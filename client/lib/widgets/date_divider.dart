@@ -1,0 +1,57 @@
+import 'package:flutter/material.dart';
+
+const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
+
+String _formatDate(DateTime date) => '${date.year}년 ${date.month}월 ${date.day}일 ${_weekdays[date.weekday - 1]}요일';
+
+/// 채팅 목록에서 날짜가 바뀔 때 가운데에 보여주는 구분선: 얇은 선 위에 날짜 텍스트를 겹쳐서
+/// 선을 끊어 보이게 하는 흔한 "divider with label" 스타일. intl 로케일 데이터 초기화가
+/// 필요 없도록 요일을 직접 매핑한다.
+class DateDivider extends StatelessWidget {
+  final DateTime date;
+  const DateDivider({super.key, required this.date});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          const Divider(),
+          Container(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_formatDate(date), style: Theme.of(context).textTheme.labelMedium),
+                const SizedBox(width: 2),
+                Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).hintColor),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 스크롤 중 화면 상단에 잠깐 떴다 사라지는 "지금 보고 있는 날짜" 토스트.
+class FloatingDatePill extends StatelessWidget {
+  final DateTime date;
+  const FloatingDatePill({super.key, required this.date});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 3,
+      borderRadius: BorderRadius.circular(14),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Text(_formatDate(date), style: Theme.of(context).textTheme.labelMedium),
+      ),
+    );
+  }
+}

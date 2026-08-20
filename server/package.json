@@ -1,0 +1,20 @@
+{
+  "name": "messenger-server",
+  "version": "1.0.0",
+  "description": "메신저 앱 백엔드 - 인증, 실시간 채팅(Socket.io), 파일 업로드",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "lowdb": "^7.0.1",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.5"
+  }
+}

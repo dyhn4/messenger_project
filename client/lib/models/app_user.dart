@@ -1,0 +1,31 @@
+class AppUser {
+  final String id;
+  final String username;
+  final String? email;
+  final String avatarType; // 'initial' | 'character' | 'photo'
+  final String? avatarEmoji;
+  final String? avatarColor; // '#RRGGBB'
+  final String? avatarUrl;
+
+  const AppUser({
+    required this.id,
+    required this.username,
+    this.email,
+    this.avatarType = 'initial',
+    this.avatarEmoji,
+    this.avatarColor,
+    this.avatarUrl,
+  });
+
+  factory AppUser.fromJson(Map<String, dynamic> json) {
+    return AppUser(
+      id: json['id'] as String,
+      username: json['username'] as String,
+      email: json['email'] as String?,
+      avatarType: json['avatarType'] as String? ?? 'initial',
+      avatarEmoji: json['avatarEmoji'] as String?,
+      avatarColor: json['avatarColor'] as String?,
+      avatarUrl: json['avatarUrl'] as String?,
+    );
+  }
+}

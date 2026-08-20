@@ -1,0 +1,66 @@
+{
+  "users": [
+    {
+      "id": "4f5bb9fd-42b3-4356-a21e-23d3384df8f6",
+      "username": "test",
+      "passwordHash": "$2a$10$KgHS5P9nPX4LTEfvqK3vN.Lz2dYuojsP1R2VQL2ZfhhYI5NksMXXu",
+      "createdAt": 1786520291951
+    },
+    {
+      "id": "78e5e9ad-12a5-4b6c-af4f-1381ad8331de",
+      "username": "test1",
+      "passwordHash": "$2a$10$mMVfIqsFCfB7iMm90yayDuxJfLLXpzJW352nsS.5IXFgMXNWZiSlK",
+      "createdAt": 1786521251263
+    }
+  ],
+  "messages": [
+    {
+      "id": "32a455b6-298e-4949-b940-7c80124f9519",
+      "senderId": "4f5bb9fd-42b3-4356-a21e-23d3384df8f6",
+      "senderName": "test",
+      "type": "text",
+      "text": "야호",
+      "fileUrl": null,
+      "fileName": null,
+      "fileSize": null,
+      "mimeType": null,
+      "createdAt": 1786520303852
+    },
+    {
+      "id": "494aea73-b923-45f9-9915-6c283b7439bd",
+      "senderId": "78e5e9ad-12a5-4b6c-af4f-1381ad8331de",
+      "senderName": "test1",
+      "type": "text",
+      "text": "얌마",
+      "fileUrl": null,
+      "fileName": null,
+      "fileSize": null,
+      "mimeType": null,
+      "createdAt": 1786521259905
+    },
+    {
+      "id": "021a0f1e-1415-4df9-ab64-a53c6b526396",
+      "senderId": "4f5bb9fd-42b3-4356-a21e-23d3384df8f6",
+      "senderName": "test",
+      "type": "text",
+      "text": "왜?",
+      "fileUrl": null,
+      "fileName": null,
+      "fileSize": null,
+      "mimeType": null,
+      "createdAt": 1786521265838
+    },
+    {
+      "id": "c93196dc-c2d1-4033-a6b3-c91e1f54b63a",
+      "senderId": "78e5e9ad-12a5-4b6c-af4f-1381ad8331de",
+      "senderName": "test1",
+      "type": "text",
+      "text": "그냥",
+      "fileUrl": null,
+      "fileName": null,
+      "fileSize": null,
+      "mimeType": null,
+      "createdAt": 1786522538107
+    }
+  ]
+}

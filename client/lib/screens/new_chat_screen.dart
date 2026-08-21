@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/user_avatar.dart';
 import 'chat_screen.dart';
 
 class NewChatScreen extends StatefulWidget {
@@ -86,10 +87,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
                       children: [
                         for (final user in _users!)
                           ListTile(
-                            leading: CircleAvatar(
-                              child: Text(user.username.isNotEmpty ? user.username[0] : '?'),
-                            ),
-                            title: Text(user.username),
+                            leading: UserAvatar(user: user, resolveUrl: widget.session.resolveUrl),
+                            title: Text(user.name),
                             selected: _selected.contains(user.id),
                             selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
                             onTap: () => setState(() {
@@ -117,14 +116,11 @@ class _NewChatScreenState extends State<NewChatScreen> {
                         children: [
                           for (final id in _selected)
                             Chip(
-                              avatar: CircleAvatar(
-                                child: Text(
-                                  _users!.firstWhere((u) => u.id == id).username.isNotEmpty
-                                      ? _users!.firstWhere((u) => u.id == id).username[0]
-                                      : '?',
-                                ),
+                              avatar: UserAvatar(
+                                user: _users!.firstWhere((u) => u.id == id),
+                                resolveUrl: widget.session.resolveUrl,
                               ),
-                              label: Text(_users!.firstWhere((u) => u.id == id).username),
+                              label: Text(_users!.firstWhere((u) => u.id == id).name),
                               onDeleted: () => setState(() => _selected.remove(id)),
                             ),
                         ],

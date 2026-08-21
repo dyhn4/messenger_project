@@ -73,15 +73,12 @@ class RoomListScreen extends StatelessWidget {
           final groups = session.rooms.where((r) => r.type == RoomType.group).toList();
           final dms = session.rooms.where((r) => r.type == RoomType.dm).toList();
 
-          if (topics.isEmpty && groups.isEmpty && dms.isEmpty) {
-            return const Center(child: Text('참여 중인 방이 없습니다. 오른쪽 아래 + 버튼으로 시작해보세요.'));
-          }
-
+          // PC 앱 사이드바와 동일하게, 방이 하나도 없어도 섹션 제목은 "0"과 함께 항상 보여준다.
           return ListView(
             children: [
-              if (topics.isNotEmpty) ..._section(context, '토픽 ${topics.length}', topics),
-              if (groups.isNotEmpty) ..._section(context, '그룹채팅 ${groups.length}', groups),
-              if (dms.isNotEmpty) ..._section(context, '채팅 ${dms.length}', dms),
+              ..._section(context, '토픽 ${topics.length}', topics),
+              ..._section(context, '그룹채팅 ${groups.length}', groups),
+              ..._section(context, '채팅 ${dms.length}', dms),
             ],
           );
         },

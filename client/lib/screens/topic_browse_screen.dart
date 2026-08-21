@@ -62,7 +62,16 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen> {
                   for (final topic in _topics!)
                     ListTile(
                       leading: const CircleAvatar(child: Icon(Icons.tag)),
-                      title: Text(topic.name),
+                      title: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(child: Text(topic.name)),
+                          if (!topic.isPublic) ...[
+                            const SizedBox(width: 6),
+                            Icon(Icons.lock_outline, size: 14, color: Theme.of(context).hintColor),
+                          ],
+                        ],
+                      ),
                       subtitle: Text(topic.description ?? '멤버 ${topic.memberCount}명'),
                       trailing: topic.joined
                           ? const Text('참여중')

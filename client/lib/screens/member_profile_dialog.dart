@@ -4,7 +4,8 @@ import '../models/app_user.dart';
 import '../services/session.dart';
 import '../widgets/user_avatar.dart';
 
-/// 다른 사용자의 프로필 플로팅 카드: 프로필 사진 + 아이디 + 이메일 + 1:1 메시지 시작.
+/// 다른 사용자의 프로필 플로팅 카드: 프로필 사진 + 이름 + 1:1 메시지 시작.
+/// 아이디/이메일은 아이디·비밀번호 찾기에 쓰이는 개인정보라 다른 사람에게는 보여주지 않는다.
 /// 멤버 패널 카드, 채팅방 메시지의 다른 사람 아바타/이름을 눌렀을 때 공용으로 쓴다.
 class MemberProfileDialog extends StatefulWidget {
   final Session session;
@@ -56,18 +57,10 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
             ),
             const SizedBox(height: 40),
             Text(
-              user.username,
+              user.name,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
-            if (user.email != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                user.email!,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
-              ),
-            ],
             const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),

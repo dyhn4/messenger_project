@@ -56,11 +56,15 @@ class RoomChatController extends ChangeNotifier {
     _session.chatSocket.send(roomId: room.id, type: 'text', text: trimmed);
   }
 
-  Future<void> sendFile(File file, {required bool isImage}) async {
+  /// [caption]을 같이 주면(이미지/파일 첨부 후 메시지를 입력하고 보낸 경우) 그 메시지 하나에
+  /// 텍스트와 첨부가 함께 실린다.
+  Future<void> sendFile(File file, {required bool isImage, String? caption}) async {
     final result = await _session.api!.uploadFile(file);
+    final trimmedCaption = caption?.trim();
     _session.chatSocket.send(
       roomId: room.id,
       type: isImage ? 'image' : 'file',
+      text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
       fileUrl: result.url,
       fileName: result.fileName,
       fileSize: result.size,

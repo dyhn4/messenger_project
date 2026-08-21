@@ -13,7 +13,7 @@ class UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AvatarView(
-      username: user.username,
+      username: user.name,
       avatarType: user.avatarType,
       avatarEmoji: user.avatarEmoji,
       avatarColor: user.avatarColor,

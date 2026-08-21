@@ -16,6 +16,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _username = TextEditingController();
+  final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _isRegister = false;
@@ -40,6 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
             _username.text.trim(),
             _password.text,
             _email.text.trim(),
+            _name.text.trim(),
             keepSignedIn: true,
           )
         : await widget.session.login(
@@ -61,6 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _username.dispose();
+    _name.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
@@ -96,6 +99,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: const InputDecoration(labelText: '아이디', border: OutlineInputBorder()),
                   ),
                   if (_isRegister) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _name,
+                      decoration: const InputDecoration(labelText: '이름', border: OutlineInputBorder()),
+                    ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _email,

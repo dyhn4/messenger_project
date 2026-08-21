@@ -32,6 +32,7 @@ class UploadResult {
 /// GET/PATCH /api/users/me 결과: 내 프로필과 아바타 상태.
 class MyProfile {
   final String username;
+  final String name;
   final String? email;
   final String avatarType; // 'initial' | 'character' | 'photo'
   final String? avatarEmoji;
@@ -39,6 +40,7 @@ class MyProfile {
   final String? avatarUrl;
   const MyProfile({
     required this.username,
+    required this.name,
     this.email,
     this.avatarType = 'initial',
     this.avatarEmoji,
@@ -48,6 +50,7 @@ class MyProfile {
 
   factory MyProfile.fromJson(Map<String, dynamic> json) => MyProfile(
         username: json['username'] as String,
+        name: (json['name'] as String?) ?? json['username'] as String,
         email: json['email'] as String?,
         avatarType: json['avatarType'] as String? ?? 'initial',
         avatarEmoji: json['avatarEmoji'] as String?,
@@ -61,12 +64,14 @@ class TopicBrowseEntry {
   final String id;
   final String name;
   final String? description;
+  final bool isPublic;
   final int memberCount;
   final bool joined;
   const TopicBrowseEntry({
     required this.id,
     required this.name,
     this.description,
+    this.isPublic = true,
     required this.memberCount,
     required this.joined,
   });
@@ -75,6 +80,7 @@ class TopicBrowseEntry {
         id: json['id'] as String,
         name: json['name'] as String,
         description: json['description'] as String?,
+        isPublic: json['isPublic'] as bool? ?? true,
         memberCount: (json['memberCount'] as num).toInt(),
         joined: json['joined'] as bool,
       );
@@ -133,8 +139,10 @@ class ApiClient {
     }
   }
 
-  Future<AuthResult> register(String username, String password, String email) =>
-      _authRequest('/auth/register', {'username': username, 'password': password, 'email': email});
+  Future<AuthResult> register(String username, String password, String email, String name) => _authRequest(
+        '/auth/register',
+        {'username': username, 'password': password, 'email': email, 'name': name},
+      );
 
   Future<AuthResult> login(String username, String password) =>
       _authRequest('/auth/login', {'username': username, 'password': password});
@@ -242,6 +250,14 @@ class ApiClient {
     return MyProfile.fromJson(body as Map<String, dynamic>);
   }
 
+  /// 제공한 필드만 바꾼다(이름만, 이메일만, 또는 둘 다).
+  Future<MyProfile> updateProfile({String? name, String? email}) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (email != null) body['email'] = email;
+    return MyProfile.fromJson(await _patch('/api/users/me', body) as Map<String, dynamic>);
+  }
+
   Future<List<Room>> fetchRooms() async {
     final list = await _get('/api/rooms') as List;
     return list.map((e) => Room.fromJson(e as Map<String, dynamic>)).toList();
@@ -261,11 +277,12 @@ class ApiClient {
     return list.map((e) => Message.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<Room> createTopic({required String name, String? description}) async {
+  Future<Room> createTopic({required String name, String? description, bool isPublic = true}) async {
     return Room.fromJson(await _post('/api/rooms', {
       'type': 'topic',
       'name': name,
       if (description != null && description.isNotEmpty) 'description': description,
+      'isPublic': isPublic,
     }) as Map<String, dynamic>);
   }
 

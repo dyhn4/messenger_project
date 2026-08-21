@@ -14,6 +14,7 @@ class Room {
   final RoomType type;
   final String? name; // dm/이름없는 group은 null (클라이언트가 대신 표시할 이름을 계산)
   final String? description;
+  final bool isPublic; // 토픽에서만 의미 있음: 공개면 누구나 검색해서 참여 가능, 비공개면 초대로만.
   final List<AppUser> members;
   final DateTime createdAt;
   final Map<String, int> lastRead; // userId -> epoch millis, 마지막으로 이 방을 읽은 시각
@@ -27,6 +28,7 @@ class Room {
     required this.type,
     required this.name,
     this.description,
+    this.isPublic = true,
     required this.members,
     required this.createdAt,
     required this.lastRead,
@@ -39,6 +41,7 @@ class Room {
       type: _typeFromString(json['type'] as String),
       name: json['name'] as String?,
       description: json['description'] as String?,
+      isPublic: json['isPublic'] as bool? ?? true,
       members: (json['members'] as List).map((e) => AppUser.fromJson(e as Map<String, dynamic>)).toList(),
       createdAt: DateTime.fromMillisecondsSinceEpoch((json['createdAt'] as num).toInt()),
       lastRead: ((json['lastRead'] as Map?) ?? const {})
@@ -52,11 +55,11 @@ class Room {
     if (name != null) return name!;
     if (type == RoomType.dm) {
       for (final m in members) {
-        if (m.id != myUserId) return m.username;
+        if (m.id != myUserId) return m.name;
       }
       return '(알 수 없음)';
     }
-    final names = members.map((m) => m.username).toList()..sort();
+    final names = members.map((m) => m.name).toList()..sort();
     return names.join(', ');
   }
 

@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import 'api_client.dart';
+import 'app_settings.dart';
 import 'chat_socket.dart';
 import 'notification_service.dart';
 import 'room_chat_controller.dart';
@@ -17,7 +18,7 @@ enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 /// 책임지고, 방 하나의 메시지/전송은 RoomChatController에 맡깁니다.
 /// 이전 KiwoomApi 포팅 때와 같은 패턴으로, ChangeNotifier + ListenableBuilder만 씁니다.
 class Session extends ChangeNotifier {
-  Session({required this.notifications});
+  Session({required this.notifications, required this.settings});
 
   static const _kServerUrl = 'server_base_url';
   static const _kToken = 'auth_token';
@@ -35,6 +36,7 @@ class Session extends ChangeNotifier {
   String? error;
   String? rememberedUsername;
 
+  String? name;
   String? email;
   String avatarType = 'initial'; // 'initial' | 'character' | 'photo'
   String? avatarEmoji;
@@ -44,6 +46,7 @@ class Session extends ChangeNotifier {
   ApiClient? api;
   final chatSocket = ChatSocket();
   final NotificationService notifications;
+  final AppSettings settings;
   final List<Room> rooms = [];
 
   final _controllers = <String, RoomChatController>{};
@@ -127,8 +130,8 @@ class Session extends ChangeNotifier {
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
       _auth(() => api!.login(u, p), keepSignedIn: keepSignedIn);
 
-  Future<bool> register(String u, String p, String email, {required bool keepSignedIn}) =>
-      _auth(() => api!.register(u, p, email), keepSignedIn: keepSignedIn);
+  Future<bool> register(String u, String p, String email, String name, {required bool keepSignedIn}) =>
+      _auth(() => api!.register(u, p, email, name), keepSignedIn: keepSignedIn);
 
   Future<bool> _auth(Future<AuthResult> Function() call, {required bool keepSignedIn}) async {
     try {
@@ -180,6 +183,7 @@ class Session extends ChangeNotifier {
 
     try {
       final me = await api!.fetchMe();
+      name = me.name;
       email = me.email;
       avatarType = me.avatarType;
       avatarEmoji = me.avatarEmoji;
@@ -222,11 +226,13 @@ class Session extends ChangeNotifier {
     }
 
     final room = match.isEmpty ? null : match.first;
-    final roomTag = room == null
-        ? null
-        : room.type == RoomType.dm
-            ? '1:1'
-            : room.displayName(userId ?? '');
+    final roomTag = switch (room?.type) {
+      null => null,
+      RoomType.dm => '1:1',
+      // 이름 없는 그룹채팅은 멤버 이름을 전부 나열하지 않고 "그룹채팅"이라고만 표시한다.
+      RoomType.group => room!.name ?? '그룹채팅',
+      RoomType.topic => room!.displayName(userId ?? ''),
+    };
     final preview = switch (m.type) {
       MessageType.text => m.text ?? '',
       MessageType.image => '사진을 보냈습니다',
@@ -281,8 +287,8 @@ class Session extends ChangeNotifier {
     return _controllers.putIfAbsent(room.id, () => RoomChatController(this, room));
   }
 
-  Future<Room> createTopic({required String name, String? description}) async {
-    final room = await api!.createTopic(name: name, description: description);
+  Future<Room> createTopic({required String name, String? description, bool isPublic = true}) async {
+    final room = await api!.createTopic(name: name, description: description, isPublic: isPublic);
     _upsertRoom(room);
     return room;
   }
@@ -329,6 +335,13 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateProfile({String? name, String? email}) async {
+    final me = await api!.updateProfile(name: name, email: email);
+    this.name = me.name;
+    this.email = me.email;
+    notifyListeners();
+  }
+
   Future<void> leaveRoom(String roomId) async {
     await api!.leaveRoom(roomId);
     rooms.removeWhere((r) => r.id == roomId);
@@ -352,6 +365,7 @@ class Session extends ChangeNotifier {
     token = null;
     userId = null;
     username = null;
+    name = null;
     email = null;
     avatarType = 'initial';
     avatarEmoji = null;

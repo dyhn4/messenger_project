@@ -1,6 +1,7 @@
 class AppUser {
   final String id;
   final String username;
+  final String name;
   final String? email;
   final String avatarType; // 'initial' | 'character' | 'photo'
   final String? avatarEmoji;
@@ -10,6 +11,7 @@ class AppUser {
   const AppUser({
     required this.id,
     required this.username,
+    required this.name,
     this.email,
     this.avatarType = 'initial',
     this.avatarEmoji,
@@ -18,9 +20,11 @@ class AppUser {
   });
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
+    final username = json['username'] as String;
     return AppUser(
       id: json['id'] as String,
-      username: json['username'] as String,
+      username: username,
+      name: (json['name'] as String?) ?? username,
       email: json['email'] as String?,
       avatarType: json['avatarType'] as String? ?? 'initial',
       avatarEmoji: json['avatarEmoji'] as String?,

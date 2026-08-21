@@ -627,7 +627,7 @@ class _MemberFilterButton extends StatelessWidget {
     final id = selectedSenderId;
     if (id == null) return '모든 멤버';
     for (final u in users ?? const <AppUser>[]) {
-      if (u.id == id) return u.username;
+      if (u.id == id) return u.name;
     }
     return '모든 멤버';
   }
@@ -667,7 +667,7 @@ class _MemberFilterPanelState extends State<_MemberFilterPanel> {
   @override
   Widget build(BuildContext context) {
     final list = (widget.users ?? const <AppUser>[])
-        .where((u) => _filter.isEmpty || u.username.toLowerCase().contains(_filter.toLowerCase()))
+        .where((u) => _filter.isEmpty || u.name.toLowerCase().contains(_filter.toLowerCase()))
         .toList();
 
     return Column(
@@ -688,8 +688,8 @@ class _MemberFilterPanelState extends State<_MemberFilterPanel> {
               for (final u in list)
                 ListTile(
                   dense: true,
-                  leading: CircleAvatar(radius: 12, child: Text(u.username.isNotEmpty ? u.username[0] : '?')),
-                  title: Text(u.username, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  leading: CircleAvatar(radius: 12, child: Text(u.name.isNotEmpty ? u.name[0] : '?')),
+                  title: Text(u.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                   trailing: widget.selectedSenderId == u.id ? const Icon(Icons.check, size: 18) : null,
                   onTap: () => widget.onSelected(u.id),
                 ),

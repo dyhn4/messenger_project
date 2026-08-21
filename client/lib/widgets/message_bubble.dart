@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -44,6 +48,9 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 이름이 바뀌었을 수도 있으니, 메시지에 박제된 senderName보다 지금 알고 있는 이름을
+    // 우선한다(나는 session.name, 남은 room.members에서 찾은 sender.name).
+    final displayName = (isMine ? session.name : sender?.name) ?? message.senderName;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -54,7 +61,7 @@ class MessageBubble extends StatelessWidget {
             child: GestureDetector(
               onTap: () => _openProfile(context),
               child: AvatarView(
-                username: message.senderName,
+                username: displayName,
                 avatarType: sender?.avatarType ?? 'initial',
                 avatarEmoji: sender?.avatarEmoji,
                 avatarColor: sender?.avatarColor,
@@ -73,7 +80,7 @@ class MessageBubble extends StatelessWidget {
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
                     onTap: () => _openProfile(context),
-                    child: Text(message.senderName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    child: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -90,7 +97,18 @@ class MessageBubble extends StatelessWidget {
                               : Theme.of(context).colorScheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        child: _buildContent(context),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
+                            if (message.type != MessageType.text && (message.text?.isNotEmpty ?? false)) ...[
+                              SelectableText(message.text!),
+                              const SizedBox(height: 6),
+                            ],
+                            _buildContent(context),
+                          ],
+                        ),
                       ),
                     ),
                     if (unreadCount > 0) ...[
@@ -119,40 +137,209 @@ class MessageBubble extends StatelessWidget {
     switch (message.type) {
       case MessageType.image:
         final url = resolveUrl(message.fileUrl ?? '');
-        return GestureDetector(
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: url)),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: CachedNetworkImage(
-              imageUrl: url,
-              width: 200,
-              fit: BoxFit.cover,
-              placeholder: (context, _) =>
-                  const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator())),
-              errorWidget: (context, _, error) =>
-                  const SizedBox(width: 200, height: 150, child: Icon(Icons.broken_image)),
-            ),
-          ),
-        );
+        return _DownloadableImage(session: session, url: url, fileName: message.fileName ?? 'image.png');
       case MessageType.file:
-        return InkWell(
-          onTap: () => launchUrl(Uri.parse(resolveUrl(message.fileUrl ?? '')), mode: LaunchMode.externalApplication),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.insert_drive_file_outlined),
-              const SizedBox(width: 8),
-              Flexible(child: Text(message.fileName ?? '파일', overflow: TextOverflow.ellipsis)),
-            ],
-          ),
-        );
+        final url = resolveUrl(message.fileUrl ?? '');
+        return _DownloadableFile(session: session, url: url, fileName: message.fileName ?? '파일');
       case MessageType.text:
         return SelectableText(message.text ?? '');
       case MessageType.system:
         // ChatPanel이 system 메시지는 SystemMessageRow로 따로 그려서 이 위젯까지 안 옴.
         return const SizedBox.shrink();
     }
+  }
+}
+
+/// 첨부 하나를 다운로드해서 저장한다. 환경설정에서 "저장 위치 안 물어보기"가 켜져 있으면
+/// 설정된 폴더에 바로 저장하고, 꺼져 있으면 저장 위치를 물어본다. 저장 후 "다운로드 완료 시
+/// 폴더 열기"가 켜져 있으면 그 폴더를 연다. 저장된 경로를 반환한다(취소되면 null).
+Future<String?> _saveAttachment({required Session session, required String url, required String fileName}) async {
+  final res = await http.get(Uri.parse(url));
+  if (res.statusCode >= 400) throw Exception('다운로드에 실패했습니다.');
+
+  final settings = session.settings;
+  String? savedPath;
+  if (settings.downloadWithoutAsking && settings.downloadFolder.isNotEmpty) {
+    final path = '${settings.downloadFolder}${Platform.pathSeparator}$fileName';
+    await File(path).writeAsBytes(res.bodyBytes);
+    savedPath = path;
+  } else {
+    savedPath = await FilePicker.saveFile(
+      fileName: fileName,
+      initialDirectory: settings.downloadFolder.isEmpty ? null : settings.downloadFolder,
+      bytes: res.bodyBytes,
+    );
+  }
+
+  if (savedPath != null && settings.openFolderAfterDownload) {
+    await settings.openDownloadFolder();
+  }
+  return savedPath;
+}
+
+/// 마우스를 올렸을 때만 보이는 원형 다운로드 버튼. 이미지/파일 첨부 위젯이 공유해서 쓴다.
+class _DownloadOverlayButton extends StatelessWidget {
+  final bool downloading;
+  final VoidCallback onTap;
+  const _DownloadOverlayButton({required this.downloading, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.55),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: downloading ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: downloading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.download, size: 16, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
+/// 채팅에 올라온 이미지 하나. 누르면 크게 보고, 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
+class _DownloadableImage extends StatefulWidget {
+  final Session session;
+  final String url;
+  final String fileName;
+  const _DownloadableImage({required this.session, required this.url, required this.fileName});
+
+  @override
+  State<_DownloadableImage> createState() => _DownloadableImageState();
+}
+
+class _DownloadableImageState extends State<_DownloadableImage> {
+  bool _hovering = false;
+  bool _downloading = false;
+
+  Future<void> _download() async {
+    setState(() => _downloading = true);
+    try {
+      final savedPath = await _saveAttachment(session: widget.session, url: widget.url, fileName: widget.fileName);
+      if (!mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('다운로드 완료: $savedPath')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('다운로드 실패: $e')));
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: widget.url)),
+        ),
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: CachedNetworkImage(
+                imageUrl: widget.url,
+                width: 200,
+                fit: BoxFit.cover,
+                placeholder: (context, _) =>
+                    const SizedBox(width: 200, height: 150, child: Center(child: CircularProgressIndicator())),
+                errorWidget: (context, _, error) =>
+                    const SizedBox(width: 200, height: 150, child: Icon(Icons.broken_image)),
+              ),
+            ),
+            if (_hovering)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: _DownloadOverlayButton(downloading: _downloading, onTap: _download),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 채팅에 올라온 파일 하나. 누르면 외부 앱으로 열고, 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
+class _DownloadableFile extends StatefulWidget {
+  final Session session;
+  final String url;
+  final String fileName;
+  const _DownloadableFile({required this.session, required this.url, required this.fileName});
+
+  @override
+  State<_DownloadableFile> createState() => _DownloadableFileState();
+}
+
+class _DownloadableFileState extends State<_DownloadableFile> {
+  bool _hovering = false;
+  bool _downloading = false;
+
+  Future<void> _download() async {
+    setState(() => _downloading = true);
+    try {
+      final savedPath = await _saveAttachment(session: widget.session, url: widget.url, fileName: widget.fileName);
+      if (!mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('다운로드 완료: $savedPath')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('다운로드 실패: $e')));
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: () => launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              constraints: const BoxConstraints(maxWidth: 220),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border.all(color: Theme.of(context).dividerColor),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.insert_drive_file_outlined),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(widget.fileName, overflow: TextOverflow.ellipsis)),
+                ],
+              ),
+            ),
+            if (_hovering)
+              Positioned(
+                right: -6,
+                top: -6,
+                child: _DownloadOverlayButton(downloading: _downloading, onTap: _download),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }

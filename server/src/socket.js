@@ -35,11 +35,13 @@ export function registerSocket(io) {
         return;
       }
 
+      const sender = db.data.users.find((u) => u.id === socket.data.userId);
+
       const message = {
         id: randomUUID(),
         roomId: room.id,
         senderId: socket.data.userId,
-        senderName: socket.data.username,
+        senderName: sender?.name ?? sender?.username ?? socket.data.username,
         type: payload.type === 'image' || payload.type === 'file' ? payload.type : 'text',
         text: typeof payload.text === 'string' ? payload.text : null,
         fileUrl: typeof payload.fileUrl === 'string' ? payload.fileUrl : null,

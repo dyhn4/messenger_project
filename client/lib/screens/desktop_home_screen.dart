@@ -243,7 +243,7 @@ class _MembersPanelState extends State<_MembersPanel> {
   Future<void> _load() async {
     try {
       final users = await widget.session.api!.fetchUsers();
-      users.sort((a, b) => a.username.compareTo(b.username));
+      users.sort((a, b) => a.name.compareTo(b.name));
       if (!mounted) return;
       setState(() => _users = users);
     } catch (e) {
@@ -255,7 +255,7 @@ class _MembersPanelState extends State<_MembersPanel> {
   @override
   Widget build(BuildContext context) {
     final list = (_users ?? const <AppUser>[])
-        .where((u) => _filter.isEmpty || u.username.toLowerCase().contains(_filter.toLowerCase()))
+        .where((u) => _filter.isEmpty || u.name.toLowerCase().contains(_filter.toLowerCase()))
         .toList();
 
     return ColoredBox(
@@ -330,7 +330,7 @@ class _MemberCard extends StatelessWidget {
       ),
       child: ListTile(
         leading: UserAvatar(user: user, resolveUrl: resolveUrl, radius: 20),
-        title: Text(user.username, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
         onTap: onTap,
       ),
     );
@@ -366,20 +366,23 @@ class _Sidebar extends StatelessWidget {
               final groupsUnread = groups.fold<int>(0, (sum, r) => sum + r.unreadCount);
               final dmsUnread = dms.fold<int>(0, (sum, r) => sum + r.unreadCount);
 
-              return ListView(
-                children: [
-                  _SectionHeader(
-                    title: '토픽 ${topics.length}',
-                    badgeCount: topicsUnread,
-                    action: PopupMenuButton<void>(
-                      icon: const Icon(Icons.add, size: 20),
-                      tooltip: '토픽 추가',
-                      itemBuilder: (context) => [
-                        PopupMenuItem(onTap: onCreateTopic, child: const Text('토픽 만들기')),
-                        PopupMenuItem(onTap: onBrowseTopics, child: const Text('토픽 찾기')),
-                      ],
-                    ),
+              // 세 섹션 사이 구분선을 사용자가 드래그해서 각자 몫을 조절할 수 있게 한다.
+              // 기본은 1/3씩이고, 자기 영역 안에서만 스크롤되며 목록이 영역보다 길면
+              // 스크롤바를 항상 보여준다.
+              return _ResizableRoomSections(
+                topicsHeader: _SectionHeader(
+                  title: '토픽 ${topics.length}',
+                  badgeCount: topicsUnread,
+                  action: PopupMenuButton<void>(
+                    icon: const Icon(Icons.add, size: 20),
+                    tooltip: '토픽 추가',
+                    itemBuilder: (context) => [
+                      PopupMenuItem(onTap: onCreateTopic, child: const Text('토픽 만들기')),
+                      PopupMenuItem(onTap: onBrowseTopics, child: const Text('토픽 찾기')),
+                    ],
                   ),
+                ),
+                topicsChildren: [
                   for (final room in topics)
                     _RoomTile(
                       leading: RoomAvatar(
@@ -393,16 +396,17 @@ class _Sidebar extends StatelessWidget {
                       unreadCount: room.unreadCount,
                       onTap: () => onSelectRoom(room),
                     ),
-                  const Divider(height: 24),
-                  _SectionHeader(
-                    title: '그룹채팅 ${groups.length}',
-                    badgeCount: groupsUnread,
-                    action: IconButton(
-                      icon: const Icon(Icons.add, size: 20),
-                      tooltip: '새 그룹채팅',
-                      onPressed: onNewGroupChat,
-                    ),
+                ],
+                groupsHeader: _SectionHeader(
+                  title: '그룹채팅 ${groups.length}',
+                  badgeCount: groupsUnread,
+                  action: IconButton(
+                    icon: const Icon(Icons.add, size: 20),
+                    tooltip: '새 그룹채팅',
+                    onPressed: onNewGroupChat,
                   ),
+                ),
+                groupsChildren: [
                   for (final room in groups)
                     _RoomTile(
                       leading: RoomAvatar(
@@ -416,16 +420,17 @@ class _Sidebar extends StatelessWidget {
                       unreadCount: room.unreadCount,
                       onTap: () => onSelectRoom(room),
                     ),
-                  const Divider(height: 24),
-                  _SectionHeader(
-                    title: '채팅 ${dms.length}',
-                    badgeCount: dmsUnread,
-                    action: IconButton(
-                      icon: const Icon(Icons.add, size: 20),
-                      tooltip: '새 대화',
-                      onPressed: onNewGroupChat,
-                    ),
+                ],
+                dmsHeader: _SectionHeader(
+                  title: '채팅 ${dms.length}',
+                  badgeCount: dmsUnread,
+                  action: IconButton(
+                    icon: const Icon(Icons.add, size: 20),
+                    tooltip: '새 대화',
+                    onPressed: onNewGroupChat,
                   ),
+                ),
+                dmsChildren: [
                   for (final room in dms)
                     _RoomTile(
                       leading: RoomAvatar(
@@ -442,6 +447,120 @@ class _Sidebar extends StatelessWidget {
                 ],
               );
       },
+    );
+  }
+}
+
+const _kDividerHitHeight = 8.0;
+const _kMinSectionHeight = 60.0;
+
+/// 토픽/그룹채팅/채팅 세 구역을 세로로 나누되, 구역 사이 구분선을 드래그해서 각자 몫(비율)을
+/// 조절할 수 있게 한다. 비율은 세션 동안만 유지된다(창을 닫으면 초기화).
+class _ResizableRoomSections extends StatefulWidget {
+  final Widget topicsHeader;
+  final List<Widget> topicsChildren;
+  final Widget groupsHeader;
+  final List<Widget> groupsChildren;
+  final Widget dmsHeader;
+  final List<Widget> dmsChildren;
+  const _ResizableRoomSections({
+    required this.topicsHeader,
+    required this.topicsChildren,
+    required this.groupsHeader,
+    required this.groupsChildren,
+    required this.dmsHeader,
+    required this.dmsChildren,
+  });
+
+  @override
+  State<_ResizableRoomSections> createState() => _ResizableRoomSectionsState();
+}
+
+class _ResizableRoomSectionsState extends State<_ResizableRoomSections> {
+  List<double> _ratios = const [1 / 3, 1 / 3, 1 / 3];
+
+  void _onDrag(double availableHeight, int topIndex, double deltaY) {
+    if (availableHeight <= 0) return;
+    final deltaRatio = deltaY / availableHeight;
+    final minRatio = _kMinSectionHeight / availableHeight;
+    final next = List<double>.from(_ratios);
+    next[topIndex] += deltaRatio;
+    next[topIndex + 1] -= deltaRatio;
+    if (next[topIndex] < minRatio || next[topIndex + 1] < minRatio) return;
+    setState(() => _ratios = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableHeight = constraints.maxHeight - _kDividerHitHeight * 2;
+        final heights = _ratios.map((r) => r * availableHeight).toList();
+        return Column(
+          children: [
+            SizedBox(
+              height: heights[0],
+              child: _RoomSection(header: widget.topicsHeader, children: widget.topicsChildren),
+            ),
+            _ResizeDivider(onDrag: (dy) => _onDrag(availableHeight, 0, dy)),
+            SizedBox(
+              height: heights[1],
+              child: _RoomSection(header: widget.groupsHeader, children: widget.groupsChildren),
+            ),
+            _ResizeDivider(onDrag: (dy) => _onDrag(availableHeight, 1, dy)),
+            SizedBox(
+              height: heights[2],
+              child: _RoomSection(header: widget.dmsHeader, children: widget.dmsChildren),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// 구역 사이의 드래그 가능한 구분선. 손잡이 힌트로 살짝 두껍게 잡고, 위아래로 드래그하면
+/// 위/아래 구역의 높이 비율이 바뀐다.
+class _ResizeDivider extends StatelessWidget {
+  final ValueChanged<double> onDrag;
+  const _ResizeDivider({required this.onDrag});
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeRow,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragUpdate: (details) => onDrag(details.delta.dy),
+        child: SizedBox(
+          height: _kDividerHitHeight,
+          child: Center(child: Container(height: 1, color: Theme.of(context).dividerColor)),
+        ),
+      ),
+    );
+  }
+}
+
+/// 사이드바 한 섹션: 고정 높이 헤더 + 그 아래는 이 섹션 영역 안에서만 스크롤되는 목록.
+/// 목록이 영역보다 길면 스크롤바를 항상 보여준다.
+class _RoomSection extends StatelessWidget {
+  final Widget header;
+  final List<Widget> children;
+  const _RoomSection({required this.header, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        header,
+        Expanded(
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: ListView(padding: EdgeInsets.zero, children: children),
+          ),
+        ),
+      ],
     );
   }
 }

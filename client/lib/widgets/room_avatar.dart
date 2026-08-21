@@ -4,7 +4,7 @@ import '../models/room.dart';
 import 'user_avatar.dart';
 
 /// 채팅방 제목 왼쪽에 쓰는 작은 아바타. DM은 상대방 아바타 하나, 그룹은 멤버 아바타
-/// 두 개를 겹쳐서, 토픽은 # 아이콘을 보여준다.
+/// 두 개를 겹쳐서 보여준다. 토픽은 방 이름 자체에 의미가 있어서 별도 아바타를 안 보여준다.
 class RoomAvatar extends StatelessWidget {
   final Room room;
   final String myUserId;
@@ -21,7 +21,7 @@ class RoomAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (room.type == RoomType.topic) {
-      return CircleAvatar(radius: size / 2, child: Icon(Icons.tag, size: size * 0.55));
+      return const SizedBox.shrink();
     }
 
     final others = room.members.where((m) => m.id != myUserId).toList();

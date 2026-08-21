@@ -5,7 +5,9 @@ import '../screens/settings_screen.dart';
 import '../services/session.dart';
 import 'my_avatar.dart';
 
-/// 잔디식 우측 상단 삼선(햄버거) 메뉴: 계정 정보 + 설정 + 로그아웃을
+const _appVersion = '1.0.0';
+
+/// 잔디식 우측 상단 삼선(햄버거) 메뉴: 계정 정보 + 설정 + 오픈소스 라이선스 + 로그아웃을
 /// 아이콘 하나에 모아둔다.
 class AccountMenuButton extends StatelessWidget {
   final Session session;
@@ -32,15 +34,25 @@ class AccountMenuButton extends StatelessWidget {
             children: [
               MyAvatar(session: session, radius: 14),
               const SizedBox(width: 8),
-              Text(session.username ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(session.name ?? session.username ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
             ],
           ),
         ),
         const PopupMenuDivider(),
         PopupMenuItem<void>(
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(session: session))),
+          onTap: () => showDialog(context: context, builder: (_) => SettingsScreen(session: session)),
           child: const Row(
             children: [Icon(Icons.settings_outlined), SizedBox(width: 8), Text('설정')],
+          ),
+        ),
+        PopupMenuItem<void>(
+          onTap: () => showLicensePage(context: context, applicationName: '메신저', applicationVersion: _appVersion),
+          child: const Row(
+            children: [
+              Icon(Icons.description_outlined),
+              SizedBox(width: 8),
+              Text('오픈소스 라이선스'),
+            ],
           ),
         ),
         PopupMenuItem<void>(

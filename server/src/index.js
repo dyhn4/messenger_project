@@ -3,13 +3,13 @@ import express from 'express';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import { Server } from 'socket.io';
-import { authRouter, requireAuth } from './auth.js';
+import { createAuthRouter, requireAuth } from './auth.js';
 import { PORT } from './config.js';
 import { createRoomsRouter } from './rooms.js';
 import { searchRouter } from './search.js';
 import { registerSocket } from './socket.js';
 import { uploadRouter, uploadsDir } from './upload.js';
-import { usersRouter } from './users.js';
+import { createUsersRouter } from './users.js';
 
 const app = express();
 app.use(cors());
@@ -18,9 +18,9 @@ app.use(express.json());
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
 
-app.use('/auth', authRouter);
+app.use('/auth', createAuthRouter(io));
 app.use('/api', requireAuth, uploadRouter);
-app.use('/api', requireAuth, usersRouter);
+app.use('/api', requireAuth, createUsersRouter(io));
 app.use('/api', requireAuth, createRoomsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 app.use('/uploads', express.static(uploadsDir));

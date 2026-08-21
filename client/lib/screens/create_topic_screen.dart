@@ -17,6 +17,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
   final _description = TextEditingController();
   bool _loading = false;
   String? _error;
+  bool _isPublic = true;
 
   Future<void> _submit() async {
     if (_name.text.trim().isEmpty) return;
@@ -28,6 +29,7 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
       final room = await widget.session.createTopic(
         name: _name.text.trim(),
         description: _description.text.trim(),
+        isPublic: _isPublic,
       );
       if (!mounted) return;
       Navigator.of(context).pop(room);
@@ -60,6 +62,22 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
           controller: _description,
           decoration: const InputDecoration(labelText: '설명 (선택)', border: OutlineInputBorder()),
         ),
+        const SizedBox(height: 16),
+        Text('공개 여부', style: Theme.of(context).textTheme.labelLarge),
+        Text(
+          '공개 토픽은 지금은 물론 나중에 가입하는 회원에게도 계속 보여요. 비공개는 초대한 사람만 볼 수 있어요.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+        ),
+        RadioGroup<bool>(
+          groupValue: _isPublic,
+          onChanged: (v) => setState(() => _isPublic = v ?? true),
+          child: const Column(
+            children: [
+              RadioListTile<bool>(contentPadding: EdgeInsets.zero, value: true, title: Text('공개')),
+              RadioListTile<bool>(contentPadding: EdgeInsets.zero, value: false, title: Text('비공개')),
+            ],
+          ),
+        ),
         if (_error != null) ...[
           const SizedBox(height: 12),
           Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -75,11 +93,11 @@ class _CreateTopicScreenState extends State<CreateTopicScreen> {
     );
 
     if (widget.asDialog) {
-      return FloatingDialog(title: '새 토픽 생성', child: body);
+      return FloatingDialog(title: '새 토픽 생성', child: SingleChildScrollView(child: body));
     }
     return Scaffold(
       appBar: AppBar(title: const Text('토픽방 만들기')),
-      body: Padding(padding: const EdgeInsets.all(20), child: body),
+      body: SingleChildScrollView(padding: const EdgeInsets.all(20), child: body),
     );
   }
 }

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../models/app_user.dart';
 import '../models/room.dart';
 import '../screens/invite_members_screen.dart';
+import '../screens/member_profile_dialog.dart';
+import '../screens/my_profile_dialog.dart';
 import '../services/session.dart';
 import 'floating_dialog.dart';
+import 'user_avatar.dart';
 
 /// 채팅 화면 우측 상단의 "더보기" 메뉴: 멤버 목록/초대(토픽·그룹만) + 나가기(전부).
 /// DM은 멤버가 항상 나+상대방 둘뿐이라 멤버 목록/초대는 의미가 없어서 나가기만 보여준다.
@@ -14,8 +18,16 @@ class RoomOptionsMenu extends StatelessWidget {
   final Room room;
   const RoomOptionsMenu({super.key, required this.session, required this.room});
 
+  void _openMemberProfile(BuildContext context, AppUser member) {
+    if (member.id == session.userId) {
+      showDialog(context: context, builder: (_) => MyProfileDialog(session: session));
+    } else {
+      showDialog(context: context, builder: (_) => MemberProfileDialog(session: session, user: member));
+    }
+  }
+
   void _showMembers(BuildContext context) {
-    final sorted = room.members.toList()..sort((a, b) => a.username.compareTo(b.username));
+    final sorted = room.members.toList()..sort((a, b) => a.name.compareTo(b.name));
     showDialog(
       context: context,
       builder: (_) => FloatingDialog(
@@ -27,8 +39,9 @@ class RoomOptionsMenu extends StatelessWidget {
             children: [
               for (final m in sorted)
                 ListTile(
-                  leading: CircleAvatar(child: Text(m.username.isNotEmpty ? m.username[0] : '?')),
-                  title: Text(m.username),
+                  leading: UserAvatar(user: m, resolveUrl: session.resolveUrl),
+                  title: Text(m.name),
+                  onTap: () => _openMemberProfile(context, m),
                 ),
             ],
           ),
@@ -39,7 +52,8 @@ class RoomOptionsMenu extends StatelessWidget {
 
   Future<void> _leave(BuildContext context) async {
     final isDm = room.type == RoomType.dm;
-    final label = isDm ? '채팅방 숨기기' : '채팅방 나가기';
+    final isTopic = room.type == RoomType.topic;
+    final label = isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기');
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -69,6 +83,8 @@ class RoomOptionsMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDm = room.type == RoomType.dm;
+    final isTopic = room.type == RoomType.topic;
+    final leaveLabel = isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기');
 
     return PopupMenuButton<void>(
       icon: const Icon(Icons.more_vert),
@@ -86,8 +102,20 @@ class RoomOptionsMenu extends StatelessWidget {
             ),
           ),
           PopupMenuItem<void>(
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => InviteMembersScreen(session: session, room: room))),
+            onTap: () {
+              // home_screen.dart의 wideBreakpoint(700)와 맞춰서, 넓은(PC) 화면에서는
+              // "새 대화"처럼 플로팅으로, 좁은(모바일) 화면에서는 전체화면으로 띄운다.
+              final isWide = MediaQuery.sizeOf(context).width >= 700;
+              if (isWide) {
+                showDialog(
+                  context: context,
+                  builder: (_) => InviteMembersScreen(session: session, room: room, asDialog: true),
+                );
+              } else {
+                Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => InviteMembersScreen(session: session, room: room)));
+              }
+            },
             child: const Row(
               children: [
                 Icon(Icons.person_add_alt_outlined),
@@ -103,7 +131,7 @@ class RoomOptionsMenu extends StatelessWidget {
             children: [
               const Icon(Icons.exit_to_app, color: Colors.redAccent),
               const SizedBox(width: 8),
-              Text(isDm ? '채팅방 숨기기' : '채팅방 나가기', style: const TextStyle(color: Colors.redAccent)),
+              Text(leaveLabel, style: const TextStyle(color: Colors.redAccent)),
             ],
           ),
         ),

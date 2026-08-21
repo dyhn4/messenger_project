@@ -4,6 +4,7 @@ import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/server_setup_screen.dart';
+import 'services/app_settings.dart';
 import 'services/notification_service.dart';
 import 'services/session.dart';
 
@@ -21,12 +22,14 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final navigatorKey = GlobalKey<NavigatorState>();
   final notifications = NotificationService();
-  late final session = Session(notifications: notifications);
+  final appSettings = AppSettings();
+  late final session = Session(notifications: notifications, settings: appSettings);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    appSettings.init();
     notifications.init(onTap: _openRoomFromNotification);
     session.init();
   }

@@ -4,17 +4,20 @@ import { db } from './db.js';
 export const searchRouter = Router();
 
 /**
- * 클라이언트 Room.displayName()과 동일한 규칙: 이름이 있으면 그대로, DM은 상대방 아이디,
- * 이름 없는 그룹은 멤버 아이디를 이름순으로 나열.
+ * 클라이언트 Room.displayName()과 동일한 규칙: 이름이 있으면 그대로, DM은 상대방 이름,
+ * 이름 없는 그룹은 멤버 이름을 이름순으로 나열.
  */
 function displayNameFor(room, myUserId) {
   if (room.name) return room.name;
-  const usernames = (id) => db.data.users.find((u) => u.id === id)?.username;
+  const nameOf = (id) => {
+    const u = db.data.users.find((x) => x.id === id);
+    return u?.name ?? u?.username;
+  };
   if (room.type === 'dm') {
     const other = room.memberIds.find((id) => id !== myUserId);
-    return other ? usernames(other) ?? '(알 수 없음)' : '(알 수 없음)';
+    return other ? nameOf(other) ?? '(알 수 없음)' : '(알 수 없음)';
   }
-  return room.memberIds.map(usernames).filter(Boolean).sort().join(', ');
+  return room.memberIds.map(nameOf).filter(Boolean).sort().join(', ');
 }
 
 /**

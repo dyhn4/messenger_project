@@ -6,14 +6,39 @@ import 'package:image_picker/image_picker.dart';
 import '../services/session.dart';
 import '../widgets/my_avatar.dart';
 
-/// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 아이디 + 이메일 + 로그아웃.
-/// 아바타를 누르면 사진 편집 화면으로 이어진다.
+/// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 아이디/이름/이메일 + 로그아웃.
+/// 아바타를 누르면 사진 편집 화면으로, 이름/이메일을 누르면 바로 수정할 수 있다.
 class MyProfileDialog extends StatelessWidget {
   final Session session;
   const MyProfileDialog({super.key, required this.session});
 
   Future<void> _editAvatar(BuildContext context) async {
     await showDialog(context: context, builder: (_) => AvatarEditDialog(session: session));
+  }
+
+  Future<void> _editName(BuildContext context) async {
+    final value = await _promptEdit(context, title: '이름 변경', initialValue: session.name ?? '');
+    if (value == null || value.isEmpty) return;
+    try {
+      await session.updateProfile(name: value);
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('실패: $e')));
+    }
+  }
+
+  Future<void> _editEmail(BuildContext context) async {
+    final value = await _promptEdit(
+      context,
+      title: '이메일 변경',
+      initialValue: session.email ?? '',
+      keyboardType: TextInputType.emailAddress,
+    );
+    if (value == null || value.isEmpty) return;
+    try {
+      await session.updateProfile(email: value);
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('실패: $e')));
+    }
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -27,7 +52,7 @@ class MyProfileDialog extends StatelessWidget {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 300),
+        constraints: const BoxConstraints(maxWidth: 320),
         child: ListenableBuilder(
           listenable: session,
           builder: (context, _) => Column(
@@ -63,25 +88,20 @@ class MyProfileDialog extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 40),
-              Text(
-                session.username ?? '',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              const SizedBox(height: 44),
+              _ProfileInfoRow(icon: Icons.badge_outlined, label: '아이디', value: session.username ?? ''),
+              _ProfileInfoRow(
+                icon: Icons.person_outline,
+                label: '이름',
+                value: session.name ?? '',
+                onTap: () => _editName(context),
               ),
-              if (session.email != null) ...[
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Icon(Icons.mail_outline, size: 18, color: Theme.of(context).hintColor),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(session.email!, style: Theme.of(context).textTheme.bodyMedium)),
-                    ],
-                  ),
-                ),
-              ],
+              _ProfileInfoRow(
+                icon: Icons.mail_outline,
+                label: '이메일',
+                value: session.email ?? '',
+                onTap: () => _editEmail(context),
+              ),
               const SizedBox(height: 16),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -106,6 +126,60 @@ class MyProfileDialog extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 프로필 카드의 정보 한 줄(아이디/이름/이메일). onTap이 있으면 눌러서 바로 수정할 수 있다.
+class _ProfileInfoRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
+  const _ProfileInfoRow({required this.icon, required this.label, required this.value, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: Theme.of(context).hintColor),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 44,
+              child: Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor)),
+            ),
+            Expanded(
+              child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodyMedium),
+            ),
+            if (onTap != null) Icon(Icons.edit_outlined, size: 16, color: Theme.of(context).hintColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 이름/이메일 수정용 간단한 한 줄 입력 다이얼로그.
+Future<String?> _promptEdit(
+  BuildContext context, {
+  required String title,
+  required String initialValue,
+  TextInputType? keyboardType,
+}) {
+  final controller = TextEditingController(text: initialValue);
+  return showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: TextField(controller: controller, autofocus: true, keyboardType: keyboardType),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('취소')),
+        FilledButton(onPressed: () => Navigator.of(context).pop(controller.text.trim()), child: const Text('확인')),
+      ],
+    ),
+  );
 }
 
 /// "프로필 사진 편집" 화면: 큰 미리보기 + 초기화/캐릭터 선택하기/사진 올리기.

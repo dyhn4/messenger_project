@@ -10,6 +10,7 @@ import 'api_client.dart';
 import 'app_settings.dart';
 import 'chat_socket.dart';
 import 'notification_service.dart';
+import 'pinned_tls.dart';
 import 'room_chat_controller.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
@@ -22,6 +23,7 @@ class Session extends ChangeNotifier {
 
   static const _kServerUrl = 'server_base_url';
   static const _kToken = 'auth_token';
+  static const _kRefreshToken = 'auth_refresh_token';
   static const _kUserId = 'auth_user_id';
   static const _kUsername = 'auth_username';
   static const _kRememberedUsername = 'remembered_username';
@@ -30,7 +32,8 @@ class Session extends ChangeNotifier {
 
   AuthStage stage = AuthStage.loadingConfig;
   String? serverUrl;
-  String? token;
+  String? token; // accessToken (짧게 삼)
+  String? refreshToken; // accessToken 만료 시 재발급받는 데 쓰는 긴 토큰
   String? userId;
   String? username;
   String? error;
@@ -53,6 +56,9 @@ class Session extends ChangeNotifier {
   StreamSubscription? _messageSub;
   StreamSubscription? _roomSub;
   StreamSubscription? _readSub;
+  StreamSubscription? _reconnectSub;
+  StreamSubscription? _authErrorSub;
+  Future<String?>? _refreshInFlight;
 
   String? _activeRoomId;
   String? get activeRoomId => _activeRoomId;
@@ -90,7 +96,14 @@ class Session extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     serverUrl = _prefs.getString(_kServerUrl);
+    // 서버가 HTTP에서 HTTPS로 바뀌면서, 예전에 http://로 저장해둔 주소는 더 이상 연결되지
+    // 않는다. 같은 호스트:포트를 https://로만 바꿔서 자동으로 맞춰준다.
+    if (serverUrl != null && serverUrl!.startsWith('http://')) {
+      serverUrl = 'https://${serverUrl!.substring('http://'.length)}';
+      await _prefs.setString(_kServerUrl, serverUrl!);
+    }
     token = _prefs.getString(_kToken);
+    refreshToken = _prefs.getString(_kRefreshToken);
     userId = _prefs.getString(_kUserId);
     username = _prefs.getString(_kUsername);
     rememberedUsername = _prefs.getString(_kRememberedUsername);
@@ -98,7 +111,12 @@ class Session extends ChangeNotifier {
     if (serverUrl == null) {
       stage = AuthStage.needsServer;
     } else {
-      api = ApiClient(baseUrl: serverUrl!, token: token);
+      api = ApiClient(
+        baseUrl: serverUrl!,
+        token: token,
+        onUnauthorized: _tryRefreshAndApply,
+        httpClient: await PinnedTls.httpClient(),
+      );
       if (token == null) {
         stage = AuthStage.needsLogin;
       } else {
@@ -111,16 +129,17 @@ class Session extends ChangeNotifier {
 
   Future<bool> setServerUrl(String url) async {
     final normalized = url.trim().replaceAll(RegExp(r'/+$'), '');
-    final testClient = ApiClient(baseUrl: normalized);
+    final pinnedClient = await PinnedTls.httpClient();
+    final testClient = ApiClient(baseUrl: normalized, httpClient: pinnedClient);
     final ok = await testClient.checkHealth();
     if (!ok) {
-      error = '서버에 연결할 수 없습니다. 주소를 확인하세요 (예: http://192.168.0.62:3000)';
+      error = '서버에 연결할 수 없습니다. 주소를 확인하세요 (예: https://192.168.0.62:3000)';
       notifyListeners();
       return false;
     }
     serverUrl = normalized;
     await _prefs.setString(_kServerUrl, normalized);
-    api = ApiClient(baseUrl: normalized);
+    api = ApiClient(baseUrl: normalized, onUnauthorized: _tryRefreshAndApply, httpClient: pinnedClient);
     error = null;
     stage = AuthStage.needsLogin;
     notifyListeners();
@@ -136,20 +155,28 @@ class Session extends ChangeNotifier {
   Future<bool> _auth(Future<AuthResult> Function() call, {required bool keepSignedIn}) async {
     try {
       final result = await call();
-      token = result.token;
+      token = result.accessToken;
+      refreshToken = result.refreshToken;
       userId = result.userId;
       username = result.username;
       if (keepSignedIn) {
         await _prefs.setString(_kToken, token!);
+        await _prefs.setString(_kRefreshToken, refreshToken!);
         await _prefs.setString(_kUserId, userId!);
         await _prefs.setString(_kUsername, username!);
       } else {
         // 이전 세션에서 "로그인 상태 유지"로 저장해둔 게 있을 수 있으니 같이 지운다.
         await _prefs.remove(_kToken);
+        await _prefs.remove(_kRefreshToken);
         await _prefs.remove(_kUserId);
         await _prefs.remove(_kUsername);
       }
-      api = ApiClient(baseUrl: serverUrl!, token: token);
+      api = ApiClient(
+        baseUrl: serverUrl!,
+        token: token,
+        onUnauthorized: _tryRefreshAndApply,
+        httpClient: await PinnedTls.httpClient(),
+      );
       error = null;
       stage = AuthStage.ready;
       notifyListeners();
@@ -193,7 +220,12 @@ class Session extends ChangeNotifier {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
 
-    chatSocket.connect(baseUrl: serverUrl!, token: token!);
+    // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
+    // 로그아웃(_forceLogout)됐을 수 있다(예: 이 토큰이 새 서버 버전 이전에 발급된 옛날
+    // 형식이라 애초에 무효인 경우). 그러면 token이 null로 바뀌어 있으니 여기서 멈춘다.
+    if (token == null) return;
+
+    await chatSocket.connect(baseUrl: serverUrl!, token: token!);
     _messageSub?.cancel();
     _messageSub = chatSocket.messages.listen((m) {
       _controllers[m.roomId]?.feed(m);
@@ -208,7 +240,81 @@ class Session extends ChangeNotifier {
       match.first.lastRead[e.userId] = e.lastReadAt;
       notifyListeners();
     });
+    _reconnectSub?.cancel();
+    _reconnectSub = chatSocket.reconnected.listen((_) => _resyncAfterReconnect());
+    _authErrorSub?.cancel();
+    _authErrorSub = chatSocket.authErrors.listen((_) async {
+      // accessToken이 만료됐거나(오래 대기 상태였다가 복귀 등) 비밀번호 변경으로 폐기된
+      // 상태로 소켓이 붙으려다 거부된 경우. 새 accessToken을 받아 다시 연결을 시도한다.
+      final newToken = await _tryRefreshAccessToken();
+      if (newToken != null) {
+        await chatSocket.connect(baseUrl: serverUrl!, token: newToken);
+      }
+    });
 
+    notifyListeners();
+  }
+
+  /// 연결이 끊겼다가 재연결됐을 때 놓쳤을 수 있는 것들을 다시 받아온다:
+  /// 방 목록(서버가 계산한 정확한 안읽음 수 포함)과, 지금까지 열어본 적 있어 캐시된 방들의 메시지.
+  Future<void> _resyncAfterReconnect() async {
+    try {
+      final freshRooms = await api!.fetchRooms();
+      for (final fresh in freshRooms) {
+        final i = rooms.indexWhere((r) => r.id == fresh.id);
+        if (i >= 0) {
+          rooms[i] = fresh;
+        } else {
+          rooms.add(fresh);
+        }
+      }
+      notifyListeners();
+    } catch (_) {
+      // 재연결 직후 방 목록 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
+    }
+
+    for (final controller in _controllers.values) {
+      await controller.refresh();
+    }
+  }
+
+  /// ApiClient가 401을 받았을 때 호출된다(ApiClient.onUnauthorized). 갱신에 성공하면 true를
+  /// 돌려줘서 원래 요청을 재시도하게 한다.
+  Future<bool> _tryRefreshAndApply() async => (await _tryRefreshAccessToken()) != null;
+
+  /// refreshToken으로 새 accessToken을 받아온다. 여러 요청이 동시에 401을 맞아도 갱신
+  /// 요청은 한 번만 나가도록 진행 중인 Future를 공유한다. refreshToken마저 무효면(비밀번호
+  /// 변경, 다른 곳에서 로그아웃 등) 이 기기를 완전히 로그아웃시키고 null을 돌려준다.
+  Future<String?> _tryRefreshAccessToken() {
+    return _refreshInFlight ??= _doRefreshAccessToken().whenComplete(() => _refreshInFlight = null);
+  }
+
+  Future<String?> _doRefreshAccessToken() async {
+    final rt = refreshToken;
+    if (rt == null || api == null) {
+      await _forceLogout();
+      return null;
+    }
+    try {
+      final newAccessToken = await api!.refreshAccessToken(rt);
+      token = newAccessToken;
+      api!.token = newAccessToken;
+      if (_prefs.containsKey(_kToken)) {
+        await _prefs.setString(_kToken, newAccessToken);
+      }
+      return newAccessToken;
+    } catch (_) {
+      await _forceLogout();
+      return null;
+    }
+  }
+
+  /// refreshToken까지 무효화된 경우(비밀번호 변경, 다른 기기에서 강제 로그아웃 등) 이
+  /// 기기를 로그아웃 화면으로 되돌린다. 서버는 이미 이 세션을 폐기한 상태라 서버에 알릴
+  /// 것은 없고, 로컬 상태만 정리한다.
+  Future<void> _forceLogout() async {
+    await logout();
+    error = '세션이 만료되었습니다. 다시 로그인해주세요.';
     notifyListeners();
   }
 
@@ -352,17 +458,22 @@ class Session extends ChangeNotifier {
 
   Future<void> logout() async {
     await _prefs.remove(_kToken);
+    await _prefs.remove(_kRefreshToken);
     await _prefs.remove(_kUserId);
     await _prefs.remove(_kUsername);
     await _messageSub?.cancel();
     await _roomSub?.cancel();
     await _readSub?.cancel();
+    await _reconnectSub?.cancel();
+    await _authErrorSub?.cancel();
     chatSocket.dispose();
     for (final c in _controllers.values) {
       c.dispose();
     }
     _controllers.clear();
     token = null;
+    refreshToken = null;
+    api?.token = null;
     userId = null;
     username = null;
     name = null;

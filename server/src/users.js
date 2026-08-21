@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { db } from './db.js';
+import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { toRoomDto } from './rooms.js';
+import { signFileUrl } from './upload.js';
 
 const VALID_AVATAR_TYPES = new Set(['initial', 'character', 'photo']);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -11,11 +13,11 @@ export function publicUser(u) {
     id: u.id,
     username: u.username,
     name: u.name ?? u.username,
-    email: u.email,
+    email: u.emailEnc ? decryptField(u.emailEnc) : null,
     avatarType: u.avatarType ?? 'initial',
     avatarEmoji: u.avatarEmoji ?? null,
     avatarColor: u.avatarColor ?? null,
-    avatarUrl: u.avatarUrl ?? null,
+    avatarUrl: signFileUrl(u.avatarUrl) ?? null,
   };
 }
 
@@ -69,11 +71,13 @@ export function createUsersRouter(io) {
       if (!EMAIL_PATTERN.test(email)) {
         return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
       }
-      const taken = db.data.users.find((u) => u.id !== user.id && u.email === email);
+      const emailLookup = lookupHash(email);
+      const taken = db.data.users.find((u) => u.id !== user.id && u.emailLookup === emailLookup);
       if (taken) {
         return res.status(409).json({ error: '이미 사용 중인 이메일입니다.' });
       }
-      user.email = email;
+      user.emailEnc = encryptField(email);
+      user.emailLookup = emailLookup;
     }
 
     await db.write();

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../services/api_client.dart';
 import '../services/session.dart';
 
 class FindPasswordScreen extends StatefulWidget {
@@ -29,8 +28,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
       _error = null;
     });
     try {
-      final api = ApiClient(baseUrl: widget.session.serverUrl!);
-      await api.resetPassword(
+      await widget.session.api!.resetPassword(
         username: _username.text.trim(),
         email: _email.text.trim(),
         newPassword: _newPassword.text,

@@ -1,6 +1,7 @@
 import { JSONFilePreset } from 'lowdb/node';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { encryptField, lookupHash } from './crypto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = path.join(__dirname, '..', 'db.json');
@@ -57,6 +58,27 @@ async function migrate() {
   for (const r of db.data.rooms) {
     if (!r.lastRead) {
       r.lastRead = {};
+      changed = true;
+    }
+  }
+
+  // 로그아웃/비밀번호 변경 시 기존에 발급된 토큰을 한꺼번에 무효화하는 데 쓰는 값.
+  // 없던 계정은 0부터 시작한다.
+  for (const u of db.data.users) {
+    if (u.tokenVersion === undefined) {
+      u.tokenVersion = 0;
+      changed = true;
+    }
+  }
+
+  // 이메일을 평문으로 저장하던 예전 데이터를 암호화 저장(emailEnc) + 조회용 해시
+  // (emailLookup, 정확히 일치하는 검색에만 씀)로 옮긴다. 한 번 옮기고 나면 평문 email
+  // 필드는 지운다 — 그래야 DB 파일을 열어봐도 이메일이 그대로 보이지 않는다.
+  for (const u of db.data.users) {
+    if (typeof u.email === 'string') {
+      u.emailEnc = encryptField(u.email);
+      u.emailLookup = lookupHash(u.email);
+      delete u.email;
       changed = true;
     }
   }

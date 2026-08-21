@@ -11,7 +11,7 @@ class ServerSetupScreen extends StatefulWidget {
 }
 
 class _ServerSetupScreenState extends State<ServerSetupScreen> {
-  final _controller = TextEditingController(text: 'http://192.168.0.62:3000');
+  final _controller = TextEditingController(text: 'https://192.168.0.62:3000');
   bool _loading = false;
 
   Future<void> _submit() async {
@@ -46,7 +46,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
               controller: _controller,
               decoration: const InputDecoration(
                 labelText: '서버 주소',
-                hintText: 'http://192.168.0.62:3000',
+                hintText: 'https://192.168.0.62:3000',
                 border: OutlineInputBorder(),
               ),
             ),

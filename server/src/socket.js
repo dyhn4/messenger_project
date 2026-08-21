@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db } from './db.js';
 import { verifySocketToken } from './auth.js';
+import { signFileUrl } from './upload.js';
 
 /** 소켓 연결 시 JWT를 확인하고, 연결된 이후의 채팅 이벤트를 처리합니다. */
 export function registerSocket(io) {
@@ -51,11 +52,14 @@ export function registerSocket(io) {
         createdAt: Date.now(),
       };
 
-      db.data.messages.push(message);
+      db.data.messages.push(message); // 원본 상대경로 그대로 저장.
       await db.write();
 
-      io.to(room.id).emit('message:new', message);
-      ack?.({ ok: true, message });
+      // 실시간으로 내보낼 때만 서명한다 — DB에는 항상 원본을 유지해서 나중에 다시 조회될
+      // 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.
+      const broadcastMessage = { ...message, fileUrl: signFileUrl(message.fileUrl) };
+      io.to(room.id).emit('message:new', broadcastMessage);
+      ack?.({ ok: true, message: broadcastMessage });
     });
 
     // payload: { roomId } — 지금 이 방을 보고 있다는 뜻. 다른 멤버들이 안읽음 카운터를 갱신할 수 있도록 브로드캐스트한다.

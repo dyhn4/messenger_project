@@ -15,10 +15,16 @@ class ApiException implements Exception {
 }
 
 class AuthResult {
-  final String token;
+  final String accessToken;
+  final String refreshToken;
   final String userId;
   final String username;
-  const AuthResult({required this.token, required this.userId, required this.username});
+  const AuthResult({
+    required this.accessToken,
+    required this.refreshToken,
+    required this.userId,
+    required this.username,
+  });
 }
 
 class UploadResult {
@@ -121,18 +127,38 @@ class SearchResult {
 
 /// Node.js 서버(REST 부분)와 통신하는 얇은 클라이언트.
 class ApiClient {
-  final String baseUrl; // 예: http://192.168.0.62:3000 (끝에 슬래시 없음)
-  final String? token;
+  final String baseUrl; // 예: https://192.168.0.62:3000 (끝에 슬래시 없음)
+  String? token; // accessToken. 갱신되면 Session이 이 필드를 직접 덮어쓴다.
 
-  const ApiClient({required this.baseUrl, this.token});
+  /// 요청이 401을 받았을 때 한 번 호출된다. accessToken 갱신에 성공하면(=이 인스턴스의
+  /// [token]을 새로 채워넣으면) true를 반환해서 원래 요청을 한 번 더 재시도하게 한다.
+  Future<bool> Function()? onUnauthorized;
+
+  /// 서버가 자체 서명 인증서(HTTPS)를 쓰므로, PinnedTls.httpClient()로 만든(그 인증서만
+  /// 신뢰하는) 클라이언트를 주입받는다. 안 주면 플랫폼 기본 클라이언트를 쓴다(테스트 등).
+  final http.Client _client;
+
+  ApiClient({required this.baseUrl, this.token, this.onUnauthorized, http.Client? httpClient})
+      : _client = httpClient ?? http.Client();
 
   Map<String, String> get _authHeaders => token == null ? {} : {'Authorization': 'Bearer $token'};
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
+  /// [request]를 보내고, 401이면 [onUnauthorized]로 한 번 갱신을 시도한 뒤 한 번만 재시도한다.
+  /// [request]는 매번 새로 헤더/바디를 구성해야 한다(재시도 시 갱신된 token을 반영하도록).
+  Future<http.Response> _send(Future<http.Response> Function() request) async {
+    var res = await request();
+    if (res.statusCode == 401 && onUnauthorized != null) {
+      final refreshed = await onUnauthorized!();
+      if (refreshed) res = await request();
+    }
+    return res;
+  }
+
   Future<bool> checkHealth() async {
     try {
-      final res = await http.get(_uri('/health')).timeout(const Duration(seconds: 5));
+      final res = await _client.get(_uri('/health')).timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -148,7 +174,7 @@ class ApiClient {
       _authRequest('/auth/login', {'username': username, 'password': password});
 
   Future<AuthResult> _authRequest(String path, Map<String, dynamic> payload) async {
-    final res = await http.post(
+    final res = await _client.post(
       _uri(path),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(payload),
@@ -158,14 +184,29 @@ class ApiClient {
       throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
     }
     return AuthResult(
-      token: body['token'] as String,
+      accessToken: body['accessToken'] as String,
+      refreshToken: body['refreshToken'] as String,
       userId: body['userId'] as String,
       username: body['username'] as String,
     );
   }
 
+  /// refreshToken으로 새 accessToken을 받아온다. 실패하면(만료/비밀번호 변경 등) 던진다.
+  Future<String> refreshAccessToken(String refreshToken) async {
+    final res = await _client.post(
+      _uri('/auth/refresh'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'refreshToken': refreshToken}),
+    );
+    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    if (res.statusCode >= 400) {
+      throw ApiException((body['error'] as String?) ?? '세션이 만료되었습니다.');
+    }
+    return body['accessToken'] as String;
+  }
+
   Future<String> findId(String email) async {
-    final res = await http.post(
+    final res = await _client.post(
       _uri('/auth/find-id'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email}),
@@ -178,7 +219,7 @@ class ApiClient {
   }
 
   Future<void> resetPassword({required String username, required String email, required String newPassword}) async {
-    final res = await http.post(
+    final res = await _client.post(
       _uri('/auth/reset-password'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({'username': username, 'email': email, 'newPassword': newPassword}),
@@ -190,7 +231,7 @@ class ApiClient {
   }
 
   Future<dynamic> _get(String path) async {
-    final res = await http.get(_uri(path), headers: _authHeaders);
+    final res = await _send(() => _client.get(_uri(path), headers: _authHeaders));
     final body = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException((body is Map ? body['error'] as String? : null) ?? '요청이 실패했습니다.');
@@ -199,11 +240,11 @@ class ApiClient {
   }
 
   Future<dynamic> _post(String path, Map<String, dynamic> body) async {
-    final res = await http.post(
-      _uri(path),
-      headers: {..._authHeaders, 'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    final res = await _send(() => _client.post(
+          _uri(path),
+          headers: {..._authHeaders, 'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        ));
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException((decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.');
@@ -212,11 +253,11 @@ class ApiClient {
   }
 
   Future<dynamic> _patch(String path, Map<String, dynamic> body) async {
-    final res = await http.patch(
-      _uri(path),
-      headers: {..._authHeaders, 'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    final res = await _send(() => _client.patch(
+          _uri(path),
+          headers: {..._authHeaders, 'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        ));
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
       throw ApiException((decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.');
@@ -327,11 +368,13 @@ class ApiClient {
   }
 
   Future<UploadResult> uploadFile(File file) async {
-    final req = http.MultipartRequest('POST', _uri('/api/upload'))
-      ..headers.addAll(_authHeaders)
-      ..files.add(await http.MultipartFile.fromPath('file', file.path));
-    final streamed = await req.send();
-    final res = await http.Response.fromStream(streamed);
+    final res = await _send(() async {
+      final req = http.MultipartRequest('POST', _uri('/api/upload'))
+        ..headers.addAll(_authHeaders)
+        ..files.add(await http.MultipartFile.fromPath('file', file.path));
+      final streamed = await _client.send(req);
+      return http.Response.fromStream(streamed);
+    });
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
       throw ApiException((body['error'] as String?) ?? '업로드에 실패했습니다.');

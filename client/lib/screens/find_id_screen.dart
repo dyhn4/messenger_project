@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../services/api_client.dart';
 import '../services/session.dart';
 
 class FindIdScreen extends StatefulWidget {
@@ -24,8 +23,7 @@ class _FindIdScreenState extends State<FindIdScreen> {
       _foundUsername = null;
     });
     try {
-      final api = ApiClient(baseUrl: widget.session.serverUrl!);
-      final username = await api.findId(_email.text.trim());
+      final username = await widget.session.api!.findId(_email.text.trim());
       if (!mounted) return;
       setState(() => _foundUsername = username);
     } catch (e) {

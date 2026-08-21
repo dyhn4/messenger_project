@@ -99,7 +99,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
     try {
       if (toSend.isEmpty) {
-        widget.controller.sendText(text);
+        await widget.controller.sendText(text);
       } else {
         // 첨부와 함께 입력한 메시지는 별도 메시지로 보내지 않고, 첫 번째 첨부의 캡션으로 붙인다.
         for (var i = 0; i < toSend.length; i++) {

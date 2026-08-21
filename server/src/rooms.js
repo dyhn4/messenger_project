@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { db } from './db.js';
+import { signFileUrl } from './upload.js';
 import { publicUser } from './users.js';
 
 function resolveMembers(memberIds) {
@@ -267,7 +268,9 @@ export function createRoomsRouter(io) {
 
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const all = db.data.messages.filter((m) => m.roomId === room.id);
-    res.json(all.slice(Math.max(0, all.length - limit)));
+    // 저장은 항상 원본 상대경로(/uploads/xxx)로 해두고, 응답에 낼 때만 매번 새로 서명한다
+    // (DB에 서명된 URL을 그대로 저장하면 나중에 다시 조회할 때 이미 만료돼있게 된다).
+    res.json(all.slice(Math.max(0, all.length - limit)).map((m) => ({ ...m, fileUrl: signFileUrl(m.fileUrl) })));
   });
 
   return router;

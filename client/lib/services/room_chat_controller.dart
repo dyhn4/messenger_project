@@ -48,12 +48,30 @@ class RoomChatController extends ChangeNotifier {
     if (_session.activeRoomId == room.id && _session.appInForeground) markReadNow();
   }
 
+  /// 연결이 끊겼다가 다시 붙었을 때 Session이 호출한다. 끊긴 동안 놓쳤을 수 있는 메시지를
+  /// 다시 받아와 이미 가진 것과 id로 비교해 새로 온 것만 합친다.
+  Future<void> refresh() async {
+    try {
+      final history = await _session.api!.fetchRoomMessages(room.id);
+      final existingIds = messages.map((m) => m.id).toSet();
+      final newOnes = history.where((m) => !existingIds.contains(m.id));
+      if (newOnes.isEmpty) return;
+      messages
+        ..addAll(newOnes)
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      notifyListeners();
+      if (_session.activeRoomId == room.id && _session.appInForeground) markReadNow();
+    } catch (_) {
+      // 재연결 직후 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
+    }
+  }
+
   void markReadNow() => _session.chatSocket.markRead(room.id);
 
-  void sendText(String text) {
+  Future<void> sendText(String text) {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
-    _session.chatSocket.send(roomId: room.id, type: 'text', text: trimmed);
+    if (trimmed.isEmpty) return Future.value();
+    return _session.chatSocket.send(roomId: room.id, type: 'text', text: trimmed);
   }
 
   /// [caption]을 같이 주면(이미지/파일 첨부 후 메시지를 입력하고 보낸 경우) 그 메시지 하나에
@@ -61,7 +79,7 @@ class RoomChatController extends ChangeNotifier {
   Future<void> sendFile(File file, {required bool isImage, String? caption}) async {
     final result = await _session.api!.uploadFile(file);
     final trimmedCaption = caption?.trim();
-    _session.chatSocket.send(
+    await _session.chatSocket.send(
       roomId: room.id,
       type: isImage ? 'image' : 'file',
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,

@@ -19,23 +19,34 @@ export const uploadsDir = path.join(__dirname, '..', 'uploads');
 const BUCKET_MS = 60 * 60 * 1000;
 const VALID_BUCKETS = 2; // 현재 버킷 + 다음 버킷까지, 즉 최대 2시간 후 만료.
 
-/** 저장된 상대경로(/uploads/xxx)를 짧게 만료되는 서명 다운로드 경로(/files/<token>)로 바꾼다. */
-export function signFileUrl(relativeUrl) {
+/**
+ * 저장된 상대경로(/uploads/xxx)를 짧게 만료되는 서명 다운로드 경로(/files/<token>)로 바꾼다.
+ * downloadName을 같이 주면(메시지 첨부처럼 원본 파일명이 있는 경우) 토큰에 실어서, 실제
+ * 다운로드 응답에 Content-Disposition으로 원본 파일명을 돌려줄 수 있게 한다 — 안 그러면
+ * (예: 파일을 눌러서 브라우저/외부 앱으로 바로 열 때) URL의 토큰 문자열이 파일명으로
+ * 쓰여버린다.
+ */
+export function signFileUrl(relativeUrl, downloadName) {
   if (!relativeUrl) return relativeUrl;
   const filename = path.basename(relativeUrl); // 경로 조작 방지
   const bucketStart = Math.floor(Date.now() / BUCKET_MS) * BUCKET_MS;
   const exp = Math.floor((bucketStart + VALID_BUCKETS * BUCKET_MS) / 1000);
-  const token = jwt.sign({ file: filename, type: 'file', exp }, JWT_SECRET, { noTimestamp: true });
+  const payload = { file: filename, type: 'file', exp };
+  if (downloadName) payload.downloadName = downloadName;
+  const token = jwt.sign(payload, JWT_SECRET, { noTimestamp: true });
   return `/files/${token}`;
 }
 
-/** /files/:token 라우트에서 쓴다. 서명이 유효하고 만료 전이면 실제 파일 경로를 돌려준다. */
+/** /files/:token 라우트에서 쓴다. 서명이 유효하고 만료 전이면 실제 파일 경로(+원본 파일명)를 돌려준다. */
 export function resolveSignedFile(token) {
   const payload = jwt.verify(token, JWT_SECRET); // 서명/만료 실패 시 throw
   if (payload.type !== 'file' || typeof payload.file !== 'string') {
     throw new Error('invalid file token');
   }
-  return path.join(uploadsDir, path.basename(payload.file));
+  return {
+    filePath: path.join(uploadsDir, path.basename(payload.file)),
+    downloadName: typeof payload.downloadName === 'string' ? payload.downloadName : null,
+  };
 }
 
 const storage = multer.diskStorage({
@@ -81,11 +92,19 @@ uploadRouter.post('/upload', upload.single('file'), (req, res) => {
 export const filesRouter = Router();
 
 filesRouter.get('/files/:token', (req, res) => {
-  let filePath;
+  let filePath, downloadName;
   try {
-    filePath = resolveSignedFile(req.params.token);
+    ({ filePath, downloadName } = resolveSignedFile(req.params.token));
   } catch {
     return res.status(401).json({ error: '다운로드 링크가 만료되었거나 유효하지 않습니다.' });
+  }
+  if (downloadName) {
+    // 한글 등 비ASCII 파일명도 안전하게: ASCII 폴백 + RFC 5987 UTF-8 인코딩을 같이 준다.
+    const asciiFallback = downloadName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
+    );
   }
   res.sendFile(filePath, (err) => {
     if (err && !res.headersSent) res.status(404).json({ error: '파일을 찾을 수 없습니다.' });

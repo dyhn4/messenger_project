@@ -55,7 +55,7 @@ class _ChatPanelState extends State<ChatPanel> {
     super.dispose();
   }
 
-  AppUser? _senderOf(String senderId) {
+  AppUser? _senderOf(String? senderId) {
     for (final m in widget.room.members) {
       if (m.id == senderId) return m;
     }

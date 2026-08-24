@@ -97,7 +97,7 @@ class SearchResult {
   final String id;
   final String roomId;
   final String? roomName;
-  final String senderId;
+  final String? senderId; // 시스템 메시지는 작성자가 없어서 null.
   final String senderName;
   final String? text;
   final String? fileName;
@@ -106,7 +106,7 @@ class SearchResult {
     required this.id,
     required this.roomId,
     this.roomName,
-    required this.senderId,
+    this.senderId,
     required this.senderName,
     this.text,
     this.fileName,
@@ -117,7 +117,7 @@ class SearchResult {
         id: json['id'] as String,
         roomId: json['roomId'] as String,
         roomName: json['roomName'] as String?,
-        senderId: json['senderId'] as String,
+        senderId: json['senderId'] as String?,
         senderName: json['senderName'] as String,
         text: json['text'] as String?,
         fileName: json['fileName'] as String?,

@@ -10,7 +10,7 @@ MessageType _typeFromString(String? s) => switch (s) {
 class Message {
   final String id;
   final String roomId;
-  final String senderId;
+  final String? senderId; // 시스템 메시지는 작성자가 없어서 null(서버 rooms.js의 postSystemMessage 참고).
   final String senderName;
   final MessageType type;
   final String? text;
@@ -23,7 +23,7 @@ class Message {
   const Message({
     required this.id,
     required this.roomId,
-    required this.senderId,
+    this.senderId,
     required this.senderName,
     required this.type,
     this.text,
@@ -38,7 +38,7 @@ class Message {
     return Message(
       id: json['id'] as String,
       roomId: json['roomId'] as String,
-      senderId: json['senderId'] as String,
+      senderId: json['senderId'] as String?,
       senderName: json['senderName'] as String,
       type: _typeFromString(json['type'] as String?),
       text: json['text'] as String?,

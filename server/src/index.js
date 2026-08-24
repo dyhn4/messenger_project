@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PORT } from './config.js';
+import { ensureSeedData } from './db/seed.js';
 import { startRetentionJob } from './retention.js';
 import { createRoomsRouter } from './rooms.js';
 import { searchRouter } from './search.js';
@@ -18,6 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 const tls = await ensureTlsCredentials();
+await ensureSeedData();
 const httpServer = createServer(tls, app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
 

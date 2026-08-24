@@ -24,23 +24,39 @@ messenger_project/
 Node.js가 설치되어 있지 않다면 먼저 설치하세요: https://nodejs.org (LTS 버전)
 설치 후 새 터미널을 열어 `node --version`이 뜨는지 확인합니다.
 
+채팅 데이터는 PostgreSQL에 저장합니다. PostgreSQL이 설치되어 있어야 하고, 이 앱 전용 데이터베이스/
+계정을 하나 만들어둬야 합니다(슈퍼유저로 한 번만):
+
+```
+psql -U postgres -c "CREATE USER messenger_app WITH PASSWORD '원하는_비밀번호';"
+psql -U postgres -c "CREATE DATABASE messenger OWNER messenger_app;"
+```
+
+그다음 `server/.env`를 만들고(`server/.env.example` 참고) `DATABASE_URL`을 채웁니다:
+
+```
+DATABASE_URL=postgres://messenger_app:원하는_비밀번호@localhost:5432/messenger
+```
+
 ```
 cd server
 npm install
+npm run db:generate   # 스키마(src/db/schema.js) 기준으로 마이그레이션 SQL 생성 — 스키마가 바뀔 때마다
+npm run db:migrate    # 실제 데이터베이스에 적용 — 처음 실행 전 필수
 npm start
 ```
 
 실행하면 콘솔에 이렇게 접속 주소가 찍힙니다. 이 주소를 클라이언트 앱의 "서버 연결" 화면에 그대로 입력하세요.
 
 ```
-메신저 서버 실행 중 (포트 3000)
+메신저 서버 실행 중 (HTTPS, 포트 3000)
 같은 와이파이의 다른 기기에서 접속할 주소:
-  http://192.168.0.62:3000
+  https://192.168.0.62:3000
 ```
 
 - PC 방화벽이 처음 실행 시 "네트워크 접근 허용" 팝업을 띄우면 허용해야 안드로이드 기기에서 접속됩니다.
 - 안드로이드 기기와 PC가 **같은 와이파이망**에 있어야 합니다. 다른 네트워크(LTE 등)에서 쓰려면 공유기 포트포워딩 + 고정 IP(또는 DDNS)가 추가로 필요합니다.
-- 채팅 데이터는 `server/db.json`, 업로드 파일은 `server/uploads/`에 저장됩니다. 둘 다 `.gitignore`에 들어있어 git에는 안 올라갑니다.
+- 업로드 파일은 `server/uploads/`에 저장됩니다. `.gitignore`에 들어있어 git에는 안 올라갑니다.
 
 ## 2. 클라이언트 실행
 

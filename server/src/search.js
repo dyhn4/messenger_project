@@ -1,52 +1,60 @@
 import { Router } from 'express';
-import { db } from './db.js';
+import { searchMessages } from './db/queries/messages.js';
+import { findRoomById, listRoomMemberUsers } from './db/queries/rooms.js';
 
 export const searchRouter = Router();
 
 /**
  * 클라이언트 Room.displayName()과 동일한 규칙: 이름이 있으면 그대로, DM은 상대방 이름,
- * 이름 없는 그룹은 멤버 이름을 이름순으로 나열.
+ * 이름 없는 그룹은 나를 뺀 나머지 멤버 이름을 이름순으로 나열.
  */
-function displayNameFor(room, myUserId) {
+async function displayNameFor(room, myUserId) {
   if (room.name) return room.name;
-  const nameOf = (id) => {
-    const u = db.data.users.find((x) => x.id === id);
-    return u?.name ?? u?.username;
-  };
+  const members = await listRoomMemberUsers(room.id);
+  const nameOf = (id) => members.find((u) => u.id === id)?.name;
   if (room.type === 'dm') {
-    const other = room.memberIds.find((id) => id !== myUserId);
-    return other ? nameOf(other) ?? '(알 수 없음)' : '(알 수 없음)';
+    const other = members.find((m) => m.id !== myUserId);
+    return other ? (nameOf(other.id) ?? '(알 수 없음)') : '(알 수 없음)';
   }
-  return room.memberIds.map(nameOf).filter(Boolean).sort().join(', ');
+  const names = members
+    .filter((m) => m.id !== myUserId)
+    .map((m) => m.name)
+    .filter(Boolean)
+    .sort();
+  return names.length > 0 ? names.join(', ') : '(알 수 없음)';
 }
 
 /**
  * 내가 속한 모든 방을 가로지르는 통합 검색. 메시지 텍스트와 파일명을 대상으로 합니다.
- * roomId/senderId/since/until로 결과 범위를 좁힐 수 있습니다(전부 선택적).
+ * roomId/senderId/since/until로 결과 범위를 좁힐 수 있습니다(전부 선택적). "내가 속한 방"
+ * 범위는 searchMessages가 room_members 조인으로 강제한다 — roomId를 임의로 보내도 내 방이
+ * 아니면 결과에 안 걸린다.
  */
-searchRouter.get('/search', (req, res) => {
+searchRouter.get('/search', async (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
   if (!q) return res.json([]);
   const { roomId, senderId, since, until } = req.query;
-
   const limit = Math.min(Number(req.query.limit) || 200, 500);
-  const myRoomIds = new Set(
-    db.data.rooms.filter((r) => r.memberIds.includes(req.user.sub)).map((r) => r.id),
-  );
-  const roomNameById = new Map(
-    db.data.rooms.map((r) => [r.id, displayNameFor(r, req.user.sub)]),
-  );
 
-  const results = db.data.messages
-    .filter((m) => myRoomIds.has(m.roomId))
-    .filter((m) => !roomId || m.roomId === roomId)
-    .filter((m) => !senderId || m.senderId === senderId)
-    .filter((m) => !since || m.createdAt >= Number(since))
-    .filter((m) => !until || m.createdAt <= Number(until))
-    .filter((m) => m.text?.toLowerCase().includes(q) || m.fileName?.toLowerCase().includes(q))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, limit)
-    .map((m) => ({
+  const rows = await searchMessages({
+    requesterId: req.user.sub,
+    roomId: roomId || null,
+    senderId: senderId || null,
+    since: since ? Number(since) : null,
+    until: until ? Number(until) : null,
+    q,
+    limit,
+  });
+
+  const roomNameById = new Map();
+  for (const m of rows) {
+    if (roomNameById.has(m.roomId)) continue;
+    const room = await findRoomById(m.roomId);
+    roomNameById.set(m.roomId, room ? await displayNameFor(room, req.user.sub) : null);
+  }
+
+  res.json(
+    rows.map((m) => ({
       id: m.id,
       roomId: m.roomId,
       roomName: roomNameById.get(m.roomId) ?? null,
@@ -55,8 +63,7 @@ searchRouter.get('/search', (req, res) => {
       type: m.type,
       text: m.text,
       fileName: m.fileName,
-      createdAt: m.createdAt,
-    }));
-
-  res.json(results);
+      createdAt: new Date(m.createdAt).getTime(),
+    })),
+  );
 });

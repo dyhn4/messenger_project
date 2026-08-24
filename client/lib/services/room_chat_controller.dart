@@ -29,9 +29,14 @@ class RoomChatController extends ChangeNotifier {
   Future<void> _load() async {
     try {
       final history = await _session.api!.fetchRoomMessages(room.id);
+      // 이 fetch가 진행되는 동안 실시간 메시지가 먼저 도착해 feed()로 messages에 이미
+      // 들어와 있을 수 있다(예: 방을 막 만들자마자 상대가 바로 답장한 경우) — 그걸 무시하고
+      // 통째로 갈아끼우면 방금 도착한 메시지가 사라진다. id로 겹치는 것만 걸러서 합친다.
+      final existingIds = messages.map((m) => m.id).toSet();
+      final newOnes = history.where((m) => !existingIds.contains(m.id));
       messages
-        ..clear()
-        ..addAll(history);
+        ..addAll(newOnes)
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     } catch (e) {
       error = e.toString();
     }

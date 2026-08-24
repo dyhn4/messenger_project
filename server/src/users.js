@@ -1,9 +1,10 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { issueTokenPair } from './auth.js';
-import { db } from './db.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
-import { toRoomDto } from './rooms.js';
+import { renameSenderMessages } from './db/queries/messages.js';
+import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
+import { broadcastMemberUpdate } from './rooms.js';
 import { signFileUrl } from './upload.js';
 
 const VALID_AVATAR_TYPES = new Set(['initial', 'character', 'photo']);
@@ -34,15 +35,15 @@ export function createUsersRouter(io) {
    * 방 멤버 선택(그룹/DM 생성)·멤버 패널에 쓸 전체 가입자 목록. 탈퇴한 사용자는 로그인도
    * 못 하고 새로 대화를 걸 수도 없으니 여기서 뺀다 — 다만 예전에 같이 있던 방의 멤버
    * 목록/과거 메시지 작성자 표시(publicUser 자체)에서는 계속 "탈퇴한 사용자"로 보여야
-   * 하므로 그쪽(rooms.js의 resolveMembers 등)은 건드리지 않는다.
+   * 하므로 그쪽(rooms.js의 listRoomMemberUsers 등)은 건드리지 않는다.
    */
-  router.get('/users', (req, res) => {
-    res.json(db.data.users.filter((u) => !u.deletedAt).map(publicUser));
+  router.get('/users', async (req, res) => {
+    res.json((await listActiveUsers()).map(publicUser));
   });
 
   /** 내 프로필(아바타 포함) 조회. */
-  router.get('/users/me', (req, res) => {
-    const user = db.data.users.find((u) => u.id === req.user.sub);
+  router.get('/users/me', async (req, res) => {
+    const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     res.json(publicUser(user));
   });
@@ -53,26 +54,27 @@ export function createUsersRouter(io) {
    * 왔을 때만 독립적으로 갱신한다.
    */
   router.patch('/users/me', async (req, res) => {
-    const user = db.data.users.find((u) => u.id === req.user.sub);
+    const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
     const { avatarType, avatarEmoji, avatarColor, avatarUrl, name, email } = req.body ?? {};
+    const patch = {};
 
     if (avatarType !== undefined) {
       if (!VALID_AVATAR_TYPES.has(avatarType)) {
         return res.status(400).json({ error: '잘못된 avatarType입니다.' });
       }
-      user.avatarType = avatarType;
-      user.avatarEmoji = avatarEmoji ?? null;
-      user.avatarColor = avatarColor ?? null;
-      user.avatarUrl = avatarUrl ?? null;
+      patch.avatarType = avatarType;
+      patch.avatarEmoji = avatarEmoji ?? null;
+      patch.avatarColor = avatarColor ?? null;
+      patch.avatarUrl = avatarUrl ?? null;
     }
 
     if (name !== undefined) {
       if (!String(name).trim()) {
         return res.status(400).json({ error: '이름을 입력하세요.' });
       }
-      user.name = String(name).trim();
+      patch.name = String(name).trim();
     }
 
     if (email !== undefined) {
@@ -80,24 +82,20 @@ export function createUsersRouter(io) {
         return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
       }
       const emailLookup = lookupHash(email);
-      const taken = db.data.users.find((u) => u.id !== user.id && u.emailLookup === emailLookup);
+      const taken = await findOtherUserByEmailLookup(emailLookup, user.id);
       if (taken) {
         return res.status(409).json({ error: '이미 사용 중인 이메일입니다.' });
       }
-      user.emailEnc = encryptField(email);
-      user.emailLookup = emailLookup;
+      patch.emailEnc = encryptField(email);
+      patch.emailLookup = emailLookup;
     }
 
-    await db.write();
+    const updated = await updateUser(user.id, patch);
 
     // 이 사람이 속한 모든 방(다른 기기 포함, 그 방의 멤버 전원)에 갱신된 멤버 정보를 알린다.
-    for (const room of db.data.rooms) {
-      if (room.memberIds.includes(user.id)) {
-        io.to(room.id).emit('room:created', toRoomDto(room));
-      }
-    }
+    await broadcastMemberUpdate(io, user.id);
 
-    res.json(publicUser(user));
+    res.json(publicUser(updated));
   });
 
   /**
@@ -106,7 +104,7 @@ export function createUsersRouter(io) {
    * 보낸 기기는 로그아웃시키지 않고 새 토큰 쌍을 바로 응답에 실어줘서 매끄럽게 이어지게 한다.
    */
   router.post('/users/me/change-password', async (req, res) => {
-    const user = db.data.users.find((u) => u.id === req.user.sub);
+    const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
     const { currentPassword, newPassword } = req.body ?? {};
@@ -117,15 +115,16 @@ export function createUsersRouter(io) {
       return res.status(401).json({ error: '현재 비밀번호가 올바르지 않습니다.' });
     }
 
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
-    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
-    await db.write();
+    const updated = await updateUser(user.id, {
+      passwordHash: await bcrypt.hash(newPassword, 10),
+      tokenVersion: (user.tokenVersion ?? 0) + 1,
+    });
 
     // 이 기기가 방금 쓴 소켓 연결도 tokenVersion이 바뀌어 곧 끊길 테니, 새 토큰으로
     // 다시 붙을 수 있도록 응답에 새 토큰 쌍을 실어 보낸다. 다른 기기는 여기서 끊고 끝.
     io.in(`user:${user.id}`).disconnectSockets(true);
 
-    res.json({ ...issueTokenPair(user), userId: user.id, username: user.username });
+    res.json({ ...issueTokenPair(updated), userId: updated.id, username: updated.username });
   });
 
   /**
@@ -139,11 +138,11 @@ export function createUsersRouter(io) {
    *     의존하면(나중에 멤버 목록에서 빠지는 경우 등) 예전 실명이 그대로 남을 수 있어서,
    *     메시지 자체에 박제된 senderName도 지금 시점에 다시 써둔다.
    *  6) 첨부 파일은 지우지 않는다(보존 정책).
-   *  7) 별도 백업/검색 색인이 없는 구조라 위 변경이 곧 전체 반영이다(search.js도 이
-   *     db.data를 그대로 조회).
+   *  7) 별도 백업/검색 색인이 없는 구조라 위 변경이 곧 전체 반영이다(search.js도 같은 DB를
+   *     그대로 조회).
    */
   router.post('/users/me/withdraw', async (req, res) => {
-    const user = db.data.users.find((u) => u.id === req.user.sub);
+    const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     if (user.deletedAt) return res.status(400).json({ error: '이미 탈퇴한 계정입니다.' });
 
@@ -152,29 +151,21 @@ export function createUsersRouter(io) {
       return res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' });
     }
 
-    user.deletedAt = Date.now();
-    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    await updateUser(user.id, {
+      deletedAt: new Date(),
+      tokenVersion: (user.tokenVersion ?? 0) + 1,
+      name: DELETED_USER_NAME,
+      emailEnc: null,
+      emailLookup: null,
+      avatarType: 'initial',
+      avatarEmoji: null,
+      avatarColor: null,
+      avatarUrl: null,
+    });
+    await renameSenderMessages(user.id, DELETED_USER_NAME);
 
-    user.name = DELETED_USER_NAME;
-    user.emailEnc = null;
-    user.emailLookup = null;
-    user.avatarType = 'initial';
-    user.avatarEmoji = null;
-    user.avatarColor = null;
-    user.avatarUrl = null;
-
-    for (const m of db.data.messages) {
-      if (m.senderId === user.id) m.senderName = DELETED_USER_NAME;
-    }
-
-    await db.write();
     io.in(`user:${user.id}`).disconnectSockets(true);
-
-    for (const room of db.data.rooms) {
-      if (room.memberIds.includes(user.id)) {
-        io.to(room.id).emit('room:created', toRoomDto(room));
-      }
-    }
+    await broadcastMemberUpdate(io, user.id);
 
     res.json({ ok: true });
   });

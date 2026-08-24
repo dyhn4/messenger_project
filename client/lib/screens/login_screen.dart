@@ -124,44 +124,48 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   if (!_isRegister) ...[
                     const SizedBox(height: 8),
-                    Row(
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      runSpacing: 4,
                       children: [
-                        Expanded(
-                          child: Wrap(
-                            spacing: 4,
-                            children: [
-                              _CheckboxLabel(
-                                label: '아이디 기억하기',
-                                value: _rememberUsername,
-                                onChanged: (v) => setState(() => _rememberUsername = v),
-                              ),
-                              _CheckboxLabel(
-                                label: '로그인 상태 유지',
-                                value: _keepSignedIn,
-                                onChanged: (v) => setState(() => _keepSignedIn = v),
-                              ),
-                            ],
-                          ),
+                        Wrap(
+                          spacing: 4,
+                          children: [
+                            _CheckboxLabel(
+                              label: '아이디 기억하기',
+                              value: _rememberUsername,
+                              onChanged: (v) => setState(() => _rememberUsername = v),
+                            ),
+                            _CheckboxLabel(
+                              label: '로그인 상태 유지',
+                              value: _keepSignedIn,
+                              onChanged: (v) => setState(() => _keepSignedIn = v),
+                            ),
+                          ],
                         ),
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          onPressed: () => Navigator.of(context)
-                              .push(MaterialPageRoute(builder: (_) => FindIdScreen(session: widget.session))),
-                          child: const Text('아이디 찾기', style: TextStyle(fontSize: 12)),
-                        ),
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          onPressed: () => Navigator.of(context)
-                              .push(MaterialPageRoute(builder: (_) => FindPasswordScreen(session: widget.session))),
-                          child: const Text('비밀번호 찾기', style: TextStyle(fontSize: 12)),
+                        Wrap(
+                          children: [
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () => Navigator.of(context)
+                                  .push(MaterialPageRoute(builder: (_) => FindIdScreen(session: widget.session))),
+                              child: const Text('아이디 찾기', style: TextStyle(fontSize: 12)),
+                            ),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () => Navigator.of(context)
+                                  .push(MaterialPageRoute(builder: (_) => FindPasswordScreen(session: widget.session))),
+                              child: const Text('비밀번호 찾기', style: TextStyle(fontSize: 12)),
+                            ),
+                          ],
                         ),
                       ],
                     ),

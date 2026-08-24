@@ -59,7 +59,8 @@ class Room {
       }
       return '(알 수 없음)';
     }
-    final names = members.map((m) => m.name).toList()..sort();
+    final names = members.where((m) => m.id != myUserId).map((m) => m.name).toList()..sort();
+    if (names.isEmpty) return '(알 수 없음)';
     return names.join(', ');
   }
 

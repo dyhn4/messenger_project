@@ -1,10 +1,17 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
-import { randomUUID } from 'node:crypto';
-import { db } from './db.js';
 import { JWT_SECRET } from './config.js';
 import { encryptField, lookupHash } from './crypto.js';
+import { addRoomMembers, listPublicTopics } from './db/queries/rooms.js';
+import {
+  findUserByEmailLookup,
+  findUserById,
+  findUserByUsername,
+  findUserByUsernameAndEmailLookup,
+  insertUser,
+  updateUser,
+} from './db/queries/users.js';
 import { nameOf, notifyMembership, postSystemMessage } from './rooms.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -58,52 +65,46 @@ export function createAuthRouter(io) {
       return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
     }
 
-    const exists = db.data.users.find((u) => u.username === username);
+    const exists = await findUserByUsername(username);
     if (exists) {
       return res.status(409).json({ error: '이미 사용 중인 아이디입니다.' });
     }
     const emailLookup = lookupHash(email);
-    const emailTaken = db.data.users.find((u) => u.emailLookup === emailLookup);
+    const emailTaken = await findUserByEmailLookup(emailLookup);
     if (emailTaken) {
       return res.status(409).json({ error: '이미 사용 중인 이메일입니다.' });
     }
 
-    const user = {
-      id: randomUUID(),
+    const user = await insertUser({
       username,
       name: name.trim(),
       emailEnc: encryptField(email),
       emailLookup,
       passwordHash: await bcrypt.hash(password, 10),
-      tokenVersion: 0,
-      createdAt: Date.now(),
       avatarType: 'character',
       avatarEmoji: randomOf(CHARACTER_EMOJIS),
       avatarColor: randomOf(CHARACTER_COLORS),
-      avatarUrl: null,
-    };
-    db.data.users.push(user);
+    });
 
     // 기존 공개 토픽 전체에 자동으로 가입시킨다(새로 만든 공개 토픽에 지금 회원 전원이
     // 들어가는 것과 대칭 — 공개 토픽은 항상 "가입된 모든 회원"이 멤버가 되도록 유지한다).
-    const publicTopics = db.data.rooms.filter((r) => r.type === 'topic' && r.isPublic !== false);
+    const publicTopics = await listPublicTopics();
     for (const room of publicTopics) {
-      room.memberIds.push(user.id);
+      await addRoomMembers(room.id, [user.id]);
     }
-    await db.write();
 
     for (const room of publicTopics) {
-      notifyMembership(io, room);
-      await postSystemMessage(io, room, `${nameOf(user.id)} 님이 참여했습니다.`);
+      await notifyMembership(io, room);
+      await postSystemMessage(io, room, `${await nameOf(user.id)} 님이 참여했습니다.`);
     }
 
     res.status(201).json({ ...issueTokenPair(user), userId: user.id, username: user.username });
   });
 
   /** 이메일로 아이디를 찾는다. 가입할 때 등록해둔 이메일이 있어야 동작한다. */
-  router.post('/find-id', (req, res) => {
+  router.post('/find-id', async (req, res) => {
     const { email } = req.body ?? {};
-    const user = db.data.users.find((u) => u.emailLookup === lookupHash(email));
+    const user = await findUserByEmailLookup(lookupHash(email));
     if (!user) {
       return res.status(404).json({ error: '일치하는 계정이 없습니다.' });
     }
@@ -120,17 +121,18 @@ export function createAuthRouter(io) {
       return res.status(400).json({ error: '비밀번호는 4자 이상이어야 합니다.' });
     }
 
-    const user = db.data.users.find((u) => u.username === username && u.emailLookup === lookupHash(email));
+    const user = await findUserByUsernameAndEmailLookup(username, lookupHash(email));
     if (!user) {
       return res.status(400).json({ error: '아이디와 이메일이 일치하는 계정이 없습니다.' });
     }
 
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
     // 비밀번호가 바뀌었으니 이전에 발급된 모든 토큰을 무효화한다: AccessToken은 남은
     // 유효기간(최대 1시간) 뒤에, RefreshToken은 즉시(다음 재발급 시도부터) 막히고,
     // 지금 연결돼있는 소켓도 바로 끊어서 실시간 세션도 함께 정리한다.
-    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
-    await db.write();
+    await updateUser(user.id, {
+      passwordHash: await bcrypt.hash(newPassword, 10),
+      tokenVersion: (user.tokenVersion ?? 0) + 1,
+    });
     io.in(`user:${user.id}`).disconnectSockets(true);
 
     res.json({ ok: true });
@@ -138,7 +140,7 @@ export function createAuthRouter(io) {
 
   router.post('/login', async (req, res) => {
     const { username, password } = req.body ?? {};
-    const user = db.data.users.find((u) => u.username === username);
+    const user = await findUserByUsername(username);
     if (!user || !(await bcrypt.compare(password ?? '', user.passwordHash))) {
       return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
     }
@@ -166,7 +168,7 @@ export function createAuthRouter(io) {
       return res.status(401).json({ error: '세션이 만료되었습니다. 다시 로그인해주세요.' });
     }
 
-    const user = db.data.users.find((u) => u.id === payload.sub);
+    const user = await findUserById(payload.sub);
     if (!user || (user.tokenVersion ?? 0) !== payload.tokenVersion) {
       // 비밀번호 변경/강제 로그아웃 등으로 이 RefreshToken 자체가 이미 폐기된 경우.
       return res.status(401).json({ error: '세션이 만료되었습니다. 다시 로그인해주세요.' });
@@ -204,12 +206,12 @@ export function requireAuth(req, res, next) {
  * tokenVersion까지 DB와 대조해서 비밀번호 변경 직후 캐시된 AccessToken으로 재연결을
  * 시도하는 것까지 막는다.
  */
-export function verifySocketToken(token) {
+export async function verifySocketToken(token) {
   const payload = jwt.verify(token, JWT_SECRET); // 서명/만료 실패 시 throw
   if (payload.type !== 'access') {
     throw new Error('invalid token type');
   }
-  const user = db.data.users.find((u) => u.id === payload.sub);
+  const user = await findUserById(payload.sub);
   if (!user || (user.tokenVersion ?? 0) !== payload.tokenVersion) {
     throw new Error('unauthorized');
   }

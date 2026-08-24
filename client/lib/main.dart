@@ -6,9 +6,16 @@ import 'screens/login_screen.dart';
 import 'screens/server_setup_screen.dart';
 import 'services/app_settings.dart';
 import 'services/notification_service.dart';
+import 'services/pinned_tls.dart';
 import 'services/session.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // NetworkImage/CachedNetworkImage처럼 우리 ApiClient/ChatSocket을 거치지 않고 자체
+  // HttpClient를 만드는 코드도 전부 서버의 자체 서명 인증서를 신뢰하도록, runApp() 전에
+  // 앱 전체 HttpClient 생성을 가로챈다. 이거 없이는 프로필 사진/채팅 이미지가 인증서
+  // 신뢰 실패로 안 보인다.
+  await PinnedTls.installGlobalHttpOverrides();
   runApp(const MyApp());
 }
 

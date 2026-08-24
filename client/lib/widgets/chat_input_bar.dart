@@ -96,6 +96,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _sending = true;
     });
     _controller.clear();
+    // 보내기 버튼을 마우스로 눌렀을 때 포커스가 버튼으로 넘어가버리는 걸 막고, 계속
+    // 이어서 입력할 수 있도록 입력칸에 커서를 유지한다.
+    _focusNode.requestFocus();
 
     try {
       if (toSend.isEmpty) {
@@ -112,7 +115,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('전송 실패: $e')));
       }
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() => _sending = false);
+        _focusNode.requestFocus();
+      }
     }
   }
 

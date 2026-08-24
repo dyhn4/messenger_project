@@ -66,6 +66,12 @@ class ChatSocket {
           .setAuth({'token': token})
           .setWebSocketConnector(connector)
           .disableAutoConnect()
+          // socket_io_client가 같은 baseUrl에 대해 내부적으로 Manager를 전역 캐싱하는데,
+          // 재로그인처럼 같은 앱 프로세스 안에서 connect()를 다시 호출하는 경우 이 캐시가
+          // 이전 계정(토큰)으로 인증된 연결을 재사용해버릴 수 있다 — 그러면 겉보기엔 새
+          // 토큰으로 연결한 것 같아도 서버는 예전 사용자로 인식한다. forceNew로 매번
+          // 완전히 새 연결을 강제해서 이 문제를 원천 차단한다.
+          .enableForceNew()
           .build(),
     );
 

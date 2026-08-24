@@ -448,6 +448,27 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 회원 탈퇴. 서버가 세션/토큰을 이미 폐기해두므로, 성공하면 그냥 로그아웃과 같은
+  /// 방식으로 로컬 상태를 정리한다. 비밀번호가 틀리면 여기서 던져서 다이얼로그가 잡는다.
+  Future<void> withdraw(String password) async {
+    await api!.withdraw(password);
+    await logout();
+  }
+
+  /// 비밀번호 변경. 다른 기기는 서버가 강제로 끊지만, 이 기기는 응답으로 받은 새 토큰
+  /// 쌍으로 로그아웃 없이 그대로 이어간다(소켓도 새 토큰으로 다시 연결).
+  Future<void> changePassword({required String currentPassword, required String newPassword}) async {
+    final result = await api!.changePassword(currentPassword: currentPassword, newPassword: newPassword);
+    token = result.accessToken;
+    refreshToken = result.refreshToken;
+    api!.token = token;
+    if (_prefs.containsKey(_kToken)) {
+      await _prefs.setString(_kToken, token!);
+      await _prefs.setString(_kRefreshToken, refreshToken!);
+    }
+    await chatSocket.connect(baseUrl: serverUrl!, token: token!);
+  }
+
   Future<void> leaveRoom(String roomId) async {
     await api!.leaveRoom(roomId);
     rooms.removeWhere((r) => r.id == roomId);

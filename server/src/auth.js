@@ -27,7 +27,7 @@ const randomOf = (list) => list[Math.floor(Math.random() * list.length)];
 const ACCESS_TOKEN_TTL = '1h';
 const REFRESH_TOKEN_TTL = '30d';
 
-function issueTokenPair(user) {
+export function issueTokenPair(user) {
   const tokenVersion = user.tokenVersion ?? 0;
   const accessToken = jwt.sign(
     { sub: user.id, username: user.username, tokenVersion, type: 'access' },
@@ -141,6 +141,9 @@ export function createAuthRouter(io) {
     const user = db.data.users.find((u) => u.username === username);
     if (!user || !(await bcrypt.compare(password ?? '', user.passwordHash))) {
       return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    }
+    if (user.deletedAt) {
+      return res.status(403).json({ error: '탈퇴한 계정입니다.' });
     }
 
     res.json({ ...issueTokenPair(user), userId: user.id, username: user.username });

@@ -65,6 +65,9 @@ class _ChatPanelState extends State<ChatPanel> {
   String _dateKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+  bool _sameMinute(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day && a.hour == b.hour && a.minute == b.minute;
+
   void _onScrollUpdate() {
     final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
     if (listBox == null) return;
@@ -136,6 +139,21 @@ class _ChatPanelState extends State<ChatPanel> {
                             m.createdAt.month != prev.createdAt.month ||
                             m.createdAt.day != prev.createdAt.day;
 
+                        // 같은 사람이 같은 분(分)에 연달아 보낸 메시지는, 그중 가장 나중(=시간상
+                        // 마지막) 메시지에만 시간을 보여준다.
+                        final next = i == 0 ? null : msgs[msgs.length - i];
+                        final showTime = next == null ||
+                            next.senderId != m.senderId ||
+                            !_sameMinute(next.createdAt, m.createdAt);
+
+                        // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
+                        // 날짜가 바뀌었거나(showDate) 중간에 시스템 메시지(입장/퇴장 알림)가 끼면
+                        // 그 다음 메시지부터 새로 보여준다.
+                        final isFirstInGroup = isOldestLoaded ||
+                            showDate ||
+                            prev.senderId != m.senderId ||
+                            prev.type == MessageType.system;
+
                         final row = m.type == MessageType.system
                             ? SystemMessageRow(message: m)
                             : MessageBubble(
@@ -145,6 +163,8 @@ class _ChatPanelState extends State<ChatPanel> {
                                 unreadCount: widget.room.unreadCountFor(m),
                                 isMine: m.senderId == widget.session.userId,
                                 sender: _senderOf(m.senderId),
+                                showTime: showTime,
+                                showSenderInfo: isFirstInGroup,
                               );
 
                         Widget? divider;

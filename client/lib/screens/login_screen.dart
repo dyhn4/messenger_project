@@ -144,11 +144,21 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
                           onPressed: () => Navigator.of(context)
                               .push(MaterialPageRoute(builder: (_) => FindIdScreen(session: widget.session))),
                           child: const Text('아이디 찾기', style: TextStyle(fontSize: 12)),
                         ),
                         TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
                           onPressed: () => Navigator.of(context)
                               .push(MaterialPageRoute(builder: (_) => FindPasswordScreen(session: widget.session))),
                           child: const Text('비밀번호 찾기', style: TextStyle(fontSize: 12)),

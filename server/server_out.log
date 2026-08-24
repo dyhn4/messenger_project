@@ -1,8 +1,3 @@
-[config] JWT_SECRET이 설정되어 있지 않아 .jwt-secret에 새 값을 생성했습니다. 이 파일은 커밋/공유하지 마세요.
-[config] DB_ENCRYPTION_KEY이 설정되어 있지 않아 .db-encryption-key에 새 값을 생성했습니다. 이 파일은 커밋/공유하지 마세요.
-[certs] 자체 서명 TLS 인증서를 새로 만들었습니다 (certs/cert.pem, certs/key.pem).
-[certs] 포함된 주소: localhost, 127.0.0.1, ::1, 192.168.0.62
-[certs] 클라이언트 앱을 이 인증서로 다시 빌드해야 접속됩니다 (client/assets/server_cert.pem 갱신 필요).
 메신저 서버 실행 중 (HTTPS, 포트 3000)
 같은 와이파이의 다른 기기에서 접속할 주소:
   https://192.168.0.62:3000

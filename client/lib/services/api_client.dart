@@ -299,6 +299,26 @@ class ApiClient {
     return MyProfile.fromJson(await _patch('/api/users/me', body) as Map<String, dynamic>);
   }
 
+  /// 비밀번호 변경. 성공하면 서버가 새 토큰 쌍을 함께 내려준다(이 기기는 로그아웃되지 않고
+  /// 그 토큰으로 이어서 쓸 수 있음 — 다른 기기는 이 시점에 강제로 끊긴다).
+  Future<AuthResult> changePassword({required String currentPassword, required String newPassword}) async {
+    final body = await _post('/api/users/me/change-password', {
+      'currentPassword': currentPassword,
+      'newPassword': newPassword,
+    }) as Map<String, dynamic>;
+    return AuthResult(
+      accessToken: body['accessToken'] as String,
+      refreshToken: body['refreshToken'] as String,
+      userId: body['userId'] as String,
+      username: body['username'] as String,
+    );
+  }
+
+  /// 회원 탈퇴. 비밀번호 확인이 틀리면 서버가 401로 거부한다.
+  Future<void> withdraw(String password) async {
+    await _post('/api/users/me/withdraw', {'password': password});
+  }
+
   Future<List<Room>> fetchRooms() async {
     final list = await _get('/api/rooms') as List;
     return list.map((e) => Room.fromJson(e as Map<String, dynamic>)).toList();

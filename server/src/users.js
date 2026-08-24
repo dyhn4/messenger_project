@@ -1,4 +1,6 @@
+import bcrypt from 'bcryptjs';
 import { Router } from 'express';
+import { issueTokenPair } from './auth.js';
 import { db } from './db.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { toRoomDto } from './rooms.js';
@@ -6,6 +8,7 @@ import { signFileUrl } from './upload.js';
 
 const VALID_AVATAR_TYPES = new Set(['initial', 'character', 'photo']);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const DELETED_USER_NAME = '탈퇴한 사용자';
 
 /** 비밀번호 등 민감 정보를 뺀, 다른 곳에 내려줘도 되는 사용자 정보. */
 export function publicUser(u) {
@@ -27,9 +30,14 @@ export function publicUser(u) {
 export function createUsersRouter(io) {
   const router = Router();
 
-  /** 방 멤버 선택(그룹/DM 생성)에 쓸 전체 가입자 목록. */
+  /**
+   * 방 멤버 선택(그룹/DM 생성)·멤버 패널에 쓸 전체 가입자 목록. 탈퇴한 사용자는 로그인도
+   * 못 하고 새로 대화를 걸 수도 없으니 여기서 뺀다 — 다만 예전에 같이 있던 방의 멤버
+   * 목록/과거 메시지 작성자 표시(publicUser 자체)에서는 계속 "탈퇴한 사용자"로 보여야
+   * 하므로 그쪽(rooms.js의 resolveMembers 등)은 건드리지 않는다.
+   */
   router.get('/users', (req, res) => {
-    res.json(db.data.users.map(publicUser));
+    res.json(db.data.users.filter((u) => !u.deletedAt).map(publicUser));
   });
 
   /** 내 프로필(아바타 포함) 조회. */
@@ -90,6 +98,85 @@ export function createUsersRouter(io) {
     }
 
     res.json(publicUser(user));
+  });
+
+  /**
+   * 비밀번호 변경(로그인된 상태). 현재 비밀번호 확인 후 바꾸고, 다른 기기의 세션은
+   * tokenVersion을 올려서 즉시 끊는다(reset-password와 같은 정책) — 단, 지금 이 요청을
+   * 보낸 기기는 로그아웃시키지 않고 새 토큰 쌍을 바로 응답에 실어줘서 매끄럽게 이어지게 한다.
+   */
+  router.post('/users/me/change-password', async (req, res) => {
+    const user = db.data.users.find((u) => u.id === req.user.sub);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: '새 비밀번호는 4자 이상이어야 합니다.' });
+    }
+    if (!currentPassword || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      return res.status(401).json({ error: '현재 비밀번호가 올바르지 않습니다.' });
+    }
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    await db.write();
+
+    // 이 기기가 방금 쓴 소켓 연결도 tokenVersion이 바뀌어 곧 끊길 테니, 새 토큰으로
+    // 다시 붙을 수 있도록 응답에 새 토큰 쌍을 실어 보낸다. 다른 기기는 여기서 끊고 끝.
+    io.in(`user:${user.id}`).disconnectSockets(true);
+
+    res.json({ ...issueTokenPair(user), userId: user.id, username: user.username });
+  });
+
+  /**
+   * 회원 탈퇴. 정책:
+   *  1) 로그인 차단 — deletedAt을 기록해두면 /auth/login이 거부한다.
+   *  2) 세션/토큰 즉시 폐기 — tokenVersion을 올리고 지금 연결된 소켓도 끊는다
+   *     (비밀번호 변경과 같은 메커니즘).
+   *  3) 이메일·이름·프로필 익명화.
+   *  4) 메시지는 삭제하지 않고 그대로 둔다(1년 뒤 보존기간 만료 시 retention.js가 처리).
+   *  5) 과거 메시지의 작성자 표시도 "탈퇴한 사용자"로 바꾼다 — 방 멤버 목록을 통한 조회에만
+   *     의존하면(나중에 멤버 목록에서 빠지는 경우 등) 예전 실명이 그대로 남을 수 있어서,
+   *     메시지 자체에 박제된 senderName도 지금 시점에 다시 써둔다.
+   *  6) 첨부 파일은 지우지 않는다(보존 정책).
+   *  7) 별도 백업/검색 색인이 없는 구조라 위 변경이 곧 전체 반영이다(search.js도 이
+   *     db.data를 그대로 조회).
+   */
+  router.post('/users/me/withdraw', async (req, res) => {
+    const user = db.data.users.find((u) => u.id === req.user.sub);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (user.deletedAt) return res.status(400).json({ error: '이미 탈퇴한 계정입니다.' });
+
+    const { password } = req.body ?? {};
+    if (!password || !(await bcrypt.compare(password, user.passwordHash))) {
+      return res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' });
+    }
+
+    user.deletedAt = Date.now();
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+
+    user.name = DELETED_USER_NAME;
+    user.emailEnc = null;
+    user.emailLookup = null;
+    user.avatarType = 'initial';
+    user.avatarEmoji = null;
+    user.avatarColor = null;
+    user.avatarUrl = null;
+
+    for (const m of db.data.messages) {
+      if (m.senderId === user.id) m.senderName = DELETED_USER_NAME;
+    }
+
+    await db.write();
+    io.in(`user:${user.id}`).disconnectSockets(true);
+
+    for (const room of db.data.rooms) {
+      if (room.memberIds.includes(user.id)) {
+        io.to(room.id).emit('room:created', toRoomDto(room));
+      }
+    }
+
+    res.json({ ok: true });
   });
 
   return router;

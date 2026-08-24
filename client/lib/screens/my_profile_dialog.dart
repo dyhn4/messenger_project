@@ -41,10 +41,25 @@ class MyProfileDialog extends StatelessWidget {
     }
   }
 
+  Future<void> _changePassword(BuildContext context) async {
+    await showDialog<bool>(context: context, builder: (_) => _ChangePasswordDialog(session: session));
+  }
+
   Future<void> _logout(BuildContext context) async {
     Navigator.of(context).pop();
     await session.logout();
     if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  Future<void> _withdraw(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _WithdrawConfirmDialog(session: session),
+    );
+    if (confirmed == true && context.mounted) {
+      Navigator.of(context).pop(); // 프로필 카드 닫기
+      if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   @override
@@ -102,9 +117,15 @@ class MyProfileDialog extends StatelessWidget {
                 value: session.email ?? '',
                 onTap: () => _editEmail(context),
               ),
+              _ProfileInfoRow(
+                icon: Icons.lock_outline,
+                label: '비밀번호',
+                value: '',
+                onTap: () => _changePassword(context),
+              ),
               const SizedBox(height: 16),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                 child: SizedBox(
                   width: double.infinity,
                   child: TextButton.icon(
@@ -120,10 +141,193 @@ class MyProfileDialog extends StatelessWidget {
                   ),
                 ),
               ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: TextButton(
+                  onPressed: () => _withdraw(context),
+                  style: TextButton.styleFrom(foregroundColor: Theme.of(context).hintColor),
+                  child: const Text('회원 탈퇴', style: TextStyle(decoration: TextDecoration.underline)),
+                ),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "회원 탈퇴" 확인 다이얼로그. 로그아웃과 달리 되돌릴 수 없는 작업이라 비밀번호를 한 번 더
+/// 받아서 본인 확인을 한다. 성공하면 true를 반환하고(호출부가 로그인 화면으로 돌려보낸다),
+/// 취소하거나 실패한 채로 닫으면 null/false를 반환한다.
+class _WithdrawConfirmDialog extends StatefulWidget {
+  final Session session;
+  const _WithdrawConfirmDialog({required this.session});
+
+  @override
+  State<_WithdrawConfirmDialog> createState() => _WithdrawConfirmDialogState();
+}
+
+class _WithdrawConfirmDialogState extends State<_WithdrawConfirmDialog> {
+  final _password = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_password.text.isEmpty) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.session.withdraw(_password.text);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('회원 탈퇴'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '탈퇴하면 로그인할 수 없고, 프로필 정보는 익명화됩니다. 이 작업은 되돌릴 수 없습니다.\n'
+            '계속하려면 비밀번호를 입력하세요.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _password,
+            autofocus: true,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: '비밀번호', border: OutlineInputBorder()),
+            onSubmitted: (_) => _submit(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+          child: _submitting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('탈퇴하기'),
+        ),
+      ],
+    );
+  }
+}
+
+/// "비밀번호 변경" 다이얼로그. 현재 비밀번호로 본인 확인 후 새 비밀번호(+확인)를 받는다.
+/// 성공하면 서버가 새 토큰을 내려줘서 이 기기는 로그아웃 없이 그대로 이어진다.
+class _ChangePasswordDialog extends StatefulWidget {
+  final Session session;
+  const _ChangePasswordDialog({required this.session});
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _current = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _newPassword.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_current.text.isEmpty || _newPassword.text.isEmpty) return;
+    if (_newPassword.text != _confirm.text) {
+      setState(() => _error = '새 비밀번호가 서로 다릅니다.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.session.changePassword(currentPassword: _current.text, newPassword: _newPassword.text);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('비밀번호 변경'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _current,
+            autofocus: true,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: '현재 비밀번호', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _newPassword,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: '새 비밀번호', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _confirm,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: '새 비밀번호 확인', border: OutlineInputBorder()),
+            onSubmitted: (_) => _submit(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('변경하기'),
+        ),
+      ],
     );
   }
 }
@@ -147,13 +351,29 @@ class _ProfileInfoRow extends StatelessWidget {
             Icon(icon, size: 18, color: Theme.of(context).hintColor),
             const SizedBox(width: 10),
             SizedBox(
-              width: 44,
-              child: Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor)),
+              width: 52,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+              ),
             ),
             Expanded(
               child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodyMedium),
             ),
-            if (onTap != null) Icon(Icons.edit_outlined, size: 16, color: Theme.of(context).hintColor),
+            if (onTap != null)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '수정',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
           ],
         ),
       ),

@@ -27,6 +27,8 @@ class MessageBubble extends StatelessWidget {
   final int unreadCount;
   final bool isMine;
   final AppUser? sender;
+  final bool showTime;
+  final bool showSenderInfo;
 
   const MessageBubble({
     super.key,
@@ -36,6 +38,8 @@ class MessageBubble extends StatelessWidget {
     this.unreadCount = 0,
     this.isMine = false,
     this.sender,
+    this.showTime = true,
+    this.showSenderInfo = true,
   });
 
   void _openProfile(BuildContext context) {
@@ -51,31 +55,81 @@ class MessageBubble extends StatelessWidget {
     // 이름이 바뀌었을 수도 있으니, 메시지에 박제된 senderName보다 지금 알고 있는 이름을
     // 우선한다(나는 session.name, 남은 room.members에서 찾은 sender.name).
     final displayName = (isMine ? session.name : sender?.name) ?? message.senderName;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: () => _openProfile(context),
-              child: AvatarView(
-                username: displayName,
-                avatarType: sender?.avatarType ?? 'initial',
-                avatarEmoji: sender?.avatarEmoji,
-                avatarColor: sender?.avatarColor,
-                avatarUrl: sender?.avatarUrl,
-                resolveUrl: resolveUrl,
-                radius: 16,
-              ),
+    const avatarDiameter = 32.0;
+    const contentIndent = avatarDiameter + 8; // 아바타 너비 + 아바타-내용 간격.
+
+    final bubbleRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: isMine
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(14),
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
+                // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
+                if (message.type != MessageType.text && (message.text?.isNotEmpty ?? false)) ...[
+                  SelectableText(message.text!),
+                  const SizedBox(height: 6),
+                ],
+                _buildContent(context),
+              ],
+            ),
+          ),
+        ),
+        if (unreadCount > 0) ...[
+          const SizedBox(width: 4),
+          Text(
+            '$unreadCount',
+            style: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.bold, fontSize: 11),
+          ),
+        ],
+        if (showTime) ...[
+          const SizedBox(width: 6),
+          Text(
+            _timeFormat.format(message.createdAt),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+        ],
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
+          // 이름은 아바타와 한 줄에서 세로 중앙에 오도록 정렬하고, 말풍선은 그 아래
+          // (아바타 하단 높이만큼 들여쓴 채) 별도 줄로 둔다.
+          if (showSenderInfo) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => _openProfile(context),
+                    child: AvatarView(
+                      username: displayName,
+                      avatarType: sender?.avatarType ?? 'initial',
+                      avatarEmoji: sender?.avatarEmoji,
+                      avatarColor: sender?.avatarColor,
+                      avatarUrl: sender?.avatarUrl,
+                      resolveUrl: resolveUrl,
+                      radius: avatarDiameter / 2,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(
@@ -83,50 +137,13 @@ class MessageBubble extends StatelessWidget {
                     child: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
-                const SizedBox(height: 2),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Flexible(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isMine
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
-                            if (message.type != MessageType.text && (message.text?.isNotEmpty ?? false)) ...[
-                              SelectableText(message.text!),
-                              const SizedBox(height: 6),
-                            ],
-                            _buildContent(context),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (unreadCount > 0) ...[
-                      const SizedBox(width: 4),
-                      Text(
-                        '$unreadCount',
-                        style: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.bold, fontSize: 11),
-                      ),
-                    ],
-                    const SizedBox(width: 6),
-                    Text(
-                      _timeFormat.format(message.createdAt),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
-                    ),
-                  ],
-                ),
               ],
             ),
+            const SizedBox(height: 4),
+          ],
+          Padding(
+            padding: const EdgeInsets.only(left: contentIndent),
+            child: bubbleRow,
           ),
         ],
       ),

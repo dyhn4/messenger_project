@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PORT } from './config.js';
+import { startRetentionJob } from './retention.js';
 import { createRoomsRouter } from './rooms.js';
 import { searchRouter } from './search.js';
 import { registerSocket } from './socket.js';
@@ -32,6 +33,7 @@ app.use(filesRouter);
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 registerSocket(io);
+startRetentionJob();
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

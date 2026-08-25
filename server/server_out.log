@@ -1,5 +1,0 @@
-메신저 서버 실행 중 (HTTPS, 포트 3000)
-같은 와이파이의 다른 기기에서 접속할 주소:
-  https://192.168.0.62:3000
-TLS 인증서(자체 서명): C:\FlutterProjects\messenger_project\server\certs\cert.pem
-클라이언트 앱은 이 인증서를 신뢰하도록 빌드돼 있어야 접속됩니다 (client/assets/server_cert.pem).

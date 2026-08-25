@@ -20,12 +20,25 @@ class RoomReadEvent {
       );
 }
 
+/// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트(presence:update).
+class PresenceUpdate {
+  final String userId;
+  final bool online;
+  const PresenceUpdate({required this.userId, required this.online});
+
+  factory PresenceUpdate.fromJson(Map<String, dynamic> json) => PresenceUpdate(
+        userId: json['userId'] as String,
+        online: json['online'] as bool,
+      );
+}
+
 /// Socket.io 연결을 감싸서 Message/Room/읽음 이벤트 스트림으로 노출합니다.
 class ChatSocket {
   socket_io.Socket? _socket;
   final _messageController = StreamController<Message>.broadcast();
   final _roomController = StreamController<Room>.broadcast();
   final _readController = StreamController<RoomReadEvent>.broadcast();
+  final _presenceController = StreamController<PresenceUpdate>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
 
@@ -36,6 +49,9 @@ class ChatSocket {
 
   /// 누군가 방을 읽었다는 브로드캐스트. 안읽음 카운터 갱신에 쓴다.
   Stream<RoomReadEvent> get readEvents => _readController.stream;
+
+  /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트. 멤버 목록의 초록 점 갱신에 쓴다.
+  Stream<PresenceUpdate> get presenceEvents => _presenceController.stream;
 
   /// 연결이 끊겼다가 다시 붙었을 때(최초 연결 제외) 흘러나온다.
   /// 끊긴 동안 놓친 메시지/방 상태를 다시 받아오는 용도.
@@ -83,6 +99,9 @@ class ChatSocket {
     });
     socket.on('room:read', (data) {
       _readController.add(RoomReadEvent.fromJson(Map<String, dynamic>.from(data as Map)));
+    });
+    socket.on('presence:update', (data) {
+      _presenceController.add(PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)));
     });
     socket.onReconnect((_) => _reconnectController.add(null));
     socket.onConnectError((err) {

@@ -21,7 +21,13 @@ class ChatScreen extends StatelessWidget {
       appBar: AppBar(
         title: Row(
           children: [
-            RoomAvatar(room: room, myUserId: session.userId ?? '', resolveUrl: session.resolveUrl, size: 24),
+            RoomAvatar(
+              room: room,
+              myUserId: session.userId ?? '',
+              resolveUrl: session.resolveUrl,
+              onlineUserIds: session.onlineUserIds,
+              size: 24,
+            ),
             const SizedBox(width: 8),
             Expanded(child: Text(room.displayName(session.userId ?? ''), overflow: TextOverflow.ellipsis)),
           ],

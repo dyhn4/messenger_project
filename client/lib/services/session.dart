@@ -60,8 +60,12 @@ class Session extends ChangeNotifier {
   StreamSubscription? _messageSub;
   StreamSubscription? _roomSub;
   StreamSubscription? _readSub;
+  StreamSubscription? _presenceSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
+
+  /// 지금 소켓으로 연결되어 있는(온라인) 사용자 id 집합. 멤버 목록의 초록 점 표시에 쓴다.
+  final Set<String> onlineUserIds = {};
   Future<String?>? _refreshInFlight;
 
   String? _activeRoomId;
@@ -285,6 +289,16 @@ class Session extends ChangeNotifier {
       match.first.lastRead[e.userId] = e.lastReadAt;
       notifyListeners();
     });
+    _presenceSub?.cancel();
+    _presenceSub = chatSocket.presenceEvents.listen((e) {
+      if (e.online) {
+        onlineUserIds.add(e.userId);
+      } else {
+        onlineUserIds.remove(e.userId);
+      }
+      notifyListeners();
+    });
+    unawaited(_seedOnlineUsers());
     _reconnectSub?.cancel();
     _reconnectSub = chatSocket.reconnected.listen((_) => _resyncAfterReconnect());
     _authErrorSub?.cancel();
@@ -298,6 +312,20 @@ class Session extends ChangeNotifier {
     });
 
     notifyListeners();
+  }
+
+  /// 소켓의 presence:update는 "바뀐 순간부터의" 변화만 알려주므로, 지금 이미 온라인인
+  /// 사람들의 초기 스냅샷은 회원 목록 조회(각 사용자의 online 필드)로 따로 채워야 한다.
+  Future<void> _seedOnlineUsers() async {
+    try {
+      final users = await api!.fetchUsers();
+      onlineUserIds
+        ..clear()
+        ..addAll(users.where((u) => u.online).map((u) => u.id));
+      notifyListeners();
+    } catch (_) {
+      // 부가 정보라 실패해도 조용히 무시 — 이후 presence:update로 점차 채워짐.
+    }
   }
 
   /// 연결이 끊겼다가 재연결됐을 때 놓쳤을 수 있는 것들을 다시 받아온다:
@@ -530,6 +558,7 @@ class Session extends ChangeNotifier {
     await _messageSub?.cancel();
     await _roomSub?.cancel();
     await _readSub?.cancel();
+    await _presenceSub?.cancel();
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();
     chatSocket.dispose();
@@ -537,6 +566,7 @@ class Session extends ChangeNotifier {
       c.dispose();
     }
     _controllers.clear();
+    onlineUserIds.clear();
     token = null;
     refreshToken = null;
     api?.token = null;

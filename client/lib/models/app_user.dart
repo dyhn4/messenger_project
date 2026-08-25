@@ -7,6 +7,7 @@ class AppUser {
   final String? avatarEmoji;
   final String? avatarColor; // '#RRGGBB'
   final String? avatarUrl;
+  final bool online; // 조회 시점 스냅샷일 뿐 — 실시간 갱신은 Session.onlineUserIds를 봐야 함.
 
   const AppUser({
     required this.id,
@@ -17,6 +18,7 @@ class AppUser {
     this.avatarEmoji,
     this.avatarColor,
     this.avatarUrl,
+    this.online = false,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
@@ -30,6 +32,7 @@ class AppUser {
       avatarEmoji: json['avatarEmoji'] as String?,
       avatarColor: json['avatarColor'] as String?,
       avatarUrl: json['avatarUrl'] as String?,
+      online: json['online'] as bool? ?? false,
     );
   }
 }

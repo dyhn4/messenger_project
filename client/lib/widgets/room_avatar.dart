@@ -5,16 +5,19 @@ import 'user_avatar.dart';
 
 /// 채팅방 제목 왼쪽에 쓰는 작은 아바타. DM은 상대방 아바타 하나, 그룹은 멤버 아바타
 /// 두 개를 겹쳐서 보여준다. 토픽은 방 이름 자체에 의미가 있어서 별도 아바타를 안 보여준다.
+/// [onlineUserIds]에 있는 멤버는 초록 점으로 지금 로그인 중임을 표시한다.
 class RoomAvatar extends StatelessWidget {
   final Room room;
   final String myUserId;
   final String Function(String relative) resolveUrl;
+  final Set<String> onlineUserIds;
   final double size;
   const RoomAvatar({
     super.key,
     required this.room,
     required this.myUserId,
     required this.resolveUrl,
+    required this.onlineUserIds,
     this.size = 28,
   });
 
@@ -30,7 +33,12 @@ class RoomAvatar extends StatelessWidget {
       return CircleAvatar(radius: size / 2, child: const Text('?'));
     }
     if (shown.length == 1) {
-      return UserAvatar(user: shown[0], resolveUrl: resolveUrl, radius: size / 2);
+      return UserAvatar(
+        user: shown[0],
+        resolveUrl: resolveUrl,
+        radius: size / 2,
+        online: onlineUserIds.contains(shown[0].id),
+      );
     }
 
     // 그룹: 멤버 아바타 두 개를 살짝 겹쳐서 보여준다.
@@ -45,7 +53,12 @@ class RoomAvatar extends StatelessWidget {
               child: CircleAvatar(
                 radius: size / 2,
                 backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                child: UserAvatar(user: shown[i], resolveUrl: resolveUrl, radius: size / 2 - 1.5),
+                child: UserAvatar(
+                  user: shown[i],
+                  resolveUrl: resolveUrl,
+                  radius: size / 2 - 1.5,
+                  online: onlineUserIds.contains(shown[i].id),
+                ),
               ),
             ),
         ],

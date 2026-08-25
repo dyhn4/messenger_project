@@ -3,6 +3,7 @@ import { verifySocketToken } from './auth.js';
 import { insertMessage } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { markConnected, markDisconnected } from './presence.js';
 import { signFileUrl } from './upload.js';
 
 /** 소켓 연결 시 JWT를 확인하고, 연결된 이후의 채팅 이벤트를 처리합니다. */
@@ -19,7 +20,11 @@ export function registerSocket(io) {
   });
 
   io.on('connection', async (socket) => {
-    socket.broadcast.emit('presence:online', { username: socket.data.username });
+    // 같은 사람이 여러 기기로 동시에 붙어있을 수 있어서, 이 사람의 "첫" 연결일 때만
+    // 온라인으로 알린다(presence.js가 기기별 연결 수를 센다).
+    if (markConnected(socket.data.userId)) {
+      io.emit('presence:update', { userId: socket.data.userId, online: true });
+    }
 
     // 개인용 룸(user:<id>)에 join해두면, REST로 방이 새로 생겼을 때
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
@@ -76,7 +81,10 @@ export function registerSocket(io) {
     });
 
     socket.on('disconnect', () => {
-      socket.broadcast.emit('presence:offline', { username: socket.data.username });
+      // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다.
+      if (markDisconnected(socket.data.userId)) {
+        io.emit('presence:update', { userId: socket.data.userId, online: false });
+      }
     });
   });
 }

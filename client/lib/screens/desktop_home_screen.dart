@@ -149,6 +149,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                                     room: _selectedRoom!,
                                     myUserId: widget.session.userId ?? '',
                                     resolveUrl: widget.session.resolveUrl,
+                                    onlineUserIds: widget.session.onlineUserIds,
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
@@ -254,12 +255,19 @@ class _MembersPanelState extends State<_MembersPanel> {
   void initState() {
     super.initState();
     _load();
+    // onlineUserIds가 바뀔 때마다(누가 접속/해제) 초록 점을 다시 그리도록 다시 빌드한다.
+    widget.session.addListener(_onSessionChanged);
   }
 
   @override
   void dispose() {
+    widget.session.removeListener(_onSessionChanged);
     _listScrollController.dispose();
     super.dispose();
+  }
+
+  void _onSessionChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
@@ -343,6 +351,7 @@ class _MembersPanelState extends State<_MembersPanel> {
                                     itemBuilder: (context, i) => _MemberRow(
                                       user: pageItems[i],
                                       resolveUrl: widget.session.resolveUrl,
+                                      online: widget.session.onlineUserIds.contains(pageItems[i].id),
                                       onTap: () => widget.onSelectMember(pageItems[i]),
                                     ),
                                   ),
@@ -368,8 +377,9 @@ class _MembersPanelState extends State<_MembersPanel> {
 class _MemberRow extends StatelessWidget {
   final AppUser user;
   final String Function(String relative) resolveUrl;
+  final bool online;
   final VoidCallback onTap;
-  const _MemberRow({required this.user, required this.resolveUrl, required this.onTap});
+  const _MemberRow({required this.user, required this.resolveUrl, required this.online, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -379,7 +389,7 @@ class _MemberRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            UserAvatar(user: user, resolveUrl: resolveUrl, radius: 20),
+            UserAvatar(user: user, resolveUrl: resolveUrl, radius: 20, online: online),
             const SizedBox(width: 12),
             Expanded(child: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold))),
           ],
@@ -441,6 +451,7 @@ class _Sidebar extends StatelessWidget {
                         room: room,
                         myUserId: session.userId ?? '',
                         resolveUrl: session.resolveUrl,
+                        onlineUserIds: session.onlineUserIds,
                         size: 28,
                       ),
                       label: room.displayName(session.userId ?? ''),
@@ -465,6 +476,7 @@ class _Sidebar extends StatelessWidget {
                         room: room,
                         myUserId: session.userId ?? '',
                         resolveUrl: session.resolveUrl,
+                        onlineUserIds: session.onlineUserIds,
                         size: 28,
                       ),
                       label: room.displayName(session.userId ?? ''),
@@ -489,6 +501,7 @@ class _Sidebar extends StatelessWidget {
                         room: room,
                         myUserId: session.userId ?? '',
                         resolveUrl: session.resolveUrl,
+                        onlineUserIds: session.onlineUserIds,
                         size: 28,
                       ),
                       label: room.displayName(session.userId ?? ''),

@@ -4,6 +4,7 @@ import { issueTokenPair } from './auth.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
+import { isOnline } from './presence.js';
 import { broadcastMemberUpdate } from './rooms.js';
 import { signFileUrl } from './upload.js';
 
@@ -22,6 +23,7 @@ export function publicUser(u) {
     avatarEmoji: u.avatarEmoji ?? null,
     avatarColor: u.avatarColor ?? null,
     avatarUrl: signFileUrl(u.avatarUrl) ?? null,
+    online: isOnline(u.id),
   };
 }
 

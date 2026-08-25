@@ -100,7 +100,12 @@ class RoomListScreen extends StatelessWidget {
       ),
       for (final room in items)
         ListTile(
-          leading: RoomAvatar(room: room, myUserId: session.userId ?? '', resolveUrl: session.resolveUrl),
+          leading: RoomAvatar(
+            room: room,
+            myUserId: session.userId ?? '',
+            resolveUrl: session.resolveUrl,
+            onlineUserIds: session.onlineUserIds,
+          ),
           title: Text(room.displayName(session.userId ?? '')),
           subtitle: room.description != null ? Text(room.description!, maxLines: 1, overflow: TextOverflow.ellipsis) : null,
           trailing: room.unreadCount > 0 ? UnreadBadge(count: room.unreadCount) : null,

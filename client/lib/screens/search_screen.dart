@@ -6,6 +6,8 @@ import '../models/room.dart';
 import '../services/api_client.dart';
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/muted_scrollbar.dart';
+import '../widgets/pagination.dart';
 import 'chat_screen.dart';
 
 enum SearchPeriod { week, month, threeMonths, year, all, custom }
@@ -41,7 +43,6 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-const _pageSize = 50;
 
 class _SearchScreenState extends State<SearchScreen> {
   final _query = TextEditingController();
@@ -272,9 +273,9 @@ class _SearchScreenState extends State<SearchScreen> {
     final sorted = [..._results!]
       ..sort((a, b) => _newestFirst ? b.createdAt.compareTo(a.createdAt) : a.createdAt.compareTo(b.createdAt));
 
-    final totalPages = (sorted.length / _pageSize).ceil();
+    final totalPages = (sorted.length / paginationPageSize).ceil();
     final page = _page.clamp(0, totalPages - 1);
-    final pageItems = sorted.skip(page * _pageSize).take(_pageSize).toList();
+    final pageItems = sorted.skip(page * paginationPageSize).take(paginationPageSize).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -298,45 +299,27 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
         const Divider(height: 1),
         Expanded(
-          child: ScrollbarTheme(
-            data: ScrollbarThemeData(
-              thickness: const WidgetStatePropertyAll(10),
-              thumbColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.hovered)
-                    ? Colors.grey.withValues(alpha: 0.75)
-                    : Colors.grey.withValues(alpha: 0.6),
-              ),
-              trackColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.hovered)
-                    ? Colors.grey.withValues(alpha: 0.45)
-                    : Colors.grey.withValues(alpha: 0.28),
-              ),
-              trackBorderColor: const WidgetStatePropertyAll(Colors.transparent),
-            ),
-            child: Scrollbar(
+          child: MutedScrollbar(
+            controller: _listScrollController,
+            child: ListView.separated(
               controller: _listScrollController,
-              thumbVisibility: true,
-              trackVisibility: true,
-              child: ListView.separated(
-                controller: _listScrollController,
-                itemCount: pageItems.length,
-                // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
-                separatorBuilder: (_, _) => const Padding(
-                  padding: EdgeInsets.only(right: 12),
-                  child: Divider(height: 1),
-                ),
-                itemBuilder: (context, i) => _SearchResultRow(
-                  result: pageItems[i],
-                  query: _query.text.trim(),
-                  timeFormat: _timeFormat,
-                  onTap: () => _openResult(pageItems[i]),
-                ),
+              itemCount: pageItems.length,
+              // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
+              separatorBuilder: (_, _) => const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: Divider(height: 1),
+              ),
+              itemBuilder: (context, i) => _SearchResultRow(
+                result: pageItems[i],
+                query: _query.text.trim(),
+                timeFormat: _timeFormat,
+                onTap: () => _openResult(pageItems[i]),
               ),
             ),
           ),
         ),
         const Divider(height: 1),
-        _Pagination(
+        Pagination(
           currentPage: page,
           totalPages: totalPages,
           onPageSelected: (p) => setState(() => _page = p),
@@ -816,69 +799,3 @@ class _PeriodFilterPanel extends StatelessWidget {
   }
 }
 
-/// 검색 결과 하단 페이지 번호. « < [숫자들] > » — 항상 최대 10개 페이지 번호만 보여주고
-/// 현재 페이지가 그 창의 가운데쯤 오도록 창을 옮긴다.
-class _Pagination extends StatelessWidget {
-  final int currentPage; // 0-based.
-  final int totalPages;
-  final ValueChanged<int> onPageSelected;
-  const _Pagination({required this.currentPage, required this.totalPages, required this.onPageSelected});
-
-  static const _windowSize = 10;
-
-  @override
-  Widget build(BuildContext context) {
-    final maxStart = (totalPages - _windowSize).clamp(0, totalPages);
-    final start = (currentPage - _windowSize ~/ 2).clamp(0, maxStart);
-    final end = (start + _windowSize).clamp(0, totalPages);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _arrow(context, Icons.first_page, currentPage > 0, () => onPageSelected(0)),
-          _arrow(context, Icons.chevron_left, currentPage > 0, () => onPageSelected(currentPage - 1)),
-          for (var i = start; i < end; i++) _pageNumber(context, i),
-          _arrow(context, Icons.chevron_right, currentPage < totalPages - 1, () => onPageSelected(currentPage + 1)),
-          _arrow(context, Icons.last_page, currentPage < totalPages - 1, () => onPageSelected(totalPages - 1)),
-        ],
-      ),
-    );
-  }
-
-  Widget _arrow(BuildContext context, IconData icon, bool enabled, VoidCallback onTap) {
-    return IconButton(
-      icon: Icon(icon, size: 18),
-      onPressed: enabled ? onTap : null,
-      visualDensity: VisualDensity.compact,
-    );
-  }
-
-  Widget _pageNumber(BuildContext context, int i) {
-    final selected = i == currentPage;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(4),
-        onTap: selected ? null : () => onPageSelected(i),
-        child: Container(
-          width: 28,
-          height: 28,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: selected ? Theme.of(context).colorScheme.primary : null,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(
-            '${i + 1}',
-            style: TextStyle(
-              color: selected ? Theme.of(context).colorScheme.onPrimary : null,
-              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

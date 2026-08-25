@@ -5,6 +5,8 @@ import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/account_menu_button.dart';
 import '../widgets/chat_panel.dart';
+import '../widgets/muted_scrollbar.dart';
+import '../widgets/pagination.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
 import '../widgets/unread_badge.dart';
@@ -242,14 +244,22 @@ class _MembersPanel extends StatefulWidget {
 }
 
 class _MembersPanelState extends State<_MembersPanel> {
+  final _listScrollController = ScrollController();
   List<AppUser>? _users;
   String? _error;
   String _filter = '';
+  int _page = 0; // 0-based.
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -269,6 +279,9 @@ class _MembersPanelState extends State<_MembersPanel> {
     final list = (_users ?? const <AppUser>[])
         .where((u) => _filter.isEmpty || u.name.toLowerCase().contains(_filter.toLowerCase()))
         .toList();
+    final totalPages = list.isEmpty ? 1 : (list.length / paginationPageSize).ceil();
+    final page = _page.clamp(0, totalPages - 1);
+    final pageItems = list.skip(page * paginationPageSize).take(paginationPageSize).toList();
 
     return ColoredBox(
       color: Theme.of(context).colorScheme.surface,
@@ -299,7 +312,10 @@ class _MembersPanelState extends State<_MembersPanel> {
                 prefixIcon: Icon(Icons.search, size: 18),
                 border: OutlineInputBorder(),
               ),
-              onChanged: (v) => setState(() => _filter = v),
+              onChanged: (v) => setState(() {
+                _filter = v;
+                _page = 0;
+              }),
             ),
           ),
           Expanded(
@@ -307,17 +323,39 @@ class _MembersPanelState extends State<_MembersPanel> {
                 ? Center(child: Text(_error!))
                 : _users == null
                     ? const Center(child: CircularProgressIndicator())
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        children: [
-                          for (final u in list)
-                            _MemberCard(
-                              user: u,
-                              resolveUrl: widget.session.resolveUrl,
-                              onTap: () => widget.onSelectMember(u),
-                            ),
-                        ],
-                      ),
+                    : list.isEmpty
+                        ? const Center(child: Text('검색 결과가 없습니다.'))
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Divider(height: 1),
+                              Expanded(
+                                child: MutedScrollbar(
+                                  controller: _listScrollController,
+                                  child: ListView.separated(
+                                    controller: _listScrollController,
+                                    itemCount: pageItems.length,
+                                    // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
+                                    separatorBuilder: (_, _) => const Padding(
+                                      padding: EdgeInsets.only(right: 12),
+                                      child: Divider(height: 1),
+                                    ),
+                                    itemBuilder: (context, i) => _MemberRow(
+                                      user: pageItems[i],
+                                      resolveUrl: widget.session.resolveUrl,
+                                      onTap: () => widget.onSelectMember(pageItems[i]),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const Divider(height: 1),
+                              Pagination(
+                                currentPage: page,
+                                totalPages: totalPages,
+                                onPageSelected: (p) => setState(() => _page = p),
+                              ),
+                            ],
+                          ),
           ),
         ],
       ),
@@ -325,25 +363,27 @@ class _MembersPanelState extends State<_MembersPanel> {
   }
 }
 
-class _MemberCard extends StatelessWidget {
+/// 멤버 목록 한 줄: 아바타 + 이름. 카드 테두리 없이 ListView.separated의 Divider로만
+/// 서로 구분한다(검색 결과 화면과 같은 스타일).
+class _MemberRow extends StatelessWidget {
   final AppUser user;
   final String Function(String relative) resolveUrl;
   final VoidCallback onTap;
-  const _MemberCard({required this.user, required this.resolveUrl, required this.onTap});
+  const _MemberRow({required this.user, required this.resolveUrl, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: Theme.of(context).dividerColor),
-      ),
-      child: ListTile(
-        leading: UserAvatar(user: user, resolveUrl: resolveUrl, radius: 20),
-        title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        onTap: onTap,
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            UserAvatar(user: user, resolveUrl: resolveUrl, radius: 20),
+            const SizedBox(width: 12),
+            Expanded(child: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold))),
+          ],
+        ),
       ),
     );
   }

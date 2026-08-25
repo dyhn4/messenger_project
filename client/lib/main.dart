@@ -64,6 +64,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       // DesktopHomeScreen이 우측 패널만 바꾸도록 요청만 남긴다.
       session.requestOpenRoom(room);
     } else {
+      // 알림을 여러 번 눌러서 채팅방 화면이 계속 쌓이지 않도록, 새로 열기 전에 항상
+      // 첫 화면(메인)까지 되돌아간다 — 그래야 방 안에서 뒤로가기를 누르면 바로 메인이 나온다.
+      navigatorKey.currentState?.popUntil((route) => route.isFirst);
       navigatorKey.currentState?.push(
         MaterialPageRoute(builder: (_) => ChatScreen(session: session, room: room)),
       );

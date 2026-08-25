@@ -9,6 +9,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_user.dart';
 import '../models/message.dart';
+import '../models/room.dart';
+import '../screens/chat_screen.dart';
+import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/image_viewer_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
@@ -44,11 +47,24 @@ class MessageBubble extends StatelessWidget {
     this.highlighted = false,
   });
 
-  void _openProfile(BuildContext context) {
+  Future<void> _openProfile(BuildContext context) async {
     if (isMine) {
       showDialog(context: context, builder: (_) => MyProfileDialog(session: session));
-    } else if (sender != null) {
-      showDialog(context: context, builder: (_) => MemberProfileDialog(session: session, user: sender!));
+      return;
+    }
+    if (sender != null) {
+      // MemberProfileDialog에서 "1:1 메시지"를 누르면 새로 만들어진/기존 DM 방을 반환한다 —
+      // 넓은(PC) 화면은 옆 패널만 바꾸고, 좁은(모바일) 화면은 전체화면으로 그 방을 띄운다.
+      final room = await showDialog<Room>(
+        context: context,
+        builder: (_) => MemberProfileDialog(session: session, user: sender!),
+      );
+      if (room == null || !context.mounted) return;
+      if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
+        session.requestOpenRoom(room);
+      } else {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(session: session, room: room)));
+      }
     }
   }
 

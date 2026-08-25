@@ -13,5 +13,3 @@ if (!connectionString) {
 
 const pool = new Pool({ connectionString });
 export const db = drizzle(pool);
-
-export const GENERAL_ROOM_ID = 'general';

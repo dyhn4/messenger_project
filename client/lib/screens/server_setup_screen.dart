@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/pinned_tls.dart';
 import '../services/session.dart';
 
 class ServerSetupScreen extends StatefulWidget {
@@ -12,10 +13,22 @@ class ServerSetupScreen extends StatefulWidget {
 
 class _ServerSetupScreenState extends State<ServerSetupScreen> {
   final _controller = TextEditingController(text: 'https://192.168.0.62:3000');
+  final _code = TextEditingController();
   bool _loading = false;
 
   Future<void> _submit() async {
     setState(() => _loading = true);
+    final code = _code.text.trim();
+    if (code.isNotEmpty) {
+      try {
+        await PinnedTls.pairAndSaveCert(_controller.text, code);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('인증서를 받지 못했습니다: $e')));
+        return;
+      }
+    }
     final ok = await widget.session.setServerUrl(_controller.text);
     if (!mounted) return;
     setState(() => _loading = false);
@@ -27,6 +40,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _code.dispose();
     super.dispose();
   }
 
@@ -48,6 +62,18 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
                 labelText: '서버 주소',
                 hintText: 'https://192.168.0.62:3000',
                 border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _code,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              decoration: const InputDecoration(
+                labelText: '페어링 코드 (새 서버일 때만)',
+                hintText: '서버 콘솔에 "pair" 입력 시 나오는 4자리',
+                border: OutlineInputBorder(),
+                counterText: '',
               ),
             ),
             const SizedBox(height: 16),

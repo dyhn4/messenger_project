@@ -83,13 +83,15 @@ export function listRoomMemberIds(roomId) {
     .then((rows) => rows.map((r) => r.userId));
 }
 
-/** 방 멤버 목록을 실제 사용자 정보(publicUser로 감쌀 원본 행)로. */
+/** 방 멤버 목록을 실제 사용자 정보(publicUser로 감쌀 원본 행)로. 탈퇴한 사용자는 멤버 목록/
+ * 그룹 표시 이름에 더 이상 보일 필요가 없으므로 제외한다(과거 메시지의 발신자 표시는
+ * 메시지에 박제된 senderName으로 대체됨 — message_bubble.dart 참고). */
 export function listRoomMemberUsers(roomId) {
   return db
     .select({ user: users })
     .from(roomMembers)
     .innerJoin(users, eq(roomMembers.userId, users.id))
-    .where(eq(roomMembers.roomId, roomId))
+    .where(and(eq(roomMembers.roomId, roomId), isNull(users.deletedAt)))
     .then((rows) => rows.map((r) => r.user));
 }
 

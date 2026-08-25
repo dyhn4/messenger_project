@@ -48,13 +48,13 @@ export function listActiveUsers() {
   return db.select().from(users).where(isNull(users.deletedAt));
 }
 
-/** 새 공개 토픽을 만들 때 "지금 가입된 회원 전원"을 멤버로 넣는 데 쓴다. lowdb 시절 코드도
- * 탈퇴 여부를 따로 거르지 않았던 걸 그대로 유지한다(탈퇴자는 어차피 로그인이 막혀있어 실질적
- * 영향이 없음 — 마이그레이션 원칙상 동작을 바꾸지 않는다). */
+/** 새 공개 토픽을 만들 때 "지금 가입된 회원 전원"을 멤버로 넣는 데 쓴다. 탈퇴한 사용자는
+ * 멤버 목록에 남아있을 필요가 없으므로 제외한다. */
 export function listAllUserIds() {
   return db
     .select({ id: users.id })
     .from(users)
+    .where(isNull(users.deletedAt))
     .then((rows) => rows.map((r) => r.id));
 }
 

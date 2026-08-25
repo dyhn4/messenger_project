@@ -1,8 +1,12 @@
 node_modules/
 db.json
 backup_before_reset_*/
+backup_before_full_reset_*/
 uploads/*
 !uploads/.gitkeep
+releases/*
+!releases/.gitkeep
+*.log
 
 # 자동 생성되는 비밀값/인증서 — 절대 커밋하지 않는다 (config.js가 없으면 새로 만듦).
 .env

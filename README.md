@@ -56,7 +56,88 @@ npm start
 
 - PC 방화벽이 처음 실행 시 "네트워크 접근 허용" 팝업을 띄우면 허용해야 안드로이드 기기에서 접속됩니다.
 - 안드로이드 기기와 PC가 **같은 와이파이망**에 있어야 합니다. 다른 네트워크(LTE 등)에서 쓰려면 공유기 포트포워딩 + 고정 IP(또는 DDNS)가 추가로 필요합니다.
-- 업로드 파일은 `server/uploads/`에 저장됩니다. `.gitignore`에 들어있어 git에는 안 올라갑니다.
+- 업로드 파일은 기본적으로 `server/uploads/`에 저장됩니다. `.gitignore`에 들어있어 git에는 안 올라갑니다.
+  다른 PC의 공유 폴더에 저장하려면 `.env`에 `UPLOADS_DIR`을 UNC 경로나 매핑된 네트워크 드라이브로
+  지정하세요(`server/.env.example` 참고) — 그 경로가 항상 접근 가능해야 첨부파일을 올리고 받을 수
+  있습니다.
+
+### pm2로 서버 운영하기
+
+`node src/index.js`를 터미널에 직접 띄워두는 대신, [pm2](https://pm2.keymetrics.io/)로 관리하면
+크래시 시 자동 재시작되고, 업데이트할 때도 재시작 명령 한 줄로 끝납니다.
+
+```
+npm install -g pm2        # 최초 1회
+npm run pm2:start         # 서버 시작 (= pm2 start ecosystem.config.cjs)
+npm run pm2:logs          # 로그 보기
+npm run pm2:restart       # 재시작 (업데이트 후)
+npm run pm2:stop          # 정지
+```
+
+Windows 재부팅 시 자동으로 다시 시작되게 하려면 `pm2-windows-startup` 패키지가 필요합니다
+(pm2 공식 `pm2 startup`은 Linux 전용):
+```
+npm install -g pm2-windows-startup
+pm2-startup install
+pm2 save                  # 지금 떠있는 프로세스 목록을 저장 — 재부팅 후 이걸 복원함
+```
+
+### 개발 PC → 운영 PC 업데이트 배포
+
+이 저장소를 GitHub 같은 원격에 올려두고, 운영 PC에서는 clone 후 다음을 반복합니다:
+```
+git pull
+npm install          # package.json이 바뀌었을 때만
+npm run db:migrate   # schema.js가 바뀌었을 때만
+npm run pm2:restart  # 또는 pm2 없이 직접 재시작
+```
+`.env`, `certs/`, `uploads/`, `releases/`는 `.gitignore`에 있어서 pull해도 안 건드립니다.
+
+### Windows 설치 프로그램 (Inno Setup)
+
+`flutter build windows --release`는 `client.exe`와 dll들이 흩어진 폴더를 만들 뿐이라, 그 자체로
+배포하기는 불편합니다. 대신 [Inno Setup](https://jrsoftware.org/isinfo.php)으로 하나의 설치
+프로그램(`messenger-setup.exe`)을 만듭니다 — 관리자 권한 없이 현재 계정에 설치되고, 시작 메뉴/바탕화면
+바로가기와 제거 프로그램까지 자동으로 생깁니다. 스크립트는 `client/windows/installer/messenger.iss`.
+
+최초 1회, Inno Setup 설치: `winget install JRSoftware.InnoSetup`
+
+### Android 릴리즈 서명 (keystore)
+
+Android는 release 빌드에 서명이 필요합니다 — 서명 없이는 배포는커녕 기존 설치본 위에 업데이트 설치도
+안 됩니다. 최초 1회만 만들면 계속 재사용합니다(**꼭 안전하게 보관** — 잃어버리면 이후 업데이트를 기존
+설치본에 덮어씌울 수 없고 사용자들이 재설치해야 합니다):
+
+```
+& "C:\Program Files\Android Studio\jbr\bin\keytool.exe" -genkey -v -keystore client\android\upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+```
+
+그다음 `client/android/key.properties`를 만듭니다(`.gitignore`에 있어 git엔 안 올라감):
+```
+storePassword=<keystore 비밀번호>
+keyPassword=<키 비밀번호>
+keyAlias=upload
+storeFile=../upload-keystore.jks
+```
+이 파일이 없으면 release 빌드는 디버그 키로 자동 폴백합니다(로컬 테스트용 `flutter run --release`는
+문제없이 되지만, 그 apk는 배포하면 안 됩니다 — 서명이 기기마다 달라질 수 있어 업데이트가 깨집니다).
+
+### 클라이언트 버전 체크/배포 (`releases/`)
+
+클라이언트는 앱을 시작할 때마다 서버의 `/version`을 확인해서, 서버에 더 최신 버전이 올라와 있으면
+화면에 배너로 알려줍니다. 새 버전을 배포하려면 `client/pubspec.yaml`의 `version:`을 올린 뒤, 저장소
+루트에서 한 번에:
+
+```
+.\publish_release.ps1 -Version "1.0.1" -Notes "이번 업데이트 내용"
+```
+
+Android/Windows 릴리즈 빌드, 설치 프로그램 컴파일, `server/releases/`로 복사, `version.json` 작성까지
+전부 자동으로 처리합니다. 서버는 재시작 없이 바로 새 버전을 알려주기 시작합니다.
+
+받는 쪽은: Windows는 `messenger-setup.exe`를 받아 실행하면 설치 마법사가 뜨고, Android는 apk를 받아서
+탭하면 설치 화면으로 넘어갑니다(둘 다 "출처를 알 수 없는 앱/파일 실행" 확인 한 번은 필요합니다 — 스토어를
+거치지 않는 배포 방식의 한계로, 완전 무터치 자동 설치는 아닙니다).
 
 ## 2. 클라이언트 실행
 

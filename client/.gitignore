@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Inno Setup 컴파일 결과물(publish_release.ps1이 매번 새로 만듦) — 소스(.iss)만 커밋한다.
+/windows/installer/output/

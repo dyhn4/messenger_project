@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/pinned_tls.dart';
 import '../services/session.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
@@ -189,6 +190,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Text(_isRegister ? '이미 계정이 있으신가요? 로그인' : '계정이 없으신가요? 회원가입'),
                     ),
                   ),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (_) => _ServerAddressDialog(session: widget.session),
+                      ),
+                      child: Text(
+                        '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -228,6 +241,109 @@ class _CheckboxLabel extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 로그인 화면에서 서버를 재설치 없이 바로 바꿀 수 있게 하는 다이얼로그.
+/// 최초 설정용 ServerSetupScreen과 달리, 이미 로그인 화면까지 온 뒤에도 다시 열 수 있다.
+class _ServerAddressDialog extends StatefulWidget {
+  final Session session;
+  const _ServerAddressDialog({required this.session});
+
+  @override
+  State<_ServerAddressDialog> createState() => _ServerAddressDialogState();
+}
+
+class _ServerAddressDialogState extends State<_ServerAddressDialog> {
+  late final _controller = TextEditingController(text: widget.session.serverUrl ?? 'https://192.168.0.62:3000');
+  final _code = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final code = _code.text.trim();
+    if (code.isNotEmpty) {
+      try {
+        await PinnedTls.pairAndSaveCert(_controller.text, code);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _submitting = false;
+          _error = '인증서를 받지 못했습니다: $e';
+        });
+        return;
+      }
+    }
+    final ok = await widget.session.setServerUrl(_controller.text);
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (ok) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() => _error = widget.session.error ?? '연결 실패');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('서버 주소 변경'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: '서버 주소',
+              hintText: 'https://192.168.0.62:3000',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _code,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            decoration: const InputDecoration(
+              labelText: '페어링 코드 (새 서버일 때만)',
+              hintText: '서버 콘솔에 "pair" 입력 시 나오는 4자리',
+              border: OutlineInputBorder(),
+              counterText: '',
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('연결'),
+        ),
+      ],
     );
   }
 }

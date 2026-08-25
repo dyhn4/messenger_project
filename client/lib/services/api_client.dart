@@ -165,6 +165,19 @@ class ApiClient {
     }
   }
 
+  /// 서버에 배포된 최신 클라이언트 버전(version.js 참고). 아직 배포된 빌드가 없으면 null.
+  /// 로그인 여부와 무관하게 호출 가능(인증 불필요 엔드포인트).
+  Future<String?> fetchLatestVersion() async {
+    try {
+      final res = await _client.get(_uri('/version')).timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return null;
+      final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      return body['version'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<AuthResult> register(String username, String password, String email, String name) => _authRequest(
         '/auth/register',
         {'username': username, 'password': password, 'email': email, 'name': name},

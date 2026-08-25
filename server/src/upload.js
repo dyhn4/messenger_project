@@ -1,13 +1,15 @@
-import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
-import { JWT_SECRET } from './config.js';
+import { JWT_SECRET, UPLOADS_DIR } from './config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const uploadsDir = path.join(__dirname, '..', 'uploads');
+export const uploadsDir = UPLOADS_DIR;
+// 네트워크 경로(UNC/매핑 드라이브)로 지정된 경우 아직 폴더가 없을 수 있어 미리 만들어둔다.
+// multer의 diskStorage는 destination 폴더가 이미 있어야 하고 스스로 만들어주지 않는다.
+fs.mkdirSync(uploadsDir, { recursive: true });
 
 // 업로드된 파일은 더 이상 고정된 공개 경로(/uploads/xxx)로 직접 서빙하지 않는다. 대신 매번
 // 짧게 만료되는 서명 URL(/files/<token>)을 만들어서 응답에 넣는다 — 그 URL을 아는 사람만,

@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_user.dart';
 import '../models/message.dart';
@@ -47,6 +50,7 @@ class Session extends ChangeNotifier {
   String? avatarUrl;
 
   ApiClient? api;
+  String? updateAvailableVersion; // 서버가 더 최신 버전을 갖고 있으면 그 버전 문자열(예: "1.0.1").
   final chatSocket = ChatSocket();
   final NotificationService notifications;
   final AppSettings settings;
@@ -117,6 +121,7 @@ class Session extends ChangeNotifier {
         onUnauthorized: _tryRefreshAndApply,
         httpClient: await PinnedTls.httpClient(),
       );
+      unawaited(_checkForUpdate());
       if (token == null) {
         stage = AuthStage.needsLogin;
       } else {
@@ -140,10 +145,50 @@ class Session extends ChangeNotifier {
     serverUrl = normalized;
     await _prefs.setString(_kServerUrl, normalized);
     api = ApiClient(baseUrl: normalized, onUnauthorized: _tryRefreshAndApply, httpClient: pinnedClient);
+    unawaited(_checkForUpdate());
     error = null;
     stage = AuthStage.needsLogin;
     notifyListeners();
     return true;
+  }
+
+  /// 서버에 지금 이 앱보다 최신 버전이 배포돼 있으면 [updateAvailableVersion]을 채운다.
+  /// 실패해도(오프라인, 아직 배포된 빌드 없음 등) 조용히 무시한다 — 부가 기능이라 앱 사용에
+  /// 지장을 주면 안 된다.
+  Future<void> _checkForUpdate() async {
+    try {
+      final latest = await api?.fetchLatestVersion();
+      if (latest == null) return;
+      final info = await PackageInfo.fromPlatform();
+      if (_isNewerVersion(latest, info.version)) {
+        updateAvailableVersion = latest;
+        notifyListeners();
+      }
+    } catch (_) {
+      // 버전 확인 실패는 무시 — 다음 실행/재연결 때 다시 시도됨.
+    }
+  }
+
+  /// "1.2.10"처럼 점으로 구분된 버전 문자열을 부분별로 숫자 비교한다. 형식이 이상하면
+  /// (파싱 실패) 안전하게 "업데이트 없음"으로 취급한다.
+  bool _isNewerVersion(String remote, String local) {
+    final r = remote.split('.').map(int.tryParse).toList();
+    final l = local.split('.').map(int.tryParse).toList();
+    if (r.any((n) => n == null) || l.any((n) => n == null)) return false;
+    for (var i = 0; i < r.length; i++) {
+      final rv = r[i]!;
+      final lv = i < l.length ? l[i]! : 0;
+      if (rv != lv) return rv > lv;
+    }
+    return false;
+  }
+
+  /// 업데이트 배너의 "다운로드"를 눌렀을 때 — 플랫폼에 맞는 다운로드 URL을 외부(브라우저)로 연다.
+  Future<void> openUpdateDownload() async {
+    final base = serverUrl;
+    if (base == null) return;
+    final platformPath = Platform.isAndroid ? 'android' : 'windows';
+    await launchUrl(Uri.parse('$base/downloads/$platformPath'), mode: LaunchMode.externalApplication);
   }
 
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>

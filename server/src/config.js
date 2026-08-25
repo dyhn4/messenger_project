@@ -29,6 +29,14 @@ function resolveSecret(envName, fileName, byteLength) {
 
 export const PORT = process.env.PORT || 3000;
 
+// 새 기기 페어링용 평문 HTTP 부트스트랩 서버 포트(pairing.js). 기본값은 메인 포트+1.
+export const PAIRING_PORT = Number(process.env.PAIRING_PORT) || Number(PORT) + 1;
+
+// 첨부파일 저장 위치. 지정 안 하면 서버 폴더 밑 uploads/를 그대로 쓴다. UNC 경로
+// (\\다른PC\공유폴더\uploads)나 매핑된 네트워크 드라이브(Z:\uploads)도 그대로 쓸 수 있다 —
+// 단 그 경로가 항상 접근 가능해야 첨부파일 업로드/다운로드가 된다(upload.js 참고).
+export const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(rootDir, 'uploads');
+
 // JWT 서명용 비밀키.
 export const JWT_SECRET = resolveSecret('JWT_SECRET', '.jwt-secret', 48);
 

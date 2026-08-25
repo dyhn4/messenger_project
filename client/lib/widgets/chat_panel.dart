@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../models/app_user.dart';
 import '../models/message.dart';
@@ -21,8 +22,10 @@ import 'system_message_row.dart';
 class ChatPanel extends StatefulWidget {
   final Session session;
   final Room room;
+  /// 검색 결과에서 열었을 때, 그 메시지로 스크롤하고 잠깐 하이라이트한다.
+  final String? highlightMessageId;
 
-  const ChatPanel({super.key, required this.session, required this.room});
+  const ChatPanel({super.key, required this.session, required this.room, this.highlightMessageId});
 
   @override
   State<ChatPanel> createState() => _ChatPanelState();
@@ -31,8 +34,11 @@ class ChatPanel extends StatefulWidget {
 class _ChatPanelState extends State<ChatPanel> {
   final _listKey = GlobalKey();
   final _dividerKeys = <String, GlobalKey>{};
+  final _itemScrollController = ItemScrollController();
   DateTime? _floatingDate;
   Timer? _hideTimer;
+  String? _highlightedMessageId;
+  Timer? _highlightTimer;
 
   @override
   void initState() {
@@ -42,6 +48,48 @@ class _ChatPanelState extends State<ChatPanel> {
     // 다시 열 때마다 명시적으로 한 번 더 읽음 처리한다.
     widget.session.controllerFor(widget.room).markReadNow();
     widget.session.clearUnreadCount(widget.room.id);
+    _scrollToHighlight();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 같은 방을 계속 보고 있는 채로(=State가 안 바뀜) 검색 결과를 새로 클릭한 경우.
+    if (widget.highlightMessageId != null && widget.highlightMessageId != oldWidget.highlightMessageId) {
+      _scrollToHighlight();
+    }
+  }
+
+  /// widget.highlightMessageId가 가리키는 메시지를 화면 가운데쯤으로 스크롤하고,
+  /// 3초간 노란색으로 표시했다가 원래 색으로 되돌린다.
+  Future<void> _scrollToHighlight() async {
+    final targetId = widget.highlightMessageId;
+    if (targetId == null) return;
+
+    final controller = widget.session.controllerFor(widget.room);
+    await controller.ensureMessageLoaded(targetId);
+    if (!mounted) return;
+
+    final msgs = controller.messages;
+    final idx = msgs.indexWhere((m) => m.id == targetId);
+    if (idx == -1) return; // 보존기간 파기 등으로 이미 지워졌으면 조용히 무시.
+    final itemIndex = msgs.length - 1 - idx; // itemBuilder의 reverse 인덱싱과 맞춤.
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScrollController.isAttached) return;
+      _itemScrollController.scrollTo(
+        index: itemIndex,
+        alignment: 0.4,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
+    });
+
+    setState(() => _highlightedMessageId = targetId);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _highlightedMessageId = null);
+    });
   }
 
   @override
@@ -52,6 +100,7 @@ class _ChatPanelState extends State<ChatPanel> {
       widget.session.setActiveRoom(null);
     }
     _hideTimer?.cancel();
+    _highlightTimer?.cancel();
     super.dispose();
   }
 
@@ -125,8 +174,9 @@ class _ChatPanelState extends State<ChatPanel> {
                       _onScrollUpdate();
                       return false;
                     },
-                    child: ListView.builder(
+                    child: ScrollablePositionedList.builder(
                       key: _listKey,
+                      itemScrollController: _itemScrollController,
                       reverse: true,
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                       itemCount: msgs.length,
@@ -165,6 +215,7 @@ class _ChatPanelState extends State<ChatPanel> {
                                 sender: _senderOf(m.senderId),
                                 showTime: showTime,
                                 showSenderInfo: isFirstInGroup,
+                                highlighted: m.id == _highlightedMessageId,
                               );
 
                         Widget? divider;

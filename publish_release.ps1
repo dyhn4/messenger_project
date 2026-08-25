@@ -33,6 +33,9 @@ Copy-Item "$client\windows\installer\output\messenger-setup.exe" "$releases\clie
 Copy-Item "$client\build\app\outputs\flutter-apk\app-release.apk" "$releases\client-android.apk" -Force
 
 $versionInfo = [ordered]@{ version = $Version; notes = $Notes }
-($versionInfo | ConvertTo-Json) | Set-Content -Path "$releases\version.json" -Encoding utf8
+$versionJson = $versionInfo | ConvertTo-Json
+# Windows PowerShell 5.1의 Set-Content -Encoding utf8은 BOM을 붙여서, 그걸 그대로 읽는
+# Node 쪽 JSON.parse가 실패한다 — .NET API로 BOM 없이 직접 써서 피해간다.
+[System.IO.File]::WriteAllText("$releases\version.json", $versionJson, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host "완료: $releases 에 버전 $Version 배포됨. 서버 재시작 없이 바로 새 버전을 알려줍니다."

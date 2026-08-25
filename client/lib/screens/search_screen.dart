@@ -26,7 +26,8 @@ class SearchScreen extends StatefulWidget {
   final bool asDialog;
   final bool asPanel;
   final VoidCallback? onClose;
-  final ValueChanged<Room>? onOpenRoom;
+  /// room과 함께, 검색 결과로 클릭한 메시지 id도 같이 넘겨서 그 말풍선으로 스크롤+하이라이트할 수 있게 한다.
+  final void Function(Room room, String highlightMessageId)? onOpenRoom;
   const SearchScreen({
     super.key,
     required this.session,
@@ -40,12 +41,16 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
+const _pageSize = 50;
+
 class _SearchScreenState extends State<SearchScreen> {
   final _query = TextEditingController();
   final _timeFormat = DateFormat('yyyy/MM/dd a h:mm');
+  final _listScrollController = ScrollController();
   List<SearchResult>? _results;
   bool _loading = false;
   String? _error;
+  int _page = 0; // 0-based.
 
   List<AppUser>? _users;
   String? _roomId; // null = 참여한 대화방(전체)
@@ -100,7 +105,10 @@ class _SearchScreenState extends State<SearchScreen> {
         until: _until,
       );
       if (!mounted) return;
-      setState(() => _results = results);
+      setState(() {
+        _results = results;
+        _page = 0;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -142,67 +150,82 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     if (room == null) return;
     if (widget.asPanel && widget.onOpenRoom != null) {
-      widget.onOpenRoom!(room);
+      widget.onOpenRoom!(room, result.id);
       return;
     }
     if (widget.asDialog) Navigator.of(context).pop();
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(session: widget.session, room: room!)));
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ChatScreen(session: widget.session, room: room!, highlightMessageId: result.id),
+    ));
   }
 
   @override
   void dispose() {
     _query.dispose();
+    _listScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final body = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        TextField(
-          controller: _query,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: '메시지 검색',
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _search),
+    // 검색창/필터는 양옆에 여백을 두지만, 결과 목록은 여백 없이 패널 가장자리(스크롤바가
+    // 붙는 오른쪽 끝, 왼쪽 구분선)까지 꽉 채운다 — _buildResults가 알아서 자기 안에서
+    // 필요한 여백(예: "결과 N건" 줄)을 처리한다.
+    final controls = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _query,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: '메시지 검색',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _search),
+            ),
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _search(),
           ),
-          textInputAction: TextInputAction.search,
-          onSubmitted: (_) => _search(),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            // 참여한 대화방만 창 크기에 따라 늘었다 줄었다 한다. 모든 멤버/기간은
-            // 항상 원래 크기 그대로 보이도록 고정 폭을 쓴다.
-            Expanded(
-              child: _RoomFilterButton(
-                session: widget.session,
-                selectedRoomId: _roomId,
-                expand: true,
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              // 참여한 대화방만 창 크기에 따라 늘었다 줄었다 한다. 모든 멤버/기간은
+              // 항상 원래 크기 그대로 보이도록 고정 폭을 쓴다.
+              Expanded(
+                child: _RoomFilterButton(
+                  session: widget.session,
+                  selectedRoomId: _roomId,
+                  expand: true,
+                  onSelected: (value) {
+                    setState(() => _roomId = value);
+                    if (_query.text.trim().isNotEmpty) _search();
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              _MemberFilterButton(
+                users: _users,
+                selectedSenderId: _senderId,
                 onSelected: (value) {
-                  setState(() => _roomId = value);
+                  setState(() => _senderId = value);
                   if (_query.text.trim().isNotEmpty) _search();
                 },
               ),
-            ),
-            const SizedBox(width: 8),
-            _MemberFilterButton(
-              users: _users,
-              selectedSenderId: _senderId,
-              onSelected: (value) {
-                setState(() => _senderId = value);
-                if (_query.text.trim().isNotEmpty) _search();
-              },
-            ),
-            const SizedBox(width: 8),
-            _PeriodFilterButton(period: _period, onSelected: _onPeriodSelected),
-          ],
-        ),
+              const SizedBox(width: 8),
+              _PeriodFilterButton(period: _period, onSelected: _onPeriodSelected),
+            ],
+          ),
+        ],
+      ),
+    );
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        controls,
         const SizedBox(height: 12),
-        Flexible(child: _buildResults(context)),
+        Expanded(child: _buildResults(context)),
       ],
     );
 
@@ -222,7 +245,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const Divider(height: 1),
-            Expanded(child: Padding(padding: const EdgeInsets.all(16), child: body)),
+            Expanded(child: body),
           ],
         ),
       );
@@ -232,45 +255,95 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     return Scaffold(
       appBar: AppBar(title: const Text('검색')),
-      body: Padding(padding: const EdgeInsets.all(16), child: body),
+      body: body,
     );
   }
 
   Widget _buildResults(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Text(_error!));
-    if (_results == null) return const Center(child: Text('내가 속한 모든 방을 대상으로 검색합니다.'));
-    if (_results!.isEmpty) return const Center(child: Text('검색 결과가 없습니다.'));
+    if (_results == null) {
+      return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('내가 속한 모든 방을 대상으로 검색합니다.')));
+    }
+    if (_results!.isEmpty) {
+      return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('검색 결과가 없습니다.')));
+    }
 
     final sorted = [..._results!]
       ..sort((a, b) => _newestFirst ? b.createdAt.compareTo(a.createdAt) : a.createdAt.compareTo(b.createdAt));
 
-    return ListView(
-      shrinkWrap: widget.asDialog,
+    final totalPages = (sorted.length / _pageSize).ceil();
+    final page = _page.clamp(0, totalPages - 1);
+    final pageItems = sorted.skip(page * _pageSize).take(_pageSize).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
           child: Row(
             children: [
               Expanded(
-                child: Text('결과 ${_results!.length}건', style: Theme.of(context).textTheme.labelLarge),
+                child: Text('결과 ${sorted.length}건', style: Theme.of(context).textTheme.labelLarge),
               ),
-              _SortButton(newestFirst: _newestFirst, onChanged: (v) => setState(() => _newestFirst = v)),
+              _SortButton(
+                newestFirst: _newestFirst,
+                onChanged: (v) => setState(() {
+                  _newestFirst = v;
+                  _page = 0;
+                }),
+              ),
             ],
           ),
         ),
-        const SizedBox(height: 4),
-        for (final r in sorted)
-          _SearchResultCard(
-            result: r,
-            query: _query.text.trim(),
-            timeFormat: _timeFormat,
-            onTap: () => _openResult(r),
+        const Divider(height: 1),
+        Expanded(
+          child: ScrollbarTheme(
+            data: ScrollbarThemeData(
+              thickness: const WidgetStatePropertyAll(10),
+              thumbColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.hovered)
+                    ? Colors.grey.withValues(alpha: 0.75)
+                    : Colors.grey.withValues(alpha: 0.6),
+              ),
+              trackColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.hovered)
+                    ? Colors.grey.withValues(alpha: 0.45)
+                    : Colors.grey.withValues(alpha: 0.28),
+              ),
+              trackBorderColor: const WidgetStatePropertyAll(Colors.transparent),
+            ),
+            child: Scrollbar(
+              controller: _listScrollController,
+              thumbVisibility: true,
+              trackVisibility: true,
+              child: ListView.separated(
+                controller: _listScrollController,
+                itemCount: pageItems.length,
+                // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
+                separatorBuilder: (_, _) => const Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: Divider(height: 1),
+                ),
+                itemBuilder: (context, i) => _SearchResultRow(
+                  result: pageItems[i],
+                  query: _query.text.trim(),
+                  timeFormat: _timeFormat,
+                  onTap: () => _openResult(pageItems[i]),
+                ),
+              ),
+            ),
           ),
+        ),
+        const Divider(height: 1),
+        _Pagination(
+          currentPage: page,
+          totalPages: totalPages,
+          onPageSelected: (p) => setState(() => _page = p),
+        ),
       ],
     );
   }
-
 }
 
 /// "결과 N건" 옆 정렬 선택(최신 순/과거 순).
@@ -306,67 +379,63 @@ class _SortButton extends StatelessWidget {
   }
 }
 
-/// 검색 결과 한 건: 방 이름 + (아바타 + 보낸사람 · 시간) + 내용을 카드 하나로 묶어서
-/// 결과끼리 테두리로 구분되게 하고, 내용 중 검색어는 형광펜으로 칠한 것처럼 하이라이트한다.
-class _SearchResultCard extends StatelessWidget {
+/// 검색 결과 한 건: 방 이름(라벨) + (아바타 + 보낸사람 · 시간) + 내용. 카드 테두리 없이
+/// ListView.separated의 Divider로만 결과끼리 구분한다. 내용 중 검색어는 형광펜으로
+/// 칠한 것처럼 하이라이트한다.
+class _SearchResultRow extends StatelessWidget {
   final SearchResult result;
   final String query;
   final DateFormat timeFormat;
   final VoidCallback onTap;
-  const _SearchResultCard({required this.result, required this.query, required this.timeFormat, required this.onTap});
+  const _SearchResultRow({required this.result, required this.query, required this.timeFormat, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).dividerColor),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(result.roomName ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 14,
-                    child: Text(result.senderName.isNotEmpty ? result.senderName[0] : '?'),
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              result.roomName ?? '',
+              style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  child: Text(result.senderName.isNotEmpty ? result.senderName[0] : '?'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(result.senderName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 8),
+                          Text(
+                            timeFormat.format(result.createdAt),
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall
+                                ?.copyWith(color: Theme.of(context).hintColor),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      _highlighted(context, result.text ?? result.fileName ?? '(파일)', query),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(result.senderName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(width: 8),
-                            Text(
-                              timeFormat.format(result.createdAt),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(color: Theme.of(context).hintColor),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        _highlighted(context, result.text ?? result.fileName ?? '(파일)', query),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -743,6 +812,73 @@ class _PeriodFilterPanel extends StatelessWidget {
             onTap: () => onSelected(p),
           ),
       ],
+    );
+  }
+}
+
+/// 검색 결과 하단 페이지 번호. « < [숫자들] > » — 항상 최대 10개 페이지 번호만 보여주고
+/// 현재 페이지가 그 창의 가운데쯤 오도록 창을 옮긴다.
+class _Pagination extends StatelessWidget {
+  final int currentPage; // 0-based.
+  final int totalPages;
+  final ValueChanged<int> onPageSelected;
+  const _Pagination({required this.currentPage, required this.totalPages, required this.onPageSelected});
+
+  static const _windowSize = 10;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxStart = (totalPages - _windowSize).clamp(0, totalPages);
+    final start = (currentPage - _windowSize ~/ 2).clamp(0, maxStart);
+    final end = (start + _windowSize).clamp(0, totalPages);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _arrow(context, Icons.first_page, currentPage > 0, () => onPageSelected(0)),
+          _arrow(context, Icons.chevron_left, currentPage > 0, () => onPageSelected(currentPage - 1)),
+          for (var i = start; i < end; i++) _pageNumber(context, i),
+          _arrow(context, Icons.chevron_right, currentPage < totalPages - 1, () => onPageSelected(currentPage + 1)),
+          _arrow(context, Icons.last_page, currentPage < totalPages - 1, () => onPageSelected(totalPages - 1)),
+        ],
+      ),
+    );
+  }
+
+  Widget _arrow(BuildContext context, IconData icon, bool enabled, VoidCallback onTap) {
+    return IconButton(
+      icon: Icon(icon, size: 18),
+      onPressed: enabled ? onTap : null,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Widget _pageNumber(BuildContext context, int i) {
+    final selected = i == currentPage;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: selected ? null : () => onPageSelected(i),
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? Theme.of(context).colorScheme.primary : null,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            '${i + 1}',
+            style: TextStyle(
+              color: selected ? Theme.of(context).colorScheme.onPrimary : null,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

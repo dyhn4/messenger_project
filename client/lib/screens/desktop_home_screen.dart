@@ -11,6 +11,7 @@ import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'create_topic_screen.dart';
 import 'member_profile_dialog.dart';
+import 'my_profile_dialog.dart';
 import 'new_chat_screen.dart';
 import 'search_screen.dart';
 import 'topic_browse_screen.dart';
@@ -29,6 +30,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Room? _selectedRoom;
   bool _searchOpen = false;
   bool _membersOpen = false;
+  String? _highlightMessageId;
 
   @override
   void initState() {
@@ -79,6 +81,12 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   }
 
   Future<void> _openMemberProfile(AppUser user) async {
+    // 멤버 목록에서 로그인한 사용자 자신을 클릭하면, 다른 멤버 볼 때 쓰는 카드(DM 시작 등)
+    // 대신 삼선 메뉴의 "내 프로필"과 같은 카드(이름/이메일/비밀번호 수정)를 보여준다.
+    if (user.id == widget.session.userId) {
+      await showDialog(context: context, builder: (_) => MyProfileDialog(session: widget.session));
+      return;
+    }
     final room = await showDialog<Room>(
       context: context,
       builder: (_) => MemberProfileDialog(session: widget.session, user: user),
@@ -156,6 +164,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                                 key: ValueKey(_selectedRoom!.id),
                                 session: widget.session,
                                 room: _selectedRoom!,
+                                highlightMessageId: _highlightMessageId,
                               ),
                             ),
                           ],
@@ -169,7 +178,10 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                       session: widget.session,
                       asPanel: true,
                       onClose: () => setState(() => _searchOpen = false),
-                      onOpenRoom: (room) => setState(() => _selectedRoom = room),
+                      onOpenRoom: (room, messageId) => setState(() {
+                        _selectedRoom = room;
+                        _highlightMessageId = messageId;
+                      }),
                     ),
                   ),
                 ],

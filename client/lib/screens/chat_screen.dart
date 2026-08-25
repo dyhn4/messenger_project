@@ -12,7 +12,8 @@ import '../widgets/room_options_menu.dart';
 class ChatScreen extends StatelessWidget {
   final Session session;
   final Room room;
-  const ChatScreen({super.key, required this.session, required this.room});
+  final String? highlightMessageId;
+  const ChatScreen({super.key, required this.session, required this.room, this.highlightMessageId});
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +28,12 @@ class ChatScreen extends StatelessWidget {
         ),
         actions: [RoomOptionsMenu(session: session, room: room)],
       ),
-      body: ChatPanel(key: ValueKey(room.id), session: session, room: room),
+      body: ChatPanel(
+        key: ValueKey(room.id),
+        session: session,
+        room: room,
+        highlightMessageId: highlightMessageId,
+      ),
     );
   }
 }

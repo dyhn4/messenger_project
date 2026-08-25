@@ -51,7 +51,7 @@ httpServer.listen(PORT, () => {
   for (const addr of lanAddresses) console.log(`  https://${addr}:${PORT}`);
   console.log(`TLS 인증서(자체 서명): ${certPath}`);
   console.log('클라이언트 앱의 "서버 주소 변경"에서 페어링 코드로 이 인증서를 받아 연결할 수 있습니다.');
-  console.log('새 기기를 연결하려면 이 콘솔에 "pair"를 입력하고 Enter 하세요.');
+  console.log('새 기기를 연결하려면 이 콘솔에 "pair"를 입력하고 Enter 하세요(pm2 등으로 띄웠다면 같은 PC에서 "npm run pair").');
 });
 
 startPairingServer({ port: PAIRING_PORT, getCertPem: () => tls.cert });

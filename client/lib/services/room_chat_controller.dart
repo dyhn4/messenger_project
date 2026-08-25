@@ -71,6 +71,23 @@ class RoomChatController extends ChangeNotifier {
     }
   }
 
+  /// 검색 결과 등에서 특정 메시지로 바로 스크롤하고 싶을 때 쓴다. 그 메시지가 아직 로드된
+  /// 범위 밖(기본 50개보다 오래됨)이면 훨씬 넉넉하게 다시 가져와서 채운다.
+  Future<void> ensureMessageLoaded(String messageId) async {
+    if (messages.any((m) => m.id == messageId)) return;
+    try {
+      final history = await _session.api!.fetchRoomMessages(room.id, limit: 500);
+      final existingIds = messages.map((m) => m.id).toSet();
+      final newOnes = history.where((m) => !existingIds.contains(m.id));
+      messages
+        ..addAll(newOnes)
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      notifyListeners();
+    } catch (_) {
+      // 실패해도 조용히 무시 — 스크롤/하이라이트만 안 될 뿐 방 자체는 정상적으로 보인다.
+    }
+  }
+
   void markReadNow() => _session.chatSocket.markRead(room.id);
 
   Future<void> sendText(String text) {

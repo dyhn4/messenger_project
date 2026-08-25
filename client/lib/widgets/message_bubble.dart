@@ -29,6 +29,7 @@ class MessageBubble extends StatelessWidget {
   final AppUser? sender;
   final bool showTime;
   final bool showSenderInfo;
+  final bool highlighted; // 검색 결과에서 열었을 때 잠깐 노란색으로 표시(chat_panel.dart 참고).
 
   const MessageBubble({
     super.key,
@@ -40,6 +41,7 @@ class MessageBubble extends StatelessWidget {
     this.sender,
     this.showTime = true,
     this.showSenderInfo = true,
+    this.highlighted = false,
   });
 
   void _openProfile(BuildContext context) {
@@ -63,12 +65,16 @@ class MessageBubble extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOut,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: isMine
-                  ? Theme.of(context).colorScheme.primaryContainer
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              color: highlighted
+                  ? const Color(0xFFFFF59D)
+                  : (isMine
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : Theme.of(context).colorScheme.surfaceContainerHighest),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Column(

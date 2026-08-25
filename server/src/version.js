@@ -17,7 +17,10 @@ function readVersionInfo() {
   const infoPath = path.join(releasesDir, 'version.json');
   if (!fs.existsSync(infoPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(infoPath, 'utf8'));
+    // publish_release.ps1이 Windows PowerShell로 저장하면 UTF-8 BOM이 붙을 수 있어서
+    // (-Encoding utf8이 5.1에서는 BOM 포함) JSON.parse 전에 제거해준다.
+    const raw = fs.readFileSync(infoPath, 'utf8');
+    return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
   } catch {
     return null;
   }

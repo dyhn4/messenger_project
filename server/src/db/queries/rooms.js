@@ -122,3 +122,18 @@ export async function setMemberLastRead(roomId, userId, whenMs) {
     .set({ lastReadAt: new Date(whenMs) })
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
 }
+
+export async function getMemberFavorite(roomId, userId) {
+  const [row] = await db
+    .select({ favorite: roomMembers.favorite })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+  return row?.favorite ?? false;
+}
+
+export async function setMemberFavorite(roomId, userId, favorite) {
+  await db
+    .update(roomMembers)
+    .set({ favorite })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}

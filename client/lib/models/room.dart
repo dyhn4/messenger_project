@@ -23,6 +23,10 @@ class Room {
   /// 이후 실시간으로는 Session이 소켓 메시지를 받을 때마다 직접 증감시킨다 — 그래서 non-final.
   int unreadCount;
 
+  /// 나만의 즐겨찾기 표시. 서버 브로드캐스트(room:created)에는 이 값이 안 실려올 수 있어서
+  /// Session이 병합할 때 로컬 값을 유지한다 — 그래서 non-final.
+  bool favorite;
+
   Room({
     required this.id,
     required this.type,
@@ -33,6 +37,7 @@ class Room {
     required this.createdAt,
     required this.lastRead,
     this.unreadCount = 0,
+    this.favorite = false,
   });
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -47,6 +52,7 @@ class Room {
       lastRead: ((json['lastRead'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, (v as num).toInt())),
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
+      favorite: json['favorite'] as bool? ?? false,
     );
   }
 

@@ -3,8 +3,8 @@ import { verifySocketToken } from './auth.js';
 import { insertMessage } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { toMessageDto } from './messages.js';
 import { markConnected, markDisconnected } from './presence.js';
-import { signFileUrl } from './upload.js';
 
 /** 소켓 연결 시 JWT를 확인하고, 연결된 이후의 채팅 이벤트를 처리합니다. */
 export function registerSocket(io) {
@@ -19,7 +19,7 @@ export function registerSocket(io) {
     }
   });
 
-  io.on('connection', async (socket) => {
+  io.on('connection', (socket) => {
     // 같은 사람이 여러 기기로 동시에 붙어있을 수 있어서, 이 사람의 "첫" 연결일 때만
     // 온라인으로 알린다(presence.js가 기기별 연결 수를 센다).
     if (markConnected(socket.data.userId)) {
@@ -29,9 +29,6 @@ export function registerSocket(io) {
     // 개인용 룸(user:<id>)에 join해두면, REST로 방이 새로 생겼을 때
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
     socket.join(`user:${socket.data.userId}`);
-    for (const room of await listRoomsForUser(socket.data.userId)) {
-      socket.join(room.id);
-    }
 
     // payload: { roomId, type: 'text'|'image'|'file', text?, fileUrl?, fileName?, fileSize?, mimeType? }
     socket.on('message:send', async (payload, ack) => {
@@ -58,13 +55,9 @@ export function registerSocket(io) {
         mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : null,
       });
 
-      // 실시간으로 내보낼 때만 서명한다 — DB에는 항상 원본을 유지해서 나중에 다시 조회될
-      // 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.
-      const broadcastMessage = {
-        ...message,
-        createdAt: new Date(message.createdAt).getTime(),
-        fileUrl: signFileUrl(message.fileUrl, message.fileName),
-      };
+      // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서
+      // 나중에 다시 조회될 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.
+      const broadcastMessage = toMessageDto(message);
       io.to(room.id).emit('message:new', broadcastMessage);
       ack?.({ ok: true, message: broadcastMessage });
     });
@@ -85,6 +78,15 @@ export function registerSocket(io) {
       if (markDisconnected(socket.data.userId)) {
         io.emit('presence:update', { userId: socket.data.userId, online: false });
       }
+    });
+
+    // 방에 join하는 건 DB 조회가 필요해 비동기다 — 리스너 등록(위)보다 뒤에 둬서, 이
+    // 조회가 끝나기 전에 도착한 이벤트(message:send 등)를 리스너 없음으로 놓치는 일이
+    // 없게 한다. join이 끝나기 전에 이 소켓이 먼저 message:send를 보내는 극히 드문
+    // 경우엔 다른 멤버들에게는 정상 전달되고, 보낸 사람 자신의 실시간 echo만 살짝
+    // 늦게(방금 보낸 메시지가 REST 재조회 때는 정상적으로 보임) 받을 수 있다.
+    listRoomsForUser(socket.data.userId).then((rooms) => {
+      for (const room of rooms) socket.join(room.id);
     });
   });
 }

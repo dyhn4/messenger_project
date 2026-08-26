@@ -1,0 +1,1 @@
+ALTER TABLE "room_members" ADD COLUMN "favorite" boolean DEFAULT false NOT NULL;

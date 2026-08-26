@@ -60,6 +60,12 @@ class Session extends ChangeNotifier {
   StreamSubscription? _messageSub;
   StreamSubscription? _roomSub;
   StreamSubscription? _readSub;
+  StreamSubscription? _favoriteSub;
+  StreamSubscription? _commentSub;
+  StreamSubscription? _messageEditedSub;
+  StreamSubscription? _messageDeletedSub;
+  StreamSubscription? _commentEditedSub;
+  StreamSubscription? _commentDeletedSub;
   StreamSubscription? _presenceSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
@@ -88,6 +94,7 @@ class Session extends ChangeNotifier {
   }
 
   Room? _pendingOpenRoom;
+
   /// 알림을 눌러서 특정 방을 열어달라는 요청. 데스크톱 분할화면은 이걸 보고
   /// 전체화면 전환 없이 그 자리에서 우측 패널만 바꾼다.
   Room? consumePendingOpenRoom() {
@@ -148,7 +155,11 @@ class Session extends ChangeNotifier {
     }
     serverUrl = normalized;
     await _prefs.setString(_kServerUrl, normalized);
-    api = ApiClient(baseUrl: normalized, onUnauthorized: _tryRefreshAndApply, httpClient: pinnedClient);
+    api = ApiClient(
+      baseUrl: normalized,
+      onUnauthorized: _tryRefreshAndApply,
+      httpClient: pinnedClient,
+    );
     unawaited(_checkForUpdate());
     error = null;
     stage = AuthStage.needsLogin;
@@ -192,16 +203,28 @@ class Session extends ChangeNotifier {
     final base = serverUrl;
     if (base == null) return;
     final platformPath = Platform.isAndroid ? 'android' : 'windows';
-    await launchUrl(Uri.parse('$base/downloads/$platformPath'), mode: LaunchMode.externalApplication);
+    await launchUrl(
+      Uri.parse('$base/downloads/$platformPath'),
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
       _auth(() => api!.login(u, p), keepSignedIn: keepSignedIn);
 
-  Future<bool> register(String u, String p, String email, String name, {required bool keepSignedIn}) =>
+  Future<bool> register(
+    String u,
+    String p,
+    String email,
+    String name, {
+    required bool keepSignedIn,
+  }) =>
       _auth(() => api!.register(u, p, email, name), keepSignedIn: keepSignedIn);
 
-  Future<bool> _auth(Future<AuthResult> Function() call, {required bool keepSignedIn}) async {
+  Future<bool> _auth(
+    Future<AuthResult> Function() call, {
+    required bool keepSignedIn,
+  }) async {
     try {
       final result = await call();
       token = result.accessToken;
@@ -289,6 +312,33 @@ class Session extends ChangeNotifier {
       match.first.lastRead[e.userId] = e.lastReadAt;
       notifyListeners();
     });
+    _favoriteSub?.cancel();
+    _favoriteSub = chatSocket.favoriteEvents.listen((e) {
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      match.first.favorite = e.favorite;
+      notifyListeners();
+    });
+    _commentSub?.cancel();
+    _commentSub = chatSocket.commentEvents.listen((c) {
+      _controllers[c.roomId]?.addComment(c);
+    });
+    _messageEditedSub?.cancel();
+    _messageEditedSub = chatSocket.messageEdited.listen((m) {
+      _controllers[m.roomId]?.applyEdit(m);
+    });
+    _messageDeletedSub?.cancel();
+    _messageDeletedSub = chatSocket.messageDeleted.listen((e) {
+      _controllers[e.roomId]?.applyDelete(e.id);
+    });
+    _commentEditedSub?.cancel();
+    _commentEditedSub = chatSocket.commentEdited.listen((c) {
+      _controllers[c.roomId]?.applyCommentEdit(c);
+    });
+    _commentDeletedSub?.cancel();
+    _commentDeletedSub = chatSocket.commentDeleted.listen((e) {
+      _controllers[e.roomId]?.applyCommentDelete(e.id);
+    });
     _presenceSub?.cancel();
     _presenceSub = chatSocket.presenceEvents.listen((e) {
       if (e.online) {
@@ -300,7 +350,9 @@ class Session extends ChangeNotifier {
     });
     unawaited(_seedOnlineUsers());
     _reconnectSub?.cancel();
-    _reconnectSub = chatSocket.reconnected.listen((_) => _resyncAfterReconnect());
+    _reconnectSub = chatSocket.reconnected.listen(
+      (_) => _resyncAfterReconnect(),
+    );
     _authErrorSub?.cancel();
     _authErrorSub = chatSocket.authErrors.listen((_) async {
       // accessToken이 만료됐거나(오래 대기 상태였다가 복귀 등) 비밀번호 변경으로 폐기된
@@ -353,13 +405,16 @@ class Session extends ChangeNotifier {
 
   /// ApiClient가 401을 받았을 때 호출된다(ApiClient.onUnauthorized). 갱신에 성공하면 true를
   /// 돌려줘서 원래 요청을 재시도하게 한다.
-  Future<bool> _tryRefreshAndApply() async => (await _tryRefreshAccessToken()) != null;
+  Future<bool> _tryRefreshAndApply() async =>
+      (await _tryRefreshAccessToken()) != null;
 
   /// refreshToken으로 새 accessToken을 받아온다. 여러 요청이 동시에 401을 맞아도 갱신
   /// 요청은 한 번만 나가도록 진행 중인 Future를 공유한다. refreshToken마저 무효면(비밀번호
   /// 변경, 다른 곳에서 로그아웃 등) 이 기기를 완전히 로그아웃시키고 null을 돌려준다.
   Future<String?> _tryRefreshAccessToken() {
-    return _refreshInFlight ??= _doRefreshAccessToken().whenComplete(() => _refreshInFlight = null);
+    return _refreshInFlight ??= _doRefreshAccessToken().whenComplete(
+      () => _refreshInFlight = null,
+    );
   }
 
   Future<String?> _doRefreshAccessToken() async {
@@ -417,6 +472,8 @@ class Session extends ChangeNotifier {
       MessageType.image => '사진을 보냈습니다',
       MessageType.file => m.fileName ?? '파일을 보냈습니다',
       MessageType.system => '',
+      MessageType.comment =>
+        '', // 실시간 message:new로는 절대 안 옴(댓글은 클라이언트 전용 합성 타입).
     };
 
     AppUser? sender;
@@ -436,21 +493,39 @@ class Session extends ChangeNotifier {
       avatarType: sender?.avatarType ?? 'initial',
       avatarEmoji: sender?.avatarEmoji,
       avatarColor: sender?.avatarColor,
-      avatarUrl: sender?.avatarUrl != null ? resolveUrl(sender!.avatarUrl!) : null,
+      avatarUrl: sender?.avatarUrl != null
+          ? resolveUrl(sender!.avatarUrl!)
+          : null,
     );
   }
 
   void _upsertRoom(Room incoming) {
     final i = rooms.indexWhere((r) => r.id == incoming.id);
     if (i >= 0) {
-      // 브로드캐스트/REST 응답에는 이 사람 기준 안읽음 수가 없거나 낡은 값일 수 있으니,
-      // 실시간으로 로컬에서 추적 중이던 값을 유지한다.
+      // 브로드캐스트/REST 응답에는 이 사람 기준 안읽음 수·즐겨찾기가 없거나 낡은 값일 수
+      // 있으니(예: room:created는 requesterId 없이 만들어져 둘 다 비어있다), 로컬에서
+      // 추적 중이던 값을 유지한다.
       incoming.unreadCount = rooms[i].unreadCount;
+      incoming.favorite = rooms[i].favorite;
       rooms[i] = incoming;
     } else {
       rooms.add(incoming);
     }
     notifyListeners();
+  }
+
+  /// 즐겨찾기를 켜거나 끈다. 화면 반응성을 위해 먼저 로컬 값을 바꾸고, 서버 요청이 실패하면
+  /// 되돌린다(room:favorite 브로드캐스트로 다른 기기도 같이 갱신됨).
+  Future<void> toggleFavorite(Room room) async {
+    final next = !room.favorite;
+    room.favorite = next;
+    notifyListeners();
+    try {
+      await api!.setFavorite(room.id, next);
+    } catch (_) {
+      room.favorite = !next;
+      notifyListeners();
+    }
   }
 
   /// 방을 열 때 안읽음 뱃지를 0으로 되돌린다.
@@ -463,16 +538,30 @@ class Session extends ChangeNotifier {
 
   /// 방을 열 때 호출. 이미 열려있으면 캐시된 컨트롤러를 그대로 재사용한다.
   RoomChatController controllerFor(Room room) {
-    return _controllers.putIfAbsent(room.id, () => RoomChatController(this, room));
+    return _controllers.putIfAbsent(
+      room.id,
+      () => RoomChatController(this, room),
+    );
   }
 
-  Future<Room> createTopic({required String name, String? description, bool isPublic = true}) async {
-    final room = await api!.createTopic(name: name, description: description, isPublic: isPublic);
+  Future<Room> createTopic({
+    required String name,
+    String? description,
+    bool isPublic = true,
+  }) async {
+    final room = await api!.createTopic(
+      name: name,
+      description: description,
+      isPublic: isPublic,
+    );
     _upsertRoom(room);
     return room;
   }
 
-  Future<Room> createGroup({String? name, required List<String> memberIds}) async {
+  Future<Room> createGroup({
+    String? name,
+    required List<String> memberIds,
+  }) async {
     final room = await api!.createGroup(name: name, memberIds: memberIds);
     _upsertRoom(room);
     return room;
@@ -530,8 +619,14 @@ class Session extends ChangeNotifier {
 
   /// 비밀번호 변경. 다른 기기는 서버가 강제로 끊지만, 이 기기는 응답으로 받은 새 토큰
   /// 쌍으로 로그아웃 없이 그대로 이어간다(소켓도 새 토큰으로 다시 연결).
-  Future<void> changePassword({required String currentPassword, required String newPassword}) async {
-    final result = await api!.changePassword(currentPassword: currentPassword, newPassword: newPassword);
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final result = await api!.changePassword(
+      currentPassword: currentPassword,
+      newPassword: newPassword,
+    );
     token = result.accessToken;
     refreshToken = result.refreshToken;
     api!.token = token;
@@ -558,6 +653,12 @@ class Session extends ChangeNotifier {
     await _messageSub?.cancel();
     await _roomSub?.cancel();
     await _readSub?.cancel();
+    await _favoriteSub?.cancel();
+    await _commentSub?.cancel();
+    await _messageEditedSub?.cancel();
+    await _messageDeletedSub?.cancel();
+    await _commentEditedSub?.cancel();
+    await _commentDeletedSub?.cancel();
     await _presenceSub?.cancel();
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();

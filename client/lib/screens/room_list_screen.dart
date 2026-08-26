@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/account_menu_button.dart';
+import '../widgets/favorite_star.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/unread_badge.dart';
 import 'chat_screen.dart';
@@ -69,9 +70,9 @@ class RoomListScreen extends StatelessWidget {
       body: ListenableBuilder(
         listenable: session,
         builder: (context, _) {
-          final topics = session.rooms.where((r) => r.type == RoomType.topic).toList();
-          final groups = session.rooms.where((r) => r.type == RoomType.group).toList();
-          final dms = session.rooms.where((r) => r.type == RoomType.dm).toList();
+          final topics = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.topic).toList());
+          final groups = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.group).toList());
+          final dms = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.dm).toList());
 
           // PC 앱 사이드바와 동일하게, 방이 하나도 없어도 섹션 제목은 "0"과 함께 항상 보여준다.
           return ListView(
@@ -85,6 +86,10 @@ class RoomListScreen extends StatelessWidget {
       ),
     );
   }
+
+  /// 즐겨찾기한 방을 목록 위쪽에 모은다(그 안에서의 상대 순서는 그대로 유지).
+  static List<Room> _favoriteFirst(List<Room> rooms) =>
+      [...rooms.where((r) => r.favorite), ...rooms.where((r) => !r.favorite)];
 
   List<Widget> _section(BuildContext context, String title, List<Room> items) {
     final unreadSum = items.fold<int>(0, (sum, r) => sum + r.unreadCount);
@@ -100,11 +105,18 @@ class RoomListScreen extends StatelessWidget {
       ),
       for (final room in items)
         ListTile(
-          leading: RoomAvatar(
-            room: room,
-            myUserId: session.userId ?? '',
-            resolveUrl: session.resolveUrl,
-            onlineUserIds: session.onlineUserIds,
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FavoriteStar(favorite: room.favorite, onTap: () => session.toggleFavorite(room)),
+              const SizedBox(width: 8),
+              RoomAvatar(
+                room: room,
+                myUserId: session.userId ?? '',
+                resolveUrl: session.resolveUrl,
+                onlineUserIds: session.onlineUserIds,
+              ),
+            ],
           ),
           title: Text(room.displayName(session.userId ?? '')),
           subtitle: room.description != null ? Text(room.description!, maxLines: 1, overflow: TextOverflow.ellipsis) : null,

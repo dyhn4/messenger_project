@@ -5,6 +5,7 @@ import '../services/session.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
+import 'message_thread_screen.dart';
 
 /// 모바일(좁은 화면)에서 방을 열 때 전체화면으로 띄우는 화면.
 /// 넓은 화면(PC)에서는 DesktopHomeScreen이 이 화면을 쓰지 않고
@@ -39,6 +40,16 @@ class ChatScreen extends StatelessWidget {
         session: session,
         room: room,
         highlightMessageId: highlightMessageId,
+        onOpenThread: (m) => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MessageThreadScreen(
+              session: session,
+              room: room,
+              message: m,
+              controller: session.controllerFor(room),
+            ),
+          ),
+        ),
       ),
     );
   }

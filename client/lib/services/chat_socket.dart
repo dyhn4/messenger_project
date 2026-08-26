@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
+import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import 'pinned_tls.dart';
@@ -11,12 +12,63 @@ class RoomReadEvent {
   final String roomId;
   final String userId;
   final int lastReadAt;
-  const RoomReadEvent({required this.roomId, required this.userId, required this.lastReadAt});
+  const RoomReadEvent({
+    required this.roomId,
+    required this.userId,
+    required this.lastReadAt,
+  });
 
   factory RoomReadEvent.fromJson(Map<String, dynamic> json) => RoomReadEvent(
+    roomId: json['roomId'] as String,
+    userId: json['userId'] as String,
+    lastReadAt: (json['lastReadAt'] as num).toInt(),
+  );
+}
+
+/// 내(다른 기기 포함)가 방의 즐겨찾기를 바꿨다는 브로드캐스트(room:favorite).
+class RoomFavoriteUpdate {
+  final String roomId;
+  final bool favorite;
+  const RoomFavoriteUpdate({required this.roomId, required this.favorite});
+
+  factory RoomFavoriteUpdate.fromJson(Map<String, dynamic> json) =>
+      RoomFavoriteUpdate(
         roomId: json['roomId'] as String,
-        userId: json['userId'] as String,
-        lastReadAt: (json['lastReadAt'] as num).toInt(),
+        favorite: json['favorite'] as bool,
+      );
+}
+
+/// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted). 내용은 이미 클라이언트에서
+/// 가려질 거라 최소 정보만 온다.
+class MessageDeletedEvent {
+  final String id;
+  final String roomId;
+  const MessageDeletedEvent({required this.id, required this.roomId});
+
+  factory MessageDeletedEvent.fromJson(Map<String, dynamic> json) =>
+      MessageDeletedEvent(
+        id: json['id'] as String,
+        roomId: json['roomId'] as String,
+      );
+}
+
+/// 누군가 댓글을 삭제했다는 브로드캐스트(comment:deleted). 내용은 이미 클라이언트에서
+/// 가려질 거라 최소 정보만 온다.
+class CommentDeletedEvent {
+  final String id;
+  final String messageId;
+  final String roomId;
+  const CommentDeletedEvent({
+    required this.id,
+    required this.messageId,
+    required this.roomId,
+  });
+
+  factory CommentDeletedEvent.fromJson(Map<String, dynamic> json) =>
+      CommentDeletedEvent(
+        id: json['id'] as String,
+        messageId: json['messageId'] as String,
+        roomId: json['roomId'] as String,
       );
 }
 
@@ -27,9 +79,9 @@ class PresenceUpdate {
   const PresenceUpdate({required this.userId, required this.online});
 
   factory PresenceUpdate.fromJson(Map<String, dynamic> json) => PresenceUpdate(
-        userId: json['userId'] as String,
-        online: json['online'] as bool,
-      );
+    userId: json['userId'] as String,
+    online: json['online'] as bool,
+  );
 }
 
 /// Socket.io 연결을 감싸서 Message/Room/읽음 이벤트 스트림으로 노출합니다.
@@ -38,6 +90,14 @@ class ChatSocket {
   final _messageController = StreamController<Message>.broadcast();
   final _roomController = StreamController<Room>.broadcast();
   final _readController = StreamController<RoomReadEvent>.broadcast();
+  final _favoriteController = StreamController<RoomFavoriteUpdate>.broadcast();
+  final _commentController = StreamController<Comment>.broadcast();
+  final _messageEditedController = StreamController<Message>.broadcast();
+  final _messageDeletedController =
+      StreamController<MessageDeletedEvent>.broadcast();
+  final _commentEditedController = StreamController<Comment>.broadcast();
+  final _commentDeletedController =
+      StreamController<CommentDeletedEvent>.broadcast();
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
@@ -49,6 +109,26 @@ class ChatSocket {
 
   /// 누군가 방을 읽었다는 브로드캐스트. 안읽음 카운터 갱신에 쓴다.
   Stream<RoomReadEvent> get readEvents => _readController.stream;
+
+  /// 내가(다른 기기 포함) 방의 즐겨찾기를 바꿨다는 브로드캐스트.
+  Stream<RoomFavoriteUpdate> get favoriteEvents => _favoriteController.stream;
+
+  /// 누군가 메시지에 댓글을 달았다는 브로드캐스트(comment:new).
+  Stream<Comment> get commentEvents => _commentController.stream;
+
+  /// 누군가 메시지를 수정했다는 브로드캐스트(message:edited) — 수정된 메시지 전체가 온다.
+  Stream<Message> get messageEdited => _messageEditedController.stream;
+
+  /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted).
+  Stream<MessageDeletedEvent> get messageDeleted =>
+      _messageDeletedController.stream;
+
+  /// 누군가 댓글을 수정했다는 브로드캐스트(comment:edited) — 수정된 댓글 전체가 온다.
+  Stream<Comment> get commentEdited => _commentEditedController.stream;
+
+  /// 누군가 댓글을 삭제했다는 브로드캐스트(comment:deleted).
+  Stream<CommentDeletedEvent> get commentDeleted =>
+      _commentDeletedController.stream;
 
   /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트. 멤버 목록의 초록 점 갱신에 쓴다.
   Stream<PresenceUpdate> get presenceEvents => _presenceController.stream;
@@ -92,16 +172,54 @@ class ChatSocket {
     );
 
     socket.on('message:new', (data) {
-      _messageController.add(Message.fromJson(Map<String, dynamic>.from(data as Map)));
+      _messageController.add(
+        Message.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
     });
     socket.on('room:created', (data) {
-      _roomController.add(Room.fromJson(Map<String, dynamic>.from(data as Map)));
+      _roomController.add(
+        Room.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
     });
     socket.on('room:read', (data) {
-      _readController.add(RoomReadEvent.fromJson(Map<String, dynamic>.from(data as Map)));
+      _readController.add(
+        RoomReadEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('room:favorite', (data) {
+      _favoriteController.add(
+        RoomFavoriteUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('comment:new', (data) {
+      _commentController.add(
+        Comment.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('message:edited', (data) {
+      _messageEditedController.add(
+        Message.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('message:deleted', (data) {
+      _messageDeletedController.add(
+        MessageDeletedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('comment:edited', (data) {
+      _commentEditedController.add(
+        Comment.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('comment:deleted', (data) {
+      _commentDeletedController.add(
+        CommentDeletedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
     });
     socket.on('presence:update', (data) {
-      _presenceController.add(PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)));
+      _presenceController.add(
+        PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
     });
     socket.onReconnect((_) => _reconnectController.add(null));
     socket.onConnectError((err) {
@@ -147,11 +265,15 @@ class ChatSocket {
       },
       ack: (dynamic response) {
         if (completer.isCompleted) return;
-        final map = response is Map ? Map<String, dynamic>.from(response) : const <String, dynamic>{};
+        final map = response is Map
+            ? Map<String, dynamic>.from(response)
+            : const <String, dynamic>{};
         if (map['ok'] == true) {
           completer.complete();
         } else {
-          completer.completeError(Exception(map['error']?.toString() ?? '메시지 전송에 실패했습니다.'));
+          completer.completeError(
+            Exception(map['error']?.toString() ?? '메시지 전송에 실패했습니다.'),
+          );
         }
       },
     );

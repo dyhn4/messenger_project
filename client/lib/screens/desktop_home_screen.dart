@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
+import '../models/message.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/account_menu_button.dart';
 import '../widgets/chat_panel.dart';
+import '../widgets/favorite_star.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
 import '../widgets/room_avatar.dart';
@@ -13,6 +15,7 @@ import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'create_topic_screen.dart';
 import 'member_profile_dialog.dart';
+import 'message_thread_screen.dart';
 import 'my_profile_dialog.dart';
 import 'new_chat_screen.dart';
 import 'search_screen.dart';
@@ -33,6 +36,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   bool _searchOpen = false;
   bool _membersOpen = false;
   String? _highlightMessageId;
+  Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
+
+  /// 방을 바꿀 때마다 쓴다 — 이전 방 메시지의 스레드 패널은 더 이상 의미가 없으므로 같이 닫는다.
+  void _selectRoom(Room room) {
+    setState(() {
+      _selectedRoom = room;
+      _threadMessage = null;
+    });
+  }
 
   @override
   void initState() {
@@ -49,13 +61,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   void _onSessionChanged() {
     final pending = widget.session.consumePendingOpenRoom();
     if (pending != null) {
-      setState(() => _selectedRoom = pending);
+      _selectRoom(pending);
       return;
     }
     // 선택된 방이 목록에서 사라졌으면(예: 채팅방 나가기) 우측 패널을 비운다.
     final selected = _selectedRoom;
     if (selected != null && !widget.session.rooms.any((r) => r.id == selected.id)) {
-      setState(() => _selectedRoom = null);
+      setState(() {
+        _selectedRoom = null;
+        _threadMessage = null;
+      });
     }
   }
 
@@ -64,7 +79,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       context: context,
       builder: (_) => CreateTopicScreen(session: widget.session, asDialog: true),
     );
-    if (result != null) setState(() => _selectedRoom = result);
+    if (result != null) _selectRoom(result);
   }
 
   Future<void> _browseTopics() async {
@@ -79,7 +94,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       context: context,
       builder: (_) => NewChatScreen(session: widget.session, asDialog: true),
     );
-    if (result != null) setState(() => _selectedRoom = result);
+    if (result != null) _selectRoom(result);
   }
 
   Future<void> _openMemberProfile(AppUser user) async {
@@ -96,6 +111,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     if (room != null) {
       setState(() {
         _selectedRoom = room;
+        _threadMessage = null;
         _membersOpen = false;
       });
     }
@@ -113,11 +129,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             session: widget.session,
             onShowMembers: () => setState(() {
               _membersOpen = !_membersOpen;
-              if (_membersOpen) _searchOpen = false;
+              if (_membersOpen) {
+                _searchOpen = false;
+                _threadMessage = null;
+              }
             }),
             onToggleSearch: () => setState(() {
               _searchOpen = !_searchOpen;
-              if (_searchOpen) _membersOpen = false;
+              if (_searchOpen) {
+                _membersOpen = false;
+                _threadMessage = null;
+              }
             }),
           ),
           const Divider(height: 1),
@@ -127,7 +149,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 SizedBox(width: 280, child: _Sidebar(
                   session: widget.session,
                   selectedRoomId: _selectedRoom?.id,
-                  onSelectRoom: (room) => setState(() => _selectedRoom = room),
+                  onSelectRoom: _selectRoom,
                   onCreateTopic: _createTopic,
                   onBrowseTopics: _browseTopics,
                   onNewGroupChat: _newGroupChat,
@@ -168,6 +190,11 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                                 session: widget.session,
                                 room: _selectedRoom!,
                                 highlightMessageId: _highlightMessageId,
+                                onOpenThread: (m) => setState(() {
+                                  _threadMessage = m;
+                                  _searchOpen = false;
+                                  _membersOpen = false;
+                                }),
                               ),
                             ),
                           ],
@@ -183,6 +210,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                       onClose: () => setState(() => _searchOpen = false),
                       onOpenRoom: (room, messageId) => setState(() {
                         _selectedRoom = room;
+                        _threadMessage = null;
                         _highlightMessageId = messageId;
                       }),
                     ),
@@ -196,6 +224,20 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                       session: widget.session,
                       onClose: () => setState(() => _membersOpen = false),
                       onSelectMember: _openMemberProfile,
+                    ),
+                  ),
+                ],
+                if (_threadMessage != null && _selectedRoom != null) ...[
+                  const VerticalDivider(width: 1),
+                  SizedBox(
+                    width: sidePanelWidth,
+                    child: MessageThreadScreen(
+                      session: widget.session,
+                      room: _selectedRoom!,
+                      message: _threadMessage!,
+                      controller: widget.session.controllerFor(_selectedRoom!),
+                      asPanel: true,
+                      onClose: () => setState(() => _threadMessage = null),
                     ),
                   ),
                 ],
@@ -416,14 +458,18 @@ class _Sidebar extends StatelessWidget {
     required this.onNewGroupChat,
   });
 
+  /// 즐겨찾기한 방을 목록 위쪽에 모은다(그 안에서의 상대 순서는 그대로 유지).
+  static List<Room> _favoriteFirst(List<Room> rooms) =>
+      [...rooms.where((r) => r.favorite), ...rooms.where((r) => !r.favorite)];
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: session,
       builder: (context, _) {
-              final topics = session.rooms.where((r) => r.type == RoomType.topic).toList();
-              final groups = session.rooms.where((r) => r.type == RoomType.group).toList();
-              final dms = session.rooms.where((r) => r.type == RoomType.dm).toList();
+              final topics = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.topic).toList());
+              final groups = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.group).toList());
+              final dms = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.dm).toList());
               final topicsUnread = topics.fold<int>(0, (sum, r) => sum + r.unreadCount);
               final groupsUnread = groups.fold<int>(0, (sum, r) => sum + r.unreadCount);
               final dmsUnread = dms.fold<int>(0, (sum, r) => sum + r.unreadCount);
@@ -457,6 +503,8 @@ class _Sidebar extends StatelessWidget {
                       label: room.displayName(session.userId ?? ''),
                       selected: room.id == selectedRoomId,
                       unreadCount: room.unreadCount,
+                      favorite: room.favorite,
+                      onToggleFavorite: () => session.toggleFavorite(room),
                       onTap: () => onSelectRoom(room),
                     ),
                 ],
@@ -482,6 +530,8 @@ class _Sidebar extends StatelessWidget {
                       label: room.displayName(session.userId ?? ''),
                       selected: room.id == selectedRoomId,
                       unreadCount: room.unreadCount,
+                      favorite: room.favorite,
+                      onToggleFavorite: () => session.toggleFavorite(room),
                       onTap: () => onSelectRoom(room),
                     ),
                 ],
@@ -507,6 +557,8 @@ class _Sidebar extends StatelessWidget {
                       label: room.displayName(session.userId ?? ''),
                       selected: room.id == selectedRoomId,
                       unreadCount: room.unreadCount,
+                      favorite: room.favorite,
+                      onToggleFavorite: () => session.toggleFavorite(room),
                       onTap: () => onSelectRoom(room),
                     ),
                 ],
@@ -657,30 +709,56 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _RoomTile extends StatelessWidget {
+class _RoomTile extends StatefulWidget {
   final Widget leading;
   final String label;
   final bool selected;
   final int unreadCount;
+  final bool favorite;
+  final VoidCallback onToggleFavorite;
   final VoidCallback onTap;
   const _RoomTile({
     required this.leading,
     required this.label,
     required this.selected,
     this.unreadCount = 0,
+    required this.favorite,
+    required this.onToggleFavorite,
     required this.onTap,
   });
 
   @override
+  State<_RoomTile> createState() => _RoomTileState();
+}
+
+class _RoomTileState extends State<_RoomTile> {
+  // 즐겨찾기 안 된 회색 별은 평소엔 숨겨두고, 마우스가 이 행 위에 있을 때만 보여준다.
+  bool _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      selected: selected,
-      selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
-      leading: leading,
-      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: unreadCount > 0 ? UnreadBadge(count: unreadCount) : null,
-      onTap: onTap,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: ListTile(
+        dense: true,
+        selected: widget.selected,
+        selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Opacity(
+              opacity: widget.favorite || _hovering ? 1 : 0,
+              child: FavoriteStar(favorite: widget.favorite, onTap: widget.onToggleFavorite),
+            ),
+            const SizedBox(width: 8),
+            widget.leading,
+          ],
+        ),
+        title: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: widget.unreadCount > 0 ? UnreadBadge(count: widget.unreadCount) : null,
+        onTap: widget.onTap,
+      ),
     );
   }
 }

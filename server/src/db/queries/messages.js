@@ -7,6 +7,29 @@ export async function insertMessage(fields) {
   return row;
 }
 
+export function findMessageById(id) {
+  return db
+    .select()
+    .from(messages)
+    .where(eq(messages.id, id))
+    .then((rows) => rows[0] ?? null);
+}
+
+export async function updateMessageText(id, text) {
+  const [row] = await db.update(messages).set({ text, editedAt: new Date() }).where(eq(messages.id, id)).returning();
+  return row;
+}
+
+/** 소프트 삭제 — 행은 남기고(댓글 스레드가 계속 참조) 내용만 비운다. */
+export async function softDeleteMessage(id) {
+  const [row] = await db
+    .update(messages)
+    .set({ deletedAt: new Date(), text: null, fileUrl: null, fileName: null, fileSize: null, mimeType: null })
+    .where(eq(messages.id, id))
+    .returning();
+  return row;
+}
+
 /** 방의 최근 메시지 limit개를 시간순(오래된 것부터)으로. */
 export async function listMessagesByRoom(roomId, limit) {
   const rows = await db

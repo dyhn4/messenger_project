@@ -4,6 +4,7 @@ import {
   addRoomMembers,
   findDmRoomByKey,
   findRoomById,
+  getMemberFavorite,
   getRoomLastReadMap,
   insertRoom,
   isRoomMember,
@@ -12,11 +13,14 @@ import {
   listRoomMemberUsers,
   listRoomsForUser,
   removeRoomMember,
+  setMemberFavorite,
 } from './db/queries/rooms.js';
 import { countUnreadForUser, insertMessage, listMessagesByRoom } from './db/queries/messages.js';
+import { listCommentsForMessages } from './db/queries/comments.js';
 import { findUserById, listAllUserIds } from './db/queries/users.js';
-import { signFileUrl } from './upload.js';
 import { publicUser } from './users.js';
+import { toCommentDto } from './comments.js';
+import { toMessageDto } from './messages.js';
 
 async function resolveMembers(roomId) {
   return (await listRoomMemberUsers(roomId)).map(publicUser);
@@ -48,6 +52,7 @@ export async function toRoomDto(room, requesterId) {
   if (requesterId) {
     const myLastRead = lastRead[requesterId] ?? 0;
     dto.unreadCount = await countUnreadForUser(room.id, requesterId, myLastRead);
+    dto.favorite = await getMemberFavorite(room.id, requesterId);
   }
   return dto;
 }
@@ -255,6 +260,18 @@ export function createRoomsRouter(io) {
     res.json({ ok: true });
   });
 
+  // 즐겨찾기는 나 혼자만의 표시 설정이라 방 멤버 전체가 아니라 내 다른 기기(user:<id> 룸)에만 알린다.
+  router.post('/rooms/:id/favorite', async (req, res) => {
+    const room = await findRoomById(req.params.id);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+
+    const favorite = req.body?.favorite === true;
+    await setMemberFavorite(room.id, req.user.sub, favorite);
+    io.to(`user:${req.user.sub}`).emit('room:favorite', { roomId: room.id, favorite });
+    res.json(await toRoomDto(room, req.user.sub));
+  });
+
   router.get('/rooms/:id', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
@@ -269,13 +286,21 @@ export function createRoomsRouter(io) {
 
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const rows = await listMessagesByRoom(room.id, limit);
+
+    const comments = await listCommentsForMessages(rows.map((m) => m.id));
+    const commentsByMessageId = new Map();
+    for (const c of comments) {
+      const list = commentsByMessageId.get(c.messageId) ?? [];
+      list.push(toCommentDto(c));
+      commentsByMessageId.set(c.messageId, list);
+    }
+
     // 저장은 항상 원본 상대경로(/uploads/xxx)로 해두고, 응답에 낼 때만 매번 새로 서명한다
     // (DB에 서명된 URL을 그대로 저장하면 나중에 다시 조회할 때 이미 만료돼있게 된다).
     res.json(
       rows.map((m) => ({
-        ...m,
-        createdAt: new Date(m.createdAt).getTime(),
-        fileUrl: signFileUrl(m.fileUrl, m.fileName),
+        ...toMessageDto(m),
+        comments: commentsByMessageId.get(m.id) ?? [],
       })),
     );
   });

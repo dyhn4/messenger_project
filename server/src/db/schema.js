@@ -51,6 +51,8 @@ export const roomMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
+    // 즐겨찾기는 그 사람 혼자만의 표시 설정이라 방 자체가 아니라 멤버십에 붙는다.
+    favorite: boolean('favorite').notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.roomId, t.userId] }), index('room_members_user_id_idx').on(t.userId)],
 );
@@ -73,9 +75,42 @@ export const messages = pgTable(
     fileSize: integer('file_size'),
     mimeType: text('mime_type'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // 작성 후 5분 이내 본인만 수정/삭제 가능(messages.js 참고). 삭제는 소프트 삭제 — 행은 남고
+    // 내용만 비운다(댓글 스레드가 이 메시지를 계속 참조하기 때문).
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
     index('messages_sender_id_idx').on(t.senderId),
   ],
+);
+
+/** 특정 메시지에 달린 댓글(스레드 답글). */
+export const messageComments = pgTable(
+  'message_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }), // 조인 없이 방 기준 필터링하려고 중복 보관.
+    // messages.senderId와 동일 규칙: 탈퇴해도 댓글 자체는 남고 senderId만 null이 된다.
+    senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
+    senderName: text('sender_name').notNull(),
+    type: text('type').notNull().default('text'), // 'text' | 'image' | 'file' — messages.type과 동일 규칙.
+    text: text('text'), // 첨부만 있고 캡션이 없는 댓글도 있어서 nullable(messages.text와 동일).
+    fileUrl: text('file_url'),
+    fileName: text('file_name'),
+    fileSize: integer('file_size'),
+    mimeType: text('mime_type'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // messages와 동일한 규칙: 작성 후 5분 이내 본인만 수정/삭제 가능(comments.js 참고). 삭제는
+    // 소프트 삭제 — 행은 남기고 deletedAt만 찍는다(text/첨부는 그대로 두되 응답에서 가린다).
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [index('message_comments_message_id_idx').on(t.messageId, t.createdAt)],
 );

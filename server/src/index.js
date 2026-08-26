@@ -7,6 +7,8 @@ import { Server } from 'socket.io';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
+import { createCommentsRouter } from './comments.js';
+import { createMessagesRouter } from './messages.js';
 import { generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
 import { createRoomsRouter } from './rooms.js';
@@ -28,6 +30,8 @@ app.use('/auth', createAuthRouter(io));
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', requireAuth, createUsersRouter(io));
 app.use('/api', requireAuth, createRoomsRouter(io));
+app.use('/api', requireAuth, createMessagesRouter(io));
+app.use('/api', requireAuth, createCommentsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 // 업로드 파일은 고정된 공개 경로로 서빙하지 않는다 — filesRouter가 짧게 만료되는
 // 서명 링크(/files/<token>)로만 내려준다(upload.js의 signFileUrl 참고).

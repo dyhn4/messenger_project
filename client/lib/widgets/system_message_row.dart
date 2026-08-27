@@ -22,12 +22,17 @@ class SystemMessageRow extends StatelessWidget {
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(message.text ?? '', style: Theme.of(context).textTheme.bodySmall),
+            child: Text(
+              message.text ?? '',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
           const SizedBox(height: 2),
           Text(
             _timeFormat.format(message.createdAt),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).hintColor,
+            ),
           ),
         ],
       ),

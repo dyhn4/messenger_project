@@ -8,7 +8,13 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:win32/win32.dart'
-    show FindWindow, GetForegroundWindow, SW_RESTORE, SetForegroundWindow, ShowWindow, TEXT;
+    show
+        FindWindow,
+        GetForegroundWindow,
+        SW_RESTORE,
+        SetForegroundWindow,
+        ShowWindow,
+        TEXT;
 
 import '../widgets/avatar_utils.dart' show parseHexColor;
 
@@ -27,7 +33,10 @@ class NotificationService {
     );
 
     await _plugin.initialize(
-      settings: const InitializationSettings(android: android, windows: windows),
+      settings: const InitializationSettings(
+        android: android,
+        windows: windows,
+      ),
       onDidReceiveNotificationResponse: (response) {
         if (Platform.isWindows) _bringWindowToFront();
         final roomId = response.payload;
@@ -36,7 +45,9 @@ class NotificationService {
     );
 
     await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.requestNotificationsPermission();
   }
 
@@ -71,7 +82,9 @@ class NotificationService {
         channelDescription: '새 채팅 메시지 알림',
         importance: Importance.high,
         priority: Priority.high,
-        largeIcon: avatarBytes != null ? ByteArrayAndroidBitmap(avatarBytes) : null,
+        largeIcon: avatarBytes != null
+            ? ByteArrayAndroidBitmap(avatarBytes)
+            : null,
       ),
       windows: WindowsNotificationDetails(
         images: [
@@ -111,7 +124,9 @@ class NotificationService {
   }) async {
     if (avatarType == 'photo' && avatarUrl != null) {
       try {
-        final res = await http.get(Uri.parse(avatarUrl)).timeout(const Duration(seconds: 3));
+        final res = await http
+            .get(Uri.parse(avatarUrl))
+            .timeout(const Duration(seconds: 3));
         if (res.statusCode == 200) return res.bodyBytes;
       } catch (_) {
         // 프로필 사진을 못 받아오면 조용히 기본 아이콘으로 대체한다.
@@ -128,20 +143,33 @@ class NotificationService {
   }
 
   /// 이모지+배경색을 원형 PNG로 직접 그린다(위젯 트리 없이 dart:ui Canvas만 사용).
-  Future<Uint8List> _renderCharacterAvatar({required String emoji, required ui.Color color}) async {
+  Future<Uint8List> _renderCharacterAvatar({
+    required String emoji,
+    required ui.Color color,
+  }) async {
     const size = 128.0;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
-    canvas.drawCircle(const Offset(size / 2, size / 2), size / 2, Paint()..color = color);
+    canvas.drawCircle(
+      const Offset(size / 2, size / 2),
+      size / 2,
+      Paint()..color = color,
+    );
 
     final textPainter = TextPainter(
-      text: TextSpan(text: emoji, style: const TextStyle(fontSize: size * 0.55)),
+      text: TextSpan(
+        text: emoji,
+        style: const TextStyle(fontSize: size * 0.55),
+      ),
       textDirection: TextDirection.ltr,
     )..layout();
     textPainter.paint(
       canvas,
-      Offset(size / 2 - textPainter.width / 2, size / 2 - textPainter.height / 2),
+      Offset(
+        size / 2 - textPainter.width / 2,
+        size / 2 - textPainter.height / 2,
+      ),
     );
 
     final picture = recorder.endRecording();
@@ -176,7 +204,8 @@ class NotificationService {
 
   void _flashWindowsTaskbar() {
     final hwnd = _findOurWindow();
-    if (hwnd == 0 || GetForegroundWindow() == hwnd) return; // 창이 없거나 이미 보고 있으면 건너뜀
+    if (hwnd == 0 || GetForegroundWindow() == hwnd)
+      return; // 창이 없거나 이미 보고 있으면 건너뜀
 
     final info = calloc<_FLASHWINFO>();
     try {
@@ -215,5 +244,5 @@ typedef _FlashWindowExNative = Int32 Function(Pointer<_FLASHWINFO>);
 typedef _FlashWindowExDart = int Function(Pointer<_FLASHWINFO>);
 
 final _user32 = DynamicLibrary.open('user32.dll');
-final _flashWindowEx =
-    _user32.lookupFunction<_FlashWindowExNative, _FlashWindowExDart>('FlashWindowEx');
+final _flashWindowEx = _user32
+    .lookupFunction<_FlashWindowExNative, _FlashWindowExDart>('FlashWindowEx');

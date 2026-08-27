@@ -25,7 +25,9 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
       } catch (e) {
         if (!mounted) return;
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('인증서를 받지 못했습니다: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('인증서를 받지 못했습니다: $e')));
         return;
       }
     }
@@ -33,7 +35,9 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
     if (!mounted) return;
     setState(() => _loading = false);
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.session.error ?? '연결 실패')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(widget.session.error ?? '연결 실패')));
     }
   }
 
@@ -80,7 +84,11 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
             FilledButton(
               onPressed: _loading ? null : _submit,
               child: _loading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('연결'),
             ),
           ],

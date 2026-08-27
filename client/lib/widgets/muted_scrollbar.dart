@@ -5,7 +5,11 @@ import 'package:flutter/material.dart';
 class MutedScrollbar extends StatelessWidget {
   final ScrollController controller;
   final Widget child;
-  const MutedScrollbar({super.key, required this.controller, required this.child});
+  const MutedScrollbar({
+    super.key,
+    required this.controller,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {

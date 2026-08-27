@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { verifySocketToken } from './auth.js';
-import { insertMessage } from './db/queries/messages.js';
+import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
+import { insertMessage, markMessageRead } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
+import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
 import { markConnected, markDisconnected } from './presence.js';
@@ -13,6 +15,16 @@ export function registerSocket(io) {
       const payload = await verifySocketToken(socket.handshake.auth?.token ?? '');
       socket.data.userId = payload.sub;
       socket.data.username = payload.username;
+      // deviceId는 비밀 대화(E2EE) 기능에서만 쓰인다 — 없거나 무효해도 일반 소켓 연결(평문
+      // 채팅/알림 등)은 그대로 허용하고, secret:* 이벤트만 이후 개별적으로 막는다.
+      const deviceId = socket.handshake.auth?.deviceId;
+      if (typeof deviceId === 'string' && deviceId) {
+        const device = await findActiveDeviceForUser(deviceId, payload.sub);
+        if (device) {
+          socket.data.deviceId = device.id;
+          touchDeviceLastSeen(device.id).catch(() => {});
+        }
+      }
       next();
     } catch {
       next(new Error('unauthorized'));
@@ -71,6 +83,75 @@ export function registerSocket(io) {
       await setMemberLastRead(room.id, socket.data.userId, lastReadAt);
 
       io.to(room.id).emit('room:read', { roomId: room.id, userId: socket.data.userId, lastReadAt });
+    });
+
+    // payload: { roomId, messageId } — 비밀 대화 메시지가 실제로 화면에 노출됐다는 신호.
+    // 최초 1회만 readAt이 찍히고(markMessageRead), 자동 삭제 타이머가 설정돼 있으면
+    // 그때부터 카운트가 시작된다(텔레그램 비밀 대화와 동일 — 보낸 시점이 아니라 읽은 시점부터).
+    socket.on('secret:message-read', async (payload) => {
+      const room = await findRoomById(payload?.roomId);
+      if (!room || !room.isSecret || !(await isRoomMember(room.id, socket.data.userId))) return;
+      if (typeof payload?.messageId !== 'string') return;
+
+      const session = await findSecretSessionByRoomId(room.id);
+      const expiresAt = session?.selfDestructSeconds
+        ? Date.now() + session.selfDestructSeconds * 1000
+        : null;
+      const updated = await markMessageRead(payload.messageId, expiresAt);
+      if (!updated) return; // 이미 읽음 처리된 메시지(멱등) — 중복 브로드캐스트 안 함.
+
+      io.to(room.id).emit('secret:message-read', {
+        roomId: room.id,
+        messageId: updated.id,
+        readAt: new Date(updated.readAt).getTime(),
+        expiresAt: updated.expiresAt ? new Date(updated.expiresAt).getTime() : null,
+      });
+    });
+
+    // 재키잉 제안/수락 중계 — 서버는 공개키/서명만 보고 그대로 상대에게 전달할 뿐, 공유비밀
+    // 계산은 양쪽 클라이언트가 각자 로컬에서 한다.
+    // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature }
+    socket.on('secret:rekey-propose', async (payload) => {
+      const room = await findRoomById(payload?.roomId);
+      if (!room || !room.isSecret || !(await isRoomMember(room.id, socket.data.userId))) return;
+      const { keyEpoch, ephemeralPublicKey, ephemeralSignature } = payload ?? {};
+      if (!Number.isInteger(keyEpoch) || !ephemeralPublicKey || !ephemeralSignature) return;
+
+      await insertSecretRekey({
+        roomId: room.id,
+        keyEpoch,
+        proposerUserId: socket.data.userId,
+        proposerEphemeralPublicKey: ephemeralPublicKey,
+        proposerEphemeralSignature: ephemeralSignature,
+      });
+      socket.to(room.id).emit('secret:rekey-propose', {
+        roomId: room.id,
+        keyEpoch,
+        proposerUserId: socket.data.userId,
+        proposerEphemeralPublicKey: ephemeralPublicKey,
+        proposerEphemeralSignature: ephemeralSignature,
+      });
+    });
+
+    // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature }
+    socket.on('secret:rekey-ack', async (payload) => {
+      const room = await findRoomById(payload?.roomId);
+      if (!room || !room.isSecret || !(await isRoomMember(room.id, socket.data.userId))) return;
+      const { keyEpoch, ephemeralPublicKey, ephemeralSignature } = payload ?? {};
+      if (!Number.isInteger(keyEpoch) || !ephemeralPublicKey || !ephemeralSignature) return;
+
+      await ackSecretRekey(room.id, keyEpoch, {
+        responderEphemeralPublicKey: ephemeralPublicKey,
+        responderEphemeralSignature: ephemeralSignature,
+      });
+      await bumpSecretSessionEpoch(room.id, keyEpoch);
+      io.to(room.id).emit('secret:rekey-ack', {
+        roomId: room.id,
+        keyEpoch,
+        responderUserId: socket.data.userId,
+        responderEphemeralPublicKey: ephemeralPublicKey,
+        responderEphemeralSignature: ephemeralSignature,
+      });
     });
 
     socket.on('disconnect', () => {

@@ -8,7 +8,11 @@ import 'create_topic_screen.dart';
 class TopicBrowseScreen extends StatefulWidget {
   final Session session;
   final bool asDialog;
-  const TopicBrowseScreen({super.key, required this.session, this.asDialog = false});
+  const TopicBrowseScreen({
+    super.key,
+    required this.session,
+    this.asDialog = false,
+  });
 
   @override
   State<TopicBrowseScreen> createState() => _TopicBrowseScreenState();
@@ -43,7 +47,9 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen> {
       await _load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('참여 실패: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('참여 실패: $e')));
       }
     } finally {
       if (mounted) setState(() => _joiningId = null);
@@ -55,35 +61,49 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen> {
     final body = _error != null
         ? Center(child: Text(_error!))
         : _topics == null
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                shrinkWrap: widget.asDialog,
-                children: [
-                  for (final topic in _topics!)
-                    ListTile(
-                      leading: const CircleAvatar(child: Icon(Icons.tag)),
-                      title: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(child: Text(topic.name)),
-                          if (!topic.isPublic) ...[
-                            const SizedBox(width: 6),
-                            Icon(Icons.lock_outline, size: 14, color: Theme.of(context).hintColor),
-                          ],
-                        ],
-                      ),
-                      subtitle: Text(topic.description ?? '멤버 ${topic.memberCount}명'),
-                      trailing: topic.joined
-                          ? const Text('참여중')
-                          : FilledButton(
-                              onPressed: _joiningId == topic.id ? null : () => _join(topic),
-                              child: _joiningId == topic.id
-                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Text('참여'),
-                            ),
-                    ),
-                ],
-              );
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            shrinkWrap: widget.asDialog,
+            children: [
+              for (final topic in _topics!)
+                ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.tag)),
+                  title: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(child: Text(topic.name)),
+                      if (!topic.isPublic) ...[
+                        const SizedBox(width: 6),
+                        Icon(
+                          Icons.lock_outline,
+                          size: 14,
+                          color: Theme.of(context).hintColor,
+                        ),
+                      ],
+                    ],
+                  ),
+                  subtitle: Text(
+                    topic.description ?? '멤버 ${topic.memberCount}명',
+                  ),
+                  trailing: topic.joined
+                      ? const Text('참여중')
+                      : FilledButton(
+                          onPressed: _joiningId == topic.id
+                              ? null
+                              : () => _join(topic),
+                          child: _joiningId == topic.id
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('참여'),
+                        ),
+                ),
+            ],
+          );
 
     if (widget.asDialog) {
       return FloatingDialog(title: '토픽방 찾기', child: body);
@@ -93,7 +113,11 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen> {
       floatingActionButton: FloatingActionButton(
         tooltip: '토픽방 만들기',
         onPressed: () async {
-          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => CreateTopicScreen(session: widget.session)));
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => CreateTopicScreen(session: widget.session),
+            ),
+          );
           _load();
         },
         child: const Icon(Icons.add),

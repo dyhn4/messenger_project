@@ -6,7 +6,12 @@ class FavoriteStar extends StatelessWidget {
   final bool favorite;
   final VoidCallback onTap;
   final double size;
-  const FavoriteStar({super.key, required this.favorite, required this.onTap, this.size = 20});
+  const FavoriteStar({
+    super.key,
+    required this.favorite,
+    required this.onTap,
+    this.size = 20,
+  });
 
   @override
   Widget build(BuildContext context) {

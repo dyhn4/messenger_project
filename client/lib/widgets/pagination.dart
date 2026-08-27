@@ -8,7 +8,12 @@ class Pagination extends StatelessWidget {
   final int currentPage; // 0-based.
   final int totalPages;
   final ValueChanged<int> onPageSelected;
-  const Pagination({super.key, required this.currentPage, required this.totalPages, required this.onPageSelected});
+  const Pagination({
+    super.key,
+    required this.currentPage,
+    required this.totalPages,
+    required this.onPageSelected,
+  });
 
   static const _windowSize = 10;
 
@@ -23,17 +28,42 @@ class Pagination extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _arrow(context, Icons.first_page, currentPage > 0, () => onPageSelected(0)),
-          _arrow(context, Icons.chevron_left, currentPage > 0, () => onPageSelected(currentPage - 1)),
+          _arrow(
+            context,
+            Icons.first_page,
+            currentPage > 0,
+            () => onPageSelected(0),
+          ),
+          _arrow(
+            context,
+            Icons.chevron_left,
+            currentPage > 0,
+            () => onPageSelected(currentPage - 1),
+          ),
           for (var i = start; i < end; i++) _pageNumber(context, i),
-          _arrow(context, Icons.chevron_right, currentPage < totalPages - 1, () => onPageSelected(currentPage + 1)),
-          _arrow(context, Icons.last_page, currentPage < totalPages - 1, () => onPageSelected(totalPages - 1)),
+          _arrow(
+            context,
+            Icons.chevron_right,
+            currentPage < totalPages - 1,
+            () => onPageSelected(currentPage + 1),
+          ),
+          _arrow(
+            context,
+            Icons.last_page,
+            currentPage < totalPages - 1,
+            () => onPageSelected(totalPages - 1),
+          ),
         ],
       ),
     );
   }
 
-  Widget _arrow(BuildContext context, IconData icon, bool enabled, VoidCallback onTap) {
+  Widget _arrow(
+    BuildContext context,
+    IconData icon,
+    bool enabled,
+    VoidCallback onTap,
+  ) {
     return IconButton(
       icon: Icon(icon, size: 18),
       onPressed: enabled ? onTap : null,

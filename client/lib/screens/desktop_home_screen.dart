@@ -629,6 +629,7 @@ class _Sidebar extends StatelessWidget {
                 selected: room.id == selectedRoomId,
                 unreadCount: room.unreadCount,
                 favorite: room.favorite,
+                isSecret: room.isSecret,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
               ),
@@ -656,6 +657,7 @@ class _Sidebar extends StatelessWidget {
                 selected: room.id == selectedRoomId,
                 unreadCount: room.unreadCount,
                 favorite: room.favorite,
+                isSecret: room.isSecret,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
               ),
@@ -827,6 +829,7 @@ class _RoomTile extends StatefulWidget {
   final bool selected;
   final int unreadCount;
   final bool favorite;
+  final bool isSecret;
   final VoidCallback onToggleFavorite;
   final VoidCallback onTap;
   const _RoomTile({
@@ -835,6 +838,7 @@ class _RoomTile extends StatefulWidget {
     required this.selected,
     this.unreadCount = 0,
     required this.favorite,
+    this.isSecret = false,
     required this.onToggleFavorite,
     required this.onTap,
   });
@@ -872,7 +876,23 @@ class _RoomTileState extends State<_RoomTile> {
             widget.leading,
           ],
         ),
-        title: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: widget.isSecret
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.lock, size: 14, color: Colors.green),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.green),
+                    ),
+                  ),
+                ],
+              )
+            : Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: widget.unreadCount > 0
             ? UnreadBadge(count: widget.unreadCount)
             : null,

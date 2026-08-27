@@ -53,11 +53,15 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     setState(() => _loading = false);
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.session.error ?? '실패했습니다.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.session.error ?? '실패했습니다.')),
+      );
       return;
     }
     if (!_isRegister) {
-      await widget.session.setRememberedUsername(_rememberUsername ? _username.text.trim() : null);
+      await widget.session.setRememberedUsername(
+        _rememberUsername ? _username.text.trim() : null,
+      );
     }
   }
 
@@ -84,7 +88,13 @@ class _LoginScreenState extends State<LoginScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 20, offset: const Offset(0, 4))],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 20,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -92,18 +102,27 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   Text(
                     _isRegister ? '회원가입' : '로그인',
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   TextField(
                     controller: _username,
-                    decoration: const InputDecoration(labelText: '아이디', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: '아이디',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                   if (_isRegister) ...[
                     const SizedBox(height: 12),
                     TextField(
                       controller: _name,
-                      decoration: const InputDecoration(labelText: '이름', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: '이름',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -119,7 +138,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _password,
-                    decoration: const InputDecoration(labelText: '비밀번호', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      labelText: '비밀번호',
+                      border: OutlineInputBorder(),
+                    ),
                     obscureText: true,
                     onSubmitted: (_) => _submit(),
                   ),
@@ -135,12 +157,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             _CheckboxLabel(
                               label: '아이디 기억하기',
                               value: _rememberUsername,
-                              onChanged: (v) => setState(() => _rememberUsername = v),
+                              onChanged: (v) =>
+                                  setState(() => _rememberUsername = v),
                             ),
                             _CheckboxLabel(
                               label: '로그인 상태 유지',
                               value: _keepSignedIn,
-                              onChanged: (v) => setState(() => _keepSignedIn = v),
+                              onChanged: (v) =>
+                                  setState(() => _keepSignedIn = v),
                             ),
                           ],
                         ),
@@ -148,23 +172,42 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             TextButton(
                               style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                              onPressed: () => Navigator.of(context)
-                                  .push(MaterialPageRoute(builder: (_) => FindIdScreen(session: widget.session))),
-                              child: const Text('아이디 찾기', style: TextStyle(fontSize: 12)),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      FindIdScreen(session: widget.session),
+                                ),
+                              ),
+                              child: const Text(
+                                '아이디 찾기',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                             TextButton(
                               style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                              onPressed: () => Navigator.of(context)
-                                  .push(MaterialPageRoute(builder: (_) => FindPasswordScreen(session: widget.session))),
-                              child: const Text('비밀번호 찾기', style: TextStyle(fontSize: 12)),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => FindPasswordScreen(
+                                    session: widget.session,
+                                  ),
+                                ),
+                              ),
+                              child: const Text(
+                                '비밀번호 찾기',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                           ],
                         ),
@@ -180,25 +223,39 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     onPressed: _loading ? null : _submit,
                     child: _loading
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
                         : Text(_isRegister ? '가입하기' : '로그인'),
                   ),
                   const SizedBox(height: 16),
                   Center(
                     child: TextButton(
-                      onPressed: () => setState(() => _isRegister = !_isRegister),
-                      child: Text(_isRegister ? '이미 계정이 있으신가요? 로그인' : '계정이 없으신가요? 회원가입'),
+                      onPressed: () =>
+                          setState(() => _isRegister = !_isRegister),
+                      child: Text(
+                        _isRegister ? '이미 계정이 있으신가요? 로그인' : '계정이 없으신가요? 회원가입',
+                      ),
                     ),
                   ),
                   Center(
                     child: TextButton(
                       onPressed: () => showDialog(
                         context: context,
-                        builder: (_) => _ServerAddressDialog(session: widget.session),
+                        builder: (_) =>
+                            _ServerAddressDialog(session: widget.session),
                       ),
                       child: Text(
                         '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
                       ),
                     ),
                   ),
@@ -216,7 +273,11 @@ class _CheckboxLabel extends StatelessWidget {
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const _CheckboxLabel({required this.label, required this.value, required this.onChanged});
+  const _CheckboxLabel({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -256,7 +317,9 @@ class _ServerAddressDialog extends StatefulWidget {
 }
 
 class _ServerAddressDialogState extends State<_ServerAddressDialog> {
-  late final _controller = TextEditingController(text: widget.session.serverUrl ?? 'https://192.168.0.62:3000');
+  late final _controller = TextEditingController(
+    text: widget.session.serverUrl ?? 'https://192.168.0.62:3000',
+  );
   final _code = TextEditingController();
   bool _submitting = false;
   String? _error;
@@ -340,7 +403,11 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
         FilledButton(
           onPressed: _submitting ? null : _submit,
           child: _submitting
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('연결'),
         ),
       ],

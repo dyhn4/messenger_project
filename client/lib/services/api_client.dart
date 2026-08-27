@@ -472,14 +472,82 @@ class ApiClient {
     );
   }
 
+  /// 비밀 대화(E2EE)용 기기 신원 등록(멱등 — 같은 deviceId면 공개키만 갱신). 개인키는 절대 여기
+  /// 담기지 않는다(device_identity.dart 참고).
+  /// 상대 기기의 서명 검증키(비밀 대화 핸드셰이크의 임시 공개키 서명을 확인하는 데 씀) 조회.
+  Future<String> fetchDeviceSigningPublicKey(String deviceId) async {
+    final body =
+        await _get('/api/devices/$deviceId/public-key') as Map<String, dynamic>;
+    return body['signingPublicKey'] as String;
+  }
+
+  Future<void> registerDevice({
+    required String deviceId,
+    String? name,
+    required String identityPublicKey,
+    required String signingPublicKey,
+  }) async {
+    await _post('/api/devices', {
+      'deviceId': deviceId,
+      'name': ?name,
+      'identityPublicKey': identityPublicKey,
+      'signingPublicKey': signingPublicKey,
+    });
+  }
+
+  Future<Room> startSecretChat({
+    required String targetUserId,
+    required String deviceId,
+    required String initiatorEphemeralPublicKey,
+    required String initiatorEphemeralSignature,
+  }) async {
+    return Room.fromJson(
+      await _post('/api/secret-chats', {
+            'targetUserId': targetUserId,
+            'deviceId': deviceId,
+            'initiatorEphemeralPublicKey': initiatorEphemeralPublicKey,
+            'initiatorEphemeralSignature': initiatorEphemeralSignature,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> acceptSecretChat({
+    required String roomId,
+    required String deviceId,
+    required String responderEphemeralPublicKey,
+    required String responderEphemeralSignature,
+  }) async {
+    await _post('/api/secret-chats/$roomId/accept', {
+      'deviceId': deviceId,
+      'responderEphemeralPublicKey': responderEphemeralPublicKey,
+      'responderEphemeralSignature': responderEphemeralSignature,
+    });
+  }
+
+  Future<void> rejectSecretChat(String roomId) async {
+    await _post('/api/secret-chats/$roomId/reject', const {});
+  }
+
+  /// [seconds]가 null이면 자동 삭제를 끈다. 1초~1주(604800초) 범위여야 한다(서버가 재검증).
+  Future<void> setSecretChatTimer(String roomId, int? seconds) async {
+    await _patch('/api/secret-chats/$roomId/settings', {
+      'selfDestructSeconds': seconds,
+    });
+  }
+
   Future<Room> joinRoom(String roomId) async {
     return Room.fromJson(
       await _post('/api/rooms/$roomId/join', const {}) as Map<String, dynamic>,
     );
   }
 
-  Future<void> leaveRoom(String roomId) async {
-    await _post('/api/rooms/$roomId/leave', const {});
+  /// [alsoRemoveOther]는 비밀 대화에서만 의미가 있다 — true면 상대방도 함께 나가지고 방
+  /// 자체가 없어지며, false(기본)면 나만 나간다(평문 방은 이 값과 무관하게 항상 나만 나간다).
+  Future<void> leaveRoom(String roomId, {bool alsoRemoveOther = false}) async {
+    await _post('/api/rooms/$roomId/leave', {
+      'alsoRemoveOther': alsoRemoveOther,
+    });
   }
 
   Future<Room> inviteMembers(String roomId, List<String> userIds) async {

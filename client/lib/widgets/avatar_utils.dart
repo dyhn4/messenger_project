@@ -7,7 +7,8 @@ Color? parseHexColor(String? hex) {
   return Color(int.parse(full, radix: 16));
 }
 
-String colorToHex(Color color) => '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+String colorToHex(Color color) =>
+    '#${color.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
 
 /// avatarType('initial'/'character'/'photo')에 따라 업로드한 사진, 캐릭터(이모지+배경색),
 /// 이니셜 중 하나를 그리는 공용 아바타. `MyAvatar`(나)와 `UserAvatar`(다른 사용자)가 공유한다.
@@ -39,7 +40,9 @@ class AvatarView extends StatelessWidget {
     if (avatarType == 'character' && avatarEmoji != null) {
       return CircleAvatar(
         radius: radius,
-        backgroundColor: parseHexColor(avatarColor) ?? Theme.of(context).colorScheme.primaryContainer,
+        backgroundColor:
+            parseHexColor(avatarColor) ??
+            Theme.of(context).colorScheme.primaryContainer,
         child: Text(avatarEmoji!, style: TextStyle(fontSize: radius)),
       );
     }

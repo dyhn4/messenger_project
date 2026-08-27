@@ -54,7 +54,10 @@ class _FindIdScreenState extends State<FindIdScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _email,
-              decoration: const InputDecoration(labelText: '이메일', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: '이메일',
+                border: OutlineInputBorder(),
+              ),
               keyboardType: TextInputType.emailAddress,
               onSubmitted: (_) => _submit(),
             ),
@@ -66,18 +69,28 @@ class _FindIdScreenState extends State<FindIdScreen> {
                   color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text('아이디: $_foundUsername', style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: Text(
+                  '아이디: $_foundUsername',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
             ],
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
             const SizedBox(height: 20),
             FilledButton(
               onPressed: _loading ? null : _submit,
               child: _loading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('아이디 찾기'),
             ),
           ],

@@ -33,6 +33,22 @@ class Room {
   /// 보내거나 받을 때마다 Session._bumpRoomActivity가 갱신한다 — 그래서 non-final.
   DateTime lastActivityAt;
 
+  /// 비밀 대화(E2EE) 방인지 — dm 위에 얹는 플래그(새 RoomType을 만들지 않음, isPublic과 같은 방식).
+  /// true면 text는 클라이언트가 만든 암호문 JSON이라 Session이 송수신 경계에서 암복호화한다.
+  final bool isSecret;
+
+  /// 비밀 대화 핸드셰이크 상태: 'pending'(초대 대기) | 'active'(성립) | 'rejected' | 'terminated'.
+  /// 서버가 room:created/rooms 목록에 실어 보내고(rooms.js의 toRoomDto), 그 자리에서 바뀔 수
+  /// 있어(secret:accepted 수신 시) non-final.
+  String? secretStatus;
+
+  /// 자동 삭제 타이머(초). null이면 꺼짐. RoomOptionsMenu 설정 변경 시 그 자리에서 바뀌므로 non-final.
+  int? secretSelfDestructSeconds;
+
+  /// 비밀 대화에서 "상대방도 나가기" 없이 상대방 혼자 나갔을 때, 그 사람의 이름(members에는
+  /// 더 이상 없음). displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여주는 데 쓴다.
+  final String? secretDepartedMemberName;
+
   Room({
     required this.id,
     required this.type,
@@ -45,6 +61,10 @@ class Room {
     this.unreadCount = 0,
     this.favorite = false,
     DateTime? lastActivityAt,
+    this.isSecret = false,
+    this.secretStatus,
+    this.secretSelfDestructSeconds,
+    this.secretDepartedMemberName,
   }) : lastActivityAt = lastActivityAt ?? createdAt;
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -70,6 +90,11 @@ class Room {
               (json['lastActivityAt'] as num).toInt(),
             )
           : null,
+      isSecret: json['isSecret'] as bool? ?? false,
+      secretStatus: json['secretStatus'] as String?,
+      secretSelfDestructSeconds: (json['secretSelfDestructSeconds'] as num?)
+          ?.toInt(),
+      secretDepartedMemberName: json['secretDepartedMemberName'] as String?,
     );
   }
 
@@ -79,6 +104,9 @@ class Room {
     if (type == RoomType.dm) {
       for (final m in members) {
         if (m.id != myUserId) return m.name;
+      }
+      if (secretDepartedMemberName != null) {
+        return '$secretDepartedMemberName (나갔음)';
       }
       return '(알 수 없음)';
     }

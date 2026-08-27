@@ -15,6 +15,7 @@ import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -245,6 +246,25 @@ class _MessageBubbleState extends State<MessageBubble> {
                         color: Theme.of(context).hintColor,
                       ),
                     )
+                  : message.decryptFailed
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.lock_outline,
+                          size: 14,
+                          color: Theme.of(context).hintColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '이 메시지는 복호화할 수 없습니다',
+                          style: TextStyle(
+                            fontStyle: FontStyle.italic,
+                            color: Theme.of(context).hintColor,
+                          ),
+                        ),
+                      ],
+                    )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -284,11 +304,19 @@ class _MessageBubbleState extends State<MessageBubble> {
           ],
           if (widget.showTime) ...[
             const SizedBox(width: 6),
-            Text(
-              _timeFormat.format(message.createdAt),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (message.expiresAt != null)
+                  SelfDestructCountdown(expiresAt: message.expiresAt!),
+                Text(
+                  _timeFormat.format(message.createdAt),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).hintColor,
+                  ),
+                ),
+              ],
             ),
           ],
           // 호버 시 시간 오른쪽에 뜨는 댓글/더보기 툴바. 세로(Column)가 아니라 이 Row 안에 두면
@@ -297,6 +325,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           // 밀려나지 않는다.
           if (_hovering &&
               !message.deleted &&
+              !message.decryptFailed &&
               !_editing &&
               widget.onOpenThread != null) ...[
             const SizedBox(width: 6),
@@ -457,6 +486,8 @@ class _MessageBubbleState extends State<MessageBubble> {
           session: widget.session,
           url: url,
           fileName: message.fileName ?? 'image.png',
+          attachmentKey: message.attachmentKey,
+          attachmentNonce: message.attachmentNonce,
         );
       case MessageType.file:
         final url = widget.resolveUrl(message.fileUrl ?? '');
@@ -464,6 +495,8 @@ class _MessageBubbleState extends State<MessageBubble> {
           session: widget.session,
           url: url,
           fileName: message.fileName ?? '파일',
+          attachmentKey: message.attachmentKey,
+          attachmentNonce: message.attachmentNonce,
         );
       case MessageType.text:
         return SelectableText(message.text ?? '');

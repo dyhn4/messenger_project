@@ -13,16 +13,26 @@ class MyProfileDialog extends StatelessWidget {
   const MyProfileDialog({super.key, required this.session});
 
   Future<void> _editAvatar(BuildContext context) async {
-    await showDialog(context: context, builder: (_) => AvatarEditDialog(session: session));
+    await showDialog(
+      context: context,
+      builder: (_) => AvatarEditDialog(session: session),
+    );
   }
 
   Future<void> _editName(BuildContext context) async {
-    final value = await _promptEdit(context, title: '이름 변경', initialValue: session.name ?? '');
+    final value = await _promptEdit(
+      context,
+      title: '이름 변경',
+      initialValue: session.name ?? '',
+    );
     if (value == null || value.isEmpty) return;
     try {
       await session.updateProfile(name: value);
     } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('실패: $e')));
+      if (context.mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('실패: $e')));
     }
   }
 
@@ -37,18 +47,25 @@ class MyProfileDialog extends StatelessWidget {
     try {
       await session.updateProfile(email: value);
     } catch (e) {
-      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('실패: $e')));
+      if (context.mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('실패: $e')));
     }
   }
 
   Future<void> _changePassword(BuildContext context) async {
-    await showDialog<bool>(context: context, builder: (_) => _ChangePasswordDialog(session: session));
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => _ChangePasswordDialog(session: session),
+    );
   }
 
   Future<void> _logout(BuildContext context) async {
     Navigator.of(context).pop();
     await session.logout();
-    if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    if (context.mounted)
+      Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<void> _withdraw(BuildContext context) async {
@@ -58,7 +75,8 @@ class MyProfileDialog extends StatelessWidget {
     );
     if (confirmed == true && context.mounted) {
       Navigator.of(context).pop(); // 프로필 카드 닫기
-      if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+      if (context.mounted)
+        Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
 
@@ -78,7 +96,9 @@ class MyProfileDialog extends StatelessWidget {
                 height: 90,
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16),
+                  ),
                 ),
                 alignment: Alignment.bottomCenter,
                 child: Transform.translate(
@@ -94,8 +114,14 @@ class MyProfileDialog extends StatelessWidget {
                           bottom: -2,
                           child: CircleAvatar(
                             radius: 11,
-                            backgroundColor: Theme.of(context).colorScheme.primary,
-                            child: const Icon(Icons.camera_alt, size: 13, color: Colors.white),
+                            backgroundColor: Theme.of(
+                              context,
+                            ).colorScheme.primary,
+                            child: const Icon(
+                              Icons.camera_alt,
+                              size: 13,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ],
@@ -104,7 +130,11 @@ class MyProfileDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 44),
-              _ProfileInfoRow(icon: Icons.badge_outlined, label: '아이디', value: session.username ?? ''),
+              _ProfileInfoRow(
+                icon: Icons.badge_outlined,
+                label: '아이디',
+                value: session.username ?? '',
+              ),
               _ProfileInfoRow(
                 icon: Icons.person_outline,
                 label: '이름',
@@ -131,13 +161,23 @@ class MyProfileDialog extends StatelessWidget {
                   child: TextButton.icon(
                     onPressed: () => _logout(context),
                     style: TextButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       foregroundColor: Colors.redAccent,
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     icon: const Icon(Icons.logout, color: Colors.redAccent),
-                    label: const Text('로그아웃', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600)),
+                    label: const Text(
+                      '로그아웃',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -145,8 +185,13 @@ class MyProfileDialog extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                 child: TextButton(
                   onPressed: () => _withdraw(context),
-                  style: TextButton.styleFrom(foregroundColor: Theme.of(context).hintColor),
-                  child: const Text('회원 탈퇴', style: TextStyle(decoration: TextDecoration.underline)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).hintColor,
+                  ),
+                  child: const Text(
+                    '회원 탈퇴',
+                    style: TextStyle(decoration: TextDecoration.underline),
+                  ),
                 ),
               ),
             ],
@@ -212,7 +257,10 @@ class _WithdrawConfirmDialogState extends State<_WithdrawConfirmDialog> {
             controller: _password,
             autofocus: true,
             obscureText: true,
-            decoration: const InputDecoration(labelText: '비밀번호', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: '비밀번호',
+              border: OutlineInputBorder(),
+            ),
             onSubmitted: (_) => _submit(),
           ),
           if (_error != null) ...[
@@ -223,14 +271,23 @@ class _WithdrawConfirmDialogState extends State<_WithdrawConfirmDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
+          onPressed: _submitting
+              ? null
+              : () => Navigator.of(context).pop(false),
           child: const Text('취소'),
         ),
         FilledButton(
           onPressed: _submitting ? null : _submit,
           style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
           child: _submitting
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
               : const Text('탈퇴하기'),
         ),
       ],
@@ -274,7 +331,10 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
       _error = null;
     });
     try {
-      await widget.session.changePassword(currentPassword: _current.text, newPassword: _newPassword.text);
+      await widget.session.changePassword(
+        currentPassword: _current.text,
+        newPassword: _newPassword.text,
+      );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -295,19 +355,28 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
             controller: _current,
             autofocus: true,
             obscureText: true,
-            decoration: const InputDecoration(labelText: '현재 비밀번호', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: '현재 비밀번호',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _newPassword,
             obscureText: true,
-            decoration: const InputDecoration(labelText: '새 비밀번호', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: '새 비밀번호',
+              border: OutlineInputBorder(),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _confirm,
             obscureText: true,
-            decoration: const InputDecoration(labelText: '새 비밀번호 확인', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: '새 비밀번호 확인',
+              border: OutlineInputBorder(),
+            ),
             onSubmitted: (_) => _submit(),
           ),
           if (_error != null) ...[
@@ -324,7 +393,11 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
         FilledButton(
           onPressed: _submitting ? null : _submit,
           child: _submitting
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Text('변경하기'),
         ),
       ],
@@ -338,7 +411,12 @@ class _ProfileInfoRow extends StatelessWidget {
   final String label;
   final String value;
   final VoidCallback? onTap;
-  const _ProfileInfoRow({required this.icon, required this.label, required this.value, this.onTap});
+  const _ProfileInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -356,22 +434,34 @@ class _ProfileInfoRow extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).hintColor,
+                ),
               ),
             ),
             Expanded(
-              child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodyMedium),
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
             if (onTap != null)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '수정',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
           ],
@@ -393,10 +483,20 @@ Future<String?> _promptEdit(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
-      content: TextField(controller: controller, autofocus: true, keyboardType: keyboardType),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        keyboardType: keyboardType,
+      ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('취소')),
-        FilledButton(onPressed: () => Navigator.of(context).pop(controller.text.trim()), child: const Text('확인')),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+          child: const Text('확인'),
+        ),
       ],
     ),
   );
@@ -419,25 +519,40 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
     try {
       await widget.session.updateAvatar(avatarType: 'initial');
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('실패: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('실패: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _pickCharacter() async {
-    await showDialog(context: context, builder: (_) => CharacterPickerDialog(session: widget.session));
+    await showDialog(
+      context: context,
+      builder: (_) => CharacterPickerDialog(session: widget.session),
+    );
   }
 
   Future<void> _uploadPhoto() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked == null) return;
     setState(() => _busy = true);
     try {
       final uploaded = await widget.session.api!.uploadFile(File(picked.path));
-      await widget.session.updateAvatar(avatarType: 'photo', avatarUrl: uploaded.url);
+      await widget.session.updateAvatar(
+        avatarType: 'photo',
+        avatarUrl: uploaded.url,
+      );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -458,7 +573,9 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
               children: [
                 Text(
                   '프로필 사진 편집',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 AspectRatio(
@@ -466,8 +583,12 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: ColoredBox(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                      child: Center(child: MyAvatar(session: widget.session, radius: 80)),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      child: Center(
+                        child: MyAvatar(session: widget.session, radius: 80),
+                      ),
                     ),
                   ),
                 ),
@@ -475,18 +596,29 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                 Text(
                   '프로필 사진은 640x640px 해상도를 권장합니다.',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).hintColor,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (_busy)
-                  const Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator())
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: CircularProgressIndicator(),
+                  )
                 else
                   Wrap(
                     alignment: WrapAlignment.center,
                     children: [
                       TextButton(onPressed: _reset, child: const Text('초기화')),
-                      TextButton(onPressed: _pickCharacter, child: const Text('캐릭터 선택하기')),
-                      TextButton(onPressed: _uploadPhoto, child: const Text('사진 올리기')),
+                      TextButton(
+                        onPressed: _pickCharacter,
+                        child: const Text('캐릭터 선택하기'),
+                      ),
+                      TextButton(
+                        onPressed: _uploadPhoto,
+                        child: const Text('사진 올리기'),
+                      ),
                     ],
                   ),
               ],
@@ -499,8 +631,18 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
 }
 
 const _characterEmojis = [
-  '🧑‍🦰', '👮', '🧑‍🌾', '👩‍🦰', '🧑‍✈️', '👩‍💼',
-  '🧑‍💼', '👩‍🦱', '🧔', '👩‍🎤', '🧑‍🎨', '🧑‍🔬',
+  '🧑‍🦰',
+  '👮',
+  '🧑‍🌾',
+  '👩‍🦰',
+  '🧑‍✈️',
+  '👩‍💼',
+  '🧑‍💼',
+  '👩‍🦱',
+  '🧔',
+  '👩‍🎤',
+  '🧑‍🎨',
+  '🧑‍🔬',
 ];
 
 const _characterColors = [
@@ -527,7 +669,8 @@ class CharacterPickerDialog extends StatefulWidget {
 
 class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
   late String _emoji = widget.session.avatarEmoji ?? _characterEmojis.first;
-  late Color _color = parseHexColor(widget.session.avatarColor) ?? _characterColors.first;
+  late Color _color =
+      parseHexColor(widget.session.avatarColor) ?? _characterColors.first;
   bool _saving = false;
 
   Future<void> _confirm() async {
@@ -540,7 +683,10 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('실패: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('실패: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -559,14 +705,31 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
             children: [
               Text(
                 '프로필 사진 편집',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
-              Text('캐릭터 선택하기', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor)),
+              Text(
+                '캐릭터 선택하기',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).hintColor,
+                ),
+              ),
               const SizedBox(height: 16),
-              CircleAvatar(radius: 44, backgroundColor: _color, child: Text(_emoji, style: const TextStyle(fontSize: 40))),
+              CircleAvatar(
+                radius: 44,
+                backgroundColor: _color,
+                child: Text(_emoji, style: const TextStyle(fontSize: 40)),
+              ),
               const SizedBox(height: 16),
-              Align(alignment: Alignment.centerLeft, child: Text('캐릭터', style: Theme.of(context).textTheme.labelMedium)),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '캐릭터',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 10,
@@ -576,12 +739,22 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                     _PickCircle(
                       selected: e == _emoji,
                       onTap: () => setState(() => _emoji = e),
-                      child: CircleAvatar(radius: 22, backgroundColor: _color, child: Text(e, style: const TextStyle(fontSize: 20))),
+                      child: CircleAvatar(
+                        radius: 22,
+                        backgroundColor: _color,
+                        child: Text(e, style: const TextStyle(fontSize: 20)),
+                      ),
                     ),
                 ],
               ),
               const SizedBox(height: 16),
-              Align(alignment: Alignment.centerLeft, child: Text('색상', style: Theme.of(context).textTheme.labelMedium)),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '색상',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 10,
@@ -595,7 +768,11 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                         radius: 14,
                         backgroundColor: c,
                         child: c.toARGB32() == _color.toARGB32()
-                            ? const Icon(Icons.check, size: 16, color: Colors.white)
+                            ? const Icon(
+                                Icons.check,
+                                size: 16,
+                                color: Colors.white,
+                              )
                             : null,
                       ),
                     ),
@@ -606,7 +783,9 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       child: const Text('닫기'),
                     ),
                   ),
@@ -615,7 +794,11 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
                     child: FilledButton(
                       onPressed: _saving ? null : _confirm,
                       child: _saving
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
                           : const Text('확인'),
                     ),
                   ),
@@ -633,7 +816,11 @@ class _PickCircle extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final Widget child;
-  const _PickCircle({required this.selected, required this.onTap, required this.child});
+  const _PickCircle({
+    required this.selected,
+    required this.onTap,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -645,7 +832,9 @@ class _PickCircle extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: selected ? Theme.of(context).colorScheme.primary : Colors.transparent,
+            color: selected
+                ? Theme.of(context).colorScheme.primary
+                : Colors.transparent,
             width: 2,
           ),
         ),

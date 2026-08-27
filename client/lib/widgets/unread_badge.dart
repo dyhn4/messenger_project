@@ -10,11 +10,18 @@ class UnreadBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       constraints: const BoxConstraints(minWidth: 18),
-      decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: Colors.redAccent,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Text(
         '$count',
         textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }

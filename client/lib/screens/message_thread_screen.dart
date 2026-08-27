@@ -169,6 +169,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                         onEdit: widget.controller.editComment,
                         onDelete: widget.controller.deleteComment,
                         fullWidth: true,
+                        expiresAt: widget.message.expiresAt,
                         showAvatar:
                             i == 0 ||
                             comments[i - 1].senderId != comments[i].senderId,

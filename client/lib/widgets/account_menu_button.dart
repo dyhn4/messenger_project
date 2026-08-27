@@ -29,24 +29,41 @@ class AccountMenuButton extends StatelessWidget {
       tooltip: '메뉴',
       itemBuilder: (context) => [
         PopupMenuItem<void>(
-          onTap: () => showDialog(context: context, builder: (_) => MyProfileDialog(session: session)),
+          onTap: () => showDialog(
+            context: context,
+            builder: (_) => MyProfileDialog(session: session),
+          ),
           child: Row(
             children: [
               MyAvatar(session: session, radius: 14),
               const SizedBox(width: 8),
-              Text(session.name ?? session.username ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                session.name ?? session.username ?? '',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
             ],
           ),
         ),
         const PopupMenuDivider(),
         PopupMenuItem<void>(
-          onTap: () => showDialog(context: context, builder: (_) => SettingsScreen(session: session)),
+          onTap: () => showDialog(
+            context: context,
+            builder: (_) => SettingsScreen(session: session),
+          ),
           child: const Row(
-            children: [Icon(Icons.settings_outlined), SizedBox(width: 8), Text('설정')],
+            children: [
+              Icon(Icons.settings_outlined),
+              SizedBox(width: 8),
+              Text('설정'),
+            ],
           ),
         ),
         PopupMenuItem<void>(
-          onTap: () => showLicensePage(context: context, applicationName: '메신저', applicationVersion: _appVersion),
+          onTap: () => showLicensePage(
+            context: context,
+            applicationName: '메신저',
+            applicationVersion: _appVersion,
+          ),
           child: const Row(
             children: [
               Icon(Icons.description_outlined),

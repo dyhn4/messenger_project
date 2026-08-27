@@ -9,7 +9,18 @@ import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/session.dart';
 import 'floating_dialog.dart';
+import 'self_destruct_picker_dialog.dart';
 import 'user_avatar.dart';
+
+/// RoomOptionsMenu의 자동 삭제 타이머 항목 트레일링 표시용 — self_destruct_picker_dialog.dart의
+/// 프리셋(1초/5초/30초/1분/5분/1시간/1일/1주) 라벨과 맞춘 짧은 문구.
+String _formatSeconds(int seconds) {
+  if (seconds >= 7 * 24 * 60 * 60) return '1주';
+  if (seconds >= 24 * 60 * 60) return '1일';
+  if (seconds >= 60 * 60) return '1시간';
+  if (seconds >= 60) return '${seconds ~/ 60}분';
+  return '$seconds초';
+}
 
 /// 채팅 화면 우측 상단의 "더보기" 메뉴: 멤버 목록/초대(토픽·그룹만) + 나가기(전부).
 /// DM은 멤버가 항상 나+상대방 둘뿐이라 멤버 목록/초대는 의미가 없어서 나가기만 보여준다.
@@ -22,7 +33,10 @@ class RoomOptionsMenu extends StatelessWidget {
 
   Future<void> _openMemberProfile(BuildContext context, AppUser member) async {
     if (member.id == session.userId) {
-      showDialog(context: context, builder: (_) => MyProfileDialog(session: session));
+      showDialog(
+        context: context,
+        builder: (_) => MyProfileDialog(session: session),
+      );
       return;
     }
     // MemberProfileDialog에서 "1:1 메시지"를 누르면 새로 만들어진/기존 DM 방을 반환한다 —
@@ -36,12 +50,17 @@ class RoomOptionsMenu extends StatelessWidget {
     if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
       session.requestOpenRoom(room);
     } else {
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(session: session, room: room)));
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(session: session, room: room),
+        ),
+      );
     }
   }
 
   void _showMembers(BuildContext context) {
-    final sorted = room.members.toList()..sort((a, b) => a.name.compareTo(b.name));
+    final sorted = room.members.toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
     showDialog(
       context: context,
       builder: (_) => FloatingDialog(
@@ -67,28 +86,64 @@ class RoomOptionsMenu extends StatelessWidget {
   Future<void> _leave(BuildContext context) async {
     final isDm = room.type == RoomType.dm;
     final isTopic = room.type == RoomType.topic;
-    final label = isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기');
+    // 비밀 대화는 "나만 목록에서 숨기기"가 의미가 없다(서버가 내용을 못 보므로) — 항상
+    // "나가기"로 표시하고, 상대방도 같이 나가지는지는 아래 체크박스로 고른다.
+    final label = room.isSecret
+        ? '채팅방 나가기'
+        : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
+    var alsoRemoveOther = false;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(label),
-        content: Text(
-          isDm
-              ? '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.'
-              : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('취소')),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(isDm ? '숨기기' : '나가기', style: const TextStyle(color: Colors.redAccent)),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(label),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                room.isSecret
+                    ? '\'${room.displayName(session.userId ?? '')}\' 비밀 대화를 나가시겠습니까?'
+                    : isDm
+                    ? '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.'
+                    : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
+              ),
+              if (room.isSecret)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: alsoRemoveOther,
+                  onChanged: (v) =>
+                      setDialogState(() => alsoRemoveOther = v ?? false),
+                  title: const Text('상대방도 나가기'),
+                  subtitle: const Text(
+                    '체크하면 상대방도 함께 나가지고 대화 내용이 양쪽 기기에서 모두 삭제됩니다. 체크하지 않으면 나만 나가고 상대방은 대화방에 그대로 남습니다.',
+                  ),
+                ),
+            ],
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(
+                !room.isSecret && isDm ? '숨기기' : '나가기',
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed != true) return;
 
-    await session.leaveRoom(room.id);
+    await session.leaveRoom(
+      room.id,
+      alsoRemoveOther: room.isSecret && alsoRemoveOther,
+    );
     if (context.mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
@@ -98,7 +153,9 @@ class RoomOptionsMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDm = room.type == RoomType.dm;
     final isTopic = room.type == RoomType.topic;
-    final leaveLabel = isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기');
+    final leaveLabel = room.isSecret
+        ? '채팅방 나가기'
+        : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
 
     return PopupMenuButton<void>(
       icon: const Icon(Icons.more_vert),
@@ -123,11 +180,19 @@ class RoomOptionsMenu extends StatelessWidget {
               if (isWide) {
                 showDialog(
                   context: context,
-                  builder: (_) => InviteMembersScreen(session: session, room: room, asDialog: true),
+                  builder: (_) => InviteMembersScreen(
+                    session: session,
+                    room: room,
+                    asDialog: true,
+                  ),
                 );
               } else {
-                Navigator.of(context)
-                    .push(MaterialPageRoute(builder: (_) => InviteMembersScreen(session: session, room: room)));
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        InviteMembersScreen(session: session, room: room),
+                  ),
+                );
               }
             },
             child: const Row(
@@ -139,6 +204,25 @@ class RoomOptionsMenu extends StatelessWidget {
             ),
           ),
         ],
+        if (room.isSecret)
+          PopupMenuItem<void>(
+            onTap: () => showDialog(
+              context: context,
+              builder: (_) =>
+                  SelfDestructPickerDialog(session: session, room: room),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.timer_outlined),
+                const SizedBox(width: 8),
+                Text(
+                  room.secretSelfDestructSeconds == null
+                      ? '자동 삭제 타이머'
+                      : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
+                ),
+              ],
+            ),
+          ),
         PopupMenuItem<void>(
           onTap: () => _leave(context),
           child: Row(

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -13,9 +14,11 @@ import '../models/room.dart';
 import 'api_client.dart';
 import 'app_settings.dart';
 import 'chat_socket.dart';
+import 'device_identity.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
 import 'room_chat_controller.dart';
+import 'secret_session_manager.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -31,6 +34,7 @@ class Session extends ChangeNotifier {
   static const _kUserId = 'auth_user_id';
   static const _kUsername = 'auth_username';
   static const _kRememberedUsername = 'remembered_username';
+  static const _secretPreviewPlaceholder = '새 메시지가 있습니다';
 
   late SharedPreferences _prefs;
 
@@ -57,6 +61,15 @@ class Session extends ChangeNotifier {
   final AppSettings settings;
   final List<Room> rooms = [];
 
+  /// 비밀 대화(E2EE)의 이 기기 신원 + 방별 핸드셰이크/암복호화 상태. 로그인마다(재로그인 포함)
+  /// api 인스턴스가 바뀌므로 secretSessionManager는 _enterApp에서 매번 새로 만들지만,
+  /// deviceIdentity(기기 UUID+키쌍)는 flutter_secure_storage에 영구 저장되므로 인스턴스만 재사용.
+  DeviceIdentity? deviceIdentity;
+  SecretSessionManager? secretSessionManager;
+
+  /// 아직 응답하지 않은 비밀 대화 초대(secret:invite). UI가 이 목록을 보고 수락/거절 다이얼로그를 띄운다.
+  final List<SecretInviteEvent> pendingSecretInvites = [];
+
   final _controllers = <String, RoomChatController>{};
   StreamSubscription? _messageSub;
   StreamSubscription? _roomSub;
@@ -70,6 +83,15 @@ class Session extends ChangeNotifier {
   StreamSubscription? _presenceSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
+  StreamSubscription? _secretInviteSub;
+  StreamSubscription? _secretAcceptedSub;
+  StreamSubscription? _secretRejectedSub;
+  StreamSubscription? _secretLeftSub;
+  StreamSubscription? _secretSettingsSub;
+  StreamSubscription? _secretMessageReadSub;
+  StreamSubscription? _messageExpiredSub;
+  StreamSubscription? _secretRekeyProposeSub;
+  StreamSubscription? _secretRekeyAckSub;
 
   /// 지금 소켓으로 연결되어 있는(온라인) 사용자 id 집합. 멤버 목록의 초록 점 표시에 쓴다.
   final Set<String> onlineUserIds = {};
@@ -298,9 +320,23 @@ class Session extends ChangeNotifier {
     // 형식이라 애초에 무효인 경우). 그러면 token이 null로 바뀌어 있으니 여기서 멈춘다.
     if (token == null) return;
 
-    await chatSocket.connect(baseUrl: serverUrl!, token: token!);
+    deviceIdentity ??= DeviceIdentity();
+    await deviceIdentity!.ensureLoaded();
+    secretSessionManager = SecretSessionManager(
+      api: api!,
+      socket: chatSocket,
+      identity: deviceIdentity!,
+    );
+    unawaited(deviceIdentity!.registerWithServer(api!));
+
+    await chatSocket.connect(
+      baseUrl: serverUrl!,
+      token: token!,
+      deviceId: deviceIdentity!.deviceId,
+    );
     _messageSub?.cancel();
-    _messageSub = chatSocket.messages.listen((m) {
+    _messageSub = chatSocket.messages.listen((m) async {
+      await decryptInPlace(_findRoom(m.roomId), m);
       _controllers[m.roomId]?.feed(m);
       // 내가 보낸 메시지도 이 방 소켓으로 그대로 되돌아오므로(feed 참고), 보낸/받은 경우 모두
       // 여기서 한 번에 방을 "최근 활동"으로 끌어올릴 수 있다 — _handleIncomingMessage는 내가
@@ -325,13 +361,17 @@ class Session extends ChangeNotifier {
       notifyListeners();
     });
     _commentSub?.cancel();
-    _commentSub = chatSocket.commentEvents.listen((c) {
+    _commentSub = chatSocket.commentEvents.listen((c) async {
+      await decryptCommentInPlace(_findRoom(c.roomId), c);
       _controllers[c.roomId]?.addComment(c);
       _bumpRoomActivity(c.roomId, c.createdAt);
       _handleIncomingComment(c);
     });
     _messageEditedSub?.cancel();
-    _messageEditedSub = chatSocket.messageEdited.listen((m) {
+    _messageEditedSub = chatSocket.messageEdited.listen((m) async {
+      // 같은 messageId라도 내용이 바뀐 것(수정)이라 forceDecrypt로 캐시를 무시하고 새로
+      // 복호화한다 — 안 그러면 수정 전 평문이 영구 캐시에 박제되어 계속 그것만 보인다.
+      await decryptInPlace(_findRoom(m.roomId), m, forceDecrypt: true);
       _controllers[m.roomId]?.applyEdit(m);
     });
     _messageDeletedSub?.cancel();
@@ -339,7 +379,8 @@ class Session extends ChangeNotifier {
       _controllers[e.roomId]?.applyDelete(e.id);
     });
     _commentEditedSub?.cancel();
-    _commentEditedSub = chatSocket.commentEdited.listen((c) {
+    _commentEditedSub = chatSocket.commentEdited.listen((c) async {
+      await decryptCommentInPlace(_findRoom(c.roomId), c, forceDecrypt: true);
       _controllers[c.roomId]?.applyCommentEdit(c);
     });
     _commentDeletedSub?.cancel();
@@ -356,6 +397,66 @@ class Session extends ChangeNotifier {
       notifyListeners();
     });
     unawaited(_seedOnlineUsers());
+    _secretInviteSub?.cancel();
+    _secretInviteSub = chatSocket.secretInvites.listen((e) {
+      pendingSecretInvites.add(e);
+      notifyListeners();
+    });
+    _secretAcceptedSub?.cancel();
+    _secretAcceptedSub = chatSocket.secretAccepted.listen((e) async {
+      await secretSessionManager?.handleAccepted(e);
+      final room = _findRoom(e.roomId);
+      if (room != null) {
+        room.secretStatus = 'active';
+        notifyListeners();
+      }
+    });
+    _secretRejectedSub?.cancel();
+    _secretRejectedSub = chatSocket.secretRejected.listen((e) async {
+      await secretSessionManager?.forgetRoom(e.roomId);
+      rooms.removeWhere((r) => r.id == e.roomId);
+      _controllers.remove(e.roomId)?.dispose();
+      notifyListeners();
+    });
+    _secretLeftSub?.cancel();
+    _secretLeftSub = chatSocket.secretLeft.listen((e) async {
+      // 나 또는 상대방이 나가서 서버가 방을 완전히 지웠다는 신호 — 양쪽 다 여기서 정리한다.
+      await secretSessionManager?.forgetRoom(e.roomId);
+      rooms.removeWhere((r) => r.id == e.roomId);
+      _controllers.remove(e.roomId)?.dispose();
+      if (_activeRoomId == e.roomId) _activeRoomId = null;
+      notifyListeners();
+    });
+    _secretSettingsSub?.cancel();
+    _secretSettingsSub = chatSocket.secretSettings.listen((e) {
+      final room = _findRoom(e.roomId);
+      if (room != null) {
+        room.secretSelfDestructSeconds = e.selfDestructSeconds;
+        notifyListeners();
+      }
+    });
+    _secretMessageReadSub?.cancel();
+    _secretMessageReadSub = chatSocket.secretMessageRead.listen((e) {
+      _controllers[e.roomId]?.applyMessageRead(
+        e.messageId,
+        DateTime.fromMillisecondsSinceEpoch(e.readAt),
+        e.expiresAt != null
+            ? DateTime.fromMillisecondsSinceEpoch(e.expiresAt!)
+            : null,
+      );
+    });
+    _messageExpiredSub?.cancel();
+    _messageExpiredSub = chatSocket.messageExpired.listen((e) {
+      _controllers[e.roomId]?.applyExpire(e.messageId);
+    });
+    _secretRekeyProposeSub?.cancel();
+    _secretRekeyProposeSub = chatSocket.secretRekeyPropose.listen((e) {
+      secretSessionManager?.handleRekeyPropose(e);
+    });
+    _secretRekeyAckSub?.cancel();
+    _secretRekeyAckSub = chatSocket.secretRekeyAck.listen((e) {
+      secretSessionManager?.handleRekeyAck(e);
+    });
     _reconnectSub?.cancel();
     _reconnectSub = chatSocket.reconnected.listen(
       (_) => _resyncAfterReconnect(),
@@ -453,6 +554,183 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  Room? _findRoom(String roomId) {
+    final match = rooms.where((r) => r.id == roomId);
+    return match.isEmpty ? null : match.first;
+  }
+
+  // ---- 비밀 대화(E2EE) ----
+
+  /// 상대에게 비밀 대화를 건다 — 새 방이 생성되고 서버로는 임시 공개키/서명만 나간다.
+  Future<Room> startSecretChat(String targetUserId) async {
+    final room = await secretSessionManager!.startSecretChat(targetUserId);
+    _upsertRoom(room);
+    return room;
+  }
+
+  Future<void> acceptSecretInvite(SecretInviteEvent invite) async {
+    pendingSecretInvites.remove(invite);
+    final ok = await secretSessionManager!.acceptInvite(invite);
+    if (!ok) {
+      error = '상대 기기의 서명을 확인할 수 없어 비밀 대화를 시작할 수 없습니다.';
+    }
+    final room = _findRoom(invite.roomId);
+    if (room != null && ok) room.secretStatus = 'active';
+    notifyListeners();
+  }
+
+  Future<void> rejectSecretInvite(SecretInviteEvent invite) async {
+    pendingSecretInvites.remove(invite);
+    await secretSessionManager!.rejectInvite(invite.roomId);
+    notifyListeners();
+  }
+
+  Future<void> setSecretChatTimer(Room room, int? seconds) async {
+    await api!.setSecretChatTimer(room.id, seconds);
+    room.secretSelfDestructSeconds = seconds;
+    notifyListeners();
+  }
+
+  /// 비밀 대화면 평문을 암호문 봉투(JSON 문자열)로 바꾼다. 세션이 아직 성립되지 않았으면(핸드셰이크
+  /// 진행 중) 예외를 던진다 — 호출자가 스낵바 등으로 보여줄 수 있게.
+  Future<String?> encryptOutgoing(Room room, String? plainText) async {
+    if (!room.isSecret) return plainText;
+    final envelope = await secretSessionManager!.encryptForRoom(
+      room.id,
+      plainText ?? '',
+    );
+    if (envelope == null) {
+      throw ApiException('비밀 대화가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
+    }
+    return envelope;
+  }
+
+  /// 비밀 대화의 이미지/파일 첨부 — 캡션+원본 파일정보+첨부 복호화 키를 하나의 암호문 봉투로
+  /// 묶는다. 서버로는 이 봉투만 text에 담아 보내고, 실제 파일명/종류는 더미 값으로 가린다.
+  Future<String> encryptAttachmentPayload(
+    Room room, {
+    String? caption,
+    required String fileName,
+    required int fileSize,
+    String? mimeType,
+    required String attachmentKey,
+    required String attachmentNonce,
+  }) async {
+    final payload = jsonEncode({
+      'caption': caption,
+      'fileName': fileName,
+      'fileSize': fileSize,
+      'mimeType': mimeType,
+      'attachmentKey': attachmentKey,
+      'attachmentNonce': attachmentNonce,
+    });
+    final envelope = await secretSessionManager!.encryptForRoom(
+      room.id,
+      payload,
+    );
+    if (envelope == null) {
+      throw ApiException('비밀 대화가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
+    }
+    return envelope;
+  }
+
+  /// 수신한 메시지의 text가 비밀 대화 암호문 봉투면 그 자리에서 평문으로 바꾼다(실패하면
+  /// decryptFailed만 세우고 text는 null). 이미지/파일 메시지는 캡션+원본 파일정보+첨부 복호화
+  /// 키가 봉투 하나에 다 들어있어서, 풀어서 각 필드로 나눠 담는다(encryptAttachmentPayload와 대칭).
+  ///
+  /// 한 방향 래칫은 지나간 메시지의 키를 다시 계산할 수 없어서, 방을 다시 열거나(재연결/앱
+  /// 재시작 포함) 서버 히스토리를 다시 받아올 때마다 매번 암호문을 새로 복호화하려고 하면
+  /// 이미 지나간 옛 메시지는 전부 실패한다 — 그래서 처음 성공한 평문을 messageId로 이 기기에
+  /// 영구 캐싱해두고, 두 번째부터는 그 캐시를 먼저 확인한다(secret_key_store.dart 참고).
+  /// [forceDecrypt]는 message:edited처럼 같은 messageId인데 내용이 바뀐 경우에 쓴다 — 캐시를
+  /// 읽지 않고 새 암호문을 새로 복호화한 뒤, 그 결과로 캐시를 덮어쓴다(안 그러면 수정 전
+  /// 내용이 영구 캐시에 박제되어 계속 그것만 보인다).
+  Future<void> decryptInPlace(
+    Room? room,
+    Message m, {
+    bool forceDecrypt = false,
+  }) async {
+    if (room == null || !room.isSecret || m.text == null) return;
+    final cached = forceDecrypt
+        ? null
+        : await secretSessionManager?.readCachedDecryptedText(m.id);
+    final plain =
+        cached ?? await secretSessionManager?.decryptForRoom(room.id, m.text!);
+    if (plain == null) {
+      m.decryptFailed = true;
+      m.text = null;
+      return;
+    }
+    if (cached == null) {
+      await secretSessionManager?.cacheDecryptedText(m.id, plain);
+    }
+    if (m.type == MessageType.image || m.type == MessageType.file) {
+      try {
+        final meta = jsonDecode(plain) as Map<String, dynamic>;
+        m.text = meta['caption'] as String?;
+        m.fileName = meta['fileName'] as String?;
+        m.fileSize = (meta['fileSize'] as num?)?.toInt();
+        m.mimeType = meta['mimeType'] as String?;
+        m.attachmentKey = meta['attachmentKey'] as String?;
+        m.attachmentNonce = meta['attachmentNonce'] as String?;
+      } catch (_) {
+        m.decryptFailed = true;
+        m.text = null;
+      }
+    } else {
+      m.text = plain;
+    }
+  }
+
+  /// decryptInPlace와 동일한 규칙(+동일한 영구 캐시, forceDecrypt 의미도 동일)을 댓글에 적용한다.
+  Future<void> decryptCommentInPlace(
+    Room? room,
+    Comment c, {
+    bool forceDecrypt = false,
+  }) async {
+    if (room == null || !room.isSecret || c.text == null) return;
+    final cached = forceDecrypt
+        ? null
+        : await secretSessionManager?.readCachedDecryptedText(c.id);
+    final plain =
+        cached ?? await secretSessionManager?.decryptForRoom(room.id, c.text!);
+    if (plain == null) {
+      c.decryptFailed = true;
+      c.text = null;
+      return;
+    }
+    if (cached == null) {
+      await secretSessionManager?.cacheDecryptedText(c.id, plain);
+    }
+    if (c.type == MessageType.image || c.type == MessageType.file) {
+      try {
+        final meta = jsonDecode(plain) as Map<String, dynamic>;
+        c.text = meta['caption'] as String?;
+        c.fileName = meta['fileName'] as String?;
+        c.fileSize = (meta['fileSize'] as num?)?.toInt();
+        c.mimeType = meta['mimeType'] as String?;
+        c.attachmentKey = meta['attachmentKey'] as String?;
+        c.attachmentNonce = meta['attachmentNonce'] as String?;
+      } catch (_) {
+        c.decryptFailed = true;
+        c.text = null;
+      }
+    } else {
+      c.text = plain;
+    }
+  }
+
+  /// 방을 열 때(REST로 받아온 히스토리) 메시지/댓글을 한꺼번에 복호화한다.
+  Future<void> decryptHistory(Room room, List<Message> history) async {
+    if (!room.isSecret) return;
+    for (final m in history) {
+      await decryptInPlace(room, m);
+      for (final c in m.comments) {
+        await decryptCommentInPlace(room, c);
+      }
+    }
+  }
+
   /// 이 방에서 방금 활동(메시지/댓글을 보냈거나 받음)이 있었다는 뜻 — 방 목록에서 그 방을
   /// 속한 카테고리(토픽/그룹/DM) 안 맨 위로 끌어올리는 데 쓴다(desktop_home_screen.dart,
   /// room_list_screen.dart의 _favoriteFirst 정렬 참고). 재연결 중 순서가 안 맞는 이벤트가
@@ -488,14 +766,19 @@ class Session extends ChangeNotifier {
       RoomType.group => room!.name ?? '그룹채팅',
       RoomType.topic => room!.displayName(userId ?? ''),
     };
-    final preview = switch (m.type) {
-      MessageType.text => m.text ?? '',
-      MessageType.image => '사진을 보냈습니다',
-      MessageType.file => m.fileName ?? '파일을 보냈습니다',
-      MessageType.system => '',
-      MessageType.comment =>
-        '', // 실시간 message:new로는 절대 안 옴(댓글은 클라이언트 전용 합성 타입).
-    };
+    // 비밀 대화는 서버가 어차피 내용을 복호화할 수 없어서 서버발 미리보기 자체가 불가능하지만,
+    // 클라이언트가 이미 복호화해둔 내용을 알림에 그대로 보여주는 것도 의도적으로 막는다 —
+    // 화면 잠금 상태에서 알림만 봐도 대화 내용이 새어나가지 않게 하려는 목적.
+    final preview = room?.isSecret == true
+        ? _secretPreviewPlaceholder
+        : switch (m.type) {
+            MessageType.text => m.text ?? '',
+            MessageType.image => '사진을 보냈습니다',
+            MessageType.file => m.fileName ?? '파일을 보냈습니다',
+            MessageType.system => '',
+            MessageType.comment =>
+              '', // 실시간 message:new로는 절대 안 옴(댓글은 클라이언트 전용 합성 타입).
+          };
 
     AppUser? sender;
     if (room != null) {
@@ -540,12 +823,14 @@ class Session extends ChangeNotifier {
       RoomType.group => room!.name ?? '그룹채팅',
       RoomType.topic => room!.displayName(userId ?? ''),
     };
-    final preview = switch (c.type) {
-      MessageType.text => c.text ?? '',
-      MessageType.image => '사진을 보냈습니다',
-      MessageType.file => c.fileName ?? '파일을 보냈습니다',
-      MessageType.system || MessageType.comment => '', // 댓글엔 나올 수 없는 타입.
-    };
+    final preview = room?.isSecret == true
+        ? _secretPreviewPlaceholder
+        : switch (c.type) {
+            MessageType.text => c.text ?? '',
+            MessageType.image => '사진을 보냈습니다',
+            MessageType.file => c.fileName ?? '파일을 보냈습니다',
+            MessageType.system || MessageType.comment => '', // 댓글엔 나올 수 없는 타입.
+          };
 
     AppUser? sender;
     if (room != null) {
@@ -707,11 +992,17 @@ class Session extends ChangeNotifier {
       await _prefs.setString(_kToken, token!);
       await _prefs.setString(_kRefreshToken, refreshToken!);
     }
-    await chatSocket.connect(baseUrl: serverUrl!, token: token!);
+    await chatSocket.connect(
+      baseUrl: serverUrl!,
+      token: token!,
+      deviceId: deviceIdentity?.deviceId,
+    );
   }
 
-  Future<void> leaveRoom(String roomId) async {
-    await api!.leaveRoom(roomId);
+  Future<void> leaveRoom(String roomId, {bool alsoRemoveOther = false}) async {
+    final room = _findRoom(roomId);
+    await api!.leaveRoom(roomId, alsoRemoveOther: alsoRemoveOther);
+    if (room?.isSecret == true) await secretSessionManager?.forgetRoom(roomId);
     rooms.removeWhere((r) => r.id == roomId);
     _controllers.remove(roomId)?.dispose();
     if (_activeRoomId == roomId) _activeRoomId = null;
@@ -735,12 +1026,23 @@ class Session extends ChangeNotifier {
     await _presenceSub?.cancel();
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();
+    await _secretInviteSub?.cancel();
+    await _secretAcceptedSub?.cancel();
+    await _secretRejectedSub?.cancel();
+    await _secretLeftSub?.cancel();
+    await _secretSettingsSub?.cancel();
+    await _secretMessageReadSub?.cancel();
+    await _messageExpiredSub?.cancel();
+    await _secretRekeyProposeSub?.cancel();
+    await _secretRekeyAckSub?.cancel();
     chatSocket.dispose();
     for (final c in _controllers.values) {
       c.dispose();
     }
     _controllers.clear();
     onlineUserIds.clear();
+    secretSessionManager = null;
+    pendingSecretInvites.clear();
     token = null;
     refreshToken = null;
     api?.token = null;

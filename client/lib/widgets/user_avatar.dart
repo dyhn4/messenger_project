@@ -10,7 +10,13 @@ class UserAvatar extends StatelessWidget {
   final String Function(String relative)? resolveUrl;
   final double radius;
   final bool online;
-  const UserAvatar({super.key, required this.user, this.resolveUrl, this.radius = 16, this.online = false});
+  const UserAvatar({
+    super.key,
+    required this.user,
+    this.resolveUrl,
+    this.radius = 16,
+    this.online = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +48,10 @@ class UserAvatar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.green,
                 shape: BoxShape.circle,
-                border: Border.all(color: Theme.of(context).colorScheme.surface, width: dotSize * 0.18),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.surface,
+                  width: dotSize * 0.18,
+                ),
               ),
             ),
           ),

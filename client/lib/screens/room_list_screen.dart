@@ -150,7 +150,23 @@ class RoomListScreen extends StatelessWidget {
               ),
             ],
           ),
-          title: Text(room.displayName(session.userId ?? '')),
+          title: room.isSecret
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.lock, size: 14, color: Colors.green),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        room.displayName(session.userId ?? ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.green),
+                      ),
+                    ),
+                  ],
+                )
+              : Text(room.displayName(session.userId ?? '')),
           subtitle: room.description != null
               ? Text(
                   room.description!,

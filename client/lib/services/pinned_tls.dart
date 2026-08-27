@@ -31,8 +31,11 @@ class PinnedTls {
     final dynamicFile = await _dynamicCertFile();
     final bytes = await dynamicFile.exists()
         ? await dynamicFile.readAsBytes()
-        : (await rootBundle.load('assets/server_cert.pem')).buffer.asUint8List();
-    final context = SecurityContext(withTrustedRoots: false)..setTrustedCertificatesBytes(bytes);
+        : (await rootBundle.load(
+            'assets/server_cert.pem',
+          )).buffer.asUint8List();
+    final context = SecurityContext(withTrustedRoots: false)
+      ..setTrustedCertificatesBytes(bytes);
     _context = context;
     return context;
   }
@@ -53,7 +56,12 @@ class PinnedTls {
   static Future<void> pairAndSaveCert(String address, String code) async {
     final uri = Uri.parse(address.trim());
     final pairingPort = (uri.hasPort ? uri.port : 443) + 1;
-    final pairingUri = Uri(scheme: 'http', host: uri.host, port: pairingPort, path: '/pair/$code');
+    final pairingUri = Uri(
+      scheme: 'http',
+      host: uri.host,
+      port: pairingPort,
+      path: '/pair/$code',
+    );
     final res = await http.get(pairingUri).timeout(const Duration(seconds: 10));
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode != 200) {
@@ -75,13 +83,19 @@ class PinnedTls {
 
   /// socket_io_client의 OptionBuilder.setWebSocketConnector에 넘길 커넥터.
   static Future<
-      Future<ws.WebSocket> Function(
-    Uri uri, {
-    Iterable<String>? protocols,
-    Map<String, String>? headers,
-  })> webSocketConnector() async {
+    Future<ws.WebSocket> Function(
+      Uri uri, {
+      Iterable<String>? protocols,
+      Map<String, String>? headers,
+    })
+  >
+  webSocketConnector() async {
     final context = await _loadContext();
-    return (Uri uri, {Iterable<String>? protocols, Map<String, String>? headers}) async {
+    return (
+      Uri uri, {
+      Iterable<String>? protocols,
+      Map<String, String>? headers,
+    }) async {
       final ioSocket = await WebSocket.connect(
         uri.toString(),
         protocols: protocols,

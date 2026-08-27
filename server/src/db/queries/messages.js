@@ -1,6 +1,6 @@
-import { and, desc, eq, gt, gte, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNotNull, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { roomMembers, messages } from '../schema.js';
+import { roomMembers, rooms, messages } from '../schema.js';
 
 export async function insertMessage(fields) {
   const [row] = await db.insert(messages).values(fields).returning();
@@ -99,8 +99,34 @@ export async function searchMessages({ requesterId, roomId, senderId, since, unt
     .select({ message: messages })
     .from(messages)
     .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
-    .where(and(...conditions))
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(and(eq(rooms.isSecret, false), ...conditions))
     .orderBy(desc(messages.createdAt))
     .limit(limit);
   return rows.map((r) => r.message);
+}
+
+/** 비밀 대화 자동 삭제(secretExpiry.js): 상대방이 읽어서 expiresAt이 잡힌 뒤 그 시각이
+ * 지난 메시지. 최초 1회만 읽음 처리되도록 readAt이 아직 없을 때만 세팅한다. */
+export async function markMessageRead(id, expiresAt) {
+  const [row] = await db
+    .update(messages)
+    .set({ readAt: new Date(), expiresAt: expiresAt ? new Date(expiresAt) : null })
+    .where(and(eq(messages.id, id), sql`${messages.readAt} is null`))
+    .returning();
+  return row ?? null;
+}
+
+export function findExpiredSecretMessages() {
+  return db
+    .select()
+    .from(messages)
+    .where(and(isNotNull(messages.expiresAt), lte(messages.expiresAt, new Date())));
+}
+
+/** 자동 삭제 타이머 만료 — 소프트 삭제가 아니라 행 자체를 완전히 없앤다(댓글도 FK cascade로
+ * 함께 삭제됨 — 부모 없는 댓글 스레드가 남는 것보다 자연스러운 선택). */
+export async function hardDeleteMessage(id) {
+  const [row] = await db.delete(messages).where(eq(messages.id, id)).returning();
+  return row ?? null;
 }

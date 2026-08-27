@@ -21,6 +21,10 @@ export function toMessageDto(m) {
     createdAt: new Date(m.createdAt).getTime(),
     editedAt: m.editedAt ? new Date(m.editedAt).getTime() : null,
     deleted: !!m.deletedAt,
+    // 비밀 대화 자동 삭제 타이머 표시용(client의 SelfDestructCountdown 참고) — 평문 방
+    // 메시지는 항상 둘 다 null이다(읽음 추적 자체를 안 하므로).
+    readAt: m.readAt ? new Date(m.readAt).getTime() : null,
+    expiresAt: m.expiresAt ? new Date(m.expiresAt).getTime() : null,
   };
 }
 

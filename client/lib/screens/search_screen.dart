@@ -14,13 +14,13 @@ enum SearchPeriod { week, month, threeMonths, year, all, custom }
 
 extension on SearchPeriod {
   String get label => switch (this) {
-        SearchPeriod.week => '1주일',
-        SearchPeriod.month => '1개월',
-        SearchPeriod.threeMonths => '3개월',
-        SearchPeriod.year => '1년 (기본)',
-        SearchPeriod.all => '기간 설정 안 함',
-        SearchPeriod.custom => '직접 설정',
-      };
+    SearchPeriod.week => '1주일',
+    SearchPeriod.month => '1개월',
+    SearchPeriod.threeMonths => '3개월',
+    SearchPeriod.year => '1년 (기본)',
+    SearchPeriod.all => '기간 설정 안 함',
+    SearchPeriod.custom => '직접 설정',
+  };
 }
 
 class SearchScreen extends StatefulWidget {
@@ -28,6 +28,7 @@ class SearchScreen extends StatefulWidget {
   final bool asDialog;
   final bool asPanel;
   final VoidCallback? onClose;
+
   /// room과 함께, 검색 결과로 클릭한 메시지 id도 같이 넘겨서 그 말풍선으로 스크롤+하이라이트할 수 있게 한다.
   final void Function(Room room, String highlightMessageId)? onOpenRoom;
   const SearchScreen({
@@ -42,7 +43,6 @@ class SearchScreen extends StatefulWidget {
   @override
   State<SearchScreen> createState() => _SearchScreenState();
 }
-
 
 class _SearchScreenState extends State<SearchScreen> {
   final _query = TextEditingController();
@@ -77,15 +77,18 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   DateTime? get _since => switch (_period) {
-        SearchPeriod.week => DateTime.now().subtract(const Duration(days: 7)),
-        SearchPeriod.month => DateTime.now().subtract(const Duration(days: 30)),
-        SearchPeriod.threeMonths => DateTime.now().subtract(const Duration(days: 90)),
-        SearchPeriod.year => DateTime.now().subtract(const Duration(days: 365)),
-        SearchPeriod.all => null,
-        SearchPeriod.custom => _customRange?.start,
-      };
+    SearchPeriod.week => DateTime.now().subtract(const Duration(days: 7)),
+    SearchPeriod.month => DateTime.now().subtract(const Duration(days: 30)),
+    SearchPeriod.threeMonths => DateTime.now().subtract(
+      const Duration(days: 90),
+    ),
+    SearchPeriod.year => DateTime.now().subtract(const Duration(days: 365)),
+    SearchPeriod.all => null,
+    SearchPeriod.custom => _customRange?.start,
+  };
 
-  DateTime? get _until => _period == SearchPeriod.custom ? _customRange?.end : null;
+  DateTime? get _until =>
+      _period == SearchPeriod.custom ? _customRange?.end : null;
 
   Future<void> _search() async {
     final q = _query.text.trim();
@@ -155,9 +158,15 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
     if (widget.asDialog) Navigator.of(context).pop();
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => ChatScreen(session: widget.session, room: room!, highlightMessageId: result.id),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          session: widget.session,
+          room: room!,
+          highlightMessageId: result.id,
+        ),
+      ),
+    );
   }
 
   @override
@@ -184,7 +193,10 @@ class _SearchScreenState extends State<SearchScreen> {
             decoration: InputDecoration(
               hintText: '메시지 검색',
               border: const OutlineInputBorder(),
-              suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: _search),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.search),
+                onPressed: _search,
+              ),
             ),
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _search(),
@@ -215,7 +227,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 },
               ),
               const SizedBox(width: 8),
-              _PeriodFilterButton(period: _period, onSelected: _onPeriodSelected),
+              _PeriodFilterButton(
+                period: _period,
+                onSelected: _onPeriodSelected,
+              ),
             ],
           ),
         ],
@@ -240,8 +255,16 @@ class _SearchScreenState extends State<SearchScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
               child: Row(
                 children: [
-                  Expanded(child: Text('검색', style: Theme.of(context).textTheme.titleLarge)),
-                  IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
+                  Expanded(
+                    child: Text(
+                      '검색',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: widget.onClose,
+                  ),
                 ],
               ),
             ),
@@ -252,7 +275,12 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
     if (widget.asDialog) {
-      return FloatingDialog(title: '검색', maxWidth: 640, maxHeight: 700, child: body);
+      return FloatingDialog(
+        title: '검색',
+        maxWidth: 640,
+        maxHeight: 700,
+        child: body,
+      );
     }
     return Scaffold(
       appBar: AppBar(title: const Text('검색')),
@@ -264,18 +292,35 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Text(_error!));
     if (_results == null) {
-      return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('내가 속한 모든 방을 대상으로 검색합니다.')));
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('내가 속한 모든 방을 대상으로 검색합니다.'),
+        ),
+      );
     }
     if (_results!.isEmpty) {
-      return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('검색 결과가 없습니다.')));
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('검색 결과가 없습니다.'),
+        ),
+      );
     }
 
     final sorted = [..._results!]
-      ..sort((a, b) => _newestFirst ? b.createdAt.compareTo(a.createdAt) : a.createdAt.compareTo(b.createdAt));
+      ..sort(
+        (a, b) => _newestFirst
+            ? b.createdAt.compareTo(a.createdAt)
+            : a.createdAt.compareTo(b.createdAt),
+      );
 
     final totalPages = (sorted.length / paginationPageSize).ceil();
     final page = _page.clamp(0, totalPages - 1);
-    final pageItems = sorted.skip(page * paginationPageSize).take(paginationPageSize).toList();
+    final pageItems = sorted
+        .skip(page * paginationPageSize)
+        .take(paginationPageSize)
+        .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -285,7 +330,10 @@ class _SearchScreenState extends State<SearchScreen> {
           child: Row(
             children: [
               Expanded(
-                child: Text('결과 ${sorted.length}건', style: Theme.of(context).textTheme.labelLarge),
+                child: Text(
+                  '결과 ${sorted.length}건',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
               ),
               _SortButton(
                 newestFirst: _newestFirst,
@@ -341,8 +389,16 @@ class _SortButton extends StatelessWidget {
       initialValue: newestFirst,
       onSelected: onChanged,
       itemBuilder: (context) => [
-        CheckedPopupMenuItem(value: true, checked: newestFirst, child: const Text('최신 순')),
-        CheckedPopupMenuItem(value: false, checked: !newestFirst, child: const Text('과거 순')),
+        CheckedPopupMenuItem(
+          value: true,
+          checked: newestFirst,
+          child: const Text('최신 순'),
+        ),
+        CheckedPopupMenuItem(
+          value: false,
+          checked: !newestFirst,
+          child: const Text('과거 순'),
+        ),
       ],
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -353,7 +409,9 @@ class _SortButton extends StatelessWidget {
             const SizedBox(width: 2),
             Text(
               newestFirst ? '최신 순' : '과거 순',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(color: Theme.of(context).hintColor),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).hintColor,
+              ),
             ),
           ],
         ),
@@ -370,7 +428,12 @@ class _SearchResultRow extends StatelessWidget {
   final String query;
   final DateFormat timeFormat;
   final VoidCallback onTap;
-  const _SearchResultRow({required this.result, required this.query, required this.timeFormat, required this.onTap});
+  const _SearchResultRow({
+    required this.result,
+    required this.query,
+    required this.timeFormat,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -383,7 +446,10 @@ class _SearchResultRow extends StatelessWidget {
           children: [
             Text(
               result.roomName ?? '',
-              style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 6),
             Row(
@@ -391,7 +457,9 @@ class _SearchResultRow extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 14,
-                  child: Text(result.senderName.isNotEmpty ? result.senderName[0] : '?'),
+                  child: Text(
+                    result.senderName.isNotEmpty ? result.senderName[0] : '?',
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -400,19 +468,24 @@ class _SearchResultRow extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Text(result.senderName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text(
+                            result.senderName,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             timeFormat.format(result.createdAt),
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelSmall
+                            style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(color: Theme.of(context).hintColor),
                           ),
                         ],
                       ),
                       const SizedBox(height: 2),
-                      _highlighted(context, result.text ?? result.fileName ?? '(파일)', query),
+                      _highlighted(
+                        context,
+                        result.text ?? result.fileName ?? '(파일)',
+                        query,
+                      ),
                     ],
                   ),
                 ),
@@ -437,21 +510,31 @@ class _SearchResultRow extends StatelessWidget {
         break;
       }
       if (idx > start) spans.add(TextSpan(text: text.substring(start, idx)));
-      spans.add(TextSpan(
-        text: text.substring(idx, idx + query.length),
-        style: const TextStyle(backgroundColor: Color(0xFFFFF59D), fontWeight: FontWeight.bold),
-      ));
+      spans.add(
+        TextSpan(
+          text: text.substring(idx, idx + query.length),
+          style: const TextStyle(
+            backgroundColor: Color(0xFFFFF59D),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
       start = idx + query.length;
     }
-    return RichText(text: TextSpan(style: DefaultTextStyle.of(context).style, children: spans));
+    return RichText(
+      text: TextSpan(
+        style: DefaultTextStyle.of(context).style,
+        children: spans,
+      ),
+    );
   }
 }
 
 IconData _iconForRoomType(RoomType type) => switch (type) {
-      RoomType.topic => Icons.tag,
-      RoomType.group => Icons.groups_outlined,
-      RoomType.dm => Icons.person_outline,
-    };
+  RoomType.topic => Icons.tag,
+  RoomType.group => Icons.groups_outlined,
+  RoomType.dm => Icons.person_outline,
+};
 
 /// 방/멤버/기간 필터 버튼 셋이 전부 이 위젯을 써서 겉모양(버튼+드롭다운 패널 틀)이 통일된다 —
 /// 안에 들어가는 내용(패널)만 필터마다 다르다. Material `DropdownMenu`는 방 필터의 토픽/채팅
@@ -461,7 +544,11 @@ class _FilterButton extends StatefulWidget {
   final String label;
   final bool expand;
   final Widget Function(VoidCallback close) panelBuilder;
-  const _FilterButton({required this.label, this.expand = false, required this.panelBuilder});
+  const _FilterButton({
+    required this.label,
+    this.expand = false,
+    required this.panelBuilder,
+  });
 
   @override
   State<_FilterButton> createState() => _FilterButtonState();
@@ -476,7 +563,12 @@ class _FilterButtonState extends State<_FilterButton> {
     _entry = OverlayEntry(
       builder: (_) => Stack(
         children: [
-          Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _close)),
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _close,
+            ),
+          ),
           CompositedTransformFollower(
             link: _link,
             showWhenUnlinked: false,
@@ -511,7 +603,9 @@ class _FilterButtonState extends State<_FilterButton> {
     );
     return CompositedTransformTarget(
       link: _link,
-      child: widget.expand ? SizedBox(width: double.infinity, child: button) : button,
+      child: widget.expand
+          ? SizedBox(width: double.infinity, child: button)
+          : button,
     );
   }
 }
@@ -528,7 +622,11 @@ class _FilterPanelShell extends StatelessWidget {
       elevation: 6,
       borderRadius: BorderRadius.circular(8),
       child: ConstrainedBox(
-        constraints: BoxConstraints(minWidth: width, maxWidth: width, maxHeight: 360),
+        constraints: BoxConstraints(
+          minWidth: width,
+          maxWidth: width,
+          maxHeight: 360,
+        ),
         child: child,
       ),
     );
@@ -596,7 +694,11 @@ class _RoomFilterPanel extends StatefulWidget {
   final Session session;
   final String? selectedRoomId;
   final ValueChanged<String?> onSelected;
-  const _RoomFilterPanel({required this.session, required this.selectedRoomId, required this.onSelected});
+  const _RoomFilterPanel({
+    required this.session,
+    required this.selectedRoomId,
+    required this.onSelected,
+  });
 
   @override
   State<_RoomFilterPanel> createState() => _RoomFilterPanelState();
@@ -610,8 +712,17 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
   Widget build(BuildContext context) {
     final myId = widget.session.userId ?? '';
     final rooms = widget.session.rooms
-        .where((r) => _chatTab ? r.type != RoomType.topic : r.type == RoomType.topic)
-        .where((r) => _filter.isEmpty || r.displayName(myId).toLowerCase().contains(_filter.toLowerCase()))
+        // 비밀 대화는 검색 자체가 안 되므로(요구사항) 방 범위 선택지에도 노출하지 않는다 —
+        // 서버 쪽도 searchMessages에서 별도로 막고 있다(server/src/db/queries/messages.js).
+        .where((r) => !r.isSecret)
+        .where(
+          (r) => _chatTab ? r.type != RoomType.topic : r.type == RoomType.topic,
+        )
+        .where(
+          (r) =>
+              _filter.isEmpty ||
+              r.displayName(myId).toLowerCase().contains(_filter.toLowerCase()),
+        )
         .toList();
 
     return Column(
@@ -619,8 +730,18 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
       children: [
         Row(
           children: [
-            _tabButton(context, '토픽', !_chatTab, () => setState(() => _chatTab = false)),
-            _tabButton(context, '채팅', _chatTab, () => setState(() => _chatTab = true)),
+            _tabButton(
+              context,
+              '토픽',
+              !_chatTab,
+              () => setState(() => _chatTab = false),
+            ),
+            _tabButton(
+              context,
+              '채팅',
+              _chatTab,
+              () => setState(() => _chatTab = true),
+            ),
           ],
         ),
         const Divider(height: 1),
@@ -632,7 +753,9 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
               ListTile(
                 dense: true,
                 title: const Text('전체'),
-                trailing: widget.selectedRoomId == null ? const Icon(Icons.check, size: 18) : null,
+                trailing: widget.selectedRoomId == null
+                    ? const Icon(Icons.check, size: 18)
+                    : null,
                 onTap: () => widget.onSelected(null),
               ),
               const Divider(height: 1),
@@ -640,8 +763,14 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
                 ListTile(
                   dense: true,
                   leading: Icon(_iconForRoomType(r.type), size: 18),
-                  title: Text(r.displayName(myId), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: widget.selectedRoomId == r.id ? const Icon(Icons.check, size: 18) : null,
+                  title: Text(
+                    r.displayName(myId),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: widget.selectedRoomId == r.id
+                      ? const Icon(Icons.check, size: 18)
+                      : null,
                   onTap: () => widget.onSelected(r.id),
                 ),
             ],
@@ -651,16 +780,30 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
     );
   }
 
-  Widget _tabButton(BuildContext context, String label, bool selected, VoidCallback onTap) {
-    final color = selected ? Theme.of(context).colorScheme.primary : Colors.transparent;
+  Widget _tabButton(
+    BuildContext context,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) {
+    final color = selected
+        ? Theme.of(context).colorScheme.primary
+        : Colors.transparent;
     return Expanded(
       child: InkWell(
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: color, width: 2))),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: color, width: 2)),
+          ),
           child: Center(
-            child: Text(label, style: TextStyle(fontWeight: selected ? FontWeight.bold : FontWeight.normal)),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
           ),
         ),
       ),
@@ -673,7 +816,11 @@ class _MemberFilterButton extends StatelessWidget {
   final List<AppUser>? users;
   final String? selectedSenderId;
   final ValueChanged<String?> onSelected;
-  const _MemberFilterButton({required this.users, required this.selectedSenderId, required this.onSelected});
+  const _MemberFilterButton({
+    required this.users,
+    required this.selectedSenderId,
+    required this.onSelected,
+  });
 
   String get _label {
     final id = selectedSenderId;
@@ -707,7 +854,11 @@ class _MemberFilterPanel extends StatefulWidget {
   final List<AppUser>? users;
   final String? selectedSenderId;
   final ValueChanged<String?> onSelected;
-  const _MemberFilterPanel({required this.users, required this.selectedSenderId, required this.onSelected});
+  const _MemberFilterPanel({
+    required this.users,
+    required this.selectedSenderId,
+    required this.onSelected,
+  });
 
   @override
   State<_MemberFilterPanel> createState() => _MemberFilterPanelState();
@@ -719,7 +870,11 @@ class _MemberFilterPanelState extends State<_MemberFilterPanel> {
   @override
   Widget build(BuildContext context) {
     final list = (widget.users ?? const <AppUser>[])
-        .where((u) => _filter.isEmpty || u.name.toLowerCase().contains(_filter.toLowerCase()))
+        .where(
+          (u) =>
+              _filter.isEmpty ||
+              u.name.toLowerCase().contains(_filter.toLowerCase()),
+        )
         .toList();
 
     return Column(
@@ -733,16 +888,27 @@ class _MemberFilterPanelState extends State<_MemberFilterPanel> {
               ListTile(
                 dense: true,
                 title: const Text('모든 멤버'),
-                trailing: widget.selectedSenderId == null ? const Icon(Icons.check, size: 18) : null,
+                trailing: widget.selectedSenderId == null
+                    ? const Icon(Icons.check, size: 18)
+                    : null,
                 onTap: () => widget.onSelected(null),
               ),
               const Divider(height: 1),
               for (final u in list)
                 ListTile(
                   dense: true,
-                  leading: CircleAvatar(radius: 12, child: Text(u.name.isNotEmpty ? u.name[0] : '?')),
-                  title: Text(u.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  trailing: widget.selectedSenderId == u.id ? const Icon(Icons.check, size: 18) : null,
+                  leading: CircleAvatar(
+                    radius: 12,
+                    child: Text(u.name.isNotEmpty ? u.name[0] : '?'),
+                  ),
+                  title: Text(
+                    u.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: widget.selectedSenderId == u.id
+                      ? const Icon(Icons.check, size: 18)
+                      : null,
                   onTap: () => widget.onSelected(u.id),
                 ),
             ],
@@ -798,4 +964,3 @@ class _PeriodFilterPanel extends StatelessWidget {
     );
   }
 }
-

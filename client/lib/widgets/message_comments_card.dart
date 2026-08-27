@@ -10,6 +10,7 @@ import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 final _dateTimeFormat = DateFormat('yyyy/MM/dd a h:mm');
@@ -162,6 +163,14 @@ class MessageCommentsCard extends StatelessWidget {
                     color: Theme.of(context).hintColor,
                   ),
                 )
+              else if (parentMessage.decryptFailed)
+                Text(
+                  '이 메시지는 복호화할 수 없습니다',
+                  style: TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: Theme.of(context).hintColor,
+                  ),
+                )
               else if (parentMessage.type == MessageType.text &&
                   (parentMessage.text?.isNotEmpty ?? false)) ...[
                 const SizedBox(height: 4),
@@ -203,6 +212,10 @@ class MessageCommentsCard extends StatelessWidget {
                       currentUserId != null &&
                       comments[i].senderId == currentUserId,
                   resolveUrl: resolveUrl,
+                  // 댓글 자체는 독립된 자동 삭제 타이머가 없다 — 원본 메시지가 만료되면 서버가
+                  // FK cascade로 댓글도 같이 지운다(secretExpiry.js). 그래서 "삭제되기까지 남은
+                  // 시간"은 항상 원본 메시지의 expiresAt을 그대로 보여준다.
+                  expiresAt: parentMessage.expiresAt,
                   onEdit: onEditComment,
                   onDelete: onDeleteComment,
                   showAvatar:
@@ -242,6 +255,10 @@ class CommentEntryLine extends StatefulWidget {
   /// 아바타와 이름을 같이 가린다(시간은 그대로 보여준다 — 채팅도 시간은 매 메시지마다 보여줌).
   final bool showAvatar;
 
+  /// 원본 메시지의 자동 삭제 예정 시각(비밀 대화, 읽은 뒤부터 확정됨) — 댓글은 독립 타이머가
+  /// 없고 원본과 함께 소멸하므로 그 값을 그대로 받아 보여준다(self_destruct_countdown.dart).
+  final DateTime? expiresAt;
+
   const CommentEntryLine({
     super.key,
     required this.session,
@@ -253,6 +270,7 @@ class CommentEntryLine extends StatefulWidget {
     this.onDelete,
     this.fullWidth = false,
     this.showAvatar = true,
+    this.expiresAt,
   });
 
   @override
@@ -354,13 +372,16 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
             sender?.name ?? comment.senderName,
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
           ),
-        if (widget.fullWidth)
+        if (widget.fullWidth) ...[
+          if (widget.expiresAt != null)
+            SelfDestructCountdown(expiresAt: widget.expiresAt!),
           Text(
             _dateTimeFormat.format(comment.createdAt),
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: Theme.of(context).hintColor,
             ),
           ),
+        ],
         if (comment.deleted)
           Text(
             '삭제된 댓글입니다',
@@ -368,6 +389,26 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
               fontStyle: FontStyle.italic,
               color: Theme.of(context).hintColor,
             ),
+          )
+        else if (comment.decryptFailed)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.lock_outline,
+                size: 12,
+                color: Theme.of(context).hintColor,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '이 댓글은 복호화할 수 없습니다',
+                style: TextStyle(
+                  fontStyle: FontStyle.italic,
+                  fontSize: 13,
+                  color: Theme.of(context).hintColor,
+                ),
+              ),
+            ],
           )
         else if (_editing)
           _buildEditor(context)
@@ -403,12 +444,16 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           session: widget.session,
           url: widget.resolveUrl(comment.fileUrl ?? ''),
           fileName: comment.fileName ?? 'image.png',
+          attachmentKey: comment.attachmentKey,
+          attachmentNonce: comment.attachmentNonce,
         );
       case MessageType.file:
         return DownloadableFile(
           session: widget.session,
           url: widget.resolveUrl(comment.fileUrl ?? ''),
           fileName: comment.fileName ?? '파일',
+          attachmentKey: comment.attachmentKey,
+          attachmentNonce: comment.attachmentNonce,
         );
       case MessageType.text:
       case MessageType.system:
@@ -457,6 +502,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     final showToolbar =
         widget.isMine &&
         !comment.deleted &&
+        !comment.decryptFailed &&
         !_editing &&
         (widget.onEdit != null || widget.onDelete != null);
 
@@ -513,11 +559,19 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           // 채우지 않고 내용 길이만큼만 차지하게 한다.
           Flexible(child: bubble),
           const SizedBox(width: 6),
-          Text(
-            _timeFormat.format(comment.createdAt),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).hintColor,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.expiresAt != null)
+                SelfDestructCountdown(expiresAt: widget.expiresAt!),
+              Text(
+                _timeFormat.format(comment.createdAt),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).hintColor,
+                ),
+              ),
+            ],
           ),
           const SizedBox(width: 6),
           // fullWidth와 동일하게, 호버 여부와 무관하게 툴바 자리를 항상 고정폭으로 비워둔다 —

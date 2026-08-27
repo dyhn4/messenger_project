@@ -53,6 +53,23 @@ export async function insertRoom(fields) {
   return row;
 }
 
+/** 방을 완전히 지운다(멤버/메시지/비밀 대화 세션은 전부 onDelete:'cascade'로 함께 지워짐).
+ * 비밀 대화를 거절했을 때처럼, 다시 대화를 걸 수 있도록 dmKey 자체를 비워줘야 하는 경우에 쓴다. */
+export async function deleteRoom(id) {
+  await db.delete(rooms).where(eq(rooms.id, id));
+}
+
+/** 비밀 대화에서 "상대방도 나가기" 없이 혼자 나갔을 때, 남은 멤버 쪽에 보여줄 이름을 남겨둔다
+ * (rooms.js의 /rooms/:id/leave 참고). */
+export async function setSecretDepartedMember(roomId, { userId, name }) {
+  const [row] = await db
+    .update(rooms)
+    .set({ secretDepartedMemberId: userId, secretDepartedMemberName: name })
+    .where(eq(rooms.id, roomId))
+    .returning();
+  return row;
+}
+
 /** 여러 명을 한 번에 멤버로 추가한다(이미 멤버면 조용히 무시 — 초대/공개토픽 자동가입에서 중복 방지). */
 export async function addRoomMembers(roomId, userIds) {
   if (userIds.length === 0) return;

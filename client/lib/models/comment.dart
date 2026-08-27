@@ -12,9 +12,11 @@ class Comment {
   /// 수정하면 그 자리에서 바뀐다(RoomChatController.applyCommentEdit) — 그래서 non-final.
   String? text;
   final String? fileUrl; // 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다.
-  final String? fileName;
-  final int? fileSize;
-  final String? mimeType;
+
+  /// message.dart와 동일 — 비밀 대화에서는 복호화한 뒤 원본 값으로 덮어쓰므로 non-final.
+  String? fileName;
+  int? fileSize;
+  String? mimeType;
   final DateTime createdAt;
 
   /// 작성 후 5분 이내 본인만 수정 가능(서버가 최종 검증). null이면 수정된 적 없음.
@@ -22,6 +24,13 @@ class Comment {
 
   /// 소프트 삭제됐으면 true — 본문 대신 "삭제된 댓글입니다"를 보여준다. 그 자리에서 바뀌므로 non-final.
   bool deleted;
+
+  /// message.dart의 decryptFailed와 동일한 의미 — 비밀 대화 댓글을 로컬에서 복호화하지 못했을 때.
+  bool decryptFailed;
+
+  /// message.dart의 attachmentKey/attachmentNonce와 동일 — 비밀 대화 댓글의 첨부 복호화용.
+  String? attachmentKey;
+  String? attachmentNonce;
 
   Comment({
     required this.id,
@@ -38,6 +47,9 @@ class Comment {
     required this.createdAt,
     this.editedAt,
     this.deleted = false,
+    this.decryptFailed = false,
+    this.attachmentKey,
+    this.attachmentNonce,
   });
 
   factory Comment.fromJson(Map<String, dynamic> json) {

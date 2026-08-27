@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 const _weekdays = ['월', '화', '수', '목', '금', '토', '일'];
 
-String _formatDate(DateTime date) => '${date.year}년 ${date.month}월 ${date.day}일 ${_weekdays[date.weekday - 1]}요일';
+String _formatDate(DateTime date) =>
+    '${date.year}년 ${date.month}월 ${date.day}일 ${_weekdays[date.weekday - 1]}요일';
 
 /// 채팅 목록에서 날짜가 바뀔 때 가운데에 보여주는 구분선: 얇은 선 위에 날짜 텍스트를 겹쳐서
 /// 선을 끊어 보이게 하는 흔한 "divider with label" 스타일. intl 로케일 데이터 초기화가
@@ -25,9 +26,16 @@ class DateDivider extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(_formatDate(date), style: Theme.of(context).textTheme.labelMedium),
+                Text(
+                  _formatDate(date),
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
                 const SizedBox(width: 2),
-                Icon(Icons.keyboard_arrow_down, size: 16, color: Theme.of(context).hintColor),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: Theme.of(context).hintColor,
+                ),
               ],
             ),
           ),
@@ -50,7 +58,10 @@ class FloatingDatePill extends StatelessWidget {
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Text(_formatDate(date), style: Theme.of(context).textTheme.labelMedium),
+        child: Text(
+          _formatDate(date),
+          style: Theme.of(context).textTheme.labelMedium,
+        ),
       ),
     );
   }

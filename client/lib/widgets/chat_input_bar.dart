@@ -12,7 +12,11 @@ class _PendingAttachment {
   final File file;
   final bool isImage;
   final String displayName;
-  _PendingAttachment({required this.file, required this.isImage, required this.displayName});
+  _PendingAttachment({
+    required this.file,
+    required this.isImage,
+    required this.displayName,
+  });
 }
 
 class ChatInputBar extends StatefulWidget {
@@ -57,21 +61,35 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   Future<void> _pasteImageFromClipboard() async {
     final bytes = await Pasteboard.image;
-    if (bytes == null || bytes.isEmpty || !mounted) return; // 클립보드에 이미지가 없으면 아무 것도 안 함.
+    if (bytes == null || bytes.isEmpty || !mounted)
+      return; // 클립보드에 이미지가 없으면 아무 것도 안 함.
 
     final path =
         '${Directory.systemTemp.path}${Platform.pathSeparator}image_${DateTime.now().microsecondsSinceEpoch}.png';
     final file = File(path);
     await file.writeAsBytes(bytes);
     if (!mounted) return;
-    setState(() => _attachments.add(_PendingAttachment(file: file, isImage: true, displayName: 'image.png')));
+    setState(
+      () => _attachments.add(
+        _PendingAttachment(file: file, isImage: true, displayName: 'image.png'),
+      ),
+    );
   }
 
   Future<void> _pickImage() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked == null) return;
     setState(() {
-      _attachments.add(_PendingAttachment(file: File(picked.path), isImage: true, displayName: picked.name));
+      _attachments.add(
+        _PendingAttachment(
+          file: File(picked.path),
+          isImage: true,
+          displayName: picked.name,
+        ),
+      );
     });
   }
 
@@ -80,11 +98,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final picked = result?.files.single;
     if (picked?.path == null) return;
     setState(() {
-      _attachments.add(_PendingAttachment(file: File(picked!.path!), isImage: false, displayName: picked.name));
+      _attachments.add(
+        _PendingAttachment(
+          file: File(picked!.path!),
+          isImage: false,
+          displayName: picked.name,
+        ),
+      );
     });
   }
 
-  void _removeAttachment(int index) => setState(() => _attachments.removeAt(index));
+  void _removeAttachment(int index) =>
+      setState(() => _attachments.removeAt(index));
 
   Future<void> _send() async {
     final text = _controller.text.trim();
@@ -107,12 +132,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
         // 첨부와 함께 입력한 메시지는 별도 메시지로 보내지 않고, 첫 번째 첨부의 캡션으로 붙인다.
         for (var i = 0; i < toSend.length; i++) {
           final a = toSend[i];
-          await widget.controller.sendFile(a.file, isImage: a.isImage, caption: i == 0 ? text : null);
+          await widget.controller.sendFile(
+            a.file,
+            isImage: a.isImage,
+            caption: i == 0 ? text : null,
+          );
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('전송 실패: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('전송 실패: $e')));
       }
     } finally {
       if (mounted) {
@@ -162,7 +193,10 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   child: TextField(
                     controller: _controller,
                     focusNode: _focusNode,
-                    decoration: const InputDecoration(hintText: '메시지 입력', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                      hintText: '메시지 입력',
+                      border: OutlineInputBorder(),
+                    ),
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _send(),
                   ),
@@ -170,10 +204,18 @@ class _ChatInputBarState extends State<ChatInputBar> {
                 if (_sending)
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
                   )
                 else
-                  IconButton(icon: const Icon(Icons.send), onPressed: _send, tooltip: '보내기'),
+                  IconButton(
+                    icon: const Icon(Icons.send),
+                    onPressed: _send,
+                    tooltip: '보내기',
+                  ),
               ],
             ),
           ],
@@ -200,7 +242,12 @@ class _AttachmentPreview extends StatelessWidget {
           if (attachment.isImage)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.file(attachment.file, width: 56, height: 56, fit: BoxFit.cover),
+              child: Image.file(
+                attachment.file,
+                width: 56,
+                height: 56,
+                fit: BoxFit.cover,
+              ),
             )
           else
             Container(
@@ -233,7 +280,10 @@ class _AttachmentPreview extends StatelessWidget {
               child: Container(
                 width: 18,
                 height: 18,
-                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  shape: BoxShape.circle,
+                ),
                 child: const Icon(Icons.close, size: 12, color: Colors.white),
               ),
             ),

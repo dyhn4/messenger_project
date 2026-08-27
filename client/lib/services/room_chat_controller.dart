@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import 'secret_chat_crypto.dart' as secret_crypto;
 import 'session.dart';
 
 /// 방 하나의 메시지 목록/전송을 담당하는 컨트롤러. 방을 열 때 Session이 생성해서 캐싱한다.
@@ -33,6 +35,7 @@ class RoomChatController extends ChangeNotifier {
   Future<void> _load() async {
     try {
       final history = await _session.api!.fetchRoomMessages(room.id);
+      await _session.decryptHistory(room, history);
       _mergeHistory(history);
     } catch (e) {
       error = e.toString();
@@ -51,6 +54,7 @@ class RoomChatController extends ChangeNotifier {
     final byId = {for (final m in messages) m.id: m};
     final newMessages = <Message>[];
     final newCommentEntries = <Message>[];
+    var changed = false;
 
     for (final incoming in history) {
       final existing = byId[incoming.id];
@@ -58,6 +62,14 @@ class RoomChatController extends ChangeNotifier {
         newMessages.add(incoming);
         newCommentEntries.addAll(incoming.comments.map(Message.commentEntry));
         continue;
+      }
+      // 연결이 끊긴 동안 상대가 이 메시지를 읽었을 수도 있다 — secret:message-read 소켓
+      // 이벤트를 놓쳤어도, 재연결 시 다시 받아온 히스토리로 자동 삭제 타이머 값을 따라잡는다.
+      if (existing.readAt != incoming.readAt ||
+          existing.expiresAt != incoming.expiresAt) {
+        existing.readAt = incoming.readAt;
+        existing.expiresAt = incoming.expiresAt;
+        changed = true;
       }
       final existingCommentIds = existing.comments.map((c) => c.id).toSet();
       for (final c in incoming.comments) {
@@ -68,7 +80,9 @@ class RoomChatController extends ChangeNotifier {
       }
     }
 
-    if (newMessages.isEmpty && newCommentEntries.isEmpty) return false;
+    if (!changed && newMessages.isEmpty && newCommentEntries.isEmpty) {
+      return false;
+    }
     messages
       ..addAll(newMessages)
       ..addAll(newCommentEntries)
@@ -104,22 +118,51 @@ class RoomChatController extends ChangeNotifier {
   /// 댓글을 단다. 실제 목록 갱신은 이 요청이 성공하면 서버가 보내는 comment:new 브로드캐스트로
   /// 이뤄진다(보낸 사람도 그 방 소켓에 있으므로 자기 자신도 받는다 — sendText와 동일한 방식이라
   /// 여기서 낙관적으로 먼저 추가할 필요가 없다).
-  Future<void> postComment(String messageId, String text) {
+  Future<void> postComment(String messageId, String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return Future.value();
-    return _session.api!.addComment(messageId, text: trimmed);
+    if (trimmed.isEmpty) return;
+    final payload = await _session.encryptOutgoing(room, trimmed);
+    await _session.api!.addComment(messageId, text: payload);
   }
 
   /// 댓글에 이미지/파일을 첨부해서 단다. [caption]을 같이 주면(첨부 후 텍스트도 입력한 경우)
-  /// 그 댓글 하나에 첨부와 텍스트가 함께 실린다 — sendFile과 동일한 방식.
+  /// 그 댓글 하나에 첨부와 텍스트가 함께 실린다 — sendFile과 동일한 방식(비밀 대화 암호화도 동일).
   Future<void> postCommentFile(
     String messageId,
     File file, {
     required bool isImage,
     String? caption,
   }) async {
-    final result = await _session.api!.uploadFile(file);
     final trimmedCaption = caption?.trim();
+    if (room.isSecret) {
+      final encrypted = await secret_crypto.encryptAttachment(
+        await file.readAsBytes(),
+      );
+      final tempFile = await _writeTempFile(encrypted.cipherBytes);
+      final result = await _session.api!.uploadFile(tempFile);
+      unawaited(tempFile.delete().catchError((_) => tempFile));
+      final envelope = await _session.encryptAttachmentPayload(
+        room,
+        caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
+        fileName: result.fileName,
+        fileSize: result.size,
+        mimeType: result.mimeType,
+        attachmentKey: encrypted.keyBase64,
+        attachmentNonce: encrypted.nonceBase64,
+      );
+      await _session.api!.addComment(
+        messageId,
+        text: envelope,
+        type: isImage ? 'image' : 'file',
+        fileUrl: result.url,
+        fileName: 'encrypted',
+        fileSize: encrypted.cipherBytes.length,
+        mimeType: 'application/octet-stream',
+      );
+      return;
+    }
+
+    final result = await _session.api!.uploadFile(file);
     await _session.api!.addComment(
       messageId,
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
@@ -133,10 +176,11 @@ class RoomChatController extends ChangeNotifier {
 
   /// 댓글을 수정한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
   /// comment:edited 브로드캐스트(applyCommentEdit)로 이뤄진다.
-  Future<void> editComment(String commentId, String text) {
+  Future<void> editComment(String commentId, String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return Future.value();
-    return _session.api!.editComment(commentId, trimmed);
+    if (trimmed.isEmpty) return;
+    final payload = await _session.encryptOutgoing(room, trimmed);
+    await _session.api!.editComment(commentId, payload!);
   }
 
   /// 댓글을 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
@@ -160,6 +204,9 @@ class RoomChatController extends ChangeNotifier {
     final entry = _findCommentEntry(commentId);
     if (entry == null) return;
     entry.asComment!.deleted = true;
+    if (room.isSecret) {
+      unawaited(_session.secretSessionManager?.forgetDecryptedText(commentId));
+    }
     notifyListeners();
   }
 
@@ -173,10 +220,11 @@ class RoomChatController extends ChangeNotifier {
 
   /// 메시지를 수정한다(텍스트 메시지, 본인, 작성 5분 이내만 서버가 허용). 실제 반영은
   /// message:edited 브로드캐스트(applyEdit)로 이뤄진다.
-  Future<void> editMessage(String messageId, String text) {
+  Future<void> editMessage(String messageId, String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return Future.value();
-    return _session.api!.editMessage(messageId, trimmed);
+    if (trimmed.isEmpty) return;
+    final payload = await _session.encryptOutgoing(room, trimmed);
+    await _session.api!.editMessage(messageId, payload!);
   }
 
   /// 메시지를 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
@@ -193,6 +241,21 @@ class RoomChatController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Session이 secret:message-read 브로드캐스트를 라우팅할 때 호출한다 — 상대가 이 메시지를
+  /// 읽었다는 신호로, 자동 삭제 타이머가 설정된 방이면 여기서부터 카운트다운이 시작된다
+  /// (message_bubble.dart의 SelfDestructCountdown이 이 값을 보고 실시간으로 줄어든다).
+  void applyMessageRead(
+    String messageId,
+    DateTime readAt,
+    DateTime? expiresAt,
+  ) {
+    final idx = messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    messages[idx].readAt = readAt;
+    messages[idx].expiresAt = expiresAt;
+    notifyListeners();
+  }
+
   /// Session이 message:deleted 브로드캐스트를 라우팅할 때 호출한다. 리스트에서 빼지 않고
   /// deleted만 세운다 — 댓글 스레드가 이 메시지를 계속 참조하고, "삭제된 메시지입니다"로
   /// 표시만 바뀌어야 하기 때문이다.
@@ -200,7 +263,36 @@ class RoomChatController extends ChangeNotifier {
     final idx = messages.indexWhere((m) => m.id == messageId);
     if (idx == -1) return;
     messages[idx].deleted = true;
+    if (room.isSecret) {
+      unawaited(_session.secretSessionManager?.forgetDecryptedText(messageId));
+    }
     notifyListeners();
+  }
+
+  /// Session이 message:expired(비밀 대화 자동 삭제 타이머 만료)를 라우팅할 때 호출한다.
+  /// 소프트 삭제(applyDelete)와 달리 흔적 없이 없어지는 게 취지라 리스트에서 완전히 뺀다 —
+  /// 서버가 FK cascade로 댓글도 같이 지웠으므로 그 댓글의 합성 타임라인 항목도 함께 제거한다.
+  void applyExpire(String messageId) {
+    final removed = <String>[];
+    for (final m in messages) {
+      if (m.id == messageId ||
+          (m.type == MessageType.comment &&
+              m.asComment?.messageId == messageId)) {
+        removed.add(m.type == MessageType.comment ? m.asComment!.id : m.id);
+      }
+    }
+    messages.removeWhere(
+      (m) =>
+          m.id == messageId ||
+          (m.type == MessageType.comment &&
+              m.asComment?.messageId == messageId),
+    );
+    if (room.isSecret) {
+      for (final id in removed) {
+        unawaited(_session.secretSessionManager?.forgetDecryptedText(id));
+      }
+    }
+    if (removed.isNotEmpty) notifyListeners();
   }
 
   /// 연결이 끊겼다가 다시 붙었을 때 Session이 호출한다. 끊긴 동안 놓쳤을 수 있는 메시지/댓글을
@@ -208,6 +300,7 @@ class RoomChatController extends ChangeNotifier {
   Future<void> refresh() async {
     try {
       final history = await _session.api!.fetchRoomMessages(room.id);
+      await _session.decryptHistory(room, history);
       if (!_mergeHistory(history)) return;
       notifyListeners();
       if (_session.activeRoomId == room.id && _session.appInForeground)
@@ -226,33 +319,80 @@ class RoomChatController extends ChangeNotifier {
         room.id,
         limit: 500,
       );
+      await _session.decryptHistory(room, history);
       if (_mergeHistory(history)) notifyListeners();
     } catch (_) {
       // 실패해도 조용히 무시 — 스크롤/하이라이트만 안 될 뿐 방 자체는 정상적으로 보인다.
     }
   }
 
-  void markReadNow() => _session.chatSocket.markRead(room.id);
+  void markReadNow() {
+    _session.chatSocket.markRead(room.id);
+    if (!room.isSecret) return;
+    // 비밀 대화 자동 삭제 타이머는 "상대가 읽은 시점"부터 세므로, 지금 로드돼있는 메시지 중
+    // 내가 안 보낸 것들에 대해 읽음 신호를 보낸다(서버가 최초 1회만 처리하므로 중복 호출은
+    // 안전하다). 방을 처음 열 때(_load)와 실시간으로 새 메시지를 볼 때(feed) 모두 이 함수를
+    // 거치므로 "실제로 화면에 나타난 시점"을 대체로 잘 근사한다.
+    for (final m in messages) {
+      if (m.senderId == _session.userId) continue;
+      if (m.type != MessageType.text &&
+          m.type != MessageType.image &&
+          m.type != MessageType.file) {
+        continue;
+      }
+      _session.chatSocket.markSecretMessageRead(room.id, m.id);
+    }
+  }
 
-  Future<void> sendText(String text) {
+  Future<void> sendText(String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return Future.value();
-    return _session.chatSocket.send(
+    if (trimmed.isEmpty) return;
+    final payload = await _session.encryptOutgoing(room, trimmed);
+    await _session.chatSocket.send(
       roomId: room.id,
       type: 'text',
-      text: trimmed,
+      text: payload,
     );
   }
 
   /// [caption]을 같이 주면(이미지/파일 첨부 후 메시지를 입력하고 보낸 경우) 그 메시지 하나에
-  /// 텍스트와 첨부가 함께 실린다.
+  /// 텍스트와 첨부가 함께 실린다. 비밀 대화면 파일 바이트 자체를 암호화한 블롭을 올리고(서버는
+  /// opaque한 바이트로만 취급), 캡션+원본 파일정보+복호화 키는 메시지 암호문 봉투 안에 함께 넣는다.
   Future<void> sendFile(
     File file, {
     required bool isImage,
     String? caption,
   }) async {
-    final result = await _session.api!.uploadFile(file);
     final trimmedCaption = caption?.trim();
+    if (room.isSecret) {
+      final encrypted = await secret_crypto.encryptAttachment(
+        await file.readAsBytes(),
+      );
+      final tempFile = await _writeTempFile(encrypted.cipherBytes);
+      final result = await _session.api!.uploadFile(tempFile);
+      unawaited(tempFile.delete().catchError((_) => tempFile));
+      final envelope = await _session.encryptAttachmentPayload(
+        room,
+        caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
+        fileName: result.fileName,
+        fileSize: result.size,
+        mimeType: result.mimeType,
+        attachmentKey: encrypted.keyBase64,
+        attachmentNonce: encrypted.nonceBase64,
+      );
+      await _session.chatSocket.send(
+        roomId: room.id,
+        type: isImage ? 'image' : 'file',
+        text: envelope,
+        fileUrl: result.url,
+        fileName: 'encrypted',
+        fileSize: encrypted.cipherBytes.length,
+        mimeType: 'application/octet-stream',
+      );
+      return;
+    }
+
+    final result = await _session.api!.uploadFile(file);
     await _session.chatSocket.send(
       roomId: room.id,
       type: isImage ? 'image' : 'file',
@@ -262,6 +402,15 @@ class RoomChatController extends ChangeNotifier {
       fileSize: result.size,
       mimeType: result.mimeType,
     );
+  }
+
+  /// 암호화한 첨부 바이트를 기존 uploadFile(File)에 그대로 태우기 위한 임시 파일.
+  Future<File> _writeTempFile(Uint8List bytes) async {
+    final dir = await getTemporaryDirectory();
+    final file = File(
+      '${dir.path}/secret_upload_${DateTime.now().microsecondsSinceEpoch}.bin',
+    );
+    return file.writeAsBytes(bytes);
   }
 
   @override

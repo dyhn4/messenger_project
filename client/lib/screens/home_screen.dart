@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/session.dart';
+import 'chat_screen.dart';
 import 'desktop_home_screen.dart';
 import 'room_list_screen.dart';
 
@@ -18,12 +19,14 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _updateBannerShown = false;
+  bool _secretInviteDialogShowing = false;
 
   @override
   void initState() {
     super.initState();
     widget.session.addListener(_onSessionChanged);
     _maybeShowUpdateBanner();
+    _maybeShowSecretInvite();
   }
 
   @override
@@ -32,7 +35,74 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  void _onSessionChanged() => _maybeShowUpdateBanner();
+  void _onSessionChanged() {
+    _maybeShowUpdateBanner();
+    _maybeShowSecretInvite();
+  }
+
+  /// 비밀 대화 초대(secret:invite)가 도착하면 수락/거절 다이얼로그를 하나씩 순서대로 띄운다.
+  void _maybeShowSecretInvite() {
+    if (_secretInviteDialogShowing) return;
+    if (widget.session.pendingSecretInvites.isEmpty) return;
+    final invite = widget.session.pendingSecretInvites.first;
+    _secretInviteDialogShowing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        _secretInviteDialogShowing = false;
+        return;
+      }
+      final accept = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.lock_outline, color: Colors.green),
+              SizedBox(width: 8),
+              Text('비밀 대화 요청'),
+            ],
+          ),
+          content: const Text(
+            '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('거절'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('수락'),
+            ),
+          ],
+        ),
+      );
+      _secretInviteDialogShowing = false;
+      if (accept == true) {
+        await widget.session.acceptSecretInvite(invite);
+        // 수락하자마자 바로 그 대화방을 연다 — 이미 초대 시점에 room:created로 목록에
+        // 들어와 있으므로(secretStatus: 'pending') 여기선 찾기만 하면 된다.
+        final matches = widget.session.rooms.where(
+          (r) => r.id == invite.roomId,
+        );
+        final room = matches.isEmpty ? null : matches.first;
+        if (room != null && mounted) {
+          if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
+            widget.session.requestOpenRoom(room);
+          } else {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ChatScreen(session: widget.session, room: room),
+              ),
+            );
+          }
+        }
+      } else {
+        await widget.session.rejectSecretInvite(invite);
+      }
+      if (mounted) _maybeShowSecretInvite();
+    });
+  }
 
   /// session.dart의 _checkForUpdate()가 새 버전을 찾으면 한 번만 배너를 띄운다.
   void _maybeShowUpdateBanner() {
@@ -53,7 +123,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Text('다운로드'),
             ),
             TextButton(
-              onPressed: () => ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
+              onPressed: () =>
+                  ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
               child: const Text('나중에'),
             ),
           ],

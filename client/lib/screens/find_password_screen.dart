@@ -34,7 +34,9 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
         newPassword: _newPassword.text,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('비밀번호가 재설정되었습니다. 새 비밀번호로 로그인하세요.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀번호가 재설정되었습니다. 새 비밀번호로 로그인하세요.')),
+      );
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
@@ -67,36 +69,55 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _username,
-              decoration: const InputDecoration(labelText: '아이디', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: '아이디',
+                border: OutlineInputBorder(),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _email,
-              decoration: const InputDecoration(labelText: '이메일', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: '이메일',
+                border: OutlineInputBorder(),
+              ),
               keyboardType: TextInputType.emailAddress,
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _newPassword,
-              decoration: const InputDecoration(labelText: '새 비밀번호', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: '새 비밀번호',
+                border: OutlineInputBorder(),
+              ),
               obscureText: true,
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _confirmPassword,
-              decoration: const InputDecoration(labelText: '새 비밀번호 확인', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: '새 비밀번호 확인',
+                border: OutlineInputBorder(),
+              ),
               obscureText: true,
               onSubmitted: (_) => _submit(),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
             const SizedBox(height: 20),
             FilledButton(
               onPressed: _loading ? null : _submit,
               child: _loading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Text('비밀번호 재설정'),
             ),
           ],

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import {
   addRoomMembers,
+  deleteRoom,
   findDmRoomByKey,
   findRoomById,
   getMemberFavorite,
@@ -14,9 +15,11 @@ import {
   listRoomsForUser,
   removeRoomMember,
   setMemberFavorite,
+  setSecretDepartedMember,
 } from './db/queries/rooms.js';
 import { countUnreadForUser, getLastMessageAt, insertMessage, listMessagesByRoom } from './db/queries/messages.js';
 import { countUnreadCommentsForUser, getLastCommentAt, listCommentsForMessages } from './db/queries/comments.js';
+import { findSecretSessionByRoomId } from './db/queries/secretSessions.js';
 import { findUserById, listAllUserIds } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
@@ -63,7 +66,21 @@ export async function toRoomDto(room, requesterId) {
     createdAt: new Date(room.createdAt).getTime(),
     lastRead,
     lastActivityAt,
+    isSecret: !!room.isSecret,
   };
+  if (room.isSecret) {
+    // 비밀 대화 상태(핸드셰이크 진행 여부/자동 삭제 타이머)도 방 목록에 실어 보낸다 —
+    // 클라이언트가 매번 별도 조회 없이 RoomOptionsMenu의 타이머 표시나 초대 대기 UI에 바로
+    // 쓸 수 있게. 공개키/서명만 포함되고 공유비밀/체인키는 여기 절대 없다.
+    const session = await findSecretSessionByRoomId(room.id);
+    dto.secretStatus = session?.status ?? null;
+    dto.secretKeyEpoch = session?.keyEpoch ?? 0;
+    dto.secretSelfDestructSeconds = session?.selfDestructSeconds ?? null;
+    dto.secretInitiatorUserId = session?.initiatorUserId ?? null;
+    // "상대방도 나가기" 없이 혼자 나간 경우, 남은 멤버 쪽에서 Room.displayName()이
+    // "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있게 나간 사람 이름을 실어 보낸다.
+    dto.secretDepartedMemberName = room.secretDepartedMemberName ?? null;
+  }
   if (requesterId) {
     const myLastRead = lastRead[requesterId] ?? 0;
     // 로그아웃해 있는 동안 달린 댓글은 comment:new 소켓을 못 받아서 클라이언트가 실시간으로
@@ -79,7 +96,7 @@ export async function toRoomDto(room, requesterId) {
   return dto;
 }
 
-function dmKeyFor(userIdA, userIdB) {
+export function dmKeyFor(userIdA, userIdB) {
   return [userIdA, userIdB].sort().join(':');
 }
 
@@ -272,6 +289,42 @@ export function createRoomsRouter(io) {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+
+    if (room.isSecret) {
+      if (req.body?.alsoRemoveOther === true) {
+        // "상대방도 나가기" 체크 — 방 자체를 완전히 지워서 양쪽 모두 나가진 것으로
+        // 취급한다(메시지/멤버/비밀 세션은 전부 onDelete:'cascade'로 함께 삭제). 서버가
+        // 내용을 못 보니, 상대만 남기고 나 혼자 지우면 상대는 이미 끊어진 세션을 계속
+        // 들고 있게 된다는 문제를 이 옵션으로 확실히 해결한다.
+        const memberIds = await listRoomMemberIds(room.id);
+        io.to(room.id).emit('secret:left', { roomId: room.id });
+        io.in(memberIds.map((id) => `user:${id}`)).socketsLeave(room.id);
+        await deleteRoom(room.id);
+        return res.json({ ok: true });
+      }
+
+      // 체크 안 함 — 나만 나간다. 시스템 메시지는 평문이라 넣지 않는다(비밀 대화 클라이언트는
+      // 이 방의 모든 메시지를 무조건 암호문으로 보고 복호화를 시도하므로, 평문 시스템
+      // 메시지를 넣으면 "복호화할 수 없습니다"로 잘못 보이게 된다).
+      await removeRoomMember(room.id, req.user.sub);
+      io.in(`user:${req.user.sub}`).socketsLeave(room.id);
+
+      const remainingMemberIds = await listRoomMemberIds(room.id);
+      if (remainingMemberIds.length === 0) {
+        // 남은 멤버가 없으면(상대가 이미 먼저 혼자 나가있던 상태였다면) 아무도 못 보는
+        // 방을 DB에 계속 남겨둘 이유가 없다 — 완전히 지운다.
+        await deleteRoom(room.id);
+        return res.json({ ok: true });
+      }
+
+      const leaver = await findUserById(req.user.sub);
+      const updated = await setSecretDepartedMember(room.id, {
+        userId: req.user.sub,
+        name: leaver?.name ?? leaver?.username ?? '알 수 없음',
+      });
+      io.to(room.id).emit('room:created', await toRoomDto(updated)); // 남은 멤버의 멤버 목록+나간 사람 이름을 갱신시킨다.
+      return res.json({ ok: true });
+    }
 
     await removeRoomMember(room.id, req.user.sub);
 

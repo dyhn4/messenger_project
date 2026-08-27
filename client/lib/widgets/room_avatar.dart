@@ -28,16 +28,57 @@ class RoomAvatar extends StatelessWidget {
     }
 
     final others = room.members.where((m) => m.id != myUserId).toList();
+    // 비밀 대화에서 상대방이 혼자 나가면(secretDepartedMemberName만 남고 members엔 없음)
+    // room.members로 대체하면 내 아바타가 "상대방 아바타"처럼 보이게 된다 — 그 대신 나간
+    // 사람 자리에 중립적인 자리표시자를 보여준다.
+    if (room.type == RoomType.dm &&
+        others.isEmpty &&
+        room.secretDepartedMemberName != null) {
+      return CircleAvatar(
+        radius: size / 2,
+        backgroundColor: Colors.grey.shade400,
+        child: Icon(
+          Icons.person_off_outlined,
+          size: size * 0.55,
+          color: Colors.white,
+        ),
+      );
+    }
     final shown = (others.isEmpty ? room.members : others).take(2).toList();
     if (shown.isEmpty) {
       return CircleAvatar(radius: size / 2, child: const Text('?'));
     }
     if (shown.length == 1) {
-      return UserAvatar(
+      final avatar = UserAvatar(
         user: shown[0],
         resolveUrl: resolveUrl,
         radius: size / 2,
         online: onlineUserIds.contains(shown[0].id),
+      );
+      if (!room.isSecret) return avatar;
+      // 비밀 대화는 아바타 오른쪽 아래에 작은 초록 자물쇠 배지를 얹는다(채팅 목록의 녹색
+      // 이름과 짝을 이루는 시각 표시).
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            avatar,
+            Positioned(
+              right: -1,
+              bottom: -1,
+              child: Container(
+                padding: const EdgeInsets.all(1.5),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.lock, size: size * 0.4, color: Colors.green),
+              ),
+            ),
+          ],
+        ),
       );
     }
 

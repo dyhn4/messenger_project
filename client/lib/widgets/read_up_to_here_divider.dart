@@ -20,7 +20,14 @@ class ReadUpToHereDivider extends StatelessWidget {
         children: [
           Icon(Icons.check, size: 14, color: color),
           const SizedBox(width: 4),
-          Text('여기까지 읽었습니다.', style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+          Text(
+            '여기까지 읽었습니다.',
+            style: TextStyle(
+              fontSize: 12,
+              color: color,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );

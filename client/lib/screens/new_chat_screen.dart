@@ -9,7 +9,11 @@ import 'chat_screen.dart';
 class NewChatScreen extends StatefulWidget {
   final Session session;
   final bool asDialog;
-  const NewChatScreen({super.key, required this.session, this.asDialog = false});
+  const NewChatScreen({
+    super.key,
+    required this.session,
+    this.asDialog = false,
+  });
 
   @override
   State<NewChatScreen> createState() => _NewChatScreenState();
@@ -62,12 +66,16 @@ class _NewChatScreenState extends State<NewChatScreen> {
         Navigator.of(context).pop(room);
       } else {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => ChatScreen(session: widget.session, room: room)),
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(session: widget.session, room: room),
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('생성 실패: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('생성 실패: $e')));
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -79,93 +87,119 @@ class _NewChatScreenState extends State<NewChatScreen> {
     final body = _error != null
         ? Center(child: Text(_error!))
         : _users == null
-            ? const Center(child: CircularProgressIndicator())
-            : Column(
-                children: [
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        for (final user in _users!)
-                          ListTile(
-                            leading: UserAvatar(user: user, resolveUrl: widget.session.resolveUrl),
-                            title: Text(user.name),
-                            selected: _selected.contains(user.id),
-                            selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
-                            onTap: () => setState(() {
-                              if (_selected.contains(user.id)) {
-                                _selected.remove(user.id);
-                              } else {
-                                _selected.add(user.id);
-                              }
-                            }),
+        ? const Center(child: CircularProgressIndicator())
+        : Column(
+            children: [
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final user in _users!)
+                      ListTile(
+                        leading: UserAvatar(
+                          user: user,
+                          resolveUrl: widget.session.resolveUrl,
+                        ),
+                        title: Text(user.name),
+                        selected: _selected.contains(user.id),
+                        selectedTileColor: Theme.of(
+                          context,
+                        ).colorScheme.primaryContainer.withValues(alpha: 0.4),
+                        onTap: () => setState(() {
+                          if (_selected.contains(user.id)) {
+                            _selected.remove(user.id);
+                          } else {
+                            _selected.add(user.id);
+                          }
+                        }),
+                      ),
+                  ],
+                ),
+              ),
+              if (_selected.isNotEmpty) ...[
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    '선택된 멤버 ${_selected.length}',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final id in _selected)
+                        Chip(
+                          avatar: UserAvatar(
+                            user: _users!.firstWhere((u) => u.id == id),
+                            resolveUrl: widget.session.resolveUrl,
                           ),
-                      ],
+                          label: Text(
+                            _users!.firstWhere((u) => u.id == id).name,
+                          ),
+                          onDeleted: () => setState(() => _selected.remove(id)),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+              if (_selected.length > 1)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: TextField(
+                    controller: _groupName,
+                    decoration: const InputDecoration(
+                      labelText: '그룹 이름 (선택, 비워두면 멤버 이름으로 표시)',
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                  if (_selected.isNotEmpty) ...[
-                    const Divider(height: 1),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                      child: Text('선택된 멤버 ${_selected.length}', style: Theme.of(context).textTheme.labelLarge),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _submitting
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        child: const Text('취소'),
+                      ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final id in _selected)
-                            Chip(
-                              avatar: UserAvatar(
-                                user: _users!.firstWhere((u) => u.id == id),
-                                resolveUrl: widget.session.resolveUrl,
-                              ),
-                              label: Text(_users!.firstWhere((u) => u.id == id).name),
-                              onDeleted: () => setState(() => _selected.remove(id)),
-                            ),
-                        ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _selected.isEmpty || _submitting
+                            ? null
+                            : _submit,
+                        child: _submitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('대화 시작하기'),
                       ),
                     ),
                   ],
-                  if (_selected.length > 1)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: TextField(
-                        controller: _groupName,
-                        decoration: const InputDecoration(
-                          labelText: '그룹 이름 (선택, 비워두면 멤버 이름으로 표시)',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-                            child: const Text('취소'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: _selected.isEmpty || _submitting ? null : _submit,
-                            child: _submitting
-                                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Text('대화 시작하기'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
+                ),
+              ),
+            ],
+          );
 
     if (widget.asDialog) {
       return FloatingDialog(title: '새 대화', child: body);
     }
-    return Scaffold(appBar: AppBar(title: const Text('새 대화')), body: body);
+    return Scaffold(
+      appBar: AppBar(title: const Text('새 대화')),
+      body: body,
+    );
   }
 }

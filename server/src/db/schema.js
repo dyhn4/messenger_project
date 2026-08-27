@@ -37,6 +37,15 @@ export const rooms = pgTable('rooms', {
   dmKey: text('dm_key').unique(), // DM 두 명의 정렬된 id 쌍 — 같은 DM 중복 생성 방지.
   createdBy: text('created_by'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // 비밀 대화(E2EE) 방인지 — 새 RoomType을 만들지 않고 dm 위에 얹는 플래그로 둔다(isPublic과
+  // 같은 방식). true면 messages/messageComments.text는 클라이언트가 만든 암호문 JSON이다.
+  isSecret: boolean('is_secret').notNull().default(false),
+  // 비밀 대화에서 "상대방도 나가기"를 체크하지 않고 혼자 나간 경우, 남은 멤버 쪽 화면에서
+  // Room.displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있도록 나간 사람의
+  // 정보를 남겨둔다(비밀 대화 DM은 멤버가 2명뿐이라 한 명이 나가면 members에선 완전히
+  // 빠지므로, 이 컬럼이 없으면 누가 나갔었는지 알 방법이 없다).
+  secretDepartedMemberId: uuid('secret_departed_member_id'),
+  secretDepartedMemberName: text('secret_departed_member_name'),
 });
 
 /** 방 멤버십 + 그 사람이 그 방을 마지막으로 읽은 시각을 한 테이블로 합친다(멤버가 아니면 읽음
@@ -79,10 +88,16 @@ export const messages = pgTable(
     // 내용만 비운다(댓글 스레드가 이 메시지를 계속 참조하기 때문).
     editedAt: timestamp('edited_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    // 비밀 대화 자동 삭제 타이머용(secretExpiry.js 참고). readAt은 상대방이 실제로 이 메시지를
+    // 본 시각(최초 1회만 기록), expiresAt은 그 시각 + 방의 selfDestructSeconds. 비밀 대화는
+    // 항상 멤버가 2명뿐이라 별도 message_reads 조인 테이블 없이 컬럼 하나로 충분하다.
+    readAt: timestamp('read_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
     index('messages_sender_id_idx').on(t.senderId),
+    index('messages_expires_at_idx').on(t.expiresAt),
   ],
 );
 
@@ -113,4 +128,80 @@ export const messageComments = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [index('message_comments_message_id_idx').on(t.messageId, t.createdAt)],
+);
+
+/**
+ * 비밀 대화(E2EE)에 쓰는 기기 신원. deviceId는 클라이언트가 생성한 UUID(로그인 계정과 별개로
+ * "이 기기"를 가리킴). identityPublicKey(X25519)/signingPublicKey(Ed25519)는 공개키만 저장 —
+ * 개인키는 절대 서버에 오지 않는다(client/lib/services/device_identity.dart 참고).
+ */
+export const devices = pgTable(
+  'devices',
+  {
+    id: text('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name'),
+    identityPublicKey: text('identity_public_key').notNull(),
+    signingPublicKey: text('signing_public_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    // 기기를 폐기(로그아웃/분실 신고 등)하면 이후 소켓 인증/비밀 대화 기능에서 거부된다.
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('devices_user_id_idx').on(t.userId)],
+);
+
+/**
+ * 비밀 대화 방 하나당 하나. 서버는 여기 공개키/서명/상태값만 들고 있고, 실제 공유비밀·체인키는
+ * 절대 서버에 오지 않는다(클라이언트가 로컬에서 유도해 flutter_secure_storage에만 저장).
+ */
+export const secretSessions = pgTable('secret_sessions', {
+  roomId: text('room_id')
+    .primaryKey()
+    .references(() => rooms.id, { onDelete: 'cascade' }),
+  initiatorUserId: uuid('initiator_user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  initiatorDeviceId: text('initiator_device_id')
+    .notNull()
+    .references(() => devices.id, { onDelete: 'cascade' }),
+  responderUserId: uuid('responder_user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  responderDeviceId: text('responder_device_id').references(() => devices.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('pending'), // 'pending' | 'active' | 'rejected' | 'terminated'
+  initiatorEphemeralPublicKey: text('initiator_ephemeral_public_key').notNull(),
+  initiatorEphemeralSignature: text('initiator_ephemeral_signature').notNull(),
+  responderEphemeralPublicKey: text('responder_ephemeral_public_key'),
+  responderEphemeralSignature: text('responder_ephemeral_signature'),
+  // 재키잉마다 1씩 증가 — 메시지 암호문 봉투의 epoch 필드와 대응(secretRekeys 이력 참고).
+  keyEpoch: integer('key_epoch').notNull().default(0),
+  // null이면 자동 삭제 꺼짐. 1~604800(1초~1주). 이후 읽는 메시지부터 적용된다.
+  selfDestructSeconds: integer('self_destruct_seconds'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+});
+
+/** 재키잉 제안/수락 이력(append-only) — 재연결 중 재키잉이 겹친 경우를 클라이언트가 따라잡는 용도. */
+export const secretRekeys = pgTable(
+  'secret_rekeys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    keyEpoch: integer('key_epoch').notNull(),
+    proposerUserId: uuid('proposer_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    proposerEphemeralPublicKey: text('proposer_ephemeral_public_key').notNull(),
+    proposerEphemeralSignature: text('proposer_ephemeral_signature').notNull(),
+    responderEphemeralPublicKey: text('responder_ephemeral_public_key'),
+    responderEphemeralSignature: text('responder_ephemeral_signature'),
+    status: text('status').notNull().default('proposed'), // 'proposed' | 'acked'
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('secret_rekeys_room_id_epoch_idx').on(t.roomId, t.keyEpoch)],
 );

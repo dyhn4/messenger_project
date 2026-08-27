@@ -32,6 +32,11 @@ class Comment {
   String? attachmentKey;
   String? attachmentNonce;
 
+  /// message.dart의 thumbnailUrl/Key/Nonce와 동일한 의미.
+  final String? thumbnailUrl;
+  String? thumbnailKey;
+  String? thumbnailNonce;
+
   Comment({
     required this.id,
     required this.messageId,
@@ -50,6 +55,9 @@ class Comment {
     this.decryptFailed = false,
     this.attachmentKey,
     this.attachmentNonce,
+    this.thumbnailUrl,
+    this.thumbnailKey,
+    this.thumbnailNonce,
   });
 
   factory Comment.fromJson(Map<String, dynamic> json) {
@@ -63,12 +71,15 @@ class Comment {
           ? MessageType.image
           : json['type'] == 'file'
           ? MessageType.file
+          : json['type'] == 'sticker'
+          ? MessageType.sticker
           : MessageType.text,
       text: json['text'] as String?,
       fileUrl: json['fileUrl'] as String?,
       fileName: json['fileName'] as String?,
       fileSize: (json['fileSize'] as num?)?.toInt(),
       mimeType: json['mimeType'] as String?,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         (json['createdAt'] as num).toInt(),
       ),

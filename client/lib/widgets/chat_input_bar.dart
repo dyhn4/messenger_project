@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../services/room_chat_controller.dart';
+import 'sticker_picker.dart';
 
 class _PendingAttachment {
   final File file;
@@ -108,6 +109,26 @@ class _ChatInputBarState extends State<ChatInputBar> {
     });
   }
 
+  /// 이모티콘은 카카오톡처럼 고르는 즉시 바로 전송된다(텍스트 입력칸에 삽입되지 않음).
+  Future<void> _openStickerPicker() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => StickerPicker(
+        onSelected: (sticker) async {
+          Navigator.of(context).pop();
+          try {
+            await widget.controller.sendSticker(sticker.id);
+          } catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('전송 실패: $e')));
+          }
+        },
+      ),
+    );
+  }
+
   void _removeAttachment(int index) =>
       setState(() => _attachments.removeAt(index));
 
@@ -183,6 +204,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   icon: const Icon(Icons.image_outlined),
                   onPressed: _sending ? null : _pickImage,
                   tooltip: '이미지 보내기',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.emoji_emotions_outlined),
+                  onPressed: _sending ? null : _openStickerPicker,
+                  tooltip: '이모티콘',
                 ),
                 IconButton(
                   icon: const Icon(Icons.attach_file),

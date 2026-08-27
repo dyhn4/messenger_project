@@ -18,6 +18,7 @@ export function toMessageDto(m) {
     fileName: m.fileName,
     fileSize: m.fileSize,
     mimeType: m.mimeType,
+    thumbnailUrl: signFileUrl(m.thumbnailUrl),
     createdAt: new Date(m.createdAt).getTime(),
     editedAt: m.editedAt ? new Date(m.editedAt).getTime() : null,
     deleted: !!m.deletedAt,

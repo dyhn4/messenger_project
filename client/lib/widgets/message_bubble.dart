@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
@@ -215,6 +216,10 @@ class _MessageBubbleState extends State<MessageBubble> {
         message.senderName;
     const avatarDiameter = 32.0;
     const contentIndent = avatarDiameter + 8; // 아바타 너비 + 아바타-내용 간격.
+    final isSticker =
+        message.type == MessageType.sticker &&
+        !message.deleted &&
+        !message.decryptFailed;
 
     final bubbleRow = MouseRegion(
       onEnter: (_) => _setBubbleHovering(true),
@@ -227,17 +232,23 @@ class _MessageBubbleState extends State<MessageBubble> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 500),
               curve: Curves.easeOut,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: highlighted
-                    ? const Color(0xFFFFF59D)
-                    : (isMine
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest),
-                borderRadius: BorderRadius.circular(14),
-              ),
+              // 이모티콘은 카카오톡처럼 말풍선 배경 없이 크게만 보여준다(삭제/복호화 실패
+              // 상태는 문구를 읽어야 하니 평소 말풍선 그대로 유지).
+              padding: isSticker
+                  ? EdgeInsets.zero
+                  : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: isSticker
+                  ? const BoxDecoration()
+                  : BoxDecoration(
+                      color: highlighted
+                          ? const Color(0xFFFFF59D)
+                          : (isMine
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHighest),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
               child: message.deleted
                   ? Text(
                       '삭제된 메시지입니다',
@@ -270,7 +281,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
+                        // 이모티콘은 text 필드 자체가 캡션이 아니라 스티커 id라 이 대상이 아니다.
                         if (message.type != MessageType.text &&
+                            message.type != MessageType.sticker &&
                             (message.text?.isNotEmpty ?? false)) ...[
                           SelectableText(message.text!),
                           const SizedBox(height: 6),
@@ -488,6 +501,11 @@ class _MessageBubbleState extends State<MessageBubble> {
           fileName: message.fileName ?? 'image.png',
           attachmentKey: message.attachmentKey,
           attachmentNonce: message.attachmentNonce,
+          thumbnailUrl: message.thumbnailUrl == null
+              ? null
+              : widget.resolveUrl(message.thumbnailUrl!),
+          thumbnailKey: message.thumbnailKey,
+          thumbnailNonce: message.thumbnailNonce,
         );
       case MessageType.file:
         final url = widget.resolveUrl(message.fileUrl ?? '');
@@ -500,6 +518,12 @@ class _MessageBubbleState extends State<MessageBubble> {
         );
       case MessageType.text:
         return SelectableText(message.text ?? '');
+      case MessageType.sticker:
+        final sticker = findStickerById(message.text ?? '');
+        return Text(
+          sticker?.emoji ?? '❔',
+          style: const TextStyle(fontSize: 72),
+        );
       case MessageType.system:
       case MessageType.comment:
         // ChatPanel이 system 메시지는 SystemMessageRow로, 댓글 합성 항목은 MessageCommentsCard로

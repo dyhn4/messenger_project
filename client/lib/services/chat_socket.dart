@@ -475,6 +475,7 @@ class ChatSocket {
     String? fileName,
     int? fileSize,
     String? mimeType,
+    String? thumbnailUrl,
   }) {
     final socket = _socket;
     if (socket == null) {
@@ -492,6 +493,7 @@ class ChatSocket {
         'fileName': ?fileName,
         'fileSize': ?fileSize,
         'mimeType': ?mimeType,
+        'thumbnailUrl': ?thumbnailUrl,
       },
       ack: (dynamic response) {
         if (completer.isCompleted) return;

@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
@@ -615,6 +616,8 @@ class Session extends ChangeNotifier {
     String? mimeType,
     required String attachmentKey,
     required String attachmentNonce,
+    String? thumbnailKey,
+    String? thumbnailNonce,
   }) async {
     final payload = jsonEncode({
       'caption': caption,
@@ -623,6 +626,8 @@ class Session extends ChangeNotifier {
       'mimeType': mimeType,
       'attachmentKey': attachmentKey,
       'attachmentNonce': attachmentNonce,
+      'thumbnailKey': thumbnailKey,
+      'thumbnailNonce': thumbnailNonce,
     });
     final envelope = await secretSessionManager!.encryptForRoom(
       room.id,
@@ -673,6 +678,8 @@ class Session extends ChangeNotifier {
         m.mimeType = meta['mimeType'] as String?;
         m.attachmentKey = meta['attachmentKey'] as String?;
         m.attachmentNonce = meta['attachmentNonce'] as String?;
+        m.thumbnailKey = meta['thumbnailKey'] as String?;
+        m.thumbnailNonce = meta['thumbnailNonce'] as String?;
       } catch (_) {
         m.decryptFailed = true;
         m.text = null;
@@ -711,6 +718,8 @@ class Session extends ChangeNotifier {
         c.mimeType = meta['mimeType'] as String?;
         c.attachmentKey = meta['attachmentKey'] as String?;
         c.attachmentNonce = meta['attachmentNonce'] as String?;
+        c.thumbnailKey = meta['thumbnailKey'] as String?;
+        c.thumbnailNonce = meta['thumbnailNonce'] as String?;
       } catch (_) {
         c.decryptFailed = true;
         c.text = null;
@@ -775,6 +784,8 @@ class Session extends ChangeNotifier {
             MessageType.text => m.text ?? '',
             MessageType.image => '사진을 보냈습니다',
             MessageType.file => m.fileName ?? '파일을 보냈습니다',
+            MessageType.sticker =>
+              '${findStickerById(m.text ?? '')?.emoji ?? ''} 이모티콘을 보냈습니다',
             MessageType.system => '',
             MessageType.comment =>
               '', // 실시간 message:new로는 절대 안 옴(댓글은 클라이언트 전용 합성 타입).
@@ -829,6 +840,8 @@ class Session extends ChangeNotifier {
             MessageType.text => c.text ?? '',
             MessageType.image => '사진을 보냈습니다',
             MessageType.file => c.fileName ?? '파일을 보냈습니다',
+            MessageType.sticker =>
+              '${findStickerById(c.text ?? '')?.emoji ?? ''} 이모티콘을 보냈습니다',
             MessageType.system || MessageType.comment => '', // 댓글엔 나올 수 없는 타입.
           };
 

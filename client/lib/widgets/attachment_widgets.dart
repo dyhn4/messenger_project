@@ -108,15 +108,23 @@ class DownloadOverlayButton extends StatelessWidget {
 }
 
 /// 채팅/댓글에 올라온 이미지 하나. 누르면 크게 보고, 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
+/// 버블에는 (있으면) 축소 썸네일을 보여주고, 실제로 열거나 다운로드할 때만 원본을 가져온다 —
+/// 그래야 썸네일을 따로 만든 보람이 있다(매번 원본을 미리 받아두면 의미가 없음).
 class DownloadableImage extends StatefulWidget {
   final Session session;
-  final String url;
+  final String url; // 원본.
   final String fileName;
 
-  /// 비밀 대화의 이미지만 채워진다 — 있으면 서버가 갖고 있는 건 암호화된 바이트라는 뜻이라
-  /// 캐시 네트워크 이미지 대신 다운로드+복호화 후 메모리 이미지로 보여준다.
+  /// 비밀 대화의 원본에만 채워진다 — 있으면 [url]이 가리키는 건 암호화된 바이트라는 뜻.
   final String? attachmentKey;
   final String? attachmentNonce;
+
+  /// 채팅 버블 미리보기용 축소 썸네일 경로. null이면(예전 메시지, 또는 썸네일 생성 실패) 원본을
+  /// 그대로 미리보기에 쓴다.
+  final String? thumbnailUrl;
+  final String? thumbnailKey;
+  final String? thumbnailNonce;
+
   const DownloadableImage({
     super.key,
     required this.session,
@@ -124,6 +132,9 @@ class DownloadableImage extends StatefulWidget {
     required this.fileName,
     this.attachmentKey,
     this.attachmentNonce,
+    this.thumbnailUrl,
+    this.thumbnailKey,
+    this.thumbnailNonce,
   });
 
   @override
@@ -133,21 +144,27 @@ class DownloadableImage extends StatefulWidget {
 class _DownloadableImageState extends State<DownloadableImage> {
   bool _hovering = false;
   bool _downloading = false;
-  Future<Uint8List>? _decryptedBytes;
+  Future<Uint8List>? _previewBytes;
 
-  bool get _isSecret => widget.attachmentKey != null;
+  bool get _hasThumbnail => widget.thumbnailUrl != null;
+  String get _previewUrl => widget.thumbnailUrl ?? widget.url;
+  String? get _previewKey =>
+      _hasThumbnail ? widget.thumbnailKey : widget.attachmentKey;
+  String? get _previewNonce =>
+      _hasThumbnail ? widget.thumbnailNonce : widget.attachmentNonce;
+  bool get _previewIsSecret => _previewKey != null;
 
   @override
   void initState() {
     super.initState();
-    if (_isSecret) _decryptedBytes = _fetch();
+    if (_previewIsSecret) {
+      _previewBytes = fetchAttachmentBytes(
+        url: _previewUrl,
+        attachmentKey: _previewKey,
+        attachmentNonce: _previewNonce,
+      );
+    }
   }
-
-  Future<Uint8List> _fetch() => fetchAttachmentBytes(
-    url: widget.url,
-    attachmentKey: widget.attachmentKey,
-    attachmentNonce: widget.attachmentNonce,
-  );
 
   Future<void> _download() async {
     setState(() => _downloading = true);
@@ -175,20 +192,30 @@ class _DownloadableImageState extends State<DownloadableImage> {
     }
   }
 
-  Future<void> _open(Uint8List? bytes) async {
+  void _open() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            ImageViewerScreen(imageUrl: widget.url, imageBytes: bytes),
+        builder: (_) => ImageViewerScreen(
+          imageUrl: widget.url,
+          // 원본이 암호화돼 있으면(비밀 대화) 여는 시점에 새로 다운로드+복호화한다 — 미리보기는
+          // 이미 축소 썸네일로 봤으니 굳이 미리 받아둘 필요가 없다.
+          imageBytesFuture: widget.attachmentKey != null
+              ? fetchAttachmentBytes(
+                  url: widget.url,
+                  attachmentKey: widget.attachmentKey,
+                  attachmentNonce: widget.attachmentNonce,
+                )
+              : null,
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final image = _isSecret
+    final image = _previewIsSecret
         ? FutureBuilder<Uint8List>(
-            future: _decryptedBytes,
+            future: _previewBytes,
             builder: (context, snapshot) {
               if (snapshot.hasError) {
                 return const SizedBox(
@@ -213,7 +240,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
             },
           )
         : CachedNetworkImage(
-            imageUrl: widget.url,
+            imageUrl: _previewUrl,
             width: 200,
             // placeholder/errorWidget과 높이를 맞춰서(150) 고정한다 — 안 그러면 이미지가
             // 원본 비율대로 로드되면서 크기가 바뀌어, 로드되기 전 크기를 기준으로 계산해둔
@@ -236,9 +263,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
-        onTap: _isSecret
-            ? () async => _open(await _decryptedBytes)
-            : () => _open(null),
+        onTap: _open,
         child: Stack(
           children: [
             ClipRRect(borderRadius: BorderRadius.circular(10), child: image),

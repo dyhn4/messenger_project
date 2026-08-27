@@ -570,6 +570,7 @@ class ApiClient {
     String? fileName,
     int? fileSize,
     String? mimeType,
+    String? thumbnailUrl,
   }) async {
     return Comment.fromJson(
       await _post('/api/messages/$messageId/comments', {
@@ -579,6 +580,7 @@ class ApiClient {
             'fileName': ?fileName,
             'fileSize': ?fileSize,
             'mimeType': ?mimeType,
+            'thumbnailUrl': ?thumbnailUrl,
           })
           as Map<String, dynamic>,
     );

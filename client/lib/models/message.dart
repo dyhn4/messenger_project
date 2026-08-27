@@ -3,11 +3,12 @@ import 'comment.dart';
 /// [comment]는 서버가 보내는 실제 메시지 타입이 아니라, 댓글 하나를 채팅 타임라인 안에 그 댓글이
 /// 달린 시각 위치에 끼워 넣기 위한 클라이언트 전용 합성(synthetic) 항목이다 — Message.commentEntry로만
 /// 만들어지고, 서버 JSON의 type 문자열로는 절대 나오지 않는다(_typeFromString은 이 값을 모른다).
-enum MessageType { text, image, file, system, comment }
+enum MessageType { text, image, file, sticker, system, comment }
 
 MessageType _typeFromString(String? s) => switch (s) {
   'image' => MessageType.image,
   'file' => MessageType.file,
+  'sticker' => MessageType.sticker,
   'system' => MessageType.system,
   _ => MessageType.text,
 };
@@ -48,6 +49,14 @@ class Message {
   String? attachmentKey;
   String? attachmentNonce;
 
+  /// 이미지 메시지의 축소 미리보기 경로(채팅 버블용) — null이면 썸네일이 없어 원본(fileUrl)을
+  /// 그대로 보여준다. 비밀 대화의 thumbnailKey/Nonce는 attachmentKey/Nonce와 동일한 방식으로
+  /// 썸네일 전용 키다(원본과 다른 랜덤 키로 따로 암호화됨) — Session.decryptInPlace가 첨부
+  /// 봉투에서 풀어서 채운다.
+  final String? thumbnailUrl;
+  String? thumbnailKey;
+  String? thumbnailNonce;
+
   /// 비밀 대화 자동 삭제 타이머용 — 상대가 이 메시지를 읽은 시각(null이면 아직 안 읽음)과,
   /// 그때부터 방의 타이머(초)만큼 지나 삭제될 시각. secret:message-read 브로드캐스트로 그 자리에서
   /// 채워지므로(RoomChatController.applyMessageRead) non-final. 평문 방 메시지는 항상 둘 다 null.
@@ -83,6 +92,9 @@ class Message {
     this.decryptFailed = false,
     this.attachmentKey,
     this.attachmentNonce,
+    this.thumbnailUrl,
+    this.thumbnailKey,
+    this.thumbnailNonce,
     this.readAt,
     this.expiresAt,
     this.asComment,
@@ -101,6 +113,7 @@ class Message {
       fileName: json['fileName'] as String?,
       fileSize: (json['fileSize'] as num?)?.toInt(),
       mimeType: json['mimeType'] as String?,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         (json['createdAt'] as num).toInt(),
       ),

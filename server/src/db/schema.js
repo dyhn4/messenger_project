@@ -83,6 +83,11 @@ export const messages = pgTable(
     fileName: text('file_name'),
     fileSize: integer('file_size'),
     mimeType: text('mime_type'),
+    // 이미지 메시지의 축소 미리보기(채팅 버블용). fileUrl은 항상 원본 그대로 두고, 이 컬럼은
+    // 클라이언트가 미리 축소·재인코딩해서 별도로 올린 썸네일 경로다(없으면 null — 이미지가
+    // 아니거나, 썸네일 생성에 실패해서 원본만 있는 경우). 비밀 대화면 이것도 원본과 마찬가지로
+    // 암호화된 바이트를 가리킨다.
+    thumbnailUrl: text('thumbnail_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     // 작성 후 5분 이내 본인만 수정/삭제 가능(messages.js 참고). 삭제는 소프트 삭제 — 행은 남고
     // 내용만 비운다(댓글 스레드가 이 메시지를 계속 참조하기 때문).
@@ -121,6 +126,7 @@ export const messageComments = pgTable(
     fileName: text('file_name'),
     fileSize: integer('file_size'),
     mimeType: text('mime_type'),
+    thumbnailUrl: text('thumbnail_url'), // messages.thumbnailUrl과 동일한 용도.
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     // messages와 동일한 규칙: 작성 후 5분 이내 본인만 수정/삭제 가능(comments.js 참고). 삭제는
     // 소프트 삭제 — 행은 남기고 deletedAt만 찍는다(text/첨부는 그대로 두되 응답에서 가린다).

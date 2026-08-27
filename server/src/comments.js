@@ -23,6 +23,7 @@ export function toCommentDto(c) {
     fileName: deleted ? null : c.fileName,
     fileSize: deleted ? null : c.fileSize,
     mimeType: deleted ? null : c.mimeType,
+    thumbnailUrl: deleted ? null : signFileUrl(c.thumbnailUrl),
     createdAt: new Date(c.createdAt).getTime(),
     editedAt: c.editedAt ? new Date(c.editedAt).getTime() : null,
     deleted,
@@ -43,7 +44,7 @@ export function createCommentsRouter(io) {
       return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     }
 
-    const type = req.body?.type === 'image' || req.body?.type === 'file' ? req.body.type : 'text';
+    const type = ['image', 'file', 'sticker'].includes(req.body?.type) ? req.body.type : 'text';
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl : null;
     if (!text && !fileUrl) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
@@ -61,6 +62,7 @@ export function createCommentsRouter(io) {
       fileName: typeof req.body?.fileName === 'string' ? req.body.fileName : null,
       fileSize: typeof req.body?.fileSize === 'number' ? req.body.fileSize : null,
       mimeType: typeof req.body?.mimeType === 'string' ? req.body.mimeType : null,
+      thumbnailUrl: typeof req.body?.thumbnailUrl === 'string' ? req.body.thumbnailUrl : null,
     });
 
     const dto = toCommentDto(comment);

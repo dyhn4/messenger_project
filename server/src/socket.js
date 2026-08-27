@@ -42,7 +42,7 @@ export function registerSocket(io) {
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
     socket.join(`user:${socket.data.userId}`);
 
-    // payload: { roomId, type: 'text'|'image'|'file', text?, fileUrl?, fileName?, fileSize?, mimeType? }
+    // payload: { roomId, type: 'text'|'image'|'file', text?, fileUrl?, fileName?, fileSize?, mimeType?, thumbnailUrl? }
     socket.on('message:send', async (payload, ack) => {
       if (!payload || typeof payload !== 'object') return;
 
@@ -59,12 +59,13 @@ export function registerSocket(io) {
         roomId: room.id,
         senderId: socket.data.userId,
         senderName: sender?.name ?? sender?.username ?? socket.data.username,
-        type: payload.type === 'image' || payload.type === 'file' ? payload.type : 'text',
+        type: ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
         text: typeof payload.text === 'string' ? payload.text : null,
         fileUrl: typeof payload.fileUrl === 'string' ? payload.fileUrl : null, // 원본 상대경로 그대로 저장.
         fileName: typeof payload.fileName === 'string' ? payload.fileName : null,
         fileSize: typeof payload.fileSize === 'number' ? payload.fileSize : null,
         mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : null,
+        thumbnailUrl: typeof payload.thumbnailUrl === 'string' ? payload.thumbnailUrl : null,
       });
 
       // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서

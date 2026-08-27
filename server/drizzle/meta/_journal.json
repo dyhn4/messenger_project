@@ -57,6 +57,13 @@
       "when": 1787818206033,
       "tag": "0007_curious_doctor_faustus",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787819028109,
+      "tag": "0008_fluffy_ultron",
+      "breakpoints": true
     }
   ]
 }

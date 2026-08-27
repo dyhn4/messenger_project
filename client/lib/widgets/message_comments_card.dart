@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
@@ -414,7 +415,9 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           _buildEditor(context)
         else ...[
           // 첨부(이미지/파일)에 캡션이 같이 달려 있으면 그 위에 먼저 보여준다(MessageBubble과 동일).
+          // 이모티콘은 text가 캡션이 아니라 스티커 id라 이 대상이 아니다.
           if (comment.type != MessageType.text &&
+              comment.type != MessageType.sticker &&
               (comment.text?.isNotEmpty ?? false)) ...[
             Text(comment.text!, style: const TextStyle(fontSize: 13)),
             const SizedBox(height: 4),
@@ -446,6 +449,11 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           fileName: comment.fileName ?? 'image.png',
           attachmentKey: comment.attachmentKey,
           attachmentNonce: comment.attachmentNonce,
+          thumbnailUrl: comment.thumbnailUrl == null
+              ? null
+              : widget.resolveUrl(comment.thumbnailUrl!),
+          thumbnailKey: comment.thumbnailKey,
+          thumbnailNonce: comment.thumbnailNonce,
         );
       case MessageType.file:
         return DownloadableFile(
@@ -454,6 +462,12 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           fileName: comment.fileName ?? '파일',
           attachmentKey: comment.attachmentKey,
           attachmentNonce: comment.attachmentNonce,
+        );
+      case MessageType.sticker:
+        final sticker = findStickerById(comment.text ?? '');
+        return Text(
+          sticker?.emoji ?? '❔',
+          style: const TextStyle(fontSize: 48),
         );
       case MessageType.text:
       case MessageType.system:
@@ -506,14 +520,22 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         !_editing &&
         (widget.onEdit != null || widget.onDelete != null);
 
+    final isSticker =
+        comment.type == MessageType.sticker &&
+        !comment.deleted &&
+        !comment.decryptFailed;
     final bubble = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: widget.isMine
-            ? Theme.of(context).colorScheme.primaryContainer
-            : Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      padding: isSticker
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: isSticker
+          ? const BoxDecoration()
+          : BoxDecoration(
+              color: widget.isMine
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
       child: _buildBubbleContent(context),
     );
 

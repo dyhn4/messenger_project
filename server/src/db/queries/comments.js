@@ -1,4 +1,4 @@
-import { asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { messageComments } from '../schema.js';
 
@@ -43,4 +43,33 @@ export async function softDeleteComment(id) {
     .where(eq(messageComments.id, id))
     .returning();
   return row;
+}
+
+/** 방 목록 정렬용 "최근 활동" 계산에 쓴다(rooms.js의 toRoomDto, getLastMessageAt과 짝) — 이
+ * 방의 가장 최근 댓글 시각. 댓글이 하나도 없으면 null. */
+export async function getLastCommentAt(roomId) {
+  const [row] = await db
+    .select({ createdAt: messageComments.createdAt })
+    .from(messageComments)
+    .where(eq(messageComments.roomId, roomId))
+    .orderBy(desc(messageComments.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
+/** rooms.js의 countUnreadForUser(messages 기준)와 동일한 규칙을 message_comments에 적용한다 —
+ * 로그아웃해 있는 동안(소켓으로 comment:new를 못 받은 채) 달린 댓글도, 다시 로그인해서 방
+ * 목록을 새로 받아올 때 이 값이 unreadCount에 합산되어 안읽음 뱃지에 반영되게 한다. */
+export async function countUnreadCommentsForUser(roomId, requesterId, sinceMs) {
+  const [row] = await db
+    .select({ count: sql`count(*)`.mapWith(Number) })
+    .from(messageComments)
+    .where(
+      and(
+        eq(messageComments.roomId, roomId),
+        ne(messageComments.senderId, requesterId),
+        gt(messageComments.createdAt, new Date(sinceMs)),
+      ),
+    );
+  return row?.count ?? 0;
 }

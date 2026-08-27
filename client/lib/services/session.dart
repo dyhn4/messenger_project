@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_user.dart';
+import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import 'api_client.dart';
@@ -301,6 +302,10 @@ class Session extends ChangeNotifier {
     _messageSub?.cancel();
     _messageSub = chatSocket.messages.listen((m) {
       _controllers[m.roomId]?.feed(m);
+      // 내가 보낸 메시지도 이 방 소켓으로 그대로 되돌아오므로(feed 참고), 보낸/받은 경우 모두
+      // 여기서 한 번에 방을 "최근 활동"으로 끌어올릴 수 있다 — _handleIncomingMessage는 내가
+      // 보낸 경우 알림/안읽음 처리를 건너뛰지만, 방 목록 정렬은 그것과 무관하게 항상 갱신한다.
+      _bumpRoomActivity(m.roomId, m.createdAt);
       _handleIncomingMessage(m);
     });
     _roomSub?.cancel();
@@ -322,6 +327,8 @@ class Session extends ChangeNotifier {
     _commentSub?.cancel();
     _commentSub = chatSocket.commentEvents.listen((c) {
       _controllers[c.roomId]?.addComment(c);
+      _bumpRoomActivity(c.roomId, c.createdAt);
+      _handleIncomingComment(c);
     });
     _messageEditedSub?.cancel();
     _messageEditedSub = chatSocket.messageEdited.listen((m) {
@@ -446,6 +453,20 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 이 방에서 방금 활동(메시지/댓글을 보냈거나 받음)이 있었다는 뜻 — 방 목록에서 그 방을
+  /// 속한 카테고리(토픽/그룹/DM) 안 맨 위로 끌어올리는 데 쓴다(desktop_home_screen.dart,
+  /// room_list_screen.dart의 _favoriteFirst 정렬 참고). 재연결 중 순서가 안 맞는 이벤트가
+  /// 뒤늦게 와도 시간을 거꾸로 되돌리지 않도록, 더 최근 시각일 때만 갱신한다.
+  void _bumpRoomActivity(String roomId, DateTime at) {
+    final match = rooms.where((r) => r.id == roomId);
+    if (match.isEmpty) return;
+    final room = match.first;
+    if (at.isAfter(room.lastActivityAt)) {
+      room.lastActivityAt = at;
+      notifyListeners();
+    }
+  }
+
   /// 새 메시지가 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께 처리한다.
   /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다.
   void _handleIncomingMessage(Message m) {
@@ -499,6 +520,57 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 새 댓글이 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께
+  /// 처리한다(_handleIncomingMessage와 동일한 규칙 — 내가 단 댓글이거나 지금 보고 있는
+  /// 방이면 둘 다 건너뛴다).
+  void _handleIncomingComment(Comment c) {
+    final isViewingNow = c.roomId == _activeRoomId && appInForeground;
+    if (c.senderId == userId || isViewingNow) return;
+
+    final match = rooms.where((r) => r.id == c.roomId);
+    if (match.isNotEmpty) {
+      match.first.unreadCount++;
+      notifyListeners();
+    }
+
+    final room = match.isEmpty ? null : match.first;
+    final roomTag = switch (room?.type) {
+      null => null,
+      RoomType.dm => '1:1',
+      RoomType.group => room!.name ?? '그룹채팅',
+      RoomType.topic => room!.displayName(userId ?? ''),
+    };
+    final preview = switch (c.type) {
+      MessageType.text => c.text ?? '',
+      MessageType.image => '사진을 보냈습니다',
+      MessageType.file => c.fileName ?? '파일을 보냈습니다',
+      MessageType.system || MessageType.comment => '', // 댓글엔 나올 수 없는 타입.
+    };
+
+    AppUser? sender;
+    if (room != null) {
+      for (final member in room.members) {
+        if (member.id == c.senderId) {
+          sender = member;
+          break;
+        }
+      }
+    }
+
+    final tag = roomTag != null ? '$roomTag·댓글' : '댓글';
+    notifications.showMessage(
+      title: '${c.senderName} [$tag]',
+      body: preview,
+      roomId: c.roomId,
+      avatarType: sender?.avatarType ?? 'initial',
+      avatarEmoji: sender?.avatarEmoji,
+      avatarColor: sender?.avatarColor,
+      avatarUrl: sender?.avatarUrl != null
+          ? resolveUrl(sender!.avatarUrl!)
+          : null,
+    );
+  }
+
   void _upsertRoom(Room incoming) {
     final i = rooms.indexWhere((r) => r.id == incoming.id);
     if (i >= 0) {
@@ -507,6 +579,7 @@ class Session extends ChangeNotifier {
       // 추적 중이던 값을 유지한다.
       incoming.unreadCount = rooms[i].unreadCount;
       incoming.favorite = rooms[i].favorite;
+      incoming.lastActivityAt = rooms[i].lastActivityAt;
       rooms[i] = incoming;
     } else {
       rooms.add(incoming);

@@ -15,6 +15,18 @@ export function findMessageById(id) {
     .then((rows) => rows[0] ?? null);
 }
 
+/** 방 목록 정렬용 "최근 활동" 계산에 쓴다(rooms.js의 toRoomDto 참고) — 이 방의 가장 최근
+ * 메시지 시각. 메시지가 하나도 없으면 null(그러면 room.createdAt으로 대체됨). */
+export async function getLastMessageAt(roomId) {
+  const [row] = await db
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(eq(messages.roomId, roomId))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
 export async function updateMessageText(id, text) {
   const [row] = await db.update(messages).set({ text, editedAt: new Date() }).where(eq(messages.id, id)).returning();
   return row;

@@ -15,8 +15,8 @@ import {
   removeRoomMember,
   setMemberFavorite,
 } from './db/queries/rooms.js';
-import { countUnreadForUser, insertMessage, listMessagesByRoom } from './db/queries/messages.js';
-import { listCommentsForMessages } from './db/queries/comments.js';
+import { countUnreadForUser, getLastMessageAt, insertMessage, listMessagesByRoom } from './db/queries/messages.js';
+import { countUnreadCommentsForUser, getLastCommentAt, listCommentsForMessages } from './db/queries/comments.js';
 import { findUserById, listAllUserIds } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
@@ -38,7 +38,21 @@ export async function nameOf(id) {
  * (requesterId 생략) 요청자 한 명에게만 가는 REST 응답에서만 넣는다(requesterId 전달).
  */
 export async function toRoomDto(room, requesterId) {
-  const [members, lastRead] = await Promise.all([resolveMembers(room.id), getRoomLastReadMap(room.id)]);
+  const [members, lastRead, lastMessageAt, lastCommentAt] = await Promise.all([
+    resolveMembers(room.id),
+    getRoomLastReadMap(room.id),
+    getLastMessageAt(room.id),
+    getLastCommentAt(room.id),
+  ]);
+  // 방 목록에서 카테고리 안 정렬 기준(누구에게나 동일한, 사용자 무관 값) — 로그인 직후에도
+  // 오프라인 동안 쌓인 활동이 반영되도록, 실시간 소켓 없이도 방 목록 응답 자체에 이 시각을
+  // 담아 보낸다(클라이언트 Room.lastActivityAt, desktop_home_screen.dart/room_list_screen.dart
+  // 의 _favoriteFirst 정렬 참고).
+  const lastActivityAt = Math.max(
+    new Date(room.createdAt).getTime(),
+    lastMessageAt ? new Date(lastMessageAt).getTime() : 0,
+    lastCommentAt ? new Date(lastCommentAt).getTime() : 0,
+  );
   const dto = {
     id: room.id,
     type: room.type,
@@ -48,10 +62,18 @@ export async function toRoomDto(room, requesterId) {
     members,
     createdAt: new Date(room.createdAt).getTime(),
     lastRead,
+    lastActivityAt,
   };
   if (requesterId) {
     const myLastRead = lastRead[requesterId] ?? 0;
-    dto.unreadCount = await countUnreadForUser(room.id, requesterId, myLastRead);
+    // 로그아웃해 있는 동안 달린 댓글은 comment:new 소켓을 못 받아서 클라이언트가 실시간으로
+    // unreadCount를 못 올리므로, 다시 로그인해서 방 목록을 받아올 때 이 REST 응답에서
+    // 메시지·댓글 안읽음 수를 합쳐서 내려줘야 뱃지가 정확하다.
+    const [unreadMessages, unreadComments] = await Promise.all([
+      countUnreadForUser(room.id, requesterId, myLastRead),
+      countUnreadCommentsForUser(room.id, requesterId, myLastRead),
+    ]);
+    dto.unreadCount = unreadMessages + unreadComments;
     dto.favorite = await getMemberFavorite(room.id, requesterId);
   }
   return dto;

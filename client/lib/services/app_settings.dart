@@ -2,7 +2,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:win32/win32.dart';
 
@@ -12,6 +12,7 @@ const _kRunValueName = 'MessengerClient';
 const _kDownloadWithoutAsking = 'settings_download_without_asking';
 const _kDownloadFolder = 'settings_download_folder';
 const _kOpenFolderAfterDownload = 'settings_open_folder_after_download';
+const _kThemeMode = 'settings_theme_mode';
 
 /// 삼선 메뉴 "설정"의 환경설정 상태: 시작 시 자동 실행(Windows 레지스트리로 실제 등록/해제)과
 /// 파일 다운로드 관련 값. SharedPreferences에 저장하고, 자동 실행 여부는 레지스트리 값의
@@ -23,18 +24,30 @@ class AppSettings extends ChangeNotifier {
   bool downloadWithoutAsking = false;
   String downloadFolder = '';
   bool openFolderAfterDownload = true;
+  ThemeMode themeMode = ThemeMode.system;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     downloadWithoutAsking = _prefs.getBool(_kDownloadWithoutAsking) ?? false;
-    downloadFolder = _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
+    downloadFolder =
+        _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
     openFolderAfterDownload = _prefs.getBool(_kOpenFolderAfterDownload) ?? true;
+    themeMode = _themeModeFromName(_prefs.getString(_kThemeMode));
     if (Platform.isWindows) launchAtStartup = _readStartupPath() != null;
     notifyListeners();
   }
 
+  ThemeMode _themeModeFromName(String? name) => switch (name) {
+    'light' => ThemeMode.light,
+    'dark' => ThemeMode.dark,
+    _ => ThemeMode.system,
+  };
+
   String _defaultDownloadFolder() {
-    final home = Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '';
+    final home =
+        Platform.environment['USERPROFILE'] ??
+        Platform.environment['HOME'] ??
+        '';
     return home.isEmpty ? '' : '$home${Platform.pathSeparator}Downloads';
   }
 
@@ -68,13 +81,25 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setThemeMode(ThemeMode value) async {
+    themeMode = value;
+    await _prefs.setString(_kThemeMode, value.name);
+    notifyListeners();
+  }
+
   // ---- Windows 레지스트리(HKCU\Software\Microsoft\Windows\CurrentVersion\Run) ----
 
   int? _openRunKey(int access) {
     final keyPtr = TEXT(_kRunKeyPath);
     final hKeyPtr = calloc<IntPtr>();
     try {
-      final status = RegOpenKeyEx(HKEY_CURRENT_USER, keyPtr, 0, access, hKeyPtr);
+      final status = RegOpenKeyEx(
+        HKEY_CURRENT_USER,
+        keyPtr,
+        0,
+        access,
+        hKeyPtr,
+      );
       if (status != ERROR_SUCCESS) return null;
       return hKeyPtr.value;
     } finally {
@@ -91,11 +116,25 @@ class AppSettings extends ChangeNotifier {
       final typePtr = calloc<Uint32>();
       final sizePtr = calloc<Uint32>();
       try {
-        var status = RegQueryValueEx(hKey, valueNamePtr, nullptr, typePtr, nullptr, sizePtr);
+        var status = RegQueryValueEx(
+          hKey,
+          valueNamePtr,
+          nullptr,
+          typePtr,
+          nullptr,
+          sizePtr,
+        );
         if (status != ERROR_SUCCESS || sizePtr.value == 0) return null;
         final buffer = calloc<Uint8>(sizePtr.value);
         try {
-          status = RegQueryValueEx(hKey, valueNamePtr, nullptr, typePtr, buffer, sizePtr);
+          status = RegQueryValueEx(
+            hKey,
+            valueNamePtr,
+            nullptr,
+            typePtr,
+            buffer,
+            sizePtr,
+          );
           if (status != ERROR_SUCCESS) return null;
           return buffer.cast<Utf16>().toDartString();
         } finally {
@@ -119,7 +158,14 @@ class AppSettings extends ChangeNotifier {
       final quoted = '"$exePath"';
       final dataPtr = quoted.toNativeUtf16();
       try {
-        RegSetValueEx(hKey, valueNamePtr, 0, REG_SZ, dataPtr.cast<Uint8>(), (quoted.length + 1) * 2);
+        RegSetValueEx(
+          hKey,
+          valueNamePtr,
+          0,
+          REG_SZ,
+          dataPtr.cast<Uint8>(),
+          (quoted.length + 1) * 2,
+        );
       } finally {
         calloc.free(valueNamePtr);
         calloc.free(dataPtr);

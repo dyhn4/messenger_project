@@ -10,6 +10,7 @@ import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
+import '../services/edit_policy.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
@@ -105,6 +106,12 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   void _startEdit() {
+    if (!isWithinEditWindow(widget.message.createdAt)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 수정할 수 없습니다.')));
+      return;
+    }
     setState(() {
       _editing = true;
       _editController.text = widget.message.text ?? '';
@@ -132,6 +139,12 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
+    if (!isWithinEditWindow(widget.message.createdAt)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 삭제할 수 없습니다.')));
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

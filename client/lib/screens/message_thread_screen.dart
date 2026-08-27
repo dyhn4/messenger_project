@@ -52,6 +52,9 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
         ? widget.message.comments.last.id
         : null;
     widget.controller.addListener(_maybeScrollToNewOwnComment);
+    // 채팅방에서 "N개 댓글 모두 보기"를 눌러 스레드를 열면, 최신 댓글이 바로 보이도록 맨
+    // 아래로 스크롤한다.
+    _scrollToBottom();
   }
 
   @override
@@ -62,12 +65,12 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       widget.controller.addListener(_maybeScrollToNewOwnComment);
     }
     if (oldWidget.message.id != widget.message.id) {
-      // 패널을 안 닫고 다른 메시지의 스레드로 바로 넘어간 경우, 이전 스크롤 위치가 그대로
-      // 남아있으면 이상해 보이므로 처음으로 되돌린다.
+      // 패널을 안 닫고 다른 메시지의 댓글 아이콘/모두 보기를 연달아 눌러 스레드를 바로 넘긴
+      // 경우도 마찬가지로 그 메시지의 최신 댓글이 바로 보이도록 맨 아래로 스크롤한다.
       _lastSeenCommentId = widget.message.comments.isNotEmpty
           ? widget.message.comments.last.id
           : null;
-      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+      _scrollToBottom();
     }
   }
 
@@ -89,21 +92,31 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
 
   void _scrollToBottom() {
     // 채팅방(ScrollablePositionedList, index 기반)과 달리 여기는 평범한 ListView라 목표
-    // 위치를 position.maxScrollExtent로 직접 읽는데, 새 댓글이 막 추가된 첫 프레임엔 뷰포트가
-    // 아직 이전 콘텐츠 크기를 들고 있을 때가 있다(내용 크기 변화를 반영하려면 레이아웃이 한 번
-    // 더 필요한 경우) — 그래서 postFrameCallback을 한 번만 쓰면 "한 번에 안 되고 그다음
-    // 댓글에서야 밀려서 맞는" 증상이 난다. 프레임을 하나 더 기다렸다가(중첩 postFrameCallback)
-    // maxScrollExtent가 새 값으로 안정된 뒤에 스크롤한다.
+    // 위치를 position.maxScrollExtent로 직접 읽는데, 이미지/파일 첨부는 실제 크기가 네트워크
+    // 요청(다운로드)이 끝나야 확정돼서 언제 레이아웃이 완전히 자리잡을지 미리 알 수 없다 —
+    // 프레임을 몇 개 더 기다리는 정도로는(텍스트 댓글엔 충분해도) 안 맞을 수 있다. 정확한
+    // 시점을 알아내려 하지 않고, 짧은 시간 동안 "맨 아래로"를 몇 번 다시 걸어서 늦게 자리잡는
+    // 경우까지 잡아낸다 — 이미 맨 아래면 그냥 제자리에서 끝나는 애니메이션이라 부작용은 없다.
+    void attempt() {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => attempt());
     });
+    for (final delay in const [
+      Duration(milliseconds: 150),
+      Duration(milliseconds: 400),
+      Duration(milliseconds: 900),
+      Duration(milliseconds: 1500),
+    ]) {
+      Future.delayed(delay, attempt);
+    }
   }
 
   AppUser? _memberOf(String? userId) {

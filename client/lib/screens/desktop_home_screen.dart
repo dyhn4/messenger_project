@@ -66,7 +66,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     }
     // 선택된 방이 목록에서 사라졌으면(예: 채팅방 나가기) 우측 패널을 비운다.
     final selected = _selectedRoom;
-    if (selected != null && !widget.session.rooms.any((r) => r.id == selected.id)) {
+    if (selected != null &&
+        !widget.session.rooms.any((r) => r.id == selected.id)) {
       setState(() {
         _selectedRoom = null;
         _threadMessage = null;
@@ -77,7 +78,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Future<void> _createTopic() async {
     final result = await showDialog<Room>(
       context: context,
-      builder: (_) => CreateTopicScreen(session: widget.session, asDialog: true),
+      builder: (_) =>
+          CreateTopicScreen(session: widget.session, asDialog: true),
     );
     if (result != null) _selectRoom(result);
   }
@@ -85,7 +87,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Future<void> _browseTopics() async {
     await showDialog(
       context: context,
-      builder: (_) => TopicBrowseScreen(session: widget.session, asDialog: true),
+      builder: (_) =>
+          TopicBrowseScreen(session: widget.session, asDialog: true),
     );
   }
 
@@ -101,7 +104,10 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     // 멤버 목록에서 로그인한 사용자 자신을 클릭하면, 다른 멤버 볼 때 쓰는 카드(DM 시작 등)
     // 대신 삼선 메뉴의 "내 프로필"과 같은 카드(이름/이메일/비밀번호 수정)를 보여준다.
     if (user.id == widget.session.userId) {
-      await showDialog(context: context, builder: (_) => MyProfileDialog(session: widget.session));
+      await showDialog(
+        context: context,
+        builder: (_) => MyProfileDialog(session: widget.session),
+      );
       return;
     }
     final room = await showDialog<Room>(
@@ -121,7 +127,9 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Widget build(BuildContext context) {
     // 창이 넓을 때(1200px 초과)는 검색/멤버 패널도 넓혀서 필터 라벨이 줄임표 없이
     // 다 보이게 하고, 좁을 때는 400으로 유지한다.
-    final sidePanelWidth = MediaQuery.of(context).size.width > 1200 ? 480.0 : 400.0;
+    final sidePanelWidth = MediaQuery.of(context).size.width > 1200
+        ? 480.0
+        : 400.0;
     return Scaffold(
       body: Column(
         children: [
@@ -146,14 +154,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           Expanded(
             child: Row(
               children: [
-                SizedBox(width: 280, child: _Sidebar(
-                  session: widget.session,
-                  selectedRoomId: _selectedRoom?.id,
-                  onSelectRoom: _selectRoom,
-                  onCreateTopic: _createTopic,
-                  onBrowseTopics: _browseTopics,
-                  onNewGroupChat: _newGroupChat,
-                )),
+                SizedBox(
+                  width: 280,
+                  child: _Sidebar(
+                    session: widget.session,
+                    selectedRoomId: _selectedRoom?.id,
+                    onSelectRoom: _selectRoom,
+                    onCreateTopic: _createTopic,
+                    onBrowseTopics: _browseTopics,
+                    onNewGroupChat: _newGroupChat,
+                  ),
+                ),
                 const VerticalDivider(width: 1),
                 Expanded(
                   child: _selectedRoom == null
@@ -161,9 +172,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                       : Column(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
                               decoration: BoxDecoration(
-                                border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor)),
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: Theme.of(context).dividerColor,
+                                  ),
+                                ),
                               ),
                               child: Row(
                                 children: [
@@ -176,11 +194,18 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
-                                      _selectedRoom!.displayName(widget.session.userId ?? ''),
-                                      style: Theme.of(context).textTheme.titleMedium,
+                                      _selectedRoom!.displayName(
+                                        widget.session.userId ?? '',
+                                      ),
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
                                     ),
                                   ),
-                                  RoomOptionsMenu(session: widget.session, room: _selectedRoom!),
+                                  RoomOptionsMenu(
+                                    session: widget.session,
+                                    room: _selectedRoom!,
+                                  ),
                                 ],
                               ),
                             ),
@@ -255,7 +280,11 @@ class _TopBar extends StatelessWidget {
   final Session session;
   final VoidCallback onShowMembers;
   final VoidCallback onToggleSearch;
-  const _TopBar({required this.session, required this.onShowMembers, required this.onToggleSearch});
+  const _TopBar({
+    required this.session,
+    required this.onShowMembers,
+    required this.onToggleSearch,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -263,10 +292,21 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
       child: Row(
         children: [
-          const Text('메신저', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const Text(
+            '메신저',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
           const Spacer(),
-          IconButton(icon: const Icon(Icons.people_outline), tooltip: '멤버', onPressed: onShowMembers),
-          IconButton(icon: const Icon(Icons.search), tooltip: '검색', onPressed: onToggleSearch),
+          IconButton(
+            icon: const Icon(Icons.people_outline),
+            tooltip: '멤버',
+            onPressed: onShowMembers,
+          ),
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: '검색',
+            onPressed: onToggleSearch,
+          ),
           AccountMenuButton(session: session),
         ],
       ),
@@ -280,7 +320,11 @@ class _MembersPanel extends StatefulWidget {
   final Session session;
   final VoidCallback onClose;
   final ValueChanged<AppUser> onSelectMember;
-  const _MembersPanel({required this.session, required this.onClose, required this.onSelectMember});
+  const _MembersPanel({
+    required this.session,
+    required this.onClose,
+    required this.onSelectMember,
+  });
 
   @override
   State<_MembersPanel> createState() => _MembersPanelState();
@@ -327,11 +371,20 @@ class _MembersPanelState extends State<_MembersPanel> {
   @override
   Widget build(BuildContext context) {
     final list = (_users ?? const <AppUser>[])
-        .where((u) => _filter.isEmpty || u.name.toLowerCase().contains(_filter.toLowerCase()))
+        .where(
+          (u) =>
+              _filter.isEmpty ||
+              u.name.toLowerCase().contains(_filter.toLowerCase()),
+        )
         .toList();
-    final totalPages = list.isEmpty ? 1 : (list.length / paginationPageSize).ceil();
+    final totalPages = list.isEmpty
+        ? 1
+        : (list.length / paginationPageSize).ceil();
     final page = _page.clamp(0, totalPages - 1);
-    final pageItems = list.skip(page * paginationPageSize).take(paginationPageSize).toList();
+    final pageItems = list
+        .skip(page * paginationPageSize)
+        .take(paginationPageSize)
+        .toList();
 
     return ColoredBox(
       color: Theme.of(context).colorScheme.surface,
@@ -348,7 +401,10 @@ class _MembersPanelState extends State<_MembersPanel> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: widget.onClose,
+                ),
               ],
             ),
           ),
@@ -372,41 +428,43 @@ class _MembersPanelState extends State<_MembersPanel> {
             child: _error != null
                 ? Center(child: Text(_error!))
                 : _users == null
-                    ? const Center(child: CircularProgressIndicator())
-                    : list.isEmpty
-                        ? const Center(child: Text('검색 결과가 없습니다.'))
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Divider(height: 1),
-                              Expanded(
-                                child: MutedScrollbar(
-                                  controller: _listScrollController,
-                                  child: ListView.separated(
-                                    controller: _listScrollController,
-                                    itemCount: pageItems.length,
-                                    // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
-                                    separatorBuilder: (_, _) => const Padding(
-                                      padding: EdgeInsets.only(right: 12),
-                                      child: Divider(height: 1),
-                                    ),
-                                    itemBuilder: (context, i) => _MemberRow(
-                                      user: pageItems[i],
-                                      resolveUrl: widget.session.resolveUrl,
-                                      online: widget.session.onlineUserIds.contains(pageItems[i].id),
-                                      onTap: () => widget.onSelectMember(pageItems[i]),
-                                    ),
-                                  ),
-                                ),
+                ? const Center(child: CircularProgressIndicator())
+                : list.isEmpty
+                ? const Center(child: Text('검색 결과가 없습니다.'))
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Divider(height: 1),
+                      Expanded(
+                        child: MutedScrollbar(
+                          controller: _listScrollController,
+                          child: ListView.separated(
+                            controller: _listScrollController,
+                            itemCount: pageItems.length,
+                            // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
+                            separatorBuilder: (_, _) => const Padding(
+                              padding: EdgeInsets.only(right: 12),
+                              child: Divider(height: 1),
+                            ),
+                            itemBuilder: (context, i) => _MemberRow(
+                              user: pageItems[i],
+                              resolveUrl: widget.session.resolveUrl,
+                              online: widget.session.onlineUserIds.contains(
+                                pageItems[i].id,
                               ),
-                              const Divider(height: 1),
-                              Pagination(
-                                currentPage: page,
-                                totalPages: totalPages,
-                                onPageSelected: (p) => setState(() => _page = p),
-                              ),
-                            ],
+                              onTap: () => widget.onSelectMember(pageItems[i]),
+                            ),
                           ),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Pagination(
+                        currentPage: page,
+                        totalPages: totalPages,
+                        onPageSelected: (p) => setState(() => _page = p),
+                      ),
+                    ],
+                  ),
           ),
         ],
       ),
@@ -421,7 +479,12 @@ class _MemberRow extends StatelessWidget {
   final String Function(String relative) resolveUrl;
   final bool online;
   final VoidCallback onTap;
-  const _MemberRow({required this.user, required this.resolveUrl, required this.online, required this.onTap});
+  const _MemberRow({
+    required this.user,
+    required this.resolveUrl,
+    required this.online,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -431,9 +494,19 @@ class _MemberRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            UserAvatar(user: user, resolveUrl: resolveUrl, radius: 20, online: online),
+            UserAvatar(
+              user: user,
+              resolveUrl: resolveUrl,
+              radius: 20,
+              online: online,
+            ),
             const SizedBox(width: 12),
-            Expanded(child: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold))),
+            Expanded(
+              child: Text(
+                user.name,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
           ],
         ),
       ),
@@ -458,111 +531,136 @@ class _Sidebar extends StatelessWidget {
     required this.onNewGroupChat,
   });
 
-  /// 즐겨찾기한 방을 목록 위쪽에 모은다(그 안에서의 상대 순서는 그대로 유지).
-  static List<Room> _favoriteFirst(List<Room> rooms) =>
-      [...rooms.where((r) => r.favorite), ...rooms.where((r) => !r.favorite)];
+  /// 즐겨찾기한 방을 목록 위쪽에 모으고, 각 묶음 안에서는 최근 활동(채팅/댓글을 보냈거나
+  /// 받음, Room.lastActivityAt) 순으로 정렬한다 — 채팅 중이거나 알림이 온 방이 그 방이 속한
+  /// 묶음의 맨 위로 올라온다(Session._bumpRoomActivity 참고).
+  static List<Room> _favoriteFirst(List<Room> rooms) {
+    int byRecent(Room a, Room b) =>
+        b.lastActivityAt.compareTo(a.lastActivityAt);
+    final favorites = rooms.where((r) => r.favorite).toList()..sort(byRecent);
+    final others = rooms.where((r) => !r.favorite).toList()..sort(byRecent);
+    return [...favorites, ...others];
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: session,
       builder: (context, _) {
-              final topics = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.topic).toList());
-              final groups = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.group).toList());
-              final dms = _favoriteFirst(session.rooms.where((r) => r.type == RoomType.dm).toList());
-              final topicsUnread = topics.fold<int>(0, (sum, r) => sum + r.unreadCount);
-              final groupsUnread = groups.fold<int>(0, (sum, r) => sum + r.unreadCount);
-              final dmsUnread = dms.fold<int>(0, (sum, r) => sum + r.unreadCount);
+        final topics = _favoriteFirst(
+          session.rooms.where((r) => r.type == RoomType.topic).toList(),
+        );
+        final groups = _favoriteFirst(
+          session.rooms.where((r) => r.type == RoomType.group).toList(),
+        );
+        final dms = _favoriteFirst(
+          session.rooms.where((r) => r.type == RoomType.dm).toList(),
+        );
+        final topicsUnread = topics.fold<int>(
+          0,
+          (sum, r) => sum + r.unreadCount,
+        );
+        final groupsUnread = groups.fold<int>(
+          0,
+          (sum, r) => sum + r.unreadCount,
+        );
+        final dmsUnread = dms.fold<int>(0, (sum, r) => sum + r.unreadCount);
 
-              // 세 섹션 사이 구분선을 사용자가 드래그해서 각자 몫을 조절할 수 있게 한다.
-              // 기본은 1/3씩이고, 자기 영역 안에서만 스크롤되며 목록이 영역보다 길면
-              // 스크롤바를 항상 보여준다.
-              return _ResizableRoomSections(
-                topicsHeader: _SectionHeader(
-                  title: '토픽 ${topics.length}',
-                  badgeCount: topicsUnread,
-                  action: PopupMenuButton<void>(
-                    icon: const Icon(Icons.add, size: 20),
-                    tooltip: '토픽 추가',
-                    itemBuilder: (context) => [
-                      PopupMenuItem(onTap: onCreateTopic, child: const Text('토픽 만들기')),
-                      PopupMenuItem(onTap: onBrowseTopics, child: const Text('토픽 찾기')),
-                    ],
-                  ),
+        // 세 섹션 사이 구분선을 사용자가 드래그해서 각자 몫을 조절할 수 있게 한다.
+        // 기본은 1/3씩이고, 자기 영역 안에서만 스크롤되며 목록이 영역보다 길면
+        // 스크롤바를 항상 보여준다.
+        return _ResizableRoomSections(
+          topicsHeader: _SectionHeader(
+            title: '토픽 ${topics.length}',
+            badgeCount: topicsUnread,
+            action: PopupMenuButton<void>(
+              icon: const Icon(Icons.add, size: 20),
+              tooltip: '토픽 추가',
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  onTap: onCreateTopic,
+                  child: const Text('토픽 만들기'),
                 ),
-                topicsChildren: [
-                  for (final room in topics)
-                    _RoomTile(
-                      leading: RoomAvatar(
-                        room: room,
-                        myUserId: session.userId ?? '',
-                        resolveUrl: session.resolveUrl,
-                        onlineUserIds: session.onlineUserIds,
-                        size: 28,
-                      ),
-                      label: room.displayName(session.userId ?? ''),
-                      selected: room.id == selectedRoomId,
-                      unreadCount: room.unreadCount,
-                      favorite: room.favorite,
-                      onToggleFavorite: () => session.toggleFavorite(room),
-                      onTap: () => onSelectRoom(room),
-                    ),
-                ],
-                groupsHeader: _SectionHeader(
-                  title: '그룹채팅 ${groups.length}',
-                  badgeCount: groupsUnread,
-                  action: IconButton(
-                    icon: const Icon(Icons.add, size: 20),
-                    tooltip: '새 그룹채팅',
-                    onPressed: onNewGroupChat,
-                  ),
+                PopupMenuItem(
+                  onTap: onBrowseTopics,
+                  child: const Text('토픽 찾기'),
                 ),
-                groupsChildren: [
-                  for (final room in groups)
-                    _RoomTile(
-                      leading: RoomAvatar(
-                        room: room,
-                        myUserId: session.userId ?? '',
-                        resolveUrl: session.resolveUrl,
-                        onlineUserIds: session.onlineUserIds,
-                        size: 28,
-                      ),
-                      label: room.displayName(session.userId ?? ''),
-                      selected: room.id == selectedRoomId,
-                      unreadCount: room.unreadCount,
-                      favorite: room.favorite,
-                      onToggleFavorite: () => session.toggleFavorite(room),
-                      onTap: () => onSelectRoom(room),
-                    ),
-                ],
-                dmsHeader: _SectionHeader(
-                  title: '채팅 ${dms.length}',
-                  badgeCount: dmsUnread,
-                  action: IconButton(
-                    icon: const Icon(Icons.add, size: 20),
-                    tooltip: '새 대화',
-                    onPressed: onNewGroupChat,
-                  ),
+              ],
+            ),
+          ),
+          topicsChildren: [
+            for (final room in topics)
+              _RoomTile(
+                leading: RoomAvatar(
+                  room: room,
+                  myUserId: session.userId ?? '',
+                  resolveUrl: session.resolveUrl,
+                  onlineUserIds: session.onlineUserIds,
+                  size: 28,
                 ),
-                dmsChildren: [
-                  for (final room in dms)
-                    _RoomTile(
-                      leading: RoomAvatar(
-                        room: room,
-                        myUserId: session.userId ?? '',
-                        resolveUrl: session.resolveUrl,
-                        onlineUserIds: session.onlineUserIds,
-                        size: 28,
-                      ),
-                      label: room.displayName(session.userId ?? ''),
-                      selected: room.id == selectedRoomId,
-                      unreadCount: room.unreadCount,
-                      favorite: room.favorite,
-                      onToggleFavorite: () => session.toggleFavorite(room),
-                      onTap: () => onSelectRoom(room),
-                    ),
-                ],
-              );
+                label: room.displayName(session.userId ?? ''),
+                selected: room.id == selectedRoomId,
+                unreadCount: room.unreadCount,
+                favorite: room.favorite,
+                onToggleFavorite: () => session.toggleFavorite(room),
+                onTap: () => onSelectRoom(room),
+              ),
+          ],
+          groupsHeader: _SectionHeader(
+            title: '그룹채팅 ${groups.length}',
+            badgeCount: groupsUnread,
+            action: IconButton(
+              icon: const Icon(Icons.add, size: 20),
+              tooltip: '새 그룹채팅',
+              onPressed: onNewGroupChat,
+            ),
+          ),
+          groupsChildren: [
+            for (final room in groups)
+              _RoomTile(
+                leading: RoomAvatar(
+                  room: room,
+                  myUserId: session.userId ?? '',
+                  resolveUrl: session.resolveUrl,
+                  onlineUserIds: session.onlineUserIds,
+                  size: 28,
+                ),
+                label: room.displayName(session.userId ?? ''),
+                selected: room.id == selectedRoomId,
+                unreadCount: room.unreadCount,
+                favorite: room.favorite,
+                onToggleFavorite: () => session.toggleFavorite(room),
+                onTap: () => onSelectRoom(room),
+              ),
+          ],
+          dmsHeader: _SectionHeader(
+            title: '채팅 ${dms.length}',
+            badgeCount: dmsUnread,
+            action: IconButton(
+              icon: const Icon(Icons.add, size: 20),
+              tooltip: '새 대화',
+              onPressed: onNewGroupChat,
+            ),
+          ),
+          dmsChildren: [
+            for (final room in dms)
+              _RoomTile(
+                leading: RoomAvatar(
+                  room: room,
+                  myUserId: session.userId ?? '',
+                  resolveUrl: session.resolveUrl,
+                  onlineUserIds: session.onlineUserIds,
+                  size: 28,
+                ),
+                label: room.displayName(session.userId ?? ''),
+                selected: room.id == selectedRoomId,
+                unreadCount: room.unreadCount,
+                favorite: room.favorite,
+                onToggleFavorite: () => session.toggleFavorite(room),
+                onTap: () => onSelectRoom(room),
+              ),
+          ],
+        );
       },
     );
   }
@@ -617,17 +715,26 @@ class _ResizableRoomSectionsState extends State<_ResizableRoomSections> {
           children: [
             SizedBox(
               height: heights[0],
-              child: _RoomSection(header: widget.topicsHeader, children: widget.topicsChildren),
+              child: _RoomSection(
+                header: widget.topicsHeader,
+                children: widget.topicsChildren,
+              ),
             ),
             _ResizeDivider(onDrag: (dy) => _onDrag(availableHeight, 0, dy)),
             SizedBox(
               height: heights[1],
-              child: _RoomSection(header: widget.groupsHeader, children: widget.groupsChildren),
+              child: _RoomSection(
+                header: widget.groupsHeader,
+                children: widget.groupsChildren,
+              ),
             ),
             _ResizeDivider(onDrag: (dy) => _onDrag(availableHeight, 1, dy)),
             SizedBox(
               height: heights[2],
-              child: _RoomSection(header: widget.dmsHeader, children: widget.dmsChildren),
+              child: _RoomSection(
+                header: widget.dmsHeader,
+                children: widget.dmsChildren,
+              ),
             ),
           ],
         );
@@ -651,7 +758,9 @@ class _ResizeDivider extends StatelessWidget {
         onVerticalDragUpdate: (details) => onDrag(details.delta.dy),
         child: SizedBox(
           height: _kDividerHitHeight,
-          child: Center(child: Container(height: 1, color: Theme.of(context).dividerColor)),
+          child: Center(
+            child: Container(height: 1, color: Theme.of(context).dividerColor),
+          ),
         ),
       ),
     );
@@ -698,7 +807,10 @@ class _SectionHeader extends StatelessWidget {
             child: Row(
               children: [
                 Text(title, style: Theme.of(context).textTheme.labelLarge),
-                if (badgeCount > 0) ...[const SizedBox(width: 6), UnreadBadge(count: badgeCount)],
+                if (badgeCount > 0) ...[
+                  const SizedBox(width: 6),
+                  UnreadBadge(count: badgeCount),
+                ],
               ],
             ),
           ),
@@ -743,20 +855,27 @@ class _RoomTileState extends State<_RoomTile> {
       child: ListTile(
         dense: true,
         selected: widget.selected,
-        selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.4),
+        selectedTileColor: Theme.of(
+          context,
+        ).colorScheme.primaryContainer.withValues(alpha: 0.4),
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Opacity(
               opacity: widget.favorite || _hovering ? 1 : 0,
-              child: FavoriteStar(favorite: widget.favorite, onTap: widget.onToggleFavorite),
+              child: FavoriteStar(
+                favorite: widget.favorite,
+                onTap: widget.onToggleFavorite,
+              ),
             ),
             const SizedBox(width: 8),
             widget.leading,
           ],
         ),
         title: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: widget.unreadCount > 0 ? UnreadBadge(count: widget.unreadCount) : null,
+        trailing: widget.unreadCount > 0
+            ? UnreadBadge(count: widget.unreadCount)
+            : null,
         onTap: widget.onTap,
       ),
     );

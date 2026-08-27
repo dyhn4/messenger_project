@@ -5,6 +5,7 @@ import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../services/edit_policy.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
@@ -107,10 +108,14 @@ class MessageCommentsCard extends StatelessWidget {
   }
 
   Widget _buildCard(BuildContext context, AppUser? originalSender) {
+    // 다크 모드에서는 배경(surface)과 카드 색(surfaceContainerHighest)의 차이가 alpha 0.5로
+    // 섞으면 잘 안 보여서, 살짝 더 밝게 보이도록 다크 모드에서만 더 진하게(불투명하게) 낸다.
+    // 라이트 모드는 원래도 문제 없었다고 해서 그대로 둔다.
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
-      color: Theme.of(
-        context,
-      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(
+        alpha: isDark ? 0.9 : 0.5,
+      ),
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -269,6 +274,12 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   }
 
   void _startEdit() {
+    if (!isWithinEditWindow(widget.comment.createdAt)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 수정할 수 없습니다.')));
+      return;
+    }
     setState(() {
       _editing = true;
       _editController.text = widget.comment.text ?? '';
@@ -296,6 +307,12 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
+    if (!isWithinEditWindow(widget.comment.createdAt)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 삭제할 수 없습니다.')));
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(

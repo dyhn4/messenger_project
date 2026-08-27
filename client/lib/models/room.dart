@@ -4,10 +4,10 @@ import 'message.dart';
 enum RoomType { topic, group, dm }
 
 RoomType _typeFromString(String s) => switch (s) {
-      'group' => RoomType.group,
-      'dm' => RoomType.dm,
-      _ => RoomType.topic,
-    };
+  'group' => RoomType.group,
+  'dm' => RoomType.dm,
+  _ => RoomType.topic,
+};
 
 class Room {
   final String id;
@@ -27,6 +27,12 @@ class Room {
   /// Session이 병합할 때 로컬 값을 유지한다 — 그래서 non-final.
   bool favorite;
 
+  /// 이 방에서 마지막으로 활동(메시지/댓글)이 있었던 시각 — 방 목록에서 카테고리 안 정렬
+  /// 기준으로 쓴다. 서버가 로그인 시점 기준(오프라인 동안 쌓인 활동 포함)으로 계산해서
+  /// 내려주고(rooms.js의 toRoomDto), 이후 이번 세션 동안은 실시간으로 메시지/댓글을
+  /// 보내거나 받을 때마다 Session._bumpRoomActivity가 갱신한다 — 그래서 non-final.
+  DateTime lastActivityAt;
+
   Room({
     required this.id,
     required this.type,
@@ -38,7 +44,8 @@ class Room {
     required this.lastRead,
     this.unreadCount = 0,
     this.favorite = false,
-  });
+    DateTime? lastActivityAt,
+  }) : lastActivityAt = lastActivityAt ?? createdAt;
 
   factory Room.fromJson(Map<String, dynamic> json) {
     return Room(
@@ -47,12 +54,22 @@ class Room {
       name: json['name'] as String?,
       description: json['description'] as String?,
       isPublic: json['isPublic'] as bool? ?? true,
-      members: (json['members'] as List).map((e) => AppUser.fromJson(e as Map<String, dynamic>)).toList(),
-      createdAt: DateTime.fromMillisecondsSinceEpoch((json['createdAt'] as num).toInt()),
-      lastRead: ((json['lastRead'] as Map?) ?? const {})
-          .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+      members: (json['members'] as List)
+          .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+        (json['createdAt'] as num).toInt(),
+      ),
+      lastRead: ((json['lastRead'] as Map?) ?? const {}).map(
+        (k, v) => MapEntry(k as String, (v as num).toInt()),
+      ),
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       favorite: json['favorite'] as bool? ?? false,
+      lastActivityAt: (json['lastActivityAt'] as num?) != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (json['lastActivityAt'] as num).toInt(),
+            )
+          : null,
     );
   }
 
@@ -65,7 +82,9 @@ class Room {
       }
       return '(알 수 없음)';
     }
-    final names = members.where((m) => m.id != myUserId).map((m) => m.name).toList()..sort();
+    final names =
+        members.where((m) => m.id != myUserId).map((m) => m.name).toList()
+          ..sort();
     if (names.isEmpty) return '(알 수 없음)';
     return names.join(', ');
   }

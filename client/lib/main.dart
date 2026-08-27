@@ -30,7 +30,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   final navigatorKey = GlobalKey<NavigatorState>();
   final notifications = NotificationService();
   final appSettings = AppSettings();
-  late final session = Session(notifications: notifications, settings: appSettings);
+  late final session = Session(
+    notifications: notifications,
+    settings: appSettings,
+  );
 
   @override
   void initState() {
@@ -58,7 +61,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (match.isEmpty) return;
     final room = match.first;
 
-    final width = navigatorKey.currentContext != null ? MediaQuery.sizeOf(navigatorKey.currentContext!).width : 0.0;
+    final width = navigatorKey.currentContext != null
+        ? MediaQuery.sizeOf(navigatorKey.currentContext!).width
+        : 0.0;
     if (width >= wideBreakpoint) {
       // 넓은(PC) 화면은 이미 사이드바+채팅패널이 떠있으니 새 화면을 덮어씌우지 않고
       // DesktopHomeScreen이 우측 패널만 바꾸도록 요청만 남긴다.
@@ -68,31 +73,58 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       // 첫 화면(메인)까지 되돌아간다 — 그래야 방 안에서 뒤로가기를 누르면 바로 메인이 나온다.
       navigatorKey.currentState?.popUntil((route) => route.isFirst);
       navigatorKey.currentState?.push(
-        MaterialPageRoute(builder: (_) => ChatScreen(session: session, room: room)),
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(session: session, room: room),
+        ),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      title: '메신저',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
-      home: ListenableBuilder(
-        listenable: session,
-        builder: (context, _) {
-          return switch (session.stage) {
-            AuthStage.loadingConfig => const Scaffold(body: Center(child: CircularProgressIndicator())),
-            AuthStage.needsServer => ServerSetupScreen(session: session),
-            AuthStage.needsLogin => LoginScreen(session: session),
-            AuthStage.ready => HomeScreen(session: session),
-          };
-        },
-      ),
+    // themeMode가 바뀌면 MaterialApp 자체가 다시 그려져야(theme/darkTheme 중 뭘 쓸지는
+    // MaterialApp 레벨 판단이라) session뿐 아니라 appSettings도 같이 듣는다.
+    final darkColorScheme = ColorScheme.fromSeed(
+      seedColor: Colors.indigo,
+      brightness: Brightness.dark,
+    );
+    return ListenableBuilder(
+      listenable: appSettings,
+      builder: (context, _) {
+        return MaterialApp(
+          navigatorKey: navigatorKey,
+          title: '메신저',
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            colorScheme: darkColorScheme,
+            useMaterial3: true,
+            // 다크 모드 기본 팝업 메뉴 배경(surfaceContainer)이 배경색과 너무 비슷해서
+            // 삼선 메뉴/각 방의 더보기 메뉴가 잘 안 보인다는 피드백에 따라 한 단계 밝은
+            // 톤(surfaceContainerHigh)으로 살짝 밝게 조정한다. 라이트 모드는 원래도 문제
+            // 없었다고 해서 안 건드린다.
+            popupMenuTheme: PopupMenuThemeData(
+              color: darkColorScheme.surfaceContainerHigh,
+            ),
+          ),
+          themeMode: appSettings.themeMode,
+          home: ListenableBuilder(
+            listenable: session,
+            builder: (context, _) {
+              return switch (session.stage) {
+                AuthStage.loadingConfig => const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                ),
+                AuthStage.needsServer => ServerSetupScreen(session: session),
+                AuthStage.needsLogin => LoginScreen(session: session),
+                AuthStage.ready => HomeScreen(session: session),
+              };
+            },
+          ),
+        );
+      },
     );
   }
 }

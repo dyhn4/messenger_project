@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
+import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
@@ -13,6 +14,8 @@ import 'date_divider.dart';
 import 'message_bubble.dart';
 import 'message_comments_card.dart';
 import 'read_up_to_here_divider.dart';
+import 'sticker_picker.dart';
+import 'sticker_preview_card.dart';
 import 'system_message_row.dart';
 
 /// 방 하나의 메시지 목록 + 입력창. ChatScreen(모바일 전체화면)과
@@ -52,6 +55,11 @@ class _ChatPanelState extends State<ChatPanel> {
   String? _highlightedMessageId;
   Timer? _highlightTimer;
 
+  /// 이모티콘 패널/미리보기 상태 — 메시지 목록 위에 떠 있는 오버레이로 그리므로(카카오톡처럼
+  /// 입력창을 밀어내지 않게) 입력창(ChatInputBar)이 아니라 여기서 들고 있는다.
+  Sticker? _pendingSticker;
+  bool _stickerPickerOpen = false;
+
   /// 스크롤이 맨 아래(=index 0, reverse 리스트라 시간상 가장 나중 항목)가 아닌 채로 내가
   /// 메시지/댓글을 새로 쓰면 그 항목이 보이도록 맨 아래로 스크롤한다. 다른 사람이 쓴 건
   /// (읽던 위치를 뺏기지 않도록) 건드리지 않는다 — _maybeScrollToNewOwnEntry 참고.
@@ -71,6 +79,18 @@ class _ChatPanelState extends State<ChatPanel> {
         ? controller.messages.last.id
         : null;
     controller.addListener(_maybeScrollToNewOwnEntry);
+    widget.session.openStickerPickerOwner.addListener(
+      _onStickerPickerOwnerChanged,
+    );
+  }
+
+  /// 다른 화면(댓글 패널 등)이 이모티콘 패널을 열면서 owner를 가져가면, 여기 열려있던
+  /// 패널은 자동으로 닫는다 — 동시에 두 곳에서 열려있지 않게.
+  void _onStickerPickerOwnerChanged() {
+    if (_stickerPickerOpen &&
+        widget.session.openStickerPickerOwner.value != this) {
+      setState(() => _stickerPickerOpen = false);
+    }
   }
 
   /// controller.messages의 마지막 항목(시간상 가장 나중 = reverse 리스트의 맨 아래)이 바뀔
@@ -152,6 +172,12 @@ class _ChatPanelState extends State<ChatPanel> {
     widget.session
         .controllerFor(widget.room)
         .removeListener(_maybeScrollToNewOwnEntry);
+    widget.session.openStickerPickerOwner.removeListener(
+      _onStickerPickerOwnerChanged,
+    );
+    if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
     _hideTimer?.cancel();
     _highlightTimer?.cancel();
     super.dispose();
@@ -180,6 +206,29 @@ class _ChatPanelState extends State<ChatPanel> {
       a.day == b.day &&
       a.hour == b.hour &&
       a.minute == b.minute;
+
+  void _toggleStickerPicker() {
+    setState(() => _stickerPickerOpen = !_stickerPickerOpen);
+    // 내가 열었으면 owner를 가져와서 다른 화면(댓글 패널 등)에 열려있던 패널을 닫히게 하고,
+    // 내가 닫는 거면(그리고 owner가 나였다면) 놓아준다.
+    if (_stickerPickerOpen) {
+      widget.session.openStickerPickerOwner.value = this;
+    } else if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
+  }
+
+  void _selectSticker(Sticker sticker) {
+    setState(() {
+      _pendingSticker = sticker;
+      _stickerPickerOpen = false;
+    });
+    if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
+  }
+
+  void _removeSticker() => setState(() => _pendingSticker = null);
 
   void _onScrollUpdate() {
     final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
@@ -387,13 +436,43 @@ class _ChatPanelState extends State<ChatPanel> {
                         child: FloatingDatePill(date: _floatingDate!),
                       ),
                     ),
+                  // 이모티콘 패널/미리보기는 메시지 목록 영역(이 Stack)의 맨 아래에 떠 있는
+                  // 오버레이로 그린다 — 입력창을 밀어내지 않고(레이아웃이 안 바뀌니 채팅 내용이
+                  // 위아래로 출렁이지 않는다) 그 위에 겹쳐 보인다(카카오톡 방식). 이 Stack은
+                  // Expanded 영역 전체를 실제로 차지하고 있어서(ScrollablePositionedList가
+                  // 이미 그만큼 자리를 쓰고 있음) Positioned가 하단 근처 어디에 있든 진짜
+                  // 레이아웃 범위 안이라 마우스 클릭도 정상적으로 먹는다(Stack 밖으로 "그림만"
+                  // 넘치는 방식과 달리 히트테스트가 안 끊긴다).
+                  if (_stickerPickerOpen)
+                    Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: StickerPicker(onSelected: _selectSticker),
+                    )
+                  else if (_pendingSticker != null)
+                    // 입력창의 이모티콘 버튼(이미지 버튼 다음 두 번째 아이콘) 바로 위쯤에 오도록
+                    // 왼쪽으로 붙인다 — 전체 폭을 채우던 것에서 바꿈.
+                    Positioned(
+                      left: 10,
+                      bottom: 8,
+                      child: StickerPreviewCard(
+                        sticker: _pendingSticker!,
+                        onRemove: _removeSticker,
+                      ),
+                    ),
                 ],
               );
             },
           ),
         ),
         const Divider(height: 1),
-        ChatInputBar(controller: controller),
+        ChatInputBar(
+          controller: controller,
+          pendingSticker: _pendingSticker,
+          stickerPickerOpen: _stickerPickerOpen,
+          onToggleStickerPicker: _toggleStickerPicker,
+          onStickerConsumed: _removeSticker,
+        ),
       ],
     );
   }

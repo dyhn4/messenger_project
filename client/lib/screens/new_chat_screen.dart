@@ -25,6 +25,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
   final _selected = <String>{};
   final _groupName = TextEditingController();
   bool _submitting = false;
+  bool _submittingSecret = false;
 
   @override
   void initState() {
@@ -79,6 +80,34 @@ class _NewChatScreenState extends State<NewChatScreen> {
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  /// 상대 1명만 선택했을 때만 가능(비밀 대화는 1:1 전용) — member_profile_dialog.dart의
+  /// _startSecretChat과 동일하게 별도 dmKey의 방을 새로 만들거나 기존 진행중인 방으로 이동한다.
+  Future<void> _submitSecret() async {
+    if (_selected.length != 1) return;
+    setState(() => _submittingSecret = true);
+    try {
+      final room = await widget.session.startSecretChat(_selected.first);
+      if (!mounted) return;
+      if (widget.asDialog) {
+        Navigator.of(context).pop(room);
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(session: widget.session, room: room),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('비밀 대화 시작 실패: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _submittingSecret = false);
     }
   }
 
@@ -165,16 +194,76 @@ class _NewChatScreenState extends State<NewChatScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: _submitting
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                        ),
+                        onPressed: _submitting || _submittingSecret
                             ? null
                             : () => Navigator.of(context).pop(),
-                        child: const Text('취소'),
+                        child: const Text('취소', maxLines: 1),
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
                     Expanded(
+                      flex: 2,
+                      child: FilledButton.icon(
+                        // 활성화됐을 때만 초록으로 강조하고, 비활성화 상태의 배경/글자색은
+                        // 직접 지정하지 않고 비워둬서 '대화 시작하기'(평범한 FilledButton)의
+                        // 비활성화 스타일(테마 기본값)을 그대로 물려받게 한다.
+                        style:
+                            FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                            ).copyWith(
+                              backgroundColor:
+                                  WidgetStateProperty.resolveWith<Color?>(
+                                    (states) =>
+                                        states.contains(WidgetState.disabled)
+                                        ? null
+                                        : Colors.green,
+                                  ),
+                              foregroundColor:
+                                  WidgetStateProperty.resolveWith<Color?>(
+                                    (states) =>
+                                        states.contains(WidgetState.disabled)
+                                        ? null
+                                        : Colors.white,
+                                  ),
+                            ),
+                        onPressed:
+                            _selected.length != 1 ||
+                                _submitting ||
+                                _submittingSecret
+                            ? null
+                            : _submitSecret,
+                        icon: _submittingSecret
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.lock_outline, size: 18),
+                        label: const Text(
+                          '비밀 대화 시작',
+                          maxLines: 1,
+                          overflow: TextOverflow.visible,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
                       child: FilledButton(
-                        onPressed: _selected.isEmpty || _submitting
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                        ),
+                        onPressed:
+                            _selected.isEmpty ||
+                                _submitting ||
+                                _submittingSecret
                             ? null
                             : _submit,
                         child: _submitting
@@ -185,7 +274,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Text('대화 시작하기'),
+                            : const Text('대화 시작하기', maxLines: 1),
                       ),
                     ),
                   ],
@@ -195,7 +284,9 @@ class _NewChatScreenState extends State<NewChatScreen> {
           );
 
     if (widget.asDialog) {
-      return FloatingDialog(title: '새 대화', child: body);
+      // 하단에 버튼 3개(취소/비밀 대화 시작/대화 시작하기)가 한 줄에 들어가려면 기본
+      // 480px로는 좁아서 줄바꿈이 생긴다 — 여유 있게 넓힌다.
+      return FloatingDialog(title: '새 대화', maxWidth: 480, child: body);
     }
     return Scaffold(
       appBar: AppBar(title: const Text('새 대화')),

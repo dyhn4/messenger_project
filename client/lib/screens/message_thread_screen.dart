@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
@@ -9,6 +10,8 @@ import '../widgets/comment_input_bar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/message_comments_card.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/sticker_picker.dart';
+import '../widgets/sticker_preview_card.dart';
 
 /// 메시지 하나의 댓글 스레드. 데스크톱은 우측 패널(asPanel: true), 모바일은 전체화면으로 쓴다
 /// (SearchScreen과 동일한 이중 모드 패턴). [message]는 RoomChatController.messages 안에 있는
@@ -41,6 +44,40 @@ class MessageThreadScreen extends StatefulWidget {
 class _MessageThreadScreenState extends State<MessageThreadScreen> {
   final _scrollController = ScrollController();
 
+  /// chat_panel.dart와 동일 — 댓글 목록 위에 떠 있는 오버레이로 그려서 입력창을 밀어내지 않는다.
+  Sticker? _pendingSticker;
+  bool _stickerPickerOpen = false;
+
+  void _toggleStickerPicker() {
+    setState(() => _stickerPickerOpen = !_stickerPickerOpen);
+    // chat_panel.dart와 동일 — 내가 열면 owner를 가져와서 다른 화면(채팅방 등)에 열려있던
+    // 패널을 닫히게 하고, 내가 닫는 거면(그리고 owner가 나였다면) 놓아준다.
+    if (_stickerPickerOpen) {
+      widget.session.openStickerPickerOwner.value = this;
+    } else if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
+  }
+
+  void _selectSticker(Sticker sticker) {
+    setState(() {
+      _pendingSticker = sticker;
+      _stickerPickerOpen = false;
+    });
+    if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
+  }
+
+  void _removeSticker() => setState(() => _pendingSticker = null);
+
+  void _onStickerPickerOwnerChanged() {
+    if (_stickerPickerOpen &&
+        widget.session.openStickerPickerOwner.value != this) {
+      setState(() => _stickerPickerOpen = false);
+    }
+  }
+
   /// 스크롤이 맨 아래가 아닌 채로 내가 댓글을 새로 달면 그 댓글이 보이도록 맨 아래로
   /// 스크롤한다(chat_panel.dart의 같은 패턴 참고). 다른 사람이 단 댓글은 건드리지 않는다.
   String? _lastSeenCommentId;
@@ -52,6 +89,9 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
         ? widget.message.comments.last.id
         : null;
     widget.controller.addListener(_maybeScrollToNewOwnComment);
+    widget.session.openStickerPickerOwner.addListener(
+      _onStickerPickerOwnerChanged,
+    );
     // 채팅방에서 "N개 댓글 모두 보기"를 눌러 스레드를 열면, 최신 댓글이 바로 보이도록 맨
     // 아래로 스크롤한다.
     _scrollToBottom();
@@ -77,6 +117,12 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
   @override
   void dispose() {
     widget.controller.removeListener(_maybeScrollToNewOwnComment);
+    widget.session.openStickerPickerOwner.removeListener(
+      _onStickerPickerOwnerChanged,
+    );
+    if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
     _scrollController.dispose();
     super.dispose();
   }
@@ -135,47 +181,73 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: MutedScrollbar(
-                controller: _scrollController,
-                child: ListView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(12),
-                  children: [
-                    MessageBubble(
-                      session: widget.session,
-                      message: widget.message,
-                      resolveUrl: widget.session.resolveUrl,
-                      isMine: widget.message.senderId == widget.session.userId,
-                      sender: _memberOf(widget.message.senderId),
-                      onEdit: widget.controller.editMessage,
-                      onDelete: widget.controller.deleteMessage,
+              // 이모티콘 패널/미리보기를 이 Stack 안에 오버레이로 띄운다 — chat_panel.dart와
+              // 같은 이유(입력창을 밀어내지 않고, Expanded의 진짜 레이아웃 범위 안이라 클릭도
+              // 정상적으로 먹는다).
+              child: Stack(
+                children: [
+                  MutedScrollbar(
+                    controller: _scrollController,
+                    child: ListView(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(12),
+                      children: [
+                        MessageBubble(
+                          session: widget.session,
+                          message: widget.message,
+                          resolveUrl: widget.session.resolveUrl,
+                          isMine:
+                              widget.message.senderId == widget.session.userId,
+                          sender: _memberOf(widget.message.senderId),
+                          onEdit: widget.controller.editMessage,
+                          onDelete: widget.controller.deleteMessage,
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          child: Divider(height: 1),
+                        ),
+                        Text(
+                          '댓글 ${comments.length}',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 프로필 사진을 보여준다.
+                        for (var i = 0; i < comments.length; i++)
+                          CommentEntryLine(
+                            session: widget.session,
+                            comment: comments[i],
+                            sender: _memberOf(comments[i].senderId),
+                            isMine:
+                                comments[i].senderId == widget.session.userId,
+                            resolveUrl: widget.session.resolveUrl,
+                            onEdit: widget.controller.editComment,
+                            onDelete: widget.controller.deleteComment,
+                            fullWidth: true,
+                            expiresAt: widget.message.expiresAt,
+                            showAvatar:
+                                i == 0 ||
+                                comments[i - 1].senderId !=
+                                    comments[i].senderId,
+                          ),
+                      ],
                     ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Divider(height: 1),
-                    ),
-                    Text(
-                      '댓글 ${comments.length}',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 프로필 사진을 보여준다.
-                    for (var i = 0; i < comments.length; i++)
-                      CommentEntryLine(
-                        session: widget.session,
-                        comment: comments[i],
-                        sender: _memberOf(comments[i].senderId),
-                        isMine: comments[i].senderId == widget.session.userId,
-                        resolveUrl: widget.session.resolveUrl,
-                        onEdit: widget.controller.editComment,
-                        onDelete: widget.controller.deleteComment,
-                        fullWidth: true,
-                        expiresAt: widget.message.expiresAt,
-                        showAvatar:
-                            i == 0 ||
-                            comments[i - 1].senderId != comments[i].senderId,
+                  ),
+                  if (_stickerPickerOpen)
+                    Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: StickerPicker(onSelected: _selectSticker),
+                    )
+                  else if (_pendingSticker != null)
+                    // 입력창의 이모티콘 버튼 바로 위쯤에 오도록 왼쪽으로 붙인다.
+                    Positioned(
+                      left: 10,
+                      bottom: 8,
+                      child: StickerPreviewCard(
+                        sticker: _pendingSticker!,
+                        onRemove: _removeSticker,
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
             const Divider(height: 1),
@@ -186,6 +258,10 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
               key: ValueKey(widget.message.id),
               controller: widget.controller,
               messageId: widget.message.id,
+              pendingSticker: _pendingSticker,
+              stickerPickerOpen: _stickerPickerOpen,
+              onToggleStickerPicker: _toggleStickerPicker,
+              onStickerConsumed: _removeSticker,
             ),
           ],
         );

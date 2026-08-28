@@ -71,6 +71,13 @@ class Session extends ChangeNotifier {
   /// 아직 응답하지 않은 비밀 대화 초대(secret:invite). UI가 이 목록을 보고 수락/거절 다이얼로그를 띄운다.
   final List<SecretInviteEvent> pendingSecretInvites = [];
 
+  /// 지금 이모티콘 패널을 열어둔 화면(ChatPanel 또는 MessageThreadScreen의 State 객체, 식별용
+  /// 토큰일 뿐 내용은 안 씀)을 담는다 — 채팅방과 댓글 패널이 동시에 떠 있을 때(데스크톱 분할
+  /// 화면) 한쪽에서 이모티콘 버튼을 누르면 다른 쪽에 열려있던 패널이 자동으로 닫히게 하는 데
+  /// 쓴다. Session 전체의 notifyListeners()에 얹으면 잦은 무관한 갱신에도 매번 걸리니, 이
+  /// 용도로만 쓰는 별도의 가벼운 ValueNotifier로 둔다.
+  final ValueNotifier<Object?> openStickerPickerOwner = ValueNotifier(null);
+
   final _controllers = <String, RoomChatController>{};
   StreamSubscription? _messageSub;
   StreamSubscription? _roomSub;

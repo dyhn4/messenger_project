@@ -6,8 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
+import '../data/stickers.dart';
 import '../services/room_chat_controller.dart';
-import 'sticker_picker.dart';
 
 class _PendingAttachment {
   final File file;
@@ -22,7 +22,26 @@ class _PendingAttachment {
 
 class ChatInputBar extends StatefulWidget {
   final RoomChatController controller;
-  const ChatInputBar({super.key, required this.controller});
+
+  /// 이모티콘 패널/미리보기는 이제 채팅 화면(chat_panel.dart)이 메시지 목록 위에 떠 있는
+  /// 오버레이로 그린다(입력창을 밀어내지 않기 위해) — 그래서 상태 자체도 이 위젯이 아니라
+  /// 부모가 들고 있고, 여기는 버튼과 "보낼 때 같이 실어 보내기"만 담당한다.
+  final Sticker? pendingSticker;
+  final bool stickerPickerOpen;
+  final VoidCallback onToggleStickerPicker;
+
+  /// 전송 시도 후(성공하든 실패하든 다른 첨부와 동일하게 낙관적으로) 부모가 pendingSticker를
+  /// 지우도록 알린다.
+  final VoidCallback onStickerConsumed;
+
+  const ChatInputBar({
+    super.key,
+    required this.controller,
+    this.pendingSticker,
+    this.stickerPickerOpen = false,
+    required this.onToggleStickerPicker,
+    required this.onStickerConsumed,
+  });
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
@@ -109,32 +128,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
     });
   }
 
-  /// 이모티콘은 카카오톡처럼 고르는 즉시 바로 전송된다(텍스트 입력칸에 삽입되지 않음).
-  Future<void> _openStickerPicker() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (_) => StickerPicker(
-        onSelected: (sticker) async {
-          Navigator.of(context).pop();
-          try {
-            await widget.controller.sendSticker(sticker.id);
-          } catch (e) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('전송 실패: $e')));
-          }
-        },
-      ),
-    );
-  }
-
   void _removeAttachment(int index) =>
       setState(() => _attachments.removeAt(index));
 
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if (_attachments.isEmpty && text.isEmpty) return;
+    final sticker = widget.pendingSticker;
+    if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
 
     final toSend = List<_PendingAttachment>.from(_attachments);
     setState(() {
@@ -142,11 +142,16 @@ class _ChatInputBarState extends State<ChatInputBar> {
       _sending = true;
     });
     _controller.clear();
+    widget.onStickerConsumed();
     // 보내기 버튼을 마우스로 눌렀을 때 포커스가 버튼으로 넘어가버리는 걸 막고, 계속
     // 이어서 입력할 수 있도록 입력칸에 커서를 유지한다.
     _focusNode.requestFocus();
 
     try {
+      // 이모티콘과 메시지는 같은 말풍선으로 합치지 않고 각자 메시지로 보내되, 이모티콘이
+      // 타임라인에서 메시지보다 먼저(위에) 보이도록 반드시 순서대로(동시 아님) 보낸다.
+      if (sticker != null) await widget.controller.sendSticker(sticker.id);
+
       if (toSend.isEmpty) {
         await widget.controller.sendText(text);
       } else {
@@ -206,8 +211,13 @@ class _ChatInputBarState extends State<ChatInputBar> {
                   tooltip: '이미지 보내기',
                 ),
                 IconButton(
-                  icon: const Icon(Icons.emoji_emotions_outlined),
-                  onPressed: _sending ? null : _openStickerPicker,
+                  icon: Icon(
+                    Icons.emoji_emotions_outlined,
+                    color: widget.stickerPickerOpen
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  onPressed: _sending ? null : widget.onToggleStickerPicker,
                   tooltip: '이모티콘',
                 ),
                 IconButton(

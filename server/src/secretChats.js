@@ -10,10 +10,28 @@ import {
 } from './db/queries/secretSessions.js';
 import { addRoomMembers, findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
-import { dmKeyFor, notifyMembership, toRoomDto } from './rooms.js';
+import { dmKeyFor, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
 
 const MIN_SELF_DESTRUCT_SECONDS = 1;
 const MAX_SELF_DESTRUCT_SECONDS = 7 * 24 * 60 * 60; // 1주.
+
+// self_destruct_picker_dialog.dart의 프리셋과 동일한 라벨 — 시스템 메시지 문구를 그
+// 다이얼로그에서 고른 표현 그대로 보여주기 위함. 프리셋에 없는 값(이론상 REST로 임의의
+// 초 단위를 보낼 수 있음)은 "N초"로 대체 표기한다.
+const SELF_DESTRUCT_LABELS = new Map([
+  [1, '1초'],
+  [5, '5초'],
+  [30, '30초'],
+  [60, '1분'],
+  [5 * 60, '5분'],
+  [60 * 60, '1시간'],
+  [24 * 60 * 60, '1일'],
+  [7 * 24 * 60 * 60, '1주'],
+]);
+
+function formatSelfDestructDuration(seconds) {
+  return SELF_DESTRUCT_LABELS.get(seconds) ?? `${seconds}초`;
+}
 
 /** POST 본문의 deviceId가 정말 이 로그인 유저 소유이고 폐기되지 않았는지 확인한다.
  * 소켓 인증(socket.js)과 동일한 검사를 REST 쪽에서도 반복한다 — JWT는 deviceId를 모르므로. */
@@ -145,6 +163,15 @@ export function createSecretChatsRouter(io) {
 
     await setSecretSessionSelfDestruct(room.id, seconds);
     io.to(room.id).emit('secret:settings', { roomId: room.id, selfDestructSeconds: seconds });
+    // 자동 삭제 시간 자체는 서버가 이미 평문으로 들고 있는 값(secretSessions.selfDestructSeconds,
+    // 만료 스윕에 필요)이라 시스템 메시지에 그대로 적어도 E2EE를 해치지 않는다. 시스템
+    // 메시지는(postSystemMessage) 애초에 암호화되지 않은 평문으로 저장/전송되는데, 클라이언트의
+    // decryptInPlace가 MessageType.system은 건너뛰도록 되어 있어야 "복호화할 수 없습니다"로
+    // 안 보인다.
+    const text = seconds != null
+      ? `메시지가 ${formatSelfDestructDuration(seconds)} 이후에 자동삭제가 되도록 설정했습니다.`
+      : '자동삭제 타이머를 비활성화 했습니다.';
+    await postSystemMessage(io, room, text);
     res.json({ ok: true, selfDestructSeconds: seconds });
   });
 

@@ -28,6 +28,16 @@ class RoomChatController extends ChangeNotifier {
   String? error;
   StreamSubscription? _readSub;
 
+  static const _pageSize = 50;
+
+  /// 위로 스크롤해서 과거 메시지를 더 불러오는 중이면 true — chat_panel.dart가 맨 위 근처에
+  /// 작은 로딩 표시를 띄우는 데 쓴다.
+  bool loadingMore = false;
+
+  /// 서버에 더 오래된 메시지가 남아있는지. loadOlderMessages()가 요청한 개수보다 적게
+  /// 돌려받으면(=그게 방의 시작이다) false로 내려서 더 이상 요청하지 않는다.
+  bool hasMoreHistory = true;
+
   /// 이 방을 이번 세션에서 처음 열었을 때(=아직 markReadNow가 실행되기 전) 내가 읽었던 지점.
   /// "여기까지 읽었습니다" 구분선을 이 값 기준으로 그린다 — 컨트롤러가 세션 내내 캐싱되므로
   /// 한 번 정해지면 이 방을 다시 열어도 안 바뀐다(방을 나갔다가 새로 들어와야 갱신됨).
@@ -35,15 +45,45 @@ class RoomChatController extends ChangeNotifier {
 
   Future<void> _load() async {
     try {
-      final history = await _session.api!.fetchRoomMessages(room.id);
+      final history = await _session.api!.fetchRoomMessages(
+        room.id,
+        limit: _pageSize,
+      );
       await _session.decryptHistory(room, history);
       _mergeHistory(history);
+      if (history.length < _pageSize) hasMoreHistory = false;
     } catch (e) {
       error = e.toString();
     }
     loading = false;
     notifyListeners();
     markReadNow();
+  }
+
+  /// 채팅방 맨 위 근처까지 스크롤했을 때(chat_panel.dart) 그보다 오래된 메시지를 더
+  /// 불러와서 앞쪽에 이어붙인다. 이미 불러오는 중이거나 더 가져올 게 없으면 아무것도 안 한다.
+  Future<void> loadOlderMessages() async {
+    if (loadingMore || !hasMoreHistory || messages.isEmpty) return;
+    loadingMore = true;
+    notifyListeners();
+    try {
+      final oldest = messages.first.createdAt;
+      final older = await _session.api!.fetchRoomMessages(
+        room.id,
+        limit: _pageSize,
+        before: oldest,
+      );
+      if (older.length < _pageSize) hasMoreHistory = false;
+      if (older.isNotEmpty) {
+        await _session.decryptHistory(room, older);
+        _mergeHistory(older);
+      }
+    } catch (_) {
+      // 실패해도 조용히 무시 — 계속 스크롤하면 다시 시도된다.
+    } finally {
+      loadingMore = false;
+      notifyListeners();
+    }
   }
 
   /// REST로 받아온 메시지 목록(history)을 messages에 합친다. 새 메시지는 그대로 추가하고, 이미
@@ -324,16 +364,31 @@ class RoomChatController extends ChangeNotifier {
   }
 
   /// 검색 결과 등에서 특정 메시지로 바로 스크롤하고 싶을 때 쓴다. 그 메시지가 아직 로드된
-  /// 범위 밖(기본 50개보다 오래됨)이면 훨씬 넉넉하게 다시 가져와서 채운다.
+  /// 범위 밖(기본 50개보다 오래됨)이면, loadOlderMessages와 같은 방식(before 커서)으로
+  /// 찾을 때까지 과거로 여러 페이지 이어서 불러온다 — 서버가 한 번에 최대 200개까지만
+  /// 주므로(한 번의 큰 요청으로는 아주 오래된 메시지를 못 찾는다).
   Future<void> ensureMessageLoaded(String messageId) async {
     if (messages.any((m) => m.id == messageId)) return;
+    const pageSize = 200;
+    const maxPages = 20; // 최대 20*200 = 4000개까지 과거로 훑는다.
     try {
-      final history = await _session.api!.fetchRoomMessages(
-        room.id,
-        limit: 500,
-      );
-      await _session.decryptHistory(room, history);
-      if (_mergeHistory(history)) notifyListeners();
+      var cursor = messages.isNotEmpty ? messages.first.createdAt : null;
+      for (var i = 0; i < maxPages; i++) {
+        final history = await _session.api!.fetchRoomMessages(
+          room.id,
+          limit: pageSize,
+          before: cursor,
+        );
+        if (history.isEmpty) break;
+        await _session.decryptHistory(room, history);
+        if (_mergeHistory(history)) notifyListeners();
+        if (history.length < pageSize) {
+          hasMoreHistory = false;
+          break;
+        }
+        if (messages.any((m) => m.id == messageId)) return;
+        cursor = history.first.createdAt;
+      }
     } catch (_) {
       // 실패해도 조용히 무시 — 스크롤/하이라이트만 안 될 뿐 방 자체는 정상적으로 보인다.
     }

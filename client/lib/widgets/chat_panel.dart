@@ -50,6 +50,7 @@ class _ChatPanelState extends State<ChatPanel> {
   final _listKey = GlobalKey();
   final _dividerKeys = <String, GlobalKey>{};
   final _itemScrollController = ItemScrollController();
+  final _itemPositionsListener = ItemPositionsListener.create();
   DateTime? _floatingDate;
   Timer? _hideTimer;
   String? _highlightedMessageId;
@@ -60,10 +61,37 @@ class _ChatPanelState extends State<ChatPanel> {
   Sticker? _pendingSticker;
   bool _stickerPickerOpen = false;
 
-  /// 스크롤이 맨 아래(=index 0, reverse 리스트라 시간상 가장 나중 항목)가 아닌 채로 내가
-  /// 메시지/댓글을 새로 쓰면 그 항목이 보이도록 맨 아래로 스크롤한다. 다른 사람이 쓴 건
-  /// (읽던 위치를 뺏기지 않도록) 건드리지 않는다 — _maybeScrollToNewOwnEntry 참고.
+  /// 내가 쓴 메시지/댓글은 스크롤이 맨 아래가 아니었더라도 항상 맨 아래로 따라가서 보여준다.
+  /// 남이 쓴 건 내가 이미 맨 아래(index 0)를 보고 있을 때만 따라간다 — 검색으로 옛
+  /// 메시지에 하이라이트해서 이동했거나 위로 스크롤해서 지난 대화를 읽는 중이면 읽던
+  /// 위치를 뺏지 않는다. _maybeScrollToNewEntry/_isAtBottom 참고.
   String? _lastSeenEntryId;
+  int _lastSeenEntryCount = 0;
+
+  /// 이 방을 처음 여는 중이면(RoomChatController가 방금 생성돼 아직 히스토리를 못 받아온
+  /// 상태) initState 시점엔 messages가 비어 있고, 잠시 뒤 REST 응답이 도착하면서
+  /// notifyListeners()가 한 번 불린다 — 이때는 "새 메시지가 왔다"가 아니라 "이제 막
+  /// 히스토리 로딩이 끝났다"일 뿐이라, _maybeScrollToNewEntry에서 알약을 띄우면 안 된다.
+  /// 이미 로딩이 끝나 있던(캐시된) 컨트롤러는 initState에서 바로 true로 시작한다.
+  bool _baselineEstablished = false;
+
+  /// 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(위치를 뺏지 않으려고 자동 스크롤은 안
+  /// 하는 대신) true로 켜서 "새로운 메시지가 있습니다" 알약을 띄운다. 알약을 누르면(맨
+  /// 아래로 스크롤) 또는 직접 스크롤해서 맨 아래에 도달하면 꺼진다.
+  bool _newMessagesBelow = false;
+
+  /// 맨 아래에서 한 페이지(뷰포트 높이) 이상 위로 스크롤되어 있으면 켜서, 항상 떠 있지는
+  /// 않는 "맨 아래로" 동그란 버튼을 보여준다. _onScrollUpdate에서 스크롤 위치로 판단한다.
+  bool _scrolledPastOnePage = false;
+
+  /// 지금 맨 아래(가장 최신 메시지, itemIndex 0)가 화면에 보이는지. 검색 결과를 눌러 옛
+  /// 메시지로 점프했거나 위로 스크롤해서 지난 대화를 읽는 중이면 false가 된다 — 이 경우
+  /// 남이 보낸 새 메시지가 와도 읽던 위치를 그대로 유지해야 하므로 자동 스크롤을 건너뛴다.
+  ///
+  /// (드래그 여부로 판단하는 방식은 버렸다 — 마우스 휠 스크롤은 dragDetails가 안 잡혀서
+  /// PC에서 위로 스크롤해도 "맨 아래를 계속 보는 중"으로 잘못 남아있는 문제가 있었다.)
+  bool get _isAtBottom =>
+      _itemPositionsListener.itemPositions.value.any((p) => p.index == 0);
 
   @override
   void initState() {
@@ -75,10 +103,14 @@ class _ChatPanelState extends State<ChatPanel> {
     controller.markReadNow();
     widget.session.clearUnreadCount(widget.room.id);
     _scrollToHighlight();
-    _lastSeenEntryId = controller.messages.isNotEmpty
-        ? controller.messages.last.id
-        : null;
-    controller.addListener(_maybeScrollToNewOwnEntry);
+    if (!controller.loading) {
+      _lastSeenEntryId = controller.messages.isNotEmpty
+          ? controller.messages.last.id
+          : null;
+      _lastSeenEntryCount = controller.messages.length;
+      _baselineEstablished = true;
+    }
+    controller.addListener(_maybeScrollToNewEntry);
     widget.session.openStickerPickerOwner.addListener(
       _onStickerPickerOwnerChanged,
     );
@@ -94,22 +126,82 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   /// controller.messages의 마지막 항목(시간상 가장 나중 = reverse 리스트의 맨 아래)이 바뀔
-  /// 때마다 불린다 — 그게 내가 쓴 메시지거나(m.senderId) 내가 단 댓글(합성 항목의
-  /// asComment.senderId)이면 맨 아래로 스크롤한다.
-  void _maybeScrollToNewOwnEntry() {
+  /// 때마다 불린다. 내가 쓴 메시지/댓글(m.senderId 또는 합성 항목의 asComment.senderId)이면
+  /// 무조건 맨 아래로 따라가고, 남이 쓴 거면 내가 이미 맨 아래를 보고 있었을 때만 따라간다.
+  /// 맨 아래가 아닌데 남이 새로 보냈으면, 스크롤 대신 "새로운 메시지가 있습니다" 알약만 켠다.
+  void _maybeScrollToNewEntry() {
     final msgs = widget.session.controllerFor(widget.room).messages;
     if (msgs.isEmpty) return;
     final last = msgs.last;
+
+    if (!_baselineEstablished) {
+      // 방을 처음 열 때 히스토리 로딩이 막 끝나서 불린 것뿐이다 — "새 메시지"가 아니니
+      // 기준점만 조용히 잡고 끝낸다(알약/스크롤 없음).
+      _baselineEstablished = true;
+      _lastSeenEntryId = last.id;
+      _lastSeenEntryCount = msgs.length;
+      return;
+    }
+
+    // loadOlderMessages()로 과거 메시지가 앞쪽(맨 아래 기준으로는 반대쪽)에 끼어드는
+    // 경우도 있다 — 이땐 가장 최신 메시지(last)는 그대로지만 msgs.length는 늘어난다.
+    // 매번 길이를 최신으로 맞춰둬야, 나중에 진짜 새 메시지가 왔을 때 added(그 사이 얼마나
+    // 밀렸는지)가 정확하다 — 안 그러면 과거 메시지를 불러올 때마다 늘어난 개수가 다음 새
+    // 메시지의 added에 잘못 누적돼서(_compensateForPrependedEntries가 엉뚱한 위치로 점프).
+    final added = msgs.length - _lastSeenEntryCount;
+    _lastSeenEntryCount = msgs.length;
+
     if (last.id == _lastSeenEntryId) return;
     _lastSeenEntryId = last.id;
 
     final senderId = last.type == MessageType.comment
         ? last.asComment!.senderId
         : last.senderId;
-    if (senderId == widget.session.userId) _scrollToBottom();
+    if (senderId == widget.session.userId) {
+      // 내가 보낸 건 위로 스크롤해둔 채였어도 항상 부드럽게 맨 아래로 내려간다.
+      _scrollToBottom();
+      return;
+    }
+    if (_isAtBottom) {
+      // 이미 맨 아래였으면 애니메이션 없이(jumpTo) 그 자리에서 바로 반영한다. 이 메서드는
+      // 화면을 다시 그리는 리스너보다 먼저 불리므로(_compensateForPrependedEntries 참고와
+      // 동일한 이유) 다음 프레임으로 미루지 않고 지금 바로 처리해야, 댓글/메시지가 짧은
+      // 간격으로 연달아 와도(애니메이션이 덜 끝난 채로 다음 게 오는 경쟁 상태 없이) 항상
+      // 정확하게 "맨 아래"로 유지된다.
+      if (_newMessagesBelow) setState(() => _newMessagesBelow = false);
+      if (_itemScrollController.isAttached) {
+        _itemScrollController.jumpTo(index: 0);
+      }
+      return;
+    }
+    if (!_newMessagesBelow) setState(() => _newMessagesBelow = true);
+    _compensateForPrependedEntries(added);
+  }
+
+  /// 맨 아래를 보고 있지 않을 때 새 메시지가 (reverse 리스트라) index 0 쪽에 끼어들면,
+  /// 지금 화면에 보이는 메시지들의 itemIndex가 전부 [added]만큼 밀린다 — 그대로 두면 같은
+  /// 인덱스 자리에 다른(더 최신) 메시지가 그려지면서 화면이 살짝 움직인 것처럼 보인다.
+  /// 지금 보이는 위치를 애니메이션 없이(jumpTo) 그만큼 보정해서 실제로는 안 움직이게 한다.
+  ///
+  /// 이 메서드는 controller.notifyListeners()가 부르는 리스너라서, 화면을 다시 그리는
+  /// ListenableBuilder의 리스너(같은 controller에 등록됨)보다 먼저 불린다 — 즉 지금 이
+  /// 시점엔 아직 새 항목이 반영된 프레임이 그려지기 전이다. 그래서 여기서 다음 프레임으로
+  /// 미루지 않고(addPostFrameCallback을 쓰면 "밀린 상태"가 한 프레임 그려졌다가 보정된
+  /// 프레임으로 바뀌면서 화면이 순간적으로 출렁이는 게 보였다) 바로 잡아줘야, 새 항목
+  /// 반영과 위치 보정이 같은 프레임에 한 번에 적용되어 깜빡임이 없다.
+  void _compensateForPrependedEntries(int added) {
+    if (added <= 0 || !_itemScrollController.isAttached) return;
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    final anchor = positions.reduce((a, b) => a.index < b.index ? a : b);
+    _itemScrollController.jumpTo(
+      index: anchor.index + added,
+      alignment: anchor.itemLeadingEdge,
+    );
   }
 
   void _scrollToBottom() {
+    if (_newMessagesBelow) setState(() => _newMessagesBelow = false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_itemScrollController.isAttached) return;
       _itemScrollController.scrollTo(
@@ -119,6 +211,8 @@ class _ChatPanelState extends State<ChatPanel> {
       );
     });
   }
+
+  void _dismissNewMessagesPill() => setState(() => _newMessagesBelow = false);
 
   @override
   void didUpdateWidget(covariant ChatPanel oldWidget) {
@@ -171,7 +265,7 @@ class _ChatPanelState extends State<ChatPanel> {
     }
     widget.session
         .controllerFor(widget.room)
-        .removeListener(_maybeScrollToNewOwnEntry);
+        .removeListener(_maybeScrollToNewEntry);
     widget.session.openStickerPickerOwner.removeListener(
       _onStickerPickerOwnerChanged,
     );
@@ -230,7 +324,37 @@ class _ChatPanelState extends State<ChatPanel> {
 
   void _removeSticker() => setState(() => _pendingSticker = null);
 
-  void _onScrollUpdate() {
+  /// reverse:true라 maxScrollExtent 쪽이 가장 오래된(맨 위) 메시지 — 거기 가까워진 채로
+  /// 스크롤이 멈추면 서버에서 그보다 더 오래된 메시지를 더 가져온다
+  /// (RoomChatController.loadOlderMessages). ScrollUpdateNotification(스크롤 도중 계속
+  /// 옴)이 아니라 ScrollEndNotification(스크롤/드래그가 끝났을 때 한 번만 옴)에서만
+  /// 호출한다 — 스크롤바 썸을 드래그하는 도중에 매번 호출하면, 과거 메시지가 로드될
+  /// 때마다 maxScrollExtent가 늘어나서 "마우스 이동량 → 스크롤 거리" 변환 비율이 드래그
+  /// 도중에 계속 바뀌어 스크롤바가 마우스를 따라가지 못하고 위아래로 튀는 문제가 있었다.
+  void _maybeLoadOlderMessages(ScrollMetrics metrics) {
+    const loadMoreThreshold = 600.0;
+    if (metrics.maxScrollExtent - metrics.pixels < loadMoreThreshold) {
+      widget.session.controllerFor(widget.room).loadOlderMessages();
+    }
+  }
+
+  void _onScrollUpdate(ScrollUpdateNotification notification) {
+    final metrics = notification.metrics;
+    // reverse:true라 pixels==0이 진짜 맨 아래(최신 메시지) — 한 페이지(뷰포트 높이)
+    // 이상 멀어졌으면 "맨 아래로" 버튼을 보여준다.
+    final pastOnePage = metrics.pixels > metrics.viewportDimension;
+    if (pastOnePage != _scrolledPastOnePage) {
+      setState(() => _scrolledPastOnePage = pastOnePage);
+    }
+
+    // 알약이 떠 있는 채로 사용자가 직접 스크롤해서 맨 아래에 닿으면(버튼/알약을 안
+    // 눌러도) 이미 다 본 셈이니 끈다. "맨 아래인지" 자체는 _isAtBottom(itemPositions
+    // 기반)이 그때그때 실시간으로 판단하므로 여기서 별도 플래그를 유지할 필요는 없다.
+    const atBottomThreshold = 4.0;
+    if (_newMessagesBelow && metrics.pixels <= atBottomThreshold) {
+      setState(() => _newMessagesBelow = false);
+    }
+
     final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
     if (listBox == null) return;
     final top = listBox.localToGlobal(Offset.zero).dy;
@@ -291,14 +415,19 @@ class _ChatPanelState extends State<ChatPanel> {
 
               return Stack(
                 children: [
-                  NotificationListener<ScrollUpdateNotification>(
+                  NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
-                      _onScrollUpdate();
+                      if (notification is ScrollUpdateNotification) {
+                        _onScrollUpdate(notification);
+                      } else if (notification is ScrollEndNotification) {
+                        _maybeLoadOlderMessages(notification.metrics);
+                      }
                       return false;
                     },
                     child: ScrollablePositionedList.builder(
                       key: _listKey,
                       itemScrollController: _itemScrollController,
+                      itemPositionsListener: _itemPositionsListener,
                       reverse: true,
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -436,6 +565,21 @@ class _ChatPanelState extends State<ChatPanel> {
                         child: FloatingDatePill(date: _floatingDate!),
                       ),
                     ),
+                  // 위로 스크롤해서 과거 메시지를 더 불러오는 동안(loadOlderMessages) 잠깐
+                  // 보여주는 표시 — reverse:true라 "맨 위"는 화면 상단이다.
+                  if (controller.loadingMore)
+                    const Positioned(
+                      top: 8,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
                   // 이모티콘 패널/미리보기는 메시지 목록 영역(이 Stack)의 맨 아래에 떠 있는
                   // 오버레이로 그린다 — 입력창을 밀어내지 않고(레이아웃이 안 바뀌니 채팅 내용이
                   // 위아래로 출렁이지 않는다) 그 위에 겹쳐 보인다(카카오톡 방식). 이 Stack은
@@ -458,6 +602,86 @@ class _ChatPanelState extends State<ChatPanel> {
                       child: StickerPreviewCard(
                         sticker: _pendingSticker!,
                         onRemove: _removeSticker,
+                      ),
+                    ),
+                  // "맨 아래로" 버튼 — 늘 떠 있진 않고, 맨 아래에서 한 페이지 이상
+                  // 스크롤이 올라가 있을 때만 보인다(_onScrollUpdate 참고).
+                  if (_scrolledPastOnePage)
+                    Positioned(
+                      right: 12,
+                      // 새 메시지 알약도 같이 떠 있으면 겹치지 않도록 그 위로 띄운다.
+                      bottom: _newMessagesBelow ? 60 : 12,
+                      child: Material(
+                        elevation: 4,
+                        shape: const CircleBorder(),
+                        color: Theme.of(context).colorScheme.surface,
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: _scrollToBottom,
+                          child: const Padding(
+                            padding: EdgeInsets.all(10),
+                            child: Icon(Icons.keyboard_arrow_down),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(자동으로 내려버리지
+                  // 않는 대신) 이 알약을 띄운다. 누르면 맨 아래로 스크롤, x를 누르면
+                  // (안 읽었더라도) 그냥 닫는다.
+                  if (_newMessagesBelow)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 8,
+                      child: Center(
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(20),
+                          color: Theme.of(context).colorScheme.primaryContainer,
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: _scrollToBottom,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.arrow_downward,
+                                    size: 16,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onPrimaryContainer,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '새로운 메시지가 있습니다',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onTap: _dismissNewMessagesPill,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(6),
+                                      child: Icon(
+                                        Icons.close,
+                                        size: 16,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onPrimaryContainer,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                 ],

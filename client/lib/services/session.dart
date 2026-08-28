@@ -3,9 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../data/stickers.dart';
 import '../models/app_user.dart';
@@ -57,6 +58,11 @@ class Session extends ChangeNotifier {
 
   ApiClient? api;
   String? updateAvailableVersion; // 서버가 더 최신 버전을 갖고 있으면 그 버전 문자열(예: "1.0.1").
+  bool updateDownloading = false;
+  // 0~1(다운로드 %). 서버가 Content-Length를 안 주면(드묾) null로 남아 있고, 호출부는
+  // 이 경우 불확정(indeterminate) 진행 표시를 해야 한다.
+  double? updateDownloadProgress;
+  String? updateError; // installUpdate() 실패 시 사용자에게 보여줄 메시지.
   final chatSocket = ChatSocket();
   final NotificationService notifications;
   final AppSettings settings;
@@ -108,6 +114,18 @@ class Session extends ChangeNotifier {
   String? _activeRoomId;
   String? get activeRoomId => _activeRoomId;
   void setActiveRoom(String? roomId) => _activeRoomId = roomId;
+
+  /// 모바일(휴대폰 화면 폭)에서 댓글 스레드를 전체화면으로 열면(MessageThreadScreen이
+  /// asPanel:false로 push됨) 그 밑에 있는 채팅 화면(ChatPanel)은 네비게이션 스택엔 남아있어
+  /// activeRoomId는 그대로지만, 실제로는 화면에 안 보인다. 그래서 그 방으로 새 메시지가
+  /// 와도 activeRoomId만 보고 "지금 보고 있다"고 판단하면 알림/안읽음 처리가 잘못
+  /// 억제된다. 이 필드로 "지금 그 방의 댓글 스레드가 화면을 덮고 있는지"를 따로 추적해서
+  /// _handleIncomingMessage가 구분할 수 있게 한다. 데스크톱은 댓글 패널이 채팅 목록
+  /// 옆에 나란히 뜨는 패널이라(항상 같이 보임) 이 값을 안 쓴다.
+  String? _mobileThreadOpenRoomId;
+  String? get mobileThreadOpenRoomId => _mobileThreadOpenRoomId;
+  void setMobileCommentThreadOpen(String? roomId) =>
+      _mobileThreadOpenRoomId = roomId;
 
   bool appInForeground = true;
 
@@ -229,15 +247,44 @@ class Session extends ChangeNotifier {
     return false;
   }
 
-  /// 업데이트 배너의 "다운로드"를 눌렀을 때 — 플랫폼에 맞는 다운로드 URL을 외부(브라우저)로 연다.
-  Future<void> openUpdateDownload() async {
-    final base = serverUrl;
-    if (base == null) return;
-    final platformPath = Platform.isAndroid ? 'android' : 'windows';
-    await launchUrl(
-      Uri.parse('$base/downloads/$platformPath'),
-      mode: LaunchMode.externalApplication,
-    );
+  /// 업데이트 대화상자의 "지금 설치"를 눌렀을 때 — 브라우저로 넘기지 않고 앱이 직접 설치
+  /// 파일을 받아서(진행률을 [updateDownloadProgress]로 보고) 그 자리에서 실행/설치까지 한다.
+  /// Windows는 받은 설치 프로그램(.exe)을 여는 것 자체가 설치 실행이고, Android는 apk를
+  /// 여는 것으로 시스템 패키지 설치 화면(REQUEST_INSTALL_PACKAGES 권한 필요)이 뜬다.
+  Future<void> installUpdate() async {
+    if (api == null || updateDownloading) return;
+    updateDownloading = true;
+    updateDownloadProgress = null;
+    updateError = null;
+    notifyListeners();
+    try {
+      final platformPath = Platform.isAndroid ? 'android' : 'windows';
+      final fileName = Platform.isAndroid ? 'update.apk' : 'update-setup.exe';
+      final response = await api!.downloadUpdate(platformPath);
+      if (response.statusCode != 200) {
+        throw '다운로드에 실패했습니다 (${response.statusCode}).';
+      }
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}${Platform.pathSeparator}$fileName');
+      final sink = file.openWrite();
+      final total = response.contentLength;
+      var received = 0;
+      await response.stream.listen((chunk) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total != null && total > 0) {
+          updateDownloadProgress = received / total;
+          notifyListeners();
+        }
+      }).asFuture<void>();
+      await sink.close();
+      await OpenFile.open(file.path);
+    } catch (e) {
+      updateError = '업데이트 설치 실패: $e';
+    } finally {
+      updateDownloading = false;
+      notifyListeners();
+    }
   }
 
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
@@ -663,6 +710,10 @@ class Session extends ChangeNotifier {
     bool forceDecrypt = false,
   }) async {
     if (room == null || !room.isSecret || m.text == null) return;
+    // 시스템 메시지(자동 삭제 타이머 변경 안내 등)는 postSystemMessage가 암호화하지 않고
+    // 평문 그대로 저장한다 — 그걸 암호문으로 착각해 복호화를 시도하면 실패해서
+    // "복호화할 수 없습니다"로 잘못 보인다.
+    if (m.type == MessageType.system) return;
     final cached = forceDecrypt
         ? null
         : await secretSessionManager?.readCachedDecryptedText(m.id);
@@ -765,7 +816,10 @@ class Session extends ChangeNotifier {
   /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다.
   void _handleIncomingMessage(Message m) {
     if (m.type == MessageType.system) return;
-    final isViewingNow = m.roomId == _activeRoomId && appInForeground;
+    final isViewingNow =
+        m.roomId == _activeRoomId &&
+        appInForeground &&
+        _mobileThreadOpenRoomId != m.roomId;
     if (m.senderId == userId || isViewingNow) return;
 
     final match = rooms.where((r) => r.id == m.roomId);

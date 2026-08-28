@@ -360,7 +360,11 @@ export function createRoomsRouter(io) {
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
 
     const limit = Math.min(Number(req.query.limit) || 50, 200);
-    const rows = await listMessagesByRoom(room.id, limit);
+    // 클라이언트가 보내는 epoch ms(가장 오래 불러온 메시지의 createdAt) — "위로 스크롤해서
+    // 더 불러오기"/검색으로 오래된 메시지 찾기(before로 여러 번 페이지네이션)에 쓴다.
+    const beforeMs = Number(req.query.before);
+    const before = Number.isFinite(beforeMs) && beforeMs > 0 ? new Date(beforeMs) : undefined;
+    const rows = await listMessagesByRoom(room.id, limit, before);
 
     const comments = await listCommentsForMessages(rows.map((m) => m.id));
     const commentsByMessageId = new Map();

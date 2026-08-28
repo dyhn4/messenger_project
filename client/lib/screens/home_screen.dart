@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/session.dart';
+import '../widgets/update_dialog.dart';
 import 'chat_screen.dart';
 import 'desktop_home_screen.dart';
 import 'room_list_screen.dart';
@@ -104,31 +105,18 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  /// session.dart의 _checkForUpdate()가 새 버전을 찾으면 한 번만 배너를 띄운다.
+  /// session.dart의 _checkForUpdate()가 새 버전을 찾으면 한 번만 대화상자를 띄운다.
+  /// 예전엔 화면 위쪽 얇은 MaterialBanner라 놓치기 쉬웠는데, 눈에 잘 띄도록 모달
+  /// 대화상자로 바꿨다(UpdateDialog 참고).
   void _maybeShowUpdateBanner() {
     final version = widget.session.updateAvailableVersion;
     if (version == null || _updateBannerShown) return;
     _updateBannerShown = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showMaterialBanner(
-        MaterialBanner(
-          content: Text('새 버전(v$version)이 있습니다.'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
-                widget.session.openUpdateDownload();
-              },
-              child: const Text('다운로드'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  ScaffoldMessenger.of(context).hideCurrentMaterialBanner(),
-              child: const Text('나중에'),
-            ),
-          ],
-        ),
+      showDialog<void>(
+        context: context,
+        builder: (_) => UpdateDialog(session: widget.session, version: version),
       );
     });
   }

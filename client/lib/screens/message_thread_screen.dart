@@ -79,8 +79,18 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
   }
 
   /// 스크롤이 맨 아래가 아닌 채로 내가 댓글을 새로 달면 그 댓글이 보이도록 맨 아래로
-  /// 스크롤한다(chat_panel.dart의 같은 패턴 참고). 다른 사람이 단 댓글은 건드리지 않는다.
+  /// 스크롤한다. 남이 단 댓글은 내가 이미 맨 아래를 보고 있을 때만 따라간다
+  /// (chat_panel.dart의 같은 패턴 참고) — _isAtBottom 참고.
   String? _lastSeenCommentId;
+
+  /// 지금 맨 아래를 보고 있는지. (드래그 여부로 판단하는 방식은 버렸다 — 마우스 휠
+  /// 스크롤은 dragDetails가 안 잡혀서 PC에서 위로 스크롤해도 "맨 아래를 계속 보는
+  /// 중"으로 잘못 남아있는 문제가 있었다. chat_panel.dart와 동일한 이유.)
+  bool get _isAtBottom {
+    if (!_scrollController.hasClients) return true;
+    final position = _scrollController.position;
+    return position.pixels >= position.maxScrollExtent - 4.0;
+  }
 
   @override
   void initState() {
@@ -88,10 +98,17 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     _lastSeenCommentId = widget.message.comments.isNotEmpty
         ? widget.message.comments.last.id
         : null;
-    widget.controller.addListener(_maybeScrollToNewOwnComment);
+    widget.controller.addListener(_maybeScrollToNewComment);
     widget.session.openStickerPickerOwner.addListener(
       _onStickerPickerOwnerChanged,
     );
+    // 모바일(전체화면)에서는 이 스레드가 채팅 화면을 완전히 덮으므로, 그 방 메시지
+    // 목록이 실제로는 안 보인다는 걸 Session에 알려서 새 메시지 알림/안읽음 처리가
+    // (activeRoomId만 보고 "보고 있다"고 착각해) 잘못 억제되지 않게 한다. 데스크톱은
+    // 패널이 옆에 나란히 떠서 목록이 항상 같이 보이므로 필요 없다.
+    if (!widget.asPanel) {
+      widget.session.setMobileCommentThreadOpen(widget.room.id);
+    }
     // 채팅방에서 "N개 댓글 모두 보기"를 눌러 스레드를 열면, 최신 댓글이 바로 보이도록 맨
     // 아래로 스크롤한다.
     _scrollToBottom();
@@ -101,8 +118,8 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
   void didUpdateWidget(covariant MessageThreadScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_maybeScrollToNewOwnComment);
-      widget.controller.addListener(_maybeScrollToNewOwnComment);
+      oldWidget.controller.removeListener(_maybeScrollToNewComment);
+      widget.controller.addListener(_maybeScrollToNewComment);
     }
     if (oldWidget.message.id != widget.message.id) {
       // 패널을 안 닫고 다른 메시지의 댓글 아이콘/모두 보기를 연달아 눌러 스레드를 바로 넘긴
@@ -116,24 +133,30 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
 
   @override
   void dispose() {
-    widget.controller.removeListener(_maybeScrollToNewOwnComment);
+    widget.controller.removeListener(_maybeScrollToNewComment);
     widget.session.openStickerPickerOwner.removeListener(
       _onStickerPickerOwnerChanged,
     );
     if (widget.session.openStickerPickerOwner.value == this) {
       widget.session.openStickerPickerOwner.value = null;
     }
+    if (!widget.asPanel &&
+        widget.session.mobileThreadOpenRoomId == widget.room.id) {
+      widget.session.setMobileCommentThreadOpen(null);
+    }
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _maybeScrollToNewOwnComment() {
+  void _maybeScrollToNewComment() {
     final comments = widget.message.comments;
     if (comments.isEmpty) return;
     final last = comments.last;
     if (last.id == _lastSeenCommentId) return;
     _lastSeenCommentId = last.id;
-    if (last.senderId == widget.session.userId) _scrollToBottom();
+    if (last.senderId == widget.session.userId || _isAtBottom) {
+      _scrollToBottom();
+    }
   }
 
   void _scrollToBottom() {
@@ -283,7 +306,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      '메시지',
+                      '댓글',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -301,7 +324,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('메시지')),
+      appBar: AppBar(title: const Text('댓글')),
       body: _body(context),
     );
   }

@@ -39,10 +39,14 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
 
   /// 방을 바꿀 때마다 쓴다 — 이전 방 메시지의 스레드 패널은 더 이상 의미가 없으므로 같이 닫는다.
+  /// _highlightMessageId도 같이 지운다 — 검색 결과 클릭(onOpenRoom, 아래 참고)이 아닌 다른
+  /// 경로로 방을 열 때 예전 검색 하이라이트가 남아있으면, 나중에(예: 알림을 눌러) 이 방을
+  /// 다시 열 때 맨 아래 대신 그 옛 메시지 위치로 스크롤되는 문제가 있었다.
   void _selectRoom(Room room) {
     setState(() {
       _selectedRoom = room;
       _threadMessage = null;
+      _highlightMessageId = null;
     });
   }
 
@@ -119,6 +123,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
         _selectedRoom = room;
         _threadMessage = null;
         _membersOpen = false;
+        _highlightMessageId = null;
       });
     }
   }

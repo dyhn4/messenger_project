@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, isNotNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, isNotNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { roomMembers, rooms, messages } from '../schema.js';
 
@@ -42,12 +42,17 @@ export async function softDeleteMessage(id) {
   return row;
 }
 
-/** 방의 최근 메시지 limit개를 시간순(오래된 것부터)으로. */
-export async function listMessagesByRoom(roomId, limit) {
+/** 방의 메시지 limit개를 시간순(오래된 것부터)으로. beforeCreatedAt을 주면 그 시각보다
+ * 먼저 온 메시지 중 최근 limit개를 돌려준다(과거 방향 페이지네이션 — "위로 스크롤해서
+ * 더 불러오기"/검색으로 아주 오래된 메시지를 찾을 때 씀). 없으면 지금까지처럼 방에서
+ * 가장 최근 limit개. */
+export async function listMessagesByRoom(roomId, limit, beforeCreatedAt) {
+  const conditions = [eq(messages.roomId, roomId)];
+  if (beforeCreatedAt) conditions.push(lt(messages.createdAt, beforeCreatedAt));
   const rows = await db
     .select()
     .from(messages)
-    .where(eq(messages.roomId, roomId))
+    .where(and(...conditions))
     .orderBy(desc(messages.createdAt))
     .limit(limit);
   return rows.reverse();

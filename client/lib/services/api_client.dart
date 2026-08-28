@@ -197,6 +197,14 @@ class ApiClient {
     }
   }
 
+  /// 업데이트 설치 파일(windows/android)을 스트리밍으로 받는다. 인증 불필요 엔드포인트라
+  /// fetchLatestVersion과 마찬가지로 로그인 여부와 무관하게 호출할 수 있다. 응답 본문을
+  /// 통째로 메모리에 올리지 않고 스트림으로 넘겨서 호출부가 진행률을 계산하며 파일에 써넣게 한다.
+  Future<http.StreamedResponse> downloadUpdate(String platformPath) {
+    final req = http.Request('GET', _uri('/downloads/$platformPath'));
+    return _client.send(req);
+  }
+
   Future<AuthResult> register(
     String username,
     String password,
@@ -424,11 +432,19 @@ class ApiClient {
     );
   }
 
+  /// [before]를 주면 그 시각보다 먼저 온 메시지 중 최근 [limit]개(과거로 페이지네이션 —
+  /// "위로 스크롤해서 더 불러오기"/검색으로 오래된 메시지 찾기). 없으면 방에서 가장 최근 [limit]개.
   Future<List<Message>> fetchRoomMessages(
     String roomId, {
     int limit = 50,
+    DateTime? before,
   }) async {
-    final list = await _get('/api/rooms/$roomId/messages?limit=$limit') as List;
+    final beforeParam = before != null
+        ? '&before=${before.millisecondsSinceEpoch}'
+        : '';
+    final list =
+        await _get('/api/rooms/$roomId/messages?limit=$limit$beforeParam')
+            as List;
     return list
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
         .toList();

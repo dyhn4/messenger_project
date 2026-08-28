@@ -116,9 +116,7 @@ class RoomOptionsMenu extends StatelessWidget {
                   onChanged: (v) =>
                       setDialogState(() => alsoRemoveOther = v ?? false),
                   title: const Text('상대방도 나가기'),
-                  subtitle: const Text(
-                    '체크하면 상대방도 함께 나가지고 대화 내용이 양쪽 기기에서 모두 삭제됩니다. 체크하지 않으면 나만 나가고 상대방은 대화방에 그대로 남습니다.',
-                  ),
+                  subtitle: const Text('(양쪽 방 폭파)'),
                 ),
             ],
           ),

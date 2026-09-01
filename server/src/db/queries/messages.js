@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, isNotNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { roomMembers, rooms, messages } from '../schema.js';
 
@@ -40,6 +40,17 @@ export async function softDeleteMessage(id) {
     .where(eq(messages.id, id))
     .returning();
   return row;
+}
+
+/** id 목록으로 메시지를 시간순(오래된 것부터) 가져온다 — 창 밖에 있는 댓글의 부모 메시지를
+ * 따로 끌어올 때 쓴다(comments.js의 listCommentsInRoomBetween 참고). */
+export function listMessagesByIds(ids) {
+  if (ids.length === 0) return Promise.resolve([]);
+  return db
+    .select()
+    .from(messages)
+    .where(inArray(messages.id, ids))
+    .orderBy(asc(messages.createdAt));
 }
 
 /** 방의 메시지 limit개를 시간순(오래된 것부터)으로. beforeCreatedAt을 주면 그 시각보다

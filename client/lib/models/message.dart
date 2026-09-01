@@ -38,6 +38,13 @@ class Message {
   /// 소프트 삭제됐으면 true — 본문 대신 "삭제된 메시지입니다"를 보여준다. 그 자리에서 바뀌므로 non-final.
   bool deleted;
 
+  /// 이 메시지가 요청한 페이지(창)에 들어서 온 게 아니라, "창 시간대에 달린 댓글의 부모"라서
+  /// 서버가 추가로 딸려 보낸 것이면 true(서버 rooms.js의 /rooms/:id/messages 참고).
+  /// 옛 메시지에 최근 댓글이 달린 경우가 이에 해당한다. 페이지네이션 커서(다음에 어디부터 더
+  /// 불러올지)를 잡을 때는 이런 항목을 빼야 한다 — 창보다 훨씬 오래된 시각이라, 커서로 쓰면
+  /// 그 사이 메시지를 통째로 건너뛴다.
+  final bool outOfWindow;
+
   /// 비밀 대화 메시지인데 로컬에 이 epoch/n을 복호화할 체인키가 없어서(재키잉을 2번 이상
   /// 놓쳤거나 다른 기기에서 온 세션 등) 복호화에 실패했으면 true. text는 이때 null이고
   /// UI는 "🔒 이 메시지는 복호화할 수 없습니다" 플레이스홀더를 보여준다(secret_chat_crypto.dart 참고).
@@ -98,6 +105,7 @@ class Message {
     this.readAt,
     this.expiresAt,
     this.asComment,
+    this.outOfWindow = false,
     List<Comment>? comments,
   }) : comments = comments ?? [];
 
@@ -123,6 +131,7 @@ class Message {
             )
           : null,
       deleted: json['deleted'] as bool? ?? false,
+      outOfWindow: json['outOfWindow'] as bool? ?? false,
       readAt: (json['readAt'] as num?) != null
           ? DateTime.fromMillisecondsSinceEpoch((json['readAt'] as num).toInt())
           : null,

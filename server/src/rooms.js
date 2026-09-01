@@ -17,8 +17,19 @@ import {
   setMemberFavorite,
   setSecretDepartedMember,
 } from './db/queries/rooms.js';
-import { countUnreadForUser, getLastMessageAt, insertMessage, listMessagesByRoom } from './db/queries/messages.js';
-import { countUnreadCommentsForUser, getLastCommentAt, listCommentsForMessages } from './db/queries/comments.js';
+import {
+  countUnreadForUser,
+  getLastMessageAt,
+  insertMessage,
+  listMessagesByIds,
+  listMessagesByRoom,
+} from './db/queries/messages.js';
+import {
+  countUnreadCommentsForUser,
+  getLastCommentAt,
+  listCommentsForMessages,
+  listCommentsInRoomBetween,
+} from './db/queries/comments.js';
 import { findSecretSessionByRoomId } from './db/queries/secretSessions.js';
 import { findUserById, listAllUserIds } from './db/queries/users.js';
 import { publicUser } from './users.js';
@@ -366,20 +377,43 @@ export function createRoomsRouter(io) {
     const before = Number.isFinite(beforeMs) && beforeMs > 0 ? new Date(beforeMs) : undefined;
     const rows = await listMessagesByRoom(room.id, limit, before);
 
-    const comments = await listCommentsForMessages(rows.map((m) => m.id));
+    // 이 창의 시간대에 달린 댓글 중 부모 메시지가 창 밖(더 오래됨)에 있는 것들의 부모를 추가로
+    // 끌어온다. 옛날 메시지에 오늘 댓글을 달면 그렇게 되는데, 부모가 없으면 클라이언트가 댓글
+    // 카드를 아예 안 그린다(chat_panel.dart의 parent == null 분기). 이 추가분은 창(페이지)의
+    // 일부가 아니므로 outOfWindow로 표시해서, 클라이언트가 "다음 페이지" 커서를 잡을 때
+    // 이것들 때문에 중간 메시지를 건너뛰지 않게 한다.
+    const inWindowIds = new Set(rows.map((m) => m.id));
+    let extraParents = [];
+    let windowComments = [];
+    if (rows.length > 0) {
+      windowComments = await listCommentsInRoomBetween(room.id, rows[0].createdAt, before);
+      const missingParentIds = [
+        ...new Set(windowComments.map((c) => c.messageId).filter((id) => !inWindowIds.has(id))),
+      ];
+      extraParents = await listMessagesByIds(missingParentIds);
+    }
+
     const commentsByMessageId = new Map();
-    for (const c of comments) {
+    const pushComment = (c) => {
       const list = commentsByMessageId.get(c.messageId) ?? [];
       list.push(toCommentDto(c));
       commentsByMessageId.set(c.messageId, list);
+    };
+    for (const c of await listCommentsForMessages(rows.map((m) => m.id))) pushComment(c);
+    // 창 밖 부모에는 이 창 시간대의 댓글만 붙인다 — 그 부모의 옛 댓글까지 다 보내면 창과
+    // 상관없는 옛 댓글 카드가 목록 맨 위에 뜬금없이 끼어든다.
+    const extraParentIds = new Set(extraParents.map((m) => m.id));
+    for (const c of windowComments) {
+      if (extraParentIds.has(c.messageId)) pushComment(c);
     }
 
     // 저장은 항상 원본 상대경로(/uploads/xxx)로 해두고, 응답에 낼 때만 매번 새로 서명한다
     // (DB에 서명된 URL을 그대로 저장하면 나중에 다시 조회할 때 이미 만료돼있게 된다).
     res.json(
-      rows.map((m) => ({
+      [...extraParents, ...rows].map((m) => ({
         ...toMessageDto(m),
         comments: commentsByMessageId.get(m.id) ?? [],
+        outOfWindow: extraParentIds.has(m.id),
       })),
     );
   });

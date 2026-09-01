@@ -1,5 +1,6 @@
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -54,6 +55,10 @@ class NotificationService {
   /// [avatarUrl]은 이미 절대경로로 resolve된 URL이어야 한다(Session이 resolveUrl 적용해서 넘김).
   /// 업로드 사진('photo')은 그대로 받아오고, 캐릭터('character')는 이모지+배경색을 직접
   /// 원형 PNG로 그려서 아이콘으로 쓴다. 그 외(기본 이니셜)는 앱 아이콘 그대로.
+  ///
+  /// [isSecret]이면(비밀 대화) 아바타 오른쪽 아래에 room_avatar.dart와 같은 모양의 초록 자물쇠
+  /// 배지를 그려 넣는다 — 알림 제목은 OS가 그리는 일반 텍스트라 위젯처럼 색 있는 아이콘을
+  /// 나란히 붙일 수 없어서, 그 대신 아바타 이미지 쪽에 배지를 합성하는 방식으로 표현한다.
   Future<void> showMessage({
     required String title,
     required String body,
@@ -62,13 +67,22 @@ class NotificationService {
     String? avatarEmoji,
     String? avatarColor,
     String? avatarUrl,
+    bool isSecret = false,
   }) async {
-    final avatarBytes = await _resolveAvatarBytes(
+    var avatarBytes = await _resolveAvatarBytes(
       avatarType: avatarType,
       avatarEmoji: avatarEmoji,
       avatarColor: avatarColor,
       avatarUrl: avatarUrl,
     );
+    // 배지를 직접 그려 넣은 뒤에는 Windows 쪽 자체 원형 크롭(WindowsImageCrop.circle)을
+    // 끈다 — 그 크롭이 이미지 전체 사각형 기준으로 원을 오려내서, 모서리에 그린 배지가
+    // 잘려나가기 때문이다(우리가 이미 원형으로 오려서 그렸으므로 다시 자를 필요 없음).
+    var badged = false;
+    if (isSecret && avatarBytes != null) {
+      avatarBytes = await _badgeWithLock(avatarBytes);
+      badged = true;
+    }
 
     Uri? windowsImageUri;
     if (avatarBytes != null && Platform.isWindows) {
@@ -93,7 +107,7 @@ class NotificationService {
               windowsImageUri,
               altText: title,
               placement: WindowsImagePlacement.appLogoOverride,
-              crop: WindowsImageCrop.circle,
+              crop: badged ? null : WindowsImageCrop.circle,
             )
           else
             WindowsImage(
@@ -176,6 +190,95 @@ class NotificationService {
     final image = await picture.toImage(size.toInt(), size.toInt());
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
+  }
+
+  /// [avatarBytes]를 원형으로 오려서 캔버스 가운데 그리고, 오른쪽 아래에 흰 테두리+초록 원
+  /// 배지를 얹어 그 안에 자물쇠 모양을 그린다 — room_avatar.dart의 비밀 대화 배지(초록
+  /// Icons.lock)와 같은 자리/느낌. 배지가 들어갈 여백을 남기려고 아바타는 캔버스 전체가
+  /// 아니라 살짝 작은 반지름으로 그린다.
+  Future<Uint8List> _badgeWithLock(Uint8List avatarBytes) async {
+    final codec = await ui.instantiateImageCodec(avatarBytes);
+    final frame = await codec.getNextFrame();
+    final source = frame.image;
+
+    const size = 128.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    const avatarRadius = size * 0.42;
+    const avatarCenter = Offset(size / 2, size / 2);
+    canvas.save();
+    canvas.clipPath(
+      Path()
+        ..addOval(Rect.fromCircle(center: avatarCenter, radius: avatarRadius)),
+    );
+    // 원본이 정사각형이 아니면(세로/가로로 긴 사진) 짧은 변에 맞춰 가운데를 정사각형으로
+    // 잘라서 채운다 — 프로필 사진이 찌그러지지 않게.
+    final srcSize = math.min(source.width.toDouble(), source.height.toDouble());
+    final srcRect = Rect.fromCenter(
+      center: Offset(source.width / 2, source.height / 2),
+      width: srcSize,
+      height: srcSize,
+    );
+    canvas.drawImageRect(
+      source,
+      srcRect,
+      Rect.fromCircle(center: avatarCenter, radius: avatarRadius),
+      Paint(),
+    );
+    canvas.restore();
+
+    // 흰 테두리(badgeRadius * 1.18)까지 포함해서 캔버스(size x size) 밖으로 안 나가야 한다 —
+    // 전에는 0.2였는데 테두리가 캔버스 경계를 넘어가서 잘렸다. avatarCenter + avatarRadius*0.78
+    // (배지 중심 오프셋) + badgeRadius*1.18(테두리 반지름)이 size/2보다 여유 있게 작도록 줄였다.
+    const badgeRadius = size * 0.125;
+    final badgeCenter = Offset(
+      avatarCenter.dx + avatarRadius * 0.78,
+      avatarCenter.dy + avatarRadius * 0.78,
+    );
+    canvas.drawCircle(
+      badgeCenter,
+      badgeRadius * 1.18,
+      Paint()..color = const ui.Color(0xFFFFFFFF),
+    );
+    canvas.drawCircle(
+      badgeCenter,
+      badgeRadius,
+      Paint()..color = const ui.Color(0xFF2E7D32),
+    );
+    _paintLockGlyph(canvas, badgeCenter, badgeRadius * 0.62);
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  /// Icons.lock 모양을 단순화해서 흰색으로 직접 그린다(몸통 = 둥근 사각형, 고리 = 반원 아치).
+  /// 이모지 글리프 대신 벡터로 그려서, 플랫폼/폰트에 상관없이 항상 같은 모양이 나온다.
+  void _paintLockGlyph(Canvas canvas, Offset center, double r) {
+    final bodyPaint = Paint()..color = const ui.Color(0xFFFFFFFF);
+    final bodyRect = Rect.fromCenter(
+      center: Offset(center.dx, center.dy + r * 0.28),
+      width: r * 1.7,
+      height: r * 1.3,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(bodyRect, Radius.circular(r * 0.25)),
+      bodyPaint,
+    );
+
+    final shacklePaint = Paint()
+      ..color = const ui.Color(0xFFFFFFFF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.32
+      ..strokeCap = StrokeCap.round;
+    final shackleRect = Rect.fromCenter(
+      center: Offset(center.dx, center.dy - r * 0.18),
+      width: r * 1.15,
+      height: r * 1.15,
+    );
+    canvas.drawArc(shackleRect, math.pi, math.pi, false, shacklePaint);
   }
 
   Future<Uri> _writeTempPng(Uint8List bytes) async {

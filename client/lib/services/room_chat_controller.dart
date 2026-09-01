@@ -38,6 +38,23 @@ class RoomChatController extends ChangeNotifier {
   /// 돌려받으면(=그게 방의 시작이다) false로 내려서 더 이상 요청하지 않는다.
   bool hasMoreHistory = true;
 
+  /// 다음 페이지를 요청할 기준 시각(이 시각보다 이전 것을 더 불러온다). messages.first를
+  /// 그대로 쓰면 안 된다 — 서버가 "창 시간대 댓글의 부모"를 창 밖에서 추가로 딸려 보내는데
+  /// (Message.outOfWindow), 그건 창보다 훨씬 오래된 시각이라 커서로 쓰면 그 사이 메시지를
+  /// 통째로 건너뛴다. 그래서 창(페이지)에 실제로 포함된 것들 중 가장 오래된 시각만 쓴다.
+  DateTime? _historyCursor;
+
+  /// 이번 응답에서 창에 실제로 포함된(= outOfWindow가 아닌) 항목들로 커서를 갱신한다.
+  void _advanceHistoryCursor(List<Message> page) {
+    for (final m in page) {
+      if (m.outOfWindow) continue;
+      final cursor = _historyCursor;
+      if (cursor == null || m.createdAt.isBefore(cursor)) {
+        _historyCursor = m.createdAt;
+      }
+    }
+  }
+
   /// 이 방을 이번 세션에서 처음 열었을 때(=아직 markReadNow가 실행되기 전) 내가 읽었던 지점.
   /// "여기까지 읽었습니다" 구분선을 이 값 기준으로 그린다 — 컨트롤러가 세션 내내 캐싱되므로
   /// 한 번 정해지면 이 방을 다시 열어도 안 바뀐다(방을 나갔다가 새로 들어와야 갱신됨).
@@ -51,7 +68,11 @@ class RoomChatController extends ChangeNotifier {
       );
       await _session.decryptHistory(room, history);
       _mergeHistory(history);
-      if (history.length < _pageSize) hasMoreHistory = false;
+      _advanceHistoryCursor(history);
+      // 창 밖 부모(outOfWindow)는 페이지 크기 판정에서도 빼야 "끝에 도달했다"를 놓치지 않는다.
+      if (history.where((m) => !m.outOfWindow).length < _pageSize) {
+        hasMoreHistory = false;
+      }
     } catch (e) {
       error = e.toString();
     }
@@ -63,20 +84,23 @@ class RoomChatController extends ChangeNotifier {
   /// 채팅방 맨 위 근처까지 스크롤했을 때(chat_panel.dart) 그보다 오래된 메시지를 더
   /// 불러와서 앞쪽에 이어붙인다. 이미 불러오는 중이거나 더 가져올 게 없으면 아무것도 안 한다.
   Future<void> loadOlderMessages() async {
-    if (loadingMore || !hasMoreHistory || messages.isEmpty) return;
+    final cursor = _historyCursor;
+    if (loadingMore || !hasMoreHistory || cursor == null) return;
     loadingMore = true;
     notifyListeners();
     try {
-      final oldest = messages.first.createdAt;
       final older = await _session.api!.fetchRoomMessages(
         room.id,
         limit: _pageSize,
-        before: oldest,
+        before: cursor,
       );
-      if (older.length < _pageSize) hasMoreHistory = false;
+      if (older.where((m) => !m.outOfWindow).length < _pageSize) {
+        hasMoreHistory = false;
+      }
       if (older.isNotEmpty) {
         await _session.decryptHistory(room, older);
         _mergeHistory(older);
+        _advanceHistoryCursor(older);
       }
     } catch (_) {
       // 실패해도 조용히 무시 — 계속 스크롤하면 다시 시도된다.
@@ -372,7 +396,7 @@ class RoomChatController extends ChangeNotifier {
     const pageSize = 200;
     const maxPages = 20; // 최대 20*200 = 4000개까지 과거로 훑는다.
     try {
-      var cursor = messages.isNotEmpty ? messages.first.createdAt : null;
+      var cursor = _historyCursor;
       for (var i = 0; i < maxPages; i++) {
         final history = await _session.api!.fetchRoomMessages(
           room.id,
@@ -382,12 +406,15 @@ class RoomChatController extends ChangeNotifier {
         if (history.isEmpty) break;
         await _session.decryptHistory(room, history);
         if (_mergeHistory(history)) notifyListeners();
-        if (history.length < pageSize) {
+        _advanceHistoryCursor(history);
+        // 창 밖 부모(outOfWindow)는 페이지의 일부가 아니므로 개수/커서 계산에서 뺀다.
+        final inWindow = history.where((m) => !m.outOfWindow).toList();
+        if (inWindow.length < pageSize) {
           hasMoreHistory = false;
           break;
         }
         if (messages.any((m) => m.id == messageId)) return;
-        cursor = history.first.createdAt;
+        cursor = inWindow.first.createdAt;
       }
     } catch (_) {
       // 실패해도 조용히 무시 — 스크롤/하이라이트만 안 될 뿐 방 자체는 정상적으로 보인다.

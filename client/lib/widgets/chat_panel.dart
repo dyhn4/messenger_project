@@ -11,6 +11,7 @@ import '../models/room.dart';
 import '../services/session.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
+import 'indexed_scrollbar.dart';
 import 'message_bubble.dart';
 import 'message_comments_card.dart';
 import 'read_up_to_here_divider.dart';
@@ -78,11 +79,18 @@ class _ChatPanelState extends State<ChatPanel> {
   /// 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(위치를 뺏지 않으려고 자동 스크롤은 안
   /// 하는 대신) true로 켜서 "새로운 메시지가 있습니다" 알약을 띄운다. 알약을 누르면(맨
   /// 아래로 스크롤) 또는 직접 스크롤해서 맨 아래에 도달하면 꺼진다.
-  bool _newMessagesBelow = false;
+  ///
+  /// setState가 아니라 ValueNotifier인 이유: 이 값들은 스크롤할 때마다 바뀌는데, setState로
+  /// 처리하면 ChatPanel 전체(=ScrollablePositionedList 포함)가 다시 빌드된다. 그런데 이
+  /// 값을 갱신하는 _onItemPositionsChanged는 리스트가 레이아웃을 끝내고 부르는 콜백이라,
+  /// 거기서 리스트 자신을 다시 빌드하게 만들면 위젯 생명주기가 꼬여서
+  /// '_dependents.isEmpty' assertion으로 죽는다. ValueListenableBuilder로 알약/버튼
+  /// 위젯만 다시 그리면 리스트는 건드리지 않는다.
+  final _newMessagesBelow = ValueNotifier<bool>(false);
 
-  /// 맨 아래에서 한 페이지(뷰포트 높이) 이상 위로 스크롤되어 있으면 켜서, 항상 떠 있지는
-  /// 않는 "맨 아래로" 동그란 버튼을 보여준다. _onScrollUpdate에서 스크롤 위치로 판단한다.
-  bool _scrolledPastOnePage = false;
+  /// 맨 아래에서 한 화면 이상 위로 스크롤되어 있으면 켜서, 항상 떠 있지는 않는 "맨 아래로"
+  /// 동그란 버튼을 보여준다. _onItemPositionsChanged에서 보이는 항목 인덱스로 판단한다.
+  final _scrolledPastOnePage = ValueNotifier<bool>(false);
 
   /// 지금 맨 아래(가장 최신 메시지, itemIndex 0)가 화면에 보이는지. 검색 결과를 눌러 옛
   /// 메시지로 점프했거나 위로 스크롤해서 지난 대화를 읽는 중이면 false가 된다 — 이 경우
@@ -92,6 +100,30 @@ class _ChatPanelState extends State<ChatPanel> {
   /// PC에서 위로 스크롤해도 "맨 아래를 계속 보는 중"으로 잘못 남아있는 문제가 있었다.)
   bool get _isAtBottom =>
       _itemPositionsListener.itemPositions.value.any((p) => p.index == 0);
+
+  /// 스크롤 위치가 바뀔 때마다(레이아웃 후) 불린다. 여기서 판단하는 것들은 전부 "지금 어떤
+  /// 항목이 화면에 보이는지"(itemPositions) 기준이다 — ScrollablePositionedList의
+  /// ScrollMetrics.pixels/maxScrollExtent는 절대 위치가 아니라 "현재 앵커 항목 기준
+  /// 상대값"이라, scrollTo/jumpTo로 앵커가 바뀔 때마다 0 근처로 리셋된다. 그걸 "맨 아래에
+  /// 닿았다"로 잘못 읽는 바람에, 위로 스크롤해둔 상태에서 새 메시지가 오면
+  /// _compensateForPrependedEntries의 jumpTo 직후 알약이 곧바로 다시 꺼지고 "맨 아래로"
+  /// 버튼도 사라지는 문제가 있었다.
+  void _onItemPositionsChanged() {
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty || !mounted) return;
+
+    final atBottom = positions.any((p) => p.index == 0);
+    // 화면에 한 번에 보이는 항목 수(positions.length)를 "한 화면"의 근사값으로 써서, 그보다
+    // 더 위로 올라가 있을 때만 "맨 아래로" 버튼을 띄운다.
+    var minIndex = positions.first.index;
+    for (final p in positions) {
+      if (p.index < minIndex) minIndex = p.index;
+    }
+    _scrolledPastOnePage.value = !atBottom && minIndex >= positions.length;
+    // 알약이 떠 있는 채로 사용자가 직접 스크롤해서 맨 아래에 닿으면(알약/버튼을 안
+    // 눌러도) 이미 다 본 셈이니 끈다.
+    if (atBottom) _newMessagesBelow.value = false;
+  }
 
   @override
   void initState() {
@@ -111,6 +143,7 @@ class _ChatPanelState extends State<ChatPanel> {
       _baselineEstablished = true;
     }
     controller.addListener(_maybeScrollToNewEntry);
+    _itemPositionsListener.itemPositions.addListener(_onItemPositionsChanged);
     widget.session.openStickerPickerOwner.addListener(
       _onStickerPickerOwnerChanged,
     );
@@ -168,13 +201,13 @@ class _ChatPanelState extends State<ChatPanel> {
       // 동일한 이유) 다음 프레임으로 미루지 않고 지금 바로 처리해야, 댓글/메시지가 짧은
       // 간격으로 연달아 와도(애니메이션이 덜 끝난 채로 다음 게 오는 경쟁 상태 없이) 항상
       // 정확하게 "맨 아래"로 유지된다.
-      if (_newMessagesBelow) setState(() => _newMessagesBelow = false);
+      _newMessagesBelow.value = false;
       if (_itemScrollController.isAttached) {
         _itemScrollController.jumpTo(index: 0);
       }
       return;
     }
-    if (!_newMessagesBelow) setState(() => _newMessagesBelow = true);
+    _newMessagesBelow.value = true;
     _compensateForPrependedEntries(added);
   }
 
@@ -201,7 +234,7 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   void _scrollToBottom() {
-    if (_newMessagesBelow) setState(() => _newMessagesBelow = false);
+    _newMessagesBelow.value = false;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_itemScrollController.isAttached) return;
       _itemScrollController.scrollTo(
@@ -212,7 +245,7 @@ class _ChatPanelState extends State<ChatPanel> {
     });
   }
 
-  void _dismissNewMessagesPill() => setState(() => _newMessagesBelow = false);
+  void _dismissNewMessagesPill() => _newMessagesBelow.value = false;
 
   @override
   void didUpdateWidget(covariant ChatPanel oldWidget) {
@@ -266,6 +299,9 @@ class _ChatPanelState extends State<ChatPanel> {
     widget.session
         .controllerFor(widget.room)
         .removeListener(_maybeScrollToNewEntry);
+    _itemPositionsListener.itemPositions.removeListener(
+      _onItemPositionsChanged,
+    );
     widget.session.openStickerPickerOwner.removeListener(
       _onStickerPickerOwnerChanged,
     );
@@ -274,6 +310,8 @@ class _ChatPanelState extends State<ChatPanel> {
     }
     _hideTimer?.cancel();
     _highlightTimer?.cancel();
+    _newMessagesBelow.dispose();
+    _scrolledPastOnePage.dispose();
     super.dispose();
   }
 
@@ -324,37 +362,28 @@ class _ChatPanelState extends State<ChatPanel> {
 
   void _removeSticker() => setState(() => _pendingSticker = null);
 
-  /// reverse:true라 maxScrollExtent 쪽이 가장 오래된(맨 위) 메시지 — 거기 가까워진 채로
-  /// 스크롤이 멈추면 서버에서 그보다 더 오래된 메시지를 더 가져온다
-  /// (RoomChatController.loadOlderMessages). ScrollUpdateNotification(스크롤 도중 계속
-  /// 옴)이 아니라 ScrollEndNotification(스크롤/드래그가 끝났을 때 한 번만 옴)에서만
-  /// 호출한다 — 스크롤바 썸을 드래그하는 도중에 매번 호출하면, 과거 메시지가 로드될
-  /// 때마다 maxScrollExtent가 늘어나서 "마우스 이동량 → 스크롤 거리" 변환 비율이 드래그
-  /// 도중에 계속 바뀌어 스크롤바가 마우스를 따라가지 못하고 위아래로 튀는 문제가 있었다.
-  void _maybeLoadOlderMessages(ScrollMetrics metrics) {
-    const loadMoreThreshold = 600.0;
-    if (metrics.maxScrollExtent - metrics.pixels < loadMoreThreshold) {
+  /// 가장 오래된(맨 위) 메시지 근처까지 올라간 채로 스크롤이 멈추면 서버에서 그보다 더
+  /// 오래된 메시지를 더 가져온다(RoomChatController.loadOlderMessages).
+  ///
+  /// 스크롤 도중(ScrollUpdateNotification)이 아니라 멈췄을 때(ScrollEndNotification)만
+  /// 호출한다 — 스크롤바 썸을 드래그하는 도중에 목록이 길어지면 "마우스 이동량 → 스크롤
+  /// 거리" 변환 비율이 드래그 중에 계속 바뀌어 스크롤바가 마우스를 안 따라가고 튄다.
+  /// 판단 기준도 pixels가 아니라 보이는 항목 인덱스다(_onItemPositionsChanged 참고).
+  void _maybeLoadOlderMessages() {
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
+    var maxIndex = positions.first.index;
+    for (final p in positions) {
+      if (p.index > maxIndex) maxIndex = p.index;
+    }
+    final itemCount = widget.session.controllerFor(widget.room).messages.length;
+    // 가장 오래된 항목이 한 화면 안쪽까지 들어왔으면 미리 더 불러온다.
+    if (maxIndex >= itemCount - 1 - positions.length) {
       widget.session.controllerFor(widget.room).loadOlderMessages();
     }
   }
 
   void _onScrollUpdate(ScrollUpdateNotification notification) {
-    final metrics = notification.metrics;
-    // reverse:true라 pixels==0이 진짜 맨 아래(최신 메시지) — 한 페이지(뷰포트 높이)
-    // 이상 멀어졌으면 "맨 아래로" 버튼을 보여준다.
-    final pastOnePage = metrics.pixels > metrics.viewportDimension;
-    if (pastOnePage != _scrolledPastOnePage) {
-      setState(() => _scrolledPastOnePage = pastOnePage);
-    }
-
-    // 알약이 떠 있는 채로 사용자가 직접 스크롤해서 맨 아래에 닿으면(버튼/알약을 안
-    // 눌러도) 이미 다 본 셈이니 끈다. "맨 아래인지" 자체는 _isAtBottom(itemPositions
-    // 기반)이 그때그때 실시간으로 판단하므로 여기서 별도 플래그를 유지할 필요는 없다.
-    const atBottomThreshold = 4.0;
-    if (_newMessagesBelow && metrics.pixels <= atBottomThreshold) {
-      setState(() => _newMessagesBelow = false);
-    }
-
     final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
     if (listBox == null) return;
     final top = listBox.localToGlobal(Offset.zero).dy;
@@ -420,140 +449,154 @@ class _ChatPanelState extends State<ChatPanel> {
                       if (notification is ScrollUpdateNotification) {
                         _onScrollUpdate(notification);
                       } else if (notification is ScrollEndNotification) {
-                        _maybeLoadOlderMessages(notification.metrics);
+                        _maybeLoadOlderMessages();
                       }
                       return false;
                     },
-                    child: ScrollablePositionedList.builder(
-                      key: _listKey,
-                      itemScrollController: _itemScrollController,
-                      itemPositionsListener: _itemPositionsListener,
-                      reverse: true,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
+                    child: IndexedScrollbar(
+                      positionsListener: _itemPositionsListener,
+                      scrollController: _itemScrollController,
                       itemCount: msgs.length,
-                      itemBuilder: (context, i) {
-                        final m = msgs[msgs.length - 1 - i];
-                        final isOldestLoaded = i == msgs.length - 1;
-                        final prev = isOldestLoaded
-                            ? null
-                            : msgs[msgs.length - 2 - i];
-                        final showDate =
-                            isOldestLoaded ||
-                            m.createdAt.year != prev!.createdAt.year ||
-                            m.createdAt.month != prev.createdAt.month ||
-                            m.createdAt.day != prev.createdAt.day;
+                      // 높이 캐시가 새 메시지로 인덱스가 밀려도 유지되도록 메시지 id를
+                      // 키로 준다(itemBuilder와 동일한 reverse 인덱싱).
+                      itemKeyAt: (i) => i >= 0 && i < msgs.length
+                          ? msgs[msgs.length - 1 - i].id
+                          : null,
+                      child: ScrollablePositionedList.builder(
+                        key: _listKey,
+                        itemScrollController: _itemScrollController,
+                        itemPositionsListener: _itemPositionsListener,
+                        reverse: true,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        itemCount: msgs.length,
+                        itemBuilder: (context, i) {
+                          final m = msgs[msgs.length - 1 - i];
+                          final isOldestLoaded = i == msgs.length - 1;
+                          final prev = isOldestLoaded
+                              ? null
+                              : msgs[msgs.length - 2 - i];
+                          final showDate =
+                              isOldestLoaded ||
+                              m.createdAt.year != prev!.createdAt.year ||
+                              m.createdAt.month != prev.createdAt.month ||
+                              m.createdAt.day != prev.createdAt.day;
 
-                        // 같은 사람이 같은 분(分)에 연달아 보낸 메시지는, 그중 가장 나중(=시간상
-                        // 마지막) 메시지에만 시간을 보여준다.
-                        final next = i == 0 ? null : msgs[msgs.length - i];
-                        final showTime =
-                            next == null ||
-                            next.senderId != m.senderId ||
-                            !_sameMinute(next.createdAt, m.createdAt);
+                          // 같은 사람이 같은 분(分)에 연달아 보낸 메시지는, 그중 가장 나중(=시간상
+                          // 마지막) 메시지에만 시간을 보여준다.
+                          final next = i == 0 ? null : msgs[msgs.length - i];
+                          final showTime =
+                              next == null ||
+                              next.senderId != m.senderId ||
+                              !_sameMinute(next.createdAt, m.createdAt);
 
-                        // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
-                        // 날짜가 바뀌었거나(showDate) 중간에 시스템 메시지(입장/퇴장 알림)나 댓글
-                        // 카드가 끼면 그 다음 메시지부터 새로 보여준다.
-                        final isFirstInGroup =
-                            isOldestLoaded ||
-                            showDate ||
-                            prev.senderId != m.senderId ||
-                            prev.type == MessageType.system ||
-                            prev.type == MessageType.comment;
+                          // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
+                          // 날짜가 바뀌었거나(showDate) 중간에 시스템 메시지(입장/퇴장 알림)나 댓글
+                          // 카드가 끼면 그 다음 메시지부터 새로 보여준다.
+                          final isFirstInGroup =
+                              isOldestLoaded ||
+                              showDate ||
+                              prev.senderId != m.senderId ||
+                              prev.type == MessageType.system ||
+                              prev.type == MessageType.comment;
 
-                        Widget row;
-                        if (m.type == MessageType.system) {
-                          row = SystemMessageRow(message: m);
-                        } else if (m.type == MessageType.comment) {
-                          final parent = _findMessage(
-                            msgs,
-                            m.asComment!.messageId,
-                          );
-                          // 바로 앞 항목이 "같은 원본 메시지"의 댓글이 아니면(=다른 채팅이 끼었거나,
-                          // 다른 원본 메시지에 대한 댓글이거나, 여기가 맨 처음이면) 이 댓글이 새 런의
-                          // 시작이라 카드를 새로 그린다. 아니면 이미 앞에서 그려진 카드에 흡수되므로
-                          // 여기선 아무것도 안 그린다.
-                          final isFirstCommentInRun =
-                              prev == null ||
-                              prev.type != MessageType.comment ||
-                              prev.asComment!.messageId !=
-                                  m.asComment!.messageId;
-                          if (parent == null || !isFirstCommentInRun) {
-                            row = const SizedBox.shrink();
-                          } else {
-                            // 같은 원본 메시지에 대한 댓글이 사이에 다른 채팅 없이 연달아 이어지는
-                            // 만큼(런) 전부 모아서, 이 카드 하나 안에서 이어 붙여 보여준다. 런은
-                            // 이 댓글부터 뒤로(시간순 정방향) 훑으며 조건이 깨지는 지점에서 끊는다.
-                            final ascIdx = msgs.length - 1 - i;
-                            final runComments = <Comment>[];
-                            var j = ascIdx;
-                            while (j < msgs.length &&
-                                msgs[j].type == MessageType.comment &&
-                                msgs[j].asComment!.messageId ==
-                                    m.asComment!.messageId) {
-                              runComments.add(msgs[j].asComment!);
-                              j++;
+                          Widget row;
+                          if (m.type == MessageType.system) {
+                            row = SystemMessageRow(message: m);
+                          } else if (m.type == MessageType.comment) {
+                            final parent = _findMessage(
+                              msgs,
+                              m.asComment!.messageId,
+                            );
+                            // 바로 앞 항목이 "같은 원본 메시지"의 댓글이 아니면(=다른 채팅이 끼었거나,
+                            // 다른 원본 메시지에 대한 댓글이거나, 여기가 맨 처음이면) 이 댓글이 새 런의
+                            // 시작이라 카드를 새로 그린다. 아니면 이미 앞에서 그려진 카드에 흡수되므로
+                            // 여기선 아무것도 안 그린다.
+                            final isFirstCommentInRun =
+                                prev == null ||
+                                prev.type != MessageType.comment ||
+                                prev.asComment!.messageId !=
+                                    m.asComment!.messageId;
+                            if (parent == null || !isFirstCommentInRun) {
+                              row = const SizedBox.shrink();
+                            } else {
+                              // 같은 원본 메시지에 대한 댓글이 사이에 다른 채팅 없이 연달아 이어지는
+                              // 만큼(런) 전부 모아서, 이 카드 하나 안에서 이어 붙여 보여준다. 런은
+                              // 이 댓글부터 뒤로(시간순 정방향) 훑으며 조건이 깨지는 지점에서 끊는다.
+                              final ascIdx = msgs.length - 1 - i;
+                              final runComments = <Comment>[];
+                              var j = ascIdx;
+                              while (j < msgs.length &&
+                                  msgs[j].type == MessageType.comment &&
+                                  msgs[j].asComment!.messageId ==
+                                      m.asComment!.messageId) {
+                                runComments.add(msgs[j].asComment!);
+                                j++;
+                              }
+                              row = Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 8,
+                                  right: 8,
+                                ),
+                                child: MessageCommentsCard(
+                                  session: widget.session,
+                                  parentMessage: parent,
+                                  comments: runComments,
+                                  room: widget.room,
+                                  currentUserId: widget.session.userId,
+                                  resolveUrl: widget.session.resolveUrl,
+                                  onTap: () =>
+                                      widget.onOpenThread?.call(parent),
+                                  onEditComment: controller.editComment,
+                                  onDeleteComment: controller.deleteComment,
+                                ),
+                              );
                             }
-                            row = Padding(
-                              padding: const EdgeInsets.only(left: 8, right: 8),
-                              child: MessageCommentsCard(
-                                session: widget.session,
-                                parentMessage: parent,
-                                comments: runComments,
-                                room: widget.room,
-                                currentUserId: widget.session.userId,
-                                resolveUrl: widget.session.resolveUrl,
-                                onTap: () => widget.onOpenThread?.call(parent),
-                                onEditComment: controller.editComment,
-                                onDeleteComment: controller.deleteComment,
-                              ),
+                          } else {
+                            row = MessageBubble(
+                              session: widget.session,
+                              message: m,
+                              resolveUrl: widget.session.resolveUrl,
+                              unreadCount: widget.room.unreadCountFor(m),
+                              isMine: m.senderId == widget.session.userId,
+                              sender: _senderOf(m.senderId),
+                              showTime: showTime,
+                              showSenderInfo: isFirstInGroup,
+                              highlighted: m.id == _highlightedMessageId,
+                              onOpenThread: widget.onOpenThread,
+                              onEdit: controller.editMessage,
+                              onDelete: controller.deleteMessage,
                             );
                           }
-                        } else {
-                          row = MessageBubble(
-                            session: widget.session,
-                            message: m,
-                            resolveUrl: widget.session.resolveUrl,
-                            unreadCount: widget.room.unreadCountFor(m),
-                            isMine: m.senderId == widget.session.userId,
-                            sender: _senderOf(m.senderId),
-                            showTime: showTime,
-                            showSenderInfo: isFirstInGroup,
-                            highlighted: m.id == _highlightedMessageId,
-                            onOpenThread: widget.onOpenThread,
-                            onEdit: controller.editMessage,
-                            onDelete: controller.deleteMessage,
+
+                          Widget? divider;
+                          if (showDate) {
+                            final key = _dividerKeys.putIfAbsent(
+                              _dateKey(m.createdAt),
+                              () => GlobalKey(),
+                            );
+                            divider = DateDivider(key: key, date: m.createdAt);
+                          }
+
+                          final isFirstUnread =
+                              showReadDivider &&
+                              m.createdAt.millisecondsSinceEpoch > boundary &&
+                              (isOldestLoaded ||
+                                  prev!.createdAt.millisecondsSinceEpoch <=
+                                      boundary);
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              ?divider,
+                              if (isFirstUnread) const ReadUpToHereDivider(),
+                              row,
+                            ],
                           );
-                        }
-
-                        Widget? divider;
-                        if (showDate) {
-                          final key = _dividerKeys.putIfAbsent(
-                            _dateKey(m.createdAt),
-                            () => GlobalKey(),
-                          );
-                          divider = DateDivider(key: key, date: m.createdAt);
-                        }
-
-                        final isFirstUnread =
-                            showReadDivider &&
-                            m.createdAt.millisecondsSinceEpoch > boundary &&
-                            (isOldestLoaded ||
-                                prev!.createdAt.millisecondsSinceEpoch <=
-                                    boundary);
-
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            ?divider,
-                            if (isFirstUnread) const ReadUpToHereDivider(),
-                            row,
-                          ],
-                        );
-                      },
+                        },
+                      ),
                     ),
                   ),
                   if (_floatingDate != null)
@@ -604,86 +647,114 @@ class _ChatPanelState extends State<ChatPanel> {
                         onRemove: _removeSticker,
                       ),
                     ),
-                  // "맨 아래로" 버튼 — 늘 떠 있진 않고, 맨 아래에서 한 페이지 이상
-                  // 스크롤이 올라가 있을 때만 보인다(_onScrollUpdate 참고).
-                  if (_scrolledPastOnePage)
-                    Positioned(
-                      right: 12,
-                      // 새 메시지 알약도 같이 떠 있으면 겹치지 않도록 그 위로 띄운다.
-                      bottom: _newMessagesBelow ? 60 : 12,
-                      child: Material(
-                        elevation: 4,
-                        shape: const CircleBorder(),
-                        color: Theme.of(context).colorScheme.surface,
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: _scrollToBottom,
-                          child: const Padding(
-                            padding: EdgeInsets.all(10),
-                            child: Icon(Icons.keyboard_arrow_down),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(자동으로 내려버리지
-                  // 않는 대신) 이 알약을 띄운다. 누르면 맨 아래로 스크롤, x를 누르면
-                  // (안 읽었더라도) 그냥 닫는다.
-                  if (_newMessagesBelow)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 8,
-                      child: Center(
-                        child: Material(
-                          elevation: 4,
-                          borderRadius: BorderRadius.circular(20),
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          clipBehavior: Clip.antiAlias,
-                          child: InkWell(
-                            onTap: _scrollToBottom,
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.arrow_downward,
-                                    size: 16,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onPrimaryContainer,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '새로운 메시지가 있습니다',
-                                    style: TextStyle(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onPrimaryContainer,
-                                      fontWeight: FontWeight.w500,
+                  // "맨 아래로" 버튼 + "새로운 메시지가 있습니다" 알약. 스크롤할 때마다
+                  // 바뀌는 상태라 setState 대신 ValueNotifier로 이 부분만 다시 그린다
+                  // (_newMessagesBelow의 주석 참고 — 리스트까지 다시 빌드하면 죽는다).
+                  Positioned.fill(
+                    child: ListenableBuilder(
+                      listenable: Listenable.merge([
+                        _scrolledPastOnePage,
+                        _newMessagesBelow,
+                      ]),
+                      builder: (context, _) {
+                        final showPill = _newMessagesBelow.value;
+                        return Stack(
+                          children: [
+                            // 늘 떠 있진 않고, 맨 아래에서 한 화면 이상 스크롤이 올라가
+                            // 있을 때만 보인다(_onItemPositionsChanged 참고).
+                            if (_scrolledPastOnePage.value)
+                              Positioned(
+                                right: 12,
+                                // 알약도 같이 떠 있으면 겹치지 않게 그 위로 띄운다.
+                                bottom: showPill ? 60 : 12,
+                                child: Material(
+                                  elevation: 4,
+                                  shape: const CircleBorder(),
+                                  color: Theme.of(context).colorScheme.surface,
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InkWell(
+                                    onTap: _scrollToBottom,
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(10),
+                                      child: Icon(Icons.keyboard_arrow_down),
                                     ),
                                   ),
-                                  InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onTap: _dismissNewMessagesPill,
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(6),
-                                      child: Icon(
-                                        Icons.close,
-                                        size: 16,
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                            // 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(자동으로
+                            // 내려버리지 않는 대신) 이 알약을 띄운다. 누르면 맨 아래로
+                            // 스크롤, x를 누르면 (안 읽었더라도) 그냥 닫는다.
+                            if (showPill)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 8,
+                                child: Center(
+                                  child: Material(
+                                    elevation: 4,
+                                    borderRadius: BorderRadius.circular(20),
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primaryContainer,
+                                    clipBehavior: Clip.antiAlias,
+                                    child: InkWell(
+                                      onTap: _scrollToBottom,
+                                      child: Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          14,
+                                          8,
+                                          6,
+                                          8,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.arrow_downward,
+                                              size: 16,
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onPrimaryContainer,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '새로운 메시지가 있습니다',
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onPrimaryContainer,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                              onTap: _dismissNewMessagesPill,
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(
+                                                  6,
+                                                ),
+                                                child: Icon(
+                                                  Icons.close,
+                                                  size: 16,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onPrimaryContainer,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ],
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
-                      ),
+                          ],
+                        );
+                      },
                     ),
+                  ),
                 ],
               );
             },

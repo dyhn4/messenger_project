@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, lt, ne, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { messageComments } from '../schema.js';
 
@@ -14,6 +14,22 @@ export function listCommentsForMessages(messageIds) {
     .select()
     .from(messageComments)
     .where(inArray(messageComments.messageId, messageIds))
+    .orderBy(asc(messageComments.createdAt));
+}
+
+/** 방의 [since, before) 시간대에 달린 댓글 전부(부모가 뭐든 상관없이).
+ *
+ * 댓글은 자기가 달린 시각 위치에 타임라인으로 끼워 넣어 보여주는데(클라이언트의 합성 항목),
+ * 옛날 메시지에 오늘 댓글을 달면 "부모 메시지는 창 밖(오래됨) + 댓글은 창 안(최근)"이 된다.
+ * 그럼 클라이언트가 부모를 못 찾아 댓글 카드를 통째로 안 그린다 — 그런 부모를 추가로
+ * 끌어오기 위해 쓴다(rooms.js의 /rooms/:id/messages 참고). */
+export function listCommentsInRoomBetween(roomId, since, before) {
+  const conditions = [eq(messageComments.roomId, roomId), gte(messageComments.createdAt, since)];
+  if (before) conditions.push(lt(messageComments.createdAt, before));
+  return db
+    .select()
+    .from(messageComments)
+    .where(and(...conditions))
     .orderBy(asc(messageComments.createdAt));
 }
 

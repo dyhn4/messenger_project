@@ -872,6 +872,7 @@ class Session extends ChangeNotifier {
       avatarUrl: sender?.avatarUrl != null
           ? resolveUrl(sender!.avatarUrl!)
           : null,
+      isSecret: room?.isSecret == true,
     );
   }
 
@@ -927,6 +928,7 @@ class Session extends ChangeNotifier {
       avatarUrl: sender?.avatarUrl != null
           ? resolveUrl(sender!.avatarUrl!)
           : null,
+      isSecret: room?.isSecret == true,
     );
   }
 

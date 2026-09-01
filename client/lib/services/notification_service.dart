@@ -25,7 +25,17 @@ import '../widgets/avatar_utils.dart' show parseHexColor;
 class NotificationService {
   final _plugin = FlutterLocalNotificationsPlugin();
 
-  Future<void> init({required void Function(String roomId) onTap}) async {
+  /// [requestPermission]을 false로 주면 권한 요청을 건너뛴다 — main.dart의 FCM 백그라운드
+  /// 핸들러(앱이 완전히 꺼진 상태에서 별도의 헤드리스 isolate로 실행됨)에서 쓰는 경로다.
+  /// 그 isolate엔 화면/Activity가 없어서 권한 요청 다이얼로그를 띄울 수 없고, 실제로
+  /// 시도하면 플러그인 내부에서 Context가 null이라 NullPointerException으로 죽는다
+  /// (앱을 완전히 종료했을 때 푸시 알림이 하나도 안 뜨던 원인이 바로 이거였다). 권한은
+  /// 이미 앱을 처음 켰을 때(메인 isolate)의 이 함수 호출에서 요청/획득돼 있으므로, 백그라운드
+  /// 경로에서는 요청 없이 그냥 알림을 그리기만 하면 된다.
+  Future<void> init({
+    required void Function(String roomId) onTap,
+    bool requestPermission = true,
+  }) async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const windows = WindowsInitializationSettings(
       appName: '메신저',
@@ -45,11 +55,22 @@ class NotificationService {
       },
     );
 
+    if (!requestPermission) return;
     await _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.requestNotificationsPermission();
+  }
+
+  /// 앱이 완전히 종료된 상태에서 알림을 눌러 새로 켜진 경우, 그 알림의 payload(roomId)를
+  /// 돌려준다. 이 경우 [init]에 넘긴 onTap 콜백은 안 불린다 — 그 콜백을 등록한 건 알림을
+  /// 눌러서 새로 뜬 이번 프로세스인데, 콜백은 "이미 실행 중이던 앱을 포그라운드로 끌어올린"
+  /// 탭에만 반응하기 때문이다. 대신 시작 시 이 메서드로 "무엇을 눌러서 켜졌는지" 직접 물어야 한다.
+  Future<String?> getLaunchPayload() async {
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details?.didNotificationLaunchApp != true) return null;
+    return details?.notificationResponse?.payload;
   }
 
   /// [avatarUrl]은 이미 절대경로로 resolve된 URL이어야 한다(Session이 resolveUrl 적용해서 넘김).

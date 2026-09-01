@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -17,6 +18,7 @@ import 'api_client.dart';
 import 'app_settings.dart';
 import 'chat_socket.dart';
 import 'device_identity.dart';
+import 'message_preview.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
 import 'room_chat_controller.dart';
@@ -89,6 +91,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _roomSub;
   StreamSubscription? _readSub;
   StreamSubscription? _favoriteSub;
+  StreamSubscription? _mutedSub;
   StreamSubscription? _commentSub;
   StreamSubscription? _messageEditedSub;
   StreamSubscription? _messageDeletedSub;
@@ -106,6 +109,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _messageExpiredSub;
   StreamSubscription? _secretRekeyProposeSub;
   StreamSubscription? _secretRekeyAckSub;
+  StreamSubscription<String>? _fcmTokenRefreshSub;
 
   /// 지금 소켓으로 연결되어 있는(온라인) 사용자 id 집합. 멤버 목록의 초록 점 표시에 쓴다.
   final Set<String> onlineUserIds = {};
@@ -382,7 +386,14 @@ class Session extends ChangeNotifier {
       socket: chatSocket,
       identity: deviceIdentity!,
     );
-    unawaited(deviceIdentity!.registerWithServer(api!));
+    // FCM 토큰 등록(_registerFcmToken)은 서버의 devices 테이블에 이 기기 행이 먼저 있어야
+    // UPDATE가 걸린다(server/src/db/queries/devices.js의 setDeviceFcmToken). 여기서
+    // registerWithServer를 fire-and-forget으로 두면, 새로 설치한 기기처럼 아직 그 행이 없는
+    // 상태에서 두 요청이 거의 동시에 나가 _registerFcmToken이 먼저 도착해버리는 경쟁 상태가
+    // 생긴다 — 이때 서버는 404를 돌려주고, _registerFcmToken은 그 실패를 조용히 삼켜서 FCM
+    // 토큰이 영영 등록되지 않는다(원인을 알기 어려운 형태로). 기기 등록만 먼저 기다린다.
+    await deviceIdentity!.registerWithServer(api!);
+    unawaited(_registerFcmToken());
 
     await chatSocket.connect(
       baseUrl: serverUrl!,
@@ -397,6 +408,12 @@ class Session extends ChangeNotifier {
       // 여기서 한 번에 방을 "최근 활동"으로 끌어올릴 수 있다 — _handleIncomingMessage는 내가
       // 보낸 경우 알림/안읽음 처리를 건너뛰지만, 방 목록 정렬은 그것과 무관하게 항상 갱신한다.
       _bumpRoomActivity(m.roomId, m.createdAt);
+      _updateRoomPreview(
+        m.roomId,
+        type: m.type,
+        text: m.text,
+        fileName: m.fileName,
+      );
       _handleIncomingMessage(m);
     });
     _roomSub?.cancel();
@@ -415,11 +432,24 @@ class Session extends ChangeNotifier {
       match.first.favorite = e.favorite;
       notifyListeners();
     });
+    _mutedSub?.cancel();
+    _mutedSub = chatSocket.mutedEvents.listen((e) {
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      match.first.muted = e.muted;
+      notifyListeners();
+    });
     _commentSub?.cancel();
     _commentSub = chatSocket.commentEvents.listen((c) async {
       await decryptCommentInPlace(_findRoom(c.roomId), c);
       _controllers[c.roomId]?.addComment(c);
       _bumpRoomActivity(c.roomId, c.createdAt);
+      _updateRoomPreview(
+        c.roomId,
+        type: c.type,
+        text: c.text,
+        fileName: c.fileName,
+      );
       _handleIncomingComment(c);
     });
     _messageEditedSub?.cancel();
@@ -527,6 +557,32 @@ class Session extends ChangeNotifier {
     });
 
     notifyListeners();
+  }
+
+  /// FCM은 안드로이드에서만 공식 지원한다(Windows는 firebase_messaging 플러그인 자체가
+  /// 없음) — 그래서 PC 앱은 지금처럼 소켓이 연결돼 있는 동안만 로컬 알림을 띄우는 방식을
+  /// 그대로 쓰고, 이 등록은 안드로이드에서만 시도한다. 실패해도(권한 거부, 오프라인 등)
+  /// 앱 사용 자체는 계속돼야 하므로 전부 조용히 무시한다 — 소켓이 붙어있는 동안은 기존
+  /// 방식으로도 알림이 정상적으로 오고, FCM은 "앱이 완전히 꺼졌을 때"를 위한 보강일 뿐이다.
+  Future<void> _registerFcmToken() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission();
+      final token = await messaging.getToken();
+      if (token != null)
+        await api!.registerFcmToken(deviceIdentity!.deviceId, token);
+
+      await _fcmTokenRefreshSub?.cancel();
+      _fcmTokenRefreshSub = messaging.onTokenRefresh.listen((newToken) {
+        api
+            ?.registerFcmToken(deviceIdentity!.deviceId, newToken)
+            .catchError((e) => debugPrint('[fcm] 토큰 갱신 등록 실패: $e'));
+      });
+    } catch (e) {
+      // 다음 로그인/토큰 갱신 때 다시 시도된다 — 그래도 원인을 눈으로 확인할 수 있게 로그는 남긴다.
+      debugPrint('[fcm] 토큰 등록 실패: $e');
+    }
   }
 
   /// 소켓의 presence:update는 "바뀐 순간부터의" 변화만 알려주므로, 지금 이미 온라인인
@@ -812,6 +868,25 @@ class Session extends ChangeNotifier {
     }
   }
 
+  /// 그룹채팅/채팅 목록 이름 아래 미리보기(room_list_screen.dart)를 새 메시지/댓글 내용으로
+  /// 갱신한다. 시스템 메시지는 제외(로그인 시 서버가 내려준 마지막 실제 대화 미리보기를 계속
+  /// 보여준다) — rooms.js의 toRoomDto가 로그인 시점 값을 계산하는 규칙과 맞춘다.
+  void _updateRoomPreview(
+    String roomId, {
+    required MessageType type,
+    String? text,
+    String? fileName,
+  }) {
+    if (type == MessageType.system || type == MessageType.comment) return;
+    final match = rooms.where((r) => r.id == roomId);
+    if (match.isEmpty) return;
+    final room = match.first;
+    room.lastMessagePreview = room.isSecret
+        ? _secretPreviewPlaceholder
+        : formatMessagePreview(type: type, text: text, fileName: fileName);
+    notifyListeners();
+  }
+
   /// 새 메시지가 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께 처리한다.
   /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다.
   void _handleIncomingMessage(Message m) {
@@ -829,6 +904,8 @@ class Session extends ChangeNotifier {
     }
 
     final room = match.isEmpty ? null : match.first;
+    // 알림 끄기는 안읽음 뱃지(이미 위에서 증가시켰다)는 그대로 두고, 알림(배너/토스트)만 막는다.
+    if (room?.muted == true) return;
     final roomTag = switch (room?.type) {
       null => null,
       RoomType.dm => '1:1',
@@ -890,6 +967,8 @@ class Session extends ChangeNotifier {
     }
 
     final room = match.isEmpty ? null : match.first;
+    // 알림 끄기는 안읽음 뱃지(이미 위에서 증가시켰다)는 그대로 두고, 알림(배너/토스트)만 막는다.
+    if (room?.muted == true) return;
     final roomTag = switch (room?.type) {
       null => null,
       RoomType.dm => '1:1',
@@ -940,7 +1019,9 @@ class Session extends ChangeNotifier {
       // 추적 중이던 값을 유지한다.
       incoming.unreadCount = rooms[i].unreadCount;
       incoming.favorite = rooms[i].favorite;
+      incoming.muted = rooms[i].muted;
       incoming.lastActivityAt = rooms[i].lastActivityAt;
+      incoming.lastMessagePreview = rooms[i].lastMessagePreview;
       rooms[i] = incoming;
     } else {
       rooms.add(incoming);
@@ -958,6 +1039,19 @@ class Session extends ChangeNotifier {
       await api!.setFavorite(room.id, next);
     } catch (_) {
       room.favorite = !next;
+      notifyListeners();
+    }
+  }
+
+  /// 알림 끄기를 켜거나 끈다(toggleFavorite와 동일한 낙관적 갱신 패턴).
+  Future<void> toggleMuted(Room room) async {
+    final next = !room.muted;
+    room.muted = next;
+    notifyListeners();
+    try {
+      await api!.setMuted(room.id, next);
+    } catch (_) {
+      room.muted = !next;
       notifyListeners();
     }
   }
@@ -1086,6 +1180,16 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // 인증이 아직 유효한 동안(아래에서 token을 지우기 전) 이 기기의 FCM 토큰을 서버에서
+    // 지워둔다 — 안 그러면 로그아웃한 뒤에도 이 기기로 그 계정 알림이 계속 온다.
+    if (Platform.isAndroid && deviceIdentity != null && api != null) {
+      try {
+        await api!.registerFcmToken(deviceIdentity!.deviceId, null);
+      } catch (_) {
+        // 오프라인 등으로 실패해도 로그아웃 자체는 계속 진행한다.
+      }
+    }
+    await _fcmTokenRefreshSub?.cancel();
     await _prefs.remove(_kToken);
     await _prefs.remove(_kRefreshToken);
     await _prefs.remove(_kUserId);
@@ -1094,6 +1198,7 @@ class Session extends ChangeNotifier {
     await _roomSub?.cancel();
     await _readSub?.cancel();
     await _favoriteSub?.cancel();
+    await _mutedSub?.cancel();
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
     await _messageDeletedSub?.cancel();

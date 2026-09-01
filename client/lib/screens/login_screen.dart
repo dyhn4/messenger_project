@@ -96,170 +96,192 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _isRegister ? '회원가입' : '로그인',
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  TextField(
-                    controller: _username,
-                    decoration: const InputDecoration(
-                      labelText: '아이디',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  if (_isRegister) ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _name,
-                      decoration: const InputDecoration(
-                        labelText: '이름',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _email,
-                      decoration: const InputDecoration(
-                        labelText: '이메일',
-                        hintText: '아이디/비밀번호 찾기에 사용됩니다',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _password,
-                    decoration: const InputDecoration(
-                      labelText: '비밀번호',
-                      border: OutlineInputBorder(),
-                    ),
-                    obscureText: true,
-                    onSubmitted: (_) => _submit(),
-                  ),
-                  if (!_isRegister) ...[
-                    const SizedBox(height: 8),
-                    Wrap(
-                      alignment: WrapAlignment.spaceBetween,
-                      runSpacing: 4,
-                      children: [
-                        Wrap(
-                          spacing: 4,
-                          children: [
-                            _CheckboxLabel(
-                              label: '아이디 기억하기',
-                              value: _rememberUsername,
-                              onChanged: (v) =>
-                                  setState(() => _rememberUsername = v),
-                            ),
-                            _CheckboxLabel(
-                              label: '로그인 상태 유지',
-                              value: _keepSignedIn,
-                              onChanged: (v) =>
-                                  setState(() => _keepSignedIn = v),
-                            ),
-                          ],
+              // 카드 배경이 항상 흰색으로 고정돼 있는데(위 decoration), 시스템이 다크 모드면
+              // 글자/테두리 색은 여전히 다크 테마(밝은 색)를 그대로 물려받아서 흰 배경 위에
+              // 흐릿하게(뿌옇게) 보이는 문제가 있었다 — 로그인 카드 안쪽만 항상 라이트 테마로
+              // 고정해서, 시스템 다크 모드와 무관하게 대비가 항상 확보되게 한다.
+              child: Theme(
+                data: ThemeData(
+                  colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+                  useMaterial3: true,
+                ),
+                // Theme만으로는 TextButton/TextField처럼 스스로 Theme.of(context)를 읽는
+                // 위젯들만 바뀐다 — 색을 안 정해준 평범한 Text("로그인" 제목)는 이 Theme
+                // 바깥(Scaffold)에서 이미 정해진 DefaultTextStyle을 그대로 물려받아서 여전히
+                // 흐릿하게 남아있었다. Material을 한 겹 더 두면 그 DefaultTextStyle을 지금
+                // Theme 기준으로 다시 잡아줘서 제목까지 포함해 전부 대비가 확보된다.
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _isRegister ? '회원가입' : '로그인',
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
                         ),
+                      ),
+                      const SizedBox(height: 24),
+                      TextField(
+                        controller: _username,
+                        decoration: const InputDecoration(
+                          labelText: '아이디',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      if (_isRegister) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _name,
+                          decoration: const InputDecoration(
+                            labelText: '이름',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _email,
+                          decoration: const InputDecoration(
+                            labelText: '이메일',
+                            hintText: '아이디/비밀번호 찾기에 사용됩니다',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.emailAddress,
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _password,
+                        decoration: const InputDecoration(
+                          labelText: '비밀번호',
+                          border: OutlineInputBorder(),
+                        ),
+                        obscureText: true,
+                        onSubmitted: (_) => _submit(),
+                      ),
+                      if (!_isRegister) ...[
+                        const SizedBox(height: 8),
                         Wrap(
+                          alignment: WrapAlignment.spaceBetween,
+                          runSpacing: 4,
                           children: [
-                            TextButton(
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
+                            Wrap(
+                              spacing: 4,
+                              children: [
+                                _CheckboxLabel(
+                                  label: '아이디 기억하기',
+                                  value: _rememberUsername,
+                                  onChanged: (v) =>
+                                      setState(() => _rememberUsername = v),
                                 ),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      FindIdScreen(session: widget.session),
+                                _CheckboxLabel(
+                                  label: '로그인 상태 유지',
+                                  value: _keepSignedIn,
+                                  onChanged: (v) =>
+                                      setState(() => _keepSignedIn = v),
                                 ),
-                              ),
-                              child: const Text(
-                                '아이디 찾기',
-                                style: TextStyle(fontSize: 12),
-                              ),
+                              ],
                             ),
-                            TextButton(
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                ),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => FindPasswordScreen(
-                                    session: widget.session,
+                            Wrap(
+                              children: [
+                                TextButton(
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                    ),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          FindIdScreen(session: widget.session),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    '아이디 찾기',
+                                    style: TextStyle(fontSize: 12),
                                   ),
                                 ),
-                              ),
-                              child: const Text(
-                                '비밀번호 찾기',
-                                style: TextStyle(fontSize: 12),
-                              ),
+                                TextButton(
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                    ),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  onPressed: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => FindPasswordScreen(
+                                        session: widget.session,
+                                      ),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    '비밀번호 찾기',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ],
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _loginGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    onPressed: _loading ? null : _submit,
-                    child: _loading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Text(_isRegister ? '가입하기' : '로그인'),
-                  ),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: TextButton(
-                      onPressed: () =>
-                          setState(() => _isRegister = !_isRegister),
-                      child: Text(
-                        _isRegister ? '이미 계정이 있으신가요? 로그인' : '계정이 없으신가요? 회원가입',
+                      const SizedBox(height: 20),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _loginGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        onPressed: _loading ? null : _submit,
+                        child: _loading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(_isRegister ? '가입하기' : '로그인'),
                       ),
-                    ),
-                  ),
-                  Center(
-                    child: TextButton(
-                      onPressed: () => showDialog(
-                        context: context,
-                        builder: (_) =>
-                            _ServerAddressDialog(session: widget.session),
-                      ),
-                      child: Text(
-                        '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
+                      const SizedBox(height: 16),
+                      Center(
+                        child: TextButton(
+                          onPressed: () =>
+                              setState(() => _isRegister = !_isRegister),
+                          child: Text(
+                            _isRegister
+                                ? '이미 계정이 있으신가요? 로그인'
+                                : '계정이 없으신가요? 회원가입',
+                          ),
                         ),
                       ),
-                    ),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => showDialog(
+                            context: context,
+                            builder: (_) =>
+                                _ServerAddressDialog(session: widget.session),
+                          ),
+                          child: Text(
+                            '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

@@ -11,6 +11,7 @@ import '../models/room.dart';
 import '../services/session.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
+import 'date_picker_popup.dart';
 import 'indexed_scrollbar.dart';
 import 'message_bubble.dart';
 import 'message_comments_card.dart';
@@ -56,6 +57,7 @@ class _ChatPanelState extends State<ChatPanel> {
   Timer? _hideTimer;
   String? _highlightedMessageId;
   Timer? _highlightTimer;
+  bool _showDatePicker = false;
 
   /// 이모티콘 패널/미리보기 상태 — 메시지 목록 위에 떠 있는 오버레이로 그리므로(카카오톡처럼
   /// 입력창을 밀어내지 않게) 입력창(ChatInputBar)이 아니라 여기서 들고 있는다.
@@ -289,6 +291,72 @@ class _ChatPanelState extends State<ChatPanel> {
     });
   }
 
+  /// 달력을 여는 동안은 _hideTimer를 꺼서, 달력을 보는 사이에 예전 스크롤 타이머가 만료돼
+  /// 알약(과 그 위에 뜬 달력)이 통째로 사라지는 일이 없게 한다. 닫을 때는 타이머를 다시
+  /// 걸어서(스크롤 없이 닫아도) 알약이 잠시 뒤 정상적으로 사라지게 한다.
+  void _openDatePicker() {
+    _hideTimer?.cancel();
+    setState(() => _showDatePicker = true);
+  }
+
+  /// DateDivider의 꺽쇠를 눌렀을 때 — FloatingDatePill의 꺽쇠와 동일하게 동작하되, 알약이
+  /// 아직 안 떠 있었을 수도 있으니(스크롤 없이 바로 눌렀을 때) 그 구분선의 날짜로 알약
+  /// 자체를 세팅한 뒤 달력을 연다.
+  void _openDatePickerFor(DateTime date) {
+    _hideTimer?.cancel();
+    setState(() {
+      _floatingDate = date;
+      _showDatePicker = true;
+    });
+  }
+
+  void _closeDatePicker() {
+    setState(() => _showDatePicker = false);
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _floatingDate = null);
+    });
+  }
+
+  void _toggleDatePicker() {
+    if (_showDatePicker) {
+      _closeDatePicker();
+    } else {
+      _openDatePicker();
+    }
+  }
+
+  /// 날짜 알약의 달력(DatePickerPopup)에서 날짜를 고르면 호출된다. 그 날짜가 아직 로드된
+  /// 범위 밖이면 controller.ensureDateLoaded가 과거 페이지를 이어서 불러오고, 그 날짜에
+  /// 메시지가 아예 없으면 null을 돌려주므로 그때는 스크롤 없이 안내만 한다.
+  Future<void> _jumpToDate(DateTime date) async {
+    _closeDatePicker();
+    final controller = widget.session.controllerFor(widget.room);
+    final target = await controller.ensureDateLoaded(date);
+    if (!mounted) return;
+    if (target == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('해당 날짜에 메시지가 없습니다.')));
+      return;
+    }
+
+    final msgs = controller.messages;
+    final idx = msgs.indexWhere((m) => m.id == target.id);
+    if (idx == -1) return;
+    final itemIndex = msgs.length - 1 - idx;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScrollController.isAttached) return;
+      _itemScrollController.scrollTo(
+        index: itemIndex,
+        alignment: 0.05,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
   @override
   void dispose() {
     // 방 A → 방 B로 바로 전환될 때 위젯 재조정 순서에 따라 dispose(A)가
@@ -383,36 +451,37 @@ class _ChatPanelState extends State<ChatPanel> {
     }
   }
 
-  void _onScrollUpdate(ScrollUpdateNotification notification) {
-    final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
-    if (listBox == null) return;
-    final top = listBox.localToGlobal(Offset.zero).dy;
+  /// 날짜 구분선이 근처에 있을 때만 뜨던 예전 방식(구분선 GlobalKey 히트테스트)은 구분선에서
+  /// 멀어지면(=같은 날짜 메시지를 계속 스크롤하는 중) 더 이상 아무 구분선도 안 걸려서 알약이
+  /// 꺼져버리는 문제가 있었다. 지금은 뷰포트 맨 위에 있는 항목 자체의 날짜를 매번 직접
+  /// 구하므로, 구분선과의 거리와 무관하게 스크롤하는 동안 항상 지금 보는 날짜가 뜬다.
+  void _onScrollUpdate(
+    ScrollUpdateNotification notification,
+    List<Message> msgs,
+  ) {
+    if (msgs.isEmpty) return;
+    final positions = _itemPositionsListener.itemPositions.value;
+    if (positions.isEmpty) return;
 
-    DateTime? found;
-    var bestDy = double.negativeInfinity;
-    for (final entry in _dividerKeys.entries) {
-      final box = entry.value.currentContext?.findRenderObject() as RenderBox?;
-      if (box == null) continue;
-      final dy = box.localToGlobal(Offset.zero).dy;
-      // 뷰포트 상단을 막 지나간(또는 아직 상단 근처에 있는) 가장 최근 구분선을 찾는다.
-      if (dy <= top + 40 && dy > bestDy) {
-        bestDy = dy;
-        final parts = entry.key.split('-');
-        found = DateTime(
-          int.parse(parts[0]),
-          int.parse(parts[1]),
-          int.parse(parts[2]),
-        );
-      }
+    // reverse:true라 인덱스가 클수록(오래된 메시지일수록) 위쪽에 있다 — 뷰포트 맨 위(leading
+    // edge가 0에 가장 가까움)에 있는 항목을 찾는다.
+    var top = positions.first;
+    for (final p in positions) {
+      if (p.itemLeadingEdge < top.itemLeadingEdge) top = p;
     }
+    if (top.index < 0 || top.index >= msgs.length) return;
+    final m = msgs[msgs.length - 1 - top.index];
+    final found = DateTime(
+      m.createdAt.year,
+      m.createdAt.month,
+      m.createdAt.day,
+    );
 
-    if (found != null) {
-      setState(() => _floatingDate = found);
-      _hideTimer?.cancel();
-      _hideTimer = Timer(const Duration(milliseconds: 1200), () {
-        if (mounted) setState(() => _floatingDate = null);
-      });
-    }
+    setState(() => _floatingDate = found);
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _floatingDate = null);
+    });
   }
 
   @override
@@ -447,7 +516,7 @@ class _ChatPanelState extends State<ChatPanel> {
                   NotificationListener<ScrollNotification>(
                     onNotification: (notification) {
                       if (notification is ScrollUpdateNotification) {
-                        _onScrollUpdate(notification);
+                        _onScrollUpdate(notification, msgs);
                       } else if (notification is ScrollEndNotification) {
                         _maybeLoadOlderMessages();
                       }
@@ -577,7 +646,11 @@ class _ChatPanelState extends State<ChatPanel> {
                               _dateKey(m.createdAt),
                               () => GlobalKey(),
                             );
-                            divider = DateDivider(key: key, date: m.createdAt);
+                            divider = DateDivider(
+                              key: key,
+                              date: m.createdAt,
+                              onPickDate: () => _openDatePickerFor(m.createdAt),
+                            );
                           }
 
                           final isFirstUnread =
@@ -605,7 +678,24 @@ class _ChatPanelState extends State<ChatPanel> {
                       left: 0,
                       right: 0,
                       child: Center(
-                        child: FloatingDatePill(date: _floatingDate!),
+                        child: FloatingDatePill(
+                          date: _floatingDate!,
+                          onPickDate: _toggleDatePicker,
+                        ),
+                      ),
+                    ),
+                  if (_showDatePicker && _floatingDate != null)
+                    Positioned(
+                      top: 48,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: DatePickerPopup(
+                          initialMonth: _floatingDate!,
+                          selectedDate: _floatingDate,
+                          onClose: _closeDatePicker,
+                          onDateSelected: _jumpToDate,
+                        ),
                       ),
                     ),
                   // 위로 스크롤해서 과거 메시지를 더 불러오는 동안(loadOlderMessages) 잠깐

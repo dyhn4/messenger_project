@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { findDevicePublicInfo, listDevicesForUser, revokeDevice, upsertDevice } from './db/queries/devices.js';
+import {
+  findDevicePublicInfo,
+  listDevicesForUser,
+  revokeDevice,
+  setDeviceFcmToken,
+  upsertDevice,
+} from './db/queries/devices.js';
 
 function toDeviceDto(d) {
   return {
@@ -46,6 +52,18 @@ export function createDevicesRouter() {
       identityPublicKey: device.identityPublicKey,
       signingPublicKey: device.signingPublicKey,
     });
+  });
+
+  // 앱이 완전히 꺼져도 알림을 받을 수 있게(FCM). null을 보내면(로그아웃 등) 토큰을 지워서
+  // 더 이상 이 기기로 푸시를 보내지 않는다. 안드로이드 전용 — Windows 클라이언트는 호출 안 함.
+  router.patch('/devices/:deviceId/fcm-token', async (req, res) => {
+    const token = req.body?.token;
+    if (token !== null && typeof token !== 'string') {
+      return res.status(400).json({ error: 'token은 문자열 또는 null이어야 합니다.' });
+    }
+    const device = await setDeviceFcmToken(req.params.deviceId, req.user.sub, token);
+    if (!device) return res.status(404).json({ error: '기기를 찾을 수 없습니다.' });
+    res.json({ ok: true });
   });
 
   router.delete('/devices/:deviceId', async (req, res) => {

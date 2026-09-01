@@ -511,6 +511,12 @@ class ApiClient {
     });
   }
 
+  /// FCM 토큰을 등록/갱신한다(안드로이드 전용). null을 보내면(로그아웃 등) 서버가 토큰을
+  /// 지워서 더 이상 이 기기로 푸시를 안 보낸다.
+  Future<void> registerFcmToken(String deviceId, String? token) async {
+    await _patch('/api/devices/$deviceId/fcm-token', {'token': token});
+  }
+
   Future<Room> startSecretChat({
     required String targetUserId,
     required String deviceId,
@@ -575,6 +581,10 @@ class ApiClient {
 
   Future<void> setFavorite(String roomId, bool favorite) async {
     await _post('/api/rooms/$roomId/favorite', {'favorite': favorite});
+  }
+
+  Future<void> setMuted(String roomId, bool muted) async {
+    await _post('/api/rooms/$roomId/muted', {'muted': muted});
   }
 
   /// [text] 없이 첨부만(이미지/파일) 다는 댓글도 가능하다 — 그때는 [type]과 [fileUrl] 등을 채워서 호출.

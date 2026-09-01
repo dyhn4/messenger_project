@@ -82,6 +82,16 @@ class Message {
   /// growable list여야 한다.
   final List<Comment> comments;
 
+  /// "메시지 공유"로 이 메시지에 인용된 원본의 스냅샷(message_share_screen.dart) — 원본이 다른
+  /// 방일 수 있어 실시간 조회 대신 공유 당시 내용을 그대로 들고 있다. 인용이 아니면 둘 다 null.
+  final String? quotedSenderName;
+  final String? quotedPreview;
+
+  /// "메시지 전달"로 이 메시지가 생겼고, 전달 화면의 "포함" 토글이 켜져 있었으면 원본 발신자/
+  /// 시각(message_forward_screen.dart). 토글이 꺼져 있었거나 전달된 메시지가 아니면 둘 다 null.
+  final String? forwardedFromSenderName;
+  final DateTime? forwardedFromCreatedAt;
+
   Message({
     required this.id,
     required this.roomId,
@@ -106,6 +116,10 @@ class Message {
     this.expiresAt,
     this.asComment,
     this.outOfWindow = false,
+    this.quotedSenderName,
+    this.quotedPreview,
+    this.forwardedFromSenderName,
+    this.forwardedFromCreatedAt,
     List<Comment>? comments,
   }) : comments = comments ?? [];
 
@@ -143,6 +157,14 @@ class Message {
       comments: (json['comments'] as List?)
           ?.map((e) => Comment.fromJson(e as Map<String, dynamic>))
           .toList(),
+      quotedSenderName: json['quotedSenderName'] as String?,
+      quotedPreview: json['quotedPreview'] as String?,
+      forwardedFromSenderName: json['forwardedFromSenderName'] as String?,
+      forwardedFromCreatedAt: (json['forwardedFromCreatedAt'] as num?) != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (json['forwardedFromCreatedAt'] as num).toInt(),
+            )
+          : null,
     );
   }
 

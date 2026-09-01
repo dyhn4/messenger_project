@@ -26,6 +26,10 @@ export function toMessageDto(m) {
     // 메시지는 항상 둘 다 null이다(읽음 추적 자체를 안 하므로).
     readAt: m.readAt ? new Date(m.readAt).getTime() : null,
     expiresAt: m.expiresAt ? new Date(m.expiresAt).getTime() : null,
+    quotedSenderName: m.quotedSenderName ?? null,
+    quotedPreview: m.quotedPreview ?? null,
+    forwardedFromSenderName: m.forwardedFromSenderName ?? null,
+    forwardedFromCreatedAt: m.forwardedFromCreatedAt ? new Date(m.forwardedFromCreatedAt).getTime() : null,
   };
 }
 

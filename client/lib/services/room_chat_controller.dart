@@ -421,6 +421,70 @@ class RoomChatController extends ChangeNotifier {
     }
   }
 
+  Message? _firstMessageOn(DateTime date) {
+    for (final m in messages) {
+      if (m.createdAt.year == date.year &&
+          m.createdAt.month == date.month &&
+          m.createdAt.day == date.day) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  /// 날짜 알약의 달력에서 특정 날짜를 골랐을 때 쓴다. ensureMessageLoaded와 같은 방식
+  /// (before 커서로 과거 페이지를 이어서 요청)으로 그 날짜가 로드될 때까지 과거로 훑고,
+  /// 그 날짜의 가장 이른(=구분선이 그려지는) 메시지를 돌려준다. 그 날짜에 메시지가 아예
+  /// 없으면(주말이라 대화가 없었다거나) null — 호출부가 안내만 하고 스크롤은 하지 않는다.
+  Future<Message?> ensureDateLoaded(DateTime date) async {
+    final existing = _firstMessageOn(date);
+    if (existing != null) return existing;
+    if (messages.isNotEmpty) {
+      final oldestLoadedDay = DateTime(
+        messages.first.createdAt.year,
+        messages.first.createdAt.month,
+        messages.first.createdAt.day,
+      );
+      // 이미 로딩된 범위가 그 날짜보다 과거까지 갔는데도 없으면, 그 날짜엔 메시지가 없는 것.
+      if (!oldestLoadedDay.isAfter(date)) return null;
+    }
+
+    const pageSize = 200;
+    const maxPages = 50; // 날짜 이동은 검색보다 훨씬 과거로도 갈 수 있어 한도를 넉넉히 준다.
+    try {
+      var cursor = _historyCursor;
+      for (var i = 0; i < maxPages; i++) {
+        final history = await _session.api!.fetchRoomMessages(
+          room.id,
+          limit: pageSize,
+          before: cursor,
+        );
+        if (history.isEmpty) break;
+        await _session.decryptHistory(room, history);
+        if (_mergeHistory(history)) notifyListeners();
+        _advanceHistoryCursor(history);
+        final inWindow = history.where((m) => !m.outOfWindow).toList();
+        final found = _firstMessageOn(date);
+        if (found != null) return found;
+        if (inWindow.length < pageSize) {
+          hasMoreHistory = false;
+          break;
+        }
+        final oldestPageDay = DateTime(
+          inWindow.first.createdAt.year,
+          inWindow.first.createdAt.month,
+          inWindow.first.createdAt.day,
+        );
+        // 이 페이지가 목표 날짜를 이미 지나쳤는데도 못 찾았으면 그 날짜엔 메시지가 없는 것.
+        if (!oldestPageDay.isAfter(date)) break;
+        cursor = inWindow.first.createdAt;
+      }
+    } catch (_) {
+      // 실패해도 조용히 무시 — 호출부가 "메시지가 없습니다"와 동일하게 처리한다.
+    }
+    return _firstMessageOn(date);
+  }
+
   void markReadNow() {
     _session.chatSocket.markRead(room.id);
     if (!room.isSecret) return;

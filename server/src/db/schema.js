@@ -62,6 +62,8 @@ export const roomMembers = pgTable(
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
     // 즐겨찾기는 그 사람 혼자만의 표시 설정이라 방 자체가 아니라 멤버십에 붙는다.
     favorite: boolean('favorite').notNull().default(false),
+    // 알림 끄기도 마찬가지로 개인 설정 — 이 방을 뮤트한 멤버에게는 FCM 푸시를 안 보낸다(push.js).
+    muted: boolean('muted').notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.roomId, t.userId] }), index('room_members_user_id_idx').on(t.userId)],
 );
@@ -98,6 +100,16 @@ export const messages = pgTable(
     // 항상 멤버가 2명뿐이라 별도 message_reads 조인 테이블 없이 컬럼 하나로 충분하다.
     readAt: timestamp('read_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
+    // "메시지 공유"(다른 방으로 원본을 인용) — 원본이 이 메시지와 다른 방(멤버가 아닐 수도
+    // 있음)에 있을 수 있어 실시간 조인 대신 공유 당시의 스냅샷을 저장한다. 원본이 나중에
+    // 수정/삭제돼도 공유된 인용문은 그대로 남고, 방을 넘나드는 권한 문제도 없다.
+    quotedSenderName: text('quoted_sender_name'),
+    quotedPreview: text('quoted_preview'),
+    // "메시지 전달" — 전달 화면의 "포함" 토글을 켠 경우에만 채워진다(끄면 일반 메시지와
+    // 완전히 동일해진다). 내용(text/fileUrl 등)은 별도 스냅샷 없이 이 메시지 자신의 필드에
+    // 원본을 그대로 복사해서 넣는다(전달 전에 편집 가능).
+    forwardedFromSenderName: text('forwarded_from_sender_name'),
+    forwardedFromCreatedAt: timestamp('forwarded_from_created_at', { withTimezone: true }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
@@ -155,6 +167,9 @@ export const devices = pgTable(
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     // 기기를 폐기(로그아웃/분실 신고 등)하면 이후 소켓 인증/비밀 대화 기능에서 거부된다.
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    // FCM 푸시 토큰(안드로이드 전용 — Windows는 FCM을 공식 지원하지 않아 항상 null).
+    // 앱이 완전히 종료된 상태에서도 새 메시지를 알리기 위한 용도로, 소켓 연결이 없을 때만 쓴다.
+    fcmToken: text('fcm_token'),
   },
   (t) => [index('devices_user_id_idx').on(t.userId)],
 );

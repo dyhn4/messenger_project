@@ -10,7 +10,11 @@ String _formatDate(DateTime date) =>
 /// 필요 없도록 요일을 직접 매핑한다.
 class DateDivider extends StatelessWidget {
   final DateTime date;
-  const DateDivider({super.key, required this.date});
+
+  /// 꺽쇠를 누르면 호출된다 — FloatingDatePill의 꺽쇠와 동일하게, 이 날짜를 기준으로 달력을
+  /// 연다(chat_panel.dart의 _openDatePickerFor 참고). null이면(안 씀) 그냥 장식용 꺽쇠.
+  final VoidCallback? onPickDate;
+  const DateDivider({super.key, required this.date, this.onPickDate});
 
   @override
   Widget build(BuildContext context) {
@@ -22,21 +26,28 @@ class DateDivider extends StatelessWidget {
           const Divider(),
           Container(
             color: Theme.of(context).scaffoldBackgroundColor,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatDate(date),
-                  style: Theme.of(context).textTheme.labelMedium,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: onPickDate,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _formatDate(date),
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 16,
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 2),
-                Icon(
-                  Icons.keyboard_arrow_down,
-                  size: 16,
-                  color: Theme.of(context).hintColor,
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -45,10 +56,13 @@ class DateDivider extends StatelessWidget {
   }
 }
 
-/// 스크롤 중 화면 상단에 잠깐 떴다 사라지는 "지금 보고 있는 날짜" 토스트.
+/// 스크롤 중 화면 상단에 잠깐 떴다 사라지는 "지금 보고 있는 날짜" 토스트. 오른쪽 꺽쇠를
+/// 누르면(onPickDate) 달력을 열어 원하는 날짜로 바로 이동할 수 있다(chat_panel.dart의
+/// _showDatePicker/DatePickerPopup 참고).
 class FloatingDatePill extends StatelessWidget {
   final DateTime date;
-  const FloatingDatePill({super.key, required this.date});
+  final VoidCallback? onPickDate;
+  const FloatingDatePill({super.key, required this.date, this.onPickDate});
 
   @override
   Widget build(BuildContext context) {
@@ -56,11 +70,26 @@ class FloatingDatePill extends StatelessWidget {
       elevation: 3,
       borderRadius: BorderRadius.circular(14),
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Text(
-          _formatDate(date),
-          style: Theme.of(context).textTheme.labelMedium,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onPickDate,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _formatDate(date),
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                Icons.keyboard_arrow_down,
+                size: 16,
+                color: Theme.of(context).hintColor,
+              ),
+            ],
+          ),
         ),
       ),
     );

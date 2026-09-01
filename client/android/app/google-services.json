@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "230232031652",
+    "project_id": "teamtalk-1a021",
+    "storage_bucket": "teamtalk-1a021.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:230232031652:android:a9b44e229767c48f678131",
+        "android_client_info": {
+          "package_name": "com.teamtalk.messenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKy4ph-32ZK8GwsO3C3T3aBgPUhpDs5WM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { verifySocketToken } from './auth.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { insertMessage, markMessageRead } from './db/queries/messages.js';
-import { findRoomById, isRoomMember, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
+import { findRoomById, isRoomMember, listRoomMemberIds, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
 import { markConnected, markDisconnected } from './presence.js';
+import { notifyOfflineMembers, roomTagFor } from './push.js';
+import { resolveRawUrl } from './upload.js';
 
 /** 소켓 연결 시 JWT를 확인하고, 연결된 이후의 채팅 이벤트를 처리합니다. */
 export function registerSocket(io) {
@@ -42,7 +44,10 @@ export function registerSocket(io) {
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
     socket.join(`user:${socket.data.userId}`);
 
-    // payload: { roomId, type: 'text'|'image'|'file', text?, fileUrl?, fileName?, fileSize?, mimeType?, thumbnailUrl? }
+    // payload: { roomId, type: 'text'|'image'|'file', text?, fileUrl?, fileName?, fileSize?, mimeType?, thumbnailUrl?,
+    //   quotedSenderName?, quotedPreview?, forwardedFromSenderName?, forwardedFromCreatedAt? }
+    // (quoted*는 "메시지 공유", forwardedFrom*는 "메시지 전달"에서 쓴다 — room_list_screen.dart의
+    // 메시지 롱프레스 메뉴, message_share_screen.dart/message_forward_screen.dart 참고.)
     socket.on('message:send', async (payload, ack) => {
       if (!payload || typeof payload !== 'object') return;
 
@@ -54,6 +59,14 @@ export function registerSocket(io) {
 
       const sender = await findUserById(socket.data.userId);
 
+      // fileUrl/thumbnailUrl이 서명된 /files/<token> 형태로 오면(메시지 전달 — 클라이언트는
+      // 원본이 아니라 서명된 다운로드 URL만 갖고 있다) 원본 상대경로로 되돌린다. 일반적인
+      // 새 업로드는 이미 원본 경로라 그대로 통과한다(resolveRawUrl 참고).
+      const fileUrl =
+        typeof payload.fileUrl === 'string' ? resolveRawUrl(payload.fileUrl) : null;
+      const thumbnailUrl =
+        typeof payload.thumbnailUrl === 'string' ? resolveRawUrl(payload.thumbnailUrl) : null;
+
       const message = await insertMessage({
         id: randomUUID(),
         roomId: room.id,
@@ -61,11 +74,17 @@ export function registerSocket(io) {
         senderName: sender?.name ?? sender?.username ?? socket.data.username,
         type: ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
         text: typeof payload.text === 'string' ? payload.text : null,
-        fileUrl: typeof payload.fileUrl === 'string' ? payload.fileUrl : null, // 원본 상대경로 그대로 저장.
+        fileUrl,
         fileName: typeof payload.fileName === 'string' ? payload.fileName : null,
         fileSize: typeof payload.fileSize === 'number' ? payload.fileSize : null,
         mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : null,
-        thumbnailUrl: typeof payload.thumbnailUrl === 'string' ? payload.thumbnailUrl : null,
+        thumbnailUrl,
+        quotedSenderName: typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
+        quotedPreview: typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
+        forwardedFromSenderName:
+          typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
+        forwardedFromCreatedAt:
+          typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
       });
 
       // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서
@@ -73,6 +92,22 @@ export function registerSocket(io) {
       const broadcastMessage = toMessageDto(message);
       io.to(room.id).emit('message:new', broadcastMessage);
       ack?.({ ok: true, message: broadcastMessage });
+
+      // 응답을 기다리게 하지 않도록 ack 이후 백그라운드로 보낸다 — 실패해도(토큰 만료 등)
+      // notifyOfflineMembers 내부에서 개별적으로 처리되고 메시지 전송 자체엔 영향 없다.
+      listRoomMemberIds(room.id)
+        .then((memberIds) =>
+          notifyOfflineMembers({
+            memberIds,
+            senderId: socket.data.userId,
+            senderName: message.senderName,
+            room,
+            entry: message,
+            roomTag: roomTagFor(room),
+            kind: 'message',
+          }),
+        )
+        .catch((err) => console.error('[push] message:send 알림 실패:', err?.message ?? err));
     });
 
     // payload: { roomId } — 지금 이 방을 보고 있다는 뜻. 다른 멤버들이 안읽음 카운터를 갱신할 수 있도록 브로드캐스트한다.

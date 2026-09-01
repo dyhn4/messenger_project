@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { roomMembers, rooms, messages } from '../schema.js';
 
@@ -25,6 +25,18 @@ export async function getLastMessageAt(roomId) {
     .orderBy(desc(messages.createdAt))
     .limit(1);
   return row?.createdAt ?? null;
+}
+
+/** 방 목록 미리보기(이름 아래 줄)용 — 가장 최근의 지워지지 않은 메시지 한 건. 소프트 삭제된
+ * 메시지는 건너뛰고 그 이전 걸 찾는다(rooms.js의 toRoomDto, push.js의 previewFor 참고). */
+export async function getLastMessageForPreview(roomId) {
+  const [row] = await db
+    .select({ type: messages.type, text: messages.text, fileName: messages.fileName, createdAt: messages.createdAt })
+    .from(messages)
+    .where(and(eq(messages.roomId, roomId), isNull(messages.deletedAt)))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function updateMessageText(id, text) {

@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/chat_screen.dart';
@@ -9,6 +13,32 @@ import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
 
+/// 앱이 완전히 종료된 상태에서 FCM이 도착하면 별도의(=Session이 없는) 격리된 isolate에서
+/// 이 함수가 새로 불린다 — 로그인 상태/소켓 등 앱의 나머지 상태에 전혀 접근할 수 없어서,
+/// push.js가 data payload에 실어 보낸 title/body/roomId만으로 최소한의 알림을 직접
+/// 그린다(아바타/자물쇠 배지 같은 풍부한 렌더링은 앱이 켜져 있을 때의 소켓 경로에서만).
+/// 탑레벨 함수+이 어노테이션이 꼭 있어야 백그라운드 isolate에서 찾아 호출할 수 있다.
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  final data = message.data;
+  final roomId = data['roomId'] as String?;
+  if (roomId == null) return;
+  final notifications = NotificationService();
+  await notifications.init(
+    onTap: (_) {}, // 이 isolate엔 화면이 없어 탭 이동은 못 한다.
+    requestPermission:
+        false, // 헤드리스 isolate라 권한 요청 다이얼로그를 못 띄운다(NotificationService 참고).
+  );
+  await notifications.showMessage(
+    title: data['title'] as String? ?? '메신저',
+    body: data['body'] as String? ?? '',
+    roomId: roomId,
+    isSecret: data['isSecret'] == 'true',
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // NetworkImage/CachedNetworkImage처럼 우리 ApiClient/ChatSocket을 거치지 않고 자체
@@ -16,6 +46,13 @@ Future<void> main() async {
   // 앱 전체 HttpClient 생성을 가로챈다. 이거 없이는 프로필 사진/채팅 이미지가 인증서
   // 신뢰 실패로 안 보인다.
   await PinnedTls.installGlobalHttpOverrides();
+  // FCM은 안드로이드에서만 공식 지원한다 — Windows에서 Firebase.initializeApp()을 부르면
+  // google-services.json이 없어 그냥 실패한다(session.dart의 _registerFcmToken도 동일하게
+  // Platform.isAndroid로 막아둠).
+  if (Platform.isAndroid) {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
   runApp(const MyApp());
 }
 
@@ -35,20 +72,44 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     settings: appSettings,
   );
 
+  // 앱이 완전히 종료된 상태에서 FCM 알림을 눌러 새로 켜진 경우, 그 방을 아직 session.rooms가
+  // 로딩되기 전이라 바로 못 연다 — 로그인/방 목록 로딩이 끝날 때까지 여기 보관해뒀다가
+  // session이 바뀔 때마다(=_tryOpenPendingLaunchRoom) 다시 시도한다.
+  String? _pendingLaunchRoomId;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     appSettings.init();
-    notifications.init(onTap: _openRoomFromNotification);
+    notifications
+        .init(onTap: _openRoomFromNotification)
+        .then((_) => _checkNotificationLaunch());
+    session.addListener(_tryOpenPendingLaunchRoom);
     session.init();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    session.removeListener(_tryOpenPendingLaunchRoom);
     session.chatSocket.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkNotificationLaunch() async {
+    final roomId = await notifications.getLaunchPayload();
+    if (roomId == null) return;
+    _pendingLaunchRoomId = roomId;
+    _tryOpenPendingLaunchRoom();
+  }
+
+  void _tryOpenPendingLaunchRoom() {
+    final roomId = _pendingLaunchRoomId;
+    if (roomId == null || session.stage != AuthStage.ready) return;
+    if (session.rooms.every((r) => r.id != roomId)) return;
+    _pendingLaunchRoomId = null;
+    _openRoomFromNotification(roomId);
   }
 
   @override

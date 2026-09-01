@@ -13,3 +13,6 @@ releases/*
 .jwt-secret
 .db-encryption-key
 certs/
+
+# FCM 푸시 발송용 Firebase 서비스 계정 키 — Admin 권한이라 절대 커밋하지 않는다.
+firebase-service-account.json

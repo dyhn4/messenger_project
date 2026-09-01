@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { findCommentById, insertComment, softDeleteComment, updateCommentText } from './db/queries/comments.js';
 import { findMessageById } from './db/queries/messages.js';
-import { isRoomMember } from './db/queries/rooms.js';
+import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
 
 // messages.js와 동일: 작성 후 이 시간(5분) 안에서만 본인이 수정/삭제할 수 있다.
@@ -68,6 +69,23 @@ export function createCommentsRouter(io) {
     const dto = toCommentDto(comment);
     io.to(message.roomId).emit('comment:new', dto);
     res.status(201).json(dto);
+
+    // 응답 이후 백그라운드로 — socket.js의 message:send와 동일한 패턴.
+    findRoomById(message.roomId)
+      .then(async (room) => {
+        if (!room) return;
+        const memberIds = await listRoomMemberIds(room.id);
+        await notifyOfflineMembers({
+          memberIds,
+          senderId: req.user.sub,
+          senderName: comment.senderName,
+          room,
+          entry: comment,
+          roomTag: roomTagFor(room),
+          kind: 'comment',
+        });
+      })
+      .catch((err) => console.error('[push] 댓글 알림 실패:', err?.message ?? err));
   });
 
   router.patch('/comments/:id', async (req, res) => {

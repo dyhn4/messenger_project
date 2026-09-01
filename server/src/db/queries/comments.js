@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { messageComments } from '../schema.js';
 
@@ -71,6 +71,18 @@ export async function getLastCommentAt(roomId) {
     .orderBy(desc(messageComments.createdAt))
     .limit(1);
   return row?.createdAt ?? null;
+}
+
+/** 방 목록 미리보기용 — 가장 최근의 지워지지 않은 댓글 한 건(messages.js의
+ * getLastMessageForPreview와 짝 — rooms.js의 toRoomDto가 둘 중 더 최근 걸 고른다). */
+export async function getLastCommentForPreview(roomId) {
+  const [row] = await db
+    .select({ type: messageComments.type, text: messageComments.text, fileName: messageComments.fileName, createdAt: messageComments.createdAt })
+    .from(messageComments)
+    .where(and(eq(messageComments.roomId, roomId), isNull(messageComments.deletedAt)))
+    .orderBy(desc(messageComments.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /** rooms.js의 countUnreadForUser(messages 기준)와 동일한 규칙을 message_comments에 적용한다 —

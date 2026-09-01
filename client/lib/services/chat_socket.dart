@@ -38,6 +38,19 @@ class RoomFavoriteUpdate {
       );
 }
 
+/// 내(다른 기기 포함)가 방의 알림 끄기를 바꿨다는 브로드캐스트(room:muted).
+class RoomMutedUpdate {
+  final String roomId;
+  final bool muted;
+  const RoomMutedUpdate({required this.roomId, required this.muted});
+
+  factory RoomMutedUpdate.fromJson(Map<String, dynamic> json) =>
+      RoomMutedUpdate(
+        roomId: json['roomId'] as String,
+        muted: json['muted'] as bool,
+      );
+}
+
 /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted). 내용은 이미 클라이언트에서
 /// 가려질 거라 최소 정보만 온다.
 class MessageDeletedEvent {
@@ -235,6 +248,7 @@ class ChatSocket {
   final _roomController = StreamController<Room>.broadcast();
   final _readController = StreamController<RoomReadEvent>.broadcast();
   final _favoriteController = StreamController<RoomFavoriteUpdate>.broadcast();
+  final _mutedController = StreamController<RoomMutedUpdate>.broadcast();
   final _commentController = StreamController<Comment>.broadcast();
   final _messageEditedController = StreamController<Message>.broadcast();
   final _messageDeletedController =
@@ -273,6 +287,9 @@ class ChatSocket {
 
   /// 내가(다른 기기 포함) 방의 즐겨찾기를 바꿨다는 브로드캐스트.
   Stream<RoomFavoriteUpdate> get favoriteEvents => _favoriteController.stream;
+
+  /// 내가(다른 기기 포함) 방의 알림 끄기를 바꿨다는 브로드캐스트.
+  Stream<RoomMutedUpdate> get mutedEvents => _mutedController.stream;
 
   /// 누군가 메시지에 댓글을 달았다는 브로드캐스트(comment:new).
   Stream<Comment> get commentEvents => _commentController.stream;
@@ -372,6 +389,11 @@ class ChatSocket {
     socket.on('room:favorite', (data) {
       _favoriteController.add(
         RoomFavoriteUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('room:muted', (data) {
+      _mutedController.add(
+        RoomMutedUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
     socket.on('comment:new', (data) {
@@ -476,6 +498,12 @@ class ChatSocket {
     int? fileSize,
     String? mimeType,
     String? thumbnailUrl,
+    // "메시지 공유"(message_share_screen.dart) — 다른 방으로 원본을 인용해서 보낼 때만 채운다.
+    String? quotedSenderName,
+    String? quotedPreview,
+    // "메시지 전달"(message_forward_screen.dart)에서 "포함" 토글을 켰을 때만 채운다.
+    String? forwardedFromSenderName,
+    int? forwardedFromCreatedAt,
   }) {
     final socket = _socket;
     if (socket == null) {
@@ -494,6 +522,10 @@ class ChatSocket {
         'fileSize': ?fileSize,
         'mimeType': ?mimeType,
         'thumbnailUrl': ?thumbnailUrl,
+        'quotedSenderName': ?quotedSenderName,
+        'quotedPreview': ?quotedPreview,
+        'forwardedFromSenderName': ?forwardedFromSenderName,
+        'forwardedFromCreatedAt': ?forwardedFromCreatedAt,
       },
       ack: (dynamic response) {
         if (completer.isCompleted) return;

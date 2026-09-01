@@ -62,6 +62,25 @@ export async function touchDeviceLastSeen(id) {
   await db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, id));
 }
 
+export async function setDeviceFcmToken(id, userId, token) {
+  const [row] = await db
+    .update(devices)
+    .set({ fcmToken: token, lastSeenAt: new Date() })
+    .where(and(eq(devices.id, id), eq(devices.userId, userId), isNull(devices.revokedAt)))
+    .returning();
+  return row ?? null;
+}
+
+/** 오프라인(소켓 미연결)인 사용자에게 FCM 푸시를 보낼 때 쓴다 — 폐기되지 않은 기기 중
+ * 토큰이 등록된 것만(같은 사람이 여러 기기를 갖고 있으면 전부 받는다). */
+export function listFcmTokensForUser(userId) {
+  return db
+    .select({ deviceId: devices.id, fcmToken: devices.fcmToken })
+    .from(devices)
+    .where(and(eq(devices.userId, userId), isNull(devices.revokedAt)))
+    .then((rows) => rows.filter((r) => !!r.fcmToken));
+}
+
 export async function revokeDevice(id, userId) {
   const [row] = await db
     .update(devices)

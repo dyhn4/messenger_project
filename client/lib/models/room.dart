@@ -27,6 +27,15 @@ class Room {
   /// Session이 병합할 때 로컬 값을 유지한다 — 그래서 non-final.
   bool favorite;
 
+  /// 나만의 알림 끄기 표시(즐겨찾기와 같은 방식 — non-final, Session이 병합 시 유지).
+  /// 이 방을 뮤트하면 앱이 완전히 꺼져있을 때의 FCM 푸시가 안 온다(server/src/push.js).
+  bool muted;
+
+  /// 그룹채팅/채팅 목록 이름 아래 한 줄 미리보기(room_list_screen.dart). 로그인 시점엔
+  /// 서버가 계산해서 내려주고(rooms.js의 toRoomDto), 이후 실시간으로는 Session이 소켓으로
+  /// 받은 메시지/댓글의 실제(복호화된) 내용으로 직접 갱신한다 — 그래서 non-final.
+  String? lastMessagePreview;
+
   /// 이 방에서 마지막으로 활동(메시지/댓글)이 있었던 시각 — 방 목록에서 카테고리 안 정렬
   /// 기준으로 쓴다. 서버가 로그인 시점 기준(오프라인 동안 쌓인 활동 포함)으로 계산해서
   /// 내려주고(rooms.js의 toRoomDto), 이후 이번 세션 동안은 실시간으로 메시지/댓글을
@@ -60,6 +69,8 @@ class Room {
     required this.lastRead,
     this.unreadCount = 0,
     this.favorite = false,
+    this.muted = false,
+    this.lastMessagePreview,
     DateTime? lastActivityAt,
     this.isSecret = false,
     this.secretStatus,
@@ -85,6 +96,8 @@ class Room {
       ),
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       favorite: json['favorite'] as bool? ?? false,
+      muted: json['muted'] as bool? ?? false,
+      lastMessagePreview: json['lastMessagePreview'] as String?,
       lastActivityAt: (json['lastActivityAt'] as num?) != null
           ? DateTime.fromMillisecondsSinceEpoch(
               (json['lastActivityAt'] as num).toInt(),

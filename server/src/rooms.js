@@ -6,6 +6,7 @@ import {
   findDmRoomByKey,
   findRoomById,
   getMemberFavorite,
+  getMemberMuted,
   getRoomLastReadMap,
   insertRoom,
   isRoomMember,
@@ -15,11 +16,13 @@ import {
   listRoomsForUser,
   removeRoomMember,
   setMemberFavorite,
+  setMemberMuted,
   setSecretDepartedMember,
 } from './db/queries/rooms.js';
 import {
   countUnreadForUser,
   getLastMessageAt,
+  getLastMessageForPreview,
   insertMessage,
   listMessagesByIds,
   listMessagesByRoom,
@@ -27,6 +30,7 @@ import {
 import {
   countUnreadCommentsForUser,
   getLastCommentAt,
+  getLastCommentForPreview,
   listCommentsForMessages,
   listCommentsInRoomBetween,
 } from './db/queries/comments.js';
@@ -35,6 +39,7 @@ import { findUserById, listAllUserIds } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
+import { previewFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 
 async function resolveMembers(roomId) {
   return (await listRoomMemberUsers(roomId)).map(publicUser);
@@ -52,11 +57,13 @@ export async function nameOf(id) {
  * (requesterId 생략) 요청자 한 명에게만 가는 REST 응답에서만 넣는다(requesterId 전달).
  */
 export async function toRoomDto(room, requesterId) {
-  const [members, lastRead, lastMessageAt, lastCommentAt] = await Promise.all([
+  const [members, lastRead, lastMessageAt, lastCommentAt, lastMessageRow, lastCommentRow] = await Promise.all([
     resolveMembers(room.id),
     getRoomLastReadMap(room.id),
     getLastMessageAt(room.id),
     getLastCommentAt(room.id),
+    getLastMessageForPreview(room.id),
+    getLastCommentForPreview(room.id),
   ]);
   // 방 목록에서 카테고리 안 정렬 기준(누구에게나 동일한, 사용자 무관 값) — 로그인 직후에도
   // 오프라인 동안 쌓인 활동이 반영되도록, 실시간 소켓 없이도 방 목록 응답 자체에 이 시각을
@@ -67,6 +74,20 @@ export async function toRoomDto(room, requesterId) {
     lastMessageAt ? new Date(lastMessageAt).getTime() : 0,
     lastCommentAt ? new Date(lastCommentAt).getTime() : 0,
   );
+  // 그룹채팅/채팅 목록의 이름 아래 한 줄 미리보기(room_list_screen.dart) — 메시지/댓글 중 더
+  // 최근 것을 고른다. 비밀 대화는 서버가 내용을 복호화할 수 없어 애초에 평문을 모르므로
+  // push.js와 같은 고정 문구를 쓴다. 로그인 시점엔 이 값을 그대로 쓰고, 이후 실시간으로는
+  // Session이 소켓으로 받은 메시지/댓글의 실제(복호화된) 내용으로 직접 갱신한다.
+  let lastMessagePreview = null;
+  if (room.isSecret) {
+    if (lastMessageRow || lastCommentRow) lastMessagePreview = SECRET_PREVIEW_PLACEHOLDER;
+  } else {
+    const newerRow =
+      lastMessageRow && lastCommentRow
+        ? (new Date(lastMessageRow.createdAt) >= new Date(lastCommentRow.createdAt) ? lastMessageRow : lastCommentRow)
+        : lastMessageRow ?? lastCommentRow;
+    if (newerRow) lastMessagePreview = previewFor(newerRow);
+  }
   const dto = {
     id: room.id,
     type: room.type,
@@ -77,6 +98,7 @@ export async function toRoomDto(room, requesterId) {
     createdAt: new Date(room.createdAt).getTime(),
     lastRead,
     lastActivityAt,
+    lastMessagePreview,
     isSecret: !!room.isSecret,
   };
   if (room.isSecret) {
@@ -103,6 +125,7 @@ export async function toRoomDto(room, requesterId) {
     ]);
     dto.unreadCount = unreadMessages + unreadComments;
     dto.favorite = await getMemberFavorite(room.id, requesterId);
+    dto.muted = await getMemberMuted(room.id, requesterId);
   }
   return dto;
 }
@@ -355,6 +378,18 @@ export function createRoomsRouter(io) {
     const favorite = req.body?.favorite === true;
     await setMemberFavorite(room.id, req.user.sub, favorite);
     io.to(`user:${req.user.sub}`).emit('room:favorite', { roomId: room.id, favorite });
+    res.json(await toRoomDto(room, req.user.sub));
+  });
+
+  // 알림 끄기도 즐겨찾기와 같은 이유로 내 다른 기기(user:<id> 룸)에만 알린다.
+  router.post('/rooms/:id/muted', async (req, res) => {
+    const room = await findRoomById(req.params.id);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+
+    const muted = req.body?.muted === true;
+    await setMemberMuted(room.id, req.user.sub, muted);
+    io.to(`user:${req.user.sub}`).emit('room:muted', { roomId: room.id, muted });
     res.json(await toRoomDto(room, req.user.sub));
   });
 

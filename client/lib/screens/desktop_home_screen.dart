@@ -607,6 +607,7 @@ class _Sidebar extends StatelessWidget {
                 selected: room.id == selectedRoomId,
                 unreadCount: room.unreadCount,
                 favorite: room.favorite,
+                muted: room.muted,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
               ),
@@ -635,6 +636,7 @@ class _Sidebar extends StatelessWidget {
                 unreadCount: room.unreadCount,
                 favorite: room.favorite,
                 isSecret: room.isSecret,
+                muted: room.muted,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
               ),
@@ -663,6 +665,7 @@ class _Sidebar extends StatelessWidget {
                 unreadCount: room.unreadCount,
                 favorite: room.favorite,
                 isSecret: room.isSecret,
+                muted: room.muted,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
               ),
@@ -835,6 +838,7 @@ class _RoomTile extends StatefulWidget {
   final int unreadCount;
   final bool favorite;
   final bool isSecret;
+  final bool muted;
   final VoidCallback onToggleFavorite;
   final VoidCallback onTap;
   const _RoomTile({
@@ -844,6 +848,7 @@ class _RoomTile extends StatefulWidget {
     this.unreadCount = 0,
     required this.favorite,
     this.isSecret = false,
+    this.muted = false,
     required this.onToggleFavorite,
     required this.onTap,
   });
@@ -881,23 +886,32 @@ class _RoomTileState extends State<_RoomTile> {
             widget.leading,
           ],
         ),
-        title: widget.isSecret
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.lock, size: 14, color: Colors.green),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      widget.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.green),
-                    ),
-                  ),
-                ],
-              )
-            : Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: Row(
+          children: [
+            if (widget.isSecret) ...[
+              const Icon(Icons.lock, size: 14, color: Colors.green),
+              const SizedBox(width: 4),
+            ],
+            Flexible(
+              child: Text(
+                widget.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: widget.isSecret
+                    ? const TextStyle(color: Colors.green)
+                    : null,
+              ),
+            ),
+            if (widget.muted) ...[
+              const SizedBox(width: 4),
+              Icon(
+                Icons.notifications_off,
+                size: 14,
+                color: Theme.of(context).hintColor,
+              ),
+            ],
+          ],
+        ),
         trailing: widget.unreadCount > 0
             ? UnreadBadge(count: widget.unreadCount)
             : null,

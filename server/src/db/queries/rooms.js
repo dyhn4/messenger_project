@@ -154,3 +154,27 @@ export async function setMemberFavorite(roomId, userId, favorite) {
     .set({ favorite })
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
 }
+
+export async function getMemberMuted(roomId, userId) {
+  const [row] = await db
+    .select({ muted: roomMembers.muted })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+  return row?.muted ?? false;
+}
+
+export async function setMemberMuted(roomId, userId, muted) {
+  await db
+    .update(roomMembers)
+    .set({ muted })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}
+
+/** push.js가 FCM 발송 대상에서 이 방을 뮤트한 멤버를 걸러내는 데 쓴다. */
+export async function listMutedUserIdsForRoom(roomId) {
+  const rows = await db
+    .select({ userId: roomMembers.userId })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.muted, true)));
+  return rows.map((r) => r.userId);
+}

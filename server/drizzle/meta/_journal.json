@@ -64,6 +64,27 @@
       "when": 1787819028109,
       "tag": "0008_fluffy_ultron",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788229421582,
+      "tag": "0009_sturdy_captain_britain",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788243588012,
+      "tag": "0010_amused_smasher",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788249086616,
+      "tag": "0011_pale_wendigo",
+      "breakpoints": true
     }
   ]
 }

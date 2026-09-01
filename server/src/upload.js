@@ -39,6 +39,26 @@ export function signFileUrl(relativeUrl, downloadName) {
   return `/files/${token}`;
 }
 
+/**
+ * 메시지 전달(forward)용 — 클라이언트는 첨부의 서명된 다운로드 URL(/files/<token>)만 들고
+ * 있으므로, 그걸 그대로 새 메시지의 fileUrl로 저장하면 안 된다(토큰이 곧 만료되고, 애초에
+ * DB엔 항상 미서명 원본 경로만 남아야 한다 — signFileUrl 주석 참고). 서명된 형태로 오면
+ * 검증해서 원본 상대경로(/uploads/xxx)로 되돌리고, 이미 원본 경로면 그대로 돌려준다.
+ * 토큰이 무효/만료면 null(호출부가 첨부 없이 진행하거나 실패 처리).
+ */
+export function resolveRawUrl(url) {
+  if (!url) return null;
+  const match = /^\/files\/(.+)$/.exec(url);
+  if (!match) return url;
+  try {
+    const payload = jwt.verify(match[1], JWT_SECRET);
+    if (payload.type !== 'file' || typeof payload.file !== 'string') return null;
+    return `/uploads/${payload.file}`;
+  } catch {
+    return null;
+  }
+}
+
 /** /files/:token 라우트에서 쓴다. 서명이 유효하고 만료 전이면 실제 파일 경로(+원본 파일명)를 돌려준다. */
 export function resolveSignedFile(token) {
   const payload = jwt.verify(token, JWT_SECRET); // 서명/만료 실패 시 throw

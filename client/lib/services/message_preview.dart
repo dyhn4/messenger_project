@@ -1,0 +1,19 @@
+import '../data/stickers.dart';
+import '../models/message.dart';
+
+/// 메시지 내용을 한 줄 미리보기로 요약한다 — 방 목록 미리보기(session.dart의
+/// _updateRoomPreview), 메시지 공유 인용문(message_share_screen.dart)에서 공용으로 쓴다.
+String formatMessagePreview({
+  required MessageType type,
+  String? text,
+  String? fileName,
+}) {
+  return switch (type) {
+    MessageType.text => text ?? '',
+    MessageType.image => '사진을 보냈습니다',
+    MessageType.file => fileName != null ? '$fileName 파일을 보냈습니다' : '파일을 보냈습니다',
+    MessageType.sticker =>
+      '${findStickerById(text ?? '')?.emoji ?? ''} 이모티콘을 보냈습니다',
+    MessageType.system || MessageType.comment => text ?? '',
+  };
+}

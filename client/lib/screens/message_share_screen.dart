@@ -4,20 +4,25 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../services/message_preview.dart';
 import '../services/session.dart';
+import '../widgets/floating_dialog.dart';
 import '../widgets/room_picker_field.dart';
 
-/// 메시지 롱프레스 메뉴의 "메시지 공유" — 대화방을 골라 새 텍스트를 쓰고, 그 아래 원본
-/// 메시지를 인용(quotedSenderName/quotedPreview)으로 붙여서 보낸다. 원본은 공유 당시
-/// 내용의 스냅샷이라(server/src/socket.js) 나중에 원본이 수정/삭제돼도 그대로 남는다.
+/// 메시지 롱프레스 메뉴(모바일)/더보기 메뉴(PC)의 "메시지 공유" — 대화방을 골라 새 텍스트를
+/// 쓰고, 그 아래 원본 메시지를 인용(quotedSenderName/quotedPreview)으로 붙여서 보낸다.
+/// 원본은 공유 당시 내용의 스냅샷이라(server/src/socket.js) 나중에 원본이 수정/삭제돼도
+/// 그대로 남는다. PC(asDialog:true)는 FloatingDialog로, 모바일은 전체화면으로 뜬다
+/// (message_actions.dart의 pushMessageShareScreen이 창 너비로 고른다).
 class MessageShareScreen extends StatefulWidget {
   final Session session;
   final Message message;
   final String senderDisplayName;
+  final bool asDialog;
   const MessageShareScreen({
     super.key,
     required this.session,
     required this.message,
     required this.senderDisplayName,
+    this.asDialog = false,
   });
 
   @override
@@ -68,12 +73,91 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final canShare = _targetRoom != null && !_sending;
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: widget.asDialog ? MainAxisSize.min : MainAxisSize.max,
+      children: [
+        Text('대화방', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 8),
+        RoomPickerField(
+          session: widget.session,
+          value: _targetRoom,
+          onChanged: (r) => setState(() => _targetRoom = r),
+        ),
+        const SizedBox(height: 16),
+        if (widget.asDialog)
+          SizedBox(
+            height: 140,
+            child: TextField(
+              controller: _textController,
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              decoration: const InputDecoration(
+                hintText: '내용을 입력하세요.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: TextField(
+              controller: _textController,
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              decoration: const InputDecoration(
+                hintText: '내용을 입력하세요.',
+                border: InputBorder.none,
+              ),
+            ),
+          ),
+        const Divider(height: 24),
+        _QuoteCard(
+          senderName: widget.senderDisplayName,
+          preview: _quotedPreview,
+        ),
+        if (widget.asDialog) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _sending
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  child: const Text('취소'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: canShare ? _share : null,
+                  child: _sending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('공유'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+
+    if (widget.asDialog) {
+      return FloatingDialog(title: '메시지 공유', maxWidth: 480, child: body);
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('메시지 공유'),
         actions: [
           TextButton(
-            onPressed: (_targetRoom == null || _sending) ? null : _share,
+            onPressed: canShare ? _share : null,
             child: _sending
                 ? const SizedBox(
                     width: 16,
@@ -84,39 +168,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('대화방', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            RoomPickerField(
-              session: widget.session,
-              value: _targetRoom,
-              onChanged: (r) => setState(() => _targetRoom = r),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: TextField(
-                controller: _textController,
-                maxLines: null,
-                expands: true,
-                textAlignVertical: TextAlignVertical.top,
-                decoration: const InputDecoration(
-                  hintText: '내용을 입력하세요.',
-                  border: InputBorder.none,
-                ),
-              ),
-            ),
-            const Divider(height: 24),
-            _QuoteCard(
-              senderName: widget.senderDisplayName,
-              preview: _quotedPreview,
-            ),
-          ],
-        ),
-      ),
+      body: Padding(padding: const EdgeInsets.all(16), child: body),
     );
   }
 }

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:intl/intl.dart';
 
 import '../data/stickers.dart';
@@ -11,14 +10,13 @@ import '../models/room.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/member_profile_dialog.dart';
-import '../screens/message_forward_screen.dart';
-import '../screens/message_share_screen.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/edit_policy.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'message_actions.dart';
 import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
@@ -112,9 +110,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   void _startEdit() {
     if (!isWithinEditWindow(widget.message.createdAt)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 수정할 수 없습니다.')));
+      showEditWindowExpiredDialog(context, '수정 기간이 경과되어 메시지를 수정할 수 없습니다.');
       return;
     }
     setState(() {
@@ -145,9 +141,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   Future<void> _confirmDelete(BuildContext context) async {
     if (!isWithinEditWindow(widget.message.createdAt)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 삭제할 수 없습니다.')));
+      showEditWindowExpiredDialog(context, '삭제 기간이 경과되어 메시지를 삭제할 수 없습니다.');
       return;
     }
     final confirmed = await showDialog<bool>(
@@ -207,128 +201,19 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
-  /// 스티커는 이모지를, 텍스트/이미지·파일 캡션은 그 텍스트를 복사 대상으로 쓴다.
-  /// 복사할 게 없으면(예: 캡션 없는 이미지) null.
-  String? _copyableText() {
-    final message = widget.message;
-    if (message.type == MessageType.sticker) {
-      return findStickerById(message.text ?? '')?.emoji;
-    }
-    return (message.text?.isNotEmpty ?? false) ? message.text : null;
-  }
-
-  Future<void> _copyFull(BuildContext context) async {
-    final text = _copyableText();
-    if (text == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('복사할 내용이 없습니다.')));
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: text));
-    if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('복사했습니다.')));
-    }
-  }
-
-  void _showSelectCopyDialog(BuildContext context) {
-    final text = _copyableText();
-    if (text == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('복사할 내용이 없습니다.')));
-      return;
-    }
-    showDialog(
-      context: context,
-      builder: (_) => _SelectCopyDialog(text: text),
-    );
-  }
-
-  /// 롱프레스로 뜨는 하단 시트: 메시지 공유/댓글/복사/선택 복사/메시지 전달. 공유·전달은
-  /// 원본이 비밀 대화(E2EE)면 숨긴다 — 평문 메시지가 다른 방으로 새거나, 암호화 없이 그
-  /// 대화에 그대로 쌓이면 안 되기 때문(room_picker_screen.dart도 대상 목록에서 비밀
-  /// 대화를 뺀다).
+  /// 롱프레스로 뜨는 하단 시트(메시지 공유/댓글/복사/선택 복사/메시지 전달) — 실제 내용은
+  /// message_actions.dart가 댓글(message_comments_card.dart)과 공용으로 구현한다.
   void _showActionSheet(BuildContext context) {
     final message = widget.message;
-    final sourceRoom = widget.session.rooms.where(
-      (r) => r.id == message.roomId,
-    );
-    final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
     final displayName =
         (widget.isMine ? widget.session.name : widget.sender?.name) ??
         message.senderName;
-
-    showModalBottomSheet(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isSecretRoom)
-              ListTile(
-                leading: const Icon(Icons.share_outlined),
-                title: const Text('메시지 공유'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => MessageShareScreen(
-                        session: widget.session,
-                        message: message,
-                        senderDisplayName: displayName,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            if (widget.onOpenThread != null)
-              ListTile(
-                leading: const Icon(Icons.mode_comment_outlined),
-                title: const Text('댓글'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  widget.onOpenThread!(message);
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.copy_outlined),
-              title: const Text('복사'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _copyFull(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.text_fields),
-              title: const Text('선택 복사'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                _showSelectCopyDialog(context);
-              },
-            ),
-            if (!isSecretRoom)
-              ListTile(
-                leading: const Icon(Icons.forward_outlined),
-                title: const Text('메시지 전달'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => MessageForwardScreen(
-                        session: widget.session,
-                        message: message,
-                        senderDisplayName: displayName,
-                      ),
-                    ),
-                  );
-                },
-              ),
-          ],
-        ),
-      ),
+    showMessageActionSheet(
+      context,
+      session: widget.session,
+      message: message,
+      senderDisplayName: displayName,
+      onOpenThread: widget.onOpenThread,
     );
   }
 
@@ -362,115 +247,125 @@ class _MessageBubbleState extends State<MessageBubble> {
                   (!message.deleted && !message.decryptFailed && !_editing)
                   ? () => _showActionSheet(context)
                   : null,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.easeOut,
-                // 이모티콘은 카카오톡처럼 말풍선 배경 없이 크게만 보여준다(삭제/복호화 실패
-                // 상태는 문구를 읽어야 하니 평소 말풍선 그대로 유지).
-                padding: isSticker
-                    ? EdgeInsets.zero
-                    : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: isSticker
-                    ? const BoxDecoration()
-                    : BoxDecoration(
-                        color: highlighted
-                            ? const Color(0xFFFFF59D)
-                            : (isMine
-                                  ? Theme.of(
-                                      context,
-                                    ).colorScheme.primaryContainer
-                                  : Theme.of(
-                                      context,
-                                    ).colorScheme.surfaceContainerHighest),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                child: message.deleted
-                    ? Text(
-                        '삭제된 메시지입니다',
-                        style: TextStyle(
-                          fontStyle: FontStyle.italic,
-                          color: Theme.of(context).hintColor,
+              child: ConstrainedBox(
+                // "메시지 공유"로 인용 카드가 붙은 말풍선은 보라색 말풍선(배경) 자체가
+                // 700px을 넘지 않도록 여기서 직접 못박는다 — 안쪽 카드만 좁혀서는(예전 시도)
+                // 이 폭까지 정확히 안 맞았다.
+                constraints: BoxConstraints(
+                  maxWidth: message.quotedSenderName != null
+                      ? 700
+                      : double.infinity,
+                ),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 500),
+                  curve: Curves.easeOut,
+                  // 이모티콘은 카카오톡처럼 말풍선 배경 없이 크게만 보여준다(삭제/복호화 실패
+                  // 상태는 문구를 읽어야 하니 평소 말풍선 그대로 유지).
+                  padding: isSticker
+                      ? EdgeInsets.zero
+                      : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: isSticker
+                      ? const BoxDecoration()
+                      : BoxDecoration(
+                          color: highlighted
+                              ? const Color(0xFFFFF59D)
+                              : (isMine
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.primaryContainer
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.surfaceContainerHighest),
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                      )
-                    : message.decryptFailed
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.lock_outline,
-                            size: 14,
+                  child: message.deleted
+                      ? Text(
+                          '삭제된 메시지입니다',
+                          style: TextStyle(
+                            fontStyle: FontStyle.italic,
                             color: Theme.of(context).hintColor,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '이 메시지는 복호화할 수 없습니다',
-                            style: TextStyle(
-                              fontStyle: FontStyle.italic,
+                        )
+                      : message.decryptFailed
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.lock_outline,
+                              size: 14,
                               color: Theme.of(context).hintColor,
                             ),
-                          ),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // "메시지 전달"로 생겼고 "포함" 토글이 켜져 있었으면 원본 발신자 표시.
-                          if (message.forwardedFromSenderName != null) ...[
+                            const SizedBox(width: 4),
                             Text(
-                              '${message.forwardedFromSenderName}에서 전달한 메시지입니다',
+                              '이 메시지는 복호화할 수 없습니다',
                               style: TextStyle(
-                                fontSize: 12,
                                 fontStyle: FontStyle.italic,
                                 color: Theme.of(context).hintColor,
                               ),
                             ),
-                            const SizedBox(height: 4),
                           ],
-                          // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
-                          // 이모티콘은 text 필드 자체가 캡션이 아니라 스티커 id라 이 대상이 아니다.
-                          if (message.type != MessageType.text &&
-                              message.type != MessageType.sticker &&
-                              (message.text?.isNotEmpty ?? false)) ...[
-                            Text(message.text!),
-                            const SizedBox(height: 6),
-                          ],
-                          if (_editing)
-                            _buildEditor(context)
-                          else
-                            _buildContent(context),
-                          // "메시지 공유"로 붙은 원본 인용 — 새로 쓴 내용(위) 아래에 구분선과 함께
-                          // 붙는다(첨부 이미지 참고). 공유 당시 스냅샷이라 원본이 나중에 바뀌어도
-                          // 그대로 남는다(models/message.dart 참고).
-                          if (message.quotedSenderName != null) ...[
-                            const SizedBox(height: 8),
-                            const Divider(height: 1),
-                            const SizedBox(height: 8),
-                            Text(
-                              '${message.quotedSenderName}에서 공유된 메시지입니다',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).hintColor,
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // "메시지 전달"로 생겼고 "포함" 토글이 켜져 있었으면 원본 발신자 표시.
+                            if (message.forwardedFromSenderName != null) ...[
+                              Text(
+                                '${message.forwardedFromSenderName}에서 전달한 메시지입니다',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
+                                  color: Theme.of(context).hintColor,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 6),
-                            _QuotedMessageCard(
-                              senderName: message.quotedSenderName!,
-                              preview: message.quotedPreview ?? '',
-                            ),
+                              const SizedBox(height: 4),
+                            ],
+                            // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
+                            // 이모티콘은 text 필드 자체가 캡션이 아니라 스티커 id라 이 대상이 아니다.
+                            if (message.type != MessageType.text &&
+                                message.type != MessageType.sticker &&
+                                (message.text?.isNotEmpty ?? false)) ...[
+                              Text(message.text!),
+                              const SizedBox(height: 6),
+                            ],
+                            if (_editing)
+                              _buildEditor(context)
+                            else
+                              _buildContent(context),
+                            // "메시지 공유"로 붙은 원본 인용 — 새로 쓴 내용(위) 아래에 구분선과 함께
+                            // 붙는다(첨부 이미지 참고). 공유 당시 스냅샷이라 원본이 나중에 바뀌어도
+                            // 그대로 남는다(models/message.dart 참고).
+                            if (message.quotedSenderName != null) ...[
+                              const SizedBox(height: 8),
+                              const Divider(height: 1),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${message.quotedSenderName}에서 공유된 메시지입니다',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).hintColor,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              _QuotedMessageCard(
+                                senderName: message.quotedSenderName!,
+                                preview: message.quotedPreview ?? '',
+                              ),
+                            ],
+                            if (message.editedAt != null && !_editing) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '(수정됨)',
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: Theme.of(context).hintColor,
+                                    ),
+                              ),
+                            ],
                           ],
-                          if (message.editedAt != null && !_editing) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              '(수정됨)',
-                              style: Theme.of(context).textTheme.labelSmall
-                                  ?.copyWith(
-                                    color: Theme.of(context).hintColor,
-                                  ),
-                            ),
-                          ],
-                        ],
-                      ),
+                        ),
+                ),
               ),
             ),
           ),
@@ -525,11 +420,19 @@ class _MessageBubbleState extends State<MessageBubble> {
                   HoverToolbarButton(
                     icon: Icons.more_vert,
                     tooltip: '더보기',
-                    visible:
-                        isMine &&
-                        (widget.onEdit != null || widget.onDelete != null),
+                    visible: true,
                     menuItems: [
-                      if (message.type == MessageType.text &&
+                      ...messageActionMenuItems(
+                        context,
+                        session: widget.session,
+                        message: message,
+                        senderDisplayName: displayName,
+                      ),
+                      if (isMine &&
+                          (widget.onEdit != null || widget.onDelete != null))
+                        const PopupMenuDivider(),
+                      if (isMine &&
+                          message.type == MessageType.text &&
                           widget.onEdit != null)
                         PopupMenuItem<void>(
                           onTap: _startEdit,
@@ -541,7 +444,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                             ],
                           ),
                         ),
-                      if (widget.onDelete != null)
+                      if (isMine && widget.onDelete != null)
                         PopupMenuItem<void>(
                           onTap: () => _confirmDelete(context),
                           child: const Row(
@@ -718,6 +621,19 @@ class _QuotedMessageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // message_comments_card.dart의 댓글 카드와 같은 규칙(최대 700, 그보다 좁으면 남는
+    // 폭만큼)으로 가로 크기를 맞춘다. 말풍선(보라색 배경) 자체의 700 상한은 이 카드가 아니라
+    // 말풍선 쪽(message_bubble.dart의 ConstrainedBox)에서 직접 잡아주므로, 여기 constraints는
+    // 이미 그 폭(700 - 말풍선 패딩) 이하로 들어온다 — 이 min()은 그 경우를 대비한 안전장치일 뿐.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth > 700 ? 700.0 : constraints.maxWidth;
+        return SizedBox(width: width, child: _buildCard(context));
+      },
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -757,65 +673,6 @@ class _QuotedMessageCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// "선택 복사" — 메시지 내용을 읽기 전용 텍스트 필드로 띄우고, 열리자마자 전체를 선택해서
-/// 플랫폼 기본 선택 도구(복사 등 팝업 + 드래그 핸들)가 바로 뜨게 한다. 원하는 부분만 다시
-/// 골라서 복사하고 싶으면 핸들을 드래그해서 선택 범위를 조절하면 된다.
-class _SelectCopyDialog extends StatefulWidget {
-  final String text;
-  const _SelectCopyDialog({required this.text});
-
-  @override
-  State<_SelectCopyDialog> createState() => _SelectCopyDialogState();
-}
-
-class _SelectCopyDialogState extends State<_SelectCopyDialog> {
-  late final _controller = TextEditingController(text: widget.text);
-  final _focusNode = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    // 포커스가 실제로 걸린 다음 프레임에 SelectAllTextIntent를(원인을 toolbar로) 실행해야
-    // 선택 범위뿐 아니라 복사 팝업 툴바까지 같이 뜬다 — 생성자에서 controller.selection만
-    // 미리 채워두면 텍스트는 선택된 것처럼 보여도 툴바는 안 뜬다.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final ctx = _focusNode.context;
-        if (ctx == null) return;
-        Actions.maybeInvoke<SelectAllTextIntent>(
-          ctx,
-          const SelectAllTextIntent(SelectionChangedCause.toolbar),
-        );
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 120),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: TextField(
-          controller: _controller,
-          focusNode: _focusNode,
-          readOnly: true,
-          maxLines: null,
-          decoration: const InputDecoration(border: InputBorder.none),
-        ),
       ),
     );
   }

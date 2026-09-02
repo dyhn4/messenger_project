@@ -11,6 +11,7 @@ import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'message_actions.dart';
 import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
@@ -294,9 +295,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
 
   void _startEdit() {
     if (!isWithinEditWindow(widget.comment.createdAt)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 수정할 수 없습니다.')));
+      showEditWindowExpiredDialog(context, '수정 기간이 경과되어 댓글을 수정할 수 없습니다.');
       return;
     }
     setState(() {
@@ -327,9 +326,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
 
   Future<void> _confirmDelete(BuildContext context) async {
     if (!isWithinEditWindow(widget.comment.createdAt)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('작성 후 5분이 지나 삭제할 수 없습니다.')));
+      showEditWindowExpiredDialog(context, '삭제 기간이 경과되어 댓글을 삭제할 수 없습니다.');
       return;
     }
     final confirmed = await showDialog<bool>(
@@ -358,6 +355,20 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         context,
       ).showSnackBar(SnackBar(content: Text('삭제 실패: $e')));
     }
+  }
+
+  /// 롱프레스로 뜨는 하단 시트(모바일) — message_bubble.dart의 메시지 롱프레스와 동일한
+  /// 항목(메시지 공유/복사/선택 복사/메시지 전달)을 쓴다. 댓글엔 "댓글" 항목(댓글 스레드
+  /// 열기)이 의미가 없어 onOpenThread를 안 넘긴다 — 댓글에 또 댓글을 달 수는 없으므로.
+  void _showActionSheet(BuildContext context) {
+    final comment = widget.comment;
+    final displayName = widget.sender?.name ?? comment.senderName;
+    showMessageActionSheet(
+      context,
+      session: widget.session,
+      message: messageFromComment(comment),
+      senderDisplayName: displayName,
+    );
   }
 
   Widget _buildBubbleContent(BuildContext context) {
@@ -477,14 +488,26 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   }
 
   Widget _buildToolbar(BuildContext context) {
+    final comment = widget.comment;
+    final displayName = widget.sender?.name ?? comment.senderName;
+    final canEditDelete =
+        widget.isMine && (widget.onEdit != null || widget.onDelete != null);
     return HoverToolbar(
       children: [
         HoverToolbarButton(
           icon: Icons.more_vert,
           tooltip: '더보기',
           menuItems: [
+            ...messageActionMenuItems(
+              context,
+              session: widget.session,
+              message: messageFromComment(comment),
+              senderDisplayName: displayName,
+            ),
+            if (canEditDelete) const PopupMenuDivider(),
             // 메시지 수정과 동일하게, 텍스트 댓글만 수정할 수 있다(서버도 동일하게 막음).
-            if (widget.comment.type == MessageType.text &&
+            if (widget.isMine &&
+                comment.type == MessageType.text &&
                 widget.onEdit != null)
               PopupMenuItem<void>(
                 onTap: _startEdit,
@@ -492,7 +515,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
                   children: [Icon(Icons.edit), SizedBox(width: 8), Text('수정')],
                 ),
               ),
-            if (widget.onDelete != null)
+            if (widget.isMine && widget.onDelete != null)
               PopupMenuItem<void>(
                 onTap: () => _confirmDelete(context),
                 child: const Row(
@@ -513,30 +536,30 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   Widget build(BuildContext context) {
     final comment = widget.comment;
     final sender = widget.sender;
-    final showToolbar =
-        widget.isMine &&
-        !comment.deleted &&
-        !comment.decryptFailed &&
-        !_editing &&
-        (widget.onEdit != null || widget.onDelete != null);
+    // PC 더보기(공유/복사/전달)는 누구 댓글이든 다 보여준다 — 수정/삭제만 그 안에서
+    // isMine으로 따로 가린다(_buildToolbar 참고). 모바일 롱프레스 액션 시트도 마찬가지.
+    final showToolbar = !comment.deleted && !comment.decryptFailed && !_editing;
 
     final isSticker =
         comment.type == MessageType.sticker &&
         !comment.deleted &&
         !comment.decryptFailed;
-    final bubble = Container(
-      padding: isSticker
-          ? EdgeInsets.zero
-          : const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: isSticker
-          ? const BoxDecoration()
-          : BoxDecoration(
-              color: widget.isMine
-                  ? Theme.of(context).colorScheme.primaryContainer
-                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-      child: _buildBubbleContent(context),
+    final bubble = GestureDetector(
+      onLongPress: showToolbar ? () => _showActionSheet(context) : null,
+      child: Container(
+        padding: isSticker
+            ? EdgeInsets.zero
+            : const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: isSticker
+            ? const BoxDecoration()
+            : BoxDecoration(
+                color: widget.isMine
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+        child: _buildBubbleContent(context),
+      ),
     );
 
     // 같은 사람이 연달아 단 댓글은 첫 댓글에만 아바타를 보여준다(showAvatar: false면 같은

@@ -4,6 +4,7 @@ import '../data/stickers.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../services/session.dart';
+import '../widgets/floating_dialog.dart';
 import '../widgets/room_picker_field.dart';
 
 String _typeToWire(MessageType type) => switch (type) {
@@ -24,18 +25,22 @@ String _formatFullDateTime(DateTime dt) {
   return '$y/$mo/$d ${isPm ? 'PM' : 'AM'} $hh:$mm';
 }
 
-/// 메시지 롱프레스 메뉴의 "메시지 전달" — 대화방을 골라 원본 내용(텍스트는 편집 가능, 첨부는
-/// 그대로) 그 자체를 새 메시지로 보낸다. "포함" 토글을 켜면 원본 발신자/시각이 같이 실려서
-/// 받는 쪽에 "OOO에서 전달한 메시지입니다"로 표시된다(message_bubble.dart 렌더링 참고).
+/// 메시지 롱프레스 메뉴(모바일)/더보기 메뉴(PC)의 "메시지 전달" — 대화방을 골라 원본 내용
+/// (텍스트는 편집 가능, 첨부는 그대로) 그 자체를 새 메시지로 보낸다. "포함" 토글을 켜면
+/// 원본 발신자/시각이 같이 실려서 받는 쪽에 "OOO에서 전달한 메시지입니다"로 표시된다
+/// (message_bubble.dart 렌더링 참고). PC(asDialog:true)는 FloatingDialog로, 모바일은
+/// 전체화면으로 뜬다(message_actions.dart의 pushMessageForwardScreen이 창 너비로 고른다).
 class MessageForwardScreen extends StatefulWidget {
   final Session session;
   final Message message;
   final String senderDisplayName;
+  final bool asDialog;
   const MessageForwardScreen({
     super.key,
     required this.session,
     required this.message,
     required this.senderDisplayName,
+    this.asDialog = false,
   });
 
   @override
@@ -133,9 +138,119 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
     );
   }
 
+  Widget _buildAttributionRow(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${widget.senderDisplayName}에서 전달한 메시지입니다',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${widget.senderDisplayName} | ${_formatFullDateTime(widget.message.createdAt)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).hintColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Column(
+          children: [
+            const Text('포함', style: TextStyle(fontSize: 12)),
+            Switch(
+              value: _includeAttribution,
+              onChanged: (v) => setState(() => _includeAttribution = v),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final canForward = _targetRoom != null && !_sending;
+    final textField = TextField(
+      controller: _textController,
+      maxLines: null,
+      expands: true,
+      textAlignVertical: TextAlignVertical.top,
+      decoration: InputDecoration(
+        hintText: '내용을 입력하세요.',
+        border: widget.asDialog ? const OutlineInputBorder() : InputBorder.none,
+      ),
+    );
+
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: widget.asDialog ? MainAxisSize.min : MainAxisSize.max,
+      children: [
+        Text('대화방', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 8),
+        RoomPickerField(
+          session: widget.session,
+          value: _targetRoom,
+          onChanged: (r) => setState(() => _targetRoom = r),
+        ),
+        const SizedBox(height: 16),
+        _buildAttachmentPreview(context) ?? const SizedBox.shrink(),
+        if (widget.message.type != MessageType.sticker)
+          widget.asDialog
+              ? SizedBox(height: 140, child: textField)
+              : Expanded(child: textField)
+        else if (!widget.asDialog)
+          const Spacer(),
+        const Divider(height: 24),
+        _buildAttributionRow(context),
+        if (widget.asDialog) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _sending
+                      ? null
+                      : () => Navigator.of(context).pop(),
+                  child: const Text('취소'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: canForward ? _forward : null,
+                  child: _sending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('전달'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+
+    if (widget.asDialog) {
+      return FloatingDialog(title: '메시지 전달', maxWidth: 480, child: body);
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('메시지 전달'),
@@ -152,82 +267,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('대화방', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            RoomPickerField(
-              session: widget.session,
-              value: _targetRoom,
-              onChanged: (r) => setState(() => _targetRoom = r),
-            ),
-            const SizedBox(height: 16),
-            _buildAttachmentPreview(context) ?? const SizedBox.shrink(),
-            if (widget.message.type != MessageType.sticker)
-              Expanded(
-                child: TextField(
-                  controller: _textController,
-                  maxLines: null,
-                  expands: true,
-                  textAlignVertical: TextAlignVertical.top,
-                  decoration: const InputDecoration(
-                    hintText: '내용을 입력하세요.',
-                    border: InputBorder.none,
-                  ),
-                ),
-              )
-            else
-              const Spacer(),
-            const Divider(height: 24),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${widget.senderDisplayName}에서 전달한 메시지입니다',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${widget.senderDisplayName} | ${_formatFullDateTime(widget.message.createdAt)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context).hintColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Column(
-                  children: [
-                    const Text('포함', style: TextStyle(fontSize: 12)),
-                    Switch(
-                      value: _includeAttribution,
-                      onChanged: (v) => setState(() => _includeAttribution = v),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+      body: Padding(padding: const EdgeInsets.all(16), child: body),
     );
   }
 }

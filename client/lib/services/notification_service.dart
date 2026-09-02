@@ -38,7 +38,7 @@ class NotificationService {
   }) async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const windows = WindowsInitializationSettings(
-      appName: '메신저',
+      appName: 'TeamTalk',
       appUserModelId: 'com.messenger.client',
       guid: 'ae1f2c84-355a-42fa-8166-f9b7e1d1feba',
     );
@@ -133,7 +133,7 @@ class NotificationService {
           else
             WindowsImage(
               WindowsImage.getAssetUri('assets/icon.png'),
-              altText: '메신저',
+              altText: 'TeamTalk',
               placement: WindowsImagePlacement.appLogoOverride,
               crop: WindowsImageCrop.circle,
             ),

@@ -190,6 +190,13 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                               ),
                               child: Row(
                                 children: [
+                                  FavoriteStar(
+                                    favorite: _selectedRoom!.favorite,
+                                    onTap: () => widget.session.toggleFavorite(
+                                      _selectedRoom!,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
                                   RoomAvatar(
                                     room: _selectedRoom!,
                                     myUserId: widget.session.userId ?? '',
@@ -298,7 +305,7 @@ class _TopBar extends StatelessWidget {
       child: Row(
         children: [
           const Text(
-            '메신저',
+            'TeamTalk',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const Spacer(),

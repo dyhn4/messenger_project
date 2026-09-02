@@ -547,7 +547,7 @@ class _MoreTab extends StatelessWidget {
           title: const Text('오픈소스 라이선스'),
           onTap: () => showLicensePage(
             context: context,
-            applicationName: '메신저',
+            applicationName: 'TeamTalk',
             applicationVersion: _appVersion,
           ),
         ),

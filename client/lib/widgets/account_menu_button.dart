@@ -61,7 +61,7 @@ class AccountMenuButton extends StatelessWidget {
         PopupMenuItem<void>(
           onTap: () => showLicensePage(
             context: context,
-            applicationName: '메신저',
+            applicationName: 'TeamTalk',
             applicationVersion: _appVersion,
           ),
           child: const Row(

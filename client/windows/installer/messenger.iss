@@ -5,7 +5,7 @@
 ; 관리자 권한 없이 현재 사용자 계정에만 설치되도록 했다(PrivilegesRequired=lowest) — 회사 PC처럼
 ; 관리자 권한이 없는 환경에서도 그냥 설치할 수 있게 하기 위함.
 
-#define MyAppName "메신저"
+#define MyAppName "TeamTalk"
 #define MyAppVersion "1.0.0"
 #define MyAppExeName "client.exe"
 #define ReleaseDir "..\..\build\windows\x64\runner\Release"

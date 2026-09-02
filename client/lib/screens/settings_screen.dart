@@ -7,7 +7,7 @@ import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 
-const _appName = '메신저';
+const _appName = 'TeamTalk';
 
 /// 삼선 메뉴 "설정"에서 여는 환경설정 플로팅 창. 로그인 계정 정보와 오픈소스 라이선스는
 /// 삼선 메뉴 자체로 옮겼고, 여기서는 시작 시 자동 실행 / 파일 다운로드만 다룬다.

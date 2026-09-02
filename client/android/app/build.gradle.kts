@@ -59,6 +59,18 @@ android {
                 signingConfigs.getByName("debug")
             }
         }
+        debug {
+            // release와 동일한 키로 서명한다 — 안 그러면 실기기에 이미 release 키로 설치된
+            // 앱(서버 업데이트로 받았거나 배포판을 설치한 경우) 위에 debug 빌드를 덮어씌울 때마다
+            // "signatures do not match"로 설치가 거부되고, 지우고 새로 깔면 로그인 세션이
+            // 날아간다. key.properties가 없는 환경(이 저장소를 처음 받은 다른 PC 등)에서는
+            // 표준 디버그 키로 폴백해서 빌드가 그냥 되게 한다.
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
     }
 }
 

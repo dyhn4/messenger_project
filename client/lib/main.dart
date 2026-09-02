@@ -32,7 +32,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         false, // 헤드리스 isolate라 권한 요청 다이얼로그를 못 띄운다(NotificationService 참고).
   );
   await notifications.showMessage(
-    title: data['title'] as String? ?? '메신저',
+    title: data['title'] as String? ?? 'TeamTalk',
     body: data['body'] as String? ?? '',
     roomId: roomId,
     isSecret: data['isSecret'] == 'true',
@@ -154,7 +154,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       builder: (context, _) {
         return MaterialApp(
           navigatorKey: navigatorKey,
-          title: '메신저',
+          title: 'TeamTalk',
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
             useMaterial3: true,

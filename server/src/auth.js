@@ -1,9 +1,9 @@
-import bcrypt from 'bcryptjs';
-import { Router } from 'express';
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from './config.js';
-import { encryptField, lookupHash } from './crypto.js';
-import { addRoomMembers, listPublicTopics } from './db/queries/rooms.js';
+import bcrypt from "bcryptjs";
+import { Router } from "express";
+import jwt from "jsonwebtoken";
+import { JWT_SECRET } from "./config.js";
+import { encryptField, lookupHash } from "./crypto.js";
+import { addRoomMembers, listPublicTopics } from "./db/queries/rooms.js";
 import {
   findUserByEmailLookup,
   findUserById,
@@ -11,19 +11,44 @@ import {
   findUserByUsernameAndEmailLookup,
   insertUser,
   updateUser,
-} from './db/queries/users.js';
-import { nameOf, notifyMembership, postSystemMessage } from './rooms.js';
+} from "./db/queries/users.js";
+import { nameOf, notifyMembership, postSystemMessage } from "./rooms.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_LENGTH_ERROR = "아이디는 4~20자여야 합니다.";
+
+// 대소문자/앞뒤 공백 차이로 정답이 틀렸다고 나오지 않도록 정규화 후 해시/비교한다.
+const normalizeAnswer = (s) =>
+  String(s ?? "")
+    .trim()
+    .toLowerCase();
 
 // 클라이언트의 "캐릭터 선택하기" 화면(client/lib/screens/my_profile_dialog.dart)과 같은 구성.
 const CHARACTER_EMOJIS = [
-  '🧑‍🦰', '👮', '🧑‍🌾', '👩‍🦰', '🧑‍✈️', '👩‍💼',
-  '🧑‍💼', '👩‍🦱', '🧔', '👩‍🎤', '🧑‍🎨', '🧑‍🔬',
+  "🧑‍🦰",
+  "👮",
+  "🧑‍🌾",
+  "👩‍🦰",
+  "🧑‍✈️",
+  "👩‍💼",
+  "🧑‍💼",
+  "👩‍🦱",
+  "🧔",
+  "👩‍🎤",
+  "🧑‍🎨",
+  "🧑‍🔬",
 ];
 const CHARACTER_COLORS = [
-  '#9AA6B2', '#4C6EF5', '#15AABF', '#FAB005', '#FF6B35',
-  '#37B24D', '#0CA678', '#E64980', '#9775FA', '#8D6E63',
+  "#9AA6B2",
+  "#4C6EF5",
+  "#15AABF",
+  "#FAB005",
+  "#FF6B35",
+  "#37B24D",
+  "#0CA678",
+  "#E64980",
+  "#9775FA",
+  "#8D6E63",
 ];
 const randomOf = (list) => list[Math.floor(Math.random() * list.length)];
 
@@ -31,18 +56,18 @@ const randomOf = (list) => list[Math.floor(Math.random() * list.length)];
 // 길게(만료되거나 재시작했을 때만 새 AccessToken을 받아오며, 이때만 tokenVersion을 DB와
 // 대조한다) 가져가는 이중 토큰 구조. 비밀번호 변경 시 tokenVersion을 올리면, 이미 나가있는
 // AccessToken은 최대 그 유효기간(1시간)만큼만 더 쓰이고, RefreshToken은 그 즉시 막힌다.
-const ACCESS_TOKEN_TTL = '1h';
-const REFRESH_TOKEN_TTL = '30d';
+const ACCESS_TOKEN_TTL = "1h";
+const REFRESH_TOKEN_TTL = "30d";
 
 export function issueTokenPair(user) {
   const tokenVersion = user.tokenVersion ?? 0;
   const accessToken = jwt.sign(
-    { sub: user.id, username: user.username, tokenVersion, type: 'access' },
+    { sub: user.id, username: user.username, tokenVersion, type: "access" },
     JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_TTL },
   );
   const refreshToken = jwt.sign(
-    { sub: user.id, tokenVersion, type: 'refresh' },
+    { sub: user.id, tokenVersion, type: "refresh" },
     JWT_SECRET,
     { expiresIn: REFRESH_TOKEN_TTL },
   );
@@ -53,26 +78,61 @@ export function issueTokenPair(user) {
 export function createAuthRouter(io) {
   const router = Router();
 
-  router.post('/register', async (req, res) => {
-    const { username, password, email, name } = req.body ?? {};
-    if (!username || !password || !email || !name) {
-      return res.status(400).json({ error: '아이디, 이름, 비밀번호, 이메일을 입력하세요.' });
+  /** 회원가입 폼에서 "중복 확인" 버튼이 누르는 참조용 가용성 체크. 실제 가입은 아니라 200으로
+   *  응답하고, 이후 register에서도 (여기 통과 후 사이에 다른 사람이 선점했을 수 있으니) 다시
+   *  한번 검사한다. */
+  router.get("/username-available", async (req, res) => {
+    const username = req.query.username ?? "";
+    if (username.length < 4 || username.length > 20) {
+      return res.json({ available: false, error: USERNAME_LENGTH_ERROR });
     }
-    if (password.length < 4) {
-      return res.status(400).json({ error: '비밀번호는 4자 이상이어야 합니다.' });
+    const exists = await findUserByUsername(username);
+    if (exists) {
+      return res.json({
+        available: false,
+        error: "이미 사용 중인 아이디입니다.",
+      });
+    }
+    res.json({ available: true });
+  });
+
+  router.post("/register", async (req, res) => {
+    const {
+      username,
+      password,
+      email,
+      name,
+      securityQuestion,
+      securityAnswer,
+    } = req.body ?? {};
+    if (!username || !password || !email || !name) {
+      return res
+        .status(400)
+        .json({ error: "아이디, 이름, 비밀번호, 이메일을 입력하세요." });
+    }
+    if (username.length < 4 || username.length > 20) {
+      return res.status(400).json({ error: USERNAME_LENGTH_ERROR });
+    }
+    if (password.length < 4 || password.length > 20) {
+      return res.status(400).json({ error: "비밀번호는 4~20자여야 합니다." });
     }
     if (!EMAIL_PATTERN.test(email)) {
-      return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
+      return res
+        .status(400)
+        .json({ error: "이메일 형식이 올바르지 않습니다." });
+    }
+    if (!securityQuestion?.trim() || !securityAnswer?.trim()) {
+      return res.status(400).json({ error: "보안 질문과 답변을 입력하세요." });
     }
 
     const exists = await findUserByUsername(username);
     if (exists) {
-      return res.status(409).json({ error: '이미 사용 중인 아이디입니다.' });
+      return res.status(409).json({ error: "이미 사용 중인 아이디입니다." });
     }
     const emailLookup = lookupHash(email);
     const emailTaken = await findUserByEmailLookup(emailLookup);
     if (emailTaken) {
-      return res.status(409).json({ error: '이미 사용 중인 이메일입니다.' });
+      return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
     }
 
     const user = await insertUser({
@@ -81,7 +141,12 @@ export function createAuthRouter(io) {
       emailEnc: encryptField(email),
       emailLookup,
       passwordHash: await bcrypt.hash(password, 10),
-      avatarType: 'character',
+      securityQuestion: securityQuestion.trim(),
+      securityAnswerHash: await bcrypt.hash(
+        normalizeAnswer(securityAnswer),
+        10,
+      ),
+      avatarType: "character",
       avatarEmoji: randomOf(CHARACTER_EMOJIS),
       avatarColor: randomOf(CHARACTER_COLORS),
     });
@@ -95,35 +160,83 @@ export function createAuthRouter(io) {
 
     for (const room of publicTopics) {
       await notifyMembership(io, room);
-      await postSystemMessage(io, room, `${await nameOf(user.id)} 님이 참여했습니다.`);
+      await postSystemMessage(
+        io,
+        room,
+        `${await nameOf(user.id)} 님이 참여했습니다.`,
+      );
     }
 
-    res.status(201).json({ ...issueTokenPair(user), userId: user.id, username: user.username });
+    res.status(201).json({
+      ...issueTokenPair(user),
+      userId: user.id,
+      username: user.username,
+    });
   });
 
   /** 이메일로 아이디를 찾는다. 가입할 때 등록해둔 이메일이 있어야 동작한다. */
-  router.post('/find-id', async (req, res) => {
+  router.post("/find-id", async (req, res) => {
     const { email } = req.body ?? {};
     const user = await findUserByEmailLookup(lookupHash(email));
     if (!user) {
-      return res.status(404).json({ error: '일치하는 계정이 없습니다.' });
+      return res.status(404).json({ error: "일치하는 계정이 없습니다." });
     }
     res.json({ username: user.username });
   });
 
   /**
-   * 이메일 인증 없이 앱 안에서 바로 비밀번호를 재설정한다 (서버에 메일 발송 기능이 없음).
-   * 아이디와 이메일이 둘 다 일치해야 통과한다.
+   * 비밀번호를 재설정하기 전, 아이디+이메일이 일치하는 계정의 보안 질문을 가져온다.
+   * 이 컬럼이 생기기 전에 가입한 계정은 질문이 없으므로 question: null을 돌려주고,
+   * 클라이언트는 그 경우 답변 확인 단계 없이 바로 재설정하게 한다.
    */
-  router.post('/reset-password', async (req, res) => {
-    const { username, email, newPassword } = req.body ?? {};
+  router.post("/security-question", async (req, res) => {
+    const { username, email } = req.body ?? {};
+    const user = await findUserByUsernameAndEmailLookup(
+      username,
+      lookupHash(email),
+    );
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: "아이디와 이메일이 일치하는 계정이 없습니다." });
+    }
+    res.json({ question: user.securityQuestion ?? null });
+  });
+
+  /**
+   * 이메일 인증 없이 앱 안에서 바로 비밀번호를 재설정한다 (서버에 메일 발송 기능이 없음).
+   * 아이디와 이메일이 둘 다 일치해야 통과하고, 계정에 보안 질문이 설정돼 있으면 그 답변까지
+   * 맞아야 한다(이 컬럼이 생기기 전 가입한 계정은 답변 확인을 건너뛴다).
+   */
+  router.post("/reset-password", async (req, res) => {
+    const { username, email, securityAnswer, newPassword } = req.body ?? {};
     if (!newPassword || newPassword.length < 4) {
-      return res.status(400).json({ error: '비밀번호는 4자 이상이어야 합니다.' });
+      return res
+        .status(400)
+        .json({ error: "비밀번호는 4자 이상이어야 합니다." });
     }
 
-    const user = await findUserByUsernameAndEmailLookup(username, lookupHash(email));
+    const user = await findUserByUsernameAndEmailLookup(
+      username,
+      lookupHash(email),
+    );
     if (!user) {
-      return res.status(400).json({ error: '아이디와 이메일이 일치하는 계정이 없습니다.' });
+      return res
+        .status(400)
+        .json({ error: "아이디와 이메일이 일치하는 계정이 없습니다." });
+    }
+    if (user.securityAnswerHash) {
+      const matches =
+        !!securityAnswer &&
+        (await bcrypt.compare(
+          normalizeAnswer(securityAnswer),
+          user.securityAnswerHash,
+        ));
+      if (!matches) {
+        return res
+          .status(400)
+          .json({ error: "보안 질문 답변이 일치하지 않습니다." });
+      }
     }
 
     // 비밀번호가 바뀌었으니 이전에 발급된 모든 토큰을 무효화한다: AccessToken은 남은
@@ -138,40 +251,52 @@ export function createAuthRouter(io) {
     res.json({ ok: true });
   });
 
-  router.post('/login', async (req, res) => {
+  router.post("/login", async (req, res) => {
     const { username, password } = req.body ?? {};
     const user = await findUserByUsername(username);
-    if (!user || !(await bcrypt.compare(password ?? '', user.passwordHash))) {
-      return res.status(401).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
+    if (!user || !(await bcrypt.compare(password ?? "", user.passwordHash))) {
+      return res
+        .status(401)
+        .json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
     }
     if (user.deletedAt) {
-      return res.status(403).json({ error: '탈퇴한 계정입니다.' });
+      return res.status(403).json({ error: "탈퇴한 계정입니다." });
     }
 
-    res.json({ ...issueTokenPair(user), userId: user.id, username: user.username });
+    res.json({
+      ...issueTokenPair(user),
+      userId: user.id,
+      username: user.username,
+    });
   });
 
   /** AccessToken이 만료됐을 때 RefreshToken으로 새 AccessToken을 받아온다. */
-  router.post('/refresh', async (req, res) => {
+  router.post("/refresh", async (req, res) => {
     const { refreshToken } = req.body ?? {};
     if (!refreshToken) {
-      return res.status(400).json({ error: 'refreshToken이 없습니다.' });
+      return res.status(400).json({ error: "refreshToken이 없습니다." });
     }
 
     let payload;
     try {
       payload = jwt.verify(refreshToken, JWT_SECRET);
     } catch {
-      return res.status(401).json({ error: '세션이 만료되었습니다. 다시 로그인해주세요.' });
+      return res
+        .status(401)
+        .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
     }
-    if (payload.type !== 'refresh') {
-      return res.status(401).json({ error: '세션이 만료되었습니다. 다시 로그인해주세요.' });
+    if (payload.type !== "refresh") {
+      return res
+        .status(401)
+        .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
     }
 
     const user = await findUserById(payload.sub);
     if (!user || (user.tokenVersion ?? 0) !== payload.tokenVersion) {
       // 비밀번호 변경/강제 로그아웃 등으로 이 RefreshToken 자체가 이미 폐기된 경우.
-      return res.status(401).json({ error: '세션이 만료되었습니다. 다시 로그인해주세요.' });
+      return res
+        .status(401)
+        .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
     }
 
     res.json({ accessToken: issueTokenPair(user).accessToken });
@@ -186,17 +311,17 @@ export function createAuthRouter(io) {
  * tokenVersion 대조는 RefreshToken 재발급 시점(/auth/refresh)과 소켓 연결 시점에만 한다.
  */
 export function requireAuth(req, res, next) {
-  const header = req.headers.authorization ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token) return res.status(401).json({ error: '토큰이 없습니다.' });
+  const header = req.headers.authorization ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "토큰이 없습니다." });
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    if (payload.type !== 'access') throw new Error('invalid token type');
+    if (payload.type !== "access") throw new Error("invalid token type");
     req.user = payload;
     next();
   } catch {
-    res.status(401).json({ error: '토큰이 유효하지 않습니다.' });
+    res.status(401).json({ error: "토큰이 유효하지 않습니다." });
   }
 }
 
@@ -208,12 +333,12 @@ export function requireAuth(req, res, next) {
  */
 export async function verifySocketToken(token) {
   const payload = jwt.verify(token, JWT_SECRET); // 서명/만료 실패 시 throw
-  if (payload.type !== 'access') {
-    throw new Error('invalid token type');
+  if (payload.type !== "access") {
+    throw new Error("invalid token type");
   }
   const user = await findUserById(payload.sub);
   if (!user || (user.tokenVersion ?? 0) !== payload.tokenVersion) {
-    throw new Error('unauthorized');
+    throw new Error("unauthorized");
   }
   return payload;
 }

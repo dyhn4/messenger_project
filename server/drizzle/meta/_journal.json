@@ -85,6 +85,13 @@
       "when": 1788249086616,
       "tag": "0011_pale_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788335979980,
+      "tag": "0012_early_rawhide_kid",
+      "breakpoints": true
     }
   ]
 }

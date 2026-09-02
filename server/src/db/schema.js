@@ -14,6 +14,10 @@ export const users = pgTable('users', {
   emailEnc: text('email_enc'),
   emailLookup: text('email_lookup').unique(),
   passwordHash: text('password_hash').notNull(),
+  // 비밀번호 찾기 시 이메일 일치 확인에 더해 한 번 더 확인하는 보안 질문. 이 컬럼이 도입되기
+  // 전에 가입한 계정은 null로 남아있고, reset-password에서는 null이면 답변 확인을 건너뛴다.
+  securityQuestion: text('security_question'),
+  securityAnswerHash: text('security_answer_hash'),
   // 로그아웃/비밀번호 변경/탈퇴 시 기존 토큰을 한꺼번에 무효화하는 데 쓴다.
   tokenVersion: integer('token_version').notNull().default(0),
   avatarType: text('avatar_type').notNull().default('initial'),

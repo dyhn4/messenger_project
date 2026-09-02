@@ -205,16 +205,33 @@ class ApiClient {
     return _client.send(req);
   }
 
+  /// 회원가입 폼의 "중복 확인" 버튼용. 사용 가능하면 null, 아니면(형식 오류/중복) 사유
+  /// 문구를 돌려준다.
+  Future<String?> checkUsernameAvailable(String username) async {
+    final res = await _client.get(
+      _uri('/auth/username-available?username=${Uri.encodeQueryComponent(username)}'),
+    );
+    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    if (res.statusCode >= 400) {
+      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+    }
+    return (body['available'] as bool) ? null : body['error'] as String?;
+  }
+
   Future<AuthResult> register(
     String username,
     String password,
     String email,
-    String name,
-  ) => _authRequest('/auth/register', {
+    String name, {
+    required String securityQuestion,
+    required String securityAnswer,
+  }) => _authRequest('/auth/register', {
     'username': username,
     'password': password,
     'email': email,
     'name': name,
+    'securityQuestion': securityQuestion,
+    'securityAnswer': securityAnswer,
   });
 
   Future<AuthResult> login(String username, String password) =>
@@ -268,9 +285,28 @@ class ApiClient {
     return body['username'] as String;
   }
 
+  /// 아이디+이메일이 일치하는 계정의 보안 질문을 가져온다. 그 컬럼이 생기기 전에 가입한
+  /// 계정은 question이 null로 온다 — 그 경우 답변 확인 없이 바로 재설정할 수 있다.
+  Future<String?> fetchSecurityQuestion({
+    required String username,
+    required String email,
+  }) async {
+    final res = await _client.post(
+      _uri('/auth/security-question'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'email': email}),
+    );
+    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    if (res.statusCode >= 400) {
+      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+    }
+    return body['question'] as String?;
+  }
+
   Future<void> resetPassword({
     required String username,
     required String email,
+    String? securityAnswer,
     required String newPassword,
   }) async {
     final res = await _client.post(
@@ -279,6 +315,7 @@ class ApiClient {
       body: jsonEncode({
         'username': username,
         'email': email,
+        'securityAnswer': ?securityAnswer,
         'newPassword': newPassword,
       }),
     );

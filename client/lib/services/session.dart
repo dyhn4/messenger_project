@@ -299,9 +299,20 @@ class Session extends ChangeNotifier {
     String p,
     String email,
     String name, {
+    required String securityQuestion,
+    required String securityAnswer,
     required bool keepSignedIn,
-  }) =>
-      _auth(() => api!.register(u, p, email, name), keepSignedIn: keepSignedIn);
+  }) => _auth(
+    () => api!.register(
+      u,
+      p,
+      email,
+      name,
+      securityQuestion: securityQuestion,
+      securityAnswer: securityAnswer,
+    ),
+    keepSignedIn: keepSignedIn,
+  );
 
   Future<bool> _auth(
     Future<AuthResult> Function() call, {

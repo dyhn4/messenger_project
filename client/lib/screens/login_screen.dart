@@ -1,11 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../services/pinned_tls.dart';
+import '../services/security_questions.dart';
 import '../services/session.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
 
 const _loginGreen = Color(0xFF6FCF97);
+
+// 보안 질문은 문장이 길어서(최대 28자 남짓) 기본 크기로는 드롭다운에서 잘린다 — 목록/선택
+// 표시 양쪽에 같은 크기를 쓴다.
+const _questionStyle = TextStyle(fontSize: 13, color: Colors.black87);
+
+const _emailDomainCustomOption = '직접 입력';
+const _emailDomainPresets = [
+  'naver.com',
+  'gmail.com',
+  'daum.net',
+  'nate.com',
+  'kakao.com',
+  _emailDomainCustomOption,
+];
 
 class LoginScreen extends StatefulWidget {
   final Session session;
@@ -18,12 +33,24 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _username = TextEditingController();
   final _name = TextEditingController();
-  final _email = TextEditingController();
+  final _emailLocal = TextEditingController();
+  final _emailDomainCustom = TextEditingController();
+  String _emailDomainChoice = _emailDomainPresets.first;
   final _password = TextEditingController();
+  final _confirmPassword = TextEditingController();
+  final _customSecurityQuestion = TextEditingController();
+  final _securityAnswer = TextEditingController();
+  String? _securityQuestionChoice;
+  bool _securityQuestionCustomMode = false;
   bool _isRegister = false;
   bool _loading = false;
   bool _rememberUsername = false;
   bool _keepSignedIn = true;
+
+  // null = 아직 중복 확인을 안 했거나(또는 확인 후 아이디를 다시 고쳐서 무효화된) 상태.
+  bool? _usernameAvailable;
+  bool _usernameChecking = false;
+  String? _usernameCheckMessage;
 
   @override
   void initState() {
@@ -33,16 +60,86 @@ class _LoginScreenState extends State<LoginScreen> {
       _username.text = remembered;
       _rememberUsername = true;
     }
+    _password.addListener(_refresh);
+    _confirmPassword.addListener(_refresh);
+  }
+
+  void _refresh() => setState(() {});
+
+  void _onUsernameChanged(String _) {
+    if (_usernameAvailable != null || _usernameCheckMessage != null) {
+      setState(() {
+        _usernameAvailable = null;
+        _usernameCheckMessage = null;
+      });
+    }
+  }
+
+  Future<void> _checkUsername() async {
+    final username = _username.text.trim();
+    if (username.isEmpty) return;
+    setState(() {
+      _usernameChecking = true;
+      _usernameCheckMessage = null;
+    });
+    try {
+      final reason = await widget.session.api!.checkUsernameAvailable(username);
+      if (!mounted) return;
+      setState(() {
+        _usernameAvailable = reason == null;
+        _usernameCheckMessage = reason ?? '사용 가능한 아이디입니다.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _usernameAvailable = false;
+        _usernameCheckMessage = e.toString();
+      });
+    } finally {
+      if (mounted) setState(() => _usernameChecking = false);
+    }
+  }
+
+  bool get _canSubmitRegister => _usernameAvailable == true;
+
+  String get _resolvedEmail {
+    final domain = _emailDomainChoice == _emailDomainCustomOption
+        ? _emailDomainCustom.text.trim()
+        : _emailDomainChoice;
+    return '${_emailLocal.text.trim()}@$domain';
   }
 
   Future<void> _submit() async {
+    if (_isRegister) {
+      if (_usernameAvailable != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('아이디 중복 확인을 해주세요.')),
+        );
+        return;
+      }
+      if (_password.text != _confirmPassword.text) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('비밀번호가 서로 다릅니다.')),
+        );
+        return;
+      }
+      final question = _resolvedSecurityQuestion();
+      if (question == null || _securityAnswer.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('보안 질문과 답변을 입력하세요.')),
+        );
+        return;
+      }
+    }
     setState(() => _loading = true);
     final ok = _isRegister
         ? await widget.session.register(
             _username.text.trim(),
             _password.text,
-            _email.text.trim(),
+            _resolvedEmail,
             _name.text.trim(),
+            securityQuestion: _resolvedSecurityQuestion()!,
+            securityAnswer: _securityAnswer.text.trim(),
             keepSignedIn: true,
           )
         : await widget.session.login(
@@ -65,12 +162,26 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// "직접 작성"/"목록에서 선택" 토글 결과를 실제로 서버에 보낼 질문 문자열로 바꾼다.
+  /// 직접 작성인데 아직 질문을 안 적었거나, 목록에서 아직 아무것도 안 골랐으면 null.
+  String? _resolvedSecurityQuestion() {
+    if (_securityQuestionCustomMode) {
+      final custom = _customSecurityQuestion.text.trim();
+      return custom.isEmpty ? null : custom;
+    }
+    return _securityQuestionChoice;
+  }
+
   @override
   void dispose() {
     _username.dispose();
     _name.dispose();
-    _email.dispose();
+    _emailLocal.dispose();
+    _emailDomainCustom.dispose();
     _password.dispose();
+    _confirmPassword.dispose();
+    _customSecurityQuestion.dispose();
+    _securityAnswer.dispose();
     super.dispose();
   }
 
@@ -124,14 +235,104 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      TextField(
-                        controller: _username,
-                        decoration: const InputDecoration(
-                          labelText: '아이디',
-                          border: OutlineInputBorder(),
+                      if (_isRegister) ...[
+                        if (_usernameCheckMessage != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Text(
+                              _usernameCheckMessage!,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _usernameAvailable == true
+                                    ? const Color(0xFF2FA36B)
+                                    : Colors.redAccent,
+                              ),
+                            ),
+                          ),
+                        TextField(
+                          controller: _username,
+                          maxLength: 20,
+                          onChanged: _onUsernameChanged,
+                          decoration: InputDecoration(
+                            hintText: '아이디 입력 (4~20자)',
+                            counterText: '',
+                            border: const OutlineInputBorder(),
+                            // 버튼을 입력칸 안쪽 오른쪽 끝에 넣는다. 기본 suffixIcon 제약은
+                            // 정사각형 아이콘 기준이라 버튼이 잘리므로 제약을 풀어준다.
+                            suffixIconConstraints: const BoxConstraints(
+                              minWidth: 0,
+                              minHeight: 0,
+                            ),
+                            suffixIcon: Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: FilledButton(
+                                onPressed: _usernameChecking
+                                    ? null
+                                    : _checkUsername,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: _loginGreen,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                  ),
+                                  minimumSize: const Size(0, 36),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  textStyle: const TextStyle(fontSize: 13),
+                                ),
+                                child: _usernameChecking
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Text('중복 확인'),
+                              ),
+                            ),
+                          ),
                         ),
+                      ] else ...[
+                        TextField(
+                          controller: _username,
+                          decoration: const InputDecoration(
+                            labelText: '아이디',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _password,
+                        maxLength: _isRegister ? 20 : null,
+                        decoration: InputDecoration(
+                          labelText: '비밀번호',
+                          hintText: _isRegister
+                              ? '문자, 숫자 4~20자 (특수문자 가능)'
+                              : null,
+                          counterText: _isRegister ? '' : null,
+                          border: const OutlineInputBorder(),
+                        ),
+                        obscureText: true,
+                        onSubmitted: _isRegister ? null : (_) => _submit(),
                       ),
                       if (_isRegister) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _confirmPassword,
+                          decoration: InputDecoration(
+                            labelText: '비밀번호 확인',
+                            errorText:
+                                _confirmPassword.text.isNotEmpty &&
+                                    _confirmPassword.text != _password.text
+                                ? '비밀번호가 일치하지 않습니다'
+                                : null,
+                            border: const OutlineInputBorder(),
+                          ),
+                          obscureText: true,
+                        ),
                         const SizedBox(height: 12),
                         TextField(
                           controller: _name,
@@ -141,26 +342,85 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          controller: _email,
-                          decoration: const InputDecoration(
-                            labelText: '이메일',
-                            hintText: '아이디/비밀번호 찾기에 사용됩니다',
-                            border: OutlineInputBorder(),
+                        const Text(
+                          '이메일 주소',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
                           ),
-                          keyboardType: TextInputType.emailAddress,
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _emailLocal,
+                                decoration: const InputDecoration(
+                                  hintText: '이메일 주소',
+                                  border: OutlineInputBorder(),
+                                ),
+                                keyboardType: TextInputType.emailAddress,
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.only(top: 14, left: 8, right: 8),
+                              child: Text('@', style: TextStyle(fontSize: 16)),
+                            ),
+                            Expanded(
+                              child: _emailDomainChoice ==
+                                      _emailDomainCustomOption
+                                  ? TextField(
+                                      controller: _emailDomainCustom,
+                                      decoration: const InputDecoration(
+                                        hintText: '도메인 입력',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      keyboardType:
+                                          TextInputType.emailAddress,
+                                    )
+                                  : DropdownButtonFormField<String>(
+                                      initialValue: _emailDomainChoice,
+                                      isExpanded: true,
+                                      decoration: const InputDecoration(
+                                        border: OutlineInputBorder(),
+                                      ),
+                                      items: _emailDomainPresets
+                                          .map(
+                                            (d) => DropdownMenuItem(
+                                              value: d,
+                                              child: Text(
+                                                d,
+                                                overflow:
+                                                    TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
+                                      onChanged: (v) => setState(
+                                        () => _emailDomainChoice = v!,
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          '아이디, 비밀번호 찾기에 이용됩니다',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 16),
+                        _SecurityQuestionSection(
+                          customMode: _securityQuestionCustomMode,
+                          onModeChanged: (custom) =>
+                              setState(() => _securityQuestionCustomMode = custom),
+                          presetChoice: _securityQuestionChoice,
+                          onPresetChanged: (v) =>
+                              setState(() => _securityQuestionChoice = v),
+                          customQuestionController: _customSecurityQuestion,
+                          answerController: _securityAnswer,
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _password,
-                        decoration: const InputDecoration(
-                          labelText: '비밀번호',
-                          border: OutlineInputBorder(),
-                        ),
-                        obscureText: true,
-                        onSubmitted: (_) => _submit(),
-                      ),
                       if (!_isRegister) ...[
                         const SizedBox(height: 8),
                         Wrap(
@@ -239,7 +499,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
-                        onPressed: _loading ? null : _submit,
+                        onPressed:
+                            _loading || (_isRegister && !_canSubmitRegister)
+                            ? null
+                            : _submit,
                         child: _loading
                             ? const SizedBox(
                                 width: 20,
@@ -287,6 +550,155 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 회원가입 폼의 "본인 확인용 질문" 블록. "직접 작성"/"목록에서 선택" 탭으로 질문을
+/// 고르는 방식을 나누고(선택된 쪽이 초록색으로 강조), 그 아래 실제 질문 입력(텍스트
+/// 필드 또는 드롭다운)과 답변 입력란을 보여준다.
+class _SecurityQuestionSection extends StatelessWidget {
+  final bool customMode;
+  final ValueChanged<bool> onModeChanged;
+  final String? presetChoice;
+  final ValueChanged<String?> onPresetChanged;
+  final TextEditingController customQuestionController;
+  final TextEditingController answerController;
+
+  const _SecurityQuestionSection({
+    required this.customMode,
+    required this.onModeChanged,
+    required this.presetChoice,
+    required this.onPresetChanged,
+    required this.customQuestionController,
+    required this.answerController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '본인 확인용 질문',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '아이디, 비밀번호 찾기에 이용됩니다',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _SegmentTab(
+                  label: '직접 작성',
+                  selected: customMode,
+                  onTap: () => onModeChanged(true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _SegmentTab(
+                  label: '목록에서 선택',
+                  selected: !customMode,
+                  onTap: () => onModeChanged(false),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (customMode)
+            TextField(
+              controller: customQuestionController,
+              decoration: const InputDecoration(
+                hintText: '질문을 직접 입력하세요',
+                border: OutlineInputBorder(),
+              ),
+            )
+          else
+            DropdownButtonFormField<String>(
+              initialValue: presetChoice,
+              isExpanded: true,
+              hint: const Text('질문 선택', style: _questionStyle),
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+              style: _questionStyle,
+              // itemHeight를 비워야 항목 높이가 내용에 맞게 늘어난다 — 질문이 길면 팝업에서
+              // 두 줄로 접혀서 끝까지 다 보이게 하기 위함.
+              itemHeight: null,
+              items: kSecurityQuestionPresets
+                  .map(
+                    (q) => DropdownMenuItem(
+                      value: q,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Text(q, style: _questionStyle),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              // 닫혀있는 상태(입력칸 자리)에서는 한 줄로만 보이게 줄임표 처리한다 —
+              // 위 items는 팝업에서 두 줄로 펼쳐지는 쪽이라 서로 다른 표현이 필요하다.
+              selectedItemBuilder: (context) => kSecurityQuestionPresets
+                  .map(
+                    (q) => Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        q,
+                        style: _questionStyle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: onPresetChanged,
+            ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: answerController,
+            decoration: const InputDecoration(
+              labelText: '답변',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SegmentTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SegmentTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? const Color(0xFF2FA36B) : Colors.grey.shade600;
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: color,
+        side: BorderSide(color: selected ? color : Colors.grey.shade300),
+        backgroundColor: selected
+            ? const Color(0xFF2FA36B).withValues(alpha: 0.08)
+            : null,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+      child: Text(label, overflow: TextOverflow.ellipsis),
     );
   }
 }

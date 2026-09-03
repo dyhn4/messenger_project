@@ -337,11 +337,9 @@ export function createRoomsRouter(io) {
         return res.json({ ok: true });
       }
 
-      // 체크 안 함 — 나만 나간다. 시스템 메시지는 평문이라 넣지 않는다(비밀 대화 클라이언트는
-      // 이 방의 모든 메시지를 무조건 암호문으로 보고 복호화를 시도하므로, 평문 시스템
-      // 메시지를 넣으면 "복호화할 수 없습니다"로 잘못 보이게 된다).
+      // 체크 안 함 — 나만 나간다.
       await removeRoomMember(room.id, req.user.sub);
-      io.in(`user:${req.user.sub}`).socketsLeave(room.id);
+      io.in(`user:${req.user.sub}`).socketsLeave(room.id); // socketsLeave 이후라 본인은 자기 퇴장 메시지를 안 받음.
 
       const remainingMemberIds = await listRoomMemberIds(room.id);
       if (remainingMemberIds.length === 0) {
@@ -357,6 +355,7 @@ export function createRoomsRouter(io) {
         name: leaver?.name ?? leaver?.username ?? '알 수 없음',
       });
       io.to(room.id).emit('room:created', await toRoomDto(updated)); // 남은 멤버의 멤버 목록+나간 사람 이름을 갱신시킨다.
+      await postSystemMessage(io, room, '상대방이 비밀대화를 종료했습니다.');
       return res.json({ ok: true });
     }
 

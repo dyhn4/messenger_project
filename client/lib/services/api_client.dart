@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import 'chat_socket.dart' show SecretInviteEvent;
 
 class ApiException implements Exception {
   final String message;
@@ -586,6 +587,15 @@ class ApiClient {
 
   Future<void> rejectSecretChat(String roomId) async {
     await _post('/api/secret-chats/$roomId/reject', const {});
+  }
+
+  /// 앱이 꺼져있어서(FCM만 받음) secret:invite 소켓 이벤트를 놓쳤을 때, 수락/거절에 필요한
+  /// 정보를 서버에서 다시 가져온다. 이미 수락/거절됐으면(404) 서버가 에러를 주는데, 그건
+  /// Session.ensurePendingSecretInvite가 조용히 무시한다.
+  Future<SecretInviteEvent> fetchSecretInvite(String roomId) async {
+    return SecretInviteEvent.fromJson(
+      await _get('/api/secret-chats/$roomId/invite') as Map<String, dynamic>,
+    );
   }
 
   /// [seconds]가 null이면 자동 삭제를 끈다. 1초~1주(604800초) 범위여야 한다(서버가 재검증).

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/session.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/update_dialog.dart';
 import 'chat_screen.dart';
 import 'desktop_home_screen.dart';
@@ -21,6 +24,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _updateBannerShown = false;
   bool _secretInviteDialogShowing = false;
+  StreamSubscription<String>? _toastSub;
 
   @override
   void initState() {
@@ -28,11 +32,20 @@ class _HomeScreenState extends State<HomeScreen> {
     widget.session.addListener(_onSessionChanged);
     _maybeShowUpdateBanner();
     _maybeShowSecretInvite();
+    // navigatorKey.currentContext(Navigator 위젯 자체의 context)로는 SnackBar/Overlay가
+    // 화면에 안 그려진다 — 이 화면(HomeScreen) 자신의, 실제로 마운트된 context를 써야 한다.
+    // HomeScreen은 항상 최상위(main.dart의 루트 라우트)에 떠 있으므로 어느 화면에 있든
+    // (다른 화면이 그 위에 덮여 있어도) session.toasts를 여기서 구독하면 된다.
+    _toastSub = widget.session.toasts.listen((message) {
+      if (!mounted) return;
+      showAppToast(context, message);
+    });
   }
 
   @override
   void dispose() {
     widget.session.removeListener(_onSessionChanged);
+    _toastSub?.cancel();
     super.dispose();
   }
 

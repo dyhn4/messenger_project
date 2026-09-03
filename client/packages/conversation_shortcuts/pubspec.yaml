@@ -1,0 +1,19 @@
+name: conversation_shortcuts
+description: 안드로이드 "대화(conversation)" 알림에 필요한 long-lived 단축키를 등록하는 내부 플러그인.
+version: 0.0.1
+publish_to: "none"
+
+environment:
+  sdk: ^3.12.2
+  flutter: ">=3.3.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.teamtalk.conversationshortcuts
+        pluginClass: ConversationShortcutsPlugin

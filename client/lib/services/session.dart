@@ -40,6 +40,14 @@ class Session extends ChangeNotifier {
   static const _kRememberedUsername = 'remembered_username';
   static const _secretPreviewPlaceholder = '새 메시지가 있습니다';
 
+  // FCM 백그라운드 핸들러(main.dart)는 이 Session과 완전히 별개의 격리된 isolate에서
+  // 돌아서 activeRoomId/appInForeground 필드에 전혀 접근할 수 없다 — 그래서 그 값이
+  // 바뀔 때마다 SharedPreferences에도 같이 적어두고, 백그라운드 핸들러가 알림을 그리기
+  // 직전에 그걸 읽어서 "지금 그 방을 보고 있는 중이면" 건너뛸 수 있게 한다. main.dart가
+  // 같은 키로 읽어야 해서 public으로 둔다.
+  static const kActiveRoomIdPrefsKey = 'active_room_id';
+  static const kAppInForegroundPrefsKey = 'app_in_foreground';
+
   late SharedPreferences _prefs;
 
   AuthStage stage = AuthStage.loadingConfig;
@@ -79,6 +87,13 @@ class Session extends ChangeNotifier {
   /// 아직 응답하지 않은 비밀 대화 초대(secret:invite). UI가 이 목록을 보고 수락/거절 다이얼로그를 띄운다.
   final List<SecretInviteEvent> pendingSecretInvites = [];
 
+  /// 화면 어디에 있든(방을 안 보고 있어도) 한 번 스치듯 보여주면 되는 안내 — 비밀 대화
+  /// 거절/양쪽 나가기처럼 "방 자체가 사라지는" 이벤트를 토스트(SnackBar)로 알릴 때 쓴다.
+  /// main.dart가 이 스트림을 구독해서 navigatorKey의 context로 SnackBar를 띄운다.
+  final _toastController = StreamController<String>.broadcast();
+  Stream<String> get toasts => _toastController.stream;
+  void _showToast(String message) => _toastController.add(message);
+
   /// 지금 이모티콘 패널을 열어둔 화면(ChatPanel 또는 MessageThreadScreen의 State 객체, 식별용
   /// 토큰일 뿐 내용은 안 씀)을 담는다 — 채팅방과 댓글 패널이 동시에 떠 있을 때(데스크톱 분할
   /// 화면) 한쪽에서 이모티콘 버튼을 누르면 다른 쪽에 열려있던 패널이 자동으로 닫히게 하는 데
@@ -117,7 +132,40 @@ class Session extends ChangeNotifier {
 
   String? _activeRoomId;
   String? get activeRoomId => _activeRoomId;
-  void setActiveRoom(String? roomId) => _activeRoomId = roomId;
+
+  /// 활성 방을 지정할 때마다 올라가는 일련번호. 화면이 닫힐 때 자기가 받았던 번호를
+  /// [clearActiveRoom]에 되돌려주면, 그 사이 다른 화면이 활성 방을 새로 지정했는지 구분할 수 있다.
+  int _activeRoomToken = 0;
+
+  /// 활성 방을 지정하고, 화면이 닫힐 때 [clearActiveRoom]에 넘길 토큰을 돌려준다.
+  int setActiveRoom(String roomId) {
+    _activeRoomId = roomId;
+    _persistForegroundState();
+    // 방을 여는 순간, 그 방으로 이미 떠있던 알림(백그라운드 FCM 경로에서 놓친 것 포함)을
+    // 바로 지운다 — 안 그러면 방을 봐도 알림이 남아있고 앱 아이콘의 안읽음 배지도 안 지워진다.
+    notifications.cancelForRoom(roomId);
+    return ++_activeRoomToken;
+  }
+
+  /// 채팅 화면이 닫힐 때 호출한다. 그 사이 다른 화면이 활성 방을 새로 지정했으면(토큰 불일치)
+  /// 아무것도 하지 않는다.
+  ///
+  /// 방 id만 비교하면 안 되는 이유: 알림을 눌러서 "이미 열려 있던 그 방"을 다시 열면
+  /// popUntil+push로 같은 방의 ChatPanel이 새로 만들어지는데, 새 initState가 먼저 돌고
+  /// 옛 dispose가 나중에 돈다. 이때 id만 보면 (같은 방이라) 가드를 통과해서 활성 방을
+  /// null로 지워버리고, 그러면 방을 보고 있는데도 읽음 처리와 알림 억제가 통째로 멈춘다.
+  void clearActiveRoom(int token) {
+    if (token != _activeRoomToken) return;
+    _activeRoomId = null;
+    _persistForegroundState();
+  }
+
+  /// 방이 사라져서(나가기/비밀대화 종료) 강제로 활성 방을 푸는 경우.
+  void _forceClearActiveRoom() {
+    _activeRoomId = null;
+    _activeRoomToken++;
+    _persistForegroundState();
+  }
 
   /// 모바일(휴대폰 화면 폭)에서 댓글 스레드를 전체화면으로 열면(MessageThreadScreen이
   /// asPanel:false로 push됨) 그 밑에 있는 채팅 화면(ChatPanel)은 네비게이션 스택엔 남아있어
@@ -140,10 +188,33 @@ class Session extends ChangeNotifier {
   void setAppInForeground(bool value) {
     final wasBackground = !appInForeground;
     appInForeground = value;
+    _persistForegroundState();
     if (value && wasBackground && _activeRoomId != null) {
       _controllers[_activeRoomId]?.markReadNow();
       clearUnreadCount(_activeRoomId!);
+      notifications.cancelForRoom(_activeRoomId!);
     }
+  }
+
+  /// FCM 백그라운드 핸들러가 읽을 수 있도록 activeRoomId/appInForeground를
+  /// SharedPreferences에 그대로 미러링해둔다 — 위 두 setter의 클래스 주석 참고.
+  void _persistForegroundState() {
+    // init()이 아직 _prefs를 못 채운 아주 이른 시점(앱 시작 직후 lifecycle 콜백 등)에
+    // 불릴 수 있어서, 그때는 조용히 건너뛴다 — init()이 끝나면 자연히 최신 상태로
+    // 다시 반영된다(다음 setActiveRoom/setAppInForeground 호출 시).
+    late SharedPreferences prefs;
+    try {
+      prefs = _prefs;
+    } catch (_) {
+      return;
+    }
+    final roomId = _activeRoomId;
+    if (roomId == null) {
+      prefs.remove(kActiveRoomIdPrefsKey);
+    } else {
+      prefs.setString(kActiveRoomIdPrefsKey, roomId);
+    }
+    prefs.setBool(kAppInForegroundPrefsKey, appInForeground);
   }
 
   Room? _pendingOpenRoom;
@@ -163,6 +234,10 @@ class Session extends ChangeNotifier {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    // 앱이 시작 상태 그대로(포그라운드) 죽 있으면 didChangeAppLifecycleState가 한 번도
+    // 안 불려서 _persistForegroundState가 늦게까지 실행 안 될 수 있다 — 여기서 한 번
+    // 명시적으로 찍어둬서 FCM 백그라운드 핸들러가 항상 최신 값을 읽을 수 있게 한다.
+    _persistForegroundState();
     serverUrl = _prefs.getString(_kServerUrl);
     // 서버가 HTTP에서 HTTPS로 바뀌면서, 예전에 http://로 저장해둔 주소는 더 이상 연결되지
     // 않는다. 같은 호스트:포트를 https://로만 바꿔서 자동으로 맞춰준다.
@@ -369,6 +444,9 @@ class Session extends ChangeNotifier {
       rooms
         ..clear()
         ..addAll(myRooms);
+      for (final room in myRooms) {
+        unawaited(ensurePendingSecretInvite(room.id));
+      }
     } catch (e) {
       error = e.toString();
     }
@@ -497,6 +575,35 @@ class Session extends ChangeNotifier {
     _secretInviteSub = chatSocket.secretInvites.listen((e) {
       pendingSecretInvites.add(e);
       notifyListeners();
+      // 포그라운드면 HomeScreen이 즉시 수락/거절 다이얼로그를 띄우므로(_maybeShowSecretInvite)
+      // 알림까지 겹쳐 뜰 필요는 없다 — 백그라운드일 때만(메시지 알림과 같은 기준) 띄운다.
+      if (appInForeground) return;
+      final room = _findRoom(e.roomId);
+      AppUser? initiator;
+      if (room != null) {
+        for (final member in room.members) {
+          if (member.id == e.initiatorUserId) {
+            initiator = member;
+            break;
+          }
+        }
+      }
+      notifications.showMessage(
+        title: initiator != null
+            ? '${initiator.name} [비밀대화 요청]'
+            : '비밀대화 요청',
+        body: '비밀 대화(종단간 암호화)를 요청했습니다.',
+        roomId: e.roomId,
+        senderName: initiator?.name,
+        conversationTitle: '비밀대화 요청',
+        avatarType: initiator?.avatarType ?? 'initial',
+        avatarEmoji: initiator?.avatarEmoji,
+        avatarColor: initiator?.avatarColor,
+        avatarUrl: initiator?.avatarUrl != null
+            ? resolveUrl(initiator!.avatarUrl!)
+            : null,
+        isSecret: true,
+      );
     });
     _secretAcceptedSub?.cancel();
     _secretAcceptedSub = chatSocket.secretAccepted.listen((e) async {
@@ -509,10 +616,15 @@ class Session extends ChangeNotifier {
     });
     _secretRejectedSub?.cancel();
     _secretRejectedSub = chatSocket.secretRejected.listen((e) async {
+      // 거절한 사람(응답자) 본인은 방금 자기가 누른 결과라 알 필요가 없다 — 요청을 보내고
+      // 기다리던 쪽(초대자)에게만 알려준다.
+      final iAmInitiator = _findRoom(e.roomId)?.secretInitiatorUserId == userId;
       await secretSessionManager?.forgetRoom(e.roomId);
       rooms.removeWhere((r) => r.id == e.roomId);
       _controllers.remove(e.roomId)?.dispose();
+      if (_activeRoomId == e.roomId) _forceClearActiveRoom();
       notifyListeners();
+      if (iAmInitiator) _showToast('상대방이 요청을 거절했습니다.');
     });
     _secretLeftSub?.cancel();
     _secretLeftSub = chatSocket.secretLeft.listen((e) async {
@@ -520,8 +632,9 @@ class Session extends ChangeNotifier {
       await secretSessionManager?.forgetRoom(e.roomId);
       rooms.removeWhere((r) => r.id == e.roomId);
       _controllers.remove(e.roomId)?.dispose();
-      if (_activeRoomId == e.roomId) _activeRoomId = null;
+      if (_activeRoomId == e.roomId) _forceClearActiveRoom();
       notifyListeners();
+      _showToast('비밀 대화가 종료되었습니다.');
     });
     _secretSettingsSub?.cancel();
     _secretSettingsSub = chatSocket.secretSettings.listen((e) {
@@ -705,6 +818,29 @@ class Session extends ChangeNotifier {
     pendingSecretInvites.remove(invite);
     await secretSessionManager!.rejectInvite(invite.roomId);
     notifyListeners();
+  }
+
+  /// 응답이 필요한 비밀 대화 초대(내가 초대한 쪽이 아니고 아직 pending)인데 아직
+  /// pendingSecretInvites에 없으면(=온라인이어서 받은 secret:invite 소켓 이벤트를 놓친
+  /// 경우 — 앱이 꺼져있어서 FCM 알림만 받았을 때가 대표적) 서버에서 다시 가져와 채워
+  /// 넣는다. HomeScreen._maybeShowSecretInvite가 이 목록을 보고 수락/거절 다이얼로그를
+  /// 띄우므로, 이걸 부르는 것만으로 알림을 눌렀을 때 방이 아니라 그 다이얼로그가 뜨게 된다.
+  /// 응답 대상이 아니거나 이미 처리됐으면(서버가 404) 조용히 아무 것도 안 한다.
+  Future<void> ensurePendingSecretInvite(String roomId) async {
+    final room = _findRoom(roomId);
+    if (room == null || !room.isSecret || room.secretStatus != 'pending') {
+      return;
+    }
+    if (room.secretInitiatorUserId == userId) return;
+    if (pendingSecretInvites.any((e) => e.roomId == roomId)) return;
+    try {
+      final invite = await api!.fetchSecretInvite(roomId);
+      if (pendingSecretInvites.any((e) => e.roomId == invite.roomId)) return;
+      pendingSecretInvites.add(invite);
+      notifyListeners();
+    } catch (_) {
+      // 이미 수락/거절됐거나(404) 네트워크 실패 — 다음 동기화 때 다시 시도된다.
+    }
   }
 
   Future<void> setSecretChatTimer(Room room, int? seconds) async {
@@ -954,6 +1090,8 @@ class Session extends ChangeNotifier {
       title: roomTag != null ? '${m.senderName} [$roomTag]' : m.senderName,
       body: preview,
       roomId: m.roomId,
+      senderName: m.senderName,
+      conversationTitle: roomTag,
       avatarType: sender?.avatarType ?? 'initial',
       avatarEmoji: sender?.avatarEmoji,
       avatarColor: sender?.avatarColor,
@@ -1012,6 +1150,8 @@ class Session extends ChangeNotifier {
       title: '${c.senderName} [$tag]',
       body: preview,
       roomId: c.roomId,
+      senderName: c.senderName,
+      conversationTitle: tag,
       avatarType: sender?.avatarType ?? 'initial',
       avatarEmoji: sender?.avatarEmoji,
       avatarColor: sender?.avatarColor,
@@ -1038,6 +1178,7 @@ class Session extends ChangeNotifier {
       rooms.add(incoming);
     }
     notifyListeners();
+    unawaited(ensurePendingSecretInvite(incoming.id));
   }
 
   /// 즐겨찾기를 켜거나 끈다. 화면 반응성을 위해 먼저 로컬 값을 바꾸고, 서버 요청이 실패하면
@@ -1186,7 +1327,7 @@ class Session extends ChangeNotifier {
     if (room?.isSecret == true) await secretSessionManager?.forgetRoom(roomId);
     rooms.removeWhere((r) => r.id == roomId);
     _controllers.remove(roomId)?.dispose();
-    if (_activeRoomId == roomId) _activeRoomId = null;
+    if (_activeRoomId == roomId) _forceClearActiveRoom();
     notifyListeners();
   }
 

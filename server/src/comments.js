@@ -79,6 +79,7 @@ export function createCommentsRouter(io) {
           memberIds,
           senderId: req.user.sub,
           senderName: comment.senderName,
+          sender,
           room,
           entry: comment,
           roomTag: roomTagFor(room),

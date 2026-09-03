@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:conversation_shortcuts/conversation_shortcuts.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -80,10 +81,14 @@ class NotificationService {
   /// [isSecret]이면(비밀 대화) 아바타 오른쪽 아래에 room_avatar.dart와 같은 모양의 초록 자물쇠
   /// 배지를 그려 넣는다 — 알림 제목은 OS가 그리는 일반 텍스트라 위젯처럼 색 있는 아이콘을
   /// 나란히 붙일 수 없어서, 그 대신 아바타 이미지 쪽에 배지를 합성하는 방식으로 표현한다.
+  /// [senderName]/[conversationTitle]은 안드로이드의 "대화(conversation)" 알림 레이아웃을
+  /// 만들기 위해 [title]("보낸사람 [방]")을 쪼개서 받는 것이다 — 안 주면 [title]로 폴백한다.
   Future<void> showMessage({
     required String title,
     required String body,
     required String roomId,
+    String? senderName,
+    String? conversationTitle,
     String avatarType = 'initial',
     String? avatarEmoji,
     String? avatarColor,
@@ -110,6 +115,17 @@ class NotificationService {
       windowsImageUri = await _writeTempPng(avatarBytes);
     }
 
+    // 안드로이드: 프로필 사진을 largeIcon으로만 주면 알림 "오른쪽"에 따로 떨어져 나온다.
+    // 참고 이미지처럼 프로필 사진이 왼쪽 큰 원으로 오고 앱 아이콘이 그 모서리에 작은 배지로
+    // 붙는 건 OS의 "대화(conversation)" 레이아웃이고, 그건 MessagingStyle + (Android 11+에서는)
+    // 같은 id의 long-lived 단축키(shortcut)가 있어야 적용된다 — MainActivity에서 방마다
+    // 단축키를 등록해두고(conversation_shortcuts.dart) 여기서 그 id를 참조한다.
+    final sender = Person(
+      key: senderName ?? title,
+      name: senderName ?? title,
+      important: true,
+      icon: avatarBytes != null ? ByteArrayAndroidIcon(avatarBytes) : null,
+    );
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'messages',
@@ -117,9 +133,14 @@ class NotificationService {
         channelDescription: '새 채팅 메시지 알림',
         importance: Importance.high,
         priority: Priority.high,
-        largeIcon: avatarBytes != null
-            ? ByteArrayAndroidBitmap(avatarBytes)
-            : null,
+        shortcutId: roomId,
+        styleInformation: MessagingStyleInformation(
+          const Person(name: '나'),
+          conversationTitle: conversationTitle,
+          // conversationTitle은 groupConversation이 true일 때만 화면에 표시된다.
+          groupConversation: conversationTitle != null,
+          messages: [Message(body, DateTime.now(), sender)],
+        ),
       ),
       windows: WindowsNotificationDetails(
         images: [
@@ -140,6 +161,18 @@ class NotificationService {
         ],
       ),
     );
+    // 위 MessagingStyle이 실제 "대화" 레이아웃으로 승격되려면 알림보다 먼저 같은 id의
+    // long-lived 단축키가 등록돼 있어야 한다(ConversationShortcuts 주석 참고).
+    if (Platform.isAndroid) {
+      await ConversationShortcuts.push(
+        id: roomId,
+        // 단축키는 사람이 아니라 "대화방"을 가리킨다. 이 라벨이 알림 윗줄(대화방 이름)로도
+        // 쓰여서, 아랫줄의 보낸사람 이름과 겹치지 않게 방 이름을 그대로 넣는다.
+        label: conversationTitle ?? senderName ?? title,
+        icon: avatarBytes,
+      );
+    }
+
     await _plugin.show(
       id: roomId.hashCode,
       title: title,
@@ -150,6 +183,11 @@ class NotificationService {
 
     if (Platform.isWindows) _flashWindowsTaskbar();
   }
+
+  /// 방을 열 때(또는 다시 포그라운드로 돌아와 그 방을 계속 보고 있을 때) 그 방으로 떠있는
+  /// 알림을 지운다 — showMessage와 같은 id(roomId.hashCode)를 써야 같은 알림을 가리킨다.
+  Future<void> cancelForRoom(String roomId) =>
+      _plugin.cancel(id: roomId.hashCode);
 
   Future<Uint8List?> _resolveAvatarBytes({
     required String avatarType,
@@ -213,10 +251,15 @@ class NotificationService {
     return byteData!.buffer.asUint8List();
   }
 
-  /// [avatarBytes]를 원형으로 오려서 캔버스 가운데 그리고, 오른쪽 아래에 흰 테두리+초록 원
+  /// [avatarBytes]를 원형으로 오려서 캔버스 가운데 그리고, 왼쪽 위에 흰 테두리+초록 원
   /// 배지를 얹어 그 안에 자물쇠 모양을 그린다 — room_avatar.dart의 비밀 대화 배지(초록
-  /// Icons.lock)와 같은 자리/느낌. 배지가 들어갈 여백을 남기려고 아바타는 캔버스 전체가
-  /// 아니라 살짝 작은 반지름으로 그린다.
+  /// Icons.lock)와 같은 느낌. 배지가 들어갈 여백을 남기려고 아바타는 캔버스 전체가 아니라
+  /// 살짝 작은 반지름으로 그린다.
+  ///
+  /// 배지를 오른쪽 아래가 아니라 왼쪽 위에 그린다: 안드로이드 알림의 "대화" 레이아웃은
+  /// 오른쪽 아래에 앱 아이콘(우리가 못 바꾸는 시스템 배지)을 항상 별도 레이어로 덧그리는데,
+  /// 거기에 우리 배지를 겹쳐 그리면 그 시스템 배지에 완전히 가려져 안 보인다(실제로
+  /// 확인함 — 자리를 옮기는 것 말고는 피할 방법이 없다).
   Future<Uint8List> _badgeWithLock(Uint8List avatarBytes) async {
     final codec = await ui.instantiateImageCodec(avatarBytes);
     final frame = await codec.getNextFrame();
@@ -249,13 +292,10 @@ class NotificationService {
     );
     canvas.restore();
 
-    // 흰 테두리(badgeRadius * 1.18)까지 포함해서 캔버스(size x size) 밖으로 안 나가야 한다 —
-    // 전에는 0.2였는데 테두리가 캔버스 경계를 넘어가서 잘렸다. avatarCenter + avatarRadius*0.78
-    // (배지 중심 오프셋) + badgeRadius*1.18(테두리 반지름)이 size/2보다 여유 있게 작도록 줄였다.
     const badgeRadius = size * 0.125;
     final badgeCenter = Offset(
-      avatarCenter.dx + avatarRadius * 0.78,
-      avatarCenter.dy + avatarRadius * 0.78,
+      avatarCenter.dx - avatarRadius * 0.78,
+      avatarCenter.dy - avatarRadius * 0.78,
     );
     canvas.drawCircle(
       badgeCenter,

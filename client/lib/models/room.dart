@@ -58,6 +58,11 @@ class Room {
   /// 더 이상 없음). displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여주는 데 쓴다.
   final String? secretDepartedMemberName;
 
+  /// 비밀 대화를 먼저 건 쪽의 사용자 id. secretStatus가 'pending'일 때, 내가 이 값과 다르면
+  /// (=상대가 나에게 건 것이면) 내가 응답(수락/거절)해야 하는 쪽 — Session이 이걸로 "내가
+  /// 놓친 초대"를 판별해서 서버에서 다시 가져온다(ensurePendingSecretInvite 참고).
+  final String? secretInitiatorUserId;
+
   Room({
     required this.id,
     required this.type,
@@ -76,6 +81,7 @@ class Room {
     this.secretStatus,
     this.secretSelfDestructSeconds,
     this.secretDepartedMemberName,
+    this.secretInitiatorUserId,
   }) : lastActivityAt = lastActivityAt ?? createdAt;
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -108,6 +114,7 @@ class Room {
       secretSelfDestructSeconds: (json['secretSelfDestructSeconds'] as num?)
           ?.toInt(),
       secretDepartedMemberName: json['secretDepartedMemberName'] as String?,
+      secretInitiatorUserId: json['secretInitiatorUserId'] as String?,
     );
   }
 

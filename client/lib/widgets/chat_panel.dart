@@ -59,6 +59,10 @@ class _ChatPanelState extends State<ChatPanel> {
   Timer? _highlightTimer;
   bool _showDatePicker = false;
 
+  /// Session.setActiveRoom이 돌려준 토큰 — dispose에서 그대로 되돌려줘서, 그 사이 다른
+  /// 화면이 활성 방을 새로 지정했으면 내가 지우지 않도록 한다(Session.clearActiveRoom 참고).
+  int _activeRoomToken = 0;
+
   /// 이모티콘 패널/미리보기 상태 — 메시지 목록 위에 떠 있는 오버레이로 그리므로(카카오톡처럼
   /// 입력창을 밀어내지 않게) 입력창(ChatInputBar)이 아니라 여기서 들고 있는다.
   Sticker? _pendingSticker;
@@ -130,7 +134,7 @@ class _ChatPanelState extends State<ChatPanel> {
   @override
   void initState() {
     super.initState();
-    widget.session.setActiveRoom(widget.room.id);
+    _activeRoomToken = widget.session.setActiveRoom(widget.room.id);
     // 캐시된 컨트롤러를 다시 열었을 때는 _load()가 재실행되지 않으므로, 방을
     // 다시 열 때마다 명시적으로 한 번 더 읽음 처리한다.
     final controller = widget.session.controllerFor(widget.room);
@@ -359,11 +363,10 @@ class _ChatPanelState extends State<ChatPanel> {
 
   @override
   void dispose() {
-    // 방 A → 방 B로 바로 전환될 때 위젯 재조정 순서에 따라 dispose(A)가
-    // initState(B)보다 나중에 불릴 수 있어서, 내가 여전히 활성 방일 때만 지운다.
-    if (widget.session.activeRoomId == widget.room.id) {
-      widget.session.setActiveRoom(null);
-    }
+    // 위젯 재조정 순서상 dispose가 다음 화면의 initState보다 나중에 불릴 수 있어서,
+    // 내가 지정했던 활성 방이 아직 그대로일 때만 지운다(토큰으로 판별 — 방 id 비교로는
+    // "같은 방을 다시 여는" 경우를 구분하지 못한다. Session.clearActiveRoom 참고).
+    widget.session.clearActiveRoom(_activeRoomToken);
     widget.session
         .controllerFor(widget.room)
         .removeListener(_maybeScrollToNewEntry);

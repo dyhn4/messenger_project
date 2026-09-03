@@ -6,6 +6,7 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { listFcmTokensForUser, setDeviceFcmToken } from './db/queries/devices.js';
 import { listMutedUserIdsForRoom } from './db/queries/rooms.js';
 import { isOnline } from './presence.js';
+import { signFileUrl } from './upload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keyPath = path.join(__dirname, '..', 'firebase-service-account.json');
@@ -55,11 +56,15 @@ export function roomTagFor(room) {
  * message:new/comment:new를 받아 로컬 알림이 뜨므로 중복 발송하지 않는다.
  *
  * [entry]는 { type, text, fileName } 형태(메시지/댓글 DTO에서 필요한 필드만).
- * [room]은 { id, isSecret, name, type } — roomTag 계산에 필요한 최소 정보. */
+ * [room]은 { id, isSecret, name, type } — roomTag 계산에 필요한 최소 정보.
+ * [sender]는 { avatarType, avatarEmoji, avatarColor, avatarUrl } — 알림의 큰 프로필
+ * 아이콘(largeIcon)용. 앱이 완전히 꺼진 상태에서 이 데이터만으로 알림을 그려야 해서
+ * (main.dart의 백그라운드 핸들러 참고), avatarUrl은 여기서 미리 서명해서 넘긴다. */
 export async function notifyOfflineMembers({
   memberIds,
   senderId,
   senderName,
+  sender,
   room,
   entry,
   roomTag,
@@ -74,7 +79,11 @@ export async function notifyOfflineMembers({
   if (targets.length === 0) return;
 
   const preview = room.isSecret ? SECRET_PREVIEW_PLACEHOLDER : previewFor(entry);
-  const title = kind === 'comment' && roomTag ? `${senderName} [${roomTag}·댓글]` : roomTag ? `${senderName} [${roomTag}]` : senderName;
+  // 안드로이드는 title을 통째로 쓰지 않고 "보낸사람"과 "대화방 이름"을 따로 받아서 대화
+  // 레이아웃을 그린다(notification_service.dart 참고) — 그래서 합친 title과 별개로 조각도 보낸다.
+  const conversationTitle = roomTag ? (kind === 'comment' ? `${roomTag}·댓글` : roomTag) : null;
+  const title = conversationTitle ? `${senderName} [${conversationTitle}]` : senderName;
+  const avatarUrl = sender?.avatarUrl ? signFileUrl(sender.avatarUrl) : null;
 
   await Promise.all(
     targets.map(async (userId) => {
@@ -93,7 +102,13 @@ export async function notifyOfflineMembers({
                 roomId: room.id,
                 title,
                 body: preview,
+                senderName,
+                ...(conversationTitle ? { conversationTitle } : {}),
                 isSecret: String(!!room.isSecret),
+                avatarType: sender?.avatarType ?? 'initial',
+                ...(sender?.avatarEmoji ? { avatarEmoji: sender.avatarEmoji } : {}),
+                ...(sender?.avatarColor ? { avatarColor: sender.avatarColor } : {}),
+                ...(avatarUrl ? { avatarUrl } : {}),
               },
               android: { priority: 'high' },
             })
@@ -108,5 +123,49 @@ export async function notifyOfflineMembers({
         ),
       );
     }),
+  );
+}
+
+/** 비밀 대화 요청(secret:invite)을 상대가 오프라인일 때만 FCM으로 알린다 — 온라인이면
+ * 소켓으로 바로 받아서(session.dart) 클라이언트가 직접 로컬 알림을 그리므로(같은 알림이
+ * 두 번 뜨지 않게) 여기서는 건너뛴다. notifyOfflineMembers와 같은 분리 방식. */
+export async function notifySecretChatInvite({ targetUserId, initiator, roomId }) {
+  if (!messaging) return;
+  if (isOnline(targetUserId)) return;
+
+  const tokens = await listFcmTokensForUser(targetUserId);
+  if (tokens.length === 0) return;
+
+  const senderName = initiator?.name ?? initiator?.username ?? '알 수 없음';
+  const avatarUrl = initiator?.avatarUrl ? signFileUrl(initiator.avatarUrl) : null;
+
+  await Promise.all(
+    tokens.map(({ deviceId, fcmToken }) =>
+      messaging
+        .send({
+          token: fcmToken,
+          data: {
+            kind: 'secretInvite',
+            roomId,
+            title: `${senderName} [비밀대화 요청]`,
+            body: '비밀 대화(종단간 암호화)를 요청했습니다.',
+            senderName,
+            conversationTitle: '비밀대화 요청',
+            isSecret: 'true',
+            avatarType: initiator?.avatarType ?? 'initial',
+            ...(initiator?.avatarEmoji ? { avatarEmoji: initiator.avatarEmoji } : {}),
+            ...(initiator?.avatarColor ? { avatarColor: initiator.avatarColor } : {}),
+            ...(avatarUrl ? { avatarUrl } : {}),
+          },
+          android: { priority: 'high' },
+        })
+        .catch(async (err) => {
+          if (err?.code === 'messaging/registration-token-not-registered') {
+            await setDeviceFcmToken(deviceId, targetUserId, null).catch(() => {});
+            return;
+          }
+          console.error('[push] 비밀대화 요청 발송 실패:', err?.message ?? err);
+        }),
+    ),
   );
 }

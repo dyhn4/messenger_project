@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_android/shared_preferences_android.dart';
 
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
@@ -15,8 +17,9 @@ import 'services/session.dart';
 
 /// 앱이 완전히 종료된 상태에서 FCM이 도착하면 별도의(=Session이 없는) 격리된 isolate에서
 /// 이 함수가 새로 불린다 — 로그인 상태/소켓 등 앱의 나머지 상태에 전혀 접근할 수 없어서,
-/// push.js가 data payload에 실어 보낸 title/body/roomId만으로 최소한의 알림을 직접
-/// 그린다(아바타/자물쇠 배지 같은 풍부한 렌더링은 앱이 켜져 있을 때의 소켓 경로에서만).
+/// push.js가 data payload에 실어 보낸 정보만으로 알림을 직접 그린다. 발신자 아바타(큰
+/// 프로필 아이콘)도 이 payload에 포함돼 있어 여기서도 그려지고, 서버 접속 주소/인증서
+/// 신뢰 설정은 세션 없이 SharedPreferences/PinnedTls에서 직접 읽어온다.
 /// 탑레벨 함수+이 어노테이션이 꼭 있어야 백그라운드 isolate에서 찾아 호출할 수 있다.
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -25,16 +28,66 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   final data = message.data;
   final roomId = data['roomId'] as String?;
   if (roomId == null) return;
+
+  // SharedPreferences(레거시 싱글턴)는 같은 isolate 안에서 값을 캐싱해두고 재사용한다 —
+  // Firebase는 이 백그라운드 isolate를 메시지마다 새로 만들지 않고 재사용할 수 있어서,
+  // 캐싱된 인스턴스를 쓰면 그 사이 메인 엔진이 저장한 최신 값을 못 보고 예전 값을 계속
+  // 읽게 된다. SharedPreferencesAsync는 매번 네이티브에서 직접 읽어와 이 문제가 없다.
+  // 안드로이드 기본 백엔드는(DataStore) Session이 쓰는 레거시 SharedPreferences(XML)와
+  // 완전히 다른 저장소라 — 명시적으로 SharedPreferences 백엔드를 지정해야 같은 값을 본다.
+  final prefs = SharedPreferencesAsync(
+    options: SharedPreferencesAsyncAndroidOptions(
+      backend: SharedPreferencesAndroidBackendLibrary.SharedPreferences,
+      // 파일명을 안 주면 안드로이드 기본 preferences 파일(PreferenceManager)을 열어서
+      // 레거시 SharedPreferences 플러그인이 쓰는 "FlutterSharedPreferences" 파일과
+      // 전혀 다른 곳을 보게 된다 — 명시적으로 같은 파일명을 지정해야 한다.
+      originalSharedPreferencesOptions: const AndroidSharedPreferencesStoreOptions(
+        fileName: 'FlutterSharedPreferences',
+      ),
+    ),
+  );
+  // 메인 엔진(Session._persistForegroundState)이 남겨둔 값 — 지금 그 방을 보고 있는
+  // 중이면(=소켓 경로였다면 isViewingNow로 걸러졌을 상황) 이 격리된 백그라운드 경로에서도
+  // 똑같이 건너뛴다. 알림을 탭해서 막 방을 연 직후, 소켓/프레즌스가 아직 못 따라잡아
+  // 서버가 FCM도 같이 보낸 경우가 바로 이 경로로 온다.
+  // Session이 쓰는 레거시 SharedPreferences는 모든 키 앞에 자동으로 "flutter."를 붙이는데,
+  // SharedPreferencesAsync는 그 프리픽스를 대신 붙여주지 않는다 — 직접 붙여야 같은 값을 찾는다.
+  final fg = await prefs.getBool('flutter.${Session.kAppInForegroundPrefsKey}');
+  final active = await prefs.getString(
+    'flutter.${Session.kActiveRoomIdPrefsKey}',
+  );
+  final isViewingNow = fg == true && active == roomId;
+  if (isViewingNow) return;
+
   final notifications = NotificationService();
   await notifications.init(
     onTap: (_) {}, // 이 isolate엔 화면이 없어 탭 이동은 못 한다.
     requestPermission:
         false, // 헤드리스 isolate라 권한 요청 다이얼로그를 못 띄운다(NotificationService 참고).
   );
+
+  // push.js가 sender의 아바타 정보를 data payload에 실어 보낸다(avatarUrl은 서버가 이미
+  // 서명해서 상대경로로 보냄) — 프로필 사진을 받아오려면 이 isolate에도 자체 서명 인증서
+  // 신뢰 설정과 서버 주소가 필요하다(둘 다 세션 없이 SharedPreferences에서 직접 읽는다).
+  await PinnedTls.installGlobalHttpOverrides();
+  final serverUrl = await prefs.getString('flutter.server_base_url');
+  final avatarUrlRaw = data['avatarUrl'] as String?;
+  final avatarUrl = avatarUrlRaw == null
+      ? null
+      : (avatarUrlRaw.startsWith('http') || serverUrl == null
+            ? avatarUrlRaw
+            : '$serverUrl$avatarUrlRaw');
+
   await notifications.showMessage(
     title: data['title'] as String? ?? 'TeamTalk',
     body: data['body'] as String? ?? '',
     roomId: roomId,
+    senderName: data['senderName'] as String?,
+    conversationTitle: data['conversationTitle'] as String?,
+    avatarType: data['avatarType'] as String? ?? 'initial',
+    avatarEmoji: data['avatarEmoji'] as String?,
+    avatarColor: data['avatarColor'] as String?,
+    avatarUrl: avatarUrl,
     isSecret: data['isSecret'] == 'true',
   );
 }
@@ -87,6 +140,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         .then((_) => _checkNotificationLaunch());
     session.addListener(_tryOpenPendingLaunchRoom);
     session.init();
+    // session.toasts는 HomeScreen이 자기 자신의 context로 구독해서 보여준다(main.dart의
+    // navigatorKey.currentContext는 Navigator 위젯 자체의 context라 SnackBar/Overlay가
+    // 화면에 그려지지 않는다 — home_screen.dart 참고).
   }
 
   @override
@@ -117,10 +173,21 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     session.setAppInForeground(state == AppLifecycleState.resumed);
   }
 
-  void _openRoomFromNotification(String roomId) {
+  Future<void> _openRoomFromNotification(String roomId) async {
     final match = session.rooms.where((r) => r.id == roomId);
     if (match.isEmpty) return;
     final room = match.first;
+
+    // 비밀 대화 요청인데 내가 아직 응답 안 한 쪽이면, 방을 바로 열지 않고 수락/거절
+    // 다이얼로그부터 띄운다. 온라인이었다면 secret:invite 소켓 이벤트로 이미
+    // pendingSecretInvites에 들어있겠지만, 앱이 꺼져있어서 FCM 알림만 받았을 때는 그
+    // 이벤트를 놓쳤으므로 여기서 서버에 다시 물어봐야 한다(ensurePendingSecretInvite).
+    if (room.isSecret &&
+        room.secretStatus == 'pending' &&
+        room.secretInitiatorUserId != session.userId) {
+      await session.ensurePendingSecretInvite(roomId);
+      return; // HomeScreen이 pendingSecretInvites를 보고 다이얼로그를 띄운다.
+    }
 
     final width = navigatorKey.currentContext != null
         ? MediaQuery.sizeOf(navigatorKey.currentContext!).width

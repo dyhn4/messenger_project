@@ -43,6 +43,10 @@ dependencies:
   path_provider: ^2.1.6
   intl: ^0.20.3
   shared_preferences: ^2.5.5
+  # SharedPreferencesAsync가 기본으로 쓰는 DataStore 백엔드 대신, main.dart의 FCM 백그라운드
+  # 핸들러에서 레거시 SharedPreferences(Session이 쓰는 것과 같은 XML)를 직접 지정해 읽으려면
+  # 이 Android 전용 옵션 타입이 필요하다.
+  shared_preferences_android: ^2.4.0
   url_launcher: ^6.3.2
   flutter_local_notifications: ^22.3.0
   win32: ^5.15.0
@@ -60,6 +64,10 @@ dependencies:
   # Platform.isAndroid로 분기해서 Windows에서는 아예 안 씀).
   firebase_core: ^4.1.1
   firebase_messaging: ^16.0.2
+  # 안드로이드 "대화" 알림용 long-lived 단축키 등록(내부 플러그인 — 백그라운드 isolate에서도
+  # 써야 해서 MainActivity의 MethodChannel이 아니라 정식 플러그인으로 만들었다).
+  conversation_shortcuts:
+    path: packages/conversation_shortcuts
 dev_dependencies:
   flutter_test:
     sdk: flutter

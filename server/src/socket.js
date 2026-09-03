@@ -101,6 +101,7 @@ export function registerSocket(io) {
             memberIds,
             senderId: socket.data.userId,
             senderName: message.senderName,
+            sender,
             room,
             entry: message,
             roomTag: roomTagFor(room),

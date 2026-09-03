@@ -10,6 +10,7 @@ import {
 } from './db/queries/secretSessions.js';
 import { addRoomMembers, findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { notifySecretChatInvite } from './push.js';
 import { dmKeyFor, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
 
 const MIN_SELF_DESTRUCT_SECONDS = 1;
@@ -104,7 +105,39 @@ export function createSecretChatsRouter(io) {
       initiatorEphemeralPublicKey,
       initiatorEphemeralSignature,
     });
+    // system 타입은 클라이언트가 복호화를 아예 안 건드리므로(decryptInPlace 참고) 비밀
+    // 대화에도 평문 시스템 메시지를 그대로 써도 된다 — 아래 세 System 메시지(요청/수락/
+    // 상대만 나가기) 전부 같은 이유로 안전하다.
+    await postSystemMessage(io, room, '비밀대화 요청을 보냈습니다. 상대방이 수락할 때까지 대기 중');
+    const initiator = await findUserById(req.user.sub);
+    notifySecretChatInvite({ targetUserId, initiator, roomId: room.id }).catch((err) =>
+      console.error('[push] 비밀대화 요청 알림 실패:', err?.message ?? err),
+    );
     res.status(201).json(await toRoomDto(room, req.user.sub));
+  });
+
+  /**
+   * 응답자가 초대를 받았을 때 앱이 꺼져있어서(FCM만 받음) secret:invite 소켓 이벤트를
+   * 놓친 경우, 수락/거절에 필요한 정보(초대자의 임시 공개키+서명)를 다시 가져온다.
+   * client/lib/services/session.dart의 ensurePendingSecretInvite 참고.
+   */
+  router.get('/secret-chats/:roomId/invite', async (req, res) => {
+    const room = await findRoomById(req.params.roomId);
+    if (!room || !room.isSecret) return res.status(404).json({ error: '비밀 대화를 찾을 수 없습니다.' });
+    const session = await findSecretSessionByRoomId(room.id);
+    if (!session || session.status !== 'pending') {
+      return res.status(404).json({ error: '대기 중인 초대가 없습니다.' });
+    }
+    if (session.responderUserId !== req.user.sub) {
+      return res.status(403).json({ error: '이 요청을 볼 수 없습니다.' });
+    }
+    res.json({
+      roomId: room.id,
+      initiatorUserId: session.initiatorUserId,
+      initiatorDeviceId: session.initiatorDeviceId,
+      initiatorEphemeralPublicKey: session.initiatorEphemeralPublicKey,
+      initiatorEphemeralSignature: session.initiatorEphemeralSignature,
+    });
   });
 
   router.post('/secret-chats/:roomId/accept', async (req, res) => {
@@ -129,6 +162,7 @@ export function createSecretChatsRouter(io) {
       responderEphemeralPublicKey,
       responderEphemeralSignature,
     });
+    await postSystemMessage(io, room, '비밀대화가 시작되었습니다');
     res.json({ ok: true, session: { status: session.status, keyEpoch: session.keyEpoch } });
   });
 

@@ -204,6 +204,38 @@ export function createAuthRouter(io) {
   });
 
   /**
+   * 보안 질문 답변만 검증한다(비밀번호는 바꾸지 않음) — 재설정 화면에서 답변이 맞을
+   * 때만 새 비밀번호 입력칸을 보여주기 위해 쓴다. 계정에 보안 질문이 없으면(컬럼 생기기
+   * 전 가입) 항상 통과시킨다 — /reset-password의 검증 로직과 동일하게 맞춘다.
+   */
+  router.post("/verify-security-answer", async (req, res) => {
+    const { username, email, securityAnswer } = req.body ?? {};
+    const user = await findUserByUsernameAndEmailLookup(
+      username,
+      lookupHash(email),
+    );
+    if (!user) {
+      return res
+        .status(400)
+        .json({ error: "아이디와 이메일이 일치하는 계정이 없습니다." });
+    }
+    if (user.securityAnswerHash) {
+      const matches =
+        !!securityAnswer &&
+        (await bcrypt.compare(
+          normalizeAnswer(securityAnswer),
+          user.securityAnswerHash,
+        ));
+      if (!matches) {
+        return res
+          .status(400)
+          .json({ error: "보안 질문 답변이 일치하지 않습니다." });
+      }
+    }
+    res.json({ ok: true });
+  });
+
+  /**
    * 이메일 인증 없이 앱 안에서 바로 비밀번호를 재설정한다 (서버에 메일 발송 기능이 없음).
    * 아이디와 이메일이 둘 다 일치해야 통과하고, 계정에 보안 질문이 설정돼 있으면 그 답변까지
    * 맞아야 한다(이 컬럼이 생기기 전 가입한 계정은 답변 확인을 건너뛴다).

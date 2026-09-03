@@ -204,14 +204,27 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                                     onlineUserIds: widget.session.onlineUserIds,
                                   ),
                                   const SizedBox(width: 10),
+                                  if (_selectedRoom!.isSecret) ...[
+                                    const Icon(
+                                      Icons.lock,
+                                      size: 14,
+                                      color: Colors.green,
+                                    ),
+                                    const SizedBox(width: 4),
+                                  ],
                                   Expanded(
                                     child: Text(
                                       _selectedRoom!.displayName(
                                         widget.session.userId ?? '',
                                       ),
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.titleMedium,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            color: _selectedRoom!.isSecret
+                                                ? Colors.green
+                                                : null,
+                                          ),
                                     ),
                                   ),
                                   RoomOptionsMenu(

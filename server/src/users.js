@@ -59,7 +59,8 @@ export function createUsersRouter(io) {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
-    const { avatarType, avatarEmoji, avatarColor, avatarUrl, name, email } = req.body ?? {};
+    const { avatarType, avatarEmoji, avatarColor, avatarUrl, name, email, currentPassword } =
+      req.body ?? {};
     const patch = {};
 
     if (avatarType !== undefined) {
@@ -80,6 +81,11 @@ export function createUsersRouter(io) {
     }
 
     if (email !== undefined) {
+      // 이메일은 아이디/비밀번호 찾기에 쓰이는 계정 복구 수단이라, 이름/아바타와 달리
+      // 현재 비밀번호로 본인 확인을 한 번 더 받는다(비밀번호 변경과 같은 정책).
+      if (!currentPassword || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+        return res.status(401).json({ error: '현재 비밀번호가 올바르지 않습니다.' });
+      }
       if (!EMAIL_PATTERN.test(email)) {
         return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
       }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/session.dart';
+import '../widgets/email_address_field.dart';
 import '../widgets/my_avatar.dart';
 
 /// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 아이디/이름/이메일 + 로그아웃.
@@ -37,21 +38,10 @@ class MyProfileDialog extends StatelessWidget {
   }
 
   Future<void> _editEmail(BuildContext context) async {
-    final value = await _promptEdit(
-      context,
-      title: '이메일 변경',
-      initialValue: session.email ?? '',
-      keyboardType: TextInputType.emailAddress,
+    await showDialog(
+      context: context,
+      builder: (_) => _EditEmailDialog(session: session),
     );
-    if (value == null || value.isEmpty) return;
-    try {
-      await session.updateProfile(email: value);
-    } catch (e) {
-      if (context.mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-    }
   }
 
   Future<void> _changePassword(BuildContext context) async {
@@ -75,8 +65,22 @@ class MyProfileDialog extends StatelessWidget {
     );
     if (confirmed == true && context.mounted) {
       Navigator.of(context).pop(); // 프로필 카드 닫기
-      if (context.mounted)
+      if (context.mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('회원 탈퇴'),
+            content: const Text('회원탈퇴가 완료되었습니다.'),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('확인'),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 
@@ -144,7 +148,7 @@ class MyProfileDialog extends StatelessWidget {
               _ProfileInfoRow(
                 icon: Icons.mail_outline,
                 label: '이메일',
-                value: session.email ?? '',
+                value: '',
                 onTap: () => _editEmail(context),
               ),
               _ProfileInfoRow(
@@ -405,6 +409,96 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
   }
 }
 
+/// "이메일 변경" 다이얼로그. 이메일은 아이디/비밀번호 찾기에 쓰이는 계정 복구 수단이라
+/// 비밀번호 변경과 같은 정책으로, 현재 비밀번호를 확인한 뒤에만 새 이메일을 받는다. 새
+/// 이메일 입력칸은 회원가입 폼과 같은 형식(로컬 파트 + '@' + 도메인)을 쓴다.
+class _EditEmailDialog extends StatefulWidget {
+  final Session session;
+  const _EditEmailDialog({required this.session});
+
+  @override
+  State<_EditEmailDialog> createState() => _EditEmailDialogState();
+}
+
+class _EditEmailDialogState extends State<_EditEmailDialog> {
+  final _password = TextEditingController();
+  String _email = '';
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_password.text.isEmpty || _email.trim().isEmpty) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.session.updateProfile(
+        email: _email.trim(),
+        currentPassword: _password.text,
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('이메일 변경'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _password,
+              autofocus: true,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: '비밀번호 확인',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            EmailAddressField(onChanged: (v) => _email = v),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('변경하기'),
+        ),
+      ],
+    );
+  }
+}
+
 /// 프로필 카드의 정보 한 줄(아이디/이름/이메일). onTap이 있으면 눌러서 바로 수정할 수 있다.
 class _ProfileInfoRow extends StatelessWidget {
   final IconData icon;
@@ -471,23 +565,18 @@ class _ProfileInfoRow extends StatelessWidget {
   }
 }
 
-/// 이름/이메일 수정용 간단한 한 줄 입력 다이얼로그.
+/// 이름 수정용 간단한 한 줄 입력 다이얼로그.
 Future<String?> _promptEdit(
   BuildContext context, {
   required String title,
   required String initialValue,
-  TextInputType? keyboardType,
 }) {
   final controller = TextEditingController(text: initialValue);
   return showDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        keyboardType: keyboardType,
-      ),
+      content: TextField(controller: controller, autofocus: true),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),

@@ -589,9 +589,7 @@ class Session extends ChangeNotifier {
         }
       }
       notifications.showMessage(
-        title: initiator != null
-            ? '${initiator.name} [비밀대화 요청]'
-            : '비밀대화 요청',
+        title: initiator != null ? '${initiator.name} [비밀대화 요청]' : '비밀대화 요청',
         body: '비밀 대화(종단간 암호화)를 요청했습니다.',
         roomId: e.roomId,
         senderName: initiator?.name,
@@ -1283,11 +1281,20 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateProfile({String? name, String? email}) async {
-    final me = await api!.updateProfile(name: name, email: email);
+  Future<void> updateProfile({
+    String? name,
+    String? email,
+    String? currentPassword,
+  }) async {
+    final me = await api!.updateProfile(
+      name: name,
+      email: email,
+      currentPassword: currentPassword,
+    );
     this.name = me.name;
     this.email = me.email;
     notifyListeners();
+    if (email != null) _showToast('이메일이 변경되었습니다.');
   }
 
   /// 회원 탈퇴. 서버가 세션/토큰을 이미 폐기해두므로, 성공하면 그냥 로그아웃과 같은
@@ -1319,6 +1326,7 @@ class Session extends ChangeNotifier {
       token: token!,
       deviceId: deviceIdentity?.deviceId,
     );
+    _showToast('비밀번호가 변경되었습니다.');
   }
 
   Future<void> leaveRoom(String roomId, {bool alsoRemoveOther = false}) async {

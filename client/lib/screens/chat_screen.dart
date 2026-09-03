@@ -64,10 +64,15 @@ class _ChatScreenState extends State<ChatScreen> {
               size: 24,
             ),
             const SizedBox(width: 8),
+            if (room.isSecret) ...[
+              const Icon(Icons.lock, size: 14, color: Colors.green),
+              const SizedBox(width: 4),
+            ],
             Expanded(
               child: Text(
                 room.displayName(session.userId ?? ''),
                 overflow: TextOverflow.ellipsis,
+                style: room.isSecret ? const TextStyle(color: Colors.green) : null,
               ),
             ),
           ],

@@ -210,7 +210,9 @@ class ApiClient {
   /// 문구를 돌려준다.
   Future<String?> checkUsernameAvailable(String username) async {
     final res = await _client.get(
-      _uri('/auth/username-available?username=${Uri.encodeQueryComponent(username)}'),
+      _uri(
+        '/auth/username-available?username=${Uri.encodeQueryComponent(username)}',
+      ),
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     if (res.statusCode >= 400) {
@@ -302,6 +304,29 @@ class ApiClient {
       throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
     }
     return body['question'] as String?;
+  }
+
+  /// 보안 질문 답변만 검증한다(비밀번호는 안 바꿈) — 답변이 맞을 때만 새 비밀번호 입력칸을
+  /// 보여주기 위해 재설정 화면에서 쓴다. 계정에 보안 질문이 없으면 서버가 항상 통과시킨다.
+  Future<void> verifySecurityAnswer({
+    required String username,
+    required String email,
+    String? securityAnswer,
+  }) async {
+    final res = await _client.post(
+      _uri('/auth/verify-security-answer'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'username': username,
+        'email': email,
+        'securityAnswer': ?securityAnswer,
+      }),
+    );
+    if (res.statusCode >= 400) {
+      final body =
+          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+    }
   }
 
   Future<void> resetPassword({
@@ -418,10 +443,19 @@ class ApiClient {
   }
 
   /// 제공한 필드만 바꾼다(이름만, 이메일만, 또는 둘 다).
-  Future<MyProfile> updateProfile({String? name, String? email}) async {
+  /// [email]을 바꿀 때는 서버가 [currentPassword]로 본인 확인을 한다(비밀번호 변경과
+  /// 같은 정책 — 이메일은 계정 복구 수단이라 이름/아바타보다 한 단계 더 확인한다).
+  Future<MyProfile> updateProfile({
+    String? name,
+    String? email,
+    String? currentPassword,
+  }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
-    if (email != null) body['email'] = email;
+    if (email != null) {
+      body['email'] = email;
+      body['currentPassword'] = currentPassword;
+    }
     return MyProfile.fromJson(
       await _patch('/api/users/me', body) as Map<String, dynamic>,
     );

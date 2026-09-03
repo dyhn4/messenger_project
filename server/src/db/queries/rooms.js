@@ -100,15 +100,19 @@ export function listRoomMemberIds(roomId) {
     .then((rows) => rows.map((r) => r.userId));
 }
 
-/** 방 멤버 목록을 실제 사용자 정보(publicUser로 감쌀 원본 행)로. 탈퇴한 사용자는 멤버 목록/
- * 그룹 표시 이름에 더 이상 보일 필요가 없으므로 제외한다(과거 메시지의 발신자 표시는
- * 메시지에 박제된 senderName으로 대체됨 — message_bubble.dart 참고). */
+/** 방 멤버 목록을 실제 사용자 정보(publicUser로 감쌀 원본 행)로. 탈퇴한 사용자도 그대로
+ * 포함한다 — users.withdraw가 이미 이름/아바타를 "탈퇴한 사용자"+기본 아바타로 익명화해두므로,
+ * 여기서 빼면 클라이언트가 그 멤버를 못 찾아 "(알 수 없음)"으로 표시하고(room.dart
+ * displayName), 메시지 말풍선도 라이브 멤버 조회 대신 메시지에 박제된(탈퇴 전) senderName/
+ * 아바타로 되돌아가 버린다(message_bubble.dart의 sender?.name ?? message.senderName 우선순위
+ * 참고) — 계속 포함시켜야 방 제목/아바타/메시지 발신자 표시가 전부 "탈퇴한 사용자"로 일관되게
+ * 보인다. 새 대화 상대 선택 목록에서 빼는 것은 별도인 listActiveUsers가 담당한다. */
 export function listRoomMemberUsers(roomId) {
   return db
     .select({ user: users })
     .from(roomMembers)
     .innerJoin(users, eq(roomMembers.userId, users.id))
-    .where(and(eq(roomMembers.roomId, roomId), isNull(users.deletedAt)))
+    .where(eq(roomMembers.roomId, roomId))
     .then((rows) => rows.map((r) => r.user));
 }
 

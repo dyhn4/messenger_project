@@ -105,6 +105,10 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   완전히 다른 인스턴스로 바뀌면(DB가 다르면) 계정은 그 서버 기준으로 다시 로그인해야 합니다
 - **채팅방 비밀번호/초대 링크** 등 별도 접근 제어 수단 — 지금은 서버에서 직접 멤버로 추가하는 방식뿐
 - **관리자 콘솔/대시보드** — 웹 기반 운영 화면 없음. 운영 작업은 서버 콘솔/SQL로 직접 수행
+- **서버 설치 프로그램 자체의 자동 업데이트** — 새 `teamtalk-server-setup.exe`를 만들어서 대상 PC에
+  다시 실행해주는 건 됩니다(위 "새 서비스 PC에 네이티브 설치 프로그램으로 설치/업데이트" 참고),
+  다만 그 배포/실행을 서버가 스스로 감지해서 알아서 받아 설치하는 건 아직 없습니다(관리자 권한
+  작업이라 무인 자동 적용은 위험 부담이 있어 일부러 범위 밖으로 뒀습니다).
 
 ## 구성도
 
@@ -144,7 +148,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 푸시 | firebase-admin ^14 (FCM 발송) |
 | TLS | selfsigned(자체 서명 인증서 생성) + Node 내장 `https` |
 | 기타 | dotenv, cors |
-| 운영 | pm2(선택), ecosystem.config.cjs |
+| 운영 | pm2(선택, 개발 PC/수동 운영) 또는 nssm(설치 프로그램이 등록하는 Windows 서비스) |
+| 설치 프로그램 | Inno Setup(`server/installer/messenger-server.iss`), PostgreSQL 공식 설치 프로그램(무인 모드로 같이 실행) |
 
 **클라이언트** (`client/pubspec.yaml`)
 
@@ -201,6 +206,12 @@ messenger_project/
 │  │     └─ queries/                테이블별 쿼리 함수
 │  ├─ drizzle/                   drizzle-kit이 생성한 SQL 마이그레이션 파일들
 │  ├─ scripts/pair.mjs           pm2 등으로 띄웠을 때 콘솔 입력 없이 페어링 코드 발급
+│  ├─ installer/                 서버+PostgreSQL 네이티브 Windows 설치 프로그램(관리자 권한)
+│  │  ├─ messenger-server.iss     Inno Setup 스크립트
+│  │  ├─ Setup-TeamTalkServer.ps1 설치 후 실제 작업(PostgreSQL 설치, DB 생성, 마이그레이션, 서비스 등록)
+│  │  ├─ Get-PairingCode.ps1      "새 기기 페어링 코드 발급" 시작메뉴 항목
+│  │  ├─ Uninstall-Full.ps1       "서버 데이터 완전 삭제"(일반 제거와 분리, 별도 확인 필요)
+│  │  └─ bin/ · stage/ · output/  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
 │  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성)
 │  ├─ uploads/                   업로드된 첨부파일(gitignore)
 │  ├─ releases/                  배포용 빌드 산출물 + version.json(gitignore)
@@ -209,6 +220,7 @@ messenger_project/
 │
 ├─ docs/                        (현재 비어 있음)
 ├─ publish_release.ps1          클라이언트 릴리즈 빌드 → server/releases/ 배포 스크립트
+├─ build_server_installer.ps1   서버+DB 설치 프로그램(teamtalk-server-setup.exe) 빌드 스크립트
 └─ README.md
 ```
 
@@ -607,6 +619,44 @@ npm run pm2:restart  # 또는 pm2 없이 직접 재시작
 `.env`, `certs/`, `uploads/`, `releases/`, `firebase-service-account.json`은 모두 `.gitignore`에
 있어 `git pull`이 건드리지 않습니다 — 서버를 처음 새 PC에 놓을 때는 이 파일들을 별도로(USB, 압축
 파일 등으로) 옮겨야 합니다.
+
+### 새 서비스 PC에 네이티브 설치 프로그램으로 설치/업데이트
+
+위의 git pull 방식과 별개로, Node.js/PostgreSQL을 하나도 안 깔아본 새 "서비스 PC"에 서버+DB를
+한 번에 세팅하는 Windows 설치 프로그램이 있습니다(`server/installer/`). 설치하는 사람이 비밀번호나
+DB 계정을 직접 다룰 필요가 없습니다 — 전부 설치 프로그램이 자동으로 만들고 내부적으로만 씁니다.
+
+**설치 프로그램 만들기** (저장소 루트에서):
+
+```powershell
+.\build_server_installer.ps1
+```
+
+Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`를 `server/installer/bin/`에
+받아두고(이미 있으면 재사용), `server/`를 정리해서(`.env`/`certs`/`uploads`/로그/
+`firebase-service-account.json` 등 실데이터·비밀값 제외) `npm install`까지 마친 결과를
+`server/installer/stage/`에 만든 뒤, `server/installer/output/teamtalk-server-setup.exe`를
+컴파일합니다. (`server/releases/`와는 무관한 별개 산출물입니다 — 클라이언트 자동 업데이트
+채널이 아니라 USB/사내 공유 폴더 등으로 직접 전달하는 용도입니다.)
+
+**새 PC에 설치**: `teamtalk-server-setup.exe`를 관리자 권한으로 실행하면 —
+
+- PostgreSQL을 이 앱 전용 경로(`C:\TeamTalk-Server\pgsql`)와 전용 포트(`55432`)에 무인 설치합니다
+  (그 PC에 이미 다른 PostgreSQL이 있어도 충돌하지 않습니다).
+- `messenger_app` 역할/`messenger` 데이터베이스를 만들고 마이그레이션까지 적용합니다.
+- 방화벽 규칙을 추가합니다.
+- 설치 중 고르는 대로 서버를 **백그라운드 Windows 서비스**(NSSM, 부팅 시 자동 시작·창 없음,
+  서비스 이름 `TeamTalkServer`) 또는 **콘솔 창**(시작 메뉴 "서버 콘솔로 실행")으로 등록합니다.
+- 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함)과
+  "서버 데이터 완전 삭제"(별도 확인 절차 필요 — 일반 제거는 DB/업로드/설정을 지우지 않습니다)도
+  같이 설치됩니다.
+
+**업데이트**: 새로 `build_server_installer.ps1`을 돌려서 만든 최신 `teamtalk-server-setup.exe`를
+같은 PC에서 다시 실행하면 됩니다 — 이미 설치돼 있는 걸 감지해서 PostgreSQL 재설치나 DB 비밀번호
+재생성 없이, 프로그램 파일만 새로 덮어쓰고 새로 추가된 마이그레이션만 적용한 뒤 서비스를
+재시작합니다(기존 `.env`/DB/업로드는 그대로 보존).
+
+자세한 설계 배경과 유지보수 메모, 검증 체크리스트는 `server/installer/README.md` 참고.
 
 ## 서버/DB 백업 · 이전 · 초기화
 

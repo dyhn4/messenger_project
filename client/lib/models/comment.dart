@@ -91,4 +91,5 @@ class Comment {
       deleted: json['deleted'] as bool? ?? false,
     );
   }
+
 }

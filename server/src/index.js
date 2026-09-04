@@ -17,7 +17,7 @@ import { createSecretChatsRouter } from './secretChats.js';
 import { startSecretExpiryJob } from './secretExpiry.js';
 import { searchRouter } from './search.js';
 import { registerSocket } from './socket.js';
-import { filesRouter, uploadRouter } from './upload.js';
+import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
 import { createUsersRouter } from './users.js';
 import { versionRouter } from './version.js';
 
@@ -44,6 +44,7 @@ const io = new Server(httpServer, { cors: { origin: '*' } });
 
 app.use('/auth', createAuthRouter(io));
 app.use('/api', requireAuth, uploadRouter);
+app.use('/api', uploadErrorHandler);
 app.use('/api', requireAuth, createUsersRouter(io));
 app.use('/api', requireAuth, createRoomsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));

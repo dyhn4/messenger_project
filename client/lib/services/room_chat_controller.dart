@@ -7,9 +7,41 @@ import 'package:path_provider/path_provider.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
-import 'image_thumbnail.dart';
+import 'api_client.dart' show UploadCancelToken;
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'session.dart';
+
+/// 첨부 업로드가 끝난 뒤(암호화 여부와 무관하게) 실제 메시지/댓글 전송에 필요한 결과.
+/// ChatInputBar/CommentInputBar가 첨부한 즉시 RoomChatController.uploadAttachment로 이 값을
+/// 만들어두고, 사용자가 "보내기"를 누르면 sendUploadedAttachment/postUploadedCommentAttachment에
+/// 그대로 넘긴다 — 그때는 이미 올라가 있는 파일이라 다시 업로드하지 않는다.
+class UploadedAttachment {
+  final bool isImage;
+  final String url;
+  final String fileName;
+  final int size;
+  final String? mimeType;
+  final String? thumbnailUrl;
+
+  /// 비밀 대화일 때만 채워짐 — [url]이 가리키는 바이트가 이미 암호화됐다는 뜻.
+  final String? attachmentKey;
+  final String? attachmentNonce;
+  final String? thumbnailKey;
+  final String? thumbnailNonce;
+
+  UploadedAttachment({
+    required this.isImage,
+    required this.url,
+    required this.fileName,
+    required this.size,
+    this.mimeType,
+    this.thumbnailUrl,
+    this.attachmentKey,
+    this.attachmentNonce,
+    this.thumbnailKey,
+    this.thumbnailNonce,
+  });
+}
 
 /// 방 하나의 메시지 목록/전송을 담당하는 컨트롤러. 방을 열 때 Session이 생성해서 캐싱한다.
 class RoomChatController extends ChangeNotifier {
@@ -196,58 +228,48 @@ class RoomChatController extends ChangeNotifier {
     await _session.api!.addComment(messageId, text: payload, type: 'sticker');
   }
 
-  /// 댓글에 이미지/파일을 첨부해서 단다. [caption]을 같이 주면(첨부 후 텍스트도 입력한 경우)
-  /// 그 댓글 하나에 첨부와 텍스트가 함께 실린다 — sendFile과 동일한 방식(비밀 대화 암호화도 동일).
-  Future<void> postCommentFile(
+  /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 댓글을 단다. [caption]을 같이 주면(첨부
+  /// 후 텍스트도 입력한 경우) 그 댓글 하나에 첨부와 텍스트가 함께 실린다.
+  Future<void> postUploadedCommentAttachment(
     String messageId,
-    File file, {
-    required bool isImage,
+    UploadedAttachment u, {
     String? caption,
   }) async {
     final trimmedCaption = caption?.trim();
-    final originalBytes = await file.readAsBytes();
-    final (thumbnailUrl, thumbnailKey, thumbnailNonce) =
-        await _uploadThumbnailIfImage(isImage, originalBytes);
-
     if (room.isSecret) {
-      final encrypted = await secret_crypto.encryptAttachment(originalBytes);
-      final tempFile = await _writeTempFile(encrypted.cipherBytes);
-      final result = await _session.api!.uploadFile(tempFile);
-      unawaited(tempFile.delete().catchError((_) => tempFile));
       final envelope = await _session.encryptAttachmentPayload(
         room,
         caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-        fileName: result.fileName,
-        fileSize: result.size,
-        mimeType: result.mimeType,
-        attachmentKey: encrypted.keyBase64,
-        attachmentNonce: encrypted.nonceBase64,
-        thumbnailKey: thumbnailKey,
-        thumbnailNonce: thumbnailNonce,
+        fileName: u.fileName,
+        fileSize: u.size,
+        mimeType: u.mimeType,
+        attachmentKey: u.attachmentKey!,
+        attachmentNonce: u.attachmentNonce!,
+        thumbnailKey: u.thumbnailKey,
+        thumbnailNonce: u.thumbnailNonce,
       );
       await _session.api!.addComment(
         messageId,
         text: envelope,
-        type: isImage ? 'image' : 'file',
-        fileUrl: result.url,
+        type: u.isImage ? 'image' : 'file',
+        fileUrl: u.url,
         fileName: 'encrypted',
-        fileSize: encrypted.cipherBytes.length,
+        fileSize: u.size,
         mimeType: 'application/octet-stream',
-        thumbnailUrl: thumbnailUrl,
+        thumbnailUrl: u.thumbnailUrl,
       );
       return;
     }
 
-    final result = await _session.api!.uploadFile(file);
     await _session.api!.addComment(
       messageId,
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-      type: isImage ? 'image' : 'file',
-      fileUrl: result.url,
-      fileName: result.fileName,
-      fileSize: result.size,
-      mimeType: result.mimeType,
-      thumbnailUrl: thumbnailUrl,
+      type: u.isImage ? 'image' : 'file',
+      fileUrl: u.url,
+      fileName: u.fileName,
+      fileSize: u.size,
+      mimeType: u.mimeType,
+      thumbnailUrl: u.thumbnailUrl,
     );
   }
 
@@ -525,71 +547,114 @@ class RoomChatController extends ChangeNotifier {
     );
   }
 
-  /// [caption]을 같이 주면(이미지/파일 첨부 후 메시지를 입력하고 보낸 경우) 그 메시지 하나에
-  /// 텍스트와 첨부가 함께 실린다. 비밀 대화면 파일 바이트 자체를 암호화한 블롭을 올리고(서버는
-  /// opaque한 바이트로만 취급), 캡션+원본 파일정보+복호화 키는 메시지 암호문 봉투 안에 함께 넣는다.
-  Future<void> sendFile(
+  /// 파일을 서버에 올린다(썸네일 업로드, 비밀 대화면 원본 암호화까지 포함) — 실제 메시지/댓글
+  /// 전송(sendUploadedAttachment/postUploadedCommentAttachment)과 분리해서, 첨부한 즉시(보내기를
+  /// 누르기 전부터) 입력창에서 업로드를 시작할 수 있게 한다. [originalBytes]/[thumbBytes]는
+  /// 호출부(ChatInputBar/CommentInputBar)가 첨부 즉시 한 번만 읽어/생성해서 넘긴다 — 여기서
+  /// 다시 읽거나 다시 생성하지 않는다(큰 파일을 두 번 읽지 않기 위함). [onProgress]/
+  /// [cancelToken]은 원본 파일 업로드에만 연결한다(썸네일은 작고 빨라서 진행률/취소를 안 건다).
+  Future<UploadedAttachment> uploadAttachment(
     File file, {
     required bool isImage,
-    String? caption,
+    required Uint8List originalBytes,
+    required Uint8List? thumbBytes,
+    void Function(int sent, int total)? onProgress,
+    UploadCancelToken? cancelToken,
   }) async {
-    final trimmedCaption = caption?.trim();
-    final originalBytes = await file.readAsBytes();
     final (thumbnailUrl, thumbnailKey, thumbnailNonce) =
-        await _uploadThumbnailIfImage(isImage, originalBytes);
+        await _uploadThumbnailIfImage(thumbBytes);
 
     if (room.isSecret) {
       final encrypted = await secret_crypto.encryptAttachment(originalBytes);
       final tempFile = await _writeTempFile(encrypted.cipherBytes);
-      final result = await _session.api!.uploadFile(tempFile);
+      final result = await _session.api!.uploadFile(
+        tempFile,
+        onProgress: onProgress,
+        cancelToken: cancelToken,
+      );
       unawaited(tempFile.delete().catchError((_) => tempFile));
-      final envelope = await _session.encryptAttachmentPayload(
-        room,
-        caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-        fileName: result.fileName,
-        fileSize: result.size,
-        mimeType: result.mimeType,
+      return UploadedAttachment(
+        isImage: isImage,
+        url: result.url,
+        fileName: 'encrypted',
+        size: encrypted.cipherBytes.length,
+        mimeType: 'application/octet-stream',
+        thumbnailUrl: thumbnailUrl,
         attachmentKey: encrypted.keyBase64,
         attachmentNonce: encrypted.nonceBase64,
         thumbnailKey: thumbnailKey,
         thumbnailNonce: thumbnailNonce,
       );
-      await _session.chatSocket.send(
-        roomId: room.id,
-        type: isImage ? 'image' : 'file',
-        text: envelope,
-        fileUrl: result.url,
-        fileName: 'encrypted',
-        fileSize: encrypted.cipherBytes.length,
-        mimeType: 'application/octet-stream',
-        thumbnailUrl: thumbnailUrl,
-      );
-      return;
     }
 
-    final result = await _session.api!.uploadFile(file);
-    await _session.chatSocket.send(
-      roomId: room.id,
-      type: isImage ? 'image' : 'file',
-      text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-      fileUrl: result.url,
+    final result = await _session.api!.uploadFile(
+      file,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+    return UploadedAttachment(
+      isImage: isImage,
+      url: result.url,
       fileName: result.fileName,
-      fileSize: result.size,
+      size: result.size,
       mimeType: result.mimeType,
       thumbnailUrl: thumbnailUrl,
     );
   }
 
-  /// 이미지 첨부일 때만 채팅 버블 미리보기용 축소 썸네일을 만들어 올린다. 비밀 대화면 원본과
-  /// 마찬가지로 자기만의 랜덤 키/nonce로 암호화해서 올리고(원본 키를 재사용하지 않음), 평문
-  /// 방이면 그대로 올린다. 이미지가 아니거나 썸네일 생성에 실패하면 전부 null — 버블은
-  /// 원본(fileUrl)을 그대로 보여주게 된다.
+  /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 채팅 메시지를 보낸다. [caption]을 같이
+  /// 주면(첨부 후 텍스트도 입력한 경우) 그 메시지 하나에 첨부와 텍스트가 함께 실린다. 비밀
+  /// 대화면 파일 바이트 자체가 이미 암호화된 채로 올라가 있으므로(서버는 opaque한 바이트로만
+  /// 취급), 캡션+원본 파일정보+복호화 키를 메시지 암호문 봉투 안에 함께 넣어 보낸다.
+  Future<void> sendUploadedAttachment(
+    UploadedAttachment u, {
+    String? caption,
+  }) async {
+    final trimmedCaption = caption?.trim();
+    if (room.isSecret) {
+      final envelope = await _session.encryptAttachmentPayload(
+        room,
+        caption: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
+        fileName: u.fileName,
+        fileSize: u.size,
+        mimeType: u.mimeType,
+        attachmentKey: u.attachmentKey!,
+        attachmentNonce: u.attachmentNonce!,
+        thumbnailKey: u.thumbnailKey,
+        thumbnailNonce: u.thumbnailNonce,
+      );
+      await _session.chatSocket.send(
+        roomId: room.id,
+        type: u.isImage ? 'image' : 'file',
+        text: envelope,
+        fileUrl: u.url,
+        fileName: 'encrypted',
+        fileSize: u.size,
+        mimeType: 'application/octet-stream',
+        thumbnailUrl: u.thumbnailUrl,
+      );
+      return;
+    }
+
+    await _session.chatSocket.send(
+      roomId: room.id,
+      type: u.isImage ? 'image' : 'file',
+      text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
+      fileUrl: u.url,
+      fileName: u.fileName,
+      fileSize: u.size,
+      mimeType: u.mimeType,
+      thumbnailUrl: u.thumbnailUrl,
+    );
+  }
+
+  /// 이미지 첨부일 때만(=[thumbBytes]가 있을 때만) 채팅 버블 미리보기용 축소 썸네일을
+  /// 올린다. 비밀 대화면 원본과 마찬가지로 자기만의 랜덤 키/nonce로 암호화해서 올리고(원본
+  /// 키를 재사용하지 않음), 평문 방이면 그대로 올린다. 이미지가 아니거나 썸네일 생성에
+  /// 실패했으면([thumbBytes] == null) 전부 null — 버블은 원본(fileUrl)을 그대로 보여주게 된다.
   Future<(String?, String?, String?)> _uploadThumbnailIfImage(
-    bool isImage,
-    Uint8List originalBytes,
+    Uint8List? thumbBytes,
   ) async {
-    if (!isImage) return (null, null, null);
-    final thumbBytes = await generateThumbnail(originalBytes);
     if (thumbBytes == null) return (null, null, null);
 
     if (room.isSecret) {

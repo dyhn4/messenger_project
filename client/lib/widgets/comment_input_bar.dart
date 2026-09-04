@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -7,21 +8,37 @@ import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
+import '../services/api_client.dart' show UploadCancelToken, UploadCancelledException;
+import '../services/file_type_utils.dart';
+import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
+import 'attachment_widgets.dart';
 
+/// ChatInputBar의 _PendingAttachment와 동일한 목적 — 첨부한 즉시 업로드가 시작되고,
+/// [result]가 채워지면 업로드가 끝난 것.
 class _PendingAttachment {
   final File file;
   final bool isImage;
   final String displayName;
+  final int totalBytes;
+  final Uint8List? thumbnailBytes;
+  final UploadCancelToken cancelToken;
+  int sentBytes = 0;
+  UploadedAttachment? result;
+
   _PendingAttachment({
     required this.file,
     required this.isImage,
     required this.displayName,
+    required this.totalBytes,
+    required this.thumbnailBytes,
+    required this.cancelToken,
   });
 }
 
 /// 댓글 입력창. ChatInputBar와 같은 이미지/파일 첨부(클립보드로 캡처한 이미지 붙여넣기 포함)를
-/// 지원하는 축소판이라, 콜백 대신 controller+messageId를 직접 받아 postComment/postCommentFile을 호출한다.
+/// 지원하는 축소판이라, 콜백 대신 controller+messageId를 직접 받아 postComment/
+/// postUploadedCommentAttachment를 호출한다.
 class CommentInputBar extends StatefulWidget {
   final RoomChatController controller;
   final String messageId;
@@ -44,14 +61,18 @@ class CommentInputBar extends StatefulWidget {
   });
 
   @override
-  State<CommentInputBar> createState() => _CommentInputBarState();
+  State<CommentInputBar> createState() => CommentInputBarState();
 }
 
-class _CommentInputBarState extends State<CommentInputBar> {
+/// ChatInputBarState와 같은 이유로 public — message_thread_screen.dart가 GlobalKey로 접근해
+/// addDroppedFiles를 호출한다.
+class CommentInputBarState extends State<CommentInputBar> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   final _attachments = <_PendingAttachment>[];
   bool _sending = false;
+
+  bool get _uploading => _attachments.any((a) => a.result == null);
 
   @override
   void initState() {
@@ -89,11 +110,7 @@ class _CommentInputBarState extends State<CommentInputBar> {
     final file = File(path);
     await file.writeAsBytes(bytes);
     if (!mounted) return;
-    setState(
-      () => _attachments.add(
-        _PendingAttachment(file: file, isImage: true, displayName: 'image.png'),
-      ),
-    );
+    unawaited(_stageAndUpload(file, true, 'image.png'));
   }
 
   Future<void> _pickImage() async {
@@ -102,39 +119,86 @@ class _CommentInputBarState extends State<CommentInputBar> {
       imageQuality: 85,
     );
     if (picked == null) return;
-    setState(() {
-      _attachments.add(
-        _PendingAttachment(
-          file: File(picked.path),
-          isImage: true,
-          displayName: picked.name,
-        ),
-      );
-    });
+    unawaited(_stageAndUpload(File(picked.path), true, picked.name));
   }
 
   Future<void> _pickFile() async {
     final result = await FilePicker.pickFiles();
     final picked = result?.files.single;
     if (picked?.path == null) return;
-    setState(() {
-      _attachments.add(
-        _PendingAttachment(
-          file: File(picked!.path!),
-          isImage: false,
-          displayName: picked.name,
-        ),
-      );
-    });
+    unawaited(_stageAndUpload(File(picked!.path!), false, picked.name));
   }
 
-  void _removeAttachment(int index) =>
-      setState(() => _attachments.removeAt(index));
+  /// ChatInputBarState.addDroppedFiles와 동일 — message_thread_screen.dart의 DropTarget이 호출.
+  void addDroppedFiles(List<File> files) {
+    if (files.isEmpty || !mounted) return;
+    for (final file in files) {
+      unawaited(
+        _stageAndUpload(
+          file,
+          looksLikeImagePath(file.path),
+          file.uri.pathSegments.last,
+        ),
+      );
+    }
+  }
+
+  /// ChatInputBarState._stageAndUpload와 동일 — 첨부를 즉시 스테이징 목록에 넣고 곧바로
+  /// 서버 업로드를 시작한다.
+  Future<void> _stageAndUpload(
+    File file,
+    bool isImage,
+    String displayName,
+  ) async {
+    final bytes = await file.readAsBytes();
+    final thumbBytes = isImage ? await generateThumbnail(bytes) : null;
+    if (!mounted) return;
+
+    final attachment = _PendingAttachment(
+      file: file,
+      isImage: isImage,
+      displayName: displayName,
+      totalBytes: bytes.length,
+      thumbnailBytes: thumbBytes,
+      cancelToken: UploadCancelToken(),
+    );
+    setState(() => _attachments.add(attachment));
+
+    try {
+      final uploaded = await widget.controller.uploadAttachment(
+        file,
+        isImage: isImage,
+        originalBytes: bytes,
+        thumbBytes: thumbBytes,
+        onProgress: (sent, total) {
+          if (!mounted) return;
+          setState(() => attachment.sentBytes = sent);
+        },
+        cancelToken: attachment.cancelToken,
+      );
+      if (!mounted) return;
+      setState(() => attachment.result = uploaded);
+    } on UploadCancelledException {
+      // 조용히 무시 — X 버튼으로 이미 목록에서 제거됨.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _attachments.remove(attachment));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+    }
+  }
+
+  void _cancelAttachment(_PendingAttachment a) {
+    a.cancelToken.cancel();
+    setState(() => _attachments.remove(a));
+  }
 
   Future<void> _send() async {
     final text = _controller.text.trim();
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
+    if (_uploading) return;
 
     final toSend = List<_PendingAttachment>.from(_attachments);
     setState(() {
@@ -158,12 +222,12 @@ class _CommentInputBarState extends State<CommentInputBar> {
         await widget.controller.postComment(widget.messageId, text);
       } else {
         // 첨부와 함께 입력한 댓글은 별도 댓글로 보내지 않고, 첫 번째 첨부의 캡션으로 붙인다.
+        // 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그 결과로 댓글만 단다.
         for (var i = 0; i < toSend.length; i++) {
           final a = toSend[i];
-          await widget.controller.postCommentFile(
+          await widget.controller.postUploadedCommentAttachment(
             widget.messageId,
-            a.file,
-            isImage: a.isImage,
+            a.result!,
             caption: i == 0 ? text : null,
           );
         }
@@ -184,6 +248,7 @@ class _CommentInputBarState extends State<CommentInputBar> {
 
   @override
   Widget build(BuildContext context) {
+    final uploading = _uploading;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -195,14 +260,29 @@ class _CommentInputBarState extends State<CommentInputBar> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: SizedBox(
-                  height: 64,
+                  height: uploading ? 160 : 64,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _attachments.length,
-                    itemBuilder: (context, i) => _CommentAttachmentPreview(
-                      attachment: _attachments[i],
-                      onRemove: () => _removeAttachment(i),
-                    ),
+                    itemBuilder: (context, i) {
+                      final a = _attachments[i];
+                      if (a.result == null) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 10, top: 6),
+                          child: UploadingAttachment(
+                            thumbnailBytes: a.thumbnailBytes,
+                            displayName: a.displayName,
+                            totalBytes: a.totalBytes,
+                            sentBytes: a.sentBytes,
+                            onCancel: () => _cancelAttachment(a),
+                          ),
+                        );
+                      }
+                      return _ReadyCommentAttachmentChip(
+                        attachment: a,
+                        onRemove: () => _cancelAttachment(a),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -253,8 +333,8 @@ class _CommentInputBarState extends State<CommentInputBar> {
                 else
                   IconButton(
                     icon: const Icon(Icons.send),
-                    onPressed: _send,
-                    tooltip: '댓글 보내기',
+                    onPressed: uploading ? null : _send,
+                    tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '댓글 보내기',
                   ),
               ],
             ),
@@ -265,11 +345,11 @@ class _CommentInputBarState extends State<CommentInputBar> {
   }
 }
 
-/// 보내기 전 첨부 미리보기 한 칸(ChatInputBar의 _AttachmentPreview와 동일한 모양).
-class _CommentAttachmentPreview extends StatelessWidget {
+/// 보내기 전 첨부 미리보기 한 칸(ChatInputBar의 _ReadyAttachmentChip과 동일한 모양).
+class _ReadyCommentAttachmentChip extends StatelessWidget {
   final _PendingAttachment attachment;
   final VoidCallback onRemove;
-  const _CommentAttachmentPreview({
+  const _ReadyCommentAttachmentChip({
     required this.attachment,
     required this.onRemove,
   });
@@ -281,11 +361,11 @@ class _CommentAttachmentPreview extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (attachment.isImage)
+          if (attachment.thumbnailBytes != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.file(
-                attachment.file,
+              child: Image.memory(
+                attachment.thumbnailBytes!,
                 width: 56,
                 height: 56,
                 fit: BoxFit.cover,

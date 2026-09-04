@@ -418,3 +418,185 @@ class _DownloadableFileState extends State<DownloadableFile> {
     );
   }
 }
+
+/// "42.3MB" 같은 사람이 읽기 좋은 용량 표기.
+String formatFileSize(int bytes) {
+  if (bytes < 1024) return '${bytes}B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(1)}KB';
+  final mb = kb / 1024;
+  if (mb < 1024) return '${mb.toStringAsFixed(1)}MB';
+  final gb = mb / 1024;
+  return '${gb.toStringAsFixed(1)}GB';
+}
+
+/// 첨부를 서버에 올리는 동안 채팅/댓글 목록에 보여주는 자리표시자. DownloadableImage/
+/// DownloadableFile의 "업로드 버전" — Message/Comment를 직접 받지 않고 순수 값만 받아서,
+/// 채팅 메시지와 댓글 양쪽에서 그대로 재사용한다. 진행률은 호출부(RoomChatController)가
+/// 원본 객체의 필드를 갱신하고 notifyListeners()를 부르면, 이 위젯이 새 값으로 다시 그려진다.
+class UploadingAttachment extends StatelessWidget {
+  final Uint8List? thumbnailBytes;
+  final String displayName;
+  final int totalBytes;
+  final int sentBytes;
+  final VoidCallback onCancel;
+  const UploadingAttachment({
+    super.key,
+    required this.thumbnailBytes,
+    required this.displayName,
+    required this.totalBytes,
+    required this.sentBytes,
+    required this.onCancel,
+  });
+
+  /// 썸네일/파일 아이콘 박스 위에 얹는 반투명 스크림 진행률 표시(흰 글씨) — 이미지든 파일이든
+  /// 항상 같은 200x150 박스 위에 이 스타일로만 그려서 둘의 모양을 통일한다.
+  Widget _buildProgressRow(BuildContext context) {
+    final progress = totalBytes > 0 ? sentBytes / totalBytes : null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            formatFileSize(totalBytes),
+            style: const TextStyle(color: Colors.white, fontSize: 11),
+          ),
+          const SizedBox(width: 6),
+          SizedBox(
+            width: 60,
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 4,
+              backgroundColor: Colors.white24,
+              valueColor: const AlwaysStoppedAnimation(Colors.white),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            progress != null ? '${(progress * 100).round()}%' : '',
+            style: const TextStyle(color: Colors.white, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cancelButton = Positioned(
+      top: -6,
+      right: -6,
+      child: GestureDetector(
+        onTap: onCancel,
+        child: Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.6),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.close, size: 12, color: Colors.white),
+        ),
+      ),
+    );
+
+    // 이미지든(실제 썸네일) 파일이든(일반 아이콘) 이미지 첨부와 똑같은 200x150 박스 +
+    // 하단 반투명 스크림 진행률 오버레이로 통일한다 — 예전엔 파일 쪽만 작은 테두리 칩으로
+    // 따로 그려서 이미지 쪽과 다르게 보였다(사용자 피드백으로 통일).
+    final content = thumbnailBytes != null
+        ? Image.memory(thumbnailBytes!, width: 200, height: 150, fit: BoxFit.cover)
+        : Container(
+            width: 200,
+            height: 150,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.insert_drive_file_outlined,
+                  size: 48,
+                  color: Theme.of(context).hintColor,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  displayName,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
+          );
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Stack(
+            children: [
+              content,
+              Positioned(
+                left: 6,
+                right: 6,
+                bottom: 6,
+                child: _buildProgressRow(context),
+              ),
+            ],
+          ),
+        ),
+        cancelButton,
+      ],
+    );
+  }
+}
+
+/// 파일 탐색기에서 채팅방/댓글 패널 위로 파일을 끌고 왔을 때(아직 놓기 전) 보여주는 전체
+/// 오버레이 — "여기에 놓으면 된다"를 명확하게 보여준다. chat_panel.dart/message_thread_screen.dart가
+/// DropTarget의 hovering 상태일 때 패널 전체를 덮어 그린다(Windows 전용, desktop_drop 기반).
+class DropZoneOverlay extends StatelessWidget {
+  const DropZoneOverlay({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      color: scheme.surface.withValues(alpha: 0.92),
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: scheme.primary.withValues(alpha: 0.12),
+            ),
+            child: Icon(
+              Icons.upload_file_outlined,
+              size: 44,
+              color: scheme.primary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '파일을 이곳에 드래그 & 드롭하여 업로드하세요',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

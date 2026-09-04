@@ -86,7 +86,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB. 필요에 맞게 조절하세요.
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB. 필요에 맞게 조절하세요.
 });
 
 export const uploadRouter = Router();
@@ -105,6 +105,19 @@ uploadRouter.post('/upload', upload.single('file'), (req, res) => {
     mimeType: req.file.mimetype,
   });
 });
+
+/**
+ * upload.single('file')이 용량 초과(LIMIT_FILE_SIZE) 등으로 던진 MulterError를 다른 API처럼
+ * 깔끔한 JSON 에러로 바꿔준다 — 안 붙이면 Express 기본 에러 핸들러가 날것의 500/HTML을 보낸다.
+ * server/src/index.js에서 uploadRouter 마운트 바로 뒤에 연결한다(라우터보다 뒤에 와야
+ * Express가 이 4개 인자짜리 미들웨어를 에러 핸들러로 인식한다).
+ */
+export function uploadErrorHandler(err, req, res, next) {
+  if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: '파일 크기가 너무 큽니다 (최대 1GB).' });
+  }
+  next(err);
+}
 
 /**
  * 서명된 다운로드 링크로만 파일을 내려받는다. 별도의 Authorization 헤더가 필요 없다 —

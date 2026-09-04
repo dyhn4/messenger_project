@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
@@ -9,6 +11,7 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../services/session.dart';
+import 'attachment_widgets.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
 import 'date_picker_popup.dart';
@@ -58,6 +61,11 @@ class _ChatPanelState extends State<ChatPanel> {
   String? _highlightedMessageId;
   Timer? _highlightTimer;
   bool _showDatePicker = false;
+
+  /// 파일 탐색기에서 입력창으로 끌어다 놓은 파일을 ChatInputBar의 기존 첨부 스테이징 목록에
+  /// 그대로 넣기 위한 접근 통로(Windows 전용 — desktop_drop 자체가 데스크톱용).
+  final _chatInputBarKey = GlobalKey<ChatInputBarState>();
+  bool _dragHovering = false;
 
   /// Session.setActiveRoom이 돌려준 토큰 — dispose에서 그대로 되돌려줘서, 그 사이 다른
   /// 화면이 활성 방을 새로 지정했으면 내가 지우지 않도록 한다(Session.clearActiveRoom 참고).
@@ -490,7 +498,7 @@ class _ChatPanelState extends State<ChatPanel> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.session.controllerFor(widget.room);
-    return Column(
+    final column = Column(
       children: [
         Expanded(
           child: ListenableBuilder(
@@ -855,6 +863,7 @@ class _ChatPanelState extends State<ChatPanel> {
         ),
         const Divider(height: 1),
         ChatInputBar(
+          key: _chatInputBarKey,
           controller: controller,
           pendingSticker: _pendingSticker,
           stickerPickerOpen: _stickerPickerOpen,
@@ -862,6 +871,30 @@ class _ChatPanelState extends State<ChatPanel> {
           onStickerConsumed: _removeSticker,
         ),
       ],
+    );
+
+    if (!Platform.isWindows) return column;
+
+    // 메시지 목록 + 입력창 전체를 드롭 영역으로 잡는다(입력창만이 아니라 어디에 놓아도
+    // 첨부되도록) — 호버 중엔 채팅방 전체를 덮는 안내 오버레이(DropZoneOverlay)를 보여준다.
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragHovering = true),
+      onDragExited: (_) => setState(() => _dragHovering = false),
+      onDragDone: (details) {
+        setState(() => _dragHovering = false);
+        _chatInputBarKey.currentState?.addDroppedFiles(
+          details.files.map((f) => File(f.path)).toList(),
+        );
+      },
+      child: Stack(
+        children: [
+          column,
+          if (_dragHovering)
+            const Positioned.fill(
+              child: IgnorePointer(child: DropZoneOverlay()),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 
 import '../data/stickers.dart';
@@ -6,6 +9,7 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
+import '../widgets/attachment_widgets.dart';
 import '../widgets/comment_input_bar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/message_comments_card.dart';
@@ -43,6 +47,13 @@ class MessageThreadScreen extends StatefulWidget {
 
 class _MessageThreadScreenState extends State<MessageThreadScreen> {
   final _scrollController = ScrollController();
+
+  /// CommentInputBar에 원래 주던 key: ValueKey(message.id)를 대신한다 — 메시지가 바뀔 때마다
+  /// (didUpdateWidget) 새 인스턴스로 교체해서 위젯이 새로 만들어지게 하는 건 똑같이 하면서,
+  /// GlobalKey라 addDroppedFiles(드래그앤드롭)를 호출할 수 있는 State 접근 통로도 겸한다.
+  GlobalKey<CommentInputBarState> _commentInputBarKey =
+      GlobalKey<CommentInputBarState>();
+  bool _dragHovering = false;
 
   /// chat_panel.dart와 동일 — 댓글 목록 위에 떠 있는 오버레이로 그려서 입력창을 밀어내지 않는다.
   Sticker? _pendingSticker;
@@ -128,6 +139,8 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
           ? widget.message.comments.last.id
           : null;
       _scrollToBottom();
+      // CommentInputBar를 새로 만들어서 autofocus가 다시 걸리게 한다(예전 key: ValueKey와 동일한 효과).
+      _commentInputBarKey = GlobalKey<CommentInputBarState>();
     }
   }
 
@@ -200,7 +213,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       listenable: widget.controller,
       builder: (context, _) {
         final comments = widget.message.comments;
-        return Column(
+        final column = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
@@ -277,8 +290,8 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
             CommentInputBar(
               // 데스크톱에서는 패널을 안 닫고 다른 메시지의 댓글 아이콘을 연달아 눌러도 이
               // 위젯 자체는 그대로 재사용될 수 있어서, key를 메시지별로 다르게 줘서 매번 새로
-              // 만들어지게 한다 — 그래야 autofocus가 그때마다 다시 걸린다.
-              key: ValueKey(widget.message.id),
+              // 만들어지게 한다 — 그래야 autofocus가 그때마다 다시 걸린다(didUpdateWidget 참고).
+              key: _commentInputBarKey,
               controller: widget.controller,
               messageId: widget.message.id,
               pendingSticker: _pendingSticker,
@@ -287,6 +300,30 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
               onStickerConsumed: _removeSticker,
             ),
           ],
+        );
+
+        if (!Platform.isWindows) return column;
+
+        // chat_panel.dart와 동일 — 댓글 목록 + 입력창 전체를 드롭 영역으로 잡고, 호버 중엔
+        // 패널 전체를 덮는 안내 오버레이를 보여준다.
+        return DropTarget(
+          onDragEntered: (_) => setState(() => _dragHovering = true),
+          onDragExited: (_) => setState(() => _dragHovering = false),
+          onDragDone: (details) {
+            setState(() => _dragHovering = false);
+            _commentInputBarKey.currentState?.addDroppedFiles(
+              details.files.map((f) => File(f.path)).toList(),
+            );
+          },
+          child: Stack(
+            children: [
+              column,
+              if (_dragHovering)
+                const Positioned.fill(
+                  child: IgnorePointer(child: DropZoneOverlay()),
+                ),
+            ],
+          ),
         );
       },
     );

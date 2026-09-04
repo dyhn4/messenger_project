@@ -64,6 +64,9 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 **메시징**
 - 텍스트/이미지/파일/이모티콘(스티커) 전송, 이미지는 업로드 시 썸네일 별도 생성
+- 첨부는 보내는 즉시 로컬 썸네일+용량+업로드 진행률(%)을 채팅/댓글 목록에 바로 보여주고, 업로드
+  중에는 취소할 수 있음(채팅 입력칸/댓글 입력칸 둘 다, 최대 1GB)
+- Windows에서 파일 탐색기의 이미지/파일을 채팅·댓글 입력칸에 드래그앤드롭으로 첨부 가능
 - 작성 후 5분 이내 본인 메시지 수정/삭제(소프트 삭제) — 댓글도 동일 정책
 - 메시지별 댓글(스레드) — PC는 옆 패널, 모바일은 전체화면
 - 메시지 인용 공유(다른 방으로), 메시지 전달
@@ -163,7 +166,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 암호화 | cryptography(X25519/Ed25519/AES-GCM, 비밀 대화용) |
 | 알림 | firebase_core, firebase_messaging(Android 전용), flutter_local_notifications |
 | 데스크톱 통합 | win32, ffi, pasteboard(클립보드 이미지 붙여넣기) |
-| UI 보조 | scrollable_positioned_list, intl, package_info_plus, url_launcher, open_file |
+| UI 보조 | scrollable_positioned_list, intl, package_info_plus, url_launcher, open_file, desktop_drop(Windows 드래그앤드롭 첨부) |
 | 사내 전용 패키지 | `packages/conversation_shortcuts`(Android "대화" 알림 단축키 등록) |
 
 ## 프로젝트 구조
@@ -317,7 +320,7 @@ npm run dev         # 개발용 — 파일 변경 시 자동 재시작(node --wa
 - PC 방화벽이 처음 실행 시 "네트워크 접근 허용" 팝업을 띄우면 허용해야 다른 기기에서 접속됩니다.
 - 클라이언트와 서버가 **같은 LAN(와이파이/유선망)**에 있어야 합니다. 외부망(LTE 등)에서 쓰려면
   공유기 포트포워딩 + 고정 IP(또는 DDNS)가 추가로 필요합니다.
-- 첨부파일 저장 위치/용량 제한은 [환경 변수 설정](#환경-변수-설정)과 아래 [보안 및 암호화](#보안-및-암호화)를 참고하세요. 파일 업로드 용량 제한은 **200MB**입니다(`server/src/upload.js`의 `limits.fileSize`).
+- 첨부파일 저장 위치/용량 제한은 [환경 변수 설정](#환경-변수-설정)과 아래 [보안 및 암호화](#보안-및-암호화)를 참고하세요. 파일 업로드 용량 제한은 **1GB**입니다(`server/src/upload.js`의 `limits.fileSize`).
 - 새 기기를 페어링하려면(인증서 발급) 서버 콘솔에 `pair`를 입력하고 Enter — 4자리 코드(5분간
   유효, 1회용)가 나오면 클라이언트의 "서버 주소 변경" 화면에 같이 입력합니다.
 
@@ -474,7 +477,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | Method | Path | 인증 | 설명 |
 |---|---|---|---|
 | GET | `/api/search` | 필요 | 내가 속한 방 통합 검색(`q`, `roomId`, `senderId`, `since`, `until`, `limit`) |
-| POST | `/api/upload` | 필요 | 파일 업로드(최대 200MB) |
+| POST | `/api/upload` | 필요 | 파일 업로드(최대 1GB, 초과 시 413) |
 | GET | `/files/:token` | 불필요(토큰 자체가 자격증명) | 서명된 다운로드 링크 |
 | GET | `/health` | 불필요 | 헬스체크 |
 | GET | `/version` | 불필요 | 최신 클라이언트 버전 조회 |

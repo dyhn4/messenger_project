@@ -68,6 +68,7 @@ dependencies:
   # 써야 해서 MainActivity의 MethodChannel이 아니라 정식 플러그인으로 만들었다).
   conversation_shortcuts:
     path: packages/conversation_shortcuts
+  desktop_drop: ^0.8.4
 dev_dependencies:
   flutter_test:
     sdk: flutter

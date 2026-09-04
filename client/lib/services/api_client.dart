@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -40,6 +41,20 @@ class UploadResult {
     required this.size,
     this.mimeType,
   });
+}
+
+/// uploadFile()에 넘겨서 업로드 중간에 취소할 수 있게 하는 토큰. RoomChatController가 만들어서
+/// Message/Comment의 uploadCancelToken 필드(Object? — 모델이 서비스 계층을 몰라도 되도록)에
+/// 보관해두고, 취소 버튼을 누르면 이 객체의 cancel()을 호출한다.
+class UploadCancelToken {
+  bool _cancelled = false;
+  void cancel() => _cancelled = true;
+  bool get isCancelled => _cancelled;
+}
+
+class UploadCancelledException implements Exception {
+  @override
+  String toString() => '업로드가 취소되었습니다.';
 }
 
 /// GET/PATCH /api/users/me 결과: 내 프로필과 아바타 상태.
@@ -737,12 +752,51 @@ class ApiClient {
         .toList();
   }
 
-  Future<UploadResult> uploadFile(File file) async {
+  /// [onProgress]/[cancelToken]을 안 넘기면 지금까지와 완전히 동일하게(단순 MultipartRequest)
+  /// 동작한다. 둘 중 하나라도 넘기면, http 패키지에 내장 진행률 콜백이 없어서 요청 바디를 직접
+  /// 스트리밍하며 바이트 수를 센다 — MultipartRequest가 만든 바디(finalize())를 그대로 다시
+  /// StreamedRequest로 감싸 보낼 뿐이라 인증서 핀닝(_client 자체)은 그대로 유지된다. 취소는
+  /// 그 파이프를 도중에 끊어(구독 취소 + sink를 끝까지 안 채우고 닫음) 요청을 미완성 상태로
+  /// 만드는 방식이라 서버에 별도로 알릴 필요가 없다.
+  Future<UploadResult> uploadFile(
+    File file, {
+    void Function(int sent, int total)? onProgress,
+    UploadCancelToken? cancelToken,
+  }) async {
     final res = await _send(() async {
       final req = http.MultipartRequest('POST', _uri('/api/upload'))
         ..headers.addAll(_authHeaders)
         ..files.add(await http.MultipartFile.fromPath('file', file.path));
-      final streamed = await _client.send(req);
+
+      if (onProgress == null && cancelToken == null) {
+        final streamed = await _client.send(req);
+        return http.Response.fromStream(streamed);
+      }
+
+      final total = req.contentLength;
+      var sentBytes = 0;
+      final bodyStream = req.finalize();
+      final streamedRequest = http.StreamedRequest(req.method, req.url)
+        ..headers.addAll(req.headers)
+        ..contentLength = total;
+      late final StreamSubscription<List<int>> subscription;
+      subscription = bodyStream.listen(
+        (chunk) {
+          if (cancelToken?.isCancelled == true) {
+            subscription.cancel();
+            streamedRequest.sink.close();
+            return;
+          }
+          sentBytes += chunk.length;
+          onProgress?.call(sentBytes, total);
+          streamedRequest.sink.add(chunk);
+        },
+        onDone: () => streamedRequest.sink.close(),
+        onError: (Object e, StackTrace st) =>
+            streamedRequest.sink.addError(e, st),
+        cancelOnError: true,
+      );
+      final streamed = await _client.send(streamedRequest);
       return http.Response.fromStream(streamed);
     });
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;

@@ -12,3 +12,9 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# FCM 설정 파일 — Google API 키(project 식별자)가 들어있다. APK에도 어차피 포함되는 값이라
+# 치명적 비밀은 아니지만(Google Cloud Console에서 패키지명+서명 SHA-1로 키 제한을 걸어두는 게
+# 정석), 새 프로젝트/계정으로 바꿀 수도 있으니 굳이 커밋하지 않는다. README의 "FCM 푸시 알림
+# 설정" 참고 — 각자 Firebase 콘솔에서 받아서 이 경로에 직접 놓아야 한다.
+app/google-services.json

@@ -96,44 +96,69 @@ class MyProfileDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                height: 90,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(16),
-                  ),
-                ),
-                alignment: Alignment.bottomCenter,
-                child: Transform.translate(
-                  offset: const Offset(0, 30),
-                  child: GestureDetector(
-                    onTap: () => _editAvatar(context),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        MyAvatar(session: session, radius: 32),
-                        Positioned(
-                          right: -2,
-                          bottom: -2,
-                          child: CircleAvatar(
-                            radius: 11,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.primary,
-                            child: const Icon(
-                              Icons.camera_alt,
-                              size: 13,
-                              color: Colors.white,
-                            ),
+              // 아바타가 배너 아래쪽으로 튀어나오게(겹쳐 보이게) 하는 부분. Positioned+
+              // Clip.none만으로는 부족하다 — Stack 자신의 size는 여전히 겹치지 않는 자식(배너
+              // Container, 90) 기준으로 90만 되고, RenderBox.hitTest는 어떤 위젯이든 자기
+              // size.contains(position)를 먼저 통과해야 자식을 검사하므로, Stack 자체가 90만큼만
+              // "차지"하는 한 그 아래로 튀어나온 아바타는 Positioned를 써도 여전히 탭이 안 먹힌다
+              // (신고된 "아래쪽 반원 클릭 안 됨" 버그 — 1차 수정에서 놓친 부분). SizedBox로
+              // Stack 자체의 크기를 아바타 전체를 포함하는 높이로 명시해야 한다.
+              SizedBox(
+                height: 124, // 배너 90 + 아바타가 튀어나온 만큼(56~120) + 여유
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: Container(
+                        height: 90,
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(16),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: 56,
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () => _editAvatar(context),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              MyAvatar(session: session, radius: 32),
+                              Positioned(
+                                right: -2,
+                                bottom: -2,
+                                child: CircleAvatar(
+                                  radius: 11,
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
+                                  child: const Icon(
+                                    Icons.camera_alt,
+                                    size: 13,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 44),
+              const SizedBox(height: 10),
               _ProfileInfoRow(
                 icon: Icons.badge_outlined,
                 label: '아이디',

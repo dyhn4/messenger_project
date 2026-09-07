@@ -13,6 +13,7 @@ import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
 import 'attachment_widgets.dart';
+import 'muted_scrollbar.dart';
 
 /// 첨부 하나의 클라이언트 쪽 진행 상태. 첨부한 즉시(_ChatInputBarState._stageAndUpload)
 /// 업로드가 시작되고, [result]가 채워지면 업로드가 끝난 것 — "보내기"는 이미 끝난 결과만
@@ -86,11 +87,19 @@ class ChatInputBarState extends State<ChatInputBar> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKey);
+    // 포커스를 얻으면(클릭/터치) 안내 문구(hintText)를 바로 감추고 커서만 보이게 한다 —
+    // hintText는 build() 시점 값이라 포커스가 바뀔 때 다시 그려줘야 반영된다.
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
+    _focusNode.removeListener(_onFocusChange);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -104,6 +113,17 @@ class ChatInputBarState extends State<ChatInputBar> {
         HardwareKeyboard.instance.isControlPressed &&
         _focusNode.hasFocus) {
       _pasteImageFromClipboard();
+      return false;
+    }
+    // Enter는 보내기, Shift+Enter만 줄바꿈으로 남긴다 — true를 돌려줘서 TextField의 기본
+    // 줄바꿈 삽입을 막아야 한다(안 그러면 Enter를 눌러도 줄바꿈이 먼저 들어가 버린다).
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        _focusNode.hasFocus &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _send();
+      return true;
     }
     return false;
   }
@@ -266,91 +286,134 @@ class ChatInputBarState extends State<ChatInputBar> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          // 입력칸(TextField)이 이 칸 전체 폭을 채우도록(예전엔 Row 안 Expanded로
+          // 채웠지만, 이제는 입력칸이 직접 자식이라 stretch로 채운다).
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_attachments.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: SizedBox(
-                  // 업로드 중인 첨부가 하나라도 있으면 이미지 첨부처럼 썸네일+용량+진행률이
-                  // 보이는 큰 카드(UploadingAttachment, 150px)로, 전부 끝나면 작은 준비완료
-                  // 칩(56px)으로 다시 줄어든다.
-                  height: uploading ? 160 : 64,
+                  // 이미지 카드(200x64)와 파일 카드가 들어갈 수 있는 고정 높이 — 업로드
+                  // 중이든 끝났든 같은 카드(UploadingAttachment)를 그대로 쓰므로(완료돼도
+                  // 다른 위젯으로 안 바뀜) 높이를 상태에 따라 바꿀 필요가 없다.
+                  height: 80,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _attachments.length,
                     itemBuilder: (context, i) {
                       final a = _attachments[i];
-                      if (a.result == null) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 10, top: 6),
-                          child: UploadingAttachment(
-                            thumbnailBytes: a.thumbnailBytes,
-                            displayName: a.displayName,
-                            totalBytes: a.totalBytes,
-                            sentBytes: a.sentBytes,
-                            onCancel: () => _cancelAttachment(a),
-                          ),
-                        );
-                      }
-                      return _ReadyAttachmentChip(
-                        attachment: a,
-                        onRemove: () => _cancelAttachment(a),
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 10, top: 6),
+                        child: UploadingAttachment(
+                          thumbnailBytes: a.thumbnailBytes,
+                          displayName: a.displayName,
+                          totalBytes: a.totalBytes,
+                          sentBytes: a.sentBytes,
+                          completed: a.result != null,
+                          onCancel: () => _cancelAttachment(a),
+                        ),
                       );
                     },
                   ),
                 ),
               ),
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.image_outlined),
-                  onPressed: _sending ? null : _pickImage,
-                  tooltip: '이미지 보내기',
+            // 입력칸을 위에 두고, 첨부 아이콘+보내기 버튼은 그 아래 별도 줄에 둔다(첨부
+            // 이미지 참고 — 예전엔 입력칸과 같은 줄 왼쪽/오른쪽에 있었다).
+            // TextField(EditableText)는 여러 줄일 때 조상 ScrollConfiguration과 무관하게
+            // 항상 자체 스크롤바를 강제로 붙인다(TextField에 그 동작을 끌 방법도 없다) —
+            // 그래서 따로 Scrollbar를 얹지 않고, 그 자동 스크롤바가 이 테마를 그대로
+            // 입도록(채팅방과 같은 두께 10px, 항상 보임) ScrollbarTheme만 씌운다.
+            ScrollbarTheme(
+              data: mutedScrollbarThemeData,
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                decoration: InputDecoration(
+                  // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                  // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                  hintText: _focusNode.hasFocus ? null : '메시지 입력',
+                  border: const OutlineInputBorder(),
+                  // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
+                  // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
+                  contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
                 ),
-                IconButton(
-                  icon: Icon(
-                    Icons.emoji_emotions_outlined,
-                    color: widget.stickerPickerOpen
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                  onPressed: _sending ? null : widget.onToggleStickerPicker,
-                  tooltip: '이모티콘',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.attach_file),
-                  onPressed: _sending ? null : _pickFile,
-                  tooltip: '파일 보내기',
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    decoration: const InputDecoration(
-                      hintText: '메시지 입력',
-                      border: OutlineInputBorder(),
+                minLines: 1,
+                maxLines: 6,
+                // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
+                // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
+                // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
+                // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
+                // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
+                // 그대로 둔다.
+                textInputAction: Platform.isWindows
+                    ? TextInputAction.newline
+                    : TextInputAction.send,
+                onSubmitted: (_) => _send(),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // 검색/멤버/스레드 패널이 열려 있으면 이 입력칸이 차지하는 폭이 창 크기에 따라
+            // 꽤 좁아질 수 있다 — 아이콘 3개+안내 문구+보내기 버튼을 고정 Row로만 두면
+            // 특정 폭 구간에서 폭이 모자라 오버플로(노란/검정 줄무늬 경고)가 났다. 남는
+            // 폭이 안내 문구까지 담기엔 부족하면 그 문구부터 먼저 숨긴다.
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final showHint =
+                    Platform.isWindows && constraints.maxWidth > 320;
+                return Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.image_outlined),
+                      onPressed: _sending ? null : _pickImage,
+                      tooltip: '이미지 보내기',
                     ),
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _send(),
-                  ),
-                ),
-                if (_sending)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                    IconButton(
+                      icon: Icon(
+                        Icons.emoji_emotions_outlined,
+                        color: widget.stickerPickerOpen
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      onPressed: _sending
+                          ? null
+                          : widget.onToggleStickerPicker,
+                      tooltip: '이모티콘',
                     ),
-                  )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: uploading ? null : _send,
-                    tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
-                  ),
-              ],
+                    IconButton(
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: _sending ? null : _pickFile,
+                      tooltip: '파일 보내기',
+                    ),
+                    const Spacer(),
+                    if (showHint) ...[
+                      Text(
+                        'Shift + Enter 로 줄바꿈',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context).hintColor,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (_sending)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: uploading ? null : _send,
+                        tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -359,71 +422,3 @@ class ChatInputBarState extends State<ChatInputBar> {
   }
 }
 
-/// 업로드가 끝난 첨부 한 칸(보내기 전) — 이미지는 썸네일, 그 외 파일은 아이콘+이름 칩으로
-/// 보여주고, 오른쪽 위 x 버튼으로 뺄 수 있다.
-class _ReadyAttachmentChip extends StatelessWidget {
-  final _PendingAttachment attachment;
-  final VoidCallback onRemove;
-  const _ReadyAttachmentChip({required this.attachment, required this.onRemove});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 10, top: 6),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          if (attachment.thumbnailBytes != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.memory(
-                attachment.thumbnailBytes!,
-                width: 56,
-                height: 56,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            Container(
-              width: 56,
-              height: 56,
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.insert_drive_file_outlined, size: 18),
-                  const SizedBox(height: 2),
-                  Text(
-                    attachment.displayName,
-                    style: const TextStyle(fontSize: 9),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          Positioned(
-            top: -6,
-            right: -6,
-            child: GestureDetector(
-              onTap: onRemove,
-              child: Container(
-                width: 18,
-                height: 18,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close, size: 12, color: Colors.white),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

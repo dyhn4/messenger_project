@@ -5,6 +5,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_android/shared_preferences_android.dart';
+import 'package:tray_manager/tray_manager.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
@@ -106,6 +108,13 @@ Future<void> main() async {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   }
+  // 창 닫기(X)를 눌러도 앱이 종료되지 않고 시스템 트레이로 내려가도록(백그라운드에서 계속
+  // 알림을 받게) — setPreventClose로 OS의 기본 닫기 동작을 막고, 실제 처리는
+  // _MyAppState.onWindowClose(WindowListener)가 한다.
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
+    await windowManager.setPreventClose(true);
+  }
   runApp(const MyApp());
 }
 
@@ -116,7 +125,8 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+class _MyAppState extends State<MyApp>
+    with WidgetsBindingObserver, WindowListener, TrayListener {
   final navigatorKey = GlobalKey<NavigatorState>();
   final notifications = NotificationService();
   final appSettings = AppSettings();
@@ -143,6 +153,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // session.toasts는 HomeScreen이 자기 자신의 context로 구독해서 보여준다(main.dart의
     // navigatorKey.currentContext는 Navigator 위젯 자체의 context라 SnackBar/Overlay가
     // 화면에 그려지지 않는다 — home_screen.dart 참고).
+    if (Platform.isWindows) {
+      windowManager.addListener(this);
+      trayManager.addListener(this);
+      _initTray();
+    }
   }
 
   @override
@@ -150,7 +165,57 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     session.removeListener(_tryOpenPendingLaunchRoom);
     session.chatSocket.dispose();
+    if (Platform.isWindows) {
+      windowManager.removeListener(this);
+      trayManager.removeListener(this);
+    }
     super.dispose();
+  }
+
+  /// 창 닫기(X)를 눌러도 종료되지 않고 트레이 아이콘으로 내려가게 하는 대신, 사용자가
+  /// 완전히 종료할 방법을 트레이 메뉴로 제공해야 한다("작업 관리자로만 끌 수 있는 앱"이
+  /// 되지 않도록).
+  Future<void> _initTray() async {
+    await trayManager.setIcon('assets/tray_icon.ico');
+    await trayManager.setToolTip('TeamTalk');
+    await trayManager.setContextMenu(
+      Menu(
+        items: [
+          MenuItem(key: 'show_window', label: '창 열기'),
+          MenuItem.separator(),
+          MenuItem(key: 'exit_app', label: '완전히 종료'),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void onWindowClose() async {
+    // setPreventClose(true) 때문에 X를 눌러도 OS가 창을 실제로 닫지 않고 이 콜백만 부른다 —
+    // 여기서 직접 hide()해서 "종료된 것처럼 보이지만 트레이에 남아 알림을 계속 받는" 상태로
+    // 만든다. 트레이 메뉴의 "완전히 종료"만 실제로 프로세스를 끝낸다.
+    if (await windowManager.isPreventClose()) {
+      await windowManager.hide();
+    }
+  }
+
+  @override
+  void onTrayIconMouseDown() {
+    windowManager.show();
+    windowManager.focus();
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) async {
+    switch (menuItem.key) {
+      case 'show_window':
+        await windowManager.show();
+        await windowManager.focus();
+      case 'exit_app':
+        // 여기서만 preventClose를 풀어야 close()가 진짜로 창을 닫고 프로세스가 끝난다.
+        await windowManager.setPreventClose(false);
+        await windowManager.close();
+    }
   }
 
   Future<void> _checkNotificationLaunch() async {

@@ -1013,6 +1013,16 @@ class Session extends ChangeNotifier {
     }
   }
 
+  /// 환경설정의 "메시지 내용 미리보기"(AppSettings.messagePreviewMode)에 따라 알림에 실제
+  /// 내용을 보여줄지 판단한다. 비밀 대화는 이 설정과 무관하게 항상 가려지므로(호출부에서
+  /// room?.isSecret로 따로 체크) 여기서는 신경 쓰지 않는다.
+  bool _shouldPreviewFor(Room? room) => switch (settings.messagePreviewMode) {
+    MessagePreviewMode.all => true,
+    MessagePreviewMode.publicTopicOnly =>
+      room?.type == RoomType.topic && room?.isPublic == true,
+    MessagePreviewMode.none => false,
+  };
+
   /// 그룹채팅/채팅 목록 이름 아래 미리보기(room_list_screen.dart)를 새 메시지/댓글 내용으로
   /// 갱신한다. 시스템 메시지는 제외(로그인 시 서버가 내려준 마지막 실제 대화 미리보기를 계속
   /// 보여준다) — rooms.js의 toRoomDto가 로그인 시점 값을 계산하는 규칙과 맞춘다.
@@ -1060,8 +1070,9 @@ class Session extends ChangeNotifier {
     };
     // 비밀 대화는 서버가 어차피 내용을 복호화할 수 없어서 서버발 미리보기 자체가 불가능하지만,
     // 클라이언트가 이미 복호화해둔 내용을 알림에 그대로 보여주는 것도 의도적으로 막는다 —
-    // 화면 잠금 상태에서 알림만 봐도 대화 내용이 새어나가지 않게 하려는 목적.
-    final preview = room?.isSecret == true
+    // 화면 잠금 상태에서 알림만 봐도 대화 내용이 새어나가지 않게 하려는 목적. 그 외엔 사용자가
+    // 환경설정에서 고른 미리보기 범위(_shouldShowPreviewFor)를 따른다.
+    final preview = room?.isSecret == true || !_shouldPreviewFor(room)
         ? _secretPreviewPlaceholder
         : switch (m.type) {
             MessageType.text => m.text ?? '',
@@ -1122,7 +1133,7 @@ class Session extends ChangeNotifier {
       RoomType.group => room!.name ?? '그룹채팅',
       RoomType.topic => room!.displayName(userId ?? ''),
     };
-    final preview = room?.isSecret == true
+    final preview = room?.isSecret == true || !_shouldPreviewFor(room)
         ? _secretPreviewPlaceholder
         : switch (c.type) {
             MessageType.text => c.text ?? '',

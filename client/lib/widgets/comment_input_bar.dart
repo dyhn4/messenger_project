@@ -8,11 +8,13 @@ import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
-import '../services/api_client.dart' show UploadCancelToken, UploadCancelledException;
+import '../services/api_client.dart'
+    show UploadCancelToken, UploadCancelledException;
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
 import 'attachment_widgets.dart';
+import 'muted_scrollbar.dart';
 
 /// ChatInputBar의 _PendingAttachment와 동일한 목적 — 첨부한 즉시 업로드가 시작되고,
 /// [result]가 채워지면 업로드가 끝난 것.
@@ -78,11 +80,18 @@ class CommentInputBarState extends State<CommentInputBar> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKey);
+    // ChatInputBarState와 동일 — 포커스를 얻으면 안내 문구를 감춘다.
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
+    _focusNode.removeListener(_onFocusChange);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -96,6 +105,16 @@ class CommentInputBarState extends State<CommentInputBar> {
         HardwareKeyboard.instance.isControlPressed &&
         _focusNode.hasFocus) {
       _pasteImageFromClipboard();
+      return false;
+    }
+    // ChatInputBarState와 동일 — Enter는 보내기, Shift+Enter만 줄바꿈으로 남긴다.
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        _focusNode.hasFocus &&
+        !HardwareKeyboard.instance.isShiftPressed) {
+      _send();
+      return true;
     }
     return false;
   }
@@ -254,163 +273,128 @@ class CommentInputBarState extends State<CommentInputBar> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          // ChatInputBarState와 동일 — 입력칸이 이 칸 전체 폭을 채우도록 stretch로 둔다.
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_attachments.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: SizedBox(
-                  height: uploading ? 160 : 64,
+                  // ChatInputBarState와 동일 — 업로드 중이든 끝났든 같은 카드를 그대로
+                  // 쓰므로(UploadingAttachment.completed) 높이를 바꿀 필요가 없다.
+                  height: 80,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _attachments.length,
                     itemBuilder: (context, i) {
                       final a = _attachments[i];
-                      if (a.result == null) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 10, top: 6),
-                          child: UploadingAttachment(
-                            thumbnailBytes: a.thumbnailBytes,
-                            displayName: a.displayName,
-                            totalBytes: a.totalBytes,
-                            sentBytes: a.sentBytes,
-                            onCancel: () => _cancelAttachment(a),
-                          ),
-                        );
-                      }
-                      return _ReadyCommentAttachmentChip(
-                        attachment: a,
-                        onRemove: () => _cancelAttachment(a),
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 10, top: 6),
+                        child: UploadingAttachment(
+                          thumbnailBytes: a.thumbnailBytes,
+                          displayName: a.displayName,
+                          totalBytes: a.totalBytes,
+                          sentBytes: a.sentBytes,
+                          completed: a.result != null,
+                          onCancel: () => _cancelAttachment(a),
+                        ),
                       );
                     },
                   ),
                 ),
               ),
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.image_outlined),
-                  onPressed: _sending ? null : _pickImage,
-                  tooltip: '이미지 첨부',
+            // ChatInputBarState와 동일 — 입력칸을 위에 두고, 첨부 아이콘+보내기 버튼은
+            // 그 아래 별도 줄에 둔다. TextField(EditableText)는 여러 줄일 때 조상
+            // ScrollConfiguration과 무관하게 항상 자체 스크롤바를 강제로 붙이므로, 따로
+            // Scrollbar를 얹지 않고 그 자동 스크롤바에 이 테마만 씌운다.
+            ScrollbarTheme(
+              data: mutedScrollbarThemeData,
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                autofocus: true,
+                decoration: InputDecoration(
+                  // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                  // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                  hintText: _focusNode.hasFocus ? null : '댓글 입력',
+                  border: const OutlineInputBorder(),
+                  // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
+                  // 가깝게 붙인다.
+                  contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
                 ),
-                IconButton(
-                  icon: Icon(
-                    Icons.emoji_emotions_outlined,
-                    color: widget.stickerPickerOpen
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                  onPressed: _sending ? null : widget.onToggleStickerPicker,
-                  tooltip: '이모티콘',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.attach_file),
-                  onPressed: _sending ? null : _pickFile,
-                  tooltip: '파일 첨부',
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      hintText: '댓글 입력',
-                      border: OutlineInputBorder(),
+                minLines: 1,
+                maxLines: 6,
+                // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
+                // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
+                // _handleKey가 순수 Enter만 직접 가로채 보낸다.
+                textInputAction: Platform.isWindows
+                    ? TextInputAction.newline
+                    : TextInputAction.send,
+                onSubmitted: (_) => _send(),
+              ),
+            ),
+            const SizedBox(height: 4),
+            // ChatInputBarState와 동일 — 검색/멤버/스레드 패널이 열려 있으면 이 입력칸 폭이
+            // 좁아질 수 있어서, 남는 폭이 안내 문구까지 담기엔 부족하면 그 문구부터 먼저
+            // 숨긴다(오버플로 방지).
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final showHint =
+                    Platform.isWindows && constraints.maxWidth > 320;
+                return Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.image_outlined),
+                      onPressed: _sending ? null : _pickImage,
+                      tooltip: '이미지 첨부',
                     ),
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _send(),
-                  ),
-                ),
-                if (_sending)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                    IconButton(
+                      icon: Icon(
+                        Icons.emoji_emotions_outlined,
+                        color: widget.stickerPickerOpen
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      onPressed: _sending ? null : widget.onToggleStickerPicker,
+                      tooltip: '이모티콘',
                     ),
-                  )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: uploading ? null : _send,
-                    tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '댓글 보내기',
-                  ),
-              ],
+                    IconButton(
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: _sending ? null : _pickFile,
+                      tooltip: '파일 첨부',
+                    ),
+                    const Spacer(),
+                    if (showHint) ...[
+                      Text(
+                        'Shift + Enter 로 줄바꿈',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context).hintColor,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (_sending)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: uploading ? null : _send,
+                        tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '댓글 보내기',
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// 보내기 전 첨부 미리보기 한 칸(ChatInputBar의 _ReadyAttachmentChip과 동일한 모양).
-class _ReadyCommentAttachmentChip extends StatelessWidget {
-  final _PendingAttachment attachment;
-  final VoidCallback onRemove;
-  const _ReadyCommentAttachmentChip({
-    required this.attachment,
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 10, top: 6),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          if (attachment.thumbnailBytes != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.memory(
-                attachment.thumbnailBytes!,
-                width: 56,
-                height: 56,
-                fit: BoxFit.cover,
-              ),
-            )
-          else
-            Container(
-              width: 56,
-              height: 56,
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.insert_drive_file_outlined, size: 18),
-                  const SizedBox(height: 2),
-                  Text(
-                    attachment.displayName,
-                    style: const TextStyle(fontSize: 9),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          Positioned(
-            top: -6,
-            right: -6,
-            child: GestureDetector(
-              onTap: onRemove,
-              child: Container(
-                width: 18,
-                height: 18,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close, size: 12, color: Colors.white),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

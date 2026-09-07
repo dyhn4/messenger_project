@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
+import '../services/app_settings.dart';
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -27,12 +29,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _openFolderAfterDownload =
       widget.session.settings.openFolderAfterDownload;
   late ThemeMode _themeMode = widget.session.settings.themeMode;
+  late MessagePreviewMode _messagePreviewMode =
+      widget.session.settings.messagePreviewMode;
+  late bool _alwaysOnTop = widget.session.settings.alwaysOnTop;
+  late double _windowOpacity = widget.session.settings.windowOpacity;
   bool _saving = false;
+
+  /// "저장하기"를 눌러 실제로 반영됐는지 — false인 채로 화면이 닫히면(취소/X/바깥 클릭)
+  /// 반투명 슬라이더로 미리 봤던 값을 원래 저장된 값으로 되돌려야 한다(dispose 참고).
+  bool _saved = false;
   final _scrollController = ScrollController();
 
   @override
   void dispose() {
     _scrollController.dispose();
+    if (!_saved && Platform.isWindows) {
+      // 저장하지 않고 닫힌 경우 — 슬라이더로 미리보기만 하던 불투명도를 원래 저장된
+      // 값으로 되돌린다. dispose는 async를 기다릴 수 없어 그냥 던져둔다(fire-and-forget).
+      windowManager.setOpacity(widget.session.settings.windowOpacity);
+    }
     super.dispose();
   }
 
@@ -45,12 +60,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
+    _saved = true; // dispose()가 반투명 미리보기를 되돌리지 않도록 먼저 표시해둔다.
     final settings = widget.session.settings;
     await settings.setLaunchAtStartup(_launchAtStartup);
     await settings.setDownloadWithoutAsking(_downloadWithoutAsking);
     await settings.setDownloadFolder(_downloadFolder);
     await settings.setOpenFolderAfterDownload(_openFolderAfterDownload);
     await settings.setThemeMode(_themeMode);
+    await settings.setMessagePreviewMode(_messagePreviewMode);
+    await settings.setAlwaysOnTop(_alwaysOnTop);
+    await settings.setWindowOpacity(_windowOpacity);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -80,26 +99,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const _SectionLabel('화면 테마'),
-                    RadioGroup<ThemeMode>(
-                      groupValue: _themeMode,
-                      onChanged: (v) =>
-                          setState(() => _themeMode = v ?? ThemeMode.system),
-                      child: const Column(
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: RadioGroup<ThemeMode>(
+                        groupValue: _themeMode,
+                        onChanged: (v) =>
+                            setState(() => _themeMode = v ?? ThemeMode.system),
+                        child: const Column(
+                          children: [
+                            RadioListTile<ThemeMode>(
+                              contentPadding: EdgeInsets.zero,
+                              value: ThemeMode.system,
+                              title: Text('시스템 설정을 따름'),
+                            ),
+                            RadioListTile<ThemeMode>(
+                              contentPadding: EdgeInsets.zero,
+                              value: ThemeMode.light,
+                              title: Text('라이트 모드'),
+                            ),
+                            RadioListTile<ThemeMode>(
+                              contentPadding: EdgeInsets.zero,
+                              value: ThemeMode.dark,
+                              title: Text('다크 모드'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionLabel('메시지 내용 미리보기'),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Row(
                         children: [
-                          RadioListTile<ThemeMode>(
-                            contentPadding: EdgeInsets.zero,
-                            value: ThemeMode.system,
-                            title: Text('시스템 설정을 따름'),
+                          _PreviewModeOption(
+                            selected:
+                                _messagePreviewMode == MessagePreviewMode.all,
+                            label: '모든 메시지',
+                            onTap: () => setState(
+                              () => _messagePreviewMode =
+                                  MessagePreviewMode.all,
+                            ),
                           ),
-                          RadioListTile<ThemeMode>(
-                            contentPadding: EdgeInsets.zero,
-                            value: ThemeMode.light,
-                            title: Text('라이트 모드'),
+                          const SizedBox(width: 8),
+                          _PreviewModeOption(
+                            selected: _messagePreviewMode ==
+                                MessagePreviewMode.publicTopicOnly,
+                            label: '공개 토픽만',
+                            onTap: () => setState(
+                              () => _messagePreviewMode =
+                                  MessagePreviewMode.publicTopicOnly,
+                            ),
                           ),
-                          RadioListTile<ThemeMode>(
-                            contentPadding: EdgeInsets.zero,
-                            value: ThemeMode.dark,
-                            title: Text('다크 모드'),
+                          const SizedBox(width: 8),
+                          _PreviewModeOption(
+                            selected:
+                                _messagePreviewMode == MessagePreviewMode.none,
+                            label: '미리보기 안함',
+                            onTap: () => setState(
+                              () => _messagePreviewMode =
+                                  MessagePreviewMode.none,
+                            ),
                           ),
                         ],
                       ),
@@ -107,78 +167,144 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 20),
                     if (Platform.isWindows) ...[
                       const _SectionLabel('시작 시 자동 실행'),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        value: _launchAtStartup,
-                        onChanged: (v) =>
-                            setState(() => _launchAtStartup = v ?? false),
-                        title: const Text('시스템 시작 시 $_appName 자동 실행'),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: _launchAtStartup,
+                          onChanged: (v) =>
+                              setState(() => _launchAtStartup = v ?? false),
+                          title: const Text('시스템 시작 시 $_appName 자동 실행'),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const _SectionLabel('항상 위로'),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          value: _alwaysOnTop,
+                          onChanged: (v) =>
+                              setState(() => _alwaysOnTop = v ?? false),
+                          title: const Text('다른 창 위에 항상 띄워두기'),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const _SectionLabel('반투명'),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Slider(
+                                // 완전히 0%로 내리면 창이 안 보여서 다시 잡기 어려우니
+                                // 최소 20%는 남겨둔다.
+                                value: _windowOpacity,
+                                min: 0.2,
+                                max: 1.0,
+                                divisions: 16,
+                                label: '${(_windowOpacity * 100).round()}%',
+                                onChanged: (v) {
+                                  setState(() => _windowOpacity = v);
+                                  // 슬라이더를 끄는 동안 실제 창에도 바로 반영해서
+                                  // 미리보기가 되게 한다 — 저장을 눌러야 그 값이
+                                  // 확정/저장된다(dispose 참고: 취소하면 원래 값으로
+                                  // 되돌아간다).
+                                  windowManager.setOpacity(v);
+                                },
+                              ),
+                            ),
+                            SizedBox(
+                              width: 44,
+                              child: Text(
+                                '${(_windowOpacity * 100).round()}%',
+                                textAlign: TextAlign.end,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 20),
                     ],
                     const _SectionLabel('파일 다운로드'),
-                    CheckboxListTile(
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      value: _downloadWithoutAsking,
-                      onChanged: (v) =>
-                          setState(() => _downloadWithoutAsking = v ?? false),
-                      title: const Text('다운로드 시 저장 위치 물어보지 않고 아래 경로로 즉시 다운로드'),
-                    ),
-                    const SizedBox(height: 8),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(8),
-                      onTap: _pickFolder,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Theme.of(context).dividerColor,
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: _downloadWithoutAsking,
+                            onChanged: (v) => setState(
+                              () => _downloadWithoutAsking = v ?? false,
+                            ),
+                            title: const Text(
+                              '다운로드 시 저장 위치 물어보지 않고 아래 경로로 즉시 다운로드',
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.folder_outlined, size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _downloadFolder.isEmpty
-                                    ? '다운로드 폴더 선택'
-                                    : _downloadFolder,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                          const SizedBox(height: 8),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: _pickFolder,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context).dividerColor,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.folder_outlined,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _downloadFolder.isEmpty
+                                          ? '다운로드 폴더 선택'
+                                          : _downloadFolder,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const Icon(Icons.arrow_drop_down),
+                                ],
                               ),
                             ),
-                            const Icon(Icons.arrow_drop_down),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      '다운로드 완료 시',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    RadioGroup<bool>(
-                      groupValue: _openFolderAfterDownload,
-                      onChanged: (v) =>
-                          setState(() => _openFolderAfterDownload = v ?? true),
-                      child: const Column(
-                        children: [
-                          RadioListTile<bool>(
-                            contentPadding: EdgeInsets.zero,
-                            value: true,
-                            title: Text('다운로드가 완료된 폴더 열기'),
                           ),
-                          RadioListTile<bool>(
-                            contentPadding: EdgeInsets.zero,
-                            value: false,
-                            title: Text('아무것도 하지 않기'),
+                          const SizedBox(height: 20),
+                          Text(
+                            '다운로드 완료 시',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          RadioGroup<bool>(
+                            groupValue: _openFolderAfterDownload,
+                            onChanged: (v) => setState(
+                              () => _openFolderAfterDownload = v ?? true,
+                            ),
+                            child: const Column(
+                              children: [
+                                RadioListTile<bool>(
+                                  contentPadding: EdgeInsets.zero,
+                                  value: true,
+                                  title: Text('다운로드가 완료된 폴더 열기'),
+                                ),
+                                RadioListTile<bool>(
+                                  contentPadding: EdgeInsets.zero,
+                                  value: false,
+                                  title: Text('아무것도 하지 않기'),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -238,6 +364,62 @@ class _SectionLabel extends StatelessWidget {
         style: Theme.of(
           context,
         ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+/// "메시지 내용 미리보기" 설정의 선택지 한 칸 — 기존 RadioListTile 세로 목록과 달리 3개를
+/// 가로로 나란히 두는 알약 모양 버튼(라디오 동작은 같지만, 짧은 라벨 3개를 한 줄에 비교하며
+/// 고르기 좋아서 이 설정만 이 모양으로 뺐다).
+class _PreviewModeOption extends StatelessWidget {
+  final bool selected;
+  final String label;
+  final VoidCallback onTap;
+  const _PreviewModeOption({
+    required this.selected,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? color : Theme.of(context).dividerColor,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                Icon(Icons.check_circle, size: 16, color: color),
+                const SizedBox(width: 4),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? color : null,
+                    fontWeight: selected ? FontWeight.w600 : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

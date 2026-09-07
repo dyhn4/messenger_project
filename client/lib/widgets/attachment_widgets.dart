@@ -439,6 +439,11 @@ class UploadingAttachment extends StatelessWidget {
   final String displayName;
   final int totalBytes;
   final int sentBytes;
+
+  /// 업로드가 끝났으면 true — 썸네일/카드 모양은 그대로 두고 진행바+퍼센트만 없애서 용량만
+  /// 보여준다(업로드 중 → 완료 전환 때 카드 자체가 다른 위젯으로 바뀌지 않게 하기 위함 —
+  /// 예전엔 완료되면 작은 칩으로 통째로 바뀌어서 썸네일이 "달라 보인다"는 피드백이 있었다).
+  final bool completed;
   final VoidCallback onCancel;
   const UploadingAttachment({
     super.key,
@@ -446,43 +451,80 @@ class UploadingAttachment extends StatelessWidget {
     required this.displayName,
     required this.totalBytes,
     required this.sentBytes,
+    required this.completed,
     required this.onCancel,
   });
 
-  /// 썸네일/파일 아이콘 박스 위에 얹는 반투명 스크림 진행률 표시(흰 글씨) — 이미지든 파일이든
-  /// 항상 같은 200x150 박스 위에 이 스타일로만 그려서 둘의 모양을 통일한다.
-  Widget _buildProgressRow(BuildContext context) {
-    final progress = totalBytes > 0 ? sentBytes / totalBytes : null;
+  double? get _progress => totalBytes > 0 ? sentBytes / totalBytes : null;
+
+  /// 이미지 썸네일(64x64, 정사각형) 위에 얹는 반투명 스크림 — 폭이 좁아서 용량+막대+퍼센트를
+  /// 한 줄에 다 넣을 자리가 없다. 업로드 중엔 퍼센트만 작게 보여주고 그 아래 얇은 진행바를
+  /// 폭 전체에 깔며, 끝나면 진행바 없이 용량만 보여준다(완료 후에도 값은 남아있게).
+  Widget _buildImageOverlay(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(4),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            formatFileSize(totalBytes),
-            style: const TextStyle(color: Colors.white, fontSize: 11),
-          ),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 60,
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 4,
-              backgroundColor: Colors.white24,
-              valueColor: const AlwaysStoppedAnimation(Colors.white),
+      child: completed
+          ? Text(
+              formatFileSize(totalBytes),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 9),
+            )
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _progress != null ? '${(_progress! * 100).round()}%' : '',
+                  style: const TextStyle(color: Colors.white, fontSize: 9),
+                ),
+                const SizedBox(height: 2),
+                LinearProgressIndicator(
+                  value: _progress,
+                  minHeight: 3,
+                  backgroundColor: Colors.white24,
+                  valueColor: const AlwaysStoppedAnimation(Colors.white),
+                ),
+              ],
             ),
+    );
+  }
+
+  /// 파일 카드(가로형) 안의 용량 줄 — 업로드 중엔 진행바+퍼센트, 끝나면 용량 텍스트만.
+  Widget _buildFileProgressRow(BuildContext context) {
+    final hintColor = Theme.of(context).hintColor;
+    if (completed) {
+      return Text(
+        formatFileSize(totalBytes),
+        style: TextStyle(fontSize: 11, color: hintColor),
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          formatFileSize(totalBytes),
+          style: TextStyle(fontSize: 11, color: hintColor),
+        ),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 60,
+          child: LinearProgressIndicator(
+            value: _progress,
+            minHeight: 4,
+            backgroundColor: Theme.of(context).dividerColor,
           ),
-          const SizedBox(width: 6),
-          Text(
-            progress != null ? '${(progress * 100).round()}%' : '',
-            style: const TextStyle(color: Colors.white, fontSize: 11),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          _progress != null ? '${(_progress! * 100).round()}%' : '',
+          style: TextStyle(fontSize: 11, color: hintColor),
+        ),
+      ],
     );
   }
 
@@ -505,50 +547,68 @@ class UploadingAttachment extends StatelessWidget {
       ),
     );
 
-    // 이미지든(실제 썸네일) 파일이든(일반 아이콘) 이미지 첨부와 똑같은 200x150 박스 +
-    // 하단 반투명 스크림 진행률 오버레이로 통일한다 — 예전엔 파일 쪽만 작은 테두리 칩으로
-    // 따로 그려서 이미지 쪽과 다르게 보였다(사용자 피드백으로 통일).
-    final content = thumbnailBytes != null
-        ? Image.memory(thumbnailBytes!, width: 200, height: 150, fit: BoxFit.cover)
-        : Container(
-            width: 200,
-            height: 150,
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+    if (thumbnailBytes != null) {
+      // 이미지 — 64x64 정사각형 썸네일(파일 카드와 높이를 맞춤), 하단에 용량(+업로드
+      // 중이면 진행바/퍼센트) 오버레이.
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Stack(
               children: [
-                Icon(
-                  Icons.insert_drive_file_outlined,
-                  size: 48,
-                  color: Theme.of(context).hintColor,
+                Image.memory(
+                  thumbnailBytes!,
+                  width: 64,
+                  height: 64,
+                  fit: BoxFit.cover,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  displayName,
-                  maxLines: 2,
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
+                Positioned(
+                  left: 3,
+                  right: 3,
+                  bottom: 3,
+                  child: _buildImageOverlay(context),
                 ),
               ],
             ),
-          );
+          ),
+          cancelButton,
+        ],
+      );
+    }
 
+    // 파일 — DownloadableFile(실제 전송된 파일 말풍선)과 같은 가로형 카드: 아이콘 왼쪽 +
+    // 파일명 오른쪽, 그 아래 용량/진행률.
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Stack(
+        Container(
+          constraints: const BoxConstraints(maxWidth: 220),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              content,
-              Positioned(
-                left: 6,
-                right: 6,
-                bottom: 6,
-                child: _buildProgressRow(context),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.insert_drive_file_outlined,
+                    color: Theme.of(context).hintColor,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(displayName, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
               ),
+              const SizedBox(height: 6),
+              _buildFileProgressRow(context),
             ],
           ),
         ),

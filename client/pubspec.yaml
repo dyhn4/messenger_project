@@ -69,6 +69,8 @@ dependencies:
   conversation_shortcuts:
     path: packages/conversation_shortcuts
   desktop_drop: ^0.8.4
+  window_manager: ^0.5.2
+  tray_manager: ^0.5.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -93,6 +95,7 @@ flutter:
   assets:
     - assets/icon.png
     - assets/server_cert.pem
+    - assets/tray_icon.ico
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

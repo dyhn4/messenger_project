@@ -7,6 +7,7 @@ import '../services/time_format.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show showLeaveRoomDialog;
+import '../widgets/muted_scrollbar.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'chat_screen.dart';
@@ -119,7 +120,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
 /// 토픽/그룹채팅/채팅 탭 공통 몸통: 검색창(누르면 SearchScreen으로 이동) + 그 타입의
 /// 방 목록. 즐겨찾기한 방을 위로 모으고, 그 안에서는 최근 활동 순으로 정렬한다(PC 사이드바와
 /// 동일한 규칙 — Session._bumpRoomActivity 참고).
-class _RoomTypeTab extends StatelessWidget {
+class _RoomTypeTab extends StatefulWidget {
   final Session session;
   final RoomType type;
   final String emptyText;
@@ -133,6 +134,22 @@ class _RoomTypeTab extends StatelessWidget {
     this.showActivityTime = false,
   });
 
+  @override
+  State<_RoomTypeTab> createState() => _RoomTypeTabState();
+}
+
+class _RoomTypeTabState extends State<_RoomTypeTab> {
+  // 5개 탭이 IndexedStack으로 전부 동시에 마운트돼 있다 보니, 컨트롤러 없이(Scrollbar가
+  // 알아서 붙는 방식) 쓰면 안드로이드에서 스크롤바가 안 뜨는 경우가 있었다 — 탭마다 컨트롤러를
+  // 직접 만들어서 ListView와 MutedScrollbar 양쪽에 명시적으로 물려준다.
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   static List<Room> _favoriteFirst(List<Room> rooms) {
     int byRecent(Room a, Room b) =>
         b.lastActivityAt.compareTo(a.lastActivityAt);
@@ -145,29 +162,35 @@ class _RoomTypeTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _SearchBox(session: session),
+        _SearchBox(session: widget.session),
         Expanded(
           child: ListenableBuilder(
-            listenable: session,
+            listenable: widget.session,
             builder: (context, _) {
               final rooms = _favoriteFirst(
-                session.rooms.where((r) => r.type == type).toList(),
+                widget.session.rooms
+                    .where((r) => r.type == widget.type)
+                    .toList(),
               );
               if (rooms.isEmpty) {
                 return Center(
                   child: Text(
-                    emptyText,
+                    widget.emptyText,
                     style: TextStyle(color: Theme.of(context).hintColor),
                   ),
                 );
               }
-              return ListView.builder(
-                itemCount: rooms.length,
-                itemBuilder: (context, i) => _RoomRow(
-                  session: session,
-                  room: rooms[i],
-                  onTap: () => onOpenRoom(rooms[i]),
-                  showActivityTime: showActivityTime,
+              return MutedScrollbar(
+                controller: _scrollController,
+                child: ListView.builder(
+                  controller: _scrollController,
+                  itemCount: rooms.length,
+                  itemBuilder: (context, i) => _RoomRow(
+                    session: widget.session,
+                    room: rooms[i],
+                    onTap: () => widget.onOpenRoom(rooms[i]),
+                    showActivityTime: widget.showActivityTime,
+                  ),
                 ),
               );
             },
@@ -382,6 +405,9 @@ class _MembersTabState extends State<_MembersTab> {
   List<AppUser>? _users;
   String? _error;
   String _filter = '';
+  // _RoomTypeTabState와 동일한 이유 — 컨트롤러를 명시적으로 물려야 안드로이드에서도
+  // 스크롤바가 확실히 붙는다.
+  final _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -394,6 +420,7 @@ class _MembersTabState extends State<_MembersTab> {
   @override
   void dispose() {
     widget.session.removeListener(_onSessionChanged);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -458,14 +485,20 @@ class _MembersTabState extends State<_MembersTab> {
               ? const Center(child: CircularProgressIndicator())
               : list.isEmpty
               ? const Center(child: Text('검색 결과가 없습니다.'))
-              : ListView.separated(
-                  itemCount: list.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, i) => _MemberRow(
-                    user: list[i],
-                    resolveUrl: widget.session.resolveUrl,
-                    online: widget.session.onlineUserIds.contains(list[i].id),
-                    onTap: () => _openProfile(list[i]),
+              : MutedScrollbar(
+                  controller: _scrollController,
+                  child: ListView.separated(
+                    controller: _scrollController,
+                    itemCount: list.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, i) => _MemberRow(
+                      user: list[i],
+                      resolveUrl: widget.session.resolveUrl,
+                      online: widget.session.onlineUserIds.contains(
+                        list[i].id,
+                      ),
+                      onTap: () => _openProfile(list[i]),
+                    ),
                   ),
                 ),
         ),
@@ -506,12 +539,27 @@ class _MemberRow extends StatelessWidget {
 
 /// 더보기 탭: 기존 PC 삼선 메뉴(AccountMenuButton)와 같은 항목(내 프로필/설정/오픈소스
 /// 라이선스/로그아웃)을 전체 화면 목록으로 옮겨 놓은 것 — 새 기능은 추가하지 않았다.
-class _MoreTab extends StatelessWidget {
+class _MoreTab extends StatefulWidget {
   final Session session;
   const _MoreTab({required this.session});
 
+  @override
+  State<_MoreTab> createState() => _MoreTabState();
+}
+
+class _MoreTabState extends State<_MoreTab> {
+  // 다른 탭들과 동일한 이유 — 컨트롤러를 명시적으로 물려야 안드로이드에서도 스크롤바가
+  // 확실히 붙는다(지금은 항목이 적어 거의 안 넘치지만, 늘어날 수 있으니 동일하게 맞춘다).
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _logout(BuildContext context) async {
-    await session.logout();
+    await widget.session.logout();
     if (context.mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
@@ -519,45 +567,55 @@ class _MoreTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        ListTile(
-          leading: MyAvatar(session: session, radius: 24),
-          title: Text(
-            session.name ?? session.username ?? '',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+    return MutedScrollbar(
+      controller: _scrollController,
+      child: ListView(
+        controller: _scrollController,
+        children: [
+          ListTile(
+            leading: MyAvatar(session: widget.session, radius: 24),
+            title: Text(
+              widget.session.name ?? widget.session.username ?? '',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showDialog(
+              context: context,
+              builder: (_) => MyProfileDialog(session: widget.session),
+            ),
           ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => showDialog(
-            context: context,
-            builder: (_) => MyProfileDialog(session: session),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('설정'),
+            onTap: () => showDialog(
+              context: context,
+              builder: (_) => SettingsScreen(session: widget.session),
+            ),
           ),
-        ),
-        const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.settings_outlined),
-          title: const Text('설정'),
-          onTap: () => showDialog(
-            context: context,
-            builder: (_) => SettingsScreen(session: session),
+          ListTile(
+            leading: const Icon(Icons.description_outlined),
+            title: const Text('오픈소스 라이선스'),
+            onTap: () => showLicensePage(
+              context: context,
+              applicationName: 'TeamTalk',
+              applicationVersion: _appVersion,
+            ),
           ),
-        ),
-        ListTile(
-          leading: const Icon(Icons.description_outlined),
-          title: const Text('오픈소스 라이선스'),
-          onTap: () => showLicensePage(
-            context: context,
-            applicationName: 'TeamTalk',
-            applicationVersion: _appVersion,
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.redAccent),
+            title: const Text(
+              '로그아웃',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+            onTap: () => _logout(context),
           ),
-        ),
-        const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.logout, color: Colors.redAccent),
-          title: const Text('로그아웃', style: TextStyle(color: Colors.redAccent)),
-          onTap: () => _logout(context),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

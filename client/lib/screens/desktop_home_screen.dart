@@ -21,6 +21,17 @@ import 'new_chat_screen.dart';
 import 'search_screen.dart';
 import 'topic_browse_screen.dart';
 
+/// 이 폭 이하로 창이 좁아지면 왼쪽 사이드바(고정 280px)를 항상 펼쳐두는 대신 얇은 화살표
+/// 스트립으로 접는다 — HomeScreen이 데스크톱/모바일 레이아웃을 가르는 wideBreakpoint(700)와는
+/// 별개로, "데스크톱 레이아웃이긴 한데 사이드바를 나란히 두기엔 좁은" 중간 구간을 다룬다.
+const _sidebarCollapseBreakpoint = 900.0;
+
+/// 검색/멤버/댓글 스레드 우측 패널의 폭 — 예전엔 창이 1200px보다 넓으면 480, 아니면 400으로
+/// 창 폭에 따라 바뀌었지만, 고정 폭이 낫다는 피드백에 따라 하나의 값으로 고정했다. 500은
+/// search_screen.dart의 "참여한 대화방"/"모든 멤버"/"전체 기간" 필터 버튼 세 개가 줄임표 없이
+/// 한 줄에 다 들어가는 데 필요한 최소 폭(계산상 약 430~450px)에 여유를 더한 값이다.
+const _sidePanelWidth = 500.0;
+
 /// 잔디(JANDI)식 넓은 화면 레이아웃: 좌측 사이드바(토픽/그룹채팅/유저목록) + 우측 채팅 패널.
 /// HomeScreen이 창 너비를 보고 이 화면을 쓸지 RoomListScreen(모바일)을 쓸지 고른다.
 class DesktopHomeScreen extends StatefulWidget {
@@ -38,15 +49,23 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   String? _highlightMessageId;
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
 
+  /// 창 폭이 [_sidebarCollapseBreakpoint] 이하로 좁아지면 왼쪽 사이드바(토픽/그룹채팅/채팅
+  /// 목록)가 고정 280px 칸에 억지로 눌려서(글자가 세로로 한 글자씩 줄바꿈되는 등) 깨지는
+  /// 문제가 있었다 — 그 대신 얇은 화살표 스트립으로 접어두고, 눌렀을 때만 채팅 위로 겹쳐서
+  /// 뜨는 오버레이로 보여준다. true면 지금 그 오버레이가 펼쳐진 상태.
+  bool _sidebarOverlayOpen = false;
+
   /// 방을 바꿀 때마다 쓴다 — 이전 방 메시지의 스레드 패널은 더 이상 의미가 없으므로 같이 닫는다.
   /// _highlightMessageId도 같이 지운다 — 검색 결과 클릭(onOpenRoom, 아래 참고)이 아닌 다른
   /// 경로로 방을 열 때 예전 검색 하이라이트가 남아있으면, 나중에(예: 알림을 눌러) 이 방을
-  /// 다시 열 때 맨 아래 대신 그 옛 메시지 위치로 스크롤되는 문제가 있었다.
+  /// 다시 열 때 맨 아래 대신 그 옛 메시지 위치로 스크롤되는 문제가 있었다. 사이드바가 겹침
+  /// 오버레이로 펼쳐진 채로 방을 골랐으면(좁은 창) 그 오버레이도 같이 접는다.
   void _selectRoom(Room room) {
     setState(() {
       _selectedRoom = room;
       _threadMessage = null;
       _highlightMessageId = null;
+      _sidebarOverlayOpen = false;
     });
   }
 
@@ -130,11 +149,6 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 창이 넓을 때(1200px 초과)는 검색/멤버 패널도 넓혀서 필터 라벨이 줄임표 없이
-    // 다 보이게 하고, 좁을 때는 400으로 유지한다.
-    final sidePanelWidth = MediaQuery.of(context).size.width > 1200
-        ? 480.0
-        : 400.0;
     return Scaffold(
       body: Column(
         children: [
@@ -159,101 +173,11 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           Expanded(
             child: Row(
               children: [
-                SizedBox(
-                  width: 280,
-                  child: _Sidebar(
-                    session: widget.session,
-                    selectedRoomId: _selectedRoom?.id,
-                    onSelectRoom: _selectRoom,
-                    onCreateTopic: _createTopic,
-                    onBrowseTopics: _browseTopics,
-                    onNewGroupChat: _newGroupChat,
-                  ),
-                ),
-                const VerticalDivider(width: 1),
-                Expanded(
-                  child: _selectedRoom == null
-                      ? const Center(child: Text('왼쪽에서 대화방을 선택하세요.'))
-                      : Column(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  bottom: BorderSide(
-                                    color: Theme.of(context).dividerColor,
-                                  ),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  FavoriteStar(
-                                    favorite: _selectedRoom!.favorite,
-                                    onTap: () => widget.session.toggleFavorite(
-                                      _selectedRoom!,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  RoomAvatar(
-                                    room: _selectedRoom!,
-                                    myUserId: widget.session.userId ?? '',
-                                    resolveUrl: widget.session.resolveUrl,
-                                    onlineUserIds: widget.session.onlineUserIds,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  if (_selectedRoom!.isSecret) ...[
-                                    const Icon(
-                                      Icons.lock,
-                                      size: 14,
-                                      color: Colors.green,
-                                    ),
-                                    const SizedBox(width: 4),
-                                  ],
-                                  Expanded(
-                                    child: Text(
-                                      _selectedRoom!.displayName(
-                                        widget.session.userId ?? '',
-                                      ),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            color: _selectedRoom!.isSecret
-                                                ? Colors.green
-                                                : null,
-                                          ),
-                                    ),
-                                  ),
-                                  RoomOptionsMenu(
-                                    session: widget.session,
-                                    room: _selectedRoom!,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              child: ChatPanel(
-                                key: ValueKey(_selectedRoom!.id),
-                                session: widget.session,
-                                room: _selectedRoom!,
-                                highlightMessageId: _highlightMessageId,
-                                onOpenThread: (m) => setState(() {
-                                  _threadMessage = m;
-                                  _searchOpen = false;
-                                  _membersOpen = false;
-                                }),
-                              ),
-                            ),
-                          ],
-                        ),
-                ),
+                Expanded(child: _buildSidebarAndChat(context)),
                 if (_searchOpen) ...[
                   const VerticalDivider(width: 1),
                   SizedBox(
-                    width: sidePanelWidth,
+                    width: _sidePanelWidth,
                     child: SearchScreen(
                       session: widget.session,
                       asPanel: true,
@@ -269,7 +193,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 if (_membersOpen) ...[
                   const VerticalDivider(width: 1),
                   SizedBox(
-                    width: sidePanelWidth,
+                    width: _sidePanelWidth,
                     child: _MembersPanel(
                       session: widget.session,
                       onClose: () => setState(() => _membersOpen = false),
@@ -280,7 +204,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 if (_threadMessage != null && _selectedRoom != null) ...[
                   const VerticalDivider(width: 1),
                   SizedBox(
-                    width: sidePanelWidth,
+                    width: _sidePanelWidth,
                     child: MessageThreadScreen(
                       session: widget.session,
                       room: _selectedRoom!,
@@ -295,6 +219,162 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 창 폭이 [_sidebarCollapseBreakpoint] 이하일 때 사이드바를 얇은 화살표 스트립으로
+  /// 접어두고(고정 280px가 억지로 눌려 글자가 세로로 깨지는 문제를 막는다), 화살표를 누르면
+  /// 채팅 위로 겹쳐서 뜨는 오버레이로 보여준다. 창이 그보다 넓으면 기존과 동일하게 사이드바를
+  /// 항상 펼쳐서 나란히 보여준다.
+  Widget _buildSidebarAndChat(BuildContext context) {
+    final sidebar = _Sidebar(
+      session: widget.session,
+      selectedRoomId: _selectedRoom?.id,
+      onSelectRoom: _selectRoom,
+      onCreateTopic: _createTopic,
+      onBrowseTopics: _browseTopics,
+      onNewGroupChat: _newGroupChat,
+    );
+    final chatArea = _buildChatArea(context);
+
+    if (MediaQuery.of(context).size.width > _sidebarCollapseBreakpoint) {
+      return Row(
+        children: [
+          SizedBox(width: 280, child: sidebar),
+          const VerticalDivider(width: 1),
+          Expanded(child: chatArea),
+        ],
+      );
+    }
+
+    return Stack(
+      children: [
+        Row(
+          children: [
+            _SidebarToggleStrip(
+              expanded: _sidebarOverlayOpen,
+              onTap: () =>
+                  setState(() => _sidebarOverlayOpen = !_sidebarOverlayOpen),
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: GestureDetector(
+                // 오버레이가 펼쳐진 동안 채팅 부분(가려지지 않은 나머지)을 누르면 그
+                // 클릭이 채팅 내부 버튼 등으로 새지 않고 오버레이만 접히게 한다.
+                behavior: HitTestBehavior.translucent,
+                onTap: _sidebarOverlayOpen
+                    ? () => setState(() => _sidebarOverlayOpen = false)
+                    : null,
+                child: IgnorePointer(
+                  ignoring: _sidebarOverlayOpen,
+                  child: chatArea,
+                ),
+              ),
+            ),
+          ],
+        ),
+        // 스트립(왼쪽 28px) 바로 옆에서 시작해서 채팅 위로 겹쳐 뜬다 — 스트립 자체는 안
+        // 가려서 화살표를 눌러 다시 접을 수 있다.
+        if (_sidebarOverlayOpen)
+          Positioned(
+            left: 28,
+            top: 0,
+            bottom: 0,
+            width: 280,
+            child: Material(elevation: 8, child: sidebar),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildChatArea(BuildContext context) {
+    if (_selectedRoom == null) {
+      return const Center(child: Text('왼쪽에서 대화방을 선택하세요.'));
+    }
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Theme.of(context).dividerColor),
+            ),
+          ),
+          child: Row(
+            children: [
+              FavoriteStar(
+                favorite: _selectedRoom!.favorite,
+                onTap: () => widget.session.toggleFavorite(_selectedRoom!),
+              ),
+              const SizedBox(width: 8),
+              RoomAvatar(
+                room: _selectedRoom!,
+                myUserId: widget.session.userId ?? '',
+                resolveUrl: widget.session.resolveUrl,
+                onlineUserIds: widget.session.onlineUserIds,
+              ),
+              const SizedBox(width: 10),
+              if (_selectedRoom!.isSecret) ...[
+                const Icon(Icons.lock, size: 14, color: Colors.green),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: Text(
+                  _selectedRoom!.displayName(widget.session.userId ?? ''),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: _selectedRoom!.isSecret ? Colors.green : null,
+                  ),
+                ),
+              ),
+              RoomOptionsMenu(session: widget.session, room: _selectedRoom!),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ChatPanel(
+            key: ValueKey(_selectedRoom!.id),
+            session: widget.session,
+            room: _selectedRoom!,
+            highlightMessageId: _highlightMessageId,
+            onOpenThread: (m) => setState(() {
+              _threadMessage = m;
+              _searchOpen = false;
+              _membersOpen = false;
+            }),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 사이드바가 접혔을 때(창 폭 <= [_sidebarCollapseBreakpoint]) 대신 보이는 얇은 화살표
+/// 스트립. 펼쳐지지 않은 상태(»)를 누르면 사이드바가 겹침 오버레이로 뜨고, 펼쳐진
+/// 상태(«, 반대 방향)를 누르면 다시 접힌다 — 같은 자리에서 화살표만 바뀐다.
+class _SidebarToggleStrip extends StatelessWidget {
+  final bool expanded;
+  final VoidCallback onTap;
+  const _SidebarToggleStrip({required this.expanded, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 28,
+      child: Material(
+        color: Theme.of(context).colorScheme.surface,
+        child: InkWell(
+          onTap: onTap,
+          child: Center(
+            child: Icon(
+              expanded
+                  ? Icons.keyboard_double_arrow_left
+                  : Icons.keyboard_double_arrow_right,
+              size: 18,
+              color: Theme.of(context).hintColor,
+            ),
+          ),
+        ),
       ),
     );
   }

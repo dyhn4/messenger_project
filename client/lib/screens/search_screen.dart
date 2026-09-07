@@ -202,10 +202,11 @@ class _SearchScreenState extends State<SearchScreen> {
             onSubmitted: (_) => _search(),
           ),
           const SizedBox(height: 12),
+          // 우측 패널 폭이 고정 500px(desktop_home_screen.dart의 _sidePanelWidth)로 세
+          // 버튼이 한 줄에 다 들어갈 만큼 넉넉해서, "참여한 대화방"만 Expanded로 남는
+          // 폭을 차지하고 모든 멤버/전체 기간은 원래 크기 그대로 옆에 붙는다.
           Row(
             children: [
-              // 참여한 대화방만 창 크기에 따라 늘었다 줄었다 한다. 모든 멤버/기간은
-              // 항상 원래 크기 그대로 보이도록 고정 폭을 쓴다.
               Expanded(
                 child: _RoomFilterButton(
                   session: widget.session,

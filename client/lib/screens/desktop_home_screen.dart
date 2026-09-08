@@ -14,6 +14,7 @@ import '../widgets/room_options_menu.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'create_topic_screen.dart';
+import 'files_screen.dart';
 import 'member_profile_dialog.dart';
 import 'message_thread_screen.dart';
 import 'my_profile_dialog.dart';
@@ -24,13 +25,13 @@ import 'topic_browse_screen.dart';
 /// 이 폭 이하로 창이 좁아지면 왼쪽 사이드바(고정 280px)를 항상 펼쳐두는 대신 얇은 화살표
 /// 스트립으로 접는다 — HomeScreen이 데스크톱/모바일 레이아웃을 가르는 wideBreakpoint(700)와는
 /// 별개로, "데스크톱 레이아웃이긴 한데 사이드바를 나란히 두기엔 좁은" 중간 구간을 다룬다.
-const _sidebarCollapseBreakpoint = 900.0;
+const _sidebarCollapseBreakpoint = 950.0;
 
 /// 검색/멤버/댓글 스레드 우측 패널의 폭 — 예전엔 창이 1200px보다 넓으면 480, 아니면 400으로
 /// 창 폭에 따라 바뀌었지만, 고정 폭이 낫다는 피드백에 따라 하나의 값으로 고정했다. 500은
 /// search_screen.dart의 "참여한 대화방"/"모든 멤버"/"전체 기간" 필터 버튼 세 개가 줄임표 없이
 /// 한 줄에 다 들어가는 데 필요한 최소 폭(계산상 약 430~450px)에 여유를 더한 값이다.
-const _sidePanelWidth = 500.0;
+const _sidePanelWidth = 420.0;
 
 /// 잔디(JANDI)식 넓은 화면 레이아웃: 좌측 사이드바(토픽/그룹채팅/유저목록) + 우측 채팅 패널.
 /// HomeScreen이 창 너비를 보고 이 화면을 쓸지 RoomListScreen(모바일)을 쓸지 고른다.
@@ -46,6 +47,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Room? _selectedRoom;
   bool _searchOpen = false;
   bool _membersOpen = false;
+  bool _filesOpen = false;
   String? _highlightMessageId;
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
 
@@ -73,6 +75,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   void initState() {
     super.initState();
     widget.session.addListener(_onSessionChanged);
+    // 좁은 화면(RoomListScreen)에서 채팅방을 열어둔 채로 창을 넓혀서 이 화면으로 넘어온
+    // 경우 — 그 화면의 ChatScreen(ChatPanel)이 아직 dispose 전이라(같은 프레임 안에서 새
+    // 위젯의 initState가 먼저 돌고 옛 dispose가 나중에 돎) session.activeRoomId가 아직
+    // 그 방을 그대로 가리키고 있다. 그 방을 그대로 이어서 선택해둔다(HomeScreen이 위에
+    // 쌓여있던 ChatScreen 스택도 걷어내서 이 화면이 실제로 보이게 한다).
+    final activeId = widget.session.activeRoomId;
+    if (activeId != null) {
+      final matches = widget.session.rooms.where((r) => r.id == activeId);
+      if (matches.isNotEmpty) _selectedRoom = matches.first;
+    }
   }
 
   @override
@@ -158,12 +170,22 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               _membersOpen = !_membersOpen;
               if (_membersOpen) {
                 _searchOpen = false;
+                _filesOpen = false;
                 _threadMessage = null;
               }
             }),
             onToggleSearch: () => setState(() {
               _searchOpen = !_searchOpen;
               if (_searchOpen) {
+                _membersOpen = false;
+                _filesOpen = false;
+                _threadMessage = null;
+              }
+            }),
+            onOpenFiles: () => setState(() {
+              _filesOpen = !_filesOpen;
+              if (_filesOpen) {
+                _searchOpen = false;
                 _membersOpen = false;
                 _threadMessage = null;
               }
@@ -198,6 +220,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                       session: widget.session,
                       onClose: () => setState(() => _membersOpen = false),
                       onSelectMember: _openMemberProfile,
+                    ),
+                  ),
+                ],
+                if (_filesOpen) ...[
+                  const VerticalDivider(width: 1),
+                  SizedBox(
+                    width: _sidePanelWidth,
+                    child: FilesScreen(
+                      session: widget.session,
+                      initialRoomId: _selectedRoom?.id,
+                      onClose: () => setState(() => _filesOpen = false),
                     ),
                   ),
                 ],
@@ -385,10 +418,12 @@ class _TopBar extends StatelessWidget {
   final Session session;
   final VoidCallback onShowMembers;
   final VoidCallback onToggleSearch;
+  final VoidCallback onOpenFiles;
   const _TopBar({
     required this.session,
     required this.onShowMembers,
     required this.onToggleSearch,
+    required this.onOpenFiles,
   });
 
   @override
@@ -412,8 +447,50 @@ class _TopBar extends StatelessWidget {
             tooltip: '검색',
             onPressed: onToggleSearch,
           ),
+          PopupMenuButton<void>(
+            icon: const Icon(Icons.apps),
+            tooltip: '메뉴',
+            position: PopupMenuPosition.under,
+            offset: const Offset(0, 10),
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                onTap: onOpenFiles,
+                child: const Row(
+                  children: [
+                    _FileTypeIcon(),
+                    SizedBox(width: 8),
+                    Text('파일'),
+                  ],
+                ),
+              ),
+            ],
+          ),
           AccountMenuButton(session: session),
         ],
+      ),
+    );
+  }
+}
+
+/// "메뉴" 팝업의 "파일" 항목 앞에 붙는 색깔 있는 파일 아이콘 — 민트색 둥근 배경 위에
+/// 진한 민트색 문서 아이콘.
+class _FileTypeIcon extends StatelessWidget {
+  const _FileTypeIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: const Color(0xFFDCF5EB),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.description_rounded,
+        size: 16,
+        color: Color(0xFF1FAE85),
       ),
     );
   }

@@ -118,6 +118,21 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
+/// 옛한글(고어) 자모 조합 글리프 — 기본 폰트(Roboto)에는 없어서 채팅에 옛한글을 쓰면
+/// 네모(tofu)로 보인다. pubspec.yaml에 번들된 폰트(SIL OFL 1.1, assets/fonts/OFL.txt 참고).
+const _oldHangulFontFamily = 'NanumBarunGothicYetHangul';
+
+/// 기존 테마의 폰트/글자 크기는 그대로 두고, 기본 폰트에 없는 글리프만 [_oldHangulFontFamily]로
+/// 대체되도록 fontFamilyFallback만 얹는다 — 그래서 채팅 내용뿐 아니라 입력창, 방 제목 등
+/// 텍스트가 나오는 모든 곳에서 옛한글이 깨지지 않고 보인다.
+ThemeData _withOldHangulFallback(ThemeData theme) {
+  const fallback = [_oldHangulFontFamily];
+  return theme.copyWith(
+    textTheme: theme.textTheme.apply(fontFamilyFallback: fallback),
+    primaryTextTheme: theme.primaryTextTheme.apply(fontFamilyFallback: fallback),
+  );
+}
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -287,19 +302,23 @@ class _MyAppState extends State<MyApp>
         return MaterialApp(
           navigatorKey: navigatorKey,
           title: 'TeamTalk',
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-            useMaterial3: true,
+          theme: _withOldHangulFallback(
+            ThemeData(
+              colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+              useMaterial3: true,
+            ),
           ),
-          darkTheme: ThemeData(
-            colorScheme: darkColorScheme,
-            useMaterial3: true,
-            // 다크 모드 기본 팝업 메뉴 배경(surfaceContainer)이 배경색과 너무 비슷해서
-            // 삼선 메뉴/각 방의 더보기 메뉴가 잘 안 보인다는 피드백에 따라 한 단계 밝은
-            // 톤(surfaceContainerHigh)으로 살짝 밝게 조정한다. 라이트 모드는 원래도 문제
-            // 없었다고 해서 안 건드린다.
-            popupMenuTheme: PopupMenuThemeData(
-              color: darkColorScheme.surfaceContainerHigh,
+          darkTheme: _withOldHangulFallback(
+            ThemeData(
+              colorScheme: darkColorScheme,
+              useMaterial3: true,
+              // 다크 모드 기본 팝업 메뉴 배경(surfaceContainer)이 배경색과 너무 비슷해서
+              // 삼선 메뉴/각 방의 더보기 메뉴가 잘 안 보인다는 피드백에 따라 한 단계 밝은
+              // 톤(surfaceContainerHigh)으로 살짝 밝게 조정한다. 라이트 모드는 원래도 문제
+              // 없었다고 해서 안 건드린다.
+              popupMenuTheme: PopupMenuThemeData(
+                color: darkColorScheme.surfaceContainerHigh,
+              ),
             ),
           ),
           themeMode: appSettings.themeMode,

@@ -21,14 +21,46 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _updateBannerShown = false;
   bool _secretInviteDialogShowing = false;
   StreamSubscription<String>? _toastSub;
 
+  /// 직전에 넓은 레이아웃이었는지. 좁은 화면에서 방을 열면 RoomListScreen이 ChatScreen을
+  /// Navigator에 push하는데, 그 상태로 창을 넓히면 DesktopHomeScreen이 그 방을 이어서
+  /// 인라인으로 보여줄 준비가 되어도(initState에서 activeRoomId로 미리 선택) 위에 쌓인
+  /// ChatScreen이 여전히 화면을 덮고 있어 안 보인다 — 좁음→넓음으로 바뀌는 순간 그 push
+  /// 스택을 루트까지 걷어낸다.
+  ///
+  /// build()의 LayoutBuilder가 아니라 [didChangeMetrics]로 감지하는 이유: ChatScreen이
+  /// 위에 떠 있는 동안은 HomeScreen이 화면에 안 보이는 라우트라서, Navigator/Overlay가
+  /// 불투명한 라우트에 덮인 아래쪽은 리레이아웃을 건너뛴다 — LayoutBuilder의 builder가
+  /// 아예 다시 안 불려서 그 안에서 창 크기 변화를 감지할 수 없었다. didChangeMetrics는
+  /// 위젯 트리의 가시성과 무관하게 창 크기가 바뀔 때마다 항상 불린다.
+  late bool _wasWide = _currentWidth >= wideBreakpoint;
+
+  double get _currentWidth {
+    final view = WidgetsBinding.instance.platformDispatcher.views.first;
+    return view.physicalSize.width / view.devicePixelRatio;
+  }
+
+  @override
+  void didChangeMetrics() {
+    final isWide = _currentWidth >= wideBreakpoint;
+    if (!_wasWide && isWide) {
+      // build 도중이 아니라도(라우트 전환이 이 콜백 도중 안전하지 않을 수 있어) 프레임이
+      // 끝난 뒤로 미룬다.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+      });
+    }
+    _wasWide = isWide;
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.session.addListener(_onSessionChanged);
     _maybeShowUpdateBanner();
     _maybeShowSecretInvite();
@@ -44,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.session.removeListener(_onSessionChanged);
     _toastSub?.cancel();
     super.dispose();
@@ -138,7 +171,18 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth >= wideBreakpoint) {
+        final isWide = constraints.maxWidth >= wideBreakpoint;
+        if (_wasWide == false && isWide) {
+          // 좁음 → 넓음으로 막 바뀌었다 — 좁은 화면에서 push해둔 ChatScreen 등이 있으면
+          // 걷어내서, DesktopHomeScreen이 이어서 보여주는 방이 실제로 화면에 드러나게
+          // 한다(위 _wasWide 주석 참고). build 도중에는 Navigator를 건드릴 수 없어서
+          // 프레임이 끝난 뒤로 미룬다.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+          });
+        }
+        _wasWide = isWide;
+        if (isWide) {
           return DesktopHomeScreen(session: widget.session);
         }
         return RoomListScreen(session: widget.session);

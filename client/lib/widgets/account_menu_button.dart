@@ -26,7 +26,9 @@ class AccountMenuButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return PopupMenuButton<void>(
       icon: const Icon(Icons.menu),
-      tooltip: '메뉴',
+      tooltip: '설정',
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 10),
       itemBuilder: (context) => [
         PopupMenuItem<void>(
           onTap: () => showDialog(

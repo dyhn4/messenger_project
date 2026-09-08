@@ -134,6 +134,32 @@ export async function searchMessages({ requesterId, roomId, senderId, since, unt
   return rows.map((r) => r.message);
 }
 
+/**
+ * 방에 첨부된 이미지/파일 목록(files.js). searchMessages와 동일하게 requesterId가 속한
+ * 방(비밀 대화 제외)으로만 좁힌다. roomId/senderId는 둘 다 선택적 — 없으면 내가 속한 모든
+ * 방을 가로지른다. 파일 형식(이미지/PDF/문서 등) 세분화는 mimeType 문자열 매칭이 SQL보다
+ * JS가 다루기 쉬워서 여기서는 안 하고 호출부(files.js)에서 이 결과를 받은 뒤에 거른다.
+ */
+export async function listAttachments({ requesterId, roomId, senderId, limit }) {
+  const conditions = [
+    eq(roomMembers.userId, requesterId),
+    inArray(messages.type, ['image', 'file']),
+    isNull(messages.deletedAt),
+  ];
+  if (roomId) conditions.push(eq(messages.roomId, roomId));
+  if (senderId) conditions.push(eq(messages.senderId, senderId));
+
+  const rows = await db
+    .select({ message: messages })
+    .from(messages)
+    .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(and(eq(rooms.isSecret, false), ...conditions))
+    .orderBy(desc(messages.createdAt))
+    .limit(limit);
+  return rows.map((r) => r.message);
+}
+
 /** 비밀 대화 자동 삭제(secretExpiry.js): 상대방이 읽어서 expiresAt이 잡힌 뒤 그 시각이
  * 지난 메시지. 최초 1회만 읽음 처리되도록 readAt이 아직 없을 때만 세팅한다. */
 export async function markMessageRead(id, expiresAt) {

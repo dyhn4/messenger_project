@@ -401,66 +401,77 @@ class _MessageBubbleState extends State<MessageBubble> {
           // 말풍선 쪽 높이가 이미 이 툴바보다 큰 경우가 대부분이라(패딩 포함 한 줄짜리 말풍선도
           // 보통 이 툴바 높이보다 큼) Row 자체의 높이가 안 늘어나서, 아래 다른 메시지들이
           // 밀려나지 않는다.
-          if (_hovering &&
-              !message.deleted &&
+          //
+          // 툴바 자체는 _hovering과 무관하게 항상 자리를 차지해두고(Opacity로 안 보이게만
+          // 함) 있다가 호버할 때만 나타나게 한다 — 예전엔 호버할 때만 이 위젯을 트리에
+          // 넣었는데, 그러면 Row의 총 너비가 늘어나면서 옆의 Flexible 말풍선이 그만큼
+          // 줄어들었다(메시지를 길게 쓸수록 폭이 꽉 차 있어서 더 눈에 띔).
+          if (!message.deleted &&
               !message.decryptFailed &&
               !_editing &&
               widget.onOpenThread != null) ...[
             const SizedBox(width: 6),
-            MouseRegion(
-              onEnter: (_) => _setToolbarHovering(true),
-              onExit: (_) => _setToolbarHovering(false),
-              child: HoverToolbar(
-                children: [
-                  HoverToolbarButton(
-                    icon: Icons.mode_comment_outlined,
-                    tooltip: '댓글',
-                    onPressed: () => widget.onOpenThread!(message),
-                  ),
-                  HoverToolbarButton(
-                    icon: Icons.more_vert,
-                    tooltip: '더보기',
-                    visible: true,
-                    menuItems: [
-                      ...messageActionMenuItems(
-                        context,
-                        session: widget.session,
-                        message: message,
-                        senderDisplayName: displayName,
+            Opacity(
+              opacity: _hovering ? 1 : 0,
+              child: IgnorePointer(
+                ignoring: !_hovering,
+                child: MouseRegion(
+                  onEnter: (_) => _setToolbarHovering(true),
+                  onExit: (_) => _setToolbarHovering(false),
+                  child: HoverToolbar(
+                    children: [
+                      HoverToolbarButton(
+                        icon: Icons.mode_comment_outlined,
+                        tooltip: '댓글',
+                        onPressed: () => widget.onOpenThread!(message),
                       ),
-                      if (isMine &&
-                          (widget.onEdit != null || widget.onDelete != null))
-                        const PopupMenuDivider(),
-                      if (isMine &&
-                          message.type == MessageType.text &&
-                          widget.onEdit != null)
-                        PopupMenuItem<void>(
-                          onTap: _startEdit,
-                          child: const Row(
-                            children: [
-                              Icon(Icons.edit),
-                              SizedBox(width: 8),
-                              Text('수정'),
-                            ],
+                      HoverToolbarButton(
+                        icon: Icons.more_vert,
+                        tooltip: '더보기',
+                        visible: true,
+                        menuItems: [
+                          ...messageActionMenuItems(
+                            context,
+                            session: widget.session,
+                            message: message,
+                            senderDisplayName: displayName,
                           ),
-                        ),
-                      if (isMine && widget.onDelete != null)
-                        PopupMenuItem<void>(
-                          onTap: () => _confirmDelete(context),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.delete, color: Colors.redAccent),
-                              SizedBox(width: 8),
-                              Text(
-                                '삭제',
-                                style: TextStyle(color: Colors.redAccent),
+                          if (isMine &&
+                              (widget.onEdit != null ||
+                                  widget.onDelete != null))
+                            const PopupMenuDivider(),
+                          if (isMine &&
+                              message.type == MessageType.text &&
+                              widget.onEdit != null)
+                            PopupMenuItem<void>(
+                              onTap: _startEdit,
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.edit),
+                                  SizedBox(width: 8),
+                                  Text('수정'),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
+                            ),
+                          if (isMine && widget.onDelete != null)
+                            PopupMenuItem<void>(
+                              onTap: () => _confirmDelete(context),
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.delete, color: Colors.redAccent),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    '삭제',
+                                    style: TextStyle(color: Colors.redAccent),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ],

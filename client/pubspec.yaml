@@ -97,6 +97,15 @@ flutter:
     - assets/server_cert.pem
     - assets/tray_icon.ico
 
+  # 옛한글(고어) 자모 조합을 지원하는 폰트 — 기본 폰트(Roboto)에는 이 글리프가 없어서
+  # 채팅에 옛한글을 쓰면 네모(tofu)로 보인다. 네이버 나눔바른고딕 옛한글(SIL OFL 1.1,
+  # assets/fonts/OFL.txt)을 fontFamilyFallback으로 앱 전체 텍스트에 붙여서(main.dart)
+  # 기본 폰트에 없는 글리프만 이 폰트로 대체되도록 한다.
+  fonts:
+    - family: NanumBarunGothicYetHangul
+      fonts:
+        - asset: assets/fonts/NanumBarunGothic-YetHangul.ttf
+
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

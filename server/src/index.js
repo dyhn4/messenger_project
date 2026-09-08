@@ -1,9 +1,17 @@
+// 다른 어떤 로컬 모듈보다 먼저 .env를 읽어야 한다 — 지금까지는 auth.js가 (db 모듈보다 먼저)
+// config.js를 import하는 순서 덕에 어쩌다 보니 되고 있었을 뿐이었다. attachments.js가
+// 알파벳 순으로 auth.js보다 먼저 들어오면서 db/client.js(process.env.DATABASE_URL을 즉시
+// 읽음)가 config.js보다 먼저 실행돼 "DATABASE_URL이 설정되어 있지 않습니다" 오류가 났다 —
+// 로컬 import 순서에 우연히 기대지 않도록 여기서 명시적으로 제일 먼저 로드한다.
+import 'dotenv/config';
+
 import cors from 'cors';
 import express from 'express';
 import { createServer } from 'node:https';
 import os from 'node:os';
 import readline from 'node:readline';
 import { Server } from 'socket.io';
+import { attachmentsRouter } from './attachments.js';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
@@ -52,6 +60,7 @@ app.use('/api', requireAuth, createCommentsRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));
 app.use('/api', requireAuth, searchRouter);
+app.use('/api', requireAuth, attachmentsRouter);
 // 업로드 파일은 고정된 공개 경로로 서빙하지 않는다 — filesRouter가 짧게 만료되는
 // 서명 링크(/files/<token>)로만 내려준다(upload.js의 signFileUrl 참고).
 app.use(filesRouter);

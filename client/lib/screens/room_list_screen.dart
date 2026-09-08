@@ -34,7 +34,43 @@ class RoomListScreen extends StatefulWidget {
 class _RoomListScreenState extends State<RoomListScreen> {
   int _index = 0;
 
+  /// 넓은 화면에서 좁은 화면으로 막 넘어오면서 곧바로 다시 열어줘야 하는 방(있다면).
+  /// initState에서 곧장 push하지 않고 여기 담아두는 이유는 아래 build() 참고.
+  Room? _pendingReopenRoom;
+
   static const _titles = ['토픽', '그룹채팅', '채팅', '멤버', '더보기'];
+
+  @override
+  void initState() {
+    super.initState();
+    // 넓은 화면(DesktopHomeScreen)에서 어떤 방을 열어둔 채로 창을 좁혀서 이 화면으로
+    // 넘어온 경우 — DesktopHomeScreen의 ChatPanel이 아직 dispose 전이라(같은 프레임 안에서
+    // 새 위젯의 initState가 먼저 돌고 옛 dispose가 나중에 돎, session.dart의 clearActiveRoom
+    // 주석 참고) session.activeRoomId가 아직 그 방을 그대로 가리키고 있다. 그 방을 곧바로
+    // 이어서 열어준다.
+    //
+    // Navigator.push는 build 중엔 할 수 없어 프레임이 끝난 뒤로 미뤄야 하는데, 그동안
+    // build()가 평소처럼 토픽/그룹채팅 탭 목록을 그대로 그리면 그 목록이 한 프레임 반짝
+    // 보였다가 채팅방으로 바뀌는 게 눈에 띈다. 그래서 다시 열 방이 있는 동안은 build()가
+    // 탭 목록 대신 빈 화면을 그리도록 해서(_pendingReopenRoom) 그 반짝임을 없앤다.
+    final activeId = widget.session.activeRoomId;
+    if (activeId != null) {
+      final matches = widget.session.rooms.where((r) => r.id == activeId);
+      if (matches.isNotEmpty) _pendingReopenRoom = matches.first;
+    }
+    if (_pendingReopenRoom != null) {
+      final room = _pendingReopenRoom!;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(session: widget.session, room: room),
+          ),
+        );
+        if (mounted) setState(() => _pendingReopenRoom = null);
+      });
+    }
+  }
 
   void _openRoom(Room room) {
     Navigator.of(context).push(
@@ -46,6 +82,9 @@ class _RoomListScreenState extends State<RoomListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_pendingReopenRoom != null) {
+      return Scaffold(backgroundColor: Theme.of(context).scaffoldBackgroundColor);
+    }
     return Scaffold(
       appBar: AppBar(title: Text(_titles[_index])),
       body: IndexedStack(

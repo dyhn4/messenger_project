@@ -752,6 +752,28 @@ class ApiClient {
         .toList();
   }
 
+  /// 방(들)에 첨부된 이미지/파일 목록(files_screen.dart). roomId를 안 주면 내가 속한 모든
+  /// 방을 가로지른다. 서버가 toMessageDto와 동일한 모양으로 내려주므로 Message.fromJson을
+  /// 그대로 재사용한다(새 모델을 따로 만들 필요 없음).
+  Future<List<Message>> fetchAttachments({
+    String? roomId,
+    String? senderId,
+    String? category,
+  }) async {
+    final params = StringBuffer('/api/attachments?');
+    final parts = <String>[];
+    if (roomId != null) parts.add('roomId=${Uri.encodeQueryComponent(roomId)}');
+    if (senderId != null) {
+      parts.add('senderId=${Uri.encodeQueryComponent(senderId)}');
+    }
+    if (category != null) {
+      parts.add('category=${Uri.encodeQueryComponent(category)}');
+    }
+    params.write(parts.join('&'));
+    final list = await _get(params.toString()) as List;
+    return list.map((e) => Message.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
   /// [onProgress]/[cancelToken]을 안 넘기면 지금까지와 완전히 동일하게(단순 MultipartRequest)
   /// 동작한다. 둘 중 하나라도 넘기면, http 패키지에 내장 진행률 콜백이 없어서 요청 바디를 직접
   /// 스트리밍하며 바이트 수를 센다 — MultipartRequest가 만든 바디(finalize())를 그대로 다시

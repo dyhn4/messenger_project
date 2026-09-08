@@ -99,14 +99,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       _selectRoom(pending);
       return;
     }
-    // 선택된 방이 목록에서 사라졌으면(예: 채팅방 나가기) 우측 패널을 비운다.
+    // 선택된 방이 목록에서 사라졌거나(예: 그룹/토픽 나가기) 숨겨졌으면(평문 DM 숨기기/나가기 —
+    // 멤버십은 그대로 두고 hidden만 켜므로 rooms 목록엔 남아있다) 우측 패널을 비운다.
     final selected = _selectedRoom;
-    if (selected != null &&
-        !widget.session.rooms.any((r) => r.id == selected.id)) {
-      setState(() {
-        _selectedRoom = null;
-        _threadMessage = null;
-      });
+    if (selected != null) {
+      final match = widget.session.rooms.where((r) => r.id == selected.id);
+      if (match.isEmpty || match.first.hidden) {
+        setState(() {
+          _selectedRoom = null;
+          _threadMessage = null;
+        });
+      }
     }
   }
 
@@ -729,14 +732,24 @@ class _Sidebar extends StatelessWidget {
     return ListenableBuilder(
       listenable: session,
       builder: (context, _) {
+        // 평문 DM의 "채팅방 숨기기"/"채팅방 나가기"는 멤버십을 안 건드리고 내 hidden
+        // 플래그만 켠다(room_options_menu.dart 참고) — 그래서 session.rooms에는 그대로
+        // 남아있고, 여기(목록 UI)에서만 걸러낸다. 상대가 새 메시지를 보내면 서버가 자동으로
+        // hidden을 다시 꺼줘서 이 필터를 통과해 목록에 돌아온다.
         final topics = _favoriteFirst(
-          session.rooms.where((r) => r.type == RoomType.topic).toList(),
+          session.rooms
+              .where((r) => r.type == RoomType.topic && !r.hidden)
+              .toList(),
         );
         final groups = _favoriteFirst(
-          session.rooms.where((r) => r.type == RoomType.group).toList(),
+          session.rooms
+              .where((r) => r.type == RoomType.group && !r.hidden)
+              .toList(),
         );
         final dms = _favoriteFirst(
-          session.rooms.where((r) => r.type == RoomType.dm).toList(),
+          session.rooms
+              .where((r) => r.type == RoomType.dm && !r.hidden)
+              .toList(),
         );
         final topicsUnread = topics.fold<int>(
           0,

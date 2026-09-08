@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -16,6 +18,24 @@ import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 final _dateTimeFormat = DateFormat('yyyy/MM/dd a h:mm');
+
+/// [comments]의 [i]번째 댓글에 시간을 보여줄지 — 같은 사람이 같은 분(分)에 연달아 단 댓글은
+/// 그 묶음의 마지막 댓글에만 보여준다(채팅 메시지에서 시간을 묶는 것과 같은 규칙 — 그쪽도
+/// 마지막 메시지에만 시간을 보여준다, chat_panel.dart의 showTime 계산 참고). 인라인 댓글
+/// 카드와 스레드 패널이 같은 규칙을 쓰도록 두 호출부가 공유한다.
+bool showCommentTimeAt(List<Comment> comments, int i) {
+  if (i == comments.length - 1) return true;
+  final current = comments[i];
+  final next = comments[i + 1];
+  if (next.senderId != current.senderId) return true;
+  final a = current.createdAt;
+  final b = next.createdAt;
+  return !(a.year == b.year &&
+      a.month == b.month &&
+      a.day == b.day &&
+      a.hour == b.hour &&
+      a.minute == b.minute);
+}
 
 /// 원본 메시지에 달린, 끊기지 않고 연달아 온 댓글 한 묶음(run)을 채팅 타임라인에 그려 넣는 항목
 /// (chat_panel.dart가 MessageType.comment 항목 중 "런의 첫 댓글"에서만 하나씩 그린다 — 같은
@@ -223,6 +243,7 @@ class MessageCommentsCard extends StatelessWidget {
                   showAvatar:
                       i == 0 ||
                       comments[i - 1].senderId != comments[i].senderId,
+                  showTime: showCommentTimeAt(comments, i),
                 ),
             ],
           ),
@@ -254,8 +275,13 @@ class CommentEntryLine extends StatefulWidget {
 
   /// 같은 사람이 연달아 단 댓글 중 첫 댓글이 아니면 false — 채팅에서 연속 발신자의 아바타/이름을
   /// 첫 메시지에만 보여주는 것과 동일한 규칙(호출부에서 이전 댓글의 senderId와 비교해서 넘긴다).
-  /// 아바타와 이름을 같이 가린다(시간은 그대로 보여준다 — 채팅도 시간은 매 메시지마다 보여줌).
+  /// 아바타와 이름을 같이 가린다.
   final bool showAvatar;
+
+  /// 같은 사람이 **같은 분(分)에** 연달아 단 댓글 중 첫 댓글이 아니면 false — 그 묶음에서
+  /// 시간을 한 번만 보여준다(호출부에서 이전 댓글의 senderId/createdAt과 비교해서 넘긴다).
+  /// [showAvatar]와 조건이 달라서(이쪽은 분까지 같아야 함) 따로 받는다.
+  final bool showTime;
 
   /// 원본 메시지의 자동 삭제 예정 시각(비밀 대화, 읽은 뒤부터 확정됨) — 댓글은 독립 타이머가
   /// 없고 원본과 함께 소멸하므로 그 값을 그대로 받아 보여준다(self_destruct_countdown.dart).
@@ -272,6 +298,7 @@ class CommentEntryLine extends StatefulWidget {
     this.onDelete,
     this.fullWidth = false,
     this.showAvatar = true,
+    this.showTime = true,
     this.expiresAt,
   });
 
@@ -282,15 +309,59 @@ class CommentEntryLine extends StatefulWidget {
 class _CommentEntryLineState extends State<CommentEntryLine> {
   static const _toolbarSlotWidth = 40.0;
 
+  // 툴바는 댓글 줄 아래에 Overlay로 떠 있어서(FloatingHoverToolbar) 이 줄의 MouseRegion
+  // 바깥이다 — 말풍선에서 툴바로 마우스를 옮기는 순간 줄 쪽 exit이 먼저 불려서 툴바가
+  // 사라져버리므로, MessageBubble과 동일하게 양쪽 호버를 OR로 묶고 짧은 소멸 유예를 둔다.
+  bool _rowHovering = false;
+  bool _toolbarHovering = false;
   bool _hovering = false;
+  Timer? _hoverExitTimer;
   bool _editing = false;
   bool _savingEdit = false;
   final _editController = TextEditingController();
 
+  final _toolbarPortal = OverlayPortalController();
+
   @override
   void dispose() {
+    _hoverExitTimer?.cancel();
     _editController.dispose();
     super.dispose();
+  }
+
+  void _setRowHovering(bool value) {
+    _rowHovering = value;
+    _updateHoverState();
+  }
+
+  void _setToolbarHovering(bool value) {
+    _toolbarHovering = value;
+    _updateHoverState();
+  }
+
+  void _updateHoverState() {
+    _hoverExitTimer?.cancel();
+    if (_rowHovering || _toolbarHovering) {
+      if (!_hovering) setState(() => _hovering = true);
+      _syncToolbarPortal();
+      return;
+    }
+    _hoverExitTimer = Timer(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
+      setState(() => _hovering = false);
+      _syncToolbarPortal();
+    });
+  }
+
+  bool get _canShowToolbar =>
+      !widget.comment.deleted && !widget.comment.decryptFailed && !_editing;
+
+  /// OverlayPortalController.show/hide는 빌드 중에 부르면 안 돼서(SDK 주석) 호버
+  /// 콜백/타이머 같은 빌드 밖 지점에서만 호출한다.
+  void _syncToolbarPortal() {
+    final show = _hovering && _canShowToolbar;
+    if (show == _toolbarPortal.isShowing) return;
+    show ? _toolbarPortal.show() : _toolbarPortal.hide();
   }
 
   void _startEdit() {
@@ -302,9 +373,13 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       _editing = true;
       _editController.text = widget.comment.text ?? '';
     });
+    _syncToolbarPortal(); // 수정 중에는 툴바를 닫는다.
   }
 
-  void _cancelEdit() => setState(() => _editing = false);
+  void _cancelEdit() {
+    setState(() => _editing = false);
+    _syncToolbarPortal();
+  }
 
   Future<void> _saveEdit() async {
     final text = _editController.text.trim();
@@ -387,12 +462,13 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         if (widget.fullWidth) ...[
           if (widget.expiresAt != null)
             SelfDestructCountdown(expiresAt: widget.expiresAt!),
-          Text(
-            _dateTimeFormat.format(comment.createdAt),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).hintColor,
+          if (widget.showTime)
+            Text(
+              _dateTimeFormat.format(comment.createdAt),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).hintColor,
+              ),
             ),
-          ),
         ],
         if (comment.deleted)
           Text(
@@ -487,7 +563,10 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     }
   }
 
-  Widget _buildToolbar(BuildContext context) {
+  /// 메뉴 항목이 쓰는 context는 툴바가 그려지는 Overlay가 아니라 이 State의 context여야
+  /// 한다 — Overlay 쪽은 툴바가 닫히면 죽은 context가 된다(message_bubble.dart와 동일).
+  Widget _buildToolbar() {
+    final context = this.context;
     final comment = widget.comment;
     final displayName = widget.sender?.name ?? comment.senderName;
     final canEditDelete =
@@ -579,8 +658,9 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
 
     final Widget row;
     if (widget.fullWidth) {
-      // 말풍선이 이미 Expanded로 폭을 다 쓰므로, 호버 툴바 자리를 항상 고정폭으로 비워둬야
-      // (호버 여부와 무관하게) 나타날 때 말풍선 폭이 안 바뀌어서 글자가 안 움직인다.
+      // 툴바는 이제 이 줄 아래에 Overlay로 뜨지만(아래 FloatingHoverToolbar), 툴바가 여기
+      // 있던 시절에 잡아둔 오른쪽 빈 자리는 그대로 남겨둔다 — 없애면 말풍선 폭이 갑자기
+      // 넓어진다.
       row = Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -588,10 +668,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           const SizedBox(width: 8),
           Expanded(child: bubble),
           const SizedBox(width: 4),
-          SizedBox(
-            width: _toolbarSlotWidth,
-            child: (_hovering && showToolbar) ? _buildToolbar(context) : null,
-          ),
+          const SizedBox(width: _toolbarSlotWidth),
         ],
       );
     } else {
@@ -610,22 +687,18 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
             children: [
               if (widget.expiresAt != null)
                 SelfDestructCountdown(expiresAt: widget.expiresAt!),
-              Text(
-                _timeFormat.format(comment.createdAt),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).hintColor,
+              if (widget.showTime)
+                Text(
+                  _timeFormat.format(comment.createdAt),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).hintColor,
+                  ),
                 ),
-              ),
             ],
           ),
           const SizedBox(width: 6),
-          // fullWidth와 동일하게, 호버 여부와 무관하게 툴바 자리를 항상 고정폭으로 비워둔다 —
-          // Flexible만으로는 말풍선 내용이 길어서 이미 가용 폭을 거의 다 쓰고 있을 때 툴바가
-          // 뜨면서 그만큼 다시 밀릴 수 있는데, 자리를 아예 고정해두면 그 경우에도 안 밀린다.
-          SizedBox(
-            width: _toolbarSlotWidth,
-            child: (_hovering && showToolbar) ? _buildToolbar(context) : null,
-          ),
+          // fullWidth와 동일하게 툴바가 쓰던 오른쪽 빈 자리를 그대로 남겨둔다.
+          const SizedBox(width: _toolbarSlotWidth),
         ],
       );
     }
@@ -633,9 +706,30 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     return Padding(
       padding: EdgeInsets.only(top: widget.fullWidth ? 10 : 6),
       child: MouseRegion(
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: row,
+        onEnter: (_) => _setRowHovering(true),
+        onExit: (_) => _setRowHovering(false),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            row,
+            // 말풍선 왼쪽 아래(아바타 폭만큼 들여쓴 자리)를 가리키는 0크기 앵커 — 툴바는
+            // 여기 기준으로 Overlay에 떠서 아래 댓글/메시지를 밀지 않는다.
+            Padding(
+              padding: EdgeInsets.only(
+                left: avatarRadius * 2 + (widget.fullWidth ? 8 : 6),
+              ),
+              child: FloatingHoverToolbar(
+                controller: _toolbarPortal,
+                toolbarBuilder: (_) => MouseRegion(
+                  onEnter: (_) => _setToolbarHovering(true),
+                  onExit: (_) => _setToolbarHovering(false),
+                  child: _buildToolbar(),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -51,6 +51,21 @@ class RoomMutedUpdate {
       );
 }
 
+/// 평문 DM의 숨기기 상태가 바뀌었다는 브로드캐스트(room:hidden) — 내가(다른 기기 포함)
+/// 직접 숨기기/나가기를 했을 때뿐 아니라, 상대가 새 메시지를 보내 서버가 자동으로 다시
+/// 보이게(hidden: false) 되돌렸을 때도 온다(room_options_menu.dart 참고).
+class RoomHiddenUpdate {
+  final String roomId;
+  final bool hidden;
+  const RoomHiddenUpdate({required this.roomId, required this.hidden});
+
+  factory RoomHiddenUpdate.fromJson(Map<String, dynamic> json) =>
+      RoomHiddenUpdate(
+        roomId: json['roomId'] as String,
+        hidden: json['hidden'] as bool,
+      );
+}
+
 /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted). 내용은 이미 클라이언트에서
 /// 가려질 거라 최소 정보만 온다.
 class MessageDeletedEvent {
@@ -249,6 +264,7 @@ class ChatSocket {
   final _readController = StreamController<RoomReadEvent>.broadcast();
   final _favoriteController = StreamController<RoomFavoriteUpdate>.broadcast();
   final _mutedController = StreamController<RoomMutedUpdate>.broadcast();
+  final _hiddenController = StreamController<RoomHiddenUpdate>.broadcast();
   final _commentController = StreamController<Comment>.broadcast();
   final _messageEditedController = StreamController<Message>.broadcast();
   final _messageDeletedController =
@@ -290,6 +306,10 @@ class ChatSocket {
 
   /// 내가(다른 기기 포함) 방의 알림 끄기를 바꿨다는 브로드캐스트.
   Stream<RoomMutedUpdate> get mutedEvents => _mutedController.stream;
+
+  /// 평문 DM의 숨기기 상태 변화(내가 숨기기/나가기를 했거나, 상대의 새 메시지로 서버가
+  /// 자동으로 다시 보이게 되돌렸을 때).
+  Stream<RoomHiddenUpdate> get hiddenEvents => _hiddenController.stream;
 
   /// 누군가 메시지에 댓글을 달았다는 브로드캐스트(comment:new).
   Stream<Comment> get commentEvents => _commentController.stream;
@@ -394,6 +414,11 @@ class ChatSocket {
     socket.on('room:muted', (data) {
       _mutedController.add(
         RoomMutedUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('room:hidden', (data) {
+      _hiddenController.add(
+        RoomHiddenUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
     socket.on('comment:new', (data) {

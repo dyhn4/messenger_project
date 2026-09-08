@@ -92,6 +92,20 @@
       "when": 1788335979980,
       "tag": "0012_early_rawhide_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788854694317,
+      "tag": "0013_tan_toro",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788856346106,
+      "tag": "0014_tense_sabretooth",
+      "breakpoints": true
     }
   ]
 }

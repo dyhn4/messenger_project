@@ -23,10 +23,14 @@ String _formatSeconds(int seconds) {
 }
 
 /// 방 나가기/숨기기 확인 대화상자 + 실행 — 채팅 화면의 "더보기" 메뉴와 방 목록의 길게 누르기
-/// 메뉴가 공용으로 쓴다(room_list_screen.dart 참고). DM은 지금 동작이 실제로는 기록을 지우지
-/// 않고 목록에서만 숨기는 것이라(다시 대화를 시작하면 예전 내용이 복원됨) "채팅방 숨기기"로
-/// 표시하고, 그룹/토픽은 진짜 멤버에서 빠지는 거라 "나가기"로 표시한다 — 동작은 leaveRoom
-/// 하나로 동일하다.
+/// 메뉴가 공용으로 쓴다(room_list_screen.dart 참고). 진입 버튼은 평문 DM만 "채팅방 숨기기"로
+/// 표시하고(다시 대화를 시작하면 예전 내용이 복원되는 게 기본 동작이라서), 그룹/토픽/비밀
+/// 대화는 "나가기"로 표시한다.
+///
+/// 평문 DM은 대화상자 안에 "나가기" 체크박스가 하나 더 있다 — 체크 안 하면(기본) 지금까지와
+/// 동일하게 그냥 숨기기만 하고, 체크하면 진짜 나가기가 되어(서버가 dm_history_floors에 시각을
+/// 남김) 나중에 다시 대화해도 그 이전 메시지/파일/검색 결과가 안 보인다. 체크 여부에 따라
+/// 대화상자 제목/본문/버튼 문구가 "숨기기"↔"나가기"로 그 자리에서 바뀐다.
 Future<void> showLeaveRoomDialog(
   BuildContext context,
   Session session,
@@ -36,52 +40,72 @@ Future<void> showLeaveRoomDialog(
   final isTopic = room.type == RoomType.topic;
   // 비밀 대화는 "나만 목록에서 숨기기"가 의미가 없다(서버가 내용을 못 보므로) — 항상
   // "나가기"로 표시하고, 상대방도 같이 나가지는지는 아래 체크박스로 고른다.
-  final label = room.isSecret
+  final staticLabel = room.isSecret
       ? '채팅방 나가기'
       : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
   var alsoRemoveOther = false;
+  // 평문 DM 전용 — 기본(체크 안 함)은 지금처럼 "숨기기"(다시 대화하면 예전 내용이 그대로
+  // 복원됨), 체크하면 "진짜 나가기"(다시 대화해도 예전 내용이 안 보임)로 문구/버튼이
+  // 전부 바뀐다(room_options_menu.dart 상단 주석, 서버 dm_history_floors 참고).
+  final plainDm = !room.isSecret && isDm;
+  var realLeave = false;
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
-      builder: (dialogContext, setDialogState) => AlertDialog(
-        title: Text(label),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              room.isSecret
-                  ? '\'${room.displayName(session.userId ?? '')}\' 비밀 대화를 나가시겠습니까?'
-                  : isDm
-                  ? '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.'
-                  : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
-            ),
-            if (room.isSecret)
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: alsoRemoveOther,
-                onChanged: (v) =>
-                    setDialogState(() => alsoRemoveOther = v ?? false),
-                title: const Text('상대방도 나가기'),
-                subtitle: const Text('(양쪽 방 폭파)'),
+      builder: (dialogContext, setDialogState) {
+        final label = plainDm && realLeave ? '채팅방 나가기' : staticLabel;
+        return AlertDialog(
+          title: Text(label),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                room.isSecret
+                    ? '\'${room.displayName(session.userId ?? '')}\' 비밀 대화를 나가시겠습니까?'
+                    : plainDm
+                    ? (realLeave
+                          ? '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까? 나중에 다시 대화를 시작해도 예전 내용은 보이지 않습니다.'
+                          : '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.')
+                    : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
               ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
+              if (room.isSecret)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: alsoRemoveOther,
+                  onChanged: (v) =>
+                      setDialogState(() => alsoRemoveOther = v ?? false),
+                  title: const Text('상대방도 나가기'),
+                  subtitle: const Text('(양쪽 방 폭파)'),
+                ),
+              if (plainDm)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: realLeave,
+                  onChanged: (v) =>
+                      setDialogState(() => realLeave = v ?? false),
+                  title: const Text('나가기'),
+                  subtitle: const Text('(체크하면 다시 대화해도 예전 내용이 안 보입니다)'),
+                ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(
-              !room.isSecret && isDm ? '숨기기' : '나가기',
-              style: const TextStyle(color: Colors.redAccent),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
             ),
-          ),
-        ],
-      ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(
+                plainDm ? (realLeave ? '나가기' : '숨기기') : '나가기',
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          ],
+        );
+      },
     ),
   );
   if (confirmed != true) return;
@@ -89,6 +113,7 @@ Future<void> showLeaveRoomDialog(
   await session.leaveRoom(
     room.id,
     alsoRemoveOther: room.isSecret && alsoRemoveOther,
+    realLeave: plainDm && realLeave,
   );
   if (context.mounted) {
     Navigator.of(context).popUntil((route) => route.isFirst);

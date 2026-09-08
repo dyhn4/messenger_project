@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { findCommentById, insertComment, softDeleteComment, updateCommentText } from './db/queries/comments.js';
 import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
+import { unhideDmForOtherMembers } from './rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
@@ -66,27 +67,30 @@ export function createCommentsRouter(io) {
       thumbnailUrl: typeof req.body?.thumbnailUrl === 'string' ? req.body.thumbnailUrl : null,
     });
 
+    // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 — socket.js의
+    // message:send와 동일한 이유(rooms.js unhideDmForOtherMembers 참고).
+    const room = await findRoomById(message.roomId);
+    if (room) await unhideDmForOtherMembers(io, room, req.user.sub);
+
     const dto = toCommentDto(comment);
     io.to(message.roomId).emit('comment:new', dto);
     res.status(201).json(dto);
 
     // 응답 이후 백그라운드로 — socket.js의 message:send와 동일한 패턴.
-    findRoomById(message.roomId)
-      .then(async (room) => {
-        if (!room) return;
-        const memberIds = await listRoomMemberIds(room.id);
-        await notifyOfflineMembers({
-          memberIds,
-          senderId: req.user.sub,
-          senderName: comment.senderName,
-          sender,
-          room,
-          entry: comment,
-          roomTag: roomTagFor(room),
-          kind: 'comment',
-        });
-      })
-      .catch((err) => console.error('[push] 댓글 알림 실패:', err?.message ?? err));
+    (async () => {
+      if (!room) return;
+      const memberIds = await listRoomMemberIds(room.id);
+      await notifyOfflineMembers({
+        memberIds,
+        senderId: req.user.sub,
+        senderName: comment.senderName,
+        sender,
+        room,
+        entry: comment,
+        roomTag: roomTagFor(room),
+        kind: 'comment',
+      });
+    })().catch((err) => console.error('[push] 댓글 알림 실패:', err?.message ?? err));
   });
 
   router.patch('/comments/:id', async (req, res) => {

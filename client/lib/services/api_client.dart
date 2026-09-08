@@ -662,9 +662,19 @@ class ApiClient {
 
   /// [alsoRemoveOther]는 비밀 대화에서만 의미가 있다 — true면 상대방도 함께 나가지고 방
   /// 자체가 없어지며, false(기본)면 나만 나간다(평문 방은 이 값과 무관하게 항상 나만 나간다).
-  Future<void> leaveRoom(String roomId, {bool alsoRemoveOther = false}) async {
+  ///
+  /// [realLeave]는 평문 DM에서만 의미가 있다 — true면 서버가 이 시각을 기록 시작선으로
+  /// 남겨서(dm_history_floors) 나중에 상대가 다시 말을 걸어 방이 복원돼도 그 이전 메시지/
+  /// 파일/검색 결과가 이 사람에게는 안 보인다("진짜 나가기"). false(기본)면 지금처럼 그냥
+  /// 나가기만 해서(=숨기기), 다시 대화하면 예전 내용이 그대로 복원된다.
+  Future<void> leaveRoom(
+    String roomId, {
+    bool alsoRemoveOther = false,
+    bool realLeave = false,
+  }) async {
     await _post('/api/rooms/$roomId/leave', {
       'alsoRemoveOther': alsoRemoveOther,
+      'realLeave': realLeave,
     });
   }
 

@@ -1,6 +1,6 @@
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { roomMembers, rooms, users } from '../schema.js';
+import { dmHistoryFloors, roomMembers, rooms, users } from '../schema.js';
 
 export function findRoomById(id) {
   return db
@@ -68,6 +68,28 @@ export async function setSecretDepartedMember(roomId, { userId, name }) {
     .where(eq(rooms.id, roomId))
     .returning();
   return row;
+}
+
+/** DM "나가기"(진짜 나가기 — dm_history_floors 참고): 지금 시각을 이 사람의 기록 시작선으로
+ * 남긴다(upsert — 이미 있으면 최신 시각으로 덮어씀). */
+export async function setDmHistoryFloor(roomId, userId) {
+  await db
+    .insert(dmHistoryFloors)
+    .values({ roomId, userId, hiddenBeforeAt: new Date() })
+    .onConflictDoUpdate({
+      target: [dmHistoryFloors.roomId, dmHistoryFloors.userId],
+      set: { hiddenBeforeAt: new Date() },
+    });
+}
+
+/** 이 사람이 이 방에서 "진짜 나가기"를 한 적이 있으면 그 시각을, 없으면(=한 번도 없거나
+ * "숨기기"만 했으면) null을 돌려준다 — 메시지/파일/검색 조회에서 이 시각 이전 내용을 가린다. */
+export async function getDmHistoryFloor(roomId, userId) {
+  const [row] = await db
+    .select({ hiddenBeforeAt: dmHistoryFloors.hiddenBeforeAt })
+    .from(dmHistoryFloors)
+    .where(and(eq(dmHistoryFloors.roomId, roomId), eq(dmHistoryFloors.userId, userId)));
+  return row?.hiddenBeforeAt ?? null;
 }
 
 /** 여러 명을 한 번에 멤버로 추가한다(이미 멤버면 조용히 무시 — 초대/공개토픽 자동가입에서 중복 방지). */
@@ -171,6 +193,22 @@ export async function setMemberMuted(roomId, userId, muted) {
   await db
     .update(roomMembers)
     .set({ muted })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}
+
+/** 평문 DM "숨기기"/"나가기" — 즐겨찾기/뮤트와 동일한 개인 설정 방식(schema.js 참고). */
+export async function getMemberHidden(roomId, userId) {
+  const [row] = await db
+    .select({ hidden: roomMembers.hidden })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+  return row?.hidden ?? false;
+}
+
+export async function setMemberHidden(roomId, userId, hidden) {
+  await db
+    .update(roomMembers)
+    .set({ hidden })
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
 }
 

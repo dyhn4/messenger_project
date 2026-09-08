@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { roomMembers, rooms, messages } from '../schema.js';
+import { dmHistoryFloors, roomMembers, rooms, messages } from '../schema.js';
 
 export async function insertMessage(fields) {
   const [row] = await db.insert(messages).values(fields).returning();
@@ -68,10 +68,12 @@ export function listMessagesByIds(ids) {
 /** 방의 메시지 limit개를 시간순(오래된 것부터)으로. beforeCreatedAt을 주면 그 시각보다
  * 먼저 온 메시지 중 최근 limit개를 돌려준다(과거 방향 페이지네이션 — "위로 스크롤해서
  * 더 불러오기"/검색으로 아주 오래된 메시지를 찾을 때 씀). 없으면 지금까지처럼 방에서
- * 가장 최근 limit개. */
-export async function listMessagesByRoom(roomId, limit, beforeCreatedAt) {
+ * 가장 최근 limit개. [floor]를 주면(DM "진짜 나가기" 이력, rooms.js의 getDmHistoryFloor
+ * 참고) 그 시각 이전 메시지는 이 요청자에게 아예 없는 것처럼 뺀다. */
+export async function listMessagesByRoom(roomId, limit, beforeCreatedAt, floor) {
   const conditions = [eq(messages.roomId, roomId)];
   if (beforeCreatedAt) conditions.push(lt(messages.createdAt, beforeCreatedAt));
+  if (floor) conditions.push(gte(messages.createdAt, floor));
   const rows = await db
     .select()
     .from(messages)
@@ -82,19 +84,20 @@ export async function listMessagesByRoom(roomId, limit, beforeCreatedAt) {
 }
 
 /** toRoomDto의 unreadCount: 이 방에서 나(requesterId)를 뺀 사람이 보낸, 시스템 메시지가 아닌,
- * 내가 마지막으로 읽은 시각(sinceMs) 이후의 메시지 수. */
-export async function countUnreadForUser(roomId, requesterId, sinceMs) {
+ * 내가 마지막으로 읽은 시각(sinceMs) 이후의 메시지 수. [floor]를 주면(DM "진짜 나가기" 이력)
+ * 그 시각 이전 메시지는 안읽음 개수에도 안 세운다 — 어차피 목록에 안 보이는 메시지다. */
+export async function countUnreadForUser(roomId, requesterId, sinceMs, floor) {
+  const conditions = [
+    eq(messages.roomId, roomId),
+    ne(messages.senderId, requesterId),
+    ne(messages.type, 'system'),
+    gt(messages.createdAt, new Date(sinceMs)),
+  ];
+  if (floor) conditions.push(gte(messages.createdAt, floor));
   const [row] = await db
     .select({ count: sql`count(*)`.mapWith(Number) })
     .from(messages)
-    .where(
-      and(
-        eq(messages.roomId, roomId),
-        ne(messages.senderId, requesterId),
-        ne(messages.type, 'system'),
-        gt(messages.createdAt, new Date(sinceMs)),
-      ),
-    );
+    .where(and(...conditions));
   return row?.count ?? 0;
 }
 
@@ -109,6 +112,12 @@ export async function renameSenderMessages(userId, newName) {
   await db.update(messages).set({ senderName: newName }).where(eq(messages.senderId, userId));
 }
 
+// searchMessages/listAttachments가 공유하는 조건 — DM "진짜 나가기" 이력이 있으면(dm_history_floors)
+// 그 시각 이전 메시지는 검색/파일 목록에서도 이 요청자에게 안 보이게 뺀다. LEFT JOIN이라
+// 이력이 없는(=한 번도 진짜 나가기를 안 했거나 다른 방인) 경우 floor 쪽 컬럼은 전부 null이고,
+// 그때는 조건 자체가 무조건 참이 되어(뒤 or) 기존과 동일하게 전부 통과한다.
+const notBeforeDmHistoryFloor = or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(messages.createdAt, dmHistoryFloors.hiddenBeforeAt));
+
 /**
  * 통합 검색. requesterId가 속한 방으로만 좁히는 건 room_members와의 join으로 강제한다(클라이언트가
  * roomId를 임의로 보내도 내 방이 아니면 절대 안 걸림 — 예전 myRoomIds.has(...) 필터와 동일한 보장).
@@ -117,6 +126,7 @@ export async function searchMessages({ requesterId, roomId, senderId, since, unt
   const conditions = [
     eq(roomMembers.userId, requesterId),
     or(sql`lower(${messages.text}) like ${`%${q}%`}`, sql`lower(${messages.fileName}) like ${`%${q}%`}`),
+    notBeforeDmHistoryFloor,
   ];
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
@@ -128,6 +138,10 @@ export async function searchMessages({ requesterId, roomId, senderId, since, unt
     .from(messages)
     .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
     .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .leftJoin(
+      dmHistoryFloors,
+      and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
+    )
     .where(and(eq(rooms.isSecret, false), ...conditions))
     .orderBy(desc(messages.createdAt))
     .limit(limit);
@@ -145,6 +159,7 @@ export async function listAttachments({ requesterId, roomId, senderId, limit }) 
     eq(roomMembers.userId, requesterId),
     inArray(messages.type, ['image', 'file']),
     isNull(messages.deletedAt),
+    notBeforeDmHistoryFloor,
   ];
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
@@ -154,6 +169,10 @@ export async function listAttachments({ requesterId, roomId, senderId, limit }) 
     .from(messages)
     .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
     .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .leftJoin(
+      dmHistoryFloors,
+      and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
+    )
     .where(and(eq(rooms.isSecret, false), ...conditions))
     .orderBy(desc(messages.createdAt))
     .limit(limit);

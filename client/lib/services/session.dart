@@ -107,6 +107,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _readSub;
   StreamSubscription? _favoriteSub;
   StreamSubscription? _mutedSub;
+  StreamSubscription? _hiddenSub;
   StreamSubscription? _commentSub;
   StreamSubscription? _messageEditedSub;
   StreamSubscription? _messageDeletedSub;
@@ -526,6 +527,13 @@ class Session extends ChangeNotifier {
       final match = rooms.where((r) => r.id == e.roomId);
       if (match.isEmpty) return;
       match.first.muted = e.muted;
+      notifyListeners();
+    });
+    _hiddenSub?.cancel();
+    _hiddenSub = chatSocket.hiddenEvents.listen((e) {
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      match.first.hidden = e.hidden;
       notifyListeners();
     });
     _commentSub?.cancel();
@@ -1180,6 +1188,7 @@ class Session extends ChangeNotifier {
       incoming.unreadCount = rooms[i].unreadCount;
       incoming.favorite = rooms[i].favorite;
       incoming.muted = rooms[i].muted;
+      incoming.hidden = rooms[i].hidden;
       incoming.lastActivityAt = rooms[i].lastActivityAt;
       incoming.lastMessagePreview = rooms[i].lastMessagePreview;
       rooms[i] = incoming;
@@ -1340,12 +1349,31 @@ class Session extends ChangeNotifier {
     _showToast('비밀번호가 변경되었습니다.');
   }
 
-  Future<void> leaveRoom(String roomId, {bool alsoRemoveOther = false}) async {
+  Future<void> leaveRoom(
+    String roomId, {
+    bool alsoRemoveOther = false,
+    bool realLeave = false,
+  }) async {
     final room = _findRoom(roomId);
-    await api!.leaveRoom(roomId, alsoRemoveOther: alsoRemoveOther);
-    if (room?.isSecret == true) await secretSessionManager?.forgetRoom(roomId);
-    rooms.removeWhere((r) => r.id == roomId);
-    _controllers.remove(roomId)?.dispose();
+    await api!.leaveRoom(
+      roomId,
+      alsoRemoveOther: alsoRemoveOther,
+      realLeave: realLeave,
+    );
+    // 평문 DM은 서버가 멤버십을 그대로 두고 내 hidden 플래그만 켠다(room_options_menu.dart
+    // 참고) — 상대가 새 메시지를 보내면 room:hidden 브로드캐스트로 자동으로 다시 꺼지므로,
+    // 방 자체는 목록에서 지우지 않고 hidden만 올려둔다. 그룹/토픽/비밀 대화는 지금까지처럼
+    // 진짜 멤버십이 없어지므로 목록에서 완전히 뺀다.
+    final isPlainDm = room != null && room.type == RoomType.dm && !room.isSecret;
+    if (isPlainDm) {
+      room.hidden = true;
+    } else {
+      if (room?.isSecret == true) {
+        await secretSessionManager?.forgetRoom(roomId);
+      }
+      rooms.removeWhere((r) => r.id == roomId);
+      _controllers.remove(roomId)?.dispose();
+    }
     if (_activeRoomId == roomId) _forceClearActiveRoom();
     notifyListeners();
   }
@@ -1370,6 +1398,7 @@ class Session extends ChangeNotifier {
     await _readSub?.cancel();
     await _favoriteSub?.cancel();
     await _mutedSub?.cancel();
+    await _hiddenSub?.cancel();
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
     await _messageDeletedSub?.cancel();

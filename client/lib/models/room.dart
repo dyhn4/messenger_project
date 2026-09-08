@@ -31,6 +31,12 @@ class Room {
   /// 이 방을 뮤트하면 앱이 완전히 꺼져있을 때의 FCM 푸시가 안 온다(server/src/push.js).
   bool muted;
 
+  /// 평문 DM의 "채팅방 숨기기"/"채팅방 나가기" — 즐겨찾기/뮤트와 같은 방식으로 나만의
+  /// 개인 설정이다(멤버십 자체는 안 바뀐다, room_options_menu.dart 참고). true면 방 목록
+  /// 화면들이 이 방을 안 보여준다. 상대가 새 메시지를 보내면 서버가 자동으로 false로
+  /// 되돌려서(room_options_menu.dart의 숨기기 설명대로) 다시 보이게 한다 — 그래서 non-final.
+  bool hidden;
+
   /// 그룹채팅/채팅 목록 이름 아래 한 줄 미리보기(room_list_screen.dart). 로그인 시점엔
   /// 서버가 계산해서 내려주고(rooms.js의 toRoomDto), 이후 실시간으로는 Session이 소켓으로
   /// 받은 메시지/댓글의 실제(복호화된) 내용으로 직접 갱신한다 — 그래서 non-final.
@@ -75,6 +81,7 @@ class Room {
     this.unreadCount = 0,
     this.favorite = false,
     this.muted = false,
+    this.hidden = false,
     this.lastMessagePreview,
     DateTime? lastActivityAt,
     this.isSecret = false,
@@ -103,6 +110,7 @@ class Room {
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       favorite: json['favorite'] as bool? ?? false,
       muted: json['muted'] as bool? ?? false,
+      hidden: json['hidden'] as bool? ?? false,
       lastMessagePreview: json['lastMessagePreview'] as String?,
       lastActivityAt: (json['lastActivityAt'] as num?) != null
           ? DateTime.fromMillisecondsSinceEpoch(

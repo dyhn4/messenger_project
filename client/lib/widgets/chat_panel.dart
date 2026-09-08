@@ -15,6 +15,7 @@ import 'attachment_widgets.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
 import 'date_picker_popup.dart';
+import 'hover_toolbar.dart' show kHoverToolbarHeight;
 import 'indexed_scrollbar.dart';
 import 'message_bubble.dart';
 import 'message_comments_card.dart';
@@ -22,6 +23,17 @@ import 'read_up_to_here_divider.dart';
 import 'sticker_picker.dart';
 import 'sticker_preview_card.dart';
 import 'system_message_row.dart';
+
+/// 목록 맨 아래(가장 최근 메시지 밑) 여백 — 호버 툴바(FloatingHoverToolbar)가 입력창을
+/// 덮지 않도록 그 높이만큼 기본 여백(8)에 더해뒀다가, 너무 넓다는 피드백에 따라 10px 줄였다.
+///
+/// 이 값을 리스트의 padding.bottom이 아니라 **맨 아래 항목(index 0) 안쪽**에 넣는다:
+/// scrollable_positioned_list의 scrollTo/jumpTo(index:0)는 항목 위치만 보고 정렬을 맞출 뿐
+/// 리스트 padding은 계산에 안 넣어서, padding으로 주면 맨 아래로 스크롤해도 딱 이 여백만큼
+/// 못 미친 자리에 멈춘다. 그래서 한동안 스크롤 후 그만큼을 픽셀로 따로 보정했는데, 메시지를
+/// 보낼 때 "부드럽게 스크롤 → 갑자기 한 번 더 튐"으로 보이는 원인이었다. 여백이 항목의
+/// 일부가 되면 정렬 계산에 자연스럽게 포함돼서 한 번의 스크롤로 정확히 맞는다.
+const _kListBottomPadding = 8.0 + kHoverToolbarHeight + 4.0 - 10.0;
 
 /// 방 하나의 메시지 목록 + 입력창. ChatScreen(모바일 전체화면)과
 /// DesktopHomeScreen(우측 패널)이 이 위젯을 그대로 공유한다.
@@ -501,364 +513,380 @@ class _ChatPanelState extends State<ChatPanel> {
     final column = Column(
       children: [
         Expanded(
-          child: ListenableBuilder(
-            listenable: controller,
-            builder: (context, _) {
-              if (controller.loading) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final msgs = controller.messages;
-              if (msgs.isEmpty) {
-                return const Center(child: Text('아직 메시지가 없습니다.'));
-              }
+          // 호버 툴바(FloatingHoverToolbar)는 Overlay에 그려지는데, 앱 전체 Overlay를 쓰면
+          // 메시지 목록 밖 — 특히 아래 입력창 위 — 까지 삐져나온다. 목록 영역만의 Overlay를
+          // 여기 두면 그 툴바들이 이 영역 안에서만 그려지고, 넘치는 부분은 목록 아래
+          // 경계에서 잘린다(Overlay.wrap 기본값이 Clip.hardEdge).
+          child: Overlay.wrap(
+            child: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) {
+                if (controller.loading) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final msgs = controller.messages;
+                if (msgs.isEmpty) {
+                  return const Center(child: Text('아직 메시지가 없습니다.'));
+                }
 
-              final boundary = controller.readBoundary;
-              final showReadDivider =
-                  boundary > 0 &&
-                  msgs.any(
-                    (m) => m.createdAt.millisecondsSinceEpoch <= boundary,
-                  ) &&
-                  msgs.any(
-                    (m) => m.createdAt.millisecondsSinceEpoch > boundary,
-                  );
+                final boundary = controller.readBoundary;
+                final showReadDivider =
+                    boundary > 0 &&
+                    msgs.any(
+                      (m) => m.createdAt.millisecondsSinceEpoch <= boundary,
+                    ) &&
+                    msgs.any(
+                      (m) => m.createdAt.millisecondsSinceEpoch > boundary,
+                    );
 
-              return Stack(
-                children: [
-                  NotificationListener<ScrollNotification>(
-                    onNotification: (notification) {
-                      if (notification is ScrollUpdateNotification) {
-                        _onScrollUpdate(notification, msgs);
-                      } else if (notification is ScrollEndNotification) {
-                        _maybeLoadOlderMessages();
-                      }
-                      return false;
-                    },
-                    child: IndexedScrollbar(
-                      positionsListener: _itemPositionsListener,
-                      scrollController: _itemScrollController,
-                      itemCount: msgs.length,
-                      // 높이 캐시가 새 메시지로 인덱스가 밀려도 유지되도록 메시지 id를
-                      // 키로 준다(itemBuilder와 동일한 reverse 인덱싱).
-                      itemKeyAt: (i) => i >= 0 && i < msgs.length
-                          ? msgs[msgs.length - 1 - i].id
-                          : null,
-                      child: ScrollablePositionedList.builder(
-                        key: _listKey,
-                        itemScrollController: _itemScrollController,
-                        itemPositionsListener: _itemPositionsListener,
-                        reverse: true,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
+                return Stack(
+                  children: [
+                    NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollUpdateNotification) {
+                          _onScrollUpdate(notification, msgs);
+                        } else if (notification is ScrollEndNotification) {
+                          _maybeLoadOlderMessages();
+                        }
+                        return false;
+                      },
+                      child: IndexedScrollbar(
+                        positionsListener: _itemPositionsListener,
+                        scrollController: _itemScrollController,
                         itemCount: msgs.length,
-                        itemBuilder: (context, i) {
-                          final m = msgs[msgs.length - 1 - i];
-                          final isOldestLoaded = i == msgs.length - 1;
-                          final prev = isOldestLoaded
-                              ? null
-                              : msgs[msgs.length - 2 - i];
-                          final showDate =
-                              isOldestLoaded ||
-                              m.createdAt.year != prev!.createdAt.year ||
-                              m.createdAt.month != prev.createdAt.month ||
-                              m.createdAt.day != prev.createdAt.day;
+                        // 높이 캐시가 새 메시지로 인덱스가 밀려도 유지되도록 메시지 id를
+                        // 키로 준다(itemBuilder와 동일한 reverse 인덱싱).
+                        itemKeyAt: (i) => i >= 0 && i < msgs.length
+                            ? msgs[msgs.length - 1 - i].id
+                            : null,
+                        child: ScrollablePositionedList.builder(
+                          key: _listKey,
+                          itemScrollController: _itemScrollController,
+                          itemPositionsListener: _itemPositionsListener,
+                          reverse: true,
+                          // 아래쪽 여백은 여기(리스트 padding)가 아니라 맨 아래 항목 안에
+                          // 넣는다 — 아래 itemBuilder와 _kListBottomPadding 주석 참고.
+                          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                          itemCount: msgs.length,
+                          itemBuilder: (context, i) {
+                            final m = msgs[msgs.length - 1 - i];
+                            final isOldestLoaded = i == msgs.length - 1;
+                            final prev = isOldestLoaded
+                                ? null
+                                : msgs[msgs.length - 2 - i];
+                            final showDate =
+                                isOldestLoaded ||
+                                m.createdAt.year != prev!.createdAt.year ||
+                                m.createdAt.month != prev.createdAt.month ||
+                                m.createdAt.day != prev.createdAt.day;
 
-                          // 같은 사람이 같은 분(分)에 연달아 보낸 메시지는, 그중 가장 나중(=시간상
-                          // 마지막) 메시지에만 시간을 보여준다.
-                          final next = i == 0 ? null : msgs[msgs.length - i];
-                          final showTime =
-                              next == null ||
-                              next.senderId != m.senderId ||
-                              !_sameMinute(next.createdAt, m.createdAt);
+                            // 같은 사람이 같은 분(分)에 연달아 보낸 메시지는, 그중 가장 나중(=시간상
+                            // 마지막) 메시지에만 시간을 보여준다.
+                            final next = i == 0 ? null : msgs[msgs.length - i];
+                            final showTime =
+                                next == null ||
+                                next.senderId != m.senderId ||
+                                !_sameMinute(next.createdAt, m.createdAt);
 
-                          // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
-                          // 날짜가 바뀌었거나(showDate) 중간에 시스템 메시지(입장/퇴장 알림)나 댓글
-                          // 카드가 끼면 그 다음 메시지부터 새로 보여준다.
-                          final isFirstInGroup =
-                              isOldestLoaded ||
-                              showDate ||
-                              prev.senderId != m.senderId ||
-                              prev.type == MessageType.system ||
-                              prev.type == MessageType.comment;
+                            // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
+                            // 날짜가 바뀌었거나(showDate) 중간에 시스템 메시지(입장/퇴장 알림)나 댓글
+                            // 카드가 끼면 그 다음 메시지부터 새로 보여준다.
+                            final isFirstInGroup =
+                                isOldestLoaded ||
+                                showDate ||
+                                prev.senderId != m.senderId ||
+                                prev.type == MessageType.system ||
+                                prev.type == MessageType.comment;
 
-                          Widget row;
-                          if (m.type == MessageType.system) {
-                            row = SystemMessageRow(message: m);
-                          } else if (m.type == MessageType.comment) {
-                            final parent = _findMessage(
-                              msgs,
-                              m.asComment!.messageId,
-                            );
-                            // 바로 앞 항목이 "같은 원본 메시지"의 댓글이 아니면(=다른 채팅이 끼었거나,
-                            // 다른 원본 메시지에 대한 댓글이거나, 여기가 맨 처음이면) 이 댓글이 새 런의
-                            // 시작이라 카드를 새로 그린다. 아니면 이미 앞에서 그려진 카드에 흡수되므로
-                            // 여기선 아무것도 안 그린다.
-                            final isFirstCommentInRun =
-                                prev == null ||
-                                prev.type != MessageType.comment ||
-                                prev.asComment!.messageId !=
-                                    m.asComment!.messageId;
-                            if (parent == null || !isFirstCommentInRun) {
-                              row = const SizedBox.shrink();
-                            } else {
-                              // 같은 원본 메시지에 대한 댓글이 사이에 다른 채팅 없이 연달아 이어지는
-                              // 만큼(런) 전부 모아서, 이 카드 하나 안에서 이어 붙여 보여준다. 런은
-                              // 이 댓글부터 뒤로(시간순 정방향) 훑으며 조건이 깨지는 지점에서 끊는다.
-                              final ascIdx = msgs.length - 1 - i;
-                              final runComments = <Comment>[];
-                              var j = ascIdx;
-                              while (j < msgs.length &&
-                                  msgs[j].type == MessageType.comment &&
-                                  msgs[j].asComment!.messageId ==
-                                      m.asComment!.messageId) {
-                                runComments.add(msgs[j].asComment!);
-                                j++;
+                            Widget row;
+                            if (m.type == MessageType.system) {
+                              row = SystemMessageRow(message: m);
+                            } else if (m.type == MessageType.comment) {
+                              final parent = _findMessage(
+                                msgs,
+                                m.asComment!.messageId,
+                              );
+                              // 바로 앞 항목이 "같은 원본 메시지"의 댓글이 아니면(=다른 채팅이 끼었거나,
+                              // 다른 원본 메시지에 대한 댓글이거나, 여기가 맨 처음이면) 이 댓글이 새 런의
+                              // 시작이라 카드를 새로 그린다. 아니면 이미 앞에서 그려진 카드에 흡수되므로
+                              // 여기선 아무것도 안 그린다.
+                              final isFirstCommentInRun =
+                                  prev == null ||
+                                  prev.type != MessageType.comment ||
+                                  prev.asComment!.messageId !=
+                                      m.asComment!.messageId;
+                              if (parent == null || !isFirstCommentInRun) {
+                                row = const SizedBox.shrink();
+                              } else {
+                                // 같은 원본 메시지에 대한 댓글이 사이에 다른 채팅 없이 연달아 이어지는
+                                // 만큼(런) 전부 모아서, 이 카드 하나 안에서 이어 붙여 보여준다. 런은
+                                // 이 댓글부터 뒤로(시간순 정방향) 훑으며 조건이 깨지는 지점에서 끊는다.
+                                final ascIdx = msgs.length - 1 - i;
+                                final runComments = <Comment>[];
+                                var j = ascIdx;
+                                while (j < msgs.length &&
+                                    msgs[j].type == MessageType.comment &&
+                                    msgs[j].asComment!.messageId ==
+                                        m.asComment!.messageId) {
+                                  runComments.add(msgs[j].asComment!);
+                                  j++;
+                                }
+                                row = Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 8,
+                                    right: 8,
+                                  ),
+                                  child: MessageCommentsCard(
+                                    session: widget.session,
+                                    parentMessage: parent,
+                                    comments: runComments,
+                                    room: widget.room,
+                                    currentUserId: widget.session.userId,
+                                    resolveUrl: widget.session.resolveUrl,
+                                    onTap: () =>
+                                        widget.onOpenThread?.call(parent),
+                                    onEditComment: controller.editComment,
+                                    onDeleteComment: controller.deleteComment,
+                                  ),
+                                );
                               }
-                              row = Padding(
-                                padding: const EdgeInsets.only(
-                                  left: 8,
-                                  right: 8,
-                                ),
-                                child: MessageCommentsCard(
-                                  session: widget.session,
-                                  parentMessage: parent,
-                                  comments: runComments,
-                                  room: widget.room,
-                                  currentUserId: widget.session.userId,
-                                  resolveUrl: widget.session.resolveUrl,
-                                  onTap: () =>
-                                      widget.onOpenThread?.call(parent),
-                                  onEditComment: controller.editComment,
-                                  onDeleteComment: controller.deleteComment,
-                                ),
+                            } else {
+                              row = MessageBubble(
+                                session: widget.session,
+                                message: m,
+                                resolveUrl: widget.session.resolveUrl,
+                                unreadCount: widget.room.unreadCountFor(m),
+                                isMine: m.senderId == widget.session.userId,
+                                sender: _senderOf(m.senderId),
+                                showTime: showTime,
+                                showSenderInfo: isFirstInGroup,
+                                highlighted: m.id == _highlightedMessageId,
+                                onOpenThread: widget.onOpenThread,
+                                onEdit: controller.editMessage,
+                                onDelete: controller.deleteMessage,
                               );
                             }
-                          } else {
-                            row = MessageBubble(
-                              session: widget.session,
-                              message: m,
-                              resolveUrl: widget.session.resolveUrl,
-                              unreadCount: widget.room.unreadCountFor(m),
-                              isMine: m.senderId == widget.session.userId,
-                              sender: _senderOf(m.senderId),
-                              showTime: showTime,
-                              showSenderInfo: isFirstInGroup,
-                              highlighted: m.id == _highlightedMessageId,
-                              onOpenThread: widget.onOpenThread,
-                              onEdit: controller.editMessage,
-                              onDelete: controller.deleteMessage,
-                            );
-                          }
 
-                          Widget? divider;
-                          if (showDate) {
-                            final key = _dividerKeys.putIfAbsent(
-                              _dateKey(m.createdAt),
-                              () => GlobalKey(),
-                            );
-                            divider = DateDivider(
-                              key: key,
-                              date: m.createdAt,
-                              onPickDate: () => _openDatePickerFor(m.createdAt),
-                            );
-                          }
+                            Widget? divider;
+                            if (showDate) {
+                              final key = _dividerKeys.putIfAbsent(
+                                _dateKey(m.createdAt),
+                                () => GlobalKey(),
+                              );
+                              divider = DateDivider(
+                                key: key,
+                                date: m.createdAt,
+                                onPickDate: () =>
+                                    _openDatePickerFor(m.createdAt),
+                              );
+                            }
 
-                          final isFirstUnread =
-                              showReadDivider &&
-                              m.createdAt.millisecondsSinceEpoch > boundary &&
-                              (isOldestLoaded ||
-                                  prev!.createdAt.millisecondsSinceEpoch <=
-                                      boundary);
+                            final isFirstUnread =
+                                showReadDivider &&
+                                m.createdAt.millisecondsSinceEpoch > boundary &&
+                                (isOldestLoaded ||
+                                    prev!.createdAt.millisecondsSinceEpoch <=
+                                        boundary);
 
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              ?divider,
-                              if (isFirstUnread) const ReadUpToHereDivider(),
-                              row,
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  if (_floatingDate != null)
-                    Positioned(
-                      top: 8,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: FloatingDatePill(
-                          date: _floatingDate!,
-                          onPickDate: _toggleDatePicker,
-                        ),
-                      ),
-                    ),
-                  if (_showDatePicker && _floatingDate != null)
-                    Positioned(
-                      top: 48,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: DatePickerPopup(
-                          initialMonth: _floatingDate!,
-                          selectedDate: _floatingDate,
-                          onClose: _closeDatePicker,
-                          onDateSelected: _jumpToDate,
-                        ),
-                      ),
-                    ),
-                  // 위로 스크롤해서 과거 메시지를 더 불러오는 동안(loadOlderMessages) 잠깐
-                  // 보여주는 표시 — reverse:true라 "맨 위"는 화면 상단이다.
-                  if (controller.loadingMore)
-                    const Positioned(
-                      top: 8,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                    ),
-                  // 이모티콘 패널/미리보기는 메시지 목록 영역(이 Stack)의 맨 아래에 떠 있는
-                  // 오버레이로 그린다 — 입력창을 밀어내지 않고(레이아웃이 안 바뀌니 채팅 내용이
-                  // 위아래로 출렁이지 않는다) 그 위에 겹쳐 보인다(카카오톡 방식). 이 Stack은
-                  // Expanded 영역 전체를 실제로 차지하고 있어서(ScrollablePositionedList가
-                  // 이미 그만큼 자리를 쓰고 있음) Positioned가 하단 근처 어디에 있든 진짜
-                  // 레이아웃 범위 안이라 마우스 클릭도 정상적으로 먹는다(Stack 밖으로 "그림만"
-                  // 넘치는 방식과 달리 히트테스트가 안 끊긴다).
-                  if (_stickerPickerOpen)
-                    Positioned(
-                      left: 8,
-                      bottom: 8,
-                      child: StickerPicker(onSelected: _selectSticker),
-                    )
-                  else if (_pendingSticker != null)
-                    // 입력창의 이모티콘 버튼(이미지 버튼 다음 두 번째 아이콘) 바로 위쯤에 오도록
-                    // 왼쪽으로 붙인다 — 전체 폭을 채우던 것에서 바꿈.
-                    Positioned(
-                      left: 10,
-                      bottom: 8,
-                      child: StickerPreviewCard(
-                        sticker: _pendingSticker!,
-                        onRemove: _removeSticker,
-                      ),
-                    ),
-                  // "맨 아래로" 버튼 + "새로운 메시지가 있습니다" 알약. 스크롤할 때마다
-                  // 바뀌는 상태라 setState 대신 ValueNotifier로 이 부분만 다시 그린다
-                  // (_newMessagesBelow의 주석 참고 — 리스트까지 다시 빌드하면 죽는다).
-                  Positioned.fill(
-                    child: ListenableBuilder(
-                      listenable: Listenable.merge([
-                        _scrolledPastOnePage,
-                        _newMessagesBelow,
-                      ]),
-                      builder: (context, _) {
-                        final showPill = _newMessagesBelow.value;
-                        return Stack(
-                          children: [
-                            // 늘 떠 있진 않고, 맨 아래에서 한 화면 이상 스크롤이 올라가
-                            // 있을 때만 보인다(_onItemPositionsChanged 참고).
-                            if (_scrolledPastOnePage.value)
-                              Positioned(
-                                right: 12,
-                                // 알약도 같이 떠 있으면 겹치지 않게 그 위로 띄운다.
-                                bottom: showPill ? 60 : 12,
-                                child: Material(
-                                  elevation: 4,
-                                  shape: const CircleBorder(),
-                                  color: Theme.of(context).colorScheme.surface,
-                                  clipBehavior: Clip.antiAlias,
-                                  child: InkWell(
-                                    onTap: _scrollToBottom,
-                                    child: const Padding(
-                                      padding: EdgeInsets.all(10),
-                                      child: Icon(Icons.keyboard_arrow_down),
-                                    ),
-                                  ),
-                                ),
+                            return Padding(
+                              // 맨 아래(가장 최근) 항목에만 아래쪽 여백을 붙인다 —
+                              // 리스트의 padding이 아니라 항목 안에 넣는 이유는
+                              // _kListBottomPadding 주석 참고.
+                              padding: EdgeInsets.only(
+                                bottom: i == 0 ? _kListBottomPadding : 0,
                               ),
-                            // 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(자동으로
-                            // 내려버리지 않는 대신) 이 알약을 띄운다. 누르면 맨 아래로
-                            // 스크롤, x를 누르면 (안 읽었더라도) 그냥 닫는다.
-                            if (showPill)
-                              Positioned(
-                                left: 0,
-                                right: 0,
-                                bottom: 8,
-                                child: Center(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  ?divider,
+                                  if (isFirstUnread) const ReadUpToHereDivider(),
+                                  row,
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    if (_floatingDate != null)
+                      Positioned(
+                        top: 8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: FloatingDatePill(
+                            date: _floatingDate!,
+                            onPickDate: _toggleDatePicker,
+                          ),
+                        ),
+                      ),
+                    if (_showDatePicker && _floatingDate != null)
+                      Positioned(
+                        top: 48,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: DatePickerPopup(
+                            initialMonth: _floatingDate!,
+                            selectedDate: _floatingDate,
+                            onClose: _closeDatePicker,
+                            onDateSelected: _jumpToDate,
+                          ),
+                        ),
+                      ),
+                    // 위로 스크롤해서 과거 메시지를 더 불러오는 동안(loadOlderMessages) 잠깐
+                    // 보여주는 표시 — reverse:true라 "맨 위"는 화면 상단이다.
+                    if (controller.loadingMore)
+                      const Positioned(
+                        top: 8,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                    // 이모티콘 패널/미리보기는 메시지 목록 영역(이 Stack)의 맨 아래에 떠 있는
+                    // 오버레이로 그린다 — 입력창을 밀어내지 않고(레이아웃이 안 바뀌니 채팅 내용이
+                    // 위아래로 출렁이지 않는다) 그 위에 겹쳐 보인다(카카오톡 방식). 이 Stack은
+                    // Expanded 영역 전체를 실제로 차지하고 있어서(ScrollablePositionedList가
+                    // 이미 그만큼 자리를 쓰고 있음) Positioned가 하단 근처 어디에 있든 진짜
+                    // 레이아웃 범위 안이라 마우스 클릭도 정상적으로 먹는다(Stack 밖으로 "그림만"
+                    // 넘치는 방식과 달리 히트테스트가 안 끊긴다).
+                    if (_stickerPickerOpen)
+                      Positioned(
+                        left: 8,
+                        bottom: 8,
+                        child: StickerPicker(onSelected: _selectSticker),
+                      )
+                    else if (_pendingSticker != null)
+                      // 입력창의 이모티콘 버튼(이미지 버튼 다음 두 번째 아이콘) 바로 위쯤에 오도록
+                      // 왼쪽으로 붙인다 — 전체 폭을 채우던 것에서 바꿈.
+                      Positioned(
+                        left: 10,
+                        bottom: 8,
+                        child: StickerPreviewCard(
+                          sticker: _pendingSticker!,
+                          onRemove: _removeSticker,
+                        ),
+                      ),
+                    // "맨 아래로" 버튼 + "새로운 메시지가 있습니다" 알약. 스크롤할 때마다
+                    // 바뀌는 상태라 setState 대신 ValueNotifier로 이 부분만 다시 그린다
+                    // (_newMessagesBelow의 주석 참고 — 리스트까지 다시 빌드하면 죽는다).
+                    Positioned.fill(
+                      child: ListenableBuilder(
+                        listenable: Listenable.merge([
+                          _scrolledPastOnePage,
+                          _newMessagesBelow,
+                        ]),
+                        builder: (context, _) {
+                          final showPill = _newMessagesBelow.value;
+                          return Stack(
+                            children: [
+                              // 늘 떠 있진 않고, 맨 아래에서 한 화면 이상 스크롤이 올라가
+                              // 있을 때만 보인다(_onItemPositionsChanged 참고).
+                              if (_scrolledPastOnePage.value)
+                                Positioned(
+                                  right: 12,
+                                  // 알약도 같이 떠 있으면 겹치지 않게 그 위로 띄운다.
+                                  bottom: showPill ? 60 : 12,
                                   child: Material(
                                     elevation: 4,
-                                    borderRadius: BorderRadius.circular(20),
+                                    shape: const CircleBorder(),
                                     color: Theme.of(
                                       context,
-                                    ).colorScheme.primaryContainer,
+                                    ).colorScheme.surface,
                                     clipBehavior: Clip.antiAlias,
                                     child: InkWell(
                                       onTap: _scrollToBottom,
-                                      child: Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          14,
-                                          8,
-                                          6,
-                                          8,
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              Icons.arrow_downward,
-                                              size: 16,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onPrimaryContainer,
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '새로운 메시지가 있습니다',
-                                              style: TextStyle(
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(10),
+                                        child: Icon(Icons.keyboard_arrow_down),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              // 맨 아래가 아닐 때 남이 보낸 새 메시지가 오면(자동으로
+                              // 내려버리지 않는 대신) 이 알약을 띄운다. 누르면 맨 아래로
+                              // 스크롤, x를 누르면 (안 읽었더라도) 그냥 닫는다.
+                              if (showPill)
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 8,
+                                  child: Center(
+                                    child: Material(
+                                      elevation: 4,
+                                      borderRadius: BorderRadius.circular(20),
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primaryContainer,
+                                      clipBehavior: Clip.antiAlias,
+                                      child: InkWell(
+                                        onTap: _scrollToBottom,
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            14,
+                                            8,
+                                            6,
+                                            8,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.arrow_downward,
+                                                size: 16,
                                                 color: Theme.of(context)
                                                     .colorScheme
                                                     .onPrimaryContainer,
-                                                fontWeight: FontWeight.w500,
                                               ),
-                                            ),
-                                            InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              onTap: _dismissNewMessagesPill,
-                                              child: Padding(
-                                                padding: const EdgeInsets.all(
-                                                  6,
-                                                ),
-                                                child: Icon(
-                                                  Icons.close,
-                                                  size: 16,
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '새로운 메시지가 있습니다',
+                                                style: TextStyle(
                                                   color: Theme.of(context)
                                                       .colorScheme
                                                       .onPrimaryContainer,
+                                                  fontWeight: FontWeight.w500,
                                                 ),
                                               ),
-                                            ),
-                                          ],
+                                              InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                onTap: _dismissNewMessagesPill,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.all(
+                                                    6,
+                                                  ),
+                                                  child: Icon(
+                                                    Icons.close,
+                                                    size: 16,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onPrimaryContainer,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
-                        );
-                      },
+                            ],
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         ),
         const Divider(height: 1),

@@ -5,7 +5,9 @@ import {
   deleteRoom,
   findDmRoomByKey,
   findRoomById,
+  getDmHistoryFloor,
   getMemberFavorite,
+  getMemberHidden,
   getMemberMuted,
   getRoomLastReadMap,
   insertRoom,
@@ -15,7 +17,9 @@ import {
   listRoomMemberUsers,
   listRoomsForUser,
   removeRoomMember,
+  setDmHistoryFloor,
   setMemberFavorite,
+  setMemberHidden,
   setMemberMuted,
   setSecretDepartedMember,
 } from './db/queries/rooms.js';
@@ -116,16 +120,20 @@ export async function toRoomDto(room, requesterId) {
   }
   if (requesterId) {
     const myLastRead = lastRead[requesterId] ?? 0;
+    // DM "진짜 나가기" 이력이 있으면 그 시각 이전 메시지는 안읽음 개수에도 안 세운다 —
+    // getDmHistoryFloor 사용처(rooms.js의 /rooms/:id/messages) 참고.
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, requesterId) : null;
     // 로그아웃해 있는 동안 달린 댓글은 comment:new 소켓을 못 받아서 클라이언트가 실시간으로
     // unreadCount를 못 올리므로, 다시 로그인해서 방 목록을 받아올 때 이 REST 응답에서
     // 메시지·댓글 안읽음 수를 합쳐서 내려줘야 뱃지가 정확하다.
     const [unreadMessages, unreadComments] = await Promise.all([
-      countUnreadForUser(room.id, requesterId, myLastRead),
+      countUnreadForUser(room.id, requesterId, myLastRead, floor),
       countUnreadCommentsForUser(room.id, requesterId, myLastRead),
     ]);
     dto.unreadCount = unreadMessages + unreadComments;
     dto.favorite = await getMemberFavorite(room.id, requesterId);
     dto.muted = await getMemberMuted(room.id, requesterId);
+    dto.hidden = room.type === 'dm' ? await getMemberHidden(room.id, requesterId) : false;
   }
   return dto;
 }
@@ -146,6 +154,25 @@ export async function notifyMembership(io, room) {
 export async function broadcastMemberUpdate(io, userId) {
   for (const room of await listRoomsForUser(userId)) {
     io.to(room.id).emit('room:created', await toRoomDto(room));
+  }
+}
+
+/**
+ * 평문 DM에 메시지/댓글이 새로 오면, 그 방을 숨겨둔(hidden) 상대 멤버는 자동으로 다시
+ * 보이게 한다 — "숨기기"의 원래 의미(room_options_menu.dart: 다시 대화를 시작하면 예전
+ * 내용이 그대로 복원됨)를 멤버십 변경 없이 재현한다(socket.js message:send, comments.js 참고).
+ * 이 방에 대해서만, 개인 채널(user:<id>)로만 알린다 — 상대는 애초에 멤버십이 안 바뀌었으니
+ * room:created(멤버 변경 브로드캐스트)를 보낼 필요가 없다.
+ */
+export async function unhideDmForOtherMembers(io, room, senderId) {
+  if (room.type !== 'dm' || room.isSecret) return;
+  const memberIds = await listRoomMemberIds(room.id);
+  for (const userId of memberIds) {
+    if (userId === senderId) continue;
+    if (await getMemberHidden(room.id, userId)) {
+      await setMemberHidden(room.id, userId, false);
+      io.to(`user:${userId}`).emit('room:hidden', { roomId: room.id, hidden: false });
+    }
   }
 }
 
@@ -359,6 +386,28 @@ export function createRoomsRouter(io) {
       return res.json({ ok: true });
     }
 
+    if (room.type === 'dm') {
+      // 평문 DM의 "채팅방 숨기기"/"채팅방 나가기" — 상대방에게는 아무 영향이 없어야 한다는
+      // 요구사항에 따라(room_options_menu.dart), 이제 진짜 멤버십을 건드리지 않는다. 예전엔
+      // removeRoomMember로 나를 멤버에서 뺐는데, DM은 멤버가 나+상대 둘뿐이라 그러면 상대
+      // 쪽 화면에서 방 이름이 "(알 수 없음)"이 되고(Room.displayName이 상대를 못 찾음),
+      // 내 소켓이 그 방에서 나가버려서 상대가 보낸 메시지도 못 받는 문제가 있었다. 그래서
+      // 이제 즐겨찾기/뮤트와 동일하게 순전히 내 개인 설정(hidden)으로만 다룬다 — 시스템
+      // 메시지도, 상대에게 가는 브로드캐스트도 없다. 체크박스로 고른 "나가기"(진짜 나가기)면
+      // 추가로 기록 시작선을 남겨서, 나중에 방이 다시 보여도 그 이전 내용은 안 보이게 한다
+      // (getDmHistoryFloor 사용처 참고). "숨기기"(기본)는 이 시작선을 안 남기므로 상대가
+      // 다시 말을 걸면 예전 내용이 그대로 복원된다.
+      if (req.body?.realLeave === true) {
+        await setDmHistoryFloor(room.id, req.user.sub);
+      }
+      await setMemberHidden(room.id, req.user.sub, true);
+      // 즐겨찾기/뮤트와 동일하게, 이 사람의 다른 기기에도 같이 알려서 동기화한다(상대방에게는
+      // 안 감 — user:<id> 채널이지 room 채널이 아니다).
+      io.to(`user:${req.user.sub}`).emit('room:hidden', { roomId: room.id, hidden: true });
+      return res.json({ ok: true });
+    }
+
+    // 그룹/토픽 — 진짜 멤버십이 없어지는 공개적인 이벤트라 지금까지처럼 실제로 나간다.
     await removeRoomMember(room.id, req.user.sub);
 
     io.in(`user:${req.user.sub}`).socketsLeave(room.id); // 나간 사람은 이후 이 방 메시지를 더 이상 받지 않게.
@@ -409,7 +458,10 @@ export function createRoomsRouter(io) {
     // 더 불러오기"/검색으로 오래된 메시지 찾기(before로 여러 번 페이지네이션)에 쓴다.
     const beforeMs = Number(req.query.before);
     const before = Number.isFinite(beforeMs) && beforeMs > 0 ? new Date(beforeMs) : undefined;
-    const rows = await listMessagesByRoom(room.id, limit, before);
+    // DM "진짜 나가기" 이력이 있으면(dm_history_floors) 그 시각 이전 메시지는 이 요청자에게
+    // 아예 없는 것처럼 뺀다 — room_options_menu.dart의 나가기 대화상자 참고.
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
+    const rows = await listMessagesByRoom(room.id, limit, before, floor);
 
     // 이 창의 시간대에 달린 댓글 중 부모 메시지가 창 밖(더 오래됨)에 있는 것들의 부모를 추가로
     // 끌어온다. 옛날 메시지에 오늘 댓글을 달면 그렇게 되는데, 부모가 없으면 클라이언트가 댓글
@@ -425,6 +477,9 @@ export function createRoomsRouter(io) {
         ...new Set(windowComments.map((c) => c.messageId).filter((id) => !inWindowIds.has(id))),
       ];
       extraParents = await listMessagesByIds(missingParentIds);
+      // floor보다 오래된 부모는(=이 요청자가 real leave로 못 보게 된 메시지) 여기로도
+      // 새면 안 된다 — 위 listMessagesByRoom의 floor 필터를 그대로 한 번 더 적용한다.
+      if (floor) extraParents = extraParents.filter((m) => m.createdAt >= floor);
     }
 
     const commentsByMessageId = new Map();

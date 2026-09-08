@@ -3,6 +3,7 @@ import { verifySocketToken } from './auth.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { insertMessage, markMessageRead } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
+import { unhideDmForOtherMembers } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
@@ -86,6 +87,11 @@ export function registerSocket(io) {
         forwardedFromCreatedAt:
           typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
       });
+
+      // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 —
+      // "숨기기"를 멤버십 변경 없이 구현한 결과라, 메시지가 갈 때마다 직접 확인해줘야 한다
+      // (rooms.js unhideDmForOtherMembers 참고).
+      await unhideDmForOtherMembers(io, room, socket.data.userId);
 
       // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서
       // 나중에 다시 조회될 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.

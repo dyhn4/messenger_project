@@ -206,9 +206,12 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
           child: ListenableBuilder(
             listenable: widget.session,
             builder: (context, _) {
+              // 평문 DM 숨기기/나가기는 멤버십을 안 건드리고 내 hidden 플래그만 켠다
+              // (room_options_menu.dart 참고) — session.rooms엔 그대로 남으므로 목록
+              // 화면에서만 걸러낸다.
               final rooms = _favoriteFirst(
                 widget.session.rooms
-                    .where((r) => r.type == widget.type)
+                    .where((r) => r.type == widget.type && !r.hidden)
                     .toList(),
               );
               if (rooms.isEmpty) {

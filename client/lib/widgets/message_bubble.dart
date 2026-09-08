@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -61,12 +62,12 @@ class MessageBubble extends StatefulWidget {
 }
 
 class _MessageBubbleState extends State<MessageBubble> {
-  // 댓글/더보기 아이콘은 평소엔 숨겨두고, 마우스가 이 메시지 위에 있을 때만 보여준다(FavoriteStar와
-  // 동일한 패턴). 한때 Stack의 Positioned 오버플로나 OverlayPortal 오버레이로 "말풍선 밖으로 살짝
-  // 겹쳐 뜨는" 방식을 시도했는데, 전자는 넘친 영역에 호버/클릭 판정이 안정적으로 안 걸리는 문제가,
-  // 후자는 Overlay와 CompositedTransformFollower의 레이아웃 타이밍이 어긋나며 렌더 크래시
-  // ('debugNeedsLayout' 단언 실패)가 나는 문제가 있었다. 그래서 툴바를 말풍선 바로 아래의 평범한
-  // 트리 자식(=일반 레이아웃 흐름)으로 되돌렸다 — 덜 "붕 뜬" 느낌이지만 안 부서진다.
+  // 댓글/더보기 아이콘은 평소엔 숨겨두고, 마우스가 이 메시지 위에 있을 때만 말풍선 아래에
+  // 겹쳐 띄운다(FloatingHoverToolbar). 이 "겹쳐 뜨는 툴바"는 두 번 실패한 이력이 있는데,
+  // Stack의 Positioned로 넘치게 그리면 넘친 영역에 호버/클릭 판정이 안 걸리고,
+  // CompositedTransformFollower로 Overlay에 띄우면 툴바 안 Tooltip이 레이아웃 중에 좌표를
+  // 물어보다가 렌더 크래시('debugNeedsLayout' 단언 실패)가 난다. 지금은 둘 다 피해서
+  // OverlayPortal.overlayChildLayoutBuilder로 좌표를 직접 받아 놓는다(hover_toolbar.dart 참고).
   //
   // 말풍선과 툴바는 서로 다른 MouseRegion이라 각각의 호버 여부를 따로 추적하고, 그중 하나라도
   // 켜져 있으면 보여준다 — 하나만 보고 판단하면 말풍선에서 툴바로 넘어갈 때(먼저 들어간 쪽의
@@ -79,6 +80,10 @@ class _MessageBubbleState extends State<MessageBubble> {
   bool _editing = false;
   bool _savingEdit = false;
   final _editController = TextEditingController();
+
+  /// 툴바는 말풍선 아래에 Overlay로 띄운다(FloatingHoverToolbar 참고) — 일반 레이아웃
+  /// 흐름이 아니라서 툴바가 떠도 아래 메시지들이 안 밀린다.
+  final _toolbarPortal = OverlayPortalController();
 
   void _setBubbleHovering(bool value) {
     _bubbleHovering = value;
@@ -94,11 +99,29 @@ class _MessageBubbleState extends State<MessageBubble> {
     _hoverExitTimer?.cancel();
     if (_bubbleHovering || _toolbarHovering) {
       if (!_hovering) setState(() => _hovering = true);
+      _syncToolbarPortal();
       return;
     }
     _hoverExitTimer = Timer(const Duration(milliseconds: 100), () {
-      if (mounted) setState(() => _hovering = false);
+      if (!mounted) return;
+      setState(() => _hovering = false);
+      _syncToolbarPortal();
     });
+  }
+
+  bool get _canShowToolbar =>
+      !widget.message.deleted &&
+      !widget.message.decryptFailed &&
+      !_editing &&
+      widget.onOpenThread != null;
+
+  /// Overlay 툴바를 여닫는다. OverlayPortalController.show/hide는 "빌드 중에는 호출하지
+  /// 말라"고 SDK에 적혀 있어서, 빌드 결과(_hovering)로 자동 반영하지 않고 호버 콜백/타이머
+  /// 같은 빌드 밖 지점에서만 이 함수를 부른다.
+  void _syncToolbarPortal() {
+    final show = _hovering && _canShowToolbar;
+    if (show == _toolbarPortal.isShowing) return;
+    show ? _toolbarPortal.show() : _toolbarPortal.hide();
   }
 
   @override
@@ -117,9 +140,13 @@ class _MessageBubbleState extends State<MessageBubble> {
       _editing = true;
       _editController.text = widget.message.text ?? '';
     });
+    _syncToolbarPortal(); // 수정 중에는 툴바를 닫는다.
   }
 
-  void _cancelEdit() => setState(() => _editing = false);
+  void _cancelEdit() {
+    setState(() => _editing = false);
+    _syncToolbarPortal();
+  }
 
   Future<void> _saveEdit() async {
     final text = _editController.text.trim();
@@ -397,83 +424,12 @@ class _MessageBubbleState extends State<MessageBubble> {
               ],
             ),
           ],
-          // 호버 시 시간 오른쪽에 뜨는 댓글/더보기 툴바. 세로(Column)가 아니라 이 Row 안에 두면
-          // 말풍선 쪽 높이가 이미 이 툴바보다 큰 경우가 대부분이라(패딩 포함 한 줄짜리 말풍선도
-          // 보통 이 툴바 높이보다 큼) Row 자체의 높이가 안 늘어나서, 아래 다른 메시지들이
-          // 밀려나지 않는다.
-          //
-          // 툴바 자체는 _hovering과 무관하게 항상 자리를 차지해두고(Opacity로 안 보이게만
-          // 함) 있다가 호버할 때만 나타나게 한다 — 예전엔 호버할 때만 이 위젯을 트리에
-          // 넣었는데, 그러면 Row의 총 너비가 늘어나면서 옆의 Flexible 말풍선이 그만큼
-          // 줄어들었다(메시지를 길게 쓸수록 폭이 꽉 차 있어서 더 눈에 띔).
-          if (!message.deleted &&
-              !message.decryptFailed &&
-              !_editing &&
-              widget.onOpenThread != null) ...[
+          // 툴바는 이제 말풍선 아래에 Overlay로 떠서(아래 FloatingHoverToolbar) 이 줄에
+          // 그려지지 않지만, 시간 오른쪽의 빈 자리는 그대로 남겨둔다 — 툴바가 여기 있던
+          // 시절에 잡아둔 여백이라 없애면 말풍선 폭이 갑자기 넓어진다.
+          if (_canShowToolbar) ...[
             const SizedBox(width: 6),
-            Opacity(
-              opacity: _hovering ? 1 : 0,
-              child: IgnorePointer(
-                ignoring: !_hovering,
-                child: MouseRegion(
-                  onEnter: (_) => _setToolbarHovering(true),
-                  onExit: (_) => _setToolbarHovering(false),
-                  child: HoverToolbar(
-                    children: [
-                      HoverToolbarButton(
-                        icon: Icons.mode_comment_outlined,
-                        tooltip: '댓글',
-                        onPressed: () => widget.onOpenThread!(message),
-                      ),
-                      HoverToolbarButton(
-                        icon: Icons.more_vert,
-                        tooltip: '더보기',
-                        visible: true,
-                        menuItems: [
-                          ...messageActionMenuItems(
-                            context,
-                            session: widget.session,
-                            message: message,
-                            senderDisplayName: displayName,
-                          ),
-                          if (isMine &&
-                              (widget.onEdit != null ||
-                                  widget.onDelete != null))
-                            const PopupMenuDivider(),
-                          if (isMine &&
-                              message.type == MessageType.text &&
-                              widget.onEdit != null)
-                            PopupMenuItem<void>(
-                              onTap: _startEdit,
-                              child: const Row(
-                                children: [
-                                  Icon(Icons.edit),
-                                  SizedBox(width: 8),
-                                  Text('수정'),
-                                ],
-                              ),
-                            ),
-                          if (isMine && widget.onDelete != null)
-                            PopupMenuItem<void>(
-                              onTap: () => _confirmDelete(context),
-                              child: const Row(
-                                children: [
-                                  Icon(Icons.delete, color: Colors.redAccent),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    '삭제',
-                                    style: TextStyle(color: Colors.redAccent),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+            SizedBox(width: HoverToolbar.widthFor(2)),
           ],
         ],
       ),
@@ -523,10 +479,77 @@ class _MessageBubbleState extends State<MessageBubble> {
           ],
           Padding(
             padding: const EdgeInsets.only(left: contentIndent),
-            child: bubbleRow,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                bubbleRow,
+                // 말풍선 왼쪽 아래를 가리키는 0크기 앵커 — 툴바는 여기 기준으로 Overlay에
+                // 떠서, 아래 메시지들을 밀지 않고 그 위에 겹쳐 보인다.
+                FloatingHoverToolbar(
+                  controller: _toolbarPortal,
+                  toolbarBuilder: (_) => MouseRegion(
+                    onEnter: (_) => _setToolbarHovering(true),
+                    onExit: (_) => _setToolbarHovering(false),
+                    child: _buildToolbar(displayName: displayName),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  /// 툴바 내용. 메뉴 항목이 쓰는 context는 (툴바가 그려지는) Overlay의 context가 아니라
+  /// 이 State의 context여야 한다 — Overlay 쪽은 툴바가 닫히는 순간 죽은 context가 돼서,
+  /// 그걸로 Navigator/스낵바를 찾으면 "deactivated widget's ancestor" 오류가 난다.
+  Widget _buildToolbar({required String displayName}) {
+    final message = widget.message;
+    final isMine = widget.isMine;
+    return HoverToolbar(
+      children: [
+        HoverToolbarButton(
+          icon: Icons.mode_comment_outlined,
+          tooltip: '댓글',
+          onPressed: () => widget.onOpenThread!(message),
+        ),
+        HoverToolbarButton(
+          icon: Icons.more_vert,
+          tooltip: '더보기',
+          menuItems: [
+            ...messageActionMenuItems(
+              context,
+              session: widget.session,
+              message: message,
+              senderDisplayName: displayName,
+            ),
+            if (isMine && (widget.onEdit != null || widget.onDelete != null))
+              const PopupMenuDivider(),
+            if (isMine &&
+                message.type == MessageType.text &&
+                widget.onEdit != null)
+              PopupMenuItem<void>(
+                onTap: _startEdit,
+                child: const Row(
+                  children: [Icon(Icons.edit), SizedBox(width: 8), Text('수정')],
+                ),
+              ),
+            if (isMine && widget.onDelete != null)
+              PopupMenuItem<void>(
+                onTap: () => _confirmDelete(context),
+                child: const Row(
+                  children: [
+                    Icon(Icons.delete, color: Colors.redAccent),
+                    SizedBox(width: 8),
+                    Text('삭제', style: TextStyle(color: Colors.redAccent)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -601,12 +624,16 @@ class _MessageBubbleState extends State<MessageBubble> {
           attachmentNonce: message.attachmentNonce,
         );
       case MessageType.text:
-        // Text가 아니라 SelectableText였을 때 자체 롱프레스(글자 선택)가 부모 GestureDetector의
-        // onLongPress(액션 시트)보다 제스처 아레나를 먼저 가져가 버려서, 말풍선 여백은 롱프레스가
-        // 되는데 글자 위는 안 되는 문제가 있었다 — 인터랙티브 선택을 꺼도 내부적으로 제스처 자체는
-        // 계속 가로채서(그냥 아무 반응이 없을 뿐) 해결이 안 됐다. 이제 선택은 "선택 복사" 메뉴가
-        // 전담하므로 이 안에서 굳이 SelectableText일 필요가 없다.
-        return Text(message.text ?? '');
+        // 안드로이드(터치)에서는 SelectableText였을 때 자체 롱프레스(단어 선택)가 부모
+        // GestureDetector의 onLongPress(액션 시트)와 같은 롱프레스 기반이라 제스처 아레나를
+        // 먼저 가져가 버려서, 말풍선 여백은 롱프레스가 되는데 글자 위는 안 되는 문제가 있었다
+        // — 그래서 안드로이드는 지금도 Text를 쓰고, 선택은 "선택 복사" 메뉴가 전담한다.
+        // Windows(마우스)에서는 텍스트 선택이 롱프레스가 아니라 클릭+드래그로 이뤄져서
+        // onLongPress와 경합하지 않으므로, 마우스 호버 시 커서가 I-beam으로 바뀌고 드래그로
+        // 바로 선택할 수 있도록 SelectableText를 쓴다.
+        return Platform.isWindows
+            ? SelectableText(message.text ?? '')
+            : Text(message.text ?? '');
       case MessageType.sticker:
         final sticker = findStickerById(message.text ?? '');
         return Text(

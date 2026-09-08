@@ -11,6 +11,7 @@ import '../services/room_chat_controller.dart';
 import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
 import '../widgets/comment_input_bar.dart';
+import '../widgets/hover_toolbar.dart' show kHoverToolbarHeight;
 import '../widgets/message_bubble.dart';
 import '../widgets/message_comments_card.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -220,70 +221,84 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
               // 이모티콘 패널/미리보기를 이 Stack 안에 오버레이로 띄운다 — chat_panel.dart와
               // 같은 이유(입력창을 밀어내지 않고, Expanded의 진짜 레이아웃 범위 안이라 클릭도
               // 정상적으로 먹는다).
-              child: Stack(
-                children: [
-                  MutedScrollbar(
-                    controller: _scrollController,
-                    child: ListView(
+              //
+              // Overlay.wrap은 댓글 줄의 호버 툴바(FloatingHoverToolbar)가 이 영역 안에서만
+              // 그려지게 한다 — 앱 전체 Overlay를 쓰면 아래 입력창 위까지 삐져나온다.
+              child: Overlay.wrap(
+                child: Stack(
+                  children: [
+                    MutedScrollbar(
                       controller: _scrollController,
-                      padding: const EdgeInsets.all(12),
-                      children: [
-                        MessageBubble(
-                          session: widget.session,
-                          message: widget.message,
-                          resolveUrl: widget.session.resolveUrl,
-                          isMine:
-                              widget.message.senderId == widget.session.userId,
-                          sender: _memberOf(widget.message.senderId),
-                          onEdit: widget.controller.editMessage,
-                          onDelete: widget.controller.deleteMessage,
+                      child: ListView(
+                        controller: _scrollController,
+                        // 아래쪽은 마지막 댓글에 호버했을 때 그 아래로 뜨는 툴바
+                        // (FloatingHoverToolbar)가 입력창을 덮지 않도록 비워둔다.
+                        padding: const EdgeInsets.fromLTRB(
+                          12,
+                          12,
+                          12,
+                          12 + kHoverToolbarHeight + 4,
                         ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Divider(height: 1),
-                        ),
-                        Text(
-                          '댓글 ${comments.length}',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 프로필 사진을 보여준다.
-                        for (var i = 0; i < comments.length; i++)
-                          CommentEntryLine(
+                        children: [
+                          MessageBubble(
                             session: widget.session,
-                            comment: comments[i],
-                            sender: _memberOf(comments[i].senderId),
-                            isMine:
-                                comments[i].senderId == widget.session.userId,
+                            message: widget.message,
                             resolveUrl: widget.session.resolveUrl,
-                            onEdit: widget.controller.editComment,
-                            onDelete: widget.controller.deleteComment,
-                            fullWidth: true,
-                            expiresAt: widget.message.expiresAt,
-                            showAvatar:
-                                i == 0 ||
-                                comments[i - 1].senderId !=
-                                    comments[i].senderId,
+                            isMine:
+                                widget.message.senderId ==
+                                widget.session.userId,
+                            sender: _memberOf(widget.message.senderId),
+                            onEdit: widget.controller.editMessage,
+                            onDelete: widget.controller.deleteMessage,
                           ),
-                      ],
-                    ),
-                  ),
-                  if (_stickerPickerOpen)
-                    Positioned(
-                      left: 8,
-                      bottom: 8,
-                      child: StickerPicker(onSelected: _selectSticker),
-                    )
-                  else if (_pendingSticker != null)
-                    // 입력창의 이모티콘 버튼 바로 위쯤에 오도록 왼쪽으로 붙인다.
-                    Positioned(
-                      left: 10,
-                      bottom: 8,
-                      child: StickerPreviewCard(
-                        sticker: _pendingSticker!,
-                        onRemove: _removeSticker,
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Divider(height: 1),
+                          ),
+                          Text(
+                            '댓글 ${comments.length}',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 프로필 사진을 보여준다.
+                          for (var i = 0; i < comments.length; i++)
+                            CommentEntryLine(
+                              session: widget.session,
+                              comment: comments[i],
+                              sender: _memberOf(comments[i].senderId),
+                              isMine:
+                                  comments[i].senderId == widget.session.userId,
+                              resolveUrl: widget.session.resolveUrl,
+                              onEdit: widget.controller.editComment,
+                              onDelete: widget.controller.deleteComment,
+                              fullWidth: true,
+                              expiresAt: widget.message.expiresAt,
+                              showAvatar:
+                                  i == 0 ||
+                                  comments[i - 1].senderId !=
+                                      comments[i].senderId,
+                              showTime: showCommentTimeAt(comments, i),
+                            ),
+                        ],
                       ),
                     ),
-                ],
+                    if (_stickerPickerOpen)
+                      Positioned(
+                        left: 8,
+                        bottom: 8,
+                        child: StickerPicker(onSelected: _selectSticker),
+                      )
+                    else if (_pendingSticker != null)
+                      // 입력창의 이모티콘 버튼 바로 위쯤에 오도록 왼쪽으로 붙인다.
+                      Positioned(
+                        left: 10,
+                        bottom: 8,
+                        child: StickerPreviewCard(
+                          sticker: _pendingSticker!,
+                          onRemove: _removeSticker,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             const Divider(height: 1),

@@ -106,6 +106,55 @@
       "when": 1788856346106,
       "tag": "0014_tense_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788917527635,
+      "tag": "0015_chief_gertrude_yorkes",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788927069257,
+      "tag": "0016_sticky_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788930186356,
+      "tag": "0017_flawless_nico_minoru",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788931224700,
+      "tag": "0018_add_message_edit_delete_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788931242831,
+      "tag": "0019_drop_old_message_delete_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788939728809,
+      "tag": "0020_server_admin_console",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788942783721,
+      "tag": "0021_account_level_roles",
+      "breakpoints": true
     }
   ]
 }

@@ -69,7 +69,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _loadUsers() async {
     try {
-      final users = await widget.session.api!.fetchUsers();
+      final users = await widget.session.fetchTeamMembers();
       if (!mounted) return;
       setState(() => _users = users);
     } catch (_) {
@@ -104,6 +104,8 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       final results = await widget.session.api!.search(
         q,
+        // 검색은 지금 보고 있는 팀 안에서만 — 다른 팀 대화가 섞여 나오면 안 된다.
+        teamId: widget.session.currentTeam!.id,
         roomId: _roomId,
         senderId: _senderId,
         since: _since,

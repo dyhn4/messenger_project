@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../screens/admin_console_screen.dart';
 import '../screens/my_profile_dialog.dart';
 import '../screens/settings_screen.dart';
 import '../services/session.dart';
@@ -60,6 +61,18 @@ class AccountMenuButton extends StatelessWidget {
             ],
           ),
         ),
+        // 서버 운영자에게만 보이는 항목(서버도 매 요청마다 다시 확인한다 — admin.js).
+        if (session.isServerAdmin)
+          PopupMenuItem<void>(
+            onTap: () => showAdminConsole(context, session),
+            child: const Row(
+              children: [
+                Icon(Icons.admin_panel_settings_outlined),
+                SizedBox(width: 8),
+                Text('서버 관리'),
+              ],
+            ),
+          ),
         PopupMenuItem<void>(
           onTap: () => showLicensePage(
             context: context,

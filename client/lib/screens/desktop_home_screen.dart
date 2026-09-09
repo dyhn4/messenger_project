@@ -11,6 +11,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
+import '../widgets/team_switcher.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'create_topic_screen.dart';
@@ -435,11 +436,15 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
       child: Row(
         children: [
-          const Text(
-            'TeamTalk',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          // 앱 이름 자리에 지금 보고 있는 팀(아이콘+이름)과 전환 버튼을 둔다.
+          // Spacer 대신 Expanded+Align을 쓴다 — Spacer와 나란히 두면 남는 공간을 서로
+          // 나눠 가져서 오른쪽 아이콘들이 창 끝에 붙지 않는다.
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TeamSwitcher(session: session),
+            ),
           ),
-          const Spacer(),
           IconButton(
             icon: const Icon(Icons.people_outline),
             tooltip: '멤버',
@@ -459,11 +464,7 @@ class _TopBar extends StatelessWidget {
               PopupMenuItem(
                 onTap: onOpenFiles,
                 child: const Row(
-                  children: [
-                    _FileTypeIcon(),
-                    SizedBox(width: 8),
-                    Text('파일'),
-                  ],
+                  children: [_FileTypeIcon(), SizedBox(width: 8), Text('파일')],
                 ),
               ),
             ],
@@ -543,7 +544,7 @@ class _MembersPanelState extends State<_MembersPanel> {
 
   Future<void> _load() async {
     try {
-      final users = await widget.session.api!.fetchUsers();
+      final users = await widget.session.fetchTeamMembers();
       users.sort((a, b) => a.name.compareTo(b.name));
       if (!mounted) return;
       setState(() => _users = users);
@@ -687,9 +688,22 @@ class _MemberRow extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                user.name,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  // 부서·직책이 등록돼 있으면 조직도답게 이름 아래 같이 보여준다.
+                  if (user.orgLine != null)
+                    Text(
+                      user.orgLine!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
@@ -736,19 +750,23 @@ class _Sidebar extends StatelessWidget {
         // 플래그만 켠다(room_options_menu.dart 참고) — 그래서 session.rooms에는 그대로
         // 남아있고, 여기(목록 UI)에서만 걸러낸다. 상대가 새 메시지를 보내면 서버가 자동으로
         // hidden을 다시 꺼줘서 이 필터를 통과해 목록에 돌아온다.
+        // session.rooms에는 다른 팀 방까지 전부 들어있다(다른 팀 메시지도 실시간으로 받아야
+        // 하므로 — Session.rooms 주석 참고). 화면에는 지금 보고 있는 팀 것만 보여준다.
+        final teamId = session.currentTeam?.id;
+        bool visible(Room r) => r.teamId == teamId && !r.hidden;
         final topics = _favoriteFirst(
           session.rooms
-              .where((r) => r.type == RoomType.topic && !r.hidden)
+              .where((r) => r.type == RoomType.topic && visible(r))
               .toList(),
         );
         final groups = _favoriteFirst(
           session.rooms
-              .where((r) => r.type == RoomType.group && !r.hidden)
+              .where((r) => r.type == RoomType.group && visible(r))
               .toList(),
         );
         final dms = _favoriteFirst(
           session.rooms
-              .where((r) => r.type == RoomType.dm && !r.hidden)
+              .where((r) => r.type == RoomType.dm && visible(r))
               .toList(),
         );
         final topicsUnread = topics.fold<int>(
@@ -768,20 +786,23 @@ class _Sidebar extends StatelessWidget {
           topicsHeader: _SectionHeader(
             title: '토픽 ${topics.length}',
             badgeCount: topicsUnread,
-            action: PopupMenuButton<void>(
-              icon: const Icon(Icons.add, size: 20),
-              tooltip: '토픽 추가',
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  onTap: onCreateTopic,
-                  child: const Text('토픽 만들기'),
-                ),
-                PopupMenuItem(
-                  onTap: onBrowseTopics,
-                  child: const Text('토픽 찾기'),
-                ),
-              ],
-            ),
+            // 준회원은 방을 만들거나 토픽을 찾아 참여할 수 없다 — 초대받은 방에서만 활동한다.
+            action: !session.canCreateRooms
+                ? null
+                : PopupMenuButton<void>(
+                    icon: const Icon(Icons.add, size: 20),
+                    tooltip: '토픽 추가',
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        onTap: onCreateTopic,
+                        child: const Text('토픽 만들기'),
+                      ),
+                      PopupMenuItem(
+                        onTap: onBrowseTopics,
+                        child: const Text('토픽 찾기'),
+                      ),
+                    ],
+                  ),
           ),
           topicsChildren: [
             for (final room in topics)
@@ -805,11 +826,13 @@ class _Sidebar extends StatelessWidget {
           groupsHeader: _SectionHeader(
             title: '그룹채팅 ${groups.length}',
             badgeCount: groupsUnread,
-            action: IconButton(
-              icon: const Icon(Icons.add, size: 20),
-              tooltip: '새 그룹채팅',
-              onPressed: onNewGroupChat,
-            ),
+            action: !session.canCreateRooms
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.add, size: 20),
+                    tooltip: '새 그룹채팅',
+                    onPressed: onNewGroupChat,
+                  ),
           ),
           groupsChildren: [
             for (final room in groups)
@@ -834,11 +857,13 @@ class _Sidebar extends StatelessWidget {
           dmsHeader: _SectionHeader(
             title: '채팅 ${dms.length}',
             badgeCount: dmsUnread,
-            action: IconButton(
-              icon: const Icon(Icons.add, size: 20),
-              tooltip: '새 대화',
-              onPressed: onNewGroupChat,
-            ),
+            action: !session.canCreateRooms
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.add, size: 20),
+                    tooltip: '새 대화',
+                    onPressed: onNewGroupChat,
+                  ),
           ),
           dmsChildren: [
             for (final room in dms)

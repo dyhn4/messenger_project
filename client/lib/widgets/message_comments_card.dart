@@ -365,8 +365,19 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   }
 
   void _startEdit() {
-    if (!isWithinEditWindow(widget.comment.createdAt)) {
-      showEditWindowExpiredDialog(context, '수정 기간이 경과되어 댓글을 수정할 수 없습니다.');
+    if (!isEditDeleteAllowed(widget.session)) {
+      showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
+      return;
+    }
+    if (!isWithinEditDeleteWindow(widget.session, widget.comment.createdAt)) {
+      showEditWindowExpiredDialog(
+        context,
+        editDeleteWindowExpiredMessage(
+          widget.session,
+          what: '댓글',
+          action: '수정',
+        ),
+      );
       return;
     }
     setState(() {
@@ -399,16 +410,45 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     }
   }
 
+  /// 메시지 쪽 _canModerate와 같은 규칙 — 팀의 소유자·관리자는 자기가 들어가 있는 방(비밀
+  /// 대화 제외)에서 남의 댓글도, 팀이 정한 삭제 가능 시간 안에서 지울 수 있다(서버 moderation.js).
+  bool get _canModerate {
+    if (widget.isMine || widget.onDelete == null) return false;
+    if (!widget.session.canModerateContent) return false;
+    if (!isEditDeleteAllowed(widget.session)) return false;
+    if (!isWithinEditDeleteWindow(widget.session, widget.comment.createdAt)) {
+      return false;
+    }
+    final room = widget.session.rooms.where(
+      (r) => r.id == widget.comment.roomId,
+    );
+    return room.isNotEmpty && !room.first.isSecret;
+  }
+
   Future<void> _confirmDelete(BuildContext context) async {
-    if (!isWithinEditWindow(widget.comment.createdAt)) {
-      showEditWindowExpiredDialog(context, '삭제 기간이 경과되어 댓글을 삭제할 수 없습니다.');
+    final moderating = !widget.isMine;
+    if (!isEditDeleteAllowed(widget.session)) {
+      showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
+      return;
+    }
+    if (!isWithinEditDeleteWindow(widget.session, widget.comment.createdAt)) {
+      showEditWindowExpiredDialog(
+        context,
+        editDeleteWindowExpiredMessage(
+          widget.session,
+          what: '댓글',
+          action: '삭제',
+        ),
+      );
       return;
     }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('댓글 삭제'),
-        content: const Text('이 댓글을 삭제할까요?'),
+        content: Text(
+          moderating ? '관리자 권한으로 다른 사람의 댓글을 삭제합니다. 계속할까요?' : '이 댓글을 삭제할까요?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -569,8 +609,11 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     final context = this.context;
     final comment = widget.comment;
     final displayName = widget.sender?.name ?? comment.senderName;
-    final canEditDelete =
-        widget.isMine && (widget.onEdit != null || widget.onDelete != null);
+    // 팀이 메시지 수정/삭제를 꺼두면([메시지 설정]) 본인 댓글도 못 고치고 못 지운다.
+    final allowed = widget.isMine && isEditDeleteAllowed(widget.session);
+    final canEdit = allowed && widget.onEdit != null;
+    final canDelete = allowed && widget.onDelete != null;
+    final canEditDelete = canEdit || canDelete;
     return HoverToolbar(
       children: [
         HoverToolbarButton(
@@ -585,16 +628,14 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
             ),
             if (canEditDelete) const PopupMenuDivider(),
             // 메시지 수정과 동일하게, 텍스트 댓글만 수정할 수 있다(서버도 동일하게 막음).
-            if (widget.isMine &&
-                comment.type == MessageType.text &&
-                widget.onEdit != null)
+            if (canEdit && comment.type == MessageType.text)
               PopupMenuItem<void>(
                 onTap: _startEdit,
                 child: const Row(
                   children: [Icon(Icons.edit), SizedBox(width: 8), Text('수정')],
                 ),
               ),
-            if (widget.isMine && widget.onDelete != null)
+            if (canDelete)
               PopupMenuItem<void>(
                 onTap: () => _confirmDelete(context),
                 child: const Row(
@@ -605,6 +646,20 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
                   ],
                 ),
               ),
+            // 소유자·관리자의 콘텐츠 관리 — 남의 댓글도 지울 수 있다(_canModerate 참고).
+            if (_canModerate) ...[
+              const PopupMenuDivider(),
+              PopupMenuItem<void>(
+                onTap: () => _confirmDelete(context),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, color: Colors.redAccent),
+                    SizedBox(width: 8),
+                    Text('삭제 (관리자)', style: TextStyle(color: Colors.redAccent)),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ],

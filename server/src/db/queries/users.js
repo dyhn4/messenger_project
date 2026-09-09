@@ -77,3 +77,30 @@ export function listUsersEligibleForMessagePurge(retentionMs) {
     .from(users)
     .where(and(sql`${users.deletedAt} IS NOT NULL`, isNull(users.messagesPurgedAt), lte(users.deletedAt, cutoff)));
 }
+
+/**
+ * 관리자 콘솔의 회원 목록 — 탈퇴한 계정까지 전부 포함한다(탈퇴 이력도 운영 정보라서).
+ * 가입 순서대로 준다. 팀 소속 수/마지막 접속은 라우터에서 따로 붙인다.
+ */
+export function listAllUsersForAdmin() {
+  return db.select().from(users).orderBy(users.createdAt);
+}
+
+/** 서버에 남아있는 계정 수(탈퇴 제외) — 운영 현황 대시보드용. */
+export function countActiveUsers() {
+  return db
+    .select({ value: sql`count(*)::int` })
+    .from(users)
+    .where(isNull(users.deletedAt))
+    .then((rows) => rows[0]?.value ?? 0);
+}
+
+/** 서버 운영자가 한 명도 없으면 true — 첫 가입자를 운영자로 만들지 판단할 때 쓴다. */
+export function hasNoServerAdmin() {
+  return db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.isServerAdmin, true), isNull(users.deletedAt)))
+    .limit(1)
+    .then((rows) => rows.length === 0);
+}

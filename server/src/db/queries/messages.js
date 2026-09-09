@@ -122,12 +122,13 @@ const notBeforeDmHistoryFloor = or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(m
  * 통합 검색. requesterId가 속한 방으로만 좁히는 건 room_members와의 join으로 강제한다(클라이언트가
  * roomId를 임의로 보내도 내 방이 아니면 절대 안 걸림 — 예전 myRoomIds.has(...) 필터와 동일한 보장).
  */
-export async function searchMessages({ requesterId, roomId, senderId, since, until, q, limit }) {
+export async function searchMessages({ requesterId, teamId, roomId, senderId, since, until, q, limit }) {
   const conditions = [
     eq(roomMembers.userId, requesterId),
     or(sql`lower(${messages.text}) like ${`%${q}%`}`, sql`lower(${messages.fileName}) like ${`%${q}%`}`),
     notBeforeDmHistoryFloor,
   ];
+  if (teamId) conditions.push(eq(rooms.teamId, teamId));
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
   if (since) conditions.push(gte(messages.createdAt, new Date(since)));
@@ -154,13 +155,14 @@ export async function searchMessages({ requesterId, roomId, senderId, since, unt
  * 방을 가로지른다. 파일 형식(이미지/PDF/문서 등) 세분화는 mimeType 문자열 매칭이 SQL보다
  * JS가 다루기 쉬워서 여기서는 안 하고 호출부(files.js)에서 이 결과를 받은 뒤에 거른다.
  */
-export async function listAttachments({ requesterId, roomId, senderId, limit }) {
+export async function listAttachments({ requesterId, teamId, roomId, senderId, limit }) {
   const conditions = [
     eq(roomMembers.userId, requesterId),
     inArray(messages.type, ['image', 'file']),
     isNull(messages.deletedAt),
     notBeforeDmHistoryFloor,
   ];
+  if (teamId) conditions.push(eq(rooms.teamId, teamId));
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
 

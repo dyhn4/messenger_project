@@ -14,6 +14,7 @@ import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../models/team.dart';
 import 'api_client.dart';
 import 'app_settings.dart';
 import 'chat_socket.dart';
@@ -66,6 +67,14 @@ class Session extends ChangeNotifier {
   String? avatarColor;
   String? avatarUrl;
 
+  /// 내 계정 등급(GET /users/me). 팀이 아니라 계정에 붙으므로 어느 팀에 있든 같은 값이다 —
+  /// 화면은 이 값으로 버튼을 감추고, 실제 차단은 항상 서버가 다시 한다.
+  AccountRole accountRole = AccountRole.guest;
+
+  /// 서버 전체 운영자인지(GET /users/me). 삼선 메뉴에 "서버 관리"를 보여줄지 판단하는 데만
+  /// 쓰고, 실제 접근 차단은 서버(admin.js)가 매 요청마다 다시 한다.
+  bool isServerAdmin = false;
+
   ApiClient? api;
   String? updateAvailableVersion; // 서버가 더 최신 버전을 갖고 있으면 그 버전 문자열(예: "1.0.1").
   bool updateDownloading = false;
@@ -76,7 +85,19 @@ class Session extends ChangeNotifier {
   final chatSocket = ChatSocket();
   final NotificationService notifications;
   final AppSettings settings;
+
+  /// 내가 속한 모든 방 — 지금 보고 있는 팀뿐 아니라 **다른 팀 방까지 전부** 들고 있다.
+  /// 다른 팀에서 온 메시지도 실시간으로 받아서 안읽음/알림에 반영해야 하기 때문이고
+  /// (소켓도 팀과 무관하게 내 모든 방에 join한다, 서버 socket.js 참고), 화면에 보여줄 때만
+  /// 각 목록 UI가 currentTeam 기준으로 걸러낸다.
   final List<Room> rooms = [];
+
+  /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함). 로그인/앱 시작 직후 팀 선택 화면이 이걸 그린다.
+  final List<Team> teams = [];
+
+  /// 지금 들어가 있는 팀. null이면 아직 팀을 안 골랐다는 뜻이라 팀 선택 화면이 뜬다
+  /// (home_screen.dart) — 로그아웃 후 로그인하거나 앱을 새로 켰을 때가 그 경우다.
+  Team? currentTeam;
 
   /// 비밀 대화(E2EE)의 이 기기 신원 + 방별 핸드셰이크/암복호화 상태. 로그인마다(재로그인 포함)
   /// api 인스턴스가 바뀌므로 secretSessionManager는 _enterApp에서 매번 새로 만들지만,
@@ -108,6 +129,8 @@ class Session extends ChangeNotifier {
   StreamSubscription? _favoriteSub;
   StreamSubscription? _mutedSub;
   StreamSubscription? _hiddenSub;
+  StreamSubscription? _teamSub;
+  StreamSubscription? _teamLeftSub;
   StreamSubscription? _commentSub;
   StreamSubscription? _messageEditedSub;
   StreamSubscription? _messageDeletedSub;
@@ -229,6 +252,12 @@ class Session extends ChangeNotifier {
   }
 
   void requestOpenRoom(Room room) {
+    // 다른 팀의 방을 열어달라는 요청(예: 다른 팀에서 온 메시지 알림을 눌렀을 때)이면
+    // 그 팀으로 먼저 전환한다 — 안 그러면 지금 팀 화면에 없는 방을 열려다 아무 일도 안 난다.
+    if (room.teamId != currentTeam?.id) {
+      final matches = teams.where((t) => t.id == room.teamId);
+      if (matches.isNotEmpty) currentTeam = matches.first;
+    }
     _pendingOpenRoom = room;
     notifyListeners();
   }
@@ -439,15 +468,165 @@ class Session extends ChangeNotifier {
     }
   }
 
+  /// 내 팀 목록과, 그 팀들의 방을 전부 불러온다. 방을 팀별로 따로 요청하는 이유는 서버가
+  /// 팀 범위를 강제하기 때문이고(GET /rooms?teamId=), 전부 모아두는 이유는 다른 팀에서 온
+  /// 메시지도 안읽음/알림에 반영해야 하기 때문이다(rooms 필드 주석 참고).
+  Future<void> _loadTeamsAndRooms() async {
+    final myTeams = await api!.fetchTeams();
+    teams
+      ..clear()
+      ..addAll(myTeams);
+
+    final loaded = <Room>[];
+    for (final team in myTeams) {
+      loaded.addAll(await api!.fetchRooms(team.id));
+    }
+    rooms
+      ..clear()
+      ..addAll(loaded);
+    for (final room in loaded) {
+      unawaited(ensurePendingSecretInvite(room.id));
+    }
+
+    // 팀 목록이 바뀌어서(다른 기기에서 나가졌다거나) 지금 보던 팀이 없어졌으면 팀 선택으로.
+    final current = currentTeam;
+    if (current != null && !myTeams.any((t) => t.id == current.id)) {
+      currentTeam = null;
+    }
+    notifyListeners();
+  }
+
+  /// 팀 선택 화면에서 "팀으로 가기"를 눌렀을 때. 방 목록은 이미 다 받아와 있으므로
+  /// (그리고 소켓도 팀과 무관하게 전부 연결돼 있으므로) 보고 있는 팀만 바꾸면 된다.
+  void enterTeam(Team team) {
+    if (currentTeam?.id == team.id) return;
+    currentTeam = team;
+    // 팀을 바꾸면 이전 팀에서 열어둔 방/댓글 패널은 더 이상 의미가 없다.
+    _forceClearActiveRoom();
+    notifyListeners();
+  }
+
+  /// 지금 보고 있는 팀에서 내가 무엇을 할 수 있는지 — 화면이 버튼을 감출 때 쓴다.
+  /// 계정 등급(accountRole)과 그 팀의 소유자 여부(Team.isOwner)를 합쳐서 판단하며,
+  /// 실제 차단은 항상 서버가 다시 하므로(server/src/permissions.js) 여기 값은 UI 힌트일 뿐이다.
+  bool get canManageCurrentTeam => currentTeam?.canManage(accountRole) ?? false;
+  bool get canCreateRooms => accountRole.canCreateRooms;
+  bool get canInviteToRooms => currentTeam?.canInvite(accountRole) ?? false;
+  bool get canModerateContent => canManageCurrentTeam;
+
+  /// 팀 목록 화면처럼 특정 팀을 골라서 판단해야 할 때.
+  bool canManageTeam(Team team) => team.canManage(accountRole);
+
+  /// 팀 선택 화면으로 되돌아간다(전환 팝업의 "팀 목록").
+  void leaveTeam() {
+    if (currentTeam == null) return;
+    currentTeam = null;
+    _forceClearActiveRoom();
+    notifyListeners();
+  }
+
+  /// 팀을 새로 만든다 — 만든 사람이 그 팀의 소유자가 된다(서버 teams.js).
+  Future<Team> createTeam({required String name, String? iconEmoji}) async {
+    final team = await api!.createTeam(name: name, iconEmoji: iconEmoji);
+    teams.add(team);
+    notifyListeners();
+    return team;
+  }
+
+  /// 팀 이름/아이콘 변경(소유자·관리자만 — 서버가 다시 검사한다).
+  Future<void> updateTeam(
+    Team team, {
+    String? name,
+    String? iconEmoji,
+    String? iconColor,
+    String? domain,
+    InvitePolicy? invitePolicy,
+    bool? messageEditDeleteEnabled,
+    int? messageEditDeleteWindowSeconds,
+  }) async {
+    final updated = await api!.updateTeam(
+      team.id,
+      name: name,
+      iconEmoji: iconEmoji,
+      iconColor: iconColor,
+      domain: domain,
+      invitePolicy: invitePolicy?.wire,
+      messageEditDeleteEnabled: messageEditDeleteEnabled,
+      messageEditDeleteWindowSeconds: messageEditDeleteWindowSeconds,
+    );
+    team.name = updated.name;
+    team.iconEmoji = updated.iconEmoji;
+    team.iconColor = updated.iconColor;
+    team.domain = updated.domain;
+    team.invitePolicy = updated.invitePolicy;
+    team.messageEditDeleteEnabled = updated.messageEditDeleteEnabled;
+    team.messageEditDeleteWindowSeconds =
+        updated.messageEditDeleteWindowSeconds;
+    notifyListeners();
+  }
+
+  /// 팀 삭제(소유자만) — 그 팀의 방/메시지가 전부 사라진다. 서버가 team:left를 보내주므로
+  /// 목록에서 빼는 일은 그 구독(_teamLeftSub)이 처리한다.
+  Future<void> deleteTeam(Team team) async {
+    await api!.deleteTeam(team.id, team.name);
+  }
+
+  /// 소유권 이양(소유자만) — 넘기고 나면 나는 더 이상 그 팀의 소유자가 아니다.
+  Future<List<AppUser>> transferTeamOwnership(Team team, String userId) async {
+    final members = await api!.transferTeamOwnership(team.id, userId);
+    team.isOwner = false;
+    notifyListeners();
+    return members;
+  }
+
+  /// 팀원의 부서/직책 변경(그 팀을 관리할 수 있는 사람만). 등급은 여기서 못 바꾼다.
+  Future<List<AppUser>> updateTeamMember(
+    Team team,
+    String userId, {
+    String? department,
+    String? position,
+  }) async {
+    final members = await api!.updateTeamMember(
+      team.id,
+      userId,
+      department: department,
+      position: position,
+    );
+    notifyListeners();
+    return members;
+  }
+
+  /// 팀 설정 화면용 — 아직 팀에 들어가지 않은 상태(팀 선택 화면)에서도 써야 해서
+  /// currentTeam이 아니라 팀을 명시적으로 받는다.
+  Future<List<AppUser>> fetchMembersOfTeam(String teamId) =>
+      api!.fetchTeamMembers(teamId);
+
+  /// 팀에 넣을 수 있는 사람들 = 서버에 가입한 전체 계정. 회원가입만 하면 아직 어느 팀에도
+  /// 속하지 않으므로, 소유자·관리자가 여기서 골라 팀에 가입시켜 준다.
+  Future<List<AppUser>> fetchAllUsers() => api!.fetchUsers();
+
+  /// 팀에 넣기 — 등급은 각자 계정에 이미 붙어 있는 것을 그대로 쓴다(여기서 정하지 않는다).
+  Future<List<AppUser>> addTeamMembers(Team team, List<String> userIds) async {
+    final members = await api!.addTeamMembers(team.id, userIds);
+    team.memberCount = members.length;
+    notifyListeners();
+    return members;
+  }
+
+  Future<List<AppUser>> removeTeamMember(Team team, String userId) async {
+    final members = await api!.removeTeamMember(team.id, userId);
+    team.memberCount = members.length;
+    notifyListeners();
+    return members;
+  }
+
   Future<void> _enterApp() async {
     try {
-      final myRooms = await api!.fetchRooms();
-      rooms
-        ..clear()
-        ..addAll(myRooms);
-      for (final room in myRooms) {
-        unawaited(ensurePendingSecretInvite(room.id));
-      }
+      // 팀 먼저 — 방은 팀 안에만 있으므로, 내가 속한 팀들을 받아온 뒤 그 팀들의 방을 전부
+      // 불러온다(다른 팀 메시지도 실시간으로 받아야 해서 화면에 보이는 팀 것만 들고 있으면
+      // 안 된다, rooms 필드 주석 참고). 어느 팀에 들어갈지는 사용자가 팀 선택 화면에서
+      // 고르므로 여기서 currentTeam을 정하지는 않는다.
+      await _loadTeamsAndRooms();
     } catch (e) {
       error = e.toString();
     }
@@ -460,6 +639,8 @@ class Session extends ChangeNotifier {
       avatarEmoji = me.avatarEmoji;
       avatarColor = me.avatarColor;
       avatarUrl = me.avatarUrl;
+      accountRole = accountRoleFromWire(me.role);
+      isServerAdmin = me.isServerAdmin;
     } catch (_) {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
@@ -534,6 +715,50 @@ class Session extends ChangeNotifier {
       final match = rooms.where((r) => r.id == e.roomId);
       if (match.isEmpty) return;
       match.first.hidden = e.hidden;
+      notifyListeners();
+    });
+    _teamSub?.cancel();
+    _teamSub = chatSocket.teamEvents.listen((team) async {
+      final i = teams.indexWhere((t) => t.id == team.id);
+      if (i >= 0) {
+        // 이름/아이콘 변경 — 지금 보고 있는 팀이면 상단 전환 버튼 표시도 같이 갱신된다.
+        teams[i].name = team.name;
+        teams[i].iconEmoji = team.iconEmoji;
+        teams[i].iconColor = team.iconColor;
+        teams[i].domain = team.domain;
+        teams[i].invitePolicy = team.invitePolicy;
+        teams[i].messageEditDeleteEnabled = team.messageEditDeleteEnabled;
+        teams[i].messageEditDeleteWindowSeconds =
+            team.messageEditDeleteWindowSeconds;
+        // 소유권이 바뀌면 화면의 버튼들도 바로 따라온다(등급은 계정 단위라 여기 없음).
+        teams[i].isOwner = team.isOwner;
+        teams[i].memberCount = team.memberCount;
+        notifyListeners();
+        return;
+      }
+      // 새로 들어간 팀 — 그 팀 방까지 받아와야 목록/알림이 정상 동작한다.
+      teams.add(team);
+      try {
+        rooms.addAll(await api!.fetchRooms(team.id));
+      } catch (_) {
+        // 방 목록은 다음 재연결(_resyncAfterReconnect)에서 다시 맞춰진다.
+      }
+      notifyListeners();
+    });
+    _teamLeftSub?.cancel();
+    _teamLeftSub = chatSocket.teamLeftEvents.listen((e) {
+      teams.removeWhere((t) => t.id == e.teamId);
+      // 그 팀 방들도 같이 정리한다(더 이상 볼 수 없다).
+      for (final room in rooms.where((r) => r.teamId == e.teamId).toList()) {
+        _controllers.remove(room.id)?.dispose();
+      }
+      rooms.removeWhere((r) => r.teamId == e.teamId);
+      if (currentTeam?.id == e.teamId) {
+        currentTeam = null; // 보고 있던 팀에서 빠졌으면 팀 선택 화면으로 돌아간다.
+        _forceClearActiveRoom();
+        final where = e.teamName == null ? '팀' : "'${e.teamName}' 팀";
+        _showToast(e.deleted ? '$where이 삭제되었습니다.' : '$where에서 나가졌습니다.');
+      }
       notifyListeners();
     });
     _commentSub?.cancel();
@@ -733,7 +958,27 @@ class Session extends ChangeNotifier {
   /// 방 목록(서버가 계산한 정확한 안읽음 수 포함)과, 지금까지 열어본 적 있어 캐시된 방들의 메시지.
   Future<void> _resyncAfterReconnect() async {
     try {
-      final freshRooms = await api!.fetchRooms();
+      // 끊겨 있는 동안 팀에 들어가거나 빠졌을 수도 있으니 팀 목록부터 다시 받는다.
+      final freshTeams = await api!.fetchTeams();
+      teams
+        ..clear()
+        ..addAll(freshTeams);
+      final current = currentTeam;
+      if (current != null) {
+        final match = freshTeams.where((t) => t.id == current.id);
+        if (match.isEmpty) {
+          currentTeam = null; // 그 사이 팀에서 빠졌으면 팀 선택 화면으로.
+          _forceClearActiveRoom();
+        } else {
+          currentTeam = match.first;
+        }
+      }
+
+      final freshRooms = <Room>[];
+      for (final team in freshTeams) {
+        freshRooms.addAll(await api!.fetchRooms(team.id));
+      }
+      final freshIds = freshRooms.map((r) => r.id).toSet();
       for (final fresh in freshRooms) {
         final i = rooms.indexWhere((r) => r.id == fresh.id);
         if (i >= 0) {
@@ -742,6 +987,8 @@ class Session extends ChangeNotifier {
           rooms.add(fresh);
         }
       }
+      // 더 이상 못 보는 방(팀에서 빠짐 등)은 정리한다.
+      rooms.removeWhere((r) => !freshIds.contains(r.id));
       notifyListeners();
     } catch (_) {
       // 재연결 직후 방 목록 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
@@ -1242,12 +1489,21 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 방은 전부 지금 보고 있는 팀 안에 만들어진다 — 팀을 안 고른 상태(팀 선택 화면)에서는
+  /// 애초에 이 화면들에 들어갈 수 없으므로, 여기서는 currentTeam이 있다고 보고 진행한다.
+  String get _requireTeamId {
+    final team = currentTeam;
+    if (team == null) throw StateError('팀을 먼저 선택해야 합니다.');
+    return team.id;
+  }
+
   Future<Room> createTopic({
     required String name,
     String? description,
     bool isPublic = true,
   }) async {
     final room = await api!.createTopic(
+      teamId: _requireTeamId,
       name: name,
       description: description,
       isPublic: isPublic,
@@ -1260,16 +1516,24 @@ class Session extends ChangeNotifier {
     String? name,
     required List<String> memberIds,
   }) async {
-    final room = await api!.createGroup(name: name, memberIds: memberIds);
+    final room = await api!.createGroup(
+      teamId: _requireTeamId,
+      name: name,
+      memberIds: memberIds,
+    );
     _upsertRoom(room);
     return room;
   }
 
   Future<Room> startDm(String targetUserId) async {
-    final room = await api!.startDm(targetUserId);
+    final room = await api!.startDm(_requireTeamId, targetUserId);
     _upsertRoom(room);
     return room;
   }
+
+  /// 지금 팀의 멤버 목록(조직도/새 대화 상대 선택) — 서버 전체 사용자가 아니라 팀 단위다.
+  Future<List<AppUser>> fetchTeamMembers() =>
+      api!.fetchTeamMembers(_requireTeamId);
 
   Future<Room> joinRoom(String roomId) async {
     final room = await api!.joinRoom(roomId);
@@ -1364,9 +1628,20 @@ class Session extends ChangeNotifier {
     // 참고) — 상대가 새 메시지를 보내면 room:hidden 브로드캐스트로 자동으로 다시 꺼지므로,
     // 방 자체는 목록에서 지우지 않고 hidden만 올려둔다. 그룹/토픽/비밀 대화는 지금까지처럼
     // 진짜 멤버십이 없어지므로 목록에서 완전히 뺀다.
-    final isPlainDm = room != null && room.type == RoomType.dm && !room.isSecret;
+    final isPlainDm =
+        room != null && room.type == RoomType.dm && !room.isSecret;
     if (isPlainDm) {
       room.hidden = true;
+      if (realLeave) {
+        // "진짜 나가기"는 서버가 dm_history_floors에 기록 시작선을 남겨서, 다음에 방을
+        // 새로 불러올 때(GET /rooms/:id/messages) 그 이전 메시지를 걸러준다 — 그런데
+        // RoomChatController를 그대로 두면 이미 메모리에 올라와 있는(그 이전 내용이 섞인)
+        // 메시지 목록을 캐시로 그대로 보여줄 뿐 서버에 다시 요청하지 않는다. 컨트롤러를
+        // 지워서, 방이 다시 보일 때(controllerFor) 새로 만들어져 서버에서 다시 불러오게
+        // 한다 — 그래야 방금 그은 시작선이 실제로 적용된다. 그냥 "숨기기"는 시작선이 없어
+        // 캐시를 지울 필요가 없다(계속 켜둬야 숨겨진 동안의 미리보기/안읽음이 정확하다).
+        _controllers.remove(roomId)?.dispose();
+      }
     } else {
       if (room?.isSecret == true) {
         await secretSessionManager?.forgetRoom(roomId);
@@ -1399,6 +1674,8 @@ class Session extends ChangeNotifier {
     await _favoriteSub?.cancel();
     await _mutedSub?.cancel();
     await _hiddenSub?.cancel();
+    await _teamSub?.cancel();
+    await _teamLeftSub?.cancel();
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
     await _messageDeletedSub?.cancel();
@@ -1435,7 +1712,12 @@ class Session extends ChangeNotifier {
     avatarEmoji = null;
     avatarColor = null;
     avatarUrl = null;
+    accountRole = AccountRole.guest;
+    isServerAdmin = false;
     rooms.clear();
+    // 로그아웃하면 팀 선택도 초기화 — 다시 로그인하면 팀 선택 화면부터 시작한다.
+    teams.clear();
+    currentTeam = null;
     stage = AuthStage.needsLogin;
     notifyListeners();
   }

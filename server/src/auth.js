@@ -3,16 +3,15 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "./config.js";
 import { encryptField, lookupHash } from "./crypto.js";
-import { addRoomMembers, listPublicTopics } from "./db/queries/rooms.js";
 import {
   findUserByEmailLookup,
   findUserById,
   findUserByUsername,
   findUserByUsernameAndEmailLookup,
+  hasNoServerAdmin,
   insertUser,
   updateUser,
 } from "./db/queries/users.js";
-import { nameOf, notifyMembership, postSystemMessage } from "./rooms.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_LENGTH_ERROR = "아이디는 4~20자여야 합니다.";
@@ -74,7 +73,8 @@ export function issueTokenPair(user) {
   return { accessToken, refreshToken };
 }
 
-/** io를 캡처해, 회원가입 시 기존 공개 토픽 전체에 자동으로 가입시키고 알립니다. */
+/** 가입/로그인/비밀번호 찾기. 팀이 생기면서 가입 시 방에 자동으로 넣는 처리는 없어졌다
+ * (어느 팀에 들어갈지는 소유자/관리자가 정한다 — teams.js 참고). */
 export function createAuthRouter(io) {
   const router = Router();
 
@@ -135,9 +135,19 @@ export function createAuthRouter(io) {
       return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
     }
 
+    // 서버가 완전히 비어 있는 상태(첫 가입)라면 그 계정이 서버 운영자가 된다 — 1단계에서
+    // 기존 서버의 첫 계정에 표시를 찍은 마이그레이션(0020)과 같은 규칙이고, 이렇게 해야
+    // 새로 설치한 서버에서도 아무도 관리자 콘솔에 못 들어가는 상태가 안 생긴다.
+    const firstAccount = await hasNoServerAdmin();
+
     const user = await insertUser({
       username,
       name: name.trim(),
+      // 가입하면 준회원으로 시작한다 — 초대받은 방에서만 활동할 수 있고, 서버 운영자가
+      // 관리자 콘솔에서 정회원 이상으로 올려줘야 방을 만들거나 팀을 만들 수 있다.
+      // 다만 서버의 첫 계정(=운영자)은 스스로 올려줄 사람이 없으므로 관리자로 시작한다.
+      role: firstAccount ? 'admin' : 'guest',
+      isServerAdmin: firstAccount,
       emailEnc: encryptField(email),
       emailLookup,
       passwordHash: await bcrypt.hash(password, 10),
@@ -151,22 +161,9 @@ export function createAuthRouter(io) {
       avatarColor: randomOf(CHARACTER_COLORS),
     });
 
-    // 기존 공개 토픽 전체에 자동으로 가입시킨다(새로 만든 공개 토픽에 지금 회원 전원이
-    // 들어가는 것과 대칭 — 공개 토픽은 항상 "가입된 모든 회원"이 멤버가 되도록 유지한다).
-    const publicTopics = await listPublicTopics();
-    for (const room of publicTopics) {
-      await addRoomMembers(room.id, [user.id]);
-    }
-
-    for (const room of publicTopics) {
-      await notifyMembership(io, room);
-      await postSystemMessage(
-        io,
-        room,
-        `${await nameOf(user.id)} 님이 참여했습니다.`,
-      );
-    }
-
+    // 가입만으로는 어느 팀에도 들어가지 않는다 — 팀은 본인이 직접 만들거나(만든 사람이 그
+    // 팀의 소유자가 된다), 소유자/관리자가 팀에 넣어줘야 들어간다(teams.js의 멤버 추가).
+    // 공개 토픽 자동 가입도 이제 "서버 전체"가 아니라 "그 팀에 들어올 때" 일어난다.
     res.status(201).json({
       ...issueTokenPair(user),
       userId: user.id,
@@ -294,6 +291,11 @@ export function createAuthRouter(io) {
     if (user.deletedAt) {
       return res.status(403).json({ error: "탈퇴한 계정입니다." });
     }
+    if (user.suspendedAt) {
+      return res
+        .status(403)
+        .json({ error: "정지된 계정입니다. 서버 운영자에게 문의하세요." });
+    }
 
     res.json({
       ...issueTokenPair(user),
@@ -326,6 +328,13 @@ export function createAuthRouter(io) {
     const user = await findUserById(payload.sub);
     if (!user || (user.tokenVersion ?? 0) !== payload.tokenVersion) {
       // 비밀번호 변경/강제 로그아웃 등으로 이 RefreshToken 자체가 이미 폐기된 경우.
+      return res
+        .status(401)
+        .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
+    }
+    // 운영자가 정지시킨 계정은 남아있던 RefreshToken으로도 다시 들어올 수 없어야 한다
+    // (정지 시 tokenVersion도 올리지만, 그 전에 발급된 토큰까지 여기서 한 번 더 막는다).
+    if (user.suspendedAt || user.deletedAt) {
       return res
         .status(401)
         .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
@@ -370,6 +379,10 @@ export async function verifySocketToken(token) {
   }
   const user = await findUserById(payload.sub);
   if (!user || (user.tokenVersion ?? 0) !== payload.tokenVersion) {
+    throw new Error("unauthorized");
+  }
+  // 정지/탈퇴한 계정은 실시간 연결도 막는다.
+  if (user.suspendedAt || user.deletedAt) {
     throw new Error("unauthorized");
   }
   return payload;

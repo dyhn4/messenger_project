@@ -11,6 +11,10 @@ RoomType _typeFromString(String s) => switch (s) {
 
 class Room {
   final String id;
+
+  /// 이 방이 속한 팀. 방 목록/조직도/검색/파일이 전부 팀 단위로 갈리고, 다른 팀에서 온
+  /// 메시지를 눌렀을 때 그 팀으로 전환하는 데도 쓴다(Session.requestOpenRoom 참고).
+  final String teamId;
   final RoomType type;
   final String? name; // dm/이름없는 group은 null (클라이언트가 대신 표시할 이름을 계산)
   final String? description;
@@ -71,6 +75,7 @@ class Room {
 
   Room({
     required this.id,
+    required this.teamId,
     required this.type,
     required this.name,
     this.description,
@@ -94,6 +99,7 @@ class Room {
   factory Room.fromJson(Map<String, dynamic> json) {
     return Room(
       id: json['id'] as String,
+      teamId: json['teamId'] as String,
       type: _typeFromString(json['type'] as String),
       name: json['name'] as String?,
       description: json['description'] as String?,

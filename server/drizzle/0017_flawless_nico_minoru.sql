@@ -1,0 +1,2 @@
+ALTER TABLE "teams" ADD COLUMN "message_delete_enabled" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "teams" ADD COLUMN "message_delete_window_seconds" integer DEFAULT 300 NOT NULL;

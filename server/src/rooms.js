@@ -23,6 +23,9 @@ import {
   setMemberMuted,
   setSecretDepartedMember,
 } from './db/queries/rooms.js';
+import { findTeamById, isTeamMember, listAutoJoinTeamMemberIds } from './db/queries/teams.js';
+import { teamAccess } from './access.js';
+import { canBrowseTopics, canCreateRooms, canInviteMembers } from './permissions.js';
 import {
   countUnreadForUser,
   getLastMessageAt,
@@ -39,7 +42,7 @@ import {
   listCommentsInRoomBetween,
 } from './db/queries/comments.js';
 import { findSecretSessionByRoomId } from './db/queries/secretSessions.js';
-import { findUserById, listAllUserIds } from './db/queries/users.js';
+import { findUserById } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
@@ -94,6 +97,7 @@ export async function toRoomDto(room, requesterId) {
   }
   const dto = {
     id: room.id,
+    teamId: room.teamId,
     type: room.type,
     name: room.name,
     description: room.description ?? null,
@@ -194,8 +198,46 @@ export async function postSystemMessage(io, room, text) {
 export function createRoomsRouter(io) {
   const router = Router();
 
+  /**
+   * 방/토픽은 전부 팀 안에서만 의미가 있으므로, 팀을 가리키는 요청은 teamId를 받아서 내가 그
+   * 팀의 멤버인지부터 확인한다. 통과하면 팀 id를, 아니면 응답까지 끝내고 null을 돌려준다.
+   */
+  async function requireTeamId(req, res, raw) {
+    const teamId = typeof raw === 'string' ? raw : null;
+    if (!teamId) {
+      res.status(400).json({ error: 'teamId가 필요합니다.' });
+      return null;
+    }
+    if (!(await isTeamMember(teamId, req.user.sub))) {
+      res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+      return null;
+    }
+    return teamId;
+  }
+
+  /**
+   * requireTeamId + 그 팀에서의 내 권한(계정 등급 + 소유자 여부)까지. 등급별 제한(준회원은
+   * 방 생성/초대 불가 등)을 검사해야 하는 라우트가 쓴다. 통과하면 `{ teamId, ...access }`,
+   * 아니면 응답까지 끝내고 null.
+   */
+  async function requireTeamRole(req, res, raw) {
+    const teamId = typeof raw === 'string' ? raw : null;
+    if (!teamId) {
+      res.status(400).json({ error: 'teamId가 필요합니다.' });
+      return null;
+    }
+    const access = await teamAccess(teamId, req.user.sub);
+    if (!access.isMember) {
+      res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+      return null;
+    }
+    return { teamId, ...access };
+  }
+
   router.get('/rooms', async (req, res) => {
-    const myRooms = await listRoomsForUser(req.user.sub);
+    const teamId = await requireTeamId(req, res, req.query.teamId);
+    if (!teamId) return;
+    const myRooms = await listRoomsForUser(req.user.sub, teamId);
     res.json(await Promise.all(myRooms.map((r) => toRoomDto(r, req.user.sub))));
   });
 
@@ -203,7 +245,13 @@ export function createRoomsRouter(io) {
   // 공개 토픽은 누구에게나(나중에 가입한 회원 포함) 보이고, 비공개 토픽은 이미 멤버인
   // 사람에게만 보인다(초대로만 들어올 수 있음 — 자유 참여 불가는 /join에서 막는다).
   router.get('/rooms/browse', async (req, res) => {
-    const rows = await listBrowsableTopics(req.user.sub);
+    const scope = await requireTeamRole(req, res, req.query.teamId);
+    if (!scope) return;
+    const { teamId, role } = scope;
+    // 준회원은 초대받은 방에서만 활동한다 — 찾아볼 토픽 자체가 없다(클라이언트도 "토픽 찾기"
+    // 버튼을 감추지만, 서버에서도 빈 목록으로 못박는다).
+    if (!canBrowseTopics(role)) return res.json([]);
+    const rows = await listBrowsableTopics(req.user.sub, teamId);
     const withCounts = await Promise.all(
       rows.map(async ({ room, joined }) => ({
         id: room.id,
@@ -218,6 +266,14 @@ export function createRoomsRouter(io) {
   });
 
   router.post('/rooms/dm', async (req, res) => {
+    const scope = await requireTeamRole(req, res, req.body?.teamId);
+    if (!scope) return;
+    const { teamId, role } = scope;
+    // 준회원은 스스로 대화를 열 수 없다(초대받은 방에서만 활동). 반대 방향 — 정회원이
+    // 준회원에게 말을 거는 것 — 은 막지 않는다.
+    if (!canCreateRooms(role)) {
+      return res.status(403).json({ error: '준회원은 대화를 시작할 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.' });
+    }
     const { targetUserId } = req.body ?? {};
     if (!targetUserId || typeof targetUserId !== 'string') {
       return res.status(400).json({ error: 'targetUserId가 필요합니다.' });
@@ -227,9 +283,13 @@ export function createRoomsRouter(io) {
     }
     const target = await findUserById(targetUserId);
     if (!target) return res.status(404).json({ error: '대상 사용자를 찾을 수 없습니다.' });
+    // 1:1 대화도 팀 안에서만 만들어진다 — 상대가 그 팀 멤버가 아니면 시작할 수 없다.
+    if (!(await isTeamMember(teamId, targetUserId))) {
+      return res.status(403).json({ error: '이 팀의 멤버가 아닌 사람과는 대화를 시작할 수 없습니다.' });
+    }
 
     const dmKey = dmKeyFor(req.user.sub, targetUserId);
-    const existing = await findDmRoomByKey(dmKey);
+    const existing = await findDmRoomByKey(teamId, dmKey);
     if (existing) {
       // 둘 중 한쪽이 예전에 "채팅방 나가기"를 했을 수 있으니, 다시 대화를 걸면 그 사람을 되살린다.
       const memberIds = await listRoomMemberIds(existing.id);
@@ -243,6 +303,7 @@ export function createRoomsRouter(io) {
 
     const room = await insertRoom({
       id: randomUUID(),
+      teamId,
       type: 'dm',
       name: null,
       dmKey,
@@ -254,6 +315,12 @@ export function createRoomsRouter(io) {
   });
 
   router.post('/rooms', async (req, res) => {
+    const scope = await requireTeamRole(req, res, req.body?.teamId);
+    if (!scope) return;
+    const { teamId, role } = scope;
+    if (!canCreateRooms(role)) {
+      return res.status(403).json({ error: '준회원은 방을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.' });
+    }
     const { type, name, description, memberIds, isPublic } = req.body ?? {};
     if (type !== 'topic' && type !== 'group') {
       return res.status(400).json({ error: "type은 'topic' 또는 'group'이어야 합니다 (DM은 /rooms/dm 사용)." });
@@ -267,9 +334,10 @@ export function createRoomsRouter(io) {
 
     let roomMemberIds;
     if (isPublicTopic) {
-      // 공개 토픽은 만드는 순간 가입된 회원 전원이 멤버로 들어간다(나중에 가입하는
-      // 회원은 /auth/register에서 기존 공개 토픽 전체에 자동으로 추가된다).
-      roomMemberIds = await listAllUserIds();
+      // 공개 토픽은 만드는 순간 그 팀 멤버 전원이 들어간다(나중에 팀에 들어오는 사람은
+      // teams.js에서 그 팀의 공개 토픽 전체에 자동으로 추가된다). 준회원은 제외 —
+      // 초대받은 방에만 들어간다.
+      roomMemberIds = await listAutoJoinTeamMemberIds(teamId);
       if (!roomMemberIds.includes(req.user.sub)) roomMemberIds.push(req.user.sub);
     } else {
       const memberIdSet = new Set([req.user.sub, ...(Array.isArray(memberIds) ? memberIds : [])]);
@@ -281,6 +349,7 @@ export function createRoomsRouter(io) {
 
     const room = await insertRoom({
       id: randomUUID(),
+      teamId,
       type,
       name: trimmedName || null,
       description: type === 'topic' && description ? String(description).trim() : null,
@@ -309,6 +378,12 @@ export function createRoomsRouter(io) {
     if (room.isPublic === false) {
       return res.status(403).json({ error: '비공개 토픽은 초대를 통해서만 참여할 수 있습니다.' });
     }
+    // 공개 토픽이라도 그 팀 사람만 들어갈 수 있고, 준회원은 스스로 참여할 수 없다.
+    const joiner = await teamAccess(room.teamId, req.user.sub);
+    if (!joiner.isMember) return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+    if (!canBrowseTopics(joiner.role)) {
+      return res.status(403).json({ error: '준회원은 초대받은 방에만 참여할 수 있습니다.' });
+    }
 
     if (!(await isRoomMember(room.id, req.user.sub))) {
       await addRoomMembers(room.id, [req.user.sub]);
@@ -323,6 +398,17 @@ export function createRoomsRouter(io) {
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
     if (room.type === 'dm') return res.status(403).json({ error: 'DM에는 멤버를 초대할 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    // 초대 권한은 팀 설정(invitePolicy)에 따라 정회원 이상 또는 팀 관리 권한자 — 준회원은 불가.
+    const team = await findTeamById(room.teamId);
+    const inviter = await teamAccess(room.teamId, req.user.sub);
+    if (!canInviteMembers({ role: inviter.role, isOwner: inviter.isOwner, team })) {
+      return res.status(403).json({
+        error:
+          team?.invitePolicy === 'admin'
+            ? '이 팀은 소유자·관리자만 멤버를 초대할 수 있습니다.'
+            : '멤버를 초대할 권한이 없습니다.',
+      });
+    }
 
     const { userIds } = req.body ?? {};
     const currentMemberIds = await listRoomMemberIds(room.id);
@@ -331,7 +417,8 @@ export function createRoomsRouter(io) {
     );
     const toInvite = [];
     for (const id of candidateIds) {
-      if (await findUserById(id)) toInvite.push(id);
+      // 방은 팀 안에만 있으므로, 그 팀 멤버만 초대할 수 있다.
+      if ((await findUserById(id)) && (await isTeamMember(room.teamId, id))) toInvite.push(id);
     }
     if (toInvite.length === 0) {
       return res.status(400).json({ error: '초대할 멤버를 선택하세요.' });

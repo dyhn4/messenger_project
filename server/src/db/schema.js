@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 스키마의 원본(source of truth). `npm run db:generate`가 이 파일을 이전 스냅샷과 비교해서
@@ -25,32 +25,166 @@ export const users = pgTable('users', {
   avatarColor: text('avatar_color'),
   avatarUrl: text('avatar_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * 계정 등급 — 'guest'(준회원) | 'member'(정회원) | 'admin'(관리자).
+   * **서버 운영자만** 바꿀 수 있고(관리자 콘솔), 이 서버 전체에서 그 사람이 무엇을 할 수
+   * 있는지를 정한다(방/팀 생성, 초대, 팀 관리, 콘텐츠 관리 — permissions.js 참고).
+   * 회원가입하면 준회원으로 시작하므로, 운영자가 정회원 이상으로 올려줘야 정상 활동한다.
+   *
+   * 예전에는 이 등급이 팀마다 따로 있었지만(team_members.role), 한 사람이 팀마다 다른
+   * 등급을 갖는 게 사내 메신저에는 오히려 헷갈려서 계정 단위로 올렸다. 팀 단위로 남은 것은
+   * "그 팀의 소유자인지"뿐이다.
+   */
+  role: text('role').notNull().default('guest'),
+  // 부서/직책을 계정 단위로 관리하는 설정(server_settings.orgScope='account')일 때 쓰는 값.
+  // 'team'이면 team_members 쪽 값을 쓰고 여기는 안 쓴다.
+  department: text('department'),
+  position: text('position'),
+  // 서버 전체 운영자(관리자 콘솔 접근 권한). 계정 등급(role)과도 별개로,
+  // 회원 관리·팀 관리·감사 로그·운영 현황을 볼 수 있는 사람이다. 마이그레이션에서 가장 먼저
+  // 가입한 계정에 표시되고, 이후에는 운영자가 다른 사람을 지정한다(admin.js 참고).
+  isServerAdmin: boolean('is_server_admin').notNull().default(false),
+  // 운영자가 계정을 정지시킨 시각. 찍혀 있으면 로그인/토큰 재발급/소켓 연결이 모두 막힌다
+  // (탈퇴(deletedAt)와 달리 되돌릴 수 있고, 이름/메시지는 그대로 남는다).
+  suspendedAt: timestamp('suspended_at', { withTimezone: true }),
   // 탈퇴한 사용자: deletedAt이 찍히면 로그인 차단 + 이름/이메일/프로필 익명화.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   // 탈퇴 후 보존기간(1년) 만료로 메시지가 파기되면 찍힌다(retention.js) — 중복 파기 방지용.
   messagesPurgedAt: timestamp('messages_purged_at', { withTimezone: true }),
 });
 
-export const rooms = pgTable('rooms', {
-  // 'general'이라는 리터럴 문자열 시드 방이 있어서 uuid가 아니라 text.
-  id: text('id').primaryKey(),
-  type: text('type').notNull(), // 'topic' | 'group' | 'dm'
-  name: text('name'),
-  description: text('description'),
-  isPublic: boolean('is_public'), // 토픽에서만 의미 있음.
-  dmKey: text('dm_key').unique(), // DM 두 명의 정렬된 id 쌍 — 같은 DM 중복 생성 방지.
-  createdBy: text('created_by'),
+/**
+ * 팀(워크스페이스). 사내 메신저라 한 서버 안에 여러 팀이 있을 수 있고, 방/조직도/검색/파일이
+ * 전부 팀 단위로 나뉜다. 한 계정은 여러 팀에 속할 수 있다(team_members).
+ * 팀을 만든 사람이 그 팀의 소유자가 된다(잔디와 동일 — 별도 소유자 비밀번호는 없다).
+ */
+export const teams = pgTable('teams', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  // 팀 아이콘 — 사용자 아바타와 같은 방식(이모지+배경색)으로 가볍게 시작한다.
+  iconEmoji: text('icon_emoji'),
+  iconColor: text('icon_color'),
+  // 팀을 사람이 읽을 수 있게 가리키는 짧은 식별자(영문 소문자/숫자/하이픈). 지금은 표시용이고,
+  // 나중에 초대 링크 등에 쓸 수 있도록 서버 전체에서 유일하게 둔다(안 정하면 null).
+  domain: text('domain').unique(),
+  // 방에 멤버를 초대할 수 있는 최소 등급 — 'member'(정회원도 가능, 기본) | 'admin'(관리자만).
+  // 준회원은 어느 값이든 초대할 수 없다(teams.js canInviteMembers 참고).
+  invitePolicy: text('invite_policy').notNull().default('member'),
+  // [메시지 설정] 메시지 수정/삭제 허용 여부. false면 그 팀에서는 아무도(소유자·관리자 포함)
+  // 메시지/댓글을 고치거나 지울 수 없다 — 대화 기록을 그대로 남겨야 하는 팀을 위한 스위치.
+  messageEditDeleteEnabled: boolean('message_edit_delete_enabled').notNull().default(true),
+  // 작성 후 이 시간 안에서만 수정/삭제할 수 있다(초 단위). 기본 300초(5분) — 예전에 코드에
+  // 박혀 있던 값과 같아서 설정을 안 건드리면 동작이 그대로다. 고를 수 있는 값은
+  // permissions.js의 EDIT_DELETE_WINDOW_OPTIONS 참고.
+  messageEditDeleteWindowSeconds: integer('message_edit_delete_window_seconds').notNull().default(300),
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  // 비밀 대화(E2EE) 방인지 — 새 RoomType을 만들지 않고 dm 위에 얹는 플래그로 둔다(isPublic과
-  // 같은 방식). true면 messages/messageComments.text는 클라이언트가 만든 암호문 JSON이다.
-  isSecret: boolean('is_secret').notNull().default(false),
-  // 비밀 대화에서 "상대방도 나가기"를 체크하지 않고 혼자 나간 경우, 남은 멤버 쪽 화면에서
-  // Room.displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있도록 나간 사람의
-  // 정보를 남겨둔다(비밀 대화 DM은 멤버가 2명뿐이라 한 명이 나가면 members에선 완전히
-  // 빠지므로, 이 컬럼이 없으면 누가 나갔었는지 알 방법이 없다).
-  secretDepartedMemberId: uuid('secret_departed_member_id'),
-  secretDepartedMemberName: text('secret_departed_member_name'),
 });
+
+/**
+ * 팀 멤버십. [role]은 이제 "그 팀의 소유자인지"만 나타낸다 — 'owner'(팀을 만든 사람) 또는
+ * 'member'(그냥 멤버). 준회원/정회원/관리자 같은 **등급은 계정 단위**(users.role)로 올라갔고,
+ * 서버 운영자만 바꾼다. 팀 설정을 바꿀 수 있는 사람은 "그 팀의 소유자 + 계정 등급이 관리자인
+ * 사람"이다(permissions.js의 canManageTeam 참고).
+ */
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().default('member'), // 'owner' | 'member' (소유자 여부만)
+    // 부서/직책 — server_settings.orgScope가 'team'일 때 쓰는 값(팀마다 다른 직책을 둘 수
+    // 있다). 'account'면 users.department/position을 쓰고 여기는 안 쓴다.
+    department: text('department'),
+    position: text('position'),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('team_members_user_id_idx').on(t.userId)],
+);
+
+/**
+ * 서버 전체 설정(항상 한 행만 있고 id는 늘 1). 팀 설정(teams)과 달리 서버 운영자만 바꾼다.
+ * 값이 없으면(설치 직후) 기본값으로 동작하므로, 읽는 쪽은 행이 없을 수도 있다고 보고 다뤄야
+ * 한다(db/queries/serverSettings.js의 getServerSettings 참고).
+ */
+export const serverSettings = pgTable('server_settings', {
+  id: integer('id').primaryKey(),
+  // 팀을 만들 수 있는 최소 계정 등급 — 'member'(정회원 이상, 기본) | 'admin'(관리자 이상) |
+  // 'serverAdmin'(서버 운영자만). 준회원은 어느 값이든 팀을 만들 수 없다.
+  teamCreation: text('team_creation').notNull().default('member'),
+  // 부서/직책을 어디에 두는지 — 'team'(기본, 팀마다 다르게: team_members) |
+  // 'account'(계정 하나로: users). 회사 조직도가 하나뿐이면 'account'가 단순하다.
+  orgScope: text('org_scope').notNull().default('team'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * 감사 로그 — "누가 언제 무엇을 했는지"의 추가 전용 기록. 관리자 권한으로 한 일(남의 메시지
+ * 삭제, 등급 변경, 팀원 제외, 팀 삭제, 계정 정지 등)만 남긴다. 일반 대화/메시지 작성은 남기지
+ * 않는다(그건 메시지 자체가 기록이므로).
+ *
+ * actorId/teamId는 계정이나 팀이 지워져도 로그는 남아야 하므로 set null이고, 대신 그 시점의
+ * 이름을 스냅샷으로 같이 저장한다(messages.senderName과 같은 방식).
+ */
+export const auditLogs = pgTable(
+  'audit_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    actorName: text('actor_name').notNull(),
+    // 'message.delete' | 'comment.delete' | 'team.member.role' | 'team.member.remove' |
+    // 'team.delete' | 'team.transferOwner' | 'user.suspend' | 'user.resetPassword' 등.
+    action: text('action').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
+    teamName: text('team_name'),
+    // 무엇에 대한 행위였는지 — 'user' | 'message' | 'comment' | 'team' | 'room'.
+    targetType: text('target_type'),
+    targetId: text('target_id'),
+    targetLabel: text('target_label'), // 사람이 읽을 이름 스냅샷(사용자명/방 이름 등).
+    detail: text('detail'), // "정회원 → 관리자"처럼 한 줄 설명.
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('audit_logs_created_at_idx').on(t.createdAt), index('audit_logs_actor_id_idx').on(t.actorId)],
+);
+
+export const rooms = pgTable(
+  'rooms',
+  {
+    // 'general'이라는 리터럴 문자열 시드 방이 있어서 uuid가 아니라 text.
+    id: text('id').primaryKey(),
+    // 이 방이 속한 팀. 방/검색/파일/조직도가 전부 팀 단위로 갈리는 기준점이다.
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(), // 'topic' | 'group' | 'dm'
+    name: text('name'),
+    description: text('description'),
+    isPublic: boolean('is_public'), // 토픽에서만 의미 있음.
+    // DM 두 명의 정렬된 id 쌍 — 같은 DM 중복 생성 방지. 팀이 생기면서 "팀 안에서만" 유일해야
+    // 한다(같은 두 사람이 팀 A와 팀 B에서 각각 1:1 대화를 가질 수 있다) — 그래서 컬럼 단독
+    // unique가 아니라 (team_id, dm_key) 복합 unique로 둔다(아래 uniqueIndex).
+    dmKey: text('dm_key'),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // 비밀 대화(E2EE) 방인지 — 새 RoomType을 만들지 않고 dm 위에 얹는 플래그로 둔다(isPublic과
+    // 같은 방식). true면 messages/messageComments.text는 클라이언트가 만든 암호문 JSON이다.
+    isSecret: boolean('is_secret').notNull().default(false),
+    // 비밀 대화에서 "상대방도 나가기"를 체크하지 않고 혼자 나간 경우, 남은 멤버 쪽 화면에서
+    // Room.displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있도록 나간 사람의
+    // 정보를 남겨둔다(비밀 대화 DM은 멤버가 2명뿐이라 한 명이 나가면 members에선 완전히
+    // 빠지므로, 이 컬럼이 없으면 누가 나갔었는지 알 방법이 없다).
+    secretDepartedMemberId: uuid('secret_departed_member_id'),
+    secretDepartedMemberName: text('secret_departed_member_name'),
+  },
+  (t) => [
+    index('rooms_team_id_idx').on(t.teamId),
+    uniqueIndex('rooms_team_id_dm_key_idx').on(t.teamId, t.dmKey),
+  ],
+);
 
 /** 방 멤버십 + 그 사람이 그 방을 마지막으로 읽은 시각을 한 테이블로 합친다(멤버가 아니면 읽음
  * 기록도 의미가 없으므로 예전 room.lastRead 맵을 여기 흡수). */

@@ -5,6 +5,7 @@ import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../models/team.dart';
 import 'pinned_tls.dart';
 
 /// room:read 브로드캐스트 한 건. 누가(userId) 언제(lastReadAt) 어느 방(roomId)을 읽었는지.
@@ -49,6 +50,26 @@ class RoomMutedUpdate {
         roomId: json['roomId'] as String,
         muted: json['muted'] as bool,
       );
+}
+
+/// 팀에서 빠졌다는 알림(team:left) — 소유자/관리자가 나를 팀에서 뺐거나, 소유자가 팀 자체를
+/// 삭제했을 때([deleted]가 true). 어느 쪽이든 클라이언트가 하는 일은 같지만(팀+방 정리),
+/// 사용자에게 보여주는 안내 문구가 다르다.
+class TeamLeftEvent {
+  final String teamId;
+  final String? teamName;
+  final bool deleted;
+  const TeamLeftEvent({
+    required this.teamId,
+    this.teamName,
+    this.deleted = false,
+  });
+
+  factory TeamLeftEvent.fromJson(Map<String, dynamic> json) => TeamLeftEvent(
+    teamId: json['teamId'] as String,
+    teamName: json['teamName'] as String?,
+    deleted: json['deleted'] as bool? ?? false,
+  );
 }
 
 /// 평문 DM의 숨기기 상태가 바뀌었다는 브로드캐스트(room:hidden) — 내가(다른 기기 포함)
@@ -265,6 +286,9 @@ class ChatSocket {
   final _favoriteController = StreamController<RoomFavoriteUpdate>.broadcast();
   final _mutedController = StreamController<RoomMutedUpdate>.broadcast();
   final _hiddenController = StreamController<RoomHiddenUpdate>.broadcast();
+  // 팀 갱신(이름/아이콘 변경, 팀에 새로 들어감)과 팀에서 빠짐.
+  final _teamController = StreamController<Team>.broadcast();
+  final _teamLeftController = StreamController<TeamLeftEvent>.broadcast();
   final _commentController = StreamController<Comment>.broadcast();
   final _messageEditedController = StreamController<Message>.broadcast();
   final _messageDeletedController =
@@ -310,6 +334,12 @@ class ChatSocket {
   /// 평문 DM의 숨기기 상태 변화(내가 숨기기/나가기를 했거나, 상대의 새 메시지로 서버가
   /// 자동으로 다시 보이게 되돌렸을 때).
   Stream<RoomHiddenUpdate> get hiddenEvents => _hiddenController.stream;
+
+  /// 팀이 갱신됐거나(team:updated — 이름/아이콘 변경) 내가 팀에 새로 들어갔을 때(team:joined).
+  Stream<Team> get teamEvents => _teamController.stream;
+
+  /// 소유자/관리자가 나를 팀에서 뺐을 때(team:left).
+  Stream<TeamLeftEvent> get teamLeftEvents => _teamLeftController.stream;
 
   /// 누군가 메시지에 댓글을 달았다는 브로드캐스트(comment:new).
   Stream<Comment> get commentEvents => _commentController.stream;
@@ -419,6 +449,19 @@ class ChatSocket {
     socket.on('room:hidden', (data) {
       _hiddenController.add(
         RoomHiddenUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    // 팀 갱신과 팀 합류는 클라이언트에서 하는 일이 같다(팀 목록에 upsert) — 같은 스트림으로 묶는다.
+    for (final event in ['team:updated', 'team:joined']) {
+      socket.on(event, (data) {
+        _teamController.add(
+          Team.fromJson(Map<String, dynamic>.from(data as Map)),
+        );
+      });
+    }
+    socket.on('team:left', (data) {
+      _teamLeftController.add(
+        TeamLeftEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
     socket.on('comment:new', (data) {

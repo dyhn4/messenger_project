@@ -132,8 +132,19 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   void _startEdit() {
-    if (!isWithinEditWindow(widget.message.createdAt)) {
-      showEditWindowExpiredDialog(context, '수정 기간이 경과되어 메시지를 수정할 수 없습니다.');
+    if (!isEditDeleteAllowed(widget.session)) {
+      showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
+      return;
+    }
+    if (!isWithinEditDeleteWindow(widget.session, widget.message.createdAt)) {
+      showEditWindowExpiredDialog(
+        context,
+        editDeleteWindowExpiredMessage(
+          widget.session,
+          what: '메시지',
+          action: '수정',
+        ),
+      );
       return;
     }
     setState(() {
@@ -166,16 +177,47 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
+  /// 팀의 소유자·관리자는 자기가 들어가 있는 방에서 남의 메시지도 지울 수 있다(콘텐츠 관리 —
+  /// 서버 moderation.js와 같은 규칙). 본인 메시지와 마찬가지로 팀이 정한 삭제 가능 시간
+  /// 안에서만 가능하고, 비밀 대화(E2EE)는 서버가 내용을 볼 수 없으므로 대상에서 뺀다.
+  bool get _canModerate {
+    if (widget.isMine || widget.onDelete == null) return false;
+    if (!widget.session.canModerateContent) return false;
+    if (!isEditDeleteAllowed(widget.session)) return false;
+    if (widget.message.type == MessageType.system) return false;
+    if (!isWithinEditDeleteWindow(widget.session, widget.message.createdAt)) {
+      return false;
+    }
+    final room = widget.session.rooms.where(
+      (r) => r.id == widget.message.roomId,
+    );
+    return room.isNotEmpty && !room.first.isSecret;
+  }
+
   Future<void> _confirmDelete(BuildContext context) async {
-    if (!isWithinEditWindow(widget.message.createdAt)) {
-      showEditWindowExpiredDialog(context, '삭제 기간이 경과되어 메시지를 삭제할 수 없습니다.');
+    final moderating = !widget.isMine;
+    if (!isEditDeleteAllowed(widget.session)) {
+      showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
+      return;
+    }
+    if (!isWithinEditDeleteWindow(widget.session, widget.message.createdAt)) {
+      showEditWindowExpiredDialog(
+        context,
+        editDeleteWindowExpiredMessage(
+          widget.session,
+          what: '메시지',
+          action: '삭제',
+        ),
+      );
       return;
     }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('메시지 삭제'),
-        content: const Text('이 메시지를 삭제할까요?'),
+        content: Text(
+          moderating ? '관리자 권한으로 다른 사람의 메시지를 삭제합니다. 계속할까요?' : '이 메시지를 삭제할까요?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -525,9 +567,13 @@ class _MessageBubbleState extends State<MessageBubble> {
               message: message,
               senderDisplayName: displayName,
             ),
-            if (isMine && (widget.onEdit != null || widget.onDelete != null))
+            // 팀이 메시지 수정/삭제를 꺼두면([메시지 설정]) 본인 메시지도 못 고치고 못 지운다.
+            if (isMine &&
+                isEditDeleteAllowed(widget.session) &&
+                (widget.onEdit != null || widget.onDelete != null))
               const PopupMenuDivider(),
             if (isMine &&
+                isEditDeleteAllowed(widget.session) &&
                 message.type == MessageType.text &&
                 widget.onEdit != null)
               PopupMenuItem<void>(
@@ -536,7 +582,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                   children: [Icon(Icons.edit), SizedBox(width: 8), Text('수정')],
                 ),
               ),
-            if (isMine && widget.onDelete != null)
+            if (isMine &&
+                widget.onDelete != null &&
+                isEditDeleteAllowed(widget.session))
               PopupMenuItem<void>(
                 onTap: () => _confirmDelete(context),
                 child: const Row(
@@ -547,6 +595,20 @@ class _MessageBubbleState extends State<MessageBubble> {
                   ],
                 ),
               ),
+            // 소유자·관리자의 콘텐츠 관리 — 남의 메시지도 지울 수 있다(_canModerate 참고).
+            if (_canModerate) ...[
+              const PopupMenuDivider(),
+              PopupMenuItem<void>(
+                onTap: () => _confirmDelete(context),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, color: Colors.redAccent),
+                    SizedBox(width: 8),
+                    Text('삭제 (관리자)', style: TextStyle(color: Colors.redAccent)),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ],

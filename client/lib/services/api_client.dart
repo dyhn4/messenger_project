@@ -4,10 +4,12 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../models/admin.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../models/team.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
 
 class ApiException implements Exception {
@@ -66,6 +68,13 @@ class MyProfile {
   final String? avatarEmoji;
   final String? avatarColor; // '#RRGGBB'
   final String? avatarUrl;
+
+  /// 내 계정 등급(준회원/정회원/관리자). 서버 운영자만 바꿀 수 있고, 화면은 이 값으로
+  /// 버튼을 감춘다(실제 차단은 항상 서버가 다시 한다).
+  final String role;
+
+  /// 서버 전체 운영자인지 — 관리자 콘솔 진입 메뉴를 보여줄지 판단하는 데만 쓴다.
+  final bool isServerAdmin;
   const MyProfile({
     required this.username,
     required this.name,
@@ -74,6 +83,8 @@ class MyProfile {
     this.avatarEmoji,
     this.avatarColor,
     this.avatarUrl,
+    this.role = 'guest',
+    this.isServerAdmin = false,
   });
 
   factory MyProfile.fromJson(Map<String, dynamic> json) => MyProfile(
@@ -84,6 +95,8 @@ class MyProfile {
     avatarEmoji: json['avatarEmoji'] as String?,
     avatarColor: json['avatarColor'] as String?,
     avatarUrl: json['avatarUrl'] as String?,
+    role: json['role'] as String? ?? 'guest',
+    isServerAdmin: json['isServerAdmin'] as bool? ?? false,
   );
 }
 
@@ -414,9 +427,16 @@ class ApiClient {
     return decoded;
   }
 
-  Future<dynamic> _delete(String path) async {
+  /// [body]는 팀 삭제처럼 DELETE에도 확인값을 실어 보내야 할 때만 쓴다(없으면 안 보낸다).
+  Future<dynamic> _delete(String path, {Map<String, dynamic>? body}) async {
     final res = await _send(
-      () => _client.delete(_uri(path), headers: _authHeaders),
+      () => _client.delete(
+        _uri(path),
+        headers: body == null
+            ? _authHeaders
+            : {..._authHeaders, 'Content-Type': 'application/json'},
+        body: body == null ? null : jsonEncode(body),
+      ),
     );
     final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
@@ -501,13 +521,235 @@ class ApiClient {
     await _post('/api/users/me/withdraw', {'password': password});
   }
 
-  Future<List<Room>> fetchRooms() async {
-    final list = await _get('/api/rooms') as List;
+  // ─────────────── 관리자 콘솔(서버 운영자 전용, 서버 admin.js) ───────────────
+  // 전부 서버가 매 요청마다 isServerAdmin을 다시 확인하므로, 운영자가 아니면 403이 온다.
+
+  Future<ServerStats> fetchServerStats() async => ServerStats.fromJson(
+    await _get('/api/admin/stats') as Map<String, dynamic>,
+  );
+
+  /// 서버 설정 변경 — 팀 생성 권한('member'|'admin'|'serverAdmin')과 부서·직책 관리
+  /// 범위('team'|'account').
+  Future<void> updateServerSettings({
+    String? teamCreation,
+    String? orgScope,
+  }) async {
+    await _patch('/api/admin/settings', {
+      'teamCreation': ?teamCreation,
+      'orgScope': ?orgScope,
+    });
+  }
+
+  /// 계정 등급 변경 — 서버 운영자만.
+  Future<AdminUser> setUserRole(String userId, String role) async =>
+      AdminUser.fromJson(
+        await _post('/api/admin/users/$userId/role', {'role': role})
+            as Map<String, dynamic>,
+      );
+
+  /// 부서·직책을 계정 단위로 관리하는 설정일 때 관리자 콘솔에서 쓴다.
+  Future<AdminUser> updateUserOrg(
+    String userId, {
+    String? department,
+    String? position,
+  }) async => AdminUser.fromJson(
+    await _patch('/api/admin/users/$userId/org', {
+          'department': ?department,
+          'position': ?position,
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<List<AdminUser>> fetchAdminUsers() async {
+    final list = await _get('/api/admin/users') as List;
+    return list
+        .map((e) => AdminUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<AdminUser> setUserSuspended(String userId, bool suspended) async =>
+      AdminUser.fromJson(
+        await _post('/api/admin/users/$userId/suspend', {
+              'suspended': suspended,
+            })
+            as Map<String, dynamic>,
+      );
+
+  Future<AdminUser> logoutUserEverywhere(String userId) async =>
+      AdminUser.fromJson(
+        await _post('/api/admin/users/$userId/logout-all', {})
+            as Map<String, dynamic>,
+      );
+
+  /// 운영자가 정한 임시 비밀번호로 초기화한다(그 계정의 기존 로그인은 전부 끊긴다).
+  Future<void> resetUserPassword(String userId, String password) async {
+    await _post('/api/admin/users/$userId/reset-password', {
+      'password': password,
+    });
+  }
+
+  Future<AdminUser> setUserServerAdmin(
+    String userId,
+    bool isServerAdmin,
+  ) async => AdminUser.fromJson(
+    await _post('/api/admin/users/$userId/server-admin', {
+          'isServerAdmin': isServerAdmin,
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<List<AdminTeam>> fetchAdminTeams() async {
+    final list = await _get('/api/admin/teams') as List;
+    return list
+        .map((e) => AdminTeam.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 감사 로그 조회. 총 건수도 같이 와서 화면이 "몇 건 중 몇 건"을 보여줄 수 있다.
+  Future<({int total, List<AuditLog> logs})> fetchAuditLogs({
+    String? action,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final query = <String>['limit=$limit', 'offset=$offset'];
+    if (action != null && action.isNotEmpty) {
+      query.add('action=${Uri.encodeQueryComponent(action)}');
+    }
+    final body =
+        await _get('/api/admin/audit-logs?${query.join('&')}')
+            as Map<String, dynamic>;
+    return (
+      total: (body['total'] as num?)?.toInt() ?? 0,
+      logs: ((body['logs'] as List?) ?? [])
+          .map((e) => AuditLog.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함) — 로그인/앱 시작 직후 팀 선택 화면이 쓴다.
+  Future<List<Team>> fetchTeams() async {
+    final list = await _get('/api/teams') as List;
+    return list.map((e) => Team.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// 팀 생성 — 만든 사람이 그 팀의 소유자가 된다(서버 teams.js 참고).
+  Future<Team> createTeam({
+    required String name,
+    String? iconEmoji,
+    String? iconColor,
+  }) async {
+    return Team.fromJson(
+      await _post('/api/teams', {
+            'name': name,
+            'iconEmoji': ?iconEmoji,
+            'iconColor': ?iconColor,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 팀 이름/도메인/아이콘/초대 권한/메시지 설정 변경 — 소유자·관리자만(서버가 다시 검사한다).
+  Future<Team> updateTeam(
+    String teamId, {
+    String? name,
+    String? iconEmoji,
+    String? iconColor,
+    String? domain,
+    String? invitePolicy,
+    bool? messageEditDeleteEnabled,
+    int? messageEditDeleteWindowSeconds,
+  }) async {
+    return Team.fromJson(
+      await _patch('/api/teams/$teamId', {
+            'name': ?name,
+            'iconEmoji': ?iconEmoji,
+            'iconColor': ?iconColor,
+            'domain': ?domain,
+            'invitePolicy': ?invitePolicy,
+            'messageEditDeleteEnabled': ?messageEditDeleteEnabled,
+            'messageEditDeleteWindowSeconds': ?messageEditDeleteWindowSeconds,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 팀 삭제 — 소유자만. 실수 방지를 위해 팀 이름을 그대로 다시 보내야 한다.
+  Future<void> deleteTeam(String teamId, String confirmName) async {
+    await _delete('/api/teams/$teamId', body: {'name': confirmName});
+  }
+
+  /// 소유권 이양 — 소유자만. 넘겨받는 사람이 소유자가 되고 넘긴 사람은 관리자가 된다.
+  Future<List<AppUser>> transferTeamOwnership(
+    String teamId,
+    String userId,
+  ) async {
+    final list =
+        await _post('/api/teams/$teamId/transfer-owner', {'userId': userId})
+            as List;
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 팀원의 부서/직책 변경 — 그 팀을 관리할 수 있는 사람만. 등급은 여기서 못 바꾼다
+  /// (계정 등급은 서버 운영자가 관리자 콘솔에서만 정한다).
+  Future<List<AppUser>> updateTeamMember(
+    String teamId,
+    String userId, {
+    String? department,
+    String? position,
+  }) async {
+    final list =
+        await _patch('/api/teams/$teamId/members/$userId', {
+              'department': ?department,
+              'position': ?position,
+            })
+            as List;
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 팀 멤버 목록 — 조직도(멤버 패널)와 "새 대화" 상대 선택이 쓴다(서버 전체가 아니라 팀 단위).
+  Future<List<AppUser>> fetchTeamMembers(String teamId) async {
+    final list = await _get('/api/teams/$teamId/members') as List;
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 팀에 멤버 추가 — 소유자·관리자만. 가입만 한 사람은 어느 팀에도 없으므로 이걸로 넣어준다.
+  Future<List<AppUser>> addTeamMembers(
+    String teamId,
+    List<String> userIds,
+  ) async {
+    final list =
+        await _post('/api/teams/$teamId/members', {'userIds': userIds}) as List;
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<AppUser>> removeTeamMember(String teamId, String userId) async {
+    final list = await _delete('/api/teams/$teamId/members/$userId') as List;
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<Room>> fetchRooms(String teamId) async {
+    final list =
+        await _get('/api/rooms?teamId=${Uri.encodeQueryComponent(teamId)}')
+            as List;
     return list.map((e) => Room.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<List<TopicBrowseEntry>> browseTopics() async {
-    final list = await _get('/api/rooms/browse') as List;
+  Future<List<TopicBrowseEntry>> browseTopics(String teamId) async {
+    final list =
+        await _get(
+              '/api/rooms/browse?teamId=${Uri.encodeQueryComponent(teamId)}',
+            )
+            as List;
     return list
         .map((e) => TopicBrowseEntry.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -538,12 +780,14 @@ class ApiClient {
   }
 
   Future<Room> createTopic({
+    required String teamId,
     required String name,
     String? description,
     bool isPublic = true,
   }) async {
     return Room.fromJson(
       await _post('/api/rooms', {
+            'teamId': teamId,
             'type': 'topic',
             'name': name,
             if (description != null && description.isNotEmpty)
@@ -555,11 +799,13 @@ class ApiClient {
   }
 
   Future<Room> createGroup({
+    required String teamId,
     String? name,
     required List<String> memberIds,
   }) async {
     return Room.fromJson(
       await _post('/api/rooms', {
+            'teamId': teamId,
             'type': 'group',
             if (name != null && name.isNotEmpty) 'name': name,
             'memberIds': memberIds,
@@ -568,9 +814,12 @@ class ApiClient {
     );
   }
 
-  Future<Room> startDm(String targetUserId) async {
+  Future<Room> startDm(String teamId, String targetUserId) async {
     return Room.fromJson(
-      await _post('/api/rooms/dm', {'targetUserId': targetUserId})
+      await _post('/api/rooms/dm', {
+            'teamId': teamId,
+            'targetUserId': targetUserId,
+          })
           as Map<String, dynamic>,
     );
   }
@@ -742,13 +991,15 @@ class ApiClient {
 
   Future<List<SearchResult>> search(
     String query, {
+    required String teamId,
     String? roomId,
     String? senderId,
     DateTime? since,
     DateTime? until,
   }) async {
     final params = StringBuffer(
-      '/api/search?q=${Uri.encodeQueryComponent(query)}',
+      '/api/search?q=${Uri.encodeQueryComponent(query)}'
+      '&teamId=${Uri.encodeQueryComponent(teamId)}',
     );
     if (roomId != null)
       params.write('&roomId=${Uri.encodeQueryComponent(roomId)}');
@@ -766,12 +1017,13 @@ class ApiClient {
   /// 방을 가로지른다. 서버가 toMessageDto와 동일한 모양으로 내려주므로 Message.fromJson을
   /// 그대로 재사용한다(새 모델을 따로 만들 필요 없음).
   Future<List<Message>> fetchAttachments({
+    required String teamId,
     String? roomId,
     String? senderId,
     String? category,
   }) async {
     final params = StringBuffer('/api/attachments?');
-    final parts = <String>[];
+    final parts = <String>['teamId=${Uri.encodeQueryComponent(teamId)}'];
     if (roomId != null) parts.add('roomId=${Uri.encodeQueryComponent(roomId)}');
     if (senderId != null) {
       parts.add('senderId=${Uri.encodeQueryComponent(senderId)}');
@@ -781,7 +1033,9 @@ class ApiClient {
     }
     params.write(parts.join('&'));
     final list = await _get(params.toString()) as List;
-    return list.map((e) => Message.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => Message.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// [onProgress]/[cancelToken]을 안 넘기면 지금까지와 완전히 동일하게(단순 MultipartRequest)

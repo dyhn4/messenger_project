@@ -35,7 +35,7 @@ class _InviteMembersScreenState extends State<InviteMembersScreen> {
 
   Future<void> _load() async {
     try {
-      final users = await widget.session.api!.fetchUsers();
+      final users = await widget.session.fetchTeamMembers();
       final memberIds = widget.room.members.map((m) => m.id).toSet();
       users.removeWhere((u) => memberIds.contains(u.id));
       if (!mounted) return;

@@ -95,6 +95,7 @@ class _FilesScreenState extends State<FilesScreen> {
     });
     try {
       final results = await widget.session.api!.fetchAttachments(
+        teamId: widget.session.currentTeam!.id,
         roomId: _roomId,
         senderId: _senderId,
         category: _category.apiValue,

@@ -31,7 +31,9 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen> {
 
   Future<void> _load() async {
     try {
-      final topics = await widget.session.api!.browseTopics();
+      final topics = await widget.session.api!.browseTopics(
+        widget.session.currentTeam!.id,
+      );
       if (!mounted) return;
       setState(() => _topics = topics);
     } catch (e) {

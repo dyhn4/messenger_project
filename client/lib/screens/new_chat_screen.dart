@@ -35,7 +35,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
 
   Future<void> _load() async {
     try {
-      final users = await widget.session.api!.fetchUsers();
+      final users = await widget.session.fetchTeamMembers();
       users.removeWhere((u) => u.id == widget.session.userId);
       if (!mounted) return;
       setState(() => _users = users);

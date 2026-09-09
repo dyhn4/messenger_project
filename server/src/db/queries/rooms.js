@@ -10,42 +10,53 @@ export function findRoomById(id) {
     .then((rows) => rows[0] ?? null);
 }
 
-export function findDmRoomByKey(dmKey) {
+/** DM은 팀 안에서만 유일하다(같은 두 사람이 팀마다 각각 1:1 대화를 가질 수 있다). */
+export function findDmRoomByKey(teamId, dmKey) {
   return db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.type, 'dm'), eq(rooms.dmKey, dmKey)))
+    .where(and(eq(rooms.teamId, teamId), eq(rooms.type, 'dm'), eq(rooms.dmKey, dmKey)))
     .then((rows) => rows[0] ?? null);
 }
 
-/** 이 사람이 멤버인 모든 방. */
-export function listRoomsForUser(userId) {
+/** 이 사람이 멤버인 방. [teamId]를 주면 그 팀의 방만, 안 주면 팀과 상관없이 전부 —
+ * 팀을 안 주는 쪽은 소켓 join처럼 "내가 속한 모든 방"이 필요한 경우에 쓴다(다른 팀에서 온
+ * 메시지도 받아야 하므로 소켓은 항상 전체 팀의 방에 join한다, socket.js 참고). */
+export function listRoomsForUser(userId, teamId) {
+  const conditions = [eq(roomMembers.userId, userId)];
+  if (teamId) conditions.push(eq(rooms.teamId, teamId));
   return db
     .select({ room: rooms })
     .from(roomMembers)
     .innerJoin(rooms, eq(roomMembers.roomId, rooms.id))
-    .where(eq(roomMembers.userId, userId))
+    .where(and(...conditions))
     .then((rows) => rows.map((r) => r.room));
 }
 
 /** isPublic이 명시적으로 false가 아니면 공개로 친다(기존 `r.isPublic !== false`와 동일한 규칙). */
 const isPublicTopic = or(isNull(rooms.isPublic), eq(rooms.isPublic, true));
 
-/** 새로 가입하는 회원을 자동으로 넣어줄 기존 공개 토픽 전체. */
-export function listPublicTopics() {
+/** 그 팀에 새로 들어온 사람을 자동으로 넣어줄 공개 토픽 전체(팀 단위). */
+export function listPublicTopics(teamId) {
   return db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.type, 'topic'), isPublicTopic));
+    .where(and(eq(rooms.teamId, teamId), eq(rooms.type, 'topic'), isPublicTopic));
 }
 
-/** 토픽 찾아보기: 공개 토픽 전부 + 비공개 토픽 중 내가 이미 멤버인 것. */
-export function listBrowsableTopics(userId) {
+/** 토픽 찾아보기: 그 팀의 공개 토픽 전부 + 비공개 토픽 중 내가 이미 멤버인 것. */
+export function listBrowsableTopics(userId, teamId) {
   return db
     .select({ room: rooms, joined: sql`(${roomMembers.userId} is not null)`.as('joined') })
     .from(rooms)
     .leftJoin(roomMembers, and(eq(roomMembers.roomId, rooms.id), eq(roomMembers.userId, userId)))
-    .where(and(eq(rooms.type, 'topic'), or(isPublicTopic, sql`${roomMembers.userId} is not null`)));
+    .where(
+      and(
+        eq(rooms.teamId, teamId),
+        eq(rooms.type, 'topic'),
+        or(isPublicTopic, sql`${roomMembers.userId} is not null`),
+      ),
+    );
 }
 
 export async function insertRoom(fields) {

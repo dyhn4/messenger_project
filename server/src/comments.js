@@ -3,13 +3,14 @@ import { Router } from 'express';
 import { findCommentById, insertComment, softDeleteComment, updateCommentText } from './db/queries/comments.js';
 import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
+import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
 
-// messages.js와 동일: 작성 후 이 시간(5분) 안에서만 본인이 수정/삭제할 수 있다.
-const EDIT_WINDOW_MS = 5 * 60 * 1000;
+// messages.js와 동일: 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르며
+// moderation.js의 canModifyContent가 판단한다.
 
 export function toCommentDto(c) {
   const deleted = !!c.deletedAt;
@@ -30,10 +31,6 @@ export function toCommentDto(c) {
     editedAt: c.editedAt ? new Date(c.editedAt).getTime() : null,
     deleted,
   };
-}
-
-function withinEditWindow(comment) {
-  return Date.now() - new Date(comment.createdAt).getTime() <= EDIT_WINDOW_MS;
 }
 
 export function createCommentsRouter(io) {
@@ -96,11 +93,17 @@ export function createCommentsRouter(io) {
   router.patch('/comments/:id', async (req, res) => {
     const comment = await findCommentById(req.params.id);
     if (!comment || comment.deletedAt) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
-    if (comment.senderId !== req.user.sub) return res.status(403).json({ error: '본인 댓글만 수정할 수 있습니다.' });
     if (comment.type !== 'text') return res.status(400).json({ error: '텍스트 댓글만 수정할 수 있습니다.' });
-    if (!withinEditWindow(comment)) {
-      return res.status(403).json({ error: '작성 후 5분이 지나 수정할 수 없습니다.' });
-    }
+    // 메시지 수정과 완전히 같은 규칙(moderation.js).
+    const verdict = await canModifyContent({
+      roomId: comment.roomId,
+      senderId: comment.senderId,
+      createdAt: comment.createdAt,
+      requesterId: req.user.sub,
+      action: 'edit',
+      noun: '댓글',
+    });
+    if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
@@ -114,12 +117,23 @@ export function createCommentsRouter(io) {
   router.delete('/comments/:id', async (req, res) => {
     const comment = await findCommentById(req.params.id);
     if (!comment || comment.deletedAt) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
-    if (comment.senderId !== req.user.sub) return res.status(403).json({ error: '본인 댓글만 삭제할 수 있습니다.' });
-    if (!withinEditWindow(comment)) {
-      return res.status(403).json({ error: '작성 후 5분이 지나 삭제할 수 없습니다.' });
-    }
+    // 메시지 삭제와 완전히 같은 규칙(moderation.js) — 팀의 수정/삭제 허용 여부와 가능 시간,
+    // 콘텐츠 관리 권한을 한 곳에서 판단한다.
+    const verdict = await canModifyContent({
+      roomId: comment.roomId,
+      senderId: comment.senderId,
+      createdAt: comment.createdAt,
+      requesterId: req.user.sub,
+      action: 'delete',
+      noun: '댓글',
+    });
+    if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
 
     await softDeleteComment(comment.id);
+    // 메시지와 동일: 남의 댓글을 지운 경우(관리자 콘텐츠 관리)만 감사 로그에 남긴다.
+    if (comment.senderId !== req.user.sub) {
+      await recordModerationAudit(req, comment, 'comment');
+    }
     io.to(comment.roomId).emit('comment:deleted', { id: comment.id, messageId: comment.messageId, roomId: comment.roomId });
     res.json({ ok: true });
   });

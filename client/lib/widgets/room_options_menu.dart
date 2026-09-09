@@ -56,40 +56,46 @@ Future<void> showLeaveRoomDialog(
         final label = plainDm && realLeave ? '채팅방 나가기' : staticLabel;
         return AlertDialog(
           title: Text(label),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                room.isSecret
-                    ? '\'${room.displayName(session.userId ?? '')}\' 비밀 대화를 나가시겠습니까?'
-                    : plainDm
-                    ? (realLeave
-                          ? '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까? 나중에 다시 대화를 시작해도 예전 내용은 보이지 않습니다.'
-                          : '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.')
-                    : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
-              ),
-              if (room.isSecret)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: alsoRemoveOther,
-                  onChanged: (v) =>
-                      setDialogState(() => alsoRemoveOther = v ?? false),
-                  title: const Text('상대방도 나가기'),
-                  subtitle: const Text('(양쪽 방 폭파)'),
+          // 체크박스 상태에 따라 안내 문구 길이가 달라지는데, 폭을 안 고정해두면 그 자연스러운
+          // 한 줄 너비만큼 대화상자 자체가 가로로 커졌다 줄었다 한다 — 고정폭을 줘서 문구는
+          // 그 안에서 줄바꿈되게 하고 대화상자 크기는 체크 여부와 무관하게 그대로 둔다.
+          content: SizedBox(
+            width: 320,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  room.isSecret
+                      ? '\'${room.displayName(session.userId ?? '')}\' 비밀 대화를 나가시겠습니까?'
+                      : plainDm
+                      ? (realLeave
+                            ? '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까? 나중에 다시 대화를 시작해도 예전 내용은 보이지 않습니다.'
+                            : '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까? 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.')
+                      : '\'${room.displayName(session.userId ?? '')}\' 방에서 나가시겠습니까?',
                 ),
-              if (plainDm)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: realLeave,
-                  onChanged: (v) =>
-                      setDialogState(() => realLeave = v ?? false),
-                  title: const Text('나가기'),
-                  subtitle: const Text('(체크하면 다시 대화해도 예전 내용이 안 보입니다)'),
-                ),
-            ],
+                if (room.isSecret)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: alsoRemoveOther,
+                    onChanged: (v) =>
+                        setDialogState(() => alsoRemoveOther = v ?? false),
+                    title: const Text('상대방도 나가기'),
+                    subtitle: const Text('(양쪽 방 폭파)'),
+                  ),
+                if (plainDm)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: realLeave,
+                    onChanged: (v) =>
+                        setDialogState(() => realLeave = v ?? false),
+                    title: const Text('나가기'),
+                    subtitle: const Text('(체크하면 다시 대화해도 예전 내용이 안 보입니다)'),
+                  ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -216,37 +222,39 @@ class RoomOptionsMenu extends StatelessWidget {
               ],
             ),
           ),
-          PopupMenuItem<void>(
-            onTap: () {
-              // home_screen.dart의 wideBreakpoint(700)와 맞춰서, 넓은(PC) 화면에서는
-              // "새 대화"처럼 플로팅으로, 좁은(모바일) 화면에서는 전체화면으로 띄운다.
-              final isWide = MediaQuery.sizeOf(context).width >= 700;
-              if (isWide) {
-                showDialog(
-                  context: context,
-                  builder: (_) => InviteMembersScreen(
-                    session: session,
-                    room: room,
-                    asDialog: true,
-                  ),
-                );
-              } else {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        InviteMembersScreen(session: session, room: room),
-                  ),
-                );
-              }
-            },
-            child: const Row(
-              children: [
-                Icon(Icons.person_add_alt_outlined),
-                SizedBox(width: 8),
-                Text('멤버 초대'),
-              ],
+          // 초대 권한은 팀 설정(초대 권한: 정회원 이상 / 관리자만)과 내 등급에 달려 있다.
+          if (session.canInviteToRooms)
+            PopupMenuItem<void>(
+              onTap: () {
+                // home_screen.dart의 wideBreakpoint(700)와 맞춰서, 넓은(PC) 화면에서는
+                // "새 대화"처럼 플로팅으로, 좁은(모바일) 화면에서는 전체화면으로 띄운다.
+                final isWide = MediaQuery.sizeOf(context).width >= 700;
+                if (isWide) {
+                  showDialog(
+                    context: context,
+                    builder: (_) => InviteMembersScreen(
+                      session: session,
+                      room: room,
+                      asDialog: true,
+                    ),
+                  );
+                } else {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          InviteMembersScreen(session: session, room: room),
+                    ),
+                  );
+                }
+              },
+              child: const Row(
+                children: [
+                  Icon(Icons.person_add_alt_outlined),
+                  SizedBox(width: 8),
+                  Text('멤버 초대'),
+                ],
+              ),
             ),
-          ),
         ],
         if (room.isSecret)
           PopupMenuItem<void>(

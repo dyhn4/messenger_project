@@ -5,6 +5,7 @@ import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
 import { isOnline } from './presence.js';
+import { accountRole } from './permissions.js';
 import { broadcastMemberUpdate } from './rooms.js';
 import { signFileUrl } from './upload.js';
 
@@ -24,6 +25,9 @@ export function publicUser(u) {
     avatarColor: u.avatarColor ?? null,
     avatarUrl: signFileUrl(u.avatarUrl) ?? null,
     online: isOnline(u.id),
+    // 계정 등급 — 팀 설정의 "팀원 추가"나 조직도에서 등급을 보여주는 데 쓴다.
+    // 바꾸는 것은 서버 운영자만 가능하다(admin.js).
+    role: accountRole(u),
   };
 }
 
@@ -43,11 +47,12 @@ export function createUsersRouter(io) {
     res.json((await listActiveUsers()).map(publicUser));
   });
 
-  /** 내 프로필(아바타 포함) 조회. */
+  /** 내 프로필(아바타 포함) 조회. 내 화면에서만 쓰는 값이라 서버 운영자 여부도 여기 실어준다
+   * (다른 사람의 publicUser에는 넣지 않는다 — 누가 운영자인지는 관리자 콘솔에서만 본다). */
   router.get('/users/me', async (req, res) => {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    res.json(publicUser(user));
+    res.json({ ...publicUser(user), isServerAdmin: !!user.isServerAdmin });
   });
 
   /**

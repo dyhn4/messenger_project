@@ -12,3 +12,13 @@ String formatRoomActivityTime(DateTime dt) {
   }
   return '${dt.year}/${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')}';
 }
+
+/// "2026/09/09 14:32"처럼 날짜와 시각을 함께 — 감사 로그/운영 현황처럼 언제였는지가 정확히
+/// 중요한 화면에서 쓴다(formatRoomActivityTime은 오늘이면 시각만 보여줘서 로그엔 부적합).
+String formatDateTime(DateTime dt) {
+  final date =
+      '${dt.year}/${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')}';
+  final time =
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  return '$date $time';
+}

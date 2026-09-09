@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { listAttachments } from './db/queries/messages.js';
+import { isTeamMember } from './db/queries/teams.js';
 import { toMessageDto } from './messages.js';
 
 export const attachmentsRouter = Router();
@@ -22,11 +23,17 @@ const CATEGORY_MATCHERS = {
  * 엑셀/파워포인트/압축 파일/오디오)로 더 좁힐 수 있다(전부 선택적).
  */
 attachmentsRouter.get('/attachments', async (req, res) => {
-  const { roomId, senderId, category } = req.query;
+  const { roomId, senderId, category, teamId } = req.query;
   const limit = Math.min(Number(req.query.limit) || 500, 1000);
+  // 파일 목록도 검색과 마찬가지로 지금 보고 있는 팀 안에서만.
+  if (!teamId) return res.status(400).json({ error: 'teamId가 필요합니다.' });
+  if (!(await isTeamMember(teamId, req.user.sub))) {
+    return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+  }
 
   const rows = await listAttachments({
     requesterId: req.user.sub,
+    teamId,
     roomId: roomId || null,
     senderId: senderId || null,
     limit,

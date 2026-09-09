@@ -8,8 +8,10 @@ import '../widgets/my_avatar.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show showLeaveRoomDialog;
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/team_switcher.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
+import 'admin_console_screen.dart';
 import 'chat_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
@@ -37,8 +39,6 @@ class _RoomListScreenState extends State<RoomListScreen> {
   /// 넓은 화면에서 좁은 화면으로 막 넘어오면서 곧바로 다시 열어줘야 하는 방(있다면).
   /// initState에서 곧장 push하지 않고 여기 담아두는 이유는 아래 build() 참고.
   Room? _pendingReopenRoom;
-
-  static const _titles = ['토픽', '그룹채팅', '채팅', '멤버', '더보기'];
 
   @override
   void initState() {
@@ -83,10 +83,14 @@ class _RoomListScreenState extends State<RoomListScreen> {
   @override
   Widget build(BuildContext context) {
     if (_pendingReopenRoom != null) {
-      return Scaffold(backgroundColor: Theme.of(context).scaffoldBackgroundColor);
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      );
     }
     return Scaffold(
-      appBar: AppBar(title: Text(_titles[_index])),
+      // 어느 탭인지는 아래 NavigationBar가 이미 보여주므로, 좁은 화면에서도 창 왼쪽 위는
+      // PC와 똑같이 지금 보고 있는 팀(아이콘+이름+전환 버튼) 자리로 쓴다.
+      appBar: AppBar(title: TeamSwitcher(session: widget.session)),
       body: IndexedStack(
         index: _index,
         children: [
@@ -114,27 +118,31 @@ class _RoomListScreenState extends State<RoomListScreen> {
           _MoreTab(session: widget.session),
         ],
       ),
-      floatingActionButton: switch (_index) {
-        0 => FloatingActionButton(
-          tooltip: '토픽방 찾기 / 만들기',
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => TopicBrowseScreen(session: widget.session),
-            ),
-          ),
-          child: const Icon(Icons.add),
-        ),
-        1 || 2 => FloatingActionButton(
-          tooltip: '새 대화',
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => NewChatScreen(session: widget.session),
-            ),
-          ),
-          child: const Icon(Icons.add),
-        ),
-        _ => null,
-      },
+      // 준회원은 방을 만들거나 토픽을 찾아 참여할 수 없으므로 + 버튼 자체를 감춘다
+      // (서버도 막지만, 눌러봐야 실패하는 버튼을 보여주지 않는다).
+      floatingActionButton: !widget.session.canCreateRooms
+          ? null
+          : switch (_index) {
+              0 => FloatingActionButton(
+                tooltip: '토픽방 찾기 / 만들기',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TopicBrowseScreen(session: widget.session),
+                  ),
+                ),
+                child: const Icon(Icons.add),
+              ),
+              1 || 2 => FloatingActionButton(
+                tooltip: '새 대화',
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => NewChatScreen(session: widget.session),
+                  ),
+                ),
+                child: const Icon(Icons.add),
+              ),
+              _ => null,
+            },
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
@@ -209,9 +217,17 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
               // 평문 DM 숨기기/나가기는 멤버십을 안 건드리고 내 hidden 플래그만 켠다
               // (room_options_menu.dart 참고) — session.rooms엔 그대로 남으므로 목록
               // 화면에서만 걸러낸다.
+              // session.rooms에는 다른 팀 방까지 들어있으므로 지금 팀 것만 걸러낸다
+              // (Session.rooms 주석 참고).
+              final teamId = widget.session.currentTeam?.id;
               final rooms = _favoriteFirst(
                 widget.session.rooms
-                    .where((r) => r.type == widget.type && !r.hidden)
+                    .where(
+                      (r) =>
+                          r.type == widget.type &&
+                          r.teamId == teamId &&
+                          !r.hidden,
+                    )
                     .toList(),
               );
               if (rooms.isEmpty) {
@@ -472,7 +488,7 @@ class _MembersTabState extends State<_MembersTab> {
 
   Future<void> _load() async {
     try {
-      final users = await widget.session.api!.fetchUsers();
+      final users = await widget.session.fetchTeamMembers();
       users.sort((a, b) => a.name.compareTo(b.name));
       if (!mounted) return;
       setState(() => _users = users);
@@ -536,9 +552,7 @@ class _MembersTabState extends State<_MembersTab> {
                     itemBuilder: (context, i) => _MemberRow(
                       user: list[i],
                       resolveUrl: widget.session.resolveUrl,
-                      online: widget.session.onlineUserIds.contains(
-                        list[i].id,
-                      ),
+                      online: widget.session.onlineUserIds.contains(list[i].id),
                       onTap: () => _openProfile(list[i]),
                     ),
                   ),
@@ -574,6 +588,8 @@ class _MemberRow extends StatelessWidget {
         user.name,
         style: const TextStyle(fontWeight: FontWeight.bold),
       ),
+      // 부서·직책이 등록돼 있으면 조직도답게 이름 아래 같이 보여준다(PC 조직도와 동일).
+      subtitle: user.orgLine == null ? null : Text(user.orgLine!),
       onTap: onTap,
     );
   }
@@ -618,10 +634,7 @@ class _MoreTabState extends State<_MoreTab> {
             leading: MyAvatar(session: widget.session, radius: 24),
             title: Text(
               widget.session.name ?? widget.session.username ?? '',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => showDialog(
@@ -638,6 +651,13 @@ class _MoreTabState extends State<_MoreTab> {
               builder: (_) => SettingsScreen(session: widget.session),
             ),
           ),
+          // PC 삼선 메뉴와 동일하게, 서버 운영자에게만 보인다.
+          if (widget.session.isServerAdmin)
+            ListTile(
+              leading: const Icon(Icons.admin_panel_settings_outlined),
+              title: const Text('서버 관리'),
+              onTap: () => showAdminConsole(context, widget.session),
+            ),
           ListTile(
             leading: const Icon(Icons.description_outlined),
             title: const Text('오픈소스 라이선스'),

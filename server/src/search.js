@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { searchMessages } from './db/queries/messages.js';
 import { findRoomById, listRoomMemberUsers } from './db/queries/rooms.js';
+import { isTeamMember } from './db/queries/teams.js';
 
 export const searchRouter = Router();
 
@@ -33,11 +34,17 @@ async function displayNameFor(room, myUserId) {
 searchRouter.get('/search', async (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase();
   if (!q) return res.json([]);
-  const { roomId, senderId, since, until } = req.query;
+  const { roomId, senderId, since, until, teamId } = req.query;
   const limit = Math.min(Number(req.query.limit) || 200, 500);
+  // 검색은 지금 보고 있는 팀 안에서만 한다 — 다른 팀 대화가 섞여 나오면 안 된다.
+  if (!teamId) return res.status(400).json({ error: 'teamId가 필요합니다.' });
+  if (!(await isTeamMember(teamId, req.user.sub))) {
+    return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+  }
 
   const rows = await searchMessages({
     requesterId: req.user.sub,
+    teamId,
     roomId: roomId || null,
     senderId: senderId || null,
     since: since ? Number(since) : null,

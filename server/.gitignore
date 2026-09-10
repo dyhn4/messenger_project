@@ -23,3 +23,8 @@ firebase-service-account.json
 installer/bin/
 installer/stage/
 installer/output/
+
+# 운영 중인 서버를 git 없이 업데이트하기 위한 코드 패키지(zip) 산출물 —
+# package_server_update.ps1이 매번 새로 만든다.
+deploy/stage/
+deploy/output/

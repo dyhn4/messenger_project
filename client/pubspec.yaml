@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.7
+version: 1.0.8
 
 environment:
   sdk: ^3.12.2
@@ -71,6 +71,9 @@ dependencies:
   desktop_drop: ^0.8.4
   window_manager: ^0.5.2
   tray_manager: ^0.5.3
+  # 초대 링크(teamtalk://pair)로 설치 후 앱이 바로 열리며 서버 주소/코드가 자동입력되게
+  # 하는 딥링크 처리. Windows는 SendAppLinkToInstance()로 이미 떠 있는 창에 전달까지 해준다.
+  app_links: ^7.2.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

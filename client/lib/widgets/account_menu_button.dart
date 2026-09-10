@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../screens/admin_console_screen.dart';
+import '../screens/invite_link_screen.dart';
 import '../screens/my_profile_dialog.dart';
 import '../screens/settings_screen.dart';
 import '../services/session.dart';
@@ -61,6 +62,20 @@ class AccountMenuButton extends StatelessWidget {
             ],
           ),
         ),
+        // 서버 운영자·계정 관리자·팀 소유자에게만 보인다(서버도 매 요청마다 다시 확인 —
+        // invites.js의 canCreateInviteLink). 관리자 콘솔과 달리 팀 소유자도 만들 수 있어야
+        // 해서 서버 운영자 전용인 "서버 관리"와는 다른 조건을 쓴다.
+        if (session.canCreateInviteLink)
+          PopupMenuItem<void>(
+            onTap: () => showInviteLinkScreen(context, session),
+            child: const Row(
+              children: [
+                Icon(Icons.add_link),
+                SizedBox(width: 8),
+                Text('초대 링크 생성'),
+              ],
+            ),
+          ),
         // 서버 운영자에게만 보이는 항목(서버도 매 요청마다 다시 확인한다 — admin.js).
         if (session.isServerAdmin)
           PopupMenuItem<void>(
@@ -76,7 +91,7 @@ class AccountMenuButton extends StatelessWidget {
         PopupMenuItem<void>(
           onTap: () => showLicensePage(
             context: context,
-            applicationName: 'TeamTalk',
+            applicationName: 'TangoTalk',
             applicationVersion: _appVersion,
           ),
           child: const Row(

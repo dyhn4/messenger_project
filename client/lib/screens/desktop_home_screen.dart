@@ -76,6 +76,18 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   void initState() {
     super.initState();
     widget.session.addListener(_onSessionChanged);
+
+    // 팀 선택 화면(또는 다른 팀)에서 알림/토스트를 눌러 특정 방을 요청했는데, 그 요청이
+    // 다른 팀의 방이라 session.requestOpenRoom()이 currentTeam을 먼저 바꾼 경우 — 그 전환
+    // 때문에 HomeScreen이 이 화면을 지금 막 새로 만든다. requestOpenRoom()의
+    // notifyListeners()는 이 위젯이 생기기 "전"에 이미 불렸으므로, 아래 _onSessionChanged
+    // 리스너가 그 요청을 놓친다. 여기서 먼저 소비해줘야 그 방이 열린다.
+    final pending = widget.session.consumePendingOpenRoom();
+    if (pending != null) {
+      _selectedRoom = pending;
+      return;
+    }
+
     // 좁은 화면(RoomListScreen)에서 채팅방을 열어둔 채로 창을 넓혀서 이 화면으로 넘어온
     // 경우 — 그 화면의 ChatScreen(ChatPanel)이 아직 dispose 전이라(같은 프레임 안에서 새
     // 위젯의 initState가 먼저 돌고 옛 dispose가 나중에 돎) session.activeRoomId가 아직

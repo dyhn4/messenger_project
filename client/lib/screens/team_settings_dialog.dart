@@ -703,28 +703,30 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
         : ListView(
             shrinkWrap: true,
             children: [
+              // 체크박스 대신 '새 대화' 화면(new_chat_screen.dart)과 같은 방식 — 눌러서
+              // 선택/해제하고, 선택된 항목은 배경색으로 표시한다. 등급은 계정에 붙어 있는
+              // 값이라 여기서 고르는 게 아니라 보여주기만 한다.
               for (final user in _candidates!)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: _selected.contains(user.id),
-                  onChanged: (v) => setState(() {
-                    if (v == true) {
-                      _selected.add(user.id);
-                    } else {
-                      _selected.remove(user.id);
-                    }
-                  }),
-                  secondary: UserAvatar(
+                ListTile(
+                  leading: UserAvatar(
                     user: user,
                     resolveUrl: widget.session.resolveUrl,
                   ),
                   title: Text(user.name),
-                  // 등급은 계정에 붙어 있는 값이라 여기서 고르는 게 아니라 보여주기만 한다
-                  // (바꾸려면 서버 운영자가 관리자 콘솔에서).
                   subtitle: Text(
                     '${user.username} · ${accountRoleFromWire(user.role).label}',
                   ),
+                  selected: _selected.contains(user.id),
+                  selectedTileColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer.withValues(alpha: 0.4),
+                  onTap: () => setState(() {
+                    if (_selected.contains(user.id)) {
+                      _selected.remove(user.id);
+                    } else {
+                      _selected.add(user.id);
+                    }
+                  }),
                 ),
             ],
           );
@@ -738,13 +740,6 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
         children: [
           Flexible(child: list),
           const Divider(height: 24),
-          Text(
-            '등급은 계정에 붙어 있어 여기서 정하지 않습니다 — 바꾸려면 서버 운영자가 [서버 관리]에서 변경합니다.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
-          ),
-          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../models/admin.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/invite_link.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/team.dart';
@@ -581,13 +582,6 @@ class ApiClient {
             as Map<String, dynamic>,
       );
 
-  /// 운영자가 정한 임시 비밀번호로 초기화한다(그 계정의 기존 로그인은 전부 끊긴다).
-  Future<void> resetUserPassword(String userId, String password) async {
-    await _post('/api/admin/users/$userId/reset-password', {
-      'password': password,
-    });
-  }
-
   Future<AdminUser> setUserServerAdmin(
     String userId,
     bool isServerAdmin,
@@ -625,6 +619,29 @@ class ApiClient {
           .toList(),
     );
   }
+
+  // ─────────────── 초대 링크(설치→가입, 서버 운영자·팀 소유자·관리자) ───────────────
+  // 서버가 매 요청마다 canCreateInviteLink를 다시 확인하므로, 권한이 없으면 403이 온다.
+
+  /// 내가 만든 초대 링크 목록(최신순).
+  Future<List<InviteLink>> fetchInviteLinks() async {
+    final list = await _get('/api/invite-links') as List;
+    return list
+        .map((e) => InviteLink.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 새 초대 링크 발급 — 유효기간은 서버에서 항상 7일로 고정된다.
+  Future<InviteLink> createInviteLink({String? label}) async =>
+      InviteLink.fromJson(
+        await _post('/api/invite-links', {'label': ?label})
+            as Map<String, dynamic>,
+      );
+
+  /// 폐기 — 내가 만든 링크만 지울 수 있다(서버가 다시 확인).
+  Future<InviteLink> revokeInviteLink(String id) async => InviteLink.fromJson(
+    await _delete('/api/invite-links/$id') as Map<String, dynamic>,
+  );
 
   /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함) — 로그인/앱 시작 직후 팀 선택 화면이 쓴다.
   Future<List<Team>> fetchTeams() async {

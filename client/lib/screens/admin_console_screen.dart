@@ -346,18 +346,6 @@ class _UsersTabState extends State<_UsersTab> {
     });
   }
 
-  Future<void> _resetPassword(AdminUser user) async {
-    final password = await showDialog<String>(
-      context: context,
-      builder: (_) => _ResetPasswordDialog(userName: user.name),
-    );
-    if (password == null || password.isEmpty) return;
-    await _run(() async {
-      await widget.session.api!.resetUserPassword(user.id, password);
-      _toast('${user.name} 님의 비밀번호를 초기화했습니다. 본인에게 직접 전달하세요.');
-    });
-  }
-
   Future<void> _changeRole(AdminUser user, String role) async {
     await _run(() async {
       _replace(await widget.session.api!.setUserRole(user.id, role));
@@ -531,16 +519,6 @@ class _UsersTabState extends State<_UsersTab> {
                               ),
                             ),
                             PopupMenuItem<void>(
-                              onTap: () => _resetPassword(user),
-                              child: const Row(
-                                children: [
-                                  Icon(Icons.key_outlined, size: 20),
-                                  SizedBox(width: 8),
-                                  Text('비밀번호 초기화'),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem<void>(
                               onTap: () => _logoutAll(user),
                               child: const Row(
                                 children: [
@@ -598,70 +576,6 @@ class _UsersTabState extends State<_UsersTab> {
               },
             ),
           ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 운영자가 임시 비밀번호를 정해서 초기화한다 — 컨트롤러는 이 State가 소유한다
-/// (team_select_screen.dart의 _CreateTeamDialog와 같은 이유).
-class _ResetPasswordDialog extends StatefulWidget {
-  final String userName;
-  const _ResetPasswordDialog({required this.userName});
-
-  @override
-  State<_ResetPasswordDialog> createState() => _ResetPasswordDialogState();
-}
-
-class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final value = _controller.text.trim();
-    final valid = value.length >= 4 && value.length <= 20;
-    return AlertDialog(
-      title: const Text('비밀번호 초기화'),
-      content: SizedBox(
-        width: 340,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${widget.userName} 님의 비밀번호를 아래 값으로 바꿉니다. 그 계정의 기존 로그인은 모두 끊기며, '
-              '새 비밀번호는 운영자가 본인에게 직접 알려줘야 합니다.',
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              maxLength: 20,
-              decoration: const InputDecoration(
-                labelText: '임시 비밀번호',
-                helperText: '4~20자',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: valid ? () => Navigator.of(context).pop(value) : null,
-          child: const Text('초기화'),
         ),
       ],
     );

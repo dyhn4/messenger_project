@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
 import { UPLOADS_DIR } from './config.js';
@@ -221,35 +220,10 @@ export function createAdminRouter(io) {
     res.json(toAdminUserDto(updated, await listTeamsForUser(target.id)));
   });
 
-  /**
-   * 비밀번호 초기화 대행 — 운영자가 임시 비밀번호를 정해서 알려주는 방식이다.
-   * (서버가 임의 문자열을 만들어 화면에 보여줄 수도 있지만, 어차피 운영자가 당사자에게
-   * 직접 전달해야 하므로 입력받는 편이 단순하고 실수도 적다.)
-   */
-  router.post('/admin/users/:id/reset-password', async (req, res) => {
-    const target = await requireTarget(req, res);
-    if (!target) return;
-    const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    if (password.length < 4 || password.length > 20) {
-      return res.status(400).json({ error: '비밀번호는 4~20자여야 합니다.' });
-    }
-
-    await updateUser(target.id, {
-      passwordHash: await bcrypt.hash(password, 10),
-      tokenVersion: (target.tokenVersion ?? 0) + 1, // 기존 로그인 전부 무효화
-    });
-    disconnectUserSockets(io, target.id);
-
-    recordAudit({
-      ...actorOf(req),
-      action: AUDIT.userResetPassword,
-      targetType: 'user',
-      targetId: target.id,
-      targetLabel: target.name ?? target.username,
-      detail: '운영자가 비밀번호를 초기화함',
-    });
-    res.json({ ok: true });
-  });
+  // 비밀번호 초기화 대행 기능은 없다 — 운영자가 남의 비밀번호(평문)를 직접 정해서 넣는 것은
+  // 그 계정을 완전히 탈취할 수 있는 힘이라 의도적으로 제외했다. 계정에 문제가 있으면 강제
+  // 로그아웃(/admin/users/:id/logout-all)이나 정지로 대응하고, 비밀번호 자체는 본인만
+  // 보안 질문(/auth/reset-password)으로 재설정할 수 있다.
 
   /** 서버 운영자 지정/해제. 마지막 운영자는 스스로 내려올 수 없다(아무도 못 들어가게 되므로). */
   router.post('/admin/users/:id/server-admin', async (req, res) => {

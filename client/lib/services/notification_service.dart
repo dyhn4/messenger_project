@@ -39,7 +39,7 @@ class NotificationService {
   }) async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const windows = WindowsInitializationSettings(
-      appName: 'TeamTalk',
+      appName: 'TangoTalk',
       appUserModelId: 'com.messenger.client',
       guid: 'ae1f2c84-355a-42fa-8166-f9b7e1d1feba',
     );
@@ -154,7 +154,7 @@ class NotificationService {
           else
             WindowsImage(
               WindowsImage.getAssetUri('assets/icon.png'),
-              altText: 'TeamTalk',
+              altText: 'TangoTalk',
               placement: WindowsImagePlacement.appLogoOverride,
               crop: WindowsImageCrop.circle,
             ),

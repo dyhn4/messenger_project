@@ -137,7 +137,7 @@ export const auditLogs = pgTable(
     actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
     actorName: text('actor_name').notNull(),
     // 'message.delete' | 'comment.delete' | 'team.member.role' | 'team.member.remove' |
-    // 'team.delete' | 'team.transferOwner' | 'user.suspend' | 'user.resetPassword' 등.
+    // 'team.delete' | 'team.transferOwner' | 'user.suspend' | 'user.role' 등(audit.js의 AUDIT 참고).
     action: text('action').notNull(),
     teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
     teamName: text('team_name'),
@@ -149,6 +149,36 @@ export const auditLogs = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('audit_logs_created_at_idx').on(t.createdAt), index('audit_logs_actor_id_idx').on(t.actorId)],
+);
+
+/**
+ * 초대 링크 — "설치→가입"을 한 번에 되게 해주는 링크. 팀 합류는 여기 포함하지 않는다
+ * (합류는 항상 소유자·관리자가 팀 설정 → 팀원 추가에서 수동으로 한다).
+ *
+ * 링크가 실제로 해주는 일은 딱 하나 — 아직 이 서버를 모르는 기기가 자체 서명 인증서를
+ * 받아서 신뢰하게 만드는 것(pairing.js의 기존 페어링 코드와 완전히 같은 메커니즘을 공유한다).
+ * 회원가입 자체는 이미 누구나 열려 있어서 별도 토큰이 필요 없다.
+ *
+ * token은 사람이 외워서 입력하는 4자리 페어링 코드와 달리 사람이 직접 입력할 일이 거의
+ * 없고(복사해서 붙여넣거나 링크를 그대로 열음) 훨씬 오래(기본 7일) 살아있어야 하므로,
+ * 무작위 대입을 막기 위해 충분히 긴 무작위 문자열로 만든다(pairing.js 참고).
+ */
+export const inviteLinks = pgTable(
+  'invite_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    token: text('token').notNull().unique(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdByName: text('created_by_name').notNull(), // 만든 사람이 탈퇴해도 남는 이름 스냅샷.
+    label: text('label'), // "9월 신입"처럼 관리자가 구분하려고 붙이는 메모. 선택.
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    // 여러 기기(여러 신입)가 같은 링크로 나눠 받을 수 있어 1회용이 아니다 — 매번 쓸 때마다 갱신.
+    usedCount: integer('used_count').notNull().default(0),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('invite_links_created_by_idx').on(t.createdBy)],
 );
 
 export const rooms = pgTable(

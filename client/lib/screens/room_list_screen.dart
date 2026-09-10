@@ -13,6 +13,7 @@ import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
 import 'chat_screen.dart';
+import 'invite_link_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
 import 'new_chat_screen.dart';
@@ -651,6 +652,13 @@ class _MoreTabState extends State<_MoreTab> {
               builder: (_) => SettingsScreen(session: widget.session),
             ),
           ),
+          // PC 삼선 메뉴와 동일한 조건 — 서버 운영자·계정 관리자·팀 소유자에게만 보인다.
+          if (widget.session.canCreateInviteLink)
+            ListTile(
+              leading: const Icon(Icons.add_link),
+              title: const Text('초대 링크 생성'),
+              onTap: () => showInviteLinkScreen(context, widget.session),
+            ),
           // PC 삼선 메뉴와 동일하게, 서버 운영자에게만 보인다.
           if (widget.session.isServerAdmin)
             ListTile(
@@ -663,7 +671,7 @@ class _MoreTabState extends State<_MoreTab> {
             title: const Text('오픈소스 라이선스'),
             onTap: () => showLicensePage(
               context: context,
-              applicationName: 'TeamTalk',
+              applicationName: 'TangoTalk',
               applicationVersion: _appVersion,
             ),
           ),

@@ -52,6 +52,34 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     _password.addListener(_refresh);
     _confirmPassword.addListener(_refresh);
+    _maybeShowPairDialog();
+  }
+
+  @override
+  void didUpdateWidget(covariant LoginScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // MyApp이 session이 바뀔 때마다 이 화면을 새로 만들어 넘겨주므로, 로그인 화면을
+    // 보고 있는 동안 초대 링크가 도착해도(또는 다시 눌러 이 창이 앞으로 온 경우도)
+    // didUpdateWidget으로 매번 잡아낼 수 있다.
+    _maybeShowPairDialog();
+  }
+
+  /// 초대 링크로 받은 서버 주소/코드가 있으면 "서버 주소 변경" 다이얼로그를 그 값으로
+  /// 미리 채워 자동으로 띄운다 — 연결 자체는 사용자가 다이얼로그에서 직접 눌러야 한다.
+  void _maybeShowPairDialog() {
+    final req = widget.session.consumePendingPairRequest();
+    if (req == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (_) => _ServerAddressDialog(
+          session: widget.session,
+          initialAddress: req.address,
+          initialCode: req.code,
+        ),
+      );
+    });
   }
 
   void _refresh() => setState(() {});
@@ -698,7 +726,14 @@ class _CheckboxLabel extends StatelessWidget {
 /// 최초 설정용 ServerSetupScreen과 달리, 이미 로그인 화면까지 온 뒤에도 다시 열 수 있다.
 class _ServerAddressDialog extends StatefulWidget {
   final Session session;
-  const _ServerAddressDialog({required this.session});
+  // 초대 링크로 받은 값이 있으면 미리 채워둔다(둘 다 null이면 지금까지처럼 빈 채로 시작).
+  final String? initialAddress;
+  final String? initialCode;
+  const _ServerAddressDialog({
+    required this.session,
+    this.initialAddress,
+    this.initialCode,
+  });
 
   @override
   State<_ServerAddressDialog> createState() => _ServerAddressDialogState();
@@ -706,9 +741,12 @@ class _ServerAddressDialog extends StatefulWidget {
 
 class _ServerAddressDialogState extends State<_ServerAddressDialog> {
   late final _controller = TextEditingController(
-    text: widget.session.serverUrl ?? 'https://192.168.0.62:3000',
+    text:
+        widget.initialAddress ??
+        widget.session.serverUrl ??
+        'https://192.168.0.62:3000',
   );
-  final _code = TextEditingController();
+  late final _code = TextEditingController(text: widget.initialCode ?? '');
   bool _submitting = false;
   String? _error;
 
@@ -767,13 +805,12 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
           const SizedBox(height: 12),
           TextField(
             controller: _code,
-            keyboardType: TextInputType.number,
-            maxLength: 4,
+            // 4자리 페어링 코드뿐 아니라 초대 링크의 긴 코드도 그대로 붙여넣을 수 있어야
+            // 해서 숫자 키패드/길이 제한을 두지 않는다(서버가 길이로 둘을 구분해서 처리).
             decoration: const InputDecoration(
-              labelText: '페어링 코드 (새 서버일 때만)',
-              hintText: '서버 콘솔에 "pair" 입력 시 나오는 4자리',
+              labelText: '페어링 코드 또는 초대 링크의 코드 (새 서버일 때만)',
+              hintText: '서버 콘솔의 4자리 코드, 또는 초대 페이지에 적힌 코드',
               border: OutlineInputBorder(),
-              counterText: '',
             ),
             onSubmitted: (_) => _submit(),
           ),

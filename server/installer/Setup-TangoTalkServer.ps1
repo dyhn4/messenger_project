@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  TeamTalk 서버 설치 프로그램의 실제 작업 — messenger-server.iss의 [Run]에서 설치 마지막 단계로
+  TangoTalk 서버 설치 프로그램의 실제 작업 — messenger-server.iss의 [Run]에서 설치 마지막 단계로
   실행된다. PostgreSQL 무인 설치, 앱 전용 DB 계정/데이터베이스 생성, .env 작성, 마이그레이션
   적용, 방화벽 규칙 추가, 서버 실행 방식(백그라운드 서비스/콘솔) 등록까지 전부 처리한다.
 
@@ -15,7 +15,7 @@
   충돌하지 않게 하기 위함이다. "이미 설치된 PostgreSQL을 재사용할지" 문제 자체를 우회한다.
 
   실패해도 이 스크립트는 나중에 그대로 다시 실행할 수 있다(관리자 권한 PowerShell에서
-  `Setup-TeamTalkServer.ps1 -RunMode service -AppDir C:\TeamTalk-Server -PgInstallerPath <설치
+  `Setup-TangoTalkServer.ps1 -RunMode service -AppDir C:\TangoTalk-Server -PgInstallerPath <설치
   프로그램 exe 경로>`) — 이미 끝난 단계는 자동으로 건너뛴다.
 #>
 
@@ -29,8 +29,8 @@ $ErrorActionPreference = 'Stop'
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
 $PgPort = 55432
-$PgServiceName = 'postgresql-teamtalk'
-$NodeServiceName = 'TeamTalkServer'
+$PgServiceName = 'postgresql-tangotalk'
+$NodeServiceName = 'TangoTalkServer'
 $DbName = 'messenger'
 $DbAppUser = 'messenger_app'
 $PgSuperUser = 'postgres'
@@ -61,7 +61,7 @@ function Fail {
   [System.Windows.Forms.MessageBox]::Show(
     "서버 설치 중 문제가 발생했습니다:`n`n$Message`n`n자세한 내용은 $LogFile 를 확인하세요. " +
     "이 창을 닫은 뒤 관리자 권한 PowerShell에서 이 스크립트를 다시 실행하면 이어서 진행됩니다.",
-    'TeamTalk 서버 설치', 'OK', 'Error'
+    'TangoTalk 서버 설치', 'OK', 'Error'
   ) | Out-Null
   exit 1
 }
@@ -112,7 +112,7 @@ function Test-PortFree {
 
 # ── 0. 준비 ──────────────────────────────────────────────────────────────
 if (-not (Test-Path $AppDir)) { Fail "설치 경로($AppDir)를 찾을 수 없습니다." }
-Write-Log "=== TeamTalk 서버 설정 시작 (RunMode=$RunMode) ==="
+Write-Log "=== TangoTalk 서버 설정 시작 (RunMode=$RunMode) ==="
 
 # ── 1. 비밀값(DB 비밀번호) 확인/생성 — 이미 있으면 재사용, 없으면 새로 생성 ──────
 $superPw = Get-OrCreateSecret -FileName 'db-superuser.pw'
@@ -185,7 +185,7 @@ if ($dbExists -ne '1') {
 if (-not (Test-Path $EnvFile)) {
   $databaseUrl = "postgres://${DbAppUser}:${appPw}@localhost:${PgPort}/${DbName}"
   @(
-    "# Setup-TeamTalkServer.ps1이 설치 시점에 자동으로 만들었습니다."
+    "# Setup-TangoTalkServer.ps1이 설치 시점에 자동으로 만들었습니다."
     "DATABASE_URL=$databaseUrl"
     ""
     "# JWT_SECRET / DB_ENCRYPTION_KEY는 일부러 비워둡니다 — 서버가 첫 실행 때 알아서 안전한"
@@ -223,8 +223,8 @@ $appPort = Get-EnvIntValue -Name 'PORT' -Default 3000
 $pairingPort = Get-EnvIntValue -Name 'PAIRING_PORT' -Default ($appPort + 1)
 
 foreach ($rule in @(
-    @{ Name = 'TeamTalk Server (main)'; Port = $appPort },
-    @{ Name = 'TeamTalk Server (pairing)'; Port = $pairingPort }
+    @{ Name = 'TangoTalk Server (main)'; Port = $appPort },
+    @{ Name = 'TangoTalk Server (pairing)'; Port = $pairingPort }
   )) {
   netsh advfirewall firewall delete rule name="$($rule.Name)" | Out-Null
   netsh advfirewall firewall add rule name="$($rule.Name)" dir=in action=allow protocol=TCP localport=$($rule.Port) | Out-Null
@@ -250,4 +250,4 @@ if ($RunMode -eq 'service') {
   Write-Log '7/7 콘솔 모드 선택됨 — 시작 메뉴의 "서버 콘솔로 실행"으로 직접 실행하세요.'
 }
 
-Write-Log '=== TeamTalk 서버 설정 완료 ==='
+Write-Log '=== TangoTalk 서버 설정 완료 ==='

@@ -1,4 +1,4 @@
-import { getTeamRole } from './db/queries/teams.js';
+import { getTeamRole, isOwnerOfAnyTeam } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import { accountRole } from './permissions.js';
 
@@ -28,4 +28,11 @@ export async function userAccess(userId) {
     role: accountRole(user),
     isServerAdmin: !!user?.isServerAdmin,
   };
+}
+
+/** userAccess에 "어느 팀이든 소유자인지"를 더한 것 — 초대 링크 생성 권한 판정 전용
+ * (permissions.js의 canCreateInviteLink). 팀 소유자 조회가 추가로 필요해서 따로 뺐다. */
+export async function inviteLinkAccess(userId) {
+  const [base, ownsTeam] = await Promise.all([userAccess(userId), isOwnerOfAnyTeam(userId)]);
+  return { ...base, isOwnerOfAnyTeam: ownsTeam };
 }

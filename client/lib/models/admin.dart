@@ -209,7 +209,10 @@ String auditActionLabel(String action) => switch (action) {
   'user.suspend' => '계정 정지',
   'user.unsuspend' => '정지 해제',
   'user.logoutAll' => '강제 로그아웃',
-  'user.resetPassword' => '비밀번호 초기화',
+  // 비밀번호 초기화 대행 기능은 없앴지만(운영자가 남의 평문 비밀번호를 정하는 건 계정을
+  // 완전히 탈취할 수 있는 힘이라 위험하다고 판단), 예전에 남은 감사 로그 기록은 계속
+  // 사람이 읽을 수 있는 이름으로 보여준다.
+  'user.resetPassword' => '비밀번호 초기화(폐지된 기능)',
   'user.role' => '계정 등급 변경',
   'user.org' => '부서·직책 변경',
   'user.serverAdmin' => '서버 운영자 지정·해제',
@@ -229,7 +232,6 @@ const auditActionFilters = [
   'user.role',
   'user.org',
   'user.suspend',
-  'user.resetPassword',
   'user.serverAdmin',
 ];
 

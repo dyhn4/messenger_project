@@ -17,6 +17,7 @@ import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
 import { createCommentsRouter } from './comments.js';
 import { createDevicesRouter } from './devices.js';
+import { createInvitesRouter } from './invites.js';
 import { createMessagesRouter } from './messages.js';
 import { generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
@@ -59,6 +60,7 @@ app.use('/api', requireAuth, createUsersRouter(io));
 // 서버 운영자 전용(관리자 콘솔) — 라우터 안에서 isServerAdmin을 다시 확인한다.
 app.use('/api', requireAuth, createAdminRouter(io));
 app.use('/api', requireAuth, createTeamsRouter(io));
+app.use('/api', requireAuth, createInvitesRouter());
 app.use('/api', requireAuth, createRoomsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
@@ -92,7 +94,7 @@ httpServer.listen(PORT, () => {
   console.log('새 기기를 연결하려면 이 콘솔에 "pair"를 입력하고 Enter 하세요(pm2 등으로 띄웠다면 같은 PC에서 "npm run pair").');
 });
 
-startPairingServer({ port: PAIRING_PORT, getCertPem: () => tls.cert });
+startPairingServer({ port: PAIRING_PORT, mainPort: PORT, getCertPem: () => tls.cert });
 
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => {

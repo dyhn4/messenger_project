@@ -1,4 +1,4 @@
-# TeamTalk
+# TangoTalk
 
 Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQL) 서버로 이루어진
 개인/소규모 그룹용 실시간 메신저입니다. 텍스트/이미지/파일/이모티콘 채팅, 토픽·그룹·1:1 채팅방,
@@ -12,6 +12,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [소개](#소개)
 - [주요 기능](#주요-기능)
 - [팀과 권한 등급](#팀과-권한-등급)
+- [초대 링크(설치→가입)](#초대-링크-설치가입)
 - [서버 운영자와 관리자 콘솔](#서버-운영자와-관리자-콘솔)
 - [향후 계획 / 미구현 기능](#향후-계획--미구현-기능)
 - [구성도](#구성도)
@@ -100,8 +101,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 **서버 운영(관리자 콘솔)**
 - 서버 운영자 개념(팀 등급과 별개) — 첫 가입자가 운영자가 되고, 이후 운영자가 지정
-- 회원 관리: **계정 등급 지정**, 부서·직책, 계정 정지·해제, 모든 기기 강제 로그아웃,
-  비밀번호 초기화 대행
+- 회원 관리: **계정 등급 지정**, 부서·직책, 계정 정지·해제, 모든 기기 강제 로그아웃
+  (비밀번호 초기화 대행은 계정 탈취 위험 때문에 의도적으로 제공하지 않습니다)
 - 팀 관리: 서버의 모든 팀 조회, 팀 생성 권한(정회원/관리자/서버 운영자), 부서·직책 관리 범위
 - 감사 로그: 관리자 권한으로 한 일(메시지 삭제, 등급 변경, 계정 정지 등)을 전부 기록
 - 운영 현황: 회원·팀·방·메시지 수, 오늘 활동량, 업로드 용량
@@ -114,6 +115,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 **서버 연결 / 배포**
 - 자체 서명 TLS 인증서 + 클라이언트 인증서 핀닝(공인 CA 미사용)
 - 페어링 코드(4자리, 5분 유효, 1회용)로 앱 재빌드 없이 새 인증서 발급/서버 이전
+- **초대 링크**(설치→가입, 서버 운영자·계정 관리자·팀 소유자가 발급) — [초대 링크](#초대-링크-설치가입) 참고
 - 서버 버전 배너(`/version`) + 앱 안에서 바로 다운로드/설치
 - Windows 설치 프로그램(Inno Setup), Android APK 배포 스크립트(`publish_release.ps1`)
 
@@ -225,6 +227,56 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 이 등급들은 전부 **팀 안에서만** 의미가 있습니다. 서버 전체를 다루는 권한은 따로 있습니다 —
 [서버 운영자와 관리자 콘솔](#서버-운영자와-관리자-콘솔) 참고.
 
+## 초대 링크(설치→가입)
+
+새 팀원에게 "이 링크 열어서 설치하고 가입하세요"라고 보낼 수 있는 링크입니다. **팀 합류는
+포함하지 않습니다** — 회원가입은 원래 누구나 열려 있고(초대 없이도 가입 가능), 팀에 넣는 일은
+지금처럼 항상 소유자·관리자가 팀 설정 → 팀원 추가에서 수동으로 합니다. 이 링크가 실제로 하는
+일은 **낯선 기기가 이 서버(자체 서명 인증서)를 신뢰하게 만드는 것** 하나뿐이고, 기존 [페어링
+코드](#서버-실행-방법) 메커니즘을 그대로 재사용합니다.
+
+**만들 수 있는 사람**: 서버 운영자, 계정 등급이 관리자인 사람, 또는 어느 팀이든 소유자인 사람
+(`server/src/permissions.js`의 `canCreateInviteLink`). 삼선(계정) 메뉴 → **"초대 링크 생성"**
+에서 만듭니다 — 관리자 콘솔과 달리 이 메뉴는 서버 운영자가 아닌 팀 소유자에게도 보입니다.
+
+**만드는 값**: 메모(선택, 예: "9월 신입")뿐입니다 — 유효기간은 고르지 않고 항상 **발급 후
+7일**로 고정입니다(`server/src/invites.js`의 `INVITE_EXPIRY_DAYS`). 생성하면 링크가 자동으로
+클립보드에 복사되어 카카오톡·이메일 등 원하는 곳에 바로 붙여넣어 보낼 수 있습니다. 페어링
+코드(4자리, 5분, 1회용)와 달리 이 링크의 코드는 사람이 직접 입력할 일이 거의 없어(복사 +
+붙여넣기, 또는 아래 딥링크 자동입력) 훨씬 길고(96비트 무작위) 오래 살아있으며, **1회용이
+아닙니다** — 유효기간 안에서는 여러 기기(예: 이번 달 입사한 신입 여러 명)가 같은 링크를 나눠
+받아도 됩니다. 만든 사람은 목록에서 언제든 취소(폐기)할 수 있습니다.
+
+**상대방이 받는 경험**:
+1. 링크를 열면 평문 HTTP 안내 페이지가 뜹니다(자체 서명 인증서 경고가 뜨지 않습니다 — 페어링과
+   같은 평문 포트인 `PAIRING_PORT`를 씁니다). 이 페이지는 열리자마자 `tangotalk://` 커스텀
+   스킴으로 앱을 열어보려고 시도합니다 — TangoTalk이 이미 설치돼 있다면 곧바로 앱이 뜨면서 아래
+   3번 단계(서버 주소/코드 입력)까지 자동으로 끝납니다.
+2. 설치돼 있지 않으면(=페이지가 그대로 남아있으면) Windows/Android 설치 버튼으로 설치 파일을
+   받습니다(같은 평문 포트로 스트리밍 — 여기서도 브라우저 경고가 없습니다). **설치가 끝나면
+   같은 초대 링크를 다시 눌러야 합니다** — 그래야 이번엔 막 설치된 앱이 커스텀 스킴을 잡아채
+   실행됩니다.
+3. 앱이 `tangotalk://pair/?address=...&code=...`로 열리면 로그인 화면의 **"서버 주소
+   변경"**(첫 실행이면 서버 연결 화면)이 서버 주소와 코드를 미리 채운 채로 뜹니다 — 연결
+   버튼은 직접 눌러야 합니다(자동 연결은 하지 않음). 딥링크가 안 먹히는 환경(예: 링크를 다른
+   기기로 옮겨 열었을 때)을 위해 안내 페이지에는 주소/코드를 직접 복사해 붙여넣는 방법도 접이식
+   섹션으로 남아 있습니다 — 이 입력칸은 4자리 페어링 코드와 초대 링크의 코드를 똑같이
+   받습니다(길이로 서버가 구분합니다).
+4. 회원가입(초대 없이 열려 있음) → 팀 소유자·관리자에게 팀 참가를 요청합니다.
+
+**딥링크 등록**(`tangotalk://` 커스텀 스킴 — 고정 도메인이 없는 LAN 자체 호스팅 구조라 도메인
+소유 검증이 필요한 HTTPS App Links 대신 이 방식을 씁니다):
+- **Android**: `AndroidManifest.xml`의 `MainActivity`에 `tangotalk` 스킴 `intent-filter`를 선언.
+  앱이 이미 떠 있으면 OS가 알아서 그 인스턴스로 새 인텐트를 전달합니다.
+- **Windows**: 설치 프로그램(`client/windows/installer/messenger.iss`)이 `HKCU\Software\Classes\tangotalk`에
+  프로토콜 핸들러를 등록합니다(관리자 권한 불필요 — `PrivilegesRequired=lowest`와 동일 원칙).
+  앱이 이미 떠 있는 상태에서 링크를 다시 열면 `app_links` 패키지의 `SendAppLinkToInstance()`가
+  기존 창을 찾아 링크를 넘기고 포그라운드로 가져옵니다(`windows/runner/main.cpp`).
+
+**만료·취소된 링크**를 열면 안내 페이지에 "만료되었습니다 / 취소되었습니다" 문구만 뜨고
+설치 버튼이 사라지며, 설치 파일 다운로드와 `/pair/<코드>` 인증서 발급도 함께 막힙니다 —
+링크 하나가 통째로 죽는 단순한 규칙입니다.
+
 ## 서버 운영자와 관리자 콘솔
 
 팀 등급(소유자/관리자/…)과 **완전히 별개의 축**으로, 서버 전체를 운영하는 **서버 운영자**가
@@ -262,8 +314,12 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 부서·직책 수정 | "부서·직책 관리"를 계정 단위로 설정한 서버에서 씁니다(팀 단위면 각 팀의 팀 설정에서). |
 | 계정 정지 / 해제 | 정지되면 로그인·토큰 재발급·소켓 연결이 모두 막히고, 이미 붙어 있던 기기도 즉시 끊깁니다. 탈퇴와 달리 되돌릴 수 있고 이름/메시지는 그대로 남습니다. 자기 계정은 정지할 수 없습니다. |
 | 모든 기기에서 로그아웃 | `token_version`을 올려 기존 토큰을 전부 무효화합니다. 다시 로그인하면 정상 사용 가능합니다. |
-| 비밀번호 초기화 | 운영자가 정한 임시 비밀번호(4~20자)로 바꾸고 기존 로그인을 끊습니다. 새 비밀번호는 운영자가 본인에게 직접 전달해야 합니다. |
 | 서버 운영자 지정 / 해제 | 관리자 콘솔 접근 권한을 주고 뺍니다. |
+
+> **비밀번호 초기화 대행은 의도적으로 없습니다.** 운영자가 남의 평문 비밀번호를 직접 정할 수
+> 있게 하면 그 계정을 완전히 탈취할 수 있는 힘을 갖게 되므로, 이 기능은 제공하지 않습니다.
+> 계정에 문제가 있으면 계정 정지나 강제 로그아웃으로 대응하고, 비밀번호 자체는 본인만
+> 회원가입 때 등록한 보안 질문으로 재설정할 수 있습니다(`POST /auth/reset-password`).
 
 ### 팀 관리
 
@@ -276,7 +332,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 않습니다). 계정이나 팀이 지워져도 로그가 남도록, 그 시점의 이름을 스냅샷으로 함께 저장합니다.
 
 기록되는 행위: 남의 메시지·댓글 삭제, 팀원 추가·제외, 등급/부서·직책 변경, 소유권 이양, 팀 삭제,
-계정 정지·해제, 강제 로그아웃, 비밀번호 초기화, 서버 운영자 지정·해제, 서버 설정 변경.
+계정 정지·해제, 강제 로그아웃, 서버 운영자 지정·해제, 서버 설정 변경.
 행위 종류로 걸러 보거나 50건씩 페이지를 넘겨 볼 수 있습니다.
 
 > 기록 실패가 원래 동작을 막지는 않습니다 — 로그를 못 남겼다고 메시지 삭제가 실패하면 더 나쁘기
@@ -295,7 +351,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   콘솔](#서버-운영자와-관리자-콘솔)). 브라우저로 접속하는 별도 운영 화면은 없어서, 운영하려면
   앱을 깔아야 합니다
 - **백업/복원·릴리즈 배포의 화면화** — 여전히 콘솔 스크립트(pg_dump, `publish_release.ps1`)로 합니다
-- **서버 설치 프로그램 자체의 자동 업데이트** — 새 `teamtalk-server-setup.exe`를 만들어서 대상 PC에
+- **서버 설치 프로그램 자체의 자동 업데이트** — 새 `tangotalk-server-setup.exe`를 만들어서 대상 PC에
   다시 실행해주는 건 됩니다(위 "새 서비스 PC에 네이티브 설치 프로그램으로 설치/업데이트" 참고),
   다만 그 배포/실행을 서버가 스스로 감지해서 알아서 받아 설치하는 건 아직 없습니다(관리자 권한
   작업이라 무인 자동 적용은 위험 부담이 있어 일부러 범위 밖으로 뒀습니다).
@@ -319,6 +375,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 ```
 
 - 클라이언트는 서버가 스스로 발급한 자체 서명 TLS 인증서만 신뢰합니다(공인 CA 미사용).
+- 평문 HTTP(PORT+1) 포트는 브라우저에서도 인증서 경고 없이 열리므로, 새 기기 페어링뿐 아니라
+  [초대 링크](#초대-링크-설치가입)의 안내 페이지·설치 파일 다운로드도 여기서 함께 서빙합니다.
 - 첨부파일은 고정 공개 URL이 아니라 짧게 만료되는 서명 링크(`/files/<token>`)로만 내려갑니다.
 - FCM은 Android 클라이언트 → Firebase → 서버(발송) → 다시 FCM → Android 기기 순으로만 쓰이고,
   Windows 클라이언트는 관여하지 않습니다.
@@ -380,6 +438,7 @@ messenger_project/
 │  │  ├─ admin.js                 관리자 콘솔 API(회원·팀·감사 로그·운영 현황, 서버 운영자 전용)
 │  │  ├─ audit.js                 감사 로그 기록 헬퍼(실패해도 원래 동작을 막지 않음)
 │  │  ├─ teams.js                 팀 생성/설정/팀원 관리/소유권 이양/팀 삭제
+│  │  ├─ invites.js                초대 링크 발급/목록/폐기 API(서버 운영자·관리자·팀 소유자)
 │  │  ├─ permissions.js           권한 판정 규칙(다른 라우터는 전부 여기를 통해서만 판단)
 │  │  ├─ access.js                계정 등급 + 팀 소유자 여부를 한 번에 모아오는 헬퍼
 │  │  ├─ moderation.js            메시지/댓글 수정·삭제 가능 여부(팀 메시지 설정 + 등급 + 방 멤버십)
@@ -391,7 +450,8 @@ messenger_project/
 │  │  ├─ upload.js                파일 업로드 + 서명 다운로드 링크
 │  │  ├─ push.js                  FCM 발송
 │  │  ├─ socket.js                Socket.io 인증 미들웨어 + 실시간 이벤트
-│  │  ├─ pairing.js               새 기기 인증서 페어링 부트스트랩 서버
+│  │  ├─ pairing.js               새 기기 인증서 페어링 부트스트랩 서버(평문 HTTP) + 초대 링크
+│  │  │                            안내 페이지/설치 파일 다운로드(자체 서명 인증서 경고 없음)
 │  │  ├─ certs.js                 자체 서명 TLS 인증서 생성/재사용
 │  │  ├─ crypto.js                DB 저장용 필드 암호화(AES-256-GCM) + 조회용 해시
 │  │  ├─ retention.js             탈퇴 계정 메시지 1년 보존 후 파기 잡
@@ -404,10 +464,11 @@ messenger_project/
 │  ├─ scripts/pair.mjs           pm2 등으로 띄웠을 때 콘솔 입력 없이 페어링 코드 발급
 │  ├─ installer/                 서버+PostgreSQL 네이티브 Windows 설치 프로그램(관리자 권한)
 │  │  ├─ messenger-server.iss     Inno Setup 스크립트
-│  │  ├─ Setup-TeamTalkServer.ps1 설치 후 실제 작업(PostgreSQL 설치, DB 생성, 마이그레이션, 서비스 등록)
+│  │  ├─ Setup-TangoTalkServer.ps1 설치 후 실제 작업(PostgreSQL 설치, DB 생성, 마이그레이션, 서비스 등록)
 │  │  ├─ Get-PairingCode.ps1      "새 기기 페어링 코드 발급" 시작메뉴 항목
 │  │  ├─ Uninstall-Full.ps1       "서버 데이터 완전 삭제"(일반 제거와 분리, 별도 확인 필요)
 │  │  └─ bin/ · stage/ · output/  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
+│  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
 │  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성)
 │  ├─ uploads/                   업로드된 첨부파일(gitignore)
 │  ├─ releases/                  배포용 빌드 산출물 + version.json(gitignore)
@@ -416,7 +477,9 @@ messenger_project/
 │
 ├─ docs/                        (현재 비어 있음)
 ├─ publish_release.ps1          클라이언트 릴리즈 빌드 → server/releases/ 배포 스크립트
-├─ build_server_installer.ps1   서버+DB 설치 프로그램(teamtalk-server-setup.exe) 빌드 스크립트
+├─ build_server_installer.ps1   서버+DB 설치 프로그램(tangotalk-server-setup.exe) 빌드 스크립트
+├─ package_server_update.ps1    운영 서버 코드 업데이트 zip(server/deploy/output/server-update.zip) 빌드 스크립트
+├─ update_server.ps1            (운영 서버 PC에서 실행) 위 zip을 적용 + DB 마이그레이션 + pm2 재시작
 └─ README.md
 ```
 
@@ -548,6 +611,43 @@ npm run pair
 (`scripts/pair.mjs`가 `pairing.js`의 `/admin/generate`를 호출 — 이 PC 안에서 온 요청만 허용되어
 외부에는 열려있지 않습니다.)
 
+### 운영 중인 서버 업데이트(DB 데이터는 그대로 두고 코드만, git 불필요)
+
+클라이언트를 `publish_release.ps1`로 설치 파일 하나 만들어 배포하는 것과 같은 방식 —
+운영 서버 PC에 git을 설치·연결할 필요 없이, 코드를 zip 파일 하나로 만들어 옮긴 뒤 그 자리에서
+적용합니다.
+
+**1) 개발 PC에서 업데이트 패키지 만들기**
+
+```powershell
+.\package_server_update.ps1
+```
+
+`server/deploy/output/server-update.zip` 하나가 만들어집니다(실데이터·비밀값은
+`build_server_installer.ps1`의 스테이징과 같은 기준으로 전부 제외 — `.env`/`certs`/`uploads`/
+`node_modules`/`firebase-service-account.json` 등은 애초에 안 들어갑니다).
+
+**2) 이 zip 파일 하나만 운영 서버 PC로 옮기기** — USB, 사내 공유 폴더, 클라우드 드라이브 등
+편한 방법 아무거나 사용하면 됩니다.
+
+**3) 운영 서버 PC에서 적용하기**
+
+```powershell
+.\update_server.ps1                                    # 같은 폴더의 server-update.zip을 씀
+.\update_server.ps1 -ZipPath "C:\받은위치\server-update.zip"   # 다른 경로일 때
+```
+
+순서대로 zip 풀어서 코드 적용 → `npm install`(패키지) → `npm run db:migrate`(스키마) →
+`npm run pm2:restart`(재시작)를 하고, 어느 단계든 실패하면 그 자리에서 멈춥니다. **DB
+데이터는 이 과정에서 전혀 건드리지 않습니다** — zip 안에 이 서버 고유의 실데이터·비밀값이
+애초에 없고, `db:migrate`는 아직 적용 안 된 마이그레이션만 골라 실행하며(지금까지 모든
+마이그레이션이 `CREATE TABLE`/`ALTER TABLE ADD COLUMN`류의 "추가"만 해왔습니다), pm2 재시작은
+Node.js 프로세스만 내렸다 올리는 것이라 Postgres 자체에는 손대지 않습니다. 적용이 끝나면 어느
+커밋에서 만든 패키지인지(`update-info.json`)도 같이 출력해줍니다.
+
+처음 서버를 띄우는 경우(pm2에 `messenger-server`가 아직 없는 경우)는 이 스크립트 대신 위
+`npm run pm2:start`를 한 번 먼저 실행하세요.
+
 ## PC 앱 실행 방법
 
 Windows 데스크톱으로 처음 빌드하려면 개발자 모드가 필요합니다(심볼릭 링크 지원):
@@ -635,10 +735,17 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | PATCH | `/api/admin/users/:id/org` | 부서·직책 변경(계정 단위 설정일 때) |
 | POST | `/api/admin/users/:id/suspend` | 계정 정지/해제(`suspended`) |
 | POST | `/api/admin/users/:id/logout-all` | 모든 기기 강제 로그아웃 |
-| POST | `/api/admin/users/:id/reset-password` | 비밀번호 초기화 대행(`password`) |
 | POST | `/api/admin/users/:id/server-admin` | 서버 운영자 지정/해제(`isServerAdmin`) |
 | GET | `/api/admin/teams` | 서버의 모든 팀 |
 | GET | `/api/admin/audit-logs` | 감사 로그(`action`, `limit`, `offset`) |
+
+**초대 링크** (`/api`, 서버 운영자·계정 관리자·팀 소유자만 — [초대 링크(설치→가입)](#초대-링크-설치가입) 참고)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/api/invite-links` | 내가 만든 초대 링크 목록(최신순) |
+| POST | `/api/invite-links` | 새 링크 발급(`expiresInDays`: 1\|7\|30, `label` 선택) |
+| DELETE | `/api/invite-links/:id` | 폐기(내가 만든 링크만) |
 
 **팀** (`/api`)
 
@@ -707,6 +814,16 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/version` | 불필요 | 최신 클라이언트 버전 조회 |
 | GET | `/downloads/windows`, `/downloads/android` | 불필요 | 최신 설치 파일 다운로드 |
 
+**페어링 부트스트랩 서버** (`server/src/pairing.js`, 평문 HTTP, 포트 `PAIRING_PORT` — 메인 HTTPS
+서버와 별개, 인증 불필요, 자체 서명 인증서 경고 없이 열림)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/pair/:code` | 인증서 발급 — 4자리 페어링 코드 또는 초대 링크의 코드를 그대로 받는다 |
+| POST | `/admin/generate` | 4자리 페어링 코드 발급(서버 PC 안(loopback)에서만 호출 가능) |
+| GET | `/invite/:token` | 초대 링크 안내 페이지(HTML) |
+| GET | `/invite/:token/download/:platform` | 설치 파일 다운로드(`windows`\|`android`) |
+
 **Socket.io 이벤트** (`server/src/socket.js`, 연결 시 `auth: { token, deviceId? }`)
 
 | 방향 | 이벤트 | 설명 |
@@ -733,6 +850,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL) |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지) |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |
+| `invite_links` | 초대 링크. `token`(무작위 문자열, unique), `expires_at`/`revoked_at`, `used_count`/`last_used_at`(1회용 아님 — 여러 기기가 나눠 씀), `created_by_name`(만든 사람 스냅샷) — [초대 링크(설치→가입)](#초대-링크-설치가입) 참고 |
 | `teams` | 팀(워크스페이스). `name`, `icon_emoji`/`icon_color`(팀 아이콘), `domain`(팀을 가리키는 짧은 식별자, 서버 전체 unique), `invite_policy`(`member`\|`admin` — 방에 초대할 수 있는 최소 등급), `message_edit_delete_enabled`/`message_edit_delete_window_seconds`([메시지 설정](#메시지-설정)), `created_by`(만든 사람 = 소유자) |
 | `team_members` | 팀 멤버십(복합 PK). `role`은 `owner`(팀을 만든 사람) 또는 `member` — 등급은 계정 단위로 올라갔다([권한 등급](#권한-등급) 참고), `department`/`position`(팀 단위 부서·직책) |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(비밀 대화 상대 혼자 나갔을 때 표시용) |
@@ -868,23 +986,23 @@ DB 계정을 직접 다룰 필요가 없습니다 — 전부 설치 프로그램
 Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`를 `server/installer/bin/`에
 받아두고(이미 있으면 재사용), `server/`를 정리해서(`.env`/`certs`/`uploads`/로그/
 `firebase-service-account.json` 등 실데이터·비밀값 제외) `npm install`까지 마친 결과를
-`server/installer/stage/`에 만든 뒤, `server/installer/output/teamtalk-server-setup.exe`를
+`server/installer/stage/`에 만든 뒤, `server/installer/output/tangotalk-server-setup.exe`를
 컴파일합니다. (`server/releases/`와는 무관한 별개 산출물입니다 — 클라이언트 자동 업데이트
 채널이 아니라 USB/사내 공유 폴더 등으로 직접 전달하는 용도입니다.)
 
-**새 PC에 설치**: `teamtalk-server-setup.exe`를 관리자 권한으로 실행하면 —
+**새 PC에 설치**: `tangotalk-server-setup.exe`를 관리자 권한으로 실행하면 —
 
-- PostgreSQL을 이 앱 전용 경로(`C:\TeamTalk-Server\pgsql`)와 전용 포트(`55432`)에 무인 설치합니다
+- PostgreSQL을 이 앱 전용 경로(`C:\TangoTalk-Server\pgsql`)와 전용 포트(`55432`)에 무인 설치합니다
   (그 PC에 이미 다른 PostgreSQL이 있어도 충돌하지 않습니다).
 - `messenger_app` 역할/`messenger` 데이터베이스를 만들고 마이그레이션까지 적용합니다.
 - 방화벽 규칙을 추가합니다.
 - 설치 중 고르는 대로 서버를 **백그라운드 Windows 서비스**(NSSM, 부팅 시 자동 시작·창 없음,
-  서비스 이름 `TeamTalkServer`) 또는 **콘솔 창**(시작 메뉴 "서버 콘솔로 실행")으로 등록합니다.
+  서비스 이름 `TangoTalkServer`) 또는 **콘솔 창**(시작 메뉴 "서버 콘솔로 실행")으로 등록합니다.
 - 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함)과
   "서버 데이터 완전 삭제"(별도 확인 절차 필요 — 일반 제거는 DB/업로드/설정을 지우지 않습니다)도
   같이 설치됩니다.
 
-**업데이트**: 새로 `build_server_installer.ps1`을 돌려서 만든 최신 `teamtalk-server-setup.exe`를
+**업데이트**: 새로 `build_server_installer.ps1`을 돌려서 만든 최신 `tangotalk-server-setup.exe`를
 같은 PC에서 다시 실행하면 됩니다 — 이미 설치돼 있는 걸 감지해서 PostgreSQL 재설치나 DB 비밀번호
 재생성 없이, 프로그램 파일만 새로 덮어쓰고 새로 추가된 마이그레이션만 적용한 뒤 서비스를
 재시작합니다(기존 `.env`/DB/업로드는 그대로 보존).

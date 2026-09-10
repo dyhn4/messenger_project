@@ -16,6 +16,31 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
   final _code = TextEditingController();
   bool _loading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _consumePendingPairRequest();
+  }
+
+  @override
+  void didUpdateWidget(covariant ServerSetupScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 이 화면이 이미 떠 있는 동안 초대 링크가 도착한 경우(예: 서버 미설정 상태로 앱을
+    // 열어둔 채 다른 기기의 딥링크... 는 아니고, 같은 기기에서 링크를 다시 눌러 이 창이
+    // 포그라운드로 올라온 경우) — MyApp이 session이 바뀔 때마다 이 위젯을 새로 만들어
+    // 넘겨주므로 didUpdateWidget이 매번 불린다.
+    _consumePendingPairRequest();
+  }
+
+  void _consumePendingPairRequest() {
+    final req = widget.session.consumePendingPairRequest();
+    if (req == null) return;
+    setState(() {
+      _controller.text = req.address;
+      _code.text = req.code;
+    });
+  }
+
   Future<void> _submit() async {
     setState(() => _loading = true);
     final code = _code.text.trim();
@@ -71,13 +96,12 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: _code,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
+              // 4자리 페어링 코드뿐 아니라 초대 링크의 긴 코드도 그대로 붙여넣을 수 있어야
+              // 해서 숫자 키패드/길이 제한을 두지 않는다(서버가 길이로 둘을 구분해서 처리).
               decoration: const InputDecoration(
-                labelText: '페어링 코드 (새 서버일 때만)',
-                hintText: '서버 콘솔에 "pair" 입력 시 나오는 4자리',
+                labelText: '페어링 코드 또는 초대 링크의 코드 (새 서버일 때만)',
+                hintText: '서버 콘솔의 4자리 코드, 또는 초대 페이지에 적힌 코드',
                 border: OutlineInputBorder(),
-                counterText: '',
               ),
             ),
             const SizedBox(height: 16),

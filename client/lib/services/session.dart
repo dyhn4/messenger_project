@@ -18,6 +18,7 @@ import '../models/team.dart';
 import 'api_client.dart';
 import 'app_settings.dart';
 import 'chat_socket.dart';
+import 'deep_link_service.dart';
 import 'device_identity.dart';
 import 'message_preview.dart';
 import 'notification_service.dart';
@@ -249,6 +250,21 @@ class Session extends ChangeNotifier {
     final room = _pendingOpenRoom;
     _pendingOpenRoom = null;
     return room;
+  }
+
+  PairRequest? _pendingPairRequest;
+
+  /// 초대 링크(tangotalk://pair)로 앱이 열리며 받은 서버 주소/코드. ServerSetupScreen과
+  /// 로그인 화면의 "서버 주소 변경" 다이얼로그가 이걸 보고 입력칸을 미리 채운다.
+  PairRequest? consumePendingPairRequest() {
+    final req = _pendingPairRequest;
+    _pendingPairRequest = null;
+    return req;
+  }
+
+  void setPendingPairRequest(PairRequest request) {
+    _pendingPairRequest = request;
+    notifyListeners();
   }
 
   void requestOpenRoom(Room room) {
@@ -516,6 +532,13 @@ class Session extends ChangeNotifier {
 
   /// 팀 목록 화면처럼 특정 팀을 골라서 판단해야 할 때.
   bool canManageTeam(Team team) => team.canManage(accountRole);
+
+  /// 초대 링크(설치→가입 링크)를 만들 수 있는지 — 서버 운영자, 계정 등급 관리자, 또는
+  /// 어느 팀이든 소유자인 사람(server/src/permissions.js의 canCreateInviteLink와 동일 규칙).
+  bool get canCreateInviteLink =>
+      isServerAdmin ||
+      accountRole == AccountRole.admin ||
+      teams.any((t) => t.isOwner);
 
   /// 팀 선택 화면으로 되돌아간다(전환 팝업의 "팀 목록").
   void leaveTeam() {

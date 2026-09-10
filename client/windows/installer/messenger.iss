@@ -5,7 +5,7 @@
 ; 관리자 권한 없이 현재 사용자 계정에만 설치되도록 했다(PrivilegesRequired=lowest) — 회사 PC처럼
 ; 관리자 권한이 없는 환경에서도 그냥 설치할 수 있게 하기 위함.
 
-#define MyAppName "TeamTalk"
+#define MyAppName "TangoTalk"
 #define MyAppVersion "1.0.0"
 #define MyAppExeName "client.exe"
 #define ReleaseDir "..\..\build\windows\x64\runner\Release"
@@ -38,6 +38,14 @@ Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{#MyAppName} 제거"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+; 초대 링크(tangotalk://pair?...)를 클릭하면 이 앱이 열리도록 커스텀 URL 프로토콜을 등록한다.
+; PrivilegesRequired=lowest와 맞춰 HKCU에만 쓴다(관리자 권한 불필요, 현재 사용자에게만 적용).
+; uninsdeletekey라 제거 시 이 키도 같이 지워진다.
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\tangotalk"; ValueType: string; ValueName: ""; ValueData: "URL:TangoTalk Protocol"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\tangotalk"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\tangotalk\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} 실행"; Flags: nowait postinstall skipifsilent

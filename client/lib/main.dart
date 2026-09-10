@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -13,6 +14,7 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/server_setup_screen.dart';
 import 'services/app_settings.dart';
+import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
@@ -81,7 +83,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
             : '$serverUrl$avatarUrlRaw');
 
   await notifications.showMessage(
-    title: data['title'] as String? ?? 'TeamTalk',
+    title: data['title'] as String? ?? 'TangoTalk',
     body: data['body'] as String? ?? '',
     roomId: roomId,
     senderName: data['senderName'] as String?,
@@ -145,10 +147,12 @@ class _MyAppState extends State<MyApp>
   final navigatorKey = GlobalKey<NavigatorState>();
   final notifications = NotificationService();
   final appSettings = AppSettings();
+  final deepLinks = DeepLinkService();
   late final session = Session(
     notifications: notifications,
     settings: appSettings,
   );
+  StreamSubscription<PairRequest>? _pairRequestSub;
 
   // 앱이 완전히 종료된 상태에서 FCM 알림을 눌러 새로 켜진 경우, 그 방을 아직 session.rooms가
   // 로딩되기 전이라 바로 못 연다 — 로그인/방 목록 로딩이 끝날 때까지 여기 보관해뒀다가
@@ -165,6 +169,10 @@ class _MyAppState extends State<MyApp>
         .then((_) => _checkNotificationLaunch());
     session.addListener(_tryOpenPendingLaunchRoom);
     session.init();
+    deepLinks.getInitialPairRequest().then((req) {
+      if (req != null) _onPairRequest(req);
+    });
+    _pairRequestSub = deepLinks.pairRequestStream.listen(_onPairRequest);
     // session.toasts는 HomeScreen이 자기 자신의 context로 구독해서 보여준다(main.dart의
     // navigatorKey.currentContext는 Navigator 위젯 자체의 context라 SnackBar/Overlay가
     // 화면에 그려지지 않는다 — home_screen.dart 참고).
@@ -175,10 +183,22 @@ class _MyAppState extends State<MyApp>
     }
   }
 
+  /// 초대 링크로 받은 서버 주소/코드를 세션에 넘기고, PC는 창을 앞으로 가져온다
+  /// (Windows는 SendAppLinkToInstance가 이미 그렇게 해주지만, 콜드 스타트로 막 켜진
+  /// 경우까지 포함해 한 번 더 확실히 해둔다 — 안드로이드는 OS가 알아서 앱을 앞으로 보낸다).
+  void _onPairRequest(PairRequest request) {
+    if (Platform.isWindows) {
+      windowManager.show();
+      windowManager.focus();
+    }
+    session.setPendingPairRequest(request);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     session.removeListener(_tryOpenPendingLaunchRoom);
+    _pairRequestSub?.cancel();
     session.chatSocket.dispose();
     if (Platform.isWindows) {
       windowManager.removeListener(this);
@@ -192,7 +212,7 @@ class _MyAppState extends State<MyApp>
   /// 되지 않도록).
   Future<void> _initTray() async {
     await trayManager.setIcon('assets/tray_icon.ico');
-    await trayManager.setToolTip('TeamTalk');
+    await trayManager.setToolTip('TangoTalk');
     await trayManager.setContextMenu(
       Menu(
         items: [
@@ -218,6 +238,13 @@ class _MyAppState extends State<MyApp>
   void onTrayIconMouseDown() {
     windowManager.show();
     windowManager.focus();
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    // tray_manager는 우클릭을 감지만 해줄 뿐 메뉴를 직접 띄워주지는 않는다 —
+    // popUpContextMenu()를 호출해야 setContextMenu로 등록해둔 메뉴가 실제로 보인다.
+    trayManager.popUpContextMenu();
   }
 
   @override
@@ -301,7 +328,7 @@ class _MyAppState extends State<MyApp>
       builder: (context, _) {
         return MaterialApp(
           navigatorKey: navigatorKey,
-          title: 'TeamTalk',
+          title: 'TangoTalk',
           theme: _withOldHangulFallback(
             ThemeData(
               colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),

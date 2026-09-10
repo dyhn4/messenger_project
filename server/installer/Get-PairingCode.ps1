@@ -32,11 +32,11 @@ try {
   [System.Windows.Forms.MessageBox]::Show(
     "새 기기 연결 코드: $($res.code)`n`n(유효시간 ${seconds}초, 1회용)`n`n" +
     "클라이언트 앱의 `"서버 주소 변경`" 화면에서 서버 주소와 함께 이 코드를 입력하세요.",
-    'TeamTalk 서버 - 페어링 코드', 'OK', 'Information'
+    'TangoTalk 서버 - 페어링 코드', 'OK', 'Information'
   ) | Out-Null
 } catch {
   [System.Windows.Forms.MessageBox]::Show(
     "코드를 발급받지 못했습니다. 서버가 실행 중인지 확인하세요.`n`n($($_.Exception.Message))",
-    'TeamTalk 서버 - 페어링 코드', 'OK', 'Error'
+    'TangoTalk 서버 - 페어링 코드', 'OK', 'Error'
   ) | Out-Null
 }

@@ -1,4 +1,4 @@
-; TeamTalk 서버 설치 프로그램 — Node.js 서버 + PostgreSQL을 새 "서비스 PC"에 통째로 설치한다.
+; TangoTalk 서버 설치 프로그램 — Node.js 서버 + PostgreSQL을 새 "서비스 PC"에 통째로 설치한다.
 ;
 ; 빌드: 저장소 루트의 build_server_installer.ps1이 (1) Node 포터블 런타임/PostgreSQL 공식 설치
 ; 프로그램/nssm.exe를 installer/bin/에 받아두고 (2) server/를 정리해서(.env·certs·uploads·로그·
@@ -9,9 +9,9 @@
 ; 클라이언트 설치 프로그램과의 핵심 차이: PostgreSQL 무인 설치 + Windows 서비스 등록(NSSM) +
 ; 방화벽 규칙 추가가 필요해서 관리자 권한으로 설치한다(클라이언트는 PrivilegesRequired=lowest).
 ; PostgreSQL은 그 PC의 다른 설치와 충돌하지 않도록 전용 설치 경로+전용 포트를 쓴다(자세한 이유는
-; Setup-TeamTalkServer.ps1 상단 주석 참고).
+; Setup-TangoTalkServer.ps1 상단 주석 참고).
 
-#define MyAppName "TeamTalk Server"
+#define MyAppName "TangoTalk Server"
 #define MyAppVersion "1.0.0"
 #define StageDir "stage"
 #define BinDir "bin"
@@ -20,7 +20,7 @@
 AppId={{A2F1C9E4-7B22-4C55-9E9C-2F6C4B8A5D31}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-DefaultDirName=C:\TeamTalk-Server
+DefaultDirName=C:\TangoTalk-Server
 ; 경로를 고정한다 — PostgreSQL/NSSM/여러 PowerShell 스크립트가 이 경로를 문자열로 조합해서
 ; 쓰기 때문에, 사용자가 임의 경로(특히 공백 포함 경로)를 고르게 두면 인용 버그 위험이 커진다.
 DisableDirPage=yes
@@ -29,7 +29,7 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=output
-OutputBaseFilename=teamtalk-server-setup
+OutputBaseFilename=tangotalk-server-setup
 Compression=lzma2
 SolidCompression=yes
 SetupIconFile=..\..\client\windows\runner\resources\app_icon.ico
@@ -49,7 +49,7 @@ Source: "{#BinDir}\pgsql-installer.exe"; DestDir: "{tmp}"; Flags: deleteafterins
 ; StageDir는 build_server_installer.ps1이 이미 필요한 것만(certs/uploads/.env/로그/개발용
 ; node_modules 등을 뺀) 정리해둔 결과라 여기서 별도 Excludes가 필요 없다.
 Source: "{#StageDir}\*"; DestDir: "{app}\server"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "Setup-TeamTalkServer.ps1"; DestDir: "{app}"
+Source: "Setup-TangoTalkServer.ps1"; DestDir: "{app}"
 Source: "Get-PairingCode.ps1"; DestDir: "{app}"
 Source: "Uninstall-Full.ps1"; DestDir: "{app}"
 Source: "README-설치후.txt"; DestDir: "{app}"
@@ -59,18 +59,18 @@ Name: "{group}\새 기기 페어링 코드 발급"; Filename: "powershell.exe"; 
 Name: "{group}\서버 콘솔로 실행"; Filename: "{app}\node\node.exe"; Parameters: """{app}\server\src\index.js"""; WorkingDir: "{app}\server"; Tasks: runasconsole
 Name: "{group}\설치 후 안내"; Filename: "{app}\README-설치후.txt"
 Name: "{group}\서버 데이터 완전 삭제"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Uninstall-Full.ps1"""
-Name: "{group}\TeamTalk 서버 제거"; Filename: "{uninstallexe}"
+Name: "{group}\TangoTalk 서버 제거"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Setup-TeamTalkServer.ps1"" -RunMode {code:GetRunMode} -AppDir ""{app}"" -PgInstallerPath ""{tmp}\pgsql-installer.exe"""; StatusMsg: "서버 구성 중입니다(PostgreSQL 설치, 데이터베이스 생성, 마이그레이션 적용) — 몇 분 걸릴 수 있습니다..."; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Setup-TangoTalkServer.ps1"" -RunMode {code:GetRunMode} -AppDir ""{app}"" -PgInstallerPath ""{tmp}\pgsql-installer.exe"""; StatusMsg: "서버 구성 중입니다(PostgreSQL 설치, 데이터베이스 생성, 마이그레이션 적용) — 몇 분 걸릴 수 있습니다..."; Flags: runhidden waituntilterminated
 
 [UninstallRun]
 ; 일반 제거는 서비스 등록/방화벽 규칙만 정리한다 — DB/업로드/설정 등 실데이터는 절대 건드리지
 ; 않는다(완전 삭제는 Uninstall-Full.ps1로 완전히 분리돼 있고, 여기서 자동 호출되지 않는다).
-Filename: "{app}\tools\nssm.exe"; Parameters: "stop TeamTalkServer"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopSvc"
-Filename: "{app}\tools\nssm.exe"; Parameters: "remove TeamTalkServer confirm"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveSvc"
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TeamTalk Server (main)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw1"
-Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TeamTalk Server (pairing)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw2"
+Filename: "{app}\tools\nssm.exe"; Parameters: "stop TangoTalkServer"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopSvc"
+Filename: "{app}\tools\nssm.exe"; Parameters: "remove TangoTalkServer confirm"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveSvc"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (main)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw1"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (pairing)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw2"
 
 [UninstallDelete]
 ; 프로그램 파일만 지정한다 — .env / certs / uploads / secrets / pgsql / pgsql-data / releases는

@@ -51,7 +51,7 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: const Text(
-          'TeamTalk',
+          'TangoTalk',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [

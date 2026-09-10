@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../services/app_settings.dart';
@@ -9,7 +10,7 @@ import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 
-const _appName = 'TeamTalk';
+const _appName = 'TangoTalk';
 
 /// 삼선 메뉴 "설정"에서 여는 환경설정 플로팅 창. 로그인 계정 정보와 오픈소스 라이선스는
 /// 삼선 메뉴 자체로 옮겼고, 여기서는 시작 시 자동 실행 / 파일 다운로드만 다룬다.
@@ -39,6 +40,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// 반투명 슬라이더로 미리 봤던 값을 원래 저장된 값으로 되돌려야 한다(dispose 참고).
   bool _saved = false;
   final _scrollController = ScrollController();
+  PackageInfo? _packageInfo;
+
+  @override
+  void initState() {
+    super.initState();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _packageInfo = info);
+    });
+  }
 
   @override
   void dispose() {
@@ -306,6 +316,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ],
                             ),
                           ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionLabel('버전 정보'),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _packageInfo == null
+                                ? '확인 중...'
+                                : '$_appName ${_packageInfo!.version}',
+                            style: TextStyle(
+                              color: Theme.of(context).hintColor,
+                            ),
+                          ),
+                          if (widget.session.updateAvailableVersion != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                '새 버전 ${widget.session.updateAvailableVersion} 사용 가능',
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),

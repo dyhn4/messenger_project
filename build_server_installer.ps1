@@ -106,6 +106,6 @@ if (-not $iscc) { throw "ISCC.exe를 찾을 수 없습니다. Inno Setup이 설�
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup 컴파일 실패' }
 
 Write-Host ''
-Write-Host "완료: $Installer\output\teamtalk-server-setup.exe"
+Write-Host "완료: $Installer\output\tangotalk-server-setup.exe"
 Write-Host '이 파일은 server/releases/(클라이언트 자동 업데이트 채널)와는 무관합니다 — 새 서비스 PC에'
 Write-Host 'USB/사내 공유 폴더 등으로 직접 전달해서 실행하세요.'

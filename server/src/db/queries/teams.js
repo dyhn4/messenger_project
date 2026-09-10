@@ -65,6 +65,16 @@ export async function isTeamMember(teamId, userId) {
   return !!row;
 }
 
+/** 이 사람이 어느 팀이든 하나라도 소유자인지 — 초대 링크 생성 권한 판정에 쓴다(permissions.js). */
+export async function isOwnerOfAnyTeam(userId) {
+  const [row] = await db
+    .select({ teamId: teamMembers.teamId })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.userId, userId), eq(teamMembers.role, 'owner')))
+    .limit(1);
+  return !!row;
+}
+
 /** 이 사람이 그 팀의 소유자인지 — 멤버가 아니면 null, 멤버면 'owner' 또는 'member'. */
 export async function getTeamRole(teamId, userId) {
   const [row] = await db

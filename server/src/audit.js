@@ -17,11 +17,12 @@ export const AUDIT = {
   userSuspend: 'user.suspend',
   userUnsuspend: 'user.unsuspend',
   userLogoutAll: 'user.logoutAll',
-  userResetPassword: 'user.resetPassword',
   userRole: 'user.role',
   userOrg: 'user.org',
   userServerAdmin: 'user.serverAdmin',
   serverSettings: 'server.settings',
+  inviteLinkCreate: 'invite.create',
+  inviteLinkRevoke: 'invite.revoke',
 };
 
 /**

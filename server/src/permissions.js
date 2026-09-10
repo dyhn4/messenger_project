@@ -33,6 +33,15 @@ export function canManageTeam({ role, isOwner }) {
 }
 
 /**
+ * 초대 링크(설치→가입 링크)를 만들 수 있는지 — 서버 운영자, 계정 등급 관리자, 또는
+ * 어느 팀이든 소유자인 사람. 팀 합류는 이 링크에 포함되지 않으므로(합류는 항상 소유자·
+ * 관리자가 팀 설정에서 수동으로 한다) 여기서는 팀 범위를 따지지 않는다.
+ */
+export function canCreateInviteLink({ role, isServerAdmin, isOwnerOfAnyTeam }) {
+  return isServerAdmin === true || role === 'admin' || isOwnerOfAnyTeam === true;
+}
+
+/**
  * 방(토픽/그룹/1:1)을 새로 만들거나 공개 토픽을 찾아 참여할 수 있는 등급인지.
  * 준회원은 초대받은 방에서만 활동하므로 어떤 방도 스스로 만들 수 없다.
  * 준회원에게 말을 거는 것 자체는 막지 않는다 — 정회원이 준회원과 1:1 대화를 시작하는 건 된다.

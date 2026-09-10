@@ -138,14 +138,20 @@ if ($pgAlreadyInstalled) {
       "자동으로 재사용하지 않습니다 — 관리자 비밀번호를 알 수 없기 때문입니다.)" -f $PgPort)
   }
   Write-Log '2/7 PostgreSQL 무인 설치 시작...'
+  # Start-Process -ArgumentList는 배열 원소를 그냥 공백으로 이어붙일 뿐 따옴표를 붙여주지
+  # 않는다 — 그래서 경로에 공백이 있으면(설치 경로를 사용자가 고를 수 있게 되면서 생긴
+  # 가능성) 인자가 둘로 쪼개져 설치가 깨진다. 공백이 있을 수 있는 값만 직접 따옴표로 감싼다.
   $pgArgs = @(
     '--mode', 'unattended', '--unattendedmodeui', 'none',
     '--superpassword', $superPw,
     '--serverport', $PgPort,
-    '--prefix', $PgDir,
-    '--datadir', $PgDataDir,
+    '--prefix', "`"$PgDir`"",
+    '--datadir', "`"$PgDataDir`"",
     '--servicename', $PgServiceName,
-    '--disable-components', 'stackbuilder'
+    # pgAdmin4(GUI 관리 도구)는 헤드리스 서버 운영에 필요 없어서 stackbuilder와 함께 끈다 —
+    # 설치 용량/시간이 줄고, pgAdmin4가 번들하는 대용량 Python 런타임이 "재시작이 필요합니다"
+    # 프롬프트의 원인 중 하나로 보여서 이것도 겸사겸사 줄인다.
+    '--disable-components', 'pgAdmin,stackbuilder'
   )
   $p = Start-Process -FilePath $PgInstallerPath -ArgumentList $pgArgs -Wait -PassThru
   if ($p.ExitCode -ne 0) { Fail "PostgreSQL 설치 프로그램이 오류 코드 $($p.ExitCode)로 종료됐습니다." }

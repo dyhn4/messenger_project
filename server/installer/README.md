@@ -21,7 +21,7 @@
 
 | 파일 | 역할 |
 |---|---|
-| `messenger-server.iss` | Inno Setup 스크립트. `PrivilegesRequired=admin`, 설치 경로 고정(`C:\TangoTalk-Server`) |
+| `messenger-server.iss` | Inno Setup 스크립트. `PrivilegesRequired=admin`, 설치 경로 선택 가능(기본값 `C:\TangoTalk-Server`) |
 | `Setup-TangoTalkServer.ps1` | 설치 마지막 단계에서 실행 — PostgreSQL 무인 설치, DB 계정/생성, `.env` 작성, 마이그레이션, 방화벽, 서비스 등록. 재실행해도 안전(idempotent) |
 | `Get-PairingCode.ps1` | 시작 메뉴 "새 기기 페어링 코드 발급"이 호출 — `server/scripts/pair.mjs`와 같은 일을 Node 없이 순수 PowerShell로 |
 | `Update-Server.ps1` | "서버 업데이트" — 업데이트 zip을 파일 선택 창에서 골라 적용(WinForms GUI). DB는 안 건드림, npm install+마이그레이션+서비스 재시작 자동. 관리자 권한 필요해 스스로 승격 |
@@ -32,6 +32,16 @@
 
 ## 설계상 중요한 결정들 (바꾸기 전에 이유를 먼저 읽을 것)
 
+- **설치 경로는 사용자가 고를 수 있다(`DisableDirPage=no`, 기본값 `C:\TangoTalk-Server`).**
+  경로에 공백이 들어갈 수 있다는 뜻이라, PostgreSQL/NSSM/여러 PowerShell 스크립트가 이
+  경로를 명령줄 인자로 조합하는 모든 곳이 안전해야 한다. `&`/splat 호출(`& $exe @args`,
+  `robocopy @args`)은 배열 원소를 각각 별도 인자로 안전하게 넘겨주지만, **`Start-Process
+  -ArgumentList`는 배열을 그냥 공백으로 이어붙이기만 해서 안전하지 않다** — 실제로
+  `Setup-TangoTalkServer.ps1`의 PostgreSQL 설치 호출부에 이 버그가 있어서(경로에 공백이 있으면
+  `--prefix`/`--datadir` 값이 인자 두 개로 쪼개짐) 값을 이스케이프된 따옴표로 감싸서 고쳤다
+  (2026-09-10, 직접 테스트 배치 파일로 재현 후 확인). 새로 `Start-Process -ArgumentList`를
+  쓸 일이 있으면 경로가 들어가는 인자는 반드시 `"` + `"` `$value` + `"` + `"` 처럼(PowerShell
+  이스케이프로는 `` "`"$value`"" ``) 감쌀 것.
 - **PostgreSQL은 전용 설치 경로(`{app}\pgsql`)+전용 포트(`55432`)를 쓴다.** 그 PC에 이미 다른
   PostgreSQL이 있어도(버전이 다르거나 우리가 만든 게 아니라 슈퍼유저 비밀번호를 모르는 경우)
   충돌하지 않게 하려는 의도 — "기존 설치를 어떻게 재사용할지" 문제 자체를 피한다. 포트/경로를
@@ -49,6 +59,14 @@
   `--prefix`/`--servicename`로 새로 지정한 값을 무시하고 예전 설치를 그대로 재사용해버리는
   문제가 실제로 있었다(2026-09-10 발견). 그래서 데이터 삭제 전에 반드시 PostgreSQL 자체부터
   정식으로 제거한다.
+- **PostgreSQL 설치 시 `pgAdmin` 컴포넌트도 `stackbuilder`와 함께 끈다**
+  (`--disable-components pgAdmin,stackbuilder`). 헤드리스 서버 운영에 pgAdmin4(GUI 관리
+  도구)가 필요 없기도 하고, pgAdmin4가 번들하는 대용량 Python 런타임이 설치 후 "컴퓨터를
+  재시작하세요" 프롬프트의 원인 중 하나로 보여서(EDB installer가 Visual C++ 런타임 등
+  설치 중인 파일이 잠겨 있으면 재시작을 요청하는 걸로 알려져 있음 — EnterpriseDB/edb-installers
+  issue #155 참고) 겸사겸사 줄인다. 다만 이 재시작 자체가 TangoTalk 서버 동작에 필수는
+  아니다 — `Setup-TangoTalkServer.ps1`은 설치 마지막 단계에서 실제로 서비스를 띄우고
+  끝나므로, 재시작 없이 바로 서버를 쓸 수 있다(재부팅은 나중에 편한 때 해도 됨).
 - **완전 삭제/초기화는 확인 문구 하나만으로 되지 않는다.** 이 PC 앞에 앉을 수 있다는 것만으로
   실제 데이터를 지울 수 있으면 안 되므로, `Uninstall-Full.ps1`/`Reset-Data.ps1` 둘 다 먼저
   `server/scripts/verify-admin.mjs`로 실제 서버 운영자(`is_server_admin=true`) 계정의
@@ -91,6 +109,8 @@
 ## 검증 체크리스트
 
 - [ ] `build_server_installer.ps1` 실행 → `installer/output/tangotalk-server-setup.exe` 생성 확인
+- [ ] 설치 경로에 공백이 있는 폴더(예: `C:\My Server\TangoTalk`)를 직접 골라서 설치 →
+      PostgreSQL 설치까지 정상적으로 끝남(`pg_ctl.exe`가 그 경로에 실제로 생김)
 - [ ] 깨끗한 PC/VM에서 서비스 모드로 설치 → `Get-Service TangoTalkServer`, `Get-Service
       postgresql-tangotalk` 둘 다 Running
 - [ ] `https://localhost:3000/health` 응답 확인

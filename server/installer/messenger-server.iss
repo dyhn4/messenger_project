@@ -21,9 +21,15 @@ AppId={{A2F1C9E4-7B22-4C55-9E9C-2F6C4B8A5D31}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 DefaultDirName=C:\TangoTalk-Server
-; 경로를 고정한다 — PostgreSQL/NSSM/여러 PowerShell 스크립트가 이 경로를 문자열로 조합해서
-; 쓰기 때문에, 사용자가 임의 경로(특히 공백 포함 경로)를 고르게 두면 인용 버그 위험이 커진다.
-DisableDirPage=yes
+; 설치 경로를 고를 수 있게 한다(예: 용량이 큰 드라이브로). PostgreSQL/NSSM/여러 PowerShell
+; 스크립트가 이 경로를 문자열로 조합해서 명령을 만들기 때문에, 공백이 포함된 경로(예: "C:\My
+; Server\...")를 고르면 인용 부호를 빠뜨린 곳에서 인자가 쪼개지는 버그가 날 수 있다 —
+; Setup-TangoTalkServer.ps1의 Start-Process -ArgumentList 호출부(PostgreSQL 설치)에서 실제로
+; 이 문제가 있어서 고쳤다(2026-09-10). 새로 이런 호출을 추가할 때는 경로가 들어가는 인자를
+; 반드시 이스케이프된 따옴표로 감쌀 것 — `&`/splat 호출(`& $exe @args`)은 배열 원소를 각각
+; 별도 인자로 안전하게 넘겨주지만, `Start-Process -ArgumentList`는 배열을 그냥 공백으로
+; 이어붙이기만 해서 안전하지 않다.
+DisableDirPage=no
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible

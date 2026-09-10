@@ -112,18 +112,22 @@ class _TopicBrowseScreenState extends State<TopicBrowseScreen> {
     }
     return Scaffold(
       appBar: AppBar(title: const Text('토픽방 찾기')),
-      floatingActionButton: FloatingActionButton(
-        tooltip: '토픽방 만들기',
-        onPressed: () async {
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => CreateTopicScreen(session: widget.session),
+      // 새 토픽 만들기는 팀 설정(토픽 생성 권한)에 따라 정회원 이상/관리자 이상/소유자만
+      // 가능할 수 있다 — 이 화면(찾아서 참여)은 그 설정과 무관하게 항상 쓸 수 있다.
+      floatingActionButton: !widget.session.canCreateTopic
+          ? null
+          : FloatingActionButton(
+              tooltip: '토픽방 만들기',
+              onPressed: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => CreateTopicScreen(session: widget.session),
+                  ),
+                );
+                _load();
+              },
+              child: const Icon(Icons.add),
             ),
-          );
-          _load();
-        },
-        child: const Icon(Icons.add),
-      ),
       body: body,
     );
   }

@@ -2,7 +2,6 @@ import { Router } from 'express';
 import {
   addTeamMembers,
   deleteTeam,
-  findTeamByDomain,
   findTeamById,
   findTeamMember,
   getTeamRole,
@@ -27,6 +26,7 @@ import {
   EDIT_DELETE_WINDOW_OPTIONS,
   editDeleteWindowSeconds,
   roleLabel,
+  TOPIC_CREATION_LEVELS,
 } from './permissions.js';
 import { teamAccess, userAccess } from './access.js';
 import { nameOf, notifyMembership, postSystemMessage } from './rooms.js';
@@ -38,8 +38,7 @@ export function toTeamDto(team, { isOwner = false, memberCount = null } = {}) {
     name: team.name,
     iconEmoji: team.iconEmoji ?? null,
     iconColor: team.iconColor ?? null,
-    domain: team.domain ?? null,
-    invitePolicy: team.invitePolicy ?? 'member',
+    topicCreationPolicy: team.topicCreationPolicy ?? 'member',
     messageEditDeleteEnabled: team.messageEditDeleteEnabled !== false,
     messageEditDeleteWindowSeconds: editDeleteWindowSeconds(team),
     createdBy: team.createdBy ?? null,
@@ -129,7 +128,7 @@ export function createTeamsRouter(io) {
     res.status(201).json(toTeamDto(team, { isOwner: true, memberCount: 1 }));
   });
 
-  /** 팀 이름/도메인/아이콘/초대 권한 변경 — 소유자·관리자만. */
+  /** 팀 이름/아이콘/토픽 생성 권한 변경 — 소유자·관리자만. */
   router.patch('/teams/:id', async (req, res) => {
     const team = await findTeamById(req.params.id);
     if (!team) return res.status(404).json({ error: '팀을 찾을 수 없습니다.' });
@@ -145,25 +144,12 @@ export function createTeamsRouter(io) {
     }
     if ('iconEmoji' in (req.body ?? {})) fields.iconEmoji = req.body.iconEmoji || null;
     if ('iconColor' in (req.body ?? {})) fields.iconColor = req.body.iconColor || null;
-    if ('domain' in (req.body ?? {})) {
-      const raw = typeof req.body.domain === 'string' ? req.body.domain.trim().toLowerCase() : '';
-      if (!raw) {
-        fields.domain = null;
-      } else {
-        if (!/^[a-z0-9][a-z0-9-]{1,29}$/.test(raw)) {
-          return res.status(400).json({ error: '도메인은 영문 소문자/숫자/하이픈 2~30자로, 하이픈으로 시작할 수 없습니다.' });
-        }
-        const owner = await findTeamByDomain(raw);
-        if (owner && owner.id !== team.id) return res.status(409).json({ error: '이미 사용 중인 도메인입니다.' });
-        fields.domain = raw;
+    if ('topicCreationPolicy' in (req.body ?? {})) {
+      const policy = req.body.topicCreationPolicy;
+      if (!TOPIC_CREATION_LEVELS.includes(policy)) {
+        return res.status(400).json({ error: `topicCreationPolicy는 ${TOPIC_CREATION_LEVELS.join('/')} 중 하나여야 합니다.` });
       }
-    }
-    if ('invitePolicy' in (req.body ?? {})) {
-      const policy = req.body.invitePolicy;
-      if (policy !== 'member' && policy !== 'admin') {
-        return res.status(400).json({ error: "invitePolicy는 'member' 또는 'admin'이어야 합니다." });
-      }
-      fields.invitePolicy = policy;
+      fields.topicCreationPolicy = policy;
     }
     // [메시지 설정] 수정/삭제 허용 여부 + 수정/삭제 가능 시간.
     if ('messageEditDeleteEnabled' in (req.body ?? {})) {

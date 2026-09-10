@@ -8,6 +8,7 @@ import '../models/admin.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/invite_link.dart';
+import '../models/team_invite_link.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/team.dart';
@@ -76,6 +77,11 @@ class MyProfile {
 
   /// 서버 전체 운영자인지 — 관리자 콘솔 진입 메뉴를 보여줄지 판단하는 데만 쓴다.
   final bool isServerAdmin;
+
+  /// "팀 초대 링크 생성" 메뉴를 보여줄지 — 서버 설정(팀 초대 링크 생성 권한)에 달려 있어서
+  /// 클라이언트가 로컬 상태만으로 판단할 수 없어 서버가 최종 판정해서 내려준다.
+  final bool canCreateTeamInviteLink;
+
   const MyProfile({
     required this.username,
     required this.name,
@@ -86,6 +92,7 @@ class MyProfile {
     this.avatarUrl,
     this.role = 'guest',
     this.isServerAdmin = false,
+    this.canCreateTeamInviteLink = false,
   });
 
   factory MyProfile.fromJson(Map<String, dynamic> json) => MyProfile(
@@ -98,6 +105,7 @@ class MyProfile {
     avatarUrl: json['avatarUrl'] as String?,
     role: json['role'] as String? ?? 'guest',
     isServerAdmin: json['isServerAdmin'] as bool? ?? false,
+    canCreateTeamInviteLink: json['canCreateTeamInviteLink'] as bool? ?? false,
   );
 }
 
@@ -257,6 +265,7 @@ class ApiClient {
     String name, {
     required String securityQuestion,
     required String securityAnswer,
+    String? teamInviteToken,
   }) => _authRequest('/auth/register', {
     'username': username,
     'password': password,
@@ -264,6 +273,7 @@ class ApiClient {
     'name': name,
     'securityQuestion': securityQuestion,
     'securityAnswer': securityAnswer,
+    'teamInviteToken': ?teamInviteToken,
   });
 
   Future<AuthResult> login(String username, String password) =>
@@ -529,14 +539,16 @@ class ApiClient {
     await _get('/api/admin/stats') as Map<String, dynamic>,
   );
 
-  /// 서버 설정 변경 — 팀 생성 권한('member'|'admin'|'serverAdmin')과 부서·직책 관리
-  /// 범위('team'|'account').
+  /// 서버 설정 변경 — 팀 생성 권한, 팀 초대 링크 생성 권한(둘 다 'member'|'admin'|'serverAdmin')과
+  /// 부서·직책 관리 범위('team'|'account').
   Future<void> updateServerSettings({
     String? teamCreation,
+    String? teamInviteLinkCreation,
     String? orgScope,
   }) async {
     await _patch('/api/admin/settings', {
       'teamCreation': ?teamCreation,
+      'teamInviteLinkCreation': ?teamInviteLinkCreation,
       'orgScope': ?orgScope,
     });
   }
@@ -643,6 +655,39 @@ class ApiClient {
     await _delete('/api/invite-links/$id') as Map<String, dynamic>,
   );
 
+  // ─────────────── 팀 초대 링크(가입 시 팀 자동 합류 + 등급 자동 부여) ───────────────
+  // 서버가 매 요청마다 canCreateTeamInviteLink(서버 설정)를 다시 확인하므로, 권한이 없으면
+  // 403이 온다. 위 초대 링크와 달리 팀 합류/등급 부여까지 자동으로 한다는 게 핵심 차이.
+
+  /// 내가 만든 팀 초대 링크 목록(최신순).
+  Future<List<TeamInviteLink>> fetchTeamInviteLinks() async {
+    final list = await _get('/api/team-invite-links') as List;
+    return list
+        .map((e) => TeamInviteLink.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 새 팀 초대 링크 발급 — 유효기간은 서버에서 항상 7일로 고정된다. teamId는 내가 속한
+  /// 팀이어야 한다(서버가 다시 확인).
+  Future<TeamInviteLink> createTeamInviteLink({
+    required String teamId,
+    required AccountRole assignedRole,
+    String? label,
+  }) async => TeamInviteLink.fromJson(
+    await _post('/api/team-invite-links', {
+          'teamId': teamId,
+          'assignedRole': assignedRole.wire,
+          'label': ?label,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 폐기 — 내가 만든 링크만 지울 수 있다(서버가 다시 확인).
+  Future<TeamInviteLink> revokeTeamInviteLink(String id) async =>
+      TeamInviteLink.fromJson(
+        await _delete('/api/team-invite-links/$id') as Map<String, dynamic>,
+      );
+
   /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함) — 로그인/앱 시작 직후 팀 선택 화면이 쓴다.
   Future<List<Team>> fetchTeams() async {
     final list = await _get('/api/teams') as List;
@@ -665,14 +710,13 @@ class ApiClient {
     );
   }
 
-  /// 팀 이름/도메인/아이콘/초대 권한/메시지 설정 변경 — 소유자·관리자만(서버가 다시 검사한다).
+  /// 팀 이름/아이콘/토픽 생성 권한/메시지 설정 변경 — 소유자·관리자만(서버가 다시 검사한다).
   Future<Team> updateTeam(
     String teamId, {
     String? name,
     String? iconEmoji,
     String? iconColor,
-    String? domain,
-    String? invitePolicy,
+    String? topicCreationPolicy,
     bool? messageEditDeleteEnabled,
     int? messageEditDeleteWindowSeconds,
   }) async {
@@ -681,8 +725,7 @@ class ApiClient {
             'name': ?name,
             'iconEmoji': ?iconEmoji,
             'iconColor': ?iconColor,
-            'domain': ?domain,
-            'invitePolicy': ?invitePolicy,
+            'topicCreationPolicy': ?topicCreationPolicy,
             'messageEditDeleteEnabled': ?messageEditDeleteEnabled,
             'messageEditDeleteWindowSeconds': ?messageEditDeleteWindowSeconds,
           })

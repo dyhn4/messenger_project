@@ -9,8 +9,19 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../screens/image_viewer_screen.dart';
+import '../screens/pdf_viewer_screen.dart';
+import '../screens/text_viewer_screen.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
+
+/// 파일명을 눌렀을 때 메신저 창 안에서 바로 열어 보여줄 수 있는 확장자인지 — 그 외(워드/엑셀/
+/// 파워포인트 등)는 지금처럼 OS 기본 프로그램으로 연다. Flutter 생태계에 오피스 문서를 원본
+/// 서식 그대로 렌더링하는 방법이 마땅치 않아서(서버에 LibreOffice 변환 파이프라인을 새로
+/// 두지 않는 한), 인앱 뷰어는 부담 없이 구현 가능한 PDF/텍스트로 한정한다.
+bool _isInAppViewable(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+  return ext == 'pdf' || ext == 'txt';
+}
 
 /// 첨부를 내려받아 [attachmentKey]/[attachmentNonce]가 있으면(비밀 대화) 그 자리에서 복호화까지
 /// 한다 — 서버는 암호화된 바이트만 갖고 있으므로 표시/저장 전에 항상 이 함수를 거쳐야 한다.
@@ -283,14 +294,16 @@ class _DownloadableImageState extends State<DownloadableImage> {
   }
 }
 
-/// 채팅/댓글에 올라온 파일 하나. 누르면 외부 앱으로 열고, 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
+/// 채팅/댓글에 올라온 파일 하나. 누르면 항상 먼저 전체를 다 받은 뒤에 PDF/텍스트는 인앱
+/// 뷰어로, 그 외는 외부 앱으로 열고(_open 참고), 마우스를 올리면 오른쪽 위에 다운로드
+/// 버튼이 뜬다.
 class DownloadableFile extends StatefulWidget {
   final Session session;
   final String url;
   final String fileName;
 
-  /// DownloadableImage와 동일한 의미 — 있으면 서버 URL은 암호화된 바이트라 바로 열 수 없고,
-  /// 다운로드+복호화 후 임시 파일로 저장해야 외부 앱으로 열 수 있다.
+  /// DownloadableImage와 동일한 의미 — 있으면 서버 URL은 암호화된 바이트라, 복호화해야
+  /// 실제 내용을 볼 수 있다.
   final String? attachmentKey;
   final String? attachmentNonce;
   const DownloadableFile({
@@ -310,8 +323,6 @@ class _DownloadableFileState extends State<DownloadableFile> {
   bool _hovering = false;
   bool _downloading = false;
   bool _opening = false;
-
-  bool get _isSecret => widget.attachmentKey != null;
 
   Future<void> _download() async {
     setState(() => _downloading = true);
@@ -339,9 +350,11 @@ class _DownloadableFileState extends State<DownloadableFile> {
     }
   }
 
-  /// 비밀 대화 첨부는 서버 URL이 암호화된 바이트라 그 URL을 그대로 외부 앱으로 열 수 없다 —
-  /// 복호화한 뒤 임시 파일에 써서 그 로컬 경로를 연다.
-  Future<void> _openSecret() async {
+  /// 파일명을 누르면 항상 먼저 전체를 다 받은 뒤에(비밀 대화면 복호화까지) 연다 — 비밀
+  /// 대화가 아닌 파일도 서버 URL을 그대로 OS에 던지면 브라우저가 형식에 따라 바로 열거나
+  /// 자기 다운로드 폴더에 받아버리는 등 동작이 제각각이라, 항상 이 앱이 직접 받아서 연 다음
+  /// 순서를 보장한다(비밀 대화 파일이 원래 하던 방식과 동일하게 통일).
+  Future<void> _open() async {
     setState(() => _opening = true);
     try {
       final bytes = await fetchAttachmentBytes(
@@ -349,11 +362,39 @@ class _DownloadableFileState extends State<DownloadableFile> {
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,
       );
-      final dir = await getTemporaryDirectory();
-      final tempFile = File('${dir.path}/${widget.fileName}');
-      await tempFile.writeAsBytes(bytes);
+      if (!mounted) return;
+
+      if (_isInAppViewable(widget.fileName)) {
+        final ext = widget.fileName.split('.').last.toLowerCase();
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ext == 'pdf'
+                ? PdfViewerScreen(
+                    fileName: widget.fileName,
+                    bytesFuture: Future.value(bytes),
+                  )
+                : TextViewerScreen(
+                    fileName: widget.fileName,
+                    bytesFuture: Future.value(bytes),
+                  ),
+          ),
+        );
+        return;
+      }
+
+      // 비밀 대화 파일은 계속 임시 폴더에만 받는다 — 복호화된 평문을 사용자의 영구 다운로드
+      // 폴더에 남기지 않기 위한 의도적인 구분이다. 일반 파일은 설정에서 다운로드 폴더를
+      // 지정해뒀으면 그 폴더에 실제로 저장해서 열고(다운로드 버튼으로 받은 것과 같은 파일이
+      // 다운로드 폴더에 남아있게), 지정 안 했으면 원래대로 임시 폴더로 폴백한다.
+      final isSecret = widget.attachmentKey != null;
+      final downloadFolder = widget.session.settings.downloadFolder;
+      final dirPath = (!isSecret && downloadFolder.isNotEmpty)
+          ? downloadFolder
+          : (await getTemporaryDirectory()).path;
+      final file = File('$dirPath${Platform.pathSeparator}${widget.fileName}');
+      await file.writeAsBytes(bytes);
       await launchUrl(
-        Uri.file(tempFile.path),
+        Uri.file(file.path),
         mode: LaunchMode.externalApplication,
       );
     } catch (e) {
@@ -372,12 +413,7 @@ class _DownloadableFileState extends State<DownloadableFile> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
-        onTap: _isSecret
-            ? (_opening ? null : _openSecret)
-            : () => launchUrl(
-                Uri.parse(widget.url),
-                mode: LaunchMode.externalApplication,
-              ),
+        onTap: _opening ? null : _open,
         child: Stack(
           clipBehavior: Clip.none,
           children: [

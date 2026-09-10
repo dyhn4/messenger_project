@@ -7,7 +7,7 @@ import { accountRole } from './permissions.js';
  * 권한이 계정 등급(users.role)과 팀 소유자 여부(team_members.role) 두 축으로 나뉘어서,
  * 라우터마다 두 번씩 조회하지 않도록 여기서 묶는다.
  *
- * 반환값을 그대로 permissions.js의 canManageTeam/canInviteMembers 등에 넘길 수 있다.
+ * 반환값을 그대로 permissions.js의 canManageTeam/canCreateTopic 등에 넘길 수 있다.
  */
 export async function teamAccess(teamId, userId) {
   const [user, teamRole] = await Promise.all([findUserById(userId), getTeamRole(teamId, userId)]);

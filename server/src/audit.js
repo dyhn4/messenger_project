@@ -23,6 +23,8 @@ export const AUDIT = {
   serverSettings: 'server.settings',
   inviteLinkCreate: 'invite.create',
   inviteLinkRevoke: 'invite.revoke',
+  teamInviteLinkCreate: 'teamInvite.create',
+  teamInviteLinkRevoke: 'teamInvite.revoke',
 };
 
 /**

@@ -15,15 +15,6 @@ export function findTeamById(id) {
     .then((rows) => rows[0] ?? null);
 }
 
-/** 팀 도메인 중복 확인용(도메인은 서버 전체에서 유일해야 한다). */
-export function findTeamByDomain(domain) {
-  return db
-    .select()
-    .from(teams)
-    .where(eq(teams.domain, domain))
-    .then((rows) => rows[0] ?? null);
-}
-
 /** 이 사람이 속한 팀 목록 — 팀 정보에 "그 팀에서 내 등급"까지 같이 준다(팀 목록 화면에서
  * 소유자에게만 설정 버튼을 보여주는 등에 쓴다). 만든 순서(오래된 것부터)로 정렬한다. */
 export function listTeamsForUser(userId) {

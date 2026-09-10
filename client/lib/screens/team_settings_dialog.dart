@@ -5,9 +5,11 @@ import '../models/team.dart';
 import '../services/session.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/muted_scrollbar.dart';
 import '../widgets/org_edit_dialog.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/user_avatar.dart';
+import 'team_invite_link_screen.dart';
 
 /// 팀 설정(소유자·관리자만). "팀 정보"(이름·도메인·아이콘·초대 권한, 소유자에게는 소유권
 /// 이양/팀 삭제까지)와 "팀원"(추가·등급 변경·부서/직책·빼기) 두 탭으로 나뉜다.
@@ -38,16 +40,15 @@ class TeamSettingsDialog extends StatefulWidget {
 
 class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   late final _nameController = TextEditingController(text: widget.team.name);
-  late final _domainController = TextEditingController(
-    text: widget.team.domain ?? '',
-  );
   late String _emoji = widget.team.iconEmoji ?? '';
   late Color? _color = parseHexColor(widget.team.iconColor);
-  late InvitePolicy _invitePolicy = widget.team.invitePolicy;
+  late TopicCreationPolicy _topicCreationPolicy =
+      widget.team.topicCreationPolicy;
   late bool _messageEditDeleteEnabled = widget.team.messageEditDeleteEnabled;
   late int _messageEditDeleteWindow =
       widget.team.messageEditDeleteWindowSeconds;
   bool _savingInfo = false;
+  final _infoScrollController = ScrollController();
 
   List<AppUser>? _members;
   String? _membersError;
@@ -63,7 +64,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   @override
   void dispose() {
     _nameController.dispose();
-    _domainController.dispose();
+    _infoScrollController.dispose();
     super.dispose();
   }
 
@@ -101,14 +102,13 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     if (name.isEmpty) return;
     setState(() => _savingInfo = true);
     try {
-      // 이모지·색·도메인은 "없음"도 고를 수 있어야 해서 빈 문자열로 보낸다(서버가 null로 지운다).
+      // 이모지·색은 "없음"도 고를 수 있어야 해서 빈 문자열로 보낸다(서버가 null로 지운다).
       await widget.session.updateTeam(
         widget.team,
         name: name,
         iconEmoji: _emoji,
         iconColor: _color == null ? '' : colorToHex(_color!),
-        domain: _domainController.text.trim(),
-        invitePolicy: _invitePolicy,
+        topicCreationPolicy: _topicCreationPolicy,
         messageEditDeleteEnabled: _messageEditDeleteEnabled,
         messageEditDeleteWindowSeconds: _messageEditDeleteWindow,
       );
@@ -234,18 +234,25 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         title: '팀 설정',
         maxWidth: 520,
         maxHeight: 700,
+        // 오른쪽 여백을 0으로 줘서 "팀 정보" 탭의 스크롤 영역이 실제 레이아웃 상으로 창
+        // 끝까지 닿게 한다(settings_screen.dart와 같은 이유 — Positioned 오버플로 트릭은
+        // 스크롤바 히트테스트가 안 먹혀서, 폭 자체를 넓히는 이 방식을 쓴다). 대신 오른쪽
+        // 여백이 필요한 부분(탭바, 스크롤 내용, 팀원 탭, 저장 버튼)은 각자 직접 챙긴다.
+        padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const TabBar(
-              tabs: [
-                Tab(text: '팀 정보'),
-                Tab(text: '팀원'),
-              ],
+            const Padding(
+              padding: EdgeInsets.only(right: 20),
+              child: TabBar(
+                tabs: [
+                  Tab(text: '팀 정보'),
+                  Tab(text: '팀원'),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
-            Flexible(
+            Expanded(
               child: TabBarView(
                 children: [_buildInfoTab(context), _buildMembersTab(context)],
               ),
@@ -257,135 +264,202 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   }
 
   Widget _buildInfoTab(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Center(child: TeamAvatar(team: _preview, size: 72)),
-          const SizedBox(height: 16),
-          const _SectionLabel('팀 아이콘'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _EmojiChoice(
-                selected: _emoji.isEmpty,
-                onTap: () => setState(() => _emoji = ''),
-                child: Text(
-                  _preview.initial,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-              for (final e in _teamEmojis)
-                _EmojiChoice(
-                  selected: e == _emoji,
-                  onTap: () => setState(() => _emoji = e),
-                  child: Text(e, style: const TextStyle(fontSize: 18)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const _SectionLabel('배경색'),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              for (final c in _teamColors)
-                _ColorChoice(
-                  color: c,
-                  selected: _color?.toARGB32() == c.toARGB32(),
-                  onTap: () => setState(() => _color = c),
-                ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          const _SectionLabel('팀 이름'),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _nameController,
-            maxLength: 30,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            onChanged: (_) => setState(() {}), // 미리보기 첫 글자 갱신
-          ),
-          const _SectionLabel('팀 도메인'),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _domainController,
-            maxLength: 30,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-              hintText: '예: pst-dev (비워두면 사용 안 함)',
-              helperText: '영문 소문자·숫자·하이픈. 서버 전체에서 유일해야 합니다.',
-            ),
-          ),
-          const SizedBox(height: 12),
-          const _SectionLabel('멤버 초대 권한'),
-          const SizedBox(height: 4),
-          Text(
-            '방(토픽·그룹)에 다른 사람을 초대할 수 있는 등급입니다. 준회원은 어느 설정에서도 초대할 수 없습니다.',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
-          ),
-          const SizedBox(height: 8),
-          SegmentedButton<InvitePolicy>(
-            segments: [
-              for (final p in InvitePolicy.values)
-                ButtonSegment(value: p, label: Text(p.label)),
-            ],
-            selected: {_invitePolicy},
-            onSelectionChanged: (s) => setState(() => _invitePolicy = s.first),
-          ),
-          const SizedBox(height: 20),
-          const _SectionLabel('메시지 설정'),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _messageEditDeleteEnabled,
-            onChanged: (v) => setState(() => _messageEditDeleteEnabled = v),
-            title: const Text('메시지 수정/삭제'),
-            subtitle: Text(
-              _messageEditDeleteEnabled
-                  ? '작성 후 정해진 시간 안에서만 메시지·댓글을 수정하거나 삭제할 수 있습니다.'
-                  : '이 팀에서는 아무도(소유자·관리자 포함) 메시지·댓글을 수정하거나 삭제할 수 없습니다.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-          ),
-          if (_messageEditDeleteEnabled) ...[
-            const SizedBox(height: 4),
-            const _SectionLabel('수정/삭제 가능 시간'),
-            const SizedBox(height: 4),
-            Text(
-              '작성 후 이 시간이 지나면 본인 메시지도, 관리자의 콘텐츠 관리도 수정·삭제할 수 없습니다.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final seconds in editDeleteWindowOptions)
-                  ChoiceChip(
-                    label: Text(formatEditDeleteWindow(seconds)),
-                    selected: _messageEditDeleteWindow == seconds,
-                    onSelected: (_) =>
-                        setState(() => _messageEditDeleteWindow = seconds),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: MutedScrollbar(
+            controller: _infoScrollController,
+            child: SingleChildScrollView(
+              controller: _infoScrollController,
+              // 스크롤바 두께(10) + 원래 창 오른쪽 여백(20)만큼을 내용 쪽에서 챙긴다.
+              padding: const EdgeInsets.only(right: 34),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(child: TeamAvatar(team: _preview, size: 72)),
+                  const SizedBox(height: 16),
+                  const _SectionLabel('팀 아이콘'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _EmojiChoice(
+                        selected: _emoji.isEmpty,
+                        onTap: () => setState(() => _emoji = ''),
+                        child: Text(
+                          _preview.initial,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      for (final e in _teamEmojis)
+                        _EmojiChoice(
+                          selected: e == _emoji,
+                          onTap: () => setState(() => _emoji = e),
+                          child: Text(e, style: const TextStyle(fontSize: 18)),
+                        ),
+                    ],
                   ),
-              ],
+                  const SizedBox(height: 16),
+                  const _SectionLabel('배경색'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final c in _teamColors)
+                        _ColorChoice(
+                          color: c,
+                          selected: _color?.toARGB32() == c.toARGB32(),
+                          onTap: () => setState(() => _color = c),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  const _SectionLabel('팀 이름'),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _nameController,
+                    maxLength: 30,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (_) => setState(() {}), // 미리보기 첫 글자 갱신
+                  ),
+                  // "팀을 관리할 수 있는 사람"이라도 "팀 초대 링크 생성 권한"(서버 설정)이
+                  // 없으면 안 보인다 — 삼선 메뉴/더보기 탭에 있던 것과 같은 조건이다. 어느
+                  // 팀으로 초대할지 이미 정해져 있는 이 화면에서 만드는 게 더 자연스러워서
+                  // 여기로 옮겼다(원래 있던 "팀 도메인" 필드는 실제로 아무 기능이 없어서 뺐다).
+                  if (widget.session.canCreateTeamInviteLink) ...[
+                    const SizedBox(height: 20),
+                    const _SectionLabel('팀 초대 링크'),
+                    const SizedBox(height: 4),
+                    Text(
+                      '이 링크로 가입하면 자동으로 이 팀에 합류하고 지정한 등급이 함께 부여됩니다.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: () => showTeamInviteLinkScreen(
+                          context,
+                          widget.session,
+                          initialTeamId: widget.team.id,
+                        ),
+                        icon: const Icon(Icons.group_add_outlined, size: 18),
+                        label: const Text('팀 초대 링크 생성'),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  const _SectionLabel('토픽 생성 권한'),
+                  const SizedBox(height: 4),
+                  Text(
+                    '새 토픽을 만들 수 있는 등급입니다. 그룹채팅은 이 설정과 무관하게 정회원 '
+                    '이상이면 항상 만들 수 있고, 준회원은 어느 설정에서도 만들 수 없습니다.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SegmentedButton<TopicCreationPolicy>(
+                    segments: [
+                      for (final p in TopicCreationPolicy.values)
+                        ButtonSegment(value: p, label: Text(p.label)),
+                    ],
+                    selected: {_topicCreationPolicy},
+                    onSelectionChanged: (s) =>
+                        setState(() => _topicCreationPolicy = s.first),
+                  ),
+                  const SizedBox(height: 20),
+                  const _SectionLabel('메시지 설정'),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _messageEditDeleteEnabled,
+                    onChanged: (v) =>
+                        setState(() => _messageEditDeleteEnabled = v),
+                    title: const Text('메시지 수정/삭제'),
+                    subtitle: Text(
+                      _messageEditDeleteEnabled
+                          ? '작성 후 정해진 시간 안에서만 메시지·댓글을 수정하거나 삭제할 수 있습니다.'
+                          : '이 팀에서는 아무도(소유자·관리자 포함) 메시지·댓글을 수정하거나 삭제할 수 없습니다.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                  ),
+                  if (_messageEditDeleteEnabled) ...[
+                    const SizedBox(height: 4),
+                    const _SectionLabel('수정/삭제 가능 시간'),
+                    const SizedBox(height: 4),
+                    Text(
+                      '작성 후 이 시간이 지나면 본인 메시지도, 관리자의 콘텐츠 관리도 수정·삭제할 수 없습니다.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final seconds in editDeleteWindowOptions)
+                          ChoiceChip(
+                            label: Text(formatEditDeleteWindow(seconds)),
+                            selected: _messageEditDeleteWindow == seconds,
+                            onSelected: (_) => setState(
+                              () => _messageEditDeleteWindow = seconds,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  if (_isOwner) ...[
+                    const SizedBox(height: 24),
+                    const Divider(height: 1),
+                    const SizedBox(height: 12),
+                    _SectionLabel(
+                      '팀 삭제',
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '이 팀의 모든 채팅방·메시지·댓글이 함께 사라지며 되돌릴 수 없습니다.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _deleteTeam,
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        label: const Text('팀 삭제하기'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          ],
-          const SizedBox(height: 16),
-          Align(
+          ),
+        ),
+        const SizedBox(height: 16),
+        // FloatingDialog의 오른쪽 여백을 0으로 받았으니(위 참고), 스크롤바가 필요 없는
+        // 저장 버튼 줄은 여기서 직접 원래 여백(20)만큼 오른쪽을 띄워준다. 스크롤 밖에 있어서
+        // 내용이 아무리 길어도 항상 보인다.
+        Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: Align(
             alignment: Alignment.centerRight,
             child: FilledButton(
               onPressed: _savingInfo ? null : _saveInfo,
@@ -398,33 +472,8 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                   : const Text('저장'),
             ),
           ),
-          if (_isOwner) ...[
-            const SizedBox(height: 24),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            _SectionLabel('팀 삭제', color: Theme.of(context).colorScheme.error),
-            const SizedBox(height: 4),
-            Text(
-              '이 팀의 모든 채팅방·메시지·댓글이 함께 사라지며 되돌릴 수 없습니다.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: _deleteTeam,
-                icon: const Icon(Icons.delete_outline, size: 18),
-                label: const Text('팀 삭제하기'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -433,37 +482,42 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     if (_members == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(child: _SectionLabel('팀원 ${_members!.length}')),
-            TextButton.icon(
-              onPressed: _addMembers,
-              icon: const Icon(Icons.person_add_alt, size: 18),
-              label: const Text('추가'),
-            ),
-          ],
-        ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: _members!.length,
-            itemBuilder: (context, i) {
-              final user = _members![i];
-              return _MemberRow(
-                session: widget.session,
-                user: user,
-                isTeamOwner: widget.team.isOwner,
-                isMe: user.id == widget.session.userId,
-                onEditOrg: () => _editOrg(user),
-                onTransferOwnership: () => _transferOwnership(user),
-                onRemove: () => _removeMember(user),
-              );
-            },
+    // "팀 정보" 탭과 달리 이 탭은 스크롤바를 오른쪽 끝에 붙일 필요가 없지만, FloatingDialog의
+    // 오른쪽 여백이 0이므로(위 참고) 여기서도 원래 여백(20)만큼 직접 챙긴다.
+    return Padding(
+      padding: const EdgeInsets.only(right: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: _SectionLabel('팀원 ${_members!.length}')),
+              TextButton.icon(
+                onPressed: _addMembers,
+                icon: const Icon(Icons.person_add_alt, size: 18),
+                label: const Text('추가'),
+              ),
+            ],
           ),
-        ),
-      ],
+          Expanded(
+            child: ListView.builder(
+              itemCount: _members!.length,
+              itemBuilder: (context, i) {
+                final user = _members![i];
+                return _MemberRow(
+                  session: widget.session,
+                  user: user,
+                  isTeamOwner: widget.team.isOwner,
+                  isMe: user.id == widget.session.userId,
+                  onEditOrg: () => _editOrg(user),
+                  onTransferOwnership: () => _transferOwnership(user),
+                  onRemove: () => _removeMember(user),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

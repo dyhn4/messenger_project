@@ -95,12 +95,17 @@ class _StatsTabState extends State<_StatsTab> {
     }
   }
 
-  Future<void> _save({String? teamCreation, String? orgScope}) async {
+  Future<void> _save({
+    String? teamCreation,
+    String? orgScope,
+    String? teamInviteLinkCreation,
+  }) async {
     setState(() => _saving = true);
     try {
       await widget.session.api!.updateServerSettings(
         teamCreation: teamCreation,
         orgScope: orgScope,
+        teamInviteLinkCreation: teamInviteLinkCreation,
       );
       await _load();
     } catch (e) {
@@ -178,6 +183,40 @@ class _StatsTabState extends State<_StatsTab> {
               onSelectionChanged: _saving
                   ? null
                   : (s) => _save(teamCreation: s.first),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '팀 초대 링크 생성 권한',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '"팀 초대 링크"로 가입하면 지정한 팀에 자동 합류하고 등급도 자동으로 부여됩니다. '
+            '이 링크를 만들 수 있는 최소 등급입니다. 준회원은 어느 설정에서도 만들 수 없고, '
+            '서버 운영자는 설정과 무관하게 항상 만들 수 있습니다.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<String>(
+              segments: [
+                for (final level in teamCreationLevels)
+                  ButtonSegment(
+                    value: level,
+                    label: Text(teamCreationLabel(level)),
+                  ),
+              ],
+              selected: {stats.teamInviteLinkCreation},
+              onSelectionChanged: _saving
+                  ? null
+                  : (s) => _save(teamInviteLinkCreation: s.first),
             ),
           ),
           const SizedBox(height: 20),
@@ -654,7 +693,6 @@ class _TeamsTabState extends State<_TeamsTab> {
             title: Text(team.name),
             subtitle: Text(
               '${team.memberCount}명'
-              '${team.domain == null ? '' : ' · ${team.domain}'}'
               '${team.createdBy == null ? '' : ' · 만든 사람 ${team.createdBy}'}'
               ' · ${formatDateTime(team.createdAt)}',
             ),

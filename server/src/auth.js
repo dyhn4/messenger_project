@@ -12,6 +12,14 @@ import {
   insertUser,
   updateUser,
 } from "./db/queries/users.js";
+import {
+  findTeamInviteLinkByToken,
+  isTeamInviteLinkValid,
+  markTeamInviteLinkUsed,
+} from "./db/queries/teamInviteLinks.js";
+import { addTeamMembers } from "./db/queries/teams.js";
+import { addRoomMembers, listPublicTopics, listRoomMemberIds } from "./db/queries/rooms.js";
+import { notifyMembership, postSystemMessage } from "./rooms.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_LENGTH_ERROR = "아이디는 4~20자여야 합니다.";
@@ -104,6 +112,7 @@ export function createAuthRouter(io) {
       name,
       securityQuestion,
       securityAnswer,
+      teamInviteToken,
     } = req.body ?? {};
     if (!username || !password || !email || !name) {
       return res
@@ -164,6 +173,34 @@ export function createAuthRouter(io) {
     // 가입만으로는 어느 팀에도 들어가지 않는다 — 팀은 본인이 직접 만들거나(만든 사람이 그
     // 팀의 소유자가 된다), 소유자/관리자가 팀에 넣어줘야 들어간다(teams.js의 멤버 추가).
     // 공개 토픽 자동 가입도 이제 "서버 전체"가 아니라 "그 팀에 들어올 때" 일어난다.
+    //
+    // 예외: "팀 초대 링크"로 왔다면 그 팀에 자동으로 합류시키고, 링크에 미리 정해둔 등급을
+    // 부여한다(서버 운영자가 일일이 등급을 올려주는 수고를 줄이는 게 이 기능의 목적).
+    // 토큰이 있어도 유효하지 않으면(만료·폐기·오타) 조용히 무시한다 — 가입 자체는 원래
+    // 초대 없이도 열려 있으므로 가입을 실패시킬 이유가 없다. 서버의 첫 계정(운영자)은 이미
+    // role: 'admin'으로 시작하고 팀 개념과 무관하므로 건너뛴다.
+    if (!firstAccount && typeof teamInviteToken === "string" && teamInviteToken) {
+      const link = await findTeamInviteLinkByToken(teamInviteToken);
+      if (isTeamInviteLinkValid(link)) {
+        await addTeamMembers(link.teamId, [user.id], "member");
+        if (link.assignedRole !== user.role) {
+          await updateUser(user.id, { role: link.assignedRole });
+        }
+        await markTeamInviteLinkUsed(link.id);
+        // 준회원으로 부여됐다면(assignedRole === 'guest') 공개 토픽 자동 가입 대상이
+        // 아니다 — admin.js의 등급 상향 처리와 같은 규칙.
+        if (link.assignedRole !== "guest") {
+          for (const room of await listPublicTopics(link.teamId)) {
+            const memberIds = await listRoomMemberIds(room.id);
+            if (memberIds.includes(user.id)) continue;
+            await addRoomMembers(room.id, [user.id]);
+            await notifyMembership(io, room);
+            await postSystemMessage(io, room, `${user.name} 님이 참여했습니다.`);
+          }
+        }
+      }
+    }
+
     res.status(201).json({
       ...issueTokenPair(user),
       userId: user.id,

@@ -5,7 +5,10 @@ import { serverSettings } from '../schema.js';
 /** 서버 설정은 항상 이 한 행만 쓴다. */
 const SINGLETON_ID = 1;
 
-export const DEFAULT_SERVER_SETTINGS = { teamCreation: 'anyone' };
+// teamInviteLinkCreation은 스키마 기본값(schema.js)과 맞춰 'admin'을 명시한다 — 설정 행이
+// 아직 한 번도 안 만들어졌을 때(관리자가 설정을 한 번도 안 건드린 설치 직후) 이 값이 그대로
+// canCreateTeamInviteLink에 쓰이므로, 등급/팀 합류를 동시에 주는 기능답게 기본을 보수적으로 둔다.
+export const DEFAULT_SERVER_SETTINGS = { teamCreation: 'anyone', teamInviteLinkCreation: 'admin' };
 
 /** 설정 행이 아직 없으면(설치 직후) 기본값을 돌려준다 — 호출부는 늘 값이 있다고 봐도 된다. */
 export async function getServerSettings() {

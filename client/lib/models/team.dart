@@ -37,20 +37,29 @@ extension AccountRoleLabel on AccountRole {
   bool get canCreateRooms => this != AccountRole.guest;
 }
 
-/// 방에 멤버를 초대할 수 있는 최소 등급(팀 설정) — 서버 teams.invitePolicy와 같은 값.
-enum InvitePolicy {
+/// 새 토픽을 만들 수 있는 최소 등급(팀 설정) — 서버 teams.topicCreationPolicy와 같은 값.
+/// 그룹채팅은 이 설정과 무관하게 항상 정회원 이상이면 만들 수 있다(AccountRole.canCreateRooms).
+enum TopicCreationPolicy {
   member, // 정회원 이상(기본)
-  admin, // 소유자·관리자만
+  admin, // 관리자 이상(소유자 포함)
+  owner, // 소유자만
 }
 
-extension InvitePolicyLabel on InvitePolicy {
+extension TopicCreationPolicyLabel on TopicCreationPolicy {
   String get label => switch (this) {
-    InvitePolicy.member => '정회원 이상',
-    InvitePolicy.admin => '팀을 관리할 수 있는 사람만',
+    TopicCreationPolicy.member => '정회원 이상',
+    TopicCreationPolicy.admin => '관리자 이상',
+    TopicCreationPolicy.owner => '소유자만',
   };
 
-  String get wire => this == InvitePolicy.admin ? 'admin' : 'member';
+  String get wire => name;
 }
+
+TopicCreationPolicy topicCreationPolicyFromWire(String? s) => switch (s) {
+  'admin' => TopicCreationPolicy.admin,
+  'owner' => TopicCreationPolicy.owner,
+  _ => TopicCreationPolicy.member,
+};
 
 /// [메시지 설정]의 수정/삭제 가능 시간 선택지(초) — 서버 permissions.js의
 /// EDIT_DELETE_WINDOW_OPTIONS와 같은 목록이어야 한다(서버가 이 목록 밖의 값을 거부한다).
@@ -70,17 +79,14 @@ class Team {
   final String? createdBy;
   final DateTime createdAt;
 
-  /// 이름/아이콘/도메인/초대 권한은 소유자·관리자가 설정에서 바꿀 수 있어서 그 자리에서
+  /// 이름/아이콘/토픽 생성 권한은 소유자·관리자가 설정에서 바꿀 수 있어서 그 자리에서
   /// 갱신된다 — non-final.
   String name;
   String? iconEmoji;
   String? iconColor;
 
-  /// 팀을 가리키는 짧은 식별자(영문 소문자/숫자/하이픈). 안 정했으면 null.
-  String? domain;
-
-  /// 이 팀에서 방에 멤버를 초대할 수 있는 최소 등급.
-  InvitePolicy invitePolicy;
+  /// 이 팀에서 새 토픽을 만들 수 있는 최소 등급.
+  TopicCreationPolicy topicCreationPolicy;
 
   /// [메시지 설정] 메시지 수정/삭제를 쓰는지. false면 그 팀에서는 아무도(소유자·관리자 포함)
   /// 메시지/댓글을 고치거나 지울 수 없다.
@@ -102,8 +108,7 @@ class Team {
     required this.name,
     this.iconEmoji,
     this.iconColor,
-    this.domain,
-    this.invitePolicy = InvitePolicy.member,
+    this.topicCreationPolicy = TopicCreationPolicy.member,
     this.messageEditDeleteEnabled = true,
     this.messageEditDeleteWindowSeconds = 300,
     this.createdBy,
@@ -117,10 +122,9 @@ class Team {
     name: json['name'] as String,
     iconEmoji: json['iconEmoji'] as String?,
     iconColor: json['iconColor'] as String?,
-    domain: json['domain'] as String?,
-    invitePolicy: json['invitePolicy'] == 'admin'
-        ? InvitePolicy.admin
-        : InvitePolicy.member,
+    topicCreationPolicy: topicCreationPolicyFromWire(
+      json['topicCreationPolicy'] as String?,
+    ),
     messageEditDeleteEnabled: json['messageEditDeleteEnabled'] as bool? ?? true,
     messageEditDeleteWindowSeconds:
         (json['messageEditDeleteWindowSeconds'] as num?)?.toInt() ?? 300,
@@ -139,8 +143,11 @@ class Team {
   /// (서버 permissions.js의 canManageTeam과 같은 규칙).
   bool canManage(AccountRole role) => isOwner || role == AccountRole.admin;
 
-  /// 이 팀에서 방에 멤버를 초대할 수 있는지 — 계정 등급과 팀 설정(invitePolicy)을 함께 본다.
-  bool canInvite(AccountRole role) => invitePolicy == InvitePolicy.admin
-      ? canManage(role)
-      : role.canCreateRooms;
+  /// 이 팀에서 새 토픽을 만들 수 있는지 — 계정 등급·소유자 여부와 팀 설정
+  /// (topicCreationPolicy)을 함께 본다(서버 permissions.js의 canCreateTopic과 같은 규칙).
+  bool canCreateTopic(AccountRole role) => switch (topicCreationPolicy) {
+    TopicCreationPolicy.owner => isOwner,
+    TopicCreationPolicy.admin => canManage(role),
+    TopicCreationPolicy.member => role.canCreateRooms,
+  };
 }

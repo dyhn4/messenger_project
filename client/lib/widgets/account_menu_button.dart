@@ -76,6 +76,8 @@ class AccountMenuButton extends StatelessWidget {
               ],
             ),
           ),
+        // 팀 초대 링크 생성은 팀 설정(팀 정보 탭)으로 옮겼다 — 이미 어느 팀인지 정해진
+        // 곳에서 만드는 게 더 자연스러워서(team_settings_dialog.dart).
         // 서버 운영자에게만 보이는 항목(서버도 매 요청마다 다시 확인한다 — admin.js).
         if (session.isServerAdmin)
           PopupMenuItem<void>(

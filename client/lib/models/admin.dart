@@ -116,7 +116,6 @@ class AdminTeam {
   final String name;
   final String? iconEmoji;
   final String? iconColor;
-  final String? domain;
   final int memberCount;
   final String? createdBy;
   final DateTime createdAt;
@@ -126,7 +125,6 @@ class AdminTeam {
     required this.name,
     this.iconEmoji,
     this.iconColor,
-    this.domain,
     required this.memberCount,
     this.createdBy,
     required this.createdAt,
@@ -137,7 +135,6 @@ class AdminTeam {
     name: json['name'] as String,
     iconEmoji: json['iconEmoji'] as String?,
     iconColor: json['iconColor'] as String?,
-    domain: json['domain'] as String?,
     memberCount: (json['memberCount'] as num?)?.toInt() ?? 0,
     createdBy: json['createdBy'] as String?,
     createdAt: DateTime.fromMillisecondsSinceEpoch(
@@ -217,6 +214,10 @@ String auditActionLabel(String action) => switch (action) {
   'user.org' => '부서·직책 변경',
   'user.serverAdmin' => '서버 운영자 지정·해제',
   'server.settings' => '서버 설정 변경',
+  'invite.create' => '초대 링크 생성',
+  'invite.revoke' => '초대 링크 폐기',
+  'teamInvite.create' => '팀 초대 링크 생성',
+  'teamInvite.revoke' => '팀 초대 링크 폐기',
   _ => action,
 };
 
@@ -233,6 +234,8 @@ const auditActionFilters = [
   'user.org',
   'user.suspend',
   'user.serverAdmin',
+  'invite.create',
+  'teamInvite.create',
 ];
 
 /// 계정 등급 코드 → 한국어 이름(관리자 콘솔 목록용).
@@ -264,6 +267,10 @@ class ServerStats {
   /// 팀을 만들 수 있는 최소 등급 — 'member' | 'admin' | 'serverAdmin'.
   final String teamCreation;
 
+  /// 팀 초대 링크(가입 시 팀 자동 합류 + 등급 자동 부여)를 만들 수 있는 최소 등급 —
+  /// teamCreation과 같은 값 집합.
+  final String teamInviteLinkCreation;
+
   /// 부서·직책을 어디에 두는지 — 'team'(팀마다 다르게) | 'account'(계정 하나로).
   final String orgScope;
 
@@ -276,6 +283,7 @@ class ServerStats {
     required this.uploadBytes,
     required this.serverStartedAt,
     required this.teamCreation,
+    required this.teamInviteLinkCreation,
     required this.orgScope,
   });
 
@@ -290,6 +298,7 @@ class ServerStats {
       (json['serverStartedAt'] as num?)?.toInt() ?? 0,
     ),
     teamCreation: json['teamCreation'] as String? ?? 'member',
+    teamInviteLinkCreation: json['teamInviteLinkCreation'] as String? ?? 'admin',
     orgScope: json['orgScope'] as String? ?? 'team',
   );
 }

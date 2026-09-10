@@ -25,7 +25,7 @@ import {
 } from './db/queries/rooms.js';
 import { findTeamById, isTeamMember, listAutoJoinTeamMemberIds } from './db/queries/teams.js';
 import { teamAccess } from './access.js';
-import { canBrowseTopics, canCreateRooms, canInviteMembers } from './permissions.js';
+import { canBrowseTopics, canCreateRooms, canCreateTopic } from './permissions.js';
 import {
   countUnreadForUser,
   getLastMessageAt,
@@ -317,13 +317,22 @@ export function createRoomsRouter(io) {
   router.post('/rooms', async (req, res) => {
     const scope = await requireTeamRole(req, res, req.body?.teamId);
     if (!scope) return;
-    const { teamId, role } = scope;
+    const { teamId, role, isOwner } = scope;
     if (!canCreateRooms(role)) {
       return res.status(403).json({ error: '준회원은 방을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.' });
     }
     const { type, name, description, memberIds, isPublic } = req.body ?? {};
     if (type !== 'topic' && type !== 'group') {
       return res.status(400).json({ error: "type은 'topic' 또는 'group'이어야 합니다 (DM은 /rooms/dm 사용)." });
+    }
+    // 토픽은 팀 설정(topicCreationPolicy)이 정한 등급 이상만 — 그룹채팅은 위 canCreateRooms
+    // 체크(정회원 이상)로 이미 충분하고 이 설정과 무관하다(README "토픽 생성 권한" 참고).
+    if (type === 'topic') {
+      const team = await findTeamById(teamId);
+      if (!canCreateTopic({ role, isOwner, team })) {
+        const need = { admin: '관리자 이상', owner: '소유자' }[team?.topicCreationPolicy] ?? '정회원 이상';
+        return res.status(403).json({ error: `이 팀은 ${need}만 토픽을 만들 수 있도록 설정되어 있습니다.` });
+      }
     }
     const trimmedName = typeof name === 'string' ? name.trim() : '';
     if (type === 'topic' && !trimmedName) {
@@ -398,16 +407,11 @@ export function createRoomsRouter(io) {
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
     if (room.type === 'dm') return res.status(403).json({ error: 'DM에는 멤버를 초대할 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
-    // 초대 권한은 팀 설정(invitePolicy)에 따라 정회원 이상 또는 팀 관리 권한자 — 준회원은 불가.
-    const team = await findTeamById(room.teamId);
+    // 이미 있는 방에 멤버를 추가로 초대하는 건 팀 설정과 무관하게 정회원 이상이면 누구나 —
+    // 준회원만 불가(canCreateRooms와 같은 기준). 새 토픽을 만드는 것과는 별개 규칙이다.
     const inviter = await teamAccess(room.teamId, req.user.sub);
-    if (!canInviteMembers({ role: inviter.role, isOwner: inviter.isOwner, team })) {
-      return res.status(403).json({
-        error:
-          team?.invitePolicy === 'admin'
-            ? '이 팀은 소유자·관리자만 멤버를 초대할 수 있습니다.'
-            : '멤버를 초대할 권한이 없습니다.',
-      });
+    if (!canCreateRooms(inviter.role)) {
+      return res.status(403).json({ error: '멤버를 초대할 권한이 없습니다.' });
     }
 
     const { userIds } = req.body ?? {};

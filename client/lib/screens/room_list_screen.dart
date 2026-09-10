@@ -659,6 +659,8 @@ class _MoreTabState extends State<_MoreTab> {
               title: const Text('초대 링크 생성'),
               onTap: () => showInviteLinkScreen(context, widget.session),
             ),
+          // 팀 초대 링크 생성은 팀 설정(팀 정보 탭)으로 옮겼다 — 이미 어느 팀인지 정해진
+          // 곳에서 만드는 게 더 자연스러워서(team_settings_dialog.dart).
           // PC 삼선 메뉴와 동일하게, 서버 운영자에게만 보인다.
           if (widget.session.isServerAdmin)
             ListTile(

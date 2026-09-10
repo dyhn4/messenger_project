@@ -56,12 +56,23 @@ export function canBrowseTopics(role) {
 }
 
 /**
- * 방에 다른 사람을 초대할 수 있는지 — 팀 설정(invitePolicy)에 따라 달라진다.
- * 'member'(기본)면 정회원 이상, 'admin'이면 그 팀을 관리할 수 있는 사람만. 준회원은 항상 불가.
+ * 새 토픽을 만들 수 있는지 — 팀 설정(topicCreationPolicy)이 정한 최소 등급을 넘어야 한다.
+ * 'member'(기본)면 정회원 이상, 'admin'이면 그 팀을 관리할 수 있는 사람만, 'owner'면 그 팀의
+ * 소유자만. **그룹채팅은 이 설정과 무관하게 항상 정회원 이상이면 만들 수 있다**(canCreateRooms) —
+ * 토픽은 팀 전체에 공개되는 채널이라 만드는 사람을 제한할 수 있어야 하지만, 그룹은 만든
+ * 사람이 스스로 고른 소수만 들어오는 사적인 대화라 제한할 이유가 약하기 때문이다.
  */
-export function canInviteMembers({ role, isOwner, team }) {
-  if (team?.invitePolicy === 'admin') return canManageTeam({ role, isOwner });
-  return canCreateRooms(role);
+export const TOPIC_CREATION_LEVELS = ['member', 'admin', 'owner'];
+
+export function canCreateTopic({ role, isOwner, team }) {
+  switch (team?.topicCreationPolicy) {
+    case 'owner':
+      return isOwner === true;
+    case 'admin':
+      return canManageTeam({ role, isOwner });
+    default: // 'member'
+      return canCreateRooms(role);
+  }
 }
 
 /**
@@ -87,6 +98,23 @@ export function canCreateTeam({ role, isServerAdmin, teamCreation }) {
   switch (teamCreation) {
     case 'serverAdmin':
       return false; // 위에서 이미 걸러졌으므로 운영자가 아니면 불가.
+    case 'admin':
+      return role === 'admin';
+    default: // 'member'
+      return canCreateRooms(role);
+  }
+}
+
+/**
+ * 팀 초대 링크(가입 시 특정 팀 자동 합류 + 등급 자동 부여)를 만들 수 있는지 — 서버 설정
+ * (server_settings.teamInviteLinkCreation)이 정한 최소 등급을 넘어야 한다. TEAM_CREATION_LEVELS와
+ * 같은 값 집합을 쓴다. canCreateTeam과 규칙 구조가 같다(둘 다 "서버 설정이 정한 최소 등급").
+ */
+export function canCreateTeamInviteLink({ role, isServerAdmin, teamInviteLinkCreation }) {
+  if (isServerAdmin) return true;
+  switch (teamInviteLinkCreation) {
+    case 'serverAdmin':
+      return false;
     case 'admin':
       return role === 'admin';
     default: // 'member'

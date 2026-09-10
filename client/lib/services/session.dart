@@ -76,6 +76,11 @@ class Session extends ChangeNotifier {
   /// 쓰고, 실제 접근 차단은 서버(admin.js)가 매 요청마다 다시 한다.
   bool isServerAdmin = false;
 
+  /// "팀 초대 링크 생성" 메뉴를 보여줄지(GET /users/me) — 서버 설정(팀 초대 링크 생성 권한)에
+  /// 달려 있어서 로컬 상태만으로 판단할 수 없다. 실제 생성은 서버(teamInvites.js)가 매
+  /// 요청마다 다시 확인한다.
+  bool canCreateTeamInviteLink = false;
+
   ApiClient? api;
   String? updateAvailableVersion; // 서버가 더 최신 버전을 갖고 있으면 그 버전 문자열(예: "1.0.1").
   bool updateDownloading = false;
@@ -140,6 +145,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _presenceSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
+  StreamSubscription? _roleUpdatedSub;
   StreamSubscription? _secretInviteSub;
   StreamSubscription? _secretAcceptedSub;
   StreamSubscription? _secretRejectedSub;
@@ -264,7 +270,23 @@ class Session extends ChangeNotifier {
 
   void setPendingPairRequest(PairRequest request) {
     _pendingPairRequest = request;
+    // consumePendingPairRequest()는 서버 주소/코드 입력칸을 채우는 화면(ServerSetupScreen 등)
+    // 딱 한 번만 소비하고 지워버린다 — 그런데 이 code가 "팀 초대 링크" 토큰이었을 수도 있고,
+    // 그건 한참 뒤(회원가입 폼 제출 시점)에야 쓰인다. 그래서 따로, 더 오래 남겨둔다 — 서버가
+    // 어차피 팀 초대 링크가 아니면 조용히 무시하므로 매번 값을 실어 보내도 안전하다.
+    pendingTeamInviteToken = request.code;
     notifyListeners();
+  }
+
+  /// 딥링크로 받은 code — 회원가입 시 함께 보내서 "팀 초대 링크"였다면 팀 자동 합류+등급
+  /// 부여를 받는다(server/src/auth.js가 유효하지 않으면 조용히 무시). LoginScreen의 회원가입
+  /// 제출이 성공하면 지운다(consumePendingTeamInviteToken).
+  String? pendingTeamInviteToken;
+
+  String? consumePendingTeamInviteToken() {
+    final token = pendingTeamInviteToken;
+    pendingTeamInviteToken = null;
+    return token;
   }
 
   void requestOpenRoom(Room room) {
@@ -423,17 +445,26 @@ class Session extends ChangeNotifier {
     required String securityQuestion,
     required String securityAnswer,
     required bool keepSignedIn,
-  }) => _auth(
-    () => api!.register(
-      u,
-      p,
-      email,
-      name,
-      securityQuestion: securityQuestion,
-      securityAnswer: securityAnswer,
-    ),
-    keepSignedIn: keepSignedIn,
-  );
+  }) async {
+    // 실패하면(아이디 중복 등) 고쳐서 다시 시도할 수 있어야 하므로, 성공했을 때만 지운다 —
+    // 여기서 바로 consumePendingTeamInviteToken()으로 지워버리면 재시도 때 팀 초대 맥락이
+    // 사라진다.
+    final teamInviteToken = pendingTeamInviteToken;
+    final ok = await _auth(
+      () => api!.register(
+        u,
+        p,
+        email,
+        name,
+        securityQuestion: securityQuestion,
+        securityAnswer: securityAnswer,
+        teamInviteToken: teamInviteToken,
+      ),
+      keepSignedIn: keepSignedIn,
+    );
+    if (ok) pendingTeamInviteToken = null;
+    return ok;
+  }
 
   Future<bool> _auth(
     Future<AuthResult> Function() call, {
@@ -527,7 +558,11 @@ class Session extends ChangeNotifier {
   /// 실제 차단은 항상 서버가 다시 하므로(server/src/permissions.js) 여기 값은 UI 힌트일 뿐이다.
   bool get canManageCurrentTeam => currentTeam?.canManage(accountRole) ?? false;
   bool get canCreateRooms => accountRole.canCreateRooms;
-  bool get canInviteToRooms => currentTeam?.canInvite(accountRole) ?? false;
+  // 새 토픽 생성은 팀 설정(topicCreationPolicy)을 따로 보고, 이미 있는 방에 멤버를 추가로
+  // 초대하는 건 팀 설정과 무관하게 항상 canCreateRooms와 같다(server/src/rooms.js 참고).
+  bool get canCreateTopic =>
+      currentTeam?.canCreateTopic(accountRole) ?? false;
+  bool get canInviteToRooms => canCreateRooms;
   bool get canModerateContent => canManageCurrentTeam;
 
   /// 팀 목록 화면처럼 특정 팀을 골라서 판단해야 할 때.
@@ -562,8 +597,7 @@ class Session extends ChangeNotifier {
     String? name,
     String? iconEmoji,
     String? iconColor,
-    String? domain,
-    InvitePolicy? invitePolicy,
+    TopicCreationPolicy? topicCreationPolicy,
     bool? messageEditDeleteEnabled,
     int? messageEditDeleteWindowSeconds,
   }) async {
@@ -572,16 +606,14 @@ class Session extends ChangeNotifier {
       name: name,
       iconEmoji: iconEmoji,
       iconColor: iconColor,
-      domain: domain,
-      invitePolicy: invitePolicy?.wire,
+      topicCreationPolicy: topicCreationPolicy?.wire,
       messageEditDeleteEnabled: messageEditDeleteEnabled,
       messageEditDeleteWindowSeconds: messageEditDeleteWindowSeconds,
     );
     team.name = updated.name;
     team.iconEmoji = updated.iconEmoji;
     team.iconColor = updated.iconColor;
-    team.domain = updated.domain;
-    team.invitePolicy = updated.invitePolicy;
+    team.topicCreationPolicy = updated.topicCreationPolicy;
     team.messageEditDeleteEnabled = updated.messageEditDeleteEnabled;
     team.messageEditDeleteWindowSeconds =
         updated.messageEditDeleteWindowSeconds;
@@ -664,6 +696,7 @@ class Session extends ChangeNotifier {
       avatarUrl = me.avatarUrl;
       accountRole = accountRoleFromWire(me.role);
       isServerAdmin = me.isServerAdmin;
+      canCreateTeamInviteLink = me.canCreateTeamInviteLink;
     } catch (_) {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
@@ -748,8 +781,7 @@ class Session extends ChangeNotifier {
         teams[i].name = team.name;
         teams[i].iconEmoji = team.iconEmoji;
         teams[i].iconColor = team.iconColor;
-        teams[i].domain = team.domain;
-        teams[i].invitePolicy = team.invitePolicy;
+        teams[i].topicCreationPolicy = team.topicCreationPolicy;
         teams[i].messageEditDeleteEnabled = team.messageEditDeleteEnabled;
         teams[i].messageEditDeleteWindowSeconds =
             team.messageEditDeleteWindowSeconds;
@@ -931,6 +963,20 @@ class Session extends ChangeNotifier {
       final newToken = await _tryRefreshAccessToken();
       if (newToken != null) {
         await chatSocket.connect(baseUrl: serverUrl!, token: newToken);
+      }
+    });
+    _roleUpdatedSub?.cancel();
+    _roleUpdatedSub = chatSocket.roleUpdated.listen((_) async {
+      // 서버 운영자가 관리자 콘솔에서 내 등급/서버 운영자 여부를 바꿨다는 알림 — 로그아웃
+      // 없이 바로 반영되도록 프로필을 다시 받아온다.
+      try {
+        final me = await api!.fetchMe();
+        accountRole = accountRoleFromWire(me.role);
+        isServerAdmin = me.isServerAdmin;
+        canCreateTeamInviteLink = me.canCreateTeamInviteLink;
+        notifyListeners();
+      } catch (_) {
+        // 실패해도 조용히 무시 — 다음 이벤트/재연결 때 다시 시도됨.
       }
     });
 
@@ -1708,6 +1754,7 @@ class Session extends ChangeNotifier {
     await _presenceSub?.cancel();
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();
+    await _roleUpdatedSub?.cancel();
     await _secretInviteSub?.cancel();
     await _secretAcceptedSub?.cancel();
     await _secretRejectedSub?.cancel();
@@ -1738,6 +1785,7 @@ class Session extends ChangeNotifier {
     avatarUrl = null;
     accountRole = AccountRole.guest;
     isServerAdmin = false;
+    canCreateTeamInviteLink = false;
     rooms.clear();
     // 로그아웃하면 팀 선택도 초기화 — 다시 로그인하면 팀 선택 화면부터 시작한다.
     teams.clear();

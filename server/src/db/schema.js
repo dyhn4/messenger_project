@@ -64,12 +64,10 @@ export const teams = pgTable('teams', {
   // 팀 아이콘 — 사용자 아바타와 같은 방식(이모지+배경색)으로 가볍게 시작한다.
   iconEmoji: text('icon_emoji'),
   iconColor: text('icon_color'),
-  // 팀을 사람이 읽을 수 있게 가리키는 짧은 식별자(영문 소문자/숫자/하이픈). 지금은 표시용이고,
-  // 나중에 초대 링크 등에 쓸 수 있도록 서버 전체에서 유일하게 둔다(안 정하면 null).
-  domain: text('domain').unique(),
-  // 방에 멤버를 초대할 수 있는 최소 등급 — 'member'(정회원도 가능, 기본) | 'admin'(관리자만).
-  // 준회원은 어느 값이든 초대할 수 없다(teams.js canInviteMembers 참고).
-  invitePolicy: text('invite_policy').notNull().default('member'),
+  // 새 토픽을 만들 수 있는 최소 등급 — 'member'(정회원도 가능, 기본) | 'admin'(관리자만) |
+  // 'owner'(소유자만). 그룹채팅은 이 설정과 무관하게 항상 정회원 이상 가능하다
+  // (permissions.js canCreateTopic 참고).
+  topicCreationPolicy: text('topic_creation_policy').notNull().default('member'),
   // [메시지 설정] 메시지 수정/삭제 허용 여부. false면 그 팀에서는 아무도(소유자·관리자 포함)
   // 메시지/댓글을 고치거나 지울 수 없다 — 대화 기록을 그대로 남겨야 하는 팀을 위한 스위치.
   messageEditDeleteEnabled: boolean('message_edit_delete_enabled').notNull().default(true),
@@ -116,6 +114,10 @@ export const serverSettings = pgTable('server_settings', {
   // 팀을 만들 수 있는 최소 계정 등급 — 'member'(정회원 이상, 기본) | 'admin'(관리자 이상) |
   // 'serverAdmin'(서버 운영자만). 준회원은 어느 값이든 팀을 만들 수 없다.
   teamCreation: text('team_creation').notNull().default('member'),
+  // 팀 초대 링크(가입 시 팀 자동 합류 + 등급 자동 부여)를 만들 수 있는 최소 계정 등급 —
+  // teamCreation과 같은 값 집합. 등급/팀 합류를 동시에 부여하는 힘이라 teamCreation보다
+  // 기본값을 더 보수적으로(관리자 이상) 둔다.
+  teamInviteLinkCreation: text('team_invite_link_creation').notNull().default('admin'),
   // 부서/직책을 어디에 두는지 — 'team'(기본, 팀마다 다르게: team_members) |
   // 'account'(계정 하나로: users). 회사 조직도가 하나뿐이면 'account'가 단순하다.
   orgScope: text('org_scope').notNull().default('team'),
@@ -179,6 +181,40 @@ export const inviteLinks = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('invite_links_created_by_idx').on(t.createdBy)],
+);
+
+/**
+ * 팀 초대 링크 — 위 inviteLinks("설치→가입")와 달리 **가입과 동시에 특정 팀에 자동
+ * 합류시키고 계정 등급까지 자동으로 부여한다**. 서버 운영자가 회원 등급을 일일이 올려주는
+ * 번거로움을 줄이기 위한 기능이라, 만들 수 있는 사람은 server_settings.teamInviteLinkCreation
+ * 최소 등급을 만족해야 한다(permissions.js의 canCreateTeamInviteLink).
+ *
+ * assignedRole은 users.role과 같은 값 집합('guest'|'member'|'admin')이지만, isServerAdmin은
+ * 여기서 절대 부여하지 않는다 — 서버 운영자 지정은 관리자 콘솔에서만(admin.js) 하도록 남겨둔
+ * 기존 설계("등급이 아니라 isServerAdmin 하나로만 한다")를 그대로 따른다.
+ *
+ * 나머지 필드/메커니즘(token, 만료, 폐기, 다회 사용)은 inviteLinks와 동일하다.
+ */
+export const teamInviteLinks = pgTable(
+  'team_invite_links',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    token: text('token').notNull().unique(),
+    teamId: uuid('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
+    assignedRole: text('assigned_role').notNull().default('member'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdByName: text('created_by_name').notNull(),
+    label: text('label'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    usedCount: integer('used_count').notNull().default(0),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('team_invite_links_created_by_idx').on(t.createdBy),
+    index('team_invite_links_team_id_idx').on(t.teamId),
+  ],
 );
 
 export const rooms = pgTable(

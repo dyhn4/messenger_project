@@ -47,5 +47,11 @@ Root: HKCU; Subkey: "Software\Classes\tangotalk"; ValueType: string; ValueName: 
 Root: HKCU; Subkey: "Software\Classes\tangotalk"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\tangotalk\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
-[Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} 실행"; Flags: nowait postinstall skipifsilent
+; [Run]에 "{#MyAppName} 실행" 항목을 두지 않는다 — 초대 링크(설치→가입)로 들어온 사람이
+; 설치 직후 여기서 바로 앱을 켜버리면 tangotalk:// 딥링크를 거치지 않아 서버 미설정 상태로
+; 열리고 만다(README "초대 링크(설치→가입)" 참고 — 서버 주소/코드 자동입력은 초대 페이지가
+; 딥링크를 다시 시도해야만 일어난다). 그래서 실행 체크박스 대신 마침 화면에 안내 문구를 넣어
+; 원래 열어뒀던 초대 링크 페이지로 돌아가 새로고침하도록 유도한다.
+[Messages]
+FinishedLabel=설치가 완료되었습니다.%n%n초대 링크 페이지로 다시 가서 새로고침하세요.
+FinishedLabelNoIcons=설치가 완료되었습니다.%n%n초대 링크 페이지로 다시 가서 새로고침하세요.

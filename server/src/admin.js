@@ -61,11 +61,12 @@ export function createAdminRouter(io) {
       uploadBytes: uploadsDirSize(),
       serverStartedAt: Math.round(Date.now() - process.uptime() * 1000),
       teamCreation: settings.teamCreation,
+      teamInviteLinkCreation: settings.teamInviteLinkCreation,
       orgScope: settings.orgScope,
     });
   });
 
-  /** 서버 설정 변경(지금은 팀 생성 권한 하나). */
+  /** 서버 설정 변경(팀 생성 권한 / 팀 초대 링크 생성 권한 / 부서·직책 관리 범위). */
   router.patch('/admin/settings', async (req, res) => {
     const fields = {};
     if ('teamCreation' in (req.body ?? {})) {
@@ -74,6 +75,13 @@ export function createAdminRouter(io) {
         return res.status(400).json({ error: '팀 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.' });
       }
       fields.teamCreation = value;
+    }
+    if ('teamInviteLinkCreation' in (req.body ?? {})) {
+      const value = req.body.teamInviteLinkCreation;
+      if (!TEAM_CREATION_LEVELS.includes(value)) {
+        return res.status(400).json({ error: '팀 초대 링크 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.' });
+      }
+      fields.teamInviteLinkCreation = value;
     }
     if ('orgScope' in (req.body ?? {})) {
       const value = req.body.orgScope;
@@ -88,6 +96,9 @@ export function createAdminRouter(io) {
     const detail = [];
     if (fields.teamCreation) {
       detail.push(`팀 생성 권한: ${TEAM_CREATION_LABEL[updated.teamCreation] ?? updated.teamCreation}`);
+    }
+    if (fields.teamInviteLinkCreation) {
+      detail.push(`팀 초대 링크 생성 권한: ${TEAM_CREATION_LABEL[updated.teamInviteLinkCreation] ?? updated.teamInviteLinkCreation}`);
     }
     if (fields.orgScope) {
       detail.push(`부서·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
@@ -125,6 +136,11 @@ export function createAdminRouter(io) {
     if (before === newRole) return res.json(toAdminUserDto(target, await listTeamsForUser(target.id)));
 
     const updated = await updateUser(target.id, { role: newRole });
+
+    // 로그아웃 없이 바로 반영되도록, 지금 접속 중인 그 사람의 소켓에 알려서 클라이언트가
+    // 자기 프로필(/users/me)을 다시 받아오게 한다 — token_version은 안 올린다(강제 로그아웃
+    // 사유가 아니라서, 정지/전체 로그아웃과 달리 이 경우는 접속을 끊을 이유가 없다).
+    io.to(`user:${target.id}`).emit('user:role-updated', { role: newRole });
 
     if (before === 'guest' && newRole !== 'guest') {
       for (const teamId of await listTeamIdsForUser(target.id)) {
@@ -241,6 +257,8 @@ export function createAdminRouter(io) {
     }
 
     const updated = await updateUser(target.id, { isServerAdmin: grant });
+    // 등급 변경과 같은 이유로, 로그아웃 없이 바로 반영되도록 알린다.
+    io.to(`user:${target.id}`).emit('user:role-updated', { isServerAdmin: grant });
     recordAudit({
       ...actorOf(req),
       action: AUDIT.userServerAdmin,
@@ -266,7 +284,6 @@ export function createAdminRouter(io) {
         name: team.name,
         iconEmoji: team.iconEmoji ?? null,
         iconColor: team.iconColor ?? null,
-        domain: team.domain ?? null,
         memberCount: memberIds.length,
         createdBy: creator ? (creator.name ?? creator.username) : null,
         createdAt: new Date(team.createdAt).getTime(),

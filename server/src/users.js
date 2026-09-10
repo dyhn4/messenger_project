@@ -5,7 +5,8 @@ import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
 import { isOnline } from './presence.js';
-import { accountRole } from './permissions.js';
+import { accountRole, canCreateTeamInviteLink } from './permissions.js';
+import { getServerSettings } from './db/queries/serverSettings.js';
 import { broadcastMemberUpdate } from './rooms.js';
 import { signFileUrl } from './upload.js';
 
@@ -52,7 +53,19 @@ export function createUsersRouter(io) {
   router.get('/users/me', async (req, res) => {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-    res.json({ ...publicUser(user), isServerAdmin: !!user.isServerAdmin });
+    // "팀 초대 링크 생성" 메뉴를 보여줄지는 서버 설정(팀 초대 링크 생성 권한)에 달려 있어서
+    // 클라이언트가 로컬 상태만으로 판단할 수 없다 — 여기서 서버가 최종 판정해서 내려준다
+    // (실제로 만들 때는 teamInvites.js가 매 요청마다 다시 확인한다, 이건 화면 표시용).
+    const settings = await getServerSettings();
+    res.json({
+      ...publicUser(user),
+      isServerAdmin: !!user.isServerAdmin,
+      canCreateTeamInviteLink: canCreateTeamInviteLink({
+        role: accountRole(user),
+        isServerAdmin: !!user.isServerAdmin,
+        teamInviteLinkCreation: settings.teamInviteLinkCreation,
+      }),
+    });
   });
 
   /**

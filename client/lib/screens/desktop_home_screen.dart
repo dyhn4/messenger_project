@@ -805,10 +805,14 @@ class _Sidebar extends StatelessWidget {
                     icon: const Icon(Icons.add, size: 20),
                     tooltip: '토픽 추가',
                     itemBuilder: (context) => [
-                      PopupMenuItem(
-                        onTap: onCreateTopic,
-                        child: const Text('토픽 만들기'),
-                      ),
+                      // 새 토픽 만들기는 팀 설정(토픽 생성 권한)에 따라 정회원 이상/관리자
+                      // 이상/소유자만 가능할 수 있다 — 토픽 찾기(이미 있는 공개 토픽 참여)는
+                      // 이 설정과 무관하게 정회원이면 항상 가능.
+                      if (session.canCreateTopic)
+                        PopupMenuItem(
+                          onTap: onCreateTopic,
+                          child: const Text('토픽 만들기'),
+                        ),
                       PopupMenuItem(
                         onTap: onBrowseTopics,
                         child: const Text('토픽 찾기'),

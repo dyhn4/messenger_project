@@ -299,6 +299,7 @@ class ChatSocket {
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
+  final _roleUpdatedController = StreamController<void>.broadcast();
   final _secretInviteController =
       StreamController<SecretInviteEvent>.broadcast();
   final _secretAcceptedController =
@@ -364,6 +365,10 @@ class ChatSocket {
   /// 연결이 끊겼다가 다시 붙었을 때(최초 연결 제외) 흘러나온다.
   /// 끊긴 동안 놓친 메시지/방 상태를 다시 받아오는 용도.
   Stream<void> get reconnected => _reconnectController.stream;
+
+  /// 서버 운영자가 관리자 콘솔에서 내 계정 등급/서버 운영자 여부를 바꿨을 때 — 로그아웃
+  /// 없이 바로 반영하려고, 이 이벤트를 받으면 Session이 /users/me를 다시 불러온다.
+  Stream<void> get roleUpdated => _roleUpdatedController.stream;
 
   /// 서버가 handshake에서 인증을 거부했을 때(만료됐거나 비밀번호 변경 등으로 폐기된
   /// accessToken으로 연결을 시도한 경우) 흘러나온다. Session이 새 accessToken을 받아
@@ -464,6 +469,7 @@ class ChatSocket {
         TeamLeftEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
+    socket.on('user:role-updated', (_) => _roleUpdatedController.add(null));
     socket.on('comment:new', (data) {
       _commentController.add(
         Comment.fromJson(Map<String, dynamic>.from(data as Map)),

@@ -13,9 +13,9 @@
 ```
 
 `installer/bin/`(Node 포터블 런타임 zip, PostgreSQL 설치 프로그램, `nssm.exe`)와 `installer/stage/`
-(정리된 `server/` 소스 + `npm install`로 새로 만든 `node_modules`)를 채운 뒤 ISCC.exe로
-`messenger-server.iss`를 컴파일한다. 둘 다 git에는 안 올라간다(`server/.gitignore`) — 매 빌드마다
-새로 받고 새로 만든다.
+(정리된 `server/` 소스 + `npm install`로 새로 만든 `node_modules`)를 채우고, 저장소 루트
+`README.md`를 `installer/README.html`로 변환한 뒤 ISCC.exe로 `messenger-server.iss`를
+컴파일한다. 셋 다 git에는 안 올라간다(`server/.gitignore`) — 매 빌드마다 새로 받고 새로 만든다.
 
 ## 파일 구성
 
@@ -29,6 +29,8 @@
 | `Reset-Data.ps1` | "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움. 서버 운영자 계정 인증 + `RESET` 입력 확인 둘 다 필수 |
 | `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `README-설치후.txt` | 설치되는 사람이 보는 안내문(`[Files]`로 설치됨) |
+| `build-readme-html.mjs` | 빌드 시에만 쓰는 변환기 — 저장소 루트 `README.md`를 `installer/README.html`로 만든다(설치 프로그램에는 포함 안 됨, 결과물인 README.html만 포함됨). 이 프로젝트 README들이 실제 쓰는 마크다운 구성(제목·굵게·인라인 코드·링크·코드펜스·표·순서/비순서 목록(중첩 포함)·체크박스·인용문)만 처리하는 자체 변환기 — 범용 마크다운 라이브러리(marked 등)를 새 의존성으로 추가하지 않으려고 직접 짰다 |
+| `README.html`(빌드 산출물, git 미포함) | 시작 메뉴 "도움말"이 그대로 여는 파일 — 저장소 루트 `README.md` 전체를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환한 것. 기본 브라우저로 열림 |
 
 ## 설계상 중요한 결정들 (바꾸기 전에 이유를 먼저 읽을 것)
 
@@ -87,6 +89,13 @@
   `[Files]`로 설치된 파일이라 일반 제거 대상에 포함된다 — `-Wait`로 기다리면 자기 자신이
   지워지는 걸 기다리는 셈이라 애매해지므로, 제거 프로그램을 독립 프로세스로 띄워두고
   스크립트는 바로 끝낸다(제거 자체는 백그라운드에서 계속 진행됨).
+- **Windows "설정 → 앱 → 설치된 앱"에서 TangoTalk 서버를 지우는 것은 시작 메뉴의 "TangoTalk
+  서버 제거"와 완전히 같다(둘 다 같은 `unins000.exe`를 실행).** `[UninstallDelete]`가
+  나열한 Node 앱 프로그램 파일만 지우고 PostgreSQL·DB 데이터·업로드·인증서·`.env`·비밀값은
+  전혀 안 건드린다 — `Uninstall-Full.ps1`("서버 완전 삭제")은 이 동작을 **마지막 단계로
+  그대로 포함**하면서 앞에 PostgreSQL·데이터 삭제를 더한 것뿐이다. 사용자가 "Windows에서
+  지웠으니 다 지워졌겠지"라고 착각하기 쉬운 지점이라 README에도 명시해뒀다(위 "운영 서버
+  업데이트"/설치 섹션 참고) — 새 문서를 쓸 때도 이 구분을 흐리지 않게 주의할 것.
 - **`Update-Server.ps1`/`Storage-Path.ps1`/`Reset-Data.ps1`/`Uninstall-Full.ps1` 넷 다 스스로
   관리자 권한으로 승격한다.** NSSM 서비스 정지/재시작, PostgreSQL 제거, 일반 제거 프로그램
   실행 전부 관리자 권한이 필요한데, 시작 메뉴 바로가기를 그냥 두 번 클릭하면 관리자 권한
@@ -109,6 +118,8 @@
 ## 검증 체크리스트
 
 - [ ] `build_server_installer.ps1` 실행 → `installer/output/tangotalk-server-setup.exe` 생성 확인
+- [ ] "도움말"을 열면 기본 브라우저로 `README.html`이 뜨고, 목차의 아무 링크나 눌러보면 해당
+      섹션으로 실제로 이동함(표/코드블록/중첩 목록/인용문이 깨지지 않고 보이는지도 확인)
 - [ ] 설치 경로에 공백이 있는 폴더(예: `C:\My Server\TangoTalk`)를 직접 골라서 설치 →
       PostgreSQL 설치까지 정상적으로 끝남(`pg_ctl.exe`가 그 경로에 실제로 생김)
 - [ ] 깨끗한 PC/VM에서 서비스 모드로 설치 → `Get-Service TangoTalkServer`, `Get-Service

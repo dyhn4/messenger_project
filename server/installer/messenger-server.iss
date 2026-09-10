@@ -62,11 +62,17 @@ Source: "Storage-Path.ps1"; DestDir: "{app}"
 Source: "Reset-Data.ps1"; DestDir: "{app}"
 Source: "Uninstall-Full.ps1"; DestDir: "{app}"
 Source: "README-설치후.txt"; DestDir: "{app}"
+; 저장소 루트 README.md(전체 프로젝트 문서, 목차 포함)를 build_server_installer.ps1이 정적
+; HTML로 미리 변환해둔 결과 — "도움말" 바로가기가 기본 브라우저로 그대로 보여준다.
+Source: "README.html"; DestDir: "{app}"
 
 [Icons]
 Name: "{group}\새 기기 페어링 코드 발급"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Get-PairingCode.ps1"""
 Name: "{group}\서버 콘솔로 실행"; Filename: "{app}\node\node.exe"; Parameters: """{app}\server\src\index.js"""; WorkingDir: "{app}\server"; Tasks: runasconsole
 Name: "{group}\설치 후 안내"; Filename: "{app}\README-설치후.txt"
+; .html은 이 PC의 기본 브라우저로 바로 열린다(.md와 달리 연결 프로그램이 없어서 뜨는
+; "여는 방법을 선택하세요" 창 걱정이 없음) — Filename을 파일 자체로 지정하면 된다.
+Name: "{group}\도움말"; Filename: "{app}\README.html"
 ; 개발 PC에서 package_server_update.ps1로 만든 zip을 골라서 적용하는 창을 띄운다(DB는
 ; 안 건드리고 코드/패키지/스키마만 갱신) — 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\서버 업데이트"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Update-Server.ps1"""

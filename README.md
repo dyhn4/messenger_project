@@ -467,7 +467,9 @@ messenger_project/
 │  │  ├─ Setup-TangoTalkServer.ps1 설치 후 실제 작업(PostgreSQL 설치, DB 생성, 마이그레이션, 서비스 등록)
 │  │  ├─ Get-PairingCode.ps1      "새 기기 페어링 코드 발급" 시작메뉴 항목
 │  │  ├─ Reset-Data.ps1           "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움(운영자 인증 + RESET 입력 필요)
-│  │  ├─ Uninstall-Full.ps1       "서버 삭제(PostgreSQL과 DB 데이터 포함)" — PostgreSQL 자체까지 정식 제거(일반 제거와 분리, 서버 운영자 인증 + DELETE 입력 둘 다 필요)
+│  │  ├─ Update-Server.ps1        "서버 업데이트" — 업데이트 zip을 골라 적용(DB는 안 건드림, npm install+마이그레이션+재시작 자동)
+│  │  ├─ Storage-Path.ps1         "첨부파일 저장소" — 저장 위치 확인/변경(NAS·다른 PC 공유 폴더도 가능, 기존 파일 이동 여부 확인 후 서비스 재시작)
+│  │  ├─ Uninstall-Full.ps1       "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — 일반 제거까지 자동 실행(서버 운영자 인증 + DELETE 입력 필요)
 │  │  └─ bin/ · stage/ · output/  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
 │  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
 │  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성)
@@ -1000,27 +1002,42 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 - 설치 중 고르는 대로 서버를 **백그라운드 Windows 서비스**(NSSM, 부팅 시 자동 시작·창 없음,
   서비스 이름 `TangoTalkServer`) 또는 **콘솔 창**(시작 메뉴 "서버 콘솔로 실행")으로 등록합니다.
 - 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함),
-  "DB 데이터 초기화", "서버 삭제(PostgreSQL과 DB 데이터 포함)"도 같이 설치됩니다. 뒤의 둘은
-  목적이 다릅니다:
+  "서버 업데이트", "첨부파일 저장소", "DB 데이터 초기화",
+  "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"도 같이 설치됩니다. 뒤의 넷은 목적이
+  다릅니다:
+  - **서버 업데이트**(`Update-Server.ps1`) — 개발 PC에서 `package_server_update.ps1`로 만든
+    업데이트 zip을 파일 선택 창에서 고르고 "업데이트 시작"을 누르면, 코드 적용 → `npm
+    install` → DB 마이그레이션(추가만 함, 기존 데이터 안 건드림) → 서버 재시작까지 자동으로
+    진행됩니다 — **평소 코드를 업데이트할 때** 씁니다.
+  - **첨부파일 저장소**(`Storage-Path.ps1`) — 지금 첨부파일이 저장되는 위치(기본값
+    `{app}\server\uploads`)를 보여주고, NAS나 다른 PC의 공유 폴더(`\\서버\공유\폴더`)
+    등으로 바꿀 수 있습니다. 기존 파일이 있으면 새 위치로 옮길지 물어보고, `.env`의
+    `UPLOADS_DIR`을 갱신한 뒤 서비스를 재시작합니다 — **첨부파일을 서버 PC가 아니라 별도
+    저장소에 두고 싶을 때** 씁니다.
   - **DB 데이터 초기화**(`Reset-Data.ps1`) — 서버는 그대로 두고 회원/팀/메시지/댓글/첨부파일
     등 데이터만 비웁니다. `.env`/인증서/설치는 안 건드리고, 끝나면 서버가 다시 시작되어 바로
     빈 상태로 쓸 수 있습니다(처음 가입하는 계정이 새 운영자가 됨) — **서버를 계속 쓰면서
     데이터만 새로 시작하고 싶을 때** 씁니다.
-  - **서버 삭제(PostgreSQL과 DB 데이터 포함)**(`Uninstall-Full.ps1`) — DB/업로드/인증서/
-    `.env`/비밀값을 지우고, **PostgreSQL 자체도 `uninstall-postgresql.exe`로 정식 제거**합니다
-    (서비스 등록까지 해제됨 — 프로그램 파일만 남기고 서비스만 정지시키면, 나중에 같은 PC에
-    PostgreSQL을 다시 설치할 때 설치 프로그램이 "이미 설치돼 있다"고 인식해서 새로 지정한
-    경로/서비스 이름을 무시하고 예전 설치를 그대로 재사용해버리는 문제가 있어서입니다). 이후
-    Node 앱 프로그램 파일은 "TangoTalk 서버 제거"로 따로 지워야 진짜 아무것도 안 남습니다 —
+  - **서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)**(`Uninstall-Full.ps1`) — DB/업로드/
+    인증서/`.env`/비밀값을 지우고, **PostgreSQL 자체도 `uninstall-postgresql.exe`로 정식
+    제거**합니다(서비스 등록까지 해제됨 — 프로그램 파일만 남기고 서비스만 정지시키면, 나중에
+    같은 PC에 PostgreSQL을 다시 설치할 때 설치 프로그램이 "이미 설치돼 있다"고 인식해서 새로
+    지정한 경로/서비스 이름을 무시하고 예전 설치를 그대로 재사용해버리는 문제가 있어서입니다).
+    마지막 단계로 **일반 "TangoTalk 서버 제거"(unins000.exe)를 무인 모드로 자동 실행**해서
+    Node 앱 프로그램 파일까지 마저 지웁니다 — 이 스크립트 하나로 서버 전체가 걷어내집니다.
     **서버 자체를 걷어낼 때** 씁니다.
 
-  둘 다 일반 제거로는 지워지지 않고, **실제 서버 운영자(`is_server_admin=true`) 계정의
-  아이디/비밀번호로 먼저 본인 확인**을 해야만(`scripts/verify-admin.mjs`) 각각 `RESET`/`DELETE`
-  입력 확인까지 진행됩니다 — 이 PC 앞에 앉을 수 있다는 것만으로는 지울 수 없게 한 것입니다.
+  이 중 "DB 데이터 초기화"/"서버 완전 삭제" 둘만 일반 제거로는 지워지지 않는 실데이터를
+  다루므로, **실제 서버 운영자(`is_server_admin=true`) 계정의 아이디/비밀번호로 먼저 본인
+  확인**을 해야만(`scripts/verify-admin.mjs`) 각각 `RESET`/`DELETE` 입력 확인까지 진행됩니다
+  — 이 PC 앞에 앉을 수 있다는 것만으로는 지울 수 없게 한 것입니다. 넷 다 NSSM 서비스를
+  다루므로 관리자 권한이 필요해서, 관리자가 아니면 스스로 관리자 권한으로 다시 실행합니다.
 
-**업데이트**: 새로 `build_server_installer.ps1`을 돌려서 만든 최신 `tangotalk-server-setup.exe`를
-같은 PC에서 다시 실행하면 됩니다 — 이미 설치돼 있는 걸 감지해서 PostgreSQL 재설치나 DB 비밀번호
-재생성 없이, 프로그램 파일만 새로 덮어쓰고 새로 추가된 마이그레이션만 적용한 뒤 서비스를
+**업데이트**: 평소에는 시작 메뉴의 "서버 업데이트"(위 설명)로 충분합니다. 완전히 새 
+설치 프로그램을 다시 배포하고 싶을 때는 `build_server_installer.ps1`을 돌려서 만든 최신
+`tangotalk-server-setup.exe`를 같은 PC에서 다시 실행하면 됩니다 — 이미 설치돼 있는 걸
+감지해서 PostgreSQL 재설치나 DB 비밀번호 재생성 없이, 프로그램 파일만 새로 덮어쓰고 새로
+추가된 마이그레이션만 적용한 뒤 서비스를
 재시작합니다(기존 `.env`/DB/업로드는 그대로 보존).
 
 자세한 설계 배경과 유지보수 메모, 검증 체크리스트는 `server/installer/README.md` 참고.

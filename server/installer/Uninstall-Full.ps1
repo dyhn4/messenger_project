@@ -1,20 +1,32 @@
 ﻿<#
 .SYNOPSIS
-  서버 삭제(PostgreSQL과 DB 데이터 포함) — PostgreSQL 자체(프로그램+서비스 등록)와 DB
-  데이터/업로드 파일/설정을 전부 삭제한다. 되돌릴 수 없습니다.
+  서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두) — 이 PC에서 서버를 통째로 걷어낸다.
+  되돌릴 수 없습니다.
 
 .DESCRIPTION
-  일반 "프로그램 제거"(제어판/시작 메뉴의 "TangoTalk 서버 제거")는 Node 앱 프로그램 파일만
-  지우고 PostgreSQL과 데이터는 그대로 남겨둔다 — 이 스크립트는 그것과 완전히 분리된, 오직
-  시작 메뉴의 "서버 삭제(PostgreSQL과 DB 데이터 포함)" 항목으로만 실행되는 별도 절차다.
+  이 스크립트 하나로 PostgreSQL 자체(프로그램+서비스 등록), DB 데이터/업로드 파일/설정,
+  그리고 Node 앱 프로그램 파일까지 전부 제거한다 — 시작 메뉴의
+  "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" 항목으로만 실행되는 별도 절차다.
   아래 확인 문구를 정확히 입력해야만 실제로 삭제가 진행된다.
 
   PostgreSQL을 프로그램 파일만 남겨두고 서비스만 정지시키면, 나중에 이 PC에 PostgreSQL을
   다시 설치할 때 그 설치 프로그램이 "이미 설치되어 있다"고 인식해서 새로 지정한 경로/서비스
   이름을 무시하고 예전 것을 그대로 재사용해버리는 문제가 있다 — 그래서 이 스크립트는
-  `uninstall-postgresql.exe`로 PostgreSQL 자체도 정식으로 제거한다(Node 앱 프로그램 파일은
-  여전히 안 건드림 — 그건 "TangoTalk 서버 제거"로 따로 진행).
+  `uninstall-postgresql.exe`로 PostgreSQL 자체도 정식으로 제거한다.
+
+  마지막 단계로 일반 "TangoTalk 서버 제거"(Inno Setup 생성 제거 프로그램, unins000.exe)를
+  무인 모드(/VERYSILENT)로 실행해서 Node 앱 프로그램 파일까지 마저 지운다 — 그래서 이
+  스크립트가 끝나면 더 이상 따로 "TangoTalk 서버 제거"를 실행할 필요가 없다. NSSM 서비스
+  정지/PostgreSQL 제거/제거 프로그램 실행 전부 관리자 권한이 필요해서, 관리자가 아니면
+  스스로 관리자 권한으로 다시 실행한다.
 #>
+
+# ── 관리자 권한 확인/승격 ───────────────────────────────────────────────
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  Start-Process powershell.exe -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+  exit
+}
 
 $AppDir = $PSScriptRoot
 $ServerDir = Join-Path $AppDir 'server'
@@ -27,7 +39,7 @@ $PgServiceName = 'postgresql-tangotalk'
 $NodeServiceName = 'TangoTalkServer'
 
 Write-Host '================================================================'
-Write-Host ' TangoTalk 서버 삭제 (PostgreSQL과 DB 데이터 포함)'
+Write-Host ' TangoTalk 서버 완전 삭제 (PostgreSQL·Node 앱·DB 데이터 모두)'
 Write-Host '================================================================'
 Write-Host ''
 Write-Host '아래 항목이 전부 영구히 삭제됩니다 — 되돌릴 수 없습니다:'
@@ -35,8 +47,7 @@ Write-Host "  - PostgreSQL 자체(프로그램, 서비스 등록) 및 데이터�
 Write-Host "  - 업로드된 첨부파일: $ServerDir\uploads"
 Write-Host "  - TLS 인증서: $ServerDir\certs"
 Write-Host "  - 서버 설정(.env)과 자동 생성된 비밀값(JWT/암호화 키, DB 비밀번호)"
-Write-Host ''
-Write-Host 'Node 앱 프로그램 파일 자체는 지워지지 않습니다 — 그건 "TangoTalk 서버 제거"로 따로 진행하세요.'
+Write-Host "  - Node 앱 프로그램 파일 전체(마지막 단계에서 일반 제거 프로그램을 자동 실행)"
 Write-Host ''
 
 # 이 PC 앞에 앉을 수 있다고 해서 누구나 지울 수 있으면 안 되므로, 실제 서버 운영자
@@ -116,6 +127,19 @@ netsh advfirewall firewall delete rule name="TangoTalk Server (main)" | Out-Null
 netsh advfirewall firewall delete rule name="TangoTalk Server (pairing)" | Out-Null
 
 Write-Host ''
-Write-Host '완료되었습니다 — PostgreSQL과 DB 데이터가 모두 제거됐습니다. Node 앱 프로그램 파일은' -ForegroundColor Green
-Write-Host '남아있습니다 — 필요하면 "TangoTalk 서버 제거"로 마저 지우세요.' -ForegroundColor Green
-Read-Host '엔터를 누르면 창이 닫힙니다'
+Write-Host '완료되었습니다 — PostgreSQL과 DB 데이터가 모두 제거됐습니다.' -ForegroundColor Green
+
+# 마지막으로 일반 제거 프로그램(Inno Setup이 만든 unins000.exe)을 무인 모드로 실행해서
+# Node 앱 프로그램 파일까지 마저 지운다. -Wait를 안 쓰는 이유: 이 스크립트 자신도
+# {app} 안에 설치된 파일이라 제거 대상이라서, 여기서 기다리는 대신 바로 종료해 파일이
+# 사용 중인 상태로 남지 않게 한다 — 제거 자체는 독립된 프로세스로 계속 진행된다.
+$UninstallExe = Join-Path $AppDir 'unins000.exe'
+if (Test-Path $UninstallExe) {
+  Write-Host 'Node 앱 프로그램도 마저 제거합니다(백그라운드에서 계속 진행됨)...' -ForegroundColor Green
+  Start-Process -FilePath $UninstallExe -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') | Out-Null
+  Start-Sleep -Seconds 3
+  Write-Host '잠시 후 이 폴더가 사라집니다. 이 창은 닫으셔도 됩니다.' -ForegroundColor Green
+} else {
+  Write-Host "제거 프로그램(${UninstallExe})을 찾을 수 없어 Node 앱 프로그램 파일은 남아있습니다 — 필요하면 수동으로 지우세요." -ForegroundColor Yellow
+  Read-Host '엔터를 누르면 창이 닫힙니다'
+}

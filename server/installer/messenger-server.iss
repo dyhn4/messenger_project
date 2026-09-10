@@ -51,6 +51,8 @@ Source: "{#BinDir}\pgsql-installer.exe"; DestDir: "{tmp}"; Flags: deleteafterins
 Source: "{#StageDir}\*"; DestDir: "{app}\server"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "Setup-TangoTalkServer.ps1"; DestDir: "{app}"
 Source: "Get-PairingCode.ps1"; DestDir: "{app}"
+Source: "Update-Server.ps1"; DestDir: "{app}"
+Source: "Storage-Path.ps1"; DestDir: "{app}"
 Source: "Reset-Data.ps1"; DestDir: "{app}"
 Source: "Uninstall-Full.ps1"; DestDir: "{app}"
 Source: "README-설치후.txt"; DestDir: "{app}"
@@ -59,10 +61,18 @@ Source: "README-설치후.txt"; DestDir: "{app}"
 Name: "{group}\새 기기 페어링 코드 발급"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Get-PairingCode.ps1"""
 Name: "{group}\서버 콘솔로 실행"; Filename: "{app}\node\node.exe"; Parameters: """{app}\server\src\index.js"""; WorkingDir: "{app}\server"; Tasks: runasconsole
 Name: "{group}\설치 후 안내"; Filename: "{app}\README-설치후.txt"
+; 개발 PC에서 package_server_update.ps1로 만든 zip을 골라서 적용하는 창을 띄운다(DB는
+; 안 건드리고 코드/패키지/스키마만 갱신) — 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\서버 업데이트"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Update-Server.ps1"""
+; 첨부파일 저장 위치 확인/변경(NAS·다른 PC 공유 폴더 등) — 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\첨부파일 저장소"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Storage-Path.ps1"""
 ; 서버는 그대로 두고 회원/팀/메시지 등 데이터만 비우고 싶을 때(Uninstall-Full과 달리
 ; .env/인증서/설치는 안 건드리고, 끝나면 서버가 바로 다시 쓸 수 있는 빈 상태로 돌아옴).
 Name: "{group}\DB 데이터 초기화"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Reset-Data.ps1"""
-Name: "{group}\서버 삭제(PostgreSQL과 DB 데이터 포함)"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Uninstall-Full.ps1"""
+; PostgreSQL·Node 앱·DB 데이터를 전부 지운다(마지막 단계에서 일반 제거 프로그램까지 자동
+; 실행) — 아래 "TangoTalk 서버 제거"는 Node 앱 프로그램 파일만 지우고 싶을 때(PostgreSQL과
+; 데이터는 그대로 둠) 따로 쓰는 것.
+Name: "{group}\서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Uninstall-Full.ps1"""
 Name: "{group}\TangoTalk 서버 제거"; Filename: "{uninstallexe}"
 
 [Run]

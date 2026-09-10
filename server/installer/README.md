@@ -24,8 +24,10 @@
 | `messenger-server.iss` | Inno Setup 스크립트. `PrivilegesRequired=admin`, 설치 경로 고정(`C:\TangoTalk-Server`) |
 | `Setup-TangoTalkServer.ps1` | 설치 마지막 단계에서 실행 — PostgreSQL 무인 설치, DB 계정/생성, `.env` 작성, 마이그레이션, 방화벽, 서비스 등록. 재실행해도 안전(idempotent) |
 | `Get-PairingCode.ps1` | 시작 메뉴 "새 기기 페어링 코드 발급"이 호출 — `server/scripts/pair.mjs`와 같은 일을 Node 없이 순수 PowerShell로 |
+| `Update-Server.ps1` | "서버 업데이트" — 업데이트 zip을 파일 선택 창에서 골라 적용(WinForms GUI). DB는 안 건드림, npm install+마이그레이션+서비스 재시작 자동. 관리자 권한 필요해 스스로 승격 |
+| `Storage-Path.ps1` | "첨부파일 저장소" — 첨부파일 저장 위치(`UPLOADS_DIR`)를 보여주고 NAS/다른 PC 공유 폴더 등으로 바꿈(WinForms GUI). 기존 파일 이동 여부를 물어보고 `.env` 갱신 + 서비스 재시작. 관리자 권한 필요해 스스로 승격 |
 | `Reset-Data.ps1` | "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움. 서버 운영자 계정 인증 + `RESET` 입력 확인 둘 다 필수 |
-| `Uninstall-Full.ps1` | "서버 삭제(PostgreSQL과 DB 데이터 포함)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터까지 정식 제거, 일반 제거와 완전히 분리. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
+| `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `README-설치후.txt` | 설치되는 사람이 보는 안내문(`[Files]`로 설치됨) |
 
 ## 설계상 중요한 결정들 (바꾸기 전에 이유를 먼저 읽을 것)
@@ -55,13 +57,28 @@
   `server/node_modules`(pg, bcryptjs)를 그대로 재사용한다 — 별도 의존성을 추가하지 않는다.
 - **`Reset-Data.ps1`과 `Uninstall-Full.ps1`은 목적이 다르다.** 전자는 서버는 계속 쓰면서
   데이터만 비우고 싶을 때(`.env`/인증서/설치는 안 건드림, 끝나면 서버 재시작되어 바로 씀),
-  후자("서버 삭제")는 서버 자체를 걷어낼 때(PostgreSQL 자체까지 정식 제거 + DB/업로드/
-  인증서/`.env`/비밀값까지 다 지움, 이후 "TangoTalk 서버 제거"까지 해야 Node 앱 프로그램
-  파일도 없어짐) 쓴다. `Reset-Data.ps1`은
+  후자("서버 완전 삭제")는 서버 자체를 걷어낼 때(PostgreSQL 자체까지 정식 제거 + DB/업로드/
+  인증서/`.env`/비밀값까지 다 지운 뒤, 마지막 단계로 `unins000.exe /VERYSILENT`를 자동
+  실행해서 Node 앱 프로그램 파일까지 지움 — 더 이상 따로 "TangoTalk 서버 제거"를 실행할
+  필요가 없다) 쓴다. `Reset-Data.ps1`은
   `public` 스키마의 테이블을 동적으로 찾아서 `TRUNCATE ... RESTART IDENTITY CASCADE`
   하므로(`server/scripts/reset-data.mjs`) 나중에 테이블이 추가돼도 하드코딩된 목록을 고칠
   필요가 없다 — drizzle의 마이그레이션 기록은 별도 `drizzle` 스키마에 있어서 자동으로 안
   건드려진다(초기화 후 마이그레이션을 다시 실행할 필요 없음).
+- **`Uninstall-Full.ps1`이 `unins000.exe`를 부를 때 `-Wait`를 안 쓴다.** 이 스크립트 자신도
+  `[Files]`로 설치된 파일이라 일반 제거 대상에 포함된다 — `-Wait`로 기다리면 자기 자신이
+  지워지는 걸 기다리는 셈이라 애매해지므로, 제거 프로그램을 독립 프로세스로 띄워두고
+  스크립트는 바로 끝낸다(제거 자체는 백그라운드에서 계속 진행됨).
+- **`Update-Server.ps1`/`Storage-Path.ps1`/`Reset-Data.ps1`/`Uninstall-Full.ps1` 넷 다 스스로
+  관리자 권한으로 승격한다.** NSSM 서비스 정지/재시작, PostgreSQL 제거, 일반 제거 프로그램
+  실행 전부 관리자 권한이 필요한데, 시작 메뉴 바로가기를 그냥 두 번 클릭하면 관리자 권한
+  없이 실행되기 때문에 — `[Security.Principal.WindowsPrincipal]`로 확인해서 아니면
+  `Start-Process -Verb RunAs`로 자기 자신을 다시 실행하고 원래 프로세스는 종료한다.
+- **`Storage-Path.ps1`은 새 메커니즘을 만들지 않는다.** `server/src/config.js`의
+  `UPLOADS_DIR`은 원래부터 환경변수로 바꿀 수 있었다(`process.env.UPLOADS_DIR || 기본값
+  server/uploads`) — 이 스크립트는 그 값을 `.env`에 써주고 서비스를 재시작해주는 GUI일
+  뿐이다. 경로를 바꿀 때 기존 파일이 있으면 새 위치로 옮길지 물어보고(`robocopy /MOVE`),
+  NAS 등 네트워크 경로(`\\서버\공유\폴더`)도 텍스트로 직접 입력하면 그대로 쓸 수 있다.
 - **마이그레이션은 번들된 `drizzle-kit`으로 실행한다** (`server/node_modules/drizzle-kit/bin.cjs
   migrate`) — 그래서 빌드 스크립트는 `npm install --omit=dev`가 아니라 devDependencies까지
   포함해서 설치해야 한다(`drizzle-kit`이 `package.json`에서 devDependency이기 때문). 이 부분을
@@ -80,9 +97,14 @@
 - [ ] "새 기기 페어링 코드 발급"으로 코드 발급 → 클라이언트 앱에서 페어링+회원가입까지 한 사이클
 - [ ] 같은 설치 프로그램을 다시 실행(업그레이드 시나리오) → `.env`/DB 비밀번호/데이터 안 바뀜,
       서비스 재시작됨
-- [ ] "서버 삭제(PostgreSQL과 DB 데이터 포함)"는 서버 운영자 아이디/비밀번호가 틀리면 `DELETE`
-      입력 단계까지도 못 감; 운영자 인증 통과 후 `DELETE`를 안 치면 아무 것도 안 지움; 둘 다
-      통과하면 PostgreSQL이 `Get-Service postgresql-tangotalk`에서 안 보일 정도로 정식 제거됨
+- [ ] "서버 업데이트"로 zip 적용 → 코드 갱신, 기존 DB 데이터는 그대로, 서비스 재시작됨
+- [ ] "첨부파일 저장소"를 처음 열면 기본값(`{app}\server\uploads`)이 보임; 다른 폴더로
+      바꾸면 `.env`의 `UPLOADS_DIR`이 갱신되고 서비스가 재시작되어 새 첨부파일이 그 위치에 저장됨
+- [ ] "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"는 서버 운영자 아이디/비밀번호가
+      틀리면 `DELETE` 입력 단계까지도 못 감; 운영자 인증 통과 후 `DELETE`를 안 치면 아무 것도
+      안 지움; 둘 다 통과하면 PostgreSQL이 `Get-Service postgresql-tangotalk`에서 안 보일
+      정도로 정식 제거되고, 잠시 후 일반 제거까지 자동 진행되어 `{app}` 폴더 안 프로그램
+      파일도 대부분 사라짐
 - [ ] "DB 데이터 초기화"도 같은 방식으로 운영자 인증 + `RESET` 입력이 필요; 통과하면 회원/팀/
       메시지 등은 비워지지만 `.env`/인증서는 남고 서버가 재시작되어 바로 다시 가입 가능
 - [ ] 일반 "TangoTalk 서버 제거"는 위 데이터를 안 건드림

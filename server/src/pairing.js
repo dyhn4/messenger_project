@@ -116,7 +116,7 @@ function renderInvitePage({ host, mainPort, token, link }) {
           <a class="btn" href="/invite/${token}/download/android">Android용 다운로드</a>
         </div>
         ${DOWNLOAD_WARNING_GUIDE}
-        <p class="hint"><b>설치가 끝나면 이 페이지를 새로고침해서 회원가입 하세요.</b> 서버 주소와 코드가 자동으로 입력됩니다.</p>
+        <p class="notice">설치가 끝나면 이 페이지를 새로고침해서 회원가입 하세요.<br><span class="notice-sub">서버 주소와 코드가 자동으로 입력됩니다.</span></p>
         <details>
           <summary>자동으로 안 되면 직접 입력하기</summary>
           <div class="field"><span>서버 주소</span><code id="addr">${escapeHtml(serverAddress)}</code></div>
@@ -143,6 +143,9 @@ function renderInvitePage({ host, mainPort, token, link }) {
   .warn-guide summary { font-weight: bold; padding: 8px 0; }
   .guide-step { margin: 14px 0 6px; }
   .warn-guide svg { display: block; max-width: 100%; height: auto; margin: 4px 0; }
+  .notice { background: #ebfbee; color: #2b8a3e; border: 2px solid #2b8a3e; border-radius: 10px;
+            padding: 14px 16px; margin: 16px 0; font-size: 18px; font-weight: bold; text-align: center; }
+  .notice-sub { display: inline-block; margin-top: 6px; color: #2b8a3e; font-size: 13px; font-weight: normal; }
 </style></head>
 <body><h1>${title}</h1>${body}
 ${valid ? `<script>try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {}</script>` : ''}

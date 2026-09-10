@@ -217,8 +217,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           // 한다(위 _wasWide 주석 참고). build 도중에는 Navigator를 건드릴 수 없어서
           // 프레임이 끝난 뒤로 미룬다.
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted)
+            if (mounted) {
               Navigator.of(context).popUntil((route) => route.isFirst);
+            }
           });
         }
         _wasWide = isWide;

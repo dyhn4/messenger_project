@@ -30,10 +30,11 @@ class MyProfileDialog extends StatelessWidget {
     try {
       await session.updateProfile(name: value);
     } catch (e) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('실패: $e')));
+      }
     }
   }
 
@@ -54,8 +55,9 @@ class MyProfileDialog extends StatelessWidget {
   Future<void> _logout(BuildContext context) async {
     Navigator.of(context).pop();
     await session.logout();
-    if (context.mounted)
+    if (context.mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   Future<void> _withdraw(BuildContext context) async {
@@ -633,10 +635,11 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
     try {
       await widget.session.updateAvatar(avatarType: 'initial');
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('실패: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -663,10 +666,11 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
         avatarUrl: uploaded.url,
       );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -797,10 +801,11 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('실패: $e')));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

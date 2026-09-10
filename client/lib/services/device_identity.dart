@@ -25,8 +25,9 @@ class DeviceIdentity {
 
   String get deviceId {
     final id = _deviceId;
-    if (id == null)
+    if (id == null) {
       throw StateError('DeviceIdentity.ensureLoaded()를 먼저 호출해야 합니다.');
+    }
     return id;
   }
 

@@ -39,11 +39,11 @@ versionRouter.get('/version', (req, res) => {
 versionRouter.get('/downloads/windows', (req, res) => {
   const filePath = path.join(releasesDir, 'client-windows-setup.exe');
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '아직 배포된 Windows 빌드가 없습니다.' });
-  res.download(filePath, '메신저-설치.exe');
+  res.download(filePath, 'TangoTalk-Setup.exe');
 });
 
 versionRouter.get('/downloads/android', (req, res) => {
   const filePath = path.join(releasesDir, 'client-android.apk');
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '아직 배포된 Android 빌드가 없습니다.' });
-  res.download(filePath, '메신저.apk');
+  res.download(filePath, 'TangoTalk.apk');
 });

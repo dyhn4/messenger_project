@@ -51,6 +51,7 @@ Source: "{#BinDir}\pgsql-installer.exe"; DestDir: "{tmp}"; Flags: deleteafterins
 Source: "{#StageDir}\*"; DestDir: "{app}\server"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "Setup-TangoTalkServer.ps1"; DestDir: "{app}"
 Source: "Get-PairingCode.ps1"; DestDir: "{app}"
+Source: "Reset-Data.ps1"; DestDir: "{app}"
 Source: "Uninstall-Full.ps1"; DestDir: "{app}"
 Source: "README-설치후.txt"; DestDir: "{app}"
 
@@ -58,7 +59,10 @@ Source: "README-설치후.txt"; DestDir: "{app}"
 Name: "{group}\새 기기 페어링 코드 발급"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Get-PairingCode.ps1"""
 Name: "{group}\서버 콘솔로 실행"; Filename: "{app}\node\node.exe"; Parameters: """{app}\server\src\index.js"""; WorkingDir: "{app}\server"; Tasks: runasconsole
 Name: "{group}\설치 후 안내"; Filename: "{app}\README-설치후.txt"
-Name: "{group}\서버 데이터 완전 삭제"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Uninstall-Full.ps1"""
+; 서버는 그대로 두고 회원/팀/메시지 등 데이터만 비우고 싶을 때(Uninstall-Full과 달리
+; .env/인증서/설치는 안 건드리고, 끝나면 서버가 바로 다시 쓸 수 있는 빈 상태로 돌아옴).
+Name: "{group}\DB 데이터 초기화"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Reset-Data.ps1"""
+Name: "{group}\서버 삭제(PostgreSQL과 DB 데이터 포함)"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Uninstall-Full.ps1"""
 Name: "{group}\TangoTalk 서버 제거"; Filename: "{uninstallexe}"
 
 [Run]

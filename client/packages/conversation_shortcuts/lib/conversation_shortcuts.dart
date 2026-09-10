@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/services.dart';
 
 /// 안드로이드 11+에서 알림이 "대화(conversation)"로 분류되려면(= 프로필 사진이 왼쪽 큰

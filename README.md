@@ -466,7 +466,8 @@ messenger_project/
 │  │  ├─ messenger-server.iss     Inno Setup 스크립트
 │  │  ├─ Setup-TangoTalkServer.ps1 설치 후 실제 작업(PostgreSQL 설치, DB 생성, 마이그레이션, 서비스 등록)
 │  │  ├─ Get-PairingCode.ps1      "새 기기 페어링 코드 발급" 시작메뉴 항목
-│  │  ├─ Uninstall-Full.ps1       "서버 데이터 완전 삭제"(일반 제거와 분리, 별도 확인 필요)
+│  │  ├─ Reset-Data.ps1           "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움(운영자 인증 + RESET 입력 필요)
+│  │  ├─ Uninstall-Full.ps1       "서버 삭제(PostgreSQL과 DB 데이터 포함)" — PostgreSQL 자체까지 정식 제거(일반 제거와 분리, 서버 운영자 인증 + DELETE 입력 둘 다 필요)
 │  │  └─ bin/ · stage/ · output/  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
 │  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
 │  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성)
@@ -998,9 +999,24 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 - 방화벽 규칙을 추가합니다.
 - 설치 중 고르는 대로 서버를 **백그라운드 Windows 서비스**(NSSM, 부팅 시 자동 시작·창 없음,
   서비스 이름 `TangoTalkServer`) 또는 **콘솔 창**(시작 메뉴 "서버 콘솔로 실행")으로 등록합니다.
-- 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함)과
-  "서버 데이터 완전 삭제"(별도 확인 절차 필요 — 일반 제거는 DB/업로드/설정을 지우지 않습니다)도
-  같이 설치됩니다.
+- 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함),
+  "DB 데이터 초기화", "서버 삭제(PostgreSQL과 DB 데이터 포함)"도 같이 설치됩니다. 뒤의 둘은
+  목적이 다릅니다:
+  - **DB 데이터 초기화**(`Reset-Data.ps1`) — 서버는 그대로 두고 회원/팀/메시지/댓글/첨부파일
+    등 데이터만 비웁니다. `.env`/인증서/설치는 안 건드리고, 끝나면 서버가 다시 시작되어 바로
+    빈 상태로 쓸 수 있습니다(처음 가입하는 계정이 새 운영자가 됨) — **서버를 계속 쓰면서
+    데이터만 새로 시작하고 싶을 때** 씁니다.
+  - **서버 삭제(PostgreSQL과 DB 데이터 포함)**(`Uninstall-Full.ps1`) — DB/업로드/인증서/
+    `.env`/비밀값을 지우고, **PostgreSQL 자체도 `uninstall-postgresql.exe`로 정식 제거**합니다
+    (서비스 등록까지 해제됨 — 프로그램 파일만 남기고 서비스만 정지시키면, 나중에 같은 PC에
+    PostgreSQL을 다시 설치할 때 설치 프로그램이 "이미 설치돼 있다"고 인식해서 새로 지정한
+    경로/서비스 이름을 무시하고 예전 설치를 그대로 재사용해버리는 문제가 있어서입니다). 이후
+    Node 앱 프로그램 파일은 "TangoTalk 서버 제거"로 따로 지워야 진짜 아무것도 안 남습니다 —
+    **서버 자체를 걷어낼 때** 씁니다.
+
+  둘 다 일반 제거로는 지워지지 않고, **실제 서버 운영자(`is_server_admin=true`) 계정의
+  아이디/비밀번호로 먼저 본인 확인**을 해야만(`scripts/verify-admin.mjs`) 각각 `RESET`/`DELETE`
+  입력 확인까지 진행됩니다 — 이 PC 앞에 앉을 수 있다는 것만으로는 지울 수 없게 한 것입니다.
 
 **업데이트**: 새로 `build_server_installer.ps1`을 돌려서 만든 최신 `tangotalk-server-setup.exe`를
 같은 PC에서 다시 실행하면 됩니다 — 이미 설치돼 있는 걸 감지해서 PostgreSQL 재설치나 DB 비밀번호

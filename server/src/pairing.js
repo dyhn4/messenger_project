@@ -208,7 +208,7 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
     const link = await findInviteLinkByToken(req.params.token);
     if (!isInviteLinkValid(link)) return res.status(404).send('만료되었거나 취소된 링크입니다.');
 
-    const files = { windows: ['client-windows-setup.exe', '메신저-설치.exe'], android: ['client-android.apk', '메신저.apk'] };
+    const files = { windows: ['client-windows-setup.exe', 'TangoTalk-Setup.exe'], android: ['client-android.apk', 'TangoTalk.apk'] };
     const entry = files[req.params.platform];
     if (!entry) return res.status(404).send('알 수 없는 플랫폼입니다.');
     const filePath = path.join(releasesDir, entry[0]);

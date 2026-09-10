@@ -121,8 +121,9 @@ class CommentInputBarState extends State<CommentInputBar> {
 
   Future<void> _pasteImageFromClipboard() async {
     final bytes = await Pasteboard.image;
-    if (bytes == null || bytes.isEmpty || !mounted)
+    if (bytes == null || bytes.isEmpty || !mounted) {
       return; // 클립보드에 이미지가 없으면 아무 것도 안 함.
+    }
 
     final path =
         '${Directory.systemTemp.path}${Platform.pathSeparator}image_${DateTime.now().microsecondsSinceEpoch}.png';

@@ -368,8 +368,9 @@ class NotificationService {
 
   void _flashWindowsTaskbar() {
     final hwnd = _findOurWindow();
-    if (hwnd == 0 || GetForegroundWindow() == hwnd)
+    if (hwnd == 0 || GetForegroundWindow() == hwnd) {
       return; // 창이 없거나 이미 보고 있으면 건너뜀
+    }
 
     final info = calloc<_FLASHWINFO>();
     try {

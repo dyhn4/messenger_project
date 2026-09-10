@@ -41,13 +41,7 @@ class SecretSessionManager {
   String _envelopeCacheKey(String roomId, int epoch, int n) =>
       '$roomId|$epoch|$n';
 
-  SecretSessionManager({
-    required ApiClient api,
-    required ChatSocket socket,
-    required DeviceIdentity identity,
-  }) : _api = api,
-       _socket = socket,
-       _identity = identity;
+  SecretSessionManager(this._api, this._socket, this._identity);
 
   Future<String> _signingKeyFor(String deviceId) async {
     return _signingKeyCache[deviceId] ??= await _api

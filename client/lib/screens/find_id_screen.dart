@@ -70,8 +70,9 @@ class _FindIdScreenState extends State<FindIdScreen> {
                 _email = v;
                 // 아이디를 찾은 뒤 이메일을 다시 고치면 그 결과는 더 이상 유효하지 않으니
                 // "비밀번호 찾기"로 바뀌었던 버튼을 원래대로("아이디 찾기") 되돌린다.
-                if (_foundUsername != null)
+                if (_foundUsername != null) {
                   setState(() => _foundUsername = null);
+                }
               },
             ),
             if (_foundUsername != null) ...[

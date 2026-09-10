@@ -1018,10 +1018,12 @@ class ApiClient {
       '/api/search?q=${Uri.encodeQueryComponent(query)}'
       '&teamId=${Uri.encodeQueryComponent(teamId)}',
     );
-    if (roomId != null)
+    if (roomId != null) {
       params.write('&roomId=${Uri.encodeQueryComponent(roomId)}');
-    if (senderId != null)
+    }
+    if (senderId != null) {
       params.write('&senderId=${Uri.encodeQueryComponent(senderId)}');
+    }
     if (since != null) params.write('&since=${since.millisecondsSinceEpoch}');
     if (until != null) params.write('&until=${until.millisecondsSinceEpoch}');
     final list = await _get(params.toString()) as List;

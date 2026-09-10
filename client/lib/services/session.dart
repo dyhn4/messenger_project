@@ -676,9 +676,9 @@ class Session extends ChangeNotifier {
     deviceIdentity ??= DeviceIdentity();
     await deviceIdentity!.ensureLoaded();
     secretSessionManager = SecretSessionManager(
-      api: api!,
-      socket: chatSocket,
-      identity: deviceIdentity!,
+      api!,
+      chatSocket,
+      deviceIdentity!,
     );
     // FCM 토큰 등록(_registerFcmToken)은 서버의 devices 테이블에 이 기기 행이 먼저 있어야
     // UPDATE가 걸린다(server/src/db/queries/devices.js의 setDeviceFcmToken). 여기서
@@ -948,8 +948,9 @@ class Session extends ChangeNotifier {
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission();
       final token = await messaging.getToken();
-      if (token != null)
+      if (token != null) {
         await api!.registerFcmToken(deviceIdentity!.deviceId, token);
+      }
 
       await _fcmTokenRefreshSub?.cancel();
       _fcmTokenRefreshSub = messaging.onTokenRefresh.listen((newToken) {

@@ -192,8 +192,9 @@ class RoomChatController extends ChangeNotifier {
     messages.add(m);
     notifyListeners();
     // 지금 이 방을 실제로 보고 있을 때만 읽음 처리한다 (백그라운드/다른 방을 보는 중이면 안읽음으로 남겨야 함).
-    if (_session.activeRoomId == room.id && _session.appInForeground)
+    if (_session.activeRoomId == room.id && _session.appInForeground) {
       markReadNow();
+    }
   }
 
   /// Session이 이 방으로 들어온 실시간 댓글(comment:new)을 라우팅할 때 호출한다. 원본 메시지가
@@ -203,8 +204,9 @@ class RoomChatController extends ChangeNotifier {
     final idx = messages.indexWhere((m) => m.id == c.messageId);
     if (idx == -1) return;
     final message = messages[idx];
-    if (message.comments.any((x) => x.id == c.id))
+    if (message.comments.any((x) => x.id == c.id)) {
       return; // 재연결 재전송 등으로 인한 중복 방지.
+    }
     message.comments.add(c);
     messages
       ..add(Message.commentEntry(c))
@@ -311,8 +313,9 @@ class RoomChatController extends ChangeNotifier {
 
   Message? _findCommentEntry(String commentId) {
     for (final m in messages) {
-      if (m.type == MessageType.comment && m.asComment!.id == commentId)
+      if (m.type == MessageType.comment && m.asComment!.id == commentId) {
         return m;
+      }
     }
     return null;
   }
@@ -402,8 +405,9 @@ class RoomChatController extends ChangeNotifier {
       await _session.decryptHistory(room, history);
       if (!_mergeHistory(history)) return;
       notifyListeners();
-      if (_session.activeRoomId == room.id && _session.appInForeground)
+      if (_session.activeRoomId == room.id && _session.appInForeground) {
         markReadNow();
+      }
     } catch (_) {
       // 재연결 직후 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
     }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/team.dart';
 import '../services/session.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -44,6 +45,10 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   late Color? _color = parseHexColor(widget.team.iconColor);
   late TopicCreationPolicy _topicCreationPolicy =
       widget.team.topicCreationPolicy;
+  // _topicCreationPolicy가 designated일 때만 의미가 있다 — 아직 저장 전인 로컬 선택 상태.
+  late List<String> _designatedTopicCreatorIds = List.of(
+    widget.team.topicCreatorIds,
+  );
   late bool _messageEditDeleteEnabled = widget.team.messageEditDeleteEnabled;
   late int _messageEditDeleteWindow =
       widget.team.messageEditDeleteWindowSeconds;
@@ -109,15 +114,75 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         iconEmoji: _emoji,
         iconColor: _color == null ? '' : colorToHex(_color!),
         topicCreationPolicy: _topicCreationPolicy,
+        topicCreatorIds: _topicCreationPolicy == TopicCreationPolicy.designated
+            ? _designatedTopicCreatorIds
+            : null,
         messageEditDeleteEnabled: _messageEditDeleteEnabled,
         messageEditDeleteWindowSeconds: _messageEditDeleteWindow,
       );
-      _toast('팀 정보를 저장했습니다.');
+      if (mounted) showAppToast(context, '팀 정보를 저장했습니다.');
     } catch (e) {
       _toast('저장 실패: $e');
     } finally {
       if (mounted) setState(() => _savingInfo = false);
     }
+  }
+
+  /// "토픽 생성 권한"을 '지정'으로 바꾸거나(처음 고를 때) 이미 지정된 목록을 다시 고칠 때
+  /// (아래 "변경" 버튼) 공통으로 쓰는 멤버 선택 다이얼로그 — 정회원 이상만 후보로 보여준다.
+  /// 취소하면 null.
+  Future<List<String>?> _pickTopicCreators() async {
+    final members = _members;
+    if (members == null) {
+      _toast('팀원 목록을 불러오는 중입니다. 잠시 후 다시 시도하세요.');
+      return null;
+    }
+    final candidates = members
+        .where((u) => accountRoleFromWire(u.role) != AccountRole.guest)
+        .toList();
+    return showDialog<List<String>>(
+      context: context,
+      builder: (_) => _DesignateTopicCreatorsDialog(
+        session: widget.session,
+        candidates: candidates,
+        initialSelectedIds: _designatedTopicCreatorIds.toSet(),
+      ),
+    );
+  }
+
+  /// 토픽 생성 권한 SegmentedButton에서 '지정'을 고르면 바로 멤버 선택 다이얼로그가 뜬다 —
+  /// 취소하면 정책 선택 자체를 되돌린다(아직 아무도 안 골랐는데 '지정'만 선택된 채로 남는
+  /// 어중간한 상태를 안 만들기 위해서).
+  Future<void> _onTopicCreationPolicyChanged(
+    Set<TopicCreationPolicy> selection,
+  ) async {
+    final policy = selection.first;
+    if (policy != TopicCreationPolicy.designated) {
+      setState(() => _topicCreationPolicy = policy);
+      return;
+    }
+    final ids = await _pickTopicCreators();
+    if (ids == null || !mounted) return;
+    setState(() {
+      _topicCreationPolicy = TopicCreationPolicy.designated;
+      _designatedTopicCreatorIds = ids;
+    });
+  }
+
+  /// 이미 '지정'으로 정해진 상태에서 목록만 다시 고를 때("변경" 버튼).
+  Future<void> _editDesignatedTopicCreators() async {
+    final ids = await _pickTopicCreators();
+    if (ids == null || !mounted) return;
+    setState(() => _designatedTopicCreatorIds = ids);
+  }
+
+  /// "지정된 사람: 홍길동, 김철수" 표시용 — 서버는 id만 주므로 이미 불러온 팀원 목록과
+  /// 대조해서 이름을 찾는다(아직 목록을 못 불러왔으면 id 그대로 보여준다).
+  String _designatedTopicCreatorNames() {
+    final members = {for (final u in _members ?? const <AppUser>[]) u.id: u};
+    return _designatedTopicCreatorIds
+        .map((id) => members[id]?.name ?? id)
+        .join(', ');
   }
 
   Future<void> _addMembers() async {
@@ -374,9 +439,29 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                         ButtonSegment(value: p, label: Text(p.label)),
                     ],
                     selected: {_topicCreationPolicy},
-                    onSelectionChanged: (s) =>
-                        setState(() => _topicCreationPolicy = s.first),
+                    onSelectionChanged: _onTopicCreationPolicyChanged,
                   ),
+                  if (_topicCreationPolicy ==
+                      TopicCreationPolicy.designated) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _designatedTopicCreatorIds.isEmpty
+                                ? '지정된 사람 없음'
+                                : '지정된 사람: ${_designatedTopicCreatorNames()}',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: Theme.of(context).hintColor),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _editDesignatedTopicCreators,
+                          child: const Text('변경'),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   const _SectionLabel('메시지 설정'),
                   SwitchListTile(
@@ -815,6 +900,104 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text('추가하기 (${_selected.length})'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "토픽 생성 권한"을 '지정'으로 정할 때 콕 집어 고르는 다이얼로그 — [candidates](정회원
+/// 이상만 이미 걸러서 넘어온다) 중에서 여러 명을 골라 "확인"을 누르면 그 id 목록을 그대로
+/// 반환한다. 여기서 서버에 저장하지는 않는다 — 팀 설정 화면이 "저장"을 눌러야 실제로 반영된다.
+class _DesignateTopicCreatorsDialog extends StatefulWidget {
+  final Session session;
+  final List<AppUser> candidates;
+  final Set<String> initialSelectedIds;
+  const _DesignateTopicCreatorsDialog({
+    required this.session,
+    required this.candidates,
+    required this.initialSelectedIds,
+  });
+
+  @override
+  State<_DesignateTopicCreatorsDialog> createState() =>
+      _DesignateTopicCreatorsDialogState();
+}
+
+class _DesignateTopicCreatorsDialogState
+    extends State<_DesignateTopicCreatorsDialog> {
+  late final _selected = Set<String>.of(widget.initialSelectedIds);
+
+  @override
+  Widget build(BuildContext context) {
+    final list = widget.candidates.isEmpty
+        ? const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: Text('지정할 수 있는 정회원 이상 팀원이 없습니다.')),
+          )
+        : ListView(
+            shrinkWrap: true,
+            children: [
+              for (final user in widget.candidates)
+                ListTile(
+                  leading: UserAvatar(
+                    user: user,
+                    resolveUrl: widget.session.resolveUrl,
+                  ),
+                  title: Text(user.name),
+                  subtitle: Text(
+                    '${user.username} · ${accountRoleFromWire(user.role).label}',
+                  ),
+                  selected: _selected.contains(user.id),
+                  selectedTileColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer.withValues(alpha: 0.4),
+                  onTap: () => setState(() {
+                    if (_selected.contains(user.id)) {
+                      _selected.remove(user.id);
+                    } else {
+                      _selected.add(user.id);
+                    }
+                  }),
+                ),
+            ],
+          );
+
+    return FloatingDialog(
+      title: '토픽 생성 권한 지정',
+      maxWidth: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '정회원 이상 중에서 새 토픽을 만들 수 있는 사람을 고르세요.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 12),
+          Flexible(child: list),
+          const Divider(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('취소'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _selected.isEmpty
+                      ? null
+                      : () => Navigator.of(context).pop(_selected.toList()),
+                  child: Text('확인 (${_selected.length})'),
                 ),
               ),
             ],

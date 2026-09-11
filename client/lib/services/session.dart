@@ -561,7 +561,7 @@ class Session extends ChangeNotifier {
   // 새 토픽 생성은 팀 설정(topicCreationPolicy)을 따로 보고, 이미 있는 방에 멤버를 추가로
   // 초대하는 건 팀 설정과 무관하게 항상 canCreateRooms와 같다(server/src/rooms.js 참고).
   bool get canCreateTopic =>
-      currentTeam?.canCreateTopic(accountRole) ?? false;
+      currentTeam?.canCreateTopic(accountRole, userId) ?? false;
   bool get canInviteToRooms => canCreateRooms;
   bool get canModerateContent => canManageCurrentTeam;
 
@@ -592,12 +592,14 @@ class Session extends ChangeNotifier {
   }
 
   /// 팀 이름/아이콘 변경(소유자·관리자만 — 서버가 다시 검사한다).
+  /// [topicCreatorIds]는 topicCreationPolicy를 designated로 정할 때만 함께 보낸다.
   Future<void> updateTeam(
     Team team, {
     String? name,
     String? iconEmoji,
     String? iconColor,
     TopicCreationPolicy? topicCreationPolicy,
+    List<String>? topicCreatorIds,
     bool? messageEditDeleteEnabled,
     int? messageEditDeleteWindowSeconds,
   }) async {
@@ -607,6 +609,7 @@ class Session extends ChangeNotifier {
       iconEmoji: iconEmoji,
       iconColor: iconColor,
       topicCreationPolicy: topicCreationPolicy?.wire,
+      topicCreatorIds: topicCreatorIds,
       messageEditDeleteEnabled: messageEditDeleteEnabled,
       messageEditDeleteWindowSeconds: messageEditDeleteWindowSeconds,
     );
@@ -614,6 +617,7 @@ class Session extends ChangeNotifier {
     team.iconEmoji = updated.iconEmoji;
     team.iconColor = updated.iconColor;
     team.topicCreationPolicy = updated.topicCreationPolicy;
+    team.topicCreatorIds = updated.topicCreatorIds;
     team.messageEditDeleteEnabled = updated.messageEditDeleteEnabled;
     team.messageEditDeleteWindowSeconds =
         updated.messageEditDeleteWindowSeconds;
@@ -782,6 +786,7 @@ class Session extends ChangeNotifier {
         teams[i].iconEmoji = team.iconEmoji;
         teams[i].iconColor = team.iconColor;
         teams[i].topicCreationPolicy = team.topicCreationPolicy;
+        teams[i].topicCreatorIds = team.topicCreatorIds;
         teams[i].messageEditDeleteEnabled = team.messageEditDeleteEnabled;
         teams[i].messageEditDeleteWindowSeconds =
             team.messageEditDeleteWindowSeconds;

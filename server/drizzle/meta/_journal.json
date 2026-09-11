@@ -176,6 +176,13 @@
       "when": 1789200000000,
       "tag": "0024_topic_creation_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789200000001,
+      "tag": "0025_topic_creators",
+      "breakpoints": true
     }
   ]
 }

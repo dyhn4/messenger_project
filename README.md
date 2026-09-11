@@ -187,11 +187,13 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 나중에 정회원 이상으로 올라가면, 그동안 빠져 있던 소속 팀들의 공개 토픽에 자동으로 참여됩니다.
 
 **토픽 생성 권한**은 팀 설정(팀을 관리할 수 있는 사람이 정함)에서 팀마다 따로 정합니다 —
-정회원 이상(기본) / 관리자 이상 / 소유자만. 준회원은 어느 설정에서도 토픽을 만들 수 없습니다.
-**그룹채팅은 이 설정과 무관하게 항상 정회원 이상이면 만들 수 있습니다** — 토픽은 팀 전체에
-공개되는 채널이라 만드는 사람을 제한할 수 있어야 하지만, 그룹은 만든 사람이 스스로 고른
-소수만 들어오는 사적인 대화라 제한할 이유가 약하기 때문입니다. 이미 있는 방(토픽·그룹)에
-나중에 멤버를 추가로 초대하는 것도 이 설정과 무관하게 정회원 이상이면 누구나 할 수 있습니다.
+정회원 이상(기본) / 관리자 이상 / 소유자만 / **지정**(팀을 관리할 수 있는 사람이 정회원 이상
+중에서 콕 집어 고른 특정 팀원들만, 여러 명 가능 — `teams` 테이블의 `topic_creators`).
+준회원은 어느 설정에서도 토픽을 만들 수 없습니다. **그룹채팅은 이 설정과 무관하게 항상
+정회원 이상이면 만들 수 있습니다** — 토픽은 팀 전체에 공개되는 채널이라 만드는 사람을 제한할
+수 있어야 하지만, 그룹은 만든 사람이 스스로 고른 소수만 들어오는 사적인 대화라 제한할 이유가
+약하기 때문입니다. 이미 있는 방(토픽·그룹)에 나중에 멤버를 추가로 초대하는 것도 이 설정과
+무관하게 정회원 이상이면 누구나 할 수 있습니다.
 
 **팀 생성 권한**은 서버 설정으로 정합니다 — 정회원 이상(기본) / 관리자 이상 / 서버 운영자만
 ([운영 현황](#운영-현황) 참고). 서버 운영자는 설정과 무관하게 항상 만들 수 있습니다. **팀 초대
@@ -810,7 +812,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 |---|---|---|
 | GET | `/api/teams` | 내가 속한 팀 목록(각 팀에서의 내 등급 포함) |
 | POST | `/api/teams` | 팀 생성(만든 사람이 소유자) |
-| PATCH | `/api/teams/:id` | 팀 이름/아이콘/토픽 생성 권한/메시지 설정 변경(소유자·관리자) |
+| PATCH | `/api/teams/:id` | 팀 이름/아이콘/토픽 생성 권한/메시지 설정 변경(소유자·관리자). `topicCreationPolicy`를 `designated`로 정할 때는 `topicCreatorIds`(정회원 이상인 팀원 id 배열, 1개 이상)를 함께 보낸다 |
 | DELETE | `/api/teams/:id` | 팀 삭제(소유자만, 본문에 `name`으로 팀 이름 확인 — 방/메시지 전부 삭제) |
 | POST | `/api/teams/:id/transfer-owner` | 소유권 이양(소유자만, 넘긴 사람은 관리자가 됨) |
 | GET | `/api/teams/:id/members` | 팀원 목록(각자의 `role`(계정 등급)·`isOwner`·`department`·`position` 포함) |
@@ -911,8 +913,9 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |
 | `invite_links` | 초대 링크. `token`(무작위 문자열, unique), `expires_at`/`revoked_at`, `used_count`/`last_used_at`(1회용 아님 — 여러 기기가 나눠 씀), `created_by_name`(만든 사람 스냅샷) — [초대 링크(설치→가입)](#초대-링크-설치가입) 참고 |
 | `team_invite_links` | 팀 초대 링크. `invite_links`와 같은 구조 + `team_id`(자동 합류시킬 팀, 팀 삭제 시 cascade), `assigned_role`(가입 즉시 부여할 등급) — [팀 초대 링크](#팀-초대-링크자동-합류등급-부여) 참고 |
-| `teams` | 팀(워크스페이스). `name`, `icon_emoji`/`icon_color`(팀 아이콘), `topic_creation_policy`(`member`\|`admin`\|`owner` — 새 토픽을 만들 수 있는 최소 등급, 그룹채팅은 이 설정과 무관), `message_edit_delete_enabled`/`message_edit_delete_window_seconds`([메시지 설정](#메시지-설정)), `created_by`(만든 사람 = 소유자) |
+| `teams` | 팀(워크스페이스). `name`, `icon_emoji`/`icon_color`(팀 아이콘), `topic_creation_policy`(`member`\|`admin`\|`owner`\|`designated` — 새 토픽을 만들 수 있는 최소 등급, 그룹채팅은 이 설정과 무관), `message_edit_delete_enabled`/`message_edit_delete_window_seconds`([메시지 설정](#메시지-설정)), `created_by`(만든 사람 = 소유자) |
 | `team_members` | 팀 멤버십(복합 PK). `role`은 `owner`(팀을 만든 사람) 또는 `member` — 등급은 계정 단위로 올라갔다([권한 등급](#권한-등급) 참고), `department`/`position`(팀 단위 부서·직책) |
+| `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(비밀 대화 상대 혼자 나갔을 때 표시용) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷) |

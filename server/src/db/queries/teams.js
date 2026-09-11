@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../client.js';
-import { teamMembers, teams, users } from '../schema.js';
+import { teamMembers, teams, topicCreators, users } from '../schema.js';
 
 export async function insertTeam(fields) {
   const [row] = await db.insert(teams).values(fields).returning();
@@ -168,4 +168,44 @@ export function listTeamIdsForUser(userId) {
 export function listTeamsByIds(ids) {
   if (ids.length === 0) return Promise.resolve([]);
   return db.select().from(teams).where(inArray(teams.id, ids));
+}
+
+/** topicCreationPolicy가 'designated'일 때, 이 사람이 지정된 토픽 생성자인지(permissions.js
+ * canCreateTopic에 넘길 값 — DB 조회가 필요해서 그 순수 함수 대신 여기서 미리 확인한다). */
+export async function isTopicCreator(teamId, userId) {
+  const [row] = await db
+    .select({ userId: topicCreators.userId })
+    .from(topicCreators)
+    .where(and(eq(topicCreators.teamId, teamId), eq(topicCreators.userId, userId)));
+  return !!row;
+}
+
+/** 지정된 토픽 생성자 id만(가볍게, 값 비교용). */
+export function listTopicCreatorIds(teamId) {
+  return db
+    .select({ userId: topicCreators.userId })
+    .from(topicCreators)
+    .where(eq(topicCreators.teamId, teamId))
+    .then((rows) => rows.map((r) => r.userId));
+}
+
+/** 지정된 토픽 생성자를 실제 사용자 정보로 — 팀 설정 화면에 이름/아바타를 보여줄 때. */
+export function listTopicCreatorUsers(teamId) {
+  return db
+    .select({ user: users })
+    .from(topicCreators)
+    .innerJoin(users, eq(topicCreators.userId, users.id))
+    .where(eq(topicCreators.teamId, teamId))
+    .then((rows) => rows.map((r) => r.user));
+}
+
+/** 지정된 토픽 생성자 목록을 통째로 교체한다("확인" 한 번에 전체를 다시 정한다 — 팀 설정
+ * 화면의 멤버 선택 다이얼로그가 매번 "지금 지정된 사람 전체"를 다시 보내온다). */
+export async function setTopicCreators(teamId, userIds) {
+  await db.transaction(async (tx) => {
+    await tx.delete(topicCreators).where(eq(topicCreators.teamId, teamId));
+    if (userIds.length > 0) {
+      await tx.insert(topicCreators).values(userIds.map((userId) => ({ teamId, userId })));
+    }
+  });
 }

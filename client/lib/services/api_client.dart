@@ -717,6 +717,7 @@ class ApiClient {
     String? iconEmoji,
     String? iconColor,
     String? topicCreationPolicy,
+    List<String>? topicCreatorIds,
     bool? messageEditDeleteEnabled,
     int? messageEditDeleteWindowSeconds,
   }) async {
@@ -726,6 +727,7 @@ class ApiClient {
             'iconEmoji': ?iconEmoji,
             'iconColor': ?iconColor,
             'topicCreationPolicy': ?topicCreationPolicy,
+            'topicCreatorIds': ?topicCreatorIds,
             'messageEditDeleteEnabled': ?messageEditDeleteEnabled,
             'messageEditDeleteWindowSeconds': ?messageEditDeleteWindowSeconds,
           })

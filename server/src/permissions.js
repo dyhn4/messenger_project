@@ -58,18 +58,23 @@ export function canBrowseTopics(role) {
 /**
  * 새 토픽을 만들 수 있는지 — 팀 설정(topicCreationPolicy)이 정한 최소 등급을 넘어야 한다.
  * 'member'(기본)면 정회원 이상, 'admin'이면 그 팀을 관리할 수 있는 사람만, 'owner'면 그 팀의
- * 소유자만. **그룹채팅은 이 설정과 무관하게 항상 정회원 이상이면 만들 수 있다**(canCreateRooms) —
- * 토픽은 팀 전체에 공개되는 채널이라 만드는 사람을 제한할 수 있어야 하지만, 그룹은 만든
- * 사람이 스스로 고른 소수만 들어오는 사적인 대화라 제한할 이유가 약하기 때문이다.
+ * 소유자만, 'designated'면 팀 관리자가 콕 집어 고른 사람만(db/queries/teams.js의
+ * topicCreators — DB 조회가 필요해서 여기(순수 모듈)서는 판정 못 하고, 호출부가 미리 조회해
+ * [isDesignatedTopicCreator]로 넘겨준다). **그룹채팅은 이 설정과 무관하게 항상 정회원
+ * 이상이면 만들 수 있다**(canCreateRooms) — 토픽은 팀 전체에 공개되는 채널이라 만드는 사람을
+ * 제한할 수 있어야 하지만, 그룹은 만든 사람이 스스로 고른 소수만 들어오는 사적인 대화라
+ * 제한할 이유가 약하기 때문이다.
  */
-export const TOPIC_CREATION_LEVELS = ['member', 'admin', 'owner'];
+export const TOPIC_CREATION_LEVELS = ['member', 'admin', 'owner', 'designated'];
 
-export function canCreateTopic({ role, isOwner, team }) {
+export function canCreateTopic({ role, isOwner, isDesignatedTopicCreator, team }) {
   switch (team?.topicCreationPolicy) {
     case 'owner':
       return isOwner === true;
     case 'admin':
       return canManageTeam({ role, isOwner });
+    case 'designated':
+      return isDesignatedTopicCreator === true;
     default: // 'member'
       return canCreateRooms(role);
   }

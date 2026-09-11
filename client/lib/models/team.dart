@@ -43,6 +43,7 @@ enum TopicCreationPolicy {
   member, // 정회원 이상(기본)
   admin, // 관리자 이상(소유자 포함)
   owner, // 소유자만
+  designated, // 팀을 관리할 수 있는 사람이 콕 집어 고른 특정 정회원 이상만(Team.topicCreatorIds)
 }
 
 extension TopicCreationPolicyLabel on TopicCreationPolicy {
@@ -50,6 +51,7 @@ extension TopicCreationPolicyLabel on TopicCreationPolicy {
     TopicCreationPolicy.member => '정회원 이상',
     TopicCreationPolicy.admin => '관리자 이상',
     TopicCreationPolicy.owner => '소유자만',
+    TopicCreationPolicy.designated => '지정',
   };
 
   String get wire => name;
@@ -58,6 +60,7 @@ extension TopicCreationPolicyLabel on TopicCreationPolicy {
 TopicCreationPolicy topicCreationPolicyFromWire(String? s) => switch (s) {
   'admin' => TopicCreationPolicy.admin,
   'owner' => TopicCreationPolicy.owner,
+  'designated' => TopicCreationPolicy.designated,
   _ => TopicCreationPolicy.member,
 };
 
@@ -88,6 +91,11 @@ class Team {
   /// 이 팀에서 새 토픽을 만들 수 있는 최소 등급.
   TopicCreationPolicy topicCreationPolicy;
 
+  /// topicCreationPolicy가 [TopicCreationPolicy.designated]일 때만 의미가 있다 — 콕 집어
+  /// 지정된 사람들의 id. 이름은 서버가 안 실어주므로(team_settings_dialog.dart) 팀원 목록과
+  /// 대조해서 보여준다.
+  List<String> topicCreatorIds;
+
   /// [메시지 설정] 메시지 수정/삭제를 쓰는지. false면 그 팀에서는 아무도(소유자·관리자 포함)
   /// 메시지/댓글을 고치거나 지울 수 없다.
   bool messageEditDeleteEnabled;
@@ -109,6 +117,7 @@ class Team {
     this.iconEmoji,
     this.iconColor,
     this.topicCreationPolicy = TopicCreationPolicy.member,
+    this.topicCreatorIds = const [],
     this.messageEditDeleteEnabled = true,
     this.messageEditDeleteWindowSeconds = 300,
     this.createdBy,
@@ -125,6 +134,8 @@ class Team {
     topicCreationPolicy: topicCreationPolicyFromWire(
       json['topicCreationPolicy'] as String?,
     ),
+    topicCreatorIds:
+        (json['topicCreatorIds'] as List?)?.cast<String>() ?? const [],
     messageEditDeleteEnabled: json['messageEditDeleteEnabled'] as bool? ?? true,
     messageEditDeleteWindowSeconds:
         (json['messageEditDeleteWindowSeconds'] as num?)?.toInt() ?? 300,
@@ -145,9 +156,12 @@ class Team {
 
   /// 이 팀에서 새 토픽을 만들 수 있는지 — 계정 등급·소유자 여부와 팀 설정
   /// (topicCreationPolicy)을 함께 본다(서버 permissions.js의 canCreateTopic과 같은 규칙).
-  bool canCreateTopic(AccountRole role) => switch (topicCreationPolicy) {
+  /// [userId]는 topicCreationPolicy가 designated일 때만 쓴다(그 외엔 안 넘겨도 된다).
+  bool canCreateTopic(AccountRole role, [String? userId]) => switch (topicCreationPolicy) {
     TopicCreationPolicy.owner => isOwner,
     TopicCreationPolicy.admin => canManage(role),
+    TopicCreationPolicy.designated =>
+      userId != null && topicCreatorIds.contains(userId),
     TopicCreationPolicy.member => role.canCreateRooms,
   };
 }

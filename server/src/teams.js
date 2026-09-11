@@ -10,8 +10,10 @@ import {
   listTeamMemberIds,
   listTeamMemberUsers,
   listTeamsForUser,
+  listTopicCreatorIds,
   removeTeamMember,
   setTeamRole,
+  setTopicCreators,
   updateTeam,
   updateTeamMember,
 } from './db/queries/teams.js';
@@ -32,13 +34,16 @@ import { teamAccess, userAccess } from './access.js';
 import { nameOf, notifyMembership, postSystemMessage } from './rooms.js';
 import { publicUser } from './users.js';
 
-export function toTeamDto(team, { isOwner = false, memberCount = null } = {}) {
+export function toTeamDto(team, { isOwner = false, memberCount = null, topicCreatorIds = [] } = {}) {
   return {
     id: team.id,
     name: team.name,
     iconEmoji: team.iconEmoji ?? null,
     iconColor: team.iconColor ?? null,
     topicCreationPolicy: team.topicCreationPolicy ?? 'member',
+    // topicCreationPolicy가 'designated'일 때만 의미가 있다 — 팀 설정 화면이 이 id 목록과
+    // 자기가 이미 갖고 있는 팀원 목록을 대조해서 이름을 보여준다(서버가 이름까지 싣지 않는다).
+    topicCreatorIds,
     messageEditDeleteEnabled: team.messageEditDeleteEnabled !== false,
     messageEditDeleteWindowSeconds: editDeleteWindowSeconds(team),
     createdBy: team.createdBy ?? null,
@@ -48,6 +53,12 @@ export function toTeamDto(team, { isOwner = false, memberCount = null } = {}) {
     isOwner,
     memberCount,
   };
+}
+
+/** topicCreationPolicy가 'designated'일 때만 지정자 목록을 조회한다(그 외 정책이면 DB를
+ * 두드릴 필요가 없다). toTeamDto에 넘길 topicCreatorIds를 만들 때 여기저기서 반복해서 쓴다. */
+function topicCreatorIdsFor(team) {
+  return team.topicCreationPolicy === 'designated' ? listTopicCreatorIds(team.id) : Promise.resolve([]);
 }
 
 /**
@@ -74,8 +85,8 @@ export function createTeamsRouter(io) {
    * 따로 emit한다 — 클라이언트는 이 값과 자기 계정 등급을 합쳐 화면의 권한 UI를 다시 그린다.
    */
   async function broadcastTeamUpdated(team) {
-    const memberIds = await listTeamMemberIds(team.id);
-    const dto = toTeamDto(team, { memberCount: memberIds.length });
+    const [memberIds, topicCreatorIds] = await Promise.all([listTeamMemberIds(team.id), topicCreatorIdsFor(team)]);
+    const dto = toTeamDto(team, { memberCount: memberIds.length, topicCreatorIds });
     for (const userId of memberIds) {
       const isOwner = (await getTeamRole(team.id, userId)) === 'owner';
       io.to(`user:${userId}`).emit('team:updated', { ...dto, isOwner });
@@ -87,8 +98,8 @@ export function createTeamsRouter(io) {
     const rows = await listTeamsForUser(req.user.sub);
     const dtos = [];
     for (const { team, role } of rows) {
-      const memberIds = await listTeamMemberIds(team.id);
-      dtos.push(toTeamDto(team, { isOwner: role === 'owner', memberCount: memberIds.length }));
+      const [memberIds, topicCreatorIds] = await Promise.all([listTeamMemberIds(team.id), topicCreatorIdsFor(team)]);
+      dtos.push(toTeamDto(team, { isOwner: role === 'owner', memberCount: memberIds.length, topicCreatorIds }));
     }
     res.json(dtos);
   });
@@ -144,12 +155,34 @@ export function createTeamsRouter(io) {
     }
     if ('iconEmoji' in (req.body ?? {})) fields.iconEmoji = req.body.iconEmoji || null;
     if ('iconColor' in (req.body ?? {})) fields.iconColor = req.body.iconColor || null;
+    // 'designated'로 정할 때만 topicCreatorIds가 함께 온다 — 다른 값으로 바꿀 때는 안 보내도
+    // 되고, 기존 지정 목록은 그대로 남는다(스키마의 topicCreators 주석 참고).
+    let topicCreatorIdsToSet = null;
     if ('topicCreationPolicy' in (req.body ?? {})) {
       const policy = req.body.topicCreationPolicy;
       if (!TOPIC_CREATION_LEVELS.includes(policy)) {
         return res.status(400).json({ error: `topicCreationPolicy는 ${TOPIC_CREATION_LEVELS.join('/')} 중 하나여야 합니다.` });
       }
       fields.topicCreationPolicy = policy;
+
+      if (policy === 'designated') {
+        const ids = Array.isArray(req.body.topicCreatorIds)
+          ? [...new Set(req.body.topicCreatorIds.filter((id) => typeof id === 'string'))]
+          : [];
+        if (ids.length === 0) {
+          return res.status(400).json({ error: '토픽을 만들 수 있는 사람을 한 명 이상 지정하세요.' });
+        }
+        for (const id of ids) {
+          if (!(await findTeamMember(team.id, id))) {
+            return res.status(400).json({ error: '이 팀의 멤버만 지정할 수 있습니다.' });
+          }
+          const target = await findUserById(id);
+          if (accountRole(target) === 'guest') {
+            return res.status(400).json({ error: '정회원 이상만 지정할 수 있습니다.' });
+          }
+        }
+        topicCreatorIdsToSet = ids;
+      }
     }
     // [메시지 설정] 수정/삭제 허용 여부 + 수정/삭제 가능 시간.
     if ('messageEditDeleteEnabled' in (req.body ?? {})) {
@@ -168,9 +201,13 @@ export function createTeamsRouter(io) {
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
 
     const updated = await updateTeam(team.id, fields);
+    if (topicCreatorIdsToSet) await setTopicCreators(team.id, topicCreatorIdsToSet);
     await broadcastTeamUpdated(updated);
-    const memberIds = await listTeamMemberIds(team.id);
-    res.json(toTeamDto(updated, { isOwner: me.isOwner, memberCount: memberIds.length }));
+    const [memberIds, topicCreatorIds] = await Promise.all([
+      listTeamMemberIds(team.id),
+      topicCreatorIdsFor(updated),
+    ]);
+    res.json(toTeamDto(updated, { isOwner: me.isOwner, memberCount: memberIds.length, topicCreatorIds }));
   });
 
   /**
@@ -289,10 +326,13 @@ export function createTeamsRouter(io) {
       }
     }
 
-    const memberIds = await listTeamMemberIds(team.id);
+    const [memberIds, topicCreatorIds] = await Promise.all([listTeamMemberIds(team.id), topicCreatorIdsFor(team)]);
     // 새로 들어온 사람의 다른 기기까지 팀 목록을 갱신시킨다(팀 선택 화면에 바로 뜨도록).
     for (const userId of userIds) {
-      io.to(`user:${userId}`).emit('team:joined', toTeamDto(team, { isOwner: false, memberCount: memberIds.length }));
+      io.to(`user:${userId}`).emit(
+        'team:joined',
+        toTeamDto(team, { isOwner: false, memberCount: memberIds.length, topicCreatorIds }),
+      );
     }
     const addedNames = await Promise.all(userIds.map(nameOf));
     recordAudit({

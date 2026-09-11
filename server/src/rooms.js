@@ -23,7 +23,7 @@ import {
   setMemberMuted,
   setSecretDepartedMember,
 } from './db/queries/rooms.js';
-import { findTeamById, isTeamMember, listAutoJoinTeamMemberIds } from './db/queries/teams.js';
+import { findTeamById, isTeamMember, isTopicCreator, listAutoJoinTeamMemberIds } from './db/queries/teams.js';
 import { teamAccess } from './access.js';
 import { canBrowseTopics, canCreateRooms, canCreateTopic } from './permissions.js';
 import {
@@ -329,8 +329,11 @@ export function createRoomsRouter(io) {
     // 체크(정회원 이상)로 이미 충분하고 이 설정과 무관하다(README "토픽 생성 권한" 참고).
     if (type === 'topic') {
       const team = await findTeamById(teamId);
-      if (!canCreateTopic({ role, isOwner, team })) {
-        const need = { admin: '관리자 이상', owner: '소유자' }[team?.topicCreationPolicy] ?? '정회원 이상';
+      // 'designated'일 때만 지정자 목록 조회가 필요하다(그 외 정책은 DB 조회 없이 판정 가능).
+      const isDesignatedTopicCreator =
+        team?.topicCreationPolicy === 'designated' ? await isTopicCreator(teamId, req.user.sub) : false;
+      if (!canCreateTopic({ role, isOwner, isDesignatedTopicCreator, team })) {
+        const need = { admin: '관리자 이상', owner: '소유자', designated: '지정된 사람' }[team?.topicCreationPolicy] ?? '정회원 이상';
         return res.status(403).json({ error: `이 팀은 ${need}만 토픽을 만들 수 있도록 설정되어 있습니다.` });
       }
     }

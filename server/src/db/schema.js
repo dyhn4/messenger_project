@@ -65,8 +65,8 @@ export const teams = pgTable('teams', {
   iconEmoji: text('icon_emoji'),
   iconColor: text('icon_color'),
   // 새 토픽을 만들 수 있는 최소 등급 — 'member'(정회원도 가능, 기본) | 'admin'(관리자만) |
-  // 'owner'(소유자만). 그룹채팅은 이 설정과 무관하게 항상 정회원 이상 가능하다
-  // (permissions.js canCreateTopic 참고).
+  // 'owner'(소유자만) | 'designated'(아래 topicCreators에 콕 집어 등록된 사람만). 그룹채팅은
+  // 이 설정과 무관하게 항상 정회원 이상 가능하다(permissions.js canCreateTopic 참고).
   topicCreationPolicy: text('topic_creation_policy').notNull().default('member'),
   // [메시지 설정] 메시지 수정/삭제 허용 여부. false면 그 팀에서는 아무도(소유자·관리자 포함)
   // 메시지/댓글을 고치거나 지울 수 없다 — 대화 기록을 그대로 남겨야 하는 팀을 위한 스위치.
@@ -102,6 +102,26 @@ export const teamMembers = pgTable(
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('team_members_user_id_idx').on(t.userId)],
+);
+
+/**
+ * teams.topicCreationPolicy가 'designated'일 때만 의미가 있는, "이 팀에서 토픽을 만들어도
+ * 되는 사람"으로 콕 집어 지정된 목록(정회원 이상 중에서 팀을 관리할 수 있는 사람이 고른다 —
+ * team_settings_dialog.dart). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 —
+ * 나중에 다시 'designated'로 돌아오면 이전에 골라둔 사람들이 그대로 남아있는 편이 매번
+ * 새로 고르는 것보다 편하다.
+ */
+export const topicCreators = pgTable(
+  'topic_creators',
+  {
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('topic_creators_user_id_idx').on(t.userId)],
 );
 
 /**

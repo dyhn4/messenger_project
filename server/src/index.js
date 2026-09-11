@@ -7,6 +7,14 @@ import 'dotenv/config';
 
 import cors from 'cors';
 import express from 'express';
+// Express 4는 async 라우트 핸들러 안에서 던져진 예외/거부된 Promise를 자동으로 next(err)로
+// 넘겨주지 않는다(Express 5부터 해결됨) — 그래서 지금까지는 그런 에러가 나면 요청이 응답
+// 없이 그대로 멈춰버렸다(클라이언트는 응답을 기다리다 타임아웃). 이 패키지가 Router의
+// get/post/patch/delete를 감싸서, async 핸들러가 던지거나 reject한 에러를 자동으로
+// next(err)로 넘겨준다 — 아래 에러 처리 미들웨어가 그걸 받아 깔끔한 JSON 에러로 바로
+// 응답한다(요청이 실패하는 건 똑같지만, 몇십 초 멈춰 있다가 "요청 시간 초과"로 끝나는 대신
+// 즉시 실제 원인이 담긴 메시지로 끝난다).
+import 'express-async-errors';
 import { createServer } from 'node:https';
 import os from 'node:os';
 import readline from 'node:readline';
@@ -33,12 +41,12 @@ import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
 import { createUsersRouter } from './users.js';
 import { versionRouter } from './version.js';
 
-// Express 4는 async 라우트 핸들러 안에서 던져진 예외/거부된 Promise를 자동으로 잡아주지
-// 않는다 — 그대로 두면 처리되지 않은 Promise 거부가 되어 Node 프로세스 전체가 죽는다
-// (실제로 비밀 대화 거절 후 dmKey unique 제약 위반으로 이 문제가 발생해 서버 전체가
-// 다운됐었다). 근본 원인(secretChats.js)은 고쳤지만, 앞으로 어떤 라우터에서든 예상 못한
-// DB 오류 하나가 전체 서비스를 끊는 일이 없도록 마지막 방어선을 둔다 — 요청 하나는
-// 실패하더라도(클라이언트가 타임아웃/에러로 보게 됨) 서버 자체는 계속 떠 있게 한다.
+// 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
+// 미들웨어로 잡힌다. 이건 그 바깥(소켓 이벤트 핸들러, 백그라운드 작업 등 요청/응답 주기
+// 밖)에서 난 에러를 위한 마지막 방어선이다 — 그대로 두면 처리되지 않은 예외/Promise 거부로
+// Node 프로세스 전체가 죽는다(실제로 비밀 대화 거절 후 dmKey unique 제약 위반으로 이 문제가
+// 발생해 서버 전체가 다운됐었다 — 근본 원인은 secretChats.js에서 고쳤다). 로그만 남기고
+// 서버 프로세스는 계속 띄워둔다.
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
 });
@@ -77,6 +85,22 @@ app.use(filesRouter);
 app.get('/health', (req, res) => res.json({ ok: true }));
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).
 app.use(versionRouter);
+
+// 모든 라우트 다음에 두는 공통 에러 처리 — express-async-errors 덕에 라우트 안에서 던진/
+// reject한 에러가 여기로 온다. 이게 없던 동안에는 그런 요청이 응답 없이 그대로 멈춰서
+// 클라이언트가 몇십 초 뒤 "요청 시간 초과"로만 보게 됐다(예: DB 마이그레이션이 아직
+// 안 된 서버에서 새 테이블을 조회하는 라우트를 치면 — 실제로 이 증상으로 발견됨). 이제는
+// 그 자리에서 바로 500 + 에러 메시지로 응답한다.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  console.error(`[요청 처리 오류] ${req.method} ${req.originalUrl}:`, err);
+  // drizzle-orm의 DrizzleQueryError는 진짜 원인(예: Postgres의 "릴레이션이 없습니다")을
+  // err.message가 아니라 err.cause에 담아둔다 — err.message만 보내면 "Failed query: ..."
+  // 라는 SQL문만 보이고 정작 왜 실패했는지는 안 보인다. 콘솔을 못 보는 상황(운영 서버 등)
+  // 에서도 화면 메시지만으로 원인을 알 수 있도록 cause도 같이 붙여 보낸다.
+  const detail = err?.cause?.message ? ` — ${err.cause.message}` : '';
+  res.status(500).json({ error: (err?.message || '서버 오류가 발생했습니다.') + detail });
+});
 
 registerSocket(io);
 startRetentionJob();

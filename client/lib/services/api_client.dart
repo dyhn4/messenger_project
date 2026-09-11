@@ -263,11 +263,27 @@ class ApiClient {
 
   /// [request]를 보내고, 401이면 [onUnauthorized]로 한 번 갱신을 시도한 뒤 한 번만 재시도한다.
   /// [request]는 매번 새로 헤더/바디를 구성해야 한다(재시도 시 갱신된 token을 반영하도록).
+  /// 일반 API 호출(_get/_post/_patch/_delete가 전부 이걸 거친다)의 공통 타임아웃 — 서버가
+  /// 잠깐 죽어 있거나(재시작 중 등) 네트워크가 끊긴 상태에서 요청을 보내면, 타임아웃이 없는
+  /// http 요청은 응답이 올 때까지 영원히 기다린다. 그러면 화면은 "불러오는 중" 스피너가
+  /// 끝없이 도는 것으로 보이고(실패로도, 성공으로도 안 끝남) 사용자는 재시도할 방법이
+  /// 없다 — 실제로 이런 신고가 있었다. 20초 후에는 명확한 에러로 실패시켜서, 각 화면의
+  /// catch가 에러 문구를 보여주고 다시 시도할 수 있게 한다.
+  static const _requestTimeout = Duration(seconds: 20);
+
+  Future<http.Response> _withTimeout(Future<http.Response> future) => future
+      .timeout(
+        _requestTimeout,
+        onTimeout: () => throw const ApiException(
+          '요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.',
+        ),
+      );
+
   Future<http.Response> _send(Future<http.Response> Function() request) async {
-    var res = await request();
+    var res = await _withTimeout(request());
     if (res.statusCode == 401 && onUnauthorized != null) {
       final refreshed = await onUnauthorized!();
-      if (refreshed) res = await request();
+      if (refreshed) res = await _withTimeout(request());
     }
     return res;
   }

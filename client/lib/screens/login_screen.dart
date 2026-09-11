@@ -35,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isRegister = false;
   bool _loading = false;
   bool _rememberUsername = false;
-  bool _keepSignedIn = true;
+  late bool _keepSignedIn = widget.session.keepSignedInPref;
 
   // null = 아직 중복 확인을 안 했거나(또는 확인 후 아이디를 다시 고쳐서 무효화된) 상태.
   bool? _usernameAvailable;
@@ -163,6 +163,7 @@ class _LoginScreenState extends State<LoginScreen> {
     // 죽은 컨트롤러 접근 크래시가 나고, mounted 체크로 건너뛰면 "아이디 기억하기"가 아예
     // 저장되지 않는다. 그래서 필요한 값은 await 전에 미리 지역 변수로 뽑아둔다.
     final rememberUsername = _rememberUsername;
+    final keepSignedIn = _keepSignedIn;
     final usernameText = _username.text.trim();
     setState(() => _loading = true);
     final ok = _isRegister
@@ -178,12 +179,15 @@ class _LoginScreenState extends State<LoginScreen> {
         : await widget.session.login(
             usernameText,
             _password.text,
-            keepSignedIn: _keepSignedIn,
+            keepSignedIn: keepSignedIn,
           );
     if (ok && !_isRegister) {
       await widget.session.setRememberedUsername(
         rememberUsername ? usernameText : null,
       );
+      // "로그인 상태 유지" 체크박스 자체의 표시값도 "아이디 기억하기"처럼 다음에 로그인
+      // 화면을 열 때 그대로 보이도록 저장해둔다(로그아웃해도 이 값은 안 지워진다).
+      await widget.session.setKeepSignedInPref(keepSignedIn);
     }
     if (!mounted) return;
     setState(() => _loading = false);

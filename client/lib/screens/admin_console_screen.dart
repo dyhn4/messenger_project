@@ -280,8 +280,7 @@ class _PositionOptionsEditor extends StatefulWidget {
   const _PositionOptionsEditor({required this.session});
 
   @override
-  State<_PositionOptionsEditor> createState() =>
-      _PositionOptionsEditorState();
+  State<_PositionOptionsEditor> createState() => _PositionOptionsEditorState();
 }
 
 class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
@@ -487,7 +486,9 @@ class _PositionOptionPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
-        border: option.isDefault ? Border.all(color: primary, width: 1.5) : null,
+        border: option.isDefault
+            ? Border.all(color: primary, width: 1.5)
+            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -789,13 +790,15 @@ class _UsersTabState extends State<_UsersTab> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
-                        flex: 10,
+                        flex: 9,
                         child: Row(
                           children: [
                             CircleAvatar(
                               backgroundColor:
                                   parseHexColor(user.avatarColor) ??
-                                  Theme.of(context).colorScheme.primaryContainer,
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.primaryContainer,
                               child: Text(
                                 user.avatarEmoji ??
                                     (user.name.isEmpty
@@ -840,27 +843,32 @@ class _UsersTabState extends State<_UsersTab> {
                                   Text(
                                     user.username,
                                     overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall?.copyWith(
-                                      color: Theme.of(context).hintColor,
-                                    ),
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(context).hintColor,
+                                        ),
                                   ),
                                 ],
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            Wrap(
-                              spacing: 4,
-                              runSpacing: 4,
-                              children: _statusBadges(context, user),
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(width: 20),
                       Expanded(
-                        flex: 12,
+                        flex: 5,
+                        child: Transform.translate(
+                          offset: const Offset(-50, 0),
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: _statusBadges(context, user),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        flex: 9,
                         child: user.teams.isEmpty
                             ? Text(
                                 '없음',
@@ -880,7 +888,7 @@ class _UsersTabState extends State<_UsersTab> {
                       ),
                       const SizedBox(width: 20),
                       Expanded(
-                        flex: 7,
+                        flex: 5,
                         child: Text(
                           user.position?.isNotEmpty == true
                               ? user.position!
@@ -894,7 +902,9 @@ class _UsersTabState extends State<_UsersTab> {
                           ),
                         ),
                       ),
-                      PopupMenuButton<void>(
+                      Transform.translate(
+                        offset: const Offset(-10, 0),
+                        child: PopupMenuButton<void>(
                           tooltip: '회원 관리',
                           position: PopupMenuPosition.under,
                           itemBuilder: (context) => [
@@ -984,8 +994,9 @@ class _UsersTabState extends State<_UsersTab> {
                             ],
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
@@ -1011,25 +1022,21 @@ class _UsersTableHead extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
+          Expanded(flex: 9, child: Text('회원', style: style)),
+          const SizedBox(width: 20),
           Expanded(
-            flex: 10,
-            // 아래 실제 행([아바타][이름/아이디][등급 뱃지])과 같은 폭 배분으로 맞춰서,
-            // "등급" 글자가 "회원" 바로 옆이 아니라 실제 등급 뱃지 자리(오른쪽 끝) 위에 오게
-            // 한다 — 아바타 지름(기본 40)만큼 왼쪽을 비워 정렬한다.
-            child: Row(
-              children: [
-                const SizedBox(width: 40),
-                const SizedBox(width: 10),
-                Expanded(child: Text('회원', style: style)),
-                const SizedBox(width: 10),
-                Text('등급', style: style),
-              ],
+            flex: 5,
+            // 아래 실제 행(등급 뱃지)과 같은 만큼(-50px) 왼쪽으로 옮겨서 계속 같은 위치에
+            // 오도록 맞춘다.
+            child: Transform.translate(
+              offset: const Offset(-50, 0),
+              child: Text('등급', style: style),
             ),
           ),
           const SizedBox(width: 20),
-          Expanded(flex: 12, child: Text('팀', style: style)),
+          Expanded(flex: 9, child: Text('팀', style: style)),
           const SizedBox(width: 20),
-          Expanded(flex: 7, child: Text('직책', style: style)),
+          Expanded(flex: 5, child: Text('직책', style: style)),
           const SizedBox(width: 48),
         ],
       ),
@@ -1051,7 +1058,9 @@ class _DeletedUserRow extends StatelessWidget {
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
             child: Icon(Icons.person_off_outlined, size: 18, color: hint),
           ),
           const SizedBox(width: 10),
@@ -1063,7 +1072,14 @@ class _DeletedUserRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          _Badge(label: '탈퇴', bg: Theme.of(context).colorScheme.surfaceContainerHighest, fg: hint),
+          Transform.translate(
+            offset: const Offset(-10, 0),
+            child: _Badge(
+              label: '탈퇴',
+              bg: Theme.of(context).colorScheme.surfaceContainerHighest,
+              fg: hint,
+            ),
+          ),
         ],
       ),
     );
@@ -1132,7 +1148,10 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
       child: Text(
         label,
         style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w700),
@@ -1168,7 +1187,11 @@ class _TeamChip extends StatelessWidget {
       ),
       child: Text(
         team.name,
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

@@ -1235,5 +1235,7 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 | Android 기기에 apk 설치 시 "signatures do not match" | 기존 설치본과 서명이 다름(예: keystore 없이 디버그로 빌드) → [Android 릴리즈 서명](#android-릴리즈-서명)대로 `key.properties` 설정 후 재빌드, 또는 기존 앱 삭제 후 재설치 |
 | FCM 알림이 전혀 안 옴 | ① `server/firebase-service-account.json` 존재 확인(서버 시작 로그에 경고가 찍힘) ② `client/android/app/google-services.json`이 실제 빌드에 포함됐는지 확인 ③ Windows 클라이언트는 애초에 FCM 미지원(정상) |
 | `npm run db:migrate` 실패 | `DATABASE_URL`이 올바른지, PostgreSQL 서비스가 떠있는지 확인. 스키마 충돌이면 `server/drizzle/meta/`의 마이그레이션 이력과 실제 DB 상태가 어긋난 것 — 백업 후 [DB 데이터 전부 삭제](#db-데이터-전부-삭제테이블-구조는-유지) 후 재적용을 고려 |
+| `npm run db:migrate`는 "성공"이라고 뜨는데 새 테이블/컬럼이 실제로는 안 보임 | `drizzle.__drizzle_migrations`에 기록된 시각(`created_at`)이 실제보다 미래로 잘못 들어가 있으면, 그보다 실제 시각이 이른 새 마이그레이션들이 "이미 적용됨"으로 착각되어 조용히 건너뛰어질 수 있다(과거 개발 DB에서 실제로 있었던 문제). `server` 폴더에서 `node scripts/check-migrations.mjs`(읽기 전용, DB를 고치지 않음)를 실행하면 어떤 마이그레이션이 빠졌는지와 실제 테이블 상태를 확인할 수 있다 |
 | pm2로 띄운 뒤 페어링 코드를 못 받음 | pm2는 콘솔 입력을 못 받음 → 서버가 떠있는 같은 PC에서 `npm run pair` 실행 |
 | 첨부파일이 업로드/다운로드 안 됨(네트워크 드라이브 사용 시) | `UPLOADS_DIR`로 지정한 UNC 경로/네트워크 드라이브가 서버 PC에서 항상 접근 가능한지 확인 |
+| 특정 화면만 "요청이 시간 초과되었습니다"로 계속 실패 | 그 API가 서버에서 에러를 던졌는데(예: DB 마이그레이션이 아직 안 된 테이블/컬럼 조회) `express-async-errors`+공통 에러 미들웨어(`server/src/index.js`) 덕에 이제는 빠르게 실제 에러 메시지로 응답한다 — 예전처럼 응답 없이 멈추지 않는다. 그래도 시간 초과가 뜬다면 그 API 자체에 도달을 못 하는 것이므로(서버가 안 떠 있거나 네트워크 문제) `npm run db:migrate`를 그 서버에서 실행했는지부터 확인 |

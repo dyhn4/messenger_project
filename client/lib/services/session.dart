@@ -40,6 +40,7 @@ class Session extends ChangeNotifier {
   static const _kUserId = 'auth_user_id';
   static const _kUsername = 'auth_username';
   static const _kRememberedUsername = 'remembered_username';
+  static const _kKeepSignedInPref = 'keep_signed_in_pref';
   static const _secretPreviewPlaceholder = '새 메시지가 있습니다';
 
   // FCM 백그라운드 핸들러(main.dart)는 이 Session과 완전히 별개의 격리된 isolate에서
@@ -60,6 +61,12 @@ class Session extends ChangeNotifier {
   String? username;
   String? error;
   String? rememberedUsername;
+
+  /// 로그인 화면의 "로그인 상태 유지" 체크박스가 마지막으로 어느 값이었는지("아이디
+  /// 기억하기"와 같은 방식으로 기기에 저장) — 로그인 자체의 keepSignedIn 인자(토큰을 저장할지
+  /// 여부)와는 별개로, 체크박스 자체의 화면 표시값을 다음에 로그인 화면을 열 때도 그대로
+  /// 보여주기 위한 값이다. 저장된 적이 없으면(첫 실행 등) 기본값 true.
+  bool keepSignedInPref = true;
 
   String? name;
   String? email;
@@ -326,6 +333,7 @@ class Session extends ChangeNotifier {
     userId = _prefs.getString(_kUserId);
     username = _prefs.getString(_kUsername);
     rememberedUsername = _prefs.getString(_kRememberedUsername);
+    keepSignedInPref = _prefs.getBool(_kKeepSignedInPref) ?? true;
 
     if (serverUrl == null) {
       stage = AuthStage.needsServer;
@@ -521,6 +529,11 @@ class Session extends ChangeNotifier {
     } else {
       await _prefs.setString(_kRememberedUsername, username);
     }
+  }
+
+  Future<void> setKeepSignedInPref(bool value) async {
+    keepSignedInPref = value;
+    await _prefs.setBool(_kKeepSignedInPref, value);
   }
 
   /// 내 팀 목록과, 그 팀들의 방을 전부 불러온다. 방을 팀별로 따로 요청하는 이유는 서버가

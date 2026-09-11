@@ -595,7 +595,7 @@ class _MembersPanelState extends State<_MembersPanel> {
               children: [
                 Expanded(
                   child: Text(
-                    _users == null ? '조직도' : '조직도 총 ${_users!.length}명',
+                    _users == null ? '멤버' : '멤버 총 ${_users!.length}명',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),

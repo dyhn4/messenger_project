@@ -20,6 +20,8 @@ import {
 import { addRoomMembers, listPublicTopics, listRoomMemberIds } from './db/queries/rooms.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { findUserById, updateUser } from './db/queries/users.js';
+import { db } from './db/client.js';
+import { teams as teamsTable } from './db/schema.js';
 import { AUDIT, recordAudit } from './audit.js';
 import {
   accountRole,
@@ -100,6 +102,36 @@ export function createTeamsRouter(io) {
     for (const { team, role } of rows) {
       const [memberIds, topicCreatorIds] = await Promise.all([listTeamMemberIds(team.id), topicCreatorIdsFor(team)]);
       dtos.push(toTeamDto(team, { isOwner: role === 'owner', memberCount: memberIds.length, topicCreatorIds }));
+    }
+    res.json(dtos);
+  });
+
+  /**
+   * 조직도 — 서버 전체 팀과 각 팀의 멤버 id 목록. GET /teams와 달리 내가 속하지 않은 팀도
+   * 포함한다("관리자 이상"이 회사 전체 구조를 보는 용도라서). 계정 등급이 관리자이거나
+   * 서버 운영자만 볼 수 있다 — 소유자라는 이유만으로는 안 된다(그 팀 하나만 관리할 뿐, 다른
+   * 팀 멤버 구성까지 볼 권한은 아니므로).
+   *
+   * 멤버 이름/아바타 등 상세 정보는 이미 등급과 무관하게 공개인 GET /users로 따로 받게 하고,
+   * 여기서는 "어느 팀에 누가 속해 있는지"라는 조직도 고유의 정보만 준다.
+   */
+  router.get('/org-chart/teams', async (req, res) => {
+    const me = await findUserById(req.user.sub);
+    if (!me || me.deletedAt) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (!me.isServerAdmin && accountRole(me) !== 'admin') {
+      return res.status(403).json({ error: '조직도는 관리자 이상만 볼 수 있습니다.' });
+    }
+    const rows = await db.select().from(teamsTable).orderBy(teamsTable.createdAt);
+    const dtos = [];
+    for (const team of rows) {
+      const memberIds = await listTeamMemberIds(team.id);
+      dtos.push({
+        id: team.id,
+        name: team.name,
+        iconEmoji: team.iconEmoji ?? null,
+        iconColor: team.iconColor ?? null,
+        memberIds,
+      });
     }
     res.json(dtos);
   });

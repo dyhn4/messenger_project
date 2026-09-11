@@ -6,6 +6,14 @@ import { UPLOADS_DIR } from './config.js';
 import { listAuditLogs } from './db/queries/audit.js';
 import { countMessages, countMessagesToday, countRooms, countTeams } from './db/queries/stats.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
+import {
+  deletePositionOption,
+  findPositionOptionByLabel,
+  insertPositionOption,
+  listPositionOptions,
+  movePositionOption,
+  toggleDefaultPositionOption,
+} from './db/queries/positionOptions.js';
 import { listTeamIdsForUser, listTeamMemberIds, listTeamsForUser } from './db/queries/teams.js';
 import { countActiveUsers, findUserById, listAllUsersForAdmin, updateUser } from './db/queries/users.js';
 import { db } from './db/client.js';
@@ -66,7 +74,7 @@ export function createAdminRouter(io) {
     });
   });
 
-  /** 서버 설정 변경(팀 생성 권한 / 팀 초대 링크 생성 권한 / 부서·직책 관리 범위). */
+  /** 서버 설정 변경(팀 생성 권한 / 팀 초대 링크 생성 권한 / 팀·직책 관리 범위). */
   router.patch('/admin/settings', async (req, res) => {
     const fields = {};
     if ('teamCreation' in (req.body ?? {})) {
@@ -101,9 +109,60 @@ export function createAdminRouter(io) {
       detail.push(`팀 초대 링크 생성 권한: ${TEAM_CREATION_LABEL[updated.teamInviteLinkCreation] ?? updated.teamInviteLinkCreation}`);
     }
     if (fields.orgScope) {
-      detail.push(`부서·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
+      detail.push(`팀·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
     }
     recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
+    res.json(updated);
+  });
+
+  /** 직책 목록 — '부서·직책 관리 범위'가 '계정 단위'일 때, 회원 탭의 직책 수정이 자유 입력
+   * 대신 여기서 고르게 한다. */
+  router.get('/admin/position-options', async (req, res) => {
+    res.json(await listPositionOptions());
+  });
+
+  router.post('/admin/position-options', async (req, res) => {
+    const label = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+    if (!label) return res.status(400).json({ error: '직책 이름을 입력하세요.' });
+    if (label.length > 30) return res.status(400).json({ error: '직책은 30자 이내로 입력하세요.' });
+    if (await findPositionOptionByLabel(label)) {
+      return res.status(400).json({ error: '이미 있는 직책입니다.' });
+    }
+    const created = await insertPositionOption(label);
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: `직책 목록에 "${label}" 추가` });
+    res.status(201).json(created);
+  });
+
+  router.delete('/admin/position-options/:id', async (req, res) => {
+    const options = await listPositionOptions();
+    const target = options.find((o) => o.id === req.params.id);
+    if (!target) return res.status(404).json({ error: '직책을 찾을 수 없습니다.' });
+    await deletePositionOption(target.id);
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: `직책 목록에서 "${target.label}" 삭제` });
+    res.json({ ok: true });
+  });
+
+  /** 직책 서열 변경 — 클릭한 직책을 왼쪽/오른쪽 이웃과 맞바꾼다. 이미 끝이면 조용히 그대로. */
+  router.post('/admin/position-options/:id/move', async (req, res) => {
+    const direction = req.body?.direction;
+    if (direction !== 'left' && direction !== 'right') {
+      return res.status(400).json({ error: "direction은 'left' 또는 'right'여야 합니다." });
+    }
+    const updated = await movePositionOption(req.params.id, direction);
+    res.json(updated);
+  });
+
+  /** 직책 "기본값" 지정/해제 — 회원가입 시 이 직책이 자동으로 부여된다(auth.js). */
+  router.post('/admin/position-options/:id/default', async (req, res) => {
+    const updated = await toggleDefaultPositionOption(req.params.id);
+    const target = updated.find((o) => o.id === req.params.id);
+    recordAudit({
+      ...actorOf(req),
+      action: AUDIT.serverSettings,
+      detail: target?.isDefault
+        ? `직책 목록의 기본값을 "${target.label}"(으)로 지정`
+        : '직책 목록의 기본값 해제',
+    });
     res.json(updated);
   });
 
@@ -178,6 +237,20 @@ export function createAdminRouter(io) {
       }
     }
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+
+    // 부서·직책 관리 범위가 '계정 단위'일 때는 직책을 자유 입력 대신 '직책 목록'(관리자 콘솔
+    // 운영 현황에서 서버 운영자가 관리)에서 고르게 한다 — 자유 입력은 팀 단위(team_members)
+    // 쪽 org_edit_dialog에서만 계속 쓴다. 목록에 없는 값이 새로 저장되지 않도록 여기서도 한 번
+    // 더 막는다(라디오 버튼 UI는 사용자 실수만 막을 뿐, 실제 강제는 서버가 한다). 값이 그대로면
+    // (건드리지 않고 저장) 막지 않는다 — 이 기능이 생기기 전부터 있던 값이 목록에 없다는
+    // 이유만으로 저장 자체가 막히면 안 되므로("바꾸려는" 값만 검증한다).
+    if ('position' in fields && fields.position !== null && fields.position !== target.position) {
+      const settings = await getServerSettings();
+      if (settings.orgScope === 'account') {
+        const match = await findPositionOptionByLabel(fields.position);
+        if (!match) return res.status(400).json({ error: '직책 목록에 없는 값입니다.' });
+      }
+    }
 
     const updated = await updateUser(target.id, fields);
     recordAudit({

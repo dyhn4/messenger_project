@@ -19,6 +19,18 @@ export function findDmRoomByKey(teamId, dmKey) {
     .then((rows) => rows[0] ?? null);
 }
 
+/** 비밀 대화 전용 — team_id와 무관하게 dmKey만으로 찾는다. 평문 DM과 달리 비밀 대화는 팀
+ * 소속과 무관한 한 쌍의 개인 채널이라 한 쌍에 하나만 있어야 한다(team_id는 DB의 NOT NULL
+ * 제약을 만족시키기 위한 부가 정보일 뿐, 이걸로 나뉘면 같은 두 사람이 보는 팀에 따라 서로
+ * 다른 비밀 대화방을 갖게 되는 버그가 된다). */
+export function findSecretRoomByDmKey(dmKey) {
+  return db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.isSecret, true), eq(rooms.dmKey, dmKey)))
+    .then((rows) => rows[0] ?? null);
+}
+
 /** 이 사람이 멤버인 방. [teamId]를 주면 그 팀의 방만, 안 주면 팀과 상관없이 전부 —
  * 팀을 안 주는 쪽은 소켓 join처럼 "내가 속한 모든 방"이 필요한 경우에 쓴다(다른 팀에서 온
  * 메시지도 받아야 하므로 소켓은 항상 전체 팀의 방에 join한다, socket.js 참고). */

@@ -81,6 +81,14 @@ class Session extends ChangeNotifier {
   /// 요청마다 다시 확인한다.
   bool canCreateTeamInviteLink = false;
 
+  /// 내 프로필 카드의 "팀"/"직책" 표시용(GET /users/me) — 부서·직책 관리 범위가 '계정
+  /// 단위'인지 '팀 단위'인지에 따라 [myPosition] 하나만 보거나 [myTeamPositions](팀마다
+  /// 다른 값)를 본다. 팀 단위일 때 [myDepartment]/[myPosition]은 항상 null이다.
+  String orgScope = 'team';
+  String? myDepartment;
+  String? myPosition;
+  List<TeamPosition> myTeamPositions = [];
+
   ApiClient? api;
   String? updateAvailableVersion; // 서버가 더 최신 버전을 갖고 있으면 그 버전 문자열(예: "1.0.1").
   bool updateDownloading = false;
@@ -575,6 +583,10 @@ class Session extends ChangeNotifier {
       accountRole == AccountRole.admin ||
       teams.any((t) => t.isOwner);
 
+  /// "조직도" 버튼(팀 목록 화면)을 보여줄지 — 계정 등급이 관리자이거나 서버 운영자만
+  /// (server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
+  bool get canViewOrgChart => isServerAdmin || accountRole == AccountRole.admin;
+
   /// 팀 선택 화면으로 되돌아간다(전환 팝업의 "팀 목록").
   void leaveTeam() {
     if (currentTeam == null) return;
@@ -664,6 +676,27 @@ class Session extends ChangeNotifier {
   /// 속하지 않으므로, 소유자·관리자가 여기서 골라 팀에 가입시켜 준다.
   Future<List<AppUser>> fetchAllUsers() => api!.fetchUsers();
 
+  /// 조직도(팀 탭)용 — 서버 전체 팀 + 각 팀의 멤버 id 목록.
+  Future<List<OrgChartTeam>> fetchOrgChartTeams() => api!.fetchOrgChartTeams();
+
+  /// 프로필 카드 "팀" 항목용 — 그 사람이 속한 팀 목록(노출 범위는 서버가 정한다).
+  Future<List<Team>> fetchUserTeams(String userId) =>
+      api!.fetchUserTeams(userId);
+
+  /// 관리자 콘솔 "운영 현황"의 직책 목록 관리(서버 운영자 전용, 서버가 매번 다시 확인한다).
+  Future<List<PositionOption>> fetchPositionOptions() =>
+      api!.fetchPositionOptions();
+  Future<PositionOption> createPositionOption(String label) =>
+      api!.createPositionOption(label);
+  Future<void> deletePositionOption(String id) =>
+      api!.deletePositionOption(id);
+  Future<List<PositionOption>> movePositionOption(
+    String id,
+    String direction,
+  ) => api!.movePositionOption(id, direction);
+  Future<List<PositionOption>> toggleDefaultPositionOption(String id) =>
+      api!.toggleDefaultPositionOption(id);
+
   /// 팀에 넣기 — 등급은 각자 계정에 이미 붙어 있는 것을 그대로 쓴다(여기서 정하지 않는다).
   Future<List<AppUser>> addTeamMembers(Team team, List<String> userIds) async {
     final members = await api!.addTeamMembers(team.id, userIds);
@@ -701,6 +734,10 @@ class Session extends ChangeNotifier {
       accountRole = accountRoleFromWire(me.role);
       isServerAdmin = me.isServerAdmin;
       canCreateTeamInviteLink = me.canCreateTeamInviteLink;
+      orgScope = me.orgScope;
+      myDepartment = me.department;
+      myPosition = me.position;
+      myTeamPositions = me.teamPositions;
     } catch (_) {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
@@ -1126,8 +1163,24 @@ class Session extends ChangeNotifier {
 
   /// 상대에게 비밀 대화를 건다 — 새 방이 생성되고 서버로는 임시 공개키/서명만 나간다.
   Future<Room> startSecretChat(String targetUserId) async {
-    final room = await secretSessionManager!.startSecretChat(targetUserId);
+    final room = await secretSessionManager!.startSecretChat(
+      targetUserId,
+      _requireTeamId,
+    );
     _upsertRoom(room);
+    return room;
+  }
+
+  /// 조직도에서 비밀 대화를 시작할 때 쓴다 — 아직 팀을 고르지 않은 상태(팀 목록 화면)에서도
+  /// 호출할 수 있도록 [teamId](나와 상대가 함께 속한 팀일 필요는 없고, 내가 속한 팀이면 된다)를
+  /// 명시적으로 받는다. 성공하면 그 팀으로 들어간다.
+  Future<Room> startSecretChatInTeam(String teamId, String targetUserId) async {
+    final room = await secretSessionManager!.startSecretChat(
+      targetUserId,
+      teamId,
+    );
+    _upsertRoom(room);
+    requestOpenRoom(room);
     return room;
   }
 
@@ -1606,6 +1659,17 @@ class Session extends ChangeNotifier {
     return room;
   }
 
+  /// 조직도에서 1:1 대화를 시작할 때 쓴다 — 아직 팀을 고르지 않은 상태(팀 목록 화면)에서도
+  /// 호출할 수 있도록 [teamId]를 명시적으로 받는다. 평문 DM은 팀 안에서만 만들어지므로(server
+  /// rooms.js) 나와 상대가 함께 속한 팀이어야 하고(조직도 화면이 미리 계산해서 넘긴다).
+  /// requestOpenRoom이 그 팀으로 전환하고 새 방을 바로 열어준다.
+  Future<Room> startDmInTeam(String teamId, String targetUserId) async {
+    final room = await api!.startDm(teamId, targetUserId);
+    _upsertRoom(room);
+    requestOpenRoom(room);
+    return room;
+  }
+
   /// 지금 팀의 멤버 목록(조직도/새 대화 상대 선택) — 서버 전체 사용자가 아니라 팀 단위다.
   Future<List<AppUser>> fetchTeamMembers() =>
       api!.fetchTeamMembers(_requireTeamId);
@@ -1791,6 +1855,10 @@ class Session extends ChangeNotifier {
     accountRole = AccountRole.guest;
     isServerAdmin = false;
     canCreateTeamInviteLink = false;
+    orgScope = 'team';
+    myDepartment = null;
+    myPosition = null;
+    myTeamPositions = [];
     rooms.clear();
     // 로그아웃하면 팀 선택도 초기화 — 다시 로그인하면 팀 선택 화면부터 시작한다.
     teams.clear();

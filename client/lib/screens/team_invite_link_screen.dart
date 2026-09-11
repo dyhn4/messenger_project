@@ -80,6 +80,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
     final result = await showDialog<_CreateTeamInviteLinkResult>(
       context: context,
       builder: (_) => _CreateTeamInviteLinkDialog(
+        session: widget.session,
         teams: teams,
         initialTeamId: widget.initialTeamId,
       ),
@@ -287,9 +288,14 @@ class _CreateTeamInviteLinkResult {
 }
 
 class _CreateTeamInviteLinkDialog extends StatefulWidget {
+  final Session session;
   final List<Team> teams;
   final String? initialTeamId;
-  const _CreateTeamInviteLinkDialog({required this.teams, this.initialTeamId});
+  const _CreateTeamInviteLinkDialog({
+    required this.session,
+    required this.teams,
+    this.initialTeamId,
+  });
 
   @override
   State<_CreateTeamInviteLinkDialog> createState() =>
@@ -306,6 +312,13 @@ class _CreateTeamInviteLinkDialogState
           ?.id ??
       widget.teams.first.id;
   AccountRole _assignedRole = AccountRole.member;
+
+  /// 서버 운영자는 관리자 콘솔에서 이미 자유롭게 등급을 바꿀 수 있는 사람이라 이 제한에서
+  /// 빼고, 그 외에는 자기 등급보다 높은 등급을 남에게 부여하지 못한다(server/src/teamInvites.js
+  /// 와 같은 규칙 — 여긴 버튼을 미리 흐리게 보여주는 UI 힌트일 뿐, 실제 차단은 서버가 한다).
+  bool _canAssign(AccountRole role) =>
+      widget.session.isServerAdmin ||
+      role.rank <= widget.session.accountRole.rank;
 
   @override
   void dispose() {
@@ -346,7 +359,11 @@ class _CreateTeamInviteLinkDialogState
             SegmentedButton<AccountRole>(
               segments: [
                 for (final role in AccountRole.values)
-                  ButtonSegment(value: role, label: Text(role.label)),
+                  ButtonSegment(
+                    value: role,
+                    label: Text(role.label),
+                    enabled: _canAssign(role),
+                  ),
               ],
               selected: {_assignedRole},
               onSelectionChanged: (s) =>

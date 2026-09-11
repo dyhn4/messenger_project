@@ -12,10 +12,29 @@ import '../widgets/user_avatar.dart';
 class MemberProfileDialog extends StatefulWidget {
   final Session session;
   final AppUser user;
+
+  /// 조직도에서 열었으면 true — DM/비밀 대화 둘 다 "방"이라 팀 하나를 걸어야 하는데
+  /// (server rooms.js/secretChats.js), 조직도에는 지금 보고 있는 팀(currentTeam)이 없을 수도
+  /// 있어서(팀 목록 화면에서 열 수 있으므로) 이 값들을 대신 쓴다. 채팅방 아바타 클릭 등
+  /// 원래 방식대로 열 때는 false로 두고 지금 보고 있는 팀을 그대로 쓴다.
+  final bool fromOrgChart;
+
+  /// 평문 DM은 나와 상대가 "함께" 속한 팀이어야 한다(상대가 그 팀 멤버가 아니면 서버가
+  /// 막는다) — 조직도 화면이 미리 계산해서 넘긴다. 그런 팀이 없으면 null(1:1 메시지 버튼을
+  /// 감추고 이유를 보여준다).
+  final String? orgChartDmTeamId;
+
+  /// 비밀 대화는 내가 속한 팀이 하나만 있으면 된다 — 평문 DM과 달리 상대가 그 팀 소속일
+  /// 필요는 없다(server/src/secretChats.js). 내가 속한 팀이 하나도 없으면 null.
+  final String? orgChartSecretTeamId;
+
   const MemberProfileDialog({
     super.key,
     required this.session,
     required this.user,
+    this.fromOrgChart = false,
+    this.orgChartDmTeamId,
+    this.orgChartSecretTeamId,
   });
 
   @override
@@ -31,10 +50,15 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   /// 같은 내용이 보이도록 팀 멤버 목록에서 이 사람을 찾아 채워 넣는다.
   late AppUser _user = widget.user;
 
+  /// "팀" 항목용 — null이면 아직 불러오는 중. 노출 범위(대상이 관리자면 나와 겹치는 팀만,
+  /// 아니면 전체)는 서버(GET /users/:id/teams)가 정한다.
+  List<Team>? _teams;
+
   @override
   void initState() {
     super.initState();
     if (widget.user.role == null) _loadTeamInfo();
+    _loadTeams();
   }
 
   Future<void> _loadTeamInfo() async {
@@ -44,6 +68,15 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
       if (match.isNotEmpty && mounted) setState(() => _user = match.first);
     } catch (_) {
       // 부가 정보라 실패하면 넘어온 값 그대로 보여준다.
+    }
+  }
+
+  Future<void> _loadTeams() async {
+    try {
+      final teams = await widget.session.fetchUserTeams(widget.user.id);
+      if (mounted) setState(() => _teams = teams);
+    } catch (_) {
+      if (mounted) setState(() => _teams = []);
     }
   }
 
@@ -72,7 +105,12 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   Future<void> _startDm() async {
     setState(() => _starting = true);
     try {
-      final room = await widget.session.startDm(widget.user.id);
+      final room = widget.orgChartDmTeamId != null
+          ? await widget.session.startDmInTeam(
+              widget.orgChartDmTeamId!,
+              widget.user.id,
+            )
+          : await widget.session.startDm(widget.user.id);
       if (!mounted) return;
       Navigator.of(context).pop(room);
     } catch (e) {
@@ -89,7 +127,12 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   Future<void> _startSecretChat() async {
     setState(() => _startingSecret = true);
     try {
-      final room = await widget.session.startSecretChat(widget.user.id);
+      final room = widget.orgChartSecretTeamId != null
+          ? await widget.session.startSecretChatInTeam(
+              widget.orgChartSecretTeamId!,
+              widget.user.id,
+            )
+          : await widget.session.startSecretChat(widget.user.id);
       if (!mounted) return;
       Navigator.of(context).pop(room);
     } catch (e) {
@@ -106,6 +149,13 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
     final user = _user;
     // 준회원은 스스로 대화를 열 수 없다(초대받은 방에서만 활동) — 서버도 막지만 버튼부터 감춘다.
     final canStartChat = widget.session.canCreateRooms;
+    // 조직도에서 열었을 때만 팀 조건이 걸린다 — DM은 나와 상대가 함께 속한 팀이 있어야 하고,
+    // 비밀 대화는 내가 속한 팀이 하나만 있으면 된다(둘 다 방이라 NOT NULL인 team_id가 필요).
+    final canStartDm =
+        canStartChat && (!widget.fromOrgChart || widget.orgChartDmTeamId != null);
+    final canStartSecret =
+        canStartChat &&
+        (!widget.fromOrgChart || widget.orgChartSecretTeamId != null);
     final role = user.role == null ? null : accountRoleFromWire(user.role);
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -153,44 +203,62 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
             ],
             const SizedBox(height: 12),
             _OrgSection(
-              orgLine: user.orgLine,
-              // 부서/직책은 인사 정보라 본인이 임의로 못 바꾸고 소유자·관리자만 수정한다.
+              teamNames: _teams?.map((t) => t.name).toList(),
+              position: user.position,
+              // 직책은 인사 정보라 본인이 임의로 못 바꾸고 소유자·관리자만 수정한다.
               onEdit: widget.session.canManageCurrentTeam ? _editOrg : null,
             ),
             const SizedBox(height: 16),
             if (canStartChat) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: FilledButton.icon(
-                  onPressed: _starting ? null : _startDm,
-                  icon: _starting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.chat_bubble_outline),
-                  label: const Text('1:1 메시지'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: OutlinedButton.icon(
-                  onPressed: _startingSecret ? null : _startSecretChat,
-                  icon: _startingSecret
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.lock_outline, color: Colors.green),
-                  label: const Text(
-                    '비밀 대화 시작',
-                    style: TextStyle(color: Colors.green),
+              if (canStartDm) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: FilledButton.icon(
+                    onPressed: _starting ? null : _startDm,
+                    icon: _starting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.chat_bubble_outline),
+                    label: const Text('1:1 메시지'),
                   ),
                 ),
-              ),
+                const SizedBox(height: 8),
+              ] else if (widget.fromOrgChart)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  child: Text(
+                    '함께 속한 팀이 없어 1:1 메시지는 보낼 수 없습니다.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).hintColor,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              if (canStartSecret)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: OutlinedButton.icon(
+                    onPressed: _startingSecret ? null : _startSecretChat,
+                    icon: _startingSecret
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.lock_outline, color: Colors.green),
+                    label: const Text(
+                      '비밀 대화 시작',
+                      style: TextStyle(color: Colors.green),
+                    ),
+                  ),
+                ),
             ] else
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -210,16 +278,25 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   }
 }
 
-/// 프로필 카드의 "직책" 칸. 소유자·관리자에게만 연필(수정) 버튼이 보인다.
+/// 프로필 카드의 "팀"/"직책" 칸. "팀"은 이 사람이 실제로 속한 팀 이름들(노출 범위는 서버가
+/// 정한다 — GET /users/:id/teams), "직책"은 기존 부서/직책 필드의 직책 값이다. 소유자·관리자
+/// 에게만 직책 수정용 연필 버튼이 보인다(팀 소속은 이 카드에서 바꿀 수 없다).
 class _OrgSection extends StatelessWidget {
-  final String? orgLine;
+  final List<String>? teamNames; // null이면 아직 불러오는 중.
+  final String? position;
   final VoidCallback? onEdit;
-  const _OrgSection({required this.orgLine, required this.onEdit});
+  const _OrgSection({
+    required this.teamNames,
+    required this.position,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    if (orgLine == null && onEdit == null) return const SizedBox.shrink();
+    final teamText = teamNames == null
+        ? '불러오는 중…'
+        : (teamNames!.isEmpty ? '없음' : teamNames!.join(', '));
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -230,31 +307,47 @@ class _OrgSection extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.badge_outlined, size: 18, color: hint),
+            Icon(Icons.groups_outlined, size: 18, color: hint),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '부서 · 직책',
+                    '팀',
                     style: Theme.of(
                       context,
                     ).textTheme.labelSmall?.copyWith(color: hint),
                   ),
                   Text(
-                    orgLine ?? '아직 등록되지 않았습니다',
-                    style: orgLine == null
+                    teamText,
+                    style: teamNames == null || teamNames!.isEmpty
                         ? TextStyle(color: hint)
                         : const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '직책',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelSmall?.copyWith(color: hint),
+                  ),
+                  Text(
+                    position?.isNotEmpty == true
+                        ? position!
+                        : '아직 등록되지 않았습니다',
+                    style: position?.isNotEmpty == true
+                        ? const TextStyle(fontWeight: FontWeight.w500)
+                        : TextStyle(color: hint),
                   ),
                 ],
               ),
             ),
             if (onEdit != null)
               IconButton(
-                tooltip: '수정',
+                tooltip: '직책 수정',
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 onPressed: onEdit,
               ),

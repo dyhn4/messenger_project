@@ -38,6 +38,42 @@ class MyProfileDialog extends StatelessWidget {
     }
   }
 
+  /// "이름" 아래 "팀"(+ '팀 단위' 설정이면 "직책"까지 팀마다 짝지어) 표시 — 팀 소속·직책은
+  /// 소유자·관리자(또는 서버 운영자)만 바꿀 수 있어 이 카드에서는 보여주기만 한다(onTap 없음).
+  List<Widget> _buildOrgRows(BuildContext context) {
+    if (session.orgScope == 'account') {
+      final teamNames = session.teams.map((t) => t.name).join(', ');
+      return [
+        _ProfileInfoRow(
+          icon: Icons.groups_outlined,
+          label: '팀',
+          value: teamNames.isEmpty ? '속한 팀이 없습니다' : teamNames,
+        ),
+        _ProfileInfoRow(
+          icon: Icons.badge_outlined,
+          label: '직책',
+          value: session.myPosition?.isNotEmpty == true
+              ? session.myPosition!
+              : '아직 등록되지 않았습니다',
+        ),
+      ];
+    }
+    final lines = session.myTeamPositions
+        .map(
+          (t) => t.position?.isNotEmpty == true
+              ? '${t.teamName} · ${t.position}'
+              : t.teamName,
+        )
+        .toList();
+    return [
+      _ProfileInfoLinesRow(
+        icon: Icons.groups_outlined,
+        label: '팀',
+        lines: lines.isEmpty ? const ['속한 팀이 없습니다'] : lines,
+      ),
+    ];
+  }
+
   Future<void> _editEmail(BuildContext context) async {
     await showDialog(
       context: context,
@@ -172,6 +208,7 @@ class MyProfileDialog extends StatelessWidget {
                 value: session.name ?? '',
                 onTap: () => _editName(context),
               ),
+              ..._buildOrgRows(context),
               _ProfileInfoRow(
                 icon: Icons.mail_outline,
                 label: '이메일',
@@ -522,6 +559,54 @@ class _EditEmailDialogState extends State<_EditEmailDialog> {
               : const Text('변경하기'),
         ),
       ],
+    );
+  }
+}
+
+/// 여러 팀에 속해 있고 팀마다 부서·직책이 다를 수 있을 때("PST · 팀장", "개발1팀 · 팀원"
+/// 처럼) 한 항목 안에 여러 줄을 보여주는 프로필 정보 행. _ProfileInfoRow와 달리 항상
+/// 읽기 전용이다(팀 소속은 이 카드에서 바꿀 수 있는 게 아니므로 onTap이 없다).
+class _ProfileInfoLinesRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final List<String> lines;
+  const _ProfileInfoLinesRow({
+    required this.icon,
+    required this.label,
+    required this.lines,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: Theme.of(context).hintColor),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 52,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final line in lines)
+                  Text(line, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

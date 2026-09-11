@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { findActiveDeviceForUser } from './db/queries/devices.js';
-import { deleteRoom, findDmRoomByKey, insertRoom } from './db/queries/rooms.js';
+import { deleteRoom, findSecretRoomByDmKey, insertRoom } from './db/queries/rooms.js';
+import { isTeamMember } from './db/queries/teams.js';
 import {
   acceptSecretSession,
   findSecretSessionByRoomId,
@@ -53,7 +54,7 @@ export function createSecretChatsRouter(io) {
   const router = Router();
 
   router.post('/secret-chats', async (req, res) => {
-    const { targetUserId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, deviceId } = req.body ?? {};
+    const { targetUserId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, deviceId, teamId } = req.body ?? {};
     const device = await requireOwnDevice(req, res, deviceId);
     if (!device) return;
     if (!targetUserId || targetUserId === req.user.sub) {
@@ -62,13 +63,24 @@ export function createSecretChatsRouter(io) {
     if (!initiatorEphemeralPublicKey || !initiatorEphemeralSignature) {
       return res.status(400).json({ error: '임시 공개키/서명이 필요합니다.' });
     }
+    // rooms.teamId는 DB에서 NOT NULL이라(팀 도입 전에는 없던 제약) 비밀 대화 방도 어느 팀인가
+    // 하나를 걸어야 한다 — 다만 평문 DM(rooms.js)과 달리 "상대가 그 팀 멤버인지"는 확인하지
+    // 않는다: 비밀 대화는 팀 소속과 무관하게 아무 회원과나 시작할 수 있는 개인 채널이고, 여기
+    // teamId는 그저 "내가 지금 보고 있던 팀" 정도의 부가 정보일 뿐이다. 요청자 본인만 그 팀의
+    // 멤버이면 된다.
+    if (!teamId || typeof teamId !== 'string') {
+      return res.status(400).json({ error: 'teamId가 필요합니다.' });
+    }
+    if (!(await isTeamMember(teamId, req.user.sub))) {
+      return res.status(403).json({ error: '내가 속한 팀에서만 비밀 대화를 시작할 수 있습니다.' });
+    }
     const target = await findUserById(targetUserId);
     if (!target) return res.status(404).json({ error: '대상 사용자를 찾을 수 없습니다.' });
 
     // 비밀 대화는 평문 DM과 별도의 방으로 취급한다(dmKey에 'secret:' 접두사를 붙여 평문
     // DM과 절대 같은 방으로 합쳐지지 않게 한다).
     const dmKey = `secret:${dmKeyFor(req.user.sub, targetUserId)}`;
-    const existing = await findDmRoomByKey(dmKey);
+    const existing = await findSecretRoomByDmKey(dmKey);
     if (existing) {
       const session = await findSecretSessionByRoomId(existing.id);
       if (session && session.status !== 'rejected' && session.status !== 'terminated') {
@@ -82,6 +94,7 @@ export function createSecretChatsRouter(io) {
 
     const room = await insertRoom({
       id: randomUUID(),
+      teamId,
       type: 'dm',
       name: null,
       dmKey,

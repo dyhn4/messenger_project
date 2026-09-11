@@ -35,6 +35,14 @@ extension AccountRoleLabel on AccountRole {
 
   /// 방(토픽/그룹/1:1)을 새로 만들거나 공개 토픽을 찾아 참여할 수 있는지 — 준회원은 불가.
   bool get canCreateRooms => this != AccountRole.guest;
+
+  /// 등급 서열(숫자가 클수록 강함) — 서버 permissions.js의 ROLE_RANK와 같다. "팀 초대
+  /// 링크"로 자기보다 높은 등급을 남에게 부여하지 못하게 막는 데 쓴다(team_invite_link_screen.dart).
+  int get rank => switch (this) {
+    AccountRole.admin => 2,
+    AccountRole.member => 1,
+    AccountRole.guest => 0,
+  };
 }
 
 /// 새 토픽을 만들 수 있는 최소 등급(팀 설정) — 서버 teams.topicCreationPolicy와 같은 값.
@@ -164,4 +172,41 @@ class Team {
       userId != null && topicCreatorIds.contains(userId),
     TopicCreationPolicy.member => role.canCreateRooms,
   };
+}
+
+/// 조직도 화면의 "팀" 탭용 — GET /api/org-chart/teams. 일반 [Team]과 달리 내가 속하지 않은
+/// 팀도 포함하고(관리자 이상이 회사 전체 구조를 보는 용도), 각 팀의 멤버 id 목록을 담는다.
+/// 이름/아바타 등 사람 정보는 세션이 이미 갖고 있는 전체 회원 목록(fetchAllUsers)과 id로
+/// 대조해서 보여준다 — 여기 실을 필요가 없다.
+class OrgChartTeam {
+  final String id;
+  final String name;
+  final String? iconEmoji;
+  final String? iconColor;
+  final List<String> memberIds;
+
+  const OrgChartTeam({
+    required this.id,
+    required this.name,
+    this.iconEmoji,
+    this.iconColor,
+    required this.memberIds,
+  });
+
+  factory OrgChartTeam.fromJson(Map<String, dynamic> json) => OrgChartTeam(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    iconEmoji: json['iconEmoji'] as String?,
+    iconColor: json['iconColor'] as String?,
+    memberIds: (json['memberIds'] as List?)?.cast<String>() ?? const [],
+  );
+
+  /// [TeamAvatar]는 [Team]을 받으므로, 아이콘만 그리는 용도의 자리표시자 팀을 만들어 준다.
+  Team get asAvatarTeam => Team(
+    id: id,
+    name: name,
+    iconEmoji: iconEmoji,
+    iconColor: iconColor,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+  );
 }

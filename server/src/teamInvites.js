@@ -11,7 +11,7 @@ import {
 } from './db/queries/teamInviteLinks.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { PAIRING_PORT } from './config.js';
-import { ACCOUNT_ROLES, canCreateTeamInviteLink, roleLabel } from './permissions.js';
+import { ACCOUNT_ROLES, canCreateTeamInviteLink, roleLabel, ROLE_RANK } from './permissions.js';
 
 /** 팀 초대 링크도 설치→가입 초대 링크와 같은 기간만큼만 유효하다 — 고를 필요 없게 고정. */
 export const TEAM_INVITE_EXPIRY_DAYS = 7;
@@ -79,6 +79,12 @@ export function createTeamInvitesRouter() {
     }
     if (!ACCOUNT_ROLES.includes(assignedRole)) {
       return res.status(400).json({ error: '부여할 등급은 준회원/정회원/관리자 중에서 고를 수 있습니다.' });
+    }
+    // 정회원도(teamInviteLinkCreation 설정에 따라) 링크를 만들 수 있는데, 자기보다 높은
+    // 등급을 남에게 부여할 수 있게 두면 권한 상승 구멍이 된다 — 서버 운영자는 관리자
+    // 콘솔에서 이미 자유롭게 등급을 바꿀 수 있는 사람이라 이 제한에서 뺀다.
+    if (!req.inviteActor.isServerAdmin && ROLE_RANK[assignedRole] > ROLE_RANK[req.inviteActor.role]) {
+      return res.status(403).json({ error: '자신의 등급보다 높은 등급은 부여할 수 없습니다.' });
     }
     const membership = await teamAccess(teamId, req.user.sub);
     if (!membership.isMember) {

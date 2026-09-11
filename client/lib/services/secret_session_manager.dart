@@ -49,7 +49,9 @@ class SecretSessionManager {
   }
 
   /// 내가 상대에게 비밀 대화를 걸 때. 방이 만들어진 뒤 서버가 돌려준 roomId로 임시키를 저장한다.
-  Future<Room> startSecretChat(String targetUserId) async {
+  /// [teamId]는 내가 지금 속해 있어야 하는 팀(서버 NOT NULL 제약을 만족시키기 위한 부가
+  /// 정보일 뿐 — 상대는 그 팀 소속이 아니어도 된다, server/src/secretChats.js).
+  Future<Room> startSecretChat(String targetUserId, String teamId) async {
     final ephemeral = await X25519().newKeyPair();
     final ephemeralPublicKey = await publicKeyBase64(ephemeral);
     final signature = await crypto.signEphemeralKey(
@@ -62,6 +64,7 @@ class SecretSessionManager {
       deviceId: _identity.deviceId,
       initiatorEphemeralPublicKey: ephemeralPublicKey,
       initiatorEphemeralSignature: signature,
+      teamId: teamId,
     );
     await _keyStore.savePendingEphemeralSeed(
       room.id,

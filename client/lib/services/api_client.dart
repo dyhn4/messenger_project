@@ -61,6 +61,50 @@ class UploadCancelledException implements Exception {
   String toString() => '업로드가 취소되었습니다.';
 }
 
+/// GET /api/users/me의 `teamPositions` 항목 — 부서·직책 관리 범위가 '팀 단위'일 때, 내가
+/// 속한 팀마다 다를 수 있는 부서/직책 한 행(프로필 카드의 "팀" 항목이 팀별로 짝지어 보여준다).
+class TeamPosition {
+  final String teamId;
+  final String teamName;
+  final String? department;
+  final String? position;
+  const TeamPosition({
+    required this.teamId,
+    required this.teamName,
+    this.department,
+    this.position,
+  });
+
+  factory TeamPosition.fromJson(Map<String, dynamic> json) => TeamPosition(
+    teamId: json['teamId'] as String,
+    teamName: json['teamName'] as String,
+    department: json['department'] as String?,
+    position: json['position'] as String?,
+  );
+}
+
+/// 서버 운영자가 관리하는 "직책 목록"(GET /admin/position-options) 한 항목 — 부서·직책 관리
+/// 범위가 '계정 단위'일 때, 회원 탭의 직책 수정을 자유 입력 대신 이 중에서 고르게 한다.
+class PositionOption {
+  final String id;
+  final String label;
+
+  /// 최대 1개만 true — 회원가입 시 이 직책이 자동으로 부여된다(server/src/auth.js).
+  final bool isDefault;
+
+  const PositionOption({
+    required this.id,
+    required this.label,
+    this.isDefault = false,
+  });
+
+  factory PositionOption.fromJson(Map<String, dynamic> json) => PositionOption(
+    id: json['id'] as String,
+    label: json['label'] as String,
+    isDefault: json['isDefault'] as bool? ?? false,
+  );
+}
+
 /// GET/PATCH /api/users/me 결과: 내 프로필과 아바타 상태.
 class MyProfile {
   final String username;
@@ -82,6 +126,14 @@ class MyProfile {
   /// 클라이언트가 로컬 상태만으로 판단할 수 없어 서버가 최종 판정해서 내려준다.
   final bool canCreateTeamInviteLink;
 
+  /// 부서·직책을 팀 단위로 관리하는지('team') 계정 단위로 관리하는지('account') — 내 프로필
+  /// 카드의 "직책" 표시 형태를 결정한다. 'account'면 [position] 하나만, 'team'이면
+  /// [teamPositions]를 본다.
+  final String orgScope;
+  final String? department;
+  final String? position;
+  final List<TeamPosition> teamPositions;
+
   const MyProfile({
     required this.username,
     required this.name,
@@ -93,6 +145,10 @@ class MyProfile {
     this.role = 'guest',
     this.isServerAdmin = false,
     this.canCreateTeamInviteLink = false,
+    this.orgScope = 'team',
+    this.department,
+    this.position,
+    this.teamPositions = const [],
   });
 
   factory MyProfile.fromJson(Map<String, dynamic> json) => MyProfile(
@@ -106,6 +162,14 @@ class MyProfile {
     role: json['role'] as String? ?? 'guest',
     isServerAdmin: json['isServerAdmin'] as bool? ?? false,
     canCreateTeamInviteLink: json['canCreateTeamInviteLink'] as bool? ?? false,
+    orgScope: json['orgScope'] as String? ?? 'team',
+    department: json['department'] as String?,
+    position: json['position'] as String?,
+    teamPositions:
+        (json['teamPositions'] as List?)
+            ?.map((e) => TeamPosition.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
   );
 }
 
@@ -573,6 +637,50 @@ class ApiClient {
         as Map<String, dynamic>,
   );
 
+  /// 직책 목록(GET /admin/position-options) — 부서·직책 관리 범위가 '계정 단위'일 때, 회원
+  /// 탭의 직책 수정이 자유 입력 대신 이 중에서 고르게 한다.
+  Future<List<PositionOption>> fetchPositionOptions() async {
+    final list = await _get('/api/admin/position-options') as List;
+    return list
+        .map((e) => PositionOption.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<PositionOption> createPositionOption(String label) async =>
+      PositionOption.fromJson(
+        await _post('/api/admin/position-options', {'label': label})
+            as Map<String, dynamic>,
+      );
+
+  Future<void> deletePositionOption(String id) async {
+    await _delete('/api/admin/position-options/$id');
+  }
+
+  /// 직책 서열 변경 — [direction]은 'left' 또는 'right'. 이미 끝이면 서버가 조용히 그대로
+  /// 돌려준다. 항상 최신 전체 목록을 돌려주므로 그대로 다시 그리면 된다.
+  Future<List<PositionOption>> movePositionOption(
+    String id,
+    String direction,
+  ) async {
+    final list =
+        await _post('/api/admin/position-options/$id/move', {
+              'direction': direction,
+            })
+            as List;
+    return list
+        .map((e) => PositionOption.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 직책 "기본값" 지정/해제(토글) — 이미 기본값이면 해제, 아니면 기존 기본값을 내리고
+  /// 이 항목을 새 기본값으로 올린다.
+  Future<List<PositionOption>> toggleDefaultPositionOption(String id) async {
+    final list = await _post('/api/admin/position-options/$id/default', {}) as List;
+    return list
+        .map((e) => PositionOption.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<List<AdminUser>> fetchAdminUsers() async {
     final list = await _get('/api/admin/users') as List;
     return list
@@ -691,6 +799,22 @@ class ApiClient {
   /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함) — 로그인/앱 시작 직후 팀 선택 화면이 쓴다.
   Future<List<Team>> fetchTeams() async {
     final list = await _get('/api/teams') as List;
+    return list.map((e) => Team.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// 조직도 — 서버 전체 팀과 각 팀의 멤버 id 목록. 관리자 이상만 호출할 수 있다(서버가
+  /// 403으로 막는다).
+  Future<List<OrgChartTeam>> fetchOrgChartTeams() async {
+    final list = await _get('/api/org-chart/teams') as List;
+    return list
+        .map((e) => OrgChartTeam.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 다른 사람의 프로필 카드 "팀" 항목용 — 그 사람이 속한 팀 목록. 서버가 노출 범위를
+  /// 정한다(대상이 계정 등급 관리자면 나와 겹치는 팀만, 정회원·준회원이면 전체).
+  Future<List<Team>> fetchUserTeams(String userId) async {
+    final list = await _get('/api/users/$userId/teams') as List;
     return list.map((e) => Team.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -915,11 +1039,14 @@ class ApiClient {
     await _patch('/api/devices/$deviceId/fcm-token', {'token': token});
   }
 
+  /// rooms.teamId는 서버에서 NOT NULL이라 비밀 대화 방도 어느 팀인가 하나를 걸어야 한다
+  /// (그 팀 멤버인지는 나만 확인받는다 — 상대는 어느 팀 소속이든 상관없다, server/src/secretChats.js).
   Future<Room> startSecretChat({
     required String targetUserId,
     required String deviceId,
     required String initiatorEphemeralPublicKey,
     required String initiatorEphemeralSignature,
+    required String teamId,
   }) async {
     return Room.fromJson(
       await _post('/api/secret-chats', {
@@ -927,6 +1054,7 @@ class ApiClient {
             'deviceId': deviceId,
             'initiatorEphemeralPublicKey': initiatorEphemeralPublicKey,
             'initiatorEphemeralSignature': initiatorEphemeralSignature,
+            'teamId': teamId,
           })
           as Map<String, dynamic>,
     );

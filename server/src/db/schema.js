@@ -125,6 +125,21 @@ export const topicCreators = pgTable(
 );
 
 /**
+ * 서버 운영자가 관리하는 "직책 목록" — orgScope가 'account'(계정 단위)일 때, 관리자 콘솔
+ * "회원" 탭에서 직책을 자유 입력 대신 이 목록 중 하나로 고르게 한다(오탈자/표기 불일치 방지).
+ * orgScope가 'team'(기본값)이면 이 목록과 무관하게 팀 설정에서 지금처럼 자유 입력한다.
+ */
+export const positionOptions = pgTable('position_options', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  label: text('label').notNull().unique(),
+  // 서열(작을수록 위/왼쪽) — 관리자 콘솔에서 직책을 클릭해 좌우로 옮기면 이웃과 값을 맞바꾼다.
+  sortOrder: integer('sort_order').notNull().default(0),
+  // 한 번에 하나만 true — 회원가입 시 이 직책이 자동으로 부여된다(auth.js).
+  isDefault: boolean('is_default').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
  * 서버 전체 설정(항상 한 행만 있고 id는 늘 1). 팀 설정(teams)과 달리 서버 운영자만 바꾼다.
  * 값이 없으면(설치 직후) 기본값으로 동작하므로, 읽는 쪽은 행이 없을 수도 있다고 보고 다뤄야
  * 한다(db/queries/serverSettings.js의 getServerSettings 참고).

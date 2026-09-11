@@ -1,0 +1,1 @@
+ALTER TABLE "position_options" ADD COLUMN "is_default" boolean DEFAULT false NOT NULL;

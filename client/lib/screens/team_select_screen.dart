@@ -6,6 +6,7 @@ import '../widgets/account_menu_button.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/team_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import 'org_chart_screen.dart';
 import 'team_settings_dialog.dart';
 
 /// 로그인 직후(또는 로그인 상태를 유지한 채 앱을 새로 켰을 때) 가장 먼저 뜨는 화면.
@@ -70,6 +71,14 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
               ],
             ),
           ),
+          // 서버 전체 팀/회원 구조를 보는 기능이라, 계정 등급이 관리자이거나 서버 운영자인
+          // 사람에게만 보인다(server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
+          if (widget.session.canViewOrgChart)
+            IconButton(
+              tooltip: '조직도',
+              icon: const Icon(Icons.account_tree_outlined),
+              onPressed: () => showOrgChartScreen(context, widget.session),
+            ),
           AccountMenuButton(session: widget.session),
         ],
       ),

@@ -4,6 +4,7 @@ import { issueTokenPair } from './auth.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
+import { findTeamMember, listTeamIdsForUser, listTeamsForUser } from './db/queries/teams.js';
 import { isOnline } from './presence.js';
 import { accountRole, canCreateTeamInviteLink } from './permissions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
@@ -32,6 +33,56 @@ export function publicUser(u) {
   };
 }
 
+/** GET /users/:id/teams용 최소 팀 DTO — 클라이언트의 Team.fromJson과 필드를 맞추되(그래야
+ * 재사용할 수 있다), isOwner/memberCount처럼 "그 팀 안에서"만 의미 있는 값은 이 목록 성격상
+ * 필요 없어 기본값으로 채운다. */
+function toTeamRefDto(team) {
+  return {
+    id: team.id,
+    name: team.name,
+    iconEmoji: team.iconEmoji ?? null,
+    iconColor: team.iconColor ?? null,
+    topicCreationPolicy: team.topicCreationPolicy ?? 'member',
+    topicCreatorIds: [],
+    messageEditDeleteEnabled: team.messageEditDeleteEnabled !== false,
+    messageEditDeleteWindowSeconds: team.messageEditDeleteWindowSeconds ?? 300,
+    createdBy: team.createdBy ?? null,
+    createdAt: new Date(team.createdAt).getTime(),
+    isOwner: false,
+    memberCount: null,
+  };
+}
+
+/**
+ * 내 프로필 카드의 "팀"/"직책" 표시용 값 — orgScope(팀 단위/계정 단위)에 따라 저장 위치가
+ * 달라서, 클라이언트가 분기하지 않아도 되도록 서버가 미리 정리해서 내려준다. 계정 단위면
+ * 값이 하나뿐이라 department/position에 바로 담고, 팀 단위면 사람이 여러 팀에 속해 있고
+ * 팀마다 부서/직책이 다를 수 있어 teamPositions 배열(팀별 한 행씩)로 담는다.
+ */
+async function myOrgInfo(user, settings) {
+  if (settings.orgScope === 'account') {
+    return {
+      orgScope: 'account',
+      department: user.department ?? null,
+      position: user.position ?? null,
+      teamPositions: [],
+    };
+  }
+  const rows = await listTeamsForUser(user.id);
+  const teamPositions = await Promise.all(
+    rows.map(async ({ team }) => {
+      const member = await findTeamMember(team.id, user.id);
+      return {
+        teamId: team.id,
+        teamName: team.name,
+        department: member?.department ?? null,
+        position: member?.position ?? null,
+      };
+    }),
+  );
+  return { orgScope: 'team', department: null, position: null, teamPositions };
+}
+
 /** io를 캡처해 프로필(이름/이메일/아바타)이 바뀌면 이 사람이 속한 모든 방에 최신 멤버
  * 정보를 브로드캐스트한다 — 안 그러면 다른 기기/다른 사람 화면의 방 목록·채팅방 제목이
  * 예전 이름/아바타로 남아있게 된다. */
@@ -48,6 +99,26 @@ export function createUsersRouter(io) {
     res.json((await listActiveUsers()).map(publicUser));
   });
 
+  /**
+   * 이 사람이 속한 팀들 — 프로필 카드의 "팀" 항목이 쓴다. 본인이면 전부, 남이면 노출 범위를
+   * 다르게 둔다: 대상이 계정 등급 관리자면 관리자는 보통 여러 팀에 걸쳐 있어서 나와 겹치는
+   * 팀만(내가 이미 알 수 있는 관계로 제한), 정회원·준회원이면 소속이 단순해서 전체를 그대로
+   * 보여준다. "조직도"(관리자 이상 전용, GET /org-chart/teams)와 달리 이건 누구나 호출할 수
+   * 있는 대신, 위 규칙으로 노출 범위를 스스로 제한한다.
+   */
+  router.get('/users/:id/teams', async (req, res) => {
+    const target = await findUserById(req.params.id);
+    if (!target || target.deletedAt) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+
+    const targetRows = await listTeamsForUser(target.id);
+    let visibleTeams = targetRows.map((r) => r.team);
+    if (target.id !== req.user.sub && accountRole(target) === 'admin') {
+      const myTeamIds = new Set(await listTeamIdsForUser(req.user.sub));
+      visibleTeams = visibleTeams.filter((team) => myTeamIds.has(team.id));
+    }
+    res.json(visibleTeams.map(toTeamRefDto));
+  });
+
   /** 내 프로필(아바타 포함) 조회. 내 화면에서만 쓰는 값이라 서버 운영자 여부도 여기 실어준다
    * (다른 사람의 publicUser에는 넣지 않는다 — 누가 운영자인지는 관리자 콘솔에서만 본다). */
   router.get('/users/me', async (req, res) => {
@@ -57,6 +128,7 @@ export function createUsersRouter(io) {
     // 클라이언트가 로컬 상태만으로 판단할 수 없다 — 여기서 서버가 최종 판정해서 내려준다
     // (실제로 만들 때는 teamInvites.js가 매 요청마다 다시 확인한다, 이건 화면 표시용).
     const settings = await getServerSettings();
+    const orgInfo = await myOrgInfo(user, settings);
     res.json({
       ...publicUser(user),
       isServerAdmin: !!user.isServerAdmin,
@@ -65,6 +137,7 @@ export function createUsersRouter(io) {
         isServerAdmin: !!user.isServerAdmin,
         teamInviteLinkCreation: settings.teamInviteLinkCreation,
       }),
+      ...orgInfo,
     });
   });
 

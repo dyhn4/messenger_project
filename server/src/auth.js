@@ -19,6 +19,7 @@ import {
 } from "./db/queries/teamInviteLinks.js";
 import { addTeamMembers } from "./db/queries/teams.js";
 import { addRoomMembers, listPublicTopics, listRoomMemberIds } from "./db/queries/rooms.js";
+import { findDefaultPositionOption } from "./db/queries/positionOptions.js";
 import { notifyMembership, postSystemMessage } from "./rooms.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -149,6 +150,11 @@ export function createAuthRouter(io) {
     // 새로 설치한 서버에서도 아무도 관리자 콘솔에 못 들어가는 상태가 안 생긴다.
     const firstAccount = await hasNoServerAdmin();
 
+    // 직책 목록(관리자 콘솔 "운영 현황")에 "기본값"으로 지정된 직책이 있으면 가입과 동시에
+    // 부여한다 — '팀 단위' 서버에서는 이 값이 어디서도 안 쓰이지만(직책은 팀마다 따로 관리),
+    // 나중에 '계정 단위'로 바뀌어도 바로 의미가 생기도록 항상 채워 둔다.
+    const defaultPosition = await findDefaultPositionOption();
+
     const user = await insertUser({
       username,
       name: name.trim(),
@@ -157,6 +163,7 @@ export function createAuthRouter(io) {
       // 다만 서버의 첫 계정(=운영자)은 스스로 올려줄 사람이 없으므로 관리자로 시작한다.
       role: firstAccount ? 'admin' : 'guest',
       isServerAdmin: firstAccount,
+      position: defaultPosition?.label ?? null,
       emailEnc: encryptField(email),
       emailLookup,
       passwordHash: await bcrypt.hash(password, 10),

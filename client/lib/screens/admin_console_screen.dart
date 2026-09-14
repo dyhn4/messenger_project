@@ -8,6 +8,8 @@ import '../widgets/admin_org_edit_dialog.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/role_badge.dart';
+import '../widgets/sort_menu_button.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
 /// 운영 현황 / 회원 / 팀 / 감사 로그 네 탭.
@@ -590,10 +592,17 @@ class _UsersTabState extends State<_UsersTab> {
   String _filter = '';
   final _scrollController = ScrollController();
 
+  MemberSortField _sortField = MemberSortField.name;
+  bool _sortAscending = true;
+  List<PositionOption>? _positionOptions;
+
   @override
   void initState() {
     super.initState();
     _load();
+    widget.session.fetchPositionOptions().then((list) {
+      if (mounted) setState(() => _positionOptions = list);
+    });
   }
 
   @override
@@ -740,13 +749,45 @@ class _UsersTabState extends State<_UsersTab> {
     );
   }
 
+  /// 직책 목록에서의 서열 — 목록은 이미 서열순(작을수록 낮음)으로 오므로 그 안에서의
+  /// 위치(index)가 곧 서열이다. 목록에 없거나(미등록·자유 입력 시절의 값) 아직 안
+  /// 불러왔으면 맨 뒤로 보낸다.
+  int _positionRank(String? label) {
+    if (label == null || label.isEmpty) return 1 << 30;
+    final index = _positionOptions?.indexWhere((o) => o.label == label) ?? -1;
+    return index == -1 ? 1 << 30 : index;
+  }
+
+  List<AdminUser> _sortedUsers(List<AdminUser> list) {
+    final users = List<AdminUser>.of(list);
+    final cmp = switch (_sortField) {
+      MemberSortField.name => (AdminUser a, AdminUser b) => a.name.compareTo(
+        b.name,
+      ),
+      MemberSortField.role => (AdminUser a, AdminUser b) => _roleRank(
+        a.role,
+      ).compareTo(_roleRank(b.role)),
+      MemberSortField.team => (AdminUser a, AdminUser b) => _teamSortKey(
+        a,
+      ).compareTo(_teamSortKey(b)),
+      MemberSortField.position => (AdminUser a, AdminUser b) => _positionRank(
+        a.position,
+      ).compareTo(_positionRank(b.position)),
+    };
+    users.sort(_sortAscending ? cmp : (a, b) => cmp(b, a));
+    return users;
+  }
+
+  String _teamSortKey(AdminUser user) =>
+      user.teams.isEmpty ? '' : user.teams.map((t) => t.name).join(', ');
+
   @override
   Widget build(BuildContext context) {
     if (_error != null) return Center(child: Text(_error!));
     final users = _users;
     if (users == null) return const Center(child: CircularProgressIndicator());
 
-    final list = users
+    final filtered = users
         .where(
           (u) =>
               _filter.isEmpty ||
@@ -754,6 +795,7 @@ class _UsersTabState extends State<_UsersTab> {
               u.username.toLowerCase().contains(_filter.toLowerCase()),
         )
         .toList();
+    final list = _sortedUsers(filtered);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -769,7 +811,14 @@ class _UsersTabState extends State<_UsersTab> {
           onChanged: (v) => setState(() => _filter = v),
         ),
         const SizedBox(height: 8),
-        _UsersTableHead(),
+        _UsersTableHead(
+          sortField: _sortField,
+          sortAscending: _sortAscending,
+          onSortChanged: (field, ascending) => setState(() {
+            _sortField = field;
+            _sortAscending = ascending;
+          }),
+        ),
         const Divider(height: 1),
         Expanded(
           child: MutedScrollbar(
@@ -1009,8 +1058,18 @@ class _UsersTabState extends State<_UsersTab> {
 
 /// "회원" 탭 목록 위 칼럼 제목 — 실제 행(위의 itemBuilder)과 같은 비율(flex 10 / 12 / 7)로
 /// 맞춰서, "회원"+"등급"은 붙여서 좁게, 그 다음 "팀"·"직책"은 넉넉한 간격으로 벌린다.
-/// 맨 끝은 각 행의 PopupMenuButton 자리만큼 빈 칸을 둔다.
+/// 맨 끝은 각 행의 PopupMenuButton 자리에 정렬 버튼을 대신 놓는다.
 class _UsersTableHead extends StatelessWidget {
+  final MemberSortField sortField;
+  final bool sortAscending;
+  final void Function(MemberSortField field, bool ascending) onSortChanged;
+
+  const _UsersTableHead({
+    required this.sortField,
+    required this.sortAscending,
+    required this.onSortChanged,
+  });
+
   @override
   Widget build(BuildContext context) {
     final style = Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -1037,12 +1096,31 @@ class _UsersTableHead extends StatelessWidget {
           Expanded(flex: 9, child: Text('팀', style: style)),
           const SizedBox(width: 20),
           Expanded(flex: 5, child: Text('직책', style: style)),
-          const SizedBox(width: 48),
+          SortMenuButton<MemberSortField>(
+            fields: const [
+              MemberSortField.name,
+              MemberSortField.role,
+              MemberSortField.team,
+              MemberSortField.position,
+            ],
+            labelOf: (f) => f.label,
+            selectedField: sortField,
+            ascending: sortAscending,
+            onChanged: onSortChanged,
+          ),
         ],
       ),
     );
   }
 }
+
+/// 계정 등급 서열(작을수록 낮음) — "등급 순" 정렬에 쓴다(server/src/permissions.js의
+/// ROLE_RANK와 같다).
+int _roleRank(String role) => switch (role) {
+  'admin' => 2,
+  'member' => 1,
+  _ => 0,
+};
 
 /// 탈퇴한 회원의 행 — 이름·"탈퇴" 표시만 흐리게 보여주고 등급/팀/직책/관리 메뉴는 의미가
 /// 없어서(계정이 이미 익명화됨) 아예 뺀다.
@@ -1074,7 +1152,7 @@ class _DeletedUserRow extends StatelessWidget {
           const SizedBox(width: 10),
           Transform.translate(
             offset: const Offset(-10, 0),
-            child: _Badge(
+            child: RoleBadge(
               label: '탈퇴',
               bg: Theme.of(context).colorScheme.surfaceContainerHighest,
               fg: hint,
@@ -1088,76 +1166,26 @@ class _DeletedUserRow extends StatelessWidget {
 
 /// 등급(관리자/정회원/준회원) + 정지됨/서버 운영자 뱃지들 — 색으로 한눈에 구분되게 한다.
 List<Widget> _statusBadges(BuildContext context, AdminUser user) {
-  final roleColors = _badgeColors(context, user.role);
+  final roleColors = roleBadgeColors(context, user.role);
   return [
-    _Badge(
+    RoleBadge(
       label: accountRoleLabel(user.role),
       bg: roleColors.bg,
       fg: roleColors.fg,
     ),
     if (user.isServerAdmin)
-      _Badge(
+      RoleBadge(
         label: '서버 운영자',
-        bg: _badgeColors(context, 'op').bg,
-        fg: _badgeColors(context, 'op').fg,
+        bg: roleBadgeColors(context, 'op').bg,
+        fg: roleBadgeColors(context, 'op').fg,
       ),
     if (user.suspended)
-      _Badge(
+      RoleBadge(
         label: '정지됨',
-        bg: _badgeColors(context, 'suspended').bg,
-        fg: _badgeColors(context, 'suspended').fg,
+        bg: roleBadgeColors(context, 'suspended').bg,
+        fg: roleBadgeColors(context, 'suspended').fg,
       ),
   ];
-}
-
-/// 뱃지 배색 — 라이트/다크 테마 각각에 맞춘 옅은 배경 + 또렷한 글자색 쌍.
-({Color bg, Color fg}) _badgeColors(BuildContext context, String kind) {
-  final dark = Theme.of(context).brightness == Brightness.dark;
-  switch (kind) {
-    case 'admin':
-      return dark
-          ? (bg: const Color(0xFF2C2650), fg: const Color(0xFFB3A4F5))
-          : (bg: const Color(0xFFECE9FB), fg: const Color(0xFF6A4FD6));
-    case 'member':
-      return dark
-          ? (bg: const Color(0xFF1C3934), fg: const Color(0xFF6BD6BD))
-          : (bg: const Color(0xFFE3F6F2), fg: const Color(0xFF0F8A72));
-    case 'op':
-      return dark
-          ? (bg: const Color(0xFF3A251F), fg: const Color(0xFFF0A284))
-          : (bg: const Color(0xFFFDECE7), fg: const Color(0xFFC1502E));
-    case 'suspended':
-      return dark
-          ? (bg: const Color(0xFF3A1E22), fg: const Color(0xFFF08A9A))
-          : (bg: const Color(0xFFFCE8EA), fg: const Color(0xFFC13350));
-    case 'guest':
-    default:
-      return dark
-          ? (bg: const Color(0xFF262A3A), fg: const Color(0xFF9AA0B5))
-          : (bg: const Color(0xFFEEF0F5), fg: const Color(0xFF6B7385));
-  }
-}
-
-class _Badge extends StatelessWidget {
-  final String label;
-  final Color bg;
-  final Color fg;
-  const _Badge({required this.label, required this.bg, required this.fg});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w700),
-      ),
-    );
-  }
 }
 
 /// 소속 팀 칩 — 팀마다(id 기준) 고정된 색을 골라서(`TeamAvatar`의 팔레트와 동일한 방식) 같은

@@ -12,6 +12,9 @@ class TeamInviteLink {
   final String teamId;
   final String teamName;
   final AccountRole assignedRole;
+
+  /// 이 링크로 가입하면 같이 부여되는 직책(선택 사항) — 직책 목록(position_options)의 label.
+  final String? assignedPosition;
   final String? label;
   final String createdByName;
   final DateTime createdAt;
@@ -32,6 +35,7 @@ class TeamInviteLink {
     required this.teamId,
     required this.teamName,
     required this.assignedRole,
+    this.assignedPosition,
     this.label,
     required this.createdByName,
     required this.createdAt,
@@ -49,6 +53,7 @@ class TeamInviteLink {
     teamId: json['teamId'] as String,
     teamName: json['teamName'] as String,
     assignedRole: accountRoleFromWire(json['assignedRole'] as String?),
+    assignedPosition: json['assignedPosition'] as String?,
     label: json['label'] as String?,
     createdByName: json['createdByName'] as String,
     createdAt: DateTime.fromMillisecondsSinceEpoch(

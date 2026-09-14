@@ -1,0 +1,91 @@
+import 'package:flutter/material.dart';
+
+import '../services/session.dart';
+import 'update_dialog.dart';
+
+/// 앱을 쓰는 동안 화면 위쪽 가운데에 계속 떠 있는 업데이트 알림 알약 — 로그인 화면/홈 화면이
+/// 앱을 막 열었을 때 한 번 띄우는 모달(UpdateDialog)과 달리, 그걸 "나중에"로 닫고 계속
+/// 쓰는 동안에도 잊지 않도록 은근하게 계속 보여준다. main.dart의 MaterialApp.builder에서
+/// 전체 화면 위에 얹어서, 어느 화면(채팅방, 다이얼로그 포함)에 있든 항상 보인다. 누르면
+/// 설치 대화상자(UpdateDialog)를 열고, X를 누르면 이번 실행 동안만(재시작하면 다시 보임)
+/// 닫는다.
+class UpdateBanner extends StatefulWidget {
+  final Session session;
+  const UpdateBanner({super.key, required this.session});
+
+  @override
+  State<UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends State<UpdateBanner> {
+  bool _dismissed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.session,
+      builder: (context, _) {
+        final version = widget.session.updateAvailableVersion;
+        if (version == null || _dismissed) return const SizedBox.shrink();
+        final colors = Theme.of(context).colorScheme;
+        return SafeArea(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Material(
+                color: colors.primaryContainer,
+                borderRadius: BorderRadius.circular(24),
+                elevation: 3,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: () => showDialog<void>(
+                    context: context,
+                    builder: (_) =>
+                        UpdateDialog(session: widget.session, version: version),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.system_update_outlined,
+                          size: 18,
+                          color: colors.onPrimaryContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'v$version 업데이트가 있습니다.',
+                          style: TextStyle(
+                            color: colors.onPrimaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        IconButton(
+                          icon: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: colors.onPrimaryContainer,
+                          ),
+                          tooltip: '닫기',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 28,
+                            minHeight: 28,
+                          ),
+                          onPressed: () => setState(() => _dismissed = true),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

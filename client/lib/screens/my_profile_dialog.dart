@@ -74,10 +74,19 @@ class MyProfileDialog extends StatelessWidget {
     ];
   }
 
+  /// 이메일 변경은 두 단계로 나뉜다: (1) 비밀번호 확인만 하는 다이얼로그, 맞으면 (2) 현재
+  /// 이메일을 보여주고 새 이메일을 받는 다이얼로그. 실제 저장은 서버가 currentPassword를
+  /// 다시 요구하므로, 1단계에서 확인된 비밀번호를 그대로 들고 가서 2단계 제출에 쓴다.
   Future<void> _editEmail(BuildContext context) async {
+    final password = await showDialog<String>(
+      context: context,
+      builder: (_) => _VerifyPasswordDialog(session: session),
+    );
+    if (password == null || !context.mounted) return;
     await showDialog(
       context: context,
-      builder: (_) => _EditEmailDialog(session: session),
+      builder: (_) =>
+          _EditEmailDialog(session: session, verifiedPassword: password),
     );
   }
 
@@ -473,20 +482,18 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
   }
 }
 
-/// "이메일 변경" 다이얼로그. 이메일은 아이디/비밀번호 찾기에 쓰이는 계정 복구 수단이라
-/// 비밀번호 변경과 같은 정책으로, 현재 비밀번호를 확인한 뒤에만 새 이메일을 받는다. 새
-/// 이메일 입력칸은 회원가입 폼과 같은 형식(로컬 파트 + '@' + 도메인)을 쓴다.
-class _EditEmailDialog extends StatefulWidget {
+/// "이메일 변경" 1단계 — 비밀번호 확인만 한다(다른 부수효과 없음). 맞으면 그 비밀번호
+/// 문자열 그대로 pop해서 돌려주고(2단계가 실제 저장 때 다시 쓴다), 취소하면 null.
+class _VerifyPasswordDialog extends StatefulWidget {
   final Session session;
-  const _EditEmailDialog({required this.session});
+  const _VerifyPasswordDialog({required this.session});
 
   @override
-  State<_EditEmailDialog> createState() => _EditEmailDialogState();
+  State<_VerifyPasswordDialog> createState() => _VerifyPasswordDialogState();
 }
 
-class _EditEmailDialogState extends State<_EditEmailDialog> {
+class _VerifyPasswordDialogState extends State<_VerifyPasswordDialog> {
   final _password = TextEditingController();
-  String _email = '';
   bool _submitting = false;
   String? _error;
 
@@ -497,17 +504,14 @@ class _EditEmailDialogState extends State<_EditEmailDialog> {
   }
 
   Future<void> _submit() async {
-    if (_password.text.isEmpty || _email.trim().isEmpty) return;
+    if (_password.text.isEmpty) return;
     setState(() {
       _submitting = true;
       _error = null;
     });
     try {
-      await widget.session.updateProfile(
-        email: _email.trim(),
-        currentPassword: _password.text,
-      );
-      if (mounted) Navigator.of(context).pop();
+      await widget.session.verifyPassword(_password.text);
+      if (mounted) Navigator.of(context).pop(_password.text);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -529,12 +533,117 @@ class _EditEmailDialogState extends State<_EditEmailDialog> {
               controller: _password,
               autofocus: true,
               obscureText: true,
+              onSubmitted: (_) => _submit(),
               decoration: const InputDecoration(
                 labelText: '비밀번호 확인',
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 12),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('확인'),
+        ),
+      ],
+    );
+  }
+}
+
+/// "이메일 변경" 2단계 — 1단계에서 확인된 비밀번호([verifiedPassword])를 들고 와서 현재
+/// 이메일을 보여주고 새 이메일을 받는다. 새 이메일 입력칸은 회원가입 폼과 같은 형식
+/// (로컬 파트 + '@' + 도메인)을 쓴다.
+class _EditEmailDialog extends StatefulWidget {
+  final Session session;
+  final String verifiedPassword;
+  const _EditEmailDialog({
+    required this.session,
+    required this.verifiedPassword,
+  });
+
+  @override
+  State<_EditEmailDialog> createState() => _EditEmailDialogState();
+}
+
+class _EditEmailDialogState extends State<_EditEmailDialog> {
+  String _email = '';
+  bool _submitting = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    if (_email.trim().isEmpty) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.session.updateProfile(
+        email: _email.trim(),
+        currentPassword: widget.verifiedPassword,
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return AlertDialog(
+      title: const Text('이메일 변경'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '현재 이메일',
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: hint),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                widget.session.email?.isNotEmpty == true
+                    ? widget.session.email!
+                    : '등록된 이메일이 없습니다',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '새 이메일',
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: hint),
+            ),
+            const SizedBox(height: 4),
             EmailAddressField(onChanged: (v) => _email = v),
             if (_error != null) ...[
               const SizedBox(height: 8),
@@ -591,9 +700,9 @@ class _ProfileInfoLinesRow extends StatelessWidget {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).hintColor,
+              ),
             ),
           ),
           Expanded(

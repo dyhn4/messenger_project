@@ -2,18 +2,21 @@ import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../models/team.dart';
+import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/org_edit_dialog.dart';
+import '../widgets/role_badge.dart';
+import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/user_avatar.dart';
 import 'team_invite_link_screen.dart';
 
 /// 팀 설정(소유자·관리자만). "팀 정보"(이름·도메인·아이콘·초대 권한, 소유자에게는 소유권
-/// 이양/팀 삭제까지)와 "팀원"(추가·등급 변경·부서/직책·빼기) 두 탭으로 나뉜다.
+/// 이양/팀 삭제까지)와 "멤버"(추가·등급 변경·부서/직책·빼기) 두 탭으로 나뉜다.
 /// 여기서 보이는 버튼은 전부 서버(server/src/permissions.js)가 다시 검사한다.
 Future<void> showTeamSettingsDialog(
   BuildContext context,
@@ -58,12 +61,19 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   List<AppUser>? _members;
   String? _membersError;
 
+  MemberSortField _sortField = MemberSortField.name;
+  bool _sortAscending = true;
+  List<PositionOption>? _positionOptions;
+
   bool get _isOwner => widget.team.isOwner;
 
   @override
   void initState() {
     super.initState();
     _loadMembers();
+    widget.session.fetchPublicPositionOptions().then((list) {
+      if (mounted) setState(() => _positionOptions = list);
+    });
   }
 
   @override
@@ -198,14 +208,13 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   }
 
   Future<void> _editOrg(AppUser user) async {
-    final result = await showOrgEditDialog(context, user);
-    if (result == null || !mounted) return;
+    final position = await showOrgEditDialog(context, widget.session, user);
+    if (position == null || !mounted) return;
     try {
       final members = await widget.session.updateTeamMember(
         widget.team,
         user.id,
-        department: result.department,
-        position: result.position,
+        position: position,
       );
       if (mounted) setState(() => _members = members);
     } catch (e) {
@@ -229,6 +238,34 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     } catch (e) {
       _toast('실패: $e');
     }
+  }
+
+  /// 직책 목록에서의 서열 — 목록은 이미 서열순(작을수록 낮음)으로 오므로 그 안에서의
+  /// 위치(index)가 곧 서열이다. 목록에 없거나(미등록·자유 입력 시절의 값) 아직 안 불러왔으면
+  /// 맨 뒤로 보낸다.
+  int _positionRank(String? label) {
+    if (label == null || label.isEmpty) return 1 << 30;
+    final index = _positionOptions?.indexWhere((o) => o.label == label) ?? -1;
+    return index == -1 ? 1 << 30 : index;
+  }
+
+  List<AppUser> get _sortedMembers {
+    final members = List<AppUser>.of(_members ?? const []);
+    final cmp = switch (_sortField) {
+      MemberSortField.name => (AppUser a, AppUser b) => a.name.compareTo(
+        b.name,
+      ),
+      MemberSortField.role => (AppUser a, AppUser b) => accountRoleFromWire(
+        a.role,
+      ).rank.compareTo(accountRoleFromWire(b.role).rank),
+      MemberSortField.position => (AppUser a, AppUser b) => _positionRank(
+        a.position,
+      ).compareTo(_positionRank(b.position)),
+      // 이 탭은 이미 한 팀 안이라 "팀" 정렬은 SortMenuButton.fields에 아예 안 넣는다 — 도달 안 함.
+      MemberSortField.team => (AppUser a, AppUser b) => 0,
+    };
+    members.sort(_sortAscending ? cmp : (a, b) => cmp(b, a));
+    return members;
   }
 
   Future<void> _transferOwnership(AppUser user) async {
@@ -312,7 +349,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
               child: TabBar(
                 tabs: [
                   Tab(text: '팀 정보'),
-                  Tab(text: '팀원'),
+                  Tab(text: '멤버'),
                 ],
               ),
             ),
@@ -576,7 +613,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         children: [
           Row(
             children: [
-              Expanded(child: _SectionLabel('팀원 ${_members!.length}')),
+              Expanded(child: _SectionLabel('멤버 ${_members!.length}')),
               TextButton.icon(
                 onPressed: _addMembers,
                 icon: const Icon(Icons.person_add_alt, size: 18),
@@ -584,19 +621,34 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
               ),
             ],
           ),
+          _MembersTableHead(
+            sortField: _sortField,
+            sortAscending: _sortAscending,
+            onSortChanged: (field, ascending) => setState(() {
+              _sortField = field;
+              _sortAscending = ascending;
+            }),
+          ),
+          const Divider(height: 1),
           Expanded(
-            child: ListView.builder(
-              itemCount: _members!.length,
-              itemBuilder: (context, i) {
-                final user = _members![i];
-                return _MemberRow(
-                  session: widget.session,
-                  user: user,
-                  isTeamOwner: widget.team.isOwner,
-                  isMe: user.id == widget.session.userId,
-                  onEditOrg: () => _editOrg(user),
-                  onTransferOwnership: () => _transferOwnership(user),
-                  onRemove: () => _removeMember(user),
+            child: Builder(
+              builder: (context) {
+                final members = _sortedMembers;
+                return ListView.separated(
+                  itemCount: members.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final user = members[i];
+                    return _MemberRow(
+                      session: widget.session,
+                      user: user,
+                      isTeamOwner: widget.team.isOwner,
+                      isMe: user.id == widget.session.userId,
+                      onEditOrg: () => _editOrg(user),
+                      onTransferOwnership: () => _transferOwnership(user),
+                      onRemove: () => _removeMember(user),
+                    );
+                  },
                 );
               },
             ),
@@ -607,8 +659,56 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   }
 }
 
-/// 팀원 한 줄: 아바타 + 이름/등급·부서·직책 + 관리 메뉴.
-/// 등급은 **보여주기만** 한다 — 계정 등급이라 서버 운영자가 관리자 콘솔에서만 바꾼다.
+/// "멤버" 탭 목록 위 칼럼 제목 — 관리자 콘솔 "회원" 탭(admin_console_screen.dart)과 같은
+/// 비율(이름 9 / 등급 5 / 직책 5)로 맞춘다. 맨 끝은 각 행의 PopupMenuButton 자리에 정렬
+/// 버튼을 대신 놓는다.
+class _MembersTableHead extends StatelessWidget {
+  final MemberSortField sortField;
+  final bool sortAscending;
+  final void Function(MemberSortField field, bool ascending) onSortChanged;
+
+  const _MembersTableHead({
+    required this.sortField,
+    required this.sortAscending,
+    required this.onSortChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelSmall?.copyWith(
+      color: Theme.of(context).hintColor,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.2,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(flex: 9, child: Text('이름', style: style)),
+          const SizedBox(width: 16),
+          Expanded(flex: 5, child: Text('등급', style: style)),
+          const SizedBox(width: 16),
+          Expanded(flex: 5, child: Text('직책', style: style)),
+          SortMenuButton<MemberSortField>(
+            fields: const [
+              MemberSortField.name,
+              MemberSortField.role,
+              MemberSortField.position,
+            ],
+            labelOf: (f) => f.label,
+            selectedField: sortField,
+            ascending: sortAscending,
+            onChanged: onSortChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 팀원 한 줄: 아바타·이름 / 등급(+소유자) 뱃지 / 직책 / 관리 메뉴 — 관리자 콘솔 "회원" 탭과
+/// 같은 칼럼 구조. 등급은 **보여주기만** 한다 — 계정 등급이라 서버 운영자가 관리자 콘솔에서만
+/// 바꾼다.
 class _MemberRow extends StatelessWidget {
   final Session session;
   final AppUser user;
@@ -631,68 +731,135 @@ class _MemberRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final role = accountRoleFromWire(user.role);
-    final subtitle = [
-      if (user.isOwner) '소유자',
-      role.label,
-      if (user.orgLine != null) user.orgLine!,
-    ].join(' · ');
     // 소유자는 뺄 수 없고, 관리자는 그 팀의 소유자만 뺄 수 있다(서버 teams.js와 같은 규칙).
     final canRemove =
         !user.isOwner && !isMe && (role != AccountRole.admin || isTeamOwner);
+    final roleColors = roleBadgeColors(context, role.wire);
+    final ownerColors = roleBadgeColors(context, 'owner');
 
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: UserAvatar(user: user, resolveUrl: session.resolveUrl),
-      title: Text(user.name),
-      subtitle: Text(subtitle),
-      trailing: PopupMenuButton<_MemberAction>(
-        tooltip: '팀원 관리',
-        position: PopupMenuPosition.under,
-        onSelected: (action) => switch (action) {
-          _MemberAction.editOrg => onEditOrg(),
-          _MemberAction.transferOwnership => onTransferOwnership(),
-          _MemberAction.remove => onRemove(),
-        },
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            value: _MemberAction.editOrg,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            flex: 9,
             child: Row(
               children: [
-                Icon(Icons.badge_outlined, size: 20),
-                SizedBox(width: 8),
-                Text('부서·직책 수정'),
+                UserAvatar(user: user, resolveUrl: session.resolveUrl),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (isMe)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Text(
+                            '(나)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).hintColor,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
-          // 소유권 이양은 그 팀의 소유자만, 자기 자신 말고 다른 사람에게.
-          if (isTeamOwner && !isMe && !user.isOwner)
-            const PopupMenuItem(
-              value: _MemberAction.transferOwnership,
-              child: Row(
-                children: [
-                  Icon(Icons.workspace_premium_outlined, size: 20),
-                  SizedBox(width: 8),
-                  Text('소유권 넘기기'),
-                ],
-              ),
-            ),
-          if (canRemove) ...[
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: _MemberAction.remove,
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.person_remove_alt_1_outlined,
-                    size: 20,
-                    color: Colors.redAccent,
+          const SizedBox(width: 16),
+          Expanded(
+            flex: 5,
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                RoleBadge(
+                  label: role.label,
+                  bg: roleColors.bg,
+                  fg: roleColors.fg,
+                ),
+                if (user.isOwner)
+                  RoleBadge(
+                    label: '소유자',
+                    bg: ownerColors.bg,
+                    fg: ownerColors.fg,
                   ),
-                  SizedBox(width: 8),
-                  Text('팀에서 빼기', style: TextStyle(color: Colors.redAccent)),
-                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            flex: 5,
+            child: Text(
+              user.position?.isNotEmpty == true ? user.position! : '미등록',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Theme.of(context).hintColor,
+                fontStyle: user.position?.isNotEmpty == true
+                    ? FontStyle.normal
+                    : FontStyle.italic,
               ),
             ),
-          ],
+          ),
+          PopupMenuButton<_MemberAction>(
+            tooltip: '팀원 관리',
+            position: PopupMenuPosition.under,
+            onSelected: (action) => switch (action) {
+              _MemberAction.editOrg => onEditOrg(),
+              _MemberAction.transferOwnership => onTransferOwnership(),
+              _MemberAction.remove => onRemove(),
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: _MemberAction.editOrg,
+                child: Row(
+                  children: [
+                    Icon(Icons.badge_outlined, size: 20),
+                    SizedBox(width: 8),
+                    Text('직책 수정'),
+                  ],
+                ),
+              ),
+              // 소유권 이양은 그 팀의 소유자만, 자기 자신 말고 다른 사람에게.
+              if (isTeamOwner && !isMe && !user.isOwner)
+                const PopupMenuItem(
+                  value: _MemberAction.transferOwnership,
+                  child: Row(
+                    children: [
+                      Icon(Icons.workspace_premium_outlined, size: 20),
+                      SizedBox(width: 8),
+                      Text('소유권 넘기기'),
+                    ],
+                  ),
+                ),
+              if (canRemove) ...[
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: _MemberAction.remove,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.person_remove_alt_1_outlined,
+                        size: 20,
+                        color: Colors.redAccent,
+                      ),
+                      SizedBox(width: 8),
+                      Text('팀에서 빼기', style: TextStyle(color: Colors.redAccent)),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );

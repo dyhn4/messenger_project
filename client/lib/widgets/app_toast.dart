@@ -12,12 +12,17 @@ import 'package:flutter/material.dart';
 /// 다이얼로그 뒤 화면에 그려져 떠 있는 다이얼로그에 완전히 가려 안 보였다(예: 팀 초대 링크
 /// 화면의 "링크 복사" 토스트). Overlay는 다이얼로그를 포함해 지금 열려 있는 모든 라우트보다
 /// "나중에 삽입"되므로 어디서 불러도 항상 맨 위에 뜬다.
-void showAppToast(BuildContext context, String message) {
+void showAppToast(
+  BuildContext context,
+  String message, {
+  Duration duration = const Duration(milliseconds: 2000),
+}) {
   final overlay = Overlay.of(context);
   late OverlayEntry entry;
   entry = OverlayEntry(
     builder: (context) => _AppToast(
       message: message,
+      duration: duration,
       onDone: () => entry.remove(),
     ),
   );
@@ -26,8 +31,13 @@ void showAppToast(BuildContext context, String message) {
 
 class _AppToast extends StatefulWidget {
   final String message;
+  final Duration duration;
   final VoidCallback onDone;
-  const _AppToast({required this.message, required this.onDone});
+  const _AppToast({
+    required this.message,
+    required this.duration,
+    required this.onDone,
+  });
 
   @override
   State<_AppToast> createState() => _AppToastState();
@@ -44,10 +54,12 @@ class _AppToastState extends State<_AppToast> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() => _opacity = 1);
     });
-    Future.delayed(const Duration(milliseconds: 1700), () {
+    // 전체 노출 시간(duration)의 마지막 300ms 동안 페이드아웃하고, 그 직후 완전히 치운다.
+    final fadeOutDelay = widget.duration - const Duration(milliseconds: 300);
+    Future.delayed(fadeOutDelay, () {
       if (mounted) setState(() => _opacity = 0);
     });
-    Future.delayed(const Duration(milliseconds: 2000), widget.onDone);
+    Future.delayed(widget.duration, widget.onDone);
   }
 
   @override
@@ -66,10 +78,7 @@ class _AppToastState extends State<_AppToast> {
           child: Material(
             color: Colors.transparent,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 6,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               decoration: BoxDecoration(
                 color: const Color(0xE6323232),
                 borderRadius: BorderRadius.circular(24),

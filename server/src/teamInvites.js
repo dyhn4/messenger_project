@@ -10,6 +10,7 @@ import {
   revokeTeamInviteLink,
 } from './db/queries/teamInviteLinks.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
+import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
 import { PAIRING_PORT } from './config.js';
 import { ACCOUNT_ROLES, canCreateTeamInviteLink, roleLabel, ROLE_RANK } from './permissions.js';
 
@@ -28,6 +29,7 @@ function toTeamInviteLinkDto(link, { serverAddress }) {
     teamId: link.teamId,
     teamName: link.teamName,
     assignedRole: link.assignedRole,
+    assignedPosition: link.assignedPosition ?? null,
     label: link.label ?? null,
     createdByName: link.createdByName,
     createdAt: new Date(link.createdAt).getTime(),
@@ -92,10 +94,27 @@ export function createTeamInvitesRouter() {
     }
     const label = typeof req.body?.label === 'string' ? req.body.label.trim().slice(0, 30) : null;
 
+    // 직책도(선택 사항) 등급과 같은 이유로 "내 서열 이하"만 부여할 수 있게 막는다 — 안 그러면
+    // 나보다 높은 직책을 남에게 줄 수 있는 권한 상승 구멍이 된다. 직책 목록의 순서(sortOrder)는
+    // **작을수록 서열이 낮다**(기본 목록이 사원(0)→대표(7) 순인 것과 같은 방향)로 비교한다.
+    let assignedPosition = null;
+    if (typeof req.body?.assignedPosition === 'string' && req.body.assignedPosition) {
+      const target = await findPositionOptionByLabel(req.body.assignedPosition);
+      if (!target) return res.status(400).json({ error: '직책 목록에 없는 값입니다.' });
+      const myPosition = req.inviteActor.user?.position
+        ? await findPositionOptionByLabel(req.inviteActor.user.position)
+        : null;
+      if (!myPosition || target.sortOrder > myPosition.sortOrder) {
+        return res.status(403).json({ error: '자신의 직책보다 높은 직책은 부여할 수 없습니다.' });
+      }
+      assignedPosition = target.label;
+    }
+
     const inserted = await insertTeamInviteLink({
       token: generateToken(),
       teamId,
       assignedRole,
+      assignedPosition,
       createdBy: req.user.sub,
       createdByName: req.inviteActor.user?.name ?? req.inviteActor.user?.username ?? '(알 수 없음)',
       label: label || null,
@@ -112,7 +131,10 @@ export function createTeamInvitesRouter() {
       targetType: 'teamInvite',
       targetId: link.id,
       targetLabel: label ?? undefined,
-      detail: `팀 초대 링크 발급(${roleLabel(assignedRole)} 등급 부여, ${TEAM_INVITE_EXPIRY_DAYS}일)`,
+      detail:
+        `팀 초대 링크 발급(${roleLabel(assignedRole)} 등급` +
+        (assignedPosition ? ` · ${assignedPosition} 직책` : '') +
+        ` 부여, ${TEAM_INVITE_EXPIRY_DAYS}일)`,
     });
 
     res.status(201).json(toTeamInviteLinkDto(link, { serverAddress: serverAddressFrom(req) }));

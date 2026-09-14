@@ -20,6 +20,9 @@ import 'package:win32/win32.dart'
 
 import '../widgets/avatar_utils.dart' show parseHexColor;
 
+/// 비밀 대화 자물쇠 배지를 아바타의 어느 모서리에 그릴지 — _badgeWithLock 문서 참고.
+enum _BadgeCorner { topLeft, bottomRight }
+
 /// 앱이 살아있는 동안(포그라운드/백그라운드) 새 메시지를 로컬 알림으로 보여준다.
 /// 완전히 종료된 앱을 깨우는 진짜 푸시(FCM)는 범위 밖 — Session이 소켓으로 받은
 /// 메시지에 대해서만 호출된다.
@@ -95,25 +98,39 @@ class NotificationService {
     String? avatarUrl,
     bool isSecret = false,
   }) async {
-    var avatarBytes = await _resolveAvatarBytes(
+    final baseAvatarBytes = await _resolveAvatarBytes(
       avatarType: avatarType,
       avatarEmoji: avatarEmoji,
       avatarColor: avatarColor,
       avatarUrl: avatarUrl,
+      fallbackLabel: senderName ?? title,
     );
-    // 배지를 직접 그려 넣은 뒤에는 Windows 쪽 자체 원형 크롭(WindowsImageCrop.circle)을
-    // 끈다 — 그 크롭이 이미지 전체 사각형 기준으로 원을 오려내서, 모서리에 그린 배지가
-    // 잘려나가기 때문이다(우리가 이미 원형으로 오려서 그렸으므로 다시 자를 필요 없음).
-    var badged = false;
-    if (isSecret && avatarBytes != null) {
-      avatarBytes = await _badgeWithLock(avatarBytes);
-      badged = true;
+    // 안드로이드의 "대화" 레이아웃은 오른쪽 아래에 시스템 앱 아이콘 배지를 항상 따로
+    // 덧그려서 그 자리의 배지를 가려버리므로(_badgeWithLock 문서 참고) 안드로이드는 계속
+    // 왼쪽 위에 그린다. Windows 토스트에는 그런 시스템 배지가 없어서 오른쪽 아래로
+    // 옮길 수 있다 — room_avatar.dart의 다른 배지들과도 위치가 더 잘 맞는다.
+    var avatarBytes = baseAvatarBytes;
+    Uint8List? windowsAvatarBytes;
+    var windowsBadged = false;
+    if (isSecret) {
+      avatarBytes = await _badgedOrFallback(
+        baseAvatarBytes,
+        corner: _BadgeCorner.topLeft,
+        fallbackLabel: senderName ?? title,
+      );
+      if (Platform.isWindows) {
+        windowsAvatarBytes = await _badgedOrFallback(
+          baseAvatarBytes,
+          corner: _BadgeCorner.bottomRight,
+          fallbackLabel: senderName ?? title,
+        );
+        windowsBadged = true;
+      }
     }
 
-    Uri? windowsImageUri;
-    if (avatarBytes != null && Platform.isWindows) {
-      windowsImageUri = await _writeTempPng(avatarBytes);
-    }
+    final windowsImageUri = Platform.isWindows
+        ? await _writeTempPng(windowsAvatarBytes ?? avatarBytes)
+        : null;
 
     // 안드로이드: 프로필 사진을 largeIcon으로만 주면 알림 "오른쪽"에 따로 떨어져 나온다.
     // 참고 이미지처럼 프로필 사진이 왼쪽 큰 원으로 오고 앱 아이콘이 그 모서리에 작은 배지로
@@ -124,7 +141,7 @@ class NotificationService {
       key: senderName ?? title,
       name: senderName ?? title,
       important: true,
-      icon: avatarBytes != null ? ByteArrayAndroidIcon(avatarBytes) : null,
+      icon: ByteArrayAndroidIcon(avatarBytes),
     );
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -149,7 +166,7 @@ class NotificationService {
               windowsImageUri,
               altText: title,
               placement: WindowsImagePlacement.appLogoOverride,
-              crop: badged ? null : WindowsImageCrop.circle,
+              crop: windowsBadged ? null : WindowsImageCrop.circle,
             )
           else
             WindowsImage(
@@ -173,9 +190,15 @@ class NotificationService {
       );
     }
 
+    // Windows 토스트는 아바타 이미지와 달리 제목 글자에 임의의 색을 입힐 방법이 OS API
+    // 자체에 없다(라이트/다크 테마 일관성을 위해 텍스트 색은 시스템이 강제로 정한다) —
+    // 그래서 "녹색 자물쇠"를 색으로는 못 넣고, 대신 이름 왼쪽에 자물쇠 이모지를 붙여서
+    // 비밀 대화라는 표시를 준다. 안드로이드는 MessagingStyle이 title을 그대로 안 쓰고
+    // 자체 레이아웃(Person 이름)으로 그리므로 안 건드린다.
+    final windowsTitle = (isSecret && Platform.isWindows) ? '🔒 $title' : title;
     await _plugin.show(
       id: roomId.hashCode,
-      title: title,
+      title: windowsTitle,
       body: body,
       notificationDetails: details,
       payload: roomId,
@@ -189,11 +212,16 @@ class NotificationService {
   Future<void> cancelForRoom(String roomId) =>
       _plugin.cancel(id: roomId.hashCode);
 
-  Future<Uint8List?> _resolveAvatarBytes({
+  /// [fallbackLabel]의 첫 글자로 만든 원형 아바타를 마지막 대안으로 쓴다(위젯의 "이니셜"
+  /// 아바타와 같은 개념) — 이게 없으면(예: avatarType이 'initial'인, 즉 대다수 회원의
+  /// 기본값인 경우) avatarBytes가 계속 null이 되어, showMessage가 [isSecret]이어도
+  /// `avatarBytes != null` 조건에 걸려 초록 자물쇠 배지를 아예 못 그리는 문제가 있었다.
+  Future<Uint8List> _resolveAvatarBytes({
     required String avatarType,
     String? avatarEmoji,
     String? avatarColor,
     String? avatarUrl,
+    required String fallbackLabel,
   }) async {
     if (avatarType == 'photo' && avatarUrl != null) {
       try {
@@ -202,17 +230,17 @@ class NotificationService {
             .timeout(const Duration(seconds: 3));
         if (res.statusCode == 200) return res.bodyBytes;
       } catch (_) {
-        // 프로필 사진을 못 받아오면 조용히 기본 아이콘으로 대체한다.
+        // 프로필 사진을 못 받아오면 아래 이니셜 아바타로 대체한다.
       }
-      return null;
-    }
-    if (avatarType == 'character' && avatarEmoji != null) {
+    } else if (avatarType == 'character' && avatarEmoji != null) {
       return _renderCharacterAvatar(
         emoji: avatarEmoji,
         color: parseHexColor(avatarColor) ?? const ui.Color(0xFF9AA6B2),
       );
     }
-    return null;
+    return _renderInitialAvatar(
+      fallbackLabel.isNotEmpty ? fallbackLabel[0] : '?',
+    );
   }
 
   /// 이모지+배경색을 원형 PNG로 직접 그린다(위젯 트리 없이 dart:ui Canvas만 사용).
@@ -251,16 +279,76 @@ class NotificationService {
     return byteData!.buffer.asUint8List();
   }
 
-  /// [avatarBytes]를 원형으로 오려서 캔버스 가운데 그리고, 왼쪽 위에 흰 테두리+초록 원
-  /// 배지를 얹어 그 안에 자물쇠 모양을 그린다 — room_avatar.dart의 비밀 대화 배지(초록
+  /// 프로필 사진도 캐릭터도 안 고른(기본 "이니셜") 사람 몫의 마지막 대안 — 위젯의
+  /// AvatarView와 같은 느낌으로 회색 원 위에 이름 첫 글자를 그린다.
+  Future<Uint8List> _renderInitialAvatar(String letter) async {
+    const size = 128.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    canvas.drawCircle(
+      const Offset(size / 2, size / 2),
+      size / 2,
+      Paint()..color = const ui.Color(0xFF9AA6B2),
+    );
+
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: letter,
+        style: const TextStyle(
+          fontSize: size * 0.45,
+          color: ui.Color(0xFFFFFFFF),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    textPainter.paint(
+      canvas,
+      Offset(
+        size / 2 - textPainter.width / 2,
+        size / 2 - textPainter.height / 2,
+      ),
+    );
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  /// [avatarBytes]를 디코딩해서 자물쇠 배지를 얹어보고, 손상/미지원 형식이라 디코딩에
+  /// 실패하면(실제 프로필 사진이 원인일 수 있음) 항상 그릴 수 있는 이니셜 아바타에라도
+  /// 배지를 붙여서 "이건 비밀 대화다"라는 표시만은 반드시 나오게 한다.
+  Future<Uint8List> _badgedOrFallback(
+    Uint8List avatarBytes, {
+    required _BadgeCorner corner,
+    required String fallbackLabel,
+  }) async {
+    try {
+      return await _badgeWithLock(avatarBytes, corner: corner);
+    } catch (_) {
+      final fallback = await _renderInitialAvatar(
+        fallbackLabel.isNotEmpty ? fallbackLabel[0] : '?',
+      );
+      return _badgeWithLock(fallback, corner: corner);
+    }
+  }
+
+  /// [avatarBytes]를 원형으로 오려서 캔버스 가운데 그리고, [corner] 자리에 흰 테두리+초록
+  /// 원 배지를 얹어 그 안에 자물쇠 모양을 그린다 — room_avatar.dart의 비밀 대화 배지(초록
   /// Icons.lock)와 같은 느낌. 배지가 들어갈 여백을 남기려고 아바타는 캔버스 전체가 아니라
   /// 살짝 작은 반지름으로 그린다.
   ///
-  /// 배지를 오른쪽 아래가 아니라 왼쪽 위에 그린다: 안드로이드 알림의 "대화" 레이아웃은
-  /// 오른쪽 아래에 앱 아이콘(우리가 못 바꾸는 시스템 배지)을 항상 별도 레이어로 덧그리는데,
-  /// 거기에 우리 배지를 겹쳐 그리면 그 시스템 배지에 완전히 가려져 안 보인다(실제로
-  /// 확인함 — 자리를 옮기는 것 말고는 피할 방법이 없다).
-  Future<Uint8List> _badgeWithLock(Uint8List avatarBytes) async {
+  /// 안드로이드는 왼쪽 위([_BadgeCorner.topLeft])로 그린다: 안드로이드 알림의 "대화"
+  /// 레이아웃은 오른쪽 아래에 앱 아이콘(우리가 못 바꾸는 시스템 배지)을 항상 별도 레이어로
+  /// 덧그리는데, 거기에 우리 배지를 겹쳐 그리면 그 시스템 배지에 완전히 가려져 안 보인다
+  /// (실제로 확인함 — 자리를 옮기는 것 말고는 피할 방법이 없다). Windows 토스트에는 그런
+  /// 시스템 배지가 없어서 오른쪽 아래([_BadgeCorner.bottomRight])로 그릴 수 있다.
+  Future<Uint8List> _badgeWithLock(
+    Uint8List avatarBytes, {
+    required _BadgeCorner corner,
+  }) async {
     final codec = await ui.instantiateImageCodec(avatarBytes);
     final frame = await codec.getNextFrame();
     final source = frame.image;
@@ -293,10 +381,15 @@ class NotificationService {
     canvas.restore();
 
     const badgeRadius = size * 0.125;
-    final badgeCenter = Offset(
-      avatarCenter.dx - avatarRadius * 0.78,
-      avatarCenter.dy - avatarRadius * 0.78,
-    );
+    final badgeCenter = corner == _BadgeCorner.topLeft
+        ? Offset(
+            avatarCenter.dx - avatarRadius * 0.78,
+            avatarCenter.dy - avatarRadius * 0.78,
+          )
+        : Offset(
+            avatarCenter.dx + avatarRadius * 0.78,
+            avatarCenter.dy + avatarRadius * 0.78,
+          );
     canvas.drawCircle(
       badgeCenter,
       badgeRadius * 1.18,

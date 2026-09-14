@@ -271,12 +271,11 @@ class ApiClient {
   /// catch가 에러 문구를 보여주고 다시 시도할 수 있게 한다.
   static const _requestTimeout = Duration(seconds: 20);
 
-  Future<http.Response> _withTimeout(Future<http.Response> future) => future
-      .timeout(
+  Future<http.Response> _withTimeout(Future<http.Response> future) =>
+      future.timeout(
         _requestTimeout,
-        onTimeout: () => throw const ApiException(
-          '요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.',
-        ),
+        onTimeout: () =>
+            throw const ApiException('요청이 시간 초과되었습니다. 네트워크 연결을 확인하고 다시 시도하세요.'),
       );
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {
@@ -587,6 +586,12 @@ class ApiClient {
     );
   }
 
+  /// 현재 비밀번호가 맞는지만 확인한다(다른 부수효과 없음) — "이메일 변경" 1단계(비밀번호
+  /// 확인) 다이얼로그가 쓴다. 틀리면 서버가 401로 응답하고 _send()가 ApiException을 던진다.
+  Future<void> verifyPassword(String password) async {
+    await _post('/api/users/me/verify-password', {'password': password});
+  }
+
   /// 비밀번호 변경. 성공하면 서버가 새 토큰 쌍을 함께 내려준다(이 기기는 로그아웃되지 않고
   /// 그 토큰으로 이어서 쓸 수 있음 — 다른 기기는 이 시점에 강제로 끊긴다).
   Future<AuthResult> changePassword({
@@ -662,6 +667,15 @@ class ApiClient {
         .toList();
   }
 
+  /// 직책 목록(GET /position-options, 서열순) — 위 [fetchPositionOptions]와 달리 서버
+  /// 운영자가 아니어도 누구나 부를 수 있다. "팀 초대 링크 만들기"의 "부여할 직책"이 쓴다.
+  Future<List<PositionOption>> fetchPublicPositionOptions() async {
+    final list = await _get('/api/position-options') as List;
+    return list
+        .map((e) => PositionOption.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<PositionOption> createPositionOption(String label) async =>
       PositionOption.fromJson(
         await _post('/api/admin/position-options', {'label': label})
@@ -691,7 +705,8 @@ class ApiClient {
   /// 직책 "기본값" 지정/해제(토글) — 이미 기본값이면 해제, 아니면 기존 기본값을 내리고
   /// 이 항목을 새 기본값으로 올린다.
   Future<List<PositionOption>> toggleDefaultPositionOption(String id) async {
-    final list = await _post('/api/admin/position-options/$id/default', {}) as List;
+    final list =
+        await _post('/api/admin/position-options/$id/default', {}) as List;
     return list
         .map((e) => PositionOption.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -796,11 +811,13 @@ class ApiClient {
   Future<TeamInviteLink> createTeamInviteLink({
     required String teamId,
     required AccountRole assignedRole,
+    String? assignedPosition,
     String? label,
   }) async => TeamInviteLink.fromJson(
     await _post('/api/team-invite-links', {
           'teamId': teamId,
           'assignedRole': assignedRole.wire,
+          'assignedPosition': ?assignedPosition,
           'label': ?label,
         })
         as Map<String, dynamic>,

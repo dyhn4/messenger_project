@@ -5,6 +5,7 @@ import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
 import { findTeamMember, listTeamIdsForUser, listTeamsForUser } from './db/queries/teams.js';
+import { listPositionOptions } from './db/queries/positionOptions.js';
 import { isOnline } from './presence.js';
 import { accountRole, canCreateTeamInviteLink } from './permissions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
@@ -90,13 +91,31 @@ export function createUsersRouter(io) {
   const router = Router();
 
   /**
-   * 방 멤버 선택(그룹/DM 생성)·멤버 패널에 쓸 전체 가입자 목록. 탈퇴한 사용자는 로그인도
-   * 못 하고 새로 대화를 걸 수도 없으니 여기서 뺀다 — 다만 예전에 같이 있던 방의 멤버
-   * 목록/과거 메시지 작성자 표시(publicUser 자체)에서는 계속 "탈퇴한 사용자"로 보여야
+   * 방 멤버 선택(그룹/DM 생성)·멤버 패널·조직도에 쓸 전체 가입자 목록. 탈퇴한 사용자는
+   * 로그인도 못 하고 새로 대화를 걸 수도 없으니 여기서 뺀다 — 다만 예전에 같이 있던 방의
+   * 멤버 목록/과거 메시지 작성자 표시(publicUser 자체)에서는 계속 "탈퇴한 사용자"로 보여야
    * 하므로 그쪽(rooms.js의 listRoomMemberUsers 등)은 건드리지 않는다.
+   *
+   * 직책(position)은 이 목록이 "특정 팀 안"이 아니라 서버 전체를 훑는 목록이라, 팀마다 다를
+   * 수 있는 값(orgScope='team')은 하나로 못 정해서 뺀다 — 계정 단위로 관리하는 서버
+   * (orgScope='account')일 때만, 사람마다 값이 하나뿐이니 그대로 실어준다(조직도 "멤버" 탭이
+   * 이 값을 쓴다).
    */
   router.get('/users', async (req, res) => {
-    res.json((await listActiveUsers()).map(publicUser));
+    const settings = await getServerSettings();
+    const users = await listActiveUsers();
+    res.json(
+      users.map((u) => ({
+        ...publicUser(u),
+        position: settings.orgScope === 'account' ? (u.position ?? null) : null,
+      })),
+    );
+  });
+
+  /** 직책 목록(서열순) — 관리자 콘솔의 '직책 목록' 관리(admin.js)와 달리 서버 운영자가
+   * 아니어도 누구나 읽을 수 있다. "팀 초대 링크 만들기"가 "부여할 직책"을 고르는 데 쓴다. */
+  router.get('/position-options', async (req, res) => {
+    res.json(await listPositionOptions());
   });
 
   /**
@@ -139,6 +158,22 @@ export function createUsersRouter(io) {
       }),
       ...orgInfo,
     });
+  });
+
+  /**
+   * 현재 비밀번호가 맞는지만 확인한다(다른 부수효과 없음) — "이메일 변경" 흐름이 1단계
+   * (비밀번호 확인)와 2단계(새 이메일 입력)로 나뉘어 있어서, 1단계에서 바로 맞고 틀림을
+   * 알려주는 데 쓴다. 실제 이메일 변경은 여전히 PATCH /users/me가 currentPassword를 같이
+   * 받아 한 번 더 검증한다(이 확인은 UX용이지 그 자체로 인증서가 되는 건 아니다).
+   */
+  router.post('/users/me/verify-password', async (req, res) => {
+    const user = await findUserById(req.user.sub);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    const { password } = req.body ?? {};
+    if (!password || !(await bcrypt.compare(password, user.passwordHash))) {
+      return res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' });
+    }
+    res.json({ ok: true });
   });
 
   /**

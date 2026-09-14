@@ -125,14 +125,20 @@ export const topicCreators = pgTable(
 );
 
 /**
- * 서버 운영자가 관리하는 "직책 목록" — orgScope가 'account'(계정 단위)일 때, 관리자 콘솔
- * "회원" 탭에서 직책을 자유 입력 대신 이 목록 중 하나로 고르게 한다(오탈자/표기 불일치 방지).
- * orgScope가 'team'(기본값)이면 이 목록과 무관하게 팀 설정에서 지금처럼 자유 입력한다.
+ * 서버 운영자가 관리하는 "직책 목록" — 관리자 콘솔 "회원" 탭, 팀 설정의 "직책 수정", 프로필
+ * 카드의 직책 수정, "팀 초대 링크"의 "부여할 직책"이 전부 이 목록에서 고르게 한다(자유 입력
+ * 대신, 오탈자/표기 불일치 방지). orgScope(팀/계정 단위)와 무관하게 항상 이 목록을 쓴다 —
+ * orgScope는 고른 값을 어디(users vs team_members)에 저장할지만 가른다.
  */
 export const positionOptions = pgTable('position_options', {
   id: uuid('id').primaryKey().defaultRandom(),
   label: text('label').notNull().unique(),
-  // 서열(작을수록 위/왼쪽) — 관리자 콘솔에서 직책을 클릭해 좌우로 옮기면 이웃과 값을 맞바꾼다.
+  // 서열 — **작을수록 서열이 낮다**(기본 목록이 사원(0)→대표(7) 순으로 들어있는 것과 같은
+  // 방향). 관리자 콘솔에서 직책을 클릭해 좌우로 옮기면 이웃과 값을 맞바꿔 이 순서를 조정한다.
+  // 관리자 콘솔의 "직책 수정"(서버 운영자 전용)만 빼고, 나머지 모든 직책 부여 화면(팀 설정의
+  // 직책 수정, 프로필 카드, 팀 초대 링크)은 "자신의 직책과 같거나 이 값이 더 작은(=서열이
+  // 같거나 낮은) 직책만" 남에게 줄 수 있다 — 등급의 "자신보다 높은 등급 부여 불가"와 같은
+  // 권한 상승 방지 규칙이다(server/src/teams.js, server/src/teamInvites.js).
   sortOrder: integer('sort_order').notNull().default(0),
   // 한 번에 하나만 true — 회원가입 시 이 직책이 자동으로 부여된다(auth.js).
   isDefault: boolean('is_default').notNull().default(false),
@@ -237,6 +243,9 @@ export const teamInviteLinks = pgTable(
     token: text('token').notNull().unique(),
     teamId: uuid('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
     assignedRole: text('assigned_role').notNull().default('member'),
+    // 직책 목록(position_options)의 label 중 하나(선택 사항) — 가입과 동시에 이 직책도
+    // 부여한다. 만든 사람의 직책보다 서열이 높은 값은 서버가 거부한다(teamInvites.js).
+    assignedPosition: text('assigned_position'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdByName: text('created_by_name').notNull(),
     label: text('label'),

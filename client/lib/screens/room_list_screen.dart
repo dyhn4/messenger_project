@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show showLeaveRoomDialog;
@@ -40,6 +42,26 @@ class _RoomListScreenState extends State<RoomListScreen> {
   /// 넓은 화면에서 좁은 화면으로 막 넘어오면서 곧바로 다시 열어줘야 하는 방(있다면).
   /// initState에서 곧장 push하지 않고 여기 담아두는 이유는 아래 build() 참고.
   Room? _pendingReopenRoom;
+
+  /// "한 번 더 누르면 앱이 종료됩니다" 안내를 띄운 시각. 이 화면(하단 탭 목록)이 이
+  /// 좁은 화면 Navigator의 첫 라우트라 뒤로가기를 누르면 바로 앱이 꺼져버리는데, 그러면
+  /// 실수로 홈 화면을 나가버리기 쉬우므로 두 번 눌러야 종료되게 한다.
+  DateTime? _lastBackPressAt;
+
+  void _handleBackPress() {
+    final now = DateTime.now();
+    final last = _lastBackPressAt;
+    if (last != null && now.difference(last) <= const Duration(seconds: 3)) {
+      SystemNavigator.pop();
+      return;
+    }
+    _lastBackPressAt = now;
+    showAppToast(
+      context,
+      '한 번 더 누르면 앱이 종료됩니다',
+      duration: const Duration(seconds: 3),
+    );
+  }
 
   @override
   void initState() {
@@ -88,78 +110,89 @@ class _RoomListScreenState extends State<RoomListScreen> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       );
     }
-    return Scaffold(
-      // 어느 탭인지는 아래 NavigationBar가 이미 보여주므로, 좁은 화면에서도 창 왼쪽 위는
-      // PC와 똑같이 지금 보고 있는 팀(아이콘+이름+전환 버튼) 자리로 쓴다.
-      appBar: AppBar(title: TeamSwitcher(session: widget.session)),
-      body: IndexedStack(
-        index: _index,
-        children: [
-          _RoomTypeTab(
-            session: widget.session,
-            type: RoomType.topic,
-            emptyText: '토픽방이 없습니다.',
-            onOpenRoom: _openRoom,
-          ),
-          _RoomTypeTab(
-            session: widget.session,
-            type: RoomType.group,
-            emptyText: '그룹채팅이 없습니다.',
-            onOpenRoom: _openRoom,
-            showActivityTime: true,
-          ),
-          _RoomTypeTab(
-            session: widget.session,
-            type: RoomType.dm,
-            emptyText: '대화가 없습니다.',
-            onOpenRoom: _openRoom,
-            showActivityTime: true,
-          ),
-          _MembersTab(session: widget.session, onOpenRoom: _openRoom),
-          _MoreTab(session: widget.session),
-        ],
-      ),
-      // 준회원은 방을 만들거나 토픽을 찾아 참여할 수 없으므로 + 버튼 자체를 감춘다
-      // (서버도 막지만, 눌러봐야 실패하는 버튼을 보여주지 않는다).
-      floatingActionButton: !widget.session.canCreateRooms
-          ? null
-          : switch (_index) {
-              0 => FloatingActionButton(
-                tooltip: '토픽방 찾기 / 만들기',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TopicBrowseScreen(session: widget.session),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBackPress();
+      },
+      child: Scaffold(
+        // 어느 탭인지는 아래 NavigationBar가 이미 보여주므로, 좁은 화면에서도 창 왼쪽 위는
+        // PC와 똑같이 지금 보고 있는 팀(아이콘+이름+전환 버튼) 자리로 쓴다.
+        appBar: AppBar(title: TeamSwitcher(session: widget.session)),
+        body: IndexedStack(
+          index: _index,
+          children: [
+            _RoomTypeTab(
+              session: widget.session,
+              type: RoomType.topic,
+              emptyText: '토픽방이 없습니다.',
+              onOpenRoom: _openRoom,
+            ),
+            _RoomTypeTab(
+              session: widget.session,
+              type: RoomType.group,
+              emptyText: '그룹채팅이 없습니다.',
+              onOpenRoom: _openRoom,
+              showActivityTime: true,
+            ),
+            _RoomTypeTab(
+              session: widget.session,
+              type: RoomType.dm,
+              emptyText: '대화가 없습니다.',
+              onOpenRoom: _openRoom,
+              showActivityTime: true,
+            ),
+            _MembersTab(session: widget.session, onOpenRoom: _openRoom),
+            _MoreTab(session: widget.session),
+          ],
+        ),
+        // 준회원은 방을 만들거나 토픽을 찾아 참여할 수 없으므로 + 버튼 자체를 감춘다
+        // (서버도 막지만, 눌러봐야 실패하는 버튼을 보여주지 않는다).
+        floatingActionButton: !widget.session.canCreateRooms
+            ? null
+            : switch (_index) {
+                0 => FloatingActionButton(
+                  tooltip: '토픽방 찾기 / 만들기',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          TopicBrowseScreen(session: widget.session),
+                    ),
                   ),
+                  child: const Icon(Icons.add),
                 ),
-                child: const Icon(Icons.add),
-              ),
-              1 || 2 => FloatingActionButton(
-                tooltip: '새 대화',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => NewChatScreen(session: widget.session),
+                1 || 2 => FloatingActionButton(
+                  tooltip: '새 대화',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => NewChatScreen(session: widget.session),
+                    ),
                   ),
+                  child: const Icon(Icons.add),
                 ),
-                child: const Icon(Icons.add),
-              ),
-              _ => null,
-            },
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.tag), label: '토픽'),
-          NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
-            label: '그룹채팅',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: '채팅',
-          ),
-          NavigationDestination(icon: Icon(Icons.people_outline), label: '멤버'),
-          NavigationDestination(icon: Icon(Icons.more_horiz), label: '더보기'),
-        ],
+                _ => null,
+              },
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) => setState(() => _index = i),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.tag), label: '토픽'),
+            NavigationDestination(
+              icon: Icon(Icons.groups_outlined),
+              label: '그룹채팅',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.chat_bubble_outline),
+              label: '채팅',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.people_outline),
+              label: '멤버',
+            ),
+            NavigationDestination(icon: Icon(Icons.more_horiz), label: '더보기'),
+          ],
+        ),
       ),
     );
   }

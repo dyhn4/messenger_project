@@ -165,13 +165,14 @@ class Team {
   /// 이 팀에서 새 토픽을 만들 수 있는지 — 계정 등급·소유자 여부와 팀 설정
   /// (topicCreationPolicy)을 함께 본다(서버 permissions.js의 canCreateTopic과 같은 규칙).
   /// [userId]는 topicCreationPolicy가 designated일 때만 쓴다(그 외엔 안 넘겨도 된다).
-  bool canCreateTopic(AccountRole role, [String? userId]) => switch (topicCreationPolicy) {
-    TopicCreationPolicy.owner => isOwner,
-    TopicCreationPolicy.admin => canManage(role),
-    TopicCreationPolicy.designated =>
-      userId != null && topicCreatorIds.contains(userId),
-    TopicCreationPolicy.member => role.canCreateRooms,
-  };
+  bool canCreateTopic(AccountRole role, [String? userId]) =>
+      switch (topicCreationPolicy) {
+        TopicCreationPolicy.owner => isOwner,
+        TopicCreationPolicy.admin => canManage(role),
+        TopicCreationPolicy.designated =>
+          userId != null && topicCreatorIds.contains(userId),
+        TopicCreationPolicy.member => role.canCreateRooms,
+      };
 }
 
 /// 조직도 화면의 "팀" 탭용 — GET /api/org-chart/teams. 일반 [Team]과 달리 내가 속하지 않은
@@ -185,12 +186,17 @@ class OrgChartTeam {
   final String? iconColor;
   final List<String> memberIds;
 
+  /// 이 팀의 소유자 id — 조직도 "멤버" 탭이 등급 배지 옆에 "소유자" 표시를 붙일지 판단하는
+  /// 데 쓴다(server/src/teams.js의 GET /org-chart/teams가 채워준다).
+  final String? ownerId;
+
   const OrgChartTeam({
     required this.id,
     required this.name,
     this.iconEmoji,
     this.iconColor,
     required this.memberIds,
+    this.ownerId,
   });
 
   factory OrgChartTeam.fromJson(Map<String, dynamic> json) => OrgChartTeam(
@@ -199,6 +205,7 @@ class OrgChartTeam {
     iconEmoji: json['iconEmoji'] as String?,
     iconColor: json['iconColor'] as String?,
     memberIds: (json['memberIds'] as List?)?.cast<String>() ?? const [],
+    ownerId: json['ownerId'] as String?,
   );
 
   /// [TeamAvatar]는 [Team]을 받으므로, 아이콘만 그리는 용도의 자리표시자 팀을 만들어 준다.

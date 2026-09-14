@@ -20,21 +20,22 @@ class MemberProfileDialog extends StatefulWidget {
   final bool fromOrgChart;
 
   /// 평문 DM은 나와 상대가 "함께" 속한 팀이어야 한다(상대가 그 팀 멤버가 아니면 서버가
-  /// 막는다) — 조직도 화면이 미리 계산해서 넘긴다. 그런 팀이 없으면 null(1:1 메시지 버튼을
-  /// 감추고 이유를 보여준다).
-  final String? orgChartDmTeamId;
+  /// 막는다) — 조직도 화면이 미리 계산해서 넘긴다. 후보가 여러 개면(같이 속한 팀이 두 개
+  /// 이상) 어느 팀으로 시작할지 팝업으로 물어보고, 하나뿐이면 바로 그 팀으로, 없으면(빈
+  /// 목록) 1:1 메시지 버튼을 감추고 이유를 보여준다.
+  final List<OrgChartTeam> orgChartDmTeamCandidates;
 
   /// 비밀 대화는 내가 속한 팀이 하나만 있으면 된다 — 평문 DM과 달리 상대가 그 팀 소속일
-  /// 필요는 없다(server/src/secretChats.js). 내가 속한 팀이 하나도 없으면 null.
-  final String? orgChartSecretTeamId;
+  /// 필요는 없다(server/src/secretChats.js). 마찬가지로 후보가 여러 개면 팝업으로 물어본다.
+  final List<OrgChartTeam> orgChartSecretTeamCandidates;
 
   const MemberProfileDialog({
     super.key,
     required this.session,
     required this.user,
     this.fromOrgChart = false,
-    this.orgChartDmTeamId,
-    this.orgChartSecretTeamId,
+    this.orgChartDmTeamCandidates = const [],
+    this.orgChartSecretTeamCandidates = const [],
   });
 
   @override
@@ -81,15 +82,14 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   }
 
   Future<void> _editOrg() async {
-    final result = await showOrgEditDialog(context, _user);
+    final position = await showOrgEditDialog(context, widget.session, _user);
     final team = widget.session.currentTeam;
-    if (result == null || team == null || !mounted) return;
+    if (position == null || team == null || !mounted) return;
     try {
       final members = await widget.session.updateTeamMember(
         team,
         _user.id,
-        department: result.department,
-        position: result.position,
+        position: position,
       );
       final match = members.where((u) => u.id == _user.id);
       if (match.isNotEmpty && mounted) setState(() => _user = match.first);
@@ -102,14 +102,88 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
     }
   }
 
+  /// [candidates]가 여러 개면 어느 팀으로 시작할지 팝업으로 물어본다(하나뿐이면 바로 그
+  /// 팀, 취소하면 null). 조직도가 아닌 곳(fromOrgChart=false)에서는 애초에 후보 목록이
+  /// 비어 있으므로 항상 null(호출부가 지금 보고 있는 팀을 그대로 쓴다).
+  Future<String?> _resolveTeamId(
+    List<OrgChartTeam> candidates, {
+    required String title,
+  }) async {
+    if (candidates.isEmpty) return null;
+    if (candidates.length == 1) return candidates.first.id;
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(title),
+        children: [
+          for (final team in candidates)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(dialogContext).pop(team.id),
+              child: Text(team.name),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 이 팀들이면 상대와 공통 팀이 없어도 "팀원 추가"로 그 팀에 상대를 새로 넣고 그 팀에서
+  /// 1:1 메시지를 시작할 수 있다 — 내가 소유자이거나 관리자인 내 팀들.
+  List<Team> get _manageableTeamsForAdd =>
+      widget.session.teams.where(widget.session.canManageTeam).toList();
+
+  /// DM 시작에 쓸 팀 id를 정한다. fromOrgChart가 아니면 항상 null(호출부가 지금 보고 있는
+  /// 팀을 그대로 씀). 조직도에서는: 공통 팀이 하나면 바로 그 팀, 여러 개면 고르는 팝업,
+  /// 하나도 없으면(무소속이거나 나와 겹치는 팀이 없는 회원) 내가 관리할 수 있는 팀이 있는
+  /// 경우에 한해 "팀원 추가" 버튼으로 그 팀에 상대를 새로 넣고 그 팀 id를 돌려준다.
+  /// null을 돌려주면서 fromOrgChart가 true면 "팝업을 취소했다"는 뜻 — 호출부가 조용히 멈춘다.
+  Future<String?> _resolveDmTeamId() async {
+    if (!widget.fromOrgChart) return null;
+    final candidates = widget.orgChartDmTeamCandidates;
+    if (candidates.length == 1) return candidates.first.id;
+    if (candidates.length > 1) {
+      return showDialog<String>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: const Text('어느 팀으로 1:1 메시지를 시작할까요?'),
+          children: [
+            for (final team in candidates)
+              SimpleDialogOption(
+                onPressed: () => Navigator.of(dialogContext).pop(team.id),
+                child: Text(team.name),
+              ),
+          ],
+        ),
+      );
+    }
+
+    final team = await showDialog<Team>(
+      context: context,
+      builder: (_) => _AddThenDmDialog(manageableTeams: _manageableTeamsForAdd),
+    );
+    if (team == null || !mounted) return null;
+    try {
+      await widget.session.addTeamMembers(team, [widget.user.id]);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('팀원 추가 실패: $e')));
+      }
+      return null;
+    }
+    return team.id;
+  }
+
   Future<void> _startDm() async {
+    final teamId = await _resolveDmTeamId();
+    // fromOrgChart인데(팝업이 실제로 떴는데) 취소를 누른 경우만 조용히 멈춘다 — 후보가
+    // 애초에 비어 있는(fromOrgChart=false) 경우는 null이 정상이라 계속 진행해야 한다.
+    if (widget.fromOrgChart && teamId == null) return;
+    if (!mounted) return;
     setState(() => _starting = true);
     try {
-      final room = widget.orgChartDmTeamId != null
-          ? await widget.session.startDmInTeam(
-              widget.orgChartDmTeamId!,
-              widget.user.id,
-            )
+      final room = teamId != null
+          ? await widget.session.startDmInTeam(teamId, widget.user.id)
           : await widget.session.startDm(widget.user.id);
       if (!mounted) return;
       Navigator.of(context).pop(room);
@@ -125,13 +199,18 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   /// 비밀 대화는 일반 DM과 완전히 다른 방(별도 dmKey)으로 취급한다 — 텔레그램의 실제 동작처럼,
   /// 같은 상대와의 평범한 대화와 비밀 대화가 서로 다른 채팅방 목록 항목으로 공존한다.
   Future<void> _startSecretChat() async {
+    final teamId = await _resolveTeamId(
+      widget.orgChartSecretTeamCandidates,
+      title: '어느 팀으로 비밀 대화를 시작할까요?',
+    );
+    if (widget.orgChartSecretTeamCandidates.length > 1 && teamId == null) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => _startingSecret = true);
     try {
-      final room = widget.orgChartSecretTeamId != null
-          ? await widget.session.startSecretChatInTeam(
-              widget.orgChartSecretTeamId!,
-              widget.user.id,
-            )
+      final room = teamId != null
+          ? await widget.session.startSecretChatInTeam(teamId, widget.user.id)
           : await widget.session.startSecretChat(widget.user.id);
       if (!mounted) return;
       Navigator.of(context).pop(room);
@@ -151,11 +230,17 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
     final canStartChat = widget.session.canCreateRooms;
     // 조직도에서 열었을 때만 팀 조건이 걸린다 — DM은 나와 상대가 함께 속한 팀이 있어야 하고,
     // 비밀 대화는 내가 속한 팀이 하나만 있으면 된다(둘 다 방이라 NOT NULL인 team_id가 필요).
+    // 공통 팀이 없어도(무소속이거나 나와 겹치는 팀이 없는 회원) 내가 팀원을 추가할 수 있는
+    // 팀이 하나라도 있으면 "팀원 추가"로 시작할 수 있으니 버튼을 계속 보여준다.
     final canStartDm =
-        canStartChat && (!widget.fromOrgChart || widget.orgChartDmTeamId != null);
+        canStartChat &&
+        (!widget.fromOrgChart ||
+            widget.orgChartDmTeamCandidates.isNotEmpty ||
+            _manageableTeamsForAdd.isNotEmpty);
     final canStartSecret =
         canStartChat &&
-        (!widget.fromOrgChart || widget.orgChartSecretTeamId != null);
+        (!widget.fromOrgChart ||
+            widget.orgChartSecretTeamCandidates.isNotEmpty);
     final role = user.role == null ? null : accountRoleFromWire(user.role);
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -278,6 +363,61 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
   }
 }
 
+/// 조직도에서 상대와 함께 속한 팀이 없을 때(무소속이거나 나와 겹치는 팀이 없는 회원) 뜬다 —
+/// 처음엔 그 사실과 "팀원 추가" 버튼만 보여주고, 버튼을 누르면 내가 관리할 수 있는(소유자·
+/// 관리자) 팀 목록으로 화면이 바뀐다. 고른 팀을 그대로 pop해서 돌려주고, 실제로 그 팀에
+/// 상대를 추가하는 일은 호출부(_resolveDmTeamId)가 한다.
+class _AddThenDmDialog extends StatefulWidget {
+  final List<Team> manageableTeams;
+  const _AddThenDmDialog({required this.manageableTeams});
+
+  @override
+  State<_AddThenDmDialog> createState() => _AddThenDmDialogState();
+}
+
+class _AddThenDmDialogState extends State<_AddThenDmDialog> {
+  bool _pickingTeam = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_pickingTeam) {
+      return SimpleDialog(
+        title: const Text('어느 팀에 추가할까요?'),
+        children: [
+          for (final team in widget.manageableTeams)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(team),
+              child: Text(team.name),
+            ),
+        ],
+      );
+    }
+    return SimpleDialog(
+      title: const Text('어느 팀으로 1:1 메시지를 시작할까요?'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Text(
+            '함께 속한 팀이 없습니다.',
+            style: TextStyle(color: Theme.of(context).hintColor),
+          ),
+        ),
+        const Divider(height: 16),
+        SimpleDialogOption(
+          onPressed: () => setState(() => _pickingTeam = true),
+          child: const Row(
+            children: [
+              Icon(Icons.person_add_alt_1, size: 18),
+              SizedBox(width: 8),
+              Text('팀원 추가'),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// 프로필 카드의 "팀"/"직책" 칸. "팀"은 이 사람이 실제로 속한 팀 이름들(노출 범위는 서버가
 /// 정한다 — GET /users/:id/teams), "직책"은 기존 부서/직책 필드의 직책 값이다. 소유자·관리자
 /// 에게만 직책 수정용 연필 버튼이 보인다(팀 소속은 이 카드에서 바꿀 수 없다).
@@ -335,9 +475,7 @@ class _OrgSection extends StatelessWidget {
                     ).textTheme.labelSmall?.copyWith(color: hint),
                   ),
                   Text(
-                    position?.isNotEmpty == true
-                        ? position!
-                        : '아직 등록되지 않았습니다',
+                    position?.isNotEmpty == true ? position! : '아직 등록되지 않았습니다',
                     style: position?.isNotEmpty == true
                         ? const TextStyle(fontWeight: FontWeight.w500)
                         : TextStyle(color: hint),

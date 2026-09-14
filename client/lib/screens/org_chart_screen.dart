@@ -3,11 +3,16 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../models/team.dart';
+import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/role_badge.dart';
+import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/user_avatar.dart';
+import 'chat_screen.dart';
+import 'home_screen.dart' show wideBreakpoint;
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
 
@@ -42,10 +47,18 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
   String? _expandedId;
   static const _unassignedId = '__unassigned__';
 
+  /// "멤버" 탭 정렬 — "팀" 탭(팀별로 묶인 목록)에는 적용하지 않는다.
+  MemberSortField _sortField = MemberSortField.name;
+  bool _sortAscending = true;
+  List<PositionOption>? _positionOptions;
+
   @override
   void initState() {
     super.initState();
     _load();
+    widget.session.fetchPublicPositionOptions().then((list) {
+      if (mounted) setState(() => _positionOptions = list);
+    });
   }
 
   @override
@@ -88,25 +101,39 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
       return;
     }
     // 평문 DM은 나와 상대가 "함께" 속한 팀이 있어야 만들 수 있고, 비밀 대화는 내가 속한
-    // 팀만 있으면 된다 — 조직도는 currentTeam이 없을 수도 있어서(팀 목록 화면) 미리 둘 다
-    // 계산해서 프로필 카드에 넘긴다.
+    // 팀만 있으면 된다 — 조직도는 currentTeam이 없을 수도 있어서(팀 목록 화면) 후보 목록을
+    // 미리 계산해서 프로필 카드에 넘긴다(여러 개면 그 카드가 팝업으로 골라준다).
     final teams = _teams ?? const <OrgChartTeam>[];
     final myId = widget.session.userId;
     final myTeams = myId == null
         ? const <OrgChartTeam>[]
         : teams.where((t) => t.memberIds.contains(myId)).toList();
-    final shared = myTeams.where((t) => t.memberIds.contains(user.id));
+    final shared = myTeams.where((t) => t.memberIds.contains(user.id)).toList();
     final room = await showDialog<Room>(
       context: context,
       builder: (_) => MemberProfileDialog(
         session: widget.session,
         user: user,
         fromOrgChart: true,
-        orgChartDmTeamId: shared.isEmpty ? null : shared.first.id,
-        orgChartSecretTeamId: myTeams.isEmpty ? null : myTeams.first.id,
+        orgChartDmTeamCandidates: shared,
+        orgChartSecretTeamCandidates: myTeams,
       ),
     );
-    if (room != null && mounted) Navigator.of(context).pop();
+    if (room == null || !mounted) return;
+    // session.startDmInTeam/startSecretChatInTeam이 이미 그 팀으로 전환하고(requestOpenRoom)
+    // "펼쳐서 보여줄 방"까지 정해뒀지만, 그걸 실제로 화면에 띄우는 건 넓은 화면(DesktopHomeScreen)
+    // 쪽 코드뿐이다 — 좁은 화면(RoomListScreen)은 방 목록만 보여줄 뿐 새로 생긴 방을 알아서
+    // 열어주지 않는다(HomeScreen의 비밀 대화 수락 처리와 같은 이유·같은 처리 방식).
+    final isWide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
+    final navigator = Navigator.of(context);
+    navigator.pop(); // 조직도 다이얼로그 닫기
+    if (!isWide) {
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(session: widget.session, room: room),
+        ),
+      );
+    }
   }
 
   @override
@@ -121,7 +148,10 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
         children: [
           TabBar(
             controller: _tabController,
-            tabs: const [Tab(text: '팀'), Tab(text: '멤버')],
+            tabs: const [
+              Tab(text: '팀'),
+              Tab(text: '멤버'),
+            ],
           ),
           const SizedBox(height: 12),
           TextField(
@@ -141,7 +171,10 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
                 ? const Center(child: CircularProgressIndicator())
                 : TabBarView(
                     controller: _tabController,
-                    children: [_buildTeamsTab(context), _buildMembersTab(context)],
+                    children: [
+                      _buildTeamsTab(context),
+                      _buildMembersTab(context),
+                    ],
                   ),
           ),
         ],
@@ -152,7 +185,9 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
   Widget _buildTeamsTab(BuildContext context) {
     final filter = _filter.trim().toLowerCase();
     final assignedIds = <String>{for (final t in _teams!) ...t.memberIds};
-    final unassigned = _users!.where((u) => !assignedIds.contains(u.id)).toList();
+    final unassigned = _users!
+        .where((u) => !assignedIds.contains(u.id))
+        .toList();
 
     final teamRows = _teams!
         .where((t) => filter.isEmpty || t.name.toLowerCase().contains(filter))
@@ -188,7 +223,9 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
               title: '미소속',
               avatar: CircleAvatar(
                 radius: 18,
-                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
                 child: Icon(
                   Icons.person_off_outlined,
                   size: 18,
@@ -198,8 +235,9 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
               memberCount: unassigned.length,
               expanded: _expandedId == _unassignedId,
               onToggle: () => setState(
-                () => _expandedId =
-                    _expandedId == _unassignedId ? null : _unassignedId,
+                () => _expandedId = _expandedId == _unassignedId
+                    ? null
+                    : _unassignedId,
               ),
               members: unassigned,
               session: widget.session,
@@ -210,25 +248,77 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
     );
   }
 
+  /// 직책 목록에서의 서열 — 목록은 이미 서열순(작을수록 낮음)으로 오므로 그 안에서의
+  /// 위치(index)가 곧 서열이다. 목록에 없거나(미등록·계정 단위가 아닌 서버) 아직 안
+  /// 불러왔으면 맨 뒤로 보낸다.
+  int _positionRank(String? label) {
+    if (label == null || label.isEmpty) return 1 << 30;
+    final index = _positionOptions?.indexWhere((o) => o.label == label) ?? -1;
+    return index == -1 ? 1 << 30 : index;
+  }
+
+  List<AppUser> _sortedMembers(List<AppUser> list) {
+    final members = List<AppUser>.of(list);
+    final cmp = switch (_sortField) {
+      MemberSortField.name => (AppUser a, AppUser b) => a.name.compareTo(
+        b.name,
+      ),
+      MemberSortField.role => (AppUser a, AppUser b) => accountRoleFromWire(
+        a.role,
+      ).rank.compareTo(accountRoleFromWire(b.role).rank),
+      MemberSortField.position => (AppUser a, AppUser b) => _positionRank(
+        a.position,
+      ).compareTo(_positionRank(b.position)),
+      // "멤버" 탭에는 팀 칼럼이 없어서 SortMenuButton.fields에 아예 안 넣는다 — 도달 안 함.
+      MemberSortField.team => (AppUser a, AppUser b) => 0,
+    };
+    members.sort(_sortAscending ? cmp : (a, b) => cmp(b, a));
+    return members;
+  }
+
   Widget _buildMembersTab(BuildContext context) {
     final filter = _filter.trim().toLowerCase();
-    final list = _users!
+    final filtered = _users!
         .where((u) => filter.isEmpty || u.name.toLowerCase().contains(filter))
         .toList();
-    if (list.isEmpty) {
+    if (filtered.isEmpty) {
       return const Center(child: Text('검색 결과가 없습니다.'));
     }
-    return MutedScrollbar(
-      child: ListView.separated(
-        itemCount: list.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, i) => _OrgMemberRow(
-          user: list[i],
-          resolveUrl: widget.session.resolveUrl,
-          online: widget.session.onlineUserIds.contains(list[i].id),
-          onTap: () => _openMember(list[i]),
+    final list = _sortedMembers(filtered);
+    // 한 사람이 여러 팀의 소유자일 수 있지만, 이 목록은 팀별로 나뉘지 않은 전체 멤버
+    // 목록이라 "적어도 한 팀의 소유자인지"만 배지로 보여준다.
+    final ownerIds = <String>{
+      for (final t in _teams!)
+        if (t.ownerId != null) t.ownerId!,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _OrgMembersTableHead(
+          sortField: _sortField,
+          sortAscending: _sortAscending,
+          onSortChanged: (field, ascending) => setState(() {
+            _sortField = field;
+            _sortAscending = ascending;
+          }),
         ),
-      ),
+        const Divider(height: 1),
+        Expanded(
+          child: MutedScrollbar(
+            child: ListView.separated(
+              itemCount: list.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) => _OrgMemberTableRow(
+                user: list[i],
+                resolveUrl: widget.session.resolveUrl,
+                online: widget.session.onlineUserIds.contains(list[i].id),
+                isOwner: ownerIds.contains(list[i].id),
+                onTap: () => _openMember(list[i]),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -277,9 +367,9 @@ class _TeamGroup extends StatelessWidget {
                 ),
                 Text(
                   '$memberCount명',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).hintColor,
+                  ),
                 ),
                 Icon(
                   expanded ? Icons.expand_less : Icons.expand_more,
@@ -356,11 +446,148 @@ class _OrgMemberRow extends StatelessWidget {
                   if (user.orgLine != null)
                     Text(
                       user.orgLine!,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).hintColor,
+                      ),
                     ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "멤버" 탭 목록 위 칼럼 제목 — 관리자 콘솔 "회원" 탭/팀 설정 "멤버" 탭과 같은 비율
+/// (이름 9 / 등급 5 / 직책 5)로 맞추고, 맨 오른쪽에 정렬 버튼을 둔다.
+class _OrgMembersTableHead extends StatelessWidget {
+  final MemberSortField sortField;
+  final bool sortAscending;
+  final void Function(MemberSortField field, bool ascending) onSortChanged;
+
+  const _OrgMembersTableHead({
+    required this.sortField,
+    required this.sortAscending,
+    required this.onSortChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelSmall?.copyWith(
+      color: Theme.of(context).hintColor,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.2,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      child: Row(
+        children: [
+          Expanded(flex: 9, child: Text('이름', style: style)),
+          const SizedBox(width: 16),
+          Expanded(flex: 5, child: Text('등급', style: style)),
+          const SizedBox(width: 16),
+          Expanded(flex: 5, child: Text('직책', style: style)),
+          SortMenuButton<MemberSortField>(
+            fields: const [
+              MemberSortField.name,
+              MemberSortField.role,
+              MemberSortField.position,
+            ],
+            labelOf: (f) => f.label,
+            selectedField: sortField,
+            ascending: sortAscending,
+            onChanged: onSortChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "멤버" 탭 한 줄: 아바타·이름 / 등급(+소유자) 뱃지 / 직책 — 관리자 콘솔 "회원" 탭·팀 설정
+/// "멤버" 탭과 같은 칼럼 구조(_OrgMemberRow와 달리 "팀" 탭 안에 중첩되지 않는 이 탭 전용).
+class _OrgMemberTableRow extends StatelessWidget {
+  final AppUser user;
+  final String Function(String relative) resolveUrl;
+  final bool online;
+  final bool isOwner;
+  final VoidCallback onTap;
+  const _OrgMemberTableRow({
+    required this.user,
+    required this.resolveUrl,
+    required this.online,
+    required this.isOwner,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final role = accountRoleFromWire(user.role);
+    final roleColors = roleBadgeColors(context, role.wire);
+    final ownerColors = roleBadgeColors(context, 'owner');
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              flex: 9,
+              child: Row(
+                children: [
+                  UserAvatar(
+                    user: user,
+                    resolveUrl: resolveUrl,
+                    radius: 18,
+                    online: online,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      user.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              flex: 5,
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  RoleBadge(
+                    label: role.label,
+                    bg: roleColors.bg,
+                    fg: roleColors.fg,
+                  ),
+                  if (isOwner)
+                    RoleBadge(
+                      label: '소유자',
+                      bg: ownerColors.bg,
+                      fg: ownerColors.fg,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              flex: 5,
+              child: Text(
+                user.position?.isNotEmpty == true ? user.position! : '미등록',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Theme.of(context).hintColor,
+                  fontStyle: user.position?.isNotEmpty == true
+                      ? FontStyle.normal
+                      : FontStyle.italic,
+                ),
               ),
             ),
           ],

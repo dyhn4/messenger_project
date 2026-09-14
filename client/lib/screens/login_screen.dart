@@ -4,6 +4,7 @@ import '../services/pinned_tls.dart';
 import '../services/security_questions.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
+import '../widgets/update_dialog.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
 
@@ -53,6 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _password.addListener(_refresh);
     _confirmPassword.addListener(_refresh);
     _maybeShowPairDialog();
+    _maybeShowUpdateBanner();
   }
 
   @override
@@ -62,6 +64,27 @@ class _LoginScreenState extends State<LoginScreen> {
     // 보고 있는 동안 초대 링크가 도착해도(또는 다시 눌러 이 창이 앞으로 온 경우도)
     // didUpdateWidget으로 매번 잡아낼 수 있다.
     _maybeShowPairDialog();
+    // session.init()이 서버 주소를 알자마자(로그인 전에도) 업데이트 확인을 비동기로 시작해서
+    // (_checkForUpdate), 로그인 화면을 보고 있는 동안 응답이 도착하는 경우가 흔하다 —
+    // HomeScreen과 같은 방식으로, 로그인하지 않고도 바로 업데이트 안내가 뜨게 한다.
+    _maybeShowUpdateBanner();
+  }
+
+  /// session.dart의 _checkForUpdate()가 새 버전을 찾으면 한 번만 대화상자를 띄운다
+  /// (home_screen.dart의 같은 이름 메서드와 동일한 목적 — 로그인 전 화면에도 필요하다).
+  /// "이미 띄웠는지"는 session에 두고 HomeScreen과 공유한다 — 로그인 전에 이미 봤으면
+  /// 로그인 직후 또 뜨지 않게.
+  void _maybeShowUpdateBanner() {
+    final version = widget.session.updateAvailableVersion;
+    if (version == null || widget.session.updateBannerShown) return;
+    widget.session.updateBannerShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (_) => UpdateDialog(session: widget.session, version: version),
+      );
+    });
   }
 
   /// 초대 링크로 받은 서버 주소/코드가 있으면 "서버 주소 변경" 다이얼로그를 그 값으로

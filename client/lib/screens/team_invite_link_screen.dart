@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/team.dart';
 import '../models/team_invite_link.dart';
+import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
@@ -92,6 +93,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
       final link = await widget.session.api!.createTeamInviteLink(
         teamId: result.teamId,
         assignedRole: result.assignedRole,
+        assignedPosition: result.assignedPosition,
         label: result.label.isEmpty ? null : result.label,
       );
       if (mounted) setState(() => _links = [link, ...?_links]);
@@ -251,7 +253,9 @@ class _TeamInviteLinkRow extends StatelessWidget {
         style: TextStyle(color: inactive ? hint : null),
       ),
       subtitle: Text(
-        '${link.teamName} · ${link.assignedRole.label} · ${link.statusLabel} · '
+        '${link.teamName} · ${link.assignedRole.label}'
+        '${link.assignedPosition != null ? ' · ${link.assignedPosition}' : ''}'
+        ' · ${link.statusLabel} · '
         '사용 ${link.usedCount}회 · ${formatDateTime(link.createdAt)} 생성',
         style: TextStyle(color: hint),
       ),
@@ -279,10 +283,12 @@ class _TeamInviteLinkRow extends StatelessWidget {
 class _CreateTeamInviteLinkResult {
   final String teamId;
   final AccountRole assignedRole;
+  final String? assignedPosition;
   final String label;
   const _CreateTeamInviteLinkResult({
     required this.teamId,
     required this.assignedRole,
+    this.assignedPosition,
     required this.label,
   });
 }
@@ -306,12 +312,36 @@ class _CreateTeamInviteLinkDialogState
     extends State<_CreateTeamInviteLinkDialog> {
   final _label = TextEditingController();
   late String _teamId =
-      widget.teams
-          .where((t) => t.id == widget.initialTeamId)
-          .firstOrNull
-          ?.id ??
+      widget.teams.where((t) => t.id == widget.initialTeamId).firstOrNull?.id ??
       widget.teams.first.id;
   AccountRole _assignedRole = AccountRole.member;
+
+  /// 직책 목록(서열순, position_options) — 로딩 전엔 null.
+  List<PositionOption>? _positionOptions;
+  String? _assignedPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.session.fetchPublicPositionOptions().then((list) {
+      if (mounted) setState(() => _positionOptions = list);
+    });
+  }
+
+  /// 내 직책과 같거나 그 아래만 남에게 부여할 수 있다 — 등급 제한(_canAssign)과 같은 이유의
+  /// 권한 상승 방지(server/src/teamInvites.js가 같은 규칙으로 다시 확인한다). 목록은 서열순인데
+  /// sortOrder가 **작을수록 서열이 낮다**(기본 목록이 사원(0)→대표(7) 순인 것과 같은 방향)
+  /// — 그래서 "내 직책 이하"는 목록 맨 앞부터 내 위치(index)까지다. 내 직책이 목록에
+  /// 없으면(직책 미등록 등) 아무것도 부여할 수 없다.
+  List<PositionOption> get _availablePositions {
+    final options = _positionOptions;
+    if (options == null) return const [];
+    final myIndex = options.indexWhere(
+      (o) => o.label == widget.session.myPosition,
+    );
+    if (myIndex == -1) return const [];
+    return options.sublist(0, myIndex + 1);
+  }
 
   /// 서버 운영자는 관리자 콘솔에서 이미 자유롭게 등급을 바꿀 수 있는 사람이라 이 제한에서
   /// 빼고, 그 외에는 자기 등급보다 높은 등급을 남에게 부여하지 못한다(server/src/teamInvites.js
@@ -369,6 +399,32 @@ class _CreateTeamInviteLinkDialogState
               onSelectionChanged: (s) =>
                   setState(() => _assignedRole = s.first),
             ),
+            if (_availablePositions.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                '부여할 직책 (선택)',
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('지정 안 함'),
+                    selected: _assignedPosition == null,
+                    onSelected: (_) => setState(() => _assignedPosition = null),
+                  ),
+                  for (final option in _availablePositions)
+                    ChoiceChip(
+                      label: Text(option.label),
+                      selected: _assignedPosition == option.label,
+                      onSelected: (_) =>
+                          setState(() => _assignedPosition = option.label),
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
             TextField(
               controller: _label,
@@ -392,6 +448,7 @@ class _CreateTeamInviteLinkDialogState
             _CreateTeamInviteLinkResult(
               teamId: _teamId,
               assignedRole: _assignedRole,
+              assignedPosition: _assignedPosition,
               label: _label.text.trim(),
             ),
           ),

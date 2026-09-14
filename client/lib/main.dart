@@ -18,6 +18,7 @@ import 'services/deep_link_service.dart';
 import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
+import 'widgets/update_banner.dart';
 
 /// 앱이 완전히 종료된 상태에서 FCM이 도착하면 별도의(=Session이 없는) 격리된 isolate에서
 /// 이 함수가 새로 불린다 — 로그인 상태/소켓 등 앱의 나머지 상태에 전혀 접근할 수 없어서,
@@ -45,9 +46,10 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       // 파일명을 안 주면 안드로이드 기본 preferences 파일(PreferenceManager)을 열어서
       // 레거시 SharedPreferences 플러그인이 쓰는 "FlutterSharedPreferences" 파일과
       // 전혀 다른 곳을 보게 된다 — 명시적으로 같은 파일명을 지정해야 한다.
-      originalSharedPreferencesOptions: const AndroidSharedPreferencesStoreOptions(
-        fileName: 'FlutterSharedPreferences',
-      ),
+      originalSharedPreferencesOptions:
+          const AndroidSharedPreferencesStoreOptions(
+            fileName: 'FlutterSharedPreferences',
+          ),
     ),
   );
   // 메인 엔진(Session._persistForegroundState)이 남겨둔 값 — 지금 그 방을 보고 있는
@@ -131,7 +133,9 @@ ThemeData _withOldHangulFallback(ThemeData theme) {
   const fallback = [_oldHangulFontFamily];
   return theme.copyWith(
     textTheme: theme.textTheme.apply(fontFamilyFallback: fallback),
-    primaryTextTheme: theme.primaryTextTheme.apply(fontFamilyFallback: fallback),
+    primaryTextTheme: theme.primaryTextTheme.apply(
+      fontFamilyFallback: fallback,
+    ),
   );
 }
 
@@ -304,6 +308,14 @@ class _MyAppState extends State<MyApp>
       // DesktopHomeScreen이 우측 패널만 바꾸도록 요청만 남긴다.
       session.requestOpenRoom(room);
     } else {
+      // 알림이 지금 보고 있는 팀과 다른 팀의 방일 수 있다(팀 선택 화면에 있을 때 온 알림
+      // 포함) — 채팅방을 push하기 전에 먼저 그 팀으로 전환해둬야, 채팅방에서 뒤로가기를
+      // 눌러 되돌아오는 첫 화면(HomeScreen)이 팀 선택 화면이나 엉뚱한 팀의 방 목록이 아니라
+      // 그 방이 속한 팀의 방 목록을 보여준다.
+      if (room.teamId != session.currentTeam?.id) {
+        final teamMatches = session.teams.where((t) => t.id == room.teamId);
+        if (teamMatches.isNotEmpty) session.enterTeam(teamMatches.first);
+      }
       // 알림을 여러 번 눌러서 채팅방 화면이 계속 쌓이지 않도록, 새로 열기 전에 항상
       // 첫 화면(메인)까지 되돌아간다 — 그래야 방 안에서 뒤로가기를 누르면 바로 메인이 나온다.
       navigatorKey.currentState?.popUntil((route) => route.isFirst);
@@ -361,6 +373,16 @@ class _MyAppState extends State<MyApp>
                 AuthStage.ready => HomeScreen(session: session),
               };
             },
+          ),
+          // 지금 보고 있는 화면이 채팅방이든 다이얼로그든 상관없이 앱 전체 위에 얹히도록,
+          // 각 화면이 아니라 MaterialApp 레벨(Navigator 트리 전체를 감싸는 자리)에서 한 번만
+          // 그린다 — UpdateDialog(로그인/홈 화면이 한 번 띄우는 모달)과 달리 계속 떠 있는
+          // 은근한 알림이라 여기 둬야 어느 화면에서도 안 사라진다.
+          builder: (context, child) => Stack(
+            children: [
+              ?child,
+              UpdateBanner(session: session),
+            ],
           ),
         );
       },

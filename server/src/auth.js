@@ -190,8 +190,13 @@ export function createAuthRouter(io) {
       const link = await findTeamInviteLinkByToken(teamInviteToken);
       if (isTeamInviteLinkValid(link)) {
         await addTeamMembers(link.teamId, [user.id], "member");
-        if (link.assignedRole !== user.role) {
-          await updateUser(user.id, { role: link.assignedRole });
+        const patch = {};
+        if (link.assignedRole !== user.role) patch.role = link.assignedRole;
+        // 직책 목록의 "기본값"(defaultPosition)보다 이 링크에 지정된 직책이 우선한다 —
+        // 링크를 만든 사람이 이 사람을 위해 콕 집어 고른 값이라 더 구체적이다.
+        if (link.assignedPosition) patch.position = link.assignedPosition;
+        if (Object.keys(patch).length > 0) {
+          await updateUser(user.id, patch);
         }
         await markTeamInviteLinkUsed(link.id);
         // 준회원으로 부여됐다면(assignedRole === 'guest') 공개 토픽 자동 가입 대상이

@@ -98,6 +98,10 @@ class Session extends ChangeNotifier {
 
   ApiClient? api;
   String? updateAvailableVersion; // 서버가 더 최신 버전을 갖고 있으면 그 버전 문자열(예: "1.0.1").
+  // 업데이트 안내 대화상자를 이미 한 번 띄웠는지 — 로그인 화면(LoginScreen)과 로그인 후
+  // 화면(HomeScreen) 둘 다 이 값을 확인/갱신해서, 로그인 전에 이미 봤으면 로그인 직후 같은
+  // 안내가 또 뜨지 않는다(둘 다 session.updateAvailableVersion이 채워지는 즉시 반응한다).
+  bool updateBannerShown = false;
   bool updateDownloading = false;
   // 0~1(다운로드 %). 서버가 Content-Length를 안 주면(드묾) null로 남아 있고, 호출부는
   // 이 경우 불확정(indeterminate) 진행 표시를 해야 한다.
@@ -699,10 +703,14 @@ class Session extends ChangeNotifier {
   /// 관리자 콘솔 "운영 현황"의 직책 목록 관리(서버 운영자 전용, 서버가 매번 다시 확인한다).
   Future<List<PositionOption>> fetchPositionOptions() =>
       api!.fetchPositionOptions();
+
+  /// 직책 목록(서열순, 서버 운영자가 아니어도 누구나 호출 가능) — "팀 초대 링크 만들기"의
+  /// "부여할 직책"이 쓴다.
+  Future<List<PositionOption>> fetchPublicPositionOptions() =>
+      api!.fetchPublicPositionOptions();
   Future<PositionOption> createPositionOption(String label) =>
       api!.createPositionOption(label);
-  Future<void> deletePositionOption(String id) =>
-      api!.deletePositionOption(id);
+  Future<void> deletePositionOption(String id) => api!.deletePositionOption(id);
   Future<List<PositionOption>> movePositionOption(
     String id,
     String direction,
@@ -1732,6 +1740,10 @@ class Session extends ChangeNotifier {
     notifyListeners();
     if (email != null) _showToast('이메일이 변경되었습니다.');
   }
+
+  /// 현재 비밀번호가 맞는지만 확인한다 — "이메일 변경" 1단계 다이얼로그가 쓴다. 틀리면
+  /// 여기서 던져서 다이얼로그가 잡는다(다른 상태는 전혀 안 바뀐다).
+  Future<void> verifyPassword(String password) => api!.verifyPassword(password);
 
   /// 회원 탈퇴. 서버가 세션/토큰을 이미 폐기해두므로, 성공하면 그냥 로그아웃과 같은
   /// 방식으로 로컬 상태를 정리한다. 비밀번호가 틀리면 여기서 던져서 다이얼로그가 잡는다.

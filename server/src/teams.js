@@ -8,6 +8,7 @@ import {
   insertTeam,
   isTeamMember,
   listTeamMemberIds,
+  listTeamMemberIdsByRole,
   listTeamMemberUsers,
   listTeamsForUser,
   listTopicCreatorIds,
@@ -19,6 +20,7 @@ import {
 } from './db/queries/teams.js';
 import { addRoomMembers, listPublicTopics, listRoomMemberIds } from './db/queries/rooms.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
+import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
 import { findUserById, updateUser } from './db/queries/users.js';
 import { db } from './db/client.js';
 import { teams as teamsTable } from './db/schema.js';
@@ -113,7 +115,8 @@ export function createTeamsRouter(io) {
    * 팀 멤버 구성까지 볼 권한은 아니므로).
    *
    * 멤버 이름/아바타 등 상세 정보는 이미 등급과 무관하게 공개인 GET /users로 따로 받게 하고,
-   * 여기서는 "어느 팀에 누가 속해 있는지"라는 조직도 고유의 정보만 준다.
+   * 여기서는 "어느 팀에 누가 속해 있는지"라는 조직도 고유의 정보만 준다. ownerId는 조직도
+   * "멤버" 탭이 등급 배지 옆에 "소유자" 표시를 붙일지 판단하는 데 쓴다.
    */
   router.get('/org-chart/teams', async (req, res) => {
     const me = await findUserById(req.user.sub);
@@ -124,13 +127,17 @@ export function createTeamsRouter(io) {
     const rows = await db.select().from(teamsTable).orderBy(teamsTable.createdAt);
     const dtos = [];
     for (const team of rows) {
-      const memberIds = await listTeamMemberIds(team.id);
+      const [memberIds, ownerIds] = await Promise.all([
+        listTeamMemberIds(team.id),
+        listTeamMemberIdsByRole(team.id, 'owner'),
+      ]);
       dtos.push({
         id: team.id,
         name: team.name,
         iconEmoji: team.iconEmoji ?? null,
         iconColor: team.iconColor ?? null,
         memberIds,
+        ownerId: ownerIds[0] ?? null,
       });
     }
     res.json(dtos);
@@ -385,7 +392,9 @@ export function createTeamsRouter(io) {
    * 팀원의 부서/직책 변경 — 그 팀의 소유자 또는 계정 등급이 관리자인 사람만.
    * **등급은 여기서 바꿀 수 없다** — 계정 등급은 서버 운영자가 관리자 콘솔에서만 정한다.
    * 부서/직책을 계정 단위로 쓰도록 설정한 서버(orgScope='account')에서도 팀 설정에서 바꾸면
-   * 계정 값이 바뀌도록, 설정에 따라 저장 위치를 나눈다.
+   * 계정 값이 바뀌도록, 설정에 따라 저장 위치를 나눈다. 직책을 실제로 바꿀 때는(그대로
+   * 저장하는 기존 값은 통과) 직책 목록(position_options)에 있는 값이어야 하고, 요청자
+   * 자신의 직책보다 서열이 높으면 안 된다(team_settings_dialog.dart의 "직책 수정" 참고).
    */
   router.patch('/teams/:id/members/:userId', async (req, res) => {
     const team = await findTeamById(req.params.id);
@@ -414,6 +423,25 @@ export function createTeamsRouter(io) {
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
 
     const settings = await getServerSettings();
+    // 저장 위치와 같은 규칙으로 "지금 값"을 고른다(계정 단위/팀 단위) — 그대로 다시 저장하는
+    // 건(자유 입력이던 시절의 기존 값 포함) 막지 않고, "바뀌는" 값만 검사한다(팀 초대 링크·
+    // 관리자 콘솔 직책 수정과 같은 정책). 새 값은 직책 목록에 있어야 하고, 내(요청자) 직책보다
+    // 서열이 높으면 안 된다 — sortOrder는 **작을수록 서열이 낮다**(기본 목록이 사원(0)→
+    // 대표(7) 순인 것과 같은 방향)이므로 "더 높음"은 sortOrder가 더 큰 쪽이다. 클라이언트는
+    // 이미 이렇게 골라서 보내지만, 여기서 한 번 더 막는다.
+    if ('position' in fields && fields.position !== null) {
+      const currentPosition =
+        settings.orgScope === 'account' ? ((await findUserById(targetId))?.position ?? null) : (target.position ?? null);
+      if (fields.position !== currentPosition) {
+        const match = await findPositionOptionByLabel(fields.position);
+        if (!match) return res.status(400).json({ error: '직책 목록에 없는 값입니다.' });
+        const myPosition = me.user?.position ? await findPositionOptionByLabel(me.user.position) : null;
+        if (!myPosition || match.sortOrder > myPosition.sortOrder) {
+          return res.status(403).json({ error: '자신의 직책보다 높은 직책은 부여할 수 없습니다.' });
+        }
+      }
+    }
+
     if (settings.orgScope === 'account') {
       await updateUser(targetId, fields); // 계정 하나로 관리하는 서버
     } else {

@@ -23,7 +23,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  bool _updateBannerShown = false;
   bool _secretInviteDialogShowing = false;
   StreamSubscription<String>? _toastSub;
 
@@ -162,11 +161,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// session.dart의 _checkForUpdate()가 새 버전을 찾으면 한 번만 대화상자를 띄운다.
   /// 예전엔 화면 위쪽 얇은 MaterialBanner라 놓치기 쉬웠는데, 눈에 잘 띄도록 모달
-  /// 대화상자로 바꿨다(UpdateDialog 참고).
+  /// 대화상자로 바꿨다(UpdateDialog 참고). "이미 띄웠는지"는 session에 두고 로그인 화면
+  /// (LoginScreen)과 공유한다 — 로그인 전에 이미 봤으면 로그인 직후 또 뜨지 않게.
   void _maybeShowUpdateBanner() {
     final version = widget.session.updateAvailableVersion;
-    if (version == null || _updateBannerShown) return;
-    _updateBannerShown = true;
+    if (version == null || widget.session.updateBannerShown) return;
+    widget.session.updateBannerShown = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       showDialog<void>(

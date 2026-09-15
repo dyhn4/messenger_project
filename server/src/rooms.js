@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
+import ExcelJS from 'exceljs';
 import {
   addRoomMembers,
   deleteRoom,
@@ -31,6 +32,7 @@ import {
   getLastMessageAt,
   getLastMessageForPreview,
   insertMessage,
+  iterateMessagesForExport,
   listMessagesByIds,
   listMessagesByRoom,
 } from './db/queries/messages.js';
@@ -601,5 +603,82 @@ export function createRoomsRouter(io) {
     );
   });
 
+  /**
+   * "대화 내보내기" — 이 방의 메시지 전체(또는 [since]~[until] 기간)를 엑셀(.xlsx)로 받는다.
+   * 비밀 대화는 서버가 평문을 아예 모르므로(종단간 암호화, secretChats.js 참고) 애초에
+   * 대상에서 뺀다. 큰 방도 메모리에 한 번에 안 올리도록 exceljs의 스트리밍 writer로 바로
+   * 응답에 흘려보낸다(iterateMessagesForExport와 짝).
+   */
+  router.get('/rooms/:id/export', async (req, res) => {
+    const room = await findRoomById(req.params.id);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    if (room.isSecret) {
+      return res.status(400).json({ error: '비밀 대화는 서버가 내용을 알 수 없어 내보낼 수 없습니다.' });
+    }
+
+    const sinceMs = Number(req.query.since);
+    const untilMs = Number(req.query.until);
+    const since = Number.isFinite(sinceMs) && sinceMs > 0 ? new Date(sinceMs) : null;
+    const until = Number.isFinite(untilMs) && untilMs > 0 ? new Date(untilMs) : null;
+    // DM "진짜 나가기" 이력이 있으면(dm_history_floors) 그 시각 이전 메시지는 이 요청자에게
+    // 아예 없는 것처럼 뺀다 — /rooms/:id/messages와 같은 규칙.
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
+
+    // 실제 로컬 파일명은 클라이언트가 방 이름 + 기간으로 직접 짓는다(서버는 DM 상대방 이름을
+    // 알려면 추가 조회가 필요해서 여기서는 신경 쓰지 않는다) — 이 헤더는 브라우저 등 다른
+    // 클라이언트로 접속했을 때를 위한 기본값일 뿐이다.
+    const asciiFallback = 'chat-export.xlsx';
+    const utf8Name = '대화내역.xlsx';
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(utf8Name)}`,
+    );
+
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: true });
+    const sheet = workbook.addWorksheet('대화 내역');
+    sheet.columns = [
+      { header: '시간', key: 'time', width: 20, style: { numFmt: 'yyyy-mm-dd hh:mm:ss' } },
+      { header: '보낸사람', key: 'sender', width: 16 },
+      { header: '내용', key: 'content', width: 80 },
+    ];
+    sheet.getRow(1).font = { bold: true };
+
+    for await (const batch of iterateMessagesForExport({ roomId: room.id, since, until, floor })) {
+      for (const m of batch) {
+        sheet
+          .addRow({ time: m.createdAt, sender: m.senderName, content: exportContentFor(m) })
+          .commit();
+      }
+    }
+    await sheet.commit();
+    await workbook.commit();
+  });
+
   return router;
+}
+
+/** "대화 내보내기" 셀 내용 — push.js의 previewFor와 같은 규칙이지만, 미리보기 한 줄이 아니라
+ * 엑셀 셀이라 파일명까지 그대로 적어준다. 삭제된 메시지는 소프트 삭제로 내용이 이미 비어
+ * 있으므로(softDeleteMessage) 그 사실만 표시한다. */
+function exportContentFor(m) {
+  if (m.deletedAt) return '(삭제된 메시지)';
+  const suffix = m.editedAt ? ' (수정됨)' : '';
+  switch (m.type) {
+    case 'text':
+    case 'system':
+      return (m.text ?? '') + suffix;
+    case 'image':
+      return (m.fileName ? `[사진: ${m.fileName}]` : '[사진]') + suffix;
+    case 'file':
+      return (m.fileName ? `[파일: ${m.fileName}]` : '[파일]') + suffix;
+    case 'sticker':
+      return '[이모티콘]' + suffix;
+    default:
+      return (m.text ?? '') + suffix;
+  }
 }

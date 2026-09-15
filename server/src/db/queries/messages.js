@@ -54,6 +54,34 @@ export async function softDeleteMessage(id) {
   return row;
 }
 
+/**
+ * "대화 내보내기"(rooms.js의 GET /rooms/:id/export)용 — 방의 메시지를 시간순으로 전부
+ * 훑는다. 한 번에 메모리에 다 올리지 않도록 BATCH개씩 끊어서 async generator로 돌려주고,
+ * 호출부가 각 배치를 곧바로 엑셀 스트림에 흘려보낸다. [since]/[until]로 기간을 좁힐 수
+ * 있고, [floor]는 listMessagesByRoom과 같은 DM "진짜 나가기" 이력 컷오프다.
+ */
+export async function* iterateMessagesForExport({ roomId, since, until, floor }) {
+  const BATCH = 2000;
+  let cursor = null;
+  while (true) {
+    const conditions = [eq(messages.roomId, roomId)];
+    if (cursor) conditions.push(gt(messages.createdAt, cursor));
+    else if (since) conditions.push(gte(messages.createdAt, since));
+    if (until) conditions.push(lte(messages.createdAt, until));
+    if (floor) conditions.push(gte(messages.createdAt, floor));
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(and(...conditions))
+      .orderBy(asc(messages.createdAt))
+      .limit(BATCH);
+    if (rows.length === 0) return;
+    yield rows;
+    if (rows.length < BATCH) return;
+    cursor = rows[rows.length - 1].createdAt;
+  }
+}
+
 /** id 목록으로 메시지를 시간순(오래된 것부터) 가져온다 — 창 밖에 있는 댓글의 부모 메시지를
  * 따로 끌어올 때 쓴다(comments.js의 listCommentsInRoomBetween 참고). */
 export function listMessagesByIds(ids) {

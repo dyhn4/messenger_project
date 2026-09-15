@@ -454,6 +454,43 @@ class Session extends ChangeNotifier {
     }
   }
 
+  /// "대화 내보내기" — 방의 대화 내용을 엑셀(.xlsx)로 받아 기기에 저장한다. 다운로드 폴더를
+  /// 설정해뒀으면 거기에, 아니면 임시 폴더에 저장한다(attachment_widgets.dart의 일반 파일
+  /// 저장과 같은 규칙). 비밀 대화는 애초에 호출부(room_options_menu.dart)가 메뉴 자체를
+  /// 감춰서 여기까지 안 오지만, 서버도 다시 막는다(rooms.js). 저장된 파일의 전체 경로를
+  /// 돌려준다(호출부가 바로 열 때 씀).
+  Future<String> exportRoomChat(
+    String roomId, {
+    DateTime? since,
+    DateTime? until,
+    required String fileName,
+  }) async {
+    if (api == null) throw const ApiException('연결되어 있지 않습니다.');
+    final response = await api!.exportRoomChat(
+      roomId,
+      since: since,
+      until: until,
+    );
+    if (response.statusCode != 200) {
+      final body = await response.stream.bytesToString();
+      var message = '내보내기에 실패했습니다.';
+      try {
+        final decoded = jsonDecode(body) as Map<String, dynamic>;
+        message = decoded['error'] as String? ?? message;
+      } catch (_) {
+        // 서버가 JSON이 아닌 응답을 보냈으면(프록시 에러 페이지 등) 기본 문구를 그대로 쓴다.
+      }
+      throw ApiException(message);
+    }
+    final bytes = await response.stream.toBytes();
+    final dirPath = settings.downloadFolder.isNotEmpty
+        ? settings.downloadFolder
+        : (await getTemporaryDirectory()).path;
+    final file = File('$dirPath${Platform.pathSeparator}$fileName');
+    await file.writeAsBytes(bytes);
+    return file.path;
+  }
+
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
       _auth(() => api!.login(u, p), keepSignedIn: keepSignedIn);
 

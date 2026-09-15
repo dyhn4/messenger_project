@@ -8,6 +8,7 @@ import '../screens/invite_members_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/session.dart';
+import 'export_chat_dialog.dart';
 import 'floating_dialog.dart';
 import 'self_destruct_picker_dialog.dart';
 import 'user_avatar.dart';
@@ -272,6 +273,18 @@ class RoomOptionsMenu extends StatelessWidget {
                       ? '자동 삭제 타이머'
                       : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
                 ),
+              ],
+            ),
+          ),
+        // 비밀 대화는 서버가 평문을 몰라서(종단간 암호화) 지원하지 않는다 — export_chat_dialog.dart 참고.
+        if (!room.isSecret)
+          PopupMenuItem<void>(
+            onTap: () => showExportChatDialog(context, session, room),
+            child: const Row(
+              children: [
+                Icon(Icons.file_download_outlined),
+                SizedBox(width: 8),
+                Text('대화 내보내기'),
               ],
             ),
           ),

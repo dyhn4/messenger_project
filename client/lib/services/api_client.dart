@@ -322,6 +322,26 @@ class ApiClient {
     return _client.send(req);
   }
 
+  /// 방의 대화 내용을 엑셀(.xlsx)로 받는다(GET /rooms/:id/export). [since]/[until]을 안 주면
+  /// 전체 기간. 인증이 필요한 엔드포인트라 downloadUpdate와 달리 Authorization 헤더를
+  /// 붙인다 — 다만 이 스트림 요청은 401이어도 토큰을 갱신해 재시도하지 않는다(다른 화면을
+  /// 오래 보다가 실행하는 흔치 않은 경로라, 실패하면 사용자가 다시 누르는 것으로 충분하다).
+  Future<http.StreamedResponse> exportRoomChat(
+    String roomId, {
+    DateTime? since,
+    DateTime? until,
+  }) {
+    final params = <String, String>{
+      if (since != null) 'since': since.millisecondsSinceEpoch.toString(),
+      if (until != null) 'until': until.millisecondsSinceEpoch.toString(),
+    };
+    final uri = _uri(
+      '/api/rooms/$roomId/export',
+    ).replace(queryParameters: params.isEmpty ? null : params);
+    final req = http.Request('GET', uri)..headers.addAll(_authHeaders);
+    return _client.send(req);
+  }
+
   /// 회원가입 폼의 "중복 확인" 버튼용. 사용 가능하면 null, 아니면(형식 오류/중복) 사유
   /// 문구를 돌려준다.
   Future<String?> checkUsernameAvailable(String username) async {

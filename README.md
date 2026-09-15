@@ -892,6 +892,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/rooms/:id/muted` | 알림 끄기 토글 |
 | GET | `/api/rooms/:id` | 방 정보 조회 |
 | GET | `/api/rooms/:id/messages` | 메시지 목록(`limit`, `before` 커서 페이지네이션) |
+| GET | `/api/rooms/:id/export` | **대화 내보내기** — 그 방의 대화 내용을 엑셀(.xlsx)로 스트리밍 응답(`since`/`until` epoch ms로 기간 제한, 둘 다 생략하면 전체). 비밀 대화는 서버가 평문을 몰라 400 |
 
 **메시지/댓글** (`/api`)
 

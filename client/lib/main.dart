@@ -15,6 +15,7 @@ import 'screens/login_screen.dart';
 import 'screens/server_setup_screen.dart';
 import 'services/app_settings.dart';
 import 'services/deep_link_service.dart';
+import 'services/fcm_config_cache.dart';
 import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
@@ -29,10 +30,6 @@ import 'widgets/update_banner.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  final data = message.data;
-  final roomId = data['roomId'] as String?;
-  if (roomId == null) return;
 
   // SharedPreferences(레거시 싱글턴)는 같은 isolate 안에서 값을 캐싱해두고 재사용한다 —
   // Firebase는 이 백그라운드 isolate를 메시지마다 새로 만들지 않고 재사용할 수 있어서,
@@ -52,6 +49,23 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
           ),
     ),
   );
+  // google-services.json 자동초기화 대신 FcmConfigCache가 캐싱해둔 값으로 직접 초기화한다
+  // (fcm_config_cache.dart 참고) — legacy SharedPreferences는 모든 키 앞에 "flutter."를
+  // 자동으로 붙이는데 SharedPreferencesAsync는 그렇지 않아 직접 붙여야 같은 값을 찾는다.
+  // 아직 한 번도 서버에서 못 받아왔으면(예: 페어링 직후 첫 데이터 도착) 이 알림은 그릴 방법이
+  // 없어 포기한다 — 소켓이 붙어있었다면 어차피 이 경로 자체가 안 쓰였을 것이다.
+  final fcmOptions = FcmConfigCache.fromValues(
+    apiKey: await prefs.getString('flutter.${FcmConfigCache.kApiKey}'),
+    appId: await prefs.getString('flutter.${FcmConfigCache.kAppId}'),
+    projectId: await prefs.getString('flutter.${FcmConfigCache.kProjectId}'),
+    senderId: await prefs.getString('flutter.${FcmConfigCache.kSenderId}'),
+  );
+  if (fcmOptions == null) return;
+  await Firebase.initializeApp(options: fcmOptions);
+  final data = message.data;
+  final roomId = data['roomId'] as String?;
+  if (roomId == null) return;
+
   // 메인 엔진(Session._persistForegroundState)이 남겨둔 값 — 지금 그 방을 보고 있는
   // 중이면(=소켓 경로였다면 isViewingNow로 걸러졌을 상황) 이 격리된 백그라운드 경로에서도
   // 똑같이 건너뛴다. 알림을 탭해서 막 방을 연 직후, 소켓/프레즌스가 아직 못 따라잡아
@@ -105,12 +119,20 @@ Future<void> main() async {
   // 앱 전체 HttpClient 생성을 가로챈다. 이거 없이는 프로필 사진/채팅 이미지가 인증서
   // 신뢰 실패로 안 보인다.
   await PinnedTls.installGlobalHttpOverrides();
-  // FCM은 안드로이드에서만 공식 지원한다 — Windows에서 Firebase.initializeApp()을 부르면
-  // google-services.json이 없어 그냥 실패한다(session.dart의 _registerFcmToken도 동일하게
-  // Platform.isAndroid로 막아둠).
+  // FCM은 안드로이드에서만 공식 지원한다(Windows는 firebase_messaging 플러그인 자체가 없음).
+  // google-services.json으로 자동초기화하던 예전 방식 대신, FcmConfigCache에 캐싱된 값(서버
+  // 관리자 콘솔에서 고객사가 직접 넣은 값 — fcm_config_cache.dart 참고)으로 초기화한다. 아직
+  // 한 번도 못 받아왔으면(첫 실행, 아직 로그인 전, 관리자가 설정 전 등) 조용히 건너뛴다 — 이후
+  // 로그인에 성공하면 session.dart의 _registerFcmToken이 서버에서 받아와 즉시 초기화한다.
   if (Platform.isAndroid) {
-    await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    final prefs = await SharedPreferences.getInstance();
+    final fcmOptions = FcmConfigCache.read(prefs);
+    if (fcmOptions != null) {
+      await Firebase.initializeApp(options: fcmOptions);
+      FirebaseMessaging.onBackgroundMessage(
+        _firebaseMessagingBackgroundHandler,
+      );
+    }
   }
   // 창 닫기(X)를 눌러도 앱이 종료되지 않고 시스템 트레이로 내려가도록(백그라운드에서 계속
   // 알림을 받게) — setPreventClose로 OS의 기본 닫기 동작을 막고, 실제 처리는

@@ -47,3 +47,31 @@ versionRouter.get('/downloads/android', (req, res) => {
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '아직 배포된 Android 빌드가 없습니다.' });
   res.download(filePath, 'TangoTalk.apk');
 });
+
+/** 서버가 켜져 있는 동안 releases/version.json이 바뀌면(publish_release.ps1이 새 버전을
+ * 배포할 때) 클라이언트가 앱을 재시작하지 않아도 곧바로 알 수 있도록, 인증 없는 소켓
+ * 네임스페이스(/updates)로 새 버전을 즉시 알린다. 기본 네임스페이스는 socket.js의 io.use가
+ * JWT를 요구해서 로그인 전(로그인 화면)엔 연결할 수 없는데, 로그인 화면에서도 이 알림이
+ * 와야 해서 일부러 그 인증과 분리된 별도 네임스페이스로 둔다 — GET /version이 인증 없이
+ * 공개된 것과 같은 성격.
+ *
+ * fs.watch는 한 번의 쓰기에도 이벤트가 여러 번 오거나 filename이 비어 올 수 있어(플랫폼마다
+ * 다름) 디바운스하고, 실제로 버전 값이 바뀐 경우에만 내보낸다 — 그래야 같은 버전을 두 번
+ * 브로드캐스트하거나, 파일이 쓰이는 도중(잠깐 비거나 깨진 JSON) 값을 잘못 읽는 걸 피한다. */
+export function watchForVersionChanges(io) {
+  const ns = io.of('/updates');
+  let lastVersion = readVersionInfo()?.version ?? null;
+  let timer = null;
+
+  fs.watch(releasesDir, (eventType, filename) => {
+    if (filename && filename !== 'version.json') return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const info = readVersionInfo();
+      if (info?.version && info.version !== lastVersion) {
+        lastVersion = info.version;
+        ns.emit('update:available', { version: info.version, notes: info.notes ?? null });
+      }
+    }, 300);
+  });
+}

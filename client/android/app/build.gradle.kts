@@ -5,8 +5,9 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // FCM 설정(google-services.json)을 앱에 반영한다.
-    id("com.google.gms.google-services")
+    // google-services.json으로 빌드에 FCM 설정을 박아넣는 플러그인은 안 쓴다 — 고객사마다
+    // 앱을 따로 빌드해야 하는 문제가 생기기 때문이다. 대신 Firebase는 런타임에
+    // FirebaseOptions로 직접 초기화한다(main.dart, session.dart, fcm_config_cache.dart 참고).
 }
 
 // 릴리즈 서명 정보(../key.properties, git에 안 올라감 — README/키스토어 생성 절차 참고).

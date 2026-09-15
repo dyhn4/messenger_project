@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:open_file/open_file.dart';
@@ -23,8 +24,10 @@ import 'device_identity.dart';
 import 'message_preview.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
+import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
 import 'secret_session_manager.dart';
+import 'update_socket.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -108,6 +111,7 @@ class Session extends ChangeNotifier {
   double? updateDownloadProgress;
   String? updateError; // installUpdate() 실패 시 사용자에게 보여줄 메시지.
   final chatSocket = ChatSocket();
+  final _updateSocket = UpdateSocket();
   final NotificationService notifications;
   final AppSettings settings;
 
@@ -327,6 +331,7 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    _listenForLiveUpdates();
     _prefs = await SharedPreferences.getInstance();
     // 앱이 시작 상태 그대로(포그라운드) 죽 있으면 didChangeAppLifecycleState가 한 번도
     // 안 불려서 _persistForegroundState가 늦게까지 실행 안 될 수 있다 — 여기서 한 번
@@ -356,6 +361,7 @@ class Session extends ChangeNotifier {
         httpClient: await PinnedTls.httpClient(),
       );
       unawaited(_checkForUpdate());
+      unawaited(_updateSocket.connect(serverUrl!));
       if (token == null) {
         stage = AuthStage.needsLogin;
       } else {
@@ -384,6 +390,7 @@ class Session extends ChangeNotifier {
       httpClient: pinnedClient,
     );
     unawaited(_checkForUpdate());
+    unawaited(_updateSocket.connect(serverUrl!));
     error = null;
     stage = AuthStage.needsLogin;
     notifyListeners();
@@ -405,6 +412,25 @@ class Session extends ChangeNotifier {
     } catch (_) {
       // 버전 확인 실패는 무시 — 다음 실행/재연결 때 다시 시도됨.
     }
+  }
+
+  /// 앱을 쓰는 도중 서버가 새 버전을 배포하면(_updateSocket, server/src/version.js의
+  /// /updates 네임스페이스) 재시작 없이 상단 알약을 띄운다. init()에서 딱 한 번만 구독한다.
+  ///
+  /// updateBannerShown을 여기서 미리 true로 찍어두는 이유: 이 필드는 원래 "시작 시 뜨는
+  /// 자동 설치 모달을 이미 보여줬는지"를 기억하는 용도라(home_screen.dart/login_screen.dart의
+  /// _maybeShowUpdateBanner 참고, updateAvailableVersion이 채워지고 이 값이 false일 때만
+  /// 모달을 연다), 아무 처리도 안 하면 대화 중에도 모달이 불쑥 뜬다. 이 경로에서는 처음부터
+  /// "이미 보여준 것"으로 표시해서 모달은 건너뛰고 UpdateBanner(알약)만 뜨게 한다.
+  void _listenForLiveUpdates() {
+    _updateSocket.updates.listen((e) async {
+      final info = await PackageInfo.fromPlatform();
+      if (_isNewerVersion(e.version, info.version)) {
+        updateAvailableVersion = e.version;
+        updateBannerShown = true;
+        notifyListeners();
+      }
+    });
   }
 
   /// "1.2.10"처럼 점으로 구분된 버전 문자열을 부분별로 숫자 비교한다. 형식이 이상하면
@@ -1098,6 +1124,7 @@ class Session extends ChangeNotifier {
   Future<void> _registerFcmToken() async {
     if (!Platform.isAndroid) return;
     try {
+      if (!await _ensureFirebaseInitialized()) return;
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission();
       final token = await messaging.getToken();
@@ -1115,6 +1142,34 @@ class Session extends ChangeNotifier {
       // 다음 로그인/토큰 갱신 때 다시 시도된다 — 그래도 원인을 눈으로 확인할 수 있게 로그는 남긴다.
       debugPrint('[fcm] 토큰 등록 실패: $e');
     }
+  }
+
+  /// FCM 초기화 값을 서버에서 받아와 캐싱하고(fcm_config_cache.dart), 이 프로세스에서 아직
+  /// Firebase가 초기화되지 않았으면(캐시가 없어 main()이 건너뛴 경우 — 이 기기에서 처음
+  /// 로그인하는 순간) 지금 바로 초기화한다. FirebaseMessaging.onBackgroundMessage 등록은
+  /// 여기서 다시 하지 않는다 — 그건 main.dart의 최상위 함수라 여기서 부르면 순환 import가
+  /// 생기고, 다음 앱 재시작부터는 이번에 캐싱된 값으로 main()이 정상적으로 등록한다(그 사이
+  /// 짧은 틈은 소켓 연결이 대신 커버한다). 관리자가 아직 FCM을 설정하지 않았거나 서버에 못
+  /// 닿으면 false.
+  Future<bool> _ensureFirebaseInitialized() async {
+    if (Firebase.apps.isNotEmpty) return true;
+    final config = await api?.fetchFirebaseClientConfig();
+    final options = FcmConfigCache.fromValues(
+      apiKey: config?['apiKey'],
+      appId: config?['appId'],
+      projectId: config?['projectId'],
+      senderId: config?['messagingSenderId'],
+    );
+    if (options == null) return false;
+    await FcmConfigCache.save(
+      _prefs,
+      apiKey: config!['apiKey']!,
+      appId: config['appId']!,
+      projectId: config['projectId']!,
+      senderId: config['messagingSenderId']!,
+    );
+    await Firebase.initializeApp(options: options);
+    return true;
   }
 
   /// 소켓의 presence:update는 "바뀐 순간부터의" 변화만 알려주므로, 지금 이미 온라인인

@@ -298,7 +298,39 @@ class ServerStats {
       (json['serverStartedAt'] as num?)?.toInt() ?? 0,
     ),
     teamCreation: json['teamCreation'] as String? ?? 'member',
-    teamInviteLinkCreation: json['teamInviteLinkCreation'] as String? ?? 'admin',
+    teamInviteLinkCreation:
+        json['teamInviteLinkCreation'] as String? ?? 'admin',
     orgScope: json['orgScope'] as String? ?? 'team',
+  );
+}
+
+/// 관리자 콘솔의 "FCM 설정" 탭이 보여주는 현재 상태(GET /admin/fcm-settings). 서비스 계정의
+/// private_key는 서버가 절대 다시 내려주지 않고, 설정 여부(serviceAccountConfigured)와
+/// 어느 계정인지(serviceAccountEmail)만 알려준다.
+class FcmSettings {
+  final String apiKey;
+  final String appId;
+  final String projectId;
+  final String messagingSenderId;
+  final bool serviceAccountConfigured;
+  final String? serviceAccountEmail;
+
+  const FcmSettings({
+    required this.apiKey,
+    required this.appId,
+    required this.projectId,
+    required this.messagingSenderId,
+    required this.serviceAccountConfigured,
+    this.serviceAccountEmail,
+  });
+
+  factory FcmSettings.fromJson(Map<String, dynamic> json) => FcmSettings(
+    apiKey: json['apiKey'] as String? ?? '',
+    appId: json['appId'] as String? ?? '',
+    projectId: json['projectId'] as String? ?? '',
+    messagingSenderId: json['messagingSenderId'] as String? ?? '',
+    serviceAccountConfigured:
+        json['serviceAccountConfigured'] as bool? ?? false,
+    serviceAccountEmail: json['serviceAccountEmail'] as String?,
   );
 }

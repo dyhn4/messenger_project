@@ -39,7 +39,8 @@ import { createTeamsRouter } from './teams.js';
 import { registerSocket } from './socket.js';
 import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
 import { createUsersRouter } from './users.js';
-import { versionRouter } from './version.js';
+import { versionRouter, watchForVersionChanges } from './version.js';
+import { firebaseConfigRouter } from './push.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
 // 미들웨어로 잡힌다. 이건 그 바깥(소켓 이벤트 핸들러, 백그라운드 작업 등 요청/응답 주기
@@ -85,6 +86,8 @@ app.use(filesRouter);
 app.get('/health', (req, res) => res.json({ ok: true }));
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).
 app.use(versionRouter);
+// FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
+app.use(firebaseConfigRouter);
 
 // 모든 라우트 다음에 두는 공통 에러 처리 — express-async-errors 덕에 라우트 안에서 던진/
 // reject한 에러가 여기로 온다. 이게 없던 동안에는 그런 요청이 응답 없이 그대로 멈춰서
@@ -103,6 +106,7 @@ app.use((err, req, res, next) => {
 });
 
 registerSocket(io);
+watchForVersionChanges(io);
 startRetentionJob();
 startSecretExpiryJob(io);
 

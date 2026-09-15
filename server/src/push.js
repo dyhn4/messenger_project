@@ -1,27 +1,84 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cert, initializeApp } from 'firebase-admin/app';
+import { Router } from 'express';
+import { cert, deleteApp, initializeApp } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { listFcmTokensForUser, setDeviceFcmToken } from './db/queries/devices.js';
 import { listMutedUserIdsForRoom } from './db/queries/rooms.js';
+import { getServerSettings } from './db/queries/serverSettings.js';
 import { isOnline } from './presence.js';
 import { signFileUrl } from './upload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const keyPath = path.join(__dirname, '..', 'firebase-service-account.json');
+// 예전 방식(파일을 서버 폴더에 직접 놓기) — 이미 이렇게 설정해둔 기존 설치를 깨지 않으려고
+// DB 값이 없을 때의 폴백으로만 남겨둔다. 새 설치는 관리자 콘솔(/admin/fcm-settings)을 쓴다.
+const legacyKeyPath = path.join(__dirname, '..', 'firebase-service-account.json');
 
-// 서비스 계정 키가 없어도(아직 FCM을 안 붙였거나 로컬 개발 중) 서버 자체는 정상 기동해야
-// 한다 — notifyOfflineMembers는 이때 조용히 아무것도 안 한다. version.js의 releases/ 폴더와
-// 같은 패턴(선택적 기능, 없으면 그냥 비활성).
-let messaging = null;
-if (fs.existsSync(keyPath)) {
-  const serviceAccount = JSON.parse(fs.readFileSync(keyPath, 'utf8'));
-  const app = initializeApp({ credential: cert(serviceAccount) });
-  messaging = getMessaging(app);
-} else {
-  console.warn('[push] firebase-service-account.json이 없어 FCM 푸시가 비활성화됩니다.');
+/** FCM 발송용 firebase-admin 앱을 지연 초기화하고 캐싱한다. admin.js가 서비스 계정을
+ * 새로 저장하면 invalidateMessagingCache()를 불러서 이 캐시를 지운다 — 그러면 서버를
+ * 재시작하지 않아도 다음 발송부터 바로 새 설정으로 붙는다(version.js가 releases/version.json
+ * 변경을 fs.watch로 즉시 반영하는 것과 같은 "재시작 없이" 철학).
+ *
+ * DB(server_settings.fcmServiceAccountJson)를 1순위로, 비어 있으면 legacyKeyPath 파일을
+ * 2순위로 본다. 서비스 계정이 전혀 없으면(로컬 개발 중, 아직 설정 전 등) messaging이 null인
+ * 채로 캐싱되고, 발송 함수들은 이때 조용히 아무것도 안 한다. */
+let messagingCache; // undefined = 아직 로드 전; 로드 후엔 항상 { messaging } 형태.
+let currentApp = null;
+
+export function invalidateMessagingCache() {
+  messagingCache = undefined;
+  if (currentApp) {
+    deleteApp(currentApp).catch(() => {});
+    currentApp = null;
+  }
 }
+
+async function loadServiceAccount() {
+  const settings = await getServerSettings();
+  if (settings.fcmServiceAccountJson) {
+    try {
+      return JSON.parse(settings.fcmServiceAccountJson);
+    } catch {
+      console.error('[push] DB에 저장된 FCM 서비스 계정이 올바른 JSON이 아닙니다.');
+      return null;
+    }
+  }
+  if (fs.existsSync(legacyKeyPath)) {
+    return JSON.parse(fs.readFileSync(legacyKeyPath, 'utf8'));
+  }
+  return null;
+}
+
+async function getMessagingInstance() {
+  if (messagingCache !== undefined) return messagingCache;
+  const serviceAccount = await loadServiceAccount();
+  if (!serviceAccount) {
+    console.warn('[push] FCM 서비스 계정이 설정되지 않아 푸시가 비활성화됩니다.');
+    messagingCache = { messaging: null };
+    return messagingCache;
+  }
+  // 앱 이름을 매번 다르게 줘서(invalidate 후 재초기화 시) firebase-admin의 "같은 이름의
+  // 앱이 이미 있다" 에러를 피한다 — deleteApp이 비동기라 직전 앱 정리가 아직 안 끝났을 수 있다.
+  currentApp = initializeApp({ credential: cert(serviceAccount) }, `push-${Date.now()}`);
+  messagingCache = { messaging: getMessaging(currentApp) };
+  return messagingCache;
+}
+
+/** 클라이언트가 Firebase.initializeApp()에 쓸 4개 값 — Android 클라이언트 API 키는
+ * 패키지명+SHA-1로 제한돼 비밀값이 아니므로(구글 공식 안내) 인증 없이 공개한다(GET /version과
+ * 같은 성격). 관리자가 아직 설정 안 했으면 전부 null을 돌려주고, 클라이언트는 이 경우 FCM을
+ * 그냥 비활성 상태로 둔다(main.dart/session.dart 참고). */
+export const firebaseConfigRouter = Router();
+firebaseConfigRouter.get('/firebase-client-config', async (req, res) => {
+  const settings = await getServerSettings();
+  res.json({
+    apiKey: settings.fcmApiKey ?? null,
+    appId: settings.fcmAppId ?? null,
+    projectId: settings.fcmProjectId ?? null,
+    messagingSenderId: settings.fcmMessagingSenderId ?? null,
+  });
+});
 
 /** 이모지는 스티커 id로부터 클라이언트에서만 찾을 수 있어서(client/lib/data/stickers.dart),
  * 서버는 그냥 "이모티콘을 보냈습니다"로만 표시한다 — session.dart의 로컬 알림 미리보기
@@ -70,6 +127,7 @@ export async function notifyOfflineMembers({
   roomTag,
   kind, // 'message' | 'comment'
 }) {
+  const { messaging } = await getMessagingInstance();
   if (!messaging) return;
 
   const mutedIds = new Set(await listMutedUserIdsForRoom(room.id));
@@ -130,6 +188,7 @@ export async function notifyOfflineMembers({
  * 소켓으로 바로 받아서(session.dart) 클라이언트가 직접 로컬 알림을 그리므로(같은 알림이
  * 두 번 뜨지 않게) 여기서는 건너뛴다. notifyOfflineMembers와 같은 분리 방식. */
 export async function notifySecretChatInvite({ targetUserId, initiator, roomId }) {
+  const { messaging } = await getMessagingInstance();
   if (!messaging) return;
   if (isOnline(targetUserId)) return;
 

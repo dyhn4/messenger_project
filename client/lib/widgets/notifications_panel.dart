@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
+import '../screens/chat_screen.dart';
+import '../screens/home_screen.dart' show wideBreakpoint;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import 'muted_scrollbar.dart';
@@ -250,9 +252,12 @@ class _NotificationRow extends StatelessWidget {
 
 /// team_select_screen.dart("팀 리스트" 화면)에서 알림 센터를 가운데 뜨는 대화상자로 연다 —
 /// 그 화면은 desktop_home_screen.dart처럼 옆으로 붙는 사이드 패널 자리가 없어서(아직 팀을
-/// 안 고른 상태) 대신 대화상자로 띄운다. 방을 고르면 그 방이 속한 팀으로 전환하면서
-/// (Session.requestOpenRoom) HomeScreen이 자동으로 DesktopHomeScreen으로 바뀌고, 그 화면이
-/// 이어서 그 방을 펼쳐 보여준다.
+/// 안 고른 상태) 대신 대화상자로 띄운다. 방을 고르면 그 방이 속한 팀으로 전환한 뒤(넓은
+/// 화면은 Session.requestOpenRoom으로 DesktopHomeScreen이 이어서 펼쳐 보여줌) 그 방을 연다.
+/// 좁은(모바일) 화면은 requestOpenRoom만으로는 안 열린다 — RoomListScreen(좁은 화면의 홈)은
+/// message_bubble.dart의 프로필 대화상자 등과 마찬가지로 requestOpenRoom의 "대기 중인 방"을
+/// 소비하지 않고 항상 직접 push된 ChatScreen으로만 열리므로, 여기서도 같은 패턴대로 직접
+/// push한다.
 Future<void> showNotificationsCenterDialog(
   BuildContext context,
   Session session,
@@ -262,15 +267,29 @@ Future<void> showNotificationsCenterDialog(
     builder: (dialogContext) => Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        width: 420,
-        height: 640,
+      // 폭을 고정하면(SizedBox) 좁은 폰 화면에서 Dialog의 기본 insetPadding(좌우 40씩)보다
+      // 넓어져 넘친다 — FloatingDialog와 같은 방식으로 최댓값만 주고 좁은 화면에서는
+      // 알아서 줄어들게 한다.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 640),
         child: NotificationsPanel(
           session: session,
           onClose: () => Navigator.of(dialogContext).pop(),
           onSelectRoom: (room) {
             Navigator.of(dialogContext).pop();
-            session.requestOpenRoom(room);
+            if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
+              session.requestOpenRoom(room);
+            } else {
+              // 좁은 화면에서도 다른 팀의 방일 수 있으니 팀 전환만 requestOpenRoom에 맡기고
+              // (내부적으로 currentTeam만 바꿔줌 — _pendingOpenRoom은 이 경로에서 안 쓰임),
+              // 화면 전환 자체는 직접 push한다.
+              session.requestOpenRoom(room);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ChatScreen(session: session, room: room),
+                ),
+              );
+            }
           },
         ),
       ),

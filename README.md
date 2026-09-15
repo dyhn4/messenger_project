@@ -518,7 +518,7 @@ messenger_project/
 │  │  ├─ models/                  Team/Room/Message/Comment/AppUser
 │  │  └─ data/                    스티커 등 정적 데이터
 │  ├─ packages/conversation_shortcuts/  사내 전용 Flutter 플러그인
-│  ├─ android/                   Android 프로젝트(keystore/key.properties/google-services.json 위치)
+│  ├─ android/                   Android 프로젝트(keystore/key.properties 위치)
 │  ├─ windows/installer/         Inno Setup 스크립트(messenger.iss)
 │  └─ assets/                     아이콘, 서버 인증서(server_cert.pem) 등 빌드 내장 자산
 │
@@ -988,24 +988,45 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 FCM은 **Android 전용**입니다(Windows는 Firebase가 공식 지원하지 않아, 코드에서
 `Platform.isAndroid`로 완전히 분기 — `client/lib/main.dart`, `server/src/push.js` 참고).
-서비스 계정 키가 없어도 서버는 정상 기동하며, 그 경우 푸시 발송만 조용히 비활성화됩니다.
+Firebase 프로젝트를 아직 설정 안 했어도(또는 서비스 계정 키가 없어도) 서버/클라이언트 모두
+정상 동작하며, 그 경우 푸시 발송만 조용히 비활성화됩니다.
 
-필요한 파일 2개:
+**클라이언트 빌드에 `google-services.json`을 넣는 방식은 쓰지 않습니다.** 이 제품은 서버까지
+고객사가 직접 운영하는 자체 호스팅 제품이라, 고객사마다 앱을 따로 빌드해 줘야 하는 문제를
+피하려고 Firebase 설정 전체(클라이언트 초기화 값 + 서버 발송용 서비스 계정 키)를 **관리자
+콘솔**에서 입력받아 DB(`server_settings` 테이블)에 저장합니다. 그래서 APK/설치 프로그램은
+고객사와 무관하게 하나만 빌드하면 되고, 각 고객사가 자기 서버에서 자기 Firebase 프로젝트 값을
+넣는 것으로 끝납니다. 클라이언트는 `GET /firebase-client-config`(인증 불필요 — Android 클라이언트
+API 키는 패키지명+SHA-1로 제한돼 비밀값이 아닙니다)로 이 값을 받아 로컬에 캐싱하고, 코드로
+직접 `Firebase.initializeApp(options: FirebaseOptions(...))`을 호출합니다
+(`client/lib/services/fcm_config_cache.dart`, `main.dart`, `session.dart` 참고).
 
-| 파일 | 위치 | 용도 | Git |
-|---|---|---|---|
-| `google-services.json` | `client/android/app/google-services.json` | 클라이언트가 Firebase 프로젝트에 연결(패키지명 `com.teamtalk.messenger` 필요) | ⚠️ 현재 저장소에 커밋되어 있음 — [Git 관리 규칙](#git-관리-규칙) 참고 |
-| `firebase-service-account.json` | `server/firebase-service-account.json` | 서버가 FCM 메시지를 실제로 발송할 때 쓰는 관리자 키 | 커밋 금지(`.gitignore`에 있음) |
+**설정 절차 (관리자 콘솔 → 서버 관리 → 운영 현황 → FCM 설정)**
 
-**새 Firebase 프로젝트로 설정(또는 다른 계정으로 교체)하는 절차**
-
-1. [Firebase 콘솔](https://console.firebase.google.com/)에서 새 프로젝트 생성
+1. [Firebase 콘솔](https://console.firebase.google.com/)에서 프로젝트 생성
 2. Android 앱 추가 — 패키지 이름에 정확히 `com.teamtalk.messenger` 입력(다르면 알림이 안 옵니다)
-3. 다운로드한 `google-services.json`을 `client/android/app/google-services.json`에 덮어쓰기
-4. Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → "새 비공개 키 생성" → 다운로드한 JSON을
-   `server/firebase-service-account.json`으로 저장
-5. 서버 재시작(시작 시점에 이 파일 존재 여부를 한 번만 확인합니다)
-6. 클라이언트를 다시 빌드(`google-services.json`이 빌드에 반영되도록)
+3. 등록 후 나오는 4개 값을 관리자 콘솔에 그대로 입력 — Firebase 콘솔 화면에 바로 안 보이면
+   대신 다운로드한 `google-services.json`을 열어서 아래처럼 옮기면 됩니다(필드 이름이 관리자
+   콘솔 항목명과 다르게 적혀 있어서 헷갈리기 쉽습니다):
+
+   | 관리자 콘솔 항목 | `google-services.json` 안의 위치 |
+   |---|---|
+   | API 키 | `client[0].api_key[0].current_key` |
+   | 앱 ID | `client[0].client_info.mobilesdk_app_id` |
+   | 프로젝트 ID | `project_info.project_id` |
+   | 발신자 ID | `project_info.project_number` |
+
+4. Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → "새 비공개 키 생성" → 받은 JSON 파일 내용을
+   그대로 복사해서 관리자 콘솔의 서비스 계정 입력창에 붙여넣고 저장
+5. 저장 즉시 반영됩니다(서버 재시작 불필요 — `push.js`가 캐시를 지우고 다음 발송부터 새 설정을
+   씁니다). 클라이언트도 다음 로그인 시 새 값을 받아 초기화합니다.
+
+서버가 서비스 계정을 응답으로 다시 보여주는 일은 없습니다(`private_key` 노출 방지) — 설정
+여부와 어느 계정인지(`client_email`)만 보여줍니다. 이미 예전 방식(`server/firebase-service-account.json`
+파일)으로 설정해둔 서버는 그대로 동작합니다 — DB 값이 비어 있을 때만 이 파일을 폴백으로 봅니다.
+다만 파일을 나중에 새로 갖다놓거나 교체하는 경우, 그 전에 한 번이라도 발송을 시도해서 "설정
+없음" 상태가 이미 캐시됐다면 서버를 재시작해야 반영됩니다 — 관리자 콘솔에 JSON을 붙여넣어
+저장하면 이 문제 없이 즉시 반영되므로, 파일 방식보다 관리자 콘솔 쪽을 더 권장합니다.
 
 **설계 메모**: 알림은 `notification` 페이로드가 아니라 `data`(data-only)로만 보냅니다 — 그래야
 앱이 완전히 꺼져 있을 때도 OS가 자체 렌더링하지 않고 `onBackgroundMessage` 핸들러가 호출되어,
@@ -1236,17 +1257,14 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 
 - `server/.env`, `server/.jwt-secret`, `server/.db-encryption-key`
 - `server/certs/`(TLS 개인키 포함)
-- `server/firebase-service-account.json`(FCM 발송용 Firebase 관리자 키)
+- `server/firebase-service-account.json`(FCM 발송용 Firebase 관리자 키 — 예전 방식의 폴백 파일.
+  새 설치는 관리자 콘솔에서 입력해 DB에 저장하므로 이 파일 자체가 없어도 됩니다)
 - `server/uploads/`, `server/releases/`, `server/db.json`
 - `client/android/key.properties`, `client/android/**/*.jks`, `client/android/**/*.keystore`
 - 그 외 각 플랫폼의 표준 빌드 산출물(`build/`, `.dart_tool/` 등)
 
-⚠️ **현재 상태 점검 결과**: `client/android/app/google-services.json`이 `.gitignore`에 없어서
-**현재 저장소에 커밋되어 있습니다**. Firebase Android 클라이언트 설정 파일은 앱 배포물(APK) 안에도
-어차피 포함되는 값이라 서비스 계정 키만큼 치명적인 비밀은 아니지만, 프로젝트 식별자/API 키가
-그대로 노출되므로 보통은 커밋하지 않는 편을 권장합니다. 저장소를 공개(public)로 전환하거나 다른
-사람과 공유할 계획이 있다면, `client/android/.gitignore`에 `google-services.json`을 추가하고
-`git rm --cached client/android/app/google-services.json`으로 추적을 해제하는 것을 고려하세요.
+`client/android/app/google-services.json`은 더 이상 빌드에서 쓰지 않습니다(FCM 설정 참고) —
+있어도 무시되니 지워도 되고, 실수로 커밋해도 예전만큼 걱정할 값은 아닙니다.
 
 ## 문제 해결
 
@@ -1255,7 +1273,7 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 | 클라이언트에서 서버 연결이 안 됨(TLS 오류) | 서버 PC의 LAN IP가 바뀌었거나 인증서가 재생성됨 → 서버 콘솔에 `pair` 입력 후 클라이언트에서 새 코드로 다시 페어링 |
 | `flutter build windows`가 심볼릭 링크 오류로 실패 | Windows 개발자 모드가 꺼져 있음 → `start ms-settings:developers`로 켜기 |
 | Android 기기에 apk 설치 시 "signatures do not match" | 기존 설치본과 서명이 다름(예: keystore 없이 디버그로 빌드) → [Android 릴리즈 서명](#android-릴리즈-서명)대로 `key.properties` 설정 후 재빌드, 또는 기존 앱 삭제 후 재설치 |
-| FCM 알림이 전혀 안 옴 | ① `server/firebase-service-account.json` 존재 확인(서버 시작 로그에 경고가 찍힘) ② `client/android/app/google-services.json`이 실제 빌드에 포함됐는지 확인 ③ Windows 클라이언트는 애초에 FCM 미지원(정상) |
+| FCM 알림이 전혀 안 옴 | ① 관리자 콘솔 → 서버 관리 → 운영 현황 → FCM 설정에서 4개 값과 서비스 계정이 다 채워져 있는지 확인 ② 클라이언트가 로그인 이후에야 이 값을 받아 초기화하므로, 설정 직후라면 한 번 재로그인해서 확인 ③ Windows 클라이언트는 애초에 FCM 미지원(정상) |
 | `npm run db:migrate` 실패 | `DATABASE_URL`이 올바른지, PostgreSQL 서비스가 떠있는지 확인. 스키마 충돌이면 `server/drizzle/meta/`의 마이그레이션 이력과 실제 DB 상태가 어긋난 것 — 백업 후 [DB 데이터 전부 삭제](#db-데이터-전부-삭제테이블-구조는-유지) 후 재적용을 고려 |
 | `npm run db:migrate`는 "성공"이라고 뜨는데 새 테이블/컬럼이 실제로는 안 보임 | `drizzle.__drizzle_migrations`에 기록된 시각(`created_at`)이 실제보다 미래로 잘못 들어가 있으면, 그보다 실제 시각이 이른 새 마이그레이션들이 "이미 적용됨"으로 착각되어 조용히 건너뛰어질 수 있다(과거 개발 DB에서 실제로 있었던 문제). `server` 폴더에서 `node scripts/check-migrations.mjs`(읽기 전용, DB를 고치지 않음)를 실행하면 어떤 마이그레이션이 빠졌는지와 실제 테이블 상태를 확인할 수 있다 |
 | pm2로 띄운 뒤 페어링 코드를 못 받음 | pm2는 콘솔 입력을 못 받음 → 서버가 떠있는 같은 PC에서 `npm run pair` 실행 |

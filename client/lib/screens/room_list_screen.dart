@@ -10,6 +10,7 @@ import '../widgets/my_avatar.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show showLeaveRoomDialog;
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/notifications_panel.dart';
 import '../widgets/team_switcher.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
@@ -119,7 +120,16 @@ class _RoomListScreenState extends State<RoomListScreen> {
       child: Scaffold(
         // 어느 탭인지는 아래 NavigationBar가 이미 보여주므로, 좁은 화면에서도 창 왼쪽 위는
         // PC와 똑같이 지금 보고 있는 팀(아이콘+이름+전환 버튼) 자리로 쓴다.
-        appBar: AppBar(title: TeamSwitcher(session: widget.session)),
+        appBar: AppBar(
+          title: TeamSwitcher(session: widget.session),
+          actions: [
+            NotificationBellButton(
+              session: widget.session,
+              onPressed: () =>
+                  showNotificationsCenterDialog(context, widget.session),
+            ),
+          ],
+        ),
         body: IndexedStack(
           index: _index,
           children: [

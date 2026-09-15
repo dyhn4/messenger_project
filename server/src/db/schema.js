@@ -162,6 +162,21 @@ export const serverSettings = pgTable('server_settings', {
   // 부서/직책을 어디에 두는지 — 'team'(기본, 팀마다 다르게: team_members) |
   // 'account'(계정 하나로: users). 회사 조직도가 하나뿐이면 'account'가 단순하다.
   orgScope: text('org_scope').notNull().default('team'),
+  // FCM(푸시 알림) 설정 — 예전엔 클라이언트 빌드에 google-services.json을 박아넣고 서버
+  // 파일로 firebase-service-account.json을 직접 놓아야 했는데, 이 제품을 여러 고객사에
+  // 자체 호스팅으로 판매하면서 고객사마다 앱을 따로 빌드해줘야 하는 문제가 생겼다. 그래서
+  // 클라이언트 초기화용 4개 값(apiKey/appId/projectId/messagingSenderId — Android 클라이언트
+  // API 키는 패키지명+SHA-1로 제한돼 비밀값이 아니다)은 여기 DB에 두고 앱이 서버에서
+  // 받아가게 하고(GET /firebase-client-config, push.js), 서버가 FCM을 보낼 때 쓰는 서비스
+  // 계정 키(private_key 포함, 진짜 비밀값)도 관리자 콘솔에서 붙여넣어 여기 저장한다
+  // (fcmServiceAccountJson). 그러면 APK 하나로 모든 고객사가 쓰고, 고객사가 자기 Firebase
+  // 프로젝트 값을 스스로 입력하는 것으로 끝난다 — 벤더가 고객사 키를 받아 재빌드할 필요가
+  // 없다(server/src/admin.js의 /admin/fcm-settings 참고).
+  fcmApiKey: text('fcm_api_key'),
+  fcmAppId: text('fcm_app_id'),
+  fcmProjectId: text('fcm_project_id'),
+  fcmMessagingSenderId: text('fcm_messaging_sender_id'),
+  fcmServiceAccountJson: text('fcm_service_account_json'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -12,7 +12,7 @@ import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
-/// 운영 현황 / 회원 / 팀 / 감사 로그 네 탭.
+/// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 다섯 탭.
 ///
 /// 여기 있는 모든 동작은 서버 src/admin.js가 매 요청마다 isServerAdmin을 다시 확인하므로,
 /// 이 화면이 열려 있다는 것만으로 권한이 생기지는 않는다.
@@ -30,7 +30,7 @@ class AdminConsoleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: FloatingDialog(
         title: '서버 관리',
         maxWidth: 820,
@@ -47,6 +47,7 @@ class AdminConsoleScreen extends StatelessWidget {
                 Tab(text: '회원'),
                 Tab(text: '팀'),
                 Tab(text: '감사 로그'),
+                Tab(text: 'FCM 설정'),
               ],
             ),
             const SizedBox(height: 12),
@@ -57,6 +58,7 @@ class AdminConsoleScreen extends StatelessWidget {
                   _UsersTab(session: session),
                   _TeamsTab(session: session),
                   _AuditTab(session: session),
+                  _FcmTab(session: session),
                 ],
               ),
             ),
@@ -454,6 +456,180 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// "FCM 설정" 편집기 — 클라이언트 초기화용 4개 값(입력창에 현재 값이 그대로 보임, 비밀값
+/// 아님)과 서버 발송용 서비스 계정 키(붙여넣기 전용 — 서버가 private_key를 절대 다시
+/// 내려주지 않으므로 항상 빈 채로 시작하고, 현재 설정 여부만 위에 문구로 보여준다).
+class _FcmSettingsEditor extends StatefulWidget {
+  final Session session;
+  const _FcmSettingsEditor({required this.session});
+
+  @override
+  State<_FcmSettingsEditor> createState() => _FcmSettingsEditorState();
+}
+
+class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
+  FcmSettings? _settings;
+  String? _error;
+  bool _saving = false;
+  final _apiKey = TextEditingController();
+  final _appId = TextEditingController();
+  final _projectId = TextEditingController();
+  final _senderId = TextEditingController();
+  final _serviceAccountJson = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _apiKey.dispose();
+    _appId.dispose();
+    _projectId.dispose();
+    _senderId.dispose();
+    _serviceAccountJson.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final settings = await widget.session.api!.fetchFcmSettings();
+      if (!mounted) return;
+      setState(() {
+        _settings = settings;
+        _apiKey.text = settings.apiKey;
+        _appId.text = settings.appId;
+        _projectId.text = settings.projectId;
+        _senderId.text = settings.messagingSenderId;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      // 서비스 계정은 붙여넣은 게 있을 때만 같이 보낸다 — 안 그러면 4개 값만 고치려다
+      // 이미 설정된 서비스 계정을 빈 값으로 덮어써 날려버릴 수 있다(서버는 빈 문자열을
+      // "설정 해제"로 해석한다 — admin.js 참고).
+      final serviceAccountJson = _serviceAccountJson.text.trim();
+      await widget.session.api!.updateFcmSettings(
+        apiKey: _apiKey.text.trim(),
+        appId: _appId.text.trim(),
+        projectId: _projectId.text.trim(),
+        messagingSenderId: _senderId.text.trim(),
+        serviceAccountJson: serviceAccountJson.isEmpty
+            ? null
+            : serviceAccountJson,
+      );
+      _serviceAccountJson.clear();
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('FCM 설정을 저장했습니다.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('실패: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) return Text(_error!);
+    final settings = _settings;
+    if (settings == null) {
+      return const SizedBox(
+        height: 24,
+        width: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _FcmField(label: 'API 키', controller: _apiKey),
+        const SizedBox(height: 8),
+        _FcmField(label: '앱 ID', controller: _appId),
+        const SizedBox(height: 8),
+        _FcmField(label: '프로젝트 ID', controller: _projectId),
+        const SizedBox(height: 8),
+        _FcmField(label: '발신자 ID', controller: _senderId),
+        const SizedBox(height: 16),
+        Text(
+          settings.serviceAccountConfigured
+              ? '서비스 계정: 설정됨 (${settings.serviceAccountEmail ?? '확인 불가'})'
+              : '서비스 계정: 설정 안 됨 — 아래 설정 전까지 푸시가 발송되지 않습니다.',
+          style: TextStyle(
+            color: settings.serviceAccountConfigured
+                ? null
+                : Theme.of(context).colorScheme.error,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '서비스 계정 키 JSON 붙여넣기 (바꿀 때만 입력 — 비워두면 기존 값을 유지합니다)',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: _serviceAccountJson,
+          maxLines: 4,
+          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+          decoration: const InputDecoration(
+            isDense: true,
+            hintText: '{"type": "service_account", ...}',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('저장'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FcmField extends StatelessWidget {
+  final String label;
+  final TextEditingController controller;
+  const _FcmField({required this.label, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        isDense: true,
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
     );
   }
 }
@@ -1503,6 +1679,35 @@ class _AuditRow extends StatelessWidget {
             ].where((s) => s.isNotEmpty).join(' '),
             style: Theme.of(context).textTheme.bodySmall,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ───────────────────────────── FCM 설정 ─────────────────────────────
+
+class _FcmTab extends StatelessWidget {
+  final Session session;
+  const _FcmTab({required this.session});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '푸시 알림(FCM)은 이 서버의 Firebase 프로젝트 값을 입력해야 동작합니다. '
+            'Firebase 콘솔에서 프로젝트를 만들고 안드로이드 앱(패키지명 com.teamtalk.messenger)을 '
+            '등록하면 아래 4개 값을 확인할 수 있고, 서비스 계정 키(발송용)는 '
+            '"프로젝트 설정 > 서비스 계정 > 새 비공개 키 생성"으로 받은 JSON 파일 내용을 그대로 붙여넣습니다.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 12),
+          _FcmSettingsEditor(session: session),
         ],
       ),
     );

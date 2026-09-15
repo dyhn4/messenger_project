@@ -314,6 +314,28 @@ class ApiClient {
     }
   }
 
+  /// 클라이언트가 Firebase.initializeApp()에 쓸 4개 값(GET /firebase-client-config) —
+  /// fetchLatestVersion과 같은 성격의 인증 불필요 엔드포인트. 관리자가 아직 FCM을 설정
+  /// 안 했으면 필드가 전부 null로 온다(session.dart가 이 경우 FCM을 조용히 비활성화한다).
+  Future<Map<String, String?>?> fetchFirebaseClientConfig() async {
+    try {
+      final res = await _client
+          .get(_uri('/firebase-client-config'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      return {
+        'apiKey': body['apiKey'] as String?,
+        'appId': body['appId'] as String?,
+        'projectId': body['projectId'] as String?,
+        'messagingSenderId': body['messagingSenderId'] as String?,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 업데이트 설치 파일(windows/android)을 스트리밍으로 받는다. 인증 불필요 엔드포인트라
   /// fetchLatestVersion과 마찬가지로 로그인 여부와 무관하게 호출할 수 있다. 응답 본문을
   /// 통째로 메모리에 올리지 않고 스트림으로 넘겨서 호출부가 진행률을 계산하며 파일에 써넣게 한다.
@@ -655,6 +677,29 @@ class ApiClient {
       'teamCreation': ?teamCreation,
       'teamInviteLinkCreation': ?teamInviteLinkCreation,
       'orgScope': ?orgScope,
+    });
+  }
+
+  /// 관리자 콘솔의 "FCM 설정" — 지금 저장된 값(서비스 계정의 private_key는 빼고).
+  Future<FcmSettings> fetchFcmSettings() async => FcmSettings.fromJson(
+    await _get('/api/admin/fcm-settings') as Map<String, dynamic>,
+  );
+
+  /// FCM 설정 변경 — 넘긴 항목만 바뀐다. serviceAccountJson에 빈 문자열을 넘기면 설정을
+  /// 해제한다(서버가 그렇게 해석 — admin.js 참고).
+  Future<void> updateFcmSettings({
+    String? apiKey,
+    String? appId,
+    String? projectId,
+    String? messagingSenderId,
+    String? serviceAccountJson,
+  }) async {
+    await _patch('/api/admin/fcm-settings', {
+      'apiKey': ?apiKey,
+      'appId': ?appId,
+      'projectId': ?projectId,
+      'messagingSenderId': ?messagingSenderId,
+      'serviceAccountJson': ?serviceAccountJson,
     });
   }
 

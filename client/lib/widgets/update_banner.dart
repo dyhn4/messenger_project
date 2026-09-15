@@ -69,7 +69,11 @@ class _UpdateBannerState extends State<UpdateBanner> {
                             size: 16,
                             color: colors.onPrimaryContainer,
                           ),
-                          tooltip: '닫기',
+                          // tooltip을 넣으면 안 된다 — 이 배너는 main.dart의
+                          // MaterialApp.builder에서 Navigator와 형제로 붙는 자리라
+                          // (다이얼로그 위에도 계속 떠 있어야 해서 일부러 그렇게 뒀다) Navigator가
+                          // 만드는 Overlay의 자손이 아니다. Tooltip은 Overlay 조상이 꼭 있어야
+                          // 해서 "No Overlay widget found" 에러로 화면이 깨진다.
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(
                             minWidth: 28,

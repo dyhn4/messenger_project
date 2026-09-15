@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Router } from 'express';
+import { cert } from 'firebase-admin/app';
 import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
 import { UPLOADS_DIR } from './config.js';
 import { listAuditLogs } from './db/queries/audit.js';
 import { countMessages, countMessagesToday, countRooms, countTeams } from './db/queries/stats.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
+import { invalidateMessagingCache } from './push.js';
 import {
   deletePositionOption,
   findPositionOptionByLabel,
@@ -113,6 +115,77 @@ export function createAdminRouter(io) {
     }
     recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
     res.json(updated);
+  });
+
+  /** 클라이언트 Firebase 초기화용 4개 값은 그대로 보여준다(비밀값 아님 — Android 클라이언트
+   * API 키는 패키지명+SHA-1로 제한된다). 서비스 계정은 private_key를 다시 내려보내지 않고,
+   * 설정 여부와 어느 계정인지(client_email)만 알려준다. */
+  router.get('/admin/fcm-settings', async (req, res) => {
+    const settings = await getServerSettings();
+    let serviceAccountEmail = null;
+    if (settings.fcmServiceAccountJson) {
+      try {
+        serviceAccountEmail = JSON.parse(settings.fcmServiceAccountJson).client_email ?? null;
+      } catch {
+        // 무시 — 아래서 serviceAccountConfigured만 true로 보여준다.
+      }
+    }
+    res.json({
+      apiKey: settings.fcmApiKey ?? '',
+      appId: settings.fcmAppId ?? '',
+      projectId: settings.fcmProjectId ?? '',
+      messagingSenderId: settings.fcmMessagingSenderId ?? '',
+      serviceAccountConfigured: !!settings.fcmServiceAccountJson,
+      serviceAccountEmail,
+    });
+  });
+
+  /** 넘긴 항목만 바꾼다. serviceAccountJson은 Firebase 콘솔에서 받은 서비스 계정 키 JSON을
+   * 그대로 붙여넣은 문자열 — 올바른 서비스 계정 키 형태인지(type/private_key/client_email)
+   * 확인하고 저장한다. 저장 후 push.js의 캐시를 지워서 서버 재시작 없이 다음 발송부터 바로
+   * 반영되게 한다. */
+  router.patch('/admin/fcm-settings', async (req, res) => {
+    const body = req.body ?? {};
+    const fields = {};
+    for (const key of ['apiKey', 'appId', 'projectId', 'messagingSenderId']) {
+      if (key in body) {
+        if (typeof body[key] !== 'string') {
+          return res.status(400).json({ error: `${key}는 문자열이어야 합니다.` });
+        }
+        fields[`fcm${key[0].toUpperCase()}${key.slice(1)}`] = body[key].trim() || null;
+      }
+    }
+    if ('serviceAccountJson' in body) {
+      const raw = body.serviceAccountJson;
+      if (typeof raw !== 'string' || !raw.trim()) {
+        fields.fcmServiceAccountJson = null; // 빈 문자열 = 설정 해제.
+      } else {
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return res.status(400).json({ error: '서비스 계정 JSON 형식이 올바르지 않습니다.' });
+        }
+        if (parsed.type !== 'service_account' || !parsed.private_key || !parsed.client_email) {
+          return res.status(400).json({ error: 'Firebase 서비스 계정 키 JSON이 아닌 것 같습니다.' });
+        }
+        try {
+          // 개인키 형식이 실제로 파싱되는지 여기서 미리 확인한다 — 안 하면 저장은 성공한
+          // 것처럼 보이고, 나중에 첫 푸시를 보내려 할 때(push.js)에야 서버 콘솔에만
+          // 조용히 에러가 남아 관리자가 원인을 알기 어렵다.
+          cert(parsed);
+        } catch (e) {
+          return res.status(400).json({ error: `서비스 계정 키를 확인할 수 없습니다: ${e.message}` });
+        }
+        fields.fcmServiceAccountJson = raw.trim();
+      }
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+
+    await updateServerSettings(fields);
+    invalidateMessagingCache();
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: 'FCM 설정 변경' });
+    res.json({ ok: true });
   });
 
   /** 직책 목록 — '부서·직책 관리 범위'가 '계정 단위'일 때, 회원 탭의 직책 수정이 자유 입력

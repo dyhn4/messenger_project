@@ -211,6 +211,13 @@
       "when": 1789365600130,
       "tag": "0029_deep_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1789457484030,
+      "tag": "0030_nosy_roulette",
+      "breakpoints": true
     }
   ]
 }

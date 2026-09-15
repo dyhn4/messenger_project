@@ -449,6 +449,9 @@ class _ChatPanelState extends State<ChatPanel> {
     if (widget.session.openStickerPickerOwner.value == this) {
       widget.session.openStickerPickerOwner.value = null;
     }
+    // 이모티콘 그리드를 누른 시점엔 입력칸이 포커스를 안 갖고 있어서, 곧바로 Enter를 눌러도
+    // 보내지지 않는다 — 포커스를 입력칸으로 되돌려서 Enter 한 번으로 바로 보낼 수 있게 한다.
+    _chatInputBarKey.currentState?.focusInput();
   }
 
   void _removeSticker() => setState(() => _pendingSticker = null);
@@ -689,6 +692,18 @@ class _ChatPanelState extends State<ChatPanel> {
                                         boundary);
 
                             return Padding(
+                              // 메시지 id를 key로 줘야 한다 — 안 주면 새 메시지가 맨 위(index
+                              // 0)에 끼어들 때마다 각 슬롯(i)에 그려지는 메시지가 한 칸씩
+                              // 밀리는데, Flutter는 key 없이는 "슬롯 i의 위젯"을 그대로
+                              // 재사용해버려서 그 슬롯의 State(MessageBubble 안 AnimatedContainer
+                              // 포함)가 전혀 다른 메시지에 그대로 옮겨 붙는다. 이모티콘(패딩 0,
+                              // 배경 없음)과 일반 말풍선(패딩 있음, 배경색 있음) 사이에서 이게
+                              // 일어나면 AnimatedContainer가 그 차이를 "속성이 바뀐 것"으로 보고
+                              // 500ms 동안 커졌다 작아지는 애니메이션을 재생한다 — 이모티콘을
+                              // 보낸 뒤 새 메시지가 올 때마다 화면이 스무스하게 움직이는 것처럼
+                              // 보였던 원인이 이것이다. key로 메시지 정체성을 고정하면 슬롯이
+                              // 밀려도 같은 메시지의 위젯은 항상 같은 위젯으로 남는다.
+                              key: ValueKey(m.id),
                               // 맨 아래(가장 최근) 항목에만 아래쪽 여백을 붙인다 —
                               // 리스트의 padding이 아니라 항목 안에 넣는 이유는
                               // _kListBottomPadding 주석 참고.
@@ -699,7 +714,8 @@ class _ChatPanelState extends State<ChatPanel> {
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   ?divider,
-                                  if (isFirstUnread) const ReadUpToHereDivider(),
+                                  if (isFirstUnread)
+                                    const ReadUpToHereDivider(),
                                   row,
                                 ],
                               ),

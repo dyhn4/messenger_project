@@ -4,6 +4,7 @@ import '../models/team.dart';
 import '../services/session.dart';
 import '../widgets/account_menu_button.dart';
 import '../widgets/my_avatar.dart';
+import '../widgets/notifications_panel.dart';
 import '../widgets/team_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'org_chart_screen.dart';
@@ -56,6 +57,19 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          NotificationBellButton(
+            session: widget.session,
+            onPressed: () =>
+                showNotificationsCenterDialog(context, widget.session),
+          ),
+          // 서버 전체 팀/회원 구조를 보는 기능이라, 계정 등급이 관리자이거나 서버 운영자인
+          // 사람에게만 보인다(server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
+          if (widget.session.canViewOrgChart)
+            IconButton(
+              tooltip: '조직도',
+              icon: const Icon(Icons.account_tree_outlined),
+              onPressed: () => showOrgChartScreen(context, widget.session),
+            ),
           // 삼선 메뉴 왼쪽에 로그인한 사용자 프로필(사진+이름)을 보여준다.
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -71,14 +85,6 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
               ],
             ),
           ),
-          // 서버 전체 팀/회원 구조를 보는 기능이라, 계정 등급이 관리자이거나 서버 운영자인
-          // 사람에게만 보인다(server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
-          if (widget.session.canViewOrgChart)
-            IconButton(
-              tooltip: '조직도',
-              icon: const Icon(Icons.account_tree_outlined),
-              onPressed: () => showOrgChartScreen(context, widget.session),
-            ),
           AccountMenuButton(session: widget.session),
         ],
       ),

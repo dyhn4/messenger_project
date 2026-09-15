@@ -76,6 +76,11 @@ class CommentInputBarState extends State<CommentInputBar> {
 
   bool get _uploading => _attachments.any((a) => a.result == null);
 
+  /// ChatInputBarState.focusInput과 같은 이유 — 이모티콘을 고른 직후 입력칸으로 포커스를
+  /// 되돌려서, 곧바로 Enter를 눌러도 보내지도록 한다(message_thread_screen.dart의
+  /// _selectSticker 참고).
+  void focusInput() => _focusNode.requestFocus();
+
   @override
   void initState() {
     super.initState();

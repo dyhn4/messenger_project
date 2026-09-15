@@ -8,6 +8,7 @@ import '../widgets/account_menu_button.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/favorite_star.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/notifications_panel.dart';
 import '../widgets/pagination.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
@@ -49,6 +50,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   bool _searchOpen = false;
   bool _membersOpen = false;
   bool _filesOpen = false;
+  bool _notificationsOpen = false;
   String? _highlightMessageId;
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
 
@@ -175,6 +177,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     }
   }
 
+  /// "알림 센터"에서 방을 누르면 — 다른 팀 방일 수 있으므로(그게 이 패널의 핵심 목적이다)
+  /// _selectRoom으로 바로 바꾸지 않고 requestOpenRoom을 거친다. 그 방이 지금 보고 있는
+  /// 팀이 아니면 currentTeam을 먼저 그 팀으로 바꾸고 "펼쳐서 보여줄 방"을 예약해두는데,
+  /// _onSessionChanged가 곧이어 그 예약을 소비해서 _selectRoom을 대신 호출해준다(main.dart의
+  /// 알림 클릭 처리, org_chart_screen.dart의 멤버 선택과 같은 패턴).
+  void _openNotificationRoom(Room room) {
+    setState(() => _notificationsOpen = false);
+    widget.session.requestOpenRoom(room);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -187,6 +199,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               if (_membersOpen) {
                 _searchOpen = false;
                 _filesOpen = false;
+                _notificationsOpen = false;
                 _threadMessage = null;
               }
             }),
@@ -195,6 +208,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               if (_searchOpen) {
                 _membersOpen = false;
                 _filesOpen = false;
+                _notificationsOpen = false;
                 _threadMessage = null;
               }
             }),
@@ -203,6 +217,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               if (_filesOpen) {
                 _searchOpen = false;
                 _membersOpen = false;
+                _notificationsOpen = false;
+                _threadMessage = null;
+              }
+            }),
+            onToggleNotifications: () => setState(() {
+              _notificationsOpen = !_notificationsOpen;
+              if (_notificationsOpen) {
+                _searchOpen = false;
+                _membersOpen = false;
+                _filesOpen = false;
                 _threadMessage = null;
               }
             }),
@@ -247,6 +271,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                       session: widget.session,
                       initialRoomId: _selectedRoom?.id,
                       onClose: () => setState(() => _filesOpen = false),
+                    ),
+                  ),
+                ],
+                if (_notificationsOpen) ...[
+                  const VerticalDivider(width: 1),
+                  SizedBox(
+                    width: _sidePanelWidth,
+                    child: NotificationsPanel(
+                      session: widget.session,
+                      onClose: () => setState(() => _notificationsOpen = false),
+                      onSelectRoom: _openNotificationRoom,
                     ),
                   ),
                 ],
@@ -435,11 +470,13 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onShowMembers;
   final VoidCallback onToggleSearch;
   final VoidCallback onOpenFiles;
+  final VoidCallback onToggleNotifications;
   const _TopBar({
     required this.session,
     required this.onShowMembers,
     required this.onToggleSearch,
     required this.onOpenFiles,
+    required this.onToggleNotifications,
   });
 
   @override
@@ -456,6 +493,10 @@ class _TopBar extends StatelessWidget {
               alignment: Alignment.centerLeft,
               child: TeamSwitcher(session: session),
             ),
+          ),
+          NotificationBellButton(
+            session: session,
+            onPressed: onToggleNotifications,
           ),
           IconButton(
             icon: const Icon(Icons.people_outline),

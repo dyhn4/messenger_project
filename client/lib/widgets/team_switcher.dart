@@ -69,7 +69,7 @@ class TeamSwitcher extends StatelessWidget {
                 children: [
                   Icon(Icons.grid_view_outlined, size: 20),
                   SizedBox(width: 10),
-                  Text('팀 목록'),
+                  Text('팀 리스트'),
                 ],
               ),
             ),

@@ -8,7 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
-import '../services/api_client.dart' show UploadCancelToken, UploadCancelledException;
+import '../services/api_client.dart'
+    show UploadCancelToken, UploadCancelledException;
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
@@ -82,6 +83,12 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// (사용자가 큰 파일을 올리는 동안 텍스트만 먼저 보내는 것도 헷갈릴 수 있어, 업로드가 다
   /// 끝날 때까지 통째로 막는 쪽을 택했다).
   bool get _uploading => _attachments.any((a) => a.result == null);
+
+  /// 이모티콘 패널에서 하나를 고르면(chat_panel.dart의 _selectSticker) 부모가 GlobalKey로
+  /// 이걸 불러 입력칸에 포커스를 되돌린다 — 안 그러면 이모티콘을 클릭한 뒤 곧바로 Enter를
+  /// 눌러도 _handleKey의 "입력칸이 포커스를 갖고 있을 때만 Enter=보내기" 조건에 걸려 아무
+  /// 일도 안 일어난다(이모티콘 그리드 칸을 누른 시점엔 입력칸이 포커스를 안 갖고 있으므로).
+  void focusInput() => _focusNode.requestFocus();
 
   @override
   void initState() {
@@ -365,21 +372,19 @@ class ChatInputBarState extends State<ChatInputBar> {
                 return Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.image_outlined),
-                      onPressed: _sending ? null : _pickImage,
-                      tooltip: '이미지 보내기',
-                    ),
-                    IconButton(
                       icon: Icon(
                         Icons.emoji_emotions_outlined,
                         color: widget.stickerPickerOpen
                             ? Theme.of(context).colorScheme.primary
                             : null,
                       ),
-                      onPressed: _sending
-                          ? null
-                          : widget.onToggleStickerPicker,
+                      onPressed: _sending ? null : widget.onToggleStickerPicker,
                       tooltip: '이모티콘',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.image_outlined),
+                      onPressed: _sending ? null : _pickImage,
+                      tooltip: '이미지 보내기',
                     ),
                     IconButton(
                       icon: const Icon(Icons.attach_file),
@@ -422,4 +427,3 @@ class ChatInputBarState extends State<ChatInputBar> {
     );
   }
 }
-

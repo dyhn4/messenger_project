@@ -120,6 +120,13 @@ class Session extends ChangeNotifier {
   /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함). 로그인/앱 시작 직후 팀 선택 화면이 이걸 그린다.
   final List<Team> teams = [];
 
+  /// "알림 센터"(desktop_home_screen.dart)에 보여줄 대상 — 안 읽은 메시지가 있는 방 전부.
+  /// 지금 보고 있는 팀도 포함한다(여러 팀에 걸친 안읽음을 한 번에 모아 보는 게 목적이라
+  /// currentTeam으로 거르지 않는다). 뮤트/숨김 둘 다 "목록 화면에 안 보이게 해달라"는
+  /// 뜻일 뿐 "안 읽었다는 사실 자체를 숨겨달라"는 뜻은 아니므로 거르지 않는다 — 숨긴
+  /// DM이라도 상대가 새로 보내면 안읽음이 생기고, 그건 여기서 꼭 보여야 한다.
+  List<Room> get unreadRooms => rooms.where((r) => r.unreadCount > 0).toList();
+
   /// 지금 들어가 있는 팀. null이면 아직 팀을 안 골랐다는 뜻이라 팀 선택 화면이 뜬다
   /// (home_screen.dart) — 로그아웃 후 로그인하거나 앱을 새로 켰을 때가 그 경우다.
   Team? currentTeam;

@@ -79,6 +79,9 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     if (widget.session.openStickerPickerOwner.value == this) {
       widget.session.openStickerPickerOwner.value = null;
     }
+    // chat_panel.dart의 _selectSticker와 같은 이유 — 포커스를 입력칸으로 되돌려서 Enter로
+    // 바로 보낼 수 있게 한다.
+    _commentInputBarKey.currentState?.focusInput();
   }
 
   void _removeSticker() => setState(() => _pendingSticker = null);

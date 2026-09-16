@@ -125,7 +125,7 @@ export async function notifyOfflineMembers({
   room,
   entry,
   roomTag,
-  kind, // 'message' | 'comment'
+  kind, // 'message' | 'comment' | 'announcement'
 }) {
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
@@ -139,7 +139,13 @@ export async function notifyOfflineMembers({
   const preview = room.isSecret ? SECRET_PREVIEW_PLACEHOLDER : previewFor(entry);
   // 안드로이드는 title을 통째로 쓰지 않고 "보낸사람"과 "대화방 이름"을 따로 받아서 대화
   // 레이아웃을 그린다(notification_service.dart 참고) — 그래서 합친 title과 별개로 조각도 보낸다.
-  const conversationTitle = roomTag ? (kind === 'comment' ? `${roomTag}·댓글` : roomTag) : null;
+  const conversationTitle = roomTag
+    ? kind === 'comment'
+      ? `${roomTag}·댓글`
+      : kind === 'announcement'
+        ? `${roomTag}·공지`
+        : roomTag
+    : null;
   const title = conversationTitle ? `${senderName} [${conversationTitle}]` : senderName;
   const avatarUrl = sender?.avatarUrl ? signFileUrl(sender.avatarUrl) : null;
 

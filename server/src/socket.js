@@ -3,7 +3,14 @@ import { verifySocketToken } from './auth.js';
 import { activeCallStatesFor, callSummaryText, joinCall, leaveAllCallsForSocket, leaveCall } from './calls.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { insertMessage, markMessageRead } from './db/queries/messages.js';
-import { findRoomById, isRoomMember, listRoomMemberIds, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
+import {
+  findRoomById,
+  isRoomMember,
+  listRoomMemberIds,
+  listRoomsForUser,
+  setMemberLastRead,
+  setMemberLastReadAnnouncementAt,
+} from './db/queries/rooms.js';
 import { postSystemMessage, unhideDmForOtherMembers } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
@@ -144,6 +151,18 @@ export function registerSocket(io) {
       await setMemberLastRead(room.id, socket.data.userId, lastReadAt);
 
       io.to(room.id).emit('room:read', { roomId: room.id, userId: socket.data.userId, lastReadAt });
+    });
+
+    // payload: { roomId } — 공지 목록/상세를 실제로 열었다는 뜻(room:read와 별개 —
+    // announcements.js 주석 참고). 다른 사람들에겐 의미 없는 값이라 본인의 다른 기기만
+    // 동기화되도록 user: 방에만 알린다(favorite/muted 등 개인 설정과 같은 방식).
+    socket.on('announcement:read', async (payload) => {
+      const room = await findRoomById(payload?.roomId);
+      if (!room || !(await isRoomMember(room.id, socket.data.userId))) return;
+
+      const lastReadAt = Date.now();
+      await setMemberLastReadAnnouncementAt(room.id, socket.data.userId, lastReadAt);
+      io.to(`user:${socket.data.userId}`).emit('announcement:read', { roomId: room.id, lastReadAt });
     });
 
     // payload: { roomId, messageId } — 비밀 대화 메시지가 실제로 화면에 노출됐다는 신호.

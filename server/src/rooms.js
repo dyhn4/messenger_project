@@ -9,6 +9,7 @@ import {
   getDmHistoryFloor,
   getMemberFavorite,
   getMemberHidden,
+  getMemberLastReadAnnouncementAt,
   getMemberMuted,
   getRoomLastReadMap,
   insertRoom,
@@ -49,6 +50,7 @@ import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
 import { previewFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
+import { latestAnnouncementDtoFor } from './announcements.js';
 
 async function resolveMembers(roomId) {
   return (await listRoomMemberUsers(roomId)).map(publicUser);
@@ -110,6 +112,11 @@ export async function toRoomDto(room, requesterId) {
     lastActivityAt,
     lastMessagePreview,
     isSecret: !!room.isSecret,
+    // 토픽방 채팅 화면 상단 배너용 — 방을 열 때 별도 요청 없이 바로 그릴 수 있게 방 DTO에
+    // 얹는다(announcements.js의 latestAnnouncementDtoFor). 그룹/DM은 공지가 없는 기능이라
+    // 쿼리 자체를 건너뛴다.
+    latestAnnouncement:
+      room.type === 'topic' ? await latestAnnouncementDtoFor(room.id) : null,
   };
   if (room.isSecret) {
     // 비밀 대화 상태(핸드셰이크 진행 여부/자동 삭제 타이머)도 방 목록에 실어 보낸다 —
@@ -140,6 +147,13 @@ export async function toRoomDto(room, requesterId) {
     dto.favorite = await getMemberFavorite(room.id, requesterId);
     dto.muted = await getMemberMuted(room.id, requesterId);
     dto.hidden = room.type === 'dm' ? await getMemberHidden(room.id, requesterId) : false;
+    // 알림 센터에 "안 읽은 공지"로 띄울지 — 내가 직접 쓴 글이면 읽은 걸로 치고, 공지 목록/
+    // 상세를 실제로 열어본 적(lastReadAnnouncementAt) 없이 그보다 최근에 올라온 고정 공지가
+    // 있으면 true. 방에 들어와 있기만 해도 올라가는 일반 lastRead와는 다른 값을 쓴다.
+    dto.hasUnreadAnnouncement =
+      dto.latestAnnouncement != null &&
+      dto.latestAnnouncement.authorId !== requesterId &&
+      (await getMemberLastReadAnnouncementAt(room.id, requesterId)) < dto.latestAnnouncement.createdAt;
   }
   return dto;
 }

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../models/admin.dart';
+import '../models/announcement.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/invite_link.dart';
@@ -1085,6 +1086,79 @@ class ApiClient {
     return list
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// 토픽방 공지 히스토리(최신순) — server/src/announcements.js 참고.
+  Future<List<Announcement>> fetchAnnouncements(String roomId) async {
+    final list = await _get('/api/rooms/$roomId/announcements') as List;
+    return list
+        .map((e) => Announcement.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 공지 작성 — 새로 쓴 것이 자동으로 그 방의 "지금 고정된 공지"가 된다. 토픽을 만들 수
+  /// 있는 사람만 가능(서버가 다시 확인 — canCreateTopic과 같은 권한).
+  Future<Announcement> createAnnouncement(String roomId, String text) async {
+    return Announcement.fromJson(
+      await _post('/api/rooms/$roomId/announcements', {'text': text})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 공지 수정 — 본인 작성 글만 가능(서버가 다시 확인).
+  Future<Announcement> updateAnnouncement(
+    String roomId,
+    String announcementId,
+    String text,
+  ) async {
+    return Announcement.fromJson(
+      await _patch(
+            '/api/rooms/$roomId/announcements/$announcementId',
+            {'text': text},
+          )
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 공지 삭제 — 본인 작성 글만 가능. 히스토리에서도 완전히 사라진다.
+  Future<void> deleteAnnouncement(String roomId, String announcementId) async {
+    await _delete('/api/rooms/$roomId/announcements/$announcementId');
+  }
+
+  /// "공지 내리기" — 삭제하지 않고 채팅방 상단 배너에서만 내린다.
+  Future<void> unpinAnnouncement(String roomId, String announcementId) async {
+    await _post(
+      '/api/rooms/$roomId/announcements/$announcementId/unpin',
+      const {},
+    );
+  }
+
+  /// 공지에 달린 댓글 목록(오래된 순).
+  Future<List<AnnouncementComment>> fetchAnnouncementComments(
+    String roomId,
+    String announcementId,
+  ) async {
+    final list =
+        await _get('/api/rooms/$roomId/announcements/$announcementId/comments')
+            as List;
+    return list
+        .map((e) => AnnouncementComment.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 공지에 댓글 작성 — 그 방의 멤버라면 누구나 가능.
+  Future<AnnouncementComment> postAnnouncementComment(
+    String roomId,
+    String announcementId,
+    String text,
+  ) async {
+    return AnnouncementComment.fromJson(
+      await _post(
+            '/api/rooms/$roomId/announcements/$announcementId/comments',
+            {'text': text},
+          )
+          as Map<String, dynamic>,
+    );
   }
 
   Future<Room> createTopic({

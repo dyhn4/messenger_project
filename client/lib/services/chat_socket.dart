@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
+import '../models/announcement.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
@@ -117,6 +118,33 @@ class CommentDeletedEvent {
       CommentDeletedEvent(
         id: json['id'] as String,
         messageId: json['messageId'] as String,
+        roomId: json['roomId'] as String,
+      );
+}
+
+/// 내(다른 기기 포함)가 공지 목록/상세를 열어서 읽음 처리됐다는 브로드캐스트(announcement:read)
+/// — user: 방에만 오므로 항상 "나"에 대한 것이다(room:read와 달리 userId가 없다).
+class AnnouncementReadEvent {
+  final String roomId;
+  final int lastReadAt;
+  const AnnouncementReadEvent({required this.roomId, required this.lastReadAt});
+
+  factory AnnouncementReadEvent.fromJson(Map<String, dynamic> json) =>
+      AnnouncementReadEvent(
+        roomId: json['roomId'] as String,
+        lastReadAt: (json['lastReadAt'] as num).toInt(),
+      );
+}
+
+/// 공지가 삭제되거나(announcement:deleted) 내려갔을 때(announcement:unpinned) 오는 최소 정보.
+class AnnouncementRemovedEvent {
+  final String id;
+  final String roomId;
+  const AnnouncementRemovedEvent({required this.id, required this.roomId});
+
+  factory AnnouncementRemovedEvent.fromJson(Map<String, dynamic> json) =>
+      AnnouncementRemovedEvent(
+        id: json['id'] as String,
         roomId: json['roomId'] as String,
       );
 }
@@ -330,6 +358,17 @@ class ChatSocket {
       StreamController<CommentDeletedEvent>.broadcast();
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
   final _callStateController = StreamController<CallState>.broadcast();
+  final _announcementController = StreamController<Announcement>.broadcast();
+  final _announcementUpdatedController =
+      StreamController<Announcement>.broadcast();
+  final _announcementDeletedController =
+      StreamController<AnnouncementRemovedEvent>.broadcast();
+  final _announcementUnpinnedController =
+      StreamController<AnnouncementRemovedEvent>.broadcast();
+  final _announcementCommentController =
+      StreamController<AnnouncementComment>.broadcast();
+  final _announcementReadController =
+      StreamController<AnnouncementReadEvent>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
   final _roleUpdatedController = StreamController<void>.broadcast();
@@ -398,6 +437,33 @@ class ChatSocket {
   /// 화상회의 상태가 바뀔 때마다(누가 들어오고 나갈 때) 그 방의 멤버 전원에게 온다.
   Stream<CallState> get callStates => _callStateController.stream;
 
+  /// 토픽방 공지가 새로 올라올 때마다(announcement:new) — 방 상단 배너와 공지 목록 화면이
+  /// 이걸로 즉시 갱신된다.
+  Stream<Announcement> get announcements => _announcementController.stream;
+
+  /// 공지가 수정됐을 때(announcement:updated) — 수정된 공지 전체가 온다(댓글 개수는 항상 0으로
+  /// 오므로 호출부에서 기존 값을 덮어쓰지 않고 text/editedAt만 반영해야 한다).
+  Stream<Announcement> get announcementUpdated =>
+      _announcementUpdatedController.stream;
+
+  /// 공지가 삭제됐을 때(announcement:deleted) — 목록에서도 완전히 사라져야 한다.
+  Stream<AnnouncementRemovedEvent> get announcementDeleted =>
+      _announcementDeletedController.stream;
+
+  /// "공지 내리기"로 배너에서 내려갔을 때(announcement:unpinned) — 목록(히스토리)엔 남고
+  /// "고정됨" 표시만 사라진다.
+  Stream<AnnouncementRemovedEvent> get announcementUnpinned =>
+      _announcementUnpinnedController.stream;
+
+  /// 공지에 새 댓글이 달렸을 때(announcement:comment:new).
+  Stream<AnnouncementComment> get announcementComments =>
+      _announcementCommentController.stream;
+
+  /// 내가(다른 기기 포함) 공지 목록/상세를 열어서 읽음 처리됐을 때(announcement:read) — 알림
+  /// 센터의 "안 읽은 공지" 표시를 다른 기기와 동기화하는 데 쓴다.
+  Stream<AnnouncementReadEvent> get announcementRead =>
+      _announcementReadController.stream;
+
   /// 연결이 끊겼다가 다시 붙었을 때(최초 연결 제외) 흘러나온다.
   /// 끊긴 동안 놓친 메시지/방 상태를 다시 받아오는 용도.
   Stream<void> get reconnected => _reconnectController.stream;
@@ -438,6 +504,7 @@ class ChatSocket {
   /// 겨우 풀렸다). 소켓이 만들어진 뒤라면 연결 전이어도 socket.io가 알아서 버퍼링해주므로
   /// (sendBuffer) 이 큐는 "_socket == null"인 구간만 메운다.
   final _pendingReadRoomIds = <String>{};
+  final _pendingAnnouncementReadRoomIds = <String>{};
 
   bool _looksLikeAuthError(dynamic err) {
     final message = err is Map ? err['message']?.toString() : err?.toString();
@@ -540,6 +607,36 @@ class ChatSocket {
         CommentDeletedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
+    socket.on('announcement:new', (data) {
+      _announcementController.add(
+        Announcement.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('announcement:updated', (data) {
+      _announcementUpdatedController.add(
+        Announcement.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('announcement:deleted', (data) {
+      _announcementDeletedController.add(
+        AnnouncementRemovedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('announcement:unpinned', (data) {
+      _announcementUnpinnedController.add(
+        AnnouncementRemovedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('announcement:comment:new', (data) {
+      _announcementCommentController.add(
+        AnnouncementComment.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('announcement:read', (data) {
+      _announcementReadController.add(
+        AnnouncementReadEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
     socket.on('call:state', (data) {
       _callStateController.add(
         CallState.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -613,6 +710,10 @@ class ChatSocket {
       socket.emit('room:read', {'roomId': roomId});
     }
     _pendingReadRoomIds.clear();
+    for (final roomId in _pendingAnnouncementReadRoomIds) {
+      socket.emit('announcement:read', {'roomId': roomId});
+    }
+    _pendingAnnouncementReadRoomIds.clear();
   }
 
   /// 메시지를 보내고 서버의 ack(message:send 응답)를 기다린다.
@@ -684,6 +785,16 @@ class ChatSocket {
       return;
     }
     socket.emit('room:read', {'roomId': roomId});
+  }
+
+  /// 공지 목록/상세를 열었다는 뜻(markRead와 별개 — announcements.js 주석 참고).
+  void markAnnouncementRead(String roomId) {
+    final socket = _socket;
+    if (socket == null) {
+      _pendingAnnouncementReadRoomIds.add(roomId);
+      return;
+    }
+    socket.emit('announcement:read', {'roomId': roomId});
   }
 
   /// LiveKit 연결에 성공한 직후 "나 통화에 들어왔다"고 알린다 — 서버가 방 멤버 전원에게

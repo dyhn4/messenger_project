@@ -13,6 +13,17 @@ String formatRoomActivityTime(DateTime dt) {
   return '${dt.year}/${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')}';
 }
 
+/// "27분 전"/"3시간 전"/"5일 전"처럼 상대적인 경과 시간 — 공지 상세보기(작성자/시간 표시)에서
+/// 쓴다. 7일이 넘으면(오래된 글) formatRoomActivityTime과 동일하게 절대 날짜로 바꾼다.
+String formatRelativeTime(DateTime dt) {
+  final diff = DateTime.now().difference(dt);
+  if (diff.inSeconds < 60) return '방금 전';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
+  if (diff.inHours < 24) return '${diff.inHours}시간 전';
+  if (diff.inDays < 7) return '${diff.inDays}일 전';
+  return formatRoomActivityTime(dt);
+}
+
 /// "2026/09/09 14:32"처럼 날짜와 시각을 함께 — 감사 로그/운영 현황처럼 언제였는지가 정확히
 /// 중요한 화면에서 쓴다(formatRoomActivityTime은 오늘이면 시각만 보여줘서 로그엔 부적합).
 String formatDateTime(DateTime dt) {

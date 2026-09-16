@@ -18,6 +18,7 @@ import '../models/room.dart';
 import '../models/team.dart';
 import 'api_client.dart';
 import 'app_settings.dart';
+import '../models/announcement.dart';
 import 'call_controller.dart';
 import 'chat_socket.dart';
 import 'deep_link_service.dart';
@@ -141,7 +142,9 @@ class Session extends ChangeNotifier {
   /// currentTeam으로 거르지 않는다). 뮤트/숨김 둘 다 "목록 화면에 안 보이게 해달라"는
   /// 뜻일 뿐 "안 읽었다는 사실 자체를 숨겨달라"는 뜻은 아니므로 거르지 않는다 — 숨긴
   /// DM이라도 상대가 새로 보내면 안읽음이 생기고, 그건 여기서 꼭 보여야 한다.
-  List<Room> get unreadRooms => rooms.where((r) => r.unreadCount > 0).toList();
+  List<Room> get unreadRooms => rooms
+      .where((r) => r.unreadCount > 0 || r.hasUnreadAnnouncement)
+      .toList();
 
   /// 지금 들어가 있는 팀. null이면 아직 팀을 안 골랐다는 뜻이라 팀 선택 화면이 뜬다
   /// (home_screen.dart) — 로그아웃 후 로그인하거나 앱을 새로 켰을 때가 그 경우다.
@@ -186,6 +189,11 @@ class Session extends ChangeNotifier {
   StreamSubscription? _commentDeletedSub;
   StreamSubscription? _presenceSub;
   StreamSubscription<CallState>? _callStateSub;
+  StreamSubscription<Announcement>? _announcementSub;
+  StreamSubscription<Announcement>? _announcementUpdatedSub;
+  StreamSubscription<AnnouncementRemovedEvent>? _announcementDeletedSub;
+  StreamSubscription<AnnouncementRemovedEvent>? _announcementUnpinnedSub;
+  StreamSubscription<AnnouncementReadEvent>? _announcementReadSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
   StreamSubscription? _roleUpdatedSub;
@@ -676,6 +684,21 @@ class Session extends ChangeNotifier {
   /// 팀 목록 화면처럼 특정 팀을 골라서 판단해야 할 때.
   bool canManageTeam(Team team) => team.canManage(accountRole);
 
+  /// 이 방(토픽)에 공지를 쓸 수 있는지 — 그 방이 속한 팀의 토픽 생성 권한과 같다
+  /// (room_options_menu.dart의 "공지" 메뉴). currentTeam이 아니라 room.teamId로 직접
+  /// 찾는다 — 다른 팀 방 화면에 있을 수 있는 경로(알림 센터 등)에서도 정확해야 해서다.
+  bool canCreateAnnouncementIn(Room room) {
+    final team = teams.where((t) => t.id == room.teamId).firstOrNull;
+    return team?.canCreateTopic(accountRole, userId) ?? false;
+  }
+
+  /// 이 공지의 수정/삭제/내리기/공유 메뉴(삼점 버튼)를 보여줄지 — 요청 사양 그대로 "작성 본인"만
+  /// 이다(메시지/댓글처럼 관리자가 남의 글을 지울 수 있는 예외는 여기 없다 — server/src/
+  /// announcements.js의 requireOwnAnnouncement와 동일 규칙).
+  bool canManageAnnouncement(Announcement announcement) {
+    return userId != null && announcement.authorId == userId;
+  }
+
   /// 초대 링크(설치→가입 링크)를 만들 수 있는지 — 서버 운영자, 계정 등급 관리자, 또는
   /// 어느 팀이든 소유자인 사람(server/src/permissions.js의 canCreateInviteLink와 동일 규칙).
   bool get canCreateInviteLink =>
@@ -1007,6 +1030,48 @@ class Session extends ChangeNotifier {
     unawaited(_seedOnlineUsers());
     _callStateSub?.cancel();
     _callStateSub = chatSocket.callStates.listen(_applyCallState);
+    _announcementSub?.cancel();
+    _announcementSub = chatSocket.announcements.listen(_handleIncomingAnnouncement);
+    _announcementUpdatedSub?.cancel();
+    _announcementUpdatedSub = chatSocket.announcementUpdated.listen((a) {
+      // 댓글 개수는 이 이벤트에 항상 0으로 온다(서버가 다시 세지 않음) — 배너에 반영된 글이면
+      // text/editedAt만 갱신하고 나머지(pinned/commentCount)는 그대로 둔다.
+      final match = rooms.where((r) => r.id == a.roomId);
+      if (match.isEmpty) return;
+      final current = match.first.latestAnnouncement;
+      if (current == null || current.id != a.id) return;
+      current.text = a.text;
+      current.editedAt = a.editedAt;
+      notifyListeners();
+    });
+    _announcementDeletedSub?.cancel();
+    _announcementDeletedSub = chatSocket.announcementDeleted.listen((e) {
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      if (match.first.latestAnnouncement?.id == e.id) {
+        match.first.latestAnnouncement = null;
+        match.first.hasUnreadAnnouncement = false;
+        notifyListeners();
+      }
+    });
+    _announcementUnpinnedSub?.cancel();
+    _announcementUnpinnedSub = chatSocket.announcementUnpinned.listen((e) {
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      if (match.first.latestAnnouncement?.id == e.id) {
+        match.first.latestAnnouncement = null;
+        match.first.hasUnreadAnnouncement = false;
+        notifyListeners();
+      }
+    });
+    _announcementReadSub?.cancel();
+    _announcementReadSub = chatSocket.announcementRead.listen((e) {
+      // user: 방에만 오므로 항상 "나"의 다른 기기에서 읽었다는 뜻이다(markAnnouncementsRead 참고).
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      match.first.hasUnreadAnnouncement = false;
+      notifyListeners();
+    });
     unawaited(_loadCallsConfig());
     _secretInviteSub?.cancel();
     _secretInviteSub = chatSocket.secretInvites.listen((e) {
@@ -1757,6 +1822,56 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 토픽방에 새 공지가 올라왔을 때(announcement:new) — 배너 갱신, 알림 센터의 "안 읽은 공지"
+  /// 표시, 로컬 알림 표시까지 한 번에 처리한다(_handleIncomingMessage와 같은 구조). 내가 쓴
+  /// 공지면 전부 건너뛴다.
+  void _handleIncomingAnnouncement(Announcement a) {
+    final match = rooms.where((r) => r.id == a.roomId);
+    if (match.isEmpty) return;
+    final room = match.first;
+    room.latestAnnouncement = a;
+    if (a.authorId != userId) room.hasUnreadAnnouncement = true;
+    notifyListeners();
+
+    if (a.authorId == userId) return;
+    // 그 방을 지금 보고 있으면 배너가 바로 바뀐 걸 이미 보고 있으므로(알림 끄기와 같은 이유로
+    // 안읽음 표시는 그대로 두되) 알림 배너/토스트만 건너뛴다 — _handleIncomingMessage와 동일 규칙.
+    final isViewingNow = room.id == _activeRoomId && appInForeground;
+    if (isViewingNow || room.muted == true) return;
+
+    AppUser? sender;
+    for (final member in room.members) {
+      if (member.id == a.authorId) {
+        sender = member;
+        break;
+      }
+    }
+    final roomTag = room.displayName(userId ?? '');
+    final tag = '$roomTag·공지';
+    notifications.showMessage(
+      title: '${a.authorName} [$tag]',
+      body: a.text,
+      roomId: room.id,
+      senderName: a.authorName,
+      conversationTitle: tag,
+      avatarType: sender?.avatarType ?? 'initial',
+      avatarEmoji: sender?.avatarEmoji,
+      avatarColor: sender?.avatarColor,
+      avatarUrl: sender?.avatarUrl != null
+          ? resolveUrl(sender!.avatarUrl!)
+          : null,
+    );
+  }
+
+  /// 공지 목록/상세를 열었다는 뜻(announcement_list_screen.dart, announcement_detail_screen.dart) —
+  /// 로컬로 즉시 안읽음 표시를 지우고(반응성), 서버에도 알려서 알림 센터와 다른 기기에도 반영한다.
+  void markAnnouncementsRead(Room room) {
+    if (!room.hasUnreadAnnouncement) return;
+    room.hasUnreadAnnouncement = false;
+    notifyListeners();
+    chatSocket.markAnnouncementRead(room.id);
+  }
+
   void _upsertRoom(Room incoming) {
     final i = rooms.indexWhere((r) => r.id == incoming.id);
     if (i >= 0) {
@@ -1769,6 +1884,12 @@ class Session extends ChangeNotifier {
       incoming.hidden = rooms[i].hidden;
       incoming.lastActivityAt = rooms[i].lastActivityAt;
       incoming.lastMessagePreview = rooms[i].lastMessagePreview;
+      // latestAnnouncement는 toRoomDto가 requesterId 없이도 항상 채워주므로 여기 들어오는
+      // 값이 더 최신이라 그대로 둔다. hasUnreadAnnouncement는 unreadCount 등과 똑같이
+      // requesterId가 있을 때만 채워지므로(rooms.js) 이 경로(브로드캐스트)에선 낡을 수 있어
+      // 보존한다. dismissedAnnouncementId는 서버 DTO에 아예 없는 순수 로컬 값이라 항상 보존.
+      incoming.hasUnreadAnnouncement = rooms[i].hasUnreadAnnouncement;
+      incoming.dismissedAnnouncementId = rooms[i].dismissedAnnouncementId;
       rooms[i] = incoming;
     } else {
       rooms.add(incoming);

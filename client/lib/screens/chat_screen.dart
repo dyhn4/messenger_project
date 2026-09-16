@@ -4,7 +4,6 @@ import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/room_avatar.dart';
-import '../widgets/call_button.dart';
 import '../widgets/room_options_menu.dart';
 import 'message_thread_screen.dart';
 
@@ -80,10 +79,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ],
         ),
-        actions: [
-          CallButton(session: session, room: room),
-          RoomOptionsMenu(session: session, room: room),
-        ],
+        actions: [RoomOptionsMenu(session: session, room: room)],
       ),
       body: ChatPanel(
         key: ValueKey(room.id),

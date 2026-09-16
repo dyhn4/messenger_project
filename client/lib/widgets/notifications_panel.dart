@@ -226,20 +226,49 @@ class _NotificationRow extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          room.lastMessagePreview ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
+                  if (room.unreadCount > 0 || room.lastMessagePreview != null)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            room.lastMessagePreview ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                         ),
+                        const SizedBox(width: 8),
+                        UnreadBadge(count: room.unreadCount),
+                      ],
+                    ),
+                  // 안 읽은 공지가 있으면(메시지 안읽음과 별개) 따로 표시한다 — 새 메시지가
+                  // 없어도(unreadCount 0) 공지만 안 읽었을 수 있으므로 이 자리를 항상 그린다.
+                  if (room.hasUnreadAnnouncement)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.campaign_outlined,
+                            size: 14,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              room.latestAnnouncement?.text ?? '새 공지가 있습니다',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      UnreadBadge(count: room.unreadCount),
-                    ],
-                  ),
+                    ),
                 ],
               ),
             ),

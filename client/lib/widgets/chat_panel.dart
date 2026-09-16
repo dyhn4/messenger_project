@@ -10,6 +10,7 @@ import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../screens/announcement_list_screen.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'chat_input_bar.dart';
@@ -515,6 +516,8 @@ class _ChatPanelState extends State<ChatPanel> {
     final controller = widget.session.controllerFor(widget.room);
     final column = Column(
       children: [
+        if (widget.room.type == RoomType.topic)
+          _AnnouncementBanner(session: widget.session, room: widget.room),
         Expanded(
           // 호버 툴바(FloatingHoverToolbar)는 Overlay에 그려지는데, 앱 전체 Overlay를 쓰면
           // 메시지 목록 밖 — 특히 아래 입력창 위 — 까지 삐져나온다. 목록 영역만의 Overlay를
@@ -909,6 +912,8 @@ class _ChatPanelState extends State<ChatPanel> {
         ChatInputBar(
           key: _chatInputBarKey,
           controller: controller,
+          session: widget.session,
+          room: widget.room,
           pendingSticker: _pendingSticker,
           stickerPickerOpen: _stickerPickerOpen,
           onToggleStickerPicker: _toggleStickerPicker,
@@ -938,6 +943,70 @@ class _ChatPanelState extends State<ChatPanel> {
               child: IgnorePointer(child: DropZoneOverlay()),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// 토픽방 상단에 고정된 공지 한 줄 — room.latestAnnouncement가 없거나, 사용자가 오른쪽 끝
+/// X 버튼으로 그 공지를 닫았으면(room.dismissedAnnouncementId) 아무 것도 안 그린다. 배너를
+/// 누르면 공지 목록 전체(히스토리 + "쓸 수 있으면 글쓰기 버튼")를 연다. 공지 자체는 누구나
+/// (방 멤버면) 볼 수 있다 — 쓰기만 권한이 있는 사람으로 좁혀진다(room_options_menu.dart의
+/// "공지" 메뉴, announcement_list_screen.dart 참고).
+///
+/// X로 닫는 건 카카오톡과 동일하게 "이 공지 하나만" 로컬로 숨기는 것 — 서버의 pinned 상태는
+/// 그대로다(공지 목록/다른 사람에겐 계속 고정으로 보인다). room.dismissedAnnouncementId에
+/// 그 공지 id를 저장해두므로, 다른 화면을 오가도 같은 공지인 동안은 계속 숨겨져 있다가 새
+/// 공지가 올라오면(id가 달라지면) 자동으로 다시 뜬다.
+class _AnnouncementBanner extends StatefulWidget {
+  final Session session;
+  final Room room;
+  const _AnnouncementBanner({required this.session, required this.room});
+
+  @override
+  State<_AnnouncementBanner> createState() => _AnnouncementBannerState();
+}
+
+class _AnnouncementBannerState extends State<_AnnouncementBanner> {
+  @override
+  Widget build(BuildContext context) {
+    final announcement = widget.room.latestAnnouncement;
+    if (announcement == null ||
+        announcement.id == widget.room.dismissedAnnouncementId) {
+      return const SizedBox.shrink();
+    }
+    final onContainer = Theme.of(context).colorScheme.onPrimaryContainer;
+    return Material(
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: InkWell(
+        onTap: () =>
+            showAnnouncementListScreen(context, widget.session, widget.room),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Row(
+            children: [
+              Icon(Icons.campaign_outlined, size: 18, color: onContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  announcement.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: onContainer),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: onContainer),
+              IconButton(
+                icon: Icon(Icons.close, size: 18, color: onContainer),
+                tooltip: '공지 닫기',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(
+                  () => widget.room.dismissedAnnouncementId = announcement.id,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

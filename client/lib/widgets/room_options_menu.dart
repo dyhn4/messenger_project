@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../models/room.dart';
+import '../screens/announcement_list_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/invite_members_screen.dart';
@@ -212,6 +213,20 @@ class RoomOptionsMenu extends StatelessWidget {
             ],
           ),
         ),
+        // 공지는 읽기가 방 멤버 전원에게 열려 있으므로(채팅방 상단 배너, 히스토리 목록) 이
+        // 메뉴 항목 자체는 누구나 본다 — "글쓰기" 버튼만 토픽 생성 권한이 있는 사람에게 보인다
+        // (announcement_list_screen.dart의 _canWrite).
+        if (isTopic)
+          PopupMenuItem<void>(
+            onTap: () => showAnnouncementListScreen(context, session, room),
+            child: const Row(
+              children: [
+                Icon(Icons.campaign_outlined),
+                SizedBox(width: 8),
+                Text('공지'),
+              ],
+            ),
+          ),
         if (!isDm) ...[
           PopupMenuItem<void>(
             onTap: () => _showMembers(context),

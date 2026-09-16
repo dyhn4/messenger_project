@@ -1,3 +1,4 @@
+import 'announcement.dart';
 import 'app_user.dart';
 import 'message.dart';
 
@@ -73,6 +74,21 @@ class Room {
   /// 놓친 초대"를 판별해서 서버에서 다시 가져온다(ensurePendingSecretInvite 참고).
   final String? secretInitiatorUserId;
 
+  /// 채팅방 상단 배너용 "지금 고정된 공지"(토픽방만, 없으면 null). 서버가 방 DTO에 얹어서
+  /// 보내고(rooms.js), 실시간으로는 announcement:new 소켓 이벤트로 Session이 직접 갱신한다
+  /// (message.dart의 lastMessagePreview와 같은 방식) — 그래서 non-final.
+  Announcement? latestAnnouncement;
+
+  /// 상단 배너의 X 버튼으로 이 공지를 닫았는지(카카오톡처럼) — 서버에는 없는 순수 로컬 상태라
+  /// JSON에 없고 fromJson도 안 건드린다. latestAnnouncement.id와 같으면 배너를 숨기고, 새
+  /// 공지가 올라와 id가 달라지면(chat_panel.dart의 _AnnouncementBanner) 자동으로 다시 뜬다.
+  String? dismissedAnnouncementId;
+
+  /// 알림 센터에 "안 읽은 공지"로 띄울지(rooms.js가 계산해서 내려줌 — 공지 목록/상세를 실제로
+  /// 열어본 적 있는지 기준, X로 배너만 닫은 건 해당 안 됨). 실시간으로는 Session이 소켓
+  /// 이벤트로 직접 갱신한다(latestAnnouncement와 같은 방식) — 그래서 non-final.
+  bool hasUnreadAnnouncement;
+
   Room({
     required this.id,
     required this.teamId,
@@ -94,6 +110,8 @@ class Room {
     this.secretSelfDestructSeconds,
     this.secretDepartedMemberName,
     this.secretInitiatorUserId,
+    this.latestAnnouncement,
+    this.hasUnreadAnnouncement = false,
   }) : lastActivityAt = lastActivityAt ?? createdAt;
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -129,6 +147,12 @@ class Room {
           ?.toInt(),
       secretDepartedMemberName: json['secretDepartedMemberName'] as String?,
       secretInitiatorUserId: json['secretInitiatorUserId'] as String?,
+      latestAnnouncement: json['latestAnnouncement'] == null
+          ? null
+          : Announcement.fromJson(
+              json['latestAnnouncement'] as Map<String, dynamic>,
+            ),
+      hasUnreadAnnouncement: json['hasUnreadAnnouncement'] as bool? ?? false,
     );
   }
 

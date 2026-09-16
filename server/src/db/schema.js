@@ -323,6 +323,11 @@ export const roomMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
+    // 공지 안읽음(알림 센터) 전용 — 메시지 lastReadAt과 별개다. 방에 들어와 있기만 해도
+    // lastReadAt은 계속 올라가버려서, 그걸 그대로 쓰면 배너만 보고 실제로 "공지" 화면을 열어본
+    // 적 없어도 읽음 처리돼버린다. 그래서 공지 목록/상세를 실제로 열었을 때만
+    // (announcements.js, socket.js의 announcement:read) 이 값을 갱신한다.
+    lastReadAnnouncementAt: timestamp('last_read_announcement_at', { withTimezone: true }),
     // 즐겨찾기는 그 사람 혼자만의 표시 설정이라 방 자체가 아니라 멤버십에 붙는다.
     favorite: boolean('favorite').notNull().default(false),
     // 알림 끄기도 마찬가지로 개인 설정 — 이 방을 뮤트한 멤버에게는 FCM 푸시를 안 보낸다(push.js).
@@ -409,6 +414,54 @@ export const messages = pgTable(
     index('messages_sender_id_idx').on(t.senderId),
     index('messages_expires_at_idx').on(t.expiresAt),
   ],
+);
+
+/**
+ * 토픽방 공지 — 카카오톡 공지와 같은 개념. 여러 개를 쓸 수 있고(히스토리로 남음), **가장
+ * 최근에 쓴 것이 자동으로 "지금 고정된 공지"**가 된다(별도 "고정" 토글은 없다 — rooms.js의
+ * latestAnnouncementForRoom이 createdAt 최신 1건을 그 방의 고정 공지로 쓴다). 수정/삭제는
+ * 지금 범위 밖 — 잘못 쓰면 새로 하나 더 쓰는 것으로 대신한다.
+ */
+export const announcements = pgTable(
+  'announcements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    authorName: text('author_name').notNull(),
+    text: text('text').notNull(),
+    // 한 방에 pinned=true인 행은 최대 하나뿐이다 — 그게 채팅방 상단 배너/목록의 "고정됨"이다.
+    // 새 공지를 쓰면 기존 pinned 행을 자동으로 내리고 새 글이 pinned=true가 된다(announcements.js
+    // insertAnnouncement). "공지 내리기"는 삭제하지 않고 이 값만 false로 바꾼다 — 히스토리에는
+    // 남지만 배너에선 사라진다(그리고 그 뒤로 자동으로 다른 글이 다시 고정되지 않는다).
+    pinned: boolean('pinned').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [index('announcements_room_id_created_at_idx').on(t.roomId, t.createdAt)],
+);
+
+/** 공지에 달린 댓글 — message_comments와 같은 모양이지만 부모가 메시지가 아니라 공지다.
+ * 수정/삭제는 지원하지 않는다(공지 댓글은 단순 의견 남기기 용도로만 요청받았다). */
+export const announcementComments = pgTable(
+  'announcement_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    announcementId: uuid('announcement_id')
+      .notNull()
+      .references(() => announcements.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }), // 조인 없이 방 기준 필터링하려고 중복 보관.
+    authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    authorName: text('author_name').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('announcement_comments_announcement_id_idx').on(t.announcementId, t.createdAt)],
 );
 
 /** 특정 메시지에 달린 댓글(스레드 답글). */

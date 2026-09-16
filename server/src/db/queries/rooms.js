@@ -189,6 +189,23 @@ export async function setMemberLastRead(roomId, userId, whenMs) {
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
 }
 
+/** 알림 센터의 "안 읽은 공지" 판정용 — getMemberLastRead와 같은 모양이지만 별도 컬럼(schema.js
+ * 참고). 공지 목록/상세를 실제로 연 시각만 여기 찍힌다. */
+export async function getMemberLastReadAnnouncementAt(roomId, userId) {
+  const [row] = await db
+    .select({ lastReadAnnouncementAt: roomMembers.lastReadAnnouncementAt })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+  return row?.lastReadAnnouncementAt ? new Date(row.lastReadAnnouncementAt).getTime() : 0;
+}
+
+export async function setMemberLastReadAnnouncementAt(roomId, userId, whenMs) {
+  await db
+    .update(roomMembers)
+    .set({ lastReadAnnouncementAt: new Date(whenMs) })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}
+
 export async function getMemberFavorite(roomId, userId) {
   const [row] = await db
     .select({ favorite: roomMembers.favorite })

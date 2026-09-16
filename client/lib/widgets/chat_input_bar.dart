@@ -8,12 +8,15 @@ import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
+import '../models/room.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
+import '../services/session.dart';
 import 'attachment_widgets.dart';
+import 'call_button.dart';
 import 'muted_scrollbar.dart';
 
 /// 첨부 하나의 클라이언트 쪽 진행 상태. 첨부한 즉시(_ChatInputBarState._stageAndUpload)
@@ -46,6 +49,11 @@ class _PendingAttachment {
 class ChatInputBar extends StatefulWidget {
   final RoomChatController controller;
 
+  /// 화상회의 버튼(CallButton)을 이 입력칸 버튼 줄에 그리는 데 필요하다 — 원래 채팅 헤더에
+  /// 있었는데, 입력칸 아래 다른 첨부 버튼들과 나란히 있는 게 더 눈에 잘 띄어서 옮겼다.
+  final Session session;
+  final Room room;
+
   /// 이모티콘 패널/미리보기는 이제 채팅 화면(chat_panel.dart)이 메시지 목록 위에 떠 있는
   /// 오버레이로 그린다(입력창을 밀어내지 않기 위해) — 그래서 상태 자체도 이 위젯이 아니라
   /// 부모가 들고 있고, 여기는 버튼과 "보낼 때 같이 실어 보내기"만 담당한다.
@@ -60,6 +68,8 @@ class ChatInputBar extends StatefulWidget {
   const ChatInputBar({
     super.key,
     required this.controller,
+    required this.session,
+    required this.room,
     this.pendingSticker,
     this.stickerPickerOpen = false,
     required this.onToggleStickerPicker,
@@ -391,6 +401,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                       onPressed: _sending ? null : _pickFile,
                       tooltip: '파일 보내기',
                     ),
+                    CallButton(session: widget.session, room: widget.room),
                     const Spacer(),
                     if (showHint) ...[
                       Text(

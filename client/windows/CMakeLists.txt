@@ -32,6 +32,15 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# 소스 파일을 항상 UTF-8로 읽고/쓰게 한다. 한국어 Windows(코드페이지 949)에서는 MSVC가
+# UTF-8로 저장된 남의 플러그인 소스(예: flutter_webrtc의 주석)를 949로 해석하려다 C4819
+# 경고를 내는데, 아래 APPLY_STANDARD_SETTINGS가 /WX(경고를 오류로)를 켜두기 때문에 그대로
+# 빌드가 실패한다. 이 옵션은 여기부터 아래에서 add_subdirectory/include로 추가되는 모든
+# 타겟(러너 + 모든 플러그인)에 적용된다.
+if(MSVC)
+  add_compile_options("/utf-8")
+endif()
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by

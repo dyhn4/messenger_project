@@ -4,6 +4,25 @@
     <!-- 앱 업데이트를 "다운로드 후 바로 설치" 흐름으로 처리하려고(브라우저로 넘기지 않고
          다운로드한 apk를 앱이 직접 패키지 설치 화면으로 넘김) 필요하다. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 화상회의(LiveKit/WebRTC). 실제 권한 요청 창은 통화를 시작할 때 flutter_webrtc가
+         띄우므로 여기서는 선언만 한다. 카메라가 없는 기기(태블릿 일부)에서도 설치는 되도록
+         uses-feature는 required="false"로 둔다 — 마이크만으로도 통화에 참여할 수 있다. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- 걸려온 화상회의를 잠금화면 위에 전체화면으로 띄우기 위한 권한(Android 14+에서
+         통화/알람 앱에만 허용된다 — 우리는 category=call 알림에만 쓴다). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 통화 중에만 도는 포그라운드 서비스 — 이게 없으면 통화 중 홈으로 나가는 순간 OS가
+         카메라/마이크 캡처를 끊는다(Android 14+). 알림바의 "통화 중" 표시가 이 서비스다. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 화면 공유(MediaProjection) — 공유를 켤 때만 이 타입으로 서비스를 다시 띄운다. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <application
         android:label="TangoTalk"
         android:name="${applicationName}"
@@ -40,6 +59,13 @@
                 <data android:scheme="tangotalk"/>
             </intent-filter>
         </activity>
+        <!-- flutter_foreground_task의 서비스(이름은 바꾸면 안 됨). stopWithTask=true라
+             최근 앱에서 앱을 밀어 없애면 통화 서비스도 같이 끝난다. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="camera|microphone|mediaProjection"
+            android:stopWithTask="true"
+            android:exported="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

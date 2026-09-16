@@ -27,6 +27,10 @@ enum _BadgeCorner { topLeft, bottomRight }
 /// 완전히 종료된 앱을 깨우는 진짜 푸시(FCM)는 범위 밖 — Session이 소켓으로 받은
 /// 메시지에 대해서만 호출된다.
 class NotificationService {
+  /// 통화 수신 알림의 payload 앞에 붙는 표시 — 알림을 눌러 앱이 켜졌을 때 "그 방 열기"와
+  /// "그 방 통화에 참여"를 구분하는 데 쓴다(main.dart의 _openRoomFromNotification).
+  static const callPayloadPrefix = 'call:';
+
   final _plugin = FlutterLocalNotificationsPlugin();
 
   /// [requestPermission]을 false로 주면 권한 요청을 건너뛴다 — main.dart의 FCM 백그라운드
@@ -76,6 +80,51 @@ class NotificationService {
     if (details?.didNotificationLaunchApp != true) return null;
     return details?.notificationResponse?.payload;
   }
+
+  /// 걸려온 화상회의를 "전화처럼" 알린다 — 잠금화면에서도 바로 뜨도록 전체화면 인텐트를
+  /// 쓰고(fullScreenIntent), 카테고리를 call로 줘서 OS가 통화 알림으로 취급하게 한다.
+  /// 화면이 켜져 있으면 OS가 전체화면 대신 헤드업 알림으로 보여준다(안드로이드 규칙).
+  ///
+  /// payload에 [callPayloadPrefix]를 붙여서, 알림을 눌러 앱이 켜졌을 때 "방 열기"가 아니라
+  /// "통화 참여"로 분기할 수 있게 한다(main.dart의 _openRoomFromNotification).
+  ///
+  /// Windows에는 전체화면 인텐트 개념이 없어서 일반 토스트로 뜬다 — PC는 앱이 트레이에
+  /// 상주하는 구조라 대부분 소켓으로 수신 화면을 직접 띄운다(home_screen.dart).
+  Future<void> showIncomingCall({
+    required String roomId,
+    required String callerName,
+    String? conversationTitle,
+  }) async {
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'calls',
+        '화상회의 수신',
+        channelDescription: '걸려온 화상회의 알림',
+        importance: Importance.max,
+        priority: Priority.max,
+        category: AndroidNotificationCategory.call,
+        fullScreenIntent: true,
+        // 사용자가 받거나 끊기 전까지 알림이 유지되게 한다(스와이프로 지워지지 않음).
+        ongoing: true,
+        autoCancel: false,
+        timeoutAfter: 45000, // 서버 푸시 ttl과 같은 45초 — 지나간 전화는 저절로 사라진다.
+      ),
+      windows: const WindowsNotificationDetails(),
+    );
+    await _plugin.show(
+      id: 'call:$roomId'.hashCode,
+      title: callerName,
+      body: conversationTitle == null
+          ? '화상회의 요청'
+          : '$conversationTitle · 화상회의 요청',
+      notificationDetails: details,
+      payload: '$callPayloadPrefix$roomId',
+    );
+  }
+
+  /// 통화 수신 알림을 지운다(받았거나, 상대가 끊었을 때).
+  Future<void> cancelIncomingCall(String roomId) =>
+      _plugin.cancel(id: 'call:$roomId'.hashCode);
 
   /// [avatarUrl]은 이미 절대경로로 resolve된 URL이어야 한다(Session이 resolveUrl 적용해서 넘김).
   /// 업로드 사진('photo')은 그대로 받아오고, 캐릭터('character')는 이모지+배경색을 직접

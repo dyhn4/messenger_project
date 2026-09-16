@@ -9,6 +9,7 @@ import 'package:shared_preferences_android/shared_preferences_android.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'screens/call_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -85,6 +86,18 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     requestPermission:
         false, // 헤드리스 isolate라 권한 요청 다이얼로그를 못 띄운다(NotificationService 참고).
   );
+
+  // 화상회의 수신은 일반 메시지 알림과 완전히 다르게 그린다 — 잠금화면에서도 바로 뜨는
+  // 전체화면 통화 알림(서버 push.js가 kind:'call'로 보낸다).
+  if (data['kind'] == 'call') {
+    await notifications.showIncomingCall(
+      roomId: roomId,
+      callerName:
+          data['senderName'] as String? ?? data['title'] as String? ?? '알 수 없음',
+      conversationTitle: data['conversationTitle'] as String?,
+    );
+    return;
+  }
 
   // push.js가 sender의 아바타 정보를 data payload에 실어 보낸다(avatarUrl은 서버가 이미
   // 서명해서 상대경로로 보냄) — 프로필 사진을 받아오려면 이 isolate에도 자체 서명 인증서
@@ -306,7 +319,13 @@ class _MyAppState extends State<MyApp>
     session.setAppInForeground(state == AppLifecycleState.resumed);
   }
 
-  Future<void> _openRoomFromNotification(String roomId) async {
+  Future<void> _openRoomFromNotification(String payload) async {
+    // 통화 수신 알림을 누른 경우엔 방만 여는 게 아니라 통화에 바로 참여한다
+    // (NotificationService.callPayloadPrefix 참고).
+    final isCall = payload.startsWith(NotificationService.callPayloadPrefix);
+    final roomId = isCall
+        ? payload.substring(NotificationService.callPayloadPrefix.length)
+        : payload;
     final match = session.rooms.where((r) => r.id == roomId);
     if (match.isEmpty) return;
     final room = match.first;
@@ -320,6 +339,24 @@ class _MyAppState extends State<MyApp>
         room.secretInitiatorUserId != session.userId) {
       await session.ensurePendingSecretInvite(roomId);
       return; // HomeScreen이 pendingSecretInvites를 보고 다이얼로그를 띄운다.
+    }
+
+    // 통화 수신 알림을 눌러서 온 경우 — 방을 여는 대신 그 방의 통화에 바로 들어가고
+    // 통화 화면을 띄운다. 그 사이 통화가 이미 끝났으면 서버가 토큰 발급을 거부하거나
+    // LiveKit 방이 비어 있을 뿐이라, 실패해도 조용히 방만 열어준다(아래 일반 경로).
+    if (isCall) {
+      final context = navigatorKey.currentContext;
+      if (context != null) {
+        try {
+          await session.joinCall(room.id);
+          if (context.mounted) {
+            await showCallScreen(context, session, room);
+            return;
+          }
+        } catch (_) {
+          // 통화 참여 실패 — 아래 일반 경로로 방만 연다.
+        }
+      }
     }
 
     final width = navigatorKey.currentContext != null

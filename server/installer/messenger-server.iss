@@ -51,6 +51,9 @@ Name: "runasconsole"; Description: "콘솔 창으로 실행(창을 닫으면 서
 [Files]
 Source: "{#BinDir}\node\*"; DestDir: "{app}\node"; Flags: recursesubdirs createallsubdirs
 Source: "{#BinDir}\nssm.exe"; DestDir: "{app}\tools"
+; 화상회의(LiveKit SFU) — Go 단일 실행 파일. 설정 파일(livekit.yaml)과 API 비밀값은
+; Setup-TangoTalkServer.ps1이 설치 시점에 만들어 넣는다(server/.livekit-secret과 같은 값).
+Source: "{#BinDir}\livekit\*"; DestDir: "{app}\livekit"; Flags: recursesubdirs createallsubdirs
 Source: "{#BinDir}\pgsql-installer.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 ; StageDir는 build_server_installer.ps1이 이미 필요한 것만(certs/uploads/.env/로그/개발용
 ; node_modules 등을 뺀) 정리해둔 결과라 여기서 별도 Excludes가 필요 없다.
@@ -93,6 +96,11 @@ Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File "
 [UninstallRun]
 ; 일반 제거는 서비스 등록/방화벽 규칙만 정리한다 — DB/업로드/설정 등 실데이터는 절대 건드리지
 ; 않는다(완전 삭제는 Uninstall-Full.ps1로 완전히 분리돼 있고, 여기서 자동 호출되지 않는다).
+Filename: "{app}\tools\nssm.exe"; Parameters: "stop TangoTalkLiveKit"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopLiveKit"
+Filename: "{app}\tools\nssm.exe"; Parameters: "remove TangoTalkLiveKit confirm"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveLiveKit"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk LiveKit (signal)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFwLk1"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk LiveKit (media)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFwLk2"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk LiveKit (turn)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFwLk3"
 Filename: "{app}\tools\nssm.exe"; Parameters: "stop TangoTalkServer"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopSvc"
 Filename: "{app}\tools\nssm.exe"; Parameters: "remove TangoTalkServer confirm"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveSvc"
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (main)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw1"
@@ -103,6 +111,9 @@ Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Tang
 ; 절대 여기 추가하지 않는다(일반 제거로 실데이터가 지워지면 안 된다는 게 이 섹션의 핵심 불변식).
 Type: filesandordirs; Name: "{app}\node"
 Type: filesandordirs; Name: "{app}\tools"
+; livekit 폴더는 실행 파일과 생성된 설정(livekit.yaml)뿐이라 지워도 된다 — API 비밀값은
+; server/.livekit-secret 쪽에 있고, 그건 실데이터와 같이 보존된다.
+Type: filesandordirs; Name: "{app}\livekit"
 Type: filesandordirs; Name: "{app}\server\node_modules"
 Type: filesandordirs; Name: "{app}\server\src"
 Type: filesandordirs; Name: "{app}\server\scripts"

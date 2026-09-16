@@ -14,6 +14,11 @@ releases/*
 .db-encryption-key
 certs/
 
+# 화상회의(LiveKit) — API 비밀값과, 개발용으로 내려받은 LiveKit 서버 실행 파일/설정.
+# 운영 서버에서는 설치 프로그램이 같은 값을 livekit.yaml과 .env에 함께 심는다.
+.livekit-secret
+.livekit/
+
 # FCM 푸시 발송용 Firebase 서비스 계정 키 — Admin 권한이라 절대 커밋하지 않는다.
 firebase-service-account.json
 

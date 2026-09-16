@@ -1,15 +1,33 @@
 import { randomUUID } from 'node:crypto';
 import { verifySocketToken } from './auth.js';
+import { activeCallStatesFor, callSummaryText, joinCall, leaveAllCallsForSocket, leaveCall } from './calls.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { insertMessage, markMessageRead } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds, listRoomsForUser, setMemberLastRead } from './db/queries/rooms.js';
-import { unhideDmForOtherMembers } from './rooms.js';
+import { postSystemMessage, unhideDmForOtherMembers } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
 import { markConnected, markDisconnected } from './presence.js';
-import { notifyOfflineMembers, roomTagFor } from './push.js';
+import { notifyIncomingCall, notifyOfflineMembers, roomTagFor } from './push.js';
 import { resolveRawUrl } from './upload.js';
+
+/**
+ * 통화가 끝났으면(마지막 참가자가 나갔으면) 그 대화에 요약 한 줄을 시스템 메시지로 남긴다.
+ * 녹화 대신 "언제 누가 얼마나 회의했는지"는 남기자는 결정(calls.js의 callSummaryText).
+ */
+async function postCallSummary(io, state) {
+  if (!state.ended) return;
+  const room = await findRoomById(state.roomId);
+  if (!room) return;
+  // 참여자 id만 들고 있으므로 여기서 이름으로 바꿔준다 — 통화가 끝나는 순간에만 도는
+  // 경로라 인원수만큼 조회해도 부담이 없다.
+  const users = await Promise.all(state.ended.participantIds.map(findUserById));
+  const names = users
+    .filter(Boolean)
+    .map((u) => u.name ?? u.username ?? '알 수 없음');
+  await postSystemMessage(io, room, callSummaryText(state.ended, names));
+}
 
 /** 소켓 연결 시 JWT를 확인하고, 연결된 이후의 채팅 이벤트를 처리합니다. */
 export function registerSocket(io) {
@@ -197,7 +215,57 @@ export function registerSocket(io) {
       });
     });
 
+    // ── 화상회의 신호 ──────────────────────────────────────────────────────
+    // 미디어는 클라이언트와 LiveKit이 직접 주고받는다(calls.js) — 여기서는 "누가 통화를
+    // 걸었고 지금 누가 들어와 있는지"만 방 멤버 전원에게 알린다. 벨이 울릴지/통화 화면을
+    // 띄울지는 클라이언트가 이 상태를 보고 판단한다(참가자 목록에 내가 없고 통화가 막
+    // 시작됐으면 수신 화면).
+
+    // payload: { roomId } — LiveKit 연결에 성공한 직후 보낸다.
+    socket.on('call:join', async (payload) => {
+      const room = await findRoomById(payload?.roomId);
+      if (!room || !(await isRoomMember(room.id, socket.data.userId))) return;
+      const state = joinCall(room.id, socket.data.userId, socket.id);
+      io.to(room.id).emit('call:state', state);
+
+      // 통화를 **막 시작한 경우에만** 앱이 꺼져 있는 멤버들에게 전화를 건다(참가자가 나
+      // 혼자고 시작한 사람도 나). 중간에 누가 합류할 때마다 다시 울리면, 이미 안 받기로
+      // 한 사람의 폰이 계속 울리게 된다.
+      const isFirstParticipant =
+        state.participantIds.length === 1 && state.startedBy === socket.data.userId;
+      if (!isFirstParticipant) return;
+
+      const [caller, memberIds] = await Promise.all([
+        findUserById(socket.data.userId),
+        listRoomMemberIds(room.id),
+      ]);
+      notifyIncomingCall({
+        memberIds,
+        callerId: socket.data.userId,
+        caller,
+        room,
+        roomTag: roomTagFor(room),
+      }).catch((err) => console.error('[push] 통화 알림 실패:', err?.message ?? err));
+    });
+
+    // payload: { roomId } — 통화 종료 버튼을 눌렀을 때.
+    socket.on('call:leave', async (payload) => {
+      const roomId = payload?.roomId;
+      if (typeof roomId !== 'string') return;
+      const state = leaveCall(roomId, socket.data.userId, socket.id);
+      io.to(roomId).emit('call:state', state);
+      await postCallSummary(io, state);
+    });
+
     socket.on('disconnect', () => {
+      // 통화 중에 앱이 꺼지거나 네트워크가 끊기면 "나가기"를 보낼 새가 없다 — 소켓이
+      // 끊긴 것으로 대신 정리해준다(안 하면 유령 참가자가 남아 통화가 영영 안 끝난다).
+      for (const state of leaveAllCallsForSocket(socket.data.userId, socket.id)) {
+        io.to(state.roomId).emit('call:state', state);
+        postCallSummary(io, state).catch((err) =>
+          console.error('[call] 통화 기록 남기기 실패:', err?.message ?? err),
+        );
+      }
       // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다.
       if (markDisconnected(socket.data.userId)) {
         io.emit('presence:update', { userId: socket.data.userId, online: false });
@@ -211,6 +279,11 @@ export function registerSocket(io) {
     // 늦게(방금 보낸 메시지가 REST 재조회 때는 정상적으로 보임) 받을 수 있다.
     listRoomsForUser(socket.data.userId).then((rooms) => {
       for (const room of rooms) socket.join(room.id);
+      // 이미 진행 중인 통화가 있으면 방금 붙은 이 소켓에만 현재 상태를 한 번 흘려준다
+      // (call:state는 변화 시점에만 나가므로 — calls.js의 activeCallStatesFor 참고).
+      for (const state of activeCallStatesFor(rooms.map((r) => r.id))) {
+        socket.emit('call:state', state);
+      }
     });
   });
 }

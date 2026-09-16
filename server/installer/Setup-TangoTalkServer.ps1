@@ -35,8 +35,17 @@ $DbName = 'messenger'
 $DbAppUser = 'messenger_app'
 $PgSuperUser = 'postgres'
 
+$LiveKitServiceName = 'TangoTalkLiveKit'
+# 화상회의 포트 — server/src/config.js의 LIVEKIT_PORT 기본값(7880)과 맞춰야 한다.
+$LiveKitPort = 7880
+$LiveKitTcpPort = 7881
+$LiveKitTurnPort = 3478
+
 $NodeExe = Join-Path $AppDir 'node\node.exe'
 $NssmExe = Join-Path $AppDir 'tools\nssm.exe'
+$LiveKitDir = Join-Path $AppDir 'livekit'
+$LiveKitExe = Join-Path $LiveKitDir 'livekit-server.exe'
+$LiveKitConfig = Join-Path $LiveKitDir 'livekit.yaml'
 $ServerDir = Join-Path $AppDir 'server'
 $PgDir = Join-Path $AppDir 'pgsql'
 $PgDataDir = Join-Path $AppDir 'pgsql-data'
@@ -203,6 +212,48 @@ if (-not (Test-Path $EnvFile)) {
   Write-Log '4/7 .env 이미 존재 — 그대로 둠'
 }
 
+# ── 4.5 화상회의(LiveKit) 설정 ───────────────────────────────────────────
+# Node 서버와 LiveKit이 **같은 API 비밀값**을 알아야 한다: 서버는 그 값으로 참가 토큰을
+# 서명하고, LiveKit은 그 서명을 검증한다. 서버 쪽은 server/.livekit-secret 파일을 읽으므로
+# (src/config.js의 optionalSecret) 여기서 그 파일을 만들고, 같은 값을 livekit.yaml에 넣는다.
+# 파일이 이미 있으면(업데이트 재설치) 그대로 재사용한다 — 새로 만들면 기존 클라이언트가
+# 받아둔 토큰/설정과 어긋난다.
+$liveKitSecretFile = Join-Path $ServerDir '.livekit-secret'
+if (-not (Test-Path $liveKitSecretFile)) {
+  $bytes = New-Object byte[] 32
+  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $liveKitSecret = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+  # 줄바꿈 없이 써야 한다 — 서버가 trim해서 읽지만 yaml 쪽과 한 글자라도 달라지면 인증이 깨진다.
+  [System.IO.File]::WriteAllText($liveKitSecretFile, $liveKitSecret)
+  Write-Log '4.5/7 LiveKit API 비밀값 새로 생성함'
+} else {
+  $liveKitSecret = (Get-Content $liveKitSecretFile -Raw).Trim()
+  Write-Log '4.5/7 LiveKit API 비밀값 이미 존재 — 재사용'
+}
+
+if (-not (Test-Path $LiveKitConfig)) {
+  # 사내망 서버라 공인 IP 탐색(use_external_ip)은 끈다 — 켜두면 STUN으로 바깥 IP를 찾으려다
+  # 인터넷이 없는 환경에서 시작이 느려지고 엉뚱한 후보를 광고한다.
+  # 내장 TURN(UDP)은 켜둔다: 방화벽이 빡빡한 사내망에서 UDP 직결이 막혀도 중계로 붙는다.
+  @(
+    '# TangoTalk 설치 프로그램이 자동 생성했습니다.'
+    "port: $LiveKitPort"
+    'rtc:'
+    '  port_range_start: 50000'
+    '  port_range_end: 60000'
+    "  tcp_port: $LiveKitTcpPort"
+    '  use_external_ip: false'
+    'turn:'
+    '  enabled: true'
+    "  udp_port: $LiveKitTurnPort"
+    'keys:'
+    "  tangotalk: $liveKitSecret"
+  ) -join "`r`n" | Set-Content -Path $LiveKitConfig -Encoding utf8
+  Write-Log '  livekit.yaml 새로 작성함'
+} else {
+  Write-Log '  livekit.yaml 이미 존재 — 그대로 둠(관리자가 포트 등을 바꿨을 수 있음)'
+}
+
 # ── 5. 마이그레이션 적용 ─────────────────────────────────────────────────
 Write-Log '5/7 데이터베이스 마이그레이션 적용 중...'
 $drizzleKitCli = Join-Path $ServerDir 'node_modules\drizzle-kit\bin.cjs'
@@ -235,9 +286,40 @@ foreach ($rule in @(
   netsh advfirewall firewall delete rule name="$($rule.Name)" | Out-Null
   netsh advfirewall firewall add rule name="$($rule.Name)" dir=in action=allow protocol=TCP localport=$($rule.Port) | Out-Null
 }
-Write-Log "6/7 방화벽 규칙 적용됨 (포트 $appPort, $pairingPort)"
+
+# 화상회의: 신호(TCP 7880/7881)와 미디어(UDP)를 따로 연다. 미디어는 ICE 후보 포트 범위
+# (50000-60000)와 내장 TURN(3478) + TURN 릴레이 범위(30000-40000)가 모두 필요하다 —
+# 하나라도 막히면 "연결은 되는데 화면이 안 나오는" 상태가 된다.
+netsh advfirewall firewall delete rule name="TangoTalk LiveKit (signal)" | Out-Null
+netsh advfirewall firewall add rule name="TangoTalk LiveKit (signal)" dir=in action=allow protocol=TCP localport="$LiveKitPort,$LiveKitTcpPort" | Out-Null
+netsh advfirewall firewall delete rule name="TangoTalk LiveKit (media)" | Out-Null
+netsh advfirewall firewall add rule name="TangoTalk LiveKit (media)" dir=in action=allow protocol=UDP localport=50000-60000 | Out-Null
+netsh advfirewall firewall delete rule name="TangoTalk LiveKit (turn)" | Out-Null
+netsh advfirewall firewall add rule name="TangoTalk LiveKit (turn)" dir=in action=allow protocol=UDP localport="$LiveKitTurnPort,30000-40000" | Out-Null
+
+Write-Log "6/7 방화벽 규칙 적용됨 (앱 $appPort/$pairingPort, 화상회의 $LiveKitPort/$LiveKitTcpPort + UDP)"
 
 # ── 7. 실행 방식 등록 ────────────────────────────────────────────────────
+# LiveKit은 콘솔 모드/서비스 모드와 무관하게 항상 백그라운드 서비스로 돌린다 — 화상회의는
+# "서버가 떠 있으면 되는" 상시 구성요소라, 관리자가 콘솔 창을 띄워두는 것과 별개다.
+if (Test-Path $LiveKitExe) {
+  $existingLiveKit = Get-Service -Name $LiveKitServiceName -ErrorAction SilentlyContinue
+  if ($existingLiveKit) {
+    & $NssmExe restart $LiveKitServiceName | Out-Null
+    Write-Log "  화상회의 서비스($LiveKitServiceName) 재시작함"
+  } else {
+    & $NssmExe install $LiveKitServiceName $LiveKitExe "--config" "$LiveKitConfig"
+    & $NssmExe set $LiveKitServiceName AppDirectory $LiveKitDir
+    & $NssmExe set $LiveKitServiceName AppStdout (Join-Path $LiveKitDir 'livekit-out.log')
+    & $NssmExe set $LiveKitServiceName AppStderr (Join-Path $LiveKitDir 'livekit-err.log')
+    & $NssmExe set $LiveKitServiceName Start SERVICE_AUTO_START
+    & $NssmExe start $LiveKitServiceName | Out-Null
+    Write-Log "  화상회의 서비스($LiveKitServiceName) 등록하고 시작함"
+  }
+} else {
+  Write-Log '  LiveKit 실행 파일이 없어 화상회의를 건너뜀(이 설치본에는 포함되지 않음)'
+}
+
 if ($RunMode -eq 'service') {
   $existing = Get-Service -Name $NodeServiceName -ErrorAction SilentlyContinue
   if ($existing) {

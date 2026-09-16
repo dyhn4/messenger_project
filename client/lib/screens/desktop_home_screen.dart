@@ -5,6 +5,7 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/account_menu_button.dart';
+import '../widgets/call_button.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/favorite_star.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -411,6 +412,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                   ),
                 ),
               ),
+              CallButton(session: widget.session, room: _selectedRoom!),
               RoomOptionsMenu(session: widget.session, room: _selectedRoom!),
             ],
           ),

@@ -184,6 +184,63 @@ export async function notifyOfflineMembers({
   );
 }
 
+/**
+ * 화상회의가 시작됐을 때, 소켓이 안 붙어있는(=앱이 꺼져 있을 가능성이 높은) 멤버들에게
+ * "전화가 왔다"고 FCM으로 알린다. 온라인인 사람은 이미 call:state 소켓 이벤트로 수신
+ * 화면을 보고 있으므로 중복으로 보내지 않는다(메시지 푸시와 같은 분리 방식).
+ *
+ * 메시지 푸시와 다른 점은 **우선순위와 만료**다: 전화는 늦게 도착하면 의미가 없으므로
+ * 안드로이드 high priority로 보내고(도즈 모드에서도 즉시 깨움), ttl을 통화 호출이 의미
+ * 있는 시간(45초)으로 짧게 잡아서 나중에 켰을 때 지나간 전화가 울리지 않게 한다.
+ * 클라이언트는 이 kind:'call'을 보고 일반 알림이 아니라 전체화면 수신 화면을 띄운다
+ * (client/lib/main.dart의 백그라운드 핸들러).
+ */
+export async function notifyIncomingCall({ memberIds, callerId, caller, room, roomTag }) {
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+
+  const targets = memberIds.filter((id) => id !== callerId && !isOnline(id));
+  if (targets.length === 0) return;
+
+  const callerName = caller?.name ?? caller?.username ?? '알 수 없음';
+  const avatarUrl = caller?.avatarUrl ? signFileUrl(caller.avatarUrl) : null;
+
+  await Promise.all(
+    targets.map(async (userId) => {
+      const tokens = await listFcmTokensForUser(userId);
+      await Promise.all(
+        tokens.map(({ deviceId, fcmToken }) =>
+          messaging
+            .send({
+              token: fcmToken,
+              data: {
+                kind: 'call',
+                roomId: room.id,
+                title: callerName,
+                body: '화상회의 요청',
+                senderName: callerName,
+                ...(roomTag ? { conversationTitle: roomTag } : {}),
+                isSecret: 'false',
+                avatarType: caller?.avatarType ?? 'initial',
+                ...(caller?.avatarEmoji ? { avatarEmoji: caller.avatarEmoji } : {}),
+                ...(caller?.avatarColor ? { avatarColor: caller.avatarColor } : {}),
+                ...(avatarUrl ? { avatarUrl } : {}),
+              },
+              android: { priority: 'high', ttl: 45_000 },
+            })
+            .catch(async (err) => {
+              if (err?.code === 'messaging/registration-token-not-registered') {
+                await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
+                return;
+              }
+              console.error('[push] 통화 알림 발송 실패:', err?.message ?? err);
+            }),
+        ),
+      );
+    }),
+  );
+}
+
 /** 비밀 대화 요청(secret:invite)을 상대가 오프라인일 때만 FCM으로 알린다 — 온라인이면
  * 소켓으로 바로 받아서(session.dart) 클라이언트가 직접 로컬 알림을 그리므로(같은 알림이
  * 두 번 뜨지 않게) 여기서는 건너뛴다. notifyOfflineMembers와 같은 분리 방식. */

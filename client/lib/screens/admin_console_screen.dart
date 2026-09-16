@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/admin.dart';
@@ -5,6 +9,7 @@ import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/admin_org_edit_dialog.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -113,11 +118,7 @@ class _StatsTabState extends State<_StatsTab> {
       );
       await _load();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-      }
+      if (mounted) showAppToast(context, '실패: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -323,11 +324,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       _newLabel.clear();
       if (mounted) setState(() => _options = [...?_options, created]);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-      }
+      if (mounted) showAppToast(context, '실패: $e');
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -342,11 +339,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-      }
+      if (mounted) showAppToast(context, '실패: $e');
     }
   }
 
@@ -359,11 +352,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       );
       if (mounted) setState(() => _options = updated);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-      }
+      if (mounted) showAppToast(context, '실패: $e');
     }
   }
 
@@ -375,11 +364,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
       );
       if (mounted) setState(() => _options = updated);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-      }
+      if (mounted) showAppToast(context, '실패: $e');
     }
   }
 
@@ -513,6 +498,81 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
     }
   }
 
+  /// google-services.json을 읽어서 4개 값을 입력창에 채워 넣기만 한다(바로 저장하지 않음) —
+  /// 파일 형식이 예상과 다를 수 있어서, 사람이 채워진 값을 한 번 보고 "저장"을 눌러야
+  /// 실제로 반영된다.
+  Future<void> _pickGoogleServicesJson() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+    );
+    final path = result?.files.single.path;
+    if (path == null) return;
+    try {
+      final json =
+          jsonDecode(await File(path).readAsString()) as Map<String, dynamic>;
+      final projectInfo = json['project_info'] as Map<String, dynamic>?;
+      final clients = json['client'] as List?;
+      final client = clients?.isNotEmpty == true
+          ? clients!.first as Map<String, dynamic>
+          : null;
+      final apiKeys = client?['api_key'] as List?;
+      final apiKey = apiKeys?.isNotEmpty == true
+          ? (apiKeys!.first as Map<String, dynamic>)['current_key'] as String?
+          : null;
+      final appId =
+          (client?['client_info'] as Map<String, dynamic>?)?['mobilesdk_app_id']
+              as String?;
+      final projectId = projectInfo?['project_id'] as String?;
+      final senderId = projectInfo?['project_number'] as String?;
+      if (apiKey == null ||
+          appId == null ||
+          projectId == null ||
+          senderId == null) {
+        throw '필요한 값(api_key/mobilesdk_app_id/project_id/project_number)을 찾지 못했습니다.';
+      }
+      setState(() {
+        _apiKey.text = apiKey;
+        _appId.text = appId;
+        _projectId.text = projectId;
+        _senderId.text = senderId;
+      });
+      if (mounted) {
+        showAppToast(
+          context,
+          'google-services.json에서 값을 불러왔습니다. 확인 후 저장을 누르세요.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, 'google-services.json을 읽지 못했습니다: $e');
+      }
+    }
+  }
+
+  /// firebase-service-account.json을 읽어서 붙여넣기 칸에 채워 넣기만 한다(바로 저장하지
+  /// 않음) — 실제 형식 검증(type/private_key/client_email)은 저장 시 서버가 한다.
+  Future<void> _pickServiceAccountJson() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+    );
+    final path = result?.files.single.path;
+    if (path == null) return;
+    try {
+      final content = await File(path).readAsString();
+      jsonDecode(content); // 최소한 JSON 형식인지만 여기서 미리 확인.
+      setState(() => _serviceAccountJson.text = content);
+      if (mounted) {
+        showAppToast(context, '서비스 계정 키를 불러왔습니다. 저장을 눌러야 반영됩니다.');
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, '파일을 읽지 못했습니다: $e');
+      }
+    }
+  }
+
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -532,15 +592,11 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
       _serviceAccountJson.clear();
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('FCM 설정을 저장했습니다.')));
+        showAppToast(context, 'FCM 설정을 저장했습니다.');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
+        showAppToast(context, '실패: $e');
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -562,6 +618,15 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _pickGoogleServicesJson,
+            icon: const Icon(Icons.folder_open, size: 18),
+            label: const Text('google-services.json 열기'),
+          ),
+        ),
+        const SizedBox(height: 12),
         _FcmField(label: 'API 키', controller: _apiKey),
         const SizedBox(height: 8),
         _FcmField(label: '앱 ID', controller: _appId),
@@ -570,10 +635,20 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         const SizedBox(height: 8),
         _FcmField(label: '발신자 ID', controller: _senderId),
         const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _pickServiceAccountJson,
+            icon: const Icon(Icons.folder_open, size: 18),
+            label: const Text('서비스 계정 JSON 열기'),
+          ),
+        ),
+        const SizedBox(height: 12),
         Text(
           settings.serviceAccountConfigured
               ? '서비스 계정: 설정됨 (${settings.serviceAccountEmail ?? '확인 불가'})'
-              : '서비스 계정: 설정 안 됨 — 아래 설정 전까지 푸시가 발송되지 않습니다.',
+              : '서비스 계정: 설정 안 됨 — 아래 설정 전까지 푸시가 발송되지 않습니다.'
+                    '서비스 계정 설정이 완료되면 다운받은 json은 반드시 삭제해야 합니다.',
           style: TextStyle(
             color: settings.serviceAccountConfigured
                 ? null
@@ -583,7 +658,8 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
         ),
         const SizedBox(height: 4),
         Text(
-          '서비스 계정 키 JSON 붙여넣기 (바꿀 때만 입력 — 비워두면 기존 값을 유지합니다)',
+          '서비스 계정 키 JSON 붙여넣기 (바꿀 때만 입력 — 비워두면 기존 값을 유지합니다)'
+          '서비스 계정 설정이 완료되면 다운받은 json은 반드시 삭제해야 합니다.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 4),
@@ -805,11 +881,11 @@ class _UsersTabState extends State<_UsersTab> {
     });
   }
 
+  /// 관리자 콘솔은 Dialog 안에서 뜨는 화면이라 SnackBar를 쓰면 다이얼로그 뒤쪽 Scaffold에
+  /// 그려져 가려진다 — Overlay에 직접 꽂는 알약 토스트를 쓴다(app_toast.dart 참고).
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppToast(context, message);
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -883,6 +959,11 @@ class _UsersTabState extends State<_UsersTab> {
           position: result.position,
         ),
       );
+      _toast(
+        result.position.isEmpty
+            ? '${user.name} 님의 직책을 지웠습니다.'
+            : '${user.name} 님의 직책을 "${result.position}"(으)로 바꿨습니다.',
+      );
     });
   }
 
@@ -898,6 +979,11 @@ class _UsersTabState extends State<_UsersTab> {
     if (ok != true) return;
     await _run(() async {
       _replace(await widget.session.api!.setUserServerAdmin(user.id, grant));
+      _toast(
+        grant
+            ? '${user.name} 님을 서버 운영자로 지정했습니다.'
+            : '${user.name} 님의 서버 운영자 권한을 해제했습니다.',
+      );
     });
   }
 
@@ -1700,8 +1786,8 @@ class _FcmTab extends StatelessWidget {
           Text(
             '푸시 알림(FCM)은 이 서버의 Firebase 프로젝트 값을 입력해야 동작합니다. '
             'Firebase 콘솔에서 프로젝트를 만들고 안드로이드 앱(패키지명 com.teamtalk.messenger)을 '
-            '등록하면 아래 4개 값을 확인할 수 있고, 서비스 계정 키(발송용)는 '
-            '"프로젝트 설정 > 서비스 계정 > 새 비공개 키 생성"으로 받은 JSON 파일 내용을 그대로 붙여넣습니다.',
+            '등록하면 "프로젝트 설정 > 일반"에서 google-services.json 파일을 다운로드하여 열기 버튼을 눌러 등록하면 아래 4개 값을 확인할 수 있습니다. 서비스 계정 키(발송용)는 '
+            '"프로젝트 설정 > 서비스 계정 > 새 비공개 키 생성"으로 받은 JSON 파일도 열기 버튼으로 등록합니다.',
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),

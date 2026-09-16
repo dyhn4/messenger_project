@@ -18,6 +18,7 @@ import '../models/room.dart';
 import '../models/team.dart';
 import 'api_client.dart';
 import 'app_settings.dart';
+import 'call_controller.dart';
 import 'chat_socket.dart';
 import 'deep_link_service.dart';
 import 'device_identity.dart';
@@ -111,6 +112,17 @@ class Session extends ChangeNotifier {
   double? updateDownloadProgress;
   String? updateError; // installUpdate() 실패 시 사용자에게 보여줄 메시지.
   final chatSocket = ChatSocket();
+
+  /// 화상회의(LiveKit) — 서버에 LiveKit이 설정돼 있을 때만 true이고, false면 통화 버튼 자체를
+  /// 감춘다(server/src/calls.js의 /calls/config). 지금 진행 중인 통화(callStates)는 방마다
+  /// "통화 중" 표시와 수신 화면 판단에 쓴다.
+  bool callsEnabled = false;
+  final Map<String, CallState> callStates = {};
+
+  /// 내가 아직 받지 않은(참가자 목록에 내가 없는) 통화가 걸려온 방. 수신 화면을 띄우는 신호.
+  String? incomingCallRoomId;
+
+  late final callController = CallController(() => api!);
   final _updateSocket = UpdateSocket();
   final NotificationService notifications;
   final AppSettings settings;
@@ -173,6 +185,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _commentEditedSub;
   StreamSubscription? _commentDeletedSub;
   StreamSubscription? _presenceSub;
+  StreamSubscription<CallState>? _callStateSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
   StreamSubscription? _roleUpdatedSub;
@@ -992,6 +1005,9 @@ class Session extends ChangeNotifier {
       notifyListeners();
     });
     unawaited(_seedOnlineUsers());
+    _callStateSub?.cancel();
+    _callStateSub = chatSocket.callStates.listen(_applyCallState);
+    unawaited(_loadCallsConfig());
     _secretInviteSub?.cancel();
     _secretInviteSub = chatSocket.secretInvites.listen((e) {
       pendingSecretInvites.add(e);
@@ -1170,6 +1186,73 @@ class Session extends ChangeNotifier {
     );
     await Firebase.initializeApp(options: options);
     return true;
+  }
+
+  /// 이 서버에서 화상회의를 쓸 수 있는지 확인한다(LiveKit 미설치 서버면 false). 실패해도
+  /// 조용히 무시 — 그 경우 통화 버튼이 안 보일 뿐 다른 기능은 그대로다.
+  Future<void> _loadCallsConfig() async {
+    try {
+      final config = await api!.fetchCallsConfig();
+      callsEnabled = config.enabled;
+      notifyListeners();
+    } catch (_) {
+      // 다음 로그인 때 다시 확인한다.
+    }
+  }
+
+  /// 서버가 보내주는 방별 통화 상태(call:state)를 반영하고, 그 결과로 "지금 나에게 걸려온
+  /// 통화"가 있는지 판단한다 — 통화가 켜져 있는데 참가자 목록에 내가 없고 내가 건 것도
+  /// 아니면 아직 안 받은 통화다. 내가 이미 다른 통화 중이면 벨을 울리지 않는다.
+  void _applyCallState(CallState state) {
+    if (state.active) {
+      callStates[state.roomId] = state;
+    } else {
+      callStates.remove(state.roomId);
+    }
+
+    final iAmIn = state.participantIds.contains(userId);
+    if (state.active &&
+        !iAmIn &&
+        state.startedBy != userId &&
+        callController.roomId == null) {
+      incomingCallRoomId = state.roomId;
+    } else if (incomingCallRoomId == state.roomId && (!state.active || iAmIn)) {
+      // 통화가 끝났거나(아무도 안 남음) 내가 다른 기기에서 받았으면 벨을 끈다.
+      incomingCallRoomId = null;
+    }
+    if (!state.active || iAmIn) {
+      // 앱이 꺼져 있는 동안 FCM으로 떠 있던 전체화면 통화 알림도 같이 내린다 — 안 그러면
+      // 이미 끝난(또는 다른 기기에서 받은) 전화가 잠금화면에 계속 남는다.
+      unawaited(notifications.cancelIncomingCall(state.roomId));
+    }
+    notifyListeners();
+  }
+
+  /// 통화를 걸거나(아무도 없으면) 진행 중인 통화에 합류한다. LiveKit 연결에 성공한 뒤에야
+  /// 소켓으로 알려서, 연결 실패한 사람이 참가자 목록에 남지 않게 한다.
+  Future<void> joinCall(String roomId) async {
+    incomingCallRoomId = null;
+    notifyListeners();
+    final match = rooms.where((r) => r.id == roomId);
+    await callController.join(
+      roomId,
+      roomLabel: match.isEmpty ? null : match.first.displayName(userId ?? ''),
+    );
+    chatSocket.joinCall(roomId);
+    notifyListeners();
+  }
+
+  Future<void> leaveCall() async {
+    final roomId = callController.roomId;
+    await callController.leave();
+    if (roomId != null) chatSocket.leaveCall(roomId);
+    notifyListeners();
+  }
+
+  /// 수신 화면에서 "거절" — 이 기기에서만 벨을 끈다(다른 기기나 통화 자체는 그대로).
+  void declineIncomingCall() {
+    incomingCallRoomId = null;
+    notifyListeners();
   }
 
   /// 소켓의 presence:update는 "바뀐 순간부터의" 변화만 알려주므로, 지금 이미 온라인인

@@ -80,12 +80,30 @@ class _RoomListScreenState extends State<RoomListScreen> {
     final activeId = widget.session.activeRoomId;
     if (activeId != null) {
       final matches = widget.session.rooms.where((r) => r.id == activeId);
-      if (matches.isNotEmpty) _pendingReopenRoom = matches.first;
+      if (matches.isNotEmpty) {
+        final room = matches.first;
+        _pendingReopenRoom = room;
+        // 이 화면이 만들어지는 시점에 이미 열려 있는 방이 있으면, 그 방이 있는 탭에서
+        // 시작한다 — 알림을 눌러 앱이 켜진 경로(main.dart의 _openRoomFromNotification)에서는
+        // 채팅방이 먼저 열리고 이 화면이 그 아래에 뒤늦게 만들어지는데, 기본값(토픽 탭)
+        // 그대로 두면 방에서 뒤로 나왔을 때 엉뚱한 탭이 보인다.
+        _index = _tabIndexFor(room.type);
+      }
     }
     if (_pendingReopenRoom != null) {
       final room = _pendingReopenRoom!;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
+        // 알림으로 켜진 경우엔 그 방의 ChatScreen이 이미 이 화면 위에 push돼 있다 — 그때
+        // 여기서 또 열면 같은 방이 두 번 쌓여서, 방에서 뒤로가기를 눌러도 같은 방이 다시
+        // 나온다. 우리 라우트가 이미 덮여 있으면(=위에 뭔가 떠 있으면) 다시 열지 않는다.
+        // (넓은 화면에서 좁은 화면으로 넘어온 경우엔 HomeScreen이 먼저 스택을 루트까지
+        // 걷어내므로 이 조건에 걸리지 않는다 — home_screen.dart의 didChangeMetrics 참고.)
+        final route = ModalRoute.of(context);
+        if (route != null && !route.isCurrent) {
+          setState(() => _pendingReopenRoom = null);
+          return;
+        }
         await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => ChatScreen(session: widget.session, room: room),
@@ -95,6 +113,13 @@ class _RoomListScreenState extends State<RoomListScreen> {
       });
     }
   }
+
+  /// 방 종류 → 아래 NavigationBar 탭 번호(토픽 0 / 그룹채팅 1 / 대화 2).
+  static int _tabIndexFor(RoomType type) => switch (type) {
+    RoomType.topic => 0,
+    RoomType.group => 1,
+    RoomType.dm => 2,
+  };
 
   void _openRoom(Room room) {
     Navigator.of(context).push(

@@ -23,6 +23,7 @@ import { attachmentsRouter } from './attachments.js';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
+import { createCallsRouter } from './calls.js';
 import { createCommentsRouter } from './comments.js';
 import { createDevicesRouter } from './devices.js';
 import { createInvitesRouter } from './invites.js';
@@ -76,6 +77,8 @@ app.use('/api', requireAuth, createRoomsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
+// 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
+app.use('/api', requireAuth, createCallsRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 app.use('/api', requireAuth, attachmentsRouter);

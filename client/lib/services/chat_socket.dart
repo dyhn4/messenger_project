@@ -265,6 +265,38 @@ class SecretRekeyEvent {
       );
 }
 
+/// 한 방의 화상회의 상태 브로드캐스트(call:state) — 서버 calls.js가 통화 참가/퇴장마다
+/// 그 방 멤버 전원에게 보낸다. 벨을 울릴지, 통화 화면을 띄울지, "통화 중" 표시를 할지는
+/// 클라이언트가 이 상태를 보고 판단한다(참가자 목록에 내가 없으면 아직 안 받은 통화).
+class CallState {
+  final String roomId;
+  final bool active;
+  final String? startedBy;
+  final DateTime? startedAt;
+  final List<String> participantIds;
+
+  const CallState({
+    required this.roomId,
+    required this.active,
+    this.startedBy,
+    this.startedAt,
+    this.participantIds = const [],
+  });
+
+  factory CallState.fromJson(Map<String, dynamic> json) => CallState(
+    roomId: json['roomId'] as String,
+    active: json['active'] as bool? ?? false,
+    startedBy: json['startedBy'] as String?,
+    startedAt: json['startedAt'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(
+            (json['startedAt'] as num).toInt(),
+          ),
+    participantIds:
+        (json['participantIds'] as List?)?.cast<String>() ?? const [],
+  );
+}
+
 /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트(presence:update).
 class PresenceUpdate {
   final String userId;
@@ -297,6 +329,7 @@ class ChatSocket {
   final _commentDeletedController =
       StreamController<CommentDeletedEvent>.broadcast();
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
+  final _callStateController = StreamController<CallState>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
   final _roleUpdatedController = StreamController<void>.broadcast();
@@ -362,6 +395,9 @@ class ChatSocket {
   /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트. 멤버 목록의 초록 점 갱신에 쓴다.
   Stream<PresenceUpdate> get presenceEvents => _presenceController.stream;
 
+  /// 화상회의 상태가 바뀔 때마다(누가 들어오고 나갈 때) 그 방의 멤버 전원에게 온다.
+  Stream<CallState> get callStates => _callStateController.stream;
+
   /// 연결이 끊겼다가 다시 붙었을 때(최초 연결 제외) 흘러나온다.
   /// 끊긴 동안 놓친 메시지/방 상태를 다시 받아오는 용도.
   Stream<void> get reconnected => _reconnectController.stream;
@@ -393,6 +429,15 @@ class ChatSocket {
       _secretRekeyAckController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
+
+  /// 소켓이 아직 **만들어지기도 전에** 들어온 읽음 처리 요청들. 알림을 눌러 앱이 켜지는
+  /// 경로에서는 방 목록을 받자마자 채팅방이 열리는데(main.dart의 _openRoomFromNotification),
+  /// 그 시점엔 Session._enterApp이 아직 fetchMe/기기 등록을 기다리는 중이라 connect()가
+  /// 불리기 전이다. 그러면 markRead의 emit이 그냥 사라져서 서버는 내가 읽은 걸 영영 모르고,
+  /// 양쪽 앱의 "안 읽음 1" 표시가 계속 남는다(다음 메시지가 올 때 markRead가 다시 불려야
+  /// 겨우 풀렸다). 소켓이 만들어진 뒤라면 연결 전이어도 socket.io가 알아서 버퍼링해주므로
+  /// (sendBuffer) 이 큐는 "_socket == null"인 구간만 메운다.
+  final _pendingReadRoomIds = <String>{};
 
   bool _looksLikeAuthError(dynamic err) {
     final message = err is Map ? err['message']?.toString() : err?.toString();
@@ -495,6 +540,11 @@ class ChatSocket {
         CommentDeletedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
+    socket.on('call:state', (data) {
+      _callStateController.add(
+        CallState.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
     socket.on('presence:update', (data) {
       _presenceController.add(
         PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -557,6 +607,12 @@ class ChatSocket {
 
     socket.connect();
     _socket = socket;
+    // connect()가 끝나기 전에 emit해도 socket.io가 sendBuffer에 담아뒀다가 연결되면 보낸다 —
+    // 소켓이 없던 동안 밀린 읽음 처리를 여기서 한 번에 흘려보낸다(_pendingReadRoomIds 참고).
+    for (final roomId in _pendingReadRoomIds) {
+      socket.emit('room:read', {'roomId': roomId});
+    }
+    _pendingReadRoomIds.clear();
   }
 
   /// 메시지를 보내고 서버의 ack(message:send 응답)를 기다린다.
@@ -622,8 +678,23 @@ class ChatSocket {
   }
 
   void markRead(String roomId) {
-    _socket?.emit('room:read', {'roomId': roomId});
+    final socket = _socket;
+    if (socket == null) {
+      _pendingReadRoomIds.add(roomId);
+      return;
+    }
+    socket.emit('room:read', {'roomId': roomId});
   }
+
+  /// LiveKit 연결에 성공한 직후 "나 통화에 들어왔다"고 알린다 — 서버가 방 멤버 전원에게
+  /// call:state를 브로드캐스트해서 다른 사람 화면에 수신/참가자 표시가 뜨게 한다.
+  void joinCall(String roomId) =>
+      _socket?.emit('call:join', {'roomId': roomId});
+
+  /// 통화 종료. 소켓이 그냥 끊겨도 서버가 알아서 정리하지만(socket.js의 disconnect),
+  /// 정상 종료는 명시적으로 알려야 남은 사람들 화면이 즉시 갱신된다.
+  void leaveCall(String roomId) =>
+      _socket?.emit('call:leave', {'roomId': roomId});
 
   /// 비밀 대화 메시지가 실제로 화면에 노출됐다는 신호 — 자동 삭제 타이머가 이 시점부터 시작된다.
   void markSecretMessageRead(String roomId, String messageId) {

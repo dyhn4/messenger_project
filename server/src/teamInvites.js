@@ -12,7 +12,7 @@ import {
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
 import { PAIRING_PORT } from './config.js';
-import { ACCOUNT_ROLES, canCreateTeamInviteLink, roleLabel, ROLE_RANK } from './permissions.js';
+import { ACCOUNT_ROLES, canCreateTeamInviteLink, canManageTeam, roleLabel, ROLE_RANK } from './permissions.js';
 
 /** 팀 초대 링크도 설치→가입 초대 링크와 같은 기간만큼만 유효하다 — 고를 필요 없게 고정. */
 export const TEAM_INVITE_EXPIRY_DAYS = 7;
@@ -52,8 +52,9 @@ export function createTeamInvitesRouter() {
   const router = Router();
 
   // 서버 설정(server_settings.teamInviteLinkCreation)이 정한 최소 등급 이상만 — 팀 생성
-  // 권한(teams.js POST /teams)과 같은 구조의 서버 전역 게이트다. 특정 팀에 대한 권한(그
-  // 팀의 소유자/관리자인지)은 실제로 링크를 만드는 POST 라우트에서 팀 단위로 따로 확인한다.
+  // 권한(teams.js POST /teams)과 같은 구조의 서버 전역 게이트다. 이건 "이 서버에서 초대
+  // 링크를 만들 수 있는 계정 등급인가"만 보고, "이 팀에 대해 만들 자격이 있는가"(멤버십 +
+  // canManageTeam)는 실제로 링크를 만드는 POST 라우트에서 팀 단위로 따로 확인한다.
   router.use('/team-invite-links', async (req, res, next) => {
     const [access, settings] = await Promise.all([userAccess(req.user.sub), getServerSettings()]);
     if (!canCreateTeamInviteLink({ ...access, teamInviteLinkCreation: settings.teamInviteLinkCreation })) {
@@ -91,6 +92,14 @@ export function createTeamInvitesRouter() {
     const membership = await teamAccess(teamId, req.user.sub);
     if (!membership.isMember) {
       return res.status(403).json({ error: '내가 속한 팀에만 초대 링크를 만들 수 있습니다.' });
+    }
+    // 위 미들웨어의 서버 전역 등급만으로는 부족하다 — 그 팀을 실제로 관리할 수 있는
+    // 사람(소유자 또는 계정 등급 관리자)만 만들 수 있어야 한다. 클라이언트는 이 버튼을 팀
+    // 설정 안에만 두지만(team_settings_dialog.dart, 팀 설정 자체가 canManageTeam으로 막혀
+    // 있음), 서버가 같이 막지 않으면 API를 직접 부르는 평범한 팀원도 "가입과 동시에 등급이
+    // 자동 부여되는" 링크를 만들 수 있다.
+    if (!canManageTeam(membership)) {
+      return res.status(403).json({ error: '팀 초대 링크는 팀 소유자나 관리자만 만들 수 있습니다.' });
     }
     const label = typeof req.body?.label === 'string' ? req.body.label.trim().slice(0, 30) : null;
 

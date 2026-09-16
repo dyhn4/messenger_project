@@ -680,6 +680,30 @@ class ApiClient {
     });
   }
 
+  /// 이 서버에서 화상회의를 쓸 수 있는지 + LiveKit 접속 주소(server/src/calls.js).
+  /// LiveKit을 안 깐 서버면 enabled=false로 오고, 클라이언트는 통화 버튼 자체를 감춘다.
+  Future<({bool enabled, String? url})> fetchCallsConfig() async {
+    final body = await _get('/api/calls/config') as Map<String, dynamic>;
+    return (
+      enabled: body['enabled'] as bool? ?? false,
+      url: body['url'] as String?,
+    );
+  }
+
+  /// 이 방의 화상회의 참가 토큰. 방 멤버가 아니거나(403) 비밀 대화면(400) 서버가 거부한다.
+  Future<({String url, String roomName, String token})> fetchCallToken(
+    String roomId,
+  ) async {
+    final body =
+        await _post('/api/rooms/$roomId/call/token', const {})
+            as Map<String, dynamic>;
+    return (
+      url: body['url'] as String,
+      roomName: body['roomName'] as String,
+      token: body['token'] as String,
+    );
+  }
+
   /// 관리자 콘솔의 "FCM 설정" — 지금 저장된 값(서비스 계정의 private_key는 빼고).
   Future<FcmSettings> fetchFcmSettings() async => FcmSettings.fromJson(
     await _get('/api/admin/fcm-settings') as Map<String, dynamic>,

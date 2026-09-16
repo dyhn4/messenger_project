@@ -23,6 +23,9 @@ $PgVersion = '17.7-1'
 $PgInstallerUrl = "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-windows-x64.exe"
 $NssmVersion = '2.24'
 $NssmZipUrl = "https://nssm.cc/release/nssm-$NssmVersion.zip"
+# 화상회의(SFU). Go 단일 실행 파일이라 Node/PostgreSQL처럼 그냥 같이 넣어두면 된다.
+$LiveKitVersion = '1.13.7'
+$LiveKitZipUrl = "https://github.com/livekit/livekit/releases/download/v$LiveKitVersion/livekit_${LiveKitVersion}_windows_amd64.zip"
 
 $Root = $PSScriptRoot
 $Server = Join-Path $Root 'server'
@@ -74,6 +77,19 @@ if (-not (Test-Path $nssmExe)) {
   Write-Host '3) nssm.exe 이미 준비됨 — 건너뜀'
 }
 
+# ── 3.5) LiveKit 서버(화상회의 SFU) ─────────────────────────────────────
+$liveKitDir = Join-Path $Bin 'livekit'
+if (-not (Test-Path (Join-Path $liveKitDir 'livekit-server.exe'))) {
+  Write-Host "3.5) LiveKit $LiveKitVersion 다운로드 중..."
+  New-Item -ItemType Directory -Force -Path $liveKitDir | Out-Null
+  $lkZip = Join-Path $Bin 'livekit.zip'
+  Invoke-WebRequest -Uri $LiveKitZipUrl -OutFile $lkZip
+  Expand-Archive -Path $lkZip -DestinationPath $liveKitDir -Force
+  Remove-Item $lkZip -Force
+} else {
+  Write-Host '3.5) LiveKit 이미 준비됨 — 건너뜀'
+}
+
 # ── 4) server/ 스테이징(실데이터/비밀값 제외) + npm install ────────────
 Write-Host '4) server/ 소스 정리 중...'
 Remove-Item $Stage -Recurse -Force -ErrorAction SilentlyContinue
@@ -83,8 +99,8 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 # robocopy는 실패가 아니어도 0이 아닌 코드를 돌려준다).
 $robocopyArgs = @(
   $Server, $Stage, '/E',
-  '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer',
-  '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', 'firebase-service-account.json', 'db.json.bak', 'ecosystem.config.cjs',
+  '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', '.livekit',
+  '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', '.livekit-secret', 'firebase-service-account.json', 'db.json.bak', 'ecosystem.config.cjs',
   '/NFL', '/NDL', '/NJH', '/NJS'
 )
 robocopy @robocopyArgs | Out-Null

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/update_dialog.dart';
+import 'call_screen.dart';
 import 'chat_screen.dart';
 import 'desktop_home_screen.dart';
 import 'room_list_screen.dart';
@@ -24,6 +25,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _secretInviteDialogShowing = false;
+  bool _incomingCallDialogShowing = false;
   StreamSubscription<String>? _toastSub;
 
   /// 직전에 넓은 레이아웃이었는지. 좁은 화면에서 방을 열면 RoomListScreen이 ChatScreen을
@@ -93,6 +95,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _onSessionChanged() {
     _maybeShowUpdateBanner();
     _maybeShowSecretInvite();
+    _maybeShowIncomingCall();
+  }
+
+  /// 걸려온 화상회의(session.incomingCallRoomId)가 있으면 수신 화면을 띄운다. 비밀 대화
+  /// 초대와 같은 방식 — HomeScreen은 어느 화면에 있든 항상 떠 있는 최상위 라우트라 여기서
+  /// 띄우면 채팅방 안에 있든 목록에 있든 똑같이 보인다.
+  ///
+  /// 앱이 완전히 꺼져 있을 때는 이 경로가 아예 안 돌아간다(소켓이 없으므로) — 그건 3단계에서
+  /// FCM 고우선순위 푸시 + 전체화면 수신 알림으로 따로 처리한다.
+  void _maybeShowIncomingCall() {
+    final roomId = widget.session.incomingCallRoomId;
+    if (roomId == null || _incomingCallDialogShowing) return;
+    final matches = widget.session.rooms.where((r) => r.id == roomId);
+    if (matches.isEmpty) return;
+    final room = matches.first;
+
+    _incomingCallDialogShowing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        _incomingCallDialogShowing = false;
+        return;
+      }
+      final accept = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.videocam, color: Colors.green),
+              SizedBox(width: 8),
+              Text('화상회의 요청'),
+            ],
+          ),
+          content: Text(
+            '${room.displayName(widget.session.userId ?? '')}에서 화상회의가 시작됐습니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('거절'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('참여'),
+            ),
+          ],
+        ),
+      );
+      _incomingCallDialogShowing = false;
+      if (!mounted) return;
+      if (accept == true) {
+        try {
+          await widget.session.joinCall(room.id);
+          if (mounted) await showCallScreen(context, widget.session, room);
+        } catch (e) {
+          if (mounted) showAppToast(context, '통화에 참여하지 못했습니다: $e');
+        }
+      } else {
+        widget.session.declineIncomingCall();
+      }
+    });
   }
 
   /// 비밀 대화 초대(secret:invite)가 도착하면 수락/거절 다이얼로그를 하나씩 순서대로 띄운다.

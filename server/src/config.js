@@ -27,6 +27,18 @@ function resolveSecret(envName, fileName, byteLength) {
   return generated;
 }
 
+/**
+ * resolveSecret과 달리 **없으면 만들지 않고 null을 돌려준다** — 그 값이 있어야만 켜지는
+ * 선택 기능(화상회의 등)에 쓴다. 자동 생성해버리면 "설정된 것처럼" 보이지만 짝이 되는
+ * 외부 구성요소(LiveKit 서버)는 다른 비밀값을 갖고 있어서 오히려 원인을 찾기 어려워진다.
+ */
+function optionalSecret(envName, fileName) {
+  if (process.env[envName]) return process.env[envName];
+  const filePath = path.join(rootDir, fileName);
+  if (fs.existsSync(filePath)) return fs.readFileSync(filePath, 'utf8').trim();
+  return null;
+}
+
 export const PORT = process.env.PORT || 3000;
 
 // 새 기기 페어링용 평문 HTTP 부트스트랩 서버 포트(pairing.js). 기본값은 메인 포트+1.
@@ -42,3 +54,17 @@ export const JWT_SECRET = resolveSecret('JWT_SECRET', '.jwt-secret', 48);
 
 // DB에 저장하는 민감 필드(이메일 등) 암호화용 키. 32바이트(AES-256) 고정 길이가 필요하다.
 export const DB_ENCRYPTION_KEY = resolveSecret('DB_ENCRYPTION_KEY', '.db-encryption-key', 32);
+
+/**
+ * 화상회의(LiveKit SFU) 연동값 — 설치 프로그램이 LiveKit 서비스를 등록하면서 같은 값을
+ * livekit.yaml과 여기(.env/.livekit-secret)에 함께 심는다. **비밀값이 없으면 화상회의 기능만
+ * 조용히 꺼진다**(푸시 알림이 서비스 계정 없이도 서버가 정상 기동하는 것과 같은 방식) —
+ * 그래야 LiveKit을 아직 안 깐 기존 서버도 업데이트 후 그대로 돌아간다.
+ *
+ * URL은 보통 설정하지 않는다: 클라이언트가 접속한 바로 그 호스트의 LIVEKIT_PORT로 만들어
+ * 보내주면 되기 때문이다(calls.js). LiveKit을 다른 장비에 띄웠을 때만 명시한다.
+ */
+export const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'tangotalk';
+export const LIVEKIT_API_SECRET = optionalSecret('LIVEKIT_API_SECRET', '.livekit-secret');
+export const LIVEKIT_PORT = Number(process.env.LIVEKIT_PORT) || 7880;
+export const LIVEKIT_URL = process.env.LIVEKIT_URL || null;

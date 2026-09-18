@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { findMessageById, softDeleteMessage, updateMessageText } from './db/queries/messages.js';
+import { findMessageById, hardDeleteMessage, softDeleteMessage, updateMessageText } from './db/queries/messages.js';
+import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { signFileUrl } from './upload.js';
 
@@ -31,6 +32,17 @@ export function toMessageDto(m) {
     quotedPreview: m.quotedPreview ?? null,
     forwardedFromSenderName: m.forwardedFromSenderName ?? null,
     forwardedFromCreatedAt: m.forwardedFromCreatedAt ? new Date(m.forwardedFromCreatedAt).getTime() : null,
+    linkPreview: m.linkPreviewTitle || m.linkPreviewDescription || m.linkPreviewImageUrl
+      ? {
+          url: m.linkPreviewUrl,
+          title: m.linkPreviewTitle ?? null,
+          description: m.linkPreviewDescription ?? null,
+          imageUrl: m.linkPreviewImageUrl ?? null,
+          siteName: m.linkPreviewSiteName ?? null,
+        }
+      : null,
+    isInquiryNotice: !!m.isInquiryNotice,
+    inquiryId: m.inquiryId ?? null,
   };
 }
 
@@ -75,13 +87,41 @@ export function createMessagesRouter(io) {
     });
     if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
 
-    await softDeleteMessage(message.id);
+    // 삭제 가능 시간 안에 발신자 본인 외에 아직 아무도 이 메시지를 안 읽었으면, "삭제된
+    // 메시지입니다" 흔적도 없이 안 보낸 것처럼 완전히 지운다. 한 명이라도 읽었으면 기존처럼
+    // 자리만 남기고 내용만 비우는 소프트 삭제로 처리한다.
+    const room = await findRoomById(message.roomId);
+    let seenByOther;
+    if (room?.isSecret) {
+      // 비밀 대화는 메시지마다 정확한 읽음 시각(readAt)을 이미 추적한다(자동 삭제 타이머용,
+      // 항상 2명뿐이라 이 값이 곧 "상대가 읽었는지"다).
+      seenByOther = !!message.readAt;
+    } else {
+      // 평문 방은 메시지 단위 읽음 기록이 없어서, 방의 "마지막으로 읽은 시각"이 이 메시지의
+      // 작성 시각 이후인 멤버가(나 제외) 한 명이라도 있는지로 판단한다.
+      const lastReadMap = await getRoomLastReadMap(message.roomId);
+      const createdAtMs = new Date(message.createdAt).getTime();
+      seenByOther = Object.entries(lastReadMap).some(
+        ([userId, whenMs]) => userId !== message.senderId && whenMs >= createdAtMs,
+      );
+    }
+
     // 남의 메시지를 지운 경우(= 관리자 콘텐츠 관리)만 감사 로그에 남긴다 — 본인이 자기 글을
     // 지우는 건 일상적인 동작이라 기록 대상이 아니다.
     if (message.senderId !== req.user.sub) {
       await recordModerationAudit(req, message, 'message');
     }
-    io.to(message.roomId).emit('message:deleted', { id: message.id, roomId: message.roomId });
+
+    if (seenByOther) {
+      await softDeleteMessage(message.id);
+      io.to(message.roomId).emit('message:deleted', { id: message.id, roomId: message.roomId });
+    } else {
+      await hardDeleteMessage(message.id);
+      // "완전히 없앤다"는 클라이언트 동작 자체가 이미 secretExpiry.js의 자동 삭제 타이머
+      // 만료와 똑같다(applyExpire — 리스트에서 통째로 빼고 딸린 댓글 타임라인 항목도 같이
+      // 제거) — 새 이벤트를 만들지 않고 그 경로를 그대로 재사용한다.
+      io.to(message.roomId).emit('message:expired', { roomId: message.roomId, messageId: message.id });
+    }
     res.json({ ok: true });
   });
 

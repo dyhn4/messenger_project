@@ -128,6 +128,39 @@ Future<void> showLeaveRoomDialog(
   }
 }
 
+/// 평문 1:1 채팅방을 "체크박스로 나가기까지 고르는" showLeaveRoomDialog 없이, 숨기기 하나만
+/// 가볍게 확인하고 싶은 곳(desktop_home_screen.dart의 방 목록 우클릭 메뉴 "숨기기"/호버 X)이
+/// 쓴다. 되돌릴 수 있는 동작이라(다시 대화를 시작하면 예전 내용이 그대로 복원됨) 삭제/나가기
+/// 같은 빨간 경고색은 쓰지 않는다.
+Future<void> showHideDmDialog(
+  BuildContext context,
+  Session session,
+  Room room,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('채팅방 숨기기'),
+      content: Text(
+        '\'${room.displayName(session.userId ?? '')}\' 방을 목록에서 숨기시겠습니까?'
+        ' 나중에 다시 대화를 시작하면 예전 내용이 그대로 보입니다.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('숨기기'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return;
+  await session.leaveRoom(room.id);
+}
+
 /// 채팅 화면 우측 상단의 "더보기" 메뉴: 멤버 목록/초대(토픽·그룹만) + 나가기(전부).
 /// DM은 멤버가 항상 나+상대방 둘뿐이라 멤버 목록/초대는 의미가 없어서 나가기만 보여준다.
 class RoomOptionsMenu extends StatelessWidget {

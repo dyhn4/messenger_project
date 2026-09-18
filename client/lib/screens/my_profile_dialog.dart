@@ -3,12 +3,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/team.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
 import '../widgets/my_avatar.dart';
+import '../widgets/org_section.dart';
 
-/// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 아이디/이름/이메일 + 로그아웃.
-/// 아바타를 누르면 사진 편집 화면으로, 이름/이메일을 누르면 바로 수정할 수 있다.
+/// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 이름 + 등급 + 팀/직책
+/// (member_profile_dialog.dart의 다른 사람 프로필 카드와 같은 모양) + 개인정보 설정 + 로그아웃.
+/// 아바타를 누르면 사진 편집 화면으로, 이름 옆 연필을 누르면 바로 수정할 수 있다. 아이디/
+/// 이메일/비밀번호/회원 탈퇴는 "개인정보 설정"(비밀번호 확인 후 진입)으로 옮겼다.
 class MyProfileDialog extends StatelessWidget {
   final Session session;
   const MyProfileDialog({super.key, required this.session});
@@ -38,79 +42,35 @@ class MyProfileDialog extends StatelessWidget {
     }
   }
 
-  /// "이름" 아래 "팀"(+ '팀 단위' 설정이면 "직책"까지 팀마다 짝지어) 표시 — 팀 소속·직책은
-  /// 소유자·관리자(또는 서버 운영자)만 바꿀 수 있어 이 카드에서는 보여주기만 한다(onTap 없음).
-  List<Widget> _buildOrgRows(BuildContext context) {
-    if (session.orgScope == 'account') {
-      final teamNames = session.teams.map((t) => t.name).join(', ');
-      return [
-        _ProfileInfoRow(
-          icon: Icons.groups_outlined,
-          label: '팀',
-          value: teamNames.isEmpty ? '속한 팀이 없습니다' : teamNames,
-        ),
-        _ProfileInfoRow(
-          icon: Icons.badge_outlined,
-          label: '직책',
-          value: session.myPosition?.isNotEmpty == true
-              ? session.myPosition!
-              : '아직 등록되지 않았습니다',
-        ),
-      ];
-    }
-    final lines = session.myTeamPositions
-        .map(
-          (t) => t.position?.isNotEmpty == true
-              ? '${t.teamName} · ${t.position}'
-              : t.teamName,
-        )
-        .toList();
-    return [
-      _ProfileInfoLinesRow(
-        icon: Icons.groups_outlined,
-        label: '팀',
-        lines: lines.isEmpty ? const ['속한 팀이 없습니다'] : lines,
-      ),
-    ];
+  /// 지금 보고 있는 팀 기준 내 직책 — account 단위면 전 팀에 같은 값, team 단위면 팀마다
+  /// 다를 수 있어 지금 팀(currentTeam) 것을 찾는다(못 찾으면 첫 번째 팀 값으로 대체).
+  /// member_profile_dialog.dart의 OrgSection과 같은 모양으로 보여주기 위해 하나로 좁힌다.
+  String? _currentPosition() {
+    if (session.orgScope == 'account') return session.myPosition;
+    final currentId = session.currentTeam?.id;
+    final matches = session.myTeamPositions.where((t) => t.teamId == currentId);
+    if (matches.isNotEmpty) return matches.first.position;
+    return session.myTeamPositions.isNotEmpty
+        ? session.myTeamPositions.first.position
+        : null;
   }
 
-  /// 이메일 변경은 두 단계로 나뉜다: (1) 비밀번호 확인만 하는 다이얼로그, 맞으면 (2) 현재
-  /// 이메일을 보여주고 새 이메일을 받는 다이얼로그. 실제 저장은 서버가 currentPassword를
-  /// 다시 요구하므로, 1단계에서 확인된 비밀번호를 그대로 들고 가서 2단계 제출에 쓴다.
-  Future<void> _editEmail(BuildContext context) async {
+  /// "개인정보 설정" — 비밀번호를 한 번 더 확인해야 열 수 있다(아이디/이메일/비밀번호 변경/
+  /// 회원 탈퇴처럼 민감한 작업을 모아둔 곳이라서). 확인된 비밀번호는 그 안의 이메일 변경에서
+  /// 다시 물어보지 않고 그대로 재사용한다(비밀번호 변경/회원 탈퇴는 각각 별도로 다시 받는다 —
+  /// 그 자체가 더 민감한 작업이라서).
+  Future<void> _openPersonalInfo(BuildContext context) async {
     final password = await showDialog<String>(
       context: context,
       builder: (_) => _VerifyPasswordDialog(session: session),
     );
     if (password == null || !context.mounted) return;
-    await showDialog(
+    final withdrawn = await showDialog<bool>(
       context: context,
       builder: (_) =>
-          _EditEmailDialog(session: session, verifiedPassword: password),
+          PersonalInfoDialog(session: session, verifiedPassword: password),
     );
-  }
-
-  Future<void> _changePassword(BuildContext context) async {
-    await showDialog<bool>(
-      context: context,
-      builder: (_) => _ChangePasswordDialog(session: session),
-    );
-  }
-
-  Future<void> _logout(BuildContext context) async {
-    Navigator.of(context).pop();
-    await session.logout();
-    if (context.mounted) {
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    }
-  }
-
-  Future<void> _withdraw(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => _WithdrawConfirmDialog(session: session),
-    );
-    if (confirmed == true && context.mounted) {
+    if (withdrawn == true && context.mounted) {
       Navigator.of(context).pop(); // 프로필 카드 닫기
       if (context.mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
@@ -131,6 +91,15 @@ class MyProfileDialog extends StatelessWidget {
     }
   }
 
+  Future<void> _logout(BuildContext context) async {
+    await session.logout();
+    // 이 버튼이 push된 화면 위에 있을 수도 있으니, 로그인 화면이 보이도록
+    // 루트까지 화면 스택을 걷어낸다.
+    if (context.mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -139,351 +108,179 @@ class MyProfileDialog extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 320),
         child: ListenableBuilder(
           listenable: session,
-          builder: (context, _) => Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 아바타가 배너 아래쪽으로 튀어나오게(겹쳐 보이게) 하는 부분. Positioned+
-              // Clip.none만으로는 부족하다 — Stack 자신의 size는 여전히 겹치지 않는 자식(배너
-              // Container, 90) 기준으로 90만 되고, RenderBox.hitTest는 어떤 위젯이든 자기
-              // size.contains(position)를 먼저 통과해야 자식을 검사하므로, Stack 자체가 90만큼만
-              // "차지"하는 한 그 아래로 튀어나온 아바타는 Positioned를 써도 여전히 탭이 안 먹힌다
-              // (신고된 "아래쪽 반원 클릭 안 됨" 버그 — 1차 수정에서 놓친 부분). SizedBox로
-              // Stack 자체의 크기를 아바타 전체를 포함하는 높이로 명시해야 한다.
-              SizedBox(
-                height: 124, // 배너 90 + 아바타가 튀어나온 만큼(56~120) + 여유
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        height: 90,
-                        decoration: BoxDecoration(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.surfaceContainerHighest,
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(16),
+          builder: (context, _) {
+            final hint = Theme.of(context).hintColor;
+            final role = session.accountRole;
+            final roleText = session.currentTeam?.isOwner == true
+                ? '${role.label} · 이 팀의 소유자'
+                : role.label;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 아바타가 배너 아래쪽으로 튀어나오게(겹쳐 보이게) 하는 부분. Positioned+
+                // Clip.none만으로는 부족하다 — Stack 자신의 size는 여전히 겹치지 않는 자식(배너
+                // Container, 90) 기준으로 90만 되고, RenderBox.hitTest는 어떤 위젯이든 자기
+                // size.contains(position)를 먼저 통과해야 자식을 검사하므로, Stack 자체가 90만큼만
+                // "차지"하는 한 그 아래로 튀어나온 아바타는 Positioned를 써도 여전히 탭이 안 먹힌다
+                // (신고된 "아래쪽 반원 클릭 안 됨" 버그 — 1차 수정에서 놓친 부분). SizedBox로
+                // Stack 자체의 크기를 아바타 전체를 포함하는 높이로 명시해야 한다.
+                SizedBox(
+                  height: 124, // 배너 90 + 아바타가 튀어나온 만큼(56~120) + 여유
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          height: 90,
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(16),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 56,
-                      child: Center(
-                        child: GestureDetector(
-                          onTap: () => _editAvatar(context),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              MyAvatar(session: session, radius: 32),
-                              Positioned(
-                                right: -2,
-                                bottom: -2,
-                                child: CircleAvatar(
-                                  radius: 11,
-                                  backgroundColor: Theme.of(
-                                    context,
-                                  ).colorScheme.primary,
-                                  child: const Icon(
-                                    Icons.camera_alt,
-                                    size: 13,
-                                    color: Colors.white,
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 56,
+                        child: Center(
+                          child: GestureDetector(
+                            onTap: () => _editAvatar(context),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                MyAvatar(session: session, radius: 32),
+                                Positioned(
+                                  right: -2,
+                                  bottom: -2,
+                                  child: CircleAvatar(
+                                    radius: 11,
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                    child: const Icon(
+                                      Icons.camera_alt,
+                                      size: 13,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        session.name ?? '',
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => _editName(context),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(Icons.edit_outlined, size: 16, color: hint),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              _ProfileInfoRow(
-                icon: Icons.badge_outlined,
-                label: '아이디',
-                value: session.username ?? '',
-              ),
-              _ProfileInfoRow(
-                icon: Icons.person_outline,
-                label: '이름',
-                value: session.name ?? '',
-                onTap: () => _editName(context),
-              ),
-              ..._buildOrgRows(context),
-              _ProfileInfoRow(
-                icon: Icons.mail_outline,
-                label: '이메일',
-                value: '',
-                onTap: () => _editEmail(context),
-              ),
-              _ProfileInfoRow(
-                icon: Icons.lock_outline,
-                label: '비밀번호',
-                value: '',
-                onTap: () => _changePassword(context),
-              ),
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: TextButton.icon(
-                    onPressed: () => _logout(context),
-                    style: TextButton.styleFrom(
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      foregroundColor: Colors.redAccent,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                const SizedBox(height: 4),
+                Text(
+                  roleText,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: hint),
+                ),
+                const SizedBox(height: 12),
+                OrgSection(
+                  teamNames: session.teams.map((t) => t.name).toList(),
+                  position: _currentPosition(),
+                  // 내 직책은 소유자·관리자도 스스로 바꾸지 않는다(자기 서열을 스스로 올리는
+                  // 걸 막기 위함) — "회원"/"멤버" 탭에서 남이 바꿔줘야 한다.
+                  onEdit: null,
+                ),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: () => _openPersonalInfo(context),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
                     ),
-                    icon: const Icon(Icons.logout, color: Colors.redAccent),
-                    label: const Text(
-                      '로그아웃',
-                      style: TextStyle(
-                        color: Colors.redAccent,
-                        fontWeight: FontWeight.w600,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.manage_accounts_outlined,
+                          size: 18,
+                          color: hint,
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(child: Text('개인정보 설정')),
+                        Icon(Icons.chevron_right, color: hint),
+                      ],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      onPressed: () => _logout(context),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
+                        foregroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      icon: const Icon(Icons.logout, color: Colors.redAccent),
+                      label: const Text(
+                        '로그아웃',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                child: TextButton(
-                  onPressed: () => _withdraw(context),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).hintColor,
-                  ),
-                  child: const Text(
-                    '회원 탈퇴',
-                    style: TextStyle(decoration: TextDecoration.underline),
-                  ),
-                ),
-              ),
-            ],
-          ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-/// "회원 탈퇴" 확인 다이얼로그. 로그아웃과 달리 되돌릴 수 없는 작업이라 비밀번호를 한 번 더
-/// 받아서 본인 확인을 한다. 성공하면 true를 반환하고(호출부가 로그인 화면으로 돌려보낸다),
-/// 취소하거나 실패한 채로 닫으면 null/false를 반환한다.
-class _WithdrawConfirmDialog extends StatefulWidget {
-  final Session session;
-  const _WithdrawConfirmDialog({required this.session});
-
-  @override
-  State<_WithdrawConfirmDialog> createState() => _WithdrawConfirmDialogState();
-}
-
-class _WithdrawConfirmDialogState extends State<_WithdrawConfirmDialog> {
-  final _password = TextEditingController();
-  bool _submitting = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _password.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_password.text.isEmpty) return;
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      await widget.session.withdraw(_password.text);
-      if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('회원 탈퇴'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '탈퇴하면 로그인할 수 없고, 프로필 정보는 익명화됩니다. 이 작업은 되돌릴 수 없습니다.\n'
-            '계속하려면 비밀번호를 입력하세요.',
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _password,
-            autofocus: true,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '비밀번호',
-              border: OutlineInputBorder(),
-            ),
-            onSubmitted: (_) => _submit(),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-          ],
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting
-              ? null
-              : () => Navigator.of(context).pop(false),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: _submitting ? null : _submit,
-          style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-          child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Text('탈퇴하기'),
-        ),
-      ],
-    );
-  }
-}
-
-/// "비밀번호 변경" 다이얼로그. 현재 비밀번호로 본인 확인 후 새 비밀번호(+확인)를 받는다.
-/// 성공하면 서버가 새 토큰을 내려줘서 이 기기는 로그아웃 없이 그대로 이어진다.
-class _ChangePasswordDialog extends StatefulWidget {
-  final Session session;
-  const _ChangePasswordDialog({required this.session});
-
-  @override
-  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
-}
-
-class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
-  final _current = TextEditingController();
-  final _newPassword = TextEditingController();
-  final _confirm = TextEditingController();
-  bool _submitting = false;
-  String? _error;
-
-  @override
-  void dispose() {
-    _current.dispose();
-    _newPassword.dispose();
-    _confirm.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_current.text.isEmpty || _newPassword.text.isEmpty) return;
-    if (_newPassword.text != _confirm.text) {
-      setState(() => _error = '새 비밀번호가 서로 다릅니다.');
-      return;
-    }
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      await widget.session.changePassword(
-        currentPassword: _current.text,
-        newPassword: _newPassword.text,
-      );
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('비밀번호 변경'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _current,
-            autofocus: true,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '현재 비밀번호',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _newPassword,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '새 비밀번호',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _confirm,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '새 비밀번호 확인',
-              border: OutlineInputBorder(),
-            ),
-            onSubmitted: (_) => _submit(),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-          ],
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: _submitting ? null : _submit,
-          child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('변경하기'),
-        ),
-      ],
-    );
-  }
-}
-
-/// "이메일 변경" 1단계 — 비밀번호 확인만 한다(다른 부수효과 없음). 맞으면 그 비밀번호
-/// 문자열 그대로 pop해서 돌려주고(2단계가 실제 저장 때 다시 쓴다), 취소하면 null.
+/// "개인정보 설정" 진입 시 비밀번호를 한 번 확인하는 다이얼로그. 맞으면 그 비밀번호 문자열
+/// 그대로 pop해서 돌려주고(PersonalInfoDialog의 이메일 변경이 다시 묻지 않고 재사용한다),
+/// 취소하거나 실패한 채로 닫으면 null.
 class _VerifyPasswordDialog extends StatefulWidget {
   final Session session;
   const _VerifyPasswordDialog({required this.session});
@@ -522,20 +319,22 @@ class _VerifyPasswordDialogState extends State<_VerifyPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('이메일 변경'),
+      title: const Text('비밀번호 확인'),
       content: SizedBox(
         width: 360,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            const Text('개인정보 설정을 열려면 비밀번호를 다시 확인해야 합니다.'),
+            const SizedBox(height: 12),
             TextField(
               controller: _password,
               autofocus: true,
               obscureText: true,
               onSubmitted: (_) => _submit(),
               decoration: const InputDecoration(
-                labelText: '비밀번호 확인',
+                labelText: '비밀번호',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -566,22 +365,257 @@ class _VerifyPasswordDialogState extends State<_VerifyPasswordDialog> {
   }
 }
 
-/// "이메일 변경" 2단계 — 1단계에서 확인된 비밀번호([verifiedPassword])를 들고 와서 현재
-/// 이메일을 보여주고 새 이메일을 받는다. 새 이메일 입력칸은 회원가입 폼과 같은 형식
-/// (로컬 파트 + '@' + 도메인)을 쓴다.
-class _EditEmailDialog extends StatefulWidget {
+/// "개인정보" 팝업 — 아이디(읽기전용) / 이메일 관리 / 비밀번호 변경 / 회원 탈퇴를 한 곳에
+/// 모아, 각 항목을 눌러 그 자리에서 아래로 펼쳐 처리한다(따로 새 창을 띄우지 않는다).
+/// 회원 탈퇴가 실제로 완료되면 true를 pop해서 돌려준다 — 호출부(my_profile_dialog의
+/// _openPersonalInfo)가 이 카드도, 프로필 카드도 닫고 로그인 화면으로 돌려보낸다.
+class PersonalInfoDialog extends StatefulWidget {
   final Session session;
   final String verifiedPassword;
-  const _EditEmailDialog({
+  const PersonalInfoDialog({
+    super.key,
     required this.session,
     required this.verifiedPassword,
   });
 
   @override
-  State<_EditEmailDialog> createState() => _EditEmailDialogState();
+  State<PersonalInfoDialog> createState() => _PersonalInfoDialogState();
 }
 
-class _EditEmailDialogState extends State<_EditEmailDialog> {
+enum _InfoSection { none, email, password, withdraw }
+
+class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
+  _InfoSection _expanded = _InfoSection.none;
+
+  void _toggle(_InfoSection section) {
+    setState(() => _expanded = _expanded == section ? _InfoSection.none : section);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 640),
+        child: ListenableBuilder(
+          listenable: widget.session,
+          builder: (context, _) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '개인정보',
+                        style: Theme.of(context).textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _StaticInfoRow(
+                        icon: Icons.badge_outlined,
+                        label: '아이디',
+                        value: widget.session.username ?? '',
+                      ),
+                      const Divider(height: 1),
+                      _ExpandableEntry(
+                        icon: Icons.mail_outline,
+                        label: '이메일 관리',
+                        collapsedValue: widget.session.email?.isNotEmpty == true
+                            ? widget.session.email!
+                            : '등록된 이메일이 없습니다',
+                        expanded: _expanded == _InfoSection.email,
+                        onToggle: () => _toggle(_InfoSection.email),
+                        child: _EmailEditPanel(
+                          session: widget.session,
+                          verifiedPassword: widget.verifiedPassword,
+                          onDone: () => _toggle(_InfoSection.email),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      _ExpandableEntry(
+                        icon: Icons.lock_outline,
+                        label: '비밀번호 변경',
+                        collapsedValue: null,
+                        expanded: _expanded == _InfoSection.password,
+                        onToggle: () => _toggle(_InfoSection.password),
+                        child: _PasswordChangePanel(
+                          session: widget.session,
+                          onDone: () => _toggle(_InfoSection.password),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      _ExpandableEntry(
+                        icon: Icons.person_remove_outlined,
+                        iconColor: Colors.redAccent,
+                        label: '회원 탈퇴',
+                        labelColor: Colors.redAccent,
+                        collapsedValue: null,
+                        expanded: _expanded == _InfoSection.withdraw,
+                        onToggle: () => _toggle(_InfoSection.withdraw),
+                        child: _WithdrawPanel(
+                          session: widget.session,
+                          onCancel: () => _toggle(_InfoSection.withdraw),
+                          onWithdrawn: () => Navigator.of(context).pop(true),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 항목 하나(아이콘+라벨+오른쪽 화살표) — 누르면 [child]가 그 아래로 펼쳐지거나 접힌다.
+class _ExpandableEntry extends StatelessWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final String label;
+  final Color? labelColor;
+  final String? collapsedValue;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final Widget child;
+  const _ExpandableEntry({
+    required this.icon,
+    this.iconColor,
+    required this.label,
+    this.labelColor,
+    required this.collapsedValue,
+    required this.expanded,
+    required this.onToggle,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: onToggle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, size: 18, color: iconColor ?? hint),
+                const SizedBox(width: 10),
+                // 라벨 칸 폭을 _StaticInfoRow(아이디)와 똑같이 고정해서, 값이 라벨 길이와
+                // 무관하게 항상 같은 자리(대략 가운데쯤)에서 시작하고 서로 왼쪽 정렬로
+                // 맞춰지게 한다 — 값이 오른쪽 끝에 붙어 있으면 읽기 불편하다는 피드백 반영.
+                SizedBox(
+                  width: _infoLabelWidth,
+                  child: Text(
+                    label,
+                    style: labelColor != null
+                        ? TextStyle(color: labelColor)
+                        : null,
+                  ),
+                ),
+                Expanded(
+                  child: collapsedValue != null
+                      ? Text(
+                          collapsedValue!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: hint),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+                AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.keyboard_arrow_down, color: hint),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+          child: expanded
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: child,
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+}
+
+/// 펼칠 내용이 없는 읽기전용 한 줄(아이디용) — 꺾쇠 없음.
+/// 항목 행들의 "라벨" 칸 폭 — 라벨 길이가 제각각이어도(아이디/이메일 관리/비밀번호 변경)
+/// 값이 항상 같은 자리에서 시작하도록 _StaticInfoRow와 _ExpandableEntry가 같이 쓴다.
+const _infoLabelWidth = 100.0;
+
+class _StaticInfoRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  const _StaticInfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: hint),
+          const SizedBox(width: 10),
+          SizedBox(width: _infoLabelWidth, child: Text(label)),
+          Expanded(child: Text(value, style: TextStyle(color: hint))),
+        ],
+      ),
+    );
+  }
+}
+
+/// "이메일 관리" 펼침 내용 — 현재 이메일 표시 + 새 이메일 입력. 개인정보 팝업에 들어올 때 이미
+/// 비밀번호를 확인했으므로 다시 묻지 않고 [verifiedPassword]를 그대로 서버에 보낸다.
+class _EmailEditPanel extends StatefulWidget {
+  final Session session;
+  final String verifiedPassword;
+  final VoidCallback onDone;
+  const _EmailEditPanel({
+    required this.session,
+    required this.verifiedPassword,
+    required this.onDone,
+  });
+
+  @override
+  State<_EmailEditPanel> createState() => _EmailEditPanelState();
+}
+
+class _EmailEditPanelState extends State<_EmailEditPanel> {
   String _email = '';
   bool _submitting = false;
   String? _error;
@@ -597,7 +631,7 @@ class _EditEmailDialogState extends State<_EditEmailDialog> {
         email: _email.trim(),
         currentPassword: widget.verifiedPassword,
       );
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) widget.onDone();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -608,180 +642,322 @@ class _EditEmailDialogState extends State<_EditEmailDialog> {
   @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    return AlertDialog(
-      title: const Text('이메일 변경'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '현재 이메일',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: hint),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            widget.session.email?.isNotEmpty == true
+                ? widget.session.email!
+                : '등록된 이메일이 없습니다',
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '새 이메일',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: hint),
+        ),
+        const SizedBox(height: 4),
+        EmailAddressField(onChanged: (v) => _email = v),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+        ],
+        const SizedBox(height: 12),
+        Row(
           children: [
-            Text(
-              '현재 이메일',
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: hint),
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                widget.session.email?.isNotEmpty == true
-                    ? widget.session.email!
-                    : '등록된 이메일이 없습니다',
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _submitting ? null : widget.onDone,
+                child: const Text('취소'),
               ),
             ),
-            const SizedBox(height: 16),
-            Text(
-              '새 이메일',
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: hint),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: _submitting ? null : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('확인'),
+              ),
             ),
-            const SizedBox(height: 4),
-            EmailAddressField(onChanged: (v) => _email = v),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-            ],
           ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: _submitting ? null : _submit,
-          child: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('변경하기'),
         ),
       ],
     );
   }
 }
 
-/// 여러 팀에 속해 있고 팀마다 부서·직책이 다를 수 있을 때("PST · 팀장", "개발1팀 · 팀원"
-/// 처럼) 한 항목 안에 여러 줄을 보여주는 프로필 정보 행. _ProfileInfoRow와 달리 항상
-/// 읽기 전용이다(팀 소속은 이 카드에서 바꿀 수 있는 게 아니므로 onTap이 없다).
-class _ProfileInfoLinesRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final List<String> lines;
-  const _ProfileInfoLinesRow({
-    required this.icon,
-    required this.label,
-    required this.lines,
-  });
+/// "비밀번호 변경" 펼침 내용 — 현재 비밀번호로 다시 본인 확인을 받는다(이 항목 자체가
+/// 개인정보 팝업 진입 때보다 더 민감한 작업이라 별도로 한 번 더 받는다).
+class _PasswordChangePanel extends StatefulWidget {
+  final Session session;
+  final VoidCallback onDone;
+  const _PasswordChangePanel({required this.session, required this.onDone});
+
+  @override
+  State<_PasswordChangePanel> createState() => _PasswordChangePanelState();
+}
+
+class _PasswordChangePanelState extends State<_PasswordChangePanel> {
+  final _current = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _newPassword.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_current.text.isEmpty || _newPassword.text.isEmpty) return;
+    if (_newPassword.text != _confirm.text) {
+      setState(() => _error = '새 비밀번호가 서로 다릅니다.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.session.changePassword(
+        currentPassword: _current.text,
+        newPassword: _newPassword.text,
+      );
+      if (mounted) widget.onDone();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: Theme.of(context).hintColor),
-          const SizedBox(width: 10),
-          SizedBox(
-            width: 52,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).hintColor,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _current,
+          autofocus: true,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: '현재 비밀번호',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _newPassword,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: '새 비밀번호',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _confirm,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: '새 비밀번호 확인',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _submit(),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _submitting ? null : widget.onDone,
+                child: const Text('취소'),
               ),
             ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final line in lines)
-                  Text(line, style: Theme.of(context).textTheme.bodyMedium),
-              ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: _submitting ? null : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('변경하기'),
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 }
 
-/// 프로필 카드의 정보 한 줄(아이디/이름/이메일). onTap이 있으면 눌러서 바로 수정할 수 있다.
-class _ProfileInfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-  const _ProfileInfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.onTap,
+/// "회원 탈퇴" 펼침 내용 — 비밀번호를 한 번 더 입력하고, 유의사항을 읽었다는 체크박스에
+/// 동의해야 "회원 탈퇴" 버튼이 눌린다. 실제로 탈퇴가 끝나면 [onWithdrawn]을 불러서
+/// PersonalInfoDialog가 true를 pop하게 한다(호출부가 프로필 카드까지 닫고 로그인 화면으로
+/// 돌려보낸다).
+class _WithdrawPanel extends StatefulWidget {
+  final Session session;
+  final VoidCallback onCancel;
+  final VoidCallback onWithdrawn;
+  const _WithdrawPanel({
+    required this.session,
+    required this.onCancel,
+    required this.onWithdrawn,
   });
 
   @override
+  State<_WithdrawPanel> createState() => _WithdrawPanelState();
+}
+
+class _WithdrawPanelState extends State<_WithdrawPanel> {
+  final _password = TextEditingController();
+  bool _agreed = false;
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_password.text.isEmpty || !_agreed) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      await widget.session.withdraw(_password.text);
+      widget.onWithdrawn();
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: Row(
+    final hint = Theme.of(context).hintColor;
+    final canSubmit = _password.text.isNotEmpty && _agreed && !_submitting;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _password,
+          autofocus: true,
+          obscureText: true,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(
+            labelText: '비밀번호',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '탈퇴 시 유의사항',
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '· 탈퇴 후에는 이 아이디로 다시 로그인할 수 없습니다.\n'
+                '· 보낸 메시지·첨부파일 등 활동 기록은 삭제되지 않고, 작성자만 익명 처리됩니다.\n'
+                '· 속한 팀·대화방에서 자동으로 나가며, 이 작업은 되돌릴 수 없습니다.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: hint),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: () => setState(() => _agreed = !_agreed),
+          child: Row(
+            children: [
+              Checkbox(
+                value: _agreed,
+                onChanged: (v) => setState(() => _agreed = v ?? false),
+              ),
+              const Expanded(
+                child: Text('위 유의사항을 모두 확인하였으며 회원 탈퇴에 동의합니다.'),
+              ),
+            ],
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 4),
+          Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+        ],
+        const SizedBox(height: 8),
+        Row(
           children: [
-            Icon(icon, size: 18, color: Theme.of(context).hintColor),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 52,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).hintColor,
-                ),
-              ),
-            ),
             Expanded(
-              child: Text(
-                value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium,
+              child: OutlinedButton(
+                onPressed: _submitting ? null : widget.onCancel,
+                child: const Text('취소'),
               ),
             ),
-            if (onTap != null)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '수정',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
-                ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: canSubmit ? _submit : null,
+                style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+                child: _submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('회원 탈퇴'),
               ),
+            ),
           ],
         ),
-      ),
+      ],
     );
   }
 }

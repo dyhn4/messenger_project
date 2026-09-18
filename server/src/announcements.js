@@ -23,7 +23,23 @@ function toDto(row) {
     commentCount: row.commentCount ?? 0,
     createdAt: new Date(row.createdAt).getTime(),
     editedAt: row.editedAt ? new Date(row.editedAt).getTime() : null,
+    autoUnpinAt: row.autoUnpinAt ? new Date(row.autoUnpinAt).getTime() : null,
   };
+}
+
+/** "공지 자동 내리기" — 클라이언트는 밀리초 epoch만 보낸다(announcement_list_screen.dart의
+ * 빠른 선택 버튼들이 계산). 과거 시각이나 너무 먼 미래(1년)는 실수로 보고 막는다. */
+function parseAutoUnpinAt(raw) {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return { ok: false, error: '자동 내리기 시각이 올바르지 않습니다.' };
+  }
+  const now = Date.now();
+  if (raw <= now) return { ok: false, error: '자동 내리기 시각은 미래여야 합니다.' };
+  if (raw - now > 366 * 24 * 60 * 60 * 1000) {
+    return { ok: false, error: '자동 내리기는 최대 1년 이내로 설정하세요.' };
+  }
+  return { ok: true, value: new Date(raw) };
 }
 
 function toCommentDto(row) {
@@ -98,12 +114,16 @@ export function createAnnouncementsRouter(io) {
     if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });
     if (text.length > 2000) return res.status(400).json({ error: '공지는 2000자 이내로 작성하세요.' });
 
+    const autoUnpin = parseAutoUnpinAt(req.body?.autoUnpinAt);
+    if (!autoUnpin.ok) return res.status(400).json({ error: autoUnpin.error });
+
     const row = await insertAnnouncement({
       id: randomUUID(),
       roomId: room.id,
       authorId: req.user.sub,
       authorName: access.user?.name ?? access.user?.username ?? '알 수 없음',
       text,
+      autoUnpinAt: autoUnpin.value,
     });
     const dto = toDto({ ...row, commentCount: 0 });
     // 방 멤버 전원의 채팅방 상단 배너가 즉시 이 공지로 바뀌도록 알린다(chat_socket.dart의

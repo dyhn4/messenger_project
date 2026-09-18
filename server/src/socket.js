@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { verifySocketToken } from './auth.js';
 import { activeCallStatesFor, callSummaryText, joinCall, leaveAllCallsForSocket, leaveCall } from './calls.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
-import { insertMessage, markMessageRead } from './db/queries/messages.js';
+import { findInquiryById } from './db/queries/inquiries.js';
+import { insertMessage, markMessageRead, updateMessageLinkPreview } from './db/queries/messages.js';
 import {
   findRoomById,
   isRoomMember,
@@ -11,6 +12,7 @@ import {
   setMemberLastRead,
   setMemberLastReadAnnouncementAt,
 } from './db/queries/rooms.js';
+import { extractFirstUrl, fetchLinkPreview } from './linkPreview.js';
 import { postSystemMessage, unhideDmForOtherMembers } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
@@ -85,6 +87,17 @@ export function registerSocket(io) {
 
       const sender = await findUserById(socket.data.userId);
 
+      // "팀장에게 문의하기"로 보낸 메시지에만 채워진다(chat_input_bar.dart) — 내가 이 방에서
+      // 보낸 실제 문의가 맞는지 확인해서, 엉뚱한 문의 id를 붙여 "문의함 바로가기"를 위조하는
+      // 것을 막는다.
+      let inquiryId = null;
+      if (typeof payload.inquiryId === 'string') {
+        const inquiry = await findInquiryById(payload.inquiryId);
+        if (inquiry && inquiry.roomId === room.id && inquiry.senderId === socket.data.userId) {
+          inquiryId = inquiry.id;
+        }
+      }
+
       // fileUrl/thumbnailUrl이 서명된 /files/<token> 형태로 오면(메시지 전달 — 클라이언트는
       // 원본이 아니라 서명된 다운로드 URL만 갖고 있다) 원본 상대경로로 되돌린다. 일반적인
       // 새 업로드는 이미 원본 경로라 그대로 통과한다(resolveRawUrl 참고).
@@ -111,6 +124,8 @@ export function registerSocket(io) {
           typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
         forwardedFromCreatedAt:
           typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
+        isInquiryNotice: inquiryId != null,
+        inquiryId,
       });
 
       // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 —
@@ -140,6 +155,22 @@ export function registerSocket(io) {
           }),
         )
         .catch((err) => console.error('[push] message:send 알림 실패:', err?.message ?? err));
+
+      // 링크 미리보기도 ack 이후 백그라운드로 — 외부 사이트를 긁어오는 거라 몇 초 걸릴 수
+      // 있는데 메시지 전송 자체를 그만큼 늦출 이유가 없다. 비밀 대화는 서버가 내용을 아예
+      // 못 봐야 하므로(암호문) 건너뛴다.
+      if (!room.isSecret && message.type === 'text') {
+        const url = extractFirstUrl(message.text);
+        if (url) {
+          fetchLinkPreview(url)
+            .then(async (preview) => {
+              if (!preview) return;
+              const updated = await updateMessageLinkPreview(message.id, preview);
+              io.to(room.id).emit('message:linkPreview', toMessageDto(updated));
+            })
+            .catch((err) => console.error('[linkPreview] 처리 실패:', err?.message ?? err));
+        }
+      }
     });
 
     // payload: { roomId } — 지금 이 방을 보고 있다는 뜻. 다른 멤버들이 안읽음 카운터를 갱신할 수 있도록 브로드캐스트한다.

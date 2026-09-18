@@ -459,7 +459,18 @@ export function createTeamsRouter(io) {
       targetLabel: await nameOf(targetId),
       detail: `부서·직책 변경(${[fields.department, fields.position].filter(Boolean).join(' / ') || '지움'})`,
     });
-    res.json(await memberListResponse(team.id));
+    const list = await memberListResponse(team.id);
+    // 로그아웃 없이 바로 반영되도록, 이 팀 사람 전원(그 대상 본인 포함)에게 알려서
+    // room.members에 캐싱된 부서/직책을 즉시 갱신한다 — 그동안은 다시 로그인해야만
+    // (프로필을 새로 받아와서) 반영됐다.
+    const updatedEntry = list.find((m) => m.id === targetId);
+    if (updatedEntry) {
+      const orgPayload = { userId: targetId, department: updatedEntry.department, position: updatedEntry.position };
+      for (const id of await listTeamMemberIds(team.id)) {
+        io.to(`user:${id}`).emit('org:updated', orgPayload);
+      }
+    }
+    res.json(list);
   });
 
   /** 팀에서 멤버 빼기 — 그 팀의 소유자 또는 계정 등급이 관리자인 사람만. 소유자는 뺄 수 없다. */

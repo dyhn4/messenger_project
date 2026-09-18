@@ -44,6 +44,23 @@ export async function updateMessageText(id, text) {
   return row;
 }
 
+/** 링크 미리보기 결과를 채운다 — updateMessageText와 달리 editedAt을 안 건드린다(사용자가
+ * 고친 게 아니라 서버가 나중에 긁어온 값이라 "(수정됨)" 표시가 붙으면 안 된다). */
+export async function updateMessageLinkPreview(id, preview) {
+  const [row] = await db
+    .update(messages)
+    .set({
+      linkPreviewUrl: preview.url,
+      linkPreviewTitle: preview.title,
+      linkPreviewDescription: preview.description,
+      linkPreviewImageUrl: preview.imageUrl,
+      linkPreviewSiteName: preview.siteName,
+    })
+    .where(eq(messages.id, id))
+    .returning();
+  return row;
+}
+
 /** 소프트 삭제 — 행은 남기고(댓글 스레드가 계속 참조) 내용만 비운다. */
 export async function softDeleteMessage(id) {
   const [row] = await db
@@ -53,6 +70,7 @@ export async function softDeleteMessage(id) {
     .returning();
   return row;
 }
+
 
 /**
  * "대화 내보내기"(rooms.js의 GET /rooms/:id/export)용 — 방의 메시지를 시간순으로 전부
@@ -227,8 +245,10 @@ export function findExpiredSecretMessages() {
     .where(and(isNotNull(messages.expiresAt), lte(messages.expiresAt, new Date())));
 }
 
-/** 자동 삭제 타이머 만료 — 소프트 삭제가 아니라 행 자체를 완전히 없앤다(댓글도 FK cascade로
- * 함께 삭제됨 — 부모 없는 댓글 스레드가 남는 것보다 자연스러운 선택). */
+/** 행 자체를 완전히 없앤다(댓글도 FK cascade로 함께 삭제됨 — 부모 없는 댓글 스레드가 남는
+ * 것보다 자연스러운 선택). 비밀 대화 자동 삭제 타이머 만료 때뿐 아니라, messages.js의
+ * DELETE /messages/:id에서 아직 아무도 안 읽은 메시지를 지울 때도 쓴다(그때는 "삭제된
+ * 메시지입니다" 흔적도 남기지 않아야 하므로 softDeleteMessage 대신 이걸 쓴다). */
 export async function hardDeleteMessage(id) {
   const [row] = await db.delete(messages).where(eq(messages.id, id)).returning();
   return row ?? null;

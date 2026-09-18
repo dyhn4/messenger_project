@@ -440,7 +440,7 @@ class _MyAppState extends State<MyApp>
           builder: (context, child) => Stack(
             children: [
               ?child,
-              UpdateBanner(session: session),
+              UpdateBanner(session: session, navigatorKey: navigatorKey),
             ],
           ),
         );

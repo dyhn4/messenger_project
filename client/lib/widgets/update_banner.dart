@@ -11,7 +11,18 @@ import 'update_dialog.dart';
 /// 닫는다.
 class UpdateBanner extends StatefulWidget {
   final Session session;
-  const UpdateBanner({super.key, required this.session});
+
+  /// main.dart의 MaterialApp에 물린 것과 같은 키 — 이 배너 자체가 Navigator와 형제 자리라
+  /// (아래 InkWell.onTap 주석 참고) 자기 build context로 showDialog를 열면 "No Navigator
+  /// found"로 조용히 실패한다. 알림 눌러 통화 화면을 여는 main.dart의 showCallScreen 호출과
+  /// 같은 방식으로, 이 키의 currentContext(Navigator 위젯 자신의 context — Navigator.of()가
+  /// 자기 자신도 찾아주므로 유효하다)를 대신 쓴다.
+  final GlobalKey<NavigatorState> navigatorKey;
+  const UpdateBanner({
+    super.key,
+    required this.session,
+    required this.navigatorKey,
+  });
 
   @override
   State<UpdateBanner> createState() => _UpdateBannerState();
@@ -39,11 +50,17 @@ class _UpdateBannerState extends State<UpdateBanner> {
                 elevation: 3,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(24),
-                  onTap: () => showDialog<void>(
-                    context: context,
-                    builder: (_) =>
-                        UpdateDialog(session: widget.session, version: version),
-                  ),
+                  onTap: () {
+                    final dialogContext =
+                        widget.navigatorKey.currentContext ?? context;
+                    showDialog<void>(
+                      context: dialogContext,
+                      builder: (_) => UpdateDialog(
+                        session: widget.session,
+                        version: version,
+                      ),
+                    );
+                  },
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
                     child: Row(

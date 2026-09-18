@@ -15,6 +15,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [초대 링크(설치→가입)](#초대-링크-설치가입)
 - [팀 초대 링크(자동 합류+등급 부여)](#팀-초대-링크자동-합류등급-부여)
 - [서버 운영자와 관리자 콘솔](#서버-운영자와-관리자-콘솔)
+- [프로젝트(업무 관리)](#프로젝트업무-관리)
 - [향후 계획 / 미구현 기능](#향후-계획--미구현-기능)
 - [구성도](#구성도)
 - [기술 스택](#기술-스택)
@@ -431,6 +432,48 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 > 기록 실패가 원래 동작을 막지는 않습니다 — 로그를 못 남겼다고 메시지 삭제가 실패하면 더 나쁘기
 > 때문에, 오류는 서버 콘솔에만 남기고 넘어갑니다(`server/src/audit.js`).
 
+## 프로젝트(업무 관리)
+
+토픽(대화방)이 "주제별 대화"라면, **프로젝트**는 "업무를 계획·추적하는 공간"입니다. 대화방과
+완전히 별개의 테이블이라 방 목록·검색·파일에는 섞이지 않고, 팀에 속하며 초대된 구성원만 볼 수
+있습니다. PC 앱 상단 툴바의 과녁 아이콘(알림 센터 왼쪽, 구분선으로 구분)으로 엽니다.
+
+### 화면 구성
+
+큰 대화상자 하나 안에서 왼쪽 사이드바와 오른쪽 내용이 함께 움직입니다.
+
+| 사이드바 | 내용 |
+|---|---|
+| 홈 | 인사말·통계(전체/완료/진행/지연), 내가 참여한 프로젝트(진행률), 내가 담당한 업무, 이번 주 나의 업무(날짜별), 최근 댓글 |
+| 내 업무 | 팀 전체에서 내가 담당자인 업무를 상태별로 거르기 |
+| 캘린더 · 간트차트 · 노트 | 자리만 잡아둔 상태(다음 단계) |
+| 프로젝트 목록 | 즐겨찾기(별)와 나머지. 고르면 그 프로젝트의 업무를 상태별로 묶어 보여줍니다 |
+
+### 업무
+
+- 제목·설명·담당자·상태(할 일/진행 중/완료)·우선순위·마감일을 가집니다.
+- 화면에 보이는 번호(`MKT-1001`)는 **프로젝트 식별자 + 순번**입니다. 순번은 프로젝트가 직접
+  들고 있어서(`projects.next_task_seq`) 업무를 지워도 번호를 재사용하지 않습니다.
+- 마감일이 있으면 `D-2` / `D-DAY` / `D+1` 뱃지가 붙고, 지났는데 완료가 아니면 "지연"으로 셉니다.
+- 업무 카드에 댓글을 달 수 있고, 최근 댓글은 홈 대시보드에 모입니다.
+
+### 권한
+
+- **만들기**: 서버 설정 "프로젝트 생성 권한"(관리자 콘솔 → 운영 현황)이 정한 최소 등급 —
+  정회원 이상(기본) / 관리자 이상 / 서버 운영자만. 준회원은 어느 설정에서도 만들 수 없고,
+  서버 운영자는 설정과 무관하게 항상 만들 수 있습니다(팀 생성 권한과 같은 구조).
+- **참여**: 이미 만들어진 프로젝트에 초대받아 참여하는 것은 이 설정과 무관합니다(준회원도 초대받으면
+  볼 수 있습니다).
+- **설정·삭제·구성원 초대**: 프로젝트 담당자(만든 사람)와 그 팀의 소유자·관리자.
+
+### 실시간 반영
+
+프로젝트·업무·댓글이 바뀌면 구성원들에게 `project:changed` 소켓 이벤트가 가고, 열려 있는
+프로젝트 창이 지금 보고 있는 화면을 다시 불러옵니다.
+
+> 안드로이드 앱에는 아직 프로젝트 화면이 없습니다(PC 먼저). 칸반보드·간트차트·캘린더·위키(노트),
+> 메시지를 업무로 전환하는 기능도 다음 단계입니다.
+
 ## 향후 계획 / 미구현 기능
 
 코드베이스를 확인한 결과, 아래 기능은 **아직 구현되어 있지 않습니다**(추측 없이, 실제로 코드/이벤트가
@@ -443,7 +486,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **웹 기반 관리자 화면** — 관리자 콘솔은 PC 앱 안에 있습니다([서버 운영자와 관리자
   콘솔](#서버-운영자와-관리자-콘솔)). 브라우저로 접속하는 별도 운영 화면은 없어서, 운영하려면
   앱을 깔아야 합니다
-- **백업/복원·릴리즈 배포의 화면화** — 여전히 콘솔 스크립트(pg_dump, `publish_release.ps1`)로 합니다
+- **릴리즈 배포의 화면화** — 새 클라이언트/서버 버전을 배포하는 건 여전히 콘솔 스크립트
+  (`publish_release.ps1`)로 합니다. DB 백업/복원은 시작 메뉴의 "백업"/"복원"으로 화면화됐습니다
 - **서버 설치 프로그램 자체의 자동 업데이트** — 새 `tangotalk-server-setup.exe`를 만들어서 대상 PC에
   다시 실행해주는 건 됩니다(위 "새 서비스 PC에 네이티브 설치 프로그램으로 설치/업데이트" 참고),
   다만 그 배포/실행을 서버가 스스로 감지해서 알아서 받아 설치하는 건 아직 없습니다(관리자 권한
@@ -562,6 +606,7 @@ messenger_project/
 │  │  ├─ Get-PairingCode.ps1      "새 기기 페어링 코드 발급" 시작메뉴 항목
 │  │  ├─ Reset-Data.ps1           "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움(운영자 인증 + RESET 입력 필요)
 │  │  ├─ Update-Server.ps1        "서버 업데이트" — 업데이트 zip을 골라 적용(DB는 안 건드림, npm install+마이그레이션+재시작 자동)
+│  │  ├─ Restart-Server.ps1       "서버 재시작" — 코드/DB는 그대로 두고 TangoTalkServer 서비스만 다시 시작
 │  │  ├─ Storage-Path.ps1         "첨부파일 저장소" — 저장 위치 확인/변경(NAS·다른 PC 공유 폴더도 가능, 기존 파일 이동 여부 확인 후 서비스 재시작)
 │  │  ├─ Uninstall-Full.ps1       "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — 일반 제거까지 자동 실행(서버 운영자 인증 + DELETE 입력 필요)
 │  │  ├─ build-readme-html.mjs    빌드 시 저장소 루트 README.md → README.html 변환기(자체 구현, 새 의존성 없음)
@@ -920,6 +965,27 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/secret-chats/:roomId/reject` | 거절 |
 | PATCH | `/api/secret-chats/:roomId/settings` | 자동 삭제 타이머 설정 |
 
+**프로젝트 / 업무** (`server/src/projects.js` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/api/projects` | 내가 참여 중인 프로젝트 목록(`teamId` 필수, 진행률 포함) |
+| GET | `/api/projects/home` | 홈 대시보드 한 번에(통계 + 프로젝트 + 내 업무 + 최근 댓글) |
+| POST | `/api/projects` | 새 프로젝트(서버 설정 "프로젝트 생성 권한"을 만족해야 함) |
+| GET | `/api/projects/:id` | 프로젝트 상세(구성원 포함) |
+| PATCH | `/api/projects/:id` | 이름·설명 수정(담당자/팀 소유자·관리자) |
+| DELETE | `/api/projects/:id` | 프로젝트 삭제(업무·댓글까지 cascade) |
+| PATCH | `/api/projects/:id/favorite` | 사이드바 즐겨찾기(개인 설정) |
+| POST | `/api/projects/:id/members` | 구성원 초대(같은 팀 멤버만) |
+| DELETE | `/api/projects/:id/members/:userId` | 구성원 제외(담당자는 제외 불가) |
+| GET | `/api/projects/:id/tasks` | 그 프로젝트의 업무 목록 |
+| POST | `/api/projects/:id/tasks` | 업무 등록(번호는 서버가 발급) |
+| GET | `/api/tasks/mine` | 내가 담당한 업무 전부(`teamId` 필수) |
+| GET | `/api/tasks/:id` | 업무 상세(댓글 포함) |
+| PATCH | `/api/tasks/:id` | 업무 수정(상태·담당자·마감일 등) |
+| DELETE | `/api/tasks/:id` | 업무 삭제 |
+| POST | `/api/tasks/:id/comments` | 업무에 댓글 남기기 |
+
 **검색 / 업로드 / 기타**
 
 | Method | Path | 인증 | 설명 |
@@ -957,6 +1023,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 서버→클라이언트 | `room:created` | 방 생성/멤버 변경 시 최신 방 정보 |
 | 서버→클라이언트 | `team:updated` / `team:joined` / `team:left` | 팀 정보 변경 / 팀에 추가됨 / 팀에서 빠짐 |
 | 서버→클라이언트 | `presence:update` | 온라인/오프라인 |
+| 서버→클라이언트 | `project:changed` | 내가 참여 중인 프로젝트에서 뭔가 바뀜(프로젝트/업무/댓글) — 열려 있는 프로젝트 창이 다시 불러온다 |
 | 서버→클라이언트 | `secret:invite` / `secret:accepted` / `secret:rejected` / `secret:left` | 비밀 대화 생명주기 |
 
 ## DB 구조
@@ -968,7 +1035,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | 테이블 | 요약 |
 |---|---|
 | `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL) |
-| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지) |
+| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급) |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 화살표로 이웃과 맞바꿈)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |
 | `invite_links` | 초대 링크. `token`(무작위 문자열, unique), `expires_at`/`revoked_at`, `used_count`/`last_used_at`(1회용 아님 — 여러 기기가 나눠 씀), `created_by_name`(만든 사람 스냅샷) — [초대 링크(설치→가입)](#초대-링크-설치가입) 참고 |
@@ -981,6 +1048,10 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷) |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우) |
+| `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |
+| `project_members` | 프로젝트 구성원. `role`(`owner`=담당자 / `member`), `favorite`(사이드바 즐겨찾기 — 사람마다 다른 개인 설정) |
+| `tasks` | 업무. `seq`(프로젝트 안 번호 → 화면에는 `MKT-1001`로 표시), `status`(`todo` / `doing` / `done`), `priority`, `assignee_id`, `start_date`/`due_date`, `completed_at` |
+| `task_comments` | 업무 카드에 달린 댓글. `project_id`를 같이 들고 있어(비정규화) 대시보드의 "최근 댓글"을 조인 없이 모은다 |
 | `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `revoked_at` |
 | `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 임시 공개키+서명, `key_epoch`, `self_destruct_seconds` |
 | `secret_rekeys` | 재키잉 제안/수락 이력(append-only) |
@@ -1178,13 +1249,16 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 - 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함),
   "도움말"(**이 README.md 전체**를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환해서
   기본 브라우저로 보여줌 — `build_server_installer.ps1`이 빌드 시 `build-readme-html.mjs`로
-  매번 새로 만들므로 설치할 때마다 최신 버전으로 덮어써짐), "서버 업데이트", "첨부파일
-  저장소", "DB 데이터 초기화", "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"도 같이
-  설치됩니다. 뒤의 넷은 목적이 다릅니다:
+  매번 새로 만들므로 설치할 때마다 최신 버전으로 덮어써짐), "서버 업데이트", "서버 재시작",
+  "첨부파일 저장소", "DB 데이터 초기화", "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"도
+  같이 설치됩니다. 뒤의 다섯은 목적이 다릅니다:
   - **서버 업데이트**(`Update-Server.ps1`) — 개발 PC에서 `package_server_update.ps1`로 만든
     업데이트 zip을 파일 선택 창에서 고르고 "업데이트 시작"을 누르면, 코드 적용 → `npm
     install` → DB 마이그레이션(추가만 함, 기존 데이터 안 건드림) → 서버 재시작까지 자동으로
     진행됩니다 — **평소 코드를 업데이트할 때** 씁니다.
+  - **서버 재시작**(`Restart-Server.ps1`) — 코드/DB는 전혀 건드리지 않고 `TangoTalkServer`
+    서비스만 다시 시작합니다 — `.env`를 손으로 고쳤거나, 서버가 이상하게 응답할 때 빠르게
+    다시 띄우고 싶을 때 씁니다(설치 프로그램을 다시 실행할 필요 없음).
   - **첨부파일 저장소**(`Storage-Path.ps1`) — 지금 첨부파일이 저장되는 위치(기본값
     `{app}\server\uploads`)를 보여주고, NAS나 다른 PC의 공유 폴더(`\\서버\공유\폴더`)
     등으로 바꿀 수 있습니다. 기존 파일이 있으면 새 위치로 옮길지 물어보고, `.env`의
@@ -1231,12 +1305,20 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 
 ### 백업
 
+**설치 프로그램으로 설치한 서버**는 시작 메뉴의 **"백업"**을 누르면 됩니다 — 경로/포트/비밀번호를
+몰라도 콘솔 명령어 없이 바로 `<설치 경로>\backups\messenger_<날짜시각>.dump`로 저장됩니다
+(`server/installer/Backup-Data.ps1`). 되돌릴 땐 **"복원"**을 눌러 그 파일을 고르면 됩니다 — DB
+데이터 초기화와 같은 수준의 안전장치(운영자 본인 확인 + `RESTORE` 입력)가 있습니다.
+
+아래는 저장소를 직접 clone해서 돌리는 개발 환경(시스템 PostgreSQL 사용)일 때의 수동 명령어입니다:
+
 ```powershell
 "C:\Program Files\PostgreSQL\<버전>\bin\pg_dump.exe" -U messenger_app -d messenger -F c -f messenger_backup.dump
 ```
 
 `server/certs/`, `server/uploads/`, `server/.env`, `server/firebase-service-account.json`,
-`server/releases/`도 Git에 없는 실데이터이므로 함께 백업하세요(예: 압축해서 통째로).
+`server/releases/`도 Git에 없는 실데이터이므로 함께 백업하세요(예: 압축해서 통째로) — 위 "백업"
+바로가기는 DB만 백업합니다.
 
 ### 다른 PC로 이전
 

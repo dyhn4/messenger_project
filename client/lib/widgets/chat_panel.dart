@@ -442,6 +442,17 @@ class _ChatPanelState extends State<ChatPanel> {
     }
   }
 
+  /// 패널 바깥을 클릭했을 때(TapRegion.onTapOutside)만 닫는다 — 이모티콘을 실제로 고르는
+  /// 것(_selectSticker)과는 별개 경로라, 거기선 이미 owner를 놓아주므로 여기서 또 만지지
+  /// 않게 _stickerPickerOpen이 아직 true일 때만 처리한다.
+  void _closeStickerPicker() {
+    if (!_stickerPickerOpen) return;
+    setState(() => _stickerPickerOpen = false);
+    if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
+  }
+
   void _selectSticker(Sticker sticker) {
     setState(() {
       _pendingSticker = sticker;
@@ -779,7 +790,17 @@ class _ChatPanelState extends State<ChatPanel> {
                       Positioned(
                         left: 8,
                         bottom: 8,
-                        child: StickerPicker(onSelected: _selectSticker),
+                        // 패널 바깥 아무 곳(입력창, 헤더, 메시지 목록 등)을 클릭하면 닫는다 —
+                        // TapRegion은 이 Stack 범위를 넘어 앱 전체의 탭을 감지하므로 위치와
+                        // 무관하게 동작한다. groupId로 토글 버튼(ChatInputBar)도 같은 그룹에
+                        // 묶어야 한다 — 안 그러면 버튼을 눌러 닫으려는 탭이 "바깥 탭"으로도
+                        // 잡혀서 _closeStickerPicker가 먼저(pointer down) 닫고, 버튼의
+                        // onPressed(pointer up)가 다시 열어버리는 깜빡임이 생긴다.
+                        child: TapRegion(
+                          groupId: this,
+                          onTapOutside: (_) => _closeStickerPicker(),
+                          child: StickerPicker(onSelected: _selectSticker),
+                        ),
                       )
                     else if (_pendingSticker != null)
                       // 입력창의 이모티콘 버튼(이미지 버튼 다음 두 번째 아이콘) 바로 위쯤에 오도록
@@ -916,6 +937,7 @@ class _ChatPanelState extends State<ChatPanel> {
           room: widget.room,
           pendingSticker: _pendingSticker,
           stickerPickerOpen: _stickerPickerOpen,
+          stickerPickerGroupId: this,
           onToggleStickerPicker: _toggleStickerPicker,
           onStickerConsumed: _removeSticker,
         ),

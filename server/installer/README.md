@@ -26,6 +26,8 @@
 | `Get-PairingCode.ps1` | 시작 메뉴 "새 기기 페어링 코드 발급"이 호출 — `server/scripts/pair.mjs`와 같은 일을 Node 없이 순수 PowerShell로 |
 | `Update-Server.ps1` | "서버 업데이트" — 업데이트 zip을 파일 선택 창에서 골라 적용(WinForms GUI). DB는 안 건드림, npm install+마이그레이션+서비스 재시작 자동. 관리자 권한 필요해 스스로 승격 |
 | `Storage-Path.ps1` | "첨부파일 저장소" — 첨부파일 저장 위치(`UPLOADS_DIR`)를 보여주고 NAS/다른 PC 공유 폴더 등으로 바꿈(WinForms GUI). 기존 파일 이동 여부를 물어보고 `.env` 갱신 + 서비스 재시작. 관리자 권한 필요해 스스로 승격 |
+| `Backup-Data.ps1` | "백업" — DB를 `{app}\backups\messenger_<날짜시각>.dump`로 저장(`pg_dump -F c`). 서버는 멈추지 않음. 관리자 권한 필요해 스스로 승격 |
+| `Restore-Data.ps1` | "복원" — 파일 선택 창(WinForms)에서 `.dump`를 골라 `pg_restore --clean --if-exists`로 되돌림. `Reset-Data.ps1`과 같은 안전장치(서버 운영자 계정 인증 + `RESTORE` 입력 확인) 필수, 복원 중엔 서비스 정지 후 재시작. 관리자 권한 필요해 스스로 승격 |
 | `Reset-Data.ps1` | "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움. 서버 운영자 계정 인증 + `RESET` 입력 확인 둘 다 필수 |
 | `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `README-설치후.txt` | 설치되는 사람이 보는 안내문(`[Files]`로 설치됨) |
@@ -96,11 +98,17 @@
   그대로 포함**하면서 앞에 PostgreSQL·데이터 삭제를 더한 것뿐이다. 사용자가 "Windows에서
   지웠으니 다 지워졌겠지"라고 착각하기 쉬운 지점이라 README에도 명시해뒀다(위 "운영 서버
   업데이트"/설치 섹션 참고) — 새 문서를 쓸 때도 이 구분을 흐리지 않게 주의할 것.
-- **`Update-Server.ps1`/`Storage-Path.ps1`/`Reset-Data.ps1`/`Uninstall-Full.ps1` 넷 다 스스로
-  관리자 권한으로 승격한다.** NSSM 서비스 정지/재시작, PostgreSQL 제거, 일반 제거 프로그램
-  실행 전부 관리자 권한이 필요한데, 시작 메뉴 바로가기를 그냥 두 번 클릭하면 관리자 권한
-  없이 실행되기 때문에 — `[Security.Principal.WindowsPrincipal]`로 확인해서 아니면
-  `Start-Process -Verb RunAs`로 자기 자신을 다시 실행하고 원래 프로세스는 종료한다.
+- **`Update-Server.ps1`/`Storage-Path.ps1`/`Backup-Data.ps1`/`Restore-Data.ps1`/`Reset-Data.ps1`/
+  `Uninstall-Full.ps1` 전부 스스로 관리자 권한으로 승격한다.** NSSM 서비스 정지/재시작,
+  PostgreSQL 제거, 일반 제거 프로그램 실행 전부 관리자 권한이 필요한데, 시작 메뉴 바로가기를
+  그냥 두 번 클릭하면 관리자 권한 없이 실행되기 때문에 — `[Security.Principal.WindowsPrincipal]`로
+  확인해서 아니면 `Start-Process -Verb RunAs`로 자기 자신을 다시 실행하고 원래 프로세스는 종료한다.
+- **`Backup-Data.ps1`/`Restore-Data.ps1`은 `.env`를 안 읽는다.** DB 접속 정보(포트 `55432`,
+  DB명 `messenger`, 앱 계정 `messenger_app`)는 상수로 박아두고, 비밀번호만
+  `{app}\secrets\db-app.pw`에서 그대로 읽는다 — `Setup-TangoTalkServer.ps1`이 이미 저장해둔
+  값을 재사용하는 것뿐이라 `.env`의 `DATABASE_URL`을 파싱하는 것보다 안전하고 간단하다.
+  백업 파일은 `{app}\backups\`에 쌓인다 — `releases`/`secrets`/`pgsql-data`와 같은 성격의
+  실데이터 폴더라 `[UninstallDelete]`에 없다(일반 제거로 안 지워짐).
 - **`Storage-Path.ps1`은 새 메커니즘을 만들지 않는다.** `server/src/config.js`의
   `UPLOADS_DIR`은 원래부터 환경변수로 바꿀 수 있었다(`process.env.UPLOADS_DIR || 기본값
   server/uploads`) — 이 스크립트는 그 값을 `.env`에 써주고 서비스를 재시작해주는 GUI일
@@ -138,4 +146,8 @@
       파일도 대부분 사라짐
 - [ ] "DB 데이터 초기화"도 같은 방식으로 운영자 인증 + `RESET` 입력이 필요; 통과하면 회원/팀/
       메시지 등은 비워지지만 `.env`/인증서는 남고 서버가 재시작되어 바로 다시 가입 가능
+- [ ] "백업"을 누르면 `{app}\backups\`에 `messenger_<날짜시각>.dump` 파일이 생기고, 서버는
+      멈추지 않고 계속 쓸 수 있음
+- [ ] "복원"은 파일 선택 창이 뜨고, 운영자 인증 + `RESTORE` 입력이 필요; 방금 만든 백업 파일로
+      복원하면 회원/팀/메시지가 그 시점 내용으로 돌아오고 서버가 재시작되어 바로 로그인 가능
 - [ ] 일반 "TangoTalk 서버 제거"는 위 데이터를 안 건드림

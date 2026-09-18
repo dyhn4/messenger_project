@@ -119,6 +119,14 @@ function Test-PortFree {
   return (-not $inUse)
 }
 
+# 본문 전체를 try/catch로 감싼다 — 이 안 어디서든(Fail을 명시적으로 부르지 않은 예상 밖 오류
+# 포함) 예외가 나면 여기서 잡아서 반드시 로그+오류 창으로 남긴다. 이게 없으면(예전 버전)
+# $ErrorActionPreference='Stop' 때문에 예상 못 한 오류가 스크립트를 그냥 조용히 죽여버리고
+# (runhidden이라 콘솔도 안 보임) install.log에도 흔적이 안 남는다 — 5~7단계(마이그레이션/
+# 방화벽/서비스 재시작)가 실제로는 한 번도 안 됐는데 설치 프로그램은 "성공"으로 끝나버리는
+# 사고가 실제로 있었다.
+try {
+
 # ── 0. 준비 ──────────────────────────────────────────────────────────────
 if (-not (Test-Path $AppDir)) { Fail "설치 경로($AppDir)를 찾을 수 없습니다." }
 Write-Log "=== TangoTalk 서버 설정 시작 (RunMode=$RunMode) ==="
@@ -211,6 +219,23 @@ if (-not (Test-Path $EnvFile)) {
 } else {
   Write-Log '4/7 .env 이미 존재 — 그대로 둠'
 }
+# .env는 DB 비밀번호(DATABASE_URL)를 평문으로 담고 있어 secrets\db-app.pw와 똑같이 민감한데,
+# Get-OrCreateSecret과 달리 지금까지 ACL을 안 좁혀서 이 PC의 아무 로그인 계정이나 메모장으로
+# 열어볼 수 있었다 — 새로 만든 경우든(위) 이미 있던 경우든(재설치) 항상 적용해서, 예전에
+# 만들어진 .env도 이 스크립트를 다시 돌리면 뒤늦게라도 잠기게 한다.
+icacls $EnvFile /inheritance:r /grant:r 'SYSTEM:(R)' 'Administrators:(R)' | Out-Null
+# server/src/config.js의 resolveSecret이 fs.writeFileSync(..., { mode: 0o600 })으로 만드는
+# .jwt-secret/.db-encryption-key도 같은 문제다 — 0o600은 POSIX 권한 비트라 Windows NTFS에서는
+# 실제로 아무것도 제한하지 않는다. 이 두 파일은 서버가 처음 실행될 때 생기므로 최초 설치
+# 시점엔 아직 없을 수 있지만(다음 재실행 때 이 블록이 마저 잠근다), 업데이트 재설치라면
+# 이미 있을 것이다.
+foreach ($secretName in @('.jwt-secret', '.db-encryption-key')) {
+  $secretPath = Join-Path $ServerDir $secretName
+  if (Test-Path $secretPath) {
+    icacls $secretPath /inheritance:r /grant:r 'SYSTEM:(R)' 'Administrators:(R)' | Out-Null
+  }
+}
+Write-Log '  비밀값 파일 접근 권한을 관리자 전용으로 좁혔습니다(.env 포함)'
 
 # ── 4.5 화상회의(LiveKit) 설정 ───────────────────────────────────────────
 # Node 서버와 LiveKit이 **같은 API 비밀값**을 알아야 한다: 서버는 그 값으로 참가 토큰을
@@ -221,7 +246,17 @@ if (-not (Test-Path $EnvFile)) {
 $liveKitSecretFile = Join-Path $ServerDir '.livekit-secret'
 if (-not (Test-Path $liveKitSecretFile)) {
   $bytes = New-Object byte[] 32
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  # RandomNumberGenerator.Fill(Span<byte>)는 .NET Core/5+ 전용 API라 Windows PowerShell 5.1
+  # (전체 .NET Framework 위에서 돈다)에서는 "메서드가 없다"는 예외로 죽는다 — 이 스크립트가
+  # 2026-09-16/17 운영PC 재설치에서 정확히 이 줄에서 조용히(콘솔이 안 보이는 상태라) 멈춰서
+  # 5~7단계(마이그레이션/방화벽/서비스 재시작)가 실제로 한 번도 안 된 원인이었다. .NET
+  # Framework 2.0부터 있는 Create()+GetBytes()로 바꿔서 어느 PowerShell에서도 동작하게 한다.
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+  } finally {
+    $rng.Dispose()
+  }
   $liveKitSecret = -join ($bytes | ForEach-Object { $_.ToString('x2') })
   # 줄바꿈 없이 써야 한다 — 서버가 trim해서 읽지만 yaml 쪽과 한 글자라도 달라지면 인증이 깨진다.
   [System.IO.File]::WriteAllText($liveKitSecretFile, $liveKitSecret)
@@ -339,3 +374,19 @@ if ($RunMode -eq 'service') {
 }
 
 Write-Log '=== TangoTalk 서버 설정 완료 ==='
+
+} catch {
+  # 위 어디서든 Fail()을 거치지 않고 터진 예외는 전부 여기서 받는다 — Fail()과 똑같이
+  # 로그+오류 창을 남기고 종료한다(스택 트레이스까지 남겨서 다음엔 바로 원인을 알 수 있게).
+  Write-Log "오류(예상 못 한 예외): $($_.Exception.Message)"
+  $position = ($_.InvocationInfo.PositionMessage -replace '\r?\n', ' ')
+  Write-Log "  위치: $position"
+  Add-Type -AssemblyName System.Windows.Forms
+  [System.Windows.Forms.MessageBox]::Show(
+    "서버 설치 중 예상하지 못한 오류가 발생했습니다:`n`n$($_.Exception.Message)`n`n" +
+    "자세한 내용은 $LogFile 를 확인하세요. 이 창을 닫은 뒤 관리자 권한 PowerShell에서 이 " +
+    "스크립트를 다시 실행하면 이어서 진행됩니다.",
+    'TangoTalk 서버 설치', 'OK', 'Error'
+  ) | Out-Null
+  exit 1
+}

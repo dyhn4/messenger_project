@@ -14,6 +14,11 @@ class Announcement {
   bool pinned;
   int commentCount;
 
+  /// "공지 자동 내리기"로 고른 시각(없으면 null — 기본값, 자동으로 안 내려감). 작성 시점에만
+  /// 정해지고 이후 바뀌지 않는다(edit은 text만 바꿀 수 있음) — 실제로 내려가면(서버의 주기적
+  /// 스윕) pinned가 false로 바뀌는 것으로 반영된다(이 값 자체는 기록으로 남아 그대로 있음).
+  final DateTime? autoUnpinAt;
+
   Announcement({
     required this.id,
     required this.roomId,
@@ -24,6 +29,7 @@ class Announcement {
     this.editedAt,
     this.pinned = true,
     this.commentCount = 0,
+    this.autoUnpinAt,
   });
 
   factory Announcement.fromJson(Map<String, dynamic> json) => Announcement(
@@ -40,6 +46,9 @@ class Announcement {
         : DateTime.fromMillisecondsSinceEpoch((json['editedAt'] as num).toInt()),
     pinned: json['pinned'] as bool? ?? true,
     commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+    autoUnpinAt: json['autoUnpinAt'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch((json['autoUnpinAt'] as num).toInt()),
   );
 }
 

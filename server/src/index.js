@@ -33,9 +33,12 @@ import { generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
 import { createAdminRouter } from './admin.js';
 import { createAnnouncementsRouter } from './announcements.js';
+import { createInquiriesRouter } from './inquiries.js';
+import { createProjectsRouter } from './projects.js';
 import { createRoomsRouter } from './rooms.js';
 import { createSecretChatsRouter } from './secretChats.js';
 import { startSecretExpiryJob } from './secretExpiry.js';
+import { startAnnouncementAutoUnpinJob } from './announcementAutoUnpin.js';
 import { searchRouter } from './search.js';
 import { createTeamsRouter } from './teams.js';
 import { registerSocket } from './socket.js';
@@ -76,6 +79,8 @@ app.use('/api', requireAuth, createInvitesRouter());
 app.use('/api', requireAuth, createTeamInvitesRouter());
 app.use('/api', requireAuth, createRoomsRouter(io));
 app.use('/api', requireAuth, createAnnouncementsRouter(io));
+app.use('/api', requireAuth, createInquiriesRouter(io));
+app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
@@ -114,6 +119,7 @@ registerSocket(io);
 watchForVersionChanges(io);
 startRetentionJob();
 startSecretExpiryJob(io);
+startAnnouncementAutoUnpinJob(io);
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

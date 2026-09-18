@@ -17,11 +17,13 @@ class AppUser {
   final bool isOwner;
 
   /// 부서/직책도 팀 멤버 목록에서만 채워진다(계정이 아니라 팀 안에서의 정보 — 서버
-  /// team_members 테이블). 안 정했으면 null.
-  final String? department;
-  final String? position;
+  /// team_members 테이블). 안 정했으면 null. 관리자 콘솔에서 바뀌면 서버가 org:updated로
+  /// 알려주고, session.dart가 이 값을 직접 덮어써서 로그아웃 없이 반영한다 — 그래서 final이
+  /// 아니다(editedAt/linkPreview 같은 다른 "실시간 갱신되는" 필드와 동일한 패턴).
+  String? department;
+  String? position;
 
-  const AppUser({
+  AppUser({
     required this.id,
     required this.username,
     required this.name,

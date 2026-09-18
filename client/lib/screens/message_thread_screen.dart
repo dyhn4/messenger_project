@@ -71,6 +71,17 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     }
   }
 
+  /// chat_panel.dart의 _closeStickerPicker와 동일 — 패널 바깥 클릭(TapRegion.onTapOutside)
+  /// 전용. 이모티콘을 실제로 고른 경우(_selectSticker)는 이미 owner를 놓아주므로 건드리지
+  /// 않게 아직 열려 있을 때만 처리한다.
+  void _closeStickerPicker() {
+    if (!_stickerPickerOpen) return;
+    setState(() => _stickerPickerOpen = false);
+    if (widget.session.openStickerPickerOwner.value == this) {
+      widget.session.openStickerPickerOwner.value = null;
+    }
+  }
+
   void _selectSticker(Sticker sticker) {
     setState(() {
       _pendingSticker = sticker;
@@ -288,7 +299,14 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                       Positioned(
                         left: 8,
                         bottom: 8,
-                        child: StickerPicker(onSelected: _selectSticker),
+                        // chat_panel.dart와 동일 — 패널 바깥을 클릭하면 닫히게 하되, 토글
+                        // 버튼(CommentInputBar)은 같은 groupId로 묶어서 버튼을 눌러 닫을 때
+                        // onTapOutside가 먼저 닫고 onPressed가 다시 여는 깜빡임을 막는다.
+                        child: TapRegion(
+                          groupId: this,
+                          onTapOutside: (_) => _closeStickerPicker(),
+                          child: StickerPicker(onSelected: _selectSticker),
+                        ),
                       )
                     else if (_pendingSticker != null)
                       // 입력창의 이모티콘 버튼 바로 위쯤에 오도록 왼쪽으로 붙인다.
@@ -314,6 +332,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
               messageId: widget.message.id,
               pendingSticker: _pendingSticker,
               stickerPickerOpen: _stickerPickerOpen,
+              stickerPickerGroupId: this,
               onToggleStickerPicker: _toggleStickerPicker,
               onStickerConsumed: _removeSticker,
             ),

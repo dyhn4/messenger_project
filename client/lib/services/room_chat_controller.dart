@@ -343,6 +343,14 @@ class RoomChatController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Session이 message:linkPreview 브로드캐스트를 라우팅할 때 호출한다.
+  void applyLinkPreview(Message updated) {
+    final idx = messages.indexWhere((m) => m.id == updated.id);
+    if (idx == -1) return;
+    messages[idx].linkPreview = updated.linkPreview;
+    notifyListeners();
+  }
+
   /// Session이 secret:message-read 브로드캐스트를 라우팅할 때 호출한다 — 상대가 이 메시지를
   /// 읽었다는 신호로, 자동 삭제 타이머가 설정된 방이면 여기서부터 카운트다운이 시작된다
   /// (message_bubble.dart의 SelfDestructCountdown이 이 값을 보고 실시간으로 줄어든다).

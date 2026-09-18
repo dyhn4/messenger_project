@@ -3,10 +3,14 @@ import 'package:flutter/services.dart' show SystemNavigator;
 
 import '../models/app_user.dart';
 import '../models/room.dart';
+import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../services/time_format.dart';
+import '../widgets/account_menu_button.dart';
+import '../widgets/app_menu_button.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/my_avatar.dart';
+import '../widgets/position_badge.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show showLeaveRoomDialog;
 import '../widgets/muted_scrollbar.dart';
@@ -16,6 +20,7 @@ import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
 import 'chat_screen.dart';
+import 'files_screen.dart';
 import 'invite_link_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
@@ -49,6 +54,9 @@ class _RoomListScreenState extends State<RoomListScreen> {
   /// 실수로 홈 화면을 나가버리기 쉬우므로 두 번 눌러야 종료되게 한다.
   DateTime? _lastBackPressAt;
 
+  /// 1:1 채팅 목록에 직책 배지를 보여줄지 판단하는 기준(desktop_home_screen.dart와 동일).
+  List<PositionOption>? _positionOptions;
+
   void _handleBackPress() {
     final now = DateTime.now();
     final last = _lastBackPressAt;
@@ -67,6 +75,9 @@ class _RoomListScreenState extends State<RoomListScreen> {
   @override
   void initState() {
     super.initState();
+    widget.session.fetchPublicPositionOptions().then((list) {
+      if (mounted) setState(() => _positionOptions = list);
+    });
     // 넓은 화면(DesktopHomeScreen)에서 어떤 방을 열어둔 채로 창을 좁혀서 이 화면으로
     // 넘어온 경우 — DesktopHomeScreen의 ChatPanel이 아직 dispose 전이라(같은 프레임 안에서
     // 새 위젯의 initState가 먼저 돌고 옛 dispose가 나중에 돎, session.dart의 clearActiveRoom
@@ -129,6 +140,24 @@ class _RoomListScreenState extends State<RoomListScreen> {
     );
   }
 
+  /// "메뉴" 팝업의 "파일" — PC는 우측 패널로 토글하지만, 좁은 화면엔 그런 패널이 없어서
+  /// 전체화면으로 새로 연다. FilesScreen 자체가 제목+닫기 버튼을 그리는 헤더를 갖고 있어서
+  /// 별도 AppBar 없이 그대로 띄우고, onClose가 뒤로가기 역할을 한다.
+  void _openFiles() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (routeContext) => Scaffold(
+          body: SafeArea(
+            child: FilesScreen(
+              session: widget.session,
+              onClose: () => Navigator.of(routeContext).pop(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_pendingReopenRoom != null) {
@@ -153,6 +182,8 @@ class _RoomListScreenState extends State<RoomListScreen> {
               onPressed: () =>
                   showNotificationsCenterDialog(context, widget.session),
             ),
+            AppMenuButton(session: widget.session, onOpenFiles: _openFiles),
+            AccountMenuButton(session: widget.session),
           ],
         ),
         body: IndexedStack(
@@ -177,6 +208,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
               emptyText: '대화가 없습니다.',
               onOpenRoom: _openRoom,
               showActivityTime: true,
+              positionOptions: _positionOptions,
             ),
             _MembersTab(session: widget.session, onOpenRoom: _openRoom),
             _MoreTab(session: widget.session),
@@ -242,12 +274,14 @@ class _RoomTypeTab extends StatefulWidget {
   final String emptyText;
   final ValueChanged<Room> onOpenRoom;
   final bool showActivityTime;
+  final List<PositionOption>? positionOptions;
   const _RoomTypeTab({
     required this.session,
     required this.type,
     required this.emptyText,
     required this.onOpenRoom,
     this.showActivityTime = false,
+    this.positionOptions,
   });
 
   @override
@@ -317,6 +351,7 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
                     room: rooms[i],
                     onTap: () => widget.onOpenRoom(rooms[i]),
                     showActivityTime: widget.showActivityTime,
+                    positionOptions: widget.positionOptions,
                   ),
                 ),
               );
@@ -335,15 +370,23 @@ class _RoomRow extends StatelessWidget {
   final Room room;
   final VoidCallback onTap;
   final bool showActivityTime;
+  final List<PositionOption>? positionOptions;
   const _RoomRow({
     required this.session,
     required this.room,
     required this.onTap,
     this.showActivityTime = false,
+    this.positionOptions,
   });
 
   @override
   Widget build(BuildContext context) {
+    final otherMember = room.type == RoomType.dm
+        ? room.members.where((m) => m.id != session.userId).firstOrNull
+        : null;
+    final showPositionBadge =
+        otherMember != null &&
+        hasLeadOrHigherPosition(positionOptions, otherMember.position);
     return ListTile(
       leading: RoomAvatar(
         room: room,
@@ -367,6 +410,10 @@ class _RoomRow extends StatelessWidget {
                   : null,
             ),
           ),
+          if (showPositionBadge) ...[
+            const SizedBox(width: 6),
+            PositionBadge(label: otherMember.position!),
+          ],
           if (room.favorite) ...[
             const SizedBox(width: 4),
             const Icon(Icons.star, size: 16, color: Colors.amber),

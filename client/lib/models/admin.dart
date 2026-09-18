@@ -274,6 +274,9 @@ class ServerStats {
   /// 부서·직책을 어디에 두는지 — 'team'(팀마다 다르게) | 'account'(계정 하나로).
   final String orgScope;
 
+  /// 프로젝트를 만들 수 있는 최소 등급 — teamCreation과 같은 값 집합.
+  final String projectCreation;
+
   const ServerStats({
     required this.users,
     required this.teams,
@@ -285,6 +288,7 @@ class ServerStats {
     required this.teamCreation,
     required this.teamInviteLinkCreation,
     required this.orgScope,
+    required this.projectCreation,
   });
 
   factory ServerStats.fromJson(Map<String, dynamic> json) => ServerStats(
@@ -301,6 +305,7 @@ class ServerStats {
     teamInviteLinkCreation:
         json['teamInviteLinkCreation'] as String? ?? 'admin',
     orgScope: json['orgScope'] as String? ?? 'team',
+    projectCreation: json['projectCreation'] as String? ?? 'member',
   );
 }
 

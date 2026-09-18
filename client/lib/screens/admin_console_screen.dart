@@ -108,6 +108,7 @@ class _StatsTabState extends State<_StatsTab> {
     String? teamCreation,
     String? orgScope,
     String? teamInviteLinkCreation,
+    String? projectCreation,
   }) async {
     setState(() => _saving = true);
     try {
@@ -115,6 +116,7 @@ class _StatsTabState extends State<_StatsTab> {
         teamCreation: teamCreation,
         orgScope: orgScope,
         teamInviteLinkCreation: teamInviteLinkCreation,
+        projectCreation: projectCreation,
       );
       await _load();
     } catch (e) {
@@ -222,6 +224,40 @@ class _StatsTabState extends State<_StatsTab> {
               onSelectionChanged: _saving
                   ? null
                   : (s) => _save(teamInviteLinkCreation: s.first),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '프로젝트 생성 권한',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '"프로젝트"(업무 관리 공간)를 새로 만들 수 있는 최소 등급입니다. 준회원은 어느 '
+            '설정에서도 만들 수 없고, 서버 운영자는 설정과 무관하게 항상 만들 수 있습니다. '
+            '이미 만들어진 프로젝트에 초대받아 참여하는 것은 이 설정과 무관합니다.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<String>(
+              segments: [
+                for (final level in teamCreationLevels)
+                  ButtonSegment(
+                    value: level,
+                    label: Text(teamCreationLabel(level)),
+                  ),
+              ],
+              selected: {stats.projectCreation},
+              onSelectionChanged: _saving
+                  ? null
+                  : (s) => _save(projectCreation: s.first),
             ),
           ),
           const SizedBox(height: 20),
@@ -445,8 +481,9 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
   }
 }
 
-/// "FCM 설정" 편집기 — 클라이언트 초기화용 4개 값(입력창에 현재 값이 그대로 보임, 비밀값
-/// 아님)과 서버 발송용 서비스 계정 키(붙여넣기 전용 — 서버가 private_key를 절대 다시
+/// "FCM 설정" 편집기 — 클라이언트 초기화용 4개 값(비밀값은 아니지만 항상 google-services.json
+/// 에서 통째로 불러오는 값이라 굳이 입력창으로 보여주지 않고 "열기" 버튼 + 설정 여부 문구로만
+/// 표시한다)과 서버 발송용 서비스 계정 키(붙여넣기 전용 — 서버가 private_key를 절대 다시
 /// 내려주지 않으므로 항상 빈 채로 시작하고, 현재 설정 여부만 위에 문구로 보여준다).
 class _FcmSettingsEditor extends StatefulWidget {
   final Session session;
@@ -627,13 +664,20 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
           ),
         ),
         const SizedBox(height: 12),
-        _FcmField(label: 'API 키', controller: _apiKey),
-        const SizedBox(height: 8),
-        _FcmField(label: '앱 ID', controller: _appId),
-        const SizedBox(height: 8),
-        _FcmField(label: '프로젝트 ID', controller: _projectId),
-        const SizedBox(height: 8),
-        _FcmField(label: '발신자 ID', controller: _senderId),
+        // 이 4개 값은 비밀값이 아니지만(API 키는 앱 패키지명+SHA-1로 제한, Firebase 공식
+        // 안내), 어차피 항상 파일에서 통째로 불러와 채우는 값이라 직접 눈으로 대조하거나
+        // 고칠 일이 없다 — 서비스 계정 키와 같은 "열기 버튼 + 설정 여부" 방식으로 맞춘다.
+        Text(
+          _projectId.text.isEmpty
+              ? 'Google 서비스 설정: 설정 안 됨'
+              : 'Google 서비스 설정: 설정됨 (프로젝트 ID: ${_projectId.text})',
+          style: TextStyle(
+            color: _projectId.text.isEmpty
+                ? Theme.of(context).colorScheme.error
+                : null,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 16),
         Align(
           alignment: Alignment.centerLeft,
@@ -644,34 +688,28 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
           ),
         ),
         const SizedBox(height: 12),
+        // google-services.json(위 4개 값)과 같은 방식 — 파일에서 통째로 불러와 채우는
+        // 값이라 화면에 원문을 보여줄 필요가 없다(개인키가 그대로 노출되는 것도 막는다).
+        // _serviceAccountJson은 화면에 안 보이는 내부 저장소일 뿐, 실제 값은 저장 버튼을
+        // 눌러야 서버로 전송된다.
         Text(
-          settings.serviceAccountConfigured
+          _serviceAccountJson.text.isNotEmpty
+              ? '새 서비스 계정 키를 선택했습니다 — 저장을 눌러야 적용됩니다.'
+              : settings.serviceAccountConfigured
               ? '서비스 계정: 설정됨 (${settings.serviceAccountEmail ?? '확인 불가'})'
-              : '서비스 계정: 설정 안 됨 — 아래 설정 전까지 푸시가 발송되지 않습니다.'
-                    '서비스 계정 설정이 완료되면 다운받은 json은 반드시 삭제해야 합니다.',
+              : '서비스 계정: 설정 안 됨 — 설정 전까지 푸시가 발송되지 않습니다.',
           style: TextStyle(
-            color: settings.serviceAccountConfigured
-                ? null
-                : Theme.of(context).colorScheme.error,
+            color: _serviceAccountJson.text.isEmpty &&
+                    !settings.serviceAccountConfigured
+                ? Theme.of(context).colorScheme.error
+                : null,
             fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 4),
         Text(
-          '서비스 계정 키 JSON 붙여넣기 (바꿀 때만 입력 — 비워두면 기존 값을 유지합니다)'
-          '서비스 계정 설정이 완료되면 다운받은 json은 반드시 삭제해야 합니다.',
+          '서비스 계정 설정이 완료되면 다운받은 json 파일은 반드시 삭제해야 합니다.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
-        ),
-        const SizedBox(height: 4),
-        TextField(
-          controller: _serviceAccountJson,
-          maxLines: 4,
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-          decoration: const InputDecoration(
-            isDense: true,
-            hintText: '{"type": "service_account", ...}',
-            border: OutlineInputBorder(),
-          ),
         ),
         const SizedBox(height: 12),
         Align(
@@ -688,24 +726,6 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _FcmField extends StatelessWidget {
-  final String label;
-  final TextEditingController controller;
-  const _FcmField({required this.label, required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: label,
-        border: const OutlineInputBorder(),
-      ),
     );
   }
 }

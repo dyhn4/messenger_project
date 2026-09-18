@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
 import '../models/announcement.dart';
+import '../models/inquiry.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
@@ -51,6 +52,21 @@ class RoomMutedUpdate {
         roomId: json['roomId'] as String,
         muted: json['muted'] as bool,
       );
+}
+
+/// 누군가의 부서/직책이 바뀌었다는 알림(org:updated) — 관리자 콘솔("회원" 탭) 또는 팀 설정
+/// ("멤버" 탭)에서 바뀌면 온다. 로그아웃 없이 room.members에 캐싱된 값을 바로 덮어쓰는 데 쓴다.
+class OrgUpdate {
+  final String userId;
+  final String? department;
+  final String? position;
+  const OrgUpdate({required this.userId, this.department, this.position});
+
+  factory OrgUpdate.fromJson(Map<String, dynamic> json) => OrgUpdate(
+    userId: json['userId'] as String,
+    department: json['department'] as String?,
+    position: json['position'] as String?,
+  );
 }
 
 /// 팀에서 빠졌다는 알림(team:left) — 소유자/관리자가 나를 팀에서 뺐거나, 소유자가 팀 자체를
@@ -351,6 +367,7 @@ class ChatSocket {
   final _teamLeftController = StreamController<TeamLeftEvent>.broadcast();
   final _commentController = StreamController<Comment>.broadcast();
   final _messageEditedController = StreamController<Message>.broadcast();
+  final _messageLinkPreviewController = StreamController<Message>.broadcast();
   final _messageDeletedController =
       StreamController<MessageDeletedEvent>.broadcast();
   final _commentEditedController = StreamController<Comment>.broadcast();
@@ -369,9 +386,13 @@ class ChatSocket {
       StreamController<AnnouncementComment>.broadcast();
   final _announcementReadController =
       StreamController<AnnouncementReadEvent>.broadcast();
+  final _inquiryNewController = StreamController<Inquiry>.broadcast();
+  final _inquiryStatusChangedController = StreamController<Inquiry>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
   final _roleUpdatedController = StreamController<void>.broadcast();
+  final _orgUpdatedController = StreamController<OrgUpdate>.broadcast();
+  final _projectChangedController = StreamController<void>.broadcast();
   final _secretInviteController =
       StreamController<SecretInviteEvent>.broadcast();
   final _secretAcceptedController =
@@ -420,6 +441,10 @@ class ChatSocket {
   /// 누군가 메시지를 수정했다는 브로드캐스트(message:edited) — 수정된 메시지 전체가 온다.
   Stream<Message> get messageEdited => _messageEditedController.stream;
 
+  /// 메시지에 담긴 링크의 오픈그래프 미리보기가 (서버가 백그라운드로 가져와서) 채워졌을 때
+  /// (message:linkPreview) — 사용자가 고친 게 아니므로 messageEdited와는 별도 이벤트다.
+  Stream<Message> get messageLinkPreview => _messageLinkPreviewController.stream;
+
   /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted).
   Stream<MessageDeletedEvent> get messageDeleted =>
       _messageDeletedController.stream;
@@ -464,6 +489,14 @@ class ChatSocket {
   Stream<AnnouncementReadEvent> get announcementRead =>
       _announcementReadController.stream;
 
+  /// 새 문의가 왔을 때(inquiry:new) — 팀장이 "받은 문의" 목록을 열어뒀으면 실시간으로 반영.
+  Stream<Inquiry> get inquiryNew => _inquiryNewController.stream;
+
+  /// 문의 처리 상태가 바뀌었을 때(inquiry:statusChanged) — 보낸 사람의 "보낸 문의" 목록이나
+  /// 다른 기기의 "받은 문의" 목록에 실시간으로 반영.
+  Stream<Inquiry> get inquiryStatusChanged =>
+      _inquiryStatusChangedController.stream;
+
   /// 연결이 끊겼다가 다시 붙었을 때(최초 연결 제외) 흘러나온다.
   /// 끊긴 동안 놓친 메시지/방 상태를 다시 받아오는 용도.
   Stream<void> get reconnected => _reconnectController.stream;
@@ -471,6 +504,15 @@ class ChatSocket {
   /// 서버 운영자가 관리자 콘솔에서 내 계정 등급/서버 운영자 여부를 바꿨을 때 — 로그아웃
   /// 없이 바로 반영하려고, 이 이벤트를 받으면 Session이 /users/me를 다시 불러온다.
   Stream<void> get roleUpdated => _roleUpdatedController.stream;
+
+  /// 누군가의 부서/직책이 바뀌었을 때(관리자 콘솔 "회원" 탭 또는 팀 설정 "멤버" 탭) — 로그아웃
+  /// 없이 바로 반영하려고, Session이 이 이벤트로 room.members에 캐싱된 값을 직접 덮어쓴다.
+  Stream<OrgUpdate> get orgUpdated => _orgUpdatedController.stream;
+
+  /// 내가 참여 중인 프로젝트에서 뭔가 바뀌었을 때(프로젝트/업무/댓글 생성·수정·삭제) —
+  /// 열려 있는 "프로젝트" 창이 지금 보고 있는 화면을 다시 불러오는 신호로만 쓴다(무엇이
+  /// 바뀌었는지는 굳이 구분하지 않는다 — 화면 하나가 통째로 새로고침되는 편이 단순하다).
+  Stream<void> get projectChanged => _projectChangedController.stream;
 
   /// 서버가 handshake에서 인증을 거부했을 때(만료됐거나 비밀번호 변경 등으로 폐기된
   /// accessToken으로 연결을 시도한 경우) 흘러나온다. Session이 새 accessToken을 받아
@@ -582,6 +624,12 @@ class ChatSocket {
       );
     });
     socket.on('user:role-updated', (_) => _roleUpdatedController.add(null));
+    socket.on('project:changed', (_) => _projectChangedController.add(null));
+    socket.on('org:updated', (data) {
+      _orgUpdatedController.add(
+        OrgUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
     socket.on('comment:new', (data) {
       _commentController.add(
         Comment.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -589,6 +637,11 @@ class ChatSocket {
     });
     socket.on('message:edited', (data) {
       _messageEditedController.add(
+        Message.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('message:linkPreview', (data) {
+      _messageLinkPreviewController.add(
         Message.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
@@ -635,6 +688,16 @@ class ChatSocket {
     socket.on('announcement:read', (data) {
       _announcementReadController.add(
         AnnouncementReadEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('inquiry:new', (data) {
+      _inquiryNewController.add(
+        Inquiry.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('inquiry:statusChanged', (data) {
+      _inquiryStatusChangedController.add(
+        Inquiry.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
     socket.on('call:state', (data) {
@@ -735,6 +798,9 @@ class ChatSocket {
     // "메시지 전달"(message_forward_screen.dart)에서 "포함" 토글을 켰을 때만 채운다.
     String? forwardedFromSenderName,
     int? forwardedFromCreatedAt,
+    // "팀장에게 문의하기"로 보낸 메시지에만 채운다(chat_input_bar.dart의 _showInquiryDialog) —
+    // message_bubble.dart가 이 값이 있으면 "문의함 바로가기" 링크를 붙여서 보여준다.
+    String? inquiryId,
   }) {
     final socket = _socket;
     if (socket == null) {
@@ -757,6 +823,7 @@ class ChatSocket {
         'quotedPreview': ?quotedPreview,
         'forwardedFromSenderName': ?forwardedFromSenderName,
         'forwardedFromCreatedAt': ?forwardedFromCreatedAt,
+        'inquiryId': ?inquiryId,
       },
       ack: (dynamic response) {
         if (completer.isCompleted) return;

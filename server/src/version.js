@@ -48,6 +48,23 @@ versionRouter.get('/downloads/android', (req, res) => {
   res.download(filePath, 'TangoTalk.apk');
 });
 
+/** 서버 설치 프로그램이 같이 깔아주는 "도움말"(README.html, 저장소 루트 README.md를 정적
+ * HTML로 미리 변환해둔 것 — server/certs.js 상단 주석·build_server_installer.ps1 참고)을
+ * 클라이언트 앱에서도 볼 수 있게 한다. 앱의 계정 메뉴 "도움말"(서버 운영자 전용)이 이 주소를
+ * 기본 브라우저로 연다 — 파일이 서버 PC 로컬 디스크에만 있어서, 앱이 서버와 다른 PC에서
+ * 실행 중이어도 보려면 이렇게 서버를 거쳐야 한다. /version과 같은 성격이라 인증 없이 공개한다.
+ * 설치된 배포본은 {app}/README.html(server/의 바로 위), 이 저장소를 그대로 켠 개발 환경은
+ * server/installer/README.html에 있어서 둘 다 시도한다. */
+versionRouter.get('/help', (req, res) => {
+  const candidates = [
+    path.join(__dirname, '..', '..', 'README.html'),
+    path.join(__dirname, '..', 'installer', 'README.html'),
+  ];
+  const filePath = candidates.find((p) => fs.existsSync(p));
+  if (!filePath) return res.status(404).json({ error: '도움말 문서를 찾을 수 없습니다.' });
+  res.sendFile(filePath);
+});
+
 /** 서버가 켜져 있는 동안 releases/version.json이 바뀌면(publish_release.ps1이 새 버전을
  * 배포할 때) 클라이언트가 앱을 재시작하지 않아도 곧바로 알 수 있도록, 인증 없는 소켓
  * 네임스페이스(/updates)로 새 버전을 즉시 알린다. 기본 네임스페이스는 socket.js의 io.use가

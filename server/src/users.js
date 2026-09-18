@@ -7,7 +7,7 @@ import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser }
 import { findTeamMember, listTeamIdsForUser, listTeamsForUser } from './db/queries/teams.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
 import { isOnline } from './presence.js';
-import { accountRole, canCreateTeamInviteLink } from './permissions.js';
+import { accountRole, canCreateProject, canCreateTeamInviteLink } from './permissions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { broadcastMemberUpdate } from './rooms.js';
 import { signFileUrl } from './upload.js';
@@ -155,6 +155,14 @@ export function createUsersRouter(io) {
         role: accountRole(user),
         isServerAdmin: !!user.isServerAdmin,
         teamInviteLinkCreation: settings.teamInviteLinkCreation,
+      }),
+      // "프로젝트" 창의 "+새 프로젝트" 버튼을 보여줄지 — 서버 설정(프로젝트 생성 권한)에
+      // 달려 있어서 클라이언트가 자기 등급만으로는 판단할 수 없다(실제 생성 때 projects.js가
+      // 다시 확인한다, 이건 화면 표시용).
+      canCreateProject: canCreateProject({
+        role: accountRole(user),
+        isServerAdmin: !!user.isServerAdmin,
+        projectCreation: settings.projectCreation,
       }),
       ...orgInfo,
     });

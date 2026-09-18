@@ -3,13 +3,17 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../widgets/account_menu_button.dart';
+import '../widgets/app_toast.dart';
+import '../widgets/app_menu_button.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/favorite_star.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/notifications_panel.dart';
 import '../widgets/pagination.dart';
+import '../widgets/position_badge.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
 import '../widgets/team_switcher.dart';
@@ -19,6 +23,7 @@ import 'create_topic_screen.dart';
 import 'files_screen.dart';
 import 'member_profile_dialog.dart';
 import 'message_thread_screen.dart';
+import 'project/project_dialog.dart';
 import 'my_profile_dialog.dart';
 import 'new_chat_screen.dart';
 import 'search_screen.dart';
@@ -47,12 +52,27 @@ class DesktopHomeScreen extends StatefulWidget {
 
 class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Room? _selectedRoom;
+  // "대화창 분할하기"(방 목록 우클릭 메뉴)로 연 두 번째 채팅 패널 — 오른쪽에 나란히 뜬다.
+  // _selectedRoom과 같은 방이면 분할할 의미가 없으므로 _effectiveSplitRoom에서 걸러진다.
+  Room? _splitRoom;
   bool _searchOpen = false;
   bool _membersOpen = false;
   bool _filesOpen = false;
   bool _notificationsOpen = false;
   String? _highlightMessageId;
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
+  // 위 _threadMessage가 메인 패널 것인지 분할 패널 것인지 구분해야 그 스레드를 올바른 방의
+  // 메시지 목록/컨트롤러로 그릴 수 있다(분할 패널 도입 전엔 항상 _selectedRoom이라고 가정했음).
+  Room? _threadRoom;
+  // "직책 배지"(1:1 채팅 목록/상단)용 — org_chart_screen.dart와 동일하게 한 번만 불러와 캐싱한다.
+  List<PositionOption>? _positionOptions;
+
+  /// _splitRoom이 메인과 같은 방을 가리키면(예: 분할해둔 방을 방금 메인으로도 선택함) 굳이
+  /// 같은 방을 두 번 그리지 않는다.
+  Room? get _effectiveSplitRoom =>
+      _splitRoom != null && _splitRoom!.id != _selectedRoom?.id
+      ? _splitRoom
+      : null;
 
   /// 창 폭이 [_sidebarCollapseBreakpoint] 이하로 좁아지면 왼쪽 사이드바(토픽/그룹채팅/채팅
   /// 목록)가 고정 280px 칸에 억지로 눌려서(글자가 세로로 한 글자씩 줄바꿈되는 등) 깨지는
@@ -69,15 +89,41 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     setState(() {
       _selectedRoom = room;
       _threadMessage = null;
+      _threadRoom = null;
       _highlightMessageId = null;
       _sidebarOverlayOpen = false;
     });
+  }
+
+  /// 방 목록 우클릭 메뉴의 "대화창 분할하기" — 이미 메인에 열려 있는 방이면 아무 것도 안 한다
+  /// (같은 방을 두 번 그릴 이유가 없다). 검색/멤버/파일/알림 센터 패널과는 서로 자리를
+  /// 다투므로(한 화면에 다 욱여넣으면 너무 좁아짐), 그 넷과 똑같이 서로 배타적으로 만든다 —
+  /// 분할 패널을 열면 그 넷을 닫고, 그 넷 중 하나를 열면(위 _TopBar 콜백들) 분할 패널을 닫는다.
+  void _openSplitRoom(Room room) {
+    if (room.id == _selectedRoom?.id) return;
+    setState(() {
+      _splitRoom = room;
+      _searchOpen = false;
+      _membersOpen = false;
+      _filesOpen = false;
+      _notificationsOpen = false;
+      _threadMessage = null;
+      _threadRoom = null;
+    });
+  }
+
+  bool _isRoomGone(String roomId) {
+    final match = widget.session.rooms.where((r) => r.id == roomId);
+    return match.isEmpty || match.first.hidden;
   }
 
   @override
   void initState() {
     super.initState();
     widget.session.addListener(_onSessionChanged);
+    widget.session.fetchPublicPositionOptions().then((list) {
+      if (mounted) setState(() => _positionOptions = list);
+    });
 
     // 팀 선택 화면(또는 다른 팀)에서 알림/토스트를 눌러 특정 방을 요청했는데, 그 요청이
     // 다른 팀의 방이라 session.requestOpenRoom()이 currentTeam을 먼저 바꾼 경우 — 그 전환
@@ -114,17 +160,24 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       _selectRoom(pending);
       return;
     }
-    // 선택된 방이 목록에서 사라졌거나(예: 그룹/토픽 나가기) 숨겨졌으면(평문 DM 숨기기/나가기 —
-    // 멤버십은 그대로 두고 hidden만 켜므로 rooms 목록엔 남아있다) 우측 패널을 비운다.
+    // 메인/분할/스레드가 가리키던 방이 목록에서 사라졌거나(예: 그룹/토픽 나가기) 숨겨졌으면
+    // (평문 DM 숨기기/나가기 — 멤버십은 그대로 두고 hidden만 켜므로 rooms 목록엔 남아있다)
+    // 그 패널을 비운다. 셋은 서로 다른 방일 수 있어(분할 패널 도입) 각자 따로 확인한다.
     final selected = _selectedRoom;
-    if (selected != null) {
-      final match = widget.session.rooms.where((r) => r.id == selected.id);
-      if (match.isEmpty || match.first.hidden) {
-        setState(() {
-          _selectedRoom = null;
+    final split = _splitRoom;
+    final thread = _threadRoom;
+    final selectedGone = selected != null && _isRoomGone(selected.id);
+    final splitGone = split != null && _isRoomGone(split.id);
+    final threadGone = thread != null && _isRoomGone(thread.id);
+    if (selectedGone || splitGone || threadGone) {
+      setState(() {
+        if (selectedGone) _selectedRoom = null;
+        if (splitGone) _splitRoom = null;
+        if (threadGone) {
           _threadMessage = null;
-        });
-      }
+          _threadRoom = null;
+        }
+      });
     }
   }
 
@@ -171,6 +224,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       setState(() {
         _selectedRoom = room;
         _threadMessage = null;
+        _threadRoom = null;
         _membersOpen = false;
         _highlightMessageId = null;
       });
@@ -201,6 +255,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 _filesOpen = false;
                 _notificationsOpen = false;
                 _threadMessage = null;
+                _threadRoom = null;
+                _splitRoom = null;
               }
             }),
             onToggleSearch: () => setState(() {
@@ -210,6 +266,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 _filesOpen = false;
                 _notificationsOpen = false;
                 _threadMessage = null;
+                _threadRoom = null;
+                _splitRoom = null;
               }
             }),
             onOpenFiles: () => setState(() {
@@ -219,6 +277,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 _membersOpen = false;
                 _notificationsOpen = false;
                 _threadMessage = null;
+                _threadRoom = null;
+                _splitRoom = null;
               }
             }),
             onToggleNotifications: () => setState(() {
@@ -228,6 +288,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 _membersOpen = false;
                 _filesOpen = false;
                 _threadMessage = null;
+                _threadRoom = null;
+                _splitRoom = null;
               }
             }),
           ),
@@ -285,17 +347,20 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                     ),
                   ),
                 ],
-                if (_threadMessage != null && _selectedRoom != null) ...[
+                if (_threadMessage != null && _threadRoom != null) ...[
                   const VerticalDivider(width: 1),
                   SizedBox(
                     width: _sidePanelWidth,
                     child: MessageThreadScreen(
                       session: widget.session,
-                      room: _selectedRoom!,
+                      room: _threadRoom!,
                       message: _threadMessage!,
-                      controller: widget.session.controllerFor(_selectedRoom!),
+                      controller: widget.session.controllerFor(_threadRoom!),
                       asPanel: true,
-                      onClose: () => setState(() => _threadMessage = null),
+                      onClose: () => setState(() {
+                        _threadMessage = null;
+                        _threadRoom = null;
+                      }),
                     ),
                   ),
                 ],
@@ -315,12 +380,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     final sidebar = _Sidebar(
       session: widget.session,
       selectedRoomId: _selectedRoom?.id,
+      positionOptions: _positionOptions,
       onSelectRoom: _selectRoom,
+      onSplitRoom: _openSplitRoom,
       onCreateTopic: _createTopic,
       onBrowseTopics: _browseTopics,
       onNewGroupChat: _newGroupChat,
     );
-    final chatArea = _buildChatArea(context);
+    final chatArea = _buildChatArea(context, _selectedRoom);
+    final splitRoom = _effectiveSplitRoom;
 
     if (MediaQuery.of(context).size.width > _sidebarCollapseBreakpoint) {
       return Row(
@@ -328,6 +396,19 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           SizedBox(width: 280, child: sidebar),
           const VerticalDivider(width: 1),
           Expanded(child: chatArea),
+          // "대화창 분할하기" — 창이 사이드바 접힘 기준보다 넓을 때만 나란히 보여준다(그보다
+          // 좁으면 채팅 하나도 겹침 오버레이로 겨우 보는 상황이라 두 개를 나란히 둘 자리가
+          // 없다 — 상태는 그대로 유지되고 창을 다시 넓히면 돌아온다).
+          if (splitRoom != null) ...[
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: _buildChatArea(
+                context,
+                splitRoom,
+                onClose: () => setState(() => _splitRoom = null),
+              ),
+            ),
+          ],
         ],
       );
     }
@@ -372,10 +453,18 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     );
   }
 
-  Widget _buildChatArea(BuildContext context) {
-    if (_selectedRoom == null) {
+  /// 메인 패널(onClose 없음, room:_selectedRoom)과 분할 패널(onClose 있음, room:_splitRoom)이
+  /// 이 하나의 메서드를 같이 쓴다 — 헤더(즐겨찾기/아바타/이름(+1:1이면 직책 배지)/삼점메뉴)와
+  /// ChatPanel을 완전히 똑같은 모양으로 그린다. onClose가 있으면(분할 패널) 헤더에 닫기
+  /// 버튼이 하나 더 붙는다.
+  Widget _buildChatArea(BuildContext context, Room? room, {VoidCallback? onClose}) {
+    if (room == null) {
       return const Center(child: Text('왼쪽에서 대화방을 선택하세요.'));
     }
+    final isSplit = onClose != null;
+    final otherMember = room.type == RoomType.dm
+        ? room.members.where((m) => m.id != widget.session.userId).firstOrNull
+        : null;
     return Column(
       children: [
         Container(
@@ -388,41 +477,66 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           child: Row(
             children: [
               FavoriteStar(
-                favorite: _selectedRoom!.favorite,
-                onTap: () => widget.session.toggleFavorite(_selectedRoom!),
+                favorite: room.favorite,
+                onTap: () => widget.session.toggleFavorite(room),
               ),
               const SizedBox(width: 8),
               RoomAvatar(
-                room: _selectedRoom!,
+                room: room,
                 myUserId: widget.session.userId ?? '',
                 resolveUrl: widget.session.resolveUrl,
                 onlineUserIds: widget.session.onlineUserIds,
               ),
               const SizedBox(width: 10),
-              if (_selectedRoom!.isSecret) ...[
+              if (room.isSecret) ...[
                 const Icon(Icons.lock, size: 14, color: Colors.green),
                 const SizedBox(width: 4),
               ],
               Expanded(
-                child: Text(
-                  _selectedRoom!.displayName(widget.session.userId ?? ''),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: _selectedRoom!.isSecret ? Colors.green : null,
-                  ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        room.displayName(widget.session.userId ?? ''),
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(color: room.isSecret ? Colors.green : null),
+                      ),
+                    ),
+                    // 방 목록의 배지와 달리 헤더는 등급(조장 이상)과 무관하게 직책이 있으면
+                    // 그냥 글자로 보여준다 — 배지가 아니라 이름 옆의 작은 보조 텍스트.
+                    if (otherMember?.position != null &&
+                        otherMember!.position!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        otherMember.position!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).hintColor,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              RoomOptionsMenu(session: widget.session, room: _selectedRoom!),
+              if (isSplit)
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: '분할 닫기',
+                  onPressed: onClose,
+                ),
+              RoomOptionsMenu(session: widget.session, room: room),
             ],
           ),
         ),
         Expanded(
           child: ChatPanel(
-            key: ValueKey(_selectedRoom!.id),
+            key: ValueKey('${isSplit ? 'split' : 'main'}-${room.id}'),
             session: widget.session,
-            room: _selectedRoom!,
-            highlightMessageId: _highlightMessageId,
+            room: room,
+            highlightMessageId: isSplit ? null : _highlightMessageId,
             onOpenThread: (m) => setState(() {
               _threadMessage = m;
+              _threadRoom = room;
               _searchOpen = false;
               _membersOpen = false;
             }),
@@ -494,6 +608,17 @@ class _TopBar extends StatelessWidget {
               child: TeamSwitcher(session: session),
             ),
           ),
+          // "프로젝트"는 대화(토픽/방)와 성격이 다른 별도 공간이라, 나머지 아이콘들과
+          // 구분선으로 한 번 끊어서 왼쪽에 둔다(잔디와 같은 배치).
+          IconButton(
+            icon: const Icon(Icons.track_changes),
+            tooltip: '프로젝트',
+            onPressed: () => showProjectDialog(context, session),
+          ),
+          const SizedBox(
+            height: 24,
+            child: VerticalDivider(width: 16, thickness: 1),
+          ),
           NotificationBellButton(
             session: session,
             onPressed: onToggleNotifications,
@@ -508,46 +633,9 @@ class _TopBar extends StatelessWidget {
             tooltip: '검색',
             onPressed: onToggleSearch,
           ),
-          PopupMenuButton<void>(
-            icon: const Icon(Icons.apps),
-            tooltip: '메뉴',
-            position: PopupMenuPosition.under,
-            offset: const Offset(0, 10),
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                onTap: onOpenFiles,
-                child: const Row(
-                  children: [_FileTypeIcon(), SizedBox(width: 8), Text('파일')],
-                ),
-              ),
-            ],
-          ),
+          AppMenuButton(session: session, onOpenFiles: onOpenFiles),
           AccountMenuButton(session: session),
         ],
-      ),
-    );
-  }
-}
-
-/// "메뉴" 팝업의 "파일" 항목 앞에 붙는 색깔 있는 파일 아이콘 — 민트색 둥근 배경 위에
-/// 진한 민트색 문서 아이콘.
-class _FileTypeIcon extends StatelessWidget {
-  const _FileTypeIcon();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        color: const Color(0xFFDCF5EB),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      alignment: Alignment.center,
-      child: const Icon(
-        Icons.description_rounded,
-        size: 16,
-        color: Color(0xFF1FAE85),
       ),
     );
   }
@@ -769,7 +857,9 @@ class _MemberRow extends StatelessWidget {
 class _Sidebar extends StatelessWidget {
   final Session session;
   final String? selectedRoomId;
+  final List<PositionOption>? positionOptions;
   final ValueChanged<Room> onSelectRoom;
+  final ValueChanged<Room> onSplitRoom;
   final VoidCallback onCreateTopic;
   final VoidCallback onBrowseTopics;
   final VoidCallback onNewGroupChat;
@@ -777,7 +867,9 @@ class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.session,
     required this.selectedRoomId,
+    required this.positionOptions,
     required this.onSelectRoom,
+    required this.onSplitRoom,
     required this.onCreateTopic,
     required this.onBrowseTopics,
     required this.onNewGroupChat,
@@ -864,6 +956,9 @@ class _Sidebar extends StatelessWidget {
           topicsChildren: [
             for (final room in topics)
               _RoomTile(
+                room: room,
+                session: session,
+                positionOptions: positionOptions,
                 leading: RoomAvatar(
                   room: room,
                   myUserId: session.userId ?? '',
@@ -878,6 +973,7 @@ class _Sidebar extends StatelessWidget {
                 muted: room.muted,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
+                onSplitPanel: onSplitRoom,
               ),
           ],
           groupsHeader: _SectionHeader(
@@ -894,6 +990,9 @@ class _Sidebar extends StatelessWidget {
           groupsChildren: [
             for (final room in groups)
               _RoomTile(
+                room: room,
+                session: session,
+                positionOptions: positionOptions,
                 leading: RoomAvatar(
                   room: room,
                   myUserId: session.userId ?? '',
@@ -909,6 +1008,7 @@ class _Sidebar extends StatelessWidget {
                 muted: room.muted,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
+                onSplitPanel: onSplitRoom,
               ),
           ],
           dmsHeader: _SectionHeader(
@@ -925,6 +1025,9 @@ class _Sidebar extends StatelessWidget {
           dmsChildren: [
             for (final room in dms)
               _RoomTile(
+                room: room,
+                session: session,
+                positionOptions: positionOptions,
                 leading: RoomAvatar(
                   room: room,
                   myUserId: session.userId ?? '',
@@ -940,6 +1043,7 @@ class _Sidebar extends StatelessWidget {
                 muted: room.muted,
                 onToggleFavorite: () => session.toggleFavorite(room),
                 onTap: () => onSelectRoom(room),
+                onSplitPanel: onSplitRoom,
               ),
           ],
         );
@@ -1103,7 +1207,13 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
+/// 방 목록 우클릭 메뉴 항목 — _RoomTileState._showContextMenu가 값으로 돌려받는다.
+enum _RoomContextAction { split, startSecret, toggleMute, markAllRead, hide, leave }
+
 class _RoomTile extends StatefulWidget {
+  final Room room;
+  final Session session;
+  final List<PositionOption>? positionOptions;
   final Widget leading;
   final String label;
   final bool selected;
@@ -1113,7 +1223,11 @@ class _RoomTile extends StatefulWidget {
   final bool muted;
   final VoidCallback onToggleFavorite;
   final VoidCallback onTap;
+  final ValueChanged<Room> onSplitPanel;
   const _RoomTile({
+    required this.room,
+    required this.session,
+    required this.positionOptions,
     required this.leading,
     required this.label,
     required this.selected,
@@ -1123,6 +1237,7 @@ class _RoomTile extends StatefulWidget {
     this.muted = false,
     required this.onToggleFavorite,
     required this.onTap,
+    required this.onSplitPanel,
   });
 
   @override
@@ -1130,64 +1245,202 @@ class _RoomTile extends StatefulWidget {
 }
 
 class _RoomTileState extends State<_RoomTile> {
-  // 즐겨찾기 안 된 회색 별은 평소엔 숨겨두고, 마우스가 이 행 위에 있을 때만 보여준다.
+  // 즐겨찾기 안 된 회색 별/숨기기·나가기 X는 평소엔 숨겨두고, 마우스가 이 행 위에 있을 때만
+  // 보여준다(칸 자체는 Opacity로 항상 자리를 차지해서 hover 때 행 크기가 안 바뀌게 한다).
   bool _hovering = false;
+
+  // showMenu가 뜨면(모달 배리어가 이 자리 전체를 덮어써서) 실제 마우스는 그대로 이 줄
+  // 위에 있어도 MouseRegion/ListTile의 자동 hover 판정이 "떠났다"로 리셋돼버린다 — 그래서
+  // 회색 표시(호버 배경)가 메뉴가 열려 있는 동안 사라지는 버그가 있었다. 메뉴가 열려 있는
+  // 동안은 이 값을 직접 true로 유지해서, 실제 hover 판정과 무관하게 회색 배경을 그대로 둔다.
+  bool _contextMenuOpen = false;
+
+  bool get _isDm => widget.room.type == RoomType.dm;
+
+  /// 우클릭(오른쪽 버튼) 메뉴 — Flutter 표준 레시피대로 탭다운 위치를 그대로 showMenu의
+  /// 기준 사각형으로 넘긴다(이 코드베이스에 우클릭 메뉴 전례가 없어서 새로 만든 패턴).
+  Future<void> _showContextMenu(Offset globalPosition) async {
+    final room = widget.room;
+    final session = widget.session;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    setState(() => _contextMenuOpen = true);
+    final action = await showMenu<_RoomContextAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        globalPosition & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        const PopupMenuItem(
+          value: _RoomContextAction.split,
+          child: Text('대화창 분할하기'),
+        ),
+        // 이미 비밀 대화인 방에서 "또" 비밀대화를 시작하는 건 의미가 없고, 그룹/토픽은
+        // 애초에 1:1이 아니라 비밀 대화 개념이 없다.
+        if (_isDm && !room.isSecret)
+          const PopupMenuItem(
+            value: _RoomContextAction.startSecret,
+            child: Text('비밀대화 시작하기'),
+          ),
+        PopupMenuItem(
+          value: _RoomContextAction.toggleMute,
+          child: Text(room.muted ? '대화방 알림 켜기' : '대화방 알림 끄기'),
+        ),
+        const PopupMenuItem(
+          value: _RoomContextAction.markAllRead,
+          child: Text('모두 읽음 처리'),
+        ),
+        if (_isDm)
+          const PopupMenuItem(
+            value: _RoomContextAction.hide,
+            child: Text('숨기기'),
+          ),
+        const PopupMenuItem(
+          value: _RoomContextAction.leave,
+          child: Text('나가기'),
+        ),
+      ],
+    );
+    if (mounted) setState(() => _contextMenuOpen = false);
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _RoomContextAction.split:
+        widget.onSplitPanel(room);
+      case _RoomContextAction.startSecret:
+        final other = room.members
+            .where((m) => m.id != session.userId)
+            .firstOrNull;
+        if (other == null) return;
+        try {
+          await session.startSecretChatInTeam(room.teamId, other.id);
+        } catch (e) {
+          if (mounted) {
+            showAppToast(context, '비밀대화를 시작하지 못했습니다: $e');
+          }
+        }
+      case _RoomContextAction.toggleMute:
+        await session.toggleMuted(room);
+      case _RoomContextAction.markAllRead:
+        session.controllerFor(room).markReadNow();
+        session.clearUnreadCount(room.id);
+      case _RoomContextAction.hide:
+        if (mounted) await showHideDmDialog(context, session, room);
+      case _RoomContextAction.leave:
+        if (mounted) await showLeaveRoomDialog(context, session, room);
+    }
+  }
+
+  /// 방 목록 두번째 스크린샷의 호버 X — 1:1/그룹·토픽 모두 확인창을 먼저 띄운다(1:1은
+  /// showHideDmDialog, 그룹/토픽은 멤버십 자체가 없어지는 showLeaveRoomDialog).
+  Future<void> _onCloseX() async {
+    if (_isDm) {
+      await showHideDmDialog(context, widget.session, widget.room);
+    } else {
+      await showLeaveRoomDialog(context, widget.session, widget.room);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final otherMember = _isDm
+        ? widget.room.members
+              .where((m) => m.id != widget.session.userId)
+              .firstOrNull
+        : null;
+    final showPositionBadge =
+        otherMember != null &&
+        hasLeadOrHigherPosition(widget.positionOptions, otherMember.position);
+    // 실제 마우스 hover든, 우클릭 메뉴가 떠 있는 동안(_contextMenuOpen)이든 똑같이 "호버된
+    // 것처럼" 보여준다 — 아래 tileColor/Opacity 전부 이 값 하나로 판단한다.
+    final showHover = _hovering || _contextMenuOpen;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      child: ListTile(
-        dense: true,
-        selected: widget.selected,
-        selectedTileColor: Theme.of(
-          context,
-        ).colorScheme.primaryContainer.withValues(alpha: 0.4),
-        leading: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Opacity(
-              opacity: widget.favorite || _hovering ? 1 : 0,
-              child: FavoriteStar(
-                favorite: widget.favorite,
-                onTap: widget.onToggleFavorite,
+      child: GestureDetector(
+        onSecondaryTapDown: (details) => _showContextMenu(details.globalPosition),
+        child: ListTile(
+          dense: true,
+          selected: widget.selected,
+          selectedTileColor: Theme.of(
+            context,
+          ).colorScheme.primaryContainer.withValues(alpha: 0.4),
+          // ListTile 자체의 자동 hover 배경 대신 이 값으로 직접 그린다 — showMenu가 뜨면
+          // (모달 배리어가 이 자리를 덮어써서) 실제 마우스는 그대로 있어도 자동 hover 판정이
+          // "떠났다"로 리셋되는 문제가 있어서(그래서 우클릭 메뉴를 열면 회색 표시가 바로
+          // 사라졌었다), 자동 판정에 기대지 않고 showHover로 직접 통제한다.
+          hoverColor: Colors.transparent,
+          tileColor: showHover && !widget.selected
+              ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.08)
+              : null,
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Opacity(
+                opacity: widget.favorite || showHover ? 1 : 0,
+                child: FavoriteStar(
+                  favorite: widget.favorite,
+                  onTap: widget.onToggleFavorite,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            widget.leading,
-          ],
-        ),
-        title: Row(
-          children: [
-            if (widget.isSecret) ...[
-              const Icon(Icons.lock, size: 14, color: Colors.green),
-              const SizedBox(width: 4),
+              const SizedBox(width: 8),
+              widget.leading,
             ],
-            Flexible(
-              child: Text(
-                widget.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: widget.isSecret
-                    ? const TextStyle(color: Colors.green)
-                    : null,
+          ),
+          title: Row(
+            children: [
+              if (widget.isSecret) ...[
+                const Icon(Icons.lock, size: 14, color: Colors.green),
+                const SizedBox(width: 4),
+              ],
+              Flexible(
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: widget.isSecret
+                      ? const TextStyle(color: Colors.green)
+                      : null,
+                ),
               ),
-            ),
-            if (widget.muted) ...[
-              const SizedBox(width: 4),
-              Icon(
-                Icons.notifications_off,
-                size: 14,
-                color: Theme.of(context).hintColor,
+              if (showPositionBadge) ...[
+                const SizedBox(width: 6),
+                PositionBadge(label: otherMember.position!),
+              ],
+              if (widget.muted) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.notifications_off,
+                  size: 14,
+                  color: Theme.of(context).hintColor,
+                ),
+              ],
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.unreadCount > 0) ...[
+                UnreadBadge(count: widget.unreadCount),
+                const SizedBox(width: 4),
+              ],
+              Opacity(
+                opacity: showHover ? 1 : 0,
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    iconSize: 16,
+                    tooltip: _isDm ? '채팅방 숨기기' : '채팅방 나가기',
+                    icon: const Icon(Icons.close),
+                    onPressed: showHover ? _onCloseX : null,
+                  ),
+                ),
               ),
             ],
-          ],
+          ),
+          onTap: widget.onTap,
         ),
-        trailing: widget.unreadCount > 0
-            ? UnreadBadge(count: widget.unreadCount)
-            : null,
-        onTap: widget.onTap,
       ),
     );
   }

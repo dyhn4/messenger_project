@@ -1,6 +1,6 @@
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { dmHistoryFloors, roomMembers, rooms, users } from '../schema.js';
+import { dmHistoryFloors, roomMembers, rooms, teamMembers, users } from '../schema.js';
 
 export function findRoomById(id) {
   return db
@@ -159,6 +159,28 @@ export function listRoomMemberUsers(roomId) {
     .innerJoin(users, eq(roomMembers.userId, users.id))
     .where(eq(roomMembers.roomId, roomId))
     .then((rows) => rows.map((r) => r.user));
+}
+
+/** listRoomMemberUsers와 같지만, [teamId]의 team_members.department/position(teamDepartment/
+ * teamPosition으로)도 같이 얹는다 — rooms.js의 resolveMembers가 서버 설정(orgScope)에 따라
+ * 계정 값(users.department/position)과 이 팀 값 중 하나를 골라 방 DTO의 member.position에
+ * 싣는다(teams.js의 memberListResponse와 같은 방식). LEFT JOIN인 이유는
+ * listRoomMemberUsers와 동일 — 팀에서 나간 사람의 옛 대화도 계속 보여야 하므로 팀 멤버십이
+ * 없어도(teamMembers 행이 없어도) 방 멤버 자체는 빠지면 안 된다. */
+export function listRoomMemberUsersWithOrg(roomId, teamId) {
+  return db
+    .select({ user: users, teamDepartment: teamMembers.department, teamPosition: teamMembers.position })
+    .from(roomMembers)
+    .innerJoin(users, eq(roomMembers.userId, users.id))
+    .leftJoin(teamMembers, and(eq(teamMembers.userId, roomMembers.userId), eq(teamMembers.teamId, teamId)))
+    .where(eq(roomMembers.roomId, roomId))
+    .then((rows) =>
+      rows.map((r) => ({
+        ...r.user,
+        teamDepartment: r.teamDepartment ?? null,
+        teamPosition: r.teamPosition ?? null,
+      })),
+    );
 }
 
 /** 방 멤버들의 마지막 읽은 시각 맵({userId: epochMillis}) — 클라이언트의 "안읽음 N" 계산용. */

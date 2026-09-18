@@ -162,6 +162,9 @@ export const serverSettings = pgTable('server_settings', {
   // 부서/직책을 어디에 두는지 — 'team'(기본, 팀마다 다르게: team_members) |
   // 'account'(계정 하나로: users). 회사 조직도가 하나뿐이면 'account'가 단순하다.
   orgScope: text('org_scope').notNull().default('team'),
+  // 프로젝트를 만들 수 있는 최소 계정 등급 — teamCreation과 같은 값 집합
+  // ('member' | 'admin' | 'serverAdmin'). 준회원은 어느 값이든 만들 수 없다.
+  projectCreation: text('project_creation').notNull().default('member'),
   // FCM(푸시 알림) 설정 — 예전엔 클라이언트 빌드에 google-services.json을 박아넣고 서버
   // 파일로 firebase-service-account.json을 직접 놓아야 했는데, 이 제품을 여러 고객사에
   // 자체 호스팅으로 판매하면서 고객사마다 앱을 따로 빌드해줘야 하는 문제가 생겼다. 그래서
@@ -304,6 +307,14 @@ export const rooms = pgTable(
     // 빠지므로, 이 컬럼이 없으면 누가 나갔었는지 알 방법이 없다).
     secretDepartedMemberId: uuid('secret_departed_member_id'),
     secretDepartedMemberName: text('secret_departed_member_name'),
+    // 그룹채팅 아이콘 — 만들 때만 고를 수 있다(new_chat_screen.dart). 'members'(기본값, null과
+    // 동일 취급 — 기존처럼 멤버 아바타 두 개를 겹쳐 보여줌) | 'initial'(그룹 이름 첫 글자,
+    // AppUser.avatarType의 'initial'과 같은 개념) | 'emoji'(iconEmoji/iconColor 사용, teams
+    // 테이블의 iconEmoji/iconColor와 같은 패턴이지만 팀과 안 겹치는 별도 이모지 목록을 씀 —
+    // room_avatar.dart 참고). 토픽/DM은 이 세 컬럼을 쓰지 않는다(항상 null).
+    iconType: text('icon_type'),
+    iconEmoji: text('icon_emoji'),
+    iconColor: text('icon_color'),
   },
   (t) => [
     index('rooms_team_id_idx').on(t.teamId),
@@ -408,6 +419,20 @@ export const messages = pgTable(
     // 원본을 그대로 복사해서 넣는다(전달 전에 편집 가능).
     forwardedFromSenderName: text('forwarded_from_sender_name'),
     forwardedFromCreatedAt: timestamp('forwarded_from_created_at', { withTimezone: true }),
+    // 링크 미리보기(오픈그래프) — 텍스트 메시지에 URL이 있으면 서버가 백그라운드로 그 페이지의
+    // og:title/og:description/og:image/og:site_name을 긁어와 채운다(linkPreview.js). 메시지
+    // 전송 자체는 이 결과를 기다리지 않고, 나중에 결과가 오면 message:linkPreview로 따로
+    // 브로드캐스트한다(editedAt은 안 건드린다 — 사용자가 수정한 게 아니므로 "(수정됨)" 표시가
+    // 붙으면 안 된다).
+    linkPreviewUrl: text('link_preview_url'),
+    linkPreviewTitle: text('link_preview_title'),
+    linkPreviewDescription: text('link_preview_description'),
+    linkPreviewImageUrl: text('link_preview_image_url'),
+    linkPreviewSiteName: text('link_preview_site_name'),
+    // "팀장에게 문의하기"로 보낸 메시지 표시용(inquiries.js) — true면 클라이언트가 일반
+    // 텍스트 옆에 "문의함 바로가기" 링크를 붙여서 누르면 그 문의로 바로 이동한다.
+    isInquiryNotice: boolean('is_inquiry_notice').notNull().default(false),
+    inquiryId: uuid('inquiry_id').references(() => inquiries.id, { onDelete: 'set null' }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
@@ -417,10 +442,9 @@ export const messages = pgTable(
 );
 
 /**
- * 토픽방 공지 — 카카오톡 공지와 같은 개념. 여러 개를 쓸 수 있고(히스토리로 남음), **가장
- * 최근에 쓴 것이 자동으로 "지금 고정된 공지"**가 된다(별도 "고정" 토글은 없다 — rooms.js의
- * latestAnnouncementForRoom이 createdAt 최신 1건을 그 방의 고정 공지로 쓴다). 수정/삭제는
- * 지금 범위 밖 — 잘못 쓰면 새로 하나 더 쓰는 것으로 대신한다.
+ * 토픽방 공지 — 카카오톡 공지와 같은 개념. 여러 개를 쓸 수 있고(히스토리로 남음), pinned인
+ * 것(방마다 최대 1개)이 "지금 고정된 공지"다. 작성 본인만 수정/삭제/내리기를 할 수 있다
+ * (announcements.js의 requireOwnAnnouncement).
  */
 export const announcements = pgTable(
   'announcements',
@@ -437,6 +461,10 @@ export const announcements = pgTable(
     // insertAnnouncement). "공지 내리기"는 삭제하지 않고 이 값만 false로 바꾼다 — 히스토리에는
     // 남지만 배너에선 사라진다(그리고 그 뒤로 자동으로 다른 글이 다시 고정되지 않는다).
     pinned: boolean('pinned').notNull().default(true),
+    // "공지 자동 내리기" — 작성 시점에 고른 시간이 지나면 announcementAutoUnpin.js의 주기적
+    // 스윕이 "공지 내리기"와 똑같이 pinned를 false로 바꾼다(수동 내리기와 동일 이벤트로
+    // 브로드캐스트). null이면 자동으로 안 내려간다(기본값).
+    autoUnpinAt: timestamp('auto_unpin_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp('edited_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -462,6 +490,149 @@ export const announcementComments = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('announcement_comments_announcement_id_idx').on(t.announcementId, t.createdAt)],
+);
+
+/**
+ * "팀장에게 문의하기" — 팀원이 자기 팀의 "팀장" 직책인 사람에게만 보낼 수 있는 문의(미니
+ * 티켓). 실제 대화는 그 DM방(roomId)에 일반 메시지로도 남지만(chat_input_bar.dart가 문의
+ * API 호출과 별개로 메시지도 보낸다), 이 테이블은 "누가 누구에게 언제 무슨 문의를 보냈고
+ * 지금 처리 상태가 어떤지"만 따로 추적한다 — 대화 목록에 묻혀 놓치지 않도록.
+ */
+export const inquiries = pgTable(
+  'inquiries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
+    senderName: text('sender_name').notNull(),
+    recipientId: uuid('recipient_id').references(() => users.id, { onDelete: 'set null' }),
+    recipientName: text('recipient_name').notNull(),
+    category: text('category').notNull(),
+    title: text('title').notNull(),
+    content: text('content').notNull(),
+    // 'open'(대기) | 'in_progress'(처리중) | 'resolved'(완료) — 받는 사람(팀장)만 바꿀 수 있다.
+    status: text('status').notNull().default('open'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    statusUpdatedAt: timestamp('status_updated_at', { withTimezone: true }),
+    // 첨부(선택) — 클라이언트가 /api/upload로 먼저 올린 뒤 그 결과 URL만 여기 저장한다
+    // (messages 테이블의 첨부 컬럼과 같은 방식). 없으면 전부 null.
+    fileUrl: text('file_url'),
+    fileName: text('file_name'),
+    fileSize: integer('file_size'),
+    mimeType: text('mime_type'),
+    thumbnailUrl: text('thumbnail_url'),
+  },
+  (t) => [
+    index('inquiries_recipient_id_idx').on(t.recipientId, t.status),
+    index('inquiries_sender_id_idx').on(t.senderId),
+  ],
+);
+
+/**
+ * 프로젝트 — 토픽(대화방)이 "주제별 대화"라면, 프로젝트는 "업무를 계획·추적하는 공간"이다.
+ * 대화방과 완전히 별개의 테이블이라 방 목록/검색/파일에는 전혀 안 섞인다. 방과 마찬가지로
+ * 팀에 속하고(teamId), 초대된 사람(project_members)만 볼 수 있다.
+ */
+export const projects = pgTable(
+  'projects',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    // 업무 번호 앞에 붙는 짧은 식별자(예: 'MKT' → MKT-1001). 팀 안에서 유일해야 한다.
+    identifier: text('identifier').notNull(),
+    // 다음에 만들 업무에 줄 번호. 업무를 지워도 번호를 재사용하지 않도록 프로젝트에 들고 있다
+    // (tasks에서 MAX(seq)+1로 계산하면 삭제 후 번호가 겹친다).
+    nextTaskSeq: integer('next_task_seq').notNull().default(1),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('projects_team_id_idx').on(t.teamId),
+    uniqueIndex('projects_team_identifier_idx').on(t.teamId, t.identifier),
+  ],
+);
+
+/**
+ * 프로젝트 구성원. [role]은 팀 멤버십과 같은 방식으로 'owner'(만든 사람 = 프로젝트 담당자)
+ * 또는 'member'다 — 프로젝트 설정/삭제는 담당자와 팀 소유자·관리자만 할 수 있다.
+ * [favorite]은 개인 설정(사이드바 "즐겨찾기")이라 사람마다 다르다(room_members.favorite와 동일).
+ */
+export const projectMembers = pgTable(
+  'project_members',
+  {
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().default('member'), // 'owner' | 'member'
+    favorite: boolean('favorite').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.userId] }), index('project_members_user_id_idx').on(t.userId)],
+);
+
+/** 프로젝트 안의 업무(태스크). 화면에 보이는 번호는 `<프로젝트 identifier>-<seq>`로 만든다. */
+export const tasks = pgTable(
+  'tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    // 프로젝트 안에서의 업무 번호(projects.nextTaskSeq에서 받아온다).
+    seq: integer('seq').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    // 담당자 — 아직 안 정했으면 null(대시보드의 "내가 담당한 업무"에는 안 잡힌다).
+    assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+    // 'todo'(할 일) | 'doing'(진행 중) | 'done'(완료). 칸반보드의 열과 1:1로 맞춘다(다음 단계).
+    status: text('status').notNull().default('todo'),
+    // 'low' | 'normal'(기본) | 'high'
+    priority: text('priority').notNull().default('normal'),
+    startDate: timestamp('start_date', { withTimezone: true }),
+    dueDate: timestamp('due_date', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('tasks_project_id_idx').on(t.projectId, t.status),
+    index('tasks_assignee_id_idx').on(t.assigneeId, t.dueDate),
+    uniqueIndex('tasks_project_seq_idx').on(t.projectId, t.seq),
+  ],
+);
+
+/** 업무 카드에 달린 댓글. [projectId]는 "최근 댓글"을 프로젝트 기준으로 모을 때 조인을 피하려고 같이 둔다. */
+export const taskComments = pgTable(
+  'task_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    // messages.senderId와 같은 규칙 — 탈퇴해도 댓글은 남고 senderId만 null이 된다.
+    senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
+    senderName: text('sender_name').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('task_comments_task_id_idx').on(t.taskId, t.createdAt), index('task_comments_project_id_idx').on(t.projectId, t.createdAt)],
 );
 
 /** 특정 메시지에 달린 댓글(스레드 답글). */

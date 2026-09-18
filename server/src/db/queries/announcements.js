@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { announcementComments, announcements } from '../schema.js';
 
@@ -13,6 +13,7 @@ export function listAnnouncementsForRoom(roomId) {
       authorName: announcements.authorName,
       text: announcements.text,
       pinned: announcements.pinned,
+      autoUnpinAt: announcements.autoUnpinAt,
       createdAt: announcements.createdAt,
       editedAt: announcements.editedAt,
       commentCount: sql`count(${announcementComments.id})`.mapWith(Number),
@@ -43,8 +44,9 @@ export function findAnnouncementById(id) {
 }
 
 /** 새 공지를 쓰면 그 방의 기존 고정 공지(있다면)는 자동으로 내려가고 새 글이 고정된다 — 한
- * 방에 고정 공지는 동시에 하나뿐이라는 불변식을 트랜잭션으로 지킨다. */
-export async function insertAnnouncement({ id, roomId, authorId, authorName, text }) {
+ * 방에 고정 공지는 동시에 하나뿐이라는 불변식을 트랜잭션으로 지킨다. [autoUnpinAt]은 "공지
+ * 자동 내리기"를 골랐을 때만 Date, 아니면 null(기본 — 자동으로 안 내려감). */
+export async function insertAnnouncement({ id, roomId, authorId, authorName, text, autoUnpinAt = null }) {
   return db.transaction(async (tx) => {
     await tx
       .update(announcements)
@@ -52,10 +54,25 @@ export async function insertAnnouncement({ id, roomId, authorId, authorName, tex
       .where(and(eq(announcements.roomId, roomId), eq(announcements.pinned, true)));
     const [row] = await tx
       .insert(announcements)
-      .values({ id, roomId, authorId, authorName, text, pinned: true })
+      .values({ id, roomId, authorId, authorName, text, pinned: true, autoUnpinAt })
       .returning();
     return row;
   });
+}
+
+/** announcementAutoUnpin.js의 주기적 스윕용 — 지금 고정돼 있고(pinned) 자동 내리기 시각이
+ * 지난 공지 전부. */
+export function findAnnouncementsPastAutoUnpin() {
+  return db
+    .select({ id: announcements.id, roomId: announcements.roomId })
+    .from(announcements)
+    .where(
+      and(
+        eq(announcements.pinned, true),
+        isNull(announcements.deletedAt),
+        lte(announcements.autoUnpinAt, new Date()),
+      ),
+    );
 }
 
 export async function updateAnnouncementText(id, text) {

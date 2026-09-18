@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../screens/admin_console_screen.dart';
 import '../screens/invite_link_screen.dart';
 import '../screens/my_profile_dialog.dart';
 import '../screens/settings_screen.dart';
 import '../services/session.dart';
+import 'app_toast.dart';
 import 'my_avatar.dart';
 
 const _appVersion = '1.0.0';
@@ -21,6 +23,21 @@ class AccountMenuButton extends StatelessWidget {
     // 루트까지 화면 스택을 걷어낸다.
     if (context.mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
+  /// 서버 설치 프로그램이 같이 깔아주는 "도움말"(README.html)을 기본 브라우저로 연다 — 그
+  /// 파일은 서버 PC 로컬 디스크에만 있어서(server/certs.js 주석 참고), 앱이 서버와 다른
+  /// PC에서 실행 중이어도 볼 수 있게 서버를 거쳐서 받는다(version.js의 GET /help).
+  Future<void> _openHelp(BuildContext context) async {
+    final base = session.serverUrl;
+    if (base == null) return;
+    final ok = await launchUrl(
+      Uri.parse('$base/help'),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok && context.mounted) {
+      showAppToast(context, '도움말 문서를 열 수 없습니다.');
     }
   }
 
@@ -87,6 +104,19 @@ class AccountMenuButton extends StatelessWidget {
                 Icon(Icons.admin_panel_settings_outlined),
                 SizedBox(width: 8),
                 Text('서버 관리'),
+              ],
+            ),
+          ),
+        // 서버 설치 시 같이 깔리는 "도움말" 바로가기(README.html)를 앱에서도 볼 수 있게 —
+        // 서버 운영자만 쓸 일이 있어서 "서버 관리"와 같은 조건으로 묶는다.
+        if (session.isServerAdmin)
+          PopupMenuItem<void>(
+            onTap: () => _openHelp(context),
+            child: const Row(
+              children: [
+                Icon(Icons.help_outline),
+                SizedBox(width: 8),
+                Text('도움말'),
               ],
             ),
           ),

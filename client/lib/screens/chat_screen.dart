@@ -52,6 +52,9 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final session = widget.session;
     final room = widget.room;
+    final otherMember = room.type == RoomType.dm
+        ? room.members.where((m) => m.id != session.userId).firstOrNull
+        : null;
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -68,7 +71,7 @@ class _ChatScreenState extends State<ChatScreen> {
               const Icon(Icons.lock, size: 14, color: Colors.green),
               const SizedBox(width: 4),
             ],
-            Expanded(
+            Flexible(
               child: Text(
                 room.displayName(session.userId ?? ''),
                 overflow: TextOverflow.ellipsis,
@@ -77,6 +80,18 @@ class _ChatScreenState extends State<ChatScreen> {
                     : null,
               ),
             ),
+            // 방 목록의 배지와 달리 헤더는 등급(조장 이상)과 무관하게 직책이 있으면
+            // 그냥 글자로 보여준다 — desktop_home_screen.dart의 헤더와 동일한 규칙.
+            if (otherMember?.position != null &&
+                otherMember!.position!.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(
+                otherMember.position!,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+              ),
+            ],
           ],
         ),
         actions: [RoomOptionsMenu(session: session, room: room)],

@@ -1,0 +1,1 @@
+ALTER TABLE "announcements" ADD COLUMN "auto_unpin_at" timestamp with time zone;

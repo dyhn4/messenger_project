@@ -49,6 +49,11 @@ class CommentInputBar extends StatefulWidget {
   /// 위에 떠 있는 오버레이로 그리므로, 상태는 부모가 들고 여기는 버튼과 전송만 담당한다.
   final Sticker? pendingSticker;
   final bool stickerPickerOpen;
+
+  /// ChatInputBar.stickerPickerGroupId와 동일 — 이 버튼을 패널(StickerPicker)과 같은
+  /// TapRegion 그룹으로 묶어서, 버튼으로 닫을 때 onTapOutside가 먼저 닫고 onPressed가
+  /// 다시 여는 깜빡임을 막는다.
+  final Object stickerPickerGroupId;
   final VoidCallback onToggleStickerPicker;
   final VoidCallback onStickerConsumed;
 
@@ -58,6 +63,7 @@ class CommentInputBar extends StatefulWidget {
     required this.messageId,
     this.pendingSticker,
     this.stickerPickerOpen = false,
+    required this.stickerPickerGroupId,
     required this.onToggleStickerPicker,
     required this.onStickerConsumed,
   });
@@ -354,15 +360,20 @@ class CommentInputBarState extends State<CommentInputBar> {
                       onPressed: _sending ? null : _pickImage,
                       tooltip: '이미지 첨부',
                     ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.emoji_emotions_outlined,
-                        color: widget.stickerPickerOpen
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
+                    TapRegion(
+                      groupId: widget.stickerPickerGroupId,
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.emoji_emotions_outlined,
+                          color: widget.stickerPickerOpen
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                        onPressed: _sending
+                            ? null
+                            : widget.onToggleStickerPicker,
+                        tooltip: '이모티콘',
                       ),
-                      onPressed: _sending ? null : widget.onToggleStickerPicker,
-                      tooltip: '이모티콘',
                     ),
                     IconButton(
                       icon: const Icon(Icons.attach_file),

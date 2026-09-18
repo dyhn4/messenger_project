@@ -16,7 +16,7 @@ import {
   isRoomMember,
   listBrowsableTopics,
   listRoomMemberIds,
-  listRoomMemberUsers,
+  listRoomMemberUsersWithOrg,
   listRoomsForUser,
   removeRoomMember,
   setDmHistoryFloor,
@@ -45,6 +45,7 @@ import {
   listCommentsInRoomBetween,
 } from './db/queries/comments.js';
 import { findSecretSessionByRoomId } from './db/queries/secretSessions.js';
+import { getServerSettings } from './db/queries/serverSettings.js';
 import { findUserById } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
@@ -52,8 +53,22 @@ import { toMessageDto } from './messages.js';
 import { previewFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
 
-async function resolveMembers(roomId) {
-  return (await listRoomMemberUsers(roomId)).map(publicUser);
+/** teams.js의 memberListResponse와 같은 규칙 — 서버 설정(orgScope)에 따라 팀 값(team_members)
+ * 또는 계정 값(users) 중 하나를 부서/직책으로 쓴다. 채팅방 상단 헤더/방 목록의 직책 표시
+ * (desktop_home_screen.dart)가 이 값을 쓴다 — publicUser()에는 원래 이 필드가 없다(팀마다
+ * 다를 수 있는 값이라 방이 속한 팀을 모르면 어느 값을 써야 할지 정할 수 없어서, 방 단위로만
+ * 계산하는 여기서 얹는다). */
+async function resolveMembers(roomId, teamId) {
+  const [rows, settings] = await Promise.all([
+    listRoomMemberUsersWithOrg(roomId, teamId),
+    getServerSettings(),
+  ]);
+  const byTeam = settings.orgScope !== 'account';
+  return rows.map((u) => ({
+    ...publicUser(u),
+    department: (byTeam ? u.teamDepartment : u.department) ?? null,
+    position: (byTeam ? u.teamPosition : u.position) ?? null,
+  }));
 }
 
 /** 시스템 메시지 문구("OOO 님이 참여했습니다" 등)에 쓸 표시 이름. 이름이 없으면 아이디로 대체. */
@@ -69,7 +84,7 @@ export async function nameOf(id) {
  */
 export async function toRoomDto(room, requesterId) {
   const [members, lastRead, lastMessageAt, lastCommentAt, lastMessageRow, lastCommentRow] = await Promise.all([
-    resolveMembers(room.id),
+    resolveMembers(room.id, room.teamId),
     getRoomLastReadMap(room.id),
     getLastMessageAt(room.id),
     getLastCommentAt(room.id),
@@ -117,6 +132,11 @@ export async function toRoomDto(room, requesterId) {
     // 쿼리 자체를 건너뛴다.
     latestAnnouncement:
       room.type === 'topic' ? await latestAnnouncementDtoFor(room.id) : null,
+    // 그룹채팅 아이콘(room_avatar.dart) — 'members'/null이면 기존처럼 멤버 아바타를 겹쳐
+    // 보여준다. 토픽/DM은 항상 null.
+    iconType: room.iconType ?? null,
+    iconEmoji: room.iconEmoji ?? null,
+    iconColor: room.iconColor ?? null,
   };
   if (room.isSecret) {
     // 비밀 대화 상태(핸드셰이크 진행 여부/자동 삭제 타이머)도 방 목록에 실어 보낸다 —
@@ -337,9 +357,18 @@ export function createRoomsRouter(io) {
     if (!canCreateRooms(role)) {
       return res.status(403).json({ error: '준회원은 방을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.' });
     }
-    const { type, name, description, memberIds, isPublic } = req.body ?? {};
+    const { type, name, description, memberIds, isPublic, iconType, iconEmoji, iconColor } =
+      req.body ?? {};
     if (type !== 'topic' && type !== 'group') {
       return res.status(400).json({ error: "type은 'topic' 또는 'group'이어야 합니다 (DM은 /rooms/dm 사용)." });
+    }
+    // 그룹채팅 아이콘 — 만들 때만 고른다(new_chat_screen.dart). 'members'(기본, 안 보내도 됨) |
+    // 'initial'(그룹 이름 첫 글자) | 'emoji'(iconEmoji 필수). 토픽은 이 값들을 무시한다(항상 null).
+    if (type === 'group' && iconType != null && !['members', 'initial', 'emoji'].includes(iconType)) {
+      return res.status(400).json({ error: 'iconType이 올바르지 않습니다.' });
+    }
+    if (type === 'group' && iconType === 'emoji' && (typeof iconEmoji !== 'string' || !iconEmoji)) {
+      return res.status(400).json({ error: '이모지를 선택하세요.' });
     }
     // 토픽은 팀 설정(topicCreationPolicy)이 정한 등급 이상만 — 그룹채팅은 위 canCreateRooms
     // 체크(정회원 이상)로 이미 충분하고 이 설정과 무관하다(README "토픽 생성 권한" 참고).
@@ -384,6 +413,12 @@ export function createRoomsRouter(io) {
       // 공개 토픽은 지금 회원뿐 아니라 나중에 가입하는 회원에게도 계속 보인다(/rooms/browse).
       isPublic: type === 'topic' ? isPublic !== false : null,
       createdBy: req.user.sub,
+      iconType: type === 'group' && iconType && iconType !== 'members' ? iconType : null,
+      iconEmoji: type === 'group' && iconType === 'emoji' ? String(iconEmoji) : null,
+      iconColor:
+        type === 'group' && iconType === 'emoji' && typeof iconColor === 'string' && iconColor
+          ? iconColor
+          : null,
     });
     await addRoomMembers(room.id, roomMemberIds);
     await notifyMembership(io, room);

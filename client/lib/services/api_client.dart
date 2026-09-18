@@ -8,9 +8,11 @@ import '../models/admin.dart';
 import '../models/announcement.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/inquiry.dart';
 import '../models/invite_link.dart';
 import '../models/team_invite_link.dart';
 import '../models/message.dart';
+import '../models/project.dart';
 import '../models/room.dart';
 import '../models/team.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
@@ -127,6 +129,10 @@ class MyProfile {
   /// 클라이언트가 로컬 상태만으로 판단할 수 없어 서버가 최종 판정해서 내려준다.
   final bool canCreateTeamInviteLink;
 
+  /// "프로젝트" 창의 "+새 프로젝트" 버튼을 보여줄지 — 서버 설정(프로젝트 생성 권한)에 달려
+  /// 있어서 마찬가지로 서버가 최종 판정해서 내려준다.
+  final bool canCreateProject;
+
   /// 부서·직책을 팀 단위로 관리하는지('team') 계정 단위로 관리하는지('account') — 내 프로필
   /// 카드의 "직책" 표시 형태를 결정한다. 'account'면 [position] 하나만, 'team'이면
   /// [teamPositions]를 본다.
@@ -146,6 +152,7 @@ class MyProfile {
     this.role = 'guest',
     this.isServerAdmin = false,
     this.canCreateTeamInviteLink = false,
+    this.canCreateProject = false,
     this.orgScope = 'team',
     this.department,
     this.position,
@@ -163,6 +170,7 @@ class MyProfile {
     role: json['role'] as String? ?? 'guest',
     isServerAdmin: json['isServerAdmin'] as bool? ?? false,
     canCreateTeamInviteLink: json['canCreateTeamInviteLink'] as bool? ?? false,
+    canCreateProject: json['canCreateProject'] as bool? ?? false,
     orgScope: json['orgScope'] as String? ?? 'team',
     department: json['department'] as String?,
     position: json['position'] as String?,
@@ -671,11 +679,13 @@ class ApiClient {
   /// 부서·직책 관리 범위('team'|'account').
   Future<void> updateServerSettings({
     String? teamCreation,
+    String? projectCreation,
     String? teamInviteLinkCreation,
     String? orgScope,
   }) async {
     await _patch('/api/admin/settings', {
       'teamCreation': ?teamCreation,
+      'projectCreation': ?projectCreation,
       'teamInviteLinkCreation': ?teamInviteLinkCreation,
       'orgScope': ?orgScope,
     });
@@ -1097,10 +1107,19 @@ class ApiClient {
   }
 
   /// 공지 작성 — 새로 쓴 것이 자동으로 그 방의 "지금 고정된 공지"가 된다. 토픽을 만들 수
-  /// 있는 사람만 가능(서버가 다시 확인 — canCreateTopic과 같은 권한).
-  Future<Announcement> createAnnouncement(String roomId, String text) async {
+  /// 있는 사람만 가능(서버가 다시 확인 — canCreateTopic과 같은 권한). [autoUnpinAt]을 주면
+  /// 그 시각에 서버가 자동으로 "공지 내리기"를 한다(공지 작성 다이얼로그의 빠른 선택 버튼).
+  Future<Announcement> createAnnouncement(
+    String roomId,
+    String text, {
+    DateTime? autoUnpinAt,
+  }) async {
     return Announcement.fromJson(
-      await _post('/api/rooms/$roomId/announcements', {'text': text})
+      await _post('/api/rooms/$roomId/announcements', {
+            'text': text,
+            if (autoUnpinAt != null)
+              'autoUnpinAt': autoUnpinAt.millisecondsSinceEpoch,
+          })
           as Map<String, dynamic>,
     );
   }
@@ -1161,6 +1180,231 @@ class ApiClient {
     );
   }
 
+  /// "팀장에게 문의하기" — 그 방(1:1)의 상대가 팀장일 때만 서버가 허용한다
+  /// (session.canSendInquiryIn과 같은 조건을 서버가 다시 확인).
+  Future<Inquiry> createInquiry(
+    String roomId, {
+    required String category,
+    required String title,
+    required String content,
+    String? fileUrl,
+    String? fileName,
+    int? fileSize,
+    String? mimeType,
+    String? thumbnailUrl,
+  }) async {
+    return Inquiry.fromJson(
+      await _post('/api/rooms/$roomId/inquiries', {
+            'category': category,
+            'title': title,
+            'content': content,
+            'fileUrl': ?fileUrl,
+            'fileName': ?fileName,
+            'fileSize': ?fileSize,
+            'mimeType': ?mimeType,
+            'thumbnailUrl': ?thumbnailUrl,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 내가 받은 문의(팀장 시점) — [status]를 주면 그 상태만 걸러서 받는다.
+  Future<List<Inquiry>> fetchReceivedInquiries({InquiryStatus? status}) async {
+    final path = status == null
+        ? '/api/inquiries/received'
+        : '/api/inquiries/received?status=${inquiryStatusToWire(status)}';
+    final list = await _get(path) as List;
+    return list
+        .map((e) => Inquiry.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 내가 보낸 문의 — 처리 현황을 직접 확인하는 용도.
+  Future<List<Inquiry>> fetchSentInquiries() async {
+    final list = await _get('/api/inquiries/sent') as List;
+    return list
+        .map((e) => Inquiry.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 문의 상태 변경 — 받는 사람(팀장) 본인만 가능(서버가 다시 확인).
+  Future<Inquiry> updateInquiryStatus(String id, InquiryStatus status) async {
+    return Inquiry.fromJson(
+      await _patch('/api/inquiries/$id', {
+            'status': inquiryStatusToWire(status),
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  // ───────────────────────────── 프로젝트 ─────────────────────────────
+
+  /// 프로젝트 홈(대시보드)에 필요한 값 한 번에 — 통계/내 프로젝트/내 업무/최근 댓글.
+  Future<ProjectHome> fetchProjectHome(String teamId) async {
+    return ProjectHome.fromJson(
+      await _get('/api/projects/home?teamId=$teamId') as Map<String, dynamic>,
+    );
+  }
+
+  /// 내가 참여 중인 프로젝트 목록(사이드바).
+  Future<List<Project>> fetchProjects(String teamId) async {
+    final list = await _get('/api/projects?teamId=$teamId') as List;
+    return list.map((e) => Project.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// 프로젝트 상세(구성원 포함).
+  Future<Project> fetchProject(String projectId) async {
+    return Project.fromJson(
+      await _get('/api/projects/$projectId') as Map<String, dynamic>,
+    );
+  }
+
+  Future<Project> createProject({
+    required String teamId,
+    required String name,
+    required String identifier,
+    String? description,
+    List<String> memberIds = const [],
+  }) async {
+    return Project.fromJson(
+      await _post('/api/projects', {
+            'teamId': teamId,
+            'name': name,
+            'identifier': identifier,
+            'description': ?description,
+            'memberIds': memberIds,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<Project> updateProject(
+    String projectId, {
+    String? name,
+    String? description,
+  }) async {
+    return Project.fromJson(
+      await _patch('/api/projects/$projectId', {
+            'name': ?name,
+            'description': ?description,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteProject(String projectId) async {
+    await _delete('/api/projects/$projectId');
+  }
+
+  /// 사이드바 즐겨찾기(개인 설정).
+  Future<void> setProjectFavorite(String projectId, bool favorite) async {
+    await _patch('/api/projects/$projectId/favorite', {'favorite': favorite});
+  }
+
+  Future<List<AppUser>> addProjectMembers(
+    String projectId,
+    List<String> userIds,
+  ) async {
+    final list =
+        await _post('/api/projects/$projectId/members', {'userIds': userIds})
+            as List;
+    return list.map((e) => AppUser.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<AppUser>> removeProjectMember(
+    String projectId,
+    String userId,
+  ) async {
+    final list =
+        await _delete('/api/projects/$projectId/members/$userId') as List;
+    return list.map((e) => AppUser.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// 프로젝트 안의 업무 목록.
+  Future<List<Task>> fetchProjectTasks(String projectId) async {
+    final list = await _get('/api/projects/$projectId/tasks') as List;
+    return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// 내가 담당한 업무 전부(팀 기준) — "내 업무" 화면.
+  Future<List<Task>> fetchMyTasks(String teamId) async {
+    final list = await _get('/api/tasks/mine?teamId=$teamId') as List;
+    return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// 업무 상세(댓글 포함).
+  Future<Task> fetchTask(String taskId) async {
+    return Task.fromJson(await _get('/api/tasks/$taskId') as Map<String, dynamic>);
+  }
+
+  Future<Task> createTask({
+    required String projectId,
+    required String title,
+    String? description,
+    String? assigneeId,
+    TaskStatus status = TaskStatus.todo,
+    TaskPriority priority = TaskPriority.normal,
+    DateTime? startDate,
+    DateTime? dueDate,
+  }) async {
+    return Task.fromJson(
+      await _post('/api/projects/$projectId/tasks', {
+            'title': title,
+            'description': ?description,
+            'assigneeId': ?assigneeId,
+            'status': taskStatusToWire(status),
+            'priority': taskPriorityToWire(priority),
+            'startDate': ?startDate?.millisecondsSinceEpoch,
+            'dueDate': ?dueDate?.millisecondsSinceEpoch,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 업무 수정 — 넘긴 항목만 바뀐다. 담당자/마감일은 "지우기"도 되어야 해서
+  /// [clearAssignee]/[clearDueDate]로 명시적으로 null을 보낸다(값을 안 넘기는 것과 구분).
+  Future<Task> updateTask(
+    String taskId, {
+    String? title,
+    String? description,
+    String? assigneeId,
+    bool clearAssignee = false,
+    TaskStatus? status,
+    TaskPriority? priority,
+    DateTime? startDate,
+    DateTime? dueDate,
+    bool clearDueDate = false,
+  }) async {
+    return Task.fromJson(
+      await _patch('/api/tasks/$taskId', {
+            'title': ?title,
+            'description': ?description,
+            if (clearAssignee) 'assigneeId': null else 'assigneeId': ?assigneeId,
+            'status': ?(status == null ? null : taskStatusToWire(status)),
+            'priority': ?(priority == null
+                ? null
+                : taskPriorityToWire(priority)),
+            'startDate': ?startDate?.millisecondsSinceEpoch,
+            if (clearDueDate)
+              'dueDate': null
+            else
+              'dueDate': ?dueDate?.millisecondsSinceEpoch,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteTask(String taskId) async {
+    await _delete('/api/tasks/$taskId');
+  }
+
+  Future<TaskComment> addTaskComment(String taskId, String text) async {
+    return TaskComment.fromJson(
+      await _post('/api/tasks/$taskId/comments', {'text': text})
+          as Map<String, dynamic>,
+    );
+  }
+
   Future<Room> createTopic({
     required String teamId,
     required String name,
@@ -1184,6 +1428,11 @@ class ApiClient {
     required String teamId,
     String? name,
     required List<String> memberIds,
+    // 'members'(기본, 안 보내도 됨) | 'initial' | 'emoji' — new_chat_screen.dart의 아이콘
+    // 선택. 'emoji'일 때만 iconEmoji가 필요하고 iconColor는 선택.
+    String? iconType,
+    String? iconEmoji,
+    String? iconColor,
   }) async {
     return Room.fromJson(
       await _post('/api/rooms', {
@@ -1191,6 +1440,9 @@ class ApiClient {
             'type': 'group',
             if (name != null && name.isNotEmpty) 'name': name,
             'memberIds': memberIds,
+            'iconType': ?(iconType != null && iconType != 'members' ? iconType : null),
+            'iconEmoji': ?iconEmoji,
+            'iconColor': ?iconColor,
           })
           as Map<String, dynamic>,
     );

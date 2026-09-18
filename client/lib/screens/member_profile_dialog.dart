@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/team.dart';
 import '../services/session.dart';
-import '../widgets/org_edit_dialog.dart';
+import '../widgets/org_section.dart';
 import '../widgets/user_avatar.dart';
 
 /// 다른 사용자의 프로필 플로팅 카드: 프로필 사진 + 이름 + 1:1 메시지 시작.
@@ -78,27 +78,6 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
       if (mounted) setState(() => _teams = teams);
     } catch (_) {
       if (mounted) setState(() => _teams = []);
-    }
-  }
-
-  Future<void> _editOrg() async {
-    final position = await showOrgEditDialog(context, widget.session, _user);
-    final team = widget.session.currentTeam;
-    if (position == null || team == null || !mounted) return;
-    try {
-      final members = await widget.session.updateTeamMember(
-        team,
-        _user.id,
-        position: position,
-      );
-      final match = members.where((u) => u.id == _user.id);
-      if (match.isNotEmpty && mounted) setState(() => _user = match.first);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
-      }
     }
   }
 
@@ -287,11 +266,13 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
               ),
             ],
             const SizedBox(height: 12),
-            _OrgSection(
+            OrgSection(
               teamNames: _teams?.map((t) => t.name).toList(),
               position: user.position,
-              // 직책은 인사 정보라 본인이 임의로 못 바꾸고 소유자·관리자만 수정한다.
-              onEdit: widget.session.canManageCurrentTeam ? _editOrg : null,
+              // 직책 수정은 "팀 설정 > 멤버" 탭에서만 한다 — 여러 사람을 한눈에 보며 바꿀 수
+              // 있는 그쪽이 더 적합하고, 프로필 카드에는 연필을 안 둔다(team_settings_dialog.dart
+              // 참고).
+              onEdit: null,
             ),
             const SizedBox(height: 16),
             if (canStartChat) ...[
@@ -418,80 +399,3 @@ class _AddThenDmDialogState extends State<_AddThenDmDialog> {
   }
 }
 
-/// 프로필 카드의 "팀"/"직책" 칸. "팀"은 이 사람이 실제로 속한 팀 이름들(노출 범위는 서버가
-/// 정한다 — GET /users/:id/teams), "직책"은 기존 부서/직책 필드의 직책 값이다. 소유자·관리자
-/// 에게만 직책 수정용 연필 버튼이 보인다(팀 소속은 이 카드에서 바꿀 수 없다).
-class _OrgSection extends StatelessWidget {
-  final List<String>? teamNames; // null이면 아직 불러오는 중.
-  final String? position;
-  final VoidCallback? onEdit;
-  const _OrgSection({
-    required this.teamNames,
-    required this.position,
-    required this.onEdit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
-    final teamText = teamNames == null
-        ? '불러오는 중…'
-        : (teamNames!.isEmpty ? '없음' : teamNames!.join(', '));
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.groups_outlined, size: 18, color: hint),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '팀',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: hint),
-                  ),
-                  Text(
-                    teamText,
-                    style: teamNames == null || teamNames!.isEmpty
-                        ? TextStyle(color: hint)
-                        : const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '직책',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.labelSmall?.copyWith(color: hint),
-                  ),
-                  Text(
-                    position?.isNotEmpty == true ? position! : '아직 등록되지 않았습니다',
-                    style: position?.isNotEmpty == true
-                        ? const TextStyle(fontWeight: FontWeight.w500)
-                        : TextStyle(color: hint),
-                  ),
-                ],
-              ),
-            ),
-            if (onEdit != null)
-              IconButton(
-                tooltip: '직책 수정',
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                onPressed: onEdit,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -128,6 +128,33 @@ export function canCreateTeamInviteLink({ role, isServerAdmin, teamInviteLinkCre
 }
 
 /**
+ * 프로젝트를 새로 만들 수 있는지 — 서버 설정(server_settings.projectCreation)이 정한 최소
+ * 등급을 넘어야 한다. canCreateTeam과 규칙 구조가 같고 값 집합도 TEAM_CREATION_LEVELS를
+ * 그대로 쓴다(관리자 콘솔의 "프로젝트 생성 권한"). 준회원은 어느 설정에서도 못 만들고,
+ * 서버 운영자는 설정과 무관하게 항상 만들 수 있다. 이미 만들어진 프로젝트에 초대받아
+ * 참여하는 것은 이 설정과 무관하다(준회원도 초대받으면 그 프로젝트를 볼 수 있다).
+ */
+export function canCreateProject({ role, isServerAdmin, projectCreation }) {
+  if (isServerAdmin) return true;
+  switch (projectCreation) {
+    case 'serverAdmin':
+      return false;
+    case 'admin':
+      return role === 'admin';
+    default: // 'member'
+      return canCreateRooms(role);
+  }
+}
+
+/**
+ * 프로젝트 설정을 바꾸거나 지울 수 있는지 — 그 프로젝트의 담당자(project_members.role ===
+ * 'owner')이거나, 그 팀을 관리할 수 있는 사람(팀 소유자·계정 등급 관리자).
+ */
+export function canManageProject({ role, isOwner, isProjectOwner }) {
+  return isProjectOwner === true || canManageTeam({ role, isOwner });
+}
+
+/**
  * [메시지 설정] 수정/삭제 가능 시간으로 고를 수 있는 값(초). 클라이언트의 선택지
  * (team_settings_dialog.dart)와 같은 목록이어야 한다 — 서버는 이 목록 밖의 값을 거부한다.
  */

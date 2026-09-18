@@ -73,10 +73,11 @@ export function createAdminRouter(io) {
       teamCreation: settings.teamCreation,
       teamInviteLinkCreation: settings.teamInviteLinkCreation,
       orgScope: settings.orgScope,
+      projectCreation: settings.projectCreation,
     });
   });
 
-  /** 서버 설정 변경(팀 생성 권한 / 팀 초대 링크 생성 권한 / 팀·직책 관리 범위). */
+  /** 서버 설정 변경(팀 생성 권한 / 팀 초대 링크 생성 권한 / 프로젝트 생성 권한 / 팀·직책 관리 범위). */
   router.patch('/admin/settings', async (req, res) => {
     const fields = {};
     if ('teamCreation' in (req.body ?? {})) {
@@ -92,6 +93,13 @@ export function createAdminRouter(io) {
         return res.status(400).json({ error: '팀 초대 링크 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.' });
       }
       fields.teamInviteLinkCreation = value;
+    }
+    if ('projectCreation' in (req.body ?? {})) {
+      const value = req.body.projectCreation;
+      if (!TEAM_CREATION_LEVELS.includes(value)) {
+        return res.status(400).json({ error: '프로젝트 생성 권한은 정회원/관리자/서버 운영자 중에서 고를 수 있습니다.' });
+      }
+      fields.projectCreation = value;
     }
     if ('orgScope' in (req.body ?? {})) {
       const value = req.body.orgScope;
@@ -109,6 +117,9 @@ export function createAdminRouter(io) {
     }
     if (fields.teamInviteLinkCreation) {
       detail.push(`팀 초대 링크 생성 권한: ${TEAM_CREATION_LABEL[updated.teamInviteLinkCreation] ?? updated.teamInviteLinkCreation}`);
+    }
+    if (fields.projectCreation) {
+      detail.push(`프로젝트 생성 권한: ${TEAM_CREATION_LABEL[updated.projectCreation] ?? updated.projectCreation}`);
     }
     if (fields.orgScope) {
       detail.push(`팀·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
@@ -334,6 +345,21 @@ export function createAdminRouter(io) {
       targetLabel: target.name ?? target.username,
       detail: `부서·직책: ${[fields.department, fields.position].filter(Boolean).join(' / ') || '지움'}`,
     });
+    // 로그아웃 없이 바로 반영되도록, 이 사람과 같은 팀에 있는 사람들 전원(본인 포함)에게
+    // 알려서 room.members에 캐싱된 부서/직책을 즉시 갱신한다 — 계정 단위로 관리할 때만
+    // 쓰는 라우트라(위 주석 참고) 팀 값이 아니라 방금 저장한 계정 값을 그대로 돌려준다.
+    const orgPayload = {
+      userId: target.id,
+      department: updated.department ?? null,
+      position: updated.position ?? null,
+    };
+    const notifyIds = new Set();
+    for (const teamId of await listTeamIdsForUser(target.id)) {
+      for (const id of await listTeamMemberIds(teamId)) notifyIds.add(id);
+    }
+    for (const id of notifyIds) {
+      io.to(`user:${id}`).emit('org:updated', orgPayload);
+    }
     res.json(toAdminUserDto(updated, await listTeamsForUser(target.id)));
   });
 

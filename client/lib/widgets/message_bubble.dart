@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/stickers.dart';
 import '../models/app_user.dart';
@@ -10,6 +14,7 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
+import '../screens/inquiry_inbox_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/edit_policy.dart';
@@ -21,6 +26,14 @@ import 'message_actions.dart';
 import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
+
+/// 서버 linkPreview.js의 URL_REGEX(`/https?:\/\/[^\s<>"']+/i`)와 동일한 패턴 — 메시지 본문에서
+/// 링크 미리보기를 만드는 링크와 여기서 파랗게 표시되는 링크가 항상 일치하게 맞춘다.
+final _messageUrlRegex = RegExp(r'''https?://[^\s<>"']+''', caseSensitive: false);
+
+/// 위 정규식과 마찬가지로 서버의 끝 문장부호 다듬기(`/[.,;:!?)\]}'"]+$/`)와 동일하다 — 링크
+/// 뒤에 곧바로 마침표/쉼표/괄호가 오면 그 부호는 링크에서 빼고 일반 글자로 남긴다.
+final _trailingPunctuationRegex = RegExp(r'''[.,;:!?)\]}'"]+$''');
 
 /// 메시지 한 줄: 아바타 + 보낸사람 이름 + (말풍선 + 시간). 항상 좌측 정렬이지만
 /// 내가 보낸 메시지는 말풍선 색을 다르게 해서 구분한다. 아바타/이름을 누르면 내 메시지는
@@ -81,6 +94,18 @@ class _MessageBubbleState extends State<MessageBubble> {
   bool _savingEdit = false;
   final _editController = TextEditingController();
 
+  /// 메시지 본문에 있는 링크를 파란 글자로 표시하고 탭하면 바로 열리게 하는 데 쓰는
+  /// TapGestureRecognizer들 — TextSpan.recognizer는 위젯이 알아서 정리해주지 않으므로,
+  /// 매 빌드마다 다시 만들기 전에 이전 것들을 직접 dispose해야 한다(_buildLinkifiedSpans 참고).
+  final List<TapGestureRecognizer> _linkRecognizers = [];
+
+  void _disposeLinkRecognizers() {
+    for (final r in _linkRecognizers) {
+      r.dispose();
+    }
+    _linkRecognizers.clear();
+  }
+
   /// 툴바는 말풍선 아래에 Overlay로 띄운다(FloatingHoverToolbar 참고) — 일반 레이아웃
   /// 흐름이 아니라서 툴바가 떠도 아래 메시지들이 안 밀린다.
   final _toolbarPortal = OverlayPortalController();
@@ -128,6 +153,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   void dispose() {
     _hoverExitTimer?.cancel();
     _editController.dispose();
+    _disposeLinkRecognizers();
     super.dispose();
   }
 
@@ -402,6 +428,44 @@ class _MessageBubbleState extends State<MessageBubble> {
                               _buildEditor(context)
                             else
                               _buildContent(context),
+                            // 메시지 텍스트에 담긴 링크의 오픈그래프 미리보기 — 전송 직후엔 없다가
+                            // 서버가 백그라운드로 가져오면 그 자리에서 나타난다(Message.linkPreview
+                            // 참고). 수정 중엔 편집기만 보여주면 되니 숨긴다.
+                            if (!_editing && message.linkPreview != null) ...[
+                              const SizedBox(height: 6),
+                              _LinkPreviewCard(preview: message.linkPreview!),
+                            ],
+                            // "팀장에게 문의하기"로 온 메시지에만 붙는 바로가기 — 누르면 문의함이
+                            // 바로 열린다(chat_input_bar.dart의 _showInquiryDialog 참고).
+                            if (!_editing && message.isInquiryNotice) ...[
+                              const SizedBox(height: 6),
+                              InkWell(
+                                onTap: () => showInquiryInboxScreen(
+                                  context,
+                                  widget.session,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.contact_support,
+                                      size: 14,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '문의함 바로가기',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Theme.of(context).colorScheme.primary,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                             // "메시지 공유"로 붙은 원본 인용 — 새로 쓴 내용(위) 아래에 구분선과 함께
                             // 붙는다(첨부 이미지 참고). 공유 당시 스냅샷이라 원본이 나중에 바뀌어도
                             // 그대로 남는다(models/message.dart 참고).
@@ -659,6 +723,49 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
   }
 
+  /// 텍스트 안의 http(s) 링크만 파란 글자+밑줄로 바꾸고 탭하면 바로 열리게 한다 — 서버
+  /// linkPreview.js의 URL_REGEX/끝 문장부호 다듬기 규칙과 맞춰서, 메시지에 링크 미리보기
+  /// 카드가 뜨는 링크와 여기서 파랗게 표시되는 링크가 항상 일치하게 한다.
+  List<InlineSpan> _buildLinkifiedSpans(
+    BuildContext context,
+    String text,
+    TextStyle baseStyle,
+  ) {
+    _disposeLinkRecognizers();
+    final linkStyle = baseStyle.copyWith(
+      color: Colors.blue,
+      decoration: TextDecoration.underline,
+    );
+    final spans = <InlineSpan>[];
+    var last = 0;
+    for (final match in _messageUrlRegex.allMatches(text)) {
+      var url = match.group(0)!;
+      var end = match.end;
+      final trailing = _trailingPunctuationRegex.firstMatch(url);
+      if (trailing != null) {
+        url = url.substring(0, trailing.start);
+        end -= trailing.group(0)!.length;
+      }
+      if (url.isEmpty) continue;
+      if (match.start > last) {
+        spans.add(
+          TextSpan(text: text.substring(last, match.start), style: baseStyle),
+        );
+      }
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () =>
+            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      _linkRecognizers.add(recognizer);
+      spans.add(TextSpan(text: url, style: linkStyle, recognizer: recognizer));
+      last = end;
+    }
+    if (last < text.length) {
+      spans.add(TextSpan(text: text.substring(last), style: baseStyle));
+    }
+    if (spans.isEmpty) spans.add(TextSpan(text: text, style: baseStyle));
+    return spans;
+  }
+
   Widget _buildContent(BuildContext context) {
     final message = widget.message;
     switch (message.type) {
@@ -693,9 +800,14 @@ class _MessageBubbleState extends State<MessageBubble> {
         // Windows(마우스)에서는 텍스트 선택이 롱프레스가 아니라 클릭+드래그로 이뤄져서
         // onLongPress와 경합하지 않으므로, 마우스 호버 시 커서가 I-beam으로 바뀌고 드래그로
         // 바로 선택할 수 있도록 SelectableText를 쓴다.
+        final spans = _buildLinkifiedSpans(
+          context,
+          message.text ?? '',
+          Theme.of(context).textTheme.bodyMedium ?? const TextStyle(),
+        );
         return Platform.isWindows
-            ? SelectableText(message.text ?? '')
-            : Text(message.text ?? '');
+            ? SelectableText.rich(TextSpan(children: spans))
+            : Text.rich(TextSpan(children: spans));
       case MessageType.sticker:
         final sticker = findStickerById(message.text ?? '');
         return Text(
@@ -774,6 +886,175 @@ class _QuotedMessageCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 메시지 텍스트에 담긴 링크의 오픈그래프 미리보기 카드 — 위에 이미지, 아래 제목/설명 일부/
+/// 출처(사이트 이름) 순으로 세로로 쌓는다(카카오톡/슬랙 링크 카드와 같은 배치). 탭하면 기본
+/// 브라우저로 그 링크를 연다.
+class _LinkPreviewCard extends StatelessWidget {
+  final LinkPreview preview;
+  const _LinkPreviewCard({required this.preview});
+
+  Future<void> _open() async {
+    try {
+      await launchUrl(Uri.parse(preview.url), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // 브라우저를 못 열어도 조용히 무시한다 — 이 카드는 어차피 정보 표시가 우선 목적이라
+      // 실패를 따로 알릴 만큼 중요한 동작은 아니다.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth > 360 ? 360.0 : constraints.maxWidth;
+        return SizedBox(width: width, child: _buildCard(context));
+      },
+    );
+  }
+
+  Widget _buildCard(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _open,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (preview.imageUrl != null)
+              AspectRatio(
+                aspectRatio: 1.9,
+                child: _ExternalImage(url: preview.imageUrl!),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (preview.title != null)
+                    Text(
+                      preview.title!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  if (preview.description != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      preview.description!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                  ],
+                  if (preview.siteName != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      preview.siteName!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).hintColor,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 링크 미리보기 이미지 전용 — 임의의 외부 웹사이트에서 오는 이미지라 그냥 Image.network를
+/// 쓰면 못 불러온다. main.dart가 앱 시작 시 PinnedTls.installGlobalHttpOverrides()로 전역
+/// HttpClient를 "우리 서버 자체 서명 인증서 하나만" 신뢰하도록 가로채놓는데(pinned_tls.dart),
+/// 이 override는 앱 전체 HttpClient에 다 걸려서 Image.network가 내부적으로 만드는 HttpClient도
+/// 똑같이 적용된다 — 그래서 공인 인증서를 쓰는 일반 웹사이트 이미지는 전부 인증서 검증 실패로
+/// 조용히(errorBuilder) 안 뜨고 있었다. 이 위젯만 별도 isolate(Isolate.run)에서 이미지를
+/// 받아온 뒤 Image.memory로 그린다 — 새 isolate는 main isolate의 HttpOverrides.global을
+/// 안 물려받는(격리된 static 상태) 덕분에 거기서 만드는 HttpClient는 평범한(공인 CA 신뢰)
+/// 기본 상태다. 우리 서버와의 통신(API/소켓/첨부파일)에 쓰는 핀닝은 그대로 안전하게 유지된다.
+///
+/// (처음엔 HttpOverrides.runZoned로 "이 fetch만 전역 재정의를 벗어나게" 시도했는데, 그
+/// zone의 createHttpClient 콜백 안에서 다시 HttpClient()를 호출하면 그 호출도 같은 zone
+/// 안이라 자기 자신을 또 부르는 무한 재귀에 빠져 StackOverflowError가 났다(직접 재현해서
+/// 확인함) — zone 기반 접근 자체가 이 용도에는 안 맞는 함정이었다.)
+class _ExternalImage extends StatefulWidget {
+  final String url;
+  const _ExternalImage({required this.url});
+
+  @override
+  State<_ExternalImage> createState() => _ExternalImageState();
+}
+
+class _ExternalImageState extends State<_ExternalImage> {
+  static const _maxBytes = 8 * 1024 * 1024; // 미리보기 이미지치고 과하게 크면 안전하게 포기.
+
+  late final Future<Uint8List> _future = _fetch(widget.url);
+
+  static Future<Uint8List> _fetch(String url) {
+    // 새 isolate는 main.dart가 설치해둔 전역 HttpOverrides(우리 서버 인증서만 신뢰)를 안
+    // 물려받는다 — isolate마다 static 상태가 완전히 독립돼 있어서, 여기서 만드는 HttpClient는
+    // 그 핀닝과 무관하게 평범한(공인 CA 신뢰) 기본 상태로 동작한다.
+    return Isolate.run(() async {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 8);
+      try {
+        final request = await client.getUrl(Uri.parse(url));
+        final response = await request.close().timeout(
+          const Duration(seconds: 8),
+        );
+        if (response.statusCode != 200) {
+          throw Exception('HTTP ${response.statusCode}');
+        }
+        final bytes = <int>[];
+        await for (final chunk in response) {
+          bytes.addAll(chunk);
+          if (bytes.length > _maxBytes) {
+            throw Exception('이미지가 너무 큽니다');
+          }
+        }
+        return Uint8List.fromList(bytes);
+      } finally {
+        client.close(force: true);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done ||
+            !snapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+        // 이미지 링크가 나중에 깨지거나(원본이 지워짐) 디코딩할 수 없는 형식이어도 카드
+        // 전체가 에러로 안 보이고 텍스트만 있는 카드로 자연스럽게 떨어진다.
+        return Image.memory(
+          snapshot.data!,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        );
+      },
     );
   }
 }

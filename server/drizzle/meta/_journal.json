@@ -239,6 +239,48 @@
       "when": 1789545209250,
       "tag": "0033_lucky_night_nurse",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789604287022,
+      "tag": "0034_perfect_shadowcat",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789616602791,
+      "tag": "0035_vengeful_impossible_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789623238941,
+      "tag": "0036_fair_shard",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789626993229,
+      "tag": "0037_tense_mikhail_rasputin",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1789627233542,
+      "tag": "0038_good_nemesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1789706909545,
+      "tag": "0039_clumsy_sauron",
+      "breakpoints": true
     }
   ]
 }

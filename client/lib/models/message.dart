@@ -1,5 +1,31 @@
 import 'comment.dart';
 
+/// 메시지에 들어있는 링크의 오픈그래프 미리보기(server/src/linkPreview.js) — 메시지 전송
+/// 직후엔 없다가(서버가 백그라운드로 긁어옴) 나중에 message:linkPreview로 채워질 수 있어서
+/// Message.linkPreview 필드 자체가 non-final이다.
+class LinkPreview {
+  final String url;
+  final String? title;
+  final String? description;
+  final String? imageUrl;
+  final String? siteName;
+  const LinkPreview({
+    required this.url,
+    this.title,
+    this.description,
+    this.imageUrl,
+    this.siteName,
+  });
+
+  factory LinkPreview.fromJson(Map<String, dynamic> json) => LinkPreview(
+    url: json['url'] as String,
+    title: json['title'] as String?,
+    description: json['description'] as String?,
+    imageUrl: json['imageUrl'] as String?,
+    siteName: json['siteName'] as String?,
+  );
+}
+
 /// [comment]는 서버가 보내는 실제 메시지 타입이 아니라, 댓글 하나를 채팅 타임라인 안에 그 댓글이
 /// 달린 시각 위치에 끼워 넣기 위한 클라이언트 전용 합성(synthetic) 항목이다 — Message.commentEntry로만
 /// 만들어지고, 서버 JSON의 type 문자열로는 절대 나오지 않는다(_typeFromString은 이 값을 모른다).
@@ -92,6 +118,16 @@ class Message {
   final String? forwardedFromSenderName;
   final DateTime? forwardedFromCreatedAt;
 
+  /// 이 메시지 텍스트에 담긴 링크의 미리보기(있으면). 전송 직후엔 null이다가 서버가 백그라운드로
+  /// 가져오면 message:linkPreview로 그 자리에서 채워진다(RoomChatController.applyLinkPreview) —
+  /// 그래서 non-final.
+  LinkPreview? linkPreview;
+
+  /// "팀장에게 문의하기"(chat_input_bar.dart)로 보낸 메시지면 true — message_bubble.dart가
+  /// "문의함 바로가기" 링크를 붙여서 누르면 [inquiryId]로 문의함이 바로 열리게 한다.
+  final bool isInquiryNotice;
+  final String? inquiryId;
+
   Message({
     required this.id,
     required this.roomId,
@@ -120,6 +156,9 @@ class Message {
     this.quotedPreview,
     this.forwardedFromSenderName,
     this.forwardedFromCreatedAt,
+    this.linkPreview,
+    this.isInquiryNotice = false,
+    this.inquiryId,
     List<Comment>? comments,
   }) : comments = comments ?? [];
 
@@ -165,6 +204,11 @@ class Message {
               (json['forwardedFromCreatedAt'] as num).toInt(),
             )
           : null,
+      linkPreview: json['linkPreview'] == null
+          ? null
+          : LinkPreview.fromJson(json['linkPreview'] as Map<String, dynamic>),
+      isInquiryNotice: json['isInquiryNotice'] as bool? ?? false,
+      inquiryId: json['inquiryId'] as String?,
     );
   }
 

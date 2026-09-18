@@ -226,49 +226,53 @@ class _NotificationRow extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  if (room.unreadCount > 0 || room.lastMessagePreview != null)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            room.lastMessagePreview ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        UnreadBadge(count: room.unreadCount),
-                      ],
-                    ),
-                  // 안 읽은 공지가 있으면(메시지 안읽음과 별개) 따로 표시한다 — 새 메시지가
-                  // 없어도(unreadCount 0) 공지만 안 읽었을 수 있으므로 이 자리를 항상 그린다.
-                  if (room.hasUnreadAnnouncement)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.campaign_outlined,
-                            size: 14,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              room.latestAnnouncement?.text ?? '새 공지가 있습니다',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.primary,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 12,
+                  Row(
+                    children: [
+                      Expanded(
+                        // 안 읽은 공지가 있으면 그게 이 방이 여기 뜬 이유이므로 그 내용을
+                        // 우선 보여준다 — 예전엔 이 자리에 항상 "마지막 채팅 내용"만 보여줘서
+                        // 메시지는 다 읽었고 공지만 안 읽은 경우에도 엉뚱한 채팅 미리보기가
+                        // 뜨는 문제가 있었다.
+                        child: room.hasUnreadAnnouncement
+                            ? Row(
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 14,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      room.latestAnnouncement?.text ?? '새 공지가 있습니다',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.primary,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                room.lastMessagePreview ?? '',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
-                            ),
-                          ),
-                        ],
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      // 안 읽은 공지도 "안 읽은 것" 1건으로 세어 배지에 합산한다 — 전엔
+                      // room.unreadCount(메시지만)만 써서 공지만 안 읽었을 땐 0으로 떴다.
+                      UnreadBadge(
+                        count:
+                            room.unreadCount +
+                            (room.hasUnreadAnnouncement ? 1 : 0),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

@@ -1,8 +1,11 @@
-# 새 클라이언트 버전을 빌드해서 server/releases/에 배포한다.
-# 사용법: .\publish_release.ps1 -Version "1.0.1" -Notes "이번 업데이트 내용"
-# client/pubspec.yaml의 version:도 같이 올려두는 걸 잊지 마세요(클라이언트 자신의 버전 번호).
+# 새 클라이언트 버전을 빌드해서 server/releases/에 배포한다. 버전 번호는 client/pubspec.yaml의
+# version:을 그대로 읽어서 쓴다 — 예전엔 -Version 인자로 따로 입력받았는데, 실제 빌드 시점의
+# pubspec.yaml과 이 인자가 서로 다른 값일 수 있어서(둘 중 하나만 올리고 깜빡하는 실수) 서버가
+# 광고하는 버전과 실제 설치되는 exe에 새겨진 버전이 어긋나는 사고가 있었다(업데이트를 설치해도
+# 계속 "새 버전이 있습니다" 알약이 뜨던 원인) — pubspec.yaml 하나만 진짜로 취급하도록 없앴다.
+# 사용법: .\publish_release.ps1 -Notes "이번 업데이트 내용" (버전은 client/pubspec.yaml의
+# version:을 미리 올려두면 됨)
 param(
-  [Parameter(Mandatory = $true)][string]$Version,
   [string]$Notes = ""
 )
 
@@ -10,6 +13,15 @@ $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $client = Join-Path $root "client"
 $releases = Join-Path $root "server\releases"
+
+Write-Host "0) client/pubspec.yaml에서 버전 읽는 중..."
+$pubspecPath = Join-Path $client "pubspec.yaml"
+$versionLine = Get-Content $pubspecPath | Where-Object { $_ -match '^version:\s*\S+' } | Select-Object -First 1
+if (-not $versionLine) { throw "client/pubspec.yaml에서 version: 값을 찾지 못했습니다." }
+# Flutter 버전 형식은 "1.0.32" 또는 "1.0.32+5"(+뒤는 빌드 번호) — 뒷부분은 버전 비교/표시에
+# 안 쓰니 뺀다(session.dart의 _isNewerVersion은 순수 점(.) 구분 숫자만 기대한다).
+$Version = (($versionLine -replace '^version:\s*', '').Trim()).Split('+')[0]
+Write-Host "   버전: $Version"
 
 Write-Host "1) Android 릴리즈 빌드..."
 Push-Location $client

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
+import 'avatar_utils.dart';
 import 'user_avatar.dart';
 
 /// 채팅방 제목 왼쪽에 쓰는 작은 아바타. DM은 상대방 아바타 하나, 그룹은 멤버 아바타
@@ -25,6 +26,26 @@ class RoomAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (room.type == RoomType.topic) {
       return const SizedBox.shrink();
+    }
+
+    // 그룹채팅 아이콘 — 만들 때 골랐으면(new_chat_screen.dart) 멤버 아바타 대신 이걸 보여준다.
+    // null/'members'는 기존처럼 아래로 내려가 멤버 아바타를 겹쳐 보여준다.
+    if (room.type == RoomType.group &&
+        room.iconType != null &&
+        room.iconType != 'members') {
+      final name = room.displayName(myUserId);
+      if (room.iconType == 'emoji' && room.iconEmoji != null) {
+        return AvatarView(
+          username: name,
+          avatarType: 'character',
+          avatarEmoji: room.iconEmoji,
+          avatarColor: room.iconColor,
+          radius: size / 2,
+        );
+      }
+      if (room.iconType == 'initial') {
+        return AvatarView(username: name, radius: size / 2);
+      }
     }
 
     final others = room.members.where((m) => m.id != myUserId).toList();

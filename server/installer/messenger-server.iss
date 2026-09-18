@@ -61,7 +61,10 @@ Source: "{#StageDir}\*"; DestDir: "{app}\server"; Flags: recursesubdirs createal
 Source: "Setup-TangoTalkServer.ps1"; DestDir: "{app}"
 Source: "Get-PairingCode.ps1"; DestDir: "{app}"
 Source: "Update-Server.ps1"; DestDir: "{app}"
+Source: "Restart-Server.ps1"; DestDir: "{app}"
 Source: "Storage-Path.ps1"; DestDir: "{app}"
+Source: "Backup-Data.ps1"; DestDir: "{app}"
+Source: "Restore-Data.ps1"; DestDir: "{app}"
 Source: "Reset-Data.ps1"; DestDir: "{app}"
 Source: "Uninstall-Full.ps1"; DestDir: "{app}"
 Source: "README-설치후.txt"; DestDir: "{app}"
@@ -79,8 +82,17 @@ Name: "{group}\도움말"; Filename: "{app}\README.html"
 ; 개발 PC에서 package_server_update.ps1로 만든 zip을 골라서 적용하는 창을 띄운다(DB는
 ; 안 건드리고 코드/패키지/스키마만 갱신) — 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\서버 업데이트"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Update-Server.ps1"""
+; 코드/DB는 그대로 두고 TangoTalkServer 서비스만 재시작한다(예: .env를 수동으로 고친 뒤) —
+; 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\서버 재시작"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Restart-Server.ps1"""
 ; 첨부파일 저장 위치 확인/변경(NAS·다른 PC 공유 폴더 등) — 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\첨부파일 저장소"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Storage-Path.ps1"""
+; DB를 파일 하나로 백업한다({app}\backups\에 저장) — pg_dump 경로/포트/비밀번호를 몰라도
+; 콘솔 명령어 없이 바로 된다. 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\백업"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Backup-Data.ps1"""
+; "백업"이 만든 .dump 파일을 골라 DB를 그 시점으로 되돌린다 — DB 데이터 초기화와 같은 수준의
+; 안전장치(운영자 본인 확인 + 문구 입력)를 둔다. 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\복원"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Restore-Data.ps1"""
 ; 서버는 그대로 두고 회원/팀/메시지 등 데이터만 비우고 싶을 때(Uninstall-Full과 달리
 ; .env/인증서/설치는 안 건드리고, 끝나면 서버가 바로 다시 쓸 수 있는 빈 상태로 돌아옴).
 Name: "{group}\DB 데이터 초기화"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Reset-Data.ps1"""
@@ -130,4 +142,27 @@ begin
     Result := 'console'
   else
     Result := 'service';
+end;
+
+// 재설치(업데이트) 시나리오 대비 — [Files]가 파일을 덮어쓰기 전에, 이전 설치가 남긴 서비스가
+// 그대로 떠 있으면 livekit-server.exe/node.exe가 잠겨 있어서 "DeleteFile 실패; 코드 5. 액세스가
+// 거부되었습니다"로 설치 자체가 막힌다(2026-09-18 실제 발생). PrepareToInstall은 마법사에서
+// 설치 경로가 정해진 뒤, 파일 복사가 시작되기 직전에 실행되므로 딱 맞는 자리다. 최초 설치라서
+// {app}\tools\nssm.exe가 아직 없으면 FileExists가 false라 조용히 건너뛴다. 서비스 재시작은
+// Setup-TangoTalkServer.ps1(7/7 단계)이 어차피 다시 해주므로 여기서는 멈추기만 한다.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  NssmPath: String;
+  ResultCode: Integer;
+begin
+  Result := '';
+  NssmPath := ExpandConstant('{app}\tools\nssm.exe');
+  if FileExists(NssmPath) then
+  begin
+    Exec(NssmPath, 'stop TangoTalkLiveKit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(NssmPath, 'stop TangoTalkServer', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // 서비스가 "정지됨"으로 보고된 뒤에도 OS가 실제로 파일 핸들을 놓는 데 살짝 시간이 걸릴 수
+    // 있어서 여유를 둔다.
+    Sleep(1000);
+  end;
 end;

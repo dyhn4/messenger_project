@@ -93,6 +93,10 @@ class Session extends ChangeNotifier {
   /// 요청마다 다시 확인한다.
   bool canCreateTeamInviteLink = false;
 
+  /// 서버 설정(프로젝트 생성 권한)이 정하는 "새 프로젝트를 만들 수 있는지" — /users/me가
+  /// 서버에서 최종 판정해서 내려준다(projects.js가 실제 생성 때 다시 확인한다).
+  bool canCreateProject = false;
+
   /// 내 프로필 카드의 "팀"/"직책" 표시용(GET /users/me) — 부서·직책 관리 범위가 '계정
   /// 단위'인지 '팀 단위'인지에 따라 [myPosition] 하나만 보거나 [myTeamPositions](팀마다
   /// 다른 값)를 본다. 팀 단위일 때 [myDepartment]/[myPosition]은 항상 null이다.
@@ -184,6 +188,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _teamLeftSub;
   StreamSubscription? _commentSub;
   StreamSubscription? _messageEditedSub;
+  StreamSubscription? _messageLinkPreviewSub;
   StreamSubscription? _messageDeletedSub;
   StreamSubscription? _commentEditedSub;
   StreamSubscription? _commentDeletedSub;
@@ -197,6 +202,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
   StreamSubscription? _roleUpdatedSub;
+  StreamSubscription? _orgUpdatedSub;
   StreamSubscription? _secretInviteSub;
   StreamSubscription? _secretAcceptedSub;
   StreamSubscription? _secretRejectedSub;
@@ -499,7 +505,28 @@ class Session extends ChangeNotifier {
         }
       }).asFuture<void>();
       await sink.close();
-      await OpenFile.open(file.path);
+      if (Platform.isWindows) {
+        // OpenFile(Windows 구현)은 문서 파일 위주로 검증돼 있어서 설치 프로그램(.exe)에는
+        // 조용히 실패하는 경우가 있었다 — 실패해도 예외를 던지지 않아 "설치하기"를 눌러도
+        // 아무 반응 없이 대화상자만 닫히는 버그로 나타났다. 설치 파일 실행은 Process.start로
+        // 직접 하는 게 훨씬 확실하다(탐색기에서 더블클릭하는 것과 동일 — UAC 상승도 그대로 뜬다).
+        //
+        // /VERYSILENT(+/SUPPRESSMSGBOXES)로 띄운다 — "지금 설치"를 이미 눌러 동의한 상태라
+        // 마법사 화면이나 "실행 중인 앱을 종료할까요?" 확인창을 또 띄울 필요가 없다. 일반
+        // 더블클릭 설치(초대 링크 등)는 여전히 인자 없이 실행되어 기존 대화형 방식 그대로다
+        // (messenger.iss의 InitializeSetup이 WizardSilent()로 이 경로만 확인창을 건너뛰고,
+        // 설치 후 재실행도 이 모드에서만 자동으로 된다 — Check: IsSilentMode 항목 참고).
+        await Process.start(
+          file.path,
+          ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
+          mode: ProcessStartMode.detached,
+        );
+      } else {
+        final result = await OpenFile.open(file.path);
+        if (result.type != ResultType.done) {
+          throw '설치 파일을 열 수 없습니다: ${result.message}';
+        }
+      }
     } catch (e) {
       updateError = '업데이트 설치 실패: $e';
     } finally {
@@ -699,6 +726,16 @@ class Session extends ChangeNotifier {
     return userId != null && announcement.authorId == userId;
   }
 
+  /// "문의하기" 버튼(chat_input_bar.dart)을 보여줄지 — 평문 1:1 대화방이고, 상대가 그 방이
+  /// 속한 팀에서 직책이 정확히 "팀장"일 때만이다(room.members[].position은 rooms.js의
+  /// resolveMembers가 이미 그 팀의 orgScope 설정에 맞게 계산해서 보내주므로, 여기서는 값만
+  /// 비교하면 된다). 등급(계정 role)과는 무관한 별개 축이다.
+  bool canSendInquiryIn(Room room) {
+    if (room.type != RoomType.dm || room.isSecret) return false;
+    final other = room.members.where((m) => m.id != userId).firstOrNull;
+    return other?.position == '팀장';
+  }
+
   /// 초대 링크(설치→가입 링크)를 만들 수 있는지 — 서버 운영자, 계정 등급 관리자, 또는
   /// 어느 팀이든 소유자인 사람(server/src/permissions.js의 canCreateInviteLink와 동일 규칙).
   bool get canCreateInviteLink =>
@@ -861,6 +898,7 @@ class Session extends ChangeNotifier {
       accountRole = accountRoleFromWire(me.role);
       isServerAdmin = me.isServerAdmin;
       canCreateTeamInviteLink = me.canCreateTeamInviteLink;
+      canCreateProject = me.canCreateProject;
       orgScope = me.orgScope;
       myDepartment = me.department;
       myPosition = me.position;
@@ -1004,6 +1042,12 @@ class Session extends ChangeNotifier {
       // 복호화한다 — 안 그러면 수정 전 평문이 영구 캐시에 박제되어 계속 그것만 보인다.
       await decryptInPlace(_findRoom(m.roomId), m, forceDecrypt: true);
       _controllers[m.roomId]?.applyEdit(m);
+    });
+    _messageLinkPreviewSub?.cancel();
+    _messageLinkPreviewSub = chatSocket.messageLinkPreview.listen((m) {
+      // 링크 미리보기는 비밀 대화(서버가 내용을 못 보는 방)에는 애초에 안 만들어지므로
+      // 복호화가 필요 없다 — message:edited와 달리 바로 적용한다.
+      _controllers[m.roomId]?.applyLinkPreview(m);
     });
     _messageDeletedSub?.cancel();
     _messageDeletedSub = chatSocket.messageDeleted.listen((e) {
@@ -1188,10 +1232,27 @@ class Session extends ChangeNotifier {
         accountRole = accountRoleFromWire(me.role);
         isServerAdmin = me.isServerAdmin;
         canCreateTeamInviteLink = me.canCreateTeamInviteLink;
+      canCreateProject = me.canCreateProject;
         notifyListeners();
       } catch (_) {
         // 실패해도 조용히 무시 — 다음 이벤트/재연결 때 다시 시도됨.
       }
+    });
+    _orgUpdatedSub?.cancel();
+    _orgUpdatedSub = chatSocket.orgUpdated.listen((e) {
+      // 관리자 콘솔/팀 설정에서 누군가의 부서·직책을 바꾸면 이 이벤트가 온다 — 그 사람이
+      // 멤버로 들어있는 모든 방(토픽/그룹채팅/1:1)의 캐시를 직접 덮어써서, 다시 로그인하지
+      // 않아도 채팅방 목록 배지·헤더에 바로 반영되게 한다.
+      var changed = false;
+      for (final room in rooms) {
+        for (final member in room.members) {
+          if (member.id != e.userId) continue;
+          member.department = e.department;
+          member.position = e.position;
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
     });
 
     notifyListeners();
@@ -1967,11 +2028,17 @@ class Session extends ChangeNotifier {
   Future<Room> createGroup({
     String? name,
     required List<String> memberIds,
+    String? iconType,
+    String? iconEmoji,
+    String? iconColor,
   }) async {
     final room = await api!.createGroup(
       teamId: _requireTeamId,
       name: name,
       memberIds: memberIds,
+      iconType: iconType,
+      iconEmoji: iconEmoji,
+      iconColor: iconColor,
     );
     _upsertRoom(room);
     return room;
@@ -2145,6 +2212,7 @@ class Session extends ChangeNotifier {
     await _teamLeftSub?.cancel();
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
+    await _messageLinkPreviewSub?.cancel();
     await _messageDeletedSub?.cancel();
     await _commentEditedSub?.cancel();
     await _commentDeletedSub?.cancel();
@@ -2152,6 +2220,7 @@ class Session extends ChangeNotifier {
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();
     await _roleUpdatedSub?.cancel();
+    await _orgUpdatedSub?.cancel();
     await _secretInviteSub?.cancel();
     await _secretAcceptedSub?.cancel();
     await _secretRejectedSub?.cancel();
@@ -2183,6 +2252,7 @@ class Session extends ChangeNotifier {
     accountRole = AccountRole.guest;
     isServerAdmin = false;
     canCreateTeamInviteLink = false;
+    canCreateProject = false;
     orgScope = 'team';
     myDepartment = null;
     myPosition = null;

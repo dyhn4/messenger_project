@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import 'screens/call_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/project/project_window.dart';
 import 'screens/server_setup_screen.dart';
 import 'services/app_settings.dart';
 import 'services/deep_link_service.dart';
@@ -127,6 +129,18 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // "프로젝트" 창(project_window.dart)처럼 desktop_multi_window로 만든 서브 창도 똑같이
+  // 이 main()을 처음부터 다시 탄다(엔진이 통째로 새로 생기므로) — 그래서 제일 먼저, 지금
+  // 실행 중인 게 메인 창인지 서브 창인지부터 가른다. desktop_multi_window는 Windows/macOS/
+  // Linux만 지원해서 이 확인 자체를 Platform.isWindows 뒤에 둔다(그 외엔 서브 창 개념이
+  // 없고 기존처럼 showProjectDialog만 쓴다).
+  if (Platform.isWindows) {
+    final windowController = await WindowController.fromCurrentEngine();
+    if (windowController.arguments.isNotEmpty) {
+      await runProjectWindow(windowController);
+      return;
+    }
+  }
   // NetworkImage/CachedNetworkImage처럼 우리 ApiClient/ChatSocket을 거치지 않고 자체
   // HttpClient를 만드는 코드도 전부 서버의 자체 서명 인증서를 신뢰하도록, runApp() 전에
   // 앱 전체 HttpClient 생성을 가로챈다. 이거 없이는 프로필 사진/채팅 이미지가 인증서

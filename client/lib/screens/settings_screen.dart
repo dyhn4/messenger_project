@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -9,6 +10,7 @@ import '../services/app_settings.dart';
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import 'project/project_window.dart';
 
 const _appName = 'TangoTalk';
 
@@ -80,6 +82,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setMessagePreviewMode(_messagePreviewMode);
     await settings.setAlwaysOnTop(_alwaysOnTop);
     await settings.setWindowOpacity(_windowOpacity);
+    // "프로젝트" 창이 열려있으면 완전히 다른 엔진이라 위 setThemeMode만으론 안 바뀐다 —
+    // 따로 알려준다(project_window.dart, Windows 전용이라 함수 안에서 자체적으로 걸러냄).
+    if (Platform.isWindows) unawaited(broadcastThemeChange(_themeMode));
     if (mounted) Navigator.of(context).pop();
   }
 

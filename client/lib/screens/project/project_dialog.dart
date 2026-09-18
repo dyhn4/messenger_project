@@ -11,8 +11,10 @@ import 'project_forms.dart';
 import 'project_home_view.dart';
 
 /// "프로젝트" 창 — 토픽(대화)과 별개로 업무를 계획·추적하는 공간. 상단 툴바의 과녁 아이콘
-/// 버튼으로 연다. 채팅 위에 뜨는 큰 대화상자 하나 안에서 왼쪽 사이드바(홈/내 업무/캘린더/
-/// 간트차트/노트 + 프로젝트 목록)와 오른쪽 내용이 함께 움직인다.
+/// 버튼으로 연다. 왼쪽 사이드바(홈/내 업무/캘린더/간트차트/노트 + 프로젝트 목록)와 오른쪽
+/// 내용이 함께 움직이는 구조는 항상 같지만, 그걸 담는 그릇은 플랫폼마다 다르다 — Windows는
+/// 독립된 OS 창(project_window.dart의 openProjectWindow, 작업표시줄에 따로 뜨고 최소화/
+/// 최대화/리사이즈가 된다), 그 외(안드로이드)는 지금처럼 큰 대화상자(showProjectDialog).
 ///
 /// 1단계에서는 홈(대시보드)/내 업무/프로젝트별 업무 목록까지만 실제로 동작하고, 캘린더·
 /// 간트차트·노트는 자리만 잡아둔다(다음 단계).
@@ -28,7 +30,17 @@ enum ProjectView { home, myTasks, calendar, gantt, notes, project }
 
 class ProjectDialog extends StatefulWidget {
   final Session session;
-  const ProjectDialog({super.key, required this.session});
+
+  /// Windows에서 진짜 OS 창(project_window.dart)에 이 내용을 그대로 채울 때 true — 그러면
+  /// 대화상자(Dialog)로 안 감싸고 창 크기에 맞춰 꽉 채우며, 내용 안의 수동 닫기 버튼도
+  /// 그리지 않는다(OS 타이틀바의 기본 닫기 버튼이 대신한다).
+  final bool embedInWindow;
+
+  const ProjectDialog({
+    super.key,
+    required this.session,
+    this.embedInWindow = false,
+  });
 
   @override
   State<ProjectDialog> createState() => _ProjectDialogState();
@@ -122,30 +134,34 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final content = Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: 220,
+          child: _Sidebar(
+            session: widget.session,
+            projects: _projects,
+            view: _view,
+            projectId: _projectId,
+            onSelect: _select,
+            onCreateProject: _createProject,
+            onToggleFavorite: _toggleFavorite,
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(child: _buildContent(context)),
+      ],
+    );
+    if (widget.embedInWindow) {
+      return Scaffold(body: content);
+    }
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1080, maxHeight: 760),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              width: 220,
-              child: _Sidebar(
-                session: widget.session,
-                projects: _projects,
-                view: _view,
-                projectId: _projectId,
-                onSelect: _select,
-                onCreateProject: _createProject,
-                onToggleFavorite: _toggleFavorite,
-              ),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(child: _buildContent(context)),
-          ],
-        ),
+        child: content,
       ),
     );
   }
@@ -161,17 +177,19 @@ class _ProjectDialogState extends State<ProjectDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // 창 오른쪽 위 닫기 버튼 — 사이드바가 왼쪽 끝까지 차 있어서 공용 FloatingDialog의
-        // 제목줄 대신 내용 쪽에 둔다.
+        // 제목줄 대신 내용 쪽에 둔다. 진짜 OS 창(embedInWindow)일 때는 OS 타이틀바의 기본
+        // 닫기 버튼이 이미 있으므로 그리지 않는다.
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
           child: Row(
             children: [
               Expanded(child: Text(_titleFor(_view), style: Theme.of(context).textTheme.titleMedium)),
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: '닫기',
-                onPressed: () => Navigator.of(context).pop(),
-              ),
+              if (!widget.embedInWindow)
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: '닫기',
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
             ],
           ),
         ),

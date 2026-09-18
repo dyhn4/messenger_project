@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
@@ -24,6 +26,7 @@ import 'files_screen.dart';
 import 'member_profile_dialog.dart';
 import 'message_thread_screen.dart';
 import 'project/project_dialog.dart';
+import 'project/project_window.dart';
 import 'my_profile_dialog.dart';
 import 'new_chat_screen.dart';
 import 'search_screen.dart';
@@ -613,7 +616,11 @@ class _TopBar extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.track_changes),
             tooltip: '프로젝트',
-            onPressed: () => showProjectDialog(context, session),
+            // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로
+            // 열고, 그 외(안드로이드)는 지금처럼 대화상자로 연다.
+            onPressed: () => Platform.isWindows
+                ? openProjectWindow(session)
+                : showProjectDialog(context, session),
           ),
           const SizedBox(
             height: 24,

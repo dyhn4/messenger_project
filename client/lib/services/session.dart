@@ -37,7 +37,16 @@ enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 /// 책임지고, 방 하나의 메시지/전송은 RoomChatController에 맡깁니다.
 /// 이전 KiwoomApi 포팅 때와 같은 패턴으로, ChangeNotifier + ListenableBuilder만 씁니다.
 class Session extends ChangeNotifier {
-  Session({required this.notifications, required this.settings});
+  Session({
+    required this.notifications,
+    required this.settings,
+    this.suppressNotifications = false,
+  });
+
+  /// "프로젝트" 창처럼 같은 사람의 둘째 Session(별도 창의 별도 소켓 연결)이 떠 있을 때, 그
+  /// 창도 메인 창과 똑같이 새 메시지/댓글/공지 소켓 이벤트를 받아버려서 알림이 두 번 뜨는 걸
+  /// 막는다 — 로컬 알림만 끄고 나머지(방 목록 갱신 등)는 그대로 동작한다.
+  final bool suppressNotifications;
 
   static const _kServerUrl = 'server_base_url';
   static const _kToken = 'auth_token';
@@ -396,6 +405,40 @@ class Session extends ChangeNotifier {
         await _enterApp();
       }
     }
+    notifyListeners();
+  }
+
+  /// "프로젝트" 창(project_window.dart)처럼, 메인 창이 이미 로그인해둔 상태를 그대로
+  /// 이어받아 새 창의 Session을 세우고 싶을 때 쓴다. init()과 달리 SharedPreferences에서
+  /// 토큰을 읽지 않는다 — "로그인 상태 유지"를 꺼둔 사용자는 토큰이 아예 저장되지 않으므로
+  /// (_auth 참고), 서브 창이 그 값을 디스크에서 복원할 방법이 없다. 대신 메인 창의 살아있는
+  /// Session이 들고 있는 값을 그대로 넘겨받는다(openProjectWindow가 창 생성 인자로 전달).
+  Future<void> restoreFromCredentials({
+    required String serverUrl,
+    required String token,
+    String? refreshToken,
+    String? userId,
+    String? username,
+  }) async {
+    _listenForLiveUpdates();
+    _prefs = await SharedPreferences.getInstance();
+    _persistForegroundState();
+    this.serverUrl = serverUrl;
+    this.token = token;
+    this.refreshToken = refreshToken;
+    this.userId = userId;
+    this.username = username;
+    keepSignedInPref = _prefs.getBool(_kKeepSignedInPref) ?? true;
+    api = ApiClient(
+      baseUrl: serverUrl,
+      token: token,
+      onUnauthorized: _tryRefreshAndApply,
+      httpClient: await PinnedTls.httpClient(),
+    );
+    unawaited(_checkForUpdate());
+    unawaited(_updateSocket.connect(serverUrl));
+    stage = AuthStage.ready;
+    await _enterApp();
     notifyListeners();
   }
 
@@ -1134,6 +1177,7 @@ class Session extends ChangeNotifier {
           }
         }
       }
+      if (suppressNotifications) return;
       notifications.showMessage(
         title: initiator != null ? '${initiator.name} [비밀대화 요청]' : '비밀대화 요청',
         body: '비밀 대화(종단간 암호화)를 요청했습니다.',
@@ -1807,6 +1851,7 @@ class Session extends ChangeNotifier {
       }
     }
 
+    if (suppressNotifications) return;
     notifications.showMessage(
       title: roomTag != null ? '${m.senderName} [$roomTag]' : m.senderName,
       body: preview,
@@ -1867,6 +1912,7 @@ class Session extends ChangeNotifier {
     }
 
     final tag = roomTag != null ? '$roomTag·댓글' : '댓글';
+    if (suppressNotifications) return;
     notifications.showMessage(
       title: '${c.senderName} [$tag]',
       body: preview,
@@ -1909,6 +1955,7 @@ class Session extends ChangeNotifier {
     }
     final roomTag = room.displayName(userId ?? '');
     final tag = '$roomTag·공지';
+    if (suppressNotifications) return;
     notifications.showMessage(
       title: '${a.authorName} [$tag]',
       body: a.text,

@@ -78,6 +78,7 @@ dependencies:
   livekit_client: ^2.13.0
   flutter_foreground_task: ^11.0.3
   flutter_webrtc: ^1.6.2+hotfix.3
+  desktop_multi_window: ^0.3.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

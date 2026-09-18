@@ -761,7 +761,7 @@ class _MoreTabState extends State<_MoreTab> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.settings_outlined),
-            title: const Text('설정'),
+            title: const Text('환경설정'),
             onTap: () => showDialog(
               context: context,
               builder: (_) => SettingsScreen(session: widget.session),

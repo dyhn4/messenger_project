@@ -75,7 +75,7 @@ class AccountMenuButton extends StatelessWidget {
             children: [
               Icon(Icons.settings_outlined),
               SizedBox(width: 8),
-              Text('설정'),
+              Text('환경설정'),
             ],
           ),
         ),

@@ -70,8 +70,7 @@ class Inquiry {
   });
 
   bool get hasAttachment => fileUrl != null;
-  bool get attachmentIsImage =>
-      mimeType?.startsWith('image/') ?? false;
+  bool get attachmentIsImage => mimeType?.startsWith('image/') ?? false;
 
   factory Inquiry.fromJson(Map<String, dynamic> json) => Inquiry(
     id: json['id'] as String,

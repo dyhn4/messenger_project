@@ -224,5 +224,4 @@ class Message {
       asComment: c,
     );
   }
-
 }

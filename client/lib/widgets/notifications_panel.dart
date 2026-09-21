@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
+import '../screens/announcement_list_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../services/session.dart';
@@ -9,6 +12,27 @@ import 'muted_scrollbar.dart';
 import 'room_avatar.dart';
 import 'team_avatar.dart';
 import 'unread_badge.dart';
+
+/// 알림 센터에서 안 읽은 "공지"가 있는 방을 눌러 열었을 때, 공지 목록을 팝업으로 함께 띄운다
+/// (안 읽은 공지에는 "안 읽음" 표시가 붙고, 하나를 눌러 상세를 본 뒤 뒤로 가면 이 목록으로 돌아온다).
+/// 방만 열면 공지를 실제로 열어본 적이 없어서(session.markAnnouncementsRead는 공지 목록/상세를
+/// 열 때만 호출된다) 알림 센터에 계속 "안 읽음"으로 남기 때문이다. [hadUnreadAnnouncement]는
+/// 방을 열기 "전"의 값이어야 한다.
+void showUnreadAnnouncementPopup(
+  BuildContext context,
+  Session session,
+  Room room, {
+  required bool hadUnreadAnnouncement,
+}) {
+  if (!hadUnreadAnnouncement || !context.mounted) return;
+  // 목록을 여는 순간 읽음 처리되어 개수가 0이 되므로 그 전에 값을 잡아둔다.
+  showAnnouncementListScreen(
+    context,
+    session,
+    room,
+    unreadCount: math.max(1, room.unreadAnnouncementCount),
+  );
+}
 
 /// 상단 툴바의 종 모양 "알림 센터" 버튼 — 안 읽은 방이 하나라도 있으면(Session.unreadRooms)
 /// 오른쪽 위에 작은 빨간 점을 얹는다. desktop_home_screen.dart의 넓은 화면 툴바와
@@ -239,16 +263,21 @@ class _NotificationRow extends StatelessWidget {
                                   Icon(
                                     Icons.campaign_outlined,
                                     size: 14,
-                                    color: Theme.of(context).colorScheme.primary,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
                                   ),
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
-                                      room.latestAnnouncement?.text ?? '새 공지가 있습니다',
+                                      room.latestAnnouncement?.text ??
+                                          '새 공지가 있습니다',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: Theme.of(context).colorScheme.primary,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
                                         fontWeight: FontWeight.w600,
                                         fontSize: 12,
                                       ),
@@ -264,12 +293,14 @@ class _NotificationRow extends StatelessWidget {
                               ),
                       ),
                       const SizedBox(width: 8),
-                      // 안 읽은 공지도 "안 읽은 것" 1건으로 세어 배지에 합산한다 — 전엔
-                      // room.unreadCount(메시지만)만 써서 공지만 안 읽었을 땐 0으로 떴다.
+                      // 안 읽은 공지도 개수대로 배지에 합산한다 — 전엔 room.unreadCount(메시지만)만
+                      // 써서 공지만 안 읽었을 땐 0으로 떴고, 그 뒤엔 공지가 몇 개든 1로만 셌다.
                       UnreadBadge(
                         count:
                             room.unreadCount +
-                            (room.hasUnreadAnnouncement ? 1 : 0),
+                            (room.hasUnreadAnnouncement
+                                ? math.max(1, room.unreadAnnouncementCount)
+                                : 0),
                       ),
                     ],
                   ),
@@ -309,6 +340,7 @@ Future<void> showNotificationsCenterDialog(
           session: session,
           onClose: () => Navigator.of(dialogContext).pop(),
           onSelectRoom: (room) {
+            final hadUnreadAnnouncement = room.hasUnreadAnnouncement;
             Navigator.of(dialogContext).pop();
             if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
               session.requestOpenRoom(room);
@@ -323,6 +355,12 @@ Future<void> showNotificationsCenterDialog(
                 ),
               );
             }
+            showUnreadAnnouncementPopup(
+              context,
+              session,
+              room,
+              hadUnreadAnnouncement: hadUnreadAnnouncement,
+            );
           },
         ),
       ),

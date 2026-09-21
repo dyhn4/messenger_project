@@ -1131,10 +1131,9 @@ class ApiClient {
     String text,
   ) async {
     return Announcement.fromJson(
-      await _patch(
-            '/api/rooms/$roomId/announcements/$announcementId',
-            {'text': text},
-          )
+      await _patch('/api/rooms/$roomId/announcements/$announcementId', {
+            'text': text,
+          })
           as Map<String, dynamic>,
     );
   }
@@ -1172,10 +1171,9 @@ class ApiClient {
     String text,
   ) async {
     return AnnouncementComment.fromJson(
-      await _post(
-            '/api/rooms/$roomId/announcements/$announcementId/comments',
-            {'text': text},
-          )
+      await _post('/api/rooms/$roomId/announcements/$announcementId/comments', {
+            'text': text,
+          })
           as Map<String, dynamic>,
     );
   }
@@ -1247,9 +1245,19 @@ class ApiClient {
   }
 
   /// 내가 참여 중인 프로젝트 목록(사이드바).
-  Future<List<Project>> fetchProjects(String teamId) async {
-    final list = await _get('/api/projects?teamId=$teamId') as List;
-    return list.map((e) => Project.fromJson(e as Map<String, dynamic>)).toList();
+  /// [archived]가 true면 종료(보관)된 프로젝트만, 아니면 진행 중인 프로젝트만.
+  Future<List<Project>> fetchProjects(
+    String teamId, {
+    bool archived = false,
+  }) async {
+    final list =
+        await _get(
+              '/api/projects?teamId=$teamId${archived ? '&archived=1' : ''}',
+            )
+            as List;
+    return list
+        .map((e) => Project.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// 프로젝트 상세(구성원 포함).
@@ -1264,6 +1272,8 @@ class ApiClient {
     required String name,
     required String identifier,
     String? description,
+    String? color,
+    bool isPublic = false,
     List<String> memberIds = const [],
   }) async {
     return Project.fromJson(
@@ -1272,9 +1282,26 @@ class ApiClient {
             'name': name,
             'identifier': identifier,
             'description': ?description,
+            'color': ?color,
+            'isPublic': isPublic,
             'memberIds': memberIds,
           })
           as Map<String, dynamic>,
+    );
+  }
+
+  /// 내가 아직 참여하지 않은 이 팀의 공개 프로젝트들.
+  Future<List<Project>> browsePublicProjects(String teamId) async {
+    final list = await _get('/api/projects/browse?teamId=$teamId') as List;
+    return list
+        .map((e) => Project.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 공개 프로젝트에 초대 없이 참여한다.
+  Future<Project> joinProject(String projectId) async {
+    return Project.fromJson(
+      await _post('/api/projects/$projectId/join', {}) as Map<String, dynamic>,
     );
   }
 
@@ -1282,11 +1309,17 @@ class ApiClient {
     String projectId, {
     String? name,
     String? description,
+    String? color,
+    bool? isPublic,
+    bool? archived,
   }) async {
     return Project.fromJson(
       await _patch('/api/projects/$projectId', {
             'name': ?name,
             'description': ?description,
+            'color': ?color,
+            'isPublic': ?isPublic,
+            'archived': ?archived,
           })
           as Map<String, dynamic>,
     );
@@ -1308,7 +1341,18 @@ class ApiClient {
     final list =
         await _post('/api/projects/$projectId/members', {'userIds': userIds})
             as List;
-    return list.map((e) => AppUser.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 구성원의 프로젝트 역할을 바꾼다('owner' = 담당자 | 'member').
+  Future<void> setProjectMemberRole(
+    String projectId,
+    String userId,
+    String role,
+  ) async {
+    await _patch('/api/projects/$projectId/members/$userId', {'role': role});
   }
 
   Future<List<AppUser>> removeProjectMember(
@@ -1317,7 +1361,9 @@ class ApiClient {
   ) async {
     final list =
         await _delete('/api/projects/$projectId/members/$userId') as List;
-    return list.map((e) => AppUser.fromJson(e as Map<String, dynamic>)).toList();
+    return list
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// 프로젝트 안의 업무 목록.
@@ -1327,6 +1373,12 @@ class ApiClient {
   }
 
   /// 내가 담당한 업무 전부(팀 기준) — "내 업무" 화면.
+  /// 내가 참여 중인 모든 프로젝트의 업무(전체 캘린더/간트차트용).
+  Future<List<Task>> fetchTeamTasks(String teamId) async {
+    final list = await _get('/api/tasks/team?teamId=$teamId') as List;
+    return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
   Future<List<Task>> fetchMyTasks(String teamId) async {
     final list = await _get('/api/tasks/mine?teamId=$teamId') as List;
     return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
@@ -1334,7 +1386,360 @@ class ApiClient {
 
   /// 업무 상세(댓글 포함).
   Future<Task> fetchTask(String taskId) async {
-    return Task.fromJson(await _get('/api/tasks/$taskId') as Map<String, dynamic>);
+    return Task.fromJson(
+      await _get('/api/tasks/$taskId') as Map<String, dynamic>,
+    );
+  }
+
+  Future<List<TaskType>> fetchTaskTypes(String projectId) async {
+    final list = await _get('/api/projects/$projectId/task-types') as List;
+    return list
+        .map((e) => TaskType.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TaskType> createTaskType(
+    String projectId, {
+    required String name,
+    required String color,
+  }) async {
+    return TaskType.fromJson(
+      await _post('/api/projects/$projectId/task-types', {
+            'name': name,
+            'color': color,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<TaskType> updateTaskType(
+    String typeId, {
+    String? name,
+    String? color,
+  }) async {
+    return TaskType.fromJson(
+      await _patch('/api/task-types/$typeId', {'name': ?name, 'color': ?color})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteTaskType(String typeId) async {
+    await _delete('/api/task-types/$typeId');
+  }
+
+  /// 노트 목록(본문 제외) — [projectId] 하나 또는 [teamId](내가 참여한 모든 프로젝트).
+  Future<List<ProjectNote>> fetchNotes({
+    String? projectId,
+    String? teamId,
+  }) async {
+    final query = projectId != null ? 'projectId=$projectId' : 'teamId=$teamId';
+    final list = await _get('/api/notes?$query') as List;
+    return list
+        .map((e) => ProjectNote.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<ProjectNote> fetchNote(String noteId) async {
+    return ProjectNote.fromJson(
+      await _get('/api/notes/$noteId') as Map<String, dynamic>,
+    );
+  }
+
+  Future<ProjectNote> createNote(
+    String projectId, {
+    required String title,
+    required String body,
+  }) async {
+    return ProjectNote.fromJson(
+      await _post('/api/projects/$projectId/notes', {
+            'title': title,
+            'body': body,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// [baseUpdatedAt]은 편집을 시작할 때의 수정 시각 — 그 사이 다른 사람이 고쳤으면 서버가 409로 막는다.
+  Future<ProjectNote> updateNote(
+    String noteId, {
+    String? title,
+    String? body,
+    DateTime? baseUpdatedAt,
+  }) async {
+    return ProjectNote.fromJson(
+      await _patch('/api/notes/$noteId', {
+            'title': ?title,
+            'body': ?body,
+            'baseUpdatedAt': ?baseUpdatedAt?.millisecondsSinceEpoch,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteNote(String noteId) async {
+    await _delete('/api/notes/$noteId');
+  }
+
+  /// 내 프로젝트 알림함(최근 50개)과 안 읽은 개수.
+  Future<(List<ProjectNotification>, int)> fetchProjectNotifications() async {
+    final json =
+        await _get('/api/project-notifications') as Map<String, dynamic>;
+    final items = (json['items'] as List)
+        .map((e) => ProjectNotification.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return (items, (json['unreadCount'] as num?)?.toInt() ?? 0);
+  }
+
+  /// [ids]가 없으면 전부 읽음. 남은 안 읽은 개수를 돌려준다.
+  Future<int> markProjectNotificationsRead({List<String>? ids}) async {
+    final json =
+        await _post('/api/project-notifications/read', {'ids': ?ids})
+            as Map<String, dynamic>;
+    return (json['unreadCount'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<ProjectNotificationSettings> fetchProjectNotificationSettings(
+    String projectId,
+  ) async {
+    return ProjectNotificationSettings.fromJson(
+      await _get('/api/projects/$projectId/notification-settings')
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<ProjectNotificationSettings> updateProjectNotificationSettings(
+    String projectId, {
+    bool? muted,
+    bool? assigned,
+    bool? referenced,
+    bool? comment,
+    bool? status,
+    bool? due,
+  }) async {
+    return ProjectNotificationSettings.fromJson(
+      await _patch('/api/projects/$projectId/notification-settings', {
+            'muted': ?muted,
+            'assigned': ?assigned,
+            'referenced': ?referenced,
+            'comment': ?comment,
+            'status': ?status,
+            'due': ?due,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<List<TaskTemplate>> fetchTaskTemplates(String projectId) async {
+    final list = await _get('/api/projects/$projectId/task-templates') as List;
+    return list
+        .map((e) => TaskTemplate.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 템플릿 저장 — [templateId]가 있으면 수정, 없으면 새로 만든다. 담당자/유형/마감일수는
+  /// 비우는 것도 뜻이 있어서 항상 값(또는 null)을 그대로 보낸다.
+  Future<TaskTemplate> saveTaskTemplate(
+    String projectId, {
+    String? templateId,
+    required String name,
+    required String title,
+    required String description,
+    required TaskPriority priority,
+    String? typeId,
+    String? assigneeId,
+    int? dueOffsetDays,
+  }) async {
+    final body = {
+      'name': name,
+      'title': title,
+      'description': description,
+      'priority': taskPriorityToWire(priority),
+      'typeId': typeId,
+      'assigneeId': assigneeId,
+      'dueOffsetDays': dueOffsetDays,
+    };
+    final json = templateId == null
+        ? await _post('/api/projects/$projectId/task-templates', body)
+        : await _patch('/api/task-templates/$templateId', body);
+    return TaskTemplate.fromJson(json as Map<String, dynamic>);
+  }
+
+  Future<void> deleteTaskTemplate(String templateId) async {
+    await _delete('/api/task-templates/$templateId');
+  }
+
+  Future<List<AutomationRule>> fetchAutomations(String projectId) async {
+    final list = await _get('/api/projects/$projectId/automations') as List;
+    return list
+        .map((e) => AutomationRule.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 규칙 저장 — [ruleId]가 있으면 수정, 없으면 새로 만든다.
+  Future<AutomationRule> saveAutomation(
+    String projectId, {
+    String? ruleId,
+    required String name,
+    required String trigger,
+    String? triggerStatusId,
+    String? conditionPriority,
+    String? conditionTypeId,
+    required List<AutomationAction> actions,
+  }) async {
+    final body = {
+      'name': name,
+      'trigger': trigger,
+      'triggerStatusId': triggerStatusId,
+      'condition': {'priority': ?conditionPriority, 'typeId': ?conditionTypeId},
+      'actions': [for (final a in actions) a.toJson()],
+    };
+    final json = ruleId == null
+        ? await _post('/api/projects/$projectId/automations', body)
+        : await _patch('/api/automations/$ruleId', body);
+    return AutomationRule.fromJson(json as Map<String, dynamic>);
+  }
+
+  Future<void> setAutomationEnabled(String ruleId, bool enabled) async {
+    await _patch('/api/automations/$ruleId', {'enabled': enabled});
+  }
+
+  Future<void> deleteAutomation(String ruleId) async {
+    await _delete('/api/automations/$ruleId');
+  }
+
+  Future<List<NoteComment>> fetchNoteComments(String noteId) async {
+    final list = await _get('/api/notes/$noteId/comments') as List;
+    return list
+        .map((e) => NoteComment.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<NoteComment> addNoteComment(String noteId, String text) async {
+    return NoteComment.fromJson(
+      await _post('/api/notes/$noteId/comments', {'text': text})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteNoteComment(String commentId) async {
+    await _delete('/api/note-comments/$commentId');
+  }
+
+  Future<List<NoteVersion>> fetchNoteVersions(String noteId) async {
+    final list = await _get('/api/notes/$noteId/versions') as List;
+    return list
+        .map((e) => NoteVersion.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<NoteVersion> fetchNoteVersion(String versionId) async {
+    return NoteVersion.fromJson(
+      await _get('/api/note-versions/$versionId') as Map<String, dynamic>,
+    );
+  }
+
+  /// 노트를 이 이력 버전의 내용으로 되돌린다(되돌리기 직전 내용도 이력에 남는다).
+  Future<ProjectNote> restoreNoteVersion(
+    String noteId,
+    String versionId,
+  ) async {
+    return ProjectNote.fromJson(
+      await _post('/api/notes/$noteId/restore', {'versionId': versionId})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<List<AutomationRunLog>> fetchAutomationRuns(String projectId) async {
+    final list = await _get('/api/projects/$projectId/automation-runs') as List;
+    return list
+        .map((e) => AutomationRunLog.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<TaskStatusDef>> fetchTaskStatuses(String projectId) async {
+    final list = await _get('/api/projects/$projectId/task-statuses') as List;
+    return list
+        .map((e) => TaskStatusDef.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TaskStatusDef> createTaskStatus(
+    String projectId, {
+    required String name,
+    required String color,
+    required TaskStatus category,
+  }) async {
+    return TaskStatusDef.fromJson(
+      await _post('/api/projects/$projectId/task-statuses', {
+            'name': name,
+            'color': color,
+            'category': taskStatusToWire(category),
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<TaskStatusDef> updateTaskStatus(
+    String statusId, {
+    String? name,
+    String? color,
+  }) async {
+    return TaskStatusDef.fromJson(
+      await _patch('/api/task-statuses/$statusId', {
+            'name': ?name,
+            'color': ?color,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteTaskStatus(String statusId) async {
+    await _delete('/api/task-statuses/$statusId');
+  }
+
+  Future<void> reorderTaskStatuses(String projectId, List<String> ids) async {
+    await _post('/api/projects/$projectId/task-statuses/order', {'ids': ids});
+  }
+
+  Future<List<TaskFieldDef>> fetchTaskFields(String projectId) async {
+    final list = await _get('/api/projects/$projectId/task-fields') as List;
+    return list
+        .map((e) => TaskFieldDef.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TaskFieldDef> createTaskField(
+    String projectId, {
+    required String name,
+    required String kind,
+    List<String> options = const [],
+  }) async {
+    return TaskFieldDef.fromJson(
+      await _post('/api/projects/$projectId/task-fields', {
+            'name': name,
+            'kind': kind,
+            'options': options,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<TaskFieldDef> updateTaskField(
+    String fieldId, {
+    String? name,
+    List<String>? options,
+  }) async {
+    return TaskFieldDef.fromJson(
+      await _patch('/api/task-fields/$fieldId', {
+            'name': ?name,
+            'options': ?options,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteTaskField(String fieldId) async {
+    await _delete('/api/task-fields/$fieldId');
   }
 
   Future<Task> createTask({
@@ -1343,7 +1748,11 @@ class ApiClient {
     String? description,
     String? assigneeId,
     TaskStatus status = TaskStatus.todo,
+    String? statusId,
+    Map<String, dynamic>? customValues,
     TaskPriority priority = TaskPriority.normal,
+    String? typeId,
+    List<String> referenceIds = const [],
     DateTime? startDate,
     DateTime? dueDate,
   }) async {
@@ -1353,7 +1762,11 @@ class ApiClient {
             'description': ?description,
             'assigneeId': ?assigneeId,
             'status': taskStatusToWire(status),
+            'statusId': ?statusId,
+            'customValues': ?customValues,
             'priority': taskPriorityToWire(priority),
+            'typeId': ?typeId,
+            'referenceIds': referenceIds,
             'startDate': ?startDate?.millisecondsSinceEpoch,
             'dueDate': ?dueDate?.millisecondsSinceEpoch,
           })
@@ -1370,8 +1783,14 @@ class ApiClient {
     String? assigneeId,
     bool clearAssignee = false,
     TaskStatus? status,
+    String? statusId,
+    Map<String, dynamic>? customValues,
     TaskPriority? priority,
+    String? typeId,
+    bool clearType = false,
+    List<String>? referenceIds,
     DateTime? startDate,
+    bool clearStartDate = false,
     DateTime? dueDate,
     bool clearDueDate = false,
   }) async {
@@ -1379,12 +1798,22 @@ class ApiClient {
       await _patch('/api/tasks/$taskId', {
             'title': ?title,
             'description': ?description,
-            if (clearAssignee) 'assigneeId': null else 'assigneeId': ?assigneeId,
+            if (clearAssignee)
+              'assigneeId': null
+            else
+              'assigneeId': ?assigneeId,
             'status': ?(status == null ? null : taskStatusToWire(status)),
+            'statusId': ?statusId,
+            'customValues': ?customValues,
             'priority': ?(priority == null
                 ? null
                 : taskPriorityToWire(priority)),
-            'startDate': ?startDate?.millisecondsSinceEpoch,
+            if (clearType) 'typeId': null else 'typeId': ?typeId,
+            'referenceIds': ?referenceIds,
+            if (clearStartDate)
+              'startDate': null
+            else
+              'startDate': ?startDate?.millisecondsSinceEpoch,
             if (clearDueDate)
               'dueDate': null
             else
@@ -1440,7 +1869,9 @@ class ApiClient {
             'type': 'group',
             if (name != null && name.isNotEmpty) 'name': name,
             'memberIds': memberIds,
-            'iconType': ?(iconType != null && iconType != 'members' ? iconType : null),
+            'iconType': ?(iconType != null && iconType != 'members'
+                ? iconType
+                : null),
             'iconEmoji': ?iconEmoji,
             'iconColor': ?iconColor,
           })
@@ -1578,6 +2009,11 @@ class ApiClient {
 
   Future<void> setMuted(String roomId, bool muted) async {
     await _post('/api/rooms/$roomId/muted', {'muted': muted});
+  }
+
+  /// 그룹채팅방 이름을 나에게만 바꾼다. 빈 문자열이면 별칭을 지운다.
+  Future<void> setRoomNickname(String roomId, String name) async {
+    await _post('/api/rooms/$roomId/nickname', {'name': name});
   }
 
   /// [text] 없이 첨부만(이미지/파일) 다는 댓글도 가능하다 — 그때는 [type]과 [fileUrl] 등을 채워서 호출.

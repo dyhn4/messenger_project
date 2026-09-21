@@ -5,13 +5,21 @@ class RoleBadge extends StatelessWidget {
   final String label;
   final Color bg;
   final Color fg;
-  const RoleBadge({super.key, required this.label, required this.bg, required this.fg});
+  const RoleBadge({
+    super.key,
+    required this.label,
+    required this.bg,
+    required this.fg,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
       child: Text(
         label,
         style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w700),

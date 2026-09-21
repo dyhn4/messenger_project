@@ -54,6 +54,19 @@ class RoomMutedUpdate {
       );
 }
 
+/// 내(다른 기기 포함)가 그룹채팅방 이름을 나에게만 바꿨다는 브로드캐스트(room:renamed).
+class RoomRenamedUpdate {
+  final String roomId;
+  final String? customName;
+  const RoomRenamedUpdate({required this.roomId, required this.customName});
+
+  factory RoomRenamedUpdate.fromJson(Map<String, dynamic> json) =>
+      RoomRenamedUpdate(
+        roomId: json['roomId'] as String,
+        customName: json['customName'] as String?,
+      );
+}
+
 /// 누군가의 부서/직책이 바뀌었다는 알림(org:updated) — 관리자 콘솔("회원" 탭) 또는 팀 설정
 /// ("멤버" 탭)에서 바뀌면 온다. 로그아웃 없이 room.members에 캐싱된 값을 바로 덮어쓰는 데 쓴다.
 class OrgUpdate {
@@ -361,6 +374,7 @@ class ChatSocket {
   final _readController = StreamController<RoomReadEvent>.broadcast();
   final _favoriteController = StreamController<RoomFavoriteUpdate>.broadcast();
   final _mutedController = StreamController<RoomMutedUpdate>.broadcast();
+  final _renamedController = StreamController<RoomRenamedUpdate>.broadcast();
   final _hiddenController = StreamController<RoomHiddenUpdate>.broadcast();
   // 팀 갱신(이름/아이콘 변경, 팀에 새로 들어감)과 팀에서 빠짐.
   final _teamController = StreamController<Team>.broadcast();
@@ -393,6 +407,9 @@ class ChatSocket {
   final _roleUpdatedController = StreamController<void>.broadcast();
   final _orgUpdatedController = StreamController<OrgUpdate>.broadcast();
   final _projectChangedController = StreamController<void>.broadcast();
+  final _projectNotificationController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _projectNotificationSyncController = StreamController<int>.broadcast();
   final _secretInviteController =
       StreamController<SecretInviteEvent>.broadcast();
   final _secretAcceptedController =
@@ -424,6 +441,7 @@ class ChatSocket {
 
   /// 내가(다른 기기 포함) 방의 알림 끄기를 바꿨다는 브로드캐스트.
   Stream<RoomMutedUpdate> get mutedEvents => _mutedController.stream;
+  Stream<RoomRenamedUpdate> get renamedEvents => _renamedController.stream;
 
   /// 평문 DM의 숨기기 상태 변화(내가 숨기기/나가기를 했거나, 상대의 새 메시지로 서버가
   /// 자동으로 다시 보이게 되돌렸을 때).
@@ -443,7 +461,8 @@ class ChatSocket {
 
   /// 메시지에 담긴 링크의 오픈그래프 미리보기가 (서버가 백그라운드로 가져와서) 채워졌을 때
   /// (message:linkPreview) — 사용자가 고친 게 아니므로 messageEdited와는 별도 이벤트다.
-  Stream<Message> get messageLinkPreview => _messageLinkPreviewController.stream;
+  Stream<Message> get messageLinkPreview =>
+      _messageLinkPreviewController.stream;
 
   /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted).
   Stream<MessageDeletedEvent> get messageDeleted =>
@@ -513,6 +532,14 @@ class ChatSocket {
   /// 열려 있는 "프로젝트" 창이 지금 보고 있는 화면을 다시 불러오는 신호로만 쓴다(무엇이
   /// 바뀌었는지는 굳이 구분하지 않는다 — 화면 하나가 통째로 새로고침되는 편이 단순하다).
   Stream<void> get projectChanged => _projectChangedController.stream;
+
+  /// 프로젝트 알림(업무 배정/댓글/마감 임박 등) 한 건 — 서버 project:notification.
+  Stream<Map<String, dynamic>> get projectNotifications =>
+      _projectNotificationController.stream;
+
+  /// 프로젝트 알림의 안 읽은 개수가 바뀜(다른 창/기기에서 읽음 처리) — 새 개수.
+  Stream<int> get projectNotificationSync =>
+      _projectNotificationSyncController.stream;
 
   /// 서버가 handshake에서 인증을 거부했을 때(만료됐거나 비밀번호 변경 등으로 폐기된
   /// accessToken으로 연결을 시도한 경우) 흘러나온다. Session이 새 accessToken을 받아
@@ -605,6 +632,11 @@ class ChatSocket {
         RoomMutedUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
+    socket.on('room:renamed', (data) {
+      _renamedController.add(
+        RoomRenamedUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
     socket.on('room:hidden', (data) {
       _hiddenController.add(
         RoomHiddenUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -625,6 +657,18 @@ class ChatSocket {
     });
     socket.on('user:role-updated', (_) => _roleUpdatedController.add(null));
     socket.on('project:changed', (_) => _projectChangedController.add(null));
+    socket.on(
+      'project:notification',
+      (data) => _projectNotificationController.add(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    );
+    socket.on(
+      'project:notification-sync',
+      (data) => _projectNotificationSyncController.add(
+        ((data as Map)['unreadCount'] as num?)?.toInt() ?? 0,
+      ),
+    );
     socket.on('org:updated', (data) {
       _orgUpdatedController.add(
         OrgUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -672,12 +716,16 @@ class ChatSocket {
     });
     socket.on('announcement:deleted', (data) {
       _announcementDeletedController.add(
-        AnnouncementRemovedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+        AnnouncementRemovedEvent.fromJson(
+          Map<String, dynamic>.from(data as Map),
+        ),
       );
     });
     socket.on('announcement:unpinned', (data) {
       _announcementUnpinnedController.add(
-        AnnouncementRemovedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+        AnnouncementRemovedEvent.fromJson(
+          Map<String, dynamic>.from(data as Map),
+        ),
       );
     });
     socket.on('announcement:comment:new', (data) {

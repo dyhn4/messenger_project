@@ -17,9 +17,7 @@ class TextViewerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(fileName, overflow: TextOverflow.ellipsis),
-      ),
+      appBar: AppBar(title: Text(fileName, overflow: TextOverflow.ellipsis)),
       body: FutureBuilder<Uint8List>(
         future: bytesFuture,
         builder: (context, snapshot) {

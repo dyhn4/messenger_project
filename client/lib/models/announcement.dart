@@ -43,12 +43,16 @@ class Announcement {
     ),
     editedAt: json['editedAt'] == null
         ? null
-        : DateTime.fromMillisecondsSinceEpoch((json['editedAt'] as num).toInt()),
+        : DateTime.fromMillisecondsSinceEpoch(
+            (json['editedAt'] as num).toInt(),
+          ),
     pinned: json['pinned'] as bool? ?? true,
     commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
     autoUnpinAt: json['autoUnpinAt'] == null
         ? null
-        : DateTime.fromMillisecondsSinceEpoch((json['autoUnpinAt'] as num).toInt()),
+        : DateTime.fromMillisecondsSinceEpoch(
+            (json['autoUnpinAt'] as num).toInt(),
+          ),
   );
 }
 

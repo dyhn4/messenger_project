@@ -11,6 +11,8 @@ import {
   getMemberHidden,
   getMemberLastReadAnnouncementAt,
   getMemberMuted,
+  getMemberCustomName,
+  setMemberCustomName,
   getRoomLastReadMap,
   insertRoom,
   isRoomMember,
@@ -52,6 +54,7 @@ import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
 import { previewFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
+import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
 
 /** teams.js의 memberListResponse와 같은 규칙 — 서버 설정(orgScope)에 따라 팀 값(team_members)
  * 또는 계정 값(users) 중 하나를 부서/직책으로 쓴다. 채팅방 상단 헤더/방 목록의 직책 표시
@@ -166,14 +169,20 @@ export async function toRoomDto(room, requesterId) {
     dto.unreadCount = unreadMessages + unreadComments;
     dto.favorite = await getMemberFavorite(room.id, requesterId);
     dto.muted = await getMemberMuted(room.id, requesterId);
+    dto.customName = room.type === 'group' ? await getMemberCustomName(room.id, requesterId) : null;
     dto.hidden = room.type === 'dm' ? await getMemberHidden(room.id, requesterId) : false;
     // 알림 센터에 "안 읽은 공지"로 띄울지 — 내가 직접 쓴 글이면 읽은 걸로 치고, 공지 목록/
     // 상세를 실제로 열어본 적(lastReadAnnouncementAt) 없이 그보다 최근에 올라온 고정 공지가
     // 있으면 true. 방에 들어와 있기만 해도 올라가는 일반 lastRead와는 다른 값을 쓴다.
+    const lastReadAnnouncementAt = await getMemberLastReadAnnouncementAt(room.id, requesterId);
     dto.hasUnreadAnnouncement =
       dto.latestAnnouncement != null &&
       dto.latestAnnouncement.authorId !== requesterId &&
-      (await getMemberLastReadAnnouncementAt(room.id, requesterId)) < dto.latestAnnouncement.createdAt;
+      lastReadAnnouncementAt < dto.latestAnnouncement.createdAt;
+    // 알림 센터 배지 숫자 — 안 읽은 공지가 여러 개일 수 있다(전엔 있으면 무조건 1로 셌다).
+    dto.unreadAnnouncementCount = dto.hasUnreadAnnouncement
+      ? Math.max(1, await countUnreadAnnouncementsForUser(room.id, requesterId, new Date(lastReadAnnouncementAt)))
+      : 0;
   }
   return dto;
 }
@@ -583,6 +592,22 @@ export function createRoomsRouter(io) {
     const muted = req.body?.muted === true;
     await setMemberMuted(room.id, req.user.sub, muted);
     io.to(`user:${req.user.sub}`).emit('room:muted', { roomId: room.id, muted });
+    res.json(await toRoomDto(room, req.user.sub));
+  });
+
+  // 그룹채팅방 이름을 나에게만 다르게 부르기 — 내 다른 기기(user:<id> 룸)에만 알린다.
+  // 빈 문자열/null이면 별칭을 지우고 원래 이름으로 돌아간다.
+  router.post('/rooms/:id/nickname', async (req, res) => {
+    const room = await findRoomById(req.params.id);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    if (room.type !== 'group') return res.status(400).json({ error: '그룹채팅방만 이름을 바꿀 수 있습니다.' });
+
+    const raw = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (raw.length > 100) return res.status(400).json({ error: '이름은 100자 이하여야 합니다.' });
+    const customName = raw || null;
+    await setMemberCustomName(room.id, req.user.sub, customName);
+    io.to(`user:${req.user.sub}`).emit('room:renamed', { roomId: room.id, customName });
     res.json(await toRoomDto(room, req.user.sub));
   });
 

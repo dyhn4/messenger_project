@@ -41,7 +41,10 @@ Future<void> showInquiryInboxScreen(BuildContext context, Session session) {
           appBar: AppBar(
             title: const Text('문의함'),
             bottom: const TabBar(
-              tabs: [Tab(text: '받은 문의'), Tab(text: '보낸 문의')],
+              tabs: [
+                Tab(text: '받은 문의'),
+                Tab(text: '보낸 문의'),
+              ],
             ),
           ),
           body: InquiryInboxScreen(session: session, embedTabBar: false),
@@ -87,7 +90,12 @@ class InquiryInboxScreen extends StatelessWidget {
             ),
           ),
         if (isWide && embedTabBar)
-          const TabBar(tabs: [Tab(text: '받은 문의'), Tab(text: '보낸 문의')]),
+          const TabBar(
+            tabs: [
+              Tab(text: '받은 문의'),
+              Tab(text: '보낸 문의'),
+            ],
+          ),
         const Divider(height: 1),
         Expanded(
           child: TabBarView(
@@ -445,9 +453,7 @@ class _InquiryDetailDialogState extends State<_InquiryDetailDialog> {
             child: Text(inquiry.category, style: const TextStyle(fontSize: 11)),
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(inquiry.title, overflow: TextOverflow.ellipsis),
-          ),
+          Expanded(child: Text(inquiry.title, overflow: TextOverflow.ellipsis)),
         ],
       ),
       content: SizedBox(
@@ -458,9 +464,9 @@ class _InquiryDetailDialogState extends State<_InquiryDetailDialog> {
           children: [
             Text(
               '${widget.counterpartLabel} · ${formatDateTime(inquiry.createdAt)}',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).hintColor,
+              ),
             ),
             const SizedBox(height: 12),
             Text(inquiry.content),
@@ -491,9 +497,7 @@ class _InquiryDetailDialogState extends State<_InquiryDetailDialog> {
                     ChoiceChip(
                       label: Text(inquiryStatusLabel(status)),
                       selected: inquiry.status == status,
-                      onSelected: _updating
-                          ? null
-                          : (_) => _setStatus(status),
+                      onSelected: _updating ? null : (_) => _setStatus(status),
                     ),
                 ],
               ),

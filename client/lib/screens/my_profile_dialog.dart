@@ -388,7 +388,9 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
   _InfoSection _expanded = _InfoSection.none;
 
   void _toggle(_InfoSection section) {
-    setState(() => _expanded = _expanded == section ? _InfoSection.none : section);
+    setState(
+      () => _expanded = _expanded == section ? _InfoSection.none : section,
+    );
   }
 
   @override
@@ -409,8 +411,9 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                     Expanded(
                       child: Text(
                         '개인정보',
-                        style: Theme.of(context).textTheme.titleLarge
-                            ?.copyWith(fontWeight: FontWeight.bold),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -592,7 +595,9 @@ class _StaticInfoRow extends StatelessWidget {
           Icon(icon, size: 18, color: hint),
           const SizedBox(width: 10),
           SizedBox(width: _infoLabelWidth, child: Text(label)),
-          Expanded(child: Text(value, style: TextStyle(color: hint))),
+          Expanded(
+            child: Text(value, style: TextStyle(color: hint)),
+          ),
         ],
       ),
     );
@@ -919,9 +924,7 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
                 value: _agreed,
                 onChanged: (v) => setState(() => _agreed = v ?? false),
               ),
-              const Expanded(
-                child: Text('위 유의사항을 모두 확인하였으며 회원 탈퇴에 동의합니다.'),
-              ),
+              const Expanded(child: Text('위 유의사항을 모두 확인하였으며 회원 탈퇴에 동의합니다.')),
             ],
           ),
         ),
@@ -942,7 +945,9 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
             Expanded(
               child: FilledButton(
                 onPressed: canSubmit ? _submit : null,
-                style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                ),
                 child: _submitting
                     ? const SizedBox(
                         width: 18,

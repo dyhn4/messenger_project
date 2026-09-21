@@ -446,8 +446,7 @@ class _GroupIconPickerDialog extends StatefulWidget {
   });
 
   @override
-  State<_GroupIconPickerDialog> createState() =>
-      _GroupIconPickerDialogState();
+  State<_GroupIconPickerDialog> createState() => _GroupIconPickerDialogState();
 }
 
 class _GroupIconPickerDialogState extends State<_GroupIconPickerDialog> {
@@ -474,9 +473,7 @@ class _GroupIconPickerDialogState extends State<_GroupIconPickerDialog> {
               ),
               const SizedBox(height: 16),
               AvatarView(
-                username: widget.previewName.isEmpty
-                    ? '?'
-                    : widget.previewName,
+                username: widget.previewName.isEmpty ? '?' : widget.previewName,
                 avatarType: _mode == 'emoji' ? 'character' : 'initial',
                 avatarEmoji: _mode == 'emoji' ? _emoji : null,
                 avatarColor: _mode == 'emoji' ? colorToHex(_color) : null,

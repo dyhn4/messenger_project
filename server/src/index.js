@@ -39,6 +39,7 @@ import { createRoomsRouter } from './rooms.js';
 import { createSecretChatsRouter } from './secretChats.js';
 import { startSecretExpiryJob } from './secretExpiry.js';
 import { startAnnouncementAutoUnpinJob } from './announcementAutoUnpin.js';
+import { startProjectDueReminderJob } from './projectNotify.js';
 import { searchRouter } from './search.js';
 import { createTeamsRouter } from './teams.js';
 import { registerSocket } from './socket.js';
@@ -120,6 +121,7 @@ watchForVersionChanges(io);
 startRetentionJob();
 startSecretExpiryJob(io);
 startAnnouncementAutoUnpinJob(io);
+startProjectDueReminderJob(io);
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

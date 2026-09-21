@@ -21,7 +21,9 @@ String _formatCommentTime(DateTime dt) {
   return '${dt.month}월 ${dt.day}일 ${isPm ? '오후' : '오전'} $hour12:${dt.minute.toString().padLeft(2, '0')}';
 }
 
-/// "새 프로젝트" — 이름/식별자/설명 + 함께할 구성원. 만든 사람이 담당자(owner)가 된다.
+/// "프로젝트 생성" — 이름, 대표 색상, 프로젝트 키, 설명, 공개 설정을 입력한다. 만든 사람이
+/// 담당자(owner)가 되고, 구성원은 만든 뒤 프로젝트 화면에서 초대한다(공개 프로젝트는 팀의
+/// 정회원 이상이 초대 없이 찾아서 참여할 수도 있다).
 Future<Project?> showNewProjectDialog(
   BuildContext context,
   Session session,
@@ -32,6 +34,17 @@ Future<Project?> showNewProjectDialog(
     builder: (_) => _NewProjectDialog(session: session, teamId: teamId),
   );
 }
+
+/// 프로젝트 대표 색상 후보 — 첫 번째가 기본값.
+const projectColorChoices = <String>[
+  '#5B8DEF',
+  '#10B981',
+  '#F59E0B',
+  '#EF4444',
+  '#A78BFA',
+  '#F472B6',
+  '#64748B',
+];
 
 class _NewProjectDialog extends StatefulWidget {
   final Session session;
@@ -46,16 +59,10 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
   final _name = TextEditingController();
   final _identifier = TextEditingController();
   final _description = TextEditingController();
-  final _selected = <String>{};
-  List<AppUser>? _members;
+  String _color = projectColorChoices.first;
+  bool _isPublic = true;
   bool _submitting = false;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMembers();
-  }
 
   @override
   void dispose() {
@@ -65,17 +72,11 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     super.dispose();
   }
 
-  Future<void> _loadMembers() async {
-    try {
-      final list = await widget.session.fetchTeamMembers();
-      list.removeWhere((u) => u.id == widget.session.userId);
-      if (mounted) setState(() => _members = list);
-    } catch (_) {
-      if (mounted) setState(() => _members = []);
-    }
-  }
-
   Future<void> _submit() async {
+    if (_name.text.trim().isEmpty) {
+      setState(() => _error = '프로젝트 이름을 입력하세요.');
+      return;
+    }
     setState(() {
       _submitting = true;
       _error = null;
@@ -88,7 +89,8 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
         description: _description.text.trim().isEmpty
             ? null
             : _description.text.trim(),
-        memberIds: _selected.toList(),
+        color: _color,
+        isPublic: _isPublic,
       );
       if (mounted) Navigator.of(context).pop(project);
     } catch (e) {
@@ -98,14 +100,35 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     }
   }
 
+  Widget _label(String text, {String? hint}) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: text,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+          if (hint != null)
+            TextSpan(
+              text: '  $hint',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).hintColor,
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    final members = _members;
     return FloatingDialog(
-      title: '새 프로젝트',
+      title: '프로젝트 생성',
       maxWidth: 520,
-      maxHeight: 640,
+      maxHeight: 780,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -113,21 +136,28 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
           Flexible(
             child: MutedScrollbar(
               child: ListView(
+                padding: const EdgeInsets.only(right: 12),
                 children: [
+                  _label('프로젝트 이름'),
                   TextField(
                     controller: _name,
                     autofocus: true,
                     maxLength: 60,
                     decoration: const InputDecoration(
-                      labelText: '프로젝트 이름',
+                      hintText: '프로젝트 이름을 입력하세요',
+                      counterText: '',
                       border: OutlineInputBorder(),
                     ),
-                    // 이름을 적으면 식별자를 아직 안 건드린 경우에 한해 앞글자로 추천한다.
+                    // 이름을 적으면 키를 아직 안 건드린 경우에 한해 영문 앞글자로 추천한다.
                     onChanged: (v) {
                       if (_identifier.text.isNotEmpty) return;
                       final guess = v
                           .toUpperCase()
-                          .replaceAll(RegExp(r'[^A-Z0-9]'), '');
+                          .replaceAll(RegExp(r'[^A-Z0-9]'), '')
+                          .replaceFirst(
+                            RegExp(r'^[0-9]+'),
+                            '',
+                          ); // 키는 영문으로 시작해야 한다.
                       if (guess.length >= 2) {
                         _identifier.text = guess.substring(
                           0,
@@ -136,71 +166,87 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                       }
                     },
                   ),
+                  const SizedBox(height: 20),
+                  _label('대표 색상'),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final hex in projectColorChoices)
+                        InkWell(
+                          onTap: () => setState(() => _color = hex),
+                          customBorder: const CircleBorder(),
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            padding: const EdgeInsets.all(2.5),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _color == hex
+                                    ? Theme.of(context).colorScheme.onSurface
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: parseTypeColor(hex),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  _label(
+                    '프로젝트 키',
+                    hint: '프로젝트를 구분하기 위한 식별 키를 입력하세요. (예: HR, CX, DEV)',
+                  ),
                   TextField(
                     controller: _identifier,
                     maxLength: 10,
                     textCapitalization: TextCapitalization.characters,
                     decoration: const InputDecoration(
-                      labelText: '식별자 (업무 번호에 붙습니다 — 예: MKT → MKT-1001)',
                       hintText: 'MKT',
+                      counterText: '',
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  const SizedBox(height: 20),
+                  _label('설명'),
                   TextField(
                     controller: _description,
                     maxLines: 3,
-                    minLines: 2,
+                    minLines: 3,
                     decoration: const InputDecoration(
-                      labelText: '설명 (선택)',
+                      hintText: '프로젝트에 대한 설명을 추가하세요...',
                       border: OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text('구성원 (선택)', style: Theme.of(context).textTheme.labelLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    '나는 담당자로 자동 포함됩니다. 나중에 프로젝트에서 더 초대할 수 있습니다.',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: hint),
+                  const SizedBox(height: 20),
+                  Text('공개 설정', style: TextStyle(color: hint)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<bool>(
+                    initialValue: _isPublic,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: true, child: Text('공개')),
+                      DropdownMenuItem(value: false, child: Text('비공개')),
+                    ],
+                    onChanged: (v) => setState(() => _isPublic = v ?? true),
                   ),
                   const SizedBox(height: 8),
-                  if (members == null)
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                    )
-                  else
-                    for (final user in members)
-                      CheckboxListTile(
-                        dense: true,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        value: _selected.contains(user.id),
-                        title: Row(
-                          children: [
-                            UserAvatar(
-                              user: user,
-                              resolveUrl: widget.session.resolveUrl,
-                              radius: 12,
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(child: Text(user.name)),
-                          ],
-                        ),
-                        onChanged: (v) => setState(() {
-                          if (v == true) {
-                            _selected.add(user.id);
-                          } else {
-                            _selected.remove(user.id);
-                          }
-                        }),
-                      ),
+                  Text(
+                    _isPublic
+                        ? '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 프로젝트를 확인하고 참여할 수 있습니다.'
+                        : '초대한 구성원만 프로젝트를 확인할 수 있습니다.',
+                    style: TextStyle(color: hint, fontSize: 12),
+                  ),
                 ],
               ),
             ),
@@ -209,31 +255,22 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
             const SizedBox(height: 8),
             Text(_error!, style: const TextStyle(color: Colors.redAccent)),
           ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _submitting
-                      ? null
-                      : () => Navigator.of(context).pop(),
-                  child: const Text('취소'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('만들기'),
-                ),
-              ),
-            ],
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 48,
+            child: FilledButton(
+              onPressed: _submitting ? null : _submit,
+              child: _submitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text(
+                      '프로젝트 생성',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+            ),
           ),
         ],
       ),
@@ -248,6 +285,8 @@ Future<Task?> showNewTaskDialog(
   List<Project> projects = const [],
   String? projectId,
   List<AppUser> members = const [],
+  String? initialTitle,
+  String? initialDescription,
 }) {
   return showDialog<Task>(
     context: context,
@@ -256,6 +295,8 @@ Future<Task?> showNewTaskDialog(
       projects: projects,
       projectId: projectId,
       members: members,
+      initialTitle: initialTitle,
+      initialDescription: initialDescription,
     ),
   );
 }
@@ -265,11 +306,15 @@ class _NewTaskDialog extends StatefulWidget {
   final List<Project> projects;
   final String? projectId;
   final List<AppUser> members;
+  final String? initialTitle;
+  final String? initialDescription;
   const _NewTaskDialog({
     required this.session,
     required this.projects,
     required this.projectId,
     required this.members,
+    this.initialTitle,
+    this.initialDescription,
   });
 
   @override
@@ -277,13 +322,24 @@ class _NewTaskDialog extends StatefulWidget {
 }
 
 class _NewTaskDialogState extends State<_NewTaskDialog> {
-  final _title = TextEditingController();
-  final _description = TextEditingController();
+  late final _title = TextEditingController(text: widget.initialTitle);
+  late final _description = TextEditingController(
+    text: widget.initialDescription,
+  );
   late String? _projectId = widget.projectId ?? widget.projects.firstOrNull?.id;
   late List<AppUser> _members = widget.members;
   String? _assigneeId;
-  TaskStatus _status = TaskStatus.todo;
+  List<TaskStatusDef> _statuses = const [];
+  String? _statusId;
+  List<TaskFieldDef> _fields = const [];
+  List<TaskTemplate> _templates = const [];
+  String? _templateId;
+  final _customValues = <String, dynamic>{};
   TaskPriority _priority = TaskPriority.normal;
+  List<TaskType> _types = const [];
+  String? _typeId;
+  final _referenceIds = <String>{};
+  DateTime? _startDate;
   DateTime? _dueDate;
   bool _submitting = false;
   String? _error;
@@ -292,6 +348,43 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   void initState() {
     super.initState();
     if (_members.isEmpty) _loadMembers();
+    _loadTypes();
+  }
+
+  /// 유형은 프로젝트마다 따로 관리하므로, 프로젝트를 고르거나 바꿀 때 그 프로젝트 것으로 받아온다.
+  Future<void> _loadTypes() async {
+    final id = _projectId;
+    if (id == null) return;
+    try {
+      final types = await widget.session.api!.fetchTaskTypes(id);
+      if (mounted) {
+        setState(() {
+          _types = types;
+          if (!types.any((t) => t.id == _typeId)) _typeId = null;
+        });
+      }
+    } catch (_) {
+      // 유형을 못 받아와도 업무는 유형 없이 만들 수 있다.
+    }
+    try {
+      final statuses = await widget.session.api!.fetchTaskStatuses(id);
+      final fields = await widget.session.api!.fetchTaskFields(id);
+      final templates = await widget.session.api!.fetchTaskTemplates(id);
+      if (mounted) {
+        setState(() {
+          _templates = templates;
+          _templateId = null;
+          _statuses = statuses;
+          if (!statuses.any((s) => s.id == _statusId)) {
+            _statusId = statuses.firstOrNull?.id;
+          }
+          _fields = fields;
+          _customValues.clear();
+        });
+      }
+    } catch (_) {
+      // 상태/필드를 못 받아와도 기본 상태(할 일)로 만들 수 있다.
+    }
   }
 
   @override
@@ -299,6 +392,26 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     _title.dispose();
     _description.dispose();
     super.dispose();
+  }
+
+  /// 템플릿을 고르면 제목·설명·우선순위·유형·담당자·마감일을 그 값으로 채운다(비어 있는 항목은 그대로 둔다).
+  void _applyTemplate(TaskTemplate t) {
+    setState(() {
+      _templateId = t.id;
+      if (t.title.isNotEmpty) _title.text = t.title;
+      if (t.description != null) _description.text = t.description!;
+      _priority = t.priority;
+      if (t.typeId != null && _types.any((x) => x.id == t.typeId)) {
+        _typeId = t.typeId;
+      }
+      if (t.assigneeId != null && _members.any((m) => m.id == t.assigneeId)) {
+        _assigneeId = t.assigneeId;
+      }
+      if (t.dueOffsetDays != null) {
+        final now = DateTime.now();
+        _dueDate = DateTime(now.year, now.month, now.day + t.dueOffsetDays!);
+      }
+    });
   }
 
   /// 담당자 후보는 그 프로젝트의 구성원 — 프로젝트를 바꾸면 다시 받아온다.
@@ -311,6 +424,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
         setState(() {
           _members = project.members;
           if (!_members.any((m) => m.id == _assigneeId)) _assigneeId = null;
+          _referenceIds.removeWhere((id) => !_members.any((m) => m.id == id));
         });
       }
     } catch (_) {
@@ -336,8 +450,12 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
             ? null
             : _description.text.trim(),
         assigneeId: _assigneeId,
-        status: _status,
+        statusId: _statusId,
+        customValues: _customValues.isEmpty ? null : _customValues,
         priority: _priority,
+        typeId: _typeId,
+        referenceIds: _referenceIds.toList(),
+        startDate: _startDate,
         dueDate: _dueDate,
       );
       if (mounted) Navigator.of(context).pop(task);
@@ -381,9 +499,39 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                         onChanged: (v) {
                           setState(() => _projectId = v);
                           _loadMembers();
+                          _loadTypes();
                         },
                       ),
                     ),
+                  if (_templates.isNotEmpty) ...[
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('tpl-$_templateId-${_templates.length}'),
+                      initialValue: _templateId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: '템플릿에서 불러오기',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final t in _templates)
+                          DropdownMenuItem(
+                            value: t.id,
+                            child: Text(
+                              t.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) {
+                        final t = _templates
+                            .where((x) => x.id == v)
+                            .firstOrNull;
+                        if (t != null) _applyTemplate(t);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     controller: _title,
                     autofocus: true,
@@ -410,24 +558,49 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                     onChanged: (v) => setState(() => _assigneeId = v),
                   ),
                   const SizedBox(height: 12),
+                  _ReferenceField(
+                    session: widget.session,
+                    members: _members,
+                    selectedIds: _referenceIds.toList(),
+                    onChanged: (ids) => setState(() {
+                      _referenceIds
+                        ..clear()
+                        ..addAll(ids);
+                    }),
+                  ),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
-                        child: DropdownButtonFormField<TaskStatus>(
-                          initialValue: _status,
+                        child: _TypeField(
+                          types: _types,
+                          value: _typeId,
+                          onChanged: (v) => setState(() => _typeId = v),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey(
+                            'status-$_statusId-${_statuses.length}',
+                          ),
+                          initialValue: _statusId,
+                          isExpanded: true,
                           decoration: const InputDecoration(
                             labelText: '상태',
                             border: OutlineInputBorder(),
                           ),
                           items: [
-                            for (final s in TaskStatus.values)
+                            for (final s in _statuses)
                               DropdownMenuItem(
-                                value: s,
-                                child: Text(taskStatusLabel(s)),
+                                value: s.id,
+                                child: Text(
+                                  s.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                           ],
-                          onChanged: (v) =>
-                              setState(() => _status = v ?? TaskStatus.todo),
+                          onChanged: (v) => setState(() => _statusId = v),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -454,9 +627,29 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                   ),
                   const SizedBox(height: 12),
                   _DueDateField(
+                    label: '시작일',
+                    value: _startDate,
+                    onChanged: (v) => setState(() => _startDate = v),
+                  ),
+                  _DueDateField(
                     value: _dueDate,
                     onChanged: (v) => setState(() => _dueDate = v),
                   ),
+                  if (_fields.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _CustomFieldsEditor(
+                      fields: _fields,
+                      values: _customValues,
+                      commitOnChange: true,
+                      onChanged: (id, v) => setState(() {
+                        if (v == null) {
+                          _customValues.remove(id);
+                        } else {
+                          _customValues[id] = v;
+                        }
+                      }),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -522,6 +715,9 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
   final _comment = TextEditingController();
   Task? _task;
   List<AppUser> _members = const [];
+  List<TaskType> _types = const [];
+  List<TaskStatusDef> _statuses = const [];
+  List<TaskFieldDef> _fields = const [];
   String? _error;
   bool _saving = false;
 
@@ -541,10 +737,18 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     try {
       final task = await widget.session.api!.fetchTask(widget.taskId);
       final project = await widget.session.api!.fetchProject(task.projectId);
+      final types = await widget.session.api!.fetchTaskTypes(task.projectId);
+      final statuses = await widget.session.api!.fetchTaskStatuses(
+        task.projectId,
+      );
+      final fields = await widget.session.api!.fetchTaskFields(task.projectId);
       if (mounted) {
         setState(() {
           _task = task;
           _members = project.members;
+          _types = types;
+          _statuses = statuses;
+          _fields = fields;
           _error = null;
         });
       }
@@ -555,10 +759,16 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
 
   /// 바꾼 항목 하나를 바로 저장한다(상태/담당자/마감일은 눌러서 즉시 반영되는 게 자연스럽다).
   Future<void> _patch({
-    TaskStatus? status,
+    String? statusId,
+    Map<String, dynamic>? customValues,
     TaskPriority? priority,
     String? assigneeId,
     bool clearAssignee = false,
+    String? typeId,
+    bool clearType = false,
+    List<String>? referenceIds,
+    DateTime? startDate,
+    bool clearStartDate = false,
     DateTime? dueDate,
     bool clearDueDate = false,
   }) async {
@@ -566,10 +776,16 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     try {
       final updated = await widget.session.api!.updateTask(
         widget.taskId,
-        status: status,
+        statusId: statusId,
+        customValues: customValues,
         priority: priority,
         assigneeId: assigneeId,
         clearAssignee: clearAssignee,
+        typeId: typeId,
+        clearType: clearType,
+        referenceIds: referenceIds,
+        startDate: startDate,
+        clearStartDate: clearStartDate,
         dueDate: dueDate,
         clearDueDate: clearDueDate,
       );
@@ -585,6 +801,15 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// 이 업무가 [status] 상태인지 — 상태 id가 없는 예전 업무는 같은 분류의 첫 상태로 본다.
+  bool _isCurrentStatus(Task task, TaskStatusDef status) {
+    if (task.statusId != null && _statuses.any((s) => s.id == task.statusId)) {
+      return task.statusId == status.id;
+    }
+    return _statuses.firstWhere((s) => s.category == task.status).id ==
+        status.id;
   }
 
   Future<void> _addComment() async {
@@ -634,7 +859,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     return FloatingDialog(
       title: task?.key ?? '업무',
       maxWidth: 560,
-      maxHeight: 700,
+      maxHeight: 780,
       child: _error != null
           ? Center(child: Text(_error!))
           : task == null
@@ -667,13 +892,21 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                           runSpacing: 8,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            for (final status in TaskStatus.values)
+                            for (final status in _statuses)
                               ChoiceChip(
-                                label: Text(taskStatusLabel(status)),
-                                selected: task.status == status,
+                                label: Text(status.name),
+                                avatar: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: parseTypeColor(status.color),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                selected: _isCurrentStatus(task, status),
                                 onSelected: _saving
                                     ? null
-                                    : (_) => _patch(status: status),
+                                    : (_) => _patch(statusId: status.id),
                               ),
                             const SizedBox(width: 4),
                             DdayBadge(task: task),
@@ -689,12 +922,43 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                               : _patch(assigneeId: v),
                         ),
                         const SizedBox(height: 12),
+                        _ReferenceField(
+                          session: widget.session,
+                          members: _members,
+                          selectedIds: task.referenceIds,
+                          onChanged: (ids) => _patch(referenceIds: ids),
+                        ),
+                        const SizedBox(height: 12),
+                        _TypeField(
+                          types: _types,
+                          value: task.typeId,
+                          onChanged: (v) => v == null
+                              ? _patch(clearType: true)
+                              : _patch(typeId: v),
+                        ),
+                        const SizedBox(height: 12),
+                        _DueDateField(
+                          label: '시작일',
+                          value: task.startDate,
+                          onChanged: (v) => v == null
+                              ? _patch(clearStartDate: true)
+                              : _patch(startDate: v),
+                        ),
                         _DueDateField(
                           value: task.dueDate,
                           onChanged: (v) => v == null
                               ? _patch(clearDueDate: true)
                               : _patch(dueDate: v),
                         ),
+                        if (_fields.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          _CustomFieldsEditor(
+                            fields: _fields,
+                            values: task.customValues,
+                            commitOnChange: false,
+                            onChanged: (id, v) => _patch(customValues: {id: v}),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         Row(
                           children: [
@@ -712,7 +976,8 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                               ],
                               onChanged: _saving
                                   ? null
-                                  : (v) => v == null ? null : _patch(priority: v),
+                                  : (v) =>
+                                        v == null ? null : _patch(priority: v),
                             ),
                           ],
                         ),
@@ -852,11 +1117,201 @@ class _AssigneeField extends StatelessWidget {
   }
 }
 
-/// 마감일 고르기 — 누르면 달력이 뜨고, X로 지울 수 있다.
+/// 업무 유형 고르기 — 그 프로젝트의 유형 목록에서(없음도 가능).
+class _TypeField extends StatelessWidget {
+  final List<TaskType> types;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+  const _TypeField({
+    required this.types,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final safeValue = types.any((t) => t.id == value) ? value : null;
+    return DropdownButtonFormField<String?>(
+      key: ValueKey('type-$safeValue-${types.length}'),
+      initialValue: safeValue,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        labelText: '유형',
+        border: OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('유형 없음')),
+        for (final type in types)
+          DropdownMenuItem(
+            value: type.id,
+            child: Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: parseTypeColor(type.color),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(type.name, overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// 참조자 고르기 — 고른 사람은 칩으로 보이고, 누르면 구성원 체크 목록이 뜬다.
+class _ReferenceField extends StatelessWidget {
+  final Session session;
+  final List<AppUser> members;
+  final List<String> selectedIds;
+  final ValueChanged<List<String>> onChanged;
+  const _ReferenceField({
+    required this.session,
+    required this.members,
+    required this.selectedIds,
+    required this.onChanged,
+  });
+
+  Future<void> _pick(BuildContext context) async {
+    final result = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _ReferencePickDialog(
+        session: session,
+        members: members,
+        initial: selectedIds,
+      ),
+    );
+    if (result != null) onChanged(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final selected = [
+      for (final id in selectedIds)
+        if (members.any((m) => m.id == id))
+          members.firstWhere((m) => m.id == id),
+    ];
+    return InkWell(
+      onTap: () => _pick(context),
+      borderRadius: BorderRadius.circular(4),
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: '참조자',
+          border: OutlineInputBorder(),
+          isDense: true,
+        ),
+        child: selected.isEmpty
+            ? Text('참조자 없음 (눌러서 추가)', style: TextStyle(color: hint))
+            : Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  for (final user in selected)
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: UserAvatar(
+                        user: user,
+                        resolveUrl: session.resolveUrl,
+                        radius: 9,
+                      ),
+                      label: Text(user.name),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _ReferencePickDialog extends StatefulWidget {
+  final Session session;
+  final List<AppUser> members;
+  final List<String> initial;
+  const _ReferencePickDialog({
+    required this.session,
+    required this.members,
+    required this.initial,
+  });
+
+  @override
+  State<_ReferencePickDialog> createState() => _ReferencePickDialogState();
+}
+
+class _ReferencePickDialogState extends State<_ReferencePickDialog> {
+  late final _selected = widget.initial.toSet();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('참조자 선택'),
+      content: SizedBox(
+        width: 360,
+        height: 360,
+        child: MutedScrollbar(
+          child: ListView(
+            children: [
+              for (final user in widget.members)
+                CheckboxListTile(
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: _selected.contains(user.id),
+                  title: Row(
+                    children: [
+                      UserAvatar(
+                        user: user,
+                        resolveUrl: widget.session.resolveUrl,
+                        radius: 12,
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(child: Text(user.name)),
+                    ],
+                  ),
+                  onChanged: (v) => setState(() {
+                    if (v == true) {
+                      _selected.add(user.id);
+                    } else {
+                      _selected.remove(user.id);
+                    }
+                  }),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_selected.toList()),
+          child: const Text('확인'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 날짜 고르기(시작일/마감일) — 누르면 달력이 뜨고, X로 지울 수 있다.
 class _DueDateField extends StatelessWidget {
+  final String label;
   final DateTime? value;
   final ValueChanged<DateTime?> onChanged;
-  const _DueDateField({required this.value, required this.onChanged});
+  const _DueDateField({
+    this.label = '마감일',
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -865,7 +1320,7 @@ class _DueDateField extends StatelessWidget {
       children: [
         Icon(Icons.event_outlined, size: 18, color: hint),
         const SizedBox(width: 8),
-        Text('마감일', style: TextStyle(color: hint)),
+        Text(label, style: TextStyle(color: hint)),
         const SizedBox(width: 12),
         TextButton(
           onPressed: () async {
@@ -883,10 +1338,152 @@ class _DueDateField extends StatelessWidget {
         if (value != null)
           IconButton(
             icon: const Icon(Icons.close, size: 16),
-            tooltip: '마감일 지우기',
+            tooltip: '$label 지우기',
             onPressed: () => onChanged(null),
           ),
       ],
+    );
+  }
+}
+
+/// 프로젝트의 사용자 정의 필드 입력칸들 — 새 업무에서는 바뀔 때마다([commitOnChange]),
+/// 상세에서는 입력을 마쳤을 때(포커스를 잃거나 Enter) 값을 넘긴다. 지우면 null.
+class _CustomFieldsEditor extends StatelessWidget {
+  final List<TaskFieldDef> fields;
+  final Map<String, dynamic> values;
+  final bool commitOnChange;
+  final void Function(String fieldId, dynamic value) onChanged;
+  const _CustomFieldsEditor({
+    required this.fields,
+    required this.values,
+    required this.commitOnChange,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('추가 정보', style: TextStyle(color: hint, fontSize: 12)),
+        const SizedBox(height: 8),
+        for (final f in fields)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: switch (f.kind) {
+              'date' => _DueDateField(
+                label: f.name,
+                value: values[f.id] is num
+                    ? DateTime.fromMillisecondsSinceEpoch(
+                        (values[f.id] as num).toInt(),
+                      )
+                    : null,
+                onChanged: (d) => onChanged(f.id, d?.millisecondsSinceEpoch),
+              ),
+              'select' => DropdownButtonFormField<String?>(
+                key: ValueKey('cf-${f.id}-${values[f.id]}'),
+                initialValue: f.options.contains(values[f.id])
+                    ? values[f.id] as String
+                    : null,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: f.name,
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('선택 안 함')),
+                  for (final o in f.options)
+                    DropdownMenuItem(value: o, child: Text(o)),
+                ],
+                onChanged: (v) => onChanged(f.id, v),
+              ),
+              _ => _CustomTextInput(
+                key: ValueKey('cf-${f.id}'),
+                field: f,
+                value: values[f.id],
+                commitOnChange: commitOnChange,
+                onChanged: (v) => onChanged(f.id, v),
+              ),
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _CustomTextInput extends StatefulWidget {
+  final TaskFieldDef field;
+  final dynamic value;
+  final bool commitOnChange;
+  final ValueChanged<dynamic> onChanged;
+  const _CustomTextInput({
+    super.key,
+    required this.field,
+    required this.value,
+    required this.commitOnChange,
+    required this.onChanged,
+  });
+
+  @override
+  State<_CustomTextInput> createState() => _CustomTextInputState();
+}
+
+class _CustomTextInputState extends State<_CustomTextInput> {
+  late final _controller = TextEditingController(
+    text: widget.field.display(widget.value) ?? '',
+  );
+  final _focus = FocusNode();
+  String _committed = '';
+
+  bool get _isNumber => widget.field.kind == 'number';
+
+  @override
+  void initState() {
+    super.initState();
+    _committed = _controller.text;
+    _focus.addListener(() {
+      if (!_focus.hasFocus) _commit();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _commit() {
+    final text = _controller.text.trim();
+    if (text == _committed) return;
+    _committed = text;
+    if (text.isEmpty) {
+      widget.onChanged(null);
+    } else if (_isNumber) {
+      final n = num.tryParse(text);
+      if (n != null) widget.onChanged(n);
+    } else {
+      widget.onChanged(text);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _controller,
+      focusNode: _focus,
+      keyboardType: _isNumber
+          ? const TextInputType.numberWithOptions(decimal: true, signed: true)
+          : TextInputType.text,
+      decoration: InputDecoration(
+        labelText: widget.field.name,
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+      onChanged: widget.commitOnChange ? (_) => _commit() : null,
+      onSubmitted: (_) => _commit(),
     );
   }
 }

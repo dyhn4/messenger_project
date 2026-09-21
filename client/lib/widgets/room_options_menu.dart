@@ -9,6 +9,7 @@ import '../screens/invite_members_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/session.dart';
+import 'app_toast.dart';
 import 'export_chat_dialog.dart';
 import 'floating_dialog.dart';
 import 'self_destruct_picker_dialog.dart';
@@ -345,6 +346,92 @@ class RoomOptionsMenu extends StatelessWidget {
               Text(leaveLabel, style: const TextStyle(color: Colors.redAccent)),
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 그룹채팅방 이름을 나에게만 바꾼다(다른 멤버에게는 그대로) — 비우고 저장하면 원래 이름으로.
+/// 채팅방 더보기 메뉴, 방 목록 우클릭 메뉴(PC), 길게 누르는 하단 시트(모바일)가 같이 쓴다.
+Future<void> showRenameRoomForMeDialog(
+  BuildContext context,
+  Session session,
+  Room room,
+) async {
+  final result = await showDialog<String>(
+    context: context,
+    builder: (_) => _RenameRoomDialog(
+      initial: room.customName ?? '',
+      originalName: room.originalDisplayName(session.userId ?? ''),
+    ),
+  );
+  if (result == null) return;
+  try {
+    await session.renameRoomForMe(room, result);
+  } catch (e) {
+    if (context.mounted) showAppToast(context, '이름을 바꾸지 못했습니다: $e');
+  }
+}
+
+/// 메뉴 항목에 보여줄 "이름 변경" 문구 — 별칭을 붙여둔 방이면 원래 방 이름을 괄호로 같이 보여준다.
+String renameRoomMenuLabel(Room room, String myUserId) =>
+    room.customName == null
+    ? '이름 변경'
+    : '이름 변경(${room.originalDisplayName(myUserId)})';
+
+/// "이름 변경" 입력 대화상자 — 저장하면 입력값(빈 문자열이면 별칭 삭제)을, 취소하면 null을 돌려준다.
+class _RenameRoomDialog extends StatefulWidget {
+  final String initial;
+  final String originalName;
+  const _RenameRoomDialog({required this.initial, required this.originalName});
+
+  @override
+  State<_RenameRoomDialog> createState() => _RenameRoomDialogState();
+}
+
+class _RenameRoomDialogState extends State<_RenameRoomDialog> {
+  late final _controller = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('이름 변경'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '나에게만 바뀌어 보이고, 다른 멤버에게는 영향이 없습니다.\n비우고 저장하면 원래 이름으로 돌아갑니다.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLength: 100,
+            decoration: InputDecoration(
+              hintText: widget.originalName,
+              border: const OutlineInputBorder(),
+            ),
+            onSubmitted: (v) => Navigator.of(context).pop(v),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('저장'),
         ),
       ],
     );

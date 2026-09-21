@@ -18,6 +18,7 @@ import '../widgets/pagination.dart';
 import '../widgets/position_badge.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
+import '../widgets/team_avatar.dart';
 import '../widgets/team_switcher.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
@@ -240,8 +241,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   /// _onSessionChanged가 곧이어 그 예약을 소비해서 _selectRoom을 대신 호출해준다(main.dart의
   /// 알림 클릭 처리, org_chart_screen.dart의 멤버 선택과 같은 패턴).
   void _openNotificationRoom(Room room) {
+    final hadUnreadAnnouncement = room.hasUnreadAnnouncement;
     setState(() => _notificationsOpen = false);
     widget.session.requestOpenRoom(room);
+    // 안 읽은 공지 때문에 알림 센터에 떠 있던 방이면 공지 내용도 팝업으로 띄운다.
+    showUnreadAnnouncementPopup(
+      context,
+      widget.session,
+      room,
+      hadUnreadAnnouncement: hadUnreadAnnouncement,
+    );
   }
 
   @override
@@ -460,9 +469,37 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   /// 이 하나의 메서드를 같이 쓴다 — 헤더(즐겨찾기/아바타/이름(+1:1이면 직책 배지)/삼점메뉴)와
   /// ChatPanel을 완전히 똑같은 모양으로 그린다. onClose가 있으면(분할 패널) 헤더에 닫기
   /// 버튼이 하나 더 붙는다.
-  Widget _buildChatArea(BuildContext context, Room? room, {VoidCallback? onClose}) {
+  Widget _buildChatArea(
+    BuildContext context,
+    Room? room, {
+    VoidCallback? onClose,
+  }) {
     if (room == null) {
-      return const Center(child: Text('왼쪽에서 대화방을 선택하세요.'));
+      // 방을 아직 안 골랐을 땐(팀을 막 전환한 직후 포함) 지금 보고 있는 팀을 알려준다.
+      final team = widget.session.currentTeam;
+      if (team == null) {
+        return const Center(child: Text('왼쪽에서 대화방을 선택하세요.'));
+      }
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TeamAvatar(team: team, size: 96),
+            const SizedBox(height: 16),
+            Text(
+              '${team.name}입니다',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '왼쪽에서 대화방을 선택하세요.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).hintColor,
+              ),
+            ),
+          ],
+        ),
+      );
     }
     final isSplit = onClose != null;
     final otherMember = room.type == RoomType.dm
@@ -503,7 +540,9 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                         room.displayName(widget.session.userId ?? ''),
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(color: room.isSecret ? Colors.green : null),
+                            ?.copyWith(
+                              color: room.isSecret ? Colors.green : null,
+                            ),
                       ),
                     ),
                     // 방 목록의 배지와 달리 헤더는 등급(조장 이상)과 무관하게 직책이 있으면
@@ -613,15 +652,24 @@ class _TopBar extends StatelessWidget {
           ),
           // "프로젝트"는 대화(토픽/방)와 성격이 다른 별도 공간이라, 나머지 아이콘들과
           // 구분선으로 한 번 끊어서 왼쪽에 둔다(잔디와 같은 배치).
-          IconButton(
-            icon: const Icon(Icons.track_changes),
-            tooltip: '프로젝트',
-            // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로
-            // 열고, 그 외(안드로이드)는 지금처럼 대화상자로 연다.
-            onPressed: () => Platform.isWindows
-                ? openProjectWindow(session)
-                : showProjectDialog(context, session),
-          ),
+          if (session.canUseProjects)
+            IconButton(
+              icon: ListenableBuilder(
+                listenable: session,
+                builder: (context, _) => Badge(
+                  isLabelVisible: session.projectUnread > 0,
+                  backgroundColor: Colors.redAccent,
+                  label: Text('${session.projectUnread}'),
+                  child: const Icon(Icons.track_changes),
+                ),
+              ),
+              tooltip: '프로젝트',
+              // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로
+              // 열고, 그 외(안드로이드)는 지금처럼 대화상자로 연다.
+              onPressed: () => Platform.isWindows
+                  ? openProjectWindow(session)
+                  : showProjectDialog(context, session),
+            ),
           const SizedBox(
             height: 24,
             child: VerticalDivider(width: 16, thickness: 1),
@@ -1215,7 +1263,15 @@ class _SectionHeader extends StatelessWidget {
 }
 
 /// 방 목록 우클릭 메뉴 항목 — _RoomTileState._showContextMenu가 값으로 돌려받는다.
-enum _RoomContextAction { split, startSecret, toggleMute, markAllRead, hide, leave }
+enum _RoomContextAction {
+  split,
+  startSecret,
+  toggleMute,
+  rename,
+  markAllRead,
+  hide,
+  leave,
+}
 
 class _RoomTile extends StatefulWidget {
   final Room room;
@@ -1293,6 +1349,12 @@ class _RoomTileState extends State<_RoomTile> {
           value: _RoomContextAction.toggleMute,
           child: Text(room.muted ? '대화방 알림 켜기' : '대화방 알림 끄기'),
         ),
+        // 그룹채팅방만 — 나에게만 다른 이름으로 부르기(다른 멤버에겐 그대로).
+        if (room.type == RoomType.group)
+          PopupMenuItem(
+            value: _RoomContextAction.rename,
+            child: Text(renameRoomMenuLabel(room, session.userId ?? '')),
+          ),
         const PopupMenuItem(
           value: _RoomContextAction.markAllRead,
           child: Text('모두 읽음 처리'),
@@ -1327,6 +1389,8 @@ class _RoomTileState extends State<_RoomTile> {
         }
       case _RoomContextAction.toggleMute:
         await session.toggleMuted(room);
+      case _RoomContextAction.rename:
+        await showRenameRoomForMeDialog(context, session, room);
       case _RoomContextAction.markAllRead:
         session.controllerFor(room).markReadNow();
         session.clearUnreadCount(room.id);
@@ -1364,7 +1428,8 @@ class _RoomTileState extends State<_RoomTile> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
-        onSecondaryTapDown: (details) => _showContextMenu(details.globalPosition),
+        onSecondaryTapDown: (details) =>
+            _showContextMenu(details.globalPosition),
         child: ListTile(
           dense: true,
           selected: widget.selected,

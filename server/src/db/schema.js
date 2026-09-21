@@ -1,4 +1,4 @@
-import { boolean, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 스키마의 원본(source of truth). `npm run db:generate`가 이 파일을 이전 스냅샷과 비교해서
@@ -343,6 +343,9 @@ export const roomMembers = pgTable(
     favorite: boolean('favorite').notNull().default(false),
     // 알림 끄기도 마찬가지로 개인 설정 — 이 방을 뮤트한 멤버에게는 FCM 푸시를 안 보낸다(push.js).
     muted: boolean('muted').notNull().default(false),
+    // 그룹채팅방 이름을 "나에게만" 다르게 부르는 개인 별칭 — 방 자체의 name은 그대로고 다른
+    // 멤버에게는 영향이 없다(즐겨찾기/뮤트와 같은 방식). null이면 원래 이름을 쓴다.
+    customName: text('custom_name'),
     // 평문 DM의 "채팅방 숨기기"/"채팅방 나가기" — 멤버십은 그대로 두고 이 플래그만 켠다.
     // 원래는 removeRoomMember로 진짜 멤버를 뺐는데, DM은 멤버가 나+상대 둘뿐이라 그러면
     // 상대 쪽 화면에서 방 이름이 "(알 수 없음)"이 되고 상대가 보낸 메시지도 안 받게 되는
@@ -549,6 +552,11 @@ export const projects = pgTable(
     description: text('description'),
     // 업무 번호 앞에 붙는 짧은 식별자(예: 'MKT' → MKT-1001). 팀 안에서 유일해야 한다.
     identifier: text('identifier').notNull(),
+    // 사이드바/카드에서 프로젝트를 구분해 주는 대표 색('#RRGGBB').
+    color: text('color').notNull().default('#5B8DEF'),
+    // 공개 프로젝트 — 팀 안의 정회원 이상 누구나 초대 없이 찾아보고 "참여"할 수 있다.
+    // 비공개(기본)는 초대받은 구성원만 볼 수 있다.
+    isPublic: boolean('is_public').notNull().default(false),
     // 다음에 만들 업무에 줄 번호. 업무를 지워도 번호를 재사용하지 않도록 프로젝트에 들고 있다
     // (tasks에서 MAX(seq)+1로 계산하면 삭제 후 번호가 겹친다).
     nextTaskSeq: integer('next_task_seq').notNull().default(1),
@@ -584,6 +592,67 @@ export const projectMembers = pgTable(
 );
 
 /** 프로젝트 안의 업무(태스크). 화면에 보이는 번호는 `<프로젝트 identifier>-<seq>`로 만든다. */
+/**
+ * 업무 유형(Bug/Feature/행사 등) — 프로젝트마다 이름과 색을 직접 관리한다. 유형을 지워도 업무는
+ * 남고 유형만 비워진다(on delete set null).
+ */
+export const taskTypes = pgTable(
+  'task_types',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    // '#RRGGBB' — 화면에서 뱃지 배경/글자색으로 쓴다.
+    color: text('color').notNull().default('#607D8B'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('task_types_project_name_idx').on(t.projectId, t.name)],
+);
+
+/**
+ * 프로젝트별 업무 상태 — 이름/색은 자유지만 반드시 세 분류(category) 중 하나에 속한다.
+ * 진행률·완료 집계·"내 업무" 등 기존 로직은 tasks.status(=분류)만 보므로, 상태를 마음대로
+ * 추가해도 통계가 깨지지 않는다. 칸반보드의 열이 이 목록이다.
+ */
+export const taskStatuses = pgTable(
+  'task_statuses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    color: text('color').notNull().default('#94A3B8'),
+    // 'todo' | 'doing' | 'done'
+    category: text('category').notNull().default('todo'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('task_statuses_project_name_idx').on(t.projectId, t.name)],
+);
+
+/** 프로젝트별 사용자 정의 필드 정의 — 값은 tasks.custom_values(jsonb)에 {필드id: 값}으로 저장한다. */
+export const taskFields = pgTable(
+  'task_fields',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    // 'text' | 'number' | 'date' | 'select'
+    kind: text('kind').notNull().default('text'),
+    // kind가 'select'일 때의 선택지(문자열 배열).
+    options: jsonb('options').notNull().default([]),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('task_fields_project_name_idx').on(t.projectId, t.name)],
+);
+
 export const tasks = pgTable(
   'tasks',
   {
@@ -601,12 +670,20 @@ export const tasks = pgTable(
     status: text('status').notNull().default('todo'),
     // 'low' | 'normal'(기본) | 'high'
     priority: text('priority').notNull().default('normal'),
+    // 업무 유형 — 없으면 null. 프로젝트별 task_types 중 하나.
+    typeId: uuid('type_id').references(() => taskTypes.id, { onDelete: 'set null' }),
+    // 프로젝트별 상태(task_statuses) — status(분류)는 항상 이 상태의 category와 같게 유지한다.
+    statusId: uuid('status_id').references(() => taskStatuses.id, { onDelete: 'set null' }),
+    // 사용자 정의 필드 값 {fieldId: 값}.
+    customValues: jsonb('custom_values').notNull().default({}),
     startDate: timestamp('start_date', { withTimezone: true }),
     dueDate: timestamp('due_date', { withTimezone: true }),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    // "마감 임박" 알림을 이미 보낸 마감일 — dueDate와 다르면(마감일이 바뀌면) 다시 보낸다.
+    dueRemindedFor: timestamp('due_reminded_for', { withTimezone: true }),
   },
   (t) => [
     index('tasks_project_id_idx').on(t.projectId, t.status),
@@ -616,6 +693,184 @@ export const tasks = pgTable(
 );
 
 /** 업무 카드에 달린 댓글. [projectId]는 "최근 댓글"을 프로젝트 기준으로 모을 때 조인을 피하려고 같이 둔다. */
+/** 업무 참조자 — 담당자는 아니지만 알고 있어야 하는 사람들. "내 업무"에 담당 업무와 같이 뜬다. */
+export const taskReferences = pgTable(
+  'task_references',
+  {
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index('task_references_user_idx').on(t.userId)],
+);
+
+/** 프로젝트 노트 — 프로젝트 구성원이 같이 쓰고 고치는 문서(회의록·가이드 등). */
+export const projectNotes = pgTable(
+  'project_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('project_notes_project_idx').on(t.projectId, t.updatedAt)],
+);
+
+/** 프로젝트 알림함 — 업무 배정/참조/댓글/상태 변경/마감 임박 알림(받는 사람마다 한 줄). */
+export const projectNotifications = pgTable(
+  'project_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'cascade' }),
+    // 'assigned' | 'referenced' | 'comment' | 'status' | 'due'
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  (t) => [index('project_notifications_user_idx').on(t.userId, t.createdAt)],
+);
+
+/** 사람 × 프로젝트별 알림 설정 — 행이 없으면 전부 켜짐(기본값). */
+export const projectNotificationSettings = pgTable(
+  'project_notification_settings',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    // true면 이 프로젝트의 알림을 전부 끈다(아래 종류별 값은 무시).
+    muted: boolean('muted').notNull().default(false),
+    onAssigned: boolean('on_assigned').notNull().default(true),
+    onReferenced: boolean('on_referenced').notNull().default(true),
+    onComment: boolean('on_comment').notNull().default(true),
+    onStatus: boolean('on_status').notNull().default(true),
+    onDue: boolean('on_due').notNull().default(true),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.projectId] })],
+);
+
+/** 업무 템플릿 — "새 업무"에서 불러와 제목/설명/우선순위/유형/담당자/마감(오늘+N일)을 미리 채운다. */
+export const taskTemplates = pgTable(
+  'task_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    title: text('title').notNull().default(''),
+    description: text('description'),
+    priority: text('priority').notNull().default('normal'),
+    typeId: uuid('type_id').references(() => taskTypes.id, { onDelete: 'set null' }),
+    assigneeId: uuid('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+    // 등록일로부터 며칠 뒤가 마감인지 — 없으면 마감일을 안 채운다.
+    dueOffsetDays: integer('due_offset_days'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('task_templates_project_name_idx').on(t.projectId, t.name)],
+);
+
+/**
+ * 프로젝트 자동화 규칙 — "업무가 만들어졌을 때 / 상태가 바뀌었을 때"(+조건) → 동작들을 실행한다.
+ * trigger: 'task_created' | 'status_changed'(triggerStatusId가 있으면 그 상태로 바뀔 때만).
+ * condition: {priority?, typeId?} — 있으면 업무가 일치할 때만.
+ * actions: [{kind, ...}] — kind: set_assignee{userId} | set_status{statusId} | set_priority{priority}
+ *          | add_reference{userId} | add_comment{text} | notify{userId}
+ * 자동화가 일으킨 변화는 다시 자동화를 부르지 않는다(무한 반복 방지).
+ */
+export const projectAutomations = pgTable(
+  'project_automations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    trigger: text('trigger').notNull(),
+    triggerStatusId: uuid('trigger_status_id').references(() => taskStatuses.id, { onDelete: 'cascade' }),
+    condition: jsonb('condition').notNull().default({}),
+    actions: jsonb('actions').notNull().default([]),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('project_automations_project_idx').on(t.projectId)],
+);
+
+/** 노트 댓글. */
+export const noteComments = pgTable(
+  'note_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    noteId: uuid('note_id')
+      .notNull()
+      .references(() => projectNotes.id, { onDelete: 'cascade' }),
+    senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
+    senderName: text('sender_name').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('note_comments_note_idx').on(t.noteId, t.createdAt)],
+);
+
+/** 노트 수정 이력 — 고치기 직전의 제목/본문을 한 줄씩 남긴다(노트당 최근 30개). */
+export const noteVersions = pgTable(
+  'note_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    noteId: uuid('note_id')
+      .notNull()
+      .references(() => projectNotes.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    // 이 버전을 쓴 사람과 그 시각(= 바뀌기 전 노트의 updatedBy/updatedAt).
+    editedBy: uuid('edited_by').references(() => users.id, { onDelete: 'set null' }),
+    editedAt: timestamp('edited_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('note_versions_note_idx').on(t.noteId, t.editedAt)],
+);
+
+/** 자동화 실행 기록 — 규칙이 언제 어떤 업무에 무엇을 했는지(프로젝트당 최근 100개). */
+export const automationRuns = pgTable(
+  'automation_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    automationName: text('automation_name').notNull(),
+    taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    taskKey: text('task_key'),
+    trigger: text('trigger').notNull(),
+    // 실행한 동작들을 한 줄로 요약(예: "담당자 지정 → 댓글 남기기").
+    summary: text('summary').notNull(),
+    ok: boolean('ok').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('automation_runs_project_idx').on(t.projectId, t.createdAt)],
+);
+
 export const taskComments = pgTable(
   'task_comments',
   {

@@ -12,7 +12,8 @@ import '../widgets/app_toast.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/position_badge.dart';
 import '../widgets/room_avatar.dart';
-import '../widgets/room_options_menu.dart' show showLeaveRoomDialog;
+import '../widgets/room_options_menu.dart'
+    show renameRoomMenuLabel, showLeaveRoomDialog, showRenameRoomForMeDialog;
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/notifications_panel.dart';
 import '../widgets/team_switcher.dart';
@@ -492,6 +493,15 @@ class _RoomRow extends StatelessWidget {
                 session.toggleMuted(room);
               },
             ),
+            if (room.type == RoomType.group)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: Text(renameRoomMenuLabel(room, session.userId ?? '')),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showRenameRoomForMeDialog(context, session, room);
+                },
+              ),
             ListTile(
               leading: Icon(
                 room.favorite ? Icons.star : Icons.star_border,

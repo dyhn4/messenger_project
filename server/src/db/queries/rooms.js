@@ -258,6 +258,21 @@ export async function setMemberMuted(roomId, userId, muted) {
     .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
 }
 
+export async function getMemberCustomName(roomId, userId) {
+  const [row] = await db
+    .select({ customName: roomMembers.customName })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+  return row?.customName ?? null;
+}
+
+export async function setMemberCustomName(roomId, userId, customName) {
+  await db
+    .update(roomMembers)
+    .set({ customName })
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)));
+}
+
 /** 평문 DM "숨기기"/"나가기" — 즐겨찾기/뮤트와 동일한 개인 설정 방식(schema.js 참고). */
 export async function getMemberHidden(roomId, userId) {
   const [row] = await db

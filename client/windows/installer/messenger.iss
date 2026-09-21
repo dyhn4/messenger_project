@@ -64,7 +64,7 @@ FinishedLabelNoIcons=설치가 완료되었습니다.%n%n초대 링크로 설치
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} 실행"; Flags: nowait postinstall skipifsilent unchecked
-; 앱 안 "지금 설치"로 받은 업데이트는 /VERYSILENT로 조용히 돌아간다(session.dart의
+; 앱 안 "지금 설치"로 받은 업데이트는 /SILENT로 진행률 창만 띄우며 돌아간다(session.dart의
 ; installUpdate 참고) — 그 경로에서는 위 체크박스 화면 자체가 안 뜨니(skipifsilent) 앱이
 ; 다시 켜지지 않고 조용히 사라진 것처럼 보인다. 조용히 설치할 때만 이 항목으로 대신
 ; 자동 재실행한다(일반 더블클릭 설치는 그대로 체크박스로 사용자가 고른다).
@@ -106,7 +106,7 @@ end;
 /// 있는데, /T를 쓰면 그 트리 관계에 따라 의도와 달리 설치 마법사 자신까지 함께 죽는 사고가
 /// 실제로 있었다(taskkill이 대상 프로세스의 자식 트리 전체를 종료하기 때문).
 ///
-/// 앱 안 "지금 설치"로 받은 업데이트(session.dart의 installUpdate, /VERYSILENT로 실행됨)는
+/// 앱 안 "지금 설치"로 받은 업데이트(session.dart의 installUpdate, /SILENT로 실행됨)는
 /// 이미 그 버튼을 누른 시점에 "종료하고 설치"에 동의한 것과 같으므로 이 확인창을 또 안
 /// 띄운다 — 안 그러면 사용자 눈에 안 보이는 곳에서(포커스를 못 받거나 다른 창 뒤에 가려)
 /// 조용히 "아니오"로 취소된 것처럼 끝나버려서, 설치가 통째로 조용히 취소되는데도 앱에는

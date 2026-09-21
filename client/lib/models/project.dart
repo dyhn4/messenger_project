@@ -1,3 +1,5 @@
+import 'package:flutter/painting.dart' show Color;
+
 import 'app_user.dart';
 
 /// 업무 상태 — server/src/projects.js의 TASK_STATUSES와 1:1로 대응한다(칸반보드의 열이 될 값).
@@ -41,6 +43,114 @@ String taskPriorityLabel(TaskPriority p) => switch (p) {
   TaskPriority.high => '높음',
 };
 
+/// 업무 유형(Bug/Feature/행사 등) — 프로젝트마다 이름과 색을 직접 관리한다(server task_types).
+class TaskType {
+  final String id;
+  final String projectId;
+  final String name;
+
+  /// '#RRGGBB'
+  final String color;
+  final int position;
+
+  const TaskType({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    required this.color,
+    this.position = 0,
+  });
+
+  factory TaskType.fromJson(Map<String, dynamic> json) => TaskType(
+    id: json['id'] as String,
+    projectId: json['projectId'] as String,
+    name: json['name'] as String,
+    color: json['color'] as String? ?? '#607D8B',
+    position: (json['position'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// 프로젝트별 업무 상태(칸반 열) — 이름/색은 자유, [category]는 진행률·완료 집계용 세 분류.
+class TaskStatusDef {
+  final String id;
+  final String projectId;
+  final String name;
+  final String color;
+  final TaskStatus category;
+  final int position;
+
+  const TaskStatusDef({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    required this.color,
+    required this.category,
+    this.position = 0,
+  });
+
+  factory TaskStatusDef.fromJson(Map<String, dynamic> json) => TaskStatusDef(
+    id: json['id'] as String,
+    projectId: json['projectId'] as String,
+    name: json['name'] as String,
+    color: json['color'] as String? ?? '#94A3B8',
+    category: taskStatusFromWire(json['category'] as String?),
+    position: (json['position'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// 프로젝트별 사용자 정의 필드 정의. [kind]: text | number | date | select.
+class TaskFieldDef {
+  final String id;
+  final String projectId;
+  final String name;
+  final String kind;
+  final List<String> options;
+  final int position;
+
+  const TaskFieldDef({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    required this.kind,
+    this.options = const [],
+    this.position = 0,
+  });
+
+  factory TaskFieldDef.fromJson(Map<String, dynamic> json) => TaskFieldDef(
+    id: json['id'] as String,
+    projectId: json['projectId'] as String,
+    name: json['name'] as String,
+    kind: json['kind'] as String? ?? 'text',
+    options:
+        (json['options'] as List?)?.map((e) => e as String).toList() ??
+        const [],
+    position: (json['position'] as num?)?.toInt() ?? 0,
+  );
+
+  /// 값을 목록/상세에 보여줄 글자로. 비어 있으면 null.
+  String? display(dynamic value) {
+    if (value == null) return null;
+    if (kind == 'date' && value is num) {
+      final d = DateTime.fromMillisecondsSinceEpoch(value.toInt());
+      return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    }
+    if (kind == 'number' && value is num) {
+      return value == value.roundToDouble()
+          ? value.toInt().toString()
+          : value.toString();
+    }
+    final s = value.toString();
+    return s.isEmpty ? null : s;
+  }
+}
+
+/// '#RRGGBB' → Color(불투명). 형식이 이상하면 회색.
+Color parseTypeColor(String? hex) {
+  final h = (hex ?? '').replaceFirst('#', '');
+  final v = int.tryParse(h.length == 6 ? 'FF$h' : h, radix: 16);
+  return Color(v ?? 0xFF607D8B);
+}
+
 /// 프로젝트 — 토픽(대화방)과 별개로 업무를 모아 관리하는 공간(server/src/projects.js).
 class Project {
   final String id;
@@ -50,6 +160,18 @@ class Project {
 
   /// 업무 번호 앞에 붙는 짧은 식별자(예: 'MKT' → MKT-1001).
   final String identifier;
+
+  /// 사이드바 등에서 프로젝트를 구분해 주는 대표 색('#RRGGBB').
+  final String color;
+
+  /// 공개 프로젝트 — 팀의 정회원 이상이 초대 없이 찾아보고 참여할 수 있다.
+  final bool isPublic;
+
+  /// 공개 프로젝트 둘러보기 목록(GET /projects/browse)에서만 채워지는 구성원 수.
+  final int? memberCount;
+
+  /// 종료(보관)된 프로젝트 — 읽기만 되고 업무를 만들거나 고칠 수 없다.
+  final bool archived;
 
   /// 사이드바 "즐겨찾기" — 사람마다 다른 개인 설정이라 non-final(그 자리에서 토글한다).
   bool favorite;
@@ -66,18 +188,26 @@ class Project {
   /// 상세 조회(GET /projects/:id)로 받아올 때만 채워진다.
   final List<AppUser> members;
 
+  /// 구성원 id → 프로젝트 역할('owner' | 'member'). 상세 조회에서만 채워진다.
+  final Map<String, String> memberRoles;
+
   Project({
     required this.id,
     required this.teamId,
     required this.name,
     this.description,
     required this.identifier,
+    this.color = '#5B8DEF',
+    this.isPublic = false,
+    this.memberCount,
+    this.archived = false,
     this.favorite = false,
     this.myRole = 'member',
     this.taskTotal = 0,
     this.taskDone = 0,
     required this.createdAt,
     this.members = const [],
+    this.memberRoles = const {},
   });
 
   bool get isOwner => myRole == 'owner';
@@ -91,6 +221,10 @@ class Project {
     name: json['name'] as String,
     description: json['description'] as String?,
     identifier: json['identifier'] as String,
+    color: json['color'] as String? ?? '#5B8DEF',
+    isPublic: json['isPublic'] as bool? ?? false,
+    memberCount: (json['memberCount'] as num?)?.toInt(),
+    archived: json['archived'] as bool? ?? false,
     favorite: json['favorite'] as bool? ?? false,
     myRole: json['myRole'] as String? ?? 'member',
     taskTotal: (json['taskTotal'] as num?)?.toInt() ?? 0,
@@ -103,6 +237,11 @@ class Project {
             ?.map((e) => AppUser.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [],
+    memberRoles: {
+      for (final m in (json['members'] as List?) ?? const [])
+        (m as Map<String, dynamic>)['id'] as String:
+            m['projectRole'] as String? ?? 'member',
+    },
   );
 }
 
@@ -119,7 +258,35 @@ class Task {
   final String? description;
   final String? assigneeId;
   final TaskStatus status;
+
+  /// 프로젝트별 상태(칸반 열) — 서버가 항상 채워주지만 예전 데이터를 위해 null이면 [status]로 대신한다.
+  final String? statusId;
+  final String? statusName;
+  final String? statusColor;
+
+  /// 사용자 정의 필드 값 {필드id: 값}.
+  final Map<String, dynamic> customValues;
   final TaskPriority priority;
+
+  /// 업무 유형(프로젝트별) — 없으면 null.
+  final String? typeId;
+  final String? typeName;
+  final String? typeColor;
+
+  /// 참조자 id들 — "내 업무"에는 담당 업무와 참조된 업무가 같이 뜬다.
+  final List<String> referenceIds;
+
+  /// 목록을 받아온 사람 기준 내 역할 — 'assignee'(담당) | 'reference'(참조) | null.
+  final String? myRole;
+
+  /// 업무를 만든 사람(목록의 "생성자" 칸).
+  final String? creatorId;
+  final String? creatorName;
+  final String creatorAvatarType;
+  final String? creatorAvatarEmoji;
+  final String? creatorAvatarColor;
+  final String? creatorAvatarUrl;
+
   final DateTime? startDate;
   final DateTime? dueDate;
   final DateTime createdAt;
@@ -136,12 +303,30 @@ class Task {
     this.description,
     this.assigneeId,
     required this.status,
+    this.statusId,
+    this.statusName,
+    this.statusColor,
+    this.customValues = const {},
     required this.priority,
+    this.typeId,
+    this.typeName,
+    this.typeColor,
+    this.referenceIds = const [],
+    this.myRole,
+    this.creatorId,
+    this.creatorName,
+    this.creatorAvatarType = 'initial',
+    this.creatorAvatarEmoji,
+    this.creatorAvatarColor,
+    this.creatorAvatarUrl,
     this.startDate,
     this.dueDate,
     required this.createdAt,
     this.comments = const [],
   });
+
+  /// 화면에 보이는 상태 이름 — 프로젝트가 정한 이름, 없으면 분류 이름.
+  String get statusLabel => statusName ?? taskStatusLabel(status);
 
   /// 마감일 기준 D-day. 마감일이 없으면 null, 지났으면 양수(D+n).
   int? get daysUntilDue {
@@ -168,9 +353,29 @@ class Task {
     description: json['description'] as String?,
     assigneeId: json['assigneeId'] as String?,
     status: taskStatusFromWire(json['status'] as String?),
+    statusId: json['statusId'] as String?,
+    statusName: json['statusName'] as String?,
+    statusColor: json['statusColor'] as String?,
+    customValues:
+        (json['customValues'] as Map?)?.cast<String, dynamic>() ?? const {},
     priority: taskPriorityFromWire(json['priority'] as String?),
+    typeId: json['typeId'] as String?,
+    typeName: json['typeName'] as String?,
+    typeColor: json['typeColor'] as String?,
+    referenceIds:
+        (json['referenceIds'] as List?)?.map((e) => e as String).toList() ??
+        const [],
+    myRole: json['myRole'] as String?,
+    creatorId: json['creatorId'] as String?,
+    creatorName: json['creatorName'] as String?,
+    creatorAvatarType: json['creatorAvatarType'] as String? ?? 'initial',
+    creatorAvatarEmoji: json['creatorAvatarEmoji'] as String?,
+    creatorAvatarColor: json['creatorAvatarColor'] as String?,
+    creatorAvatarUrl: json['creatorAvatarUrl'] as String?,
     startDate: (json['startDate'] as num?) != null
-        ? DateTime.fromMillisecondsSinceEpoch((json['startDate'] as num).toInt())
+        ? DateTime.fromMillisecondsSinceEpoch(
+            (json['startDate'] as num).toInt(),
+          )
         : null,
     dueDate: (json['dueDate'] as num?) != null
         ? DateTime.fromMillisecondsSinceEpoch((json['dueDate'] as num).toInt())
@@ -272,4 +477,339 @@ class ProjectHome {
           .toList(),
     );
   }
+}
+
+/// 프로젝트 노트 — 목록에서는 [body]가 null이고 [preview]만 있다(상세 조회에서 본문이 온다).
+class ProjectNote {
+  final String id;
+  final String projectId;
+  final String? projectName;
+  final String? projectColor;
+  final String title;
+  final String? preview;
+  final String? body;
+  final String? createdBy;
+  final String? createdByName;
+  final String? updatedByName;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  const ProjectNote({
+    required this.id,
+    required this.projectId,
+    this.projectName,
+    this.projectColor,
+    required this.title,
+    this.preview,
+    this.body,
+    this.createdBy,
+    this.createdByName,
+    this.updatedByName,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory ProjectNote.fromJson(Map<String, dynamic> json) => ProjectNote(
+    id: json['id'] as String,
+    projectId: json['projectId'] as String,
+    projectName: json['projectName'] as String?,
+    projectColor: json['projectColor'] as String?,
+    title: json['title'] as String,
+    preview: json['preview'] as String?,
+    body: json['body'] as String?,
+    createdBy: json['createdBy'] as String?,
+    createdByName: json['createdByName'] as String?,
+    updatedByName: json['updatedByName'] as String?,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(
+      (json['createdAt'] as num).toInt(),
+    ),
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(
+      (json['updatedAt'] as num).toInt(),
+    ),
+  );
+}
+
+/// 프로젝트 알림함의 한 줄 — [kind]: assigned | referenced | comment | status | due.
+class ProjectNotification {
+  final String id;
+  final String projectId;
+  final String? projectName;
+  final String? projectColor;
+  final String? taskId;
+  final String kind;
+  final String title;
+  final String body;
+  final DateTime createdAt;
+  final bool read;
+
+  const ProjectNotification({
+    required this.id,
+    required this.projectId,
+    this.projectName,
+    this.projectColor,
+    this.taskId,
+    required this.kind,
+    required this.title,
+    required this.body,
+    required this.createdAt,
+    this.read = false,
+  });
+
+  factory ProjectNotification.fromJson(Map<String, dynamic> json) =>
+      ProjectNotification(
+        id: json['id'] as String,
+        projectId: json['projectId'] as String,
+        projectName: json['projectName'] as String?,
+        projectColor: json['projectColor'] as String?,
+        taskId: json['taskId'] as String?,
+        kind: json['kind'] as String,
+        title: json['title'] as String,
+        body: json['body'] as String,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          (json['createdAt'] as num).toInt(),
+        ),
+        read: json['read'] as bool? ?? false,
+      );
+}
+
+/// 내가 이 프로젝트에서 받을 알림 설정 — [muted]면 전부 끔.
+class ProjectNotificationSettings {
+  final bool muted;
+  final bool assigned;
+  final bool referenced;
+  final bool comment;
+  final bool status;
+  final bool due;
+
+  const ProjectNotificationSettings({
+    this.muted = false,
+    this.assigned = true,
+    this.referenced = true,
+    this.comment = true,
+    this.status = true,
+    this.due = true,
+  });
+
+  factory ProjectNotificationSettings.fromJson(Map<String, dynamic> json) =>
+      ProjectNotificationSettings(
+        muted: json['muted'] as bool? ?? false,
+        assigned: json['assigned'] as bool? ?? true,
+        referenced: json['referenced'] as bool? ?? true,
+        comment: json['comment'] as bool? ?? true,
+        status: json['status'] as bool? ?? true,
+        due: json['due'] as bool? ?? true,
+      );
+}
+
+/// 업무 템플릿 — "새 업무"에서 불러와 항목을 미리 채운다.
+class TaskTemplate {
+  final String id;
+  final String projectId;
+  final String name;
+  final String title;
+  final String? description;
+  final TaskPriority priority;
+  final String? typeId;
+  final String? assigneeId;
+
+  /// 등록일로부터 며칠 뒤가 마감인지(없으면 마감일을 안 채움).
+  final int? dueOffsetDays;
+
+  const TaskTemplate({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    this.title = '',
+    this.description,
+    this.priority = TaskPriority.normal,
+    this.typeId,
+    this.assigneeId,
+    this.dueOffsetDays,
+  });
+
+  factory TaskTemplate.fromJson(Map<String, dynamic> json) => TaskTemplate(
+    id: json['id'] as String,
+    projectId: json['projectId'] as String,
+    name: json['name'] as String,
+    title: json['title'] as String? ?? '',
+    description: json['description'] as String?,
+    priority: taskPriorityFromWire(json['priority'] as String?),
+    typeId: json['typeId'] as String?,
+    assigneeId: json['assigneeId'] as String?,
+    dueOffsetDays: (json['dueOffsetDays'] as num?)?.toInt(),
+  );
+}
+
+/// 자동화 규칙의 동작 한 개. [kind]: set_assignee | set_status | set_priority |
+/// add_reference | add_comment | notify — 종류에 따라 userId/statusId/priority/text 중 하나를 쓴다.
+class AutomationAction {
+  final String kind;
+  final String? userId;
+  final String? statusId;
+  final String? priority;
+  final String? text;
+
+  const AutomationAction(
+    this.kind, {
+    this.userId,
+    this.statusId,
+    this.priority,
+    this.text,
+  });
+
+  factory AutomationAction.fromJson(Map<String, dynamic> json) =>
+      AutomationAction(
+        json['kind'] as String,
+        userId: json['userId'] as String?,
+        statusId: json['statusId'] as String?,
+        priority: json['priority'] as String?,
+        text: json['text'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'kind': kind,
+    'userId': ?userId,
+    'statusId': ?statusId,
+    'priority': ?priority,
+    'text': ?text,
+  };
+}
+
+/// 자동화 규칙 — [trigger]('task_created' | 'status_changed') 때 [condition]이 맞으면 [actions] 실행.
+class AutomationRule {
+  final String id;
+  final String projectId;
+  final String name;
+  final bool enabled;
+  final String trigger;
+  final String? triggerStatusId;
+  final String? conditionPriority;
+  final String? conditionTypeId;
+  final List<AutomationAction> actions;
+
+  const AutomationRule({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    required this.enabled,
+    required this.trigger,
+    this.triggerStatusId,
+    this.conditionPriority,
+    this.conditionTypeId,
+    this.actions = const [],
+  });
+
+  factory AutomationRule.fromJson(Map<String, dynamic> json) {
+    final condition =
+        (json['condition'] as Map?)?.cast<String, dynamic>() ?? const {};
+    return AutomationRule(
+      id: json['id'] as String,
+      projectId: json['projectId'] as String,
+      name: json['name'] as String,
+      enabled: json['enabled'] as bool? ?? true,
+      trigger: json['trigger'] as String,
+      triggerStatusId: json['triggerStatusId'] as String?,
+      conditionPriority: condition['priority'] as String?,
+      conditionTypeId: condition['typeId'] as String?,
+      actions:
+          (json['actions'] as List?)
+              ?.map((e) => AutomationAction.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+    );
+  }
+}
+
+/// 노트 댓글.
+class NoteComment {
+  final String id;
+  final String noteId;
+  final String? senderId;
+  final String senderName;
+  final String text;
+  final DateTime createdAt;
+
+  const NoteComment({
+    required this.id,
+    required this.noteId,
+    this.senderId,
+    required this.senderName,
+    required this.text,
+    required this.createdAt,
+  });
+
+  factory NoteComment.fromJson(Map<String, dynamic> json) => NoteComment(
+    id: json['id'] as String,
+    noteId: json['noteId'] as String,
+    senderId: json['senderId'] as String?,
+    senderName: json['senderName'] as String? ?? '알 수 없음',
+    text: json['text'] as String,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(
+      (json['createdAt'] as num).toInt(),
+    ),
+  );
+}
+
+/// 노트 수정 이력 한 줄 — 목록에서는 [body]가 null이고, 상세 조회에서 본문이 온다.
+class NoteVersion {
+  final String id;
+  final String title;
+  final String? body;
+  final String? editedByName;
+  final DateTime editedAt;
+
+  const NoteVersion({
+    required this.id,
+    required this.title,
+    this.body,
+    this.editedByName,
+    required this.editedAt,
+  });
+
+  factory NoteVersion.fromJson(Map<String, dynamic> json) => NoteVersion(
+    id: json['id'] as String,
+    title: json['title'] as String,
+    body: json['body'] as String?,
+    editedByName: json['editedByName'] as String?,
+    editedAt: DateTime.fromMillisecondsSinceEpoch(
+      (json['editedAt'] as num).toInt(),
+    ),
+  );
+}
+
+/// 자동화 실행 기록 한 줄.
+class AutomationRunLog {
+  final String id;
+  final String automationName;
+  final String? taskId;
+  final String? taskKey;
+  final String trigger;
+  final String summary;
+  final bool ok;
+  final DateTime createdAt;
+
+  const AutomationRunLog({
+    required this.id,
+    required this.automationName,
+    this.taskId,
+    this.taskKey,
+    required this.trigger,
+    required this.summary,
+    required this.ok,
+    required this.createdAt,
+  });
+
+  factory AutomationRunLog.fromJson(Map<String, dynamic> json) =>
+      AutomationRunLog(
+        id: json['id'] as String,
+        automationName: json['automationName'] as String,
+        taskId: json['taskId'] as String?,
+        taskKey: json['taskKey'] as String?,
+        trigger: json['trigger'] as String,
+        summary: json['summary'] as String? ?? '',
+        ok: json['ok'] as bool? ?? true,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          (json['createdAt'] as num).toInt(),
+        ),
+      );
 }

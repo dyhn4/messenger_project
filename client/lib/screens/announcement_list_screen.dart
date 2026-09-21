@@ -15,11 +15,15 @@ import 'home_screen.dart' show wideBreakpoint;
 /// 있는 사람만 새로 쓸 수 있다(session.canCreateAnnouncementIn). pinned인 글(방마다 최대
 /// 1개)이 채팅방 상단 배너에 고정된다 — 새 글을 쓰면 자동으로 그 글로 바뀌고, "공지 내리기"로
 /// 직접 내릴 수도 있다(announcement_detail_screen.dart).
+///
+/// [unreadCount]가 0보다 크면(알림 센터에서 안 읽은 공지 때문에 열었을 때) 목록 위쪽의(=가장
+/// 최근의) 다른 사람이 쓴 공지 그만큼에 "안 읽음" 표시를 붙여서 어느 게 새 공지인지 알 수 있게 한다.
 Future<void> showAnnouncementListScreen(
   BuildContext context,
   Session session,
-  Room room,
-) {
+  Room room, {
+  int unreadCount = 0,
+}) {
   final isWide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
   if (isWide) {
     return showDialog<void>(
@@ -29,7 +33,11 @@ Future<void> showAnnouncementListScreen(
         child: SizedBox(
           width: 480,
           height: 640,
-          child: AnnouncementListScreen(session: session, room: room),
+          child: AnnouncementListScreen(
+            session: session,
+            room: room,
+            unreadCount: unreadCount,
+          ),
         ),
       ),
     );
@@ -38,7 +46,11 @@ Future<void> showAnnouncementListScreen(
     MaterialPageRoute(
       builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('공지')),
-        body: AnnouncementListScreen(session: session, room: room),
+        body: AnnouncementListScreen(
+          session: session,
+          room: room,
+          unreadCount: unreadCount,
+        ),
       ),
     ),
   );
@@ -47,10 +59,12 @@ Future<void> showAnnouncementListScreen(
 class AnnouncementListScreen extends StatefulWidget {
   final Session session;
   final Room room;
+  final int unreadCount;
   const AnnouncementListScreen({
     super.key,
     required this.session,
     required this.room,
+    this.unreadCount = 0,
   });
 
   @override
@@ -64,6 +78,10 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
   StreamSubscription<Announcement>? _updatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _deletedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _unpinnedSub;
+
+  /// "안 읽음" 표시가 붙은 공지 id — 처음 목록이 그려질 때 한 번만 정하고, 상세를 열어본 공지는
+  /// 여기서 빼서 표시를 지운다(build에서 매번 다시 계산하면 열어본 것도 다시 붙는다).
+  Set<String>? _unreadIds;
 
   bool get _canWrite => widget.session.canCreateAnnouncementIn(widget.room);
 
@@ -196,6 +214,17 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
     final items = _items;
     if (items == null) return const Center(child: CircularProgressIndicator());
 
+    // 최신순 목록에서 내가 안 쓴 공지 앞에서부터 unreadCount개가 안 읽은 공지다(안 읽은 건
+    // 항상 마지막으로 연 시각 이후 = 가장 최근 것들이기 때문).
+    final unreadIds = _unreadIds ??= () {
+      final ids = <String>{};
+      for (final a in items) {
+        if (ids.length >= widget.unreadCount) break;
+        if (a.authorId != widget.session.userId) ids.add(a.id);
+      }
+      return ids;
+    }();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -220,12 +249,17 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
                   separatorBuilder: (_, _) => const Divider(height: 24),
                   itemBuilder: (context, i) => _AnnouncementTile(
                     announcement: items[i],
-                    onTap: () => showAnnouncementDetailScreen(
-                      context,
-                      widget.session,
-                      widget.room,
-                      items[i],
-                    ),
+                    unread: unreadIds.contains(items[i].id),
+                    onTap: () {
+                      // 상세를 열어본 공지는 "안 읽음" 표시를 지운다.
+                      setState(() => unreadIds.remove(items[i].id));
+                      showAnnouncementDetailScreen(
+                        context,
+                        widget.session,
+                        widget.room,
+                        items[i],
+                      );
+                    },
                   ),
                 ),
         ),
@@ -237,7 +271,12 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
 class _AnnouncementTile extends StatelessWidget {
   final Announcement announcement;
   final VoidCallback onTap;
-  const _AnnouncementTile({required this.announcement, required this.onTap});
+  final bool unread;
+  const _AnnouncementTile({
+    required this.announcement,
+    required this.onTap,
+    this.unread = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +309,38 @@ class _AnnouncementTile extends StatelessWidget {
                 ],
               ),
             ),
-          Text(announcement.text, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Row(
+            children: [
+              if (unread) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    '안 읽음',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: Text(
+                  announcement.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           Text(
             '${formatRelativeTime(announcement.createdAt)} · ${announcement.authorName} · 댓글 ${announcement.commentCount}개',
@@ -414,8 +484,7 @@ class _CustomAutoUnpinDialog extends StatefulWidget {
   const _CustomAutoUnpinDialog();
 
   @override
-  State<_CustomAutoUnpinDialog> createState() =>
-      _CustomAutoUnpinDialogState();
+  State<_CustomAutoUnpinDialog> createState() => _CustomAutoUnpinDialogState();
 }
 
 class _CustomAutoUnpinDialogState extends State<_CustomAutoUnpinDialog> {

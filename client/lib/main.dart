@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -11,6 +12,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'screens/call_screen.dart';
+import 'screens/capture/capture_window.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -137,7 +139,16 @@ Future<void> main() async {
   if (Platform.isWindows) {
     final windowController = await WindowController.fromCurrentEngine();
     if (windowController.arguments.isNotEmpty) {
-      await runProjectWindow(windowController);
+      Map<String, dynamic> windowArgs = const {};
+      try {
+        windowArgs =
+            jsonDecode(windowController.arguments) as Map<String, dynamic>;
+      } catch (_) {}
+      if (windowArgs['type'] == kCaptureWindowType) {
+        await runCaptureWindow(windowController, windowArgs);
+      } else {
+        await runProjectWindow(windowController);
+      }
       return;
     }
   }
@@ -334,6 +345,11 @@ class _MyAppState extends State<MyApp>
   }
 
   Future<void> _openRoomFromNotification(String payload) async {
+    // 프로젝트 알림을 누르면 프로젝트 창을 연다(안드로이드에는 별도 창이 없어 앱만 앞으로 온다).
+    if (payload.startsWith(NotificationService.projectPayloadPrefix)) {
+      if (Platform.isWindows) openProjectWindow(session);
+      return;
+    }
     // 통화 수신 알림을 누른 경우엔 방만 여는 게 아니라 통화에 바로 참여한다
     // (NotificationService.callPayloadPrefix 참고).
     final isCall = payload.startsWith(NotificationService.callPayloadPrefix);

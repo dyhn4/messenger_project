@@ -445,13 +445,29 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 사이드바 | 내용 |
 |---|---|
 | 홈 | 인사말·통계(전체/완료/진행/지연), 내가 참여한 프로젝트(진행률), 내가 담당한 업무, 이번 주 나의 업무(날짜별), 최근 댓글 |
-| 내 업무 | 팀 전체에서 내가 담당자인 업무를 상태별로 거르기 |
+| 내 업무 | 팀 전체에서 내가 **담당자이거나 참조자**인 업무 — 리스트(업무·유형·우선순위·상태·시작일·마감일·생성자 표, `D+n` 지연 뱃지, 참조 표시)와 캘린더(월/주 전환, 여러 날에 걸친 업무는 하나의 막대, 날짜를 누르면 오른쪽에 그날의 업무 목록)를 탭으로 전환. 우측 상단 "필터링"(역할·상태·우선순위·프로젝트·유형)과 "새 업무" 버튼 |
+| 프로젝트 보기 방식 | 프로젝트를 열면 상단 탭으로 리스트 · 칸반보드(카드를 끌어 다른 상태 열에 놓으면 상태 변경) · 간트차트(일/주 확대, 오늘선) · 캘린더 · 대시보드(상태/우선순위/유형/담당자별 통계, 임박·지연 업무)를 전환. 사이드바의 "캘린더"·"간트차트"는 내가 참여한 모든 프로젝트의 업무를 한 화면에 모아 보여줍니다 |
+| 프로젝트 설정 | 프로젝트 화면 ⋮ 메뉴 → "프로젝트 설정"(담당자·팀 소유자/관리자만). 이름·설명·대표 색상·공개 여부 수정(프로젝트 키는 고정), 구성원 추가/제외와 담당자 지정·해제(담당자는 최소 1명 유지), 프로젝트 삭제. 프로젝트는 정회원 이상만 이용·참여할 수 있습니다 |
+| 커스텀 상태·필드 | ⋮ 메뉴 → "상태 · 필드 관리"(담당자·팀 소유자/관리자). **상태**: 프로젝트마다 이름·색·순서를 자유롭게 정하고(칸반보드의 열), 각 상태는 "할 일/진행 중/완료" 분류 중 하나에 속해 진행률·완료 집계는 그대로 동작(분류마다 상태 하나는 남아야 하며, 지우면 그 업무는 같은 분류의 첫 상태로 이동). **사용자 정의 필드**: 텍스트/숫자/날짜/선택 필드(프로젝트당 20개)를 만들면 업무 등록·상세의 "추가 정보"에 입력칸으로 나타남 |
+| 메시지를 업무로 등록 | 메시지를 길게 누르거나(모바일) 더보기 메뉴(PC)에서 "업무로 등록" → 제목=메시지 첫 줄, 설명=전체 내용+출처(보낸 사람·대화방·시각)가 채워진 "새 업무" 창이 열리고 프로젝트·담당자·마감일 등을 골라 등록. 대화 입력창의 "업무 등록" 버튼은 입력 중인 글을 채워서 같은 창을 연다. 정회원 이상만, 비밀 대화(E2EE)에서는 평문이 서버에 저장되므로 제외 |
+| 프로젝트 노트 | 프로젝트 화면의 "노트" 탭(그 프로젝트 노트)과 사이드바 "노트"(내가 참여한 모든 프로젝트 노트, 프로젝트 색 표시). 왼쪽 검색·목록, 오른쪽 읽기/편집. 구성원이면 누구나 쓰고 고치며, 지우기는 작성자·프로젝트 담당자·팀 소유자/관리자만. 두 사람이 동시에 고치다 덮어쓰지 않도록 열 때의 수정 시각을 보내 그 사이 바뀌었으면 저장을 막습니다(409). 본문은 가벼운 마크다운(# 제목, - 목록, - [ ] 체크, > 인용, ---)을 줄 단위로 그립니다 |
+| 노트 댓글·수정 이력 | 노트 아래에 댓글(쓴 사람·프로젝트 담당자·팀 소유자/관리자가 삭제). 노트 헤더의 시계 아이콘 "수정 이력"에서 고치기 직전 버전(노트당 최근 30개, 쓴 사람·시각 표시)을 골라 내용을 보고 "이 버전으로 되돌리기"(되돌리기 직전 내용도 이력에 남음) |
+| 프로젝트 알림 | 업무 **배정**·**참조자 지정**·**댓글**(내가 담당/생성/참조한 업무)·**상태 변경**(내가 담당/생성한 업무)·**마감 임박**(담당 업무, 마감 24시간 전부터 한 번 — 서버가 10분마다 확인)을 알려줍니다. 행동한 본인에게는 안 보냅니다. 프로젝트 창 사이드바 "알림"(안 읽은 개수 배지, 누르면 읽음 처리하고 그 업무로 이동, "모두 읽음")에 쌓이고, 접속 중이면 OS 알림(Windows 토스트/안드로이드 "프로젝트 알림" 채널)이 뜨며 메신저 툴바 "프로젝트" 버튼에 개수 배지가 붙습니다. 앱이 꺼져 있으면 FCM 푸시로 갑니다. 프로젝트 화면 종 아이콘 → "알림 설정"에서 프로젝트별로 전체 끄기와 종류별 켜기/끄기(나만의 설정) |
+| 업무 템플릿 | ⋮ 메뉴 → "템플릿 · 자동화 관리" → "업무 템플릿"(담당자·팀 소유자/관리자). 이름 + 미리 채울 제목·설명·우선순위·유형·담당자·마감(등록일로부터 N일 뒤)을 저장해두고, "새 업무" 창 맨 위 "템플릿에서 불러오기"에서 고르면 항목이 채워집니다(프로젝트당 30개) |
+| 자동화 규칙 | 같은 메뉴의 "자동화 규칙". **언제**(업무가 만들어졌을 때 / 상태가 바뀌었을 때 — 특정 상태로 바뀔 때만도 가능) + **조건**(우선순위·유형, 선택) → **동작**(최대 5개, 차례로): 담당자 지정 · 상태 변경 · 우선순위 변경 · 참조자 추가 · 댓글 남기기("자동화 · 규칙이름"이 작성자) · 알림 보내기. 규칙마다 켜기/끄기(프로젝트당 20개). 자동화가 일으킨 변화는 다른 규칙을 다시 부르지 않습니다(무한 반복 방지) |
+| 자동화 실행 기록 | "템플릿 · 자동화 관리" → "실행 기록" 탭: 규칙이 언제 어떤 업무(TA-7)에서 무엇을 했는지 최근 100개(성공/실패 표시). 종료된 프로젝트의 칸반은 카드를 끌 수 없습니다 |
+| 필터·필드 열 | 프로젝트 화면 탭 줄 오른쪽 "필터" — 검색(제목/업무 번호)·상태·우선순위·담당자(담당자 없음 포함)·유형·사용자 정의 필드(선택 필드는 값 일치, 텍스트 필드는 포함, 숫자 필드는 최소~최대, 날짜 필드는 기간)를 조합해 리스트/칸반/간트/캘린더/대시보드에 똑같이 적용(활성 개수 표시, 초기화). 리스트 표에는 사용자 정의 필드마다 열이 붙습니다 |
+| 프로젝트 종료(보관) | 프로젝트 설정 → "프로젝트 종료"(담당자·팀 소유자/관리자). 종료하면 사이드바 "종료된 프로젝트"로 옮겨지고 읽기만 가능(업무·댓글·노트 쓰기는 409로 거부, 마감 알림 중지, 내 업무/캘린더/간트/홈 통계에서 빠짐). "다시 시작"으로 되돌리며, 데이터는 그대로 남습니다 |
 | 캘린더 · 간트차트 · 노트 | 자리만 잡아둔 상태(다음 단계) |
-| 프로젝트 목록 | 즐겨찾기(별)와 나머지. 고르면 그 프로젝트의 업무를 상태별로 묶어 보여줍니다 |
+| 프로젝트 목록 | 대표 색상 점이 붙은 즐겨찾기(별)와 나머지. 고르면 그 프로젝트의 업무를 상태별로 묶어 보여줍니다. "공개 프로젝트 찾기"로 아직 안 들어간 공개 프로젝트를 보고 초대 없이 "참여"할 수 있습니다 |
+
+**프로젝트 생성**(사이드바 `+`): 이름, 대표 색상(7색), 프로젝트 키(업무 번호 앞에 붙는 영문 식별자 — 예: `HR`, `DEV`), 설명, 공개 설정(공개/비공개)을 입력하고 "프로젝트 생성"을 누릅니다. 구성원은 만든 뒤 프로젝트 화면에서 초대합니다. **공개** 프로젝트는 팀의 정회원 이상이 초대 없이 확인하고 참여할 수 있고, **비공개**는 초대한 구성원만 볼 수 있습니다.
 
 ### 업무
 
-- 제목·설명·담당자·상태(할 일/진행 중/완료)·우선순위·마감일을 가집니다.
+- 제목·설명·담당자·**참조자(여러 명)**·**유형**·상태(할 일/진행 중/완료)·우선순위·시작일·마감일을 가집니다.
+- **유형**(Bug/Feature/행사 등)은 프로젝트마다 이름과 색을 직접 관리합니다(프로젝트 화면 ⋮ 메뉴 → "업무 유형 관리", 프로젝트 담당자와 팀 소유자·관리자). 새 프로젝트에는 Bug/Feature/Improvement/기타가 기본으로 들어가고, 유형을 지워도 그 업무는 남고 유형만 비워집니다.
+- **참조자**로 지정된 사람의 "내 업무"에도 그 업무가 나타납니다(홈 대시보드의 "내가 담당한 업무" 통계는 담당 업무만 셉니다).
 - 화면에 보이는 번호(`MKT-1001`)는 **프로젝트 식별자 + 순번**입니다. 순번은 프로젝트가 직접
   들고 있어서(`projects.next_task_seq`) 업무를 지워도 번호를 재사용하지 않습니다.
 - 마감일이 있으면 `D-2` / `D-DAY` / `D+1` 뱃지가 붙고, 지났는데 완료가 아니면 "지연"으로 셉니다.
@@ -972,6 +988,8 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/projects` | 내가 참여 중인 프로젝트 목록(`teamId` 필수, 진행률 포함) |
 | GET | `/api/projects/home` | 홈 대시보드 한 번에(통계 + 프로젝트 + 내 업무 + 최근 댓글) |
 | POST | `/api/projects` | 새 프로젝트(서버 설정 "프로젝트 생성 권한"을 만족해야 함) |
+| GET | `/api/projects/browse` | 내가 아직 참여하지 않은 이 팀의 공개 프로젝트(`teamId` 필수, 정회원 이상만) |
+| POST | `/api/projects/:id/join` | 공개 프로젝트에 초대 없이 참여(팀 멤버 + 정회원 이상) |
 | GET | `/api/projects/:id` | 프로젝트 상세(구성원 포함) |
 | PATCH | `/api/projects/:id` | 이름·설명 수정(담당자/팀 소유자·관리자) |
 | DELETE | `/api/projects/:id` | 프로젝트 삭제(업무·댓글까지 cascade) |
@@ -980,7 +998,32 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | DELETE | `/api/projects/:id/members/:userId` | 구성원 제외(담당자는 제외 불가) |
 | GET | `/api/projects/:id/tasks` | 그 프로젝트의 업무 목록 |
 | POST | `/api/projects/:id/tasks` | 업무 등록(번호는 서버가 발급) |
-| GET | `/api/tasks/mine` | 내가 담당한 업무 전부(`teamId` 필수) |
+| GET | `/api/tasks/mine` | 내가 담당하거나 참조된 업무 전부(`teamId` 필수, 각 업무에 `myRole`) |
+| GET | `/api/tasks/team` | 내가 참여한 프로젝트 전체의 업무(`teamId` 필수) — 사이드바 캘린더/간트차트용 |
+| PATCH | `/api/projects/:id/members/:userId` | 구성원 역할 변경(`role`: `owner`\|`member`) |
+| GET/POST | `/api/projects/:id/task-statuses` | 프로젝트 상태 목록 / 추가(`name`,`color`,`category`) |
+| GET | `/api/notes` | 노트 목록(본문 제외, `projectId` 또는 `teamId`) — 최근 수정 순 |
+| GET/POST | `/api/notes/:id/comments` | 노트 댓글 목록 / 남기기 |
+| DELETE | `/api/note-comments/:id` | 노트 댓글 삭제 |
+| GET | `/api/notes/:id/versions`, `/api/note-versions/:id` | 노트 수정 이력 목록 / 한 버전의 내용 |
+| POST | `/api/notes/:id/restore` | 노트를 이력 버전으로 되돌리기(`versionId`) |
+| GET | `/api/projects/:id/automation-runs` | 자동화 실행 기록(최근 100개) |
+| GET | `/api/project-notifications` | 내 프로젝트 알림함(최근 50개 + `unreadCount`) |
+| GET/POST | `/api/projects/:id/task-templates` | 업무 템플릿 목록 / 만들기(관리자·담당자) |
+| PATCH/DELETE | `/api/task-templates/:id` | 템플릿 수정 / 삭제 |
+| GET/POST | `/api/projects/:id/automations` | 자동화 규칙 목록 / 만들기(`name`,`trigger`,`triggerStatusId`,`condition`,`actions`) |
+| PATCH/DELETE | `/api/automations/:id` | 규칙 수정(`enabled`만 보내면 켜기/끄기) / 삭제 |
+| POST | `/api/project-notifications/read` | 읽음 처리(`ids` 없으면 전부) — 내 다른 창/기기에 `project:notification-sync`로 새 개수 전달 |
+| GET/PATCH | `/api/projects/:id/notification-settings` | 내 알림 설정(`muted`,`assigned`,`referenced`,`comment`,`status`,`due`) |
+| GET/PATCH/DELETE | `/api/notes/:id` | 노트 상세 / 수정(`title`,`body`,`baseUpdatedAt`) / 삭제 |
+| POST | `/api/projects/:id/notes` | 노트 만들기(`title`,`body`) |
+| POST | `/api/projects/:id/task-statuses/order` | 상태 순서 저장(`ids` 전체를 원하는 순서로) |
+| PATCH/DELETE | `/api/task-statuses/:id` | 상태 이름·색 수정(분류는 고정) / 삭제(같은 분류에 다른 상태가 있어야 함) |
+| GET/POST | `/api/projects/:id/task-fields` | 사용자 정의 필드 목록 / 추가(`name`,`kind`: text\|number\|date\|select, `options`) |
+| PATCH/DELETE | `/api/task-fields/:id` | 필드 이름·선택지 수정 / 삭제 |
+| GET | `/api/projects/:id/task-types` | 그 프로젝트의 업무 유형 목록 |
+| POST | `/api/projects/:id/task-types` | 유형 추가(이름 20자·`#RRGGBB` 색, 프로젝트 관리자) |
+| PATCH / DELETE | `/api/task-types/:id` | 유형 수정 / 삭제(삭제해도 업무는 유지) |
 | GET | `/api/tasks/:id` | 업무 상세(댓글 포함) |
 | PATCH | `/api/tasks/:id` | 업무 수정(상태·담당자·마감일 등) |
 | DELETE | `/api/tasks/:id` | 업무 삭제 |
@@ -1048,9 +1091,20 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷) |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우) |
-| `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |
+| `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `color`(대표 색 `#RRGGBB`), `is_public`(공개 프로젝트 여부), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |
 | `project_members` | 프로젝트 구성원. `role`(`owner`=담당자 / `member`), `favorite`(사이드바 즐겨찾기 — 사람마다 다른 개인 설정) |
-| `tasks` | 업무. `seq`(프로젝트 안 번호 → 화면에는 `MKT-1001`로 표시), `status`(`todo` / `doing` / `done`), `priority`, `assignee_id`, `start_date`/`due_date`, `completed_at` |
+| `tasks` | 업무. `seq`(프로젝트 안 번호 → 화면에는 `MKT-1001`로 표시), `status`(`todo` / `doing` / `done`), `priority`, `assignee_id`, `type_id`(→ `task_types`, 삭제 시 null), `start_date`/`due_date`, `completed_at` |
+| `task_types` | 프로젝트별 업무 유형(`name` — 프로젝트 안 unique, `color` `#RRGGBB`, `position`) |
+| `task_statuses` | 프로젝트별 업무 상태(`name`,`color`,`category`,`position`). `tasks.status_id`가 가리키고, `tasks.status`(분류)는 항상 그 상태의 category와 같다 |
+| `task_fields` | 프로젝트별 사용자 정의 필드 정의(`kind`,`options`). 값은 `tasks.custom_values`(jsonb, `{필드id: 값}`) |
+| `project_notes` | 프로젝트 노트(`title`,`body`,`created_by`,`updated_by`,`updated_at`) |
+| `note_comments` / `note_versions` | 노트 댓글 / 수정 이력(고치기 직전 제목·본문, 노트당 30개) |
+| `automation_runs` | 자동화 실행 기록(규칙 이름·업무 번호·시점·동작 요약·성공 여부, 프로젝트당 100개) |
+| `project_notifications` | 프로젝트 알림함(받는 사람마다 한 줄: `kind`,`title`,`body`,`read_at`) |
+| `task_templates` | 프로젝트별 업무 템플릿(`name`,`title`,`description`,`priority`,`type_id`,`assignee_id`,`due_offset_days`) |
+| `project_automations` | 자동화 규칙(`trigger`,`trigger_status_id`,`condition` jsonb,`actions` jsonb,`enabled`) |
+| `project_notification_settings` | 사람 × 프로젝트별 알림 설정(행이 없으면 전부 켜짐) |
+| `task_references` | 업무 참조자(`task_id`, `user_id` 복합 PK). "내 업무"에 참조된 업무를 함께 보여주는 데 쓴다 |
 | `task_comments` | 업무 카드에 달린 댓글. `project_id`를 같이 들고 있어(비정규화) 대시보드의 "최근 댓글"을 조인 없이 모은다 |
 | `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `revoked_at` |
 | `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 임시 공개키+서명, `key_epoch`, `self_destruct_seconds` |

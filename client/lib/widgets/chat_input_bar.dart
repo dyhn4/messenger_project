@@ -17,9 +17,11 @@ import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
+import '../screens/capture/capture_window.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'call_button.dart';
+import 'capture_upload_dialog.dart';
 import 'muted_scrollbar.dart';
 
 /// 첨부 하나의 클라이언트 쪽 진행 상태. 첨부한 즉시(_ChatInputBarState._stageAndUpload)
@@ -169,6 +171,80 @@ class ChatInputBarState extends State<ChatInputBar> {
     unawaited(_stageAndUpload(file, true, 'image.png'));
   }
 
+  bool _capturing = false;
+
+  /// "화면 캡처" — 화면을 찍어 전체 화면 오버레이에서 영역을 고르게 하고(capture_window.dart),
+  /// 결과에 따라 업로드 대화상자/바로 보내기/저장을 한다. [hideMessenger]는 찍는 동안 메신저
+  /// 창을 숨길지(메신저가 캡처에 안 찍힘) 여부.
+  Future<void> _startCapture(bool hideMessenger) async {
+    if (_capturing) return;
+    setState(() => _capturing = true);
+    CaptureOutcome? outcome;
+    try {
+      outcome = await startScreenCapture(hideMessenger: hideMessenger);
+    } catch (e) {
+      if (mounted) showAppToast(context, '화면을 캡처하지 못했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _capturing = false);
+    }
+    final file = outcome?.file;
+    if (outcome == null || file == null || !mounted) return;
+    switch (outcome.action) {
+      case 'send':
+        await _uploadCapture(widget.room, file, '');
+      case 'dialog':
+        final choice = await showCaptureUploadDialog(
+          context,
+          session: widget.session,
+          initialRoom: widget.room,
+          file: file,
+        );
+        if (choice != null) {
+          await _uploadCapture(choice.room, file, choice.message);
+        }
+      case 'save':
+        await _saveCapture(file);
+    }
+  }
+
+  /// [room]에 캡처 이미지를 올려서 바로 보낸다. 다른 방에 올릴 수도 있어서(업로드 대화상자의
+  /// 공유 대화방) 그 방의 컨트롤러를 따로 가져온다.
+  Future<void> _uploadCapture(Room room, File file, String caption) async {
+    final controller = widget.session.controllerFor(room);
+    if (mounted) showAppToast(context, '캡처를 업로드하는 중입니다...');
+    try {
+      final bytes = await file.readAsBytes();
+      final thumb = await generateThumbnail(bytes);
+      final uploaded = await controller.uploadAttachment(
+        file,
+        isImage: true,
+        originalBytes: bytes,
+        thumbBytes: thumb,
+      );
+      await controller.sendUploadedAttachment(uploaded, caption: caption);
+      if (mounted) showAppToast(context, '캡처를 보냈습니다.');
+    } catch (e) {
+      if (mounted) showAppToast(context, '캡처를 보내지 못했습니다: $e');
+    }
+  }
+
+  Future<void> _saveCapture(File file) async {
+    final name = file.uri.pathSegments.last;
+    final path = await FilePicker.saveFile(
+      dialogTitle: '캡처 저장',
+      fileName: name,
+      type: FileType.custom,
+      allowedExtensions: ['png'],
+    );
+    if (path == null) return;
+    try {
+      await file.copy(path.toLowerCase().endsWith('.png') ? path : '$path.png');
+      if (mounted) showAppToast(context, '캡처를 저장했습니다.');
+    } catch (e) {
+      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+    }
+  }
+
   Future<void> _pickImage() async {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -189,10 +265,11 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 대화 목록에서도 바로 볼 수 있도록 같은 내용을 일반 메시지로도 그 방에 보낸다. 티켓 생성이
   /// 실패하면 메시지도 안 보낸다(팀장이 못 찾는 "고아" 메시지가 남는 걸 막는다).
   Future<void> _showInquiryDialog() async {
-    final result = await showDialog<(String, String, String, UploadedAttachment?)>(
-      context: context,
-      builder: (_) => _InquiryDialog(controller: widget.controller),
-    );
+    final result =
+        await showDialog<(String, String, String, UploadedAttachment?)>(
+          context: context,
+          builder: (_) => _InquiryDialog(controller: widget.controller),
+        );
     if (result == null || !mounted) return;
     final (category, title, content, attachment) = result;
     final text = '📩 문의 [$category] $title\n\n$content';
@@ -210,7 +287,9 @@ class ChatInputBarState extends State<ChatInputBar> {
       );
       await widget.session.chatSocket.send(
         roomId: widget.room.id,
-        type: attachment == null ? 'text' : (attachment.isImage ? 'image' : 'file'),
+        type: attachment == null
+            ? 'text'
+            : (attachment.isImage ? 'image' : 'file'),
         text: text,
         fileUrl: attachment?.url,
         fileName: attachment?.fileName,
@@ -456,6 +535,25 @@ class ChatInputBarState extends State<ChatInputBar> {
                       onPressed: _sending ? null : _pickFile,
                       tooltip: '파일 보내기',
                     ),
+                    // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
+                    // 찍을지 먼저 고른다.
+                    if (Platform.isWindows)
+                      PopupMenuButton<bool>(
+                        icon: const Icon(Icons.filter_center_focus),
+                        tooltip: '화면 캡처',
+                        enabled: !_sending && !_capturing,
+                        onSelected: _startCapture,
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: true,
+                            child: Text('메신저 창 숨기고 캡처'),
+                          ),
+                          PopupMenuItem(
+                            value: false,
+                            child: Text('메신저 창 포함하여 캡처'),
+                          ),
+                        ],
+                      ),
                     CallButton(session: widget.session, room: widget.room),
                     // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
                     if (widget.session.canSendInquiryIn(widget.room))
@@ -543,7 +641,11 @@ class _InquiryDialogState extends State<_InquiryDialog> {
     unawaited(_stageAndUpload(File(picked!.path!), false, picked.name));
   }
 
-  Future<void> _stageAndUpload(File file, bool isImage, String displayName) async {
+  Future<void> _stageAndUpload(
+    File file,
+    bool isImage,
+    String displayName,
+  ) async {
     final bytes = await file.readAsBytes();
     final thumbBytes = isImage ? await generateThumbnail(bytes) : null;
     if (!mounted) return;

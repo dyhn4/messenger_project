@@ -152,13 +152,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 _messagePreviewMode == MessagePreviewMode.all,
                             label: '모든 메시지',
                             onTap: () => setState(
-                              () => _messagePreviewMode =
-                                  MessagePreviewMode.all,
+                              () =>
+                                  _messagePreviewMode = MessagePreviewMode.all,
                             ),
                           ),
                           const SizedBox(width: 8),
                           _PreviewModeOption(
-                            selected: _messagePreviewMode ==
+                            selected:
+                                _messagePreviewMode ==
                                 MessagePreviewMode.publicTopicOnly,
                             label: '공개 토픽만',
                             onTap: () => setState(
@@ -172,8 +173,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 _messagePreviewMode == MessagePreviewMode.none,
                             label: '미리보기 안함',
                             onTap: () => setState(
-                              () => _messagePreviewMode =
-                                  MessagePreviewMode.none,
+                              () =>
+                                  _messagePreviewMode = MessagePreviewMode.none,
                             ),
                           ),
                         ],
@@ -277,10 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(
-                                    Icons.folder_outlined,
-                                    size: 18,
-                                  ),
+                                  const Icon(Icons.folder_outlined, size: 18),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(

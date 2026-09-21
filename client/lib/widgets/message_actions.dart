@@ -4,10 +4,13 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../data/stickers.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
+import '../models/project.dart' show Project;
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/message_forward_screen.dart';
 import '../screens/message_share_screen.dart';
+import '../screens/project/project_forms.dart' show showNewTaskDialog;
 import '../services/session.dart';
+import 'app_toast.dart';
 
 /// message_bubble.dart(실제 메시지)와 message_comments_card.dart(댓글)가 공용으로 쓰는
 /// 액션들 — 롱프레스 액션 시트(모바일)와 "더보기" 메뉴(PC) 양쪽에서 호출한다. 댓글은
@@ -167,6 +170,81 @@ void pushMessageForwardScreen(
   );
 }
 
+/// 메시지를 업무로 등록한다 — 제목은 메시지 첫 줄, 설명에는 전체 내용과 출처(보낸 사람·대화방·시각)가
+/// 채워진 "새 업무" 창이 열리고, 프로젝트/담당자/마감일 등은 거기서 고른다. 정회원 이상만.
+Future<void> registerMessageAsTask(
+  BuildContext context, {
+  required Session session,
+  required Message message,
+  required String senderDisplayName,
+}) async {
+  final body = copyableTextFor(message)?.trim() ?? '';
+  final fileName = message.fileName;
+  final firstLine = body
+      .split('\n')
+      .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
+  var title = firstLine.trim();
+  if (title.isEmpty) {
+    title = fileName != null ? '[파일] $fileName' : '메시지에서 등록한 업무';
+  }
+  if (title.length > 200) title = title.substring(0, 200);
+
+  final rooms = session.rooms.where((r) => r.id == message.roomId);
+  final roomName = rooms.isEmpty
+      ? null
+      : rooms.first.displayName(session.userId ?? '');
+  final t = message.createdAt.toLocal();
+  final when =
+      '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')} '
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  final description = [
+    if (body.isNotEmpty) body,
+    if (fileName != null) '첨부: $fileName',
+    '— $senderDisplayName${roomName == null ? '' : ' · $roomName'} · $when 메시지에서 등록',
+  ].join('\n\n');
+
+  await openNewTaskFromChat(
+    context,
+    session,
+    initialTitle: title,
+    initialDescription: description,
+  );
+}
+
+/// 대화 화면에서 "새 업무" 창을 연다 — 이 팀에서 참여 중인 프로젝트를 받아와 고르게 한다.
+/// 등록되면 업무 번호와 함께 알려준다.
+Future<void> openNewTaskFromChat(
+  BuildContext context,
+  Session session, {
+  String? initialTitle,
+  String? initialDescription,
+}) async {
+  final teamId = session.currentTeam?.id;
+  if (teamId == null) return;
+  final List<Project> projects;
+  try {
+    projects = await session.api!.fetchProjects(teamId);
+  } catch (e) {
+    if (context.mounted) showAppToast(context, '프로젝트를 불러오지 못했습니다: $e');
+    return;
+  }
+  if (!context.mounted) return;
+  if (projects.isEmpty) {
+    showAppToast(context, '참여 중인 프로젝트가 없습니다. 프로젝트를 먼저 만들거나 참여하세요.');
+    return;
+  }
+  final task = await showNewTaskDialog(
+    context,
+    session,
+    projects: projects,
+    initialTitle: initialTitle,
+    initialDescription: initialDescription,
+  );
+  if (task != null && context.mounted) {
+    showAppToast(context, '${task.key ?? '업무'}로 등록했습니다.');
+  }
+}
+
 /// 롱프레스로 뜨는 하단 시트(모바일 전용 진입점) — 메시지 공유/댓글/복사/선택 복사/메시지
 /// 전달. 공유·전달은 원본이 비밀 대화(E2EE)면 숨긴다 — 평문 메시지가 다른 방으로 새거나,
 /// 암호화 없이 그 대화에 그대로 쌓이면 안 되기 때문(room_picker_screen.dart도 대상
@@ -227,6 +305,20 @@ void showMessageActionSheet(
               showSelectCopyDialog(context, message);
             },
           ),
+          if (!isSecretRoom && session.canUseProjects)
+            ListTile(
+              leading: const Icon(Icons.assignment_outlined),
+              title: const Text('업무로 등록'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                registerMessageAsTask(
+                  context,
+                  session: session,
+                  message: message,
+                  senderDisplayName: senderDisplayName,
+                );
+              },
+            ),
           if (!isSecretRoom)
             ListTile(
               leading: const Icon(Icons.forward_outlined),
@@ -282,6 +374,22 @@ List<PopupMenuEntry<void>> messageActionMenuItems(
         children: [Icon(Icons.copy_outlined), SizedBox(width: 8), Text('복사')],
       ),
     ),
+    if (!isSecretRoom && session.canUseProjects)
+      PopupMenuItem<void>(
+        onTap: () => registerMessageAsTask(
+          context,
+          session: session,
+          message: message,
+          senderDisplayName: senderDisplayName,
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.assignment_outlined),
+            SizedBox(width: 8),
+            Text('업무로 등록'),
+          ],
+        ),
+      ),
     if (!isSecretRoom)
       PopupMenuItem<void>(
         onTap: () => pushMessageForwardScreen(

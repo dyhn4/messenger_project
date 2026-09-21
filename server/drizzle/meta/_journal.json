@@ -281,6 +281,62 @@
       "when": 1789706909545,
       "tag": "0039_clumsy_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789953017959,
+      "tag": "0040_groovy_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789970183712,
+      "tag": "0041_even_nighthawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789972513852,
+      "tag": "0042_early_anthem",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789975112935,
+      "tag": "0043_fresh_black_tom",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1789976508862,
+      "tag": "0044_demonic_garia",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1789977562876,
+      "tag": "0045_boring_molecule_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1789978173215,
+      "tag": "0046_parched_nemesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789979392587,
+      "tag": "0047_loving_spot",
+      "breakpoints": true
     }
   ]
 }

@@ -54,8 +54,26 @@ Future<void> showAnnouncementDetailScreen(
 }
 
 const _quickEmojis = [
-  '😀', '😂', '😍', '😊', '😉', '😢', '😭', '😡', '👍', '👎',
-  '👏', '🙏', '🎉', '❤️', '🔥', '✨', '💯', '👀', '🤔', '😅',
+  '😀',
+  '😂',
+  '😍',
+  '😊',
+  '😉',
+  '😢',
+  '😭',
+  '😡',
+  '👍',
+  '👎',
+  '👏',
+  '🙏',
+  '🎉',
+  '❤️',
+  '🔥',
+  '✨',
+  '💯',
+  '👀',
+  '🤔',
+  '😅',
 ];
 
 class AnnouncementDetailScreen extends StatefulWidget {
@@ -84,8 +102,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
   StreamSubscription<AnnouncementComment>? _commentSub;
   StreamSubscription<Announcement>? _updatedSub;
 
-  bool get _canManage =>
-      widget.session.canManageAnnouncement(_announcement);
+  bool get _canManage => widget.session.canManageAnnouncement(_announcement);
 
   @override
   void initState() {
@@ -420,7 +437,10 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                         children: [
                           Icon(Icons.delete_outline, color: Colors.redAccent),
                           SizedBox(width: 8),
-                          Text('삭제하기', style: TextStyle(color: Colors.redAccent)),
+                          Text(
+                            '삭제하기',
+                            style: TextStyle(color: Colors.redAccent),
+                          ),
                         ],
                       ),
                     ),

@@ -155,9 +155,8 @@ class Session extends ChangeNotifier {
   /// currentTeam으로 거르지 않는다). 뮤트/숨김 둘 다 "목록 화면에 안 보이게 해달라"는
   /// 뜻일 뿐 "안 읽었다는 사실 자체를 숨겨달라"는 뜻은 아니므로 거르지 않는다 — 숨긴
   /// DM이라도 상대가 새로 보내면 안읽음이 생기고, 그건 여기서 꼭 보여야 한다.
-  List<Room> get unreadRooms => rooms
-      .where((r) => r.unreadCount > 0 || r.hasUnreadAnnouncement)
-      .toList();
+  List<Room> get unreadRooms =>
+      rooms.where((r) => r.unreadCount > 0 || r.hasUnreadAnnouncement).toList();
 
   /// 지금 들어가 있는 팀. null이면 아직 팀을 안 골랐다는 뜻이라 팀 선택 화면이 뜬다
   /// (home_screen.dart) — 로그아웃 후 로그인하거나 앱을 새로 켰을 때가 그 경우다.
@@ -192,6 +191,12 @@ class Session extends ChangeNotifier {
   StreamSubscription? _readSub;
   StreamSubscription? _favoriteSub;
   StreamSubscription? _mutedSub;
+  StreamSubscription? _renamedSub;
+  StreamSubscription? _projectNotifSub;
+  StreamSubscription? _projectNotifSyncSub;
+
+  /// 프로젝트 알림함의 안 읽은 개수 — 툴바 "프로젝트" 버튼의 배지와 프로젝트 창 사이드바가 쓴다.
+  int projectUnread = 0;
   StreamSubscription? _hiddenSub;
   StreamSubscription? _teamSub;
   StreamSubscription? _teamLeftSub;
@@ -554,16 +559,18 @@ class Session extends ChangeNotifier {
         // 아무 반응 없이 대화상자만 닫히는 버그로 나타났다. 설치 파일 실행은 Process.start로
         // 직접 하는 게 훨씬 확실하다(탐색기에서 더블클릭하는 것과 동일 — UAC 상승도 그대로 뜬다).
         //
-        // /VERYSILENT(+/SUPPRESSMSGBOXES)로 띄운다 — "지금 설치"를 이미 눌러 동의한 상태라
-        // 마법사 화면이나 "실행 중인 앱을 종료할까요?" 확인창을 또 띄울 필요가 없다. 일반
+        // /SILENT(+/SUPPRESSMSGBOXES)로 띄운다 — "지금 설치"를 이미 눌러 동의한 상태라
+        // 마법사 선택 화면이나 "실행 중인 앱을 종료할까요?" 확인창은 또 띄울 필요가 없지만,
+        // 설치가 진행 중인지는 보여야 해서 /VERYSILENT(진행률 창까지 숨김)가 아니라 /SILENT
+        // (진행률 창만 표시)를 쓴다. 일반
         // 더블클릭 설치(초대 링크 등)는 여전히 인자 없이 실행되어 기존 대화형 방식 그대로다
         // (messenger.iss의 InitializeSetup이 WizardSilent()로 이 경로만 확인창을 건너뛰고,
         // 설치 후 재실행도 이 모드에서만 자동으로 된다 — Check: IsSilentMode 항목 참고).
-        await Process.start(
-          file.path,
-          ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
-          mode: ProcessStartMode.detached,
-        );
+        await Process.start(file.path, [
+          '/SILENT',
+          '/SUPPRESSMSGBOXES',
+          '/NORESTART',
+        ], mode: ProcessStartMode.detached);
       } else {
         final result = await OpenFile.open(file.path);
         if (result.type != ResultType.done) {
@@ -786,6 +793,20 @@ class Session extends ChangeNotifier {
       accountRole == AccountRole.admin ||
       teams.any((t) => t.isOwner);
 
+  /// 프로젝트 알림의 안 읽은 개수를 서버에서 다시 받아온다.
+  Future<void> refreshProjectUnread() async {
+    try {
+      final (_, count) = await api!.fetchProjectNotifications();
+      projectUnread = count;
+      notifyListeners();
+    } catch (_) {
+      // 배지 숫자일 뿐이라 실패해도 조용히 넘어간다.
+    }
+  }
+
+  /// 프로젝트는 정회원 이상만(server/src/projects.js의 게이트와 동일 규칙).
+  bool get canUseProjects => isServerAdmin || accountRole != AccountRole.guest;
+
   /// "조직도" 버튼(팀 목록 화면)을 보여줄지 — 계정 등급이 관리자이거나 서버 운영자만
   /// (server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
   bool get canViewOrgChart => isServerAdmin || accountRole == AccountRole.admin;
@@ -949,6 +970,7 @@ class Session extends ChangeNotifier {
     } catch (_) {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
+    if (canUseProjects) unawaited(refreshProjectUnread());
 
     // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
     // 로그아웃(_forceLogout)됐을 수 있다(예: 이 토큰이 새 서버 버전 이전에 발급된 옛날
@@ -1013,6 +1035,31 @@ class Session extends ChangeNotifier {
       final match = rooms.where((r) => r.id == e.roomId);
       if (match.isEmpty) return;
       match.first.muted = e.muted;
+      notifyListeners();
+    });
+    _projectNotifSub?.cancel();
+    _projectNotifSub = chatSocket.projectNotifications.listen((data) {
+      projectUnread =
+          (data['unreadCount'] as num?)?.toInt() ?? projectUnread + 1;
+      if (!suppressNotifications) {
+        notifications.showProjectNotification(
+          title: data['title'] as String? ?? '프로젝트',
+          body: data['body'] as String? ?? '',
+          projectId: data['projectId'] as String? ?? '',
+        );
+      }
+      notifyListeners();
+    });
+    _projectNotifSyncSub?.cancel();
+    _projectNotifSyncSub = chatSocket.projectNotificationSync.listen((count) {
+      projectUnread = count;
+      notifyListeners();
+    });
+    _renamedSub?.cancel();
+    _renamedSub = chatSocket.renamedEvents.listen((e) {
+      final match = rooms.where((r) => r.id == e.roomId);
+      if (match.isEmpty) return;
+      match.first.customName = e.customName;
       notifyListeners();
     });
     _hiddenSub?.cancel();
@@ -1118,7 +1165,9 @@ class Session extends ChangeNotifier {
     _callStateSub?.cancel();
     _callStateSub = chatSocket.callStates.listen(_applyCallState);
     _announcementSub?.cancel();
-    _announcementSub = chatSocket.announcements.listen(_handleIncomingAnnouncement);
+    _announcementSub = chatSocket.announcements.listen(
+      _handleIncomingAnnouncement,
+    );
     _announcementUpdatedSub?.cancel();
     _announcementUpdatedSub = chatSocket.announcementUpdated.listen((a) {
       // 댓글 개수는 이 이벤트에 항상 0으로 온다(서버가 다시 세지 않음) — 배너에 반영된 글이면
@@ -1138,6 +1187,7 @@ class Session extends ChangeNotifier {
       if (match.first.latestAnnouncement?.id == e.id) {
         match.first.latestAnnouncement = null;
         match.first.hasUnreadAnnouncement = false;
+        match.first.unreadAnnouncementCount = 0;
         notifyListeners();
       }
     });
@@ -1148,6 +1198,7 @@ class Session extends ChangeNotifier {
       if (match.first.latestAnnouncement?.id == e.id) {
         match.first.latestAnnouncement = null;
         match.first.hasUnreadAnnouncement = false;
+        match.first.unreadAnnouncementCount = 0;
         notifyListeners();
       }
     });
@@ -1157,6 +1208,7 @@ class Session extends ChangeNotifier {
       final match = rooms.where((r) => r.id == e.roomId);
       if (match.isEmpty) return;
       match.first.hasUnreadAnnouncement = false;
+      match.first.unreadAnnouncementCount = 0;
       notifyListeners();
     });
     unawaited(_loadCallsConfig());
@@ -1276,7 +1328,7 @@ class Session extends ChangeNotifier {
         accountRole = accountRoleFromWire(me.role);
         isServerAdmin = me.isServerAdmin;
         canCreateTeamInviteLink = me.canCreateTeamInviteLink;
-      canCreateProject = me.canCreateProject;
+        canCreateProject = me.canCreateProject;
         notifyListeners();
       } catch (_) {
         // 실패해도 조용히 무시 — 다음 이벤트/재연결 때 다시 시도됨.
@@ -1937,7 +1989,10 @@ class Session extends ChangeNotifier {
     if (match.isEmpty) return;
     final room = match.first;
     room.latestAnnouncement = a;
-    if (a.authorId != userId) room.hasUnreadAnnouncement = true;
+    if (a.authorId != userId) {
+      room.hasUnreadAnnouncement = true;
+      room.unreadAnnouncementCount++;
+    }
     notifyListeners();
 
     if (a.authorId == userId) return;
@@ -1976,6 +2031,7 @@ class Session extends ChangeNotifier {
   void markAnnouncementsRead(Room room) {
     if (!room.hasUnreadAnnouncement) return;
     room.hasUnreadAnnouncement = false;
+    room.unreadAnnouncementCount = 0;
     notifyListeners();
     chatSocket.markAnnouncementRead(room.id);
   }
@@ -1989,6 +2045,7 @@ class Session extends ChangeNotifier {
       incoming.unreadCount = rooms[i].unreadCount;
       incoming.favorite = rooms[i].favorite;
       incoming.muted = rooms[i].muted;
+      incoming.customName = rooms[i].customName;
       incoming.hidden = rooms[i].hidden;
       incoming.lastActivityAt = rooms[i].lastActivityAt;
       incoming.lastMessagePreview = rooms[i].lastMessagePreview;
@@ -1997,6 +2054,7 @@ class Session extends ChangeNotifier {
       // requesterId가 있을 때만 채워지므로(rooms.js) 이 경로(브로드캐스트)에선 낡을 수 있어
       // 보존한다. dismissedAnnouncementId는 서버 DTO에 아예 없는 순수 로컬 값이라 항상 보존.
       incoming.hasUnreadAnnouncement = rooms[i].hasUnreadAnnouncement;
+      incoming.unreadAnnouncementCount = rooms[i].unreadAnnouncementCount;
       incoming.dismissedAnnouncementId = rooms[i].dismissedAnnouncementId;
       rooms[i] = incoming;
     } else {
@@ -2030,6 +2088,22 @@ class Session extends ChangeNotifier {
     } catch (_) {
       room.muted = !next;
       notifyListeners();
+    }
+  }
+
+  /// 그룹채팅방 이름을 나에게만 바꾼다(빈 문자열이면 원래 이름으로). toggleMuted와 같은
+  /// 낙관적 갱신 패턴 — 실패하면 되돌리고 예외를 다시 던져 호출한 화면이 알리게 한다.
+  Future<void> renameRoomForMe(Room room, String name) async {
+    final trimmed = name.trim();
+    final previous = room.customName;
+    room.customName = trimmed.isEmpty ? null : trimmed;
+    notifyListeners();
+    try {
+      await api!.setRoomNickname(room.id, trimmed);
+    } catch (_) {
+      room.customName = previous;
+      notifyListeners();
+      rethrow;
     }
   }
 
@@ -2254,6 +2328,10 @@ class Session extends ChangeNotifier {
     await _readSub?.cancel();
     await _favoriteSub?.cancel();
     await _mutedSub?.cancel();
+    await _renamedSub?.cancel();
+    await _projectNotifSub?.cancel();
+    await _projectNotifSyncSub?.cancel();
+    projectUnread = 0;
     await _hiddenSub?.cancel();
     await _teamSub?.cancel();
     await _teamLeftSub?.cancel();

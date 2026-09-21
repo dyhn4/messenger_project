@@ -155,10 +155,7 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                       : Column(
                           children: [
                             for (final task in myTasks.take(5))
-                              TaskRow(
-                                task: task,
-                                onTap: () => _openTask(task),
-                              ),
+                              TaskRow(task: task, onTap: () => _openTask(task)),
                             if (myTasks.length > 5)
                               TextButton(
                                 onPressed: widget.onOpenMyTasks,
@@ -359,9 +356,9 @@ class _Stat extends StatelessWidget {
           ),
           Text(
             label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: Theme.of(context).hintColor),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).hintColor,
+            ),
           ),
         ],
       ),

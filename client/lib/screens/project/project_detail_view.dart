@@ -3,10 +3,18 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
+import 'notes_view.dart';
+import 'project_notifications.dart';
 import 'project_forms.dart';
+import 'project_settings_dialog.dart';
+import 'project_views.dart';
 import 'project_widgets.dart';
+import 'task_views.dart';
+import 'task_config_manager.dart';
+import 'task_filter.dart';
+import 'template_automation_manager.dart';
+import 'task_type_manager.dart';
 
 /// 프로젝트 하나의 업무 목록 — 상태별(할 일/진행 중/완료)로 묶어서 보여준다.
 /// 칸반보드(드래그로 상태 이동)는 다음 단계이고, 지금은 같은 데이터를 목록으로 본다.
@@ -28,9 +36,17 @@ class ProjectDetailView extends StatefulWidget {
   State<ProjectDetailView> createState() => _ProjectDetailViewState();
 }
 
+/// 프로젝트 안에서 업무를 보는 방식 — 같은 업무를 다섯 가지 모양으로 본다.
+enum _ProjectTab { dashboard, kanban, list, gantt, calendar, notes }
+
 class _ProjectDetailViewState extends State<ProjectDetailView> {
+  _ProjectTab _tab = _ProjectTab.list;
   Project? _project;
   List<Task>? _tasks;
+  List<TaskStatusDef> _statuses = const [];
+  List<TaskFieldDef> _fields = const [];
+  List<TaskType> _types = const [];
+  TaskFilter _filter = const TaskFilter();
   String? _error;
 
   @override
@@ -54,10 +70,20 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
       final tasks = await widget.session.api!.fetchProjectTasks(
         widget.projectId,
       );
+      final statuses = await widget.session.api!.fetchTaskStatuses(
+        widget.projectId,
+      );
+      final fields = await widget.session.api!.fetchTaskFields(
+        widget.projectId,
+      );
+      final types = await widget.session.api!.fetchTaskTypes(widget.projectId);
       if (mounted) {
         setState(() {
           _project = project;
           _tasks = tasks;
+          _statuses = statuses;
+          _fields = fields;
+          _types = types;
           _error = null;
         });
       }
@@ -78,6 +104,16 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
     if (created != null) _load();
   }
 
+  /// 칸반보드에서 카드를 다른 열로 끌어다 놓았을 때 — 서버에 반영하고 다시 불러온다.
+  Future<void> _changeStatus(Task task, TaskStatusDef status) async {
+    try {
+      await widget.session.api!.updateTask(task.id, statusId: status.id);
+    } catch (e) {
+      if (mounted) showAppToast(context, '상태를 바꾸지 못했습니다: $e');
+    }
+    if (mounted) _load();
+  }
+
   Future<void> _openTask(Task task) async {
     await showTaskDetailDialog(context, widget.session, task.id);
     if (mounted) _load();
@@ -86,55 +122,92 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
   Future<void> _addMembers() async {
     final project = _project;
     if (project == null) return;
-    final all = await widget.session.fetchTeamMembers();
-    if (!mounted) return;
-    final existing = project.members.map((m) => m.id).toSet();
-    final candidates = all.where((u) => !existing.contains(u.id)).toList();
-    if (candidates.isEmpty) {
-      showAppToast(context, '이미 팀원이 모두 참여 중입니다.');
-      return;
-    }
-    final picked = await showDialog<List<String>>(
-      context: context,
-      builder: (_) =>
-          _MemberPickDialog(session: widget.session, candidates: candidates),
+    if (await addMembersToProject(context, widget.session, project)) _load();
+  }
+
+  Future<void> _openFilter() async {
+    final project = _project;
+    if (project == null) return;
+    final result = await showTaskFilterDialog(
+      context,
+      initial: _filter,
+      statuses: _statuses,
+      members: project.members,
+      types: _types,
+      fields: _fields,
     );
-    if (picked == null || picked.isEmpty || !mounted) return;
-    try {
-      await widget.session.api!.addProjectMembers(project.id, picked);
+    if (result != null && mounted) setState(() => _filter = result);
+  }
+
+  Future<void> _openSettings() async {
+    final result = await showProjectSettingsDialog(
+      context,
+      widget.session,
+      widget.projectId,
+    );
+    if (!mounted) return;
+    if (result == ProjectSettingsResult.deleted) {
+      widget.onDeleted();
+    } else if (result == ProjectSettingsResult.changed) {
       _load();
-    } catch (e) {
-      if (mounted) showAppToast(context, '구성원을 추가하지 못했습니다: $e');
     }
   }
 
-  Future<void> _deleteProject() async {
-    final project = _project;
-    if (project == null) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('프로젝트 삭제'),
-        content: Text('"${project.name}"의 업무와 댓글이 모두 삭제됩니다. 되돌릴 수 없습니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await widget.session.api!.deleteProject(project.id);
-      widget.onDeleted();
-    } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+  Widget _buildView(Project project, List<Task> allTasks) {
+    final tasks = _filter.isEmpty
+        ? allTasks
+        : [
+            for (final t in allTasks)
+              if (_filter.matches(t, statuses: _statuses, fields: _fields)) t,
+          ];
+    if (allTasks.isEmpty &&
+        _tab != _ProjectTab.dashboard &&
+        _tab != _ProjectTab.notes) {
+      return const EmptyHint('아직 등록된 업무가 없습니다. "새 업무"로 시작해보세요.');
+    }
+    if (tasks.isEmpty &&
+        _tab != _ProjectTab.dashboard &&
+        _tab != _ProjectTab.notes) {
+      return const EmptyHint('조건에 맞는 업무가 없습니다. 필터를 바꿔보세요.');
+    }
+    switch (_tab) {
+      case _ProjectTab.dashboard:
+        return TaskDashboardView(
+          statuses: _statuses,
+          tasks: tasks,
+          members: project.members,
+          session: widget.session,
+          onOpen: _openTask,
+        );
+      case _ProjectTab.kanban:
+        return TaskKanbanView(
+          statuses: _statuses,
+          readOnly: project.archived,
+          tasks: tasks,
+          members: project.members,
+          session: widget.session,
+          onOpen: _openTask,
+          onStatusChange: _changeStatus,
+        );
+      case _ProjectTab.list:
+        return TaskListTable(
+          tasks: tasks,
+          session: widget.session,
+          onOpen: _openTask,
+          members: project.members,
+          fields: _fields,
+        );
+      case _ProjectTab.gantt:
+        return TaskGanttView(tasks: tasks, onOpen: _openTask);
+      case _ProjectTab.calendar:
+        return TaskCalendarView(tasks: tasks, onOpen: _openTask);
+      case _ProjectTab.notes:
+        return NotesView(
+          session: widget.session,
+          teamId: project.teamId,
+          projectId: project.id,
+          reloadTick: widget.reloadTick,
+        );
     }
   }
 
@@ -202,26 +275,81 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                   ],
                 ),
               ),
-              FilledButton.icon(
-                onPressed: _newTask,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('새 업무'),
+              IconButton(
+                icon: const Icon(Icons.notifications_none),
+                tooltip: '알림 설정',
+                onPressed: () => showProjectNotificationSettingsDialog(
+                  context,
+                  widget.session,
+                  project,
+                ),
               ),
+              if (!project.archived)
+                FilledButton.icon(
+                  onPressed: _newTask,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('새 업무'),
+                ),
               if (project.isOwner || widget.session.canManageCurrentTeam)
                 PopupMenuButton<void>(
                   icon: const Icon(Icons.more_vert),
                   tooltip: '프로젝트 메뉴',
                   itemBuilder: (context) => [
                     PopupMenuItem(
-                      onTap: _deleteProject,
+                      onTap: () => showTaskTypeManagerDialog(
+                        context,
+                        widget.session,
+                        widget.projectId,
+                      ),
                       child: const Row(
                         children: [
-                          Icon(Icons.delete_outline, color: Colors.redAccent),
+                          Icon(Icons.label_outline),
                           SizedBox(width: 8),
-                          Text(
-                            '프로젝트 삭제',
-                            style: TextStyle(color: Colors.redAccent),
-                          ),
+                          Text('업무 유형 관리'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      onTap: () async {
+                        await showTaskConfigManagerDialog(
+                          context,
+                          widget.session,
+                          widget.projectId,
+                        );
+                        if (mounted) _load();
+                      },
+                      child: const Row(
+                        children: [
+                          Icon(Icons.view_column_outlined),
+                          SizedBox(width: 8),
+                          Text('상태 · 필드 관리'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      onTap: () async {
+                        await showTemplateAutomationManagerDialog(
+                          context,
+                          widget.session,
+                          widget.projectId,
+                        );
+                        if (mounted) _load();
+                      },
+                      child: const Row(
+                        children: [
+                          Icon(Icons.bolt_outlined),
+                          SizedBox(width: 8),
+                          Text('템플릿 · 자동화 관리'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      onTap: _openSettings,
+                      child: const Row(
+                        children: [
+                          Icon(Icons.settings_outlined),
+                          SizedBox(width: 8),
+                          Text('프로젝트 설정'),
                         ],
                       ),
                     ),
@@ -230,242 +358,113 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
             ],
           ),
         ),
-        const Divider(height: 1),
-        Expanded(
-          child: tasks.isEmpty
-              ? const EmptyHint('아직 등록된 업무가 없습니다. "새 업무"로 시작해보세요.')
-              : MutedScrollbar(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                    children: [
-                      for (final status in TaskStatus.values)
-                        _StatusSection(
-                          status: status,
-                          tasks: tasks.where((t) => t.status == status).toList(),
-                          onOpen: _openTask,
-                        ),
-                    ],
+        if (project.archived)
+          Container(
+            color: Theme.of(context).colorScheme.surfaceContainerHigh,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.inventory_2_outlined, size: 16, color: hint),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '종료된 프로젝트입니다. 읽기만 할 수 있습니다.',
+                    style: TextStyle(color: hint, fontSize: 12),
                   ),
                 ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 상태 하나(할 일/진행 중/완료)와 그 업무들.
-class _StatusSection extends StatelessWidget {
-  final TaskStatus status;
-  final List<Task> tasks;
-  final ValueChanged<Task> onOpen;
-  const _StatusSection({
-    required this.status,
-    required this.tasks,
-    required this.onOpen,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (tasks.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              TaskStatusChip(status: status),
-              const SizedBox(width: 8),
-              Text(
-                '${tasks.length}',
-                style: TextStyle(color: Theme.of(context).hintColor),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 4),
-          for (final task in tasks)
-            TaskRow(task: task, onTap: () => onOpen(task), showProject: false),
-        ],
-      ),
-    );
-  }
-}
-
-/// "내 업무" — 팀 전체에서 내가 담당자인 업무를 한 목록으로.
-class MyTasksView extends StatefulWidget {
-  final Session session;
-  final String teamId;
-  final int reloadTick;
-
-  const MyTasksView({
-    super.key,
-    required this.session,
-    required this.teamId,
-    required this.reloadTick,
-  });
-
-  @override
-  State<MyTasksView> createState() => _MyTasksViewState();
-}
-
-class _MyTasksViewState extends State<MyTasksView> {
-  List<Task>? _tasks;
-  String? _error;
-
-  /// null이면 전체.
-  TaskStatus? _filter;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void didUpdateWidget(MyTasksView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.reloadTick != widget.reloadTick) _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final tasks = await widget.session.api!.fetchMyTasks(widget.teamId);
-      if (mounted) {
-        setState(() {
-          _tasks = tasks;
-          _error = null;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_error != null) return Center(child: Text(_error!));
-    final all = _tasks;
-    if (all == null) return const Center(child: CircularProgressIndicator());
-    final tasks = _filter == null
-        ? all
-        : all.where((t) => t.status == _filter).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
+        const Divider(height: 1),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          child: Wrap(
-            spacing: 8,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
             children: [
-              ChoiceChip(
-                label: Text('전체 ${all.length}'),
-                selected: _filter == null,
-                onSelected: (_) => setState(() => _filter = null),
-              ),
-              for (final status in TaskStatus.values)
-                ChoiceChip(
+              for (final tab in _ProjectTab.values)
+                _ViewTab(
+                  label: switch (tab) {
+                    _ProjectTab.dashboard => '대시보드',
+                    _ProjectTab.kanban => '칸반보드',
+                    _ProjectTab.list => '리스트',
+                    _ProjectTab.gantt => '간트차트',
+                    _ProjectTab.calendar => '캘린더',
+                    _ProjectTab.notes => '노트',
+                  },
+                  icon: switch (tab) {
+                    _ProjectTab.dashboard => Icons.dashboard_outlined,
+                    _ProjectTab.kanban => Icons.view_kanban_outlined,
+                    _ProjectTab.list => Icons.format_list_bulleted,
+                    _ProjectTab.gantt => Icons.view_timeline_outlined,
+                    _ProjectTab.calendar => Icons.calendar_today_outlined,
+                    _ProjectTab.notes => Icons.description_outlined,
+                  },
+                  selected: _tab == tab,
+                  onTap: () => setState(() => _tab = tab),
+                ),
+              const Spacer(),
+              if (_tab != _ProjectTab.notes)
+                TextButton.icon(
+                  onPressed: _openFilter,
+                  icon: const Icon(Icons.filter_list, size: 18),
                   label: Text(
-                    '${taskStatusLabel(status)} ${all.where((t) => t.status == status).length}',
+                    _filter.isEmpty ? '필터' : '필터 ${_filter.activeCount}',
                   ),
-                  selected: _filter == status,
-                  onSelected: (_) => setState(() => _filter = status),
                 ),
             ],
           ),
         ),
         const Divider(height: 1),
-        Expanded(
-          child: tasks.isEmpty
-              ? const EmptyHint('담당한 업무가 없습니다')
-              : MutedScrollbar(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                    children: [
-                      for (final task in tasks)
-                        TaskRow(
-                          task: task,
-                          onTap: () async {
-                            await showTaskDetailDialog(
-                              context,
-                              widget.session,
-                              task.id,
-                            );
-                            if (mounted) _load();
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-        ),
+        Expanded(child: _buildView(project, tasks)),
       ],
+    );
+  }
+}
+
+class _ViewTab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  const _ViewTab({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final hint = Theme.of(context).hintColor;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: selected ? primary : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: selected ? primary : hint),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? primary : hint,
+                fontWeight: selected ? FontWeight.w600 : null,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
 /// 팀원 중에서 프로젝트에 추가할 사람을 고르는 작은 창.
-class _MemberPickDialog extends StatefulWidget {
-  final Session session;
-  final List<dynamic> candidates;
-  const _MemberPickDialog({required this.session, required this.candidates});
-
-  @override
-  State<_MemberPickDialog> createState() => _MemberPickDialogState();
-}
-
-class _MemberPickDialogState extends State<_MemberPickDialog> {
-  final _selected = <String>{};
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('구성원 추가'),
-      content: SizedBox(
-        width: 360,
-        height: 360,
-        child: MutedScrollbar(
-          child: ListView(
-            children: [
-              for (final user in widget.candidates)
-                CheckboxListTile(
-                  dense: true,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: _selected.contains(user.id),
-                  title: Row(
-                    children: [
-                      UserAvatar(
-                        user: user,
-                        resolveUrl: widget.session.resolveUrl,
-                        radius: 12,
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(child: Text(user.name as String)),
-                    ],
-                  ),
-                  onChanged: (v) => setState(() {
-                    if (v == true) {
-                      _selected.add(user.id as String);
-                    } else {
-                      _selected.remove(user.id);
-                    }
-                  }),
-                ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: _selected.isEmpty
-              ? null
-              : () => Navigator.of(context).pop(_selected.toList()),
-          child: const Text('추가'),
-        ),
-      ],
-    );
-  }
-}

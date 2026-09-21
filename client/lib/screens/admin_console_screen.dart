@@ -699,7 +699,8 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
               ? '서비스 계정: 설정됨 (${settings.serviceAccountEmail ?? '확인 불가'})'
               : '서비스 계정: 설정 안 됨 — 설정 전까지 푸시가 발송되지 않습니다.',
           style: TextStyle(
-            color: _serviceAccountJson.text.isEmpty &&
+            color:
+                _serviceAccountJson.text.isEmpty &&
                     !settings.serviceAccountConfigured
                 ? Theme.of(context).colorScheme.error
                 : null,

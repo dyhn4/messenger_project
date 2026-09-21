@@ -29,7 +29,10 @@ final _timeFormat = DateFormat('a h:mm');
 
 /// 서버 linkPreview.js의 URL_REGEX(`/https?:\/\/[^\s<>"']+/i`)와 동일한 패턴 — 메시지 본문에서
 /// 링크 미리보기를 만드는 링크와 여기서 파랗게 표시되는 링크가 항상 일치하게 맞춘다.
-final _messageUrlRegex = RegExp(r'''https?://[^\s<>"']+''', caseSensitive: false);
+final _messageUrlRegex = RegExp(
+  r'''https?://[^\s<>"']+''',
+  caseSensitive: false,
+);
 
 /// 위 정규식과 마찬가지로 서버의 끝 문장부호 다듬기(`/[.,;:!?)\]}'"]+$/`)와 동일하다 — 링크
 /// 뒤에 곧바로 마침표/쉼표/괄호가 오면 그 부호는 링크에서 빼고 일반 글자로 남긴다.
@@ -450,7 +453,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                                     Icon(
                                       Icons.contact_support,
                                       size: 14,
-                                      color: Theme.of(context).colorScheme.primary,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
@@ -458,7 +463,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: Theme.of(context).colorScheme.primary,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
                                         decoration: TextDecoration.underline,
                                       ),
                                     ),
@@ -899,7 +906,10 @@ class _LinkPreviewCard extends StatelessWidget {
 
   Future<void> _open() async {
     try {
-      await launchUrl(Uri.parse(preview.url), mode: LaunchMode.externalApplication);
+      await launchUrl(
+        Uri.parse(preview.url),
+        mode: LaunchMode.externalApplication,
+      );
     } catch (_) {
       // 브라우저를 못 열어도 조용히 무시한다 — 이 카드는 어차피 정보 표시가 우선 목적이라
       // 실패를 따로 알릴 만큼 중요한 동작은 아니다.

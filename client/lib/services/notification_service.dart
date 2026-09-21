@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
@@ -9,6 +10,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:win32/win32.dart'
     show
         FindWindow,
@@ -81,6 +83,34 @@ class NotificationService {
     return details?.notificationResponse?.payload;
   }
 
+  /// 프로젝트 알림 payload 앞에 붙는 표시 — 알림을 눌렀을 때 방이 아니라 프로젝트 창을 연다.
+  static const projectPayloadPrefix = 'project:';
+
+  /// 프로젝트 알림(업무 배정/댓글/마감 임박 등) 한 건을 보여준다 — 대화 알림과 달리 단순한
+  /// 제목+본문이고, 채널도 따로 둬서 OS 설정에서 채팅 알림과 따로 끄고 켤 수 있다.
+  Future<void> showProjectNotification({
+    required String title,
+    required String body,
+    required String projectId,
+  }) async {
+    await _plugin.show(
+      id: 'project:${DateTime.now().microsecondsSinceEpoch}'.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: const AndroidNotificationDetails(
+          'project_updates',
+          '프로젝트 알림',
+          channelDescription: '업무 배정·댓글·마감 임박 등 프로젝트 알림',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        windows: const WindowsNotificationDetails(),
+      ),
+      payload: '$projectPayloadPrefix$projectId',
+    );
+  }
+
   /// 걸려온 화상회의를 "전화처럼" 알린다 — 잠금화면에서도 바로 뜨도록 전체화면 인텐트를
   /// 쓰고(fullScreenIntent), 카테고리를 call로 줘서 OS가 통화 알림으로 취급하게 한다.
   /// 화면이 켜져 있으면 OS가 전체화면 대신 헤드업 알림으로 보여준다(안드로이드 규칙).
@@ -125,6 +155,54 @@ class NotificationService {
   /// 통화 수신 알림을 지운다(받았거나, 상대가 끊었을 때).
   Future<void> cancelIncomingCall(String roomId) =>
       _plugin.cancel(id: 'call:$roomId'.hashCode);
+
+  /// 방마다 아직 안 지운(=사용자가 확인 안 한) 알림 메시지 기록 — 같은 방에서 메시지가 여러 개
+  /// 와도 알림 id는 방 하나당 하나(roomId.hashCode)라 새 메시지가 이전 알림을 덮어써서, 예전엔
+  /// 알림 한 줄·런처 아이콘 배지 "1"로만 보였다. 이 기록에 쌓아서 알림에 최근 메시지를 전부 보여주고
+  /// 배지 숫자([AndroidNotificationDetails.number])를 실제 개수로 올린다.
+  /// 앱이 꺼져있을 때 FCM 백그라운드 isolate(main.dart)에서도 이어서 쌓아야 해서, isolate끼리
+  /// 값이 유지되는 SharedPreferencesAsync에 저장한다(fcm 핸들러가 쓰는 것과 같은 방식).
+  static const _historyKeyPrefix = 'notif_history:';
+  static const _historyMax = 30;
+  late final _historyPrefs = SharedPreferencesAsync();
+
+  Future<List<({String name, String body, int ms})>> _appendHistory(
+    String roomId,
+    String name,
+    String body,
+  ) async {
+    final key = '$_historyKeyPrefix$roomId';
+    var stored = await _historyPrefs.getStringList(key) ?? <String>[];
+    // 사용자가 알림을 옆으로 밀어서 지웠거나 다른 경로로 사라졌으면(이 앱은 그걸 알림 삭제
+    // 이벤트로 못 받는다) 화면에 알림이 실제로 없는 것이므로 기록도 새로 시작한다.
+    try {
+      final active = await _plugin.getActiveNotifications();
+      if (!active.any((n) => n.id == roomId.hashCode)) stored = <String>[];
+    } catch (_) {}
+    stored = [
+      ...stored,
+      jsonEncode({
+        'n': name,
+        'b': body,
+        't': DateTime.now().millisecondsSinceEpoch,
+      }),
+    ];
+    if (stored.length > _historyMax) {
+      stored = stored.sublist(stored.length - _historyMax);
+    }
+    await _historyPrefs.setStringList(key, stored);
+    return [
+      for (final raw in stored)
+        () {
+          final m = jsonDecode(raw) as Map<String, dynamic>;
+          return (
+            name: m['n'] as String,
+            body: m['b'] as String,
+            ms: m['t'] as int,
+          );
+        }(),
+    ];
+  }
 
   /// [avatarUrl]은 이미 절대경로로 resolve된 URL이어야 한다(Session이 resolveUrl 적용해서 넘김).
   /// 업로드 사진('photo')은 그대로 받아오고, 캐릭터('character')는 이모지+배경색을 직접
@@ -192,6 +270,9 @@ class NotificationService {
       important: true,
       icon: ByteArrayAndroidIcon(avatarBytes),
     );
+    final history = Platform.isAndroid
+        ? await _appendHistory(roomId, senderName ?? title, body)
+        : null;
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'messages',
@@ -200,12 +281,26 @@ class NotificationService {
         importance: Importance.high,
         priority: Priority.high,
         shortcutId: roomId,
+        // 런처 아이콘 배지 숫자 — 안 지운 이 방 메시지 개수(위 _appendHistory 참고).
+        number: history?.length,
         styleInformation: MessagingStyleInformation(
           const Person(name: '나'),
           conversationTitle: conversationTitle,
           // conversationTitle은 groupConversation이 true일 때만 화면에 표시된다.
           groupConversation: conversationTitle != null,
-          messages: [Message(body, DateTime.now(), sender)],
+          messages: history == null
+              ? [Message(body, DateTime.now(), sender)]
+              : [
+                  for (var i = 0; i < history.length; i++)
+                    Message(
+                      history[i].body,
+                      DateTime.fromMillisecondsSinceEpoch(history[i].ms),
+                      // 가장 최근 것만 아바타 아이콘이 있는 Person을 쓴다(위 sender).
+                      i == history.length - 1
+                          ? sender
+                          : Person(name: history[i].name, key: history[i].name),
+                    ),
+                ],
         ),
       ),
       windows: WindowsNotificationDetails(
@@ -258,8 +353,12 @@ class NotificationService {
 
   /// 방을 열 때(또는 다시 포그라운드로 돌아와 그 방을 계속 보고 있을 때) 그 방으로 떠있는
   /// 알림을 지운다 — showMessage와 같은 id(roomId.hashCode)를 써야 같은 알림을 가리킨다.
-  Future<void> cancelForRoom(String roomId) =>
-      _plugin.cancel(id: roomId.hashCode);
+  Future<void> cancelForRoom(String roomId) async {
+    await _plugin.cancel(id: roomId.hashCode);
+    if (Platform.isAndroid) {
+      await _historyPrefs.remove('$_historyKeyPrefix$roomId');
+    }
+  }
 
   /// [fallbackLabel]의 첫 글자로 만든 원형 아바타를 마지막 대안으로 쓴다(위젯의 "이니셜"
   /// 아바타와 같은 개념) — 이게 없으면(예: avatarType이 'initial'인, 즉 대다수 회원의

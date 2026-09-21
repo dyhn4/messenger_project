@@ -1,0 +1,1 @@
+ALTER TABLE "room_members" ADD COLUMN "custom_name" text;

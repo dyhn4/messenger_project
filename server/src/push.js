@@ -191,6 +191,35 @@ export async function notifyOfflineMembers({
 }
 
 /**
+ * 프로젝트 알림(업무 배정/댓글/마감 임박 등)을 소켓이 안 붙어있는 사람에게만 FCM으로 보낸다.
+ * 채팅 푸시와 달리 알림 payload(notification)를 넣어서, 앱이 꺼져 있어도 OS가 바로 그려준다.
+ */
+export async function notifyProjectPush({ userId, title, body, projectId, taskId }) {
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+  if (isOnline(userId)) return;
+  const tokens = await listFcmTokensForUser(userId);
+  await Promise.all(
+    tokens.map(({ deviceId, fcmToken }) =>
+      messaging
+        .send({
+          token: fcmToken,
+          notification: { title, body },
+          data: { kind: 'project', projectId, ...(taskId ? { taskId } : {}) },
+          android: { priority: 'high' },
+        })
+        .catch(async (err) => {
+          if (err?.code === 'messaging/registration-token-not-registered') {
+            await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
+            return;
+          }
+          console.error('[push] 프로젝트 알림 발송 실패:', err?.message ?? err);
+        }),
+    ),
+  );
+}
+
+/**
  * 화상회의가 시작됐을 때, 소켓이 안 붙어있는(=앱이 꺼져 있을 가능성이 높은) 멤버들에게
  * "전화가 왔다"고 FCM으로 알린다. 온라인인 사람은 이미 call:state 소켓 이벤트로 수신
  * 화면을 보고 있으므로 중복으로 보내지 않는다(메시지 푸시와 같은 분리 방식).

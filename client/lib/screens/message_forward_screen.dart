@@ -114,10 +114,9 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         Icons.emoji_emotions_outlined,
         findStickerById(message.text ?? '')?.emoji ?? '이모티콘',
       ),
-      MessageType.text || MessageType.system || MessageType.comment => (
-        null,
-        null,
-      ),
+      MessageType.text ||
+      MessageType.system ||
+      MessageType.comment => (null, null),
     };
     if (icon == null) return null;
     return Padding(

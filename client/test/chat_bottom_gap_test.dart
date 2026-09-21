@@ -69,7 +69,10 @@ void main() {
     await tester.pumpAndSettle();
 
     unawaited(
-      controller.scrollTo(index: 0, duration: const Duration(milliseconds: 100)),
+      controller.scrollTo(
+        index: 0,
+        duration: const Duration(milliseconds: 100),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -88,7 +91,9 @@ void main() {
     controller.jumpTo(index: 0);
     await tester.pumpAndSettle();
 
-    final listBottom = tester.getRect(find.byType(ScrollablePositionedList)).bottom;
+    final listBottom = tester
+        .getRect(find.byType(ScrollablePositionedList))
+        .bottom;
     final lastMessageBottom = tester.getRect(find.text('메시지 0')).bottom;
     expect(listBottom - lastMessageBottom, moreOrLessEquals(gap, epsilon: 1));
   });

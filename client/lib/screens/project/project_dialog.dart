@@ -6,9 +6,14 @@ import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/muted_scrollbar.dart';
+import 'browse_projects_dialog.dart';
 import 'project_detail_view.dart';
+import 'my_tasks_view.dart';
+import 'notes_view.dart';
+import 'project_notifications.dart';
 import 'project_forms.dart';
 import 'project_home_view.dart';
+import 'team_tasks_view.dart';
 
 /// "프로젝트" 창 — 토픽(대화)과 별개로 업무를 계획·추적하는 공간. 상단 툴바의 과녁 아이콘
 /// 버튼으로 연다. 왼쪽 사이드바(홈/내 업무/캘린더/간트차트/노트 + 프로젝트 목록)와 오른쪽
@@ -26,7 +31,15 @@ Future<void> showProjectDialog(BuildContext context, Session session) {
 }
 
 /// 지금 오른쪽에 무엇을 그리고 있는지.
-enum ProjectView { home, myTasks, calendar, gantt, notes, project }
+enum ProjectView {
+  home,
+  notifications,
+  myTasks,
+  calendar,
+  gantt,
+  notes,
+  project,
+}
 
 class ProjectDialog extends StatefulWidget {
   final Session session;
@@ -51,6 +64,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
   String? _projectId; // _view == ProjectView.project일 때만 의미 있다.
 
   List<Project>? _projects;
+  List<Project> _archivedProjects = const [];
   String? _error;
 
   /// 내가 참여 중인 프로젝트에서 뭔가 바뀌면(다른 사람이 업무를 만들거나 댓글을 달아도)
@@ -87,13 +101,18 @@ class _ProjectDialogState extends State<ProjectDialog> {
       return;
     }
     try {
-      final list = await widget.session.api!.fetchProjects(teamId);
+      final api = widget.session.api!;
+      final list = await api.fetchProjects(teamId);
+      final archived = await api.fetchProjects(teamId, archived: true);
       if (!mounted) return;
       setState(() {
         _projects = list;
+        _archivedProjects = archived;
         _error = null;
         // 열어둔 프로젝트가 사라졌으면(삭제되었거나 제외됨) 홈으로 돌아간다.
-        if (_projectId != null && !list.any((p) => p.id == _projectId)) {
+        if (_projectId != null &&
+            !list.any((p) => p.id == _projectId) &&
+            !archived.any((p) => p.id == _projectId)) {
           _view = ProjectView.home;
           _projectId = null;
         }
@@ -108,6 +127,32 @@ class _ProjectDialogState extends State<ProjectDialog> {
       _view = view;
       _projectId = projectId;
     });
+  }
+
+  /// 알림함에서 알림을 눌렀을 때 — 그 프로젝트를 열고, 업무 알림이면 업무 상세도 띄운다.
+  void _openNotification(ProjectNotification n) {
+    if (_projects?.any((p) => p.id == n.projectId) != true) {
+      showAppToast(context, '더 이상 참여 중이 아닌 프로젝트입니다.');
+      return;
+    }
+    _select(ProjectView.project, projectId: n.projectId);
+    if (n.taskId != null) {
+      showTaskDetailDialog(context, widget.session, n.taskId!);
+    }
+  }
+
+  /// 공개 프로젝트 둘러보기 — 참여하면 목록을 새로 받아 그 프로젝트를 바로 연다.
+  Future<void> _browseProjects() async {
+    final teamId = _teamId;
+    if (teamId == null) return;
+    final joined = await showBrowseProjectsDialog(
+      context,
+      widget.session,
+      teamId,
+    );
+    if (joined == null || !mounted) return;
+    await _loadProjects();
+    if (mounted) _select(ProjectView.project, projectId: joined.id);
   }
 
   Future<void> _createProject() async {
@@ -142,10 +187,12 @@ class _ProjectDialogState extends State<ProjectDialog> {
           child: _Sidebar(
             session: widget.session,
             projects: _projects,
+            archivedProjects: _archivedProjects,
             view: _view,
             projectId: _projectId,
             onSelect: _select,
             onCreateProject: _createProject,
+            onBrowse: _browseProjects,
             onToggleFavorite: _toggleFavorite,
           ),
         ),
@@ -183,7 +230,12 @@ class _ProjectDialogState extends State<ProjectDialog> {
           padding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
           child: Row(
             children: [
-              Expanded(child: Text(_titleFor(_view), style: Theme.of(context).textTheme.titleMedium)),
+              Expanded(
+                child: Text(
+                  _titleFor(_view),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
               if (!widget.embedInWindow)
                 IconButton(
                   icon: const Icon(Icons.close),
@@ -200,15 +252,17 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   String _titleFor(ProjectView view) => switch (view) {
     ProjectView.home => '홈',
+    ProjectView.notifications => '알림',
     ProjectView.myTasks => '내 업무',
     ProjectView.calendar => '캘린더',
     ProjectView.gantt => '간트차트',
     ProjectView.notes => '노트',
-    ProjectView.project => _projects
-            ?.where((p) => p.id == _projectId)
-            .map((p) => p.name)
-            .firstOrNull ??
-        '프로젝트',
+    ProjectView.project =>
+      _projects
+              ?.where((p) => p.id == _projectId)
+              .map((p) => p.name)
+              .firstOrNull ??
+          '프로젝트',
   };
 
   Widget _buildBody(BuildContext context, String teamId) {
@@ -241,14 +295,31 @@ class _ProjectDialogState extends State<ProjectDialog> {
           },
         );
       case ProjectView.calendar:
-        return const _ComingSoon(
-          icon: Icons.calendar_today_outlined,
-          label: '캘린더',
+        return TeamTasksView(
+          session: widget.session,
+          teamId: teamId,
+          reloadTick: _reloadTick,
+          gantt: false,
         );
       case ProjectView.gantt:
-        return const _ComingSoon(icon: Icons.view_timeline_outlined, label: '간트차트');
+        return TeamTasksView(
+          session: widget.session,
+          teamId: teamId,
+          reloadTick: _reloadTick,
+          gantt: true,
+        );
+      case ProjectView.notifications:
+        return ProjectNotificationsView(
+          session: widget.session,
+          reloadTick: _reloadTick,
+          onOpen: _openNotification,
+        );
       case ProjectView.notes:
-        return const _ComingSoon(icon: Icons.description_outlined, label: '노트');
+        return NotesView(
+          session: widget.session,
+          teamId: teamId,
+          reloadTick: _reloadTick,
+        );
     }
   }
 }
@@ -257,19 +328,23 @@ class _ProjectDialogState extends State<ProjectDialog> {
 class _Sidebar extends StatelessWidget {
   final Session session;
   final List<Project>? projects;
+  final List<Project> archivedProjects;
   final ProjectView view;
   final String? projectId;
   final void Function(ProjectView view, {String? projectId}) onSelect;
   final VoidCallback onCreateProject;
+  final VoidCallback onBrowse;
   final ValueChanged<Project> onToggleFavorite;
 
   const _Sidebar({
     required this.session,
     required this.projects,
+    required this.archivedProjects,
     required this.view,
     required this.projectId,
     required this.onSelect,
     required this.onCreateProject,
+    required this.onBrowse,
     required this.onToggleFavorite,
   });
 
@@ -312,6 +387,21 @@ class _Sidebar extends StatelessWidget {
               onTap: () => onSelect(ProjectView.home),
             ),
             _SidebarItem(
+              icon: Icons.notifications_none,
+              label: '알림',
+              selected: view == ProjectView.notifications,
+              trailing: ListenableBuilder(
+                listenable: session,
+                builder: (context, _) => session.projectUnread == 0
+                    ? const SizedBox.shrink()
+                    : Badge(
+                        backgroundColor: Colors.redAccent,
+                        label: Text('${session.projectUnread}'),
+                      ),
+              ),
+              onTap: () => onSelect(ProjectView.notifications),
+            ),
+            _SidebarItem(
               icon: Icons.checklist_outlined,
               label: '내 업무',
               selected: view == ProjectView.myTasks,
@@ -351,12 +441,18 @@ class _Sidebar extends StatelessWidget {
                   if (session.canCreateProject)
                     IconButton(
                       icon: const Icon(Icons.add, size: 18),
-                      tooltip: '새 프로젝트',
+                      tooltip: '프로젝트 생성',
                       visualDensity: VisualDensity.compact,
                       onPressed: onCreateProject,
                     ),
                 ],
               ),
+            ),
+            _SidebarItem(
+              icon: Icons.explore_outlined,
+              label: '공개 프로젝트 찾기',
+              selected: false,
+              onTap: onBrowse,
             ),
             if (projects == null)
               const Padding(
@@ -394,8 +490,10 @@ class _Sidebar extends StatelessWidget {
               for (final project in favorites)
                 _ProjectItem(
                   project: project,
-                  selected: view == ProjectView.project && projectId == project.id,
-                  onTap: () => onSelect(ProjectView.project, projectId: project.id),
+                  selected:
+                      view == ProjectView.project && projectId == project.id,
+                  onTap: () =>
+                      onSelect(ProjectView.project, projectId: project.id),
                   onToggleFavorite: () => onToggleFavorite(project),
                 ),
               const Divider(indent: 16, endIndent: 16, height: 20),
@@ -403,9 +501,50 @@ class _Sidebar extends StatelessWidget {
             for (final project in others)
               _ProjectItem(
                 project: project,
-                selected: view == ProjectView.project && projectId == project.id,
-                onTap: () => onSelect(ProjectView.project, projectId: project.id),
+                selected:
+                    view == ProjectView.project && projectId == project.id,
+                onTap: () =>
+                    onSelect(ProjectView.project, projectId: project.id),
                 onToggleFavorite: () => onToggleFavorite(project),
+              ),
+            if (archivedProjects.isNotEmpty)
+              ExpansionTile(
+                dense: true,
+                shape: const Border(),
+                collapsedShape: const Border(),
+                initiallyExpanded: archivedProjects.any(
+                  (p) => view == ProjectView.project && projectId == p.id,
+                ),
+                title: Text(
+                  '종료된 프로젝트 ${archivedProjects.length}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelMedium?.copyWith(color: hint),
+                ),
+                children: [
+                  for (final p in archivedProjects)
+                    ListTile(
+                      dense: true,
+                      selected:
+                          view == ProjectView.project && projectId == p.id,
+                      leading: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: parseTypeColor(p.color).withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      title: Text(
+                        p.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: hint),
+                      ),
+                      onTap: () =>
+                          onSelect(ProjectView.project, projectId: p.id),
+                    ),
+                ],
               ),
           ],
         ),
@@ -419,11 +558,13 @@ class _SidebarItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final Widget? trailing;
   const _SidebarItem({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.trailing,
   });
 
   @override
@@ -432,6 +573,7 @@ class _SidebarItem extends StatelessWidget {
       dense: true,
       leading: Icon(icon, size: 20),
       title: Text(label),
+      trailing: trailing,
       selected: selected,
       selectedTileColor: Theme.of(
         context,
@@ -469,7 +611,18 @@ class _ProjectItemState extends State<_ProjectItem> {
       onExit: (_) => setState(() => _hovering = false),
       child: ListTile(
         dense: true,
-        contentPadding: const EdgeInsets.only(left: 28, right: 4),
+        contentPadding: const EdgeInsets.only(left: 16, right: 4),
+        horizontalTitleGap: 10,
+        // 만들 때 고른 대표 색상 — 사이드바에서 프로젝트를 한눈에 구분하게 한다.
+        leading: Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: parseTypeColor(widget.project.color),
+            shape: BoxShape.circle,
+          ),
+        ),
+        minLeadingWidth: 10,
         title: Text(
           widget.project.name,
           maxLines: 1,
@@ -493,33 +646,6 @@ class _ProjectItemState extends State<_ProjectItem> {
           ),
         ),
         onTap: widget.onTap,
-      ),
-    );
-  }
-}
-
-/// 아직 안 만든 화면(캘린더/간트차트/노트) 자리.
-class _ComingSoon extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _ComingSoon({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 40, color: hint),
-          const SizedBox(height: 12),
-          Text('$label는 준비 중입니다.', style: TextStyle(color: hint)),
-          const SizedBox(height: 4),
-          Text(
-            '지금은 홈과 내 업무, 프로젝트별 업무 목록을 쓸 수 있습니다.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
-          ),
-        ],
       ),
     );
   }

@@ -87,9 +87,9 @@ class _ChatScreenState extends State<ChatScreen> {
               const SizedBox(width: 8),
               Text(
                 otherMember.position!,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).hintColor,
+                ),
               ),
             ],
           ],

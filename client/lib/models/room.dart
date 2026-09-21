@@ -36,6 +36,10 @@ class Room {
   /// 이 방을 뮤트하면 앱이 완전히 꺼져있을 때의 FCM 푸시가 안 온다(server/src/push.js).
   bool muted;
 
+  /// 그룹채팅방 이름을 "나에게만" 다르게 부르는 개인 별칭(server/src/db/schema.js의
+  /// room_members.custom_name). null이면 원래 이름. muted와 같은 방식으로 Session이 병합 시 유지한다.
+  String? customName;
+
   /// 평문 DM의 "채팅방 숨기기"/"채팅방 나가기" — 즐겨찾기/뮤트와 같은 방식으로 나만의
   /// 개인 설정이다(멤버십 자체는 안 바뀐다, room_options_menu.dart 참고). true면 방 목록
   /// 화면들이 이 방을 안 보여준다. 상대가 새 메시지를 보내면 서버가 자동으로 false로
@@ -89,6 +93,9 @@ class Room {
   /// 이벤트로 직접 갱신한다(latestAnnouncement와 같은 방식) — 그래서 non-final.
   bool hasUnreadAnnouncement;
 
+  /// [hasUnreadAnnouncement]가 true일 때 안 읽은 공지가 몇 개인지(알림 센터 배지 숫자).
+  int unreadAnnouncementCount;
+
   /// 그룹채팅 아이콘 — 만들 때만 고를 수 있고(new_chat_screen.dart), 이후 수정 UI는 없다.
   /// null 또는 'members'면 room_avatar.dart가 기존처럼 멤버 아바타 두 개를 겹쳐 보여준다.
   /// 'initial'이면 그룹 이름 첫 글자, 'emoji'면 iconEmoji/iconColor를 보여준다. 토픽/DM은
@@ -110,6 +117,7 @@ class Room {
     this.unreadCount = 0,
     this.favorite = false,
     this.muted = false,
+    this.customName,
     this.hidden = false,
     this.lastMessagePreview,
     DateTime? lastActivityAt,
@@ -120,6 +128,7 @@ class Room {
     this.secretInitiatorUserId,
     this.latestAnnouncement,
     this.hasUnreadAnnouncement = false,
+    this.unreadAnnouncementCount = 0,
     this.iconType,
     this.iconEmoji,
     this.iconColor,
@@ -145,6 +154,7 @@ class Room {
       unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
       favorite: json['favorite'] as bool? ?? false,
       muted: json['muted'] as bool? ?? false,
+      customName: json['customName'] as String?,
       hidden: json['hidden'] as bool? ?? false,
       lastMessagePreview: json['lastMessagePreview'] as String?,
       lastActivityAt: (json['lastActivityAt'] as num?) != null
@@ -164,6 +174,8 @@ class Room {
               json['latestAnnouncement'] as Map<String, dynamic>,
             ),
       hasUnreadAnnouncement: json['hasUnreadAnnouncement'] as bool? ?? false,
+      unreadAnnouncementCount:
+          (json['unreadAnnouncementCount'] as num?)?.toInt() ?? 0,
       iconType: json['iconType'] as String?,
       iconEmoji: json['iconEmoji'] as String?,
       iconColor: json['iconColor'] as String?,
@@ -172,6 +184,14 @@ class Room {
 
   /// 화면에 보여줄 이름. DM은 상대방 이름, 이름 없는 그룹은 멤버 이름을 이름순 정렬해 보여준다.
   String displayName(String myUserId) {
+    final custom = customName;
+    if (custom != null && custom.isNotEmpty) return custom;
+    return originalDisplayName(myUserId);
+  }
+
+  /// 나만의 별칭([customName])을 무시한 원래 이름 — 이름 변경 메뉴가 "이름 변경(원래 이름)"으로
+  /// 보여주고, 별칭을 지웠을 때 돌아갈 이름을 안내하는 데 쓴다.
+  String originalDisplayName(String myUserId) {
     if (name != null) return name!;
     if (type == RoomType.dm) {
       for (final m in members) {

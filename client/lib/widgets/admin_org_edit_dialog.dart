@@ -67,7 +67,9 @@ class _AdminOrgEditDialogState extends State<_AdminOrgEditDialog> {
   }
 
   void _submit() => Navigator.of(context).pop((
-    position: _isAccountScope ? (_selected?.trim() ?? '') : _positionText.text.trim(),
+    position: _isAccountScope
+        ? (_selected?.trim() ?? '')
+        : _positionText.text.trim(),
   ));
 
   @override

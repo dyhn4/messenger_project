@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lte, ne, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { announcementComments, announcements } from '../schema.js';
 
@@ -33,6 +33,23 @@ export async function findLatestAnnouncementForRoom(roomId) {
     .where(and(eq(announcements.roomId, roomId), eq(announcements.pinned, true), isNull(announcements.deletedAt)))
     .limit(1);
   return row ?? null;
+}
+
+/** 알림 센터 배지용 — [since] 이후에 올라온 안 지워진 공지 중 [userId]가 쓴 게 아닌 것의 개수.
+ * 한 방에 고정 공지는 하나뿐이지만(내려간 이전 공지도 남아있다) 안 읽은 건 여러 개일 수 있다. */
+export async function countUnreadAnnouncementsForUser(roomId, userId, since) {
+  const [row] = await db
+    .select({ n: sql`count(*)::int` })
+    .from(announcements)
+    .where(
+      and(
+        eq(announcements.roomId, roomId),
+        isNull(announcements.deletedAt),
+        ne(announcements.authorId, userId),
+        gt(announcements.createdAt, since),
+      ),
+    );
+  return row?.n ?? 0;
 }
 
 export function findAnnouncementById(id) {

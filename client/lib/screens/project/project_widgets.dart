@@ -163,9 +163,7 @@ class DdayBadge extends StatelessWidget {
     if (days == null || task.status == TaskStatus.done) {
       return const SizedBox.shrink();
     }
-    final label = days == 0
-        ? 'D-DAY'
-        : (days > 0 ? 'D-$days' : 'D+${-days}');
+    final label = days == 0 ? 'D-DAY' : (days > 0 ? 'D-$days' : 'D+${-days}');
     // 지났으면 빨강, 오늘·내일이면 주황, 그 외에는 옅은 회색.
     final color = days < 0
         ? Colors.redAccent

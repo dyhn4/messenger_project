@@ -10,7 +10,16 @@ import '../widgets/filter_dropdown.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
 
-enum FileCategory { all, image, pdf, document, excel, powerpoint, archive, audio }
+enum FileCategory {
+  all,
+  image,
+  pdf,
+  document,
+  excel,
+  powerpoint,
+  archive,
+  audio,
+}
 
 extension on FileCategory {
   String get label => switch (this) {
@@ -326,9 +335,7 @@ class _FilesScreenState extends State<FilesScreen> {
             children: [
               CircleAvatar(
                 radius: 16,
-                child: Text(
-                  m.senderName.isNotEmpty ? m.senderName[0] : '?',
-                ),
+                child: Text(m.senderName.isNotEmpty ? m.senderName[0] : '?'),
               ),
               const SizedBox(width: 8),
               Column(
@@ -340,8 +347,9 @@ class _FilesScreenState extends State<FilesScreen> {
                   ),
                   Text(
                     _timeFormat.format(m.createdAt),
-                    style: Theme.of(context).textTheme.labelSmall
-                        ?.copyWith(color: Theme.of(context).hintColor),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).hintColor,
+                    ),
                   ),
                 ],
               ),
@@ -350,10 +358,7 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Text(
-                '대화방',
-                style: TextStyle(color: Theme.of(context).hintColor),
-              ),
+              Text('대화방', style: TextStyle(color: Theme.of(context).hintColor)),
               const SizedBox(width: 4),
               Text(roomName),
             ],
@@ -592,7 +597,9 @@ class _FileResultRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isImage = message.type == MessageType.image;
-    final placeholderColor = Theme.of(context).colorScheme.surfaceContainerHighest;
+    final placeholderColor = Theme.of(
+      context,
+    ).colorScheme.surfaceContainerHighest;
     final thumbnail = isImage
         ? Image.network(
             session.resolveUrl(message.thumbnailUrl ?? message.fileUrl ?? ''),
@@ -631,7 +638,10 @@ class _FileResultRow extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ClipRRect(borderRadius: BorderRadius.circular(6), child: thumbnail),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: thumbnail,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(

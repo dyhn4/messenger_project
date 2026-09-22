@@ -3,60 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/floating_dialog.dart';
 import 'project_forms.dart' show projectColorChoices;
-
-/// 프로젝트의 업무 상태(칸반 열)와 사용자 정의 필드를 관리한다 — 프로젝트 담당자와 팀
-/// 소유자·관리자만 열 수 있다(서버도 다시 확인한다). 상태는 이름/색/순서를 자유롭게 바꾸되
-/// 반드시 "할 일/진행 중/완료" 중 한 분류에 속하고(진행률·완료 집계용), 분류마다 하나는 남아야 한다.
-Future<void> showTaskConfigManagerDialog(
-  BuildContext context,
-  Session session,
-  String projectId,
-) {
-  return showDialog<void>(
-    context: context,
-    builder: (_) => _TaskConfigManager(session: session, projectId: projectId),
-  );
-}
-
-class _TaskConfigManager extends StatelessWidget {
-  final Session session;
-  final String projectId;
-  const _TaskConfigManager({required this.session, required this.projectId});
-
-  @override
-  Widget build(BuildContext context) {
-    return FloatingDialog(
-      title: '상태 · 필드 관리',
-      maxWidth: 520,
-      maxHeight: 620,
-      child: DefaultTabController(
-        length: 2,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const TabBar(
-              tabs: [
-                Tab(text: '상태'),
-                Tab(text: '사용자 정의 필드'),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _StatusTab(session: session, projectId: projectId),
-                  _FieldTab(session: session, projectId: projectId),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 String _categoryLabel(TaskStatus c) => taskStatusLabel(c);
 
@@ -86,18 +33,181 @@ Future<bool> _confirm(
   return ok == true;
 }
 
-// ───────────────────────── 상태 ─────────────────────────
+// ───────────────────────── 공통(구획 · 말풍선) ─────────────────────────
 
-class _StatusTab extends StatefulWidget {
-  final Session session;
-  final String projectId;
-  const _StatusTab({required this.session, required this.projectId});
+/// "기본 필드" 안의 한 구획(상태 / 유형 / 우선순위). 왼쪽 위에 제목, 그 줄 오른쪽 끝에 작은
+/// "추가" 버튼을 두고, 아래에 항목들을 말풍선으로 쌓는다.
+///
+/// 스스로 스크롤하지 않는다 — 세 구획이 "기본 필드" 카드 하나의 스크롤을 같이 쓴다(구획마다
+/// 스크롤바가 따로 생기면 어디를 굴려야 할지 알 수 없다).
+class ConfigSection extends StatelessWidget {
+  final String title;
+  final String description;
+  final String addLabel;
+  final VoidCallback onAdd;
+  final List<Widget> children;
+
+  /// 항목이 하나도 없을 때 대신 보여줄 문구.
+  final String emptyHint;
+
+  const ConfigSection({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.addLabel,
+    required this.onAdd,
+    required this.children,
+    required this.emptyHint,
+  });
 
   @override
-  State<_StatusTab> createState() => _StatusTabState();
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add, size: 14),
+              label: Text(addLabel),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                textStyle: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        Text(
+          description,
+          style: TextStyle(color: theme.hintColor, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        if (children.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: Text(
+                emptyHint,
+                style: TextStyle(color: theme.hintColor, fontSize: 12),
+              ),
+            ),
+          )
+        else
+          ...children,
+      ],
+    );
+  }
 }
 
-class _StatusTabState extends State<_StatusTab> {
+/// 구획 안의 항목 한 줄 — 연한 바탕에 둥근 모서리의 말풍선.
+class ConfigBubble extends StatelessWidget {
+  final Color dotColor;
+  final String title;
+  final String? subtitle;
+  final List<Widget> actions;
+
+  const ConfigBubble({
+    super.key,
+    required this.dotColor,
+    required this.title,
+    this.subtitle,
+    required this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.6,
+          ),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(
+                color: dotColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(fontSize: 13),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: TextStyle(color: theme.hintColor, fontSize: 11),
+                    ),
+                ],
+              ),
+            ),
+            ...actions,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 말풍선 오른쪽에 붙는 작은 아이콘 버튼(위로/아래로/수정/삭제).
+Widget configAction(IconData icon, String tooltip, VoidCallback? onPressed) =>
+    IconButton(
+      icon: Icon(icon, size: 16),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+      onPressed: onPressed,
+    );
+
+// ───────────────────────── 상태 ─────────────────────────
+
+/// 프로젝트의 업무 상태(칸반 열)를 추가·수정·삭제·정렬한다. 상태는 이름/색/순서를 자유롭게
+/// 바꾸되 반드시 "할 일/진행 중/완료" 중 한 분류에 속하고(진행률·완료 집계용), 분류마다
+/// 하나는 남아야 한다. "프로젝트 메뉴"의 "필드 / 상태"에서 쓴다.
+class ProjectStatusEditor extends StatefulWidget {
+  final Session session;
+  final String projectId;
+  const ProjectStatusEditor({
+    super.key,
+    required this.session,
+    required this.projectId,
+  });
+
+  @override
+  State<ProjectStatusEditor> createState() => _ProjectStatusEditorState();
+}
+
+class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
   List<TaskStatusDef>? _statuses;
   String? _error;
 
@@ -190,74 +300,41 @@ class _StatusTabState extends State<_StatusTab> {
     if (statuses == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    final hint = Theme.of(context).hintColor;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return ConfigSection(
+      title: '상태',
+      description: '칸반보드의 열이 되는 상태입니다. 위에서부터 왼쪽 열 순서입니다.',
+      addLabel: '추가',
+      onAdd: _edit,
+      emptyHint: '등록된 상태가 없습니다.',
       children: [
-        Text(
-          '칸반보드의 열이 되는 상태입니다. 위에서부터 왼쪽 열 순서입니다.',
-          style: TextStyle(color: hint, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        Expanded(
-          child: ListView(
-            children: [
-              for (var i = 0; i < statuses.length; i++)
-                ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: parseTypeColor(statuses[i].color),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  title: Text(statuses[i].name),
-                  subtitle: Text(
-                    _categoryLabel(statuses[i].category),
-                    style: TextStyle(color: hint, fontSize: 11),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_upward, size: 18),
-                        tooltip: '위로',
-                        onPressed: i == 0 ? null : () => _move(i, -1),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.arrow_downward, size: 18),
-                        tooltip: '아래로',
-                        onPressed: i == statuses.length - 1
-                            ? null
-                            : () => _move(i, 1),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                        tooltip: '수정',
-                        onPressed: () => _edit(existing: statuses[i]),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18),
-                        tooltip: '삭제',
-                        onPressed: () => _delete(statuses[i]),
-                      ),
-                    ],
-                  ),
-                ),
+        for (var i = 0; i < statuses.length; i++)
+          ConfigBubble(
+            dotColor: parseTypeColor(statuses[i].color),
+            title: statuses[i].name,
+            subtitle: _categoryLabel(statuses[i].category),
+            actions: [
+              configAction(
+                Icons.arrow_upward,
+                '위로',
+                i == 0 ? null : () => _move(i, -1),
+              ),
+              configAction(
+                Icons.arrow_downward,
+                '아래로',
+                i == statuses.length - 1 ? null : () => _move(i, 1),
+              ),
+              configAction(
+                Icons.edit_outlined,
+                '수정',
+                () => _edit(existing: statuses[i]),
+              ),
+              configAction(
+                Icons.delete_outline,
+                '삭제',
+                () => _delete(statuses[i]),
+              ),
             ],
           ),
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: () => _edit(),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('상태 추가'),
-          ),
-        ),
       ],
     );
   }
@@ -384,19 +461,26 @@ const _kindLabels = {
   'text': '텍스트',
   'number': '숫자',
   'date': '날짜',
-  'select': '선택',
+  'select': '단일 선택',
+  'multiSelect': '다중 선택',
+  'progress': '진행률',
 };
 
-class _FieldTab extends StatefulWidget {
+/// 프로젝트의 사용자 정의 필드(텍스트/숫자/날짜/선택)를 추가·수정·삭제한다.
+class ProjectFieldEditor extends StatefulWidget {
   final Session session;
   final String projectId;
-  const _FieldTab({required this.session, required this.projectId});
+  const ProjectFieldEditor({
+    super.key,
+    required this.session,
+    required this.projectId,
+  });
 
   @override
-  State<_FieldTab> createState() => _FieldTabState();
+  State<ProjectFieldEditor> createState() => _ProjectFieldEditorState();
 }
 
-class _FieldTabState extends State<_FieldTab> {
+class _ProjectFieldEditorState extends State<ProjectFieldEditor> {
   List<TaskFieldDef>? _fields;
   String? _error;
 
@@ -439,7 +523,7 @@ class _FieldTabState extends State<_FieldTab> {
         await api.updateTaskField(
           existing.id,
           name: result.name,
-          options: existing.kind == 'select' ? result.options : null,
+          options: existing.hasOptions ? result.options : null,
         );
       }
       await _load();
@@ -490,7 +574,7 @@ class _FieldTabState extends State<_FieldTab> {
                         contentPadding: EdgeInsets.zero,
                         title: Text(f.name),
                         subtitle: Text(
-                          f.kind == 'select'
+                          f.hasOptions
                               ? '${_kindLabels[f.kind]} · ${f.options.join(', ')}'
                               : _kindLabels[f.kind] ?? f.kind,
                           maxLines: 1,
@@ -565,7 +649,7 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
       setState(() => _error = '필드 이름을 입력하세요.');
       return;
     }
-    final options = _kind == 'select'
+    final options = _kind == 'select' || _kind == 'multiSelect'
         ? _options.text
               .split(RegExp(r'[,\n]'))
               .map((o) => o.trim())
@@ -573,7 +657,7 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
               .toSet()
               .toList()
         : <String>[];
-    if (_kind == 'select' && options.isEmpty) {
+    if ((_kind == 'select' || _kind == 'multiSelect') && options.isEmpty) {
       setState(() => _error = '선택지를 하나 이상 입력하세요(쉼표로 구분).');
       return;
     }
@@ -619,7 +703,7 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
                   ),
               ],
             ),
-            if (_kind == 'select') ...[
+            if (_kind == 'select' || _kind == 'multiSelect') ...[
               const SizedBox(height: 12),
               TextField(
                 controller: _options,
@@ -634,6 +718,272 @@ class _FieldEditDialogState extends State<_FieldEditDialog> {
               const SizedBox(height: 8),
               Text(_error!, style: const TextStyle(color: Colors.redAccent)),
             ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('저장')),
+      ],
+    );
+  }
+}
+
+// ───────────────────────── 우선순위 ─────────────────────────
+
+/// 프로젝트의 업무 우선순위를 추가·수정·삭제·정렬한다. 이름/색/순서는 자유롭게 바꾸되 반드시
+/// "낮음/보통/높음" 중 한 단계에 속하고(정렬·통계용), 단계마다 하나는 남아야 한다.
+/// "프로젝트 메뉴"의 "필드 / 상태"에서 쓴다.
+class ProjectPriorityEditor extends StatefulWidget {
+  final Session session;
+  final String projectId;
+  const ProjectPriorityEditor({
+    super.key,
+    required this.session,
+    required this.projectId,
+  });
+
+  @override
+  State<ProjectPriorityEditor> createState() => _ProjectPriorityEditorState();
+}
+
+class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
+  List<TaskPriorityDef>? _priorities;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await widget.session.api!.fetchTaskPriorities(
+        widget.projectId,
+      );
+      if (mounted) {
+        setState(() {
+          _priorities = list;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _edit({TaskPriorityDef? existing}) async {
+    final result = await showDialog<_PriorityEditResult>(
+      context: context,
+      builder: (_) => _PriorityEditDialog(existing: existing),
+    );
+    if (result == null) return;
+    try {
+      final api = widget.session.api!;
+      if (existing == null) {
+        await api.createTaskPriority(
+          widget.projectId,
+          name: result.name,
+          color: result.color,
+          level: result.level,
+        );
+      } else {
+        await api.updateTaskPriority(
+          existing.id,
+          name: result.name,
+          color: result.color,
+        );
+      }
+      await _load();
+    } catch (e) {
+      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+    }
+  }
+
+  Future<void> _delete(TaskPriorityDef s) async {
+    final ok = await _confirm(
+      context,
+      '우선순위 삭제',
+      "'${s.name}' 우선순위를 삭제할까요? 이 우선순위의 업무는 같은 단계(${taskPriorityLabel(s.level)})의 첫 우선순위로 옮겨집니다.",
+    );
+    if (!ok) return;
+    try {
+      await widget.session.api!.deleteTaskPriority(s.id);
+      await _load();
+    } catch (e) {
+      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+    }
+  }
+
+  Future<void> _move(int index, int delta) async {
+    final list = [..._priorities!];
+    final to = index + delta;
+    if (to < 0 || to >= list.length) return;
+    final item = list.removeAt(index);
+    list.insert(to, item);
+    setState(() => _priorities = list);
+    try {
+      await widget.session.api!.reorderTaskPriorities(widget.projectId, [
+        for (final s in list) s.id,
+      ]);
+    } catch (e) {
+      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      await _load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final priorities = _priorities;
+    if (_error != null) return Center(child: Text(_error!));
+    if (priorities == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return ConfigSection(
+      title: '우선순위',
+      description: '업무에 붙는 우선순위입니다. 위에서부터 보여주는 순서입니다.',
+      addLabel: '추가',
+      onAdd: _edit,
+      emptyHint: '등록된 우선순위가 없습니다.',
+      children: [
+        for (var i = 0; i < priorities.length; i++)
+          ConfigBubble(
+            dotColor: parseTypeColor(priorities[i].color),
+            title: priorities[i].name,
+            subtitle: taskPriorityLabel(priorities[i].level),
+            actions: [
+              configAction(
+                Icons.arrow_upward,
+                '위로',
+                i == 0 ? null : () => _move(i, -1),
+              ),
+              configAction(
+                Icons.arrow_downward,
+                '아래로',
+                i == priorities.length - 1 ? null : () => _move(i, 1),
+              ),
+              configAction(
+                Icons.edit_outlined,
+                '수정',
+                () => _edit(existing: priorities[i]),
+              ),
+              configAction(
+                Icons.delete_outline,
+                '삭제',
+                () => _delete(priorities[i]),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _PriorityEditResult {
+  final String name;
+  final String color;
+  final TaskPriority level;
+  const _PriorityEditResult(this.name, this.color, this.level);
+}
+
+class _PriorityEditDialog extends StatefulWidget {
+  final TaskPriorityDef? existing;
+  const _PriorityEditDialog({this.existing});
+
+  @override
+  State<_PriorityEditDialog> createState() => _PriorityEditDialogState();
+}
+
+class _PriorityEditDialogState extends State<_PriorityEditDialog> {
+  late final _name = TextEditingController(text: widget.existing?.name ?? '');
+  late String _color =
+      widget.existing?.color.toUpperCase() ?? projectColorChoices.first;
+  late TaskPriority _level = widget.existing?.level ?? TaskPriority.normal;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _name.text.trim();
+    if (name.isEmpty) return;
+    Navigator.of(context).pop(_PriorityEditResult(name, _color, _level));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final creating = widget.existing == null;
+    return AlertDialog(
+      title: Text(creating ? '우선순위 추가' : '우선순위 수정'),
+      content: SizedBox(
+        width: 340,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: true,
+              maxLength: 20,
+              decoration: const InputDecoration(
+                labelText: '우선순위 이름',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 8),
+            const Text('색'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final hex in projectColorChoices)
+                  InkWell(
+                    onTap: () => setState(() => _color = hex),
+                    customBorder: const CircleBorder(),
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: parseTypeColor(hex),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _color == hex
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              creating ? '단계 (정렬·통계에 쓰입니다)' : '단계 (바꿀 수 없습니다)',
+              style: TextStyle(color: Theme.of(context).hintColor),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final c in TaskPriority.values)
+                  ChoiceChip(
+                    label: Text(taskPriorityLabel(c)),
+                    selected: _level == c,
+                    onSelected: creating
+                        ? (_) => setState(() => _level = c)
+                        : null,
+                  ),
+              ],
+            ),
           ],
         ),
       ),

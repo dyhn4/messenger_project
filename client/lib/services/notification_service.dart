@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
@@ -591,34 +592,67 @@ class NotificationService {
     return Uri.file(file.path, windows: true);
   }
 
+  /// 메인 창 핸들. "프로젝트"/캡처 같은 보조 창도 창 클래스가 같아서, 제목("TangoTalk")까지
+  /// 맞춰 먼저 찾고 못 찾을 때만 클래스만으로 찾는다 — 안 그러면 보조 창이 먼저 잡혀서
+  /// 작업표시줄 깜빡임이 엉뚱한 창에 걸린다.
   int _findOurWindow() {
     final classNamePtr = TEXT('FLUTTER_RUNNER_WIN32_WINDOW');
+    final titlePtr = TEXT('TangoTalk');
     try {
+      final byTitle = FindWindow(classNamePtr, titlePtr);
+      if (byTitle != 0) return byTitle;
       return FindWindow(classNamePtr, nullptr);
     } finally {
       calloc.free(classNamePtr);
+      calloc.free(titlePtr);
     }
   }
 
   void _bringWindowToFront() {
     final hwnd = _findOurWindow();
     if (hwnd == 0) return;
+    stopWindowsTaskbarFlash();
     ShowWindow(hwnd, SW_RESTORE);
     SetForegroundWindow(hwnd);
   }
+
+  /// 창을 볼 때까지 계속 깜빡이게 하는 타이머 — Windows는 FLASHW_TIMERNOFG를 줘도 시스템
+  /// 설정(기본 3회)만큼만 깜빡이고 멈춰서, 그 뒤로도 사용자가 창을 열 때까지 다시 걸어준다.
+  Timer? _flashTimer;
 
   void _flashWindowsTaskbar() {
     final hwnd = _findOurWindow();
     if (hwnd == 0 || GetForegroundWindow() == hwnd) {
       return; // 창이 없거나 이미 보고 있으면 건너뜀
     }
+    _flash(hwnd, stop: false);
+    _flashTimer?.cancel();
+    _flashTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final current = _findOurWindow();
+      if (current == 0 || GetForegroundWindow() == current) {
+        stopWindowsTaskbarFlash();
+        return;
+      }
+      _flash(current, stop: false);
+    });
+  }
 
+  /// 창을 열었거나(포커스) 알림을 눌렀을 때 깜빡임을 멈추고 원래 모습으로 되돌린다.
+  void stopWindowsTaskbarFlash() {
+    _flashTimer?.cancel();
+    _flashTimer = null;
+    if (!Platform.isWindows) return;
+    final hwnd = _findOurWindow();
+    if (hwnd != 0) _flash(hwnd, stop: true);
+  }
+
+  void _flash(int hwnd, {required bool stop}) {
     final info = calloc<_FLASHWINFO>();
     try {
       info.ref
         ..cbSize = sizeOf<_FLASHWINFO>()
         ..hwnd = hwnd
-        ..dwFlags = _flashwAll | _flashwTimerNoFg
+        ..dwFlags = stop ? _flashwStop : (_flashwAll | _flashwTimerNoFg)
         ..uCount = 0
         ..dwTimeout = 0;
       _flashWindowEx(info);
@@ -630,6 +664,7 @@ class NotificationService {
 
 // win32 5.x 패키지 바인딩에 FlashWindowEx가 아직 없어서, 여기서만 필요한
 // 최소한의 FFI 선언을 직접 추가했다 (다른 Win32 호출은 전부 win32 패키지 것을 그대로 씀).
+const _flashwStop = 0x00000000; // 깜빡임 중지(원래 상태로)
 const _flashwAll = 0x00000003; // FLASHW_CAPTION | FLASHW_TRAY
 const _flashwTimerNoFg = 0x0000000C; // 포커스를 받을 때까지 계속 깜빡임
 

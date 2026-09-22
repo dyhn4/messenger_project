@@ -32,6 +32,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _openFolderAfterDownload =
       widget.session.settings.openFolderAfterDownload;
   late ThemeMode _themeMode = widget.session.settings.themeMode;
+  late TeamSwitchStyle _teamSwitchStyle =
+      widget.session.settings.teamSwitchStyle;
   late MessagePreviewMode _messagePreviewMode =
       widget.session.settings.messagePreviewMode;
   late bool _alwaysOnTop = widget.session.settings.alwaysOnTop;
@@ -80,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setOpenFolderAfterDownload(_openFolderAfterDownload);
     await settings.setThemeMode(_themeMode);
     await settings.setMessagePreviewMode(_messagePreviewMode);
+    await settings.setTeamSwitchStyle(_teamSwitchStyle);
     await settings.setAlwaysOnTop(_alwaysOnTop);
     await settings.setWindowOpacity(_windowOpacity);
     // "프로젝트" 창이 열려있으면 완전히 다른 엔진이라 위 setThemeMode만으론 안 바뀐다 —
@@ -139,6 +142,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ],
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const _SectionLabel('팀 전환 방식'),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Row(
+                        children: [
+                          _PreviewModeOption(
+                            selected:
+                                _teamSwitchStyle == TeamSwitchStyle.dropdown,
+                            label: '드롭다운',
+                            onTap: () => setState(
+                              () => _teamSwitchStyle = TeamSwitchStyle.dropdown,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          _PreviewModeOption(
+                            selected: _teamSwitchStyle == TeamSwitchStyle.tabs,
+                            label: '탭(전체 보기)',
+                            onTap: () => setState(
+                              () => _teamSwitchStyle = TeamSwitchStyle.tabs,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 20),

@@ -64,7 +64,6 @@ class _MyTasksViewState extends State<MyTasksView> {
   List<Project> _projects = const [];
   String? _error;
 
-  bool _calendarTab = false;
   _Filters _filters = const _Filters();
 
   @override
@@ -138,38 +137,6 @@ class _MyTasksViewState extends State<MyTasksView> {
     if (all == null) return const Center(child: CircularProgressIndicator());
     final visible = all.where(_filters.matches).toList();
     final hint = Theme.of(context).hintColor;
-    final primary = Theme.of(context).colorScheme.primary;
-
-    Widget tab(String label, IconData icon, bool selected, VoidCallback onTap) {
-      return InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: selected ? primary : Colors.transparent,
-                width: 2,
-              ),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16, color: selected ? primary : hint),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? primary : hint,
-                  fontWeight: selected ? FontWeight.w600 : null,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -207,45 +174,26 @@ class _MyTasksViewState extends State<MyTasksView> {
         const SizedBox(height: 12),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Row(
-            children: [
-              tab(
-                '리스트',
-                Icons.format_list_bulleted,
-                !_calendarTab,
-                () => setState(() => _calendarTab = false),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => _openFilter(all),
+              icon: const Icon(Icons.filter_list, size: 18),
+              label: Text(
+                _filters.activeCount == 0
+                    ? '필터링'
+                    : '필터링 ${_filters.activeCount}',
               ),
-              tab(
-                '캘린더',
-                Icons.calendar_today_outlined,
-                _calendarTab,
-                () => setState(() => _calendarTab = true),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _openFilter(all),
-                icon: const Icon(Icons.filter_list, size: 18),
-                label: Text(
-                  _filters.activeCount == 0
-                      ? '필터링'
-                      : '필터링 ${_filters.activeCount}',
-                ),
-              ),
-            ],
+            ),
           ),
         ),
-        const Divider(height: 1),
         Expanded(
-          child: _calendarTab
-              ? TaskCalendarView(tasks: visible, onOpen: _openTask)
-              : TaskListTable(
-                  tasks: visible,
-                  session: widget.session,
-                  onOpen: _openTask,
-                  emptyText: all.isEmpty
-                      ? '담당하거나 참조된 업무가 없습니다.'
-                      : '조건에 맞는 업무가 없습니다.',
-                ),
+          child: TaskListTable(
+            tasks: visible,
+            session: widget.session,
+            onOpen: _openTask,
+            emptyText: all.isEmpty ? '담당하거나 참조된 업무가 없습니다.' : '조건에 맞는 업무가 없습니다.',
+          ),
         ),
       ],
     );

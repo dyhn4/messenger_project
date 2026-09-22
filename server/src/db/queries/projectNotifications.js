@@ -1,32 +1,63 @@
 import { and, desc, eq, inArray, isNull, lte, gt, ne, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { projectNotificationSettings, projectNotifications, projects, tasks } from '../schema.js';
+import {
+  projectNotificationPolicies,
+  projectNotificationSettings,
+  projectNotifications,
+  projects,
+  tasks,
+} from '../schema.js';
 
-const KIND_COLUMN = {
+/** 알림 종류 → 정책 칸. 여기 없는 종류(자동화 등)는 정책으로 끄지 않는다. */
+const POLICY_COLUMN = {
+  status: 'onStatus',
+  priority: 'onPriority',
   assigned: 'onAssigned',
   referenced: 'onReferenced',
+  due_date: 'onDueDate',
+  task_type: 'onTaskType',
+  custom_field: 'onCustomField',
+  created: 'onCreated',
+  deleted: 'onDeleted',
   comment: 'onComment',
-  status: 'onStatus',
   due: 'onDue',
 };
 
-export const NOTIFICATION_KINDS = Object.keys(KIND_COLUMN);
+export const DEFAULT_POLICY = Object.fromEntries(
+  Object.values(POLICY_COLUMN).map((col) => [col, true]),
+);
 
-export const DEFAULT_SETTINGS = {
-  muted: false,
-  onAssigned: true,
-  onReferenced: true,
-  onComment: true,
-  onStatus: true,
-  onDue: true,
-};
+export async function getNotificationPolicy(projectId) {
+  const [row] = await db
+    .select()
+    .from(projectNotificationPolicies)
+    .where(eq(projectNotificationPolicies.projectId, projectId));
+  return row ?? { projectId, ...DEFAULT_POLICY };
+}
+
+export async function upsertNotificationPolicy(projectId, fields) {
+  const [row] = await db
+    .insert(projectNotificationPolicies)
+    .values({ projectId, ...fields })
+    .onConflictDoUpdate({ target: projectNotificationPolicies.projectId, set: fields })
+    .returning();
+  return row;
+}
+
+/** 프로젝트 정책이 이 종류의 알림을 허용하는지. */
+export async function policyAllows(projectId, kind) {
+  const col = POLICY_COLUMN[kind];
+  if (!col) return true;
+  const policy = await getNotificationPolicy(projectId);
+  return policy[col] !== false;
+}
 
 export async function getNotificationSettings(userId, projectId) {
   const [row] = await db
     .select()
     .from(projectNotificationSettings)
     .where(and(eq(projectNotificationSettings.userId, userId), eq(projectNotificationSettings.projectId, projectId)));
-  return row ?? { userId, projectId, ...DEFAULT_SETTINGS };
+  return row ?? { userId, projectId, muted: false };
 }
 
 export async function upsertNotificationSettings(userId, projectId, fields) {
@@ -41,19 +72,15 @@ export async function upsertNotificationSettings(userId, projectId, fields) {
   return row;
 }
 
-/** 이 프로젝트에서 [kind] 알림을 받고 싶어 하는 사람만 추린다(설정 행이 없으면 받는다). */
-export async function filterUsersWantingKind(projectId, userIds, kind) {
+/** 이 프로젝트 알림을 개인적으로 끄지 않은 사람만 추린다. */
+export async function filterUnmutedUsers(projectId, userIds) {
   if (userIds.length === 0) return [];
   const rows = await db
     .select()
     .from(projectNotificationSettings)
     .where(and(eq(projectNotificationSettings.projectId, projectId), inArray(projectNotificationSettings.userId, userIds)));
-  const byUser = new Map(rows.map((r) => [r.userId, r]));
-  const col = KIND_COLUMN[kind];
-  return userIds.filter((id) => {
-    const s = byUser.get(id);
-    return !s || (!s.muted && s[col] !== false);
-  });
+  const muted = new Set(rows.filter((r) => r.muted).map((r) => r.userId));
+  return userIds.filter((id) => !muted.has(id));
 }
 
 export async function insertProjectNotification(fields) {

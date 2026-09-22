@@ -4,6 +4,7 @@ import '../../models/app_user.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/dashed_add_button.dart';
 import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
@@ -285,6 +286,7 @@ Future<Task?> showNewTaskDialog(
   List<Project> projects = const [],
   String? projectId,
   List<AppUser> members = const [],
+  String? projectName,
   String? initialTitle,
   String? initialDescription,
 }) {
@@ -294,6 +296,7 @@ Future<Task?> showNewTaskDialog(
       session: session,
       projects: projects,
       projectId: projectId,
+      projectName: projectName,
       members: members,
       initialTitle: initialTitle,
       initialDescription: initialDescription,
@@ -305,6 +308,9 @@ class _NewTaskDialog extends StatefulWidget {
   final Session session;
   final List<Project> projects;
   final String? projectId;
+
+  /// 프로젝트를 고를 수 없을 때(프로젝트 안에서 연 경우) 보여줄 이름.
+  final String? projectName;
   final List<AppUser> members;
   final String? initialTitle;
   final String? initialDescription;
@@ -312,6 +318,7 @@ class _NewTaskDialog extends StatefulWidget {
     required this.session,
     required this.projects,
     required this.projectId,
+    this.projectName,
     required this.members,
     this.initialTitle,
     this.initialDescription,
@@ -327,11 +334,19 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     text: widget.initialDescription,
   );
   late String? _projectId = widget.projectId ?? widget.projects.firstOrNull?.id;
+  late String? _projectName =
+      widget.projectName ??
+      widget.projects
+          .where((p) => p.id == _projectId)
+          .map((p) => p.name)
+          .firstOrNull;
   late List<AppUser> _members = widget.members;
   String? _assigneeId;
   List<TaskStatusDef> _statuses = const [];
   String? _statusId;
   List<TaskFieldDef> _fields = const [];
+  List<TaskPriorityDef> _priorities = const [];
+  String? _priorityId;
   List<TaskTemplate> _templates = const [];
   String? _templateId;
   final _customValues = <String, dynamic>{};
@@ -347,8 +362,14 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   @override
   void initState() {
     super.initState();
-    if (_members.isEmpty) _loadMembers();
+    // "생성" 버튼은 제목이 있어야 눌리므로 글자가 바뀔 때마다 다시 그린다.
+    _title.addListener(_onTitleChanged);
+    if (_members.isEmpty || _projectName == null) _loadMembers();
     _loadTypes();
+  }
+
+  void _onTitleChanged() {
+    if (mounted) setState(() {});
   }
 
   /// 유형은 프로젝트마다 따로 관리하므로, 프로젝트를 고르거나 바꿀 때 그 프로젝트 것으로 받아온다.
@@ -370,8 +391,12 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
       final statuses = await widget.session.api!.fetchTaskStatuses(id);
       final fields = await widget.session.api!.fetchTaskFields(id);
       final templates = await widget.session.api!.fetchTaskTemplates(id);
+      final priorities = await widget.session.api!.fetchTaskPriorities(id);
       if (mounted) {
         setState(() {
+          _priorities = priorities;
+          // 템플릿이 정한 단계가 있으면 그 단계의 첫 우선순위를, 없으면 "보통"부터 고른다.
+          _priorityId = _priorityIdFor(priorities, _priority);
           _templates = templates;
           _templateId = null;
           _statuses = statuses;
@@ -389,10 +414,16 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
 
   @override
   void dispose() {
+    _title.removeListener(_onTitleChanged);
     _title.dispose();
     _description.dispose();
     super.dispose();
   }
+
+  /// 단계(낮음/보통/높음)에 해당하는 첫 우선순위 id — 템플릿이나 기본값을 옮길 때 쓴다.
+  String? _priorityIdFor(List<TaskPriorityDef> list, TaskPriority level) =>
+      list.where((p) => p.level == level).map((p) => p.id).firstOrNull ??
+      list.firstOrNull?.id;
 
   /// 템플릿을 고르면 제목·설명·우선순위·유형·담당자·마감일을 그 값으로 채운다(비어 있는 항목은 그대로 둔다).
   void _applyTemplate(TaskTemplate t) {
@@ -401,6 +432,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
       if (t.title.isNotEmpty) _title.text = t.title;
       if (t.description != null) _description.text = t.description!;
       _priority = t.priority;
+      _priorityId = _priorityIdFor(_priorities, t.priority);
       if (t.typeId != null && _types.any((x) => x.id == t.typeId)) {
         _typeId = t.typeId;
       }
@@ -422,6 +454,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
       final project = await widget.session.api!.fetchProject(id);
       if (mounted) {
         setState(() {
+          _projectName ??= project.name;
           _members = project.members;
           if (!_members.any((m) => m.id == _assigneeId)) _assigneeId = null;
           _referenceIds.removeWhere((id) => !_members.any((m) => m.id == id));
@@ -453,6 +486,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
         statusId: _statusId,
         customValues: _customValues.isEmpty ? null : _customValues,
         priority: _priority,
+        priorityId: _priorityId,
         typeId: _typeId,
         referenceIds: _referenceIds.toList(),
         startDate: _startDate,
@@ -466,52 +500,331 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     }
   }
 
+  /// 섹션 제목("프로젝트", "업무") — 입력칸 바로 위에 붙는 작은 굵은 글씨.
+  Widget _sectionLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+    ),
+  );
+
+  /// 항목들을 한 장의 테두리 안에 줄로 쌓는다(줄 사이엔 옅은 선).
+  Widget _card(List<Widget> rows) => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: Theme.of(context).dividerColor),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      children: [
+        for (var i = 0; i < rows.length; i++) ...[
+          if (i > 0) const Divider(height: 1),
+          rows[i],
+        ],
+      ],
+    ),
+  );
+
+  /// 카드 한 줄 — 왼쪽에 항목 이름, 오른쪽에 내용(필요하면 맨 오른쪽에 작은 링크).
+  Widget _row(String label, Widget child, {Widget? trailing}) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 8, 10, 8),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 13, color: Theme.of(context).hintColor),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: child),
+        ?trailing,
+      ],
+    ),
+  );
+
+  /// 상태·유형·우선순위처럼 하나만 고르는 항목 — 고른 칩만 색이 찬다.
+  Widget _chip(
+    String label, {
+    required bool selected,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    final theme = Theme.of(context);
+    final tint = color ?? theme.colorScheme.primary;
+    return ChoiceChip(
+      label: Text(label, overflow: TextOverflow.ellipsis),
+      selected: selected,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      labelStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      backgroundColor: theme.colorScheme.surface,
+      selectedColor: tint.withValues(alpha: 0.16),
+      side: BorderSide(
+        color: selected ? tint.withValues(alpha: 0.5) : theme.dividerColor,
+      ),
+      onSelected: (_) => onTap(),
+    );
+  }
+
+  Widget _chipRow(List<Widget> chips) =>
+      Wrap(spacing: 6, runSpacing: 6, children: chips);
+
+  /// 기간의 양 끝 — 비어 있으면 "시작일"/"마감일" 안내 글씨, 누르면 달력이 뜬다.
+  Widget _dateText(
+    DateTime? value,
+    String placeholder,
+    ValueChanged<DateTime?> onChanged,
+  ) => InkWell(
+    borderRadius: BorderRadius.circular(4),
+    onTap: () async {
+      final now = DateTime.now();
+      final picked = await showDatePicker(
+        context: context,
+        initialDate: value ?? now,
+        firstDate: DateTime(now.year - 1),
+        lastDate: DateTime(now.year + 5),
+      );
+      if (picked != null) onChanged(picked);
+    },
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Text(
+        value == null ? placeholder : _formatDue(value),
+        style: TextStyle(
+          fontSize: 13,
+          color: value == null ? Theme.of(context).hintColor : null,
+        ),
+      ),
+    ),
+  );
+
+  Widget get _periodField => Row(
+    children: [
+      Icon(
+        Icons.calendar_today_outlined,
+        size: 14,
+        color: Theme.of(context).hintColor,
+      ),
+      const SizedBox(width: 6),
+      _dateText(_startDate, '시작일', (v) => setState(() => _startDate = v)),
+      Text('—', style: TextStyle(color: Theme.of(context).hintColor)),
+      _dateText(_dueDate, '마감일', (v) => setState(() => _dueDate = v)),
+      if (_startDate != null || _dueDate != null)
+        IconButton(
+          icon: const Icon(Icons.close, size: 14),
+          tooltip: '기간 지우기',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => setState(() {
+            _startDate = null;
+            _dueDate = null;
+          }),
+        ),
+    ],
+  );
+
+  Widget get _assigneeField {
+    final me = _members.where((m) => m.id == _assigneeId).firstOrNull;
+    return MenuAnchor(
+      menuChildren: [
+        MenuItemButton(
+          onPressed: () => setState(() => _assigneeId = null),
+          child: const Text('미배정'),
+        ),
+        for (final user in _members)
+          MenuItemButton(
+            onPressed: () => setState(() => _assigneeId = user.id),
+            child: Row(
+              children: [
+                UserAvatar(
+                  user: user,
+                  resolveUrl: widget.session.resolveUrl,
+                  radius: 10,
+                ),
+                const SizedBox(width: 8),
+                Text(user.name),
+              ],
+            ),
+          ),
+      ],
+      builder: (context, controller, _) => InkWell(
+        borderRadius: BorderRadius.circular(4),
+        onTap: () => controller.isOpen ? controller.close() : controller.open(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: me == null
+              ? Text(
+                  '미배정',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).hintColor,
+                  ),
+                )
+              : Row(
+                  children: [
+                    UserAvatar(
+                      user: me,
+                      resolveUrl: widget.session.resolveUrl,
+                      radius: 10,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(me.name, style: const TextStyle(fontSize: 13)),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget get _referenceField {
+    final selected = [
+      for (final id in _referenceIds)
+        if (_members.any((m) => m.id == id))
+          _members.firstWhere((m) => m.id == id),
+    ];
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final user in selected)
+          Chip(
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            labelStyle: const TextStyle(fontSize: 12),
+            avatar: UserAvatar(
+              user: user,
+              resolveUrl: widget.session.resolveUrl,
+              radius: 9,
+            ),
+            label: Text(user.name),
+            onDeleted: () => setState(() => _referenceIds.remove(user.id)),
+          ),
+        DashedAddButton(label: '+ 추가', onTap: _pickReferences),
+      ],
+    );
+  }
+
+  Future<void> _pickReferences() async {
+    final result = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _ReferencePickDialog(
+        session: widget.session,
+        members: _members,
+        initial: _referenceIds.toList(),
+      ),
+    );
+    if (result != null) {
+      setState(() {
+        _referenceIds
+          ..clear()
+          ..addAll(result);
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final myId = widget.session.userId;
+    // 구성원이 아니면 담당자로 넣어도 이름을 못 보여주므로 아예 권하지 않는다.
+    final canAssignMe =
+        myId != null && _assigneeId != myId && _members.any((m) => m.id == myId);
+    final boxBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: theme.dividerColor),
+    );
+
     return FloatingDialog(
       title: '새 업무',
-      maxWidth: 520,
-      maxHeight: 640,
+      maxWidth: 560,
+      maxHeight: 760,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          const Divider(height: 1),
+          const SizedBox(height: 16),
           Flexible(
             child: MutedScrollbar(
               child: ListView(
                 children: [
-                  if (widget.projectId == null && widget.projects.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _projectId,
-                        decoration: const InputDecoration(
-                          labelText: '프로젝트',
-                          border: OutlineInputBorder(),
+                  _sectionLabel('프로젝트'),
+                  if (widget.projects.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      initialValue: _projectId,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        filled: true,
+                        fillColor: theme.colorScheme.surfaceContainerLowest,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
                         ),
-                        items: [
-                          for (final project in widget.projects)
-                            DropdownMenuItem(
-                              value: project.id,
-                              child: Text(project.name),
+                        border: boxBorder,
+                        enabledBorder: boxBorder,
+                      ),
+                      items: [
+                        for (final project in widget.projects)
+                          DropdownMenuItem(
+                            value: project.id,
+                            child: Text(
+                              project.name,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                        ],
-                        onChanged: (v) {
-                          setState(() => _projectId = v);
-                          _loadMembers();
-                          _loadTypes();
-                        },
+                          ),
+                      ],
+                      onChanged: (v) {
+                        setState(() {
+                          _projectId = v;
+                          _projectName = widget.projects
+                              .where((p) => p.id == v)
+                              .map((p) => p.name)
+                              .firstOrNull;
+                        });
+                        _loadMembers();
+                        _loadTypes();
+                      },
+                    )
+                  else
+                    // 프로젝트 안에서 연 경우 — 바꿀 수 없으니 이름만 보여준다.
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerLowest,
+                        border: Border.all(color: theme.dividerColor),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _projectName ?? '프로젝트',
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   if (_templates.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _sectionLabel('템플릿에서 불러오기'),
                     DropdownButtonFormField<String>(
                       key: ValueKey('tpl-$_templateId-${_templates.length}'),
                       initialValue: _templateId,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: '템플릿에서 불러오기',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
                         isDense: true,
+                        hintText: '템플릿에서 불러오기',
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
+                        border: boxBorder,
+                        enabledBorder: boxBorder,
                       ),
                       items: [
                         for (final t in _templates)
@@ -530,113 +843,104 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                         if (t != null) _applyTemplate(t);
                       },
                     ),
-                    const SizedBox(height: 12),
                   ],
+                  const SizedBox(height: 12),
+                  _sectionLabel('업무'),
                   TextField(
                     controller: _title,
                     autofocus: true,
                     maxLength: 200,
-                    decoration: const InputDecoration(
-                      labelText: '업무 제목',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: '업무 입력',
+                      counterText: '',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
+                      border: boxBorder,
+                      enabledBorder: boxBorder,
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  _card([
+                    _row(
+                      '담당자',
+                      _assigneeField,
+                      trailing: canAssignMe
+                          ? TextButton(
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                              onPressed: () =>
+                                  setState(() => _assigneeId = myId),
+                              child: const Text('나에게 할당'),
+                            )
+                          : null,
+                    ),
+                    _row('기간', _periodField),
+                    if (_statuses.isNotEmpty)
+                      _row(
+                        '상태',
+                        _chipRow([
+                          for (final s in _statuses)
+                            _chip(
+                              s.name,
+                              selected: _statusId == s.id,
+                              color: parseTypeColor(s.color),
+                              onTap: () => setState(() => _statusId = s.id),
+                            ),
+                        ]),
+                      ),
+                    if (_types.isNotEmpty)
+                      _row(
+                        '유형',
+                        _chipRow([
+                          for (final t in _types)
+                            _chip(
+                              t.name,
+                              selected: _typeId == t.id,
+                              color: parseTypeColor(t.color),
+                              onTap: () => setState(
+                                () => _typeId = _typeId == t.id ? null : t.id,
+                              ),
+                            ),
+                        ]),
+                      ),
+                    if (_priorities.isNotEmpty)
+                      _row(
+                        '우선순위',
+                        _chipRow([
+                          for (final p in _priorities)
+                            _chip(
+                              p.name,
+                              selected: _priorityId == p.id,
+                              color: parseTypeColor(p.color),
+                              onTap: () => setState(() {
+                                _priorityId = p.id;
+                                // 서버는 단계(낮음/보통/높음)도 같이 받으므로 어긋나지 않게 맞춘다.
+                                _priority = p.level;
+                              }),
+                            ),
+                        ]),
+                      ),
+                    _row('참조', _referenceField),
+                  ]),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: _description,
-                    maxLines: 4,
-                    minLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: '설명 (선택)',
-                      border: OutlineInputBorder(),
+                    maxLines: 5,
+                    minLines: 3,
+                    decoration: InputDecoration(
+                      hintText: '설명을 추가하세요...',
+                      contentPadding: const EdgeInsets.all(12),
+                      border: boxBorder,
+                      enabledBorder: boxBorder,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _AssigneeField(
-                    session: widget.session,
-                    members: _members,
-                    value: _assigneeId,
-                    onChanged: (v) => setState(() => _assigneeId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  _ReferenceField(
-                    session: widget.session,
-                    members: _members,
-                    selectedIds: _referenceIds.toList(),
-                    onChanged: (ids) => setState(() {
-                      _referenceIds
-                        ..clear()
-                        ..addAll(ids);
-                    }),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _TypeField(
-                          types: _types,
-                          value: _typeId,
-                          onChanged: (v) => setState(() => _typeId = v),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          key: ValueKey(
-                            'status-$_statusId-${_statuses.length}',
-                          ),
-                          initialValue: _statusId,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: '상태',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: [
-                            for (final s in _statuses)
-                              DropdownMenuItem(
-                                value: s.id,
-                                child: Text(
-                                  s.name,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                          onChanged: (v) => setState(() => _statusId = v),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<TaskPriority>(
-                          initialValue: _priority,
-                          decoration: const InputDecoration(
-                            labelText: '우선순위',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: [
-                            for (final p in TaskPriority.values)
-                              DropdownMenuItem(
-                                value: p,
-                                child: Text(taskPriorityLabel(p)),
-                              ),
-                          ],
-                          onChanged: (v) => setState(
-                            () => _priority = v ?? TaskPriority.normal,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _DueDateField(
-                    label: '시작일',
-                    value: _startDate,
-                    onChanged: (v) => setState(() => _startDate = v),
-                  ),
-                  _DueDateField(
-                    value: _dueDate,
-                    onChanged: (v) => setState(() => _dueDate = v),
-                  ),
                   if (_fields.isNotEmpty) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     _CustomFieldsEditor(
                       fields: _fields,
                       values: _customValues,
@@ -658,29 +962,28 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
             const SizedBox(height: 8),
             Text(_error!, style: const TextStyle(color: Colors.redAccent)),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Row(
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _submitting
-                      ? null
-                      : () => Navigator.of(context).pop(),
-                  child: const Text('취소'),
-                ),
+              OutlinedButton(
+                onPressed: _submitting
+                    ? null
+                    : () => Navigator.of(context).pop(),
+                child: const Text('취소'),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('등록'),
-                ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _submitting || _title.text.trim().isEmpty
+                    ? null
+                    : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('생성'),
               ),
             ],
           ),
@@ -718,6 +1021,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
   List<TaskType> _types = const [];
   List<TaskStatusDef> _statuses = const [];
   List<TaskFieldDef> _fields = const [];
+  List<TaskPriorityDef> _priorities = const [];
   String? _error;
   bool _saving = false;
 
@@ -742,6 +1046,9 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
         task.projectId,
       );
       final fields = await widget.session.api!.fetchTaskFields(task.projectId);
+      final priorities = await widget.session.api!.fetchTaskPriorities(
+        task.projectId,
+      );
       if (mounted) {
         setState(() {
           _task = task;
@@ -749,6 +1056,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
           _types = types;
           _statuses = statuses;
           _fields = fields;
+          _priorities = priorities;
           _error = null;
         });
       }
@@ -760,6 +1068,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
   /// 바꾼 항목 하나를 바로 저장한다(상태/담당자/마감일은 눌러서 즉시 반영되는 게 자연스럽다).
   Future<void> _patch({
     String? statusId,
+    String? priorityId,
     Map<String, dynamic>? customValues,
     TaskPriority? priority,
     String? assigneeId,
@@ -777,6 +1086,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
       final updated = await widget.session.api!.updateTask(
         widget.taskId,
         statusId: statusId,
+        priorityId: priorityId,
         customValues: customValues,
         priority: priority,
         assigneeId: assigneeId,
@@ -801,6 +1111,18 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// 이 업무의 우선순위 id — 없는 예전 업무는 같은 단계의 첫 우선순위로 본다.
+  String? _currentPriorityId(Task task) {
+    if (task.priorityId != null &&
+        _priorities.any((p) => p.id == task.priorityId)) {
+      return task.priorityId;
+    }
+    return _priorities
+        .where((p) => p.level == task.priority)
+        .map((p) => p.id)
+        .firstOrNull;
   }
 
   /// 이 업무가 [status] 상태인지 — 상태 id가 없는 예전 업무는 같은 분류의 첫 상태로 본다.
@@ -964,20 +1286,21 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
                           children: [
                             Text('우선순위', style: TextStyle(color: hint)),
                             const SizedBox(width: 12),
-                            DropdownButton<TaskPriority>(
-                              value: task.priority,
+                            DropdownButton<String>(
+                              value: _currentPriorityId(task),
                               underline: const SizedBox.shrink(),
                               items: [
-                                for (final p in TaskPriority.values)
+                                for (final p in _priorities)
                                   DropdownMenuItem(
-                                    value: p,
-                                    child: Text(taskPriorityLabel(p)),
+                                    value: p.id,
+                                    child: Text(p.name),
                                   ),
                               ],
                               onChanged: _saving
                                   ? null
-                                  : (v) =>
-                                        v == null ? null : _patch(priority: v),
+                                  : (v) => v == null
+                                        ? null
+                                        : _patch(priorityId: v),
                             ),
                           ],
                         ),
@@ -1381,6 +1704,19 @@ class _CustomFieldsEditor extends StatelessWidget {
                     : null,
                 onChanged: (d) => onChanged(f.id, d?.millisecondsSinceEpoch),
               ),
+              'progress' => _ProgressField(
+                key: ValueKey('cf-${f.id}'),
+                label: f.name,
+                value: (values[f.id] as num?)?.toDouble() ?? 0,
+                onChanged: (v) => onChanged(f.id, v),
+              ),
+              'multiSelect' => _MultiSelectField(
+                field: f,
+                selected:
+                    (values[f.id] as List?)?.whereType<String>().toList() ??
+                    const [],
+                onChanged: (list) => onChanged(f.id, list),
+              ),
               'select' => DropdownButtonFormField<String?>(
                 key: ValueKey('cf-${f.id}-${values[f.id]}'),
                 initialValue: f.options.contains(values[f.id])
@@ -1484,6 +1820,104 @@ class _CustomTextInputState extends State<_CustomTextInput> {
       ),
       onChanged: widget.commitOnChange ? (_) => _commit() : null,
       onSubmitted: (_) => _commit(),
+    );
+  }
+}
+
+/// 진행률(0~100) 입력 — 끌어서 정하고 손을 뗄 때만 저장한다(업무 상세에서 매번 저장되지 않도록).
+class _ProgressField extends StatefulWidget {
+  final String label;
+  final double value;
+  final ValueChanged<num> onChanged;
+  const _ProgressField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  State<_ProgressField> createState() => _ProgressFieldState();
+}
+
+class _ProgressFieldState extends State<_ProgressField> {
+  late double _value = widget.value;
+
+  @override
+  void didUpdateWidget(_ProgressField old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value) _value = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(widget.label, style: TextStyle(color: hint, fontSize: 12)),
+        Row(
+          children: [
+            Expanded(
+              child: Slider(
+                value: _value,
+                max: 100,
+                divisions: 20,
+                label: '${_value.round()}%',
+                onChanged: (v) => setState(() => _value = v),
+                onChangeEnd: (v) => widget.onChanged(v.round()),
+              ),
+            ),
+            SizedBox(
+              width: 44,
+              child: Text(
+                '${_value.round()}%',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 다중 선택 — 고른 것만 색이 채워진 칩으로 보여주고, 누를 때마다 전체 목록을 넘긴다.
+class _MultiSelectField extends StatelessWidget {
+  final TaskFieldDef field;
+  final List<String> selected;
+  final void Function(List<String>) onChanged;
+  const _MultiSelectField({
+    required this.field,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(field.name, style: TextStyle(color: hint, fontSize: 12)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            for (final option in field.options)
+              FilterChip(
+                label: Text(option),
+                selected: selected.contains(option),
+                onSelected: (on) => onChanged([
+                  for (final o in field.options)
+                    if (o == option ? on : selected.contains(o)) o,
+                ]),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }

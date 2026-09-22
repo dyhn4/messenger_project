@@ -1507,24 +1507,36 @@ class ApiClient {
     );
   }
 
-  Future<ProjectNotificationSettings> updateProjectNotificationSettings(
-    String projectId, {
-    bool? muted,
-    bool? assigned,
-    bool? referenced,
-    bool? comment,
-    bool? status,
-    bool? due,
-  }) async {
+  /// 내 개인 설정 — 이 프로젝트 알림을 나만 전부 끄거나 켠다.
+  Future<ProjectNotificationSettings> setProjectNotificationMuted(
+    String projectId,
+    bool muted,
+  ) async {
     return ProjectNotificationSettings.fromJson(
       await _patch('/api/projects/$projectId/notification-settings', {
-            'muted': ?muted,
-            'assigned': ?assigned,
-            'referenced': ?referenced,
-            'comment': ?comment,
-            'status': ?status,
-            'due': ?due,
+            'muted': muted,
           })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<ProjectNotificationPolicy> fetchProjectNotificationPolicy(
+    String projectId,
+  ) async {
+    return ProjectNotificationPolicy.fromJson(
+      await _get('/api/projects/$projectId/notification-policy')
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 프로젝트 알림 정책을 바꾼다(담당자·팀 소유자/관리자만) — [key]는 서버와 같은 이름.
+  Future<ProjectNotificationPolicy> setProjectNotificationPolicy(
+    String projectId,
+    String key,
+    bool value,
+  ) async {
+    return ProjectNotificationPolicy.fromJson(
+      await _patch('/api/projects/$projectId/notification-policy', {key: value})
           as Map<String, dynamic>,
     );
   }
@@ -1701,6 +1713,51 @@ class ApiClient {
     await _post('/api/projects/$projectId/task-statuses/order', {'ids': ids});
   }
 
+  Future<List<TaskPriorityDef>> fetchTaskPriorities(String projectId) async {
+    final list = await _get('/api/projects/$projectId/task-priorities') as List;
+    return list
+        .map((e) => TaskPriorityDef.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TaskPriorityDef> createTaskPriority(
+    String projectId, {
+    required String name,
+    required String color,
+    required TaskPriority level,
+  }) async {
+    return TaskPriorityDef.fromJson(
+      await _post('/api/projects/$projectId/task-priorities', {
+            'name': name,
+            'color': color,
+            'level': taskPriorityToWire(level),
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<TaskPriorityDef> updateTaskPriority(
+    String priorityId, {
+    String? name,
+    String? color,
+  }) async {
+    return TaskPriorityDef.fromJson(
+      await _patch('/api/task-priorities/$priorityId', {
+            'name': ?name,
+            'color': ?color,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteTaskPriority(String priorityId) async {
+    await _delete('/api/task-priorities/$priorityId');
+  }
+
+  Future<void> reorderTaskPriorities(String projectId, List<String> ids) async {
+    await _post('/api/projects/$projectId/task-priorities/order', {'ids': ids});
+  }
+
   Future<List<TaskFieldDef>> fetchTaskFields(String projectId) async {
     final list = await _get('/api/projects/$projectId/task-fields') as List;
     return list
@@ -1751,6 +1808,7 @@ class ApiClient {
     String? statusId,
     Map<String, dynamic>? customValues,
     TaskPriority priority = TaskPriority.normal,
+    String? priorityId,
     String? typeId,
     List<String> referenceIds = const [],
     DateTime? startDate,
@@ -1765,6 +1823,7 @@ class ApiClient {
             'statusId': ?statusId,
             'customValues': ?customValues,
             'priority': taskPriorityToWire(priority),
+            'priorityId': ?priorityId,
             'typeId': ?typeId,
             'referenceIds': referenceIds,
             'startDate': ?startDate?.millisecondsSinceEpoch,
@@ -1786,6 +1845,7 @@ class ApiClient {
     String? statusId,
     Map<String, dynamic>? customValues,
     TaskPriority? priority,
+    String? priorityId,
     String? typeId,
     bool clearType = false,
     List<String>? referenceIds,
@@ -1808,6 +1868,7 @@ class ApiClient {
             'priority': ?(priority == null
                 ? null
                 : taskPriorityToWire(priority)),
+            'priorityId': ?priorityId,
             if (clearType) 'typeId': null else 'typeId': ?typeId,
             'referenceIds': ?referenceIds,
             if (clearStartDate)

@@ -1,0 +1,1 @@
+ALTER TABLE "project_notification_policies" ADD COLUMN "on_deleted" boolean DEFAULT true NOT NULL;

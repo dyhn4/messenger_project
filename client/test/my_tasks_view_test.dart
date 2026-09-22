@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:client/models/project.dart';
 import 'package:client/screens/project/my_tasks_view.dart';
+import 'package:client/screens/project/task_views.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
@@ -43,7 +45,7 @@ Map<String, dynamic> _task(
 };
 
 void main() {
-  testWidgets('내 업무: 리스트 → 캘린더(월/주) → 필터', (tester) async {
+  testWidgets('내 업무: 리스트 + 필터(탭 없이 리스트만)', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -128,22 +130,9 @@ void main() {
     expect(find.text('참조'), findsOneWidget); // 참조된 업무 표시
     expect(find.text('D+1'), findsOneWidget); // 마감이 지난 업무
 
-    // 캘린더(월)
-    await tester.tap(find.text('캘린더'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(find.text('${now.year}년 ${now.month}월'), findsOneWidget);
-    expect(find.textContaining('해당 일의 업무'), findsOneWidget);
-
-    // 주 보기 전환 + 이전/다음
-    await tester.tap(find.text('주'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    await tester.tap(find.byIcon(Icons.chevron_right));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('오늘'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+    // 리스트/캘린더 탭은 없앴다 — 리스트만 보인다.
+    expect(find.text('캘린더'), findsNothing);
+    expect(find.text('리스트'), findsNothing);
 
     // 좁은 폭에서도 오버플로 없이
     tester.view.physicalSize = const Size(700, 700);
@@ -158,5 +147,45 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('필터링 1'), findsOneWidget);
+  });
+
+  testWidgets('캘린더 보기: 월/주 전환과 이전·다음·오늘', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final now = DateTime.now();
+    int day(int offset) =>
+        DateTime(now.year, now.month, now.day + offset).millisecondsSinceEpoch;
+    final tasks = [
+      for (final t in [
+        _task('1', '4월 오프라인 행사', start: day(-3), due: day(1)),
+        _task('2', '대시보드 수정', start: day(0), due: day(2)),
+        for (var i = 0; i < 6; i++)
+          _task('x$i', '겹치는 업무 $i', start: day(0), due: day(1)),
+      ])
+        Task.fromJson(t),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TaskCalendarView(tasks: tasks, onOpen: (_) {}),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('${now.year}년 ${now.month}월'), findsOneWidget);
+    expect(find.textContaining('해당 일의 업무'), findsOneWidget);
+
+    await tester.tap(find.text('주'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('오늘'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 }

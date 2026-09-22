@@ -84,6 +84,31 @@ set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 
+# VC++ 런타임(msvcp140.dll 등)을 client.exe 옆에 같이 깔아서, 그 PC에 설치돼 있는
+# C:\Windows\System32 쪽 재배포 패키지를 아예 쓰지 않게 한다.
+#
+# 이게 없으면: MSVC는 "대상 PC의 재배포 패키지 버전이 빌드에 쓴 툴셋 버전 이상"이어야 한다고
+# 못박아 뒀는데, 그보다 낮으면 로딩은 멀쩡히 되고 실행 중에 터진다. 특히 툴셋 14.40부터
+# std::mutex 생성자가 바뀌어서, 낡은 msvcp140.dll과 만나면 std::mutex를 처음 잠그는 순간
+# 0xc0000005(액세스 위반)로 프로세스가 그대로 죽는다 — 개발 PC는 최신 런타임이라 멀쩡하고
+# 남의 PC에서만 죽는, 재현이 까다로운 형태로 나타난다(실제로 채팅방 "캡처" 버튼이
+# desktop_multi_window로 두 번째 창을 만들 때 이렇게 죽었다).
+#
+# UCRT(api-ms-win-crt-*.dll)는 Windows 10부터 OS 구성요소라 OS가 알아서 최신을 유지하므로 뺀다.
+# DLL을 실행 파일과 같은 폴더에 두면(msvcp140.dll은 KnownDLLs가 아니다) 시스템 것보다 먼저
+# 로드된다.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
+include(InstallRequiredSystemLibraries)
+if(NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+  message(FATAL_ERROR
+    "VC++ 재배포 DLL을 찾지 못했습니다. Visual Studio 설치 관리자에서 "
+    "\"MSVC ... 재배포 가능 패키지\"(Redistributable) 구성 요소를 추가하세요 — "
+    "이게 빠지면 낡은 런타임이 깔린 PC에서 앱이 실행 중에 강제 종료됩니다.")
+endif()
+install(FILES ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 

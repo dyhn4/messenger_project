@@ -1,12 +1,12 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../../models/app_user.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
+import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
+import 'task_filter.dart';
 import 'task_views.dart';
 
 AppUser? _memberById(List<AppUser> members, String? id) =>
@@ -805,346 +805,551 @@ class _GanttGridPainter extends CustomPainter {
 
 // ───────────────────────── 대시보드 ─────────────────────────
 
-/// 프로젝트 전체 진행 현황 — 상태·우선순위·유형·담당자별 집계와 마감 임박 업무.
+/// 프로젝트 "대시보드" — 숫자 카드 네 장(전체/완료/진행 중/지연), 전체 완료율, 멤버별 업무현황.
+/// 숫자 카드를 누르면 [onStatTap]으로 리스트 탭에 그 조건을 걸어달라고 알린다.
 class TaskDashboardView extends StatelessWidget {
   final List<Task> tasks;
   final List<AppUser> members;
   final Session session;
   final ValueChanged<Task> onOpen;
-
-  /// 프로젝트 상태 목록 — 주면 "상태별 업무"가 이 상태들로 나뉜다(없으면 세 분류).
-  final List<TaskStatusDef>? statuses;
+  final void Function(QuickFilter? quick) onStatTap;
 
   const TaskDashboardView({
     super.key,
-    this.statuses,
     required this.tasks,
     required this.members,
     required this.session,
     required this.onOpen,
+    required this.onStatTap,
   });
-
-  String? _firstOfCategory(TaskStatus c) {
-    for (final s in statuses ?? const <TaskStatusDef>[]) {
-      if (s.category == c) return s.id;
-    }
-    return null;
-  }
 
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
     final total = tasks.length;
     final done = tasks.where((t) => t.status == TaskStatus.done).length;
-    final doing = tasks.where((t) => t.status == TaskStatus.doing).length;
+    final doing = total - done;
     final overdue = tasks.where((t) => t.isOverdue).length;
-    final percent = total == 0 ? 0 : (done / total * 100).round();
+    int pct(int n) => total == 0 ? 0 : (n / total * 100).round();
 
-    Widget stat(String label, int value, Color color) => Container(
-      width: 170,
-      padding: const EdgeInsets.all(16),
+    Widget box({required Widget child, EdgeInsets? padding}) => Container(
+      padding: padding ?? const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).dividerColor),
+        border: Border.all(color: theme.dividerColor),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: child,
+    );
+
+    Widget stat(
+      String label,
+      int value,
+      Color dot,
+      Color? number,
+      QuickFilter? quick,
+    ) => Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => onStatTap(quick),
+        child: box(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: dot,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(label, style: TextStyle(color: hint, fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '$value',
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.bold,
+                  color: number,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    Widget legend(String label, int value, Color color) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
         children: [
-          Text(label, style: TextStyle(color: hint, fontSize: 12)),
-          const SizedBox(height: 6),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          Text(label),
+          const Spacer(),
           Text(
-            '$value',
-            style: TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+            '${pct(value)}%',
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
         ],
       ),
     );
 
-    Widget card(String title, Widget child, {double width = 360}) => Container(
-      width: width,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).dividerColor),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
-    );
+    final doneColor = theme.colorScheme.primary;
+    const doingColor = Color(0xFF2E9E6B);
+    const overdueColor = Colors.redAccent;
 
-    /// 라벨 + 막대 + 개수 한 줄.
-    Widget barRow(
-      String label,
-      int count,
-      int max,
-      Color color, {
-      Widget? lead,
-    }) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
+    return MutedScrollbar(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 스크롤 안이라 높이가 무한이다 — stretch를 쓰면 안 되고, 네 카드는 내용이 같아 어차피 키가 같다.
+            Row(
+              children: [
+                stat('전체 업무', total, doneColor, null, null),
+                const SizedBox(width: 12),
+                stat('완료', done, doneColor, doneColor, QuickFilter.done),
+                const SizedBox(width: 12),
+                stat(
+                  '진행 중',
+                  doing,
+                  doneColor,
+                  doingColor,
+                  QuickFilter.incomplete,
+                ),
+                const SizedBox(width: 12),
+                stat(
+                  '지연',
+                  overdue,
+                  overdueColor,
+                  overdueColor,
+                  QuickFilter.overdue,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             SizedBox(
-              width: 110,
+              height: 300,
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (lead != null) ...[lead, const SizedBox(width: 6)],
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
+                  Expanded(
+                    child: box(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '전체 완료율',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Expanded(
+                            child: Row(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: SizedBox(
+                                    width: 150,
+                                    height: 150,
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        SizedBox.expand(
+                                          child: CircularProgressIndicator(
+                                            value: total == 0
+                                                ? 0
+                                                : done / total,
+                                            strokeWidth: 16,
+                                            strokeCap: StrokeCap.round,
+                                            backgroundColor: theme
+                                                .colorScheme
+                                                .surfaceContainerHighest,
+                                          ),
+                                        ),
+                                        Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              '${pct(done)}%',
+                                              style: const TextStyle(
+                                                fontSize: 26,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                            Text(
+                                              '전체 완료율',
+                                              style: TextStyle(
+                                                color: hint,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      legend('완료', done, doneColor),
+                                      legend('진행 중', doing, doingColor),
+                                      legend('지연', overdue, overdueColor),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: box(
+                      // 오른쪽 여백은 안쪽 목록이 갖는다 — 그래야 스크롤바가 카드
+                      // 오른쪽 선에 붙고 담당 수("2/5")를 가리지 않는다.
+                      padding: const EdgeInsets.fromLTRB(16, 16, 0, 16),
+                      child: _MemberWorkload(
+                        members: members,
+                        tasks: tasks,
+                        session: session,
+                        onOpen: onOpen,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
-            Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: max == 0 ? 0 : count / max,
-                  minHeight: 10,
-                  color: color,
-                  backgroundColor: color.withValues(alpha: 0.12),
-                ),
-              ),
-            ),
-            SizedBox(
-              width: 32,
-              child: Text(
-                '$count',
-                textAlign: TextAlign.end,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
           ],
         ),
-      );
-    }
+      ),
+    );
+  }
+}
 
-    // 유형별
-    final byType = <String, (int, Color)>{};
-    for (final t in tasks) {
-      final key = t.typeName ?? '유형 없음';
-      final color = t.typeColor != null
-          ? parseTypeColor(t.typeColor)
-          : const Color(0xFF90A4AE);
-      final prev = byType[key];
-      byType[key] = ((prev?.$1 ?? 0) + 1, color);
-    }
-    // 담당자별
-    final byAssignee = <String?, List<Task>>{};
-    for (final t in tasks) {
-      (byAssignee[t.assigneeId] ??= []).add(t);
-    }
-    final assigneeRows = byAssignee.entries.toList()
-      ..sort((a, b) => b.value.length.compareTo(a.value.length));
-    final soon = [
-      for (final t in tasks)
-        if (t.status != TaskStatus.done &&
-            t.dueDate != null &&
-            (t.daysUntilDue ?? 99) <= 7)
-          t,
-    ]..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
+/// 멤버별 담당 업무 현황 — 카드 안에는 몇 명만 보이고, "전체보기"로 전부 본다.
+class _MemberWorkload extends StatefulWidget {
+  final List<AppUser> members;
+  final List<Task> tasks;
+  final Session session;
+  final ValueChanged<Task> onOpen;
+  const _MemberWorkload({
+    required this.members,
+    required this.tasks,
+    required this.session,
+    required this.onOpen,
+  });
 
-    return MutedScrollbar(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-        children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
+  @override
+  State<_MemberWorkload> createState() => _MemberWorkloadState();
+}
+
+class _MemberWorkloadState extends State<_MemberWorkload> {
+  // 대시보드 전체가 이미 스크롤되고 있어서, 이 목록은 자기 컨트롤러를 가져야
+  // 스크롤바가 제대로 붙는다.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: Row(
             children: [
-              stat('전체 업무', total, Theme.of(context).colorScheme.primary),
-              stat('완료', done, taskStatusColor(TaskStatus.done)),
-              stat('진행 중', doing, taskStatusColor(TaskStatus.doing)),
-              stat('지연', overdue, Colors.redAccent),
-              Container(
-                width: 260,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Theme.of(context).dividerColor),
-                  borderRadius: BorderRadius.circular(12),
+              const Text(
+                '멤버별 업무현황',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => showMemberWorkloadDialog(
+                  context,
+                  session: widget.session,
+                  members: widget.members,
+                  tasks: widget.tasks,
+                  onOpen: widget.onOpen,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('진행률', style: TextStyle(color: hint, fontSize: 12)),
-                    const SizedBox(height: 6),
-                    Text(
-                      '$percent%',
-                      style: const TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: total == 0 ? 0 : done / total,
-                        minHeight: 8,
-                      ),
-                    ),
-                  ],
-                ),
+                child: const Text('전체보기'),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.start,
-            children: [
-              card(
-                '상태별 업무',
-                Column(
-                  children: [
-                    if (statuses != null && statuses!.isNotEmpty)
-                      for (final s in statuses!)
-                        barRow(
-                          s.name,
-                          tasks
-                              .where(
-                                (t) =>
-                                    t.statusId == s.id ||
-                                    (t.statusId == null &&
-                                        t.status == s.category &&
-                                        s.id == _firstOfCategory(s.category)),
-                              )
-                              .length,
-                          total,
-                          parseTypeColor(s.color),
-                        )
-                    else
-                      for (final s in TaskStatus.values)
-                        barRow(
-                          taskStatusLabel(s),
-                          tasks.where((t) => t.status == s).length,
-                          total,
-                          taskStatusColor(s),
+        ),
+        Expanded(
+          child: widget.members.isEmpty
+              ? Center(
+                  child: Text(
+                    '프로젝트 멤버가 없습니다.',
+                    style: TextStyle(color: hint, fontSize: 12),
+                  ),
+                )
+              : MutedScrollbar(
+                  controller: _scroll,
+                  child: ListView(
+                    controller: _scroll,
+                    // 스크롤바(10px)가 담당 수를 덮지 않도록 내용만 안쪽으로 들인다.
+                    padding: const EdgeInsets.only(right: 16),
+                    children: [
+                      for (final m in widget.members.take(5))
+                        memberWorkloadRow(
+                          context,
+                          m,
+                          widget.tasks,
+                          widget.session,
                         ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              card(
-                '우선순위별 업무',
-                Column(
-                  children: [
-                    for (final p in TaskPriority.values.reversed)
-                      barRow(
-                        taskPriorityLabel(p),
-                        tasks.where((t) => t.priority == p).length,
-                        total,
-                        taskPriorityColor(p),
+        ),
+      ],
+    );
+  }
+}
+
+/// 멤버 한 줄 — 아바타·이름과 담당 업무의 완료/전체, 그리고 진행 막대.
+Widget memberWorkloadRow(
+  BuildContext context,
+  AppUser member,
+  List<Task> tasks,
+  Session session, {
+  VoidCallback? onTap,
+  bool selected = false,
+}) {
+  final hint = Theme.of(context).hintColor;
+  final mine = tasks.where((t) => t.assigneeId == member.id).toList();
+  final done = mine.where((t) => t.status == TaskStatus.done).length;
+  return ListTile(
+    dense: true,
+    selected: selected,
+    contentPadding: EdgeInsets.zero,
+    onTap: onTap,
+    leading: UserAvatar(
+      user: member,
+      resolveUrl: session.resolveUrl,
+      radius: 14,
+    ),
+    title: Text(member.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+    subtitle: mine.isEmpty
+        ? Text('담당 업무 없음', style: TextStyle(color: hint, fontSize: 11))
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: done / mine.length,
+              minHeight: 5,
+            ),
+          ),
+    trailing: Text(
+      '$done/${mine.length}',
+      style: TextStyle(color: hint, fontSize: 12),
+    ),
+  );
+}
+
+/// "전체보기" — 왼쪽에서 멤버를 고르면 오른쪽에 그 멤버의 담당 업무가 뜬다.
+Future<void> showMemberWorkloadDialog(
+  BuildContext context, {
+  required Session session,
+  required List<AppUser> members,
+  required List<Task> tasks,
+  required ValueChanged<Task> onOpen,
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (_) => _MemberWorkloadDialog(
+      session: session,
+      members: members,
+      tasks: tasks,
+      onOpen: onOpen,
+    ),
+  );
+}
+
+class _MemberWorkloadDialog extends StatefulWidget {
+  final Session session;
+  final List<AppUser> members;
+  final List<Task> tasks;
+  final ValueChanged<Task> onOpen;
+  const _MemberWorkloadDialog({
+    required this.session,
+    required this.members,
+    required this.tasks,
+    required this.onOpen,
+  });
+
+  @override
+  State<_MemberWorkloadDialog> createState() => _MemberWorkloadDialogState();
+}
+
+class _MemberWorkloadDialogState extends State<_MemberWorkloadDialog> {
+  String? _selectedId;
+  final _left = ScrollController();
+  final _right = ScrollController();
+
+  @override
+  void dispose() {
+    _left.dispose();
+    _right.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final selected = widget.members
+        .where((m) => m.id == _selectedId)
+        .firstOrNull;
+    final mine = selected == null
+        ? const <Task>[]
+        : [
+            for (final t in widget.tasks)
+              if (t.assigneeId == selected.id) t,
+          ];
+    return FloatingDialog(
+      title: '멤버별 업무현황 — 전체보기',
+      maxWidth: 900,
+      maxHeight: 600,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '멤버를 선택하면 해당 멤버의 업무 상세를 확인할 수 있어요.',
+            style: TextStyle(color: theme.hintColor, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: 280,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '멤버 ${widget.members.length}명',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
-                  ],
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: MutedScrollbar(
+                          controller: _left,
+                          child: ListView(
+                            controller: _left,
+                            padding: const EdgeInsets.only(right: 14),
+                            children: [
+                              for (final m in widget.members)
+                                memberWorkloadRow(
+                                  context,
+                                  m,
+                                  widget.tasks,
+                                  widget.session,
+                                  selected: m.id == _selectedId,
+                                  onTap: () =>
+                                      setState(() => _selectedId = m.id),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              card(
-                '유형별 업무',
-                byType.isEmpty
-                    ? Text('업무가 없습니다.', style: TextStyle(color: hint))
-                    : Column(
-                        children: [
-                          for (final e in byType.entries)
-                            barRow(e.key, e.value.$1, total, e.value.$2),
-                        ],
-                      ),
-              ),
-              card(
-                '담당자별 업무',
-                assigneeRows.isEmpty
-                    ? Text('업무가 없습니다.', style: TextStyle(color: hint))
-                    : Column(
-                        children: [
-                          for (final e in assigneeRows)
-                            Builder(
-                              builder: (context) {
-                                final user = _memberById(members, e.key);
-                                return barRow(
-                                  user?.name ?? '담당자 없음',
-                                  e.value.length,
-                                  math.max(1, assigneeRows.first.value.length),
-                                  Theme.of(context).colorScheme.primary,
-                                  lead: user == null
-                                      ? const Icon(
-                                          Icons.person_outline,
-                                          size: 16,
-                                        )
-                                      : UserAvatar(
-                                          user: user,
-                                          resolveUrl: session.resolveUrl,
-                                          radius: 8,
-                                        ),
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-              ),
-              card(
-                '마감 임박·지연 업무',
-                soon.isEmpty
-                    ? Text(
-                        '7일 안에 마감이거나 지연된 업무가 없습니다.',
-                        style: TextStyle(color: hint, fontSize: 12),
-                      )
-                    : Column(
-                        children: [
-                          for (final t in soon.take(6))
-                            InkWell(
-                              onTap: () => onOpen(t),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 6,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        t.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontSize: 13),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      formatMd(t.dueDate!),
-                                      style: TextStyle(
-                                        color: hint,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                    if (t.isOverdue) ...[
-                                      const SizedBox(width: 6),
-                                      TaskPill(
-                                        'D+${-(t.daysUntilDue ?? 0)}',
-                                        Colors.redAccent,
-                                      ),
-                                    ],
-                                  ],
-                                ),
+                const VerticalDivider(width: 24),
+                Expanded(
+                  child: selected == null
+                      ? const SizedBox.shrink()
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              '${selected.name} · 담당 업무 ${mine.length}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                        ],
-                      ),
-                width: 360,
-              ),
-            ],
+                            const SizedBox(height: 6),
+                            Expanded(
+                              child: mine.isEmpty
+                                  ? Center(
+                                      child: Text(
+                                        '담당한 업무가 없습니다.',
+                                        style: TextStyle(
+                                          color: theme.hintColor,
+                                        ),
+                                      ),
+                                    )
+                                  : MutedScrollbar(
+                                      controller: _right,
+                                      child: ListView.separated(
+                                        controller: _right,
+                                        padding: const EdgeInsets.only(
+                                          right: 14,
+                                        ),
+                                        itemCount: mine.length,
+                                        separatorBuilder: (_, _) =>
+                                            const Divider(height: 1),
+                                        itemBuilder: (context, i) {
+                                          final t = mine[i];
+                                          return ListTile(
+                                            dense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            title: Text(
+                                              t.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            subtitle: Text(
+                                              [
+                                                ?t.key,
+                                                t.statusLabel,
+                                                if (t.dueDate != null)
+                                                  formatYmd(t.dueDate!),
+                                              ].join(' · '),
+                                              style: TextStyle(
+                                                color: theme.hintColor,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                            trailing: TaskPill(
+                                              t.priorityLabel,
+                                              taskPriorityDisplayColor(t),
+                                            ),
+                                            onTap: () {
+                                              Navigator.of(context).pop();
+                                              widget.onOpen(t);
+                                            },
+                                          );
+                                        },
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

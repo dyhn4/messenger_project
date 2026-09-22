@@ -119,7 +119,7 @@ void main() {
     expect(find.textContaining('재현 방법은 아래와 같아요'), findsOneWidget);
     expect(find.textContaining('Sam'), findsWidgets);
 
-    await tester.tap(find.widgetWithText(FilledButton, '등록'));
+    await tester.tap(find.widgetWithText(FilledButton, '생성'));
     await tester.pumpAndSettle();
     expect(created?['title'], '배포 전에 로그인 오류 확인 부탁해요');
     expect(created?['description'], contains('재현 방법은 아래와 같아요'));

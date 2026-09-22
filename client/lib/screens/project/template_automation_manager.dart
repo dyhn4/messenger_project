@@ -4,24 +4,6 @@ import '../../models/app_user.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/floating_dialog.dart';
-
-/// 프로젝트의 업무 템플릿과 자동화 규칙을 관리한다 — 프로젝트 담당자와 팀 소유자·관리자만
-/// 열 수 있다(서버도 다시 확인한다).
-///
-/// 템플릿은 "새 업무"에서 불러와 제목·설명·우선순위·유형·담당자·마감(오늘+N일)을 미리 채우고,
-/// 자동화는 "업무가 만들어졌을 때 / 상태가 바뀌었을 때" 조건이 맞으면 배정·상태·우선순위 변경,
-/// 참조자 추가, 댓글, 알림을 대신 해준다(자동화가 일으킨 변화는 다시 자동화를 부르지 않는다).
-Future<void> showTemplateAutomationManagerDialog(
-  BuildContext context,
-  Session session,
-  String projectId,
-) {
-  return showDialog<void>(
-    context: context,
-    builder: (_) => _ManagerDialog(session: session, projectId: projectId),
-  );
-}
 
 /// 편집 창들이 고르기 목록으로 쓰는 프로젝트 정보.
 class _Ctx {
@@ -41,16 +23,24 @@ class _Ctx {
       '(삭제된 유형)';
 }
 
-class _ManagerDialog extends StatefulWidget {
+/// 프로젝트의 업무 템플릿과 자동화 규칙, 그리고 규칙 실행 기록을 관리한다 — 프로젝트 담당자와
+/// 팀 소유자·관리자만 쓸 수 있다(서버도 다시 확인한다). "프로젝트 메뉴"에서 쓴다.
+class ProjectTemplateAutomationEditor extends StatefulWidget {
   final Session session;
   final String projectId;
-  const _ManagerDialog({required this.session, required this.projectId});
+  const ProjectTemplateAutomationEditor({
+    super.key,
+    required this.session,
+    required this.projectId,
+  });
 
   @override
-  State<_ManagerDialog> createState() => _ManagerDialogState();
+  State<ProjectTemplateAutomationEditor> createState() =>
+      _ProjectTemplateAutomationEditorState();
 }
 
-class _ManagerDialogState extends State<_ManagerDialog> {
+class _ProjectTemplateAutomationEditorState
+    extends State<ProjectTemplateAutomationEditor> {
   _Ctx? _ctx;
   String? _error;
 
@@ -77,51 +67,46 @@ class _ManagerDialogState extends State<_ManagerDialog> {
   @override
   Widget build(BuildContext context) {
     final ctx = _ctx;
-    return FloatingDialog(
-      title: '템플릿 · 자동화 관리',
-      maxWidth: 600,
-      maxHeight: 680,
-      child: _error != null
-          ? Center(child: Text(_error!))
-          : ctx == null
-          ? const Center(child: CircularProgressIndicator())
-          : DefaultTabController(
-              length: 3,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const TabBar(
-                    tabs: [
-                      Tab(text: '업무 템플릿'),
-                      Tab(text: '자동화 규칙'),
-                      Tab(text: '실행 기록'),
+    return _error != null
+        ? Center(child: Text(_error!))
+        : ctx == null
+        ? const Center(child: CircularProgressIndicator())
+        : DefaultTabController(
+            length: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const TabBar(
+                  tabs: [
+                    Tab(text: '업무 템플릿'),
+                    Tab(text: '자동화 규칙'),
+                    Tab(text: '실행 기록'),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _TemplatesTab(
+                        session: widget.session,
+                        projectId: widget.projectId,
+                        ctx: ctx,
+                      ),
+                      _AutomationsTab(
+                        session: widget.session,
+                        projectId: widget.projectId,
+                        ctx: ctx,
+                      ),
+                      _RunsTab(
+                        session: widget.session,
+                        projectId: widget.projectId,
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        _TemplatesTab(
-                          session: widget.session,
-                          projectId: widget.projectId,
-                          ctx: ctx,
-                        ),
-                        _AutomationsTab(
-                          session: widget.session,
-                          projectId: widget.projectId,
-                          ctx: ctx,
-                        ),
-                        _RunsTab(
-                          session: widget.session,
-                          projectId: widget.projectId,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-    );
+          );
   }
 }
 

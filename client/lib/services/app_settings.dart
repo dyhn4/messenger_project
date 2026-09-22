@@ -15,6 +15,7 @@ const _kDownloadFolder = 'settings_download_folder';
 const _kOpenFolderAfterDownload = 'settings_open_folder_after_download';
 const _kThemeMode = 'settings_theme_mode';
 const _kMessagePreviewMode = 'settings_message_preview_mode';
+const _kTeamSwitchStyle = 'settings_team_switch_style';
 const _kAlwaysOnTop = 'settings_always_on_top';
 const _kWindowOpacity = 'settings_window_opacity';
 
@@ -30,6 +31,10 @@ const minWindowSize = Size(350, 600);
 /// 비밀 대화는 이 설정과 무관하게 항상 가려진다(session.dart의 기존 규칙).
 enum MessagePreviewMode { all, publicTopicOnly, none }
 
+/// 창 왼쪽 위에서 팀을 바꾸는 방식 — 드롭다운(지금 팀만 보이고 눌러서 고름) 또는
+/// 탭(속한 팀을 전부 한 줄로 늘어놓고 눌러서 바로 전환).
+enum TeamSwitchStyle { dropdown, tabs }
+
 /// 삼선 메뉴 "설정"의 환경설정 상태: 시작 시 자동 실행(Windows 레지스트리로 실제 등록/해제)과
 /// 파일 다운로드 관련 값. SharedPreferences에 저장하고, 자동 실행 여부는 레지스트리 값의
 /// 실제 존재 여부로 판단한다(다른 방법으로 꺼졌어도 UI가 항상 실제 상태를 반영하도록).
@@ -42,6 +47,7 @@ class AppSettings extends ChangeNotifier {
   bool openFolderAfterDownload = true;
   ThemeMode themeMode = ThemeMode.system;
   MessagePreviewMode messagePreviewMode = MessagePreviewMode.all;
+  TeamSwitchStyle teamSwitchStyle = TeamSwitchStyle.dropdown;
   bool alwaysOnTop = false;
   double windowOpacity = 1.0;
 
@@ -55,6 +61,9 @@ class AppSettings extends ChangeNotifier {
     messagePreviewMode = _messagePreviewModeFromName(
       _prefs.getString(_kMessagePreviewMode),
     );
+    teamSwitchStyle = _prefs.getString(_kTeamSwitchStyle) == 'tabs'
+        ? TeamSwitchStyle.tabs
+        : TeamSwitchStyle.dropdown;
     alwaysOnTop = _prefs.getBool(_kAlwaysOnTop) ?? false;
     windowOpacity = _prefs.getDouble(_kWindowOpacity) ?? 1.0;
     if (Platform.isWindows) {
@@ -128,6 +137,12 @@ class AppSettings extends ChangeNotifier {
   Future<void> setMessagePreviewMode(MessagePreviewMode value) async {
     messagePreviewMode = value;
     await _prefs.setString(_kMessagePreviewMode, value.name);
+    notifyListeners();
+  }
+
+  Future<void> setTeamSwitchStyle(TeamSwitchStyle value) async {
+    teamSwitchStyle = value;
+    await _prefs.setString(_kTeamSwitchStyle, value.name);
     notifyListeners();
   }
 

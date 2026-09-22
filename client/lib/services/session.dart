@@ -138,6 +138,10 @@ class Session extends ChangeNotifier {
 
   late final callController = CallController(() => api!);
   final _updateSocket = UpdateSocket();
+  StreamSubscription<UpdateAvailableEvent>? _updateSub;
+
+  /// 소켓 알림을 놓쳤을 때를 대비해 켜져 있는 동안 주기적으로 버전을 다시 확인하는 타이머.
+  Timer? _updateRecheckTimer;
   final NotificationService notifications;
   final AppSettings settings;
 
@@ -498,13 +502,24 @@ class Session extends ChangeNotifier {
   /// 모달을 연다), 아무 처리도 안 하면 대화 중에도 모달이 불쑥 뜬다. 이 경로에서는 처음부터
   /// "이미 보여준 것"으로 표시해서 모달은 건너뛰고 UpdateBanner(알약)만 뜨게 한다.
   void _listenForLiveUpdates() {
-    _updateSocket.updates.listen((e) async {
+    // init()과 restoreFromCredentials()가 둘 다 부르므로 중복 구독을 막는다.
+    _updateSub?.cancel();
+    _updateSub = _updateSocket.updates.listen((e) async {
       final info = await PackageInfo.fromPlatform();
       if (_isNewerVersion(e.version, info.version)) {
         updateAvailableVersion = e.version;
         updateBannerShown = true;
         notifyListeners();
       }
+    });
+    // 소켓 알림은 배포되는 그 순간 붙어 있는 앱에만 간다. 그때 PC가 절전이었거나 네트워크가
+    // 끊겨 있었거나, 서버가 그 뒤 재시작됐거나, 앱을 켤 때 서버가 잠깐 꺼져 있어서 소켓이
+    // 아예 못 붙은 경우엔 알약이 영영 안 뜬다 — 그래서 켜져 있는 동안 주기적으로도 확인한다
+    // (서버도 이제 연결될 때마다 현재 버전을 알려주므로, 이건 그게 안 되는 예전 서버까지
+    // 감싸는 보조 수단이다).
+    _updateRecheckTimer?.cancel();
+    _updateRecheckTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+      if (updateAvailableVersion == null) unawaited(_checkForUpdate());
     });
   }
 
@@ -1230,12 +1245,16 @@ class Session extends ChangeNotifier {
         }
       }
       if (suppressNotifications) return;
+      final teamTag = _teamTagFor(room);
+      final teamBadge = teamTag == null ? '' : ' [$teamTag]';
       notifications.showMessage(
-        title: initiator != null ? '${initiator.name} [비밀대화 요청]' : '비밀대화 요청',
+        title: initiator != null
+            ? '${initiator.name} [비밀대화 요청]$teamBadge'
+            : '비밀대화 요청$teamBadge',
         body: '비밀 대화(종단간 암호화)를 요청했습니다.',
         roomId: e.roomId,
         senderName: initiator?.name,
-        conversationTitle: '비밀대화 요청',
+        conversationTitle: teamTag == null ? '비밀대화 요청' : '비밀대화 요청 · $teamTag',
         avatarType: initiator?.avatarType ?? 'initial',
         avatarEmoji: initiator?.avatarEmoji,
         avatarColor: initiator?.avatarColor,
@@ -1869,6 +1888,7 @@ class Session extends ChangeNotifier {
     final room = match.isEmpty ? null : match.first;
     // 알림 끄기는 안읽음 뱃지(이미 위에서 증가시켰다)는 그대로 두고, 알림(배너/토스트)만 막는다.
     if (room?.muted == true) return;
+    final teamTag = _teamTagFor(room);
     final roomTag = switch (room?.type) {
       null => null,
       RoomType.dm => '1:1',
@@ -1905,11 +1925,15 @@ class Session extends ChangeNotifier {
 
     if (suppressNotifications) return;
     notifications.showMessage(
-      title: roomTag != null ? '${m.senderName} [$roomTag]' : m.senderName,
+      title: roomTag != null
+          ? '${m.senderName} [$roomTag]${teamTag == null ? '' : ' [$teamTag]'}'
+          : m.senderName,
       body: preview,
       roomId: m.roomId,
       senderName: m.senderName,
-      conversationTitle: roomTag,
+      conversationTitle: roomTag == null
+          ? null
+          : (teamTag == null ? roomTag : '$roomTag · $teamTag'),
       avatarType: sender?.avatarType ?? 'initial',
       avatarEmoji: sender?.avatarEmoji,
       avatarColor: sender?.avatarColor,
@@ -1918,6 +1942,15 @@ class Session extends ChangeNotifier {
           : null,
       isSecret: room?.isSecret == true,
     );
+  }
+
+  /// 알림 제목 끝에 붙일 팀 이름 — 여러 팀 방에서 알림이 섞여 오므로 어느 팀인지 구분해 준다.
+  String? _teamTagFor(Room? room) {
+    if (room == null) return null;
+    return teams
+        .where((t) => t.id == room.teamId)
+        .map((t) => t.name)
+        .firstOrNull;
   }
 
   /// 새 댓글이 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께
@@ -1964,13 +1997,14 @@ class Session extends ChangeNotifier {
     }
 
     final tag = roomTag != null ? '$roomTag·댓글' : '댓글';
+    final teamTag = _teamTagFor(room);
     if (suppressNotifications) return;
     notifications.showMessage(
-      title: '${c.senderName} [$tag]',
+      title: '${c.senderName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: preview,
       roomId: c.roomId,
       senderName: c.senderName,
-      conversationTitle: tag,
+      conversationTitle: teamTag == null ? tag : '$tag · $teamTag',
       avatarType: sender?.avatarType ?? 'initial',
       avatarEmoji: sender?.avatarEmoji,
       avatarColor: sender?.avatarColor,
@@ -2010,13 +2044,14 @@ class Session extends ChangeNotifier {
     }
     final roomTag = room.displayName(userId ?? '');
     final tag = '$roomTag·공지';
+    final teamTag = _teamTagFor(room);
     if (suppressNotifications) return;
     notifications.showMessage(
-      title: '${a.authorName} [$tag]',
+      title: '${a.authorName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: a.text,
       roomId: room.id,
       senderName: a.authorName,
-      conversationTitle: tag,
+      conversationTitle: teamTag == null ? tag : '$tag · $teamTag',
       avatarType: sender?.avatarType ?? 'initial',
       avatarEmoji: sender?.avatarEmoji,
       avatarColor: sender?.avatarColor,

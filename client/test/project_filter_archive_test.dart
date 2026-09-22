@@ -8,6 +8,7 @@ import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -67,6 +68,22 @@ void main() {
         category: TaskStatus.done,
       ),
     ];
+    const priorities = [
+      TaskPriorityDef(
+        id: 'pr-high',
+        projectId: 'p1',
+        name: '긴급',
+        color: '#EF4444',
+        level: TaskPriority.high,
+      ),
+      TaskPriorityDef(
+        id: 'pr-normal',
+        projectId: 'p1',
+        name: '보통',
+        color: '#5B8DEF',
+        level: TaskPriority.normal,
+      ),
+    ];
     const fields = [
       TaskFieldDef(
         id: 'f1',
@@ -88,8 +105,12 @@ void main() {
     );
     final b = Task.fromJson(_task('2', '배포 준비', status: 'done'));
 
-    bool m(TaskFilter f, Task t) =>
-        f.matches(t, statuses: statuses, fields: fields);
+    bool m(TaskFilter f, Task t) => f.matches(
+      t,
+      statuses: statuses,
+      priorities: priorities,
+      fields: fields,
+    );
     expect(m(const TaskFilter(query: '로그인'), a), isTrue);
     expect(m(const TaskFilter(query: '로그인'), b), isFalse);
     expect(m(const TaskFilter(query: 'ta-2'), b), isTrue); // 업무 번호도 검색
@@ -98,7 +119,9 @@ void main() {
       isTrue,
     ); // 상태 id 없음 → 분류의 첫 상태
     expect(m(const TaskFilter(statusIds: {'s1'}), b), isFalse);
-    expect(m(const TaskFilter(priorities: {TaskPriority.high}), a), isTrue);
+    // 우선순위는 프로젝트가 정한 항목(id)으로 고른다 — 예전 업무는 같은 단계의 첫 항목으로 본다.
+    expect(m(const TaskFilter(priorityIds: {'pr-high'}), a), isTrue);
+    expect(m(const TaskFilter(priorityIds: {'pr-normal'}), a), isFalse);
     expect(m(const TaskFilter(assigneeId: 'u1'), a), isTrue);
     expect(m(const TaskFilter(assigneeId: noAssigneeFilter), b), isTrue);
     expect(m(const TaskFilter(assigneeId: noAssigneeFilter), a), isFalse);
@@ -210,20 +233,31 @@ void main() {
     expect(find.text('배포 준비'), findsOneWidget);
     expect(find.text('문서 정리'), findsOneWidget);
 
-    // 필터: 고객사 = A
-    await tester.tap(find.text('필터'));
+    // 필터: 고객사 = A. 사용자 정의 필드는 "필터 추가"로 꺼내 쓴다.
+    await tester.tap(find.text('필터링'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('전체').last); // 고객사 드롭다운(마지막 섹션)
+    await tester.tap(find.text('필터 추가'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('A').last);
+    await tester.tap(find.widgetWithText(TextButton, '고객사'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '적용'));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('filter-field-f1')),
+        matching: find.text('전체'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // 드롭다운이 열려 있는 동안엔 목록 쪽 'A' 칸은 눌리지 않는다.
+    await tester.tap(find.text('A').hitTestable().last);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
     expect(find.text('로그인 오류'), findsOneWidget);
     expect(find.text('배포 준비'), findsNothing);
     expect(find.text('문서 정리'), findsNothing);
-    expect(find.text('필터 1'), findsOneWidget);
+    // 걸린 조건은 목록 위에 칩으로 남는다.
+    expect(find.text('고객사: A'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

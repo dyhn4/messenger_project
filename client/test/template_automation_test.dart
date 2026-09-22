@@ -125,20 +125,17 @@ void main() {
     });
     final session = _session(client);
 
+    // "프로젝트 메뉴 > 템플릿 · 자동화"가 이 편집기를 보여준다.
     await tester.pumpWidget(
       MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: TextButton(
-              onPressed: () =>
-                  showTemplateAutomationManagerDialog(context, session, 'p1'),
-              child: const Text('열기'),
-            ),
+        home: Scaffold(
+          body: ProjectTemplateAutomationEditor(
+            session: session,
+            projectId: 'p1',
           ),
         ),
       ),
     );
-    await tester.tap(find.text('열기'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
@@ -279,13 +276,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.text('템플릿에서 불러오기'));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('버그 신고').last);
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, '[버그] '), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(FilledButton, '등록'));
+    await tester.tap(find.widgetWithText(FilledButton, '생성'));
     await tester.pumpAndSettle();
     expect(created?['title'], '[버그]');
     expect(created?['description'], '재현 방법:');

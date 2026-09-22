@@ -19,6 +19,7 @@ import '../widgets/position_badge.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
 import '../widgets/team_avatar.dart';
+import '../services/app_settings.dart' show TeamSwitchStyle;
 import '../widgets/team_switcher.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
@@ -46,6 +47,16 @@ const _sidePanelWidth = 420.0;
 
 /// 잔디(JANDI)식 넓은 화면 레이아웃: 좌측 사이드바(토픽/그룹채팅/유저목록) + 우측 채팅 패널.
 /// HomeScreen이 창 너비를 보고 이 화면을 쓸지 RoomListScreen(모바일)을 쓸지 고른다.
+/// 이 방을 채팅 패널에 계속 띄워둘 수 있는지 — 목록에서 사라졌거나(나가기), 숨겨졌거나
+/// (DM 숨기기), **다른 팀으로 전환**했으면 더는 보여줄 대상이 아니다. session.rooms는 모든
+/// 팀의 방을 다 들고 있어서 "사라졌는지"만 봐서는 팀 전환을 걸러내지 못한다.
+@visibleForTesting
+bool isRoomGoneFrom(Session session, String roomId) {
+  final match = session.rooms.where((r) => r.id == roomId);
+  if (match.isEmpty || match.first.hidden) return true;
+  return match.first.teamId != session.currentTeam?.id;
+}
+
 class DesktopHomeScreen extends StatefulWidget {
   final Session session;
   const DesktopHomeScreen({super.key, required this.session});
@@ -116,10 +127,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     });
   }
 
-  bool _isRoomGone(String roomId) {
-    final match = widget.session.rooms.where((r) => r.id == roomId);
-    return match.isEmpty || match.first.hidden;
-  }
+  bool _isRoomGone(String roomId) => isRoomGoneFrom(widget.session, roomId);
 
   @override
   void initState() {
@@ -637,61 +645,83 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-      child: Row(
-        children: [
-          // 앱 이름 자리에 지금 보고 있는 팀(아이콘+이름)과 전환 버튼을 둔다.
-          // Spacer 대신 Expanded+Align을 쓴다 — Spacer와 나란히 두면 남는 공간을 서로
-          // 나눠 가져서 오른쪽 아이콘들이 창 끝에 붙지 않는다.
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TeamSwitcher(session: session),
-            ),
-          ),
-          // "프로젝트"는 대화(토픽/방)와 성격이 다른 별도 공간이라, 나머지 아이콘들과
-          // 구분선으로 한 번 끊어서 왼쪽에 둔다(잔디와 같은 배치).
-          if (session.canUseProjects)
-            IconButton(
-              icon: ListenableBuilder(
-                listenable: session,
-                builder: (context, _) => Badge(
-                  isLabelVisible: session.projectUnread > 0,
-                  backgroundColor: Colors.redAccent,
-                  label: Text('${session.projectUnread}'),
-                  child: const Icon(Icons.track_changes),
+    // 환경설정 "팀 전환 방식" — 드롭다운(기본)이거나 팀을 전부 보여주는 탭.
+    return ListenableBuilder(
+      listenable: session.settings,
+      builder: (context, _) {
+        final tabs = session.settings.teamSwitchStyle == TeamSwitchStyle.tabs;
+        // 탭 모드에서는 탭이 아래 구분선에 딱 닿아야 브라우저 탭처럼 보이므로, 바 자체의
+        // 아래 여백을 없애고 그만큼을 오른쪽 아이콘들에게만 준다(아이콘 위치는 그대로).
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 10, 8, tabs ? 0 : 10),
+          child: Row(
+            crossAxisAlignment: tabs
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.center,
+            children: [
+              // 앱 이름 자리에 지금 보고 있는 팀(아이콘+이름)과 전환 버튼을 둔다.
+              // Spacer 대신 Expanded+Align을 쓴다 — Spacer와 나란히 두면 남는 공간을 서로
+              // 나눠 가져서 오른쪽 아이콘들이 창 끝에 붙지 않는다.
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: tabs
+                      ? TeamSwitcherTabs(session: session)
+                      : TeamSwitcher(session: session),
                 ),
               ),
-              tooltip: '프로젝트',
-              // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로
-              // 열고, 그 외(안드로이드)는 지금처럼 대화상자로 연다.
-              onPressed: () => Platform.isWindows
-                  ? openProjectWindow(session)
-                  : showProjectDialog(context, session),
-            ),
-          const SizedBox(
-            height: 24,
-            child: VerticalDivider(width: 16, thickness: 1),
+              Padding(
+                padding: EdgeInsets.only(bottom: tabs ? 10 : 0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // "프로젝트"는 대화(토픽/방)와 성격이 다른 별도 공간이라, 나머지 아이콘들과
+                    // 구분선으로 한 번 끊어서 왼쪽에 둔다(잔디와 같은 배치).
+                    if (session.canUseProjects)
+                      IconButton(
+                        icon: ListenableBuilder(
+                          listenable: session,
+                          builder: (context, _) => Badge(
+                            isLabelVisible: session.projectUnread > 0,
+                            backgroundColor: Colors.redAccent,
+                            label: Text('${session.projectUnread}'),
+                            child: const Icon(Icons.track_changes),
+                          ),
+                        ),
+                        tooltip: '프로젝트',
+                        // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로
+                        // 열고, 그 외(안드로이드)는 지금처럼 대화상자로 연다.
+                        onPressed: () => Platform.isWindows
+                            ? openProjectWindow(session)
+                            : showProjectDialog(context, session),
+                      ),
+                    const SizedBox(
+                      height: 24,
+                      child: VerticalDivider(width: 16, thickness: 1),
+                    ),
+                    NotificationBellButton(
+                      session: session,
+                      onPressed: onToggleNotifications,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.people_outline),
+                      tooltip: '멤버',
+                      onPressed: onShowMembers,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.search),
+                      tooltip: '검색',
+                      onPressed: onToggleSearch,
+                    ),
+                    AppMenuButton(session: session, onOpenFiles: onOpenFiles),
+                    AccountMenuButton(session: session),
+                  ],
+                ),
+              ),
+            ],
           ),
-          NotificationBellButton(
-            session: session,
-            onPressed: onToggleNotifications,
-          ),
-          IconButton(
-            icon: const Icon(Icons.people_outline),
-            tooltip: '멤버',
-            onPressed: onShowMembers,
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '검색',
-            onPressed: onToggleSearch,
-          ),
-          AppMenuButton(session: session, onOpenFiles: onOpenFiles),
-          AccountMenuButton(session: session),
-        ],
-      ),
+        );
+      },
     );
   }
 }

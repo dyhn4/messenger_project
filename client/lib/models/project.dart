@@ -98,7 +98,37 @@ class TaskStatusDef {
   );
 }
 
-/// 프로젝트별 사용자 정의 필드 정의. [kind]: text | number | date | select.
+/// 프로젝트별 업무 우선순위 — 이름/색은 자유, [level]은 정렬·통계용 세 단계.
+class TaskPriorityDef {
+  final String id;
+  final String projectId;
+  final String name;
+  final String color;
+  final TaskPriority level;
+  final int position;
+
+  const TaskPriorityDef({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    required this.color,
+    required this.level,
+    this.position = 0,
+  });
+
+  factory TaskPriorityDef.fromJson(Map<String, dynamic> json) =>
+      TaskPriorityDef(
+        id: json['id'] as String,
+        projectId: json['projectId'] as String,
+        name: json['name'] as String,
+        color: json['color'] as String? ?? '#94A3B8',
+        level: taskPriorityFromWire(json['level'] as String?),
+        position: (json['position'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 프로젝트별 사용자 정의 필드 정의.
+/// [kind]: text | number | date | select | multiSelect | progress.
 class TaskFieldDef {
   final String id;
   final String projectId;
@@ -127,9 +157,17 @@ class TaskFieldDef {
     position: (json['position'] as num?)?.toInt() ?? 0,
   );
 
+  /// 선택지를 쓰는 종류인지(단일/다중 선택).
+  bool get hasOptions => kind == 'select' || kind == 'multiSelect';
+
   /// 값을 목록/상세에 보여줄 글자로. 비어 있으면 null.
   String? display(dynamic value) {
     if (value == null) return null;
+    if (kind == 'progress' && value is num) return '${value.round()}%';
+    if (kind == 'multiSelect') {
+      final list = value is List ? value : const [];
+      return list.isEmpty ? null : list.join(', ');
+    }
     if (kind == 'date' && value is num) {
       final d = DateTime.fromMillisecondsSinceEpoch(value.toInt());
       return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -268,6 +306,11 @@ class Task {
   final Map<String, dynamic> customValues;
   final TaskPriority priority;
 
+  /// 프로젝트별 우선순위 — 서버가 항상 채워주지만 예전 데이터를 위해 null이면 [priority]로 대신한다.
+  final String? priorityId;
+  final String? priorityName;
+  final String? priorityColor;
+
   /// 업무 유형(프로젝트별) — 없으면 null.
   final String? typeId;
   final String? typeName;
@@ -308,6 +351,9 @@ class Task {
     this.statusColor,
     this.customValues = const {},
     required this.priority,
+    this.priorityId,
+    this.priorityName,
+    this.priorityColor,
     this.typeId,
     this.typeName,
     this.typeColor,
@@ -327,6 +373,9 @@ class Task {
 
   /// 화면에 보이는 상태 이름 — 프로젝트가 정한 이름, 없으면 분류 이름.
   String get statusLabel => statusName ?? taskStatusLabel(status);
+
+  /// 화면에 보이는 우선순위 이름 — 프로젝트가 정한 이름, 없으면 단계 이름.
+  String get priorityLabel => priorityName ?? taskPriorityLabel(priority);
 
   /// 마감일 기준 D-day. 마감일이 없으면 null, 지났으면 양수(D+n).
   int? get daysUntilDue {
@@ -359,6 +408,9 @@ class Task {
     customValues:
         (json['customValues'] as Map?)?.cast<String, dynamic>() ?? const {},
     priority: taskPriorityFromWire(json['priority'] as String?),
+    priorityId: json['priorityId'] as String?,
+    priorityName: json['priorityName'] as String?,
+    priorityColor: json['priorityColor'] as String?,
     typeId: json['typeId'] as String?,
     typeName: json['typeName'] as String?,
     typeColor: json['typeColor'] as String?,
@@ -572,33 +624,72 @@ class ProjectNotification {
       );
 }
 
-/// 내가 이 프로젝트에서 받을 알림 설정 — [muted]면 전부 끔.
-class ProjectNotificationSettings {
-  final bool muted;
+/// 프로젝트 알림 정책 — 담당자·팀 관리자가 정하고 그 프로젝트의 **모든 멤버**에게 적용된다.
+/// 꺼둔 종류는 아무에게도 알림이 가지 않는다.
+class ProjectNotificationPolicy {
+  final bool status;
+  final bool priority;
   final bool assigned;
   final bool referenced;
+  final bool dueDate;
+  final bool taskType;
+  final bool customField;
+  final bool created;
+  final bool deleted;
   final bool comment;
-  final bool status;
   final bool due;
 
-  const ProjectNotificationSettings({
-    this.muted = false,
+  const ProjectNotificationPolicy({
+    this.status = true,
+    this.priority = true,
     this.assigned = true,
     this.referenced = true,
+    this.dueDate = true,
+    this.taskType = true,
+    this.customField = true,
+    this.created = true,
+    this.deleted = true,
     this.comment = true,
-    this.status = true,
     this.due = true,
   });
 
-  factory ProjectNotificationSettings.fromJson(Map<String, dynamic> json) =>
-      ProjectNotificationSettings(
-        muted: json['muted'] as bool? ?? false,
+  factory ProjectNotificationPolicy.fromJson(Map<String, dynamic> json) =>
+      ProjectNotificationPolicy(
+        status: json['status'] as bool? ?? true,
+        priority: json['priority'] as bool? ?? true,
         assigned: json['assigned'] as bool? ?? true,
         referenced: json['referenced'] as bool? ?? true,
+        dueDate: json['dueDate'] as bool? ?? true,
+        taskType: json['taskType'] as bool? ?? true,
+        customField: json['customField'] as bool? ?? true,
+        created: json['created'] as bool? ?? true,
+        deleted: json['deleted'] as bool? ?? true,
         comment: json['comment'] as bool? ?? true,
-        status: json['status'] as bool? ?? true,
         due: json['due'] as bool? ?? true,
       );
+
+  bool valueOf(String key) => switch (key) {
+    'status' => status,
+    'priority' => priority,
+    'assigned' => assigned,
+    'referenced' => referenced,
+    'dueDate' => dueDate,
+    'taskType' => taskType,
+    'customField' => customField,
+    'created' => created,
+    'deleted' => deleted,
+    'comment' => comment,
+    _ => due,
+  };
+}
+
+/// 이 프로젝트 알림에 대한 내 개인 설정 — 지금은 "전부 끄기" 하나뿐이다.
+class ProjectNotificationSettings {
+  final bool muted;
+  const ProjectNotificationSettings({this.muted = false});
+
+  factory ProjectNotificationSettings.fromJson(Map<String, dynamic> json) =>
+      ProjectNotificationSettings(muted: json['muted'] as bool? ?? false);
 }
 
 /// 업무 템플릿 — "새 업무"에서 불러와 항목을 미리 채운다.

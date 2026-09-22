@@ -28,6 +28,11 @@ String formatMd(DateTime d) => '${d.month}.${d.day}';
   return start.isAfter(end) ? (end, start) : (start, end);
 }
 
+/// 업무의 우선순위 색 — 프로젝트가 정한 색, 없으면 단계 기본색.
+Color taskPriorityDisplayColor(Task t) => t.priorityColor != null
+    ? parseTypeColor(t.priorityColor)
+    : taskPriorityColor(t.priority);
+
 /// 업무의 상태 색 — 프로젝트가 정한 색, 없으면 분류 기본색.
 Color taskStatusDisplayColor(Task t) => t.statusColor != null
     ? parseTypeColor(t.statusColor)
@@ -541,10 +546,7 @@ class _TaskTableRow extends StatelessWidget {
               _TaskTable._typeW,
             ),
             cell(
-              TaskPill(
-                taskPriorityLabel(task.priority),
-                taskPriorityColor(task.priority),
-              ),
+              TaskPill(task.priorityLabel, taskPriorityDisplayColor(task)),
               _TaskTable._priorityW,
             ),
             cell(

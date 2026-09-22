@@ -11,6 +11,7 @@ import {
   taskComments,
   taskTemplates,
   taskFields,
+  taskPriorities,
   taskReferences,
   tasks,
   taskStatuses,
@@ -700,4 +701,90 @@ export function listAutomationRuns(projectId, limit = 100) {
     .where(eq(automationRuns.projectId, projectId))
     .orderBy(desc(automationRuns.createdAt))
     .limit(limit);
+}
+
+// ── 업무 우선순위 ───────────────────────────────────────────────────────
+
+/** 위에서부터 높은 순위다(position 순서 = 앱에서 보여주는 순서). level(low/normal/high)은
+ * 통계·정렬용 큰 묶음이라 여러 우선순위가 같은 단계를 가질 수 있다 — '긴급'과 '높음'이 둘 다
+ * high, '대기'와 '없음'이 '낮음'과 같은 low인 식이다. 기존 프로젝트에도 같은 값이 들어가도록
+ * drizzle/0051_task_priority_presets.sql이 한 번 채워준다. */
+const DEFAULT_TASK_PRIORITIES = [
+  { name: '긴급', color: '#DC2626', level: 'high' },
+  { name: '높음', color: '#EF4444', level: 'high' },
+  { name: '보통', color: '#5B8DEF', level: 'normal' },
+  { name: '낮음', color: '#94A3B8', level: 'low' },
+  { name: '대기', color: '#A78BFA', level: 'low' },
+  { name: '없음', color: '#CBD5E1', level: 'low' },
+];
+
+export async function seedDefaultTaskPriorities(projectId) {
+  await db
+    .insert(taskPriorities)
+    .values(DEFAULT_TASK_PRIORITIES.map((p, i) => ({ projectId, ...p, position: i })))
+    .onConflictDoNothing();
+}
+
+export function listTaskPriorities(projectId) {
+  return db
+    .select()
+    .from(taskPriorities)
+    .where(eq(taskPriorities.projectId, projectId))
+    .orderBy(asc(taskPriorities.position), asc(taskPriorities.createdAt));
+}
+
+export function listTaskPrioritiesByIds(ids) {
+  if (ids.length === 0) return Promise.resolve([]);
+  return db.select().from(taskPriorities).where(inArray(taskPriorities.id, ids));
+}
+
+export function findTaskPriorityById(id) {
+  return db
+    .select()
+    .from(taskPriorities)
+    .where(eq(taskPriorities.id, id))
+    .then((rows) => rows[0] ?? null);
+}
+
+/** 단계(low/normal/high)에 속한 첫 우선순위 — 단계만 알려주는 예전 방식 요청을 옮길 때 쓴다. */
+export function findFirstPriorityOfLevel(projectId, level) {
+  return db
+    .select()
+    .from(taskPriorities)
+    .where(and(eq(taskPriorities.projectId, projectId), eq(taskPriorities.level, level)))
+    .orderBy(asc(taskPriorities.position), asc(taskPriorities.createdAt))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+}
+
+export async function insertTaskPriority(fields) {
+  const [{ next }] = await db
+    .select({ next: sql`coalesce(max(${taskPriorities.position}), -1) + 1` })
+    .from(taskPriorities)
+    .where(eq(taskPriorities.projectId, fields.projectId));
+  const [row] = await db
+    .insert(taskPriorities)
+    .values({ ...fields, position: Number(next) })
+    .returning();
+  return row;
+}
+
+export async function updateTaskPriority(id, fields) {
+  const [row] = await db.update(taskPriorities).set(fields).where(eq(taskPriorities.id, id)).returning();
+  return row ?? null;
+}
+
+/** 우선순위를 지운다 — 그 우선순위이던 업무는 [replacementId]로 옮긴다(같은 단계여야 한다). */
+export async function deleteTaskPriority(id, replacementId) {
+  await db.update(tasks).set({ priorityId: replacementId }).where(eq(tasks.priorityId, id));
+  await db.delete(taskPriorities).where(eq(taskPriorities.id, id));
+}
+
+export async function reorderTaskPriorities(projectId, ids) {
+  for (let i = 0; i < ids.length; i += 1) {
+    await db
+      .update(taskPriorities)
+      .set({ position: i })
+      .where(and(eq(taskPriorities.projectId, projectId), eq(taskPriorities.id, ids[i])));
+  }
 }

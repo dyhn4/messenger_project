@@ -123,7 +123,7 @@ export function createSecretChatsRouter(io) {
     // 상대만 나가기) 전부 같은 이유로 안전하다.
     await postSystemMessage(io, room, '비밀대화 요청을 보냈습니다. 상대방이 수락할 때까지 대기 중');
     const initiator = await findUserById(req.user.sub);
-    notifySecretChatInvite({ targetUserId, initiator, roomId: room.id }).catch((err) =>
+    notifySecretChatInvite({ targetUserId, initiator, roomId: room.id, teamId: room.teamId }).catch((err) =>
       console.error('[push] 비밀대화 요청 알림 실패:', err?.message ?? err),
     );
     res.status(201).json(await toRoomDto(room, req.user.sub));

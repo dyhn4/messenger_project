@@ -164,9 +164,11 @@ void main() {
     }
 
     await openTab('대시보드');
-    expect(find.text('상태별 업무'), findsOneWidget);
-    expect(find.text('담당자별 업무'), findsOneWidget);
-    expect(find.text('진행률'), findsOneWidget);
+    expect(find.text('전체 업무'), findsOneWidget);
+    expect(find.text('지연'), findsNWidgets(2)); // 숫자 카드 + 완료율 범례
+    expect(find.text('멤버별 업무현황'), findsOneWidget);
+    // 카드 제목 + 도넛 가운데 글자 두 곳.
+    expect(find.text('전체 완료율'), findsNWidgets(2));
 
     await openTab('간트차트');
     expect(find.text('업무'), findsWidgets);

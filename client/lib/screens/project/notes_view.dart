@@ -61,6 +61,16 @@ class _NotesViewState extends State<NotesView> {
   @override
   void didUpdateWidget(NotesView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.projectId != widget.projectId) {
+      // 다른 프로젝트의 노트 화면이 되었으니 고르고 있던 노트를 놓는다.
+      _selectedId = null;
+      _detail = null;
+      _comments = const [];
+      _editing = false;
+      _createProjectId = null;
+      _loadList();
+      return;
+    }
     if (oldWidget.reloadTick != widget.reloadTick) {
       _loadList();
       // 다른 사람이 지금 보고 있는 노트를 고쳤을 수 있다 — 내가 편집 중이 아닐 때만 새로 읽는다.

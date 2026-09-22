@@ -187,6 +187,9 @@ class ChatInputBarState extends State<ChatInputBar> {
     } finally {
       if (mounted) setState(() => _capturing = false);
     }
+    if (outcome?.error != null && mounted) {
+      showAppToast(context, '화면을 캡처하지 못했습니다: ${outcome!.error}');
+    }
     final file = outcome?.file;
     if (outcome == null || file == null || !mounted) return;
     switch (outcome.action) {

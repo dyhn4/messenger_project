@@ -73,14 +73,28 @@ class _TeamTasksViewState extends State<TeamTasksView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 4),
-          child: Text(
-            widget.gantt
-                ? '참여 중인 모든 프로젝트의 업무 일정을 타임라인으로 봅니다.'
-                : '참여 중인 모든 프로젝트의 업무 일정을 날짜별로 봅니다.',
-            style: TextStyle(color: hint),
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // "내 업무" 화면과 같은 크기의 제목.
+              Text(
+                widget.gantt ? '간트차트' : '캘린더',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.gantt
+                    ? '참여 중인 모든 프로젝트의 업무 일정을 타임라인으로 봅니다.'
+                    : '참여 중인 모든 프로젝트의 업무 일정을 날짜별로 봅니다.',
+                style: TextStyle(color: hint),
+              ),
+            ],
           ),
         ),
+        const SizedBox(height: 12),
         const Divider(height: 1),
         Expanded(
           child: widget.gantt

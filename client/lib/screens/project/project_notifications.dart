@@ -5,9 +5,7 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
-import 'project_widgets.dart' show EmptyHint;
 
 IconData projectNotificationIcon(String kind) => switch (kind) {
   'assigned' => Icons.assignment_ind_outlined,
@@ -15,54 +13,50 @@ IconData projectNotificationIcon(String kind) => switch (kind) {
   'comment' => Icons.mode_comment_outlined,
   'status' => Icons.swap_horiz,
   'due' => Icons.alarm,
+  'created' => Icons.add_task,
+  'deleted' => Icons.delete_outline,
   _ => Icons.notifications_none,
 };
 
-/// 프로젝트 알림함 — 업무 배정/참조/댓글/상태 변경/마감 임박 알림을 최근 순으로 보여준다.
-/// 알림을 누르면 읽음 처리하고 [onOpen]으로 그 프로젝트/업무로 이동한다.
-class ProjectNotificationsView extends StatefulWidget {
+/// 상단 알림 종 — 안 읽은 개수를 배지로 보여주고, 누르면 아래로 알림 목록이 펼쳐진다.
+/// 항목을 누르면 읽음 처리한 뒤 [onOpen]으로 넘겨서 그 프로젝트/업무로 이동한다.
+class ProjectNotificationsBell extends StatefulWidget {
   final Session session;
-  final int reloadTick;
   final void Function(ProjectNotification n) onOpen;
 
-  const ProjectNotificationsView({
+  const ProjectNotificationsBell({
     super.key,
     required this.session,
-    required this.reloadTick,
     required this.onOpen,
   });
 
   @override
-  State<ProjectNotificationsView> createState() =>
-      _ProjectNotificationsViewState();
+  State<ProjectNotificationsBell> createState() =>
+      _ProjectNotificationsBellState();
 }
 
-class _ProjectNotificationsViewState extends State<ProjectNotificationsView> {
+class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
+  final _menu = MenuController();
+  // 메뉴 패널 자체도 스크롤 뷰라, 목록이 기본(Primary) 컨트롤러를 같이 쓰면
+  // "한 컨트롤러에 스크롤 위치가 여럿"이라는 오류가 난다 — 목록은 자기 컨트롤러를 쓴다.
+  final _listScroll = ScrollController();
   List<ProjectNotification>? _items;
   String? _error;
   StreamSubscription<Map<String, dynamic>>? _sub;
-  final _scroll = ScrollController();
 
+  /// 펼쳐 둔 동안 새 알림이 오면 목록도 따라 갱신한다.
   @override
   void initState() {
     super.initState();
-    _load();
-    // 이 화면을 보고 있는 동안 새 알림이 오면 바로 목록에 끼워 넣는다.
-    _sub = widget.session.chatSocket.projectNotifications.listen(
-      (_) => _load(),
-    );
-  }
-
-  @override
-  void didUpdateWidget(ProjectNotificationsView oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.reloadTick != widget.reloadTick) _load();
+    _sub = widget.session.chatSocket.projectNotifications.listen((_) {
+      if (_menu.isOpen) _load();
+    });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
-    _scroll.dispose();
+    _listScroll.dispose();
     super.dispose();
   }
 
@@ -81,10 +75,11 @@ class _ProjectNotificationsViewState extends State<ProjectNotificationsView> {
   }
 
   Future<void> _open(ProjectNotification n) async {
+    _menu.close();
     if (!n.read) {
       try {
         await widget.session.api!.markProjectNotificationsRead(ids: [n.id]);
-        await _load();
+        await widget.session.refreshProjectUnread();
       } catch (_) {
         // 읽음 표시가 실패해도 이동은 한다.
       }
@@ -96,109 +91,167 @@ class _ProjectNotificationsViewState extends State<ProjectNotificationsView> {
     try {
       await widget.session.api!.markProjectNotificationsRead();
       await _load();
+      await widget.session.refreshProjectUnread();
     } catch (e) {
       if (mounted) showAppToast(context, '읽음 처리하지 못했습니다: $e');
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_error != null) return Center(child: Text(_error!));
-    final items = _items;
-    if (items == null) return const Center(child: CircularProgressIndicator());
+  Widget _tile(BuildContext context, ProjectNotification n) {
     final hint = Theme.of(context).hintColor;
-    final hasUnread = items.any((n) => !n.read);
+    return ListTile(
+      dense: true,
+      leading: CircleAvatar(
+        radius: 16,
+        backgroundColor: parseTypeColor(n.projectColor).withValues(alpha: 0.18),
+        child: Icon(
+          projectNotificationIcon(n.kind),
+          size: 16,
+          color: parseTypeColor(n.projectColor),
+        ),
+      ),
+      title: Text(
+        n.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: n.read ? FontWeight.normal : FontWeight.bold,
+        ),
+      ),
+      subtitle: Text(
+        n.body,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12, color: n.read ? hint : null),
+      ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(_ago(n.createdAt), style: TextStyle(color: hint, fontSize: 11)),
+          if (!n.read)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.redAccent,
+                shape: BoxShape.circle,
+              ),
+            ),
+        ],
+      ),
+      onTap: () => _open(n),
+    );
+  }
+
+  Widget _panel(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final items = _items;
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 10),
           child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  '알림',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+              const Text(
+                '알림',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
               ),
-              TextButton.icon(
-                onPressed: hasUnread ? _readAll : null,
-                icon: const Icon(Icons.done_all, size: 18),
-                label: const Text('모두 읽음'),
-              ),
+              const Spacer(),
+              if (items != null && items.any((n) => !n.read))
+                TextButton(onPressed: _readAll, child: const Text('모두 읽음')),
             ],
           ),
         ),
         const Divider(height: 1),
-        Expanded(
-          child: items.isEmpty
-              ? const EmptyHint('받은 프로젝트 알림이 없습니다.')
-              : MutedScrollbar(
-                  controller: _scroll,
-                  child: ListView.separated(
-                    controller: _scroll,
-                    padding: const EdgeInsets.only(right: 10),
-                    itemCount: items.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, i) {
-                      final n = items[i];
-                      return ListTile(
-                        leading: CircleAvatar(
-                          radius: 18,
-                          backgroundColor: parseTypeColor(
-                            n.projectColor,
-                          ).withValues(alpha: 0.18),
-                          child: Icon(
-                            projectNotificationIcon(n.kind),
-                            size: 18,
-                            color: parseTypeColor(n.projectColor),
-                          ),
-                        ),
-                        title: Text(
-                          n.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: n.read
-                                ? FontWeight.normal
-                                : FontWeight.bold,
-                          ),
-                        ),
-                        subtitle: Text(
-                          n.body,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: n.read ? hint : null),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              _ago(n.createdAt),
-                              style: TextStyle(color: hint, fontSize: 11),
-                            ),
-                            if (!n.read)
-                              Container(
-                                margin: const EdgeInsets.only(top: 6),
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Colors.redAccent,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                          ],
-                        ),
-                        onTap: () => _open(n),
-                      );
-                    },
-                  ),
-                ),
-        ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            child: Center(child: Text(_error!)),
+          )
+        else if (items == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 28),
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          )
+        else if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 28),
+            child: Center(
+              child: Text('알림이 없습니다', style: TextStyle(color: hint)),
+            ),
+          )
+        else
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 420),
+            // 메뉴 패널은 내용의 고유 너비를 재는데 ListView는 그걸 지원하지 않아서
+            // (RenderShrinkWrappingViewport), 스크롤은 되지만 크기를 잴 수 있는 쪽을 쓴다.
+            child: SingleChildScrollView(
+              controller: _listScroll,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < items.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    _tile(context, items[i]),
+                  ],
+                ],
+              ),
+            ),
+          ),
       ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      controller: _menu,
+      // 종 버튼(48) 아래에 패널(400)의 오른쪽 끝을 맞춘다.
+      alignmentOffset: const Offset(-352, 6),
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        backgroundColor: WidgetStatePropertyAll(
+          Theme.of(context).colorScheme.surface,
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+        ),
+      ),
+      menuChildren: [SizedBox(width: 400, child: _panel(context))],
+      builder: (context, controller, _) => ListenableBuilder(
+        listenable: widget.session,
+        builder: (context, _) => IconButton(
+          tooltip: '알림',
+          icon: Badge(
+            isLabelVisible: widget.session.projectUnread > 0,
+            backgroundColor: Colors.redAccent,
+            label: Text('${widget.session.projectUnread}'),
+            child: const Icon(Icons.notifications_none),
+          ),
+          onPressed: () {
+            if (controller.isOpen) {
+              controller.close();
+            } else {
+              _load();
+              controller.open();
+            }
+          },
+        ),
+      ),
     );
   }
 }
@@ -212,143 +265,181 @@ String _ago(DateTime t) {
   return '${t.month}/${t.day}';
 }
 
-/// 이 프로젝트에서 내가 받을 알림을 고른다 — 나만의 설정이라 구성원이면 누구나 열 수 있다.
-Future<void> showProjectNotificationSettingsDialog(
-  BuildContext context,
-  Session session,
-  Project project,
-) {
-  return showDialog<void>(
-    context: context,
-    builder: (_) => _NotificationSettingsDialog(
-      session: session,
-      projectId: project.id,
-      projectName: project.name,
-    ),
-  );
-}
-
-class _NotificationSettingsDialog extends StatefulWidget {
+/// "프로젝트 메뉴 > 알림" — 여기서 정한 정책은 이 프로젝트의 **모든 멤버**에게 적용된다.
+/// 정책은 프로젝트 담당자와 팀 소유자·관리자만 바꿀 수 있고(서버도 다시 확인한다), 그 아래
+/// "내 설정"은 각자 자기 알림만 끄는 값이다.
+class ProjectNotificationSettingsEditor extends StatefulWidget {
   final Session session;
   final String projectId;
-  final String projectName;
-  const _NotificationSettingsDialog({
+
+  /// 정책을 바꿀 수 있는 사람인지 — 아니면 읽기만 된다.
+  final bool canManage;
+
+  const ProjectNotificationSettingsEditor({
+    super.key,
     required this.session,
     required this.projectId,
-    required this.projectName,
+    this.canManage = false,
   });
 
   @override
-  State<_NotificationSettingsDialog> createState() =>
-      _NotificationSettingsDialogState();
+  State<ProjectNotificationSettingsEditor> createState() =>
+      _ProjectNotificationSettingsEditorState();
 }
 
-class _NotificationSettingsDialogState
-    extends State<_NotificationSettingsDialog> {
-  ProjectNotificationSettings? _settings;
+class _ProjectNotificationSettingsEditorState
+    extends State<ProjectNotificationSettingsEditor> {
+  ProjectNotificationPolicy? _policy;
+  ProjectNotificationSettings? _mine;
   String? _error;
+  final _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    widget.session.api!
-        .fetchProjectNotificationSettings(widget.projectId)
-        .then((s) {
-          if (mounted) setState(() => _settings = s);
-        })
-        .catchError((Object e) {
-          if (mounted) setState(() => _error = e.toString());
-        });
+    _load();
   }
 
-  Future<void> _update({
-    bool? muted,
-    bool? assigned,
-    bool? referenced,
-    bool? comment,
-    bool? status,
-    bool? due,
-  }) async {
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
     try {
-      final s = await widget.session.api!.updateProjectNotificationSettings(
+      final api = widget.session.api!;
+      final policy = await api.fetchProjectNotificationPolicy(widget.projectId);
+      final mine = await api.fetchProjectNotificationSettings(widget.projectId);
+      if (mounted) {
+        setState(() {
+          _policy = policy;
+          _mine = mine;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _setPolicy(String key, bool value) async {
+    try {
+      final p = await widget.session.api!.setProjectNotificationPolicy(
         widget.projectId,
-        muted: muted,
-        assigned: assigned,
-        referenced: referenced,
-        comment: comment,
-        status: status,
-        due: due,
+        key,
+        value,
       );
-      if (mounted) setState(() => _settings = s);
+      if (mounted) setState(() => _policy = p);
     } catch (e) {
       if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
     }
   }
 
+  Future<void> _setMuted(bool value) async {
+    try {
+      final m = await widget.session.api!.setProjectNotificationMuted(
+        widget.projectId,
+        value,
+      );
+      if (mounted) setState(() => _mine = m);
+    } catch (e) {
+      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+    }
+  }
+
+  Widget _card(
+    BuildContext context,
+    String title,
+    String desc,
+    List<Widget> rows,
+  ) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text(desc, style: TextStyle(color: theme.hintColor, fontSize: 12)),
+          const SizedBox(height: 6),
+          ...rows,
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String key, String title, {String? sub}) => SwitchListTile(
+    contentPadding: EdgeInsets.zero,
+    dense: true,
+    title: Text(title),
+    subtitle: sub == null
+        ? null
+        : Text(sub, style: const TextStyle(fontSize: 12)),
+    value: _policy!.valueOf(key),
+    onChanged: widget.canManage ? (v) => _setPolicy(key, v) : null,
+  );
+
   @override
   Widget build(BuildContext context) {
-    final s = _settings;
-    Widget row(String title, String sub, bool value, ValueChanged<bool> on) =>
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(title),
-          subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
-          value: value,
-          onChanged: s?.muted == true ? null : on,
-        );
-    return FloatingDialog(
-      title: '알림 설정 · ${widget.projectName}',
-      maxWidth: 460,
-      maxHeight: 560,
-      child: _error != null
-          ? Center(child: Text(_error!))
-          : s == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('이 프로젝트 알림 끄기'),
-                  subtitle: const Text(
-                    '켜면 아래 알림을 모두 받지 않습니다.',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  value: s.muted,
-                  onChanged: (v) => _update(muted: v),
-                ),
-                const Divider(),
-                row(
-                  '내게 업무 배정',
-                  '누군가 나를 담당자로 지정했을 때',
-                  s.assigned,
-                  (v) => _update(assigned: v),
-                ),
-                row(
-                  '참조자로 지정',
-                  '누군가 나를 참조자로 추가했을 때',
-                  s.referenced,
-                  (v) => _update(referenced: v),
-                ),
-                row(
-                  '댓글',
-                  '내가 담당·생성·참조한 업무에 댓글이 달렸을 때',
-                  s.comment,
-                  (v) => _update(comment: v),
-                ),
-                row(
-                  '상태 변경',
-                  '내가 담당하거나 만든 업무의 상태가 바뀌었을 때',
-                  s.status,
-                  (v) => _update(status: v),
-                ),
-                row(
-                  '마감 임박',
-                  '내가 담당한 업무의 마감이 하루 앞으로 다가왔을 때',
-                  s.due,
-                  (v) => _update(due: v),
-                ),
-              ],
+    final theme = Theme.of(context);
+    if (_error != null) return Center(child: Text(_error!));
+    if (_policy == null || _mine == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return MutedScrollbar(
+      controller: _scroll,
+      child: ListView(
+        controller: _scroll,
+        padding: const EdgeInsets.only(right: 12),
+        children: [
+          Text(
+            widget.canManage
+                ? '여기서 설정한 알림 정책은 이 프로젝트의 모든 멤버에게 적용됩니다.'
+                : '이 프로젝트의 알림 정책입니다. 바꾸려면 프로젝트 담당자나 팀 관리자여야 합니다.',
+            style: TextStyle(color: theme.hintColor, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          _card(context, '업무 변경 알림', '업무 항목이 바뀌면 담당자·참조자에게 알림을 보냅니다.', [
+            _row('status', '상태 변경'),
+            _row('priority', '우선순위 변경'),
+            _row('assigned', '담당자 변경'),
+            _row('referenced', '참조자 지정'),
+            _row('dueDate', '마감일 변경'),
+            _row('taskType', '유형 변경'),
+            _row('customField', '사용자 정의 필드 변경'),
+          ]),
+          _card(context, '업무 생성/삭제 알림', '업무가 생성되거나 삭제될 때 알림을 보냅니다.', [
+            _row('created', '업무 생성', sub: '새 업무가 만들어지면 프로젝트 담당자에게 알림'),
+            _row('deleted', '업무 삭제', sub: '업무가 삭제되면 프로젝트 담당자와 그 업무의 담당자에게 알림'),
+          ]),
+          _card(context, '댓글 알림', '댓글 관련 알림입니다.', [
+            _row('comment', '댓글 작성', sub: '댓글이 작성되면 업무 담당자·생성자·참조자에게 알림'),
+          ]),
+          _card(context, '마감 알림', '마감이 다가오면 알림을 보냅니다.', [
+            _row('due', '마감 임박', sub: '담당한 업무의 마감 하루 전에 알림'),
+          ]),
+          _card(context, '내 설정', '나에게만 적용됩니다(정책과 별개).', [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('이 프로젝트 알림 끄기'),
+              subtitle: const Text(
+                '켜면 위 정책과 상관없이 내게는 알림이 오지 않습니다.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: _mine!.muted,
+              onChanged: _setMuted,
             ),
+          ]),
+        ],
+      ),
     );
   }
 }

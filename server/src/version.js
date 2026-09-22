@@ -80,6 +80,18 @@ export function watchForVersionChanges(io) {
   let lastVersion = readVersionInfo()?.version ?? null;
   let timer = null;
 
+  // 붙는 즉시 지금 배포돼 있는 버전을 그 소켓에만 알려준다. 아래 emit은 "바뀌는 그 순간"
+  // 붙어 있던 앱에만 가기 때문에, 배포 시점에 PC가 절전이었거나 네트워크가 끊겨 있었거나,
+  // 배포 뒤 서버가 재시작돼서(그러면 lastVersion이 새 버전으로 시작해 다시는 안 알린다)
+  // 놓친 앱은 재시작 전까지 영영 모른다. 연결/재연결 때마다 현재 값을 다시 알려주면 그런
+  // 경우가 저절로 복구된다 — 앱은 자기 버전보다 높을 때만 알약을 띄우므로 그냥 보내도 된다.
+  ns.on('connection', (socket) => {
+    const info = readVersionInfo();
+    if (info?.version) {
+      socket.emit('update:available', { version: info.version, notes: info.notes ?? null });
+    }
+  });
+
   fs.watch(releasesDir, (eventType, filename) => {
     if (filename && filename !== 'version.json') return;
     clearTimeout(timer);

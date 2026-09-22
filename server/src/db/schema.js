@@ -634,6 +634,28 @@ export const taskStatuses = pgTable(
   (t) => [uniqueIndex('task_statuses_project_name_idx').on(t.projectId, t.name)],
 );
 
+/**
+ * 프로젝트별 업무 우선순위 — 이름/색은 자유지만 반드시 세 단계(level) 중 하나에 속한다.
+ * 정렬·대시보드 통계·자동화 조건은 tasks.priority(=level)만 보므로, 우선순위를 마음대로
+ * 추가해도 기존 로직이 깨지지 않는다(task_statuses와 같은 방식).
+ */
+export const taskPriorities = pgTable(
+  'task_priorities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    color: text('color').notNull().default('#94A3B8'),
+    // 'low' | 'normal' | 'high'
+    level: text('level').notNull().default('normal'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('task_priorities_project_name_idx').on(t.projectId, t.name)],
+);
+
 /** 프로젝트별 사용자 정의 필드 정의 — 값은 tasks.custom_values(jsonb)에 {필드id: 값}으로 저장한다. */
 export const taskFields = pgTable(
   'task_fields',
@@ -674,6 +696,8 @@ export const tasks = pgTable(
     typeId: uuid('type_id').references(() => taskTypes.id, { onDelete: 'set null' }),
     // 프로젝트별 상태(task_statuses) — status(분류)는 항상 이 상태의 category와 같게 유지한다.
     statusId: uuid('status_id').references(() => taskStatuses.id, { onDelete: 'set null' }),
+    // 프로젝트별 우선순위(task_priorities) — priority(단계)는 항상 이 우선순위의 level과 같다.
+    priorityId: uuid('priority_id').references(() => taskPriorities.id, { onDelete: 'set null' }),
     // 사용자 정의 필드 값 {fieldId: 값}.
     customValues: jsonb('custom_values').notNull().default({}),
     startDate: timestamp('start_date', { withTimezone: true }),
@@ -748,7 +772,33 @@ export const projectNotifications = pgTable(
   (t) => [index('project_notifications_user_idx').on(t.userId, t.createdAt)],
 );
 
-/** 사람 × 프로젝트별 알림 설정 — 행이 없으면 전부 켜짐(기본값). */
+/**
+ * 프로젝트 알림 정책 — 프로젝트 담당자·팀 관리자가 정하고 **그 프로젝트의 모든 멤버에게**
+ * 적용된다. 여기서 끈 종류는 아무에게도 알림이 가지 않는다(행이 없으면 전부 켜짐).
+ * 개인이 더 조용히 받고 싶으면 projectNotificationSettings.muted로 자기 것만 끈다.
+ */
+export const projectNotificationPolicies = pgTable('project_notification_policies', {
+  projectId: uuid('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  // 업무 변경 — 담당자/참조자에게
+  onStatus: boolean('on_status').notNull().default(true),
+  onPriority: boolean('on_priority').notNull().default(true),
+  onAssigned: boolean('on_assigned').notNull().default(true),
+  onReferenced: boolean('on_referenced').notNull().default(true),
+  onDueDate: boolean('on_due_date').notNull().default(true),
+  onTaskType: boolean('on_task_type').notNull().default(true),
+  onCustomField: boolean('on_custom_field').notNull().default(true),
+  // 업무 생성·삭제 — 프로젝트 담당자(와 삭제된 업무의 담당자)에게
+  onCreated: boolean('on_created').notNull().default(true),
+  onDeleted: boolean('on_deleted').notNull().default(true),
+  // 댓글 — 담당자/생성자/참조자에게
+  onComment: boolean('on_comment').notNull().default(true),
+  // 마감 임박 — 담당자에게
+  onDue: boolean('on_due').notNull().default(true),
+});
+
+/** 사람 × 프로젝트별 개인 설정 — 지금은 "이 프로젝트 알림 끄기" 하나뿐이다. */
 export const projectNotificationSettings = pgTable(
   'project_notification_settings',
   {
@@ -758,13 +808,8 @@ export const projectNotificationSettings = pgTable(
     projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
-    // true면 이 프로젝트의 알림을 전부 끈다(아래 종류별 값은 무시).
+    // true면 이 프로젝트의 알림을 나만 전부 받지 않는다(정책과 별개).
     muted: boolean('muted').notNull().default(false),
-    onAssigned: boolean('on_assigned').notNull().default(true),
-    onReferenced: boolean('on_referenced').notNull().default(true),
-    onComment: boolean('on_comment').notNull().default(true),
-    onStatus: boolean('on_status').notNull().default(true),
-    onDue: boolean('on_due').notNull().default(true),
   },
   (t) => [primaryKey({ columns: [t.userId, t.projectId] })],
 );

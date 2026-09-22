@@ -56,7 +56,16 @@ import {
   updateNote,
   deleteTaskField,
   deleteTaskStatus,
+  deleteTaskPriority,
+  findFirstPriorityOfLevel,
   findFirstStatusOfCategory,
+  findTaskPriorityById,
+  insertTaskPriority,
+  listTaskPriorities,
+  listTaskPrioritiesByIds,
+  reorderTaskPriorities,
+  seedDefaultTaskPriorities,
+  updateTaskPriority,
   findTaskFieldById,
   findTaskStatusById,
   insertTaskField,
@@ -78,9 +87,11 @@ import {
 } from './db/queries/projects.js';
 import {
   countUnreadProjectNotifications,
+  getNotificationPolicy,
   getNotificationSettings,
   listProjectNotifications,
   markProjectNotificationsRead,
+  upsertNotificationPolicy,
   upsertNotificationSettings,
 } from './db/queries/projectNotifications.js';
 import { createProjectNotifier } from './projectNotify.js';
@@ -119,6 +130,10 @@ function toProjectDto(project, { total = 0, done = 0 } = {}) {
   };
 }
 
+function toTaskPriorityDto(p) {
+  return { id: p.id, projectId: p.projectId, name: p.name, color: p.color, level: p.level, position: p.position };
+}
+
 function toTaskStatusDto(s) {
   return { id: s.id, projectId: s.projectId, name: s.name, color: s.color, category: s.category, position: s.position };
 }
@@ -134,7 +149,9 @@ function toTaskFieldDto(f) {
   };
 }
 
-const FIELD_KINDS = ['text', 'number', 'date', 'select'];
+const FIELD_KINDS = ['text', 'number', 'date', 'select', 'multiSelect', 'progress'];
+/** 선택지(options)가 필요한 필드 종류. */
+const OPTION_FIELD_KINDS = ['select', 'multiSelect'];
 
 const NOTE_TITLE_MAX = 100;
 const NOTE_BODY_MAX = 50000;
@@ -175,14 +192,17 @@ function toTaskTypeDto(type) {
 async function decorateTasks(tasks, myUserId = null) {
   const typeIds = [...new Set(tasks.map((t) => t.typeId).filter(Boolean))];
   const statusIds = [...new Set(tasks.map((t) => t.statusId).filter(Boolean))];
-  const [types, statuses, refs, creators] = await Promise.all([
+  const priorityIds = [...new Set(tasks.map((t) => t.priorityId).filter(Boolean))];
+  const [types, statuses, priorities, refs, creators] = await Promise.all([
     listTaskTypesByIds(typeIds),
     listTaskStatusesByIds(statusIds),
+    listTaskPrioritiesByIds(priorityIds),
     listReferencesForTasks(tasks.map((t) => t.id)),
     listUsersByIds([...new Set(tasks.map((t) => t.createdBy).filter(Boolean))]),
   ]);
   const typeById = new Map(types.map((t) => [t.id, t]));
   const statusById = new Map(statuses.map((s) => [s.id, s]));
+  const priorityById = new Map(priorities.map((p) => [p.id, p]));
   const creatorById = new Map(creators.map((u) => [u.id, publicUser(u)]));
   return tasks.map((t) => {
     const type = t.typeId ? typeById.get(t.typeId) : null;
@@ -194,7 +214,8 @@ async function decorateTasks(tasks, myUserId = null) {
       else if (referenceIds.includes(myUserId)) myRole = 'reference';
     }
     const statusRow = t.statusId ? statusById.get(t.statusId) : null;
-    return { ...t, type, statusRow, creator, referenceIds, myRole };
+    const priorityRow = t.priorityId ? priorityById.get(t.priorityId) : null;
+    return { ...t, type, statusRow, priorityRow, creator, referenceIds, myRole };
   });
 }
 
@@ -204,6 +225,9 @@ function toTaskDto(task, { identifier, projectName } = {}) {
     statusId: task.statusId ?? null,
     statusName: task.statusRow?.name ?? null,
     statusColor: task.statusRow?.color ?? null,
+    priorityId: task.priorityId ?? null,
+    priorityName: task.priorityRow?.name ?? null,
+    priorityColor: task.priorityRow?.color ?? null,
     customValues: task.customValues ?? {},
     typeId: task.typeId ?? null,
     typeName: task.type?.name ?? null,
@@ -277,7 +301,7 @@ export function createProjectsRouter(io) {
   }
 
   // 프로젝트는 정회원 이상만 쓴다(준회원은 목록·조회·수정 모두 불가). 서버 운영자는 예외.
-  router.use(['/projects', '/tasks', '/task-types', '/task-statuses', '/task-fields', '/notes', '/project-notifications', '/task-templates', '/automations', '/note-comments', '/note-versions'], async (req, res, next) => {
+  router.use(['/projects', '/tasks', '/task-types', '/task-statuses', '/task-priorities', '/task-fields', '/notes', '/project-notifications', '/task-templates', '/automations', '/note-comments', '/note-versions'], async (req, res, next) => {
     try {
       const user = await findUserById(req.user.sub);
       if (accountRole(user) === 'guest' && !user?.isServerAdmin) {
@@ -440,6 +464,7 @@ export function createProjectsRouter(io) {
     });
     await seedDefaultTaskTypes(project.id);
     await seedDefaultTaskStatuses(project.id);
+    await seedDefaultTaskPriorities(project.id);
     await addProjectMembers(project.id, [req.user.sub], 'owner');
     await addProjectMembers(
       project.id,
@@ -629,6 +654,23 @@ export function createProjectsRouter(io) {
     return {};
   }
 
+  /**
+   * 요청 본문의 우선순위를 (단계, 우선순위 id)로 푼다 — resolveStatus와 같은 방식.
+   * priorityId가 오면 그 우선순위(이 프로젝트 것이어야 함), 예전 방식의 priority(단계)만 오면 단계만.
+   */
+  async function resolvePriority(project, body) {
+    if (typeof body?.priorityId === 'string') {
+      const p = await findTaskPriorityById(body.priorityId);
+      if (!p || p.projectId !== project.id) return { error: '이 프로젝트의 우선순위가 아닙니다.' };
+      return { priority: p.level, priorityId: p.id };
+    }
+    if (body?.priority !== undefined) {
+      if (!TASK_PRIORITIES.includes(body.priority)) return { error: '우선순위 값이 올바르지 않습니다.' };
+      return { priority: body.priority };
+    }
+    return {};
+  }
+
   /** 사용자 정의 필드 값 검증 + 기존 값과 합치기(null이면 그 값을 지운다). */
   async function validCustomValues(project, input, existing) {
     if (input === undefined || input === null) return { values: existing };
@@ -638,7 +680,8 @@ export function createProjectsRouter(io) {
     for (const [fieldId, value] of Object.entries(input)) {
       const def = defs.get(fieldId);
       if (!def) return { error: '이 프로젝트의 필드가 아닙니다.' };
-      if (value === null || value === '') {
+      // 다중 선택은 빈 배열도 "값 없음"으로 본다.
+      if (value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
         delete values[fieldId];
         continue;
       }
@@ -650,6 +693,18 @@ export function createProjectsRouter(io) {
         if (typeof value !== 'number' || !Number.isFinite(value)) return { error: `"${def.name}"은(는) 날짜여야 합니다.` };
       } else if (def.kind === 'select') {
         if (typeof value !== 'string' || !(def.options ?? []).includes(value)) return { error: `"${def.name}"의 선택지에 없는 값입니다.` };
+      } else if (def.kind === 'multiSelect') {
+        if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+          return { error: `"${def.name}"은(는) 선택지 목록이어야 합니다.` };
+        }
+        const picked = [...new Set(value)];
+        if (picked.some((v) => !(def.options ?? []).includes(v))) return { error: `"${def.name}"의 선택지에 없는 값입니다.` };
+        values[fieldId] = picked;
+        continue;
+      } else if (def.kind === 'progress') {
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+          return { error: `"${def.name}"은(는) 0~100 사이의 숫자여야 합니다.` };
+        }
       }
       values[fieldId] = value;
     }
@@ -978,6 +1033,97 @@ export function createProjectsRouter(io) {
     res.json({ ok: true });
   });
 
+  // ── 업무 우선순위(프로젝트별) ─────────────────────────────────────────
+
+  router.get('/projects/:id/task-priorities', async (req, res) => {
+    const project = await requireProjectMember(req, res, req.params.id);
+    if (!project) return;
+    res.json((await listTaskPriorities(project.id)).map(toTaskPriorityDto));
+  });
+
+  function parsePriorityFields(body, { partial }) {
+    const fields = {};
+    if (!partial || 'name' in (body ?? {})) {
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
+      if (!name) return { error: '우선순위 이름을 입력하세요.' };
+      if (name.length > 20) return { error: '우선순위 이름은 20자 이내로 입력하세요.' };
+      fields.name = name;
+    }
+    if ('color' in (body ?? {})) {
+      if (typeof body.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(body.color)) {
+        return { error: '색은 #RRGGBB 형식이어야 합니다.' };
+      }
+      fields.color = body.color.toUpperCase();
+    }
+    if (!partial) {
+      if (!TASK_PRIORITIES.includes(body?.level)) return { error: '단계(낮음/보통/높음)를 고르세요.' };
+      fields.level = body.level;
+    }
+    return { fields };
+  }
+
+  router.post('/projects/:id/task-priorities', async (req, res) => {
+    const project = await requireProjectManager(req, res, req.params.id);
+    if (!project) return;
+    const { fields, error } = parsePriorityFields(req.body, { partial: false });
+    if (error) return res.status(400).json({ error });
+    try {
+      const row = await insertTaskPriority({ projectId: project.id, ...fields });
+      await notifyProjectMembers(project, null);
+      res.status(201).json(toTaskPriorityDto(row));
+    } catch (e) {
+      if ((e?.code ?? e?.cause?.code) === '23505') return res.status(409).json({ error: '이미 같은 이름의 우선순위가 있습니다.' });
+      throw e;
+    }
+  });
+
+  /** 순서 바꾸기 — 프로젝트의 우선순위 id를 원하는 순서로 전부 보낸다. */
+  router.post('/projects/:id/task-priorities/order', async (req, res) => {
+    const project = await requireProjectManager(req, res, req.params.id);
+    if (!project) return;
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const current = (await listTaskPriorities(project.id)).map((p) => p.id);
+    if (ids.length !== current.length || !current.every((id) => ids.includes(id))) {
+      return res.status(400).json({ error: '우선순위 목록이 올바르지 않습니다.' });
+    }
+    await reorderTaskPriorities(project.id, ids);
+    await notifyProjectMembers(project, null);
+    res.json((await listTaskPriorities(project.id)).map(toTaskPriorityDto));
+  });
+
+  router.patch('/task-priorities/:id', async (req, res) => {
+    const row = await findTaskPriorityById(req.params.id);
+    if (!row) return res.status(404).json({ error: '우선순위를 찾을 수 없습니다.' });
+    const project = await requireProjectManager(req, res, row.projectId);
+    if (!project) return;
+    const { fields, error } = parsePriorityFields(req.body, { partial: true });
+    if (error) return res.status(400).json({ error });
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    try {
+      const updated = await updateTaskPriority(row.id, fields);
+      await notifyProjectMembers(project, null);
+      res.json(toTaskPriorityDto(updated));
+    } catch (e) {
+      if ((e?.code ?? e?.cause?.code) === '23505') return res.status(409).json({ error: '이미 같은 이름의 우선순위가 있습니다.' });
+      throw e;
+    }
+  });
+
+  /** 삭제 — 같은 단계의 다른 우선순위가 있어야 하고, 그 업무는 그쪽(첫 번째)으로 옮긴다. */
+  router.delete('/task-priorities/:id', async (req, res) => {
+    const row = await findTaskPriorityById(req.params.id);
+    if (!row) return res.status(404).json({ error: '우선순위를 찾을 수 없습니다.' });
+    const project = await requireProjectManager(req, res, row.projectId);
+    if (!project) return;
+    const others = (await listTaskPriorities(project.id)).filter((p) => p.id !== row.id && p.level === row.level);
+    if (others.length === 0) {
+      return res.status(400).json({ error: '단계(낮음/보통/높음)마다 우선순위가 하나는 있어야 합니다.' });
+    }
+    await deleteTaskPriority(row.id, others[0].id);
+    await notifyProjectMembers(project, null);
+    res.json({ ok: true });
+  });
+
   // ── 사용자 정의 필드(프로젝트별) ──────────────────────────────────────
 
   router.get('/projects/:id/task-fields', async (req, res) => {
@@ -998,7 +1144,7 @@ export function createProjectsRouter(io) {
       if (!FIELD_KINDS.includes(body?.kind)) return { error: '필드 종류가 올바르지 않습니다.' };
       fields.kind = body.kind;
     }
-    if ('options' in (body ?? {}) || (!partial && body?.kind === 'select')) {
+    if ('options' in (body ?? {}) || (!partial && OPTION_FIELD_KINDS.includes(body?.kind))) {
       const raw = Array.isArray(body?.options) ? body.options : [];
       const options = [...new Set(raw.filter((o) => typeof o === 'string').map((o) => o.trim()).filter(Boolean))];
       if (options.some((o) => o.length > 30)) return { error: '선택지는 30자 이내로 입력하세요.' };
@@ -1013,7 +1159,7 @@ export function createProjectsRouter(io) {
     if (!project) return;
     const { fields, error } = parseFieldFields(req.body, { partial: false });
     if (error) return res.status(400).json({ error });
-    if (fields.kind === 'select' && (fields.options ?? []).length === 0) {
+    if (OPTION_FIELD_KINDS.includes(fields.kind) && (fields.options ?? []).length === 0) {
       return res.status(400).json({ error: '선택 필드는 선택지가 하나 이상 필요합니다.' });
     }
     if ((await listTaskFields(project.id)).length >= 20) {
@@ -1036,7 +1182,7 @@ export function createProjectsRouter(io) {
     if (!project) return;
     const { fields, error } = parseFieldFields(req.body, { partial: true });
     if (error) return res.status(400).json({ error });
-    if ('options' in fields && f.kind !== 'select') delete fields.options;
+    if ('options' in fields && !OPTION_FIELD_KINDS.includes(f.kind)) delete fields.options;
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     if (fields.options && fields.options.length === 0) return res.status(400).json({ error: '선택지가 하나 이상 필요합니다.' });
     try {
@@ -1142,7 +1288,11 @@ export function createProjectsRouter(io) {
     const statusId = resolved.statusId ?? (await findFirstStatusOfCategory(project.id, status))?.id ?? null;
     const custom = await validCustomValues(project, req.body?.customValues, {});
     if (custom.error) return res.status(400).json({ error: custom.error });
-    const priority = TASK_PRIORITIES.includes(req.body?.priority) ? req.body.priority : 'normal';
+    const resolvedPriority = await resolvePriority(project, req.body);
+    if (resolvedPriority.error) return res.status(400).json({ error: resolvedPriority.error });
+    const priority = resolvedPriority.priority ?? 'normal';
+    const priorityId =
+      resolvedPriority.priorityId ?? (await findFirstPriorityOfLevel(project.id, priority))?.id ?? null;
     const assigneeId = typeof req.body?.assigneeId === 'string' ? req.body.assigneeId : null;
     if (assigneeId && !(await isProjectMember(project.id, assigneeId))) {
       return res.status(400).json({ error: '담당자는 프로젝트 구성원 중에서 고를 수 있습니다.' });
@@ -1168,6 +1318,7 @@ export function createProjectsRouter(io) {
       statusId,
       customValues: custom.values,
       priority,
+      priorityId,
       typeId,
       startDate: parseDate(req.body?.startDate) ?? null,
       dueDate: parseDate(req.body?.dueDate) ?? null,
@@ -1178,7 +1329,11 @@ export function createProjectsRouter(io) {
     // 자동화 규칙 실행 — 결과(자동 배정 등)가 응답과 다른 사람들의 화면 갱신에 이미 반영되도록 먼저 돌린다.
     const task = await runAutomations({ project, task: inserted, trigger: 'task_created', notifier });
     await notifyProjectMembers(project, task.id);
-    await notifyTaskEvents(project, inserted, req.user.sub, { assigneeId: inserted.assigneeId, addedReferenceIds: referenceIds });
+    await notifyTaskEvents(project, inserted, req.user.sub, {
+      assigneeId: inserted.assigneeId,
+      addedReferenceIds: referenceIds,
+      created: true,
+    });
     const [decorated] = await decorateTasks([task], req.user.sub);
     res.status(201).json(toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }));
   });
@@ -1233,11 +1388,12 @@ export function createProjectsRouter(io) {
       if (custom.error) return res.status(400).json({ error: custom.error });
       fields.customValues = custom.values;
     }
-    if ('priority' in (req.body ?? {})) {
-      if (!TASK_PRIORITIES.includes(req.body.priority)) {
-        return res.status(400).json({ error: '우선순위 값이 올바르지 않습니다.' });
-      }
-      fields.priority = req.body.priority;
+    if ('priority' in (req.body ?? {}) || 'priorityId' in (req.body ?? {})) {
+      const resolved = await resolvePriority(project, req.body);
+      if (resolved.error) return res.status(400).json({ error: resolved.error });
+      fields.priority = resolved.priority;
+      fields.priorityId =
+        resolved.priorityId ?? (await findFirstPriorityOfLevel(project.id, resolved.priority))?.id ?? null;
     }
     if ('typeId' in (req.body ?? {})) {
       const typeId = typeof req.body.typeId === 'string' ? req.body.typeId : null;
@@ -1271,6 +1427,14 @@ export function createProjectsRouter(io) {
       assigneeId: 'assigneeId' in fields && fields.assigneeId !== task.assigneeId ? fields.assigneeId : null,
       addedReferenceIds: (newReferenceIds ?? []).filter((id) => !oldReferenceIds.includes(id)),
       statusChanged,
+      priorityChanged: 'priorityId' in fields && fields.priorityId !== task.priorityId,
+      dueChanged:
+        'dueDate' in fields &&
+        (fields.dueDate?.getTime() ?? null) !== (task.dueDate ? new Date(task.dueDate).getTime() : null),
+      typeChanged: 'typeId' in fields && fields.typeId !== task.typeId,
+      customFieldChanged:
+        'customValues' in fields &&
+        JSON.stringify(fields.customValues) !== JSON.stringify(task.customValues ?? {}),
     });
     const [decorated] = await decorateTasks([updated], req.user.sub);
     res.json(toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }));
@@ -1282,8 +1446,25 @@ export function createProjectsRouter(io) {
     const project = await requireProjectMember(req, res, task.projectId);
     if (!project) return;
     if (rejectIfArchived(res, project)) return;
+    // 알림 대상은 지우기 전에 모아둔다(지운 뒤엔 참조자 목록도 같이 사라진다).
+    const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
+    const owners = (await listProjectMemberUsers(project.id))
+      .filter((m) => m.projectRole === 'owner')
+      .map((m) => m.id);
+    const actor = await findUserById(req.user.sub);
+    const label = taskKey(project.identifier, task.seq);
     await deleteTask(task.id);
     await notifyProjectMembers(project, null);
+    // project_notifications.task_id는 업무가 지워지면 같이 사라지므로(cascade) 안 붙인다.
+    await notifier.notify({
+      project,
+      task: null,
+      kind: 'deleted',
+      actorId: req.user.sub,
+      targetIds: [...owners, task.assigneeId, task.createdBy, ...refs],
+      title: `${project.name} · ${label}`,
+      body: `${actor?.name ?? actor?.username ?? '누군가'}님이 업무를 삭제했습니다: ${task.title}`,
+    });
     res.json({ ok: true });
   });
 
@@ -1324,10 +1505,19 @@ export function createProjectsRouter(io) {
   });
 
   /** 업무가 만들어지거나 바뀔 때 배정/참조/상태 변경 알림을 보낸다(행동한 본인은 제외). */
-  async function notifyTaskEvents(project, task, actorId, { assigneeId, addedReferenceIds, statusChanged }) {
+  async function notifyTaskEvents(
+    project,
+    task,
+    actorId,
+    { assigneeId, addedReferenceIds, statusChanged, priorityChanged, dueChanged, typeChanged, customFieldChanged, created } = {},
+  ) {
     const actor = await findUserById(actorId);
     const actorName = actor?.name ?? actor?.username ?? '누군가';
     const title = `${project.name} · ${taskKey(project.identifier, task.seq)}`;
+    // 업무 변경 알림은 담당자와 참조자에게 간다(정책의 "업무 변경 알림" 항목들).
+    const watchers = async () => [task.assigneeId, task.createdBy, ...((await listReferencesForTasks([task.id]))[task.id] ?? [])];
+    const change = async (kind, body) =>
+      notifier.notify({ project, task, kind, actorId, targetIds: await watchers(), title, body });
     if (assigneeId) {
       await notifier.notify({
         project,
@@ -1352,14 +1542,36 @@ export function createProjectsRouter(io) {
     }
     if (statusChanged) {
       const st = task.statusId ? await findTaskStatusById(task.statusId) : null;
+      await change('status', `${actorName}님이 상태를 '${st?.name ?? task.status}'(으)로 바꿨습니다: ${task.title}`);
+    }
+    if (priorityChanged) {
+      const pr = task.priorityId ? await findTaskPriorityById(task.priorityId) : null;
+      await change('priority', `${actorName}님이 우선순위를 '${pr?.name ?? task.priority}'(으)로 바꿨습니다: ${task.title}`);
+    }
+    if (dueChanged) {
+      const when = task.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : '없음';
+      await change('due_date', `${actorName}님이 마감일을 ${when}(으)로 바꿨습니다: ${task.title}`);
+    }
+    if (typeChanged) {
+      const type = task.typeId ? await findTaskTypeById(task.typeId) : null;
+      await change('task_type', `${actorName}님이 유형을 '${type?.name ?? '없음'}'(으)로 바꿨습니다: ${task.title}`);
+    }
+    if (customFieldChanged) {
+      await change('custom_field', `${actorName}님이 추가 정보를 바꿨습니다: ${task.title}`);
+    }
+    if (created) {
+      // 업무가 새로 만들어지면 프로젝트 담당자(owner)에게 알린다.
+      const owners = (await listProjectMemberUsers(project.id))
+        .filter((m) => m.projectRole === 'owner')
+        .map((m) => m.id);
       await notifier.notify({
         project,
         task,
-        kind: 'status',
+        kind: 'created',
         actorId,
-        targetIds: [task.assigneeId, task.createdBy],
+        targetIds: owners,
         title,
-        body: `${actorName}님이 상태를 '${st?.name ?? task.status}'(으)로 바꿨습니다: ${task.title}`,
+        body: `${actorName}님이 업무를 만들었습니다: ${task.title}`,
       });
     }
   }
@@ -1582,16 +1794,50 @@ export function createProjectsRouter(io) {
 
   // ── 프로젝트 알림 ─────────────────────────────────────────────────────
 
+  /** 개인 설정 — 지금은 "이 프로젝트 알림 끄기" 하나. */
   function toSettingsDto(s) {
-    return {
-      muted: s.muted,
-      assigned: s.onAssigned,
-      referenced: s.onReferenced,
-      comment: s.onComment,
-      status: s.onStatus,
-      due: s.onDue,
-    };
+    return { muted: s.muted };
   }
+
+  const POLICY_FIELDS = {
+    status: 'onStatus',
+    priority: 'onPriority',
+    assigned: 'onAssigned',
+    referenced: 'onReferenced',
+    dueDate: 'onDueDate',
+    taskType: 'onTaskType',
+    customField: 'onCustomField',
+    created: 'onCreated',
+    deleted: 'onDeleted',
+    comment: 'onComment',
+    due: 'onDue',
+  };
+
+  function toPolicyDto(p) {
+    return Object.fromEntries(Object.entries(POLICY_FIELDS).map(([key, col]) => [key, p[col] !== false]));
+  }
+
+  /** 프로젝트 알림 정책 — 구성원이면 볼 수 있고, 바꾸는 건 담당자·팀 소유자/관리자만. */
+  router.get('/projects/:id/notification-policy', async (req, res) => {
+    const project = await requireProjectMember(req, res, req.params.id);
+    if (!project) return;
+    res.json(toPolicyDto(await getNotificationPolicy(project.id)));
+  });
+
+  router.patch('/projects/:id/notification-policy', async (req, res) => {
+    const project = await requireProjectManager(req, res, req.params.id);
+    if (!project) return;
+    const fields = {};
+    for (const [key, col] of Object.entries(POLICY_FIELDS)) {
+      if (key in (req.body ?? {})) {
+        if (typeof req.body[key] !== 'boolean') return res.status(400).json({ error: '설정 값이 올바르지 않습니다.' });
+        fields[col] = req.body[key];
+      }
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    await notifyProjectMembers(project, null);
+    res.json(toPolicyDto(await upsertNotificationPolicy(project.id, fields)));
+  });
 
   /** 내 알림함(최근 50개) + 안 읽은 개수. */
   router.get('/project-notifications', async (req, res) => {
@@ -1634,15 +1880,8 @@ export function createProjectsRouter(io) {
   router.patch('/projects/:id/notification-settings', async (req, res) => {
     const project = await requireProjectMember(req, res, req.params.id);
     if (!project) return;
-    const map = { muted: 'muted', assigned: 'onAssigned', referenced: 'onReferenced', comment: 'onComment', status: 'onStatus', due: 'onDue' };
-    const fields = {};
-    for (const [key, col] of Object.entries(map)) {
-      if (key in (req.body ?? {})) {
-        if (typeof req.body[key] !== 'boolean') return res.status(400).json({ error: '설정 값이 올바르지 않습니다.' });
-        fields[col] = req.body[key];
-      }
-    }
-    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    if (typeof req.body?.muted !== 'boolean') return res.status(400).json({ error: '설정 값이 올바르지 않습니다.' });
+    const fields = { muted: req.body.muted };
     res.json(toSettingsDto(await upsertNotificationSettings(req.user.sub, project.id, fields)));
   });
 

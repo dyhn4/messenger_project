@@ -56,20 +56,26 @@ void main() {
       httpClient: client,
     );
 
+    // "프로젝트 메뉴 > 필드 / 상태"가 이 두 편집기를 나란히 보여준다.
     await tester.pumpWidget(
       MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: TextButton(
-              onPressed: () =>
-                  showTaskConfigManagerDialog(context, session, 'p1'),
-              child: const Text('열기'),
-            ),
+        home: Scaffold(
+          body: Column(
+            children: [
+              // 상태 편집기는 스스로 스크롤하지 않는다 — "기본 필드" 카드처럼 바깥에서 감싼다.
+              Flexible(
+                child: SingleChildScrollView(
+                  child: ProjectStatusEditor(session: session, projectId: 'p1'),
+                ),
+              ),
+              Expanded(
+                child: ProjectFieldEditor(session: session, projectId: 'p1'),
+              ),
+            ],
           ),
         ),
       ),
     );
-    await tester.tap(find.text('열기'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.text('진행 중'), findsWidgets);
@@ -82,7 +88,7 @@ void main() {
     });
 
     // 상태 추가(기본 분류 '진행 중')
-    await tester.tap(find.text('상태 추가'));
+    await tester.tap(find.text('추가')); // 제목 줄 오른쪽의 작은 추가 버튼
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, '상태 이름'), '검수');
     await tester.tap(find.widgetWithText(FilledButton, '저장'));
@@ -103,13 +109,11 @@ void main() {
       isTrue,
     );
 
-    // 필드 탭: 선택 필드 추가
-    await tester.tap(find.text('사용자 정의 필드'));
-    await tester.pumpAndSettle();
+    // 선택 필드 추가
     await tester.tap(find.text('필드 추가'));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, '필드 이름'), '고객사');
-    await tester.tap(find.text('선택'));
+    await tester.tap(find.text('단일 선택'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, '선택지 (쉼표로 구분)'),

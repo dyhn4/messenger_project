@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-  filterUsersWantingKind,
+  filterUnmutedUsers,
+  policyAllows,
   findTasksDueSoon,
   insertProjectNotification,
   countUnreadProjectNotifications,
@@ -17,7 +18,9 @@ import { notifyProjectPush } from './push.js';
 export function createProjectNotifier(io) {
   async function notify({ project, task, kind, actorId = null, targetIds, title, body }) {
     const ids = [...new Set(targetIds.filter((id) => id && id !== actorId))];
-    const wanted = await filterUsersWantingKind(project.id, ids, kind);
+    // 프로젝트 정책이 이 종류를 껐으면 아무에게도 안 보낸다. 그 다음에 개인 끄기를 본다.
+    if (!(await policyAllows(project.id, kind))) return;
+    const wanted = await filterUnmutedUsers(project.id, ids);
     for (const userId of wanted) {
       const row = await insertProjectNotification({
         id: randomUUID(),

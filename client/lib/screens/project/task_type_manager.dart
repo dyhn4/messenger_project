@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/floating_dialog.dart';
-import '../../widgets/muted_scrollbar.dart';
+import 'task_config_manager.dart'
+    show ConfigBubble, ConfigSection, configAction;
 
 const _typePalette = <String>[
   '#E53935',
@@ -18,30 +18,22 @@ const _typePalette = <String>[
   '#78909C',
 ];
 
-/// 프로젝트의 업무 유형(Bug/Feature/행사 등)을 추가·수정·삭제한다 — 프로젝트 담당자와 팀
-/// 소유자·관리자만 열 수 있다(서버도 다시 확인한다). 유형을 지워도 그 유형이던 업무는 남고
-/// 유형만 비워진다.
-Future<void> showTaskTypeManagerDialog(
-  BuildContext context,
-  Session session,
-  String projectId,
-) {
-  return showDialog<void>(
-    context: context,
-    builder: (_) => _TaskTypeManager(session: session, projectId: projectId),
-  );
-}
-
-class _TaskTypeManager extends StatefulWidget {
+/// 프로젝트의 업무 유형(Bug/Feature/행사 등)을 추가·수정·삭제한다. 유형을 지워도 그 유형이던
+/// 업무는 남고 유형만 비워진다. "프로젝트 메뉴"의 "필드 / 상태"에서 쓴다.
+class ProjectTypeEditor extends StatefulWidget {
   final Session session;
   final String projectId;
-  const _TaskTypeManager({required this.session, required this.projectId});
+  const ProjectTypeEditor({
+    super.key,
+    required this.session,
+    required this.projectId,
+  });
 
   @override
-  State<_TaskTypeManager> createState() => _TaskTypeManagerState();
+  State<ProjectTypeEditor> createState() => _ProjectTypeEditorState();
 }
 
-class _TaskTypeManagerState extends State<_TaskTypeManager> {
+class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
   List<TaskType>? _types;
   String? _error;
 
@@ -116,85 +108,36 @@ class _TaskTypeManagerState extends State<_TaskTypeManager> {
   @override
   Widget build(BuildContext context) {
     final types = _types;
-    return FloatingDialog(
-      title: '업무 유형 관리',
-      maxWidth: 440,
-      maxHeight: 560,
-      child: _error != null
-          ? Center(child: Text(_error!))
-          : types == null
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: types.isEmpty
-                      ? Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 24),
-                          child: Center(
-                            child: Text(
-                              '등록된 유형이 없습니다.',
-                              style: TextStyle(
-                                color: Theme.of(context).hintColor,
-                              ),
-                            ),
-                          ),
-                        )
-                      : MutedScrollbar(
-                          child: ListView(
-                            shrinkWrap: true,
-                            children: [
-                              for (final type in types)
-                                ListTile(
-                                  dense: true,
-                                  leading: Container(
-                                    width: 14,
-                                    height: 14,
-                                    decoration: BoxDecoration(
-                                      color: parseTypeColor(type.color),
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  title: Text(type.name),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.edit_outlined,
-                                          size: 18,
-                                        ),
-                                        tooltip: '수정',
-                                        onPressed: () => _edit(existing: type),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.delete_outline,
-                                          size: 18,
-                                        ),
-                                        tooltip: '삭제',
-                                        onPressed: () => _delete(type),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
+    return _error != null
+        ? Center(child: Text(_error!))
+        : types == null
+        ? const Center(child: CircularProgressIndicator())
+        : ConfigSection(
+            title: '유형',
+            description: '업무를 분류하는 꼬리표입니다(버그·기능 등).',
+            addLabel: '추가',
+            onAdd: _edit,
+            emptyHint: '등록된 유형이 없습니다.',
+            children: [
+              for (final type in types)
+                ConfigBubble(
+                  dotColor: parseTypeColor(type.color),
+                  title: type.name,
+                  actions: [
+                    configAction(
+                      Icons.edit_outlined,
+                      '수정',
+                      () => _edit(existing: type),
+                    ),
+                    configAction(
+                      Icons.delete_outline,
+                      '삭제',
+                      () => _delete(type),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: () => _edit(),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('유형 추가'),
-                  ),
-                ),
-              ],
-            ),
-    );
+            ],
+          );
   }
 }
 

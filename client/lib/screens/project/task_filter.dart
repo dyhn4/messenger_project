@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../models/app_user.dart';
 import '../../models/project.dart';
-import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
 
 /// 숫자/날짜 필드의 범위 조건 — [min]/[max] 중 하나만 있어도 된다(날짜는 밀리초, [max]는 그날 끝까지).
@@ -23,10 +22,21 @@ class FieldRange {
 
 /// 프로젝트 화면의 업무 필터 — 다섯 가지 보기(리스트/칸반/간트/캘린더/대시보드)에 같이 적용된다.
 /// 비어 있는 항목은 "전체". 사용자 정의 필드는 선택 필드는 값이 같은 것, 텍스트 필드는 글자가 들어 있는 것만 본다.
+/// "빠른 필터링" 한 줄짜리 조건 — 대시보드 카드를 눌렀을 때도 이 값이 걸린다.
+enum QuickFilter { incomplete, done, overdue, mine }
+
+String quickFilterLabel(QuickFilter q) => switch (q) {
+  QuickFilter.incomplete => '미완료 업무',
+  QuickFilter.done => '완료된 업무',
+  QuickFilter.overdue => '지연 업무',
+  QuickFilter.mine => '내 업무',
+};
+
 class TaskFilter {
+  final QuickFilter? quick;
   final String query;
   final Set<String> statusIds;
-  final Set<TaskPriority> priorities;
+  final Set<String> priorityIds;
   final String? assigneeId;
   final String? typeId;
 
@@ -37,9 +47,10 @@ class TaskFilter {
   final Map<String, FieldRange> fieldRanges;
 
   const TaskFilter({
+    this.quick,
     this.query = '',
     this.statusIds = const {},
-    this.priorities = const {},
+    this.priorityIds = const {},
     this.assigneeId,
     this.typeId,
     this.fieldValues = const {},
@@ -47,9 +58,10 @@ class TaskFilter {
   });
 
   int get activeCount =>
+      (quick == null ? 0 : 1) +
       (query.trim().isEmpty ? 0 : 1) +
       (statusIds.isEmpty ? 0 : 1) +
-      (priorities.isEmpty ? 0 : 1) +
+      (priorityIds.isEmpty ? 0 : 1) +
       (assigneeId == null ? 0 : 1) +
       (typeId == null ? 0 : 1) +
       fieldValues.length +
@@ -58,11 +70,97 @@ class TaskFilter {
   bool get isEmpty => activeCount == 0;
 
   /// [statuses]는 상태 id가 없는 예전 업무를 같은 분류의 첫 상태로 보기 위해 필요하다.
+  TaskFilter _copy({
+    Object? quick = _keep,
+    String? query,
+    Set<String>? statusIds,
+    Set<String>? priorityIds,
+    Object? assigneeId = _keep,
+    Object? typeId = _keep,
+    Map<String, String>? fieldValues,
+    Map<String, FieldRange>? fieldRanges,
+  }) => TaskFilter(
+    quick: quick == _keep ? this.quick : quick as QuickFilter?,
+    query: query ?? this.query,
+    statusIds: statusIds ?? this.statusIds,
+    priorityIds: priorityIds ?? this.priorityIds,
+    assigneeId: assigneeId == _keep ? this.assigneeId : assigneeId as String?,
+    typeId: typeId == _keep ? this.typeId : typeId as String?,
+    fieldValues: fieldValues ?? this.fieldValues,
+    fieldRanges: fieldRanges ?? this.fieldRanges,
+  );
+
+  TaskFilter copyQuick(QuickFilter? q) => _copy(quick: q);
+  TaskFilter copyAssignee(String? id) => _copy(assigneeId: id);
+  TaskFilter copyType(String? id) => _copy(typeId: id);
+  TaskFilter copyStatus(String? id) =>
+      _copy(statusIds: id == null ? const {} : {id});
+  TaskFilter copyPriority(String? id) =>
+      _copy(priorityIds: id == null ? const {} : {id});
+
+  TaskFilter copyFieldValue(String fieldId, String? value) {
+    final next = {...fieldValues};
+    if (value == null || value.trim().isEmpty) {
+      next.remove(fieldId);
+    } else {
+      next[fieldId] = value;
+    }
+    return _copy(fieldValues: next);
+  }
+
+  TaskFilter copyFieldRange(String fieldId, FieldRange range) {
+    final next = {...fieldRanges};
+    if (range.isEmpty) {
+      next.remove(fieldId);
+    } else {
+      next[fieldId] = range;
+    }
+    return _copy(fieldRanges: next);
+  }
+
+  /// 조건 하나를 뺀 새 필터 — 목록 위 조건 칩의 × 버튼이 쓴다.
+  TaskFilter without({
+    bool quick = false,
+    bool query = false,
+    bool statuses = false,
+    bool priorities = false,
+    bool assignee = false,
+    bool type = false,
+    String? fieldId,
+  }) => TaskFilter(
+    quick: quick ? null : this.quick,
+    query: query ? '' : this.query,
+    statusIds: statuses ? const {} : statusIds,
+    priorityIds: priorities ? const {} : priorityIds,
+    assigneeId: assignee ? null : assigneeId,
+    typeId: type ? null : typeId,
+    fieldValues: fieldId == null
+        ? fieldValues
+        : ({...fieldValues}..remove(fieldId)),
+    fieldRanges: fieldId == null
+        ? fieldRanges
+        : ({...fieldRanges}..remove(fieldId)),
+  );
+
   bool matches(
     Task t, {
+    String? myUserId,
     List<TaskStatusDef> statuses = const [],
+    List<TaskPriorityDef> priorities = const [],
     List<TaskFieldDef> fields = const [],
   }) {
+    switch (quick) {
+      case QuickFilter.incomplete:
+        if (t.status == TaskStatus.done) return false;
+      case QuickFilter.done:
+        if (t.status != TaskStatus.done) return false;
+      case QuickFilter.overdue:
+        if (!t.isOverdue) return false;
+      case QuickFilter.mine:
+        if (t.assigneeId != myUserId) return false;
+      case null:
+        break;
+    }
     final q = query.trim().toLowerCase();
     if (q.isNotEmpty &&
         !t.title.toLowerCase().contains(q) &&
@@ -79,7 +177,16 @@ class TaskFilter {
       }
       if (!statusIds.contains(id)) return false;
     }
-    if (priorities.isNotEmpty && !priorities.contains(t.priority)) return false;
+    if (priorityIds.isNotEmpty) {
+      var id = t.priorityId;
+      if (id == null || !priorities.any((p) => p.id == id)) {
+        id = priorities
+            .where((p) => p.level == t.priority)
+            .map((p) => p.id)
+            .firstOrNull;
+      }
+      if (!priorityIds.contains(id)) return false;
+    }
     if (assigneeId != null) {
       // '__none__'은 담당자 없는 업무.
       if (assigneeId == noAssigneeFilter) {
@@ -95,6 +202,8 @@ class TaskFilter {
       if (def == null) continue;
       if (def.kind == 'select') {
         if (v != e.value) return false;
+      } else if (def.kind == 'multiSelect') {
+        if (v is! List || !v.contains(e.value)) return false;
       } else {
         if (!(v?.toString().toLowerCase().contains(e.value.toLowerCase()) ??
             false)) {
@@ -111,420 +220,410 @@ class TaskFilter {
 
 const noAssigneeFilter = '__none__';
 
-/// 필터 창 — 적용하면 새 [TaskFilter]를, 취소하면 null을 돌려준다.
-Future<TaskFilter?> showTaskFilterDialog(
+/// _copy에서 "안 바꿈"과 "null로 지움"을 구분하는 표식.
+const _keep = Object();
+
+/// 목록 위에 걸려 있는 조건을 칩으로 보여준다 — × 를 누르면 그 조건만 뺀다.
+List<Widget> activeFilterChips(
   BuildContext context, {
-  required TaskFilter initial,
+  required TaskFilter filter,
   required List<TaskStatusDef> statuses,
-  required List<AppUser> members,
+  required List<TaskPriorityDef> priorities,
   required List<TaskType> types,
+  required List<AppUser> members,
   required List<TaskFieldDef> fields,
+  required ValueChanged<TaskFilter> onChanged,
 }) {
-  return showDialog<TaskFilter>(
-    context: context,
-    builder: (_) => _TaskFilterDialog(
-      initial: initial,
-      statuses: statuses,
-      members: members,
-      types: types,
-      fields: fields,
+  String nameOf<T>(
+    Iterable<T> list,
+    String? id,
+    String Function(T) name,
+    String Function(T) idOf,
+  ) {
+    for (final e in list) {
+      if (idOf(e) == id) return name(e);
+    }
+    return '(삭제됨)';
+  }
+
+  Widget chip(String label, TaskFilter next) => Padding(
+    padding: const EdgeInsets.only(right: 6),
+    child: InputChip(
+      label: Text(label),
+      onDeleted: () => onChanged(next),
+      visualDensity: VisualDensity.compact,
     ),
   );
+
+  return [
+    if (filter.quick != null)
+      chip(quickFilterLabel(filter.quick!), filter.without(quick: true)),
+    if (filter.query.trim().isNotEmpty)
+      chip('"${filter.query.trim()}"', filter.without(query: true)),
+    for (final id in filter.statusIds)
+      chip(
+        nameOf(statuses, id, (s) => s.name, (s) => s.id),
+        filter.without(statuses: true),
+      ),
+    for (final id in filter.priorityIds)
+      chip(
+        nameOf(priorities, id, (p) => p.name, (p) => p.id),
+        filter.without(priorities: true),
+      ),
+    if (filter.assigneeId != null)
+      chip(
+        filter.assigneeId == noAssigneeFilter
+            ? '담당자 없음'
+            : nameOf(members, filter.assigneeId, (m) => m.name, (m) => m.id),
+        filter.without(assignee: true),
+      ),
+    if (filter.typeId != null)
+      chip(
+        nameOf(types, filter.typeId, (t) => t.name, (t) => t.id),
+        filter.without(type: true),
+      ),
+    for (final e in filter.fieldValues.entries)
+      chip(
+        '${nameOf(fields, e.key, (f) => f.name, (f) => f.id)}: ${e.value}',
+        filter.without(fieldId: e.key),
+      ),
+    for (final e in filter.fieldRanges.entries)
+      chip(
+        nameOf(fields, e.key, (f) => f.name, (f) => f.id),
+        filter.without(fieldId: e.key),
+      ),
+  ];
 }
 
-class _TaskFilterDialog extends StatefulWidget {
-  final TaskFilter initial;
+/// 목록 위 "필터링" 버튼 — 누르면 아래로 펼쳐지고, 바꿀 때마다 [onChanged]로 바로 알린다.
+class TaskFilterButton extends StatefulWidget {
+  final TaskFilter filter;
   final List<TaskStatusDef> statuses;
-  final List<AppUser> members;
+  final List<TaskPriorityDef> priorities;
   final List<TaskType> types;
+  final List<AppUser> members;
   final List<TaskFieldDef> fields;
-  const _TaskFilterDialog({
-    required this.initial,
+  final ValueChanged<TaskFilter> onChanged;
+
+  const TaskFilterButton({
+    super.key,
+    required this.filter,
     required this.statuses,
-    required this.members,
+    required this.priorities,
     required this.types,
+    required this.members,
     required this.fields,
+    required this.onChanged,
   });
 
   @override
-  State<_TaskFilterDialog> createState() => _TaskFilterDialogState();
+  State<TaskFilterButton> createState() => _TaskFilterButtonState();
 }
 
-class _TaskFilterDialogState extends State<_TaskFilterDialog> {
-  late final _query = TextEditingController(text: widget.initial.query);
-  late final _statusIds = {...widget.initial.statusIds};
-  late final _priorities = {...widget.initial.priorities};
-  late String? _assigneeId = widget.initial.assigneeId;
-  late String? _typeId = widget.initial.typeId;
-  late final Map<String, String> _fieldValues = {...widget.initial.fieldValues};
+class _TaskFilterButtonState extends State<TaskFilterButton> {
+  final _menu = MenuController();
+  final _addMenu = MenuController();
   final _scroll = ScrollController();
-  final _textControllers = <String, TextEditingController>{};
-  late final Map<String, FieldRange> _ranges = {...widget.initial.fieldRanges};
+
+  /// "필터 추가"로 꺼내 둔 사용자 정의 필드 — 값이 걸려 있는 것은 항상 보인다.
+  final _extraFields = <String>{};
 
   @override
   void dispose() {
-    _query.dispose();
     _scroll.dispose();
-    for (final c in _textControllers.values) {
-      c.dispose();
-    }
     super.dispose();
   }
 
-  Widget _section(String title, Widget child) => Padding(
-    padding: const EdgeInsets.only(bottom: 14),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  TaskFilter get f => widget.filter;
+
+  Widget _labeled(String label, Widget child, {Key? key}) => Padding(
+    key: key,
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(
       children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 6),
-        child,
+        SizedBox(
+          width: 68,
+          child: Text(label, style: const TextStyle(fontSize: 13)),
+        ),
+        Expanded(child: child),
       ],
     ),
   );
 
-  TaskFilter _build() {
-    final values = {..._fieldValues}..removeWhere((_, v) => v.trim().isEmpty);
-    return TaskFilter(
-      query: _query.text,
-      statusIds: _statusIds,
-      priorities: _priorities,
-      assigneeId: _assigneeId,
-      typeId: _typeId,
-      fieldValues: values,
-      fieldRanges: {..._ranges}..removeWhere((_, r) => r.isEmpty),
+  /// "전체"가 기본인 한 개짜리 선택 — 고르면 그 값 하나만 걸린다.
+  Widget _pick({
+    required String? value,
+    required List<({String id, String name})> options,
+    required ValueChanged<String?> onChanged,
+  }) => DropdownButtonFormField<String?>(
+    key: ValueKey('$value-${options.length}'),
+    initialValue: options.any((o) => o.id == value) ? value : null,
+    isExpanded: true,
+    isDense: true,
+    decoration: const InputDecoration(
+      isDense: true,
+      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      border: OutlineInputBorder(),
+    ),
+    items: [
+      const DropdownMenuItem(value: null, child: Text('전체')),
+      for (final o in options)
+        DropdownMenuItem(value: o.id, child: Text(o.name)),
+    ],
+    onChanged: onChanged,
+  );
+
+  /// 사용자 정의 필드 한 줄 — 선택은 고르기, 글자는 입력, 숫자·날짜·진행률은 최소/최대.
+  Widget _fieldInput(TaskFieldDef field) {
+    if (field.hasOptions) {
+      return _pick(
+        value: f.fieldValues[field.id],
+        options: [for (final o in field.options) (id: o, name: o)],
+        onChanged: (v) => widget.onChanged(f.copyFieldValue(field.id, v)),
+      );
+    }
+    if (field.kind == 'text') {
+      return TextFormField(
+        initialValue: f.fieldValues[field.id] ?? '',
+        decoration: const InputDecoration(
+          hintText: '포함하는 글자',
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          border: OutlineInputBorder(),
+        ),
+        onChanged: (v) => widget.onChanged(f.copyFieldValue(field.id, v)),
+      );
+    }
+    final range = f.fieldRanges[field.id] ?? const FieldRange();
+    InputDecoration deco(String hint) => InputDecoration(
+      hintText: hint,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      border: const OutlineInputBorder(),
+    );
+    return Row(
+      children: [
+        Expanded(
+          child: TextFormField(
+            initialValue: range.min?.toString() ?? '',
+            keyboardType: TextInputType.number,
+            decoration: deco('최소'),
+            onChanged: (v) => widget.onChanged(
+              f.copyFieldRange(
+                field.id,
+                FieldRange(min: num.tryParse(v), max: range.max),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: TextFormField(
+            initialValue: range.max?.toString() ?? '',
+            keyboardType: TextInputType.number,
+            decoration: deco('최대'),
+            onChanged: (v) => widget.onChanged(
+              f.copyFieldRange(
+                field.id,
+                FieldRange(min: range.min, max: num.tryParse(v)),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final filterable = widget.fields
-        .where((f) => f.kind == 'select' || f.kind == 'text')
-        .toList();
-    final rangeable = widget.fields
-        .where((f) => f.kind == 'number' || f.kind == 'date')
-        .toList();
-    return FloatingDialog(
-      title: '필터',
-      maxWidth: 480,
-      maxHeight: 640,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: MutedScrollbar(
+  Widget _panel(BuildContext context) {
+    final theme = Theme.of(context);
+    final shown = {
+      ...f.fieldValues.keys,
+      ...f.fieldRanges.keys,
+      ..._extraFields,
+    };
+    final rest = widget.fields.where((x) => !shown.contains(x.id)).toList();
+    return SizedBox(
+      width: 320,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 460),
+          child: MutedScrollbar(
+            controller: _scroll,
+            child: SingleChildScrollView(
               controller: _scroll,
-              child: ListView(
-                controller: _scroll,
-                padding: const EdgeInsets.only(right: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _section(
-                    '검색',
-                    TextField(
-                      controller: _query,
-                      decoration: const InputDecoration(
-                        hintText: '제목 또는 업무 번호',
-                        isDense: true,
-                        border: OutlineInputBorder(),
+                  Row(
+                    children: [
+                      const Text(
+                        '필터링',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
                       ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: f.isEmpty
+                            ? null
+                            : () {
+                                _extraFields.clear();
+                                widget.onChanged(const TaskFilter());
+                              },
+                        child: const Text('지우기'),
+                      ),
+                    ],
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '빠른 필터링',
+                      style: TextStyle(color: theme.hintColor, fontSize: 12),
                     ),
                   ),
-                  _section(
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final q in QuickFilter.values)
+                        ChoiceChip(
+                          label: Text(quickFilterLabel(q)),
+                          selected: f.quick == q,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (on) =>
+                              widget.onChanged(f.copyQuick(on ? q : null)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  _labeled(
                     '상태',
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
+                    _pick(
+                      value: f.statusIds.firstOrNull,
+                      options: [
                         for (final s in widget.statuses)
-                          FilterChip(
-                            label: Text(s.name),
-                            selected: _statusIds.contains(s.id),
-                            onSelected: (v) => setState(
-                              () => v
-                                  ? _statusIds.add(s.id)
-                                  : _statusIds.remove(s.id),
-                            ),
-                          ),
+                          (id: s.id, name: s.name),
                       ],
+                      onChanged: (v) => widget.onChanged(f.copyStatus(v)),
                     ),
                   ),
-                  _section(
-                    '우선순위',
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        for (final p in TaskPriority.values)
-                          FilterChip(
-                            label: Text(taskPriorityLabel(p)),
-                            selected: _priorities.contains(p),
-                            onSelected: (v) => setState(
-                              () => v
-                                  ? _priorities.add(p)
-                                  : _priorities.remove(p),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  _section(
+                  _labeled(
                     '담당자',
-                    DropdownButtonFormField<String?>(
-                      initialValue: _assigneeId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                      ),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('전체')),
-                        const DropdownMenuItem(
-                          value: noAssigneeFilter,
-                          child: Text('담당자 없음'),
-                        ),
+                    _pick(
+                      value: f.assigneeId,
+                      options: [
+                        (id: noAssigneeFilter, name: '담당자 없음'),
                         for (final m in widget.members)
-                          DropdownMenuItem(value: m.id, child: Text(m.name)),
+                          (id: m.id, name: m.name),
                       ],
-                      onChanged: (v) => setState(() => _assigneeId = v),
+                      onChanged: (v) => widget.onChanged(f.copyAssignee(v)),
                     ),
                   ),
-                  if (widget.types.isNotEmpty)
-                    _section(
-                      '유형',
-                      DropdownButtonFormField<String?>(
-                        initialValue: _typeId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: null,
-                            child: Text('전체'),
+                  _labeled(
+                    '유형',
+                    _pick(
+                      value: f.typeId,
+                      options: [
+                        for (final t in widget.types) (id: t.id, name: t.name),
+                      ],
+                      onChanged: (v) => widget.onChanged(f.copyType(v)),
+                    ),
+                  ),
+                  _labeled(
+                    '우선순위',
+                    _pick(
+                      value: f.priorityIds.firstOrNull,
+                      options: [
+                        for (final p in widget.priorities)
+                          (id: p.id, name: p.name),
+                      ],
+                      onChanged: (v) => widget.onChanged(f.copyPriority(v)),
+                    ),
+                  ),
+                  for (final field in widget.fields)
+                    if (shown.contains(field.id))
+                      _labeled(
+                        field.name,
+                        _fieldInput(field),
+                        key: ValueKey('filter-field-${field.id}'),
+                      ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    // MenuItemButton을 쓰면 누르는 순간 위 필터 패널까지 같이 닫힌다.
+                    // 필드를 고른 뒤에도 패널은 열려 있어야 하므로 이 작은 메뉴만 닫는다.
+                    child: MenuAnchor(
+                      controller: _addMenu,
+                      menuChildren: [
+                        if (rest.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            child: Text('추가할 필드가 없습니다'),
                           ),
-                          for (final t in widget.types)
-                            DropdownMenuItem(value: t.id, child: Text(t.name)),
-                        ],
-                        onChanged: (v) => setState(() => _typeId = v),
+                        for (final field in rest)
+                          SizedBox(
+                            width: 180,
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                alignment: Alignment.centerLeft,
+                                shape: const RoundedRectangleBorder(),
+                              ),
+                              onPressed: () {
+                                _addMenu.close();
+                                setState(() => _extraFields.add(field.id));
+                              },
+                              child: Text(field.name),
+                            ),
+                          ),
+                      ],
+                      builder: (context, controller, _) => TextButton.icon(
+                        onPressed: () => controller.isOpen
+                            ? controller.close()
+                            : controller.open(),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('필터 추가'),
                       ),
                     ),
-                  for (final f in filterable)
-                    _section(
-                      f.name,
-                      f.kind == 'select'
-                          ? DropdownButtonFormField<String?>(
-                              initialValue:
-                                  f.options.contains(_fieldValues[f.id])
-                                  ? _fieldValues[f.id]
-                                  : null,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                border: OutlineInputBorder(),
-                              ),
-                              items: [
-                                const DropdownMenuItem(
-                                  value: null,
-                                  child: Text('전체'),
-                                ),
-                                for (final o in f.options)
-                                  DropdownMenuItem(value: o, child: Text(o)),
-                              ],
-                              onChanged: (v) => setState(() {
-                                if (v == null) {
-                                  _fieldValues.remove(f.id);
-                                } else {
-                                  _fieldValues[f.id] = v;
-                                }
-                              }),
-                            )
-                          : TextField(
-                              controller: _textControllers.putIfAbsent(
-                                f.id,
-                                () => TextEditingController(
-                                  text: _fieldValues[f.id] ?? '',
-                                ),
-                              ),
-                              decoration: const InputDecoration(
-                                hintText: '포함하는 글자',
-                                isDense: true,
-                                border: OutlineInputBorder(),
-                              ),
-                              onChanged: (v) => _fieldValues[f.id] = v,
-                            ),
-                    ),
-                  for (final f in rangeable)
-                    _section(
-                      f.name,
-                      f.kind == 'number'
-                          ? _NumberRange(
-                              key: ValueKey('nr-${f.id}'),
-                              initial: _ranges[f.id],
-                              onChanged: (r) => _ranges[f.id] = r,
-                            )
-                          : _DateRange(
-                              initial: _ranges[f.id],
-                              onChanged: (r) =>
-                                  setState(() => _ranges[f.id] = r),
-                            ),
-                    ),
+                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(const TaskFilter()),
-                child: const Text('초기화'),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('취소'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(_build()),
-                child: const Text('적용'),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
-}
-
-class _NumberRange extends StatefulWidget {
-  final FieldRange? initial;
-  final ValueChanged<FieldRange> onChanged;
-  const _NumberRange({super.key, this.initial, required this.onChanged});
-
-  @override
-  State<_NumberRange> createState() => _NumberRangeState();
-}
-
-class _NumberRangeState extends State<_NumberRange> {
-  late final _min = TextEditingController(
-    text: widget.initial?.min?.toString() ?? '',
-  );
-  late final _max = TextEditingController(
-    text: widget.initial?.max?.toString() ?? '',
-  );
-
-  @override
-  void dispose() {
-    _min.dispose();
-    _max.dispose();
-    super.dispose();
-  }
-
-  void _emit() => widget.onChanged(
-    FieldRange(
-      min: num.tryParse(_min.text.trim()),
-      max: num.tryParse(_max.text.trim()),
-    ),
-  );
 
   @override
   Widget build(BuildContext context) {
-    InputDecoration deco(String hint) => InputDecoration(
-      hintText: hint,
-      isDense: true,
-      border: const OutlineInputBorder(),
-    );
-    const keyboard = TextInputType.numberWithOptions(
-      decimal: true,
-      signed: true,
-    );
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: _min,
-            keyboardType: keyboard,
-            decoration: deco('최소'),
-            onChanged: (_) => _emit(),
+    return MenuAnchor(
+      controller: _menu,
+      alignmentOffset: const Offset(-240, 6),
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        backgroundColor: WidgetStatePropertyAll(
+          Theme.of(context).colorScheme.surface,
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(color: Theme.of(context).dividerColor),
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: Text('~'),
-        ),
-        Expanded(
-          child: TextField(
-            controller: _max,
-            keyboardType: keyboard,
-            decoration: deco('최대'),
-            onChanged: (_) => _emit(),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _DateRange extends StatelessWidget {
-  final FieldRange? initial;
-  final ValueChanged<FieldRange> onChanged;
-  const _DateRange({this.initial, required this.onChanged});
-
-  String _fmt(num? ms) {
-    if (ms == null) return '지정 안 함';
-    final d = DateTime.fromMillisecondsSinceEpoch(ms.toInt());
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  }
-
-  Future<DateTime?> _pick(BuildContext context, num? current) {
-    final now = DateTime.now();
-    return showDatePicker(
-      context: context,
-      initialDate: current == null
-          ? now
-          : DateTime.fromMillisecondsSinceEpoch(current.toInt()),
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 10),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final r = initial ?? const FieldRange();
-    return Row(
-      children: [
-        TextButton(
-          onPressed: () async {
-            final d = await _pick(context, r.min);
-            if (d != null) {
-              onChanged(FieldRange(min: d.millisecondsSinceEpoch, max: r.max));
-            }
-          },
-          child: Text('부터 ${_fmt(r.min)}'),
-        ),
-        TextButton(
-          onPressed: () async {
-            final d = await _pick(context, r.max);
-            if (d != null) {
-              // 그날 끝까지 포함한다.
-              final end = DateTime(d.year, d.month, d.day, 23, 59, 59, 999);
-              onChanged(
-                FieldRange(min: r.min, max: end.millisecondsSinceEpoch),
-              );
-            }
-          },
-          child: Text('까지 ${_fmt(r.max)}'),
-        ),
-        if (!r.isEmpty)
-          IconButton(
-            icon: const Icon(Icons.close, size: 16),
-            tooltip: '지우기',
-            onPressed: () => onChanged(const FieldRange()),
-          ),
-      ],
+      ),
+      menuChildren: [_panel(context)],
+      builder: (context, controller, _) => TextButton.icon(
+        onPressed: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+        icon: const Icon(Icons.filter_list, size: 18),
+        label: Text(f.isEmpty ? '필터링' : '필터링: ${f.activeCount}'),
+      ),
     );
   }
 }

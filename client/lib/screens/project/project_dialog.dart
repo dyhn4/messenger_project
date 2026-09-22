@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -11,6 +12,7 @@ import 'project_detail_view.dart';
 import 'my_tasks_view.dart';
 import 'notes_view.dart';
 import 'project_notifications.dart';
+import 'project_search.dart';
 import 'project_forms.dart';
 import 'project_home_view.dart';
 import 'team_tasks_view.dart';
@@ -31,15 +33,7 @@ Future<void> showProjectDialog(BuildContext context, Session session) {
 }
 
 /// 지금 오른쪽에 무엇을 그리고 있는지.
-enum ProjectView {
-  home,
-  notifications,
-  myTasks,
-  calendar,
-  gantt,
-  notes,
-  project,
-}
+enum ProjectView { home, myTasks, calendar, gantt, notes, project }
 
 class ProjectDialog extends StatefulWidget {
   final Session session;
@@ -177,9 +171,89 @@ class _ProjectDialogState extends State<ProjectDialog> {
     }
   }
 
+  /// 검색 결과를 눌렀을 때 — 그 업무가 속한 프로젝트를 열고 업무 상세를 띄운다.
+  void _openSearchHit(Task task) {
+    if (_projects?.any((p) => p.id == task.projectId) == true) {
+      _select(ProjectView.project, projectId: task.projectId);
+    }
+    showTaskDetailDialog(context, widget.session, task.id);
+  }
+
+  /// 창 맨 위 줄 — 왼쪽 로고, 가운데 검색칸, 오른쪽 알림 종(+대화상자일 때 닫기).
+  /// 검색칸은 좌우 버튼 너비와 상관없이 창 정가운데에 오도록 Stack으로 겹쳐 놓는다.
+  Widget _buildTopBar(BuildContext context) {
+    final teamId = _teamId;
+    return SizedBox(
+      height: 56,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final searchWidth = math.min(520.0, constraints.maxWidth - 500);
+          return Stack(
+            children: [
+              if (teamId != null && searchWidth >= 200)
+                Positioned.fill(
+                  child: Center(
+                    child: SizedBox(
+                      width: searchWidth,
+                      child: ProjectSearchField(
+                        session: widget.session,
+                        teamId: teamId,
+                        onOpen: _openSearchHit,
+                      ),
+                    ),
+                  ),
+                ),
+              Positioned(
+                left: 16,
+                top: 0,
+                bottom: 0,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.track_changes,
+                      size: 22,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '프로젝트',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                right: 8,
+                top: 0,
+                bottom: 0,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ProjectNotificationsBell(
+                      session: widget.session,
+                      onOpen: _openNotification,
+                    ),
+                    if (!widget.embedInWindow)
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        tooltip: '닫기',
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final content = Row(
+    final body = Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SizedBox(
@@ -198,6 +272,14 @@ class _ProjectDialogState extends State<ProjectDialog> {
         ),
         const VerticalDivider(width: 1),
         Expanded(child: _buildContent(context)),
+      ],
+    );
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildTopBar(context),
+        const Divider(height: 1),
+        Expanded(child: body),
       ],
     );
     if (widget.embedInWindow) {
@@ -223,28 +305,18 @@ class _ProjectDialogState extends State<ProjectDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 창 오른쪽 위 닫기 버튼 — 사이드바가 왼쪽 끝까지 차 있어서 공용 FloatingDialog의
-        // 제목줄 대신 내용 쪽에 둔다. 진짜 OS 창(embedInWindow)일 때는 OS 타이틀바의 기본
-        // 닫기 버튼이 이미 있으므로 그리지 않는다.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _titleFor(_view),
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              if (!widget.embedInWindow)
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: '닫기',
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-            ],
-          ),
-        ),
+        // 화면 제목은 각 화면이 직접 크게 그린다(내 업무/캘린더/간트차트/노트). 여기서는
+        // 프로젝트 상세일 때만 프로젝트 이름을 얹는다 — 그 화면엔 이름을 보여줄 자리가 없다.
+        if (_view == ProjectView.project)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            child: Text(
+              _titleFor(_view),
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          )
+        else
+          const SizedBox(height: 12),
         Expanded(child: _buildBody(context, teamId)),
       ],
     );
@@ -252,7 +324,6 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   String _titleFor(ProjectView view) => switch (view) {
     ProjectView.home => '홈',
-    ProjectView.notifications => '알림',
     ProjectView.myTasks => '내 업무',
     ProjectView.calendar => '캘린더',
     ProjectView.gantt => '간트차트',
@@ -285,7 +356,8 @@ class _ProjectDialogState extends State<ProjectDialog> {
         final id = _projectId;
         if (id == null) return const SizedBox.shrink();
         return ProjectDetailView(
-          key: ValueKey(id),
+          // 일부러 key를 안 준다 — 프로젝트를 바꿔도 State가 유지되어 보던 탭(대시보드 등)이
+          // 그대로 남는다. 프로젝트별 데이터는 ProjectDetailView가 스스로 비우고 다시 읽는다.
           session: widget.session,
           projectId: id,
           reloadTick: _reloadTick,
@@ -308,12 +380,6 @@ class _ProjectDialogState extends State<ProjectDialog> {
           reloadTick: _reloadTick,
           gantt: true,
         );
-      case ProjectView.notifications:
-        return ProjectNotificationsView(
-          session: widget.session,
-          reloadTick: _reloadTick,
-          onOpen: _openNotification,
-        );
       case ProjectView.notes:
         return NotesView(
           session: widget.session,
@@ -325,7 +391,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
 }
 
 /// 왼쪽 사이드바 — 고정 메뉴(홈/내 업무/캘린더/간트차트/노트) + 내 프로젝트 목록.
-class _Sidebar extends StatelessWidget {
+class _Sidebar extends StatefulWidget {
   final Session session;
   final List<Project>? projects;
   final List<Project> archivedProjects;
@@ -349,57 +415,53 @@ class _Sidebar extends StatelessWidget {
   });
 
   @override
+  State<_Sidebar> createState() => _SidebarState();
+}
+
+class _SidebarState extends State<_Sidebar> {
+  // 오른쪽 내용도 스크롤 뷰라, 사이드바까지 기본(Primary) 컨트롤러를 같이 쓰면 스크롤바가
+  // "한 컨트롤러에 스크롤 위치가 여럿"이라며 그리지 못한다 — 사이드바는 자기 것을 쓴다.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Session get session => widget.session;
+  List<Project>? get projects => widget.projects;
+  List<Project> get archivedProjects => widget.archivedProjects;
+  ProjectView get view => widget.view;
+  String? get projectId => widget.projectId;
+  void Function(ProjectView view, {String? projectId}) get onSelect =>
+      widget.onSelect;
+  VoidCallback get onCreateProject => widget.onCreateProject;
+  VoidCallback get onBrowse => widget.onBrowse;
+  ValueChanged<Project> get onToggleFavorite => widget.onToggleFavorite;
+
+  @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     final list = projects ?? const <Project>[];
     final favorites = list.where((p) => p.favorite).toList();
     final others = list.where((p) => !p.favorite).toList();
 
-    return ColoredBox(
+    // ColoredBox가 아니라 Material로 칠한다 — 사이 배경이 ColoredBox면 ListTile의 선택 색과
+    // 클릭 효과가 그 뒤에 가려서 안 보인다(Flutter가 assert로 경고한다).
+    return Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       child: MutedScrollbar(
+        controller: _scroll,
         child: ListView(
+          controller: _scroll,
           padding: const EdgeInsets.symmetric(vertical: 12),
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.track_changes,
-                    size: 20,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '프로젝트',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
             _SidebarItem(
               icon: Icons.home_outlined,
               label: '홈',
               selected: view == ProjectView.home,
               onTap: () => onSelect(ProjectView.home),
-            ),
-            _SidebarItem(
-              icon: Icons.notifications_none,
-              label: '알림',
-              selected: view == ProjectView.notifications,
-              trailing: ListenableBuilder(
-                listenable: session,
-                builder: (context, _) => session.projectUnread == 0
-                    ? const SizedBox.shrink()
-                    : Badge(
-                        backgroundColor: Colors.redAccent,
-                        label: Text('${session.projectUnread}'),
-                      ),
-              ),
-              onTap: () => onSelect(ProjectView.notifications),
             ),
             _SidebarItem(
               icon: Icons.checklist_outlined,
@@ -558,13 +620,11 @@ class _SidebarItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final Widget? trailing;
   const _SidebarItem({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
-    this.trailing,
   });
 
   @override
@@ -573,7 +633,6 @@ class _SidebarItem extends StatelessWidget {
       dense: true,
       leading: Icon(icon, size: 20),
       title: Text(label),
-      trailing: trailing,
       selected: selected,
       selectedTileColor: Theme.of(
         context,

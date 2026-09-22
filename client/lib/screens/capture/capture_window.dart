@@ -30,7 +30,10 @@ const _kBeginMethod = 'capture_begin';
 class CaptureOutcome {
   final String action;
   final File? file;
-  const CaptureOutcome(this.action, this.file);
+
+  /// 캡처가 실패해서 취소된 경우의 이유 — 메인 창이 그대로 토스트로 보여준다.
+  final String? error;
+  const CaptureOutcome(this.action, this.file, {this.error});
 }
 
 /// 오버레이는 콘솔이 없는 별도 창이라 문제가 생겨도 알 방법이 없다 — 임시 폴더의 로그 파일에 남긴다.
@@ -81,6 +84,7 @@ Future<CaptureOutcome?> startScreenCapture({
           CaptureOutcome(
             args['action'] as String,
             path == null ? null : File(path),
+            error: args['error'] as String?,
           ),
         );
       }
@@ -91,7 +95,7 @@ Future<CaptureOutcome?> startScreenCapture({
     unawaited(
       Future<void>.delayed(
         hideMessenger ? const Duration(milliseconds: 60) : Duration.zero,
-      ).then((_) => captureVirtualScreenTo(rawPath)).catchError((Object e) {
+      ).then((_) => captureVirtualScreenTo(geo)).catchError((Object e) {
         _log('화면 찍기 실패: $e');
         if (!completer.isCompleted) completer.complete(null);
       }),
@@ -238,13 +242,14 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
   final w = args['width'] as int;
   final h = args['height'] as int;
   final mainId = args['mainWindowId'] as String;
+  _log('캡처 준비 시작 ${w}x$h @($x,$y)');
 
   // 화면을 찍는 쪽(메인 창)이 아직 파일을 다 쓰지 못했을 수 있다 — 나타날 때까지 기다린다.
   final waitStart = DateTime.now();
   while (!File(rawPath).existsSync()) {
     if (DateTime.now().difference(waitStart) > const Duration(seconds: 10)) {
       _log('화면 파일을 기다리다 시간 초과');
-      await _reportAndHide(mainId, 'cancel', null);
+      await _reportAndHide(mainId, 'cancel', null, error: '화면을 찍지 못했습니다.');
       return;
     }
     await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -255,7 +260,7 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
     image = await _decodeBgra(await File(rawPath).readAsBytes(), w, h);
   } catch (e) {
     _log('화면 이미지 준비 실패: $e');
-    await _reportAndHide(mainId, 'cancel', null);
+    await _reportAndHide(mainId, 'cancel', null, error: '$e');
     return;
   }
   try {
@@ -295,11 +300,20 @@ Future<void> _prepareSession(Map<String, dynamic> args) async {
 }
 
 /// 창을 숨기고 메인 창에 결과를 알린다(캡처를 시작하지도 못한 경우 포함).
-Future<void> _reportAndHide(String mainId, String action, String? path) async {
+Future<void> _reportAndHide(
+  String mainId,
+  String action,
+  String? path, {
+  String? error,
+}) async {
   if (_overlayHwnd != 0) ShowWindow(_overlayHwnd, SW_HIDE);
   try {
     await WindowController.fromWindowId(mainId)
-        .invokeMethod(_kResultMethod, {'action': action, 'path': path})
+        .invokeMethod(_kResultMethod, {
+          'action': action,
+          'path': path,
+          'error': error,
+        })
         .timeout(const Duration(seconds: 5));
   } catch (e) {
     _log('메인 창에 결과 전달 실패: $e');
@@ -307,6 +321,12 @@ Future<void> _reportAndHide(String mainId, String action, String? path) async {
 }
 
 Future<ui.Image> _decodeBgra(Uint8List bytes, int w, int h) async {
+  // ImageDescriptor.raw는 버퍼 길이를 검사하지 않는다 — 찍은 파일이 기대보다 짧으면
+  // 엔진이 버퍼 밖을 읽어서 앱이 그대로 죽는다. 여기서 먼저 막고 예외로 바꾼다.
+  final needed = w * h * 4;
+  if (w <= 0 || h <= 0 || bytes.length < needed) {
+    throw StateError('화면 이미지 크기가 맞지 않습니다(${bytes.length} < $needed, $w x $h).');
+  }
   final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
   final descriptor = ui.ImageDescriptor.raw(
     buffer,

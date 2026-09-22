@@ -1,4 +1,4 @@
-# 새 클라이언트 버전을 빌드해서 server/releases/에 배포한다. 버전 번호는 client/pubspec.yaml의
+﻿# 새 클라이언트 버전을 빌드해서 server/releases/에 배포한다. 버전 번호는 client/pubspec.yaml의
 # version:을 그대로 읽어서 쓴다 — 예전엔 -Version 인자로 따로 입력받았는데, 실제 빌드 시점의
 # pubspec.yaml과 이 인자가 서로 다른 값일 수 있어서(둘 중 하나만 올리고 깜빡하는 실수) 서버가
 # 광고하는 버전과 실제 설치되는 exe에 새겨진 버전이 어긋나는 사고가 있었다(업데이트를 설치해도
@@ -30,7 +30,24 @@ Pop-Location
 
 Write-Host "2) Windows 릴리즈 빌드..."
 Push-Location $client
+# 빌드 폴더에서 띄워 둔 앱이 살아 있으면 링커가 client.exe를 덮어쓰지 못해서
+# "LNK1104: 파일을 열 수 없습니다"로 실패한다. 그 폴더에서 실행 중인 것만 골라서 끈다
+# (설치된 앱 C:\Users\...\AppData\Local\TangoTalk\client.exe 는 건드리지 않는다).
+$buildExe = "$client\build\windows\x64\runner\Release\client.exe"
+Get-CimInstance Win32_Process -Filter "Name='client.exe'" |
+  Where-Object { $_.ExecutablePath -eq $buildExe } |
+  ForEach-Object {
+    Write-Host "   빌드 폴더에서 실행 중인 앱을 종료합니다 (PID $($_.ProcessId))"
+    Stop-Process -Id $_.ProcessId -Force
+  }
+
+# 버전만 올렸을 때 client.exe가 다시 링크되지 않아 예전 버전 번호가 그대로 박히는 문제가 있다.
+# 앱은 자기 버전을 client.exe의 버전 정보에서 읽으므로(package_info_plus), 그러면 업데이트를
+# 설치해도 계속 "새 버전 있음"으로 뜬다. Runner.rc를 건드려 버전 리소스를 매번 다시 컴파일한다.
+(Get-Item "$client\windows\runner\Runner.rc").LastWriteTime = Get-Date
 flutter build windows --release
+$builtVersion = (Get-Item "$client\build\windows\x64\runner\Release\client.exe").VersionInfo.FileVersion
+if ($builtVersion -ne $Version) { throw "client.exe 버전이 $builtVersion 입니다(기대: $Version). 빌드가 버전을 반영하지 못했습니다." }
 Pop-Location
 
 Write-Host "3) Windows 설치 프로그램 컴파일..."

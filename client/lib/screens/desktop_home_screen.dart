@@ -492,7 +492,11 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TeamAvatar(team: team, size: 96),
+            TeamAvatar(
+              team: team,
+              resolveUrl: widget.session.resolveUrl,
+              size: 96,
+            ),
             const SizedBox(height: 16),
             Text(
               '${team.name}입니다',

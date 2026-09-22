@@ -1,3 +1,5 @@
+import '../widgets/avatar_utils.dart' show initialsOf;
+
 /// 계정 등급. **서버 운영자만** 바꿀 수 있고(관리자 콘솔), 팀이 아니라 계정에 붙는다 —
 /// 어느 팀에 있든 같은 등급이다. 자세한 설명은 README.md의 "권한 등급" 참고.
 /// 서버 users.role 문자열과 1:1로 대응한다.
@@ -96,6 +98,9 @@ class Team {
   String? iconEmoji;
   String? iconColor;
 
+  /// 팀 아이콘 사진(서명된 /files/ 링크) — 있으면 이모지·이니셜 대신 이걸 보여준다.
+  String? iconUrl;
+
   /// 이 팀에서 새 토픽을 만들 수 있는 최소 등급.
   TopicCreationPolicy topicCreationPolicy;
 
@@ -124,6 +129,7 @@ class Team {
     required this.name,
     this.iconEmoji,
     this.iconColor,
+    this.iconUrl,
     this.topicCreationPolicy = TopicCreationPolicy.member,
     this.topicCreatorIds = const [],
     this.messageEditDeleteEnabled = true,
@@ -139,6 +145,7 @@ class Team {
     name: json['name'] as String,
     iconEmoji: json['iconEmoji'] as String?,
     iconColor: json['iconColor'] as String?,
+    iconUrl: json['iconUrl'] as String?,
     topicCreationPolicy: topicCreationPolicyFromWire(
       json['topicCreationPolicy'] as String?,
     ),
@@ -155,8 +162,8 @@ class Team {
     memberCount: (json['memberCount'] as num?)?.toInt(),
   );
 
-  /// 아이콘 이모지가 없으면 팀 이름 첫 글자를 쓴다(사용자 아바타의 initial 방식과 동일).
-  String get initial => name.isEmpty ? '?' : name.substring(0, 1);
+  /// 아이콘 이모지가 없으면 팀 이름 앞 2글자를 쓴다.
+  String get initial => initialsOf(name);
 
   /// 이 팀을 관리할 수 있는지 — 그 팀의 소유자이거나 계정 등급이 관리자면 된다
   /// (서버 permissions.js의 canManageTeam과 같은 규칙).
@@ -184,6 +191,7 @@ class OrgChartTeam {
   final String name;
   final String? iconEmoji;
   final String? iconColor;
+  final String? iconUrl;
   final List<String> memberIds;
 
   /// 이 팀의 소유자 id — 조직도 "멤버" 탭이 등급 배지 옆에 "소유자" 표시를 붙일지 판단하는
@@ -195,6 +203,7 @@ class OrgChartTeam {
     required this.name,
     this.iconEmoji,
     this.iconColor,
+    this.iconUrl,
     required this.memberIds,
     this.ownerId,
   });
@@ -204,6 +213,7 @@ class OrgChartTeam {
     name: json['name'] as String,
     iconEmoji: json['iconEmoji'] as String?,
     iconColor: json['iconColor'] as String?,
+    iconUrl: json['iconUrl'] as String?,
     memberIds: (json['memberIds'] as List?)?.cast<String>() ?? const [],
     ownerId: json['ownerId'] as String?,
   );
@@ -214,6 +224,7 @@ class OrgChartTeam {
     name: name,
     iconEmoji: iconEmoji,
     iconColor: iconColor,
+    iconUrl: iconUrl,
     createdAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
 }

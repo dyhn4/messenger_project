@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/admin.dart';
+import '../models/team.dart';
 import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../services/time_format.dart';
@@ -15,6 +17,7 @@ import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
+import '../widgets/team_avatar.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
 /// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 다섯 탭.
@@ -118,6 +121,7 @@ class _StatsTabState extends State<_StatsTab> {
         teamInviteLinkCreation: teamInviteLinkCreation,
         projectCreation: projectCreation,
       );
+      if (orgScope != null) await widget.session.refreshOrgInfo();
       await _load();
     } catch (e) {
       if (mounted) showAppToast(context, '실패: $e');
@@ -157,9 +161,7 @@ class _StatsTabState extends State<_StatsTab> {
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
           ),
-          const SizedBox(height: 24),
-          const Divider(height: 1),
-          const SizedBox(height: 16),
+          const _SectionDivider(),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -192,7 +194,7 @@ class _StatsTabState extends State<_StatsTab> {
                   : (s) => _save(teamCreation: s.first),
             ),
           ),
-          const SizedBox(height: 20),
+          const _SectionDivider(),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -226,7 +228,7 @@ class _StatsTabState extends State<_StatsTab> {
                   : (s) => _save(teamInviteLinkCreation: s.first),
             ),
           ),
-          const SizedBox(height: 20),
+          const _SectionDivider(),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -260,7 +262,7 @@ class _StatsTabState extends State<_StatsTab> {
                   : (s) => _save(projectCreation: s.first),
             ),
           ),
-          const SizedBox(height: 20),
+          const _SectionDivider(),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -290,7 +292,7 @@ class _StatsTabState extends State<_StatsTab> {
                   : (s) => _save(orgScope: s.first),
             ),
           ),
-          const SizedBox(height: 20),
+          const _SectionDivider(),
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -314,8 +316,20 @@ class _StatsTabState extends State<_StatsTab> {
   }
 }
 
-/// "직책 목록" 관리 — 칩(삭제 버튼 포함) + 추가 입력창. `_StatsTab`과 별도 위젯으로 뺀 이유는
-/// 이 목록 자체의 로딩/에러 상태가 위 서버 설정(orgScope 등)과 독립적이기 때문이다.
+/// "운영 현황" 탭의 항목 사이 구분선.
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 20),
+    child: Divider(height: 1),
+  );
+}
+
+/// "직책 목록" 관리 — 끌어다 놓아 서열을 바꾸는 칩 + 끝의 "+" 버튼(누르면 이름 입력 팝업).
+/// `_StatsTab`과 별도 위젯으로 뺀 이유는 이 목록 자체의 로딩/에러 상태가 위 서버
+/// 설정(orgScope 등)과 독립적이기 때문이다.
 class _PositionOptionsEditor extends StatefulWidget {
   final Session session;
   const _PositionOptionsEditor({required this.session});
@@ -328,18 +342,11 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
   List<PositionOption>? _options;
   String? _error;
   bool _adding = false;
-  final _newLabel = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _newLabel.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -352,12 +359,14 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
   }
 
   Future<void> _add() async {
-    final label = _newLabel.text.trim();
-    if (label.isEmpty) return;
+    final label = await showDialog<String>(
+      context: context,
+      builder: (_) => const _AddPositionDialog(),
+    );
+    if (label == null || !mounted) return;
     setState(() => _adding = true);
     try {
       final created = await widget.session.createPositionOption(label);
-      _newLabel.clear();
       if (mounted) setState(() => _options = [...?_options, created]);
     } catch (e) {
       if (mounted) showAppToast(context, '실패: $e');
@@ -379,24 +388,49 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
     }
   }
 
-  /// [direction]은 'left' 또는 'right' — 그 이웃과 서열(sortOrder)을 맞바꾼다.
-  Future<void> _move(PositionOption option, String direction) async {
+  // 끄는 동안의 미리보기 순서 — 끌고 있는 칩이 다른 칩 위에 올라갈 때마다 그 자리로 옮겨서
+  // 나머지 칩들이 밀려나 보이게 하고, 손을 놓으면 이 순서를 저장한다. null이면 끄는 중이 아님.
+  List<PositionOption>? _preview;
+
+  void _dragStarted() => setState(() => _preview = [...?_options]);
+
+  void _dragOver(String draggedId, String targetId) {
+    final list = _preview;
+    if (list == null) return;
+    final from = list.indexWhere((o) => o.id == draggedId);
+    final to = list.indexWhere((o) => o.id == targetId);
+    if (from == -1 || to == -1 || from == to) return;
+    setState(() => list.insert(to, list.removeAt(from)));
+  }
+
+  /// 손을 놓으면(칩 밖에 놓아도) 미리보기 순서를 그대로 확정한다. 화면을 먼저 바꾸고, 저장에
+  /// 실패하면 다시 불러온다.
+  Future<void> _dragEnded() async {
+    final list = _preview;
+    final before = _options;
+    setState(() => _preview = null);
+    if (list == null || before == null) return;
+    final ids = [for (final o in list) o.id];
+    if (listEquals(ids, [for (final o in before) o.id])) return;
+    setState(() => _options = list);
     try {
-      final updated = await widget.session.movePositionOption(
-        option.id,
-        direction,
-      );
+      final updated = await widget.session.reorderPositionOptions(ids);
       if (mounted) setState(() => _options = updated);
     } catch (e) {
-      if (mounted) showAppToast(context, '실패: $e');
+      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      await _load();
     }
   }
 
-  /// 별표를 누르면 기본값 지정/해제를 토글한다(이미 기본값이던 다른 직책은 자동으로 풀린다).
-  Future<void> _toggleDefault(PositionOption option) async {
+  /// 회원가입 기본 직책 변경 — [id]가 null이면 해제. 서버 API는 토글이라, 해제는 지금 기본값을
+  /// 한 번 더 토글하고, 지정은 새 항목을 토글한다(기존 기본값은 서버가 알아서 내린다).
+  Future<void> _setDefault(String? id) async {
+    final current = _options?.where((o) => o.isDefault).firstOrNull;
+    if (id == current?.id) return;
+    final toggleId = id ?? current!.id;
     try {
       final updated = await widget.session.toggleDefaultPositionOption(
-        option.id,
+        toggleId,
       );
       if (mounted) setState(() => _options = updated);
     } catch (e) {
@@ -407,7 +441,7 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) return Text(_error!);
-    final options = _options;
+    final options = _preview ?? _options;
     if (options == null) {
       return const SizedBox(
         height: 24,
@@ -415,68 +449,139 @@ class _PositionOptionsEditorState extends State<_PositionOptionsEditor> {
         child: CircularProgressIndicator(strokeWidth: 2),
       );
     }
+    final hint = Theme.of(context).hintColor;
+    final defaultId = _options!.where((o) => o.isDefault).firstOrNull?.id;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '화살표를 눌러 서열을 바꿀 수 있습니다(왼쪽이 위). 별표를 누르면 회원가입 시 자동으로'
-          ' 부여할 기본값으로 지정됩니다(하나만 지정 가능).',
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          '직책을 끌어서 옮기면 서열을 바꿀 수 있습니다(왼쪽이 위).',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: hint),
         ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            for (var i = 0; i < options.length; i++)
+            for (final option in options)
               _PositionOptionPill(
-                option: options[i],
-                canMoveLeft: i > 0,
-                canMoveRight: i < options.length - 1,
-                onMoveLeft: () => _move(options[i], 'left'),
-                onMoveRight: () => _move(options[i], 'right'),
-                onToggleDefault: () => _toggleDefault(options[i]),
-                onDelete: () => _delete(options[i]),
+                key: ValueKey(option.id),
+                option: option,
+                onDragStarted: _dragStarted,
+                onDragOver: (draggedId) => _dragOver(draggedId, option.id),
+                onDragEnded: _dragEnded,
+                onDelete: () => _delete(option),
               ),
-            if (options.isEmpty)
-              Text(
-                '등록된 직책이 없습니다.',
-                style: TextStyle(color: Theme.of(context).hintColor),
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _newLabel,
-                maxLength: 30,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  hintText: '예: 팀장',
-                  border: OutlineInputBorder(),
-                  counterText: '',
-                ),
-                onSubmitted: (_) => _adding ? null : _add(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: _adding ? null : _add,
-              child: _adding
+            IconButton.filledTonal(
+              tooltip: '직책 추가',
+              icon: _adding
                   ? const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('추가'),
+                  : const Icon(Icons.add, size: 18),
+              visualDensity: VisualDensity.compact,
+              onPressed: _adding ? null : _add,
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Text('회원가입 시 기본 직책', style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(width: 10),
+            _DefaultPositionPicker(
+              options: _options!,
+              selectedId: defaultId,
+              onSelected: _setDefault,
             ),
           ],
         ),
       ],
+    );
+  }
+}
+
+/// "회원가입 시 기본 직책" 선택 버튼 — 직책 칩과 같은 알약 모양 버튼을 누르면 목록이 아래로
+/// 펼쳐진다. 기본값이 있으면 버튼을 강조색으로 칠해 지정돼 있다는 게 한눈에 보이게 한다.
+class _DefaultPositionPicker extends StatelessWidget {
+  final List<PositionOption> options;
+  final String? selectedId;
+  final ValueChanged<String?> onSelected;
+  const _DefaultPositionPicker({
+    required this.options,
+    required this.selectedId,
+    required this.onSelected,
+  });
+
+  // PopupMenuButton은 null 값을 "메뉴 닫힘"으로 보므로 "지정 안 함"은 빈 문자열로 표시한다.
+  static const _none = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final selected = options.where((o) => o.id == selectedId).firstOrNull;
+    final fg = selected != null
+        ? scheme.onPrimaryContainer
+        : scheme.onSurfaceVariant;
+
+    PopupMenuItem<String> item(String value, String label) => PopupMenuItem(
+      value: value,
+      height: 40,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 24,
+            child: value == (selectedId ?? _none)
+                ? Icon(Icons.check, size: 18, color: scheme.primary)
+                : null,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: value == _none
+                ? TextStyle(color: Theme.of(context).hintColor)
+                : null,
+          ),
+        ],
+      ),
+    );
+
+    return PopupMenuButton<String>(
+      tooltip: '기본 직책 선택',
+      position: PopupMenuPosition.under,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      onSelected: (v) => onSelected(v == _none ? null : v),
+      itemBuilder: (_) => [
+        item(_none, '지정 안 함'),
+        const PopupMenuDivider(),
+        for (final o in options) item(o.id, o.label),
+      ],
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
+        decoration: BoxDecoration(
+          color: selected != null
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              selected?.label ?? '지정 안 함',
+              style: TextStyle(
+                color: fg,
+                fontWeight: selected != null ? FontWeight.w600 : null,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.expand_more, size: 18, color: fg),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -731,72 +836,75 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
   }
 }
 
-/// 직책 목록 한 항목: ◀ [이름] ▶ [★] [x]. 화살표를 누르면 그 방향의 이웃과 서열을 맞바꾸고
-/// (맨 끝이면 그쪽 화살표가 비활성화된다), 별표를 누르면 회원가입 기본값으로 지정/해제한다
-/// (기본값이면 테두리로도 표시).
+/// 직책 목록 한 항목: [이름 x]. 끄는 동안 다른 칩 위에 올라가면 [onDragOver]로 알려서
+/// 부모가 미리보기 순서를 바꾸게 한다(나머지 칩이 밀려난다). 끌고 있는 칩의 자리에는 흐린
+/// 칩 + 테두리로 "놓일 자리"를 보여준다.
 class _PositionOptionPill extends StatelessWidget {
   final PositionOption option;
-  final bool canMoveLeft;
-  final bool canMoveRight;
-  final VoidCallback onMoveLeft;
-  final VoidCallback onMoveRight;
-  final VoidCallback onToggleDefault;
+  final VoidCallback onDragStarted;
+  final ValueChanged<String> onDragOver;
+  final VoidCallback onDragEnded;
   final VoidCallback onDelete;
   const _PositionOptionPill({
+    super.key,
     required this.option,
-    required this.canMoveLeft,
-    required this.canMoveRight,
-    required this.onMoveLeft,
-    required this.onMoveRight,
-    required this.onToggleDefault,
+    required this.onDragStarted,
+    required this.onDragOver,
+    required this.onDragEnded,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
+    final chip = _chip(context);
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (d) {
+        if (d.data == option.id) return false;
+        onDragOver(d.data);
+        return true;
+      },
+      builder: (context, _, _) => MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: Draggable<String>(
+          data: option.id,
+          onDragStarted: onDragStarted,
+          onDragEnd: (_) => onDragEnded(),
+          feedback: Material(
+            color: Colors.transparent,
+            elevation: 4,
+            borderRadius: BorderRadius.circular(20),
+            child: chip,
+          ),
+          childWhenDragging: DecoratedBox(
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.primary,
+                width: 1.5,
+              ),
+            ),
+            child: Opacity(opacity: 0.3, child: chip),
+          ),
+          child: chip,
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    final primary = Theme.of(context).colorScheme.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(20),
-        border: option.isDefault
-            ? Border.all(color: primary, width: 1.5)
-            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: '왼쪽으로',
-            icon: const Icon(Icons.chevron_left, size: 18),
-            padding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: canMoveLeft ? onMoveLeft : null,
-          ),
+          const SizedBox(width: 10),
           Text(option.label),
-          IconButton(
-            tooltip: '오른쪽으로',
-            icon: const Icon(Icons.chevron_right, size: 18),
-            padding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: canMoveRight ? onMoveRight : null,
-          ),
-          IconButton(
-            tooltip: option.isDefault ? '기본값 해제' : '회원가입 기본값으로 지정',
-            icon: Icon(
-              option.isDefault ? Icons.star : Icons.star_border,
-              size: 17,
-              color: option.isDefault ? primary : hint,
-            ),
-            padding: EdgeInsets.zero,
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: onToggleDefault,
-          ),
           const SizedBox(width: 2),
           InkWell(
             onTap: onDelete,
@@ -809,6 +917,64 @@ class _PositionOptionPill extends StatelessWidget {
           const SizedBox(width: 2),
         ],
       ),
+    );
+  }
+}
+
+/// 직책 목록의 "+" 버튼으로 여는 팝업 — 입력한 직책 이름(앞뒤 공백 제거)을 돌려준다.
+class _AddPositionDialog extends StatefulWidget {
+  const _AddPositionDialog();
+
+  @override
+  State<_AddPositionDialog> createState() => _AddPositionDialogState();
+}
+
+class _AddPositionDialogState extends State<_AddPositionDialog> {
+  final _label = TextEditingController();
+
+  @override
+  void dispose() {
+    _label.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final label = _label.text.trim();
+    if (label.isEmpty) return;
+    Navigator.of(context).pop(label);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('직책 추가'),
+      content: SizedBox(
+        width: 320,
+        child: TextField(
+          controller: _label,
+          autofocus: true,
+          maxLength: 30,
+          decoration: const InputDecoration(
+            labelText: '직책 이름',
+            hintText: '예: 팀장',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _submit(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _label,
+          builder: (context, value, _) => FilledButton(
+            onPressed: value.text.trim().isEmpty ? null : _submit,
+            child: const Text('추가'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1561,21 +1727,16 @@ class _TeamsTabState extends State<_TeamsTab> {
           final team = teams[i];
           return ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Container(
-              width: 40,
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color:
-                    parseHexColor(team.iconColor) ??
-                    Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(11),
+            leading: TeamAvatar(
+              team: Team(
+                id: team.id,
+                name: team.name,
+                iconEmoji: team.iconEmoji,
+                iconColor: team.iconColor,
+                iconUrl: team.iconUrl,
+                createdAt: team.createdAt,
               ),
-              child: Text(
-                team.iconEmoji?.isNotEmpty == true
-                    ? team.iconEmoji!
-                    : (team.name.isEmpty ? '?' : team.name.substring(0, 1)),
-              ),
+              resolveUrl: widget.session.resolveUrl,
             ),
             title: Text(team.name),
             subtitle: Text(

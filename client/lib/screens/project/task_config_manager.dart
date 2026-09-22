@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../models/project.dart';
@@ -178,7 +179,118 @@ class ConfigBubble extends StatelessWidget {
   }
 }
 
-/// 말풍선 오른쪽에 붙는 작은 아이콘 버튼(위로/아래로/수정/삭제).
+/// 말풍선을 끌어서 순서를 바꾸는 목록 — 끄는 동안 끌고 있는 말풍선이 손 위치의 자리로 옮겨가
+/// 나머지가 밀려나고(놓일 자리는 원래 칸에 흐리게 표시), 손을 놓으면 그 순서를 [onReorder]에
+/// 알린다. 목록 자체는 스크롤하지 않는다("기본 필드" 카드 하나의 스크롤을 같이 쓴다).
+class ReorderableBubbleList<T> extends StatefulWidget {
+  final List<T> items;
+  final String Function(T item) idOf;
+  final Widget Function(T item) itemBuilder;
+  final void Function(List<T> reordered) onReorder;
+  const ReorderableBubbleList({
+    super.key,
+    required this.items,
+    required this.idOf,
+    required this.itemBuilder,
+    required this.onReorder,
+  });
+
+  @override
+  State<ReorderableBubbleList<T>> createState() =>
+      _ReorderableBubbleListState<T>();
+}
+
+class _ReorderableBubbleListState<T> extends State<ReorderableBubbleList<T>> {
+  /// 끄는 동안의 미리보기 순서. null이면 끄는 중이 아님.
+  List<T>? _preview;
+
+  void _dragOver(String draggedId, String targetId) {
+    final list = _preview;
+    if (list == null) return;
+    final from = list.indexWhere((e) => widget.idOf(e) == draggedId);
+    final to = list.indexWhere((e) => widget.idOf(e) == targetId);
+    if (from == -1 || to == -1 || from == to) return;
+    setState(() => list.insert(to, list.removeAt(from)));
+  }
+
+  void _dragEnded() {
+    final list = _preview;
+    setState(() => _preview = null);
+    if (list == null) return;
+    final before = [for (final e in widget.items) widget.idOf(e)];
+    final after = [for (final e in list) widget.idOf(e)];
+    if (!listEquals(before, after)) widget.onReorder(list);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _preview ?? widget.items;
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final item in items)
+            _DraggableBubble(
+              key: ValueKey(widget.idOf(item)),
+              id: widget.idOf(item),
+              width: constraints.maxWidth,
+              onDragStarted: () => setState(() => _preview = [...widget.items]),
+              onDragOver: (draggedId) =>
+                  _dragOver(draggedId, widget.idOf(item)),
+              onDragEnded: _dragEnded,
+              child: widget.itemBuilder(item),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DraggableBubble extends StatelessWidget {
+  final String id;
+  final double width;
+  final VoidCallback onDragStarted;
+  final ValueChanged<String> onDragOver;
+  final VoidCallback onDragEnded;
+  final Widget child;
+  const _DraggableBubble({
+    super.key,
+    required this.id,
+    required this.width,
+    required this.onDragStarted,
+    required this.onDragOver,
+    required this.onDragEnded,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (d) {
+        if (d.data == id) return false;
+        onDragOver(d.data);
+        return true;
+      },
+      builder: (context, _, _) => MouseRegion(
+        cursor: SystemMouseCursors.grab,
+        child: Draggable<String>(
+          data: id,
+          onDragStarted: onDragStarted,
+          onDragEnd: (_) => onDragEnded(),
+          // 끌고 다니는 동안 보이는 모습 — 폭을 원래 칸과 같게 잡아야 모양이 안 일그러진다.
+          feedback: Material(
+            color: Colors.transparent,
+            child: SizedBox(width: width, child: child),
+          ),
+          childWhenDragging: Opacity(opacity: 0.3, child: child),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// 말풍선 오른쪽에 붙는 작은 아이콘 버튼(수정/삭제).
 Widget configAction(IconData icon, String tooltip, VoidCallback? onPressed) =>
     IconButton(
       icon: Icon(icon, size: 16),
@@ -276,12 +388,9 @@ class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
     }
   }
 
-  Future<void> _move(int index, int delta) async {
-    final list = [..._statuses!];
-    final to = index + delta;
-    if (to < 0 || to >= list.length) return;
-    final item = list.removeAt(index);
-    list.insert(to, item);
+  /// 말풍선을 끌어다 놓아 순서가 바뀌었을 때 — 화면을 먼저 바꾸고, 저장에 실패하면 다시
+  /// 불러온다.
+  Future<void> _reorder(List<TaskStatusDef> list) async {
     setState(() => _statuses = list);
     try {
       await widget.session.api!.reorderTaskStatuses(widget.projectId, [
@@ -302,39 +411,25 @@ class _ProjectStatusEditorState extends State<ProjectStatusEditor> {
     }
     return ConfigSection(
       title: '상태',
-      description: '칸반보드의 열이 되는 상태입니다. 위에서부터 왼쪽 열 순서입니다.',
+      description: '칸반보드의 열이 되는 상태입니다. 위에서부터 왼쪽 열 순서이고, 끌어서 순서를 바꿀 수 있습니다.',
       addLabel: '추가',
       onAdd: _edit,
       emptyHint: '등록된 상태가 없습니다.',
       children: [
-        for (var i = 0; i < statuses.length; i++)
-          ConfigBubble(
-            dotColor: parseTypeColor(statuses[i].color),
-            title: statuses[i].name,
-            subtitle: _categoryLabel(statuses[i].category),
+        ReorderableBubbleList<TaskStatusDef>(
+          items: statuses,
+          idOf: (s) => s.id,
+          onReorder: _reorder,
+          itemBuilder: (s) => ConfigBubble(
+            dotColor: parseTypeColor(s.color),
+            title: s.name,
+            subtitle: _categoryLabel(s.category),
             actions: [
-              configAction(
-                Icons.arrow_upward,
-                '위로',
-                i == 0 ? null : () => _move(i, -1),
-              ),
-              configAction(
-                Icons.arrow_downward,
-                '아래로',
-                i == statuses.length - 1 ? null : () => _move(i, 1),
-              ),
-              configAction(
-                Icons.edit_outlined,
-                '수정',
-                () => _edit(existing: statuses[i]),
-              ),
-              configAction(
-                Icons.delete_outline,
-                '삭제',
-                () => _delete(statuses[i]),
-              ),
+              configAction(Icons.edit_outlined, '수정', () => _edit(existing: s)),
+              configAction(Icons.delete_outline, '삭제', () => _delete(s)),
             ],
           ),
+        ),
       ],
     );
   }
@@ -819,12 +914,9 @@ class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
     }
   }
 
-  Future<void> _move(int index, int delta) async {
-    final list = [..._priorities!];
-    final to = index + delta;
-    if (to < 0 || to >= list.length) return;
-    final item = list.removeAt(index);
-    list.insert(to, item);
+  /// 말풍선을 끌어다 놓아 순서가 바뀌었을 때 — 화면을 먼저 바꾸고, 저장에 실패하면 다시
+  /// 불러온다.
+  Future<void> _reorder(List<TaskPriorityDef> list) async {
     setState(() => _priorities = list);
     try {
       await widget.session.api!.reorderTaskPriorities(widget.projectId, [
@@ -845,39 +937,25 @@ class _ProjectPriorityEditorState extends State<ProjectPriorityEditor> {
     }
     return ConfigSection(
       title: '우선순위',
-      description: '업무에 붙는 우선순위입니다. 위에서부터 보여주는 순서입니다.',
+      description: '업무에 붙는 우선순위입니다. 위에서부터 보여주는 순서이고, 끌어서 순서를 바꿀 수 있습니다.',
       addLabel: '추가',
       onAdd: _edit,
       emptyHint: '등록된 우선순위가 없습니다.',
       children: [
-        for (var i = 0; i < priorities.length; i++)
-          ConfigBubble(
-            dotColor: parseTypeColor(priorities[i].color),
-            title: priorities[i].name,
-            subtitle: taskPriorityLabel(priorities[i].level),
+        ReorderableBubbleList<TaskPriorityDef>(
+          items: priorities,
+          idOf: (p) => p.id,
+          onReorder: _reorder,
+          itemBuilder: (p) => ConfigBubble(
+            dotColor: parseTypeColor(p.color),
+            title: p.name,
+            subtitle: taskPriorityLabel(p.level),
             actions: [
-              configAction(
-                Icons.arrow_upward,
-                '위로',
-                i == 0 ? null : () => _move(i, -1),
-              ),
-              configAction(
-                Icons.arrow_downward,
-                '아래로',
-                i == priorities.length - 1 ? null : () => _move(i, 1),
-              ),
-              configAction(
-                Icons.edit_outlined,
-                '수정',
-                () => _edit(existing: priorities[i]),
-              ),
-              configAction(
-                Icons.delete_outline,
-                '삭제',
-                () => _delete(priorities[i]),
-              ),
+              configAction(Icons.edit_outlined, '수정', () => _edit(existing: p)),
+              configAction(Icons.delete_outline, '삭제', () => _delete(p)),
             ],
           ),
+        ),
       ],
     );
   }

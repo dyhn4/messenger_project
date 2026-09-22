@@ -54,6 +54,7 @@ import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
 import { previewFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
+import { signFileUrl, toStoredUploadUrl } from './upload.js';
 import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
 
 /** teams.js의 memberListResponse와 같은 규칙 — 서버 설정(orgScope)에 따라 팀 값(team_members)
@@ -140,6 +141,7 @@ export async function toRoomDto(room, requesterId) {
     iconType: room.iconType ?? null,
     iconEmoji: room.iconEmoji ?? null,
     iconColor: room.iconColor ?? null,
+    iconUrl: signFileUrl(room.iconUrl) ?? null,
   };
   if (room.isSecret) {
     // 비밀 대화 상태(핸드셰이크 진행 여부/자동 삭제 타이머)도 방 목록에 실어 보낸다 —
@@ -366,18 +368,23 @@ export function createRoomsRouter(io) {
     if (!canCreateRooms(role)) {
       return res.status(403).json({ error: '준회원은 방을 만들 수 없습니다. 초대받은 방에서만 활동할 수 있습니다.' });
     }
-    const { type, name, description, memberIds, isPublic, iconType, iconEmoji, iconColor } =
+    const { type, name, description, memberIds, isPublic, iconType, iconEmoji, iconColor, iconUrl } =
       req.body ?? {};
     if (type !== 'topic' && type !== 'group') {
       return res.status(400).json({ error: "type은 'topic' 또는 'group'이어야 합니다 (DM은 /rooms/dm 사용)." });
     }
     // 그룹채팅 아이콘 — 만들 때만 고른다(new_chat_screen.dart). 'members'(기본, 안 보내도 됨) |
-    // 'initial'(그룹 이름 첫 글자) | 'emoji'(iconEmoji 필수). 토픽은 이 값들을 무시한다(항상 null).
-    if (type === 'group' && iconType != null && !['members', 'initial', 'emoji'].includes(iconType)) {
+    // 'initial'(그룹 이름 앞 2글자) | 'emoji'(iconEmoji 필수) | 'photo'(iconUrl 필수 — 업로드
+    // 응답의 URL). iconColor는 initial·emoji의 배경색이다. 토픽은 이 값들을 무시한다(항상 null).
+    if (type === 'group' && iconType != null && !['members', 'initial', 'emoji', 'photo'].includes(iconType)) {
       return res.status(400).json({ error: 'iconType이 올바르지 않습니다.' });
     }
     if (type === 'group' && iconType === 'emoji' && (typeof iconEmoji !== 'string' || !iconEmoji)) {
       return res.status(400).json({ error: '이모지를 선택하세요.' });
+    }
+    const storedIconUrl = type === 'group' && iconType === 'photo' ? toStoredUploadUrl(iconUrl) : null;
+    if (type === 'group' && iconType === 'photo' && !storedIconUrl) {
+      return res.status(400).json({ error: '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.' });
     }
     // 토픽은 팀 설정(topicCreationPolicy)이 정한 등급 이상만 — 그룹채팅은 위 canCreateRooms
     // 체크(정회원 이상)로 이미 충분하고 이 설정과 무관하다(README "토픽 생성 권한" 참고).
@@ -425,9 +432,13 @@ export function createRoomsRouter(io) {
       iconType: type === 'group' && iconType && iconType !== 'members' ? iconType : null,
       iconEmoji: type === 'group' && iconType === 'emoji' ? String(iconEmoji) : null,
       iconColor:
-        type === 'group' && iconType === 'emoji' && typeof iconColor === 'string' && iconColor
+        type === 'group' &&
+        (iconType === 'emoji' || iconType === 'initial') &&
+        typeof iconColor === 'string' &&
+        iconColor
           ? iconColor
           : null,
+      iconUrl: storedIconUrl,
     });
     await addRoomMembers(room.id, roomMemberIds);
     await notifyMembership(io, room);

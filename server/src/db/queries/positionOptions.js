@@ -45,22 +45,15 @@ export async function deletePositionOption(id) {
 }
 
 /**
- * 관리자 콘솔에서 직책을 클릭해 좌우로 옮길 때 — 바로 이웃(왼쪽/오른쪽)과 sortOrder를
- * 맞바꾼다. 이미 맨 끝(더 옮길 자리가 없음)이면 조용히 아무 것도 하지 않는다. 항상 최신
- * 전체 목록을 돌려준다(클라이언트가 그대로 다시 그리면 되도록).
+ * 관리자 콘솔에서 직책을 끌어다 놓아 서열을 바꿀 때 — [ids](전체 직책 id, 원하는 순서)의
+ * 순서대로 sortOrder를 0부터 다시 매긴다. 항상 최신 전체 목록을 돌려준다(클라이언트가 그대로
+ * 다시 그리면 되도록).
  */
-export async function movePositionOption(id, direction) {
-  const all = await listPositionOptions();
-  const idx = all.findIndex((o) => o.id === id);
-  if (idx === -1) return all;
-  const swapIdx = direction === 'left' ? idx - 1 : idx + 1;
-  if (swapIdx < 0 || swapIdx >= all.length) return all;
-
-  const a = all[idx];
-  const b = all[swapIdx];
+export async function reorderPositionOptions(ids) {
   await db.transaction(async (tx) => {
-    await tx.update(positionOptions).set({ sortOrder: b.sortOrder }).where(eq(positionOptions.id, a.id));
-    await tx.update(positionOptions).set({ sortOrder: a.sortOrder }).where(eq(positionOptions.id, b.id));
+    for (const [i, id] of ids.entries()) {
+      await tx.update(positionOptions).set({ sortOrder: i }).where(eq(positionOptions.id, id));
+    }
   });
   return listPositionOptions();
 }

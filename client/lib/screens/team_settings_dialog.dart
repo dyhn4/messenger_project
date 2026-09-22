@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
@@ -7,6 +9,7 @@ import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/icon_edit_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/org_edit_dialog.dart';
 import '../widgets/role_badge.dart';
@@ -29,13 +32,39 @@ Future<void> showTeamSettingsDialog(
   );
 }
 
+/// "팀 생성하기" — 팀 설정과 같은 화면(아이콘·이름·토픽 생성 권한·메시지 설정)에서 값을
+/// 고른 뒤 "만들기"로 한 번에 만든다. 만든 팀을 돌려주고, 취소하면 null.
+Future<Team?> showCreateTeamDialog(BuildContext context, Session session) {
+  return showDialog<Team>(
+    context: context,
+    builder: (_) => TeamSettingsDialog(
+      session: session,
+      creating: true,
+      // 아직 없는 팀의 자리표시자 — 배경색은 팔레트에서 무작위로 미리 골라 둔다.
+      team: Team(
+        id: '',
+        name: '',
+        iconColor: colorToHex(
+          _teamColors[Random().nextInt(_teamColors.length)],
+        ),
+        createdAt: DateTime.now(),
+      ),
+    ),
+  );
+}
+
 class TeamSettingsDialog extends StatefulWidget {
   final Session session;
   final Team team;
+
+  /// true면 "팀 생성하기" — 멤버 탭·팀 초대 링크·팀 삭제처럼 이미 있는 팀에만 의미 있는 부분을
+  /// 숨기고, "저장" 대신 "만들기"로 새 팀을 만든다.
+  final bool creating;
   const TeamSettingsDialog({
     super.key,
     required this.session,
     required this.team,
+    this.creating = false,
   });
 
   @override
@@ -46,6 +75,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   late final _nameController = TextEditingController(text: widget.team.name);
   late String _emoji = widget.team.iconEmoji ?? '';
   late Color? _color = parseHexColor(widget.team.iconColor);
+  late String? _iconUrl = widget.team.iconUrl;
   late TopicCreationPolicy _topicCreationPolicy =
       widget.team.topicCreationPolicy;
   // _topicCreationPolicy가 designated일 때만 의미가 있다 — 아직 저장 전인 로컬 선택 상태.
@@ -70,6 +100,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   @override
   void initState() {
     super.initState();
+    if (widget.creating) return; // 아직 없는 팀이라 멤버·직책을 불러올 게 없다.
     _loadMembers();
     widget.session.fetchPublicPositionOptions().then((list) {
       if (mounted) setState(() => _positionOptions = list);
@@ -101,16 +132,84 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// 미리보기용 임시 팀 — 아직 저장하지 않은 이모지/색을 그대로 그려보기 위한 것.
-  Team get _preview => Team(
+  IconChoice get _iconChoice => IconChoice(
+    emoji: _emoji.isEmpty ? null : _emoji,
+    color: _color,
+    photoUrl: _iconUrl,
+  );
+
+  /// 미리보기용 임시 팀 — 아직 저장하지 않은 아이콘을 그대로 그려보기 위한 것.
+  Team _teamWith(IconChoice icon) => Team(
     id: widget.team.id,
     name: _nameController.text.trim().isEmpty
         ? widget.team.name
         : _nameController.text.trim(),
-    iconEmoji: _emoji,
-    iconColor: _color == null ? null : colorToHex(_color!),
+    iconEmoji: icon.emoji ?? '',
+    iconColor: icon.color == null ? null : colorToHex(icon.color!),
+    iconUrl: icon.photoUrl,
     createdAt: widget.team.createdAt,
   );
+
+  Team get _preview => _teamWith(_iconChoice);
+
+  /// 프로필 사진처럼 아이콘의 사진기 배지를 누르면 편집 팝업(초기화/아이콘 선택하기/사진
+  /// 올리기)이 뜬다 — 여기서는 미리보기만 바뀌고, 아래 "저장"을 눌러야 서버에 반영된다.
+  Future<void> _editIcon() async {
+    final result = await showIconEditDialog(
+      context,
+      title: '팀 아이콘 편집',
+      session: widget.session,
+      initial: _iconChoice,
+      preview: (icon, size) => TeamAvatar(
+        team: _teamWith(icon),
+        resolveUrl: widget.session.resolveUrl,
+        size: size,
+      ),
+      pickIcon: (current) async {
+        final picked = await showDialog<(String, Color?)>(
+          context: context,
+          builder: (_) => _TeamIconPickerDialog(
+            team: _teamWith(current),
+            resolveUrl: widget.session.resolveUrl,
+            initialEmoji: current.emoji ?? '',
+            initialColor: current.color,
+          ),
+        );
+        if (picked == null) return null;
+        final (emoji, color) = picked;
+        return IconChoice(emoji: emoji.isEmpty ? null : emoji, color: color);
+      },
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _emoji = result.emoji ?? '';
+      _color = result.color;
+      _iconUrl = result.photoUrl;
+    });
+  }
+
+  /// "팀 생성하기"의 "만들기" — 고른 값으로 팀을 만들고 그 팀을 돌려주며 닫는다.
+  Future<void> _create() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+    setState(() => _savingInfo = true);
+    try {
+      // 팀을 만든 사람이 그 팀의 소유자가 된다(서버 teams.js).
+      final team = await widget.session.createTeam(
+        name: name,
+        iconEmoji: _emoji.isEmpty ? null : _emoji,
+        iconColor: _color == null ? null : colorToHex(_color!),
+        iconUrl: _iconUrl,
+        topicCreationPolicy: _topicCreationPolicy,
+        messageEditDeleteEnabled: _messageEditDeleteEnabled,
+        messageEditDeleteWindowSeconds: _messageEditDeleteWindow,
+      );
+      if (mounted) Navigator.of(context).pop(team);
+    } catch (e) {
+      _toast('팀 생성 실패: $e');
+      if (mounted) setState(() => _savingInfo = false);
+    }
+  }
 
   Future<void> _saveInfo() async {
     final name = _nameController.text.trim();
@@ -123,6 +222,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
         name: name,
         iconEmoji: _emoji,
         iconColor: _color == null ? '' : colorToHex(_color!),
+        iconUrl: _iconUrl ?? '',
         topicCreationPolicy: _topicCreationPolicy,
         topicCreatorIds: _topicCreationPolicy == TopicCreationPolicy.designated
             ? _designatedTopicCreatorIds
@@ -330,6 +430,16 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.creating) {
+      // 새 팀에는 아직 멤버가 없으니 "멤버" 탭 없이 팀 정보만 보여준다.
+      return FloatingDialog(
+        title: '팀 생성하기',
+        maxWidth: 520,
+        maxHeight: 700,
+        padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
+        child: _buildInfoTab(context),
+      );
+    }
     return DefaultTabController(
       length: 2,
       child: FloatingDialog(
@@ -380,63 +490,53 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Center(child: TeamAvatar(team: _preview, size: 72)),
-                  const SizedBox(height: 16),
-                  const _SectionLabel('팀 아이콘'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  // 팀 아이콘(왼쪽)과 팀 이름(오른쪽)을 한 줄에 두고, 이름 입력칸은 아이콘
+                  // 높이의 가운데에 맞춘다.
+                  const Row(
                     children: [
-                      _EmojiChoice(
-                        selected: _emoji.isEmpty,
-                        onTap: () => setState(() => _emoji = ''),
-                        child: Text(
-                          _preview.initial,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                      SizedBox(width: 72, child: _SectionLabel('팀 아이콘')),
+                      SizedBox(width: 24),
+                      Expanded(child: _SectionLabel('팀 이름')),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      CameraBadge(
+                        onTap: _editIcon,
+                        child: TeamAvatar(
+                          team: _preview,
+                          resolveUrl: widget.session.resolveUrl,
+                          size: 72,
                         ),
                       ),
-                      for (final e in _teamEmojis)
-                        _EmojiChoice(
-                          selected: e == _emoji,
-                          onTap: () => setState(() => _emoji = e),
-                          child: Text(e, style: const TextStyle(fontSize: 18)),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: TextField(
+                          controller: _nameController,
+                          autofocus: widget.creating,
+                          maxLength: 30,
+                          decoration: InputDecoration(
+                            hintText: widget.creating ? '예: 개발팀' : null,
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                            // 글자 수 표시가 입력칸 아래에 붙으면 가운데 정렬이 어긋나서 숨긴다
+                            // (30자 제한은 그대로).
+                            counterText: '',
+                          ),
+                          // 아이콘 미리보기의 이니셜 갱신
+                          onChanged: (_) => setState(() {}),
                         ),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 16),
-                  const _SectionLabel('배경색'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (final c in _teamColors)
-                        _ColorChoice(
-                          color: c,
-                          selected: _color?.toARGB32() == c.toARGB32(),
-                          onTap: () => setState(() => _color = c),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  const _SectionLabel('팀 이름'),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _nameController,
-                    maxLength: 30,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    onChanged: (_) => setState(() {}), // 미리보기 첫 글자 갱신
                   ),
                   // "팀을 관리할 수 있는 사람"이라도 "팀 초대 링크 생성 권한"(서버 설정)이
                   // 없으면 안 보인다 — 삼선 메뉴/더보기 탭에 있던 것과 같은 조건이다. 어느
                   // 팀으로 초대할지 이미 정해져 있는 이 화면에서 만드는 게 더 자연스러워서
                   // 여기로 옮겼다(원래 있던 "팀 도메인" 필드는 실제로 아무 기능이 없어서 뺐다).
-                  if (widget.session.canCreateTeamInviteLink) ...[
-                    const SizedBox(height: 20),
+                  if (widget.session.canCreateTeamInviteLink &&
+                      !widget.creating) ...[
+                    const _SectionDivider(),
                     const _SectionLabel('팀 초대 링크'),
                     const SizedBox(height: 4),
                     Text(
@@ -459,7 +559,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 20),
+                  const _SectionDivider(),
                   const _SectionLabel('토픽 생성 권한'),
                   const SizedBox(height: 4),
                   Text(
@@ -472,8 +572,12 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                   const SizedBox(height: 8),
                   SegmentedButton<TopicCreationPolicy>(
                     segments: [
+                      // '지정'은 멤버 중에서 고르는 거라, 아직 멤버가 없는 새 팀에서는 뺀다
+                      // (만든 뒤 팀 설정에서 정한다).
                       for (final p in TopicCreationPolicy.values)
-                        ButtonSegment(value: p, label: Text(p.label)),
+                        if (!widget.creating ||
+                            p != TopicCreationPolicy.designated)
+                          ButtonSegment(value: p, label: Text(p.label)),
                     ],
                     selected: {_topicCreationPolicy},
                     onSelectionChanged: _onTopicCreationPolicyChanged,
@@ -499,7 +603,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                       ],
                     ),
                   ],
-                  const SizedBox(height: 20),
+                  const _SectionDivider(),
                   const _SectionLabel('메시지 설정'),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -543,9 +647,7 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
                     ),
                   ],
                   if (_isOwner) ...[
-                    const SizedBox(height: 24),
-                    const Divider(height: 1),
-                    const SizedBox(height: 12),
+                    const _SectionDivider(),
                     _SectionLabel(
                       '팀 삭제',
                       color: Theme.of(context).colorScheme.error,
@@ -584,14 +686,19 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
           child: Align(
             alignment: Alignment.centerRight,
             child: FilledButton(
-              onPressed: _savingInfo ? null : _saveInfo,
+              // 만들 때는 팀 이름을 적어야 "만들기"가 켜진다.
+              onPressed:
+                  _savingInfo ||
+                      (widget.creating && _nameController.text.trim().isEmpty)
+                  ? null
+                  : (widget.creating ? _create : _saveInfo),
               child: _savingInfo
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('저장'),
+                  : Text(widget.creating ? '만들기' : '저장'),
             ),
           ),
         ),
@@ -1170,6 +1277,132 @@ class _DesignateTopicCreatorsDialogState
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// "팀 정보" 탭의 항목 사이 구분선.
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 16),
+    child: Divider(height: 1),
+  );
+}
+
+/// "팀 아이콘 선택하기" 팝업 — 프로필의 "캐릭터 선택하기"(my_profile_dialog.dart)와 같은
+/// 구성이다. 아이콘 첫 칸은 팀 이름 앞 2글자로 만든 이니셜이고, 배경색은 이니셜·이모지
+/// 모두에 적용된다. "확인"을 누르면 (이모지(이니셜이면 ''), 배경색)을 돌려준다.
+class _TeamIconPickerDialog extends StatefulWidget {
+  final Team team;
+  final String Function(String relative) resolveUrl;
+  final String initialEmoji;
+  final Color? initialColor;
+  const _TeamIconPickerDialog({
+    required this.team,
+    required this.resolveUrl,
+    required this.initialEmoji,
+    required this.initialColor,
+  });
+
+  @override
+  State<_TeamIconPickerDialog> createState() => _TeamIconPickerDialogState();
+}
+
+class _TeamIconPickerDialogState extends State<_TeamIconPickerDialog> {
+  late String _emoji = widget.initialEmoji;
+  late Color? _color = widget.initialColor;
+
+  Team _withIcon(String emoji) => Team(
+    id: widget.team.id,
+    name: widget.team.name,
+    iconEmoji: emoji,
+    iconColor: _color == null ? null : colorToHex(_color!),
+    createdAt: widget.team.createdAt,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '팀 아이콘 선택하기',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              TeamAvatar(
+                team: _withIcon(_emoji),
+                resolveUrl: widget.resolveUrl,
+                size: 88,
+              ),
+              const SizedBox(height: 16),
+              const _SectionLabel('아이콘'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final e in ['', ..._teamEmojis])
+                    _EmojiChoice(
+                      selected: e == _emoji,
+                      onTap: () => setState(() => _emoji = e),
+                      child: TeamAvatar(
+                        team: _withIcon(e),
+                        resolveUrl: widget.resolveUrl,
+                        size: 32,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const _SectionLabel('배경색'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final c in _teamColors)
+                    _ColorChoice(
+                      color: c,
+                      selected: _color?.toARGB32() == c.toARGB32(),
+                      onTap: () => setState(() => _color = c),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('취소'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () =>
+                          Navigator.of(context).pop((_emoji, _color)),
+                      child: const Text('확인'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

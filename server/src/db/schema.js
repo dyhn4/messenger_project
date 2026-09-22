@@ -61,9 +61,11 @@ export const users = pgTable('users', {
 export const teams = pgTable('teams', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
-  // 팀 아이콘 — 사용자 아바타와 같은 방식(이모지+배경색)으로 가볍게 시작한다.
+  // 팀 아이콘 — 사용자 아바타와 같은 방식(이모지+배경색, 둘 다 없으면 이름 앞 2글자 이니셜).
+  // iconUrl(업로드한 사진, 미서명 /uploads/ 경로)이 있으면 그게 우선이다.
   iconEmoji: text('icon_emoji'),
   iconColor: text('icon_color'),
+  iconUrl: text('icon_url'),
   // 새 토픽을 만들 수 있는 최소 등급 — 'member'(정회원도 가능, 기본) | 'admin'(관리자만) |
   // 'owner'(소유자만) | 'designated'(아래 topicCreators에 콕 집어 등록된 사람만). 그룹채팅은
   // 이 설정과 무관하게 항상 정회원 이상 가능하다(permissions.js canCreateTopic 참고).
@@ -308,13 +310,14 @@ export const rooms = pgTable(
     secretDepartedMemberId: uuid('secret_departed_member_id'),
     secretDepartedMemberName: text('secret_departed_member_name'),
     // 그룹채팅 아이콘 — 만들 때만 고를 수 있다(new_chat_screen.dart). 'members'(기본값, null과
-    // 동일 취급 — 기존처럼 멤버 아바타 두 개를 겹쳐 보여줌) | 'initial'(그룹 이름 첫 글자,
-    // AppUser.avatarType의 'initial'과 같은 개념) | 'emoji'(iconEmoji/iconColor 사용, teams
-    // 테이블의 iconEmoji/iconColor와 같은 패턴이지만 팀과 안 겹치는 별도 이모지 목록을 씀 —
-    // room_avatar.dart 참고). 토픽/DM은 이 세 컬럼을 쓰지 않는다(항상 null).
+    // 동일 취급 — 기존처럼 멤버 아바타 두 개를 겹쳐 보여줌) | 'initial'(그룹 이름 앞 2글자) |
+    // 'emoji'(iconEmoji 사용, 팀과 안 겹치는 별도 이모지 목록) | 'photo'(iconUrl — 업로드한
+    // 사진의 미서명 /uploads/ 경로). iconColor는 initial·emoji의 배경색(room_avatar.dart
+    // 참고). 토픽/DM은 이 컬럼들을 쓰지 않는다(항상 null).
     iconType: text('icon_type'),
     iconEmoji: text('icon_emoji'),
     iconColor: text('icon_color'),
+    iconUrl: text('icon_url'),
   },
   (t) => [
     index('rooms_team_id_idx').on(t.teamId),

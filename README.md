@@ -245,10 +245,11 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 **직책 목록** — 서버 운영자가 관리하는 직책 후보 목록(`position_options` 테이블, 설치 직후
 사원/주임/대리/과장/차장/부장/이사/대표가 이 순서로 기본 들어있습니다 — `sort_order`는
-**작을수록 서열이 낮습니다**, 사원=0 … 대표=7). 관리자 콘솔 "운영 현황"에서 추가·삭제하고,
-각 항목의 화살표(◀▶)를 눌러 서열(`sort_order`)도 바꿀 수 있습니다(바로 이웃과 값을 맞바꾸는
-방식 — 조직에 맞게 순서를 다시 짜면 그게 곧 새 서열이 됩니다). 항목의 별표(★)를 누르면
-"기본값"으로 지정됩니다(최대 1개, `is_default`)
+**작을수록 서열이 낮습니다**, 사원=0 … 대표=7). 관리자 콘솔 "운영 현황"에서 "+" 버튼(이름 입력
+팝업)으로 추가하고 항목의 ×로 삭제하며, 항목을 끌어다 옮겨 서열(`sort_order`)도 바꿀 수
+있습니다(끄는 동안 나머지 항목이 밀려나며 놓일 자리를 보여주고, 놓는 순간 전체 순서를 저장 —
+조직에 맞게 순서를 다시 짜면 그게 곧 새 서열이 됩니다). 목록 아래 "회원가입 시 기본 직책"
+드롭다운에서 고른 직책이 "기본값"이 됩니다(최대 1개, `is_default`)
 — **회원가입 시 이 직책이 자동으로 부여됩니다**(`server/src/auth.js`, 팀 단위 서버에서는 이
 값이 당장 어디서도 안 쓰이지만 나중에 계정 단위로 바뀌어도 바로 의미가 생기도록 항상 채워
 둡니다). 목록 자체는 `GET /api/position-options`로 서버 운영자가 아니어도 누구나 조회할 수
@@ -667,10 +668,112 @@ Windows 기준입니다.
 | Windows 개발자 모드 | Windows 데스크톱 첫 빌드 시 심볼릭 링크 지원에 필요 | `start ms-settings:developers` |
 | Inno Setup | Windows 설치 프로그램(.exe) 컴파일 | `winget install JRSoftware.InnoSetup` |
 
+### 설치 시 자주 막히는 부분
+
+**PostgreSQL 설치 마지막의 Stack Builder** — 아무것도 선택하지 않고 닫아도 됩니다. 서버가 쓰는
+`pg`(node-postgres)는 순수 JS 드라이버라 ODBC/JDBC 드라이버가 필요 없고, PostGIS 등 확장 기능도
+이 프로젝트에서 안 씁니다.
+
+**Flutter SDK** — VS Code에 Flutter 확장을 설치하면 SDK가 없을 때 자동 다운로드 버튼이 뜹니다.
+그걸로 받아도 되고 https://flutter.dev/to/setup 에서 직접 받아 압축 풀어도 됩니다. 어느 쪽이든:
+
+- 설치 위치는 한글/공백 없는 짧은 경로로(`C:\src\flutter`, `C:\flutter` 등). `Program Files`나
+  OneDrive 동기화 폴더는 피하세요.
+- 설치 후 `flutter`, `flutter doctor` 명령이 안 먹으면 PATH에 자동으로 안 잡혔을 가능성이 큽니다 —
+  `<SDK 경로>\bin`(예: `C:\flutter\bin`)을 사용자 환경 변수 PATH에 직접 추가하고, **열려 있던
+  터미널/VS Code를 전부 닫았다가 다시 열어야** 반영됩니다.
+
+**Visual Studio "MSVC 재배포 가능 패키지"** — 최신 Visual Studio Installer에서는 워크로드 체크
+화면에 안 보일 수 있습니다. "개별 구성 요소" 탭에서 "redist"로 검색해보고, 그래도 안 보이면 최근
+버전은 이 구성 요소가 워크로드에 기본 포함되어 따로 안 뜨는 경우가 많으니 기본값 그대로 설치를
+진행하면 됩니다. 나중에 `flutter build windows --release` 결과물 폴더(`client/build/windows/x64/runner/Release/`)에
+`msvcp140.dll` 등이 같이 생기는지로 확인할 수 있습니다.
+
+**Android Studio는 선택 사항입니다** — 이 PC에서 Android 빌드/실행을 안 할 거면 설치 안 해도
+Windows 데스크톱 개발에는 지장 없습니다. `flutter doctor`가 Android toolchain을 ✗로 표시해도
+무시해도 됩니다.
+
+**Windows 개발자 모드를 늦게 켠 경우** — `flutter run -d windows`가
+`Building with plugins requires symlink support. Please enable Developer Mode...` 에러로 멈출 수
+있습니다. `start ms-settings:developers`로 설정을 열어 **"개발자 모드"** 토글을 켜세요(관리자 권한
+확인 + 관련 구성 요소 설치로 몇 분 걸릴 수 있음). 켠 뒤 새 터미널에서 다시 실행하면 됩니다.
+
+**Android SDK를 나중에 추가로 설치하는 경우** — Android Studio 설치 프로그램(winget
+`Google.AndroidStudio` 등)으로 처음 설치한 뒤 Setup Wizard를 "Standard"로 진행해도, 아래 두 가지가
+빠져서 `flutter doctor --android-licenses`가 `Android sdkmanager not found`로 실패하는 경우가
+있습니다.
+
+1. **`cmdline-tools`가 기본 설치에 안 포함됨** — Android Studio → "More Actions"(또는 Tools 메뉴)
+   → **"SDK Manager"** → **"SDK Tools"** 탭 → **"Android SDK Command-line Tools (latest)"** 체크 →
+   Apply
+2. **`ANDROID_HOME` 환경 변수가 자동으로 안 잡힘** — 사용자 환경 변수에 직접 추가:
+   ```
+   ANDROID_HOME = %LOCALAPPDATA%\Android\Sdk
+   ```
+   PATH에도 `%ANDROID_HOME%\platform-tools`, `%ANDROID_HOME%\cmdline-tools\latest\bin` 추가 후
+   터미널 재시작.
+
+그 다음 `flutter doctor -v`가 `Flutter requires Android SDK XX and the Android BuildTools Y.Y.Y`처럼
+특정 버전을 요구하면, 같은 SDK Manager에서 **"Show Package Details"**를 체크하고 **SDK Platforms**
+탭에서 요구 API 레벨을, **SDK Tools** 탭의 "Android SDK Build-Tools"에서 요구 버전을 각각 체크 →
+Apply로 설치합니다.
+
+**명령줄(`sdkmanager`/`android sdk install`)로 build-tools 설치는 피하세요** — 이 프로젝트 세팅
+시점의 cmdline-tools 버전에서는 `android sdk install "build-tools;28.0.3"`처럼 세미콜론이 들어간
+패키지 ID로 build-tools를 설치하려 하면 도구 자체가 크래시(종료 코드 `0xC0000409`)났습니다(`platforms;android-36` 같은 플랫폼 설치는 명령줄로 문제없이 됐습니다). build-tools는 위 Android
+Studio GUI의 SDK Manager로 설치하는 게 안전합니다.
+
 ```powershell
 git clone <이 저장소 주소>
 cd messenger_project
 ```
+
+### 다른 PC에서 새로 클론했을 때 — git에는 없는 파일들
+
+아래는 `.gitignore`에 있어 `git clone`만으로는 따라오지 않는 파일입니다. 대부분은 없어도 서버가
+알아서 새로 만들거나 그 기능만 조용히 꺼지므로, 독립된 개발용 로컬 DB를 새로 쓸 거면 `server/.env`만
+채우면 충분합니다.
+
+| 파일 | 없으면 | 기존 PC/서버와 같은 DB를 공유할 계획이면 |
+|---|---|---|
+| `server/.env` | `server/.env.example`을 복사해서 새로 채워야 함(`DATABASE_URL`은 자동 생성 안 됨, [환경 변수 설정](#환경-변수-설정) 참고) | — |
+| `server/.jwt-secret`, `server/.db-encryption-key` | 서버 최초 실행 시 자동 생성 | 기존 PC 것을 그대로 복사해서 옮겨야 기존 로그인 세션과 DB에 암호화 저장된 이메일을 계속 읽을 수 있음 |
+| `server/certs/` | 서버가 자동으로 새 자체서명 인증서 생성 | — |
+| `firebase-service-account.json`, `client/android/google-services.json` | FCM 푸시만 비활성화(그 외 정상 동작) — 최신 방식은 관리자 콘솔에서 DB로 설정하므로 보통 필요 없음([FCM 푸시 알림 설정](#fcm-푸시-알림-설정) 참고) | — |
+| `client/android/key.properties` | Android release 서명 빌드만 불가(개발 실행은 문제없음) | PC마다 다시 만드는 값이 아니라 하나뿐인 서명 키([Android 릴리즈 서명](#android-릴리즈-서명) 참고) — 기존 키스토어 파일과 함께 그대로 옮겨야 기존 설치본 위에 업데이트 설치가 됨 |
+| `server/.livekit-secret`, `server/.livekit/` | **화상회의만 꺼짐** — 서버가 화상회의를 끄고 채팅방의 화상회의 버튼이 아예 안 보인다(에러 없이 조용히 사라지므로 버그로 착각하기 쉽다). 아래 "화상회의(LiveKit) 개발용 실행" 참고 | PC마다 새로 만들어도 됨(Node 서버와 LiveKit이 같은 PC에서 같은 값을 쓰기만 하면 된다) |
+
+### 화상회의(LiveKit) 개발용 실행
+
+운영 서버는 설치 프로그램이 LiveKit을 서비스로 설치해주지만([화상회의(LiveKit)](#화상회의livekit)
+참고), 개발 PC에서는 직접 받아서 띄워야 합니다. 설치 프로그램(`build_server_installer.ps1`의
+`$LiveKitVersion`)과 같은 버전·같은 설정으로 맞춥니다. `server/.livekit/`과 `server/.livekit-secret`은
+`.gitignore` 대상이라 커밋되지 않습니다.
+
+```bash
+cd server
+# 1) LiveKit 서버 실행 파일(버전은 build_server_installer.ps1의 $LiveKitVersion과 맞춘다)
+mkdir -p .livekit
+curl -L -o .livekit/livekit.zip https://github.com/livekit/livekit/releases/download/v1.13.7/livekit_1.13.7_windows_amd64.zip
+powershell -Command "Expand-Archive .livekit/livekit.zip .livekit -Force"; rm .livekit/livekit.zip
+
+# 2) API 비밀값 — 줄바꿈 없이 저장(서버와 livekit.yaml이 한 글자라도 다르면 인증이 깨진다)
+node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))" > .livekit-secret
+
+# 3) livekit.yaml — Setup-TangoTalkServer.ps1이 만드는 것과 같은 내용
+printf '%s\n' "port: 7880" "rtc:" "  port_range_start: 50000" "  port_range_end: 60000" \
+  "  tcp_port: 7881" "  use_external_ip: false" "turn:" "  enabled: true" "  udp_port: 3478" \
+  "keys:" "  tangotalk: $(cat .livekit-secret)" > .livekit/livekit.yaml
+
+# 4) 실행 (개발할 때마다 Node 서버와 함께 띄워둔다)
+.livekit/livekit-server.exe --config .livekit/livekit.yaml
+```
+
+- **Node 서버는 LiveKit 비밀값을 시작할 때 한 번만 읽습니다** — 비밀값을 만든 뒤에는 Node 서버를
+  재시작해야 화상회의가 켜지고, 클라이언트 앱도 다시 실행해야 화상회의 버튼이 나타납니다.
+- 같은 PC 안에서만 테스트하면 방화벽 설정이 필요 없습니다. 다른 기기(휴대폰 등)에서 붙으려면
+  TCP 7880·7881, UDP 50000-60000·3478 포트를 방화벽에서 열어야 합니다(처음 실행할 때 Windows가
+  "네트워크 접근 허용" 창을 띄우면 허용).
 
 ## 환경 변수 설정
 
@@ -913,7 +1016,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/admin/position-options` | 직책 목록 조회 |
 | POST | `/api/admin/position-options` | 직책 목록에 항목 추가(`label`, 30자 이내, 중복 불가) |
 | DELETE | `/api/admin/position-options/:id` | 직책 목록에서 항목 삭제 |
-| POST | `/api/admin/position-options/:id/move` | 직책 서열 변경(`direction`: `left`\|`right` — 바로 이웃과 서열을 맞바꾼다, 이미 끝이면 조용히 그대로) |
+| POST | `/api/admin/position-options/order` | 직책 서열 변경(`ids` 전체를 원하는 순서로 — 관리자 콘솔에서 끌어다 놓기) |
 | POST | `/api/admin/position-options/:id/default` | 직책 "기본값" 지정/해제 토글(이미 기본값이면 해제, 아니면 기존 기본값을 내리고 이걸 새 기본값으로 — 최대 1개). 회원가입 시 이 값이 자동으로 부여된다 |
 | GET | `/api/admin/audit-logs` | 감사 로그(`action`, `limit`, `offset`) |
 
@@ -1049,7 +1152,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 |---|---|---|---|
 | GET | `/api/search` | 필요 | 내가 속한 방 통합 검색(`teamId` 필수, `q`, `roomId`, `senderId`, `since`, `until`, `limit`) |
 | GET | `/api/attachments` | 필요 | 첨부 이미지/파일 모아보기(`teamId` 필수, `roomId`, `senderId`, `kind`, 기간 필터) |
-| POST | `/api/upload` | 필요 | 파일 업로드(최대 1GB, 초과 시 413) |
+| POST | `/api/upload` | 필요 | 파일 업로드(최대 1GB, 초과 시 413). 응답의 `url`은 미서명 경로, `signedUrl`은 올린 사람이 저장 전에 바로 미리보기를 그릴 수 있는 서명된 링크(팀·그룹 아이콘 사진) |
 | GET | `/files/:token` | 불필요(토큰 자체가 자격증명) | 서명된 다운로드 링크 |
 | GET | `/health` | 불필요 | 헬스체크 |
 | GET | `/version` | 불필요 | 최신 클라이언트 버전 조회 |
@@ -1093,14 +1196,14 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 |---|---|
 | `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL) |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급) |
-| `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 화살표로 이웃과 맞바꿈)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
+| `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |
 | `invite_links` | 초대 링크. `token`(무작위 문자열, unique), `expires_at`/`revoked_at`, `used_count`/`last_used_at`(1회용 아님 — 여러 기기가 나눠 씀), `created_by_name`(만든 사람 스냅샷) — [초대 링크(설치→가입)](#초대-링크-설치가입) 참고 |
 | `team_invite_links` | 팀 초대 링크. `invite_links`와 같은 구조 + `team_id`(자동 합류시킬 팀, 팀 삭제 시 cascade), `assigned_role`(가입 즉시 부여할 등급), `assigned_position`(선택, 가입 즉시 부여할 직책 — 직책 목록의 `label`) — [팀 초대 링크](#팀-초대-링크자동-합류등급-부여) 참고 |
-| `teams` | 팀(워크스페이스). `name`, `icon_emoji`/`icon_color`(팀 아이콘), `topic_creation_policy`(`member`\|`admin`\|`owner`\|`designated` — 새 토픽을 만들 수 있는 최소 등급, 그룹채팅은 이 설정과 무관), `message_edit_delete_enabled`/`message_edit_delete_window_seconds`([메시지 설정](#메시지-설정)), `created_by`(만든 사람 = 소유자) |
+| `teams` | 팀(워크스페이스). `name`, `icon_url`/`icon_emoji`/`icon_color`(팀 아이콘 — `icon_url`(업로드한 사진, 미서명 `/uploads/` 경로 — 응답 때마다 서명)이 있으면 사진, 없으면 이모지, 둘 다 없으면 팀 이름 앞 2글자 이니셜. `icon_color`는 배경색이고 팀을 만들 때 지정하지 않으면 서버가 팔레트에서 무작위로 정한다. 팀 설정에서 아이콘의 사진기 배지를 눌러 초기화/아이콘 선택/사진 올리기), `topic_creation_policy`(`member`\|`admin`\|`owner`\|`designated` — 새 토픽을 만들 수 있는 최소 등급, 그룹채팅은 이 설정과 무관), `message_edit_delete_enabled`/`message_edit_delete_window_seconds`([메시지 설정](#메시지-설정)), `created_by`(만든 사람 = 소유자) |
 | `team_members` | 팀 멤버십(복합 PK). `role`은 `owner`(팀을 만든 사람) 또는 `member` — 등급은 계정 단위로 올라갔다([권한 등급](#권한-등급) 참고), `department`/`position`(팀 단위 부서·직책) |
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
-| `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(비밀 대화 상대 혼자 나갔을 때 표시용) |
+| `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(비밀 대화 상대 혼자 나갔을 때 표시용), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷) |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |

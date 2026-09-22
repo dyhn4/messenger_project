@@ -322,6 +322,16 @@ export async function deleteTaskType(id) {
   await db.delete(taskTypes).where(eq(taskTypes.id, id));
 }
 
+/** 유형 순서 저장 — ids 순서대로 position을 0부터 다시 매긴다(상태·우선순위와 같은 방식). */
+export async function reorderTaskTypes(projectId, ids) {
+  for (let i = 0; i < ids.length; i += 1) {
+    await db
+      .update(taskTypes)
+      .set({ position: i })
+      .where(and(eq(taskTypes.projectId, projectId), eq(taskTypes.id, ids[i])));
+  }
+}
+
 // ── 업무 참조자 ─────────────────────────────────────────────────────────
 
 /** 업무의 참조자를 통째로 바꾼다(빈 배열이면 전부 지운다). */

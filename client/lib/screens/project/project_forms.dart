@@ -5,6 +5,7 @@ import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/dashed_add_button.dart';
+import '../../widgets/date_range_calendar_panel.dart';
 import '../../widgets/floating_dialog.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
@@ -60,6 +61,14 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
   final _name = TextEditingController();
   final _identifier = TextEditingController();
   final _description = TextEditingController();
+  // 입력칸을 누르면(포커스) 안내 문구를 숨기려고 포커스 상태를 지켜본다.
+  late final _nameFocus = FocusNode()..addListener(() => setState(() {}));
+  late final _identifierFocus = FocusNode()..addListener(() => setState(() {}));
+  late final _descriptionFocus = FocusNode()
+    ..addListener(() => setState(() {}));
+
+  /// 스크롤바가 붙을 목록 — 안 넘기면 Windows에서는 스크롤바가 목록을 못 찾아 경고가 난다.
+  final _formScroll = ScrollController();
   String _color = projectColorChoices.first;
   bool _isPublic = true;
   bool _submitting = false;
@@ -70,8 +79,16 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     _name.dispose();
     _identifier.dispose();
     _description.dispose();
+    _nameFocus.dispose();
+    _identifierFocus.dispose();
+    _descriptionFocus.dispose();
+    _formScroll.dispose();
     super.dispose();
   }
+
+  /// 포커스가 없을 때만 보여줄 안내 문구(누르면 사라진다).
+  String? _hintWhenIdle(FocusNode node, String text) =>
+      node.hasFocus ? null : text;
 
   Future<void> _submit() async {
     if (_name.text.trim().isEmpty) {
@@ -101,25 +118,11 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     }
   }
 
-  Widget _label(String text, {String? hint}) => Padding(
+  Widget _label(String text) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(
-            text: text,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-          ),
-          if (hint != null)
-            TextSpan(
-              text: '  $hint',
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-        ],
-      ),
+    child: Text(
+      text,
+      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
     ),
   );
 
@@ -130,24 +133,36 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
       title: '프로젝트 생성',
       maxWidth: 520,
       maxHeight: 780,
+      // 스크롤바를 창 오른쪽 끝에 붙이려고 오른쪽 여백을 0으로 받고, 안쪽 내용이 좌우 여백을
+      // 직접 챙긴다(팀 설정과 같은 방식).
+      padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
           Flexible(
             child: MutedScrollbar(
+              controller: _formScroll,
               child: ListView(
-                padding: const EdgeInsets.only(right: 12),
+                controller: _formScroll,
+                // 내용만큼만 차지하게 한다 — 안 그러면 목록이 창 높이를 꽉 채워서 마지막
+                // 항목과 아래 "프로젝트 생성" 버튼 사이가 휑하게 벌어진다(창이 모자라면
+                // Flexible이 높이를 잘라주고 그때부터 스크롤된다).
+                shrinkWrap: true,
+                // 왼쪽(창 여백 20)과 같은 폭으로 오른쪽도 띄운다 — 스크롤바는 이 여백
+                // 바깥의 창 오른쪽 끝에 그려진다.
+                padding: const EdgeInsets.only(right: 20),
                 children: [
                   _label('프로젝트 이름'),
                   TextField(
                     controller: _name,
+                    focusNode: _nameFocus,
                     autofocus: true,
                     maxLength: 60,
-                    decoration: const InputDecoration(
-                      hintText: '프로젝트 이름을 입력하세요',
+                    decoration: InputDecoration(
+                      hintText: _hintWhenIdle(_nameFocus, '프로젝트 이름을 입력하세요'),
                       counterText: '',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                     // 이름을 적으면 키를 아직 안 건드린 경우에 한해 영문 앞글자로 추천한다.
                     onChanged: (v) {
@@ -201,76 +216,118 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
                     ],
                   ),
                   const SizedBox(height: 20),
-                  _label(
-                    '프로젝트 키',
-                    hint: '프로젝트를 구분하기 위한 식별 키를 입력하세요. (예: HR, CX, DEV)',
-                  ),
+                  _label('프로젝트 키'),
                   TextField(
                     controller: _identifier,
+                    focusNode: _identifierFocus,
                     maxLength: 10,
                     textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      hintText: 'MKT',
+                    decoration: InputDecoration(
+                      hintText: _hintWhenIdle(
+                        _identifierFocus,
+                        '프로젝트 식별 키를 입력하세요. (예: HR, CX, DEV)',
+                      ),
                       counterText: '',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 20),
                   _label('설명'),
                   TextField(
                     controller: _description,
+                    focusNode: _descriptionFocus,
                     maxLines: 3,
                     minLines: 3,
-                    decoration: const InputDecoration(
-                      hintText: '프로젝트에 대한 설명을 추가하세요...',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: _hintWhenIdle(
+                        _descriptionFocus,
+                        '프로젝트에 대한 설명을 추가하세요...',
+                      ),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Text('공개 설정', style: TextStyle(color: hint)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<bool>(
-                    initialValue: _isPublic,
-                    decoration: const InputDecoration(
+                  _label('공개 설정'),
+                  // 고른 값 위에 메뉴가 겹쳐 뜨는 기본 드롭다운(DropdownButtonFormField) 대신,
+                  // 메뉴가 입력칸 바로 아래로 펼쳐지는 DropdownMenu를 쓴다 — 펼쳤을 때 공개·
+                  // 비공개 두 항목이 입력칸에 가리지 않고 다 보인다.
+                  DropdownMenu<bool>(
+                    initialSelection: _isPublic,
+                    // 눌렀을 때 글자를 입력하는 칸이 아니라 목록만 펼치도록.
+                    requestFocusOnTap: false,
+                    expandedInsets: EdgeInsets.zero,
+                    menuStyle: const MenuStyle(alignment: Alignment.bottomLeft),
+                    inputDecorationTheme: const InputDecorationTheme(
                       border: OutlineInputBorder(),
                       isDense: true,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: true, child: Text('공개')),
-                      DropdownMenuItem(value: false, child: Text('비공개')),
+                    dropdownMenuEntries: const [
+                      DropdownMenuEntry(
+                        value: true,
+                        label: '공개',
+                        leadingIcon: Icon(Icons.public, size: 18),
+                      ),
+                      DropdownMenuEntry(
+                        value: false,
+                        label: '비공개',
+                        leadingIcon: Icon(Icons.lock_outline, size: 18),
+                      ),
                     ],
-                    onChanged: (v) => setState(() => _isPublic = v ?? true),
+                    onSelected: (v) => setState(() => _isPublic = v ?? true),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    _isPublic
-                        ? '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 프로젝트를 확인하고 참여할 수 있습니다.'
-                        : '초대한 구성원만 프로젝트를 확인할 수 있습니다.',
-                    style: TextStyle(color: hint, fontSize: 12),
+                  // 두 설명의 줄 수가 달라서 그냥 갈아끼우면 창 높이가 들썩인다 —
+                  // IndexedStack은 자리를 항상 더 긴 쪽에 맞춰 잡아둔다.
+                  IndexedStack(
+                    index: _isPublic ? 0 : 1,
+                    alignment: Alignment.centerLeft,
+                    children: [
+                      Text(
+                        '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 프로젝트를 확인하고 참여할 수 있습니다.',
+                        style: TextStyle(color: hint, fontSize: 12),
+                      ),
+                      Text(
+                        '초대한 구성원만 프로젝트를 확인할 수 있습니다.',
+                        style: TextStyle(color: hint, fontSize: 12),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
           ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-          ],
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 48,
-            child: FilledButton(
-              onPressed: _submitting ? null : _submit,
-              child: _submitting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text(
-                      '프로젝트 생성',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
+          // 스크롤바가 없는 아래쪽 줄은 창의 원래 오른쪽 여백(20)을 직접 준다.
+          Padding(
+            padding: const EdgeInsets.only(right: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text(
+                            '프로젝트 생성',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -354,6 +411,13 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   List<TaskType> _types = const [];
   String? _typeId;
   final _referenceIds = <String>{};
+
+  /// "기간" 칸 바로 아래에 붙여 띄우는 달력 — 마감일까지 고르거나 바깥을 누르면 닫는다.
+  final _periodOverlay = OverlayPortalController();
+  final _periodLink = LayerLink();
+
+  /// 스크롤바가 붙을 목록 — 안 넘기면 Windows에서는 스크롤바가 목록을 못 찾아 경고가 난다.
+  final _formScroll = ScrollController();
   DateTime? _startDate;
   DateTime? _dueDate;
   bool _submitting = false;
@@ -417,6 +481,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     _title.removeListener(_onTitleChanged);
     _title.dispose();
     _description.dispose();
+    _formScroll.dispose();
     super.dispose();
   }
 
@@ -500,6 +565,19 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     }
   }
 
+  /// 프로젝트 드롭다운을 펼쳤을 때 이름 앞에 붙는 대표 색상 점(입력칸에는 이름만 보인다).
+  Widget _projectColorDot(String color) => Padding(
+    padding: const EdgeInsets.only(left: 4, right: 2),
+    child: Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: parseTypeColor(color),
+        shape: BoxShape.circle,
+      ),
+    ),
+  );
+
   /// 섹션 제목("프로젝트", "업무") — 입력칸 바로 위에 붙는 작은 굵은 글씨.
   Widget _sectionLabel(String text) => Padding(
     padding: const EdgeInsets.only(bottom: 6),
@@ -575,58 +653,98 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   Widget _chipRow(List<Widget> chips) =>
       Wrap(spacing: 6, runSpacing: 6, children: chips);
 
-  /// 기간의 양 끝 — 비어 있으면 "시작일"/"마감일" 안내 글씨, 누르면 달력이 뜬다.
-  Widget _dateText(
-    DateTime? value,
-    String placeholder,
-    ValueChanged<DateTime?> onChanged,
-  ) => InkWell(
-    borderRadius: BorderRadius.circular(4),
-    onTap: () async {
-      final now = DateTime.now();
-      final picked = await showDatePicker(
-        context: context,
-        initialDate: value ?? now,
-        firstDate: DateTime(now.year - 1),
-        lastDate: DateTime(now.year + 5),
-      );
-      if (picked != null) onChanged(picked);
-    },
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Text(
-        value == null ? placeholder : _formatDue(value),
-        style: TextStyle(
-          fontSize: 13,
-          color: value == null ? Theme.of(context).hintColor : null,
-        ),
-      ),
-    ),
-  );
+  /// 기간 — 칸 전체를 누르면(담당자 칸과 같은 방식) 달력 하나가 아래로 펼쳐지고, 거기서
+  /// 시작일·마감일을 차례로 고른다(대화 내보내기와 같은 달력).
+  Widget get _periodField {
+    final hint = Theme.of(context).hintColor;
+    Widget dateText(DateTime? value, String placeholder) => Text(
+      value == null ? placeholder : _formatDue(value),
+      style: TextStyle(fontSize: 13, color: value == null ? hint : null),
+    );
 
-  Widget get _periodField => Row(
-    children: [
-      Icon(
-        Icons.calendar_today_outlined,
-        size: 14,
-        color: Theme.of(context).hintColor,
-      ),
-      const SizedBox(width: 6),
-      _dateText(_startDate, '시작일', (v) => setState(() => _startDate = v)),
-      Text('—', style: TextStyle(color: Theme.of(context).hintColor)),
-      _dateText(_dueDate, '마감일', (v) => setState(() => _dueDate = v)),
-      if (_startDate != null || _dueDate != null)
-        IconButton(
-          icon: const Icon(Icons.close, size: 14),
-          tooltip: '기간 지우기',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => setState(() {
-            _startDate = null;
-            _dueDate = null;
-          }),
+    // 메뉴(MenuAnchor)·팝업메뉴 안에 달력을 넣으면 그 위젯들이 폭을 재는 방식(IntrinsicWidth)과
+    // GridView가 맞지 않아 레이아웃이 깨진다 — 칸에 붙여 띄우는 건 OverlayPortal로 직접 한다.
+    return OverlayPortal(
+      controller: _periodOverlay,
+      overlayChildBuilder: (context) => CompositedTransformFollower(
+        link: _periodLink,
+        targetAnchor: Alignment.bottomLeft,
+        followerAnchor: Alignment.topLeft,
+        offset: const Offset(0, 6),
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: TapRegion(
+            // 달력 바깥을 누르면 닫는다.
+            onTapOutside: (_) => _periodOverlay.hide(),
+            child: Material(
+              elevation: 6,
+              borderRadius: BorderRadius.circular(12),
+              color: Theme.of(context).colorScheme.surface,
+              child: Container(
+                width: 300,
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _startDate == null || _dueDate != null
+                          ? '시작일을 선택하세요'
+                          : '마감일을 선택하세요',
+                      style: TextStyle(color: hint, fontSize: 12),
+                    ),
+                    const SizedBox(height: 6),
+                    DateRangeCalendarPanel(
+                      start: _startDate,
+                      end: _dueDate,
+                      onChanged: (start, end) {
+                        setState(() {
+                          _startDate = start;
+                          _dueDate = end;
+                        });
+                        // 마감일까지 고르면 더 볼 게 없으니 닫는다.
+                        if (end != null) _periodOverlay.hide();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-    ],
-  );
+      ),
+      child: CompositedTransformTarget(
+        link: _periodLink,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: _periodOverlay.toggle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Icon(Icons.calendar_today_outlined, size: 14, color: hint),
+                const SizedBox(width: 6),
+                dateText(_startDate, '시작일'),
+                Text('  —  ', style: TextStyle(color: hint)),
+                dateText(_dueDate, '마감일'),
+                const Spacer(),
+                if (_startDate != null || _dueDate != null)
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 14),
+                    tooltip: '기간 지우기',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() {
+                      _startDate = null;
+                      _dueDate = null;
+                    }),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget get _assigneeField {
     final me = _members.where((m) => m.id == _assigneeId).firstOrNull;
@@ -734,7 +852,9 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
     final myId = widget.session.userId;
     // 구성원이 아니면 담당자로 넣어도 이름을 못 보여주므로 아예 권하지 않는다.
     final canAssignMe =
-        myId != null && _assigneeId != myId && _members.any((m) => m.id == myId);
+        myId != null &&
+        _assigneeId != myId &&
+        _members.any((m) => m.id == myId);
     final boxBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
       borderSide: BorderSide(color: theme.dividerColor),
@@ -744,22 +864,41 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
       title: '새 업무',
       maxWidth: 560,
       maxHeight: 760,
+      // 스크롤바를 창 오른쪽 끝에 붙이려고 오른쪽 여백을 0으로 받고, 안쪽 내용이 좌우 여백을
+      // 직접 챙긴다(프로젝트 생성 창과 같은 방식).
+      padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Divider(height: 1),
+          const Padding(
+            padding: EdgeInsets.only(right: 20),
+            child: Divider(height: 1),
+          ),
           const SizedBox(height: 16),
           Flexible(
             child: MutedScrollbar(
+              controller: _formScroll,
               child: ListView(
+                controller: _formScroll,
+                // 내용만큼만 차지하게 해서 아래 버튼이 내용 바로 밑에 붙게 한다(창이 모자라면
+                // Flexible이 잘라주고 그때부터 스크롤된다). 오른쪽은 왼쪽 여백과 같은 폭으로
+                // 띄우고, 스크롤바는 그 바깥 창 끝에 그려진다.
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(right: 20),
                 children: [
                   _sectionLabel('프로젝트'),
                   if (widget.projects.isNotEmpty)
-                    DropdownButtonFormField<String>(
-                      initialValue: _projectId,
-                      isExpanded: true,
-                      decoration: InputDecoration(
+                    // 고른 값 위에 메뉴가 겹쳐 뜨는 기본 드롭다운 대신, 입력칸 바로 아래로
+                    // 펼쳐지는 DropdownMenu를 쓴다(프로젝트 생성 창의 "공개 설정"과 같다).
+                    DropdownMenu<String>(
+                      initialSelection: _projectId,
+                      requestFocusOnTap: false,
+                      expandedInsets: EdgeInsets.zero,
+                      menuStyle: const MenuStyle(
+                        alignment: Alignment.bottomLeft,
+                      ),
+                      inputDecorationTheme: InputDecorationTheme(
                         isDense: true,
                         filled: true,
                         fillColor: theme.colorScheme.surfaceContainerLowest,
@@ -770,17 +909,15 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                         border: boxBorder,
                         enabledBorder: boxBorder,
                       ),
-                      items: [
+                      dropdownMenuEntries: [
                         for (final project in widget.projects)
-                          DropdownMenuItem(
+                          DropdownMenuEntry(
                             value: project.id,
-                            child: Text(
-                              project.name,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            label: project.name,
+                            leadingIcon: _projectColorDot(project.color),
                           ),
                       ],
-                      onChanged: (v) {
+                      onSelected: (v) {
                         setState(() {
                           _projectId = v;
                           _projectName = widget.projects
@@ -958,34 +1095,47 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
               ),
             ),
           ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-          ],
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              OutlinedButton(
-                onPressed: _submitting
-                    ? null
-                    : () => Navigator.of(context).pop(),
-                child: const Text('취소'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _submitting || _title.text.trim().isEmpty
-                    ? null
-                    : _submit,
-                child: _submitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('생성'),
-              ),
-            ],
+          // 스크롤바가 없는 아래쪽 줄은 창의 원래 오른쪽 여백(20)을 직접 준다.
+          Padding(
+            padding: const EdgeInsets.only(right: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    OutlinedButton(
+                      onPressed: _submitting
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: const Text('취소'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _submitting || _title.text.trim().isEmpty
+                          ? null
+                          : _submit,
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('생성'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),

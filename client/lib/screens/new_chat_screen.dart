@@ -1,9 +1,12 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../services/session.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/icon_edit_dialog.dart';
 import '../widgets/user_avatar.dart';
 import 'chat_screen.dart';
 
@@ -54,14 +57,39 @@ class _NewChatScreenState extends State<NewChatScreen> {
   String? _error;
   final _selected = <String>{};
   final _groupName = TextEditingController();
+  late final _groupNameFocus = FocusNode()
+    ..addListener(() => setState(() {}));
   bool _submitting = false;
   bool _submittingSecret = false;
 
-  // 그룹 아이콘 — 'members'(기본, 멤버 사진 두 개를 겹쳐 보여주는 기존 동작 그대로) |
-  // 'initial'(그룹 이름 첫 글자) | 'emoji'(_iconEmoji/_iconColor).
-  String _iconType = 'members';
+  // 그룹 아이콘 — 이모지를 안 고르면(null) 그룹 이름 앞 2글자 이니셜이고, 이름까지 비어 있으면
+  // 예전처럼 멤버 사진 두 개를 겹쳐 보여준다('members'). 배경색은 창을 열 때 무작위로 정해두고
+  // 이니셜·이모지 모두에 쓴다.
   String? _iconEmoji;
-  Color? _iconColor;
+  Color _iconColor = _groupColors[Random().nextInt(_groupColors.length)];
+
+  /// 올린 사진(업로드 응답의 서명된 링크) — 있으면 이모지·이니셜보다 우선한다.
+  String? _iconUrl;
+
+  String get _iconType => _iconUrl != null
+      ? 'photo'
+      : _iconEmoji != null
+      ? 'emoji'
+      : _groupName.text.trim().isEmpty
+      ? 'members'
+      : 'initial';
+
+  IconChoice get _iconChoice =>
+      IconChoice(emoji: _iconEmoji, color: _iconColor, photoUrl: _iconUrl);
+
+  Widget _groupIcon(IconChoice icon, double radius) => _GroupIcon(
+    name: _groupName.text.trim(),
+    emoji: icon.emoji,
+    color: icon.color ?? _iconColor,
+    photoUrl: icon.photoUrl,
+    resolveUrl: widget.session.resolveUrl,
+    radius: radius,
+  );
 
   @override
   void initState() {
@@ -84,6 +112,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
   @override
   void dispose() {
     _groupName.dispose();
+    _groupNameFocus.dispose();
     super.dispose();
   }
 
@@ -98,10 +127,9 @@ class _NewChatScreenState extends State<NewChatScreen> {
               name: groupName.isEmpty ? null : groupName,
               memberIds: _selected.toList(),
               iconType: _iconType,
-              iconEmoji: _iconType == 'emoji' ? _iconEmoji : null,
-              iconColor: _iconType == 'emoji' && _iconColor != null
-                  ? colorToHex(_iconColor!)
-                  : null,
+              iconEmoji: _iconEmoji,
+              iconColor: _iconType == 'members' ? null : colorToHex(_iconColor),
+              iconUrl: _iconUrl,
             );
       if (!mounted) return;
       if (widget.asDialog) {
@@ -124,24 +152,35 @@ class _NewChatScreenState extends State<NewChatScreen> {
     }
   }
 
-  /// 프로필 카드의 "캐릭터 선택하기"(my_profile_dialog.dart)와 같은 모양의 팝업을 띄운다 —
-  /// 이 팝업을 열지 않고 그냥 만들면 _iconType이 초기값 'members'(멤버 사진 겹침)로 남는다.
-  Future<void> _pickGroupIcon() async {
-    final result = await showDialog<(String, String, Color)>(
-      context: context,
-      builder: (_) => _GroupIconPickerDialog(
-        previewName: _groupName.text.trim(),
-        initialMode: _iconType == 'emoji' ? 'emoji' : 'initial',
-        initialEmoji: _iconEmoji,
-        initialColor: _iconColor,
-      ),
+  /// "프로필 사진 편집"과 같은 편집 팝업(초기화/아이콘 선택하기/사진 올리기)을 띄운다 — 이
+  /// 팝업을 열지 않고 그냥 만들면 이름 앞 2글자 이니셜(이름이 없으면 멤버 사진)이 된다.
+  /// "아이콘 선택하기"는 그룹 고유의 이모지 목록(_GroupIconPickerDialog)을 연다.
+  Future<void> _editGroupIcon() async {
+    final result = await showIconEditDialog(
+      context,
+      title: '그룹 아이콘 편집',
+      session: widget.session,
+      initial: _iconChoice,
+      preview: (icon, size) => _groupIcon(icon, size / 2),
+      pickIcon: (current) async {
+        final picked = await showDialog<(String?, Color)>(
+          context: context,
+          builder: (_) => _GroupIconPickerDialog(
+            previewName: _groupName.text.trim(),
+            initialEmoji: current.emoji,
+            initialColor: current.color ?? _iconColor,
+          ),
+        );
+        if (picked == null) return null;
+        final (emoji, color) = picked;
+        return IconChoice(emoji: emoji, color: color);
+      },
     );
     if (result == null || !mounted) return;
-    final (mode, emoji, color) = result;
     setState(() {
-      _iconType = mode;
-      _iconEmoji = mode == 'emoji' ? emoji : null;
-      _iconColor = mode == 'emoji' ? color : null;
+      _iconEmoji = result.emoji;
+      _iconColor = result.color ?? _iconColor;
+      _iconUrl = result.photoUrl;
     });
   }
 
@@ -237,90 +276,68 @@ class _NewChatScreenState extends State<NewChatScreen> {
                 ),
               ],
               if (_selected.length > 1) ...[
+                // 팀 설정의 "팀 아이콘"/"팀 이름"과 같은 배치 — 제목 한 줄 아래에 아이콘과
+                // 이름 입력칸을 나란히 두고, 입력칸은 아이콘 높이의 가운데에 맞춘다.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 아이콘 미리보기를 누르면 바로 선택 팝업이 뜬다(내 프로필 카드의 아바타
-                      // 클릭-편집과 같은 방식) — 예전엔 이름 칸 위아래로 "그룹 아이콘
-                      // 선택하기" 버튼이 한 줄 통째로 차지해서 공간을 낭비했다.
-                      GestureDetector(
-                        onTap: _pickGroupIcon,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            if (_iconType == 'members')
-                              CircleAvatar(
-                                radius: 24,
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
-                                child: Icon(
-                                  Icons.groups_outlined,
-                                  color: Theme.of(context).hintColor,
-                                ),
-                              )
-                            else
-                              AvatarView(
-                                username: _groupName.text.trim().isEmpty
-                                    ? '?'
-                                    : _groupName.text.trim(),
-                                avatarType: _iconType == 'emoji'
-                                    ? 'character'
-                                    : 'initial',
-                                avatarEmoji: _iconEmoji,
-                                avatarColor: _iconColor != null
-                                    ? colorToHex(_iconColor!)
-                                    : null,
-                                radius: 24,
-                              ),
-                            Positioned(
-                              right: -2,
-                              bottom: -2,
-                              child: CircleAvatar(
-                                radius: 9,
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.primary,
-                                child: const Icon(
-                                  Icons.edit,
-                                  size: 11,
-                                  color: Colors.white,
-                                ),
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 64,
+                            child: Text(
+                              '그룹 아이콘',
+                              style: Theme.of(context).textTheme.labelMedium,
+                            ),
+                          ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: Text(
+                              '그룹 이름',
+                              style: Theme.of(context).textTheme.labelMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          // 아이콘의 사진기 배지를 누르면 편집 팝업이 뜬다(내 프로필 카드의
+                          // 아바타 클릭-편집과 같은 방식).
+                          SizedBox(
+                            width: 64,
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: CameraBadge(
+                                onTap: _editGroupIcon,
+                                child: _groupIcon(_iconChoice, 28),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _groupName,
-                          decoration: const InputDecoration(
-                            labelText: '그룹 이름 (선택, 비워두면 멤버 이름으로 표시)',
-                            border: OutlineInputBorder(),
                           ),
-                        ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: TextField(
+                              controller: _groupName,
+                              focusNode: _groupNameFocus,
+                              decoration: InputDecoration(
+                                // 입력칸을 누르면(포커스) 안내 문구를 숨긴다.
+                                hintText: _groupNameFocus.hasFocus
+                                    ? null
+                                    : '멤버 이름으로 표시',
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              // 왼쪽 아이콘 미리보기의 이니셜을 입력하는 대로 갱신한다.
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                if (_iconType != 'members')
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        onPressed: () => setState(() {
-                          _iconType = 'members';
-                          _iconEmoji = null;
-                          _iconColor = null;
-                        }),
-                        child: const Text('기본으로'),
-                      ),
-                    ),
-                  ),
                 const SizedBox(height: 4),
               ],
               Padding(
@@ -430,19 +447,66 @@ class _NewChatScreenState extends State<NewChatScreen> {
   }
 }
 
-/// "그룹 아이콘 선택하기" 팝업 — my_profile_dialog.dart의 "캐릭터 선택하기"(CharacterPickerDialog)와
-/// 같은 모양이다. 그룹 이름 첫 글자를 쓰는 "이니셜"과, 이모지+배경색을 고르는 "이미지" 중 하나를
-/// 고른다. "취소"로 닫으면 null을 돌려주고(호출부가 아무것도 안 바꿈), "확인"을 눌러야 반영된다.
+/// 그룹 아이콘 한 개 — [photoUrl]이 있으면 그 사진, [emoji]가 있으면 [color] 배경의 이모지,
+/// 없으면 [name] 앞 2글자 이니셜, 이름까지 비어 있으면 멤버 사진 겹침('members')을 뜻하는
+/// 회색 사람 아이콘.
+class _GroupIcon extends StatelessWidget {
+  final String name;
+  final String? emoji;
+  final Color color;
+  final String? photoUrl;
+  final String Function(String relative)? resolveUrl;
+  final double radius;
+  const _GroupIcon({
+    required this.name,
+    required this.emoji,
+    required this.color,
+    this.photoUrl,
+    this.resolveUrl,
+    required this.radius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (photoUrl != null && resolveUrl != null) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundImage: NetworkImage(resolveUrl!(photoUrl!)),
+      );
+    }
+    if (emoji != null) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: color,
+        child: Text(emoji!, style: TextStyle(fontSize: radius)),
+      );
+    }
+    if (name.isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Icon(
+          Icons.groups_outlined,
+          size: radius,
+          color: Theme.of(context).hintColor,
+        ),
+      );
+    }
+    return InitialsAvatar(name: name, color: color, radius: radius);
+  }
+}
+
+/// "그룹 아이콘 선택하기" 팝업 — my_profile_dialog.dart의 "캐릭터 선택하기"와 같은 모양이다.
+/// 아이콘 첫 칸은 그룹 이름 앞 2글자 이니셜(팀 설정의 팀 아이콘과 같은 방식)이고, 배경색은
+/// 이니셜·이모지 모두에 적용된다. "확인"을 누르면 (이모지(이니셜이면 null), 배경색)을 돌려준다.
 class _GroupIconPickerDialog extends StatefulWidget {
   final String previewName;
-  final String initialMode; // 'initial' | 'emoji'
   final String? initialEmoji;
-  final Color? initialColor;
+  final Color initialColor;
   const _GroupIconPickerDialog({
     required this.previewName,
-    required this.initialMode,
-    this.initialEmoji,
-    this.initialColor,
+    required this.initialEmoji,
+    required this.initialColor,
   });
 
   @override
@@ -450,9 +514,15 @@ class _GroupIconPickerDialog extends StatefulWidget {
 }
 
 class _GroupIconPickerDialogState extends State<_GroupIconPickerDialog> {
-  late String _mode = widget.initialMode;
-  late String _emoji = widget.initialEmoji ?? _groupEmojis.first;
-  late Color _color = widget.initialColor ?? _groupColors.first;
+  late String? _emoji = widget.initialEmoji;
+  late Color _color = widget.initialColor;
+
+  Widget _icon(String? emoji, double radius) => _GroupIcon(
+    name: widget.previewName,
+    emoji: emoji,
+    color: _color,
+    radius: radius,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -472,73 +542,49 @@ class _GroupIconPickerDialogState extends State<_GroupIconPickerDialog> {
                 ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-              AvatarView(
-                username: widget.previewName.isEmpty ? '?' : widget.previewName,
-                avatarType: _mode == 'emoji' ? 'character' : 'initial',
-                avatarEmoji: _mode == 'emoji' ? _emoji : null,
-                avatarColor: _mode == 'emoji' ? colorToHex(_color) : null,
-                radius: 44,
-              ),
+              _icon(_emoji, 44),
               const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '아이콘',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+              const SizedBox(height: 8),
               Wrap(
-                spacing: 8,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
-                  ChoiceChip(
-                    label: const Text('이니셜'),
-                    selected: _mode == 'initial',
-                    onSelected: (_) => setState(() => _mode = 'initial'),
-                  ),
-                  ChoiceChip(
-                    label: const Text('이미지'),
-                    selected: _mode == 'emoji',
-                    onSelected: (_) => setState(() => _mode = 'emoji'),
-                  ),
+                  for (final e in <String?>[null, ..._groupEmojis])
+                    _EmojiChoice(
+                      selected: e == _emoji,
+                      onTap: () => setState(() => _emoji = e),
+                      child: _icon(e, 16),
+                    ),
                 ],
               ),
-              if (_mode == 'emoji') ...[
-                const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '이미지',
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '배경색',
+                  style: Theme.of(context).textTheme.labelMedium,
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final e in _groupEmojis)
-                      _EmojiChoice(
-                        selected: e == _emoji,
-                        onTap: () => setState(() => _emoji = e),
-                        child: Text(e, style: const TextStyle(fontSize: 20)),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '색상',
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final c in _groupColors)
-                      _ColorChoice(
-                        color: c,
-                        selected: c.toARGB32() == _color.toARGB32(),
-                        onTap: () => setState(() => _color = c),
-                      ),
-                  ],
-                ),
-              ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final c in _groupColors)
+                    _ColorChoice(
+                      color: c,
+                      selected: c.toARGB32() == _color.toARGB32(),
+                      onTap: () => setState(() => _color = c),
+                    ),
+                ],
+              ),
               const SizedBox(height: 20),
               Row(
                 children: [
@@ -552,7 +598,7 @@ class _GroupIconPickerDialogState extends State<_GroupIconPickerDialog> {
                   Expanded(
                     child: FilledButton(
                       onPressed: () =>
-                          Navigator.of(context).pop((_mode, _emoji, _color)),
+                          Navigator.of(context).pop((_emoji, _color)),
                       child: const Text('확인'),
                     ),
                   ),

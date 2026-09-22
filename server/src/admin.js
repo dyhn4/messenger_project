@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { cert } from 'firebase-admin/app';
 import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
 import { UPLOADS_DIR } from './config.js';
+import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
 import { countMessages, countMessagesToday, countRooms, countTeams } from './db/queries/stats.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
@@ -13,7 +14,7 @@ import {
   findPositionOptionByLabel,
   insertPositionOption,
   listPositionOptions,
-  movePositionOption,
+  reorderPositionOptions,
   toggleDefaultPositionOption,
 } from './db/queries/positionOptions.js';
 import { listTeamIdsForUser, listTeamMemberIds, listTeamsForUser } from './db/queries/teams.js';
@@ -226,14 +227,14 @@ export function createAdminRouter(io) {
     res.json({ ok: true });
   });
 
-  /** 직책 서열 변경 — 클릭한 직책을 왼쪽/오른쪽 이웃과 맞바꾼다. 이미 끝이면 조용히 그대로. */
-  router.post('/admin/position-options/:id/move', async (req, res) => {
-    const direction = req.body?.direction;
-    if (direction !== 'left' && direction !== 'right') {
-      return res.status(400).json({ error: "direction은 'left' 또는 'right'여야 합니다." });
+  /** 직책 서열 변경 — `ids`에 전체 직책 id를 원하는 순서대로 보낸다(끌어다 놓기). */
+  router.post('/admin/position-options/order', async (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const current = (await listPositionOptions()).map((o) => o.id);
+    if (ids.length !== current.length || !current.every((id) => ids.includes(id))) {
+      return res.status(400).json({ error: '직책 목록이 올바르지 않습니다.' });
     }
-    const updated = await movePositionOption(req.params.id, direction);
-    res.json(updated);
+    res.json(await reorderPositionOptions(ids));
   });
 
   /** 직책 "기본값" 지정/해제 — 회원가입 시 이 직책이 자동으로 부여된다(auth.js). */
@@ -456,6 +457,7 @@ export function createAdminRouter(io) {
         name: team.name,
         iconEmoji: team.iconEmoji ?? null,
         iconColor: team.iconColor ?? null,
+        iconUrl: signFileUrl(team.iconUrl) ?? null,
         memberCount: memberIds.length,
         createdBy: creator ? (creator.name ?? creator.username) : null,
         createdAt: new Date(team.createdAt).getTime(),

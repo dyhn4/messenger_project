@@ -205,7 +205,11 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
           for (final team in teamRows)
             _TeamGroup(
               title: team.name,
-              avatar: TeamAvatar(team: team.asAvatarTeam, size: 36),
+              avatar: TeamAvatar(
+                team: team.asAvatarTeam,
+                resolveUrl: widget.session.resolveUrl,
+                size: 36,
+              ),
               memberCount: team.memberIds.length,
               expanded: _expandedId == team.id,
               onToggle: () => setState(

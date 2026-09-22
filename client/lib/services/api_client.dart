@@ -39,11 +39,16 @@ class AuthResult {
 
 class UploadResult {
   final String url;
+
+  /// 올린 사람이 저장 전에 바로 미리보기를 그릴 수 있는 서명된 /files/ 링크(팀·그룹 아이콘
+  /// 사진). [url](미서명 /uploads/ 경로)은 그 자체로는 내려받을 수 없다.
+  final String? signedUrl;
   final String fileName;
   final int size;
   final String? mimeType;
   const UploadResult({
     required this.url,
+    this.signedUrl,
     required this.fileName,
     required this.size,
     this.mimeType,
@@ -786,17 +791,11 @@ class ApiClient {
     await _delete('/api/admin/position-options/$id');
   }
 
-  /// 직책 서열 변경 — [direction]은 'left' 또는 'right'. 이미 끝이면 서버가 조용히 그대로
-  /// 돌려준다. 항상 최신 전체 목록을 돌려주므로 그대로 다시 그리면 된다.
-  Future<List<PositionOption>> movePositionOption(
-    String id,
-    String direction,
-  ) async {
+  /// 직책 서열 변경 — [ids]는 전체 직책 id를 원하는 순서대로. 항상 최신 전체 목록을
+  /// 돌려주므로 그대로 다시 그리면 된다.
+  Future<List<PositionOption>> reorderPositionOptions(List<String> ids) async {
     final list =
-        await _post('/api/admin/position-options/$id/move', {
-              'direction': direction,
-            })
-            as List;
+        await _post('/api/admin/position-options/order', {'ids': ids}) as List;
     return list
         .map((e) => PositionOption.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -952,16 +951,26 @@ class ApiClient {
   }
 
   /// 팀 생성 — 만든 사람이 그 팀의 소유자가 된다(서버 teams.js 참고).
+  /// 팀 생성 — 팀 설정과 같은 항목(아이콘·토픽 생성 권한·메시지 설정)을 함께 정할 수 있다
+  /// ('designated' 토픽 생성 권한은 멤버가 생긴 뒤 팀 설정에서만).
   Future<Team> createTeam({
     required String name,
     String? iconEmoji,
     String? iconColor,
+    String? iconUrl,
+    String? topicCreationPolicy,
+    bool? messageEditDeleteEnabled,
+    int? messageEditDeleteWindowSeconds,
   }) async {
     return Team.fromJson(
       await _post('/api/teams', {
             'name': name,
             'iconEmoji': ?iconEmoji,
             'iconColor': ?iconColor,
+            'iconUrl': ?iconUrl,
+            'topicCreationPolicy': ?topicCreationPolicy,
+            'messageEditDeleteEnabled': ?messageEditDeleteEnabled,
+            'messageEditDeleteWindowSeconds': ?messageEditDeleteWindowSeconds,
           })
           as Map<String, dynamic>,
     );
@@ -973,6 +982,7 @@ class ApiClient {
     String? name,
     String? iconEmoji,
     String? iconColor,
+    String? iconUrl,
     String? topicCreationPolicy,
     List<String>? topicCreatorIds,
     bool? messageEditDeleteEnabled,
@@ -983,6 +993,7 @@ class ApiClient {
             'name': ?name,
             'iconEmoji': ?iconEmoji,
             'iconColor': ?iconColor,
+            'iconUrl': ?iconUrl,
             'topicCreationPolicy': ?topicCreationPolicy,
             'topicCreatorIds': ?topicCreatorIds,
             'messageEditDeleteEnabled': ?messageEditDeleteEnabled,
@@ -1425,6 +1436,11 @@ class ApiClient {
 
   Future<void> deleteTaskType(String typeId) async {
     await _delete('/api/task-types/$typeId');
+  }
+
+  /// 유형 순서 저장 — [ids]는 그 프로젝트의 전체 유형 id를 원하는 순서대로.
+  Future<void> reorderTaskTypes(String projectId, List<String> ids) async {
+    await _post('/api/projects/$projectId/task-types/order', {'ids': ids});
   }
 
   /// 노트 목록(본문 제외) — [projectId] 하나 또는 [teamId](내가 참여한 모든 프로젝트).
@@ -1918,11 +1934,13 @@ class ApiClient {
     required String teamId,
     String? name,
     required List<String> memberIds,
-    // 'members'(기본, 안 보내도 됨) | 'initial' | 'emoji' — new_chat_screen.dart의 아이콘
-    // 선택. 'emoji'일 때만 iconEmoji가 필요하고 iconColor는 선택.
+    // 'members'(기본, 안 보내도 됨) | 'initial' | 'emoji' | 'photo' — new_chat_screen.dart의
+    // 아이콘 선택. 'emoji'면 iconEmoji, 'photo'면 iconUrl(업로드 응답의 URL)이 필요하고,
+    // iconColor는 initial·emoji의 배경색(선택).
     String? iconType,
     String? iconEmoji,
     String? iconColor,
+    String? iconUrl,
   }) async {
     return Room.fromJson(
       await _post('/api/rooms', {
@@ -1935,6 +1953,7 @@ class ApiClient {
                 : null),
             'iconEmoji': ?iconEmoji,
             'iconColor': ?iconColor,
+            'iconUrl': ?iconUrl,
           })
           as Map<String, dynamic>,
     );
@@ -2228,6 +2247,7 @@ class ApiClient {
     }
     return UploadResult(
       url: body['url'] as String,
+      signedUrl: body['signedUrl'] as String?,
       fileName: body['fileName'] as String,
       size: (body['size'] as num).toInt(),
       mimeType: body['mimeType'] as String?,

@@ -22,30 +22,10 @@ class TeamSelectScreen extends StatefulWidget {
 }
 
 class _TeamSelectScreenState extends State<TeamSelectScreen> {
-  bool _creating = false;
-
-  Future<void> _createTeam() async {
-    final name = await showDialog<String>(
-      context: context,
-      builder: (_) => const _CreateTeamDialog(),
-    );
-    if (name == null || name.isEmpty || !mounted) return;
-
-    setState(() => _creating = true);
-    try {
-      // 팀을 만든 사람이 그 팀의 소유자가 된다(서버 teams.js) — 만들자마자 바로 들어간다.
-      final team = await widget.session.createTeam(name: name);
-      if (mounted) widget.session.enterTeam(team);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('팀 생성 실패: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _creating = false);
-    }
-  }
+  /// 팀 설정과 같은 화면에서 아이콘·이름·토픽 생성 권한·메시지 설정을 고른 뒤 만든다 —
+  /// 만든 사람이 소유자가 되고(서버 teams.js), 만든 팀은 이 목록에 추가될 뿐 바로 들어가지는
+  /// 않는다.
+  Future<void> _createTeam() => showCreateTeamDialog(context, widget.session);
 
   @override
   Widget build(BuildContext context) {
@@ -135,10 +115,7 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
                       ),
                     ),
                   const SizedBox(height: 16),
-                  _CreateTeamButton(
-                    busy: _creating,
-                    onPressed: _creating ? null : _createTeam,
-                  ),
+                  _CreateTeamButton(onPressed: _createTeam),
                 ],
               ),
             ),
@@ -150,61 +127,6 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
               : Align(alignment: Alignment.topCenter, child: list);
         },
       ),
-    );
-  }
-}
-
-/// 팀 이름 입력창. TextEditingController를 이 State가 들고 dispose까지 책임진다.
-///
-/// 예전에는 _createTeam()에서 컨트롤러를 만들어 `await showDialog(...)` 직후에 dispose했는데,
-/// showDialog의 Future는 Navigator.pop이 "호출된" 시점에 바로 완료되고 다이얼로그 라우트는
-/// 그 뒤로도 닫히는 전환 애니메이션 동안 계속 리빌드된다 — 그 리빌드가 이미 dispose된
-/// 컨트롤러에 리스너를 다시 달면서 "A TextEditingController was used after being disposed"가
-/// 났고, 그 여파로 위젯 트리가 깨져 "_dependents.isEmpty" 단언 실패까지 이어졌다.
-/// State가 소유하면 라우트가 실제로 사라질 때 dispose되므로 이 경합이 없다.
-class _CreateTeamDialog extends StatefulWidget {
-  const _CreateTeamDialog();
-
-  @override
-  State<_CreateTeamDialog> createState() => _CreateTeamDialogState();
-}
-
-class _CreateTeamDialogState extends State<_CreateTeamDialog> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() => Navigator.of(context).pop(_controller.text.trim());
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('팀 생성하기'),
-      content: SizedBox(
-        width: 320,
-        child: TextField(
-          controller: _controller,
-          autofocus: true,
-          maxLength: 30,
-          decoration: const InputDecoration(
-            labelText: '팀 이름',
-            hintText: '예: 개발팀',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (_) => _submit(),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('만들기')),
-      ],
     );
   }
 }
@@ -262,7 +184,7 @@ class _TeamRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Row(
         children: [
-          TeamAvatar(team: team, size: 44),
+          TeamAvatar(team: team, resolveUrl: session.resolveUrl, size: 44),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -301,9 +223,8 @@ class _TeamRow extends StatelessWidget {
 }
 
 class _CreateTeamButton extends StatelessWidget {
-  final bool busy;
-  final VoidCallback? onPressed;
-  const _CreateTeamButton({required this.busy, required this.onPressed});
+  final VoidCallback onPressed;
+  const _CreateTeamButton({required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -318,14 +239,7 @@ class _CreateTeamButton extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              if (busy)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(Icons.add, color: Theme.of(context).hintColor),
+              Icon(Icons.add, color: Theme.of(context).hintColor),
               const SizedBox(width: 8),
               Text(
                 '팀 생성하기',

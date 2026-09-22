@@ -43,6 +43,7 @@ function toTeamRefDto(team) {
     name: team.name,
     iconEmoji: team.iconEmoji ?? null,
     iconColor: team.iconColor ?? null,
+    iconUrl: signFileUrl(team.iconUrl) ?? null,
     topicCreationPolicy: team.topicCreationPolicy ?? 'member',
     topicCreatorIds: [],
     messageEditDeleteEnabled: team.messageEditDeleteEnabled !== false,

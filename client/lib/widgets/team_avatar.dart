@@ -2,12 +2,20 @@ import 'package:flutter/material.dart';
 
 import '../models/team.dart';
 
-/// 팀 아이콘. 팀 설정에서 이모지를 고르면 그 이모지를, 없으면 팀 이름 첫 글자를 보여준다
-/// (사용자 아바타의 character/initial 방식과 같은 규칙).
+/// 팀 아이콘. 사진을 올렸으면 그 사진을, 이모지를 고르면 그 이모지를, 둘 다 없으면 팀 이름
+/// 앞 2글자를 보여준다.
 class TeamAvatar extends StatelessWidget {
   final Team team;
   final double size;
-  const TeamAvatar({super.key, required this.team, this.size = 40});
+
+  /// 사진(team.iconUrl, 서버 기준 상대경로)을 절대 주소로 바꾼다 — 보통 session.resolveUrl.
+  final String Function(String relative) resolveUrl;
+  const TeamAvatar({
+    super.key,
+    required this.team,
+    required this.resolveUrl,
+    this.size = 40,
+  });
 
   static Color _colorOf(Team team) {
     final hex = team.iconColor;
@@ -30,7 +38,26 @@ class TeamAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final photo = team.iconUrl;
+    if (photo != null && photo.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.28),
+        child: Image.network(
+          resolveUrl(photo),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          // 링크가 만료됐거나 파일이 없으면 이모지·이니셜로 대신 그린다.
+          errorBuilder: (context, _, _) => _fallback(),
+        ),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() {
     final emoji = team.iconEmoji;
+    final hasEmoji = emoji != null && emoji.isNotEmpty;
     return Container(
       width: size,
       height: size,
@@ -40,9 +67,11 @@ class TeamAvatar extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Text(
-        emoji != null && emoji.isNotEmpty ? emoji : team.initial,
+        hasEmoji ? emoji : team.initial,
+        maxLines: 1,
         style: TextStyle(
-          fontSize: size * 0.5,
+          // 이니셜은 2글자라 이모지보다 작게 해야 칸 안에 들어간다.
+          fontSize: size * (hasEmoji ? 0.5 : 0.36),
           color: Colors.white,
           fontWeight: FontWeight.bold,
         ),

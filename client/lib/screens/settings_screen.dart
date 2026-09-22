@@ -144,7 +144,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const _SectionDivider(),
                     const _SectionLabel('팀 전환 방식'),
                     Padding(
                       padding: const EdgeInsets.only(left: 12),
@@ -169,7 +169,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const _SectionDivider(),
                     const _SectionLabel('메시지 내용 미리보기'),
                     Padding(
                       padding: const EdgeInsets.only(left: 12),
@@ -208,7 +208,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const _SectionDivider(),
                     if (Platform.isWindows) ...[
                       const _SectionLabel('시작 시 자동 실행'),
                       Padding(
@@ -222,7 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('시스템 시작 시 $_appName 자동 실행'),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const _SectionDivider(),
                       const _SectionLabel('항상 위로'),
                       Padding(
                         padding: const EdgeInsets.only(left: 12),
@@ -235,7 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('다른 창 위에 항상 띄워두기'),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const _SectionDivider(),
                       const _SectionLabel('반투명'),
                       Padding(
                         padding: const EdgeInsets.only(left: 12),
@@ -270,7 +270,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const _SectionDivider(),
                     ],
                     const _SectionLabel('파일 다운로드'),
                     Padding(
@@ -350,7 +350,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const _SectionDivider(),
                     const _SectionLabel('버전 정보'),
                     Padding(
                       padding: const EdgeInsets.only(left: 12),
@@ -419,6 +419,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+/// 환경설정 항목 사이 구분선.
+class _SectionDivider extends StatelessWidget {
+  const _SectionDivider();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 16),
+    child: Divider(height: 1),
+  );
 }
 
 class _SectionLabel extends StatelessWidget {

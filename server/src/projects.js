@@ -74,6 +74,7 @@ import {
   listTaskStatuses,
   listTaskStatusesByIds,
   reorderTaskStatuses,
+  reorderTaskTypes,
   seedDefaultTaskStatuses,
   updateTaskField,
   updateTaskStatus,
@@ -1229,6 +1230,20 @@ export function createProjectsRouter(io) {
     }
     return { fields };
   }
+
+  /** 유형 순서 저장 — 말풍선을 끌어다 놓으면 전체 id를 원하는 순서로 보낸다. */
+  router.post('/projects/:id/task-types/order', async (req, res) => {
+    const project = await requireProjectManager(req, res, req.params.id);
+    if (!project) return;
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const current = (await listTaskTypes(project.id)).map((t) => t.id);
+    if (ids.length !== current.length || !current.every((id) => ids.includes(id))) {
+      return res.status(400).json({ error: '유형 목록이 올바르지 않습니다.' });
+    }
+    await reorderTaskTypes(project.id, ids);
+    await notifyProjectMembers(project, null);
+    res.json((await listTaskTypes(project.id)).map(toTaskTypeDto));
+  });
 
   router.post('/projects/:id/task-types', async (req, res) => {
     const project = await requireProjectManager(req, res, req.params.id);

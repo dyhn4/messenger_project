@@ -835,8 +835,24 @@ class Session extends ChangeNotifier {
   }
 
   /// 팀을 새로 만든다 — 만든 사람이 그 팀의 소유자가 된다(서버 teams.js).
-  Future<Team> createTeam({required String name, String? iconEmoji}) async {
-    final team = await api!.createTeam(name: name, iconEmoji: iconEmoji);
+  Future<Team> createTeam({
+    required String name,
+    String? iconEmoji,
+    String? iconColor,
+    String? iconUrl,
+    TopicCreationPolicy? topicCreationPolicy,
+    bool? messageEditDeleteEnabled,
+    int? messageEditDeleteWindowSeconds,
+  }) async {
+    final team = await api!.createTeam(
+      name: name,
+      iconEmoji: iconEmoji,
+      iconColor: iconColor,
+      iconUrl: iconUrl,
+      topicCreationPolicy: topicCreationPolicy?.wire,
+      messageEditDeleteEnabled: messageEditDeleteEnabled,
+      messageEditDeleteWindowSeconds: messageEditDeleteWindowSeconds,
+    );
     teams.add(team);
     notifyListeners();
     return team;
@@ -849,6 +865,7 @@ class Session extends ChangeNotifier {
     String? name,
     String? iconEmoji,
     String? iconColor,
+    String? iconUrl,
     TopicCreationPolicy? topicCreationPolicy,
     List<String>? topicCreatorIds,
     bool? messageEditDeleteEnabled,
@@ -859,6 +876,7 @@ class Session extends ChangeNotifier {
       name: name,
       iconEmoji: iconEmoji,
       iconColor: iconColor,
+      iconUrl: iconUrl,
       topicCreationPolicy: topicCreationPolicy?.wire,
       topicCreatorIds: topicCreatorIds,
       messageEditDeleteEnabled: messageEditDeleteEnabled,
@@ -867,6 +885,7 @@ class Session extends ChangeNotifier {
     team.name = updated.name;
     team.iconEmoji = updated.iconEmoji;
     team.iconColor = updated.iconColor;
+    team.iconUrl = updated.iconUrl;
     team.topicCreationPolicy = updated.topicCreationPolicy;
     team.topicCreatorIds = updated.topicCreatorIds;
     team.messageEditDeleteEnabled = updated.messageEditDeleteEnabled;
@@ -926,6 +945,17 @@ class Session extends ChangeNotifier {
   Future<List<PositionOption>> fetchPositionOptions() =>
       api!.fetchPositionOptions();
 
+  /// 팀·직책 관리 설정(orgScope)을 바꾼 직후 호출 — orgScope와 내 부서·직책 표시값은 로그인 때
+  /// fetchMe로만 채워지므로, 다시 받아오지 않으면 재로그인 전까지 예전 설정으로 동작한다.
+  Future<void> refreshOrgInfo() async {
+    final me = await api!.fetchMe();
+    orgScope = me.orgScope;
+    myDepartment = me.department;
+    myPosition = me.position;
+    myTeamPositions = me.teamPositions;
+    notifyListeners();
+  }
+
   /// 직책 목록(서열순, 서버 운영자가 아니어도 누구나 호출 가능) — "팀 초대 링크 만들기"의
   /// "부여할 직책"이 쓴다.
   Future<List<PositionOption>> fetchPublicPositionOptions() =>
@@ -933,10 +963,8 @@ class Session extends ChangeNotifier {
   Future<PositionOption> createPositionOption(String label) =>
       api!.createPositionOption(label);
   Future<void> deletePositionOption(String id) => api!.deletePositionOption(id);
-  Future<List<PositionOption>> movePositionOption(
-    String id,
-    String direction,
-  ) => api!.movePositionOption(id, direction);
+  Future<List<PositionOption>> reorderPositionOptions(List<String> ids) =>
+      api!.reorderPositionOptions(ids);
   Future<List<PositionOption>> toggleDefaultPositionOption(String id) =>
       api!.toggleDefaultPositionOption(id);
 
@@ -1092,6 +1120,7 @@ class Session extends ChangeNotifier {
         teams[i].name = team.name;
         teams[i].iconEmoji = team.iconEmoji;
         teams[i].iconColor = team.iconColor;
+        teams[i].iconUrl = team.iconUrl;
         teams[i].topicCreationPolicy = team.topicCreationPolicy;
         teams[i].topicCreatorIds = team.topicCreatorIds;
         teams[i].messageEditDeleteEnabled = team.messageEditDeleteEnabled;
@@ -2187,6 +2216,7 @@ class Session extends ChangeNotifier {
     String? iconType,
     String? iconEmoji,
     String? iconColor,
+    String? iconUrl,
   }) async {
     final room = await api!.createGroup(
       teamId: _requireTeamId,
@@ -2195,6 +2225,7 @@ class Session extends ChangeNotifier {
       iconType: iconType,
       iconEmoji: iconEmoji,
       iconColor: iconColor,
+      iconUrl: iconUrl,
     );
     _upsertRoom(room);
     return room;

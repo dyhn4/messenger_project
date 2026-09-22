@@ -98,11 +98,13 @@ class Room {
 
   /// 그룹채팅 아이콘 — 만들 때만 고를 수 있고(new_chat_screen.dart), 이후 수정 UI는 없다.
   /// null 또는 'members'면 room_avatar.dart가 기존처럼 멤버 아바타 두 개를 겹쳐 보여준다.
-  /// 'initial'이면 그룹 이름 첫 글자, 'emoji'면 iconEmoji/iconColor를 보여준다. 토픽/DM은
-  /// 항상 null. 서버가 다시 계산해줄 값이 아니라 생성 시점에 고정되므로 전부 final.
+  /// 'initial'이면 그룹 이름 앞 2글자, 'emoji'면 iconEmoji, 'photo'면 iconUrl(서명된
+  /// /files/ 링크)을 보여준다. iconColor는 initial·emoji의 배경색. 토픽/DM은 항상 null.
+  /// 서버가 다시 계산해줄 값이 아니라 생성 시점에 고정되므로 전부 final.
   final String? iconType;
   final String? iconEmoji;
   final String? iconColor;
+  final String? iconUrl;
 
   Room({
     required this.id,
@@ -132,6 +134,7 @@ class Room {
     this.iconType,
     this.iconEmoji,
     this.iconColor,
+    this.iconUrl,
   }) : lastActivityAt = lastActivityAt ?? createdAt;
 
   factory Room.fromJson(Map<String, dynamic> json) {
@@ -179,6 +182,7 @@ class Room {
       iconType: json['iconType'] as String?,
       iconEmoji: json['iconEmoji'] as String?,
       iconColor: json['iconColor'] as String?,
+      iconUrl: json['iconUrl'] as String?,
     );
   }
 

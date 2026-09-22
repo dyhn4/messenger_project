@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../services/pinned_tls.dart';
@@ -12,14 +14,36 @@ class ServerSetupScreen extends StatefulWidget {
 }
 
 class _ServerSetupScreenState extends State<ServerSetupScreen> {
-  final _controller = TextEditingController(text: 'https://192.168.0.62:3000');
+  final _controller = TextEditingController();
   final _code = TextEditingController();
   bool _loading = false;
 
   @override
   void initState() {
     super.initState();
+    _prefillLocalServerAddress();
     _consumePendingPairRequest();
+  }
+
+  // 서버(index.js)가 콘솔에 찍는 "같은 와이파이의 다른 기기에서 접속할 주소"와 같은 방식으로
+  // 이 PC의 LAN IPv4를 찾는다 — 보통 서버도 같은 개발 PC에서 띄우므로, 기본값을 미리 채워두면
+  // 매번 서버 콘솔을 보고 옮겨 적을 필요가 없다. 못 찾으면 빈 값(hintText의 예시만 보임)으로 둔다.
+  Future<void> _prefillLocalServerAddress() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      final addresses = interfaces
+          .expand((i) => i.addresses)
+          .map((a) => a.address)
+          .where((a) => a.isNotEmpty)
+          .toList();
+      if (addresses.isEmpty || !mounted || _controller.text.isNotEmpty) return;
+      setState(() => _controller.text = 'https://${addresses.first}:3000');
+    } catch (_) {
+      // 네트워크 인터페이스 조회 실패 — 사용자가 직접 입력하도록 둔다.
+    }
   }
 
   @override

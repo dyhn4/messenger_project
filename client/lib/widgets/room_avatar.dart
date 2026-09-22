@@ -34,6 +34,12 @@ class RoomAvatar extends StatelessWidget {
         room.iconType != null &&
         room.iconType != 'members') {
       final name = room.displayName(myUserId);
+      if (room.iconType == 'photo' && room.iconUrl != null) {
+        return CircleAvatar(
+          radius: size / 2,
+          backgroundImage: NetworkImage(resolveUrl(room.iconUrl!)),
+        );
+      }
       if (room.iconType == 'emoji' && room.iconEmoji != null) {
         return AvatarView(
           username: name,
@@ -44,7 +50,11 @@ class RoomAvatar extends StatelessWidget {
         );
       }
       if (room.iconType == 'initial') {
-        return AvatarView(username: name, radius: size / 2);
+        return InitialsAvatar(
+          name: name,
+          color: parseHexColor(room.iconColor),
+          radius: size / 2,
+        );
       }
     }
 

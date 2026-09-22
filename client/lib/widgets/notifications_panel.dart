@@ -198,7 +198,11 @@ class _NotificationRow extends StatelessWidget {
                   : Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        TeamAvatar(team: team, size: 32),
+                        TeamAvatar(
+                          team: team,
+                          resolveUrl: session.resolveUrl,
+                          size: 32,
+                        ),
                         const SizedBox(height: 2),
                         Text(
                           team.name,

@@ -59,6 +59,16 @@ export function resolveRawUrl(url) {
   }
 }
 
+/**
+ * 팀·그룹 아이콘 사진처럼 클라이언트가 업로드 응답의 URL(서명된 /files/ 링크든 미서명
+ * /uploads/ 경로든)을 다시 보내올 때 — DB에 넣을 미서명 /uploads/<파일명> 경로로 바꾼다.
+ * 알아볼 수 없는 값(만료/위조 토큰, 다른 경로)이면 null.
+ */
+export function toStoredUploadUrl(url) {
+  const raw = resolveRawUrl(url);
+  return raw && /^\/uploads\/[^/\\]+$/.test(raw) ? raw : null;
+}
+
 /** /files/:token 라우트에서 쓴다. 서명이 유효하고 만료 전이면 실제 파일 경로(+원본 파일명)를 돌려준다. */
 export function resolveSignedFile(token) {
   const payload = jwt.verify(token, JWT_SECRET); // 서명/만료 실패 시 throw
@@ -97,9 +107,13 @@ uploadRouter.post('/upload', upload.single('file'), (req, res) => {
   // 응답의 url은 저장된 상대경로일 뿐, 그 자체로는 서빙되지 않는다(직접 공개 URL 금지).
   // 실제로 내려받을 땐 이 메시지/프로필이 요청될 때마다 signFileUrl로 새로 서명된
   // /files/<token> 경로가 쓰인다 — socket.js의 message:send, rooms.js의 메시지 조회,
-  // users.js의 publicUser()를 보면 된다.
+  // users.js의 publicUser()를 보면 된다. signedUrl은 올린 사람이 저장 전에 바로 미리보기를
+  // 그릴 수 있게 함께 주는 서명된 링크다(팀·그룹 아이콘 사진 — 저장할 땐 이걸 그대로
+  // 보내도 서버가 toStoredUploadUrl로 미서명 경로로 되돌린다).
+  const url = `/uploads/${req.file.filename}`;
   res.status(201).json({
-    url: `/uploads/${req.file.filename}`,
+    url,
+    signedUrl: signFileUrl(url),
     fileName: req.file.originalname,
     size: req.file.size,
     mimeType: req.file.mimetype,

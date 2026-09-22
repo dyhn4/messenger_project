@@ -40,7 +40,11 @@ class TeamSwitcher extends StatelessWidget {
                 value: team,
                 child: Row(
                   children: [
-                    TeamAvatar(team: team, size: 28),
+                    TeamAvatar(
+                      team: team,
+                      resolveUrl: session.resolveUrl,
+                      size: 28,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -77,7 +81,11 @@ class TeamSwitcher extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TeamAvatar(team: current, size: 28),
+              TeamAvatar(
+                team: current,
+                resolveUrl: session.resolveUrl,
+                size: 28,
+              ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -107,6 +115,27 @@ class TeamSwitcherTabs extends StatelessWidget {
   final Session session;
   const TeamSwitcherTabs({super.key, required this.session});
 
+  /// 탭 안의 팀명 칸 너비 — 가장 긴 팀명에 맞춰 모든 탭을 같은 폭으로 그린다. 선택된 탭은
+  /// 굵은 글씨라 더 넓어지므로 굵은 글씨로 재서, 선택이 바뀌어도 폭이 흔들리지 않게 한다.
+  /// 이름이 아주 길면 탭 하나가 화면을 다 차지하므로 상한을 둔다(넘으면 말줄임표).
+  static double _nameColumnWidth(BuildContext context, List<Team> teams) {
+    final style = DefaultTextStyle.of(context).style.copyWith(
+      fontSize: 13,
+      fontWeight: FontWeight.bold,
+    );
+    final scaler = MediaQuery.textScalerOf(context);
+    var widest = 0.0;
+    for (final team in teams) {
+      final painter = TextPainter(
+        text: TextSpan(text: team.name, style: style),
+        textDirection: TextDirection.ltr,
+        textScaler: scaler,
+      )..layout();
+      widest = widest > painter.width ? widest : painter.width;
+    }
+    return widest.clamp(40.0, 180.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -114,6 +143,7 @@ class TeamSwitcherTabs extends StatelessWidget {
       builder: (context, _) {
         final current = session.currentTeam;
         if (current == null) return const SizedBox.shrink();
+        final nameWidth = _nameColumnWidth(context, session.teams);
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -123,6 +153,8 @@ class TeamSwitcherTabs extends StatelessWidget {
               for (final team in session.teams) ...[
                 _TeamTab(
                   team: team,
+                  resolveUrl: session.resolveUrl,
+                  nameWidth: nameWidth,
                   selected: team.id == current.id,
                   // 그 팀에 안 읽은 방이 하나라도 있으면 탭 오른쪽 위에 빨간 점을 얹는다
                   // ("알림 센터" 종 버튼과 같은 표시 — notifications_panel.dart 참고).
@@ -161,11 +193,17 @@ class _TeamTab extends StatelessWidget {
   final bool selected;
   final bool hasUnread;
   final VoidCallback onTap;
+  final String Function(String relative) resolveUrl;
+
+  /// 탭 안 팀명 칸의 너비 — 모든 탭이 같은 값을 받아 폭이 같아진다([TeamSwitcherTabs]가 계산).
+  final double nameWidth;
   const _TeamTab({
     required this.team,
     required this.selected,
     required this.hasUnread,
     required this.onTap,
+    required this.resolveUrl,
+    required this.nameWidth,
   });
 
   static const _radius = BorderRadius.vertical(top: Radius.circular(10));
@@ -202,21 +240,32 @@ class _TeamTab extends StatelessWidget {
               children: [
                 Opacity(
                   opacity: selected ? 1 : 0.45,
-                  child: TeamAvatar(team: team, size: 20),
+                  child: TeamAvatar(
+                    team: team,
+                    resolveUrl: resolveUrl,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 7),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 130),
-                  child: Text(
-                    team.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: selected
-                          ? theme.colorScheme.onSurface
-                          : theme.hintColor,
-                      fontWeight: selected ? FontWeight.bold : FontWeight.w400,
+                // 가장 긴 팀명에 맞춘 칸 — 모든 탭의 폭이 같아진다(넘치면 말줄임표 + 툴팁).
+                SizedBox(
+                  width: nameWidth,
+                  child: Tooltip(
+                    message: team.name,
+                    waitDuration: const Duration(milliseconds: 500),
+                    child: Text(
+                      team.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: selected
+                            ? theme.colorScheme.onSurface
+                            : theme.hintColor,
+                        fontWeight: selected
+                            ? FontWeight.bold
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),

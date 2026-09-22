@@ -106,9 +106,17 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
   Future<void> _newTask() async {
     final project = _project;
     if (project == null) return;
+    // 지금 프로젝트로 골라둔 채 열되, 창 안에서 다른 프로젝트로 바꿀 수도 있게 팀의 프로젝트
+    // 목록을 함께 넘긴다(목록을 못 불러와도 이 프로젝트로는 만들 수 있게 그냥 진행한다).
+    List<Project> projects = const [];
+    try {
+      projects = await widget.session.api!.fetchProjects(project.teamId);
+    } catch (_) {}
+    if (!mounted) return;
     final created = await showNewTaskDialog(
       context,
       widget.session,
+      projects: projects,
       projectId: project.id,
       projectName: project.name,
       members: project.members,

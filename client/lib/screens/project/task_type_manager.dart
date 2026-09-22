@@ -4,7 +4,7 @@ import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'task_config_manager.dart'
-    show ConfigBubble, ConfigSection, configAction;
+    show ConfigBubble, ConfigSection, ReorderableBubbleList, configAction;
 
 const _typePalette = <String>[
   '#E53935',
@@ -105,6 +105,20 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
     }
   }
 
+  /// 말풍선을 끌어다 놓아 순서가 바뀌었을 때 — 화면을 먼저 바꾸고, 저장에 실패하면 다시
+  /// 불러온다.
+  Future<void> _reorder(List<TaskType> list) async {
+    setState(() => _types = list);
+    try {
+      await widget.session.api!.reorderTaskTypes(widget.projectId, [
+        for (final t in list) t.id,
+      ]);
+    } catch (e) {
+      if (mounted) showAppToast(context, '순서를 바꾸지 못했습니다: $e');
+      await _load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final types = _types;
@@ -114,13 +128,16 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
         ? const Center(child: CircularProgressIndicator())
         : ConfigSection(
             title: '유형',
-            description: '업무를 분류하는 꼬리표입니다(버그·기능 등).',
+            description: '업무를 분류하는 꼬리표입니다(버그·기능 등). 끌어서 순서를 바꿀 수 있습니다.',
             addLabel: '추가',
             onAdd: _edit,
             emptyHint: '등록된 유형이 없습니다.',
             children: [
-              for (final type in types)
-                ConfigBubble(
+              ReorderableBubbleList<TaskType>(
+                items: types,
+                idOf: (t) => t.id,
+                onReorder: _reorder,
+                itemBuilder: (type) => ConfigBubble(
                   dotColor: parseTypeColor(type.color),
                   title: type.name,
                   actions: [
@@ -136,6 +153,7 @@ class _ProjectTypeEditorState extends State<ProjectTypeEditor> {
                     ),
                   ],
                 ),
+              ),
             ],
           );
   }

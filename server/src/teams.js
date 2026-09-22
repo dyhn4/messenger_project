@@ -37,6 +37,52 @@ import {
 import { teamAccess, userAccess } from './access.js';
 import { nameOf, notifyMembership, postSystemMessage } from './rooms.js';
 import { publicUser } from './users.js';
+import { signFileUrl, toStoredUploadUrl } from './upload.js';
+
+const TEAM_ICON_COLORS = ['#9575CD', '#4C6EF5', '#15AABF', '#37B24D', '#FAB005', '#FF6B35', '#E64980', '#8D6E63'];
+
+/**
+ * 팀 생성(POST)과 팀 설정 변경(PATCH)이 함께 쓰는 아이콘·토픽 생성 권한·메시지 설정 검증 —
+ * 본문에 들어 있는 항목만 fields에 담는다. 'designated'의 지정자 목록은 팀 멤버를 확인해야
+ * 해서 호출부가 따로 검사한다.
+ */
+function parseTeamOptionFields(body) {
+  const fields = {};
+  const text = (v) => (typeof v === 'string' && v ? v : null);
+  if ('iconEmoji' in body) fields.iconEmoji = text(body.iconEmoji);
+  if ('iconColor' in body) fields.iconColor = text(body.iconColor);
+  // 팀 아이콘 사진 — 빈 값이면 지운다(초기화/이모지로 변경). 업로드 응답의 URL을 그대로
+  // 보내오므로 미서명 경로로 되돌려 저장한다.
+  if ('iconUrl' in body) {
+    if (!body.iconUrl) {
+      fields.iconUrl = null;
+    } else {
+      const stored = toStoredUploadUrl(body.iconUrl);
+      if (!stored) return { error: '팀 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.' };
+      fields.iconUrl = stored;
+    }
+  }
+  if ('topicCreationPolicy' in body) {
+    if (!TOPIC_CREATION_LEVELS.includes(body.topicCreationPolicy)) {
+      return { error: `topicCreationPolicy는 ${TOPIC_CREATION_LEVELS.join('/')} 중 하나여야 합니다.` };
+    }
+    fields.topicCreationPolicy = body.topicCreationPolicy;
+  }
+  // [메시지 설정] 수정/삭제 허용 여부 + 수정/삭제 가능 시간.
+  if ('messageEditDeleteEnabled' in body) {
+    if (typeof body.messageEditDeleteEnabled !== 'boolean') {
+      return { error: 'messageEditDeleteEnabled는 true/false여야 합니다.' };
+    }
+    fields.messageEditDeleteEnabled = body.messageEditDeleteEnabled;
+  }
+  if ('messageEditDeleteWindowSeconds' in body) {
+    if (!EDIT_DELETE_WINDOW_OPTIONS.includes(body.messageEditDeleteWindowSeconds)) {
+      return { error: '수정/삭제 가능 시간은 5분/30분/1시간/24시간/7일 중에서 고를 수 있습니다.' };
+    }
+    fields.messageEditDeleteWindowSeconds = body.messageEditDeleteWindowSeconds;
+  }
+  return { fields };
+}
 
 export function toTeamDto(team, { isOwner = false, memberCount = null, topicCreatorIds = [] } = {}) {
   return {
@@ -44,6 +90,7 @@ export function toTeamDto(team, { isOwner = false, memberCount = null, topicCrea
     name: team.name,
     iconEmoji: team.iconEmoji ?? null,
     iconColor: team.iconColor ?? null,
+    iconUrl: signFileUrl(team.iconUrl) ?? null,
     topicCreationPolicy: team.topicCreationPolicy ?? 'member',
     // topicCreationPolicy가 'designated'일 때만 의미가 있다 — 팀 설정 화면이 이 id 목록과
     // 자기가 이미 갖고 있는 팀원 목록을 대조해서 이름을 보여준다(서버가 이름까지 싣지 않는다).
@@ -136,6 +183,7 @@ export function createTeamsRouter(io) {
         name: team.name,
         iconEmoji: team.iconEmoji ?? null,
         iconColor: team.iconColor ?? null,
+        iconUrl: signFileUrl(team.iconUrl) ?? null,
         memberIds,
         ownerId: ownerIds[0] ?? null,
       });
@@ -157,10 +205,22 @@ export function createTeamsRouter(io) {
     if (!name) return res.status(400).json({ error: '팀 이름을 입력하세요.' });
     if (name.length > 30) return res.status(400).json({ error: '팀 이름은 30자 이내로 입력하세요.' });
 
+    // 팀 설정과 같은 항목(아이콘·토픽 생성 권한·메시지 설정)을 만들 때 함께 정할 수 있다.
+    // 'designated'(지정한 사람만)는 아직 나 말고 멤버가 없어 고를 수 없다 — 멤버를 넣은 뒤
+    // 팀 설정에서 정한다.
+    const options = parseTeamOptionFields(req.body ?? {});
+    if (options.error) return res.status(400).json({ error: options.error });
+    if (options.fields.topicCreationPolicy === 'designated') {
+      return res.status(400).json({ error: "'지정' 토픽 생성 권한은 팀을 만든 뒤 팀 설정에서 정할 수 있습니다." });
+    }
+
     const team = await insertTeam({
+      ...options.fields,
       name,
-      iconEmoji: typeof req.body?.iconEmoji === 'string' ? req.body.iconEmoji : null,
-      iconColor: typeof req.body?.iconColor === 'string' ? req.body.iconColor : null,
+      // 색을 안 정하고 만들면(기본 이니셜 아이콘) 팔레트에서 무작위로 골라 저장한다 — 클라이언트
+      // team_settings_dialog.dart의 "배경색" 선택지와 같은 목록이다.
+      iconColor:
+        options.fields.iconColor ?? TEAM_ICON_COLORS[Math.floor(Math.random() * TEAM_ICON_COLORS.length)],
       createdBy: req.user.sub,
     });
     await addTeamMembers(team.id, [req.user.sub], 'owner');
@@ -192,50 +252,29 @@ export function createTeamsRouter(io) {
       if (name.length > 30) return res.status(400).json({ error: '팀 이름은 30자 이내로 입력하세요.' });
       fields.name = name;
     }
-    if ('iconEmoji' in (req.body ?? {})) fields.iconEmoji = req.body.iconEmoji || null;
-    if ('iconColor' in (req.body ?? {})) fields.iconColor = req.body.iconColor || null;
+    const options = parseTeamOptionFields(req.body ?? {});
+    if (options.error) return res.status(400).json({ error: options.error });
+    Object.assign(fields, options.fields);
     // 'designated'로 정할 때만 topicCreatorIds가 함께 온다 — 다른 값으로 바꿀 때는 안 보내도
     // 되고, 기존 지정 목록은 그대로 남는다(스키마의 topicCreators 주석 참고).
     let topicCreatorIdsToSet = null;
-    if ('topicCreationPolicy' in (req.body ?? {})) {
-      const policy = req.body.topicCreationPolicy;
-      if (!TOPIC_CREATION_LEVELS.includes(policy)) {
-        return res.status(400).json({ error: `topicCreationPolicy는 ${TOPIC_CREATION_LEVELS.join('/')} 중 하나여야 합니다.` });
+    if (fields.topicCreationPolicy === 'designated') {
+      const ids = Array.isArray(req.body.topicCreatorIds)
+        ? [...new Set(req.body.topicCreatorIds.filter((id) => typeof id === 'string'))]
+        : [];
+      if (ids.length === 0) {
+        return res.status(400).json({ error: '토픽을 만들 수 있는 사람을 한 명 이상 지정하세요.' });
       }
-      fields.topicCreationPolicy = policy;
-
-      if (policy === 'designated') {
-        const ids = Array.isArray(req.body.topicCreatorIds)
-          ? [...new Set(req.body.topicCreatorIds.filter((id) => typeof id === 'string'))]
-          : [];
-        if (ids.length === 0) {
-          return res.status(400).json({ error: '토픽을 만들 수 있는 사람을 한 명 이상 지정하세요.' });
+      for (const id of ids) {
+        if (!(await findTeamMember(team.id, id))) {
+          return res.status(400).json({ error: '이 팀의 멤버만 지정할 수 있습니다.' });
         }
-        for (const id of ids) {
-          if (!(await findTeamMember(team.id, id))) {
-            return res.status(400).json({ error: '이 팀의 멤버만 지정할 수 있습니다.' });
-          }
-          const target = await findUserById(id);
-          if (accountRole(target) === 'guest') {
-            return res.status(400).json({ error: '정회원 이상만 지정할 수 있습니다.' });
-          }
+        const target = await findUserById(id);
+        if (accountRole(target) === 'guest') {
+          return res.status(400).json({ error: '정회원 이상만 지정할 수 있습니다.' });
         }
-        topicCreatorIdsToSet = ids;
       }
-    }
-    // [메시지 설정] 수정/삭제 허용 여부 + 수정/삭제 가능 시간.
-    if ('messageEditDeleteEnabled' in (req.body ?? {})) {
-      if (typeof req.body.messageEditDeleteEnabled !== 'boolean') {
-        return res.status(400).json({ error: 'messageEditDeleteEnabled는 true/false여야 합니다.' });
-      }
-      fields.messageEditDeleteEnabled = req.body.messageEditDeleteEnabled;
-    }
-    if ('messageEditDeleteWindowSeconds' in (req.body ?? {})) {
-      const seconds = req.body.messageEditDeleteWindowSeconds;
-      if (!EDIT_DELETE_WINDOW_OPTIONS.includes(seconds)) {
-        return res.status(400).json({ error: '수정/삭제 가능 시간은 5분/30분/1시간/24시간/7일 중에서 고를 수 있습니다.' });
-      }
-      fields.messageEditDeleteWindowSeconds = seconds;
+      topicCreatorIdsToSet = ids;
     }
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
 

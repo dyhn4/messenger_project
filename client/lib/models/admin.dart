@@ -116,6 +116,7 @@ class AdminTeam {
   final String name;
   final String? iconEmoji;
   final String? iconColor;
+  final String? iconUrl;
   final int memberCount;
   final String? createdBy;
   final DateTime createdAt;
@@ -125,6 +126,7 @@ class AdminTeam {
     required this.name,
     this.iconEmoji,
     this.iconColor,
+    this.iconUrl,
     required this.memberCount,
     this.createdBy,
     required this.createdAt,
@@ -135,6 +137,7 @@ class AdminTeam {
     name: json['name'] as String,
     iconEmoji: json['iconEmoji'] as String?,
     iconColor: json['iconColor'] as String?,
+    iconUrl: json['iconUrl'] as String?,
     memberCount: (json['memberCount'] as num?)?.toInt() ?? 0,
     createdBy: json['createdBy'] as String?,
     createdAt: DateTime.fromMillisecondsSinceEpoch(

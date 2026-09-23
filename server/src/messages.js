@@ -1,11 +1,47 @@
 import { Router } from 'express';
-import { findMessageById, hardDeleteMessage, softDeleteMessage, updateMessageText } from './db/queries/messages.js';
+import {
+  findMessageById,
+  hardDeleteMessage,
+  listFavoriteFiles,
+  softDeleteMessage,
+  toggleFavoriteFile,
+  updateMessageText,
+} from './db/queries/messages.js';
+import { isRoomMember } from './db/queries/rooms.js';
 import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
-import { signFileUrl } from './upload.js';
+import { resolveRawUrl, signFileUrl } from './upload.js';
 
 // 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르므로 여기 상수가 아니라
 // moderation.js의 canModifyContent가 판단한다.
+
+/** [m.attachments]가 붙어 있으면 그걸, 없으면 예전 방식(messages의 파일 칸 하나)을 목록으로. */
+function toAttachmentDtos(m) {
+  const rows = m.attachments;
+  if (Array.isArray(rows) && rows.length > 0) {
+    return rows.map((a) => ({
+      id: a.id,
+      kind: a.kind,
+      fileUrl: signFileUrl(a.fileUrl, a.fileName),
+      fileName: a.fileName ?? null,
+      fileSize: a.fileSize ?? null,
+      mimeType: a.mimeType ?? null,
+      thumbnailUrl: signFileUrl(a.thumbnailUrl),
+    }));
+  }
+  if (!m.fileUrl || (m.type !== 'image' && m.type !== 'file')) return [];
+  return [
+    {
+      id: m.id,
+      kind: m.type,
+      fileUrl: signFileUrl(m.fileUrl, m.fileName),
+      fileName: m.fileName ?? null,
+      fileSize: m.fileSize ?? null,
+      mimeType: m.mimeType ?? null,
+      thumbnailUrl: signFileUrl(m.thumbnailUrl),
+    },
+  ];
+}
 
 /** 방 메시지 조회(rooms.js)와 수정/삭제 브로드캐스트(여기)가 같은 모양의 DTO를 쓰도록 공용화. */
 export function toMessageDto(m) {
@@ -21,6 +57,9 @@ export function toMessageDto(m) {
     fileSize: m.fileSize,
     mimeType: m.mimeType,
     thumbnailUrl: signFileUrl(m.thumbnailUrl),
+    // 사진 여러 장을 한 말풍선에 보여주려고 첨부를 목록으로 내려준다. message_attachments
+    // 행이 있으면 그걸 쓰고, 없으면(예전 메시지) messages의 파일 칸을 첨부 하나로 본다.
+    attachments: toAttachmentDtos(m),
     createdAt: new Date(m.createdAt).getTime(),
     editedAt: m.editedAt ? new Date(m.editedAt).getTime() : null,
     deleted: !!m.deletedAt,
@@ -48,6 +87,41 @@ export function toMessageDto(m) {
 
 export function createMessagesRouter(io) {
   const router = Router();
+
+  // ── 즐겨찾기한 파일 ───────────────────────────────────────────────────
+  //
+  // 사람마다 따로 담는 목록이라 방 권한만 확인하고 그 사람 것에만 쓴다.
+
+  router.post('/messages/:id/favorite-file', async (req, res) => {
+    const message = await findMessageById(req.params.id);
+    if (!message) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
+    if (!(await isRoomMember(message.roomId, req.user.sub))) {
+      return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    }
+    const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl : null;
+    if (!fileUrl) return res.status(400).json({ error: '파일을 알 수 없습니다.' });
+    const favorited = await toggleFavoriteFile({
+      userId: req.user.sub,
+      messageId: message.id,
+      // 서명된 /files/<token> 형태로 와도 원본 경로로 되돌려 저장한다(서명은 매번 바뀐다).
+      fileUrl: resolveRawUrl(fileUrl),
+      fileName: typeof req.body?.fileName === 'string' ? req.body.fileName : null,
+    });
+    res.json({ favorited });
+  });
+
+  router.get('/favorite-files', async (req, res) => {
+    const rows = await listFavoriteFiles(req.user.sub);
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        messageId: r.messageId,
+        fileUrl: signFileUrl(r.fileUrl, r.fileName),
+        fileName: r.fileName ?? null,
+        createdAt: new Date(r.createdAt).getTime(),
+      })),
+    );
+  });
 
   router.patch('/messages/:id', async (req, res) => {
     const message = await findMessageById(req.params.id);

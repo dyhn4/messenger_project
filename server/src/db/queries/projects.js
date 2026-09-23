@@ -8,6 +8,7 @@ import {
   projectAutomations,
   projectNotes,
   projects,
+  taskChecklistItems,
   taskComments,
   taskTemplates,
   taskFields,
@@ -217,11 +218,17 @@ export async function deleteTask(id) {
   await db.delete(tasks).where(eq(tasks.id, id));
 }
 
-export function listTasksByProject(projectId) {
+/** 보관한 업무는 기본으로 빼고 보여준다 — [archivedOnly]면 보관한 것만. */
+export function listTasksByProject(projectId, { archivedOnly = false } = {}) {
   return db
     .select()
     .from(tasks)
-    .where(eq(tasks.projectId, projectId))
+    .where(
+      and(
+        eq(tasks.projectId, projectId),
+        archivedOnly ? sql`${tasks.archivedAt} is not null` : isNull(tasks.archivedAt),
+      ),
+    )
     .orderBy(asc(tasks.status), asc(tasks.dueDate), desc(tasks.createdAt));
 }
 
@@ -242,7 +249,9 @@ export function listTasksForAssignee(teamId, userId, { includeReferenced = false
     .select({ task: tasks, projectName: projects.name, projectIdentifier: projects.identifier })
     .from(tasks)
     .innerJoin(projects, eq(tasks.projectId, projects.id))
-    .where(and(mine, eq(projects.teamId, teamId), isNull(projects.archivedAt)))
+    .where(
+      and(mine, eq(projects.teamId, teamId), isNull(projects.archivedAt), isNull(tasks.archivedAt)),
+    )
     .orderBy(asc(tasks.dueDate), desc(tasks.createdAt))
     .then((rows) =>
       rows.map((r) => ({ ...r.task, projectName: r.projectName, projectIdentifier: r.projectIdentifier })),
@@ -256,11 +265,102 @@ export function listTasksInProjects(projectIds) {
     .select({ task: tasks, projectName: projects.name, projectIdentifier: projects.identifier })
     .from(tasks)
     .innerJoin(projects, eq(tasks.projectId, projects.id))
-    .where(inArray(tasks.projectId, projectIds))
+    .where(and(inArray(tasks.projectId, projectIds), isNull(tasks.archivedAt)))
     .orderBy(asc(tasks.dueDate), desc(tasks.createdAt))
     .then((rows) =>
       rows.map((r) => ({ ...r.task, projectName: r.projectName, projectIdentifier: r.projectIdentifier })),
     );
+}
+
+/** 이 업무들 각각의 하위 업무 개수 {taskId: n} — 목록에서 "하위 업무 2" 같은 표시에 쓴다. */
+export async function countSubtasks(taskIds) {
+  if (taskIds.length === 0) return {};
+  const rows = await db
+    .select({ parentTaskId: tasks.parentTaskId, n: sql`count(*)::int` })
+    .from(tasks)
+    .where(and(inArray(tasks.parentTaskId, taskIds), isNull(tasks.archivedAt)))
+    .groupBy(tasks.parentTaskId);
+  const map = {};
+  for (const r of rows) map[r.parentTaskId] = r.n ?? 0;
+  return map;
+}
+
+/** 부모의 하위 업무들 — 상세 화면에서 보여준다(보관한 것은 뺀다). */
+export function listSubtasks(parentTaskId) {
+  return db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.parentTaskId, parentTaskId), isNull(tasks.archivedAt)))
+    .orderBy(asc(tasks.createdAt));
+}
+
+export async function setTaskArchived(id, archived) {
+  const [row] = await db
+    .update(tasks)
+    .set({ archivedAt: archived ? new Date() : null })
+    .where(eq(tasks.id, id))
+    .returning();
+  return row ?? null;
+}
+
+// ── 체크리스트 ──────────────────────────────────────────────────────────
+
+export function listChecklistItems(taskId) {
+  return db
+    .select()
+    .from(taskChecklistItems)
+    .where(eq(taskChecklistItems.taskId, taskId))
+    .orderBy(asc(taskChecklistItems.position), asc(taskChecklistItems.createdAt));
+}
+
+/** 업무별 체크리스트 진행 {taskId: {done, total}} — 목록/상세의 "2/4"에 쓴다. */
+export async function countChecklistItems(taskIds) {
+  if (taskIds.length === 0) return {};
+  const rows = await db
+    .select({
+      taskId: taskChecklistItems.taskId,
+      total: sql`count(*)::int`,
+      done: sql`count(*) filter (where ${taskChecklistItems.done})::int`,
+    })
+    .from(taskChecklistItems)
+    .where(inArray(taskChecklistItems.taskId, taskIds))
+    .groupBy(taskChecklistItems.taskId);
+  const map = {};
+  for (const r of rows) map[r.taskId] = { done: r.done ?? 0, total: r.total ?? 0 };
+  return map;
+}
+
+export async function insertChecklistItem(taskId, text) {
+  const [{ next }] = await db
+    .select({ next: sql`coalesce(max(${taskChecklistItems.position}), -1) + 1` })
+    .from(taskChecklistItems)
+    .where(eq(taskChecklistItems.taskId, taskId));
+  const [row] = await db
+    .insert(taskChecklistItems)
+    .values({ taskId, text, position: Number(next) })
+    .returning();
+  return row;
+}
+
+export function findChecklistItemById(id) {
+  return db
+    .select()
+    .from(taskChecklistItems)
+    .where(eq(taskChecklistItems.id, id))
+    .then((rows) => rows[0] ?? null);
+}
+
+export async function updateChecklistItem(id, fields) {
+  const [row] = await db
+    .update(taskChecklistItems)
+    .set(fields)
+    .where(eq(taskChecklistItems.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteChecklistItem(id) {
+  await db.delete(taskChecklistItems).where(eq(taskChecklistItems.id, id));
 }
 
 // ── 업무 유형 ───────────────────────────────────────────────────────────

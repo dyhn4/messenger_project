@@ -24,6 +24,15 @@ import {
   listTaskComments,
   listTaskTypes,
   listTaskTypesByIds,
+  countChecklistItems,
+  countSubtasks,
+  deleteChecklistItem,
+  findChecklistItemById,
+  insertChecklistItem,
+  listChecklistItems,
+  listSubtasks,
+  setTaskArchived,
+  updateChecklistItem,
   listTasksByProject,
   listTasksInProjects,
   listTasksForAssignee,
@@ -194,12 +203,15 @@ async function decorateTasks(tasks, myUserId = null) {
   const typeIds = [...new Set(tasks.map((t) => t.typeId).filter(Boolean))];
   const statusIds = [...new Set(tasks.map((t) => t.statusId).filter(Boolean))];
   const priorityIds = [...new Set(tasks.map((t) => t.priorityId).filter(Boolean))];
-  const [types, statuses, priorities, refs, creators] = await Promise.all([
+  const ids = tasks.map((t) => t.id);
+  const [types, statuses, priorities, refs, creators, checklist, subtasks] = await Promise.all([
     listTaskTypesByIds(typeIds),
     listTaskStatusesByIds(statusIds),
     listTaskPrioritiesByIds(priorityIds),
-    listReferencesForTasks(tasks.map((t) => t.id)),
+    listReferencesForTasks(ids),
     listUsersByIds([...new Set(tasks.map((t) => t.createdBy).filter(Boolean))]),
+    countChecklistItems(ids),
+    countSubtasks(ids),
   ]);
   const typeById = new Map(types.map((t) => [t.id, t]));
   const statusById = new Map(statuses.map((s) => [s.id, s]));
@@ -216,7 +228,17 @@ async function decorateTasks(tasks, myUserId = null) {
     }
     const statusRow = t.statusId ? statusById.get(t.statusId) : null;
     const priorityRow = t.priorityId ? priorityById.get(t.priorityId) : null;
-    return { ...t, type, statusRow, priorityRow, creator, referenceIds, myRole };
+    return {
+      ...t,
+      type,
+      statusRow,
+      priorityRow,
+      creator,
+      referenceIds,
+      myRole,
+      checklist: checklist[t.id] ?? null,
+      subtaskCount: subtasks[t.id] ?? 0,
+    };
   });
 }
 
@@ -255,6 +277,21 @@ function toTaskDto(task, { identifier, projectName } = {}) {
     dueDate: task.dueDate ? new Date(task.dueDate).getTime() : null,
     createdAt: new Date(task.createdAt).getTime(),
     completedAt: task.completedAt ? new Date(task.completedAt).getTime() : null,
+    parentTaskId: task.parentTaskId ?? null,
+    archived: !!task.archivedAt,
+    checklistDone: task.checklist?.done ?? 0,
+    checklistTotal: task.checklist?.total ?? 0,
+    subtaskCount: task.subtaskCount ?? 0,
+  };
+}
+
+function toChecklistItemDto(item) {
+  return {
+    id: item.id,
+    taskId: item.taskId,
+    text: item.text,
+    done: item.done,
+    position: item.position,
   };
 }
 
@@ -607,7 +644,10 @@ export function createProjectsRouter(io) {
   router.get('/projects/:id/tasks', async (req, res) => {
     const project = await requireProjectMember(req, res, req.params.id);
     if (!project) return;
-    const list = await decorateTasks(await listTasksByProject(project.id), req.user.sub);
+    // ?archived=1이면 보관함 — 평소 목록에서는 보관한 업무를 뺀다.
+    const archivedOnly = req.query.archived === '1';
+    const rows = await listTasksByProject(project.id, { archivedOnly });
+    const list = await decorateTasks(rows, req.user.sub);
     res.json(list.map((t) => toTaskDto(t, { identifier: project.identifier, projectName: project.name })));
   });
 
@@ -1306,8 +1346,14 @@ export function createProjectsRouter(io) {
     const resolvedPriority = await resolvePriority(project, req.body);
     if (resolvedPriority.error) return res.status(400).json({ error: resolvedPriority.error });
     const priority = resolvedPriority.priority ?? 'normal';
-    const priorityId =
-      resolvedPriority.priorityId ?? (await findFirstPriorityOfLevel(project.id, priority))?.id ?? null;
+    // 우선순위를 아예 안 보낸 업무(예: 상세 패널의 "+ 새 하위 업무")는 비워 둔다 — 화면에
+    // "—"로 나오고 나중에 배지를 눌러 정하면 된다. 단계만 보냈으면(템플릿 등) 그 단계의 첫
+    // 우선순위로 맞춘다. priority(단계)는 정렬·통계용이라 항상 값이 있어야 해서 기본값을 쓴다.
+    const priorityGiven =
+      req.body?.priorityId !== undefined || req.body?.priority !== undefined;
+    const priorityId = priorityGiven
+      ? (resolvedPriority.priorityId ?? (await findFirstPriorityOfLevel(project.id, priority))?.id ?? null)
+      : null;
     const assigneeId = typeof req.body?.assigneeId === 'string' ? req.body.assigneeId : null;
     if (assigneeId && !(await isProjectMember(project.id, assigneeId))) {
       return res.status(400).json({ error: '담당자는 프로젝트 구성원 중에서 고를 수 있습니다.' });
@@ -1321,11 +1367,25 @@ export function createProjectsRouter(io) {
     const referenceIds = await validReferenceIds(project, req.body?.referenceIds);
     if (referenceIds === null) return res.status(400).json({ error: '참조자는 프로젝트 구성원 중에서 고를 수 있습니다.' });
 
+    // 하위 업무로 만들 때 — 부모는 같은 프로젝트의 업무여야 하고, 두 단계까지만 허용한다
+    // (하위 업무의 하위 업무는 만들지 않는다 — 목록 들여쓰기가 끝없이 깊어진다).
+    const parentTaskId = typeof req.body?.parentTaskId === 'string' ? req.body.parentTaskId : null;
+    if (parentTaskId) {
+      const parent = await findTaskById(parentTaskId);
+      if (!parent || parent.projectId !== project.id) {
+        return res.status(400).json({ error: '이 프로젝트의 업무가 아닙니다.' });
+      }
+      if (parent.parentTaskId) {
+        return res.status(400).json({ error: '하위 업무에는 또 하위 업무를 둘 수 없습니다.' });
+      }
+    }
+
     const seq = await takeNextTaskSeq(project.id);
     const inserted = await insertTask({
       id: randomUUID(),
       projectId: project.id,
       seq,
+      parentTaskId,
       title,
       description: typeof req.body?.description === 'string' ? req.body.description.trim() || null : null,
       assigneeId,
@@ -1358,12 +1418,182 @@ export function createProjectsRouter(io) {
     if (!task) return res.status(404).json({ error: '업무를 찾을 수 없습니다.' });
     const project = await requireProjectMember(req, res, task.projectId);
     if (!project) return;
-    const comments = await listTaskComments(task.id);
+    const [comments, checklist, subtaskRows] = await Promise.all([
+      listTaskComments(task.id),
+      listChecklistItems(task.id),
+      listSubtasks(task.id),
+    ]);
     const [decorated] = await decorateTasks([task], req.user.sub);
+    const subtasks = await decorateTasks(subtaskRows, req.user.sub);
     res.json({
       ...toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }),
       comments: comments.map(toTaskCommentDto),
+      checklist: checklist.map(toChecklistItemDto),
+      subtasks: subtasks.map((t) =>
+        toTaskDto(t, { identifier: project.identifier, projectName: project.name }),
+      ),
     });
+  });
+
+  // ── 체크리스트 ────────────────────────────────────────────────────────
+  //
+  // 업무를 볼 수 있으면(=프로젝트 구성원) 체크리스트도 고칠 수 있다 — 그 업무를 같이 하는
+  // 사람들이 진행을 표시하는 용도라 따로 권한을 더 두지 않는다.
+
+  async function requireTaskForChecklist(req, res) {
+    const task = await findTaskById(req.params.id ?? req.params.taskId);
+    if (!task) {
+      res.status(404).json({ error: '업무를 찾을 수 없습니다.' });
+      return null;
+    }
+    const project = await requireProjectMember(req, res, task.projectId);
+    if (!project) return null;
+    if (rejectIfArchived(res, project)) return null;
+    return { task, project };
+  }
+
+  router.post('/tasks/:id/checklist', async (req, res) => {
+    const found = await requireTaskForChecklist(req, res);
+    if (!found) return;
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: '체크리스트 내용을 입력하세요.' });
+    if (text.length > 200) return res.status(400).json({ error: '체크리스트는 200자 이내로 입력하세요.' });
+    const items = await listChecklistItems(found.task.id);
+    if (items.length >= 50) return res.status(400).json({ error: '체크리스트는 업무당 50개까지 만들 수 있습니다.' });
+    const item = await insertChecklistItem(found.task.id, text);
+    await notifyProjectMembers(found.project, found.task.id);
+    res.status(201).json(toChecklistItemDto(item));
+  });
+
+  router.patch('/checklist-items/:id', async (req, res) => {
+    const item = await findChecklistItemById(req.params.id);
+    if (!item) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
+    const task = await findTaskById(item.taskId);
+    const project = await requireProjectMember(req, res, task.projectId);
+    if (!project) return;
+    if (rejectIfArchived(res, project)) return;
+    const fields = {};
+    if (typeof req.body?.done === 'boolean') fields.done = req.body.done;
+    if (typeof req.body?.text === 'string') {
+      const text = req.body.text.trim();
+      if (!text) return res.status(400).json({ error: '체크리스트 내용을 입력하세요.' });
+      fields.text = text.slice(0, 200);
+    }
+    const updated = await updateChecklistItem(item.id, fields);
+    await notifyProjectMembers(project, task.id);
+    res.json(toChecklistItemDto(updated));
+  });
+
+  router.delete('/checklist-items/:id', async (req, res) => {
+    const item = await findChecklistItemById(req.params.id);
+    if (!item) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
+    const task = await findTaskById(item.taskId);
+    const project = await requireProjectMember(req, res, task.projectId);
+    if (!project) return;
+    if (rejectIfArchived(res, project)) return;
+    await deleteChecklistItem(item.id);
+    await notifyProjectMembers(project, task.id);
+    res.json({ ok: true });
+  });
+
+  // ── 보관 · 복사 · 이동 ────────────────────────────────────────────────
+
+  router.post('/tasks/:id/archive', async (req, res) => {
+    const found = await requireTaskForChecklist(req, res);
+    if (!found) return;
+    const archived = req.body?.archived !== false;
+    const updated = await setTaskArchived(found.task.id, archived);
+    await notifyProjectMembers(found.project, found.task.id);
+    const [decorated] = await decorateTasks([updated], req.user.sub);
+    res.json(
+      toTaskDto(decorated, {
+        identifier: found.project.identifier,
+        projectName: found.project.name,
+      }),
+    );
+  });
+
+  /** 같은 프로젝트에 사본을 만든다 — 참조자와 체크리스트까지 같이 복사하고, 댓글·하위 업무는
+   * 원본에 딸린 기록이라 복사하지 않는다. 제목 뒤에 "(사본)"을 붙인다. */
+  router.post('/tasks/:id/copy', async (req, res) => {
+    const found = await requireTaskForChecklist(req, res);
+    if (!found) return;
+    const { task, project } = found;
+    const seq = await takeNextTaskSeq(project.id);
+    const copy = await insertTask({
+      id: randomUUID(),
+      projectId: task.projectId,
+      seq,
+      parentTaskId: task.parentTaskId,
+      title: `${task.title} (사본)`.slice(0, 200),
+      description: task.description,
+      assigneeId: task.assigneeId,
+      status: task.status,
+      statusId: task.statusId,
+      customValues: task.customValues,
+      priority: task.priority,
+      priorityId: task.priorityId,
+      typeId: task.typeId,
+      startDate: task.startDate,
+      dueDate: task.dueDate,
+      createdBy: req.user.sub,
+      completedAt: task.status === 'done' ? new Date() : null,
+    });
+    const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
+    if (refs.length > 0) await setTaskReferences(copy.id, refs);
+    for (const item of await listChecklistItems(task.id)) {
+      const made = await insertChecklistItem(copy.id, item.text);
+      if (item.done) await updateChecklistItem(made.id, { done: true });
+    }
+    await notifyProjectMembers(project, copy.id);
+    const [decorated] = await decorateTasks([copy], req.user.sub);
+    res.status(201).json(
+      toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }),
+    );
+  });
+
+  /** 다른 프로젝트로 옮긴다. 업무 번호는 새 프로젝트에서 다시 받고, 그 프로젝트에만 있는
+   * 값(상태·유형·우선순위·사용자 정의 필드·참조자·하위 업무 관계)은 비우거나 기본값으로
+   * 맞춘다 — 옮긴 뒤에도 남아 있으면 다른 프로젝트의 항목을 가리키게 된다. */
+  router.post('/tasks/:id/move', async (req, res) => {
+    const found = await requireTaskForChecklist(req, res);
+    if (!found) return;
+    const { task } = found;
+    const targetId = typeof req.body?.projectId === 'string' ? req.body.projectId : null;
+    if (!targetId) return res.status(400).json({ error: '옮길 프로젝트를 고르세요.' });
+    if (targetId === task.projectId) return res.status(400).json({ error: '이미 그 프로젝트에 있습니다.' });
+    const target = await requireProjectMember(req, res, targetId);
+    if (!target) return;
+    if (rejectIfArchived(res, target)) return;
+
+    const seq = await takeNextTaskSeq(target.id);
+    const status = await findFirstStatusOfCategory(target.id, task.status);
+    const priority = await findFirstPriorityOfLevel(target.id, task.priority);
+    const moved = await updateTask(task.id, {
+      projectId: target.id,
+      seq,
+      statusId: status?.id ?? null,
+      priorityId: priority?.id ?? null,
+      typeId: null,
+      customValues: {},
+      parentTaskId: null,
+    });
+    // 참조자·담당자는 새 프로젝트 구성원이 아닐 수 있다 — 구성원이 아닌 사람은 뗀다.
+    const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
+    const keep = [];
+    for (const userId of refs) {
+      if (await isProjectMember(target.id, userId)) keep.push(userId);
+    }
+    await setTaskReferences(task.id, keep);
+    if (moved.assigneeId && !(await isProjectMember(target.id, moved.assigneeId))) {
+      await updateTask(task.id, { assigneeId: null });
+    }
+    // 하위 업무는 부모를 따라오지 않는다 — 부모만 옮기고 하위는 원래 프로젝트에 남긴다.
+    await notifyProjectMembers(found.project, null);
+    await notifyProjectMembers(target, task.id);
+    const fresh = await findTaskById(task.id);
+    const [decorated] = await decorateTasks([fresh], req.user.sub);
+    res.json(toTaskDto(decorated, { identifier: target.identifier, projectName: target.name }));
   });
 
   router.patch('/tasks/:id', async (req, res) => {
@@ -1397,6 +1627,27 @@ export function createProjectsRouter(io) {
       fields.statusId = resolved.statusId ?? (await findFirstStatusOfCategory(project.id, resolved.status))?.id ?? null;
       // 완료로 바뀐 순간만 기록하고, 다시 진행 중으로 되돌리면 지운다(완료율 계산에 쓴다).
       if (resolved.status !== task.status) fields.completedAt = resolved.status === 'done' ? new Date() : null;
+    }
+    if ('parentTaskId' in (req.body ?? {})) {
+      const parentTaskId = typeof req.body.parentTaskId === 'string' ? req.body.parentTaskId : null;
+      if (parentTaskId) {
+        if (parentTaskId === task.id) {
+          return res.status(400).json({ error: '자기 자신을 상위 업무로 둘 수 없습니다.' });
+        }
+        const parent = await findTaskById(parentTaskId);
+        if (!parent || parent.projectId !== project.id) {
+          return res.status(400).json({ error: '이 프로젝트의 업무가 아닙니다.' });
+        }
+        // 두 단계까지만 — 하위 업무를 상위로 삼거나, 이미 하위를 거느린 업무를 하위로 내릴 수 없다.
+        if (parent.parentTaskId) {
+          return res.status(400).json({ error: '하위 업무를 상위 업무로 둘 수 없습니다.' });
+        }
+        const mine = await listSubtasks(task.id);
+        if (mine.length > 0) {
+          return res.status(400).json({ error: '하위 업무가 있는 업무는 다른 업무의 하위로 둘 수 없습니다.' });
+        }
+      }
+      fields.parentTaskId = parentTaskId;
     }
     if ('customValues' in (req.body ?? {})) {
       const custom = await validCustomValues(project, req.body.customValues, task.customValues ?? {});

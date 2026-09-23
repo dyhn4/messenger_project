@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'helpers/drag_bubble.dart';
+
 void main() {
   testWidgets('우선순위 편집: 추가 · 순서 · 삭제', (tester) async {
     tester.view.physicalSize = const Size(1000, 800);
@@ -68,9 +70,8 @@ void main() {
     expect(find.text('낮음'), findsWidgets);
     expect(find.text('높음'), findsWidgets);
 
-    // 순서: 두 번째를 위로
-    await tester.tap(find.byTooltip('위로').at(1));
-    await tester.pumpAndSettle();
+    // 순서: '보통'을 '낮음' 자리로 끌어다 놓는다(말풍선을 끌어서 정렬).
+    await dragBubble(tester, from: '보통', to: '낮음');
     expect(calls['POST /api/projects/p1/task-priorities/order'], {
       'ids': ['normal', 'low', 'high'],
     });

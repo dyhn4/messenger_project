@@ -337,6 +337,21 @@ class Task {
   /// 상세 조회(GET /tasks/:id)로 받아올 때만 채워진다.
   final List<TaskComment> comments;
 
+  /// 하위 업무면 부모 업무의 id. 하위 업무도 자기 번호·상태·담당자를 갖는 온전한 업무다.
+  final String? parentTaskId;
+
+  /// 보관한 업무 — 목록에서 빠지고 "보관된 업무"로만 보인다.
+  final bool archived;
+
+  /// 체크리스트 진행("2/4")과 하위 업무 개수 — 목록·상세에 숫자로만 쓴다.
+  final int checklistDone;
+  final int checklistTotal;
+  final int subtaskCount;
+
+  /// 상세로 받아올 때만 채워진다(GET /api/tasks/:id).
+  final List<TaskChecklistItem> checklist;
+  final List<Task> subtasks;
+
   Task({
     required this.id,
     required this.projectId,
@@ -369,6 +384,13 @@ class Task {
     this.dueDate,
     required this.createdAt,
     this.comments = const [],
+    this.parentTaskId,
+    this.archived = false,
+    this.checklistDone = 0,
+    this.checklistTotal = 0,
+    this.subtaskCount = 0,
+    this.checklist = const [],
+    this.subtasks = const [],
   });
 
   /// 화면에 보이는 상태 이름 — 프로젝트가 정한 이름, 없으면 분류 이름.
@@ -440,7 +462,49 @@ class Task {
             ?.map((e) => TaskComment.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [],
+    parentTaskId: json['parentTaskId'] as String?,
+    archived: json['archived'] as bool? ?? false,
+    checklistDone: (json['checklistDone'] as num?)?.toInt() ?? 0,
+    checklistTotal: (json['checklistTotal'] as num?)?.toInt() ?? 0,
+    subtaskCount: (json['subtaskCount'] as num?)?.toInt() ?? 0,
+    checklist:
+        (json['checklist'] as List?)
+            ?.map((e) => TaskChecklistItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+    subtasks:
+        (json['subtasks'] as List?)
+            ?.map((e) => Task.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
   );
+}
+
+/// 업무 하나에 딸린 체크리스트 항목. 진행률은 그 업무 상세에만 보여주고 전체·대시보드
+/// 집계에는 넣지 않는다(그 업무를 하는 사람의 메모에 가깝다).
+class TaskChecklistItem {
+  final String id;
+  final String taskId;
+  final String text;
+  final bool done;
+  final int position;
+
+  const TaskChecklistItem({
+    required this.id,
+    required this.taskId,
+    required this.text,
+    required this.done,
+    this.position = 0,
+  });
+
+  factory TaskChecklistItem.fromJson(Map<String, dynamic> json) =>
+      TaskChecklistItem(
+        id: json['id'] as String,
+        taskId: json['taskId'] as String,
+        text: json['text'] as String,
+        done: json['done'] as bool? ?? false,
+        position: (json['position'] as num?)?.toInt() ?? 0,
+      );
 }
 
 /// 업무 카드에 달린 댓글. [taskTitle]/[taskKey]/[projectName]은 대시보드의 "최근 댓글"

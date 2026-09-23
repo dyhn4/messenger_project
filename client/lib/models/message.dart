@@ -90,6 +90,10 @@ class Message {
   String? thumbnailKey;
   String? thumbnailNonce;
 
+  /// 이 메시지에 딸린 첨부들. 서버가 늘 채워 보낸다 — 예전 메시지는 위의 fileUrl 한 칸을
+  /// 첨부 하나로 바꿔서 내려주므로, 화면은 이 목록만 보면 된다(사진 여러 장이면 격자).
+  final List<MessageAttachment> attachments;
+
   /// 비밀 대화 자동 삭제 타이머용 — 상대가 이 메시지를 읽은 시각(null이면 아직 안 읽음)과,
   /// 그때부터 방의 타이머(초)만큼 지나 삭제될 시각. secret:message-read 브로드캐스트로 그 자리에서
   /// 채워지므로(RoomChatController.applyMessageRead) non-final. 평문 방 메시지는 항상 둘 다 null.
@@ -146,6 +150,7 @@ class Message {
     this.attachmentKey,
     this.attachmentNonce,
     this.thumbnailUrl,
+    this.attachments = const [],
     this.thumbnailKey,
     this.thumbnailNonce,
     this.readAt,
@@ -175,6 +180,13 @@ class Message {
       fileSize: (json['fileSize'] as num?)?.toInt(),
       mimeType: json['mimeType'] as String?,
       thumbnailUrl: json['thumbnailUrl'] as String?,
+      attachments:
+          (json['attachments'] as List?)
+              ?.map(
+                (e) => MessageAttachment.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          const [],
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         (json['createdAt'] as num).toInt(),
       ),
@@ -224,4 +236,41 @@ class Message {
       asComment: c,
     );
   }
+}
+
+/// 메시지 하나에 딸린 첨부 한 개. 사진을 여러 장 보내면 한 메시지에 여러 개가 들어오고,
+/// 채팅 버블은 그걸 격자로 보여준다.
+class MessageAttachment {
+  final String id;
+
+  /// 'image' | 'file'
+  final String kind;
+  final String fileUrl;
+  final String? fileName;
+  final int? fileSize;
+  final String? mimeType;
+  final String? thumbnailUrl;
+
+  const MessageAttachment({
+    required this.id,
+    required this.kind,
+    required this.fileUrl,
+    this.fileName,
+    this.fileSize,
+    this.mimeType,
+    this.thumbnailUrl,
+  });
+
+  bool get isImage => kind == 'image';
+
+  factory MessageAttachment.fromJson(Map<String, dynamic> json) =>
+      MessageAttachment(
+        id: json['id'] as String,
+        kind: json['kind'] as String? ?? 'file',
+        fileUrl: json['fileUrl'] as String,
+        fileName: json['fileName'] as String?,
+        fileSize: (json['fileSize'] as num?)?.toInt(),
+        mimeType: json['mimeType'] as String?,
+        thumbnailUrl: json['thumbnailUrl'] as String?,
+      );
 }

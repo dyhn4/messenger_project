@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'helpers/drag_bubble.dart';
+
 void main() {
   testWidgets('상태·필드 관리: 상태 추가/순서/삭제, 선택 필드 추가', (tester) async {
     tester.view.physicalSize = const Size(1200, 1000);
@@ -80,9 +82,8 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('진행 중'), findsWidgets);
 
-    // 순서: 두 번째를 위로
-    await tester.tap(find.byTooltip('위로').at(1));
-    await tester.pumpAndSettle();
+    // 순서: '진행 중'을 '할 일' 자리로 끌어다 놓는다(말풍선을 끌어서 정렬).
+    await dragBubble(tester, from: '진행 중', to: '할 일');
     expect(calls['POST /api/projects/p1/task-statuses/order'], {
       'ids': ['b', 'a', 'c'],
     });

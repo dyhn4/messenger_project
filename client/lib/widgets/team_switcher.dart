@@ -119,10 +119,9 @@ class TeamSwitcherTabs extends StatelessWidget {
   /// 굵은 글씨라 더 넓어지므로 굵은 글씨로 재서, 선택이 바뀌어도 폭이 흔들리지 않게 한다.
   /// 이름이 아주 길면 탭 하나가 화면을 다 차지하므로 상한을 둔다(넘으면 말줄임표).
   static double _nameColumnWidth(BuildContext context, List<Team> teams) {
-    final style = DefaultTextStyle.of(context).style.copyWith(
-      fontSize: 13,
-      fontWeight: FontWeight.bold,
-    );
+    final style = DefaultTextStyle.of(
+      context,
+    ).style.copyWith(fontSize: 13, fontWeight: FontWeight.bold);
     final scaler = MediaQuery.textScalerOf(context);
     var widest = 0.0;
     for (final team in teams) {

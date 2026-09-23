@@ -36,6 +36,7 @@ import {
   getLastMessageForPreview,
   insertMessage,
   iterateMessagesForExport,
+  listAttachmentsForMessages,
   listMessagesByIds,
   listMessagesByRoom,
 } from './db/queries/messages.js';
@@ -679,9 +680,13 @@ export function createRoomsRouter(io) {
 
     // 저장은 항상 원본 상대경로(/uploads/xxx)로 해두고, 응답에 낼 때만 매번 새로 서명한다
     // (DB에 서명된 URL을 그대로 저장하면 나중에 다시 조회할 때 이미 만료돼있게 된다).
+    // 사진 여러 장짜리 메시지의 첨부 목록을 한 번에 붙인다(없으면 toMessageDto가 예전 방식으로
+    // messages의 파일 칸을 첨부 하나로 본다).
+    const all = [...extraParents, ...rows];
+    const attachmentsByMessageId = await listAttachmentsForMessages(all.map((m) => m.id));
     res.json(
-      [...extraParents, ...rows].map((m) => ({
-        ...toMessageDto(m),
+      all.map((m) => ({
+        ...toMessageDto({ ...m, attachments: attachmentsByMessageId[m.id] }),
         comments: commentsByMessageId.get(m.id) ?? [],
         outOfWindow: extraParentIds.has(m.id),
       })),

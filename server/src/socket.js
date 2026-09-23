@@ -3,7 +3,12 @@ import { verifySocketToken } from './auth.js';
 import { activeCallStatesFor, callSummaryText, joinCall, leaveAllCallsForSocket, leaveCall } from './calls.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { findInquiryById } from './db/queries/inquiries.js';
-import { insertMessage, markMessageRead, updateMessageLinkPreview } from './db/queries/messages.js';
+import {
+  insertMessage,
+  insertMessageAttachments,
+  markMessageRead,
+  updateMessageLinkPreview,
+} from './db/queries/messages.js';
 import {
   findRoomById,
   isRoomMember,
@@ -106,6 +111,24 @@ export function registerSocket(io) {
       const thumbnailUrl =
         typeof payload.thumbnailUrl === 'string' ? resolveRawUrl(payload.thumbnailUrl) : null;
 
+      // 사진 여러 장을 한 말풍선으로 보낼 때 — 첫 장은 messages의 파일 칸에도 그대로 넣는다
+      // (파일 모아보기·검색·알림 미리보기가 아직 그 칸을 쓴다).
+      const attachments = Array.isArray(payload.attachments)
+        ? payload.attachments
+            .filter((a) => a && typeof a.fileUrl === 'string')
+            .slice(0, 20)
+            .map((a) => ({
+              kind: a.kind === 'file' ? 'file' : 'image',
+              fileUrl: resolveRawUrl(a.fileUrl),
+              fileName: typeof a.fileName === 'string' ? a.fileName : null,
+              fileSize: typeof a.fileSize === 'number' ? a.fileSize : null,
+              mimeType: typeof a.mimeType === 'string' ? a.mimeType : null,
+              thumbnailUrl:
+                typeof a.thumbnailUrl === 'string' ? resolveRawUrl(a.thumbnailUrl) : null,
+            }))
+        : [];
+      const head = attachments[0];
+
       const message = await insertMessage({
         id: randomUUID(),
         roomId: room.id,
@@ -113,11 +136,14 @@ export function registerSocket(io) {
         senderName: sender?.name ?? sender?.username ?? socket.data.username,
         type: ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
         text: typeof payload.text === 'string' ? payload.text : null,
-        fileUrl,
-        fileName: typeof payload.fileName === 'string' ? payload.fileName : null,
-        fileSize: typeof payload.fileSize === 'number' ? payload.fileSize : null,
-        mimeType: typeof payload.mimeType === 'string' ? payload.mimeType : null,
-        thumbnailUrl,
+        fileUrl: head?.fileUrl ?? fileUrl,
+        fileName:
+          head?.fileName ?? (typeof payload.fileName === 'string' ? payload.fileName : null),
+        fileSize:
+          head?.fileSize ?? (typeof payload.fileSize === 'number' ? payload.fileSize : null),
+        mimeType:
+          head?.mimeType ?? (typeof payload.mimeType === 'string' ? payload.mimeType : null),
+        thumbnailUrl: head?.thumbnailUrl ?? thumbnailUrl,
         quotedSenderName: typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
         quotedPreview: typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
         forwardedFromSenderName:
@@ -127,6 +153,11 @@ export function registerSocket(io) {
         isInquiryNotice: inquiryId != null,
         inquiryId,
       });
+
+      // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분).
+      if (attachments.length > 1) {
+        message.attachments = await insertMessageAttachments(message.id, attachments);
+      }
 
       // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 —
       // "숨기기"를 멤버십 변경 없이 구현한 결과라, 메시지가 갈 때마다 직접 확인해줘야 한다

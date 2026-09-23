@@ -4,6 +4,7 @@ import '../../models/app_user.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import 'task_detail_panel.dart' show TaskPanelScope;
 import '../../widgets/dashed_add_button.dart';
 import '../../widgets/date_range_calendar_panel.dart';
 import '../../widgets/floating_dialog.dart';
@@ -1149,6 +1150,13 @@ Future<void> showTaskDetailDialog(
   Session session,
   String taskId,
 ) {
+  // "프로젝트" 창 안이면 가운데 팝업 대신 오른쪽 패널로 연다(task_detail_panel.dart).
+  // 밖에서 부른 경우에만 예전처럼 팝업으로 띄운다.
+  final scope = TaskPanelScope.maybeOf(context);
+  if (scope != null) {
+    scope.openTask(taskId);
+    return Future.value();
+  }
   return showDialog<void>(
     context: context,
     builder: (_) => _TaskDetailDialog(session: session, taskId: taskId),

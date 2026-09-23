@@ -12,12 +12,18 @@ class DateRangeCalendarPanel extends StatefulWidget {
   final DateTime? end;
   final DateTime? lastDate;
   final void Function(DateTime? start, DateTime? end) onChanged;
+
+  /// true면 기간이 아니라 하루만 고른다 — 누를 때마다 그 날짜가 [start]로 넘어간다
+  /// (표의 시작일/마감일 칸처럼 날짜 하나만 바꾸는 자리에서 쓴다).
+  final bool singlePick;
+
   const DateRangeCalendarPanel({
     super.key,
     required this.start,
     required this.end,
     required this.onChanged,
     this.lastDate,
+    this.singlePick = false,
   });
 
   @override
@@ -26,6 +32,12 @@ class DateRangeCalendarPanel extends StatefulWidget {
 
 class _DateRangeCalendarPanelState extends State<DateRangeCalendarPanel> {
   late DateTime _month;
+
+  /// 시/분을 뗀 오늘 — 달력 칸과 비교하려면 날짜만 있어야 한다.
+  DateTime get _today {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
 
   @override
   void initState() {
@@ -40,12 +52,20 @@ class _DateRangeCalendarPanelState extends State<DateRangeCalendarPanel> {
   void _nextMonth() =>
       setState(() => _month = DateTime(_month.year, _month.month + 1, 1));
 
+  /// "오늘" 버튼 — 오늘이 있는 달로 옮기고, 오늘을 실제로 고른다(그 날을 직접 누른 것과 같다).
+  /// 그래서 시작일이 비어 있으면 시작일이, 시작일만 정해져 있으면 마감일이 된다.
   void _goToday() {
-    final now = DateTime.now();
-    setState(() => _month = DateTime(now.year, now.month, 1));
+    final today = _today;
+    setState(() => _month = DateTime(today.year, today.month, 1));
+    if (widget.lastDate != null && today.isAfter(widget.lastDate!)) return;
+    _tapDate(today);
   }
 
   void _tapDate(DateTime date) {
+    if (widget.singlePick) {
+      widget.onChanged(date, null);
+      return;
+    }
     final start = widget.start;
     final end = widget.end;
     if (start == null || end != null) {
@@ -137,6 +157,7 @@ class _DateRangeCalendarPanelState extends State<DateRangeCalendarPanel> {
             for (var day = 1; day <= daysInMonth; day++)
               _RangeDayCell(
                 date: DateTime(_month.year, _month.month, day),
+                today: _today,
                 start: widget.start,
                 end: widget.end,
                 lastDate: widget.lastDate,
@@ -151,12 +172,14 @@ class _DateRangeCalendarPanelState extends State<DateRangeCalendarPanel> {
 
 class _RangeDayCell extends StatelessWidget {
   final DateTime date;
+  final DateTime today;
   final DateTime? start;
   final DateTime? end;
   final DateTime? lastDate;
   final ValueChanged<DateTime> onTap;
   const _RangeDayCell({
     required this.date,
+    required this.today,
     required this.start,
     required this.end,
     required this.lastDate,
@@ -172,6 +195,9 @@ class _RangeDayCell extends StatelessWidget {
     final isStart = start != null && _isSameDay(date, start!);
     final isEnd = end != null && _isSameDay(date, end!);
     final isEndpoint = isStart || isEnd;
+    // 달력을 열자마자 오늘이 어디인지 보이도록 회색 동그라미로 표시한다. 고른 날(검은 동그라미)
+    // 이기도 하면 그쪽이 이긴다.
+    final isToday = _isSameDay(date, today);
     final inRange =
         start != null &&
         end != null &&
@@ -202,6 +228,11 @@ class _RangeDayCell extends StatelessWidget {
               ? const BoxDecoration(
                   shape: BoxShape.circle,
                   color: Colors.black87,
+                )
+              : isToday
+              ? BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.grey.withValues(alpha: 0.35),
                 )
               : null,
           child: Text('${date.day}', style: TextStyle(color: textColor)),

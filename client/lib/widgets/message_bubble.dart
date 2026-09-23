@@ -777,16 +777,30 @@ class _MessageBubbleState extends State<MessageBubble> {
     final message = widget.message;
     switch (message.type) {
       case MessageType.image:
-        final url = widget.resolveUrl(message.fileUrl ?? '');
-        return DownloadableImage(
+        // 서버가 첨부를 늘 목록으로 내려준다(예전 메시지는 파일 칸 하나를 목록 하나로).
+        // 아주 예전 캐시 등으로 목록이 비어 있으면 메시지의 파일 칸으로 하나 만들어 쓴다.
+        final items = message.attachments.isNotEmpty
+            ? message.attachments
+            : [
+                MessageAttachment(
+                  id: message.id,
+                  kind: 'image',
+                  fileUrl: message.fileUrl ?? '',
+                  fileName: message.fileName,
+                  thumbnailUrl: message.thumbnailUrl,
+                ),
+              ];
+        return ChatImageAttachments(
           session: widget.session,
-          url: url,
-          fileName: message.fileName ?? 'image.png',
+          attachments: items,
+          message: message,
+          // 뷰어의 댓글 패널이 이 방의 컨트롤러를 쓴다 — 버블은 방을 따로 안 받으므로
+          // 세션의 방 목록에서 찾는다(못 찾으면 댓글 버튼만 안 보인다).
+          room: widget.session.rooms
+              .where((r) => r.id == message.roomId)
+              .firstOrNull,
           attachmentKey: message.attachmentKey,
           attachmentNonce: message.attachmentNonce,
-          thumbnailUrl: message.thumbnailUrl == null
-              ? null
-              : widget.resolveUrl(message.thumbnailUrl!),
           thumbnailKey: message.thumbnailKey,
           thumbnailNonce: message.thumbnailNonce,
         );

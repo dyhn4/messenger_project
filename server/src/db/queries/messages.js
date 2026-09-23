@@ -1,10 +1,39 @@
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { dmHistoryFloors, roomMembers, rooms, messages } from '../schema.js';
+import {
+  dmHistoryFloors,
+  favoriteFiles,
+  messageAttachments,
+  roomMembers,
+  rooms,
+  messages,
+} from '../schema.js';
 
 export async function insertMessage(fields) {
   const [row] = await db.insert(messages).values(fields).returning();
   return row;
+}
+
+/** 한 메시지에 딸린 첨부들을 한꺼번에 넣는다(사진 여러 장을 한 말풍선으로 보낼 때). */
+export async function insertMessageAttachments(messageId, items) {
+  if (items.length === 0) return [];
+  return db
+    .insert(messageAttachments)
+    .values(items.map((a, i) => ({ ...a, messageId, position: i })))
+    .returning();
+}
+
+/** 메시지 id별 첨부 목록 {messageId: [...]} — 목록 조회가 한 번에 붙여 내려준다. */
+export async function listAttachmentsForMessages(messageIds) {
+  if (messageIds.length === 0) return {};
+  const rows = await db
+    .select()
+    .from(messageAttachments)
+    .where(inArray(messageAttachments.messageId, messageIds))
+    .orderBy(asc(messageAttachments.position));
+  const map = {};
+  for (const r of rows) (map[r.messageId] ??= []).push(r);
+  return map;
 }
 
 export function findMessageById(id) {
@@ -252,4 +281,44 @@ export function findExpiredSecretMessages() {
 export async function hardDeleteMessage(id) {
   const [row] = await db.delete(messages).where(eq(messages.id, id)).returning();
   return row ?? null;
+}
+
+// ── 즐겨찾기한 파일 ──────────────────────────────────────────────────────
+
+/** 이미 있으면 빼고 없으면 넣는다(토글) — 넣었으면 true. */
+export async function toggleFavoriteFile({ userId, messageId, fileUrl, fileName }) {
+  const existing = await db
+    .select()
+    .from(favoriteFiles)
+    .where(
+      and(
+        eq(favoriteFiles.userId, userId),
+        eq(favoriteFiles.messageId, messageId),
+        eq(favoriteFiles.fileUrl, fileUrl),
+      ),
+    );
+  if (existing.length > 0) {
+    await db.delete(favoriteFiles).where(eq(favoriteFiles.id, existing[0].id));
+    return false;
+  }
+  await db.insert(favoriteFiles).values({ userId, messageId, fileUrl, fileName });
+  return true;
+}
+
+export function listFavoriteFiles(userId) {
+  return db
+    .select()
+    .from(favoriteFiles)
+    .where(eq(favoriteFiles.userId, userId))
+    .orderBy(desc(favoriteFiles.createdAt));
+}
+
+/** 이 사람이 즐겨찾기한 파일 경로 집합 — 메시지 목록에 별 표시를 붙일 때 쓴다. */
+export async function favoriteFileUrls(userId, messageIds) {
+  if (messageIds.length === 0) return new Set();
+  const rows = await db
+    .select({ fileUrl: favoriteFiles.fileUrl })
+    .from(favoriteFiles)
+    .where(and(eq(favoriteFiles.userId, userId), inArray(favoriteFiles.messageId, messageIds)));
+  return new Set(rows.map((r) => r.fileUrl));
 }

@@ -660,6 +660,42 @@ class RoomChatController extends ChangeNotifier {
     );
   }
 
+  /// 이미 올라간 이미지 여러 장을 **한 메시지**로 보낸다(채팅 버블에 격자로 보인다).
+  /// 비밀 대화는 첨부마다 복호화 키가 따로라 봉투에 한 개만 담을 수 있어서, 거기서는
+  /// 예전처럼 한 장씩 따로 보낸다(sendUploadedAttachment).
+  Future<void> sendUploadedAttachments(
+    List<UploadedAttachment> items, {
+    String? caption,
+  }) async {
+    if (items.isEmpty) return;
+    if (items.length == 1 || room.isSecret) {
+      for (var i = 0; i < items.length; i++) {
+        await sendUploadedAttachment(
+          items[i],
+          caption: i == 0 ? caption : null,
+        );
+      }
+      return;
+    }
+    final trimmed = caption?.trim();
+    await _session.chatSocket.send(
+      roomId: room.id,
+      type: 'image',
+      text: trimmed?.isNotEmpty == true ? trimmed : null,
+      attachments: [
+        for (final u in items)
+          {
+            'kind': u.isImage ? 'image' : 'file',
+            'fileUrl': u.url,
+            'fileName': u.fileName,
+            'fileSize': u.size,
+            'mimeType': ?u.mimeType,
+            'thumbnailUrl': ?u.thumbnailUrl,
+          },
+      ],
+    );
+  }
+
   /// 이미지 첨부일 때만(=[thumbBytes]가 있을 때만) 채팅 버블 미리보기용 축소 썸네일을
   /// 올린다. 비밀 대화면 원본과 마찬가지로 자기만의 랜덤 키/nonce로 암호화해서 올리고(원본
   /// 키를 재사용하지 않음), 평문 방이면 그대로 올린다. 이미지가 아니거나 썸네일 생성에

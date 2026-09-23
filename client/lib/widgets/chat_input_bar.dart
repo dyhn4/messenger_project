@@ -405,13 +405,30 @@ class ChatInputBarState extends State<ChatInputBar> {
       } else {
         // 첨부와 함께 입력한 메시지는 별도 메시지로 보내지 않고, 첫 번째 첨부의 캡션으로
         // 붙인다. 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그
-        // 결과로 메시지만 보낸다.
-        for (var i = 0; i < toSend.length; i++) {
-          final a = toSend[i];
-          await widget.controller.sendUploadedAttachment(
-            a.result!,
-            caption: i == 0 ? text : null,
+        // 결과로 메시지만 보낸다. 사진은 한 말풍선에 격자로 모아 보내고(여러 장이면),
+        // 파일은 예전처럼 하나씩 보낸다.
+        final images = [
+          for (final a in toSend)
+            if (a.result!.isImage) a.result!,
+        ];
+        final files = [
+          for (final a in toSend)
+            if (!a.result!.isImage) a.result!,
+        ];
+        var caption = text;
+        if (images.isNotEmpty) {
+          await widget.controller.sendUploadedAttachments(
+            images,
+            caption: caption,
           );
+          caption = '';
+        }
+        for (final f in files) {
+          await widget.controller.sendUploadedAttachment(
+            f,
+            caption: caption.isEmpty ? null : caption,
+          );
+          caption = '';
         }
       }
     } catch (e) {

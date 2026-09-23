@@ -41,8 +41,12 @@ Uint8List _generateThumbnailSync(_ThumbnailRequest req) {
 /// null — 호출자는 썸네일 없이 원본만 보내면 된다(버블 미리보기가 원본을 그대로 쓰게 됨).
 Future<Uint8List?> generateThumbnail(
   Uint8List originalBytes, {
-  int maxDimension = 480,
-  int quality = 70,
+  // 채팅 버블 미리보기가 가로 650px까지 커져서(attachment_widgets.dart의
+  // kChatImageMaxWidth) 예전 480px로는 뿌옇게 보인다. 고해상도 화면(devicePixelRatio 2)
+  // 에서도 또렷하도록 1300px로 만든다 — 예전에 보낸 이미지의 썸네일은 그대로 480px이라
+  // 살짝 부드럽게 보일 수 있다(다시 만들지는 않는다).
+  int maxDimension = 1300,
+  int quality = 72,
 }) async {
   try {
     return await compute(

@@ -1817,6 +1817,7 @@ class ApiClient {
 
   Future<Task> createTask({
     required String projectId,
+    String? parentTaskId,
     required String title,
     String? description,
     String? assigneeId,
@@ -1832,6 +1833,7 @@ class ApiClient {
   }) async {
     return Task.fromJson(
       await _post('/api/projects/$projectId/tasks', {
+            'parentTaskId': ?parentTaskId,
             'title': title,
             'description': ?description,
             'assigneeId': ?assigneeId,
@@ -1864,6 +1866,8 @@ class ApiClient {
     String? priorityId,
     String? typeId,
     bool clearType = false,
+    String? parentTaskId,
+    bool clearParent = false,
     List<String>? referenceIds,
     DateTime? startDate,
     bool clearStartDate = false,
@@ -1886,6 +1890,10 @@ class ApiClient {
                 : taskPriorityToWire(priority)),
             'priorityId': ?priorityId,
             if (clearType) 'typeId': null else 'typeId': ?typeId,
+            if (clearParent)
+              'parentTaskId': null
+            else
+              'parentTaskId': ?parentTaskId,
             'referenceIds': ?referenceIds,
             if (clearStartDate)
               'startDate': null
@@ -1900,8 +1908,74 @@ class ApiClient {
     );
   }
 
+  // ── 즐겨찾기한 파일 ──────────────────────────────────────────────────
+
+  /// 첨부 하나를 즐겨찾기에 넣거나 뺀다(토글) — 넣었으면 true.
+  Future<bool> toggleFavoriteFile(
+    String messageId, {
+    required String fileUrl,
+    String? fileName,
+  }) async {
+    final res =
+        await _post('/api/messages/$messageId/favorite-file', {
+              'fileUrl': fileUrl,
+              'fileName': ?fileName,
+            })
+            as Map<String, dynamic>;
+    return res['favorited'] as bool? ?? false;
+  }
+
   Future<void> deleteTask(String taskId) async {
     await _delete('/api/tasks/$taskId');
+  }
+
+  // ── 체크리스트 ────────────────────────────────────────────────────────
+
+  Future<TaskChecklistItem> addChecklistItem(String taskId, String text) async {
+    return TaskChecklistItem.fromJson(
+      await _post('/api/tasks/$taskId/checklist', {'text': text})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<TaskChecklistItem> updateChecklistItem(
+    String itemId, {
+    bool? done,
+    String? text,
+  }) async {
+    return TaskChecklistItem.fromJson(
+      await _patch('/api/checklist-items/$itemId', {
+            'done': ?done,
+            'text': ?text,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteChecklistItem(String itemId) async {
+    await _delete('/api/checklist-items/$itemId');
+  }
+
+  // ── 보관 · 복사 · 이동 ────────────────────────────────────────────────
+
+  Future<Task> setTaskArchived(String taskId, bool archived) async {
+    return Task.fromJson(
+      await _post('/api/tasks/$taskId/archive', {'archived': archived})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<Task> copyTask(String taskId) async {
+    return Task.fromJson(
+      await _post('/api/tasks/$taskId/copy', {}) as Map<String, dynamic>,
+    );
+  }
+
+  Future<Task> moveTask(String taskId, String projectId) async {
+    return Task.fromJson(
+      await _post('/api/tasks/$taskId/move', {'projectId': projectId})
+          as Map<String, dynamic>,
+    );
   }
 
   Future<TaskComment> addTaskComment(String taskId, String text) async {

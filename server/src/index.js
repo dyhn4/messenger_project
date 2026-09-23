@@ -29,6 +29,7 @@ import { createDevicesRouter } from './devices.js';
 import { createInvitesRouter } from './invites.js';
 import { createTeamInvitesRouter } from './teamInvites.js';
 import { createMessagesRouter } from './messages.js';
+import { checkPendingMigrations } from './migrationCheck.js';
 import { generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
 import { createAdminRouter } from './admin.js';
@@ -122,6 +123,10 @@ startRetentionJob();
 startSecretExpiryJob(io);
 startAnnouncementAutoUnpinJob(io);
 startProjectDueReminderJob(io);
+
+// 코드가 기대하는 스키마와 DB가 어긋난 채로 뜨면, 서버는 멀쩡해 보이는데 새 컬럼을 읽는
+// 화면만 조용히 비어 보인다 — 뜨기 전에 확인해서 콘솔에 크게 알린다(막지는 않는다).
+await checkPendingMigrations();
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

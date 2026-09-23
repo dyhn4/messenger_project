@@ -447,6 +447,51 @@ export const messages = pgTable(
   ],
 );
 
+/** 메시지 하나에 딸린 첨부들. 예전에는 messages.fileUrl 한 칸에 첨부 하나만 넣었는데,
+ * 사진 여러 장을 한 말풍선에 격자로 보여주려면 여러 개가 필요해서 따로 뺐다.
+ *
+ * 예전 메시지에는 이 행이 없다 — 그때는 messages의 fileUrl/fileName/thumbnailUrl을 그대로
+ * 첨부 하나로 본다(messages.js의 toMessageDto 참고). 새로 보내는 메시지는 첫 번째 첨부를
+ * messages 쪽에도 그대로 넣어둔다(파일 모아보기·검색·알림 미리보기가 그 칸을 쓰고 있다). */
+export const messageAttachments = pgTable(
+  'message_attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    // 'image' | 'file'
+    kind: text('kind').notNull(),
+    fileUrl: text('file_url').notNull(),
+    fileName: text('file_name'),
+    fileSize: integer('file_size'),
+    mimeType: text('mime_type'),
+    thumbnailUrl: text('thumbnail_url'),
+    position: integer('position').notNull().default(0),
+  },
+  (t) => [index('message_attachments_message_id_idx').on(t.messageId, t.position)],
+);
+
+/** 사람마다 따로 담아두는 "즐겨찾기한 파일". 대화방 즐겨찾기(rooms.favorite)와 달리 첨부
+ * 단위이고, 메시지가 지워지면 같이 사라진다. 어떤 첨부인지는 메시지 + 파일 경로로 가린다
+ * (예전 메시지는 message_attachments 행이 없어서 id로는 못 가리킨다). */
+export const favoriteFiles = pgTable(
+  'favorite_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    fileUrl: text('file_url').notNull(),
+    fileName: text('file_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('favorite_files_user_file_idx').on(t.userId, t.messageId, t.fileUrl)],
+);
+
 /**
  * 토픽방 공지 — 카카오톡 공지와 같은 개념. 여러 개를 쓸 수 있고(히스토리로 남음), pinned인
  * 것(방마다 최대 1개)이 "지금 고정된 공지"다. 작성 본인만 수정/삭제/내리기를 할 수 있다
@@ -711,12 +756,36 @@ export const tasks = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     // "마감 임박" 알림을 이미 보낸 마감일 — dueDate와 다르면(마감일이 바뀌면) 다시 보낸다.
     dueRemindedFor: timestamp('due_reminded_for', { withTimezone: true }),
+    // 하위 업무면 부모 업무. 하위 업무도 자기 번호·상태·담당자를 갖는 온전한 업무이고,
+    // 이 칸만 부모를 가리킨다(부모를 지우면 하위 업무도 같이 지워진다).
+    // AnyPgColumn 주석은 self-reference라 타입 추론이 순환하는 걸 끊어주는 용도다.
+    parentTaskId: uuid('parent_task_id').references(() => tasks.id, { onDelete: 'cascade' }),
+    // 보관한 시각 — 값이 있으면 목록에서 빠지고 "보관된 업무" 필터로만 보인다.
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
   },
   (t) => [
     index('tasks_project_id_idx').on(t.projectId, t.status),
     index('tasks_assignee_id_idx').on(t.assigneeId, t.dueDate),
+    index('tasks_parent_id_idx').on(t.parentTaskId),
     uniqueIndex('tasks_project_seq_idx').on(t.projectId, t.seq),
   ],
+);
+
+/** 업무 하나에 딸린 체크리스트 항목. 진행률은 업무 상세에만 보여주고 전체/대시보드 집계에는
+ * 넣지 않는다(체크리스트는 그 업무를 하는 사람의 메모에 가깝다). */
+export const taskChecklistItems = pgTable(
+  'task_checklist_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    done: boolean('done').notNull().default(false),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('task_checklist_task_id_idx').on(t.taskId, t.position)],
 );
 
 /** 업무 카드에 달린 댓글. [projectId]는 "최근 댓글"을 프로젝트 기준으로 모을 때 조인을 피하려고 같이 둔다. */

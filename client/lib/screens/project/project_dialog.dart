@@ -15,6 +15,7 @@ import 'project_notifications.dart';
 import 'project_search.dart';
 import 'project_forms.dart';
 import 'project_home_view.dart';
+import 'task_detail_panel.dart';
 import 'team_tasks_view.dart';
 
 /// "프로젝트" 창 — 토픽(대화)과 별개로 업무를 계획·추적하는 공간. 상단 툴바의 과녁 아이콘
@@ -35,6 +36,11 @@ Future<void> showProjectDialog(BuildContext context, Session session) {
 /// 지금 오른쪽에 무엇을 그리고 있는지.
 enum ProjectView { home, myTasks, calendar, gantt, notes, project }
 
+/// 이 폭 이하로 창이 좁아지면 왼쪽 메뉴(홈/내 업무/캘린더/…/프로젝트 목록)를 고정 220px로
+/// 나란히 두는 대신, 메신저 본창과 같은 방식으로 얇은 » 스트립으로 접어두고 누를 때만 내용
+/// 위로 겹쳐서 보여준다. 표도 이 아래에서는 좁은 화면용(업무 + 상태만)으로 바뀐다.
+const kProjectNarrowBreakpoint = 800.0;
+
 class ProjectDialog extends StatefulWidget {
   final Session session;
 
@@ -54,6 +60,15 @@ class ProjectDialog extends StatefulWidget {
 }
 
 class _ProjectDialogState extends State<ProjectDialog> {
+  /// 창이 좁아 접어둔 왼쪽 메뉴가 지금 겹쳐서 펼쳐져 있는지.
+  bool _sidebarOverlayOpen = false;
+
+  /// 오른쪽에 열어둔 업무 상세 패널 — null이면 안 열린 상태.
+  String? _openTaskId;
+  bool _taskExpanded = false;
+
+  void _openTask(String taskId) => setState(() => _openTaskId = taskId);
+
   ProjectView _view = ProjectView.home;
   String? _projectId; // _view == ProjectView.project일 때만 의미 있다.
 
@@ -251,36 +266,138 @@ class _ProjectDialogState extends State<ProjectDialog> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final body = Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+  /// 왼쪽 메뉴 — 넓으면 나란히, 좁으면 » 스트립으로 접어두고 겹쳐서 펼친다(메신저 본창과 동일).
+  /// [contentOverride]를 주면 오른쪽 내용 자리를 그걸로 바꾼다 — 업무 패널을 "크게 보기"로
+  /// 열 때 쓴다(왼쪽 메뉴와 상단 바는 그대로 두고 내용 자리만 패널이 차지한다).
+  Widget _buildBodyRow(
+    BuildContext context,
+    double width, [
+    Widget? contentOverride,
+  ]) {
+    final sidebar = _Sidebar(
+      session: widget.session,
+      projects: _projects,
+      archivedProjects: _archivedProjects,
+      view: _view,
+      projectId: _projectId,
+      onSelect: (view, {String? projectId}) {
+        // 겹쳐 뜬 메뉴에서 골랐으면 고르는 즉시 접는다.
+        if (_sidebarOverlayOpen) setState(() => _sidebarOverlayOpen = false);
+        _select(view, projectId: projectId);
+      },
+      onCreateProject: _createProject,
+      onBrowse: _browseProjects,
+      onToggleFavorite: _toggleFavorite,
+    );
+    final narrow = width <= kProjectNarrowBreakpoint;
+    final content = contentOverride ?? _buildContent(context, narrow);
+
+    if (!narrow) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(width: 220, child: sidebar),
+          const VerticalDivider(width: 1),
+          Expanded(child: content),
+        ],
+      );
+    }
+
+    return Stack(
       children: [
-        SizedBox(
-          width: 220,
-          child: _Sidebar(
-            session: widget.session,
-            projects: _projects,
-            archivedProjects: _archivedProjects,
-            view: _view,
-            projectId: _projectId,
-            onSelect: _select,
-            onCreateProject: _createProject,
-            onBrowse: _browseProjects,
-            onToggleFavorite: _toggleFavorite,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _SidebarToggleStrip(
+              expanded: _sidebarOverlayOpen,
+              onTap: () =>
+                  setState(() => _sidebarOverlayOpen = !_sidebarOverlayOpen),
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: GestureDetector(
+                // 메뉴가 펼쳐진 동안 내용 쪽을 누르면 그 클릭이 안쪽 버튼으로 새지 않고
+                // 메뉴만 접히게 한다.
+                behavior: HitTestBehavior.translucent,
+                onTap: _sidebarOverlayOpen
+                    ? () => setState(() => _sidebarOverlayOpen = false)
+                    : null,
+                child: IgnorePointer(
+                  ignoring: _sidebarOverlayOpen,
+                  child: content,
+                ),
+              ),
+            ),
+          ],
         ),
-        const VerticalDivider(width: 1),
-        Expanded(child: _buildContent(context)),
+        // 스트립(28px) 바로 옆에서 시작해 내용 위로 겹쳐 뜬다 — 스트립은 안 가려서 다시 접을 수 있다.
+        if (_sidebarOverlayOpen)
+          Positioned(
+            left: 28,
+            top: 0,
+            bottom: 0,
+            width: 220,
+            child: Material(elevation: 8, child: sidebar),
+          ),
       ],
     );
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildTopBar(context),
-        const Divider(height: 1),
-        Expanded(child: body),
-      ],
+  }
+
+  /// 업무 상세 패널을 곁들인 창 내용. 좁은 창에서는 나란히 둘 자리가 없어 늘 넓은 모드로 연다.
+  Widget? _taskPanel() {
+    final taskId = _openTaskId;
+    if (taskId == null) return null;
+    return TaskDetailPanel(
+      key: ValueKey(taskId),
+      session: widget.session,
+      taskId: taskId,
+      expanded: _taskExpanded,
+      onToggleExpand: () => setState(() => _taskExpanded = !_taskExpanded),
+      onClose: () => setState(() => _openTaskId = null),
+      onOpenTask: _openTask,
+      // 업무를 고치면 뒤에 있는 목록·대시보드도 같이 다시 읽는다.
+      onChanged: () => setState(() => _reloadTick++),
+    );
+  }
+
+  /// 상단 바 아래 영역 — 왼쪽 메뉴 + 내용, 그리고 업무 패널.
+  ///
+  /// 패널은 상단 바(로고·검색·알림 종)를 덮지 않고 그 아래에서 시작한다. 평소(미니)에는
+  /// 내용 오른쪽에 나란히 붙고, **크게 보기**나 좁은 창에서는 왼쪽 메뉴는 그대로 둔 채
+  /// 내용 자리만 패널이 차지한다.
+  Widget _buildBodyArea(Widget? panel) => LayoutBuilder(
+    builder: (context, constraints) {
+      final asContent =
+          panel != null && (_taskExpanded || constraints.maxWidth < 760);
+      // 패널을 옆에 세우면 그만큼 본문이 좁아진다 — 왼쪽 메뉴 접힘 판단도 그 폭으로 한다.
+      final bodyWidth = panel == null || asContent
+          ? constraints.maxWidth
+          : constraints.maxWidth - kTaskPanelWidth - 1;
+      final body = _buildBodyRow(context, bodyWidth, asContent ? panel : null);
+      if (panel == null || asContent) return body;
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: body),
+          const VerticalDivider(width: 1),
+          SizedBox(width: kTaskPanelWidth, child: panel),
+        ],
+      );
+    },
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final content = TaskPanelScope(
+      openTask: _openTask,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildTopBar(context),
+          const Divider(height: 1),
+          Expanded(child: _buildBodyArea(_taskPanel())),
+        ],
+      ),
     );
     if (widget.embedInWindow) {
       return Scaffold(body: content);
@@ -295,7 +412,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
     );
   }
 
-  Widget _buildContent(BuildContext context) {
+  Widget _buildContent(BuildContext context, bool narrow) {
     final teamId = _teamId;
     if (_error != null) return Center(child: Text(_error!));
     if (teamId == null) {
@@ -317,7 +434,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
           )
         else
           const SizedBox(height: 12),
-        Expanded(child: _buildBody(context, teamId)),
+        Expanded(child: _buildBody(context, teamId, narrow)),
       ],
     );
   }
@@ -336,7 +453,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
           '프로젝트',
   };
 
-  Widget _buildBody(BuildContext context, String teamId) {
+  Widget _buildBody(BuildContext context, String teamId, bool narrow) {
     switch (_view) {
       case ProjectView.home:
         return ProjectHomeView(
@@ -351,6 +468,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
           session: widget.session,
           teamId: teamId,
           reloadTick: _reloadTick,
+          narrow: narrow,
         );
       case ProjectView.project:
         final id = _projectId;
@@ -705,6 +823,37 @@ class _ProjectItemState extends State<_ProjectItem> {
           ),
         ),
         onTap: widget.onTap,
+      ),
+    );
+  }
+}
+
+/// 왼쪽 메뉴가 접혔을 때(창 폭 <= [kProjectNarrowBreakpoint]) 대신 보이는 얇은 화살표 스트립.
+/// 접힌 상태(»)를 누르면 메뉴가 겹침 오버레이로 뜨고, 펼쳐진 상태(«)를 누르면 다시 접힌다 —
+/// 메신저 본창(desktop_home_screen.dart)의 _SidebarToggleStrip과 같은 모양·동작이다.
+class _SidebarToggleStrip extends StatelessWidget {
+  final bool expanded;
+  final VoidCallback onTap;
+  const _SidebarToggleStrip({required this.expanded, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 28,
+      child: Material(
+        color: Theme.of(context).colorScheme.surface,
+        child: InkWell(
+          onTap: onTap,
+          child: Center(
+            child: Icon(
+              expanded
+                  ? Icons.keyboard_double_arrow_left
+                  : Icons.keyboard_double_arrow_right,
+              size: 18,
+              color: Theme.of(context).hintColor,
+            ),
+          ),
+        ),
       ),
     );
   }

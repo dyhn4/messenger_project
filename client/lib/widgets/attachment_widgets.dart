@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -8,11 +9,14 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/message.dart' show Message, MessageAttachment;
+import '../models/room.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
+import 'file_actions.dart';
 
 /// 파일명을 눌렀을 때 메신저 창 안에서 바로 열어 보여줄 수 있는 확장자인지 — 그 외(워드/엑셀/
 /// 파워포인트 등)는 지금처럼 OS 기본 프로그램으로 연다. Flutter 생태계에 오피스 문서를 원본
@@ -206,7 +210,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
   void _open() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => ImageViewerScreen(
+        builder: (_) => ImageViewerScreen.single(
           imageUrl: widget.url,
           // 원본이 암호화돼 있으면(비밀 대화) 여는 시점에 새로 다운로드+복호화한다 — 미리보기는
           // 이미 축소 썸네일로 봤으니 굳이 미리 받아둘 필요가 없다.
@@ -288,6 +292,403 @@ class _DownloadableImageState extends State<DownloadableImage> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 채팅 버블 안 이미지 미리보기의 기본 가로 크기. 창이 좁으면 그만큼 줄어든다.
+const kChatImageMaxWidth = 650.0;
+
+/// 미리보기 한 칸의 최대 세로 — 열이 적을수록(=칸이 클수록) 더 낮게 잘라서, 사진 한 장이
+/// 대화창을 다 먹지 않게 한다. 열 수를 키로 쓴다(1열 / 2열 / 3열).
+const kChatImageMaxHeights = {1: 200.0, 2: 300.0, 3: 420.0};
+
+double chatImageMaxHeight(int columns) =>
+    kChatImageMaxHeights[columns] ?? kChatImageMaxHeights[3]!;
+
+/// 격자 한 줄에 놓는 장수(사진 3장마다 줄바꿈).
+const kChatImageGridColumns = 3;
+
+/// 한 메시지에 딸린 이미지들을 채팅 버블에 그린다. 한 장이면 가로 [kChatImageMaxWidth]에
+/// 맞춰 크게(세로는 원본 비율대로, 너무 길면 잘라서), 여러 장이면 3열 격자로 보여준다.
+/// 아무 장이나 누르면 뷰어가 열리고 거기서 좌우로 넘길 수 있다.
+class ChatImageAttachments extends StatelessWidget {
+  final Session session;
+  final List<MessageAttachment> attachments;
+
+  /// "더보기"(파일 전달·다운로드·즐겨찾기·원본 보기)와 뷰어 상단 바에 필요하다.
+  /// 안 주면 그 메뉴와 상단 바 버튼은 안 나온다(파일 모아보기 화면 등).
+  final Message? message;
+  final Room? room;
+
+  /// 비밀 대화 첨부의 복호화 키 — 지금은 한 장짜리(예전 방식)에만 채워진다.
+  final String? attachmentKey;
+  final String? attachmentNonce;
+  final String? thumbnailKey;
+  final String? thumbnailNonce;
+
+  const ChatImageAttachments({
+    super.key,
+    required this.session,
+    required this.attachments,
+    this.message,
+    this.room,
+    this.attachmentKey,
+    this.attachmentNonce,
+    this.thumbnailKey,
+    this.thumbnailNonce,
+  });
+
+  /// 뷰어에 넘길 목록 — 비밀 대화면 여는 시점에 원본을 받아 복호화한다.
+  List<ViewerImage> _viewerImages() => [
+    for (final a in attachments)
+      ViewerImage(
+        url: session.resolveUrl(a.fileUrl),
+        fileName: a.fileName ?? 'image.png',
+        fileSize: a.fileSize,
+        bytesFuture: attachmentKey == null
+            ? null
+            : fetchAttachmentBytes(
+                url: session.resolveUrl(a.fileUrl),
+                attachmentKey: attachmentKey,
+                attachmentNonce: attachmentNonce,
+              ),
+      ),
+  ];
+
+  void _open(BuildContext context, int index) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ImageViewerScreen(
+          images: _viewerImages(),
+          initialIndex: index,
+          session: session,
+          message: message,
+          room: room,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (attachments.isEmpty) return const SizedBox.shrink();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 창을 좁히면 미리보기도 같이 줄어든다(maxWidth가 무한이면 기본값을 쓴다).
+        final width = constraints.hasBoundedWidth
+            ? math.min(kChatImageMaxWidth, constraints.maxWidth)
+            : kChatImageMaxWidth;
+        if (attachments.length == 1) {
+          return _ChatImageTile(
+            session: session,
+            message: message,
+            attachment: attachments.first,
+            width: width,
+            maxHeight: chatImageMaxHeight(1),
+            attachmentKey: attachmentKey,
+            attachmentNonce: attachmentNonce,
+            thumbnailKey: thumbnailKey,
+            thumbnailNonce: thumbnailNonce,
+            onTap: () => _open(context, 0),
+          );
+        }
+        const gap = 4.0;
+        final columns = math.min(kChatImageGridColumns, attachments.length);
+        final cell = (width - gap * (columns - 1)) / columns;
+        return SizedBox(
+          width: width,
+          child: Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: [
+              for (var i = 0; i < attachments.length; i++)
+                _ChatImageTile(
+                  session: session,
+                  message: message,
+                  attachment: attachments[i],
+                  width: cell,
+                  // 격자는 칸 크기를 맞춰야 줄이 가지런하다 — 정사각형으로 자르되,
+                  // 열 수에 따른 최대 높이를 넘지 않게 한다.
+                  fixedHeight: math.min(cell, chatImageMaxHeight(columns)),
+                  onTap: () => _open(context, i),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 미리보기 한 칸. [fixedHeight]를 주면 그 높이로 잘라 보여주고(격자), 안 주면 원본 비율대로
+/// 그리되 [maxHeight]를 넘지 않게 한다(한 장짜리).
+class _ChatImageTile extends StatefulWidget {
+  final Session session;
+  final Message? message;
+  final MessageAttachment attachment;
+  final double width;
+  final double? fixedHeight;
+  final double maxHeight;
+  final String? attachmentKey;
+  final String? attachmentNonce;
+  final String? thumbnailKey;
+  final String? thumbnailNonce;
+  final VoidCallback onTap;
+
+  const _ChatImageTile({
+    required this.session,
+    required this.attachment,
+    this.message,
+    required this.width,
+    required this.onTap,
+    this.fixedHeight,
+    this.maxHeight = 420,
+    this.attachmentKey,
+    this.attachmentNonce,
+    this.thumbnailKey,
+    this.thumbnailNonce,
+  });
+
+  @override
+  State<_ChatImageTile> createState() => _ChatImageTileState();
+}
+
+class _ChatImageTileState extends State<_ChatImageTile> {
+  bool _hovering = false;
+  bool _downloading = false;
+  Future<Uint8List>? _previewBytes;
+
+  /// 원본 가로/세로 비 — 알아내면 그 비율로 높이를 잡는다(알기 전에는 아래 기본값).
+  double? _ratio;
+  ImageStream? _stream;
+  ImageStreamListener? _listener;
+
+  bool get _hasThumbnail => widget.attachment.thumbnailUrl != null;
+  String get _previewUrl => widget.session.resolveUrl(
+    widget.attachment.thumbnailUrl ?? widget.attachment.fileUrl,
+  );
+  String? get _previewKey =>
+      _hasThumbnail ? widget.thumbnailKey : widget.attachmentKey;
+  String? get _previewNonce =>
+      _hasThumbnail ? widget.thumbnailNonce : widget.attachmentNonce;
+  bool get _previewIsSecret => _previewKey != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_previewIsSecret) {
+      _previewBytes = fetchAttachmentBytes(
+        url: _previewUrl,
+        attachmentKey: _previewKey,
+        attachmentNonce: _previewNonce,
+      );
+    } else if (widget.fixedHeight == null) {
+      _listenForRatio();
+    }
+  }
+
+  /// 한 장짜리는 세로를 원본 비율대로 잡아야 해서, 미리 크기만 알아본다(그리기 전에 한 번).
+  void _listenForRatio() {
+    final stream = CachedNetworkImageProvider(
+      _previewUrl,
+    ).resolve(const ImageConfiguration());
+    final listener = ImageStreamListener((info, _) {
+      if (!mounted) return;
+      final ratio = info.image.width / info.image.height;
+      if (ratio.isFinite && ratio > 0) setState(() => _ratio = ratio);
+    }, onError: (_, _) {});
+    stream.addListener(listener);
+    _stream = stream;
+    _listener = listener;
+  }
+
+  @override
+  void dispose() {
+    if (_stream != null && _listener != null) {
+      _stream!.removeListener(_listener!);
+    }
+    super.dispose();
+  }
+
+  /// 더보기 메뉴가 쓰는 동작 묶음 — 메시지를 모르면(파일 모아보기 등) 만들지 않는다.
+  FileActions? _actions() {
+    final message = widget.message;
+    if (message == null) return null;
+    return FileActions(
+      session: widget.session,
+      message: message,
+      url: widget.session.resolveUrl(widget.attachment.fileUrl),
+      fileName: widget.attachment.fileName ?? 'image.png',
+      attachmentKey: widget.attachmentKey,
+      attachmentNonce: widget.attachmentNonce,
+    );
+  }
+
+  Future<void> _download() async {
+    setState(() => _downloading = true);
+    try {
+      final savedPath = await saveAttachment(
+        session: widget.session,
+        url: widget.session.resolveUrl(widget.attachment.fileUrl),
+        fileName: widget.attachment.fileName ?? 'image.png',
+        attachmentKey: widget.attachmentKey,
+        attachmentNonce: widget.attachmentNonce,
+      );
+      if (!mounted) return;
+      if (savedPath != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('다운로드 완료: $savedPath')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('다운로드 실패: $e')));
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = widget.width;
+    // 비율을 아직 모르면 가로:세로 = 3:2쯤으로 자리를 잡아둔다 — 알게 되면 그 비율로 바뀐다.
+    final height =
+        widget.fixedHeight ??
+        math.min(widget.maxHeight, width / (_ratio ?? 1.5));
+
+    final Widget image = _previewIsSecret
+        ? FutureBuilder<Uint8List>(
+            future: _previewBytes,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return SizedBox(
+                  width: width,
+                  height: height,
+                  child: const Icon(Icons.broken_image),
+                );
+              }
+              if (!snapshot.hasData) {
+                return SizedBox(
+                  width: width,
+                  height: height,
+                  child: const Center(child: CircularProgressIndicator()),
+                );
+              }
+              return Image.memory(
+                snapshot.data!,
+                width: width,
+                height: height,
+                fit: BoxFit.cover,
+              );
+            },
+          )
+        : CachedNetworkImage(
+            imageUrl: _previewUrl,
+            width: width,
+            height: height,
+            fit: BoxFit.cover,
+            placeholder: (context, _) => SizedBox(
+              width: width,
+              height: height,
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+            errorWidget: (context, _, error) => SizedBox(
+              width: width,
+              height: height,
+              child: const Icon(Icons.broken_image),
+            ),
+          );
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Stack(
+          children: [
+            ClipRRect(borderRadius: BorderRadius.circular(10), child: image),
+            if (_hovering)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Row(
+                  children: [
+                    DownloadOverlayButton(
+                      downloading: _downloading,
+                      onTap: _download,
+                    ),
+                    if (widget.message != null) ...[
+                      const SizedBox(width: 4),
+                      _MoreMenuButton(actions: _actions()!),
+                    ],
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 썸네일 오른쪽 위의 "더보기" — 파일 전달 · 다운로드 · 즐겨찾기 · 원본 파일 보기.
+class _MoreMenuButton extends StatelessWidget {
+  final FileActions actions;
+  const _MoreMenuButton({required this.actions});
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      menuChildren: [
+        SizedBox(
+          width: 200,
+          child: MenuItemButton(
+            leadingIcon: const Icon(Icons.send_outlined, size: 18),
+            onPressed: () => actions.forward(context),
+            child: const Text('파일 전달'),
+          ),
+        ),
+        SizedBox(
+          width: 200,
+          child: MenuItemButton(
+            leadingIcon: const Icon(Icons.download_outlined, size: 18),
+            onPressed: () => actions.download(context),
+            child: const Text('다운로드'),
+          ),
+        ),
+        SizedBox(
+          width: 200,
+          child: MenuItemButton(
+            leadingIcon: const Icon(Icons.star_border, size: 18),
+            onPressed: () => actions.toggleFavorite(context),
+            child: const Text('즐겨찾기'),
+          ),
+        ),
+        SizedBox(
+          width: 200,
+          child: MenuItemButton(
+            leadingIcon: const Icon(Icons.image_outlined, size: 18),
+            onPressed: () => actions.openOriginal(context),
+            child: const Text('원본 파일 보기'),
+          ),
+        ),
+      ],
+      builder: (context, controller, _) => Material(
+        color: Colors.black45,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () =>
+              controller.isOpen ? controller.close() : controller.open(),
+          child: const Padding(
+            padding: EdgeInsets.all(6),
+            child: Icon(Icons.more_horiz, size: 16, color: Colors.white),
+          ),
         ),
       ),
     );

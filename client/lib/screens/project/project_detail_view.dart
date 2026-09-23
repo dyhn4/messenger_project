@@ -211,6 +211,8 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
           onOpen: _openTask,
           members: project.members,
           fields: _fields,
+          readOnly: project.archived,
+          onChanged: _load,
         );
       case _ProjectTab.gantt:
         return TaskGanttView(tasks: tasks, onOpen: _openTask);
@@ -295,28 +297,39 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
-              for (final tab in _ProjectTab.values)
-                _ViewTab(
-                  label: switch (tab) {
-                    _ProjectTab.dashboard => '대시보드',
-                    _ProjectTab.kanban => '칸반보드',
-                    _ProjectTab.list => '리스트',
-                    _ProjectTab.gantt => '간트차트',
-                    _ProjectTab.calendar => '캘린더',
-                    _ProjectTab.notes => '노트',
-                  },
-                  icon: switch (tab) {
-                    _ProjectTab.dashboard => Icons.dashboard_outlined,
-                    _ProjectTab.kanban => Icons.view_kanban_outlined,
-                    _ProjectTab.list => Icons.format_list_bulleted,
-                    _ProjectTab.gantt => Icons.view_timeline_outlined,
-                    _ProjectTab.calendar => Icons.calendar_today_outlined,
-                    _ProjectTab.notes => Icons.description_outlined,
-                  },
-                  selected: _tab == tab,
-                  onTap: () => setState(() => _tab = tab),
+              // 창이 좁으면 탭 여섯 개가 자리를 넘겨서 노란 경고 줄무늬가 났다 —
+              // 탭 줄만 가로로 밀 수 있게 하고 "필터링"은 오른쪽에 그대로 붙여둔다.
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final tab in _ProjectTab.values)
+                        _ViewTab(
+                          label: switch (tab) {
+                            _ProjectTab.dashboard => '대시보드',
+                            _ProjectTab.kanban => '칸반보드',
+                            _ProjectTab.list => '리스트',
+                            _ProjectTab.gantt => '간트차트',
+                            _ProjectTab.calendar => '캘린더',
+                            _ProjectTab.notes => '노트',
+                          },
+                          icon: switch (tab) {
+                            _ProjectTab.dashboard => Icons.dashboard_outlined,
+                            _ProjectTab.kanban => Icons.view_kanban_outlined,
+                            _ProjectTab.list => Icons.format_list_bulleted,
+                            _ProjectTab.gantt => Icons.view_timeline_outlined,
+                            _ProjectTab.calendar =>
+                              Icons.calendar_today_outlined,
+                            _ProjectTab.notes => Icons.description_outlined,
+                          },
+                          selected: _tab == tab,
+                          onTap: () => setState(() => _tab = tab),
+                        ),
+                    ],
+                  ),
                 ),
-              const Spacer(),
+              ),
               if (_tab != _ProjectTab.notes && _tab != _ProjectTab.dashboard)
                 TaskFilterButton(
                   filter: _filter,

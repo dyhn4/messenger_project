@@ -57,8 +57,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
   String? _error;
   final _selected = <String>{};
   final _groupName = TextEditingController();
-  late final _groupNameFocus = FocusNode()
-    ..addListener(() => setState(() {}));
+  late final _groupNameFocus = FocusNode()..addListener(() => setState(() {}));
   bool _submitting = false;
   bool _submittingSecret = false;
 

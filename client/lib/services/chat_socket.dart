@@ -840,6 +840,10 @@ class ChatSocket {
     int? fileSize,
     String? mimeType,
     String? thumbnailUrl,
+
+    /// 사진 여러 장을 한 말풍선으로 보낼 때 — [{kind, fileUrl, fileName, fileSize,
+    /// mimeType, thumbnailUrl}, ...]. 한 장뿐이면 안 보내고 위의 fileUrl만 쓴다.
+    List<Map<String, dynamic>>? attachments,
     // "메시지 공유"(message_share_screen.dart) — 다른 방으로 원본을 인용해서 보낼 때만 채운다.
     String? quotedSenderName,
     String? quotedPreview,
@@ -867,6 +871,7 @@ class ChatSocket {
         'fileSize': ?fileSize,
         'mimeType': ?mimeType,
         'thumbnailUrl': ?thumbnailUrl,
+        'attachments': ?attachments,
         'quotedSenderName': ?quotedSenderName,
         'quotedPreview': ?quotedPreview,
         'forwardedFromSenderName': ?forwardedFromSenderName,

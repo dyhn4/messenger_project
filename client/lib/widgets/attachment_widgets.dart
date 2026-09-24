@@ -17,6 +17,7 @@ import '../screens/text_viewer_screen.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
 import 'file_actions.dart';
+import 'hover_toolbar.dart';
 
 /// 파일명을 눌렀을 때 메신저 창 안에서 바로 열어 보여줄 수 있는 확장자인지 — 그 외(워드/엑셀/
 /// 파워포인트 등)는 지금처럼 OS 기본 프로그램으로 연다. Flutter 생태계에 오피스 문서를 원본
@@ -84,42 +85,6 @@ Future<String?> saveAttachment({
     await settings.openDownloadFolder();
   }
   return savedPath;
-}
-
-/// 마우스를 올렸을 때만 보이는 원형 다운로드 버튼. 이미지/파일 첨부 위젯이 공유해서 쓴다.
-class DownloadOverlayButton extends StatelessWidget {
-  final bool downloading;
-  final VoidCallback onTap;
-  const DownloadOverlayButton({
-    super.key,
-    required this.downloading,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black.withValues(alpha: 0.55),
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: downloading ? null : onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: downloading
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Icon(Icons.download, size: 16, color: Colors.white),
-        ),
-      ),
-    );
-  }
 }
 
 /// 채팅/댓글에 올라온 이미지 하나. 누르면 크게 보고, 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
@@ -250,7 +215,9 @@ class _DownloadableImageState extends State<DownloadableImage> {
                 snapshot.data!,
                 width: 200,
                 height: 150,
-                fit: BoxFit.cover,
+                // 채팅 썸네일과 같은 규칙 — 자르지 않고 통째로 보여주되 원본보다 크게
+                // 늘리지는 않는다(남는 자리는 아래 배경색).
+                fit: BoxFit.scaleDown,
               );
             },
           )
@@ -261,7 +228,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
             // 원본 비율대로 로드되면서 크기가 바뀌어, 로드되기 전 크기를 기준으로 계산해둔
             // 스크롤 위치(맨 아래로 스크롤 등)가 로드 후 어긋나는 문제가 있었다.
             height: 150,
-            fit: BoxFit.cover,
+            fit: BoxFit.scaleDown,
             placeholder: (context, _) => const SizedBox(
               width: 200,
               height: 150,
@@ -281,14 +248,26 @@ class _DownloadableImageState extends State<DownloadableImage> {
         onTap: _open,
         child: Stack(
           children: [
-            ClipRRect(borderRadius: BorderRadius.circular(10), child: image),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: ColoredBox(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: image,
+              ),
+            ),
             if (_hovering)
               Positioned(
                 right: 6,
                 top: 6,
-                child: DownloadOverlayButton(
-                  downloading: _downloading,
-                  onTap: _download,
+                child: HoverToolbar(
+                  children: [
+                    HoverToolbarButton(
+                      icon: Icons.download_outlined,
+                      tooltip: '다운로드',
+                      busy: _downloading,
+                      onPressed: _download,
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -301,12 +280,14 @@ class _DownloadableImageState extends State<DownloadableImage> {
 /// 채팅 버블 안 이미지 미리보기의 기본 가로 크기. 창이 좁으면 그만큼 줄어든다.
 const kChatImageMaxWidth = 650.0;
 
-/// 미리보기 한 칸의 최대 세로 — 열이 적을수록(=칸이 클수록) 더 낮게 잘라서, 사진 한 장이
-/// 대화창을 다 먹지 않게 한다. 열 수를 키로 쓴다(1열 / 2열 / 3열).
-const kChatImageMaxHeights = {1: 200.0, 2: 300.0, 3: 420.0};
+/// 미리보기 **전체 높이**의 상한 — 사진 묶음이 대화창을 다 먹지 않게 한다. **줄 수**(3장마다
+/// 줄바꿈되는 행 개수)를 키로 쓴다: 1~3장(1줄)은 170, 4~6장(2줄)은 300, 7장 이상(3줄)은 420.
+/// 줄이 여러 개면 이 값을 줄들이 나눠 갖는다(칸 하나의 높이가 아니다 — 9장이면 3줄 합쳐서
+/// 420을 넘지 않는다).
+const kChatImageMaxHeights = {1: 170.0, 2: 300.0, 3: 420.0};
 
-double chatImageMaxHeight(int columns) =>
-    kChatImageMaxHeights[columns] ?? kChatImageMaxHeights[3]!;
+double chatImageMaxHeight(int rows) =>
+    kChatImageMaxHeights[rows] ?? kChatImageMaxHeights[3]!;
 
 /// 격자 한 줄에 놓는 장수(사진 3장마다 줄바꿈).
 const kChatImageGridColumns = 3;
@@ -398,6 +379,16 @@ class ChatImageAttachments extends StatelessWidget {
         const gap = 4.0;
         final columns = math.min(kChatImageGridColumns, attachments.length);
         final cell = (width - gap * (columns - 1)) / columns;
+        // 3장마다 줄이 바뀌므로, 장수를 3으로 나눠 올림한 값이 줄 수다. 전체 높이 상한은
+        // 3줄까지만 커지고(4줄 이상이면 3줄과 같은 420), 그 상한을 실제 줄 수가 나눠 갖는다
+        // — 그래서 몇 장을 보내든 사진 묶음 전체 높이가 상한을 넘지 않는다.
+        final rows = ((attachments.length - 1) ~/ kChatImageGridColumns) + 1;
+        final budget = chatImageMaxHeight(math.min(rows, 3));
+        // 칸 하나의 높이 — 칸 폭보다 높아지지는 않게 해서 세로로 길쭉한 칸이 생기지 않게
+        // 한다. 모든 칸이 같은 값을 쓰므로, 같은 사진을 다시 보내면 항상 같은 모양으로
+        // 그려진다(원본 비율을 비동기로 재서 칸마다 높이를 다르게 잡던 방식은 측정 시점에
+        // 따라 같은 사진도 다르게 보이는 문제가 있었다).
+        final tileHeight = math.min(cell, (budget - gap * (rows - 1)) / rows);
         return SizedBox(
           width: width,
           child: Wrap(
@@ -410,9 +401,7 @@ class ChatImageAttachments extends StatelessWidget {
                   message: message,
                   attachment: attachments[i],
                   width: cell,
-                  // 격자는 칸 크기를 맞춰야 줄이 가지런하다 — 정사각형으로 자르되,
-                  // 열 수에 따른 최대 높이를 넘지 않게 한다.
-                  fixedHeight: math.min(cell, chatImageMaxHeight(columns)),
+                  fixedHeight: tileHeight,
                   onTap: () => _open(context, i),
                 ),
             ],
@@ -423,8 +412,12 @@ class ChatImageAttachments extends StatelessWidget {
   }
 }
 
-/// 미리보기 한 칸. [fixedHeight]를 주면 그 높이로 잘라 보여주고(격자), 안 주면 원본 비율대로
-/// 그리되 [maxHeight]를 넘지 않게 한다(한 장짜리).
+/// 미리보기 한 칸.
+///
+/// [fixedHeight]를 주면(격자 — 여러 장) 모든 칸이 그 높이로 똑같이 그려지고, 칸에 남는 자리가
+/// 없도록 잘라서 채운다(BoxFit.cover). 안 주면(한 장짜리) 원본 비율 그대로 그리되 [maxHeight]를
+/// 넘지 않고, **원본보다 크게 늘리지도 않는다** — 원본이 작으면 칸 자체가 원본 크기로 줄어서
+/// 말풍선에 여백이 남지 않는다.
 class _ChatImageTile extends StatefulWidget {
   final Session session;
   final Message? message;
@@ -458,10 +451,12 @@ class _ChatImageTile extends StatefulWidget {
 
 class _ChatImageTileState extends State<_ChatImageTile> {
   bool _hovering = false;
+  bool _menuOpen = false;
   bool _downloading = false;
   Future<Uint8List>? _previewBytes;
 
-  /// 원본 가로/세로 비 — 알아내면 그 비율로 높이를 잡는다(알기 전에는 아래 기본값).
+  /// 미리보기 이미지(썸네일이 있으면 썸네일, 없으면 원본)의 가로/세로 비 — 한 장짜리 칸의
+  /// 세로를 이 비율로 잡는다. 알기 전에는 아래 기본값으로 자리를 잡는다.
   double? _ratio;
   ImageStream? _stream;
   ImageStreamListener? _listener;
@@ -486,11 +481,12 @@ class _ChatImageTileState extends State<_ChatImageTile> {
         attachmentNonce: _previewNonce,
       );
     } else if (widget.fixedHeight == null) {
+      // 한 장짜리만 칸 세로를 원본 비율로 잡으므로 미리 크기를 알아본다(격자는 모든 칸이
+      // 같은 고정 높이라 원본 크기를 몰라도 된다).
       _listenForRatio();
     }
   }
 
-  /// 한 장짜리는 세로를 원본 비율대로 잡아야 해서, 미리 크기만 알아본다(그리기 전에 한 번).
   void _listenForRatio() {
     final stream = CachedNetworkImageProvider(
       _previewUrl,
@@ -555,11 +551,25 @@ class _ChatImageTileState extends State<_ChatImageTile> {
 
   @override
   Widget build(BuildContext context) {
-    final width = widget.width;
-    // 비율을 아직 모르면 가로:세로 = 3:2쯤으로 자리를 잡아둔다 — 알게 되면 그 비율로 바뀐다.
-    final height =
-        widget.fixedHeight ??
-        math.min(widget.maxHeight, width / (_ratio ?? 1.5));
+    final fixedHeight = widget.fixedHeight;
+    final double width;
+    final double height;
+    if (fixedHeight != null) {
+      // 격자 칸 — 모든 칸이 같은 크기(부모가 정한 값)라 줄이 가지런하다.
+      width = widget.width;
+      height = fixedHeight;
+    } else {
+      // 한 장짜리 — 가로는 원본 크기와 상관없이 항상 칸 폭([kChatImageMaxWidth], 창이 좁으면
+      // 그만큼)을 쓰고, 세로만 원본 비율에 맞춘다. 그래서 위아래 여백 없이 꽉 차고, 세로로
+      // 아주 긴 사진만 [maxHeight]에서 잘린다. 비율을 아직 모르면 가로:세로 = 3:2쯤으로
+      // 자리를 잡아둔다(알게 되면 그 비율로 바뀐다).
+      width = widget.width;
+      height = math.min(widget.maxHeight, width / (_ratio ?? 1.5));
+    }
+    // 사진을 자르지 않는다 — 칸보다 크면 통째로 들어가게 줄이고, 칸보다 작으면 늘리지 않고
+    // 원본 크기 그대로 그린다(BoxFit.scaleDown). 어느 쪽이든 칸에 남는 자리는 배경색으로
+    // 채워진다.
+    const fit = BoxFit.scaleDown;
 
     final Widget image = _previewIsSecret
         ? FutureBuilder<Uint8List>(
@@ -583,7 +593,7 @@ class _ChatImageTileState extends State<_ChatImageTile> {
                 snapshot.data!,
                 width: width,
                 height: height,
-                fit: BoxFit.cover,
+                fit: fit,
               );
             },
           )
@@ -591,7 +601,7 @@ class _ChatImageTileState extends State<_ChatImageTile> {
             imageUrl: _previewUrl,
             width: width,
             height: height,
-            fit: BoxFit.cover,
+            fit: fit,
             placeholder: (context, _) => SizedBox(
               width: width,
               height: height,
@@ -611,21 +621,39 @@ class _ChatImageTileState extends State<_ChatImageTile> {
         onTap: widget.onTap,
         child: Stack(
           children: [
-            ClipRRect(borderRadius: BorderRadius.circular(10), child: image),
-            if (_hovering)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: ColoredBox(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: SizedBox(width: width, height: height, child: image),
+              ),
+            ),
+            // 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다 — 마우스를 메뉴로 옮기면 썸네일
+            // 밖으로 나간 것으로 잡혀서, 안 붙잡으면 툴바가 사라지며 메뉴까지 닫힌다.
+            if (_hovering || _menuOpen)
               Positioned(
                 right: 6,
                 top: 6,
-                child: Row(
+                // 다운로드·더보기를 말풍선 호버 툴바와 같은 상자 하나에 담는다.
+                child: HoverToolbar(
                   children: [
-                    DownloadOverlayButton(
-                      downloading: _downloading,
-                      onTap: _download,
+                    HoverToolbarButton(
+                      icon: Icons.download_outlined,
+                      tooltip: '다운로드',
+                      busy: _downloading,
+                      onPressed: _download,
                     ),
-                    if (widget.message != null) ...[
-                      const SizedBox(width: 4),
-                      _MoreMenuButton(actions: _actions()!),
-                    ],
+                    if (widget.message != null)
+                      HoverToolbarButton(
+                        icon: Icons.more_vert,
+                        tooltip: '더보기',
+                        onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
+                        menuChildren: fileActionMenuItems(
+                          context,
+                          _actions()!,
+                          isImage: true,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -636,64 +664,35 @@ class _ChatImageTileState extends State<_ChatImageTile> {
   }
 }
 
-/// 썸네일 오른쪽 위의 "더보기" — 파일 전달 · 다운로드 · 즐겨찾기 · 원본 파일 보기.
-class _MoreMenuButton extends StatelessWidget {
-  final FileActions actions;
-  const _MoreMenuButton({required this.actions});
-
-  @override
-  Widget build(BuildContext context) {
-    return MenuAnchor(
-      menuChildren: [
-        SizedBox(
-          width: 200,
-          child: MenuItemButton(
-            leadingIcon: const Icon(Icons.send_outlined, size: 18),
-            onPressed: () => actions.forward(context),
-            child: const Text('파일 전달'),
-          ),
-        ),
-        SizedBox(
-          width: 200,
-          child: MenuItemButton(
-            leadingIcon: const Icon(Icons.download_outlined, size: 18),
-            onPressed: () => actions.download(context),
-            child: const Text('다운로드'),
-          ),
-        ),
-        SizedBox(
-          width: 200,
-          child: MenuItemButton(
-            leadingIcon: const Icon(Icons.star_border, size: 18),
-            onPressed: () => actions.toggleFavorite(context),
-            child: const Text('즐겨찾기'),
-          ),
-        ),
-        SizedBox(
-          width: 200,
-          child: MenuItemButton(
-            leadingIcon: const Icon(Icons.image_outlined, size: 18),
-            onPressed: () => actions.openOriginal(context),
-            child: const Text('원본 파일 보기'),
-          ),
-        ),
-      ],
-      builder: (context, controller, _) => Material(
-        color: Colors.black45,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () =>
-              controller.isOpen ? controller.close() : controller.open(),
-          child: const Padding(
-            padding: EdgeInsets.all(6),
-            child: Icon(Icons.more_horiz, size: 16, color: Colors.white),
-          ),
-        ),
-      ),
-    );
-  }
-}
+/// 첨부(이미지/파일) "더보기" 메뉴의 항목들 — 파일 전달 · 다운로드 · 즐겨찾기 (+이미지는
+/// "원본 파일 보기"까지). 파일은 누르면 어차피 원본을 받아서 여는 동작이라 그 항목이 없다.
+List<Widget> fileActionMenuItems(
+  BuildContext context,
+  FileActions actions, {
+  required bool isImage,
+}) => [
+  hoverMenuItem(
+    icon: Icons.send_outlined,
+    label: '파일 전달',
+    onPressed: () => actions.forward(context),
+  ),
+  hoverMenuItem(
+    icon: Icons.download_outlined,
+    label: '다운로드',
+    onPressed: () => actions.download(context),
+  ),
+  hoverMenuItem(
+    icon: Icons.star_border,
+    label: '즐겨찾기',
+    onPressed: () => actions.toggleFavorite(context),
+  ),
+  if (isImage)
+    hoverMenuItem(
+      icon: Icons.image_outlined,
+      label: '원본 파일 보기',
+      onPressed: () => actions.openOriginal(context),
+    ),
+];
 
 /// 채팅/댓글에 올라온 파일 하나. 누르면 항상 먼저 전체를 다 받은 뒤에 PDF/텍스트는 인앱
 /// 뷰어로, 그 외는 외부 앱으로 열고(_open 참고), 마우스를 올리면 오른쪽 위에 다운로드
@@ -702,6 +701,10 @@ class DownloadableFile extends StatefulWidget {
   final Session session;
   final String url;
   final String fileName;
+
+  /// "더보기"(파일 전달·다운로드·즐겨찾기·원본 파일 보기)에 필요하다 — 이미지 썸네일과
+  /// 같은 규칙으로, 안 주면 다운로드 버튼만 보인다(파일 모아보기 미리보기 등).
+  final Message? message;
 
   /// DownloadableImage와 동일한 의미 — 있으면 서버 URL은 암호화된 바이트라, 복호화해야
   /// 실제 내용을 볼 수 있다.
@@ -712,6 +715,7 @@ class DownloadableFile extends StatefulWidget {
     required this.session,
     required this.url,
     required this.fileName,
+    this.message,
     this.attachmentKey,
     this.attachmentNonce,
   });
@@ -722,6 +726,7 @@ class DownloadableFile extends StatefulWidget {
 
 class _DownloadableFileState extends State<DownloadableFile> {
   bool _hovering = false;
+  bool _menuOpen = false;
   bool _downloading = false;
   bool _opening = false;
 
@@ -840,13 +845,39 @@ class _DownloadableFileState extends State<DownloadableFile> {
                 ],
               ),
             ),
-            if (_hovering)
+            // 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다(이미지 썸네일과 같은 이유).
+            if (_hovering || _menuOpen)
               Positioned(
                 right: -6,
                 top: -6,
-                child: DownloadOverlayButton(
-                  downloading: _downloading,
-                  onTap: _download,
+                // 이미지 썸네일과 같은 툴바 — 다운로드 + (메시지를 알면) 더보기.
+                child: HoverToolbar(
+                  children: [
+                    HoverToolbarButton(
+                      icon: Icons.download_outlined,
+                      tooltip: '다운로드',
+                      busy: _downloading,
+                      onPressed: _download,
+                    ),
+                    if (widget.message != null)
+                      HoverToolbarButton(
+                        icon: Icons.more_vert,
+                        tooltip: '더보기',
+                        onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
+                        menuChildren: fileActionMenuItems(
+                          context,
+                          FileActions(
+                            session: widget.session,
+                            message: widget.message!,
+                            url: widget.url,
+                            fileName: widget.fileName,
+                            attachmentKey: widget.attachmentKey,
+                            attachmentNonce: widget.attachmentNonce,
+                          ),
+                          isImage: false,
+                        ),
+                      ),
+                  ],
                 ),
               ),
           ],

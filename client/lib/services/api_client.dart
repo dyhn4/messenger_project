@@ -1910,6 +1910,15 @@ class ApiClient {
 
   // ── 즐겨찾기한 파일 ──────────────────────────────────────────────────
 
+  /// 내가 즐겨찾기한 첨부들의 메시지 id — 파일 모아보기가 별 표시와 정렬에 쓴다.
+  /// (한 메시지에 사진이 여러 장이면 그중 하나만 담아도 그 메시지가 들어온다.)
+  Future<Set<String>> fetchFavoriteFileMessageIds() async {
+    final list = await _get('/api/favorite-files') as List;
+    return {
+      for (final e in list) (e as Map<String, dynamic>)['messageId'] as String,
+    };
+  }
+
   /// 첨부 하나를 즐겨찾기에 넣거나 뺀다(토글) — 넣었으면 true.
   Future<bool> toggleFavoriteFile(
     String messageId, {

@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
@@ -144,20 +143,19 @@ class CommentInputBarState extends State<CommentInputBar> {
     unawaited(_stageAndUpload(file, true, 'image.png'));
   }
 
-  Future<void> _pickImage() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-    unawaited(_stageAndUpload(File(picked.path), true, picked.name));
-  }
-
+  /// 이미지든 아니든 이 버튼 하나로 고른다 — 이미지인지는 확장자로 판별해서(끌어다 놓기와
+  /// 같은 방식) 이미지면 썸네일을 만들어 미리보기로 보여준다. 여러 개도 한 번에 고를 수 있다.
   Future<void> _pickFile() async {
-    final result = await FilePicker.pickFiles();
-    final picked = result?.files.single;
-    if (picked?.path == null) return;
-    unawaited(_stageAndUpload(File(picked!.path!), false, picked.name));
+    final result = await FilePicker.pickFiles(allowMultiple: true);
+    final picked = result?.files ?? const [];
+    if (picked.isEmpty || !mounted) return;
+    for (final file in picked) {
+      final path = file.path;
+      if (path == null) continue;
+      unawaited(
+        _stageAndUpload(File(path), looksLikeImagePath(path), file.name),
+      );
+    }
   }
 
   /// ChatInputBarState.addDroppedFiles와 동일 — message_thread_screen.dart의 DropTarget이 호출.
@@ -355,11 +353,6 @@ class CommentInputBarState extends State<CommentInputBar> {
                     Platform.isWindows && constraints.maxWidth > 320;
                 return Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.image_outlined),
-                      onPressed: _sending ? null : _pickImage,
-                      tooltip: '이미지 첨부',
-                    ),
                     TapRegion(
                       groupId: widget.stickerPickerGroupId,
                       child: IconButton(

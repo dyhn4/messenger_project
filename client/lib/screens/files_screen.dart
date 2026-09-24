@@ -6,6 +6,8 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
+import '../widgets/file_actions.dart';
+import '../widgets/hover_toolbar.dart';
 import '../widgets/filter_dropdown.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
@@ -84,6 +86,40 @@ class _FilesScreenState extends State<FilesScreen> {
 
   Message? _preview; // null이면 목록, 있으면 그 첨부의 자체 미리보기("메시지" 화면).
 
+  /// 내가 즐겨찾기한 첨부의 메시지 id — 별 표시와 "즐겨찾기 먼저" 정렬에 쓴다.
+  Set<String> _favorites = const {};
+
+  /// 즐겨찾기한 것을 앞으로 보낸다. 그 안에서는 서버가 준 순서(최신순)를 그대로 둔다.
+  List<Message> _sortFavoritesFirst(List<Message> items) {
+    final favorite = <Message>[];
+    final rest = <Message>[];
+    for (final m in items) {
+      (_favorites.contains(m.id) ? favorite : rest).add(m);
+    }
+    return [...favorite, ...rest];
+  }
+
+  /// 별을 눌렀을 때 — 서버에 토글하고, 목록의 별 표시와 순서를 그 결과대로 다시 맞춘다.
+  Future<void> _toggleFavorite(Message m) async {
+    final actions = _actionsFor(m);
+    final on = await actions.toggleFavorite(context);
+    if (on == null || !mounted) return;
+    final next = {..._favorites};
+    on ? next.add(m.id) : next.remove(m.id);
+    setState(() {
+      _favorites = next;
+      final results = _results;
+      if (results != null) _results = _sortFavoritesFirst(results);
+    });
+  }
+
+  FileActions _actionsFor(Message m) => FileActions(
+    session: widget.session,
+    message: m,
+    url: widget.session.resolveUrl(m.fileUrl ?? ''),
+    fileName: m.fileName ?? (m.type == MessageType.image ? 'image.png' : '파일'),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -103,15 +139,23 @@ class _FilesScreenState extends State<FilesScreen> {
       _error = null;
     });
     try {
-      final results = await widget.session.api!.fetchAttachments(
+      final api = widget.session.api!;
+      final results = await api.fetchAttachments(
         teamId: widget.session.currentTeam!.id,
         roomId: _roomId,
         senderId: _senderId,
         category: _category.apiValue,
       );
+      // 즐겨찾기한 것을 목록 맨 위로 올리려면 어떤 게 담겨 있는지 알아야 한다. 즐겨찾기를
+      // 못 불러와도(예: 일시적 오류) 목록 자체는 보여준다.
+      Set<String> favorites = const {};
+      try {
+        favorites = await api.fetchFavoriteFileMessageIds();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
-        _results = results;
+        _favorites = favorites;
+        _results = _sortFavoritesFirst(results);
         _page = 0;
       });
     } catch (e) {
@@ -290,6 +334,9 @@ class _FilesScreenState extends State<FilesScreen> {
                 message: pageItems[i],
                 timeFormat: _timeFormat,
                 roomName: _roomNameFor(pageItems[i]),
+                favorited: _favorites.contains(pageItems[i].id),
+                actions: _actionsFor(pageItems[i]),
+                onToggleFavorite: () => _toggleFavorite(pageItems[i]),
                 onTap: () => setState(() => _preview = pageItems[i]),
               ),
             ),
@@ -580,22 +627,43 @@ class _CategoryFilterPanelState extends State<_CategoryFilterPanel> {
 
 /// 파일 목록 한 줄: 대화방 이름(라벨) + (썸네일/아이콘 + 파일명 + 보낸사람 · 시간).
 /// 검색 결과 행과 같은 스타일(카드 테두리 없이 ListView.separated의 Divider로만 구분).
-class _FileResultRow extends StatelessWidget {
+/// 목록 한 줄 — 마우스를 올리면 오른쪽 위에 툴바(즐겨찾기 별 + 더보기)가 뜬다. 즐겨찾기한
+/// 파일은 별이 노랗게 차고, 목록에서도 맨 위로 올라간다(_FilesScreenState._sortFavoritesFirst).
+class _FileResultRow extends StatefulWidget {
   final Session session;
   final Message message;
   final DateFormat timeFormat;
   final String roomName;
+  final bool favorited;
+  final FileActions actions;
+  final VoidCallback onToggleFavorite;
   final VoidCallback onTap;
   const _FileResultRow({
     required this.session,
     required this.message,
     required this.timeFormat,
     required this.roomName,
+    required this.favorited,
+    required this.actions,
+    required this.onToggleFavorite,
     required this.onTap,
   });
 
   @override
+  State<_FileResultRow> createState() => _FileResultRowState();
+}
+
+class _FileResultRowState extends State<_FileResultRow> {
+  bool _hovering = false;
+
+  /// 더보기 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다 — 마우스를 메뉴로 옮기면 줄 밖으로
+  /// 나간 것으로 잡혀서, 안 붙잡으면 툴바가 사라지며 메뉴까지 닫힌다.
+  bool _menuOpen = false;
+
+  @override
   Widget build(BuildContext context) {
+    final session = widget.session;
+    final message = widget.message;
     final isImage = message.type == MessageType.image;
     final placeholderColor = Theme.of(
       context,
@@ -605,7 +673,8 @@ class _FileResultRow extends StatelessWidget {
             session.resolveUrl(message.thumbnailUrl ?? message.fileUrl ?? ''),
             width: 40,
             height: 40,
-            fit: BoxFit.cover,
+            // 채팅 썸네일과 같은 규칙 — 자르지 않고 통째로 보여준다.
+            fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) => Container(
               width: 40,
               height: 40,
@@ -620,8 +689,54 @@ class _FileResultRow extends StatelessWidget {
             child: const Icon(Icons.insert_drive_file_outlined, size: 20),
           );
 
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Stack(
+        children: [
+          _buildRow(context, thumbnail: thumbnail, isImage: isImage),
+          // 즐겨찾기한 줄은 마우스를 올리지 않아도 별이 보여야 어떤 게 담긴 건지 알 수 있다.
+          if (_hovering || _menuOpen || widget.favorited)
+            Positioned(
+              right: 16,
+              top: 8,
+              child: HoverToolbar(
+                children: [
+                  HoverToolbarButton(
+                    icon: widget.favorited ? Icons.star : Icons.star_border,
+                    color: widget.favorited ? Colors.amber : null,
+                    tooltip: widget.favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+                    onPressed: widget.onToggleFavorite,
+                  ),
+                  if (_hovering || _menuOpen)
+                    HoverToolbarButton(
+                      icon: Icons.more_vert,
+                      tooltip: '더보기',
+                      onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
+                      menuChildren: fileActionMenuItems(
+                        context,
+                        widget.actions,
+                        isImage: isImage,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRow(
+    BuildContext context, {
+    required Widget thumbnail,
+    required bool isImage,
+  }) {
+    final message = widget.message;
+    final timeFormat = widget.timeFormat;
+    final roomName = widget.roomName;
     return InkWell(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(

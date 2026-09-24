@@ -91,6 +91,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   // 위에 계속 있는데도 사라져버리는 경합이 생긴다.
   bool _bubbleHovering = false;
   bool _toolbarHovering = false;
+  bool _menuOpen = false;
   bool _hovering = false; // 위 둘의 OR에 소멸 유예(디바운스)를 적용한 실제 표시 여부.
   Timer? _hoverExitTimer;
   bool _editing = false;
@@ -123,9 +124,16 @@ class _MessageBubbleState extends State<MessageBubble> {
     _updateHoverState();
   }
 
+  /// 더보기 메뉴가 열려 있는 동안에는 툴바를 붙잡아 둔다 — 마우스가 메뉴로 넘어가면 툴바
+  /// 밖으로 나간 것으로 잡혀서, 안 붙잡으면 툴바가 사라지며 메뉴까지 같이 닫힌다.
+  void _setMenuOpen(bool value) {
+    _menuOpen = value;
+    _updateHoverState();
+  }
+
   void _updateHoverState() {
     _hoverExitTimer?.cancel();
-    if (_bubbleHovering || _toolbarHovering) {
+    if (_bubbleHovering || _toolbarHovering || _menuOpen) {
       if (!_hovering) setState(() => _hovering = true);
       _syncToolbarPortal();
       return;
@@ -631,7 +639,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         HoverToolbarButton(
           icon: Icons.more_vert,
           tooltip: '더보기',
-          menuItems: [
+          onMenuOpenChanged: _setMenuOpen,
+          menuChildren: [
             ...messageActionMenuItems(
               context,
               session: widget.session,
@@ -642,42 +651,33 @@ class _MessageBubbleState extends State<MessageBubble> {
             if (isMine &&
                 isEditDeleteAllowed(widget.session) &&
                 (widget.onEdit != null || widget.onDelete != null))
-              const PopupMenuDivider(),
+              hoverMenuDivider(),
             if (isMine &&
                 isEditDeleteAllowed(widget.session) &&
                 message.type == MessageType.text &&
                 widget.onEdit != null)
-              PopupMenuItem<void>(
-                onTap: _startEdit,
-                child: const Row(
-                  children: [Icon(Icons.edit), SizedBox(width: 8), Text('수정')],
-                ),
+              hoverMenuItem(
+                icon: Icons.edit,
+                label: '수정',
+                onPressed: _startEdit,
               ),
             if (isMine &&
                 widget.onDelete != null &&
                 isEditDeleteAllowed(widget.session))
-              PopupMenuItem<void>(
-                onTap: () => _confirmDelete(context),
-                child: const Row(
-                  children: [
-                    Icon(Icons.delete, color: Colors.redAccent),
-                    SizedBox(width: 8),
-                    Text('삭제', style: TextStyle(color: Colors.redAccent)),
-                  ],
-                ),
+              hoverMenuItem(
+                icon: Icons.delete,
+                label: '삭제',
+                color: Colors.redAccent,
+                onPressed: () => _confirmDelete(context),
               ),
             // 소유자·관리자의 콘텐츠 관리 — 남의 메시지도 지울 수 있다(_canModerate 참고).
             if (_canModerate) ...[
-              const PopupMenuDivider(),
-              PopupMenuItem<void>(
-                onTap: () => _confirmDelete(context),
-                child: const Row(
-                  children: [
-                    Icon(Icons.shield_outlined, color: Colors.redAccent),
-                    SizedBox(width: 8),
-                    Text('삭제 (관리자)', style: TextStyle(color: Colors.redAccent)),
-                  ],
-                ),
+              hoverMenuDivider(),
+              hoverMenuItem(
+                icon: Icons.shield_outlined,
+                label: '삭제 (관리자)',
+                color: Colors.redAccent,
+                onPressed: () => _confirmDelete(context),
               ),
             ],
           ],
@@ -810,6 +810,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           session: widget.session,
           url: url,
           fileName: message.fileName ?? '파일',
+          message: message,
           attachmentKey: message.attachmentKey,
           attachmentNonce: message.attachmentNonce,
         );

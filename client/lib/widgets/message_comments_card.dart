@@ -314,6 +314,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   // 사라져버리므로, MessageBubble과 동일하게 양쪽 호버를 OR로 묶고 짧은 소멸 유예를 둔다.
   bool _rowHovering = false;
   bool _toolbarHovering = false;
+  bool _menuOpen = false;
   bool _hovering = false;
   Timer? _hoverExitTimer;
   bool _editing = false;
@@ -339,9 +340,16 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     _updateHoverState();
   }
 
+  /// 더보기 메뉴가 열려 있는 동안에는 툴바를 붙잡아 둔다(MessageBubble과 같은 이유 —
+  /// 마우스가 메뉴로 넘어가면 툴바 밖으로 나간 것으로 잡힌다).
+  void _setMenuOpen(bool value) {
+    _menuOpen = value;
+    _updateHoverState();
+  }
+
   void _updateHoverState() {
     _hoverExitTimer?.cancel();
-    if (_rowHovering || _toolbarHovering) {
+    if (_rowHovering || _toolbarHovering || _menuOpen) {
       if (!_hovering) setState(() => _hovering = true);
       _syncToolbarPortal();
       return;
@@ -587,6 +595,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           session: widget.session,
           url: widget.resolveUrl(comment.fileUrl ?? ''),
           fileName: comment.fileName ?? '파일',
+          message: messageFromComment(comment),
           attachmentKey: comment.attachmentKey,
           attachmentNonce: comment.attachmentNonce,
         );
@@ -619,45 +628,37 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
         HoverToolbarButton(
           icon: Icons.more_vert,
           tooltip: '더보기',
-          menuItems: [
+          onMenuOpenChanged: _setMenuOpen,
+          menuChildren: [
             ...messageActionMenuItems(
               context,
               session: widget.session,
               message: messageFromComment(comment),
               senderDisplayName: displayName,
             ),
-            if (canEditDelete) const PopupMenuDivider(),
+            if (canEditDelete) hoverMenuDivider(),
             // 메시지 수정과 동일하게, 텍스트 댓글만 수정할 수 있다(서버도 동일하게 막음).
             if (canEdit && comment.type == MessageType.text)
-              PopupMenuItem<void>(
-                onTap: _startEdit,
-                child: const Row(
-                  children: [Icon(Icons.edit), SizedBox(width: 8), Text('수정')],
-                ),
+              hoverMenuItem(
+                icon: Icons.edit,
+                label: '수정',
+                onPressed: _startEdit,
               ),
             if (canDelete)
-              PopupMenuItem<void>(
-                onTap: () => _confirmDelete(context),
-                child: const Row(
-                  children: [
-                    Icon(Icons.delete, color: Colors.redAccent),
-                    SizedBox(width: 8),
-                    Text('삭제', style: TextStyle(color: Colors.redAccent)),
-                  ],
-                ),
+              hoverMenuItem(
+                icon: Icons.delete,
+                label: '삭제',
+                color: Colors.redAccent,
+                onPressed: () => _confirmDelete(context),
               ),
             // 소유자·관리자의 콘텐츠 관리 — 남의 댓글도 지울 수 있다(_canModerate 참고).
             if (_canModerate) ...[
-              const PopupMenuDivider(),
-              PopupMenuItem<void>(
-                onTap: () => _confirmDelete(context),
-                child: const Row(
-                  children: [
-                    Icon(Icons.shield_outlined, color: Colors.redAccent),
-                    SizedBox(width: 8),
-                    Text('삭제 (관리자)', style: TextStyle(color: Colors.redAccent)),
-                  ],
-                ),
+              hoverMenuDivider(),
+              hoverMenuItem(
+                icon: Icons.shield_outlined,
+                label: '삭제 (관리자)',
+                color: Colors.redAccent,
+                onPressed: () => _confirmDelete(context),
               ),
             ],
           ],

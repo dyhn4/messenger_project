@@ -248,20 +248,21 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  Future<void> _pickImage() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-    unawaited(_stageAndUpload(File(picked.path), true, picked.name));
-  }
-
+  /// 이미지든 아니든 이 버튼 하나로 고른다 — 이미지인지는 확장자로 판별해서(끌어다 놓기와
+  /// 같은 방식) 이미지면 썸네일을 만들어 미리보기로 보여준다. 여러 개를 한 번에 고를 수
+  /// 있고, 고른 파일마다 각자 스테이징+업로드를 시작한다(병렬로 올라가고, _send()가 그
+  /// 시점까지 쌓인 걸 한 번에 보낸다).
   Future<void> _pickFile() async {
-    final result = await FilePicker.pickFiles();
-    final picked = result?.files.single;
-    if (picked?.path == null) return;
-    unawaited(_stageAndUpload(File(picked!.path!), false, picked.name));
+    final result = await FilePicker.pickFiles(allowMultiple: true);
+    final picked = result?.files ?? const [];
+    if (picked.isEmpty || !mounted) return;
+    for (final file in picked) {
+      final path = file.path;
+      if (path == null) continue;
+      unawaited(
+        _stageAndUpload(File(path), looksLikeImagePath(path), file.name),
+      );
+    }
   }
 
   /// "문의하기" — 분류/제목/내용(+선택 첨부)을 입력받아 서버에 문의(티켓)를 만들고, 팀장이
@@ -308,7 +309,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   }
 
   /// 파일 탐색기에서 채팅 입력칸(또는 chat_panel.dart 전체)으로 끌어다 놓은 파일들을 추가한다
-  /// (chat_panel.dart의 DropTarget.onDragDone에서 호출). 클릭으로 고를 때(_pickImage/_pickFile)와
+  /// (chat_panel.dart의 DropTarget.onDragDone에서 호출). 클릭으로 고를 때(_pickFile)와
   /// 완전히 같은 방식으로 즉시 업로드가 시작된다 — 다만 "어느 버튼으로 골랐는지" 신호가 없어서
   /// 이미지 여부는 확장자로 판별한다(looksLikeImagePath).
   void addDroppedFiles(List<File> files) {
@@ -544,11 +545,6 @@ class ChatInputBarState extends State<ChatInputBar> {
                             : widget.onToggleStickerPicker,
                         tooltip: '이모티콘',
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.image_outlined),
-                      onPressed: _sending ? null : _pickImage,
-                      tooltip: '이미지 보내기',
                     ),
                     IconButton(
                       icon: const Icon(Icons.attach_file),

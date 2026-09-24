@@ -88,23 +88,58 @@ class FloatingHoverToolbar extends StatelessWidget {
   }
 }
 
-/// HoverToolbar 안에 들어가는 아이콘 버튼 하나. [menuItems]를 주면 눌렀을 때 팝업 메뉴가 뜨고,
-/// 안 주면 [onPressed]를 그대로 호출하는 일반 버튼이 된다. [visible]이 false면(예: 내 메시지가
-/// 아니라서 더보기가 의미 없을 때) 버튼은 숨기되 같은 크기의 빈 자리는 그대로 남겨서, 내 것과
-/// 상대방 것의 툴바가 항상 같은 크기로 보이게 한다.
+/// 툴바 "더보기" 메뉴의 항목 한 줄. 메시지·댓글·이미지 썸네일의 더보기 메뉴가 모두 이걸
+/// 써서 아이콘 크기(18)와 글자 크기가 같아진다. 폭은 따로 정하지 않는다 — 메뉴가 항목 중
+/// 가장 긴 글자에 맞춰(+오른쪽 여백 15) 알아서 넓어진다.
+Widget hoverMenuItem({
+  required IconData icon,
+  required String label,
+  required VoidCallback onPressed,
+  Color? color,
+}) => MenuItemButton(
+  leadingIcon: Icon(icon, size: 18, color: color),
+  onPressed: onPressed,
+  child: Padding(
+    padding: const EdgeInsets.only(right: 15),
+    child: Text(label, style: color == null ? null : TextStyle(color: color)),
+  ),
+);
+
+/// 더보기 메뉴의 구분선(예: 공용 항목과 수정/삭제 사이). 메뉴 폭은 항목들이 정하므로
+/// 여기서는 가로를 차지하지 않는다.
+Widget hoverMenuDivider() => const Divider(height: 8);
+
+/// HoverToolbar 안에 들어가는 아이콘 버튼 하나. [menuChildren]을 주면 눌렀을 때 메뉴가 뜨고
+/// ([hoverMenuItem]으로 만든 항목들), 안 주면 [onPressed]를 그대로 호출하는 일반 버튼이 된다.
+/// [visible]이 false면(예: 내 메시지가 아니라서 더보기가 의미 없을 때) 버튼은 숨기되 같은
+/// 크기의 빈 자리는 그대로 남겨서, 내 것과 상대방 것의 툴바가 항상 같은 크기로 보이게 한다.
 class HoverToolbarButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
+
+  /// 아이콘 색 — 켜진 상태를 보여줄 때만 준다(예: 즐겨찾기한 파일의 노란 별).
+  final Color? color;
   final VoidCallback? onPressed;
-  final List<PopupMenuEntry<void>>? menuItems;
+  final List<Widget>? menuChildren;
   final bool visible;
+
+  /// 진행 중이면 아이콘 대신 작은 진행 표시를 그리고 누를 수 없게 한다(예: 다운로드 중).
+  final bool busy;
+
+  /// 메뉴가 열리고 닫힐 때 알려준다 — 메뉴가 떠 있는 동안에는 툴바를 계속 보여줘야 해서
+  /// (마우스가 메뉴로 넘어가면 툴바에서 벗어난 것으로 잡히기 때문에) 부모가 이걸로 붙잡아 둔다.
+  final ValueChanged<bool>? onMenuOpenChanged;
+
   const HoverToolbarButton({
     super.key,
     required this.icon,
     required this.tooltip,
+    this.color,
     this.onPressed,
-    this.menuItems,
+    this.menuChildren,
     this.visible = true,
+    this.busy = false,
+    this.onMenuOpenChanged,
   });
 
   static const dimension = 30.0;
@@ -113,22 +148,38 @@ class HoverToolbarButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!visible) return const SizedBox(width: dimension, height: dimension);
 
-    // PopupMenuButton의 constraints는 버튼 자체가 아니라 펼쳐지는 메뉴의 크기라서, 버튼
-    // 크기는 SizedBox로 직접 강제해야 한다 — 안 그러면 Material 기본 최소 탭 영역(48x48)으로
-    // 커져서 옆의 IconButton(32x32)과 크기가 안 맞고 툴바 전체 높이도 예상보다 커진다.
-    final button = menuItems != null
-        ? PopupMenuButton<void>(
-            icon: Icon(icon, size: 18),
-            tooltip: tooltip,
-            padding: EdgeInsets.zero,
-            itemBuilder: (context) => menuItems!,
+    // 버튼 크기는 SizedBox로 직접 강제한다 — 안 그러면 Material 기본 최소 탭 영역(48x48)으로
+    // 커져서 툴바 전체 높이도 예상보다 커진다.
+    final iconWidget = busy
+        ? const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : Icon(icon, size: 18, color: color);
+    final items = menuChildren;
+    final button = items != null
+        // 팝업메뉴(PopupMenuButton) 대신 MenuAnchor를 쓴다 — 여는 애니메이션이 없어 바로
+        // 뜨고, 항목 모양도 이미지 썸네일의 더보기 메뉴와 같아진다.
+        ? MenuAnchor(
+            menuChildren: items,
+            onOpen: () => onMenuOpenChanged?.call(true),
+            onClose: () => onMenuOpenChanged?.call(false),
+            builder: (context, controller, _) => IconButton(
+              icon: iconWidget,
+              tooltip: tooltip,
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
+            ),
           )
         : IconButton(
-            icon: Icon(icon, size: 18),
+            icon: iconWidget,
             tooltip: tooltip,
             padding: EdgeInsets.zero,
             visualDensity: VisualDensity.compact,
-            onPressed: onPressed,
+            onPressed: busy ? null : onPressed,
           );
     return SizedBox(width: dimension, height: dimension, child: button);
   }

@@ -43,6 +43,9 @@ class UploadedAttachment {
   });
 }
 
+/// 임시 파일 이름이 겹치지 않게 하는 일련번호([RoomChatController._writeTempFile] 참고).
+int _tempFileSeq = 0;
+
 /// 방 하나의 메시지 목록/전송을 담당하는 컨트롤러. 방을 열 때 Session이 생성해서 캐싱한다.
 class RoomChatController extends ChangeNotifier {
   RoomChatController(this._session, this.room)
@@ -721,12 +724,16 @@ class RoomChatController extends ChangeNotifier {
 
   /// 암호화한 첨부 바이트를 기존 uploadFile(File)에 그대로 태우기 위한 임시 파일. 썸네일
   /// 업로드에도 재사용한다(평문 썸네일도 File 형태로 올려야 uploadFile을 그대로 쓸 수 있어서).
+  ///
+  /// 이름에 일련번호를 붙이는 이유: Windows는 시계 해상도가 낮아서 연속 호출이 **같은**
+  /// microsecondsSinceEpoch를 돌려준다. 시각만으로 이름을 만들면 사진 여러 장을 한 번에
+  /// 보낼 때 세 썸네일이 같은 파일을 서로 덮어써서, 올라간 썸네일이 전부 한 장의 이미지가
+  /// 되는 문제가 있었다.
   Future<File> _writeTempFile(Uint8List bytes) async {
     final dir = await getTemporaryDirectory();
-    final file = File(
-      '${dir.path}/upload_${DateTime.now().microsecondsSinceEpoch}.bin',
-    );
-    return file.writeAsBytes(bytes);
+    final name =
+        'upload_${DateTime.now().microsecondsSinceEpoch}_${pid}_${_tempFileSeq++}.bin';
+    return File('${dir.path}/$name').writeAsBytes(bytes);
   }
 
   @override

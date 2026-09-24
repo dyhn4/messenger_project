@@ -588,11 +588,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             session: widget.session,
             room: room,
             highlightMessageId: isSplit ? null : _highlightMessageId,
+            // 오른쪽 패널은 한 번에 하나만 — 댓글을 열면 열려 있던 다른 패널(파일 모아보기
+            // 등)은 닫아서 자리를 넘겨준다(반대로 그 패널들을 열면 댓글이 닫힌다).
             onOpenThread: (m) => setState(() {
               _threadMessage = m;
               _threadRoom = room;
               _searchOpen = false;
               _membersOpen = false;
+              _filesOpen = false;
+              _notificationsOpen = false;
             }),
           ),
         ),

@@ -82,17 +82,16 @@ class FileActions {
     }
   }
 
-  /// 원본 파일 보기 — 축소 미리보기가 아니라 원본을 OS 기본 프로그램으로 연다.
-  /// 비밀 대화는 서버의 파일이 암호문이라 임시 파일로 풀어서 연다.
+  /// 원본 파일 보기 — 원본을 다운로드 폴더에 받아두고, 그 파일을 PC 기본 프로그램(이미지면
+  /// 기본 이미지 앱)으로 연다. 다운로드 폴더를 아직 안 정했으면 임시 폴더에 받는다.
+  /// 브라우저로 URL을 여는 대신 파일로 받아서 여는 이유: 비밀 대화는 서버의 파일이 암호문
+  /// 이라 그냥 열면 못 보고, 평문 방도 브라우저가 아니라 기본 앱으로 열리는 게 자연스럽다.
   Future<void> openOriginal(BuildContext context) async {
     try {
-      if (attachmentKey == null) {
-        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-        return;
-      }
       final bytes = await _bytes();
-      final path =
-          '${Directory.systemTemp.path}${Platform.pathSeparator}$fileName';
+      final folder = session.settings.downloadFolder;
+      final dir = folder.isEmpty ? Directory.systemTemp.path : folder;
+      final path = '$dir${Platform.pathSeparator}$fileName';
       await File(path).writeAsBytes(bytes);
       await launchUrl(Uri.file(path), mode: LaunchMode.externalApplication);
     } catch (e) {

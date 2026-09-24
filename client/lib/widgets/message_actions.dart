@@ -11,6 +11,7 @@ import '../screens/message_share_screen.dart';
 import '../screens/project/project_forms.dart' show showNewTaskDialog;
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'hover_toolbar.dart' show hoverMenuItem;
 
 /// message_bubble.dart(실제 메시지)와 message_comments_card.dart(댓글)가 공용으로 쓰는
 /// 액션들 — 롱프레스 액션 시트(모바일)와 "더보기" 메뉴(PC) 양쪽에서 호출한다. 댓글은
@@ -342,7 +343,7 @@ void showMessageActionSheet(
 /// PC "더보기" 메뉴(PopupMenuButton)에 공유/복사/전달 항목을 채워 넣는다 — 비밀 대화면
 /// (showMessageActionSheet와 동일한 이유로) 공유/전달만 뺀다. 수정/삭제 등 호출부 전용
 /// 항목은 이 리스트 앞뒤에 이어 붙이면 된다.
-List<PopupMenuEntry<void>> messageActionMenuItems(
+List<Widget> messageActionMenuItems(
   BuildContext context, {
   required Session session,
   required Message message,
@@ -353,57 +354,41 @@ List<PopupMenuEntry<void>> messageActionMenuItems(
 
   return [
     if (!isSecretRoom)
-      PopupMenuItem<void>(
-        onTap: () => pushMessageShareScreen(
+      hoverMenuItem(
+        icon: Icons.share_outlined,
+        label: '메시지 공유',
+        onPressed: () => pushMessageShareScreen(
           context,
           session: session,
           message: message,
           senderDisplayName: senderDisplayName,
         ),
-        child: const Row(
-          children: [
-            Icon(Icons.share_outlined),
-            SizedBox(width: 8),
-            Text('메시지 공유'),
-          ],
-        ),
       ),
-    PopupMenuItem<void>(
-      onTap: () => copyMessageText(context, message),
-      child: const Row(
-        children: [Icon(Icons.copy_outlined), SizedBox(width: 8), Text('복사')],
-      ),
+    hoverMenuItem(
+      icon: Icons.copy_outlined,
+      label: '복사',
+      onPressed: () => copyMessageText(context, message),
     ),
     if (!isSecretRoom && session.canUseProjects)
-      PopupMenuItem<void>(
-        onTap: () => registerMessageAsTask(
+      hoverMenuItem(
+        icon: Icons.assignment_outlined,
+        label: '업무로 등록',
+        onPressed: () => registerMessageAsTask(
           context,
           session: session,
           message: message,
           senderDisplayName: senderDisplayName,
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.assignment_outlined),
-            SizedBox(width: 8),
-            Text('업무로 등록'),
-          ],
         ),
       ),
     if (!isSecretRoom)
-      PopupMenuItem<void>(
-        onTap: () => pushMessageForwardScreen(
+      hoverMenuItem(
+        icon: Icons.forward_outlined,
+        label: '메시지 전달',
+        onPressed: () => pushMessageForwardScreen(
           context,
           session: session,
           message: message,
           senderDisplayName: senderDisplayName,
-        ),
-        child: const Row(
-          children: [
-            Icon(Icons.forward_outlined),
-            SizedBox(width: 8),
-            Text('메시지 전달'),
-          ],
         ),
       ),
   ];

@@ -704,6 +704,25 @@ Windows 데스크톱 개발에는 지장 없습니다. `flutter doctor`가 Andro
 있습니다. `start ms-settings:developers`로 설정을 열어 **"개발자 모드"** 토글을 켜세요(관리자 권한
 확인 + 관련 구성 요소 설치로 몇 분 걸릴 수 있음). 켠 뒤 새 터미널에서 다시 실행하면 됩니다.
 
+**`LINK : fatal error LNK1168: ...client.exe을(를) 쓰기용으로 열 수 없습니다`** — 이전에
+`flutter run -d windows`로 띄워둔 앱이 아직 실행 중이면, 빌드가 그 `client.exe`를 새로 못 써서
+이 에러로 실패합니다. 떠 있는 앱 창을 닫거나(또는 작업 관리자에서 `client.exe` 프로세스를 종료)
+다시 빌드하면 됩니다. 터미널을 그냥 닫아버렸을 때(창은 닫혔는데 프로세스만 남는 경우)도 흔히
+겪습니다.
+
+**다른 PC에서 `git pull`로 받은 뒤 DB 관련 기능이 그대로인 경우** — `git pull`은
+`server/drizzle/*.sql` 마이그레이션 파일만 받아올 뿐, 이 PC의 DB에 자동으로 적용하지는
+않습니다. pull 받을 때마다 다음을 직접 실행해야 합니다.
+
+```powershell
+cd server
+npm run db:migrate
+```
+
+서버가 이미 떠 있었다면 pull 전 코드로 계속 실행 중인 상태이므로, 마이그레이션 적용 후 서버도
+재시작해야( `Ctrl+C` 후 `npm start`/`npm run dev`, 또는 pm2면 `npm run pm2:restart`) 새 코드가
+반영됩니다.
+
 **Android SDK를 나중에 추가로 설치하는 경우** — Android Studio 설치 프로그램(winget
 `Google.AndroidStudio` 등)으로 처음 설치한 뒤 Setup Wizard를 "Standard"로 진행해도, 아래 두 가지가
 빠져서 `flutter doctor --android-licenses`가 `Android sdkmanager not found`로 실패하는 경우가

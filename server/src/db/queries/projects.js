@@ -8,6 +8,7 @@ import {
   projectAutomations,
   projectNotes,
   projects,
+  taskActivities,
   taskChecklistItems,
   taskComments,
   taskTemplates,
@@ -467,6 +468,42 @@ export async function insertTaskComment(fields) {
 
 export function listTaskComments(taskId) {
   return db.select().from(taskComments).where(eq(taskComments.taskId, taskId)).orderBy(asc(taskComments.createdAt));
+}
+
+export async function findTaskCommentById(id) {
+  const [row] = await db.select().from(taskComments).where(eq(taskComments.id, id));
+  return row ?? null;
+}
+
+export async function updateTaskCommentText(id, text, textFormat = null) {
+  const [row] = await db
+    .update(taskComments)
+    .set({ text, textFormat, editedAt: new Date() })
+    .where(eq(taskComments.id, id))
+    .returning();
+  return row ?? null;
+}
+
+/** 댓글을 지운다 — 거기 달린 답글도 FK cascade로 같이 지워진다. */
+export async function deleteTaskComment(id) {
+  await db.delete(taskComments).where(eq(taskComments.id, id));
+}
+
+// ── 업무 기록 ───────────────────────────────────────────────────────────
+
+export async function insertTaskActivities(rows) {
+  if (rows.length === 0) return;
+  await db.insert(taskActivities).values(rows);
+}
+
+/** 기록 탭 — 최신이 위로. */
+export function listTaskActivities(taskId, limit = 200) {
+  return db
+    .select()
+    .from(taskActivities)
+    .where(eq(taskActivities.taskId, taskId))
+    .orderBy(desc(taskActivities.createdAt))
+    .limit(limit);
 }
 
 /** 대시보드 "최근 댓글" — 내가 참여 중인 프로젝트들의 업무 댓글을 최신순으로 몇 건만. */

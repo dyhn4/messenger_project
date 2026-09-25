@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:client/screens/project/project_detail_view.dart';
+import 'package:client/screens/project/task_views.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
@@ -42,6 +43,7 @@ Map<String, dynamic> _task(
 };
 
 void main() {
+  setUp(TaskListTable.resetRememberedWidths);
   testWidgets('프로젝트 보기: 대시보드·칸반(드래그)·리스트·간트·캘린더', (tester) async {
     tester.view.physicalSize = const Size(1300, 900);
     tester.view.devicePixelRatio = 1.0;
@@ -171,7 +173,8 @@ void main() {
     expect(find.text('전체 완료율'), findsNWidgets(2));
 
     await openTab('간트차트');
-    expect(find.text('업무'), findsWidgets);
+    // 상태별로 묶인 간트차트.
+    expect(find.text('상태 / 업무'), findsOneWidget);
     await tester.tap(find.text('주'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

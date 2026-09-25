@@ -20,6 +20,9 @@ void main() {
   final now = DateTime.now().millisecondsSinceEpoch;
   late List<({String method, String path, Map<String, dynamic>? body})> calls;
 
+  /// 업무 상세(GET /api/tasks/:id)를 몇 번 읽었는지.
+  var taskFetches = 0;
+
   Map<String, dynamic> task(
     String id,
     String title, {
@@ -60,6 +63,9 @@ void main() {
       token: 't',
       httpClient: MockClient((request) async {
         final path = request.url.path;
+        if (request.method == 'GET' && path.startsWith('/api/tasks/')) {
+          taskFetches++;
+        }
         if (request.method != 'GET') {
           calls.add((
             method: request.method,
@@ -183,7 +189,12 @@ void main() {
     return s;
   }
 
-  Future<void> pumpPanel(WidgetTester tester, {String taskId = '1001'}) async {
+  Future<void> pumpPanel(
+    WidgetTester tester, {
+    String taskId = '1001',
+    int reloadTick = 0,
+    Session? session,
+  }) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -191,12 +202,13 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: TaskDetailPanel(
-            session: buildSession(),
+            session: session ?? buildSession(),
             taskId: taskId,
             expanded: false,
             onToggleExpand: () {},
             onClose: () {},
             onOpenTask: (_) {},
+            reloadTick: reloadTick,
           ),
         ),
       ),
@@ -400,6 +412,17 @@ void main() {
       (c) => c.method == 'PATCH' && c.body!.containsKey('parentTaskId'),
     );
     expect(saved.body?['parentTaskId'], '1004');
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('패널: 뒤 화면에서 업무가 바뀌었다고 알리면(reloadTick) 다시 읽는다', (tester) async {
+    final session = buildSession();
+    await pumpPanel(tester, session: session);
+    final before = taskFetches;
+    await pumpPanel(tester, session: session, reloadTick: 1);
+    expect(taskFetches, greaterThan(before));
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

@@ -1,4 +1,5 @@
 import 'message.dart';
+import 'text_format.dart';
 
 /// 특정 메시지에 달린 댓글(스레드 답글) 한 건.
 class Comment {
@@ -11,6 +12,9 @@ class Comment {
 
   /// 수정하면 그 자리에서 바뀐다(RoomChatController.applyCommentEdit) — 그래서 non-final.
   String? text;
+
+  /// [text]에 걸린 글자 서식(굵게 등). 수정하면 같이 바뀐다.
+  List<TextFormatRun>? textFormat;
   final String? fileUrl; // 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다.
 
   /// message.dart와 동일 — 비밀 대화에서는 복호화한 뒤 원본 값으로 덮어쓰므로 non-final.
@@ -45,6 +49,7 @@ class Comment {
     required this.senderName,
     this.type = MessageType.text,
     this.text,
+    this.textFormat,
     this.fileUrl,
     this.fileName,
     this.fileSize,
@@ -75,6 +80,7 @@ class Comment {
           ? MessageType.sticker
           : MessageType.text,
       text: json['text'] as String?,
+      textFormat: parseTextFormat(json['textFormat']),
       fileUrl: json['fileUrl'] as String?,
       fileName: json['fileName'] as String?,
       fileSize: (json['fileSize'] as num?)?.toInt(),

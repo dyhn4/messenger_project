@@ -25,6 +25,7 @@ import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'widgets/update_banner.dart';
+import 'widgets/grab_cursors.dart';
 
 /// 앱이 완전히 종료된 상태에서 FCM이 도착하면 별도의(=Session이 없는) 격리된 isolate에서
 /// 이 함수가 새로 불린다 — 로그인 상태/소켓 등 앱의 나머지 상태에 전혀 접근할 수 없어서,
@@ -131,6 +132,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Windows엔 손(끌기) 모양 시스템 커서가 없어서 직접 만든다 — 메인 창·프로젝트 창 모두
+  // 이 main()을 타므로 여기서 한 번.
+  await GrabCursors.init();
   // "프로젝트" 창(project_window.dart)처럼 desktop_multi_window로 만든 서브 창도 똑같이
   // 이 main()을 처음부터 다시 탄다(엔진이 통째로 새로 생기므로) — 그래서 제일 먼저, 지금
   // 실행 중인 게 메인 창인지 서브 창인지부터 가른다. desktop_multi_window는 Windows/macOS/

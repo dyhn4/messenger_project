@@ -93,10 +93,12 @@ void main() {
     final fourth = tester.getRect(tiles.at(3));
     expect(third.top, closeTo(first.top, 1)); // 같은 줄
     expect(fourth.top, greaterThan(first.bottom)); // 다음 줄
-    // 칸은 정사각형(3열 한도 420px 안)이고 3장이 한 줄에 들어간다.
-    expect(first.width, closeTo(first.height, 1));
-    expect(first.height, lessThanOrEqualTo(chatImageMaxHeight(3) + 1));
+    // 3장이 한 줄에 들어가고(폭 650 안), 두 줄 전체 높이는 2줄 상한(300px) 안이다.
     expect(third.right, lessThanOrEqualTo(kChatImageMaxWidth + 1));
+    expect(
+      fourth.bottom - first.top,
+      lessThanOrEqualTo(chatImageMaxHeight(2) + 1),
+    );
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
@@ -123,17 +125,17 @@ void main() {
   testWidgets('썸네일에 마우스를 올리면 더보기 메뉴가 나온다', (tester) async {
     await pump(tester, [_image('a')], withMessage: true);
 
-    // 올리기 전에는 없다.
-    expect(find.byIcon(Icons.more_horiz), findsNothing);
+    // 올리기 전에는 없다(메시지 도구모음과 같은 ⋮ 더보기 버튼).
+    expect(find.byIcon(Icons.more_vert), findsNothing);
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(mouse.removePointer);
     await mouse.addPointer(location: Offset.zero);
     await mouse.moveTo(tester.getCenter(find.byType(ChatImageAttachments)));
     await tester.pump();
-    expect(find.byIcon(Icons.more_horiz), findsOneWidget);
+    expect(find.byIcon(Icons.more_vert), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.tap(find.byIcon(Icons.more_vert));
     await tester.pump();
     for (final label in ['파일 전달', '다운로드', '즐겨찾기', '원본 파일 보기']) {
       expect(find.text(label), findsOneWidget, reason: label);

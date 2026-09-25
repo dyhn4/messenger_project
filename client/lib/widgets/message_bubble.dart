@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -23,20 +22,10 @@ import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
 import 'message_actions.dart';
+import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
-
-/// 서버 linkPreview.js의 URL_REGEX(`/https?:\/\/[^\s<>"']+/i`)와 동일한 패턴 — 메시지 본문에서
-/// 링크 미리보기를 만드는 링크와 여기서 파랗게 표시되는 링크가 항상 일치하게 맞춘다.
-final _messageUrlRegex = RegExp(
-  r'''https?://[^\s<>"']+''',
-  caseSensitive: false,
-);
-
-/// 위 정규식과 마찬가지로 서버의 끝 문장부호 다듬기(`/[.,;:!?)\]}'"]+$/`)와 동일하다 — 링크
-/// 뒤에 곧바로 마침표/쉼표/괄호가 오면 그 부호는 링크에서 빼고 일반 글자로 남긴다.
-final _trailingPunctuationRegex = RegExp(r'''[.,;:!?)\]}'"]+$''');
 
 /// 메시지 한 줄: 아바타 + 보낸사람 이름 + (말풍선 + 시간). 항상 좌측 정렬이지만
 /// 내가 보낸 메시지는 말풍선 색을 다르게 해서 구분한다. 아바타/이름을 누르면 내 메시지는
@@ -53,7 +42,11 @@ class MessageBubble extends StatefulWidget {
   final bool highlighted; // 검색 결과에서 열었을 때 잠깐 노란색으로 표시(chat_panel.dart 참고).
   final void Function(Message message)?
   onOpenThread; // 댓글 아이콘을 눌렀을 때(chat_panel.dart 참고).
-  final Future<void> Function(String messageId, String text)?
+  final Future<void> Function(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+  })?
   onEdit; // "수정" 저장.
   final Future<void> Function(String messageId)? onDelete; // "삭제" 확인.
 
@@ -96,19 +89,8 @@ class _MessageBubbleState extends State<MessageBubble> {
   Timer? _hoverExitTimer;
   bool _editing = false;
   bool _savingEdit = false;
-  final _editController = TextEditingController();
-
-  /// 메시지 본문에 있는 링크를 파란 글자로 표시하고 탭하면 바로 열리게 하는 데 쓰는
-  /// TapGestureRecognizer들 — TextSpan.recognizer는 위젯이 알아서 정리해주지 않으므로,
-  /// 매 빌드마다 다시 만들기 전에 이전 것들을 직접 dispose해야 한다(_buildLinkifiedSpans 참고).
-  final List<TapGestureRecognizer> _linkRecognizers = [];
-
-  void _disposeLinkRecognizers() {
-    for (final r in _linkRecognizers) {
-      r.dispose();
-    }
-    _linkRecognizers.clear();
-  }
+  final _editController = RichTextEditingController();
+  final _editFocus = FocusNode();
 
   /// 툴바는 말풍선 아래에 Overlay로 띄운다(FloatingHoverToolbar 참고) — 일반 레이아웃
   /// 흐름이 아니라서 툴바가 떠도 아래 메시지들이 안 밀린다.
@@ -164,7 +146,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   void dispose() {
     _hoverExitTimer?.cancel();
     _editController.dispose();
-    _disposeLinkRecognizers();
+    _editFocus.dispose();
     super.dispose();
   }
 
@@ -184,10 +166,8 @@ class _MessageBubbleState extends State<MessageBubble> {
       );
       return;
     }
-    setState(() {
-      _editing = true;
-      _editController.text = widget.message.text ?? '';
-    });
+    setState(() => _editing = true);
+    _editController.load(widget.message.text ?? '', widget.message.textFormat);
     _syncToolbarPortal(); // 수정 중에는 툴바를 닫는다.
   }
 
@@ -197,11 +177,11 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Future<void> _saveEdit() async {
-    final text = _editController.text.trim();
+    final (:text, :format) = _editController.formatted();
     if (text.isEmpty) return;
     setState(() => _savingEdit = true);
     try {
-      await widget.onEdit!(widget.message.id, text);
+      await widget.onEdit!(widget.message.id, text, format: format);
       if (mounted) setState(() => _editing = false);
     } catch (e) {
       if (mounted) {
@@ -432,7 +412,11 @@ class _MessageBubbleState extends State<MessageBubble> {
                             if (message.type != MessageType.text &&
                                 message.type != MessageType.sticker &&
                                 (message.text?.isNotEmpty ?? false)) ...[
-                              Text(message.text!),
+                              FormattedText(
+                                message.text!,
+                                format: message.textFormat,
+                                linkColor: Colors.blue,
+                              ),
                               const SizedBox(height: 6),
                             ],
                             if (_editing)
@@ -691,15 +675,20 @@ class _MessageBubbleState extends State<MessageBubble> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
+        RichFormatToolbar(controller: _editController, focusNode: _editFocus),
+        RichFieldWrapper(
           controller: _editController,
-          autofocus: true,
-          maxLines: null,
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(),
+          child: TextField(
+            controller: _editController,
+            focusNode: _editFocus,
+            autofocus: true,
+            maxLines: null,
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (_) => _saveEdit(),
           ),
-          onSubmitted: (_) => _saveEdit(),
         ),
         const SizedBox(height: 4),
         Row(
@@ -728,49 +717,6 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
       ],
     );
-  }
-
-  /// 텍스트 안의 http(s) 링크만 파란 글자+밑줄로 바꾸고 탭하면 바로 열리게 한다 — 서버
-  /// linkPreview.js의 URL_REGEX/끝 문장부호 다듬기 규칙과 맞춰서, 메시지에 링크 미리보기
-  /// 카드가 뜨는 링크와 여기서 파랗게 표시되는 링크가 항상 일치하게 한다.
-  List<InlineSpan> _buildLinkifiedSpans(
-    BuildContext context,
-    String text,
-    TextStyle baseStyle,
-  ) {
-    _disposeLinkRecognizers();
-    final linkStyle = baseStyle.copyWith(
-      color: Colors.blue,
-      decoration: TextDecoration.underline,
-    );
-    final spans = <InlineSpan>[];
-    var last = 0;
-    for (final match in _messageUrlRegex.allMatches(text)) {
-      var url = match.group(0)!;
-      var end = match.end;
-      final trailing = _trailingPunctuationRegex.firstMatch(url);
-      if (trailing != null) {
-        url = url.substring(0, trailing.start);
-        end -= trailing.group(0)!.length;
-      }
-      if (url.isEmpty) continue;
-      if (match.start > last) {
-        spans.add(
-          TextSpan(text: text.substring(last, match.start), style: baseStyle),
-        );
-      }
-      final recognizer = TapGestureRecognizer()
-        ..onTap = () =>
-            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      _linkRecognizers.add(recognizer);
-      spans.add(TextSpan(text: url, style: linkStyle, recognizer: recognizer));
-      last = end;
-    }
-    if (last < text.length) {
-      spans.add(TextSpan(text: text.substring(last), style: baseStyle));
-    }
-    if (spans.isEmpty) spans.add(TextSpan(text: text, style: baseStyle));
-    return spans;
   }
 
   Widget _buildContent(BuildContext context) {
@@ -822,14 +768,13 @@ class _MessageBubbleState extends State<MessageBubble> {
         // Windows(마우스)에서는 텍스트 선택이 롱프레스가 아니라 클릭+드래그로 이뤄져서
         // onLongPress와 경합하지 않으므로, 마우스 호버 시 커서가 I-beam으로 바뀌고 드래그로
         // 바로 선택할 수 있도록 SelectableText를 쓴다.
-        final spans = _buildLinkifiedSpans(
-          context,
+        return FormattedText(
           message.text ?? '',
-          Theme.of(context).textTheme.bodyMedium ?? const TextStyle(),
+          format: message.textFormat,
+          style: Theme.of(context).textTheme.bodyMedium,
+          linkColor: Colors.blue,
+          selectable: Platform.isWindows,
         );
-        return Platform.isWindows
-            ? SelectableText.rich(TextSpan(children: spans))
-            : Text.rich(TextSpan(children: spans));
       case MessageType.sticker:
         final sticker = findStickerById(message.text ?? '');
         return Text(

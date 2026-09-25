@@ -34,28 +34,57 @@ Future<ProjectMenuResult?> showProjectMenuDialog(
 }
 
 /// 팀원 중 아직 이 프로젝트에 없는 정회원 이상을 골라 추가한다. 추가했으면 true.
+/// [asOwner]면 고른 사람을 넣은 뒤 바로 담당자로 올린다(공개 프로젝트의 "담당자 추가").
 Future<bool> addMembersToProject(
   BuildContext context,
   Session session,
-  Project project,
-) async {
+  Project project, {
+  bool asOwner = false,
+}) async {
   final all = await session.fetchTeamMembers();
   if (!context.mounted) return false;
   final existing = project.members.map((m) => m.id).toSet();
+  // 담당자 추가는 이미 프로젝트에 들어와 있는 일반 멤버도 담당자로 올릴 수 있어야 한다
+  // (공개 프로젝트는 멤버 목록을 따로 보여주지 않아서, 참여한 사람도 여기서 골라야 한다).
+  // 그래서 이미 담당자인 사람만 뺀다.
+  final excluded = asOwner
+      ? {
+          for (final e in project.memberRoles.entries)
+            if (e.value == 'owner') e.key,
+        }
+      : existing;
   final candidates = all
-      .where((u) => !existing.contains(u.id) && u.role != 'guest')
+      .where((u) => !excluded.contains(u.id) && u.role != 'guest')
       .toList();
   if (candidates.isEmpty) {
-    showAppToast(context, '추가할 수 있는 팀원이 없습니다. (준회원은 프로젝트에 참여할 수 없습니다.)');
+    showAppToast(
+      context,
+      asOwner
+          ? '담당자로 지정할 수 있는 팀원이 없습니다. (준회원은 담당자가 될 수 없습니다.)'
+          : '추가할 수 있는 팀원이 없습니다. (준회원은 프로젝트에 참여할 수 없습니다.)',
+    );
     return false;
   }
   final picked = await showDialog<List<String>>(
     context: context,
-    builder: (_) => _MemberPickDialog(session: session, candidates: candidates),
+    builder: (_) => _MemberPickDialog(
+      session: session,
+      candidates: candidates,
+      title: asOwner ? '담당자 추가' : '멤버 초대하기',
+    ),
   );
   if (picked == null || picked.isEmpty || !context.mounted) return false;
   try {
-    await session.api!.addProjectMembers(project.id, picked);
+    // 이미 멤버인 사람은 다시 추가하지 않고 역할만 바꾼다.
+    final newcomers = picked.where((id) => !existing.contains(id)).toList();
+    if (newcomers.isNotEmpty) {
+      await session.api!.addProjectMembers(project.id, newcomers);
+    }
+    if (asOwner) {
+      for (final id in picked) {
+        await session.api!.setProjectMemberRole(project.id, id, 'owner');
+      }
+    }
     return true;
   } catch (e) {
     if (context.mounted) showAppToast(context, '구성원을 추가하지 못했습니다: $e');
@@ -745,11 +774,64 @@ class _MembersPaneState extends State<_MembersPane> {
     }
   }
 
+  /// 공개 프로젝트의 "담당자 추가" — 고른 사람을 프로젝트에 넣고 바로 담당자로 올린다.
+  Future<void> _addOwner() async {
+    if (await addMembersToProject(
+      context,
+      widget.session,
+      project,
+      asOwner: true,
+    )) {
+      await widget.onChanged();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final members = _of('member', _leftQuery);
     final owners = _of('owner', _rightQuery);
+    // 공개 프로젝트는 팀의 모든 멤버가 접근할 수 있어서 "프로젝트 멤버" 목록 자체가 의미가
+    // 없다 — 담당자만 지정하면 되고, 인원 제한도 없다.
+    if (project.isPublic) {
+      return _Pane(
+        title: '프로젝트 담당자',
+        description: '프로젝트에 담당자를 지정합니다.',
+        scrollable: false,
+        action: FilledButton.icon(
+          onPressed: _addOwner,
+          icon: const Icon(Icons.person_add_alt, size: 18),
+          label: const Text('담당자 추가'),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '공개 프로젝트라 모든 멤버가 프로젝트에 접근할 수 있으므로, 별도의 멤버 목록은 '
+              '표시되지 않으며 프로젝트 담당자 수에는 제한이 없습니다.',
+              style: TextStyle(color: theme.hintColor, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: _MemberList(
+                title: '프로젝트 담당자',
+                role: 'owner',
+                users: owners,
+                session: widget.session,
+                checked: const {},
+                selectable: false,
+                roleOf: _roleOf,
+                onQuery: (v) => setState(() => _rightQuery = v),
+                onToggle: (_, _) {},
+                onDropped: (_) {},
+                onRemove: _remove,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final members = _of('member', _leftQuery);
     final checkedMembers = members
         .where((m) => _checked.contains(m.id))
         .map((m) => m.id)
@@ -860,6 +942,10 @@ class _MemberList extends StatefulWidget {
   final void Function(List<String> userIds) onDropped;
   final void Function(AppUser user) onRemove;
 
+  /// 목록이 하나뿐일 때(공개 프로젝트의 담당자 목록)는 역할을 옮길 상대가 없어서 체크상자와
+  /// 끌어다 놓기를 빼고 이름만 보여준다.
+  final bool selectable;
+
   const _MemberList({
     required this.title,
     required this.role,
@@ -871,6 +957,7 @@ class _MemberList extends StatefulWidget {
     required this.onToggle,
     required this.onDropped,
     required this.onRemove,
+    this.selectable = true,
   });
 
   @override
@@ -893,10 +980,13 @@ class _MemberListState extends State<_MemberList> {
       color: Colors.transparent,
       child: Row(
         children: [
-          Checkbox(
-            value: widget.checked.contains(user.id),
-            onChanged: (v) => widget.onToggle(user.id, v == true),
-          ),
+          if (widget.selectable)
+            Checkbox(
+              value: widget.checked.contains(user.id),
+              onChanged: (v) => widget.onToggle(user.id, v == true),
+            )
+          else
+            const SizedBox(width: 8),
           UserAvatar(
             user: user,
             resolveUrl: widget.session.resolveUrl,
@@ -925,6 +1015,12 @@ class _MemberListState extends State<_MemberList> {
         ],
       ),
     );
+    if (!widget.selectable) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: card,
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Draggable<String>(
@@ -996,7 +1092,9 @@ class _MemberListState extends State<_MemberList> {
                 child: widget.users.isEmpty
                     ? Center(
                         child: Text(
-                          '없습니다. 여기로 끌어다 놓으세요.',
+                          widget.selectable
+                              ? '없습니다. 여기로 끌어다 놓으세요.'
+                              : '아직 담당자가 없습니다.',
                           style: TextStyle(
                             color: theme.hintColor,
                             fontSize: 12,
@@ -1200,7 +1298,14 @@ class _DangerPaneState extends State<_DangerPane> {
 class _MemberPickDialog extends StatefulWidget {
   final Session session;
   final List<AppUser> candidates;
-  const _MemberPickDialog({required this.session, required this.candidates});
+
+  /// 대화상자 제목 — 멤버 초대와 담당자 추가가 같은 고르기 화면을 쓴다.
+  final String title;
+  const _MemberPickDialog({
+    required this.session,
+    required this.candidates,
+    required this.title,
+  });
 
   @override
   State<_MemberPickDialog> createState() => _MemberPickDialogState();
@@ -1219,7 +1324,7 @@ class _MemberPickDialogState extends State<_MemberPickDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('멤버 초대하기'),
+      title: Text(widget.title),
       content: SizedBox(
         width: 360,
         height: 360,

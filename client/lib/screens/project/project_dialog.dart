@@ -67,6 +67,9 @@ class _ProjectDialogState extends State<ProjectDialog> {
   String? _openTaskId;
   bool _taskExpanded = false;
 
+  /// 뒤 화면에서 업무를 고치면 올린다 — 열린 업무 패널이 다시 읽는다(TaskPanelScope.tasksChanged).
+  int _panelReloadTick = 0;
+
   void _openTask(String taskId) => setState(() => _openTaskId = taskId);
 
   ProjectView _view = ProjectView.home;
@@ -353,10 +356,15 @@ class _ProjectDialogState extends State<ProjectDialog> {
       taskId: taskId,
       expanded: _taskExpanded,
       onToggleExpand: () => setState(() => _taskExpanded = !_taskExpanded),
-      onClose: () => setState(() => _openTaskId = null),
+      // 닫으면 크게 보기도 풀어 둔다 — 다음에 업무를 누르면 다시 옆 패널로 열린다.
+      onClose: () => setState(() {
+        _openTaskId = null;
+        _taskExpanded = false;
+      }),
       onOpenTask: _openTask,
       // 업무를 고치면 뒤에 있는 목록·대시보드도 같이 다시 읽는다.
       onChanged: () => setState(() => _reloadTick++),
+      reloadTick: _panelReloadTick,
     );
   }
 
@@ -374,13 +382,22 @@ class _ProjectDialogState extends State<ProjectDialog> {
           ? constraints.maxWidth
           : constraints.maxWidth - kTaskPanelWidth - 1;
       final body = _buildBodyRow(context, bodyWidth, asContent ? panel : null);
-      if (panel == null || asContent) return body;
+      final side = panel != null && !asContent;
+      // 패널이 있든 없든 본문은 늘 같은 자리(Row → Expanded → TaskPanelInset)에 둔다 —
+      // 구조가 바뀌면 본문 화면이 새로 만들어져서 보던 상태(간트차트 축척 등)가 초기화된다.
       return Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: body),
-          const VerticalDivider(width: 1),
-          SizedBox(width: kTaskPanelWidth, child: panel),
+          Expanded(
+            child: TaskPanelInset(
+              width: side ? kTaskPanelWidth + 1 : 0,
+              child: body,
+            ),
+          ),
+          if (side) ...[
+            const VerticalDivider(width: 1),
+            SizedBox(width: kTaskPanelWidth, child: panel),
+          ],
         ],
       );
     },
@@ -390,6 +407,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
   Widget build(BuildContext context) {
     final content = TaskPanelScope(
       openTask: _openTask,
+      tasksChanged: () => setState(() => _panelReloadTick++),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -468,7 +486,6 @@ class _ProjectDialogState extends State<ProjectDialog> {
           session: widget.session,
           teamId: teamId,
           reloadTick: _reloadTick,
-          narrow: narrow,
         );
       case ProjectView.project:
         final id = _projectId;

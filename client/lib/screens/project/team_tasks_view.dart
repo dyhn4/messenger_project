@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import 'project_forms.dart';
-import 'project_views.dart';
+import 'gantt_chart_view.dart';
 import 'task_views.dart';
 
 /// 사이드바 "캘린더" / "간트차트" — 내가 참여 중인 모든 프로젝트의 업무를 한 화면에서 본다
@@ -87,19 +87,32 @@ class _TeamTasksViewState extends State<TeamTasksView> {
               const SizedBox(height: 4),
               Text(
                 widget.gantt
-                    ? '참여 중인 모든 프로젝트의 업무 일정을 타임라인으로 봅니다.'
+                    ? '프로젝트별 업무 일정을 확인합니다. 막대를 드래그하면 일정을 수정할 수 있습니다.'
                     : '참여 중인 모든 프로젝트의 업무 일정을 날짜별로 봅니다.',
                 style: TextStyle(color: hint),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        const Divider(height: 1),
+        if (!widget.gantt) ...[
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+        ],
         Expanded(
           child: widget.gantt
-              ? TaskGanttView(tasks: tasks, onOpen: _openTask)
-              : TaskCalendarView(tasks: tasks, onOpen: _openTask),
+              ? GanttChartView(
+                  session: widget.session,
+                  teamId: widget.teamId,
+                  prefsKey: 'team',
+                  tasks: tasks,
+                  onOpen: _openTask,
+                  onChanged: _load,
+                )
+              : TaskCalendarView(
+                  tasks: tasks,
+                  onOpen: _openTask,
+                  session: widget.session,
+                ),
         ),
       ],
     );

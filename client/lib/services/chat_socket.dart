@@ -8,6 +8,7 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/team.dart';
+import '../models/text_format.dart';
 import 'pinned_tls.dart';
 
 /// room:read 브로드캐스트 한 건. 누가(userId) 언제(lastReadAt) 어느 방(roomId)을 읽었는지.
@@ -835,6 +836,9 @@ class ChatSocket {
     required String roomId,
     required String type,
     String? text,
+
+    /// [text]의 글자 서식(rich_text_format.dart) — 비밀 대화는 서버가 받지 않는다.
+    List<TextFormatRun>? textFormat,
     String? fileUrl,
     String? fileName,
     int? fileSize,
@@ -866,6 +870,7 @@ class ChatSocket {
         'roomId': roomId,
         'type': type,
         'text': ?text,
+        'textFormat': ?textFormatToJson(textFormat),
         'fileUrl': ?fileUrl,
         'fileName': ?fileName,
         'fileSize': ?fileSize,

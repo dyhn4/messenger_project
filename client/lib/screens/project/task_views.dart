@@ -9,6 +9,7 @@ import '../../widgets/app_toast.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/date_drop_calendar.dart';
 import '../../widgets/user_avatar.dart';
+import 'task_detail_panel.dart' show TaskPanelInset, TaskPanelScope;
 
 const kWeekdayLabels = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -92,11 +93,6 @@ class TaskListTable extends StatefulWidget {
   /// 배지로 유형·우선순위·상태를 바꿨을 때 — 부른 쪽이 목록을 다시 읽는다.
   final VoidCallback? onChanged;
 
-  /// 창이 좁아(프로젝트 창 기준 kProjectNarrowBreakpoint 이하) 열을 다 늘어놓을 수 없을 때.
-  /// 이 값은 부르는 쪽이 **창 폭**을 보고 정한다 — 사이드바가 접히면서 내용 칸이 오히려
-  /// 넓어지기 때문에, 표가 자기 칸 폭만 보고 판단하면 800px 근처에서 거꾸로 뒤집힌다.
-  final bool narrow;
-
   const TaskListTable({
     super.key,
     required this.tasks,
@@ -107,11 +103,15 @@ class TaskListTable extends StatefulWidget {
     this.fields = const [],
     this.readOnly = false,
     this.onChanged,
-    this.narrow = false,
   });
 
   @override
   State<TaskListTable> createState() => _TaskListTableState();
+
+  /// 기억해 둔 "업무" 열 폭을 지운다 — 테스트끼리 값이 이어지지 않게.
+  @visibleForTesting
+  static void resetRememberedWidths() =>
+      _TaskListTableState._titleWidths.clear();
 }
 
 /// 부모 바로 아래에 그 하위 업무가 오도록 줄 순서를 다시 짠다. 정렬·필터 때문에 부모가
@@ -138,8 +138,30 @@ List<({Task task, bool indented})> arrangeWithSubtasks(List<Task> tasks) {
 }
 
 class _TaskListTableState extends State<TaskListTable> {
-  /// 사용자가 구분선을 끌어서 정한 "업무" 열 폭 — null이면 남는 자리를 다 쓴다(기본).
-  double? _titleW;
+  /// "업무" 열 폭 — 표("내 업무" / 프로젝트 리스트)마다 하나씩, 표 바깥에 기억해 둔다.
+  /// 처음 한 번 창 폭에 맞춰 정하고, 그 뒤로는 구분선을 끌 때만 바뀐다 — 업무 패널이 열리거나
+  /// 창이 줄어도(그때 표가 새로 만들어져도) 구분선이 제자리에 있게 하려는 것이다.
+  static final _titleWidths = <bool, double>{};
+
+  double? get _titleW => _titleWidths[widget.members != null];
+  set _titleW(double? w) => w == null
+      ? _titleWidths.remove(widget.members != null)
+      : _titleWidths[widget.members != null] = w;
+
+  /// 표의 가로 스크롤 — 스크롤바에 직접 물려야 막대를 끌어 움직일 수 있다(데스크톱에서
+  /// 가로 스크롤 뷰는 기본 컨트롤러가 붙지 않는다).
+  final _hScroll = ScrollController();
+
+  /// 표 안의 세로 목록 — 세로 스크롤바를 표 오른쪽 끝이 아니라 **보이는 영역**의 오른쪽 끝에
+  /// 그리려고 바깥으로 꺼내 쓴다(표가 가로로 넘치거나 업무 패널 뒤로 밀리면 표 끝이 안 보인다).
+  final _vScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _hScroll.dispose();
+    _vScroll.dispose();
+    super.dispose();
+  }
 
   final _optionsCache = <String, _ProjectOptions>{};
 
@@ -161,11 +183,12 @@ class _TaskListTableState extends State<TaskListTable> {
     return options;
   }
 
-  /// 배지에서 고른 값을 서버에 반영하고 목록을 다시 읽는다.
+  /// 배지에서 고른 값을 서버에 반영하고 목록을 다시 읽는다(열린 업무 패널도).
   Future<void> _apply(Future<void> Function() save) async {
     try {
       await save();
       widget.onChanged?.call();
+      if (mounted) TaskPanelScope.notifyChanged(context);
     } catch (e) {
       if (mounted) showAppToast(context, '바꾸지 못했습니다: $e');
     }
@@ -183,60 +206,98 @@ class _TaskListTableState extends State<TaskListTable> {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 좁은 창에서는 열을 다 보여줄 자리가 없다 — 업무와 상태만 남긴 목록으로 바꾼다.
-        if (widget.narrow) {
-          return _NarrowTaskList(
-            tasks: widget.tasks,
-            onOpen: widget.onOpen,
-            readOnly: widget.readOnly,
-            optionsFor: _optionsFor,
-            apply: _apply,
-            session: widget.session,
-          );
-        }
-        // "업무" 뒤에 오는 열의 개수(유형·우선순위·상태·시작일·마감일·담당자 + 사용자 정의 필드).
-        final others = _TaskTable._fixedColumns + widget.fields.length;
+        // "업무" 뒤에 오는 열의 개수(유형·우선순위·상태·시작일·마감일·사람 열 + 사용자 정의 필드).
+        final others =
+            _TaskTable.fixedColumns(withMembers: widget.members != null) +
+            widget.fields.length;
         // 가로 여백(24+24)과 표 테두리(1+1)를 뺀, 표 내용이 실제로 쓸 수 있는 폭.
         final available = constraints.maxWidth - 48 - 2;
-        // 표 전체 폭은 칸에 맞춘다(자리가 모자랄 때만 최소 폭까지 버티고 가로 스크롤).
-        // 구분선을 끌어도 이 값은 그대로라, 표의 오른쪽 끝은 움직이지 않는다.
-        final tableW = math.max(
-          available,
-          _TaskTable._minTitleW + _TaskTable._minOtherW * others,
+        // 화면에 들어오게 맞출 열 수. 프로젝트 리스트에서 업무 패널이 옆에 열려 있으면
+        // 담당자 열까지만 맞추고, 그 뒤(생성자·생성일·사용자 정의 필드)는 패널 뒤로 밀어
+        // 둔다 — 패널이 표를 덮은 것처럼 보이고, 가로 스크롤로 볼 수 있다.
+        final panelOpen = TaskPanelInset.of(context) > 0;
+        final coverTrailing = widget.members != null && panelOpen;
+        final fitCols = coverTrailing
+            ? _TaskTable.fixedColumns(withMembers: false)
+            : others;
+        // "업무" 열은 구분선으로 넓힐 수 있다. 창이 좁아도 최소한 이만큼은 넓힐 수 있게 하되
+        // (예전엔 좁은 창에서 최소=최대가 돼 구분선이 안 움직였다), 오른쪽 칸이 적어도 한 칸은
+        // 보이게 남긴다.
+        final maxTitleW = math.max(
+          _TaskTable._minTitleW,
+          math.min(
+            math.max(
+              available - _TaskTable._minOtherW * fitCols,
+              _TaskTable._minTitleW + 280,
+            ),
+            available - _TaskTable._minOtherW,
+          ),
         );
-        final titleW =
-            (_titleW ?? math.max(_TaskTable._minTitleW, tableW * 0.35)).clamp(
-              _TaskTable._minTitleW,
-              tableW - _TaskTable._minOtherW * others,
-            );
+        // 처음엔 창 폭의 35%(맞출 열들이 최소 폭으로 다 들어갈 만큼까지)로 정해 두고 기억한다.
+        final remembered = _titleW ??= math.max(
+          _TaskTable._minTitleW,
+          math.min(
+            available * 0.35,
+            available - _TaskTable._minOtherW * fitCols,
+          ),
+        );
+        // 기억한 폭을 그대로 쓴다. 창이 아주 좁아져 오른쪽 칸이 한 칸도 안 보일 때만 그만큼
+        // 잠깐 줄인다(기억한 값은 그대로라 창을 다시 넓히면 원래 자리로 돌아온다).
+        final titleW = math.max(
+          math.min(40.0, available),
+          math.min(remembered, available - _TaskTable._minOtherW),
+        );
         // 나머지 열은 남는 자리를 똑같이 나눠 갖는다 — 넓은 창에서 고르게 벌어진다.
-        final otherW = (tableW - titleW) / others;
-        return Scrollbar(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
-            child: SizedBox(
-              // 표 테두리(좌우 1px)만큼 더 잡아야 안쪽 내용 폭이 정확히 tableW가 된다.
-              width: tableW + 2,
-              height: constraints.maxHeight - 36,
-              child: _TaskTable(
-                tasks: widget.tasks,
-                session: widget.session,
-                onOpen: widget.onOpen,
-                members: widget.members,
-                fields: widget.fields,
-                readOnly: widget.readOnly,
-                titleW: titleW,
-                otherW: otherW,
-                onTitleWidthTo: (x) => setState(
-                  () => _titleW = x.clamp(
-                    _TaskTable._minTitleW,
-                    tableW - _TaskTable._minOtherW * others,
+        final otherW = math.max(
+          _TaskTable._minOtherW,
+          (available - titleW) / fitCols,
+        );
+        // "업무" 열 오른쪽 칸들의 전체 폭과 보이는 폭 — 넘치면 표 아래 스크롤 줄로 그 칸들만
+        // 좌우로 움직인다("업무" 열은 제자리).
+        final rightW = otherW * others;
+        final rightVisibleW = available - titleW;
+        final overflow = rightW > rightVisibleW + 0.5;
+        return MutedScrollbar(
+          controller: _vScroll,
+          notificationPredicate: (n) => n.metrics.axis == Axis.vertical,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(24, 16, 24, overflow ? 6 : 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _TaskTable(
+                    tasks: widget.tasks,
+                    session: widget.session,
+                    onOpen: widget.onOpen,
+                    members: widget.members,
+                    fields: widget.fields,
+                    readOnly: widget.readOnly,
+                    titleW: titleW,
+                    otherW: otherW,
+                    onTitleWidthTo: (x) => setState(
+                      () => _titleW = x.clamp(_TaskTable._minTitleW, maxTitleW),
+                    ),
+                    verticalController: _vScroll,
+                    horizontalController: _hScroll,
+                    optionsFor: _optionsFor,
+                    apply: _apply,
                   ),
                 ),
-                optionsFor: _optionsFor,
-                apply: _apply,
-              ),
+                if (overflow)
+                  Padding(
+                    // 표 왼쪽 테두리(1) + "업무" 열 폭만큼 들여서 오른쪽 칸 구간 아래에만 둔다.
+                    padding: EdgeInsets.only(left: titleW + 1, right: 1),
+                    child: MutedScrollbar(
+                      controller: _hScroll,
+                      child: SingleChildScrollView(
+                        controller: _hScroll,
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(width: rightW, height: 14),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
         );
@@ -253,7 +314,11 @@ class TaskCalendarView extends StatefulWidget {
     super.key,
     required this.tasks,
     required this.onOpen,
+    this.session,
   });
+
+  /// 일별 목록의 담당자 사진 주소를 풀 때 쓴다(없으면 이니셜로만).
+  final Session? session;
 
   @override
   State<TaskCalendarView> createState() => _TaskCalendarViewState();
@@ -420,8 +485,17 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
         final panel = _DayPanel(
           date: _selected,
           tasks: selectedTasks,
+          session: widget.session,
           onOpen: _openTask,
         );
+        // 업무 패널이 옆에 열려 있으면 일별 목록 자리는 그 패널이 덮는다 — 목록은 빼고
+        // 달력만 남긴다(패널을 닫으면 다시 나온다).
+        if (TaskPanelInset.of(context) > 0) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+            child: grid,
+          );
+        }
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
@@ -438,7 +512,7 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
                   children: [
                     Expanded(child: grid),
                     const SizedBox(width: 16),
-                    SizedBox(width: 260, child: panel),
+                    SizedBox(width: 300, child: panel),
                   ],
                 ),
         );
@@ -448,6 +522,14 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
 }
 
 // ───────────────────────── 리스트 표 ─────────────────────────
+
+/// 리스트 표의 가로·세로 구분선 색 — 테마 기본 구분선(dividerColor)은 거의 안 보일 만큼
+/// 옅어서, 칸 경계가 드러나도록 회색을 쓴다(어두운 테마에서도 같은 회색으로 보이게 투명도만
+/// 조절한다).
+Color _tableGridLine(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? Colors.grey.withValues(alpha: 0.45)
+    : Colors.grey.shade400;
 
 class _TaskTable extends StatelessWidget {
   final List<Task> tasks;
@@ -463,6 +545,12 @@ class _TaskTable extends StatelessWidget {
   final double otherW;
   final ValueChanged<double> onTitleWidthTo;
 
+  /// 세로 목록의 컨트롤러 — 스크롤바는 바깥(TaskListTable)이 그린다.
+  final ScrollController verticalController;
+
+  /// "업무" 열 오른쪽 칸들의 가로 위치 — 머리글과 모든 줄이 이걸 따라 함께 움직인다.
+  final ScrollController horizontalController;
+
   /// 구분선 손잡이의 절반 폭 — 얇은 선만으론 잡기 어려워서 좌우로 조금 넓게 잡는다.
   static const _handleHalf = 5.0;
 
@@ -476,6 +564,8 @@ class _TaskTable extends StatelessWidget {
     required this.titleW,
     required this.otherW,
     required this.onTitleWidthTo,
+    required this.verticalController,
+    required this.horizontalController,
     required this.optionsFor,
     required this.apply,
     this.readOnly = false,
@@ -483,8 +573,9 @@ class _TaskTable extends StatelessWidget {
     this.fields = const [],
   });
 
-  /// "업무" 뒤에 늘 오는 열: 유형·우선순위·상태·시작일·마감일·담당자(생성자).
-  static const _fixedColumns = 6;
+  /// "업무" 뒤에 늘 오는 열의 개수: 유형·우선순위·상태·시작일·마감일 + 사람 열.
+  /// 사람 열은 프로젝트 "리스트"([members]가 있을 때)면 담당자·생성자·생성일, "내 업무"면 생성자.
+  static int fixedColumns({required bool withMembers}) => withMembers ? 8 : 6;
 
   /// 더 줄일 수 없는 폭 — 여기까지 좁아지면 그 아래로는 가로 스크롤로 넘긴다.
   static const _minTitleW = 200.0;
@@ -493,7 +584,8 @@ class _TaskTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    final border = Theme.of(context).dividerColor;
+    // 표의 가로/세로 구분선 — 테마 기본 구분선 색은 너무 옅어서 칸 경계가 잘 안 보인다.
+    final border = _tableGridLine(context);
     final rows = arrangeWithSubtasks(tasks);
     Widget head(String text, {double? width}) {
       final child = Text(
@@ -506,7 +598,8 @@ class _TaskTable extends StatelessWidget {
         ),
       );
       return width == null
-          ? Expanded(
+          ? SizedBox(
+              width: titleW,
               child: Padding(
                 padding: const EdgeInsets.only(left: 16),
                 child: child,
@@ -531,33 +624,60 @@ class _TaskTable extends StatelessWidget {
                 child: Row(
                   children: [
                     head('업무'),
-                    head('유형', width: otherW),
-                    head('우선순위', width: otherW),
-                    head('상태', width: otherW),
-                    head('시작일', width: otherW),
-                    head('마감일', width: otherW),
-                    head(members == null ? '생성자' : '담당자', width: otherW),
-                    for (final f in fields) head(f.name, width: otherW),
+                    Expanded(
+                      child: _HScrollWindow(
+                        controller: horizontalController,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            head('유형', width: otherW),
+                            head('우선순위', width: otherW),
+                            head('상태', width: otherW),
+                            head('시작일', width: otherW),
+                            head('마감일', width: otherW),
+                            if (members != null) ...[
+                              head('담당자', width: otherW),
+                              head('생성자', width: otherW),
+                              head('생성일', width: otherW),
+                            ] else
+                              head('생성자', width: otherW),
+                            for (final f in fields) head(f.name, width: otherW),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
               Expanded(
-                child: MutedScrollbar(
-                  child: ListView.separated(
+                // 스크롤바는 바깥(TaskListTable)에서 보이는 영역 끝에 그린다 — 여기서는 끈다.
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(
+                    context,
+                  ).copyWith(scrollbars: false),
+                  // 줄 사이가 아니라 줄마다 아래에 선을 그린다 — 마지막 업무 아래에도
+                  // 선이 남아서 표가 끝까지 칸으로 보인다.
+                  child: ListView.builder(
+                    controller: verticalController,
                     itemCount: rows.length,
-                    separatorBuilder: (_, _) =>
-                        Divider(height: 1, color: border),
-                    itemBuilder: (context, i) => _TaskTableRow(
-                      task: rows[i].task,
-                      indented: rows[i].indented,
-                      session: session,
-                      members: members,
-                      fields: fields,
-                      otherW: otherW,
-                      readOnly: readOnly,
-                      optionsFor: optionsFor,
-                      apply: apply,
-                      onTap: () => onOpen(rows[i].task),
+                    itemBuilder: (context, i) => DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(bottom: BorderSide(color: border)),
+                      ),
+                      child: _TaskTableRow(
+                        task: rows[i].task,
+                        indented: rows[i].indented,
+                        session: session,
+                        members: members,
+                        fields: fields,
+                        titleW: titleW,
+                        otherW: otherW,
+                        horizontalController: horizontalController,
+                        readOnly: readOnly,
+                        optionsFor: optionsFor,
+                        apply: apply,
+                        onTap: () => onOpen(rows[i].task),
+                      ),
                     ),
                   ),
                 ),
@@ -788,7 +908,11 @@ class _TaskTableRow extends StatefulWidget {
   final VoidCallback onTap;
   final List<AppUser>? members;
   final List<TaskFieldDef> fields;
+  final double titleW;
   final double otherW;
+
+  /// "업무" 열 오른쪽 칸들의 가로 위치(_TaskTable.horizontalController).
+  final ScrollController horizontalController;
 
   /// 부모 바로 아래에 붙는 하위 업무면 한 칸 들여쓰고 앞에 ↳를 붙인다.
   final bool indented;
@@ -799,7 +923,9 @@ class _TaskTableRow extends StatefulWidget {
     required this.task,
     required this.session,
     required this.onTap,
+    required this.titleW,
     required this.otherW,
+    required this.horizontalController,
     required this.optionsFor,
     required this.apply,
     this.indented = false,
@@ -892,23 +1018,40 @@ class _TaskTableRowState extends State<_TaskTableRow> {
       ),
     );
 
-    // 마지막 칸 — [members]가 있으면(프로젝트 리스트 보기) 담당자, 없으면 생성자.
-    final AppUser? person;
-    if (members != null) {
-      person = members!.where((m) => m.id == task.assigneeId).firstOrNull;
-    } else if (task.creatorName == null) {
-      person = null;
-    } else {
-      person = AppUser(
-        id: task.creatorId ?? '',
-        username: task.creatorName!,
-        name: task.creatorName!,
-        avatarType: task.creatorAvatarType,
-        avatarEmoji: task.creatorAvatarEmoji,
-        avatarColor: task.creatorAvatarColor,
-        avatarUrl: task.creatorAvatarUrl,
-      );
-    }
+    // 사람 열 — 프로젝트 리스트 보기([members]가 있을 때)는 담당자·생성자·생성일, "내 업무"는 생성자.
+    final assignee = members?.where((m) => m.id == task.assigneeId).firstOrNull;
+    final creator = task.creatorName == null
+        ? null
+        : AppUser(
+            id: task.creatorId ?? '',
+            username: task.creatorName!,
+            name: task.creatorName!,
+            avatarType: task.creatorAvatarType,
+            avatarEmoji: task.creatorAvatarEmoji,
+            avatarColor: task.creatorAvatarColor,
+            avatarUrl: task.creatorAvatarUrl,
+          );
+    Widget personCell(AppUser? person) => person == null
+        ? Text('—', style: TextStyle(color: hint))
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              UserAvatar(
+                user: person,
+                resolveUrl: session.resolveUrl,
+                radius: 10,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  person.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          );
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
@@ -919,7 +1062,8 @@ class _TaskTableRowState extends State<_TaskTableRow> {
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(
             children: [
-              Expanded(
+              SizedBox(
+                width: widget.titleW,
                 child: Padding(
                   padding: EdgeInsets.only(
                     left: widget.indented ? 40 : 16,
@@ -1023,189 +1167,211 @@ class _TaskTableRowState extends State<_TaskTableRow> {
                 ),
               ),
               // 유형·우선순위·상태는 배지를 눌러 그 자리에서 바꾼다(종료된 프로젝트는 제외).
-              cell(
-                readOnly
-                    ? (task.typeName == null
-                          ? Text('—', style: TextStyle(color: hint))
-                          : TaskPill(
-                              task.typeName!,
-                              parseTypeColor(task.typeColor),
-                            ))
-                    : _EditablePill(
-                        text: task.typeName,
-                        color: parseTypeColor(task.typeColor),
-                        menuWidth: otherW,
-                        loadOptions: () async => (
-                          options: [
-                            const _PillOption(null, '없음', Colors.grey),
-                            for (final t in (await optionsFor(
-                              task.projectId,
-                            )).types)
-                              _PillOption(
-                                t.id,
-                                t.name,
-                                parseTypeColor(t.color),
-                              ),
-                          ],
-                          currentId: task.typeId,
-                        ),
-                        onPick: (id) => apply(
-                          () => session.api!.updateTask(
-                            task.id,
-                            typeId: id,
-                            clearType: id == null,
-                          ),
-                        ),
-                      ),
-                otherW,
-              ),
-              cell(
-                readOnly
-                    ? (task.priorityName == null
-                          ? Text('—', style: TextStyle(color: hint))
-                          : TaskPill(
-                              task.priorityName!,
-                              taskPriorityDisplayColor(task),
-                            ))
-                    : _EditablePill(
-                        text: task.priorityName,
-                        color: taskPriorityDisplayColor(task),
-                        menuWidth: otherW,
-                        loadOptions: () async {
-                          final list = (await optionsFor(
-                            task.projectId,
-                          )).priorities;
-                          return (
-                            options: [
-                              for (final p in list)
-                                _PillOption(
-                                  p.id,
-                                  p.name,
-                                  parseTypeColor(p.color),
+              Expanded(
+                child: _HScrollWindow(
+                  controller: widget.horizontalController,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      cell(
+                        readOnly
+                            ? (task.typeName == null
+                                  ? Text('—', style: TextStyle(color: hint))
+                                  : TaskPill(
+                                      task.typeName!,
+                                      parseTypeColor(task.typeColor),
+                                    ))
+                            : _EditablePill(
+                                text: task.typeName,
+                                color: parseTypeColor(task.typeColor),
+                                menuWidth: otherW,
+                                loadOptions: () async => (
+                                  options: [
+                                    const _PillOption(null, '없음', Colors.grey),
+                                    for (final t in (await optionsFor(
+                                      task.projectId,
+                                    )).types)
+                                      _PillOption(
+                                        t.id,
+                                        t.name,
+                                        parseTypeColor(t.color),
+                                      ),
+                                  ],
+                                  currentId: task.typeId,
                                 ),
-                            ],
-                            // 옛 업무는 priorityId가 비어 있다 — 같은 단계의 첫 항목으로 본다.
-                            currentId: list.any((e) => e.id == task.priorityId)
-                                ? task.priorityId
-                                : list
-                                      .where((e) => e.level == task.priority)
-                                      .map((e) => e.id)
-                                      .firstOrNull,
-                          );
-                        },
-                        onPick: (id) => apply(
-                          () =>
-                              session.api!.updateTask(task.id, priorityId: id),
-                        ),
-                      ),
-                otherW,
-              ),
-              cell(
-                readOnly
-                    ? TaskPill(task.statusLabel, taskStatusDisplayColor(task))
-                    : _EditablePill(
-                        text: task.statusLabel,
-                        color: taskStatusDisplayColor(task),
-                        menuWidth: otherW,
-                        loadOptions: () async {
-                          final list = (await optionsFor(
-                            task.projectId,
-                          )).statuses;
-                          return (
-                            options: [
-                              for (final s in list)
-                                _PillOption(
-                                  s.id,
-                                  s.name,
-                                  parseTypeColor(s.color),
+                                onPick: (id) => apply(
+                                  () => session.api!.updateTask(
+                                    task.id,
+                                    typeId: id,
+                                    clearType: id == null,
+                                  ),
                                 ),
-                            ],
-                            // 옛 업무는 statusId가 비어 있다 — 같은 분류의 첫 상태로 본다.
-                            currentId: list.any((e) => e.id == task.statusId)
-                                ? task.statusId
-                                : list
-                                      .where((e) => e.category == task.status)
-                                      .map((e) => e.id)
-                                      .firstOrNull,
-                          );
-                        },
-                        onPick: (id) => apply(
-                          () => session.api!.updateTask(task.id, statusId: id),
-                        ),
-                      ),
-                otherW,
-              ),
-              cell(
-                _dateCell(
-                  Text(
-                    task.startDate == null ? '—' : formatYmd(task.startDate!),
-                    style: TextStyle(fontSize: 12, color: hint),
-                  ),
-                  due: false,
-                ),
-                otherW,
-              ),
-              cell(
-                _dateCell(
-                  task.dueDate == null
-                      ? Text('—', style: TextStyle(color: hint))
-                      : Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              formatYmd(task.dueDate!),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: task.isOverdue ? Colors.redAccent : hint,
                               ),
-                            ),
-                            if (task.isOverdue) ...[
-                              const SizedBox(width: 6),
-                              TaskPill('D+$overdueDays', Colors.redAccent),
-                            ],
-                          ],
-                        ),
-                  due: true,
-                ),
-                otherW,
-              ),
-              cell(
-                person == null
-                    ? Text('—', style: TextStyle(color: hint))
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          UserAvatar(
-                            user: person,
-                            resolveUrl: session.resolveUrl,
-                            radius: 10,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              person.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ],
+                        otherW,
                       ),
-                otherW,
-              ),
-              for (final f in fields)
-                cell(
-                  Text(
-                    f.display(task.customValues[f.id]) ?? '—',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: task.customValues[f.id] == null ? hint : null,
-                    ),
+                      cell(
+                        readOnly
+                            ? (task.priorityName == null
+                                  ? Text('—', style: TextStyle(color: hint))
+                                  : TaskPill(
+                                      task.priorityName!,
+                                      taskPriorityDisplayColor(task),
+                                    ))
+                            : _EditablePill(
+                                text: task.priorityName,
+                                color: taskPriorityDisplayColor(task),
+                                menuWidth: otherW,
+                                loadOptions: () async {
+                                  final list = (await optionsFor(
+                                    task.projectId,
+                                  )).priorities;
+                                  return (
+                                    options: [
+                                      for (final p in list)
+                                        _PillOption(
+                                          p.id,
+                                          p.name,
+                                          parseTypeColor(p.color),
+                                        ),
+                                    ],
+                                    // 옛 업무는 priorityId가 비어 있다 — 같은 단계의 첫 항목으로 본다.
+                                    currentId:
+                                        list.any((e) => e.id == task.priorityId)
+                                        ? task.priorityId
+                                        : list
+                                              .where(
+                                                (e) => e.level == task.priority,
+                                              )
+                                              .map((e) => e.id)
+                                              .firstOrNull,
+                                  );
+                                },
+                                onPick: (id) => apply(
+                                  () => session.api!.updateTask(
+                                    task.id,
+                                    priorityId: id,
+                                  ),
+                                ),
+                              ),
+                        otherW,
+                      ),
+                      cell(
+                        readOnly
+                            ? TaskPill(
+                                task.statusLabel,
+                                taskStatusDisplayColor(task),
+                              )
+                            : _EditablePill(
+                                text: task.statusLabel,
+                                color: taskStatusDisplayColor(task),
+                                menuWidth: otherW,
+                                loadOptions: () async {
+                                  final list = (await optionsFor(
+                                    task.projectId,
+                                  )).statuses;
+                                  return (
+                                    options: [
+                                      for (final s in list)
+                                        _PillOption(
+                                          s.id,
+                                          s.name,
+                                          parseTypeColor(s.color),
+                                        ),
+                                    ],
+                                    // 옛 업무는 statusId가 비어 있다 — 같은 분류의 첫 상태로 본다.
+                                    currentId:
+                                        list.any((e) => e.id == task.statusId)
+                                        ? task.statusId
+                                        : list
+                                              .where(
+                                                (e) =>
+                                                    e.category == task.status,
+                                              )
+                                              .map((e) => e.id)
+                                              .firstOrNull,
+                                  );
+                                },
+                                onPick: (id) => apply(
+                                  () => session.api!.updateTask(
+                                    task.id,
+                                    statusId: id,
+                                  ),
+                                ),
+                              ),
+                        otherW,
+                      ),
+                      cell(
+                        _dateCell(
+                          Text(
+                            task.startDate == null
+                                ? '—'
+                                : formatYmd(task.startDate!),
+                            style: TextStyle(fontSize: 12, color: hint),
+                          ),
+                          due: false,
+                        ),
+                        otherW,
+                      ),
+                      cell(
+                        _dateCell(
+                          task.dueDate == null
+                              ? Text('—', style: TextStyle(color: hint))
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      formatYmd(task.dueDate!),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: task.isOverdue
+                                            ? Colors.redAccent
+                                            : hint,
+                                      ),
+                                    ),
+                                    if (task.isOverdue) ...[
+                                      const SizedBox(width: 6),
+                                      TaskPill(
+                                        'D+$overdueDays',
+                                        Colors.redAccent,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                          due: true,
+                        ),
+                        otherW,
+                      ),
+                      if (members != null) ...[
+                        cell(personCell(assignee), otherW),
+                        cell(personCell(creator), otherW),
+                        cell(
+                          Text(
+                            formatYmd(task.createdAt),
+                            style: TextStyle(fontSize: 12, color: hint),
+                          ),
+                          otherW,
+                        ),
+                      ] else
+                        cell(personCell(creator), otherW),
+                      for (final f in fields)
+                        cell(
+                          Text(
+                            f.display(task.customValues[f.id]) ?? '—',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: task.customValues[f.id] == null
+                                  ? hint
+                                  : null,
+                            ),
+                          ),
+                          otherW,
+                        ),
+                    ],
                   ),
-                  otherW,
                 ),
+              ),
             ],
           ),
         ),
@@ -1214,182 +1380,28 @@ class _TaskTableRowState extends State<_TaskTableRow> {
   }
 }
 
-/// 좁은 창(프로젝트 창을 800px 이하로 줄였을 때)의 "내 업무" 목록 — 열을 늘어놓을 자리가
-/// 없으므로 업무(번호·제목·프로젝트)와 상태 배지만 남긴다. 상태는 표에서와 똑같이 눌러서 바꾼다.
-class _NarrowTaskList extends StatelessWidget {
-  final List<Task> tasks;
-  final ValueChanged<Task> onOpen;
-  final bool readOnly;
-  final Session session;
-  final Future<_ProjectOptions> Function(String projectId) optionsFor;
-  final Future<void> Function(Future<void> Function()) apply;
-
-  const _NarrowTaskList({
-    required this.tasks,
-    required this.onOpen,
-    required this.readOnly,
-    required this.session,
-    required this.optionsFor,
-    required this.apply,
-  });
+/// 표에서 "업무" 열 오른쪽 칸들 — 가로로 넘치면 [controller]의 위치만큼 왼쪽으로 밀어서 그린다.
+/// 머리글과 모든 줄이 같은 컨트롤러를 따라가므로 "업무" 열은 제자리에 있고 나머지만 좌우로
+/// 움직인다. 넘친 부분은 잘라서(보이는 칸 밖은) 그리지 않는다.
+class _HScrollWindow extends StatelessWidget {
+  final ScrollController controller;
+  final Widget child;
+  const _HScrollWindow({required this.controller, required this.child});
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hint = theme.hintColor;
-    // 넓은 표와 똑같이 하위 업무를 부모 바로 아래로 모은다.
-    final rows = arrangeWithSubtasks(tasks);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.dividerColor),
-        borderRadius: BorderRadius.circular(10),
+  Widget build(BuildContext context) => UnconstrainedBox(
+    constrainedAxis: Axis.vertical,
+    alignment: Alignment.centerLeft,
+    clipBehavior: Clip.hardEdge,
+    child: ListenableBuilder(
+      listenable: controller,
+      builder: (context, child) => Transform.translate(
+        offset: Offset(controller.hasClients ? -controller.offset : 0, 0),
+        child: child,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Container(
-            height: 36,
-            width: double.infinity,
-            color: theme.colorScheme.surfaceContainerLow,
-            padding: const EdgeInsets.only(left: 16),
-            alignment: Alignment.centerLeft,
-            child: Text(
-              '업무',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: hint,
-              ),
-            ),
-          ),
-          Expanded(
-            child: MutedScrollbar(
-              child: ListView.separated(
-                itemCount: rows.length,
-                separatorBuilder: (_, _) =>
-                    Divider(height: 1, color: theme.dividerColor),
-                itemBuilder: (context, i) {
-                  final task = rows[i].task;
-                  final indented = rows[i].indented;
-                  final done = task.status == TaskStatus.done;
-                  return InkWell(
-                    onTap: () => onOpen(task),
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        indented ? 34 : 16,
-                        10,
-                        10,
-                        10,
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    if (indented) ...[
-                                      Icon(
-                                        Icons.subdirectory_arrow_right,
-                                        size: 14,
-                                        color: hint,
-                                      ),
-                                      const SizedBox(width: 6),
-                                    ],
-                                    if (task.key != null)
-                                      Text(
-                                        task.key!,
-                                        style: const TextStyle(
-                                          color: Color(0xFF5B8DEF),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        task.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          decoration: done
-                                              ? TextDecoration.lineThrough
-                                              : null,
-                                          color: done ? hint : null,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                if (task.projectName != null) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    task.projectName!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(color: hint, fontSize: 11),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          readOnly
-                              ? TaskPill(
-                                  task.statusLabel,
-                                  taskStatusDisplayColor(task),
-                                )
-                              : _EditablePill(
-                                  text: task.statusLabel,
-                                  color: taskStatusDisplayColor(task),
-                                  menuWidth: 140,
-                                  loadOptions: () async {
-                                    final list = (await optionsFor(
-                                      task.projectId,
-                                    )).statuses;
-                                    return (
-                                      options: [
-                                        for (final s in list)
-                                          _PillOption(
-                                            s.id,
-                                            s.name,
-                                            parseTypeColor(s.color),
-                                          ),
-                                      ],
-                                      currentId:
-                                          list.any((e) => e.id == task.statusId)
-                                          ? task.statusId
-                                          : list
-                                                .where(
-                                                  (e) =>
-                                                      e.category == task.status,
-                                                )
-                                                .map((e) => e.id)
-                                                .firstOrNull,
-                                    );
-                                  },
-                                  onPick: (id) => apply(
-                                    () => session.api!.updateTask(
-                                      task.id,
-                                      statusId: id,
-                                    ),
-                                  ),
-                                ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+      child: child,
+    ),
+  );
 }
 
 // ───────────────────────── 캘린더 부품 ─────────────────────────
@@ -1669,23 +1681,119 @@ class _TaskBar extends StatelessWidget {
   }
 }
 
+/// 달력에서 고른 날의 업무 목록 — 날짜와 건수, 그 아래 업무마다 왼쪽 색 막대 · 제목 ·
+/// 프로젝트 · 기간 · 담당자를 보여주고, 업무 사이는 얇은 실선으로 나눈다.
 class _DayPanel extends StatelessWidget {
   final DateTime date;
   final List<Task> tasks;
+  final Session? session;
   final ValueChanged<Task> onOpen;
   const _DayPanel({
     required this.date,
     required this.tasks,
+    required this.session,
     required this.onOpen,
   });
 
+  Widget _item(BuildContext context, Task t) {
+    final hint = Theme.of(context).hintColor;
+    final r = taskRange(t)!;
+    final done = t.status == TaskStatus.done;
+    return InkWell(
+      onTap: () => onOpen(t),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 업무 색(유형, 없으면 상태) 막대 — 내용 높이만큼.
+              Container(
+                width: 3,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  color: taskDisplayColor(t),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      t.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        decoration: done ? TextDecoration.lineThrough : null,
+                      ),
+                    ),
+                    if (t.projectName != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        t.projectName!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: hint),
+                      ),
+                    ],
+                    const SizedBox(height: 2),
+                    Text(
+                      r.$1 == r.$2
+                          ? formatYmd(r.$1)
+                          : '${formatYmd(r.$1)} ~ ${formatYmd(r.$2)}',
+                      style: TextStyle(fontSize: 12, color: hint),
+                    ),
+                    const SizedBox(height: 8),
+                    if (t.assigneeName == null)
+                      Text('미배정', style: TextStyle(fontSize: 12, color: hint))
+                    else
+                      Row(
+                        children: [
+                          UserAvatar(
+                            user: AppUser(
+                              id: t.assigneeId ?? '',
+                              username: t.assigneeName!,
+                              name: t.assigneeName!,
+                              avatarType: t.assigneeAvatarType,
+                              avatarEmoji: t.assigneeAvatarEmoji,
+                              avatarColor: t.assigneeAvatarColor,
+                              avatarUrl: t.assigneeAvatarUrl,
+                            ),
+                            resolveUrl: session?.resolveUrl,
+                            radius: 9,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              t.assigneeName!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
       decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).dividerColor),
+        border: Border.all(color: theme.dividerColor),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1693,14 +1801,14 @@ class _DayPanel extends StatelessWidget {
         children: [
           Text(
             '${formatYmd(date)} (${kWeekdayLabels[date.weekday % 7]})',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             '해당 일의 업무 ${tasks.length}건',
             style: TextStyle(color: hint, fontSize: 12),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Expanded(
             child: tasks.isEmpty
                 ? Center(
@@ -1708,63 +1816,14 @@ class _DayPanel extends StatelessWidget {
                   )
                 : MutedScrollbar(
                     child: ListView.separated(
+                      padding: const EdgeInsets.only(right: 8),
                       itemCount: tasks.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 4),
-                      itemBuilder: (context, i) {
-                        final t = tasks[i];
-                        final r = taskRange(t)!;
-                        return InkWell(
-                          onTap: () => onOpen(t),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: 3,
-                                  height: 34,
-                                  margin: const EdgeInsets.only(right: 10),
-                                  decoration: BoxDecoration(
-                                    color: taskDisplayColor(t),
-                                    borderRadius: BorderRadius.circular(2),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        t.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          decoration:
-                                              t.status == TaskStatus.done
-                                              ? TextDecoration.lineThrough
-                                              : null,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        r.$1 == r.$2
-                                            ? formatMd(r.$1)
-                                            : '${formatMd(r.$1)} ~ ${formatMd(r.$2)}',
-                                        style: TextStyle(
-                                          color: hint,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+                      separatorBuilder: (_, _) => Divider(
+                        height: 1,
+                        thickness: 1,
+                        color: theme.dividerColor,
+                      ),
+                      itemBuilder: (context, i) => _item(context, tasks[i]),
                     ),
                   ),
           ),

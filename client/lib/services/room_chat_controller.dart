@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../models/text_format.dart';
 import 'api_client.dart' show UploadCancelToken;
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'session.dart';
@@ -220,11 +221,21 @@ class RoomChatController extends ChangeNotifier {
   /// 댓글을 단다. 실제 목록 갱신은 이 요청이 성공하면 서버가 보내는 comment:new 브로드캐스트로
   /// 이뤄진다(보낸 사람도 그 방 소켓에 있으므로 자기 자신도 받는다 — sendText와 동일한 방식이라
   /// 여기서 낙관적으로 먼저 추가할 필요가 없다).
-  Future<void> postComment(String messageId, String text) async {
+  /// [format]은 [text]의 글자 서식 — [text]는 이미 앞뒤 공백을 뗀 것이어야 위치가 맞는다
+  /// (RichTextEditingController.formatted). 비밀 대화는 서식 없이 보낸다.
+  Future<void> postComment(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final payload = await _session.encryptOutgoing(room, trimmed);
-    await _session.api!.addComment(messageId, text: payload);
+    await _session.api!.addComment(
+      messageId,
+      text: payload,
+      textFormat: room.isSecret || trimmed != text ? null : format,
+    );
   }
 
   /// 댓글로 이모티콘을 단다 — sendSticker와 동일한 방식(파일 업로드 없이 id만 전송).
@@ -239,6 +250,7 @@ class RoomChatController extends ChangeNotifier {
     String messageId,
     UploadedAttachment u, {
     String? caption,
+    List<TextFormatRun>? captionFormat,
   }) async {
     final trimmedCaption = caption?.trim();
     if (room.isSecret) {
@@ -269,6 +281,7 @@ class RoomChatController extends ChangeNotifier {
     await _session.api!.addComment(
       messageId,
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
+      textFormat: trimmedCaption == caption ? captionFormat : null,
       type: u.isImage ? 'image' : 'file',
       fileUrl: u.url,
       fileName: u.fileName,
@@ -280,11 +293,19 @@ class RoomChatController extends ChangeNotifier {
 
   /// 댓글을 수정한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
   /// comment:edited 브로드캐스트(applyCommentEdit)로 이뤄진다.
-  Future<void> editComment(String commentId, String text) async {
+  Future<void> editComment(
+    String commentId,
+    String text, {
+    List<TextFormatRun>? format,
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final payload = await _session.encryptOutgoing(room, trimmed);
-    await _session.api!.editComment(commentId, payload!);
+    await _session.api!.editComment(
+      commentId,
+      payload!,
+      textFormat: room.isSecret || trimmed != text ? null : format,
+    );
   }
 
   /// 댓글을 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
@@ -299,6 +320,7 @@ class RoomChatController extends ChangeNotifier {
     final entry = _findCommentEntry(edited.id);
     if (entry == null) return;
     entry.asComment!.text = edited.text;
+    entry.asComment!.textFormat = edited.textFormat;
     entry.asComment!.editedAt = edited.editedAt;
     notifyListeners();
   }
@@ -325,11 +347,19 @@ class RoomChatController extends ChangeNotifier {
 
   /// 메시지를 수정한다(텍스트 메시지, 본인, 작성 5분 이내만 서버가 허용). 실제 반영은
   /// message:edited 브로드캐스트(applyEdit)로 이뤄진다.
-  Future<void> editMessage(String messageId, String text) async {
+  Future<void> editMessage(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final payload = await _session.encryptOutgoing(room, trimmed);
-    await _session.api!.editMessage(messageId, payload!);
+    await _session.api!.editMessage(
+      messageId,
+      payload!,
+      textFormat: room.isSecret || trimmed != text ? null : format,
+    );
   }
 
   /// 메시지를 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
@@ -342,6 +372,7 @@ class RoomChatController extends ChangeNotifier {
     final idx = messages.indexWhere((m) => m.id == edited.id);
     if (idx == -1) return;
     messages[idx].text = edited.text;
+    messages[idx].textFormat = edited.textFormat;
     messages[idx].editedAt = edited.editedAt;
     notifyListeners();
   }
@@ -540,7 +571,9 @@ class RoomChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> sendText(String text) async {
+  /// [format]은 [text]의 글자 서식 — [text]는 이미 앞뒤 공백을 뗀 것이어야 위치가 맞는다
+  /// (RichTextEditingController.formatted). 비밀 대화는 서식 없이 보낸다.
+  Future<void> sendText(String text, {List<TextFormatRun>? format}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final payload = await _session.encryptOutgoing(room, trimmed);
@@ -548,6 +581,7 @@ class RoomChatController extends ChangeNotifier {
       roomId: room.id,
       type: 'text',
       text: payload,
+      textFormat: room.isSecret || trimmed != text ? null : format,
     );
   }
 
@@ -624,6 +658,7 @@ class RoomChatController extends ChangeNotifier {
   Future<void> sendUploadedAttachment(
     UploadedAttachment u, {
     String? caption,
+    List<TextFormatRun>? captionFormat,
   }) async {
     final trimmedCaption = caption?.trim();
     if (room.isSecret) {
@@ -655,6 +690,7 @@ class RoomChatController extends ChangeNotifier {
       roomId: room.id,
       type: u.isImage ? 'image' : 'file',
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
+      textFormat: trimmedCaption == caption ? captionFormat : null,
       fileUrl: u.url,
       fileName: u.fileName,
       fileSize: u.size,
@@ -669,6 +705,7 @@ class RoomChatController extends ChangeNotifier {
   Future<void> sendUploadedAttachments(
     List<UploadedAttachment> items, {
     String? caption,
+    List<TextFormatRun>? captionFormat,
   }) async {
     if (items.isEmpty) return;
     if (items.length == 1 || room.isSecret) {
@@ -676,6 +713,7 @@ class RoomChatController extends ChangeNotifier {
         await sendUploadedAttachment(
           items[i],
           caption: i == 0 ? caption : null,
+          captionFormat: i == 0 ? captionFormat : null,
         );
       }
       return;
@@ -685,6 +723,7 @@ class RoomChatController extends ChangeNotifier {
       roomId: room.id,
       type: 'image',
       text: trimmed?.isNotEmpty == true ? trimmed : null,
+      textFormat: trimmed == caption ? captionFormat : null,
       attachments: [
         for (final u in items)
           {

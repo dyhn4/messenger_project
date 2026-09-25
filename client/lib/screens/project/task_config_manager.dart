@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/grab_cursors.dart';
 import 'project_forms.dart' show projectColorChoices;
 
 String _categoryLabel(TaskStatus c) => taskStatusLabel(c);
@@ -272,7 +273,7 @@ class _DraggableBubble extends StatelessWidget {
         return true;
       },
       builder: (context, _, _) => MouseRegion(
-        cursor: SystemMouseCursors.grab,
+        cursor: GrabCursors.open,
         child: Draggable<String>(
           data: id,
           onDragStarted: onDragStarted,

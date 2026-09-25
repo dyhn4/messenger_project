@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:client/models/project.dart';
 import 'package:client/screens/project/my_tasks_view.dart';
+import 'package:client/screens/project/task_detail_panel.dart';
 import 'package:client/screens/project/task_views.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
@@ -45,6 +46,7 @@ Map<String, dynamic> _task(
 };
 
 void main() {
+  setUp(TaskListTable.resetRememberedWidths);
   testWidgets('내 업무: 리스트 + 필터(탭 없이 리스트만)', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1.0;
@@ -187,5 +189,65 @@ void main() {
     await tester.tap(find.text('오늘'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('캘린더 일별 목록: 제목·프로젝트·기간·담당자, 업무 사이 실선', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    String ymd(DateTime d) =>
+        '${d.year}.${d.month.toString().padLeft(2, '0')}.${d.day.toString().padLeft(2, '0')}';
+    final start = today.subtract(const Duration(days: 3));
+    final due = today.add(const Duration(days: 2));
+    final tasks = [
+      Task.fromJson({
+        ..._task(
+          '1',
+          '랜딩페이지 히어로 카피',
+          start: start.millisecondsSinceEpoch,
+          due: due.millisecondsSinceEpoch,
+        ),
+        'projectName': '신제품 런칭 캠페인',
+        'assigneeId': 'u1',
+        'assigneeName': '송병근',
+      }),
+      Task.fromJson(
+        _task(
+          '2',
+          '디스플레이 배너 3종',
+          start: today.millisecondsSinceEpoch,
+          due: today.millisecondsSinceEpoch,
+        ),
+      ),
+    ];
+    Widget calendar() => TaskCalendarView(tasks: tasks, onOpen: (_) {});
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: calendar())));
+    await tester.pumpAndSettle();
+    expect(find.text('해당 일의 업무 2건'), findsOneWidget);
+    expect(find.text('신제품 런칭 캠페인'), findsOneWidget);
+    expect(find.text('${ymd(start)} ~ ${ymd(due)}'), findsOneWidget);
+    expect(find.text('송병근'), findsOneWidget);
+    expect(find.text('미배정'), findsOneWidget);
+    // 두 업무 사이에 실선 하나.
+    expect(
+      find.descendant(
+        of: find.byType(ListView),
+        matching: find.byType(Divider),
+      ),
+      findsOneWidget,
+    );
+
+    // 업무 패널이 옆에 열리면 일별 목록 자리는 패널이 덮는다(목록이 빠진다).
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: TaskPanelInset(width: 421, child: calendar())),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('해당 일의 업무'), findsNothing);
   });
 }

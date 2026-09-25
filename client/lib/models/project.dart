@@ -1,6 +1,7 @@
 import 'package:flutter/painting.dart' show Color;
 
 import 'app_user.dart';
+import 'text_format.dart';
 
 /// 업무 상태 — server/src/projects.js의 TASK_STATUSES와 1:1로 대응한다(칸반보드의 열이 될 값).
 enum TaskStatus { todo, doing, done }
@@ -330,12 +331,22 @@ class Task {
   final String? creatorAvatarColor;
   final String? creatorAvatarUrl;
 
+  /// 담당자 이름·사진 — 구성원 목록 없이도(달력 일별 목록 등) 바로 그리려고 서버가 같이 준다.
+  final String? assigneeName;
+  final String assigneeAvatarType;
+  final String? assigneeAvatarEmoji;
+  final String? assigneeAvatarColor;
+  final String? assigneeAvatarUrl;
+
   final DateTime? startDate;
   final DateTime? dueDate;
   final DateTime createdAt;
 
   /// 상세 조회(GET /tasks/:id)로 받아올 때만 채워진다.
   final List<TaskComment> comments;
+
+  /// "기록" 탭 — 최신이 앞. 상세 조회에서만 채워진다.
+  final List<TaskActivity> activities;
 
   /// 하위 업무면 부모 업무의 id. 하위 업무도 자기 번호·상태·담당자를 갖는 온전한 업무다.
   final String? parentTaskId;
@@ -380,10 +391,16 @@ class Task {
     this.creatorAvatarEmoji,
     this.creatorAvatarColor,
     this.creatorAvatarUrl,
+    this.assigneeName,
+    this.assigneeAvatarType = 'initial',
+    this.assigneeAvatarEmoji,
+    this.assigneeAvatarColor,
+    this.assigneeAvatarUrl,
     this.startDate,
     this.dueDate,
     required this.createdAt,
     this.comments = const [],
+    this.activities = const [],
     this.parentTaskId,
     this.archived = false,
     this.checklistDone = 0,
@@ -446,6 +463,11 @@ class Task {
     creatorAvatarEmoji: json['creatorAvatarEmoji'] as String?,
     creatorAvatarColor: json['creatorAvatarColor'] as String?,
     creatorAvatarUrl: json['creatorAvatarUrl'] as String?,
+    assigneeName: json['assigneeName'] as String?,
+    assigneeAvatarType: json['assigneeAvatarType'] as String? ?? 'initial',
+    assigneeAvatarEmoji: json['assigneeAvatarEmoji'] as String?,
+    assigneeAvatarColor: json['assigneeAvatarColor'] as String?,
+    assigneeAvatarUrl: json['assigneeAvatarUrl'] as String?,
     startDate: (json['startDate'] as num?) != null
         ? DateTime.fromMillisecondsSinceEpoch(
             (json['startDate'] as num).toInt(),
@@ -460,6 +482,11 @@ class Task {
     comments:
         (json['comments'] as List?)
             ?.map((e) => TaskComment.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        const [],
+    activities:
+        (json['activities'] as List?)
+            ?.map((e) => TaskActivity.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [],
     parentTaskId: json['parentTaskId'] as String?,
@@ -516,7 +543,16 @@ class TaskComment {
   final String? senderId;
   final String senderName;
   final String text;
+
+  /// [text]에 걸린 글자 서식(굵게 등).
+  final List<TextFormatRun>? textFormat;
+
+  /// 답글이면 그 댓글의 id(한 단계까지만).
+  final String? parentCommentId;
   final DateTime createdAt;
+
+  /// 수정한 시각 — 있으면 "(수정됨)"을 붙인다.
+  final DateTime? editedAt;
   final String? taskTitle;
   final String? taskKey;
   final String? projectName;
@@ -528,7 +564,10 @@ class TaskComment {
     this.senderId,
     required this.senderName,
     required this.text,
+    this.textFormat,
+    this.parentCommentId,
     required this.createdAt,
+    this.editedAt,
     this.taskTitle,
     this.taskKey,
     this.projectName,
@@ -541,12 +580,69 @@ class TaskComment {
     senderId: json['senderId'] as String?,
     senderName: json['senderName'] as String,
     text: json['text'] as String,
+    textFormat: parseTextFormat(json['textFormat']),
+    parentCommentId: json['parentCommentId'] as String?,
     createdAt: DateTime.fromMillisecondsSinceEpoch(
       (json['createdAt'] as num).toInt(),
     ),
+    editedAt: json['editedAt'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(
+            (json['editedAt'] as num).toInt(),
+          ),
     taskTitle: json['taskTitle'] as String?,
     taskKey: json['taskKey'] as String?,
     projectName: json['projectName'] as String?,
+  );
+}
+
+/// 업무 기록 한 줄 — 누가 언제 무엇을 했는지(서버가 문장으로 만들어 둔다).
+class TaskActivity {
+  final String id;
+  final String? actorId;
+  final String actorName;
+  final String text;
+
+  /// 'created' | 'status' | 'title' | 'description' | null(그 밖의 항목).
+  final String? kind;
+
+  /// 바뀐 뒤의 값 — 제목·설명은 새 글, 상태·생성은 상태 이름.
+  final String? detail;
+
+  /// 바뀌기 전 값 — 제목은 이전 제목, 상태는 이전 상태 이름.
+  final String? previous;
+
+  /// 상태·생성 기록의 상태 색(#RRGGBB).
+  final String? color;
+  final DateTime createdAt;
+
+  const TaskActivity({
+    required this.id,
+    this.actorId,
+    required this.actorName,
+    required this.text,
+    this.kind,
+    this.detail,
+    this.previous,
+    this.color,
+    required this.createdAt,
+  });
+
+  /// 상태 구간을 여는 기록인지(기록 탭의 머리줄).
+  bool get startsStatus => kind == 'created' || kind == 'status';
+
+  factory TaskActivity.fromJson(Map<String, dynamic> json) => TaskActivity(
+    id: json['id'] as String,
+    actorId: json['actorId'] as String?,
+    actorName: json['actorName'] as String,
+    text: json['text'] as String,
+    kind: json['kind'] as String?,
+    detail: json['detail'] as String?,
+    previous: json['previous'] as String?,
+    color: json['color'] as String?,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(
+      (json['createdAt'] as num).toInt(),
+    ),
   );
 }
 

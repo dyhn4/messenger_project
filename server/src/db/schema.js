@@ -396,6 +396,8 @@ export const messages = pgTable(
     senderName: text('sender_name').notNull(),
     type: text('type').notNull(), // 'text' | 'image' | 'file' | 'system'
     text: text('text'),
+    // 글자 서식 구간 — [{s, e, f, h?}] (textFormat.js 참고). 본문은 평문 그대로라 미리보기·검색은 그대로 쓴다.
+    textFormat: jsonb('text_format'),
     fileUrl: text('file_url'),
     fileName: text('file_name'),
     fileSize: integer('file_size'),
@@ -1002,9 +1004,41 @@ export const taskComments = pgTable(
     senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
     senderName: text('sender_name').notNull(),
     text: text('text').notNull(),
+    // 답글이면 그 댓글. 답글에는 다시 답글을 달 수 없다(한 단계까지). 댓글을 지우면 답글도 지워진다.
+    parentCommentId: uuid('parent_comment_id').references(() => taskComments.id, { onDelete: 'cascade' }),
+    // 글자 서식 구간(messages.textFormat과 동일).
+    textFormat: jsonb('text_format'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // 수정한 시각 — 값이 있으면 "(수정됨)"을 붙인다.
+    editedAt: timestamp('edited_at', { withTimezone: true }),
   },
   (t) => [index('task_comments_task_id_idx').on(t.taskId, t.createdAt), index('task_comments_project_id_idx').on(t.projectId, t.createdAt)],
+);
+
+/** 업무 기록 — 업무 상세의 "기록" 탭. 누가 언제 무엇을 바꿨는지 한 줄 문장으로 남긴다. */
+export const taskActivities = pgTable(
+  'task_activities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    actorName: text('actor_name').notNull(),
+    // 예: "상태를 '진행 중'(으)로 변경했습니다."
+    text: text('text').notNull(),
+    // 무엇에 대한 기록인지 — 'created' | 'status' | 'title' | 'description' | null(그 밖의 항목).
+    // 기록 탭이 'created'·'status'를 상태 구간의 머리줄로 쓰고, 제목·설명은 새 내용을 상자로 보여준다.
+    kind: text('kind'),
+    // 바뀐 뒤의 값 — 제목·설명은 새 글, 상태는 상태 이름.
+    detail: text('detail'),
+    // 바뀌기 전 값 — 제목은 이전 제목, 상태는 이전 상태 이름(기록 탭의 "이전 › 새" 표시).
+    previous: text('previous'),
+    // 상태 기록의 상태 색(#RRGGBB) — 그때 색으로 남겨 둔다.
+    color: text('color'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('task_activities_task_idx').on(t.taskId, t.createdAt)],
 );
 
 /** 특정 메시지에 달린 댓글(스레드 답글). */
@@ -1023,6 +1057,7 @@ export const messageComments = pgTable(
     senderName: text('sender_name').notNull(),
     type: text('type').notNull().default('text'), // 'text' | 'image' | 'file' — messages.type과 동일 규칙.
     text: text('text'), // 첨부만 있고 캡션이 없는 댓글도 있어서 nullable(messages.text와 동일).
+    textFormat: jsonb('text_format'), // messages.textFormat과 동일.
     fileUrl: text('file_url'),
     fileName: text('file_name'),
     fileSize: integer('file_size'),

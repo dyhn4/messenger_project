@@ -22,6 +22,11 @@ import {
   listRecentTaskComments,
   listReferencesForTasks,
   listTaskComments,
+  findTaskCommentById,
+  updateTaskCommentText,
+  deleteTaskComment,
+  insertTaskActivities,
+  listTaskActivities,
   listTaskTypes,
   listTaskTypesByIds,
   countChecklistItems,
@@ -112,6 +117,7 @@ import { findUserById } from './db/queries/users.js';
 import { teamAccess } from './access.js';
 import { accountRole, canCreateProject, canManageProject } from './permissions.js';
 import { publicUser } from './users.js';
+import { sanitizeTextFormat } from './textFormat.js';
 
 const TASK_STATUSES = ['todo', 'doing', 'done'];
 const TASK_PRIORITIES = ['low', 'normal', 'high'];
@@ -209,7 +215,8 @@ async function decorateTasks(tasks, myUserId = null) {
     listTaskStatusesByIds(statusIds),
     listTaskPrioritiesByIds(priorityIds),
     listReferencesForTasks(ids),
-    listUsersByIds([...new Set(tasks.map((t) => t.createdBy).filter(Boolean))]),
+    // 만든 사람과 담당자를 한 번에 — 달력 일별 목록 등이 담당자 이름·사진을 바로 쓴다.
+    listUsersByIds([...new Set(tasks.flatMap((t) => [t.createdBy, t.assigneeId]).filter(Boolean))]),
     countChecklistItems(ids),
     countSubtasks(ids),
   ]);
@@ -220,6 +227,7 @@ async function decorateTasks(tasks, myUserId = null) {
   return tasks.map((t) => {
     const type = t.typeId ? typeById.get(t.typeId) : null;
     const creator = t.createdBy ? creatorById.get(t.createdBy) : null;
+    const assignee = t.assigneeId ? creatorById.get(t.assigneeId) : null;
     const referenceIds = refs[t.id] ?? [];
     let myRole = null;
     if (myUserId) {
@@ -234,6 +242,7 @@ async function decorateTasks(tasks, myUserId = null) {
       statusRow,
       priorityRow,
       creator,
+      assignee,
       referenceIds,
       myRole,
       checklist: checklist[t.id] ?? null,
@@ -263,6 +272,11 @@ function toTaskDto(task, { identifier, projectName } = {}) {
     creatorAvatarEmoji: task.creator?.avatarEmoji ?? null,
     creatorAvatarColor: task.creator?.avatarColor ?? null,
     creatorAvatarUrl: task.creator?.avatarUrl ?? null,
+    assigneeName: task.assignee?.name ?? null,
+    assigneeAvatarType: task.assignee?.avatarType ?? 'initial',
+    assigneeAvatarEmoji: task.assignee?.avatarEmoji ?? null,
+    assigneeAvatarColor: task.assignee?.avatarColor ?? null,
+    assigneeAvatarUrl: task.assignee?.avatarUrl ?? null,
     id: task.id,
     projectId: task.projectId,
     seq: task.seq,
@@ -303,7 +317,10 @@ function toTaskCommentDto(comment) {
     senderId: comment.senderId ?? null,
     senderName: comment.senderName,
     text: comment.text,
+    textFormat: comment.textFormat ?? null,
+    parentCommentId: comment.parentCommentId ?? null,
     createdAt: new Date(comment.createdAt).getTime(),
+    editedAt: comment.editedAt ? new Date(comment.editedAt).getTime() : null,
     // "최근 댓글" 목록에서만 채워진다(어느 업무의 댓글인지 한 줄로 보여주려고).
     taskTitle: comment.taskTitle ?? null,
     taskKey:
@@ -339,7 +356,7 @@ export function createProjectsRouter(io) {
   }
 
   // 프로젝트는 정회원 이상만 쓴다(준회원은 목록·조회·수정 모두 불가). 서버 운영자는 예외.
-  router.use(['/projects', '/tasks', '/task-types', '/task-statuses', '/task-priorities', '/task-fields', '/notes', '/project-notifications', '/task-templates', '/automations', '/note-comments', '/note-versions'], async (req, res, next) => {
+  router.use(['/projects', '/tasks', '/task-types', '/task-statuses', '/task-priorities', '/task-fields', '/notes', '/project-notifications', '/task-templates', '/automations', '/note-comments', '/note-versions', '/task-comments'], async (req, res, next) => {
     try {
       const user = await findUserById(req.user.sub);
       if (accountRole(user) === 'guest' && !user?.isServerAdmin) {
@@ -1410,6 +1427,14 @@ export function createProjectsRouter(io) {
       created: true,
     });
     const [decorated] = await decorateTasks([task], req.user.sub);
+    await recordTaskActivity(inserted.id, req.user.sub, [
+      {
+        text: '업무를 만들었습니다.',
+        kind: 'created',
+        detail: decorated.statusRow?.name ?? null,
+        color: decorated.statusRow?.color ?? null,
+      },
+    ]);
     res.status(201).json(toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }));
   });
 
@@ -1418,16 +1443,28 @@ export function createProjectsRouter(io) {
     if (!task) return res.status(404).json({ error: '업무를 찾을 수 없습니다.' });
     const project = await requireProjectMember(req, res, task.projectId);
     if (!project) return;
-    const [comments, checklist, subtaskRows] = await Promise.all([
+    const [comments, checklist, subtaskRows, activities] = await Promise.all([
       listTaskComments(task.id),
       listChecklistItems(task.id),
       listSubtasks(task.id),
+      listTaskActivities(task.id),
     ]);
     const [decorated] = await decorateTasks([task], req.user.sub);
     const subtasks = await decorateTasks(subtaskRows, req.user.sub);
     res.json({
       ...toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }),
       comments: comments.map(toTaskCommentDto),
+      activities: activities.map((a) => ({
+        id: a.id,
+        actorId: a.actorId ?? null,
+        actorName: a.actorName,
+        text: a.text,
+        kind: a.kind ?? null,
+        detail: a.detail ?? null,
+        previous: a.previous ?? null,
+        color: a.color ?? null,
+        createdAt: new Date(a.createdAt).getTime(),
+      })),
       checklist: checklist.map(toChecklistItemDto),
       subtasks: subtasks.map((t) =>
         toTaskDto(t, { identifier: project.identifier, projectName: project.name }),
@@ -1703,8 +1740,87 @@ export function createProjectsRouter(io) {
         JSON.stringify(fields.customValues) !== JSON.stringify(task.customValues ?? {}),
     });
     const [decorated] = await decorateTasks([updated], req.user.sub);
+    await recordTaskActivity(task.id, req.user.sub, await describeTaskChanges(task, fields, decorated, newReferenceIds, oldReferenceIds));
     res.json(toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }));
   });
+
+  /** 업무 기록에 한 줄씩 남긴다(행동한 사람 이름은 그때 이름으로 박아 둔다).
+   * [lines]는 문장 또는 { text, kind?, detail?, previous?, color? }. */
+  async function recordTaskActivity(taskId, actorId, lines) {
+    if (lines.length === 0) return;
+    const actor = await findUserById(actorId);
+    const actorName = actor?.name ?? actor?.username ?? '알 수 없음';
+    await insertTaskActivities(
+      lines.map((line) => {
+        const {
+          text,
+          kind = null,
+          detail = null,
+          previous = null,
+          color = null,
+        } = typeof line === 'string' ? { text: line } : line;
+        return { taskId, actorId, actorName, text, kind, detail, previous, color };
+      }),
+    );
+  }
+
+  /** PATCH로 실제로 바뀐 것만 골라 기록 문장으로 만든다. */
+  async function describeTaskChanges(before, fields, after, newReferenceIds, oldReferenceIds) {
+    const lines = [];
+    const day = (d) =>
+      d ? new Date(d).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric' }) : null;
+    const dateLine = (label, from, to) => {
+      const a = day(from);
+      const b = day(to);
+      if (a === b) return;
+      lines.push(b ? `${label}을 ${b}(으)로 변경했습니다.` : `${label}을 지웠습니다.`);
+    };
+    if ('title' in fields && fields.title !== before.title) {
+      lines.push({ text: '제목을 변경했습니다.', kind: 'title', detail: fields.title, previous: before.title });
+    }
+    if ('description' in fields && (fields.description ?? null) !== (before.description ?? null)) {
+      lines.push(
+        fields.description
+          ? { text: '설명을 변경했습니다.', kind: 'description', detail: fields.description }
+          : { text: '설명을 지웠습니다.', kind: 'description' },
+      );
+    }
+    if ('assigneeId' in fields && fields.assigneeId !== before.assigneeId) {
+      const user = fields.assigneeId ? await findUserById(fields.assigneeId) : null;
+      lines.push(user ? `담당자를 ${user.name ?? user.username}(으)로 지정했습니다.` : '담당자를 해제했습니다.');
+    }
+    if ('statusId' in fields && fields.statusId !== before.statusId) {
+      const name = after.statusRow?.name ?? fields.status;
+      const prev = before.statusId ? await findTaskStatusById(before.statusId) : null;
+      lines.push({
+        text: `상태를 '${name}'(으)로 변경했습니다.`,
+        kind: 'status',
+        detail: name,
+        previous: prev?.name ?? null,
+        color: after.statusRow?.color ?? null,
+      });
+    }
+    if ('priorityId' in fields && fields.priorityId !== before.priorityId) {
+      lines.push(`우선순위를 '${after.priorityRow?.name ?? fields.priority}'(으)로 변경했습니다.`);
+    }
+    if ('typeId' in fields && fields.typeId !== before.typeId) {
+      lines.push(after.type?.name ? `유형을 '${after.type.name}'(으)로 변경했습니다.` : '유형을 지웠습니다.');
+    }
+    if ('startDate' in fields) dateLine('시작일', before.startDate, fields.startDate);
+    if ('dueDate' in fields) dateLine('마감일', before.dueDate, fields.dueDate);
+    if ('parentTaskId' in fields && fields.parentTaskId !== before.parentTaskId) {
+      lines.push(fields.parentTaskId ? '상위 업무를 지정했습니다.' : '상위 업무를 해제했습니다.');
+    }
+    if ('customValues' in fields && JSON.stringify(fields.customValues) !== JSON.stringify(before.customValues ?? {})) {
+      lines.push('필드 값을 변경했습니다.');
+    }
+    if (newReferenceIds !== undefined) {
+      const same =
+        newReferenceIds.length === oldReferenceIds.length && newReferenceIds.every((id) => oldReferenceIds.includes(id));
+      if (!same) lines.push('참조자를 변경했습니다.');
+    }
+    return lines;
+  }
 
   router.delete('/tasks/:id', async (req, res) => {
     const task = await findTaskById(req.params.id);
@@ -1747,6 +1863,15 @@ export function createProjectsRouter(io) {
     if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
     if (text.length > 2000) return res.status(400).json({ error: '댓글은 2000자 이내로 작성하세요.' });
 
+    // 답글 — 같은 업무의 (답글이 아닌) 댓글에만 달 수 있다.
+    let parentCommentId = null;
+    if (typeof req.body?.parentCommentId === 'string') {
+      const parent = await findTaskCommentById(req.body.parentCommentId);
+      if (!parent || parent.taskId !== task.id) return res.status(400).json({ error: '답글을 달 댓글을 찾을 수 없습니다.' });
+      if (parent.parentCommentId) return res.status(400).json({ error: '답글에는 다시 답글을 달 수 없습니다.' });
+      parentCommentId = parent.id;
+    }
+
     const sender = await findUserById(req.user.sub);
     const comment = await insertTaskComment({
       id: randomUUID(),
@@ -1755,6 +1880,8 @@ export function createProjectsRouter(io) {
       senderId: req.user.sub,
       senderName: sender?.name ?? sender?.username ?? '알 수 없음',
       text,
+      textFormat: sanitizeTextFormat(req.body?.textFormat, text),
+      parentCommentId,
     });
     await notifyProjectMembers(project, task.id);
     const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
@@ -1768,6 +1895,54 @@ export function createProjectsRouter(io) {
       body: `${comment.senderName}: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`,
     });
     res.status(201).json(toTaskCommentDto(comment));
+  });
+
+  /** 수정·삭제할 댓글을 찾고 권한을 확인한다. 안 되면 응답까지 보내고 null. */
+  async function requireOwnTaskComment(req, res, { allowManager }) {
+    const comment = await findTaskCommentById(req.params.id);
+    if (!comment) {
+      res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+      return null;
+    }
+    const project = await requireProjectMember(req, res, comment.projectId);
+    if (!project) return null;
+    if (rejectIfArchived(res, project)) return null;
+    if (comment.senderId !== req.user.sub) {
+      let ok = false;
+      if (allowManager) {
+        const [access, myRole] = await Promise.all([
+          teamAccess(project.teamId, req.user.sub),
+          getProjectRole(project.id, req.user.sub),
+        ]);
+        ok = canManageProject({ ...access, isProjectOwner: myRole === 'owner' });
+      }
+      if (!ok) {
+        res.status(403).json({ error: allowManager ? '댓글을 지울 권한이 없습니다.' : '내가 쓴 댓글만 수정할 수 있습니다.' });
+        return null;
+      }
+    }
+    return { comment, project };
+  }
+
+  /** 댓글 수정 — 쓴 사람만. */
+  router.patch('/task-comments/:id', async (req, res) => {
+    const found = await requireOwnTaskComment(req, res, { allowManager: false });
+    if (!found) return;
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    if (text.length > 2000) return res.status(400).json({ error: '댓글은 2000자 이내로 작성하세요.' });
+    const updated = await updateTaskCommentText(found.comment.id, text, sanitizeTextFormat(req.body?.textFormat, text));
+    await notifyProjectMembers(found.project, found.comment.taskId);
+    res.json(toTaskCommentDto(updated));
+  });
+
+  /** 댓글 삭제 — 쓴 사람, 프로젝트 담당자, 팀 소유자·관리자만. 답글도 같이 지워진다. */
+  router.delete('/task-comments/:id', async (req, res) => {
+    const found = await requireOwnTaskComment(req, res, { allowManager: true });
+    if (!found) return;
+    await deleteTaskComment(found.comment.id);
+    await notifyProjectMembers(found.project, found.comment.taskId);
+    res.json({ ok: true });
   });
 
   /** 업무가 만들어지거나 바뀔 때 배정/참조/상태 변경 알림을 보낸다(행동한 본인은 제외). */

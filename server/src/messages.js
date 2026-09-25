@@ -11,6 +11,7 @@ import { isRoomMember } from './db/queries/rooms.js';
 import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
+import { sanitizeTextFormat } from './textFormat.js';
 
 // 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르므로 여기 상수가 아니라
 // moderation.js의 canModifyContent가 판단한다.
@@ -52,6 +53,7 @@ export function toMessageDto(m) {
     senderName: m.senderName,
     type: m.type,
     text: m.text,
+    textFormat: m.deletedAt ? null : (m.textFormat ?? null),
     fileUrl: signFileUrl(m.fileUrl, m.fileName),
     fileName: m.fileName,
     fileSize: m.fileSize,
@@ -141,7 +143,9 @@ export function createMessagesRouter(io) {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '메시지 내용을 입력하세요.' });
 
-    const updated = await updateMessageText(message.id, text);
+    const room = await findRoomById(message.roomId);
+    const textFormat = room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text);
+    const updated = await updateMessageText(message.id, text, textFormat);
     const dto = toMessageDto(updated);
     io.to(message.roomId).emit('message:edited', dto);
     res.json(dto);

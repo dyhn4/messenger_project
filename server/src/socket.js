@@ -25,6 +25,7 @@ import { toMessageDto } from './messages.js';
 import { markConnected, markDisconnected } from './presence.js';
 import { notifyIncomingCall, notifyOfflineMembers, roomTagFor } from './push.js';
 import { resolveRawUrl } from './upload.js';
+import { sanitizeTextFormat } from './textFormat.js';
 
 /**
  * 통화가 끝났으면(마지막 참가자가 나갔으면) 그 대화에 요약 한 줄을 시스템 메시지로 남긴다.
@@ -136,6 +137,10 @@ export function registerSocket(io) {
         senderName: sender?.name ?? sender?.username ?? socket.data.username,
         type: ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
         text: typeof payload.text === 'string' ? payload.text : null,
+        textFormat:
+          room.isSecret || typeof payload.text !== 'string'
+            ? null
+            : sanitizeTextFormat(payload.textFormat, payload.text),
         fileUrl: head?.fileUrl ?? fileUrl,
         fileName:
           head?.fileName ?? (typeof payload.fileName === 'string' ? payload.fileName : null),

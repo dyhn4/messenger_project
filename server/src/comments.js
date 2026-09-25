@@ -8,6 +8,7 @@ import { unhideDmForOtherMembers } from './rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
+import { sanitizeTextFormat } from './textFormat.js';
 
 // messages.js와 동일: 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르며
 // moderation.js의 canModifyContent가 판단한다.
@@ -22,6 +23,7 @@ export function toCommentDto(c) {
     senderName: c.senderName,
     type: c.type,
     text: deleted ? null : c.text,
+    textFormat: deleted ? null : (c.textFormat ?? null),
     fileUrl: deleted ? null : signFileUrl(c.fileUrl, c.fileName),
     fileName: deleted ? null : c.fileName,
     fileSize: deleted ? null : c.fileSize,
@@ -49,6 +51,7 @@ export function createCommentsRouter(io) {
     if (!text && !fileUrl) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
 
     const sender = await findUserById(req.user.sub);
+    const room = await findRoomById(message.roomId);
     const comment = await insertComment({
       id: randomUUID(),
       messageId: message.id,
@@ -57,6 +60,7 @@ export function createCommentsRouter(io) {
       senderName: sender?.name ?? sender?.username ?? '알 수 없음',
       type,
       text: text || null,
+      textFormat: room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text),
       fileUrl,
       fileName: typeof req.body?.fileName === 'string' ? req.body.fileName : null,
       fileSize: typeof req.body?.fileSize === 'number' ? req.body.fileSize : null,
@@ -66,7 +70,6 @@ export function createCommentsRouter(io) {
 
     // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 — socket.js의
     // message:send와 동일한 이유(rooms.js unhideDmForOtherMembers 참고).
-    const room = await findRoomById(message.roomId);
     if (room) await unhideDmForOtherMembers(io, room, req.user.sub);
 
     const dto = toCommentDto(comment);
@@ -108,7 +111,9 @@ export function createCommentsRouter(io) {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
 
-    const updated = await updateCommentText(comment.id, text);
+    const room = await findRoomById(comment.roomId);
+    const textFormat = room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text);
+    const updated = await updateCommentText(comment.id, text, textFormat);
     const dto = toCommentDto(updated);
     io.to(comment.roomId).emit('comment:edited', dto);
     res.json(dto);

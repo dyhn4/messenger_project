@@ -23,6 +23,7 @@ import 'attachment_widgets.dart';
 import 'call_button.dart';
 import 'capture_upload_dialog.dart';
 import 'muted_scrollbar.dart';
+import 'rich_text_format.dart';
 
 /// 첨부 하나의 클라이언트 쪽 진행 상태. 첨부한 즉시(_ChatInputBarState._stageAndUpload)
 /// 업로드가 시작되고, [result]가 채워지면 업로드가 끝난 것 — "보내기"는 이미 끝난 결과만
@@ -96,10 +97,13 @@ class ChatInputBar extends StatefulWidget {
 /// 받은 파일도 추가할 수 있도록, 부모(chat_panel.dart)가 GlobalKey로 이 State에 접근해
 /// addDroppedFiles를 호출할 수 있게 public으로 둔다(다른 필드/메서드는 계속 private).
 class ChatInputBarState extends State<ChatInputBar> {
-  final _controller = TextEditingController();
+  final _controller = RichTextEditingController();
   final _focusNode = FocusNode();
   final _attachments = <_PendingAttachment>[];
   bool _sending = false;
+
+  /// 서식 도구모음(굵게·기울임 등)을 입력칸 위에 펼쳤는지 — 아래 줄의 "T" 버튼으로 켜고 끈다.
+  bool _formatOpen = false;
 
   /// 첨부 중 하나라도 아직 업로드가 안 끝났으면 true — "보내기"를 비활성화하는 데 쓴다
   /// (사용자가 큰 파일을 올리는 동안 텍스트만 먼저 보내는 것도 헷갈릴 수 있어, 업로드가 다
@@ -116,6 +120,8 @@ class ChatInputBarState extends State<ChatInputBar> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKey);
+    // 비밀 대화는 서버가 서식을 받지 않는다(본문이 암호문이라 위치가 안 맞는다).
+    _controller.formattingEnabled = !widget.room.isSecret;
     // 포커스를 얻으면(클릭/터치) 안내 문구(hintText)를 바로 감추고 커서만 보이게 한다 —
     // hintText는 build() 시점 값이라 포커스가 바뀔 때 다시 그려줘야 반영된다.
     _focusNode.addListener(_onFocusChange);
@@ -380,7 +386,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _send() async {
-    final text = _controller.text.trim();
+    final (:text, :format) = _controller.formatted();
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
     if (_uploading) return; // 버튼 자체도 막지만, 이중 방어.
@@ -402,7 +408,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       if (sticker != null) await widget.controller.sendSticker(sticker.id);
 
       if (toSend.isEmpty) {
-        await widget.controller.sendText(text);
+        await widget.controller.sendText(text, format: format);
       } else {
         // 첨부와 함께 입력한 메시지는 별도 메시지로 보내지 않고, 첫 번째 첨부의 캡션으로
         // 붙인다. 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그
@@ -417,19 +423,24 @@ class ChatInputBarState extends State<ChatInputBar> {
             if (!a.result!.isImage) a.result!,
         ];
         var caption = text;
+        List<TextFormatRun>? captionFormat = format;
         if (images.isNotEmpty) {
           await widget.controller.sendUploadedAttachments(
             images,
             caption: caption,
+            captionFormat: captionFormat,
           );
           caption = '';
+          captionFormat = null;
         }
         for (final f in files) {
           await widget.controller.sendUploadedAttachment(
             f,
             caption: caption.isEmpty ? null : caption,
+            captionFormat: captionFormat,
           );
           caption = '';
+          captionFormat = null;
         }
       }
     } catch (e) {
@@ -492,32 +503,49 @@ class ChatInputBarState extends State<ChatInputBar> {
             // 항상 자체 스크롤바를 강제로 붙인다(TextField에 그 동작을 끌 방법도 없다) —
             // 그래서 따로 Scrollbar를 얹지 않고, 그 자동 스크롤바가 이 테마를 그대로
             // 입도록(채팅방과 같은 두께 10px, 항상 보임) ScrollbarTheme만 씌운다.
-            ScrollbarTheme(
-              data: mutedScrollbarThemeData,
-              child: TextField(
+            // 서식 도구모음을 펼치면 입력칸 테두리 안쪽 맨 위에 도구모음 줄을 얹는다. 펼치든
+            // 접든 TextField는 같은 자리(Column의 마지막)에 두어서 입력 중인 상태·포커스가
+            // 그대로 이어지게 한다.
+            RichFormatFrame(
+              open: _formatOpen,
+              focused: _focusNode.hasFocus,
+              toolbar: RichFormatToolbar(
                 controller: _controller,
                 focusNode: _focusNode,
-                decoration: InputDecoration(
-                  // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                  // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                  hintText: _focusNode.hasFocus ? null : '메시지 입력',
-                  border: const OutlineInputBorder(),
-                  // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
-                  // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
-                  contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
+              ),
+              child: ScrollbarTheme(
+                data: mutedScrollbarThemeData,
+                child: RichFieldWrapper(
+                  controller: _controller,
+                  child: TextField(
+                    key: const ValueKey('chat-input'),
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    decoration: InputDecoration(
+                      // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                      // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                      hintText: _focusNode.hasFocus ? null : '메시지 입력',
+                      border: _formatOpen
+                          ? InputBorder.none
+                          : const OutlineInputBorder(),
+                      // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
+                      // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
+                      contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
+                    ),
+                    minLines: 1,
+                    maxLines: 6,
+                    // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
+                    // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
+                    // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
+                    // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
+                    // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
+                    // 그대로 둔다.
+                    textInputAction: Platform.isWindows
+                        ? TextInputAction.newline
+                        : TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                  ),
                 ),
-                minLines: 1,
-                maxLines: 6,
-                // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
-                // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
-                // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
-                // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
-                // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
-                // 그대로 둔다.
-                textInputAction: Platform.isWindows
-                    ? TextInputAction.newline
-                    : TextInputAction.send,
-                onSubmitted: (_) => _send(),
               ),
             ),
             const SizedBox(height: 4),
@@ -551,6 +579,14 @@ class ChatInputBarState extends State<ChatInputBar> {
                       onPressed: _sending ? null : _pickFile,
                       tooltip: '파일 보내기',
                     ),
+                    if (!widget.room.isSecret)
+                      RichFormatToggleButton(
+                        open: _formatOpen,
+                        onPressed: () {
+                          setState(() => _formatOpen = !_formatOpen);
+                          _focusNode.requestFocus();
+                        },
+                      ),
                     // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
                     // 찍을지 먼저 고른다.
                     if (Platform.isWindows)

@@ -10,6 +10,7 @@ import 'project_views.dart';
 import 'project_widgets.dart';
 import 'task_views.dart';
 import 'task_filter.dart';
+import 'gantt_chart_view.dart';
 
 /// 프로젝트 하나의 업무 목록 — 상태별(할 일/진행 중/완료)로 묶어서 보여준다.
 /// 칸반보드(드래그로 상태 이동)는 다음 단계이고, 지금은 같은 데이터를 목록으로 본다.
@@ -215,9 +216,22 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
           onChanged: _load,
         );
       case _ProjectTab.gantt:
-        return TaskGanttView(tasks: tasks, onOpen: _openTask);
+        // 프로젝트 안의 간트차트는 상태별로 묶는다.
+        return GanttChartView(
+          session: widget.session,
+          tasks: tasks,
+          statuses: _statuses,
+          prefsKey: 'project:${widget.projectId}',
+          readOnly: project.archived,
+          onOpen: _openTask,
+          onChanged: _load,
+        );
       case _ProjectTab.calendar:
-        return TaskCalendarView(tasks: tasks, onOpen: _openTask);
+        return TaskCalendarView(
+          tasks: tasks,
+          onOpen: _openTask,
+          session: widget.session,
+        );
       case _ProjectTab.notes:
         return NotesView(
           session: widget.session,

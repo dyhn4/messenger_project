@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  setUp(TaskListTable.resetRememberedWidths);
   const json = {'content-type': 'application/json'};
   final now = DateTime.now().millisecondsSinceEpoch;
 
@@ -115,27 +116,19 @@ void main() {
     for (final h in ['업무', '유형', '우선순위', '상태', '시작일', '마감일', '생성자']) {
       expect(find.text(h), findsWidgets, reason: h);
     }
-    // 표가 제 칸 안에 들어가면 가로로 굴릴 게 없다.
-    final scroll = tester.widget<SingleChildScrollView>(
-      find
-          .descendant(
-            of: find.byType(TaskListTable),
-            matching: find.byType(SingleChildScrollView),
-          )
-          .first,
+    // 표가 제 칸 안에 들어가면 가로로 굴릴 게 없다(오른쪽 칸 스크롤 줄 자체가 없다).
+    expect(
+      find.descendant(
+        of: find.byType(TaskListTable),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is SingleChildScrollView &&
+              w.scrollDirection == Axis.horizontal,
+        ),
+      ),
+      findsNothing,
+      reason: '가로 스크롤이 남아 있으면 다 안 보인다',
     );
-    expect(scroll.scrollDirection, Axis.horizontal);
-    final position = tester
-        .state<ScrollableState>(
-          find
-              .descendant(
-                of: find.byType(TaskListTable),
-                matching: find.byType(Scrollable),
-              )
-              .first,
-        )
-        .position;
-    expect(position.maxScrollExtent, 0, reason: '가로 스크롤이 남아 있으면 다 안 보인다');
     // 왼쪽 메뉴는 접히지 않는다.
     expect(strip, findsNothing);
 
@@ -147,14 +140,18 @@ void main() {
     await pumpAt(tester, 1000);
 
     expect(find.text('우선순위'), findsOneWidget); // 열은 살아 있다
+    // "업무" 열 오른쪽 칸들만 가로로 미는 스크롤 줄이 생긴다.
+    final hScroll = find.descendant(
+      of: find.byType(TaskListTable),
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w is SingleChildScrollView && w.scrollDirection == Axis.horizontal,
+      ),
+    );
+    expect(hScroll, findsOneWidget);
     final position = tester
         .state<ScrollableState>(
-          find
-              .descendant(
-                of: find.byType(TaskListTable),
-                matching: find.byType(Scrollable),
-              )
-              .first,
+          find.descendant(of: hScroll, matching: find.byType(Scrollable)),
         )
         .position;
     expect(position.maxScrollExtent, greaterThan(0));
@@ -164,15 +161,27 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('800px 이하: 업무·상태만 남고 왼쪽 메뉴는 » 버튼으로 접힌다', (tester) async {
+  testWidgets('800px 이하: 표는 그대로(업무 열 고정 + 가로 스크롤), 왼쪽 메뉴는 » 버튼으로 접힌다', (
+    tester,
+  ) async {
     await pumpAt(tester, 780);
 
-    // 좁은 목록 — 업무와 상태만.
-    expect(find.text('업무'), findsWidgets);
+    // 리스트와 같은 표 — 열은 다 있고, 넘치는 칸은 가로 스크롤 줄로 본다.
+    for (final h in ['업무', '유형', '우선순위', '상태', '마감일']) {
+      expect(find.text(h), findsWidgets, reason: h);
+    }
     expect(find.text('제작 중'), findsOneWidget);
-    expect(find.text('유형'), findsNothing);
-    expect(find.text('우선순위'), findsNothing);
-    expect(find.text('마감일'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(TaskListTable),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is SingleChildScrollView &&
+              w.scrollDirection == Axis.horizontal,
+        ),
+      ),
+      findsOneWidget,
+    );
 
     // 메뉴는 접혀 있고, » 를 누르면 겹쳐서 펼쳐진다.
     expect(strip, findsOneWidget);

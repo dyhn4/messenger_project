@@ -32,7 +32,16 @@ final mutedScrollbarThemeData = ScrollbarThemeData(
 class MutedScrollbar extends StatelessWidget {
   final ScrollController? controller;
   final Widget child;
-  const MutedScrollbar({super.key, this.controller, required this.child});
+
+  /// 어떤 스크롤 알림에 반응할지 — 가로 스크롤 안에 든 세로 목록처럼 바로 아래 자식이 아닌
+  /// 목록에 붙일 때 준다(없으면 Scrollbar 기본: 바로 아래 스크롤만).
+  final ScrollNotificationPredicate? notificationPredicate;
+  const MutedScrollbar({
+    super.key,
+    this.controller,
+    this.notificationPredicate,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +49,8 @@ class MutedScrollbar extends StatelessWidget {
       data: mutedScrollbarThemeData,
       child: Scrollbar(
         controller: controller,
+        notificationPredicate:
+            notificationPredicate ?? defaultScrollNotificationPredicate,
         thumbVisibility: true,
         trackVisibility: true,
         child: child,

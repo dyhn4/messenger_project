@@ -14,6 +14,7 @@ import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
 import 'message_actions.dart';
+import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
@@ -57,7 +58,12 @@ class MessageCommentsCard extends StatelessWidget {
   final String? currentUserId;
   final String Function(String relative) resolveUrl;
   final VoidCallback onTap;
-  final Future<void> Function(String commentId, String text)? onEditComment;
+  final Future<void> Function(
+    String commentId,
+    String text, {
+    List<TextFormatRun>? format,
+  })?
+  onEditComment;
   final Future<void> Function(String commentId)? onDeleteComment;
 
   const MessageCommentsCard({
@@ -269,7 +275,12 @@ class CommentEntryLine extends StatefulWidget {
   final AppUser? sender;
   final bool isMine;
   final String Function(String relative) resolveUrl;
-  final Future<void> Function(String commentId, String text)? onEdit;
+  final Future<void> Function(
+    String commentId,
+    String text, {
+    List<TextFormatRun>? format,
+  })?
+  onEdit;
   final Future<void> Function(String commentId)? onDelete;
   final bool fullWidth;
 
@@ -319,7 +330,8 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   Timer? _hoverExitTimer;
   bool _editing = false;
   bool _savingEdit = false;
-  final _editController = TextEditingController();
+  final _editController = RichTextEditingController();
+  final _editFocus = FocusNode();
 
   final _toolbarPortal = OverlayPortalController();
 
@@ -327,6 +339,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   void dispose() {
     _hoverExitTimer?.cancel();
     _editController.dispose();
+    _editFocus.dispose();
     super.dispose();
   }
 
@@ -388,10 +401,8 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       );
       return;
     }
-    setState(() {
-      _editing = true;
-      _editController.text = widget.comment.text ?? '';
-    });
+    setState(() => _editing = true);
+    _editController.load(widget.comment.text ?? '', widget.comment.textFormat);
     _syncToolbarPortal(); // 수정 중에는 툴바를 닫는다.
   }
 
@@ -401,11 +412,11 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   }
 
   Future<void> _saveEdit() async {
-    final text = _editController.text.trim();
+    final (:text, :format) = _editController.formatted();
     if (text.isEmpty) return;
     setState(() => _savingEdit = true);
     try {
-      await widget.onEdit!(widget.comment.id, text);
+      await widget.onEdit!(widget.comment.id, text, format: format);
       if (mounted) setState(() => _editing = false);
     } catch (e) {
       if (mounted) {
@@ -554,11 +565,21 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           if (comment.type != MessageType.text &&
               comment.type != MessageType.sticker &&
               (comment.text?.isNotEmpty ?? false)) ...[
-            Text(comment.text!, style: const TextStyle(fontSize: 13)),
+            FormattedText(
+              comment.text!,
+              format: comment.textFormat,
+              style: const TextStyle(fontSize: 13),
+              linkColor: Colors.blue,
+            ),
             const SizedBox(height: 4),
           ],
           if (comment.type == MessageType.text)
-            Text(comment.text ?? '', style: const TextStyle(fontSize: 13))
+            FormattedText(
+              comment.text ?? '',
+              format: comment.textFormat,
+              style: const TextStyle(fontSize: 13),
+              linkColor: Colors.blue,
+            )
           else
             _buildAttachment(context),
           if (comment.editedAt != null)
@@ -795,16 +816,21 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
+        RichFormatToolbar(controller: _editController, focusNode: _editFocus),
+        RichFieldWrapper(
           controller: _editController,
-          autofocus: true,
-          maxLines: null,
-          style: const TextStyle(fontSize: 13),
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(),
+          child: TextField(
+            controller: _editController,
+            focusNode: _editFocus,
+            autofocus: true,
+            maxLines: null,
+            style: const TextStyle(fontSize: 13),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (_) => _saveEdit(),
           ),
-          onSubmitted: (_) => _saveEdit(),
         ),
         const SizedBox(height: 4),
         Row(

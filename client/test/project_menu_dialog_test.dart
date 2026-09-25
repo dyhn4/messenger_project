@@ -20,6 +20,7 @@ void main() {
 
     final calls = <String, dynamic>{};
     var deleted = false;
+    const isPublic = false;
     final client = MockClient((request) async {
       final path = request.url.path;
       if (request.method == 'PATCH') {
@@ -38,7 +39,7 @@ void main() {
             'name': '잔디톡',
             'identifier': 'TA',
             'color': '#5B8DEF',
-            'isPublic': true,
+            'isPublic': isPublic,
             'myRole': 'owner',
             'createdAt': DateTime.now().millisecondsSinceEpoch,
             'members': [
@@ -124,9 +125,9 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, '저장'));
     await tester.pumpAndSettle();
     expect(calls['PATCH /api/projects/p1']['name'], '새 이름');
-    expect(calls['PATCH /api/projects/p1']['isPublic'], true);
+    expect(calls['PATCH /api/projects/p1']['isPublic'], false);
 
-    // 멤버 → 두 패널(멤버 / 담당자)로 나뉘고, 체크 후 화살표로 담당자가 된다.
+    // 멤버(비공개 프로젝트) → 두 패널(멤버 / 담당자)로 나뉘고, 체크 후 화살표로 담당자가 된다.
     await tester.tap(find.text('멤버').first);
     await tester.pumpAndSettle();
     expect(find.text('멤버 관리'), findsOneWidget);
@@ -198,5 +199,81 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('공개 프로젝트의 멤버 화면은 담당자 목록 하나만 보여준다', (tester) async {
+    tester.view.physicalSize = const Size(1400, 950);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final client = MockClient((request) async {
+      if (request.url.path == '/api/projects/p1') {
+        return http.Response(
+          jsonEncode({
+            'id': 'p1',
+            'teamId': 't1',
+            'name': '잔디톡',
+            'identifier': 'TA',
+            'color': '#5B8DEF',
+            'isPublic': true,
+            'myRole': 'owner',
+            'createdAt': DateTime.now().millisecondsSinceEpoch,
+            'members': [
+              {
+                'id': 'u1',
+                'username': 'riley',
+                'name': 'Riley',
+                'projectRole': 'owner',
+              },
+              {
+                'id': 'u2',
+                'username': 'sam',
+                'name': 'Sam',
+                'projectRole': 'member',
+              },
+            ],
+          }),
+          200,
+          headers: json,
+        );
+      }
+      return http.Response('[]', 200, headers: json);
+    });
+    final session = Session(
+      notifications: NotificationService(),
+      settings: AppSettings(),
+    );
+    session.api = ApiClient(
+      baseUrl: 'https://test.local',
+      token: 't',
+      httpClient: client,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => showProjectMenuDialog(context, session, 'p1'),
+              child: const Text('열기'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('멤버').first);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('멤버 관리'), findsNothing);
+    expect(find.text('프로젝트 멤버'), findsNothing);
+    expect(find.text('프로젝트 담당자'), findsWidgets); // 제목 + 목록 상자
+    expect(find.text('담당자 추가'), findsOneWidget);
+    expect(find.text('프로젝트에 담당자를 지정합니다.'), findsOneWidget);
+    // 담당자(Riley)만 보이고, 일반 멤버(Sam)·체크상자는 없다.
+    expect(find.text('Riley'), findsOneWidget);
+    expect(find.text('Sam'), findsNothing);
+    expect(find.byType(Checkbox), findsNothing);
   });
 }

@@ -48,15 +48,11 @@ class MyTasksView extends StatefulWidget {
   final String teamId;
   final int reloadTick;
 
-  /// 창이 좁을 때(프로젝트 창 800px 이하) — 표 대신 업무·상태만 있는 목록으로 보여준다.
-  final bool narrow;
-
   const MyTasksView({
     super.key,
     required this.session,
     required this.teamId,
     required this.reloadTick,
-    this.narrow = false,
   });
 
   @override
@@ -196,7 +192,6 @@ class _MyTasksViewState extends State<MyTasksView> {
             tasks: visible,
             session: widget.session,
             onOpen: _openTask,
-            narrow: widget.narrow,
             emptyText: all.isEmpty ? '담당하거나 참조된 업무가 없습니다.' : '조건에 맞는 업무가 없습니다.',
             // 표에서 배지로 유형·우선순위·상태를 바꾸면 목록을 다시 읽는다.
             onChanged: _load,

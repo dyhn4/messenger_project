@@ -8,6 +8,7 @@ import '../../widgets/dashed_add_button.dart';
 import '../../widgets/date_drop_calendar.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
+import 'task_comments_section.dart';
 import 'task_views.dart' show formatYmd;
 
 /// 미니 모드일 때의 패널 폭 — 목록과 나란히 두기에 답답하지 않은 선.
@@ -38,7 +39,12 @@ class TaskDetailPanel extends StatefulWidget {
     required this.onClose,
     required this.onOpenTask,
     this.onChanged,
+    this.reloadTick = 0,
   });
+
+  /// 바뀌면 업무를 다시 읽는다 — 패널이 열린 채 뒤 화면(간트차트 막대 끌기, 목록 배지 등)에서
+  /// 업무를 고쳤을 때 패널에도 바로 보이게.
+  final int reloadTick;
 
   @override
   State<TaskDetailPanel> createState() => _TaskDetailPanelState();
@@ -54,7 +60,6 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
 
   final _newChecklist = TextEditingController();
   final _newSubtask = TextEditingController();
-  final _comment = TextEditingController();
   final _scroll = ScrollController();
 
   /// 상위 업무 id → 제목(상세 응답에 부모 제목이 없어서 한 번 받아와 기억해둔다).
@@ -78,6 +83,8 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       _editingTitle = null;
       _editingDescription = null;
       _load();
+    } else if (old.reloadTick != widget.reloadTick) {
+      _load();
     }
   }
 
@@ -85,7 +92,6 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
   void dispose() {
     _newChecklist.dispose();
     _newSubtask.dispose();
-    _comment.dispose();
     _scroll.dispose();
     _editingTitle?.dispose();
     _editingDescription?.dispose();
@@ -1014,11 +1020,14 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
   }
 
   /// 하위 업무 한 줄 — 제목, 그리고 오른쪽에 담당자·마감일·상태.
+  /// 담당자·마감일은 비어 있어도 자리를 비워두지 않고 "미배정" 동그라미와 "-"를 그려서,
+  /// 여러 줄의 칸이 위아래로 가지런히 맞게 한다.
   Widget _subtaskRow(Task sub) {
     final theme = Theme.of(context);
     final assignee = (_project?.members ?? const <AppUser>[])
         .where((m) => m.id == sub.assigneeId)
         .firstOrNull;
+    final due = sub.dueDate;
     return InkWell(
       onTap: () => widget.onOpenTask(sub.id),
       child: Padding(
@@ -1034,24 +1043,38 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               ),
             ),
             const SizedBox(width: 8),
-            if (assignee != null) ...[
-              UserAvatar(
-                user: assignee,
-                resolveUrl: widget.session.resolveUrl,
-                radius: 10,
-              ),
-              const SizedBox(width: 8),
-            ],
-            if (sub.dueDate != null) ...[
-              Text(
-                '${sub.dueDate!.month}. ${sub.dueDate!.day}.',
+            Tooltip(
+              message: assignee?.name ?? '미배정',
+              child: assignee != null
+                  ? UserAvatar(
+                      user: assignee,
+                      resolveUrl: widget.session.resolveUrl,
+                      radius: 10,
+                    )
+                  : CircleAvatar(
+                      radius: 10,
+                      backgroundColor: theme.hintColor.withValues(alpha: 0.15),
+                      child: Icon(
+                        Icons.person_outline,
+                        size: 13,
+                        color: theme.hintColor,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 8),
+            // 마감일은 "9.↵26."처럼 월·일을 두 줄로 좁게 — 폭을 고정해 줄마다 칸이 맞는다.
+            SizedBox(
+              width: 24,
+              child: Text(
+                due == null ? '-' : '${due.month}.\n${due.day}.',
                 style: TextStyle(
                   fontSize: 11,
+                  height: 1.15,
                   color: sub.isOverdue ? Colors.redAccent : theme.hintColor,
                 ),
               ),
-              const SizedBox(width: 8),
-            ],
+            ),
+            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
@@ -1086,72 +1109,17 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     );
   }
 
-  Widget _comments(Task task) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          '댓글 (${task.comments.length})',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        for (final c in task.comments)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  c.senderName,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(c.text, style: const TextStyle(fontSize: 13)),
-              ],
-            ),
-          ),
-        if (!_readOnly)
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _comment,
-                  decoration: const InputDecoration(
-                    hintText: '댓글을 입력하세요...',
-                    isDense: true,
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _addComment(task),
-                ),
-              ),
-              const SizedBox(width: 6),
-              FilledButton(
-                onPressed: () => _addComment(task),
-                child: const Text('등록'),
-              ),
-            ],
-          ),
-        if (task.comments.isEmpty && _readOnly)
-          Text(
-            '댓글이 없습니다.',
-            style: TextStyle(color: theme.hintColor, fontSize: 12),
-          ),
-      ],
-    );
-  }
+  /// 댓글 · 기록 탭.
+  Widget _comments(Task task) => TaskCommentsSection(
+    session: widget.session,
+    task: task,
+    members: _project?.members ?? const <AppUser>[],
+    readOnly: _readOnly,
+    canModerate: _project?.memberRoles[widget.session.userId] == 'owner',
+    apply: _apply,
+  );
 
-  void _addComment(Task task) {
-    final text = _comment.text.trim();
-    if (text.isEmpty) return;
-    _comment.clear();
-    _apply(() => widget.session.api!.addTaskComment(task.id, text));
-  }
-
-  /// 프로젝트 이름 · 만든 날짜 · 만든 사람 한 줄.
+  /// 프로젝트 이름 · 만든 날짜 한 줄, 오른쪽 끝에 만든 사람.
   Widget _byline(Task task) {
     final theme = Theme.of(context);
     return Row(
@@ -1165,7 +1133,9 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
           ),
         ),
         const SizedBox(width: 6),
-        Flexible(
+        // 글자 칸이 남는 폭을 다 차지해야 생성자가 오른쪽 끝에 붙는다(Flexible+Spacer면
+        // 남는 폭을 반씩 나눠 생성자가 가운데로 간다).
+        Expanded(
           child: Text(
             '${task.projectName ?? ''} · ${formatYmd(task.createdAt)}',
             maxLines: 1,
@@ -1173,13 +1143,39 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             style: TextStyle(color: theme.hintColor, fontSize: 12),
           ),
         ),
-        const Spacer(),
-        if (task.creatorName != null)
+        if (task.creatorName != null) _creator(task),
+      ],
+    );
+  }
+
+  /// 업무를 만든 사람 — 프로필 사진과 이름.
+  Widget _creator(Task task) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: '생성자',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          UserAvatar(
+            user: AppUser(
+              id: task.creatorId ?? '',
+              username: task.creatorName!,
+              name: task.creatorName!,
+              avatarType: task.creatorAvatarType,
+              avatarEmoji: task.creatorAvatarEmoji,
+              avatarColor: task.creatorAvatarColor,
+              avatarUrl: task.creatorAvatarUrl,
+            ),
+            resolveUrl: widget.session.resolveUrl,
+            radius: 10,
+          ),
+          const SizedBox(width: 6),
           Text(
             task.creatorName!,
             style: TextStyle(color: theme.hintColor, fontSize: 12),
           ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1273,16 +1269,39 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
   );
 }
 
+/// 업무 패널이 본문 오른쪽에 나란히 붙어 있을 때 그 폭(없으면 0) — 업무 목록 표가 이만큼은
+/// "패널 뒤로 가려진 자리"로 보고, 패널이 없을 때의 열 배치를 유지한 채 뒤쪽 열(생성자·생성일
+/// 등)만 패널 아래로 밀어 둔다(가로 스크롤로 볼 수 있다).
+class TaskPanelInset extends InheritedWidget {
+  final double width;
+  const TaskPanelInset({super.key, required this.width, required super.child});
+
+  static double of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<TaskPanelInset>()?.width ?? 0;
+
+  @override
+  bool updateShouldNotify(TaskPanelInset old) => old.width != width;
+}
+
 /// "프로젝트" 창이 아래 화면들에게 "업무 상세는 오른쪽 패널로 연다"고 알려주는 통로.
 /// 목록·홈·검색·알림 등 여러 곳에서 업무를 여는데, 그때마다 콜백을 넘겨 내려보내는 대신
 /// 이 Scope를 찾아 [open]을 부른다. Scope가 없으면(프로젝트 창 밖) 예전처럼 팝업으로 뜬다.
 class TaskPanelScope extends InheritedWidget {
   final ValueChanged<String> openTask;
+
+  /// 뒤 화면에서 업무를 고쳤다고 알린다 — 열려 있는 업무 패널이 다시 읽는다.
+  final VoidCallback? tasksChanged;
+
   const TaskPanelScope({
     super.key,
     required this.openTask,
+    this.tasksChanged,
     required super.child,
   });
+
+  /// [context] 위에 Scope가 있으면 열린 업무 패널에 "업무가 바뀌었다"고 알린다.
+  static void notifyChanged(BuildContext context) =>
+      maybeOf(context)?.tasksChanged?.call();
 
   static TaskPanelScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<TaskPanelScope>();

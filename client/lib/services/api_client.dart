@@ -15,6 +15,7 @@ import '../models/message.dart';
 import '../models/project.dart';
 import '../models/room.dart';
 import '../models/team.dart';
+import '../models/text_format.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
 
 class ApiException implements Exception {
@@ -1987,11 +1988,40 @@ class ApiClient {
     );
   }
 
-  Future<TaskComment> addTaskComment(String taskId, String text) async {
+  /// [parentCommentId]를 주면 그 댓글의 답글로 단다.
+  Future<TaskComment> addTaskComment(
+    String taskId,
+    String text, {
+    List<TextFormatRun>? textFormat,
+    String? parentCommentId,
+  }) async {
     return TaskComment.fromJson(
-      await _post('/api/tasks/$taskId/comments', {'text': text})
+      await _post('/api/tasks/$taskId/comments', {
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+            'parentCommentId': ?parentCommentId,
+          })
           as Map<String, dynamic>,
     );
+  }
+
+  Future<TaskComment> updateTaskComment(
+    String commentId,
+    String text, {
+    List<TextFormatRun>? textFormat,
+  }) async {
+    return TaskComment.fromJson(
+      await _patch('/api/task-comments/$commentId', {
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 댓글 삭제 — 달린 답글도 같이 지워진다.
+  Future<void> deleteTaskComment(String commentId) async {
+    await _delete('/api/task-comments/$commentId');
   }
 
   Future<Room> createTopic({
@@ -2183,6 +2213,7 @@ class ApiClient {
   Future<Comment> addComment(
     String messageId, {
     String? text,
+    List<TextFormatRun>? textFormat,
     String type = 'text',
     String? fileUrl,
     String? fileName,
@@ -2193,6 +2224,7 @@ class ApiClient {
     return Comment.fromJson(
       await _post('/api/messages/$messageId/comments', {
             'text': ?text,
+            'textFormat': ?textFormatToJson(textFormat),
             'type': type,
             'fileUrl': ?fileUrl,
             'fileName': ?fileName,
@@ -2204,9 +2236,16 @@ class ApiClient {
     );
   }
 
-  Future<Comment> editComment(String commentId, String text) async {
+  Future<Comment> editComment(
+    String commentId,
+    String text, {
+    List<TextFormatRun>? textFormat,
+  }) async {
     return Comment.fromJson(
-      await _patch('/api/comments/$commentId', {'text': text})
+      await _patch('/api/comments/$commentId', {
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+          })
           as Map<String, dynamic>,
     );
   }
@@ -2215,9 +2254,16 @@ class ApiClient {
     await _delete('/api/comments/$commentId');
   }
 
-  Future<Message> editMessage(String messageId, String text) async {
+  Future<Message> editMessage(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? textFormat,
+  }) async {
     return Message.fromJson(
-      await _patch('/api/messages/$messageId', {'text': text})
+      await _patch('/api/messages/$messageId', {
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+          })
           as Map<String, dynamic>,
     );
   }

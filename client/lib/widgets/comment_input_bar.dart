@@ -14,6 +14,7 @@ import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
 import 'attachment_widgets.dart';
 import 'muted_scrollbar.dart';
+import 'rich_text_format.dart';
 
 /// ChatInputBar의 _PendingAttachment와 동일한 목적 — 첨부한 즉시 업로드가 시작되고,
 /// [result]가 채워지면 업로드가 끝난 것.
@@ -74,10 +75,13 @@ class CommentInputBar extends StatefulWidget {
 /// ChatInputBarState와 같은 이유로 public — message_thread_screen.dart가 GlobalKey로 접근해
 /// addDroppedFiles를 호출한다.
 class CommentInputBarState extends State<CommentInputBar> {
-  final _controller = TextEditingController();
+  final _controller = RichTextEditingController();
   final _focusNode = FocusNode();
   final _attachments = <_PendingAttachment>[];
   bool _sending = false;
+
+  /// 서식 도구모음을 펼쳤는지(ChatInputBarState와 동일).
+  bool _formatOpen = false;
 
   bool get _uploading => _attachments.any((a) => a.result == null);
 
@@ -90,6 +94,7 @@ class CommentInputBarState extends State<CommentInputBar> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKey);
+    _controller.formattingEnabled = !widget.controller.room.isSecret;
     // ChatInputBarState와 동일 — 포커스를 얻으면 안내 문구를 감춘다.
     _focusNode.addListener(_onFocusChange);
   }
@@ -224,7 +229,7 @@ class CommentInputBarState extends State<CommentInputBar> {
   }
 
   Future<void> _send() async {
-    final text = _controller.text.trim();
+    final (:text, :format) = _controller.formatted();
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
     if (_uploading) return;
@@ -248,7 +253,11 @@ class CommentInputBarState extends State<CommentInputBar> {
       }
 
       if (toSend.isEmpty) {
-        await widget.controller.postComment(widget.messageId, text);
+        await widget.controller.postComment(
+          widget.messageId,
+          text,
+          format: format,
+        );
       } else {
         // 첨부와 함께 입력한 댓글은 별도 댓글로 보내지 않고, 첫 번째 첨부의 캡션으로 붙인다.
         // 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그 결과로 댓글만 단다.
@@ -258,6 +267,7 @@ class CommentInputBarState extends State<CommentInputBar> {
             widget.messageId,
             a.result!,
             caption: i == 0 ? text : null,
+            captionFormat: i == 0 ? format : null,
           );
         }
       }
@@ -317,30 +327,44 @@ class CommentInputBarState extends State<CommentInputBar> {
             // 그 아래 별도 줄에 둔다. TextField(EditableText)는 여러 줄일 때 조상
             // ScrollConfiguration과 무관하게 항상 자체 스크롤바를 강제로 붙이므로, 따로
             // Scrollbar를 얹지 않고 그 자동 스크롤바에 이 테마만 씌운다.
-            ScrollbarTheme(
-              data: mutedScrollbarThemeData,
-              child: TextField(
+            RichFormatFrame(
+              open: _formatOpen,
+              focused: _focusNode.hasFocus,
+              toolbar: RichFormatToolbar(
                 controller: _controller,
                 focusNode: _focusNode,
-                autofocus: true,
-                decoration: InputDecoration(
-                  // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                  // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                  hintText: _focusNode.hasFocus ? null : '댓글 입력',
-                  border: const OutlineInputBorder(),
-                  // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
-                  // 가깝게 붙인다.
-                  contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
+              ),
+              child: ScrollbarTheme(
+                data: mutedScrollbarThemeData,
+                child: RichFieldWrapper(
+                  controller: _controller,
+                  child: TextField(
+                    key: const ValueKey('comment-input'),
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                      // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                      hintText: _focusNode.hasFocus ? null : '댓글 입력',
+                      border: _formatOpen
+                          ? InputBorder.none
+                          : const OutlineInputBorder(),
+                      // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
+                      // 가깝게 붙인다.
+                      contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
+                    ),
+                    minLines: 1,
+                    maxLines: 6,
+                    // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
+                    // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
+                    // _handleKey가 순수 Enter만 직접 가로채 보낸다.
+                    textInputAction: Platform.isWindows
+                        ? TextInputAction.newline
+                        : TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                  ),
                 ),
-                minLines: 1,
-                maxLines: 6,
-                // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
-                // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
-                // _handleKey가 순수 Enter만 직접 가로채 보낸다.
-                textInputAction: Platform.isWindows
-                    ? TextInputAction.newline
-                    : TextInputAction.send,
-                onSubmitted: (_) => _send(),
               ),
             ),
             const SizedBox(height: 4),
@@ -373,6 +397,14 @@ class CommentInputBarState extends State<CommentInputBar> {
                       onPressed: _sending ? null : _pickFile,
                       tooltip: '파일 첨부',
                     ),
+                    if (!widget.controller.room.isSecret)
+                      RichFormatToggleButton(
+                        open: _formatOpen,
+                        onPressed: () {
+                          setState(() => _formatOpen = !_formatOpen);
+                          _focusNode.requestFocus();
+                        },
+                      ),
                     const Spacer(),
                     if (showHint) ...[
                       Text(

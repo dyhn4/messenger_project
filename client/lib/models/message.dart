@@ -1,4 +1,5 @@
 import 'comment.dart';
+import 'text_format.dart';
 
 /// 메시지에 들어있는 링크의 오픈그래프 미리보기(server/src/linkPreview.js) — 메시지 전송
 /// 직후엔 없다가(서버가 백그라운드로 긁어옴) 나중에 message:linkPreview로 채워질 수 있어서
@@ -49,6 +50,9 @@ class Message {
 
   /// 수정하면 그 자리에서 바뀐다(RoomChatController.applyEdit) — 그래서 non-final.
   String? text;
+
+  /// [text]에 걸린 글자 서식(굵게 등). 수정하면 같이 바뀐다.
+  List<TextFormatRun>? textFormat;
   final String? fileUrl; // 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다.
 
   /// 비밀 대화에서는 서버가 실제 파일명/종류를 못 보게 더미 값("encrypted" 등)만 받고,
@@ -139,6 +143,7 @@ class Message {
     required this.senderName,
     required this.type,
     this.text,
+    this.textFormat,
     this.fileUrl,
     this.fileName,
     this.fileSize,
@@ -175,6 +180,7 @@ class Message {
       senderName: json['senderName'] as String,
       type: _typeFromString(json['type'] as String?),
       text: json['text'] as String?,
+      textFormat: parseTextFormat(json['textFormat']),
       fileUrl: json['fileUrl'] as String?,
       fileName: json['fileName'] as String?,
       fileSize: (json['fileSize'] as num?)?.toInt(),

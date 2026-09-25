@@ -18,6 +18,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
+import '../widgets/grab_cursors.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
 /// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 다섯 탭.
@@ -864,7 +865,7 @@ class _PositionOptionPill extends StatelessWidget {
         return true;
       },
       builder: (context, _, _) => MouseRegion(
-        cursor: SystemMouseCursors.grab,
+        cursor: GrabCursors.open,
         child: Draggable<String>(
           data: option.id,
           onDragStarted: onDragStarted,

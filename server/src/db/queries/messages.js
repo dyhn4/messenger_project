@@ -68,8 +68,12 @@ export async function getLastMessageForPreview(roomId) {
   return row ?? null;
 }
 
-export async function updateMessageText(id, text) {
-  const [row] = await db.update(messages).set({ text, editedAt: new Date() }).where(eq(messages.id, id)).returning();
+export async function updateMessageText(id, text, textFormat = null) {
+  const [row] = await db
+    .update(messages)
+    .set({ text, textFormat, editedAt: new Date() })
+    .where(eq(messages.id, id))
+    .returning();
   return row;
 }
 
@@ -94,7 +98,7 @@ export async function updateMessageLinkPreview(id, preview) {
 export async function softDeleteMessage(id) {
   const [row] = await db
     .update(messages)
-    .set({ deletedAt: new Date(), text: null, fileUrl: null, fileName: null, fileSize: null, mimeType: null })
+    .set({ deletedAt: new Date(), text: null, textFormat: null, fileUrl: null, fileName: null, fileSize: null, mimeType: null })
     .where(eq(messages.id, id))
     .returning();
   return row;

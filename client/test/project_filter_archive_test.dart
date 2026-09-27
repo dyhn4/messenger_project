@@ -221,6 +221,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    // 처음은 대시보드 — 이 테스트들은 리스트를 본다.
+    await tester.tap(find.text('리스트'));
+    await tester.pumpAndSettle();
   }
 
   testWidgets('리스트에 사용자 정의 필드 열이 붙고, 필터로 값이 같은 업무만 본다', (tester) async {

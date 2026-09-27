@@ -6,20 +6,96 @@ import '../../services/session.dart';
 import '../../services/time_format.dart';
 import '../../widgets/hover_toolbar.dart' show hoverMenuItem;
 import '../../widgets/rich_text_format.dart';
+import '../../widgets/my_avatar.dart';
 import '../../widgets/user_avatar.dart';
 
-/// 업무 상세 아래쪽 — "댓글 (n) | 기록" 탭.
+/// 댓글 한 개(업무·노트 공통).
+class CommentEntry {
+  final String id;
+
+  /// 답글이면 그 댓글(한 단계까지만).
+  final String? parentId;
+  final String? senderId;
+  final String senderName;
+  final String text;
+  final List<TextFormatRun>? format;
+  final DateTime createdAt;
+  final DateTime? editedAt;
+  const CommentEntry({
+    required this.id,
+    this.parentId,
+    this.senderId,
+    required this.senderName,
+    required this.text,
+    this.format,
+    required this.createdAt,
+    this.editedAt,
+  });
+}
+
+/// 댓글을 달고·고치고·지우는 방법 — 업무·노트마다 다른 API를 쓴다.
+class CommentActions {
+  final Future<void> Function(
+    String text,
+    List<TextFormatRun>? format, {
+    String? parentId,
+  })
+  add;
+  final Future<void> Function(
+    String id,
+    String text,
+    List<TextFormatRun>? format,
+  )
+  update;
+  final Future<void> Function(String id) delete;
+  const CommentActions({
+    required this.add,
+    required this.update,
+    required this.delete,
+  });
+}
+
+/// "댓글 (n) | 기록" 탭 — 업무 패널과 노트가 같이 쓴다.
 ///
-/// 댓글 탭: 위에 새 댓글 입력칸, 아래 회색 바탕에 댓글 카드들(최신이 위). 카드 밑 도구모음의
-/// 첫 버튼이 답글, 삼점이 수정·삭제. 답글은 한 단계까지라 답글의 "답글"도 같은 댓글 아래에 단다.
-/// 기록 탭: 누가 언제 무엇을 바꿨는지(서버가 문장으로 남겨 둔 것).
-class TaskCommentsSection extends StatefulWidget {
+/// 댓글 탭: 위에 새 댓글 입력칸(서식 도구모음), 아래 회색 바탕에 댓글 카드들(최신이 위). 카드 밑
+/// 도구모음의 첫 버튼이 답글, 삼점이 수정·삭제. 답글은 한 단계까지라 답글의 "답글"도 같은 댓글
+/// 아래에 단다. 기록 탭 내용은 [history]가 그린다.
+class CommentsSection extends StatefulWidget {
   final Session session;
-  final Task task;
+  final List<CommentEntry> comments;
+
+  /// 댓글 쓴 사람 사진을 찾을 구성원(없으면 이니셜).
   final List<AppUser> members;
   final bool readOnly;
 
   /// 프로젝트 담당자 — 남의 댓글도 지울 수 있다(서버도 같은 규칙).
+  final bool canModerate;
+  final CommentActions actions;
+
+  /// 기록 탭 내용.
+  final WidgetBuilder history;
+
+  const CommentsSection({
+    super.key,
+    required this.session,
+    required this.comments,
+    required this.members,
+    required this.readOnly,
+    required this.canModerate,
+    required this.actions,
+    required this.history,
+  });
+
+  @override
+  State<CommentsSection> createState() => _CommentsSectionState();
+}
+
+/// 업무 상세 아래쪽 댓글·기록 — 공용 [CommentsSection]에 업무 댓글과 업무 기록을 넣는다.
+class TaskCommentsSection extends StatelessWidget {
+  final Session session;
+  final Task task;
+  final List<AppUser> members;
+  final bool readOnly;
   final bool canModerate;
 
   /// 서버에 반영하고 업무를 다시 불러온다(업무 상세 패널의 _apply).
@@ -36,10 +112,46 @@ class TaskCommentsSection extends StatefulWidget {
   });
 
   @override
-  State<TaskCommentsSection> createState() => _TaskCommentsSectionState();
+  Widget build(BuildContext context) {
+    final api = session.api!;
+    return CommentsSection(
+      session: session,
+      comments: [
+        for (final c in task.comments)
+          CommentEntry(
+            id: c.id,
+            parentId: c.parentCommentId,
+            senderId: c.senderId,
+            senderName: c.senderName,
+            text: c.text,
+            format: c.textFormat,
+            createdAt: c.createdAt,
+            editedAt: c.editedAt,
+          ),
+      ],
+      members: members,
+      readOnly: readOnly,
+      canModerate: canModerate,
+      actions: CommentActions(
+        add: (text, format, {parentId}) => apply(
+          () => api.addTaskComment(
+            task.id,
+            text,
+            textFormat: format,
+            parentCommentId: parentId,
+          ),
+        ),
+        update: (id, text, format) =>
+            apply(() => api.updateTaskComment(id, text, textFormat: format)),
+        delete: (id) => apply(() => api.deleteTaskComment(id)),
+      ),
+      history: (_) =>
+          TaskHistoryView(session: session, task: task, members: members),
+    );
+  }
 }
 
-class _TaskCommentsSectionState extends State<TaskCommentsSection> {
+class _CommentsSectionState extends State<CommentsSection> {
   int _tab = 0;
 
   final _newText = RichTextEditingController();
@@ -89,13 +201,7 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
     if (text.isEmpty) return;
     _newText.clear();
     _newFocus.unfocus();
-    await widget.apply(
-      () => widget.session.api!.addTaskComment(
-        widget.task.id,
-        text,
-        textFormat: format,
-      ),
-    );
+    await widget.actions.add(text, format);
   }
 
   void _openReply(String threadId) {
@@ -114,38 +220,28 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
     if (text.isEmpty) return;
     setState(() => _replyTo = null);
     _replyText.clear();
-    await widget.apply(
-      () => widget.session.api!.addTaskComment(
-        widget.task.id,
-        text,
-        textFormat: format,
-        parentCommentId: threadId,
-      ),
-    );
+    await widget.actions.add(text, format, parentId: threadId);
   }
 
-  void _startEdit(TaskComment c) {
+  void _startEdit(CommentEntry c) {
     setState(() {
       _replyTo = null;
       _editing = c.id;
     });
-    _editText.load(c.text, c.textFormat);
+    _editText.load(c.text, c.format);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _editFocus.requestFocus(),
     );
   }
 
-  Future<void> _submitEdit(TaskComment c) async {
+  Future<void> _submitEdit(CommentEntry c) async {
     final (:text, :format) = _editText.formatted();
     if (text.isEmpty) return;
     setState(() => _editing = null);
-    await widget.apply(
-      () =>
-          widget.session.api!.updateTaskComment(c.id, text, textFormat: format),
-    );
+    await widget.actions.update(c.id, text, format);
   }
 
-  Future<void> _delete(TaskComment c, {required bool hasReplies}) async {
+  Future<void> _delete(CommentEntry c, {required bool hasReplies}) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -167,7 +263,7 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
       ),
     );
     if (ok != true) return;
-    await widget.apply(() => widget.session.api!.deleteTaskComment(c.id));
+    await widget.actions.delete(c.id);
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────
@@ -213,23 +309,28 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
         border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
       child: Row(
-        children: [tab('댓글 (${widget.task.comments.length})', 0), tab('기록', 1)],
+        children: [tab('댓글 (${widget.comments.length})', 0), tab('기록', 1)],
       ),
     );
   }
 
   Widget _newCommentInput(ThemeData theme) {
     final me = widget.session.userId;
+    final inMembers = widget.members.any((m) => m.id == me);
     return Padding(
       padding: const EdgeInsets.only(top: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          UserAvatar(
-            user: _userFor(me, ''),
-            resolveUrl: widget.session.resolveUrl,
-            radius: 14,
-          ),
+          // 구성원 목록에 내가 없으면(노트) 세션의 내 프로필로.
+          if (inMembers)
+            UserAvatar(
+              user: _userFor(me, ''),
+              resolveUrl: widget.session.resolveUrl,
+              radius: 14,
+            )
+          else
+            MyAvatar(session: widget.session, radius: 14),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -295,7 +396,7 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
   /// 댓글(또는 답글) 한 개 — 아바타, 이름·시각, 본문, 도구모음(답글 / 삼점: 수정·삭제).
   Widget _comment(
     ThemeData theme,
-    TaskComment c, {
+    CommentEntry c, {
     required String threadId,
     required bool hasReplies,
   }) {
@@ -352,7 +453,7 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
               else
                 FormattedText(
                   c.text,
-                  format: c.textFormat,
+                  format: c.format,
                   style: const TextStyle(fontSize: 13),
                 ),
               if (!widget.readOnly && !editing)
@@ -420,7 +521,7 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
     onPressed: onPressed,
   );
 
-  Widget _thread(ThemeData theme, TaskComment c, List<TaskComment> replies) {
+  Widget _thread(ThemeData theme, CommentEntry c, List<CommentEntry> replies) {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       decoration: BoxDecoration(
@@ -454,13 +555,13 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
   }
 
   Widget _commentsTab(ThemeData theme) {
-    final all = widget.task.comments;
-    final threads = all.where((c) => c.parentCommentId == null).toList()
+    final all = widget.comments;
+    final threads = all.where((c) => c.parentId == null).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final replies = <String, List<TaskComment>>{};
+    final replies = <String, List<CommentEntry>>{};
     for (final c in all) {
-      if (c.parentCommentId != null) {
-        (replies[c.parentCommentId!] ??= []).add(c);
+      if (c.parentId != null) {
+        (replies[c.parentId!] ??= []).add(c);
       }
     }
     for (final list in replies.values) {
@@ -503,6 +604,40 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
     );
   }
 
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _tabs(theme),
+        if (_tab == 0) _commentsTab(theme) else widget.history(context),
+      ],
+    );
+  }
+}
+
+/// 업무 기록 탭 — 상태 구간별로 묶은 누가 언제 무엇을 바꿨는지.
+class TaskHistoryView extends StatefulWidget {
+  final Session session;
+  final Task task;
+  final List<AppUser> members;
+  const TaskHistoryView({
+    super.key,
+    required this.session,
+    required this.task,
+    required this.members,
+  });
+
+  @override
+  State<TaskHistoryView> createState() => _TaskHistoryViewState();
+}
+
+class _TaskHistoryViewState extends State<TaskHistoryView> {
+  AppUser _userFor(String? id, String name) =>
+      widget.members.where((m) => m.id == id).firstOrNull ??
+      AppUser(id: id ?? '', username: '', name: name);
+
   /// 접어 둔 상태 구간(머리줄 기록의 id).
   final _collapsed = <String>{};
 
@@ -526,7 +661,9 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
   /// 이름·날짜·한 사람)이 되고, 그 상태에 머무는 동안의 다른 기록들이 왼쪽 세로줄 아래로
   /// 달린다. 최근 구간이 위, 구간 안에서도 최근 기록이 위. 제목·설명을 바꾼 기록은 새 내용을
   /// 회색 상자로 함께 보여준다.
-  Widget _historyTab(ThemeData theme) {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final task = widget.task;
     final list = task.activities;
     if (list.isEmpty) {
@@ -791,18 +928,6 @@ class _TaskCommentsSectionState extends State<TaskCommentsSection> {
           ),
         ),
       );
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _tabs(theme),
-        if (_tab == 0) _commentsTab(theme) else _historyTab(theme),
-      ],
-    );
-  }
 }
 
 /// 기록 탭 상태 구간의 머리줄에 쓸 값.

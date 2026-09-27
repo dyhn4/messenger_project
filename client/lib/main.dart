@@ -25,6 +25,7 @@ import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'widgets/update_banner.dart';
+import 'services/app_links.dart';
 import 'widgets/grab_cursors.dart';
 
 /// 앱이 완전히 종료된 상태에서 FCM이 도착하면 별도의(=Session이 없는) 격리된 isolate에서
@@ -230,6 +231,10 @@ class _MyAppState extends State<MyApp>
   @override
   void initState() {
     super.initState();
+    // 노트·업무 링크를 누르면 프로젝트 창을 띄워 그 노트·업무를 연다.
+    AppLinks.handler = (href) {
+      if (Platform.isWindows) openProjectWindow(session, openLink: href);
+    };
     WidgetsBinding.instance.addObserver(this);
     appSettings.init();
     notifications

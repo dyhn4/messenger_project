@@ -17,6 +17,8 @@ import '../screens/inquiry_inbox_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/edit_policy.dart';
+import '../models/project.dart' show parseTypeColor;
+import '../services/app_links.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
@@ -429,6 +431,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                             if (!_editing && message.linkPreview != null) ...[
                               const SizedBox(height: 6),
                               _LinkPreviewCard(preview: message.linkPreview!),
+                            ],
+                            // 노트 링크(tangotalk://)가 든 메시지 — 앱 안 링크라 서버가 미리보기를
+                            // 긁어올 수 없어서, 여기서 카드를 만들어 붙인다. 누르면 그 노트가 열린다.
+                            if (!_editing && _appLinkOf(message) != null) ...[
+                              const SizedBox(height: 6),
+                              _AppLinkCard(href: _appLinkOf(message)!),
                             ],
                             // "팀장에게 문의하기"로 온 메시지에만 붙는 바로가기 — 누르면 문의함이
                             // 바로 열린다(chat_input_bar.dart의 _showInquiryDialog 참고).
@@ -865,6 +873,7 @@ class _LinkPreviewCard extends StatelessWidget {
   const _LinkPreviewCard({required this.preview});
 
   Future<void> _open() async {
+    if (AppLinks.open(preview.url)) return;
     try {
       await launchUrl(
         Uri.parse(preview.url),
@@ -950,6 +959,93 @@ class _LinkPreviewCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 노트·업무 링크 카드 — 프로젝트 색 점 · 프로젝트 이름, 그 아래 "노트"·"업무"와 작성자·
+/// 담당자. 값은 링크를 복사할 때 담아 둔 것(AppLinks)이다. 누르면 그 노트·업무가 열린다.
+class _AppLinkCard extends StatelessWidget {
+  final String href;
+  const _AppLinkCard({required this.href});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final link = AppLinks.parse(href);
+    final isTask = link?.kind == 'task';
+    final color = link?.color == null
+        ? theme.colorScheme.primary
+        : parseTypeColor(link!.color);
+    final person = link?.person;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth > 360 ? 360.0 : constraints.maxWidth;
+        return SizedBox(
+          width: width,
+          child: Material(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(10),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => AppLinks.open(href),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: Text(
+                            link?.project ?? 'TangoTalk Project',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      [
+                        isTask ? '업무' : '노트',
+                        if (person != null && person.isNotEmpty)
+                          '${isTask ? '담당자' : '작성자'} $person',
+                      ].join('  ·  '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: theme.hintColor),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 메시지 글에 걸린 첫 앱 링크(노트·업무 링크) — 없으면 null.
+String? _appLinkOf(Message m) {
+  if (m.type != MessageType.text) return null;
+  for (final r in m.textFormat ?? const <TextFormatRun>[]) {
+    if (AppLinks.isAppLink(r.href)) return r.href;
+  }
+  return null;
 }
 
 /// 링크 미리보기 이미지 전용 — 임의의 외부 웹사이트에서 오는 이미지라 그냥 Image.network를

@@ -171,8 +171,9 @@ void pushMessageForwardScreen(
   );
 }
 
-/// 메시지를 업무로 등록한다 — 제목은 메시지 첫 줄, 설명에는 전체 내용과 출처(보낸 사람·대화방·시각)가
-/// 채워진 "새 업무" 창이 열리고, 프로젝트/담당자/마감일 등은 거기서 고른다. 정회원 이상만.
+/// 메시지를 업무로 등록한다 — 설명에 메시지 내용과 출처(보낸 사람·대화방·시각)가 채워진 "새 업무"
+/// 창이 열린다. 업무(제목)는 비워 두어 "업무 입력" 안내가 보이고, 프로젝트/담당자/마감일 등과
+/// 함께 거기서 정한다. 정회원 이상만.
 Future<void> registerMessageAsTask(
   BuildContext context, {
   required Session session,
@@ -181,14 +182,6 @@ Future<void> registerMessageAsTask(
 }) async {
   final body = copyableTextFor(message)?.trim() ?? '';
   final fileName = message.fileName;
-  final firstLine = body
-      .split('\n')
-      .firstWhere((l) => l.trim().isNotEmpty, orElse: () => '');
-  var title = firstLine.trim();
-  if (title.isEmpty) {
-    title = fileName != null ? '[파일] $fileName' : '메시지에서 등록한 업무';
-  }
-  if (title.length > 200) title = title.substring(0, 200);
 
   final rooms = session.rooms.where((r) => r.id == message.roomId);
   final roomName = rooms.isEmpty
@@ -204,12 +197,7 @@ Future<void> registerMessageAsTask(
     '— $senderDisplayName${roomName == null ? '' : ' · $roomName'} · $when 메시지에서 등록',
   ].join('\n\n');
 
-  await openNewTaskFromChat(
-    context,
-    session,
-    initialTitle: title,
-    initialDescription: description,
-  );
+  await openNewTaskFromChat(context, session, initialDescription: description);
 }
 
 /// 대화 화면에서 "새 업무" 창을 연다 — 이 팀에서 참여 중인 프로젝트를 받아와 고르게 한다.

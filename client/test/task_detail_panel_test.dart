@@ -2,14 +2,17 @@ import 'dart:convert';
 
 import 'package:client/models/project.dart';
 import 'package:client/models/team.dart';
+import 'package:client/screens/project/notes_view.dart';
 import 'package:client/screens/project/project_dialog.dart';
 import 'package:client/screens/project/task_detail_panel.dart';
 import 'package:client/screens/project/task_views.dart';
 import 'package:client/services/api_client.dart';
+import 'package:client/services/app_links.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -110,6 +113,23 @@ void main() {
                 subtasks: [task('1032', '매체 규격 검수 회의', parent: '1001')],
               ),
             ),
+            200,
+            headers: _json,
+          );
+        }
+        if (path == '/api/projects') {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'p1',
+                'teamId': 't1',
+                'name': '신제품 런칭 캠페인',
+                'identifier': 'MKT',
+                'color': '#5B8DEF',
+                'myRole': 'owner',
+                'createdAt': now,
+              },
+            ]),
             200,
             headers: _json,
           );
@@ -423,6 +443,157 @@ void main() {
     final before = taskFetches;
     await pumpPanel(tester, session: session, reloadTick: 1);
     expect(taskFetches, greaterThan(before));
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('내 업무에서 업무 패널을 연 채 왼쪽 메뉴의 프로젝트를 누르면 대시보드가 보이고 패널은 닫힌다', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProjectDialog(session: buildSession(), embedInWindow: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('내 업무').first);
+    await tester.pumpAndSettle();
+    tester.widget<TaskPanelScope>(find.byType(TaskPanelScope)).openTask('1001');
+    await tester.pumpAndSettle();
+    expect(find.byType(TaskDetailPanel), findsOneWidget);
+
+    // 왼쪽 메뉴(가장 앞에 그려진 것)의 프로젝트 이름.
+    await tester.tap(find.text('신제품 런칭 캠페인').first);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(TaskDetailPanel), findsNothing);
+    expect(find.text('멤버별 업무현황'), findsOneWidget); // 대시보드 탭
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('업무 칩: 프로젝트 색이고, 누르면 업무 링크가 복사된다', (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    await pumpPanel(tester);
+    final chip = find.text('MKT-1001');
+    expect(tester.widget<Text>(chip).style?.color, const Color(0xFF5B8DEF));
+    await tester.tap(chip);
+    await tester.pump();
+    expect(find.text('링크를 복사했습니다.'), findsOneWidget);
+    expect(copied, startsWith('tangotalk://task/1001'));
+    expect(copied, contains('key=MKT-1001'));
+    expect(copied, contains('project='));
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('업무 링크를 누르면 그 프로젝트의 리스트 탭과 업무 패널이 열린다', (tester) async {
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProjectDialog(session: buildSession(), embedInWindow: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // 홈에 있다가 링크로 연다.
+    AppLinks.requestOpen(
+      AppLinks.task(id: '1001', key: 'MKT-1001', title: '배너'),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(TaskDetailPanel), findsOneWidget);
+    expect(find.byType(TaskListTable), findsOneWidget); // 리스트 탭
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('프로젝트 탭: 노트는 맨 오른쪽, 필터링은 구분선 아래, 노트 탭은 오른쪽 노트 패널로', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProjectDialog(session: buildSession(), embedInWindow: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('신제품 런칭 캠페인').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('리스트'));
+    await tester.pumpAndSettle();
+
+    final notesTab = tester.getTopLeft(find.text('노트').last);
+    expect(
+      notesTab.dx,
+      greaterThan(tester.getTopLeft(find.text('캘린더').last).dx + 300),
+    );
+    expect(
+      tester.getTopLeft(find.text('필터링')).dy,
+      greaterThan(tester.getBottomLeft(find.text('리스트')).dy),
+    );
+
+    Finder panel({required bool expanded}) => find.byWidgetPredicate(
+      (w) => w is NotesView && w.panelMode && w.panelExpanded == expanded,
+    );
+    await tester.tap(find.text('노트').last);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(panel(expanded: false), findsOneWidget);
+    expect(find.text('+ 새 노트'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('크게 보기'));
+    await tester.pumpAndSettle();
+    expect(panel(expanded: true), findsOneWidget);
+    await tester.tap(find.byTooltip('작게 보기'));
+    await tester.pumpAndSettle();
+    expect(panel(expanded: false), findsOneWidget);
+    await tester.tap(find.byTooltip('닫기').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(NotesView), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('내 업무에서 업무 패널을 연 채 왼쪽 메뉴의 노트를 누르면 패널이 닫힌다', (tester) async {
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProjectDialog(session: buildSession(), embedInWindow: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('내 업무').first);
+    await tester.pumpAndSettle();
+    tester.widget<TaskPanelScope>(find.byType(TaskPanelScope)).openTask('1001');
+    await tester.pumpAndSettle();
+    expect(find.byType(TaskDetailPanel), findsOneWidget);
+    await tester.tap(find.text('노트').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(TaskDetailPanel), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

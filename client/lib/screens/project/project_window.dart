@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../services/app_settings.dart';
 import '../../services/notification_service.dart';
 import '../../services/pinned_tls.dart';
+import '../../services/app_links.dart';
 import '../../services/session.dart';
 import 'project_dialog.dart';
 
@@ -35,11 +36,17 @@ Future<List<WindowController>> _findProjectWindows() async {
 
 /// Windows에서 "프로젝트"를 대화상자가 아니라 독립된 OS 창(별도 작업표시줄 항목)으로 연다.
 /// 이미 열려있으면 새로 만들지 않고 그 창을 앞으로 가져온다(최소화돼 있었다면 복원까지).
-Future<void> openProjectWindow(Session session) async {
+/// [openLink](노트·업무 링크)를 주면 프로젝트 창에서 그 노트·업무를 연다(링크를 눌렀을 때).
+Future<void> openProjectWindow(Session session, {String? openLink}) async {
   final existingProjectWindows = await _findProjectWindows();
   if (existingProjectWindows.isNotEmpty) {
     try {
       await existingProjectWindows.first.invokeMethod('window_focus');
+      if (openLink != null) {
+        await existingProjectWindows.first.invokeMethod('open_link', {
+          'href': openLink,
+        });
+      }
     } catch (_) {
       // 창이 그 사이 닫혔거나 응답이 없으면 그냥 포기한다 — 다음 클릭에서 getAll()이
       // 이미 정리된 목록을 돌려주므로 새 창이 만들어진다.
@@ -68,6 +75,7 @@ Future<void> openProjectWindow(Session session) async {
         'refreshToken': session.refreshToken,
         'userId': session.userId,
         'username': session.username,
+        'openLink': ?openLink,
       }),
     ),
   );
@@ -121,6 +129,10 @@ Future<void> runProjectWindow(WindowController controller) async {
         await windowManager.show();
         await windowManager.focus();
         return null;
+      case 'open_link':
+        final href = (call.arguments as Map?)?['href'] as String?;
+        if (href != null) AppLinks.requestOpen(href);
+        return null;
       case 'theme_changed':
         final modeName = (call.arguments as Map?)?['mode'] as String?;
         await appSettings.setThemeMode(switch (modeName) {
@@ -173,6 +185,10 @@ Future<void> runProjectWindow(WindowController controller) async {
     await windowManager.show();
     await windowManager.focus();
   });
+  // 이 창 안에서 노트·업무 링크를 누르면 바로 그리로. 링크로 새로 열린 창이면 거기부터.
+  AppLinks.handler = AppLinks.requestOpen;
+  final openLink = args['openLink'] as String?;
+  if (openLink != null) AppLinks.requestOpen(openLink);
   runApp(_ProjectWindowApp(session: session));
 }
 

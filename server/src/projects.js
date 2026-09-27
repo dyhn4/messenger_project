@@ -47,6 +47,7 @@ import {
   countProjectOwners,
   deleteNoteComment,
   findNoteCommentById,
+  updateNoteCommentText,
   findNoteVersionById,
   insertNoteComment,
   listAutomationRuns,
@@ -65,6 +66,7 @@ import {
   updateTaskTemplate,
   deleteNote,
   findNoteById,
+  takeNextNoteSeq,
   insertNote,
   listNotesInProjects,
   updateNote,
@@ -118,6 +120,7 @@ import { teamAccess } from './access.js';
 import { accountRole, canCreateProject, canManageProject } from './permissions.js';
 import { publicUser } from './users.js';
 import { sanitizeTextFormat } from './textFormat.js';
+import { resolveRawUrl, signFileUrl } from './upload.js';
 
 const TASK_STATUSES = ['todo', 'doing', 'done'];
 const TASK_PRIORITIES = ['low', 'normal', 'high'];
@@ -172,28 +175,66 @@ const OPTION_FIELD_KINDS = ['select', 'multiSelect'];
 const NOTE_TITLE_MAX = 100;
 const NOTE_BODY_MAX = 50000;
 
-function toNoteDto(note, names = new Map()) {
+/**
+ * 노트 본문에 넣은 그림·파일 링크 — DB에는 만료되지 않는 원본 경로(`](/uploads/…)`)로 두고,
+ * 내려줄 때만 지금 시점의 서명된 주소(`/files/<토큰>`)로 바꾼다(서명은 시간이 지나면 만료된다).
+ */
+function signNoteBody(body) {
+  if (typeof body !== 'string') return body;
+  return body.replace(/\]\((\/uploads\/[^)\s]+)\)/g, (_, url) => `](${signFileUrl(url)})`);
+}
+
+/** 저장할 때 — 클라이언트가 서명된 주소를 그대로 보내와도 원본 경로로 되돌린다. */
+function rawNoteBody(body) {
+  if (typeof body !== 'string') return body;
+  return body.replace(/\]\((\/files\/[^)\s]+)\)/g, (m, url) => {
+    const raw = resolveRawUrl(url);
+    return raw ? `](${raw})` : m;
+  });
+}
+
+/** [users]는 noteNames가 준 id → 사람(이름·사진). */
+function toNoteDto(note, users = new Map()) {
+  const creator = users.get(note.createdBy);
   return {
     id: note.id,
+    // "MKT-N10" — 프로젝트 키 + N + 노트 번호.
+    key: note.projectIdentifier && note.seq ? `${note.projectIdentifier}-N${note.seq}` : null,
     projectId: note.projectId,
     projectName: note.projectName ?? null,
     projectColor: note.projectColor ?? null,
     title: note.title,
     preview: note.preview ?? undefined,
-    body: note.body ?? undefined,
+    body: note.body == null ? undefined : signNoteBody(note.body),
     createdBy: note.createdBy ?? null,
-    createdByName: names.get(note.createdBy) ?? null,
+    createdByName: creator?.name ?? null,
+    createdByAvatarType: creator?.avatarType ?? 'initial',
+    createdByAvatarEmoji: creator?.avatarEmoji ?? null,
+    createdByAvatarColor: creator?.avatarColor ?? null,
+    createdByAvatarUrl: creator?.avatarUrl ?? null,
     updatedBy: note.updatedBy ?? null,
-    updatedByName: names.get(note.updatedBy) ?? null,
+    updatedByName: users.get(note.updatedBy)?.name ?? null,
     createdAt: new Date(note.createdAt).getTime(),
     updatedAt: new Date(note.updatedAt).getTime(),
   };
 }
 
+/** 노트에 나오는 사람들 — id → 이름·사진(서명된 주소). */
 async function noteNames(notes) {
   const ids = [...new Set(notes.flatMap((n) => [n.createdBy, n.updatedBy]).filter(Boolean))];
   const users = await listUsersByIds(ids);
-  return new Map(users.map((u) => [u.id, u.name]));
+  return new Map(
+    users.map((u) => [
+      u.id,
+      {
+        name: u.name,
+        avatarType: u.avatarType ?? 'initial',
+        avatarEmoji: u.avatarEmoji ?? null,
+        avatarColor: u.avatarColor ?? null,
+        avatarUrl: signFileUrl(u.avatarUrl) ?? null,
+      },
+    ]),
+  );
 }
 
 function toTaskTypeDto(type) {
@@ -801,7 +842,7 @@ export function createProjectsRouter(io) {
     const project = await requireProjectMember(req, res, note.projectId);
     if (!project) return;
     const names = await noteNames([note]);
-    res.json(toNoteDto({ ...note, projectName: project.name, projectColor: project.color }, names));
+    res.json(toNoteDto({ ...note, projectName: project.name, projectColor: project.color, projectIdentifier: project.identifier }, names));
   });
 
   router.post('/projects/:id/notes', async (req, res) => {
@@ -809,12 +850,13 @@ export function createProjectsRouter(io) {
     if (!project) return;
     if (rejectIfArchived(res, project)) return;
     const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-    const body = typeof req.body?.body === 'string' ? req.body.body : '';
+    const body = rawNoteBody(typeof req.body?.body === 'string' ? req.body.body : '');
     if (!title) return res.status(400).json({ error: '노트 제목을 입력하세요.' });
     if (title.length > NOTE_TITLE_MAX) return res.status(400).json({ error: `제목은 ${NOTE_TITLE_MAX}자 이내로 입력하세요.` });
     if (body.length > NOTE_BODY_MAX) return res.status(400).json({ error: `내용은 ${NOTE_BODY_MAX}자 이내로 입력하세요.` });
     const note = await insertNote({
       projectId: project.id,
+      seq: await takeNextNoteSeq(project.id),
       title,
       body,
       createdBy: req.user.sub,
@@ -822,7 +864,7 @@ export function createProjectsRouter(io) {
     });
     await notifyProjectMembers(project, null);
     const names = await noteNames([note]);
-    res.status(201).json(toNoteDto({ ...note, projectName: project.name, projectColor: project.color }, names));
+    res.status(201).json(toNoteDto({ ...note, projectName: project.name, projectColor: project.color, projectIdentifier: project.identifier }, names));
   });
 
   /**
@@ -845,7 +887,7 @@ export function createProjectsRouter(io) {
     if ('body' in (req.body ?? {})) {
       if (typeof req.body.body !== 'string') return res.status(400).json({ error: '내용 형식이 올바르지 않습니다.' });
       if (req.body.body.length > NOTE_BODY_MAX) return res.status(400).json({ error: `내용은 ${NOTE_BODY_MAX}자 이내로 입력하세요.` });
-      fields.body = req.body.body;
+      fields.body = rawNoteBody(req.body.body);
     }
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     const base = req.body?.baseUpdatedAt;
@@ -859,7 +901,7 @@ export function createProjectsRouter(io) {
     const updated = await updateNote(note.id, { ...fields, updatedBy: req.user.sub });
     await notifyProjectMembers(project, null);
     const names = await noteNames([updated]);
-    res.json(toNoteDto({ ...updated, projectName: project.name, projectColor: project.color }, names));
+    res.json(toNoteDto({ ...updated, projectName: project.name, projectColor: project.color, projectIdentifier: project.identifier }, names));
   });
 
   // ── 노트 댓글 ──
@@ -870,7 +912,10 @@ export function createProjectsRouter(io) {
       senderId: c.senderId ?? null,
       senderName: c.senderName,
       text: c.text,
+      textFormat: c.textFormat ?? null,
+      parentCommentId: c.parentCommentId ?? null,
       createdAt: new Date(c.createdAt).getTime(),
+      editedAt: c.editedAt ? new Date(c.editedAt).getTime() : null,
     };
   }
 
@@ -891,18 +936,46 @@ export function createProjectsRouter(io) {
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
     if (text.length > 2000) return res.status(400).json({ error: '댓글은 2000자 이내로 작성하세요.' });
+    // 답글 — 같은 노트의 (답글이 아닌) 댓글에만 달 수 있다.
+    let parentCommentId = null;
+    if (typeof req.body?.parentCommentId === 'string') {
+      const parent = await findNoteCommentById(req.body.parentCommentId);
+      if (!parent || parent.noteId !== note.id) return res.status(400).json({ error: '답글을 달 댓글을 찾을 수 없습니다.' });
+      if (parent.parentCommentId) return res.status(400).json({ error: '답글에는 다시 답글을 달 수 없습니다.' });
+      parentCommentId = parent.id;
+    }
     const sender = await findUserById(req.user.sub);
     const c = await insertNoteComment({
       noteId: note.id,
       senderId: req.user.sub,
       senderName: sender?.name ?? sender?.username ?? '알 수 없음',
       text,
+      textFormat: sanitizeTextFormat(req.body?.textFormat, text),
+      parentCommentId,
     });
     await notifyProjectMembers(project, null);
     res.status(201).json(toNoteCommentDto(c));
   });
 
-  /** 댓글 삭제 — 쓴 사람, 프로젝트 담당자, 팀 소유자·관리자만. */
+  /** 노트 댓글 수정 — 쓴 사람만. */
+  router.patch('/note-comments/:id', async (req, res) => {
+    const c = await findNoteCommentById(req.params.id);
+    if (!c) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+    const note = await findNoteById(c.noteId);
+    if (!note) return res.status(404).json({ error: '노트를 찾을 수 없습니다.' });
+    const project = await requireProjectMember(req, res, note.projectId);
+    if (!project) return;
+    if (rejectIfArchived(res, project)) return;
+    if (c.senderId !== req.user.sub) return res.status(403).json({ error: '내가 쓴 댓글만 수정할 수 있습니다.' });
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    if (text.length > 2000) return res.status(400).json({ error: '댓글은 2000자 이내로 작성하세요.' });
+    const updated = await updateNoteCommentText(c.id, text, sanitizeTextFormat(req.body?.textFormat, text));
+    await notifyProjectMembers(project, null);
+    res.json(toNoteCommentDto(updated));
+  });
+
+  /** 댓글 삭제 — 쓴 사람, 프로젝트 담당자, 팀 소유자·관리자만. 답글도 같이 지워진다. */
   router.delete('/note-comments/:id', async (req, res) => {
     const c = await findNoteCommentById(req.params.id);
     if (!c) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
@@ -938,7 +1011,7 @@ export function createProjectsRouter(io) {
         id: v.id,
         title: v.title,
         editedBy: v.editedBy ?? null,
-        editedByName: names.get(v.editedBy) ?? null,
+        editedByName: names.get(v.editedBy)?.name ?? null,
         editedAt: new Date(v.editedAt).getTime(),
       })),
     );
@@ -956,9 +1029,9 @@ export function createProjectsRouter(io) {
       id: v.id,
       noteId: v.noteId,
       title: v.title,
-      body: v.body,
+      body: signNoteBody(v.body),
       editedBy: v.editedBy ?? null,
-      editedByName: names.get(v.editedBy) ?? null,
+      editedByName: names.get(v.editedBy)?.name ?? null,
       editedAt: new Date(v.editedAt).getTime(),
     });
   });
@@ -976,7 +1049,7 @@ export function createProjectsRouter(io) {
     const updated = await updateNote(note.id, { title: v.title, body: v.body, updatedBy: req.user.sub });
     await notifyProjectMembers(project, null);
     const names = await noteNames([updated]);
-    res.json(toNoteDto({ ...updated, projectName: project.name, projectColor: project.color }, names));
+    res.json(toNoteDto({ ...updated, projectName: project.name, projectColor: project.color, projectIdentifier: project.identifier }, names));
   });
 
   /** 삭제 — 쓴 사람, 프로젝트 담당자, 팀 소유자·관리자만. */

@@ -315,16 +315,25 @@ class TaskCalendarView extends StatefulWidget {
     required this.tasks,
     required this.onOpen,
     this.session,
+    this.projectColors,
   });
 
   /// 일별 목록의 담당자 사진 주소를 풀 때 쓴다(없으면 이니셜로만).
   final Session? session;
+
+  /// 주면 막대·일별 목록 색을 프로젝트 색으로(여러 프로젝트를 모아 보는 사이드바 캘린더).
+  /// 없으면 업무 색(유형, 없으면 상태).
+  final Map<String, Color>? projectColors;
 
   @override
   State<TaskCalendarView> createState() => _TaskCalendarViewState();
 }
 
 class _TaskCalendarViewState extends State<TaskCalendarView> {
+  /// 막대·일별 목록 색 — 프로젝트 색이 주어졌으면 그것, 아니면 업무 색.
+  Color _colorOf(Task t) =>
+      widget.projectColors?[t.projectId] ?? taskDisplayColor(t);
+
   bool _monthMode = true;
   DateTime _focused = dateOnly(DateTime.now());
   DateTime _selected = dateOnly(DateTime.now());
@@ -467,6 +476,7 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
                   for (final week in weeks)
                     Expanded(
                       child: _WeekRow(
+                        colorOf: _colorOf,
                         days: week,
                         tasks: scheduled,
                         month: _monthMode ? _focused.month : null,
@@ -483,6 +493,7 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
         );
 
         final panel = _DayPanel(
+          colorOf: _colorOf,
           date: _selected,
           tasks: selectedTasks,
           session: widget.session,
@@ -1434,6 +1445,7 @@ class _WeekRow extends StatelessWidget {
   final int maxLanes;
   final ValueChanged<DateTime> onSelectDay;
   final ValueChanged<Task> onOpenTask;
+  final Color Function(Task) colorOf;
 
   const _WeekRow({
     required this.days,
@@ -1443,6 +1455,7 @@ class _WeekRow extends StatelessWidget {
     required this.maxLanes,
     required this.onSelectDay,
     required this.onOpenTask,
+    required this.colorOf,
   });
 
   static const _dayHeader = 24.0;
@@ -1540,6 +1553,7 @@ class _WeekRow extends StatelessWidget {
                       (seg.continuesRight ? 0 : 3),
                   height: _barHeight,
                   child: _TaskBar(
+                    color: colorOf(seg.task),
                     task: seg.task,
                     roundLeft: !seg.continuesLeft,
                     roundRight: !seg.continuesRight,
@@ -1636,11 +1650,13 @@ class _DayCell extends StatelessWidget {
 
 class _TaskBar extends StatelessWidget {
   final Task task;
+  final Color color;
   final bool roundLeft;
   final bool roundRight;
   final VoidCallback onTap;
   const _TaskBar({
     required this.task,
+    required this.color,
     required this.roundLeft,
     required this.roundRight,
     required this.onTap,
@@ -1649,7 +1665,7 @@ class _TaskBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final done = task.status == TaskStatus.done;
-    final color = done ? const Color(0xFF90A4AE) : taskDisplayColor(task);
+    final color = done ? const Color(0xFF90A4AE) : this.color;
     return Tooltip(
       message: '${task.key ?? ''} ${task.title}'.trim(),
       child: InkWell(
@@ -1684,11 +1700,13 @@ class _TaskBar extends StatelessWidget {
 /// 달력에서 고른 날의 업무 목록 — 날짜와 건수, 그 아래 업무마다 왼쪽 색 막대 · 제목 ·
 /// 프로젝트 · 기간 · 담당자를 보여주고, 업무 사이는 얇은 실선으로 나눈다.
 class _DayPanel extends StatelessWidget {
+  final Color Function(Task) colorOf;
   final DateTime date;
   final List<Task> tasks;
   final Session? session;
   final ValueChanged<Task> onOpen;
   const _DayPanel({
+    required this.colorOf,
     required this.date,
     required this.tasks,
     required this.session,
@@ -1712,7 +1730,7 @@ class _DayPanel extends StatelessWidget {
                 width: 3,
                 margin: const EdgeInsets.only(right: 12),
                 decoration: BoxDecoration(
-                  color: taskDisplayColor(t),
+                  color: colorOf(t),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),

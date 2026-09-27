@@ -694,6 +694,9 @@ class ProjectHome {
 /// 프로젝트 노트 — 목록에서는 [body]가 null이고 [preview]만 있다(상세 조회에서 본문이 온다).
 class ProjectNote {
   final String id;
+
+  /// "MKT-N10" — 프로젝트 키 + N + 노트 번호.
+  final String? key;
   final String projectId;
   final String? projectName;
   final String? projectColor;
@@ -702,12 +705,17 @@ class ProjectNote {
   final String? body;
   final String? createdBy;
   final String? createdByName;
+  final String createdByAvatarType;
+  final String? createdByAvatarEmoji;
+  final String? createdByAvatarColor;
+  final String? createdByAvatarUrl;
   final String? updatedByName;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   const ProjectNote({
     required this.id,
+    this.key,
     required this.projectId,
     this.projectName,
     this.projectColor,
@@ -716,6 +724,10 @@ class ProjectNote {
     this.body,
     this.createdBy,
     this.createdByName,
+    this.createdByAvatarType = 'initial',
+    this.createdByAvatarEmoji,
+    this.createdByAvatarColor,
+    this.createdByAvatarUrl,
     this.updatedByName,
     required this.createdAt,
     required this.updatedAt,
@@ -723,6 +735,7 @@ class ProjectNote {
 
   factory ProjectNote.fromJson(Map<String, dynamic> json) => ProjectNote(
     id: json['id'] as String,
+    key: json['key'] as String?,
     projectId: json['projectId'] as String,
     projectName: json['projectName'] as String?,
     projectColor: json['projectColor'] as String?,
@@ -731,6 +744,10 @@ class ProjectNote {
     body: json['body'] as String?,
     createdBy: json['createdBy'] as String?,
     createdByName: json['createdByName'] as String?,
+    createdByAvatarType: json['createdByAvatarType'] as String? ?? 'initial',
+    createdByAvatarEmoji: json['createdByAvatarEmoji'] as String?,
+    createdByAvatarColor: json['createdByAvatarColor'] as String?,
+    createdByAvatarUrl: json['createdByAvatarUrl'] as String?,
     updatedByName: json['updatedByName'] as String?,
     createdAt: DateTime.fromMillisecondsSinceEpoch(
       (json['createdAt'] as num).toInt(),
@@ -978,7 +995,14 @@ class NoteComment {
   final String? senderId;
   final String senderName;
   final String text;
+
+  /// [text]에 걸린 글자 서식.
+  final List<TextFormatRun>? textFormat;
+
+  /// 답글이면 그 댓글(한 단계까지만).
+  final String? parentCommentId;
   final DateTime createdAt;
+  final DateTime? editedAt;
 
   const NoteComment({
     required this.id,
@@ -986,7 +1010,10 @@ class NoteComment {
     this.senderId,
     required this.senderName,
     required this.text,
+    this.textFormat,
+    this.parentCommentId,
     required this.createdAt,
+    this.editedAt,
   });
 
   factory NoteComment.fromJson(Map<String, dynamic> json) => NoteComment(
@@ -995,9 +1022,16 @@ class NoteComment {
     senderId: json['senderId'] as String?,
     senderName: json['senderName'] as String? ?? '알 수 없음',
     text: json['text'] as String,
+    textFormat: parseTextFormat(json['textFormat']),
+    parentCommentId: json['parentCommentId'] as String?,
     createdAt: DateTime.fromMillisecondsSinceEpoch(
       (json['createdAt'] as num).toInt(),
     ),
+    editedAt: json['editedAt'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(
+            (json['editedAt'] as num).toInt(),
+          ),
   );
 }
 

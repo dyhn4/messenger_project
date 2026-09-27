@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../models/project.dart';
+import '../../services/app_links.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/muted_scrollbar.dart';
@@ -70,7 +71,25 @@ class _ProjectDialogState extends State<ProjectDialog> {
   /// 뒤 화면에서 업무를 고치면 올린다 — 열린 업무 패널이 다시 읽는다(TaskPanelScope.tasksChanged).
   int _panelReloadTick = 0;
 
-  void _openTask(String taskId) => setState(() => _openTaskId = taskId);
+  void _openTask(String taskId) => setState(() {
+    _openTaskId = taskId;
+    // 업무 패널과 노트 패널은 같은 자리 — 업무를 열면 노트 패널은 닫는다.
+    _notePanelProjectId = null;
+    _noteExpanded = false;
+  });
+
+  /// 프로젝트의 "노트" 탭에서 연 오른쪽 노트 패널(그 프로젝트 id). 업무 패널과 같은 자리.
+  String? _notePanelProjectId;
+  bool _noteExpanded = false;
+
+  /// 패널 ↔ 크게 보기(본문 자리)를 오가도 노트 화면이 새로 만들어지지 않게(보던 노트 유지).
+  final _notePanelKey = GlobalKey();
+
+  void _openNotes(String projectId) => setState(() {
+    _notePanelProjectId = projectId;
+    _openTaskId = null;
+    _taskExpanded = false;
+  });
 
   ProjectView _view = ProjectView.home;
   String? _projectId; // _view == ProjectView.project일 때만 의미 있다.
@@ -89,9 +108,53 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   String? get _teamId => widget.session.currentTeam?.id;
 
+  /// 노트 링크로 열 노트(AppLinks.request).
+  String? _openNoteId;
+  int _openNoteTick = 0;
+
+  /// 노트 링크면 "노트"에서 그 노트를, 업무 링크면 지금 화면 그대로 업무 패널을 연다.
+  /// 업무 링크로 열 때 올린다 — 프로젝트 화면을 리스트 탭으로(ProjectDetailView.listTabTick).
+  int _listTabTick = 0;
+
+  void _onLinkRequest() {
+    final req = AppLinks.request.value;
+    if (req == null || !mounted) return;
+    if (req.kind == 'task') {
+      _openTaskFromLink(req.id);
+      return;
+    }
+    setState(() {
+      _view = ProjectView.notes;
+      _projectId = null;
+      _openNoteId = req.id;
+      _openNoteTick = req.tick;
+    });
+  }
+
+  /// 업무 링크 — 그 업무의 프로젝트를 리스트 탭으로 열고, 업무 패널도 연다.
+  Future<void> _openTaskFromLink(String taskId) async {
+    try {
+      final task = await widget.session.api!.fetchTask(taskId);
+      if (!mounted) return;
+      setState(() {
+        _view = ProjectView.project;
+        _projectId = task.projectId;
+        _openNoteId = null;
+        _listTabTick++;
+        _openTaskId = taskId;
+        _taskExpanded = false;
+      });
+    } catch (e) {
+      if (mounted) showAppToast(context, '업무를 열지 못했습니다: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    AppLinks.request.addListener(_onLinkRequest);
+    // 창이 뜨기 전에 들어온 요청(링크로 새로 연 경우)도 처리한다.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onLinkRequest());
     _loadProjects();
     _changedSub = widget.session.chatSocket.projectChanged.listen((_) {
       if (!mounted) return;
@@ -102,6 +165,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   @override
   void dispose() {
+    AppLinks.request.removeListener(_onLinkRequest);
     _changedSub?.cancel();
     super.dispose();
   }
@@ -136,6 +200,18 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   void _select(ProjectView view, {String? projectId}) {
     setState(() {
+      // 메뉴로 옮겨 다닐 때는 링크로 열었던 노트를 다시 열지 않고, 노트 패널도 닫는다.
+      _openNoteId = null;
+      _notePanelProjectId = null;
+      _noteExpanded = false;
+      // 홈·내 업무·캘린더·간트차트·노트에서 프로젝트로 넘어가면 보던 업무 패널은 닫는다
+      // (프로젝트 화면은 대시보드 탭부터 보인다 — ProjectDetailView의 첫 탭).
+      // "노트"로 갈 때도 업무 패널은 닫는다.
+      if ((view == ProjectView.project && _view != ProjectView.project) ||
+          view == ProjectView.notes) {
+        _openTaskId = null;
+        _taskExpanded = false;
+      }
       _view = view;
       _projectId = projectId;
     });
@@ -348,6 +424,24 @@ class _ProjectDialogState extends State<ProjectDialog> {
 
   /// 업무 상세 패널을 곁들인 창 내용. 좁은 창에서는 나란히 둘 자리가 없어 늘 넓은 모드로 연다.
   Widget? _taskPanel() {
+    final notesProject = _notePanelProjectId;
+    final teamId = _teamId;
+    if (notesProject != null && teamId != null) {
+      return NotesView(
+        key: _notePanelKey,
+        session: widget.session,
+        teamId: teamId,
+        projectId: notesProject,
+        reloadTick: _reloadTick,
+        panelMode: true,
+        panelExpanded: _noteExpanded,
+        onToggleExpand: () => setState(() => _noteExpanded = !_noteExpanded),
+        onClose: () => setState(() {
+          _notePanelProjectId = null;
+          _noteExpanded = false;
+        }),
+      );
+    }
     final taskId = _openTaskId;
     if (taskId == null) return null;
     return TaskDetailPanel(
@@ -375,8 +469,11 @@ class _ProjectDialogState extends State<ProjectDialog> {
   /// 내용 자리만 패널이 차지한다.
   Widget _buildBodyArea(Widget? panel) => LayoutBuilder(
     builder: (context, constraints) {
+      final expanded = _notePanelProjectId != null
+          ? _noteExpanded
+          : _taskExpanded;
       final asContent =
-          panel != null && (_taskExpanded || constraints.maxWidth < 760);
+          panel != null && (expanded || constraints.maxWidth < 760);
       // 패널을 옆에 세우면 그만큼 본문이 좁아진다 — 왼쪽 메뉴 접힘 판단도 그 폭으로 한다.
       final bodyWidth = panel == null || asContent
           ? constraints.maxWidth
@@ -407,6 +504,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
   Widget build(BuildContext context) {
     final content = TaskPanelScope(
       openTask: _openTask,
+      openNotes: _openNotes,
       tasksChanged: () => setState(() => _panelReloadTick++),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -496,6 +594,7 @@ class _ProjectDialogState extends State<ProjectDialog> {
           session: widget.session,
           projectId: id,
           reloadTick: _reloadTick,
+          listTabTick: _listTabTick,
           onDeleted: () {
             _select(ProjectView.home);
             _loadProjects();
@@ -520,6 +619,8 @@ class _ProjectDialogState extends State<ProjectDialog> {
           session: widget.session,
           teamId: teamId,
           reloadTick: _reloadTick,
+          openNoteId: _openNoteId,
+          openNoteTick: _openNoteTick,
         );
     }
   }

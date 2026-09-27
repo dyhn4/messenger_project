@@ -11,6 +11,30 @@ abstract final class Fmt {
 
   /// 줄 단위 — 그 줄의 글자들에 같이 걸린다.
   static const quote = 32;
+
+  /// 제목(노트 편집기) — 줄 단위. 채팅·댓글에서는 쓰지 않는다(서버도 받지 않는다).
+  static const h1 = 64;
+  static const h2 = 128;
+  static const h3 = 256;
+  static const headings = h1 | h2 | h3;
+
+  /// 줄 단위 서식 전부 — 줄 맨 앞에서 글을 칠 때 이어받는다.
+  static const lineMask = quote | headings;
+
+  /// 글자색(노트 편집기) — 서식 비트 안에 "색 있음" 비트 + RGB 24비트로 함께 담는다. 이렇게
+  /// 두면 글을 치고 지울 때 서식을 따라가는 처리를 색도 그대로 탄다.
+  static const _colorBit = 1 << 9;
+  static const _colorShift = 10;
+  static const _colorMask = _colorBit | (0xFFFFFF << _colorShift);
+
+  /// 글자색(0xRRGGBB) — 없으면 null.
+  static int? colorOf(int flags) =>
+      flags & _colorBit == 0 ? null : (flags >> _colorShift) & 0xFFFFFF;
+
+  /// [flags]의 글자색을 [rgb](0xRRGGBB, null이면 기본색)로 바꾼 값.
+  static int withColor(int flags, int? rgb) => rgb == null
+      ? flags & ~_colorMask
+      : (flags & ~_colorMask) | _colorBit | ((rgb & 0xFFFFFF) << _colorShift);
 }
 
 /// 서식 구간 하나 — [start, end) 에 [flags] 서식, [href]가 있으면 링크.

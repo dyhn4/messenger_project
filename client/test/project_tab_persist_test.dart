@@ -97,23 +97,23 @@ void main() {
 
     await show('p1');
     expect(tester.takeException(), isNull);
-    expect(find.text('첫 업무'), findsOneWidget); // 기본은 리스트
+    expect(find.text('멤버별 업무현황'), findsOneWidget); // 처음은 대시보드
 
-    // 대시보드로 옮긴다.
+    // 리스트로 옮긴다.
+    await tester.tap(find.text('리스트'));
+    await tester.pumpAndSettle();
+    expect(find.text('첫 업무'), findsOneWidget);
+
+    // 다른 프로젝트로 바꿔도 리스트 그대로이고, 내용은 새 프로젝트 것이다.
+    await show('p2');
+    expect(tester.takeException(), isNull);
+    expect(find.text('둘째 업무'), findsOneWidget);
+    expect(find.text('첫 업무'), findsNothing);
+
+    // 대시보드로 돌아가도 새 프로젝트의 것이 보인다.
     await tester.tap(find.text('대시보드'));
     await tester.pumpAndSettle();
     expect(find.text('멤버별 업무현황'), findsOneWidget);
-
-    // 다른 프로젝트로 바꿔도 대시보드 그대로이고, 내용은 새 프로젝트 것이다.
-    await show('p2');
-    expect(tester.takeException(), isNull);
-    expect(find.text('멤버별 업무현황'), findsOneWidget);
-    expect(find.text('첫 업무'), findsNothing);
-
-    // 리스트로 돌아가면 새 프로젝트의 업무가 보인다.
-    await tester.tap(find.text('리스트'));
-    await tester.pumpAndSettle();
-    expect(find.text('둘째 업무'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

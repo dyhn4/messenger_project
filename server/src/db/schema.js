@@ -609,7 +609,10 @@ export const projects = pgTable(
     isPublic: boolean('is_public').notNull().default(false),
     // 다음에 만들 업무에 줄 번호. 업무를 지워도 번호를 재사용하지 않도록 프로젝트에 들고 있다
     // (tasks에서 MAX(seq)+1로 계산하면 삭제 후 번호가 겹친다).
-    nextTaskSeq: integer('next_task_seq').notNull().default(1),
+    // 다음 업무 번호 — 1001부터 네 자리로 매긴다("MKT-1001").
+    nextTaskSeq: integer('next_task_seq').notNull().default(1001),
+    // 다음 노트 번호("MKT-N10"의 10) — 업무 번호와 따로 센다.
+    nextNoteSeq: integer('next_note_seq').notNull().default(1),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -815,6 +818,8 @@ export const projectNotes = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     body: text('body').notNull().default(''),
+    // 프로젝트 안에서의 노트 번호(projects.nextNoteSeq에서 받아온다) — "MKT-N10".
+    seq: integer('seq'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     updatedBy: uuid('updated_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -948,7 +953,12 @@ export const noteComments = pgTable(
     senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
     senderName: text('sender_name').notNull(),
     text: text('text').notNull(),
+    // 글자 서식 구간(messages.textFormat과 동일).
+    textFormat: jsonb('text_format'),
+    // 답글이면 그 댓글(한 단계까지만). 댓글을 지우면 답글도 지워진다.
+    parentCommentId: uuid('parent_comment_id').references(() => noteComments.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
   },
   (t) => [index('note_comments_note_idx').on(t.noteId, t.createdAt)],
 );

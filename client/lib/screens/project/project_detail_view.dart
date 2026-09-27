@@ -8,6 +8,7 @@ import 'project_menu_dialog.dart';
 import 'project_forms.dart';
 import 'project_views.dart';
 import 'project_widgets.dart';
+import 'task_detail_panel.dart' show TaskPanelScope;
 import 'task_views.dart';
 import 'task_filter.dart';
 import 'gantt_chart_view.dart';
@@ -26,7 +27,11 @@ class ProjectDetailView extends StatefulWidget {
     required this.projectId,
     required this.reloadTick,
     required this.onDeleted,
+    this.listTabTick = 0,
   });
+
+  /// 바뀔 때마다(0이 아니면 처음 만들 때도) 리스트 탭으로 옮긴다 — 업무 링크로 열었을 때.
+  final int listTabTick;
 
   @override
   State<ProjectDetailView> createState() => _ProjectDetailViewState();
@@ -36,7 +41,8 @@ class ProjectDetailView extends StatefulWidget {
 enum _ProjectTab { dashboard, kanban, list, gantt, calendar, notes }
 
 class _ProjectDetailViewState extends State<ProjectDetailView> {
-  _ProjectTab _tab = _ProjectTab.list;
+  /// 처음 열면 대시보드부터(다른 프로젝트로 바꿀 때는 보던 탭을 그대로 둔다 — didUpdateWidget).
+  _ProjectTab _tab = _ProjectTab.dashboard;
   Project? _project;
   List<Task>? _tasks;
   List<TaskStatusDef> _statuses = const [];
@@ -49,12 +55,14 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
   @override
   void initState() {
     super.initState();
+    if (widget.listTabTick != 0) _tab = _ProjectTab.list;
     _load();
   }
 
   @override
   void didUpdateWidget(ProjectDetailView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.listTabTick != widget.listTabTick) _tab = _ProjectTab.list;
     if (oldWidget.projectId != widget.projectId) {
       // 다른 프로젝트로 바뀌면 앞 프로젝트 내용이 잠깐이라도 새 이름 아래 보이면 안 된다.
       // 필터도 앞 프로젝트의 상태·유형·필드 id를 가리키고 있어 같이 비운다(탭은 유지).
@@ -311,52 +319,75 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: [
-              // 창이 좁으면 탭 여섯 개가 자리를 넘겨서 노란 경고 줄무늬가 났다 —
-              // 탭 줄만 가로로 밀 수 있게 하고 "필터링"은 오른쪽에 그대로 붙여둔다.
+              // 창이 좁으면 탭들이 자리를 넘겨서 노란 경고 줄무늬가 났다 — 탭 줄만 가로로 밀 수
+              // 있게 한다. "노트"는 줄의 맨 오른쪽.
               Expanded(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
                       for (final tab in _ProjectTab.values)
-                        _ViewTab(
-                          label: switch (tab) {
-                            _ProjectTab.dashboard => '대시보드',
-                            _ProjectTab.kanban => '칸반보드',
-                            _ProjectTab.list => '리스트',
-                            _ProjectTab.gantt => '간트차트',
-                            _ProjectTab.calendar => '캘린더',
-                            _ProjectTab.notes => '노트',
-                          },
-                          icon: switch (tab) {
-                            _ProjectTab.dashboard => Icons.dashboard_outlined,
-                            _ProjectTab.kanban => Icons.view_kanban_outlined,
-                            _ProjectTab.list => Icons.format_list_bulleted,
-                            _ProjectTab.gantt => Icons.view_timeline_outlined,
-                            _ProjectTab.calendar =>
-                              Icons.calendar_today_outlined,
-                            _ProjectTab.notes => Icons.description_outlined,
-                          },
-                          selected: _tab == tab,
-                          onTap: () => setState(() => _tab = tab),
-                        ),
+                        if (tab != _ProjectTab.notes)
+                          _ViewTab(
+                            label: switch (tab) {
+                              _ProjectTab.dashboard => '대시보드',
+                              _ProjectTab.kanban => '칸반보드',
+                              _ProjectTab.list => '리스트',
+                              _ProjectTab.gantt => '간트차트',
+                              _ProjectTab.calendar => '캘린더',
+                              _ProjectTab.notes => '노트',
+                            },
+                            icon: switch (tab) {
+                              _ProjectTab.dashboard => Icons.dashboard_outlined,
+                              _ProjectTab.kanban => Icons.view_kanban_outlined,
+                              _ProjectTab.list => Icons.format_list_bulleted,
+                              _ProjectTab.gantt => Icons.view_timeline_outlined,
+                              _ProjectTab.calendar =>
+                                Icons.calendar_today_outlined,
+                              _ProjectTab.notes => Icons.description_outlined,
+                            },
+                            selected: _tab == tab,
+                            onTap: () => setState(() => _tab = tab),
+                          ),
                     ],
                   ),
                 ),
               ),
-              if (_tab != _ProjectTab.notes && _tab != _ProjectTab.dashboard)
-                TaskFilterButton(
-                  filter: _filter,
-                  statuses: _statuses,
-                  priorities: _priorities,
-                  types: _types,
-                  members: project.members,
-                  fields: _fields,
-                  onChanged: (f) => setState(() => _filter = f),
-                ),
+              // "노트" — 프로젝트 창이면 오른쪽 노트 패널로 열고, 아니면(대화상자) 탭 안에.
+              _ViewTab(
+                label: '노트',
+                icon: Icons.description_outlined,
+                selected: _tab == _ProjectTab.notes,
+                onTap: () {
+                  final open = TaskPanelScope.maybeOf(context)?.openNotes;
+                  if (open != null) {
+                    open(project.id);
+                  } else {
+                    setState(() => _tab = _ProjectTab.notes);
+                  }
+                },
+              ),
             ],
           ),
         ),
+        const Divider(height: 1),
+        // 필터링은 탭 줄 아래(구분선 밑) 오른쪽.
+        if (_tab != _ProjectTab.notes && _tab != _ProjectTab.dashboard)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: TaskFilterButton(
+                filter: _filter,
+                statuses: _statuses,
+                priorities: _priorities,
+                types: _types,
+                members: project.members,
+                fields: _fields,
+                onChanged: (f) => setState(() => _filter = f),
+              ),
+            ),
+          ),
         if (_tab != _ProjectTab.notes &&
             _tab != _ProjectTab.dashboard &&
             !_filter.isEmpty)
@@ -376,7 +407,6 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
               ),
             ),
           ),
-        const Divider(height: 1),
         Expanded(child: _buildView(project, tasks)),
       ],
     );

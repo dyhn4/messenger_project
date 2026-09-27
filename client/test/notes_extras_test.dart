@@ -232,18 +232,54 @@ void main() {
     await tester.tap(find.text('주간 회의록'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.text('댓글 1'), findsOneWidget);
+    expect(find.text('댓글 (1)'), findsOneWidget);
     expect(find.text('확인했습니다'), findsOneWidget);
 
     // 댓글 남기기
-    await tester.enterText(find.widgetWithText(TextField, '댓글 남기기'), '감사합니다');
-    await tester.tap(find.widgetWithText(FilledButton, '등록'));
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.hintText == '댓글을 입력하세요...',
+      ),
+      '감사합니다',
+    );
+    await tester.pump();
+    // 댓글 칸 아래 폭 전체 [저장] 버튼.
+    // 업무 패널 댓글처럼 입력칸에 서식 도구모음이 뜬다.
+    expect(find.byTooltip('굵게 (Ctrl+B)'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '저장'));
     await tester.pumpAndSettle();
     expect(calls['POST /api/notes/n1/comments'], {'text': '감사합니다'});
-    expect(find.text('댓글 2'), findsOneWidget);
+    expect(find.text('댓글 (2)'), findsOneWidget);
+    // 달린 댓글은 '저장' 버튼 아래로 붙는다.
+    expect(
+      tester.getTopLeft(find.text('감사합니다').first).dy,
+      greaterThan(
+        tester.getBottomLeft(find.widgetWithText(FilledButton, '저장')).dy,
+      ),
+    );
 
-    // 내 댓글만 지울 수 있다(프로젝트 담당자라 Sam 것도 가능 — 두 개 다 삭제 버튼)
-    await tester.tap(find.byTooltip('댓글 삭제').last);
+    // 답글 — 댓글 아래에 입력칸이 열리고, 저장하면 그 댓글의 답글로 단다.
+    await tester.tap(find.byTooltip('답글').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.hintText == '답글을 입력하세요...',
+      ),
+      '네',
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '저장').last);
+    await tester.pumpAndSettle();
+    expect(calls['POST /api/notes/n1/comments']['parentCommentId'], isNotNull);
+
+    // ✕ 대신 업무 댓글처럼 답글 · ⋯(수정·삭제). 프로젝트 담당자라 Sam 댓글도 지울 수 있다.
+    expect(find.byTooltip('댓글 삭제'), findsNothing);
+    expect(find.byTooltip('답글'), findsNWidgets(2));
+    await tester.tap(find.byTooltip('더보기').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('삭제').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '삭제'));
     await tester.pumpAndSettle();
     expect(
       calls.keys.any((k) => k.startsWith('DELETE /api/note-comments/')),

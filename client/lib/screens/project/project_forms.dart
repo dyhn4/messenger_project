@@ -391,7 +391,8 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   late final _description = TextEditingController(
     text: widget.initialDescription,
   );
-  late String? _projectId = widget.projectId ?? widget.projects.firstOrNull?.id;
+  // 프로젝트 밖(내 업무·홈·채팅)에서 열면 고르기 전까지 비워 두고 "프로젝트 선택"을 보여준다.
+  late String? _projectId = widget.projectId;
   late String? _projectName =
       widget.projectName ??
       widget.projects
@@ -894,6 +895,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                     // 펼쳐지는 DropdownMenu를 쓴다(프로젝트 생성 창의 "공개 설정"과 같다).
                     DropdownMenu<String>(
                       initialSelection: _projectId,
+                      hintText: '프로젝트 선택',
                       requestFocusOnTap: false,
                       expandedInsets: EdgeInsets.zero,
                       menuStyle: const MenuStyle(

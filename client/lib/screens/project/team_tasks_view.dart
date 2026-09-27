@@ -32,6 +32,9 @@ class _TeamTasksViewState extends State<TeamTasksView> {
   List<Task>? _tasks;
   String? _error;
 
+  /// 프로젝트 id → 프로젝트 색(캘린더 막대 색).
+  Map<String, Color> _projectColors = const {};
+
   @override
   void initState() {
     super.initState();
@@ -46,10 +49,18 @@ class _TeamTasksViewState extends State<TeamTasksView> {
 
   Future<void> _load() async {
     try {
-      final tasks = await widget.session.api!.fetchTeamTasks(widget.teamId);
+      final api = widget.session.api!;
+      final results = await Future.wait([
+        api.fetchTeamTasks(widget.teamId),
+        api.fetchProjects(widget.teamId),
+      ]);
       if (mounted) {
         setState(() {
-          _tasks = tasks;
+          _tasks = results[0] as List<Task>;
+          _projectColors = {
+            for (final p in results[1] as List<Project>)
+              p.id: parseTypeColor(p.color),
+          };
           _error = null;
         });
       }
@@ -112,6 +123,7 @@ class _TeamTasksViewState extends State<TeamTasksView> {
                   tasks: tasks,
                   onOpen: _openTask,
                   session: widget.session,
+                  projectColors: _projectColors,
                 ),
         ),
       ],

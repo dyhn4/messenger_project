@@ -155,15 +155,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 기본은 리스트 — 담당자 칸
-    expect(find.text('기획서 작성'), findsOneWidget);
-    expect(find.text('담당자'), findsOneWidget);
-
     Future<void> openTab(String label) async {
       await tester.tap(find.text(label));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: label);
     }
+
+    // 처음은 대시보드.
+    expect(find.text('멤버별 업무현황'), findsOneWidget);
+
+    // 리스트 — 담당자 칸
+    await openTab('리스트');
+    expect(find.text('기획서 작성'), findsOneWidget);
+    expect(find.text('담당자'), findsOneWidget);
 
     await openTab('대시보드');
     expect(find.text('전체 업무'), findsOneWidget);

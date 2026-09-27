@@ -1643,9 +1643,33 @@ class ApiClient {
         .toList();
   }
 
-  Future<NoteComment> addNoteComment(String noteId, String text) async {
+  /// [parentCommentId]를 주면 그 댓글의 답글로 단다.
+  Future<NoteComment> addNoteComment(
+    String noteId,
+    String text, {
+    List<TextFormatRun>? textFormat,
+    String? parentCommentId,
+  }) async {
     return NoteComment.fromJson(
-      await _post('/api/notes/$noteId/comments', {'text': text})
+      await _post('/api/notes/$noteId/comments', {
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+            'parentCommentId': ?parentCommentId,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<NoteComment> updateNoteComment(
+    String commentId,
+    String text, {
+    List<TextFormatRun>? textFormat,
+  }) async {
+    return NoteComment.fromJson(
+      await _patch('/api/note-comments/$commentId', {
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+          })
           as Map<String, dynamic>,
     );
   }

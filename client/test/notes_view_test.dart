@@ -113,7 +113,12 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    // 목록 화면 — 검색 칸 · 정렬 · 노트(제목 · 미리보기 · 날짜).
+    expect(find.text('검색어를 입력하세요.'), findsOneWidget);
+    expect(find.text('생성순'), findsOneWidget);
     expect(find.text('주간 회의록'), findsOneWidget);
+    expect(find.text('안건'), findsOneWidget); // 미리보기에서 '# ' 제거
+    expect(find.text('2026년 9월 1일'), findsOneWidget);
 
     // 읽기: 마크다운 줄 렌더링
     await tester.tap(find.text('주간 회의록'));
@@ -123,21 +128,32 @@ void main() {
     expect(find.byIcon(Icons.check_box), findsOneWidget);
     expect(find.text('참고'), findsOneWidget);
 
-    // 편집 → 저장: 열 때의 수정 시각을 함께 보낸다
-    await tester.tap(find.text('편집'));
+    Finder field(String hint) => find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.hintText == hint,
+    );
+
+    // 편집 → 저장: 열 때의 수정 시각을 함께 보낸다. 편집기에는 기호 없이 서식만 입혀 보이고,
+    // 고치지 않은 본문은 원래 마크다운 그대로 저장된다.
+    // ⋯ → 수정
+    await tester.tap(find.byTooltip('더보기'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, '제목'), '주간 회의록 v2');
+    await tester.tap(find.text('수정'));
+    await tester.pumpAndSettle();
+    final body = tester.widget<TextField>(field('내용을 입력하세요'));
+    expect(body.controller!.text, '안건\n• 배포 일정\n☑ 리뷰 완료\n참고');
+    await tester.enterText(field('제목을 입력하세요'), '주간 회의록 v2');
     await tester.tap(find.widgetWithText(FilledButton, '저장'));
     await tester.pumpAndSettle();
     final patch = calls['PATCH /api/notes/n1'] as Map;
     expect(patch['title'], '주간 회의록 v2');
+    expect(patch['body'], '# 안건\n- 배포 일정\n- [x] 리뷰 완료\n> 참고');
     expect(patch['baseUpdatedAt'], t0);
 
     // 새 노트
-    await tester.tap(find.text('새 노트'));
+    await tester.tap(find.text('+ 새 노트').first);
     await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, '제목'), '새 노트');
-    await tester.enterText(find.widgetWithText(TextField, '내용'), '본문');
+    await tester.enterText(field('제목을 입력하세요'), '새 노트');
+    await tester.enterText(field('내용을 입력하세요'), '본문');
     await tester.tap(find.widgetWithText(FilledButton, '저장'));
     await tester.pumpAndSettle();
     expect(calls['POST /api/projects/p1/notes'], {
@@ -146,7 +162,9 @@ void main() {
     });
 
     // 삭제(작성자=나)
-    await tester.tap(find.byTooltip('삭제'));
+    await tester.tap(find.byTooltip('더보기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('삭제'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '삭제'));
     await tester.pumpAndSettle();

@@ -111,17 +111,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 제목은 첫 줄, 설명에는 전체 + 출처
-    expect(
-      find.widgetWithText(TextField, '배포 전에 로그인 오류 확인 부탁해요'),
-      findsOneWidget,
-    );
+    // 메시지 내용(+ 출처)은 설명에, 업무(제목)는 비워 두어 '업무 입력' 안내가 보인다.
+    // 프로젝트도 고르기 전이라 '프로젝트 선택'.
+    expect(find.text('업무 입력'), findsOneWidget);
+    expect(find.text('프로젝트 선택'), findsOneWidget);
     expect(find.textContaining('재현 방법은 아래와 같아요'), findsOneWidget);
     expect(find.textContaining('Sam'), findsWidgets);
 
+    // 프로젝트를 고르지 않으면 만들 수 없다.
     await tester.tap(find.widgetWithText(FilledButton, '생성'));
     await tester.pumpAndSettle();
-    expect(created?['title'], '배포 전에 로그인 오류 확인 부탁해요');
+    expect(created, isNull);
+
+    await tester.tap(find.text('프로젝트 선택'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('잔디톡').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, '업무 입력'),
+      '로그인 오류 확인',
+    );
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '생성'));
+    await tester.pumpAndSettle();
+    expect(created?['title'], '로그인 오류 확인');
     expect(created?['description'], contains('재현 방법은 아래와 같아요'));
     expect(created?['description'], contains('Sam'));
     expect(find.text('TA-7로 등록했습니다.'), findsOneWidget);

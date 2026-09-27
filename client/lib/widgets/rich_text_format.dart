@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/text_format.dart';
+import '../services/app_links.dart';
 
 export '../models/text_format.dart';
 
@@ -87,6 +88,17 @@ TextStyle formatStyle(
       color: (base.color ?? theme.hintColor).withValues(alpha: 0.7),
     );
   }
+  if (flags & Fmt.headings != 0) {
+    final size = base.fontSize ?? 14;
+    final scale = flags & Fmt.h1 != 0
+        ? 1.9
+        : flags & Fmt.h2 != 0
+        ? 1.55
+        : 1.3;
+    s = s.copyWith(fontSize: size * scale, fontWeight: FontWeight.bold);
+  }
+  final rgb = Fmt.colorOf(flags);
+  if (rgb != null) s = s.copyWith(color: Color(0xFF000000 | rgb));
   if (href != null) {
     s = s.copyWith(color: linkColor ?? theme.colorScheme.primary);
   }
@@ -115,6 +127,11 @@ class RichTextEditingController extends TextEditingController {
 
   bool _manual = false;
 
+  /// 한글 등 IME로 글자를 조합하고 있는지 — Windows는 조합 중이 아니어도 조합 영역을
+  /// (0,0)처럼 빈 구간으로 보내서, "유효한 구간"만으로 보면 늘 조합 중으로 잘못 본다.
+  static bool _composing(TextEditingValue v) =>
+      v.composing.isValid && !v.composing.isCollapsed;
+
   // ── 값이 바뀔 때 서식 배열 따라가기 ──
 
   @override
@@ -126,8 +143,7 @@ class RichTextEditingController extends TextEditingController {
     final old = super.value;
     if (newValue.text != old.text) {
       newValue = _followEdit(old, newValue);
-    } else if (newValue.selection != old.selection &&
-        !newValue.composing.isValid) {
+    } else if (newValue.selection != old.selection && !_composing(newValue)) {
       _pending = null;
     }
     super.value = newValue;
@@ -177,17 +193,39 @@ class RichTextEditingController extends TextEditingController {
         href = prevHref;
       }
     } else if (removedEnd < o.length) {
-      flags = _chars.flags[removedEnd] & Fmt.quote;
+      flags = _chars.flags[removedEnd] & Fmt.lineMask;
     }
     _chars.flags.replaceRange(pre, removedEnd, List.filled(count, flags));
     _chars.hrefs.replaceRange(pre, removedEnd, List.filled(count, href));
     if (count > 0) _pending = null;
 
+    // 노트 링크(tangotalk://…)를 붙여넣으면 주소 대신 "[MKT-N10] 제목" 링크 글자로 바꾼다.
+    if (count > 1 && formattingEnabled && !_composing(next)) {
+      final pasted = n.substring(pre, insertedEnd);
+      final display = AppLinks.displayText(pasted);
+      if (display != null && display.isNotEmpty) {
+        _chars.flags.replaceRange(
+          pre,
+          pre + count,
+          List.filled(display.length, flags & ~Fmt.code),
+        );
+        _chars.hrefs.replaceRange(
+          pre,
+          pre + count,
+          List<String?>.filled(display.length, pasted.trim()),
+        );
+        return TextEditingValue(
+          text: n.replaceRange(pre, insertedEnd, display),
+          selection: TextSelection.collapsed(offset: pre + display.length),
+        );
+      }
+    }
+
     // 목록 줄에서 줄바꿈 → 다음 번호/글머리를 이어 붙인다(빈 항목이면 목록을 끝낸다).
     if (count == 1 &&
         removedEnd == pre &&
         n.codeUnitAt(pre) == 0x0A &&
-        !next.composing.isValid) {
+        !_composing(next)) {
       return _continueList(next, pre);
     }
     return next;
@@ -380,6 +418,79 @@ class RichTextEditingController extends TextEditingController {
       _chars.hrefs[i] = href;
     }
     _touch();
+  }
+
+  /// 제목(1~3) — 커서가 걸친 줄 전체를 그 크기 제목으로 바꾸거나, 이미 그 제목이면 푼다.
+  void toggleHeading(int level) {
+    final flag = switch (level) {
+      1 => Fmt.h1,
+      2 => Fmt.h2,
+      _ => Fmt.h3,
+    };
+    final (start, end) = _lineRange();
+    if (start == end) {
+      final cur = _pending ?? _cursorFlags;
+      _pending = cur & flag != 0
+          ? cur & ~Fmt.headings
+          : (cur & ~Fmt.headings) | flag;
+      _touch();
+      return;
+    }
+    var all = true;
+    for (var i = start; i < end; i++) {
+      if (text.codeUnitAt(i) != 0x0A && _chars.flags[i] & flag == 0) {
+        all = false;
+        break;
+      }
+    }
+    for (var i = start; i < end; i++) {
+      final f = _chars.flags[i] & ~Fmt.headings;
+      _chars.flags[i] = all ? f : f | flag;
+    }
+    _touch();
+  }
+
+  /// 커서(또는 고른 글자 첫 자리)의 글자색 — 없으면 null.
+  int? get currentColor {
+    final sel = _sel;
+    if (sel.isCollapsed) return Fmt.colorOf(_pending ?? _cursorFlags);
+    return sel.start < _chars.flags.length
+        ? Fmt.colorOf(_chars.flags[sel.start])
+        : null;
+  }
+
+  /// 글자색 — 고른 글자에 바로, 고른 게 없으면 다음에 칠 글자부터. [rgb]가 null이면 기본색.
+  void applyColor(int? rgb) {
+    final sel = _sel;
+    if (sel.isCollapsed) {
+      _pending = Fmt.withColor(_pending ?? _cursorFlags, rgb);
+      _touch();
+      return;
+    }
+    for (var i = sel.start; i < sel.end; i++) {
+      _chars.flags[i] = Fmt.withColor(_chars.flags[i], rgb);
+    }
+    _touch();
+  }
+
+  /// 줄 단위 내용(표·그림 줄 등)을 커서 자리에 따로 줄을 잡아 넣는다. [href]를 주면 넣은
+  /// 글자에 그 주소를 걸어 둔다(그림 줄은 'image:<주소>').
+  void insertBlock(String block, {String? href}) {
+    final t = text;
+    final at = _sel.start;
+    final before = at == 0 || t.codeUnitAt(at - 1) == 0x0A ? '' : '\n';
+    final after = at < t.length && t.codeUnitAt(at) == 0x0A ? '' : '\n';
+    final inserted = '$before$block$after';
+    _edit([
+      (at, _sel.end - at, inserted, 0),
+    ], (_) => TextSelection.collapsed(offset: at + inserted.length));
+    if (href != null) {
+      final s = at + before.length;
+      for (var i = s; i < s + block.length; i++) {
+        _chars.hrefs[i] = href;
+      }
+      _touch();
+    }
   }
 
   /// 구분선 — 커서 자리에 한 줄로 넣는다(평문 미리보기에서도 선으로 보이게 글자로).
@@ -638,12 +749,35 @@ class RichFormatToolbar extends StatelessWidget {
   final RichTextEditingController controller;
   final FocusNode focusNode;
   final bool showRule;
+
+  /// 맨 앞에 글자색(A)과 제목(H1·H2·H3) 버튼을 둘지 — 노트 편집기.
+  final bool showColor;
+  final bool showHeadings;
+
+  /// 맨 뒤에 덧붙일 버튼들(노트의 표·그림 넣기 등) — 앞에 구분선이 하나 붙는다.
+  final List<Widget> trailing;
+
   const RichFormatToolbar({
     super.key,
     required this.controller,
     required this.focusNode,
     this.showRule = false,
+    this.showColor = false,
+    this.showHeadings = false,
+    this.trailing = const [],
   });
+
+  /// 글자색 고르기에 나오는 색(0xRRGGBB). null은 기본색.
+  static const palette = <int?>[
+    null,
+    0xE53935,
+    0xFB8C00,
+    0xF9A825,
+    0x43A047,
+    0x1E88E5,
+    0x8E24AA,
+    0x757575,
+  ];
 
   Future<void> _link(BuildContext context) async {
     final sel = controller.selection;
@@ -707,6 +841,128 @@ class RichFormatToolbar extends StatelessWidget {
           color: theme.dividerColor,
         );
         final c = controller;
+        Widget heading(int level) {
+          final flag = switch (level) {
+            1 => Fmt.h1,
+            2 => Fmt.h2,
+            _ => Fmt.h3,
+          };
+          final on = c.isActive(flag);
+          return Tooltip(
+            message: '제목 $level',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: () {
+                c.toggleHeading(level);
+                focusNode.requestFocus();
+              },
+              child: Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: on
+                      ? richFormatActiveColor.withValues(alpha: 0.14)
+                      : null,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'H$level',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: on ? richFormatActiveColor : theme.hintColor,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        Widget colorButton() {
+          final current = c.currentColor;
+          final shown = current == null
+              ? Colors.redAccent
+              : Color(0xFF000000 | current);
+          return MenuAnchor(
+            alignmentOffset: const Offset(0, 4),
+            menuChildren: [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final rgb in palette)
+                      Padding(
+                        padding: const EdgeInsets.all(3),
+                        child: Tooltip(
+                          message: rgb == null ? '기본색' : '',
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () {
+                              c.applyColor(rgb);
+                              focusNode.requestFocus();
+                            },
+                            child: Container(
+                              width: 22,
+                              height: 22,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: rgb == null
+                                    ? theme.colorScheme.surface
+                                    : Color(0xFF000000 | rgb),
+                                border: Border.all(
+                                  color: rgb == current
+                                      ? richFormatActiveColor
+                                      : theme.dividerColor,
+                                  width: rgb == current ? 2 : 1,
+                                ),
+                              ),
+                              child: rgb == null
+                                  ? Icon(
+                                      Icons.format_color_reset,
+                                      size: 14,
+                                      color: theme.hintColor,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            builder: (context, menu, _) => Tooltip(
+              message: '글자색',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => menu.isOpen ? menu.close() : menu.open(),
+                child: SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'A',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurface,
+                          height: 1,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Container(width: 14, height: 3, color: shown),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
         // 도구모음을 눌러도 입력칸 밖을 누른 것으로 치지 않게(데스크톱은 밖을 누르면 포커스가
         // 빠지면서 고른 글자 선택이 사라진다).
         return TextFieldTapRegion(
@@ -716,6 +972,13 @@ class RichFormatToolbar extends StatelessWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 2,
               children: [
+                if (showColor) ...[colorButton(), gap()],
+                if (showHeadings) ...[
+                  heading(1),
+                  heading(2),
+                  heading(3),
+                  gap(),
+                ],
                 button(
                   Icons.format_bold,
                   '굵게 (Ctrl+B)',
@@ -774,6 +1037,7 @@ class RichFormatToolbar extends StatelessWidget {
                   gap(),
                   button(Icons.horizontal_rule, '구분선', c.insertRule),
                 ],
+                if (trailing.isNotEmpty) ...[gap(), ...trailing],
               ],
             ),
           ),
@@ -1114,6 +1378,7 @@ class _FormattedTextState extends State<FormattedText> {
     final uri = Uri.tryParse(url);
     final r = TapGestureRecognizer()
       ..onTap = () {
+        if (AppLinks.open(url)) return;
         if (uri != null &&
             const {'http', 'https', 'mailto'}.contains(uri.scheme)) {
           launchUrl(uri, mode: LaunchMode.externalApplication);

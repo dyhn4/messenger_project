@@ -250,4 +250,34 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.textContaining('해당 일의 업무'), findsNothing);
   });
+
+  testWidgets('사이드바 캘린더: 막대와 일별 목록 색이 프로젝트 색', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final tasks = [
+      Task.fromJson(
+        _task('1', '배너 제작', start: today, due: today, color: '#5B8DEF'),
+      ),
+    ];
+    const pink = Color(0xFFEC4899);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TaskCalendarView(
+            tasks: tasks,
+            onOpen: (_) {},
+            projectColors: const {'p1': pink},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final barText = tester
+        .widgetList<Text>(find.text('배너 제작'))
+        .firstWhere((t) => t.style?.fontSize == 11);
+    expect(barText.style?.color, Color.lerp(pink, Colors.black, 0.45));
+  });
 }

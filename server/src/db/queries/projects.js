@@ -182,6 +182,16 @@ export async function setProjectFavorite(projectId, userId, favorite) {
 
 // ── 업무 ────────────────────────────────────────────────────────────────
 
+/** 노트 번호를 하나 발급받는다(projects.nextNoteSeq를 원자적으로 +1). */
+export async function takeNextNoteSeq(projectId) {
+  const [row] = await db
+    .update(projects)
+    .set({ nextNoteSeq: sql`${projects.nextNoteSeq} + 1` })
+    .where(eq(projects.id, projectId))
+    .returning({ seq: projects.nextNoteSeq });
+  return (row?.seq ?? 1) - 1;
+}
+
 /** 업무 번호를 하나 발급받는다(projects.nextTaskSeq를 원자적으로 +1) — 삭제된 번호는 재사용 안 한다. */
 export async function takeNextTaskSeq(projectId) {
   const [row] = await db
@@ -663,6 +673,7 @@ export function listNotesInProjects(projectIds) {
       id: projectNotes.id,
       projectId: projectNotes.projectId,
       title: projectNotes.title,
+      seq: projectNotes.seq,
       preview: sql`left(${projectNotes.body}, 140)`,
       createdBy: projectNotes.createdBy,
       updatedBy: projectNotes.updatedBy,
@@ -670,6 +681,7 @@ export function listNotesInProjects(projectIds) {
       updatedAt: projectNotes.updatedAt,
       projectName: projects.name,
       projectColor: projects.color,
+      projectIdentifier: projects.identifier,
     })
     .from(projectNotes)
     .innerJoin(projects, eq(projectNotes.projectId, projects.id))
@@ -779,6 +791,15 @@ export function findNoteCommentById(id) {
     .from(noteComments)
     .where(eq(noteComments.id, id))
     .then((rows) => rows[0] ?? null);
+}
+
+export async function updateNoteCommentText(id, text, textFormat = null) {
+  const [row] = await db
+    .update(noteComments)
+    .set({ text, textFormat, editedAt: new Date() })
+    .where(eq(noteComments.id, id))
+    .returning();
+  return row ?? null;
 }
 
 export async function deleteNoteComment(id) {

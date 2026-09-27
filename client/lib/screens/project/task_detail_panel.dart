@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/app_user.dart';
 import '../../models/project.dart';
+import '../../services/app_links.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/dashed_add_button.dart';
@@ -231,6 +233,22 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     }
   }
 
+  Future<void> _copyLink(Task task) async {
+    await Clipboard.setData(
+      ClipboardData(
+        text: AppLinks.task(
+          id: task.id,
+          key: task.key,
+          title: task.title,
+          project: _project?.name ?? task.projectName,
+          color: _project?.color,
+          person: task.assigneeName,
+        ),
+      ),
+    );
+    if (mounted) showAppToast(context, '링크를 복사했습니다.');
+  }
+
   // ── 조각들 ────────────────────────────────────────────────────────────
 
   Widget _header(Task? task) {
@@ -238,28 +256,45 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       padding: const EdgeInsets.fromLTRB(16, 10, 8, 6),
       child: Row(
         children: [
+          // 업무 번호 칩 — 프로젝트 색. 누르면 업무 링크가 복사되고, 채팅·댓글에 붙여넣으면
+          // "[MKT-1001] 제목" 링크가 된다(AppLinks).
           if (task?.key != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE94E77).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.link, size: 13, color: Color(0xFFE94E77)),
-                  const SizedBox(width: 5),
-                  Text(
-                    task!.key!,
-                    style: const TextStyle(
-                      color: Color(0xFFE94E77),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+            Builder(
+              builder: (context) {
+                final color = parseTypeColor(_project?.color);
+                return Tooltip(
+                  message: '링크 복사',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () => _copyLink(task),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.link, size: 13, color: color),
+                          const SizedBox(width: 5),
+                          Text(
+                            task!.key!,
+                            style: TextStyle(
+                              color: color,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           const Spacer(),
           if (task != null && !_readOnly)
@@ -1289,12 +1324,16 @@ class TaskPanelInset extends InheritedWidget {
 class TaskPanelScope extends InheritedWidget {
   final ValueChanged<String> openTask;
 
+  /// 프로젝트의 "노트" 탭 — 오른쪽에 그 프로젝트의 노트 패널을 연다(없으면 탭 안에 노트 화면).
+  final ValueChanged<String>? openNotes;
+
   /// 뒤 화면에서 업무를 고쳤다고 알린다 — 열려 있는 업무 패널이 다시 읽는다.
   final VoidCallback? tasksChanged;
 
   const TaskPanelScope({
     super.key,
     required this.openTask,
+    this.openNotes,
     this.tasksChanged,
     required super.child,
   });

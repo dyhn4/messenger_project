@@ -170,7 +170,7 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
         if (!didPop) _close();
       },
       child: FloatingDialog(
-        title: '프로젝트 메뉴',
+        title: '프로젝트 설정',
         maxWidth: 1000,
         maxHeight: 700,
         child: _error != null

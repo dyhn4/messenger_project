@@ -347,6 +347,7 @@ Future<Task?> showNewTaskDialog(
   String? projectName,
   String? initialTitle,
   String? initialDescription,
+  String? initialStatusId,
 }) {
   return showDialog<Task>(
     context: context,
@@ -358,6 +359,7 @@ Future<Task?> showNewTaskDialog(
       members: members,
       initialTitle: initialTitle,
       initialDescription: initialDescription,
+      initialStatusId: initialStatusId,
     ),
   );
 }
@@ -372,6 +374,9 @@ class _NewTaskDialog extends StatefulWidget {
   final List<AppUser> members;
   final String? initialTitle;
   final String? initialDescription;
+
+  /// 처음 골라둘 상태(칸반 열의 "+"로 연 경우) — 프로젝트를 바꿔 그 상태가 없으면 첫 상태로.
+  final String? initialStatusId;
   const _NewTaskDialog({
     required this.session,
     required this.projects,
@@ -380,6 +385,7 @@ class _NewTaskDialog extends StatefulWidget {
     required this.members,
     this.initialTitle,
     this.initialDescription,
+    this.initialStatusId,
   });
 
   @override
@@ -402,7 +408,7 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
   late List<AppUser> _members = widget.members;
   String? _assigneeId;
   List<TaskStatusDef> _statuses = const [];
-  String? _statusId;
+  late String? _statusId = widget.initialStatusId;
   List<TaskFieldDef> _fields = const [];
   List<TaskPriorityDef> _priorities = const [];
   String? _priorityId;

@@ -15,14 +15,26 @@ AppUser? _memberById(List<AppUser> members, String? id) =>
 
 // ───────────────────────── 칸반보드 ─────────────────────────
 
-/// 상태(할 일/진행 중/완료)별 열에 업무 카드를 늘어놓고, 카드를 다른 열로 끌어다 놓으면 상태가
-/// 바뀐다. 실제 저장은 [onStatusChange]가 한다(호출한 화면이 서버에 반영하고 다시 불러온다).
-class TaskKanbanView extends StatelessWidget {
+/// 상태(할 일/진행 중/완료)별 열에 업무 카드를 늘어놓는다. 카드를 다른 열로 끌어다 놓으면 상태가
+/// 바뀌고, 같은 열 안에서 위아래로 끌면 순서가 바뀐다. 실제 저장은 [onMove]가 한다(호출한 화면이
+/// 서버에 반영하고 다시 불러온다) — 그동안은 옮긴 모습을 먼저 보여준다.
+class TaskKanbanView extends StatefulWidget {
   final List<Task> tasks;
   final List<AppUser> members;
   final Session session;
   final ValueChanged<Task> onOpen;
-  final void Function(Task task, TaskStatusDef status) onStatusChange;
+
+  /// 카드를 놓았을 때 — 다른 열이면 [newStatus]가 그 열의 상태, 같은 열 안에서 옮겼으면 null.
+  /// [orderedIds]는 놓은 뒤 그 열의 업무 id(위에서부터).
+  final Future<void> Function(
+    Task task,
+    TaskStatusDef? newStatus,
+    List<String> orderedIds,
+  )
+  onMove;
+
+  /// 열 머리의 "+"와 열 아래 "+ 업무 추가" — 그 상태로 새 업무를 만든다. null이면 버튼을 숨긴다.
+  final ValueChanged<TaskStatusDef>? onAdd;
 
   /// 프로젝트의 상태 목록 = 칸반의 열(왼쪽부터 순서대로).
   final List<TaskStatusDef> statuses;
@@ -38,11 +50,28 @@ class TaskKanbanView extends StatelessWidget {
     required this.members,
     required this.session,
     required this.onOpen,
-    required this.onStatusChange,
+    required this.onMove,
+    this.onAdd,
   });
+
+  /// 열 너비 — 화면 폭과 상관없이 고정이고, 열이 많으면 옆으로 스크롤한다.
+  static const columnWidth = 280.0;
+
+  @override
+  State<TaskKanbanView> createState() => _TaskKanbanViewState();
+}
+
+class _TaskKanbanViewState extends State<TaskKanbanView> {
+  /// 서버 반영을 기다리는 동안 먼저 보여줄 모습 — 옮긴 업무의 새 열, 열별 새 순서.
+  final _statusOverride = <String, String>{};
+  final _orderOverride = <String, List<String>>{};
+
+  List<TaskStatusDef> get statuses => widget.statuses;
 
   /// 업무가 속한 열의 상태 id — 상태 id가 없거나 지워졌다면 같은 분류의 첫 상태로 본다.
   String? _columnOf(Task t) {
+    final moved = _statusOverride[t.id];
+    if (moved != null) return moved;
     if (t.statusId != null && statuses.any((s) => s.id == t.statusId)) {
       return t.statusId;
     }
@@ -52,16 +81,70 @@ class TaskKanbanView extends StatelessWidget {
     return statuses.isEmpty ? null : statuses.first.id;
   }
 
+  /// 열별 업무 — 저장된 순서(boardPosition)대로, 한 번도 옮기지 않은 업무는 원래 순서로 그 아래.
+  Map<String, List<Task>> _columns() {
+    final columns = {for (final s in statuses) s.id: <Task>[]};
+    final original = <String, int>{};
+    for (final (i, t) in widget.tasks.indexed) {
+      original[t.id] = i;
+      columns[_columnOf(t)]?.add(t);
+    }
+    const last = 1 << 30;
+    for (final MapEntry(key: statusId, value: list) in columns.entries) {
+      final order = _orderOverride[statusId];
+      int rank(Task t) {
+        if (order != null) {
+          final i = order.indexOf(t.id);
+          return i < 0 ? last : i;
+        }
+        return t.boardPosition ?? last;
+      }
+
+      list.sort((a, b) {
+        final c = rank(a).compareTo(rank(b));
+        return c != 0 ? c : original[a.id]!.compareTo(original[b.id]!);
+      });
+    }
+    return columns;
+  }
+
+  Future<void> _drop(
+    Task task,
+    TaskStatusDef status,
+    List<Task> column,
+    int index,
+  ) async {
+    final others = [
+      for (final t in column)
+        if (t.id != task.id) t.id,
+    ];
+    others.insert(index.clamp(0, others.length), task.id);
+    final sameColumn = _columnOf(task) == status.id;
+    if (sameColumn &&
+        others.length == column.length &&
+        [for (final t in column) t.id].join(',') == others.join(',')) {
+      return; // 제자리에 놓았다.
+    }
+    setState(() {
+      _statusOverride[task.id] = status.id;
+      _orderOverride[status.id] = others;
+    });
+    await widget.onMove(task, sameColumn ? null : status, others);
+    // 호출한 화면이 다시 불러온 목록(저장된 순서)으로 돌아간다 — 실패했다면 원래 자리로.
+    if (mounted) {
+      setState(() {
+        _statusOverride.clear();
+        _orderOverride.clear();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    const gap = 14.0;
+    final columns = _columns();
     return LayoutBuilder(
       builder: (context, constraints) {
-        const gap = 12.0;
-        const minColumn = 240.0;
-        final n = statuses.length;
-        final avail = constraints.maxWidth - 48;
-        final fitted = n == 0 ? avail : (avail - gap * (n - 1)) / n;
-        final columnWidth = fitted < minColumn ? minColumn : fitted;
         return SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
@@ -72,18 +155,19 @@ class TaskKanbanView extends StatelessWidget {
               children: [
                 for (final status in statuses) ...[
                   SizedBox(
-                    width: columnWidth,
+                    width: TaskKanbanView.columnWidth,
                     child: _KanbanColumn(
-                      readOnly: readOnly,
+                      readOnly: widget.readOnly,
                       status: status,
-                      tasks: [
-                        for (final t in tasks)
-                          if (_columnOf(t) == status.id) t,
-                      ],
-                      members: members,
-                      session: session,
-                      onOpen: onOpen,
-                      onDrop: (task) => onStatusChange(task, status),
+                      tasks: columns[status.id]!,
+                      members: widget.members,
+                      session: widget.session,
+                      onOpen: widget.onOpen,
+                      onDrop: (task, index) =>
+                          _drop(task, status, columns[status.id]!, index),
+                      onAdd: widget.readOnly || widget.onAdd == null
+                          ? null
+                          : () => widget.onAdd!(status),
                     ),
                   ),
                   if (status != statuses.last) const SizedBox(width: gap),
@@ -97,13 +181,22 @@ class TaskKanbanView extends StatelessWidget {
   }
 }
 
+/// 칸반 열 바탕 — 옅은 회색(어두운 테마에서는 한 단계 밝은 면).
+Color _kanbanColumnColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? Theme.of(context).colorScheme.surfaceContainerLow
+    : const Color(0xFFF2F3F5);
+
 class _KanbanColumn extends StatefulWidget {
   final TaskStatusDef status;
   final List<Task> tasks;
   final List<AppUser> members;
   final Session session;
   final ValueChanged<Task> onOpen;
-  final ValueChanged<Task> onDrop;
+
+  /// 카드를 이 열에 놓았을 때 — [index]는 끌고 있던 카드를 뺀 나머지 중 몇 번째 앞인지.
+  final void Function(Task task, int index) onDrop;
+  final VoidCallback? onAdd;
 
   final bool readOnly;
 
@@ -115,6 +208,7 @@ class _KanbanColumn extends StatefulWidget {
     required this.session,
     required this.onOpen,
     required this.onDrop,
+    this.onAdd,
   });
 
   @override
@@ -126,6 +220,12 @@ class _KanbanColumnState extends State<_KanbanColumn> {
   // 열마다 자기 컨트롤러를 갖는다.
   final _scroll = ScrollController();
 
+  /// 카드 위치를 읽으려고 카드마다 다는 키(놓을 자리 계산).
+  final _cardKeys = <String, GlobalKey>{};
+
+  /// 끌고 있는 카드를 놓으면 들어갈 자리 — 끌고 있는 카드를 뺀 나머지 중 몇 번째 앞인지.
+  int? _insertAt;
+
   @override
   void dispose() {
     _scroll.dispose();
@@ -134,88 +234,238 @@ class _KanbanColumnState extends State<_KanbanColumn> {
 
   TaskStatusDef get status => widget.status;
   List<Task> get tasks => widget.tasks;
-  List<AppUser> get members => widget.members;
-  Session get session => widget.session;
-  ValueChanged<Task> get onOpen => widget.onOpen;
-  ValueChanged<Task> get onDrop => widget.onDrop;
   bool get readOnly => widget.readOnly;
+
+  GlobalKey _keyOf(Task t) => _cardKeys.putIfAbsent(t.id, GlobalKey.new);
+
+  /// 마우스 높이가 어느 카드들의 가운데보다 아래인지 세어 놓을 자리를 정한다. 스크롤로 안 그려진
+  /// 카드는 이미 지나간 위쪽 카드면 센다.
+  int _indexAt(Offset global, Task dragged) {
+    var index = 0;
+    var seenBuilt = false;
+    for (final t in tasks) {
+      if (t.id == dragged.id) continue;
+      final box = _keyOf(t).currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.attached) {
+        if (!seenBuilt) index++;
+        continue;
+      }
+      seenBuilt = true;
+      final center = box.localToGlobal(box.size.center(Offset.zero)).dy;
+      if (global.dy > center) index++;
+    }
+    return index;
+  }
+
+  Widget _header(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 8, 6, 6),
+      child: Row(
+        children: [
+          // 오른쪽 "+"만큼 비워 이름·개수가 열 가운데에 오게 한다.
+          const SizedBox(width: 40),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(
+                    status.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 개수 배지 — 회색 둥근 칸.
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.brightness == Brightness.dark
+                        ? theme.colorScheme.surfaceContainerHighest
+                        : const Color(0xFFE3E5E8),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${tasks.length}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: widget.onAdd == null
+                ? null
+                : IconButton(
+                    tooltip: '업무 추가',
+                    onPressed: widget.onAdd,
+                    icon: const Icon(Icons.add, size: 18),
+                    color: theme.hintColor,
+                    visualDensity: VisualDensity.compact,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 열 맨 아래 "+ 업무 추가".
+  Widget _addButton(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: widget.onAdd,
+        icon: Icon(Icons.add, size: 16, color: hint),
+        label: Text('업무 추가', style: TextStyle(color: hint, fontSize: 13)),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
+      ),
+    );
+  }
+
+  /// 놓을 자리 표시선 — 카드 사이 틈 가운데에 겹쳐 그려서 카드들이 밀리지 않게 한다.
+  Widget _withMarker(Widget card, {bool above = false, bool below = false}) {
+    if (!above && !below) return card;
+    final line = Container(
+      height: 3,
+      decoration: BoxDecoration(
+        color: const Color(0xFF3B82F6),
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        card,
+        if (above) Positioned(left: 4, right: 4, top: -6.5, child: line),
+        if (below) Positioned(left: 4, right: 4, bottom: -6.5, child: line),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final color = parseTypeColor(status.color);
     return DragTarget<Task>(
-      onWillAcceptWithDetails: (d) => !readOnly && d.data.statusId != status.id,
-      onAcceptWithDetails: (d) => onDrop(d.data),
+      onWillAcceptWithDetails: (_) => !readOnly,
+      onMove: (d) {
+        final i = _indexAt(d.offset, d.data);
+        if (i != _insertAt) setState(() => _insertAt = i);
+      },
+      onLeave: (_) => setState(() => _insertAt = null),
+      onAcceptWithDetails: (d) {
+        final i = _insertAt ?? _indexAt(d.offset, d.data);
+        setState(() => _insertAt = null);
+        widget.onDrop(d.data, i);
+      },
       builder: (context, candidate, _) {
-        final hovering = candidate.isNotEmpty;
-        return Container(
-          decoration: BoxDecoration(
-            color: hovering
-                ? color.withValues(alpha: 0.10)
-                : Theme.of(context).colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: hovering ? color : Colors.transparent,
-              width: 1.5,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      status.name,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${tasks.length}',
-                      style: TextStyle(color: Theme.of(context).hintColor),
-                    ),
-                  ],
+        final dragged = candidate.firstOrNull;
+        // 다른 열에서 끌어온 카드일 때만 열 전체를 강조한다.
+        final fromOther =
+            dragged != null && !tasks.any((t) => t.id == dragged.id);
+        final others = [
+          for (final t in tasks)
+            if (t.id != dragged?.id) t,
+        ];
+        final insertAt = dragged == null ? null : _insertAt;
+        // 표시선을 붙일 카드 — 그 자리 바로 뒤 카드의 위, 맨 끝이면 마지막 카드의 아래.
+        final markAbove = insertAt != null && insertAt < others.length
+            ? others[insertAt].id
+            : null;
+        final markBelow =
+            insertAt != null && insertAt >= others.length && others.isNotEmpty
+            ? others.last.id
+            : null;
+        final items = <Widget>[
+          for (final t in tasks)
+            _withMarker(
+              KeyedSubtree(
+                key: _keyOf(t),
+                child: _KanbanCard(
+                  readOnly: readOnly,
+                  task: t,
+                  assignee: _memberById(widget.members, t.assigneeId),
+                  session: widget.session,
+                  onTap: () => widget.onOpen(t),
                 ),
               ),
-              Expanded(
-                child: tasks.isEmpty
-                    ? Center(
-                        child: Text(
-                          '업무를 여기로 끌어다 놓으세요',
-                          style: TextStyle(
-                            color: Theme.of(context).hintColor,
-                            fontSize: 12,
-                          ),
-                        ),
-                      )
-                    : MutedScrollbar(
-                        controller: _scroll,
-                        child: ListView.separated(
-                          controller: _scroll,
-                          padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-                          itemCount: tasks.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, i) => _KanbanCard(
-                            readOnly: readOnly,
-                            task: tasks[i],
-                            assignee: _memberById(members, tasks[i].assigneeId),
-                            session: session,
-                            onTap: () => onOpen(tasks[i]),
-                          ),
-                        ),
-                      ),
+              above: t.id == markAbove,
+              below: t.id == markBelow,
+            ),
+          if (tasks.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  '업무를 여기로 끌어다 놓으세요',
+                  style: TextStyle(
+                    color: Theme.of(context).hintColor,
+                    fontSize: 12,
+                  ),
+                ),
               ),
-            ],
+            ),
+        ];
+        // 열 바탕은 내용(카드 + "업무 추가")만큼만 — 둥근 아래 모서리가 버튼 바로 밑에서 끝난다.
+        // 카드가 많으면 화면 높이까지 늘고 그 안에서 스크롤한다. 놓기(DragTarget)는 열 아래 빈
+        // 곳까지 전체 높이에서 받는다.
+        return Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: fromOther
+                  ? color.withValues(alpha: 0.10)
+                  : _kanbanColumnColor(context),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: fromOther ? color : Colors.transparent,
+                width: 1.5,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _header(context),
+                Flexible(
+                  child: MutedScrollbar(
+                    controller: _scroll,
+                    child: ListView.separated(
+                      controller: _scroll,
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) => items[i],
+                    ),
+                  ),
+                ),
+                if (widget.onAdd != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 2, 10, 10),
+                    child: _addButton(context),
+                  )
+                else
+                  const SizedBox(height: 10),
+              ],
+            ),
           ),
         );
       },
@@ -223,6 +473,36 @@ class _KanbanColumnState extends State<_KanbanColumn> {
   }
 }
 
+/// 카드 윗줄의 작은 꼬리표(유형·우선순위) — 옅은 바탕에 같은 색 글자.
+class _KanbanTag extends StatelessWidget {
+  final String text;
+  final Color color;
+  const _KanbanTag(this.text, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// 칸반 카드 — 윗줄: 유형·우선순위 꼬리표와 (있으면) 댓글 수 / 굵은 제목(두 줄까지) /
+/// 아랫줄: 업무 번호(파랑)와 담당자 사진·이름.
 class _KanbanCard extends StatelessWidget {
   final Task task;
   final AppUser? assignee;
@@ -238,82 +518,120 @@ class _KanbanCard extends StatelessWidget {
     required this.onTap,
   });
 
+  /// 열 안쪽 여백(좌우 10)과 테두리를 뺀 카드 폭 — 끌 때 따라다니는 카드도 같은 폭.
+  static const width = TaskKanbanView.columnWidth - 23;
+
+  /// 담당자 — 구성원 목록에서 찾고, 없으면(내보낸 사람 등) 업무에 딸려 온 이름·사진으로.
+  AppUser? get _assignee {
+    if (assignee != null) return assignee;
+    final name = task.assigneeName;
+    if (task.assigneeId == null || name == null) return null;
+    return AppUser(
+      id: task.assigneeId!,
+      username: name,
+      name: name,
+      avatarType: task.assigneeAvatarType,
+      avatarEmoji: task.assigneeAvatarEmoji,
+      avatarColor: task.assigneeAvatarColor,
+      avatarUrl: task.assigneeAvatarUrl,
+    );
+  }
+
   Widget _card(BuildContext context, {bool dragging = false}) {
-    final hint = Theme.of(context).hintColor;
-    final done = task.status == TaskStatus.done;
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final user = _assignee;
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: theme.colorScheme.surface,
       elevation: dragging ? 8 : 0,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: theme.brightness == Brightness.dark
+                ? theme.dividerColor
+                : const Color(0xFFE4E6EA),
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: [
+                      if (task.typeName != null)
+                        _KanbanTag(
+                          task.typeName!,
+                          parseTypeColor(task.typeColor),
+                        ),
+                      _KanbanTag(
+                        task.priorityLabel,
+                        taskPriorityDisplayColor(task),
+                      ),
+                    ],
+                  ),
+                ),
+                if (task.commentCount > 0) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.chat_bubble_outline, size: 14, color: hint),
+                  const SizedBox(width: 3),
+                  Text(
+                    '${task.commentCount}',
+                    style: TextStyle(fontSize: 12, color: hint),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              task.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
                 if (task.key != null)
                   Text(
                     task.key!,
                     style: const TextStyle(
-                      color: Color(0xFF5B8DEF),
-                      fontSize: 11,
+                      color: Color(0xFF5B9BF0),
+                      fontSize: 12,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 const Spacer(),
-                TaskPill(
-                  taskPriorityLabel(task.priority),
-                  taskPriorityColor(task.priority),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              task.title,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                decoration: done ? TextDecoration.lineThrough : null,
-                color: done ? hint : null,
-              ),
-            ),
-            if (task.typeName != null) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TaskPill(task.typeName!, parseTypeColor(task.typeColor)),
-              ),
-            ],
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Icon(Icons.event_outlined, size: 13, color: hint),
-                const SizedBox(width: 4),
-                Text(
-                  task.dueDate == null ? '마감일 없음' : formatYmd(task.dueDate!),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: task.isOverdue ? Colors.redAccent : hint,
-                  ),
-                ),
-                if (task.isOverdue) ...[
-                  const SizedBox(width: 4),
-                  TaskPill('D+${-(task.daysUntilDue ?? 0)}', Colors.redAccent),
-                ],
-                const Spacer(),
-                if (assignee != null)
-                  Tooltip(
-                    message: assignee!.name,
-                    child: UserAvatar(
-                      user: assignee!,
-                      resolveUrl: session.resolveUrl,
-                      radius: 10,
+                if (user != null)
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        UserAvatar(
+                          user: user,
+                          resolveUrl: session.resolveUrl,
+                          radius: 10,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            user.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: hint),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
@@ -331,7 +649,7 @@ class _KanbanCard extends StatelessWidget {
       data: task,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: SizedBox(
-        width: 240,
+        width: width,
         child: Opacity(opacity: 0.92, child: _card(context, dragging: true)),
       ),
       childWhenDragging: Opacity(opacity: 0.35, child: _card(context)),

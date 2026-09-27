@@ -296,6 +296,29 @@ export async function countSubtasks(taskIds) {
   return map;
 }
 
+/** 칸반 한 열의 카드 순서 저장 — ids 순서대로 boardPosition을 0부터 다시 매긴다. */
+export async function reorderTasks(projectId, ids) {
+  for (let i = 0; i < ids.length; i += 1) {
+    await db
+      .update(tasks)
+      .set({ boardPosition: i })
+      .where(and(eq(tasks.projectId, projectId), eq(tasks.id, ids[i])));
+  }
+}
+
+/** 업무별 댓글 수(답글 포함) — 칸반 카드의 말풍선 숫자. */
+export async function countTaskComments(taskIds) {
+  if (taskIds.length === 0) return {};
+  const rows = await db
+    .select({ taskId: taskComments.taskId, n: sql`count(*)::int` })
+    .from(taskComments)
+    .where(inArray(taskComments.taskId, taskIds))
+    .groupBy(taskComments.taskId);
+  const map = {};
+  for (const r of rows) map[r.taskId] = r.n ?? 0;
+  return map;
+}
+
 /** 부모의 하위 업무들 — 상세 화면에서 보여준다(보관한 것은 뺀다). */
 export function listSubtasks(parentTaskId) {
   return db

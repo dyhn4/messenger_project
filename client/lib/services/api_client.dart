@@ -1750,6 +1750,11 @@ class ApiClient {
     await _delete('/api/task-statuses/$statusId');
   }
 
+  /// 칸반 한 열의 카드 순서 — 그 열의 업무 id를 위에서부터.
+  Future<void> reorderTasks(String projectId, List<String> ids) async {
+    await _post('/api/projects/$projectId/tasks/order', {'ids': ids});
+  }
+
   Future<void> reorderTaskStatuses(String projectId, List<String> ids) async {
     await _post('/api/projects/$projectId/task-statuses/order', {'ids': ids});
   }

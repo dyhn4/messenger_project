@@ -93,8 +93,12 @@ class TaskListTable extends StatefulWidget {
   /// 배지로 유형·우선순위·상태를 바꿨을 때 — 부른 쪽이 목록을 다시 읽는다.
   final VoidCallback? onChanged;
 
+  /// 업무 제목 아래에 프로젝트 이름을 보일지 — 여러 프로젝트가 섞인 "내 업무"만 보인다.
+  final bool showProjectName;
+
   const TaskListTable({
     super.key,
+    this.showProjectName = true,
     required this.tasks,
     required this.session,
     required this.onOpen,
@@ -273,6 +277,7 @@ class _TaskListTableState extends State<TaskListTable> {
                     members: widget.members,
                     fields: widget.fields,
                     readOnly: widget.readOnly,
+                    showProjectName: widget.showProjectName,
                     titleW: titleW,
                     otherW: otherW,
                     onTitleWidthTo: (x) => setState(
@@ -549,6 +554,7 @@ class _TaskTable extends StatelessWidget {
   final List<AppUser>? members;
   final List<TaskFieldDef> fields;
   final bool readOnly;
+  final bool showProjectName;
 
   /// "업무" 열의 폭, 나머지 열 하나의 폭, 그리고 구분선을 끌어 옮겼을 때 알려줄 콜백
   /// (표 왼쪽 끝에서 잰 새 경계 위치를 그대로 준다).
@@ -580,6 +586,7 @@ class _TaskTable extends StatelessWidget {
     required this.optionsFor,
     required this.apply,
     this.readOnly = false,
+    this.showProjectName = true,
     this.members,
     this.fields = const [],
   });
@@ -685,6 +692,7 @@ class _TaskTable extends StatelessWidget {
                         otherW: otherW,
                         horizontalController: horizontalController,
                         readOnly: readOnly,
+                        showProjectName: showProjectName,
                         optionsFor: optionsFor,
                         apply: apply,
                         onTap: () => onOpen(rows[i].task),
@@ -928,6 +936,7 @@ class _TaskTableRow extends StatefulWidget {
   /// 부모 바로 아래에 붙는 하위 업무면 한 칸 들여쓰고 앞에 ↳를 붙인다.
   final bool indented;
   final bool readOnly;
+  final bool showProjectName;
   final Future<_ProjectOptions> Function(String projectId) optionsFor;
   final Future<void> Function(Future<void> Function()) apply;
   const _TaskTableRow({
@@ -941,6 +950,7 @@ class _TaskTableRow extends StatefulWidget {
     required this.apply,
     this.indented = false,
     this.readOnly = false,
+    this.showProjectName = true,
     this.members,
     this.fields = const [],
   });
@@ -948,6 +958,9 @@ class _TaskTableRow extends StatefulWidget {
   @override
   State<_TaskTableRow> createState() => _TaskTableRowState();
 }
+
+/// 표 한 줄의 제목 줄 높이(연필 버튼·제목 고치기 입력칸도 이 안에 들어간다).
+const _titleLineHeight = 24.0;
 
 class _TaskTableRowState extends State<_TaskTableRow> {
   /// 마우스가 업무 칸 위에 있는지 — 있을 때만 제목 옆에 연필이 보인다.
@@ -959,6 +972,7 @@ class _TaskTableRowState extends State<_TaskTableRow> {
 
   Task get task => widget.task;
   Session get session => widget.session;
+  bool get _showProject => widget.showProjectName && task.projectName != null;
   List<AppUser>? get members => widget.members;
   List<TaskFieldDef> get fields => widget.fields;
   double get otherW => widget.otherW;
@@ -1070,7 +1084,9 @@ class _TaskTableRowState extends State<_TaskTableRow> {
       child: InkWell(
         onTap: _editing == null ? onTap : null,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          // 줄 높이 — 프로젝트 이름 줄이 있으면 위아래를 좁혀 두 줄이 한 칸에 촘촘히, 없으면 한
+          // 줄을 가운데에 둔다(어느 쪽이든 약 46px).
+          padding: EdgeInsets.symmetric(vertical: _showProject ? 4 : 11),
           child: Row(
             children: [
               SizedBox(
@@ -1083,96 +1099,104 @@ class _TaskTableRowState extends State<_TaskTableRow> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          // 부모 바로 아래에 붙는 하위 업무 표시.
-                          if (widget.indented) ...[
-                            Icon(
-                              Icons.subdirectory_arrow_right,
-                              size: 14,
-                              color: hint,
-                            ),
-                            const SizedBox(width: 6),
-                          ],
-                          if (task.key != null)
-                            Text(
-                              task.key!,
-                              style: const TextStyle(
-                                color: Color(0xFF5B8DEF),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
+                      // 줄 높이를 고정한다 — 마우스를 올렸을 때만 나오는 연필 때문에 줄이
+                      // 커졌다 작아졌다 하면 아래 구분선들이 흔들린다.
+                      SizedBox(
+                        height: _titleLineHeight,
+                        child: Row(
+                          children: [
+                            // 부모 바로 아래에 붙는 하위 업무 표시.
+                            if (widget.indented) ...[
+                              Icon(
+                                Icons.subdirectory_arrow_right,
+                                size: 14,
+                                color: hint,
                               ),
-                            ),
-                          if (task.myRole == 'reference') ...[
-                            const SizedBox(width: 6),
-                            TaskPill('참조', const Color(0xFF8E6BD9)),
-                          ],
-                          const SizedBox(width: 8),
-                          if (_editing != null)
-                            Expanded(
-                              child: TextField(
-                                controller: _editing,
-                                focusNode: _editFocus,
-                                autofocus: true,
+                              const SizedBox(width: 6),
+                            ],
+                            if (task.key != null)
+                              Text(
+                                task.key!,
                                 style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14,
+                                  color: Color(0xFF5B8DEF),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 6,
+                              ),
+                            if (task.myRole == 'reference') ...[
+                              const SizedBox(width: 6),
+                              TaskPill('참조', const Color(0xFF8E6BD9)),
+                            ],
+                            const SizedBox(width: 8),
+                            if (_editing != null)
+                              Expanded(
+                                child: TextField(
+                                  controller: _editing,
+                                  focusNode: _editFocus,
+                                  autofocus: true,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
                                   ),
-                                  border: OutlineInputBorder(),
+                                  decoration: const InputDecoration(
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  onSubmitted: (_) => _commitTitle(),
+                                  onTapOutside: (_) => _commitTitle(),
                                 ),
-                                onSubmitted: (_) => _commitTitle(),
-                                onTapOutside: (_) => _commitTitle(),
+                              )
+                            else ...[
+                              Flexible(
+                                child: Text(
+                                  task.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    decoration: done
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                    color: done ? hint : null,
+                                  ),
+                                ),
                               ),
-                            )
-                          else ...[
-                            Flexible(
-                              child: Text(
-                                task.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  decoration: done
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                  color: done ? hint : null,
+                              // 마우스를 올렸을 때만 보이는 연필 — 누르면 제목을 그 자리에서 고친다.
+                              if (_hovering && !readOnly)
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 16,
+                                  ),
+                                  tooltip: '제목 수정',
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 28,
+                                    height: _titleLineHeight,
+                                  ),
+                                  onPressed: _startEditing,
                                 ),
-                              ),
-                            ),
-                            // 마우스를 올렸을 때만 보이는 연필 — 누르면 제목을 그 자리에서 고친다.
-                            if (_hovering && !readOnly)
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined, size: 18),
-                                tooltip: '제목 수정',
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                constraints: const BoxConstraints(
-                                  minWidth: 30,
-                                  minHeight: 30,
-                                ),
-                                onPressed: _startEditing,
-                              ),
-                            const Spacer(),
+                              const Spacer(),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                      if (task.projectName != null) ...[
-                        const SizedBox(height: 2),
+                      if (_showProject)
                         Text(
                           task.projectName!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: hint, fontSize: 11),
+                          style: TextStyle(
+                            color: hint,
+                            fontSize: 11,
+                            height: 1.3,
+                          ),
                         ),
-                      ],
                     ],
                   ),
                 ),

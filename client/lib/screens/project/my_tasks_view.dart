@@ -3,44 +3,96 @@ import 'package:flutter/material.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/floating_dialog.dart';
-import '../../widgets/muted_scrollbar.dart';
+import 'filter_controls.dart';
 import 'project_forms.dart';
+import 'task_filter.dart' show QuickFilter, quickFilterLabel;
 import 'task_views.dart';
 
-/// "내 업무" 필터. 비어 있는 항목은 "전체".
+/// "내 업무" 필터 — 빠른 필터링(미완료/완료/지연) 하나와 "필터 추가"로 꺼내는 프로젝트·시작일·마감일.
+/// 비어 있는 항목은 "전체".
 class _Filters {
-  final Set<TaskStatus> statuses;
-  final Set<TaskPriority> priorities;
+  final QuickFilter? quick;
   final String? projectId;
-  final String? typeName;
 
-  /// 'assignee'(담당) | 'reference'(참조) | null(전체)
-  final String? role;
-  const _Filters({
-    this.statuses = const {},
-    this.priorities = const {},
-    this.projectId,
-    this.typeName,
-    this.role,
-  });
+  /// 이 날 이후(그날 포함)에 시작하는 업무.
+  final DateTime? startFrom;
+
+  /// 이 날까지(그날 포함) 마감인 업무.
+  final DateTime? dueBy;
+
+  const _Filters({this.quick, this.projectId, this.startFrom, this.dueBy});
 
   int get activeCount =>
-      (statuses.isEmpty ? 0 : 1) +
-      (priorities.isEmpty ? 0 : 1) +
+      (quick == null ? 0 : 1) +
       (projectId == null ? 0 : 1) +
-      (typeName == null ? 0 : 1) +
-      (role == null ? 0 : 1);
+      (startFrom == null ? 0 : 1) +
+      (dueBy == null ? 0 : 1);
+
+  _Filters copyWith({
+    Object? quick = _keep,
+    Object? projectId = _keep,
+    Object? startFrom = _keep,
+    Object? dueBy = _keep,
+  }) => _Filters(
+    quick: quick == _keep ? this.quick : quick as QuickFilter?,
+    projectId: projectId == _keep ? this.projectId : projectId as String?,
+    startFrom: startFrom == _keep ? this.startFrom : startFrom as DateTime?,
+    dueBy: dueBy == _keep ? this.dueBy : dueBy as DateTime?,
+  );
 
   bool matches(Task t) {
-    if (statuses.isNotEmpty && !statuses.contains(t.status)) return false;
-    if (priorities.isNotEmpty && !priorities.contains(t.priority)) return false;
+    switch (quick) {
+      case QuickFilter.incomplete:
+        if (t.status == TaskStatus.done) return false;
+      case QuickFilter.done:
+        if (t.status != TaskStatus.done) return false;
+      case QuickFilter.overdue:
+        if (!t.isOverdue) return false;
+      case QuickFilter.mine:
+      case null:
+        break;
+    }
     if (projectId != null && t.projectId != projectId) return false;
-    if (typeName != null && t.typeName != typeName) return false;
-    if (role != null && t.myRole != role) return false;
+    if (startFrom != null) {
+      final start = t.startDate;
+      if (start == null || dateOnly(start).isBefore(startFrom!)) return false;
+    }
+    if (dueBy != null) {
+      final due = t.dueDate;
+      if (due == null || dateOnly(due).isAfter(dueBy!)) return false;
+    }
     return true;
   }
 }
+
+/// 기본 정렬 — 프로젝트 키 오름차순, 같은 프로젝트 안에서는 업무 번호 오름차순
+/// ("MKT-1009"를 "MKT"와 1009로 나눠 비교해서 1009가 999보다 뒤에 온다). 키가 없으면 맨 뒤.
+int compareTaskKeys(Task a, Task b) {
+  (String, int)? split(String? key) {
+    if (key == null) return null;
+    final dash = key.lastIndexOf('-');
+    if (dash < 0) return (key, 0);
+    return (key.substring(0, dash), int.tryParse(key.substring(dash + 1)) ?? 0);
+  }
+
+  final ka = split(a.key);
+  final kb = split(b.key);
+  if (ka == null || kb == null) {
+    return ka == null ? (kb == null ? 0 : 1) : -1;
+  }
+  final byProject = ka.$1.compareTo(kb.$1);
+  return byProject != 0 ? byProject : ka.$2.compareTo(kb.$2);
+}
+
+/// copyWith에서 "안 바꿈"과 "null로 지움"을 구분하는 표식.
+const _keep = Object();
+
+/// "필터 추가"로 꺼낼 수 있는 필터(순서대로 보인다).
+const _extraFilters = [
+  (id: 'project', label: '프로젝트'),
+  (id: 'start', label: '시작일'),
+  (id: 'due', label: '마감일'),
+];
 
 /// 프로젝트 → "내 업무": 내가 담당자이거나 참조자로 걸린 업무를 리스트/캘린더로 본다.
 class MyTasksView extends StatefulWidget {
@@ -65,6 +117,9 @@ class _MyTasksViewState extends State<MyTasksView> {
   String? _error;
 
   _Filters _filters = const _Filters();
+
+  /// "필터 추가"로 꺼내 둔 필터 줄('project' | 'start' | 'due') — 값이 비어 있어도 줄은 남는다.
+  final _shownFilters = <String>{};
 
   @override
   void initState() {
@@ -115,19 +170,83 @@ class _MyTasksViewState extends State<MyTasksView> {
     if (created != null && mounted) _load();
   }
 
-  Future<void> _openFilter(List<Task> all) async {
-    final result = await showDialog<_Filters>(
-      context: context,
-      builder: (_) => _FilterDialog(
-        initial: _filters,
-        projects: _projects,
-        typeNames: {
-          for (final t in all)
-            if (t.typeName != null) t.typeName!,
-        }.toList()..sort(),
-      ),
+  void _setFilters(_Filters f) => setState(() => _filters = f);
+
+  /// 필터 줄을 뺀다 — 걸려 있던 값도 같이 지운다.
+  void _removeFilter(String id) => setState(() {
+    _shownFilters.remove(id);
+    _filters = switch (id) {
+      'project' => _filters.copyWith(projectId: null),
+      'start' => _filters.copyWith(startFrom: null),
+      _ => _filters.copyWith(dueBy: null),
+    };
+  });
+
+  Widget _filterPanel(BuildContext context) {
+    final f = _filters;
+    final shown = [
+      for (final e in _extraFilters)
+        if (_shownFilters.contains(e.id)) e,
+    ];
+    return FilterPanel(
+      onClear: f.activeCount == 0 && _shownFilters.isEmpty
+          ? null
+          : () => setState(() {
+              _shownFilters.clear();
+              _filters = const _Filters();
+            }),
+      quickChips: [
+        for (final q in [
+          QuickFilter.incomplete,
+          QuickFilter.done,
+          QuickFilter.overdue,
+        ])
+          FilterQuickChip(
+            label: quickFilterLabel(q),
+            selected: f.quick == q,
+            onTap: () =>
+                _setFilters(f.copyWith(quick: f.quick == q ? null : q)),
+          ),
+      ],
+      children: [
+        FilterAddButton(
+          options: [
+            for (final e in _extraFilters)
+              if (!_shownFilters.contains(e.id)) e,
+          ],
+          onSelected: (id) => setState(() => _shownFilters.add(id)),
+        ),
+        if (shown.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.only(top: 8, bottom: 12),
+            child: Divider(height: 1),
+          ),
+          for (final e in shown)
+            FilterRow(
+              key: ValueKey('my-filter-${e.id}'),
+              label: e.label,
+              onRemove: () => _removeFilter(e.id),
+              child: switch (e.id) {
+                'project' => FilterDropdown<String>(
+                  value: f.projectId,
+                  options: [
+                    for (final p in _projects) (value: p.id, label: p.name),
+                  ],
+                  onChanged: (v) => _setFilters(f.copyWith(projectId: v)),
+                ),
+                'start' => FilterDateField(
+                  value: f.startFrom,
+                  onChanged: (d) => _setFilters(f.copyWith(startFrom: d)),
+                ),
+                _ => FilterDateField(
+                  value: f.dueBy,
+                  onChanged: (d) => _setFilters(f.copyWith(dueBy: d)),
+                ),
+              },
+            ),
+        ],
+      ],
     );
-    if (result != null && mounted) setState(() => _filters = result);
   }
 
   @override
@@ -135,7 +254,7 @@ class _MyTasksViewState extends State<MyTasksView> {
     if (_error != null) return Center(child: Text(_error!));
     final all = _tasks;
     if (all == null) return const Center(child: CircularProgressIndicator());
-    final visible = all.where(_filters.matches).toList();
+    final visible = all.where(_filters.matches).toList()..sort(compareTaskKeys);
     final hint = Theme.of(context).hintColor;
 
     return Column(
@@ -176,14 +295,11 @@ class _MyTasksViewState extends State<MyTasksView> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Align(
             alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () => _openFilter(all),
-              icon: const Icon(Icons.filter_list, size: 18),
-              label: Text(
-                _filters.activeCount == 0
-                    ? '필터링'
-                    : '필터링 ${_filters.activeCount}',
-              ),
+            child: FilterPanelButton(
+              label: _filters.activeCount == 0
+                  ? '필터링'
+                  : '필터링 ${_filters.activeCount}',
+              panelBuilder: _filterPanel,
             ),
           ),
         ),
@@ -198,157 +314,6 @@ class _MyTasksViewState extends State<MyTasksView> {
           ),
         ),
       ],
-    );
-  }
-}
-
-// ───────────────────────── 필터 ─────────────────────────
-
-class _FilterDialog extends StatefulWidget {
-  final _Filters initial;
-  final List<Project> projects;
-  final List<String> typeNames;
-  const _FilterDialog({
-    required this.initial,
-    required this.projects,
-    required this.typeNames,
-  });
-
-  @override
-  State<_FilterDialog> createState() => _FilterDialogState();
-}
-
-class _FilterDialogState extends State<_FilterDialog> {
-  late final _statuses = {...widget.initial.statuses};
-  late final _priorities = {...widget.initial.priorities};
-  late String? _projectId = widget.initial.projectId;
-  late String? _typeName = widget.initial.typeName;
-  late String? _role = widget.initial.role;
-
-  Widget _section(String title, List<Widget> chips) => Padding(
-    padding: const EdgeInsets.only(bottom: 14),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 6),
-        Wrap(spacing: 8, runSpacing: 6, children: chips),
-      ],
-    ),
-  );
-
-  @override
-  Widget build(BuildContext context) {
-    return FloatingDialog(
-      title: '필터링',
-      maxWidth: 460,
-      maxHeight: 620,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: MutedScrollbar(
-              child: ListView(
-                children: [
-                  _section('내 역할', [
-                    ChoiceChip(
-                      label: const Text('전체'),
-                      selected: _role == null,
-                      onSelected: (_) => setState(() => _role = null),
-                    ),
-                    ChoiceChip(
-                      label: const Text('담당'),
-                      selected: _role == 'assignee',
-                      onSelected: (_) => setState(() => _role = 'assignee'),
-                    ),
-                    ChoiceChip(
-                      label: const Text('참조'),
-                      selected: _role == 'reference',
-                      onSelected: (_) => setState(() => _role = 'reference'),
-                    ),
-                  ]),
-                  _section('상태', [
-                    for (final s in TaskStatus.values)
-                      FilterChip(
-                        label: Text(taskStatusLabel(s)),
-                        selected: _statuses.contains(s),
-                        onSelected: (v) => setState(
-                          () => v ? _statuses.add(s) : _statuses.remove(s),
-                        ),
-                      ),
-                  ]),
-                  _section('우선순위', [
-                    for (final p in TaskPriority.values)
-                      FilterChip(
-                        label: Text(taskPriorityLabel(p)),
-                        selected: _priorities.contains(p),
-                        onSelected: (v) => setState(
-                          () => v ? _priorities.add(p) : _priorities.remove(p),
-                        ),
-                      ),
-                  ]),
-                  if (widget.projects.isNotEmpty)
-                    _section('프로젝트', [
-                      ChoiceChip(
-                        label: const Text('전체'),
-                        selected: _projectId == null,
-                        onSelected: (_) => setState(() => _projectId = null),
-                      ),
-                      for (final p in widget.projects)
-                        ChoiceChip(
-                          label: Text(p.name),
-                          selected: _projectId == p.id,
-                          onSelected: (_) => setState(() => _projectId = p.id),
-                        ),
-                    ]),
-                  if (widget.typeNames.isNotEmpty)
-                    _section('유형', [
-                      ChoiceChip(
-                        label: const Text('전체'),
-                        selected: _typeName == null,
-                        onSelected: (_) => setState(() => _typeName = null),
-                      ),
-                      for (final name in widget.typeNames)
-                        ChoiceChip(
-                          label: Text(name),
-                          selected: _typeName == name,
-                          onSelected: (_) => setState(() => _typeName = name),
-                        ),
-                    ]),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(const _Filters()),
-                child: const Text('초기화'),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('취소'),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(
-                  _Filters(
-                    statuses: _statuses,
-                    priorities: _priorities,
-                    projectId: _projectId,
-                    typeName: _typeName,
-                    role: _role,
-                  ),
-                ),
-                child: const Text('적용'),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

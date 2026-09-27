@@ -294,19 +294,15 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('패널: 삼점 메뉴에 복사·이동·보관·삭제가 있다', (tester) async {
+  testWidgets('패널: 삼점 메뉴에 복사·이동·삭제가 있다(보관은 뺐다)', (tester) async {
     await pumpPanel(tester);
 
     await tester.tap(find.byTooltip('업무 메뉴'));
     await tester.pumpAndSettle();
-    for (final label in ['업무 복사', '업무 이동', '업무 보관', '업무 삭제']) {
+    for (final label in ['업무 복사', '업무 이동', '업무 삭제']) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
-
-    await tester.tap(find.text('업무 보관'));
-    await tester.pumpAndSettle();
-    final archived = calls.firstWhere((c) => c.path.endsWith('/archive'));
-    expect(archived.body?['archived'], true);
+    expect(find.text('업무 보관'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

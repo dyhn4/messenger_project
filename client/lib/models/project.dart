@@ -359,6 +359,12 @@ class Task {
   final int checklistTotal;
   final int subtaskCount;
 
+  /// 댓글 수(답글 포함) — 칸반 카드의 말풍선 숫자.
+  final int commentCount;
+
+  /// 칸반 열 안에서의 순서(작을수록 위) — 한 번도 옮기지 않았으면 null.
+  final int? boardPosition;
+
   /// 상세로 받아올 때만 채워진다(GET /api/tasks/:id).
   final List<TaskChecklistItem> checklist;
   final List<Task> subtasks;
@@ -406,6 +412,8 @@ class Task {
     this.checklistDone = 0,
     this.checklistTotal = 0,
     this.subtaskCount = 0,
+    this.commentCount = 0,
+    this.boardPosition,
     this.checklist = const [],
     this.subtasks = const [],
   });
@@ -494,6 +502,8 @@ class Task {
     checklistDone: (json['checklistDone'] as num?)?.toInt() ?? 0,
     checklistTotal: (json['checklistTotal'] as num?)?.toInt() ?? 0,
     subtaskCount: (json['subtaskCount'] as num?)?.toInt() ?? 0,
+    commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+    boardPosition: (json['boardPosition'] as num?)?.toInt(),
     checklist:
         (json['checklist'] as List?)
             ?.map((e) => TaskChecklistItem.fromJson(e as Map<String, dynamic>))

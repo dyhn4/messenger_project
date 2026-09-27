@@ -539,8 +539,11 @@ class _ProjectDialogState extends State<ProjectDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // 화면 제목은 각 화면이 직접 크게 그린다(내 업무/캘린더/간트차트/노트). 여기서는
-        // 프로젝트 상세일 때만 프로젝트 이름을 얹는다 — 그 화면엔 이름을 보여줄 자리가 없다.
-        if (_view == ProjectView.project)
+        // 프로젝트 상세일 때만 프로젝트 머리(색 막대·이름·즐겨찾기 별·설명)를 얹는다.
+        // (사이드바 목록에 있는 프로젝트는 상세 화면이 머리를 "새 업무"·설정 버튼과 한 줄에 그린다.)
+        if (_view == ProjectView.project && _currentProject != null)
+          const SizedBox(height: 14)
+        else if (_view == ProjectView.project)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
             child: Text(
@@ -554,6 +557,10 @@ class _ProjectDialogState extends State<ProjectDialog> {
       ],
     );
   }
+
+  /// 지금 열려 있는 프로젝트(사이드바 목록에서 — 종료된 프로젝트는 없을 수 있다).
+  Project? get _currentProject =>
+      _projects?.where((p) => p.id == _projectId).firstOrNull;
 
   String _titleFor(ProjectView view) => switch (view) {
     ProjectView.home => '홈',
@@ -599,6 +606,14 @@ class _ProjectDialogState extends State<ProjectDialog> {
             _select(ProjectView.home);
             _loadProjects();
           },
+          // 프로젝트 설정에서 이름·설명·색을 바꿨을 수 있다 — 머리와 사이드바를 새로 그린다.
+          onProjectChanged: _loadProjects,
+          header: _currentProject == null
+              ? null
+              : _ProjectHeader(
+                  project: _currentProject!,
+                  onToggleFavorite: () => _toggleFavorite(_currentProject!),
+                ),
         );
       case ProjectView.calendar:
         return TeamTasksView(
@@ -623,6 +638,82 @@ class _ProjectDialogState extends State<ProjectDialog> {
           openNoteTick: _openNoteTick,
         );
     }
+  }
+}
+
+/// 프로젝트 화면 왼쪽 위 — 프로젝트 색 세로 막대, 굵은 이름과 즐겨찾기 별, 아래 설명.
+class _ProjectHeader extends StatelessWidget {
+  final Project project;
+  final VoidCallback onToggleFavorite;
+  const _ProjectHeader({required this.project, required this.onToggleFavorite});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final description = project.description?.trim() ?? '';
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: 4,
+            decoration: BoxDecoration(
+              color: parseTypeColor(project.color),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        project.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: project.favorite ? '즐겨찾기 해제' : '즐겨찾기',
+                      onPressed: onToggleFavorite,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        project.favorite
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        size: 24,
+                        color: project.favorite
+                            ? const Color(0xFFF5A623)
+                            : theme.hintColor,
+                      ),
+                    ),
+                  ],
+                ),
+                if (description.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: theme.hintColor),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -658,6 +749,9 @@ class _SidebarState extends State<_Sidebar> {
   // 오른쪽 내용도 스크롤 뷰라, 사이드바까지 기본(Primary) 컨트롤러를 같이 쓰면 스크롤바가
   // "한 컨트롤러에 스크롤 위치가 여럿"이라며 그리지 못한다 — 사이드바는 자기 것을 쓴다.
   final _scroll = ScrollController();
+
+  /// 즐겨찾기 묶음을 접었는지 — 창을 닫았다 열어도 앱이 켜져 있는 동안은 기억한다.
+  static bool _favoritesCollapsed = false;
 
   @override
   void dispose() {
@@ -776,24 +870,42 @@ class _SidebarState extends State<_Sidebar> {
                 ),
               ),
             if (favorites.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text(
-                  '즐겨찾기 ${favorites.length}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.labelSmall?.copyWith(color: hint),
+              // 왼쪽 꺽쇠 — 누르면 즐겨찾기 목록을 접었다 편다.
+              InkWell(
+                onTap: () =>
+                    setState(() => _favoritesCollapsed = !_favoritesCollapsed),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 16, 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _favoritesCollapsed
+                            ? Icons.chevron_right
+                            : Icons.expand_more,
+                        size: 16,
+                        color: hint,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        '즐겨찾기 ${favorites.length}',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.labelSmall?.copyWith(color: hint),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              for (final project in favorites)
-                _ProjectItem(
-                  project: project,
-                  selected:
-                      view == ProjectView.project && projectId == project.id,
-                  onTap: () =>
-                      onSelect(ProjectView.project, projectId: project.id),
-                  onToggleFavorite: () => onToggleFavorite(project),
-                ),
+              if (!_favoritesCollapsed)
+                for (final project in favorites)
+                  _ProjectItem(
+                    project: project,
+                    selected:
+                        view == ProjectView.project && projectId == project.id,
+                    onTap: () =>
+                        onSelect(ProjectView.project, projectId: project.id),
+                    onToggleFavorite: () => onToggleFavorite(project),
+                  ),
               const Divider(indent: 16, endIndent: 16, height: 20),
             ],
             for (final project in others)

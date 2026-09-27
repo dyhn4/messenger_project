@@ -767,6 +767,8 @@ export const tasks = pgTable(
     parentTaskId: uuid('parent_task_id').references(() => tasks.id, { onDelete: 'cascade' }),
     // 보관한 시각 — 값이 있으면 목록에서 빠지고 "보관된 업무" 필터로만 보인다.
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    // 칸반 열 안에서의 순서(0부터, 작을수록 위). 아직 한 번도 옮기지 않은 업무는 null(열 맨 아래).
+    boardPosition: integer('board_position'),
   },
   (t) => [
     index('tasks_project_id_idx').on(t.projectId, t.status),

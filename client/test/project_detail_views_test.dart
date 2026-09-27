@@ -6,7 +6,9 @@ import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
+import 'package:client/screens/project/filter_controls.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -75,14 +77,26 @@ void main() {
       _task('3', '배포 준비', status: 'done', start: day(-9), due: day(-6)),
       _task('4', '일정 없는 업무'),
     ];
+    tasks[0]['commentCount'] = 3;
+    tasks[0]['assigneeName'] = 'Riley';
     final patched = <String, dynamic>{};
+    final orders = <List<dynamic>>[];
 
     final client = MockClient((request) async {
       final path = request.url.path;
       const json = {'content-type': 'application/json'};
       if (request.method == 'PATCH' && path.startsWith('/api/tasks/')) {
         patched[path] = jsonDecode(request.body);
-        return http.Response('{}', 200, headers: json);
+        final id = path.split('/').last;
+        return http.Response(
+          jsonEncode(tasks.firstWhere((t) => t['id'] == id)),
+          200,
+          headers: json,
+        );
+      }
+      if (request.method == 'POST' && path == '/api/projects/p1/tasks/order') {
+        orders.add(jsonDecode(request.body)['ids'] as List<dynamic>);
+        return http.Response('{"ok":true}', 200, headers: json);
       }
       if (path == '/api/projects/p1') {
         return http.Response(
@@ -169,6 +183,50 @@ void main() {
     expect(find.text('기획서 작성'), findsOneWidget);
     expect(find.text('담당자'), findsOneWidget);
 
+    // 필터 패널 — 리스트에는 '상태' 줄이 있고, 칸반보드에는 없다.
+    Finder inPanel(String t) =>
+        find.descendant(of: find.byType(FilterPanel), matching: find.text(t));
+    Future<void> toggleFilter() async {
+      await tester.tap(find.text('필터링').first);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+
+    await toggleFilter();
+    expect(inPanel('상태'), findsOneWidget);
+    expect(inPanel('우선순위'), findsOneWidget);
+    // 필터 추가 → 시작일·마감일.
+    await tester.tap(inPanel('필터 추가'));
+    await tester.pumpAndSettle();
+    Finder inMenu(String t) => find.descendant(
+      of: find.byType(FilterPopupCard).last,
+      matching: find.text(t),
+    );
+    expect(inMenu('시작일'), findsOneWidget);
+    await tester.tap(inMenu('마감일'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('filter-due')), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('filter-due')),
+        matching: find.text('연도-월-일'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('오늘'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // 오늘까지 마감 — '기획서 작성'(모레 마감)은 빠지고 '디자인 시안'(어제 마감)은 남는다.
+    expect(find.text('기획서 작성'), findsNothing);
+    expect(find.text('디자인 시안'), findsWidgets);
+    expect(find.textContaining('마감일 '), findsOneWidget); // 목록 위 칩
+    await tester.tap(find.byTooltip('필터 빼기'));
+    await tester.pumpAndSettle();
+    expect(find.text('기획서 작성'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(FilterPanel), findsNothing);
+
     await openTab('대시보드');
     expect(find.text('전체 업무'), findsOneWidget);
     expect(find.text('지연'), findsNWidgets(2)); // 숫자 카드 + 완료율 범례
@@ -189,6 +247,24 @@ void main() {
     // 칸반: 할 일 → 완료로 끌어다 놓기
     await openTab('칸반보드');
     expect(find.text('업무를 여기로 끌어다 놓으세요'), findsOneWidget); // 빈 '검수' 열
+    await toggleFilter();
+    expect(inPanel('담당자'), findsOneWidget);
+    expect(inPanel('상태'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(FilterPanel), findsNothing);
+    // 카드: 댓글 수 · 업무 번호 · 담당자 이름, 열마다 "+ 업무 추가".
+    expect(find.byIcon(Icons.chat_bubble_outline), findsOneWidget);
+    expect(find.text('3'), findsWidgets);
+    expect(find.text('TA-1'), findsOneWidget);
+    expect(find.text('Riley'), findsWidgets);
+    expect(find.text('업무 추가'), findsNWidgets(4));
+    await tester.tap(find.text('업무 추가').at(2));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsNothing);
     final card = find.text('기획서 작성');
     final doneHeader = find.text('완료').first;
     final from = tester.getCenter(card);
@@ -203,7 +279,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(patched['/api/tasks/1'], {'statusId': 's-done'});
+    // 옮긴 열('완료')의 순서도 같이 저장한다.
+    expect(orders.single, containsAll(['1', '3']));
     expect(find.text('검수'), findsOneWidget);
+
+    // 같은 열 안에서 위로 끌기 — 상태는 그대로, 순서만 저장.
+    patched.clear();
+    orders.clear();
+    final lower = tester.getCenter(find.text('일정 없는 업무'));
+    final upper = tester.getTopLeft(find.text('기획서 작성'));
+    final g2 = await tester.startGesture(lower);
+    await tester.pump(const Duration(milliseconds: 100));
+    await g2.moveTo(lower + const Offset(0, -20));
+    await tester.pump(const Duration(milliseconds: 100));
+    await g2.moveTo(Offset(lower.dx, upper.dy - 20));
+    await tester.pump(const Duration(milliseconds: 100));
+    await g2.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(patched, isEmpty);
+    expect(orders.single, ['4', '1']);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
   });

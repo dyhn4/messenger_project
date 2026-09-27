@@ -21,12 +21,20 @@ class ProjectDetailView extends StatefulWidget {
   final int reloadTick;
   final VoidCallback onDeleted;
 
+  /// 프로젝트 설정을 닫았을 때(이름·설명·색이 바뀌었을 수 있다) — 바깥 머리를 새로 그리게.
+  final VoidCallback? onProjectChanged;
+
+  /// 맨 윗줄 왼쪽의 프로젝트 머리(색 막대·이름·즐겨찾기·설명) — 오른쪽에 "새 업무"·설정 버튼.
+  final Widget? header;
+
   const ProjectDetailView({
     super.key,
     required this.session,
     required this.projectId,
     required this.reloadTick,
     required this.onDeleted,
+    this.onProjectChanged,
+    this.header,
     this.listTabTick = 0,
   });
 
@@ -50,6 +58,18 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
   List<TaskPriorityDef> _priorities = const [];
   List<TaskType> _types = const [];
   TaskFilter _filter = const TaskFilter();
+
+  /// 지금 탭에 실제로 거는 필터 — 칸반보드는 열이 곧 상태라 상태 조건은 빼고 본다(지우지는 않고
+  /// 다른 탭으로 가면 다시 걸린다).
+  TaskFilter get _viewFilter =>
+      _tab == _ProjectTab.kanban ? _filter.without(statuses: true) : _filter;
+
+  /// 필터 버튼·칩에서 바꾼 값 — 칸반에서는 숨겨 둔 상태 조건을 그대로 둔다.
+  void _setFilter(TaskFilter f) => setState(
+    () => _filter = _tab == _ProjectTab.kanban
+        ? f.withStatusIds(_filter.statusIds)
+        : f,
+  );
   String? _error;
 
   @override
@@ -112,7 +132,8 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
     }
   }
 
-  Future<void> _newTask() async {
+  /// [statusId]를 주면(칸반 열의 "+") 그 상태를 골라둔 채 연다.
+  Future<void> _newTask({String? statusId}) async {
     final project = _project;
     if (project == null) return;
     // 지금 프로젝트로 골라둔 채 열되, 창 안에서 다른 프로젝트로 바꿀 수도 있게 팀의 프로젝트
@@ -129,18 +150,28 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
       projectId: project.id,
       projectName: project.name,
       members: project.members,
+      initialStatusId: statusId,
     );
     if (created != null) _load();
   }
 
-  /// 칸반보드에서 카드를 다른 열로 끌어다 놓았을 때 — 서버에 반영하고 다시 불러온다.
-  Future<void> _changeStatus(Task task, TaskStatusDef status) async {
+  /// 칸반보드에서 카드를 놓았을 때 — 다른 열이면([newStatus]) 상태를 바꾸고, 그 열의 순서를
+  /// 저장한 뒤 다시 불러온다.
+  Future<void> _moveTask(
+    Task task,
+    TaskStatusDef? newStatus,
+    List<String> orderedIds,
+  ) async {
+    final api = widget.session.api!;
     try {
-      await widget.session.api!.updateTask(task.id, statusId: status.id);
+      if (newStatus != null) {
+        await api.updateTask(task.id, statusId: newStatus.id);
+      }
+      await api.reorderTasks(task.projectId, orderedIds);
     } catch (e) {
-      if (mounted) showAppToast(context, '상태를 바꾸지 못했습니다: $e');
+      if (mounted) showAppToast(context, '업무를 옮기지 못했습니다: $e');
     }
-    if (mounted) _load();
+    if (mounted) await _load();
   }
 
   Future<void> _openTask(Task task) async {
@@ -166,15 +197,17 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
     } else {
       // 상태·필드·유형을 바꿨을 수 있으니 닫으면 항상 다시 읽는다.
       _load();
+      widget.onProjectChanged?.call();
     }
   }
 
   Widget _buildView(Project project, List<Task> allTasks) {
-    final tasks = _filter.isEmpty
+    final filter = _viewFilter;
+    final tasks = filter.isEmpty
         ? allTasks
         : [
             for (final t in allTasks)
-              if (_filter.matches(
+              if (filter.matches(
                 t,
                 myUserId: widget.session.userId,
                 statuses: _statuses,
@@ -211,10 +244,13 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
           members: project.members,
           session: widget.session,
           onOpen: _openTask,
-          onStatusChange: _changeStatus,
+          onMove: _moveTask,
+          onAdd: (status) => _newTask(statusId: status.id),
         );
       case _ProjectTab.list:
         return TaskListTable(
+          // 한 프로젝트 안이라 업무 아래 프로젝트 이름은 뺀다.
+          showProjectName: false,
           tasks: tasks,
           session: widget.session,
           onOpen: _openTask,
@@ -266,32 +302,23 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 멤버는 대시보드의 "멤버별 업무현황"에서 보고, 초대·역할은 프로젝트 메뉴에서 한다.
-              Expanded(
-                child:
-                    project.description == null || project.description!.isEmpty
-                    ? const SizedBox.shrink()
-                    : Text(
-                        project.description!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: hint),
-                      ),
-              ),
+              // 왼쪽 프로젝트 머리, 오른쪽 위 "새 업무"·설정. 멤버는 대시보드의 "멤버별 업무현황"에서
+              // 보고, 초대·역할은 프로젝트 설정에서 한다.
+              Expanded(child: widget.header ?? const SizedBox.shrink()),
+              const SizedBox(width: 12),
               if (!project.archived)
                 FilledButton.icon(
                   onPressed: _newTask,
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('새 업무'),
                 ),
-              // 프로젝트 설정은 전부 "프로젝트 메뉴" 한 창에 모여 있다(기본 정보 / 필드·상태 /
+              // 프로젝트 설정은 전부 "프로젝트 설정" 한 창에 모여 있다(기본 정보 / 필드·상태 /
               // 멤버 / 알림 / 템플릿·자동화 / 삭제).
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
-                tooltip: '프로젝트 메뉴',
+                tooltip: '프로젝트 설정',
                 onPressed: _openMenu,
               ),
             ],
@@ -378,32 +405,33 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
             child: Align(
               alignment: Alignment.centerRight,
               child: TaskFilterButton(
-                filter: _filter,
+                filter: _viewFilter,
                 statuses: _statuses,
                 priorities: _priorities,
                 types: _types,
                 members: project.members,
                 fields: _fields,
-                onChanged: (f) => setState(() => _filter = f),
+                showStatus: _tab != _ProjectTab.kanban,
+                onChanged: _setFilter,
               ),
             ),
           ),
         if (_tab != _ProjectTab.notes &&
             _tab != _ProjectTab.dashboard &&
-            !_filter.isEmpty)
+            !_viewFilter.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Wrap(
               runSpacing: 4,
               children: activeFilterChips(
                 context,
-                filter: _filter,
+                filter: _viewFilter,
                 statuses: _statuses,
                 priorities: _priorities,
                 types: _types,
                 members: project.members,
                 fields: _fields,
-                onChanged: (f) => setState(() => _filter = f),
+                onChanged: _setFilter,
               ),
             ),
           ),

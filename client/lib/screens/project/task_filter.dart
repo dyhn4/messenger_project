@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/app_user.dart';
 import '../../models/project.dart';
-import '../../widgets/muted_scrollbar.dart';
+import 'filter_controls.dart';
 
 /// 숫자/날짜 필드의 범위 조건 — [min]/[max] 중 하나만 있어도 된다(날짜는 밀리초, [max]는 그날 끝까지).
 class FieldRange {
@@ -46,6 +46,12 @@ class TaskFilter {
   /// {필드id: 범위} — 숫자·날짜 필드.
   final Map<String, FieldRange> fieldRanges;
 
+  /// 이 날 이후(그날 포함)에 시작하는 업무.
+  final DateTime? startFrom;
+
+  /// 이 날까지(그날 포함) 마감인 업무.
+  final DateTime? dueBy;
+
   const TaskFilter({
     this.quick,
     this.query = '',
@@ -55,6 +61,8 @@ class TaskFilter {
     this.typeId,
     this.fieldValues = const {},
     this.fieldRanges = const {},
+    this.startFrom,
+    this.dueBy,
   });
 
   int get activeCount =>
@@ -65,7 +73,9 @@ class TaskFilter {
       (assigneeId == null ? 0 : 1) +
       (typeId == null ? 0 : 1) +
       fieldValues.length +
-      fieldRanges.length;
+      fieldRanges.length +
+      (startFrom == null ? 0 : 1) +
+      (dueBy == null ? 0 : 1);
 
   bool get isEmpty => activeCount == 0;
 
@@ -79,6 +89,8 @@ class TaskFilter {
     Object? typeId = _keep,
     Map<String, String>? fieldValues,
     Map<String, FieldRange>? fieldRanges,
+    Object? startFrom = _keep,
+    Object? dueBy = _keep,
   }) => TaskFilter(
     quick: quick == _keep ? this.quick : quick as QuickFilter?,
     query: query ?? this.query,
@@ -88,13 +100,21 @@ class TaskFilter {
     typeId: typeId == _keep ? this.typeId : typeId as String?,
     fieldValues: fieldValues ?? this.fieldValues,
     fieldRanges: fieldRanges ?? this.fieldRanges,
+    startFrom: startFrom == _keep ? this.startFrom : startFrom as DateTime?,
+    dueBy: dueBy == _keep ? this.dueBy : dueBy as DateTime?,
   );
+
+  TaskFilter copyStartFrom(DateTime? d) => _copy(startFrom: d);
+  TaskFilter copyDueBy(DateTime? d) => _copy(dueBy: d);
 
   TaskFilter copyQuick(QuickFilter? q) => _copy(quick: q);
   TaskFilter copyAssignee(String? id) => _copy(assigneeId: id);
   TaskFilter copyType(String? id) => _copy(typeId: id);
   TaskFilter copyStatus(String? id) =>
       _copy(statusIds: id == null ? const {} : {id});
+
+  /// 상태 조건만 [ids]로 바꾼다 — 칸반에서 숨겨 둔 상태 조건을 되살릴 때.
+  TaskFilter withStatusIds(Set<String> ids) => _copy(statusIds: ids);
   TaskFilter copyPriority(String? id) =>
       _copy(priorityIds: id == null ? const {} : {id});
 
@@ -126,6 +146,8 @@ class TaskFilter {
     bool priorities = false,
     bool assignee = false,
     bool type = false,
+    bool start = false,
+    bool due = false,
     String? fieldId,
   }) => TaskFilter(
     quick: quick ? null : this.quick,
@@ -140,6 +162,8 @@ class TaskFilter {
     fieldRanges: fieldId == null
         ? fieldRanges
         : ({...fieldRanges}..remove(fieldId)),
+    startFrom: start ? null : startFrom,
+    dueBy: due ? null : dueBy,
   );
 
   bool matches(
@@ -213,6 +237,15 @@ class TaskFilter {
     }
     for (final e in fieldRanges.entries) {
       if (!e.value.contains(t.customValues[e.key])) return false;
+    }
+    DateTime day(DateTime d) => DateTime(d.year, d.month, d.day);
+    if (startFrom != null) {
+      final s = t.startDate;
+      if (s == null || day(s).isBefore(day(startFrom!))) return false;
+    }
+    if (dueBy != null) {
+      final d = t.dueDate;
+      if (d == null || day(d).isAfter(day(dueBy!))) return false;
     }
     return true;
   }
@@ -292,6 +325,16 @@ List<Widget> activeFilterChips(
         nameOf(fields, e.key, (f) => f.name, (f) => f.id),
         filter.without(fieldId: e.key),
       ),
+    if (filter.startFrom != null)
+      chip(
+        '시작일 ${FilterDateField.format(filter.startFrom!)}부터',
+        filter.without(start: true),
+      ),
+    if (filter.dueBy != null)
+      chip(
+        '마감일 ${FilterDateField.format(filter.dueBy!)}까지',
+        filter.without(due: true),
+      ),
   ];
 }
 
@@ -305,6 +348,9 @@ class TaskFilterButton extends StatefulWidget {
   final List<TaskFieldDef> fields;
   final ValueChanged<TaskFilter> onChanged;
 
+  /// false면 "상태" 줄을 숨긴다(칸반보드 — 열이 곧 상태라서).
+  final bool showStatus;
+
   const TaskFilterButton({
     super.key,
     required this.filter,
@@ -314,6 +360,7 @@ class TaskFilterButton extends StatefulWidget {
     required this.members,
     required this.fields,
     required this.onChanged,
+    this.showStatus = true,
   });
 
   @override
@@ -321,60 +368,56 @@ class TaskFilterButton extends StatefulWidget {
 }
 
 class _TaskFilterButtonState extends State<TaskFilterButton> {
-  final _menu = MenuController();
-  final _addMenu = MenuController();
-  final _scroll = ScrollController();
-
-  /// "필터 추가"로 꺼내 둔 사용자 정의 필드 — 값이 걸려 있는 것은 항상 보인다.
+  /// "필터 추가"로 꺼내 둔 사용자 정의 필드(와 시작일·마감일) — 값이 걸려 있는 것은 항상 보인다.
   final _extraFields = <String>{};
 
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
+  static const _startId = '__start__';
+  static const _dueId = '__due__';
 
   TaskFilter get f => widget.filter;
 
-  Widget _labeled(String label, Widget child, {Key? key}) => Padding(
-    key: key,
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 68,
-          child: Text(label, style: const TextStyle(fontSize: 13)),
-        ),
-        Expanded(child: child),
-      ],
+  static const _inputDecoration = InputDecoration(
+    isDense: true,
+    filled: true,
+    fillColor: Color(0xFFF1F3F6),
+    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(8)),
+      borderSide: BorderSide(color: Color(0xFFD6DAE1)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(8)),
+      borderSide: BorderSide(color: Color(0xFFD6DAE1)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(8)),
+      borderSide: BorderSide(color: filterAccent),
     ),
   );
+
+  InputDecoration _deco(BuildContext context, String hint) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return _inputDecoration.copyWith(
+      hintText: hint,
+      fillColor: dark
+          ? Theme.of(context).colorScheme.surfaceContainerHighest
+          : null,
+    );
+  }
 
   /// "전체"가 기본인 한 개짜리 선택 — 고르면 그 값 하나만 걸린다.
   Widget _pick({
     required String? value,
     required List<({String id, String name})> options,
     required ValueChanged<String?> onChanged,
-  }) => DropdownButtonFormField<String?>(
-    key: ValueKey('$value-${options.length}'),
-    initialValue: options.any((o) => o.id == value) ? value : null,
-    isExpanded: true,
-    isDense: true,
-    decoration: const InputDecoration(
-      isDense: true,
-      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      border: OutlineInputBorder(),
-    ),
-    items: [
-      const DropdownMenuItem(value: null, child: Text('전체')),
-      for (final o in options)
-        DropdownMenuItem(value: o.id, child: Text(o.name)),
-    ],
+  }) => FilterDropdown<String>(
+    value: options.any((o) => o.id == value) ? value : null,
+    options: [for (final o in options) (value: o.id, label: o.name)],
     onChanged: onChanged,
   );
 
   /// 사용자 정의 필드 한 줄 — 선택은 고르기, 글자는 입력, 숫자·날짜·진행률은 최소/최대.
-  Widget _fieldInput(TaskFieldDef field) {
+  Widget _fieldInput(BuildContext context, TaskFieldDef field) {
     if (field.hasOptions) {
       return _pick(
         value: f.fieldValues[field.id],
@@ -385,29 +428,20 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
     if (field.kind == 'text') {
       return TextFormField(
         initialValue: f.fieldValues[field.id] ?? '',
-        decoration: const InputDecoration(
-          hintText: '포함하는 글자',
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          border: OutlineInputBorder(),
-        ),
+        style: const TextStyle(fontSize: 13),
+        decoration: _deco(context, '포함하는 글자'),
         onChanged: (v) => widget.onChanged(f.copyFieldValue(field.id, v)),
       );
     }
     final range = f.fieldRanges[field.id] ?? const FieldRange();
-    InputDecoration deco(String hint) => InputDecoration(
-      hintText: hint,
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      border: const OutlineInputBorder(),
-    );
     return Row(
       children: [
         Expanded(
           child: TextFormField(
             initialValue: range.min?.toString() ?? '',
             keyboardType: TextInputType.number,
-            decoration: deco('최소'),
+            style: const TextStyle(fontSize: 13),
+            decoration: _deco(context, '최소'),
             onChanged: (v) => widget.onChanged(
               f.copyFieldRange(
                 field.id,
@@ -421,7 +455,8 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
           child: TextFormField(
             initialValue: range.max?.toString() ?? '',
             keyboardType: TextInputType.number,
-            decoration: deco('최대'),
+            style: const TextStyle(fontSize: 13),
+            decoration: _deco(context, '최대'),
             onChanged: (v) => widget.onChanged(
               f.copyFieldRange(
                 field.id,
@@ -435,195 +470,125 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
   }
 
   Widget _panel(BuildContext context) {
-    final theme = Theme.of(context);
     final shown = {
       ...f.fieldValues.keys,
       ...f.fieldRanges.keys,
+      if (f.startFrom != null) _startId,
+      if (f.dueBy != null) _dueId,
       ..._extraFields,
     };
-    final rest = widget.fields.where((x) => !shown.contains(x.id)).toList();
-    return SizedBox(
-      width: 320,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 460),
-          child: MutedScrollbar(
-            controller: _scroll,
-            child: SingleChildScrollView(
-              controller: _scroll,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        '필터링',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: f.isEmpty
-                            ? null
-                            : () {
-                                _extraFields.clear();
-                                widget.onChanged(const TaskFilter());
-                              },
-                        child: const Text('지우기'),
-                      ),
-                    ],
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '빠른 필터링',
-                      style: TextStyle(color: theme.hintColor, fontSize: 12),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final q in QuickFilter.values)
-                        ChoiceChip(
-                          label: Text(quickFilterLabel(q)),
-                          selected: f.quick == q,
-                          visualDensity: VisualDensity.compact,
-                          onSelected: (on) =>
-                              widget.onChanged(f.copyQuick(on ? q : null)),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  _labeled(
-                    '상태',
-                    _pick(
-                      value: f.statusIds.firstOrNull,
-                      options: [
-                        for (final s in widget.statuses)
-                          (id: s.id, name: s.name),
-                      ],
-                      onChanged: (v) => widget.onChanged(f.copyStatus(v)),
-                    ),
-                  ),
-                  _labeled(
-                    '담당자',
-                    _pick(
-                      value: f.assigneeId,
-                      options: [
-                        (id: noAssigneeFilter, name: '담당자 없음'),
-                        for (final m in widget.members)
-                          (id: m.id, name: m.name),
-                      ],
-                      onChanged: (v) => widget.onChanged(f.copyAssignee(v)),
-                    ),
-                  ),
-                  _labeled(
-                    '유형',
-                    _pick(
-                      value: f.typeId,
-                      options: [
-                        for (final t in widget.types) (id: t.id, name: t.name),
-                      ],
-                      onChanged: (v) => widget.onChanged(f.copyType(v)),
-                    ),
-                  ),
-                  _labeled(
-                    '우선순위',
-                    _pick(
-                      value: f.priorityIds.firstOrNull,
-                      options: [
-                        for (final p in widget.priorities)
-                          (id: p.id, name: p.name),
-                      ],
-                      onChanged: (v) => widget.onChanged(f.copyPriority(v)),
-                    ),
-                  ),
-                  for (final field in widget.fields)
-                    if (shown.contains(field.id))
-                      _labeled(
-                        field.name,
-                        _fieldInput(field),
-                        key: ValueKey('filter-field-${field.id}'),
-                      ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    // MenuItemButton을 쓰면 누르는 순간 위 필터 패널까지 같이 닫힌다.
-                    // 필드를 고른 뒤에도 패널은 열려 있어야 하므로 이 작은 메뉴만 닫는다.
-                    child: MenuAnchor(
-                      controller: _addMenu,
-                      menuChildren: [
-                        if (rest.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Text('추가할 필드가 없습니다'),
-                          ),
-                        for (final field in rest)
-                          SizedBox(
-                            width: 180,
-                            child: TextButton(
-                              style: TextButton.styleFrom(
-                                alignment: Alignment.centerLeft,
-                                shape: const RoundedRectangleBorder(),
-                              ),
-                              onPressed: () {
-                                _addMenu.close();
-                                setState(() => _extraFields.add(field.id));
-                              },
-                              child: Text(field.name),
-                            ),
-                          ),
-                      ],
-                      builder: (context, controller, _) => TextButton.icon(
-                        onPressed: () => controller.isOpen
-                            ? controller.close()
-                            : controller.open(),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('필터 추가'),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+    final rest = [
+      if (!shown.contains(_startId)) (id: _startId, label: '시작일'),
+      if (!shown.contains(_dueId)) (id: _dueId, label: '마감일'),
+      for (final x in widget.fields)
+        if (!shown.contains(x.id)) (id: x.id, label: x.name),
+    ];
+    return FilterPanel(
+      onClear: f.isEmpty
+          ? null
+          : () {
+              setState(_extraFields.clear);
+              widget.onChanged(const TaskFilter());
+            },
+      quickChips: [
+        for (final q in QuickFilter.values)
+          FilterQuickChip(
+            label: quickFilterLabel(q),
+            selected: f.quick == q,
+            onTap: () => widget.onChanged(f.copyQuick(f.quick == q ? null : q)),
+          ),
+      ],
+      children: [
+        if (widget.showStatus)
+          FilterRow(
+            label: '상태',
+            child: _pick(
+              value: f.statusIds.firstOrNull,
+              options: [
+                for (final s in widget.statuses) (id: s.id, name: s.name),
+              ],
+              onChanged: (v) => widget.onChanged(f.copyStatus(v)),
             ),
           ),
+        FilterRow(
+          label: '담당자',
+          child: _pick(
+            value: f.assigneeId,
+            options: [
+              (id: noAssigneeFilter, name: '담당자 없음'),
+              for (final m in widget.members) (id: m.id, name: m.name),
+            ],
+            onChanged: (v) => widget.onChanged(f.copyAssignee(v)),
+          ),
         ),
-      ),
+        FilterRow(
+          label: '유형',
+          child: _pick(
+            value: f.typeId,
+            options: [for (final t in widget.types) (id: t.id, name: t.name)],
+            onChanged: (v) => widget.onChanged(f.copyType(v)),
+          ),
+        ),
+        FilterRow(
+          label: '우선순위',
+          child: _pick(
+            value: f.priorityIds.firstOrNull,
+            options: [
+              for (final p in widget.priorities) (id: p.id, name: p.name),
+            ],
+            onChanged: (v) => widget.onChanged(f.copyPriority(v)),
+          ),
+        ),
+        if (shown.contains(_startId))
+          FilterRow(
+            key: const ValueKey('filter-start'),
+            label: '시작일',
+            child: FilterDateField(
+              value: f.startFrom,
+              onChanged: (d) => widget.onChanged(f.copyStartFrom(d)),
+            ),
+            onRemove: () {
+              setState(() => _extraFields.remove(_startId));
+              widget.onChanged(f.without(start: true));
+            },
+          ),
+        if (shown.contains(_dueId))
+          FilterRow(
+            key: const ValueKey('filter-due'),
+            label: '마감일',
+            child: FilterDateField(
+              value: f.dueBy,
+              onChanged: (d) => widget.onChanged(f.copyDueBy(d)),
+            ),
+            onRemove: () {
+              setState(() => _extraFields.remove(_dueId));
+              widget.onChanged(f.without(due: true));
+            },
+          ),
+        for (final field in widget.fields)
+          if (shown.contains(field.id))
+            FilterRow(
+              key: ValueKey('filter-field-${field.id}'),
+              label: field.name,
+              child: _fieldInput(context, field),
+              onRemove: () {
+                setState(() => _extraFields.remove(field.id));
+                widget.onChanged(f.without(fieldId: field.id));
+              },
+            ),
+        FilterAddButton(
+          options: rest,
+          onSelected: (id) => setState(() => _extraFields.add(id)),
+        ),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return MenuAnchor(
-      controller: _menu,
-      alignmentOffset: const Offset(-240, 6),
-      style: MenuStyle(
-        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-        backgroundColor: WidgetStatePropertyAll(
-          Theme.of(context).colorScheme.surface,
-        ),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: BorderSide(color: Theme.of(context).dividerColor),
-          ),
-        ),
-      ),
-      menuChildren: [_panel(context)],
-      builder: (context, controller, _) => TextButton.icon(
-        onPressed: () =>
-            controller.isOpen ? controller.close() : controller.open(),
-        icon: const Icon(Icons.filter_list, size: 18),
-        label: Text(f.isEmpty ? '필터링' : '필터링: ${f.activeCount}'),
-      ),
+    return FilterPanelButton(
+      label: f.isEmpty ? '필터링' : '필터링: ${f.activeCount}',
+      panelBuilder: _panel,
     );
   }
 }

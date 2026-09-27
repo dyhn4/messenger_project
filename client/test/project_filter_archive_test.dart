@@ -7,6 +7,7 @@ import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
+import 'package:client/screens/project/filter_controls.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -241,7 +242,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('필터 추가'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(TextButton, '고객사'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(FilterPopupCard).last,
+        matching: find.text('고객사'),
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(

@@ -31,6 +31,8 @@ import {
   listTaskTypesByIds,
   countChecklistItems,
   countSubtasks,
+  countTaskComments,
+  reorderTasks,
   deleteChecklistItem,
   findChecklistItemById,
   insertChecklistItem,
@@ -251,7 +253,7 @@ async function decorateTasks(tasks, myUserId = null) {
   const statusIds = [...new Set(tasks.map((t) => t.statusId).filter(Boolean))];
   const priorityIds = [...new Set(tasks.map((t) => t.priorityId).filter(Boolean))];
   const ids = tasks.map((t) => t.id);
-  const [types, statuses, priorities, refs, creators, checklist, subtasks] = await Promise.all([
+  const [types, statuses, priorities, refs, creators, checklist, subtasks, comments] = await Promise.all([
     listTaskTypesByIds(typeIds),
     listTaskStatusesByIds(statusIds),
     listTaskPrioritiesByIds(priorityIds),
@@ -260,6 +262,7 @@ async function decorateTasks(tasks, myUserId = null) {
     listUsersByIds([...new Set(tasks.flatMap((t) => [t.createdBy, t.assigneeId]).filter(Boolean))]),
     countChecklistItems(ids),
     countSubtasks(ids),
+    countTaskComments(ids),
   ]);
   const typeById = new Map(types.map((t) => [t.id, t]));
   const statusById = new Map(statuses.map((s) => [s.id, s]));
@@ -288,6 +291,7 @@ async function decorateTasks(tasks, myUserId = null) {
       myRole,
       checklist: checklist[t.id] ?? null,
       subtaskCount: subtasks[t.id] ?? 0,
+      commentCount: comments[t.id] ?? 0,
     };
   });
 }
@@ -337,6 +341,8 @@ function toTaskDto(task, { identifier, projectName } = {}) {
     checklistDone: task.checklist?.done ?? 0,
     checklistTotal: task.checklist?.total ?? 0,
     subtaskCount: task.subtaskCount ?? 0,
+    commentCount: task.commentCount ?? 0,
+    boardPosition: task.boardPosition ?? null,
   };
 }
 
@@ -710,6 +716,20 @@ export function createProjectsRouter(io) {
   });
 
   /** 내가 담당한 업무(팀 전체) — "내 업무" 화면이 쓴다. */
+  /** 칸반 한 열의 카드 순서 — 그 열의 업무 id를 위에서부터 차례로 보낸다. 다른 프로젝트 업무는 무시한다. */
+  router.post('/projects/:id/tasks/order', async (req, res) => {
+    const project = await requireProjectMember(req, res, req.params.id);
+    if (!project) return;
+    if (rejectIfArchived(res, project)) return;
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((id) => typeof id === 'string') : [];
+    if (ids.length === 0 || ids.length > 1000) {
+      return res.status(400).json({ error: '업무 목록이 올바르지 않습니다.' });
+    }
+    await reorderTasks(project.id, ids);
+    await notifyProjectMembers(project, null);
+    res.json({ ok: true });
+  });
+
   router.get('/tasks/mine', async (req, res) => {
     const teamId = req.query.teamId;
     if (typeof teamId !== 'string') return res.status(400).json({ error: 'teamId가 필요합니다.' });

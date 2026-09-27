@@ -185,18 +185,6 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     });
   }
 
-  Future<void> _archive() async {
-    final task = _task;
-    if (task == null) return;
-    await _apply(
-      () => widget.session.api!.setTaskArchived(task.id, !task.archived),
-    );
-    if (mounted) {
-      showAppToast(context, task.archived ? '보관을 해제했습니다.' : '업무를 보관했습니다.');
-    }
-    if (!task.archived) widget.onClose();
-  }
-
   Future<void> _delete() async {
     final task = _task;
     if (task == null) return;
@@ -303,17 +291,19 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                 MenuItemButton(
                   leadingIcon: const Icon(Icons.copy_outlined, size: 16),
                   onPressed: _copy,
-                  child: const Text('업무 복사'),
+                  // 메뉴 이름 오른쪽에 20px 여백 — 메뉴 폭이 글자에 딱 붙지 않게.
+                  child: const Padding(
+                    padding: EdgeInsets.only(right: 20),
+                    child: Text('업무 복사'),
+                  ),
                 ),
                 MenuItemButton(
                   leadingIcon: const Icon(Icons.open_with, size: 16),
                   onPressed: _move,
-                  child: const Text('업무 이동'),
-                ),
-                MenuItemButton(
-                  leadingIcon: const Icon(Icons.inventory_2_outlined, size: 16),
-                  onPressed: _archive,
-                  child: Text(task.archived ? '보관 해제' : '업무 보관'),
+                  child: const Padding(
+                    padding: EdgeInsets.only(right: 20),
+                    child: Text('업무 이동'),
+                  ),
                 ),
                 MenuItemButton(
                   leadingIcon: const Icon(
@@ -322,9 +312,12 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                     color: Colors.redAccent,
                   ),
                   onPressed: _delete,
-                  child: const Text(
-                    '업무 삭제',
-                    style: TextStyle(color: Colors.redAccent),
+                  child: const Padding(
+                    padding: EdgeInsets.only(right: 20),
+                    child: Text(
+                      '업무 삭제',
+                      style: TextStyle(color: Colors.redAccent),
+                    ),
                   ),
                 ),
               ],

@@ -176,6 +176,18 @@ class _CommentsSectionState extends State<CommentsSection> {
   }
 
   @override
+  void didUpdateWidget(covariant CommentsSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.readOnly && widget.readOnly) {
+      _replyTo = null;
+      _editing = null;
+      _newFocus.unfocus();
+      _replyFocus.unfocus();
+      _editFocus.unfocus();
+    }
+  }
+
+  @override
   void dispose() {
     _newText.dispose();
     _newFocus.dispose();
@@ -197,6 +209,7 @@ class _CommentsSectionState extends State<CommentsSection> {
   // ── 저장 ──────────────────────────────────────────────────────────────
 
   Future<void> _submitNew() async {
+    if (widget.readOnly) return;
     final (:text, :format) = _newText.formatted();
     if (text.isEmpty) return;
     _newText.clear();
@@ -216,6 +229,7 @@ class _CommentsSectionState extends State<CommentsSection> {
   }
 
   Future<void> _submitReply(String threadId) async {
+    if (widget.readOnly) return;
     final (:text, :format) = _replyText.formatted();
     if (text.isEmpty) return;
     setState(() => _replyTo = null);
@@ -235,6 +249,7 @@ class _CommentsSectionState extends State<CommentsSection> {
   }
 
   Future<void> _submitEdit(CommentEntry c) async {
+    if (widget.readOnly) return;
     final (:text, :format) = _editText.formatted();
     if (text.isEmpty) return;
     setState(() => _editing = null);
@@ -314,7 +329,7 @@ class _CommentsSectionState extends State<CommentsSection> {
     );
   }
 
-  Widget _newCommentInput(ThemeData theme) {
+  Widget _newCommentInput(ThemeData theme, {bool enabled = true}) {
     final me = widget.session.userId;
     final inMembers = widget.members.any((m) => m.id == me);
     return Padding(
@@ -336,17 +351,28 @@ class _CommentsSectionState extends State<CommentsSection> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                RichEditorBox(
-                  controller: _newText,
-                  focusNode: _newFocus,
-                  hintText: '댓글을 입력하세요...',
-                  alwaysShowToolbar: false,
-                  onSubmit: _submitNew,
+                IgnorePointer(
+                  ignoring: !enabled,
+                  child: ExcludeFocus(
+                    excluding: !enabled,
+                    child: Opacity(
+                      opacity: enabled ? 1 : 0.55,
+                      child: RichEditorBox(
+                        controller: _newText,
+                        focusNode: _newFocus,
+                        hintText: '댓글을 입력하세요...',
+                        alwaysShowToolbar: false,
+                        onSubmit: enabled ? _submitNew : null,
+                      ),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 FilledButton(
                   style: _saveStyle(theme),
-                  onPressed: _newText.text.trim().isEmpty ? null : _submitNew,
+                  onPressed: !enabled || _newText.text.trim().isEmpty
+                      ? null
+                      : _submitNew,
                   child: const Text('저장'),
                 ),
               ],
@@ -402,7 +428,7 @@ class _CommentsSectionState extends State<CommentsSection> {
   }) {
     final mine = c.senderId != null && c.senderId == widget.session.userId;
     final canDelete = mine || widget.canModerate;
-    final editing = _editing == c.id;
+    final editing = !widget.readOnly && _editing == c.id;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -537,7 +563,7 @@ class _CommentsSectionState extends State<CommentsSection> {
               padding: const EdgeInsets.only(left: 32, top: 6),
               child: _comment(theme, r, threadId: c.id, hasReplies: false),
             ),
-          if (_replyTo == c.id)
+          if (!widget.readOnly && _replyTo == c.id)
             Padding(
               padding: const EdgeInsets.fromLTRB(32, 4, 0, 10),
               child: _inlineEditor(
@@ -571,7 +597,8 @@ class _CommentsSectionState extends State<CommentsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (!widget.readOnly) _newCommentInput(theme),
+        // 읽기 전용(종료된 프로젝트·보관한 업무)이면 입력칸을 흐리게 두고 저장할 수 없다.
+        _newCommentInput(theme, enabled: !widget.readOnly),
         const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.all(12),

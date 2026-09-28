@@ -46,7 +46,7 @@ import { createTeamsRouter } from './teams.js';
 import { registerSocket } from './socket.js';
 import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
 import { createUsersRouter } from './users.js';
-import { versionRouter, watchForVersionChanges } from './version.js';
+import { guideStatic, helpApiRouter, versionRouter, watchForVersionChanges } from './version.js';
 import { firebaseConfigRouter } from './push.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
@@ -91,6 +91,8 @@ app.use('/api', requireAuth, createCallsRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 app.use('/api', requireAuth, attachmentsRouter);
+// "메신저 설명서"(관리자 이상) 열람용 5분짜리 링크 발급 — 권한은 라우터 안에서 확인(version.js).
+app.use('/api', requireAuth, helpApiRouter);
 // 업로드 파일은 고정된 공개 경로로 서빙하지 않는다 — filesRouter가 짧게 만료되는
 // 서명 링크(/files/<token>)로만 내려준다(upload.js의 signFileUrl 참고).
 app.use(filesRouter);
@@ -98,6 +100,8 @@ app.use(filesRouter);
 app.get('/health', (req, res) => res.json({ ok: true }));
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).
 app.use(versionRouter);
+// 초보자용 도움말(server/guide/ 정적 페이지) — 모든 회원이 보는 공개 문서라 인증 없이(version.js).
+app.use('/guide', guideStatic);
 // FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
 app.use(firebaseConfigRouter);
 

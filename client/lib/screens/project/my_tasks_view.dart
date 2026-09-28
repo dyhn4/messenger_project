@@ -41,6 +41,9 @@ class _Filters {
   );
 
   bool matches(Task t) {
+    // 보관한 업무는 "보관된 업무"를 골랐을 때만 보이고(그때는 보관한 것만), 필터가 없거나
+    // 다른 빠른 필터일 때는 늘 뺀다.
+    if (t.archived != (quick == QuickFilter.archived)) return false;
     switch (quick) {
       case QuickFilter.incomplete:
         if (t.status == TaskStatus.done) return false;
@@ -49,6 +52,7 @@ class _Filters {
       case QuickFilter.overdue:
         if (!t.isOverdue) return false;
       case QuickFilter.mine:
+      case QuickFilter.archived:
       case null:
         break;
     }
@@ -137,7 +141,8 @@ class _MyTasksViewState extends State<MyTasksView> {
     try {
       final api = widget.session.api!;
       final results = await Future.wait([
-        api.fetchMyTasks(widget.teamId),
+        // 보관한 업무도 받아서 표에 흐리게 보여준다("보관된 업무"로 따로 볼 수 있다).
+        api.fetchMyTasks(widget.teamId, includeArchived: true),
         api.fetchProjects(widget.teamId),
       ]);
       if (mounted) {
@@ -200,6 +205,7 @@ class _MyTasksViewState extends State<MyTasksView> {
           QuickFilter.incomplete,
           QuickFilter.done,
           QuickFilter.overdue,
+          QuickFilter.archived,
         ])
           FilterQuickChip(
             label: quickFilterLabel(q),
@@ -308,7 +314,12 @@ class _MyTasksViewState extends State<MyTasksView> {
             tasks: visible,
             session: widget.session,
             onOpen: _openTask,
-            emptyText: all.isEmpty ? '담당하거나 참조된 업무가 없습니다.' : '조건에 맞는 업무가 없습니다.',
+            // 보관한 업무만 남은 경우도 "업무가 없다"로 본다("보관된 업무"를 고른 때는 제외).
+            emptyText:
+                _filters.quick != QuickFilter.archived &&
+                    all.every((t) => t.archived)
+                ? '담당하거나 참조된 업무가 없습니다.'
+                : '조건에 맞는 업무가 없습니다.',
             // 표에서 배지로 유형·우선순위·상태를 바꾸면 목록을 다시 읽는다.
             onChanged: _load,
           ),

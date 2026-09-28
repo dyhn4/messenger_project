@@ -112,6 +112,12 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       ]);
       if (!mounted) return;
       setState(() {
+        if (task.archived || project.archived) {
+          _editingTitle?.dispose();
+          _editingTitle = null;
+          _editingDescription?.dispose();
+          _editingDescription = null;
+        }
         _task = task;
         _project = project;
         _statuses = results[0] as List<TaskStatusDef>;
@@ -135,7 +141,12 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     }
   }
 
-  bool get _readOnly => _project?.archived ?? false;
+  /// 종료된 프로젝트 — 업무 메뉴(복사·이동·보관·삭제)도 쓸 수 없다.
+  bool get _projectArchived => _project?.archived ?? false;
+
+  /// 고칠 수 없는 상태 — 종료된 프로젝트이거나 보관한 업무. 모든 칸이 읽기만 된다
+  /// (보관한 업무는 업무 메뉴의 "보관 해제"로 다시 고칠 수 있게 된다).
+  bool get _readOnly => _projectArchived || (_task?.archived ?? false);
 
   // ── 삼점 메뉴 ─────────────────────────────────────────────────────────
 
@@ -182,6 +193,19 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     await _apply(() async {
       await widget.session.api!.moveTask(task.id, picked.id);
       if (mounted) showAppToast(context, '${picked.name}(으)로 옮겼습니다.');
+    });
+  }
+
+  /// 업무 보관 ↔ 보관 해제. 보관하면 패널은 그대로 두고 읽기 전용으로 바뀐다.
+  Future<void> _toggleArchive() async {
+    final task = _task;
+    if (task == null) return;
+    final archive = !task.archived;
+    await _apply(() async {
+      await widget.session.api!.setTaskArchived(task.id, archive);
+      if (mounted) {
+        showAppToast(context, archive ? '업무를 보관했습니다.' : '보관을 해제했습니다.');
+      }
     });
   }
 
@@ -285,7 +309,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               },
             ),
           const Spacer(),
-          if (task != null && !_readOnly)
+          if (task != null && !_projectArchived)
             MenuAnchor(
               menuChildren: [
                 MenuItemButton(
@@ -303,6 +327,14 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   child: const Padding(
                     padding: EdgeInsets.only(right: 20),
                     child: Text('업무 이동'),
+                  ),
+                ),
+                MenuItemButton(
+                  leadingIcon: const Icon(Icons.inventory_2_outlined, size: 16),
+                  onPressed: _toggleArchive,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 20),
+                    child: Text(task.archived ? '보관 해제' : '업무 보관'),
                   ),
                 ),
                 MenuItemButton(
@@ -348,7 +380,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
 
   /// 제목 — 연필을 누르면 그 자리에서 고친다.
   Widget _title(Task task) {
-    final editing = _editingTitle;
+    final editing = _readOnly ? null : _editingTitle;
     if (editing != null) {
       return TextField(
         controller: editing,
@@ -485,7 +517,10 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
     final me = widget.session.userId;
     final assignee = members.where((m) => m.id == task.assigneeId).firstOrNull;
     final canAssignMe =
-        me != null && task.assigneeId != me && members.any((m) => m.id == me);
+        !_readOnly &&
+        me != null &&
+        task.assigneeId != me &&
+        members.any((m) => m.id == me);
     return _row(
       '담당자',
       _readOnly
@@ -568,22 +603,28 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
 
   Widget _periodRow(Task task) {
     final hint = Theme.of(context).hintColor;
-    Widget one(DateTime? value, bool due) => DateDropButton(
-      value: value,
-      onPicked: (picked) => _apply(
-        () => widget.session.api!.updateTask(
-          task.id,
-          startDate: due ? null : picked,
-          clearStartDate: !due && picked == null,
-          dueDate: due ? picked : null,
-          clearDueDate: due && picked == null,
-        ),
-      ),
-      child: Text(
-        value == null ? (due ? '마감일' : '시작일') : formatYmd(value),
-        style: TextStyle(fontSize: 13, color: value == null ? hint : null),
-      ),
+    Widget label(DateTime? value, bool due) => Text(
+      value == null ? (due ? '마감일' : '시작일') : formatYmd(value),
+      style: TextStyle(fontSize: 13, color: value == null ? hint : null),
     );
+    Widget one(DateTime? value, bool due) => _readOnly
+        ? Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: label(value, due),
+          )
+        : DateDropButton(
+            value: value,
+            onPicked: (picked) => _apply(
+              () => widget.session.api!.updateTask(
+                task.id,
+                startDate: due ? null : picked,
+                clearStartDate: !due && picked == null,
+                dueDate: due ? picked : null,
+                clearDueDate: due && picked == null,
+              ),
+            ),
+            child: label(value, due),
+          );
     return _row(
       '기간',
       Row(
@@ -707,7 +748,14 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                         if (id != user.id) id,
                     ]),
             ),
-          if (!_readOnly)
+          if (_readOnly)
+            IgnorePointer(
+              child: Opacity(
+                opacity: 0.45,
+                child: DashedAddButton(label: '+ 추가', onTap: () {}),
+              ),
+            )
+          else
             MenuAnchor(
               menuChildren: [
                 if (rest.isEmpty)
@@ -795,7 +843,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
 
   Widget _description(Task task) {
     final theme = Theme.of(context);
-    final editing = _editingDescription;
+    final editing = _readOnly ? null : _editingDescription;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -806,7 +854,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
             const Spacer(),
-            if (!_readOnly && editing == null)
+            if (editing == null)
               TextButton.icon(
                 icon: const Icon(Icons.edit_outlined, size: 14),
                 label: const Text('편집'),
@@ -814,11 +862,13 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   visualDensity: VisualDensity.compact,
                   textStyle: const TextStyle(fontSize: 12),
                 ),
-                onPressed: () => setState(
-                  () => _editingDescription = TextEditingController(
-                    text: task.description ?? '',
-                  ),
-                ),
+                onPressed: _readOnly
+                    ? null
+                    : () => setState(
+                        () => _editingDescription = TextEditingController(
+                          text: task.description ?? '',
+                        ),
+                      ),
               ),
           ],
         ),
@@ -958,29 +1008,28 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                   ),
               ],
             ),
-          if (!_readOnly) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _newChecklist,
-                    decoration: const InputDecoration(
-                      hintText: '+ 새 체크리스트 항목 추가 (Enter)',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _addChecklist(task),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _newChecklist,
+                  enabled: !_readOnly,
+                  decoration: const InputDecoration(
+                    hintText: '+ 새 체크리스트 항목 추가 (Enter)',
+                    isDense: true,
+                    border: OutlineInputBorder(),
                   ),
+                  onSubmitted: (_) => _addChecklist(task),
                 ),
-                const SizedBox(width: 6),
-                FilledButton(
-                  onPressed: () => _addChecklist(task),
-                  child: const Text('추가'),
-                ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(width: 6),
+              FilledButton(
+                onPressed: _readOnly ? null : () => _addChecklist(task),
+                child: const Text('추가'),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -996,7 +1045,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
   Widget _subtasks(Task task) {
     final theme = Theme.of(context);
     // 하위 업무에는 또 하위 업무를 둘 수 없다(서버도 막는다).
-    final canAdd = !_readOnly && task.parentTaskId == null;
+    final canAdd = task.parentTaskId == null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1027,6 +1076,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               Expanded(
                 child: TextField(
                   controller: _newSubtask,
+                  enabled: !_readOnly,
                   decoration: const InputDecoration(
                     hintText: '+ 새 하위 업무 (Enter)',
                     isDense: true,
@@ -1037,7 +1087,7 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               ),
               const SizedBox(width: 6),
               FilledButton(
-                onPressed: () => _addSubtask(task),
+                onPressed: _readOnly ? null : () => _addSubtask(task),
                 child: const Text('추가'),
               ),
             ],
@@ -1060,65 +1110,84 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       onTap: () => widget.onOpenTask(sub.id),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                sub.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13),
+        // 보관한 하위 업무는 흐리게, 앞에 보관함 아이콘(리스트 표와 같다).
+        child: Opacity(
+          opacity: sub.archived ? 0.45 : 1,
+          child: Row(
+            children: [
+              if (sub.archived) ...[
+                Tooltip(
+                  message: '보관된 업무',
+                  child: Icon(
+                    Icons.inventory_2_outlined,
+                    size: 14,
+                    color: theme.hintColor,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: Text(
+                  sub.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: assignee?.name ?? '미배정',
-              child: assignee != null
-                  ? UserAvatar(
-                      user: assignee,
-                      resolveUrl: widget.session.resolveUrl,
-                      radius: 10,
-                    )
-                  : CircleAvatar(
-                      radius: 10,
-                      backgroundColor: theme.hintColor.withValues(alpha: 0.15),
-                      child: Icon(
-                        Icons.person_outline,
-                        size: 13,
-                        color: theme.hintColor,
+              const SizedBox(width: 8),
+              Tooltip(
+                message: assignee?.name ?? '미배정',
+                child: assignee != null
+                    ? UserAvatar(
+                        user: assignee,
+                        resolveUrl: widget.session.resolveUrl,
+                        radius: 10,
+                      )
+                    : CircleAvatar(
+                        radius: 10,
+                        backgroundColor: theme.hintColor.withValues(
+                          alpha: 0.15,
+                        ),
+                        child: Icon(
+                          Icons.person_outline,
+                          size: 13,
+                          color: theme.hintColor,
+                        ),
                       ),
-                    ),
-            ),
-            const SizedBox(width: 8),
-            // 마감일은 "9.↵26."처럼 월·일을 두 줄로 좁게 — 폭을 고정해 줄마다 칸이 맞는다.
-            SizedBox(
-              width: 24,
-              child: Text(
-                due == null ? '-' : '${due.month}.\n${due.day}.',
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.15,
-                  color: sub.isOverdue ? Colors.redAccent : theme.hintColor,
+              ),
+              const SizedBox(width: 8),
+              // 마감일은 "9.↵26."처럼 월·일을 두 줄로 좁게 — 폭을 고정해 줄마다 칸이 맞는다.
+              SizedBox(
+                width: 24,
+                child: Text(
+                  due == null ? '-' : '${due.month}.\n${due.day}.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.15,
+                    color: sub.isOverdue ? Colors.redAccent : theme.hintColor,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: parseTypeColor(sub.statusColor).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                sub.statusLabel,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: parseTypeColor(sub.statusColor),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: parseTypeColor(
+                    sub.statusColor,
+                  ).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  sub.statusLabel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: parseTypeColor(sub.statusColor),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1227,7 +1296,9 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
                 '종료된 프로젝트의 업무입니다. 읽기만 할 수 있습니다.',
                 style: TextStyle(color: theme.hintColor, fontSize: 12),
               ),
-            ),
+            )
+          else if (task?.archived == true)
+            const _ArchivedBanner(),
           Expanded(
             child: _error != null
                 ? Center(child: Text(_error!))
@@ -1295,6 +1366,46 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       SizedBox(width: 320, child: _meta(task)),
     ],
   );
+}
+
+/// 보관한 업무 안내 — 옅은 주황 띠에 보관함 아이콘. 패널의 모든 칸은 읽기만 된다.
+class _ArchivedBanner extends StatelessWidget {
+  const _ArchivedBanner();
+
+  static const _fg = Color(0xFFB45309);
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: dark
+            ? const Color(0xFFF59E0B).withValues(alpha: 0.16)
+            : const Color(0xFFFFF3DC),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.inventory_2_outlined,
+            size: 16,
+            color: dark ? const Color(0xFFFBBF24) : _fg,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '보관된 업무입니다',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: dark ? const Color(0xFFFBBF24) : _fg,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// 업무 패널이 본문 오른쪽에 나란히 붙어 있을 때 그 폭(없으면 0) — 업무 목록 표가 이만큼은

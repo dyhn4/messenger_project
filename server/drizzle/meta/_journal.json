@@ -449,6 +449,41 @@
       "when": 1790513853150,
       "tag": "0063_lethal_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1790561778237,
+      "tag": "0064_bent_imperial_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1790600967033,
+      "tag": "0065_harsh_the_phantom",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1790620657545,
+      "tag": "0066_boring_firestar",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790624836198,
+      "tag": "0067_purple_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790630355544,
+      "tag": "0068_flashy_miss_america",
+      "breakpoints": true
     }
   ]
 }

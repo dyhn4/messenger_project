@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, lte, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { announcementComments, announcements } from '../schema.js';
 
@@ -45,7 +45,8 @@ export async function countUnreadAnnouncementsForUser(roomId, userId, since) {
       and(
         eq(announcements.roomId, roomId),
         isNull(announcements.deletedAt),
-        ne(announcements.authorId, userId),
+        // 탈퇴한 사람의 공지(authorId null)도 세도록 — SQL에서 NULL <> x는 참이 아니다.
+        or(isNull(announcements.authorId), ne(announcements.authorId, userId)),
         gt(announcements.createdAt, since),
       ),
     );

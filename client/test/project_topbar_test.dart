@@ -88,6 +88,30 @@ void main() {
       if (path == '/api/projects/p1') {
         return http.Response(jsonEncode(project()), 200, headers: json);
       }
+      if (path == '/api/projects/p1/task-statuses') {
+        return http.Response(
+          jsonEncode([
+            {
+              'id': 's1',
+              'projectId': 'p1',
+              'name': 'JANDI',
+              'color': '#10B981',
+              'category': 'todo',
+              'position': 0,
+            },
+            {
+              'id': 's2',
+              'projectId': 'p1',
+              'name': '끝',
+              'color': '#64748B',
+              'category': 'done',
+              'position': 1,
+            },
+          ]),
+          200,
+          headers: json,
+        );
+      }
       if (path == '/api/tasks/task-1') {
         return http.Response(
           jsonEncode({
@@ -227,6 +251,75 @@ void main() {
     expect(favorite, isTrue);
     expect(find.byIcon(Icons.star_rounded), findsOneWidget);
     expect(find.text('즐겨찾기 1'), findsOneWidget); // 사이드바에도 반영
+  });
+
+  testWidgets('사이드바: 공개 프로젝트 찾기는 없고, [+] > 전체 프로젝트에서 줄을 누르면 연다', (
+    tester,
+  ) async {
+    await pumpDialog(tester, buildSession());
+    expect(find.text('공개 프로젝트 찾기'), findsNothing);
+
+    await tester.tap(find.byTooltip('추가'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('전체 프로젝트'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // 전체 프로젝트 목록 — 참여 중인 프로젝트, 키, 진행률, 공개 여부.
+    expect(find.text('내가 참여 중인 프로젝트 1개'), findsOneWidget);
+    final row = find.byKey(const ValueKey('all-project-p1'));
+    expect(row, findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('TA')), findsOneWidget);
+    // 공개 프로젝트는 정회원 이상이면 자동으로 멤버라 이 목록에 이미 있다 — 찾기 버튼이 없다.
+    expect(find.text('공개 프로젝트 찾기'), findsNothing);
+    expect(find.byType(OutlinedButton), findsNothing);
+
+    // 검색은 이름·키로 거른다.
+    await tester.enterText(
+      find.widgetWithText(TextField, '프로젝트 이름·키 검색'),
+      '없는이름',
+    );
+    await tester.pump();
+    expect(find.text('검색 결과가 없습니다.'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, '없는이름'), 'ta');
+    await tester.pump();
+    expect(row, findsOneWidget);
+
+    // 줄을 누르면 그 프로젝트가 열린다(프로젝트 머리의 큰 이름).
+    await tester.tap(row);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is Text && w.data == '잔디톡' && w.style?.fontSize == 22,
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('사이드바: [+] > 템플릿, 프로젝트 ⋯ > 템플릿 저장', (tester) async {
+    await pumpDialog(tester, buildSession());
+
+    // [+] 메뉴 — 전체 프로젝트·템플릿(프로젝트 생성은 권한이 있을 때만).
+    await tester.tap(find.byTooltip('추가'));
+    await tester.pumpAndSettle();
+    expect(find.text('전체 프로젝트'), findsOneWidget);
+    await tester.tap(find.text('템플릿'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('템플릿이 없습니다'), findsOneWidget);
+
+    // 프로젝트 ⋯ > 템플릿 저장 → 그 프로젝트 구성으로 채운 새 템플릿 편집기.
+    await tester.tap(find.byTooltip('프로젝트 메뉴').first);
+    await tester.pumpAndSettle();
+    expect(find.text('즐겨찾기'), findsOneWidget);
+    await tester.tap(find.text('템플릿 저장'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('새 템플릿 만들기'), findsOneWidget);
+    final nameField = tester.widget<TextField>(find.byType(TextField).at(1));
+    expect(nameField.controller?.text, '잔디톡');
+    expect(find.text('JANDI'), findsOneWidget);
+    expect(find.text('끝'), findsOneWidget);
   });
 
   testWidgets('상단 검색: 업무를 찾아 누르면 그 업무 상세가 열린다', (tester) async {

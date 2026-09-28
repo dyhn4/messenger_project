@@ -76,7 +76,9 @@ void main() {
       ),
       _task('3', '배포 준비', status: 'done', start: day(-9), due: day(-6)),
       _task('4', '일정 없는 업무'),
+      {..._task('5', '보관한 업무'), 'archived': true},
     ];
+    String? tasksArchivedQuery;
     tasks[0]['commentCount'] = 3;
     tasks[0]['assigneeName'] = 'Riley';
     final patched = <String, dynamic>{};
@@ -140,6 +142,7 @@ void main() {
         );
       }
       if (path == '/api/projects/p1/tasks') {
+        tasksArchivedQuery = request.url.queryParameters['archived'];
         return http.Response(jsonEncode(tasks), 200, headers: json);
       }
       return http.Response('[]', 200, headers: json);
@@ -195,6 +198,30 @@ void main() {
     await toggleFilter();
     expect(inPanel('상태'), findsOneWidget);
     expect(inPanel('우선순위'), findsOneWidget);
+    // 보관한 업무는 평소 리스트에 없고, "보관된 업무"를 골랐을 때만(그것만, 흐리게) 보인다.
+    expect(find.text('보관한 업무'), findsNothing);
+    await tester.tap(inPanel('보관된 업무'));
+    await tester.pumpAndSettle();
+    expect(find.text('기획서 작성'), findsNothing);
+    expect(find.text('보관한 업무'), findsOneWidget);
+    expect(find.byTooltip('보관된 업무'), findsOneWidget);
+    expect(
+      tester
+          .widget<Opacity>(
+            find
+                .ancestor(
+                  of: find.text('보관한 업무'),
+                  matching: find.byType(Opacity),
+                )
+                .first,
+          )
+          .opacity,
+      0.45,
+    );
+    await tester.tap(inPanel('보관된 업무'));
+    await tester.pumpAndSettle();
+    expect(find.text('기획서 작성'), findsOneWidget);
+    expect(find.text('보관한 업무'), findsNothing);
     // 필터 추가 → 시작일·마감일.
     await tester.tap(inPanel('필터 추가'));
     await tester.pumpAndSettle();
@@ -245,11 +272,20 @@ void main() {
     expect(find.textContaining('해당 일의 업무'), findsOneWidget);
 
     // 칸반: 할 일 → 완료로 끌어다 놓기
+    // 보관한 것까지 받아 오지만, 필터 없는 리스트에는 보관한 업무가 없다.
+    expect(tasksArchivedQuery, 'all');
+    await openTab('리스트');
+    expect(find.text('보관한 업무'), findsNothing);
+    expect(find.byTooltip('보관된 업무'), findsNothing);
+
     await openTab('칸반보드');
+    // 칸반(과 간트·캘린더·대시보드)에는 보관한 업무가 없다.
+    expect(find.text('보관한 업무'), findsNothing);
     expect(find.text('업무를 여기로 끌어다 놓으세요'), findsOneWidget); // 빈 '검수' 열
     await toggleFilter();
     expect(inPanel('담당자'), findsOneWidget);
     expect(inPanel('상태'), findsNothing);
+    expect(inPanel('보관된 업무'), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.byType(FilterPanel), findsNothing);

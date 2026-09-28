@@ -53,6 +53,30 @@ void main() {
     );
   });
 
+  test('예전에 저장된 링크 글의 짝 없는 "["도 예전처럼 링크로 읽는다', () {
+    const url = 'https://x.com';
+    // 글 | 서식 구간(시작-끝:서식:주소) 목록.
+    String read(String md) {
+      final r = noteMarkdownToRich(md);
+      final runs = [
+        for (final x in r.runs) '${x.start}-${x.end}:${x.flags}:${x.href}',
+      ];
+      return '${r.text} | ${runs.join(', ')}';
+    }
+
+    expect(read('배열 [a[0]($url) 끝'), '배열 a[0 끝 | 3-6:0:$url');
+    expect(read('[a[b]($url)'), 'a[b | 0-3:0:$url');
+    expect(read('[`a[0`]($url)'), 'a[0 | 0-3:${Fmt.code}:$url');
+    // 다시 저장하면 짝 없는 "["는 전각이 되어, 앞뒤 글과 상관없이 같은 링크로 읽힌다.
+    expect(roundTrip('배열 [a[0]($url) 끝'), '배열 [a［0]($url) 끝');
+    expect(read('배열 [a［0]($url) 끝'), '배열 a［0 끝 | 3-6:0:$url');
+    // 링크를 대괄호로 감싼 글은 안쪽만 링크 — 짝 맞는 대괄호 링크 글도 그대로.
+    expect(read('[참고 [TA-1 제목]($url)]'), '[참고 TA-1 제목] | 4-11:0:$url');
+    expect(roundTrip('[참고 [TA-1 제목]($url)]'), '[참고 [TA-1 제목]($url)]');
+    expect(read('[[긴급] 점검]($url)'), '[긴급] 점검 | 0-7:0:$url');
+    expect(read('[x] 할 일 [링크]($url)'), '[x] 할 일 링크 | 8-10:0:$url');
+  });
+
   test('미리보기에서는 기호가 빠진다', () {
     expect(notePlainPreview('# 제목\n**굵게** 글\n- 항목'), '제목 굵게 글 • 항목');
   });

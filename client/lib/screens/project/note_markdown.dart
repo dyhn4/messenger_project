@@ -34,9 +34,54 @@ final _inlinePattern = RegExp(
   r'|<u>(.+?)</u>' // 6
   r'|~~(.+?)~~' // 7
   r'|`([^`]+)`' // 8
-  r'|\[([^\]]+)\]\(([^)\s]+)\)' // 9, 10
-  r'|(?<![\w*])\*([^*\s](?:[^*]*[^*\s])?)\*(?![\w*])', // 11 (예전 기울임)
+  // 링크 글에는 짝이 맞는 대괄호 한 겹까지 둘 수 있다("[긴급] 서버 점검", 붙여넣은 "[MKT-1] 제목").
+  r'|\[((?:[^\[\]]|\[[^\[\]]*\])+)\]\(([^)\s]+)\)' // 9, 10
+  // 예전 앱은 링크 글의 짝 없는 "["도 그대로 저장했다("[a[0](주소)") — 위에 안 맞으면 예전처럼 읽는다.
+  // 단 뒤에 그 "["를 닫는 "]"가 있으면 링크를 대괄호로 감싼 글("[참고 [TA-1 제목](주소)]")로 본다.
+  r'|\[([^\]]+)\]\(([^)\s]+)\)(?![^\[]*\])' // 11, 12
+  r'|(?<![\w*])\*([^*\s](?:[^*]*[^*\s])?)\*(?![\w*])', // 13 (예전 기울임)
 );
+
+/// 링크 글로 저장해도 다시 링크로 읽히게 — 마크다운 링크 글에는 짝이 맞는 대괄호 한 겹까지만
+/// 둘 수 있어서, 그렇지 않은 글이면 대괄호를 전각(［］)으로 바꾼다. 안에 "[글](주소)" 모양이
+/// 있어도(링크 속 링크로 읽혀 주소가 바뀐다) 바꾼다.
+String noteSafeLinkText(String s) {
+  var depth = 0;
+  var ok = !s.contains('](');
+  for (final c in s.codeUnits) {
+    if (c == 0x5B) {
+      depth++;
+    } else if (c == 0x5D) {
+      depth--;
+    }
+    if (depth < 0 || depth > 1) {
+      ok = false;
+      break;
+    }
+  }
+  if (ok && depth == 0) return s;
+  return s.replaceAll('[', '［').replaceAll(']', '］');
+}
+
+/// 서식 없이 글자 그대로 보여야 하는 링크 글(업무 제목 등) — 저장했다 다시 읽을 때 "*중요*",
+/// "`코드`", "~~취소~~", "<b>" 같은 서식 기호로 읽히면 그 기호들을 전각으로 바꿔 글자 그대로 남긴다.
+String notePlainLinkText(String s) {
+  final safe = noteSafeLinkText(s);
+  final b = _Builder();
+  _inlineInto(b, safe, 0, null);
+  if (b.buf.toString() == safe &&
+      b.flags.every((f) => f == 0) &&
+      b.hrefs.every((h) => h == null)) {
+    return safe;
+  }
+  return safe
+      .replaceAll('*', '＊')
+      .replaceAll('`', '｀')
+      .replaceAll('~', '～')
+      .replaceAll('<', '＜')
+      .replaceAll('[', '［')
+      .replaceAll(']', '］');
+}
 
 final _checkLine = RegExp(r'^(\s*)[-*] \[( |x|X)\] ');
 final _bulletLine = RegExp(r'^(\s*)[-*] ');
@@ -81,8 +126,10 @@ void _inlineInto(_Builder b, String s, int f, String? href) {
       b.add(m.group(8)!, f | Fmt.code, href);
     } else if (m.group(9) != null) {
       _inlineInto(b, m.group(9)!, f, m.group(10));
+    } else if (m.group(11) != null) {
+      _inlineInto(b, m.group(11)!, f, m.group(12));
     } else {
-      _inlineInto(b, m.group(11)!, f | Fmt.italic, href);
+      _inlineInto(b, m.group(13)!, f | Fmt.italic, href);
     }
     last = m.end;
   }
@@ -233,7 +280,9 @@ String _inlineToMd(
     if (f & Fmt.underline != 0) seg = '<u>$seg</u>';
     if (f & Fmt.italic != 0) seg = '<i>$seg</i>';
     if (f & Fmt.bold != 0) seg = '**$seg**';
-    if (h != null && !h.startsWith(noteImageHref)) seg = '[$seg]($h)';
+    if (h != null && !h.startsWith(noteImageHref)) {
+      seg = '[${noteSafeLinkText(seg)}]($h)';
+    }
     final rgb = Fmt.colorOf(f);
     if (rgb != null) {
       final hex = rgb.toRadixString(16).padLeft(6, '0').toUpperCase();

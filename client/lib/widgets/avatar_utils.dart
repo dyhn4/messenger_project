@@ -48,6 +48,24 @@ class InitialsAvatar extends StatelessWidget {
   }
 }
 
+/// 프로젝트 자동화(채팅방 알림) 메시지의 아바타 색 — 사람 아바타와 헷갈리지 않게 남보라 계열로 고정.
+const automationAvatarColor = Color(0xFF6366F1);
+
+/// 자동화가 보낸 메시지의 아바타 — 사람이 아니라서 프로필 사진·이니셜 대신 번개 아이콘을 그린다.
+class AutomationAvatar extends StatelessWidget {
+  final double radius;
+  const AutomationAvatar({super.key, this.radius = 16});
+
+  @override
+  Widget build(BuildContext context) {
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: automationAvatarColor.withValues(alpha: 0.16),
+      child: Icon(Icons.bolt, size: radius * 1.2, color: automationAvatarColor),
+    );
+  }
+}
+
 /// avatarType('initial'/'character'/'photo')에 따라 업로드한 사진, 캐릭터(이모지+배경색),
 /// 이니셜 중 하나를 그리는 공용 아바타. `MyAvatar`(나)와 `UserAvatar`(다른 사용자)가 공유한다.
 class AvatarView extends StatelessWidget {

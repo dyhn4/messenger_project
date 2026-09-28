@@ -1248,21 +1248,41 @@ class _ResizeDivider extends StatelessWidget {
 
 /// 사이드바 한 섹션: 고정 높이 헤더 + 그 아래는 이 섹션 영역 안에서만 스크롤되는 목록.
 /// 목록이 영역보다 길면 스크롤바를 항상 보여준다.
-class _RoomSection extends StatelessWidget {
+class _RoomSection extends StatefulWidget {
   final Widget header;
   final List<Widget> children;
   const _RoomSection({required this.header, required this.children});
+
+  @override
+  State<_RoomSection> createState() => _RoomSectionState();
+}
+
+class _RoomSectionState extends State<_RoomSection> {
+  /// 섹션마다 따로 — 데스크톱에서는 ListView가 PrimaryScrollController에 안 붙어서, 컨트롤러
+  /// 없이 늘 보이는 스크롤바를 달면 디버그 모드에서 "ScrollPosition이 없다" 오류가 난다.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        header,
+        widget.header,
         Expanded(
           child: Scrollbar(
+            controller: _scroll,
             thumbVisibility: true,
-            child: ListView(padding: EdgeInsets.zero, children: children),
+            child: ListView(
+              controller: _scroll,
+              padding: EdgeInsets.zero,
+              children: widget.children,
+            ),
           ),
         ),
       ],

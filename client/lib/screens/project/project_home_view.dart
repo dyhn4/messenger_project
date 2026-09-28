@@ -28,6 +28,9 @@ class ProjectHomeView extends StatefulWidget {
   final ValueChanged<String> onOpenProject;
   final VoidCallback onOpenMyTasks;
 
+  /// "이번 주 나의 업무"의 "캘린더 ›".
+  final VoidCallback? onOpenCalendar;
+
   const ProjectHomeView({
     super.key,
     required this.session,
@@ -35,6 +38,7 @@ class ProjectHomeView extends StatefulWidget {
     required this.reloadTick,
     required this.onOpenProject,
     required this.onOpenMyTasks,
+    this.onOpenCalendar,
   });
 
   @override
@@ -45,11 +49,34 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
   ProjectHome? _home;
   String? _error;
 
-  /// "이번 주 나의 업무"에서 고른 날짜(기본은 오늘) — 그날 마감인 업무만 보여준다.
+  /// "이번 주 나의 업무"에서 고른 날짜(기본은 오늘) — 그날 진행 중인 업무를 보여준다.
   late DateTime _selectedDay = _dateOnly(DateTime.now());
 
   /// 프로젝트 목록을 다 펼쳤는지("모두 보기").
   bool _allProjects = false;
+
+  final _weekScroll = ScrollController();
+
+  /// 화면 전체 목록용 — 데스크톱에서는 ListView가 PrimaryScrollController에 안 붙어서, 컨트롤러
+  /// 없이 스크롤바를 달면 디버그 모드에서 "ScrollPosition이 없다" 오류가 난다.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _weekScroll.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// [day]에 진행 중인 업무인지 — 시작일(없으면 마감일)부터 마감일까지. 오늘이면 마감이 지났는데
+  /// 아직 안 끝난 업무도 넣는다(오늘 챙겨야 하므로).
+  bool _activeOn(Task t, DateTime day) {
+    final due = t.dueDate == null ? null : _dateOnly(t.dueDate!);
+    if (due == null) return false;
+    final start = t.startDate == null ? due : _dateOnly(t.startDate!);
+    if (!day.isBefore(start) && !day.isAfter(due)) return true;
+    return day == _dateOnly(DateTime.now()) && t.isOverdue;
+  }
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
@@ -96,23 +123,16 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
 
     final myTasks = home.myTasks;
     final weekDays = _weekDays;
-    final weekTasks = myTasks
-        .where(
-          (t) =>
-              t.dueDate != null &&
-              !_dateOnly(t.dueDate!).isBefore(weekDays.first) &&
-              !_dateOnly(t.dueDate!).isAfter(weekDays.last),
-        )
-        .toList();
-    final dayTasks = weekTasks
-        .where((t) => _dateOnly(t.dueDate!) == _selectedDay)
-        .toList();
+    final dayTasks = myTasks.where((t) => _activeOn(t, _selectedDay)).toList()
+      ..sort((a, b) => a.dueDate!.compareTo(b.dueDate!));
     final projects = _allProjects || home.projects.length <= 4
         ? home.projects
         : home.projects.take(4).toList();
 
     return MutedScrollbar(
+      controller: _scroll,
       child: ListView(
+        controller: _scroll,
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
         children: [
           _buildGreeting(context, home),
@@ -125,14 +145,12 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
               final left = [
                 ProjectCard(
                   title: '내가 참여한 프로젝트',
+                  icon: Icons.assignment_outlined,
                   subtitle: '내가 참여 중인 프로젝트별 진행률을 확인할 수 있습니다.',
-                  action: home.projects.length > 4
-                      ? TextButton(
-                          onPressed: () =>
-                              setState(() => _allProjects = !_allProjects),
-                          child: Text(_allProjects ? '접기' : '모두 보기'),
-                        )
+                  actionLabel: home.projects.length > 4
+                      ? (_allProjects ? '접기' : '모두 보기')
                       : null,
+                  onAction: () => setState(() => _allProjects = !_allProjects),
                   child: projects.isEmpty
                       ? const EmptyHint('참여 중인 프로젝트가 없습니다')
                       : Column(
@@ -145,21 +163,36 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                           ],
                         ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 ProjectCard(
                   title: '내가 담당한 업무',
+                  icon: Icons.assignment_turned_in_outlined,
                   count: myTasks.length,
                   subtitle: '내가 담당자로 지정된 업무를 진행 상황별로 확인할 수 있습니다.',
                   child: myTasks.isEmpty
                       ? const EmptyHint('담당한 업무가 없습니다')
                       : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            for (final task in myTasks.take(5))
-                              TaskRow(task: task, onTap: () => _openTask(task)),
+                            TaskRow.list([
+                              for (final task in myTasks.take(5))
+                                TaskRow(
+                                  task: task,
+                                  onTap: () => _openTask(task),
+                                ),
+                            ]),
                             if (myTasks.length > 5)
-                              TextButton(
-                                onPressed: widget.onOpenMyTasks,
-                                child: const Text('더보기'),
+                              Center(
+                                child: TextButton(
+                                  onPressed: widget.onOpenMyTasks,
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Theme.of(
+                                      context,
+                                    ).hintColor,
+                                    textStyle: const TextStyle(fontSize: 12),
+                                  ),
+                                  child: const Text('더보기'),
+                                ),
                               ),
                           ],
                         ),
@@ -168,7 +201,10 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
               final right = [
                 ProjectCard(
                   title: '이번 주 나의 업무',
+                  icon: Icons.calendar_today_outlined,
                   subtitle: '이번 주 내가 담당한 업무를 날짜별로 확인할 수 있습니다.',
+                  actionLabel: widget.onOpenCalendar == null ? null : '캘린더',
+                  onAction: widget.onOpenCalendar,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -177,42 +213,58 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                         selected: _selectedDay,
                         hasTask: {
                           for (final day in weekDays)
-                            day: weekTasks.any(
-                              (t) => _dateOnly(t.dueDate!) == day,
-                            ),
+                            day: myTasks.any((t) => _activeOn(t, day)),
                         },
                         onSelect: (day) => setState(() => _selectedDay = day),
                       ),
                       const SizedBox(height: 8),
                       if (dayTasks.isEmpty)
-                        const EmptyHint('이 날짜에 마감인 업무가 없습니다')
+                        const EmptyHint('이 날짜에 진행 중인 업무가 없습니다')
                       else
-                        for (final task in dayTasks)
-                          TaskRow(task: task, onTap: () => _openTask(task)),
+                        // 다섯 줄쯤 보이고 나머지는 이 안에서 스크롤.
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 310),
+                          child: MutedScrollbar(
+                            controller: _weekScroll,
+                            child: SingleChildScrollView(
+                              controller: _weekScroll,
+                              padding: const EdgeInsets.only(right: 10),
+                              child: TaskRow.list([
+                                for (final task in dayTasks)
+                                  TaskRow(
+                                    task: task,
+                                    onTap: () => _openTask(task),
+                                  ),
+                              ]),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 ProjectCard(
                   title: '최근 댓글',
+                  icon: Icons.chat_bubble_outline,
                   child: home.recentComments.isEmpty
-                      ? const EmptyHint('최근 댓글이 없습니다')
-                      : Column(
-                          children: [
-                            for (final comment in home.recentComments.take(5))
-                              _CommentRow(
-                                comment: comment,
-                                onTap: () => _openTaskById(comment.taskId),
-                              ),
-                          ],
-                        ),
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: EmptyHint('최근 댓글이 없습니다'),
+                        )
+                      : TaskRow.list([
+                          for (final comment in home.recentComments.take(5))
+                            _CommentRow(
+                              comment: comment,
+                              onTap: () => _openTaskById(comment.taskId),
+                            ),
+                        ]),
                 ),
               ];
 
               if (constraints.maxWidth < 720) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [...left, const SizedBox(height: 16), ...right],
+                  children: [...left, const SizedBox(height: 20), ...right],
                 );
               }
               return Row(
@@ -224,7 +276,7 @@ class _ProjectHomeViewState extends State<ProjectHomeView> {
                       children: left,
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 20),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -366,7 +418,7 @@ class _Stat extends StatelessWidget {
   }
 }
 
-/// 프로젝트 한 줄 — 이름 + 진행률 막대 + 완료/전체.
+/// 프로젝트 한 줄 — 이름 + 프로젝트 색 진행률 막대 + 퍼센트 + 완료/전체.
 class _ProjectProgressRow extends StatelessWidget {
   final Project project;
   final VoidCallback onTap;
@@ -374,21 +426,23 @@ class _ProjectProgressRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
     return InkWell(
       onTap: onTap,
+      hoverColor: homeHoverColor(context),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 13),
         child: Row(
           children: [
             SizedBox(
-              width: 120,
+              width: 122,
               child: Text(
                 project.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w500),
+                style: const TextStyle(fontSize: 14),
               ),
             ),
             const SizedBox(width: 12),
@@ -397,30 +451,32 @@ class _ProjectProgressRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(999),
                 child: LinearProgressIndicator(
                   value: project.progress,
-                  minHeight: 6,
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.surfaceContainerHighest,
+                  minHeight: 8,
+                  color: parseTypeColor(project.color),
+                  backgroundColor: theme.brightness == Brightness.dark
+                      ? theme.colorScheme.surfaceContainerHighest
+                      : const Color(0xFFF0F1F4),
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 20),
             SizedBox(
-              width: 38,
+              width: 40,
               child: Text(
                 '${(project.progress * 100).round()}%',
                 textAlign: TextAlign.right,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             SizedBox(
-              width: 48,
+              width: 50,
               child: Text(
                 '${project.taskDone}/${project.taskTotal}',
                 textAlign: TextAlign.right,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: hint),
+                style: TextStyle(fontSize: 12, color: hint),
               ),
             ),
           ],
@@ -430,7 +486,7 @@ class _ProjectProgressRow extends StatelessWidget {
   }
 }
 
-/// 이번 주 날짜 7개(월~일) — 업무가 있는 날은 아래에 점이 찍힌다.
+/// 이번 주 날짜 7개(월~일) — 둥근 회색 칸, 고른 날은 파란 칸. 업무가 있는 날은 아래에 점.
 class _WeekStrip extends StatelessWidget {
   final List<DateTime> days;
   final DateTime selected;
@@ -444,57 +500,66 @@ class _WeekStrip extends StatelessWidget {
   });
 
   static const _weekdayNames = ['월', '화', '수', '목', '금', '토', '일'];
+  static const _selectedColor = Color(0xFF7FB2F0);
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final dark = theme.brightness == Brightness.dark;
     return Row(
       children: [
         for (final day in days)
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () => onSelect(day),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: day == selected
-                        ? colors.primary
-                        : colors.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        _weekdayNames[day.weekday - 1],
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: day == selected ? colors.onPrimary : null,
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Material(
+                color: day == selected
+                    ? _selectedColor
+                    : (dark
+                          ? theme.colorScheme.surfaceContainerHighest
+                          : const Color(0xFFF3F4F6)),
+                elevation: day == selected ? 3 : 0,
+                shadowColor: _selectedColor.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onSelect(day),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    child: Column(
+                      children: [
+                        Text(
+                          _weekdayNames[day.weekday - 1],
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: day == selected ? Colors.white : hint,
+                          ),
                         ),
-                      ),
-                      Text(
-                        '${day.day}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: day == selected ? colors.onPrimary : null,
+                        const SizedBox(height: 2),
+                        Text(
+                          '${day.day}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: day == selected ? Colors.white : null,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Container(
-                        width: 4,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: (hasTask[day] ?? false)
-                              ? (day == selected
-                                    ? colors.onPrimary
-                                    : colors.primary)
-                              : Colors.transparent,
+                        const SizedBox(height: 4),
+                        Container(
+                          width: 4,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: (hasTask[day] ?? false)
+                                ? (day == selected
+                                      ? Colors.white
+                                      : _selectedColor)
+                                : Colors.transparent,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -505,6 +570,7 @@ class _WeekStrip extends StatelessWidget {
   }
 }
 
+/// 최근 댓글 한 줄 — 댓글 글(두 줄까지) + (쓴 사람 · 업무 번호 · 업무 제목).
 class _CommentRow extends StatelessWidget {
   final TaskComment comment;
   final VoidCallback onTap;
@@ -515,9 +581,9 @@ class _CommentRow extends StatelessWidget {
     final hint = Theme.of(context).hintColor;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      hoverColor: homeHoverColor(context),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        padding: const EdgeInsets.fromLTRB(4, 10, 4, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -525,9 +591,9 @@ class _CommentRow extends StatelessWidget {
               comment.text,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13),
+              style: const TextStyle(fontSize: 14),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Text(
               [
                 comment.senderName,
@@ -536,9 +602,7 @@ class _CommentRow extends StatelessWidget {
               ].join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: hint),
+              style: TextStyle(fontSize: 11, color: hint),
             ),
           ],
         ),

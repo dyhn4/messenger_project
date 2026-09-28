@@ -604,8 +604,8 @@ export const projects = pgTable(
     identifier: text('identifier').notNull(),
     // 사이드바/카드에서 프로젝트를 구분해 주는 대표 색('#RRGGBB').
     color: text('color').notNull().default('#5B8DEF'),
-    // 공개 프로젝트 — 팀 안의 정회원 이상 누구나 초대 없이 찾아보고 "참여"할 수 있다.
-    // 비공개(기본)는 초대받은 구성원만 볼 수 있다.
+    // 공개 프로젝트 — 팀 안의 정회원 이상 모두가 참여 절차 없이 자동으로 구성원이 된다
+    // (project_members.auto). 비공개(기본)는 초대받은 구성원만 볼 수 있다.
     isPublic: boolean('is_public').notNull().default(false),
     // 다음에 만들 업무에 줄 번호. 업무를 지워도 번호를 재사용하지 않도록 프로젝트에 들고 있다
     // (tasks에서 MAX(seq)+1로 계산하면 삭제 후 번호가 겹친다).
@@ -613,6 +613,13 @@ export const projects = pgTable(
     nextTaskSeq: integer('next_task_seq').notNull().default(1001),
     // 다음 노트 번호("MKT-N10"의 10) — 업무 번호와 따로 센다.
     nextNoteSeq: integer('next_note_seq').notNull().default(1),
+    // 이 프로젝트를 만든(또는 이 프로젝트를 저장해 만든) 프로젝트 템플릿 — 설정 > 필드 / 상태의
+    // "업무 템플릿" 칸에 그 카드를 보여 주는 데만 쓴다. 템플릿을 지우면 null로 돌아간다.
+    templateId: uuid('template_id').references(() => projectTemplates.id, { onDelete: 'set null' }),
+    // 노트 수정·삭제 권한 — 'all'(구성원 모두) | 'creator_admin'(작성자 본인과 프로젝트 관리자만).
+    // 기본값은 이 설정이 생기기 전 동작 그대로 — 수정은 누구나, 삭제는 작성자와 관리자만(0068).
+    noteEditPermission: text('note_edit_permission').notNull().default('all'),
+    noteDeletePermission: text('note_delete_permission').notNull().default('creator_admin'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -639,9 +646,55 @@ export const projectMembers = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     role: text('role').notNull().default('member'), // 'owner' | 'member'
     favorite: boolean('favorite').notNull().default(false),
+    // 공개 프로젝트라서 자동으로 들어온 행이면 true(초대·생성으로 들어온 사람은 false).
+    // 비공개로 바뀌면 이 표시가 있는 일반 구성원만 빠지고, 초대받은 사람·담당자는 남는다.
+    auto: boolean('auto').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.projectId, t.userId] }), index('project_members_user_id_idx').on(t.userId)],
+);
+
+/**
+ * 사이드바 프로젝트 폴더 — **개인 설정**이라 사람마다(팀마다) 따로 만든다. 폴더를 지워도
+ * 안에 있던 프로젝트는 그대로 두고 폴더 밖 목록으로 돌아간다(project_folder_items만 cascade).
+ */
+export const projectFolders = pgTable(
+  'project_folders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    position: integer('position').notNull().default(0),
+    // 접어둔 폴더인지 — 다른 기기에서도 같은 모양으로 보이도록 서버에 둔다.
+    collapsed: boolean('collapsed').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('project_folders_user_team_idx').on(t.userId, t.teamId)],
+);
+
+/** 어느 프로젝트를 내 어느 폴더에 넣었는지 — 한 프로젝트는 내 폴더 중 하나에만 들어간다. */
+export const projectFolderItems = pgTable(
+  'project_folder_items',
+  {
+    folderId: uuid('folder_id')
+      .notNull()
+      .references(() => projectFolders.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    uniqueIndex('project_folder_items_user_project_idx').on(t.userId, t.projectId),
+    index('project_folder_items_folder_idx').on(t.folderId),
+  ],
 );
 
 /** 프로젝트 안의 업무(태스크). 화면에 보이는 번호는 `<프로젝트 identifier>-<seq>`로 만든다. */
@@ -842,7 +895,7 @@ export const projectNotifications = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     taskId: uuid('task_id').references(() => tasks.id, { onDelete: 'cascade' }),
-    // 'assigned' | 'referenced' | 'comment' | 'status' | 'due'
+    // 'assigned' | 'referenced' | 'comment' | 'status' | 'due' | 'project_created'(공개 프로젝트 생성, task 없음) 등
     kind: text('kind').notNull(),
     title: text('title').notNull(),
     body: text('body').notNull(),
@@ -896,6 +949,33 @@ export const projectNotificationSettings = pgTable(
 );
 
 /** 업무 템플릿 — "새 업무"에서 불러와 제목/설명/우선순위/유형/담당자/마감(오늘+N일)을 미리 채운다. */
+/**
+ * 프로젝트 템플릿(팀 공유) — 프로젝트의 상태·유형·우선순위·사용자 정의 필드 구성을 저장해 두고,
+ * 새 프로젝트를 만들 때 기본값 대신 이 구성으로 채운다. 만든 프로젝트는 projects.templateId로
+ * 어느 템플릿에서 왔는지만 기억하고 구성은 따로 논다(템플릿을 고치거나 지워도 프로젝트는 그대로).
+ * statuses: [{name, color, category}], types: [{name, color}], priorities: [{name, color, level}],
+ * fields: [{name, kind, options: [문자열]}] — 각 배열의 순서가 곧 표시 순서다.
+ */
+export const projectTemplates = pgTable(
+  'project_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    statuses: jsonb('statuses').notNull().default([]),
+    types: jsonb('types').notNull().default([]),
+    priorities: jsonb('priorities').notNull().default([]),
+    fields: jsonb('fields').notNull().default([]),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('project_templates_team_idx').on(t.teamId, t.createdAt)],
+);
+
 export const taskTemplates = pgTable(
   'task_templates',
   {
@@ -924,6 +1004,8 @@ export const taskTemplates = pgTable(
  * actions: [{kind, ...}] — kind: set_assignee{userId} | set_status{statusId} | set_priority{priority}
  *          | add_reference{userId} | add_comment{text} | notify{userId}
  * 자동화가 일으킨 변화는 다시 자동화를 부르지 않는다(무한 반복 방지).
+ * graph가 있으면 노드 편집기로 만든 규칙이다(트리거 → IF 조건 → 액션 그래프, projectAutomation.js).
+ * 그때 trigger는 트리거 노드의 종류이고 triggerStatusId·condition·actions는 쓰지 않는다.
  */
 export const projectAutomations = pgTable(
   'project_automations',
@@ -938,6 +1020,8 @@ export const projectAutomations = pgTable(
     triggerStatusId: uuid('trigger_status_id').references(() => taskStatuses.id, { onDelete: 'cascade' }),
     condition: jsonb('condition').notNull().default({}),
     actions: jsonb('actions').notNull().default([]),
+    // {nodes: [{id, kind, type, config, x, y}], edges: [{from, port, to}]} — null이면 예전 방식 규칙.
+    graph: jsonb('graph'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

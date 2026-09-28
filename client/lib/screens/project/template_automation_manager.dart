@@ -4,13 +4,25 @@ import '../../models/app_user.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import '../../widgets/role_badge.dart';
+import 'automation_flow_editor.dart' show showAutomationFlowEditor;
 
-/// 편집 창들이 고르기 목록으로 쓰는 프로젝트 정보.
+/// 편집 창과 목록 요약이 쓰는 프로젝트 정보.
 class _Ctx {
   final List<AppUser> members;
   final List<TaskType> types;
   final List<TaskStatusDef> statuses;
-  const _Ctx(this.members, this.types, this.statuses);
+
+  /// 자동화 요약(IF 조건)에만 쓰여서 템플릿 화면에서는 비어 있다.
+  final List<TaskPriorityDef> priorities;
+  final List<TaskFieldDef> fields;
+  const _Ctx(
+    this.members,
+    this.types,
+    this.statuses, {
+    this.priorities = const [],
+    this.fields = const [],
+  });
 
   String memberName(String? id) =>
       members.where((m) => m.id == id).map((m) => m.name).firstOrNull ??
@@ -21,17 +33,49 @@ class _Ctx {
   String typeName(String? id) =>
       types.where((t) => t.id == id).map((t) => t.name).firstOrNull ??
       '(삭제된 유형)';
+  String priorityName(String? id) =>
+      priorities.where((p) => p.id == id).map((p) => p.name).firstOrNull ??
+      '(삭제된 우선순위)';
+
+  /// 자동화 노드의 필드 이름 — 사용자 정의 필드는 `field:<id>`로 온다.
+  String fieldLabel(String field) =>
+      automationFieldLabels[field] ??
+      (field.startsWith('field:')
+          ? fields
+                    .where((f) => f.id == field.substring(6))
+                    .map((f) => f.name)
+                    .firstOrNull ??
+                '(삭제된 필드)'
+          : field);
+
+  /// IF 조건 값의 화면 이름 — 상태·우선순위·담당자·유형은 id로, 사용자 정의 필드는 글자 그대로 온다.
+  String valueLabel(String field, Object? value) {
+    final id = value?.toString();
+    return switch (field) {
+      'status' => statusName(id),
+      'priority' => priorityName(id),
+      'assignee' => memberName(id),
+      'type' => typeName(id),
+      _ => id ?? '',
+    };
+  }
 }
 
-/// 프로젝트의 업무 템플릿과 자동화 규칙, 그리고 규칙 실행 기록을 관리한다 — 프로젝트 담당자와
-/// 팀 소유자·관리자만 쓸 수 있다(서버도 다시 확인한다). "프로젝트 메뉴"에서 쓴다.
+/// 프로젝트의 업무 템플릿("새 업무 양식"), 또는 자동화 규칙과 규칙 실행 기록을 관리한다 —
+/// 프로젝트 담당자와 팀 소유자·관리자만 쓸 수 있다(서버도 다시 확인한다). "프로젝트 설정"의
+/// 필드 / 상태 > "업무 템플릿" 칸과 "자동화" 메뉴가 프로젝트 정보 로딩을 나눠 쓴다.
 class ProjectTemplateAutomationEditor extends StatefulWidget {
   final Session session;
   final String projectId;
+
+  /// true면 자동화(규칙 + 실행 기록) 탭을, false면 새 업무 양식 목록만 보여준다. 양식 목록은
+  /// 설정 칸의 스크롤 안에 들어가므로 자체 스크롤 없이 내용 높이만큼만 차지한다.
+  final bool automations;
   const ProjectTemplateAutomationEditor({
     super.key,
     required this.session,
     required this.projectId,
+    this.automations = false,
   });
 
   @override
@@ -56,8 +100,23 @@ class _ProjectTemplateAutomationEditorState
       final project = await api.fetchProject(widget.projectId);
       final types = await api.fetchTaskTypes(widget.projectId);
       final statuses = await api.fetchTaskStatuses(widget.projectId);
+      // 규칙 요약의 IF 조건이 우선순위·사용자 정의 필드 이름을 쓴다.
+      final priorities = widget.automations
+          ? await api.fetchTaskPriorities(widget.projectId)
+          : const <TaskPriorityDef>[];
+      final fields = widget.automations
+          ? await api.fetchTaskFields(widget.projectId)
+          : const <TaskFieldDef>[];
       if (mounted) {
-        setState(() => _ctx = _Ctx(project.members, types, statuses));
+        setState(
+          () => _ctx = _Ctx(
+            project.members,
+            types,
+            statuses,
+            priorities: priorities,
+            fields: fields,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -70,15 +129,22 @@ class _ProjectTemplateAutomationEditorState
     return _error != null
         ? Center(child: Text(_error!))
         : ctx == null
-        ? const Center(child: CircularProgressIndicator())
+        ? (widget.automations
+              ? const Center(child: CircularProgressIndicator())
+              : const _Loading())
+        : !widget.automations
+        ? _TemplatesTab(
+            session: widget.session,
+            projectId: widget.projectId,
+            ctx: ctx,
+          )
         : DefaultTabController(
-            length: 3,
+            length: 2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const TabBar(
                   tabs: [
-                    Tab(text: '업무 템플릿'),
                     Tab(text: '자동화 규칙'),
                     Tab(text: '실행 기록'),
                   ],
@@ -87,11 +153,6 @@ class _ProjectTemplateAutomationEditorState
                 Expanded(
                   child: TabBarView(
                     children: [
-                      _TemplatesTab(
-                        session: widget.session,
-                        projectId: widget.projectId,
-                        ctx: ctx,
-                      ),
                       _AutomationsTab(
                         session: widget.session,
                         projectId: widget.projectId,
@@ -108,6 +169,23 @@ class _ProjectTemplateAutomationEditorState
             ),
           );
   }
+}
+
+/// 불러오는 중 — 양식 목록은 바깥 스크롤 안(높이 제한 없음)에 놓이므로 작게 한 줄만 차지한다.
+class _Loading extends StatelessWidget {
+  const _Loading();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 16),
+    child: Center(
+      child: SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(strokeWidth: 2.4),
+      ),
+    ),
+  );
 }
 
 Future<bool> _confirmDelete(
@@ -136,7 +214,7 @@ Future<bool> _confirmDelete(
   return ok == true;
 }
 
-// ───────────────────────── 템플릿 ─────────────────────────
+// ───────────────────────── 새 업무 양식 ─────────────────────────
 
 class _TemplatesTab extends StatefulWidget {
   final Session session;
@@ -203,7 +281,7 @@ class _TemplatesTabState extends State<_TemplatesTab> {
   }
 
   Future<void> _delete(TaskTemplate t) async {
-    if (!await _confirmDelete(context, '템플릿 삭제', "'${t.name}' 템플릿을 삭제할까요?")) {
+    if (!await _confirmDelete(context, '양식 삭제', "'${t.name}' 양식을 삭제할까요?")) {
       return;
     }
     try {
@@ -226,60 +304,65 @@ class _TemplatesTabState extends State<_TemplatesTab> {
   Widget build(BuildContext context) {
     if (_error != null) return Center(child: Text(_error!));
     final items = _items;
-    if (items == null) return const Center(child: CircularProgressIndicator());
+    if (items == null) return const _Loading();
     final hint = Theme.of(context).hintColor;
+    // 설정 > 필드 / 상태의 "업무 템플릿" 칸 스크롤 안에 들어가므로 ListView 대신 줄을 그대로 늘어놓는다.
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '"새 업무"에서 템플릿을 고르면 항목이 미리 채워집니다.',
+          '"새 업무" 창의 "양식에서 불러오기"에서 고르면 제목·설명·우선순위·유형·담당자·마감일이 '
+          '미리 채워집니다.',
           style: TextStyle(color: hint, fontSize: 12),
         ),
         const SizedBox(height: 4),
-        Expanded(
-          child: items.isEmpty
-              ? Center(
-                  child: Text('만든 템플릿이 없습니다.', style: TextStyle(color: hint)),
-                )
-              : ListView(
-                  children: [
-                    for (final t in items)
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.description_outlined),
-                        title: Text(t.name),
-                        subtitle: Text(
-                          _summary(t),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: hint, fontSize: 11),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit_outlined, size: 18),
-                              tooltip: '수정',
-                              onPressed: () => _edit(existing: t),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 18),
-                              tooltip: '삭제',
-                              onPressed: () => _delete(t),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-        ),
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Center(
+              child: Text(
+                '만든 양식이 없습니다.',
+                style: TextStyle(color: hint, fontSize: 13),
+              ),
+            ),
+          )
+        else
+          for (final t in items)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.description_outlined),
+              title: Text(t.name),
+              subtitle: Text(
+                _summary(t),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: hint, fontSize: 11),
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    tooltip: '수정',
+                    onPressed: () => _edit(existing: t),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    tooltip: '삭제',
+                    onPressed: () => _delete(t),
+                  ),
+                ],
+              ),
+            ),
+        const SizedBox(height: 4),
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
             onPressed: () => _edit(),
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('템플릿 추가'),
+            label: const Text('양식 추가'),
           ),
         ),
       ],
@@ -348,7 +431,7 @@ class _TemplateEditDialogState extends State<_TemplateEditDialog> {
   void _submit() {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = '템플릿 이름을 입력하세요.');
+      setState(() => _error = '양식 이름을 입력하세요.');
       return;
     }
     int? due;
@@ -375,7 +458,7 @@ class _TemplateEditDialogState extends State<_TemplateEditDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.existing == null ? '템플릿 추가' : '템플릿 수정'),
+      title: Text(widget.existing == null ? '양식 추가' : '양식 수정'),
       content: SizedBox(
         width: 420,
         child: SingleChildScrollView(
@@ -388,7 +471,7 @@ class _TemplateEditDialogState extends State<_TemplateEditDialog> {
                 autofocus: true,
                 maxLength: 30,
                 decoration: const InputDecoration(
-                  labelText: '템플릿 이름',
+                  labelText: '양식 이름',
                   counterText: '',
                   border: OutlineInputBorder(),
                 ),
@@ -491,15 +574,7 @@ class _TemplateEditDialogState extends State<_TemplateEditDialog> {
 
 // ───────────────────────── 자동화 ─────────────────────────
 
-const _actionLabels = {
-  'set_assignee': '담당자 지정',
-  'set_status': '상태 변경',
-  'set_priority': '우선순위 변경',
-  'add_reference': '참조자 추가',
-  'add_comment': '댓글 남기기',
-  'notify': '알림 보내기',
-};
-
+// 이전 방식 규칙(노드 편집기 이전)의 요약 — 켜기·끄기·삭제만 되므로 목록에서 설명만 보여준다.
 String _describeAction(AutomationAction a, _Ctx ctx) => switch (a.kind) {
   'set_assignee' => '담당자를 ${ctx.memberName(a.userId)}(으)로',
   'set_status' => '상태를 ${ctx.statusName(a.statusId)}(으)로',
@@ -510,6 +585,72 @@ String _describeAction(AutomationAction a, _Ctx ctx) => switch (a.kind) {
   'notify' => '${ctx.memberName(a.userId)}에게 알림',
   _ => a.kind,
 };
+
+String _legacyWhen(AutomationRule r, _Ctx ctx) {
+  final base = r.trigger == 'task_created'
+      ? '업무가 만들어질 때'
+      : r.triggerStatusId == null
+      ? '상태가 바뀔 때'
+      : "상태가 '${ctx.statusName(r.triggerStatusId)}'(으)로 바뀔 때";
+  final cond = [
+    if (r.conditionPriority != null)
+      '우선순위 ${taskPriorityLabel(taskPriorityFromWire(r.conditionPriority))}',
+    if (r.conditionTypeId != null) '유형 ${ctx.typeName(r.conditionTypeId)}',
+  ];
+  return cond.isEmpty ? base : '$base (${cond.join(', ')}인 업무)';
+}
+
+String _legacySummary(AutomationRule r, _Ctx ctx) =>
+    '언제: ${_legacyWhen(r, ctx)} · '
+    '동작: ${r.actions.map((a) => _describeAction(a, ctx)).join(' → ')}';
+
+String _conditionSummary(Map<String, dynamic> c, _Ctx ctx) {
+  final field = c['field'] is String ? c['field'] as String : 'status';
+  final op = c['op'] is String ? c['op'] as String : 'eq';
+  final text = 'IF ${ctx.fieldLabel(field)} ${automationOpLabels[op] ?? op}';
+  // 비어 있음 / 비어 있지 않음은 값이 없다.
+  return op == 'eq' || op == 'neq'
+      ? '$text ${ctx.valueLabel(field, c['value'])}'
+      : text;
+}
+
+/// 노드 규칙의 한 줄 요약 — "트리거 → IF 조건들 → 액션들". 노드 목록 순서가 아니라 트리거에서
+/// 연결을 따라간 순서로 적어서, 캔버스에서 흐름을 읽는 순서와 같게 한다.
+String _graphSummary(AutomationGraph g, _Ctx ctx) {
+  final trigger = g.trigger;
+  if (trigger == null) return '';
+  final byId = {for (final n in g.nodes) n.id: n};
+  final seen = {trigger.id};
+  final queue = [trigger.id];
+  final flow = <AutomationNode>[];
+  for (var i = 0; i < queue.length; i++) {
+    for (final e in g.edges) {
+      final next = byId[e.to];
+      if (e.from == queue[i] && next != null && seen.add(next.id)) {
+        queue.add(next.id);
+        flow.add(next);
+      }
+    }
+  }
+  final head = automationTriggerLabels[trigger.type] ?? trigger.type;
+  // 감지할 필드가 여러 개일 수 있다 — 예전 {field} 모양도 같이 읽는다.
+  final fields = automationTriggerFields(trigger.config);
+  final watched = fields.contains('any')
+      ? ctx.fieldLabel('any')
+      : fields.map(ctx.fieldLabel).join('·');
+  final actions = [
+    for (final n in flow)
+      if (n.kind == 'action') automationActionLabels[n.type] ?? n.type,
+  ];
+  return [
+    trigger.type == 'field_changed' && watched.isNotEmpty
+        ? '$head($watched)'
+        : head,
+    for (final n in flow)
+      if (n.kind == 'condition') _conditionSummary(n.config, ctx),
+    if (actions.isNotEmpty) actions.join(', '),
+  ].join(' → ');
+}
 
 class _AutomationsTab extends StatefulWidget {
   final Session session;
@@ -549,27 +690,15 @@ class _AutomationsTabState extends State<_AutomationsTab> {
     }
   }
 
-  Future<void> _edit({AutomationRule? existing}) async {
-    final result = await showDialog<_RuleInput>(
-      context: context,
-      builder: (_) => _RuleEditDialog(ctx: widget.ctx, existing: existing),
+  /// 노드 편집기를 연다([rule]이 없으면 새 규칙). 저장했을 때만 목록을 다시 읽는다.
+  Future<void> _openEditor([AutomationRule? rule]) async {
+    final saved = await showAutomationFlowEditor(
+      context,
+      session: widget.session,
+      projectId: widget.projectId,
+      rule: rule,
     );
-    if (result == null) return;
-    try {
-      await widget.session.api!.saveAutomation(
-        widget.projectId,
-        ruleId: existing?.id,
-        name: result.name,
-        trigger: result.trigger,
-        triggerStatusId: result.triggerStatusId,
-        conditionPriority: result.conditionPriority,
-        conditionTypeId: result.conditionTypeId,
-        actions: result.actions,
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
-    }
+    if (saved) await _load();
   }
 
   Future<void> _toggle(AutomationRule r, bool v) async {
@@ -593,19 +722,64 @@ class _AutomationsTabState extends State<_AutomationsTab> {
     }
   }
 
-  String _when(AutomationRule r) {
-    final base = r.trigger == 'task_created'
-        ? '업무가 만들어질 때'
-        : r.triggerStatusId == null
-        ? '상태가 바뀔 때'
-        : "상태가 '${widget.ctx.statusName(r.triggerStatusId)}'(으)로 바뀔 때";
-    final cond = [
-      if (r.conditionPriority != null)
-        '우선순위 ${taskPriorityLabel(taskPriorityFromWire(r.conditionPriority))}',
-      if (r.conditionTypeId != null)
-        '유형 ${widget.ctx.typeName(r.conditionTypeId)}',
-    ];
-    return cond.isEmpty ? base : '$base (${cond.join(', ')}인 업무)';
+  Widget _ruleTile(AutomationRule r, Color hint) {
+    final legacy = r.isLegacy;
+    // 회색 알약 — 준회원 배지와 같은 무채색 배색을 쓴다.
+    final chip = roleBadgeColors(context, 'guest');
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        Icons.bolt_outlined,
+        color: r.enabled ? Theme.of(context).colorScheme.primary : hint,
+      ),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(r.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          if (legacy) ...[
+            const SizedBox(width: 6),
+            RoleBadge(label: '이전 방식', bg: chip.bg, fg: chip.fg),
+          ],
+        ],
+      ),
+      subtitle: Text(
+        legacy
+            ? _legacySummary(r, widget.ctx)
+            : _graphSummary(r.graph!, widget.ctx),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: hint, fontSize: 11),
+      ),
+      // 이전 방식 규칙은 새 편집기로 열 수 없다(켜기·끄기·삭제만).
+      onTap: legacy ? null : () => _openEditor(r),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Switch(value: r.enabled, onChanged: (v) => _toggle(r, v)),
+          if (legacy)
+            const Tooltip(
+              message: '새 편집기에서 다시 만들어 주세요',
+              child: IconButton(
+                icon: Icon(Icons.edit_outlined, size: 18),
+                onPressed: null,
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              tooltip: '편집',
+              onPressed: () => _openEditor(r),
+            ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 18),
+            tooltip: '삭제',
+            onPressed: () => _delete(r),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -617,9 +791,22 @@ class _AutomationsTabState extends State<_AutomationsTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '조건이 맞으면 동작을 대신 실행합니다. 자동화가 일으킨 변화는 다른 규칙을 다시 부르지 않습니다.',
-          style: TextStyle(color: hint, fontSize: 12),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '트리거가 일어나고 조건이 맞으면 액션을 대신 실행합니다. '
+                '자동화가 일으킨 변화는 다른 규칙을 다시 부르지 않습니다.',
+                style: TextStyle(color: hint, fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: () => _openEditor(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('새 자동화'),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Expanded(
@@ -627,439 +814,8 @@ class _AutomationsTabState extends State<_AutomationsTab> {
               ? Center(
                   child: Text('만든 규칙이 없습니다.', style: TextStyle(color: hint)),
                 )
-              : ListView(
-                  children: [
-                    for (final r in items)
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        isThreeLine: true,
-                        leading: Switch(
-                          value: r.enabled,
-                          onChanged: (v) => _toggle(r, v),
-                        ),
-                        title: Text(r.name),
-                        subtitle: Text(
-                          '언제: ${_when(r)}\n'
-                          '동작: ${r.actions.map((a) => _describeAction(a, widget.ctx)).join(' → ')}',
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: hint, fontSize: 11),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit_outlined, size: 18),
-                              tooltip: '수정',
-                              onPressed: () => _edit(existing: r),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 18),
-                              tooltip: '삭제',
-                              onPressed: () => _delete(r),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
+              : ListView(children: [for (final r in items) _ruleTile(r, hint)]),
         ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: () => _edit(),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('규칙 추가'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _RuleInput {
-  final String name;
-  final String trigger;
-  final String? triggerStatusId;
-  final String? conditionPriority;
-  final String? conditionTypeId;
-  final List<AutomationAction> actions;
-  const _RuleInput({
-    required this.name,
-    required this.trigger,
-    this.triggerStatusId,
-    this.conditionPriority,
-    this.conditionTypeId,
-    required this.actions,
-  });
-}
-
-/// 편집 중인 동작 한 줄 — 종류에 맞는 값 하나만 쓴다.
-class _ActionDraft {
-  String kind;
-  String? userId;
-  String? statusId;
-  String? priority;
-  final TextEditingController text;
-  _ActionDraft(
-    this.kind, {
-    this.userId,
-    this.statusId,
-    this.priority,
-    String? text,
-  }) : text = TextEditingController(text: text ?? '');
-}
-
-class _RuleEditDialog extends StatefulWidget {
-  final _Ctx ctx;
-  final AutomationRule? existing;
-  const _RuleEditDialog({required this.ctx, this.existing});
-
-  @override
-  State<_RuleEditDialog> createState() => _RuleEditDialogState();
-}
-
-class _RuleEditDialogState extends State<_RuleEditDialog> {
-  late final _name = TextEditingController(text: widget.existing?.name ?? '');
-  late String _trigger = widget.existing?.trigger ?? 'task_created';
-  late String? _triggerStatusId =
-      widget.ctx.statuses.any((s) => s.id == widget.existing?.triggerStatusId)
-      ? widget.existing?.triggerStatusId
-      : null;
-  late String? _condPriority = widget.existing?.conditionPriority;
-  late String? _condTypeId =
-      widget.ctx.types.any((t) => t.id == widget.existing?.conditionTypeId)
-      ? widget.existing?.conditionTypeId
-      : null;
-  late final List<_ActionDraft> _actions = [
-    for (final a in widget.existing?.actions ?? const <AutomationAction>[])
-      _ActionDraft(
-        a.kind,
-        userId: a.userId,
-        statusId: a.statusId,
-        priority: a.priority,
-        text: a.text,
-      ),
-  ];
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    if (_actions.isEmpty) _actions.add(_ActionDraft('set_assignee'));
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    for (final a in _actions) {
-      a.text.dispose();
-    }
-    super.dispose();
-  }
-
-  void _submit() {
-    final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = '규칙 이름을 입력하세요.');
-      return;
-    }
-    final actions = <AutomationAction>[];
-    for (final d in _actions) {
-      switch (d.kind) {
-        case 'set_assignee' || 'add_reference' || 'notify':
-          if (d.userId == null) {
-            setState(() => _error = '동작마다 사용자를 골라주세요.');
-            return;
-          }
-          actions.add(AutomationAction(d.kind, userId: d.userId));
-        case 'set_status':
-          if (d.statusId == null) {
-            setState(() => _error = '바꿀 상태를 골라주세요.');
-            return;
-          }
-          actions.add(AutomationAction(d.kind, statusId: d.statusId));
-        case 'set_priority':
-          actions.add(
-            AutomationAction(d.kind, priority: d.priority ?? 'normal'),
-          );
-        case 'add_comment':
-          final text = d.text.text.trim();
-          if (text.isEmpty) {
-            setState(() => _error = '댓글 내용을 입력하세요.');
-            return;
-          }
-          actions.add(AutomationAction(d.kind, text: text));
-      }
-    }
-    Navigator.of(context).pop(
-      _RuleInput(
-        name: name,
-        trigger: _trigger,
-        triggerStatusId: _trigger == 'status_changed' ? _triggerStatusId : null,
-        conditionPriority: _condPriority,
-        conditionTypeId: _condTypeId,
-        actions: actions,
-      ),
-    );
-  }
-
-  Widget _userDropdown(_ActionDraft d) => DropdownButtonFormField<String>(
-    key: ValueKey('u-${d.hashCode}-${d.userId}'),
-    initialValue: widget.ctx.members.any((m) => m.id == d.userId)
-        ? d.userId
-        : null,
-    isExpanded: true,
-    decoration: const InputDecoration(
-      labelText: '사용자',
-      border: OutlineInputBorder(),
-      isDense: true,
-    ),
-    items: [
-      for (final m in widget.ctx.members)
-        DropdownMenuItem(value: m.id, child: Text(m.name)),
-    ],
-    onChanged: (v) => setState(() => d.userId = v),
-  );
-
-  Widget _paramField(_ActionDraft d) {
-    switch (d.kind) {
-      case 'set_status':
-        return DropdownButtonFormField<String>(
-          key: ValueKey('s-${d.hashCode}-${d.statusId}'),
-          initialValue: widget.ctx.statuses.any((s) => s.id == d.statusId)
-              ? d.statusId
-              : null,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: '상태',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-          items: [
-            for (final s in widget.ctx.statuses)
-              DropdownMenuItem(value: s.id, child: Text(s.name)),
-          ],
-          onChanged: (v) => setState(() => d.statusId = v),
-        );
-      case 'set_priority':
-        return DropdownButtonFormField<String>(
-          key: ValueKey('p-${d.hashCode}-${d.priority}'),
-          initialValue: d.priority ?? 'normal',
-          decoration: const InputDecoration(
-            labelText: '우선순위',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-          items: [
-            for (final p in TaskPriority.values)
-              DropdownMenuItem(
-                value: taskPriorityToWire(p),
-                child: Text(taskPriorityLabel(p)),
-              ),
-          ],
-          onChanged: (v) => setState(() => d.priority = v),
-        );
-      case 'add_comment':
-        return TextField(
-          controller: d.text,
-          maxLength: 500,
-          decoration: const InputDecoration(
-            labelText: '댓글 내용',
-            counterText: '',
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
-        );
-      default:
-        return _userDropdown(d);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ctx = widget.ctx;
-    final hint = Theme.of(context).hintColor;
-    return AlertDialog(
-      title: Text(widget.existing == null ? '규칙 추가' : '규칙 수정'),
-      content: SizedBox(
-        width: 480,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: _name,
-                autofocus: true,
-                maxLength: 40,
-                decoration: const InputDecoration(
-                  labelText: '규칙 이름',
-                  counterText: '',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text('언제', style: TextStyle(color: hint)),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                children: [
-                  ChoiceChip(
-                    label: const Text('업무가 만들어졌을 때'),
-                    selected: _trigger == 'task_created',
-                    onSelected: (_) =>
-                        setState(() => _trigger = 'task_created'),
-                  ),
-                  ChoiceChip(
-                    label: const Text('상태가 바뀌었을 때'),
-                    selected: _trigger == 'status_changed',
-                    onSelected: (_) =>
-                        setState(() => _trigger = 'status_changed'),
-                  ),
-                ],
-              ),
-              if (_trigger == 'status_changed') ...[
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String?>(
-                  key: ValueKey('ts-$_triggerStatusId'),
-                  initialValue: _triggerStatusId,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: '어떤 상태로 바뀔 때',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('어떤 상태로든')),
-                    for (final s in ctx.statuses)
-                      DropdownMenuItem(value: s.id, child: Text(s.name)),
-                  ],
-                  onChanged: (v) => setState(() => _triggerStatusId = v),
-                ),
-              ],
-              const SizedBox(height: 14),
-              Text('조건 (선택)', style: TextStyle(color: hint)),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String?>(
-                      key: ValueKey('cp-$_condPriority'),
-                      initialValue: _condPriority,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: '우선순위',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('모두')),
-                        for (final p in TaskPriority.values)
-                          DropdownMenuItem(
-                            value: taskPriorityToWire(p),
-                            child: Text(taskPriorityLabel(p)),
-                          ),
-                      ],
-                      onChanged: (v) => setState(() => _condPriority = v),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: DropdownButtonFormField<String?>(
-                      key: ValueKey('ct-$_condTypeId'),
-                      initialValue: _condTypeId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: '유형',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('모두')),
-                        for (final t in ctx.types)
-                          DropdownMenuItem(value: t.id, child: Text(t.name)),
-                      ],
-                      onChanged: (v) => setState(() => _condTypeId = v),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text('동작 (위에서부터 차례로)', style: TextStyle(color: hint)),
-              const SizedBox(height: 6),
-              for (var i = 0; i < _actions.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 150,
-                        child: DropdownButtonFormField<String>(
-                          key: ValueKey('k-${_actions[i].hashCode}'),
-                          initialValue: _actions[i].kind,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                          items: [
-                            for (final e in _actionLabels.entries)
-                              DropdownMenuItem(
-                                value: e.key,
-                                child: Text(
-                                  e.value,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                          ],
-                          onChanged: (v) => setState(
-                            () => _actions[i].kind = v ?? _actions[i].kind,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(child: _paramField(_actions[i])),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        tooltip: '동작 삭제',
-                        onPressed: _actions.length <= 1
-                            ? null
-                            : () => setState(
-                                () => _actions.removeAt(i).text.dispose(),
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _actions.length >= 5
-                      ? null
-                      : () => setState(
-                          () => _actions.add(_ActionDraft('notify')),
-                        ),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('동작 추가'),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 4),
-                Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
       ],
     );
   }
@@ -1107,6 +863,11 @@ class _RunsTabState extends State<_RunsTab> {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${l.month}/${l.day} ${two(l.hour)}:${two(l.minute)}';
   }
+
+  /// 이전 방식 규칙의 'status_changed'는 새 트리거 목록에 없어서 따로 적는다.
+  static String _triggerLabel(String trigger) =>
+      automationTriggerLabels[trigger] ??
+      (trigger == 'status_changed' ? '상태 변경' : trigger);
 
   @override
   Widget build(BuildContext context) {
@@ -1159,7 +920,9 @@ class _RunsTabState extends State<_RunsTab> {
                           overflow: TextOverflow.ellipsis,
                         ),
                         subtitle: Text(
-                          '${r.trigger == 'task_created' ? '업무 생성' : '상태 변경'} → ${r.summary}',
+                          r.summary.isEmpty
+                              ? _triggerLabel(r.trigger)
+                              : '${_triggerLabel(r.trigger)} → ${r.summary}',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: hint, fontSize: 11),

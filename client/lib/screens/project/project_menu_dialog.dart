@@ -11,6 +11,11 @@ import '../../widgets/role_badge.dart';
 import '../../widgets/user_avatar.dart';
 import 'project_forms.dart' show projectColorChoices;
 import 'project_notifications.dart' show ProjectNotificationSettingsEditor;
+import 'project_templates_view.dart'
+    show
+        ProjectTemplateSummaryCard,
+        projectTemplateDraftFor,
+        showProjectTemplateEditorDialog;
 import 'task_config_manager.dart'
     show ProjectFieldEditor, ProjectPriorityEditor, ProjectStatusEditor;
 import 'task_type_manager.dart' show ProjectTypeEditor;
@@ -20,17 +25,29 @@ import 'template_automation_manager.dart' show ProjectTemplateAutomationEditor;
 enum ProjectMenuResult { changed, deleted }
 
 /// 프로젝트 화면 오른쪽 위 톱니 버튼으로 여는 통합 설정 창 — 왼쪽 메뉴(기본 정보 / 필드·상태 /
-/// 멤버 / 알림 / 템플릿·자동화 / 삭제)로 오른쪽 내용을 바꾼다. 항목별 권한은 서버가 다시
-/// 확인하므로 여기서는 화면만 나눈다.
+/// 멤버 / 알림 / 자동화 / 노트 / 삭제)로 오른쪽 내용을 바꾼다. 업무 템플릿은 필드 / 상태 화면의
+/// "업무 템플릿" 칸에 있다. 항목별 권한은 서버가 다시 확인하므로 여기서는 화면만 나눈다.
 Future<ProjectMenuResult?> showProjectMenuDialog(
   BuildContext context,
   Session session,
   String projectId,
-) {
-  return showDialog<ProjectMenuResult>(
+) async {
+  final changed = _ChangeFlag();
+  final result = await showDialog<ProjectMenuResult>(
     context: context,
-    builder: (_) => _ProjectMenuDialog(session: session, projectId: projectId),
+    builder: (_) => _ProjectMenuDialog(
+      session: session,
+      projectId: projectId,
+      changed: changed,
+    ),
   );
+  // 창 오른쪽 위 X(FloatingDialog)는 결과 없이 바로 닫으므로, 바뀐 게 있었는지는 여기서 다시 본다.
+  return result ?? (changed.value ? ProjectMenuResult.changed : null);
+}
+
+/// 설정 창 안에서 뭔가 바뀌었는지 — 창이 어떤 방법으로 닫혀도 호출부가 알 수 있게 창 밖에 둔다.
+class _ChangeFlag {
+  bool value = false;
 }
 
 /// 팀원 중 아직 이 프로젝트에 없는 정회원 이상을 골라 추가한다. 추가했으면 true.
@@ -45,7 +62,7 @@ Future<bool> addMembersToProject(
   if (!context.mounted) return false;
   final existing = project.members.map((m) => m.id).toSet();
   // 담당자 추가는 이미 프로젝트에 들어와 있는 일반 멤버도 담당자로 올릴 수 있어야 한다
-  // (공개 프로젝트는 멤버 목록을 따로 보여주지 않아서, 참여한 사람도 여기서 골라야 한다).
+  // (공개 프로젝트는 정회원 이상 모두가 자동 멤버인데 멤버 목록을 따로 보여주지 않아서, 여기서 고른다).
   // 그래서 이미 담당자인 사람만 뺀다.
   final excluded = asOwner
       ? {
@@ -92,14 +109,23 @@ Future<bool> addMembersToProject(
   }
 }
 
-enum _Section { basic, fields, members, notifications, automation, danger }
+enum _Section {
+  basic,
+  fields,
+  members,
+  notifications,
+  automation,
+  notes,
+  danger,
+}
 
 String _sectionLabel(_Section s) => switch (s) {
   _Section.basic => '기본 정보',
   _Section.fields => '필드 / 상태',
   _Section.members => '멤버',
   _Section.notifications => '알림',
-  _Section.automation => '템플릿 · 자동화',
+  _Section.automation => '자동화',
+  _Section.notes => '노트',
   _Section.danger => '삭제',
 };
 
@@ -109,13 +135,19 @@ IconData _sectionIcon(_Section s) => switch (s) {
   _Section.members => Icons.people_outline,
   _Section.notifications => Icons.notifications_none,
   _Section.automation => Icons.bolt_outlined,
+  _Section.notes => Icons.description_outlined,
   _Section.danger => Icons.delete_outline,
 };
 
 class _ProjectMenuDialog extends StatefulWidget {
   final Session session;
   final String projectId;
-  const _ProjectMenuDialog({required this.session, required this.projectId});
+  final _ChangeFlag changed;
+  const _ProjectMenuDialog({
+    required this.session,
+    required this.projectId,
+    required this.changed,
+  });
 
   @override
   State<_ProjectMenuDialog> createState() => _ProjectMenuDialogState();
@@ -125,7 +157,6 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
   _Section _section = _Section.basic;
   Project? _project;
   String? _error;
-  bool _changed = false;
 
   @override
   void initState() {
@@ -149,7 +180,7 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
 
   /// 하위 화면이 뭔가 바꿨을 때 — 프로젝트를 다시 읽고 닫을 때 호출부에도 알린다.
   Future<void> _reload() async {
-    _changed = true;
+    widget.changed.value = true;
     await _load();
   }
 
@@ -157,7 +188,7 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
     Navigator.of(context).pop(
       deleted
           ? ProjectMenuResult.deleted
-          : (_changed ? ProjectMenuResult.changed : null),
+          : (widget.changed.value ? ProjectMenuResult.changed : null),
     );
   }
 
@@ -223,7 +254,11 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
           onSaved: _reload,
         );
       case _Section.fields:
-        return _FieldsPane(session: widget.session, projectId: project.id);
+        return _FieldsPane(
+          session: widget.session,
+          project: project,
+          onChanged: _reload,
+        );
       case _Section.members:
         return _MembersPane(
           session: widget.session,
@@ -242,10 +277,23 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
             canManage: project.isOwner || widget.session.canManageCurrentTeam,
           ),
         );
+      // 필드 / 상태의 "새 업무 양식"과 같은 위젯이라 키로 나눠야 상태(불러온 목록)가 섞이지 않는다.
       case _Section.automation:
-        return ProjectTemplateAutomationEditor(
+        return _Pane(
+          title: '자동화',
+          scrollable: false,
+          child: ProjectTemplateAutomationEditor(
+            key: ValueKey('automations-${project.id}'),
+            session: widget.session,
+            projectId: project.id,
+            automations: true,
+          ),
+        );
+      case _Section.notes:
+        return _NotesPane(
           session: widget.session,
-          projectId: project.id,
+          project: project,
+          onChanged: _reload,
         );
       case _Section.danger:
         return _DangerPane(
@@ -296,7 +344,7 @@ class _NavItem extends StatelessWidget {
                       : (selected ? color : theme.hintColor),
                 ),
                 const SizedBox(width: 10),
-                // 라벨이 길어도(템플릿 · 자동화) 메뉴 폭을 넘지 않게 줄여서 맞춘다.
+                // 라벨이 길어도 메뉴 폭을 넘지 않게 줄여서 맞춘다.
                 Expanded(
                   child: Text(
                     label,
@@ -320,7 +368,7 @@ class _NavItem extends StatelessWidget {
 }
 
 /// 오른쪽 내용의 공통 틀 — 제목 + 설명 + 본문을 테두리 있는 카드에 담는다.
-class _Pane extends StatelessWidget {
+class _Pane extends StatefulWidget {
   final String title;
   final String? description;
   final Widget? action;
@@ -337,8 +385,27 @@ class _Pane extends StatelessWidget {
   });
 
   @override
+  State<_Pane> createState() => _PaneState();
+}
+
+class _PaneState extends State<_Pane> {
+  /// 본문 스크롤 — 데스크톱에서는 SingleChildScrollView가 PrimaryScrollController에 안 붙어서,
+  /// 컨트롤러 없이 스크롤바를 달면 디버그 모드에서 "ScrollPosition이 없다" 오류가 난다.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final title = widget.title;
+    final description = widget.description;
+    final action = widget.action;
+    final child = widget.child;
     final head = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -355,7 +422,7 @@ class _Pane extends StatelessWidget {
               if (description != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  description!,
+                  description,
                   style: TextStyle(color: theme.hintColor, fontSize: 12),
                 ),
               ],
@@ -377,8 +444,14 @@ class _Pane extends StatelessWidget {
           head,
           const SizedBox(height: 16),
           Expanded(
-            child: scrollable
-                ? MutedScrollbar(child: SingleChildScrollView(child: child))
+            child: widget.scrollable
+                ? MutedScrollbar(
+                    controller: _scroll,
+                    child: SingleChildScrollView(
+                      controller: _scroll,
+                      child: child,
+                    ),
+                  )
                 : child,
           ),
         ],
@@ -560,7 +633,7 @@ class _BasicPaneState extends State<_BasicPane> {
           const SizedBox(height: 8),
           Text(
             _isPublic
-                ? '공개: 정회원 이상 권한을 가진 모든 멤버가 초대 없이 프로젝트를 찾아 참여하고 업무를 만들 수 있습니다.'
+                ? '공개: 정회원 이상 팀원 모두가 참여 절차 없이 자동으로 멤버가 되어 바로 업무를 보고 만들 수 있습니다.'
                 : '비공개: 프로젝트 멤버로 추가된 멤버만 접근할 수 있습니다.',
             style: TextStyle(color: hint, fontSize: 12),
           ),
@@ -574,8 +647,15 @@ class _BasicPaneState extends State<_BasicPane> {
 
 class _FieldsPane extends StatefulWidget {
   final Session session;
-  final String projectId;
-  const _FieldsPane({required this.session, required this.projectId});
+  final Project project;
+
+  /// "업무 템플릿" 칸에서 이 프로젝트를 템플릿으로 저장했을 때 — 프로젝트를 다시 읽어 카드로 바꾼다.
+  final Future<void> Function() onChanged;
+  const _FieldsPane({
+    required this.session,
+    required this.project,
+    required this.onChanged,
+  });
 
   @override
   State<_FieldsPane> createState() => _FieldsPaneState();
@@ -586,14 +666,22 @@ class _FieldsPaneState extends State<_FieldsPane> {
   // 그려지지 않으므로 이 카드 전용으로 하나 만든다.
   final _basicScroll = ScrollController();
 
+  // 오른쪽 열(사용자 정의 필드 + 업무 템플릿)의 스크롤.
+  final _sideScroll = ScrollController();
+
+  /// 오른쪽 열이 넘쳐서 스크롤바가 보이는지 — 그때만 스크롤바 자리를 비워 둔다(안 넘치면 카드가
+  /// 왼쪽 카드처럼 오른쪽 끝까지 닿는다).
+  bool _sideScrollable = false;
+
   @override
   void dispose() {
     _basicScroll.dispose();
+    _sideScroll.dispose();
     super.dispose();
   }
 
   Session get session => widget.session;
-  String get projectId => widget.projectId;
+  String get projectId => widget.project.id;
 
   @override
   Widget build(BuildContext context) {
@@ -616,24 +704,7 @@ class _FieldsPaneState extends State<_FieldsPane> {
         children: [
           Padding(
             padding: EdgeInsets.only(right: scrollToEdge ? 16 : 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (desc != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    desc,
-                    style: TextStyle(color: theme.hintColor, fontSize: 12),
-                  ),
-                ],
-              ],
-            ),
+            child: _cardHeader(theme, title, desc),
           ),
           const SizedBox(height: 10),
           Expanded(child: child),
@@ -676,13 +747,172 @@ class _FieldsPaneState extends State<_FieldsPane> {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: card(
-            '사용자 정의 필드',
-            '프로젝트에 필요한 입력 항목을 직접 추가합니다.',
-            ProjectFieldEditor(session: session, projectId: projectId),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // 사용자 정의 필드 목록은 스스로 스크롤하므로 카드 높이를 정해 두고, 그 아래
+              // "업무 템플릿" 칸까지 이 열 전체를 한 스크롤로 움직인다(양식 목록은 따로 스크롤하지 않는다).
+              final fieldsHeight = (constraints.maxHeight * 0.5).clamp(
+                240.0,
+                340.0,
+              );
+              return NotificationListener<ScrollMetricsNotification>(
+                onNotification: (n) {
+                  if (n.depth != 0) return false;
+                  final scrollable =
+                      n.metrics.maxScrollExtent > n.metrics.minScrollExtent;
+                  if (scrollable != _sideScrollable) {
+                    setState(() => _sideScrollable = scrollable);
+                  }
+                  return false;
+                },
+                child: MutedScrollbar(
+                  controller: _sideScroll,
+                  child: SingleChildScrollView(
+                    controller: _sideScroll,
+                    // 스크롤바(10px)가 칸 테두리를 덮지 않도록 넘칠 때만 오른쪽을 비운다.
+                    padding: EdgeInsets.only(right: _sideScrollable ? 14 : 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: fieldsHeight,
+                          child: card(
+                            '사용자 정의 필드',
+                            '프로젝트에 필요한 입력 항목을 직접 추가합니다.',
+                            ProjectFieldEditor(
+                              session: session,
+                              projectId: projectId,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _TaskTemplateBox(
+                          key: ValueKey('task-template-box-$projectId'),
+                          session: session,
+                          project: widget.project,
+                          onChanged: widget.onChanged,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 필드 / 상태 화면의 카드 머리글(굵은 제목 + 회색 설명) — 세 칸이 같은 모양을 쓴다.
+Widget _cardHeader(ThemeData theme, String title, String? desc) => Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    Text(
+      title,
+      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+    ),
+    if (desc != null) ...[
+      const SizedBox(height: 4),
+      Text(desc, style: TextStyle(color: theme.hintColor, fontSize: 12)),
+    ],
+  ],
+);
+
+/// 필드 / 상태 > "업무 템플릿" 칸 — 이 프로젝트가 프로젝트 템플릿을 썼으면(그 템플릿으로 만들었거나
+/// 이 프로젝트를 템플릿으로 저장했으면) 그 템플릿 카드를, 아니면 "템플릿 저장" 버튼을 보여준다.
+/// 템플릿이 지워지면 서버가 연결을 끊어서 다시 "템플릿 저장"이 보인다.
+class _TaskTemplateBox extends StatefulWidget {
+  final Session session;
+  final Project project;
+  final Future<void> Function() onChanged;
+  const _TaskTemplateBox({
+    super.key,
+    required this.session,
+    required this.project,
+    required this.onChanged,
+  });
+
+  @override
+  State<_TaskTemplateBox> createState() => _TaskTemplateBoxState();
+}
+
+class _TaskTemplateBoxState extends State<_TaskTemplateBox> {
+  bool _busy = false;
+
+  /// 사이드바 프로젝트 ⋯ > "템플릿 저장"과 같은 편집기(지금 구성으로 채운 새 템플릿)를 창으로 연다 —
+  /// 저장하면 서버가 이 프로젝트를 새 템플릿에 연결하므로 다시 읽으면 카드로 바뀐다.
+  Future<void> _saveAsTemplate() async {
+    setState(() => _busy = true);
+    try {
+      final draft = await projectTemplateDraftFor(
+        widget.session,
+        widget.project,
+      );
+      if (!mounted) return;
+      final saved = await showProjectTemplateEditorDialog(
+        context,
+        widget.session,
+        teamId: widget.project.teamId,
+        draft: draft,
+      );
+      if (saved != null) await widget.onChanged();
+    } catch (e) {
+      if (mounted) showAppToast(context, '프로젝트 설정을 불러오지 못했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final template = widget.project.template;
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.dividerColor),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _cardHeader(
+            theme,
+            '업무 템플릿',
+            template != null
+                ? '이 프로젝트가 사용한 프로젝트 템플릿입니다. 템플릿을 고쳐도 이 프로젝트의 구성은 바뀌지 않습니다.'
+                : '프로젝트 템플릿을 사용하지 않은 프로젝트입니다. 지금의 상태·유형·우선순위·사용자 정의 필드 '
+                      '구성을 템플릿으로 저장하면 새 프로젝트를 만들 때 불러올 수 있습니다.',
+          ),
+          const SizedBox(height: 10),
+          if (template != null)
+            ProjectTemplateSummaryCard(template: template, detailed: true)
+          else
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : _saveAsTemplate,
+                icon: const Icon(Icons.grid_view_outlined, size: 18),
+                label: const Text('템플릿 저장'),
+              ),
+            ),
+          // 새 업무 양식(예전 설정 메뉴 "업무 템플릿") — "새 업무" 창의 "양식에서 불러오기"가 쓰는
+          // 목록이라 메뉴를 없애면서 이 칸 아래로 옮겼다. 빼려면 여기부터 이 목록까지만 지우면 된다.
+          const Divider(height: 28),
+          const Text(
+            '새 업무 양식',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          ProjectTemplateAutomationEditor(
+            key: ValueKey('task-forms-${widget.project.id}'),
+            session: widget.session,
+            projectId: widget.project.id,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -790,24 +1020,33 @@ class _MembersPaneState extends State<_MembersPane> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final owners = _of('owner', _rightQuery);
-    // 공개 프로젝트는 팀의 모든 멤버가 접근할 수 있어서 "프로젝트 멤버" 목록 자체가 의미가
-    // 없다 — 담당자만 지정하면 되고, 인원 제한도 없다.
+    // 공개 프로젝트는 정회원 이상 팀원 모두가 자동으로 멤버라 초대·제외가 없다 — 담당자만
+    // 지정하면 되고, 인원 제한도 없다. 담당자의 X는 프로젝트에서 빼는 게 아니라 일반 멤버로
+    // 내리는 것이다(빼도 공개 프로젝트라 다시 자동으로 들어온다).
     if (project.isPublic) {
+      final canManage = project.isOwner || widget.session.canManageCurrentTeam;
       return _Pane(
         title: '프로젝트 담당자',
         description: '프로젝트에 담당자를 지정합니다.',
         scrollable: false,
-        action: FilledButton.icon(
-          onPressed: _addOwner,
-          icon: const Icon(Icons.person_add_alt, size: 18),
-          label: const Text('담당자 추가'),
-        ),
+        action: canManage
+            ? FilledButton.icon(
+                onPressed: _addOwner,
+                icon: const Icon(Icons.person_add_alt, size: 18),
+                label: const Text('담당자 추가'),
+              )
+            : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '공개 프로젝트라 모든 멤버가 프로젝트에 접근할 수 있으므로, 별도의 멤버 목록은 '
-              '표시되지 않으며 프로젝트 담당자 수에는 제한이 없습니다.',
+              '공개 프로젝트는 정회원 이상 팀원 모두가 멤버입니다.',
+              style: TextStyle(color: theme.hintColor, fontSize: 12),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '따로 초대하거나 제외할 필요가 없어 멤버 목록은 표시되지 않으며, '
+              '프로젝트 담당자 수에는 제한이 없습니다.',
               style: TextStyle(color: theme.hintColor, fontSize: 12),
             ),
             const SizedBox(height: 10),
@@ -823,7 +1062,8 @@ class _MembersPaneState extends State<_MembersPane> {
                 onQuery: (v) => setState(() => _rightQuery = v),
                 onToggle: (_, _) {},
                 onDropped: (_) {},
-                onRemove: _remove,
+                onRemove: canManage ? (u) => _move([u.id], 'member') : null,
+                removeTooltip: '담당자 해제',
               ),
             ),
           ],
@@ -854,11 +1094,8 @@ class _MembersPaneState extends State<_MembersPane> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            project.isPublic
-                ? '공개 프로젝트라 정회원 이상은 초대 없이도 참여할 수 있습니다. '
-                      '프로젝트 담당자는 설정을 바꿀 수 있고, 팀 소유자·관리자는 담당자가 아니어도 관리할 수 있습니다.'
-                : '비공개 프로젝트라 여기에 추가된 멤버만 접근할 수 있습니다. '
-                      '프로젝트 담당자는 설정을 바꿀 수 있고, 팀 소유자·관리자는 담당자가 아니어도 관리할 수 있습니다.',
+            '비공개 프로젝트라 여기에 추가된 멤버만 접근할 수 있습니다. '
+            '프로젝트 담당자는 설정을 바꿀 수 있고, 팀 소유자·관리자는 담당자가 아니어도 관리할 수 있습니다.',
             style: TextStyle(color: theme.hintColor, fontSize: 12),
           ),
           const SizedBox(height: 10),
@@ -940,7 +1177,12 @@ class _MemberList extends StatefulWidget {
   final ValueChanged<String> onQuery;
   final void Function(String userId, bool on) onToggle;
   final void Function(List<String> userIds) onDropped;
-  final void Function(AppUser user) onRemove;
+
+  /// 줄 오른쪽 X — null이면 X를 그리지 않는다(공개 프로젝트에서 관리 권한이 없을 때).
+  final void Function(AppUser user)? onRemove;
+
+  /// X의 툴팁 — 공개 프로젝트의 담당자 목록에서는 "담당자 해제"다(프로젝트에서 빼지 않는다).
+  final String removeTooltip;
 
   /// 목록이 하나뿐일 때(공개 프로젝트의 담당자 목록)는 역할을 옮길 상대가 없어서 체크상자와
   /// 끌어다 놓기를 빼고 이름만 보여준다.
@@ -957,6 +1199,7 @@ class _MemberList extends StatefulWidget {
     required this.onToggle,
     required this.onDropped,
     required this.onRemove,
+    this.removeTooltip = '프로젝트에서 제외',
     this.selectable = true,
   });
 
@@ -1006,12 +1249,13 @@ class _MemberListState extends State<_MemberList> {
               bg: roleBadgeColors(context, user.role!).bg,
               fg: roleBadgeColors(context, user.role!).fg,
             ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 16),
-            tooltip: '프로젝트에서 제외',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => widget.onRemove(user),
-          ),
+          if (widget.onRemove != null)
+            IconButton(
+              icon: const Icon(Icons.close, size: 16),
+              tooltip: widget.removeTooltip,
+              visualDensity: VisualDensity.compact,
+              onPressed: () => widget.onRemove!(user),
+            ),
         ],
       ),
     );
@@ -1113,6 +1357,223 @@ class _MemberListState extends State<_MemberList> {
           ),
         );
       },
+    );
+  }
+}
+
+// ───────────────────────── 노트 ─────────────────────────
+
+/// 노트 수정·삭제 권한 — 'all'(모두) | 'creator_admin'(생성자와 관리자). 고르면 바로 저장하고,
+/// 실패하면 원래대로 되돌린다. 바꿀 수 있는 사람은 프로젝트 담당자와 팀 소유자·관리자뿐이다
+/// (서버도 다시 확인한다). 노트 댓글은 이 설정과 무관하다.
+class _NotesPane extends StatefulWidget {
+  final Session session;
+  final Project project;
+  final Future<void> Function() onChanged;
+  const _NotesPane({
+    required this.session,
+    required this.project,
+    required this.onChanged,
+  });
+
+  @override
+  State<_NotesPane> createState() => _NotesPaneState();
+}
+
+class _NotesPaneState extends State<_NotesPane> {
+  /// 화면에 보이는(마지막으로 고른) 값.
+  late String _edit;
+  late String _delete;
+
+  /// 서버에 저장된 값 — 저장에 실패하면 여기로 되돌린다.
+  late String _savedEdit;
+  late String _savedDelete;
+  bool _saving = false;
+
+  bool get _canManage =>
+      widget.project.isOwner || widget.session.canManageCurrentTeam;
+
+  @override
+  void initState() {
+    super.initState();
+    _edit = _savedEdit = widget.project.noteEditPermission;
+    _delete = _savedDelete = widget.project.noteDeletePermission;
+  }
+
+  @override
+  void didUpdateWidget(_NotesPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 다시 불러온 프로젝트(다른 사람이 바꾼 값 포함)를 따라간다 — 저장 중에는 고른 값을 그대로 둔다.
+    if (!_saving) {
+      _edit = _savedEdit = widget.project.noteEditPermission;
+      _delete = _savedDelete = widget.project.noteDeletePermission;
+    }
+  }
+
+  /// 누르자마자 바뀐 것처럼 보이고 바로 저장한다. 앞 저장이 끝나기 전에 또 고르면 버리지 않고
+  /// 앞 저장이 끝난 뒤 이어서 보낸다(라디오는 저장 중에도 누를 수 있다).
+  void _choose({String? edit, String? delete}) {
+    if (!_canManage) return;
+    if ((edit ?? _edit) == _edit && (delete ?? _delete) == _delete) return;
+    setState(() {
+      _edit = edit ?? _edit;
+      _delete = delete ?? _delete;
+    });
+    _flush();
+  }
+
+  /// 저장된 값과 다른 동안 한 번에 하나씩 PATCH한다 — 바뀐 항목만 보낸다.
+  Future<void> _flush() async {
+    if (_saving) return;
+    _saving = true;
+    var saved = false;
+    while (mounted && (_edit != _savedEdit || _delete != _savedDelete)) {
+      final edit = _edit;
+      final delete = _delete;
+      try {
+        await widget.session.api!.updateProject(
+          widget.project.id,
+          noteEditPermission: edit != _savedEdit ? edit : null,
+          noteDeletePermission: delete != _savedDelete ? delete : null,
+        );
+        _savedEdit = edit;
+        _savedDelete = delete;
+        saved = true;
+      } catch (e) {
+        if (!mounted) return;
+        // 실패하면 마지막으로 저장된 값으로 되돌린다(그 사이 고른 것도 같이 취소).
+        setState(() {
+          _edit = _savedEdit;
+          _delete = _savedDelete;
+        });
+        showAppToast(context, '노트 권한을 저장하지 못했습니다: $e');
+        break;
+      }
+    }
+    _saving = false;
+    if (saved && mounted) await widget.onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canManage = _canManage;
+    return _Pane(
+      title: '노트',
+      description: canManage
+          ? '프로젝트 노트를 수정·삭제할 수 있는 사람을 정합니다.'
+          : '프로젝트 노트를 수정·삭제할 수 있는 사람입니다. 프로젝트 담당자와 팀 소유자·관리자만 바꿀 수 있습니다.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _PermissionSection(
+            keyPrefix: 'note-edit',
+            title: '노트 수정 권한',
+            description:
+                "노트를 수정할 수 있는 권한을 설정합니다. '생성자와 관리자' 선택 시, "
+                '작성자 본인과 관리자만 수정할 수 있습니다.',
+            value: _edit,
+            enabled: canManage,
+            onChanged: (v) => _choose(edit: v),
+          ),
+          const SizedBox(height: 24),
+          _PermissionSection(
+            keyPrefix: 'note-delete',
+            title: '노트 삭제 권한',
+            description:
+                "노트를 삭제할 수 있는 권한을 설정합니다. '생성자와 관리자' 선택 시, "
+                '작성자 본인과 관리자만 삭제할 수 있습니다.',
+            value: _delete,
+            enabled: canManage,
+            onChanged: (v) => _choose(delete: v),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 권한 한 가지 — 굵은 작은 제목 아래 둥근 테두리 칸에 회색 설명과 "모두 / 생성자와 관리자" 라디오.
+class _PermissionSection extends StatelessWidget {
+  /// 테스트에서 고를 때 쓰는 키 앞부분 — 라디오 줄의 키는 '[keyPrefix]-값'.
+  final String keyPrefix;
+  final String title;
+  final String description;
+  final String value;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+  const _PermissionSection({
+    required this.keyPrefix,
+    required this.title,
+    required this.description,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  static const _options = [('all', '모두'), ('creator_admin', '생성자와 관리자')];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: theme.dividerColor),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                description,
+                style: TextStyle(color: theme.hintColor, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              RadioGroup<String>(
+                groupValue: value,
+                onChanged: (v) {
+                  if (v != null && enabled) onChanged(v);
+                },
+                child: Wrap(
+                  spacing: 20,
+                  children: [
+                    for (final (v, label) in _options)
+                      InkWell(
+                        key: ValueKey('$keyPrefix-$v'),
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: enabled ? () => onChanged(v) : null,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Radio<String>(value: v, enabled: enabled),
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: enabled ? null : theme.disabledColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

@@ -217,7 +217,7 @@ class _ChatPanelState extends State<ChatPanel> {
     final senderId = last.type == MessageType.comment
         ? last.asComment!.senderId
         : last.senderId;
-    if (senderId == widget.session.userId) {
+    if (senderId != null && senderId == widget.session.userId) {
       // 내가 보낸 건 위로 스크롤해둔 채였어도 항상 부드럽게 맨 아래로 내려간다.
       _scrollToBottom();
       return;
@@ -408,6 +408,7 @@ class _ChatPanelState extends State<ChatPanel> {
   }
 
   AppUser? _senderOf(String? senderId) {
+    if (senderId == null) return null;
     for (final m in widget.room.members) {
       if (m.id == senderId) return m;
     }
@@ -602,7 +603,7 @@ class _ChatPanelState extends State<ChatPanel> {
                             final next = i == 0 ? null : msgs[msgs.length - i];
                             final showTime =
                                 next == null ||
-                                next.senderId != m.senderId ||
+                                !next.sameSenderAs(m) ||
                                 !_sameMinute(next.createdAt, m.createdAt);
 
                             // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
@@ -611,7 +612,7 @@ class _ChatPanelState extends State<ChatPanel> {
                             final isFirstInGroup =
                                 isOldestLoaded ||
                                 showDate ||
-                                prev.senderId != m.senderId ||
+                                !prev.sameSenderAs(m) ||
                                 prev.type == MessageType.system ||
                                 prev.type == MessageType.comment;
 
@@ -673,7 +674,10 @@ class _ChatPanelState extends State<ChatPanel> {
                                 message: m,
                                 resolveUrl: widget.session.resolveUrl,
                                 unreadCount: widget.room.unreadCountFor(m),
-                                isMine: m.senderId == widget.session.userId,
+                                // 보낸 사람이 없는(자동화·탈퇴) 메시지는 내 것이 아니다.
+                                isMine:
+                                    m.senderId != null &&
+                                    m.senderId == widget.session.userId,
                                 sender: _senderOf(m.senderId),
                                 showTime: showTime,
                                 showSenderInfo: isFirstInGroup,

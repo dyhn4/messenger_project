@@ -157,15 +157,20 @@ class MessageCommentsCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  AvatarView(
-                    username: originalSender?.name ?? parentMessage.senderName,
-                    avatarType: originalSender?.avatarType ?? 'initial',
-                    avatarEmoji: originalSender?.avatarEmoji,
-                    avatarColor: originalSender?.avatarColor,
-                    avatarUrl: originalSender?.avatarUrl,
-                    resolveUrl: resolveUrl,
-                    radius: 12,
-                  ),
+                  // 자동화 메시지에 달린 댓글이면 채팅 말풍선과 같은 번개 아바타.
+                  if (parentMessage.isAutomation)
+                    const AutomationAvatar(radius: 12)
+                  else
+                    AvatarView(
+                      username:
+                          originalSender?.name ?? parentMessage.senderName,
+                      avatarType: originalSender?.avatarType ?? 'initial',
+                      avatarEmoji: originalSender?.avatarEmoji,
+                      avatarColor: originalSender?.avatarColor,
+                      avatarUrl: originalSender?.avatarUrl,
+                      resolveUrl: resolveUrl,
+                      radius: 12,
+                    ),
                   const SizedBox(width: 6),
                   Text(
                     originalSender?.name ?? parentMessage.senderName,

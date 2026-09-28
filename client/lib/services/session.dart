@@ -16,6 +16,7 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/team.dart';
+import '../widgets/avatar_utils.dart' show automationAvatarColor, colorToHex;
 import 'api_client.dart';
 import 'app_settings.dart';
 import '../models/announcement.dart';
@@ -826,6 +827,12 @@ class Session extends ChangeNotifier {
   /// (server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
   bool get canViewOrgChart => isServerAdmin || accountRole == AccountRole.admin;
 
+  /// 삼선 메뉴의 "메신저 설명서"(README 기반 운영 문서)를 보여줄지 — 관리자 이상(서버 운영자
+  /// 또는 계정 등급 관리자). 서버(version.js의 POST /api/help/manual-link)도 같은 규칙으로
+  /// 다시 확인한다.
+  bool get canViewMessengerManual =>
+      isServerAdmin || accountRole == AccountRole.admin;
+
   /// 팀 선택 화면으로 되돌아간다(전환 팝업의 "팀 목록").
   void leaveTeam() {
     if (currentTeam == null) return;
@@ -1042,21 +1049,7 @@ class Session extends ChangeNotifier {
       deviceId: deviceIdentity!.deviceId,
     );
     _messageSub?.cancel();
-    _messageSub = chatSocket.messages.listen((m) async {
-      await decryptInPlace(_findRoom(m.roomId), m);
-      _controllers[m.roomId]?.feed(m);
-      // 내가 보낸 메시지도 이 방 소켓으로 그대로 되돌아오므로(feed 참고), 보낸/받은 경우 모두
-      // 여기서 한 번에 방을 "최근 활동"으로 끌어올릴 수 있다 — _handleIncomingMessage는 내가
-      // 보낸 경우 알림/안읽음 처리를 건너뛰지만, 방 목록 정렬은 그것과 무관하게 항상 갱신한다.
-      _bumpRoomActivity(m.roomId, m.createdAt);
-      _updateRoomPreview(
-        m.roomId,
-        type: m.type,
-        text: m.text,
-        fileName: m.fileName,
-      );
-      _handleIncomingMessage(m);
-    });
+    _messageSub = chatSocket.messages.listen(handleSocketMessage);
     _roomSub?.cancel();
     _roomSub = chatSocket.roomEvents.listen(_upsertRoom);
     _readSub?.cancel();
@@ -1898,15 +1891,36 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 소켓의 message:new 하나를 처리한다 — 복호화 → 열린 방에 넣기 → 방 목록 정렬·미리보기 →
+  /// 안읽음·알림. 테스트가 소켓 없이 같은 경로를 태울 수 있게 밖으로 열어 둔다.
+  @visibleForTesting
+  Future<void> handleSocketMessage(Message m) async {
+    await decryptInPlace(_findRoom(m.roomId), m);
+    _controllers[m.roomId]?.feed(m);
+    // 내가 보낸 메시지도 이 방 소켓으로 그대로 되돌아오므로(feed 참고), 보낸/받은 경우 모두
+    // 여기서 한 번에 방을 "최근 활동"으로 끌어올릴 수 있다 — _handleIncomingMessage는 내가
+    // 보낸 경우 알림/안읽음 처리를 건너뛰지만, 방 목록 정렬은 그것과 무관하게 항상 갱신한다.
+    _bumpRoomActivity(m.roomId, m.createdAt);
+    _updateRoomPreview(
+      m.roomId,
+      type: m.type,
+      text: m.text,
+      fileName: m.fileName,
+    );
+    _handleIncomingMessage(m);
+  }
+
   /// 새 메시지가 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께 처리한다.
-  /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다.
+  /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다. 자동화 메시지(보낸
+  /// 사람 없는 일반 글)는 누구의 메시지도 아니라서 모두에게 안읽음·알림이 간다.
   void _handleIncomingMessage(Message m) {
     if (m.type == MessageType.system) return;
     final isViewingNow =
         m.roomId == _activeRoomId &&
         appInForeground &&
         _mobileThreadOpenRoomId != m.roomId;
-    if (m.senderId == userId || isViewingNow) return;
+    final isMine = m.senderId != null && m.senderId == userId;
+    if (isMine || isViewingNow) return;
 
     final match = rooms.where((r) => r.id == m.roomId);
     if (match.isNotEmpty) {
@@ -1943,7 +1957,7 @@ class Session extends ChangeNotifier {
           };
 
     AppUser? sender;
-    if (room != null) {
+    if (room != null && m.senderId != null) {
       for (final member in room.members) {
         if (member.id == m.senderId) {
           sender = member;
@@ -1951,6 +1965,8 @@ class Session extends ChangeNotifier {
         }
       }
     }
+    // 자동화 메시지는 사람 아바타가 없어서, 채팅 말풍선의 번개 아바타와 비슷하게 그린다.
+    final bot = m.isAutomation;
 
     if (suppressNotifications) return;
     notifications.showMessage(
@@ -1963,9 +1979,11 @@ class Session extends ChangeNotifier {
       conversationTitle: roomTag == null
           ? null
           : (teamTag == null ? roomTag : '$roomTag · $teamTag'),
-      avatarType: sender?.avatarType ?? 'initial',
-      avatarEmoji: sender?.avatarEmoji,
-      avatarColor: sender?.avatarColor,
+      avatarType: bot ? 'character' : sender?.avatarType ?? 'initial',
+      avatarEmoji: bot ? '⚡' : sender?.avatarEmoji,
+      avatarColor: bot
+          ? colorToHex(automationAvatarColor)
+          : sender?.avatarColor,
       avatarUrl: sender?.avatarUrl != null
           ? resolveUrl(sender!.avatarUrl!)
           : null,

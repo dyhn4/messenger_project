@@ -26,12 +26,19 @@ void main() {
   /// 업무 상세(GET /api/tasks/:id)를 몇 번 읽었는지.
   var taskFetches = 0;
 
+  /// 1001번 업무를 보관했는지 — POST /api/tasks/1001/archive가 바꾼다.
+  var archived1001 = false;
+
+  /// true면 보관 요청이 서버 오류로 실패한다.
+  var failArchive = false;
+
   Map<String, dynamic> task(
     String id,
     String title, {
     String? parent,
     List<Map<String, dynamic>> checklist = const [],
     List<Map<String, dynamic>> subtasks = const [],
+    bool archived = false,
   }) => {
     'id': id,
     'projectId': 'p1',
@@ -45,7 +52,7 @@ void main() {
     'priorityId': 'pr-high',
     'priorityName': '높음',
     'parentTaskId': parent,
-    'archived': false,
+    'archived': archived,
     'checklistDone': checklist.where((c) => c['done'] == true).length,
     'checklistTotal': checklist.length,
     'subtaskCount': subtasks.length,
@@ -57,6 +64,8 @@ void main() {
 
   Session buildSession() {
     calls = [];
+    archived1001 = false;
+    failArchive = false;
     final s = Session(
       notifications: NotificationService(),
       settings: AppSettings(),
@@ -90,12 +99,26 @@ void main() {
             headers: _json,
           );
         }
+        if (request.method == 'POST' && path == '/api/tasks/1001/archive') {
+          if (failArchive) {
+            return http.Response('{"error":"서버 오류"}', 500, headers: _json);
+          }
+          archived1001 =
+              (jsonDecode(request.body) as Map<String, dynamic>)['archived'] ==
+              true;
+          return http.Response(
+            jsonEncode(task('1001', '디스플레이 배너 3종', archived: archived1001)),
+            200,
+            headers: _json,
+          );
+        }
         if (path == '/api/tasks/1001') {
           return http.Response(
             jsonEncode(
               task(
                 '1001',
                 '디스플레이 배너 3종',
+                archived: archived1001,
                 checklist: [
                   {
                     'id': 'c1',
@@ -110,7 +133,10 @@ void main() {
                     'done': false,
                   },
                 ],
-                subtasks: [task('1032', '매체 규격 검수 회의', parent: '1001')],
+                subtasks: [
+                  task('1032', '매체 규격 검수 회의', parent: '1001'),
+                  task('1040', '보관한 하위 업무', parent: '1001', archived: true),
+                ],
               ),
             ),
             200,
@@ -245,8 +271,24 @@ void main() {
     expect(find.text('체크리스트 (1/2)'), findsOneWidget);
     expect(find.text('50%'), findsOneWidget);
     expect(find.text('300×250 시안'), findsOneWidget);
-    expect(find.text('하위 업무 (1)'), findsOneWidget);
+    expect(find.text('하위 업무 (2)'), findsOneWidget);
     expect(find.text('매체 규격 검수 회의'), findsOneWidget);
+    // 보관한 하위 업무도 보이지만 흐리게, 보관함 아이콘과 함께.
+    expect(find.text('보관한 하위 업무'), findsOneWidget);
+    expect(find.byTooltip('보관된 업무'), findsOneWidget);
+    expect(
+      tester
+          .widget<Opacity>(
+            find
+                .ancestor(
+                  of: find.text('보관한 하위 업무'),
+                  matching: find.byType(Opacity),
+                )
+                .first,
+          )
+          .opacity,
+      0.45,
+    );
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
@@ -294,15 +336,106 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('패널: 삼점 메뉴에 복사·이동·삭제가 있다(보관은 뺐다)', (tester) async {
+  testWidgets('패널: 보관 요청이 실패하면 "보관했습니다"를 띄우지 않는다', (tester) async {
+    await pumpPanel(tester);
+    failArchive = true;
+    await tester.tap(find.byTooltip('업무 메뉴'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('업무 보관'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('업무를 보관했습니다.'), findsNothing);
+    expect(find.textContaining('바꾸지 못했습니다'), findsOneWidget);
+    expect(find.text('보관된 업무입니다'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('패널: 업무 보관 → 보관된 업무(읽기 전용) → 보관 해제', (tester) async {
     await pumpPanel(tester);
 
     await tester.tap(find.byTooltip('업무 메뉴'));
     await tester.pumpAndSettle();
-    for (final label in ['업무 복사', '업무 이동', '업무 삭제']) {
+    for (final label in ['업무 복사', '업무 이동', '업무 보관', '업무 삭제']) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
+    expect(find.text('보관된 업무입니다'), findsNothing);
+    expect(find.text('나에게 할당'), findsOneWidget);
+
+    // 설명을 고치던 중에 보관해도 편집칸이 닫힌다(보관된 업무는 저장할 수 없다).
+    await tester.tapAt(const Offset(5, 5)); // 메뉴 닫기
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '편집'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextButton, '취소'), findsOneWidget);
+    await tester.tap(find.byTooltip('업무 메뉴'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('업무 보관'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      calls.where((c) => c.path == '/api/tasks/1001/archive').single.body,
+      {'archived': true},
+    );
+
+    // 보관하면 패널은 열린 채로 안내 띠가 뜨고 모든 칸이 읽기 전용이 된다.
+    expect(find.text('보관된 업무입니다'), findsOneWidget);
+    expect(find.text('업무를 보관했습니다.'), findsOneWidget);
+    expect(find.byTooltip('제목 수정'), findsNothing);
+    expect(find.text('나에게 할당'), findsNothing);
+    expect(find.widgetWithText(TextButton, '취소'), findsNothing);
+    expect(
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, '편집'))
+          .onPressed,
+      isNull,
+    );
+    for (final hint in ['+ 새 체크리스트 항목 추가 (Enter)', '+ 새 하위 업무 (Enter)']) {
+      final field = tester.widget<TextField>(
+        find.ancestor(of: find.text(hint), matching: find.byType(TextField)),
+      );
+      expect(field.enabled, isFalse, reason: hint);
+    }
+    expect(
+      tester
+          .widgetList<Checkbox>(find.byType(Checkbox))
+          .every((c) => c.onChanged == null),
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '저장'))
+          .onPressed,
+      isNull,
+    );
+    // 참조 "+ 추가"는 보이지만 눌리지 않는다.
+    expect(
+      find.ancestor(
+        of: find.text('+ 추가'),
+        matching: find.byType(IgnorePointer),
+      ),
+      findsWidgets,
+    );
+
+    // 메뉴는 "보관 해제"로 바뀌고, 누르면 다시 고칠 수 있다.
+    await tester.tap(find.byTooltip('업무 메뉴'));
+    await tester.pumpAndSettle();
     expect(find.text('업무 보관'), findsNothing);
+    await tester.tap(find.text('보관 해제'));
+    await tester.pumpAndSettle();
+    expect(calls.where((c) => c.path == '/api/tasks/1001/archive').last.body, {
+      'archived': false,
+    });
+    expect(find.text('보관된 업무입니다'), findsNothing);
+    expect(find.byTooltip('제목 수정'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, '편집'))
+          .onPressed,
+      isNotNull,
+    );
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

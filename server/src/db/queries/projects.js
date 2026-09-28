@@ -1,7 +1,11 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import {
+  projectFolderItems,
+  projectFolders,
   projectMembers,
+  teamMembers,
+  projectTemplates,
   automationRuns,
   noteComments,
   noteVersions,
@@ -110,12 +114,48 @@ export async function countTasksByProject(projectIds) {
 
 // ── 구성원 ──────────────────────────────────────────────────────────────
 
+/** 공개 프로젝트 자동 참여 대상 = 계정 등급 정회원 이상이고 탈퇴·정지되지 않은 사람([alias]는 users 별칭). */
+function eligibleUser(alias) {
+  return sql.raw(
+    `${alias}.role in ('member', 'admin') and ${alias}.deleted_at is null and ${alias}.suspended_at is null`,
+  );
+}
+
+/**
+ * 지금도 유효한 구성원 행인지 — 그 프로젝트의 팀에 아직 있어야 하고, 자동 참여 행(auto)은 정회원
+ * 이상일 때만 유효하다. 팀에서 빠졌거나 자격을 잃은 사람의 남은 행은 없는 것으로 봐서 접근·담당자
+ * 선택·알림에서 모두 빠지게 한다(행 자체는 지우지 않으므로 다시 팀에 들어오면 초대받은 자리는 살아난다).
+ */
+function activeMembership(projectIdCol, userIdCol, autoCol) {
+  return sql`exists (
+    select 1 from ${projects} amp
+    join ${teamMembers} amt on amt.team_id = amp.team_id and amt.user_id = ${userIdCol}
+    join ${users} amu on amu.id = amt.user_id
+    where amp.id = ${projectIdCol} and (not ${autoCol} or ${eligibleUser('amu')}))`;
+}
+
+const ACTIVE_PROJECT_MEMBER = activeMembership(projectMembers.projectId, projectMembers.userId, projectMembers.auto);
+
 export function isProjectMember(projectId, userId) {
   return db
     .select({ userId: projectMembers.userId })
     .from(projectMembers)
-    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId), ACTIVE_PROJECT_MEMBER))
     .then((rows) => rows.length > 0);
+}
+
+/**
+ * [userIds] 중 지금 이 프로젝트의 (유효한) 구성원만 — 알림 대상 거르기용, 한 번의 쿼리로.
+ * 비공개 전환·팀 탈퇴로 빠진 사람이 담당·참조로 남아 있어도 업무 내용이 가지 않게 한다.
+ */
+export async function filterActiveProjectMembers(projectId, userIds) {
+  if (userIds.length === 0) return [];
+  const rows = await db
+    .select({ userId: projectMembers.userId })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), inArray(projectMembers.userId, userIds), ACTIVE_PROJECT_MEMBER));
+  const active = new Set(rows.map((r) => r.userId));
+  return userIds.filter((id) => active.has(id));
 }
 
 export function getProjectRole(projectId, userId) {
@@ -159,18 +199,233 @@ export function listProjectMemberIds(projectId) {
   return db
     .select({ userId: projectMembers.userId })
     .from(projectMembers)
-    .where(eq(projectMembers.projectId, projectId))
+    .where(and(eq(projectMembers.projectId, projectId), ACTIVE_PROJECT_MEMBER))
     .then((rows) => rows.map((r) => r.userId));
 }
 
-/** 구성원 목록을 실제 사용자 행 + 프로젝트 역할로. */
+/**
+ * 구성원 목록을 실제 사용자 행 + 프로젝트 역할(+공개 프로젝트라 자동으로 들어왔는지)로.
+ * 팀에서 빠진 사람의 남은 행은 빼서 담당자·참조자 선택에 나오지 않게 한다.
+ */
 export function listProjectMemberUsers(projectId) {
   return db
-    .select({ user: users, role: projectMembers.role })
+    .select({ user: users, role: projectMembers.role, auto: projectMembers.auto })
     .from(projectMembers)
     .innerJoin(users, eq(projectMembers.userId, users.id))
-    .where(eq(projectMembers.projectId, projectId))
-    .then((rows) => rows.map((r) => ({ ...r.user, projectRole: r.role })));
+    .where(and(eq(projectMembers.projectId, projectId), ACTIVE_PROJECT_MEMBER))
+    .then((rows) => rows.map((r) => ({ ...r.user, projectRole: r.role, projectAuto: r.auto })));
+}
+
+// ── 공개 프로젝트 자동 참여 ─────────────────────────────────────────────
+// 공개 프로젝트는 정회원 이상 팀원 모두가 참여 절차 없이 쓴다. 권한 확인·목록·알림·담당자 선택이
+// 전부 project_members를 보므로, 가상으로 계산하지 않고 실제 행(auto = true)을 채워 둔다.
+// 넣는 문장들은 같은 문장 안에서 projects 행의 공개·종료 여부를 다시 보고 그 행을 잠근다(for share) —
+// 먼저 읽어 둔 프로젝트 객체만 믿으면 방금 비공개로 바뀐 프로젝트에 팀 전체를 다시 넣을 수 있다.
+
+/** 자동 참여 대상 = 계정 등급 정회원 이상이고 탈퇴·정지되지 않은 사람(u는 users 별칭). */
+const PUBLIC_ELIGIBLE_USER = eligibleUser('u');
+
+/**
+ * 공개(종료 안 된) 프로젝트에 아직 없는 정회원 이상 팀원을 한 번에 넣는다.
+ * 새로 들어간 사람 id들을 돌려준다(사이드바 갱신 알림용).
+ */
+export async function ensurePublicProjectMembers(project) {
+  if (!project?.isPublic || project.archivedAt) return [];
+  const result = await db.execute(sql`
+    insert into ${projectMembers} (project_id, user_id, role, auto)
+    select p.id, u.id, 'member', true
+    from ${projects} p
+    join ${teamMembers} tm on tm.team_id = p.team_id
+    join ${users} u on u.id = tm.user_id
+    where p.id = ${project.id} and p.is_public and p.archived_at is null and ${PUBLIC_ELIGIBLE_USER}
+    for share of p
+    on conflict do nothing
+    returning user_id`);
+  return result.rows.map((r) => r.user_id);
+}
+
+/**
+ * 이 사람이 아직 안 들어간 이 팀의 공개 프로젝트 전부에 넣는다 — 목록을 불러올 때마다 불러서
+ * 예전에 만든 공개 프로젝트, 나중에 팀에 들어오거나 정회원으로 올라온 사람까지 채운다.
+ */
+export async function ensurePublicMembershipsForUser(teamId, userId) {
+  const result = await db.execute(sql`
+    insert into ${projectMembers} (project_id, user_id, role, auto)
+    select p.id, u.id, 'member', true
+    from ${projects} p
+    join ${teamMembers} tm on tm.team_id = p.team_id and tm.user_id = ${userId}
+    join ${users} u on u.id = tm.user_id
+    where p.team_id = ${teamId} and p.is_public and p.archived_at is null and ${PUBLIC_ELIGIBLE_USER}
+    for share of p
+    on conflict do nothing
+    returning project_id`);
+  return result.rows.map((r) => r.project_id);
+}
+
+/**
+ * 공개 프로젝트에 한 사람만 넣어 본다(목록보다 링크·알림으로 먼저 연 경우). 넣었거나 이미
+ * 구성원이면 true, 자격이 없으면(비공개·종료·준회원·다른 팀) false.
+ */
+export async function joinPublicProjectAutomatically(project, userId) {
+  if (!project?.isPublic || project.archivedAt) return false;
+  const result = await db.execute(sql`
+    insert into ${projectMembers} (project_id, user_id, role, auto)
+    select p.id, u.id, 'member', true
+    from ${projects} p
+    join ${teamMembers} tm on tm.team_id = p.team_id and tm.user_id = ${userId}
+    join ${users} u on u.id = tm.user_id
+    where p.id = ${project.id} and p.is_public and p.archived_at is null and ${PUBLIC_ELIGIBLE_USER}
+    for share of p
+    on conflict do nothing
+    returning user_id`);
+  return result.rows.length > 0 || isProjectMember(project.id, userId);
+}
+
+/** 이 팀에서 공개 프로젝트에 자동으로 들어가는 사람인지(정회원 이상 팀원). */
+export async function isPublicProjectEligible(teamId, userId) {
+  const result = await db.execute(sql`
+    select 1 from ${teamMembers} tm
+    join ${users} u on u.id = tm.user_id
+    where tm.team_id = ${teamId} and tm.user_id = ${userId} and ${PUBLIC_ELIGIBLE_USER}
+    limit 1`);
+  return result.rows.length > 0;
+}
+
+/** 공개 프로젝트에 자동으로 들어가는 팀원 id 전부 — "공개 프로젝트 생성" 알림 대상. */
+export async function listPublicEligibleUserIds(teamId) {
+  const result = await db.execute(sql`
+    select tm.user_id from ${teamMembers} tm
+    join ${users} u on u.id = tm.user_id
+    where tm.team_id = ${teamId} and ${PUBLIC_ELIGIBLE_USER}`);
+  return result.rows.map((r) => r.user_id);
+}
+
+/**
+ * 비공개로 바뀔 때 — 자동으로 들어왔던 일반 구성원만 뺀다(초대받은 사람·담당자는 남는다).
+ * 빠진 사람 id들을 돌려준다(사이드바에서 사라지도록 알리는 용도).
+ */
+export async function removeAutoMembers(projectId) {
+  const rows = await db
+    .delete(projectMembers)
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.auto, true), eq(projectMembers.role, 'member')))
+    .returning({ userId: projectMembers.userId });
+  // 담당자라서 남은 사람은 이제 비공개 프로젝트의 구성원이다 — 자동 표시를 지워서, 나중에 담당자에서
+  // 내려온 뒤 다시 공개→비공개가 되어도 조용히 빠지지 않게 한다.
+  await db
+    .update(projectMembers)
+    .set({ auto: false })
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.auto, true)));
+  return rows.map((r) => r.userId);
+}
+
+// ── 프로젝트 폴더(개인 설정) ────────────────────────────────────────────
+
+/**
+ * 내 폴더 목록 + 폴더마다 들어 있는 프로젝트 id(position, 만든 순). 내가 더 이상 구성원이
+ * 아닌 프로젝트는 빼고 돌려준다(빠졌다가 다시 들어오면 원래 폴더로 돌아온다).
+ */
+export async function listProjectFolders(teamId, userId) {
+  const folders = await db
+    .select()
+    .from(projectFolders)
+    .where(and(eq(projectFolders.teamId, teamId), eq(projectFolders.userId, userId)))
+    .orderBy(asc(projectFolders.position), asc(projectFolders.createdAt));
+  if (folders.length === 0) return [];
+  const items = await db
+    .select({ folderId: projectFolderItems.folderId, projectId: projectFolderItems.projectId })
+    .from(projectFolderItems)
+    .innerJoin(
+      projectMembers,
+      and(eq(projectMembers.projectId, projectFolderItems.projectId), eq(projectMembers.userId, userId)),
+    )
+    .innerJoin(projects, eq(projects.id, projectFolderItems.projectId))
+    .where(
+      and(
+        eq(projectFolderItems.userId, userId),
+        inArray(
+          projectFolderItems.folderId,
+          folders.map((f) => f.id),
+        ),
+      ),
+    )
+    .orderBy(asc(projects.name));
+  const byFolder = new Map(folders.map((f) => [f.id, []]));
+  for (const it of items) byFolder.get(it.folderId)?.push(it.projectId);
+  return folders.map((f) => ({ ...f, projectIds: byFolder.get(f.id) ?? [] }));
+}
+
+export async function countProjectFolders(teamId, userId) {
+  const [row] = await db
+    .select({ n: sql`count(*)::int` })
+    .from(projectFolders)
+    .where(and(eq(projectFolders.teamId, teamId), eq(projectFolders.userId, userId)));
+  return row?.n ?? 0;
+}
+
+/** 새 폴더는 맨 아래(가장 큰 position + 1)에 붙는다. */
+export async function insertProjectFolder({ teamId, userId, name }) {
+  const [{ next }] = await db
+    .select({ next: sql`coalesce(max(${projectFolders.position}), -1) + 1` })
+    .from(projectFolders)
+    .where(and(eq(projectFolders.teamId, teamId), eq(projectFolders.userId, userId)));
+  const [row] = await db
+    .insert(projectFolders)
+    .values({ teamId, userId, name, position: Number(next) })
+    .returning();
+  return row;
+}
+
+export function findProjectFolderById(id) {
+  return db
+    .select()
+    .from(projectFolders)
+    .where(eq(projectFolders.id, id))
+    .then((rows) => rows[0] ?? null);
+}
+
+export async function updateProjectFolder(id, fields) {
+  const [row] = await db.update(projectFolders).set(fields).where(eq(projectFolders.id, id)).returning();
+  return row ?? null;
+}
+
+/** 폴더만 지운다 — 안의 프로젝트 배치(project_folder_items)는 cascade로 같이 사라져 목록으로 돌아간다. */
+export async function deleteProjectFolder(id) {
+  await db.delete(projectFolders).where(eq(projectFolders.id, id));
+}
+
+/** 폴더 하나에 들어 있는 (내가 구성원인) 프로젝트 id들 — 폴더 하나를 돌려줄 때 쓴다. */
+export function listFolderProjectIds(folderId, userId) {
+  return db
+    .select({ projectId: projectFolderItems.projectId })
+    .from(projectFolderItems)
+    .innerJoin(
+      projectMembers,
+      and(eq(projectMembers.projectId, projectFolderItems.projectId), eq(projectMembers.userId, userId)),
+    )
+    .innerJoin(projects, eq(projects.id, projectFolderItems.projectId))
+    .where(and(eq(projectFolderItems.folderId, folderId), eq(projectFolderItems.userId, userId)))
+    .orderBy(asc(projects.name))
+    .then((rows) => rows.map((r) => r.projectId));
+}
+
+/**
+ * 내 폴더 배치를 바꾼다 — [folderId]가 null이면 어느 폴더에서든 뺀다. 한 프로젝트는 내 폴더
+ * 하나에만 들어가므로(user_id, project_id 유일) 다른 폴더에 있었으면 옮겨진다.
+ */
+export async function setProjectFolder(userId, projectId, folderId) {
+  if (folderId == null) {
+    await db
+      .delete(projectFolderItems)
+      .where(and(eq(projectFolderItems.userId, userId), eq(projectFolderItems.projectId, projectId)));
+    return;
+  }
+  await db
+    .insert(projectFolderItems)
+    .values({ userId, projectId, folderId })
+    .onConflictDoUpdate({
+      target: [projectFolderItems.userId, projectFolderItems.projectId],
+      set: { folderId },
+    });
 }
 
 export async function setProjectFavorite(projectId, userId, favorite) {
@@ -225,19 +480,29 @@ export async function updateTask(id, fields) {
   return row ?? null;
 }
 
+/** 지운 행이 있었는지 돌려준다 — 같은 업무를 동시에 지우는 요청 중 실제로 지운 쪽만 뒤처리를 한다. */
 export async function deleteTask(id) {
-  await db.delete(tasks).where(eq(tasks.id, id));
+  const rows = await db.delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id });
+  return rows.length > 0;
 }
 
 /** 보관한 업무는 기본으로 빼고 보여준다 — [archivedOnly]면 보관한 것만. */
-export function listTasksByProject(projectId, { archivedOnly = false } = {}) {
+/**
+ * [archivedOnly]면 보관한 업무만, [includeArchived]면 보관한 업무까지 전부(리스트 탭이 흐리게
+ * 보여준다), 둘 다 아니면 보관 안 한 업무만.
+ */
+export function listTasksByProject(projectId, { archivedOnly = false, includeArchived = false } = {}) {
   return db
     .select()
     .from(tasks)
     .where(
       and(
         eq(tasks.projectId, projectId),
-        archivedOnly ? sql`${tasks.archivedAt} is not null` : isNull(tasks.archivedAt),
+        includeArchived
+          ? undefined
+          : archivedOnly
+            ? sql`${tasks.archivedAt} is not null`
+            : isNull(tasks.archivedAt),
       ),
     )
     .orderBy(asc(tasks.status), asc(tasks.dueDate), desc(tasks.createdAt));
@@ -248,7 +513,8 @@ export function listTasksByProject(projectId, { archivedOnly = false } = {}) {
  * "이번 주 나의 업무"가 같은 목록을 쓰고, 주간 필터는 클라이언트가 날짜로 나눈다.
  * 프로젝트 이름/식별자를 같이 실어서 목록에 "MKT-1001 · 신제품 런칭 캠페인"을 바로 그린다.
  */
-export function listTasksForAssignee(teamId, userId, { includeReferenced = false } = {}) {
+/** [includeArchived]면 보관한 업무도 넣는다("내 업무" 표가 흐리게 보여준다). 종료된 프로젝트는 늘 뺀다. */
+export function listTasksForAssignee(teamId, userId, { includeReferenced = false, includeArchived = false } = {}) {
   // 참조된 업무까지 볼 때는 "내 업무" 화면 — 홈 통계는 담당 업무만 센다.
   const mine = includeReferenced
     ? or(
@@ -261,7 +527,14 @@ export function listTasksForAssignee(teamId, userId, { includeReferenced = false
     .from(tasks)
     .innerJoin(projects, eq(tasks.projectId, projects.id))
     .where(
-      and(mine, eq(projects.teamId, teamId), isNull(projects.archivedAt), isNull(tasks.archivedAt)),
+      and(
+        mine,
+        eq(projects.teamId, teamId),
+        isNull(projects.archivedAt),
+        includeArchived ? undefined : isNull(tasks.archivedAt),
+        // 비공개로 바뀌거나 구성원에서 빠진 프로젝트의 업무는 담당·참조로 남아 있어도 보여주지 않는다.
+        sql`exists (select 1 from ${projectMembers} pm where pm.project_id = ${tasks.projectId} and pm.user_id = ${userId})`,
+      ),
     )
     .orderBy(asc(tasks.dueDate), desc(tasks.createdAt))
     .then((rows) =>
@@ -306,6 +579,62 @@ export async function reorderTasks(projectId, ids) {
   }
 }
 
+// ── 프로젝트 템플릿 ─────────────────────────────────────────────────────
+
+export function listProjectTemplates(teamId) {
+  return db
+    .select()
+    .from(projectTemplates)
+    .where(eq(projectTemplates.teamId, teamId))
+    .orderBy(asc(projectTemplates.createdAt));
+}
+
+export async function findProjectTemplateById(id) {
+  const [row] = await db.select().from(projectTemplates).where(eq(projectTemplates.id, id));
+  return row ?? null;
+}
+
+export async function insertProjectTemplate(fields) {
+  const [row] = await db.insert(projectTemplates).values(fields).returning();
+  return row;
+}
+
+export async function updateProjectTemplate(id, fields) {
+  const [row] = await db
+    .update(projectTemplates)
+    .set({ ...fields, updatedAt: new Date() })
+    .where(eq(projectTemplates.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteProjectTemplate(id) {
+  await db.delete(projectTemplates).where(eq(projectTemplates.id, id));
+}
+
+/** 새 프로젝트를 템플릿 구성(상태·유형·우선순위·필드)으로 채운다 — 기본값 대신 쓴다. */
+export async function applyProjectTemplate(projectId, template) {
+  const rows = (list, map) => list.map((item, i) => ({ projectId, ...map(item), position: i }));
+  if (template.statuses.length > 0) {
+    await db.insert(taskStatuses).values(
+      rows(template.statuses, (s) => ({ name: s.name, color: s.color, category: s.category })),
+    );
+  }
+  if (template.types.length > 0) {
+    await db.insert(taskTypes).values(rows(template.types, (t) => ({ name: t.name, color: t.color })));
+  }
+  if (template.priorities.length > 0) {
+    await db.insert(taskPriorities).values(
+      rows(template.priorities, (p) => ({ name: p.name, color: p.color, level: p.level })),
+    );
+  }
+  if (template.fields.length > 0) {
+    await db.insert(taskFields).values(
+      rows(template.fields, (f) => ({ name: f.name, kind: f.kind, options: f.options ?? [] })),
+    );
+  }
+}
+
 /** 업무별 댓글 수(답글 포함) — 칸반 카드의 말풍선 숫자. */
 export async function countTaskComments(taskIds) {
   if (taskIds.length === 0) return {};
@@ -320,11 +649,12 @@ export async function countTaskComments(taskIds) {
 }
 
 /** 부모의 하위 업무들 — 상세 화면에서 보여준다(보관한 것은 뺀다). */
-export function listSubtasks(parentTaskId) {
+/** [includeArchived]면 보관한 하위 업무도(업무 상세가 흐리게 보여주고, 삭제 안내 개수에도 넣는다). */
+export function listSubtasks(parentTaskId, { includeArchived = false } = {}) {
   return db
     .select()
     .from(tasks)
-    .where(and(eq(tasks.parentTaskId, parentTaskId), isNull(tasks.archivedAt)))
+    .where(and(eq(tasks.parentTaskId, parentTaskId), includeArchived ? undefined : isNull(tasks.archivedAt)))
     .orderBy(asc(tasks.createdAt));
 }
 
@@ -364,12 +694,33 @@ export async function countChecklistItems(taskIds) {
   return map;
 }
 
-export async function insertChecklistItem(taskId, text) {
-  const [{ next }] = await db
+/**
+ * 체크리스트를 바꾸고({ result }), 이 변경으로 "항목 1개 이상, 전부 완료"가 막 됐는지
+ * ({ completed }) 알려준다. 같은 업무의 동시 변경이 둘 다 전환으로 보이지 않게 업무 행을 잠근
+ * 트랜잭션 안에서 전후를 본다 — [mutate]는 받은 tx로 고치고, 자동화는 커밋한 뒤 부른 쪽이 돌린다.
+ */
+export function mutateChecklist(taskId, mutate) {
+  return db.transaction(async (tx) => {
+    await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).for('update');
+    const allDone = async () => {
+      const rows = await tx
+        .select({ done: taskChecklistItems.done })
+        .from(taskChecklistItems)
+        .where(eq(taskChecklistItems.taskId, taskId));
+      return rows.length > 0 && rows.every((r) => r.done);
+    };
+    const wasDone = await allDone();
+    const result = await mutate(tx);
+    return { result, completed: !wasDone && (await allDone()) };
+  });
+}
+
+export async function insertChecklistItem(taskId, text, tx = db) {
+  const [{ next }] = await tx
     .select({ next: sql`coalesce(max(${taskChecklistItems.position}), -1) + 1` })
     .from(taskChecklistItems)
     .where(eq(taskChecklistItems.taskId, taskId));
-  const [row] = await db
+  const [row] = await tx
     .insert(taskChecklistItems)
     .values({ taskId, text, position: Number(next) })
     .returning();
@@ -384,8 +735,8 @@ export function findChecklistItemById(id) {
     .then((rows) => rows[0] ?? null);
 }
 
-export async function updateChecklistItem(id, fields) {
-  const [row] = await db
+export async function updateChecklistItem(id, fields, tx = db) {
+  const [row] = await tx
     .update(taskChecklistItems)
     .set(fields)
     .where(eq(taskChecklistItems.id, id))
@@ -393,8 +744,8 @@ export async function updateChecklistItem(id, fields) {
   return row ?? null;
 }
 
-export async function deleteChecklistItem(id) {
-  await db.delete(taskChecklistItems).where(eq(taskChecklistItems.id, id));
+export async function deleteChecklistItem(id, tx = db) {
+  await tx.delete(taskChecklistItems).where(eq(taskChecklistItems.id, id));
 }
 
 // ── 업무 유형 ───────────────────────────────────────────────────────────

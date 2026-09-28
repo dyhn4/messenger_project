@@ -13,6 +13,10 @@ import 'task_views.dart';
 import 'task_filter.dart';
 import 'gantt_chart_view.dart';
 
+/// 프로젝트 머리의 위 여백(창 상단 바 밑줄부터 이름까지)과 아래 여백(설명부터 탭 줄 윗줄까지).
+const _kHeaderTopGap = 14.0;
+const _kHeaderBottomGap = 8.0;
+
 /// 프로젝트 하나의 업무 목록 — 상태별(할 일/진행 중/완료)로 묶어서 보여준다.
 /// 칸반보드(드래그로 상태 이동)는 다음 단계이고, 지금은 같은 데이터를 목록으로 본다.
 class ProjectDetailView extends StatefulWidget {
@@ -61,15 +65,30 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
 
   /// 지금 탭에 실제로 거는 필터 — 칸반보드는 열이 곧 상태라 상태 조건은 빼고 본다(지우지는 않고
   /// 다른 탭으로 가면 다시 걸린다).
-  TaskFilter get _viewFilter =>
-      _tab == _ProjectTab.kanban ? _filter.without(statuses: true) : _filter;
+  /// 보관한 업무는 리스트 탭에만 나오므로, 다른 탭에서는 "보관된 업무" 빠른 필터도 쉬게 둔다.
+  TaskFilter get _viewFilter {
+    var f = _filter;
+    if (_tab == _ProjectTab.kanban) f = f.without(statuses: true);
+    if (_tab != _ProjectTab.list && f.quick == QuickFilter.archived) {
+      f = f.copyQuick(null);
+    }
+    return f;
+  }
 
-  /// 필터 버튼·칩에서 바꾼 값 — 칸반에서는 숨겨 둔 상태 조건을 그대로 둔다.
-  void _setFilter(TaskFilter f) => setState(
-    () => _filter = _tab == _ProjectTab.kanban
-        ? f.withStatusIds(_filter.statusIds)
-        : f,
-  );
+  /// 필터 버튼·칩에서 바꾼 값 — 칸반에서는 숨겨 둔 상태 조건을, 리스트가 아닌 탭에서는 숨겨 둔
+  /// "보관된 업무" 조건을 그대로 둔다(다른 빠른 필터를 고르면 그것으로 바뀐다).
+  void _setFilter(TaskFilter f) => setState(() {
+    var next = f;
+    if (_tab == _ProjectTab.kanban) {
+      next = next.withStatusIds(_filter.statusIds);
+    }
+    if (_tab != _ProjectTab.list &&
+        _filter.quick == QuickFilter.archived &&
+        next.quick == null) {
+      next = next.copyQuick(QuickFilter.archived);
+    }
+    _filter = next;
+  });
   String? _error;
 
   @override
@@ -103,8 +122,10 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
   Future<void> _load() async {
     try {
       final project = await widget.session.api!.fetchProject(widget.projectId);
+      // 보관한 업무까지 받는다 — 리스트 탭은 흐리게 보여주고, 다른 탭은 뺀다(_buildView).
       final tasks = await widget.session.api!.fetchProjectTasks(
         widget.projectId,
+        includeArchived: true,
       );
       final statuses = await widget.session.api!.fetchTaskStatuses(
         widget.projectId,
@@ -201,12 +222,20 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
     }
   }
 
-  Widget _buildView(Project project, List<Task> allTasks) {
+  Widget _buildView(Project project, List<Task> loaded) {
+    // 보관한 업무는 리스트 탭에서 "보관된 업무" 필터를 골랐을 때만(흐리게) 보인다. 그 밖에는
+    // 어느 탭에서도 빼고 센다(대시보드 숫자, "아직 등록된 업무가 없습니다" 판단 포함).
+    final allTasks = [
+      for (final t in loaded)
+        if (!t.archived) t,
+    ];
     final filter = _viewFilter;
+    final showArchived = filter.quick == QuickFilter.archived;
+    final pool = showArchived ? loaded : allTasks;
     final tasks = filter.isEmpty
-        ? allTasks
+        ? pool
         : [
-            for (final t in allTasks)
+            for (final t in pool)
               if (filter.matches(
                 t,
                 myUserId: widget.session.userId,
@@ -217,6 +246,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                 t,
           ];
     if (allTasks.isEmpty &&
+        !showArchived &&
         _tab != _ProjectTab.dashboard &&
         _tab != _ProjectTab.notes) {
       return const EmptyHint('아직 등록된 업무가 없습니다. "새 업무"로 시작해보세요.');
@@ -296,17 +326,34 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
     }
     final hint = Theme.of(context).hintColor;
 
+    final header = widget.header;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 맨 윗줄 — 왼쪽 프로젝트 머리, 오른쪽 "새 업무"·설정. 멤버는 대시보드의 "멤버별 업무현황"에서
+        // 보고, 초대·역할은 프로젝트 설정에서 한다.
+        // 버튼은 위 구분선(창 상단 바 밑줄)과 아래 구분선(탭 줄 윗줄, 종료된 프로젝트면 안내 띠) 사이의
+        // 정가운데에 온다 — 머리의 위아래 여백까지 이 줄 안에 두고 버튼을 줄 높이의 가운데에 세우므로,
+        // 설명이 없든 두 줄이든 늘 가운데다(그래서 위 여백을 바깥 창이 아니라 여기서 둔다).
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          padding: EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: header == null ? _kHeaderBottomGap : 0,
+          ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 왼쪽 프로젝트 머리, 오른쪽 위 "새 업무"·설정. 멤버는 대시보드의 "멤버별 업무현황"에서
-              // 보고, 초대·역할은 프로젝트 설정에서 한다.
-              Expanded(child: widget.header ?? const SizedBox.shrink()),
+              Expanded(
+                child: header == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.only(
+                          top: _kHeaderTopGap,
+                          bottom: _kHeaderBottomGap,
+                        ),
+                        child: header,
+                      ),
+              ),
               const SizedBox(width: 12),
               if (!project.archived)
                 FilledButton.icon(
@@ -315,7 +362,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                   label: const Text('새 업무'),
                 ),
               // 프로젝트 설정은 전부 "프로젝트 설정" 한 창에 모여 있다(기본 정보 / 필드·상태 /
-              // 멤버 / 알림 / 템플릿·자동화 / 삭제).
+              // 멤버 / 알림 / 자동화 / 노트 / 삭제). 사이드바 프로젝트 ⋯ 메뉴에서도 연다.
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
                 tooltip: '프로젝트 설정',
@@ -412,6 +459,7 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                 members: project.members,
                 fields: _fields,
                 showStatus: _tab != _ProjectTab.kanban,
+                showArchived: _tab == _ProjectTab.list,
                 onChanged: _setFilter,
               ),
             ),

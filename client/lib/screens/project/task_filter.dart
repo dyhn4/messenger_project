@@ -23,13 +23,15 @@ class FieldRange {
 /// 프로젝트 화면의 업무 필터 — 다섯 가지 보기(리스트/칸반/간트/캘린더/대시보드)에 같이 적용된다.
 /// 비어 있는 항목은 "전체". 사용자 정의 필드는 선택 필드는 값이 같은 것, 텍스트 필드는 글자가 들어 있는 것만 본다.
 /// "빠른 필터링" 한 줄짜리 조건 — 대시보드 카드를 눌렀을 때도 이 값이 걸린다.
-enum QuickFilter { incomplete, done, overdue, mine }
+/// [archived]("보관된 업무")는 보관한 업무만, 나머지는 보관 안 한 업무 중에서 고른다.
+enum QuickFilter { incomplete, done, overdue, mine, archived }
 
 String quickFilterLabel(QuickFilter q) => switch (q) {
   QuickFilter.incomplete => '미완료 업무',
   QuickFilter.done => '완료된 업무',
   QuickFilter.overdue => '지연 업무',
   QuickFilter.mine => '내 업무',
+  QuickFilter.archived => '보관된 업무',
 };
 
 class TaskFilter {
@@ -173,6 +175,9 @@ class TaskFilter {
     List<TaskPriorityDef> priorities = const [],
     List<TaskFieldDef> fields = const [],
   }) {
+    // 보관한 업무는 "보관된 업무"를 골랐을 때만 보이고(그때는 보관한 것만), 필터가 없거나
+    // 다른 빠른 필터일 때는 늘 뺀다.
+    if (t.archived != (quick == QuickFilter.archived)) return false;
     switch (quick) {
       case QuickFilter.incomplete:
         if (t.status == TaskStatus.done) return false;
@@ -182,6 +187,7 @@ class TaskFilter {
         if (!t.isOverdue) return false;
       case QuickFilter.mine:
         if (t.assigneeId != myUserId) return false;
+      case QuickFilter.archived:
       case null:
         break;
     }
@@ -351,6 +357,9 @@ class TaskFilterButton extends StatefulWidget {
   /// false면 "상태" 줄을 숨긴다(칸반보드 — 열이 곧 상태라서).
   final bool showStatus;
 
+  /// false면 빠른 필터링의 "보관된 업무"를 숨긴다 — 보관한 업무는 리스트 탭에만 나온다.
+  final bool showArchived;
+
   const TaskFilterButton({
     super.key,
     required this.filter,
@@ -361,6 +370,7 @@ class TaskFilterButton extends StatefulWidget {
     required this.fields,
     required this.onChanged,
     this.showStatus = true,
+    this.showArchived = false,
   });
 
   @override
@@ -492,11 +502,13 @@ class _TaskFilterButtonState extends State<TaskFilterButton> {
             },
       quickChips: [
         for (final q in QuickFilter.values)
-          FilterQuickChip(
-            label: quickFilterLabel(q),
-            selected: f.quick == q,
-            onTap: () => widget.onChanged(f.copyQuick(f.quick == q ? null : q)),
-          ),
+          if (q != QuickFilter.archived || widget.showArchived)
+            FilterQuickChip(
+              label: quickFilterLabel(q),
+              selected: f.quick == q,
+              onTap: () =>
+                  widget.onChanged(f.copyQuick(f.quick == q ? null : q)),
+            ),
       ],
       children: [
         if (widget.showStatus)

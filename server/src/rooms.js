@@ -53,7 +53,7 @@ import { findUserById } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
-import { previewFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
+import { notifyOfflineMembers, previewFor, roomTagFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
 import { signFileUrl, toStoredUploadUrl } from './upload.js';
 import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
@@ -240,6 +240,42 @@ export async function postSystemMessage(io, room, text) {
   });
   const dto = { ...message, createdAt: new Date(message.createdAt).getTime() };
   io.to(room.id).emit('message:new', dto);
+  return dto;
+}
+
+/**
+ * 사람이 아닌 발신자(프로젝트 자동화 등)의 글을 일반 텍스트 메시지로 올린다. 시스템 메시지와
+ * 달리 안읽음 숫자·방 목록 미리보기·데스크톱/모바일 알림이 사람 메시지와 똑같이 나가야 해서
+ * socket.js의 message:send와 같은 순서(숨긴 DM 되살리기 → message:new → 푸시)로 보낸다.
+ * senderId가 null이라 누구의 "내 메시지"도 아니고, 푸시에서 보낸 사람으로 빠지는 멤버도 없다.
+ */
+export async function postBotMessage(io, room, text, { senderName }) {
+  const message = await insertMessage({
+    id: randomUUID(),
+    roomId: room.id,
+    senderId: null,
+    senderName,
+    type: 'text',
+    text,
+  });
+  await unhideDmForOtherMembers(io, room, null);
+  const dto = toMessageDto(message);
+  io.to(room.id).emit('message:new', dto);
+  // 푸시는 기다리지 않는다(socket.js와 같은 이유) — 실패해도 메시지는 이미 올라갔다.
+  listRoomMemberIds(room.id)
+    .then((memberIds) =>
+      notifyOfflineMembers({
+        memberIds,
+        senderId: null,
+        senderName,
+        sender: null,
+        room,
+        entry: message,
+        roomTag: roomTagFor(room),
+        kind: 'message',
+      }),
+    )
+    .catch((err) => console.error('[push] 자동 메시지 알림 실패:', err?.message ?? err));
   return dto;
 }
 

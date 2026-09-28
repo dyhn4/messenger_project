@@ -15,6 +15,8 @@ IconData projectNotificationIcon(String kind) => switch (kind) {
   'due' => Icons.alarm,
   'created' => Icons.add_task,
   'deleted' => Icons.delete_outline,
+  // 공개 프로젝트가 새로 생겼다는 알림 — 업무가 아니라 프로젝트 자체를 가리킨다.
+  'project_created' => Icons.rocket_launch_outlined,
   _ => Icons.notifications_none,
 };
 
@@ -111,7 +113,8 @@ class _ProjectNotificationsBellState extends State<ProjectNotificationsBell> {
         ),
       ),
       title: Text(
-        n.title,
+        // 제목이 비어 오면(모르는 종류 등) 프로젝트 이름으로 대신한다.
+        n.title.isNotEmpty ? n.title : (n.projectName ?? '프로젝트'),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(

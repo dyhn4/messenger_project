@@ -17,6 +17,7 @@ import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
 import '../../widgets/rich_text_format.dart';
 import 'note_markdown.dart';
+import 'note_task_links.dart';
 import 'task_comments_section.dart';
 import 'project_widgets.dart' show EmptyHint;
 
@@ -100,6 +101,14 @@ class _NotesViewState extends State<NotesView> {
   String? _detailError;
 
   bool _editing = false;
+
+  /// 편집하다가 저장이 권한 때문에 막혔고 서버도 이제 고칠 수 없다고 하면 true — 편집기를 읽기
+  /// 전용으로 바꾼다(쓰던 글은 복사할 수 있게 남겨 둔다).
+  bool _editLocked = false;
+
+  /// 편집기를 잠글 때 서버에서 새로 받은 노트 — 편집을 끝내면 이걸로 [_detail]을 바꿔 낡은
+  /// canEdit으로 '수정'·되돌리기가 다시 보이지 않게 한다.
+  ProjectNote? _lockedNote;
 
   /// 새 노트를 쓰는 중이면 그 노트가 들어갈 프로젝트(아래 선택 칸으로 바꾼다).
   String? _createProjectId;
@@ -321,25 +330,34 @@ class _NotesViewState extends State<NotesView> {
       _detail = null;
       _createProjectId = projectId;
       _editing = true;
+      _editLocked = false;
       _fillEditor('', '');
     });
   }
 
   void _startEdit() {
     final d = _detail;
-    if (d == null) return;
+    // 노트 수정 권한(프로젝트 설정 > 노트)은 서버가 사람마다 계산해 준다.
+    if (d == null || !d.canEdit) return;
     setState(() {
       _editing = true;
+      _editLocked = false;
       _fillEditor(d.title, d.body ?? '');
     });
   }
 
   Future<void> _cancelEdit() async {
     if (!await _confirmDiscard()) return;
+    final fresh = _editLocked ? _lockedNote : null;
     setState(() {
       _editing = false;
+      _editLocked = false;
+      _lockedNote = null;
       _createProjectId = null;
+      if (fresh != null && fresh.id == _selectedId) _detail = fresh;
     });
+    // 삭제 권한도 같이 바뀌었을 수 있다 — 목록의 ✕를 맞춘다.
+    if (fresh != null) await _loadList();
   }
 
   Future<void> _save() async {
@@ -377,9 +395,32 @@ class _NotesViewState extends State<NotesView> {
       await _loadList();
       await _loadDetail(saved.id);
     } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
+      if (!mounted) return;
+      showAppToast(context, '저장하지 못했습니다: $e');
+      final id = _selectedId;
+      if (!_creating && id != null) _recheckEditPermission(id);
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// 저장이 실패했을 때 — 그 사이 노트 수정 권한이 바뀌었을 수 있어 다시 물어보고, 이제 고칠 수 없으면
+  /// 편집기를 읽기 전용으로 바꾼다. 충돌 검사 기준(열 때의 수정 시각)이 바뀌지 않게 [_detail]은 그대로 둔다.
+  Future<void> _recheckEditPermission(String id) async {
+    try {
+      final fresh = await widget.session.api!.fetchNote(id);
+      if (!mounted || _selectedId != id || fresh.canEdit) return;
+      setState(() {
+        if (_editing) {
+          _editLocked = true;
+          _lockedNote = fresh;
+        } else {
+          // 다시 묻는 사이에 편집을 그만뒀으면 보기 화면의 메뉴만 맞춘다.
+          _detail = fresh;
+        }
+      });
+    } catch (_) {
+      // 다시 묻지 못해도 편집기는 그대로 둔다(저장 실패 안내는 이미 했다).
     }
   }
 
@@ -463,19 +504,18 @@ class _NotesViewState extends State<NotesView> {
   Future<void> _openHistory(ProjectNote note) async {
     final restored = await showDialog<ProjectNote>(
       context: context,
-      builder: (_) => _NoteHistoryDialog(session: widget.session, note: note),
+      builder: (_) => _NoteHistoryDialog(
+        session: widget.session,
+        note: note,
+        // 되돌리기도 노트를 고치는 것이라 수정 권한이 있어야 한다.
+        canRestore: note.canEdit,
+      ),
     );
     if (restored != null && mounted) {
       setState(() => _detail = restored);
       showAppToast(context, '이전 버전으로 되돌렸습니다.');
       await _loadList();
     }
-  }
-
-  bool _canDelete(ProjectNote note) {
-    if (note.createdBy == widget.session.userId) return true;
-    if (widget.session.canManageCurrentTeam) return true;
-    return _projects.any((p) => p.id == note.projectId && p.isOwner);
   }
 
   Future<void> _delete(ProjectNote note) async {
@@ -510,7 +550,13 @@ class _NotesViewState extends State<NotesView> {
       }
       await _loadList();
     } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+      if (!mounted) return;
+      showAppToast(context, '삭제하지 못했습니다: $e');
+      // 삭제 권한이 바뀌었을 수 있다 — 목록과 보고 있는 노트를 새로 읽어 ✕·삭제 메뉴를 맞춘다.
+      await _loadList();
+      if (mounted && _selectedId == note.id && !_editing) {
+        await _loadDetail(note.id);
+      }
     }
   }
 
@@ -689,7 +735,7 @@ class _NotesViewState extends State<NotesView> {
                           note: n,
                           project: _projectOf(n.projectId),
                           date: _shownDate(n),
-                          canDelete: _canDelete(n),
+                          canDelete: n.canDelete,
                           onOpen: () => _select(n),
                           onDelete: () => _delete(n),
                         );
@@ -1021,17 +1067,18 @@ class _NotesViewState extends State<NotesView> {
               MenuAnchor(
                 alignmentOffset: const Offset(-110, 4),
                 menuChildren: [
-                  hoverMenuItem(
-                    icon: Icons.edit_outlined,
-                    label: '수정',
-                    onPressed: _startEdit,
-                  ),
+                  if (note.canEdit)
+                    hoverMenuItem(
+                      icon: Icons.edit_outlined,
+                      label: '수정',
+                      onPressed: _startEdit,
+                    ),
                   hoverMenuItem(
                     icon: Icons.copy_outlined,
                     label: '노트 복제',
                     onPressed: () => _duplicate(note),
                   ),
-                  if (_canDelete(note))
+                  if (note.canDelete)
                     hoverMenuItem(
                       icon: Icons.delete_outline,
                       label: '삭제',
@@ -1206,7 +1253,11 @@ class _NotesViewState extends State<NotesView> {
           onPressed: onPressed,
         );
     final projectId = _creating ? _createProjectId : _detail?.projectId;
-    final canSave = !_saving && _title.text.trim().isNotEmpty;
+    final project = projectId == null ? null : _projectOf(projectId);
+    // 수정 권한이 없는 노트(저장하다 권한이 바뀐 걸 알게 된 경우 등)는 읽기 전용으로만 보여준다.
+    final readOnly =
+        _editLocked || (!_creating && _detail != null && !_detail!.canEdit);
+    final canSave = !_saving && !readOnly && _title.text.trim().isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1219,6 +1270,7 @@ class _NotesViewState extends State<NotesView> {
                 child: TextField(
                   controller: _title,
                   autofocus: true,
+                  readOnly: readOnly,
                   maxLength: 100,
                   style: const TextStyle(
                     fontSize: 30,
@@ -1241,55 +1293,93 @@ class _NotesViewState extends State<NotesView> {
             ],
           ),
         ),
-        Container(
-          color: theme.brightness == Brightness.dark
-              ? Colors.white.withValues(alpha: 0.04)
-              : const Color(0xFFF7F8FA),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          child: RichFormatToolbar(
-            controller: _body,
-            focusNode: _bodyFocus,
-            showColor: true,
-            showHeadings: true,
-            showRule: true,
-            trailing: [
-              toolButton(Icons.table_chart_outlined, '표', _insertTable),
-              _uploading
-                  ? const Padding(
-                      padding: EdgeInsets.all(7),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : toolButton(Icons.image_outlined, '그림', _insertImage),
-            ],
+        if (readOnly)
+          Container(
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.lock_outline,
+                  size: 16,
+                  color: Colors.deepOrange,
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '이 노트를 수정할 권한이 없습니다(노트 작성자와 관리자만 수정할 수 있습니다). '
+                    '쓰던 내용은 복사해 둘 수 있습니다.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Container(
+            color: theme.brightness == Brightness.dark
+                ? Colors.white.withValues(alpha: 0.04)
+                : const Color(0xFFF7F8FA),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            child: RichFormatToolbar(
+              controller: _body,
+              focusNode: _bodyFocus,
+              showColor: true,
+              showHeadings: true,
+              showRule: true,
+              trailing: [
+                toolButton(Icons.table_chart_outlined, '표', _insertTable),
+                _uploading
+                    ? const Padding(
+                        padding: EdgeInsets.all(7),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : toolButton(Icons.image_outlined, '그림', _insertImage),
+              ],
+            ),
           ),
-        ),
         Divider(height: 1, color: theme.dividerColor),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(24, 12, 12, 0),
-            child: RichFieldWrapper(
+            // 줄 맨 앞이나 공백 뒤에서 "/"를 치면 이 프로젝트의 업무 링크 목록이 뜬다.
+            child: NoteTaskLinkMenu(
               controller: _body,
-              child: TextField(
+              focusNode: _bodyFocus,
+              projectId: projectId,
+              projectName: project?.name ?? _detail?.projectName,
+              projectColor: project?.color ?? _detail?.projectColor,
+              loadTasks: (id) => widget.session.api!.fetchProjectTasks(id),
+              enabled: !readOnly,
+              child: RichFieldWrapper(
                 controller: _body,
-                focusNode: _bodyFocus,
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                keyboardType: TextInputType.multiline,
-                textAlignVertical: TextAlignVertical.top,
-                style: const TextStyle(fontSize: 15, height: 1.5),
-                decoration: InputDecoration(
-                  hintText: '내용을 입력하세요',
-                  hintStyle: TextStyle(
-                    fontSize: 17,
-                    color: hint.withValues(alpha: 0.7),
+                child: TextField(
+                  controller: _body,
+                  focusNode: _bodyFocus,
+                  readOnly: readOnly,
+                  expands: true,
+                  maxLines: null,
+                  minLines: null,
+                  keyboardType: TextInputType.multiline,
+                  textAlignVertical: TextAlignVertical.top,
+                  style: const TextStyle(fontSize: 15, height: 1.5),
+                  decoration: InputDecoration(
+                    hintText: '내용을 입력하세요',
+                    hintStyle: TextStyle(
+                      fontSize: 17,
+                      color: hint.withValues(alpha: 0.7),
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
                   ),
-                  border: InputBorder.none,
-                  isDense: true,
                 ),
               ),
             ),
@@ -1788,7 +1878,14 @@ String _formatWhen(DateTime t) {
 class _NoteHistoryDialog extends StatefulWidget {
   final Session session;
   final ProjectNote note;
-  const _NoteHistoryDialog({required this.session, required this.note});
+
+  /// 노트 수정 권한이 없으면 이력은 보기만 한다(되돌리기 버튼 없음).
+  final bool canRestore;
+  const _NoteHistoryDialog({
+    required this.session,
+    required this.note,
+    this.canRestore = true,
+  });
 
   @override
   State<_NoteHistoryDialog> createState() => _NoteHistoryDialogState();
@@ -1914,10 +2011,11 @@ class _NoteHistoryDialogState extends State<_NoteHistoryDialog> {
                                           ),
                                     ),
                                   ),
-                                  FilledButton(
-                                    onPressed: _restoring ? null : _restore,
-                                    child: const Text('이 버전으로 되돌리기'),
-                                  ),
+                                  if (widget.canRestore)
+                                    FilledButton(
+                                      onPressed: _restoring ? null : _restore,
+                                      child: const Text('이 버전으로 되돌리기'),
+                                    ),
                                 ],
                               ),
                             ),

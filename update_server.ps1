@@ -45,6 +45,13 @@ $robocopyArgs = @(
 )
 robocopy @robocopyArgs | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "코드 적용 실패(robocopy 코드 $LASTEXITCODE)" }
+# 초보자용 도움말(guide/)은 서버가 그대로 서빙하는 정적 파일뿐이라 통째로 맞춘다(/MIR) —
+# 위 /E 복사는 새 파일을 더하기만 해서, 이름이 바뀌거나 빠진 스크린샷이 계속 남는다.
+$guideSrc = Join-Path $tmp 'guide'
+if (Test-Path $guideSrc) {
+    robocopy $guideSrc (Join-Path $Server 'guide') /MIR /NFL /NDL /NJH /NJS | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "도움말 적용 실패(robocopy 코드 $LASTEXITCODE)" }
+}
 Remove-Item $tmp -Recurse -Force
 
 Set-Location $Server

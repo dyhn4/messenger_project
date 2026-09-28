@@ -26,15 +26,26 @@ String _formatCommentTime(DateTime dt) {
 
 /// "프로젝트 생성" — 이름, 대표 색상, 프로젝트 키, 설명, 공개 설정을 입력한다. 만든 사람이
 /// 담당자(owner)가 되고, 구성원은 만든 뒤 프로젝트 화면에서 초대한다(공개 프로젝트는 팀의
-/// 정회원 이상이 초대 없이 찾아서 참여할 수도 있다).
+/// 정회원 이상 모두가 자동으로 멤버가 되고, 만들 때 이들에게 알림이 간다).
+///
+/// 오른쪽 "프로젝트 템플릿"에서 템플릿을 고르면 기본 상태·유형·우선순위 대신 그 구성으로 만든다
+/// ([templateId]로 미리 골라 둘 수 있다). [onNewTemplate]을 주면 "+ 새 템플릿" 버튼이 보이고,
+/// 누르면 이 창을 닫고 그것을 부른다.
 Future<Project?> showNewProjectDialog(
   BuildContext context,
   Session session,
-  String teamId,
-) {
+  String teamId, {
+  String? templateId,
+  VoidCallback? onNewTemplate,
+}) {
   return showDialog<Project>(
     context: context,
-    builder: (_) => _NewProjectDialog(session: session, teamId: teamId),
+    builder: (_) => _NewProjectDialog(
+      session: session,
+      teamId: teamId,
+      initialTemplateId: templateId,
+      onNewTemplate: onNewTemplate,
+    ),
   );
 }
 
@@ -52,7 +63,14 @@ const projectColorChoices = <String>[
 class _NewProjectDialog extends StatefulWidget {
   final Session session;
   final String teamId;
-  const _NewProjectDialog({required this.session, required this.teamId});
+  final String? initialTemplateId;
+  final VoidCallback? onNewTemplate;
+  const _NewProjectDialog({
+    required this.session,
+    required this.teamId,
+    this.initialTemplateId,
+    this.onNewTemplate,
+  });
 
   @override
   State<_NewProjectDialog> createState() => _NewProjectDialogState();
@@ -75,6 +93,27 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
   bool _submitting = false;
   String? _error;
 
+  /// 팀의 프로젝트 템플릿(못 불러오면 빈 목록 — 빈 프로젝트로는 늘 만들 수 있다).
+  List<ProjectTemplate>? _templates;
+  late String? _templateId = widget.initialTemplateId;
+  final _templateScroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.session.api!
+        .fetchProjectTemplates(widget.teamId)
+        .then((list) {
+          if (mounted) setState(() => _templates = list);
+        })
+        .catchError((_) {
+          if (mounted) setState(() => _templates = const []);
+        });
+  }
+
+  ProjectTemplate? get _template =>
+      _templates?.where((t) => t.id == _templateId).firstOrNull;
+
   @override
   void dispose() {
     _name.dispose();
@@ -84,7 +123,199 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
     _identifierFocus.dispose();
     _descriptionFocus.dispose();
     _formScroll.dispose();
+    _templateScroll.dispose();
     super.dispose();
+  }
+
+  /// 오른쪽 "프로젝트 템플릿" — 빈 프로젝트 + 팀 템플릿들, 고른 것에 ✓.
+  Widget _templatePanel(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final dark = theme.brightness == Brightness.dark;
+    Widget tile({
+      required String title,
+      String? subtitle,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          // 고른 것은 아주 옅은 파랑 + 파란 테두리, 나머지는 옅은 회색 + 옅은 테두리.
+          color: selected
+              ? (dark
+                    ? const Color(0xFF3B82F6).withValues(alpha: 0.12)
+                    : const Color(0xFFF5F9FF))
+              : (dark
+                    ? theme.colorScheme.surfaceContainerHighest
+                    : const Color(0xFFF3F4F6)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: selected
+                  ? const Color(0xFF3B82F6)
+                  : (dark ? theme.dividerColor : const Color(0xFFE5E7EB)),
+            ),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (subtitle != null)
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 11, color: hint),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (selected)
+                    const Icon(Icons.check, size: 16, color: Color(0xFF3B82F6)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final templates = _templates;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      decoration: BoxDecoration(
+        // 창 바탕(옅은 회색) 위에 흰 칸으로 띄운다.
+        color: dark ? theme.colorScheme.surface : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: dark ? theme.dividerColor : const Color(0xFFE2E4E8),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '프로젝트 템플릿',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (widget.onNewTemplate != null)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    widget.onNewTemplate!();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                  icon: const Icon(Icons.add, size: 14),
+                  label: const Text('새 템플릿'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (templates == null)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else
+            Flexible(
+              child: MutedScrollbar(
+                controller: _templateScroll,
+                child: ListView(
+                  controller: _templateScroll,
+                  shrinkWrap: true,
+                  children: [
+                    tile(
+                      title: '빈 프로젝트',
+                      subtitle: '기본 상태·유형·우선순위로 시작',
+                      selected: _templateId == null,
+                      onTap: () => setState(() => _templateId = null),
+                    ),
+                    for (final t in templates)
+                      tile(
+                        title: t.name,
+                        subtitle: (t.description ?? '').isEmpty
+                            ? null
+                            : t.description,
+                        selected: _templateId == t.id,
+                        onTap: () => setState(() => _templateId = t.id),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 왼쪽 맨 위 — 고른 템플릿 표시(× 로 빈 프로젝트로 되돌린다).
+  Widget _selectedTemplateChip(ProjectTemplate t) {
+    const blue = Color(0xFF3B82F6);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: blue.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: blue.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.grid_view_outlined, size: 16, color: blue),
+          const SizedBox(width: 8),
+          Text(
+            '템플릿',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              t.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+          ),
+          IconButton(
+            tooltip: '템플릿 빼기',
+            onPressed: () => setState(() => _templateId = null),
+            icon: const Icon(Icons.close, size: 16),
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
+    );
   }
 
   /// 포커스가 없을 때만 보여줄 안내 문구(누르면 사라진다).
@@ -110,6 +341,7 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
             : _description.text.trim(),
         color: _color,
         isPublic: _isPublic,
+        templateId: _template?.id,
       );
       if (mounted) Navigator.of(context).pop(project);
     } catch (e) {
@@ -130,209 +362,227 @@ class _NewProjectDialogState extends State<_NewProjectDialog> {
   @override
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
+    final template = _template;
+    // 넓으면 왼쪽 입력, 오른쪽 템플릿 고르기. 좁으면(창이 작을 때) 템플릿 칸은 입력 아래로.
+    final wide = MediaQuery.sizeOf(context).width >= 860;
+    final form = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: MutedScrollbar(
+            controller: _formScroll,
+            child: ListView(
+              controller: _formScroll,
+              // 내용만큼만 차지하게 한다 — 안 그러면 목록이 창 높이를 꽉 채워서 마지막
+              // 항목과 아래 "프로젝트 생성" 버튼 사이가 휑하게 벌어진다(창이 모자라면
+              // Flexible이 높이를 잘라주고 그때부터 스크롤된다).
+              shrinkWrap: true,
+              // 왼쪽(창 여백 20)과 같은 폭으로 오른쪽도 띄운다 — 스크롤바는 이 여백
+              // 바깥의 창 오른쪽 끝에 그려진다.
+              padding: const EdgeInsets.only(right: 20),
+              children: [
+                if (template != null) _selectedTemplateChip(template),
+                _label('프로젝트 이름'),
+                TextField(
+                  controller: _name,
+                  focusNode: _nameFocus,
+                  autofocus: true,
+                  maxLength: 60,
+                  decoration: InputDecoration(
+                    hintText: _hintWhenIdle(_nameFocus, '프로젝트 이름을 입력하세요'),
+                    counterText: '',
+                    border: const OutlineInputBorder(),
+                  ),
+                  // 이름을 적으면 키를 아직 안 건드린 경우에 한해 영문 앞글자로 추천한다.
+                  onChanged: (v) {
+                    if (_identifier.text.isNotEmpty) return;
+                    final guess = v
+                        .toUpperCase()
+                        .replaceAll(RegExp(r'[^A-Z0-9]'), '')
+                        .replaceFirst(
+                          RegExp(r'^[0-9]+'),
+                          '',
+                        ); // 키는 영문으로 시작해야 한다.
+                    if (guess.length >= 2) {
+                      _identifier.text = guess.substring(
+                        0,
+                        guess.length > 4 ? 4 : guess.length,
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(height: 20),
+                _label('대표 색상'),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final hex in projectColorChoices)
+                      InkWell(
+                        onTap: () => setState(() => _color = hex),
+                        customBorder: const CircleBorder(),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          padding: const EdgeInsets.all(2.5),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _color == hex
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: parseTypeColor(hex),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                _label('프로젝트 키'),
+                TextField(
+                  controller: _identifier,
+                  focusNode: _identifierFocus,
+                  maxLength: 10,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                    hintText: _hintWhenIdle(
+                      _identifierFocus,
+                      '프로젝트 식별 키를 입력하세요. (예: HR, CX, DEV)',
+                    ),
+                    counterText: '',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _label('설명'),
+                TextField(
+                  controller: _description,
+                  focusNode: _descriptionFocus,
+                  maxLines: 3,
+                  minLines: 3,
+                  decoration: InputDecoration(
+                    hintText: _hintWhenIdle(
+                      _descriptionFocus,
+                      '프로젝트에 대한 설명을 추가하세요...',
+                    ),
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                _label('공개 설정'),
+                // 고른 값 위에 메뉴가 겹쳐 뜨는 기본 드롭다운(DropdownButtonFormField) 대신,
+                // 메뉴가 입력칸 바로 아래로 펼쳐지는 DropdownMenu를 쓴다 — 펼쳤을 때 공개·
+                // 비공개 두 항목이 입력칸에 가리지 않고 다 보인다.
+                DropdownMenu<bool>(
+                  initialSelection: _isPublic,
+                  // 눌렀을 때 글자를 입력하는 칸이 아니라 목록만 펼치도록.
+                  requestFocusOnTap: false,
+                  expandedInsets: EdgeInsets.zero,
+                  menuStyle: const MenuStyle(alignment: Alignment.bottomLeft),
+                  inputDecorationTheme: const InputDecorationTheme(
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  dropdownMenuEntries: const [
+                    DropdownMenuEntry(
+                      value: true,
+                      label: '공개',
+                      leadingIcon: Icon(Icons.public, size: 18),
+                    ),
+                    DropdownMenuEntry(
+                      value: false,
+                      label: '비공개',
+                      leadingIcon: Icon(Icons.lock_outline, size: 18),
+                    ),
+                  ],
+                  onSelected: (v) => setState(() => _isPublic = v ?? true),
+                ),
+                const SizedBox(height: 8),
+                // 두 설명의 줄 수가 달라서 그냥 갈아끼우면 창 높이가 들썩인다 —
+                // IndexedStack은 자리를 항상 더 긴 쪽에 맞춰 잡아둔다.
+                IndexedStack(
+                  index: _isPublic ? 0 : 1,
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    Text(
+                      '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 자동으로 참여하며, 만들면 이들에게 알림이 갑니다.',
+                      style: TextStyle(color: hint, fontSize: 12),
+                    ),
+                    Text(
+                      '초대한 구성원만 프로젝트를 확인할 수 있습니다.',
+                      style: TextStyle(color: hint, fontSize: 12),
+                    ),
+                  ],
+                ),
+                if (!wide) ...[
+                  const SizedBox(height: 20),
+                  _templatePanel(context),
+                ],
+              ],
+            ),
+          ),
+        ),
+        // 스크롤바가 없는 아래쪽 줄은 창의 원래 오른쪽 여백(20)을 직접 준다.
+        Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 48,
+                child: FilledButton(
+                  onPressed: _submitting ? null : _submit,
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text(
+                          '프로젝트 생성',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
     return FloatingDialog(
       title: '프로젝트 생성',
-      maxWidth: 520,
+      maxWidth: wide ? 900 : 520,
       maxHeight: 780,
       // 스크롤바를 창 오른쪽 끝에 붙이려고 오른쪽 여백을 0으로 받고, 안쪽 내용이 좌우 여백을
       // 직접 챙긴다(팀 설정과 같은 방식).
       padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: MutedScrollbar(
-              controller: _formScroll,
-              child: ListView(
-                controller: _formScroll,
-                // 내용만큼만 차지하게 한다 — 안 그러면 목록이 창 높이를 꽉 채워서 마지막
-                // 항목과 아래 "프로젝트 생성" 버튼 사이가 휑하게 벌어진다(창이 모자라면
-                // Flexible이 높이를 잘라주고 그때부터 스크롤된다).
-                shrinkWrap: true,
-                // 왼쪽(창 여백 20)과 같은 폭으로 오른쪽도 띄운다 — 스크롤바는 이 여백
-                // 바깥의 창 오른쪽 끝에 그려진다.
-                padding: const EdgeInsets.only(right: 20),
-                children: [
-                  _label('프로젝트 이름'),
-                  TextField(
-                    controller: _name,
-                    focusNode: _nameFocus,
-                    autofocus: true,
-                    maxLength: 60,
-                    decoration: InputDecoration(
-                      hintText: _hintWhenIdle(_nameFocus, '프로젝트 이름을 입력하세요'),
-                      counterText: '',
-                      border: const OutlineInputBorder(),
-                    ),
-                    // 이름을 적으면 키를 아직 안 건드린 경우에 한해 영문 앞글자로 추천한다.
-                    onChanged: (v) {
-                      if (_identifier.text.isNotEmpty) return;
-                      final guess = v
-                          .toUpperCase()
-                          .replaceAll(RegExp(r'[^A-Z0-9]'), '')
-                          .replaceFirst(
-                            RegExp(r'^[0-9]+'),
-                            '',
-                          ); // 키는 영문으로 시작해야 한다.
-                      if (guess.length >= 2) {
-                        _identifier.text = guess.substring(
-                          0,
-                          guess.length > 4 ? 4 : guess.length,
-                        );
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  _label('대표 색상'),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      for (final hex in projectColorChoices)
-                        InkWell(
-                          onTap: () => setState(() => _color = hex),
-                          customBorder: const CircleBorder(),
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            padding: const EdgeInsets.all(2.5),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _color == hex
-                                    ? Theme.of(context).colorScheme.onSurface
-                                    : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: parseTypeColor(hex),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  _label('프로젝트 키'),
-                  TextField(
-                    controller: _identifier,
-                    focusNode: _identifierFocus,
-                    maxLength: 10,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: InputDecoration(
-                      hintText: _hintWhenIdle(
-                        _identifierFocus,
-                        '프로젝트 식별 키를 입력하세요. (예: HR, CX, DEV)',
-                      ),
-                      counterText: '',
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  _label('설명'),
-                  TextField(
-                    controller: _description,
-                    focusNode: _descriptionFocus,
-                    maxLines: 3,
-                    minLines: 3,
-                    decoration: InputDecoration(
-                      hintText: _hintWhenIdle(
-                        _descriptionFocus,
-                        '프로젝트에 대한 설명을 추가하세요...',
-                      ),
-                      border: const OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  _label('공개 설정'),
-                  // 고른 값 위에 메뉴가 겹쳐 뜨는 기본 드롭다운(DropdownButtonFormField) 대신,
-                  // 메뉴가 입력칸 바로 아래로 펼쳐지는 DropdownMenu를 쓴다 — 펼쳤을 때 공개·
-                  // 비공개 두 항목이 입력칸에 가리지 않고 다 보인다.
-                  DropdownMenu<bool>(
-                    initialSelection: _isPublic,
-                    // 눌렀을 때 글자를 입력하는 칸이 아니라 목록만 펼치도록.
-                    requestFocusOnTap: false,
-                    expandedInsets: EdgeInsets.zero,
-                    menuStyle: const MenuStyle(alignment: Alignment.bottomLeft),
-                    inputDecorationTheme: const InputDecorationTheme(
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    dropdownMenuEntries: const [
-                      DropdownMenuEntry(
-                        value: true,
-                        label: '공개',
-                        leadingIcon: Icon(Icons.public, size: 18),
-                      ),
-                      DropdownMenuEntry(
-                        value: false,
-                        label: '비공개',
-                        leadingIcon: Icon(Icons.lock_outline, size: 18),
-                      ),
-                    ],
-                    onSelected: (v) => setState(() => _isPublic = v ?? true),
-                  ),
-                  const SizedBox(height: 8),
-                  // 두 설명의 줄 수가 달라서 그냥 갈아끼우면 창 높이가 들썩인다 —
-                  // IndexedStack은 자리를 항상 더 긴 쪽에 맞춰 잡아둔다.
-                  IndexedStack(
-                    index: _isPublic ? 0 : 1,
-                    alignment: Alignment.centerLeft,
-                    children: [
-                      Text(
-                        '정회원 이상 권한을 가진 모든 멤버가 별도 초대 없이 프로젝트를 확인하고 참여할 수 있습니다.',
-                        style: TextStyle(color: hint, fontSize: 12),
-                      ),
-                      Text(
-                        '초대한 구성원만 프로젝트를 확인할 수 있습니다.',
-                        style: TextStyle(color: hint, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // 스크롤바가 없는 아래쪽 줄은 창의 원래 오른쪽 여백(20)을 직접 준다.
-          Padding(
-            padding: const EdgeInsets.only(right: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
+      child: wide
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _error!,
-                    style: const TextStyle(color: Colors.redAccent),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 48,
-                  child: FilledButton(
-                    onPressed: _submitting ? null : _submit,
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text(
-                            '프로젝트 생성',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                  ),
+                Expanded(child: form),
+                const SizedBox(width: 12),
+                Padding(
+                  padding: const EdgeInsets.only(right: 20),
+                  child: SizedBox(width: 300, child: _templatePanel(context)),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
+            )
+          : form,
     );
   }
 }
@@ -957,14 +1207,14 @@ class _NewTaskDialogState extends State<_NewTaskDialog> {
                     ),
                   if (_templates.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    _sectionLabel('템플릿에서 불러오기'),
+                    _sectionLabel('양식에서 불러오기'),
                     DropdownButtonFormField<String>(
                       key: ValueKey('tpl-$_templateId-${_templates.length}'),
                       initialValue: _templateId,
                       isExpanded: true,
                       decoration: InputDecoration(
                         isDense: true,
-                        hintText: '템플릿에서 불러오기',
+                        hintText: '양식에서 불러오기',
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 14,
@@ -1182,6 +1432,9 @@ class _TaskDetailDialog extends StatefulWidget {
 
 class _TaskDetailDialogState extends State<_TaskDetailDialog> {
   final _comment = TextEditingController();
+
+  /// 본문 목록 — 데스크톱에서는 ListView가 PrimaryScrollController에 안 붙어서 스크롤바와 같이 쓴다.
+  final _scroll = ScrollController();
   Task? _task;
   List<AppUser> _members = const [];
   List<TaskType> _types = const [];
@@ -1200,6 +1453,7 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
   @override
   void dispose() {
     _comment.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -1358,7 +1612,9 @@ class _TaskDetailDialogState extends State<_TaskDetailDialog> {
               children: [
                 Flexible(
                   child: MutedScrollbar(
+                    controller: _scroll,
                     child: ListView(
+                      controller: _scroll,
                       children: [
                         Text(
                           task.title,
@@ -1739,6 +1995,15 @@ class _ReferencePickDialog extends StatefulWidget {
 class _ReferencePickDialogState extends State<_ReferencePickDialog> {
   late final _selected = widget.initial.toSet();
 
+  /// 데스크톱에서는 ListView가 PrimaryScrollController에 안 붙어서 스크롤바와 같이 쓴다.
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -1747,7 +2012,9 @@ class _ReferencePickDialogState extends State<_ReferencePickDialog> {
         width: 360,
         height: 360,
         child: MutedScrollbar(
+          controller: _scroll,
           child: ListView(
+            controller: _scroll,
             children: [
               for (final user in widget.members)
                 CheckboxListTile(

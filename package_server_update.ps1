@@ -34,6 +34,9 @@ $robocopyArgs = @(
 )
 robocopy @robocopyArgs | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy 실패(코드 $LASTEXITCODE)" }
+# 앱의 "도움말"이 여는 초보자용 안내 웹페이지(server/guide/)도 같이 담겨야 한다 — 위 제외
+# 목록을 고치다 실수로 빠지는 일이 없게 확인한다.
+if (-not (Test-Path (Join-Path $Stage 'guide\index.html'))) { throw 'server/guide/index.html이 스테이징에 없습니다(초보자용 도움말).' }
 
 # git 없이도 어느 시점 코드인지 나중에 확인할 수 있도록 기록해둔다(update_server.ps1이
 # 적용 후 이 값을 출력해줌).

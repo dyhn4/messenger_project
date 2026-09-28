@@ -345,6 +345,16 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
 
   void _openTask(Task t) => widget.onOpen(t);
 
+  /// 일별 목록 스크롤 — 데스크톱에서는 ListView가 PrimaryScrollController에 안 붙어서, 컨트롤러
+  /// 없이 스크롤바를 달면 디버그 모드에서 "ScrollPosition이 없다" 오류가 난다.
+  final _dayScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _dayScroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => _buildCalendar(widget.tasks);
 
@@ -503,6 +513,7 @@ class _TaskCalendarViewState extends State<TaskCalendarView> {
           tasks: selectedTasks,
           session: widget.session,
           onOpen: _openTask,
+          scroll: _dayScroll,
         );
         // 업무 패널이 옆에 열려 있으면 일별 목록 자리는 그 패널이 덮는다 — 목록은 빼고
         // 달력만 남긴다(패널을 닫으면 다시 나온다).
@@ -976,7 +987,9 @@ class _TaskTableRowState extends State<_TaskTableRow> {
   List<AppUser>? get members => widget.members;
   List<TaskFieldDef> get fields => widget.fields;
   double get otherW => widget.otherW;
-  bool get readOnly => widget.readOnly;
+
+  /// 보관한 업무는 표에서 바로 고칠 수 없다(업무 패널에서 "보관 해제"부터).
+  bool get readOnly => widget.readOnly || widget.task.archived;
   VoidCallback get onTap => widget.onTap;
   Future<_ProjectOptions> Function(String) get optionsFor => widget.optionsFor;
   Future<void> Function(Future<void> Function()) get apply => widget.apply;
@@ -1087,327 +1100,350 @@ class _TaskTableRowState extends State<_TaskTableRow> {
           // 줄 높이 — 프로젝트 이름 줄이 있으면 위아래를 좁혀 두 줄이 한 칸에 촘촘히, 없으면 한
           // 줄을 가운데에 둔다(어느 쪽이든 약 46px).
           padding: EdgeInsets.symmetric(vertical: _showProject ? 4 : 11),
-          child: Row(
-            children: [
-              SizedBox(
-                width: widget.titleW,
-                child: Padding(
-                  padding: EdgeInsets.only(
-                    left: widget.indented ? 40 : 16,
-                    right: 8,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 줄 높이를 고정한다 — 마우스를 올렸을 때만 나오는 연필 때문에 줄이
-                      // 커졌다 작아졌다 하면 아래 구분선들이 흔들린다.
-                      SizedBox(
-                        height: _titleLineHeight,
-                        child: Row(
-                          children: [
-                            // 부모 바로 아래에 붙는 하위 업무 표시.
-                            if (widget.indented) ...[
-                              Icon(
-                                Icons.subdirectory_arrow_right,
-                                size: 14,
-                                color: hint,
-                              ),
-                              const SizedBox(width: 6),
-                            ],
-                            if (task.key != null)
-                              Text(
-                                task.key!,
-                                style: const TextStyle(
-                                  color: Color(0xFF5B8DEF),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+          // 보관한 업무는 줄 전체를 흐리게.
+          child: Opacity(
+            opacity: task.archived ? 0.45 : 1,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: widget.titleW,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      left: widget.indented ? 40 : 16,
+                      right: 8,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 줄 높이를 고정한다 — 마우스를 올렸을 때만 나오는 연필 때문에 줄이
+                        // 커졌다 작아졌다 하면 아래 구분선들이 흔들린다.
+                        SizedBox(
+                          height: _titleLineHeight,
+                          child: Row(
+                            children: [
+                              // 부모 바로 아래에 붙는 하위 업무 표시.
+                              if (widget.indented) ...[
+                                Icon(
+                                  Icons.subdirectory_arrow_right,
+                                  size: 14,
+                                  color: hint,
                                 ),
-                              ),
-                            if (task.myRole == 'reference') ...[
-                              const SizedBox(width: 6),
-                              TaskPill('참조', const Color(0xFF8E6BD9)),
-                            ],
-                            const SizedBox(width: 8),
-                            if (_editing != null)
-                              Expanded(
-                                child: TextField(
-                                  controller: _editing,
-                                  focusNode: _editFocus,
-                                  autofocus: true,
+                                const SizedBox(width: 6),
+                              ],
+                              // 보관한 업무 표시(보관함 아이콘).
+                              if (task.archived) ...[
+                                Tooltip(
+                                  message: '보관된 업무',
+                                  child: Icon(
+                                    Icons.inventory_2_outlined,
+                                    size: 14,
+                                    color: hint,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              if (task.key != null)
+                                Text(
+                                  task.key!,
                                   style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
+                                    color: Color(0xFF5B8DEF),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
                                   ),
-                                  decoration: const InputDecoration(
-                                    isDense: true,
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
+                                ),
+                              if (task.myRole == 'reference') ...[
+                                const SizedBox(width: 6),
+                                TaskPill('참조', const Color(0xFF8E6BD9)),
+                              ],
+                              const SizedBox(width: 8),
+                              if (_editing != null)
+                                Expanded(
+                                  child: TextField(
+                                    controller: _editing,
+                                    focusNode: _editFocus,
+                                    autofocus: true,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
                                     ),
-                                    border: OutlineInputBorder(),
+                                    decoration: const InputDecoration(
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      border: OutlineInputBorder(),
+                                    ),
+                                    onSubmitted: (_) => _commitTitle(),
+                                    onTapOutside: (_) => _commitTitle(),
                                   ),
-                                  onSubmitted: (_) => _commitTitle(),
-                                  onTapOutside: (_) => _commitTitle(),
+                                )
+                              else ...[
+                                Flexible(
+                                  child: Text(
+                                    task.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      decoration: done
+                                          ? TextDecoration.lineThrough
+                                          : null,
+                                      color: done ? hint : null,
+                                    ),
+                                  ),
                                 ),
-                              )
-                            else ...[
-                              Flexible(
-                                child: Text(
-                                  task.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    decoration: done
-                                        ? TextDecoration.lineThrough
-                                        : null,
-                                    color: done ? hint : null,
+                                // 마우스를 올렸을 때만 보이는 연필 — 누르면 제목을 그 자리에서 고친다.
+                                if (_hovering && !readOnly)
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 16,
+                                    ),
+                                    tooltip: '제목 수정',
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 28,
+                                      height: _titleLineHeight,
+                                    ),
+                                    onPressed: _startEditing,
                                   ),
-                                ),
-                              ),
-                              // 마우스를 올렸을 때만 보이는 연필 — 누르면 제목을 그 자리에서 고친다.
-                              if (_hovering && !readOnly)
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.edit_outlined,
-                                    size: 16,
-                                  ),
-                                  tooltip: '제목 수정',
-                                  visualDensity: VisualDensity.compact,
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 28,
-                                    height: _titleLineHeight,
-                                  ),
-                                  onPressed: _startEditing,
-                                ),
-                              const Spacer(),
+                                const Spacer(),
+                              ],
                             ],
-                          ],
-                        ),
-                      ),
-                      if (_showProject)
-                        Text(
-                          task.projectName!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: hint,
-                            fontSize: 11,
-                            height: 1.3,
                           ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              // 유형·우선순위·상태는 배지를 눌러 그 자리에서 바꾼다(종료된 프로젝트는 제외).
-              Expanded(
-                child: _HScrollWindow(
-                  controller: widget.horizontalController,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      cell(
-                        readOnly
-                            ? (task.typeName == null
-                                  ? Text('—', style: TextStyle(color: hint))
-                                  : TaskPill(
-                                      task.typeName!,
-                                      parseTypeColor(task.typeColor),
-                                    ))
-                            : _EditablePill(
-                                text: task.typeName,
-                                color: parseTypeColor(task.typeColor),
-                                menuWidth: otherW,
-                                loadOptions: () async => (
-                                  options: [
-                                    const _PillOption(null, '없음', Colors.grey),
-                                    for (final t in (await optionsFor(
-                                      task.projectId,
-                                    )).types)
-                                      _PillOption(
-                                        t.id,
-                                        t.name,
-                                        parseTypeColor(t.color),
-                                      ),
-                                  ],
-                                  currentId: task.typeId,
-                                ),
-                                onPick: (id) => apply(
-                                  () => session.api!.updateTask(
-                                    task.id,
-                                    typeId: id,
-                                    clearType: id == null,
-                                  ),
-                                ),
-                              ),
-                        otherW,
-                      ),
-                      cell(
-                        readOnly
-                            ? (task.priorityName == null
-                                  ? Text('—', style: TextStyle(color: hint))
-                                  : TaskPill(
-                                      task.priorityName!,
-                                      taskPriorityDisplayColor(task),
-                                    ))
-                            : _EditablePill(
-                                text: task.priorityName,
-                                color: taskPriorityDisplayColor(task),
-                                menuWidth: otherW,
-                                loadOptions: () async {
-                                  final list = (await optionsFor(
-                                    task.projectId,
-                                  )).priorities;
-                                  return (
-                                    options: [
-                                      for (final p in list)
-                                        _PillOption(
-                                          p.id,
-                                          p.name,
-                                          parseTypeColor(p.color),
-                                        ),
-                                    ],
-                                    // 옛 업무는 priorityId가 비어 있다 — 같은 단계의 첫 항목으로 본다.
-                                    currentId:
-                                        list.any((e) => e.id == task.priorityId)
-                                        ? task.priorityId
-                                        : list
-                                              .where(
-                                                (e) => e.level == task.priority,
-                                              )
-                                              .map((e) => e.id)
-                                              .firstOrNull,
-                                  );
-                                },
-                                onPick: (id) => apply(
-                                  () => session.api!.updateTask(
-                                    task.id,
-                                    priorityId: id,
-                                  ),
-                                ),
-                              ),
-                        otherW,
-                      ),
-                      cell(
-                        readOnly
-                            ? TaskPill(
-                                task.statusLabel,
-                                taskStatusDisplayColor(task),
-                              )
-                            : _EditablePill(
-                                text: task.statusLabel,
-                                color: taskStatusDisplayColor(task),
-                                menuWidth: otherW,
-                                loadOptions: () async {
-                                  final list = (await optionsFor(
-                                    task.projectId,
-                                  )).statuses;
-                                  return (
-                                    options: [
-                                      for (final s in list)
-                                        _PillOption(
-                                          s.id,
-                                          s.name,
-                                          parseTypeColor(s.color),
-                                        ),
-                                    ],
-                                    // 옛 업무는 statusId가 비어 있다 — 같은 분류의 첫 상태로 본다.
-                                    currentId:
-                                        list.any((e) => e.id == task.statusId)
-                                        ? task.statusId
-                                        : list
-                                              .where(
-                                                (e) =>
-                                                    e.category == task.status,
-                                              )
-                                              .map((e) => e.id)
-                                              .firstOrNull,
-                                  );
-                                },
-                                onPick: (id) => apply(
-                                  () => session.api!.updateTask(
-                                    task.id,
-                                    statusId: id,
-                                  ),
-                                ),
-                              ),
-                        otherW,
-                      ),
-                      cell(
-                        _dateCell(
+                        if (_showProject)
                           Text(
-                            task.startDate == null
-                                ? '—'
-                                : formatYmd(task.startDate!),
-                            style: TextStyle(fontSize: 12, color: hint),
-                          ),
-                          due: false,
-                        ),
-                        otherW,
-                      ),
-                      cell(
-                        _dateCell(
-                          task.dueDate == null
-                              ? Text('—', style: TextStyle(color: hint))
-                              : Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      formatYmd(task.dueDate!),
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: task.isOverdue
-                                            ? Colors.redAccent
-                                            : hint,
-                                      ),
-                                    ),
-                                    if (task.isOverdue) ...[
-                                      const SizedBox(width: 6),
-                                      TaskPill(
-                                        'D+$overdueDays',
-                                        Colors.redAccent,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                          due: true,
-                        ),
-                        otherW,
-                      ),
-                      if (members != null) ...[
-                        cell(personCell(assignee), otherW),
-                        cell(personCell(creator), otherW),
-                        cell(
-                          Text(
-                            formatYmd(task.createdAt),
-                            style: TextStyle(fontSize: 12, color: hint),
-                          ),
-                          otherW,
-                        ),
-                      ] else
-                        cell(personCell(creator), otherW),
-                      for (final f in fields)
-                        cell(
-                          Text(
-                            f.display(task.customValues[f.id]) ?? '—',
+                            task.projectName!,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 12,
-                              color: task.customValues[f.id] == null
-                                  ? hint
-                                  : null,
+                              color: hint,
+                              fontSize: 11,
+                              height: 1.3,
                             ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                // 유형·우선순위·상태는 배지를 눌러 그 자리에서 바꾼다(종료된 프로젝트는 제외).
+                Expanded(
+                  child: _HScrollWindow(
+                    controller: widget.horizontalController,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        cell(
+                          readOnly
+                              ? (task.typeName == null
+                                    ? Text('—', style: TextStyle(color: hint))
+                                    : TaskPill(
+                                        task.typeName!,
+                                        parseTypeColor(task.typeColor),
+                                      ))
+                              : _EditablePill(
+                                  text: task.typeName,
+                                  color: parseTypeColor(task.typeColor),
+                                  menuWidth: otherW,
+                                  loadOptions: () async => (
+                                    options: [
+                                      const _PillOption(
+                                        null,
+                                        '없음',
+                                        Colors.grey,
+                                      ),
+                                      for (final t in (await optionsFor(
+                                        task.projectId,
+                                      )).types)
+                                        _PillOption(
+                                          t.id,
+                                          t.name,
+                                          parseTypeColor(t.color),
+                                        ),
+                                    ],
+                                    currentId: task.typeId,
+                                  ),
+                                  onPick: (id) => apply(
+                                    () => session.api!.updateTask(
+                                      task.id,
+                                      typeId: id,
+                                      clearType: id == null,
+                                    ),
+                                  ),
+                                ),
+                          otherW,
+                        ),
+                        cell(
+                          readOnly
+                              ? (task.priorityName == null
+                                    ? Text('—', style: TextStyle(color: hint))
+                                    : TaskPill(
+                                        task.priorityName!,
+                                        taskPriorityDisplayColor(task),
+                                      ))
+                              : _EditablePill(
+                                  text: task.priorityName,
+                                  color: taskPriorityDisplayColor(task),
+                                  menuWidth: otherW,
+                                  loadOptions: () async {
+                                    final list = (await optionsFor(
+                                      task.projectId,
+                                    )).priorities;
+                                    return (
+                                      options: [
+                                        for (final p in list)
+                                          _PillOption(
+                                            p.id,
+                                            p.name,
+                                            parseTypeColor(p.color),
+                                          ),
+                                      ],
+                                      // 옛 업무는 priorityId가 비어 있다 — 같은 단계의 첫 항목으로 본다.
+                                      currentId:
+                                          list.any(
+                                            (e) => e.id == task.priorityId,
+                                          )
+                                          ? task.priorityId
+                                          : list
+                                                .where(
+                                                  (e) =>
+                                                      e.level == task.priority,
+                                                )
+                                                .map((e) => e.id)
+                                                .firstOrNull,
+                                    );
+                                  },
+                                  onPick: (id) => apply(
+                                    () => session.api!.updateTask(
+                                      task.id,
+                                      priorityId: id,
+                                    ),
+                                  ),
+                                ),
+                          otherW,
+                        ),
+                        cell(
+                          readOnly
+                              ? TaskPill(
+                                  task.statusLabel,
+                                  taskStatusDisplayColor(task),
+                                )
+                              : _EditablePill(
+                                  text: task.statusLabel,
+                                  color: taskStatusDisplayColor(task),
+                                  menuWidth: otherW,
+                                  loadOptions: () async {
+                                    final list = (await optionsFor(
+                                      task.projectId,
+                                    )).statuses;
+                                    return (
+                                      options: [
+                                        for (final s in list)
+                                          _PillOption(
+                                            s.id,
+                                            s.name,
+                                            parseTypeColor(s.color),
+                                          ),
+                                      ],
+                                      // 옛 업무는 statusId가 비어 있다 — 같은 분류의 첫 상태로 본다.
+                                      currentId:
+                                          list.any((e) => e.id == task.statusId)
+                                          ? task.statusId
+                                          : list
+                                                .where(
+                                                  (e) =>
+                                                      e.category == task.status,
+                                                )
+                                                .map((e) => e.id)
+                                                .firstOrNull,
+                                    );
+                                  },
+                                  onPick: (id) => apply(
+                                    () => session.api!.updateTask(
+                                      task.id,
+                                      statusId: id,
+                                    ),
+                                  ),
+                                ),
+                          otherW,
+                        ),
+                        cell(
+                          _dateCell(
+                            Text(
+                              task.startDate == null
+                                  ? '—'
+                                  : formatYmd(task.startDate!),
+                              style: TextStyle(fontSize: 12, color: hint),
+                            ),
+                            due: false,
                           ),
                           otherW,
                         ),
-                    ],
+                        cell(
+                          _dateCell(
+                            task.dueDate == null
+                                ? Text('—', style: TextStyle(color: hint))
+                                : Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        formatYmd(task.dueDate!),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: task.isOverdue
+                                              ? Colors.redAccent
+                                              : hint,
+                                        ),
+                                      ),
+                                      if (task.isOverdue) ...[
+                                        const SizedBox(width: 6),
+                                        TaskPill(
+                                          'D+$overdueDays',
+                                          Colors.redAccent,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                            due: true,
+                          ),
+                          otherW,
+                        ),
+                        if (members != null) ...[
+                          cell(personCell(assignee), otherW),
+                          cell(personCell(creator), otherW),
+                          cell(
+                            Text(
+                              formatYmd(task.createdAt),
+                              style: TextStyle(fontSize: 12, color: hint),
+                            ),
+                            otherW,
+                          ),
+                        ] else
+                          cell(personCell(creator), otherW),
+                        for (final f in fields)
+                          cell(
+                            Text(
+                              f.display(task.customValues[f.id]) ?? '—',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: task.customValues[f.id] == null
+                                    ? hint
+                                    : null,
+                              ),
+                            ),
+                            otherW,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1729,12 +1765,16 @@ class _DayPanel extends StatelessWidget {
   final List<Task> tasks;
   final Session? session;
   final ValueChanged<Task> onOpen;
+
+  /// 목록과 스크롤바가 같이 쓰는 컨트롤러(달력 화면이 가진다).
+  final ScrollController scroll;
   const _DayPanel({
     required this.colorOf,
     required this.date,
     required this.tasks,
     required this.session,
     required this.onOpen,
+    required this.scroll,
   });
 
   Widget _item(BuildContext context, Task t) {
@@ -1857,7 +1897,9 @@ class _DayPanel extends StatelessWidget {
                     child: Text('업무가 없습니다.', style: TextStyle(color: hint)),
                   )
                 : MutedScrollbar(
+                    controller: scroll,
                     child: ListView.separated(
+                      controller: scroll,
                       padding: const EdgeInsets.only(right: 8),
                       itemCount: tasks.length,
                       separatorBuilder: (_, _) => Divider(

@@ -203,7 +203,7 @@ class Project {
   /// 사이드바 등에서 프로젝트를 구분해 주는 대표 색('#RRGGBB').
   final String color;
 
-  /// 공개 프로젝트 — 팀의 정회원 이상이 초대 없이 찾아보고 참여할 수 있다.
+  /// 공개 프로젝트 — 팀의 정회원 이상 모두가 참여 절차 없이 자동으로 멤버가 된다.
   final bool isPublic;
 
   /// 공개 프로젝트 둘러보기 목록(GET /projects/browse)에서만 채워지는 구성원 수.
@@ -230,6 +230,18 @@ class Project {
   /// 구성원 id → 프로젝트 역할('owner' | 'member'). 상세 조회에서만 채워진다.
   final Map<String, String> memberRoles;
 
+  /// 노트 수정·삭제 권한 — 'all'(모두) | 'creator_admin'(생성자와 관리자). 값이 없으면 수정은
+  /// 'all', 삭제는 예전처럼 작성자·관리자만 지울 수 있게 'creator_admin'으로 본다.
+  final String noteEditPermission;
+  final String noteDeletePermission;
+
+  /// 이 프로젝트를 만든(또는 이 프로젝트로 저장한) 프로젝트 템플릿 id — 없거나 지워졌으면 null.
+  final String? templateId;
+
+  /// [templateId] 템플릿의 카드 내용 — 상세 조회(GET /projects/:id)에서만 서버가 붙여 준다
+  /// (설정 > 필드 / 상태의 "업무 템플릿" 칸이 따로 요청하지 않도록). 기준은 [templateId]다.
+  final ProjectTemplate? template;
+
   Project({
     required this.id,
     required this.teamId,
@@ -247,6 +259,10 @@ class Project {
     required this.createdAt,
     this.members = const [],
     this.memberRoles = const {},
+    this.noteEditPermission = 'all',
+    this.noteDeletePermission = 'creator_admin',
+    this.templateId,
+    this.template,
   });
 
   bool get isOwner => myRole == 'owner';
@@ -281,6 +297,13 @@ class Project {
         (m as Map<String, dynamic>)['id'] as String:
             m['projectRole'] as String? ?? 'member',
     },
+    noteEditPermission: json['noteEditPermission'] as String? ?? 'all',
+    noteDeletePermission:
+        json['noteDeletePermission'] as String? ?? 'creator_admin',
+    templateId: json['templateId'] as String?,
+    template: json['template'] is Map<String, dynamic>
+        ? ProjectTemplate.fromJson(json['template'] as Map<String, dynamic>)
+        : null,
   );
 }
 
@@ -723,6 +746,11 @@ class ProjectNote {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// 내가 이 노트를 고치거나 지울 수 있는지 — 프로젝트의 노트 권한 설정에 따라 서버가
+  /// 사람마다 계산해서 내려준다(예전 서버처럼 값이 없으면 되는 것으로 본다).
+  final bool canEdit;
+  final bool canDelete;
+
   const ProjectNote({
     required this.id,
     this.key,
@@ -741,6 +769,8 @@ class ProjectNote {
     this.updatedByName,
     required this.createdAt,
     required this.updatedAt,
+    this.canEdit = true,
+    this.canDelete = true,
   });
 
   factory ProjectNote.fromJson(Map<String, dynamic> json) => ProjectNote(
@@ -765,10 +795,44 @@ class ProjectNote {
     updatedAt: DateTime.fromMillisecondsSinceEpoch(
       (json['updatedAt'] as num).toInt(),
     ),
+    canEdit: json['canEdit'] as bool? ?? true,
+    canDelete: json['canDelete'] as bool? ?? true,
   );
 }
 
-/// 프로젝트 알림함의 한 줄 — [kind]: assigned | referenced | comment | status | due.
+/// 사이드바의 개인 프로젝트 폴더 — 사람마다 자기 목록을 따로 정리한다(팀별).
+/// 한 프로젝트는 내 폴더 중 한 곳에만 들어간다.
+class ProjectFolder {
+  final String id;
+  final String name;
+  final int position;
+
+  /// 접어 둔 폴더 — 그 자리에서 토글하고 서버에 저장한다(즐겨찾기처럼 non-final).
+  bool collapsed;
+
+  final List<String> projectIds;
+
+  ProjectFolder({
+    required this.id,
+    required this.name,
+    this.position = 0,
+    this.collapsed = false,
+    this.projectIds = const [],
+  });
+
+  factory ProjectFolder.fromJson(Map<String, dynamic> json) => ProjectFolder(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    position: (json['position'] as num?)?.toInt() ?? 0,
+    collapsed: json['collapsed'] as bool? ?? false,
+    projectIds:
+        (json['projectIds'] as List?)?.map((e) => e as String).toList() ??
+        const [],
+  );
+}
+
+/// 프로젝트 알림함의 한 줄 — [kind]: assigned | referenced | comment | status | due |
+/// created | deleted | project_created(공개 프로젝트 생성 — [taskId] 없음). 모르는 종류도 그냥 보여준다.
 class ProjectNotification {
   final String id;
   final String projectId;
@@ -801,9 +865,10 @@ class ProjectNotification {
         projectName: json['projectName'] as String?,
         projectColor: json['projectColor'] as String?,
         taskId: json['taskId'] as String?,
-        kind: json['kind'] as String,
-        title: json['title'] as String,
-        body: json['body'] as String,
+        // 서버에 새 종류가 생겨도 목록이 깨지지 않게 빈 값은 빈 글자로 받는다.
+        kind: json['kind'] as String? ?? '',
+        title: json['title'] as String? ?? '',
+        body: json['body'] as String? ?? '',
         createdAt: DateTime.fromMillisecondsSinceEpoch(
           (json['createdAt'] as num).toInt(),
         ),
@@ -953,7 +1018,175 @@ class AutomationAction {
   };
 }
 
-/// 자동화 규칙 — [trigger]('task_created' | 'status_changed') 때 [condition]이 맞으면 [actions] 실행.
+// ── 자동화 v2: 노드 그래프 ─────────────────────────────────────────────
+// 규칙 = 트리거 노드 하나 → (IF 조건 노드들, 예/아니오 갈래) → 액션 노드들. 편집기 캔버스에서
+// 노드를 놓고 포트끼리 잇는다. 서버가 그래프를 따라 실행한다(설명: 서버 projectAutomation.js).
+
+/// 트리거 종류(언제 실행할지).
+const automationTriggerLabels = {
+  'field_changed': '필드 변경',
+  'task_created': '업무 생성',
+  'task_deleted': '업무 삭제',
+  'task_archived': '업무 보관',
+  'comment_added': '댓글 추가',
+  'checklist_completed': '체크리스트 완료',
+};
+
+/// 액션 종류(무엇을 할지).
+const automationActionLabels = {
+  'set_field': '필드 변경',
+  'create_task': '업무 생성',
+  'archive_task': '업무 보관',
+  'chat_message': '채팅방 알림',
+};
+
+/// 트리거·조건·액션이 가리키는 업무 필드. 사용자 정의 필드는 `field:<id>`로 쓴다.
+const automationFieldLabels = {
+  'any': '모든 필드',
+  'status': '상태',
+  'priority': '우선순위',
+  'assignee': '담당자',
+  'type': '유형',
+  'startDate': '시작일',
+  'dueDate': '마감일',
+  'title': '제목',
+};
+
+/// IF 조건의 비교 방법.
+const automationOpLabels = {
+  'eq': '같음',
+  'neq': '같지 않음',
+  'empty': '비어 있음',
+  'not_empty': '비어 있지 않음',
+};
+
+/// 필드 변경 트리거가 감지할 필드들. 지금은 `{fields: [...]}`로 저장하지만, 예전에 저장한 규칙은
+/// `{field: X}` 한 개짜리로 올 수 있어서 둘 다 읽는다. 아무것도 없으면 모든 필드(['any']).
+List<String> automationTriggerFields(Map<String, dynamic> config) {
+  final fields = config['fields'];
+  if (fields is List) {
+    return [
+      for (final f in fields)
+        if (f is String) f,
+    ];
+  }
+  final field = config['field'];
+  return field is String ? [field] : ['any'];
+}
+
+/// 그래프의 노드 한 개 — [kind]: 'trigger' | 'condition' | 'action'. 편집기가 그대로 고친다.
+class AutomationNode {
+  final String id;
+  final String kind;
+  final String type;
+  Map<String, dynamic> config;
+  double x;
+  double y;
+
+  AutomationNode({
+    required this.id,
+    required this.kind,
+    required this.type,
+    Map<String, dynamic>? config,
+    this.x = 0,
+    this.y = 0,
+  }) : config = config ?? {};
+
+  factory AutomationNode.fromJson(Map<String, dynamic> json) => AutomationNode(
+    id: json['id'] as String,
+    kind: json['kind'] as String,
+    type: json['type'] as String,
+    config: Map<String, dynamic>.from((json['config'] as Map?) ?? const {}),
+    x: (json['x'] as num?)?.toDouble() ?? 0,
+    y: (json['y'] as num?)?.toDouble() ?? 0,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'kind': kind,
+    'type': type,
+    'config': config,
+    'x': x.roundToDouble(),
+    'y': y.roundToDouble(),
+  };
+
+  AutomationNode copy() => AutomationNode(
+    id: id,
+    kind: kind,
+    type: type,
+    config: Map<String, dynamic>.from(config),
+    x: x,
+    y: y,
+  );
+}
+
+/// 노드 사이 연결 — [from]의 [port]('out' | 'yes' | 'no')에서 [to]로.
+class AutomationEdge {
+  final String from;
+  final String port;
+  final String to;
+  const AutomationEdge({
+    required this.from,
+    required this.port,
+    required this.to,
+  });
+
+  factory AutomationEdge.fromJson(Map<String, dynamic> json) => AutomationEdge(
+    from: json['from'] as String,
+    port: json['port'] as String? ?? 'out',
+    to: json['to'] as String,
+  );
+
+  Map<String, dynamic> toJson() => {'from': from, 'port': port, 'to': to};
+
+  @override
+  bool operator ==(Object other) =>
+      other is AutomationEdge &&
+      other.from == from &&
+      other.port == port &&
+      other.to == to;
+
+  @override
+  int get hashCode => Object.hash(from, port, to);
+}
+
+/// 자동화 규칙의 흐름 — 노드와 연결.
+class AutomationGraph {
+  final List<AutomationNode> nodes;
+  final List<AutomationEdge> edges;
+  AutomationGraph({List<AutomationNode>? nodes, List<AutomationEdge>? edges})
+    : nodes = nodes ?? [],
+      edges = edges ?? [];
+
+  factory AutomationGraph.fromJson(Map<String, dynamic> json) =>
+      AutomationGraph(
+        nodes: [
+          for (final n in (json['nodes'] as List?) ?? const [])
+            AutomationNode.fromJson(n as Map<String, dynamic>),
+        ],
+        edges: [
+          for (final e in (json['edges'] as List?) ?? const [])
+            AutomationEdge.fromJson(e as Map<String, dynamic>),
+        ],
+      );
+
+  Map<String, dynamic> toJson() => {
+    'nodes': [for (final n in nodes) n.toJson()],
+    'edges': [for (final e in edges) e.toJson()],
+  };
+
+  AutomationGraph copy() => AutomationGraph(
+    nodes: [for (final n in nodes) n.copy()],
+    edges: [...edges],
+  );
+
+  AutomationNode? get trigger =>
+      nodes.where((n) => n.kind == 'trigger').firstOrNull;
+}
+
+/// 자동화 규칙. [graph]가 있으면 노드 편집기로 만든 규칙이고, null이면 예전 방식 규칙이다
+/// ([trigger]('task_created' | 'status_changed') 때 [condition]이 맞으면 [actions] 실행 — 켜기·끄기·
+/// 삭제만 할 수 있다).
 class AutomationRule {
   final String id;
   final String projectId;
@@ -964,6 +1197,7 @@ class AutomationRule {
   final String? conditionPriority;
   final String? conditionTypeId;
   final List<AutomationAction> actions;
+  final AutomationGraph? graph;
 
   const AutomationRule({
     required this.id,
@@ -975,7 +1209,11 @@ class AutomationRule {
     this.conditionPriority,
     this.conditionTypeId,
     this.actions = const [],
+    this.graph,
   });
+
+  /// 노드 편집기 이전에 만든 규칙.
+  bool get isLegacy => graph == null;
 
   factory AutomationRule.fromJson(Map<String, dynamic> json) {
     final condition =
@@ -994,6 +1232,11 @@ class AutomationRule {
               ?.map((e) => AutomationAction.fromJson(e as Map<String, dynamic>))
               .toList() ??
           const [],
+      graph: json['graph'] is Map
+          ? AutomationGraph.fromJson(
+              (json['graph'] as Map).cast<String, dynamic>(),
+            )
+          : null,
     );
   }
 }
@@ -1107,4 +1350,198 @@ class AutomationRunLog {
           (json['createdAt'] as num).toInt(),
         ),
       );
+}
+
+// ── 프로젝트 템플릿 ─────────────────────────────────────────────────────
+
+/// 사용자 정의 필드 종류의 화면 이름.
+const fieldKindLabels = {
+  'text': '텍스트',
+  'number': '숫자',
+  'date': '날짜',
+  'select': '단일 선택',
+  'multiSelect': '다중 선택',
+  'progress': '진행률',
+};
+
+/// 템플릿의 상태 한 개 — [category]가 done이면 "완료"로 집계된다.
+class TemplateStatus {
+  final String name;
+  final String color;
+  final TaskStatus category;
+  const TemplateStatus({
+    required this.name,
+    required this.color,
+    required this.category,
+  });
+
+  factory TemplateStatus.fromJson(Map<String, dynamic> json) => TemplateStatus(
+    name: json['name'] as String? ?? '',
+    color: json['color'] as String? ?? '#94A3B8',
+    category: taskStatusFromWire(json['category'] as String?),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'color': color,
+    'category': taskStatusToWire(category),
+  };
+}
+
+/// 템플릿의 작업 유형 한 개.
+class TemplateType {
+  final String name;
+  final String color;
+  const TemplateType({required this.name, required this.color});
+
+  factory TemplateType.fromJson(Map<String, dynamic> json) => TemplateType(
+    name: json['name'] as String? ?? '',
+    color: json['color'] as String? ?? '#94A3B8',
+  );
+
+  Map<String, dynamic> toJson() => {'name': name, 'color': color};
+}
+
+/// 템플릿의 우선순위 한 개 — [level]은 정렬·통계용 큰 묶음(높음/보통/낮음).
+class TemplatePriority {
+  final String name;
+  final String color;
+  final TaskPriority level;
+  const TemplatePriority({
+    required this.name,
+    required this.color,
+    required this.level,
+  });
+
+  factory TemplatePriority.fromJson(Map<String, dynamic> json) =>
+      TemplatePriority(
+        name: json['name'] as String? ?? '',
+        color: json['color'] as String? ?? '#94A3B8',
+        level: taskPriorityFromWire(json['level'] as String?),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'color': color,
+    'level': taskPriorityToWire(level),
+  };
+}
+
+/// 템플릿의 사용자 정의 필드 한 개 — 선택 필드면 [options]가 선택지.
+class TemplateField {
+  final String name;
+  final String kind;
+  final List<String> options;
+  const TemplateField({
+    required this.name,
+    required this.kind,
+    this.options = const [],
+  });
+
+  bool get hasOptions => kind == 'select' || kind == 'multiSelect';
+
+  factory TemplateField.fromJson(Map<String, dynamic> json) => TemplateField(
+    name: json['name'] as String? ?? '',
+    kind: json['kind'] as String? ?? 'text',
+    options:
+        (json['options'] as List?)?.map((e) => e as String).toList() ??
+        const [],
+  );
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'kind': kind,
+    'options': options,
+  };
+}
+
+/// 프로젝트 템플릿(팀 공유) — 상태·유형·우선순위·사용자 정의 필드 구성. 새 프로젝트를 만들 때
+/// 기본값 대신 이 구성으로 채운다(만든 뒤에는 템플릿과 따로 논다).
+class ProjectTemplate {
+  /// 아직 저장하지 않은 새 템플릿이면 null.
+  final String? id;
+  final String name;
+  final String? description;
+  final List<TemplateStatus> statuses;
+  final List<TemplateType> types;
+  final List<TemplatePriority> priorities;
+  final List<TemplateField> fields;
+  final String? creatorName;
+
+  /// 내가 고치거나 지울 수 있는지(만든 사람·팀 소유자).
+  final bool canEdit;
+
+  /// 프로젝트를 템플릿으로 저장하는 초안이면 그 프로젝트 id — 새로 저장할 때 같이 보내면 서버가
+  /// 그 프로젝트를 새 템플릿에 연결한다(Project.templateId). 서버가 내려주는 값은 아니다.
+  final String? sourceProjectId;
+
+  const ProjectTemplate({
+    this.id,
+    required this.name,
+    this.description,
+    this.statuses = const [],
+    this.types = const [],
+    this.priorities = const [],
+    this.fields = const [],
+    this.creatorName,
+    this.canEdit = true,
+    this.sourceProjectId,
+  });
+
+  /// "새 템플릿 만들기"의 처음 모습 — 새 프로젝트의 기본 구성과 같게.
+  factory ProjectTemplate.blank() => const ProjectTemplate(
+    name: '',
+    statuses: [
+      TemplateStatus(name: '할 일', color: '#5B8DEF', category: TaskStatus.todo),
+      TemplateStatus(
+        name: '진행 중',
+        color: '#F59E0B',
+        category: TaskStatus.doing,
+      ),
+      TemplateStatus(name: '완료', color: '#10B981', category: TaskStatus.done),
+    ],
+    types: [
+      TemplateType(name: '기능', color: '#5B8DEF'),
+      TemplateType(name: '버그', color: '#EF4444'),
+      TemplateType(name: '개선', color: '#10B981'),
+    ],
+    priorities: [
+      TemplatePriority(name: '긴급', color: '#EF4444', level: TaskPriority.high),
+      TemplatePriority(name: '높음', color: '#F59E0B', level: TaskPriority.high),
+      TemplatePriority(
+        name: '보통',
+        color: '#5B8DEF',
+        level: TaskPriority.normal,
+      ),
+      TemplatePriority(name: '낮음', color: '#10B981', level: TaskPriority.low),
+    ],
+  );
+
+  factory ProjectTemplate.fromJson(Map<String, dynamic> json) {
+    List<T> list<T>(String key, T Function(Map<String, dynamic>) f) =>
+        ((json[key] as List?) ?? const [])
+            .map((e) => f(e as Map<String, dynamic>))
+            .toList();
+    return ProjectTemplate(
+      id: json['id'] as String?,
+      name: json['name'] as String? ?? '',
+      description: json['description'] as String?,
+      statuses: list('statuses', TemplateStatus.fromJson),
+      types: list('types', TemplateType.fromJson),
+      priorities: list('priorities', TemplatePriority.fromJson),
+      fields: list('fields', TemplateField.fromJson),
+      creatorName: json['creatorName'] as String?,
+      canEdit: json['canEdit'] as bool? ?? false,
+    );
+  }
+
+  /// 저장할 때 보내는 본문(id·만든 사람은 서버가 정한다).
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'description': description,
+    'statuses': [for (final s in statuses) s.toJson()],
+    'types': [for (final t in types) t.toJson()],
+    'priorities': [for (final p in priorities) p.toJson()],
+    'fields': [for (final f in fields) f.toJson()],
+  };
 }

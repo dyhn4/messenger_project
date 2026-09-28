@@ -574,6 +574,23 @@ class ApiClient {
     return decoded;
   }
 
+  Future<dynamic> _put(String path, Map<String, dynamic> body) async {
+    final res = await _send(
+      () => _client.put(
+        _uri(path),
+        headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      ),
+    );
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    if (res.statusCode >= 400) {
+      throw ApiException(
+        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+      );
+    }
+    return decoded;
+  }
+
   /// [body]는 팀 삭제처럼 DELETE에도 확인값을 실어 보내야 할 때만 쓴다(없으면 안 보낸다).
   Future<dynamic> _delete(String path, {Map<String, dynamic>? body}) async {
     final res = await _send(
@@ -1279,6 +1296,7 @@ class ApiClient {
     );
   }
 
+  /// [templateId]를 주면 기본 상태·유형·우선순위 대신 그 템플릿 구성으로 만든다.
   Future<Project> createProject({
     required String teamId,
     required String name,
@@ -1287,6 +1305,7 @@ class ApiClient {
     String? color,
     bool isPublic = false,
     List<String> memberIds = const [],
+    String? templateId,
   }) async {
     return Project.fromJson(
       await _post('/api/projects', {
@@ -1297,12 +1316,52 @@ class ApiClient {
             'color': ?color,
             'isPublic': isPublic,
             'memberIds': memberIds,
+            'templateId': ?templateId,
           })
           as Map<String, dynamic>,
     );
   }
 
+  /// 팀이 공유하는 프로젝트 템플릿들(만든 순).
+  Future<List<ProjectTemplate>> fetchProjectTemplates(String teamId) async {
+    final list = await _get('/api/projects/templates?teamId=$teamId') as List;
+    return list
+        .map((e) => ProjectTemplate.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 새 프로젝트 템플릿. [ProjectTemplate.sourceProjectId]가 있으면(프로젝트를 템플릿으로 저장)
+  /// 서버가 그 프로젝트를 새 템플릿에 연결한다.
+  Future<ProjectTemplate> createProjectTemplate(
+    String teamId,
+    ProjectTemplate template,
+  ) async {
+    return ProjectTemplate.fromJson(
+      await _post('/api/projects/templates', {
+            ...template.toJson(),
+            'teamId': teamId,
+            'sourceProjectId': ?template.sourceProjectId,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<ProjectTemplate> updateProjectTemplate(
+    String id,
+    ProjectTemplate template,
+  ) async {
+    return ProjectTemplate.fromJson(
+      await _patch('/api/project-templates/$id', template.toJson())
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteProjectTemplate(String id) async {
+    await _delete('/api/project-templates/$id');
+  }
+
   /// 내가 아직 참여하지 않은 이 팀의 공개 프로젝트들.
+  /// (공개 프로젝트는 이제 자동으로 멤버가 되어 화면에서는 쓰지 않는다 — browse_projects_dialog.dart만 남아 있다.)
   Future<List<Project>> browsePublicProjects(String teamId) async {
     final list = await _get('/api/projects/browse?teamId=$teamId') as List;
     return list
@@ -1324,6 +1383,9 @@ class ApiClient {
     String? color,
     bool? isPublic,
     bool? archived,
+    // 노트 수정·삭제 권한 — 'all' | 'creator_admin'(설정 > 노트).
+    String? noteEditPermission,
+    String? noteDeletePermission,
   }) async {
     return Project.fromJson(
       await _patch('/api/projects/$projectId', {
@@ -1332,6 +1394,8 @@ class ApiClient {
             'color': ?color,
             'isPublic': ?isPublic,
             'archived': ?archived,
+            'noteEditPermission': ?noteEditPermission,
+            'noteDeletePermission': ?noteDeletePermission,
           })
           as Map<String, dynamic>,
     );
@@ -1344,6 +1408,51 @@ class ApiClient {
   /// 사이드바 즐겨찾기(개인 설정).
   Future<void> setProjectFavorite(String projectId, bool favorite) async {
     await _patch('/api/projects/$projectId/favorite', {'favorite': favorite});
+  }
+
+  /// 사이드바의 내 프로젝트 폴더들(개인 설정, 팀별) — 순서대로.
+  Future<List<ProjectFolder>> fetchProjectFolders(String teamId) async {
+    final list =
+        await _get(
+              '/api/projects/folders?teamId=${Uri.encodeQueryComponent(teamId)}',
+            )
+            as List;
+    return list
+        .map((e) => ProjectFolder.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<ProjectFolder> createProjectFolder(String teamId, String name) async {
+    return ProjectFolder.fromJson(
+      await _post('/api/projects/folders', {'teamId': teamId, 'name': name})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<ProjectFolder> updateProjectFolder(
+    String folderId, {
+    String? name,
+    bool? collapsed,
+    int? position,
+  }) async {
+    return ProjectFolder.fromJson(
+      await _patch('/api/project-folders/$folderId', {
+            'name': ?name,
+            'collapsed': ?collapsed,
+            'position': ?position,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 폴더만 지운다 — 안의 프로젝트는 사이드바 목록으로 돌아간다.
+  Future<void> deleteProjectFolder(String folderId) async {
+    await _delete('/api/project-folders/$folderId');
+  }
+
+  /// 프로젝트를 내 폴더 [folderId]에 넣는다. null이면 어느 폴더에서든 뺀다.
+  Future<void> setProjectFolder(String projectId, String? folderId) async {
+    await _put('/api/projects/$projectId/folder', {'folderId': folderId});
   }
 
   Future<List<AppUser>> addProjectMembers(
@@ -1378,9 +1487,16 @@ class ApiClient {
         .toList();
   }
 
-  /// 프로젝트 안의 업무 목록.
-  Future<List<Task>> fetchProjectTasks(String projectId) async {
-    final list = await _get('/api/projects/$projectId/tasks') as List;
+  /// 프로젝트 안의 업무 목록. [includeArchived]면 보관한 업무도 같이(리스트 탭이 흐리게 보여준다).
+  Future<List<Task>> fetchProjectTasks(
+    String projectId, {
+    bool includeArchived = false,
+  }) async {
+    final list =
+        await _get(
+              '/api/projects/$projectId/tasks${includeArchived ? '?archived=all' : ''}',
+            )
+            as List;
     return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -1391,8 +1507,16 @@ class ApiClient {
     return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<List<Task>> fetchMyTasks(String teamId) async {
-    final list = await _get('/api/tasks/mine?teamId=$teamId') as List;
+  /// [includeArchived]면 보관한 업무도 같이("내 업무" 표가 흐리게 보여준다).
+  Future<List<Task>> fetchMyTasks(
+    String teamId, {
+    bool includeArchived = false,
+  }) async {
+    final list =
+        await _get(
+              '/api/tasks/mine?teamId=$teamId${includeArchived ? '&archived=all' : ''}',
+            )
+            as List;
     return list.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -1622,6 +1746,21 @@ class ApiClient {
       'condition': {'priority': ?conditionPriority, 'typeId': ?conditionTypeId},
       'actions': [for (final a in actions) a.toJson()],
     };
+    final json = ruleId == null
+        ? await _post('/api/projects/$projectId/automations', body)
+        : await _patch('/api/automations/$ruleId', body);
+    return AutomationRule.fromJson(json as Map<String, dynamic>);
+  }
+
+  /// 노드 편집기로 만든 규칙 저장 — [ruleId]가 있으면 수정, 없으면 새로 만든다.
+  Future<AutomationRule> saveAutomationGraph(
+    String projectId, {
+    String? ruleId,
+    required String name,
+    required bool enabled,
+    required AutomationGraph graph,
+  }) async {
+    final body = {'name': name, 'enabled': enabled, 'graph': graph.toJson()};
     final json = ruleId == null
         ? await _post('/api/projects/$projectId/automations', body)
         : await _patch('/api/automations/$ruleId', body);
@@ -2415,4 +2554,12 @@ class ApiClient {
   /// 서버가 내려준 상대 경로(/uploads/xxx)를 절대 주소로 바꿉니다.
   String resolve(String relativeUrl) =>
       relativeUrl.startsWith('http') ? relativeUrl : '$baseUrl$relativeUrl';
+
+  /// "메신저 설명서"(관리자 이상)를 기본 브라우저로 열 주소 — 브라우저는 토큰 헤더를 못
+  /// 싣기 때문에 서버가 5분짜리 서명 토큰을 붙인 /help 주소를 만들어 준다(version.js).
+  Future<String> fetchMessengerManualLink() async {
+    final body =
+        await _post('/api/help/manual-link', const {}) as Map<String, dynamic>;
+    return resolve(body['url'] as String);
+  }
 }

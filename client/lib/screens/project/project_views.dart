@@ -767,133 +767,163 @@ class TaskDashboardView extends StatelessWidget {
     const doingColor = Color(0xFF2E9E6B);
     const overdueColor = Colors.redAccent;
 
-    return MutedScrollbar(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 스크롤 안이라 높이가 무한이다 — stretch를 쓰면 안 되고, 네 카드는 내용이 같아 어차피 키가 같다.
-            Row(
+    return _DashboardScroll(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 스크롤 안이라 높이가 무한이다 — stretch를 쓰면 안 되고, 네 카드는 내용이 같아 어차피 키가 같다.
+          Row(
+            children: [
+              stat('전체 업무', total, doneColor, null, null),
+              const SizedBox(width: 12),
+              stat('완료', done, doneColor, doneColor, QuickFilter.done),
+              const SizedBox(width: 12),
+              stat(
+                '진행 중',
+                doing,
+                doneColor,
+                doingColor,
+                QuickFilter.incomplete,
+              ),
+              const SizedBox(width: 12),
+              stat(
+                '지연',
+                overdue,
+                overdueColor,
+                overdueColor,
+                QuickFilter.overdue,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 300,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                stat('전체 업무', total, doneColor, null, null),
-                const SizedBox(width: 12),
-                stat('완료', done, doneColor, doneColor, QuickFilter.done),
-                const SizedBox(width: 12),
-                stat(
-                  '진행 중',
-                  doing,
-                  doneColor,
-                  doingColor,
-                  QuickFilter.incomplete,
-                ),
-                const SizedBox(width: 12),
-                stat(
-                  '지연',
-                  overdue,
-                  overdueColor,
-                  overdueColor,
-                  QuickFilter.overdue,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 300,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: box(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '전체 완료율',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Expanded(
-                            child: Row(
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: SizedBox(
-                                    width: 150,
-                                    height: 150,
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        SizedBox.expand(
-                                          child: CircularProgressIndicator(
-                                            value: total == 0
-                                                ? 0
-                                                : done / total,
-                                            strokeWidth: 16,
-                                            strokeCap: StrokeCap.round,
-                                            backgroundColor: theme
-                                                .colorScheme
-                                                .surfaceContainerHighest,
-                                          ),
-                                        ),
-                                        Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              '${pct(done)}%',
-                                              style: const TextStyle(
-                                                fontSize: 26,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            Text(
-                                              '전체 완료율',
-                                              style: TextStyle(
-                                                color: hint,
-                                                fontSize: 11,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                Expanded(
+                  child: box(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '전체 완료율',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: SizedBox(
+                                  width: 150,
+                                  height: 150,
+                                  child: Stack(
+                                    alignment: Alignment.center,
                                     children: [
-                                      legend('완료', done, doneColor),
-                                      legend('진행 중', doing, doingColor),
-                                      legend('지연', overdue, overdueColor),
+                                      SizedBox.expand(
+                                        child: CircularProgressIndicator(
+                                          value: total == 0 ? 0 : done / total,
+                                          strokeWidth: 16,
+                                          strokeCap: StrokeCap.round,
+                                          backgroundColor: theme
+                                              .colorScheme
+                                              .surfaceContainerHighest,
+                                        ),
+                                      ),
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${pct(done)}%',
+                                            style: const TextStyle(
+                                              fontSize: 26,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          Text(
+                                            '전체 완료율',
+                                            style: TextStyle(
+                                              color: hint,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ],
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    legend('완료', done, doneColor),
+                                    legend('진행 중', doing, doingColor),
+                                    legend('지연', overdue, overdueColor),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: box(
-                      // 오른쪽 여백은 안쪽 목록이 갖는다 — 그래야 스크롤바가 카드
-                      // 오른쪽 선에 붙고 담당 수("2/5")를 가리지 않는다.
-                      padding: const EdgeInsets.fromLTRB(16, 16, 0, 16),
-                      child: _MemberWorkload(
-                        members: members,
-                        tasks: tasks,
-                        session: session,
-                        onOpen: onOpen,
-                      ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: box(
+                    // 오른쪽 여백은 안쪽 목록이 갖는다 — 그래야 스크롤바가 카드
+                    // 오른쪽 선에 붙고 담당 수("2/5")를 가리지 않는다.
+                    padding: const EdgeInsets.fromLTRB(16, 16, 0, 16),
+                    child: _MemberWorkload(
+                      members: members,
+                      tasks: tasks,
+                      session: session,
+                      onOpen: onOpen,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 대시보드 전체 스크롤 — 스크롤바와 스크롤 뷰가 같은 컨트롤러를 쓴다. 데스크톱에서는 스크롤 뷰가
+/// PrimaryScrollController에 안 붙어서, 컨트롤러 없이 스크롤바를 달면 디버그 모드에서
+/// "ScrollPosition이 없다" 오류가 난다.
+class _DashboardScroll extends StatefulWidget {
+  final EdgeInsets padding;
+  final Widget child;
+  const _DashboardScroll({required this.padding, required this.child});
+
+  @override
+  State<_DashboardScroll> createState() => _DashboardScrollState();
+}
+
+class _DashboardScrollState extends State<_DashboardScroll> {
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MutedScrollbar(
+      controller: _scroll,
+      child: SingleChildScrollView(
+        controller: _scroll,
+        padding: widget.padding,
+        child: widget.child,
       ),
     );
   }

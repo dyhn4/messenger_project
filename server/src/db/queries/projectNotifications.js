@@ -137,6 +137,8 @@ export function findTasksDueSoon(now = new Date()) {
         gt(tasks.dueDate, past),
         sql`${tasks.dueRemindedFor} is distinct from ${tasks.dueDate}`,
         sql`${projects.archivedAt} is null`,
+        // 보관한 업무는 마감 임박 알림을 보내지 않는다.
+        sql`${tasks.archivedAt} is null`,
       ),
     )
     .then((rows) => rows.map((r) => ({ ...r.task, projectName: r.projectName, projectIdentifier: r.projectIdentifier })));

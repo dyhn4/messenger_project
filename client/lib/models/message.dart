@@ -32,6 +32,9 @@ class LinkPreview {
 /// 만들어지고, 서버 JSON의 type 문자열로는 절대 나오지 않는다(_typeFromString은 이 값을 모른다).
 enum MessageType { text, image, file, sticker, system, comment }
 
+/// 프로젝트 자동화의 "채팅방 알림"이 보내는 메시지의 보낸 사람 이름(server/src/projectAutomation.js).
+const automationSenderName = '자동화';
+
 MessageType _typeFromString(String? s) => switch (s) {
   'image' => MessageType.image,
   'file' => MessageType.file,
@@ -43,8 +46,10 @@ MessageType _typeFromString(String? s) => switch (s) {
 class Message {
   final String id;
   final String roomId;
-  final String?
-  senderId; // 시스템 메시지는 작성자가 없어서 null(서버 rooms.js의 postSystemMessage 참고).
+
+  /// 작성자가 없는 시스템·자동화 메시지([isAutomation])와 탈퇴한 사람의 메시지는 null
+  /// (서버 rooms.js의 postSystemMessage 참고).
+  final String? senderId;
   final String senderName;
   final MessageType type;
 
@@ -171,6 +176,21 @@ class Message {
     this.inquiryId,
     List<Comment>? comments,
   }) : comments = comments ?? [];
+
+  /// 프로젝트 자동화(채팅방 알림)가 보낸 메시지 — 사람이 아니라서 senderId가 null인 일반 글 메시지다.
+  /// 안읽음·알림은 일반 메시지처럼 가지만, 누구의 "내 메시지"도 아니고 프로필도 없다. 탈퇴한
+  /// 사람의 메시지도 senderId가 null이라 보낸 사람 이름까지 같이 본다.
+  bool get isAutomation =>
+      senderId == null &&
+      type == MessageType.text &&
+      senderName == automationSenderName;
+
+  /// 채팅 목록에서 [other]와 "같은 사람이 연달아 보낸" 메시지로 묶을지(프로필·시간을 한 번만
+  /// 보여줄지). senderId가 null인 메시지는 자동화·탈퇴한 사람 등 여럿일 수 있어서 보낸 사람
+  /// 이름까지 같아야 같은 사람으로 본다.
+  bool sameSenderAs(Message other) =>
+      senderId == other.senderId &&
+      (senderId != null || senderName == other.senderName);
 
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(

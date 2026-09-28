@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { messageComments } from '../schema.js';
 
@@ -95,7 +95,8 @@ export async function countUnreadCommentsForUser(roomId, requesterId, sinceMs) {
     .where(
       and(
         eq(messageComments.roomId, roomId),
-        ne(messageComments.senderId, requesterId),
+        // 탈퇴한 사람의 댓글(senderId null)도 세도록 — messages 쪽 countUnreadForUser와 같은 이유.
+        or(isNull(messageComments.senderId), ne(messageComments.senderId, requesterId)),
         gt(messageComments.createdAt, new Date(sinceMs)),
       ),
     );

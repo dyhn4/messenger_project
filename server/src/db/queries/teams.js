@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../client.js';
-import { teamMembers, teams, topicCreators, users } from '../schema.js';
+import { projectMembers, projects, teamMembers, teams, topicCreators, users } from '../schema.js';
 
 export async function insertTeam(fields) {
   const [row] = await db.insert(teams).values(fields).returning();
@@ -45,7 +45,20 @@ export async function addTeamMembers(teamId, userIds, role = 'member') {
 }
 
 export async function removeTeamMember(teamId, userId) {
-  await db.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+  await db.transaction(async (tx) => {
+    await tx.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    // 공개 프로젝트 자동 참여 행은 '정회원 이상 팀원'이라서 생긴 것 — 팀에서 빠지면 그 팀 프로젝트의
+    // 자동 행도 같이 지운다(초대·생성으로 들어온 행은 예전처럼 남긴다).
+    await tx
+      .delete(projectMembers)
+      .where(
+        and(
+          eq(projectMembers.userId, userId),
+          eq(projectMembers.auto, true),
+          inArray(projectMembers.projectId, tx.select({ id: projects.id }).from(projects).where(eq(projects.teamId, teamId))),
+        ),
+      );
+  });
 }
 
 export async function isTeamMember(teamId, userId) {

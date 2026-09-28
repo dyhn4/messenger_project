@@ -9,8 +9,9 @@
 #   2) server/를 정리해서(.env·certs·uploads·로그·firebase-service-account.json 등 실데이터/
 #      비밀값 전부 제외) server/installer/stage/에 복사하고, 그 안에서 npm install(전체 —
 #      drizzle-kit이 devDependency지만 설치 시점 마이그레이션 실행에 실제로 필요하다).
+#      앱의 "도움말"이 여는 초보자용 안내 웹페이지(server/guide/)도 여기서 같이 담긴다.
 #   3) 저장소 루트 README.md를 server/installer/README.html로 변환한다(설치된 서버의
-#      "도움말" 바로가기가 보여줌 — build-readme-html.mjs 참고).
+#      "메신저 설명서" 바로가기가 보여줌 — build-readme-html.mjs 참고).
 #   4) ISCC.exe로 messenger-server.iss를 컴파일해서 server/installer/output/에 exe를 만든다.
 
 $ErrorActionPreference = 'Stop'
@@ -105,6 +106,9 @@ $robocopyArgs = @(
 )
 robocopy @robocopyArgs | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy 실패(코드 $LASTEXITCODE)" }
+# 초보자용 도움말(server/guide/)이 빠진 채로 설치되면 모든 회원이 빈 페이지를 보게 되므로,
+# 위 제외 목록을 고치다 실수로 빠지는 일이 없게 확인한다.
+if (-not (Test-Path (Join-Path $Stage 'guide\index.html'))) { throw 'server/guide/index.html이 스테이징에 없습니다(초보자용 도움말).' }
 
 Write-Host '   npm install 실행 중(devDependencies 포함 — drizzle-kit이 마이그레이션에 필요)...'
 Push-Location $Stage
@@ -115,11 +119,12 @@ try {
   Pop-Location
 }
 
-# ── 5) 도움말 문서(README.html) 생성 ─────────────────────────────────────
+# ── 5) 메신저 설명서(README.html) 생성 ───────────────────────────────────
 # 저장소 루트 README.md(전체 프로젝트 문서, 목차 포함)를 정적 HTML로 변환해서 설치된 서버의
-# "도움말" 바로가기가 기본 브라우저로 보여줄 수 있게 한다 — build-readme-html.mjs는 이
-# 파일들에서 실제 쓰는 마크다운 구성만 처리하는 작은 자체 변환기다(별도 npm 의존성 없음).
-Write-Host '5) 도움말 문서(README.html) 만드는 중...'
+# "메신저 설명서" 바로가기(와 앱의 관리자용 "메신저 설명서" 메뉴 — version.js의 GET /help)가
+# 기본 브라우저로 보여줄 수 있게 한다 — build-readme-html.mjs는 이 파일들에서 실제 쓰는
+# 마크다운 구성만 처리하는 작은 자체 변환기다(별도 npm 의존성 없음).
+Write-Host '5) 메신저 설명서(README.html) 만드는 중...'
 $readmeHtml = Join-Path $Installer 'README.html'
 $converter = Join-Path $Installer 'build-readme-html.mjs'
 & (Join-Path $nodeDestDir 'node.exe') $converter (Join-Path $Root 'README.md') $readmeHtml

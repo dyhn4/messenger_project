@@ -598,6 +598,7 @@ messenger_project/
 │  ├─ packages/conversation_shortcuts/  사내 전용 Flutter 플러그인
 │  ├─ android/                   Android 프로젝트(keystore/key.properties 위치)
 │  ├─ windows/installer/         Inno Setup 스크립트(messenger.iss)
+│  ├─ tool/guide_capture/        초보자용 도움말 스크린샷 캡처(위젯 테스트로 진짜 화면을 그려 server/guide/images/에 PNG 저장)
 │  └─ assets/                     아이콘, 서버 인증서(server_cert.pem) 등 빌드 내장 자산
 │
 ├─ server/                      Node.js 백엔드
@@ -643,8 +644,9 @@ messenger_project/
 │  │  ├─ Storage-Path.ps1         "첨부파일 저장소" — 저장 위치 확인/변경(NAS·다른 PC 공유 폴더도 가능, 기존 파일 이동 여부 확인 후 서비스 재시작)
 │  │  ├─ Uninstall-Full.ps1       "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — 일반 제거까지 자동 실행(서버 운영자 인증 + DELETE 입력 필요)
 │  │  ├─ build-readme-html.mjs    빌드 시 저장소 루트 README.md → README.html 변환기(자체 구현, 새 의존성 없음)
-│  │  ├─ README.md                이 installer 폴더 자체 문서(개발자용 — 설치된 서버의 "도움말"은 루트 README.md를 보여줌)
+│  │  ├─ README.md                이 installer 폴더 자체 문서(개발자용 — 설치된 서버의 "메신저 설명서"는 루트 README.md를 보여줌)
 │  │  └─ bin/ · stage/ · output/ · README.html  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
+│  ├─ guide/                     초보자용 도움말 웹페이지(앱 삼선 메뉴 "도움말" — 서버가 인증 없이 /guide/로 서빙)
 │  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
 │  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성)
 │  ├─ uploads/                   업로드된 첨부파일(gitignore)
@@ -1465,7 +1467,7 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 - 설치 중 고르는 대로 서버를 **백그라운드 Windows 서비스**(NSSM, 부팅 시 자동 시작·창 없음,
   서비스 이름 `TangoTalkServer`) 또는 **콘솔 창**(시작 메뉴 "서버 콘솔로 실행")으로 등록합니다.
 - 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함),
-  "도움말"(**이 README.md 전체**를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환해서
+  "메신저 설명서"(예전 이름 "도움말" — **이 README.md 전체**를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환해서
   기본 브라우저로 보여줌 — `build_server_installer.ps1`이 빌드 시 `build-readme-html.mjs`로
   매번 새로 만들므로 설치할 때마다 최신 버전으로 덮어써짐), "서버 업데이트", "서버 재시작",
   "첨부파일 저장소", "DB 데이터 초기화", "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"도

@@ -69,16 +69,25 @@ Source: "Reset-Data.ps1"; DestDir: "{app}"
 Source: "Uninstall-Full.ps1"; DestDir: "{app}"
 Source: "README-설치후.txt"; DestDir: "{app}"
 ; 저장소 루트 README.md(전체 프로젝트 문서, 목차 포함)를 build_server_installer.ps1이 정적
-; HTML로 미리 변환해둔 결과 — "도움말" 바로가기가 기본 브라우저로 그대로 보여준다.
+; HTML로 미리 변환해둔 결과 — "메신저 설명서" 바로가기가 기본 브라우저로 그대로 보여준다.
+; (초보자용 "도움말" 웹페이지 server/guide/는 위 StageDir에 같이 들어 있어 {app}\server\guide로
+; 깔리고, 서버가 /guide/로 서빙한다 — server/src/version.js 참고.)
 Source: "README.html"; DestDir: "{app}"
+
+[InstallDelete]
+; 예전 버전이 만든 "도움말" 바로가기(지금은 "메신저 설명서") — 새 버전을 덮어 설치해도 옛 이름의
+; 바로가기가 시작 메뉴에 같이 남지 않게 지운다([Icons]에서 빠진 항목은 Inno가 스스로 안 지운다).
+Type: files; Name: "{group}\도움말.lnk"
 
 [Icons]
 Name: "{group}\새 기기 페어링 코드 발급"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Get-PairingCode.ps1"""
 Name: "{group}\서버 콘솔로 실행"; Filename: "{app}\node\node.exe"; Parameters: """{app}\server\src\index.js"""; WorkingDir: "{app}\server"; Tasks: runasconsole
 Name: "{group}\설치 후 안내"; Filename: "{app}\README-설치후.txt"
 ; .html은 이 PC의 기본 브라우저로 바로 열린다(.md와 달리 연결 프로그램이 없어서 뜨는
-; "여는 방법을 선택하세요" 창 걱정이 없음) — Filename을 파일 자체로 지정하면 된다.
-Name: "{group}\도움말"; Filename: "{app}\README.html"
+; "여는 방법을 선택하세요" 창 걱정이 없음) — Filename을 파일 자체로 지정하면 된다. 예전 이름은
+; "도움말"이었는데, 앱의 "도움말"이 모든 회원용 초보자 안내(server/guide/)가 되면서 이 문서는
+; 앱과 같은 "메신저 설명서"로 이름을 맞췄다.
+Name: "{group}\메신저 설명서"; Filename: "{app}\README.html"
 ; 개발 PC에서 package_server_update.ps1로 만든 zip을 골라서 적용하는 창을 띄운다(DB는
 ; 안 건드리고 코드/패키지/스키마만 갱신) — 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\서버 업데이트"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Update-Server.ps1"""
@@ -130,6 +139,7 @@ Type: filesandordirs; Name: "{app}\server\node_modules"
 Type: filesandordirs; Name: "{app}\server\src"
 Type: filesandordirs; Name: "{app}\server\scripts"
 Type: filesandordirs; Name: "{app}\server\drizzle"
+Type: filesandordirs; Name: "{app}\server\guide"
 Type: files; Name: "{app}\server\package.json"
 Type: files; Name: "{app}\server\package-lock.json"
 Type: files; Name: "{app}\server\drizzle.config.js"

@@ -100,11 +100,14 @@ void main() {
       _task('5', '일정 없는 업무'),
       for (var i = 0; i < 6; i++)
         _task('x$i', '겹치는 업무 $i', start: day(0), due: day(1)),
+      {..._task('9', '보관한 업무'), 'archived': true},
     ];
+    String? archivedQuery;
 
     final client = MockClient((request) async {
       final path = request.url.path;
       if (path.endsWith('/tasks/mine')) {
+        archivedQuery = request.url.queryParameters['archived'];
         return http.Response(
           jsonEncode(tasks),
           200,
@@ -169,12 +172,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
-    // 필터 패널: 빠른 필터링 세 개(내 업무·보관은 없음) — 누르면 바로 걸리고 패널은 열려 있다.
+    // 필터 패널: 빠른 필터링 네 개(미완료·완료·지연·보관된 업무, "내 업무"는 없음) — 누르면 바로 걸리고 패널은 열려 있다.
     await tester.tap(find.text('필터링'));
     await tester.pumpAndSettle();
     expect(find.text('빠른 필터링'), findsOneWidget);
     expect(find.text('미완료 업무'), findsOneWidget);
     expect(find.text('완료된 업무'), findsOneWidget);
+
+    // 보관한 업무도 받아 오지만 평소 표에는 없고, "보관된 업무"를 골랐을 때만(그것만, 흐리게) 보인다.
+    expect(archivedQuery, 'all');
+    expect(find.text('보관한 업무'), findsNothing);
+    await tester.tap(find.text('보관된 업무'));
+    await tester.pumpAndSettle();
+    expect(find.text('보관한 업무'), findsOneWidget);
+    expect(find.byTooltip('보관된 업무'), findsOneWidget);
+    expect(find.text('대시보드 수정'), findsNothing);
+    expect(find.text('필터링 1'), findsOneWidget);
+    await tester.tap(find.text('보관된 업무'));
+    await tester.pumpAndSettle();
+    expect(find.text('대시보드 수정'), findsOneWidget);
+    expect(find.text('보관한 업무'), findsNothing);
     await tester.tap(find.text('지연 업무'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);

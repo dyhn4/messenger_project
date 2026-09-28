@@ -32,7 +32,8 @@
 | `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `README-설치후.txt` | 설치되는 사람이 보는 안내문(`[Files]`로 설치됨) |
 | `build-readme-html.mjs` | 빌드 시에만 쓰는 변환기 — 저장소 루트 `README.md`를 `installer/README.html`로 만든다(설치 프로그램에는 포함 안 됨, 결과물인 README.html만 포함됨). 이 프로젝트 README들이 실제 쓰는 마크다운 구성(제목·굵게·인라인 코드·링크·코드펜스·표·순서/비순서 목록(중첩 포함)·체크박스·인용문)만 처리하는 자체 변환기 — 범용 마크다운 라이브러리(marked 등)를 새 의존성으로 추가하지 않으려고 직접 짰다 |
-| `README.html`(빌드 산출물, git 미포함) | 시작 메뉴 "도움말"이 그대로 여는 파일 — 저장소 루트 `README.md` 전체를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환한 것. 기본 브라우저로 열림 |
+| `README.html`(빌드 산출물, git 미포함) | 시작 메뉴 "메신저 설명서"(예전 이름 "도움말")가 그대로 여는 파일 — 저장소 루트 `README.md` 전체를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환한 것. 기본 브라우저로 열림. 앱의 삼선 메뉴 "메신저 설명서"(관리자 이상)도 서버의 `/help`(5분짜리 서명 링크 필요 — `server/src/version.js`)로 같은 파일을 연다 |
+| `../guide/`(server/guide, 설치 시 `{app}\server\guide`) | 앱의 삼선 메뉴 "도움말"(모든 회원)이 여는 초보자용 안내 웹페이지(메신저·프로젝트 이용법 + 스크린샷). 스테이징에 같이 담기고 서버가 인증 없이 `/guide/`로 서빙한다. 업데이트 zip을 적용할 때 `Update-Server.ps1`이 이 폴더를 통째로 맞춘다(/MIR) |
 
 ## 설계상 중요한 결정들 (바꾸기 전에 이유를 먼저 읽을 것)
 
@@ -126,8 +127,10 @@
 ## 검증 체크리스트
 
 - [ ] `build_server_installer.ps1` 실행 → `installer/output/tangotalk-server-setup.exe` 생성 확인
-- [ ] "도움말"을 열면 기본 브라우저로 `README.html`이 뜨고, 목차의 아무 링크나 눌러보면 해당
+- [ ] "메신저 설명서"를 열면 기본 브라우저로 `README.html`이 뜨고, 목차의 아무 링크나 눌러보면 해당
       섹션으로 실제로 이동함(표/코드블록/중첩 목록/인용문이 깨지지 않고 보이는지도 확인)
+- [ ] 이전 버전 위에 덮어 설치했을 때 시작 메뉴에 옛 "도움말" 바로가기가 남아 있지 않음
+- [ ] 브라우저로 `https://<서버>:3000/guide/`를 열면 초보자용 도움말 첫 페이지가 뜸
 - [ ] 설치 경로에 공백이 있는 폴더(예: `C:\My Server\TangoTalk`)를 직접 골라서 설치 →
       PostgreSQL 설치까지 정상적으로 끝남(`pg_ctl.exe`가 그 경로에 실제로 생김)
 - [ ] 깨끗한 PC/VM에서 서비스 모드로 설치 → `Get-Service TangoTalkServer`, `Get-Service

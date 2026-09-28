@@ -168,7 +168,9 @@ export async function listMessagesByRoom(roomId, limit, beforeCreatedAt, floor) 
 export async function countUnreadForUser(roomId, requesterId, sinceMs, floor) {
   const conditions = [
     eq(messages.roomId, roomId),
-    ne(messages.senderId, requesterId),
+    // SQL에서 NULL <> x는 참이 아니라 NULL이라, 보낸 사람이 없는 글(자동화 메시지, 탈퇴한 사람의
+    // 글)도 "남이 보낸 글"로 세려면 null을 따로 넣어야 한다.
+    or(isNull(messages.senderId), ne(messages.senderId, requesterId)),
     ne(messages.type, 'system'),
     gt(messages.createdAt, new Date(sinceMs)),
   ];

@@ -129,6 +129,11 @@ class _MessageBubbleState extends State<MessageBubble> {
     });
   }
 
+  /// 자동화 메시지는 보낸 사람이 없어서(senderId null) 누구의 "내 메시지"도 아니다 — 호출부가
+  /// senderId == userId로 비교하다 userId까지 null이면 true가 될 수 있어 여기서 한 번 더 막는다.
+  /// 그래서 수정·본인 삭제 메뉴도 안 뜬다(관리자 삭제는 남의 메시지와 같은 규칙).
+  bool get _isMine => widget.isMine && !widget.message.isAutomation;
+
   bool get _canShowToolbar =>
       !widget.message.deleted &&
       !widget.message.decryptFailed &&
@@ -200,7 +205,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// 서버 moderation.js와 같은 규칙). 본인 메시지와 마찬가지로 팀이 정한 삭제 가능 시간
   /// 안에서만 가능하고, 비밀 대화(E2EE)는 서버가 내용을 볼 수 없으므로 대상에서 뺀다.
   bool get _canModerate {
-    if (widget.isMine || widget.onDelete == null) return false;
+    if (_isMine || widget.onDelete == null) return false;
     if (!widget.session.canModerateContent) return false;
     if (!isEditDeleteAllowed(widget.session)) return false;
     if (widget.message.type == MessageType.system) return false;
@@ -214,7 +219,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
-    final moderating = !widget.isMine;
+    final moderating = !_isMine;
     if (!isEditDeleteAllowed(widget.session)) {
       showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
       return;
@@ -261,7 +266,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Future<void> _openProfile(BuildContext context) async {
-    if (widget.isMine) {
+    if (_isMine) {
       showDialog(
         context: context,
         builder: (_) => MyProfileDialog(session: widget.session),
@@ -294,7 +299,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   void _showActionSheet(BuildContext context) {
     final message = widget.message;
     final displayName =
-        (widget.isMine ? widget.session.name : widget.sender?.name) ??
+        (_isMine ? widget.session.name : widget.sender?.name) ??
         message.senderName;
     showMessageActionSheet(
       context,
@@ -308,7 +313,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
-    final isMine = widget.isMine;
+    final isMine = _isMine;
     final highlighted = widget.highlighted;
     // 이름이 바뀌었을 수도 있으니, 메시지에 박제된 senderName보다 지금 알고 있는 이름을
     // 우선한다(나는 session.name, 남은 room.members에서 찾은 sender.name).
@@ -556,7 +561,24 @@ class _MessageBubbleState extends State<MessageBubble> {
           // 같은 사람이 연달아 보낸 메시지는 첫 메시지에만 프로필 사진/이름을 보여준다.
           // 이름은 아바타와 한 줄에서 세로 중앙에 오도록 정렬하고, 말풍선은 그 아래
           // (아바타 하단 높이만큼 들여쓴 채) 별도 줄로 둔다.
-          if (widget.showSenderInfo) ...[
+          // 자동화 메시지는 사람이 아니라 열어 볼 프로필이 없다 — 번개 아바타와 이름만 둔다.
+          if (widget.showSenderInfo && message.isAutomation) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const AutomationAvatar(
+                  key: ValueKey('automation-avatar'),
+                  radius: avatarDiameter / 2,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  displayName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+          ] else if (widget.showSenderInfo) ...[
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -620,7 +642,7 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// 그걸로 Navigator/스낵바를 찾으면 "deactivated widget's ancestor" 오류가 난다.
   Widget _buildToolbar({required String displayName}) {
     final message = widget.message;
-    final isMine = widget.isMine;
+    final isMine = _isMine;
     return HoverToolbar(
       children: [
         HoverToolbarButton(

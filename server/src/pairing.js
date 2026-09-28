@@ -9,7 +9,7 @@ import {
   markTeamInviteLinkUsed,
 } from './db/queries/teamInviteLinks.js';
 import { roleLabel } from './permissions.js';
-import { releasesDir } from './version.js';
+import { guideStatic, releasesDir } from './version.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_ATTEMPTS = 10; // 이 횟수만큼 틀리면 코드를 무효화한다(무작위 대입 방지).
@@ -425,6 +425,11 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
     if (!isTeamInviteLinkValid(link)) return res.status(404).send('만료되었거나 취소된 링크입니다.');
     downloadInstaller(req, res);
   });
+
+  /** 초보자용 도움말(server/guide/ 정적 페이지) — 메인 HTTPS 서버의 /guide와 같은 파일. 앱이
+   * 자체 서명 인증서 경고 없이 열리도록 이 평문 포트의 /guide/를 먼저 시도한다. 여기에는 이
+   * 공개 정적 폴더만 얹고 다른 메인 서버 경로는 노출하지 않는다. */
+  app.use('/guide', guideStatic);
 
   const server = app.listen(port, () => {
     console.log(`[pairing] 페어링 부트스트랩 서버 대기 중 (평문 HTTP, 포트 ${port})`);

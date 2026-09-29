@@ -14,6 +14,7 @@ import '../models/team_invite_link.dart';
 import '../models/message.dart';
 import '../models/project.dart';
 import '../models/room.dart';
+import '../models/shared_link.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
@@ -2495,6 +2496,20 @@ class ApiClient {
     final list = await _get(params.toString()) as List;
     return list
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// "링크" 모아보기 — 지금 팀에서 내가 속한 방(비밀 대화 제외)에서 주고받은 http(s) 링크, 최신순.
+  /// [roomId]를 주면 그 방만(server/src/links.js).
+  Future<List<SharedLink>> fetchLinks({
+    required String teamId,
+    String? roomId,
+  }) async {
+    final parts = <String>['teamId=${Uri.encodeQueryComponent(teamId)}'];
+    if (roomId != null) parts.add('roomId=${Uri.encodeQueryComponent(roomId)}');
+    final list = await _get('/api/links?${parts.join('&')}') as List;
+    return list
+        .map((e) => SharedLink.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 

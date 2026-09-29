@@ -22,6 +22,7 @@ import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
 import 'chat_screen.dart';
 import 'files_screen.dart';
+import 'links_screen.dart';
 import 'invite_link_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
@@ -159,6 +160,35 @@ class _RoomListScreenState extends State<RoomListScreen> {
     );
   }
 
+  /// "메뉴" 팝업의 "링크" — 파일과 같은 이유로 전체화면으로 연다. "대화방에서 보기"는 링크 화면을
+  /// 닫고 그 방을 열어 해당 메시지로 스크롤한다(검색 결과를 눌렀을 때와 같은 방식).
+  void _openLinks() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (routeContext) => Scaffold(
+          body: SafeArea(
+            child: LinksScreen(
+              session: widget.session,
+              onClose: () => Navigator.of(routeContext).pop(),
+              onOpenMessage: (room, messageId) {
+                Navigator.of(routeContext).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ChatScreen(
+                      session: widget.session,
+                      room: room,
+                      highlightMessageId: messageId,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_pendingReopenRoom != null) {
@@ -183,7 +213,11 @@ class _RoomListScreenState extends State<RoomListScreen> {
               onPressed: () =>
                   showNotificationsCenterDialog(context, widget.session),
             ),
-            AppMenuButton(session: widget.session, onOpenFiles: _openFiles),
+            AppMenuButton(
+              session: widget.session,
+              onOpenFiles: _openFiles,
+              onOpenLinks: _openLinks,
+            ),
             AccountMenuButton(session: widget.session),
           ],
         ),

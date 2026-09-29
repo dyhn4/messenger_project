@@ -25,6 +25,7 @@ import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'create_topic_screen.dart';
 import 'files_screen.dart';
+import 'links_screen.dart';
 import 'member_profile_dialog.dart';
 import 'message_thread_screen.dart';
 import 'project/project_dialog.dart';
@@ -73,6 +74,33 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   bool _searchOpen = false;
   bool _membersOpen = false;
   bool _filesOpen = false;
+
+  /// "메뉴 > 링크" 패널(links_screen.dart) — 파일 패널과 같은 자리를 서로 번갈아 쓴다.
+  bool _linksOpen = false;
+
+  /// 방 헤더 "더보기"의 "파일 보기"/"링크 보기"로 연 패널이 걸러 볼 방. null이면(상단 메뉴로 연
+  /// 경우) 지금 보고 있는 방으로 시작한다. 패널은 [_panelGeneration]을 키로 써서, 이미 열려 있어도
+  /// 다른 방에서 누르면 그 방으로 새로 시작한다.
+  String? _panelRoomId;
+  int _panelGeneration = 0;
+
+  /// 방 헤더의 "파일 보기"/"링크 보기" — 오른쪽 패널을 그 방으로 걸러서 연다. 다른 오른쪽 패널과
+  /// 분할 패널은 닫는다(상단 메뉴로 열 때와 같다).
+  void _openRoomPanel(Room room, {required bool links}) {
+    setState(() {
+      _panelRoomId = room.id;
+      _panelGeneration++;
+      _filesOpen = !links;
+      _linksOpen = links;
+      _searchOpen = false;
+      _membersOpen = false;
+      _notificationsOpen = false;
+      _threadMessage = null;
+      _threadRoom = null;
+      _splitRoom = null;
+    });
+  }
+
   bool _notificationsOpen = false;
   String? _highlightMessageId;
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
@@ -121,6 +149,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       _searchOpen = false;
       _membersOpen = false;
       _filesOpen = false;
+      _linksOpen = false;
       _notificationsOpen = false;
       _threadMessage = null;
       _threadRoom = null;
@@ -273,6 +302,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               if (_membersOpen) {
                 _searchOpen = false;
                 _filesOpen = false;
+                _linksOpen = false;
                 _notificationsOpen = false;
                 _threadMessage = null;
                 _threadRoom = null;
@@ -284,6 +314,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               if (_searchOpen) {
                 _membersOpen = false;
                 _filesOpen = false;
+                _linksOpen = false;
                 _notificationsOpen = false;
                 _threadMessage = null;
                 _threadRoom = null;
@@ -293,6 +324,21 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             onOpenFiles: () => setState(() {
               _filesOpen = !_filesOpen;
               if (_filesOpen) {
+                _panelRoomId = null;
+                _linksOpen = false;
+                _searchOpen = false;
+                _membersOpen = false;
+                _notificationsOpen = false;
+                _threadMessage = null;
+                _threadRoom = null;
+                _splitRoom = null;
+              }
+            }),
+            onOpenLinks: () => setState(() {
+              _linksOpen = !_linksOpen;
+              if (_linksOpen) {
+                _panelRoomId = null;
+                _filesOpen = false;
                 _searchOpen = false;
                 _membersOpen = false;
                 _notificationsOpen = false;
@@ -307,6 +353,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                 _searchOpen = false;
                 _membersOpen = false;
                 _filesOpen = false;
+                _linksOpen = false;
                 _threadMessage = null;
                 _threadRoom = null;
                 _splitRoom = null;
@@ -350,9 +397,28 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                   SizedBox(
                     width: _sidePanelWidth,
                     child: FilesScreen(
+                      key: ValueKey('files-$_panelGeneration'),
                       session: widget.session,
-                      initialRoomId: _selectedRoom?.id,
+                      initialRoomId: _panelRoomId ?? _selectedRoom?.id,
                       onClose: () => setState(() => _filesOpen = false),
+                    ),
+                  ),
+                ],
+                if (_linksOpen) ...[
+                  const VerticalDivider(width: 1),
+                  SizedBox(
+                    width: _sidePanelWidth,
+                    child: LinksScreen(
+                      key: ValueKey('links-$_panelGeneration'),
+                      session: widget.session,
+                      initialRoomId: _panelRoomId ?? _selectedRoom?.id,
+                      onClose: () => setState(() => _linksOpen = false),
+                      // "대화방에서 보기" — 검색 결과를 눌렀을 때처럼 그 방을 열고 메시지로 스크롤.
+                      onOpenMessage: (room, messageId) => setState(() {
+                        _selectedRoom = room;
+                        _threadMessage = null;
+                        _highlightMessageId = messageId;
+                      }),
                     ),
                   ),
                 ],
@@ -578,7 +644,12 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                   tooltip: '분할 닫기',
                   onPressed: onClose,
                 ),
-              RoomOptionsMenu(session: widget.session, room: room),
+              RoomOptionsMenu(
+                session: widget.session,
+                room: room,
+                onOpenFiles: (r) => _openRoomPanel(r, links: false),
+                onOpenLinks: (r) => _openRoomPanel(r, links: true),
+              ),
             ],
           ),
         ),
@@ -596,6 +667,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               _searchOpen = false;
               _membersOpen = false;
               _filesOpen = false;
+              _linksOpen = false;
               _notificationsOpen = false;
             }),
           ),
@@ -642,12 +714,14 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onShowMembers;
   final VoidCallback onToggleSearch;
   final VoidCallback onOpenFiles;
+  final VoidCallback onOpenLinks;
   final VoidCallback onToggleNotifications;
   const _TopBar({
     required this.session,
     required this.onShowMembers,
     required this.onToggleSearch,
     required this.onOpenFiles,
+    required this.onOpenLinks,
     required this.onToggleNotifications,
   });
 
@@ -721,7 +795,11 @@ class _TopBar extends StatelessWidget {
                       tooltip: '검색',
                       onPressed: onToggleSearch,
                     ),
-                    AppMenuButton(session: session, onOpenFiles: onOpenFiles),
+                    AppMenuButton(
+                      session: session,
+                      onOpenFiles: onOpenFiles,
+                      onOpenLinks: onOpenLinks,
+                    ),
                     AccountMenuButton(session: session),
                   ],
                 ),
@@ -1385,47 +1463,50 @@ class _RoomTileState extends State<_RoomTile> {
     final session = widget.session;
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     setState(() => _contextMenuOpen = true);
+    // 작은 글씨·좁은 줄 간격의 간결한 메뉴 — 항목 종류(열기 / 이 방 설정 / 떠나기)마다 구분선.
+    PopupMenuItem<_RoomContextAction> item(
+      _RoomContextAction value,
+      String label,
+    ) => PopupMenuItem(
+      value: value,
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text(label, style: const TextStyle(fontSize: 13)),
+    );
+    const divider = PopupMenuDivider(height: 9);
+    final light = Theme.of(context).brightness == Brightness.light;
     final action = await showMenu<_RoomContextAction>(
       context: context,
       position: RelativeRect.fromRect(
         globalPosition & const Size(1, 1),
         Offset.zero & overlay.size,
       ),
+      // 밝은 테마는 흰 바탕, 어두운 테마는 앱 공통 팝업 색(main.dart popupMenuTheme)을 그대로.
+      color: light ? Colors.white : null,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      menuPadding: const EdgeInsets.symmetric(vertical: 6),
+      constraints: const BoxConstraints(minWidth: 180, maxWidth: 280),
       items: [
-        const PopupMenuItem(
-          value: _RoomContextAction.split,
-          child: Text('대화창 분할하기'),
-        ),
+        item(_RoomContextAction.split, '대화창 분할하기'),
         // 이미 비밀 대화인 방에서 "또" 비밀대화를 시작하는 건 의미가 없고, 그룹/토픽은
         // 애초에 1:1이 아니라 비밀 대화 개념이 없다.
         if (_isDm && !room.isSecret)
-          const PopupMenuItem(
-            value: _RoomContextAction.startSecret,
-            child: Text('비밀대화 시작하기'),
-          ),
-        PopupMenuItem(
-          value: _RoomContextAction.toggleMute,
-          child: Text(room.muted ? '대화방 알림 켜기' : '대화방 알림 끄기'),
+          item(_RoomContextAction.startSecret, '비밀대화 시작하기'),
+        divider,
+        item(
+          _RoomContextAction.toggleMute,
+          room.muted ? '대화방 알림 켜기' : '대화방 알림 끄기',
         ),
         // 그룹채팅방만 — 나에게만 다른 이름으로 부르기(다른 멤버에겐 그대로).
         if (room.type == RoomType.group)
-          PopupMenuItem(
-            value: _RoomContextAction.rename,
-            child: Text(renameRoomMenuLabel(room, session.userId ?? '')),
+          item(
+            _RoomContextAction.rename,
+            renameRoomMenuLabel(room, session.userId ?? ''),
           ),
-        const PopupMenuItem(
-          value: _RoomContextAction.markAllRead,
-          child: Text('모두 읽음 처리'),
-        ),
-        if (_isDm)
-          const PopupMenuItem(
-            value: _RoomContextAction.hide,
-            child: Text('숨기기'),
-          ),
-        const PopupMenuItem(
-          value: _RoomContextAction.leave,
-          child: Text('나가기'),
-        ),
+        item(_RoomContextAction.markAllRead, '모두 읽음 처리'),
+        divider,
+        if (_isDm) item(_RoomContextAction.hide, '숨기기'),
+        item(_RoomContextAction.leave, '나가기'),
       ],
     );
     if (mounted) setState(() => _contextMenuOpen = false);

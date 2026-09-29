@@ -136,12 +136,16 @@ class CommentInputBarState extends State<CommentInputBar> {
       _pasteImageFromClipboard();
       return false;
     }
-    // ChatInputBarState와 동일 — Enter는 보내기, Shift+Enter만 줄바꿈으로 남긴다.
+    // ChatInputBarState와 동일 — 환경설정 "메시지 전송 옵션"대로(기본: Enter 전송·Shift+Enter 줄바꿈).
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    final sendKey = widget.controller.session.settings.sendWithShiftEnter
+        ? shift
+        : !shift;
     if (event is KeyDownEvent &&
         (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
         _focusNode.hasFocus &&
-        !HardwareKeyboard.instance.isShiftPressed) {
+        sendKey) {
       _send();
       return true;
     }
@@ -424,7 +428,9 @@ class CommentInputBarState extends State<CommentInputBar> {
                     const Spacer(),
                     if (showHint) ...[
                       Text(
-                        'Shift + Enter 로 줄바꿈',
+                        widget.controller.session.settings.sendWithShiftEnter
+                            ? 'Shift + Enter 로 전송'
+                            : 'Shift + Enter 로 줄바꿈',
                         style: TextStyle(
                           fontSize: 11,
                           color: Theme.of(context).hintColor,

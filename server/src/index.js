@@ -20,6 +20,7 @@ import os from 'node:os';
 import readline from 'node:readline';
 import { Server } from 'socket.io';
 import { attachmentsRouter } from './attachments.js';
+import { linksRouter } from './links.js';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
@@ -91,6 +92,7 @@ app.use('/api', requireAuth, createCallsRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));
 app.use('/api', requireAuth, searchRouter);
 app.use('/api', requireAuth, attachmentsRouter);
+app.use('/api', requireAuth, linksRouter);
 // "메신저 설명서"(관리자 이상) 열람용 5분짜리 링크 발급 — 권한은 라우터 안에서 확인(version.js).
 app.use('/api', requireAuth, helpApiRouter);
 // 업로드 파일은 고정된 공개 경로로 서빙하지 않는다 — filesRouter가 짧게 만료되는

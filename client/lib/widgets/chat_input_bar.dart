@@ -164,13 +164,16 @@ class ChatInputBarState extends State<ChatInputBar> {
       _pasteImageFromClipboard();
       return false;
     }
-    // Enter는 보내기, Shift+Enter만 줄바꿈으로 남긴다 — true를 돌려줘서 TextField의 기본
-    // 줄바꿈 삽입을 막아야 한다(안 그러면 Enter를 눌러도 줄바꿈이 먼저 들어가 버린다).
+    // 환경설정 "메시지 전송 옵션" — 기본은 Enter로 보내고 Shift+Enter로 줄바꿈, 반대로 고르면
+    // Shift+Enter로 보내고 Enter로 줄바꿈. 보낼 때는 true를 돌려줘서 TextField의 기본 줄바꿈
+    // 삽입을 막아야 한다(안 그러면 보내는 키를 눌러도 줄바꿈이 먼저 들어가 버린다).
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    final sendKey = widget.session.settings.sendWithShiftEnter ? shift : !shift;
     if (event is KeyDownEvent &&
         (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
         _focusNode.hasFocus &&
-        !HardwareKeyboard.instance.isShiftPressed) {
+        sendKey) {
       _send();
       return true;
     }
@@ -631,7 +634,9 @@ class ChatInputBarState extends State<ChatInputBar> {
                     const Spacer(),
                     if (showHint) ...[
                       Text(
-                        'Shift + Enter 로 줄바꿈',
+                        widget.session.settings.sendWithShiftEnter
+                            ? 'Shift + Enter 로 전송'
+                            : 'Shift + Enter 로 줄바꿈',
                         style: TextStyle(
                           fontSize: 11,
                           color: Theme.of(context).hintColor,

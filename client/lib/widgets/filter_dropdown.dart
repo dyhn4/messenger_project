@@ -191,7 +191,13 @@ class _RoomFilterPanel extends StatefulWidget {
 }
 
 class _RoomFilterPanelState extends State<_RoomFilterPanel> {
-  bool _chatTab = false; // false=토픽, true=채팅(그룹+DM)
+  /// 보고 있는 탭 — 토픽 / 그룹채팅 / 채팅(1:1). 방을 골라 둔 채로 열면 그 방의 탭부터 보인다.
+  late RoomType _tab =
+      widget.session.rooms
+          .where((r) => r.id == widget.selectedRoomId)
+          .firstOrNull
+          ?.type ??
+      RoomType.topic;
   String _filter = '';
 
   @override
@@ -201,9 +207,7 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
         // 비밀 대화는 검색/파일 목록 자체가 안 되므로(요구사항) 방 범위 선택지에도
         // 노출하지 않는다 — 서버 쪽도 별도로 막고 있다(server/src/db/queries/messages.js).
         .where((r) => !r.isSecret)
-        .where(
-          (r) => _chatTab ? r.type != RoomType.topic : r.type == RoomType.topic,
-        )
+        .where((r) => r.type == _tab)
         .where(
           (r) =>
               _filter.isEmpty ||
@@ -216,18 +220,17 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
       children: [
         Row(
           children: [
-            _tabButton(
-              context,
-              '토픽',
-              !_chatTab,
-              () => setState(() => _chatTab = false),
-            ),
-            _tabButton(
-              context,
-              '채팅',
-              _chatTab,
-              () => setState(() => _chatTab = true),
-            ),
+            for (final (type, label) in const [
+              (RoomType.topic, '토픽'),
+              (RoomType.group, '그룹채팅'),
+              (RoomType.dm, '채팅'),
+            ])
+              _tabButton(
+                context,
+                label,
+                _tab == type,
+                () => setState(() => _tab = type),
+              ),
           ],
         ),
         const Divider(height: 1),

@@ -1877,12 +1877,15 @@ class Session extends ChangeNotifier {
   /// 환경설정의 "메시지 내용 미리보기"(AppSettings.messagePreviewMode)에 따라 알림에 실제
   /// 내용을 보여줄지 판단한다. 비밀 대화는 이 설정과 무관하게 항상 가려지므로(호출부에서
   /// room?.isSecret로 따로 체크) 여기서는 신경 쓰지 않는다.
-  bool _shouldPreviewFor(Room? room) => switch (settings.messagePreviewMode) {
-    MessagePreviewMode.all => true,
-    MessagePreviewMode.publicTopicOnly =>
-      room?.type == RoomType.topic && room?.isPublic == true,
-    MessagePreviewMode.none => false,
-  };
+  /// 자동 잠금으로 잠겨 있는 동안은 설정과 무관하게 내용을 가린다(잠금 화면이 무색해지지 않게).
+  bool _shouldPreviewFor(Room? room) =>
+      !settings.appLocked &&
+      switch (settings.messagePreviewMode) {
+        MessagePreviewMode.all => true,
+        MessagePreviewMode.publicTopicOnly =>
+          room?.type == RoomType.topic && room?.isPublic == true,
+        MessagePreviewMode.none => false,
+      };
 
   /// 그룹채팅/채팅 목록 이름 아래 미리보기(room_list_screen.dart)를 새 메시지/댓글 내용으로
   /// 갱신한다. 시스템 메시지는 제외(로그인 시 서버가 내려준 마지막 실제 대화 미리보기를 계속
@@ -2405,6 +2408,8 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // 잠긴 채로 로그아웃하면(잠금 화면의 "로그아웃") 다음 로그인 때 다시 잠겨 뜨지 않게 푼다.
+    if (settings.appLocked) await settings.setAppLocked(false);
     // 인증이 아직 유효한 동안(아래에서 token을 지우기 전) 이 기기의 FCM 토큰을 서버에서
     // 지워둔다 — 안 그러면 로그아웃한 뒤에도 이 기기로 그 계정 알림이 계속 온다.
     if (Platform.isAndroid && deviceIdentity != null && api != null) {

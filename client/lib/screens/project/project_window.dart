@@ -96,6 +96,26 @@ Future<void> broadcastThemeChange(ThemeMode mode) async {
   }
 }
 
+/// 메인 창이 잠기거나(자동 잠금) 풀렸을 때 부른다(app_lock.dart) — 열려 있는 프로젝트 창도
+/// 같이 가리고 푼다. 이 창은 다른 엔진이라 잠금 화면을 따로 그려야 한다(아래 'lock_changed').
+Future<void> broadcastLockChange(bool locked) async {
+  if (!Platform.isWindows) return;
+  // 창 목록을 못 얻어도(창 플러그인이 없는 환경 등) 잠금·해제 자체는 이미 끝났으니 조용히 넘어간다.
+  List<WindowController> windows;
+  try {
+    windows = await _findProjectWindows();
+  } catch (_) {
+    return;
+  }
+  for (final controller in windows) {
+    try {
+      await controller.invokeMethod('lock_changed', {'locked': locked});
+    } catch (_) {
+      // 그 사이 닫혔으면 무시 — 다음에 열 때 저장된 잠금 상태(AppSettings.appLocked)를 읽는다.
+    }
+  }
+}
+
 /// desktop_multi_window로 만들어진 서브 창의 엔진에서 실행되는 진입점. main.dart의 main()이
 /// 창 인자를 보고 서브 창이라고 판단하면(비어있지 않은 arguments) 이걸 부른다.
 Future<void> runProjectWindow(WindowController controller) async {
@@ -133,13 +153,15 @@ Future<void> runProjectWindow(WindowController controller) async {
         final href = (call.arguments as Map?)?['href'] as String?;
         if (href != null) AppLinks.requestOpen(href);
         return null;
+      case 'lock_changed':
+        final locked = (call.arguments as Map?)?['locked'] == true;
+        await appSettings.setAppLocked(locked);
+        return null;
       case 'theme_changed':
         final modeName = (call.arguments as Map?)?['mode'] as String?;
-        await appSettings.setThemeMode(switch (modeName) {
-          'light' => ThemeMode.light,
-          'dark' => ThemeMode.dark,
-          _ => ThemeMode.system,
-        });
+        await appSettings.setThemeMode(
+          modeName == 'dark' ? ThemeMode.dark : ThemeMode.light,
+        );
         return null;
       default:
         throw MissingPluginException('Not implemented: ${call.method}');
@@ -215,6 +237,16 @@ class _ProjectWindowApp extends StatelessWidget {
         ),
         darkTheme: ThemeData(colorScheme: darkColorScheme, useMaterial3: true),
         themeMode: session.settings.themeMode,
+        // 메인 창이 잠겨 있으면(자동 잠금) 이 창도 가린다 — 잠금 해제는 메인 창에서 한다.
+        builder: (context, child) {
+          final locked = session.settings.appLocked;
+          return Stack(
+            children: [
+              ExcludeFocus(excluding: locked, child: child!),
+              if (locked) const Positioned.fill(child: _LockedCover()),
+            ],
+          );
+        },
         home: ListenableBuilder(
           listenable: session,
           builder: (context, _) {
@@ -265,6 +297,32 @@ class _ProjectWindowApp extends StatelessWidget {
                 return ProjectDialog(session: session, embedInWindow: true);
             }
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// 메인 창이 잠겨 있는 동안 프로젝트 창을 덮는 화면.
+class _LockedCover extends StatelessWidget {
+  const _LockedCover();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF5A5A5A),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.lock, size: 90, color: Colors.white),
+            SizedBox(height: 16),
+            Text(
+              '현재 화면 잠금모드입니다.\n메신저 창에서 비밀번호를 입력해 잠금을 해제해주세요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white, fontSize: 15, height: 1.5),
+            ),
+          ],
         ),
       ),
     );

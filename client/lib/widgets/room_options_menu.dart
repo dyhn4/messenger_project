@@ -4,8 +4,10 @@ import '../models/app_user.dart';
 import '../models/room.dart';
 import '../screens/announcement_list_screen.dart';
 import '../screens/chat_screen.dart';
+import '../screens/files_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/invite_members_screen.dart';
+import '../screens/links_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/session.dart';
@@ -162,12 +164,95 @@ Future<void> showHideDmDialog(
   await session.leaveRoom(room.id);
 }
 
-/// 채팅 화면 우측 상단의 "더보기" 메뉴: 멤버 목록/초대(토픽·그룹만) + 나가기(전부).
-/// DM은 멤버가 항상 나+상대방 둘뿐이라 멤버 목록/초대는 의미가 없어서 나가기만 보여준다.
+/// 채팅 화면 우측 상단 — 자주 쓰는 **멤버(인원 수) · 알림 켜기/끄기 · 멤버 초대**는 "더보기" 왼쪽에
+/// 아이콘으로 꺼내 두고, 나머지(공지 · 파일 보기 · 링크 보기 · 자동 삭제 타이머 · 대화 내보내기 ·
+/// 나가기)는 "더보기" 메뉴에 둔다. DM은 멤버가 항상 나+상대방 둘뿐이라 멤버/초대 아이콘이 없다.
 class RoomOptionsMenu extends StatelessWidget {
   final Session session;
   final Room room;
-  const RoomOptionsMenu({super.key, required this.session, required this.room});
+
+  /// "파일 보기"/"링크 보기" — PC는 오른쪽 패널을 이 방으로 걸러서 연다(desktop_home_screen.dart).
+  /// 안 주면(모바일) 전체화면으로 연다.
+  final ValueChanged<Room>? onOpenFiles;
+  final ValueChanged<Room>? onOpenLinks;
+
+  const RoomOptionsMenu({
+    super.key,
+    required this.session,
+    required this.room,
+    this.onOpenFiles,
+    this.onOpenLinks,
+  });
+
+  void _openFiles(BuildContext context) {
+    final handler = onOpenFiles;
+    if (handler != null) return handler(room);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (routeContext) => Scaffold(
+          body: SafeArea(
+            child: FilesScreen(
+              session: session,
+              initialRoomId: room.id,
+              onClose: () => Navigator.of(routeContext).pop(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 모바일의 "링크 보기" — "대화방에서 보기"를 누르면 링크 화면을 닫고, 지금 채팅 화면을 그 방
+  /// (해당 메시지로 스크롤한) 화면으로 바꾼다.
+  void _openLinks(BuildContext context) {
+    final handler = onOpenLinks;
+    if (handler != null) return handler(room);
+    final navigator = Navigator.of(context);
+    navigator.push(
+      MaterialPageRoute(
+        builder: (routeContext) => Scaffold(
+          body: SafeArea(
+            child: LinksScreen(
+              session: session,
+              initialRoomId: room.id,
+              onClose: () => Navigator.of(routeContext).pop(),
+              onOpenMessage: (target, messageId) {
+                Navigator.of(routeContext).pop();
+                navigator.pushReplacement(
+                  MaterialPageRoute(
+                    builder: (_) => ChatScreen(
+                      session: session,
+                      room: target,
+                      highlightMessageId: messageId,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _invite(BuildContext context) {
+    // home_screen.dart의 wideBreakpoint(700)와 맞춰서, 넓은(PC) 화면에서는 "새 대화"처럼
+    // 플로팅으로, 좁은(모바일) 화면에서는 전체화면으로 띄운다.
+    final isWide = MediaQuery.sizeOf(context).width >= 700;
+    if (isWide) {
+      showDialog(
+        context: context,
+        builder: (_) =>
+            InviteMembersScreen(session: session, room: room, asDialog: true),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => InviteMembersScreen(session: session, room: room),
+        ),
+      );
+    }
+  }
 
   Future<void> _openMemberProfile(BuildContext context, AppUser member) async {
     if (member.id == session.userId) {
@@ -228,124 +313,127 @@ class RoomOptionsMenu extends StatelessWidget {
     final leaveLabel = room.isSecret
         ? '채팅방 나가기'
         : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
+    final iconColor = IconTheme.of(context).color;
 
-    return PopupMenuButton<void>(
-      icon: const Icon(Icons.more_vert),
-      tooltip: '더보기',
-      itemBuilder: (context) => [
-        PopupMenuItem<void>(
-          onTap: () => session.toggleMuted(room),
-          child: Row(
-            children: [
-              Icon(
-                room.muted
-                    ? Icons.notifications_active_outlined
-                    : Icons.notifications_off_outlined,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!isDm)
+          Tooltip(
+            message: '멤버',
+            child: TextButton.icon(
+              onPressed: () => _showMembers(context),
+              style: TextButton.styleFrom(
+                foregroundColor: iconColor,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(40, 40),
               ),
-              const SizedBox(width: 8),
-              Text(room.muted ? '알림 켜기' : '알림 끄기'),
-            ],
+              icon: const Icon(Icons.people_outline, size: 22),
+              label: Text('${room.members.length}'),
+            ),
           ),
+        IconButton(
+          icon: Icon(
+            room.muted
+                ? Icons.notifications_off_outlined
+                : Icons.notifications_none_outlined,
+          ),
+          tooltip: room.muted ? '알림 켜기' : '알림 끄기',
+          onPressed: () => session.toggleMuted(room),
         ),
-        // 공지는 읽기가 방 멤버 전원에게 열려 있으므로(채팅방 상단 배너, 히스토리 목록) 이
-        // 메뉴 항목 자체는 누구나 본다 — "글쓰기" 버튼만 토픽 생성 권한이 있는 사람에게 보인다
-        // (announcement_list_screen.dart의 _canWrite).
-        if (isTopic)
-          PopupMenuItem<void>(
-            onTap: () => showAnnouncementListScreen(context, session, room),
-            child: const Row(
-              children: [
-                Icon(Icons.campaign_outlined),
-                SizedBox(width: 8),
-                Text('공지'),
-              ],
-            ),
+        // 초대 권한은 팀 설정(초대 권한: 정회원 이상 / 관리자만)과 내 등급에 달려 있다.
+        if (!isDm && session.canInviteToRooms)
+          IconButton(
+            icon: const Icon(Icons.person_add_alt_outlined),
+            tooltip: '멤버 초대',
+            onPressed: () => _invite(context),
           ),
-        if (!isDm) ...[
-          PopupMenuItem<void>(
-            onTap: () => _showMembers(context),
-            child: Row(
-              children: [
-                const Icon(Icons.people_outline),
-                const SizedBox(width: 8),
-                Text('멤버 (${room.members.length})'),
-              ],
-            ),
-          ),
-          // 초대 권한은 팀 설정(초대 권한: 정회원 이상 / 관리자만)과 내 등급에 달려 있다.
-          if (session.canInviteToRooms)
+        PopupMenuButton<void>(
+          icon: const Icon(Icons.more_vert),
+          tooltip: '더보기',
+          itemBuilder: (context) => [
+            // 공지는 읽기가 방 멤버 전원에게 열려 있으므로(채팅방 상단 배너, 히스토리 목록) 이
+            // 메뉴 항목 자체는 누구나 본다 — "글쓰기" 버튼만 토픽 생성 권한이 있는 사람에게
+            // 보인다(announcement_list_screen.dart의 _canWrite).
+            if (isTopic)
+              PopupMenuItem<void>(
+                onTap: () => showAnnouncementListScreen(context, session, room),
+                child: const Row(
+                  children: [
+                    Icon(Icons.campaign_outlined),
+                    SizedBox(width: 8),
+                    Text('공지'),
+                  ],
+                ),
+              ),
+            // 비밀 대화는 서버가 내용을 몰라서(종단간 암호화) 파일·링크 모아보기에서 빠진다.
+            if (!room.isSecret) ...[
+              PopupMenuItem<void>(
+                onTap: () => _openFiles(context),
+                child: const Row(
+                  children: [
+                    Icon(Icons.insert_drive_file_outlined),
+                    SizedBox(width: 8),
+                    Text('파일 보기'),
+                  ],
+                ),
+              ),
+              PopupMenuItem<void>(
+                onTap: () => _openLinks(context),
+                child: const Row(
+                  children: [
+                    Icon(Icons.link),
+                    SizedBox(width: 8),
+                    Text('링크 보기'),
+                  ],
+                ),
+              ),
+            ],
+            if (room.isSecret)
+              PopupMenuItem<void>(
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (_) =>
+                      SelfDestructPickerDialog(session: session, room: room),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.timer_outlined),
+                    const SizedBox(width: 8),
+                    Text(
+                      room.secretSelfDestructSeconds == null
+                          ? '자동 삭제 타이머'
+                          : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
+                    ),
+                  ],
+                ),
+              ),
+            // 비밀 대화는 서버가 평문을 몰라서(종단간 암호화) 지원하지 않는다 — export_chat_dialog.dart 참고.
+            if (!room.isSecret)
+              PopupMenuItem<void>(
+                onTap: () => showExportChatDialog(context, session, room),
+                child: const Row(
+                  children: [
+                    Icon(Icons.file_download_outlined),
+                    SizedBox(width: 8),
+                    Text('대화 내보내기'),
+                  ],
+                ),
+              ),
             PopupMenuItem<void>(
-              onTap: () {
-                // home_screen.dart의 wideBreakpoint(700)와 맞춰서, 넓은(PC) 화면에서는
-                // "새 대화"처럼 플로팅으로, 좁은(모바일) 화면에서는 전체화면으로 띄운다.
-                final isWide = MediaQuery.sizeOf(context).width >= 700;
-                if (isWide) {
-                  showDialog(
-                    context: context,
-                    builder: (_) => InviteMembersScreen(
-                      session: session,
-                      room: room,
-                      asDialog: true,
-                    ),
-                  );
-                } else {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          InviteMembersScreen(session: session, room: room),
-                    ),
-                  );
-                }
-              },
-              child: const Row(
+              onTap: () => showLeaveRoomDialog(context, session, room),
+              child: Row(
                 children: [
-                  Icon(Icons.person_add_alt_outlined),
-                  SizedBox(width: 8),
-                  Text('멤버 초대'),
+                  const Icon(Icons.exit_to_app, color: Colors.redAccent),
+                  const SizedBox(width: 8),
+                  Text(
+                    leaveLabel,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
                 ],
               ),
             ),
-        ],
-        if (room.isSecret)
-          PopupMenuItem<void>(
-            onTap: () => showDialog(
-              context: context,
-              builder: (_) =>
-                  SelfDestructPickerDialog(session: session, room: room),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.timer_outlined),
-                const SizedBox(width: 8),
-                Text(
-                  room.secretSelfDestructSeconds == null
-                      ? '자동 삭제 타이머'
-                      : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
-                ),
-              ],
-            ),
-          ),
-        // 비밀 대화는 서버가 평문을 몰라서(종단간 암호화) 지원하지 않는다 — export_chat_dialog.dart 참고.
-        if (!room.isSecret)
-          PopupMenuItem<void>(
-            onTap: () => showExportChatDialog(context, session, room),
-            child: const Row(
-              children: [
-                Icon(Icons.file_download_outlined),
-                SizedBox(width: 8),
-                Text('대화 내보내기'),
-              ],
-            ),
-          ),
-        PopupMenuItem<void>(
-          onTap: () => showLeaveRoomDialog(context, session, room),
-          child: Row(
-            children: [
-              const Icon(Icons.exit_to_app, color: Colors.redAccent),
-              const SizedBox(width: 8),
-              Text(leaveLabel, style: const TextStyle(color: Colors.redAccent)),
-            ],
-          ),
+          ],
         ),
       ],
     );

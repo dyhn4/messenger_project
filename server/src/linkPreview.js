@@ -11,6 +11,13 @@ export function extractFirstUrl(text) {
   return m[0].replace(/[.,;:!?)\]}'"]+$/, '');
 }
 
+/** 텍스트에 나오는 http(s) URL 전부 — 나온 순서대로, 같은 주소는 한 번만("링크" 모아보기). */
+export function extractUrls(text) {
+  if (!text) return [];
+  const all = text.match(new RegExp(URL_REGEX.source, 'gi')) ?? [];
+  return [...new Set(all.map((u) => u.replace(/[.,;:!?)\]}'"]+$/, '')))];
+}
+
 /** SSRF 방지 — 사설/루프백/링크로컬 IP로는 절대 요청을 보내지 않는다(내부망 스캔에 쓰이는 걸
  * 막는다). 호스트명이 아니라 실제로 접속하는 IP를 봐야 하므로 dns.lookup 결과를 검사한다. */
 function isPrivateIp(ip) {

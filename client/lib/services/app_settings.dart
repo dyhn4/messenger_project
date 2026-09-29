@@ -20,6 +20,9 @@ const _kMessagePreviewMode = 'settings_message_preview_mode';
 const _kTeamSwitchStyle = 'settings_team_switch_style';
 const _kAlwaysOnTop = 'settings_always_on_top';
 const _kWindowOpacity = 'settings_window_opacity';
+const _kSendWithShiftEnter = 'settings_send_with_shift_enter';
+const _kAutoLockOnSleep = 'settings_auto_lock_on_sleep';
+const _kAppLocked = 'settings_app_locked';
 
 /// 모바일(안드로이드 스타일) 레이아웃으로 바뀌는 창 폭 기준(home_screen.dart의
 /// wideBreakpoint=700)보다 확실히 더 좁게 줄일 수 있도록 하는 최소 창 크기 — 사용자가
@@ -47,11 +50,23 @@ class AppSettings extends ChangeNotifier {
   bool downloadWithoutAsking = false;
   String downloadFolder = '';
   bool openFolderAfterDownload = true;
-  ThemeMode themeMode = ThemeMode.system;
+
+  /// 화면 테마 — 화이트(기본) 또는 다크. 예전의 "시스템 설정을 따름"은 화이트로 읽는다.
+  ThemeMode themeMode = ThemeMode.light;
   MessagePreviewMode messagePreviewMode = MessagePreviewMode.all;
   TeamSwitchStyle teamSwitchStyle = TeamSwitchStyle.dropdown;
   bool alwaysOnTop = false;
   double windowOpacity = 1.0;
+
+  /// 메시지 전송 키 — false(기본)면 Enter로 전송·Shift+Enter로 줄바꿈, true면 그 반대.
+  bool sendWithShiftEnter = false;
+
+  /// 절전 모드(또는 화면 꺼짐)에 들어가면 메신저를 잠글지(PC 전용 — app_lock.dart).
+  bool autoLockOnSleep = false;
+
+  /// 지금 잠겨 있는지 — 비밀번호를 넣어 풀 때까지 유지된다. 앱을 껐다 켜도 잠긴 채로 떠야
+  /// 하므로 저장해 둔다.
+  bool appLocked = false;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -70,6 +85,9 @@ class AppSettings extends ChangeNotifier {
         : TeamSwitchStyle.dropdown;
     alwaysOnTop = _prefs.getBool(_kAlwaysOnTop) ?? false;
     windowOpacity = _prefs.getDouble(_kWindowOpacity) ?? 1.0;
+    sendWithShiftEnter = _prefs.getBool(_kSendWithShiftEnter) ?? false;
+    autoLockOnSleep = _prefs.getBool(_kAutoLockOnSleep) ?? false;
+    appLocked = _prefs.getBool(_kAppLocked) ?? false;
     if (Platform.isWindows) {
       launchAtStartup = _readStartupPath() != null;
       // 창 자체의 실제 속성(항상 위로/불투명도)이라 위젯 재빌드만으론 반영이 안 되고, 매번
@@ -81,11 +99,8 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
-  ThemeMode _themeModeFromName(String? name) => switch (name) {
-    'light' => ThemeMode.light,
-    'dark' => ThemeMode.dark,
-    _ => ThemeMode.system,
-  };
+  ThemeMode _themeModeFromName(String? name) =>
+      name == 'dark' ? ThemeMode.dark : ThemeMode.light;
 
   MessagePreviewMode _messagePreviewModeFromName(String? name) =>
       switch (name) {
@@ -153,6 +168,25 @@ class AppSettings extends ChangeNotifier {
   Future<void> setTeamSwitchStyle(TeamSwitchStyle value) async {
     teamSwitchStyle = value;
     await _prefs.setString(_kTeamSwitchStyle, value.name);
+    notifyListeners();
+  }
+
+  Future<void> setSendWithShiftEnter(bool value) async {
+    sendWithShiftEnter = value;
+    await _prefs.setBool(_kSendWithShiftEnter, value);
+    notifyListeners();
+  }
+
+  Future<void> setAutoLockOnSleep(bool value) async {
+    autoLockOnSleep = value;
+    await _prefs.setBool(_kAutoLockOnSleep, value);
+    notifyListeners();
+  }
+
+  Future<void> setAppLocked(bool value) async {
+    if (appLocked == value) return;
+    appLocked = value;
+    await _prefs.setBool(_kAppLocked, value);
     notifyListeners();
   }
 

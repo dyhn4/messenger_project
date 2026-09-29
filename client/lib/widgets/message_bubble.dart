@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +19,7 @@ import '../models/project.dart' show parseTypeColor;
 import '../services/app_links.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
+import 'external_image.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
 import 'message_actions.dart';
@@ -931,7 +930,7 @@ class _LinkPreviewCard extends StatelessWidget {
             if (preview.imageUrl != null)
               AspectRatio(
                 aspectRatio: 1.9,
-                child: _ExternalImage(url: preview.imageUrl!),
+                child: ExternalImage(url: preview.imageUrl!),
               ),
             Padding(
               padding: const EdgeInsets.all(10),
@@ -1070,79 +1069,3 @@ String? _appLinkOf(Message m) {
   return null;
 }
 
-/// 링크 미리보기 이미지 전용 — 임의의 외부 웹사이트에서 오는 이미지라 그냥 Image.network를
-/// 쓰면 못 불러온다. main.dart가 앱 시작 시 PinnedTls.installGlobalHttpOverrides()로 전역
-/// HttpClient를 "우리 서버 자체 서명 인증서 하나만" 신뢰하도록 가로채놓는데(pinned_tls.dart),
-/// 이 override는 앱 전체 HttpClient에 다 걸려서 Image.network가 내부적으로 만드는 HttpClient도
-/// 똑같이 적용된다 — 그래서 공인 인증서를 쓰는 일반 웹사이트 이미지는 전부 인증서 검증 실패로
-/// 조용히(errorBuilder) 안 뜨고 있었다. 이 위젯만 별도 isolate(Isolate.run)에서 이미지를
-/// 받아온 뒤 Image.memory로 그린다 — 새 isolate는 main isolate의 HttpOverrides.global을
-/// 안 물려받는(격리된 static 상태) 덕분에 거기서 만드는 HttpClient는 평범한(공인 CA 신뢰)
-/// 기본 상태다. 우리 서버와의 통신(API/소켓/첨부파일)에 쓰는 핀닝은 그대로 안전하게 유지된다.
-///
-/// (처음엔 HttpOverrides.runZoned로 "이 fetch만 전역 재정의를 벗어나게" 시도했는데, 그
-/// zone의 createHttpClient 콜백 안에서 다시 HttpClient()를 호출하면 그 호출도 같은 zone
-/// 안이라 자기 자신을 또 부르는 무한 재귀에 빠져 StackOverflowError가 났다(직접 재현해서
-/// 확인함) — zone 기반 접근 자체가 이 용도에는 안 맞는 함정이었다.)
-class _ExternalImage extends StatefulWidget {
-  final String url;
-  const _ExternalImage({required this.url});
-
-  @override
-  State<_ExternalImage> createState() => _ExternalImageState();
-}
-
-class _ExternalImageState extends State<_ExternalImage> {
-  static const _maxBytes = 8 * 1024 * 1024; // 미리보기 이미지치고 과하게 크면 안전하게 포기.
-
-  late final Future<Uint8List> _future = _fetch(widget.url);
-
-  static Future<Uint8List> _fetch(String url) {
-    // 새 isolate는 main.dart가 설치해둔 전역 HttpOverrides(우리 서버 인증서만 신뢰)를 안
-    // 물려받는다 — isolate마다 static 상태가 완전히 독립돼 있어서, 여기서 만드는 HttpClient는
-    // 그 핀닝과 무관하게 평범한(공인 CA 신뢰) 기본 상태로 동작한다.
-    return Isolate.run(() async {
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 8);
-      try {
-        final request = await client.getUrl(Uri.parse(url));
-        final response = await request.close().timeout(
-          const Duration(seconds: 8),
-        );
-        if (response.statusCode != 200) {
-          throw Exception('HTTP ${response.statusCode}');
-        }
-        final bytes = <int>[];
-        await for (final chunk in response) {
-          bytes.addAll(chunk);
-          if (bytes.length > _maxBytes) {
-            throw Exception('이미지가 너무 큽니다');
-          }
-        }
-        return Uint8List.fromList(bytes);
-      } finally {
-        client.close(force: true);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Uint8List>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done ||
-            !snapshot.hasData) {
-          return const SizedBox.shrink();
-        }
-        // 이미지 링크가 나중에 깨지거나(원본이 지워짐) 디코딩할 수 없는 형식이어도 카드
-        // 전체가 에러로 안 보이고 텍스트만 있는 카드로 자연스럽게 떨어진다.
-        return Image.memory(
-          snapshot.data!,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => const SizedBox.shrink(),
-        );
-      },
-    );
-  }
-}

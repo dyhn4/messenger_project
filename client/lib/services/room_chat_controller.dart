@@ -65,6 +65,7 @@ class RoomChatController extends ChangeNotifier {
       TypingGate.instance.run(this, super.notifyListeners);
 
   final Session _session;
+  Session get session => _session;
   final Room room;
   final List<Message> messages = [];
   bool loading = true;

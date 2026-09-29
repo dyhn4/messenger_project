@@ -18,12 +18,14 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/project/project_window.dart';
 import 'screens/server_setup_screen.dart';
+import 'services/app_lock.dart';
 import 'services/app_settings.dart';
 import 'services/deep_link_service.dart';
 import 'services/fcm_config_cache.dart';
 import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
+import 'widgets/app_lock_overlay.dart';
 import 'widgets/update_banner.dart';
 import 'services/app_links.dart';
 import 'widgets/grab_cursors.dart';
@@ -242,6 +244,7 @@ class _MyAppState extends State<MyApp>
         .then((_) => _checkNotificationLaunch());
     session.addListener(_tryOpenPendingLaunchRoom);
     session.init();
+    AppLock.install(session);
     deepLinks.getInitialPairRequest().then((req) {
       if (req != null) _onPairRequest(req);
     });
@@ -476,11 +479,15 @@ class _MyAppState extends State<MyApp>
           // 각 화면이 아니라 MaterialApp 레벨(Navigator 트리 전체를 감싸는 자리)에서 한 번만
           // 그린다 — UpdateDialog(로그인/홈 화면이 한 번 띄우는 모달)과 달리 계속 떠 있는
           // 은근한 알림이라 여기 둬야 어느 화면에서도 안 사라진다.
-          builder: (context, child) => Stack(
-            children: [
-              ?child,
-              UpdateBanner(session: session, navigatorKey: navigatorKey),
-            ],
+          // 자동 잠금(환경설정 > 시스템 설정) — 잠겨 있으면 화면·다이얼로그 전부를 잠금 화면이 덮는다.
+          builder: (context, child) => AppLockGate(
+            session: session,
+            child: Stack(
+              children: [
+                ?child,
+                UpdateBanner(session: session, navigatorKey: navigatorKey),
+              ],
+            ),
           ),
         );
       },

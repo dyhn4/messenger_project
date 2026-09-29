@@ -262,6 +262,40 @@ export async function listAttachments({ requesterId, teamId, roomId, senderId, l
   return rows.map((r) => r.message);
 }
 
+/**
+ * "링크" 모아보기 — 내가 속한 방(비밀 대화 제외)에서 본문이나 글자 서식(링크 걸린 글자)에 http(s)
+ * 주소가 들어 있는 메시지. listAttachments와 같은 범위(팀·방·보낸 사람·DM 기록 하한)로 좁히고,
+ * 실제 주소를 뽑아 한 줄씩 펼치는 건 호출부(links.js)가 한다.
+ */
+export async function listLinkMessages({ requesterId, teamId, roomId, senderId, limit }) {
+  const conditions = [
+    eq(roomMembers.userId, requesterId),
+    isNull(messages.deletedAt),
+    notBeforeDmHistoryFloor,
+    or(
+      sql`${messages.text} ilike '%http%'`,
+      sql`${messages.textFormat}::text ilike '%http%'`,
+    ),
+  ];
+  if (teamId) conditions.push(eq(rooms.teamId, teamId));
+  if (roomId) conditions.push(eq(messages.roomId, roomId));
+  if (senderId) conditions.push(eq(messages.senderId, senderId));
+
+  const rows = await db
+    .select({ message: messages })
+    .from(messages)
+    .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .leftJoin(
+      dmHistoryFloors,
+      and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
+    )
+    .where(and(eq(rooms.isSecret, false), ...conditions))
+    .orderBy(desc(messages.createdAt))
+    .limit(limit);
+  return rows.map((r) => r.message);
+}
+
 /** 비밀 대화 자동 삭제(secretExpiry.js): 상대방이 읽어서 expiresAt이 잡힌 뒤 그 시각이
  * 지난 메시지. 최초 1회만 읽음 처리되도록 readAt이 아직 없을 때만 세팅한다. */
 export async function markMessageRead(id, expiresAt) {

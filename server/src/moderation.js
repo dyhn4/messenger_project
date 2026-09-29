@@ -1,5 +1,5 @@
 import { AUDIT, recordAudit } from './audit.js';
-import { teamAccess } from './access.js';
+import { topicAccess } from './access.js';
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findTeamById } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
@@ -22,13 +22,23 @@ import { canModerateContent, editDeleteWindowSeconds, formatWindow } from './per
  *       - 비밀 대화(E2EE) 방이 아니다(서버가 내용을 볼 수 없는 대화라 관리 대상에서 뺀다).
  *  4. 본인이든 관리자든 **팀이 정한 수정/삭제 가능 시간 안**이어야 한다(기본 5분).
  *
+ * 보드 뷰 게시글([isPost])은 두 가지가 다르다 — 남의 게시글은 팀 관리자뿐 아니라 **그 토픽의
+ * 토픽 관리자**도 지울 수 있고(토픽을 관리할 수 있는 사람, permissions.js canManageTopic), 오래
+ * 두고 고쳐 쓰는 글이라 **수정/삭제 가능 시간 제한이 없다**(1번 팀 스위치는 그대로 따른다).
+ *
  * [action]은 'edit' | 'delete'. 안내 문구를 그에 맞게 만드는 데도 쓴다.
  */
-export async function canModifyContent({ roomId, senderId, createdAt, requesterId, action, noun = '메시지' }) {
+export async function canModifyContent({ roomId, senderId, createdAt, requesterId, action, noun, isPost = false }) {
   const verb = action === 'edit' ? '수정' : '삭제';
+  noun ??= isPost ? '게시글' : '메시지';
 
   const room = await findRoomById(roomId);
   if (!room) return { ok: false, status: 404, error: '방을 찾을 수 없습니다.' };
+  // 나갔거나 내보내진 사람은 자기 글이라도 더 이상 고치거나 지울 수 없다 — 예전 id로 남은 멤버들의
+  // 대화를 바깥에서 바꾸지 못하게(시간 제한이 없는 게시글은 특히).
+  if (!(await isRoomMember(room.id, requesterId))) {
+    return { ok: false, status: 403, error: '이 방의 멤버가 아닙니다.' };
+  }
 
   const team = await findTeamById(room.teamId);
   if (team && team.messageEditDeleteEnabled === false) {
@@ -39,14 +49,15 @@ export async function canModifyContent({ roomId, senderId, createdAt, requesterI
     const denied = { ok: false, status: 403, error: `본인 ${noun}만 ${verb}할 수 있습니다.` };
     if (action !== 'delete') return denied; // 남의 글 수정은 관리자도 불가
     if (room.isSecret) return denied;
-    if (!(await isRoomMember(room.id, requesterId))) return denied;
-    // 남의 글 삭제 = 그 팀을 관리할 수 있는 사람(팀 소유자 또는 계정 등급 관리자).
-    const access = await teamAccess(room.teamId, requesterId);
-    if (!canModerateContent(access)) return denied;
+    const access = await topicAccess(room, requesterId);
+    if (!access.isRoomMember) return denied;
+    // 남의 글 삭제 = 그 팀을 관리할 수 있는 사람(팀 소유자 또는 계정 등급 관리자). 게시글은
+    // 토픽 관리자까지(access.canManage — 팀 관리자도 포함한다).
+    if (!(isPost ? access.canManage : canModerateContent(access))) return denied;
   }
 
   const windowSeconds = editDeleteWindowSeconds(team);
-  if (Date.now() - new Date(createdAt).getTime() > windowSeconds * 1000) {
+  if (!isPost && Date.now() - new Date(createdAt).getTime() > windowSeconds * 1000) {
     return {
       ok: false,
       status: 403,
@@ -66,7 +77,8 @@ export async function recordModerationAudit(req, content, kind) {
   const room = await findRoomById(content.roomId);
   const team = room ? await findTeamById(room.teamId) : null;
   const actor = await findUserById(req.user.sub);
-  const label = kind === 'comment' ? '댓글' : '메시지';
+  // 게시글('post')은 행위 코드는 메시지 삭제 그대로 두고(관리자 콘솔 필터가 같은 항목으로 묶임) 문구만 구분한다.
+  const label = { comment: '댓글', post: '게시글' }[kind] ?? '메시지';
 
   recordAudit({
     actorId: req.user.sub,
@@ -74,7 +86,7 @@ export async function recordModerationAudit(req, content, kind) {
     action: kind === 'comment' ? AUDIT.commentDelete : AUDIT.messageDelete,
     teamId: team?.id ?? null,
     teamName: team?.name ?? null,
-    targetType: kind,
+    targetType: kind === 'comment' ? 'comment' : 'message',
     targetId: content.id,
     targetLabel: content.senderName,
     detail: `${room?.name ?? '대화방'}에서 ${content.senderName} 님의 ${label} 삭제`,

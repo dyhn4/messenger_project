@@ -318,6 +318,20 @@ export const rooms = pgTable(
     iconEmoji: text('icon_emoji'),
     iconColor: text('icon_color'),
     iconUrl: text('icon_url'),
+    // ── 아래는 토픽에서만 의미가 있다(그룹/DM은 항상 기본값) ──
+    // 보기 방식 — 'chat'(챗 뷰, 메시지를 주고받는 대화방) | 'board'(보드 뷰, 제목 있는 게시글만
+    // 올리는 게시판 — messages.type = 'post'). 이미 쌓인 글의 모양이 달라서 만든 뒤에는 못 바꾼다.
+    viewMode: text('view_mode').notNull().default('chat'),
+    // 읽기 전용 — 토픽을 관리할 수 있는 사람(토픽 관리자·팀 관리자)만 글을 쓴다(socket.js).
+    // 댓글은 계속 달 수 있다(공지 아래 질문·답글은 막지 않기로 함).
+    readOnly: boolean('read_only').notNull().default(false),
+    // 정회원 자동 초대 — 새로 팀에 들어오는 정회원 이상을 이 토픽에 자동으로 넣는다(teams.js).
+    // 공개 토픽에서만 의미가 있어 비공개면 항상 false로 둔다.
+    autoInvite: boolean('auto_invite').notNull().default(false),
+    // 조용히 나가기 — 멤버가 나가거나 내보내져도 "OOO 님이 나갔습니다/내보냈습니다" 안내를 안 남긴다.
+    quietLeave: boolean('quiet_leave').notNull().default(false),
+    // 토픽 보관 — 찍혀 있으면 목록의 '보관된 토픽'으로 옮겨지고 읽기 전용처럼 동작한다(내용은 그대로).
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
   },
   (t) => [
     index('rooms_team_id_idx').on(t.teamId),
@@ -356,8 +370,57 @@ export const roomMembers = pgTable(
     // 이제 순전히 내 개인 설정으로만 다룬다(즐겨찾기/뮤트와 같은 방식). 상대가 새 메시지를
     // 보내면 서버가 자동으로 false로 되돌린다(rooms.js unhideDmForOtherMembers 참고).
     hidden: boolean('hidden').notNull().default(false),
+    // 토픽 안에서의 역할 — 'admin'(토픽 관리자, 여러 명 가능) | 'member'. 토픽을 만든 사람이
+    // 'admin'으로 시작한다. 팀 관리자는 이 값과 무관하게 모든 토픽을 관리할 수 있다
+    // (permissions.js canManageTopic). 그룹/DM은 항상 'member'.
+    role: text('role').notNull().default('member'),
   },
   (t) => [primaryKey({ columns: [t.roomId, t.userId] }), index('room_members_user_id_idx').on(t.userId)],
+);
+
+/**
+ * 사이드바 토픽 폴더 — **개인 설정**이라 사람마다(팀마다) 따로 만든다(project_folders와 같은
+ * 방식). 폴더를 지워도 안에 있던 토픽은 그대로 두고 폴더 밖 목록으로 돌아간다(topic_folder_items만
+ * cascade).
+ */
+export const topicFolders = pgTable(
+  'topic_folders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    position: integer('position').notNull().default(0),
+    // 접어둔 폴더인지 — PC와 모바일에서 같은 모양으로 보이도록 서버에 둔다.
+    collapsed: boolean('collapsed').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('topic_folders_user_team_idx').on(t.userId, t.teamId)],
+);
+
+/** 어느 토픽을 내 어느 폴더에 넣었는지 — 한 토픽은 내 폴더 중 하나에만 들어간다. 토픽에서
+ * 나가거나 내보내지면 그 사람의 행도 같이 지운다(rooms.js). */
+export const topicFolderItems = pgTable(
+  'topic_folder_items',
+  {
+    folderId: uuid('folder_id')
+      .notNull()
+      .references(() => topicFolders.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    uniqueIndex('topic_folder_items_user_room_idx').on(t.userId, t.roomId),
+    index('topic_folder_items_folder_idx').on(t.folderId),
+  ],
 );
 
 /**
@@ -394,7 +457,9 @@ export const messages = pgTable(
     // 이미 판별 기준이라 표시 로직은 안 바뀐다.
     senderId: uuid('sender_id').references(() => users.id, { onDelete: 'set null' }),
     senderName: text('sender_name').notNull(),
-    type: text('type').notNull(), // 'text' | 'image' | 'file' | 'system'
+    type: text('type').notNull(), // 'text' | 'image' | 'file' | 'sticker' | 'system' | 'post'(보드 뷰 게시글)
+    // 보드 뷰 게시글(type = 'post')의 제목 — 본문은 text, 첨부는 message_attachments. 그 밖의 메시지는 null.
+    title: text('title'),
     text: text('text'),
     // 글자 서식 구간 — [{s, e, f, h?}] (textFormat.js 참고). 본문은 평문 그대로라 미리보기·검색은 그대로 쓴다.
     textFormat: jsonb('text_format'),
@@ -441,6 +506,9 @@ export const messages = pgTable(
     // 텍스트 옆에 "문의함 바로가기" 링크를 붙여서 누르면 그 문의로 바로 이동한다.
     isInquiryNotice: boolean('is_inquiry_notice').notNull().default(false),
     inquiryId: uuid('inquiry_id').references(() => inquiries.id, { onDelete: 'set null' }),
+    // 보드 뷰에서 "게시글 고정"한 시각 — 토픽을 관리할 수 있는 사람만 고정/해제한다(messages.js).
+    // 고정 목록은 이 시각이 아니라 게시글 작성 시각 최신순으로 보여준다.
+    pinnedAt: timestamp('pinned_at', { withTimezone: true }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),

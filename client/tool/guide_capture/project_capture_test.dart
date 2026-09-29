@@ -2322,8 +2322,13 @@ void main() {
     await settleGuide(tester);
     // 대화상자 뒤 입력칸 아래 줄의 화면 캡처 버튼 · "Shift + Enter 로 줄바꿈"은 Windows에만 있다
     // (테스트가 Windows에서 돌아 그려진다) — 실제 안드로이드처럼 그 자리를 배경색으로 지운다.
+    // 줄바꿈 안내는 버튼들을 놓고 남은 자리에 통째로 들어갈 때만 보여서(chat_input_bar.dart의
+    // _SendKeyHint) 없을 수도 있다 — 없으면 캡처 버튼 자리만 지운다.
     final capture = tester.getRect(find.byTooltip('화면 캡처'));
-    final hint = tester.getRect(find.text('Shift + Enter 로 줄바꿈'));
+    final hintFinder = find.text('Shift + Enter 로 줄바꿈');
+    final hint = hintFinder.evaluate().isEmpty
+        ? capture
+        : tester.getRect(hintFinder);
     await shot(
       tester,
       'project-phone-new-task',
@@ -2332,7 +2337,7 @@ void main() {
         Rect.fromLTRB(
           capture.left,
           math.min(capture.top, hint.top),
-          hint.right + 4,
+          math.max(capture.right, hint.right) + 4,
           math.max(capture.bottom, hint.bottom),
         ),
       ],

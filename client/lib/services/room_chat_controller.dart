@@ -8,7 +8,9 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/text_format.dart';
-import 'api_client.dart' show UploadCancelToken;
+import 'api_client.dart' show ApiException, UploadCancelToken;
+import 'file_type_utils.dart';
+import 'image_thumbnail.dart';
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'session.dart';
 import 'typing_gate.dart';
@@ -43,6 +45,17 @@ class UploadedAttachment {
     this.thumbnailKey,
     this.thumbnailNonce,
   });
+
+  /// message:send의 attachments 한 칸 — 여러 장을 한 말풍선으로 보낼 때(sendUploadedAttachments)와
+  /// 보드 게시글(sendPost)이 같은 모양을 쓴다.
+  Map<String, dynamic> toPayload() => {
+    'kind': isImage ? 'image' : 'file',
+    'fileUrl': url,
+    'fileName': fileName,
+    'fileSize': size,
+    'mimeType': ?mimeType,
+    'thumbnailUrl': ?thumbnailUrl,
+  };
 }
 
 /// 임시 파일 이름이 겹치지 않게 하는 일련번호([RoomChatController._writeTempFile] 참고).
@@ -59,10 +72,13 @@ class RoomChatController extends ChangeNotifier {
   }
 
   /// 대화 목록을 다시 그리게 하는 알림 — 한글을 조합하며 빠르게 치는 동안에는 잠깐 모아 둔다
-  /// (typing_gate.dart 참고).
+  /// (typing_gate.dart 참고). 방이 사라져(나가기·내보내짐·삭제) 정리된 뒤 늦게 끝난 요청이
+  /// 다시 그리려 하면 조용히 무시한다.
   @override
-  void notifyListeners() =>
-      TypingGate.instance.run(this, super.notifyListeners);
+  void notifyListeners() {
+    if (_disposed) return;
+    TypingGate.instance.run(this, super.notifyListeners);
+  }
 
   final Session _session;
   Session get session => _session;
@@ -71,6 +87,15 @@ class RoomChatController extends ChangeNotifier {
   bool loading = true;
   String? error;
   StreamSubscription? _readSub;
+  bool _disposed = false;
+
+  /// 보드 뷰 상단 "고정된 게시글"(게시글 작성 시각 최신순) — [loadPinnedPosts]로 채우고, 이후엔
+  /// 고정/해제·수정·삭제 브로드캐스트(applyEdit/applyDelete)로 그 자리에서 맞춘다. 타임라인
+  /// ([messages])에 이미 있는 게시글이면 같은 인스턴스를 써서 댓글·수정이 양쪽에 함께 보인다.
+  final List<Message> pinnedPosts = [];
+
+  /// [pinnedPosts]를 한 번이라도 받아왔는지 — 받기 전엔 실시간 고정 이벤트로 목록을 만들지 않는다.
+  bool pinnedPostsLoaded = false;
 
   static const _pageSize = 50;
 
@@ -110,6 +135,7 @@ class RoomChatController extends ChangeNotifier {
         room.id,
         limit: _pageSize,
       );
+      if (_disposed) return;
       await _session.decryptHistory(room, history);
       _mergeHistory(history);
       _advanceHistoryCursor(history);
@@ -123,6 +149,16 @@ class RoomChatController extends ChangeNotifier {
     loading = false;
     notifyListeners();
     markReadNow();
+  }
+
+  /// 처음 불러오기가 실패한 방을 다시 불러온다(보드의 "다시 시도"). 컨트롤러는 세션 내내 캐싱되고
+  /// refresh는 과거 페이지 커서를 잡지 않아서, 이게 없으면 다시 열어도 빈 목록에 머문다.
+  Future<void> retryLoad() async {
+    if (loading) return;
+    loading = true;
+    error = null;
+    notifyListeners();
+    await _load();
   }
 
   /// 채팅방 맨 위 근처까지 스크롤했을 때(chat_panel.dart) 그보다 오래된 메시지를 더
@@ -161,6 +197,12 @@ class RoomChatController extends ChangeNotifier {
   /// 끼워 넣는다. 뭔가 하나라도 바뀌면 true를 돌려준다.
   bool _mergeHistory(List<Message> history) {
     final byId = {for (final m in messages) m.id: m};
+    // 고정 목록에만 따로 있던 옛 게시글 — 타임라인에 들어올 때도 그 인스턴스를 그대로 쓴다(게시글
+    // 상세가 그 인스턴스를 들고 있을 수 있어서, 바꿔 끼우면 그 뒤 댓글·수정이 상세에 안 보인다).
+    final pinnedOnly = {
+      for (final p in pinnedPosts)
+        if (!byId.containsKey(p.id)) p.id: p,
+    };
     final newMessages = <Message>[];
     final newCommentEntries = <Message>[];
     var changed = false;
@@ -168,6 +210,15 @@ class RoomChatController extends ChangeNotifier {
     for (final incoming in history) {
       final existing = byId[incoming.id];
       if (existing == null) {
+        final pinned = pinnedOnly.remove(incoming.id);
+        if (pinned != null) {
+          _syncPostState(pinned, incoming);
+          _syncPinned(pinned); // 그 사이 고정이 풀렸거나 지워졌으면 고정 목록에서 뺀다.
+          _mergeComments(pinned, incoming.comments);
+          newMessages.add(pinned);
+          newCommentEntries.addAll(pinned.comments.map(Message.commentEntry));
+          continue;
+        }
         newMessages.add(incoming);
         newCommentEntries.addAll(incoming.comments.map(Message.commentEntry));
         continue;
@@ -178,6 +229,11 @@ class RoomChatController extends ChangeNotifier {
           existing.expiresAt != incoming.expiresAt) {
         existing.readAt = incoming.readAt;
         existing.expiresAt = incoming.expiresAt;
+        changed = true;
+      }
+      // 게시글은 고정/수정/삭제가 보드에 바로 보이는 상태라, 끊긴 동안 놓친 변경도 따라잡는다.
+      if (incoming.isPost && _syncPostState(existing, incoming)) {
+        _syncPinned(existing);
         changed = true;
       }
       final existingCommentIds = existing.comments.map((c) => c.id).toSet();
@@ -214,7 +270,15 @@ class RoomChatController extends ChangeNotifier {
   /// 불러올 때 댓글이 이미 함께 포함돼서 온다 — rooms.js의 /rooms/:id/messages 참고).
   void addComment(Comment c) {
     final idx = messages.indexWhere((m) => m.id == c.messageId);
-    if (idx == -1) return;
+    if (idx == -1) {
+      // 타임라인엔 아직 없는 옛 게시글이라도 고정 목록에 있으면 그 댓글 목록은 맞춰 둔다
+      // (게시글 상세가 그 인스턴스의 comments를 그대로 그린다).
+      final pinned = pinnedPosts.where((p) => p.id == c.messageId).firstOrNull;
+      if (pinned == null || pinned.comments.any((x) => x.id == c.id)) return;
+      pinned.comments.add(c);
+      notifyListeners();
+      return;
+    }
     final message = messages[idx];
     if (message.comments.any((x) => x.id == c.id)) {
       return; // 재연결 재전송 등으로 인한 중복 방지.
@@ -325,23 +389,35 @@ class RoomChatController extends ChangeNotifier {
   /// asComment와 원본 메시지의 comments 리스트 항목은 같은 Comment 인스턴스를 공유하므로
   /// (addComment/_mergeHistory 참고), 이 인스턴스 하나만 찾아 그 자리에서 바꾸면 양쪽에 함께 반영된다.
   void applyCommentEdit(Comment edited) {
-    final entry = _findCommentEntry(edited.id);
-    if (entry == null) return;
-    entry.asComment!.text = edited.text;
-    entry.asComment!.textFormat = edited.textFormat;
-    entry.asComment!.editedAt = edited.editedAt;
+    final target = _findComment(edited.id);
+    if (target == null) return;
+    target.text = edited.text;
+    target.textFormat = edited.textFormat;
+    target.editedAt = edited.editedAt;
     notifyListeners();
   }
 
   /// Session이 comment:deleted 브로드캐스트를 라우팅할 때 호출한다.
   void applyCommentDelete(String commentId) {
-    final entry = _findCommentEntry(commentId);
-    if (entry == null) return;
-    entry.asComment!.deleted = true;
+    final target = _findComment(commentId);
+    if (target == null) return;
+    target.deleted = true;
     if (room.isSecret) {
       unawaited(_session.secretSessionManager?.forgetDecryptedText(commentId));
     }
     notifyListeners();
+  }
+
+  /// 타임라인의 댓글 합성 항목에서 찾고, 없으면 고정 목록에만 있는 옛 게시글의 댓글에서 찾는다.
+  Comment? _findComment(String commentId) {
+    final entry = _findCommentEntry(commentId);
+    if (entry != null) return entry.asComment;
+    for (final p in pinnedPosts) {
+      for (final c in p.comments) {
+        if (c.id == commentId) return c;
+      }
+    }
+    return null;
   }
 
   Message? _findCommentEntry(String commentId) {
@@ -375,14 +451,139 @@ class RoomChatController extends ChangeNotifier {
   Future<void> deleteMessage(String messageId) =>
       _session.api!.deleteMessage(messageId);
 
-  /// Session이 message:edited 브로드캐스트를 라우팅할 때 호출한다.
+  /// Session이 message:edited 브로드캐스트를 라우팅할 때 호출한다. 게시글의 제목·고정 상태도
+  /// 이 이벤트로 오므로(고정/해제도 message:edited) 함께 반영하고 고정 목록을 맞춘다.
   void applyEdit(Message edited) {
-    final idx = messages.indexWhere((m) => m.id == edited.id);
-    if (idx == -1) return;
-    messages[idx].text = edited.text;
-    messages[idx].textFormat = edited.textFormat;
-    messages[idx].editedAt = edited.editedAt;
+    final targets = _instancesOf(edited.id);
+    if (targets.isEmpty) {
+      // 아직 안 불러온 옛 게시글이 고정됐다 — 브로드캐스트에는 댓글이 없어서(서버 postDto) 그대로
+      // 넣으면 댓글 0개로 보이므로, 고정 목록을 댓글까지 통째로 다시 받는다.
+      if (edited.isPost && edited.isPinned && pinnedPostsLoaded) {
+        unawaited(loadPinnedPosts());
+      }
+      return;
+    }
+    for (final m in targets) {
+      m.text = edited.text;
+      m.textFormat = edited.textFormat;
+      m.editedAt = edited.editedAt;
+      m.title = edited.title;
+      m.pinnedAt = edited.pinnedAt;
+    }
+    if (edited.isPost) _syncPinned(targets.first);
     notifyListeners();
+  }
+
+  /// 같은 id의 인스턴스들 — 타임라인([messages])의 것과, 아직 로드되지 않은 옛 게시글이라
+  /// [pinnedPosts]에만 있는 것(대개는 둘이 같은 인스턴스 하나).
+  List<Message> _instancesOf(String messageId) {
+    final found = <Message>[];
+    for (final m in messages) {
+      if (m.id == messageId) {
+        found.add(m);
+        break;
+      }
+    }
+    for (final p in pinnedPosts) {
+      if (p.id == messageId && !found.any((f) => identical(f, p))) {
+        found.add(p);
+        break;
+      }
+    }
+    return found;
+  }
+
+  /// REST로 다시 받은 게시글 값([incoming])을 [existing]에 옮긴다 — 바뀐 게 있으면 true.
+  bool _syncPostState(Message existing, Message incoming) {
+    if (existing.title == incoming.title &&
+        existing.text == incoming.text &&
+        existing.editedAt == incoming.editedAt &&
+        existing.pinnedAt == incoming.pinnedAt &&
+        existing.deleted == incoming.deleted) {
+      return false;
+    }
+    existing.title = incoming.title;
+    existing.text = incoming.text;
+    existing.textFormat = incoming.textFormat;
+    existing.editedAt = incoming.editedAt;
+    existing.pinnedAt = incoming.pinnedAt;
+    existing.deleted = incoming.deleted;
+    return true;
+  }
+
+  /// 타임라인 밖에서 들고 있던 게시글([post])의 댓글을 서버가 다시 준 목록([fresh])으로 맞춘다 —
+  /// 새 댓글은 붙이고, 이미 있는 댓글은 끊긴 동안 놓친 수정·삭제를 따라간다.
+  void _mergeComments(Message post, List<Comment> fresh) {
+    final known = {for (final c in post.comments) c.id: c};
+    var added = false;
+    for (final c in fresh) {
+      final existing = known[c.id];
+      if (existing == null) {
+        post.comments.add(c);
+        added = true;
+        continue;
+      }
+      existing.text = c.text;
+      existing.textFormat = c.textFormat;
+      existing.editedAt = c.editedAt;
+      existing.deleted = c.deleted;
+    }
+    if (added) post.comments.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  /// [post]의 고정 상태에 맞춰 [pinnedPosts]를 고친다 — 아직 한 번도 안 받아왔으면 그대로 둔다
+  /// (보드가 열릴 때 loadPinnedPosts로 통째로 받는다). 목록이 바뀌면 true.
+  bool _syncPinned(Message post) {
+    if (!pinnedPostsLoaded) return false;
+    final idx = pinnedPosts.indexWhere((p) => p.id == post.id);
+    final shouldPin = post.isPinned && !post.deleted;
+    if (shouldPin && idx == -1) {
+      pinnedPosts.add(post);
+      _sortPinnedPosts();
+      return true;
+    }
+    if (!shouldPin && idx != -1) {
+      pinnedPosts.removeAt(idx);
+      return true;
+    }
+    return false;
+  }
+
+  void _sortPinnedPosts() =>
+      pinnedPosts.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  /// 보드 상단 "고정된 게시글"을 서버에서 다시 받아온다(보드를 열 때·재연결 뒤). 실패해도
+  /// 보드 자체는 보여야 하므로 조용히 넘어가고 이전 목록을 그대로 둔다.
+  Future<void> loadPinnedPosts() async {
+    try {
+      final list = await _session.api!.fetchPinnedPosts(room.id);
+      if (_disposed) return;
+      final byId = {for (final m in messages) m.id: m};
+      final previous = {for (final p in pinnedPosts) p.id: p};
+      pinnedPosts
+        ..clear()
+        ..addAll(
+          list.map((p) {
+            // 이미 타임라인에 있는 게시글이면 그 인스턴스를 같이 써서 댓글·수정이 한 곳에서 반영되게 한다.
+            final inTimeline = byId[p.id];
+            if (inTimeline != null) {
+              _syncPostState(inTimeline, p);
+              return inTimeline;
+            }
+            // 고정 목록에만 있던 옛 게시글도 원래 인스턴스를 그대로 쓴다(상세가 들고 있을 수 있다).
+            final held = previous[p.id];
+            if (held == null) return p;
+            _syncPostState(held, p);
+            _mergeComments(held, p.comments);
+            return held;
+          }),
+        );
+      _sortPinnedPosts();
+      pinnedPostsLoaded = true;
+      notifyListeners();
+    } catch (_) {
+      // 고정 목록은 보드 상단의 부가 정보라 실패해도 조용히 넘어간다(다음에 다시 열면 재시도).
+    }
   }
 
   /// Session이 message:linkPreview 브로드캐스트를 라우팅할 때 호출한다.
@@ -412,9 +613,13 @@ class RoomChatController extends ChangeNotifier {
   /// deleted만 세운다 — 댓글 스레드가 이 메시지를 계속 참조하고, "삭제된 메시지입니다"로
   /// 표시만 바뀌어야 하기 때문이다.
   void applyDelete(String messageId) {
-    final idx = messages.indexWhere((m) => m.id == messageId);
-    if (idx == -1) return;
-    messages[idx].deleted = true;
+    final targets = _instancesOf(messageId);
+    if (targets.isEmpty) return;
+    for (final m in targets) {
+      m.deleted = true;
+    }
+    // 지워진 게시글은 고정 목록에서도 빠진다(서버 pinned-posts도 삭제된 글은 안 준다).
+    pinnedPosts.removeWhere((p) => p.id == messageId);
     if (room.isSecret) {
       unawaited(_session.secretSessionManager?.forgetDecryptedText(messageId));
     }
@@ -433,6 +638,16 @@ class RoomChatController extends ChangeNotifier {
         removed.add(m.type == MessageType.comment ? m.asComment!.id : m.id);
       }
     }
+    // 아무도 안 읽은 게시글을 지우면 서버가 이 경로(완전 삭제)로 알린다 — 고정 목록에서도 빼고,
+    // 게시글 상세처럼 그 인스턴스를 들고 있는 화면은 "삭제된 게시글"로 바뀌게 표시해 둔다.
+    final posts = [
+      for (final m in _instancesOf(messageId))
+        if (m.isPost) m,
+    ];
+    for (final p in posts) {
+      p.deleted = true;
+    }
+    pinnedPosts.removeWhere((p) => p.id == messageId);
     messages.removeWhere(
       (m) =>
           m.id == messageId ||
@@ -444,16 +659,27 @@ class RoomChatController extends ChangeNotifier {
         unawaited(_session.secretSessionManager?.forgetDecryptedText(id));
       }
     }
-    if (removed.isNotEmpty) notifyListeners();
+    if (removed.isNotEmpty || posts.isNotEmpty) notifyListeners();
   }
 
   /// 연결이 끊겼다가 다시 붙었을 때 Session이 호출한다. 끊긴 동안 놓쳤을 수 있는 메시지/댓글을
-  /// 다시 받아와 합친다.
+  /// 다시 받아와 합친다(보드의 고정 목록을 받아둔 적 있으면 그것도 다시 받는다).
   Future<void> refresh() async {
+    if (pinnedPostsLoaded) unawaited(loadPinnedPosts());
     try {
       final history = await _session.api!.fetchRoomMessages(room.id);
       await _session.decryptHistory(room, history);
-      if (!_mergeHistory(history)) return;
+      // 처음 불러오기가 실패했던 방이면, 이번에 받은 최근 페이지로 과거 페이지 커서를 잡고 오류를
+      // 거둔다 — 안 그러면 목록은 보여도 위(보드는 아래)로 더 불러오기가 영영 안 된다.
+      final recovering = error != null && _historyCursor == null;
+      if (recovering) {
+        error = null;
+        _advanceHistoryCursor(history);
+        if (history.where((m) => !m.outOfWindow).length < _pageSize) {
+          hasMoreHistory = false;
+        }
+      }
+      if (!_mergeHistory(history) && !recovering) return;
       notifyListeners();
       if (_session.activeRoomId == room.id && _session.appInForeground) {
         markReadNow();
@@ -604,6 +830,76 @@ class RoomChatController extends ChangeNotifier {
     );
   }
 
+  /// 보드 뷰 게시글을 올린다 — 채팅 메시지와 같은 message:send 경로에 type 'post'와 제목을
+  /// 실어 보낸다. [attachments]는 이미 올라간 첨부(uploadLocalFiles/uploadAttachment 결과)이고,
+  /// [textFormat]은 [text](앞뒤 공백을 뗀 것)의 글자 서식이다. 보드 목록 반영은 다른 메시지처럼
+  /// 서버가 돌려보내는 message:new로 이뤄지고, 여기선 서버가 저장한 게시글(있으면)을 돌려준다.
+  /// 읽기 전용/보관된 토픽 등 서버가 거절하면 그 문구로 [MessageSendException]이 난다.
+  Future<Message?> sendPost({
+    required String title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+    List<UploadedAttachment> attachments = const [],
+  }) async {
+    final trimmedTitle = title.trim();
+    final trimmedText = text.trim();
+    _validatePost(trimmedTitle, trimmedText);
+    if (attachments.length > postAttachmentsMaxCount) {
+      throw const ApiException('첨부는 30개까지 올릴 수 있습니다.');
+    }
+    return _session.chatSocket.send(
+      roomId: room.id,
+      type: 'post',
+      title: trimmedTitle,
+      text: trimmedText,
+      textFormat: trimmedText == text ? textFormat : null,
+      attachments: attachments.isEmpty
+          ? null
+          : [for (final u in attachments) u.toPayload()],
+    );
+  }
+
+  /// 게시글 제목·본문을 고친다(작성자만, 첨부는 그대로). 응답으로 받은 게시글을 곧바로 목록에
+  /// 반영하고(다른 멤버에겐 message:edited로 퍼진다) 돌려준다.
+  Future<Message> editPost(
+    String messageId, {
+    required String title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+  }) async {
+    final trimmedTitle = title.trim();
+    final trimmedText = text.trim();
+    _validatePost(trimmedTitle, trimmedText);
+    final updated = await _session.api!.editPost(
+      messageId,
+      title: trimmedTitle,
+      text: trimmedText,
+      textFormat: trimmedText == text ? textFormat : null,
+    );
+    applyEdit(updated);
+    return updated;
+  }
+
+  /// 게시글 고정/해제(토픽을 관리할 수 있는 사람만). 응답을 곧바로 목록·고정 목록에 반영한다.
+  Future<Message> setPostPinned(String messageId, bool pinned) async {
+    final updated = await _session.api!.setPostPinned(messageId, pinned);
+    applyEdit(updated);
+    return updated;
+  }
+
+  /// 서버와 같은 규칙(글자 수는 postTextLength 단위)으로 먼저 걸러서, 보내기 전에 편집 화면에 바로
+  /// 알려줄 수 있게 한다.
+  void _validatePost(String title, String text) {
+    if (title.isEmpty) throw const ApiException('제목을 입력하세요.');
+    if (postTextLength(title) > postTitleMaxLength) {
+      throw const ApiException('제목은 100자까지 쓸 수 있습니다.');
+    }
+    if (text.isEmpty) throw const ApiException('내용을 입력하세요.');
+    if (postTextLength(text) > postTextMaxLength) {
+      throw const ApiException('내용은 20000자까지 쓸 수 있습니다.');
+    }
+  }
+
   /// 파일을 서버에 올린다(썸네일 업로드, 비밀 대화면 원본 암호화까지 포함) — 실제 메시지/댓글
   /// 전송(sendUploadedAttachment/postUploadedCommentAttachment)과 분리해서, 첨부한 즉시(보내기를
   /// 누르기 전부터) 입력창에서 업로드를 시작할 수 있게 한다. [originalBytes]/[thumbBytes]는
@@ -657,6 +953,55 @@ class RoomChatController extends ChangeNotifier {
       mimeType: result.mimeType,
       thumbnailUrl: thumbnailUrl,
     );
+  }
+
+  /// 로컬 파일 하나를 채팅 입력칸과 같은 방식으로 올린다 — 이미지면(안 주면 확장자로 판별)
+  /// 버블/카드 미리보기용 썸네일도 만들어 같이 올린다. 게시글 편집 화면처럼 입력칸 밖에서
+  /// 첨부를 올릴 때 쓴다. 미리보기용 썸네일 바이트가 따로 필요하면 generateThumbnail을 쓰면 된다.
+  Future<UploadedAttachment> uploadLocalFile(
+    File file, {
+    bool? isImage,
+    void Function(int sent, int total)? onProgress,
+    UploadCancelToken? cancelToken,
+  }) async {
+    final image = isImage ?? looksLikeImagePath(file.path);
+    // 원본을 메모리로 읽는 건 썸네일을 만들거나(이미지) 암호화할 때(비밀 대화)뿐 — 큰 일반
+    // 파일은 읽지 않고 그대로 스트리밍해서 올린다(uploadAttachment는 비밀 대화에서만 바이트를 쓴다).
+    final bytes = image || room.isSecret
+        ? await file.readAsBytes()
+        : Uint8List(0);
+    final thumbBytes = image ? await generateThumbnail(bytes) : null;
+    return uploadAttachment(
+      file,
+      isImage: image,
+      originalBytes: bytes,
+      thumbBytes: thumbBytes,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+  }
+
+  /// 여러 파일을 순서대로 올려 첨부 목록을 만든다(sendPost에 그대로 넘기면 된다). [onProgress]는
+  /// 지금 올리는 파일의 순번(0부터)과 그 파일의 진행 바이트를 알려준다. 하나라도 실패하면
+  /// 그 예외가 그대로 나간다(이미 올라간 앞 파일들은 서버에 남지만 어디에도 연결되지 않는다).
+  Future<List<UploadedAttachment>> uploadLocalFiles(
+    List<File> files, {
+    void Function(int index, int sent, int total)? onProgress,
+    UploadCancelToken? cancelToken,
+  }) async {
+    final uploaded = <UploadedAttachment>[];
+    for (var i = 0; i < files.length; i++) {
+      uploaded.add(
+        await uploadLocalFile(
+          files[i],
+          onProgress: onProgress == null
+              ? null
+              : (sent, total) => onProgress(i, sent, total),
+          cancelToken: cancelToken,
+        ),
+      );
+    }
+    return uploaded;
   }
 
   /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 채팅 메시지를 보낸다. [caption]을 같이
@@ -733,17 +1078,7 @@ class RoomChatController extends ChangeNotifier {
       type: items.every((u) => u.isImage) ? 'image' : 'file',
       text: trimmed?.isNotEmpty == true ? trimmed : null,
       textFormat: trimmed == caption ? captionFormat : null,
-      attachments: [
-        for (final u in items)
-          {
-            'kind': u.isImage ? 'image' : 'file',
-            'fileUrl': u.url,
-            'fileName': u.fileName,
-            'fileSize': u.size,
-            'mimeType': ?u.mimeType,
-            'thumbnailUrl': ?u.thumbnailUrl,
-          },
-      ],
+      attachments: [for (final u in items) u.toPayload()],
     );
   }
 
@@ -786,6 +1121,7 @@ class RoomChatController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _readSub?.cancel();
     TypingGate.instance.cancel(this);
     super.dispose();

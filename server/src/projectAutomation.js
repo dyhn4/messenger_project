@@ -24,7 +24,21 @@ import {
 } from './db/queries/projects.js';
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { topicAccess } from './access.js';
+import { topicWriteDenial } from './permissions.js';
 import { postBotMessage } from './rooms.js';
+
+/**
+ * "채팅방 알림"을 이 방에 올릴 수 없는 이유 — 올릴 수 있으면 null. 사람이 보내는 메시지와 같은
+ * 규칙(socket.js의 message:send)이다: 보드 뷰 토픽은 게시글만 받고(일반 글은 게시판에 안 보인다),
+ * 읽기 전용·보관된 토픽은 규칙을 저장한 사람이 그 토픽을 관리할 수 있을 때만 올린다.
+ */
+async function chatMessageDenial(room, userId) {
+  if (room.type !== 'topic') return null;
+  if (room.viewMode === 'board') return '보드 뷰 토픽에는 채팅방 알림을 보낼 수 없습니다.';
+  if (!room.readOnly && !room.archivedAt) return null;
+  return topicWriteDenial({ room, canManage: (await topicAccess(room, userId)).canManage });
+}
 
 export const AUTOMATION_TRIGGERS = ['task_created', 'status_changed'];
 export const ACTION_KINDS = ['set_assignee', 'set_status', 'set_priority', 'add_reference', 'add_comment', 'notify'];
@@ -358,6 +372,8 @@ async function normalizeNodeConfig(kind, type, config, { project, userId, defs, 
       const room = roomId ? await findRoomById(roomId) : null;
       if (!room || room.teamId !== project.teamId || room.isSecret) return { error: '알림을 보낼 채팅방을 찾을 수 없습니다.' };
       if (!userId || !(await isRoomMember(room.id, userId))) return { error: '내가 참여 중인 채팅방만 고를 수 있습니다.' };
+      const denial = await chatMessageDenial(room, userId);
+      if (denial) return { error: denial };
       const text = trimmed(config.text);
       if (!text) return { error: '채팅방에 보낼 내용을 입력하세요.' };
       if (text.length > 500) return { error: '채팅방에 보낼 내용은 500자 이내로 입력하세요.' };
@@ -715,6 +731,9 @@ async function applyGraphAction({ project, rule, task, node, notifier, io }) {
       if (!config.savedBy || !(await isRoomMember(room.id, config.savedBy))) {
         throw new Error('규칙을 저장한 사람이 더 이상 채팅방 멤버가 아닙니다.');
       }
+      // 저장한 뒤 토픽이 읽기 전용·보관으로 바뀌었을 수 있어 실행할 때 다시 본다.
+      const denial = await chatMessageDenial(room, config.savedBy);
+      if (denial) throw new Error(denial);
       // 보낸 사람 이름이 이미 '자동화'라 머리말에는 규칙 이름만 둔다. 사람 메시지처럼 안읽음·푸시가 가게
       // 일반 텍스트로 올린다(시스템 메시지는 알림이 안 울린다).
       const body = clip(await fillTaskTokens(config.text, project, task), 1000);

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
 import '../models/announcement.dart';
@@ -355,6 +356,50 @@ class CallState {
   );
 }
 
+/// 토픽에서 내보내졌거나 토픽이 삭제돼서 이 방이 내 목록에서 사라졌다는 알림(room:removed) —
+/// user: 방으로만 온다. Session이 방을 정리한 뒤 같은 모양으로 roomRemovedEvents에 흘려서
+/// 화면이 안내 토스트([toastText])를 띄우고 열려 있던 그 방을 닫게 한다.
+class RoomRemovedEvent {
+  final String roomId;
+
+  /// 'deleted'(토픽 삭제) | 'kicked'(내보내짐). 모르는 값이 와도 방 정리는 똑같이 한다.
+  final String reason;
+
+  /// 토픽 이름(안내 문구용). 서버가 안 보냈으면 Session이 로컬에 있던 이름으로 채운다.
+  final String? name;
+
+  const RoomRemovedEvent({
+    required this.roomId,
+    required this.reason,
+    this.name,
+  });
+
+  factory RoomRemovedEvent.fromJson(Map<String, dynamic> json) =>
+      RoomRemovedEvent(
+        roomId: json['roomId'] as String,
+        reason: json['reason'] as String? ?? 'deleted',
+        name: json['name'] as String?,
+      );
+
+  bool get isDeleted => reason == 'deleted';
+  bool get isKicked => reason == 'kicked';
+
+  /// 토스트에 그대로 쓰는 안내 문구.
+  String get toastText {
+    final topic = name == null || name!.isEmpty ? '토픽' : "'$name' 토픽";
+    return isKicked ? '$topic에서 내보내졌습니다.' : '$topic이 삭제되었습니다.';
+  }
+}
+
+/// message:send가 실패했을 때(서버 거절·연결 없음·응답 없음) — 서버 문구를 그대로 보여줄 수
+/// 있게 toString이 "Exception: " 없이 문구만 돌려준다(읽기 전용 토픽 안내 등).
+class MessageSendException implements Exception {
+  final String message;
+  const MessageSendException(this.message);
+  @override
+  String toString() => message;
+}
+
 /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트(presence:update).
 class PresenceUpdate {
   final String userId;
@@ -428,8 +473,17 @@ class ChatSocket {
       StreamController<SecretRekeyEvent>.broadcast();
   final _secretRekeyAckController =
       StreamController<SecretRekeyEvent>.broadcast();
+  final _roomRemovedController = StreamController<RoomRemovedEvent>.broadcast();
+  final _topicFoldersChangedController = StreamController<String>.broadcast();
 
   Stream<Message> get messages => _messageController.stream;
+
+  /// 토픽에서 내보내졌거나 토픽이 삭제됐을 때(room:removed).
+  Stream<RoomRemovedEvent> get roomRemoved => _roomRemovedController.stream;
+
+  /// 내(다른 기기 포함) 토픽 폴더가 바뀌었을 때(topic-folders:changed) — 그 팀 id가 흐른다.
+  Stream<String> get topicFoldersChanged =>
+      _topicFoldersChangedController.stream;
 
   /// 서버가 방 생성/합류를 알려줄 때(room:created) 흘러나온다. Session이 방 목록을 upsert하는 데 쓴다.
   Stream<Room> get roomEvents => _roomController.stream;
@@ -643,6 +697,16 @@ class ChatSocket {
         RoomHiddenUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
+    socket.on('room:removed', (data) {
+      _roomRemovedController.add(
+        RoomRemovedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('topic-folders:changed', (data) {
+      _topicFoldersChangedController.add(
+        data is Map ? (data['teamId'] as String? ?? '') : '',
+      );
+    });
     // 팀 갱신과 팀 합류는 클라이언트에서 하는 일이 같다(팀 목록에 upsert) — 같은 스트림으로 묶는다.
     for (final event in ['team:updated', 'team:joined']) {
       socket.on(event, (data) {
@@ -828,14 +892,24 @@ class ChatSocket {
     _pendingAnnouncementReadRoomIds.clear();
   }
 
-  /// 메시지를 보내고 서버의 ack(message:send 응답)를 기다린다.
-  /// 서버가 실패를 응답하거나 일정 시간 내 응답이 없으면 예외를 던진다.
+  /// 테스트가 실제 소켓 없이 message:send 페이로드를 확인할 수 있게 하는 대체 전송 함수 —
+  /// 설정돼 있으면 소켓 대신 이 함수가 페이로드를 받고, 그 반환값을 서버 ack로 쓴다.
+  @visibleForTesting
+  Future<Map<String, dynamic>> Function(Map<String, dynamic> payload)?
+  debugSendOverride;
+
+  /// 메시지를 보내고 서버의 ack(message:send 응답)를 기다린다. 서버가 ack에 실어준 저장된
+  /// 메시지를 돌려준다(없거나 못 읽으면 null — 목록 반영은 어차피 message:new로 된다).
+  /// 서버가 실패를 응답하거나 일정 시간 내 응답이 없으면 [MessageSendException]을 던진다.
   /// (연결이 끊긴 상태라면 socket.io가 알아서 큐에 담아뒀다가 재연결 시 보내므로,
   /// 짧은 연결 끊김 정도는 타임아웃 전에 ack가 도착해 정상 처리된다.)
-  Future<void> send({
+  Future<Message?> send({
     required String roomId,
     required String type,
     String? text,
+
+    /// 보드 게시글(type 'post')의 제목 — 다른 타입은 안 보낸다.
+    String? title,
 
     /// [text]의 글자 서식(rich_text_format.dart) — 비밀 대화는 서버가 받지 않는다.
     List<TextFormatRun>? textFormat,
@@ -858,49 +932,67 @@ class ChatSocket {
     // message_bubble.dart가 이 값이 있으면 "문의함 바로가기" 링크를 붙여서 보여준다.
     String? inquiryId,
   }) {
+    final payload = <String, dynamic>{
+      'roomId': roomId,
+      'type': type,
+      'title': ?title,
+      'text': ?text,
+      'textFormat': ?textFormatToJson(textFormat),
+      'fileUrl': ?fileUrl,
+      'fileName': ?fileName,
+      'fileSize': ?fileSize,
+      'mimeType': ?mimeType,
+      'thumbnailUrl': ?thumbnailUrl,
+      'attachments': ?attachments,
+      'quotedSenderName': ?quotedSenderName,
+      'quotedPreview': ?quotedPreview,
+      'forwardedFromSenderName': ?forwardedFromSenderName,
+      'forwardedFromCreatedAt': ?forwardedFromCreatedAt,
+      'inquiryId': ?inquiryId,
+    };
+    final override = debugSendOverride;
+    if (override != null) return override(payload).then(_messageFromAck);
+
     final socket = _socket;
     if (socket == null) {
-      return Future.error(Exception('서버와 연결되어 있지 않습니다.'));
+      return Future.error(const MessageSendException('서버와 연결되어 있지 않습니다.'));
     }
 
-    final completer = Completer<void>();
+    final completer = Completer<Message?>();
     socket.emitWithAck(
       'message:send',
-      {
-        'roomId': roomId,
-        'type': type,
-        'text': ?text,
-        'textFormat': ?textFormatToJson(textFormat),
-        'fileUrl': ?fileUrl,
-        'fileName': ?fileName,
-        'fileSize': ?fileSize,
-        'mimeType': ?mimeType,
-        'thumbnailUrl': ?thumbnailUrl,
-        'attachments': ?attachments,
-        'quotedSenderName': ?quotedSenderName,
-        'quotedPreview': ?quotedPreview,
-        'forwardedFromSenderName': ?forwardedFromSenderName,
-        'forwardedFromCreatedAt': ?forwardedFromCreatedAt,
-        'inquiryId': ?inquiryId,
-      },
+      payload,
       ack: (dynamic response) {
         if (completer.isCompleted) return;
         final map = response is Map
             ? Map<String, dynamic>.from(response)
             : const <String, dynamic>{};
-        if (map['ok'] == true) {
-          completer.complete();
-        } else {
-          completer.completeError(
-            Exception(map['error']?.toString() ?? '메시지 전송에 실패했습니다.'),
-          );
+        try {
+          completer.complete(_messageFromAck(map));
+        } catch (e) {
+          completer.completeError(e);
         }
       },
     );
     return completer.future.timeout(
       const Duration(seconds: 15),
-      onTimeout: () => throw Exception('서버 응답이 없습니다. 연결 상태를 확인해주세요.'),
+      onTimeout: () =>
+          throw const MessageSendException('서버 응답이 없습니다. 연결 상태를 확인해주세요.'),
     );
+  }
+
+  /// message:send ack 해석 — 실패면 서버 문구로 예외를 던지고, 성공이면 같이 온 메시지를 읽는다.
+  static Message? _messageFromAck(Map<String, dynamic> ack) {
+    if (ack['ok'] != true) {
+      throw MessageSendException(ack['error']?.toString() ?? '메시지 전송에 실패했습니다.');
+    }
+    final message = ack['message'];
+    if (message is! Map) return null;
+    try {
+      return Message.fromJson(Map<String, dynamic>.from(message));
+    } catch (_) {
+      return null; // 전송 자체는 성공했으니 모양이 낯설어도 실패로 만들지 않는다.
+    }
   }
 
   void markRead(String roomId) {

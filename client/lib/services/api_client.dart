@@ -17,6 +17,7 @@ import '../models/room.dart';
 import '../models/shared_link.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
+import '../models/topic_folder.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
 
 class ApiException implements Exception {
@@ -189,7 +190,8 @@ class MyProfile {
   );
 }
 
-/// GET /api/rooms/browse 결과 한 줄. 참여 여부가 함께 내려온다.
+/// GET /api/rooms/browse 결과 한 줄. 참여 여부가 함께 내려온다. 보기 방식~관리자 이름은
+/// 예전 서버면 없어서 기본값(챗 뷰, 설정 꺼짐, 빈 목록)으로 읽는다.
 class TopicBrowseEntry {
   final String id;
   final String name;
@@ -197,6 +199,16 @@ class TopicBrowseEntry {
   final bool isPublic;
   final int memberCount;
   final bool joined;
+  final TopicViewMode viewMode;
+  final bool readOnly;
+
+  /// 보관된 공개 토픽도 목록에 남고 참여할 수 있다(배지로만 구분).
+  final bool archived;
+  final DateTime? createdAt;
+
+  /// 토픽 관리자 이름들("멤버 N명 · 관리자 {names}").
+  final List<String> adminNames;
+
   const TopicBrowseEntry({
     required this.id,
     required this.name,
@@ -204,7 +216,14 @@ class TopicBrowseEntry {
     this.isPublic = true,
     required this.memberCount,
     required this.joined,
+    this.viewMode = TopicViewMode.chat,
+    this.readOnly = false,
+    this.archived = false,
+    this.createdAt,
+    this.adminNames = const [],
   });
+
+  bool get isBoard => viewMode == TopicViewMode.board;
 
   factory TopicBrowseEntry.fromJson(Map<String, dynamic> json) =>
       TopicBrowseEntry(
@@ -214,6 +233,17 @@ class TopicBrowseEntry {
         isPublic: json['isPublic'] as bool? ?? true,
         memberCount: (json['memberCount'] as num).toInt(),
         joined: json['joined'] as bool,
+        viewMode: topicViewModeFromWire(json['viewMode'] as String?),
+        readOnly: json['readOnly'] as bool? ?? false,
+        archived: (json['archived'] as bool?) ?? (json['archivedAt'] != null),
+        createdAt: (json['createdAt'] as num?) != null
+            ? DateTime.fromMillisecondsSinceEpoch(
+                (json['createdAt'] as num).toInt(),
+              )
+            : null,
+        adminNames:
+            (json['adminNames'] as List?)?.whereType<String>().toList() ??
+            const [],
       );
 }
 
@@ -227,6 +257,13 @@ class SearchResult {
   final String? text;
   final String? fileName;
   final DateTime createdAt;
+
+  /// 서버 메시지 타입 문자열('text'|'image'|'file'|'post' 등, 예전 서버면 null).
+  final String? type;
+
+  /// 보드 게시글이면 제목(서버가 실어줄 때만).
+  final String? title;
+
   const SearchResult({
     required this.id,
     required this.roomId,
@@ -236,7 +273,11 @@ class SearchResult {
     this.text,
     this.fileName,
     required this.createdAt,
+    this.type,
+    this.title,
   });
+
+  bool get isPost => type == 'post';
 
   factory SearchResult.fromJson(Map<String, dynamic> json) => SearchResult(
     id: json['id'] as String,
@@ -249,6 +290,8 @@ class SearchResult {
     createdAt: DateTime.fromMillisecondsSinceEpoch(
       (json['createdAt'] as num).toInt(),
     ),
+    type: json['type'] as String?,
+    title: json['title'] as String?,
   );
 }
 
@@ -2200,11 +2243,20 @@ class ApiClient {
     await _delete('/api/task-comments/$commentId');
   }
 
+  /// 새 토픽 — 만든 사람만 멤버(토픽 관리자)로 들어가고, [memberIds]를 주면 그 사람들도 같이
+  /// 넣는다. [autoInvite]/[quietLeave]를 안 주면 서버 기본값(자동 초대 끔, 조용히 나가기는 보드
+  /// 뷰만 켬)을 쓴다. [folderId]는 내 토픽 폴더 — 주면 새 토픽을 그 폴더에 바로 넣는다.
   Future<Room> createTopic({
     required String teamId,
     required String name,
     String? description,
     bool isPublic = true,
+    TopicViewMode viewMode = TopicViewMode.chat,
+    bool readOnly = false,
+    bool? autoInvite,
+    bool? quietLeave,
+    String? folderId,
+    List<String>? memberIds,
   }) async {
     return Room.fromJson(
       await _post('/api/rooms', {
@@ -2214,9 +2266,125 @@ class ApiClient {
             if (description != null && description.isNotEmpty)
               'description': description,
             'isPublic': isPublic,
+            'viewMode': viewMode.wire,
+            'readOnly': readOnly,
+            'autoInvite': ?autoInvite,
+            'quietLeave': ?quietLeave,
+            'folderId': ?folderId,
+            if (memberIds != null && memberIds.isNotEmpty)
+              'memberIds': memberIds,
           })
           as Map<String, dynamic>,
     );
+  }
+
+  /// 토픽 정보 변경(토픽을 관리할 수 있는 사람만) — 준 값만 바꾼다. 설명을 지우려면 빈 문자열.
+  /// 보기 방식은 바꿀 수 없다. 비공개로 바꾸면 서버가 자동 초대를 끈다.
+  Future<Room> updateTopic(
+    String roomId, {
+    String? name,
+    String? description,
+    bool? isPublic,
+    bool? readOnly,
+    bool? autoInvite,
+    bool? quietLeave,
+  }) async {
+    return Room.fromJson(
+      await _patch('/api/rooms/$roomId', {
+            'name': ?name,
+            'description': ?description,
+            'isPublic': ?isPublic,
+            'readOnly': ?readOnly,
+            'autoInvite': ?autoInvite,
+            'quietLeave': ?quietLeave,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 토픽 보관/보관 해제(토픽을 관리할 수 있는 사람만).
+  Future<Room> setTopicArchived(String roomId, bool archived) async {
+    return Room.fromJson(
+      await _post('/api/rooms/$roomId/archive', {'archived': archived})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 토픽 삭제(토픽을 관리할 수 있는 사람만) — 메시지·파일까지 전부 지워져 되돌릴 수 없다.
+  /// 멤버 전원에게 room:removed(reason 'deleted')가 간다.
+  Future<void> deleteTopic(String roomId) async {
+    await _delete('/api/rooms/$roomId');
+  }
+
+  /// 멤버 내보내기(토픽을 관리할 수 있는 사람만) — 내보낸 뒤의 토픽을 돌려준다. 내보내진
+  /// 사람에게는 room:removed(reason 'kicked')가 간다.
+  Future<Room> kickTopicMembers(String roomId, List<String> userIds) async {
+    return Room.fromJson(
+      await _post('/api/rooms/$roomId/kick', {'userIds': userIds})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 토픽 관리자를 [userIds]로 통째로 바꾼다(한 명 이상, 정회원 이상 멤버만).
+  Future<Room> setTopicAdmins(String roomId, List<String> userIds) async {
+    return Room.fromJson(
+      await _put('/api/rooms/$roomId/admins', {'userIds': userIds})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 토픽 목록의 내 폴더들(개인 설정, 팀별) — 순서대로.
+  Future<List<TopicFolder>> fetchTopicFolders(String teamId) async {
+    final list =
+        await _get(
+              '/api/rooms/folders?teamId=${Uri.encodeQueryComponent(teamId)}',
+            )
+            as List;
+    return list
+        .map((e) => TopicFolder.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<TopicFolder> createTopicFolder(String teamId, String name) async {
+    return TopicFolder.fromJson(
+      await _post('/api/rooms/folders', {'teamId': teamId, 'name': name})
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<TopicFolder> updateTopicFolder(
+    String folderId, {
+    String? name,
+    bool? collapsed,
+  }) async {
+    return TopicFolder.fromJson(
+      await _patch('/api/topic-folders/$folderId', {
+            'name': ?name,
+            'collapsed': ?collapsed,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 폴더만 지운다 — 안의 토픽은 폴더 밖 목록으로 돌아간다.
+  Future<void> deleteTopicFolder(String folderId) async {
+    await _delete('/api/topic-folders/$folderId');
+  }
+
+  /// 내 폴더 순서를 [folderIds] 순서(그 팀의 내 폴더 전부)로 바꾼다.
+  Future<void> reorderTopicFolders(
+    String teamId,
+    List<String> folderIds,
+  ) async {
+    await _put('/api/topic-folders/order', {
+      'teamId': teamId,
+      'folderIds': folderIds,
+    });
+  }
+
+  /// 토픽을 내 폴더 [folderId]에 넣는다. null이면 어느 폴더에서든 뺀다.
+  Future<void> moveTopicToFolder(String roomId, String? folderId) async {
+    await _put('/api/rooms/$roomId/folder', {'folderId': folderId});
   }
 
   Future<Room> createGroup({
@@ -2446,6 +2614,40 @@ class ApiClient {
 
   Future<void> deleteMessage(String messageId) async {
     await _delete('/api/messages/$messageId');
+  }
+
+  /// 보드 게시글 수정(작성자만 — 게시글은 팀의 수정 가능 시간 제한을 받지 않는다). 첨부는
+  /// 바꿀 수 없다. 다른 멤버에게는 message:edited로 퍼진다.
+  Future<Message> editPost(
+    String messageId, {
+    required String title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+  }) async {
+    return Message.fromJson(
+      await _patch('/api/messages/$messageId', {
+            'title': title,
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 보드 게시글 고정/해제(토픽을 관리할 수 있는 사람만) — 결과는 message:edited로도 퍼진다.
+  Future<Message> setPostPinned(String messageId, bool pinned) async {
+    return Message.fromJson(
+      await _post('/api/messages/$messageId/pin', {'pinned': pinned})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 보드의 고정된 게시글(삭제된 것 제외) — 게시글 작성 시각 최신순, 댓글 포함.
+  Future<List<Message>> fetchPinnedPosts(String roomId) async {
+    final list = await _get('/api/rooms/$roomId/pinned-posts') as List;
+    return list
+        .map((e) => Message.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<List<SearchResult>> search(

@@ -205,25 +205,33 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// 안에서만 가능하고, 비밀 대화(E2EE)는 서버가 내용을 볼 수 없으므로 대상에서 뺀다.
   bool get _canModerate {
     if (_isMine || widget.onDelete == null) return false;
-    if (!widget.session.canModerateContent) return false;
     if (!isEditDeleteAllowed(widget.session)) return false;
+    final room = widget.session.rooms.where(
+      (r) => r.id == widget.message.roomId,
+    );
+    // 게시글은 토픽을 관리할 수 있는 사람(토픽 관리자 포함)이 시간 제한 없이 지운다(서버와 같은 규칙).
+    if (widget.message.isPost) {
+      return room.isNotEmpty && room.first.canManage(widget.session);
+    }
+    if (!widget.session.canModerateContent) return false;
     if (widget.message.type == MessageType.system) return false;
     if (!isWithinEditDeleteWindow(widget.session, widget.message.createdAt)) {
       return false;
     }
-    final room = widget.session.rooms.where(
-      (r) => r.id == widget.message.roomId,
-    );
     return room.isNotEmpty && !room.first.isSecret;
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
     final moderating = !_isMine;
+    final isPost = widget.message.isPost;
+    final noun = isPost ? '게시글' : '메시지';
     if (!isEditDeleteAllowed(widget.session)) {
       showEditWindowExpiredDialog(context, editDeleteDisabledMessage);
       return;
     }
-    if (!isWithinEditDeleteWindow(widget.session, widget.message.createdAt)) {
+    // 게시글은 오래 두고 쓰는 글이라 수정/삭제 가능 시간 제한이 없다.
+    if (!isPost &&
+        !isWithinEditDeleteWindow(widget.session, widget.message.createdAt)) {
       showEditWindowExpiredDialog(
         context,
         editDeleteWindowExpiredMessage(
@@ -237,9 +245,11 @@ class _MessageBubbleState extends State<MessageBubble> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('메시지 삭제'),
+        title: Text('$noun 삭제'),
         content: Text(
-          moderating ? '관리자 권한으로 다른 사람의 메시지를 삭제합니다. 계속할까요?' : '이 메시지를 삭제할까요?',
+          moderating
+              ? '관리자 권한으로 다른 사람의 $noun${isPost ? '을' : '를'} 삭제합니다. 계속할까요?'
+              : '이 $noun${isPost ? '을' : '를'} 삭제할까요?',
         ),
         actions: [
           TextButton(
@@ -665,9 +675,11 @@ class _MessageBubbleState extends State<MessageBubble> {
                 isEditDeleteAllowed(widget.session) &&
                 (widget.onEdit != null || widget.onDelete != null))
               hoverMenuDivider(),
+            // 게시글은 제목까지 함께 고쳐야 해서 말풍선 안 수정 대신 게시글 편집기로만 고친다.
             if (isMine &&
                 isEditDeleteAllowed(widget.session) &&
                 message.type == MessageType.text &&
+                !message.isPost &&
                 widget.onEdit != null)
               hoverMenuItem(
                 icon: Icons.edit,
@@ -790,6 +802,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           attachmentNonce: message.attachmentNonce,
         );
       case MessageType.text:
+        if (message.isPost) return _buildPostContent(context);
         // 안드로이드(터치)에서는 SelectableText였을 때 자체 롱프레스(단어 선택)가 부모
         // GestureDetector의 onLongPress(액션 시트)와 같은 롱프레스 기반이라 제스처 아레나를
         // 먼저 가져가 버려서, 말풍선 여백은 롱프레스가 되는데 글자 위는 안 되는 문제가 있었다
@@ -816,6 +829,80 @@ class _MessageBubbleState extends State<MessageBubble> {
         // 따로 그려서 이 위젯까지 안 옴.
         return const SizedBox.shrink();
     }
+  }
+
+  /// 보드 게시글(Message.isPost)을 말풍선에 그릴 때 — "게시글" 표시 + 굵은 제목 + 서식 있는 본문
+  /// + 첨부(사진 격자·파일 목록). 보드 화면·게시글 상세는 board_view.dart가 따로 그리고, 여기는
+  /// 그 밖의 곳에서 게시글이 말풍선으로 보일 때를 위한 것이다.
+  Widget _buildPostContent(BuildContext context) {
+    final message = widget.message;
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final images = [
+      for (final a in message.attachments)
+        if (a.isImage) a,
+    ];
+    final files = [
+      for (final a in message.attachments)
+        if (!a.isImage) a,
+    ];
+    final text = message.text ?? '';
+    return Column(
+      key: const ValueKey('post-bubble'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.dashboard_outlined, size: 13, color: hint),
+            const SizedBox(width: 4),
+            Text(
+              '게시글',
+              style: theme.textTheme.labelSmall?.copyWith(color: hint),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          message.title ?? '',
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            height: 1.35,
+          ),
+        ),
+        if (text.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          FormattedText(
+            text,
+            format: message.textFormat,
+            style: theme.textTheme.bodyMedium,
+            linkColor: Colors.blue,
+            selectable: Platform.isWindows,
+          ),
+        ],
+        if (images.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ChatImageAttachments(
+            session: widget.session,
+            attachments: images,
+            message: message,
+            room: widget.session.rooms
+                .where((r) => r.id == message.roomId)
+                .firstOrNull,
+          ),
+        ],
+        if (files.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ChatFileAttachments(
+            session: widget.session,
+            attachments: files,
+            message: message,
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -1068,4 +1155,3 @@ String? _appLinkOf(Message m) {
   }
   return null;
 }
-

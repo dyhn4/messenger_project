@@ -94,6 +94,9 @@ export function previewFor(entry) {
       return entry.fileName ? `${entry.fileName} 파일을 보냈습니다` : '파일을 보냈습니다';
     case 'sticker':
       return '이모티콘을 보냈습니다';
+    case 'post':
+      // 보드 뷰 게시글은 본문이 길어서 제목만 보여준다(방 목록 미리보기도 같은 문구).
+      return `게시글: ${entry.title ?? ''}`;
     default:
       return '';
   }

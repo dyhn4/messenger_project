@@ -115,11 +115,69 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 이걸 불러 입력칸에 포커스를 되돌린다 — 안 그러면 이모티콘을 클릭한 뒤 곧바로 Enter를
   /// 눌러도 _handleKey의 "입력칸이 포커스를 갖고 있을 때만 Enter=보내기" 조건에 걸려 아무
   /// 일도 안 일어난다(이모티콘 그리드 칸을 누른 시점엔 입력칸이 포커스를 안 갖고 있으므로).
-  void focusInput() => _focusNode.requestFocus();
+  void focusInput() {
+    if (_canWrite) _focusNode.requestFocus();
+  }
+
+  /// 읽기 전용·보관된 토픽에서 이 사람이 글을 쓸 수 있는지(토픽을 관리할 수 있는 사람만) — 못
+  /// 쓰면 입력칸 대신 안내 줄만 보인다. 토픽 설정·토픽 관리자가 바뀌면 세션 알림으로 다시 본다.
+  late bool _canWrite = _liveRoom.canWrite(widget.session);
+
+  /// 읽기 전용 또는 보관된 토픽인지(쓸 수 있는 관리자에게는 입력칸 위에 얇은 안내만 붙인다).
+  late bool _restricted = _isRestricted(_liveRoom);
+  late bool _archived = _liveRoom.isArchived;
+
+  /// 부모가 같은 방 객체를 들고 있지만, 세션이 방을 다시 받아 바꿔 끼웠을 수도 있어서 세션 쪽을 먼저 본다.
+  Room get _liveRoom => widget.session.roomById(widget.room.id) ?? widget.room;
+
+  static bool _isRestricted(Room room) =>
+      room.type == RoomType.topic && (room.readOnly || room.isArchived);
+
+  String get _readOnlyNotice => _archived
+      ? '보관된 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.'
+      : '읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.';
+
+  /// 세션이 바뀔 때마다 부르지만, 쓰기 가능 여부가 실제로 바뀐 때만 다시 그린다(입력 중 불필요한
+  /// 다시 그리기를 줄이려고).
+  void _onSessionChanged() {
+    if (!mounted) return;
+    final room = _liveRoom;
+    final canWrite = room.canWrite(widget.session);
+    final restricted = _isRestricted(room);
+    final archived = room.isArchived;
+    if (canWrite == _canWrite &&
+        restricted == _restricted &&
+        archived == _archived) {
+      return;
+    }
+    final lostWrite = _canWrite && !canWrite;
+    setState(() {
+      _canWrite = canWrite;
+      _restricted = restricted;
+      _archived = archived;
+      if (lostWrite) _dropComposerState();
+    });
+  }
+
+  /// 글을 쓸 수 없게 되면 올리던 첨부·서식 도구모음을 치우고, 부모가 들고 있는 이모티콘
+  /// 패널/미리보기도 닫게 한다(보낼 길이 없는데 남아 있지 않게).
+  void _dropComposerState() {
+    for (final a in _attachments) {
+      a.cancelToken.cancel();
+    }
+    _attachments.clear();
+    _formatOpen = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _canWrite) return;
+      if (widget.pendingSticker != null) widget.onStickerConsumed();
+      if (widget.stickerPickerOpen) widget.onToggleStickerPicker();
+    });
+  }
 
   @override
   void initState() {
     super.initState();
+    widget.session.addListener(_onSessionChanged);
     HardwareKeyboard.instance.addHandler(_handleKey);
     // 비밀 대화는 서버가 서식을 받지 않는다(본문이 암호문이라 위치가 안 맞는다).
     _controller.formattingEnabled = !widget.room.isSecret;
@@ -145,7 +203,25 @@ class ChatInputBarState extends State<ChatInputBar> {
   }
 
   @override
+  void didUpdateWidget(covariant ChatInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final sessionChanged = !identical(oldWidget.session, widget.session);
+    if (sessionChanged) {
+      oldWidget.session.removeListener(_onSessionChanged);
+      widget.session.addListener(_onSessionChanged);
+    }
+    // 같은 자리에 다른 방이 오면(부모가 키 없이 바꿔 끼운 경우) 그 방 기준으로 다시 본다.
+    if (sessionChanged || oldWidget.room.id != widget.room.id) {
+      final room = _liveRoom;
+      _canWrite = room.canWrite(widget.session);
+      _restricted = _isRestricted(room);
+      _archived = room.isArchived;
+    }
+  }
+
+  @override
   void dispose() {
+    widget.session.removeListener(_onSessionChanged);
     HardwareKeyboard.instance.removeHandler(_handleKey);
     _focusNode.removeListener(_onFocusChange);
     _controller.removeListener(_onTextChanged);
@@ -337,6 +413,11 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 이미지 여부는 확장자로 판별한다(looksLikeImagePath).
   void addDroppedFiles(List<File> files) {
     if (files.isEmpty || !mounted) return;
+    if (!_canWrite) {
+      // 읽기 전용·보관된 토픽 — 끌어다 놓아도 올리지 않고 이유만 알린다.
+      showAppToast(context, _readOnlyNotice);
+      return;
+    }
     for (final file in files) {
       unawaited(
         _stageAndUpload(
@@ -403,6 +484,8 @@ class ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _send() async {
+    // 읽기 전용·보관된 토픽에서는 입력칸이 없지만, 남아 있던 이모티콘 등이 새지 않게 한 번 더 막는다.
+    if (!_canWrite) return;
     final (:text, :format) = _controller.formatted();
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
@@ -474,9 +557,71 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  /// 글을 쓸 수 없는 사람에게 입력칸 대신 보여주는 안내 줄(입력칸·첨부·이모티콘 버튼 없음).
+  /// 화상회의는 글쓰기가 아니라서 진행 중인 회의에 참여할 수 있게 버튼을 남긴다.
+  Widget _buildReadOnlyNotice(BuildContext context) {
+    final theme = Theme.of(context);
+    final callButton = widget.session.callsEnabled && !widget.room.isSecret;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Container(
+          key: const ValueKey('chat-input-read-only-notice'),
+          constraints: const BoxConstraints(minHeight: 46),
+          padding: EdgeInsets.fromLTRB(14, 4, callButton ? 4 : 14, 4),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest.withValues(
+              alpha: 0.7,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                _archived ? Icons.inventory_2_outlined : Icons.lock_outline,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              // 좁은 화면에서는 두 문장을 두 줄로 나눠서, 한글이 낱자로 어색하게 끊기지 않게 한다.
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: _archived ? '보관된 토픽입니다.' : '읽기 전용 토픽입니다.',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        TextSpan(text: constraints.maxWidth < 360 ? '\n' : ' '),
+                        const TextSpan(text: '토픽 관리자만 글을 쓸 수 있습니다.'),
+                      ],
+                    ),
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+              // 화상회의를 쓰지 않는 서버면 CallButton이 스스로 빈칸이 된다.
+              Theme(
+                data: theme.copyWith(visualDensity: VisualDensity.compact),
+                child: CallButton(session: widget.session, room: widget.room),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!_canWrite) return _buildReadOnlyNotice(context);
     final uploading = _uploading;
+    final hintColor = Theme.of(context).hintColor;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -486,6 +631,35 @@ class ChatInputBarState extends State<ChatInputBar> {
           // 채웠지만, 이제는 입력칸이 직접 자식이라 stretch로 채운다).
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 읽기 전용·보관된 토픽인데 토픽 관리자라 쓸 수 있는 경우 — 다른 멤버는 못 쓴다는 걸
+            // 잊지 않게 얇게 알려 준다.
+            if (_restricted)
+              Padding(
+                key: const ValueKey('chat-input-read-only-hint'),
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                child: Row(
+                  children: [
+                    Icon(
+                      _archived
+                          ? Icons.inventory_2_outlined
+                          : Icons.edit_off_outlined,
+                      size: 14,
+                      color: hintColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _archived
+                            ? '보관된 토픽 — 토픽 관리자만 글을 쓸 수 있어요'
+                            : '읽기 전용 토픽 — 토픽 관리자만 글을 쓸 수 있어요',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: hintColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (_attachments.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -566,106 +740,126 @@ class ChatInputBarState extends State<ChatInputBar> {
               ),
             ),
             const SizedBox(height: 4),
-            // 검색/멤버/스레드 패널이 열려 있으면 이 입력칸이 차지하는 폭이 창 크기에 따라
-            // 꽤 좁아질 수 있다 — 아이콘 3개+안내 문구+보내기 버튼을 고정 Row로만 두면
-            // 특정 폭 구간에서 폭이 모자라 오버플로(노란/검정 줄무늬 경고)가 났다. 남는
-            // 폭이 안내 문구까지 담기엔 부족하면 그 문구부터 먼저 숨긴다.
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final showHint =
-                    Platform.isWindows && constraints.maxWidth > 320;
-                return Row(
-                  children: [
-                    TapRegion(
-                      groupId: widget.stickerPickerGroupId,
-                      child: IconButton(
-                        icon: Icon(
-                          Icons.emoji_emotions_outlined,
-                          color: widget.stickerPickerOpen
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                        ),
-                        onPressed: _sending
-                            ? null
-                            : widget.onToggleStickerPicker,
-                        tooltip: '이모티콘',
-                      ),
+            // 검색/멤버/스레드 패널이 열려 있거나 창이 좁으면 이 줄의 폭이 꽤 좁아진다 — 버튼
+            // 개수(캡처·화상회의·문의)와 글꼴에 따라 필요한 폭이 달라서, 예전처럼 고정 폭(320)
+            // 기준으로 안내 문구를 두면 360px 안팎에서 넘쳐 보내기 버튼이 밀려났다. 이제 버튼을
+            // 다 놓고 남은 자리에 안내 문구가 통째로 들어갈 때만 보인다(_SendKeyHint).
+            Row(
+              children: [
+                TapRegion(
+                  groupId: widget.stickerPickerGroupId,
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.emoji_emotions_outlined,
+                      color: widget.stickerPickerOpen
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.attach_file),
-                      onPressed: _sending ? null : _pickFile,
-                      tooltip: '파일 보내기',
-                    ),
-                    if (!widget.room.isSecret)
-                      RichFormatToggleButton(
-                        open: _formatOpen,
-                        onPressed: () {
-                          setState(() => _formatOpen = !_formatOpen);
-                          _focusNode.requestFocus();
-                        },
-                      ),
-                    // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
-                    // 찍을지 먼저 고른다.
-                    if (Platform.isWindows)
-                      PopupMenuButton<bool>(
-                        icon: const Icon(Icons.filter_center_focus),
-                        tooltip: '화면 캡처',
-                        enabled: !_sending && !_capturing,
-                        onSelected: _startCapture,
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: true,
-                            child: Text('메신저 창 숨기고 캡처'),
-                          ),
-                          PopupMenuItem(
-                            value: false,
-                            child: Text('메신저 창 포함하여 캡처'),
-                          ),
-                        ],
-                      ),
-                    CallButton(session: widget.session, room: widget.room),
-                    // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
-                    if (widget.session.canSendInquiryIn(widget.room))
-                      IconButton(
-                        icon: const Icon(Icons.contact_support_outlined),
-                        onPressed: _sending ? null : _showInquiryDialog,
-                        tooltip: '팀장에게 문의하기',
-                      ),
-                    const Spacer(),
-                    if (showHint) ...[
-                      Text(
-                        widget.session.settings.sendWithShiftEnter
-                            ? 'Shift + Enter 로 전송'
-                            : 'Shift + Enter 로 줄바꿈',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).hintColor,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
+                    onPressed: _sending ? null : widget.onToggleStickerPicker,
+                    tooltip: '이모티콘',
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.attach_file),
+                  onPressed: _sending ? null : _pickFile,
+                  tooltip: '파일 보내기',
+                ),
+                if (!widget.room.isSecret)
+                  RichFormatToggleButton(
+                    open: _formatOpen,
+                    onPressed: () {
+                      setState(() => _formatOpen = !_formatOpen);
+                      _focusNode.requestFocus();
+                    },
+                  ),
+                // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
+                // 찍을지 먼저 고른다.
+                if (Platform.isWindows)
+                  PopupMenuButton<bool>(
+                    icon: const Icon(Icons.filter_center_focus),
+                    tooltip: '화면 캡처',
+                    enabled: !_sending && !_capturing,
+                    onSelected: _startCapture,
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: true, child: Text('메신저 창 숨기고 캡처')),
+                      PopupMenuItem(value: false, child: Text('메신저 창 포함하여 캡처')),
                     ],
-                    if (_sending)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    else
-                      IconButton(
-                        icon: const Icon(Icons.send),
-                        onPressed: uploading ? null : _send,
-                        tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
-                      ),
-                  ],
-                );
-              },
+                  ),
+                CallButton(session: widget.session, room: widget.room),
+                // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
+                if (widget.session.canSendInquiryIn(widget.room))
+                  IconButton(
+                    icon: const Icon(Icons.contact_support_outlined),
+                    onPressed: _sending ? null : _showInquiryDialog,
+                    tooltip: '팀장에게 문의하기',
+                  ),
+                // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
+                Expanded(
+                  child: Platform.isWindows
+                      ? _SendKeyHint(
+                          widget.session.settings.sendWithShiftEnter
+                              ? 'Shift + Enter 로 전송'
+                              : 'Shift + Enter 로 줄바꿈',
+                        )
+                      : const SizedBox.shrink(),
+                ),
+                if (_sending)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.send),
+                    onPressed: uploading ? null : _send,
+                    tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
+                  ),
+              ],
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 입력칸 아래 줄의 "Shift + Enter 로 …" 안내 — 버튼들을 다 놓고 남은 폭([Expanded])에 글자가
+/// 통째로 들어갈 때만 보내기 버튼 바로 왼쪽에 붙이고, 모자라면 아예 숨긴다(잘린 안내는 쓸모가 없고,
+/// 억지로 두면 줄이 넘쳐 보내기 버튼이 밀려난다).
+class _SendKeyHint extends StatelessWidget {
+  final String text;
+  const _SendKeyHint(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(
+      context,
+    ).style.merge(TextStyle(fontSize: 11, color: Theme.of(context).hintColor));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          locale: Localizations.maybeLocaleOf(context),
+          maxLines: 1,
+        )..layout();
+        final width = painter.width;
+        painter.dispose();
+        const gap = 8.0; // 보내기 버튼과의 간격
+        if (width + gap > constraints.maxWidth) return const SizedBox.shrink();
+        return Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.only(right: gap),
+            child: Text(text, style: style, maxLines: 1, softWrap: false),
+          ),
+        );
+      },
     );
   }
 }

@@ -10,6 +10,7 @@ import '../models/room.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
+import '../widgets/board_view.dart' show PostDetailHead;
 import '../widgets/comment_input_bar.dart';
 import '../widgets/hover_toolbar.dart' show kHoverToolbarHeight;
 import '../widgets/message_bubble.dart';
@@ -17,10 +18,14 @@ import '../widgets/message_comments_card.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/sticker_picker.dart';
 import '../widgets/sticker_preview_card.dart';
+import 'post_editor_dialog.dart' show postEditorsOpen;
 
 /// 메시지 하나의 댓글 스레드. 데스크톱은 우측 패널(asPanel: true), 모바일은 전체화면으로 쓴다
 /// (SearchScreen과 동일한 이중 모드 패턴). [message]는 RoomChatController.messages 안에 있는
 /// 바로 그 인스턴스라서, 댓글이 실시간으로 도착하면(controller.addComment) 여기서도 즉시 반영된다.
+///
+/// 보드 게시글(Message.isPost)이면 "게시글 상세"가 된다 — 맨 위에 말풍선 대신 제목·본문·첨부를
+/// 그리고(PostDetailHead), 그 아래 댓글과 댓글 입력칸은 똑같이 쓴다.
 ///
 /// 데스크톱 패널은 호출부(desktop_home_screen.dart)가 key 없이 재사용하므로(다른 메시지의 댓글
 /// 아이콘을 연달아 눌러도 이 State가 그대로 유지됨), 메시지가 바뀌는 건 didUpdateWidget에서 감지한다.
@@ -136,8 +141,8 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       widget.session.setMobileCommentThreadOpen(widget.room.id);
     }
     // 채팅방에서 "N개 댓글 모두 보기"를 눌러 스레드를 열면, 최신 댓글이 바로 보이도록 맨
-    // 아래로 스크롤한다.
-    _scrollToBottom();
+    // 아래로 스크롤한다. 게시글은 본문부터 읽어야 하니 맨 위에서 시작한다.
+    if (!widget.message.isPost) _scrollToBottom();
   }
 
   @override
@@ -153,7 +158,11 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       _lastSeenCommentId = widget.message.comments.isNotEmpty
           ? widget.message.comments.last.id
           : null;
-      _scrollToBottom();
+      if (widget.message.isPost) {
+        _scrollToTop();
+      } else {
+        _scrollToBottom();
+      }
       // CommentInputBar를 새로 만들어서 autofocus가 다시 걸리게 한다(예전 key: ValueKey와 동일한 효과).
       _commentInputBarKey = GlobalKey<CommentInputBarState>();
     }
@@ -216,6 +225,25 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     }
   }
 
+  /// 패널을 닫지 않고 다른 게시글로 넘어갔을 때 — 새 게시글의 제목부터 보이게.
+  void _scrollToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) _scrollController.jumpTo(0);
+    });
+  }
+
+  /// 게시글을 이 화면에서 지웠으면 상세도 닫는다(패널이면 패널을, 전체 화면이면 그 화면을).
+  void _closeAfterPostDeleted() {
+    if (!mounted) return;
+    if (widget.asPanel) {
+      widget.onClose?.call();
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  String get _title => widget.message.isPost ? '게시글' : '댓글';
+
   AppUser? _memberOf(String? userId) {
     for (final m in widget.room.members) {
       if (m.id == userId) return m;
@@ -254,23 +282,32 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                           12 + kHoverToolbarHeight + 4,
                         ),
                         children: [
-                          MessageBubble(
-                            session: widget.session,
-                            message: widget.message,
-                            resolveUrl: widget.session.resolveUrl,
-                            isMine:
-                                widget.message.senderId ==
-                                widget.session.userId,
-                            sender: _memberOf(widget.message.senderId),
-                            onEdit: widget.controller.editMessage,
-                            onDelete: widget.controller.deleteMessage,
-                          ),
+                          if (widget.message.isPost)
+                            PostDetailHead(
+                              session: widget.session,
+                              room: widget.room,
+                              post: widget.message,
+                              onDeleted: _closeAfterPostDeleted,
+                            )
+                          else
+                            MessageBubble(
+                              session: widget.session,
+                              message: widget.message,
+                              resolveUrl: widget.session.resolveUrl,
+                              isMine:
+                                  widget.message.senderId ==
+                                  widget.session.userId,
+                              sender: _memberOf(widget.message.senderId),
+                              onEdit: widget.controller.editMessage,
+                              onDelete: widget.controller.deleteMessage,
+                            ),
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Divider(height: 1),
                           ),
                           Text(
-                            '댓글 ${comments.length}',
+                            // 게시글은 보드 카드의 "댓글 N"과 같게 지운 댓글은 세지 않는다.
+                            '댓글 ${widget.message.isPost ? comments.where((c) => !c.deleted).length : comments.length}',
                             style: Theme.of(context).textTheme.labelLarge,
                           ),
                           // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 프로필 사진을 보여준다.
@@ -342,24 +379,29 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
         if (!Platform.isWindows) return column;
 
         // chat_panel.dart와 동일 — 댓글 목록 + 입력창 전체를 드롭 영역으로 잡고, 호버 중엔
-        // 패널 전체를 덮는 안내 오버레이를 보여준다.
-        return DropTarget(
-          onDragEntered: (_) => setState(() => _dragHovering = true),
-          onDragExited: (_) => setState(() => _dragHovering = false),
-          onDragDone: (details) {
-            setState(() => _dragHovering = false);
-            _commentInputBarKey.currentState?.addDroppedFiles(
-              details.files.map((f) => File(f.path)).toList(),
-            );
-          },
-          child: Stack(
-            children: [
-              column,
-              if (_dragHovering)
-                const Positioned.fill(
-                  child: IgnorePointer(child: DropZoneOverlay()),
-                ),
-            ],
+        // 패널 전체를 덮는 안내 오버레이를 보여준다. 게시글 편집기나 다른 창이 위에 떠 있으면 꺼
+        // 둔다(그 창에 놓은 파일이 가려진 댓글 입력칸에도 들어가지 않게).
+        return ValueListenableBuilder<int>(
+          valueListenable: postEditorsOpen,
+          builder: (context, editors, _) => DropTarget(
+            enable: editors == 0 && (ModalRoute.isCurrentOf(context) ?? true),
+            onDragEntered: (_) => setState(() => _dragHovering = true),
+            onDragExited: (_) => setState(() => _dragHovering = false),
+            onDragDone: (details) {
+              setState(() => _dragHovering = false);
+              _commentInputBarKey.currentState?.addDroppedFiles(
+                details.files.map((f) => File(f.path)).toList(),
+              );
+            },
+            child: Stack(
+              children: [
+                column,
+                if (_dragHovering)
+                  const Positioned.fill(
+                    child: IgnorePointer(child: DropZoneOverlay()),
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -380,7 +422,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      '댓글',
+                      _title,
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -398,7 +440,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('댓글')),
+      appBar: AppBar(title: Text(_title)),
       body: _body(context),
     );
   }

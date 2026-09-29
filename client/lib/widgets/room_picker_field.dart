@@ -11,11 +11,16 @@ class RoomPickerField extends StatefulWidget {
   final Session session;
   final Room? value;
   final ValueChanged<Room> onChanged;
+
+  /// 고를 수 있는 방만 남긴다(없으면 비밀 대화를 뺀 모든 방) — 공유·전달 화면이 보드 뷰 토픽과
+  /// 내가 글을 쓸 수 없는 토픽을 빼는 데 쓴다.
+  final bool Function(Room room)? filter;
   const RoomPickerField({
     super.key,
     required this.session,
     required this.value,
     required this.onChanged,
+    this.filter,
   });
 
   @override
@@ -29,7 +34,10 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
 
   @override
   void dispose() {
-    _removeOverlay();
+    // 떠 있던 드롭다운만 치운다 — 사라지는 중에 setState를 부르면(_removeOverlay) 디버그
+    // 단언(defunct element)이 난다(공유·전달 창을 닫을 때마다).
+    _entry?.remove();
+    _entry = null;
     super.dispose();
   }
 
@@ -70,6 +78,7 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
                 width: width,
                 session: widget.session,
                 value: widget.value,
+                filter: widget.filter,
                 onSelected: (room) {
                   widget.onChanged(room);
                   _removeOverlay();
@@ -128,11 +137,13 @@ class _RoomPickerDropdown extends StatefulWidget {
   final double width;
   final Session session;
   final Room? value;
+  final bool Function(Room room)? filter;
   final ValueChanged<Room> onSelected;
   const _RoomPickerDropdown({
     required this.width,
     required this.session,
     required this.value,
+    required this.filter,
     required this.onSelected,
   });
 
@@ -158,6 +169,7 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
     final rooms =
         widget.session.rooms
             .where((r) => r.type == _tab && !r.isSecret)
+            .where((r) => widget.filter?.call(r) ?? true)
             .where(
               (r) =>
                   lowerFilter.isEmpty ||

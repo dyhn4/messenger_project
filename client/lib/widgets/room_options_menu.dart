@@ -10,12 +10,108 @@ import '../screens/invite_members_screen.dart';
 import '../screens/links_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
+import '../screens/topic_members_dialog.dart';
+import '../screens/topic_settings_dialog.dart';
+import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'export_chat_dialog.dart';
 import 'floating_dialog.dart';
 import 'self_destruct_picker_dialog.dart';
 import 'user_avatar.dart';
+
+/// 토픽 이름 옆에 붙이는 작은 상태 배지(보드 뷰 · 읽기 전용 · 보관됨) — 참여 가능한 토픽 목록과
+/// 모바일 대화 헤더(좁으면 이름 아래 줄)가 같이 쓴다.
+class TopicBadge extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  const TopicBadge({super.key, required this.label, required this.icon});
+
+  const TopicBadge.board({super.key})
+    : label = '보드 뷰',
+      icon = Icons.dashboard_outlined;
+
+  const TopicBadge.readOnly({super.key})
+    : label = '읽기 전용',
+      icon = Icons.edit_off_outlined;
+
+  const TopicBadge.archived({super.key})
+    : label = '보관됨',
+      icon = Icons.inventory_2_outlined;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = scheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: fg),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+              color: fg,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// [context]가 속한 라우트(대화상자·전체 화면)를 닫는다 — 맨 위가 아니어도 닫고, 이미 닫히는
+/// 중이면(다른 화면이 먼저 목록까지 되돌렸으면) 아무것도 안 한다. 엉뚱한 화면을 닫지 않도록
+/// Navigator.pop 대신 이걸 쓴다.
+void closeOwnRoute(BuildContext context) {
+  final route = ModalRoute.of(context);
+  if (route == null || !route.isActive) return;
+  final navigator = Navigator.of(context);
+  if (route.isCurrent) {
+    navigator.pop();
+  } else {
+    navigator.removeRoute(route);
+  }
+}
+
+/// 한 방을 다루는 대화상자·화면(토픽 정보 변경하기 · 참여 멤버 · 멤버 초대하기)이 그 방이 목록에서
+/// 사라지면(토픽 삭제 · 내보내짐 · 나가기) 스스로 닫히게 한다. 열 때 목록에 있던 방만 지켜본다 —
+/// 목록 밖 방으로 연 화면(테스트 등)이 엉뚱하게 닫히지 않게.
+mixin CloseWhenRoomRemoved<T extends StatefulWidget> on State<T> {
+  Session get roomSession;
+  String get watchedRoomId;
+
+  bool _roomWasListed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _roomWasListed = roomSession.roomById(watchedRoomId) != null;
+    roomSession.addListener(_closeIfRoomRemoved);
+  }
+
+  @override
+  void dispose() {
+    roomSession.removeListener(_closeIfRoomRemoved);
+    super.dispose();
+  }
+
+  void _closeIfRoomRemoved() {
+    if (!_roomWasListed || !mounted) return;
+    if (roomSession.roomById(watchedRoomId) != null) return;
+    _roomWasListed = false;
+    closeOwnRoute(context);
+  }
+}
 
 /// RoomOptionsMenu의 자동 삭제 타이머 항목 트레일링 표시용 — self_destruct_picker_dialog.dart의
 /// 프리셋(1초/5초/30초/1분/5분/1시간/1일/1주) 라벨과 맞춘 짧은 문구.
@@ -121,14 +217,60 @@ Future<void> showLeaveRoomDialog(
   );
   if (confirmed != true) return;
 
-  await session.leaveRoom(
-    room.id,
-    alsoRemoveOther: room.isSecret && alsoRemoveOther,
-    realLeave: plainDm && realLeave,
-  );
+  try {
+    await session.leaveRoom(
+      room.id,
+      alsoRemoveOther: room.isSecret && alsoRemoveOther,
+      realLeave: plainDm && realLeave,
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    // 마지막 토픽 관리자는 다른 멤버가 남아 있으면 못 나간다(서버가 거절) — 그 안내를 그대로
+    // 보여 주고, 바로 토픽 관리자를 지정할 수 있게 "토픽 멤버 관리" 탭으로 안내한다.
+    if (isTopic && e is ApiException && e.message.contains('토픽 관리자')) {
+      await _showCannotLeaveTopicDialog(context, session, room, e.message);
+    } else {
+      showAppToast(context, '나가지 못했습니다: $e');
+    }
+    return;
+  }
   if (context.mounted) {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
+}
+
+Future<void> _showCannotLeaveTopicDialog(
+  BuildContext context,
+  Session session,
+  Room room,
+  String message,
+) async {
+  final canManage = room.canManage(session);
+  final openMembers = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('토픽을 나갈 수 없습니다'),
+      content: SizedBox(width: 340, child: Text(message)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('닫기'),
+        ),
+        if (canManage)
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('토픽 관리자 지정하기'),
+          ),
+      ],
+    ),
+  );
+  if (openMembers != true || !context.mounted) return;
+  await showTopicSettingsDialog(
+    context,
+    session,
+    room,
+    initialTab: TopicSettingsTab.members,
+  );
 }
 
 /// 평문 1:1 채팅방을 "체크박스로 나가기까지 고르는" showLeaveRoomDialog 없이, 숨기기 하나만
@@ -235,23 +377,8 @@ class RoomOptionsMenu extends StatelessWidget {
     );
   }
 
-  void _invite(BuildContext context) {
-    // home_screen.dart의 wideBreakpoint(700)와 맞춰서, 넓은(PC) 화면에서는 "새 대화"처럼
-    // 플로팅으로, 좁은(모바일) 화면에서는 전체화면으로 띄운다.
-    final isWide = MediaQuery.sizeOf(context).width >= 700;
-    if (isWide) {
-      showDialog(
-        context: context,
-        builder: (_) =>
-            InviteMembersScreen(session: session, room: room, asDialog: true),
-      );
-    } else {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => InviteMembersScreen(session: session, room: room),
-        ),
-      );
-    }
+  void _invite(BuildContext context, Room room) {
+    showInviteMembers(context, session, room);
   }
 
   Future<void> _openMemberProfile(BuildContext context, AppUser member) async {
@@ -281,7 +408,12 @@ class RoomOptionsMenu extends StatelessWidget {
     }
   }
 
-  void _showMembers(BuildContext context) {
+  void _showMembers(BuildContext context, Room room) {
+    // 토픽은 순서·배지·검색·내보내기가 있는 "참여 멤버" 창, 그룹은 지금까지의 간단한 목록.
+    if (room.type == RoomType.topic) {
+      showTopicMembersDialog(context, session, room);
+      return;
+    }
     final sorted = room.members.toList()
       ..sort((a, b) => a.name.compareTo(b.name));
     showDialog(
@@ -308,6 +440,16 @@ class RoomOptionsMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 멤버 수·알림 상태·"정보 변경하기"(토픽 관리자 지정/해제)가 그 자리에서 바뀌므로, 헤더가
+    // 다시 그려지지 않아도 이 줄만은 세션 변경을 따라간다.
+    return ListenableBuilder(
+      listenable: session,
+      builder: (context, _) =>
+          _buildRow(context, session.roomById(room.id) ?? room),
+    );
+  }
+
+  Widget _buildRow(BuildContext context, Room room) {
     final isDm = room.type == RoomType.dm;
     final isTopic = room.type == RoomType.topic;
     final leaveLabel = room.isSecret
@@ -322,7 +464,7 @@ class RoomOptionsMenu extends StatelessWidget {
           Tooltip(
             message: '멤버',
             child: TextButton.icon(
-              onPressed: () => _showMembers(context),
+              onPressed: () => _showMembers(context, room),
               style: TextButton.styleFrom(
                 foregroundColor: iconColor,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -346,7 +488,7 @@ class RoomOptionsMenu extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.person_add_alt_outlined),
             tooltip: '멤버 초대',
-            onPressed: () => _invite(context),
+            onPressed: () => _invite(context, room),
           ),
         PopupMenuButton<void>(
           icon: const Icon(Icons.more_vert),
@@ -417,6 +559,18 @@ class RoomOptionsMenu extends StatelessWidget {
                     Icon(Icons.file_download_outlined),
                     SizedBox(width: 8),
                     Text('대화 내보내기'),
+                  ],
+                ),
+              ),
+            // 토픽을 관리할 수 있는 사람(토픽 관리자·팀 관리자)만 — 이름·설정·보관·삭제·멤버 관리.
+            if (isTopic && room.canManage(session))
+              PopupMenuItem<void>(
+                onTap: () => showTopicSettingsDialog(context, session, room),
+                child: const Row(
+                  children: [
+                    Icon(Icons.edit_outlined),
+                    SizedBox(width: 8),
+                    Text('정보 변경하기'),
                   ],
                 ),
               ),

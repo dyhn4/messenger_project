@@ -633,10 +633,13 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
               child: Row(
                 children: [
                   Expanded(child: _viewerArea(context, many)),
+                  // 새 컨트롤러를 만들지 않는 조회를 쓴다 — 보는 도중 방이 삭제·강퇴로 사라지면 댓글 칸만
+                  // 닫히고, 다시 그릴 때 그 방의 컨트롤러를 되살려 대화 기록을 받아오지 않게.
                   if (_commentsOpen &&
                       message != null &&
                       session != null &&
-                      room != null)
+                      room != null &&
+                      session.existingControllerFor(room.id) != null)
                     SizedBox(
                       width: 380,
                       child: Material(
@@ -647,7 +650,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                           session: session,
                           room: room,
                           message: message,
-                          controller: session.controllerFor(room),
+                          controller: session.existingControllerFor(room.id)!,
                           asPanel: true,
                           onClose: () => setState(() => _commentsOpen = false),
                         ),

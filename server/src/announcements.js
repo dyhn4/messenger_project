@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
-import { teamAccess } from './access.js';
+import { teamAccess, topicAccess } from './access.js';
 import {
   findAnnouncementById,
   findLatestAnnouncementForRoom,
@@ -14,7 +14,7 @@ import {
 } from './db/queries/announcements.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findTeamById, isTopicCreator } from './db/queries/teams.js';
-import { canCreateTopic } from './permissions.js';
+import { canCreateTopic, topicWriteDenial } from './permissions.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 
 function toDto(row) {
@@ -50,7 +50,8 @@ function toCommentDto(row) {
  * 토픽방 공지(카카오톡 공지와 같은 개념) — 쓸 수 있는 사람은 그 팀에서 **토픽을 만들 수
  * 있는 사람과 같다**(팀 설정 topicCreationPolicy, permissions.js의 canCreateTopic). 별도
  * 권한 축을 새로 만들지 않고 이미 있는 걸 그대로 재사용한다 — "토픽방을 관리할 자격이
- * 있는 사람"이라는 의미가 이미 거기 있기 때문이다.
+ * 있는 사람"이라는 의미가 이미 거기 있기 때문이다. 여기에 더해 **그 토픽을 관리할 수 있는
+ * 사람**(토픽 관리자·팀 관리자, permissions.js canManageTopic)도 쓸 수 있다.
  *
  * 읽기는 그 방 멤버 전원에게 열려 있다 — 공지는 원래 다 같이 보라고 붙이는 것이므로. 수정/
  * 삭제/내리기는 **작성 본인만** 할 수 있다(요청 사양 그대로 — 메시지/댓글의 "관리자도 남의
@@ -102,13 +103,17 @@ export function createAnnouncementsRouter(io) {
     const room = await requireTopicMember(req, res);
     if (!room) return;
 
-    const access = await teamAccess(room.teamId, req.user.sub);
+    // 토픽을 만들 수 있는 사람에 더해, 그 토픽을 관리할 수 있는 사람(토픽 관리자·팀 관리자)도 쓴다.
+    const access = await topicAccess(room, req.user.sub);
     const team = await findTeamById(room.teamId);
     const isDesignatedTopicCreator =
       team?.topicCreationPolicy === 'designated' ? await isTopicCreator(room.teamId, req.user.sub) : false;
-    if (!canCreateTopic({ ...access, isDesignatedTopicCreator, team })) {
+    if (!access.canManage && !canCreateTopic({ ...access, isDesignatedTopicCreator, team })) {
       return res.status(403).json({ error: '공지를 작성할 권한이 없습니다.' });
     }
+    // 읽기 전용·보관된 토픽은 공지도 토픽을 관리할 수 있는 사람만 — 공지로 읽기 전용을 우회하지 못하게.
+    const denial = topicWriteDenial({ room, canManage: access.canManage });
+    if (denial) return res.status(403).json({ error: denial });
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });
@@ -155,6 +160,9 @@ export function createAnnouncementsRouter(io) {
     if (!room) return;
     const announcement = await requireOwnAnnouncement(req, res, room);
     if (!announcement) return;
+    // 메시지 수정과 같은 규칙 — 읽기 전용·보관된 토픽에서는 토픽을 관리할 수 있는 사람만 고친다.
+    const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, req.user.sub)).canManage });
+    if (denial) return res.status(403).json({ error: denial });
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });

@@ -11,8 +11,11 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../screens/announcement_list_screen.dart';
+import '../screens/post_editor_dialog.dart' show postEditorsOpen;
+import '../services/room_chat_controller.dart' show RoomChatController;
 import '../services/session.dart';
 import 'attachment_widgets.dart';
+import 'board_view.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
 import 'date_picker_popup.dart';
@@ -37,7 +40,8 @@ import 'system_message_row.dart';
 const _kListBottomPadding = 8.0 + kHoverToolbarHeight + 4.0 - 10.0;
 
 /// 방 하나의 메시지 목록 + 입력창. ChatScreen(모바일 전체화면)과
-/// DesktopHomeScreen(우측 패널)이 이 위젯을 그대로 공유한다.
+/// DesktopHomeScreen(우측 패널)이 이 위젯을 그대로 공유한다. 보드 뷰 토픽(room.isBoard)은 목록과
+/// 입력창 대신 게시글 보드(board_view.dart)를 보여준다(공지 배너는 그대로).
 ///
 /// 이 방이 화면에 떠있는 동안은 Session에 "지금 보고 있는 방"으로 등록해서,
 /// 그 방으로 온 메시지에는 알림이 뜨지 않도록 한다. 호출부에서 반드시
@@ -79,6 +83,16 @@ class _ChatPanelState extends State<ChatPanel> {
   /// 그대로 넣기 위한 접근 통로(Windows 전용 — desktop_drop 자체가 데스크톱용).
   final _chatInputBarKey = GlobalKey<ChatInputBarState>();
   bool _dragHovering = false;
+
+  /// 보드 뷰 토픽이면 — 보드에 끌어다 놓은 파일로 새 게시글을 시작하는 통로.
+  final _boardKey = GlobalKey<BoardViewState>();
+
+  /// 이 방의 컨트롤러 — 처음 받은 것을 끝까지 쓴다. 방이 사라지면(나가기·내보내짐·삭제) Session이
+  /// 컨트롤러를 치우는데, 그 뒤 dispose나 다시 그리기에서 controllerFor를 부르면 목록에 없는 방의
+  /// 컨트롤러가 새로 만들어져(기록까지 다시 받으며) 세션에 남는다.
+  late final RoomChatController _controller = widget.session.controllerFor(
+    widget.room,
+  );
 
   /// Session.setActiveRoom이 돌려준 토큰 — dispose에서 그대로 되돌려줘서, 그 사이 다른
   /// 화면이 활성 방을 새로 지정했으면 내가 지우지 않도록 한다(Session.clearActiveRoom 참고).
@@ -158,9 +172,11 @@ class _ChatPanelState extends State<ChatPanel> {
     _activeRoomToken = widget.session.setActiveRoom(widget.room.id);
     // 캐시된 컨트롤러를 다시 열었을 때는 _load()가 재실행되지 않으므로, 방을
     // 다시 열 때마다 명시적으로 한 번 더 읽음 처리한다.
-    final controller = widget.session.controllerFor(widget.room);
+    final controller = _controller;
     controller.markReadNow();
     widget.session.clearUnreadCount(widget.room.id);
+    // 보드는 검색 결과 강조·새 글 따라가기를 BoardView가 직접 한다.
+    if (widget.room.isBoard) return;
     _scrollToHighlight();
     if (!controller.loading) {
       _lastSeenEntryId = controller.messages.isNotEmpty
@@ -190,7 +206,7 @@ class _ChatPanelState extends State<ChatPanel> {
   /// 무조건 맨 아래로 따라가고, 남이 쓴 거면 내가 이미 맨 아래를 보고 있었을 때만 따라간다.
   /// 맨 아래가 아닌데 남이 새로 보냈으면, 스크롤 대신 "새로운 메시지가 있습니다" 알약만 켠다.
   void _maybeScrollToNewEntry() {
-    final msgs = widget.session.controllerFor(widget.room).messages;
+    final msgs = _controller.messages;
     if (msgs.isEmpty) return;
     final last = msgs.last;
 
@@ -278,7 +294,8 @@ class _ChatPanelState extends State<ChatPanel> {
   void didUpdateWidget(covariant ChatPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 같은 방을 계속 보고 있는 채로(=State가 안 바뀜) 검색 결과를 새로 클릭한 경우.
-    if (widget.highlightMessageId != null &&
+    if (!widget.room.isBoard &&
+        widget.highlightMessageId != null &&
         widget.highlightMessageId != oldWidget.highlightMessageId) {
       _scrollToHighlight();
     }
@@ -290,7 +307,7 @@ class _ChatPanelState extends State<ChatPanel> {
     final targetId = widget.highlightMessageId;
     if (targetId == null) return;
 
-    final controller = widget.session.controllerFor(widget.room);
+    final controller = _controller;
     await controller.ensureMessageLoaded(targetId);
     if (!mounted) return;
 
@@ -356,7 +373,7 @@ class _ChatPanelState extends State<ChatPanel> {
   /// 메시지가 아예 없으면 null을 돌려주므로 그때는 스크롤 없이 안내만 한다.
   Future<void> _jumpToDate(DateTime date) async {
     _closeDatePicker();
-    final controller = widget.session.controllerFor(widget.room);
+    final controller = _controller;
     final target = await controller.ensureDateLoaded(date);
     if (!mounted) return;
     if (target == null) {
@@ -388,9 +405,7 @@ class _ChatPanelState extends State<ChatPanel> {
     // 내가 지정했던 활성 방이 아직 그대로일 때만 지운다(토큰으로 판별 — 방 id 비교로는
     // "같은 방을 다시 여는" 경우를 구분하지 못한다. Session.clearActiveRoom 참고).
     widget.session.clearActiveRoom(_activeRoomToken);
-    widget.session
-        .controllerFor(widget.room)
-        .removeListener(_maybeScrollToNewEntry);
+    _controller.removeListener(_maybeScrollToNewEntry);
     _itemPositionsListener.itemPositions.removeListener(
       _onItemPositionsChanged,
     );
@@ -483,10 +498,10 @@ class _ChatPanelState extends State<ChatPanel> {
     for (final p in positions) {
       if (p.index > maxIndex) maxIndex = p.index;
     }
-    final itemCount = widget.session.controllerFor(widget.room).messages.length;
+    final itemCount = _controller.messages.length;
     // 가장 오래된 항목이 한 화면 안쪽까지 들어왔으면 미리 더 불러온다.
     if (maxIndex >= itemCount - 1 - positions.length) {
-      widget.session.controllerFor(widget.room).loadOlderMessages();
+      _controller.loadOlderMessages();
     }
   }
 
@@ -523,9 +538,71 @@ class _ChatPanelState extends State<ChatPanel> {
     });
   }
 
+  /// 보드 뷰 토픽 — 공지 배너 + 게시글 보드(입력창 없음). Windows에서는 보드에 파일을 끌어다
+  /// 놓으면 그 파일을 붙인 채로 게시글 작성 창이 열린다(글을 쓸 수 있을 때만).
+  Widget _buildBoard(BuildContext context) {
+    final column = Column(
+      children: [
+        _AnnouncementBanner(session: widget.session, room: widget.room),
+        Expanded(
+          child: BoardView(
+            key: _boardKey,
+            session: widget.session,
+            room: widget.room,
+            highlightMessageId: widget.highlightMessageId,
+            onOpenPost: widget.onOpenThread,
+          ),
+        ),
+      ],
+    );
+    if (!Platform.isWindows) return column;
+    return _dropArea(
+      column,
+      onFiles: (files) {
+        if (!widget.room.canWrite(widget.session)) return;
+        _boardKey.currentState?.compose(files: files);
+      },
+      accepts: () => widget.room.canWrite(widget.session),
+    );
+  }
+
+  /// 파일을 끌어다 놓는 영역 — 호버 중엔 전체를 덮는 안내(DropZoneOverlay)를 보여준다. 게시글 편집기나
+  /// 다른 창(사진 뷰어·설정 대화상자 등)이 이 화면 위에 떠 있는 동안에는 꺼 둔다 — desktop_drop은
+  /// 가려진 드롭 영역에도 파일을 줘서, 그 창에 놓은 파일이 뒤의 입력칸이나 새 게시글로 들어간다.
+  Widget _dropArea(
+    Widget child, {
+    required void Function(List<File> files) onFiles,
+    bool Function()? accepts,
+  }) {
+    return ValueListenableBuilder<int>(
+      valueListenable: postEditorsOpen,
+      builder: (context, editors, _) => DropTarget(
+        enable: editors == 0 && (ModalRoute.isCurrentOf(context) ?? true),
+        onDragEntered: (_) {
+          if (accepts?.call() ?? true) setState(() => _dragHovering = true);
+        },
+        onDragExited: (_) => setState(() => _dragHovering = false),
+        onDragDone: (details) {
+          setState(() => _dragHovering = false);
+          onFiles(details.files.map((f) => File(f.path)).toList());
+        },
+        child: Stack(
+          children: [
+            child,
+            if (_dragHovering)
+              const Positioned.fill(
+                child: IgnorePointer(child: DropZoneOverlay()),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final controller = widget.session.controllerFor(widget.room);
+    if (widget.room.isBoard) return _buildBoard(context);
+    final controller = _controller;
     final column = Column(
       children: [
         if (widget.room.type == RoomType.topic)
@@ -952,24 +1029,9 @@ class _ChatPanelState extends State<ChatPanel> {
 
     // 메시지 목록 + 입력창 전체를 드롭 영역으로 잡는다(입력창만이 아니라 어디에 놓아도
     // 첨부되도록) — 호버 중엔 채팅방 전체를 덮는 안내 오버레이(DropZoneOverlay)를 보여준다.
-    return DropTarget(
-      onDragEntered: (_) => setState(() => _dragHovering = true),
-      onDragExited: (_) => setState(() => _dragHovering = false),
-      onDragDone: (details) {
-        setState(() => _dragHovering = false);
-        _chatInputBarKey.currentState?.addDroppedFiles(
-          details.files.map((f) => File(f.path)).toList(),
-        );
-      },
-      child: Stack(
-        children: [
-          column,
-          if (_dragHovering)
-            const Positioned.fill(
-              child: IgnorePointer(child: DropZoneOverlay()),
-            ),
-        ],
-      ),
+    return _dropArea(
+      column,
+      onFiles: (files) => _chatInputBarKey.currentState?.addDroppedFiles(files),
     );
   }
 }

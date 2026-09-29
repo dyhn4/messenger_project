@@ -466,6 +466,8 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       final fields = await api.fetchTaskFields(id);
       final me = widget.session.userId ?? '';
       // 채팅방 알림은 이 프로젝트 팀의 비밀 대화가 아닌 방에만 보낼 수 있다(서버도 다시 확인한다).
+      // 보드 뷰 토픽은 게시글만 받아서 알림 메시지를 보낼 수 없으니 빼고, 읽기 전용·보관된 토픽은
+      // 규칙을 저장하는 내가 그 토픽을 관리할 수 있을 때만 남긴다(서버가 저장·실행 때 같은 규칙으로 막는다).
       int order(Room r) => switch (r.type) {
         RoomType.topic => 0,
         RoomType.group => 1,
@@ -473,7 +475,13 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
       };
       final rooms =
           widget.session.rooms
-              .where((r) => r.teamId == project.teamId && !r.isSecret)
+              .where(
+                (r) =>
+                    r.teamId == project.teamId &&
+                    !r.isSecret &&
+                    !r.isBoard &&
+                    r.canWrite(widget.session),
+              )
               .toList()
             ..sort((a, b) {
               final c = order(a).compareTo(order(b));

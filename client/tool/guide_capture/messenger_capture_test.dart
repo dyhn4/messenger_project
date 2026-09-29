@@ -9,912 +9,33 @@
 // 바꾸면 HTML도 같이 고친다.
 //
 // 진짜 앱 화면(DesktopHomeScreen, LoginScreen, RoomListScreen 등)을 가짜 서버 응답
-// (GuideFakeApi)과 예시 데이터(탱고컴퍼니 · 김민지 등)로 채워 그린다 — guide_capture.dart 참고.
+// (GuideFakeApi)과 예시 데이터(탱고컴퍼니 · 김민지 등 — messenger_demo.dart)로 채워 그린다
+// (guide_capture.dart 참고). 토픽 만들기 · 토픽 관리 · 보드 뷰 · 토픽 폴더 그림은
+// messenger_topic_capture_test.dart, 로그인 · 회원가입은 messenger_login_capture_test.dart가 찍는다.
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:client/models/announcement.dart';
 import 'package:client/models/app_user.dart';
-import 'package:client/models/room.dart';
-import 'package:client/models/team.dart';
 import 'package:client/screens/chat_screen.dart';
-import 'package:client/screens/desktop_home_screen.dart';
 import 'package:client/screens/room_list_screen.dart';
 import 'package:client/screens/server_setup_screen.dart';
 import 'package:client/screens/team_select_screen.dart';
-import 'package:client/services/api_client.dart';
-import 'package:client/services/app_settings.dart';
-import 'package:client/services/notification_service.dart';
-import 'package:client/services/session.dart';
 import 'package:client/widgets/account_menu_button.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/chat_panel.dart';
-import 'package:client/widgets/hover_toolbar.dart';
 import 'package:client/widgets/filter_dropdown.dart';
-import 'package:client/widgets/message_bubble.dart';
+import 'package:client/widgets/hover_toolbar.dart';
 import 'package:client/widgets/rich_text_format.dart';
 import 'package:client/widgets/room_options_menu.dart';
 import 'package:client/widgets/team_switcher.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'guide_capture.dart';
-
-// ───────────────────────────── 테스트 환경 ─────────────────────────────
-
-/// 테스트 엔진에는 OS 알림 플러그인이 없다 — 방을 열 때 부르는 "그 방 알림 지우기" 등을
-/// 조용히 넘긴다(실제 알림은 도움말 그림과 상관없다).
-class _QuietNotifications extends NotificationService {
-  @override
-  Future<void> cancelForRoom(String roomId) async {}
-
-  @override
-  Future<void> showMessage({
-    required String title,
-    required String body,
-    required String roomId,
-    String? senderName,
-    String? conversationTitle,
-    String avatarType = 'initial',
-    String? avatarEmoji,
-    String? avatarColor,
-    String? avatarUrl,
-    bool isSecret = false,
-  }) async {}
-}
-
-/// 캡처와 상관없는 디버그 경고를 걸러 낸다 — PC(windows) 모드에서 컨트롤러 없이 붙은
-/// 스크롤바(사이드바 목록 등)가 "ScrollPosition이 없다"는 디버그 단언을 내는데, 실제 앱에서도
-/// 디버그 로그로만 남고 그림에는 영향이 없다. 나머지 오류는 그대로 테스트 실패로 둔다.
-void ignoreBenignErrors() {
-  final original = FlutterError.onError;
-  FlutterError.onError = (details) {
-    final text = details.exceptionAsString();
-    if (text.contains('ScrollController has no ScrollPosition attached')) {
-      return;
-    }
-    original?.call(details);
-  };
-  addTearDown(() => FlutterError.onError = original);
-}
-
-/// 비공개(_로 시작하는) 위젯도 타입 이름으로 찾는다 — 사이드바(_Sidebar) 등.
-Finder byTypeName(String name) =>
-    find.byWidgetPredicate((w) => w.runtimeType.toString() == name);
-
-/// [of] 안에서 [text]를 찾는다(같은 글자가 화면 여러 곳에 있을 때).
-Finder textIn(Finder of, String text) =>
-    find.descendant(of: of, matching: find.text(text));
-
-Finder get sidebar => byTypeName('_Sidebar');
-
-/// 마우스 포인터를 [at]에 올려 둔다(호버 툴바처럼 마우스를 올려야 보이는 것을 찍을 때).
-Future<TestGesture> mouseAt(WidgetTester tester, Offset at) async {
-  final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-  await gesture.addPointer(location: at);
-  addTearDown(gesture.removePointer);
-  await tester.pump();
-  return gesture;
-}
-
-/// 화면 안으로 잘라낸 영역 — 잘라낼 영역이 화면 밖으로 나가지 않게.
-Rect clampToScreen(WidgetTester tester, Rect r) {
-  final size = tester.view.physicalSize / tester.view.devicePixelRatio;
-  return Rect.fromLTRB(
-    math.max(0, r.left),
-    math.max(0, r.top),
-    math.min(size.width, r.right),
-    math.min(size.height, r.bottom),
-  );
-}
-
-// ───────────────────────────── 예시 데이터 ─────────────────────────────
-
-/// 말풍선 시간 표시용 시각 — 날짜를 고정해서 다시 찍어도 같은 그림이 나오게 한다.
-DateTime at(int h, int m, {int day = 29}) => DateTime(2026, 9, day, h, m);
-
-AppUser person(
-  String id,
-  String name, {
-  String? emoji,
-  String? color,
-  String? dept,
-  String? position,
-}) => AppUser(
-  id: id,
-  username: id,
-  name: name,
-  avatarType: emoji == null ? 'initial' : 'character',
-  avatarEmoji: emoji,
-  avatarColor: color,
-  role: 'member',
-  department: dept,
-  position: position,
-);
-
-final me = person(
-  'u-me',
-  '김민지',
-  emoji: '🐰',
-  color: '#FFDEEB',
-  dept: '마케팅팀',
-  position: '대리',
-);
-final doHyun = person(
-  'u-dh',
-  '이도현',
-  emoji: '🐻',
-  color: '#FFE8CC',
-  dept: '마케팅팀',
-  position: '팀장',
-);
-final seoYeon = person('u-sy', '박서연', dept: '디자인팀', position: '과장');
-final junHo = person(
-  'u-jh',
-  '최준호',
-  emoji: '🐶',
-  color: '#D0EBFF',
-  dept: '개발팀',
-  position: '사원',
-);
-final yuNa = person('u-yn', '정유나', dept: '인사팀', position: '대리');
-final jiWoo = person('u-jw', '한지우', dept: '영업팀', position: '차장');
-
-final everyone = [me, doHyun, seoYeon, junHo, yuNa, jiWoo];
-
-Map<String, dynamic> userJson(AppUser u) => {
-  'id': u.id,
-  'username': u.username,
-  'name': u.name,
-  'avatarType': u.avatarType,
-  'avatarEmoji': u.avatarEmoji,
-  'avatarColor': u.avatarColor,
-  'role': u.role,
-  'department': u.department,
-  'position': u.position,
-};
-
-final tango = Team(
-  id: 't-tango',
-  name: '탱고컴퍼니',
-  iconEmoji: '🚀',
-  iconColor: '#4C6EF5',
-  createdAt: DateTime(2025, 3, 2),
-  memberCount: 42,
-);
-final designLab = Team(
-  id: 't-lab',
-  name: '디자인랩',
-  iconEmoji: '🎨',
-  iconColor: '#E64980',
-  createdAt: DateTime(2025, 6, 11),
-  memberCount: 8,
-);
-
-Map<String, dynamic> teamJson(Team t) => {
-  'id': t.id,
-  'name': t.name,
-  'iconEmoji': t.iconEmoji,
-  'iconColor': t.iconColor,
-  'createdAt': t.createdAt.millisecondsSinceEpoch,
-  'memberCount': t.memberCount,
-};
-
-/// 방 멤버들이 마지막으로 읽은 시각 — 말풍선 옆 "안 읽은 사람 수"(주황 숫자)가 여기서 나온다.
-/// 최준호만 9시 50분 이후를 아직 안 읽었다.
-Map<String, int> readState() => {
-  me.id: at(10, 30).millisecondsSinceEpoch,
-  doHyun.id: at(10, 20).millisecondsSinceEpoch,
-  seoYeon.id: at(10, 20).millisecondsSinceEpoch,
-  jiWoo.id: at(10, 20).millisecondsSinceEpoch,
-  yuNa.id: at(10, 20).millisecondsSinceEpoch,
-  junHo.id: at(9, 50).millisecondsSinceEpoch,
-};
-
-final townHall = Announcement(
-  id: 'an1',
-  roomId: 'r-notice',
-  authorId: yuNa.id,
-  authorName: yuNa.name,
-  text: '10월 2일(금) 오후 3시 전 직원 타운홀 미팅이 있습니다. 대회의실로 모여 주세요.',
-  createdAt: at(8, 20),
-  commentCount: 3,
-);
-
-Room topic(
-  String id,
-  String name, {
-  String? description,
-  int unread = 0,
-  bool favorite = false,
-  DateTime? active,
-  List<AppUser>? members,
-  Announcement? announcement,
-  String teamId = 't-tango',
-  String? preview,
-}) => Room(
-  id: id,
-  teamId: teamId,
-  type: RoomType.topic,
-  name: name,
-  description: description,
-  members: members ?? everyone,
-  createdAt: DateTime(2025, 3, 2),
-  lastRead: readState(),
-  unreadCount: unread,
-  favorite: favorite,
-  lastActivityAt: active,
-  latestAnnouncement: announcement,
-  lastMessagePreview: preview,
-);
-
-Room group(
-  String id,
-  String? name,
-  List<AppUser> members, {
-  int unread = 0,
-  String? iconEmoji,
-  String? iconColor,
-  String? preview,
-  DateTime? active,
-  bool muted = false,
-}) => Room(
-  id: id,
-  teamId: tango.id,
-  type: RoomType.group,
-  name: name,
-  members: [me, ...members],
-  createdAt: DateTime(2026, 8, 1),
-  lastRead: readState(),
-  unreadCount: unread,
-  muted: muted,
-  iconType: iconEmoji != null ? 'emoji' : null,
-  iconEmoji: iconEmoji,
-  iconColor: iconColor,
-  lastMessagePreview: preview,
-  lastActivityAt: active,
-);
-
-Room dm(
-  String id,
-  AppUser other, {
-  int unread = 0,
-  String? preview,
-  DateTime? active,
-}) => Room(
-  id: id,
-  teamId: tango.id,
-  type: RoomType.dm,
-  name: null,
-  members: [me, other],
-  createdAt: DateTime(2026, 7, 1),
-  lastRead: readState(),
-  unreadCount: unread,
-  lastMessagePreview: preview,
-  lastActivityAt: active,
-);
-
-List<Room> demoRooms() => [
-  topic(
-    'r-notice',
-    '전사 공지',
-    description: '회사 전체 공지와 소식',
-    favorite: true,
-    active: at(8, 30),
-    announcement: townHall,
-  ),
-  topic(
-    'r-mkt',
-    '마케팅팀',
-    description: '마케팅팀 업무 이야기',
-    active: at(10, 15),
-    members: [me, doHyun, seoYeon, junHo, jiWoo],
-  ),
-  topic(
-    'r-weekly',
-    '주간회의',
-    description: '매주 월요일 10시 주간회의',
-    unread: 3,
-    preview: '이번 주 안건 정리해서 올렸습니다',
-    active: at(9, 40),
-  ),
-  topic(
-    'r-launch',
-    '신제품 런칭',
-    description: '11월 신제품 출시 준비',
-    unread: 12,
-    preview: '출시 일정표 최신본 공유합니다',
-    active: at(9, 55),
-  ),
-  group(
-    'r-lunch',
-    '점심 메뉴 정하기',
-    [doHyun, junHo, yuNa],
-    iconEmoji: '🍀',
-    iconColor: '#37B24D',
-    unread: 2,
-    preview: '오늘은 칼국수 어때요?',
-    active: at(11, 2),
-  ),
-  group(
-    'r-tf',
-    '3분기 캠페인 TF',
-    [doHyun, seoYeon, jiWoo],
-    iconEmoji: '🎉',
-    iconColor: '#FAB005',
-    preview: '시안 두 가지 올려 두었습니다',
-    active: at(9, 20),
-  ),
-  dm(
-    'r-dm-dh',
-    doHyun,
-    unread: 1,
-    preview: '오후에 잠깐 통화 가능할까요?',
-    active: at(10, 40),
-  ),
-  dm('r-dm-sy', seoYeon, preview: '배너 수정본 확인했어요 👍', active: at(9, 5)),
-  dm('r-dm-jh', junHo, preview: '네 알겠습니다!', active: at(8, 50, day: 28)),
-  // 다른 팀(디자인랩)의 방 — 알림 센터는 여러 팀의 안 읽은 방을 한꺼번에 보여준다.
-  topic(
-    'r-lab-review',
-    '디자인 리뷰',
-    teamId: designLab.id,
-    unread: 5,
-    preview: '로고 시안 피드백 부탁드려요',
-    active: at(10, 50),
-  ),
-];
-
-/// 공개 직책 목록 — '조장' 이상이면 1:1 목록에 직책 배지가 붙는다(position_badge.dart).
-final positionOptions = [
-  for (final (i, label) in ['사원', '대리', '조장', '과장', '차장', '팀장'].indexed)
-    {'id': 'p$i', 'label': label, 'isDefault': i == 0},
-];
-
-Map<String, dynamic> message(
-  String id,
-  String roomId,
-  AppUser sender,
-  DateTime time, {
-  String type = 'text',
-  String? text,
-  String? fileName,
-  int? fileSize,
-  List<Map<String, dynamic>> comments = const [],
-}) => {
-  'id': id,
-  'roomId': roomId,
-  'senderId': sender.id,
-  'senderName': sender.name,
-  'type': type,
-  'text': text,
-  if (fileName != null) ...{
-    'fileUrl': '/uploads/$id',
-    'fileName': fileName,
-    'fileSize': fileSize ?? 1024 * 1024,
-    'attachments': [
-      {
-        'id': 'a-$id',
-        'kind': 'file',
-        'fileUrl': '/uploads/$id',
-        'fileName': fileName,
-        'fileSize': fileSize ?? 1024 * 1024,
-      },
-    ],
-  },
-  'createdAt': time.millisecondsSinceEpoch,
-  'comments': comments,
-};
-
-Map<String, dynamic> comment(
-  String id,
-  String messageId,
-  AppUser sender,
-  DateTime time,
-  String text,
-) => {
-  'id': id,
-  'messageId': messageId,
-  'roomId': 'r-mkt',
-  'senderId': sender.id,
-  'senderName': sender.name,
-  'type': 'text',
-  'text': text,
-  'createdAt': time.millisecondsSinceEpoch,
-};
-
-const planFile = '3분기_캠페인_기획안.pptx';
-const myLastText = '좋습니다! 2시에 회의실에서 뵐게요.';
-
-/// 마케팅팀 토픽의 대화. [withComments]면 기획안 메시지에 댓글 두 개가 달려 있다.
-List<Map<String, dynamic>> marketingMessages({bool withComments = false}) => [
-  message(
-    'm1',
-    'r-mkt',
-    doHyun,
-    at(9, 30),
-    text: '다들 좋은 아침입니다 ☀️\n오늘 오후 2시에 3분기 캠페인 중간 점검 회의가 있습니다.',
-  ),
-  message(
-    'm3',
-    'r-mkt',
-    me,
-    at(9, 41),
-    type: 'file',
-    text: '기획안 초안 공유드립니다. 검토 부탁드려요!',
-    fileName: planFile,
-    fileSize: 4 * 1024 * 1024,
-    comments: withComments
-        ? [
-            comment('c1', 'm3', doHyun, at(9, 52), '잘 봤어요. 일정표만 한 장 추가해 주세요.'),
-            comment('c2', 'm3', me, at(9, 55), '네, 회의 전까지 반영하겠습니다!'),
-          ]
-        : const [],
-  ),
-  message(
-    'm5',
-    'r-mkt',
-    jiWoo,
-    at(10, 12),
-    text: '영업팀에서도 고객사 반응 자료를 모아서 같이 보겠습니다.',
-  ),
-  message('m6', 'r-mkt', me, at(10, 15), text: myLastText),
-];
-
-List<Map<String, dynamic>> noticeMessages() => [
-  message(
-    'n1',
-    'r-notice',
-    yuNa,
-    at(8, 22),
-    text: '타운홀 미팅 안내를 공지로 올려 두었습니다. 위쪽 공지를 눌러 확인해 주세요 🙂',
-  ),
-  message(
-    'n2',
-    'r-notice',
-    yuNa,
-    at(8, 30),
-    text: '10월 복지포인트 신청은 이번 주 금요일까지입니다.',
-  ),
-];
-
-Map<String, dynamic> announcementJson(
-  String id,
-  String text,
-  DateTime time, {
-  bool pinned = false,
-  int comments = 0,
-}) => {
-  'id': id,
-  'roomId': 'r-notice',
-  'authorId': yuNa.id,
-  'authorName': yuNa.name,
-  'text': text,
-  'createdAt': time.millisecondsSinceEpoch,
-  'pinned': pinned,
-  'commentCount': comments,
-};
-
-/// 가짜 서버 — 화면이 부르는 API에 예시 데이터를 돌려준다.
-GuideFakeApi demoApi({bool withComments = false}) {
-  return GuideFakeApi()
-    ..get('/api/position-options', positionOptions)
-    ..get('/api/teams/:id/members', [for (final u in everyone) userJson(u)])
-    ..get('/api/users/:id/teams', [teamJson(tango)])
-    ..get(
-      '/api/rooms/r-mkt/messages',
-      (_) => marketingMessages(withComments: withComments),
-    )
-    ..get('/api/rooms/r-notice/messages', (_) => noticeMessages())
-    ..get('/api/rooms/:id/messages', <Object>[])
-    ..get('/api/rooms/r-notice/announcements', [
-      announcementJson(
-        'an1',
-        townHall.text,
-        townHall.createdAt,
-        pinned: true,
-        comments: 3,
-      ),
-      announcementJson(
-        'an2',
-        '추석 연휴(10/3~10/5) 사무실 출입 안내',
-        at(15, 10, day: 24),
-        comments: 1,
-      ),
-      announcementJson('an3', '하반기 정보보안 교육 이수 안내', at(9, 0, day: 15)),
-    ])
-    ..get('/api/rooms/browse', [
-      {
-        'id': 'r-notice',
-        'name': '전사 공지',
-        'description': '회사 전체 공지와 소식',
-        'memberCount': 42,
-        'joined': true,
-      },
-      {
-        'id': 'r-club',
-        'name': '사내 동호회',
-        'description': '등산 · 볼링 · 보드게임 모임',
-        'memberCount': 23,
-        'joined': false,
-      },
-      {
-        'id': 'r-it',
-        'name': 'IT 도움방',
-        'description': 'PC · 프린터 · 계정 문의',
-        'memberCount': 35,
-        'joined': false,
-      },
-      {
-        'id': 'r-mkt',
-        'name': '마케팅팀',
-        'description': '마케팅팀 업무 이야기',
-        'memberCount': 5,
-        'joined': true,
-      },
-      {
-        'id': 'r-launch',
-        'name': '신제품 런칭',
-        'description': '11월 신제품 출시 준비',
-        'memberCount': 12,
-        'joined': true,
-      },
-    ])
-    ..get('/api/search', [
-      {
-        'id': 'm3',
-        'roomId': 'r-mkt',
-        'roomName': '마케팅팀',
-        'senderId': me.id,
-        'senderName': me.name,
-        'text': '기획안 초안 공유드립니다. 검토 부탁드려요!',
-        'createdAt': at(9, 41).millisecondsSinceEpoch,
-      },
-      {
-        'id': 's2',
-        'roomId': 'r-tf',
-        'roomName': '3분기 캠페인 TF',
-        'senderId': jiWoo.id,
-        'senderName': jiWoo.name,
-        'text': '기획안에 들어갈 고객사 사례 세 곳 정리했습니다.',
-        'createdAt': at(16, 20, day: 26).millisecondsSinceEpoch,
-      },
-      {
-        'id': 's3',
-        'roomId': 'r-dm-dh',
-        'roomName': '이도현',
-        'senderId': doHyun.id,
-        'senderName': doHyun.name,
-        'text': '기획안은 이번 주 안에만 주시면 됩니다.',
-        'createdAt': at(11, 5, day: 22).millisecondsSinceEpoch,
-      },
-    ])
-    ..get('/api/attachments', [
-      message('f1', 'r-mkt', me, at(9, 41), type: 'file', fileName: planFile),
-      message(
-        'f2',
-        'r-tf',
-        seoYeon,
-        at(17, 2, day: 26),
-        type: 'file',
-        fileName: '배너_시안_v2.pdf',
-      ),
-      message(
-        'f3',
-        'r-weekly',
-        doHyun,
-        at(10, 40, day: 28),
-        type: 'file',
-        fileName: '주간회의_회의록_0928.docx',
-      ),
-      message(
-        'f4',
-        'r-tf',
-        jiWoo,
-        at(16, 20, day: 26),
-        type: 'file',
-        fileName: '고객사_반응_정리.xlsx',
-      ),
-    ])
-    ..get('/api/favorite-files', [
-      {'messageId': 'f1'},
-    ])
-    ..get('/auth/username-available', {'available': true})
-    ..post(
-      '/api/upload',
-      (_) => {
-        'url': '/uploads/new',
-        'fileName': 'file',
-        'size': 1000,
-        'mimeType': 'application/octet-stream',
-      },
-    );
-}
-
-/// 로그인까지 끝난 김민지(정회원)의 세션 — guide_capture.dart의 guideSession과 같은 방식이되,
-/// OS 알림 플러그인을 부르지 않는 알림 서비스를 쓴다.
-Session demoSession({
-  GuideFakeApi? api,
-  List<Room>? rooms,
-  bool inTeam = true,
-}) {
-  final fake = api ?? demoApi();
-  final session = Session(
-    notifications: _QuietNotifications(),
-    settings: AppSettings(),
-  );
-  const serverUrl = 'https://192.168.0.10:3000';
-  session.serverUrl = serverUrl;
-  session.api = ApiClient(
-    baseUrl: serverUrl,
-    token: 'guide-token',
-    httpClient: fake.client,
-  );
-  session.userId = me.id;
-  session.username = 'minji.kim';
-  session.name = me.name;
-  session.accountRole = AccountRole.member;
-  session.canCreateProject = true;
-  session.avatarType = 'character';
-  session.avatarEmoji = me.avatarEmoji;
-  session.avatarColor = me.avatarColor;
-  session.myTeamPositions = [
-    TeamPosition(
-      teamId: tango.id,
-      teamName: tango.name,
-      department: '마케팅팀',
-      position: '대리',
-    ),
-  ];
-  session.teams.addAll([tango, designLab]);
-  if (inTeam) session.currentTeam = tango;
-  session.rooms.addAll(rooms ?? demoRooms());
-  session.onlineUserIds.addAll([doHyun.id, seoYeon.id, jiWoo.id]);
-  session.settings.downloadFolder = r'C:\Users\minji\Downloads';
-  return session;
-}
-
-/// PC 메인 화면을 띄우고 [roomName] 방을 연다.
-Future<Session> openDesktop(
-  WidgetTester tester, {
-  String? roomName = '마케팅팀',
-  GuideFakeApi? api,
-}) async {
-  ignoreBenignErrors();
-  final session = demoSession(api: api);
-  await pumpGuideApp(tester, DesktopHomeScreen(session: session));
-  if (roomName != null) {
-    await tester.tap(textIn(sidebar, roomName));
-    await settleGuide(tester);
-  }
-  return session;
-}
-
-/// 사이드바 섹션 제목 옆 [+] 버튼(툴팁으로 찾는다).
-Finder plusButton(String tooltip) =>
-    find.descendant(of: sidebar, matching: find.byTooltip(tooltip));
-
-/// 떠 있는 대화상자의 카드 부분 — Dialog 위젯 자체는 화면 전체 크기라 잘라낼 때는 이걸 쓴다.
-Finder get dialogCard => find
-    .descendant(of: find.byType(Dialog), matching: find.byType(Material))
-    .first;
-
-/// [text]가 적힌 버튼 전체(아이콘 포함).
-Finder buttonWith(String text) => find
-    .ancestor(
-      of: find.text(text),
-      matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
-    )
-    .first;
-
-/// [text]로 시작하는 메시지의 말풍선(배경이 칠해진 상자) — 아바타의 AnimatedContainer와
-/// 헷갈리지 않게 말풍선 애니메이션 길이(500ms)로 고른다.
-Finder bubbleBoxOf(String text) => find
-    .descendant(
-      of: find
-          .ancestor(
-            of: find.textContaining(text, findRichText: true).first,
-            matching: find.byType(MessageBubble),
-          )
-          .first,
-      matching: find.byWidgetPredicate(
-        (w) =>
-            w is AnimatedContainer &&
-            w.duration == const Duration(milliseconds: 500),
-      ),
-    )
-    .first;
-
-/// 보낸 사람이 나인 마지막 말풍선.
-Finder get myLastBubble => find
-    .ancestor(
-      of: find.textContaining(myLastText, findRichText: true),
-      matching: find.byType(MessageBubble),
-    )
-    .first;
-
-/// 떠 있는 제목(라벨)이 테두리 위에 걸친 입력칸 — 라벨을 가리지 않게 상자 위쪽만 더 띄운다
-/// (입력칸끼리 12px 간격이라 아래쪽은 바짝 붙인다).
-GuideCallout fieldCallout(
-  WidgetTester tester,
-  Finder field,
-  int number, {
-  CalloutBadge badge = CalloutBadge.left,
-}) {
-  final r = tester.getRect(field);
-  return GuideCallout.rect(
-    Rect.fromLTRB(r.left - 4, r.top - 9, r.right + 4, r.bottom + 1),
-    number: number,
-    badge: badge,
-  );
-}
-
-/// 메뉴 항목 하나(팝업 메뉴 항목들이 서로 붙어 있어서 상자를 살짝 안쪽으로 그린다).
-GuideCallout menuItemCallout(
-  WidgetTester tester,
-  Finder item,
-  int number, {
-  CalloutBadge badge = CalloutBadge.left,
-}) => GuideCallout.rect(
-  tester.getRect(item).deflate(3),
-  number: number,
-  badge: badge,
-);
-
-/// 테스트 엔진에는 path_provider 플러그인이 없다 — 첨부 썸네일을 임시 파일로 쓸 때 부르는
-/// "임시 폴더"를 테스트용 폴더로 돌려준다.
-Directory mockPathProvider(WidgetTester tester) {
-  final dir = Directory.systemTemp.createTempSync('guide_tmp_');
-  const channel = MethodChannel('plugins.flutter.io/path_provider');
-  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-    channel,
-    (call) async => dir.path,
-  );
-  addTearDown(() {
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      channel,
-      null,
-    );
-    dir.deleteSync(recursive: true);
-  });
-  return dir;
-}
-
-/// 메뉴가 버튼을 덮어서 한 장에 "누를 곳"과 "뜨는 메뉴"를 같이 못 보여줄 때 — 누르기 전
-/// 그림과 누른 뒤 그림을 가로로 이어 붙이고 사이에 화살표를 그려 한 장으로 만든다.
-/// [parts]는 saveGuideShot으로 저장한 임시 파일들이고, 합친 뒤 지운다.
-void composeShots(List<File> parts, String name) {
-  const ratio = 1.5; // GuideSurface.desktop의 배율.
-  const gap = 84; // 화살표 칸(픽셀) — 논리 56px.
-  const pad = 18;
-  final images = [
-    for (final f in parts)
-      img.decodePng(f.readAsBytesSync())!.convert(numChannels: 3),
-  ];
-  final width =
-      images.fold<int>(0, (s, i) => s + i.width) +
-      gap * (images.length - 1) +
-      pad * 2;
-  final height = images.map((i) => i.height).reduce(math.max) + pad * 2;
-  final canvas = img.Image(width: width, height: height);
-  img.fill(canvas, color: img.ColorRgb8(241, 243, 245));
-  final border = img.ColorRgb8(206, 212, 218);
-  final arrow = img.ColorRgb8(73, 80, 87);
-  var x = pad;
-  for (final (i, part) in images.indexed) {
-    final y = (height - part.height) ~/ 2;
-    img.compositeImage(canvas, part, dstX: x, dstY: y);
-    img.drawRect(
-      canvas,
-      x1: x - 1,
-      y1: y - 1,
-      x2: x + part.width,
-      y2: y + part.height,
-      color: border,
-      thickness: 2,
-    );
-    x += part.width;
-    if (i < images.length - 1) {
-      final cy = height ~/ 2;
-      img.drawLine(
-        canvas,
-        x1: x + 18,
-        y1: cy,
-        x2: x + gap - 30,
-        y2: cy,
-        color: arrow,
-        thickness: 7,
-      );
-      img.fillPolygon(
-        canvas,
-        vertices: [
-          img.Point(x + gap - 34, cy - 16),
-          img.Point(x + gap - 14, cy),
-          img.Point(x + gap - 34, cy + 16),
-        ],
-        color: arrow,
-      );
-      x += gap;
-    }
-  }
-  final out = File('${guideImagesDir.path}/$name.png');
-  out.writeAsBytesSync(
-    img.encodePng(
-      img.quantize(
-        canvas,
-        numberOfColors: 256,
-        method: img.QuantizeMethod.octree,
-      ),
-      level: 9,
-    ),
-  );
-  for (final f in parts) {
-    f.deleteSync();
-  }
-  // ignore: avoid_print
-  print(
-    '[guide] ${out.path} (${canvas.width}×${canvas.height}px, '
-    '${(out.lengthSync() / 1024).toStringAsFixed(0)} KB)\n'
-    '        <img src="images/$name.png" alt="" '
-    'width="${(canvas.width / ratio).round()}" '
-    'height="${(canvas.height / ratio).round()}" loading="lazy">',
-  );
-}
-
-/// "배너 시안" 예시 그림(파일 보내기 캡처용) — 채팅 입력칸 위에 작은 미리보기로 보인다.
-img.Image bannerImage() {
-  final noise = math.Random(7);
-  final image = img.Image(width: 960, height: 540);
-  for (var y = 0; y < image.height; y++) {
-    for (var x = 0; x < image.width; x++) {
-      final t = x / image.width;
-      final n = noise.nextInt(9) - 4;
-      image.setPixelRgb(
-        x,
-        y,
-        (76 + 120 * t).round() + n,
-        (110 + 40 * (1 - t)).round() + n,
-        245 - (60 * t).round() + n,
-      );
-    }
-  }
-  img.fillCircle(
-    image,
-    x: 720,
-    y: 240,
-    radius: 140,
-    color: img.ColorRgb8(255, 212, 59),
-  );
-  img.fillRect(
-    image,
-    x1: 80,
-    y1: 340,
-    x2: 500,
-    y2: 392,
-    color: img.ColorRgb8(255, 255, 255),
-  );
-  img.fillRect(
-    image,
-    x1: 80,
-    y1: 412,
-    x2: 360,
-    y2: 448,
-    color: img.ColorRgb8(220, 228, 255),
-  );
-  return image;
-}
-
-// ───────────────────────────── 캡처 ─────────────────────────────
-
-const desktop = GuideSurface.desktop;
-
-/// 입력칸처럼 가로로 긴 부분만 잘라 보여줄 때 — 창을 조금 좁혀서(사이드바는 그대로 보이는 폭)
-/// 잘라낸 그림이 본문 폭에서 덜 줄어들게 한다.
-const compact = GuideSurface(Size(1000, 720));
+import 'messenger_demo.dart';
 
 void main() {
   setUpAll(() {
@@ -999,8 +120,8 @@ void main() {
     final chat = tester.getRect(find.byType(ChatPanel));
     final input = tester.getRect(find.byType(ChatInputBar));
     final icons = unionRect(tester, [
-      find.byTooltip('프로젝트'),
-      find.byTooltip('설정'),
+      topBarButton('프로젝트'),
+      topBarButton('설정'),
     ], padding: 2);
     await saveGuideShot(
       tester,
@@ -1037,7 +158,7 @@ void main() {
     await openDesktop(tester, roomName: null);
     final tips = ['프로젝트', '알림 센터', '멤버', '검색', '메뉴', '설정'];
     final row = unionRect(tester, [
-      for (final t in tips) find.byTooltip(t),
+      for (final t in tips) topBarButton(t),
     ], padding: 0);
     await saveGuideShot(
       tester,
@@ -1045,7 +166,7 @@ void main() {
       callouts: [
         for (final (i, t) in tips.indexed)
           GuideCallout.box(
-            find.byTooltip(t),
+            topBarButton(t),
             number: i + 1,
             badge: CalloutBadge.bottom,
             padding: 1,
@@ -1065,7 +186,7 @@ void main() {
 
   guideCapture('내 메뉴', desktop, (tester) async {
     await openDesktop(tester, roomName: null);
-    final button = find.byTooltip('설정');
+    final button = topBarButton('설정');
     final buttonRect = tester.getRect(button);
     await tester.tap(button);
     await settleGuide(tester);
@@ -1091,7 +212,7 @@ void main() {
       crop: clampToScreen(
         tester,
         Rect.fromLTRB(
-          tester.getRect(find.byTooltip('알림 센터')).left - 16,
+          tester.getRect(topBarButton('알림 센터')).left - 16,
           0,
           1280,
           menu.bottom + 20,
@@ -1233,126 +354,7 @@ void main() {
     );
   });
 
-  guideCapture('토픽 메뉴', desktop, (tester) async {
-    await openDesktop(tester, roomName: null);
-    final plus = plusButton('토픽 추가');
-    final plusRect = tester.getRect(plus);
-    final header = tester.getRect(textIn(sidebar, '토픽 4'));
-    final before = await saveGuideShot(
-      tester,
-      '_tmp-topic-menu-a',
-      callouts: [
-        GuideCallout.rect(
-          plusRect.inflate(2),
-          number: 1,
-          badge: CalloutBadge.left,
-        ),
-      ],
-      crop: Rect.fromLTRB(
-        0,
-        header.top - 26,
-        282,
-        tester.getRect(textIn(sidebar, '마케팅팀')).bottom + 14,
-      ),
-    );
-    await tester.tap(plus);
-    await settleGuide(tester);
-    Finder item(String text) => find.ancestor(
-      of: find.text(text),
-      matching: find.byType(PopupMenuItem<void>),
-    );
-    final menu = unionRect(tester, [item('토픽 만들기'), item('토픽 찾기')]);
-    final after = await saveGuideShot(
-      tester,
-      '_tmp-topic-menu-b',
-      // 토픽 찾기에는 번호를 달지 않는다 — 바로 다음 그림(새 토픽 생성 창)의 3번과 겹치지 않게
-      // (토픽 찾기는 다음 절에서 따로 설명한다).
-      callouts: [
-        menuItemCallout(tester, item('토픽 만들기'), 2, badge: CalloutBadge.right),
-      ],
-      crop: clampToScreen(
-        tester,
-        Rect.fromLTRB(
-          menu.left - 20,
-          menu.top - 20,
-          menu.right + 50,
-          menu.bottom + 20,
-        ),
-      ),
-    );
-    composeShots([before, after], 'messenger-topic-menu');
-  });
-
-  guideCapture('토픽 만들기', desktop, (tester) async {
-    await openDesktop(tester, roomName: null);
-    await tester.tap(plusButton('토픽 추가'));
-    await settleGuide(tester);
-    await tester.tap(find.text('토픽 만들기'));
-    await settleGuide(tester);
-    final name = find.widgetWithText(TextField, '토픽 이름');
-    final desc = find.widgetWithText(TextField, '설명 (선택)');
-    await tester.enterText(name, '고객 문의 대응');
-    await tester.enterText(desc, '고객 문의를 함께 확인하고 답변을 나누는 방');
-    FocusManager.instance.primaryFocus?.unfocus();
-    await settleGuide(tester);
-    await saveGuideShot(
-      tester,
-      'messenger-topic-create',
-      callouts: [
-        fieldCallout(tester, name, 3),
-        fieldCallout(tester, desc, 4),
-        GuideCallout.rect(
-          unionRect(tester, [
-            find.text('공개 여부'),
-            find.widgetWithText(RadioListTile<bool>, '비공개'),
-          ]),
-          number: 5,
-          badge: CalloutBadge.left,
-        ),
-        GuideCallout.box(
-          buttonWith('만들기'),
-          number: 6,
-          badge: CalloutBadge.left,
-        ),
-      ],
-      crop: cropAround(tester, [dialogCard], margin: 30),
-    );
-  });
-
-  guideCapture('토픽 찾기', desktop, (tester) async {
-    await openDesktop(tester, roomName: null);
-    final plusRect = tester.getRect(plusButton('토픽 추가'));
-    await tester.tap(plusButton('토픽 추가'));
-    await settleGuide(tester);
-    await tester.tap(find.text('토픽 찾기'));
-    await settleGuide(tester);
-    final join = find.descendant(
-      of: find.widgetWithText(ListTile, '사내 동호회'),
-      matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
-    );
-    final card = tester.getRect(dialogCard);
-    await saveGuideShot(
-      tester,
-      'messenger-topic-browse',
-      callouts: [
-        GuideCallout.rect(
-          plusRect.inflate(2),
-          number: 1,
-          badge: CalloutBadge.bottom,
-        ),
-        GuideCallout.box(join, number: 2, badge: CalloutBadge.left),
-      ],
-      crop: clampToScreen(
-        tester,
-        Rect.fromLTRB(
-          0,
-          math.min(card.top, plusRect.top) - 20,
-          card.right + 24,
-          card.bottom + 20,
-        ),
-      ),
-    );
-  });
+  // 토픽 만들기 · 참여 가능한 토픽 보기 · 멤버 초대하기 그림은 messenger_topic_capture_test.dart.
 
   // ── 4. 메시지 보내기 ──
 
@@ -1545,13 +547,15 @@ void main() {
   });
 
   guideCapture('화면 캡처', compact, (tester) async {
+    final parts = createGuideTempDir();
     await openDesktop(tester);
     final button = find.byTooltip('화면 캡처');
     final buttonRect = tester.getRect(button);
     final input = tester.getRect(find.byType(ChatInputBar));
     final before = await saveGuideShot(
       tester,
-      '_tmp-capture-a',
+      'capture-a',
+      dir: parts,
       callouts: [
         GuideCallout.rect(
           buttonRect.deflate(2),
@@ -1578,7 +582,8 @@ void main() {
     ], padding: 6);
     final after = await saveGuideShot(
       tester,
-      '_tmp-capture-b',
+      'capture-b',
+      dir: parts,
       callouts: [GuideCallout.rect(menu, number: 2, badge: CalloutBadge.right)],
       crop: clampToScreen(
         tester,
@@ -1732,7 +737,7 @@ void main() {
 
   guideCapture('알림 센터', desktop, (tester) async {
     await openDesktop(tester);
-    final bell = find.byTooltip('알림 센터');
+    final bell = topBarButton('알림 센터');
     await tester.tap(bell);
     await settleGuide(tester);
     final panel = byTypeName('NotificationsPanel');
@@ -1745,7 +750,8 @@ void main() {
       tester,
       'messenger-notification-center',
       callouts: [
-        GuideCallout.box(bell, number: 1, badge: CalloutBadge.left),
+        // 번호는 종 아래에 — 왼쪽에 두면 바로 옆 프로젝트 아이콘을 가린다.
+        GuideCallout.box(bell, number: 1, badge: CalloutBadge.bottom),
         GuideCallout.rect(
           Rect.fromLTRB(
             panelRect.left,
@@ -1778,8 +784,9 @@ void main() {
     );
     final tileRect = tester.getRect(tile);
     await mouseAt(tester, tileRect.center);
+    // 줄의 오른쪽 아래를 누른다 — 메뉴가 누른 곳에서 열려서, 방 이름과 표시 상자를 덮지 않게.
     await tester.tapAt(
-      tileRect.center + const Offset(40, 0),
+      Offset(tileRect.right - 60, tileRect.bottom - 3),
       buttons: kSecondaryMouseButton,
       kind: PointerDeviceKind.mouse,
     );
@@ -1804,7 +811,7 @@ void main() {
         tester,
         Rect.fromLTRB(
           0,
-          math.min(tileRect.top, menu.top) - 30,
+          math.min(tileRect.top, menu.top) - 42,
           menu.right + 70,
           math.max(tileRect.bottom, menu.bottom) + 30,
         ),
@@ -1812,35 +819,50 @@ void main() {
     );
   });
 
-  guideCapture('대화방 더보기', desktop, (tester) async {
-    await openDesktop(tester);
-    final button = find.byType(RoomOptionsMenu);
-    final buttonRect = tester.getRect(button);
-    final before = await saveGuideShot(
+  // 대화방 위쪽(머리글) 오른쪽의 버튼들 — 멤버 N · 알림 · 멤버 초대 · ⋮(더보기). 내가 토픽
+  // 관리자인 마케팅팀 토픽이라 ⋮ 메뉴에 "정보 변경하기"까지 보인다. 메뉴는 버튼 위를 덮으며
+  // 열려서, 머리글과 메뉴를 두 장으로 나눠 찍는다.
+  guideCapture('대화방 위쪽 버튼', compact, (tester) async {
+    await openDesktop(
       tester,
-      '_tmp-room-options-a',
-      callouts: [
-        GuideCallout.rect(
-          buttonRect.deflate(2),
-          number: 1,
-          badge: CalloutBadge.left,
-        ),
-      ],
-      crop: Rect.fromLTRB(
-        buttonRect.left - 220,
-        buttonRect.top - 30,
-        1280,
-        buttonRect.bottom + 30,
-      ),
+      session: demoSession(rooms: demoRoomsWith(replace: [managedMarketing()])),
     );
-    await tester.tap(button);
+    final header = find.byType(RoomOptionsMenu);
+    Finder inHeader(Finder f) => find.descendant(of: header, matching: f);
+    final more = inHeader(find.byTooltip('더보기'));
+    final chat = tester.getRect(find.byType(ChatPanel));
+    final row = tester.getRect(header);
+    await saveGuideShot(
+      tester,
+      'messenger-room-header',
+      callouts: [
+        GuideCallout.box(
+          inHeader(find.byTooltip('멤버')),
+          number: 1,
+          badge: CalloutBadge.bottom,
+        ),
+        GuideCallout.box(
+          inHeader(find.byTooltip('알림 끄기')),
+          number: 2,
+          badge: CalloutBadge.bottom,
+        ),
+        GuideCallout.box(
+          inHeader(find.byTooltip('멤버 초대')),
+          number: 3,
+          badge: CalloutBadge.bottom,
+        ),
+        GuideCallout.box(more, number: 4, badge: CalloutBadge.bottom),
+      ],
+      crop: Rect.fromLTRB(chat.left, row.top - 14, 1000, row.bottom + 48),
+    );
+    await tester.tap(more);
     await settleGuide(tester);
     final items = find.byWidgetPredicate((w) => w is PopupMenuItem);
     final menu = unionRect(tester, [items.first, items.last], padding: 8);
-    final after = await saveGuideShot(
+    await saveGuideShot(
       tester,
-      '_tmp-room-options-b',
-      callouts: [GuideCallout.rect(menu, number: 2, badge: CalloutBadge.left)],
+      'messenger-room-options',
+      callouts: [GuideCallout.rect(menu, number: 5, badge: CalloutBadge.left)],
       crop: clampToScreen(
         tester,
         Rect.fromLTRB(
@@ -1851,14 +873,13 @@ void main() {
         ),
       ),
     );
-    composeShots([before, after], 'messenger-room-options');
   });
 
   // ── 7. 검색과 파일 ──
 
   guideCapture('검색', desktop, (tester) async {
     await openDesktop(tester);
-    final searchIcon = find.byTooltip('검색');
+    final searchIcon = topBarButton('검색');
     final iconRect = tester.getRect(searchIcon);
     await tester.tap(searchIcon);
     await settleGuide(tester);
@@ -1913,7 +934,7 @@ void main() {
 
   guideCapture('파일 모아 보기', desktop, (tester) async {
     await openDesktop(tester, roomName: null);
-    final menuButton = find.byTooltip('메뉴');
+    final menuButton = topBarButton('메뉴');
     final menuRect = tester.getRect(menuButton);
     await tester.tap(menuButton);
     await settleGuide(tester);
@@ -2026,7 +1047,7 @@ void main() {
 
   guideCapture('멤버와 프로필', desktop, (tester) async {
     await openDesktop(tester);
-    final membersIcon = find.byTooltip('멤버');
+    final membersIcon = topBarButton('멤버');
     final iconRect = tester.getRect(membersIcon);
     await tester.tap(membersIcon);
     await settleGuide(tester);
@@ -2067,7 +1088,7 @@ void main() {
 
   guideCapture('내 프로필', desktop, (tester) async {
     await openDesktop(tester);
-    await tester.tap(find.byTooltip('설정'));
+    await tester.tap(topBarButton('설정'));
     await settleGuide(tester);
     await tester.tap(find.text(me.name).last);
     await settleGuide(tester);
@@ -2114,47 +1135,105 @@ void main() {
 
   // ── 10. 환경설정 ──
 
+  // 환경설정 창(settings_screen.dart) — 왼쪽에서 "메신저 설정 / 시스템 설정"을 고르면 오른쪽에 그
+  // 항목들이 보인다. 창을 연 뒤 창 크기를 줄여서(대화상자가 창 폭을 따라 줄어든다) 본문 폭에 맞춘다.
   guideCapture('환경설정', desktop, (tester) async {
     await openDesktop(tester);
-    await tester.tap(find.byTooltip('설정'));
+    await tester.tap(topBarButton('설정'));
     await settleGuide(tester);
     await tester.tap(find.text('환경설정'));
     await settleGuide(tester);
-    Finder pill(String label) => find.ancestor(
-      of: find.text(label),
-      matching: byTypeName('_PreviewModeOption'),
+    await resizeGuideWindow(tester, const Size(780, 800));
+    Finder item(String label) => find
+        .ancestor(of: find.text(label), matching: byTypeName('_Item'))
+        .first;
+    Finder nav(String label) =>
+        find.ancestor(of: find.text(label), matching: byTypeName('_NavItem'));
+    // 오른쪽 칸의 스크롤 영역 — 항목 상자를 이 안으로 잘라서 스크롤에 가려진 부분까지 그리지 않는다.
+    Finder pane() => find
+        .descendant(
+          of: find.byType(Dialog),
+          matching: find.byType(SingleChildScrollView),
+        )
+        .last;
+    GuideCallout section(String label, int number) => GuideCallout.rect(
+      tester
+          .getRect(item(label))
+          .inflate(6)
+          .intersect(tester.getRect(pane()).deflate(3)),
+      number: number,
+      badge: CalloutBadge.left,
     );
-    Rect section(String label, Finder last) =>
-        unionRect(tester, [find.text(label), last], padding: 5);
     await saveGuideShot(
       tester,
       'messenger-settings',
       callouts: [
         GuideCallout.rect(
-          section(
-            '화면 테마',
-            find.widgetWithText(RadioListTile<ThemeMode>, '다크 모드'),
-          ),
+          unionRect(tester, [
+            nav('메신저 설정'),
+            nav('시스템 설정'),
+          ], padding: 3),
           number: 1,
           badge: CalloutBadge.left,
         ),
-        GuideCallout.rect(
-          section('팀 전환 방식', pill('탭(전체 보기)')),
-          number: 2,
-          badge: CalloutBadge.left,
-        ),
-        GuideCallout.rect(
-          section('메시지 내용 미리보기', pill('미리보기 안함')),
-          number: 3,
-          badge: CalloutBadge.left,
-        ),
+        section('팀 전환 방식', 2),
+        section('메시지 내용 미리보기', 3),
+        section('메시지 전송 옵션 설정', 4),
         GuideCallout.box(
           buttonWith('저장하기'),
-          number: 4,
+          number: 5,
           badge: CalloutBadge.left,
         ),
       ],
-      crop: cropAround(tester, [dialogCard], margin: 30),
+      crop: cropAround(tester, [dialogCard], margin: 20),
+    );
+
+    // 시스템 설정 — 항목이 길어서 오른쪽 칸이 스크롤된다. 처음 보이는 네 항목(창 전체)과, "파일
+    // 다운로드"부터 보이게 내린 오른쪽 칸(다음 두 항목 — 맨 아래 버전 정보는 글로만 설명)을 따로 찍는다.
+    await tester.tap(nav('시스템 설정'));
+    await settleGuide(tester);
+    await saveGuideShot(
+      tester,
+      'messenger-settings-system',
+      callouts: [
+        section('시작 시 자동 실행', 1),
+        section('항상 위로', 2),
+        section('화면 테마', 3),
+        section('반투명', 4),
+      ],
+      crop: cropAround(tester, [dialogCard], margin: 20),
+    );
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: pane(), matching: find.byType(Scrollable)).first,
+        )
+        .position;
+    final download = tester.getRect(item('파일 다운로드'));
+    position.jumpTo(
+      (download.top - tester.getRect(pane()).top + position.pixels - 12).clamp(
+        0,
+        position.maxScrollExtent,
+      ),
+    );
+    await settleGuide(tester);
+    // 오른쪽 칸만 — 스크롤 영역에 칸 제목("시스템 설정") 줄과 테두리까지 더한다.
+    final scroll = tester.getRect(pane());
+    await saveGuideShot(
+      tester,
+      'messenger-settings-system-2',
+      callouts: [
+        section('파일 다운로드', 5),
+        section('자동 잠금', 6),
+      ],
+      crop: clampToScreen(
+        tester,
+        Rect.fromLTRB(
+          scroll.left - 23,
+          scroll.top - 80,
+          scroll.right + 23,
+          scroll.bottom + 23,
+        ),
+      ),
     );
   });
 

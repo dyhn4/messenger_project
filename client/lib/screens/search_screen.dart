@@ -487,11 +487,14 @@ class _SearchResultRow extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      _highlighted(
-                        context,
-                        result.text ?? result.fileName ?? '(파일)',
-                        query,
-                      ),
+                      if (result.isPost)
+                        ..._postLines(context)
+                      else
+                        _highlighted(
+                          context,
+                          result.text ?? result.fileName ?? '(파일)',
+                          query,
+                        ),
                     ],
                   ),
                 ),
@@ -503,8 +506,59 @@ class _SearchResultRow extends StatelessWidget {
     );
   }
 
-  Widget _highlighted(BuildContext context, String text, String query) {
-    if (query.isEmpty) return Text(text);
+  /// 보드 게시글 — "게시글" 표시와 굵은 제목 한 줄, 그 아래 본문 두 줄(검색어는 양쪽 다 칠한다 —
+  /// 서버가 제목으로도 찾아준다).
+  List<Widget> _postLines(BuildContext context) {
+    final theme = Theme.of(context);
+    final body = result.text?.trim() ?? '';
+    return [
+      Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '게시글',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: _highlighted(
+              context,
+              result.title ?? '',
+              query,
+              maxLines: 1,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+      if (body.isNotEmpty) ...[
+        const SizedBox(height: 2),
+        _highlighted(context, body, query, maxLines: 2),
+      ],
+    ];
+  }
+
+  Widget _highlighted(
+    BuildContext context,
+    String text,
+    String query, {
+    int? maxLines,
+    TextStyle? style,
+  }) {
+    final overflow = maxLines == null ? null : TextOverflow.ellipsis;
+    if (query.isEmpty) {
+      return Text(text, maxLines: maxLines, overflow: overflow, style: style);
+    }
     final lowerText = text.toLowerCase();
     final lowerQuery = query.toLowerCase();
     final spans = <TextSpan>[];
@@ -528,8 +582,10 @@ class _SearchResultRow extends StatelessWidget {
       start = idx + query.length;
     }
     return RichText(
+      maxLines: maxLines,
+      overflow: overflow ?? TextOverflow.clip,
       text: TextSpan(
-        style: DefaultTextStyle.of(context).style,
+        style: DefaultTextStyle.of(context).style.merge(style),
         children: spans,
       ),
     );

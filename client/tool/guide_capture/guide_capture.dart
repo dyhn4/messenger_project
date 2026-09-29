@@ -15,6 +15,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:client/models/room.dart';
 import 'package:client/models/team.dart';
 import 'package:client/services/api_client.dart';
@@ -219,6 +220,7 @@ void guideCapture(
       tester.view.devicePixelRatio = surface.pixelRatio;
       addTearDown(tester.view.reset);
       _currentSurface = surface;
+      _stubDesktopPlugins(tester);
       // 위젯 테스트는 그림자를 굵은 검은 테두리로 바꿔 그린다(골든 비교용) — 실제 앱처럼
       // 보이도록 캡처하는 동안만 끄고, 테스트가 끝날 때 검사하는 값으로 되돌린다.
       debugDisableShadows = false;
@@ -235,6 +237,19 @@ void guideCapture(
 }
 
 GuideSurface _currentSurface = GuideSurface.desktop;
+
+/// 테스트 엔진에 없는 PC 전용 플러그인 흉내 — 부르면 아무것도 하지 않고 null을 돌려준다.
+///
+/// 환경설정 창(settings_screen.dart)은 저장하지 않고 닫힐 때(테스트가 끝나 화면이 내려갈 때 포함)
+/// Windows 창 투명도를 되돌리려고 window_manager의 setOpacity를 부른다. 흉내가 없으면 그 호출이
+/// MissingPluginException으로 끝나고, 비동기라 **다음** 캡처 테스트의 실패로 잡힌다. 테스트가 끝난
+/// 뒤 화면을 내릴 때도 불리므로 테스트마다 다시 걸어 두기만 하고 되돌리지는 않는다.
+void _stubDesktopPlugins(WidgetTester tester) {
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    const MethodChannel('window_manager'),
+    (call) async => null,
+  );
+}
 
 // ───────────────────────────── 화면 올리기 ─────────────────────────────
 
@@ -592,6 +607,16 @@ Directory get guideImagesDir {
   return out;
 }
 
+/// 이어 붙이기 전 조각 그림 등을 둘 운영체제 임시 폴더 — 캡처 테스트 안에서 부르면 새로 만들고,
+/// 그 테스트가 끝날 때(실패해도) 지운다.
+Directory createGuideTempDir() {
+  final dir = Directory.systemTemp.createTempSync('guide_parts_');
+  addTearDown(() {
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
+  });
+  return dir;
+}
+
 /// 지금 화면을 [callouts]를 얹어 `server/guide/images/<name>.png`로 저장한다.
 ///
 /// - [crop]: 논리 좌표로 잘라낼 영역(메뉴·대화상자만 보여줄 때). 화면 밖은 알아서 잘린다.
@@ -602,6 +627,9 @@ Directory get guideImagesDir {
 /// - [erase]: 논리 좌표 영역을 그 바로 왼쪽 픽셀 색으로 칠해 지운다. 캡처는 Windows에서 돌아서
 ///   휴대폰 그림에도 Windows 전용 버튼(화면 캡처·줄바꿈 안내 등)이 그려지는데, 그 자리가 실제
 ///   안드로이드에서는 빈 배경이라 배경색으로 덮는다. 표시 상자와 겹치지 않는 곳에만 쓸 것.
+/// - [dir]: 저장할 폴더(기본은 [guideImagesDir]). 여러 장을 이어 붙일 조각처럼 도움말에 그대로
+///   쓰지 않을 그림은 임시 폴더([createGuideTempDir])에 저장한다 — 중간에 테스트가 실패해도 도움말
+///   그림 폴더에 조각이 남지 않게.
 /// 저장한 파일을 돌려준다. 저장 뒤에는 표시를 지우므로 같은 화면에서 이어서 다른 장을 찍을 수 있다.
 Future<File> saveGuideShot(
   WidgetTester tester,
@@ -611,6 +639,7 @@ Future<File> saveGuideShot(
   bool spotlight = false,
   bool palette = true,
   List<Rect> erase = const [],
+  Directory? dir,
 }) async {
   // 캡처 중에 창 크기를 바꿀 수도 있어서(tester.view.physicalSize) 처음 크기가 아니라 지금 크기로.
   final screen =
@@ -697,7 +726,7 @@ Future<File> saveGuideShot(
       method: img.QuantizeMethod.octree,
     );
   }
-  final file = File('${guideImagesDir.path}/$name.png');
+  final file = File('${(dir ?? guideImagesDir).path}/$name.png');
   file.writeAsBytesSync(img.encodePng(shot, level: 9));
   // HTML의 width/height는 논리 크기(PNG 픽셀 ÷ 배율)로 — 그래야 고해상도 화면에서도 선명하고
   // 앱에서 보이는 실제 크기로 나온다(본문 폭보다 넓으면 CSS가 줄여 준다).
@@ -855,4 +884,32 @@ void printGuideImagesSize() {
 /// 디버그 확인용: 지금 화면에서 [finder]의 위치를 출력한다(표시 좌표를 맞출 때).
 void debugPrintRect(WidgetTester tester, Finder finder) {
   debugPrint('$finder → ${tester.getRect(finder)}');
+}
+
+// ───────────────────────────── 네트워크 그림 ─────────────────────────────
+
+/// 서버에 올라간 사진(CachedNetworkImage로 그리는 것 — 게시글·채팅 사진 썸네일 등)을 테스트 엔진의
+/// 이미지 캐시에 미리 넣어 둔다. 캡처는 진짜 서버에 연결하지 않아서, 그대로 두면 사진 자리에 깨진
+/// 그림 아이콘이 찍힌다. [url]은 화면이 부르는 그대로의 전체 주소(session.resolveUrl로 푼 것)여야
+/// 캐시에서 찾는다. 테스트마다 캐시가 비워질 수 있으니 화면을 올리기 전에 그 테스트 안에서 부른다.
+Future<void> seedGuideNetworkImage(
+  WidgetTester tester,
+  String url,
+  img.Image image,
+) async {
+  final png = img.encodePng(image);
+  final decoded = await tester.runAsync(() async {
+    final codec = await ui.instantiateImageCodec(png);
+    try {
+      return (await codec.getNextFrame()).image;
+    } finally {
+      codec.dispose();
+    }
+  });
+  PaintingBinding.instance.imageCache.putIfAbsent(
+    CachedNetworkImageProvider(url),
+    () => OneFrameImageStreamCompleter(
+      SynchronousFuture(ImageInfo(image: decoded!)),
+    ),
+  );
 }

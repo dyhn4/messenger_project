@@ -1,6 +1,7 @@
+import { getRoomMemberRole } from './db/queries/rooms.js';
 import { getTeamRole, isOwnerOfAnyTeam } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
-import { accountRole } from './permissions.js';
+import { accountRole, canManageTopic } from './permissions.js';
 
 /**
  * "이 사람이 이 팀에서 무엇을 할 수 있는지"를 판단하는 데 필요한 값을 한 번에 모아온다.
@@ -17,6 +18,26 @@ export async function teamAccess(teamId, userId) {
     isMember: teamRole !== null,
     isOwner: teamRole === 'owner',
     isServerAdmin: !!user?.isServerAdmin,
+  };
+}
+
+/**
+ * teamAccess에 "이 방에서의 나"를 더한 것 — 방 멤버인지(isRoomMember), 토픽 관리자인지
+ * (isTopicAdmin), 그래서 이 토픽을 관리할 수 있는지(canManage: 토픽이고, 멤버이고,
+ * permissions.js의 canManageTopic을 만족). 토픽 관리 라우트(rooms.js)와 글쓰기 제한(socket.js,
+ * messages.js)이 같은 판단을 쓰도록 여기 모았다.
+ */
+export async function topicAccess(room, userId) {
+  const [access, memberRole] = await Promise.all([teamAccess(room.teamId, userId), getRoomMemberRole(room.id, userId)]);
+  const isRoomMember = memberRole !== null;
+  const isTopicAdmin = memberRole === 'admin';
+  return {
+    ...access,
+    isRoomMember,
+    isTopicAdmin,
+    // 팀에서 빠진 사람은 방 멤버십이 남아 있어도(옛 대화를 보려고 남겨 둔다) 그 팀의 토픽을 관리할 수
+    // 없다 — 토픽 관리자였어도, 다른 팀의 관리자 등급이어도 마찬가지.
+    canManage: room.type === 'topic' && isRoomMember && access.isMember && canManageTopic({ ...access, isTopicAdmin }),
   };
 }
 

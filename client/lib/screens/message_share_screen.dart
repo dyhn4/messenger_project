@@ -6,6 +6,7 @@ import '../services/message_preview.dart';
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/room_picker_field.dart';
+import 'message_forward_screen.dart' show canForwardTo;
 
 /// 메시지 롱프레스 메뉴(모바일)/더보기 메뉴(PC)의 "메시지 공유" — 대화방을 골라 새 텍스트를
 /// 쓰고, 그 아래 원본 메시지를 인용(quotedSenderName/quotedPreview)으로 붙여서 보낸다.
@@ -40,15 +41,18 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
     super.dispose();
   }
 
-  String get _quotedPreview => formatMessagePreview(
-    type: widget.message.type,
-    text: widget.message.text,
-    fileName: widget.message.fileName,
-  );
+  /// 게시글은 방 목록·알림 미리보기와 같은 "게시글: 제목"으로 인용한다.
+  String get _quotedPreview => widget.message.isPost
+      ? '게시글: ${widget.message.title ?? ''}'
+      : formatMessagePreview(
+          type: widget.message.type,
+          text: widget.message.text,
+          fileName: widget.message.fileName,
+        );
 
   Future<void> _share() async {
     final room = _targetRoom;
-    if (room == null) return;
+    if (room == null || !canForwardTo(widget.session, room)) return;
     setState(() => _sending = true);
     final text = _textController.text.trim();
     try {
@@ -83,6 +87,7 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
         RoomPickerField(
           session: widget.session,
           value: _targetRoom,
+          filter: (r) => canForwardTo(widget.session, r),
           onChanged: (r) => setState(() => _targetRoom = r),
         ),
         const SizedBox(height: 16),

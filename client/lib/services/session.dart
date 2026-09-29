@@ -15,7 +15,10 @@ import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../models/room_permissions.dart';
 import '../models/team.dart';
+import '../models/text_format.dart';
+import '../models/topic_folder.dart';
 import '../widgets/avatar_utils.dart' show automationAvatarColor, colorToHex;
 import 'api_client.dart';
 import 'app_settings.dart';
@@ -33,6 +36,10 @@ import 'room_chat_controller.dart';
 import 'secret_session_manager.dart';
 import 'typing_gate.dart';
 import 'update_socket.dart';
+
+// 토픽 권한 확장(room.canManage(session)/canWrite(session))은 Session과 늘 같이 쓰이므로,
+// session.dart만 import해도 바로 쓸 수 있게 같이 내보낸다.
+export '../models/room_permissions.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -197,6 +204,14 @@ class Session extends ChangeNotifier {
   Stream<String> get toasts => _toastController.stream;
   void _showToast(String message) => _toastController.add(message);
 
+  /// 토픽에서 내보내졌거나 토픽이 삭제돼 방이 내 목록에서 사라졌을 때 — 방 정리(목록·컨트롤러·
+  /// 활성 방·토픽 폴더)는 이미 끝난 뒤에 흐른다. 홈 화면이 구독해서 event.toastText로 안내하고,
+  /// 그 방을 보고 있었으면 목록으로 돌아가거나 대화 패널을 비운다. 내가 직접 삭제한 토픽은
+  /// 이 기기에선 흐르지 않는다(삭제 화면이 따로 알린다).
+  final _roomRemovedController = StreamController<RoomRemovedEvent>.broadcast();
+  Stream<RoomRemovedEvent> get roomRemovedEvents =>
+      _roomRemovedController.stream;
+
   /// 지금 이모티콘 패널을 열어둔 화면(ChatPanel 또는 MessageThreadScreen의 State 객체, 식별용
   /// 토큰일 뿐 내용은 안 씀)을 담는다 — 채팅방과 댓글 패널이 동시에 떠 있을 때(데스크톱 분할
   /// 화면) 한쪽에서 이모티콘 버튼을 누르면 다른 쪽에 열려있던 패널이 자동으로 닫히게 하는 데
@@ -245,6 +260,8 @@ class Session extends ChangeNotifier {
   StreamSubscription? _messageExpiredSub;
   StreamSubscription? _secretRekeyProposeSub;
   StreamSubscription? _secretRekeyAckSub;
+  StreamSubscription<RoomRemovedEvent>? _roomRemovedSub;
+  StreamSubscription<String>? _topicFoldersChangedSub;
   StreamSubscription<String>? _fcmTokenRefreshSub;
 
   /// 지금 소켓으로 연결되어 있는(온라인) 사용자 id 집합. 멤버 목록의 초록 점 표시에 쓴다.
@@ -384,9 +401,12 @@ class Session extends ChangeNotifier {
     // 그 팀으로 먼저 전환한다 — 안 그러면 지금 팀 화면에 없는 방을 열려다 아무 일도 안 난다.
     if (room.teamId != currentTeam?.id) {
       final matches = teams.where((t) => t.id == room.teamId);
-      if (matches.isNotEmpty) currentTeam = matches.first;
+      if (matches.isNotEmpty) {
+        currentTeam = matches.first;
+        _onCurrentTeamChanged();
+      }
     }
-    _pendingOpenRoom = room;
+    _pendingOpenRoom = _findRoom(room.id) ?? room;
     notifyListeners();
   }
 
@@ -771,6 +791,7 @@ class Session extends ChangeNotifier {
     currentTeam = team;
     // 팀을 바꾸면 이전 팀에서 열어둔 방/댓글 패널은 더 이상 의미가 없다.
     _forceClearActiveRoom();
+    _onCurrentTeamChanged();
     notifyListeners();
   }
 
@@ -789,12 +810,17 @@ class Session extends ChangeNotifier {
   /// 팀 목록 화면처럼 특정 팀을 골라서 판단해야 할 때.
   bool canManageTeam(Team team) => team.canManage(accountRole);
 
-  /// 이 방(토픽)에 공지를 쓸 수 있는지 — 그 방이 속한 팀의 토픽 생성 권한과 같다
-  /// (room_options_menu.dart의 "공지" 메뉴). currentTeam이 아니라 room.teamId로 직접
-  /// 찾는다 — 다른 팀 방 화면에 있을 수 있는 경로(알림 센터 등)에서도 정확해야 해서다.
+  /// 이 방(토픽)에 공지를 쓸 수 있는지 — 그 방이 속한 팀의 토픽 생성 권한과 같고, 그 토픽을
+  /// 관리할 수 있는 사람(토픽 관리자·팀 관리자)도 쓸 수 있다(room_options_menu.dart의 "공지"
+  /// 메뉴, 서버와 같은 규칙). currentTeam이 아니라 room.teamId로 직접 찾는다 — 다른 팀 방
+  /// 화면에 있을 수 있는 경로(알림 센터 등)에서도 정확해야 해서다.
   bool canCreateAnnouncementIn(Room room) {
+    // 읽기 전용·보관된 토픽은 공지도 토픽을 관리할 수 있는 사람만 쓴다(서버 announcements.js와
+    // 같은 규칙 — 공지로 읽기 전용을 우회하지 못하게).
+    if (room.readOnly || room.isArchived) return room.canManage(this);
     final team = teams.where((t) => t.id == room.teamId).firstOrNull;
-    return team?.canCreateTopic(accountRole, userId) ?? false;
+    if (team?.canCreateTopic(accountRole, userId) ?? false) return true;
+    return room.canManage(this);
   }
 
   /// 이 공지의 수정/삭제/내리기/공유 메뉴(삼점 버튼)를 보여줄지 — 요청 사양 그대로 "작성 본인"만
@@ -850,6 +876,7 @@ class Session extends ChangeNotifier {
     if (currentTeam == null) return;
     currentTeam = null;
     _forceClearActiveRoom();
+    _onCurrentTeamChanged();
     notifyListeners();
   }
 
@@ -1063,7 +1090,13 @@ class Session extends ChangeNotifier {
     _messageSub?.cancel();
     _messageSub = chatSocket.messages.listen(handleSocketMessage);
     _roomSub?.cancel();
-    _roomSub = chatSocket.roomEvents.listen(_upsertRoom);
+    _roomSub = chatSocket.roomEvents.listen(_handleRoomBroadcast);
+    _roomRemovedSub?.cancel();
+    _roomRemovedSub = chatSocket.roomRemoved.listen(handleRoomRemoved);
+    _topicFoldersChangedSub?.cancel();
+    _topicFoldersChangedSub = chatSocket.topicFoldersChanged.listen(
+      handleTopicFoldersChanged,
+    );
     _readSub?.cancel();
     _readSub = chatSocket.readEvents.listen((e) {
       final match = rooms.where((r) => r.id == e.roomId);
@@ -1118,34 +1151,7 @@ class Session extends ChangeNotifier {
       notifyListeners();
     });
     _teamSub?.cancel();
-    _teamSub = chatSocket.teamEvents.listen((team) async {
-      final i = teams.indexWhere((t) => t.id == team.id);
-      if (i >= 0) {
-        // 이름/아이콘 변경 — 지금 보고 있는 팀이면 상단 전환 버튼 표시도 같이 갱신된다.
-        teams[i].name = team.name;
-        teams[i].iconEmoji = team.iconEmoji;
-        teams[i].iconColor = team.iconColor;
-        teams[i].iconUrl = team.iconUrl;
-        teams[i].topicCreationPolicy = team.topicCreationPolicy;
-        teams[i].topicCreatorIds = team.topicCreatorIds;
-        teams[i].messageEditDeleteEnabled = team.messageEditDeleteEnabled;
-        teams[i].messageEditDeleteWindowSeconds =
-            team.messageEditDeleteWindowSeconds;
-        // 소유권이 바뀌면 화면의 버튼들도 바로 따라온다(등급은 계정 단위라 여기 없음).
-        teams[i].isOwner = team.isOwner;
-        teams[i].memberCount = team.memberCount;
-        notifyListeners();
-        return;
-      }
-      // 새로 들어간 팀 — 그 팀 방까지 받아와야 목록/알림이 정상 동작한다.
-      teams.add(team);
-      try {
-        rooms.addAll(await api!.fetchRooms(team.id));
-      } catch (_) {
-        // 방 목록은 다음 재연결(_resyncAfterReconnect)에서 다시 맞춰진다.
-      }
-      notifyListeners();
-    });
+    _teamSub = chatSocket.teamEvents.listen(handleTeamEvent);
     _teamLeftSub?.cancel();
     _teamLeftSub = chatSocket.teamLeftEvents.listen((e) {
       teams.removeWhere((t) => t.id == e.teamId);
@@ -1157,6 +1163,7 @@ class Session extends ChangeNotifier {
       if (currentTeam?.id == e.teamId) {
         currentTeam = null; // 보고 있던 팀에서 빠졌으면 팀 선택 화면으로 돌아간다.
         _forceClearActiveRoom();
+        _onCurrentTeamChanged();
         final where = e.teamName == null ? '팀' : "'${e.teamName}' 팀";
         _showToast(e.deleted ? '$where이 삭제되었습니다.' : '$where에서 나가졌습니다.');
       }
@@ -1547,6 +1554,7 @@ class Session extends ChangeNotifier {
   /// 연결이 끊겼다가 재연결됐을 때 놓쳤을 수 있는 것들을 다시 받아온다:
   /// 방 목록(서버가 계산한 정확한 안읽음 수 포함)과, 지금까지 열어본 적 있어 캐시된 방들의 메시지.
   Future<void> _resyncAfterReconnect() async {
+    final changes = _roomChangesDuringResync = <String, bool>{};
     try {
       // 끊겨 있는 동안 팀에 들어가거나 빠졌을 수도 있으니 팀 목록부터 다시 받는다.
       final freshTeams = await api!.fetchTeams();
@@ -1559,6 +1567,7 @@ class Session extends ChangeNotifier {
         if (match.isEmpty) {
           currentTeam = null; // 그 사이 팀에서 빠졌으면 팀 선택 화면으로.
           _forceClearActiveRoom();
+          _onCurrentTeamChanged();
         } else {
           currentTeam = match.first;
         }
@@ -1570,24 +1579,48 @@ class Session extends ChangeNotifier {
       }
       final freshIds = freshRooms.map((r) => r.id).toSet();
       for (final fresh in freshRooms) {
+        // 목록을 받는 사이 내보내졌거나 삭제된 방 — 받은 목록이 그보다 먼저 만들어진 것이라
+        // 거기 있어도 되살리지 않는다.
+        if (changes[fresh.id] == false) continue;
         final i = rooms.indexWhere((r) => r.id == fresh.id);
         if (i >= 0) {
-          rooms[i] = fresh;
+          // 같은 인스턴스를 그대로 두고 값만 새로 채운다(_upsertRoom 참고). 이 목록은 내 기준으로
+          // 새로 계산된 것이라 안읽음·즐겨찾기 같은 개인 값도 서버 값으로 맞춘다.
+          rooms[i].mergeServerState(fresh, includePersonal: true);
         } else {
           rooms.add(fresh);
         }
       }
-      // 더 이상 못 보는 방(팀에서 빠짐 등)은 정리한다.
-      rooms.removeWhere((r) => !freshIds.contains(r.id));
+      // 더 이상 못 보는 방(끊긴 동안 내보내졌거나 삭제된 토픽, 팀에서 빠짐 등)은 나가기와 같은
+      // 경로로 정리한다(컨트롤러·활성 방·토픽 폴더까지).
+      // 목록을 받는 사이 새로 생긴 방(초대·참여·만들기)은 받은 목록에 없어도 그대로 둔다.
+      for (final gone
+          in rooms
+              .where((r) => !freshIds.contains(r.id) && changes[r.id] != true)
+              .toList()) {
+        _forgetRoom(gone.id);
+      }
       notifyListeners();
+      // 끊긴 동안 다른 기기에서 바꾼 토픽 폴더(topic-folders:changed)를 놓쳤을 수 있다.
+      unawaited(loadTopicFolders());
     } catch (_) {
       // 재연결 직후 방 목록 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
+    } finally {
+      if (identical(_roomChangesDuringResync, changes)) {
+        _roomChangesDuringResync = null;
+      }
     }
 
-    for (final controller in _controllers.values) {
+    // 하나씩 기다리는 사이 다른 방을 열거나(컨트롤러 추가) 방이 사라질 수 있어서 목록을 복사해
+    // 돌고, 그 사이 정리된 컨트롤러는 건너뛴다.
+    for (final controller in _controllers.values.toList()) {
+      if (!identical(_controllers[controller.room.id], controller)) continue;
       await controller.refresh();
     }
   }
+
+  /// 재연결 동기화가 방 목록을 받는 동안 생기거나(true) 사라진(false) 방 — 동기화 중일 때만 있다.
+  Map<String, bool>? _roomChangesDuringResync;
 
   /// ApiClient가 401을 받았을 때 호출된다(ApiClient.onUnauthorized). 갱신에 성공하면 true를
   /// 돌려줘서 원래 요청을 재시도하게 한다.
@@ -1637,6 +1670,10 @@ class Session extends ChangeNotifier {
     return match.isEmpty ? null : match.first;
   }
 
+  /// 내 목록에 있는 그 방(같은 방은 늘 인스턴스 하나 — _upsertRoom 참고). 없으면(나갔거나
+  /// 내보내졌거나 삭제됨) null.
+  Room? roomById(String roomId) => _findRoom(roomId);
+
   // ---- 비밀 대화(E2EE) ----
 
   /// 상대에게 비밀 대화를 건다 — 새 방이 생성되고 서버로는 임시 공개키/서명만 나간다.
@@ -1645,19 +1682,16 @@ class Session extends ChangeNotifier {
       targetUserId,
       _requireTeamId,
     );
-    _upsertRoom(room);
-    return room;
+    return _upsertRoom(room);
   }
 
   /// 조직도에서 비밀 대화를 시작할 때 쓴다 — 아직 팀을 고르지 않은 상태(팀 목록 화면)에서도
   /// 호출할 수 있도록 [teamId](나와 상대가 함께 속한 팀일 필요는 없고, 내가 속한 팀이면 된다)를
   /// 명시적으로 받는다. 성공하면 그 팀으로 들어간다.
   Future<Room> startSecretChatInTeam(String teamId, String targetUserId) async {
-    final room = await secretSessionManager!.startSecretChat(
-      targetUserId,
-      teamId,
+    final room = _upsertRoom(
+      await secretSessionManager!.startSecretChat(targetUserId, teamId),
     );
-    _upsertRoom(room);
     requestOpenRoom(room);
     return room;
   }
@@ -1919,11 +1953,14 @@ class Session extends ChangeNotifier {
     _updateRoomPreview(
       m.roomId,
       type: m.type,
-      text: m.text,
+      text: m.isPost ? _postPreview(m) : m.text,
       fileName: m.fileName,
     );
     _handleIncomingMessage(m);
   }
+
+  /// 보드 게시글의 한 줄 미리보기 — 서버 push.js의 알림 문구와 같다.
+  String _postPreview(Message m) => '게시글: ${m.title ?? ''}';
 
   /// 새 메시지가 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께 처리한다.
   /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다. 자동화 메시지(보낸
@@ -1961,7 +1998,7 @@ class Session extends ChangeNotifier {
     final preview = room?.isSecret == true || !_shouldPreviewFor(room)
         ? _secretPreviewPlaceholder
         : switch (m.type) {
-            MessageType.text => m.text ?? '',
+            MessageType.text => m.isPost ? _postPreview(m) : m.text ?? '',
             MessageType.image => '사진을 보냈습니다',
             MessageType.file => m.fileName ?? '파일을 보냈습니다',
             MessageType.sticker =>
@@ -2133,32 +2170,40 @@ class Session extends ChangeNotifier {
     chatSocket.markAnnouncementRead(room.id);
   }
 
-  void _upsertRoom(Room incoming) {
+  /// 방 생성·합류·정보 변경 브로드캐스트(room:created). 나를 멤버로 담고 있지 않은 방은 내
+  /// 방이 아니다 — 막 내보내진 토픽의 갱신 브로드캐스트가 room:removed보다 늦게 도착해서 방이
+  /// 목록에 되살아나지 않게 거른다.
+  void _handleRoomBroadcast(Room incoming) {
+    final me = userId;
+    if (me != null &&
+        incoming.members.isNotEmpty &&
+        !incoming.members.any((m) => m.id == me)) {
+      return;
+    }
+    _upsertRoom(incoming);
+  }
+
+  /// 방을 목록에 넣거나 이미 있으면 그 인스턴스를 새 값으로 갱신하고, 목록에 있는(화면이 계속
+  /// 들고 있어도 되는) 인스턴스를 돌려준다. 이미 있는 방은 새 객체로 바꿔 끼우지 않고 그 자리에서
+  /// 값만 채운다(Room.mergeServerState) — 대화 화면·헤더·컨트롤러가 붙잡고 있는 객체도 다시 열지
+  /// 않고 최신 이름·멤버·토픽 설정(읽기 전용/보관/토픽 관리자)을 보게 하려는 것이다.
+  /// 브로드캐스트/REST 응답에는 이 사람 기준 안읽음 수·즐겨찾기 등이 없거나 낡은 값일 수
+  /// 있으니(예: room:created는 requesterId 없이 만들어져 둘 다 비어있다), 그런 개인 값은
+  /// 로컬에서 추적 중이던 값을 유지한다(latestAnnouncement는 toRoomDto가 requesterId 없이도
+  /// 항상 채워줘서 들어오는 값이 더 최신이라 새 값을 쓴다).
+  Room _upsertRoom(Room incoming) {
     final i = rooms.indexWhere((r) => r.id == incoming.id);
+    final Room live;
     if (i >= 0) {
-      // 브로드캐스트/REST 응답에는 이 사람 기준 안읽음 수·즐겨찾기가 없거나 낡은 값일 수
-      // 있으니(예: room:created는 requesterId 없이 만들어져 둘 다 비어있다), 로컬에서
-      // 추적 중이던 값을 유지한다.
-      incoming.unreadCount = rooms[i].unreadCount;
-      incoming.favorite = rooms[i].favorite;
-      incoming.muted = rooms[i].muted;
-      incoming.customName = rooms[i].customName;
-      incoming.hidden = rooms[i].hidden;
-      incoming.lastActivityAt = rooms[i].lastActivityAt;
-      incoming.lastMessagePreview = rooms[i].lastMessagePreview;
-      // latestAnnouncement는 toRoomDto가 requesterId 없이도 항상 채워주므로 여기 들어오는
-      // 값이 더 최신이라 그대로 둔다. hasUnreadAnnouncement는 unreadCount 등과 똑같이
-      // requesterId가 있을 때만 채워지므로(rooms.js) 이 경로(브로드캐스트)에선 낡을 수 있어
-      // 보존한다. dismissedAnnouncementId는 서버 DTO에 아예 없는 순수 로컬 값이라 항상 보존.
-      incoming.hasUnreadAnnouncement = rooms[i].hasUnreadAnnouncement;
-      incoming.unreadAnnouncementCount = rooms[i].unreadAnnouncementCount;
-      incoming.dismissedAnnouncementId = rooms[i].dismissedAnnouncementId;
-      rooms[i] = incoming;
+      live = rooms[i]..mergeServerState(incoming);
     } else {
       rooms.add(incoming);
+      live = incoming;
+      _roomChangesDuringResync?[incoming.id] = true;
     }
     notifyListeners();
-    unawaited(ensurePendingSecretInvite(incoming.id));
+    unawaited(ensurePendingSecretInvite(live.id));
+    return live;
   }
 
   /// 즐겨찾기를 켜거나 끈다. 화면 반응성을 위해 먼저 로컬 값을 바꾸고, 서버 요청이 실패하면
@@ -2212,13 +2257,24 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 방을 열 때 호출. 이미 열려있으면 캐시된 컨트롤러를 그대로 재사용한다.
+  /// 방을 열 때 호출. 이미 열려있으면 캐시된 컨트롤러를 그대로 재사용한다. 컨트롤러는 목록에
+  /// 있는 그 방 인스턴스를 들고 있어야 토픽 설정 변경 등이 바로 보이므로, 넘겨받은 객체보다
+  /// 목록의 인스턴스를 먼저 쓴다.
   RoomChatController controllerFor(Room room) {
     return _controllers.putIfAbsent(
       room.id,
-      () => RoomChatController(this, room),
+      () => RoomChatController(this, _findRoom(room.id) ?? room),
     );
   }
+
+  /// 이미 만들어 둔 컨트롤러만 돌려준다(없으면 null) — 화면을 닫거나 정리할 때는 이것을 쓴다.
+  /// controllerFor는 없으면 새로 만들어 기록까지 받아 오므로, 방금 나가거나 내보내진 방에 대고
+  /// 부르면 목록에 없는 방의 컨트롤러가 세션에 남는다.
+  RoomChatController? existingControllerFor(String roomId) =>
+      _controllers[roomId];
+
+  @visibleForTesting
+  Future<void> resyncAfterReconnect() => _resyncAfterReconnect();
 
   /// 방은 전부 지금 보고 있는 팀 안에 만들어진다 — 팀을 안 고른 상태(팀 선택 화면)에서는
   /// 애초에 이 화면들에 들어갈 수 없으므로, 여기서는 currentTeam이 있다고 보고 진행한다.
@@ -2228,20 +2284,97 @@ class Session extends ChangeNotifier {
     return team.id;
   }
 
+  /// 새 토픽(지금 팀). 만든 사람만 멤버(토픽 관리자)로 들어가므로, 화면은 만든 뒤 바로 그
+  /// 토픽을 열고 멤버 초대 창을 띄운다. [folderId](내 토픽 폴더)를 주면 그 폴더에 넣어 둔다.
+  /// [autoInvite]/[quietLeave]를 안 주면 서버 기본값을 쓴다(ApiClient.createTopic 참고).
   Future<Room> createTopic({
     required String name,
     String? description,
     bool isPublic = true,
+    TopicViewMode viewMode = TopicViewMode.chat,
+    bool readOnly = false,
+    bool? autoInvite,
+    bool? quietLeave,
+    String? folderId,
+    List<String>? memberIds,
   }) async {
-    final room = await api!.createTopic(
+    final created = await api!.createTopic(
       teamId: _requireTeamId,
-      name: name,
-      description: description,
+      name: name.trim(),
+      description: description?.trim(),
       isPublic: isPublic,
+      viewMode: viewMode,
+      readOnly: readOnly,
+      // 비공개 토픽은 자동 초대를 쓸 수 없다(서버도 끈다).
+      autoInvite: isPublic ? autoInvite : false,
+      quietLeave: quietLeave,
+      folderId: folderId,
+      memberIds: memberIds,
     );
-    _upsertRoom(room);
+    final room = _upsertRoom(created);
+    if (folderId != null) {
+      // 서버가 이미 내 폴더에 넣었다 — 폴더 목록을 다시 받기 전에도 바로 그 폴더에 보이게 한다.
+      _placeRoomInTopicFolder(room.id, folderId);
+      notifyListeners();
+    }
     return room;
   }
+
+  /// 토픽 정보 변경(토픽을 관리할 수 있는 사람만) — 준 값만 바꾼다. 설명을 지우려면 빈 문자열.
+  /// 돌려받은 방은 목록의 그 인스턴스에 그대로 반영된다(다른 멤버에겐 room:created로 퍼진다).
+  Future<Room> updateTopic(
+    String roomId, {
+    String? name,
+    String? description,
+    bool? isPublic,
+    bool? readOnly,
+    bool? autoInvite,
+    bool? quietLeave,
+  }) async {
+    final updated = await api!.updateTopic(
+      roomId,
+      name: name?.trim(),
+      description: description?.trim(),
+      isPublic: isPublic,
+      readOnly: readOnly,
+      // 비공개로 바꾸면 자동 초대는 꺼진다(서버도 끈다).
+      autoInvite: isPublic == false ? false : autoInvite,
+      quietLeave: quietLeave,
+    );
+    return _upsertRoom(updated);
+  }
+
+  /// 토픽 보관/보관 해제(토픽을 관리할 수 있는 사람만).
+  Future<Room> setTopicArchived(String roomId, bool archived) async {
+    return _upsertRoom(await api!.setTopicArchived(roomId, archived));
+  }
+
+  /// 토픽 삭제(토픽을 관리할 수 있는 사람만) — 성공하면 이 기기 목록에서도 바로 지운다.
+  /// 서버가 멤버 전원에게 보내는 room:removed는 이 기기에선 안내 없이 정리만 한다.
+  Future<void> deleteTopic(String roomId) async {
+    _deletingTopicIds.add(roomId);
+    try {
+      await api!.deleteTopic(roomId);
+    } finally {
+      _deletingTopicIds.remove(roomId);
+    }
+    _forgetRoom(roomId);
+    notifyListeners();
+  }
+
+  /// 멤버 내보내기(토픽을 관리할 수 있는 사람만) — 내보낸 뒤의 방을 돌려준다.
+  Future<Room> kickTopicMembers(String roomId, List<String> userIds) async {
+    return _upsertRoom(await api!.kickTopicMembers(roomId, userIds));
+  }
+
+  /// 토픽 관리자를 [userIds]로 통째로 바꾼다(한 명 이상, 정회원 이상 멤버만).
+  Future<Room> setTopicAdmins(String roomId, List<String> userIds) async {
+    return _upsertRoom(await api!.setTopicAdmins(roomId, userIds));
+  }
+
+  /// 지금 삭제 요청 중인 토픽 — 서버가 HTTP 응답보다 room:removed를 먼저 보낼 수 있어서, 그
+  /// 이벤트가 "다른 사람이 삭제했다"는 안내로 이 기기에 뜨지 않게 거른다.
+  final _deletingTopicIds = <String>{};
 
   Future<Room> createGroup({
     String? name,
@@ -2260,14 +2393,12 @@ class Session extends ChangeNotifier {
       iconColor: iconColor,
       iconUrl: iconUrl,
     );
-    _upsertRoom(room);
-    return room;
+    return _upsertRoom(room);
   }
 
   Future<Room> startDm(String targetUserId) async {
     final room = await api!.startDm(_requireTeamId, targetUserId);
-    _upsertRoom(room);
-    return room;
+    return _upsertRoom(room);
   }
 
   /// 조직도에서 1:1 대화를 시작할 때 쓴다 — 아직 팀을 고르지 않은 상태(팀 목록 화면)에서도
@@ -2275,8 +2406,7 @@ class Session extends ChangeNotifier {
   /// rooms.js) 나와 상대가 함께 속한 팀이어야 하고(조직도 화면이 미리 계산해서 넘긴다).
   /// requestOpenRoom이 그 팀으로 전환하고 새 방을 바로 열어준다.
   Future<Room> startDmInTeam(String teamId, String targetUserId) async {
-    final room = await api!.startDm(teamId, targetUserId);
-    _upsertRoom(room);
+    final room = _upsertRoom(await api!.startDm(teamId, targetUserId));
     requestOpenRoom(room);
     return room;
   }
@@ -2286,9 +2416,7 @@ class Session extends ChangeNotifier {
       api!.fetchTeamMembers(_requireTeamId);
 
   Future<Room> joinRoom(String roomId) async {
-    final room = await api!.joinRoom(roomId);
-    _upsertRoom(room);
-    return room;
+    return _upsertRoom(await api!.joinRoom(roomId));
   }
 
   Future<void> inviteMembers(String roomId, List<String> userIds) async {
@@ -2400,12 +2528,356 @@ class Session extends ChangeNotifier {
       if (room?.isSecret == true) {
         await secretSessionManager?.forgetRoom(roomId);
       }
-      rooms.removeWhere((r) => r.id == roomId);
-      _controllers.remove(roomId)?.dispose();
+      _forgetRoom(roomId);
     }
     if (_activeRoomId == roomId) _forceClearActiveRoom();
     notifyListeners();
   }
+
+  /// 방이 내 목록에서 완전히 사라질 때(나가기·내보내짐·토픽 삭제·재연결 때 사라진 방)의 공통
+  /// 정리 — 목록에서 빼고, 컨트롤러를 닫고, 보고 있던 방이면 활성 방을 풀고, 토픽 폴더에서도
+  /// 뺀다. 알림(notifyListeners)은 부르는 쪽이 한 번에 한다.
+  void _forgetRoom(String roomId) {
+    _roomChangesDuringResync?[roomId] = false;
+    rooms.removeWhere((r) => r.id == roomId);
+    _controllers.remove(roomId)?.dispose();
+    if (_activeRoomId == roomId) _forceClearActiveRoom();
+    if (_mobileThreadOpenRoomId == roomId) _mobileThreadOpenRoomId = null;
+    if (_pendingOpenRoom?.id == roomId) _pendingOpenRoom = null;
+    if (incomingCallRoomId == roomId) incomingCallRoomId = null;
+    _removeRoomFromTopicFolders(roomId);
+  }
+
+  /// 소켓 team:updated/team:joined — 이미 아는 팀이면 설정만 갱신하고, 새로 들어간 팀이면 그 팀 방까지
+  /// 받아 온다. 테스트가 소켓 없이 부를 수 있게 밖으로 열어 둔다.
+  @visibleForTesting
+  Future<void> handleTeamEvent(Team team) async {
+    final i = teams.indexWhere((t) => t.id == team.id);
+    if (i >= 0) {
+      // 이름/아이콘 변경 — 지금 보고 있는 팀이면 상단 전환 버튼 표시도 같이 갱신된다.
+      teams[i].name = team.name;
+      teams[i].iconEmoji = team.iconEmoji;
+      teams[i].iconColor = team.iconColor;
+      teams[i].iconUrl = team.iconUrl;
+      teams[i].topicCreationPolicy = team.topicCreationPolicy;
+      teams[i].topicCreatorIds = team.topicCreatorIds;
+      teams[i].messageEditDeleteEnabled = team.messageEditDeleteEnabled;
+      teams[i].messageEditDeleteWindowSeconds =
+          team.messageEditDeleteWindowSeconds;
+      // 소유권이 바뀌면 화면의 버튼들도 바로 따라온다(등급은 계정 단위라 여기 없음).
+      teams[i].isOwner = team.isOwner;
+      teams[i].memberCount = team.memberCount;
+      notifyListeners();
+      return;
+    }
+    // 새로 들어간 팀 — 그 팀 방까지 받아와야 목록/알림이 정상 동작한다.
+    teams.add(team);
+    try {
+      // 서버는 팀에 넣으면서 자동 초대 토픽의 room:created를 team:joined보다 먼저 보낸다 — 그 방은
+      // 이미 목록에 있으니 덧붙이지 않고 같은 인스턴스에 합친다(같은 방이 두 번 보이지 않게).
+      for (final fresh in await api!.fetchRooms(team.id)) {
+        final existing = _findRoom(fresh.id);
+        if (existing != null) {
+          existing.mergeServerState(fresh, includePersonal: true);
+        } else {
+          rooms.add(fresh);
+          _roomChangesDuringResync?[fresh.id] = true;
+        }
+      }
+    } catch (_) {
+      // 방 목록은 다음 재연결(_resyncAfterReconnect)에서 다시 맞춰진다.
+    }
+    notifyListeners();
+  }
+
+  /// 소켓 room:removed(토픽에서 내보내짐/토픽 삭제) — 방을 정리하고 [roomRemovedEvents]로
+  /// 화면에 알린다. 이미 목록에 없는 방(이 기기에서 방금 정리함)이나 내가 이 기기에서 삭제 중인
+  /// 토픽이면 안내 없이 정리만 한다. 테스트가 소켓 없이 부를 수 있게 밖으로 열어 둔다.
+  @visibleForTesting
+  void handleRoomRemoved(RoomRemovedEvent event) {
+    final room = _findRoom(event.roomId);
+    if (room == null) return;
+    _forgetRoom(event.roomId);
+    notifyListeners();
+    if (event.isDeleted && _deletingTopicIds.contains(event.roomId)) return;
+    _roomRemovedController.add(
+      RoomRemovedEvent(
+        roomId: event.roomId,
+        reason: event.reason,
+        name: event.name ?? room.name,
+      ),
+    );
+  }
+
+  // ---- 토픽 폴더(개인 설정, 팀별) ----
+
+  /// 지금 팀에서 내가 만든 토픽 폴더들(position 순) — 토픽 목록을 폴더로 묶어 보여주는 데 쓴다.
+  /// 팀을 고르거나 바꿀 때 불러오고(loadTopicFolders), 다른 기기에서 바꾸면(topic-folders:changed)
+  /// 다시 불러온다. 접기·이름·순서·이동·삭제는 화면 반응성을 위해 여기 먼저 반영하고 서버가
+  /// 실패하면 되돌린 뒤 예외를 다시 던진다(부른 화면이 안내한다).
+  final List<TopicFolder> topicFolders = [];
+
+  /// 팀 전환 중에 늦게 도착한 옛 팀 폴더 응답을 버리기 위한 요청 번호.
+  int _topicFoldersLoadSeq = 0;
+
+  /// 서버로 가는 중인 내 폴더 조작 수 — 그동안 도착한 다시 불러오기(대개 내 조작의 에코)는
+  /// 조작이 끝난 뒤로 미뤄서, 낙관적으로 바꿔 둔 화면이 잠깐 옛 상태로 튀지 않게 한다.
+  int _topicFolderOpsInFlight = 0;
+  bool _topicFoldersReloadQueued = false;
+
+  /// [roomId]가 들어 있는 내 폴더(없으면 null — 폴더 밖 목록에 보인다).
+  TopicFolder? topicFolderOf(String roomId) {
+    for (final f in topicFolders) {
+      if (f.roomIds.contains(roomId)) return f;
+    }
+    return null;
+  }
+
+  TopicFolder? _topicFolderById(String folderId) {
+    for (final f in topicFolders) {
+      if (f.id == folderId) return f;
+    }
+    return null;
+  }
+
+  /// 보고 있는 팀이 바뀌면 이전 팀 폴더는 바로 비우고 새 팀 것을 불러온다.
+  void _onCurrentTeamChanged() {
+    topicFolders.clear();
+    unawaited(loadTopicFolders());
+  }
+
+  /// 지금 팀의 내 토픽 폴더를 서버에서 다시 받는다. 폴더는 목록을 묶어 보여주는 부가 정보라
+  /// 실패해도 조용히 넘어간다(다음 팀 전환·재연결·변경 알림 때 다시 받는다).
+  Future<void> loadTopicFolders() async {
+    final teamId = currentTeam?.id;
+    final seq = ++_topicFoldersLoadSeq;
+    if (teamId == null || api == null) {
+      if (topicFolders.isNotEmpty) {
+        topicFolders.clear();
+        notifyListeners();
+      }
+      return;
+    }
+    if (_topicFolderOpsInFlight > 0) {
+      _topicFoldersReloadQueued = true;
+      return;
+    }
+    try {
+      final folders = await api!.fetchTopicFolders(teamId);
+      if (seq != _topicFoldersLoadSeq || currentTeam?.id != teamId) return;
+      if (_topicFolderOpsInFlight > 0) {
+        _topicFoldersReloadQueued = true;
+        return;
+      }
+      folders.sort((a, b) => a.position.compareTo(b.position));
+      topicFolders
+        ..clear()
+        ..addAll(folders);
+      notifyListeners();
+    } catch (_) {
+      // 폴더 없이도 토픽 목록은 그대로 보이므로 조용히 넘어간다.
+    }
+  }
+
+  /// 소켓 topic-folders:changed — 내(다른 기기 포함) 폴더가 바뀌었으니 지금 팀 것이면 다시 받는다.
+  @visibleForTesting
+  void handleTopicFoldersChanged(String teamId) {
+    if (teamId.isNotEmpty && teamId != currentTeam?.id) return;
+    unawaited(loadTopicFolders());
+  }
+
+  /// 폴더 조작 하나를 서버에 보낸다. 실패하면 [rollback]으로 낙관적 변경을 되돌리고, 조작이 다
+  /// 끝난 뒤 서버 상태를 한 번 더 받아와 확실히 맞춘 다음 예외를 다시 던진다.
+  Future<T> _topicFolderOp<T>(
+    Future<T> Function() request, {
+    void Function()? rollback,
+  }) async {
+    _topicFolderOpsInFlight++;
+    try {
+      return await request();
+    } catch (_) {
+      if (rollback != null) {
+        rollback();
+        _topicFoldersReloadQueued = true;
+        notifyListeners();
+      }
+      rethrow;
+    } finally {
+      _topicFolderOpsInFlight--;
+      if (_topicFolderOpsInFlight == 0 && _topicFoldersReloadQueued) {
+        _topicFoldersReloadQueued = false;
+        unawaited(loadTopicFolders());
+      }
+    }
+  }
+
+  /// 지금 팀에 폴더를 만든다(이름 1~30자, 최대 50개 — 서버가 검사). 맨 뒤에 붙는다.
+  Future<TopicFolder> createTopicFolder(String name) async {
+    final teamId = _requireTeamId;
+    final folder = await _topicFolderOp(
+      () => api!.createTopicFolder(teamId, name.trim()),
+    );
+    if (currentTeam?.id == teamId &&
+        !topicFolders.any((f) => f.id == folder.id)) {
+      topicFolders.add(folder);
+      notifyListeners();
+    }
+    return folder;
+  }
+
+  Future<void> renameTopicFolder(String folderId, String name) async {
+    final folder = _topicFolderById(folderId);
+    final previous = folder?.name;
+    final trimmed = name.trim();
+    folder?.name = trimmed;
+    notifyListeners();
+    final updated = await _topicFolderOp(
+      () => api!.updateTopicFolder(folderId, name: trimmed),
+      rollback: () {
+        if (folder != null && previous != null) folder.name = previous;
+      },
+    );
+    if (folder != null && folder.name != updated.name) {
+      folder.name = updated.name;
+      notifyListeners();
+    }
+  }
+
+  /// 폴더 접기/펴기 — 화면에 바로 반영하고 PATCH 한 번만 보낸다(목록을 다시 받지 않는다).
+  Future<void> setTopicFolderCollapsed(String folderId, bool collapsed) async {
+    final folder = _topicFolderById(folderId);
+    if (folder == null || folder.collapsed == collapsed) return;
+    folder.collapsed = collapsed;
+    notifyListeners();
+    await _topicFolderOp(
+      () => api!.updateTopicFolder(folderId, collapsed: collapsed),
+      rollback: () => folder.collapsed = !collapsed,
+    );
+  }
+
+  /// 폴더만 지운다 — 안의 토픽은 폴더 밖 목록으로 돌아간다.
+  Future<void> deleteTopicFolder(String folderId) async {
+    final index = topicFolders.indexWhere((f) => f.id == folderId);
+    final removed = index == -1 ? null : topicFolders.removeAt(index);
+    notifyListeners();
+    await _topicFolderOp(
+      () => api!.deleteTopicFolder(folderId),
+      rollback: () {
+        if (removed == null || topicFolders.any((f) => f.id == folderId)) {
+          return;
+        }
+        final at = index > topicFolders.length ? topicFolders.length : index;
+        topicFolders.insert(at, removed);
+      },
+    );
+  }
+
+  /// 폴더 순서를 [folderIds] 순서로 바꾼다(끌어다 놓기). 목록에 없는 폴더는 원래 순서대로 뒤에
+  /// 붙이고, 서버에는 이 팀의 내 폴더 전체 순서를 보낸다.
+  Future<void> reorderTopicFolders(List<String> folderIds) async {
+    final teamId = _requireTeamId;
+    final previous = List<TopicFolder>.of(topicFolders);
+    final ordered = <TopicFolder>[
+      for (final id in folderIds) ?_topicFolderById(id),
+    ];
+    for (final f in previous) {
+      if (!ordered.contains(f)) ordered.add(f);
+    }
+    _applyTopicFolderOrder(ordered);
+    notifyListeners();
+    await _topicFolderOp(
+      () => api!.reorderTopicFolders(teamId, [for (final f in ordered) f.id]),
+      rollback: () => _applyTopicFolderOrder([
+        for (final f in previous)
+          if (topicFolders.contains(f)) f,
+        for (final f in topicFolders)
+          if (!previous.contains(f)) f,
+      ]),
+    );
+  }
+
+  void _applyTopicFolderOrder(List<TopicFolder> ordered) {
+    topicFolders
+      ..clear()
+      ..addAll(ordered);
+    for (var i = 0; i < topicFolders.length; i++) {
+      topicFolders[i].position = i;
+    }
+  }
+
+  /// 토픽을 내 폴더 [folderId]에 넣는다(null이면 폴더에서 뺀다). 한 토픽은 한 폴더에만 들어간다.
+  Future<void> moveTopicToFolder(Room room, String? folderId) async {
+    final previous = topicFolderOf(room.id)?.id;
+    if (previous == folderId) return;
+    _placeRoomInTopicFolder(room.id, folderId);
+    notifyListeners();
+    await _topicFolderOp(
+      () => api!.moveTopicToFolder(room.id, folderId),
+      rollback: () => _placeRoomInTopicFolder(room.id, previous),
+    );
+  }
+
+  /// [roomId]를 모든 폴더에서 빼고 [folderId] 폴더(있으면)에 넣는다.
+  void _placeRoomInTopicFolder(String roomId, String? folderId) {
+    _removeRoomFromTopicFolders(roomId);
+    if (folderId == null) return;
+    _topicFolderById(folderId)?.roomIds.add(roomId);
+  }
+
+  void _removeRoomFromTopicFolders(String roomId) {
+    for (final f in topicFolders) {
+      f.roomIds.remove(roomId);
+    }
+  }
+
+  // ---- 보드 뷰 게시글 ----
+
+  /// 게시글 조작이 갈 그 방 컨트롤러 — 이미 있으면 그것을 쓰고, 목록에서 사라진 방(나가기·
+  /// 내보내짐·삭제)이면 새로 만들지 않고 막는다(정리된 방의 컨트롤러가 세션에 다시 생기지 않게).
+  Future<RoomChatController> _postControllerFor(Room room) async {
+    final existing = _controllers[room.id];
+    if (existing != null) return existing;
+    if (_findRoom(room.id) == null) {
+      throw const ApiException('이 토픽에 더 이상 참여하고 있지 않습니다.');
+    }
+    return controllerFor(room);
+  }
+
+  /// 보드 토픽에 게시글을 올린다 — RoomChatController.sendPost와 같다(그 방 컨트롤러로 보낸다).
+  Future<Message?> sendPost(
+    Room room, {
+    required String title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+    List<UploadedAttachment> attachments = const [],
+  }) async {
+    return (await _postControllerFor(room)).sendPost(
+      title: title,
+      text: text,
+      textFormat: textFormat,
+      attachments: attachments,
+    );
+  }
+
+  /// 게시글 수정 — RoomChatController.editPost와 같다.
+  Future<Message> editPost(
+    Room room,
+    String messageId, {
+    required String title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+  }) async {
+    return (await _postControllerFor(
+      room,
+    )).editPost(messageId, title: title, text: text, textFormat: textFormat);
+  }
+
+  /// 게시글 고정/해제 — RoomChatController.setPostPinned와 같다.
+  Future<Message> setPostPinned(
+    Room room,
+    String messageId,
+    bool pinned,
+  ) async => (await _postControllerFor(room)).setPostPinned(messageId, pinned);
 
   Future<void> logout() async {
     // 잠긴 채로 로그아웃하면(잠금 화면의 "로그아웃") 다음 로그인 때 다시 잠겨 뜨지 않게 푼다.
@@ -2456,11 +2928,16 @@ class Session extends ChangeNotifier {
     await _messageExpiredSub?.cancel();
     await _secretRekeyProposeSub?.cancel();
     await _secretRekeyAckSub?.cancel();
+    await _roomRemovedSub?.cancel();
+    await _topicFoldersChangedSub?.cancel();
     chatSocket.dispose();
     for (final c in _controllers.values) {
       c.dispose();
     }
     _controllers.clear();
+    topicFolders.clear();
+    _topicFoldersLoadSeq++; // 로그아웃 전에 나간 폴더 요청이 늦게 와도 버린다.
+    _deletingTopicIds.clear();
     onlineUserIds.clear();
     secretSessionManager = null;
     pendingSecretInvites.clear();

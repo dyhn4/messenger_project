@@ -2,14 +2,19 @@ import { Router } from 'express';
 import {
   findMessageById,
   hardDeleteMessage,
+  listAttachmentsForMessages,
   listFavoriteFiles,
+  setMessagePinned,
   softDeleteMessage,
   toggleFavoriteFile,
   updateMessageText,
+  updatePost,
 } from './db/queries/messages.js';
 import { isRoomMember } from './db/queries/rooms.js';
 import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
+import { topicAccess } from './access.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
+import { parsePostFields, topicWriteDenial } from './permissions.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
 
@@ -52,6 +57,9 @@ export function toMessageDto(m) {
     senderId: m.senderId,
     senderName: m.senderName,
     type: m.type,
+    // 보드 뷰 게시글('post')의 제목과 고정 시각 — 다른 메시지는 둘 다 null.
+    title: m.deletedAt ? null : (m.title ?? null),
+    pinnedAt: m.pinnedAt && !m.deletedAt ? new Date(m.pinnedAt).getTime() : null,
     text: m.text,
     textFormat: m.deletedAt ? null : (m.textFormat ?? null),
     fileUrl: signFileUrl(m.fileUrl, m.fileName),
@@ -61,7 +69,8 @@ export function toMessageDto(m) {
     thumbnailUrl: signFileUrl(m.thumbnailUrl),
     // 사진 여러 장을 한 말풍선에 보여주려고 첨부를 목록으로 내려준다. message_attachments
     // 행이 있으면 그걸 쓰고, 없으면(예전 메시지) messages의 파일 칸을 첨부 하나로 본다.
-    attachments: toAttachmentDtos(m),
+    // 지워진 메시지는 첨부 행이 남아 있어도 내려주지 않는다(내용을 비운 소프트 삭제와 같은 뜻).
+    attachments: m.deletedAt ? [] : toAttachmentDtos(m),
     createdAt: new Date(m.createdAt).getTime(),
     editedAt: m.editedAt ? new Date(m.editedAt).getTime() : null,
     deleted: !!m.deletedAt,
@@ -125,28 +134,84 @@ export function createMessagesRouter(io) {
     );
   });
 
+  /** 게시글 응답·브로드캐스트용 DTO — 방금 고친 행에는 첨부 목록이 안 붙어 있어서 다시 붙인다
+   * (안 붙이면 toMessageDto가 게시글 첨부를 빈 목록으로 내려 화면에서 첨부가 사라진다). */
+  async function postDto(row) {
+    const byMessage = await listAttachmentsForMessages([row.id]);
+    return toMessageDto({ ...row, attachments: byMessage[row.id] });
+  }
+
   router.patch('/messages/:id', async (req, res) => {
     const message = await findMessageById(req.params.id);
     if (!message || message.deletedAt) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
-    if (message.type !== 'text') return res.status(400).json({ error: '텍스트 메시지만 수정할 수 있습니다.' });
+    const isPost = message.type === 'post';
+    if (message.type !== 'text' && !isPost) {
+      return res.status(400).json({ error: '텍스트 메시지만 수정할 수 있습니다.' });
+    }
     // 수정도 삭제와 같은 규칙(팀 [메시지 설정]의 허용 여부 + 수정/삭제 가능 시간)을 따른다.
     // 다만 남의 메시지 수정은 관리자도 할 수 없다 — moderation.js가 action으로 구분한다.
+    // 게시글은 본인만 고칠 수 있고 수정/삭제 가능 시간 제한이 없다(isPost).
     const verdict = await canModifyContent({
       roomId: message.roomId,
       senderId: message.senderId,
       createdAt: message.createdAt,
       requesterId: req.user.sub,
       action: 'edit',
+      isPost,
     });
     if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
+
+    const room = await findRoomById(message.roomId);
+    // 읽기 전용·보관된 토픽에서는 고치는 것도 "글쓰기"다 — 토픽을 관리할 수 있는 사람만(socket.js의
+    // message:send와 같은 규칙). 삭제는 막지 않는다.
+    if (room?.type === 'topic' && (room.readOnly || room.archivedAt)) {
+      const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, req.user.sub)).canManage });
+      if (denial) return res.status(403).json({ error: denial });
+    }
+
+    if (isPost) {
+      const fields = parsePostFields(req.body?.title, req.body?.text);
+      if (fields.error) return res.status(400).json({ error: fields.error });
+      const updated = await updatePost(message.id, {
+        title: fields.title,
+        text: fields.text,
+        textFormat: sanitizeTextFormat(req.body?.textFormat, fields.text),
+      });
+      const dto = await postDto(updated);
+      io.to(message.roomId).emit('message:edited', dto);
+      return res.json(dto);
+    }
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '메시지 내용을 입력하세요.' });
 
-    const room = await findRoomById(message.roomId);
     const textFormat = room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text);
     const updated = await updateMessageText(message.id, text, textFormat);
     const dto = toMessageDto(updated);
+    io.to(message.roomId).emit('message:edited', dto);
+    res.json(dto);
+  });
+
+  /**
+   * 보드 뷰 게시글 고정/해제 — 보드 뷰 토픽의 게시글만, 토픽을 관리할 수 있는 사람만. 고정 목록
+   * (GET /rooms/:id/pinned-posts)과 카드의 📌 표시가 바뀌도록 message:edited로 알린다.
+   */
+  router.post('/messages/:id/pin', async (req, res) => {
+    const message = await findMessageById(req.params.id);
+    if (!message || message.deletedAt) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
+    const room = await findRoomById(message.roomId);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (message.type !== 'post' || room.type !== 'topic' || room.viewMode !== 'board') {
+      return res.status(400).json({ error: '보드 뷰 토픽의 게시글만 고정할 수 있습니다.' });
+    }
+    if (typeof req.body?.pinned !== 'boolean') return res.status(400).json({ error: 'pinned는 true/false여야 합니다.' });
+    const access = await topicAccess(room, req.user.sub);
+    if (!access.isRoomMember) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    if (!access.canManage) return res.status(403).json({ error: '토픽 관리자만 게시글을 고정할 수 있습니다.' });
+
+    // 이미 같은 상태면 고정 시각을 새로 찍지 않고 그대로 돌려준다(두 기기에서 동시에 눌러도 무해).
+    const updated = req.body.pinned === !!message.pinnedAt ? message : await setMessagePinned(message.id, req.body.pinned);
+    const dto = await postDto(updated);
     io.to(message.roomId).emit('message:edited', dto);
     res.json(dto);
   });
@@ -155,13 +220,16 @@ export function createMessagesRouter(io) {
     const message = await findMessageById(req.params.id);
     if (!message || message.deletedAt) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
     // 수정/삭제 허용 여부, 가능 시간, 콘텐츠 관리 권한을 한 곳에서 판단한다(moderation.js
-    // 참고) — 댓글(comments.js)도 완전히 같은 규칙을 쓴다.
+    // 참고) — 댓글(comments.js)도 완전히 같은 규칙을 쓴다. 게시글은 그 토픽의 토픽 관리자도 지울 수
+    // 있고 가능 시간 제한이 없다(isPost).
+    const isPost = message.type === 'post';
     const verdict = await canModifyContent({
       roomId: message.roomId,
       senderId: message.senderId,
       createdAt: message.createdAt,
       requesterId: req.user.sub,
       action: 'delete',
+      isPost,
     });
     if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
 
@@ -187,7 +255,7 @@ export function createMessagesRouter(io) {
     // 남의 메시지를 지운 경우(= 관리자 콘텐츠 관리)만 감사 로그에 남긴다 — 본인이 자기 글을
     // 지우는 건 일상적인 동작이라 기록 대상이 아니다.
     if (message.senderId !== req.user.sub) {
-      await recordModerationAudit(req, message, 'message');
+      await recordModerationAudit(req, message, isPost ? 'post' : 'message');
     }
 
     if (seenByOther) {

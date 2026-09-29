@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '../client.js';
 import { projectMembers, projects, teamMembers, teams, topicCreators, users } from '../schema.js';
 
@@ -145,19 +145,6 @@ export function listTeamMemberUsers(teamId) {
         teamPosition: r.position ?? null,
       })),
     );
-}
-
-/**
- * 공개 토픽에 자동으로 넣어야 할 팀원 id들 = 준회원을 뺀 전원.
- * 등급이 계정 단위로 올라갔으므로 users.role을 기준으로 판단한다.
- */
-export function listAutoJoinTeamMemberIds(teamId) {
-  return db
-    .select({ userId: teamMembers.userId })
-    .from(teamMembers)
-    .innerJoin(users, eq(teamMembers.userId, users.id))
-    .where(and(eq(teamMembers.teamId, teamId), ne(users.role, 'guest')))
-    .then((rows) => rows.map((r) => r.userId));
 }
 
 /** 한 사람의 팀 멤버십 한 행(등급+부서/직책). 멤버가 아니면 null. */

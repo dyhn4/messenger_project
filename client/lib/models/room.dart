@@ -10,6 +10,43 @@ RoomType _typeFromString(String s) => switch (s) {
   _ => RoomType.topic,
 };
 
+/// 토픽의 보기 방식(서버 rooms.view_mode) — 만들 때 정하면 바꿀 수 없다. 그룹/DM은 항상 chat.
+enum TopicViewMode {
+  chat, // 챗 뷰 — 메시지를 주고받는 대화방(예전 토픽 전부)
+  board, // 보드 뷰 — 제목이 있는 게시글(Message.isPost)을 올리는 게시판
+}
+
+/// 서버 문자열('chat'|'board')을 enum으로. 모르는 값·예전 서버(값 없음)면 챗 뷰.
+TopicViewMode topicViewModeFromWire(String? s) =>
+    s == 'board' ? TopicViewMode.board : TopicViewMode.chat;
+
+extension TopicViewModeLabel on TopicViewMode {
+  String get wire => name;
+
+  String get label => switch (this) {
+    TopicViewMode.chat => '챗 뷰',
+    TopicViewMode.board => '보드 뷰',
+  };
+
+  String get description => switch (this) {
+    TopicViewMode.chat => '메시지를 주고받는 대화방',
+    TopicViewMode.board => '제목이 있는 게시글을 올리는 게시판',
+  };
+}
+
+/// 토픽 이름(글자 수)·설명 최대 길이 — 서버 POST/PATCH /rooms가 같은 값으로 다시 검사한다.
+const topicNameMaxLength = 60;
+const topicDescriptionMaxLength = 300;
+
+/// 보관 시각 없이 archived만 온 경우(부분 응답)에도 보관 상태는 놓치지 않는다.
+DateTime? _archivedAtFromJson(Map<String, dynamic> json) {
+  final ms = json['archivedAt'] as num?;
+  if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms.toInt());
+  return json['archived'] == true
+      ? DateTime.fromMillisecondsSinceEpoch(0)
+      : null;
+}
+
 class Room {
   final String id;
 
@@ -17,12 +54,16 @@ class Room {
   /// 메시지를 눌렀을 때 그 팀으로 전환하는 데도 쓴다(Session.requestOpenRoom 참고).
   final String teamId;
   final RoomType type;
-  final String? name; // dm/이름없는 group은 null (클라이언트가 대신 표시할 이름을 계산)
-  final String? description;
-  final bool isPublic; // 토픽에서만 의미 있음: 공개면 누구나 검색해서 참여 가능, 비공개면 초대로만.
-  final List<AppUser> members;
+
+  /// 이름·설명·공개 여부·멤버는 토픽 정보 변경/초대/내보내기로 바뀌어 room:created로 다시
+  /// 오고, Session이 화면이 들고 있는 이 인스턴스에 그 자리에서 반영한다([mergeServerState])
+  /// — 그래서 non-final.
+  String? name; // dm/이름없는 group은 null (클라이언트가 대신 표시할 이름을 계산)
+  String? description;
+  bool isPublic; // 토픽에서만 의미 있음: 공개면 누구나 검색해서 참여 가능, 비공개면 초대로만.
+  List<AppUser> members;
   final DateTime createdAt;
-  final Map<String, int> lastRead; // userId -> epoch millis, 마지막으로 이 방을 읽은 시각
+  Map<String, int> lastRead; // userId -> epoch millis, 마지막으로 이 방을 읽은 시각
 
   /// 내가 안 읽은 메시지 수. 서버가 REST 응답에서 계산해서 채워주고(로그인/방 목록 조회 시),
   /// 이후 실시간으로는 Session이 소켓 메시지를 받을 때마다 직접 증감시킨다 — 그래서 non-final.
@@ -61,6 +102,9 @@ class Room {
   /// true면 text는 클라이언트가 만든 암호문 JSON이라 Session이 송수신 경계에서 암복호화한다.
   final bool isSecret;
 
+  /// 초대로만 들어오는 비공개 토픽 — 방 목록·대화 헤더에서 이름 옆에 자물쇠를 붙인다.
+  bool get isPrivateTopic => type == RoomType.topic && !isPublic;
+
   /// 비밀 대화 핸드셰이크 상태: 'pending'(초대 대기) | 'active'(성립) | 'rejected' | 'terminated'.
   /// 서버가 room:created/rooms 목록에 실어 보내고(rooms.js의 toRoomDto), 그 자리에서 바뀔 수
   /// 있어(secret:accepted 수신 시) non-final.
@@ -71,7 +115,8 @@ class Room {
 
   /// 비밀 대화에서 "상대방도 나가기" 없이 상대방 혼자 나갔을 때, 그 사람의 이름(members에는
   /// 더 이상 없음). displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여주는 데 쓴다.
-  final String? secretDepartedMemberName;
+  /// 상대가 나가는 순간 room:created로 다시 오므로 non-final.
+  String? secretDepartedMemberName;
 
   /// 비밀 대화를 먼저 건 쪽의 사용자 id. secretStatus가 'pending'일 때, 내가 이 값과 다르면
   /// (=상대가 나에게 건 것이면) 내가 응답(수락/거절)해야 하는 쪽 — Session이 이걸로 "내가
@@ -100,11 +145,35 @@ class Room {
   /// null 또는 'members'면 room_avatar.dart가 기존처럼 멤버 아바타 두 개를 겹쳐 보여준다.
   /// 'initial'이면 그룹 이름 앞 2글자, 'emoji'면 iconEmoji, 'photo'면 iconUrl(서명된
   /// /files/ 링크)을 보여준다. iconColor는 initial·emoji의 배경색. 토픽/DM은 항상 null.
-  /// 서버가 다시 계산해줄 값이 아니라 생성 시점에 고정되므로 전부 final.
+  /// 서버가 다시 계산해줄 값이 아니라 생성 시점에 고정되므로 final — 단 iconUrl은 때마다
+  /// 새로 서명되는(만료되는) 링크라 방 갱신 때 새 값으로 바꾼다([mergeServerState]).
   final String? iconType;
   final String? iconEmoji;
   final String? iconColor;
-  final String? iconUrl;
+  String? iconUrl;
+
+  /// 토픽의 보기 방식 — 챗 뷰/보드 뷰. 만든 뒤에는 바꿀 수 없어서(서버 PATCH가 거부) final.
+  final TopicViewMode viewMode;
+
+  /// 읽기 전용 — 토픽을 관리할 수 있는 사람만 글을 쓸 수 있다(서버 message:send가 막는다).
+  /// 아래 토픽 설정들은 "토픽 정보 변경하기"로 바뀌어 room:created로 다시 오므로 non-final.
+  bool readOnly;
+
+  /// 정회원 자동 초대 — 새로 팀에 들어오는 정회원을 이 토픽에 자동으로 넣는다(공개 토픽만).
+  bool autoInvite;
+
+  /// 조용히 나가기 — 멤버가 나가거나 내보내져도 "OOO 님이 나갔습니다" 안내를 남기지 않는다.
+  bool quietLeave;
+
+  /// 토픽을 보관한 시각(null이면 보관 안 됨) — 보관된 토픽은 목록의 "보관된 토픽"으로
+  /// 옮겨지고, 읽기 전용처럼 토픽을 관리할 수 있는 사람만 글을 쓸 수 있다.
+  DateTime? archivedAt;
+
+  /// 토픽 관리자(room_members.role = 'admin')의 id들 — 여러 명일 수 있다.
+  List<String> adminIds;
+
+  /// 토픽을 만든 사람 id(예전 방이거나 서버가 안 보내면 null).
+  String? createdBy;
 
   Room({
     required this.id,
@@ -135,8 +204,18 @@ class Room {
     this.iconEmoji,
     this.iconColor,
     this.iconUrl,
-  }) : lastActivityAt = lastActivityAt ?? createdAt;
+    this.viewMode = TopicViewMode.chat,
+    this.readOnly = false,
+    this.autoInvite = false,
+    this.quietLeave = false,
+    this.archivedAt,
+    List<String>? adminIds,
+    this.createdBy,
+  }) : lastActivityAt = lastActivityAt ?? createdAt,
+       adminIds = adminIds ?? [];
 
+  /// 새 토픽 필드(viewMode~createdBy)가 없는 예전 서버 응답이면 전부 기본값(챗 뷰, 설정 꺼짐,
+  /// 보관 안 됨, 토픽 관리자 없음)으로 읽는다.
   factory Room.fromJson(Map<String, dynamic> json) {
     return Room(
       id: json['id'] as String,
@@ -183,7 +262,67 @@ class Room {
       iconEmoji: json['iconEmoji'] as String?,
       iconColor: json['iconColor'] as String?,
       iconUrl: json['iconUrl'] as String?,
+      viewMode: topicViewModeFromWire(json['viewMode'] as String?),
+      readOnly: json['readOnly'] as bool? ?? false,
+      autoInvite: json['autoInvite'] as bool? ?? false,
+      quietLeave: json['quietLeave'] as bool? ?? false,
+      archivedAt: _archivedAtFromJson(json),
+      adminIds: (json['adminIds'] as List?)?.whereType<String>().toList(),
+      createdBy: json['createdBy'] as String?,
     );
+  }
+
+  /// 보드 뷰 토픽 — 채팅 목록 대신 게시글 보드(board_view.dart)를 보여준다.
+  bool get isBoard => type == RoomType.topic && viewMode == TopicViewMode.board;
+
+  /// 보관된 토픽인지 — 목록에서는 "보관된 토픽"에만 보인다.
+  bool get isArchived => archivedAt != null;
+
+  /// [userId]가 이 토픽의 토픽 관리자인지(팀 관리자 여부와는 별개 — 둘을 합친 "토픽을 관리할 수
+  /// 있는 사람"은 room_permissions.dart의 canManage).
+  bool isTopicAdmin(String? userId) =>
+      userId != null && adminIds.contains(userId);
+
+  /// 같은 방의 새 서버 값([incoming] — room:created 브로드캐스트나 REST 응답)을 이 인스턴스에
+  /// 그 자리에서 반영한다. 방 하나에 인스턴스를 하나만 두려는 것 — 화면·컨트롤러가 붙잡고 있는
+  /// 객체도 다시 열지 않고 최신 이름·멤버·권한(읽기 전용/보관/토픽 관리자)을 보게 된다.
+  /// 이 사람만의 값(안읽음·즐겨찾기·알림 끄기·별칭·숨김·최근 활동·미리보기·안 읽은 공지)은
+  /// 브로드캐스트엔 없거나 낡았을 수 있어서, [includePersonal]일 때(재연결 후 내 기준으로 다시
+  /// 받은 목록)만 덮어쓴다. 배너 닫기(dismissedAnnouncementId)는 순수 로컬 값이라 늘 그대로 둔다.
+  void mergeServerState(Room incoming, {bool includePersonal = false}) {
+    if (identical(incoming, this)) return;
+    name = incoming.name;
+    description = incoming.description;
+    isPublic = incoming.isPublic;
+    members = incoming.members;
+    // 읽음 시각은 늘기만 한다 — 조금 전에 만들어진 브로드캐스트가 방금 받은 room:read보다
+    // 늦게 도착해도 되돌아가지 않게 더 큰 값을 남긴다.
+    final mergedRead = Map<String, int>.of(lastRead);
+    incoming.lastRead.forEach((userId, at) {
+      if (at > (mergedRead[userId] ?? 0)) mergedRead[userId] = at;
+    });
+    lastRead = mergedRead;
+    secretStatus = incoming.secretStatus;
+    secretSelfDestructSeconds = incoming.secretSelfDestructSeconds;
+    secretDepartedMemberName = incoming.secretDepartedMemberName;
+    latestAnnouncement = incoming.latestAnnouncement;
+    iconUrl = incoming.iconUrl;
+    readOnly = incoming.readOnly;
+    autoInvite = incoming.autoInvite;
+    quietLeave = incoming.quietLeave;
+    archivedAt = incoming.archivedAt;
+    adminIds = incoming.adminIds;
+    createdBy = incoming.createdBy;
+    if (!includePersonal) return;
+    unreadCount = incoming.unreadCount;
+    favorite = incoming.favorite;
+    muted = incoming.muted;
+    customName = incoming.customName;
+    hidden = incoming.hidden;
+    lastActivityAt = incoming.lastActivityAt;
+    lastMessagePreview = incoming.lastMessagePreview;
+    hasUnreadAnnouncement = incoming.hasUnreadAnnouncement;
+    unreadAnnouncementCount = incoming.unreadAnnouncementCount;
   }
 
   /// 화면에 보여줄 이름. DM은 상대방 이름, 이름 없는 그룹은 멤버 이름을 이름순 정렬해 보여준다.

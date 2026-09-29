@@ -238,7 +238,9 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
             // 바탕은 마우스를 올렸을 때(글자색 8%가 위에 겹친다)보다 연하게 깔아 둔다.
             backgroundColor: hint.withValues(alpha: 0.05),
             visualDensity: VisualDensity.compact,
-            textStyle: const TextStyle(
+            // 테마 글꼴(한글 대체 글꼴 포함)에서 크기·굵기만 바꾼다 — 맨 TextStyle을 주면 버튼 글자가
+            // 테마의 대체 글꼴을 잃어 한글이 네모(□)로 나올 수 있다.
+            textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),

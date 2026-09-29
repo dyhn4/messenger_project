@@ -60,7 +60,13 @@ export async function getLastMessageAt(roomId) {
  * 메시지는 건너뛰고 그 이전 걸 찾는다(rooms.js의 toRoomDto, push.js의 previewFor 참고). */
 export async function getLastMessageForPreview(roomId) {
   const [row] = await db
-    .select({ type: messages.type, text: messages.text, fileName: messages.fileName, createdAt: messages.createdAt })
+    .select({
+      type: messages.type,
+      title: messages.title, // 게시글 미리보기("게시글: 제목")용
+      text: messages.text,
+      fileName: messages.fileName,
+      createdAt: messages.createdAt,
+    })
     .from(messages)
     .where(and(eq(messages.roomId, roomId), isNull(messages.deletedAt)))
     .orderBy(desc(messages.createdAt))
@@ -94,14 +100,60 @@ export async function updateMessageLinkPreview(id, preview) {
   return row;
 }
 
-/** 소프트 삭제 — 행은 남기고(댓글 스레드가 계속 참조) 내용만 비운다. */
+/** 소프트 삭제 — 행은 남기고(댓글 스레드가 계속 참조) 내용만 비운다. 게시글이면 제목과 고정도 푼다. */
 export async function softDeleteMessage(id) {
   const [row] = await db
     .update(messages)
-    .set({ deletedAt: new Date(), text: null, textFormat: null, fileUrl: null, fileName: null, fileSize: null, mimeType: null })
+    .set({
+      deletedAt: new Date(),
+      text: null,
+      textFormat: null,
+      fileUrl: null,
+      fileName: null,
+      fileSize: null,
+      mimeType: null,
+      title: null,
+      pinnedAt: null,
+    })
     .where(eq(messages.id, id))
     .returning();
   return row;
+}
+
+/** 게시글 수정(messages.js) — 제목·본문·서식을 한 번에 바꾸고 "(수정됨)" 시각을 찍는다. */
+export async function updatePost(id, { title, text, textFormat = null }) {
+  const [row] = await db
+    .update(messages)
+    .set({ title, text, textFormat, editedAt: new Date() })
+    .where(eq(messages.id, id))
+    .returning();
+  return row;
+}
+
+/** 게시글 고정/해제 — 내용을 고친 게 아니라서 editedAt은 안 건드린다("(수정됨)"이 붙으면 안 됨). */
+export async function setMessagePinned(id, pinned) {
+  const [row] = await db
+    .update(messages)
+    .set({ pinnedAt: pinned ? new Date() : null })
+    .where(eq(messages.id, id))
+    .returning();
+  return row;
+}
+
+/** 보드 뷰 상단 "고정된 게시글" — 지워지지 않은 고정 게시글을 작성 시각 최신순으로. */
+export function listPinnedPosts(roomId) {
+  return db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.roomId, roomId),
+        eq(messages.type, 'post'),
+        isNotNull(messages.pinnedAt),
+        isNull(messages.deletedAt),
+      ),
+    )
+    .orderBy(desc(messages.createdAt));
 }
 
 
@@ -204,9 +256,17 @@ const notBeforeDmHistoryFloor = or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(m
  * roomId를 임의로 보내도 내 방이 아니면 절대 안 걸림 — 예전 myRoomIds.has(...) 필터와 동일한 보장).
  */
 export async function searchMessages({ requesterId, teamId, roomId, senderId, since, until, q, limit }) {
+  // 검색어의 %·_·\는 LIKE 와일드카드가 아니라 글자 그대로 찾는다 — 안 그러면 "_" 하나로 모든 글이
+  // 걸린다(Postgres LIKE의 기본 이스케이프 문자가 \라 ESCAPE 절 없이 앞에 \만 붙이면 된다).
+  const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
   const conditions = [
     eq(roomMembers.userId, requesterId),
-    or(sql`lower(${messages.text}) like ${`%${q}%`}`, sql`lower(${messages.fileName}) like ${`%${q}%`}`),
+    or(
+      sql`lower(${messages.text}) like ${pattern}`,
+      sql`lower(${messages.fileName}) like ${pattern}`,
+      // 보드 뷰 게시글은 제목으로도 찾는다(다른 메시지는 title이 null이라 영향 없음).
+      sql`lower(${messages.title}) like ${pattern}`,
+    ),
     notBeforeDmHistoryFloor,
   ];
   if (teamId) conditions.push(eq(rooms.teamId, teamId));
@@ -239,7 +299,10 @@ export async function searchMessages({ requesterId, teamId, roomId, senderId, si
 export async function listAttachments({ requesterId, teamId, roomId, senderId, limit }) {
   const conditions = [
     eq(roomMembers.userId, requesterId),
-    inArray(messages.type, ['image', 'file']),
+    // 보드 뷰 게시글의 첨부도 파일 모아보기에 나온다(첨부 없는 게시글은 fileUrl이 비어 빠진다 —
+    // 호출부 attachments.js가 게시글은 첨부 한 줄씩 펼친다).
+    inArray(messages.type, ['image', 'file', 'post']),
+    isNotNull(messages.fileUrl),
     isNull(messages.deletedAt),
     notBeforeDmHistoryFloor,
   ];

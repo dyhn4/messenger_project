@@ -18,7 +18,13 @@ import {
   updateTeam,
   updateTeamMember,
 } from './db/queries/teams.js';
-import { addRoomMembers, listPublicTopics, listRoomMemberIds } from './db/queries/rooms.js';
+import {
+  addRoomMembers,
+  clearTopicAdminRoles,
+  findRoomById,
+  listAutoInviteTopics,
+  listRoomMemberIds,
+} from './db/queries/rooms.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
 import { findUserById, updateUser } from './db/queries/users.js';
@@ -35,7 +41,7 @@ import {
   TOPIC_CREATION_LEVELS,
 } from './permissions.js';
 import { teamAccess, userAccess } from './access.js';
-import { nameOf, notifyMembership, postSystemMessage } from './rooms.js';
+import { nameOf, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
 import { publicUser } from './users.js';
 import { signFileUrl, toStoredUploadUrl } from './upload.js';
 
@@ -385,7 +391,8 @@ export function createTeamsRouter(io) {
 
     await addTeamMembers(team.id, userIds, 'member');
 
-    // 팀에 들어오면 그 팀의 공개 토픽에 자동으로 참여시킨다. 준회원은 제외 —
+    // 팀에 들어오면 '정회원 자동 초대'가 켜진 공개 토픽(보관 안 된 것)에 자동으로 참여시킨다 —
+    // 나머지 공개 토픽은 "참여 가능한 토픽"에서 스스로 찾아 들어간다. 준회원은 제외 —
     // 초대받은 방에만 들어간다(계정 등급 기준이라 사람마다 따로 판단한다).
     const autoJoinIds = [];
     for (const id of userIds) {
@@ -393,7 +400,7 @@ export function createTeamsRouter(io) {
       if (accountRole(u) !== 'guest') autoJoinIds.push(id);
     }
     if (autoJoinIds.length > 0) {
-      for (const room of await listPublicTopics(team.id)) {
+      for (const room of await listAutoInviteTopics(team.id)) {
         const before = await listRoomMemberIds(room.id);
         const missing = autoJoinIds.filter((id) => !before.includes(id));
         if (missing.length === 0) continue;
@@ -529,6 +536,12 @@ export function createTeamsRouter(io) {
     }
 
     await removeTeamMember(team.id, req.params.userId);
+    // 방 멤버십은 옛 대화 때문에 남겨 두지만, 팀에서 빠진 사람은 그 팀 토픽을 관리할 수 없으므로
+    // (access.js topicAccess) 토픽 관리자 역할은 거두고 남은 멤버들의 관리자 표시를 바로 바꾼다.
+    for (const roomId of await clearTopicAdminRoles(req.params.userId, team.id)) {
+      const room = await findRoomById(roomId);
+      if (room) io.to(room.id).emit('room:created', await toRoomDto(room));
+    }
     io.to(`user:${req.params.userId}`).emit('team:left', { teamId: team.id, teamName: team.name });
     recordAudit({
       actorId: req.user.sub,

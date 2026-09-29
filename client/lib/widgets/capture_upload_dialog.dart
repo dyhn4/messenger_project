@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
+import '../screens/message_forward_screen.dart' show canForwardTo;
 import '../services/session.dart';
 
 /// 화면 캡처 "파일 업로드" 대화상자에서 고른 결과.
@@ -52,8 +53,15 @@ class _CaptureUploadDialogState extends State<_CaptureUploadDialog> {
   List<Room> _candidateRooms() {
     final teamId = widget.session.currentTeam?.id;
     final myId = widget.session.userId ?? '';
+    // 보드 뷰 토픽(게시글만 받음)과 내가 쓸 수 없는 읽기 전용·보관된 토픽은 서버가 거절하므로
+    // 공유·전달과 같은 규칙으로 뺀다. 캡처를 시작한 방은 입력칸이 있던 방이라 늘 둔다.
     final list = widget.session.rooms
-        .where((r) => !r.hidden && (teamId == null || r.teamId == teamId))
+        .where(
+          (r) =>
+              !r.hidden &&
+              (teamId == null || r.teamId == teamId) &&
+              canForwardTo(widget.session, r),
+        )
         .toList();
     if (!list.any((r) => r.id == widget.initialRoom.id)) {
       list.add(widget.initialRoom);

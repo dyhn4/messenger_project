@@ -14,6 +14,20 @@ String _typeToWire(MessageType type) => switch (type) {
   MessageType.text || MessageType.system || MessageType.comment => 'text',
 };
 
+/// 공유·전달로 보낼 수 있는 방인지 — 보드 뷰 토픽은 게시글만 받고(서버가 다른 메시지를 거절한다),
+/// 읽기 전용·보관된 토픽은 토픽을 관리할 수 있는 사람만 쓸 수 있어서 목록에서 뺀다.
+bool canForwardTo(Session session, Room room) =>
+    !room.isBoard && room.canWrite(session);
+
+/// 게시글을 전달할 때 받는 방에 들어갈 글 — 제목을 첫 줄로 본문과 함께(고쳐서 보낼 수 있다).
+String _initialForwardText(Message m) {
+  if (m.type == MessageType.sticker) return '';
+  if (!m.isPost) return m.text ?? '';
+  final body = m.text ?? '';
+  final title = m.title ?? '';
+  return body.isEmpty ? title : '$title\n\n$body';
+}
+
 String _formatFullDateTime(DateTime dt) {
   final isPm = dt.hour >= 12;
   final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
@@ -50,9 +64,7 @@ class MessageForwardScreen extends StatefulWidget {
 class _MessageForwardScreenState extends State<MessageForwardScreen> {
   Room? _targetRoom;
   late final _textController = TextEditingController(
-    text: widget.message.type == MessageType.sticker
-        ? ''
-        : widget.message.text ?? '',
+    text: _initialForwardText(widget.message),
   );
   bool _includeAttribution = true;
   bool _sending = false;
@@ -63,9 +75,19 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
     super.dispose();
   }
 
+  /// 게시글은 받는 방에 게시글이 아니라 보통 메시지로 간다 — 첨부가 있으면 사진만이면 사진, 아니면
+  /// 파일 메시지로.
+  String get _wireType {
+    final message = widget.message;
+    if (!message.isPost || message.attachments.isEmpty) {
+      return _typeToWire(message.type);
+    }
+    return message.attachments.every((a) => a.isImage) ? 'image' : 'file';
+  }
+
   Future<void> _forward() async {
     final room = _targetRoom;
-    if (room == null) return;
+    if (room == null || !canForwardTo(widget.session, room)) return;
     setState(() => _sending = true);
     final message = widget.message;
     final text = message.type == MessageType.sticker
@@ -73,10 +95,14 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         : (_textController.text.trim().isEmpty
               ? null
               : _textController.text.trim());
+    // 게시글은 첨부가 하나여도 목록으로 넘긴다(게시글 첨부는 목록에만 온전히 있다).
+    final sendList =
+        message.attachments.length > 1 ||
+        (message.isPost && message.attachments.isNotEmpty);
     try {
       await widget.session.chatSocket.send(
         roomId: room.id,
-        type: _typeToWire(message.type),
+        type: _wireType,
         text: text,
         fileUrl: message.fileUrl,
         fileName: message.fileName,
@@ -84,7 +110,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         mimeType: message.mimeType,
         thumbnailUrl: message.thumbnailUrl,
         // 사진·파일 여러 개가 딸린 메시지는 전부 같이 넘긴다(없으면 첫 번째만 전달된다).
-        attachments: message.attachments.length > 1
+        attachments: sendList
             ? [
                 for (final a in message.attachments)
                   {
@@ -118,20 +144,27 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
 
   Widget? _buildAttachmentPreview(BuildContext context) {
     final message = widget.message;
-    final (icon, label) = switch (message.type) {
-      MessageType.image => (Icons.image_outlined, '사진'),
-      MessageType.file => (
-        Icons.insert_drive_file_outlined,
-        message.fileName ?? '파일',
-      ),
-      MessageType.sticker => (
-        Icons.emoji_emotions_outlined,
-        findStickerById(message.text ?? '')?.emoji ?? '이모티콘',
-      ),
-      MessageType.text ||
-      MessageType.system ||
-      MessageType.comment => (null, null),
-    };
+    final images = message.attachments.where((a) => a.isImage).length;
+    final (icon, label) = message.isPost
+        ? switch (message.attachments.length) {
+            0 => (null, null),
+            final n when n == images => (Icons.image_outlined, '사진 $n장'),
+            final n => (Icons.attach_file, '첨부 $n개'),
+          }
+        : switch (message.type) {
+            MessageType.image => (Icons.image_outlined, '사진'),
+            MessageType.file => (
+              Icons.insert_drive_file_outlined,
+              message.fileName ?? '파일',
+            ),
+            MessageType.sticker => (
+              Icons.emoji_emotions_outlined,
+              findStickerById(message.text ?? '')?.emoji ?? '이모티콘',
+            ),
+            MessageType.text ||
+            MessageType.system ||
+            MessageType.comment => (null, null),
+          };
     if (icon == null) return null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -219,6 +252,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         RoomPickerField(
           session: widget.session,
           value: _targetRoom,
+          filter: (r) => canForwardTo(widget.session, r),
           onChanged: (r) => setState(() => _targetRoom = r),
         ),
         const SizedBox(height: 16),

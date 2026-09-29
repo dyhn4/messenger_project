@@ -45,7 +45,9 @@ class FloatingDialog extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.of(context).pop(),
+                    // maybePop — 안의 PopScope(요청 중에는 닫지 않기, 닫을 때 결과 넘기기)가 Esc·바깥
+                    // 클릭과 똑같이 ✕에도 적용되게 한다.
+                    onPressed: () => Navigator.of(context).maybePop(),
                   ),
                 ],
               ),

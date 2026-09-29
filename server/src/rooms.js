@@ -3,9 +3,12 @@ import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import {
   addRoomMembers,
+  countTopicFolders,
   deleteRoom,
+  deleteTopicFolder,
   findDmRoomByKey,
   findRoomById,
+  findTopicFolderById,
   getDmHistoryFloor,
   getMemberFavorite,
   getMemberHidden,
@@ -15,21 +18,45 @@ import {
   setMemberCustomName,
   getRoomLastReadMap,
   insertRoom,
+  insertTopicFolder,
   isRoomMember,
   listBrowsableTopics,
   listRoomMemberIds,
+  listRoomMemberRoles,
   listRoomMemberUsersWithOrg,
   listRoomsForUser,
+  listTopicFolderRoomIds,
+  listTopicFolders,
+  listTopicSummaries,
   removeRoomMember,
+  removeRoomMembers,
+  reorderTopicFolders,
   setDmHistoryFloor,
   setMemberFavorite,
   setMemberHidden,
   setMemberMuted,
+  setRoomAdmins,
   setSecretDepartedMember,
+  setTopicFolder,
+  updateRoom,
+  updateTopicFolder,
+  withRoomLock,
 } from './db/queries/rooms.js';
-import { findTeamById, isTeamMember, isTopicCreator, listAutoJoinTeamMemberIds } from './db/queries/teams.js';
-import { teamAccess } from './access.js';
-import { canBrowseTopics, canCreateRooms, canCreateTopic } from './permissions.js';
+import { findTeamById, isTeamMember, isTopicCreator, listTeamMemberIds } from './db/queries/teams.js';
+import { teamAccess, topicAccess } from './access.js';
+import { AUDIT, recordAudit } from './audit.js';
+import {
+  accountRole,
+  canBrowseTopics,
+  canCreateRooms,
+  canCreateTopic,
+  canManageTeam,
+  graphemeLength,
+  TOPIC_DESCRIPTION_MAX,
+  TOPIC_FOLDER_MAX_PER_TEAM,
+  TOPIC_FOLDER_NAME_MAX,
+  TOPIC_NAME_MAX,
+} from './permissions.js';
 import {
   countUnreadForUser,
   getLastMessageAt,
@@ -39,6 +66,7 @@ import {
   listAttachmentsForMessages,
   listMessagesByIds,
   listMessagesByRoom,
+  listPinnedPosts,
 } from './db/queries/messages.js';
 import {
   countUnreadCommentsForUser,
@@ -62,18 +90,56 @@ import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
  * 또는 계정 값(users) 중 하나를 부서/직책으로 쓴다. 채팅방 상단 헤더/방 목록의 직책 표시
  * (desktop_home_screen.dart)가 이 값을 쓴다 — publicUser()에는 원래 이 필드가 없다(팀마다
  * 다를 수 있는 값이라 방이 속한 팀을 모르면 어느 값을 써야 할지 정할 수 없어서, 방 단위로만
- * 계산하는 여기서 얹는다). */
+ * 계산하는 여기서 얹는다).
+ * 토픽 관리자 id 목록(adminIds)도 같은 조회에서 뽑는다 — 멤버마다 따로 조회하지 않도록. */
 async function resolveMembers(roomId, teamId) {
   const [rows, settings] = await Promise.all([
     listRoomMemberUsersWithOrg(roomId, teamId),
     getServerSettings(),
   ]);
   const byTeam = settings.orgScope !== 'account';
-  return rows.map((u) => ({
-    ...publicUser(u),
-    department: (byTeam ? u.teamDepartment : u.department) ?? null,
-    position: (byTeam ? u.teamPosition : u.position) ?? null,
-  }));
+  return {
+    members: rows.map((u) => ({
+      ...publicUser(u),
+      department: (byTeam ? u.teamDepartment : u.department) ?? null,
+      position: (byTeam ? u.teamPosition : u.position) ?? null,
+      // 그 팀의 소유자인지 — 토픽 "참여 멤버" 목록의 '소유자' 배지·정렬, 내보내기 권한 표시에 쓴다.
+      isOwner: u.isTeamOwner === true,
+    })),
+    adminIds: rows.filter((u) => u.roomRole === 'admin').map((u) => u.id),
+  };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 사이드바 토픽 폴더(개인 설정) — roomIds는 내가 멤버인 토픽만. */
+function toTopicFolderDto(folder, roomIds = folder.roomIds ?? []) {
+  return {
+    id: folder.id,
+    name: folder.name,
+    position: folder.position,
+    collapsed: folder.collapsed,
+    roomIds,
+  };
+}
+
+/** 토픽 이름 — 앞뒤 공백을 빼고 1~60자(글자 단위 — 앱 입력창의 글자 수 표시와 같은 기준). */
+function parseTopicName(raw) {
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  if (!name) return { error: '토픽 이름을 입력하세요.' };
+  if (graphemeLength(name) > TOPIC_NAME_MAX) return { error: `토픽 이름은 ${TOPIC_NAME_MAX}자 이내로 입력하세요.` };
+  return { name };
+}
+
+/** 토픽 설명 — 없거나 비면 null, 앞뒤 공백을 빼고 300자까지. 통과하면 `{ value }`. */
+function parseTopicDescription(raw) {
+  if (raw == null) return { value: null };
+  if (typeof raw !== 'string') return { error: '토픽 설명이 올바르지 않습니다.' };
+  const value = raw.trim();
+  if (graphemeLength(value) > TOPIC_DESCRIPTION_MAX) {
+    return { error: `토픽 설명은 ${TOPIC_DESCRIPTION_MAX}자 이내로 입력하세요.` };
+  }
+  return { value: value || null };
 }
 
 /** 시스템 메시지 문구("OOO 님이 참여했습니다" 등)에 쓸 표시 이름. 이름이 없으면 아이디로 대체. */
@@ -88,7 +154,7 @@ export async function nameOf(id) {
  * (requesterId 생략) 요청자 한 명에게만 가는 REST 응답에서만 넣는다(requesterId 전달).
  */
 export async function toRoomDto(room, requesterId) {
-  const [members, lastRead, lastMessageAt, lastCommentAt, lastMessageRow, lastCommentRow] = await Promise.all([
+  const [{ members, adminIds }, lastRead, lastMessageAt, lastCommentAt, lastMessageRow, lastCommentRow] = await Promise.all([
     resolveMembers(room.id, room.teamId),
     getRoomLastReadMap(room.id),
     getLastMessageAt(room.id),
@@ -119,6 +185,7 @@ export async function toRoomDto(room, requesterId) {
         : lastMessageRow ?? lastCommentRow;
     if (newerRow) lastMessagePreview = previewFor(newerRow);
   }
+  const isTopic = room.type === 'topic';
   const dto = {
     id: room.id,
     teamId: room.teamId,
@@ -143,6 +210,16 @@ export async function toRoomDto(room, requesterId) {
     iconEmoji: room.iconEmoji ?? null,
     iconColor: room.iconColor ?? null,
     iconUrl: signFileUrl(room.iconUrl) ?? null,
+    // 토픽 설정(schema.js rooms 참고) — 그룹/DM은 항상 기본값이다. 클라이언트가 이 값으로 보드 뷰,
+    // 읽기 전용 입력창, '보관된 토픽' 묶음, 토픽 관리 메뉴(adminIds + 팀 관리자)를 그린다.
+    viewMode: isTopic && room.viewMode === 'board' ? 'board' : 'chat',
+    readOnly: isTopic && !!room.readOnly,
+    autoInvite: isTopic && room.isPublic !== false && !!room.autoInvite,
+    quietLeave: isTopic && !!room.quietLeave,
+    archived: isTopic && !!room.archivedAt,
+    archivedAt: isTopic && room.archivedAt ? new Date(room.archivedAt).getTime() : null,
+    adminIds: isTopic ? adminIds : [],
+    createdBy: room.createdBy ?? null,
   };
   if (room.isSecret) {
     // 비밀 대화 상태(핸드셰이크 진행 여부/자동 삭제 타이머)도 방 목록에 실어 보낸다 —
@@ -318,11 +395,205 @@ export function createRoomsRouter(io) {
     return { teamId, ...access };
   }
 
+  /**
+   * 토픽 관리 라우트 공통 — :id가 토픽이고, 내가 그 토픽의 멤버이며, 토픽을 관리할 수 있는
+   * 사람(토픽 관리자 또는 팀 관리자 — permissions.js canManageTopic)인지 확인한다. 통과하면
+   * `{ room, access }`, 아니면 응답까지 끝내고 null.
+   */
+  async function requireTopicManager(req, res) {
+    const room = await findRoomById(req.params.id);
+    if (!room) {
+      res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+      return null;
+    }
+    if (room.type !== 'topic') {
+      res.status(400).json({ error: '토픽에서만 할 수 있습니다.' });
+      return null;
+    }
+    const access = await topicAccess(room, req.user.sub);
+    if (!access.isRoomMember) {
+      res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+      return null;
+    }
+    if (!access.canManage) {
+      res.status(403).json({ error: '토픽을 관리할 권한이 없습니다.' });
+      return null;
+    }
+    return { room, access };
+  }
+
   router.get('/rooms', async (req, res) => {
     const teamId = await requireTeamId(req, res, req.query.teamId);
     if (!teamId) return;
     const myRooms = await listRoomsForUser(req.user.sub, teamId);
     res.json(await Promise.all(myRooms.map((r) => toRoomDto(r, req.user.sub))));
+  });
+
+  // ── 사이드바 토픽 폴더(개인 설정) ────────────────────────────────
+  // 사람마다(팀마다) 따로 만드는 정리용 폴더라 다른 사람에게는 보이지 않는다(projects.js의 프로젝트
+  // 폴더와 같은 방식). 바뀔 때마다 내 기기들(user:<id>)에만 topic-folders:changed를 보내 PC와
+  // 모바일이 같은 모양을 유지한다. /rooms/:id보다 먼저 등록해야 'folders'가 방 id로 잡히지 않는다.
+
+  /** 폴더 이름 검사 — 앞뒤 공백을 빼고 1~30자(글자 단위). */
+  function parseFolderName(raw) {
+    const name = typeof raw === 'string' ? raw.trim() : '';
+    if (!name) return { error: '폴더 이름을 입력하세요.' };
+    if (graphemeLength(name) > TOPIC_FOLDER_NAME_MAX) {
+      return { error: `폴더 이름은 ${TOPIC_FOLDER_NAME_MAX}자 이내로 입력하세요.` };
+    }
+    return { name };
+  }
+
+  /** 내 폴더인지 확인하고, 아니면 응답까지 보내고 null — 남의 폴더는 있는지조차 알려주지 않는다.
+   * uuid 모양이 아니면 DB가 형식 오류(500)를 내므로 조회 전에 걸러 같은 404로 답한다. */
+  async function requireMyFolder(req, res, folderId) {
+    const folder =
+      typeof folderId === 'string' && UUID_RE.test(folderId) ? await findTopicFolderById(folderId) : null;
+    if (!folder || folder.userId !== req.user.sub) {
+      res.status(404).json({ error: '폴더를 찾을 수 없습니다.' });
+      return null;
+    }
+    return folder;
+  }
+
+  function notifyTopicFoldersChanged(userId, teamId) {
+    io.to(`user:${userId}`).emit('topic-folders:changed', { teamId });
+  }
+
+  /**
+   * 새 토픽 설정 검사(POST /rooms) — 통과하면 저장할 값들, 아니면 `{ error }`. 보기 방식은 만든 뒤
+   * 못 바꾸므로 여기서만 정한다. 조용히 나가기는 안 보내면 보드 뷰는 켜고(게시판 사이에 입퇴장
+   * 안내가 끼지 않게) 챗 뷰는 끈다. [folderId]는 이 팀의 내 폴더여야 한다.
+   */
+  async function parseTopicCreateOptions(req, teamId, name) {
+    const body = req.body ?? {};
+    const nameCheck = parseTopicName(name);
+    if (nameCheck.error) return nameCheck;
+    const viewMode = body.viewMode ?? 'chat';
+    if (viewMode !== 'chat' && viewMode !== 'board') return { error: '보기 방식이 올바르지 않습니다.' };
+    const description = parseTopicDescription(body.description);
+    if (description.error) return description;
+    for (const key of ['readOnly', 'autoInvite', 'quietLeave']) {
+      if (body[key] != null && typeof body[key] !== 'boolean') return { error: `${key}는 true/false여야 합니다.` };
+    }
+    const isPublic = body.isPublic !== false;
+    let folder = null;
+    if (body.folderId != null) {
+      folder =
+        typeof body.folderId === 'string' && UUID_RE.test(body.folderId)
+          ? await findTopicFolderById(body.folderId)
+          : null;
+      if (!folder || folder.userId !== req.user.sub || folder.teamId !== teamId) {
+        return { error: '폴더를 찾을 수 없습니다.' };
+      }
+    }
+    return {
+      viewMode,
+      isPublic,
+      description: description.value,
+      readOnly: body.readOnly === true,
+      // 정회원 자동 초대는 공개 토픽에서만 의미가 있다 — 비공개면 보내와도 끈다.
+      autoInvite: isPublic && body.autoInvite === true,
+      quietLeave: typeof body.quietLeave === 'boolean' ? body.quietLeave : viewMode === 'board',
+      folder,
+    };
+  }
+
+  router.get('/rooms/folders', async (req, res) => {
+    const teamId = await requireTeamId(req, res, req.query.teamId);
+    if (!teamId) return;
+    const folders = await listTopicFolders(teamId, req.user.sub);
+    res.json(folders.map((f) => toTopicFolderDto(f)));
+  });
+
+  router.post('/rooms/folders', async (req, res) => {
+    const teamId = await requireTeamId(req, res, req.body?.teamId);
+    if (!teamId) return;
+    const { name, error } = parseFolderName(req.body?.name);
+    if (error) return res.status(400).json({ error });
+    if ((await countTopicFolders(teamId, req.user.sub)) >= TOPIC_FOLDER_MAX_PER_TEAM) {
+      return res.status(400).json({ error: `폴더는 ${TOPIC_FOLDER_MAX_PER_TEAM}개까지 만들 수 있습니다.` });
+    }
+    const folder = await insertTopicFolder({ teamId, userId: req.user.sub, name });
+    notifyTopicFoldersChanged(req.user.sub, teamId);
+    res.status(201).json(toTopicFolderDto(folder, []));
+  });
+
+  /**
+   * 내 폴더 순서를 통째로 다시 정한다 — [folderIds] 순서대로 0부터. 목록에 없는 내 폴더(다른 기기에서
+   * 방금 만든 것 등)는 지금 순서 그대로 그 뒤에 붙인다(자리가 겹치지 않게).
+   */
+  router.put('/topic-folders/order', async (req, res) => {
+    const teamId = await requireTeamId(req, res, req.body?.teamId);
+    if (!teamId) return;
+    const folderIds = req.body?.folderIds;
+    if (!Array.isArray(folderIds) || folderIds.some((id) => typeof id !== 'string')) {
+      return res.status(400).json({ error: 'folderIds가 필요합니다.' });
+    }
+    if (new Set(folderIds).size !== folderIds.length) {
+      return res.status(400).json({ error: '폴더 순서가 올바르지 않습니다.' });
+    }
+    const mine = await listTopicFolders(teamId, req.user.sub);
+    const mineIds = new Set(mine.map((f) => f.id));
+    if (folderIds.some((id) => !mineIds.has(id))) {
+      return res.status(400).json({ error: '이 팀의 내 폴더만 순서를 바꿀 수 있습니다.' });
+    }
+    const listed = new Set(folderIds);
+    await reorderTopicFolders([...folderIds, ...mine.map((f) => f.id).filter((id) => !listed.has(id))]);
+    notifyTopicFoldersChanged(req.user.sub, teamId);
+    res.json({ ok: true });
+  });
+
+  /** 이름 바꾸기·접기/펼치기 — 만든 사람만(개인 설정). */
+  router.patch('/topic-folders/:id', async (req, res) => {
+    const folder = await requireMyFolder(req, res, req.params.id);
+    if (!folder) return;
+    const body = req.body ?? {};
+    const fields = {};
+    if ('name' in body) {
+      const { name, error } = parseFolderName(body.name);
+      if (error) return res.status(400).json({ error });
+      fields.name = name;
+    }
+    if ('collapsed' in body) {
+      if (typeof body.collapsed !== 'boolean') return res.status(400).json({ error: '접기 값이 올바르지 않습니다.' });
+      fields.collapsed = body.collapsed;
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    const updated = await updateTopicFolder(folder.id, fields);
+    notifyTopicFoldersChanged(req.user.sub, folder.teamId);
+    res.json(toTopicFolderDto(updated, await listTopicFolderRoomIds(folder.id, req.user.sub)));
+  });
+
+  /** 폴더만 지운다 — 안에 있던 토픽은 폴더 밖 목록으로 돌아간다. */
+  router.delete('/topic-folders/:id', async (req, res) => {
+    const folder = await requireMyFolder(req, res, req.params.id);
+    if (!folder) return;
+    await deleteTopicFolder(folder.id);
+    notifyTopicFoldersChanged(req.user.sub, folder.teamId);
+    res.json({ ok: true });
+  });
+
+  /** 토픽을 내 폴더에 넣거나 옮기거나(folderId) 폴더에서 뺀다(null). 내가 멤버인 토픽만. */
+  router.put('/rooms/:id/folder', async (req, res) => {
+    const folderId = req.body?.folderId;
+    if (folderId !== null && typeof folderId !== 'string') {
+      return res.status(400).json({ error: 'folderId가 필요합니다.' });
+    }
+    const room = await findRoomById(req.params.id);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (room.type !== 'topic') return res.status(400).json({ error: '토픽만 폴더에 넣을 수 있습니다.' });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    if (folderId !== null) {
+      const folder = await requireMyFolder(req, res, folderId);
+      if (!folder) return;
+      if (folder.teamId !== room.teamId) {
+        return res.status(400).json({ error: '같은 팀의 폴더에만 넣을 수 있습니다.' });
+      }
+    }
+    await setTopicFolder(req.user.sub, room.id, folderId);
+    notifyTopicFoldersChanged(req.user.sub, room.teamId);
+    res.json({ ok: true });
   });
 
   // /rooms/:id 보다 먼저 등록해야 'browse'가 :id로 매칭되지 않습니다.
@@ -336,17 +607,25 @@ export function createRoomsRouter(io) {
     // 버튼을 감추지만, 서버에서도 빈 목록으로 못박는다).
     if (!canBrowseTopics(role)) return res.json([]);
     const rows = await listBrowsableTopics(req.user.sub, teamId);
-    const withCounts = await Promise.all(
-      rows.map(async ({ room, joined }) => ({
+    // 멤버 수·토픽 관리자 이름은 방마다 조회하지 않고 목록 전체를 한 번에 모은다.
+    const summaries = await listTopicSummaries(rows.map(({ room }) => room.id));
+    res.json(
+      rows.map(({ room, joined }) => ({
         id: room.id,
         name: room.name,
         description: room.description ?? null,
         isPublic: room.isPublic !== false,
-        memberCount: (await listRoomMemberIds(room.id)).length,
+        memberCount: summaries[room.id]?.memberCount ?? 0,
         joined: !!joined,
+        // 목록 배지(보드 뷰·읽기 전용·보관됨)와 "관리자 OOO" 표시용. 보관된 공개 토픽도 그대로
+        // 보이고 참여할 수 있다(보관은 삭제가 아니라 읽기 전용으로 남겨두는 것).
+        viewMode: room.viewMode === 'board' ? 'board' : 'chat',
+        readOnly: !!room.readOnly,
+        archived: !!room.archivedAt,
+        createdAt: new Date(room.createdAt).getTime(),
+        adminNames: summaries[room.id]?.adminNames ?? [],
       })),
     );
-    res.json(withCounts);
   });
 
   router.post('/rooms/dm', async (req, res) => {
@@ -440,15 +719,23 @@ export function createRoomsRouter(io) {
       return res.status(400).json({ error: '토픽 이름을 입력하세요.' });
     }
 
-    const isPublicTopic = type === 'topic' && isPublic !== false;
+    // 토픽 설정(보기 방식·공개 여부·설명·읽기 전용·정회원 자동 초대·조용히 나가기·폴더) 검사.
+    let topic = null;
+    if (type === 'topic') {
+      topic = await parseTopicCreateOptions(req, teamId, trimmedName);
+      if (topic.error) return res.status(400).json({ error: topic.error });
+    }
 
     let roomMemberIds;
-    if (isPublicTopic) {
-      // 공개 토픽은 만드는 순간 그 팀 멤버 전원이 들어간다(나중에 팀에 들어오는 사람은
-      // teams.js에서 그 팀의 공개 토픽 전체에 자동으로 추가된다). 준회원은 제외 —
-      // 초대받은 방에만 들어간다.
-      roomMemberIds = await listAutoJoinTeamMemberIds(teamId);
-      if (!roomMemberIds.includes(req.user.sub)) roomMemberIds.push(req.user.sub);
+    if (type === 'topic') {
+      // 공개 토픽도 이제 만드는 순간 팀 전원이 들어가지 않는다(잔디 방식) — "참여 가능한 토픽"에서
+      // 찾아서 들어오고, 만든 사람이 바로 이어서 "멤버 초대하기"로 한 번에 부를 수 있다. 호출부가
+      // memberIds를 보냈으면 그중 이 팀 멤버만 같이 넣는다(다른 팀 사람이 섞이지 않게).
+      const teamMemberIds = new Set(await listTeamMemberIds(teamId));
+      const invited = (Array.isArray(memberIds) ? memberIds : []).filter(
+        (id) => typeof id === 'string' && id !== req.user.sub && teamMemberIds.has(id),
+      );
+      roomMemberIds = [req.user.sub, ...new Set(invited)];
     } else {
       const memberIdSet = new Set([req.user.sub, ...(Array.isArray(memberIds) ? memberIds : [])]);
       if (type === 'group' && memberIdSet.size < 2) {
@@ -462,9 +749,17 @@ export function createRoomsRouter(io) {
       teamId,
       type,
       name: trimmedName || null,
-      description: type === 'topic' && description ? String(description).trim() : null,
+      description: topic?.description ?? null,
       // 공개 토픽은 지금 회원뿐 아니라 나중에 가입하는 회원에게도 계속 보인다(/rooms/browse).
-      isPublic: type === 'topic' ? isPublic !== false : null,
+      isPublic: type === 'topic' ? topic.isPublic : null,
+      ...(topic
+        ? {
+            viewMode: topic.viewMode,
+            readOnly: topic.readOnly,
+            autoInvite: topic.autoInvite,
+            quietLeave: topic.quietLeave,
+          }
+        : {}),
       createdBy: req.user.sub,
       iconType: type === 'group' && iconType && iconType !== 'members' ? iconType : null,
       iconEmoji: type === 'group' && iconType === 'emoji' ? String(iconEmoji) : null,
@@ -477,8 +772,20 @@ export function createRoomsRouter(io) {
           : null,
       iconUrl: storedIconUrl,
     });
-    await addRoomMembers(room.id, roomMemberIds);
+    if (type === 'topic') {
+      // 토픽을 만든 사람은 토픽 관리자로 시작한다.
+      await addRoomMembers(room.id, [req.user.sub], 'admin');
+      await addRoomMembers(room.id, roomMemberIds.filter((id) => id !== req.user.sub));
+    } else {
+      await addRoomMembers(room.id, roomMemberIds);
+    }
     await notifyMembership(io, room);
+
+    // 만들면서 고른 내 폴더에 넣는다(개인 설정 — 내 다른 기기에도 알린다).
+    if (topic?.folder) {
+      await setTopicFolder(req.user.sub, room.id, topic.folder.id);
+      notifyTopicFoldersChanged(req.user.sub, teamId);
+    }
 
     if (type === 'group') {
       const invitedIds = roomMemberIds.filter((id) => id !== req.user.sub);
@@ -609,12 +916,42 @@ export function createRoomsRouter(io) {
       return res.json({ ok: true });
     }
 
-    // 그룹/토픽 — 진짜 멤버십이 없어지는 공개적인 이벤트라 지금까지처럼 실제로 나간다.
-    await removeRoomMember(room.id, req.user.sub);
+    // 그룹/토픽 — 진짜 멤버십이 없어지는 공개적인 이벤트라 지금까지처럼 실제로 나간다(내 토픽 폴더
+    // 배치도 같이 지워진다).
+    let folderItemRemoved;
+    if (room.type === 'topic') {
+      // 토픽 관리자가 마지막 한 명이면 먼저 다른 멤버를 토픽 관리자로 정해야 나갈 수 있다 — 관리할
+      // 사람 없이 남은 멤버들만 두고 떠나지 않게(나 혼자 남은 토픽이면 그냥 나갈 수 있다). 확인과
+      // 나가기를 방 잠금 안에서 한 번에 해서, 관리자 둘이 동시에 나가도 둘 다 빠지지 않게 한다.
+      const left = await withRoomLock(room.id, async (tx) => {
+        const members = await listRoomMemberRoles(room.id, tx);
+        const isAdmin = members.some((m) => m.userId === req.user.sub && m.role === 'admin');
+        // 토픽 관리자로 지정할 수 있는 사람(정회원 이상)이 남아 있을 때만 막는다 — 남은 멤버가 모두
+        // 준회원이면 지정할 방법이 없으니 그냥 나가게 둔다(팀 관리자는 계속 관리할 수 있다).
+        const eligibleOthers = members.filter(
+          (m) => m.userId !== req.user.sub && accountRole({ role: m.accountRole }) !== 'guest',
+        );
+        if (isAdmin && eligibleOthers.length > 0 && !eligibleOthers.some((m) => m.role === 'admin')) return null;
+        return removeRoomMembers(room.id, [req.user.sub], tx);
+      });
+      if (!left) {
+        return res
+          .status(400)
+          .json({ error: '토픽 관리자는 다른 멤버를 토픽 관리자로 지정한 뒤에 나갈 수 있습니다.' });
+      }
+      folderItemRemoved = left.folderItemRemoved;
+    } else {
+      folderItemRemoved = await removeRoomMember(room.id, req.user.sub);
+    }
 
     io.in(`user:${req.user.sub}`).socketsLeave(room.id); // 나간 사람은 이후 이 방 메시지를 더 이상 받지 않게.
-    await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 나갔습니다.`); // socketsLeave 이후라 본인은 자기 퇴장 메시지를 안 받음.
+    // 조용히 나가기 토픽은 "나갔습니다" 안내를 남기지 않는다(그룹은 항상 false).
+    if (!room.quietLeave) {
+      await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 나갔습니다.`); // socketsLeave 이후라 본인은 자기 퇴장 메시지를 안 받음.
+    }
     io.to(room.id).emit('room:created', await toRoomDto(room)); // 남은 멤버들의 목록을 갱신시킨다.
+    // 폴더에 넣어뒀던 토픽이면 내 다른 기기의 폴더 목록도 다시 불러오게 한다.
+    if (folderItemRemoved) io.to(`user:${req.user.sub}`).emit('topic-folders:changed', { teamId: room.teamId });
 
     res.json({ ok: true });
   });
@@ -659,11 +996,247 @@ export function createRoomsRouter(io) {
     res.json(await toRoomDto(room, req.user.sub));
   });
 
+  // ── 토픽 관리(토픽 관리자·팀 관리자) ────────────────────────────────
+  // 바뀐 방 DTO는 기존 방식대로 room:created로 멤버 전원에게 다시 뿌린다(클라이언트가 같은 id면
+  // 덮어쓴다). 안내 문구는 시스템 메시지로 남긴다(보드 뷰는 클라이언트가 시스템 메시지를 숨긴다).
+
+  /** 토픽 정보·설정 변경 — 이름, 설명, 공개 여부, 읽기 전용, 정회원 자동 초대, 조용히 나가기. */
+  router.patch('/rooms/:id', async (req, res) => {
+    const scope = await requireTopicManager(req, res);
+    if (!scope) return;
+    const { room } = scope;
+    const body = req.body ?? {};
+
+    // 보기 방식은 만든 뒤에 못 바꾼다(이미 쌓인 글의 모양이 달라서) — 같은 값이면 그냥 둔다.
+    if ('viewMode' in body && body.viewMode !== (room.viewMode ?? 'chat')) {
+      return res.status(400).json({ error: '보기 방식은 바꿀 수 없습니다.' });
+    }
+    const fields = {};
+    if ('name' in body) {
+      const { name, error } = parseTopicName(body.name);
+      if (error) return res.status(400).json({ error });
+      fields.name = name;
+    }
+    if ('description' in body) {
+      const { value, error } = parseTopicDescription(body.description);
+      if (error) return res.status(400).json({ error });
+      fields.description = value;
+    }
+    for (const key of ['isPublic', 'readOnly', 'autoInvite', 'quietLeave']) {
+      if (!(key in body)) continue;
+      if (typeof body[key] !== 'boolean') return res.status(400).json({ error: `${key}는 true/false여야 합니다.` });
+      fields[key] = body[key];
+    }
+    if (Object.keys(fields).length === 0 && !('viewMode' in body)) {
+      return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    }
+    const wasPublic = room.isPublic !== false;
+    const willBePublic = 'isPublic' in fields ? fields.isPublic : wasPublic;
+    // 비공개 토픽은 정회원 자동 초대를 쓸 수 없다 — 비공개로 바꾸면 같이 끈다.
+    if (!willBePublic && ('isPublic' in fields || 'autoInvite' in fields)) fields.autoInvite = false;
+
+    const updated = Object.keys(fields).length > 0 ? await updateRoom(room.id, fields) : room;
+    io.to(room.id).emit('room:created', await toRoomDto(updated));
+
+    const actor = await nameOf(req.user.sub);
+    if ('name' in fields && fields.name !== room.name) {
+      await postSystemMessage(
+        io,
+        updated,
+        `${actor} 님이 토픽 이름을 '${room.name ?? ''}'에서 '${fields.name}'(으)로 바꿨습니다.`,
+      );
+    }
+    if ('readOnly' in fields && fields.readOnly !== !!room.readOnly) {
+      await postSystemMessage(
+        io,
+        updated,
+        fields.readOnly ? `${actor} 님이 읽기 전용을 설정했습니다.` : `${actor} 님이 읽기 전용을 해제했습니다.`,
+      );
+    }
+    if (willBePublic !== wasPublic) {
+      await postSystemMessage(
+        io,
+        updated,
+        willBePublic ? `${actor} 님이 토픽을 공개로 바꿨습니다.` : `${actor} 님이 토픽을 비공개로 바꿨습니다.`,
+      );
+    }
+    res.json(await toRoomDto(updated, req.user.sub));
+  });
+
+  /** 토픽 보관/보관 해제 — 보관하면 목록의 '보관된 토픽'으로 옮겨지고 토픽 관리자만 글을 쓴다. */
+  router.post('/rooms/:id/archive', async (req, res) => {
+    const scope = await requireTopicManager(req, res);
+    if (!scope) return;
+    const { room } = scope;
+    if (typeof req.body?.archived !== 'boolean') {
+      return res.status(400).json({ error: 'archived는 true/false여야 합니다.' });
+    }
+    const archived = req.body.archived;
+    let updated = room;
+    // 이미 그 상태면 아무것도 안 바꾸고 안내도 안 남긴다(두 기기에서 동시에 눌러도 무해).
+    if (archived !== !!room.archivedAt) {
+      updated = await updateRoom(room.id, { archivedAt: archived ? new Date() : null });
+      io.to(room.id).emit('room:created', await toRoomDto(updated));
+      const actor = await nameOf(req.user.sub);
+      await postSystemMessage(
+        io,
+        updated,
+        archived ? `${actor} 님이 토픽을 보관했습니다.` : `${actor} 님이 토픽 보관을 해제했습니다.`,
+      );
+    }
+    res.json(await toRoomDto(updated, req.user.sub));
+  });
+
+  /**
+   * 토픽 삭제 — 메시지·댓글·공지·첨부 기록까지 전부 사라진다(FK cascade, 되돌릴 수 없음). 지우기
+   * 전에 멤버들에게 room:removed를 보내 열려 있는 화면을 닫게 하고, 소켓도 방에서 빼 둔다.
+   * (업로드된 파일 자체는 팀 삭제와 마찬가지로 디스크에 남는다.)
+   */
+  router.delete('/rooms/:id', async (req, res) => {
+    const scope = await requireTopicManager(req, res);
+    if (!scope) return;
+    const { room } = scope;
+
+    const memberIds = await listRoomMemberIds(room.id);
+    const payload = { roomId: room.id, reason: 'deleted', name: room.name };
+    for (const userId of memberIds) io.to(`user:${userId}`).emit('room:removed', payload);
+    io.in(room.id).socketsLeave(room.id);
+    const [actorName, team] = await Promise.all([nameOf(req.user.sub), findTeamById(room.teamId)]);
+    await deleteRoom(room.id);
+    recordAudit({
+      actorId: req.user.sub,
+      actorName,
+      action: AUDIT.topicDelete,
+      teamId: room.teamId,
+      teamName: team?.name ?? null,
+      targetType: 'room',
+      targetId: room.id,
+      targetLabel: room.name,
+      detail: `토픽 삭제(멤버 ${memberIds.length}명)`,
+    });
+    res.json({ ok: true });
+  });
+
+  /**
+   * 멤버 내보내기 — 나 자신은 안 되고, 팀 관리자가 아닌 토픽 관리자는 다른 토픽 관리자를 내보낼 수
+   * 없다. 내보낸 사람에게는 room:removed(reason 'kicked')를 보내 화면을 닫게 한다. 공개 토픽이면
+   * 다시 찾아서 참여할 수 있다(내보내기는 차단이 아니다).
+   */
+  router.post('/rooms/:id/kick', async (req, res) => {
+    const scope = await requireTopicManager(req, res);
+    if (!scope) return;
+    const { room, access } = scope;
+    const ids = Array.isArray(req.body?.userIds)
+      ? [...new Set(req.body.userIds.filter((id) => typeof id === 'string'))]
+      : [];
+    if (ids.length === 0) return res.status(400).json({ error: '내보낼 멤버를 선택하세요.' });
+    if (ids.includes(req.user.sub)) return res.status(400).json({ error: '자기 자신은 내보낼 수 없습니다.' });
+
+    // 확인과 내보내기를 방 잠금 안에서 한 번에 — 같은 때 들어온 토픽 관리자 지정·나가기와 엇갈려 토픽
+    // 관리자가 하나도 안 남는 일이 없게.
+    const outcome = await withRoomLock(room.id, async (tx) => {
+      const members = new Map((await listRoomMemberRoles(room.id, tx)).map((m) => [m.userId, m]));
+      // 그새 스스로 나간 사람 등 이미 멤버가 아닌 id는 조용히 건너뛴다.
+      const found = ids.filter((id) => members.has(id));
+      if (found.length === 0) return { status: 400, error: '내보낼 멤버를 선택하세요.' };
+      if (!canManageTeam(access) && found.some((id) => members.get(id).role === 'admin')) {
+        return { status: 403, error: '토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다.' };
+      }
+      await removeRoomMembers(room.id, found, tx); // 그 사람들의 토픽 폴더 배치도 같이 지운다.
+      return { targets: found };
+    });
+    if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
+    const { targets } = outcome;
+    io.in(targets.map((id) => `user:${id}`)).socketsLeave(room.id);
+    const payload = { roomId: room.id, reason: 'kicked', name: room.name };
+    for (const userId of targets) io.to(`user:${userId}`).emit('room:removed', payload);
+    io.to(room.id).emit('room:created', await toRoomDto(room)); // 남은 멤버들의 목록을 갱신시킨다.
+    if (!room.quietLeave) {
+      const names = await Promise.all(targets.map(nameOf));
+      await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 ${names.join(', ')} 님을 내보냈습니다.`);
+    }
+    res.json(await toRoomDto(room, req.user.sub));
+  });
+
+  /**
+   * 토픽 관리자 지정 — 보낸 목록으로 통째로 바꾼다(한 명 이상). 이 토픽의 멤버 중 정회원 이상만
+   * 지정할 수 있다(준회원은 초대받은 방에서 활동만 하는 등급이라 관리 권한을 주지 않는다).
+   */
+  router.put('/rooms/:id/admins', async (req, res) => {
+    const scope = await requireTopicManager(req, res);
+    if (!scope) return;
+    const { room } = scope;
+    const ids = Array.isArray(req.body?.userIds)
+      ? [...new Set(req.body.userIds.filter((id) => typeof id === 'string'))]
+      : [];
+    if (ids.length === 0) return res.status(400).json({ error: '토픽 관리자를 한 명 이상 지정하세요.' });
+
+    // 확인과 저장을 방 잠금 안에서 한 번에 — 지정하는 사이 그 사람이 나가거나 내보내져서 토픽 관리자가
+    // 하나도 안 남는 일이 없게.
+    const outcome = await withRoomLock(room.id, async (tx) => {
+      const memberRows = await listRoomMemberRoles(room.id, tx);
+      const members = new Map(memberRows.map((m) => [m.userId, m]));
+      for (const id of ids) {
+        const member = members.get(id);
+        if (!member) return { error: '이 토픽의 멤버만 토픽 관리자로 지정할 수 있습니다.' };
+        if (accountRole({ role: member.accountRole }) === 'guest') {
+          return { error: '준회원은 토픽 관리자로 지정할 수 없습니다.' };
+        }
+      }
+      const before = new Set(memberRows.filter((m) => m.role === 'admin').map((m) => m.userId));
+      const changed = before.size !== ids.length || ids.some((id) => !before.has(id));
+      // 그대로 다시 저장한 것이면 안내를 또 남기지 않는다.
+      if (changed) await setRoomAdmins(room.id, ids, tx);
+      return { changed };
+    });
+    if (outcome.error) return res.status(400).json({ error: outcome.error });
+    if (outcome.changed) {
+      io.to(room.id).emit('room:created', await toRoomDto(room));
+      const names = await Promise.all(ids.map(nameOf));
+      await postSystemMessage(
+        io,
+        room,
+        `${await nameOf(req.user.sub)} 님이 토픽 관리자를 ${names.join(', ')} 님으로 지정했습니다.`,
+      );
+    }
+    res.json(await toRoomDto(room, req.user.sub));
+  });
+
   router.get('/rooms/:id', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     res.json(await toRoomDto(room, req.user.sub));
+  });
+
+  /**
+   * 보드 뷰 상단 "고정된 게시글" — 지워지지 않은 고정 게시글 전부를 작성 시각 최신순으로.
+   * GET /rooms/:id/messages의 항목과 같은 모양(댓글 포함)이라 클라이언트가 같은 파서를 쓴다.
+   */
+  router.get('/rooms/:id/pinned-posts', async (req, res) => {
+    const room = await findRoomById(req.params.id);
+    if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+
+    const rows = await listPinnedPosts(room.id);
+    const ids = rows.map((m) => m.id);
+    const [attachmentsByMessageId, comments] = await Promise.all([
+      listAttachmentsForMessages(ids),
+      listCommentsForMessages(ids),
+    ]);
+    const commentsByMessageId = new Map();
+    for (const c of comments) {
+      const list = commentsByMessageId.get(c.messageId) ?? [];
+      list.push(toCommentDto(c));
+      commentsByMessageId.set(c.messageId, list);
+    }
+    res.json(
+      rows.map((m) => ({
+        ...toMessageDto({ ...m, attachments: attachmentsByMessageId[m.id] }),
+        comments: commentsByMessageId.get(m.id) ?? [],
+        outOfWindow: false,
+      })),
+    );
   });
 
   router.get('/rooms/:id/messages', async (req, res) => {
@@ -804,6 +1377,9 @@ function exportContentFor(m) {
       return (m.fileName ? `[파일: ${m.fileName}]` : '[파일]') + suffix;
     case 'sticker':
       return '[이모티콘]' + suffix;
+    case 'post':
+      // 보드 뷰 게시글 — 제목 줄 다음에 본문 전체(첨부는 파일 보기에서 받는다).
+      return `[게시글] ${m.title ?? ''}\n${m.text ?? ''}` + suffix;
     default:
       return (m.text ?? '') + suffix;
   }

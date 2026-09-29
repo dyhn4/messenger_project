@@ -13,7 +13,8 @@ class AppUser {
   /// 팀원 추가 화면 어디서든 볼 수 있다. 바꾸는 것은 서버 운영자만 가능하다.
   final String? role;
 
-  /// 팀 멤버 목록(GET /teams/:id/members)으로 받아온 경우에만 채워지는 "그 팀의 소유자인지".
+  /// "그 팀의 소유자인지" — 팀 멤버 목록(GET /teams/:id/members)과 방 멤버 목록(Room.members,
+  /// 방이 속한 팀 기준)에서 채워진다. 그 밖의 사용자 목록에서는 항상 false.
   final bool isOwner;
 
   /// 부서/직책도 팀 멤버 목록에서만 채워진다(계정이 아니라 팀 안에서의 정보 — 서버

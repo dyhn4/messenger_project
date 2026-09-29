@@ -6,8 +6,9 @@
   스타일은 guide.css, 동작(목차 강조·그림 크게 보기)은 guide.js — 둘 다 이 폴더에 있고 외부
   CDN·웹폰트는 쓰지 않는다(사내망 서버는 인터넷이 안 될 수 있다). 인라인 style 대신 아래
   클래스만 쓴다. 그림은 images/<이름>.png — client/tool/guide_capture/의 캡처 테스트로 만든다
-  (예: flutter test tool/guide_capture/messenger_capture_test.dart — sample_capture_test.dart는 따라 만들
-  예시라 그림을 임시 폴더에만 쓴다).
+  (예: flutter test tool/guide_capture/messenger_capture_test.dart — 메신저 그림은 이 파일과
+  messenger_topic_capture_test.dart(토픽 · 보드 · 폴더), messenger_login_capture_test.dart(로그인 · 가입)가
+  나눠 찍는다. sample_capture_test.dart는 따라 만들 예시라 그림을 임시 폴더에만 쓴다).
 
   ▸ 장(큰 주제) — 목차의 1단계 항목과 id를 맞춘다
     <section class="chapter" id="start">
@@ -62,7 +63,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>메신저 이용법 — TangoTalk 도움말</title>
-  <meta name="description" content="TangoTalk 메신저를 처음 쓰는 분을 위한 그림 설명서: 로그인, 화면 구성, 대화 시작, 메시지·파일·이모티콘 보내기, 댓글, 알림, 검색, 공지, 환경설정, 안드로이드">
+  <meta name="description" content="TangoTalk 메신저를 처음 쓰는 분을 위한 그림 설명서: 로그인, 화면 구성, 대화 시작, 토픽 만들기와 멤버 초대, 메시지·파일·이모티콘 보내기, 댓글, 알림, 토픽 폴더, 검색, 공지, 토픽 관리, 보드 뷰, 환경설정, 안드로이드">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233f51b5'/%3E%3Ctext x='16' y='22' font-size='17' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'%3E%3F%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="guide.css">
@@ -108,7 +109,8 @@
               <li><a href="#chat-dm">1:1 대화</a></li>
               <li><a href="#chat-group">그룹 대화</a></li>
               <li><a href="#chat-topic">토픽 만들기</a></li>
-              <li><a href="#chat-topic-join">토픽에 참여하기</a></li>
+              <li><a href="#chat-invite">멤버 초대하기</a></li>
+              <li><a href="#chat-topic-join">참여 가능한 토픽 보기</a></li>
               <li><a href="#chat-secret">비밀 대화</a></li>
             </ol>
           </li>
@@ -138,13 +140,15 @@
           <li><a href="#room">대화방 정리하기</a>
             <ol>
               <li><a href="#room-menu">목록에서 오른쪽 클릭</a></li>
-              <li><a href="#room-options">대화방의 ⋮ 메뉴</a></li>
+              <li><a href="#room-options">대화방 위쪽 버튼과 ⋮ 메뉴</a></li>
+              <li><a href="#room-folders">토픽 폴더</a></li>
             </ol>
           </li>
           <li><a href="#search">검색과 파일</a>
             <ol>
               <li><a href="#search-message">메시지 검색</a></li>
               <li><a href="#search-files">파일 모아 보기</a></li>
+              <li><a href="#search-links">링크 모아 보기</a></li>
               <li><a href="#search-date">날짜로 이동</a></li>
             </ol>
           </li>
@@ -154,6 +158,23 @@
               <li><a href="#notice-write">공지 쓰기</a></li>
             </ol>
           </li>
+          <li><a href="#topic">토픽 관리하기</a>
+            <ol>
+              <li><a href="#topic-members">참여 멤버</a></li>
+              <li><a href="#topic-settings">토픽 정보 변경하기</a></li>
+              <li><a href="#topic-admins">토픽 관리자 지정 · 내보내기</a></li>
+              <li><a href="#topic-readonly">읽기 전용 · 보관된 토픽</a></li>
+              <li><a href="#topic-rules">누가 무엇을 할 수 있나요</a></li>
+            </ol>
+          </li>
+          <li><a href="#board">보드 뷰 토픽</a>
+            <ol>
+              <li><a href="#board-view">보드 화면</a></li>
+              <li><a href="#board-write">게시글 쓰기</a></li>
+              <li><a href="#board-menu">고정 · 수정 · 삭제</a></li>
+              <li><a href="#board-detail">게시글 보기와 댓글</a></li>
+            </ol>
+          </li>
           <li><a href="#people">동료와 내 프로필</a>
             <ol>
               <li><a href="#people-members">동료 찾기와 프로필</a></li>
@@ -161,10 +182,16 @@
               <li><a href="#people-more">조직도 · 팀장 문의 · 화상회의</a></li>
             </ol>
           </li>
-          <li><a href="#settings">환경설정</a></li>
+          <li><a href="#settings">환경설정</a>
+            <ol>
+              <li><a href="#settings-messenger">메신저 설정</a></li>
+              <li><a href="#settings-system">시스템 설정</a></li>
+            </ol>
+          </li>
           <li><a href="#mobile">안드로이드 휴대폰에서</a>
             <ol>
               <li><a href="#mobile-home">첫 화면</a></li>
+              <li><a href="#mobile-topic">토픽 탭과 폴더</a></li>
               <li><a href="#mobile-message">메시지 길게 누르기</a></li>
               <li><a href="#mobile-diff">PC와 다른 점</a></li>
             </ol>
@@ -306,14 +333,17 @@
           <table class="simple">
             <thead><tr><th>종류</th><th>설명</th><th>이럴 때 좋아요</th></tr></thead>
             <tbody>
-              <tr><td><b>토픽</b></td><td>주제별 대화방입니다. <b>공개</b> 토픽은 팀원 누구나 찾아서 들어올 수 있고, <b>비공개</b> 토픽은 초대받은 사람만 볼 수 있습니다. 토픽에는 <a href="#notice">공지</a>를 올릴 수 있습니다.</td><td>부서 방, 전사 공지, 프로젝트별 방</td></tr>
+              <tr><td><b>토픽</b></td><td>주제별 대화방입니다. <b>공개</b> 토픽은 정회원이면 누구나 <a href="#chat-topic-join">참여 가능한 토픽 보기</a>에서 찾아 들어올 수 있습니다(저절로 들어가지는 않습니다).
+                <b>비공개</b> 토픽은 초대받은 사람만 볼 수 있고, 목록에서 이름 옆에 회색 자물쇠(🔒)가 붙습니다.
+                대화를 주고받는 <b>챗 뷰</b>와 게시글을 올리는 <a href="#board">보드 뷰</a>가 있고, <a href="#notice">공지</a>를 올릴 수 있습니다.</td><td>부서 방, 전사 공지, 프로젝트별 방, 자료 게시판</td></tr>
               <tr><td><b>그룹채팅</b></td><td>여러 사람을 골라 만드는 대화방입니다.</td><td>몇 명끼리 잠깐 의논할 때</td></tr>
               <tr><td><b>채팅</b></td><td>한 사람과 나누는 1:1 대화입니다.</td><td>개인적인 업무 연락</td></tr>
               <tr><td><b>🔒 비밀 대화</b></td><td>이름이 초록색이고 자물쇠가 붙은 1:1 대화입니다. <a href="#chat-secret">아래</a>에서 설명합니다.</td><td>민감한 내용을 주고받을 때</td></tr>
             </tbody>
           </table>
         </div>
-        <p>각 칸 안에서는 <b>즐겨찾기(★)</b>한 방이 맨 위에 오고, 그다음은 최근에 대화가 오간 순서로 정렬됩니다.</p>
+        <p>각 칸 안에서는 <b>즐겨찾기(★)</b>한 방이 맨 위에 오고, 그다음은 최근에 대화가 오간 순서로 정렬됩니다.
+          토픽 칸은 내가 만든 <a href="#room-folders">토픽 폴더</a> → 폴더 밖 토픽 → 맨 아래 <b>보관된 토픽</b> 순서로 묶여 보입니다.</p>
 
         <h3 id="layout-icons">오른쪽 위 아이콘</h3>
         <figure class="shot crop">
@@ -329,7 +359,7 @@
               <tr><td><span class="mark">2</span></td><td>알림 센터</td><td>안 읽은 메시지가 있는 방을 모아 보여 줍니다. 빨간 점은 안 읽은 메시지가 있다는 뜻입니다.</td></tr>
               <tr><td><span class="mark">3</span></td><td>멤버</td><td>팀원 목록이 열립니다. 이름을 누르면 프로필 카드가 뜹니다.</td></tr>
               <tr><td><span class="mark">4</span></td><td>검색</td><td>메시지를 검색합니다.</td></tr>
-              <tr><td><span class="mark">5</span></td><td>메뉴</td><td><span class="ui">파일</span>(주고받은 파일 모아 보기)과 <span class="ui">문의함</span>이 있습니다.</td></tr>
+              <tr><td><span class="mark">5</span></td><td>메뉴</td><td><span class="ui">파일</span>(<a href="#search-files">주고받은 파일 모아 보기</a>), <span class="ui">링크</span>(<a href="#search-links">주고받은 링크 모아 보기</a>), <span class="ui">문의함</span>이 있습니다.</td></tr>
               <tr><td><span class="mark">6</span></td><td>내 메뉴(☰)</td><td>내 프로필, 환경설정, 도움말, 로그아웃이 있습니다.</td></tr>
             </tbody>
           </table>
@@ -344,7 +374,7 @@
         <ol class="steps">
           <li><p>오른쪽 위 끝의 <span class="ui">☰</span>를 누르면 메뉴가 열립니다.</p></li>
           <li><p>맨 위 <b>내 이름</b>을 누르면 <a href="#people-me">내 프로필</a>이 열립니다.</p></li>
-          <li><p><span class="ui">환경설정</span>: 화면 테마, 알림 미리보기 등을 바꿉니다(<a href="#settings">환경설정</a>).</p></li>
+          <li><p><span class="ui">환경설정</span>: 알림 미리보기, 보내기 키, 화면 테마, 파일 다운로드 등을 바꿉니다(<a href="#settings">환경설정</a>).</p></li>
           <li><p><span class="ui">도움말</span>: 지금 보고 있는 이 도움말을 엽니다.</p></li>
           <li><p><span class="ui">로그아웃</span>: 로그인 화면으로 나갑니다.</p></li>
         </ol>
@@ -368,7 +398,7 @@
         <aside class="box tip">
           <p class="box-title">다른 팀 메시지도 놓치지 않아요</p>
           <p>지금 보고 있지 않은 팀의 메시지도 알림이 오고 <a href="#alert-center">알림 센터</a>에 모입니다.
-            팀을 자주 오간다면 <a href="#settings">환경설정</a>의 <b>팀 전환 방식</b>을 <span class="ui">탭(전체 보기)</span>으로 바꿔 보세요.
+            팀을 자주 오간다면 <a href="#settings-messenger">환경설정 › 메신저 설정</a>의 <b>팀 전환 방식</b>을 <span class="ui">탭(전체 보기)</span>으로 바꿔 보세요.
             모든 팀이 브라우저 탭처럼 한 줄로 보여서 한 번에 옮길 수 있습니다.</p>
         </aside>
       </section>
@@ -377,7 +407,8 @@
       <section class="chapter" id="chat">
         <h2><span class="chapter-no">3</span>대화 시작하기</h2>
         <p>대화방 목록의 각 칸 제목 옆 <span class="ui">+</span> 버튼으로 새 대화를 만듭니다.
-          <span class="badge role">준회원</span>에게는 <span class="ui">+</span> 버튼이 보이지 않습니다.</p>
+          <span class="badge role">준회원</span>에게는 그룹채팅·채팅 칸의 <span class="ui">+</span> 버튼이 보이지 않고,
+          토픽 칸의 <span class="ui">+</span> 메뉴에는 <span class="ui">폴더 생성</span>만 있습니다.</p>
 
         <h3 id="chat-dm">1:1 대화</h3>
         <figure class="shot">
@@ -409,47 +440,97 @@
             이름을 비워 두면 멤버 이름이 방 이름이 됩니다.</p></li>
           <li><p><span class="ui">대화 시작하기</span>를 누릅니다.</p></li>
         </ol>
-        <p>나중에 사람을 더 부르려면 대화방 오른쪽 위 <span class="ui">⋮</span> › <span class="ui">멤버 초대</span>를 누릅니다
-          (<a href="#room-options">대화방의 ⋮ 메뉴</a>).</p>
+        <p>나중에 사람을 더 부르려면 대화방 위쪽의 <span class="ui">멤버 초대</span>(사람 모양에 +) 버튼을 누릅니다
+          (<a href="#chat-invite">멤버 초대하기</a>).</p>
 
         <h3 id="chat-topic">토픽 만들기</h3>
+        <p>토픽은 주제별 대화방입니다. 새 토픽을 만들면 <b>만든 사람만</b> 들어 있고, 만든 사람이 그 토픽의
+          <b>토픽 관리자</b>가 됩니다(<a href="#topic">토픽 관리하기</a>). 공개 토픽이라도 팀원이 저절로 들어오지 않으므로,
+          만든 뒤 바로 열리는 <a href="#chat-invite">멤버 초대하기</a> 창에서 함께할 사람을 고르세요.</p>
         <figure class="shot crop">
           <a class="shot-frame" href="images/messenger-topic-menu.png">
-            <img src="images/messenger-topic-menu.png" alt="토픽 옆 + 버튼을 누르면 메뉴가 열린다: 1 + 버튼, 2 토픽 만들기. 그 아래는 토픽 찾기" width="552" height="169" loading="lazy"></a>
-          <figcaption>토픽 옆 <span class="ui">+</span>를 누르면 메뉴가 열립니다</figcaption>
+            <img src="images/messenger-topic-menu.png" alt="토픽 옆 + 버튼을 누르면 메뉴가 열린다: 1 + 버튼, 2 새로운 토픽 생성하기. 그 아래는 참여 가능한 토픽 보기와 폴더 생성" width="650" height="232" loading="lazy"></a>
+          <figcaption>토픽 옆 <span class="ui">+</span>(토픽 추가)를 누르면 메뉴가 열립니다</figcaption>
         </figure>
         <ol class="steps">
-          <li><p><b>토픽</b> 칸 옆 <span class="ui">+</span>를 누릅니다.</p></li>
-          <li><p><span class="ui">토픽 만들기</span>를 누릅니다. (그 아래 <span class="ui">토픽 찾기</span>는 <a href="#chat-topic-join">다음 절</a>에서 설명합니다.)</p></li>
+          <li><p><b>토픽</b> 칸 제목 옆 <span class="ui">+</span>를 누릅니다.</p></li>
+          <li><p><span class="ui">새로운 토픽 생성하기</span>를 누릅니다.
+            (<span class="ui">참여 가능한 토픽 보기</span>는 <a href="#chat-topic-join">아래</a>, <span class="ui">폴더 생성</span>은
+            <a href="#room-folders">토픽 폴더</a>에서 설명합니다.)</p></li>
         </ol>
         <figure class="shot crop">
           <a class="shot-frame" href="images/messenger-topic-create.png">
-            <img src="images/messenger-topic-create.png" alt="새 토픽 생성 창: 3 토픽 이름, 4 설명, 5 공개 여부, 6 만들기" width="540" height="482" loading="lazy"></a>
-          <figcaption>새 토픽 생성 창</figcaption>
+            <img src="images/messenger-topic-create.png" alt="새로운 토픽 생성하기 창 위쪽: 3 이름, 4 보기 방식(챗 뷰·보드 뷰), 5 공개 여부, 6 토픽 설명" width="648" height="660" loading="lazy"></a>
+          <figcaption>새로운 토픽 생성하기 창 — 위쪽</figcaption>
         </figure>
         <ol class="steps" start="3">
-          <li><p><b>토픽 이름</b>을 씁니다.</p></li>
-          <li><p>어떤 방인지 알 수 있게 <b>설명</b>을 씁니다(안 써도 됩니다).</p></li>
-          <li><p><b>공개 여부</b>를 고릅니다. <b>공개</b>는 지금 팀원은 물론 나중에 팀에 들어오는 사람에게도 보이고,
-            <b>비공개</b>는 초대한 사람만 볼 수 있습니다.</p></li>
-          <li><p><span class="ui">만들기</span>를 누르면 새 토픽이 열립니다.</p></li>
+          <li><p><b>이름</b>: 토픽 이름을 씁니다(60자까지). 칸 아래에 글자 수가 보입니다.</p></li>
+          <li><p><b>보기 방식</b>: 메시지를 주고받는 <span class="ui">챗 뷰</span>와, 제목이 있는 게시글을 올리는
+            <span class="ui">보드 뷰</span>(<a href="#board">보드 뷰 토픽</a>) 중에서 고릅니다. <b>만든 뒤에는 바꿀 수 없습니다.</b></p></li>
+          <li><p><b>공개 여부</b>: <span class="ui">공개</span>는 정회원이면 누구나 찾아서 참여할 수 있고,
+            <span class="ui">비공개</span>는 초대받은 멤버만 참여할 수 있습니다. 비공개 토픽은 목록에서 이름 옆에 회색 자물쇠가 붙습니다.</p></li>
+          <li><p><b>토픽 설명</b>(선택): 어떤 이야기를 나누는 토픽인지 적습니다(300자까지).</p></li>
+        </ol>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-create-2.png">
+            <img src="images/messenger-topic-create-2.png" alt="새로운 토픽 생성하기 창을 끝까지 내린 모습: 7 폴더 선택, 8 정회원 자동 초대와 읽기 전용 설정, 9 생성" width="648" height="340" loading="lazy"></a>
+          <figcaption>같은 창을 아래로 내린 모습</figcaption>
+        </figure>
+        <ol class="steps" start="7">
+          <li><p><b>폴더 선택</b>(선택): 내 <a href="#room-folders">토픽 폴더</a>를 고르면 새 토픽이 그 폴더에 바로 들어갑니다.</p></li>
+          <li><p>필요하면 스위치를 켭니다.
+            <span class="ui">정회원 자동 초대</span>를 켜면 앞으로 팀에 새로 들어오는 정회원이 이 토픽에 자동으로 초대됩니다(공개 토픽만 — 비공개를 고르면 꺼지고 누를 수 없습니다).
+            <span class="ui">읽기 전용 설정</span>을 켜면 토픽 관리자만 글을 쓰고, 다른 멤버는 읽고 댓글만 달 수 있습니다(<a href="#topic-readonly">읽기 전용 토픽</a>).</p></li>
+          <li><p><span class="ui">생성</span>을 누르면 새 토픽이 열리고, 곧바로 <b>멤버 초대하기</b> 창이 뜹니다(<a href="#chat-invite">다음 절</a>).</p></li>
         </ol>
         <aside class="box note">
-          <p class="box-title">토픽 만들기가 안 보이면</p>
-          <p>팀 설정에 따라 토픽은 관리자나 소유자, 또는 지정된 사람만 만들 수 있습니다.
-            이때 <span class="ui">+</span> 메뉴에는 <span class="ui">토픽 찾기</span>만 나옵니다.</p>
+          <p class="box-title">새로운 토픽 생성하기가 안 보이면</p>
+          <p>팀 설정에 따라 새 토픽은 관리자·소유자나 지정된 사람만 만들 수 있습니다.
+            이때 <span class="ui">+</span> 메뉴에는 <span class="ui">참여 가능한 토픽 보기</span>와 <span class="ui">폴더 생성</span>만 나옵니다.
+            이미 있는 공개 토픽에 참여하는 것은 팀 설정과 상관없이 정회원이면 할 수 있습니다.</p>
         </aside>
 
-        <h3 id="chat-topic-join">토픽에 참여하기</h3>
-        <figure class="shot">
-          <a class="shot-frame" href="images/messenger-topic-browse.png">
-            <img src="images/messenger-topic-browse.png" alt="토픽방 찾기 창: 1 토픽 옆 + 버튼, 2 참여 버튼" width="904" height="580" loading="lazy"></a>
-          <figcaption>토픽방 찾기 창</figcaption>
+        <h3 id="chat-invite">멤버 초대하기</h3>
+        <p>토픽을 만든 직후에는 이 창이 저절로 열립니다. 이미 있는 토픽이나 그룹채팅에 사람을 더 부를 때는
+          대화방 위쪽의 <span class="ui">멤버 초대</span>(사람 모양에 +) 버튼이나, <a href="#topic-members">참여 멤버</a> 창의
+          <span class="ui">멤버 초대하기</span>를 누릅니다. <span class="badge role">정회원</span> 이상만 초대할 수 있습니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-invite-members.png">
+            <img src="images/messenger-invite-members.png" alt="멤버 초대하기 창: 1 멤버 검색, 2 직책, 3 검색 조건 초기화, 4 모든 멤버 선택하기, 5 팀 멤버 목록(세 명을 체크함), 6 선택된 멤버, 7 초대하기 (3)" width="726" height="816" loading="lazy"></a>
+          <figcaption>멤버 초대하기 창 — 왼쪽에서 고르면 오른쪽에 모입니다</figcaption>
         </figure>
         <ol class="steps">
-          <li><p><b>토픽</b> 칸 옆 <span class="ui">+</span>를 누르고 <span class="ui">토픽 찾기</span>를 누릅니다.</p></li>
-          <li><p>들어가고 싶은 토픽의 <span class="ui">참여</span>를 누릅니다. 이미 들어가 있는 토픽에는 <b>참여중</b>이라고 적혀 있습니다.</p></li>
+          <li><p><b>멤버 검색</b> 칸에 이름(또는 아이디)을 쓰면 목록이 좁혀집니다.</p></li>
+          <li><p><b>직책</b>으로도 좁힐 수 있습니다(<span class="ui">전체</span>, 직책별, <span class="ui">직책 없음</span>).</p></li>
+          <li><p><span class="ui">검색 조건 초기화</span>를 누르면 검색어와 직책이 처음 상태로 돌아갑니다.</p></li>
+          <li><p><span class="ui">모든 멤버 선택하기</span>: 지금 목록에 보이는 사람을 한꺼번에 고르거나 풉니다.</p></li>
+          <li><p>왼쪽 <b>팀 멤버</b>에서 초대할 사람을 눌러 체크합니다. 이미 이 방에 있는 사람은 목록에 나오지 않습니다.</p></li>
+          <li><p>고른 사람은 오른쪽 <b>선택된 멤버</b>에 고른 순서대로 모입니다. <b>✕</b>를 누르면 뺍니다.</p></li>
+          <li><p><span class="ui">초대하기 (N)</span>을 누르면 초대가 끝납니다. <span class="ui">닫기</span>를 누르면 아무도 초대하지 않고 닫힙니다.</p></li>
         </ol>
+
+        <h3 id="chat-topic-join">참여 가능한 토픽 보기</h3>
+        <p><b>공개</b> 토픽은 초대를 받지 않아도 직접 찾아 들어갈 수 있습니다. <b>토픽</b> 칸 옆 <span class="ui">+</span> ›
+          <span class="ui">참여 가능한 토픽 보기</span>를 누르세요.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-browse.png">
+            <img src="images/messenger-topic-browse.png" alt="참여 가능한 토픽 보기 창: 1 검색 칸, 2 새로운 토픽 생성하기, 3 참여 가능한 토픽 · 참여 중인 토픽 탭, 4 토픽 이름과 보드 뷰 표시, 5 참여하기" width="688" height="728" loading="lazy"></a>
+          <figcaption>참여 가능한 토픽 보기 창</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>토픽 이름이나 설명으로 검색합니다.</p></li>
+          <li><p>찾는 토픽이 없으면 여기서 바로 <span class="ui">새로운 토픽 생성하기</span>를 누를 수 있습니다(토픽을 만들 수 있는 사람에게만 보입니다).</p></li>
+          <li><p><b>참여 가능한 토픽</b> 탭에는 아직 들어가지 않은 공개 토픽이, <b>참여 중인 토픽</b> 탭에는 내가 들어가 있는
+            토픽(비공개 포함)이 있습니다. 탭 이름 옆 숫자는 토픽 수입니다.</p></li>
+          <li><p>이름 옆에는 <span class="ui">보드 뷰</span>, <span class="ui">읽기 전용</span>, <span class="ui">보관됨</span>,
+            회색 자물쇠(비공개) 같은 표시가 붙고, 아래 줄에 멤버 수와 토픽 관리자가 보입니다.</p></li>
+          <li><p><span class="ui">참여하기</span>를 누르면 바로 들어가서 그 토픽이 열립니다. 참여하면 이전 메시지도 볼 수 있습니다.
+            참여 중인 토픽에는 <span class="ui">열기</span> 버튼이 있습니다.</p></li>
+        </ol>
+        <aside class="box note">
+          <p class="box-title">참여하기가 흐리게 보이면</p>
+          <p><span class="badge role">준회원</span>은 토픽에 직접 참여할 수 없습니다. 토픽 멤버에게 초대해 달라고 하세요.</p>
+        </aside>
 
         <h3 id="chat-secret">비밀 대화</h3>
         <p><b>비밀 대화</b>는 내용이 암호화되어 서버도 볼 수 없는 1:1 대화입니다. 목록에 초록색 이름과 🔒 자물쇠로 표시됩니다.</p>
@@ -480,7 +561,10 @@
         <ol class="steps">
           <li><p>아래쪽 <b>메시지 입력</b> 칸을 누르고 글을 씁니다.</p></li>
           <li><p><kbd>Enter</kbd>를 누르거나 <span class="ui">보내기</span>(종이비행기 모양)를 누르면 보내집니다.
-            줄을 바꾸려면 <kbd>Shift</kbd> + <kbd>Enter</kbd>를 누릅니다.</p></li>
+            줄을 바꾸려면 <kbd>Shift</kbd> + <kbd>Enter</kbd>를 누릅니다.
+            <span class="badge pc">PC</span> 반대로(<kbd>Shift</kbd> + <kbd>Enter</kbd>로 보내고 <kbd>Enter</kbd>로 줄바꿈) 쓰고 싶으면
+            <a href="#settings-messenger">환경설정 › 메신저 설정</a>의 <b>메시지 전송 옵션 설정</b>을 바꾸세요.
+            입력칸 아래 오른쪽의 작은 안내(<b>Shift + Enter 로 줄바꿈</b>)가 지금 설정을 알려 줍니다(자리가 좁으면 숨겨집니다).</p></li>
           <li><p>내 말풍선 옆 <b>주황색 숫자</b>는 아직 읽지 않은 사람 수입니다. 모두 읽으면 숫자가 사라집니다.</p></li>
         </ol>
         <aside class="box tip">
@@ -510,9 +594,14 @@
         <aside class="box note">
           <p class="box-title">받은 파일 열기</p>
           <p>대화에 올라온 파일 이름을 누르면 내려받은 뒤 열립니다(PDF와 텍스트(.txt) 파일은 앱 안에서 바로 보입니다).
-            사진은 누르면 크게 보입니다. 파일이나 사진 위에 마우스를 올리면 <span class="ui">다운로드</span>와
-            <span class="ui">⋮</span>(파일 전달 · 다운로드 · 즐겨찾기) 버튼이 나타납니다.
-            저장 위치는 <a href="#settings">환경설정</a>의 <b>파일 다운로드</b>에서 정합니다.</p>
+            파일이나 사진 위에 마우스를 올리면 <span class="ui">다운로드</span>와
+            <span class="ui">⋮</span>(파일 전달 · 다운로드 · 즐겨찾기) 버튼이 나타납니다. 사진이나 파일이 여러 개 딸린 메시지는
+            아래쪽 <span class="ui">전체 다운로드 (N)</span>으로 한꺼번에 받습니다.
+            저장 위치는 <a href="#settings-system">환경설정 › 시스템 설정</a>의 <b>파일 다운로드</b>에서 정합니다.</p>
+          <p><b>사진 보기</b>: 사진을 누르면 사진 보기 창이 열립니다. 아래쪽 도구(마우스를 올리면 보입니다)로
+            <b>축소 · 확대 · 화면에 맞춤 · 회전</b>을 하고, 가운데 퍼센트 숫자를 누르면 원래 크기(100%)로 돌아갑니다.
+            키보드 <kbd>←</kbd> / <kbd>→</kbd>로 이 대화방의 앞뒤 사진을 넘겨 보고, 위쪽 버튼으로
+            <span class="ui">댓글</span> · <span class="ui">인쇄</span> · <span class="ui">다운로드</span> · <span class="ui">파일 전달</span>을 합니다.</p>
         </aside>
 
         <h3 id="send-emoji">이모티콘 보내기</h3>
@@ -661,8 +750,9 @@
           <li>창의 <b>✕</b>를 눌러도 TangoTalk은 꺼지지 않고, 작업 표시줄 오른쪽 아래(알림 영역)의 아이콘으로 숨어서 계속 알림을 받습니다.
             아이콘을 누르면 창이 다시 열립니다.</li>
           <li>완전히 끄려면 그 아이콘을 <b>오른쪽 클릭</b>하고 <span class="ui">완전히 종료</span>를 누릅니다.</li>
-          <li>특정 방의 알림만 끄려면 <a href="#room-menu">대화방 정리하기</a>의 <span class="ui">알림 끄기</span>를 쓰세요.
-            알림 내용을 숨기려면 <a href="#settings">환경설정</a>의 <b>메시지 내용 미리보기</b>를 바꿉니다.</li>
+          <li>특정 방의 알림만 끄려면 대화방 위쪽의 종 모양 버튼(<a href="#room-options">대화방 위쪽 버튼</a>)이나
+            목록의 오른쪽 클릭 메뉴(<a href="#room-menu">대화방 알림 끄기</a>)를 쓰세요.
+            알림 내용을 숨기려면 <a href="#settings-messenger">환경설정 › 메신저 설정</a>의 <b>메시지 내용 미리보기</b>를 바꿉니다.</li>
         </ul>
       </section>
 
@@ -673,7 +763,7 @@
         <h3 id="room-menu">목록에서 오른쪽 클릭 <span class="badge pc">PC</span></h3>
         <figure class="shot crop">
           <a class="shot-frame" href="images/messenger-room-menu.png">
-            <img src="images/messenger-room-menu.png" alt="대화방 목록에서 오른쪽 클릭한 메뉴: 1 대화방, 2 메뉴" width="426" height="336" loading="lazy"></a>
+            <img src="images/messenger-room-menu.png" alt="대화방 목록에서 오른쪽 클릭한 메뉴: 1 대화방, 2 메뉴" width="478" height="301" loading="lazy"></a>
           <figcaption>그룹채팅 방을 오른쪽 클릭한 메뉴</figcaption>
         </figure>
         <ol class="steps">
@@ -685,42 +775,104 @@
             <thead><tr><th>항목</th><th>하는 일</th></tr></thead>
             <tbody>
               <tr><td><span class="ui">대화창 분할하기</span></td><td>이 방을 지금 열린 대화 오른쪽에 하나 더 엽니다. 두 방을 나란히 볼 수 있습니다(창이 넓을 때). 분할 창 위의 <b>✕</b>로 닫습니다.</td></tr>
+              <tr><td><span class="ui">비밀대화 시작하기</span></td><td>1:1 방에만 보입니다. 그 사람과 <a href="#chat-secret">비밀 대화</a>를 시작합니다.</td></tr>
               <tr><td><span class="ui">대화방 알림 끄기</span></td><td>이 방의 새 메시지 알림을 끕니다. 안 읽은 숫자는 계속 보이고, 방 이름 옆에 🔕 모양이 붙습니다. 다시 누르면 <span class="ui">대화방 알림 켜기</span>입니다.</td></tr>
               <tr><td><span class="ui">이름 변경</span></td><td>그룹채팅 방 이름을 <b>나에게만</b> 다르게 보이게 바꿉니다. 비우고 저장하면 원래 이름으로 돌아갑니다.</td></tr>
               <tr><td><span class="ui">모두 읽음 처리</span></td><td>방을 열지 않고 안 읽은 표시를 지웁니다.</td></tr>
-              <tr><td><span class="ui">비밀대화 시작하기</span></td><td>1:1 방에만 보입니다. 그 사람과 <a href="#chat-secret">비밀 대화</a>를 시작합니다.</td></tr>
+              <tr><td><span class="ui">폴더로 이동</span> ›</td><td>토픽에만 보입니다. 오른쪽에 내 폴더 목록이 열리고, 고른 폴더로 토픽을 옮깁니다(<a href="#room-folders">토픽 폴더</a>).</td></tr>
+              <tr><td><span class="ui">폴더에서 빼기</span></td><td>폴더에 들어 있는 토픽에만 보입니다. 폴더 밖 목록으로 꺼냅니다.</td></tr>
               <tr><td><span class="ui">숨기기</span></td><td>1:1 방에만 보입니다. 목록에서 숨깁니다. 상대가 새 메시지를 보내거나 다시 대화를 시작하면 예전 내용과 함께 돌아옵니다.</td></tr>
-              <tr><td><span class="ui">나가기</span></td><td>대화방에서 나갑니다. 1:1 방에서 <b>나가기</b>에 체크하고 나가면, 다시 대화해도 예전 내용이 보이지 않습니다.</td></tr>
+              <tr><td><span class="ui">나가기</span></td><td>대화방에서 나갑니다. 1:1 방에서 <b>나가기</b>에 체크하고 나가면, 다시 대화해도 예전 내용이 보이지 않습니다.
+                토픽의 마지막 토픽 관리자는 바로 나갈 수 없습니다(<a href="#topic-rules">나가기 규칙</a>).</td></tr>
             </tbody>
           </table>
         </div>
         <p><b>즐겨찾기</b>: 방 이름 앞의 <b>☆</b>를 누르면 노란 <b>★</b>이 되고, 그 방이 칸의 맨 위로 올라갑니다.
           대화방 위쪽 이름 옆의 ☆로도 켜고 끌 수 있습니다.</p>
 
-        <h3 id="room-options">대화방의 ⋮ 메뉴</h3>
+        <h3 id="room-options">대화방 위쪽 버튼과 ⋮ 메뉴</h3>
+        <p>열린 대화방의 맨 위 줄에는 방 이름과 함께 자주 쓰는 버튼이 있습니다. 토픽이면 이름 옆에 회색 자물쇠(비공개)와
+          <span class="ui">보드 뷰</span> · <span class="ui">읽기 전용</span> · <span class="ui">보관됨</span> 표시가 붙기도 합니다.</p>
         <figure class="shot crop">
-          <a class="shot-frame" href="images/messenger-room-options.png">
-            <img src="images/messenger-room-options.png" alt="대화방 오른쪽 위 더보기 버튼을 누르면 메뉴가 열린다: 1 더보기 버튼, 2 메뉴" width="598" height="368" loading="lazy"></a>
-          <figcaption>토픽의 ⋮ 메뉴</figcaption>
+          <a class="shot-frame" href="images/messenger-room-header.png">
+            <img src="images/messenger-room-header.png" alt="토픽 대화방 위쪽 줄: 1 멤버 수(6), 2 알림 끄기(종 모양), 3 멤버 초대, 4 더보기(⋮)" width="719" height="102" loading="lazy"></a>
+          <figcaption>대화방 위쪽 줄의 버튼(마케팅팀 토픽)</figcaption>
         </figure>
         <ol class="steps">
-          <li><p>열린 대화방 오른쪽 위의 <span class="ui">⋮</span>를 누릅니다.</p></li>
-          <li><p>메뉴에서 고릅니다. 방 종류에 따라 보이는 항목이 조금 다릅니다.</p></li>
+          <li><p><span class="ui">멤버 N</span>(사람 모양과 숫자): 이 방의 멤버 수입니다. 누르면 멤버 목록이 열립니다 — 토픽은
+            <a href="#topic-members">참여 멤버</a> 창입니다. 1:1 채팅에는 없습니다.</p></li>
+          <li><p>종 모양: 이 방의 알림을 끄거나 켭니다. 끄면 종에 빗금이 생기고, 목록의 방 이름 옆에 🔕 모양이 붙습니다.</p></li>
+          <li><p><span class="ui">멤버 초대</span>(사람 모양에 +): <a href="#chat-invite">멤버 초대하기</a> 창을 엽니다(정회원 이상, 1:1 채팅 제외).</p></li>
+          <li><p><span class="ui">⋮</span>(더보기)를 누르면 메뉴가 열립니다.</p></li>
+        </ol>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-room-options.png">
+            <img src="images/messenger-room-options.png" alt="토픽의 더보기 메뉴: 5 공지, 파일 보기, 링크 보기, 대화 내보내기, 정보 변경하기, 토픽 나가기" width="242" height="344" loading="lazy"></a>
+          <figcaption>토픽의 ⋮ 메뉴(토픽 관리자가 본 모습)</figcaption>
+        </figure>
+        <ol class="steps" start="5">
+          <li><p>메뉴에서 고릅니다. 방 종류와 내 권한에 따라 보이는 항목이 조금 다릅니다.</p></li>
         </ol>
         <div class="table-wrap">
           <table class="simple">
             <thead><tr><th>항목</th><th>하는 일</th></tr></thead>
             <tbody>
-              <tr><td><span class="ui">알림 끄기</span> / <span class="ui">알림 켜기</span></td><td>이 방의 알림을 끄거나 켭니다.</td></tr>
               <tr><td><span class="ui">공지</span></td><td>토픽에만 있습니다. 공지 목록을 엽니다(<a href="#notice">공지</a>).</td></tr>
-              <tr><td><span class="ui">멤버 (숫자)</span></td><td>이 방에 있는 사람을 봅니다. 이름을 누르면 프로필이 뜹니다. 1:1 방에는 없습니다.</td></tr>
-              <tr><td><span class="ui">멤버 초대</span></td><td>이 방에 사람을 더 부릅니다(정회원 이상).</td></tr>
+              <tr><td><span class="ui">파일 보기</span></td><td>이 방에서 주고받은 파일만 오른쪽에 모아 봅니다(<a href="#search-files">파일 모아 보기</a>).</td></tr>
+              <tr><td><span class="ui">링크 보기</span></td><td>이 방에서 주고받은 링크만 모아 봅니다(<a href="#search-links">링크 모아 보기</a>).</td></tr>
+              <tr><td><span class="ui">자동 삭제 타이머</span></td><td>비밀 대화에만 있습니다(비밀 대화에는 파일 보기 · 링크 보기 · 대화 내보내기가 없습니다).</td></tr>
               <tr><td><span class="ui">대화 내보내기</span></td><td>대화 내용을 엑셀 파일(.xlsx)로 받습니다. 기간을 고르지 않으면 전체 대화를 받습니다.</td></tr>
-              <tr><td><span class="ui">자동 삭제 타이머</span></td><td>비밀 대화에만 있습니다.</td></tr>
+              <tr><td><span class="ui">정보 변경하기</span></td><td>토픽의 <b>토픽 관리자</b>와 팀 관리자에게만 보입니다(<a href="#topic-settings">토픽 정보 변경하기</a>).</td></tr>
               <tr><td><span class="ui">토픽 나가기</span> · <span class="ui">채팅방 나가기</span> · <span class="ui">채팅방 숨기기</span></td><td>방에서 나가거나(1:1은) 목록에서 숨깁니다.</td></tr>
             </tbody>
           </table>
         </div>
+
+        <h3 id="room-folders">토픽 폴더</h3>
+        <p>토픽이 많으면 <b>내 폴더</b>로 묶어 둘 수 있습니다. 폴더는 나에게만 보이는 정리 도구라서 다른 사람의 목록에는 아무 영향이 없고,
+          팀마다 따로 만듭니다. 새 폴더는 <b>토픽</b> 칸 옆 <span class="ui">+</span> › <span class="ui">폴더 생성</span>을 누르고,
+          이름(30자까지)을 쓴 뒤 <span class="ui">생성</span>을 누르면 생깁니다. 휴대폰에서는 <a href="#mobile-topic">토픽 탭과 폴더</a>를 보세요.</p>
+
+        <h4>폴더 보기와 폴더 메뉴</h4>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-folders.png">
+            <img src="images/messenger-topic-folders.png" alt="토픽 칸의 폴더: 1 펼친 폴더(우리 팀), 2 폴더 메뉴(이름 변경 · 폴더 삭제), 3 접은 폴더(안 읽은 수 4), 4 비공개 토픽의 회색 자물쇠, 5 보관된 토픽 묶음" width="399" height="365" loading="lazy"></a>
+          <figcaption>폴더로 묶은 토픽 칸</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>폴더 머리글을 누르면 접히고 펼쳐집니다. 폴더 안의 토픽은 한 칸 들여 써져 있습니다.</p></li>
+          <li><p>머리글에 마우스를 올리면 오른쪽에 <span class="ui">⋯</span>가 나타납니다. <span class="ui">이름 변경</span> ·
+            <span class="ui">폴더 삭제</span>를 고릅니다. 폴더를 지워도 안의 토픽은 목록에 그대로 남습니다.</p></li>
+          <li><p>접어 둔 폴더에는 안에 든 토픽들의 안 읽은 메시지 수를 더한 빨간 숫자가 붙습니다.</p></li>
+          <li><p>이름 옆 회색 자물쇠는 <b>비공개</b> 토픽이라는 뜻입니다.</p></li>
+          <li><p><a href="#topic-settings">보관</a>한 토픽은 맨 아래 <b>보관된 토픽</b> 묶음에만 모입니다. 눌러서 펼쳐 봅니다.</p></li>
+        </ol>
+
+        <h4>끌어다 놓아 폴더에 넣기</h4>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-drag.png">
+            <img src="images/messenger-topic-drag.png" alt="토픽을 폴더로 끌어 오는 모습: 1 끌고 있는 토픽(마케팅 자료실, 흐리게 보임), 2 놓을 폴더(우리 팀, 색이 바뀜)" width="330" height="283" loading="lazy"></a>
+          <figcaption>토픽을 폴더 머리글 위로 끌어 온 모습</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>폴더에 넣을 토픽을 마우스로 누른 채 끕니다. 제자리의 토픽은 흐리게 보이고, 마우스 옆에 토픽 이름이 따라다닙니다.</p></li>
+          <li><p>폴더 머리글 위로 가져가 색이 바뀌면 놓습니다.</p></li>
+        </ol>
+        <p>폴더에서 빼려면 폴더 안의 토픽을 맨 위 <b>토픽 N</b> 머리글로 끌어다 놓습니다. 폴더 머리글끼리 끌어다 놓으면 폴더 순서가 바뀝니다.</p>
+
+        <h4>오른쪽 클릭 메뉴로 옮기기</h4>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-move.png">
+            <img src="images/messenger-topic-move.png" alt="토픽을 오른쪽 클릭한 메뉴: 1 오른쪽 클릭한 토픽(주간회의), 2 폴더로 이동, 3 내 폴더 목록과 새 폴더…, 4 폴더에서 빼기" width="618" height="296" loading="lazy"></a>
+          <figcaption>폴더로 이동 › 폴더 목록</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>토픽을 마우스 오른쪽 버튼으로 누릅니다.</p></li>
+          <li><p><span class="ui">폴더로 이동</span>을 누릅니다.</p></li>
+          <li><p>오른쪽에 내 폴더 목록이 열립니다(지금 들어 있는 폴더는 ✓ 표시로 흐리게). 옮길 폴더를 누르거나,
+            <span class="ui">새 폴더…</span>를 눌러 이름을 정하면 새 폴더를 만들면서 바로 넣습니다.</p></li>
+          <li><p>폴더 안의 토픽이면 <span class="ui">폴더에서 빼기</span>로 폴더 밖 목록에 꺼냅니다.</p></li>
+        </ol>
       </section>
 
       <!-- ─────────────────────────── 8. 검색과 파일 ─────────────────────────── -->
@@ -751,9 +903,19 @@
         <ol class="steps">
           <li><p>오른쪽 위 <span class="ui">메뉴</span>(점 아홉 개)를 누르고 <span class="ui">파일</span>을 고릅니다.</p></li>
           <li><p>대화방, 보낸 사람, 파일 종류(이미지 · PDF · 문서 · 엑셀 · 파워포인트 · 압축 파일 · 오디오)로 거를 수 있습니다.
-            대화방을 연 상태에서 열면 처음에는 그 방의 파일만 보입니다.</p></li>
+            대화방을 연 상태에서 열면 처음에는 그 방의 파일만 보입니다(대화방 <span class="ui">⋮</span> › <span class="ui">파일 보기</span>로 열어도 같습니다).</p></li>
           <li><p>파일을 누르면 창 안에서 미리 볼 수 있습니다. 마우스를 올리면 나타나는 <b>☆</b>로 즐겨찾기하면 목록 맨 위에 모입니다.</p></li>
         </ol>
+
+        <h3 id="search-links">링크 모아 보기</h3>
+        <p>대화에서 주고받은 인터넷 주소(링크)도 한곳에 모아 볼 수 있습니다. 오른쪽 위 <span class="ui">메뉴</span>(점 아홉 개) ›
+          <span class="ui">링크</span>를 누르거나, 대화방 <span class="ui">⋮</span> › <span class="ui">링크 보기</span>를 누르세요(그 방의 링크만).</p>
+        <ul>
+          <li>줄마다 초록색 대화방 이름, 미리보기 그림, 제목(없으면 사이트 이름), 파란 링크 주소가 보입니다.
+            <b>파란 주소</b>를 누르면 링크가 열리고, 그림이나 제목을 누르면 그 링크를 보낸 메시지로 이동합니다.</li>
+          <li>위쪽 <b>대화방</b> 칸으로 거를 수 있습니다.</li>
+          <li>줄에 마우스를 올리면 <span class="ui">대화방에서 보기</span>와 <span class="ui">링크 복사</span> 버튼이 나타납니다(휴대폰은 길게 누릅니다).</li>
+        </ul>
 
         <h3 id="search-date">날짜로 이동</h3>
         <p>대화 중간에 있는 날짜 줄(예: <b>2026년 9월 29일 화요일 ⌄</b>)을 누르면 달력이 열립니다.
@@ -790,15 +952,224 @@
         </ol>
         <aside class="box note">
           <p class="box-title">참고</p>
-          <p><span class="ui">글쓰기</span>는 그 팀에서 토픽을 만들 수 있는 사람에게만 보입니다. 공지를 쓴 사람은 공지 화면의 메뉴로
-            <b>현재 채팅방에 공유하기 · 공지 내리기 · 수정하기 · 삭제하기</b>를 할 수 있습니다.</p>
+          <p><span class="ui">글쓰기</span>는 그 팀에서 토픽을 만들 수 있는 사람과, 그 토픽을 관리하는 사람(<a href="#topic">토픽 관리자</a>·팀 관리자)에게 보입니다.
+            <a href="#topic-readonly">읽기 전용이나 보관된 토픽</a>에서는 토픽 관리자와 팀 관리자만 공지를 쓸 수 있습니다.
+            공지를 쓴 사람은 공지 화면의 메뉴로 <b>현재 채팅방에 공유하기 · 공지 내리기 · 수정하기 · 삭제하기</b>를 할 수 있습니다.</p>
         </aside>
         <p>대화방 <span class="ui">⋮</span> 메뉴의 <span class="ui">공지</span>로도 공지 목록을 열 수 있습니다.</p>
       </section>
 
-      <!-- ─────────────────────────── 10. 동료와 내 프로필 ─────────────────────────── -->
+      <!-- ─────────────────────────── 10. 토픽 관리하기 ─────────────────────────── -->
+      <section class="chapter" id="topic">
+        <h2><span class="chapter-no">10</span>토픽 관리하기</h2>
+        <p>토픽마다 그 토픽을 맡아 관리하는 <b>토픽 관리자</b>가 있습니다. 토픽을 만든 사람이 처음 토픽 관리자가 되고,
+          정회원 이상 멤버를 여러 명 토픽 관리자로 정할 수 있습니다. 팀 소유자와 관리자(<b>팀 관리자</b>)도 자기가 들어가 있는
+          토픽을 토픽 관리자처럼 관리할 수 있습니다. 이 장의 <b>정보 변경 · 보관 · 삭제 · 멤버 내보내기 · 토픽 관리자 지정</b>은
+          토픽 관리자와 팀 관리자에게만 보입니다.</p>
+
+        <h3 id="topic-members">참여 멤버</h3>
+        <p>대화방 위쪽의 <span class="ui">멤버 N</span>(사람 모양과 숫자, <a href="#room-options">대화방 위쪽 버튼</a>의 <span class="mark">1</span>)을
+          누르면 이 토픽의 <b>참여 멤버</b> 창이 열립니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-members.png">
+            <img src="images/messenger-topic-members.png" alt="참여 멤버 창: 1 검색 칸, 2 멤버 초대하기, 3 멤버 목록(나, 토픽 관리자, 소유자, 관리자, 정회원, 준회원 순서와 배지), 4 내보내기" width="528" height="688" loading="lazy"></a>
+          <figcaption>참여 멤버 창(토픽 관리자가 본 모습)</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>이름이나 직책으로 찾습니다.</p></li>
+          <li><p><span class="ui">멤버 초대하기</span>: <a href="#chat-invite">멤버 초대하기</a> 창이 열립니다(정회원 이상).</p></li>
+          <li><p>목록은 <b>나 → 토픽 관리자 → 소유자 → 관리자 → 정회원 → 준회원</b> 순서이고, 이름 옆 배지로 구분합니다(정회원은 배지가 없습니다).
+            사진 옆 초록 점은 지금 접속 중이라는 뜻이고, 이름을 누르면 프로필 카드가 뜹니다.</p></li>
+          <li><p>토픽 관리자와 팀 관리자에게는 내보낼 수 있는 멤버 옆에 <span class="ui">내보내기</span>가 보입니다.
+            확인 창에서 <span class="ui">내보내기</span>를 누르면 그 사람은 이 토픽을 더 볼 수 없습니다(공개 토픽이면 다시 찾아서 참여할 수 있습니다).
+            토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다(팀 관리자는 할 수 있습니다).</p></li>
+        </ol>
+
+        <h3 id="topic-settings">토픽 정보 변경하기</h3>
+        <p>대화방 <span class="ui">⋮</span> › <span class="ui">정보 변경하기</span>를 누릅니다(토픽 관리자와 팀 관리자에게만 보입니다).
+          창에는 <b>토픽 설정</b>과 <b>토픽 멤버 관리</b> 두 탭이 있습니다.</p>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-settings.png">
+            <img src="images/messenger-topic-settings.png" alt="토픽 정보 변경하기 창의 토픽 설정 탭 위쪽: 1 토픽 설정 · 토픽 멤버 관리 탭, 2 이름과 토픽 설명, 3 보기 방식(바꿀 수 없음), 4 공개 여부" width="648" height="808" loading="lazy"></a>
+          <figcaption>토픽 정보 변경하기 — 토픽 설정 탭</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>위쪽 탭에서 <span class="ui">토픽 설정</span>(이 그림)과 <span class="ui">토픽 멤버 관리</span>(<a href="#topic-admins">아래</a>)를 고릅니다.</p></li>
+          <li><p><b>이름</b>과 <b>토픽 설명</b>을 고칩니다.</p></li>
+          <li><p><b>보기 방식</b>(챗 뷰 · 보드 뷰)은 보여 주기만 합니다. 만든 뒤에는 바꿀 수 없습니다.</p></li>
+          <li><p><b>공개 여부</b>: 공개로 바꾸면 정회원 누구나 찾아서 참여할 수 있고, 참여하면 이전 메시지도 볼 수 있습니다.
+            비공개로 바꾸면 그 뒤로는 초대받은 멤버만 참여할 수 있고, 지금 멤버는 그대로 남습니다(정회원 자동 초대도 꺼집니다).</p></li>
+        </ol>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-settings-2.png">
+            <img src="images/messenger-topic-settings-2.png" alt="같은 창을 아래로 내린 모습: 5 조용히 나가기 · 정회원 자동 초대 · 읽기 전용 설정 스위치, 6 저장, 7 토픽 보관, 8 토픽 삭제" width="648" height="664" loading="lazy"></a>
+          <figcaption>같은 창을 아래로 내린 모습</figcaption>
+        </figure>
+        <ol class="steps" start="5">
+          <li><p>필요한 설정을 켜거나 끕니다(아래 표).</p></li>
+          <li><p><span class="ui">저장</span>을 누르면 바꾼 내용이 적용됩니다. 바꾼 것이 없으면 누를 수 없고, 저장하지 않은 변경이 있으면 왼쪽에
+            <b>저장하지 않은 변경 사항이 있습니다.</b>라고 나옵니다. 바꾼 항목마다 대화방에 안내 메시지가 남습니다.</p></li>
+          <li><p><span class="ui">토픽 보관</span>: 다 끝난 토픽을 치워 둡니다. 확인 창에서 <span class="ui">보관</span>을 누르면 목록 맨 아래
+            <b>보관된 토픽</b>으로 옮겨지고, 이름 옆에 <span class="ui">보관됨</span> 표시가 붙으며 토픽 관리자만 글을 쓸 수 있게 됩니다.
+            메시지와 파일은 그대로 남고, 같은 자리의 <span class="ui">보관 해제</span>로 언제든 되돌립니다.</p></li>
+          <li><p><span class="ui">토픽 삭제</span>: 확인 창에 <b>토픽 이름을 그대로 입력</b>해야 <span class="ui">삭제</span> 버튼이 눌립니다.</p></li>
+        </ol>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>설정</th><th>켜면</th></tr></thead>
+            <tbody>
+              <tr><td><span class="ui">조용히 나가기</span></td><td>멤버가 나가거나 내보내져도 "OOO 님이 나갔습니다" 같은 안내 메시지를 남기지 않습니다. 보드 뷰 토픽은 처음부터 켜져 있습니다.</td></tr>
+              <tr><td><span class="ui">정회원 자동 초대</span></td><td>켠 뒤에 팀에 새로 들어오는 정회원을 이 토픽에 자동으로 초대합니다. 공개 토픽에서만 켤 수 있습니다.</td></tr>
+              <tr><td><span class="ui">읽기 전용 설정</span></td><td>토픽 관리자와 팀 관리자만 메시지 · 게시글 · 공지를 쓸 수 있고, 다른 멤버는 읽고 댓글만 달 수 있습니다(<a href="#topic-readonly">아래</a>).</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <aside class="box caution">
+          <p class="box-title">토픽을 삭제하면 되살릴 수 없어요</p>
+          <p>삭제한 토픽은 모든 멤버의 목록에서 사라지고, 그 안의 메시지와 파일도 복구되지 않습니다.
+            잠시 치워 두기만 하려면 삭제 대신 <b>토픽 보관</b>을 쓰세요.</p>
+        </aside>
+
+        <h3 id="topic-admins">토픽 관리자 지정 · 멤버 내보내기</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-admins.png">
+            <img src="images/messenger-topic-admins.png" alt="토픽 멤버 관리 탭: 1 토픽 멤버 관리 탭, 2 토픽 관리자 지정 · 멤버 내보내기, 3 멤버 목록(체크한 사람이 토픽 관리자), 4 저장" width="648" height="808" loading="lazy"></a>
+          <figcaption>토픽 멤버 관리 탭 — 한지우를 토픽 관리자로 새로 체크한 모습</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>토픽 정보 변경하기 창에서 <span class="ui">토픽 멤버 관리</span> 탭을 누릅니다.</p></li>
+          <li><p><span class="ui">토픽 관리자 지정</span>과 <span class="ui">멤버 내보내기</span> 중에서 고릅니다. 위쪽 칸에서 이름이나 직책으로 찾을 수 있습니다.</p></li>
+          <li><p><b>토픽 관리자 지정</b>: 체크한 사람이 토픽 관리자가 됩니다. 목록에는 정회원 이상만 나옵니다(준회원은 토픽 관리자가 될 수 없습니다).
+            <b>멤버 내보내기</b>: 내보낼 사람을 체크합니다(<span class="ui">모든 멤버 선택</span>으로 한꺼번에).</p></li>
+          <li><p><span class="ui">저장</span>(멤버 내보내기는 빨간 <span class="ui">내보내기</span>)을 누릅니다. 토픽 관리자는 한 명 이상이어야 하고,
+            나를 빼면 저장한 뒤 이 토픽을 관리할 수 없다고 미리 알려 줍니다(팀 관리자는 계속 관리할 수 있습니다).</p></li>
+        </ol>
+
+        <h3 id="topic-readonly">읽기 전용 · 보관된 토픽</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-topic-read-only.png">
+            <img src="images/messenger-topic-read-only.png" alt="읽기 전용 토픽을 일반 멤버가 본 모습: 1 이름 옆 읽기 전용 표시, 2 입력칸 대신 나오는 안내" width="719" height="661" loading="lazy"></a>
+          <figcaption>읽기 전용 토픽을 일반 멤버가 본 모습</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>토픽 이름 옆에 <span class="ui">읽기 전용</span> 표시가 붙습니다(보관된 토픽은 <span class="ui">보관됨</span>).</p></li>
+          <li><p>글을 쓸 수 없는 멤버에게는 입력칸 대신 <b>읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.</b>가 보입니다
+            (보관된 토픽은 <b>보관된 토픽입니다.</b>).</p></li>
+        </ol>
+        <ul>
+          <li>이런 토픽에서도 메시지와 게시글에 <b>댓글</b>은 누구나 달 수 있습니다.</li>
+          <li>토픽 관리자와 팀 관리자는 평소처럼 쓸 수 있고, 입력칸 위에 <b>읽기 전용 토픽 — 토픽 관리자만 글을 쓸 수 있어요</b>가 작게 보입니다.</li>
+          <li>글을 쓸 수 없는 토픽은 메시지 공유 · 전달할 대화방 목록에도 나오지 않습니다.</li>
+          <li>보관된 토픽은 목록 맨 아래 <b>보관된 토픽</b> 묶음에만 보이고, 토픽 관리자가 <span class="ui">보관 해제</span>하면 원래 자리로 돌아옵니다.</li>
+        </ul>
+
+        <h3 id="topic-rules">누가 무엇을 할 수 있나요</h3>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>할 일</th><th>할 수 있는 사람</th></tr></thead>
+            <tbody>
+              <tr><td>새 토픽 만들기</td><td>정회원 이상(팀 설정에 따라 관리자 이상, 소유자, 지정된 사람만일 수 있습니다)</td></tr>
+              <tr><td>공개 토픽 찾아서 참여하기</td><td>정회원 이상</td></tr>
+              <tr><td>멤버 초대</td><td>그 토픽의 정회원 이상 멤버</td></tr>
+              <tr><td>메시지 · 게시글 쓰기</td><td>멤버 누구나 — 읽기 전용 · 보관된 토픽은 토픽 관리자와 팀 관리자만</td></tr>
+              <tr><td>공지 쓰기</td><td>토픽을 만들 수 있는 사람과 토픽 관리자 · 팀 관리자 — 읽기 전용 · 보관된 토픽은 토픽 관리자와 팀 관리자만</td></tr>
+              <tr><td>댓글 달기</td><td>멤버 누구나(읽기 전용 · 보관된 토픽도)</td></tr>
+              <tr><td>정보 변경 · 보관 · 삭제 · 멤버 내보내기 · 토픽 관리자 지정 · 게시글 고정</td><td>토픽 관리자, 팀 관리자(소유자 · 관리자)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <aside class="box caution">
+          <p class="box-title">마지막 토픽 관리자는 바로 나갈 수 없어요</p>
+          <p>토픽 관리자가 나 혼자인데 정회원 이상 멤버가 남아 있으면, <span class="ui">토픽 나가기</span>를 눌러도
+            <b>토픽을 나갈 수 없습니다</b> 창이 뜹니다. <span class="ui">토픽 관리자 지정하기</span>를 눌러 다른 멤버를 토픽 관리자로 정한 뒤 나가세요.
+            남은 멤버가 모두 준회원이거나 나 혼자 남은 토픽이면 그냥 나갈 수 있습니다.</p>
+        </aside>
+      </section>
+
+      <!-- ─────────────────────────── 11. 보드 뷰 토픽 ─────────────────────────── -->
+      <section class="chapter" id="board">
+        <h2><span class="chapter-no">11</span>보드 뷰 토픽</h2>
+        <p><b>보드 뷰</b>로 만든 토픽은 채팅 대신 <b>제목이 있는 게시글</b>을 올리는 게시판입니다. 공지 · 회의록 · 자료처럼 오래 두고 볼 글에 좋고,
+          새 게시글이 맨 위에 옵니다. 보기 방식은 <a href="#chat-topic">토픽을 만들 때</a>만 고를 수 있습니다.</p>
+
+        <h3 id="board-view">보드 화면</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-board.png">
+            <img src="images/messenger-board.png" alt="보드 뷰 토픽 화면: 1 이름 옆 보드 뷰 표시, 2 고정된 게시글 4개(3개까지 보이고 더 보기), 3 게시글 카드, 4 댓글 수, 5 게시글 작성 버튼" width="719" height="741" loading="lazy"></a>
+          <figcaption>보드 뷰 토픽(마케팅 자료실)</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>토픽 이름 옆에 <span class="ui">보드 뷰</span> 표시가 붙습니다.</p></li>
+          <li><p><b>고정된 게시글</b>: 중요한 글은 맨 위에 모입니다. 세 개까지 보이고, 더 있으면 <span class="ui">더 보기</span>로 펼칩니다.</p></li>
+          <li><p><b>게시글 카드</b>: 쓴 사람, 올린 때(예: 25분 전, 고친 글은 <b>(수정됨)</b>), 제목, 본문 앞부분, 첨부(사진은 네 장까지 작게, 파일은 "파일 N개")가 보입니다.
+            카드를 누르면 <a href="#board-detail">게시글</a>이 열립니다.</p></li>
+          <li><p><b>댓글 N</b>: 달린 댓글 수입니다. 댓글이 있으면 파란색입니다.</p></li>
+          <li><p><span class="ui">게시글 작성</span>(연필): 오른쪽 아래에 있습니다. 창이 좁으면 연필 모양 동그란 버튼만 보입니다.</p></li>
+        </ol>
+        <p>아래로 내리면 예전 게시글을 더 불러옵니다. 위로 올려 둔 채 다른 사람이 새 글을 올리면 <b>새 게시글이 있습니다</b> 알림이 뜨고,
+          누르면 맨 위로 갑니다. <span class="badge pc">PC</span> 보드에 파일을 끌어다 놓으면 그 파일을 붙인 채로 게시글 작성 창이 열립니다.</p>
+
+        <h3 id="board-write">게시글 쓰기</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-post-editor.png">
+            <img src="images/messenger-post-editor.png" alt="게시글 작성 창: 1 제목, 2 서식 도구와 본문, 3 첨부 파일(2/30)과 파일 첨부 버튼, 4 게시" width="740" height="800" loading="lazy"></a>
+          <figcaption>게시글 작성 창</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p><b>제목</b>을 씁니다(100자까지, 꼭 써야 합니다).</p></li>
+          <li><p><b>본문</b>을 씁니다(꼭 써야 합니다). 위쪽 서식 도구로 굵게 · 기울임 · 밑줄 · 취소선 · 링크 · 코드 · 인용 · 목록을 넣을 수 있습니다.</p></li>
+          <li><p><span class="ui">파일 첨부</span>로 사진과 파일을 <b>30개까지</b> 붙입니다. <span class="badge pc">PC</span> 이 창에 파일을 끌어다 놓거나
+            복사한 그림을 <kbd>Ctrl</kbd> + <kbd>V</kbd>로 붙여 넣어도 됩니다. 붙이자마자 올라가기 시작하고, 오른쪽 위 <b>✕</b>로 뺍니다.</p></li>
+          <li><p><span class="ui">게시</span>를 누르면 보드 맨 위에 올라갑니다(<kbd>Ctrl</kbd> + <kbd>Enter</kbd>도 됩니다).
+            <span class="ui">취소</span>나 <kbd>Esc</kbd>로 닫을 때 쓰던 내용이 있으면 버릴지 한 번 더 묻습니다.</p></li>
+        </ol>
+
+        <h3 id="board-menu">고정 · 수정 · 삭제</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-post-menu.png">
+            <img src="images/messenger-post-menu.png" alt="게시글 카드의 더보기 메뉴: 1 더보기(⋯) 버튼, 2 게시글 고정 · 수정 · 삭제" width="715" height="221" loading="lazy"></a>
+          <figcaption>내가 쓴 게시글의 ⋯ 메뉴(토픽 관리자가 본 모습)</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>게시글 오른쪽 위의 <span class="ui">⋯</span>(더보기)를 누릅니다. 할 수 있는 일이 없으면 이 버튼이 보이지 않습니다.</p></li>
+          <li><p>원하는 항목을 고릅니다.</p></li>
+        </ol>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>항목</th><th>하는 일</th><th>할 수 있는 사람</th></tr></thead>
+            <tbody>
+              <tr><td><span class="ui">게시글 고정</span> / <span class="ui">게시글 고정 해제</span></td><td>맨 위 <b>고정된 게시글</b>에 올리거나 내립니다. 고정한 글은 이름 옆에 <b>📌 고정</b> 표시가 붙습니다.</td><td>토픽 관리자, 팀 관리자</td></tr>
+              <tr><td><span class="ui">수정</span></td><td>제목과 본문을 고칩니다(첨부는 바꿀 수 없습니다). 게시글은 고칠 수 있는 시간 제한이 없습니다.</td><td>쓴 사람</td></tr>
+              <tr><td><span class="ui">삭제</span></td><td>확인한 뒤 지웁니다.</td><td>쓴 사람, 토픽 관리자, 팀 관리자</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>팀에서 메시지 수정 · 삭제를 꺼 두었으면 게시글도 고치거나 지울 수 없습니다. 읽기 전용 · 보관된 보드에서는 쓴 사람이라도 토픽 관리자가 아니면 고칠 수 없습니다(지우기는 할 수 있습니다).</p>
+
+        <h3 id="board-detail">게시글 보기와 댓글</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-post-detail.png">
+            <img src="images/messenger-post-detail.png" alt="게시글을 연 모습(오른쪽 게시글 창): 1 제목과 본문, 2 첨부한 사진과 파일, 3 댓글, 4 댓글 입력칸" width="570" height="939" loading="lazy"></a>
+          <figcaption>PC에서는 오른쪽에 게시글 창이 열립니다</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>게시글 카드를 누르면 PC는 오른쪽에 <b>게시글</b> 창이, 휴대폰은 새 화면이 열립니다. 제목과 본문 전체를 볼 수 있습니다.
+            쓴 사람 옆 <span class="ui">⋯</span>는 카드의 메뉴와 같습니다.</p></li>
+          <li><p>사진은 누르면 크게 보이고, 파일은 눌러서 열거나 내려받습니다. 여러 개면 <span class="ui">전체 다운로드 (N)</span>으로 한꺼번에 받습니다.</p></li>
+          <li><p>아래에 댓글이 모입니다.</p></li>
+          <li><p>댓글 입력칸에 쓰고 <kbd>Enter</kbd>를 누르면 댓글이 달립니다. 이모티콘과 파일도 붙일 수 있습니다.</p></li>
+        </ol>
+        <aside class="box note">
+          <p class="box-title">읽기 전용 · 보관된 보드</p>
+          <p>글을 쓸 수 없는 멤버에게는 <span class="ui">게시글 작성</span> 버튼 대신 화면 아래에 <b>읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.</b>
+            (보관된 보드는 <b>보관된 토픽입니다. …</b>) 안내가 보입니다. 이때도 게시글에 댓글은 달 수 있습니다.
+            보드 뷰 토픽은 메시지 공유 · 전달 대상 목록에 나오지 않습니다.</p>
+        </aside>
+      </section>
+
+      <!-- ─────────────────────────── 12. 동료와 내 프로필 ─────────────────────────── -->
       <section class="chapter" id="people">
-        <h2><span class="chapter-no">10</span>동료와 내 프로필</h2>
+        <h2><span class="chapter-no">12</span>동료와 내 프로필</h2>
 
         <h3 id="people-members">동료 찾기와 프로필</h3>
         <figure class="shot">
@@ -807,8 +1178,9 @@
           <figcaption>멤버 창에서 동료의 프로필 카드를 연 모습</figcaption>
         </figure>
         <ol class="steps">
-          <li><p>오른쪽 위 <span class="ui">멤버</span>(사람 두 명)를 누르면 이 팀의 멤버 목록이 열립니다. 위쪽 칸에 이름을 쳐서 찾을 수 있습니다.
-            사진 옆 <b>초록 점</b>은 지금 접속 중이라는 뜻입니다.</p></li>
+          <li><p>창 맨 위 줄 오른쪽의 <span class="ui">멤버</span>(사람 두 명)를 누르면 이 팀의 멤버 목록이 열립니다. 위쪽 칸에 이름을 쳐서 찾을 수 있습니다.
+            사진 옆 <b>초록 점</b>은 지금 접속 중이라는 뜻입니다. (대화방 위쪽의 <span class="ui">멤버 N</span>은 그 방의 멤버만 보여 줍니다 —
+            <a href="#topic-members">참여 멤버</a>.)</p></li>
           <li><p>동료 이름을 누르면 <b>프로필 카드</b>가 뜹니다. 등급, 팀, 직책을 볼 수 있습니다.</p></li>
           <li><p><span class="ui">1:1 메시지</span>를 누르면 그 사람과의 대화방이 열립니다.</p></li>
           <li><p><span class="ui">비밀 대화 시작</span>을 누르면 <a href="#chat-secret">비밀 대화</a>를 요청합니다.</p></li>
@@ -842,41 +1214,62 @@
         </ul>
       </section>
 
-      <!-- ─────────────────────────── 11. 환경설정 ─────────────────────────── -->
+      <!-- ─────────────────────────── 13. 환경설정 ─────────────────────────── -->
       <section class="chapter" id="settings">
-        <h2><span class="chapter-no">11</span>환경설정</h2>
-        <p><span class="ui">☰</span> › <span class="ui">환경설정</span>을 누르면 환경설정 창이 열립니다.</p>
+        <h2><span class="chapter-no">13</span>환경설정</h2>
+        <p><span class="ui">☰</span> › <span class="ui">환경설정</span>을 누르면 환경설정 창이 열립니다. 왼쪽에서
+          <b>메신저 설정</b>과 <b>시스템 설정</b> 중 하나를 고르면 오른쪽에 그 항목들이 보입니다(휴대폰은 위쪽 탭).
+          바꾼 뒤에는 꼭 <span class="ui">저장하기</span>를 눌러야 적용됩니다.</p>
+
+        <h3 id="settings-messenger">메신저 설정</h3>
         <figure class="shot crop">
           <a class="shot-frame" href="images/messenger-settings.png">
-            <img src="images/messenger-settings.png" alt="환경설정 창: 1 화면 테마, 2 팀 전환 방식, 3 메시지 내용 미리보기, 4 저장하기" width="520" height="660" loading="lazy"></a>
-          <figcaption>환경설정 창 (아래로 스크롤하면 항목이 더 있습니다)</figcaption>
+            <img src="images/messenger-settings.png" alt="환경설정 창의 메신저 설정: 1 메신저 설정 · 시스템 설정 고르기, 2 팀 전환 방식, 3 메시지 내용 미리보기, 4 메시지 전송 옵션 설정, 5 저장하기" width="740" height="680" loading="lazy"></a>
+          <figcaption>환경설정 창 — 메신저 설정</figcaption>
         </figure>
         <ol class="steps">
-          <li><p><b>화면 테마</b>: 밝은 화면(<span class="ui">라이트 모드</span>), 어두운 화면(<span class="ui">다크 모드</span>),
-            또는 Windows·휴대폰 설정을 따르는 <span class="ui">시스템 설정을 따름</span> 중에서 고릅니다.</p></li>
-          <li><p><b>팀 전환 방식</b>: 왼쪽 위 팀 이름을 <span class="ui">드롭다운</span>으로 보일지, 모든 팀을 <span class="ui">탭(전체 보기)</span>으로 늘어놓을지 고릅니다.</p></li>
-          <li><p><b>메시지 내용 미리보기</b>: 알림에 메시지 내용을 어디까지 보여 줄지 고릅니다. <span class="ui">미리보기 안함</span>이면
-            알림에 <b>새 메시지가 있습니다</b>만 나옵니다.</p></li>
-          <li><p>다 고쳤으면 꼭 <span class="ui">저장하기</span>를 누릅니다. <span class="ui">닫기</span>를 누르면 바꾼 내용이 적용되지 않습니다.</p></li>
+          <li><p>왼쪽에서 <span class="ui">메신저 설정</span> 또는 <span class="ui">시스템 설정</span>을 고릅니다.</p></li>
+          <li><p><b>팀 전환 방식</b>: 왼쪽 위 팀 이름을 <span class="ui">드롭다운</span>으로 보일지, 모든 팀을
+            <span class="ui">탭(전체 보기)</span>으로 늘어놓을지 고릅니다(<a href="#layout-team">다른 팀으로 옮기기</a>).</p></li>
+          <li><p><b>메시지 내용 미리보기</b>: 알림에 메시지 내용을 어디까지 보여 줄지 고릅니다 —
+            <span class="ui">모든 메시지</span> · <span class="ui">공개 토픽만</span> · <span class="ui">미리보기 안함</span>.
+            미리보기 안함이면 알림에 <b>새 메시지가 있습니다</b>만 나옵니다.</p></li>
+          <li><p><b>메시지 전송 옵션 설정</b> <span class="badge pc">PC</span>: <span class="ui">Enter로 전송</span>(<kbd>Shift</kbd> + <kbd>Enter</kbd>로 줄바꿈, 처음 설정)과
+            <span class="ui">Shift + Enter로 전송</span>(<kbd>Enter</kbd>로 줄바꿈) 중에서 고릅니다.</p></li>
+          <li><p>다 고쳤으면 <span class="ui">저장하기</span>를 누릅니다. <span class="ui">닫기</span>(또는 ✕)를 누르면 바꾼 내용이 적용되지 않습니다.</p></li>
         </ol>
-        <p>아래로 스크롤하면 다음 항목도 있습니다.</p>
+
+        <h3 id="settings-system">시스템 설정</h3>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-settings-system.png">
+            <img src="images/messenger-settings-system.png" alt="환경설정 창의 시스템 설정: 1 시작 시 자동 실행, 2 항상 위로, 3 화면 테마, 4 반투명" width="740" height="680" loading="lazy"></a>
+          <figcaption>시스템 설정 — 위쪽</figcaption>
+        </figure>
+        <figure class="shot crop">
+          <a class="shot-frame" href="images/messenger-settings-system-2.png">
+            <img src="images/messenger-settings-system-2.png" alt="시스템 설정을 아래로 내린 모습: 5 파일 다운로드, 6 자동 잠금" width="508" height="546" loading="lazy"></a>
+          <figcaption>시스템 설정 — 오른쪽 칸을 아래로 내린 모습</figcaption>
+        </figure>
         <div class="table-wrap">
           <table class="simple">
-            <thead><tr><th>항목</th><th>설명</th></tr></thead>
+            <thead><tr><th>번호</th><th>항목</th><th>설명</th></tr></thead>
             <tbody>
-              <tr><td>시작 시 자동 실행 <span class="badge pc">PC</span></td><td>컴퓨터를 켜면 TangoTalk이 저절로 실행됩니다.</td></tr>
-              <tr><td>항상 위로 <span class="badge pc">PC</span></td><td>TangoTalk 창이 다른 창에 가려지지 않고 늘 위에 떠 있습니다.</td></tr>
-              <tr><td>반투명 <span class="badge pc">PC</span></td><td>막대를 움직여 창을 20~100% 사이로 비치게 합니다.</td></tr>
-              <tr><td>파일 다운로드</td><td>저장할 때마다 위치를 묻지 않고 정한 폴더에 바로 받을지, 받은 뒤 폴더를 열지 정합니다.</td></tr>
-              <tr><td>버전 정보</td><td>지금 쓰는 앱의 버전입니다. 새 버전이 있으면 함께 표시됩니다.</td></tr>
+              <tr><td><span class="mark">1</span></td><td>시작 시 자동 실행 <span class="badge pc">PC</span></td><td>컴퓨터를 켜면 TangoTalk이 저절로 실행됩니다.</td></tr>
+              <tr><td><span class="mark">2</span></td><td>항상 위로 <span class="badge pc">PC</span></td><td>TangoTalk 창이 다른 창에 가려지지 않고 늘 위에 떠 있습니다.</td></tr>
+              <tr><td><span class="mark">3</span></td><td>화면 테마</td><td>밝은 <span class="ui">화이트 (기본)</span>와 어두운 <span class="ui">다크</span> 중에서 고릅니다.</td></tr>
+              <tr><td><span class="mark">4</span></td><td>반투명 <span class="badge pc">PC</span></td><td>막대를 움직여 창을 20~100% 사이로 비치게 합니다. 움직이는 동안 바로 보이고, 저장하지 않고 닫으면 원래대로 돌아갑니다.</td></tr>
+              <tr><td><span class="mark">5</span></td><td>파일 다운로드</td><td>저장할 때마다 위치를 묻지 않고 아래 폴더에 바로 받을지 정하고(체크), 받을 폴더를 고릅니다.
+                <b>다운로드 완료 시</b> 폴더를 열지, 아무것도 하지 않을지도 고릅니다. 휴대폰은 늘 <b>Download/TangoTalk</b> 폴더에 저장합니다.</td></tr>
+              <tr><td><span class="mark">6</span></td><td>자동 잠금 <span class="badge pc">PC</span></td><td>PC가 절전 모드에 들어가거나 화면이 꺼지면 메신저를 잠급니다. 다시 열 때 로그인 비밀번호를 넣어야 풀립니다.</td></tr>
+              <tr><td></td><td>버전 정보</td><td>맨 아래에 지금 쓰는 앱의 버전이 있습니다. 새 버전이 있으면 함께 표시됩니다.</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <!-- ─────────────────────────── 12. 안드로이드 ─────────────────────────── -->
+      <!-- ─────────────────────────── 14. 안드로이드 ─────────────────────────── -->
       <section class="chapter" id="mobile">
-        <h2><span class="chapter-no">12</span>안드로이드 휴대폰에서</h2>
+        <h2><span class="chapter-no">14</span>안드로이드 휴대폰에서</h2>
         <p>휴대폰에서도 같은 계정으로 대화할 수 있습니다. 기능은 대부분 같고, 화면 배치만 조금 다릅니다.</p>
 
         <h3 id="mobile-home">첫 화면 <span class="badge mobile">안드로이드</span></h3>
@@ -891,16 +1284,41 @@
             <tbody>
               <tr><td><span class="mark">1</span></td><td>팀 이름 — 눌러서 다른 팀으로 옮깁니다.</td></tr>
               <tr><td><span class="mark">2</span></td><td>알림 센터 — 안 읽은 방을 모아 봅니다.</td></tr>
-              <tr><td><span class="mark">3</span></td><td>메뉴 — 파일, 문의함.</td></tr>
+              <tr><td><span class="mark">3</span></td><td>메뉴 — 파일, 링크, 문의함.</td></tr>
               <tr><td><span class="mark">4</span></td><td>내 메뉴(☰) — 내 프로필, 환경설정, <b>도움말</b>, 로그아웃.</td></tr>
               <tr><td><span class="mark">5</span></td><td>검색창 — 누르면 검색 화면으로 갑니다.</td></tr>
-              <tr><td><span class="mark">6</span></td><td><b>+</b> 버튼 — 토픽 탭에서는 토픽방 찾기(오른쪽 아래 +로 새 토픽 만들기), 그룹채팅·채팅 탭에서는 새 대화입니다.</td></tr>
+              <tr><td><span class="mark">6</span></td><td><b>+</b> 버튼 — 그룹채팅 · 채팅 탭에서는 새 대화입니다. 토픽 탭에서는 새로운 토픽 생성하기 · 참여 가능한 토픽 보기 · 폴더 만들기를 고릅니다(<a href="#mobile-topic">아래</a>).</td></tr>
               <tr><td><span class="mark">7</span></td><td>아래 탭 — <b>토픽 · 그룹채팅 · 채팅 · 멤버 · 더보기</b>. 더보기에는 내 프로필, 환경설정, 로그아웃 등이 있습니다.</td></tr>
             </tbody>
           </table>
         </div>
         <p>방을 누르면 대화가 화면 가득 열립니다. 목록으로 돌아가려면 휴대폰의 뒤로 가기를 누릅니다.
           목록 화면에서 뒤로 가기를 두 번 누르면 앱이 종료됩니다.</p>
+
+        <h3 id="mobile-topic">토픽 탭과 폴더 <span class="badge mobile">안드로이드</span></h3>
+        <figure class="shot">
+          <a class="shot-frame" href="images/messenger-phone-topics.png">
+            <img src="images/messenger-phone-topics.png" alt="휴대폰 토픽 탭(왼쪽)과 + 버튼을 누른 모습(오른쪽): 1 폴더, 2 보관된 토픽, 3 + 버튼, 4 새로운 토픽 생성하기 · 참여 가능한 토픽 보기 · 폴더 만들기" width="860" height="868" loading="lazy"></a>
+          <figcaption>토픽 탭(왼쪽)에서 <b>+</b>를 누르면 아래에서 메뉴가 올라옵니다(오른쪽)</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>폴더 머리글을 누르면 접히고 펼쳐집니다. 오른쪽 <span class="ui">⋯</span>(또는 머리글을 길게 누르기)로 <span class="ui">이름 변경</span> · <span class="ui">폴더 삭제</span>를 합니다.</p></li>
+          <li><p>보관된 토픽은 맨 아래 <b>보관된 토픽</b>에 모입니다.</p></li>
+          <li><p>오른쪽 아래 <b>+</b>를 누르면</p></li>
+          <li><p><span class="ui">새로운 토픽 생성하기</span> · <span class="ui">참여 가능한 토픽 보기</span> · <span class="ui">폴더 만들기</span>를 고를 수 있습니다.
+            토픽 만들기와 찾기는 화면 가득 열리고, 내용은 PC와 같습니다(<a href="#chat-topic">토픽 만들기</a>, <a href="#chat-topic-join">참여 가능한 토픽 보기</a>).
+            <span class="badge role">준회원</span>에게는 폴더 만들기만 보입니다.</p></li>
+        </ol>
+        <figure class="shot phone">
+          <a class="shot-frame" href="images/messenger-phone-topic-long-press.png">
+            <img src="images/messenger-phone-topic-long-press.png" alt="토픽을 길게 누른 모습: 1 길게 누른 토픽(주간회의), 2 폴더로 이동 · 폴더에서 빼기" width="390" height="844" loading="lazy"></a>
+          <figcaption>토픽을 길게 누른 모습</figcaption>
+        </figure>
+        <ol class="steps">
+          <li><p>토픽을 <b>길게 누르면</b> 아래에서 메뉴가 올라옵니다(휴대폰에서는 끌어다 놓기 대신 이 메뉴를 씁니다).</p></li>
+          <li><p><span class="ui">폴더로 이동</span>을 누르면 내 폴더 목록과 <span class="ui">새 폴더…</span>가 나옵니다.
+            폴더 안의 토픽이면 <span class="ui">폴더에서 빼기</span>도 있습니다.</p></li>
+        </ol>
 
         <h3 id="mobile-message">메시지 길게 누르기 <span class="badge mobile">안드로이드</span></h3>
         <figure class="shot phone">
@@ -917,8 +1335,10 @@
         <h3 id="mobile-diff">PC와 다른 점</h3>
         <ul>
           <li>대화방 목록에서 방을 <b>길게 누르면</b> <span class="ui">알림 끄기</span>, <span class="ui">즐겨찾기</span>,
-            <span class="ui">이름 변경</span>(그룹채팅), <span class="ui">숨기기</span>/<span class="ui">나가기</span> 메뉴가 나옵니다(PC의 오른쪽 클릭 메뉴).</li>
-          <li>댓글과 검색, 공지는 화면 가득 새 화면으로 열립니다.</li>
+            <span class="ui">이름 변경</span>(그룹채팅), <span class="ui">폴더로 이동</span>(토픽), <span class="ui">숨기기</span>/<span class="ui">나가기</span> 메뉴가 나옵니다(PC의 오른쪽 클릭 메뉴).</li>
+          <li>대화방 위쪽에도 멤버 수 · 알림 · 멤버 초대 · <span class="ui">⋮</span> 버튼이 있습니다(<a href="#room-options">대화방 위쪽 버튼</a>).
+            토픽의 읽기 전용 · 보관됨 표시는 이름 옆(자리가 좁으면 이름 아래)에 붙습니다.</li>
+          <li>댓글, 검색, 공지, 참여 멤버, 멤버 초대하기, 토픽 정보 변경하기, 게시글은 화면 가득 새 화면으로 열립니다.</li>
           <li>메시지 <b>고치기·지우기</b>, 화면 캡처, 파일 끌어다 놓기, 대화창 분할은 휴대폰에서는 할 수 없습니다. PC에서 해 주세요.</li>
           <li><b>도움말</b>은 오른쪽 위 <span class="ui">☰</span> 메뉴에 있습니다.</li>
         </ul>
@@ -928,7 +1348,6 @@
             <span class="ui">알림 끄기</span>가 켜져 있지 않은지(방 이름 옆 🔕) 확인하세요.</p>
         </aside>
       </section>
-
 
       <nav class="pager" aria-label="다른 도움말">
         <a class="prev" href="index.html"><small>← 이전</small>처음</a>

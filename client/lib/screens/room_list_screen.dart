@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator;
 
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../services/api_client.dart' show PositionOption;
+import '../services/chat_socket.dart' show RoomRemovedEvent;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/account_menu_button.dart';
@@ -11,16 +14,19 @@ import '../widgets/app_menu_button.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/position_badge.dart';
+import '../widgets/private_topic_lock.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart'
     show renameRoomMenuLabel, showLeaveRoomDialog, showRenameRoomForMeDialog;
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/notifications_panel.dart';
 import '../widgets/team_switcher.dart';
+import '../widgets/topic_folder_widgets.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
 import 'chat_screen.dart';
+import 'create_topic_screen.dart';
 import 'files_screen.dart';
 import 'links_screen.dart';
 import 'invite_link_screen.dart';
@@ -32,6 +38,9 @@ import 'settings_screen.dart';
 import 'topic_browse_screen.dart';
 
 const _appVersion = '1.0.0';
+
+/// 토픽 탭 [+] 버튼 시트의 항목.
+enum _TopicFabAction { create, browse, folder }
 
 /// 안드로이드/좁은 화면(폰)에서 쓰는 메인 화면: 토픽/그룹채팅/채팅/멤버/더보기 5개 하단 탭.
 /// PC(넓은 화면)는 사이드바+분할패널 방식의 DesktopHomeScreen이 따로 담당하므로 이 화면과
@@ -59,6 +68,12 @@ class _RoomListScreenState extends State<RoomListScreen> {
   /// 1:1 채팅 목록에 직책 배지를 보여줄지 판단하는 기준(desktop_home_screen.dart와 동일).
   List<PositionOption>? _positionOptions;
 
+  /// 토픽에서 내보내졌거나 토픽이 삭제됐다는 알림(session.roomRemovedEvents) 구독.
+  StreamSubscription<RoomRemovedEvent>? _roomRemovedSub;
+
+  /// 이 화면이 띄운 대화 화면(방 id와 라우트) — 그 방이 사라지면 목록으로 돌아오려고 기억해 둔다.
+  final _chatRoutes = <({String roomId, Route<void> route})>[];
+
   void _handleBackPress() {
     final now = DateTime.now();
     final last = _lastBackPressAt;
@@ -77,6 +92,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
   @override
   void initState() {
     super.initState();
+    _roomRemovedSub = widget.session.roomRemovedEvents.listen(_onRoomRemoved);
     widget.session.fetchPublicPositionOptions().then((list) {
       if (mounted) setState(() => _positionOptions = list);
     });
@@ -117,13 +133,45 @@ class _RoomListScreenState extends State<RoomListScreen> {
           setState(() => _pendingReopenRoom = null);
           return;
         }
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ChatScreen(session: widget.session, room: room),
-          ),
-        );
+        await _pushChat(room);
         if (mounted) setState(() => _pendingReopenRoom = null);
       });
+    }
+  }
+
+  @override
+  void dispose() {
+    _roomRemovedSub?.cancel();
+    super.dispose();
+  }
+
+  /// 토픽에서 내보내졌거나 토픽이 삭제됐다 — 안내하고, 그 방 대화 화면을 이 화면이 띄워 둔
+  /// 채면 목록으로 돌아온다. ChatScreen도 방이 사라지면 스스로 닫히지만, 한글 입력 중에는 세션
+  /// 알림이 잠깐 미뤄질 수 있어서(typing_gate.dart) 여기서도 바로 닫는다.
+  void _onRoomRemoved(RoomRemovedEvent event) {
+    if (!mounted) return;
+    showAppToast(context, event.toastText);
+    final open = _chatRoutes.any(
+      (e) => e.roomId == event.roomId && e.route.isActive,
+    );
+    if (open) Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  /// 대화 화면을 띄우고, 닫힐 때까지 [_chatRoutes]에 기억해 둔다.
+  Future<void> _pushChat(Room room, {String? highlightMessageId}) async {
+    final route = MaterialPageRoute<void>(
+      builder: (_) => ChatScreen(
+        session: widget.session,
+        room: room,
+        highlightMessageId: highlightMessageId,
+      ),
+    );
+    final entry = (roomId: room.id, route: route);
+    _chatRoutes.add(entry);
+    try {
+      await Navigator.of(context).push(route);
+    } finally {
+      _chatRoutes.remove(entry);
     }
   }
 
@@ -135,11 +183,53 @@ class _RoomListScreenState extends State<RoomListScreen> {
   };
 
   void _openRoom(Room room) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatScreen(session: widget.session, room: room),
+    if (mounted) _pushChat(room);
+  }
+
+  /// 토픽 탭의 [+] — 새로운 토픽 생성하기 / 참여 가능한 토픽 보기 / 폴더 만들기를 아래 시트로
+  /// 고른다. 준회원은 토픽을 만들거나 찾아 참여할 수 없지만(초대받은 방에서만 활동) 자기 목록을
+  /// 정리하는 폴더는 누구나 만든다. 새 토픽 만들기는 팀 설정(토픽 생성 권한)에 따라 더 좁을 수 있다.
+  Future<void> _showTopicActions() async {
+    final session = widget.session;
+    final action = await showModalBottomSheet<_TopicFabAction>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (session.canCreateRooms && session.canCreateTopic)
+              ListTile(
+                leading: const Icon(Icons.add_comment_outlined),
+                title: const Text('새로운 토픽 생성하기'),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_TopicFabAction.create),
+              ),
+            if (session.canCreateRooms)
+              ListTile(
+                leading: const Icon(Icons.explore_outlined),
+                title: const Text('참여 가능한 토픽 보기'),
+                onTap: () =>
+                    Navigator.of(sheetContext).pop(_TopicFabAction.browse),
+              ),
+            ListTile(
+              leading: const Icon(Icons.create_new_folder_outlined),
+              title: const Text('폴더 만들기'),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(_TopicFabAction.folder),
+            ),
+          ],
+        ),
       ),
     );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _TopicFabAction.create:
+        await showCreateTopicFlow(context, session, onOpenRoom: _openRoom);
+      case _TopicFabAction.browse:
+        await showTopicBrowse(context, session, onOpenRoom: _openRoom);
+      case _TopicFabAction.folder:
+        await createTopicFolderFlow(context, session);
+    }
   }
 
   /// "메뉴" 팝업의 "파일" — PC는 우측 패널로 토글하지만, 좁은 화면엔 그런 패널이 없어서
@@ -172,15 +262,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
               onClose: () => Navigator.of(routeContext).pop(),
               onOpenMessage: (room, messageId) {
                 Navigator.of(routeContext).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => ChatScreen(
-                      session: widget.session,
-                      room: room,
-                      highlightMessageId: messageId,
-                    ),
-                  ),
-                );
+                _pushChat(room, highlightMessageId: messageId);
               },
             ),
           ),
@@ -249,32 +331,26 @@ class _RoomListScreenState extends State<RoomListScreen> {
             _MoreTab(session: widget.session),
           ],
         ),
-        // 준회원은 방을 만들거나 토픽을 찾아 참여할 수 없으므로 + 버튼 자체를 감춘다
-        // (서버도 막지만, 눌러봐야 실패하는 버튼을 보여주지 않는다).
-        floatingActionButton: !widget.session.canCreateRooms
-            ? null
-            : switch (_index) {
-                0 => FloatingActionButton(
-                  tooltip: '토픽방 찾기 / 만들기',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          TopicBrowseScreen(session: widget.session),
-                    ),
-                  ),
-                  child: const Icon(Icons.add),
-                ),
-                1 || 2 => FloatingActionButton(
-                  tooltip: '새 대화',
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => NewChatScreen(session: widget.session),
-                    ),
-                  ),
-                  child: const Icon(Icons.add),
-                ),
-                _ => null,
-              },
+        // 토픽 탭의 + 는 누구나(폴더 만들기는 준회원도 된다 — 시트 안에서 항목을 가린다).
+        // 그룹채팅/채팅 탭의 + 는 준회원에게 감춘다 — 방을 만들 수 없어서(서버도 막지만,
+        // 눌러봐야 실패하는 버튼을 보여주지 않는다).
+        floatingActionButton: switch (_index) {
+          0 => FloatingActionButton(
+            tooltip: '토픽 추가',
+            onPressed: _showTopicActions,
+            child: const Icon(Icons.add),
+          ),
+          1 || 2 when widget.session.canCreateRooms => FloatingActionButton(
+            tooltip: '새 대화',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => NewChatScreen(session: widget.session),
+              ),
+            ),
+            child: const Icon(Icons.add),
+          ),
+          _ => null,
+        },
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
           onDestinationSelected: (i) => setState(() => _index = i),
@@ -302,7 +378,8 @@ class _RoomListScreenState extends State<RoomListScreen> {
 
 /// 토픽/그룹채팅/채팅 탭 공통 몸통: 검색창(누르면 SearchScreen으로 이동) + 그 타입의
 /// 방 목록. 즐겨찾기한 방을 위로 모으고, 그 안에서는 최근 활동 순으로 정렬한다(PC 사이드바와
-/// 동일한 규칙 — Session._bumpRoomActivity 참고).
+/// 동일한 규칙 — Session._bumpRoomActivity 참고). 토픽 탭은 PC 사이드바처럼 내 폴더 →
+/// 폴더 밖 토픽 → "보관된 토픽"으로 묶는다(폴더마다 같은 정렬 규칙).
 class _RoomTypeTab extends StatefulWidget {
   final Session session;
   final RoomType type;
@@ -329,18 +406,27 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
   // 직접 만들어서 ListView와 MutedScrollbar 양쪽에 명시적으로 물려준다.
   final _scrollController = ScrollController();
 
+  /// 토픽 탭 맨 아래 "보관된 토픽" 묶음을 펼쳤는지 — 서버에 저장하지 않는 화면 상태(기본 접힘).
+  bool _archivedExpanded = false;
+
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
   }
 
-  static List<Room> _favoriteFirst(List<Room> rooms) {
-    int byRecent(Room a, Room b) =>
-        b.lastActivityAt.compareTo(a.lastActivityAt);
-    final favorites = rooms.where((r) => r.favorite).toList()..sort(byRecent);
-    final others = rooms.where((r) => !r.favorite).toList()..sort(byRecent);
-    return [...favorites, ...others];
+  /// 길게 누른 토픽의 "폴더로 이동" — 내 폴더 목록 시트에서 고르거나 새 폴더를 만들어 넣는다.
+  /// 폴더 작업은 목록을 먼저 바꿔서 누른 줄이 곧 사라질 수 있으므로, 늘 떠 있는 이 탭의
+  /// context로 시트·이름 입력 창·실패 토스트를 띄운다.
+  Future<void> _pickFolderFor(Room room) async {
+    final session = widget.session;
+    final choice = await showTopicFolderPickerSheet(context, session, room);
+    if (choice == null || !mounted) return;
+    if (choice == kNewTopicFolderChoice) {
+      await createTopicFolderFlow(context, session, moveIn: room);
+    } else {
+      await moveTopicToFolderFlow(context, session, room, choice);
+    }
   }
 
   @override
@@ -358,33 +444,28 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
               // session.rooms에는 다른 팀 방까지 들어있으므로 지금 팀 것만 걸러낸다
               // (Session.rooms 주석 참고).
               final teamId = widget.session.currentTeam?.id;
-              final rooms = _favoriteFirst(
-                widget.session.rooms
-                    .where(
-                      (r) =>
-                          r.type == widget.type &&
-                          r.teamId == teamId &&
-                          !r.hidden,
-                    )
-                    .toList(),
-              );
-              if (rooms.isEmpty) {
-                return Center(
-                  child: Text(
-                    widget.emptyText,
-                    style: TextStyle(color: Theme.of(context).hintColor),
-                  ),
-                );
+              final rooms = widget.session.rooms
+                  .where(
+                    (r) =>
+                        r.type == widget.type &&
+                        r.teamId == teamId &&
+                        !r.hidden,
+                  )
+                  .toList();
+              if (widget.type == RoomType.topic) {
+                return _buildTopicList(context, rooms);
               }
+              final sorted = favoriteFirst(rooms);
+              if (sorted.isEmpty) return _buildEmpty(context);
               return MutedScrollbar(
                 controller: _scrollController,
                 child: ListView.builder(
                   controller: _scrollController,
-                  itemCount: rooms.length,
+                  itemCount: sorted.length,
                   itemBuilder: (context, i) => _RoomRow(
                     session: widget.session,
-                    room: rooms[i],
-                    onTap: () => widget.onOpenRoom(rooms[i]),
+                    room: sorted[i],
+                    onTap: () => widget.onOpenRoom(sorted[i]),
                     showActivityTime: widget.showActivityTime,
                     positionOptions: widget.positionOptions,
                   ),
@@ -396,22 +477,136 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
       ],
     );
   }
+
+  Widget _buildEmpty(BuildContext context) => Center(
+    child: Text(
+      widget.emptyText,
+      style: TextStyle(color: Theme.of(context).hintColor),
+    ),
+  );
+
+  /// 토픽 탭: 내 폴더(접기·⋯ 메뉴) → 폴더 밖 토픽 → "보관된 토픽". 폴더가 있으면 토픽이
+  /// 하나도 없어도 빈 폴더를 보여준다.
+  Widget _buildTopicList(BuildContext context, List<Room> topics) {
+    final session = widget.session;
+    final groups = groupTopics(topics, session.topicFolders);
+    if (topics.isEmpty && groups.folders.isEmpty) return _buildEmpty(context);
+
+    Widget row(Room room, {bool inFolder = false, bool archived = false}) =>
+        _RoomRow(
+          key: ValueKey('topic-row-${room.id}'),
+          session: session,
+          room: room,
+          onTap: () => widget.onOpenRoom(room),
+          showActivityTime: widget.showActivityTime,
+          positionOptions: widget.positionOptions,
+          indent: inFolder || archived,
+          // 보관된 토픽은 "보관된 토픽"에만 보여서 폴더로 옮겨도 달라 보이는 게 없다.
+          folderActions: archived
+              ? null
+              : _RowFolderActions(
+                  inFolder: session.topicFolderOf(room.id) != null,
+                  onPick: () => _pickFolderFor(room),
+                  onRemove: () =>
+                      moveTopicToFolderFlow(context, session, room, null),
+                ),
+        );
+
+    return MutedScrollbar(
+      controller: _scrollController,
+      child: ListView(
+        controller: _scrollController,
+        // 오른쪽 아래 [+] 버튼이 마지막 줄을 가리지 않게.
+        padding: const EdgeInsets.only(bottom: 88),
+        children: [
+          for (final group in groups.folders) ...[
+            TopicFolderHeader(
+              key: ValueKey('topic-folder-${group.folder.id}'),
+              mobile: true,
+              name: group.folder.name,
+              count: group.rooms.length,
+              unreadCount: group.unreadCount,
+              collapsed: group.folder.collapsed,
+              onToggle: () =>
+                  toggleTopicFolderFlow(context, session, group.folder),
+              onRename: () =>
+                  renameTopicFolderFlow(context, session, group.folder),
+              onDelete: () =>
+                  deleteTopicFolderFlow(context, session, group.folder),
+            ),
+            TopicFolderBody(
+              key: ValueKey('topic-folder-body-${group.folder.id}'),
+              expanded: !group.folder.collapsed,
+              children: [
+                for (final room in group.rooms) row(room, inFolder: true),
+              ],
+            ),
+          ],
+          for (final room in groups.loose) row(room),
+          if (groups.archived.isNotEmpty) ...[
+            TopicFolderHeader(
+              key: const ValueKey('topic-folder-archived'),
+              mobile: true,
+              archived: true,
+              name: '보관된 토픽',
+              count: groups.archived.length,
+              unreadCount: groups.archivedUnread,
+              collapsed: !_archivedExpanded,
+              onToggle: () =>
+                  setState(() => _archivedExpanded = !_archivedExpanded),
+            ),
+            TopicFolderBody(
+              key: const ValueKey('topic-folder-body-archived'),
+              expanded: _archivedExpanded,
+              children: [
+                for (final room in groups.archived) row(room, archived: true),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 토픽 줄 길게 누르기 시트의 "폴더로 이동"/"폴더에서 빼기".
+class _RowFolderActions {
+  /// 지금 내 폴더 중 하나에 들어 있는지("폴더에서 빼기"를 보여줄지).
+  final bool inFolder;
+  final VoidCallback onPick;
+  final VoidCallback onRemove;
+  const _RowFolderActions({
+    required this.inFolder,
+    required this.onPick,
+    required this.onRemove,
+  });
 }
 
 /// 방 목록 한 줄 — 아바타 + 이름(비밀 대화는 자물쇠+초록색, 즐겨찾기는 이름 옆 노란 별) +
-/// 안읽음 뱃지. 즐겨찾기/알림 끄기/나가기는 길게 누르면 뜨는 하단 시트로만 조작한다.
+/// 안읽음 뱃지. 즐겨찾기/알림 끄기/나가기(토픽은 폴더로 이동도)는 길게 누르면 뜨는 하단
+/// 시트로만 조작한다.
 class _RoomRow extends StatelessWidget {
   final Session session;
   final Room room;
   final VoidCallback onTap;
   final bool showActivityTime;
   final List<PositionOption>? positionOptions;
+
+  /// 폴더(또는 "보관된 토픽") 안의 토픽 — 머리글 아래로 들여 쓴다.
+  final bool indent;
+
+  /// 있으면 길게 누르기 시트에 "폴더로 이동"(과 폴더 안이면 "폴더에서 빼기")이 붙는다.
+  final _RowFolderActions? folderActions;
+
   const _RoomRow({
+    super.key,
     required this.session,
     required this.room,
     required this.onTap,
     this.showActivityTime = false,
     this.positionOptions,
+    this.indent = false,
+    this.folderActions,
   });
 
   @override
@@ -423,6 +618,9 @@ class _RoomRow extends StatelessWidget {
         otherMember != null &&
         hasLeadOrHigherPosition(positionOptions, otherMember.position);
     return ListTile(
+      contentPadding: indent
+          ? const EdgeInsetsDirectional.only(start: 32, end: 24)
+          : null,
       leading: RoomAvatar(
         room: room,
         myUserId: session.userId ?? '',
@@ -445,6 +643,7 @@ class _RoomRow extends StatelessWidget {
                   : null,
             ),
           ),
+          if (room.isPrivateTopic) const PrivateTopicLock(),
           if (showPositionBadge) ...[
             const SizedBox(width: 6),
             PositionBadge(label: otherMember.position!),
@@ -509,6 +708,7 @@ class _RoomRow extends StatelessWidget {
 
   void _showRoomActionSheet(BuildContext context) {
     final isDm = room.type == RoomType.dm;
+    final folder = folderActions;
     showModalBottomSheet(
       context: context,
       builder: (sheetContext) => SafeArea(
@@ -547,6 +747,26 @@ class _RoomRow extends StatelessWidget {
                 session.toggleFavorite(room);
               },
             ),
+            // 토픽만 — 내 토픽 폴더로 옮기거나 폴더에서 뺀다(PC 사이드바의 끌어다 놓기와 같다).
+            if (folder != null) ...[
+              ListTile(
+                leading: const Icon(Icons.drive_file_move_outline),
+                title: const Text('폴더로 이동'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  folder.onPick();
+                },
+              ),
+              if (folder.inFolder)
+                ListTile(
+                  leading: const Icon(Icons.folder_off_outlined),
+                  title: const Text('폴더에서 빼기'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    folder.onRemove();
+                  },
+                ),
+            ],
             ListTile(
               leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
               title: Text(

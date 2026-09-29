@@ -25,6 +25,8 @@ export const AUDIT = {
   inviteLinkRevoke: 'invite.revoke',
   teamInviteLinkCreate: 'teamInvite.create',
   teamInviteLinkRevoke: 'teamInvite.revoke',
+  // 토픽 삭제(rooms.js DELETE /rooms/:id) — 메시지·파일이 전부 사라지는 되돌릴 수 없는 일이라 남긴다.
+  topicDelete: 'topic.delete',
 };
 
 /**

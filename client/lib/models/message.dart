@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart' show StringCharacters;
+
 import 'comment.dart';
 import 'text_format.dart';
 
@@ -35,6 +37,20 @@ enum MessageType { text, image, file, sticker, system, comment }
 /// 프로젝트 자동화의 "채팅방 알림"이 보내는 메시지의 보낸 사람 이름(server/src/projectAutomation.js).
 const automationSenderName = '자동화';
 
+/// 보드 뷰 게시글(type 'post') 제목·본문 최대 길이와 첨부 개수 — 서버 message:send가 같은
+/// 값으로 다시 검사한다.
+const postTitleMaxLength = 100;
+const postTextMaxLength = 20000;
+const postAttachmentsMaxCount = 30;
+
+/// 게시글 제목·본문의 글자 수 — 서버(permissions.js graphemeLength)처럼 눈에 보이는 글자 단위로
+/// 센다(이모지·조합 문자 한 덩어리 = 1자). UTF-16 길이로 세면 입력칸(maxLength)이 받아 준 이모지
+/// 제목이 한도 초과로 막힌다.
+int postTextLength(String text) => text.characters.length;
+
+/// 모르는 타입(보드 게시글 'post' 포함)은 text로 읽는다 — 게시글은 본문이 text에 있어서 예전
+/// 화면에서도 글로 보이고, 새 enum 값을 만들면 타입별 switch들이 전부 깨지므로 게시글은
+/// [Message.isPost]로만 구분한다.
 MessageType _typeFromString(String? s) => switch (s) {
   'image' => MessageType.image,
   'file' => MessageType.file,
@@ -141,6 +157,17 @@ class Message {
   final bool isInquiryNotice;
   final String? inquiryId;
 
+  /// 보드 뷰 게시글(서버 type 'post')인지 — [type]은 text로 두고(본문은 [text]) 이 값으로만
+  /// 구분한다(_typeFromString 참고).
+  final bool isPost;
+
+  /// 게시글 제목(게시글이 아니면 null). 수정하면 그 자리에서 바뀐다(applyEdit) — non-final.
+  String? title;
+
+  /// 게시글을 고정한 시각(null이면 고정 안 됨). 고정/해제가 message:edited로 와서 그 자리에서
+  /// 바뀐다 — non-final.
+  DateTime? pinnedAt;
+
   Message({
     required this.id,
     required this.roomId,
@@ -174,8 +201,14 @@ class Message {
     this.linkPreview,
     this.isInquiryNotice = false,
     this.inquiryId,
+    this.isPost = false,
+    this.title,
+    this.pinnedAt,
     List<Comment>? comments,
   }) : comments = comments ?? [];
+
+  /// 고정된 게시글인지(보드 상단 "고정된 게시글").
+  bool get isPinned => pinnedAt != null;
 
   /// 프로젝트 자동화(채팅방 알림)가 보낸 메시지 — 사람이 아니라서 senderId가 null인 일반 글 메시지다.
   /// 안읽음·알림은 일반 메시지처럼 가지만, 누구의 "내 메시지"도 아니고 프로필도 없다. 탈퇴한
@@ -247,6 +280,13 @@ class Message {
           : LinkPreview.fromJson(json['linkPreview'] as Map<String, dynamic>),
       isInquiryNotice: json['isInquiryNotice'] as bool? ?? false,
       inquiryId: json['inquiryId'] as String?,
+      isPost: json['type'] == 'post',
+      title: json['title'] as String?,
+      pinnedAt: (json['pinnedAt'] as num?) != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (json['pinnedAt'] as num).toInt(),
+            )
+          : null,
     );
   }
 

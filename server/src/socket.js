@@ -18,6 +18,8 @@ import {
   setMemberLastReadAnnouncementAt,
 } from './db/queries/rooms.js';
 import { extractFirstUrl, fetchLinkPreview } from './linkPreview.js';
+import { topicAccess } from './access.js';
+import { MESSAGE_ATTACHMENT_MAX, parsePostFields, POST_ATTACHMENT_MAX, topicWriteDenial } from './permissions.js';
 import { postSystemMessage, unhideDmForOtherMembers } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
@@ -82,6 +84,8 @@ export function registerSocket(io) {
     //   quotedSenderName?, quotedPreview?, forwardedFromSenderName?, forwardedFromCreatedAt? }
     // (quoted*는 "메시지 공유", forwardedFrom*는 "메시지 전달"에서 쓴다 — room_list_screen.dart의
     // 메시지 롱프레스 메뉴, message_share_screen.dart/message_forward_screen.dart 참고.)
+    // 보드 뷰 게시글: { roomId, type: 'post', title, text, textFormat?, attachments? } — 보드 뷰 토픽은
+    // 게시글만, 그 밖의 방은 게시글을 받지 않는다.
     socket.on('message:send', async (payload, ack) => {
       if (!payload || typeof payload !== 'object') return;
 
@@ -89,6 +93,34 @@ export function registerSocket(io) {
       if (!room || !(await isRoomMember(room.id, socket.data.userId))) {
         ack?.({ ok: false, error: '이 방의 멤버가 아닙니다.' });
         return;
+      }
+
+      const isPost = payload.type === 'post';
+      const isBoard = room.type === 'topic' && room.viewMode === 'board';
+      if (isBoard && !isPost) {
+        ack?.({ ok: false, error: '보드 뷰 토픽에는 게시글만 올릴 수 있습니다.' });
+        return;
+      }
+      if (!isBoard && isPost) {
+        ack?.({ ok: false, error: '게시글은 보드 뷰 토픽에서만 올릴 수 있습니다.' });
+        return;
+      }
+      // 읽기 전용·보관된 토픽은 토픽을 관리할 수 있는 사람만 쓴다. 대부분의 방은 해당이 없어서
+      // 그때만 권한을 조회한다(메시지마다 조회가 늘지 않게).
+      if (room.type === 'topic' && (room.readOnly || room.archivedAt)) {
+        const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, socket.data.userId)).canManage });
+        if (denial) {
+          ack?.({ ok: false, error: denial });
+          return;
+        }
+      }
+      let post = null;
+      if (isPost) {
+        post = parsePostFields(payload.title, payload.text);
+        if (post.error) {
+          ack?.({ ok: false, error: post.error });
+          return;
+        }
       }
 
       const sender = await findUserById(socket.data.userId);
@@ -113,54 +145,68 @@ export function registerSocket(io) {
         typeof payload.thumbnailUrl === 'string' ? resolveRawUrl(payload.thumbnailUrl) : null;
 
       // 사진 여러 장을 한 말풍선으로 보낼 때 — 첫 장은 messages의 파일 칸에도 그대로 넣는다
-      // (파일 모아보기·검색·알림 미리보기가 아직 그 칸을 쓴다).
-      const attachments = Array.isArray(payload.attachments)
-        ? payload.attachments
-            .filter((a) => a && typeof a.fileUrl === 'string')
-            .slice(0, 20)
-            .map((a) => ({
-              kind: a.kind === 'file' ? 'file' : 'image',
-              fileUrl: resolveRawUrl(a.fileUrl),
-              fileName: typeof a.fileName === 'string' ? a.fileName : null,
-              fileSize: typeof a.fileSize === 'number' ? a.fileSize : null,
-              mimeType: typeof a.mimeType === 'string' ? a.mimeType : null,
-              thumbnailUrl:
-                typeof a.thumbnailUrl === 'string' ? resolveRawUrl(a.thumbnailUrl) : null,
-            }))
+      // (파일 모아보기·검색·알림 미리보기가 아직 그 칸을 쓴다). 게시글은 30개까지 — 넘으면 조용히
+      // 자르지 않고 거절한다(게시글 편집기가 이미 30개로 막으므로 넘어왔다면 파일이 빠진 채 올라가면 안 됨).
+      const validAttachments = Array.isArray(payload.attachments)
+        ? payload.attachments.filter((a) => a && typeof a.fileUrl === 'string')
         : [];
+      if (isPost && validAttachments.length > POST_ATTACHMENT_MAX) {
+        ack?.({ ok: false, error: `첨부 파일은 ${POST_ATTACHMENT_MAX}개까지 올릴 수 있습니다.` });
+        return;
+      }
+      const attachments = validAttachments
+        .slice(0, isPost ? POST_ATTACHMENT_MAX : MESSAGE_ATTACHMENT_MAX)
+        .map((a) => ({
+          kind: a.kind === 'file' ? 'file' : 'image',
+          fileUrl: resolveRawUrl(a.fileUrl),
+          fileName: typeof a.fileName === 'string' ? a.fileName : null,
+          fileSize: typeof a.fileSize === 'number' ? a.fileSize : null,
+          mimeType: typeof a.mimeType === 'string' ? a.mimeType : null,
+          thumbnailUrl:
+            typeof a.thumbnailUrl === 'string' ? resolveRawUrl(a.thumbnailUrl) : null,
+        }))
+        // 만료·위조된 서명 링크는 원본 경로로 못 되돌린다(null) — message_attachments.file_url은
+        // 비울 수 없어서 저장 전에 뺀다(게시글은 첨부가 하나여도 그 표에 저장한다).
+        .filter((a) => a.fileUrl);
       const head = attachments[0];
 
+      // 게시글은 제목·본문(앞뒤 공백 뺀 값)과 첨부 목록만 쓴다 — 단일 파일 칸(fileUrl 등)·인용·전달
+      // 값은 일반 메시지 전용이라 무시한다.
       const message = await insertMessage({
         id: randomUUID(),
         roomId: room.id,
         senderId: socket.data.userId,
         senderName: sender?.name ?? sender?.username ?? socket.data.username,
-        type: ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
-        text: typeof payload.text === 'string' ? payload.text : null,
-        textFormat:
-          room.isSecret || typeof payload.text !== 'string'
+        type: isPost ? 'post' : ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
+        title: post?.title ?? null,
+        text: post ? post.text : typeof payload.text === 'string' ? payload.text : null,
+        textFormat: post
+          ? sanitizeTextFormat(payload.textFormat, post.text)
+          : room.isSecret || typeof payload.text !== 'string'
             ? null
             : sanitizeTextFormat(payload.textFormat, payload.text),
-        fileUrl: head?.fileUrl ?? fileUrl,
+        fileUrl: head?.fileUrl ?? (post ? null : fileUrl),
         fileName:
-          head?.fileName ?? (typeof payload.fileName === 'string' ? payload.fileName : null),
+          head?.fileName ?? (!post && typeof payload.fileName === 'string' ? payload.fileName : null),
         fileSize:
-          head?.fileSize ?? (typeof payload.fileSize === 'number' ? payload.fileSize : null),
+          head?.fileSize ?? (!post && typeof payload.fileSize === 'number' ? payload.fileSize : null),
         mimeType:
-          head?.mimeType ?? (typeof payload.mimeType === 'string' ? payload.mimeType : null),
-        thumbnailUrl: head?.thumbnailUrl ?? thumbnailUrl,
-        quotedSenderName: typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
-        quotedPreview: typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
+          head?.mimeType ?? (!post && typeof payload.mimeType === 'string' ? payload.mimeType : null),
+        thumbnailUrl: head?.thumbnailUrl ?? (post ? null : thumbnailUrl),
+        quotedSenderName: !post && typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
+        quotedPreview: !post && typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
         forwardedFromSenderName:
-          typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
+          !post && typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
         forwardedFromCreatedAt:
-          typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
+          !post && typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
         isInquiryNotice: inquiryId != null,
         inquiryId,
       });
 
-      // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분).
-      if (attachments.length > 1) {
+      // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분). 게시글은
+      // 하나여도 목록으로 저장한다 — toMessageDto의 예전 방식(파일 칸 하나 = 첨부 하나)은
+      // 'image'/'file' 메시지에만 적용되기 때문이다.
+      if (attachments.length > 1 || (post && attachments.length > 0)) {
         message.attachments = await insertMessageAttachments(message.id, attachments);
       }
 

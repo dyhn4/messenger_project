@@ -81,6 +81,31 @@ export function canCreateTopic({ role, isOwner, isDesignatedTopicCreator, team }
 }
 
 /**
+ * 토픽을 관리할 수 있는지(정보·설정 변경, 보관, 삭제, 멤버 내보내기, 토픽 관리자 지정, 게시글
+ * 고정) — 그 토픽의 **토픽 관리자**(room_members.role === 'admin', 여러 명 가능)이거나 **팀
+ * 관리자**(canManageTeam). 실제로는 여기에 더해 **그 토픽의 멤버**여야 한다(access.js의
+ * topicAccess가 함께 판단) — 초대받지 않은 비공개 토픽은 팀 관리자도 볼 수 없으므로
+ * canModerateContent와 같은 원칙이다.
+ */
+export function canManageTopic({ role, isOwner, isTopicAdmin }) {
+  // 준회원은 토픽 관리자가 될 수 없다(rooms.js PUT /rooms/:id/admins) — 토픽 관리자였다가 준회원으로
+  // 내려간 사람의 행이 혹시 남아 있어도 관리 권한으로 치지 않는다.
+  return (isTopicAdmin === true && role !== 'guest') || canManageTeam({ role, isOwner });
+}
+
+/**
+ * 읽기 전용이거나 보관된 토픽에 글을 쓰려 할 때의 거절 문구 — 쓸 수 있으면 null. 두 경우 모두
+ * 토픽을 관리할 수 있는 사람([canManage])만 쓸 수 있다. 댓글은 여기 해당하지 않는다(멤버도
+ * 공지성 글 아래에 질문·답글은 달 수 있게 하기로 함 — comments.js는 이 검사를 안 한다).
+ */
+export function topicWriteDenial({ room, canManage }) {
+  if (room?.type !== 'topic' || canManage) return null;
+  if (room.archivedAt) return '보관된 토픽에서는 토픽 관리자만 글을 쓸 수 있습니다.';
+  if (room.readOnly) return '읽기 전용 토픽에서는 토픽 관리자만 글을 쓸 수 있습니다.';
+  return null;
+}
+
+/**
  * 남의 메시지/댓글을 지울 수 있는지(콘텐츠 관리) — 팀을 관리할 수 있는 사람과 같다.
  * 실제로 지우려면 여기에 더해 **그 방의 멤버**여야 하고, **팀이 정한 수정/삭제 가능 시간
  * 안**이어야 한다 — 초대받지 않은 비공개 토픽/그룹/1:1 대화는 관리자도 볼 수 없고 관리할
@@ -182,4 +207,37 @@ export function formatWindow(seconds) {
 /** 감사 로그/화면 문구용 한국어 등급 이름. */
 export function roleLabel(role) {
   return { admin: '관리자', member: '정회원', guest: '준회원' }[role] ?? role;
+}
+
+// ── 토픽·게시글 글자 수 제한 ─────────────────────────────────────────────
+// 앱 입력창(maxLength)은 글자 단위(이모지 한 덩어리 = 1자)로 세므로 서버도 같은 단위로 센다 —
+// UTF-16 길이로 세면 앱에서 허용한 이모지 이름이 거절된다(projects.js의 폴더 이름과 같은 이유).
+export const TOPIC_NAME_MAX = 60;
+export const TOPIC_DESCRIPTION_MAX = 300;
+export const TOPIC_FOLDER_NAME_MAX = 30;
+export const TOPIC_FOLDER_MAX_PER_TEAM = 50;
+export const POST_TITLE_MAX = 100;
+export const POST_TEXT_MAX = 20000;
+export const POST_ATTACHMENT_MAX = 30;
+export const MESSAGE_ATTACHMENT_MAX = 20;
+
+const graphemeSegmenter = new Intl.Segmenter('ko', { granularity: 'grapheme' });
+export function graphemeLength(s) {
+  let n = 0;
+  for (const _ of graphemeSegmenter.segment(s)) n++;
+  return n;
+}
+
+/**
+ * 게시글 제목·본문 검사(작성 socket.js, 수정 messages.js 공용) — 앞뒤 공백을 뺀 값을 돌려준다.
+ * 통과하면 `{ title, text }`, 아니면 `{ error }`.
+ */
+export function parsePostFields(rawTitle, rawText) {
+  const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+  const text = typeof rawText === 'string' ? rawText.trim() : '';
+  if (!title) return { error: '제목을 입력하세요.' };
+  if (graphemeLength(title) > POST_TITLE_MAX) return { error: `제목은 ${POST_TITLE_MAX}자 이내로 입력하세요.` };
+  if (!text) return { error: '본문을 입력하세요.' };
+  if (graphemeLength(text) > POST_TEXT_MAX) return { error: `본문은 ${POST_TEXT_MAX}자 이내로 입력하세요.` };
+  return { title, text };
 }

@@ -18,7 +18,7 @@ import {
   markTeamInviteLinkUsed,
 } from "./db/queries/teamInviteLinks.js";
 import { addTeamMembers } from "./db/queries/teams.js";
-import { addRoomMembers, listPublicTopics, listRoomMemberIds } from "./db/queries/rooms.js";
+import { addRoomMembers, listAutoInviteTopics, listRoomMemberIds } from "./db/queries/rooms.js";
 import { findDefaultPositionOption } from "./db/queries/positionOptions.js";
 import { notifyMembership, postSystemMessage } from "./rooms.js";
 
@@ -199,10 +199,11 @@ export function createAuthRouter(io) {
           await updateUser(user.id, patch);
         }
         await markTeamInviteLinkUsed(link.id);
-        // 준회원으로 부여됐다면(assignedRole === 'guest') 공개 토픽 자동 가입 대상이
-        // 아니다 — admin.js의 등급 상향 처리와 같은 규칙.
+        // 준회원으로 부여됐다면(assignedRole === 'guest') 토픽 자동 가입 대상이
+        // 아니다 — admin.js의 등급 상향 처리와 같은 규칙. 정회원 이상은 팀 멤버 추가(teams.js)와
+        // 같이 '정회원 자동 초대'가 켜진 토픽에만 들어간다.
         if (link.assignedRole !== "guest") {
-          for (const room of await listPublicTopics(link.teamId)) {
+          for (const room of await listAutoInviteTopics(link.teamId)) {
             const memberIds = await listRoomMemberIds(room.id);
             if (memberIds.includes(user.id)) continue;
             await addRoomMembers(room.id, [user.id]);

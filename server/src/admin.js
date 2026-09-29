@@ -23,8 +23,14 @@ import { db } from './db/client.js';
 import { teams as teamsTable } from './db/schema.js';
 import { isOnline } from './presence.js';
 import { accountRole, ACCOUNT_ROLES, roleLabel, TEAM_CREATION_LEVELS } from './permissions.js';
-import { addRoomMembers, listPublicTopics, listRoomMemberIds } from './db/queries/rooms.js';
-import { notifyMembership, postSystemMessage } from './rooms.js';
+import {
+  addRoomMembers,
+  clearTopicAdminRoles,
+  findRoomById,
+  listAutoInviteTopics,
+  listRoomMemberIds,
+} from './db/queries/rooms.js';
+import { notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
 
 /**
  * 서버 운영자(users.isServerAdmin)만 쓸 수 있는 관리자 콘솔 API.
@@ -266,8 +272,9 @@ export function createAdminRouter(io) {
 
   /**
    * 계정 등급 변경(준회원/정회원/관리자) — **서버 운영자만** 할 수 있는 일이다.
-   * 준회원 → 정회원 이상으로 올리면, 그동안 빠져 있던 그 사람 소속 팀들의 공개 토픽에
-   * 자동으로 넣어준다(준회원은 공개 토픽 자동 참여 대상이 아니었으므로 따라잡아 주는 것).
+   * 준회원 → 정회원 이상으로 올리면, 그동안 빠져 있던 그 사람 소속 팀들의 '정회원 자동 초대'
+   * 토픽에 자동으로 넣어준다(준회원은 자동 참여 대상이 아니었으므로 따라잡아 주는 것 — 팀에
+   * 새로 들어올 때와 같은 기준, teams.js).
    */
   router.post('/admin/users/:id/role', async (req, res) => {
     const target = await requireTarget(req, res);
@@ -286,9 +293,18 @@ export function createAdminRouter(io) {
     // 사유가 아니라서, 정지/전체 로그아웃과 달리 이 경우는 접속을 끊을 이유가 없다).
     io.to(`user:${target.id}`).emit('user:role-updated', { role: newRole });
 
+    // 준회원은 토픽 관리자가 될 수 없다 — 내려가면 맡던 토픽 관리자 역할을 거두고, 그 토픽 멤버들의
+    // 관리자 표시·관리 메뉴가 바로 바뀌도록 방 정보를 다시 보낸다.
+    if (newRole === 'guest') {
+      for (const roomId of await clearTopicAdminRoles(target.id)) {
+        const room = await findRoomById(roomId);
+        if (room) io.to(room.id).emit('room:created', await toRoomDto(room));
+      }
+    }
+
     if (before === 'guest' && newRole !== 'guest') {
       for (const teamId of await listTeamIdsForUser(target.id)) {
-        for (const room of await listPublicTopics(teamId)) {
+        for (const room of await listAutoInviteTopics(teamId)) {
           const memberIds = await listRoomMemberIds(room.id);
           if (memberIds.includes(target.id)) continue;
           await addRoomMembers(room.id, [target.id]);

@@ -19,7 +19,7 @@ import 'project_templates_view.dart'
 import 'task_config_manager.dart'
     show ProjectFieldEditor, ProjectPriorityEditor, ProjectStatusEditor;
 import 'task_type_manager.dart' show ProjectTypeEditor;
-import 'template_automation_manager.dart' show ProjectTemplateAutomationEditor;
+import 'template_automation_manager.dart' show ProjectAutomationEditor;
 
 /// "프로젝트 메뉴"를 닫은 결과 — 내용이 바뀌었는지, 프로젝트가 지워졌는지.
 enum ProjectMenuResult { changed, deleted }
@@ -277,16 +277,14 @@ class _ProjectMenuDialogState extends State<_ProjectMenuDialog> {
             canManage: project.isOwner || widget.session.canManageCurrentTeam,
           ),
         );
-      // 필드 / 상태의 "새 업무 양식"과 같은 위젯이라 키로 나눠야 상태(불러온 목록)가 섞이지 않는다.
       case _Section.automation:
         return _Pane(
           title: '자동화',
           scrollable: false,
-          child: ProjectTemplateAutomationEditor(
+          child: ProjectAutomationEditor(
             key: ValueKey('automations-${project.id}'),
             session: widget.session,
             projectId: project.id,
-            automations: true,
           ),
         );
       case _Section.notes:
@@ -898,19 +896,6 @@ class _TaskTemplateBoxState extends State<_TaskTemplateBox> {
                 label: const Text('템플릿 저장'),
               ),
             ),
-          // 새 업무 양식(예전 설정 메뉴 "업무 템플릿") — "새 업무" 창의 "양식에서 불러오기"가 쓰는
-          // 목록이라 메뉴를 없애면서 이 칸 아래로 옮겼다. 빼려면 여기부터 이 목록까지만 지우면 된다.
-          const Divider(height: 28),
-          const Text(
-            '새 업무 양식',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          ProjectTemplateAutomationEditor(
-            key: ValueKey('task-forms-${widget.project.id}'),
-            session: widget.session,
-            projectId: widget.project.id,
-          ),
         ],
       ),
     );

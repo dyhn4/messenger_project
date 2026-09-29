@@ -251,6 +251,10 @@ class SearchResult {
   );
 }
 
+/// 즐겨찾기한 첨부 하나를 가리키는 키 — 메시지 id + 파일 이름(서명된 URL은 매번 바뀌어서 못 쓴다).
+String favoriteFileKey(String messageId, String? fileName) =>
+    '$messageId/${fileName ?? ''}';
+
 /// Node.js 서버(REST 부분)와 통신하는 얇은 클라이언트.
 class ApiClient {
   final String baseUrl; // 예: https://192.168.0.62:3000 (끝에 슬래시 없음)
@@ -2081,10 +2085,13 @@ class ApiClient {
 
   /// 내가 즐겨찾기한 첨부들의 메시지 id — 파일 모아보기가 별 표시와 정렬에 쓴다.
   /// (한 메시지에 사진이 여러 장이면 그중 하나만 담아도 그 메시지가 들어온다.)
-  Future<Set<String>> fetchFavoriteFileMessageIds() async {
+  /// 즐겨찾기한 첨부들 — [favoriteFileKey] 형태로 돌려준다(한 메시지에 파일이 여러 개일 수
+  /// 있어서 메시지 id만으로는 어느 파일인지 모른다).
+  Future<Set<String>> fetchFavoriteFileKeys() async {
     final list = await _get('/api/favorite-files') as List;
     return {
-      for (final e in list) (e as Map<String, dynamic>)['messageId'] as String,
+      for (final e in list.cast<Map<String, dynamic>>())
+        favoriteFileKey(e['messageId'] as String, e['fileName'] as String?),
     };
   }
 

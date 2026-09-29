@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../models/room.dart';
+import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'date_range_calendar_panel.dart';
 
@@ -66,7 +66,7 @@ class _ExportChatDialogState extends State<_ExportChatDialog> {
       );
       if (!mounted) return;
       Navigator.of(context).pop();
-      await launchUrl(Uri.file(path), mode: LaunchMode.externalApplication);
+      await openLocalFile(path);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {

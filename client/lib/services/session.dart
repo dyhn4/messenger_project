@@ -24,12 +24,14 @@ import 'call_controller.dart';
 import 'chat_socket.dart';
 import 'deep_link_service.dart';
 import 'device_identity.dart';
+import 'download_storage.dart';
 import 'message_preview.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
 import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
 import 'secret_session_manager.dart';
+import 'typing_gate.dart';
 import 'update_socket.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
@@ -43,6 +45,18 @@ class Session extends ChangeNotifier {
     required this.settings,
     this.suppressNotifications = false,
   });
+
+  /// 세션이 바뀌면 앱 전체(방 목록·대화 목록 등)가 다시 그려진다 — 입력칸에서 한글을 조합하며
+  /// 빠르게 치는 동안에는 그 알림을 잠깐 모아 두었다가 내보낸다(typing_gate.dart 참고).
+  @override
+  void notifyListeners() =>
+      TypingGate.instance.run(this, super.notifyListeners);
+
+  @override
+  void dispose() {
+    TypingGate.instance.cancel(this);
+    super.dispose();
+  }
 
   /// "프로젝트" 창처럼 같은 사람의 둘째 Session(별도 창의 별도 소켓 연결)이 떠 있을 때, 그
   /// 창도 메인 창과 똑같이 새 메시지/댓글/공지 소켓 이벤트를 받아버려서 알림이 두 번 뜨는 걸
@@ -633,9 +647,7 @@ class Session extends ChangeNotifier {
     final dirPath = settings.downloadFolder.isNotEmpty
         ? settings.downloadFolder
         : (await getTemporaryDirectory()).path;
-    final file = File('$dirPath${Platform.pathSeparator}$fileName');
-    await file.writeAsBytes(bytes);
-    return file.path;
+    return writeDownloadFile(folder: dirPath, fileName: fileName, bytes: bytes);
   }
 
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>

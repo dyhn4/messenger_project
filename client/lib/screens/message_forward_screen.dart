@@ -83,6 +83,20 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         fileSize: message.fileSize,
         mimeType: message.mimeType,
         thumbnailUrl: message.thumbnailUrl,
+        // 사진·파일 여러 개가 딸린 메시지는 전부 같이 넘긴다(없으면 첫 번째만 전달된다).
+        attachments: message.attachments.length > 1
+            ? [
+                for (final a in message.attachments)
+                  {
+                    'kind': a.kind,
+                    'fileUrl': a.fileUrl,
+                    'fileName': ?a.fileName,
+                    'fileSize': ?a.fileSize,
+                    'mimeType': ?a.mimeType,
+                    'thumbnailUrl': ?a.thumbnailUrl,
+                  },
+              ]
+            : null,
         forwardedFromSenderName: _includeAttribution
             ? widget.senderDisplayName
             : null,

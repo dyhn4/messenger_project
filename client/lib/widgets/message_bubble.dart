@@ -753,19 +753,9 @@ class _MessageBubbleState extends State<MessageBubble> {
     final message = widget.message;
     switch (message.type) {
       case MessageType.image:
-        // 서버가 첨부를 늘 목록으로 내려준다(예전 메시지는 파일 칸 하나를 목록 하나로).
-        // 아주 예전 캐시 등으로 목록이 비어 있으면 메시지의 파일 칸으로 하나 만들어 쓴다.
-        final items = message.attachments.isNotEmpty
-            ? message.attachments
-            : [
-                MessageAttachment(
-                  id: message.id,
-                  kind: 'image',
-                  fileUrl: message.fileUrl ?? '',
-                  fileName: message.fileName,
-                  thumbnailUrl: message.thumbnailUrl,
-                ),
-              ];
+        // 서버가 첨부를 늘 목록으로 내려준다(예전 메시지는 파일 칸 하나를 목록 하나로) —
+        // 뷰어도 같은 목록·번호로 앞뒤 메시지 사진을 이어 붙인다(imageAttachmentsOf).
+        final items = imageAttachmentsOf(message);
         return ChatImageAttachments(
           session: widget.session,
           attachments: items,
@@ -781,6 +771,16 @@ class _MessageBubbleState extends State<MessageBubble> {
           thumbnailNonce: message.thumbnailNonce,
         );
       case MessageType.file:
+        // 파일 여러 개를 한 말풍선으로 보냈으면 목록 + "전체 다운로드".
+        if (message.attachments.length > 1) {
+          return ChatFileAttachments(
+            session: widget.session,
+            attachments: message.attachments,
+            message: message,
+            attachmentKey: message.attachmentKey,
+            attachmentNonce: message.attachmentNonce,
+          );
+        }
         final url = widget.resolveUrl(message.fileUrl ?? '');
         return DownloadableFile(
           session: widget.session,

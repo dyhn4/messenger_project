@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../services/api_client.dart' show favoriteFileKey;
 import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
 import '../widgets/file_actions.dart';
@@ -11,6 +12,7 @@ import '../widgets/hover_toolbar.dart';
 import '../widgets/filter_dropdown.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
+import 'image_viewer_screen.dart';
 
 enum FileCategory {
   all,
@@ -86,15 +88,18 @@ class _FilesScreenState extends State<FilesScreen> {
 
   Message? _preview; // null이면 목록, 있으면 그 첨부의 자체 미리보기("메시지" 화면).
 
-  /// 내가 즐겨찾기한 첨부의 메시지 id — 별 표시와 "즐겨찾기 먼저" 정렬에 쓴다.
+  /// 내가 즐겨찾기한 첨부([favoriteFileKey]) — 별 표시와 "즐겨찾기 먼저" 정렬에 쓴다.
   Set<String> _favorites = const {};
+
+  bool _isFavorite(Message m) =>
+      _favorites.contains(favoriteFileKey(m.id, m.fileName));
 
   /// 즐겨찾기한 것을 앞으로 보낸다. 그 안에서는 서버가 준 순서(최신순)를 그대로 둔다.
   List<Message> _sortFavoritesFirst(List<Message> items) {
     final favorite = <Message>[];
     final rest = <Message>[];
     for (final m in items) {
-      (_favorites.contains(m.id) ? favorite : rest).add(m);
+      (_isFavorite(m) ? favorite : rest).add(m);
     }
     return [...favorite, ...rest];
   }
@@ -105,7 +110,8 @@ class _FilesScreenState extends State<FilesScreen> {
     final on = await actions.toggleFavorite(context);
     if (on == null || !mounted) return;
     final next = {..._favorites};
-    on ? next.add(m.id) : next.remove(m.id);
+    final key = favoriteFileKey(m.id, m.fileName);
+    on ? next.add(key) : next.remove(key);
     setState(() {
       _favorites = next;
       final results = _results;
@@ -150,7 +156,7 @@ class _FilesScreenState extends State<FilesScreen> {
       // 못 불러와도(예: 일시적 오류) 목록 자체는 보여준다.
       Set<String> favorites = const {};
       try {
-        favorites = await api.fetchFavoriteFileMessageIds();
+        favorites = await api.fetchFavoriteFileKeys();
       } catch (_) {}
       if (!mounted) return;
       setState(() {
@@ -334,7 +340,7 @@ class _FilesScreenState extends State<FilesScreen> {
                 message: pageItems[i],
                 timeFormat: _timeFormat,
                 roomName: _roomNameFor(pageItems[i]),
-                favorited: _favorites.contains(pageItems[i].id),
+                favorited: _isFavorite(pageItems[i]),
                 actions: _actionsFor(pageItems[i]),
                 onToggleFavorite: () => _toggleFavorite(pageItems[i]),
                 onTap: () => setState(() => _preview = pageItems[i]),
@@ -366,6 +372,61 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
           IconButton(icon: const Icon(Icons.close), onPressed: widget.onClose),
         ],
+      ),
+    );
+  }
+
+  /// "메시지" 화면에서 사진을 누르면 — 지금 목록(걸어 둔 방·보낸 사람·형식 필터 그대로)의 사진을
+  /// 시간 순서대로 모아, 그 사진부터 앞뒤 메시지의 사진까지 이어서 넘겨 본다. 목록은 서버가
+  /// 한꺼번에 준 것이라 채팅방에 아직 안 불러온 오래된 사진도 들어 있다.
+  void _openViewer(Message m) {
+    final results = _results ?? const <Message>[];
+    final order = {for (final (i, r) in results.indexed) r: i};
+    final photos = [
+      for (final r in results)
+        if (r.type == MessageType.image) r,
+    ];
+    // 목록은 최신순(+즐겨찾기 먼저)이라 시간 순서로 다시 줄 세운다 — 같은 시각(한 메시지의
+    // 여러 장)은 목록 순서 그대로.
+    photos.sort((a, b) {
+      final byTime = a.createdAt.compareTo(b.createdAt);
+      return byTime != 0 ? byTime : order[a]!.compareTo(order[b]!);
+    });
+    // 한 메시지의 여러 장이 목록에서 줄마다 따로 오므로(메시지 id가 같다) 파일 주소까지 붙여 구분한다.
+    String idOf(Message x) => '${x.id}|${x.fileUrl}';
+    var images = [
+      for (final x in photos)
+        ViewerImage(
+          id: idOf(x),
+          message: x,
+          url: widget.session.resolveUrl(x.fileUrl ?? ''),
+          fileName: x.fileName ?? 'image.png',
+          fileSize: x.fileSize,
+        ),
+    ];
+    var start = images.indexWhere((v) => v.id == idOf(m));
+    if (start < 0) {
+      images = [
+        ViewerImage(
+          id: idOf(m),
+          message: m,
+          url: widget.session.resolveUrl(m.fileUrl ?? ''),
+          fileName: m.fileName ?? 'image.png',
+          fileSize: m.fileSize,
+        ),
+      ];
+      start = 0;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ImageViewerScreen(
+          images: images,
+          initialIndex: start,
+          session: widget.session,
+          message: m,
+          // 댓글 패널은 그 사진의 방에서 연다(방을 모르면 댓글 버튼만 안 보인다).
+          room: widget.session.rooms.where((r) => r.id == m.roomId).firstOrNull,
+        ),
       ),
     );
   }
@@ -416,6 +477,8 @@ class _FilesScreenState extends State<FilesScreen> {
             const SizedBox(height: 8),
           ],
           if (m.type == MessageType.image)
+            // 마우스를 올리면 목록 줄과 같은 즐겨찾기 · 더보기가 뜨고, 누르면 지금 목록의 앞뒤
+            // 사진까지 넘겨 보는 뷰어가 열린다.
             DownloadableImage(
               session: widget.session,
               url: widget.session.resolveUrl(m.fileUrl ?? ''),
@@ -423,6 +486,10 @@ class _FilesScreenState extends State<FilesScreen> {
               thumbnailUrl: m.thumbnailUrl == null
                   ? null
                   : widget.session.resolveUrl(m.thumbnailUrl!),
+              actions: _actionsFor(m),
+              favorited: _isFavorite(m),
+              onToggleFavorite: () => _toggleFavorite(m),
+              onOpen: () => _openViewer(m),
             )
           else
             DownloadableFile(
@@ -717,6 +784,8 @@ class _FileResultRowState extends State<_FileResultRow> {
                         context,
                         widget.actions,
                         isImage: isImage,
+                        favorited: widget.favorited,
+                        onToggleFavorite: widget.onToggleFavorite,
                       ),
                     ),
                 ],

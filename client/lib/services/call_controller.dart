@@ -45,6 +45,10 @@ Future<void> _startCallForegroundService(
     ],
     notificationTitle: '통화 중',
     notificationText: roomName,
+    // 기본값은 앱 아이콘(적응형)이라 알림 아이콘으로 쓰면 안 된다 — 흰 실루엣으로(AndroidManifest.xml).
+    notificationIcon: const NotificationIcon(
+      metaDataName: 'com.teamtalk.messenger.NOTIFICATION_ICON',
+    ),
   );
 }
 

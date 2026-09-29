@@ -4,9 +4,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../models/message.dart';
+import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart';
@@ -58,7 +58,7 @@ class FileActions {
         attachmentNonce: attachmentNonce,
       );
       if (!context.mounted || savedPath == null) return;
-      showAppToast(context, '다운로드 완료: $savedPath');
+      showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
     } catch (e) {
       if (context.mounted) showAppToast(context, '다운로드 실패: $e');
     }
@@ -90,10 +90,13 @@ class FileActions {
     try {
       final bytes = await _bytes();
       final folder = session.settings.downloadFolder;
-      final dir = folder.isEmpty ? Directory.systemTemp.path : folder;
-      final path = '$dir${Platform.pathSeparator}$fileName';
-      await File(path).writeAsBytes(bytes);
-      await launchUrl(Uri.file(path), mode: LaunchMode.externalApplication);
+      final path = await writeDownloadFile(
+        folder: folder.isEmpty ? Directory.systemTemp.path : folder,
+        fileName: fileName,
+        bytes: bytes,
+        reuseIdentical: true,
+      );
+      await openLocalFile(path);
     } catch (e) {
       if (context.mounted) showAppToast(context, '원본을 열지 못했습니다: $e');
     }

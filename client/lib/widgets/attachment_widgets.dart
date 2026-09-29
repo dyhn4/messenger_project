@@ -7,15 +7,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../models/message.dart' show Message, MessageAttachment;
+import '../models/message.dart' show Message, MessageAttachment, MessageType;
 import '../models/room.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
+import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
+import 'app_toast.dart';
 import 'file_actions.dart';
 import 'hover_toolbar.dart';
 
@@ -49,7 +50,8 @@ Future<Uint8List> fetchAttachmentBytes({
 }
 
 /// 첨부 하나를 다운로드해서 저장한다. 환경설정에서 "저장 위치 안 물어보기"가 켜져 있으면
-/// 설정된 폴더에 바로 저장하고, 꺼져 있으면 저장 위치를 물어본다. 저장 후 "다운로드 완료 시
+/// 설정된 폴더에 바로 저장하고(안드로이드는 늘 Download/TangoTalk에 바로 — 같은 이름이 있으면
+/// 덮어쓰지 않고 번호를 붙인다), 꺼져 있으면 저장 위치를 물어본다. 저장 후 "다운로드 완료 시
 /// 폴더 열기"가 켜져 있으면 그 폴더를 연다. 저장된 경로를 반환한다(취소되면 null).
 /// MessageBubble의 이미지/파일 첨부와 댓글의 이미지/파일 첨부가 같이 쓴다.
 Future<String?> saveAttachment({
@@ -67,10 +69,12 @@ Future<String?> saveAttachment({
 
   final settings = session.settings;
   String? savedPath;
-  if (settings.downloadWithoutAsking && settings.downloadFolder.isNotEmpty) {
-    final path = '${settings.downloadFolder}${Platform.pathSeparator}$fileName';
-    await File(path).writeAsBytes(bytes);
-    savedPath = path;
+  if (settings.savesWithoutAsking) {
+    savedPath = await writeDownloadFile(
+      folder: settings.downloadFolder,
+      fileName: fileName,
+      bytes: bytes,
+    );
   } else {
     savedPath = await FilePicker.saveFile(
       fileName: fileName,
@@ -85,6 +89,224 @@ Future<String?> saveAttachment({
     await settings.openDownloadFolder();
   }
   return savedPath;
+}
+
+/// 이미지 메시지의 사진들. 서버가 첨부를 늘 목록으로 내려주지만, 아주 예전 캐시 등으로 목록이
+/// 비어 있으면 메시지의 파일 칸으로 하나 만든다 — 말풍선과 뷰어가 같은 순서·번호를 쓰게 한 곳에 둔다.
+List<MessageAttachment> imageAttachmentsOf(Message m) =>
+    m.attachments.isNotEmpty
+    ? m.attachments
+    : [
+        MessageAttachment(
+          id: m.id,
+          kind: 'image',
+          fileUrl: m.fileUrl ?? '',
+          fileName: m.fileName,
+          fileSize: m.fileSize,
+          thumbnailUrl: m.thumbnailUrl,
+        ),
+      ];
+
+/// 뷰어에서 한 장을 가리키는 이름 — 메시지 id + 그 메시지 안에서 몇 번째 사진인지.
+String viewerImageId(Message m, int index) => '${m.id}#$index';
+
+/// 방에 불러와 있는 메시지들의 사진을 시간 순서대로 모은다 — 뷰어에서 앞뒤 메시지의 사진까지
+/// 이어서 넘겨 본다. 지워진 메시지와 복호화하지 못한 비밀 대화 메시지는 뺀다(댓글은 이미지
+/// 메시지가 아니라 애초에 안 들어온다). 비밀 대화 사진은 그 장을 볼 때 받아 복호화한다.
+List<ViewerImage> roomViewerImages(Session session, List<Message> messages) {
+  final images =
+      messages
+          .where(
+            (m) =>
+                m.type == MessageType.image && !m.deleted && !m.decryptFailed,
+          )
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  return [
+    for (final m in images)
+      for (final (i, a) in imageAttachmentsOf(m).indexed)
+        if (a.isImage)
+          ViewerImage(
+            id: viewerImageId(m, i),
+            message: m,
+            url: session.resolveUrl(a.fileUrl),
+            fileName: a.fileName ?? 'image.png',
+            fileSize: a.fileSize,
+            loadBytes: m.attachmentKey == null
+                ? null
+                : () => fetchAttachmentBytes(
+                    url: session.resolveUrl(a.fileUrl),
+                    attachmentKey: m.attachmentKey,
+                    attachmentNonce: m.attachmentNonce,
+                  ),
+          ),
+  ];
+}
+
+/// 한 메시지의 첨부를 전부 한 폴더에 저장한다(말풍선 아래 "전체 다운로드").
+/// "저장 위치 안 물어보기"가 켜져 있으면 설정된 폴더에 바로, 아니면 **폴더를 한 번만** 물어본다
+/// (파일마다 저장 창이 뜨면 여러 장일 때 번거롭다). 같은 이름이 이미 있으면 "이름 (1).png"처럼
+/// 번호를 붙여 덮어쓰지 않는다. 저장한 개수와 폴더를 돌려준다(취소되면 null).
+Future<({int count, String folder})?> saveAllAttachments({
+  required Session session,
+  required List<({String url, String fileName})> items,
+  String? attachmentKey,
+  String? attachmentNonce,
+}) async {
+  final settings = session.settings;
+  final folder = settings.savesWithoutAsking
+      ? settings.downloadFolder
+      : await FilePicker.getDirectoryPath(
+          initialDirectory: settings.downloadFolder.isEmpty
+              ? null
+              : settings.downloadFolder,
+        );
+  if (folder == null) return null;
+
+  var count = 0;
+  for (final item in items) {
+    final bytes = await fetchAttachmentBytes(
+      url: item.url,
+      attachmentKey: attachmentKey,
+      attachmentNonce: attachmentNonce,
+    );
+    await writeDownloadFile(
+      folder: folder,
+      fileName: item.fileName,
+      bytes: bytes,
+    );
+    count++;
+  }
+  if (settings.openFolderAfterDownload) await settings.openDownloadFolder();
+  return (count: count, folder: folder);
+}
+
+/// 여러 첨부가 딸린 말풍선의 맨 아래 줄 — 오른쪽 끝에 "전체 다운로드".
+class AllDownloadBar extends StatefulWidget {
+  final Session session;
+  final List<({String url, String fileName})> items;
+  final String? attachmentKey;
+  final String? attachmentNonce;
+
+  const AllDownloadBar({
+    super.key,
+    required this.session,
+    required this.items,
+    this.attachmentKey,
+    this.attachmentNonce,
+  });
+
+  @override
+  State<AllDownloadBar> createState() => _AllDownloadBarState();
+}
+
+class _AllDownloadBarState extends State<AllDownloadBar> {
+  bool _busy = false;
+
+  Future<void> _downloadAll() async {
+    setState(() => _busy = true);
+    try {
+      final result = await saveAllAttachments(
+        session: widget.session,
+        items: widget.items,
+        attachmentKey: widget.attachmentKey,
+        attachmentNonce: widget.attachmentNonce,
+      );
+      if (!mounted || result == null) return;
+      showAppToast(
+        context,
+        '${result.count}개를 다운로드했습니다: ${displayDownloadPath(result.folder)}',
+      );
+    } catch (e) {
+      if (mounted) showAppToast(context, '다운로드 실패: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          onPressed: _busy ? null : _downloadAll,
+          style: TextButton.styleFrom(
+            foregroundColor: hint,
+            // 바탕은 마우스를 올렸을 때(글자색 8%가 위에 겹친다)보다 연하게 깔아 둔다.
+            backgroundColor: hint.withValues(alpha: 0.05),
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          icon: _busy
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.download_outlined, size: 16),
+          label: Text('전체 다운로드 (${widget.items.length})'),
+        ),
+      ),
+    );
+  }
+}
+
+/// 한 메시지에 파일이 여러 개 딸렸을 때 — 파일 칸을 위아래로 쌓고 맨 아래에 "전체 다운로드".
+class ChatFileAttachments extends StatelessWidget {
+  final Session session;
+  final List<MessageAttachment> attachments;
+  final Message? message;
+  final String? attachmentKey;
+  final String? attachmentNonce;
+
+  const ChatFileAttachments({
+    super.key,
+    required this.session,
+    required this.attachments,
+    this.message,
+    this.attachmentKey,
+    this.attachmentNonce,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < attachments.length; i++) ...[
+          if (i > 0) const SizedBox(height: 6),
+          DownloadableFile(
+            session: session,
+            url: session.resolveUrl(attachments[i].fileUrl),
+            fileName: attachments[i].fileName ?? '파일',
+            message: message,
+            attachmentKey: attachmentKey,
+            attachmentNonce: attachmentNonce,
+          ),
+        ],
+        if (attachments.length > 1)
+          AllDownloadBar(
+            session: session,
+            items: [
+              for (final a in attachments)
+                (
+                  url: session.resolveUrl(a.fileUrl),
+                  fileName: a.fileName ?? '파일',
+                ),
+            ],
+            attachmentKey: attachmentKey,
+            attachmentNonce: attachmentNonce,
+          ),
+      ],
+    );
+  }
 }
 
 /// 채팅/댓글에 올라온 이미지 하나. 누르면 크게 보고, 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
@@ -105,6 +327,15 @@ class DownloadableImage extends StatefulWidget {
   final String? thumbnailKey;
   final String? thumbnailNonce;
 
+  /// 주면(파일 패널의 "메시지" 화면) 마우스를 올렸을 때 다운로드 대신 파일 목록 줄과 같은
+  /// 즐겨찾기 · 더보기(파일 전달·다운로드·즐겨찾기·원본 파일 보기)를 띄운다.
+  final FileActions? actions;
+  final bool favorited;
+  final VoidCallback? onToggleFavorite;
+
+  /// 누르면 기본 뷰어(이 한 장) 대신 이걸 부른다 — 앞뒤 사진까지 넘기는 뷰어를 열 때.
+  final VoidCallback? onOpen;
+
   const DownloadableImage({
     super.key,
     required this.session,
@@ -115,6 +346,10 @@ class DownloadableImage extends StatefulWidget {
     this.thumbnailUrl,
     this.thumbnailKey,
     this.thumbnailNonce,
+    this.actions,
+    this.favorited = false,
+    this.onToggleFavorite,
+    this.onOpen,
   });
 
   @override
@@ -123,6 +358,9 @@ class DownloadableImage extends StatefulWidget {
 
 class _DownloadableImageState extends State<DownloadableImage> {
   bool _hovering = false;
+
+  /// 더보기 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다(파일 목록 줄과 같은 이유).
+  bool _menuOpen = false;
   bool _downloading = false;
   Future<Uint8List>? _previewBytes;
 
@@ -158,21 +396,19 @@ class _DownloadableImageState extends State<DownloadableImage> {
       );
       if (!mounted) return;
       if (savedPath != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('다운로드 완료: $savedPath')));
+        showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('다운로드 실패: $e')));
+      showAppToast(context, '다운로드 실패: $e');
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
   }
 
   void _open() {
+    final onOpen = widget.onOpen;
+    if (onOpen != null) return onOpen();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ImageViewerScreen.single(
@@ -187,6 +423,39 @@ class _DownloadableImageState extends State<DownloadableImage> {
                 )
               : null,
         ),
+      ),
+    );
+  }
+
+  /// 즐겨찾기 · 더보기 — 파일 목록 줄과 같다. 즐겨찾기한 사진은 마우스를 올리지 않아도 별이 보인다.
+  Widget _fileToolbar(BuildContext context, FileActions actions) {
+    final show = _hovering || _menuOpen;
+    if (!show && !widget.favorited) return const SizedBox.shrink();
+    return Positioned(
+      right: 6,
+      top: 6,
+      child: HoverToolbar(
+        children: [
+          HoverToolbarButton(
+            icon: widget.favorited ? Icons.star : Icons.star_border,
+            color: widget.favorited ? Colors.amber : null,
+            tooltip: widget.favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+            onPressed: widget.onToggleFavorite,
+          ),
+          if (show)
+            HoverToolbarButton(
+              icon: Icons.more_vert,
+              tooltip: '더보기',
+              onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
+              menuChildren: fileActionMenuItems(
+                context,
+                actions,
+                isImage: true,
+                favorited: widget.favorited,
+                onToggleFavorite: widget.onToggleFavorite,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -255,7 +524,9 @@ class _DownloadableImageState extends State<DownloadableImage> {
                 child: image,
               ),
             ),
-            if (_hovering)
+            if (widget.actions != null)
+              _fileToolbar(context, widget.actions!)
+            else if (_hovering)
               Positioned(
                 right: 6,
                 top: 6,
@@ -322,16 +593,18 @@ class ChatImageAttachments extends StatelessWidget {
     this.thumbnailNonce,
   });
 
-  /// 뷰어에 넘길 목록 — 비밀 대화면 여는 시점에 원본을 받아 복호화한다.
+  /// 이 말풍선의 사진만 넘겨볼 때의 목록 — 비밀 대화면 그 장을 볼 때 원본을 받아 복호화한다.
   List<ViewerImage> _viewerImages() => [
-    for (final a in attachments)
+    for (final (i, a) in attachments.indexed)
       ViewerImage(
+        id: message == null ? null : viewerImageId(message!, i),
+        message: message,
         url: session.resolveUrl(a.fileUrl),
         fileName: a.fileName ?? 'image.png',
         fileSize: a.fileSize,
-        bytesFuture: attachmentKey == null
+        loadBytes: attachmentKey == null
             ? null
-            : fetchAttachmentBytes(
+            : () => fetchAttachmentBytes(
                 url: session.resolveUrl(a.fileUrl),
                 attachmentKey: attachmentKey,
                 attachmentNonce: attachmentNonce,
@@ -340,16 +613,44 @@ class ChatImageAttachments extends StatelessWidget {
   ];
 
   void _open(BuildContext context, int index) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ImageViewerScreen(
-          images: _viewerImages(),
-          initialIndex: index,
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => _viewer(index)));
+  }
+
+  /// 채팅방 말풍선에서 열면 그 방의 앞뒤 메시지 사진까지 이어서 넘겨 보고, 맨 앞에 닿으면 과거
+  /// 메시지를 더 불러온다. 방을 모르거나 그 방 목록에 이 메시지가 없으면 이 말풍선의 사진만.
+  Widget _viewer(int index) {
+    final room = this.room, message = this.message;
+    if (room != null && message != null) {
+      final controller = session.controllerFor(room);
+      List<ViewerImage> all() => roomViewerImages(session, controller.messages);
+      final images = all();
+      final start = images.indexWhere(
+        (v) => v.id == viewerImageId(message, index),
+      );
+      if (start >= 0) {
+        return ImageViewerScreen(
+          images: images,
+          initialIndex: start,
           session: session,
           message: message,
           room: room,
-        ),
-      ),
+          source: ViewerImageSource(
+            changes: controller,
+            images: all,
+            hasOlder: () => controller.hasMoreHistory,
+            loadOlder: controller.loadOlderMessages,
+          ),
+        );
+      }
+    }
+    return ImageViewerScreen(
+      images: _viewerImages(),
+      initialIndex: index,
+      session: session,
+      message: message,
+      room: room,
     );
   }
 
@@ -391,19 +692,38 @@ class ChatImageAttachments extends StatelessWidget {
         final tileHeight = math.min(cell, (budget - gap * (rows - 1)) / rows);
         return SizedBox(
           width: width,
-          child: Wrap(
-            spacing: gap,
-            runSpacing: gap,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var i = 0; i < attachments.length; i++)
-                _ChatImageTile(
-                  session: session,
-                  message: message,
-                  attachment: attachments[i],
-                  width: cell,
-                  fixedHeight: tileHeight,
-                  onTap: () => _open(context, i),
-                ),
+              Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  for (var i = 0; i < attachments.length; i++)
+                    _ChatImageTile(
+                      session: session,
+                      message: message,
+                      attachment: attachments[i],
+                      width: cell,
+                      fixedHeight: tileHeight,
+                      onTap: () => _open(context, i),
+                    ),
+                ],
+              ),
+              // 여러 장이면 말풍선 아래를 한 줄 늘려 오른쪽 끝에 "전체 다운로드"를 둔다.
+              AllDownloadBar(
+                session: session,
+                items: [
+                  for (final a in attachments)
+                    (
+                      url: session.resolveUrl(a.fileUrl),
+                      fileName: a.fileName ?? 'image.png',
+                    ),
+                ],
+                attachmentKey: attachmentKey,
+                attachmentNonce: attachmentNonce,
+              ),
             ],
           ),
         );
@@ -535,15 +855,11 @@ class _ChatImageTileState extends State<_ChatImageTile> {
       );
       if (!mounted) return;
       if (savedPath != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('다운로드 완료: $savedPath')));
+        showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('다운로드 실패: $e')));
+      showAppToast(context, '다운로드 실패: $e');
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -666,10 +982,14 @@ class _ChatImageTileState extends State<_ChatImageTile> {
 
 /// 첨부(이미지/파일) "더보기" 메뉴의 항목들 — 파일 전달 · 다운로드 · 즐겨찾기 (+이미지는
 /// "원본 파일 보기"까지). 파일은 누르면 어차피 원본을 받아서 여는 동작이라 그 항목이 없다.
+/// 별 표시를 따로 들고 있는 화면(파일 패널)은 [favorited]·[onToggleFavorite]를 줘서 메뉴의
+/// 즐겨찾기도 그 별과 같이 바뀌게 한다(안 주면 서버에만 토글하고 알약으로 알린다).
 List<Widget> fileActionMenuItems(
   BuildContext context,
   FileActions actions, {
   required bool isImage,
+  bool favorited = false,
+  VoidCallback? onToggleFavorite,
 }) => [
   hoverMenuItem(
     icon: Icons.send_outlined,
@@ -682,9 +1002,9 @@ List<Widget> fileActionMenuItems(
     onPressed: () => actions.download(context),
   ),
   hoverMenuItem(
-    icon: Icons.star_border,
-    label: '즐겨찾기',
-    onPressed: () => actions.toggleFavorite(context),
+    icon: favorited ? Icons.star : Icons.star_border,
+    label: favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+    onPressed: onToggleFavorite ?? () => actions.toggleFavorite(context),
   ),
   if (isImage)
     hoverMenuItem(
@@ -742,15 +1062,11 @@ class _DownloadableFileState extends State<DownloadableFile> {
       );
       if (!mounted) return;
       if (savedPath != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('다운로드 완료: $savedPath')));
+        showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('다운로드 실패: $e')));
+      showAppToast(context, '다운로드 실패: $e');
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -794,20 +1110,23 @@ class _DownloadableFileState extends State<DownloadableFile> {
       // 다운로드 폴더에 남아있게), 지정 안 했으면 원래대로 임시 폴더로 폴백한다.
       final isSecret = widget.attachmentKey != null;
       final downloadFolder = widget.session.settings.downloadFolder;
-      final dirPath = (!isSecret && downloadFolder.isNotEmpty)
-          ? downloadFolder
-          : (await getTemporaryDirectory()).path;
-      final file = File('$dirPath${Platform.pathSeparator}${widget.fileName}');
-      await file.writeAsBytes(bytes);
-      await launchUrl(
-        Uri.file(file.path),
-        mode: LaunchMode.externalApplication,
-      );
+      final String path;
+      if (!isSecret && downloadFolder.isNotEmpty) {
+        path = await writeDownloadFile(
+          folder: downloadFolder,
+          fileName: widget.fileName,
+          bytes: bytes,
+          reuseIdentical: true,
+        );
+      } else {
+        final temp = (await getTemporaryDirectory()).path;
+        path = '$temp${Platform.pathSeparator}${widget.fileName}';
+        await File(path).writeAsBytes(bytes);
+      }
+      await openLocalFile(path);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('열기 실패: $e')));
+      showAppToast(context, '열기 실패: $e');
     } finally {
       if (mounted) setState(() => _opening = false);
     }

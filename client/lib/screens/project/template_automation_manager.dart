@@ -13,7 +13,7 @@ class _Ctx {
   final List<TaskType> types;
   final List<TaskStatusDef> statuses;
 
-  /// 자동화 요약(IF 조건)에만 쓰여서 템플릿 화면에서는 비어 있다.
+  /// 자동화 요약(IF 조건)이 쓴다.
   final List<TaskPriorityDef> priorities;
   final List<TaskFieldDef> fields;
   const _Ctx(
@@ -61,30 +61,23 @@ class _Ctx {
   }
 }
 
-/// 프로젝트의 업무 템플릿("새 업무 양식"), 또는 자동화 규칙과 규칙 실행 기록을 관리한다 —
-/// 프로젝트 담당자와 팀 소유자·관리자만 쓸 수 있다(서버도 다시 확인한다). "프로젝트 설정"의
-/// 필드 / 상태 > "업무 템플릿" 칸과 "자동화" 메뉴가 프로젝트 정보 로딩을 나눠 쓴다.
-class ProjectTemplateAutomationEditor extends StatefulWidget {
+/// 프로젝트의 자동화 규칙과 규칙 실행 기록을 관리한다("프로젝트 설정 > 자동화") — 프로젝트
+/// 담당자와 팀 소유자·관리자만 쓸 수 있다(서버도 다시 확인한다).
+class ProjectAutomationEditor extends StatefulWidget {
   final Session session;
   final String projectId;
-
-  /// true면 자동화(규칙 + 실행 기록) 탭을, false면 새 업무 양식 목록만 보여준다. 양식 목록은
-  /// 설정 칸의 스크롤 안에 들어가므로 자체 스크롤 없이 내용 높이만큼만 차지한다.
-  final bool automations;
-  const ProjectTemplateAutomationEditor({
+  const ProjectAutomationEditor({
     super.key,
     required this.session,
     required this.projectId,
-    this.automations = false,
   });
 
   @override
-  State<ProjectTemplateAutomationEditor> createState() =>
-      _ProjectTemplateAutomationEditorState();
+  State<ProjectAutomationEditor> createState() =>
+      _ProjectAutomationEditorState();
 }
 
-class _ProjectTemplateAutomationEditorState
-    extends State<ProjectTemplateAutomationEditor> {
+class _ProjectAutomationEditorState extends State<ProjectAutomationEditor> {
   _Ctx? _ctx;
   String? _error;
 
@@ -101,12 +94,8 @@ class _ProjectTemplateAutomationEditorState
       final types = await api.fetchTaskTypes(widget.projectId);
       final statuses = await api.fetchTaskStatuses(widget.projectId);
       // 규칙 요약의 IF 조건이 우선순위·사용자 정의 필드 이름을 쓴다.
-      final priorities = widget.automations
-          ? await api.fetchTaskPriorities(widget.projectId)
-          : const <TaskPriorityDef>[];
-      final fields = widget.automations
-          ? await api.fetchTaskFields(widget.projectId)
-          : const <TaskFieldDef>[];
+      final priorities = await api.fetchTaskPriorities(widget.projectId);
+      final fields = await api.fetchTaskFields(widget.projectId);
       if (mounted) {
         setState(
           () => _ctx = _Ctx(
@@ -129,15 +118,7 @@ class _ProjectTemplateAutomationEditorState
     return _error != null
         ? Center(child: Text(_error!))
         : ctx == null
-        ? (widget.automations
-              ? const Center(child: CircularProgressIndicator())
-              : const _Loading())
-        : !widget.automations
-        ? _TemplatesTab(
-            session: widget.session,
-            projectId: widget.projectId,
-            ctx: ctx,
-          )
+        ? const Center(child: CircularProgressIndicator())
         : DefaultTabController(
             length: 2,
             child: Column(
@@ -171,23 +152,6 @@ class _ProjectTemplateAutomationEditorState
   }
 }
 
-/// 불러오는 중 — 양식 목록은 바깥 스크롤 안(높이 제한 없음)에 놓이므로 작게 한 줄만 차지한다.
-class _Loading extends StatelessWidget {
-  const _Loading();
-
-  @override
-  Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.symmetric(vertical: 16),
-    child: Center(
-      child: SizedBox(
-        width: 22,
-        height: 22,
-        child: CircularProgressIndicator(strokeWidth: 2.4),
-      ),
-    ),
-  );
-}
-
 Future<bool> _confirmDelete(
   BuildContext context,
   String title,
@@ -212,364 +176,6 @@ Future<bool> _confirmDelete(
     ),
   );
   return ok == true;
-}
-
-// ───────────────────────── 새 업무 양식 ─────────────────────────
-
-class _TemplatesTab extends StatefulWidget {
-  final Session session;
-  final String projectId;
-  final _Ctx ctx;
-  const _TemplatesTab({
-    required this.session,
-    required this.projectId,
-    required this.ctx,
-  });
-
-  @override
-  State<_TemplatesTab> createState() => _TemplatesTabState();
-}
-
-class _TemplatesTabState extends State<_TemplatesTab> {
-  List<TaskTemplate>? _items;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final list = await widget.session.api!.fetchTaskTemplates(
-        widget.projectId,
-      );
-      if (mounted) {
-        setState(() {
-          _items = list;
-          _error = null;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    }
-  }
-
-  Future<void> _edit({TaskTemplate? existing}) async {
-    final result = await showDialog<_TemplateInput>(
-      context: context,
-      builder: (_) => _TemplateEditDialog(ctx: widget.ctx, existing: existing),
-    );
-    if (result == null) return;
-    try {
-      await widget.session.api!.saveTaskTemplate(
-        widget.projectId,
-        templateId: existing?.id,
-        name: result.name,
-        title: result.title,
-        description: result.description,
-        priority: result.priority,
-        typeId: result.typeId,
-        assigneeId: result.assigneeId,
-        dueOffsetDays: result.dueOffsetDays,
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) showAppToast(context, '저장하지 못했습니다: $e');
-    }
-  }
-
-  Future<void> _delete(TaskTemplate t) async {
-    if (!await _confirmDelete(context, '양식 삭제', "'${t.name}' 양식을 삭제할까요?")) {
-      return;
-    }
-    try {
-      await widget.session.api!.deleteTaskTemplate(t.id);
-      await _load();
-    } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
-    }
-  }
-
-  String _summary(TaskTemplate t) => [
-    if (t.title.isNotEmpty) '제목 "${t.title}"',
-    '우선순위 ${taskPriorityLabel(t.priority)}',
-    if (t.typeId != null) '유형 ${widget.ctx.typeName(t.typeId)}',
-    if (t.assigneeId != null) '담당 ${widget.ctx.memberName(t.assigneeId)}',
-    if (t.dueOffsetDays != null) '마감 +${t.dueOffsetDays}일',
-  ].join(' · ');
-
-  @override
-  Widget build(BuildContext context) {
-    if (_error != null) return Center(child: Text(_error!));
-    final items = _items;
-    if (items == null) return const _Loading();
-    final hint = Theme.of(context).hintColor;
-    // 설정 > 필드 / 상태의 "업무 템플릿" 칸 스크롤 안에 들어가므로 ListView 대신 줄을 그대로 늘어놓는다.
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          '"새 업무" 창의 "양식에서 불러오기"에서 고르면 제목·설명·우선순위·유형·담당자·마감일이 '
-          '미리 채워집니다.',
-          style: TextStyle(color: hint, fontSize: 12),
-        ),
-        const SizedBox(height: 4),
-        if (items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Center(
-              child: Text(
-                '만든 양식이 없습니다.',
-                style: TextStyle(color: hint, fontSize: 13),
-              ),
-            ),
-          )
-        else
-          for (final t in items)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.description_outlined),
-              title: Text(t.name),
-              subtitle: Text(
-                _summary(t),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: hint, fontSize: 11),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    tooltip: '수정',
-                    onPressed: () => _edit(existing: t),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    tooltip: '삭제',
-                    onPressed: () => _delete(t),
-                  ),
-                ],
-              ),
-            ),
-        const SizedBox(height: 4),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            onPressed: () => _edit(),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('양식 추가'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TemplateInput {
-  final String name;
-  final String title;
-  final String description;
-  final TaskPriority priority;
-  final String? typeId;
-  final String? assigneeId;
-  final int? dueOffsetDays;
-  const _TemplateInput({
-    required this.name,
-    required this.title,
-    required this.description,
-    required this.priority,
-    this.typeId,
-    this.assigneeId,
-    this.dueOffsetDays,
-  });
-}
-
-class _TemplateEditDialog extends StatefulWidget {
-  final _Ctx ctx;
-  final TaskTemplate? existing;
-  const _TemplateEditDialog({required this.ctx, this.existing});
-
-  @override
-  State<_TemplateEditDialog> createState() => _TemplateEditDialogState();
-}
-
-class _TemplateEditDialogState extends State<_TemplateEditDialog> {
-  late final _name = TextEditingController(text: widget.existing?.name ?? '');
-  late final _title = TextEditingController(text: widget.existing?.title ?? '');
-  late final _description = TextEditingController(
-    text: widget.existing?.description ?? '',
-  );
-  late final _due = TextEditingController(
-    text: widget.existing?.dueOffsetDays?.toString() ?? '',
-  );
-  late TaskPriority _priority =
-      widget.existing?.priority ?? TaskPriority.normal;
-  late String? _typeId =
-      widget.ctx.types.any((t) => t.id == widget.existing?.typeId)
-      ? widget.existing?.typeId
-      : null;
-  late String? _assigneeId =
-      widget.ctx.members.any((m) => m.id == widget.existing?.assigneeId)
-      ? widget.existing?.assigneeId
-      : null;
-  String? _error;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _title.dispose();
-    _description.dispose();
-    _due.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final name = _name.text.trim();
-    if (name.isEmpty) {
-      setState(() => _error = '양식 이름을 입력하세요.');
-      return;
-    }
-    int? due;
-    if (_due.text.trim().isNotEmpty) {
-      due = int.tryParse(_due.text.trim());
-      if (due == null || due < 0) {
-        setState(() => _error = '마감일은 0 이상의 숫자(일)로 입력하세요.');
-        return;
-      }
-    }
-    Navigator.of(context).pop(
-      _TemplateInput(
-        name: name,
-        title: _title.text.trim(),
-        description: _description.text.trim(),
-        priority: _priority,
-        typeId: _typeId,
-        assigneeId: _assigneeId,
-        dueOffsetDays: due,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? '양식 추가' : '양식 수정'),
-      content: SizedBox(
-        width: 420,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: _name,
-                autofocus: true,
-                maxLength: 30,
-                decoration: const InputDecoration(
-                  labelText: '양식 이름',
-                  counterText: '',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _title,
-                decoration: const InputDecoration(
-                  labelText: '업무 제목 (미리 채울 내용)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _description,
-                minLines: 3,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  labelText: '설명 (미리 채울 내용)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<TaskPriority>(
-                initialValue: _priority,
-                decoration: const InputDecoration(
-                  labelText: '우선순위',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: [
-                  for (final p in TaskPriority.values)
-                    DropdownMenuItem(
-                      value: p,
-                      child: Text(taskPriorityLabel(p)),
-                    ),
-                ],
-                onChanged: (v) => setState(() => _priority = v ?? _priority),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String?>(
-                initialValue: _typeId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: '유형',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('유형 없음')),
-                  for (final t in widget.ctx.types)
-                    DropdownMenuItem(value: t.id, child: Text(t.name)),
-                ],
-                onChanged: (v) => setState(() => _typeId = v),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String?>(
-                initialValue: _assigneeId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: '담당자',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('담당자 없음')),
-                  for (final m in widget.ctx.members)
-                    DropdownMenuItem(value: m.id, child: Text(m.name)),
-                ],
-                onChanged: (v) => setState(() => _assigneeId = v),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _due,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: '마감일: 등록일로부터 N일 뒤 (비우면 안 채움)',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-              ],
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('저장')),
-      ],
-    );
-  }
 }
 
 // ───────────────────────── 자동화 ─────────────────────────

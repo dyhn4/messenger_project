@@ -200,8 +200,8 @@ void main() {
     expect(find.text('새 자동화'), findsOneWidget);
     expect(find.text('양식 추가'), findsNothing);
 
-    // 필드 / 상태 → 사용자 정의 필드 아래 "업무 템플릿" 칸 — 템플릿을 안 썼으니 "템플릿 저장",
-    // 그 아래 새 업무 양식 목록(예전 업무 템플릿 메뉴).
+    // 필드 / 상태 → 사용자 정의 필드 아래 "업무 템플릿" 칸 — 템플릿을 안 썼으니 "템플릿 저장"만
+    // 있고, 예전에 그 아래 있던 "새 업무 양식"은 뺐다.
     await tester.tap(find.text('필드 / 상태').first);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -211,8 +211,8 @@ void main() {
       greaterThan(tester.getTopLeft(find.text('사용자 정의 필드')).dy),
     );
     expect(find.widgetWithText(FilledButton, '템플릿 저장'), findsOneWidget);
-    expect(find.text('새 업무 양식'), findsOneWidget);
-    expect(find.text('양식 추가'), findsOneWidget);
+    expect(find.text('새 업무 양식'), findsNothing);
+    expect(find.text('양식 추가'), findsNothing);
     expect(find.text('자동화 규칙'), findsNothing);
 
     // 삭제 → 이름을 정확히 입력해야 영구 삭제가 열린다.

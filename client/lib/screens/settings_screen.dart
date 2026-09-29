@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../services/app_settings.dart';
+import '../services/download_storage.dart' show kAndroidDownloadSubfolder;
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -273,83 +274,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const _SectionDivider(),
                     ],
                     const _SectionLabel('파일 다운로드'),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            value: _downloadWithoutAsking,
-                            onChanged: (v) => setState(
-                              () => _downloadWithoutAsking = v ?? false,
-                            ),
-                            title: const Text(
-                              '다운로드 시 저장 위치 물어보지 않고 아래 경로로 즉시 다운로드',
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: _pickFolder,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
+                    // 안드로이드는 폴더를 고르지 않는다 — 폴더 선택 창에서 Download 자체를 고를 수
+                    // 없어서(안드로이드 11+ OS 제한) 늘 Download/TangoTalk에 바로 저장한다.
+                    if (Platform.isAndroid)
+                      const Padding(
+                        padding: EdgeInsets.only(left: 12),
+                        child: _AndroidDownloadFolder(),
+                      )
+                    else
+                      Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CheckboxListTile(
+                              contentPadding: EdgeInsets.zero,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              value: _downloadWithoutAsking,
+                              onChanged: (v) => setState(
+                                () => _downloadWithoutAsking = v ?? false,
                               ),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: Theme.of(context).dividerColor,
+                              title: const Text(
+                                '다운로드 시 저장 위치 물어보지 않고 아래 경로로 즉시 다운로드',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: _pickFolder,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
                                 ),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.folder_outlined, size: 18),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _downloadFolder.isEmpty
-                                          ? '다운로드 폴더 선택'
-                                          : _downloadFolder,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Theme.of(context).dividerColor,
                                   ),
-                                  const Icon(Icons.arrow_drop_down),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.folder_outlined, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        _downloadFolder.isEmpty
+                                            ? '다운로드 폴더 선택'
+                                            : _downloadFolder,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const Icon(Icons.arrow_drop_down),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            Text(
+                              '다운로드 완료 시',
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            RadioGroup<bool>(
+                              groupValue: _openFolderAfterDownload,
+                              onChanged: (v) => setState(
+                                () => _openFolderAfterDownload = v ?? true,
+                              ),
+                              child: const Column(
+                                children: [
+                                  RadioListTile<bool>(
+                                    contentPadding: EdgeInsets.zero,
+                                    value: true,
+                                    title: Text('다운로드가 완료된 폴더 열기'),
+                                  ),
+                                  RadioListTile<bool>(
+                                    contentPadding: EdgeInsets.zero,
+                                    value: false,
+                                    title: Text('아무것도 하지 않기'),
+                                  ),
                                 ],
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 20),
-                          Text(
-                            '다운로드 완료 시',
-                            style: Theme.of(context).textTheme.labelLarge,
-                          ),
-                          RadioGroup<bool>(
-                            groupValue: _openFolderAfterDownload,
-                            onChanged: (v) => setState(
-                              () => _openFolderAfterDownload = v ?? true,
-                            ),
-                            child: const Column(
-                              children: [
-                                RadioListTile<bool>(
-                                  contentPadding: EdgeInsets.zero,
-                                  value: true,
-                                  title: Text('다운로드가 완료된 폴더 열기'),
-                                ),
-                                RadioListTile<bool>(
-                                  contentPadding: EdgeInsets.zero,
-                                  value: false,
-                                  title: Text('아무것도 하지 않기'),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
                     const _SectionDivider(),
                     const _SectionLabel('버전 정보'),
                     Padding(
@@ -417,6 +426,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 안드로이드의 다운로드 위치 안내 — 바꿀 수 없는 고정 폴더라 누를 곳 없이 보여주기만 한다.
+class _AndroidDownloadFolder extends StatelessWidget {
+  const _AndroidDownloadFolder();
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.folder_outlined, size: 18),
+              SizedBox(width: 8),
+              Expanded(child: Text('Download/$kAndroidDownloadSubfolder')),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '다운로드한 파일은 휴대폰의 이 폴더에 바로 저장됩니다. 같은 이름의 파일이 있으면 '
+          '"이름 (1)"처럼 번호가 붙습니다.',
+          style: TextStyle(fontSize: 12, color: hint),
+        ),
+      ],
     );
   }
 }

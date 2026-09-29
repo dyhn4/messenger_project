@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:client/models/message.dart';
 import 'package:client/screens/image_viewer_screen.dart';
 import 'package:client/services/app_settings.dart';
@@ -6,7 +8,9 @@ import 'package:client/services/session.dart';
 import 'package:client/widgets/attachment_widgets.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:photo_view/photo_view.dart';
 
 MessageAttachment _image(String id) => MessageAttachment(
   id: id,
@@ -15,6 +19,25 @@ MessageAttachment _image(String id) => MessageAttachment(
   fileName: '$id.png',
   thumbnailUrl: '/uploads/${id}_thumb.jpg',
 );
+
+MessageAttachment _file(String id) => MessageAttachment(
+  id: id,
+  kind: 'file',
+  fileUrl: '/uploads/$id.pdf',
+  fileName: '$id.pdf',
+);
+
+/// [width]×[height] 픽셀짜리 PNG — 뷰어가 원본 크기를 재는지 보려고 만든다.
+Future<Uint8List> _png(int width, int height) async {
+  final recorder = ui.PictureRecorder();
+  ui.Canvas(recorder).drawRect(
+    Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+    ui.Paint()..color = const Color(0xFF3366FF),
+  );
+  final image = await recorder.endRecording().toImage(width, height);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
+}
 
 void main() {
   Session session() {
@@ -184,5 +207,310 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
+  });
+  testWidgets('여러 장이면 말풍선 아래 오른쪽 끝에 "전체 다운로드"가 붙고, 한 장이면 없다', (tester) async {
+    await pump(tester, [_image('a')]);
+    expect(find.textContaining('전체 다운로드'), findsNothing);
+
+    await pump(tester, [_image('a'), _image('b'), _image('c')]);
+    final button = find.text('전체 다운로드 (3)');
+    expect(button, findsOneWidget);
+    // 사진 묶음 아래에, 오른쪽 끝에 붙는다.
+    final grid = tester.getRect(find.byType(Wrap));
+    final bar = tester.getRect(find.byType(TextButton));
+    expect(bar.top, greaterThanOrEqualTo(grid.bottom));
+    expect(bar.right, closeTo(grid.right, 1));
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('파일 여러 개면 목록으로 쌓이고 맨 아래 오른쪽에 "전체 다운로드"가 붙는다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: ChatFileAttachments(
+              session: session(),
+              attachments: [_file('a'), _file('b')],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('a.pdf'), findsOneWidget);
+    expect(find.text('b.pdf'), findsOneWidget);
+    expect(find.text('전체 다운로드 (2)'), findsOneWidget);
+
+    final second = tester.getRect(find.byType(DownloadableFile).at(1));
+    final bar = tester.getRect(find.byType(TextButton));
+    expect(bar.top, greaterThanOrEqualTo(second.bottom));
+    expect(
+      bar.right,
+      closeTo(tester.getRect(find.byType(ChatFileAttachments)).right, 1),
+    );
+  });
+
+  testWidgets('"전체 다운로드" 바탕색은 마우스를 올렸을 때보다 연하다', (tester) async {
+    await pump(tester, [_image('a'), _image('b')]);
+    final style = tester.widget<TextButton>(find.byType(TextButton)).style!;
+    final base = style.backgroundColor!.resolve({})!;
+    final hover = style.overlayColor!.resolve({WidgetState.hovered})!;
+    expect(base.a, greaterThan(0)); // 바탕이 깔려 있다
+    expect(base.a, lessThan(hover.a)); // 호버 때 한 겹 더 진해진다
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  group('뷰어 넘기기', () {
+    Message imageMessage(
+      String id,
+      String sender,
+      int minute, {
+      List<MessageAttachment> attachments = const [],
+      bool deleted = false,
+    }) => Message(
+      id: id,
+      roomId: 'r1',
+      senderName: sender,
+      type: MessageType.image,
+      createdAt: DateTime(2026, 9, 23, 14, minute),
+      fileUrl: '/uploads/$id.png',
+      fileName: '$id.png',
+      attachments: attachments,
+      deleted: deleted,
+    );
+
+    Future<void> openViewer(WidgetTester tester, Widget viewer) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(home: viewer));
+      await tester.pump();
+    }
+
+    Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300)); // 넘기는 애니메이션
+    }
+
+    Future<void> close(WidgetTester tester) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3));
+    }
+
+    testWidgets('키보드 ←/→로 앞뒤 장을 넘긴다', (tester) async {
+      await openViewer(
+        tester,
+        const ImageViewerScreen(
+          images: [
+            ViewerImage(url: '/uploads/a.png'),
+            ViewerImage(url: '/uploads/b.png'),
+            ViewerImage(url: '/uploads/c.png'),
+          ],
+        ),
+      );
+      expect(find.text('1 / 3'), findsOneWidget);
+
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      expect(find.text('2 / 3'), findsOneWidget);
+      await press(tester, LogicalKeyboardKey.arrowRight);
+      await press(tester, LogicalKeyboardKey.arrowRight); // 끝에서는 더 안 간다
+      expect(find.text('3 / 3'), findsOneWidget);
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      expect(find.text('2 / 3'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    test('방 사진 목록: 시간 순서로, 지운 메시지는 빼고, 한 메시지의 여러 장을 이어 붙인다', () {
+      final s = session();
+      final older = imageMessage('m1', '김철수', 1);
+      final multi = imageMessage(
+        'm2',
+        '송병근',
+        2,
+        attachments: [_image('x'), _image('y')],
+      );
+      final gone = imageMessage('m3', '이영희', 3, deleted: true);
+      final text = Message(
+        id: 't1',
+        roomId: 'r1',
+        senderName: '김철수',
+        type: MessageType.text,
+        createdAt: DateTime(2026, 9, 23, 14, 0),
+        text: '안녕',
+      );
+      final images = roomViewerImages(s, [multi, gone, text, older]);
+      expect(images.map((v) => v.id), ['m1#0', 'm2#0', 'm2#1']);
+      expect(images.map((v) => v.message?.senderName), ['김철수', '송병근', '송병근']);
+    });
+
+    testWidgets('앞뒤 메시지 사진까지 넘기고, 맨 앞에 닿으면 과거 메시지를 불러와 이어 붙인다', (tester) async {
+      final s = session();
+      final changes = ChangeNotifier();
+      addTearDown(changes.dispose);
+      final messages = [
+        imageMessage('m1', '김철수', 1),
+        imageMessage('m2', '송병근', 2, attachments: [_image('x'), _image('y')]),
+      ];
+      var hasOlder = true;
+      var loads = 0;
+      final source = ViewerImageSource(
+        changes: changes,
+        images: () => roomViewerImages(s, messages),
+        hasOlder: () => hasOlder,
+        loadOlder: () async {
+          loads++;
+          messages.insert(0, imageMessage('m0', '이영희', 0));
+          hasOlder = false;
+          // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+          changes.notifyListeners();
+        },
+      );
+      final images = source.images();
+      await openViewer(
+        tester,
+        ImageViewerScreen(
+          images: images,
+          initialIndex: images.indexWhere((v) => v.id == 'm2#1'),
+          session: s,
+          message: messages[1],
+          source: source,
+        ),
+      );
+      // 누른 장(송병근의 둘째 장)에서 시작한다 — 맨 앞과 멀어서 아직 과거 메시지는 안 부른다.
+      expect(find.text('3 / 3'), findsOneWidget);
+      expect(find.text('송병근'), findsOneWidget);
+      expect(loads, 0);
+
+      // 같은 메시지의 첫 장 — 맨 앞에 가까워져서 과거 메시지를 불러오고, 앞에 붙은 장 때문에
+      // 번호만 밀린다(보던 장은 그대로).
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      await tester.pump();
+      expect(loads, 1);
+      expect(find.text('3 / 4'), findsOneWidget);
+      expect(find.text('송병근'), findsOneWidget);
+
+      // 앞 메시지(김철수)의 사진 — 상단 바도 그 메시지를 따른다.
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      expect(find.text('2 / 4'), findsOneWidget);
+      expect(find.text('김철수'), findsOneWidget);
+
+      // 불러온 과거 사진까지 넘어간다.
+      await press(tester, LogicalKeyboardKey.arrowLeft);
+      expect(find.text('1 / 4'), findsOneWidget);
+      expect(find.text('이영희'), findsOneWidget);
+
+      // 뒤로도 이어서 — 송병근의 두 번째 장까지.
+      for (var i = 0; i < 3; i++) {
+        await press(tester, LogicalKeyboardKey.arrowRight);
+      }
+      expect(find.text('4 / 4'), findsOneWidget);
+      expect(find.text('송병근'), findsOneWidget);
+
+      await close(tester);
+    });
+  });
+
+  group('뷰어 배율', () {
+    Future<PhotoViewControllerBase> openViewer(
+      WidgetTester tester,
+      Uint8List bytes,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ImageViewerScreen(
+            images: [
+              ViewerImage(
+                url: '/uploads/x.png',
+                bytesFuture: Future.value(bytes),
+              ),
+            ],
+          ),
+        ),
+      );
+      // 이미지 디코딩은 실제 비동기로 돈다.
+      for (var i = 0; i < 5 && find.byType(PhotoView).evaluate().isEmpty; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+      }
+      await tester.pump();
+      return tester.widget<PhotoView>(find.byType(PhotoView)).controller!;
+    }
+
+    /// 이미지가 그려지는 자리 — 상단 바를 뺀 영역.
+    Size viewport(WidgetTester tester) => tester.getSize(find.byType(PageView));
+
+    Future<void> close(WidgetTester tester) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3));
+    }
+
+    testWidgets('원본이 창보다 크면 처음부터 화면에 맞춰 연다', (tester) async {
+      final bytes = (await tester.runAsync(() => _png(3000, 1000)))!;
+      final photo = await openViewer(tester, bytes);
+      final area = viewport(tester);
+      final fit = [
+        area.width / 3000,
+        area.height / 1000,
+      ].reduce((a, b) => a < b ? a : b);
+      expect(photo.scale, closeTo(fit, 0.001));
+      expect(find.text('${(fit * 100).round()}%'), findsOneWidget);
+      await close(tester);
+    });
+
+    testWidgets('원본이 창보다 작으면 100%로 열고, "화면에 맞춤"을 누르면 꽉 차게 키운다', (tester) async {
+      final bytes = (await tester.runAsync(() => _png(200, 100)))!;
+      final photo = await openViewer(tester, bytes);
+      expect(photo.scale, closeTo(1, 0.001));
+      expect(find.text('100%'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('화면에 맞춤'));
+      await tester.pump();
+      final area = viewport(tester);
+      final fit = [
+        area.width / 200,
+        area.height / 100,
+      ].reduce((a, b) => a < b ? a : b);
+      expect(photo.scale, closeTo(fit, 0.001));
+      // 가로나 세로 중 한쪽이 창에 꽉 찬다.
+      final drawn = Size(200 * fit, 100 * fit);
+      expect(
+        (drawn.width - area.width).abs() < 1 ||
+            (drawn.height - area.height).abs() < 1,
+        isTrue,
+      );
+
+      // 배율 숫자를 누르면 다시 100%.
+      await tester.tap(find.text('${(fit * 100).round()}%'));
+      await tester.pump();
+      expect(photo.scale, closeTo(1, 0.001));
+      await close(tester);
+    });
+
+    testWidgets('90° 돌린 뒤 "화면에 맞춤"은 가로·세로를 바꿔서 맞춘다', (tester) async {
+      final bytes = (await tester.runAsync(() => _png(3000, 1000)))!;
+      final photo = await openViewer(tester, bytes);
+      await tester.tap(find.byTooltip('회전'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('화면에 맞춤'));
+      await tester.pump();
+      final area = viewport(tester);
+      final fit = [
+        area.width / 1000,
+        area.height / 3000,
+      ].reduce((a, b) => a < b ? a : b);
+      expect(photo.scale, closeTo(fit, 0.001));
+      await close(tester);
+    });
   });
 }

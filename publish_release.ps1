@@ -26,7 +26,11 @@ Write-Host "   버전: $Version"
 Write-Host "1) Android 릴리즈 빌드..."
 Push-Location $client
 flutter build apk --release
+$buildExit = $LASTEXITCODE
 Pop-Location
+# 외부 명령(flutter/ISCC)은 실패해도 위 $ErrorActionPreference로 멈추지 않는다 — 코드를 직접 봐야
+# 한다. 안 보면 그대로 진행해서 예전 apk/설치 파일을 releases로 복사해 버릴 수 있다.
+if ($buildExit -ne 0) { throw "Android 빌드 실패(코드 $buildExit)" }
 
 Write-Host "2) Windows 릴리즈 빌드..."
 Push-Location $client
@@ -46,6 +50,7 @@ Get-CimInstance Win32_Process -Filter "Name='client.exe'" |
 # 설치해도 계속 "새 버전 있음"으로 뜬다. Runner.rc를 건드려 버전 리소스를 매번 다시 컴파일한다.
 (Get-Item "$client\windows\runner\Runner.rc").LastWriteTime = Get-Date
 flutter build windows --release
+if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Windows 빌드 실패(코드 $LASTEXITCODE)" }
 $builtVersion = (Get-Item "$client\build\windows\x64\runner\Release\client.exe").VersionInfo.FileVersion
 if ($builtVersion -ne $Version) { throw "client.exe 버전이 $builtVersion 입니다(기대: $Version). 빌드가 버전을 반영하지 못했습니다." }
 Pop-Location
@@ -54,7 +59,18 @@ Write-Host "3) Windows 설치 프로그램 컴파일..."
 $iscc = Get-ChildItem "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
 if (-not $iscc) { $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue }
 if (-not $iscc) { throw "ISCC.exe를 찾을 수 없습니다. Inno Setup이 설치되어 있는지 확인하세요 (winget install JRSoftware.InnoSetup)." }
-& $iscc.FullName "$client\windows\installer\messenger.iss"
+# Inno Setup은 막 만든 설치 파일에 아이콘·버전 정보를 써 넣는데, 그 순간 백신(Windows Defender
+# 실시간 검사)이 새 exe를 검사하느라 잠가 두면 "EndUpdateResource failed ... (110)"로 가끔 실패한다.
+# 다시 돌리면 대개 되므로 세 번까지 해 보고, 그래도 안 되면 복사 전에 멈춘다.
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+  & $iscc.FullName "$client\windows\installer\messenger.iss"
+  if ($LASTEXITCODE -eq 0) { break }
+  if ($attempt -eq 3) {
+    throw "설치 프로그램 컴파일이 3번 모두 실패했습니다(코드 $LASTEXITCODE). 백신이 client\windows\installer\output 폴더를 잠그는 것이면 그 폴더를 검사 제외에 넣고 다시 실행하세요."
+  }
+  Write-Host "   설치 프로그램 컴파일 실패(코드 $LASTEXITCODE) — 5초 뒤 다시 시도합니다 ($attempt/3)..."
+  Start-Sleep -Seconds 5
+}
 
 Write-Host "4) server/releases/로 복사..."
 New-Item -ItemType Directory -Force -Path $releases | Out-Null

@@ -156,86 +156,6 @@ Map<String, dynamic> _legacyRule() => {
 };
 
 void main() {
-  testWidgets('새 업무 양식(설정 > 필드 / 상태 > 업무 템플릿 칸): 양식만 보여주고 저장한다', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1300, 1000);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-
-    final calls = <String, dynamic>{};
-    final client = MockClient((request) async {
-      final path = request.url.path;
-      final key = '${request.method} $path';
-      if (request.method != 'GET') {
-        calls[key] = jsonDecode(request.body);
-        return http.Response(
-          jsonEncode({'id': 'x', 'projectId': 'p1', 'name': 'n'}),
-          200,
-          headers: _json,
-        );
-      }
-      if (path == '/api/projects/p1') {
-        return http.Response(jsonEncode(_project()), 200, headers: _json);
-      }
-      if (path == '/api/projects/p1/task-statuses') {
-        return http.Response(jsonEncode(_statuses()), 200, headers: _json);
-      }
-      return http.Response('[]', 200, headers: _json);
-    });
-    final session = _session(client);
-
-    // "프로젝트 설정 > 필드 / 상태"의 업무 템플릿 칸이 이 편집기를 바깥 스크롤 안에 넣는다 —
-    // 목록이 스스로 스크롤하지 않고 내용 높이만큼만 차지해야 한다.
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: ProjectTemplateAutomationEditor(
-              session: session,
-              projectId: 'p1',
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    // 자동화 탭은 "자동화" 메뉴로 옮겨졌다.
-    expect(find.byType(TabBar), findsNothing);
-    expect(find.text('자동화 규칙'), findsNothing);
-
-    expect(find.text('만든 양식이 없습니다.'), findsOneWidget);
-    expect(find.byType(ListView), findsNothing);
-    // 안내 문구도 "새 업무" 창의 이름(양식에서 불러오기)과 맞는다.
-    expect(find.textContaining('"양식에서 불러오기"'), findsOneWidget);
-    expect(find.textContaining('템플릿'), findsNothing);
-
-    // 양식 추가
-    await tester.tap(find.text('양식 추가'));
-    await tester.pumpAndSettle();
-    expect(find.text('양식 추가'), findsNWidgets(2)); // 버튼 + 창 제목
-    await tester.enterText(find.widgetWithText(TextField, '양식 이름'), '버그 신고');
-    await tester.enterText(
-      find.widgetWithText(TextField, '업무 제목 (미리 채울 내용)'),
-      '[버그] ',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, '마감일: 등록일로부터 N일 뒤 (비우면 안 채움)'),
-      '3',
-    );
-    await tester.tap(find.widgetWithText(FilledButton, '저장'));
-    await tester.pumpAndSettle();
-    final tpl = calls['POST /api/projects/p1/task-templates'] as Map;
-    expect(tpl['name'], '버그 신고');
-    expect(tpl['title'], '[버그]');
-    expect(tpl['dueOffsetDays'], 3);
-    expect(tpl['priority'], 'normal');
-
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump(const Duration(seconds: 3));
-  });
-
   testWidgets('자동화 메뉴: 규칙 요약·켜기/끄기, 이전 방식 규칙, 새 편집기 열기, 실행 기록', (tester) async {
     // 노드 편집기가 1400×900에서 맞춰져 있다.
     tester.view.physicalSize = const Size(1400, 900);
@@ -331,11 +251,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: ProjectTemplateAutomationEditor(
-            session: session,
-            projectId: 'p1',
-            automations: true,
-          ),
+          body: ProjectAutomationEditor(session: session, projectId: 'p1'),
         ),
       ),
     );

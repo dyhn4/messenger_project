@@ -11,6 +11,7 @@ import '../models/text_format.dart';
 import 'api_client.dart' show UploadCancelToken;
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'session.dart';
+import 'typing_gate.dart';
 
 /// 첨부 업로드가 끝난 뒤(암호화 여부와 무관하게) 실제 메시지/댓글 전송에 필요한 결과.
 /// ChatInputBar/CommentInputBar가 첨부한 즉시 RoomChatController.uploadAttachment로 이 값을
@@ -56,6 +57,12 @@ class RoomChatController extends ChangeNotifier {
         .listen((_) => notifyListeners());
     _load();
   }
+
+  /// 대화 목록을 다시 그리게 하는 알림 — 한글을 조합하며 빠르게 치는 동안에는 잠깐 모아 둔다
+  /// (typing_gate.dart 참고).
+  @override
+  void notifyListeners() =>
+      TypingGate.instance.run(this, super.notifyListeners);
 
   final Session _session;
   final Room room;
@@ -699,7 +706,7 @@ class RoomChatController extends ChangeNotifier {
     );
   }
 
-  /// 이미 올라간 이미지 여러 장을 **한 메시지**로 보낸다(채팅 버블에 격자로 보인다).
+  /// 이미 올라간 첨부 여러 개를 **한 메시지**로 보낸다(사진은 격자, 파일은 목록으로 보인다).
   /// 비밀 대화는 첨부마다 복호화 키가 따로라 봉투에 한 개만 담을 수 있어서, 거기서는
   /// 예전처럼 한 장씩 따로 보낸다(sendUploadedAttachment).
   Future<void> sendUploadedAttachments(
@@ -721,7 +728,8 @@ class RoomChatController extends ChangeNotifier {
     final trimmed = caption?.trim();
     await _session.chatSocket.send(
       roomId: room.id,
-      type: 'image',
+      // 사진만 모였으면 격자(image), 하나라도 파일이면 파일 목록(file) 말풍선이 된다.
+      type: items.every((u) => u.isImage) ? 'image' : 'file',
       text: trimmed?.isNotEmpty == true ? trimmed : null,
       textFormat: trimmed == caption ? captionFormat : null,
       attachments: [
@@ -778,6 +786,7 @@ class RoomChatController extends ChangeNotifier {
   @override
   void dispose() {
     _readSub?.cancel();
+    TypingGate.instance.cancel(this);
     super.dispose();
   }
 }

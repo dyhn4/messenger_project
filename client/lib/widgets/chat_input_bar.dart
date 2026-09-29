@@ -16,6 +16,7 @@ import '../services/api_client.dart'
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
+import '../services/typing_gate.dart';
 import '../services/session.dart';
 import '../screens/capture/capture_window.dart';
 import 'app_toast.dart';
@@ -125,6 +126,18 @@ class ChatInputBarState extends State<ChatInputBar> {
     // 포커스를 얻으면(클릭/터치) 안내 문구(hintText)를 바로 감추고 커서만 보이게 한다 —
     // hintText는 build() 시점 값이라 포커스가 바뀔 때 다시 그려줘야 반영된다.
     _focusNode.addListener(_onFocusChange);
+    _controller.addListener(_onTextChanged);
+  }
+
+  /// 한글 등을 IME로 조합하는 중이면, 그동안 앱 전체를 다시 그리는 알림을 잠깐 미룬다 — 빠르게
+  /// 칠 때 그 다시 그리기가 키 처리를 늦춰서 글자가 빠지거나 뭉개지던 문제(typing_gate.dart).
+  void _onTextChanged() {
+    final composing = _controller.value.composing;
+    if (composing.isValid && !composing.isCollapsed) {
+      TypingGate.instance.composing();
+    } else {
+      TypingGate.instance.committed();
+    }
   }
 
   void _onFocusChange() {
@@ -135,6 +148,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
     _focusNode.removeListener(_onFocusChange);
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -397,6 +411,8 @@ class ChatInputBarState extends State<ChatInputBar> {
       _sending = true;
     });
     _controller.clear();
+    // 조합하느라 미뤄 둔 화면 갱신을 지금 내보낸다 — 보낸 메시지가 바로 보이게.
+    TypingGate.instance.flush();
     widget.onStickerConsumed();
     // 보내기 버튼을 마우스로 눌렀을 때 포커스가 버튼으로 넘어가버리는 걸 막고, 계속
     // 이어서 입력할 수 있도록 입력칸에 커서를 유지한다.
@@ -413,7 +429,7 @@ class ChatInputBarState extends State<ChatInputBar> {
         // 첨부와 함께 입력한 메시지는 별도 메시지로 보내지 않고, 첫 번째 첨부의 캡션으로
         // 붙인다. 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그
         // 결과로 메시지만 보낸다. 사진은 한 말풍선에 격자로 모아 보내고(여러 장이면),
-        // 파일은 예전처럼 하나씩 보낸다.
+        // 파일도 여러 개면 한 말풍선에 목록으로 모아 보낸다(아래 "전체 다운로드"가 붙는다).
         final images = [
           for (final a in toSend)
             if (a.result!.isImage) a.result!,
@@ -433,14 +449,12 @@ class ChatInputBarState extends State<ChatInputBar> {
           caption = '';
           captionFormat = null;
         }
-        for (final f in files) {
-          await widget.controller.sendUploadedAttachment(
-            f,
+        if (files.isNotEmpty) {
+          await widget.controller.sendUploadedAttachments(
+            files,
             caption: caption.isEmpty ? null : caption,
             captionFormat: captionFormat,
           );
-          caption = '';
-          captionFormat = null;
         }
       }
     } catch (e) {

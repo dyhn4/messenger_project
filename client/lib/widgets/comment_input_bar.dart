@@ -12,6 +12,7 @@ import '../services/api_client.dart'
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/room_chat_controller.dart';
+import '../services/typing_gate.dart';
 import 'attachment_widgets.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
@@ -97,6 +98,18 @@ class CommentInputBarState extends State<CommentInputBar> {
     _controller.formattingEnabled = !widget.controller.room.isSecret;
     // ChatInputBarState와 동일 — 포커스를 얻으면 안내 문구를 감춘다.
     _focusNode.addListener(_onFocusChange);
+    _controller.addListener(_onTextChanged);
+  }
+
+  /// 한글 등을 IME로 조합하는 중이면, 그동안 앱 전체를 다시 그리는 알림을 잠깐 미룬다 — 빠르게
+  /// 칠 때 그 다시 그리기가 키 처리를 늦춰서 글자가 빠지거나 뭉개지던 문제(typing_gate.dart).
+  void _onTextChanged() {
+    final composing = _controller.value.composing;
+    if (composing.isValid && !composing.isCollapsed) {
+      TypingGate.instance.composing();
+    } else {
+      TypingGate.instance.committed();
+    }
   }
 
   void _onFocusChange() {
@@ -107,6 +120,7 @@ class CommentInputBarState extends State<CommentInputBar> {
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleKey);
     _focusNode.removeListener(_onFocusChange);
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -240,6 +254,8 @@ class CommentInputBarState extends State<CommentInputBar> {
       _sending = true;
     });
     _controller.clear();
+    // 조합하느라 미뤄 둔 화면 갱신을 지금 내보낸다 — 보낸 메시지가 바로 보이게.
+    TypingGate.instance.flush();
     widget.onStickerConsumed();
     _focusNode.requestFocus();
 

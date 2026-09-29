@@ -118,7 +118,7 @@ Future<void> _finish(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('업무 템플릿 칸: 템플릿을 쓴 프로젝트는 템플릿 카드 + 새 업무 양식 추가', (tester) async {
+  testWidgets('업무 템플릿 칸: 템플릿을 쓴 프로젝트는 템플릿 카드만 보인다(새 업무 양식 없음)', (tester) async {
     final calls = <String, dynamic>{};
     var forms = <Map<String, dynamic>>[
       {
@@ -168,27 +168,10 @@ void main() {
     expect(find.text('진행 중'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, '템플릿 저장'), findsNothing);
 
-    // 새 업무 양식 — 칸 스크롤 안에 줄이 그대로 놓인다(자체 목록 스크롤 없음).
-    expect(find.text('새 업무 양식'), findsOneWidget);
-    expect(find.text('버그 신고'), findsOneWidget);
-    expect(
-      find.ancestor(of: find.text('버그 신고'), matching: find.byType(ListView)),
-      findsNothing,
-    );
-    await tester.ensureVisible(find.text('양식 추가'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('양식 추가'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, '양식 이름'), '회의록');
-    await tester.tap(find.widgetWithText(FilledButton, '저장'));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(
-      (calls['POST /api/projects/p1/task-templates'] as Map)['name'],
-      '회의록',
-    );
-    expect(find.text('회의록'), findsOneWidget);
-    expect(find.text('버그 신고'), findsOneWidget);
+    // "새 업무 양식"은 설정에서 뺐다 — 양식 목록·추가 버튼이 없다.
+    expect(find.text('새 업무 양식'), findsNothing);
+    expect(find.text('양식 추가'), findsNothing);
+    expect(find.text('버그 신고'), findsNothing);
 
     await _finish(tester);
   });

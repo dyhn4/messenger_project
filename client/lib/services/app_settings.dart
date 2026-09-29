@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:win32/win32.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'download_storage.dart';
+
 const _kRunKeyPath = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const _kRunValueName = 'MessengerClient';
 
@@ -54,8 +56,10 @@ class AppSettings extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     downloadWithoutAsking = _prefs.getBool(_kDownloadWithoutAsking) ?? false;
-    downloadFolder =
-        _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
+    // 안드로이드는 폴더를 고르지 않고 늘 공용 Download/TangoTalk에 저장한다(download_storage.dart).
+    downloadFolder = Platform.isAndroid
+        ? await androidDownloadFolder()
+        : _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
     openFolderAfterDownload = _prefs.getBool(_kOpenFolderAfterDownload) ?? true;
     themeMode = _themeModeFromName(_prefs.getString(_kThemeMode));
     messagePreviewMode = _messagePreviewModeFromName(
@@ -110,6 +114,11 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 저장 위치를 묻지 않고 [downloadFolder]에 바로 저장하는지 — 안드로이드는 늘 바로 저장한다.
+  bool get savesWithoutAsking =>
+      downloadFolder.isNotEmpty &&
+      (Platform.isAndroid || downloadWithoutAsking);
+
   Future<void> setDownloadWithoutAsking(bool value) async {
     downloadWithoutAsking = value;
     await _prefs.setBool(_kDownloadWithoutAsking, value);
@@ -117,6 +126,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   Future<void> setDownloadFolder(String path) async {
+    if (Platform.isAndroid) return; // 안드로이드는 Download/TangoTalk 고정.
     downloadFolder = path;
     await _prefs.setString(_kDownloadFolder, path);
     notifyListeners();

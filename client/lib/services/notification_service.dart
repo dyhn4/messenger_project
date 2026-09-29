@@ -47,7 +47,8 @@ class NotificationService {
     required void Function(String roomId) onTap,
     bool requestPermission = true,
   }) async {
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // 알림 아이콘은 흰 실루엣 전용 그림 — 앱 아이콘(적응형)을 쓰면 안 된다(AndroidManifest.xml 참고).
+    const android = AndroidInitializationSettings('@drawable/ic_notification');
     const windows = WindowsInitializationSettings(
       appName: 'TangoTalk',
       appUserModelId: 'com.messenger.client',

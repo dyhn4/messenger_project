@@ -135,8 +135,17 @@ Write-Host '6) 설치 프로그램 컴파일 중...'
 $iscc = Get-ChildItem "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
 if (-not $iscc) { $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue }
 if (-not $iscc) { throw "ISCC.exe를 찾을 수 없습니다. Inno Setup이 설치되어 있는지 확인하세요 (winget install JRSoftware.InnoSetup)." }
-& $iscc.FullName (Join-Path $Installer 'messenger-server.iss')
-if ($LASTEXITCODE -ne 0) { throw 'Inno Setup 컴파일 실패' }
+# 막 만든 설치 파일에 아이콘·버전 정보를 써 넣는 순간 백신(Windows Defender 실시간 검사)이 그
+# 파일을 잠가 두면 "EndUpdateResource failed ... (110)"로 가끔 실패한다 — 세 번까지 다시 해 본다.
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+  & $iscc.FullName (Join-Path $Installer 'messenger-server.iss')
+  if ($LASTEXITCODE -eq 0) { break }
+  if ($attempt -eq 3) {
+    throw "Inno Setup 컴파일이 3번 모두 실패했습니다(코드 $LASTEXITCODE). 백신이 server\installer\output 폴더를 잠그는 것이면 그 폴더를 검사 제외에 넣고 다시 실행하세요."
+  }
+  Write-Host "   컴파일 실패(코드 $LASTEXITCODE) — 5초 뒤 다시 시도합니다 ($attempt/3)..."
+  Start-Sleep -Seconds 5
+}
 
 Write-Host ''
 Write-Host "완료: $Installer\output\tangotalk-server-setup.exe"

@@ -6,7 +6,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
 import '../models/inquiry.dart';
@@ -14,10 +13,12 @@ import '../models/mention.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
+import '../services/clipboard_paste.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
+import '../services/table_image.dart';
 import '../services/typing_gate.dart';
 import '../services/session.dart';
 import '../screens/capture/capture_window.dart';
@@ -83,6 +84,10 @@ class ChatInputBar extends StatefulWidget {
   /// 전송 시도 후(성공하든 실패하든 다른 첨부와 동일하게 낙관적으로) 부모가 pendingSticker를
   /// 지우도록 알린다.
   final VoidCallback onStickerConsumed;
+
+  /// 붙여넣을 때 클립보드를 읽는 함수 — 테스트가 가짜 클립보드를 끼운다.
+  @visibleForTesting
+  static ClipboardReader clipboardReader = readSystemClipboard;
 
   const ChatInputBar({
     super.key,
@@ -237,16 +242,9 @@ class ChatInputBarState extends State<ChatInputBar> {
     super.dispose();
   }
 
-  // Ctrl+V는 텍스트 붙여넣기용 기본 동작을 그대로 두고(return false), 클립보드에
-  // 이미지가 있으면 첨부 목록에 추가하는 걸 별도로 시도한다.
+  // Ctrl+V(붙여넣기)는 여기서 다루지 않는다 — 입력칸의 PasteTextIntent를 [_ChatPasteAction]이 가로채서
+  // 클립보드의 이미지·표를 보고 처리한다(아래 _paste). Ctrl+Shift+V(서식·표 변환 없는 붙여넣기)도 마찬가지.
   bool _handleKey(KeyEvent event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.keyV &&
-        HardwareKeyboard.instance.isControlPressed &&
-        _focusNode.hasFocus) {
-      _pasteImageFromClipboard();
-      return false;
-    }
     // 환경설정 "메시지 전송 옵션" — 기본은 Enter로 보내고 Shift+Enter로 줄바꿈, 반대로 고르면
     // Shift+Enter로 보내고 Enter로 줄바꿈. 보낼 때는 true를 돌려줘서 TextField의 기본 줄바꿈
     // 삽입을 막아야 한다(안 그러면 보내는 키를 눌러도 줄바꿈이 먼저 들어가 버린다).
@@ -265,18 +263,68 @@ class ChatInputBarState extends State<ChatInputBar> {
     return false;
   }
 
-  Future<void> _pasteImageFromClipboard() async {
-    final bytes = await Pasteboard.image;
-    if (bytes == null || bytes.isEmpty || !mounted) {
-      return; // 클립보드에 이미지가 없으면 아무 것도 안 함.
-    }
+  late final _pasteAction = _ChatPasteAction(this);
 
+  /// Ctrl+V — 클립보드를 읽어 [decidePaste]대로 처리한다(잔디의 표 이미지 붙여넣기). 엑셀 표(글자·HTML·비트맵이 함께
+  /// 온다)는 글자를 붙이지 않고 이미지를 업로드 미리보기로 올리고, 이미지 없이 탭·HTML 표만 있으면 표를 PNG로 그려서 같은
+  /// 미리보기로 올린다. 그 밖에는 평소처럼 글자를 붙인다([defaultPaste] — 입력칸의 기본 붙여넣기). 표가 아닌 이미지+글자는
+  /// 예전처럼 글자도 붙이고 이미지도 올린다.
+  Future<void> _paste(VoidCallback defaultPaste) async {
+    PasteDecision decision;
+    try {
+      decision = decidePaste(await ChatInputBar.clipboardReader());
+    } catch (_) {
+      decision = const PasteAsText();
+    }
+    if (!mounted) return;
+    switch (decision) {
+      case PasteAsText():
+        defaultPaste();
+      case PasteAsImage(:final bytes):
+        await _stagePastedPng(bytes, 'image.png');
+      case PasteAsImageAndText(:final bytes):
+        defaultPaste();
+        await _stagePastedPng(bytes, 'image.png');
+      case PasteAsTable(:final table):
+        Uint8List png;
+        try {
+          png = await renderTablePng(table);
+        } catch (_) {
+          // 그리지 못하면 표 대신 글자로 붙여넣는다.
+          if (mounted) defaultPaste();
+          return;
+        }
+        if (!mounted) return;
+        await _stagePastedPng(png, 'table.png');
+    }
+  }
+
+  /// Ctrl+Shift+V — 표·서식 변환 없이 언제나 글자만 커서 자리에 붙여넣는다.
+  Future<void> _pasteAsPlainText() async {
+    String? text;
+    try {
+      text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    } catch (_) {}
+    if (text == null || text.isEmpty || !mounted) return;
+    final value = _controller.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+    _controller.value = value.copyWith(
+      text: value.text.replaceRange(start, end, text),
+      selection: TextSelection.collapsed(offset: start + text.length),
+      composing: TextRange.empty,
+    );
+  }
+
+  /// 붙여넣은 PNG를 임시 파일로 쓰고 클릭으로 고른 첨부와 같은 업로드 미리보기에 올린다.
+  Future<void> _stagePastedPng(Uint8List bytes, String displayName) async {
     final path =
-        '${Directory.systemTemp.path}${Platform.pathSeparator}image_${DateTime.now().microsecondsSinceEpoch}.png';
+        '${Directory.systemTemp.path}${Platform.pathSeparator}paste_${DateTime.now().microsecondsSinceEpoch}.png';
     final file = File(path);
     await file.writeAsBytes(bytes);
     if (!mounted) return;
-    unawaited(_stageAndUpload(file, true, 'image.png'));
+    unawaited(_stageAndUpload(file, true, displayName));
   }
 
   bool _capturing = false;
@@ -862,7 +910,27 @@ class ChatInputBarState extends State<ChatInputBar> {
                   resolveUrl: widget.session.resolveUrl,
                   child: RichFieldWrapper(
                     controller: _controller,
-                    child: TextField(
+                    // 붙여넣기: Ctrl+V는 클립보드의 이미지·표를 보고(_paste), Ctrl+Shift+V는 언제나 글자만(_pasteAsPlainText).
+                    child: Shortcuts(
+                      shortcuts: const <ShortcutActivator, Intent>{
+                        SingleActivator(
+                          LogicalKeyboardKey.keyV,
+                          control: true,
+                          shift: true,
+                        ): _PlainPasteIntent(),
+                      },
+                      child: Actions(
+                        actions: <Type, Action<Intent>>{
+                          PasteTextIntent: _pasteAction,
+                          _PlainPasteIntent:
+                              CallbackAction<_PlainPasteIntent>(
+                                onInvoke: (_) {
+                                  unawaited(_pasteAsPlainText());
+                                  return null;
+                                },
+                              ),
+                        },
+                        child: TextField(
                       key: const ValueKey('chat-input'),
                       controller: _controller,
                       focusNode: _focusNode,
@@ -894,6 +962,8 @@ class ChatInputBarState extends State<ChatInputBar> {
                           ? TextInputAction.newline
                           : TextInputAction.send,
                       onSubmitted: (_) => _send(),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1292,5 +1362,25 @@ class _InquiryDialogState extends State<_InquiryDialog> {
         ),
       ],
     );
+  }
+}
+
+/// Ctrl+Shift+V — 표·서식 변환 없이 글자만 붙여넣는다(입력칸의 Shortcuts가 이 의도를 낸다).
+class _PlainPasteIntent extends Intent {
+  const _PlainPasteIntent();
+}
+
+/// 입력칸의 붙여넣기(PasteTextIntent)를 덮어쓰는 동작 — 기본 붙여넣기(글자)를 [callingAction]으로 넘겨받아 두었다가,
+/// 클립보드를 읽어 본 결과 글자로 붙일 때만 부른다([ChatInputBarState._paste]). Action.invoke는 이 클래스 안에서만 부를 수 있어
+/// 여기서 감싸 넘긴다.
+class _ChatPasteAction extends Action<PasteTextIntent> {
+  final ChatInputBarState _owner;
+  _ChatPasteAction(this._owner);
+
+  @override
+  Object? invoke(PasteTextIntent intent) {
+    final fallback = callingAction;
+    unawaited(_owner._paste(() => fallback?.invoke(intent)));
+    return null;
   }
 }

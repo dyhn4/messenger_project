@@ -257,6 +257,14 @@ class TopicBrowseEntry {
       );
 }
 
+/// 검색 한 번의 결과 — [items]는 한도(limit) 안에서 받은 것이고, [total]은 한도에 잘리기 전의 전체
+/// 건수다("결과 N건"에 쓴다).
+class SearchPage {
+  final List<SearchResult> items;
+  final int total;
+  const SearchPage(this.items, this.total);
+}
+
 /// GET /api/search 결과 한 줄.
 class SearchResult {
   final String id;
@@ -2890,9 +2898,36 @@ class ApiClient {
     DateTime? since,
     DateTime? until,
   }) async {
+    final page = await searchPage(
+      query,
+      teamId: teamId,
+      roomId: roomId,
+      senderId: senderId,
+      since: since,
+      until: until,
+    );
+    return page.items;
+  }
+
+  /// 검색 패널용 — [search]에 탭([type]: message|poll|file), 파일 형식([fileKind], 파일 탭일 때),
+  /// 정렬([newestFirst])을 더하고, 한도(limit)에 잘리기 전의 전체 건수([SearchPage.total])도 받는다
+  /// (server/src/search.js, withTotal=1). 예전 서버처럼 배열만 오면 받은 개수를 전체 건수로 본다.
+  Future<SearchPage> searchPage(
+    String query, {
+    required String teamId,
+    String? roomId,
+    String? senderId,
+    DateTime? since,
+    DateTime? until,
+    String? type,
+    String? fileKind,
+    bool newestFirst = true,
+    int? limit,
+  }) async {
     final params = StringBuffer(
       '/api/search?q=${Uri.encodeQueryComponent(query)}'
-      '&teamId=${Uri.encodeQueryComponent(teamId)}',
+      '&teamId=${Uri.encodeQueryComponent(teamId)}'
+      '&withTotal=1',
     );
     if (roomId != null) {
       params.write('&roomId=${Uri.encodeQueryComponent(roomId)}');
@@ -2902,10 +2937,19 @@ class ApiClient {
     }
     if (since != null) params.write('&since=${since.millisecondsSinceEpoch}');
     if (until != null) params.write('&until=${until.millisecondsSinceEpoch}');
-    final list = await _get(params.toString()) as List;
-    return list
+    if (type != null) params.write('&type=${Uri.encodeQueryComponent(type)}');
+    if (fileKind != null) {
+      params.write('&fileKind=${Uri.encodeQueryComponent(fileKind)}');
+    }
+    if (!newestFirst) params.write('&order=asc');
+    if (limit != null) params.write('&limit=$limit');
+    final body = await _get(params.toString());
+    final rawItems = body is Map ? body['items'] as List : body as List;
+    final items = rawItems
         .map((e) => SearchResult.fromJson(e as Map<String, dynamic>))
         .toList();
+    final total = body is Map ? (body['total'] as num?)?.toInt() : null;
+    return SearchPage(items, total ?? items.length);
   }
 
   /// 방(들)에 첨부된 이미지/파일 목록(files_screen.dart). roomId를 안 주면 내가 속한 모든
@@ -2916,6 +2960,10 @@ class ApiClient {
     String? roomId,
     String? senderId,
     String? category,
+    String? query,
+    DateTime? since,
+    DateTime? until,
+    bool newestFirst = true,
   }) async {
     final params = StringBuffer('/api/attachments?');
     final parts = <String>['teamId=${Uri.encodeQueryComponent(teamId)}'];
@@ -2926,6 +2974,12 @@ class ApiClient {
     if (category != null) {
       parts.add('category=${Uri.encodeQueryComponent(category)}');
     }
+    if (query != null && query.trim().isNotEmpty) {
+      parts.add('q=${Uri.encodeQueryComponent(query.trim())}');
+    }
+    if (since != null) parts.add('since=${since.millisecondsSinceEpoch}');
+    if (until != null) parts.add('until=${until.millisecondsSinceEpoch}');
+    if (!newestFirst) parts.add('order=asc');
     params.write(parts.join('&'));
     final list = await _get(params.toString()) as List;
     return list
@@ -2938,9 +2992,23 @@ class ApiClient {
   Future<List<SharedLink>> fetchLinks({
     required String teamId,
     String? roomId,
+    String? senderId,
+    String? query,
+    DateTime? since,
+    DateTime? until,
+    bool newestFirst = true,
   }) async {
     final parts = <String>['teamId=${Uri.encodeQueryComponent(teamId)}'];
     if (roomId != null) parts.add('roomId=${Uri.encodeQueryComponent(roomId)}');
+    if (senderId != null) {
+      parts.add('senderId=${Uri.encodeQueryComponent(senderId)}');
+    }
+    if (query != null && query.trim().isNotEmpty) {
+      parts.add('q=${Uri.encodeQueryComponent(query.trim())}');
+    }
+    if (since != null) parts.add('since=${since.millisecondsSinceEpoch}');
+    if (until != null) parts.add('until=${until.millisecondsSinceEpoch}');
+    if (!newestFirst) parts.add('order=asc');
     final list = await _get('/api/links?${parts.join('&')}') as List;
     return list
         .map((e) => SharedLink.fromJson(e as Map<String, dynamic>))

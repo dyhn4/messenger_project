@@ -9,11 +9,16 @@ import '../services/session.dart';
 class FilterDropdownButton extends StatefulWidget {
   final String label;
   final bool expand;
+
+  /// true면 패널의 오른쪽 끝을 버튼의 오른쪽 끝에 맞춘다 — 패널이 버튼보다 넓을 때 창 오른쪽
+  /// 밖으로 삐져나가지 않게(맨 오른쪽 "기간" 필터의 달력).
+  final bool alignEnd;
   final Widget Function(VoidCallback close) panelBuilder;
   const FilterDropdownButton({
     super.key,
     required this.label,
     this.expand = false,
+    this.alignEnd = false,
     required this.panelBuilder,
   });
 
@@ -39,6 +44,12 @@ class _FilterDropdownButtonState extends State<FilterDropdownButton> {
           CompositedTransformFollower(
             link: _link,
             showWhenUnlinked: false,
+            targetAnchor: widget.alignEnd
+                ? Alignment.topRight
+                : Alignment.topLeft,
+            followerAnchor: widget.alignEnd
+                ? Alignment.topRight
+                : Alignment.topLeft,
             offset: const Offset(0, 44),
             child: widget.panelBuilder(_close),
           ),

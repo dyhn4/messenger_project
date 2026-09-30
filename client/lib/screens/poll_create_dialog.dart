@@ -14,6 +14,7 @@ import '../services/room_chat_controller.dart'
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart' show formatFileSize;
+import '../widgets/room_picker_field.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
 import 'schedule_message_dialog.dart' show SchedulePicker;
@@ -24,11 +25,12 @@ bool canCreatePollIn(Session session, Room room) =>
     !room.isSecret && room.canWrite(session);
 
 /// 투표 만들기 화면을 연다 — 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면. 만들었으면 true.
-/// [room]은 투표가 올라갈 대화방이다(입력창 도구모음의 "투표"·보드에서 연다).
+/// [room]을 주면(입력창 도구모음의 "투표"·보드) 그 방이 대화방 칸에 미리 채워지고(바꿀 수도 있다),
+/// 안 주면(메뉴의 "투표") 칸이 비어 있어 방을 골라야 만들 수 있다.
 Future<bool> showPollCreator(
   BuildContext context, {
   required Session session,
-  required Room room,
+  Room? room,
 }) async {
   final wide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
   final creator = PollCreator(session: session, room: room, asDialog: wide);
@@ -78,14 +80,14 @@ class _PollFile {
 class PollCreator extends StatefulWidget {
   final Session session;
 
-  /// 투표가 올라갈 대화방.
-  final Room room;
+  /// 처음에 채워 둘 대화방 — 없으면 맨 위 "대화방" 칸에서 골라야 한다.
+  final Room? room;
   final bool asDialog;
 
   const PollCreator({
     super.key,
     required this.session,
-    required this.room,
+    this.room,
     this.asDialog = true,
   });
 
@@ -110,10 +112,33 @@ class PollCreatorState extends State<PollCreator> {
   String? _serverError;
   Completer<void>? _uploadsIdle;
 
-  /// 투표가 올라갈 대화방.
-  Room get _room => widget.room;
+  /// 투표가 올라갈 대화방 — 맨 위 "대화방" 칸의 값.
+  late Room? _room = widget.room;
 
-  bool get _isBoard => _room.isBoard;
+  bool get _isBoard => _room?.isBoard ?? false;
+
+  /// 대화방 칸에서 고를 수 있는 방 — 내가 이 팀에서 참여 중이고 투표를 올릴 수 있는 방(비밀 대화·
+  /// 읽기 전용/보관된 토픽(관리자 제외)은 빠진다).
+  bool _pickable(Room r) => canCreatePollIn(widget.session, r);
+
+  /// 방을 바꿨을 때 — 보드 토픽이 아니게 되면 붙여 둔 첨부는 쓸 수 없으니 치우고 알린다.
+  void _onRoomPicked(Room room) {
+    final hadFiles = _files.isNotEmpty;
+    setState(() {
+      _room = room;
+      _serverError = null;
+      if (!room.isBoard && hadFiles) {
+        for (final f in _files) {
+          f.removed = true;
+          f.token.cancel();
+        }
+        _files.clear();
+      }
+    });
+    if (hadFiles && !room.isBoard) {
+      showAppToast(context, '보드 토픽이 아니라서 붙인 파일을 뺐습니다.');
+    }
+  }
 
   @override
   void initState() {
@@ -183,6 +208,7 @@ class PollCreatorState extends State<PollCreator> {
   /// 서버가 받아 줄 입력이 다 찼는지 — 만들기 단추를 켜는 조건.
   bool get canSubmit =>
       !_submitting &&
+      _room != null &&
       _check.ok &&
       !_hasPendingUpload &&
       !_hasFailedUpload &&
@@ -291,7 +317,7 @@ class PollCreatorState extends State<PollCreator> {
     });
     try {
       await widget.session.createPoll(
-        _room,
+        _room!,
         title: _title.text,
         description: _showDescription ? _description.text : null,
         options: [for (final c in _options) c.text],
@@ -520,12 +546,28 @@ class PollCreatorState extends State<PollCreator> {
     final check = _check;
     final filled = _options.where((c) => c.text.trim().isNotEmpty).length;
     return [
+      // 어느 대화방에 올라가는지 — 투표는 그 방의 모든 멤버가 함께 본다. 입력창의 "투표"로 열었으면
+      // 그 방이 미리 채워져 있고(바꿀 수 있다), 메뉴의 "투표"로 열었으면 비어 있다.
+      const _SectionLabel('대화방'),
+      KeyedSubtree(
+        key: const ValueKey('poll-room-field'),
+        child: IgnorePointer(
+          ignoring: _submitting,
+          child: RoomPickerField(
+            session: widget.session,
+            value: _room,
+            filter: _pickable,
+            onChanged: _onRoomPicked,
+          ),
+        ),
+      ),
+      const SizedBox(height: 16),
       const _SectionLabel('투표 제목'),
       TextField(
         key: const ValueKey('poll-title-field'),
         controller: _title,
         enabled: !_submitting,
-        autofocus: true,
+        autofocus: _room != null,
         maxLength: pollTitleMaxLength,
         textInputAction: TextInputAction.next,
         decoration: const InputDecoration(

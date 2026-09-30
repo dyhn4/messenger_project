@@ -11,6 +11,7 @@ import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
+import 'package:client/widgets/app_menu_button.dart';
 import 'package:client/widgets/board_view.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/message_actions.dart';
@@ -1478,6 +1479,229 @@ void main() {
       expect(find.byKey(const ValueKey('chat-poll')), findsNothing);
       expect(find.byKey(const ValueKey('chat-attach-menu')), findsNothing);
       expect(find.byTooltip('파일 보내기'), findsOneWidget);
+    });
+
+    testWidgets('[메뉴] → 투표 — 투표 만들기 창이 뜨고 맨 위 대화방 칸에서 방을 골라야 만들 수 있다', (tester) async {
+      final server = _Server();
+      server.on('POST', '/api/rooms/r2/polls', (r) {
+        return _json(_messageJson(senderId: 'me'), 201);
+      });
+      final readOnly = Room.fromJson({
+        'id': 'r-ro',
+        'teamId': 't1',
+        'type': 'topic',
+        'name': '읽기전용방',
+        'members': _members,
+        'createdAt': 1000,
+        'readOnly': true,
+      });
+      final session = _session(
+        server,
+        rooms: [
+          _topic('r1'),
+          Room.fromJson({
+            'id': 'r2',
+            'teamId': 't1',
+            'type': 'topic',
+            'name': '영업방',
+            'members': _members,
+            'createdAt': 1000,
+          }),
+          readOnly,
+          _secretDm(),
+        ],
+      );
+      _size(tester, const Size(1280, 900));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              actions: [
+                AppMenuButton(
+                  session: session,
+                  onOpenFiles: () {},
+                  onOpenLinks: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('메뉴'));
+      await tester.pumpAndSettle();
+      // 예전 "투표 즐겨찾기"는 "투표"로 바뀌었고, 생성 · 리스트 두 묶음으로 나뉜다.
+      expect(find.text('투표 즐겨찾기'), findsNothing);
+      expect(find.text('생성'), findsOneWidget);
+      expect(find.text('리스트'), findsOneWidget);
+      await tester.tap(find.text('투표'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PollCreator), findsOneWidget);
+      // 맨 위 "대화방" 칸은 비어 있어서 방을 고르기 전에는 만들 수 없다.
+      expect(find.text('대화방'), findsOneWidget);
+      expect(find.text('대화방 선택'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('poll-title-field')),
+        '점심 뭐 먹을까요?',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('poll-option-field-0')),
+        '한식',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('poll-option-field-1')),
+        '중식',
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('poll-create-submit')),
+            )
+            .onPressed,
+        isNull,
+      );
+
+      // 고를 수 있는 방 — 읽기 전용 토픽과 비밀 대화는 목록에 없다.
+      await tester.tap(find.text('대화방 선택'));
+      await tester.pumpAndSettle();
+      expect(find.text('공지방'), findsOneWidget);
+      expect(find.text('영업방'), findsOneWidget);
+      expect(find.text('읽기전용방'), findsNothing);
+      expect(find.text('박비밀'), findsNothing);
+      await tester.tap(find.text('영업방'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('poll-create-submit')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('poll-create-submit')));
+      await tester.pumpAndSettle();
+      // 고른 방으로 만들어진다.
+      expect(server.called('POST', '/api/rooms/r2/polls'), hasLength(1));
+      expect(server.called('POST', '/api/rooms/r1/polls'), isEmpty);
+      expect(find.byType(PollCreator), findsNothing);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('입력창 도구모음의 투표로 열면 그 대화방이 미리 채워져 있고 바꿀 수도 있다', (tester) async {
+      final server = _Server();
+      server.on('POST', '/api/rooms/r2/polls', (r) {
+        return _json(_messageJson(senderId: 'me'), 201);
+      });
+      final session = _session(
+        server,
+        rooms: [
+          _topic('r1'),
+          Room.fromJson({
+            'id': 'r2',
+            'teamId': 't1',
+            'type': 'topic',
+            'name': '영업방',
+            'members': _members,
+            'createdAt': 1000,
+          }),
+        ],
+      );
+      _size(tester, const Size(1280, 900));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: inputBar(session, session.rooms.first),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('chat-poll')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PollCreator), findsOneWidget);
+      // 열린 방(공지방)이 대화방 칸에 들어 있다.
+      expect(find.text('대화방 선택'), findsNothing);
+      final field = find.byKey(const ValueKey('poll-room-field'));
+      expect(
+        find.descendant(of: field, matching: find.text('공지방')),
+        findsOneWidget,
+      );
+      // 다른 방으로 바꿀 수 있다.
+      await tester.tap(find.descendant(of: field, matching: find.text('공지방')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('영업방'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: field, matching: find.text('영업방')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('폭 360 — 메뉴의 투표는 전체 화면으로 열리고 대화방 칸 목록이 화면 안에 뜬다', (tester) async {
+      final session = _session(_Server(), rooms: [_topic('r1')]);
+      _size(tester, const Size(360, 700));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              actions: [
+                AppMenuButton(
+                  session: session,
+                  onOpenFiles: () {},
+                  onOpenLinks: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('메뉴'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('투표'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PollCreator), findsOneWidget);
+      expect(find.byType(Dialog), findsNothing); // 좁은 화면은 전체 화면
+      await tester.tap(find.text('대화방 선택'));
+      await tester.pumpAndSettle();
+      expect(find.text('공지방'), findsOneWidget);
+      final list = tester.getRect(find.text('토픽'));
+      expect(list.right, lessThanOrEqualTo(360));
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('공지방'));
+      await tester.pumpAndSettle();
+      expect(find.text('대화방 선택'), findsNothing);
+    });
+
+    testWidgets('메뉴 드롭다운 — 폭 360에서도 넘치지 않고 타일이 모두 보인다', (tester) async {
+      final session = _session(_Server());
+      _size(tester, const Size(360, 640));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              actions: [
+                AppMenuButton(
+                  session: session,
+                  onOpenFiles: () {},
+                  onOpenLinks: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('메뉴'));
+      await tester.pumpAndSettle();
+      for (final label in ['메시지 예약', '투표', '파일', '링크', '문의함']) {
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+      expect(tester.takeException(), isNull);
+      final right = tester
+          .getTopRight(find.byKey(const ValueKey('menu-inquiries')))
+          .dx;
+      expect(right, lessThanOrEqualTo(360));
     });
   });
 }

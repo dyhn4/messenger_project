@@ -2,28 +2,21 @@ import { Router } from 'express';
 import { listAttachments, listAttachmentsForMessages } from './db/queries/messages.js';
 import { isTeamMember } from './db/queries/teams.js';
 import { toMessageDto } from './messages.js';
+import { matchesFileKind, parseFileKind } from './fileKinds.js';
 
 export const attachmentsRouter = Router();
-
-/** files_screen.dart의 파일 형식 필터와 값이 일치해야 한다(client/lib/screens/files_screen.dart). */
-const CATEGORY_MATCHERS = {
-  image: (mime) => (mime ?? '').startsWith('image/'),
-  pdf: (mime) => mime === 'application/pdf',
-  document: (mime, name) =>
-    /word|msword|text\/plain|hwp/i.test(mime ?? '') || /\.(docx?|hwpx?|txt|rtf)$/i.test(name ?? ''),
-  excel: (mime, name) => /excel|spreadsheet/i.test(mime ?? '') || /\.(xlsx?|csv)$/i.test(name ?? ''),
-  powerpoint: (mime, name) => /powerpoint|presentation/i.test(mime ?? '') || /\.(pptx?)$/i.test(name ?? ''),
-  archive: (mime, name) => /zip|rar|7z|compressed/i.test(mime ?? '') || /\.(zip|rar|7z)$/i.test(name ?? ''),
-  audio: (mime) => (mime ?? '').startsWith('audio/'),
-};
 
 /**
  * 방(들)에 첨부된 이미지/파일 목록 — search.js와 동일하게 내가 속한 방(비밀 대화 제외)으로만
  * 좁힌다. roomId를 안 주면 내가 속한 모든 방을 가로지른다. senderId/category(이미지/PDF/문서/
- * 엑셀/파워포인트/압축 파일/오디오)로 더 좁힐 수 있다(전부 선택적).
+ * 엑셀/파워포인트/동영상/오디오/압축 파일/기타 — fileKinds.js)로 더 좁힐 수 있다(전부 선택적).
+ * 파일 패널 상단의 검색칸·기간·정렬도 여기서 받는다: q(파일 이름 일부), since/until(밀리초),
+ * order=desc|asc(기본 최신 순).
  */
 attachmentsRouter.get('/attachments', async (req, res) => {
-  const { roomId, senderId, category, teamId } = req.query;
+  const { roomId, senderId, category, teamId, since, until } = req.query;
+  const q = String(req.query.q ?? '').trim().toLowerCase();
+  const order = req.query.order === 'asc' ? 'asc' : 'desc';
   const limit = Math.min(Number(req.query.limit) || 500, 1000);
   // 파일 목록도 검색과 마찬가지로 지금 보고 있는 팀 안에서만.
   if (!teamId) return res.status(400).json({ error: 'teamId가 필요합니다.' });
@@ -37,6 +30,10 @@ attachmentsRouter.get('/attachments', async (req, res) => {
     roomId: roomId || null,
     senderId: senderId || null,
     limit,
+    since: since ? Number(since) : null,
+    until: until ? Number(until) : null,
+    q,
+    order,
   });
 
   // 사진·파일 여러 개를 한 말풍선으로 보낸 메시지는 첨부마다 한 줄씩 펼친다 — 안 그러면
@@ -60,8 +57,13 @@ attachmentsRouter.get('/attachments', async (req, res) => {
     }));
   });
 
-  const matcher = category ? CATEGORY_MATCHERS[category] : null;
-  const filtered = matcher ? items.filter((m) => matcher(m.mimeType, m.fileName)) : items;
+  // 한 메시지에 첨부가 여러 개면 이름이 맞는 첨부만 남긴다(메시지 단위 SQL 조건은 "하나라도 맞는" 메시지까지만 거른다).
+  const kind = parseFileKind(category);
+  const filtered = items.filter(
+    (m) =>
+      (!kind || matchesFileKind(kind, m.mimeType, m.fileName)) &&
+      (!q || (m.fileName ?? '').toLowerCase().includes(q)),
+  );
 
   res.json(filtered.map(toMessageDto));
 });

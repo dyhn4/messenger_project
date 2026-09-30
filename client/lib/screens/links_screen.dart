@@ -8,13 +8,14 @@ import '../services/app_links.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/external_image.dart';
-import '../widgets/filter_dropdown.dart';
 import '../widgets/hover_toolbar.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
+import '../widgets/panel_filters.dart';
 
 /// "메뉴 > 링크" — 대화에서 주고받은 링크를 한 곳에 모아 보는 패널(잔디의 "링크 모아보기"와 같은
-/// 기능). 파일 패널과 같은 틀(헤더+대화방 필터+목록+페이지 넘김)이고, 줄마다 대화방 이름·미리보기
+/// 기능). 파일 패널과 같은 틀(헤더+검색칸+필터 줄(참여 대화방 / 모든 멤버 / 기간)+정렬+목록+페이지
+/// 넘김, "파일 ⌄" 형식 단추만 없다)이고, 줄마다 대화방 이름·미리보기
 /// 그림·제목(없으면 도메인)·주소를 보여준다(_LinkRow — 누르는 곳마다 하는 일이 다르다).
 class LinksScreen extends StatefulWidget {
   final Session session;
@@ -42,6 +43,10 @@ class _LinksScreenState extends State<LinksScreen> {
   final _listScrollController = ScrollController();
 
   String? _roomId;
+  String? _senderId; // null = 모든 멤버
+  PanelPeriod _period = const PanelPeriod();
+  bool _newestFirst = true;
+  String _query = ''; // 링크 검색어
   bool _loading = true;
   String? _error;
   List<SharedLink>? _results;
@@ -69,6 +74,11 @@ class _LinksScreenState extends State<LinksScreen> {
       final results = await widget.session.api!.fetchLinks(
         teamId: widget.session.currentTeam!.id,
         roomId: _roomId,
+        senderId: _senderId,
+        query: _query,
+        since: _period.since(),
+        until: _period.until,
+        newestFirst: _newestFirst,
       );
       if (!mounted) return;
       setState(() {
@@ -165,19 +175,41 @@ class _LinksScreenState extends State<LinksScreen> {
             ),
           ),
           const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: RoomFilterButton(
-              session: widget.session,
-              selectedRoomId: _roomId,
-              expand: true,
-              onSelected: (id) {
-                setState(() => _roomId = id);
-                _load();
-              },
-            ),
+          PanelFilterBar(
+            searchHint: '링크 검색',
+            initialQuery: _query,
+            onQueryChanged: (q) {
+              _query = q;
+              _load();
+            },
+            session: widget.session,
+            roomId: _roomId,
+            onRoomChanged: (id) {
+              // 방이 바뀌면 이전 방 멤버 기준으로 골랐던 보낸 사람도 같이 비운다(파일 패널과 같다).
+              setState(() {
+                _roomId = id;
+                _senderId = null;
+              });
+              _load();
+            },
+            members: memberChoicesFor(widget.session, _roomId),
+            senderId: _senderId,
+            onSenderChanged: (v) {
+              setState(() => _senderId = v);
+              _load();
+            },
+            period: _period,
+            onPeriodChanged: (v) {
+              setState(() => _period = v);
+              _load();
+            },
+            newestFirst: _newestFirst,
+            onSortChanged: (v) {
+              setState(() => _newestFirst = v);
+              _load();
+            },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
           Expanded(child: _buildResults(context)),
         ],
       ),
@@ -188,12 +220,29 @@ class _LinksScreenState extends State<LinksScreen> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Text(_error!));
     final results = _results ?? const <SharedLink>[];
+    final countLine = PanelResultLine(
+      summary: Text(
+        '"${results.length}"개가 로딩되었습니다.',
+        key: const ValueKey('panel-loaded-count'),
+        style: Theme.of(context).textTheme.labelLarge,
+      ),
+      rangeText: _period.rangeText,
+    );
     if (results.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('주고받은 링크가 없습니다.'),
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          countLine,
+          const Divider(height: 1),
+          const Expanded(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('주고받은 링크가 없습니다.'),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -207,13 +256,7 @@ class _LinksScreenState extends State<LinksScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: Text(
-            '"${results.length}"개가 로딩되었습니다.',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-        ),
+        countLine,
         const Divider(height: 1),
         Expanded(
           child: MutedScrollbar(

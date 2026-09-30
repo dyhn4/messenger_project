@@ -9,6 +9,7 @@ import {
   rooms,
   messages,
 } from '../schema.js';
+import { fileKindSql } from '../../fileKinds.js';
 
 export async function insertMessage(fields) {
   const [row] = await db.insert(messages).values(fields).returning();
@@ -277,7 +278,20 @@ const notBeforeDmHistoryFloor = or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(m
  * 통합 검색. requesterId가 속한 방으로만 좁히는 건 room_members와의 join으로 강제한다(클라이언트가
  * roomId를 임의로 보내도 내 방이 아니면 절대 안 걸림 — 예전 myRoomIds.has(...) 필터와 동일한 보장).
  */
-export async function searchMessages({ requesterId, teamId, roomId, senderId, since, until, q, limit }) {
+export async function searchMessages({
+  requesterId,
+  teamId,
+  roomId,
+  senderId,
+  since,
+  until,
+  q,
+  limit,
+  type = 'all', // 'all' | 'message' | 'poll' | 'file' — 검색 패널의 탭.
+  fileKind = null, // type이 'file'일 때 파일 형식(fileKinds.js) — null이면 전체 파일.
+  order = 'desc', // 'desc'(최신 순) | 'asc'(과거 순)
+  withTotal = false, // true면 limit와 상관없는 전체 건수도 같이 센다({ rows, total }로 돌려준다).
+}) {
   // 검색어의 %·_·\는 LIKE 와일드카드가 아니라 글자 그대로 찾는다 — 안 그러면 "_" 하나로 모든 글이
   // 걸린다(Postgres LIKE의 기본 이스케이프 문자가 \라 ESCAPE 절 없이 앞에 \만 붙이면 된다).
   const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
@@ -296,20 +310,34 @@ export async function searchMessages({ requesterId, teamId, roomId, senderId, si
   if (senderId) conditions.push(eq(messages.senderId, senderId));
   if (since) conditions.push(gte(messages.createdAt, new Date(since)));
   if (until) conditions.push(lte(messages.createdAt, new Date(until)));
+  if (type === 'poll') conditions.push(eq(messages.type, 'poll'));
+  else if (type === 'message') conditions.push(inArray(messages.type, ['text', 'post']));
+  else if (type === 'file') {
+    conditions.push(inArray(messages.type, ['image', 'file']));
+    if (fileKind) conditions.push(fileKindSql(fileKind, messages.mimeType, messages.fileName));
+  }
 
-  const rows = await db
-    .select({ message: messages })
-    .from(messages)
-    .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
-    .innerJoin(rooms, eq(rooms.id, messages.roomId))
-    .leftJoin(
-      dmHistoryFloors,
-      and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
-    )
-    .where(and(eq(rooms.isSecret, false), ...conditions))
-    .orderBy(desc(messages.createdAt))
-    .limit(limit);
-  return rows.map((r) => r.message);
+  const where = and(eq(rooms.isSecret, false), ...conditions);
+  const joined = (selection) =>
+    db
+      .select(selection)
+      .from(messages)
+      .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
+      .innerJoin(rooms, eq(rooms.id, messages.roomId))
+      .leftJoin(
+        dmHistoryFloors,
+        and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
+      )
+      .where(where);
+
+  const rows = (
+    await joined({ message: messages })
+      .orderBy(order === 'asc' ? asc(messages.createdAt) : desc(messages.createdAt))
+      .limit(limit)
+  ).map((r) => r.message);
+  if (!withTotal) return rows;
+  const [{ total }] = await joined({ total: sql`count(*)::int` });
+  return { rows, total };
 }
 
 /**
@@ -318,7 +346,17 @@ export async function searchMessages({ requesterId, teamId, roomId, senderId, si
  * 방을 가로지른다. 파일 형식(이미지/PDF/문서 등) 세분화는 mimeType 문자열 매칭이 SQL보다
  * JS가 다루기 쉬워서 여기서는 안 하고 호출부(files.js)에서 이 결과를 받은 뒤에 거른다.
  */
-export async function listAttachments({ requesterId, teamId, roomId, senderId, limit }) {
+export async function listAttachments({
+  requesterId,
+  teamId,
+  roomId,
+  senderId,
+  limit,
+  since = null,
+  until = null,
+  q = '', // 파일 이름 검색(소문자로 들어온다) — 여러 첨부 중 하나라도 이름이 맞으면 그 메시지가 남는다.
+  order = 'desc',
+}) {
   const conditions = [
     eq(roomMembers.userId, requesterId),
     // 보드 뷰 게시글과 첨부를 붙인 투표의 첨부도 파일 모아보기에 나온다(첨부 없는 글은 fileUrl이
@@ -331,6 +369,17 @@ export async function listAttachments({ requesterId, teamId, roomId, senderId, l
   if (teamId) conditions.push(eq(rooms.teamId, teamId));
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
+  if (since) conditions.push(gte(messages.createdAt, new Date(since)));
+  if (until) conditions.push(lte(messages.createdAt, new Date(until)));
+  if (q) {
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    conditions.push(
+      or(
+        sql`lower(${messages.fileName}) like ${pattern}`,
+        sql`exists (select 1 from ${messageAttachments} where ${messageAttachments.messageId} = ${messages.id} and lower(${messageAttachments.fileName}) like ${pattern})`,
+      ),
+    );
+  }
 
   const rows = await db
     .select({ message: messages })
@@ -342,7 +391,7 @@ export async function listAttachments({ requesterId, teamId, roomId, senderId, l
       and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
     )
     .where(and(eq(rooms.isSecret, false), ...conditions))
-    .orderBy(desc(messages.createdAt))
+    .orderBy(order === 'asc' ? asc(messages.createdAt) : desc(messages.createdAt))
     .limit(limit);
   return rows.map((r) => r.message);
 }
@@ -352,7 +401,17 @@ export async function listAttachments({ requesterId, teamId, roomId, senderId, l
  * 주소가 들어 있는 메시지. listAttachments와 같은 범위(팀·방·보낸 사람·DM 기록 하한)로 좁히고,
  * 실제 주소를 뽑아 한 줄씩 펼치는 건 호출부(links.js)가 한다.
  */
-export async function listLinkMessages({ requesterId, teamId, roomId, senderId, limit }) {
+export async function listLinkMessages({
+  requesterId,
+  teamId,
+  roomId,
+  senderId,
+  limit,
+  since = null,
+  until = null,
+  q = '', // 링크 검색(소문자) — 본문·글자 서식·링크 미리보기 제목/사이트 이름에서 찾는다.
+  order = 'desc',
+}) {
   const conditions = [
     eq(roomMembers.userId, requesterId),
     isNull(messages.deletedAt),
@@ -365,6 +424,19 @@ export async function listLinkMessages({ requesterId, teamId, roomId, senderId, 
   if (teamId) conditions.push(eq(rooms.teamId, teamId));
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
+  if (since) conditions.push(gte(messages.createdAt, new Date(since)));
+  if (until) conditions.push(lte(messages.createdAt, new Date(until)));
+  if (q) {
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    conditions.push(
+      or(
+        sql`lower(${messages.text}) like ${pattern}`,
+        sql`lower(${messages.textFormat}::text) like ${pattern}`,
+        sql`lower(${messages.linkPreviewTitle}) like ${pattern}`,
+        sql`lower(${messages.linkPreviewSiteName}) like ${pattern}`,
+      ),
+    );
+  }
 
   const rows = await db
     .select({ message: messages })
@@ -376,7 +448,7 @@ export async function listLinkMessages({ requesterId, teamId, roomId, senderId, 
       and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
     )
     .where(and(eq(rooms.isSecret, false), ...conditions))
-    .orderBy(desc(messages.createdAt))
+    .orderBy(order === 'asc' ? asc(messages.createdAt) : desc(messages.createdAt))
     .limit(limit);
   return rows.map((r) => r.message);
 }

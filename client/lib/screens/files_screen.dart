@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/app_user.dart';
+import '../models/file_category.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../services/api_client.dart' show favoriteFileKey;
@@ -9,51 +10,17 @@ import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
 import '../widgets/file_actions.dart';
 import '../widgets/hover_toolbar.dart';
-import '../widgets/filter_dropdown.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
+import '../widgets/panel_filters.dart';
 import 'image_viewer_screen.dart';
 
-enum FileCategory {
-  all,
-  image,
-  pdf,
-  document,
-  excel,
-  powerpoint,
-  archive,
-  audio,
-}
+export '../models/file_category.dart';
 
-extension on FileCategory {
-  String get label => switch (this) {
-    FileCategory.all => '모든 파일',
-    FileCategory.image => '이미지',
-    FileCategory.pdf => 'PDF',
-    FileCategory.document => '문서',
-    FileCategory.excel => '엑셀',
-    FileCategory.powerpoint => '파워포인트',
-    FileCategory.archive => '압축 파일',
-    FileCategory.audio => '오디오',
-  };
-
-  IconData get icon => switch (this) {
-    FileCategory.all => Icons.insert_drive_file_outlined,
-    FileCategory.image => Icons.image_outlined,
-    FileCategory.pdf => Icons.picture_as_pdf_outlined,
-    FileCategory.document => Icons.description_outlined,
-    FileCategory.excel => Icons.grid_on_outlined,
-    FileCategory.powerpoint => Icons.slideshow_outlined,
-    FileCategory.archive => Icons.folder_zip_outlined,
-    FileCategory.audio => Icons.audiotrack_outlined,
-  };
-
-  /// server/src/attachments.js의 CATEGORY_MATCHERS 키와 정확히 일치해야 한다.
-  String? get apiValue => this == FileCategory.all ? null : name;
-}
-
-/// 채팅방에 첨부된 이미지/파일을 한 번에 볼 수 있는 패널. 검색 패널과 같은 틀(헤더+필터+
-/// 목록+페이지네이션)을 재사용하지만, 검색어 입력 없이 필터만으로 바로 조회하고, 결과를
+/// 채팅방에 첨부된 이미지/파일을 한 번에 볼 수 있는 패널. 검색 패널과 같은 틀(헤더+검색칸+필터+
+/// 목록+페이지네이션)을 재사용한다 — 위에서부터 파일명 검색칸, 필터 줄(참여 대화방 / 모든 멤버 /
+/// 기간), "파일 ⌄"(형식 메뉴)와 정렬 줄, `"N"개가 로딩되었습니다.` 줄(직접 설정한 기간이 오른쪽에).
+/// 검색어 없이도 바로 조회하고, 결과를
 /// 클릭하면 검색처럼 실제 채팅창으로 이동하는 대신 이 패널 안에서 뒤로가기가 있는 자체
 /// 미리보기("메시지" 화면)로 보여준다.
 class FilesScreen extends StatefulWidget {
@@ -85,6 +52,9 @@ class _FilesScreenState extends State<FilesScreen> {
   String? _roomId; // null = 참여 대화방(전체)
   String? _senderId; // null = 모든 멤버
   FileCategory _category = FileCategory.all;
+  PanelPeriod _period = const PanelPeriod();
+  bool _newestFirst = true;
+  String _query = ''; // 파일명 검색어
 
   Message? _preview; // null이면 목록, 있으면 그 첨부의 자체 미리보기("메시지" 화면).
 
@@ -151,6 +121,10 @@ class _FilesScreenState extends State<FilesScreen> {
         roomId: _roomId,
         senderId: _senderId,
         category: _category.apiValue,
+        query: _query,
+        since: _period.since(),
+        until: _period.until,
+        newestFirst: _newestFirst,
       );
       // 즐겨찾기한 것을 목록 맨 위로 올리려면 어떤 게 담겨 있는지 알아야 한다. 즐겨찾기를
       // 못 불러와도(예: 일시적 오류) 목록 자체는 보여준다.
@@ -193,17 +167,8 @@ class _FilesScreenState extends State<FilesScreen> {
 
   /// 발신자 필터 후보 — 방을 하나 골랐으면 그 방 멤버만, "전체"면 비밀 아닌 내 방들의
   /// 멤버를 모아 보여준다(검색 패널과 달리 조직 전체 사용자 목록은 쓰지 않는다).
-  List<AppUser> get _senderChoices {
-    final room = _selectedRoom;
-    if (room != null) return room.members;
-    final byId = <String, AppUser>{};
-    for (final r in widget.session.rooms.where((r) => !r.isSecret)) {
-      for (final m in r.members) {
-        byId[m.id] = m;
-      }
-    }
-    return byId.values.toList();
-  }
+  List<AppUser> get _senderChoices =>
+      memberChoicesFor(widget.session, _selectedRoom?.id);
 
   String _roomNameFor(Message m) {
     for (final r in widget.session.rooms) {
@@ -251,43 +216,42 @@ class _FilesScreenState extends State<FilesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: RoomFilterButton(
-                  session: widget.session,
-                  selectedRoomId: _roomId,
-                  expand: true,
-                  onSelected: _onRoomSelected,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _SenderFilterButton(
-                  users: _senderChoices,
-                  selectedSenderId: _senderId,
-                  onSelected: (v) {
-                    setState(() => _senderId = v);
-                    _load();
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _CategoryFilterButton(
-                  category: _category,
-                  onSelected: (v) {
-                    setState(() => _category = v);
-                    _load();
-                  },
-                ),
-              ),
-            ],
+        PanelFilterBar(
+          searchHint: '파일명 검색',
+          initialQuery: _query,
+          onQueryChanged: (q) {
+            _query = q;
+            _load();
+          },
+          session: widget.session,
+          roomId: _roomId,
+          onRoomChanged: _onRoomSelected,
+          members: _senderChoices,
+          senderId: _senderId,
+          onSenderChanged: (v) {
+            setState(() => _senderId = v);
+            _load();
+          },
+          period: _period,
+          onPeriodChanged: (v) {
+            setState(() => _period = v);
+            _load();
+          },
+          // 늘 보이는 "파일 ⌄" — 누르면 파일 형식 메뉴.
+          leading: FileCategoryButton(
+            category: _category,
+            onSelected: (v) {
+              setState(() => _category = v);
+              _load();
+            },
           ),
+          newestFirst: _newestFirst,
+          onSortChanged: (v) {
+            setState(() => _newestFirst = v);
+            _load();
+          },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
         Expanded(child: _buildResults(context)),
       ],
     );
@@ -297,12 +261,30 @@ class _FilesScreenState extends State<FilesScreen> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Text(_error!));
     final results = _results ?? const <Message>[];
+    // "N개가 로딩되었습니다." 줄 — 비어 있어도 보이고, 직접 설정한 기간은 그 오른쪽에 보인다.
+    final countLine = PanelResultLine(
+      summary: Text(
+        '"${results.length}"개가 로딩되었습니다.',
+        key: const ValueKey('panel-loaded-count'),
+        style: Theme.of(context).textTheme.labelLarge,
+      ),
+      rangeText: _period.rangeText,
+    );
     if (results.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('첨부된 파일이 없습니다.'),
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          countLine,
+          const Divider(height: 1),
+          const Expanded(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('첨부된 파일이 없습니다.'),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
@@ -316,13 +298,7 @@ class _FilesScreenState extends State<FilesScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: Text(
-            '"${results.length}"개가 로딩되었습니다.',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-        ),
+        countLine,
         const Divider(height: 1),
         Expanded(
           child: MutedScrollbar(
@@ -499,195 +475,6 @@ class _FilesScreenState extends State<FilesScreen> {
             ),
         ],
       ),
-    );
-  }
-}
-
-/// "모든 멤버" 필터 — 검색 패널과 달리 조직 전체가 아니라 현재 범위(선택된 방 또는 내
-/// 방 전체)의 멤버로만 좁힌다.
-class _SenderFilterButton extends StatelessWidget {
-  final List<AppUser> users;
-  final String? selectedSenderId;
-  final ValueChanged<String?> onSelected;
-  const _SenderFilterButton({
-    required this.users,
-    required this.selectedSenderId,
-    required this.onSelected,
-  });
-
-  String get _label {
-    final id = selectedSenderId;
-    if (id == null) return '모든 멤버';
-    for (final u in users) {
-      if (u.id == id) return u.name;
-    }
-    return '모든 멤버';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterDropdownButton(
-      label: _label,
-      expand: true,
-      panelBuilder: (close) => FilterPanelShell(
-        width: 220,
-        child: _SenderFilterPanel(
-          users: users,
-          selectedSenderId: selectedSenderId,
-          onSelected: (id) {
-            onSelected(id);
-            close();
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _SenderFilterPanel extends StatefulWidget {
-  final List<AppUser> users;
-  final String? selectedSenderId;
-  final ValueChanged<String?> onSelected;
-  const _SenderFilterPanel({
-    required this.users,
-    required this.selectedSenderId,
-    required this.onSelected,
-  });
-
-  @override
-  State<_SenderFilterPanel> createState() => _SenderFilterPanelState();
-}
-
-class _SenderFilterPanelState extends State<_SenderFilterPanel> {
-  String _filter = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final list =
-        widget.users
-            .where(
-              (u) =>
-                  _filter.isEmpty ||
-                  u.name.toLowerCase().contains(_filter.toLowerCase()),
-            )
-            .toList()
-          ..sort((a, b) => a.name.compareTo(b.name));
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        filterSearchBox((v) => setState(() => _filter = v)),
-        Flexible(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                dense: true,
-                title: const Text('모든 멤버'),
-                trailing: widget.selectedSenderId == null
-                    ? const Icon(Icons.check, size: 18)
-                    : null,
-                onTap: () => widget.onSelected(null),
-              ),
-              const Divider(height: 1),
-              for (final u in list)
-                ListTile(
-                  dense: true,
-                  leading: CircleAvatar(
-                    radius: 12,
-                    child: Text(u.name.isNotEmpty ? u.name[0] : '?'),
-                  ),
-                  title: Text(
-                    u.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: widget.selectedSenderId == u.id
-                      ? const Icon(Icons.check, size: 18)
-                      : null,
-                  onTap: () => widget.onSelected(u.id),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// "모든 파일" 필터 — 이미지/PDF/문서/엑셀/파워포인트/압축 파일/오디오 중 하나로 좁힌다.
-class _CategoryFilterButton extends StatelessWidget {
-  final FileCategory category;
-  final ValueChanged<FileCategory> onSelected;
-  const _CategoryFilterButton({
-    required this.category,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterDropdownButton(
-      label: category.label,
-      expand: true,
-      panelBuilder: (close) => FilterPanelShell(
-        width: 200,
-        child: _CategoryFilterPanel(
-          selected: category,
-          onSelected: (c) {
-            onSelected(c);
-            close();
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _CategoryFilterPanel extends StatefulWidget {
-  final FileCategory selected;
-  final ValueChanged<FileCategory> onSelected;
-  const _CategoryFilterPanel({
-    required this.selected,
-    required this.onSelected,
-  });
-
-  @override
-  State<_CategoryFilterPanel> createState() => _CategoryFilterPanelState();
-}
-
-class _CategoryFilterPanelState extends State<_CategoryFilterPanel> {
-  String _filter = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final list = FileCategory.values.where(
-      (c) =>
-          _filter.isEmpty ||
-          c.label.toLowerCase().contains(_filter.toLowerCase()),
-    );
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        filterSearchBox((v) => setState(() => _filter = v)),
-        Flexible(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final c in list)
-                ListTile(
-                  dense: true,
-                  leading: Icon(c.icon, size: 18),
-                  title: Text(c.label),
-                  trailing: widget.selected == c
-                      ? const Icon(Icons.check, size: 18)
-                      : null,
-                  onTap: () => widget.onSelected(c),
-                ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

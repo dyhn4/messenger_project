@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/app_user.dart';
+import '../models/file_category.dart';
+import '../models/poll.dart' show pollPreviewText;
 import '../models/room.dart';
 import '../services/api_client.dart';
 import '../services/session.dart';
@@ -9,20 +11,19 @@ import '../widgets/filter_dropdown.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
+import '../widgets/panel_filters.dart';
 import 'chat_screen.dart';
 
-enum SearchPeriod { week, month, threeMonths, year, all, custom }
+/// 검색 패널의 종류 탭 — 전체 / 메시지 / 투표 / 파일(꺽쇠로 파일 형식).
+enum SearchType { all, message, poll, file }
 
-extension on SearchPeriod {
-  String get label => switch (this) {
-    SearchPeriod.week => '1주일',
-    SearchPeriod.month => '1개월',
-    SearchPeriod.threeMonths => '3개월',
-    SearchPeriod.year => '1년 (기본)',
-    SearchPeriod.all => '기간 설정 안 함',
-    SearchPeriod.custom => '직접 설정',
-  };
+extension on SearchType {
+  /// 서버 `type` 값 — 전체는 안 보낸다.
+  String? get apiValue => this == SearchType.all ? null : name;
 }
+
+/// 한 번에 받아 오는 결과 수 — 넘치면 "결과 N건"의 N은 전체 건수이고 목록은 앞의 이만큼만 보인다.
+const searchFetchLimit = 500;
 
 class SearchScreen extends StatefulWidget {
   final Session session;
@@ -50,6 +51,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final _timeFormat = DateFormat('yyyy/MM/dd a h:mm');
   final _listScrollController = ScrollController();
   List<SearchResult>? _results;
+  int _total = 0; // 한도에 잘리기 전의 전체 건수.
   bool _loading = false;
   String? _error;
   int _page = 0; // 0-based.
@@ -57,8 +59,9 @@ class _SearchScreenState extends State<SearchScreen> {
   List<AppUser>? _users;
   String? _roomId; // null = 참여한 대화방(전체)
   String? _senderId; // null = 모든 멤버
-  SearchPeriod _period = SearchPeriod.year;
-  DateTimeRange? _customRange;
+  PanelPeriod _period = const PanelPeriod();
+  SearchType _type = SearchType.all;
+  FileCategory _fileKind = FileCategory.all;
   bool _newestFirst = true;
 
   @override
@@ -77,20 +80,6 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  DateTime? get _since => switch (_period) {
-    SearchPeriod.week => DateTime.now().subtract(const Duration(days: 7)),
-    SearchPeriod.month => DateTime.now().subtract(const Duration(days: 30)),
-    SearchPeriod.threeMonths => DateTime.now().subtract(
-      const Duration(days: 90),
-    ),
-    SearchPeriod.year => DateTime.now().subtract(const Duration(days: 365)),
-    SearchPeriod.all => null,
-    SearchPeriod.custom => _customRange?.start,
-  };
-
-  DateTime? get _until =>
-      _period == SearchPeriod.custom ? _customRange?.end : null;
-
   Future<void> _search() async {
     final q = _query.text.trim();
     if (q.isEmpty) {
@@ -102,18 +91,23 @@ class _SearchScreenState extends State<SearchScreen> {
       _error = null;
     });
     try {
-      final results = await widget.session.api!.search(
+      final page = await widget.session.api!.searchPage(
         q,
         // 검색은 지금 보고 있는 팀 안에서만 — 다른 팀 대화가 섞여 나오면 안 된다.
         teamId: widget.session.currentTeam!.id,
         roomId: _roomId,
         senderId: _senderId,
-        since: _since,
-        until: _until,
+        since: _period.since(),
+        until: _period.until,
+        type: _type.apiValue,
+        fileKind: _type == SearchType.file ? _fileKind.apiValue : null,
+        newestFirst: _newestFirst,
+        limit: searchFetchLimit,
       );
       if (!mounted) return;
       setState(() {
-        _results = results;
+        _results = page.items;
+        _total = page.total;
         _page = 0;
       });
     } catch (e) {
@@ -124,30 +118,24 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final range = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year - 5),
-      lastDate: now,
-      initialDateRange: _customRange,
-    );
-    if (range == null) return;
-    setState(() {
-      _period = SearchPeriod.custom;
-      _customRange = range;
-    });
+  /// 조건(필터·탭·정렬)이 바뀌었을 때 — 이미 검색어가 있으면 그 조건으로 다시 찾는다.
+  void _refresh() {
     if (_query.text.trim().isNotEmpty) _search();
   }
 
-  void _onPeriodSelected(SearchPeriod? period) {
-    if (period == null) return;
-    if (period == SearchPeriod.custom) {
-      _pickCustomRange();
-      return;
-    }
-    setState(() => _period = period);
-    if (_query.text.trim().isNotEmpty) _search();
+  void _selectType(SearchType type) {
+    if (_type == type) return;
+    setState(() => _type = type);
+    _refresh();
+  }
+
+  /// 꺽쇠 메뉴에서 파일 형식을 고르면 "파일" 탭으로 옮겨 그 형식으로 찾는다.
+  void _selectFileKind(FileCategory kind) {
+    setState(() {
+      _type = SearchType.file;
+      _fileKind = kind;
+    });
+    _refresh();
   }
 
   /// 결과 줄의 방 이름 — 목록에 있는 방이면 사이드바와 같은 이름(나에게만 바꾼 이름·나와의 대화 포함),
@@ -223,26 +211,29 @@ class _SearchScreenState extends State<SearchScreen> {
                   expand: true,
                   onSelected: (value) {
                     setState(() => _roomId = value);
-                    if (_query.text.trim().isNotEmpty) _search();
+                    _refresh();
                   },
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _MemberFilterButton(
+                child: MemberFilterButton(
                   users: _users,
                   selectedSenderId: _senderId,
                   onSelected: (value) {
                     setState(() => _senderId = value);
-                    if (_query.text.trim().isNotEmpty) _search();
+                    _refresh();
                   },
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: _PeriodFilterButton(
+                child: PeriodFilterButton(
                   period: _period,
-                  onSelected: _onPeriodSelected,
+                  onChanged: (value) {
+                    setState(() => _period = value);
+                    _refresh();
+                  },
                 ),
               ),
             ],
@@ -254,7 +245,8 @@ class _SearchScreenState extends State<SearchScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         controls,
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
+        _buildTypeBar(context),
         Expanded(child: _buildResults(context)),
       ],
     );
@@ -302,10 +294,68 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  /// 필터 줄 아래 — `전체 | 메시지 | 투표 | 파일 ⌄` 탭과 맨 오른쪽 정렬 단추. 검색 전에도 늘 보인다.
+  Widget _buildTypeBar(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _SearchTab(
+                    key: const ValueKey('search-tab-all'),
+                    label: '전체',
+                    selected: _type == SearchType.all,
+                    onTap: () => _selectType(SearchType.all),
+                  ),
+                  _SearchTab(
+                    key: const ValueKey('search-tab-message'),
+                    label: '메시지',
+                    selected: _type == SearchType.message,
+                    onTap: () => _selectType(SearchType.message),
+                  ),
+                  _SearchTab(
+                    key: const ValueKey('search-tab-poll'),
+                    label: '투표',
+                    selected: _type == SearchType.poll,
+                    onTap: () => _selectType(SearchType.poll),
+                  ),
+                  _SearchTab(
+                    key: const ValueKey('search-tab-file'),
+                    label: _fileKind.buttonLabel,
+                    selected: _type == SearchType.file,
+                    onTap: () => _selectType(SearchType.file),
+                    // 꺽쇠를 누르면 파일 형식 메뉴.
+                    menuBuilder: (chevron) => FileCategoryMenu(
+                      selected: _fileKind,
+                      onSelected: _selectFileKind,
+                      child: chevron,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          PanelSortButton(
+            newestFirst: _newestFirst,
+            onChanged: (v) {
+              setState(() => _newestFirst = v);
+              _refresh();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildResults(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Text(_error!));
-    if (_results == null) {
+    final results = _results;
+    if (results == null) {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(16),
@@ -313,25 +363,57 @@ class _SearchScreenState extends State<SearchScreen> {
         ),
       );
     }
-    if (_results!.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('검색 결과가 없습니다.'),
-        ),
+    final theme = Theme.of(context);
+    final summary = Text.rich(
+      key: const ValueKey('search-result-count'),
+      TextSpan(
+        style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+        children: [
+          const TextSpan(text: '결과 '),
+          TextSpan(
+            text: '$_total',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          const TextSpan(text: '건'),
+          // 한도를 넘으면 목록에는 앞의 일부만 있다는 걸 알린다.
+          if (_total > results.length)
+            TextSpan(
+              text: ' (${results.length}건까지 표시)',
+              style: theme.textTheme.bodySmall,
+            ),
+        ],
+      ),
+    );
+    final resultLine = PanelResultLine(
+      summary: summary,
+      rangeText: _period.rangeText,
+    );
+
+    if (results.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          resultLine,
+          const Divider(height: 1),
+          const Expanded(
+            child: Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('검색 결과가 없습니다.'),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
-    final sorted = [..._results!]
-      ..sort(
-        (a, b) => _newestFirst
-            ? b.createdAt.compareTo(a.createdAt)
-            : a.createdAt.compareTo(b.createdAt),
-      );
-
-    final totalPages = (sorted.length / paginationPageSize).ceil();
+    // 정렬은 서버가 한다(한도에 잘리는 쪽이 정렬 방향을 따라야 해서).
+    final totalPages = (results.length / paginationPageSize).ceil();
     final page = _page.clamp(0, totalPages - 1);
-    final pageItems = sorted
+    final pageItems = results
         .skip(page * paginationPageSize)
         .take(paginationPageSize)
         .toList();
@@ -339,26 +421,7 @@ class _SearchScreenState extends State<SearchScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '결과 ${sorted.length}건',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ),
-              _SortButton(
-                newestFirst: _newestFirst,
-                onChanged: (v) => setState(() {
-                  _newestFirst = v;
-                  _page = 0;
-                }),
-              ),
-            ],
-          ),
-        ),
+        resultLine,
         const Divider(height: 1),
         Expanded(
           child: MutedScrollbar(
@@ -392,45 +455,72 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 }
 
-/// "결과 N건" 옆 정렬 선택(최신 순/과거 순).
-class _SortButton extends StatelessWidget {
-  final bool newestFirst;
-  final ValueChanged<bool> onChanged;
-  const _SortButton({required this.newestFirst, required this.onChanged});
+/// 종류 탭 하나 — 고른 탭은 굵은 글씨 + 밑줄. [menuBuilder]를 주면 글자 오른쪽에 꺽쇠가 붙고,
+/// 꺽쇠를 누르면 그 메뉴가 열린다(글자를 누르면 탭만 고른다).
+class _SearchTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget Function(Widget chevron)? menuBuilder;
+  const _SearchTab({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.menuBuilder,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<bool>(
-      initialValue: newestFirst,
-      onSelected: onChanged,
-      itemBuilder: (context) => [
-        CheckedPopupMenuItem(
-          value: true,
-          checked: newestFirst,
-          child: const Text('최신 순'),
-        ),
-        CheckedPopupMenuItem(
-          value: false,
-          checked: !newestFirst,
-          child: const Text('과거 순'),
-        ),
-      ],
+    final theme = Theme.of(context);
+    final color = selected ? theme.colorScheme.onSurface : theme.hintColor;
+    final text = InkWell(
+      onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.swap_vert, size: 16, color: Theme.of(context).hintColor),
-            const SizedBox(width: 2),
-            Text(
-              newestFirst ? '최신 순' : '과거 순',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-          ],
+        padding: EdgeInsets.only(
+          left: 10,
+          right: menuBuilder == null ? 10 : 0,
+          top: 10,
+          bottom: 10,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            color: color,
+          ),
         ),
       ),
+    );
+    final builder = menuBuilder;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            width: 2,
+            color: selected ? theme.colorScheme.onSurface : Colors.transparent,
+          ),
+        ),
+      ),
+      child: builder == null
+          ? text
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                text,
+                builder(
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 10, 8, 10),
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 18,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -503,7 +593,9 @@ class _SearchResultRow extends StatelessWidget {
                       else
                         _highlighted(
                           context,
-                          result.text ?? result.fileName ?? '(파일)',
+                          result.isPoll
+                              ? pollPreviewText(result.text)
+                              : result.text ?? result.fileName ?? '(파일)',
                           query,
                         ),
                     ],
@@ -603,158 +695,3 @@ class _SearchResultRow extends StatelessWidget {
   }
 }
 
-/// "모든 멤버" 필터.
-class _MemberFilterButton extends StatelessWidget {
-  final List<AppUser>? users;
-  final String? selectedSenderId;
-  final ValueChanged<String?> onSelected;
-  const _MemberFilterButton({
-    required this.users,
-    required this.selectedSenderId,
-    required this.onSelected,
-  });
-
-  String get _label {
-    final id = selectedSenderId;
-    if (id == null) return '모든 멤버';
-    for (final u in users ?? const <AppUser>[]) {
-      if (u.id == id) return u.name;
-    }
-    return '모든 멤버';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterDropdownButton(
-      label: _label,
-      expand: true,
-      panelBuilder: (close) => FilterPanelShell(
-        width: 220,
-        child: _MemberFilterPanel(
-          users: users,
-          selectedSenderId: selectedSenderId,
-          onSelected: (id) {
-            onSelected(id);
-            close();
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _MemberFilterPanel extends StatefulWidget {
-  final List<AppUser>? users;
-  final String? selectedSenderId;
-  final ValueChanged<String?> onSelected;
-  const _MemberFilterPanel({
-    required this.users,
-    required this.selectedSenderId,
-    required this.onSelected,
-  });
-
-  @override
-  State<_MemberFilterPanel> createState() => _MemberFilterPanelState();
-}
-
-class _MemberFilterPanelState extends State<_MemberFilterPanel> {
-  String _filter = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final list = (widget.users ?? const <AppUser>[])
-        .where(
-          (u) =>
-              _filter.isEmpty ||
-              u.name.toLowerCase().contains(_filter.toLowerCase()),
-        )
-        .toList();
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        filterSearchBox((v) => setState(() => _filter = v)),
-        Flexible(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ListTile(
-                dense: true,
-                title: const Text('모든 멤버'),
-                trailing: widget.selectedSenderId == null
-                    ? const Icon(Icons.check, size: 18)
-                    : null,
-                onTap: () => widget.onSelected(null),
-              ),
-              const Divider(height: 1),
-              for (final u in list)
-                ListTile(
-                  dense: true,
-                  leading: CircleAvatar(
-                    radius: 12,
-                    child: Text(u.name.isNotEmpty ? u.name[0] : '?'),
-                  ),
-                  title: Text(
-                    u.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: widget.selectedSenderId == u.id
-                      ? const Icon(Icons.check, size: 18)
-                      : null,
-                  onTap: () => widget.onSelected(u.id),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 기간 필터. 검색창은 없이 프리셋 목록만 보여준다("직접 설정"은 상위에서 날짜 범위 선택기를 띄움).
-class _PeriodFilterButton extends StatelessWidget {
-  final SearchPeriod period;
-  final ValueChanged<SearchPeriod?> onSelected;
-  const _PeriodFilterButton({required this.period, required this.onSelected});
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterDropdownButton(
-      label: period.label,
-      expand: true,
-      panelBuilder: (close) => FilterPanelShell(
-        width: 200,
-        child: _PeriodFilterPanel(
-          selected: period,
-          onSelected: (p) {
-            onSelected(p);
-            close();
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _PeriodFilterPanel extends StatelessWidget {
-  final SearchPeriod selected;
-  final ValueChanged<SearchPeriod> onSelected;
-  const _PeriodFilterPanel({required this.selected, required this.onSelected});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      shrinkWrap: true,
-      children: [
-        for (final p in SearchPeriod.values)
-          ListTile(
-            dense: true,
-            title: Text(p.label),
-            trailing: selected == p ? const Icon(Icons.check, size: 18) : null,
-            onTap: () => onSelected(p),
-          ),
-      ],
-    );
-  }
-}

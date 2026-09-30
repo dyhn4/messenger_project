@@ -18,6 +18,20 @@ export function extractUrls(text) {
   return [...new Set(all.map((u) => u.replace(/[.,;:!?)\]}'"]+$/, '')))];
 }
 
+/**
+ * "링크" 모아보기의 검색어([q], 소문자)가 펼친 한 줄(메시지의 링크 하나)에 해당하는지. 메시지 단위 SQL 조건은 "그 메시지의 어느 글자든
+ * 맞으면" 통과시키므로, 링크가 여럿인 메시지에서 검색어가 한 주소에만 들어 있으면 나머지 주소 줄도 딸려 나온다. 그래서 줄마다 다시 본다:
+ * 그 주소·그 줄의 미리보기 제목/사이트 이름에 있거나, 주소를 뺀 본문(링크에 곁들인 설명)에 있으면 해당한다. q가 없으면 항상 해당.
+ */
+export function linkRowMatchesQuery(q, { url, text, urls = [], title = null, siteName = null }) {
+  if (!q) return true;
+  const has = (s) => typeof s === 'string' && s.toLowerCase().includes(q);
+  if (has(url) || has(title) || has(siteName)) return true;
+  let body = text ?? '';
+  for (const u of urls) body = body.split(u).join(' ');
+  return has(body);
+}
+
 /** SSRF 방지 — 사설/루프백/링크로컬 IP로는 절대 요청을 보내지 않는다(내부망 스캔에 쓰이는 걸
  * 막는다). 호스트명이 아니라 실제로 접속하는 IP를 봐야 하므로 dns.lookup 결과를 검사한다. */
 function isPrivateIp(ip) {

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import 'comment.dart';
+import 'poll.dart';
 import 'text_format.dart';
 
 /// 메시지에 들어있는 링크의 오픈그래프 미리보기(server/src/linkPreview.js) — 메시지 전송
@@ -48,9 +49,9 @@ const postAttachmentsMaxCount = 30;
 /// 제목이 한도 초과로 막힌다.
 int postTextLength(String text) => text.characters.length;
 
-/// 모르는 타입(보드 게시글 'post' 포함)은 text로 읽는다 — 게시글은 본문이 text에 있어서 예전
-/// 화면에서도 글로 보이고, 새 enum 값을 만들면 타입별 switch들이 전부 깨지므로 게시글은
-/// [Message.isPost]로만 구분한다.
+/// 모르는 타입(보드 게시글 'post'·투표 'poll' 포함)은 text로 읽는다 — 게시글·투표는 제목/본문이
+/// text에 있어서 예전 화면에서도 글로 보이고, 새 enum 값을 만들면 타입별 switch들이 전부
+/// 깨지므로 [Message.isPost]·[Message.isPoll]로만 구분한다.
 MessageType _typeFromString(String? s) => switch (s) {
   'image' => MessageType.image,
   'file' => MessageType.file,
@@ -168,6 +169,14 @@ class Message {
   /// 바뀐다 — non-final.
   DateTime? pinnedAt;
 
+  /// 투표 메시지(서버 type 'poll')인지 — 게시글처럼 [type]은 text로 두고(제목이 [text]에 들어 있어
+  /// 예전 화면에서도 글로 보인다) 이 값으로만 구분한다. 삭제된 투표도 true지만 [poll]은 null이다.
+  final bool isPoll;
+
+  /// 투표 내용(투표가 아니거나 삭제됐으면 null). 투표/마감/즐겨찾기가 오면 그 자리에서 바뀐다
+  /// (RoomChatController.applyPollUpdate) — non-final.
+  Poll? poll;
+
   Message({
     required this.id,
     required this.roomId,
@@ -204,6 +213,8 @@ class Message {
     this.isPost = false,
     this.title,
     this.pinnedAt,
+    this.isPoll = false,
+    this.poll,
     List<Comment>? comments,
   }) : comments = comments ?? [];
 
@@ -287,6 +298,10 @@ class Message {
               (json['pinnedAt'] as num).toInt(),
             )
           : null,
+      isPoll: json['type'] == 'poll',
+      poll: json['poll'] == null
+          ? null
+          : Poll.fromJson(Map<String, dynamic>.from(json['poll'] as Map)),
     );
   }
 

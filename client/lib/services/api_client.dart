@@ -12,6 +12,7 @@ import '../models/inquiry.dart';
 import '../models/invite_link.dart';
 import '../models/team_invite_link.dart';
 import '../models/message.dart';
+import '../models/poll.dart';
 import '../models/project.dart';
 import '../models/room.dart';
 import '../models/scheduled_message.dart';
@@ -281,6 +282,7 @@ class SearchResult {
   });
 
   bool get isPost => type == 'post';
+  bool get isPoll => type == 'poll';
 
   factory SearchResult.fromJson(Map<String, dynamic> json) => SearchResult(
     id: json['id'] as String,
@@ -2773,6 +2775,59 @@ class ApiClient {
     return list
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // ── 투표 ──────────────────────────────────────────────────────────────
+
+  /// 투표를 만든다 — 응답은 방에 뿌려진 메시지(type 'poll'). 목록 반영은 message:new로 오지만,
+  /// 응답도 그대로 돌려준다. [attachments]는 보드 뷰 토픽에서만 허용된다(서버가 다시 검사한다).
+  Future<Message> createPoll(
+    String roomId, {
+    required String title,
+    String? description,
+    required List<String> options,
+    bool anonymous = false,
+    bool multiple = false,
+    required DateTime closesAt,
+    List<UploadedAttachment> attachments = const [],
+  }) async {
+    return Message.fromJson(
+      await _post('/api/rooms/$roomId/polls', {
+            'title': title,
+            'description': ?description,
+            'options': options,
+            'anonymous': anonymous,
+            'multiple': multiple,
+            'closesAt': closesAt.millisecondsSinceEpoch,
+            if (attachments.isNotEmpty)
+              'attachments': [for (final u in attachments) u.toPayload()],
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 투표하기·다시 투표하기 — 내 표를 [optionIds]로 통째로 바꾼다(빈 목록이면 내 표를 취소).
+  /// 응답은 내 기준의 poll 객체다.
+  Future<Poll> votePoll(String pollId, List<String> optionIds) async {
+    return Poll.fromJson(
+      await _put('/api/polls/$pollId/vote', {'optionIds': optionIds})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 투표 일찍 마감(만든 사람·관리자) — 응답은 내 기준의 poll 객체다.
+  Future<Poll> closePoll(String pollId) async {
+    return Poll.fromJson(
+      await _post('/api/polls/$pollId/close', const {}) as Map<String, dynamic>,
+    );
+  }
+
+  /// 투표 즐겨찾기 켜기/끄기 — 서버가 확정한 값을 돌려준다.
+  Future<bool> setPollFavorite(String pollId, bool favorite) async {
+    final body =
+        await _put('/api/polls/$pollId/favorite', {'favorite': favorite})
+            as Map<String, dynamic>;
+    return body['favorite'] as bool? ?? favorite;
   }
 
   Future<List<SearchResult>> search(

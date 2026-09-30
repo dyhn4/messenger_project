@@ -7,6 +7,7 @@ import '../models/announcement.dart';
 import '../models/inquiry.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
+import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/scheduled_message.dart';
 import '../models/team.dart';
@@ -429,6 +430,9 @@ class ChatSocket {
   final _commentController = StreamController<Comment>.broadcast();
   final _messageEditedController = StreamController<Message>.broadcast();
   final _messageLinkPreviewController = StreamController<Message>.broadcast();
+  final _pollUpdatedController = StreamController<PollUpdatedEvent>.broadcast();
+  final _pollFavoriteController =
+      StreamController<PollFavoriteEvent>.broadcast();
   final _messageDeletedController =
       StreamController<MessageDeletedEvent>.broadcast();
   final _commentEditedController = StreamController<Comment>.broadcast();
@@ -552,6 +556,12 @@ class ChatSocket {
   /// (message:linkPreview) — 사용자가 고친 게 아니므로 messageEdited와는 별도 이벤트다.
   Stream<Message> get messageLinkPreview =>
       _messageLinkPreviewController.stream;
+
+  /// 누가 투표했거나 투표가 마감됐다(poll:updated) — 방 전체에 온다.
+  Stream<PollUpdatedEvent> get pollUpdated => _pollUpdatedController.stream;
+
+  /// 내 다른 기기에서 투표 즐겨찾기를 바꿨다(poll:favorite) — 내 user 룸으로만 온다.
+  Stream<PollFavoriteEvent> get pollFavorite => _pollFavoriteController.stream;
 
   /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted).
   Stream<MessageDeletedEvent> get messageDeleted =>
@@ -787,6 +797,16 @@ class ChatSocket {
     socket.on('message:linkPreview', (data) {
       _messageLinkPreviewController.add(
         Message.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('poll:updated', (data) {
+      _pollUpdatedController.add(
+        PollUpdatedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('poll:favorite', (data) {
+      _pollFavoriteController.add(
+        PollFavoriteEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
     socket.on('message:deleted', (data) {

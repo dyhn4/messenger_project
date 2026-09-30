@@ -2044,3 +2044,74 @@ class _RemoveBadge extends StatelessWidget {
     );
   }
 }
+
+/// 날짜(달력)와 15분 단위 시각을 고르는 입력 — 예약 발송 시간과 같은 UI·같은 범위(지금 이후~90일
+/// 안)라서, 투표 마감 시각처럼 같은 종류의 시각을 고르는 다른 화면이 그대로 쓴다. 날짜를 바꿨을 때
+/// 그날 고를 수 없는 시각이면 가장 가까운 시각으로 옮기는 규칙도 예약 편집기와 같다.
+class SchedulePicker extends StatelessWidget {
+  final DateTime value;
+  final bool enabled;
+  final ValueChanged<DateTime> onChanged;
+  const SchedulePicker({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  void _pickDate(DateTime day) {
+    final now = DateTime.now();
+    var next = DateTime(day.year, day.month, day.day, value.hour, value.minute);
+    if (!next.isAfter(now)) {
+      final preferred = defaultScheduleTime(now);
+      next = _dayOf(preferred) == _dayOf(next)
+          ? preferred
+          : _firstSlotAfter(now);
+    } else if (next.isAfter(latestScheduleTime(now))) {
+      next = _lastSlot(now);
+    }
+    onChanged(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final first = _firstSlotAfter(now);
+    final last = _lastSlot(now);
+    final day = _dayOf(value);
+    final date = _DateField(
+      value: value,
+      first: _dayOf(first),
+      last: _dayOf(last),
+      enabled: enabled,
+      onPicked: _pickDate,
+    );
+    final time = _TimeField(
+      minutes: value.hour * 60 + value.minute,
+      enabled: enabled,
+      allowed: (m) => _slotAllowed(
+        DateTime(day.year, day.month, day.day, 0, m),
+        DateTime.now(),
+      ),
+      onChanged: (m) => onChanged(DateTime(day.year, day.month, day.day, 0, m)),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 좁은 화면(휴대폰)에서는 날짜와 시각을 위아래로 쌓는다.
+        if (constraints.maxWidth < 380) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [date, const SizedBox(height: 8), time],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(flex: 3, child: date),
+            const SizedBox(width: 10),
+            Expanded(flex: 2, child: time),
+          ],
+        );
+      },
+    );
+  }
+}

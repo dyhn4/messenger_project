@@ -91,6 +91,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   설정([메시지 설정](#메시지-설정))을 따릅니다. 팀의 소유자·관리자는 자신이 참여 중인 방(비밀
   대화 제외)에서 같은 시간 안에 남의 메시지·댓글도 **삭제**할 수 있습니다(수정은 불가)
 - 메시지별 댓글(스레드) — PC는 옆 패널, 모바일은 전체화면
+- **투표** — 토픽·그룹·1:1·나와의 대화(비밀 대화 제외)에 제목·보기(2~20개)·마감 시각(최대 90일 뒤)을 정해 올리고, 익명/복수 선택 여부를 고릅니다. 만든 뒤에는 수정할 수 없고, 다시 투표할 수 있으며, 만든 사람이나 방 관리자가 일찍 마감할 수 있습니다. 투표는 방 멤버마다 즐겨찾기할 수 있고, 게시글처럼 시간 제한 없이 삭제할 수 있으며(관리자도 가능) 댓글도 달 수 있습니다. 앱에서는 입력칸의 투표 단추(보드 뷰 토픽은 오른쪽 아래 작은 단추, 파일도 30개까지 붙일 수 있음)로 만들고, 카드의 ⋯ 메뉴에서 댓글·즐겨찾기·투표 마감·삭제를 하며, 기명 투표는 득표 수를 눌러 투표자를 봅니다
 - 메시지 인용 공유(다른 방으로), 메시지 전달
 - 방별 안읽음 개수, 읽음 시각 동기화(`room:read`)
 - 메시지 페이지네이션(기본 50개, 최대 200개, `before` 커서로 과거 메시지 추가 로드)
@@ -1109,8 +1110,13 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | Method | Path | 설명 |
 |---|---|---|
 | PATCH | `/api/messages/:id` | 메시지 수정(팀 설정의 수정/삭제 가능 시간 안에서, **본인만**) |
-| DELETE | `/api/messages/:id` | 메시지 삭제(소프트 삭제 — 같은 시간 안에서, 본인 또는 참여 중인 방의 소유자·관리자) |
+| DELETE | `/api/messages/:id` | 메시지 삭제(소프트 삭제 — 같은 시간 안에서, 본인 또는 참여 중인 방의 소유자·관리자). 게시글·투표는 시간 제한 없음 |
 | POST | `/api/messages/:messageId/comments` | 댓글 작성 |
+| POST | `/api/rooms/:roomId/polls` | **투표 만들기** — `{ title, description?, options[2~20], anonymous?, multiple?, closesAt(epoch ms, 최대 90일 뒤), attachments? }`. 방에 `type:'poll'` 메시지(`poll` 필드 포함)로 올라간다. 비밀 대화는 400, 첨부는 보드 뷰 토픽만. 소켓 `message:send`로는 못 만든다 |
+| PUT | `/api/polls/:pollId/vote` | 투표하기·다시 투표하기·취소(`{ optionIds }`, 빈 배열이면 취소). 응답은 `poll`. 방에 소켓 `poll:updated` |
+| POST | `/api/polls/:pollId/close` | 일찍 마감(만든 사람 또는 방 관리자). 방에 `poll:updated` + 시스템 메시지 |
+| PUT | `/api/polls/:pollId/favorite` | 투표 즐겨찾기(`{ favorite }`). 내 다른 기기에 소켓 `poll:favorite` |
+| GET | `/api/polls/favorites?teamId=` | 내가 즐겨찾기한 투표 목록(최근 즐겨찾기순) |
 | PATCH | `/api/comments/:id` | 댓글 수정 |
 | DELETE | `/api/comments/:id` | 댓글 삭제(메시지 삭제와 동일한 규칙) |
 
@@ -1248,6 +1254,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(비밀 대화 상대 혼자 나갔을 때 표시용), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷) |
+| `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다 |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우) |
 | `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `color`(대표 색 `#RRGGBB`), `is_public`(공개 프로젝트 여부), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |

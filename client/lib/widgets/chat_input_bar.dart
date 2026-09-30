@@ -19,6 +19,7 @@ import '../services/room_chat_controller.dart';
 import '../services/typing_gate.dart';
 import '../services/session.dart';
 import '../screens/capture/capture_window.dart';
+import '../screens/poll_create_dialog.dart';
 import '../screens/schedule_message_dialog.dart';
 import '../screens/scheduled_messages_screen.dart' show ScheduledRoomBar;
 import 'app_toast.dart';
@@ -559,6 +560,57 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  /// 단추 줄에 투표 단추를 따로 놓을 자리가 있는지 — 단추 줄은 고정 폭 단추들이라 좁은 화면(휴대폰에
+  /// 팀장 문의 단추까지 붙은 경우 등)에서 하나 더 넣으면 줄이 넘친다. 지금 보일 단추 수로 필요한
+  /// 폭을 어림해서(단추당 48) 남는 자리가 있을 때만 별도 단추로 그리고(촘촘한 폭 40), 없으면 파일
+  /// 단추가 (파일 · 투표) 메뉴가 되어 거기에 합친다 — 어떤 폭에서도 투표를 만들 수 있고 줄은
+  /// 넘치지 않는다.
+  bool _standalonePoll(double maxWidth) {
+    final session = widget.session;
+    final room = _liveRoom;
+    var others = 3; // 이모티콘 · 파일 · 보내기.
+    if (!room.isSecret) others++; // 서식(T)
+    if (Platform.isWindows) others++; // 화면 캡처
+    if (_showCallButton && session.callsEnabled) others++;
+    if (session.canSendInquiryIn(widget.room)) others++;
+    if (canScheduleIn(session, room)) others++;
+    const compact = 40.0;
+    return canCreatePollIn(session, room) &&
+        maxWidth - others * 48.0 >= compact;
+  }
+
+  /// 투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가 메뉴가 된다.
+  bool _needsAttachMenu(double maxWidth) =>
+      canCreatePollIn(widget.session, _liveRoom) && !_standalonePoll(maxWidth);
+
+  /// 좁은 화면의 파일 단추 — 별도 단추를 못 놓은 투표를 메뉴 항목으로 모아 둔다.
+  Widget _buildAttachMenu() {
+    return PopupMenuButton<String>(
+      key: const ValueKey('chat-attach-menu'),
+      icon: const Icon(Icons.attach_file),
+      tooltip: '파일 · 투표',
+      enabled: !_sending,
+      onSelected: (v) {
+        if (v == 'poll') {
+          _openPollCreator();
+        } else {
+          _pickFile();
+        }
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem(value: 'file', child: Text('파일 보내기')),
+        PopupMenuItem(value: 'poll', child: Text('투표')),
+      ],
+    );
+  }
+
+  /// "투표"(막대그래프 단추) — 투표 만들기 창을 연다. 만들어지면 서버가 방에 뿌리는 message:new로
+  /// 목록에 나타난다(다른 메시지 전송과 같다). 쓰던 글·첨부는 건드리지 않는다.
+  Future<void> _openPollCreator() async {
+    if (!_canWrite || _sending) return;
+    await showPollCreator(context, session: widget.session, room: _liveRoom);
+  }
+
   /// "메시지 예약"(시계 단추) — 쓰던 글(서식 포함)과 이미 올라간 첨부를 채운 채로 예약 편집기를 연다.
   /// 예약하면 넘긴 글·첨부를 입력칸에서 비운다(예약으로 옮겨 갔으니). 취소하면 그대로 남는다.
   Future<void> _openScheduleEditor() async {
@@ -798,92 +850,111 @@ class ChatInputBarState extends State<ChatInputBar> {
             // 개수(캡처·화상회의·문의)와 글꼴에 따라 필요한 폭이 달라서, 예전처럼 고정 폭(320)
             // 기준으로 안내 문구를 두면 360px 안팎에서 넘쳐 보내기 버튼이 밀려났다. 이제 버튼을
             // 다 놓고 남은 자리에 안내 문구가 통째로 들어갈 때만 보인다(_SendKeyHint).
-            Row(
-              children: [
-                TapRegion(
-                  groupId: widget.stickerPickerGroupId,
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.emoji_emotions_outlined,
-                      color: widget.stickerPickerOpen
-                          ? Theme.of(context).colorScheme.primary
-                          : null,
+            LayoutBuilder(
+              builder: (context, constraints) => Row(
+                children: [
+                  TapRegion(
+                    groupId: widget.stickerPickerGroupId,
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.emoji_emotions_outlined,
+                        color: widget.stickerPickerOpen
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      onPressed: _sending ? null : widget.onToggleStickerPicker,
+                      tooltip: '이모티콘',
                     ),
-                    onPressed: _sending ? null : widget.onToggleStickerPicker,
-                    tooltip: '이모티콘',
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.attach_file),
-                  onPressed: _sending ? null : _pickFile,
-                  tooltip: '파일 보내기',
-                ),
-                if (!widget.room.isSecret)
-                  RichFormatToggleButton(
-                    open: _formatOpen,
-                    onPressed: () {
-                      setState(() => _formatOpen = !_formatOpen);
-                      _focusNode.requestFocus();
-                    },
-                  ),
-                // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
-                // 찍을지 먼저 고른다.
-                if (Platform.isWindows)
-                  PopupMenuButton<bool>(
-                    icon: const Icon(Icons.filter_center_focus),
-                    tooltip: '화면 캡처',
-                    enabled: !_sending && !_capturing,
-                    onSelected: _startCapture,
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: true, child: Text('메신저 창 숨기고 캡처')),
-                      PopupMenuItem(value: false, child: Text('메신저 창 포함하여 캡처')),
-                    ],
-                  ),
-                if (_showCallButton)
-                  CallButton(session: widget.session, room: widget.room),
-                // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
-                if (widget.session.canSendInquiryIn(widget.room))
-                  IconButton(
-                    icon: const Icon(Icons.contact_support_outlined),
-                    onPressed: _sending ? null : _showInquiryDialog,
-                    tooltip: '팀장에게 문의하기',
-                  ),
-                // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
-                Expanded(
-                  child: Platform.isWindows
-                      ? _SendKeyHint(
-                          widget.session.settings.sendWithShiftEnter
-                              ? 'Shift + Enter 로 전송'
-                              : 'Shift + Enter 로 줄바꿈',
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                // 메시지 예약 — 보내기 바로 옆에 둔다(비밀 대화는 서버가 예약을 받지 않는다).
-                if (canScheduleIn(widget.session, _liveRoom))
-                  IconButton(
-                    key: const ValueKey('chat-schedule'),
-                    icon: const Icon(Icons.schedule_send_outlined),
-                    onPressed: _sending || uploading
-                        ? null
-                        : _openScheduleEditor,
-                    tooltip: uploading ? '업로드가 끝나면 예약할 수 있어요' : '메시지 예약',
-                  ),
-                if (_sending)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                  // 투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가
+                  // 같은 자리의 메뉴(파일 보내기 · 투표)가 된다.
+                  if (_needsAttachMenu(constraints.maxWidth))
+                    _buildAttachMenu()
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: _sending ? null : _pickFile,
+                      tooltip: '파일 보내기',
                     ),
-                  )
-                else
-                  IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: uploading ? null : _send,
-                    tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
+                  // 투표 만들기 — 비밀 대화에서는 서버가 막으니 단추 자체를 숨긴다.
+                  if (_standalonePoll(constraints.maxWidth))
+                    IconButton(
+                      key: const ValueKey('chat-poll'),
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.poll_outlined),
+                      onPressed: _sending ? null : _openPollCreator,
+                      tooltip: '투표',
+                    ),
+                  if (!widget.room.isSecret)
+                    RichFormatToggleButton(
+                      open: _formatOpen,
+                      onPressed: () {
+                        setState(() => _formatOpen = !_formatOpen);
+                        _focusNode.requestFocus();
+                      },
+                    ),
+                  // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
+                  // 찍을지 먼저 고른다.
+                  if (Platform.isWindows)
+                    PopupMenuButton<bool>(
+                      icon: const Icon(Icons.filter_center_focus),
+                      tooltip: '화면 캡처',
+                      enabled: !_sending && !_capturing,
+                      onSelected: _startCapture,
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: true, child: Text('메신저 창 숨기고 캡처')),
+                        PopupMenuItem(
+                          value: false,
+                          child: Text('메신저 창 포함하여 캡처'),
+                        ),
+                      ],
+                    ),
+                  if (_showCallButton)
+                    CallButton(session: widget.session, room: widget.room),
+                  // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
+                  if (widget.session.canSendInquiryIn(widget.room))
+                    IconButton(
+                      icon: const Icon(Icons.contact_support_outlined),
+                      onPressed: _sending ? null : _showInquiryDialog,
+                      tooltip: '팀장에게 문의하기',
+                    ),
+                  // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
+                  Expanded(
+                    child: Platform.isWindows
+                        ? _SendKeyHint(
+                            widget.session.settings.sendWithShiftEnter
+                                ? 'Shift + Enter 로 전송'
+                                : 'Shift + Enter 로 줄바꿈',
+                          )
+                        : const SizedBox.shrink(),
                   ),
-              ],
+                  // 메시지 예약 — 보내기 바로 옆에 둔다(비밀 대화는 서버가 예약을 받지 않는다).
+                  if (canScheduleIn(widget.session, _liveRoom))
+                    IconButton(
+                      key: const ValueKey('chat-schedule'),
+                      icon: const Icon(Icons.schedule_send_outlined),
+                      onPressed: _sending || uploading
+                          ? null
+                          : _openScheduleEditor,
+                      tooltip: uploading ? '업로드가 끝나면 예약할 수 있어요' : '메시지 예약',
+                    ),
+                  if (_sending)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.send),
+                      onPressed: uploading ? null : _send,
+                      tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
+                    ),
+                ],
+              ),
             ),
           ],
         ),

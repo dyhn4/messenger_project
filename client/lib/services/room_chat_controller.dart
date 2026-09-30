@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/comment.dart';
 import '../models/message.dart';
+import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/text_format.dart';
 import '../models/uploaded_attachment.dart';
@@ -309,6 +310,8 @@ class RoomChatController extends ChangeNotifier {
         _syncPinned(existing);
         changed = true;
       }
+      // 투표도 끊긴 동안 놓친 표·마감·삭제를 따라잡는다(REST는 내 기준 값을 준다).
+      if (incoming.isPoll && _syncPollState(existing, incoming)) changed = true;
       final existingCommentIds = existing.comments.map((c) => c.id).toSet();
       for (final c in incoming.comments) {
         if (existingCommentIds.add(c.id)) {
@@ -665,6 +668,74 @@ class RoomChatController extends ChangeNotifier {
     if (idx == -1) return;
     messages[idx].linkPreview = updated.linkPreview;
     notifyListeners();
+  }
+
+  /// REST로 다시 받은 투표 메시지([incoming])의 값을 [existing]에 옮긴다 — 바뀐 게 있으면 true.
+  bool _syncPollState(Message existing, Message incoming) {
+    var changed = false;
+    if (existing.deleted != incoming.deleted) {
+      existing.deleted = incoming.deleted;
+      changed = true;
+    }
+    final fresh = incoming.poll;
+    final current = existing.poll;
+    if (fresh == null) {
+      if (current != null && incoming.deleted) {
+        existing.poll = null;
+        changed = true;
+      }
+    } else if (current == null || !current.sameContentAs(fresh)) {
+      existing.poll = fresh;
+      changed = true;
+    }
+    return changed;
+  }
+
+  /// 투표가 들어 있는 메시지 — 메시지 id로 먼저, 없으면 투표 id로 찾는다(아직 못 받은 방이면 null).
+  Message? _pollMessage({String? messageId, required String pollId}) {
+    for (final m in messages) {
+      if (!m.isPoll) continue;
+      if ((messageId != null && m.id == messageId) || m.poll?.id == pollId) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  /// Session이 poll:updated(누가 투표했거나 마감됐다)를 라우팅할 때 호출한다 — 규약의 받는 쪽
+  /// 규칙대로 [Poll.applyUpdate]가 내 선택·즐겨찾기를 지킨다. 목록에 없으면 false.
+  bool applyPollUpdate(PollUpdatedEvent event, {String? myUserId}) {
+    final m = _pollMessage(messageId: event.messageId, pollId: event.pollId);
+    if (m == null || m.deleted) return false;
+    m.poll = Poll.applyUpdate(
+      m.poll,
+      event.poll,
+      actorId: event.actorId,
+      actorOptionIds: event.actorOptionIds,
+      myUserId: myUserId,
+    );
+    notifyListeners();
+    return true;
+  }
+
+  /// 내가 투표/마감 요청을 보내고 받은 응답(내 기준 poll)을 곧바로 반영한다 — 소켓 이벤트를
+  /// 기다리지 않아도 카드가 바뀐다(같은 이벤트가 나중에 와도 결과는 같다).
+  bool applyPollResult(Poll poll) {
+    final m = _pollMessage(pollId: poll.id);
+    if (m == null || m.deleted) return false;
+    m.poll = poll;
+    notifyListeners();
+    return true;
+  }
+
+  /// 내 즐겨찾기 표시가 바뀌었다(내 다른 기기 포함).
+  bool applyPollFavorite(String messageId, String pollId, bool favorite) {
+    final m = _pollMessage(messageId: messageId, pollId: pollId);
+    final poll = m?.poll;
+    if (m == null || poll == null || poll.favorite == favorite) return false;
+    m.poll = poll.copyWith(favorite: favorite);
+    notifyListeners();
+    return true;
   }
 
   /// Session이 secret:message-read 브로드캐스트를 라우팅할 때 호출한다 — 상대가 이 메시지를

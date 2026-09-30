@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { findInquiryById } from './db/queries/inquiries.js';
 import { insertMessage, insertMessageAttachments, updateMessageLinkPreview } from './db/queries/messages.js';
+import { insertPollMessage } from './db/queries/polls.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { extractFirstUrl, fetchLinkPreview } from './linkPreview.js';
@@ -8,6 +9,7 @@ import { topicAccess } from './access.js';
 import { MESSAGE_ATTACHMENT_MAX, parsePostFields, POST_ATTACHMENT_MAX, topicWriteDenial } from './permissions.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { toMessageDto } from './messages.js';
+import { toPollDto } from './polls.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { resolveRawUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
@@ -27,17 +29,30 @@ import { sanitizeTextFormat } from './textFormat.js';
  * (quoted*는 "메시지 공유", forwardedFrom*는 "메시지 전달"에서 쓴다 — room_list_screen.dart의
  * 메시지 롱프레스 메뉴, message_share_screen.dart/message_forward_screen.dart 참고.)
  * 보드 뷰 게시글: { roomId, type: 'post', title, text, textFormat?, attachments? } — 보드 뷰 토픽은
- * 게시글만, 그 밖의 방은 게시글을 받지 않는다.
+ * 게시글만(투표 제외), 그 밖의 방은 게시글을 받지 않는다.
+ * 투표: { roomId, type: 'poll', attachments? } + [poll]({ title, description, optionTexts, anonymous, multiple,
+ * closesAt } — polls.js의 parsePollFields가 검사한 값). 투표는 REST(POST /rooms/:roomId/polls)로만 만든다 —
+ * 소켓 message:send는 [poll]을 넘길 수 없어서 type:'poll'을 거절한다. 첨부는 보드 뷰 토픽의 투표만 30개까지.
+ * 거절 결과에는 REST 응답용 [status]가 붙을 수 있다(소켓 ack에서는 무시된다).
  */
-export async function sendUserMessage({ io, senderId, payload, room: knownRoom = null, fallbackName = null }) {
+export async function sendUserMessage({ io, senderId, payload, room: knownRoom = null, fallbackName = null, poll = null }) {
   const room = knownRoom ?? (await findRoomById(payload.roomId));
   if (!room || !(await isRoomMember(room.id, senderId))) {
-    return { ok: false, error: '이 방의 멤버가 아닙니다.' };
+    return { ok: false, error: '이 방의 멤버가 아닙니다.', status: 403 };
   }
 
   const isPost = payload.type === 'post';
+  const isPoll = poll != null;
+  if (payload.type === 'poll' && !isPoll) {
+    return { ok: false, error: '투표는 투표 만들기로만 올릴 수 있습니다.' };
+  }
+  if (isPoll && room.isSecret) {
+    return { ok: false, error: '비밀 대화에서는 투표를 만들 수 없습니다.' };
+  }
+  // 게시글과 투표는 본문 대신 제목·첨부 목록을 쓰는 "카드형" 메시지다(단일 파일 칸·인용·전달 값은 무시).
+  const isRich = isPost || isPoll;
   const isBoard = room.type === 'topic' && room.viewMode === 'board';
-  if (isBoard && !isPost) {
+  if (isBoard && !isPost && !isPoll) {
     return { ok: false, error: '보드 뷰 토픽에는 게시글만 올릴 수 있습니다.' };
   }
   if (!isBoard && isPost) {
@@ -48,7 +63,7 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
   if (room.type === 'topic' && (room.readOnly || room.archivedAt)) {
     const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, senderId)).canManage });
     if (denial) {
-      return { ok: false, error: denial };
+      return { ok: false, error: denial, status: 403 };
     }
   }
   let post = null;
@@ -86,11 +101,14 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
   const validAttachments = Array.isArray(payload.attachments)
     ? payload.attachments.filter((a) => a && typeof a.fileUrl === 'string')
     : [];
-  if (isPost && validAttachments.length > POST_ATTACHMENT_MAX) {
+  if (isPoll && !isBoard && validAttachments.length > 0) {
+    return { ok: false, error: '첨부 파일은 보드 뷰 토픽의 투표에서만 올릴 수 있습니다.' };
+  }
+  if (isRich && validAttachments.length > POST_ATTACHMENT_MAX) {
     return { ok: false, error: `첨부 파일은 ${POST_ATTACHMENT_MAX}개까지 올릴 수 있습니다.` };
   }
   const attachments = validAttachments
-    .slice(0, isPost ? POST_ATTACHMENT_MAX : MESSAGE_ATTACHMENT_MAX)
+    .slice(0, isRich ? POST_ATTACHMENT_MAX : MESSAGE_ATTACHMENT_MAX)
     .map((a) => ({
       kind: a.kind === 'file' ? 'file' : 'image',
       fileUrl: resolveRawUrl(a.fileUrl),
@@ -106,42 +124,70 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
   const head = attachments[0];
 
   // 게시글은 제목·본문(앞뒤 공백 뺀 값)과 첨부 목록만 쓴다 — 단일 파일 칸(fileUrl 등)·인용·전달
-  // 값은 일반 메시지 전용이라 무시한다.
-  const message = await insertMessage({
+  // 값은 일반 메시지 전용이라 무시한다. 투표는 messages.text에 제목을 그대로 넣는다(검색·알림·미리보기가
+  // text를 쓰므로) — 보기·마감 같은 나머지는 polls 표에 있다.
+  const messageFields = {
     id: randomUUID(),
     roomId: room.id,
     senderId,
     senderName: sender?.name ?? sender?.username ?? fallbackName,
-    type: isPost ? 'post' : ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
+    type: isPoll ? 'poll' : isPost ? 'post' : ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
     title: post?.title ?? null,
-    text: post ? post.text : typeof payload.text === 'string' ? payload.text : null,
-    textFormat: post
-      ? sanitizeTextFormat(payload.textFormat, post.text)
-      : room.isSecret || typeof payload.text !== 'string'
-        ? null
-        : sanitizeTextFormat(payload.textFormat, payload.text),
-    fileUrl: head?.fileUrl ?? (post ? null : fileUrl),
+    text: isPoll ? poll.title : post ? post.text : typeof payload.text === 'string' ? payload.text : null,
+    textFormat: isPoll
+      ? null
+      : post
+        ? sanitizeTextFormat(payload.textFormat, post.text)
+        : room.isSecret || typeof payload.text !== 'string'
+          ? null
+          : sanitizeTextFormat(payload.textFormat, payload.text),
+    fileUrl: head?.fileUrl ?? (isRich ? null : fileUrl),
     fileName:
-      head?.fileName ?? (!post && typeof payload.fileName === 'string' ? payload.fileName : null),
+      head?.fileName ?? (!isRich && typeof payload.fileName === 'string' ? payload.fileName : null),
     fileSize:
-      head?.fileSize ?? (!post && typeof payload.fileSize === 'number' ? payload.fileSize : null),
+      head?.fileSize ?? (!isRich && typeof payload.fileSize === 'number' ? payload.fileSize : null),
     mimeType:
-      head?.mimeType ?? (!post && typeof payload.mimeType === 'string' ? payload.mimeType : null),
-    thumbnailUrl: head?.thumbnailUrl ?? (post ? null : thumbnailUrl),
-    quotedSenderName: !post && typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
-    quotedPreview: !post && typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
+      head?.mimeType ?? (!isRich && typeof payload.mimeType === 'string' ? payload.mimeType : null),
+    thumbnailUrl: head?.thumbnailUrl ?? (isRich ? null : thumbnailUrl),
+    quotedSenderName: !isRich && typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
+    quotedPreview: !isRich && typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
     forwardedFromSenderName:
-      !post && typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
+      !isRich && typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
     forwardedFromCreatedAt:
-      !post && typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
+      !isRich && typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
     isInquiryNotice: inquiryId != null,
     inquiryId,
-  });
+  };
+
+  let message;
+  let pollDto = null;
+  if (isPoll) {
+    // 메시지·첨부·투표·보기를 한 트랜잭션으로 — 중간에 실패해도 반쪽짜리 투표가 남지 않는다.
+    const created = await insertPollMessage({
+      message: messageFields,
+      attachments,
+      poll: {
+        creatorId: senderId,
+        title: poll.title,
+        description: poll.description,
+        anonymous: poll.anonymous,
+        multiple: poll.multiple,
+        closesAt: poll.closesAt,
+      },
+      optionTexts: poll.optionTexts,
+    });
+    message = created.message;
+    if (created.attachments.length > 0) message.attachments = created.attachments;
+    // 막 만든 투표라 표가 없다 — 모두에게 같은 DTO라 myOptionIds/favorite은 중립값이다.
+    pollDto = toPollDto(created.poll, created.options, []);
+  } else {
+    message = await insertMessage(messageFields);
+  }
 
   // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분). 게시글은
   // 하나여도 목록으로 저장한다 — toMessageDto의 예전 방식(파일 칸 하나 = 첨부 하나)은
   // 'image'/'file' 메시지에만 적용되기 때문이다.
-  if (attachments.length > 1 || (post && attachments.length > 0)) {
+  if (!isPoll && (attachments.length > 1 || (post && attachments.length > 0))) {
     message.attachments = await insertMessageAttachments(message.id, attachments);
   }
 
@@ -152,7 +198,7 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
 
   // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서
   // 나중에 다시 조회될 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.
-  const broadcastMessage = toMessageDto(message);
+  const broadcastMessage = toMessageDto(pollDto ? { ...message, poll: pollDto } : message);
   io.to(room.id).emit('message:new', broadcastMessage);
 
   // 응답(소켓 ack 등)을 기다리게 하지 않도록 백그라운드로 보낸다 — 실패해도(토큰 만료 등)

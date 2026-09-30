@@ -249,6 +249,8 @@ void showMessageActionSheet(
 }) {
   final sourceRoom = session.rooms.where((r) => r.id == message.roomId);
   final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
+  // 투표는 공유·전달을 못 한다(카드가 원본 하나로만 존재한다) — 비밀 대화와 같이 항목을 뺀다.
+  final cannotShare = isSecretRoom || message.isPoll;
 
   showModalBottomSheet(
     context: context,
@@ -256,7 +258,7 @@ void showMessageActionSheet(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!isSecretRoom)
+          if (!cannotShare)
             ListTile(
               leading: const Icon(Icons.share_outlined),
               title: const Text('메시지 공유'),
@@ -309,7 +311,7 @@ void showMessageActionSheet(
                 );
               },
             ),
-          if (!isSecretRoom)
+          if (!cannotShare)
             ListTile(
               leading: const Icon(Icons.forward_outlined),
               title: const Text('메시지 전달'),
@@ -340,9 +342,11 @@ List<Widget> messageActionMenuItems(
 }) {
   final sourceRoom = session.rooms.where((r) => r.id == message.roomId);
   final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
+  // 투표는 공유·전달을 못 한다(카드가 원본 하나로만 존재한다) — 비밀 대화와 같이 항목을 뺀다.
+  final cannotShare = isSecretRoom || message.isPoll;
 
   return [
-    if (!isSecretRoom)
+    if (!cannotShare)
       hoverMenuItem(
         icon: Icons.share_outlined,
         label: '메시지 공유',
@@ -369,7 +373,7 @@ List<Widget> messageActionMenuItems(
           senderDisplayName: senderDisplayName,
         ),
       ),
-    if (!isSecretRoom)
+    if (!cannotShare)
       hoverMenuItem(
         icon: Icons.forward_outlined,
         label: '메시지 전달',

@@ -93,6 +93,10 @@ export function toMessageDto(m) {
       : null,
     isInquiryNotice: !!m.isInquiryNotice,
     inquiryId: m.inquiryId ?? null,
+    // 투표(type='poll')의 제목·보기·집계 — 동기 함수라 여기서 조회하지 않고, 목록을 내려주는 쪽이 미리
+    // 행에 붙여 둔 m.poll(polls.js의 attachPolls / 새 투표는 sendMessage.js)을 그대로 옮긴다. 지워진
+    // 메시지나 투표가 아닌 메시지는 항상 null.
+    poll: m.type === 'poll' && !m.deletedAt ? (m.poll ?? null) : null,
   };
 }
 
@@ -145,6 +149,9 @@ export function createMessagesRouter(io) {
     const message = await findMessageById(req.params.id);
     if (!message || message.deletedAt) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
     const isPost = message.type === 'post';
+    if (message.type === 'poll') {
+      return res.status(400).json({ error: '투표는 수정할 수 없습니다.' });
+    }
     if (message.type !== 'text' && !isPost) {
       return res.status(400).json({ error: '텍스트 메시지만 수정할 수 있습니다.' });
     }
@@ -221,8 +228,10 @@ export function createMessagesRouter(io) {
     if (!message || message.deletedAt) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
     // 수정/삭제 허용 여부, 가능 시간, 콘텐츠 관리 권한을 한 곳에서 판단한다(moderation.js
     // 참고) — 댓글(comments.js)도 완전히 같은 규칙을 쓴다. 게시글은 그 토픽의 토픽 관리자도 지울 수
-    // 있고 가능 시간 제한이 없다(isPost).
+    // 있고 가능 시간 제한이 없다(isPost). 투표도 게시글처럼 오래 두고 쓰는 글이라 시간 제한이 없고
+    // 관리자가 지울 수 있다(isPoll).
     const isPost = message.type === 'post';
+    const isPoll = message.type === 'poll';
     const verdict = await canModifyContent({
       roomId: message.roomId,
       senderId: message.senderId,
@@ -230,6 +239,7 @@ export function createMessagesRouter(io) {
       requesterId: req.user.sub,
       action: 'delete',
       isPost,
+      isPoll,
     });
     if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
 
@@ -255,7 +265,7 @@ export function createMessagesRouter(io) {
     // 남의 메시지를 지운 경우(= 관리자 콘텐츠 관리)만 감사 로그에 남긴다 — 본인이 자기 글을
     // 지우는 건 일상적인 동작이라 기록 대상이 아니다.
     if (message.senderId !== req.user.sub) {
-      await recordModerationAudit(req, message, isPost ? 'post' : 'message');
+      await recordModerationAudit(req, message, isPost ? 'post' : isPoll ? 'poll' : 'message');
     }
 
     if (seenByOther) {

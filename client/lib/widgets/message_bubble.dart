@@ -23,6 +23,7 @@ import 'external_image.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
 import 'message_actions.dart';
+import 'poll_card.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
 
@@ -133,10 +134,13 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// 그래서 수정·본인 삭제 메뉴도 안 뜬다(관리자 삭제는 남의 메시지와 같은 규칙).
   bool get _isMine => widget.isMine && !widget.message.isAutomation;
 
+  /// 투표는 카드 안의 더보기(⋯: 댓글·즐겨찾기·마감·삭제)가 이 툴바를 대신한다 — 공유·전달·수정을
+  /// 못 하는 메시지라 툴바 항목이 사실상 겹치기만 한다.
   bool get _canShowToolbar =>
       !widget.message.deleted &&
       !widget.message.decryptFailed &&
       !_editing &&
+      !widget.message.isPoll &&
       widget.onOpenThread != null;
 
   /// Overlay 툴바를 여닫는다. OverlayPortalController.show/hide는 "빌드 중에는 호출하지
@@ -680,6 +684,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                 isEditDeleteAllowed(widget.session) &&
                 message.type == MessageType.text &&
                 !message.isPost &&
+                !message.isPoll &&
                 widget.onEdit != null)
               hoverMenuItem(
                 icon: Icons.edit,
@@ -803,6 +808,14 @@ class _MessageBubbleState extends State<MessageBubble> {
         );
       case MessageType.text:
         if (message.isPost) return _buildPostContent(context);
+        if (message.isPoll && message.poll != null) {
+          return PollCard(
+            session: widget.session,
+            message: message,
+            onOpenThread: widget.onOpenThread,
+            onDelete: widget.onDelete,
+          );
+        }
         // 안드로이드(터치)에서는 SelectableText였을 때 자체 롱프레스(단어 선택)가 부모
         // GestureDetector의 onLongPress(액션 시트)와 같은 롱프레스 기반이라 제스처 아레나를
         // 먼저 가져가 버려서, 말풍선 여백은 롱프레스가 되는데 글자 위는 안 되는 문제가 있었다

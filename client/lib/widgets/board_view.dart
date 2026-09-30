@@ -10,6 +10,7 @@ import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../screens/message_thread_screen.dart';
+import '../screens/poll_create_dialog.dart';
 import '../screens/post_editor_dialog.dart';
 import '../screens/scheduled_messages_screen.dart' show ScheduledRoomBar;
 import '../services/edit_policy.dart';
@@ -21,6 +22,7 @@ import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
 import 'muted_scrollbar.dart';
+import 'poll_card.dart';
 import 'rich_text_format.dart';
 
 final _fullDateFormat = DateFormat('yyyy/MM/dd a h:mm');
@@ -121,7 +123,7 @@ class BoardViewState extends State<BoardView> {
     final seen = <String>{};
     final posts = [
       for (final m in _c.messages)
-        if (m.isPost && !m.deleted && seen.add(m.id)) m,
+        if ((m.isPost || m.isPoll) && !m.deleted && seen.add(m.id)) m,
     ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return posts;
   }
@@ -129,7 +131,7 @@ class BoardViewState extends State<BoardView> {
   Message? _newestPost() {
     Message? newest;
     for (final m in _c.messages) {
-      if (!m.isPost || m.deleted) continue;
+      if ((!m.isPost && !m.isPoll) || m.deleted) continue;
       if (newest == null || m.createdAt.isAfter(newest.createdAt)) newest = m;
     }
     return newest;
@@ -137,7 +139,7 @@ class BoardViewState extends State<BoardView> {
 
   Message? _findPost(String id) {
     for (final m in _c.messages) {
-      if (m.id == id && m.isPost) return m;
+      if (m.id == id && (m.isPost || m.isPoll)) return m;
     }
     for (final m in _c.pinnedPosts) {
       if (m.id == id) return m;
@@ -216,6 +218,12 @@ class BoardViewState extends State<BoardView> {
     );
   }
 
+  /// 투표 만들기 — 보드 토픽이라 파일도 붙일 수 있다(최대 30개). 만들면 message:new로 카드가 나타난다.
+  Future<void> composePoll() async {
+    if (!canCreatePollIn(widget.session, widget.room)) return;
+    await showPollCreator(context, session: widget.session, room: widget.room);
+  }
+
   /// 목록 끝 근처에서 스크롤이 멈추면 과거 글을 더 불러온다(채팅과 같은 컨트롤러 페이지).
   void _maybeLoadOlder() {
     if (!_scroll.hasClients || !_c.hasMoreHistory || _c.loadingMore) return;
@@ -282,9 +290,24 @@ class BoardViewState extends State<BoardView> {
                   Positioned(
                     right: 20,
                     bottom: 20 + bottomInset,
-                    child: _ComposeButton(
-                      extended: constraints.maxWidth >= 600,
-                      onPressed: compose,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        // 투표 만들기 — 게시글 작성 버튼 바로 위의 작은 버튼(보드에는 채팅 입력칸이 없다).
+                        FloatingActionButton.small(
+                          key: const ValueKey('board-poll'),
+                          heroTag: null,
+                          tooltip: '투표 만들기',
+                          onPressed: composePoll,
+                          child: const Icon(Icons.poll_outlined),
+                        ),
+                        const SizedBox(height: 12),
+                        _ComposeButton(
+                          extended: constraints.maxWidth >= 600,
+                          onPressed: compose,
+                        ),
+                      ],
                     ),
                   ),
               ],
@@ -376,14 +399,24 @@ class BoardViewState extends State<BoardView> {
               : const SizedBox.shrink();
         } else {
           final post = posts[i - (hasPinned ? 1 : 0)];
-          item = PostCard(
-            key: ValueKey('post-${post.id}'),
-            session: widget.session,
-            room: widget.room,
-            post: post,
-            highlighted: post.id == _highlightedId,
-            onOpen: () => _openPost(post),
-          );
+          item = post.isPoll
+              ? PollBoardCard(
+                  key: ValueKey('poll-${post.id}'),
+                  session: widget.session,
+                  room: widget.room,
+                  poll: post,
+                  highlighted: post.id == _highlightedId,
+                  onOpen: () => _openPost(post),
+                  onDelete: _c.deleteMessage,
+                )
+              : PostCard(
+                  key: ValueKey('post-${post.id}'),
+                  session: widget.session,
+                  room: widget.room,
+                  post: post,
+                  highlighted: post.id == _highlightedId,
+                  onOpen: () => _openPost(post),
+                );
         }
         return Center(
           child: ConstrainedBox(
@@ -801,6 +834,93 @@ class PostCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 보드 목록의 투표 카드 — 게시글 카드와 같은 테두리·작성자 줄 아래에 투표 카드(PollCard)를 그대로
+/// 넣는다(보기를 눌러 바로 투표한다). 댓글·즐겨찾기·마감·삭제는 PollCard의 더보기(⋯)에서 하고,
+/// 댓글은 게시글처럼 오른쪽 상세(스레드)가 열린다.
+class PollBoardCard extends StatelessWidget {
+  final Session session;
+  final Room room;
+  final Message poll;
+  final bool highlighted;
+  final VoidCallback onOpen;
+  final Future<void> Function(String messageId)? onDelete;
+
+  const PollBoardCard({
+    super.key,
+    required this.session,
+    required this.room,
+    required this.poll,
+    required this.onOpen,
+    this.highlighted = false,
+    this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = BoardColors.of(theme);
+    final primary = theme.colorScheme.primary;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      decoration: _cardDecoration(
+        colors,
+        border: highlighted ? primary : null,
+        borderWidth: highlighted ? 1.5 : 1,
+        color: highlighted
+            ? Color.alphaBlend(primary.withValues(alpha: 0.06), colors.card)
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _authorAvatar(session, room, poll, 17),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _authorName(room, poll),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Tooltip(
+                      message: _fullDateFormat.format(poll.createdAt),
+                      child: Text(
+                        formatRelativeTime(poll.createdAt),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: theme.hintColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          PollCard(
+            session: session,
+            message: poll,
+            room: room,
+            onOpenThread: (_) => onOpen(),
+            onDelete: onDelete,
+            maxWidth: 560,
+          ),
+        ],
       ),
     );
   }

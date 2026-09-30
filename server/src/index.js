@@ -37,6 +37,7 @@ import { startRetentionJob } from './retention.js';
 import { createAdminRouter } from './admin.js';
 import { createAnnouncementsRouter } from './announcements.js';
 import { createInquiriesRouter } from './inquiries.js';
+import { createPollsRouter } from './polls.js';
 import { createProjectsRouter } from './projects.js';
 import { createRoomsRouter } from './rooms.js';
 import { createScheduledMessagesRouter, startScheduledMessageJob } from './scheduledMessages.js';
@@ -87,6 +88,8 @@ app.use('/api', requireAuth, createAnnouncementsRouter(io));
 app.use('/api', requireAuth, createInquiriesRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
+// 투표 — 만들기(방 메시지)·투표하기·마감·즐겨찾기. 소켓 message:send로는 못 만든다(polls.js).
+app.use('/api', requireAuth, createPollsRouter(io));
 // 메시지 예약 발송 — 만든 사람만 보고 고친다. 실제 발송은 아래 startScheduledMessageJob이 한다.
 app.use('/api', requireAuth, createScheduledMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));

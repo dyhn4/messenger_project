@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
@@ -51,6 +52,9 @@ export const users = pgTable('users', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   // 탈퇴 후 보존기간(1년) 만료로 메시지가 파기되면 찍힌다(retention.js) — 중복 파기 방지용.
   messagesPurgedAt: timestamp('messages_purged_at', { withTimezone: true }),
+  // 생일(연도 없이 월-일 'MM-DD') — 캘린더의 "멤버 생일" 구독 캘린더에 쓰인다. 비워 두면(null)
+  // 생일 캘린더에 나오지 않는다. 본인이 프로필에서 고친다.
+  birthday: text('birthday'),
 });
 
 /**
@@ -1388,4 +1392,195 @@ export const stickers = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('stickers_pack_id_idx').on(t.packId, t.position)],
+);
+
+// ── 투표 ────────────────────────────────────────────────────────────────
+// 투표는 방에 올라가는 메시지(messages.type = 'poll') 하나 + 아래 polls 한 행이다. 잔디처럼 만든 뒤에는
+// 수정할 수 없고(제목·보기·옵션 고정), 마감 시각(closesAt)이 지나거나 만든 사람이 일찍 마감(closedAt)하면
+// 더는 투표할 수 없다. 메시지를 지우면(하드 삭제) 같이 지워진다.
+export const polls = pgTable(
+  'polls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    messageId: uuid('message_id')
+      .notNull()
+      .unique()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    // 익명이면 누가 어느 보기를 골랐는지 서버가 내려주지 않는다(개수만).
+    anonymous: boolean('anonymous').notNull().default(false),
+    multiple: boolean('multiple').notNull().default(false),
+    closesAt: timestamp('closes_at', { withTimezone: true }).notNull(),
+    // 마감 시각 전에 만든 사람(또는 관리자)이 일찍 마감한 시각.
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closedBy: uuid('closed_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('polls_room_id_idx').on(t.roomId)],
+);
+
+export const pollOptions = pgTable(
+  'poll_options',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pollId: uuid('poll_id')
+      .notNull()
+      .references(() => polls.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull().default(0),
+    text: text('text').notNull(),
+  },
+  (t) => [index('poll_options_poll_id_idx').on(t.pollId, t.position)],
+);
+
+export const pollVotes = pgTable(
+  'poll_votes',
+  {
+    pollId: uuid('poll_id')
+      .notNull()
+      .references(() => polls.id, { onDelete: 'cascade' }),
+    optionId: uuid('option_id')
+      .notNull()
+      .references(() => pollOptions.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.optionId, t.userId] }), index('poll_votes_poll_id_idx').on(t.pollId)],
+);
+
+/** 사람마다 따로 "즐겨찾기"해 두는 투표. */
+export const pollFavorites = pgTable(
+  'poll_favorites',
+  {
+    pollId: uuid('poll_id')
+      .notNull()
+      .references(() => polls.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.pollId, t.userId] }), index('poll_favorites_user_id_idx').on(t.userId)],
+);
+
+// ── 캘린더 ──────────────────────────────────────────────────────────────
+// 캘린더는 팀 단위다. kind:
+//   'personal' — 사람마다 팀마다 하나씩 있는 "기본 캘린더"(처음 열 때 만든다). 지울 수 없다.
+//   'team'     — 팀마다 하나 있는 "팀 캘린더"(처음 열 때 만든다). 정회원 이상만 보고, 팀을 관리할
+//                수 있는 사람(소유자·관리자)만 일정을 만들고 고치고 지운다. 지울 수 없다.
+//   'shared'   — 사람이 "새 캘린더 만들기"로 만든 캘린더. 만든 사람이 소유자이고 멤버별로
+//                관리자/쓰기/읽기 권한을 준다.
+// isPublic이 false(비공개)면 다른 사람이 구독으로 찾을 수 없다.
+export const calendars = pgTable(
+  'calendars',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(), // 'personal' | 'team' | 'shared'
+    name: text('name').notNull(),
+    // 기본 색(멤버마다 calendar_members.color로 자기만 다르게 바꿀 수 있다). '#RRGGBB'.
+    color: text('color').notNull(),
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    isPublic: boolean('is_public').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('calendars_team_id_idx').on(t.teamId),
+    index('calendars_owner_id_idx').on(t.ownerId),
+    // 팀마다 팀 캘린더 하나, 사람마다 팀마다 기본 캘린더 하나.
+    uniqueIndex('calendars_team_kind_idx').on(t.teamId).where(sql`kind = 'team'`),
+    uniqueIndex('calendars_personal_owner_idx').on(t.teamId, t.ownerId).where(sql`kind = 'personal'`),
+  ],
+);
+
+/**
+ * 캘린더에 딸린 사람들. role: 'admin'(캘린더 관리자) | 'write' | 'read' — 그 캘린더의 멤버이거나,
+ * 'subscriber' — 구독만 한 사람(읽기 전용, 공개 캘린더만). 소유자도 'admin' 행이 있다.
+ * color/hidden은 그 사람 화면에서만 적용되는 개인 설정(색 바꾸기, 체크 해제로 숨기기).
+ * 팀 캘린더는 권한을 팀 소유자·관리자·정회원 여부로 계산하지만, 색·숨김은 이 표에 행을 만들어 둔다.
+ */
+export const calendarMembers = pgTable(
+  'calendar_members',
+  {
+    calendarId: uuid('calendar_id')
+      .notNull()
+      .references(() => calendars.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(), // 'admin' | 'write' | 'read' | 'subscriber'
+    color: text('color'),
+    hidden: boolean('hidden').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.calendarId, t.userId] }), index('calendar_members_user_id_idx').on(t.userId)],
+);
+
+/**
+ * 일정. 시각은 모두 UTC 순간(timestamptz)이다. allDay면 시작·끝은 "날" 단위(끝 날 포함)이고, 화면은
+ * 앱이 그 사람의 시간대로 그린다. recurrence(반복)는 null이거나
+ *   { freq: 'daily'|'weekly'|'monthly'|'yearly', interval: 1.., byWeekday?: [0..6](일=0, weekly만),
+ *     until?: 'YYYY-MM-DD', count?: 1.. }
+ * 이고, 서버가 조회 구간에 맞춰 회차(occurrence)로 펼쳐 준다. exdates는 "이 일정만 지우기/고치기"로 빠진
+ * 회차의 원래 시작 시각(ms) 목록이다. visibility: 'public'(캘린더를 보는 사람 모두 자세히) |
+ * 'private'(초대받은 사람과 만든 사람만 자세히, 나머지는 "비공개 일정"으로만).
+ */
+export const calendarEvents = pgTable(
+  'calendar_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    calendarId: uuid('calendar_id')
+      .notNull()
+      .references(() => calendars.id, { onDelete: 'cascade' }),
+    creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    location: text('location'),
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+    allDay: boolean('all_day').notNull().default(false),
+    visibility: text('visibility').notNull().default('public'), // 'public' | 'private'
+    recurrence: jsonb('recurrence'),
+    exdates: jsonb('exdates').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('calendar_events_calendar_start_idx').on(t.calendarId, t.startAt)],
+);
+
+/** 일정에 초대된 참석자. */
+export const calendarEventAttendees = pgTable(
+  'calendar_event_attendees',
+  {
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => calendarEvents.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.userId] }), index('calendar_event_attendees_user_id_idx').on(t.userId)],
+);
+
+/** 일정 색 — "개인 설정만 적용"이라 일정 하나에 사람마다 따로 고른 색을 둔다(없으면 캘린더 색). */
+export const calendarEventColors = pgTable(
+  'calendar_event_colors',
+  {
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => calendarEvents.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    color: text('color').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
 );

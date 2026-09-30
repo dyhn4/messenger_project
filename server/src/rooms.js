@@ -86,6 +86,7 @@ import { findUserById } from './db/queries/users.js';
 import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
+import { attachPolls } from './polls.js';
 import { notifyOfflineMembers, previewFor, roomTagFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
 import { knownUploadPath, signFileUrl, toStoredUploadUrl } from './upload.js';
@@ -1397,7 +1398,8 @@ export function createRoomsRouter(io) {
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
 
-    const rows = await listPinnedPosts(room.id);
+    // 고정은 게시글만 되지만(messages.js) 같은 모양을 지키려고 투표도 붙일 수 있게 attachPolls를 거친다.
+    const rows = await attachPolls(await listPinnedPosts(room.id), req.user.sub);
     const ids = rows.map((m) => m.id);
     const [attachmentsByMessageId, comments] = await Promise.all([
       listAttachmentsForMessages(ids),
@@ -1470,7 +1472,8 @@ export function createRoomsRouter(io) {
     // (DB에 서명된 URL을 그대로 저장하면 나중에 다시 조회할 때 이미 만료돼있게 된다).
     // 사진 여러 장짜리 메시지의 첨부 목록을 한 번에 붙인다(없으면 toMessageDto가 예전 방식으로
     // messages의 파일 칸을 첨부 하나로 본다).
-    const all = [...extraParents, ...rows];
+    // 투표 메시지에는 보기·집계와 "내가 고른 보기/즐겨찾기"(요청자 기준)를 붙인다(polls.js).
+    const all = await attachPolls([...extraParents, ...rows], req.user.sub);
     const attachmentsByMessageId = await listAttachmentsForMessages(all.map((m) => m.id));
     res.json(
       all.map((m) => ({
@@ -1559,6 +1562,9 @@ function exportContentFor(m) {
     case 'post':
       // 보드 뷰 게시글 — 제목 줄 다음에 본문 전체(첨부는 파일 보기에서 받는다).
       return `[게시글] ${m.title ?? ''}\n${m.text ?? ''}` + suffix;
+    case 'poll':
+      // 투표 — messages.text에 제목이 들어 있다(보기·결과는 앱에서 본다).
+      return `[투표] ${m.text ?? ''}`;
     default:
       return (m.text ?? '') + suffix;
   }

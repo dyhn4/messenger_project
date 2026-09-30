@@ -97,6 +97,9 @@ export function previewFor(entry) {
     case 'post':
       // 보드 뷰 게시글은 본문이 길어서 제목만 보여준다(방 목록 미리보기도 같은 문구).
       return `게시글: ${entry.title ?? ''}`;
+    case 'poll':
+      // 투표는 messages.text에 제목이 들어 있다(polls.js).
+      return `[투표] ${entry.text ?? ''}`;
     default:
       return '';
   }

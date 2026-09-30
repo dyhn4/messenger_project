@@ -41,12 +41,13 @@ attachmentsRouter.get('/attachments', async (req, res) => {
 
   // 사진·파일 여러 개를 한 말풍선으로 보낸 메시지는 첨부마다 한 줄씩 펼친다 — 안 그러면
   // 첫 번째 첨부만 목록에 나온다. 펼친 줄도 메시지 id는 그대로라 "메시지 위치로 이동"이 된다.
-  // 게시글('post')은 첨부가 하나여도 펼친다 — 목록의 각 줄은 항상 'image'/'file'이어야 한다.
+  // 게시글('post')과 첨부를 붙인 투표('poll')는 첨부가 하나여도 펼친다 — 목록의 각 줄은 항상 'image'/'file'이어야 한다.
   const byMessage = await listAttachmentsForMessages(rows.map((m) => m.id));
   const items = rows.flatMap((m) => {
     const list = byMessage[m.id];
-    if (m.type === 'post' && !list) return [];
-    if (!list || (list.length < 2 && m.type !== 'post')) return [m];
+    const isCard = m.type === 'post' || m.type === 'poll';
+    if (isCard && !list) return [];
+    if (!list || (list.length < 2 && !isCard)) return [m];
     return list.map((a) => ({
       ...m,
       type: a.kind === 'image' ? 'image' : 'file',

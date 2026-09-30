@@ -14,6 +14,7 @@ import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
+import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/room_permissions.dart';
 import '../models/scheduled_message.dart';
@@ -32,6 +33,7 @@ import 'download_storage.dart';
 import 'message_preview.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
+import 'poll_actions.dart';
 import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
 import 'secret_session_manager.dart';
@@ -43,6 +45,8 @@ import 'update_socket.dart';
 // scheduledMessages/scheduledMessageEvents가 주는 모양)도 같은 이유로 같이 내보낸다.
 export '../models/room_permissions.dart';
 export '../models/scheduled_message.dart';
+// 투표 조작(session.votePoll 등)도 같은 이유로 확장으로 따로 두고 같이 내보낸다.
+export 'poll_actions.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -241,6 +245,8 @@ class Session extends ChangeNotifier {
   StreamSubscription? _commentSub;
   StreamSubscription? _messageEditedSub;
   StreamSubscription? _messageLinkPreviewSub;
+  StreamSubscription? _pollUpdatedSub;
+  StreamSubscription? _pollFavoriteSub;
   StreamSubscription? _messageDeletedSub;
   StreamSubscription? _commentEditedSub;
   StreamSubscription? _commentDeletedSub;
@@ -1209,6 +1215,11 @@ class Session extends ChangeNotifier {
       // 복호화가 필요 없다 — message:edited와 달리 바로 적용한다.
       _controllers[m.roomId]?.applyLinkPreview(m);
     });
+    // 투표: 누가 투표했거나 마감됨(방 전체) / 내 다른 기기에서 즐겨찾기를 바꿈(내 룸) — poll_actions.dart.
+    _pollUpdatedSub?.cancel();
+    _pollUpdatedSub = chatSocket.pollUpdated.listen(handlePollUpdated);
+    _pollFavoriteSub?.cancel();
+    _pollFavoriteSub = chatSocket.pollFavorite.listen(handlePollFavorite);
     _messageDeletedSub?.cancel();
     _messageDeletedSub = chatSocket.messageDeleted.listen((e) {
       _controllers[e.roomId]?.applyDelete(e.id);
@@ -1972,7 +1983,11 @@ class Session extends ChangeNotifier {
     _updateRoomPreview(
       m.roomId,
       type: m.type,
-      text: m.isPost ? _postPreview(m) : m.text,
+      text: m.isPost
+          ? _postPreview(m)
+          : m.isPoll
+          ? _pollPreview(m)
+          : m.text,
       fileName: m.fileName,
     );
     _handleIncomingMessage(m);
@@ -1980,6 +1995,9 @@ class Session extends ChangeNotifier {
 
   /// 보드 게시글의 한 줄 미리보기 — 서버 push.js의 알림 문구와 같다.
   String _postPreview(Message m) => '게시글: ${m.title ?? ''}';
+
+  /// 투표의 한 줄 미리보기("[투표] 제목") — 서버 push.js·방 목록 미리보기와 같다.
+  String _pollPreview(Message m) => pollPreviewText(m.poll?.title ?? m.text);
 
   /// 새 메시지가 소켓으로 도착했을 때 알림 표시 여부와 방 목록의 안읽음 뱃지 증가를 함께 처리한다.
   /// 시스템 메시지/내가 보낸 메시지/지금 보고 있는 방이면 둘 다 건너뛴다. 자동화 메시지(보낸
@@ -2018,7 +2036,12 @@ class Session extends ChangeNotifier {
     final preview = room?.isSecret == true || !_shouldPreviewFor(room)
         ? _secretPreviewPlaceholder
         : switch (m.type) {
-            MessageType.text => m.isPost ? _postPreview(m) : m.text ?? '',
+            MessageType.text =>
+              m.isPost
+                  ? _postPreview(m)
+                  : m.isPoll
+                  ? _pollPreview(m)
+                  : m.text ?? '',
             MessageType.image => '사진을 보냈습니다',
             MessageType.file => m.fileName ?? '파일을 보냈습니다',
             MessageType.sticker => stickerPreviewText(m.text),
@@ -3468,6 +3491,8 @@ class Session extends ChangeNotifier {
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
     await _messageLinkPreviewSub?.cancel();
+    await _pollUpdatedSub?.cancel();
+    await _pollFavoriteSub?.cancel();
     await _messageDeletedSub?.cancel();
     await _commentEditedSub?.cancel();
     await _commentDeletedSub?.cancel();

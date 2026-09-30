@@ -317,9 +317,9 @@ export async function searchMessages({ requesterId, teamId, roomId, senderId, si
 export async function listAttachments({ requesterId, teamId, roomId, senderId, limit }) {
   const conditions = [
     eq(roomMembers.userId, requesterId),
-    // 보드 뷰 게시글의 첨부도 파일 모아보기에 나온다(첨부 없는 게시글은 fileUrl이 비어 빠진다 —
-    // 호출부 attachments.js가 게시글은 첨부 한 줄씩 펼친다).
-    inArray(messages.type, ['image', 'file', 'post']),
+    // 보드 뷰 게시글과 첨부를 붙인 투표의 첨부도 파일 모아보기에 나온다(첨부 없는 글은 fileUrl이
+    // 비어 빠진다 — 호출부 attachments.js가 첨부 한 줄씩 펼친다).
+    inArray(messages.type, ['image', 'file', 'post', 'poll']),
     isNotNull(messages.fileUrl),
     isNull(messages.deletedAt),
     notBeforeDmHistoryFloor,

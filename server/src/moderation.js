@@ -26,11 +26,15 @@ import { canModerateContent, editDeleteWindowSeconds, formatWindow } from './per
  * 토픽 관리자**도 지울 수 있고(토픽을 관리할 수 있는 사람, permissions.js canManageTopic), 오래
  * 두고 고쳐 쓰는 글이라 **수정/삭제 가능 시간 제한이 없다**(1번 팀 스위치는 그대로 따른다).
  *
+ * 투표([isPoll])도 게시글처럼 **수정/삭제 가능 시간 제한이 없고**, 남의 투표는 팀 관리자(소유자·관리자
+ * 등급)와 — 토픽이면 — 토픽 관리자가 지울 수 있다(투표는 그룹·1:1에도 올라와서 게시글과 달리 토픽
+ * 관리자만으로 좁히지 않는다). 투표 자체는 수정할 수 없으므로 action은 실제로 'delete'만 온다.
+ *
  * [action]은 'edit' | 'delete'. 안내 문구를 그에 맞게 만드는 데도 쓴다.
  */
-export async function canModifyContent({ roomId, senderId, createdAt, requesterId, action, noun, isPost = false }) {
+export async function canModifyContent({ roomId, senderId, createdAt, requesterId, action, noun, isPost = false, isPoll = false }) {
   const verb = action === 'edit' ? '수정' : '삭제';
-  noun ??= isPost ? '게시글' : '메시지';
+  noun ??= isPoll ? '투표' : isPost ? '게시글' : '메시지';
 
   const room = await findRoomById(roomId);
   if (!room) return { ok: false, status: 404, error: '방을 찾을 수 없습니다.' };
@@ -53,11 +57,16 @@ export async function canModifyContent({ roomId, senderId, createdAt, requesterI
     if (!access.isRoomMember) return denied;
     // 남의 글 삭제 = 그 팀을 관리할 수 있는 사람(팀 소유자 또는 계정 등급 관리자). 게시글은
     // 토픽 관리자까지(access.canManage — 팀 관리자도 포함한다).
-    if (!(isPost ? access.canManage : canModerateContent(access))) return denied;
+    const allowed = isPoll
+      ? access.canManage || canModerateContent(access)
+      : isPost
+        ? access.canManage
+        : canModerateContent(access);
+    if (!allowed) return denied;
   }
 
   const windowSeconds = editDeleteWindowSeconds(team);
-  if (!isPost && Date.now() - new Date(createdAt).getTime() > windowSeconds * 1000) {
+  if (!isPost && !isPoll && Date.now() - new Date(createdAt).getTime() > windowSeconds * 1000) {
     return {
       ok: false,
       status: 403,
@@ -77,8 +86,8 @@ export async function recordModerationAudit(req, content, kind) {
   const room = await findRoomById(content.roomId);
   const team = room ? await findTeamById(room.teamId) : null;
   const actor = await findUserById(req.user.sub);
-  // 게시글('post')은 행위 코드는 메시지 삭제 그대로 두고(관리자 콘솔 필터가 같은 항목으로 묶임) 문구만 구분한다.
-  const label = { comment: '댓글', post: '게시글' }[kind] ?? '메시지';
+  // 게시글('post')·투표('poll')는 행위 코드는 메시지 삭제 그대로 두고(관리자 콘솔 필터가 같은 항목으로 묶임) 문구만 구분한다.
+  const label = { comment: '댓글', post: '게시글', poll: '투표' }[kind] ?? '메시지';
 
   recordAudit({
     actorId: req.user.sub,

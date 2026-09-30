@@ -12,6 +12,7 @@ import { isOnline } from './presence.js';
 import { accountRole, canCreateProject, canCreateTeamInviteLink } from './permissions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { broadcastMemberUpdate } from './rooms.js';
+import { notifyBirthdayChanged } from './calendars.js';
 import { signFileUrl } from './upload.js';
 
 const VALID_AVATAR_TYPES = new Set(['initial', 'character', 'photo']);
@@ -33,7 +34,28 @@ export function publicUser(u) {
     // 계정 등급 — 팀 설정의 "팀원 추가"나 조직도에서 등급을 보여주는 데 쓴다.
     // 바꾸는 것은 서버 운영자만 가능하다(admin.js).
     role: accountRole(u),
+    // 생일('MM-DD', 없으면 null) — 캘린더의 "멤버 생일"이 쓴다. 팀 멤버끼리는 보이는 정보다(캘린더 규약).
+    birthday: u.birthday ?? null,
   };
+}
+
+/**
+ * 프로필의 생일 값 검사 — 'MM-DD'(연도 없음)만 받고, 없는 날짜는 거절한다(2월 29일은 윤년 생일이라 허용).
+ * null/빈 문자열은 삭제. 통과하면 `{ value }`(삭제면 null), 아니면 `{ error }`.
+ */
+export function parseBirthday(raw) {
+  if (raw === null || raw === '') return { value: null };
+  if (typeof raw !== 'string') return { error: '생일 형식이 올바르지 않습니다.' };
+  const match = /^(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (!match) return { error: '생일은 MM-DD 형식으로 입력하세요.' };
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  // 2024는 윤년이라 2월 29일까지 유효한 날짜로 본다.
+  const probe = new Date(Date.UTC(2024, month - 1, day));
+  if (month < 1 || month > 12 || day < 1 || probe.getUTCMonth() !== month - 1) {
+    return { error: '존재하지 않는 날짜입니다.' };
+  }
+  return { value: `${match[1]}-${match[2]}` };
 }
 
 /** GET /users/:id/teams용 최소 팀 DTO — 클라이언트의 Team.fromJson과 필드를 맞추되(그래야
@@ -196,7 +218,7 @@ export function createUsersRouter(io) {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
-    const { avatarType, avatarEmoji, avatarColor, avatarUrl, name, email, currentPassword } =
+    const { avatarType, avatarEmoji, avatarColor, avatarUrl, name, email, currentPassword, birthday } =
       req.body ?? {};
     const patch = {};
 
@@ -215,6 +237,12 @@ export function createUsersRouter(io) {
         return res.status(400).json({ error: '이름을 입력하세요.' });
       }
       patch.name = String(name).trim();
+    }
+
+    if (birthday !== undefined) {
+      const parsed = parseBirthday(birthday);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      patch.birthday = parsed.value;
     }
 
     if (email !== undefined) {
@@ -236,6 +264,11 @@ export function createUsersRouter(io) {
     }
 
     const updated = await updateUser(user.id, patch);
+
+    // 생일이 바뀌면 팀원들의 캘린더(멤버 생일)를 새로 고치게 알린다.
+    if (patch.birthday !== undefined && patch.birthday !== (user.birthday ?? null)) {
+      await notifyBirthdayChanged(io, user.id);
+    }
 
     // 이 사람이 속한 모든 방(다른 기기 포함, 그 방의 멤버 전원)에 갱신된 멤버 정보를 알린다.
     await broadcastMemberUpdate(io, user.id);

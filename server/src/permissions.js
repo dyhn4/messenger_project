@@ -256,3 +256,79 @@ export function parsePostFields(rawTitle, rawText) {
   if (graphemeLength(text) > POST_TEXT_MAX) return { error: `본문은 ${POST_TEXT_MAX}자 이내로 입력하세요.` };
   return { title, text };
 }
+
+// ── 캘린더 ──────────────────────────────────────────────────────────────
+
+/**
+ * 한 캘린더에 대해 이 사람이 할 수 있는 것을 한꺼번에 계산한다(캘린더 권한 표의 유일한 구현 — 라우터는
+ * calendars.js의 calendarAccess를 거쳐 이 함수만 본다). DB를 읽지 않는 순수 함수라서, 목록처럼 여러 캘린더를
+ * 판정할 때는 미리 조회한 값을 넘겨 준다.
+ *
+ * 입력: calendar { kind, ownerId, isPublic }, userId, isTeamMember(그 캘린더가 속한 팀의 멤버인지),
+ *  role(계정 등급), isOwner(그 팀의 소유자인지), memberRole(calendar_members의 내 행: 'admin'|'write'|'read'|
+ *  'subscriber'|null).
+ *
+ * 팀에서 나간 사람의 calendar_members·구독 행은 지우지 않고 남겨 두므로, 여기서 팀 멤버십을 먼저 본다 —
+ * 팀 멤버가 아니면 어떤 종류든 아무것도 못 한다.
+ *
+ * 반환: canView / canCreateEvents / canEditSettings / canDelete(캘린더 자체) / role(DTO의 role) /
+ *  isOwner(캘린더 소유자) / isManager(남의 일정도 고치고 비공개 일정도 볼 수 있는 캘린더 관리자 자격).
+ * 일정 하나를 고치고 지울 수 있는지는 canModifyCalendarEvent가 이 결과에 "만든 사람이면"을 더해 판정한다.
+ */
+export function calendarPermissions({ calendar, userId, isTeamMember, role, isOwner, memberRole }) {
+  const none = {
+    canView: false,
+    canCreateEvents: false,
+    canEditSettings: false,
+    canDelete: false,
+    role: null,
+    isOwner: false,
+    isManager: false,
+  };
+  if (!isTeamMember || !calendar) return none;
+  const guest = role === 'guest';
+  const isCalendarOwner = calendar.ownerId != null && calendar.ownerId === userId;
+  // 구독은 공개 캘린더만, 준회원은 구독 자체를 못 한다(그래서 예전 구독 행이 남아 있어도 못 본다).
+  const subscribed = memberRole === 'subscriber' && calendar.isPublic === true && !guest;
+
+  switch (calendar.kind) {
+    case 'personal':
+      if (isCalendarOwner) {
+        // 준회원도 자기 기본 캘린더에는 일정을 만들 수 있다.
+        return { ...none, canView: true, canCreateEvents: true, canEditSettings: true, role: 'admin', isOwner: true, isManager: true };
+      }
+      return subscribed ? { ...none, canView: true, role: 'subscriber' } : none;
+    case 'team': {
+      if (guest) return none; // 팀 캘린더는 정회원 이상만 보인다.
+      const manager = canManageTeam({ role, isOwner });
+      return { ...none, canView: true, canCreateEvents: manager, role: manager ? 'admin' : 'read', isManager: manager };
+    }
+    case 'shared': {
+      if (memberRole === 'admin' || memberRole === 'write' || memberRole === 'read') {
+        return {
+          ...none,
+          canView: true,
+          canCreateEvents: memberRole !== 'read',
+          canEditSettings: memberRole === 'admin',
+          canDelete: isCalendarOwner,
+          role: memberRole,
+          isOwner: isCalendarOwner,
+          isManager: memberRole === 'admin',
+        };
+      }
+      return subscribed ? { ...none, canView: true, role: 'subscriber' } : none;
+    }
+    default:
+      return none;
+  }
+}
+
+/**
+ * 일정 하나를 고치거나 지울 수 있는지 — 그 캘린더에 일정을 만들 수 있는 사람 중에서 일정을 만든 사람이거나
+ * 캘린더 소유자·관리자(팀 캘린더는 팀 관리자)일 때(잔디 문서 기준: write 멤버는 남이 만든 일정은 못 고친다).
+ * "만들 수 있는 사람 중에서"라는 조건 덕에 read로 내려간 옛 작성자는 더 못 고친다.
+ */
+export function canModifyCalendarEvent({ access, event, userId }) {
+  if (!access?.canCreateEvents) return false;
+  return event.creatorId === userId || access.isOwner === true || access.isManager === true;
+}

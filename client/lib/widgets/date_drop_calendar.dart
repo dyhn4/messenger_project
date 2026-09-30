@@ -233,11 +233,15 @@ class DateDropButton extends StatefulWidget {
   final DateTime? value;
   final ValueChanged<DateTime?> onPicked;
   final Widget child;
+
+  /// 달력 아래 "지우기"를 둘지 — 날짜가 반드시 있어야 하는 칸(일정 시작·종료)은 끈다.
+  final bool allowClear;
   const DateDropButton({
     super.key,
     required this.value,
     required this.onPicked,
     required this.child,
+    this.allowClear = true,
   });
 
   @override
@@ -302,6 +306,7 @@ class DateDropButtonState extends State<DateDropButton> {
               color: theme.colorScheme.surface,
               child: DateDropCalendar(
                 value: widget.value,
+                allowClear: widget.allowClear,
                 onPicked: (picked) {
                   _overlay.hide();
                   widget.onPicked(picked);

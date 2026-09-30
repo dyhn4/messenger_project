@@ -24,6 +24,9 @@ class AppUser {
   String? department;
   String? position;
 
+  /// 생일('MM-DD', 연도 없음). 안 정했으면 null. 서버 사용자 DTO가 항상 내려주고, 캘린더의 "멤버 생일"이 쓴다.
+  final String? birthday;
+
   AppUser({
     required this.id,
     required this.username,
@@ -38,6 +41,7 @@ class AppUser {
     this.isOwner = false,
     this.department,
     this.position,
+    this.birthday,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
@@ -56,6 +60,7 @@ class AppUser {
       isOwner: json['isOwner'] as bool? ?? false,
       department: json['department'] as String?,
       position: json['position'] as String?,
+      birthday: json['birthday'] as String?,
     );
   }
 

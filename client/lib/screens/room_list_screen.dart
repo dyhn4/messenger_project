@@ -25,6 +25,7 @@ import '../widgets/topic_folder_widgets.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
+import 'calendar/calendar_screen.dart' show openCalendarScreen;
 import 'chat_screen.dart';
 import 'create_topic_screen.dart';
 import 'files_screen.dart';
@@ -307,6 +308,13 @@ class _RoomListScreenState extends State<RoomListScreen> {
         appBar: AppBar(
           title: TeamSwitcher(session: widget.session),
           actions: [
+            // 캘린더는 대화 목록 탭과 성격이 다른 별도 화면이라 탭을 늘리지 않고 앱바에 둔다.
+            IconButton(
+              key: const ValueKey('open-calendar'),
+              icon: const Icon(Icons.calendar_month_outlined),
+              tooltip: '캘린더',
+              onPressed: () => openCalendarScreen(context, widget.session),
+            ),
             NotificationBellButton(
               session: widget.session,
               onPressed: () =>

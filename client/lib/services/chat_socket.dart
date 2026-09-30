@@ -480,6 +480,7 @@ class ChatSocket {
       StreamController<SecretRekeyEvent>.broadcast();
   final _roomRemovedController = StreamController<RoomRemovedEvent>.broadcast();
   final _topicFoldersChangedController = StreamController<String>.broadcast();
+  final _calendarChangedController = StreamController<String>.broadcast();
   final _scheduledMessageEventController =
       StreamController<ScheduledMessageEvent>.broadcast();
   final _scheduledChangedController = StreamController<String>.broadcast();
@@ -518,6 +519,9 @@ class ChatSocket {
 
   /// 토픽에서 내보내졌거나 토픽이 삭제됐을 때(room:removed).
   Stream<RoomRemovedEvent> get roomRemoved => _roomRemovedController.stream;
+
+  /// 캘린더·일정이 바뀌었을 때(calendar:changed) — 그 팀 id가 흐른다. 열려 있는 캘린더 화면이 다시 받는다.
+  Stream<String> get calendarChanged => _calendarChangedController.stream;
 
   /// 내(다른 기기 포함) 토픽 폴더가 바뀌었을 때(topic-folders:changed) — 그 팀 id가 흐른다.
   Stream<String> get topicFoldersChanged =>
@@ -744,6 +748,11 @@ class ChatSocket {
     socket.on('room:removed', (data) {
       _roomRemovedController.add(
         RoomRemovedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('calendar:changed', (data) {
+      _calendarChangedController.add(
+        data is Map ? (data['teamId'] as String? ?? '') : '',
       );
     });
     socket.on('topic-folders:changed', (data) {

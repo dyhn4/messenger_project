@@ -17,7 +17,16 @@ void showAppToast(
   String message, {
   Duration duration = const Duration(milliseconds: 2000),
 }) {
-  final overlay = Overlay.of(context);
+  showAppToastOnOverlay(Overlay.of(context), message, duration: duration);
+}
+
+/// [showAppToast]와 같지만 [Overlay]를 직접 받는다 — 알림을 띄우기 전에 창이 닫히거나 목록 항목이 없어져
+/// (삭제·나가기 직후) 부른 쪽 context가 사라지는 경우, 미리 잡아 둔 Overlay로 결과를 알리려고.
+void showAppToastOnOverlay(
+  OverlayState overlay,
+  String message, {
+  Duration duration = const Duration(milliseconds: 2000),
+}) {
   late OverlayEntry entry;
   entry = OverlayEntry(
     builder: (context) => _AppToast(

@@ -106,6 +106,14 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 대화 생명주기 시스템 메시지("요청 보냄"/"시작됨"/"상대방이 종료함") + 토스트(거절/양쪽 나가기)
 - 채팅 목록·채팅방 제목에 초록 자물쇠 아이콘 + 초록 이름, 알림 미리보기는 항상 고정 문구, 통합 검색에서 제외
 
+**캘린더** (팀 단위 — `server/src/calendars.js`)
+- 캘린더 종류: 사람마다 자동으로 생기는 **기본 캘린더**(공개면 다른 사람이 검색해서 구독), 팀마다 하나인 **팀 캘린더**(정회원 이상이 보고, 일정은 팀 소유자·관리자만 편집), 정회원이 만드는 **공유 캘린더**(멤버별 관리자/쓰기/읽기 권한, 삭제는 소유자만), 그리고 항상 켜져 있는 **공휴일**·**멤버 생일** 캘린더(숨기기만 가능)
+- 일정: 제목·설명·장소·종일/시간·공개 범위(비공개는 만든 사람·참석자·캘린더 관리자만 자세히, 나머지에게는 "비공개 일정")·참석자·내 개인 색. **반복**(매일/매주 요일 지정/매월/매년, 간격, 종료일 또는 횟수)은 시간 일정이면 한국 시간 기준으로 펼치고, "이 일정만/이후 모두/전체" 단위로 수정·삭제합니다
+- 준회원은 팀 캘린더·생일 캘린더를 볼 수 없고, 새 캘린더 만들기·구독·참석자 초대를 할 수 없습니다(자기 기본 캘린더에 일정은 만들 수 있음). 팀에서 나간 사람은 멤버 행이 남아 있어도 접근이 막힙니다
+- 공휴일은 `server/src/holidays.js`의 정적 표(2025~2027년, 범위 밖은 비어 있음 — 임시공휴일이 새로 지정되면 직접 추가), 생일은 프로필의 `birthday`(`MM-DD`)를 씁니다. 바뀌면 소켓 `calendar:changed`로 알립니다
+- 앱 화면(`client/lib/screens/calendar/`, 상태는 `services/calendar_controller.dart`): PC는 상단 바의 캘린더 버튼(프로젝트 옆)을 누르면 사이드바+채팅 자리가 캘린더로 바뀌고(방을 고르면 돌아옴), 안드로이드는 방 목록 앱바의 캘린더 버튼으로 전체 화면을 엽니다. 보기는 **월간**(여러 날·종일 일정은 가로 막대, 넘치면 "+N개", 공휴일은 날짜 빨강+이름)·**주간**(일~토 7일)·**일간**(시간대별)·**목록** 4가지이고, 모바일 월간은 격자 아래에 고른 날의 일정 목록이 붙습니다. 왼쪽(모바일은 오른쪽 서랍)의 "나의 캘린더"/"구독 캘린더" 체크박스로 내 화면에서 숨기며(공휴일·생일의 숨김은 이 기기에만 저장), ⋯ 메뉴에서 색을 바꿉니다. 일정 만들기·수정은 종일, 10분 단위 시간, 참석자(이름 검색·조직도), 반복(사용자 정의 포함), 공개/비공개를 고르고, 반복 일정의 수정·삭제는 "이 일정만 / 이 일정 및 이후 일정 / 모든 일정"을 먼저 묻습니다
+- 캘린더 관리(`client/lib/screens/calendar/management/`, PC는 가운데 뜨는 창·모바일은 전체 화면): "나의 캘린더" 옆 +는 이름(1~30자)과 색을 골라 새 캘린더를 만들고 곧바로 그 캘린더의 설정으로 이어지며, ⋯ 메뉴 "캘린더 설정"은 관리자에게 이름·공개/비공개(비공개는 구독 불가)·멤버(이름 검색 또는 조직도로 추가, 관리자/쓰기/읽기 권한 변경, 내보내기 — 소유자는 못 바꾸고 못 뺌, 준회원은 읽기만)를, 그 밖의 멤버·구독자에게는 읽기 전용 화면과 색 변경(나에게만 적용)을 보여 주고 소유자만 삭제할 수 있습니다(모든 일정도 함께 삭제된다는 확인 창). "구독 캘린더" 옆 +는 캘린더 이름을 검색(입력을 멈추면 조회)해 "구독하기"로 구독하고, 공유 캘린더 멤버는 "나에게만 삭제", 구독자는 "구독 취소"로 내 목록에서만 뺍니다. 프로필 카드의 "생일"은 월/일만 고르고(2월 29일 가능, "삭제"로 비움) `PATCH /users/me`의 `birthday`로 저장하며, 준회원에게는 정회원부터 생일 캘린더에 표시된다고 안내합니다
+
 **서버 운영(관리자 콘솔)**
 - 서버 운영자 개념(팀 등급과 별개) — 첫 가입자가 운영자가 되고, 이후 운영자가 지정
 - 회원 관리: **계정 등급 지정**, 부서·직책, 계정 정지·해제, 모든 기기 강제 로그아웃
@@ -1030,7 +1038,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/users` | 활성 가입자 전체 목록(방 생성·팀원 추가·조직도용, 계정 등급 `role` 포함). `position`은 부서·직책 관리 범위가 '계정 단위'일 때만 채워지고, '팀 단위'면 항상 `null`(팀마다 다를 수 있어 이 서버 전체 목록 하나로는 못 정한다) |
 | GET | `/api/users/:id/teams` | 프로필 카드 "팀" 항목 — 그 사람이 속한 팀 목록. 대상이 관리자면 나와 겹치는 팀만, 정회원·준회원이면 전체(본인 조회는 항상 전체) |
 | GET | `/api/users/me` | 내 프로필 조회. `orgScope`\|`department`\|`position`\|`teamPositions`로 "팀"/"직책" 표시값도 함께 내려준다 |
-| PATCH | `/api/users/me` | 이름/이메일/아바타 수정(이메일 변경은 `currentPassword` 필요) |
+| PATCH | `/api/users/me` | 이름/이메일/아바타/생일(`birthday` — `MM-DD`, `null`·빈 문자열이면 삭제) 수정(이메일 변경은 `currentPassword` 필요) |
 | POST | `/api/users/me/verify-password` | 현재 비밀번호가 맞는지만 확인(다른 부수효과 없음) — "이메일 변경" 1단계(비밀번호 확인) 다이얼로그가 쓴다 |
 | POST | `/api/users/me/change-password` | 비밀번호 변경 |
 | POST | `/api/users/me/withdraw` | 회원 탈퇴 |
@@ -1187,6 +1195,22 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | DELETE | `/api/tasks/:id` | 업무 삭제 |
 | POST | `/api/tasks/:id/comments` | 업무에 댓글 남기기 |
 
+**캘린더** (`server/src/calendars.js` — 시각은 epoch ms, 종일 일정은 날짜를 UTC 자정으로 본 ms이고 `end`는 마지막 날 다음 날. 권한은 `calendarAccess` 한 곳에서 계산)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/api/teams/:teamId/calendars` | 내 캘린더 `{ mine, subscribed }` — 처음 열 때 기본·팀 캘린더를 자동 생성. 팀 멤버가 아니면 403 |
+| POST | `/api/teams/:teamId/calendars` | 새 공유 캘린더 `{ name(1~30자), color, isPublic? }`(정회원 이상) |
+| PATCH/DELETE | `/api/calendars/:id` | 이름·공개 여부 수정(캘린더 관리자, 기본 캘린더는 공개 여부만) / 삭제(공유 캘린더의 소유자만, 일정도 함께) |
+| PATCH/DELETE | `/api/calendars/:id/me` | 내 개인 설정 `{ color?, hidden? }` / 나에게만 삭제·구독 취소 |
+| GET/POST | `/api/calendars/:id/members` | 공유 캘린더 멤버 목록 / 추가 `{ userId, role: admin\|write\|read }`(캘린더 관리자, 준회원은 `read`만) |
+| PATCH/DELETE | `/api/calendars/:id/members/:userId` | 멤버 권한 변경 / 내보내기(소유자는 불가) |
+| GET | `/api/teams/:teamId/calendars/search?q=` | 구독 가능한 공개 캘린더 검색(정회원 이상) |
+| POST | `/api/calendars/:id/subscribe` | 공개 캘린더 구독 |
+| GET | `/api/teams/:teamId/calendar/events?from=&to=` | 구간(최대 62일)의 일정 회차 + 공휴일 + 생일(정회원 이상) |
+| POST | `/api/calendars/:id/events` | 일정 만들기 `{ title, description?, location?, start, end, allDay?, visibility?, attendeeIds?, recurrence?, color? }` |
+| GET/PATCH/DELETE | `/api/events/:id` | 일정 상세 / 수정 / 삭제 — 반복 일정은 `scope`(`this`\|`following`\|`all`)와 `occurrenceStart`(원래 회차 시작 ms) |
+
 **검색 / 업로드 / 기타**
 
 | Method | Path | 인증 | 설명 |
@@ -1255,6 +1279,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷) |
 | `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다 |
+| `calendars` / `calendar_members` / `calendar_events` / `calendar_event_attendees` / `calendar_event_colors` | 캘린더. 팀 단위 `calendars`(`kind`: `personal`\|`team`\|`shared`, 팀당 팀 캘린더 1개·사람당 기본 캘린더 1개는 partial unique index), 멤버·구독·개인 색/숨김(`calendar_members` — `role`: `admin`\|`write`\|`read`\|`subscriber`), 일정(`calendar_events` — `recurrence` jsonb, 빠진 회차 `exdates`), 참석자, 사람별 일정 색. `users.birthday`(`MM-DD`)는 생일 캘린더에 쓰인다 |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우) |
 | `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `color`(대표 색 `#RRGGBB`), `is_public`(공개 프로젝트 여부), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |

@@ -10,6 +10,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/email_address_field.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/org_section.dart';
+import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
 
@@ -223,6 +224,29 @@ class MyProfileDialog extends StatelessWidget {
                   // 내 직책은 소유자·관리자도 스스로 바꾸지 않는다(자기 서열을 스스로 올리는
                   // 걸 막기 위함) — "회원"/"멤버" 탭에서 남이 바꿔줘야 한다.
                   onEdit: null,
+                ),
+                // 생일 — 월/일만(연도 없음). 정한 값은 팀원들의 캘린더 "멤버 생일"에 표시된다.
+                InkWell(
+                  key: const ValueKey('profile-birthday'),
+                  onTap: () => showBirthdayDialog(context, session),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.cake_outlined, size: 18, color: hint),
+                        const SizedBox(width: 10),
+                        const Expanded(child: Text('생일')),
+                        Text(
+                          birthdayText(session.birthday) ?? '설정 안 함',
+                          style: TextStyle(color: hint),
+                        ),
+                        Icon(Icons.chevron_right, color: hint),
+                      ],
+                    ),
+                  ),
                 ),
                 // 나와의 대화는 팀마다 하나라, 팀을 고르기 전(팀 목록 화면)에는 뺀다.
                 if (session.currentTeam != null) ...[

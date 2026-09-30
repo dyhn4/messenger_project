@@ -25,6 +25,8 @@ import '../widgets/avatar_utils.dart' show automationAvatarColor, colorToHex;
 import 'api_client.dart';
 import 'app_settings.dart';
 import '../models/announcement.dart';
+import 'calendar_api.dart';
+import 'calendar_controller.dart';
 import 'call_controller.dart';
 import 'chat_socket.dart';
 import 'deep_link_service.dart';
@@ -114,6 +116,9 @@ class Session extends ChangeNotifier {
 
   String? name;
   String? email;
+
+  /// 내 생일('MM-DD', 연도 없음) — 프로필의 "생일" 항목. 안 정했으면 null.
+  String? birthday;
   String avatarType = 'initial'; // 'initial' | 'character' | 'photo'
   String? avatarEmoji;
   String? avatarColor;
@@ -167,6 +172,16 @@ class Session extends ChangeNotifier {
   String? incomingCallRoomId;
 
   late final callController = CallController(() => api!);
+
+  /// 캘린더 화면의 상태(선택한 팀의 캘린더·일정 캐시). 화면이 처음 열릴 때 만들어지고 소켓의
+  /// calendar:changed로 알아서 새로고침한다 — 로그아웃하면 [logout]이 비운다.
+  late final calendar = CalendarController(
+    apiProvider: () => RemoteCalendarApi(api!),
+    calendarChanged: chatSocket.calendarChanged,
+    reconnected: chatSocket.reconnected,
+    userId: () => userId,
+    isGuest: () => accountRole == AccountRole.guest,
+  );
   final _updateSocket = UpdateSocket();
   StreamSubscription<UpdateAvailableEvent>? _updateSub;
 
@@ -1056,6 +1071,7 @@ class Session extends ChangeNotifier {
       final me = await api!.fetchMe();
       name = me.name;
       email = me.email;
+      birthday = me.birthday;
       avatarType = me.avatarType;
       avatarEmoji = me.avatarEmoji;
       avatarColor = me.avatarColor;
@@ -2572,6 +2588,13 @@ class Session extends ChangeNotifier {
     if (email != null) _showToast('이메일이 변경되었습니다.');
   }
 
+  /// 생일 저장/삭제('MM-DD' 또는 null). 서버가 거절하면(없는 날짜 등) 예외가 그대로 나간다.
+  Future<void> updateBirthday(String? birthday) async {
+    final me = await api!.updateMyBirthday(birthday);
+    this.birthday = me.birthday;
+    notifyListeners();
+  }
+
   /// 현재 비밀번호가 맞는지만 확인한다 — "이메일 변경" 1단계 다이얼로그가 쓴다. 틀리면
   /// 여기서 던져서 다이얼로그가 잡는다(다른 상태는 전혀 안 바뀐다).
   Future<void> verifyPassword(String password) => api!.verifyPassword(password);
@@ -3522,6 +3545,7 @@ class Session extends ChangeNotifier {
     topicFolders.clear();
     _topicFoldersLoadSeq++; // 로그아웃 전에 나간 폴더 요청이 늦게 와도 버린다.
     _resetScheduledMessages(); // 예약 목록도 같은 이유로 비우고 늦은 응답은 버린다.
+    calendar.reset(); // 캘린더 캐시도 — 다음에 로그인하는 사람에게 남지 않게.
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();
@@ -3534,6 +3558,7 @@ class Session extends ChangeNotifier {
     username = null;
     name = null;
     email = null;
+    birthday = null;
     avatarType = 'initial';
     avatarEmoji = null;
     avatarColor = null;

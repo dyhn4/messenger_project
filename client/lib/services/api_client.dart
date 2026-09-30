@@ -130,6 +130,9 @@ class MyProfile {
   final String? avatarColor; // '#RRGGBB'
   final String? avatarUrl;
 
+  /// 생일('MM-DD', 연도 없음). 안 정했으면 null.
+  final String? birthday;
+
   /// 내 계정 등급(준회원/정회원/관리자). 서버 운영자만 바꿀 수 있고, 화면은 이 값으로
   /// 버튼을 감춘다(실제 차단은 항상 서버가 다시 한다).
   final String role;
@@ -161,6 +164,7 @@ class MyProfile {
     this.avatarEmoji,
     this.avatarColor,
     this.avatarUrl,
+    this.birthday,
     this.role = 'guest',
     this.isServerAdmin = false,
     this.canCreateTeamInviteLink = false,
@@ -179,6 +183,7 @@ class MyProfile {
     avatarEmoji: json['avatarEmoji'] as String?,
     avatarColor: json['avatarColor'] as String?,
     avatarUrl: json['avatarUrl'] as String?,
+    birthday: json['birthday'] as String?,
     role: json['role'] as String? ?? 'guest',
     isServerAdmin: json['isServerAdmin'] as bool? ?? false,
     canCreateTeamInviteLink: json['canCreateTeamInviteLink'] as bool? ?? false,
@@ -664,6 +669,29 @@ class ApiClient {
     return decoded;
   }
 
+  /// 별도 파일의 API 묶음(calendar_api.dart 등)이 이 클라이언트의 인증·401 재시도·타임아웃·에러
+  /// 처리를 그대로 쓰게 하는 범용 호출 — 엔드포인트가 많은 기능마다 이 파일을 늘리지 않으려는 것.
+  /// [method]는 GET/POST/PUT/PATCH/DELETE. 4xx는 ApiException(서버의 `error` 문구)으로 던진다.
+  Future<dynamic> requestJson(
+    String method,
+    String path, {
+    Map<String, dynamic>? body,
+  }) {
+    switch (method) {
+      case 'GET':
+        return _get(path);
+      case 'POST':
+        return _post(path, body ?? const {});
+      case 'PUT':
+        return _put(path, body ?? const {});
+      case 'PATCH':
+        return _patch(path, body ?? const {});
+      case 'DELETE':
+        return _delete(path, body: body);
+    }
+    throw ArgumentError('지원하지 않는 HTTP 메서드: $method');
+  }
+
   Future<List<AppUser>> fetchUsers() async {
     final list = await _get('/api/users') as List;
     return list
@@ -710,6 +738,15 @@ class ApiClient {
     }
     return MyProfile.fromJson(
       await _patch('/api/users/me', body) as Map<String, dynamic>,
+    );
+  }
+
+  /// 생일만 바꾼다 — [birthday]는 'MM-DD'(연도 없음), null이면 삭제. null도 body에 그대로 실어야
+  /// 서버가 "지우기"로 읽는다(빠지면 "바꾸지 않음").
+  Future<MyProfile> updateMyBirthday(String? birthday) async {
+    return MyProfile.fromJson(
+      await _patch('/api/users/me', {'birthday': birthday})
+          as Map<String, dynamic>,
     );
   }
 

@@ -29,6 +29,7 @@ import '../widgets/team_switcher.dart';
 import '../widgets/topic_folder_widgets.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
+import 'calendar/calendar_screen.dart';
 import 'create_topic_screen.dart';
 import 'files_screen.dart';
 import 'links_screen.dart';
@@ -74,7 +75,18 @@ class DesktopHomeScreen extends StatefulWidget {
 }
 
 class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
-  Room? _selectedRoom;
+  Room? _selectedRoomValue;
+
+  /// 상단 "캘린더" 버튼으로 사이드바+채팅 자리를 캘린더로 바꿔 보고 있는지. 방을 고르면(어느 경로로든)
+  /// 대화 화면으로 돌아오도록 [_selectedRoom]에 방을 넣을 때 같이 끈다.
+  bool _calendarOpen = false;
+
+  Room? get _selectedRoom => _selectedRoomValue;
+  set _selectedRoom(Room? room) {
+    _selectedRoomValue = room;
+    if (room != null) _calendarOpen = false;
+  }
+
   // "대화창 분할하기"(방 목록 우클릭 메뉴)로 연 두 번째 채팅 패널 — 오른쪽에 나란히 뜬다.
   // _selectedRoom과 같은 방이면 분할할 의미가 없으므로 _effectiveSplitRoom에서 걸러진다.
   Room? _splitRoom;
@@ -372,6 +384,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
         children: [
           _TopBar(
             session: widget.session,
+            calendarOpen: _calendarOpen,
+            onToggleCalendar: () => setState(() {
+              _calendarOpen = !_calendarOpen;
+              if (_calendarOpen) {
+                _threadMessage = null;
+                _threadRoom = null;
+                _splitRoom = null;
+              }
+            }),
             onShowMembers: () => setState(() {
               _membersOpen = !_membersOpen;
               if (_membersOpen) {
@@ -439,7 +460,11 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           Expanded(
             child: Row(
               children: [
-                Expanded(child: _buildSidebarAndChat(context)),
+                Expanded(
+                  child: _calendarOpen
+                      ? CalendarScreen(session: widget.session, embedded: true)
+                      : _buildSidebarAndChat(context),
+                ),
                 if (_searchOpen) ...[
                   const VerticalDivider(width: 1),
                   SizedBox(
@@ -849,6 +874,10 @@ class _SidebarToggleStrip extends StatelessWidget {
 /// 창 전체 폭을 가로지르는 최상단 바: 앱 이름(좌) + 멤버/검색/삼선(햄버거) 메뉴(우측 끝).
 class _TopBar extends StatelessWidget {
   final Session session;
+
+  /// 캘린더 화면을 보고 있는지 / 캘린더 버튼을 눌렀을 때.
+  final bool calendarOpen;
+  final VoidCallback onToggleCalendar;
   final VoidCallback onShowMembers;
   final VoidCallback onToggleSearch;
   final VoidCallback onOpenFiles;
@@ -856,6 +885,8 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onToggleNotifications;
   const _TopBar({
     required this.session,
+    required this.calendarOpen,
+    required this.onToggleCalendar,
     required this.onShowMembers,
     required this.onToggleSearch,
     required this.onOpenFiles,
@@ -915,6 +946,16 @@ class _TopBar extends StatelessWidget {
                             ? openProjectWindow(session)
                             : showProjectDialog(context, session),
                       ),
+                    // 캘린더도 대화와 성격이 다른 별도 공간이라 프로젝트 옆에 둔다. 누르면
+                    // 사이드바+채팅 자리가 캘린더로 바뀌고, 한 번 더 누르거나 방을 고르면 돌아온다.
+                    IconButton(
+                      key: const ValueKey('open-calendar'),
+                      icon: const Icon(Icons.calendar_month_outlined),
+                      selectedIcon: const Icon(Icons.calendar_month),
+                      isSelected: calendarOpen,
+                      tooltip: '캘린더',
+                      onPressed: onToggleCalendar,
+                    ),
                     const SizedBox(
                       height: 24,
                       child: VerticalDivider(width: 16, thickness: 1),

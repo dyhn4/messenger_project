@@ -26,6 +26,7 @@ import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
 import { createCallsRouter } from './calls.js';
+import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
 import { createDevicesRouter } from './devices.js';
 import { createInvitesRouter } from './invites.js';
@@ -93,6 +94,8 @@ app.use('/api', requireAuth, createPollsRouter(io));
 // 메시지 예약 발송 — 만든 사람만 보고 고친다. 실제 발송은 아래 startScheduledMessageJob이 한다.
 app.use('/api', requireAuth, createScheduledMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
+// 캘린더(기본/팀/공유 캘린더, 일정, 반복, 공휴일·생일) — 권한은 calendars.js의 calendarAccess 한 곳에서 계산한다.
+app.use('/api', requireAuth, createCalendarsRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
 app.use('/api', requireAuth, createCallsRouter());

@@ -159,7 +159,10 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
             ),
             MessageType.sticker => (
               Icons.emoji_emotions_outlined,
-              findStickerById(message.text ?? '')?.emoji ?? '이모티콘',
+              switch (findStickerById(message.text ?? '')?.emoji) {
+                final String e when e.isNotEmpty => e,
+                _ => '이모티콘',
+              },
             ),
             MessageType.text ||
             MessageType.system ||

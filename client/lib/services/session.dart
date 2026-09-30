@@ -64,6 +64,7 @@ class Session extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stickerRefresh?.cancel();
     TypingGate.instance.cancel(this);
     super.dispose();
   }
@@ -1231,6 +1232,9 @@ class Session extends ChangeNotifier {
       notifyListeners();
     });
     unawaited(_seedOnlineUsers());
+    // 서버에 올린 그림 이모티콘 목록 — 연결될 때마다(재연결 포함) 새로 받는다.
+    serverStickers.onMissing = () => unawaited(loadServerStickers());
+    unawaited(loadServerStickers(force: true));
     _callStateSub?.cancel();
     _callStateSub = chatSocket.callStates.listen(_applyCallState);
     _announcementSub?.cancel();
@@ -2017,8 +2021,7 @@ class Session extends ChangeNotifier {
             MessageType.text => m.isPost ? _postPreview(m) : m.text ?? '',
             MessageType.image => '사진을 보냈습니다',
             MessageType.file => m.fileName ?? '파일을 보냈습니다',
-            MessageType.sticker =>
-              '${findStickerById(m.text ?? '')?.emoji ?? ''} 이모티콘을 보냈습니다',
+            MessageType.sticker => stickerPreviewText(m.text),
             MessageType.system => '',
             MessageType.comment =>
               '', // 실시간 message:new로는 절대 안 옴(댓글은 클라이언트 전용 합성 타입).
@@ -2096,8 +2099,7 @@ class Session extends ChangeNotifier {
             MessageType.text => c.text ?? '',
             MessageType.image => '사진을 보냈습니다',
             MessageType.file => c.fileName ?? '파일을 보냈습니다',
-            MessageType.sticker =>
-              '${findStickerById(c.text ?? '')?.emoji ?? ''} 이모티콘을 보냈습니다',
+            MessageType.sticker => stickerPreviewText(c.text),
             MessageType.system || MessageType.comment => '', // 댓글엔 나올 수 없는 타입.
           };
 
@@ -3398,7 +3400,43 @@ class Session extends ChangeNotifier {
     bool pinned,
   ) async => (await _postControllerFor(room)).setPostPinned(messageId, pinned);
 
+  DateTime? _stickersLoadedAt;
+  Future<void>? _stickersLoading;
+  Timer? _stickerRefresh;
+
+  /// 서버에 올린 그림 이모티콘 목록을 받아 [serverStickers]에 채운다. 그림 링크는 서명이 2시간쯤
+  /// 지나면 만료되므로 50분마다 다시 받는다(한 번 받은 그림은 id로 캐시돼 있어 다시 안 받는다).
+  /// [force]가 아니면 1분 안에 다시 받지 않는다 — 목록에 없는 이모티콘을 만날 때마다 불리기 때문.
+  Future<void> loadServerStickers({bool force = false}) {
+    final running = _stickersLoading;
+    if (running != null) return running;
+    final last = _stickersLoadedAt;
+    if (!force &&
+        last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 1)) {
+      return Future.value();
+    }
+    _stickersLoadedAt = DateTime.now();
+    _stickerRefresh?.cancel();
+    _stickerRefresh = Timer(
+      const Duration(minutes: 50),
+      () => unawaited(loadServerStickers(force: true)),
+    );
+    return _stickersLoading = () async {
+      try {
+        final packs = await api?.fetchStickerPacks();
+        if (packs != null) serverStickers.replace(packs, resolveUrl);
+      } catch (_) {
+        // 못 받아도 기본 이모티콘은 그대로 쓴다 — 다음 연결·다음 요청 때 다시 시도.
+      } finally {
+        _stickersLoading = null;
+      }
+    }();
+  }
+
   Future<void> logout() async {
+    _stickerRefresh?.cancel();
+    serverStickers.clear();
     // 잠긴 채로 로그아웃하면(잠금 화면의 "로그아웃") 다음 로그인 때 다시 잠겨 뜨지 않게 푼다.
     if (settings.appLocked) await settings.setAppLocked(false);
     // 인증이 아직 유효한 동안(아래에서 token을 지우기 전) 이 기기의 FCM 토큰을 서버에서

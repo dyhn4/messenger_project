@@ -10,6 +10,7 @@ import '../models/topic_folder.dart';
 import '../services/api_client.dart' show PositionOption;
 import '../services/chat_socket.dart' show RoomRemovedEvent;
 import '../services/session.dart';
+import '../widgets/compact_menu.dart';
 import '../widgets/account_menu_button.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/app_menu_button.dart';
@@ -1202,15 +1203,11 @@ class _Sidebar extends StatelessWidget {
   });
 
   PopupMenuItem<void> _plusItem(
+    BuildContext context,
     IconData icon,
     String label,
     VoidCallback onTap,
-  ) => PopupMenuItem<void>(
-    onTap: onTap,
-    child: Row(
-      children: [Icon(icon, size: 18), const SizedBox(width: 12), Text(label)],
-    ),
-  );
+  ) => CompactMenu.item<void>(context, icon: icon, label: label, onTap: onTap);
 
   /// 토픽 줄 하나. [inFolder]면 폴더(또는 "보관된 토픽") 아래로 들여 쓴다. 보관된 토픽은 그
   /// 묶음에만 보여서 폴더로 옮겨도 달라 보이는 게 없으므로 끌기·폴더 메뉴를 뺀다.
@@ -1392,6 +1389,11 @@ class _Sidebar extends StatelessWidget {
                 action: PopupMenuButton<void>(
                   icon: const Icon(Icons.add, size: 20),
                   tooltip: '토픽 추가',
+                  // 채팅 목록 우클릭 메뉴와 같은 간결한 모양.
+                  color: CompactMenu.color(context),
+                  shape: CompactMenu.shape,
+                  menuPadding: CompactMenu.menuPadding,
+                  constraints: CompactMenu.constraints,
                   itemBuilder: (context) => [
                     // 준회원은 토픽을 만들거나 찾아 참여할 수 없다 — 초대받은 방에서만 활동한다.
                     // 새 토픽 만들기는 팀 설정(토픽 생성 권한)에 따라 정회원 이상/관리자 이상/
@@ -1399,19 +1401,22 @@ class _Sidebar extends StatelessWidget {
                     // 설정과 무관하게 정회원이면 늘 된다. 폴더(내 목록 정리)는 누구나 만든다.
                     if (session.canCreateRooms && session.canCreateTopic)
                       _plusItem(
+                        context,
                         Icons.add_comment_outlined,
                         '새로운 토픽 생성하기',
                         onCreateTopic,
                       ),
                     if (session.canCreateRooms) ...[
                       _plusItem(
+                        context,
                         Icons.explore_outlined,
                         '참여 가능한 토픽 보기',
                         onBrowseTopics,
                       ),
-                      const PopupMenuDivider(),
+                      CompactMenu.divider,
                     ],
                     _plusItem(
+                      context,
                       Icons.create_new_folder_outlined,
                       '폴더 생성',
                       () => createTopicFolderFlow(hostContext, session),

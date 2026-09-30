@@ -1355,3 +1355,37 @@ export const secretRekeys = pgTable(
   },
   (t) => [index('secret_rekeys_room_id_epoch_idx').on(t.roomId, t.keyEpoch)],
 );
+
+// ── 이모티콘(그림 스티커) ────────────────────────────────────────────────
+// 서버 운영자가 앱의 "서버 관리 > 이모티콘"(또는 scripts/import-stickers.mjs)으로 세트(팩)를 만들고
+// 그림을 올린다 — 앱을 새로 배포하지 않아도 모든 기기에 바로 보인다. 그림 파일은 첨부와 같은
+// 업로드 폴더에 두고(/uploads/<uuid>.png) 목록을 줄 때마다 서명된 링크로 내려준다.
+// 메시지에는 "srv:<스티커 id>"만 실린다(client/lib/data/stickers.dart). 그래서 지우지 않고
+// 숨기기만 한다(hidden) — 숨긴 것도 목록에는 내려줘서 예전 메시지는 계속 그림이 보이고,
+// 이모티콘 선택창에서만 빠진다.
+export const stickerPacks = pgTable('sticker_packs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  position: integer('position').notNull().default(0),
+  hidden: boolean('hidden').notNull().default(false),
+  // "세트 삭제" — 관리 화면·선택창에서 사라지지만 행은 남겨서 예전 메시지의 그림은 계속 보인다.
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const stickers = pgTable(
+  'stickers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    packId: uuid('pack_id')
+      .notNull()
+      .references(() => stickerPacks.id, { onDelete: 'cascade' }),
+    fileUrl: text('file_url').notNull(),
+    fileName: text('file_name'),
+    mimeType: text('mime_type'),
+    position: integer('position').notNull().default(0),
+    hidden: boolean('hidden').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('stickers_pack_id_idx').on(t.packId, t.position)],
+);

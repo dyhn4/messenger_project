@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../data/stickers.dart';
+import 'sticker_view.dart';
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
@@ -818,10 +818,10 @@ class _MessageBubbleState extends State<MessageBubble> {
           selectable: Platform.isWindows,
         );
       case MessageType.sticker:
-        final sticker = findStickerById(message.text ?? '');
-        return Text(
-          sticker?.emoji ?? '❔',
-          style: const TextStyle(fontSize: 72),
+        return StickerView(
+          stickerId: message.text ?? '',
+          emojiSize: 72,
+          imageSize: 140,
         );
       case MessageType.system:
       case MessageType.comment:

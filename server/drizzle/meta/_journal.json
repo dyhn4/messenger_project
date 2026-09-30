@@ -512,6 +512,20 @@
       "when": 1790725043955,
       "tag": "0072_self_rooms_scheduled_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790752082457,
+      "tag": "0073_lumpy_thunderball",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790753605964,
+      "tag": "0074_spicy_stellaris",
+      "breakpoints": true
     }
   ]
 }

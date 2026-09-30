@@ -16,6 +16,7 @@ import '../models/project.dart';
 import '../models/room.dart';
 import '../models/scheduled_message.dart';
 import '../models/shared_link.dart';
+import '../models/sticker_pack.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/topic_folder.dart';
@@ -2837,6 +2838,77 @@ class ApiClient {
     return list
         .map((e) => SharedLink.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // ── 그림 이모티콘(server/src/stickers.js) ──
+
+  /// 세트 전부(숨긴 것 포함 — 예전 메시지를 그리려고).
+  Future<List<ServerStickerPack>> fetchStickerPacks() async {
+    final list = await _get('/api/stickers') as List;
+    return list
+        .map((e) => ServerStickerPack.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 새 세트(서버 운영자만).
+  Future<ServerStickerPack> createStickerPack(String name) async {
+    final json = await _post('/api/stickers/packs', {'name': name});
+    return ServerStickerPack.fromJson(json as Map<String, dynamic>);
+  }
+
+  /// 세트 이름 바꾸기·숨기기(서버 운영자만).
+  Future<void> updateStickerPack(
+    String packId, {
+    String? name,
+    bool? hidden,
+  }) async {
+    await _patch('/api/stickers/packs/$packId', {
+      'name': ?name,
+      'hidden': ?hidden,
+    });
+  }
+
+  /// 세트 삭제(서버 운영자만) — 이미 보낸 메시지의 그림은 계속 보인다.
+  Future<void> deleteStickerPack(String packId) async {
+    await _delete('/api/stickers/packs/$packId');
+  }
+
+  /// 그림 여러 장을 세트 맨 뒤에 올린다(서버 운영자만) — 파일 이름 순서대로 붙는다.
+  Future<void> uploadStickers(String packId, List<File> files) async {
+    final res = await _send(() async {
+      final req =
+          http.MultipartRequest(
+              'POST',
+              _uri('/api/stickers/packs/$packId/stickers'),
+            )
+            ..headers.addAll(_authHeaders)
+            ..files.addAll([
+              for (final f in files)
+                await http.MultipartFile.fromPath('files', f.path),
+            ]);
+      return http.Response.fromStream(await _client.send(req));
+    });
+    if (res.statusCode >= 400) {
+      String message = '이모티콘을 올리지 못했습니다.';
+      try {
+        message =
+            (jsonDecode(utf8.decode(res.bodyBytes)) as Map)['error']
+                as String? ??
+            message;
+      } catch (_) {}
+      throw ApiException(message);
+    }
+  }
+
+  /// 한 장 숨기기/다시 보이기(서버 운영자만).
+  Future<void> setStickerHidden(
+    String packId,
+    String stickerId,
+    bool hidden,
+  ) async {
+    await _patch('/api/stickers/packs/$packId/stickers/$stickerId', {
+      'hidden': hidden,
+    });
   }
 
   /// [onProgress]/[cancelToken]을 안 넘기면 지금까지와 완전히 동일하게(단순 MultipartRequest)

@@ -12,8 +12,7 @@ String formatMessagePreview({
     MessageType.text => text ?? '',
     MessageType.image => '사진을 보냈습니다',
     MessageType.file => fileName != null ? '$fileName 파일을 보냈습니다' : '파일을 보냈습니다',
-    MessageType.sticker =>
-      '${findStickerById(text ?? '')?.emoji ?? ''} 이모티콘을 보냈습니다',
+    MessageType.sticker => stickerPreviewText(text),
     MessageType.system || MessageType.comment => text ?? '',
   };
 }

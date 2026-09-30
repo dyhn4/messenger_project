@@ -407,6 +407,11 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         minScale: 0.05,
         maxScale: 10.0,
         enableRotation: true,
+        // photo_view의 기본값(FilterQuality.none)은 확대·축소를 "가장 가까운 픽셀 고르기"로 해서,
+        // 큰 사진을 화면에 맞춰 줄이면 선이 계단처럼 자글자글해진다. medium은 줄일 때 미리 줄여 둔
+        // 단계(밉맵)를 섞어 쓰고 키울 때는 부드럽게 보간해서, 몇 배로 줄여도 깨끗하다(이 값이
+        // none이 아니면 photo_view가 그 배율의 크기로 직접 그린다).
+        filterQuality: FilterQuality.medium,
         backgroundDecoration: const BoxDecoration(color: Colors.black),
         loadingBuilder: (context, event) =>
             const Center(child: CircularProgressIndicator()),

@@ -1,0 +1,1 @@
+ALTER TABLE "sticker_packs" ADD COLUMN "deleted_at" timestamp with time zone;

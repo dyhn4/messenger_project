@@ -19,9 +19,10 @@ import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
+import 'admin_stickers_tab.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
-/// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 다섯 탭.
+/// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 / 이모티콘 여섯 탭.
 ///
 /// 여기 있는 모든 동작은 서버 src/admin.js가 매 요청마다 isServerAdmin을 다시 확인하므로,
 /// 이 화면이 열려 있다는 것만으로 권한이 생기지는 않는다.
@@ -39,7 +40,7 @@ class AdminConsoleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 6,
       child: FloatingDialog(
         title: '서버 관리',
         maxWidth: 820,
@@ -57,6 +58,7 @@ class AdminConsoleScreen extends StatelessWidget {
                 Tab(text: '팀'),
                 Tab(text: '감사 로그'),
                 Tab(text: 'FCM 설정'),
+                Tab(text: '이모티콘'),
               ],
             ),
             const SizedBox(height: 12),
@@ -68,6 +70,7 @@ class AdminConsoleScreen extends StatelessWidget {
                   _TeamsTab(session: session),
                   _AuditTab(session: session),
                   _FcmTab(session: session),
+                  AdminStickersTab(session: session),
                 ],
               ),
             ),

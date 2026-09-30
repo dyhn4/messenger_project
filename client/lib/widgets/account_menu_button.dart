@@ -8,6 +8,7 @@ import '../screens/my_profile_dialog.dart';
 import '../screens/settings_screen.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'compact_menu.dart';
 import 'my_avatar.dart';
 
 const _appVersion = '1.0.0';
@@ -102,117 +103,106 @@ class AccountMenuButton extends StatelessWidget {
     // 메뉴가 닫힌 뒤에도(비동기로 링크를 받는 동안) 토스트를 띄울 수 있도록, 팝업 안의
     // context가 아니라 버튼 자신의 context를 쓴다.
     final buttonContext = context;
+    // 채팅 목록 우클릭 메뉴와 같은 간결한 모양(compact_menu.dart) — 항목 묶음(내 프로필 /
+    // 설정·관리 / 도움말·안내 / 로그아웃) 사이에 구분선.
     return PopupMenuButton<void>(
       icon: const Icon(Icons.menu),
       tooltip: '설정',
       position: PopupMenuPosition.under,
       offset: const Offset(0, 10),
+      color: CompactMenu.color(context),
+      shape: CompactMenu.shape,
+      menuPadding: CompactMenu.menuPadding,
+      constraints: CompactMenu.constraints,
       itemBuilder: (context) => [
         PopupMenuItem<void>(
           onTap: () => showDialog(
             context: context,
             builder: (_) => MyProfileDialog(session: session),
           ),
+          height: 40,
+          padding: CompactMenu.itemPadding,
           child: Row(
             children: [
-              MyAvatar(session: session, radius: 14),
+              MyAvatar(session: session, radius: 12),
               const SizedBox(width: 8),
-              Text(
-                session.name ?? session.username ?? '',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              Flexible(
+                child: Text(
+                  session.name ?? session.username ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: CompactMenu.textStyle.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
           ),
         ),
-        const PopupMenuDivider(),
-        PopupMenuItem<void>(
+        CompactMenu.divider,
+        CompactMenu.item<void>(
+          context,
+          icon: Icons.settings_outlined,
+          label: '환경설정',
           onTap: () => showDialog(
             context: context,
             builder: (_) => SettingsScreen(session: session),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.settings_outlined),
-              SizedBox(width: 8),
-              Text('환경설정'),
-            ],
           ),
         ),
         // 서버 운영자·계정 관리자·팀 소유자에게만 보인다(서버도 매 요청마다 다시 확인 —
         // invites.js의 canCreateInviteLink). 관리자 콘솔과 달리 팀 소유자도 만들 수 있어야
         // 해서 서버 운영자 전용인 "서버 관리"와는 다른 조건을 쓴다.
         if (session.canCreateInviteLink)
-          PopupMenuItem<void>(
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.add_link,
+            label: '초대 링크 생성',
             onTap: () => showInviteLinkScreen(context, session),
-            child: const Row(
-              children: [
-                Icon(Icons.add_link),
-                SizedBox(width: 8),
-                Text('초대 링크 생성'),
-              ],
-            ),
           ),
         // 팀 초대 링크 생성은 팀 설정(팀 정보 탭)으로 옮겼다 — 이미 어느 팀인지 정해진
         // 곳에서 만드는 게 더 자연스러워서(team_settings_dialog.dart).
         // 서버 운영자에게만 보이는 항목(서버도 매 요청마다 다시 확인한다 — admin.js).
         if (session.isServerAdmin)
-          PopupMenuItem<void>(
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.admin_panel_settings_outlined,
+            label: '서버 관리',
             onTap: () => showAdminConsole(context, session),
-            child: const Row(
-              children: [
-                Icon(Icons.admin_panel_settings_outlined),
-                SizedBox(width: 8),
-                Text('서버 관리'),
-              ],
-            ),
           ),
+        CompactMenu.divider,
         // 초보자용 도움말(메신저·프로젝트 이용법 웹페이지) — 모든 회원에게 보인다.
-        PopupMenuItem<void>(
+        CompactMenu.item<void>(
+          context,
+          icon: Icons.help_outline,
+          label: '도움말',
           onTap: () => _openGuide(buttonContext),
-          child: const Row(
-            children: [
-              Icon(Icons.help_outline),
-              SizedBox(width: 8),
-              Text('도움말'),
-            ],
-          ),
         ),
         // 예전 "도움말"(README 기반, 서버 설치·운영 내용 포함)은 "메신저 설명서"로 이름을 바꿔
         // 관리자 이상에게만 보인다 — 서버도 링크를 줄 때 같은 조건을 다시 확인한다.
         if (session.canViewMessengerManual)
-          PopupMenuItem<void>(
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.menu_book_outlined,
+            label: '메신저 설명서',
             onTap: () => _openMessengerManual(buttonContext),
-            child: const Row(
-              children: [
-                Icon(Icons.menu_book_outlined),
-                SizedBox(width: 8),
-                Text('메신저 설명서'),
-              ],
-            ),
           ),
-        PopupMenuItem<void>(
+        CompactMenu.item<void>(
+          context,
+          icon: Icons.description_outlined,
+          label: '오픈소스 라이선스',
           onTap: () => showLicensePage(
             context: context,
             applicationName: 'TangoTalk',
             applicationVersion: _appVersion,
           ),
-          child: const Row(
-            children: [
-              Icon(Icons.description_outlined),
-              SizedBox(width: 8),
-              Text('오픈소스 라이선스'),
-            ],
-          ),
         ),
-        PopupMenuItem<void>(
+        CompactMenu.divider,
+        CompactMenu.item<void>(
+          context,
+          icon: Icons.logout,
+          label: '로그아웃',
+          color: Colors.redAccent,
           onTap: () => _logout(context),
-          child: const Row(
-            children: [
-              Icon(Icons.logout, color: Colors.redAccent),
-              SizedBox(width: 8),
-              Text('로그아웃', style: TextStyle(color: Colors.redAccent)),
-            ],
-          ),
         ),
       ],
     );

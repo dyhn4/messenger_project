@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../data/stickers.dart';
+import 'sticker_view.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
@@ -626,10 +626,10 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           attachmentNonce: comment.attachmentNonce,
         );
       case MessageType.sticker:
-        final sticker = findStickerById(comment.text ?? '');
-        return Text(
-          sticker?.emoji ?? '❔',
-          style: const TextStyle(fontSize: 48),
+        return StickerView(
+          stickerId: comment.text ?? '',
+          emojiSize: 48,
+          imageSize: 100,
         );
       case MessageType.text:
       case MessageType.system:

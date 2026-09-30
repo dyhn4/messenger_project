@@ -30,6 +30,14 @@ extension RoomPermissions on Room {
     return members.any((m) => m.id == userId);
   }
 
+  /// 그룹채팅 정보(이름·설명·아이콘)를 바꿀 수 있는지 — 그 방 멤버이면서 준회원이 아니어야 한다
+  /// (서버 PATCH /rooms/:id와 같은 규칙). 그룹채팅이 아니면 항상 false. 준회원에게는 버튼을 막고
+  /// [groupInfoGuestNotice]로 이유를 보여준다.
+  bool canEditGroupInfo(Session s) =>
+      type == RoomType.group &&
+      s.accountRole != AccountRole.guest &&
+      members.any((m) => m.id == s.userId);
+
   /// 이 방이 속한 팀을 내가 관리할 수 있는지(팀 관리자 = 소유자 또는 계정 등급 관리자). 방이
   /// 지금 보고 있는 팀이 아닐 수도 있어서(알림 센터 등) 방의 팀을 먼저 찾고, 못 찾으면 지금
   /// 팀 기준(canManageCurrentTeam)으로 본다.
@@ -45,6 +53,9 @@ extension RoomPermissions on Room {
     return team?.canManage(s.accountRole) ?? s.canManageCurrentTeam;
   }
 }
+
+/// 준회원이 그룹채팅 정보를 바꾸려 할 때의 안내(서버 403 문구와 같다) — ⋮ 메뉴 툴팁·정보 변경 창이 같이 쓴다.
+const groupInfoGuestNotice = '준회원은 채팅 정보를 바꿀 수 없습니다.';
 
 /// 토픽 관리자로 지정할 수 있는 멤버인지 — 정회원 이상(준회원 제외, 서버 PUT /rooms/:id/admins와
 /// 같은 규칙).

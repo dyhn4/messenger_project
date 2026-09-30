@@ -57,7 +57,8 @@ class CameraBadge extends StatelessWidget {
 /// 편집 팝업 — 큰 미리보기 + 초기화/아이콘 선택하기/사진 올리기. "아이콘 선택하기"는 팀·그룹이
 /// 각자 고유한 이모지 목록으로 여는 [pickIcon]을 부른다. 초기화는 이니셜로 되돌린다(배경색은
 /// 유지). 여기서는 고르기만 하고, "확인"을 누르면 고른 값을, "취소"면 null을 돌려준다 — 실제
-/// 저장은 호출한 화면이 한다(팀 설정의 "저장", 새 대화의 "대화 시작하기").
+/// 저장은 호출한 화면이 한다(팀 설정의 "저장", 그룹 아이콘은 group_icon_picker.dart를 거쳐 새 그룹채팅
+/// 만들기(new_group_dialog.dart)의 "생성"·채팅 정보 변경(group_settings_dialog.dart)의 "저장").
 Future<IconChoice?> showIconEditDialog(
   BuildContext context, {
   required String title,

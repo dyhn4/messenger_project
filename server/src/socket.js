@@ -1,14 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import { verifySocketToken } from './auth.js';
 import { activeCallStatesFor, callSummaryText, joinCall, leaveAllCallsForSocket, leaveCall } from './calls.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
-import { findInquiryById } from './db/queries/inquiries.js';
-import {
-  insertMessage,
-  insertMessageAttachments,
-  markMessageRead,
-  updateMessageLinkPreview,
-} from './db/queries/messages.js';
+import { markMessageRead } from './db/queries/messages.js';
 import {
   findRoomById,
   isRoomMember,
@@ -17,17 +10,12 @@ import {
   setMemberLastRead,
   setMemberLastReadAnnouncementAt,
 } from './db/queries/rooms.js';
-import { extractFirstUrl, fetchLinkPreview } from './linkPreview.js';
-import { topicAccess } from './access.js';
-import { MESSAGE_ATTACHMENT_MAX, parsePostFields, POST_ATTACHMENT_MAX, topicWriteDenial } from './permissions.js';
-import { postSystemMessage, unhideDmForOtherMembers } from './rooms.js';
+import { postSystemMessage } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
-import { toMessageDto } from './messages.js';
 import { markConnected, markDisconnected } from './presence.js';
-import { notifyIncomingCall, notifyOfflineMembers, roomTagFor } from './push.js';
-import { resolveRawUrl } from './upload.js';
-import { sanitizeTextFormat } from './textFormat.js';
+import { notifyIncomingCall, roomTagFor } from './push.js';
+import { sendUserMessage } from './sendMessage.js';
 
 /**
  * 통화가 끝났으면(마지막 참가자가 나갔으면) 그 대화에 요약 한 줄을 시스템 메시지로 남긴다.
@@ -80,179 +68,17 @@ export function registerSocket(io) {
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
     socket.join(`user:${socket.data.userId}`);
 
-    // payload: { roomId, type: 'text'|'image'|'file', text?, fileUrl?, fileName?, fileSize?, mimeType?, thumbnailUrl?,
-    //   quotedSenderName?, quotedPreview?, forwardedFromSenderName?, forwardedFromCreatedAt? }
-    // (quoted*는 "메시지 공유", forwardedFrom*는 "메시지 전달"에서 쓴다 — room_list_screen.dart의
-    // 메시지 롱프레스 메뉴, message_share_screen.dart/message_forward_screen.dart 참고.)
-    // 보드 뷰 게시글: { roomId, type: 'post', title, text, textFormat?, attachments? } — 보드 뷰 토픽은
-    // 게시글만, 그 밖의 방은 게시글을 받지 않는다.
+    // payload 모양과 규칙(보드 뷰는 게시글만, 읽기 전용·보관, 첨부, DM 되살리기, 푸시, 링크 미리보기)은
+    // sendMessage.js의 sendUserMessage — 메시지 예약 발송(scheduledMessages.js)도 같은 함수로 보낸다.
     socket.on('message:send', async (payload, ack) => {
       if (!payload || typeof payload !== 'object') return;
-
-      const room = await findRoomById(payload.roomId);
-      if (!room || !(await isRoomMember(room.id, socket.data.userId))) {
-        ack?.({ ok: false, error: '이 방의 멤버가 아닙니다.' });
-        return;
-      }
-
-      const isPost = payload.type === 'post';
-      const isBoard = room.type === 'topic' && room.viewMode === 'board';
-      if (isBoard && !isPost) {
-        ack?.({ ok: false, error: '보드 뷰 토픽에는 게시글만 올릴 수 있습니다.' });
-        return;
-      }
-      if (!isBoard && isPost) {
-        ack?.({ ok: false, error: '게시글은 보드 뷰 토픽에서만 올릴 수 있습니다.' });
-        return;
-      }
-      // 읽기 전용·보관된 토픽은 토픽을 관리할 수 있는 사람만 쓴다. 대부분의 방은 해당이 없어서
-      // 그때만 권한을 조회한다(메시지마다 조회가 늘지 않게).
-      if (room.type === 'topic' && (room.readOnly || room.archivedAt)) {
-        const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, socket.data.userId)).canManage });
-        if (denial) {
-          ack?.({ ok: false, error: denial });
-          return;
-        }
-      }
-      let post = null;
-      if (isPost) {
-        post = parsePostFields(payload.title, payload.text);
-        if (post.error) {
-          ack?.({ ok: false, error: post.error });
-          return;
-        }
-      }
-
-      const sender = await findUserById(socket.data.userId);
-
-      // "팀장에게 문의하기"로 보낸 메시지에만 채워진다(chat_input_bar.dart) — 내가 이 방에서
-      // 보낸 실제 문의가 맞는지 확인해서, 엉뚱한 문의 id를 붙여 "문의함 바로가기"를 위조하는
-      // 것을 막는다.
-      let inquiryId = null;
-      if (typeof payload.inquiryId === 'string') {
-        const inquiry = await findInquiryById(payload.inquiryId);
-        if (inquiry && inquiry.roomId === room.id && inquiry.senderId === socket.data.userId) {
-          inquiryId = inquiry.id;
-        }
-      }
-
-      // fileUrl/thumbnailUrl이 서명된 /files/<token> 형태로 오면(메시지 전달 — 클라이언트는
-      // 원본이 아니라 서명된 다운로드 URL만 갖고 있다) 원본 상대경로로 되돌린다. 일반적인
-      // 새 업로드는 이미 원본 경로라 그대로 통과한다(resolveRawUrl 참고).
-      const fileUrl =
-        typeof payload.fileUrl === 'string' ? resolveRawUrl(payload.fileUrl) : null;
-      const thumbnailUrl =
-        typeof payload.thumbnailUrl === 'string' ? resolveRawUrl(payload.thumbnailUrl) : null;
-
-      // 사진 여러 장을 한 말풍선으로 보낼 때 — 첫 장은 messages의 파일 칸에도 그대로 넣는다
-      // (파일 모아보기·검색·알림 미리보기가 아직 그 칸을 쓴다). 게시글은 30개까지 — 넘으면 조용히
-      // 자르지 않고 거절한다(게시글 편집기가 이미 30개로 막으므로 넘어왔다면 파일이 빠진 채 올라가면 안 됨).
-      const validAttachments = Array.isArray(payload.attachments)
-        ? payload.attachments.filter((a) => a && typeof a.fileUrl === 'string')
-        : [];
-      if (isPost && validAttachments.length > POST_ATTACHMENT_MAX) {
-        ack?.({ ok: false, error: `첨부 파일은 ${POST_ATTACHMENT_MAX}개까지 올릴 수 있습니다.` });
-        return;
-      }
-      const attachments = validAttachments
-        .slice(0, isPost ? POST_ATTACHMENT_MAX : MESSAGE_ATTACHMENT_MAX)
-        .map((a) => ({
-          kind: a.kind === 'file' ? 'file' : 'image',
-          fileUrl: resolveRawUrl(a.fileUrl),
-          fileName: typeof a.fileName === 'string' ? a.fileName : null,
-          fileSize: typeof a.fileSize === 'number' ? a.fileSize : null,
-          mimeType: typeof a.mimeType === 'string' ? a.mimeType : null,
-          thumbnailUrl:
-            typeof a.thumbnailUrl === 'string' ? resolveRawUrl(a.thumbnailUrl) : null,
-        }))
-        // 만료·위조된 서명 링크는 원본 경로로 못 되돌린다(null) — message_attachments.file_url은
-        // 비울 수 없어서 저장 전에 뺀다(게시글은 첨부가 하나여도 그 표에 저장한다).
-        .filter((a) => a.fileUrl);
-      const head = attachments[0];
-
-      // 게시글은 제목·본문(앞뒤 공백 뺀 값)과 첨부 목록만 쓴다 — 단일 파일 칸(fileUrl 등)·인용·전달
-      // 값은 일반 메시지 전용이라 무시한다.
-      const message = await insertMessage({
-        id: randomUUID(),
-        roomId: room.id,
+      const result = await sendUserMessage({
+        io,
         senderId: socket.data.userId,
-        senderName: sender?.name ?? sender?.username ?? socket.data.username,
-        type: isPost ? 'post' : ['image', 'file', 'sticker'].includes(payload.type) ? payload.type : 'text',
-        title: post?.title ?? null,
-        text: post ? post.text : typeof payload.text === 'string' ? payload.text : null,
-        textFormat: post
-          ? sanitizeTextFormat(payload.textFormat, post.text)
-          : room.isSecret || typeof payload.text !== 'string'
-            ? null
-            : sanitizeTextFormat(payload.textFormat, payload.text),
-        fileUrl: head?.fileUrl ?? (post ? null : fileUrl),
-        fileName:
-          head?.fileName ?? (!post && typeof payload.fileName === 'string' ? payload.fileName : null),
-        fileSize:
-          head?.fileSize ?? (!post && typeof payload.fileSize === 'number' ? payload.fileSize : null),
-        mimeType:
-          head?.mimeType ?? (!post && typeof payload.mimeType === 'string' ? payload.mimeType : null),
-        thumbnailUrl: head?.thumbnailUrl ?? (post ? null : thumbnailUrl),
-        quotedSenderName: !post && typeof payload.quotedSenderName === 'string' ? payload.quotedSenderName : null,
-        quotedPreview: !post && typeof payload.quotedPreview === 'string' ? payload.quotedPreview : null,
-        forwardedFromSenderName:
-          !post && typeof payload.forwardedFromSenderName === 'string' ? payload.forwardedFromSenderName : null,
-        forwardedFromCreatedAt:
-          !post && typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
-        isInquiryNotice: inquiryId != null,
-        inquiryId,
+        fallbackName: socket.data.username,
+        payload,
       });
-
-      // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분). 게시글은
-      // 하나여도 목록으로 저장한다 — toMessageDto의 예전 방식(파일 칸 하나 = 첨부 하나)은
-      // 'image'/'file' 메시지에만 적용되기 때문이다.
-      if (attachments.length > 1 || (post && attachments.length > 0)) {
-        message.attachments = await insertMessageAttachments(message.id, attachments);
-      }
-
-      // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 —
-      // "숨기기"를 멤버십 변경 없이 구현한 결과라, 메시지가 갈 때마다 직접 확인해줘야 한다
-      // (rooms.js unhideDmForOtherMembers 참고).
-      await unhideDmForOtherMembers(io, room, socket.data.userId);
-
-      // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서
-      // 나중에 다시 조회될 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.
-      const broadcastMessage = toMessageDto(message);
-      io.to(room.id).emit('message:new', broadcastMessage);
-      ack?.({ ok: true, message: broadcastMessage });
-
-      // 응답을 기다리게 하지 않도록 ack 이후 백그라운드로 보낸다 — 실패해도(토큰 만료 등)
-      // notifyOfflineMembers 내부에서 개별적으로 처리되고 메시지 전송 자체엔 영향 없다.
-      listRoomMemberIds(room.id)
-        .then((memberIds) =>
-          notifyOfflineMembers({
-            memberIds,
-            senderId: socket.data.userId,
-            senderName: message.senderName,
-            sender,
-            room,
-            entry: message,
-            roomTag: roomTagFor(room),
-            kind: 'message',
-          }),
-        )
-        .catch((err) => console.error('[push] message:send 알림 실패:', err?.message ?? err));
-
-      // 링크 미리보기도 ack 이후 백그라운드로 — 외부 사이트를 긁어오는 거라 몇 초 걸릴 수
-      // 있는데 메시지 전송 자체를 그만큼 늦출 이유가 없다. 비밀 대화는 서버가 내용을 아예
-      // 못 봐야 하므로(암호문) 건너뛴다.
-      if (!room.isSecret && message.type === 'text') {
-        const url = extractFirstUrl(message.text);
-        if (url) {
-          fetchLinkPreview(url)
-            .then(async (preview) => {
-              if (!preview) return;
-              const updated = await updateMessageLinkPreview(message.id, preview);
-              io.to(room.id).emit('message:linkPreview', toMessageDto(updated));
-            })
-            .catch((err) => console.error('[linkPreview] 처리 실패:', err?.message ?? err));
-        }
-      }
+      ack?.(result);
     });
 
     // payload: { roomId } — 지금 이 방을 보고 있다는 뜻. 다른 멤버들이 안읽음 카운터를 갱신할 수 있도록 브로드캐스트한다.

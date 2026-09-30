@@ -21,6 +21,7 @@ import { addTeamMembers } from "./db/queries/teams.js";
 import { addRoomMembers, listAutoInviteTopics, listRoomMemberIds } from "./db/queries/rooms.js";
 import { findDefaultPositionOption } from "./db/queries/positionOptions.js";
 import { notifyMembership, postSystemMessage } from "./rooms.js";
+import { announceTeamJoin } from "./selfRoomNotices.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_LENGTH_ERROR = "아이디는 4~20자여야 합니다.";
@@ -211,6 +212,8 @@ export function createAuthRouter(io) {
             await postSystemMessage(io, room, `${user.name} 님이 참여했습니다.`);
           }
         }
+        // 나와의 대화에 사용 안내, 그 팀 관리자들에게 참여 알림(스스로 들어온 것이라 관리자는 모두 받는다).
+        await announceTeamJoin(io, { teamId: link.teamId, joinerIds: [user.id], actorId: user.id });
       }
     }
 

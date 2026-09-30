@@ -150,6 +150,14 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_query.text.trim().isNotEmpty) _search();
   }
 
+  /// 결과 줄의 방 이름 — 목록에 있는 방이면 사이드바와 같은 이름(나에게만 바꾼 이름·나와의 대화 포함),
+  /// 없으면(그 사이 나간 방 등) 서버가 준 이름. 서버는 모두가 보는 원래 이름을 준다.
+  String _roomNameOf(SearchResult result) {
+    final room = widget.session.roomById(result.roomId);
+    if (room == null) return result.roomName ?? '';
+    return room.displayName(widget.session.userId ?? '');
+  }
+
   void _openResult(SearchResult result) {
     Room? room;
     for (final r in widget.session.rooms) {
@@ -365,6 +373,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               itemBuilder: (context, i) => _SearchResultRow(
                 result: pageItems[i],
+                roomName: _roomNameOf(pageItems[i]),
                 query: _query.text.trim(),
                 timeFormat: _timeFormat,
                 onTap: () => _openResult(pageItems[i]),
@@ -431,11 +440,13 @@ class _SortButton extends StatelessWidget {
 /// 칠한 것처럼 하이라이트한다.
 class _SearchResultRow extends StatelessWidget {
   final SearchResult result;
+  final String roomName;
   final String query;
   final DateFormat timeFormat;
   final VoidCallback onTap;
   const _SearchResultRow({
     required this.result,
+    required this.roomName,
     required this.query,
     required this.timeFormat,
     required this.onTap,
@@ -451,7 +462,7 @@ class _SearchResultRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              result.roomName ?? '',
+              roomName,
               style: TextStyle(
                 color: Theme.of(context).colorScheme.primary,
                 fontWeight: FontWeight.w600,

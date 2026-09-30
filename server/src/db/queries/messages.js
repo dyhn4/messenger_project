@@ -234,6 +234,24 @@ export async function countUnreadForUser(roomId, requesterId, sinceMs, floor) {
   return row?.count ?? 0;
 }
 
+/** 이 방에 사람이 아닌 발신자([senderName])가 같은 글([text])을 이미 올렸는지 — 나와의 대화 환영 안내를
+ * 팀마다 한 번만 보내는 데 쓴다(selfRoomNotices.js). [executor]는 방 잠금 안에서 부를 때의 트랜잭션. */
+export async function hasBotMessage(roomId, senderName, text, executor = db) {
+  const [row] = await executor
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.roomId, roomId),
+        isNull(messages.senderId),
+        eq(messages.senderName, senderName),
+        eq(messages.text, text),
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
 /** 보존기간 만료 파기(retention.js) — 그 사람이 보낸 메시지를 전부 지우고 지운 개수를 돌려준다. */
 export async function deleteMessagesBySender(userId) {
   const deleted = await db.delete(messages).where(eq(messages.senderId, userId)).returning({ id: messages.id });

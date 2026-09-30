@@ -32,9 +32,10 @@ import 'links_screen.dart';
 import 'invite_link_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
-import 'new_chat_screen.dart';
+import 'new_group_dialog.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
+import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
 
 const _appVersion = '1.0.0';
@@ -186,6 +187,22 @@ class _RoomListScreenState extends State<RoomListScreen> {
     if (mounted) _pushChat(room);
   }
 
+  /// 채팅 탭 맨 위 "나와의 대화" 줄 — 목록에 아직 없으면(방 목록을 받기 전 등) 서버에서 받아 연다.
+  Future<void> _openSelfChat() async {
+    final session = widget.session;
+    final loaded = session.selfRoom;
+    if (loaded != null) {
+      _openRoom(loaded);
+      return;
+    }
+    try {
+      final room = await session.openSelfChat();
+      _openRoom(room);
+    } catch (e) {
+      if (mounted) showAppToast(context, '나와의 대화를 열지 못했습니다: $e');
+    }
+  }
+
   /// 토픽 탭의 [+] — 새로운 토픽 생성하기 / 참여 가능한 토픽 보기 / 폴더 만들기를 아래 시트로
   /// 고른다. 준회원은 토픽을 만들거나 찾아 참여할 수 없지만(초대받은 방에서만 활동) 자기 목록을
   /// 정리하는 폴더는 누구나 만든다. 새 토픽 만들기는 팀 설정(토픽 생성 권한)에 따라 더 좁을 수 있다.
@@ -324,6 +341,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
               type: RoomType.dm,
               emptyText: '대화가 없습니다.',
               onOpenRoom: _openRoom,
+              onOpenSelfChat: _openSelfChat,
               showActivityTime: true,
               positionOptions: _positionOptions,
             ),
@@ -340,12 +358,21 @@ class _RoomListScreenState extends State<RoomListScreen> {
             onPressed: _showTopicActions,
             child: const Icon(Icons.add),
           ),
-          1 || 2 when widget.session.canCreateRooms => FloatingActionButton(
-            tooltip: '새 대화',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => NewChatScreen(session: widget.session),
-              ),
+          1 when widget.session.canCreateRooms => FloatingActionButton(
+            tooltip: '새 그룹채팅',
+            onPressed: () => showNewGroupDialog(
+              context,
+              widget.session,
+              onOpenRoom: _openRoom,
+            ),
+            child: const Icon(Icons.add),
+          ),
+          2 when widget.session.canCreateRooms => FloatingActionButton(
+            tooltip: '채팅 시작하기',
+            onPressed: () => showStartChatDialog(
+              context,
+              widget.session,
+              onOpenRoom: _openRoom,
             ),
             child: const Icon(Icons.add),
           ),
@@ -379,12 +406,16 @@ class _RoomListScreenState extends State<RoomListScreen> {
 /// 토픽/그룹채팅/채팅 탭 공통 몸통: 검색창(누르면 SearchScreen으로 이동) + 그 타입의
 /// 방 목록. 즐겨찾기한 방을 위로 모으고, 그 안에서는 최근 활동 순으로 정렬한다(PC 사이드바와
 /// 동일한 규칙 — Session._bumpRoomActivity 참고). 토픽 탭은 PC 사이드바처럼 내 폴더 →
-/// 폴더 밖 토픽 → "보관된 토픽"으로 묶는다(폴더마다 같은 정렬 규칙).
+/// 폴더 밖 토픽 → "보관된 토픽"으로 묶는다(폴더마다 같은 정렬 규칙). 채팅 탭은 맨 위에
+/// "나와의 대화"가 늘 고정이다.
 class _RoomTypeTab extends StatefulWidget {
   final Session session;
   final RoomType type;
   final String emptyText;
   final ValueChanged<Room> onOpenRoom;
+
+  /// 채팅 탭의 "나와의 대화" 고정 줄 — 목록에 없으면 서버에서 받아서라도 연다. null이면 그 줄이 없다.
+  final VoidCallback? onOpenSelfChat;
   final bool showActivityTime;
   final List<PositionOption>? positionOptions;
   const _RoomTypeTab({
@@ -392,6 +423,7 @@ class _RoomTypeTab extends StatefulWidget {
     required this.type,
     required this.emptyText,
     required this.onOpenRoom,
+    this.onOpenSelfChat,
     this.showActivityTime = false,
     this.positionOptions,
   });
@@ -444,31 +476,39 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
               // session.rooms에는 다른 팀 방까지 들어있으므로 지금 팀 것만 걸러낸다
               // (Session.rooms 주석 참고).
               final teamId = widget.session.currentTeam?.id;
+              // 나와의 대화는 채팅 탭 맨 위 고정 줄로 따로 그린다(목록 정렬에서 뺀다).
               final rooms = widget.session.rooms
                   .where(
                     (r) =>
                         r.type == widget.type &&
                         r.teamId == teamId &&
-                        !r.hidden,
+                        !r.hidden &&
+                        !r.isSelf,
                   )
                   .toList();
               if (widget.type == RoomType.topic) {
                 return _buildTopicList(context, rooms);
               }
               final sorted = favoriteFirst(rooms);
-              if (sorted.isEmpty) return _buildEmpty(context);
+              final onOpenSelf = widget.onOpenSelfChat;
+              final pinned = onOpenSelf == null ? 0 : 1;
+              if (sorted.isEmpty && pinned == 0) return _buildEmpty(context);
               return MutedScrollbar(
                 controller: _scrollController,
                 child: ListView.builder(
                   controller: _scrollController,
-                  itemCount: sorted.length,
-                  itemBuilder: (context, i) => _RoomRow(
-                    session: widget.session,
-                    room: sorted[i],
-                    onTap: () => widget.onOpenRoom(sorted[i]),
-                    showActivityTime: widget.showActivityTime,
-                    positionOptions: widget.positionOptions,
-                  ),
+                  itemCount: pinned + sorted.length,
+                  itemBuilder: (context, i) {
+                    if (i < pinned) return _buildSelfRow(onOpenSelf!);
+                    final room = sorted[i - pinned];
+                    return _RoomRow(
+                      session: widget.session,
+                      room: room,
+                      onTap: () => widget.onOpenRoom(room),
+                      showActivityTime: widget.showActivityTime,
+                      positionOptions: widget.positionOptions,
+                    );
+                  },
                 ),
               );
             },
@@ -484,6 +524,30 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
       style: TextStyle(color: Theme.of(context).hintColor),
     ),
   );
+
+  /// 채팅 탭 맨 위 "나와의 대화" — 방을 아직 못 받았으면(null) 이름만 있는 같은 모양의 줄을 그리고,
+  /// 누르면 서버에서 받아 연다.
+  Widget _buildSelfRow(VoidCallback onOpenSelf) {
+    const key = ValueKey('self-room-row');
+    final session = widget.session;
+    final room = session.selfRoom;
+    if (room == null) {
+      return ListTile(
+        key: key,
+        leading: SelfRoomAvatar(session: session),
+        title: const Text(selfRoomName),
+        onTap: onOpenSelf,
+      );
+    }
+    return _RoomRow(
+      key: key,
+      session: session,
+      room: room,
+      onTap: () => widget.onOpenRoom(room),
+      showActivityTime: widget.showActivityTime,
+      pinnedSelf: true,
+    );
+  }
 
   /// 토픽 탭: 내 폴더(접기·⋯ 메뉴) → 폴더 밖 토픽 → "보관된 토픽". 폴더가 있으면 토픽이
   /// 하나도 없어도 빈 폴더를 보여준다.
@@ -598,6 +662,10 @@ class _RoomRow extends StatelessWidget {
   /// 있으면 길게 누르기 시트에 "폴더로 이동"(과 폴더 안이면 "폴더에서 빼기")이 붙는다.
   final _RowFolderActions? folderActions;
 
+  /// 채팅 탭 맨 위에 고정된 "나와의 대화" — 늘 맨 위라 즐겨찾기 표시가 없고, 길게 누르기 시트엔
+  /// 알림 켜기/끄기만 있다(나가기·숨기기는 서버도 막는다).
+  final bool pinnedSelf;
+
   const _RoomRow({
     super.key,
     required this.session,
@@ -607,6 +675,7 @@ class _RoomRow extends StatelessWidget {
     this.positionOptions,
     this.indent = false,
     this.folderActions,
+    this.pinnedSelf = false,
   });
 
   @override
@@ -621,12 +690,14 @@ class _RoomRow extends StatelessWidget {
       contentPadding: indent
           ? const EdgeInsetsDirectional.only(start: 32, end: 24)
           : null,
-      leading: RoomAvatar(
-        room: room,
-        myUserId: session.userId ?? '',
-        resolveUrl: session.resolveUrl,
-        onlineUserIds: session.onlineUserIds,
-      ),
+      leading: pinnedSelf
+          ? SelfRoomAvatar(session: session)
+          : RoomAvatar(
+              room: room,
+              myUserId: session.userId ?? '',
+              resolveUrl: session.resolveUrl,
+              onlineUserIds: session.onlineUserIds,
+            ),
       title: Row(
         children: [
           if (room.isSecret) ...[
@@ -648,7 +719,7 @@ class _RoomRow extends StatelessWidget {
             const SizedBox(width: 6),
             PositionBadge(label: otherMember.position!),
           ],
-          if (room.favorite) ...[
+          if (room.favorite && !pinnedSelf) ...[
             const SizedBox(width: 4),
             const Icon(Icons.star, size: 16, color: Colors.amber),
           ],
@@ -729,24 +800,25 @@ class _RoomRow extends StatelessWidget {
             ),
             if (room.type == RoomType.group)
               ListTile(
-                leading: const Icon(Icons.edit_outlined),
+                leading: const Icon(Icons.drive_file_rename_outline),
                 title: Text(renameRoomMenuLabel(room, session.userId ?? '')),
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   showRenameRoomForMeDialog(context, session, room);
                 },
               ),
-            ListTile(
-              leading: Icon(
-                room.favorite ? Icons.star : Icons.star_border,
-                color: room.favorite ? Colors.amber : null,
+            if (!pinnedSelf)
+              ListTile(
+                leading: Icon(
+                  room.favorite ? Icons.star : Icons.star_border,
+                  color: room.favorite ? Colors.amber : null,
+                ),
+                title: Text(room.favorite ? '즐겨찾기 해제' : '즐겨찾기'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  session.toggleFavorite(room);
+                },
               ),
-              title: Text(room.favorite ? '즐겨찾기 해제' : '즐겨찾기'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                session.toggleFavorite(room);
-              },
-            ),
             // 토픽만 — 내 토픽 폴더로 옮기거나 폴더에서 뺀다(PC 사이드바의 끌어다 놓기와 같다).
             if (folder != null) ...[
               ListTile(
@@ -767,17 +839,18 @@ class _RoomRow extends StatelessWidget {
                   },
                 ),
             ],
-            ListTile(
-              leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
-              title: Text(
-                isDm && !room.isSecret ? '숨기기' : '나가기',
-                style: const TextStyle(color: Colors.redAccent),
+            if (!pinnedSelf)
+              ListTile(
+                leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
+                title: Text(
+                  isDm && !room.isSecret ? '숨기기' : '나가기',
+                  style: const TextStyle(color: Colors.redAccent),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showLeaveRoomDialog(context, session, room);
+                },
               ),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                showLeaveRoomDialog(context, session, room);
-              },
-            ),
           ],
         ),
       ),

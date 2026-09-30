@@ -203,10 +203,14 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
   @override
   Widget build(BuildContext context) {
     final myId = widget.session.userId ?? '';
+    final teamId = widget.session.currentTeam?.id;
     final rooms = widget.session.rooms
         // 비밀 대화는 검색/파일 목록 자체가 안 되므로(요구사항) 방 범위 선택지에도
         // 노출하지 않는다 — 서버 쪽도 별도로 막고 있다(server/src/db/queries/messages.js).
         .where((r) => !r.isSecret)
+        // 검색·파일·링크는 지금 팀 안에서만 찾으므로 다른 팀 방은 골라도 결과가 없다 — 지금 팀 방만(팀마다
+        // 하나씩 있는 나와의 대화도 하나만 보인다).
+        .where((r) => teamId == null || r.teamId == teamId)
         .where((r) => r.type == _tab)
         .where(
           (r) =>

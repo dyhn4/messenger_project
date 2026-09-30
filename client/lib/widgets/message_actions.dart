@@ -110,7 +110,8 @@ void showSelectCopyDialog(BuildContext context, Message message) {
 }
 
 /// 넓은(PC) 화면에서는 FloatingDialog로 띄우고, 좁은(모바일) 화면에서는 전체화면으로
-/// push한다 — home_screen.dart의 wideBreakpoint(700) 기준, 다른 "새 대화"류 화면들과 동일한 규칙.
+/// push한다 — home_screen.dart의 wideBreakpoint(700) 기준, 채팅 시작하기(start_chat_dialog.dart) 같은
+/// 다른 화면들과 동일한 규칙.
 void pushMessageShareScreen(
   BuildContext context, {
   required Session session,

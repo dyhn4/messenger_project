@@ -174,7 +174,13 @@ class _ChatPanelState extends State<ChatPanel> {
     // 다시 열 때마다 명시적으로 한 번 더 읽음 처리한다.
     final controller = _controller;
     controller.markReadNow();
-    widget.session.clearUnreadCount(widget.room.id);
+    // 안읽음 뱃지는 첫 프레임 뒤에 지운다 — 여기는 부모가 빌드하는 도중이라, 바로 지우면 세션 알림을 받은
+    // 사이드바 등이 빌드 중에 setState를 불러 단언이 난다("여기까지 읽었습니다"는 컨트롤러의 readBoundary라
+    // 영향 없다). 그사이 온 메시지는 이미 활성 방이라 안읽음이 늘지 않는다.
+    final roomId = widget.room.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.session.clearUnreadCount(roomId);
+    });
     // 보드는 검색 결과 강조·새 글 따라가기를 BoardView가 직접 한다.
     if (widget.room.isBoard) return;
     _scrollToHighlight();

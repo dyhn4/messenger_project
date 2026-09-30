@@ -332,6 +332,9 @@ export const rooms = pgTable(
     quietLeave: boolean('quiet_leave').notNull().default(false),
     // 토픽 보관 — 찍혀 있으면 목록의 '보관된 토픽'으로 옮겨지고 읽기 전용처럼 동작한다(내용은 그대로).
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    // 나와의 대화 — 팀마다 사람마다 하나씩 있는, 나 혼자만 멤버인 DM(type 'dm', dmKey '{나}:{나}').
+    // 메모·파일 보관용이라 초대·나가기·숨기기 등은 막고(rooms.js), 팀 관리자 알림도 여기로 온다.
+    isSelf: boolean('is_self').notNull().default(false),
   },
   (t) => [
     index('rooms_team_id_idx').on(t.teamId),
@@ -560,6 +563,44 @@ export const favoriteFiles = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('favorite_files_user_file_idx').on(t.userId, t.messageId, t.fileUrl)],
+);
+
+/**
+ * 메시지 예약 발송 — 정한 시각(15분 단위, 최대 90일 뒤)에 서버가 대신 보낸다(scheduledMessages.js).
+ * 만든 사람만 보고 고칠 수 있다. 보내고 나면 행을 지우고, 못 보냈으면 'failed' + 이유로 남겨 목록의
+ * '발송 실패'에 보여준다. 'sending'은 발송 중에 잠깐 거치는 상태(두 번 보내지 않도록 먼저 찜한다).
+ * 방이 지워져도 행은 남겨 실패로 알려야 해서 roomId는 set null이고, 표시용 방 이름을 따로 둔다.
+ * attachments는 채팅 첨부와 같은 모양 [{id, kind, fileUrl, fileName, fileSize, mimeType, thumbnailUrl}]
+ * (미서명 /uploads/ 경로 — 응답에 낼 때만 서명한다).
+ */
+export const scheduledMessages = pgTable(
+  'scheduled_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    roomId: text('room_id').references(() => rooms.id, { onDelete: 'set null' }),
+    roomName: text('room_name'),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // 보드 뷰 토픽에 올릴 게시글의 제목 — 그 밖의 방은 null.
+    title: text('title'),
+    text: text('text').notNull(),
+    textFormat: jsonb('text_format'),
+    attachments: jsonb('attachments').notNull().default([]),
+    sendAt: timestamp('send_at', { withTimezone: true }).notNull(),
+    // 'scheduled' | 'sending' | 'failed'
+    status: text('status').notNull().default('scheduled'),
+    failReason: text('fail_reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('scheduled_messages_user_team_idx').on(t.userId, t.teamId),
+    index('scheduled_messages_status_send_at_idx').on(t.status, t.sendAt),
+  ],
 );
 
 /**

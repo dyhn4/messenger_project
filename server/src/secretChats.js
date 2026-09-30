@@ -12,6 +12,7 @@ import {
 import { addRoomMembers, findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { notifySecretChatInvite } from './push.js';
+import { SELF_ROOM_DENIAL } from './permissions.js';
 import { dmKeyFor, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
 
 const MIN_SELF_DESTRUCT_SECONDS = 1;
@@ -55,9 +56,11 @@ export function createSecretChatsRouter(io) {
 
   router.post('/secret-chats', async (req, res) => {
     const { targetUserId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, deviceId, teamId } = req.body ?? {};
+    // 나 자신과의 비밀 대화는 없다(나와의 대화에서 비밀 대화 시작 등) — 기기 확인보다 먼저 이유를 알려준다.
+    if (targetUserId === req.user.sub) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     const device = await requireOwnDevice(req, res, deviceId);
     if (!device) return;
-    if (!targetUserId || targetUserId === req.user.sub) {
+    if (!targetUserId) {
       return res.status(400).json({ error: '대상 사용자가 올바르지 않습니다.' });
     }
     if (!initiatorEphemeralPublicKey || !initiatorEphemeralSignature) {

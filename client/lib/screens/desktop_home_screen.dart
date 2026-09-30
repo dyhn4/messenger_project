@@ -36,8 +36,9 @@ import 'message_thread_screen.dart';
 import 'project/project_dialog.dart';
 import 'project/project_window.dart';
 import 'my_profile_dialog.dart';
-import 'new_chat_screen.dart';
+import 'new_group_dialog.dart';
 import 'search_screen.dart';
+import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
 
 /// 이 폭 이하로 창이 좁아지면 왼쪽 사이드바(고정 280px)를 항상 펼쳐두는 대신 얇은 화살표
@@ -282,12 +283,42 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     );
   }
 
+  /// 사이드바 그룹채팅 [+] > 새 그룹채팅 만들기 — 만들어지면 그 그룹채팅을 연다.
   Future<void> _newGroupChat() async {
-    final result = await showDialog<Room>(
-      context: context,
-      builder: (_) => NewChatScreen(session: widget.session, asDialog: true),
+    await showNewGroupDialog(
+      context,
+      widget.session,
+      onOpenRoom: (room) {
+        if (mounted) _selectRoom(room);
+      },
     );
-    if (result != null) _selectRoom(result);
+  }
+
+  /// 사이드바 채팅 [+] > 채팅 시작하기 — 1:1·그룹채팅(또는 나와의 대화)을 열면 그 방을 연다.
+  Future<void> _startChat() async {
+    await showStartChatDialog(
+      context,
+      widget.session,
+      onOpenRoom: (room) {
+        if (mounted) _selectRoom(room);
+      },
+    );
+  }
+
+  /// 채팅 구역 맨 위 "나와의 대화" 줄 — 목록에 아직 없으면(방 목록을 받기 전 등) 서버에서 받아 연다.
+  Future<void> _openSelfChat() async {
+    final session = widget.session;
+    final loaded = session.selfRoom;
+    if (loaded != null) {
+      _selectRoom(loaded);
+      return;
+    }
+    try {
+      final room = await session.openSelfChat();
+      if (mounted) _selectRoom(room);
+    } catch (e) {
+      if (mounted) showAppToast(context, '나와의 대화를 열지 못했습니다: $e');
+    }
   }
 
   Future<void> _openMemberProfile(AppUser user) async {
@@ -516,6 +547,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       onCreateTopic: _createTopic,
       onBrowseTopics: _browseTopics,
       onNewGroupChat: _newGroupChat,
+      onStartChat: _startChat,
+      onOpenSelfChat: _openSelfChat,
       archivedExpanded: _archivedTopicsExpanded,
       onToggleArchived: () =>
           setState(() => _archivedTopicsExpanded = !_archivedTopicsExpanded),
@@ -664,7 +697,9 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   }
 
   /// 채팅 패널 위 방 헤더 — 즐겨찾기·아바타·이름(+1:1이면 직책)·삼점 메뉴. 토픽이면 이름 옆에
-  /// 비공개 자물쇠와 상태 칩('보드 뷰'·'읽기 전용'·'보관됨')이 붙는다.
+  /// 비공개 자물쇠와 상태 칩('보드 뷰'·'읽기 전용'·'보관됨')이 붙고, 설명이 있는 그룹채팅·토픽은
+  /// 이름 아래에 설명 한 줄이 붙는다. 나와의 대화는 목록 맨 위에 늘 고정이라 즐겨찾기 별이 없고,
+  /// 아바타는 '나' 꼬리표를 단 내 아바타다.
   Widget _buildRoomHeader(
     BuildContext context,
     Room room, {
@@ -675,6 +710,49 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
         ? room.members.where((m) => m.id != widget.session.userId).firstOrNull
         : null;
     final chips = topicStatusChips(room);
+    final description = roomHeaderDescription(room);
+    final nameRow = Row(
+      children: [
+        Flexible(
+          flex: 3,
+          child: Text(
+            room.displayName(widget.session.userId ?? ''),
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: room.isSecret ? Colors.green : null,
+            ),
+          ),
+        ),
+        if (room.isPrivateTopic) const PrivateTopicLock(size: 16),
+        // 칩은 한 줄로만 — 대화 칸이 좁으면(오른쪽 패널을 연 좁은 창 등) 안 들어가는 칩은
+        // 다음 줄로 넘어가서 잘려 안 보인다(이름을 밀어내거나 넘치지 않게).
+        if (chips.isNotEmpty)
+          Flexible(
+            flex: 2,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: ClipRect(
+                child: SizedBox(
+                  height: 20,
+                  child: Wrap(spacing: 4, runSpacing: 4, children: chips),
+                ),
+              ),
+            ),
+          ),
+        // 방 목록의 배지와 달리 헤더는 등급(조장 이상)과 무관하게 직책이 있으면
+        // 그냥 글자로 보여준다 — 배지가 아니라 이름 옆의 작은 보조 텍스트.
+        if (otherMember?.position != null &&
+            otherMember!.position!.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Text(
+            otherMember.position!,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+        ],
+      ],
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -684,69 +762,39 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       ),
       child: Row(
         children: [
-          FavoriteStar(
-            favorite: room.favorite,
-            onTap: () => widget.session.toggleFavorite(room),
-          ),
-          const SizedBox(width: 8),
-          RoomAvatar(
-            room: room,
-            myUserId: widget.session.userId ?? '',
-            resolveUrl: widget.session.resolveUrl,
-            onlineUserIds: widget.session.onlineUserIds,
-          ),
+          if (!room.isSelf) ...[
+            FavoriteStar(
+              favorite: room.favorite,
+              onTap: () => widget.session.toggleFavorite(room),
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (room.isSelf)
+            SelfRoomAvatar(session: widget.session)
+          else
+            RoomAvatar(
+              room: room,
+              myUserId: widget.session.userId ?? '',
+              resolveUrl: widget.session.resolveUrl,
+              onlineUserIds: widget.session.onlineUserIds,
+            ),
           const SizedBox(width: 10),
           if (room.isSecret) ...[
             const Icon(Icons.lock, size: 14, color: Colors.green),
             const SizedBox(width: 4),
           ],
           Expanded(
-            child: Row(
-              children: [
-                Flexible(
-                  flex: 3,
-                  child: Text(
-                    room.displayName(widget.session.userId ?? ''),
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: room.isSecret ? Colors.green : null,
-                    ),
+            child: description == null
+                ? nameRow
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      nameRow,
+                      const SizedBox(height: 2),
+                      RoomDescriptionLine(description),
+                    ],
                   ),
-                ),
-                if (room.isPrivateTopic) const PrivateTopicLock(size: 16),
-                // 칩은 한 줄로만 — 대화 칸이 좁으면(오른쪽 패널을 연 좁은 창 등) 안 들어가는 칩은
-                // 다음 줄로 넘어가서 잘려 안 보인다(이름을 밀어내거나 넘치지 않게).
-                if (chips.isNotEmpty)
-                  Flexible(
-                    flex: 2,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: ClipRect(
-                        child: SizedBox(
-                          height: 20,
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: chips,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                // 방 목록의 배지와 달리 헤더는 등급(조장 이상)과 무관하게 직책이 있으면
-                // 그냥 글자로 보여준다 — 배지가 아니라 이름 옆의 작은 보조 텍스트.
-                if (otherMember?.position != null &&
-                    otherMember!.position!.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    otherMember.position!,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).hintColor,
-                    ),
-                  ),
-                ],
-              ],
-            ),
           ),
           if (isSplit)
             IconButton(
@@ -1128,6 +1176,10 @@ class _Sidebar extends StatelessWidget {
   final VoidCallback onCreateTopic;
   final VoidCallback onBrowseTopics;
   final VoidCallback onNewGroupChat;
+  final VoidCallback onStartChat;
+
+  /// 채팅 구역 맨 위 "나와의 대화" 줄 — 목록에 없으면 서버에서 받아서라도 연다.
+  final VoidCallback onOpenSelfChat;
 
   /// 맨 아래 "보관된 토픽" 묶음을 펼쳤는지(서버에 저장하지 않는 화면 상태, 기본 접힘).
   final bool archivedExpanded;
@@ -1143,6 +1195,8 @@ class _Sidebar extends StatelessWidget {
     required this.onCreateTopic,
     required this.onBrowseTopics,
     required this.onNewGroupChat,
+    required this.onStartChat,
+    required this.onOpenSelfChat,
     required this.archivedExpanded,
     required this.onToggleArchived,
   });
@@ -1191,6 +1245,46 @@ class _Sidebar extends StatelessWidget {
                   createTopicFolderFlow(hostContext, session, moveIn: room),
             ),
       onToggleFavorite: () => session.toggleFavorite(room),
+      onTap: () => onSelectRoom(room),
+      onSplitPanel: onSplitRoom,
+    );
+  }
+
+  /// 채팅 구역 맨 위에 고정된 "나와의 대화" 줄 — 즐겨찾기 별·숨기기 ✕ 없이 늘 이 자리다. 방을
+  /// 아직 못 받았으면(null) 같은 모양의 자리만 그리고, 누르면 서버에서 받아 연다.
+  Widget _selfRoomTile(Room? room) {
+    const key = ValueKey('self-room-row');
+    final avatar = SelfRoomAvatar(session: session);
+    if (room == null) {
+      return ListTile(
+        key: key,
+        dense: true,
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          // 다른 줄의 즐겨찾기 별 자리만큼 비워서 아바타 줄을 맞춘다.
+          children: [const SizedBox(width: 28), avatar],
+        ),
+        title: const Text(
+          selfRoomName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        onTap: onOpenSelfChat,
+      );
+    }
+    return _RoomTile(
+      key: key,
+      room: room,
+      session: session,
+      positionOptions: positionOptions,
+      leading: avatar,
+      label: room.displayName(session.userId ?? ''),
+      selected: room.id == selectedRoomId,
+      unreadCount: room.unreadCount,
+      favorite: false,
+      muted: room.muted,
+      pinnedSelf: true,
+      onToggleFavorite: () {},
       onTap: () => onSelectRoom(room),
       onSplitPanel: onSplitRoom,
     );
@@ -1258,9 +1352,13 @@ class _Sidebar extends StatelessWidget {
         final groups = favoriteFirst(
           session.rooms.where((r) => r.type == RoomType.group && visible(r)),
         );
+        // 나와의 대화는 채팅 구역 맨 위 고정 줄로 따로 그린다(목록 정렬·"채팅 N" 수에서 뺀다).
         final dms = favoriteFirst(
-          session.rooms.where((r) => r.type == RoomType.dm && visible(r)),
+          session.rooms.where(
+            (r) => r.type == RoomType.dm && !r.isSelf && visible(r),
+          ),
         );
+        final selfRoom = session.selfRoom;
         // 머리글의 토픽 수·안 읽은 수는 폴더 안·보관된 토픽까지 전부 센다.
         final topicsUnread = topics.fold<int>(
           0,
@@ -1270,7 +1368,11 @@ class _Sidebar extends StatelessWidget {
           0,
           (sum, r) => sum + r.unreadCount,
         );
-        final dmsUnread = dms.fold<int>(0, (sum, r) => sum + r.unreadCount);
+        // 안 읽은 수는 구역에 보이는 줄 전부(나와의 대화의 봇 안내 포함)를 센다.
+        final dmsUnread = dms.fold<int>(
+          selfRoom?.unreadCount ?? 0,
+          (sum, r) => sum + r.unreadCount,
+        );
 
         // 세 섹션 사이 구분선을 사용자가 드래그해서 각자 몫을 조절할 수 있게 한다.
         // 기본은 1/3씩이고, 자기 영역 안에서만 스크롤되며 목록이 영역보다 길면
@@ -1362,11 +1464,12 @@ class _Sidebar extends StatelessWidget {
                 ? null
                 : IconButton(
                     icon: const Icon(Icons.add, size: 20),
-                    tooltip: '새 대화',
-                    onPressed: onNewGroupChat,
+                    tooltip: '채팅 시작하기',
+                    onPressed: onStartChat,
                   ),
           ),
           dmsChildren: [
+            _selfRoomTile(selfRoom),
             for (final room in dms)
               _RoomTile(
                 room: room,
@@ -1700,6 +1803,10 @@ class _RoomTile extends StatefulWidget {
   /// 있으면 우클릭 메뉴에 "폴더로 이동"(과 폴더 안이면 "폴더에서 빼기")이 붙는다.
   final _TopicFolderMenu? folderMenu;
 
+  /// 채팅 구역 맨 위에 고정된 "나와의 대화" 줄 — 즐겨찾기 별·숨기기 ✕가 없고, 우클릭 메뉴에도
+  /// 비밀대화·숨기기·나가기가 없다(서버도 막는다). 다른 줄과 정렬은 맞도록 그 자리는 비워 둔다.
+  final bool pinnedSelf;
+
   const _RoomTile({
     super.key,
     required this.room,
@@ -1718,6 +1825,7 @@ class _RoomTile extends StatefulWidget {
     this.indent = false,
     this.draggable = false,
     this.folderMenu,
+    this.pinnedSelf = false,
   });
 
   @override
@@ -1812,6 +1920,7 @@ class _RoomTileState extends State<_RoomTile> {
     final room = widget.room;
     final session = widget.session;
     final folderMenu = widget.folderMenu;
+    final pinnedSelf = widget.pinnedSelf;
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     setState(() => _contextMenuOpen = true);
     // 작은 글씨·좁은 줄 간격의 간결한 메뉴 — 항목 종류(열기 / 이 방 설정 / 폴더 / 떠나기)마다
@@ -1841,8 +1950,8 @@ class _RoomTileState extends State<_RoomTile> {
       items: [
         item(_RoomContextAction.split, '대화창 분할하기'),
         // 이미 비밀 대화인 방에서 "또" 비밀대화를 시작하는 건 의미가 없고, 그룹/토픽은
-        // 애초에 1:1이 아니라 비밀 대화 개념이 없다.
-        if (_isDm && !room.isSecret)
+        // 애초에 1:1이 아니라 비밀 대화 개념이 없다(나와의 대화는 상대가 없다).
+        if (_isDm && !room.isSecret && !pinnedSelf)
           item(_RoomContextAction.startSecret, '비밀대화 시작하기'),
         divider,
         item(
@@ -1887,9 +1996,11 @@ class _RoomTileState extends State<_RoomTile> {
           if (folderMenu.currentFolderId != null)
             item(_RoomContextAction.removeFromFolder, '폴더에서 빼기'),
         ],
-        divider,
-        if (_isDm) item(_RoomContextAction.hide, '숨기기'),
-        item(_RoomContextAction.leave, '나가기'),
+        if (!pinnedSelf) ...[
+          divider,
+          if (_isDm) item(_RoomContextAction.hide, '숨기기'),
+          item(_RoomContextAction.leave, '나가기'),
+        ],
       ],
     );
     if (mounted) setState(() => _contextMenuOpen = false);
@@ -1995,13 +2106,16 @@ class _RoomTileState extends State<_RoomTile> {
           leading: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Opacity(
-                opacity: widget.favorite || showHover ? 1 : 0,
-                child: FavoriteStar(
-                  favorite: widget.favorite,
-                  onTap: widget.onToggleFavorite,
+              if (widget.pinnedSelf)
+                const SizedBox(width: 20)
+              else
+                Opacity(
+                  opacity: widget.favorite || showHover ? 1 : 0,
+                  child: FavoriteStar(
+                    favorite: widget.favorite,
+                    onTap: widget.onToggleFavorite,
+                  ),
                 ),
-              ),
               const SizedBox(width: 8),
               widget.leading,
             ],
@@ -2044,25 +2158,28 @@ class _RoomTileState extends State<_RoomTile> {
                 UnreadBadge(count: widget.unreadCount),
                 const SizedBox(width: 4),
               ],
-              Opacity(
-                opacity: showHover ? 1 : 0,
-                child: SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 16,
-                    // ⋮ 메뉴의 문구(room_options_menu.dart)와 맞춘다 — 토픽은 "토픽 나가기".
-                    tooltip: _isDm
-                        ? '채팅방 숨기기'
-                        : (widget.room.type == RoomType.topic
-                              ? '토픽 나가기'
-                              : '채팅방 나가기'),
-                    icon: const Icon(Icons.close),
-                    onPressed: showHover ? _onCloseX : null,
+              if (widget.pinnedSelf)
+                const SizedBox(width: 28, height: 28)
+              else
+                Opacity(
+                  opacity: showHover ? 1 : 0,
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      iconSize: 16,
+                      // ⋮ 메뉴의 문구(room_options_menu.dart)와 맞춘다 — 토픽은 "토픽 나가기".
+                      tooltip: _isDm
+                          ? '채팅방 숨기기'
+                          : (widget.room.type == RoomType.topic
+                                ? '토픽 나가기'
+                                : '채팅방 나가기'),
+                      icon: const Icon(Icons.close),
+                      onPressed: showHover ? _onCloseX : null,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           onTap: widget.onTap,

@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { messageComments, messages, rooms, teams } from '../schema.js';
 
@@ -7,7 +7,8 @@ import { messageComments, messages, rooms, teams } from '../schema.js';
  * 모아 한 쿼리로 처리하고, 화면에서도 자주 새로고침하지 않는다.
  */
 export async function countRooms() {
-  const [row] = await db.select({ value: sql`count(*)::int` }).from(rooms);
+  // 나와의 대화는 팀원마다 저절로 하나씩 생기는 개인 메모 공간이라 '대화방' 수에서 뺀다.
+  const [row] = await db.select({ value: sql`count(*)::int` }).from(rooms).where(eq(rooms.isSelf, false));
   return row?.value ?? 0;
 }
 

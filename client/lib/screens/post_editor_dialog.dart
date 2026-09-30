@@ -20,6 +20,7 @@ import '../widgets/attachment_widgets.dart'
     show DropZoneOverlay, formatFileSize;
 import '../widgets/rich_text_format.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import 'schedule_message_dialog.dart';
 
 /// 게시글 작성·수정 창이 지금 몇 개 떠 있는지. 떠 있는 동안은 뒤에 깔린 채팅방·댓글 패널의 파일
 /// 드롭 영역을 꺼서(chat_panel.dart, message_thread_screen.dart) 편집기에 끌어다 놓은 파일이 뒤
@@ -142,6 +143,14 @@ class PostEditorState extends State<PostEditor> {
   String _lastBody = '';
   bool _submitting = false;
   bool _dragHovering = false;
+
+  /// "예약"을 눌러 첨부 업로드를 기다리는 중이거나 예약 창이 떠 있는 동안 — 게시·예약 단추를 막고,
+  /// 위에 뜬 예약 창에 끌어다 놓은 파일이 이 편집기에도 같이 들어오지 않게 끌어다 놓기를 끈다.
+  bool _scheduling = false;
+
+  /// 그중 첨부 업로드를 기다리는 동안만 — 예약 단추에 진행 표시를 띄운다(예약 창이 떠 있는 동안에는
+  /// 돌지 않게).
+  bool _waitingUploadsToSchedule = false;
 
   /// 서식 도구모음을 펼쳤는지 — PC 대화상자는 늘 펼치고, 휴대폰은 본문 칸을 넓게 쓰도록 접어 두었다가
   /// 제목줄의 "서식" 단추(채팅 입력칸과 같은 T 단추)로 편다.
@@ -391,7 +400,7 @@ class PostEditorState extends State<PostEditor> {
   bool get _hasFailedUpload => _drafts.any((d) => d.error != null);
 
   Future<void> _submit() async {
-    if (_submitting) return;
+    if (_submitting || _scheduling) return;
     final title = _title.text.trim();
     final body = _body.formatted();
     if (!_validate(title, body.text)) return;
@@ -435,6 +444,62 @@ class PostEditorState extends State<PostEditor> {
     }
   }
 
+  /// 새 글에서만 — 이 보드에 예약할 수 있을 때(지금 팀의 보드이고 내가 글을 쓸 수 있을 때).
+  bool get _canSchedule =>
+      !_editing && canScheduleIn(widget.session, widget.room);
+
+  /// "예약" — 지금 쓴 제목·본문(서식 포함)·첨부를 채운 채로 예약 창을 연다(첨부가 다 올라간 뒤에).
+  /// 예약하면 게시하지 않고 이 편집기를 닫는다 — 쓰던 글은 예약으로 옮겨 갔다. 예약 창에서 취소하면
+  /// 이 편집기로 돌아와 계속 쓸 수 있다.
+  Future<void> _schedule() async {
+    if (_submitting || _scheduling || !_canSchedule) return;
+    if (_hasFailedUpload) {
+      showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+      return;
+    }
+    setState(() {
+      _scheduling = true;
+      _waitingUploadsToSchedule = _uploadsIdle != null;
+    });
+    try {
+      while (_uploadsIdle != null) {
+        await _uploadsIdle!.future;
+      }
+      if (!mounted) return;
+      setState(() => _waitingUploadsToSchedule = false);
+      if (_hasFailedUpload) {
+        showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
+        return;
+      }
+      final body = _body.formatted();
+      final saved = await showScheduleMessageEditor(
+        context,
+        widget.session,
+        room: widget.room,
+        title: _title.text.trim(),
+        text: body.text,
+        textFormat: body.format,
+        attachments: [
+          for (final d in _drafts)
+            ScheduleDraftAttachment(d.result!, file: d.isImage ? d.file : null),
+        ],
+      );
+      if (saved == null || !mounted) return;
+      // 올려 둔 첨부는 예약이 가져갔으니 업로드를 건드리지 않고 목록에서만 뗀다.
+      for (final d in _drafts) {
+        d.removed = true;
+      }
+      Navigator.of(context).pop(false);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _scheduling = false;
+          _waitingUploadsToSchedule = false;
+        });
+      }
+    }
+  }
+
   bool get _dirty {
     final post = widget.post;
     if (post != null) {
@@ -448,7 +513,7 @@ class PostEditorState extends State<PostEditor> {
 
   /// 취소·Esc·뒤로 가기 — 쓰던 내용이 있으면 한 번 묻는다.
   Future<void> _requestClose() async {
-    if (_submitting) return;
+    if (_submitting || _scheduling) return;
     if (_dirty) {
       final discard = await showDialog<bool>(
         context: context,
@@ -501,6 +566,7 @@ class PostEditorState extends State<PostEditor> {
     );
     if (!Platform.isWindows || _editing) return editor;
     return DropTarget(
+      enable: !_scheduling,
       onDragEntered: (_) => setState(() => _dragHovering = true),
       onDragExited: (_) => setState(() => _dragHovering = false),
       onDragDone: (details) {
@@ -557,13 +623,43 @@ class PostEditorState extends State<PostEditor> {
           onPressed: _requestClose,
         ),
         title: Text(_editing ? '게시글 수정' : '게시글 작성'),
+        // 예약 단추까지 들어가면 360px 휴대폰에서 제목이 잘려서, 아이콘 단추 둘을 조금 좁게 둔다.
+        titleSpacing: _canSchedule ? 4 : null,
         actions: [
-          RichFormatToggleButton(
-            open: _formatOpen,
-            onPressed: () {
-              setState(() => _formatOpen = !_formatOpen);
-              _bodyFocus.requestFocus();
-            },
+          Theme(
+            data: Theme.of(context).copyWith(
+              visualDensity: _canSchedule ? VisualDensity.compact : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RichFormatToggleButton(
+                  open: _formatOpen,
+                  onPressed: () {
+                    setState(() => _formatOpen = !_formatOpen);
+                    _bodyFocus.requestFocus();
+                  },
+                ),
+                if (_canSchedule)
+                  _waitingUploadsToSchedule
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 11),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : IconButton(
+                          key: const ValueKey('post-schedule'),
+                          icon: const Icon(Icons.schedule_send_outlined),
+                          tooltip: '예약',
+                          onPressed: _submitting || _scheduling
+                              ? null
+                              : _schedule,
+                        ),
+              ],
+            ),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -939,20 +1035,37 @@ class PostEditorState extends State<PostEditor> {
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
       child: Row(
         children: [
-          if (Platform.isWindows)
-            Flexible(
-              child: Text(
-                'Ctrl + Enter 로 ${_editing ? '저장' : '게시'} · Esc 로 닫기',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12, color: hint),
-              ),
-            ),
-          const Spacer(),
+          // 남는 폭을 안내 글자가 다 차지해서 단추들이 늘 오른쪽 끝에 붙는다(Flexible + Spacer로 나누면
+          // 안내가 짧을 때 남는 절반이 단추 오른쪽에 빈칸으로 남았다).
+          Expanded(
+            child: Platform.isWindows
+                ? Text(
+                    'Ctrl + Enter 로 ${_editing ? '저장' : '게시'} · Esc 로 닫기',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: hint),
+                  )
+                : const SizedBox.shrink(),
+          ),
           TextButton(
-            onPressed: _submitting ? null : _requestClose,
+            onPressed: _submitting || _scheduling ? null : _requestClose,
             child: const Text('취소'),
           ),
+          if (_canSchedule) ...[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              key: const ValueKey('post-schedule'),
+              onPressed: _submitting || _scheduling ? null : _schedule,
+              icon: _waitingUploadsToSchedule
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.schedule_send_outlined, size: 18),
+              label: const Text('예약'),
+            ),
+          ],
           const SizedBox(width: 8),
           _buildSubmitButton(context),
         ],
@@ -973,7 +1086,7 @@ class PostEditorState extends State<PostEditor> {
     }
     return FilledButton(
       key: const ValueKey('post-submit'),
-      onPressed: _submitting ? null : _submit,
+      onPressed: _submitting || _scheduling ? null : _submit,
       child: _submitting
           ? Row(
               mainAxisSize: MainAxisSize.min,

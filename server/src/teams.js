@@ -42,6 +42,7 @@ import {
 } from './permissions.js';
 import { teamAccess, userAccess } from './access.js';
 import { nameOf, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
+import { announceTeamJoin, announceTeamRemoval } from './selfRoomNotices.js';
 import { publicUser } from './users.js';
 import { signFileUrl, toStoredUploadUrl } from './upload.js';
 
@@ -241,6 +242,8 @@ export function createTeamsRouter(io) {
       targetLabel: team.name,
       detail: '팀 생성(만든 사람이 소유자)',
     });
+    // 만든 사람도 이 팀에 새로 들어온 사람이다 — 이 팀의 나와의 대화에 사용 안내를 남긴다(관리자 알림은 본인뿐이라 없음).
+    await announceTeamJoin(io, { teamId: team.id, joinerIds: [req.user.sub], actorId: req.user.sub });
     res.status(201).json(toTeamDto(team, { isOwner: true, memberCount: 1 }));
   });
 
@@ -389,7 +392,8 @@ export function createTeamsRouter(io) {
     const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds.filter((id) => typeof id === 'string') : [];
     if (userIds.length === 0) return res.status(400).json({ error: '추가할 멤버를 선택하세요.' });
 
-    await addTeamMembers(team.id, userIds, 'member');
+    // 이미 멤버였던 사람은 조용히 건너뛴다 — 실제로 새로 들어온 사람에게만 아래 나와의 대화 안내를 보낸다.
+    const joinedIds = await addTeamMembers(team.id, userIds, 'member');
 
     // 팀에 들어오면 '정회원 자동 초대'가 켜진 공개 토픽(보관 안 된 것)에 자동으로 참여시킨다 —
     // 나머지 공개 토픽은 "참여 가능한 토픽"에서 스스로 찾아 들어간다. 준회원은 제외 —
@@ -431,6 +435,8 @@ export function createTeamsRouter(io) {
       targetLabel: addedNames.join(', '),
       detail: '팀에 추가',
     });
+    // 새로 들어온 사람에게 사용 안내, 팀 관리자들(추가한 본인 제외)에게 참여 알림 — 나와의 대화로.
+    await announceTeamJoin(io, { teamId: team.id, joinerIds: joinedIds, actorId: req.user.sub });
     res.json(await memberListResponse(team.id));
   });
 
@@ -554,6 +560,8 @@ export function createTeamsRouter(io) {
       targetLabel: await nameOf(req.params.userId),
       detail: `팀에서 제외(${roleLabel(accountRole(target))})`,
     });
+    // 팀 관리자들(뺀 본인 제외)에게 나와의 대화로 제외 알림.
+    await announceTeamRemoval(io, { teamId: team.id, userId: req.params.userId, actorId: req.user.sub });
     res.json(await memberListResponse(team.id));
   });
 

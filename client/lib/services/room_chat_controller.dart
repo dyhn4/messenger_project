@@ -8,58 +8,131 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/text_format.dart';
-import 'api_client.dart' show ApiException, UploadCancelToken;
+import '../models/uploaded_attachment.dart';
+import 'api_client.dart' show ApiClient, ApiException, UploadCancelToken;
 import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'session.dart';
 import 'typing_gate.dart';
 
-/// 첨부 업로드가 끝난 뒤(암호화 여부와 무관하게) 실제 메시지/댓글 전송에 필요한 결과.
-/// ChatInputBar/CommentInputBar가 첨부한 즉시 RoomChatController.uploadAttachment로 이 값을
-/// 만들어두고, 사용자가 "보내기"를 누르면 sendUploadedAttachment/postUploadedCommentAttachment에
-/// 그대로 넘긴다 — 그때는 이미 올라가 있는 파일이라 다시 업로드하지 않는다.
-class UploadedAttachment {
-  final bool isImage;
-  final String url;
-  final String fileName;
-  final int size;
-  final String? mimeType;
-  final String? thumbnailUrl;
+// UploadedAttachment는 예약 메시지(모델·ApiClient)도 써서 모델로 옮겼다 — 예전처럼 이 파일만
+// import해도 쓸 수 있게 다시 내보낸다.
+export '../models/uploaded_attachment.dart';
 
-  /// 비밀 대화일 때만 채워짐 — [url]이 가리키는 바이트가 이미 암호화됐다는 뜻.
-  final String? attachmentKey;
-  final String? attachmentNonce;
-  final String? thumbnailKey;
-  final String? thumbnailNonce;
+/// 임시 파일 이름이 겹치지 않게 하는 일련번호([_writeTempUploadFile] 참고).
+int _tempFileSeq = 0;
 
-  UploadedAttachment({
-    required this.isImage,
-    required this.url,
-    required this.fileName,
-    required this.size,
-    this.mimeType,
-    this.thumbnailUrl,
-    this.attachmentKey,
-    this.attachmentNonce,
-    this.thumbnailKey,
-    this.thumbnailNonce,
-  });
-
-  /// message:send의 attachments 한 칸 — 여러 장을 한 말풍선으로 보낼 때(sendUploadedAttachments)와
-  /// 보드 게시글(sendPost)이 같은 모양을 쓴다.
-  Map<String, dynamic> toPayload() => {
-    'kind': isImage ? 'image' : 'file',
-    'fileUrl': url,
-    'fileName': fileName,
-    'fileSize': size,
-    'mimeType': ?mimeType,
-    'thumbnailUrl': ?thumbnailUrl,
-  };
+/// 암호화한 첨부나 썸네일 바이트를 기존 uploadFile(File)에 그대로 태우기 위한 임시 파일.
+///
+/// 이름에 일련번호를 붙이는 이유: Windows는 시계 해상도가 낮아서 연속 호출이 **같은**
+/// microsecondsSinceEpoch를 돌려준다. 시각만으로 이름을 만들면 사진 여러 장을 한 번에
+/// 보낼 때 세 썸네일이 같은 파일을 서로 덮어써서, 올라간 썸네일이 전부 한 장의 이미지가
+/// 되는 문제가 있었다.
+Future<File> _writeTempUploadFile(Uint8List bytes) async {
+  final dir = await getTemporaryDirectory();
+  final name =
+      'upload_${DateTime.now().microsecondsSinceEpoch}_${pid}_${_tempFileSeq++}.bin';
+  return File('${dir.path}/$name').writeAsBytes(bytes);
 }
 
-/// 임시 파일 이름이 겹치지 않게 하는 일련번호([RoomChatController._writeTempFile] 참고).
-int _tempFileSeq = 0;
+/// 평문 첨부 하나를 올린다(비밀 대화 암호화 없이) — [thumbBytes]가 있으면(이미지) 채팅 버블
+/// 미리보기용 축소 썸네일을 먼저 올리고, 그다음 원본을 올린다. [onProgress]/[cancelToken]은 원본
+/// 업로드에만 건다(썸네일은 작고 빨라서).
+Future<UploadedAttachment> _uploadPlainAttachment(
+  ApiClient api,
+  File file, {
+  required bool isImage,
+  Uint8List? thumbBytes,
+  void Function(int sent, int total)? onProgress,
+  UploadCancelToken? cancelToken,
+}) async {
+  String? thumbnailUrl;
+  if (thumbBytes != null) {
+    final tempFile = await _writeTempUploadFile(thumbBytes);
+    thumbnailUrl = (await api.uploadFile(tempFile)).url;
+    unawaited(tempFile.delete().catchError((_) => tempFile));
+  }
+  final result = await api.uploadFile(
+    file,
+    onProgress: onProgress,
+    cancelToken: cancelToken,
+  );
+  return UploadedAttachment(
+    isImage: isImage,
+    url: result.url,
+    fileName: result.fileName,
+    size: result.size,
+    mimeType: result.mimeType,
+    thumbnailUrl: thumbnailUrl,
+  );
+}
+
+/// 방과 무관하게 로컬 파일 하나를 채팅 입력칸과 같은 방식(평문)으로 올린다 — 이미지면(안 주면
+/// 확장자로 판별) 축소 썸네일도 만들어 같이 올린다. 아직 보낼 방이 정해지지 않은 화면(예약
+/// 메시지 편집)이 Session.uploadAttachments로 쓴다. 비밀 대화 첨부는 RoomChatController로 올린다.
+Future<UploadedAttachment> uploadPlainFile(
+  ApiClient api,
+  File file, {
+  bool? isImage,
+  void Function(int sent, int total)? onProgress,
+  UploadCancelToken? cancelToken,
+}) async {
+  final image = isImage ?? looksLikeImagePath(file.path);
+  // 원본을 메모리로 읽는 건 썸네일을 만들 때(이미지)뿐 — 큰 일반 파일은 그대로 스트리밍해서 올린다.
+  final thumbBytes = image
+      ? await generateThumbnail(await file.readAsBytes())
+      : null;
+  return _uploadPlainAttachment(
+    api,
+    file,
+    isImage: image,
+    thumbBytes: thumbBytes,
+    onProgress: onProgress,
+    cancelToken: cancelToken,
+  );
+}
+
+/// 여러 파일을 [uploadPlainFile]로 순서대로 올린다(onProgress/실패 규칙은 uploadLocalFiles와 같다).
+Future<List<UploadedAttachment>> uploadPlainFiles(
+  ApiClient api,
+  List<File> files, {
+  void Function(int index, int sent, int total)? onProgress,
+  UploadCancelToken? cancelToken,
+}) => _uploadInOrder(
+  files,
+  (file, progress) => uploadPlainFile(
+    api,
+    file,
+    onProgress: progress,
+    cancelToken: cancelToken,
+  ),
+  onProgress: onProgress,
+);
+
+/// 파일을 하나씩 순서대로 [uploadOne]으로 올린다. [onProgress]는 지금 올리는 파일의 순번(0부터)과
+/// 그 파일의 진행 바이트를 알려준다. 하나라도 실패하면 그 예외가 그대로 나간다(이미 올라간 앞
+/// 파일들은 서버에 남지만 어디에도 연결되지 않는다).
+Future<List<UploadedAttachment>> _uploadInOrder(
+  List<File> files,
+  Future<UploadedAttachment> Function(
+    File file,
+    void Function(int sent, int total)? onProgress,
+  )
+  uploadOne, {
+  void Function(int index, int sent, int total)? onProgress,
+}) async {
+  final uploaded = <UploadedAttachment>[];
+  for (var i = 0; i < files.length; i++) {
+    uploaded.add(
+      await uploadOne(
+        files[i],
+        onProgress == null ? null : (sent, total) => onProgress(i, sent, total),
+      ),
+    );
+  }
+  return uploaded;
+}
 
 /// 방 하나의 메시지 목록/전송을 담당하는 컨트롤러. 방을 열 때 Session이 생성해서 캐싱한다.
 class RoomChatController extends ChangeNotifier {
@@ -914,44 +987,39 @@ class RoomChatController extends ChangeNotifier {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   }) async {
-    final (thumbnailUrl, thumbnailKey, thumbnailNonce) =
-        await _uploadThumbnailIfImage(thumbBytes);
-
-    if (room.isSecret) {
-      final encrypted = await secret_crypto.encryptAttachment(originalBytes);
-      final tempFile = await _writeTempFile(encrypted.cipherBytes);
-      final result = await _session.api!.uploadFile(
-        tempFile,
+    // 평문 방은 방과 무관한 업로드(예약 메시지 첨부 등)와 같은 코드로 올린다.
+    if (!room.isSecret) {
+      return _uploadPlainAttachment(
+        _session.api!,
+        file,
+        isImage: isImage,
+        thumbBytes: thumbBytes,
         onProgress: onProgress,
         cancelToken: cancelToken,
       );
-      unawaited(tempFile.delete().catchError((_) => tempFile));
-      return UploadedAttachment(
-        isImage: isImage,
-        url: result.url,
-        fileName: 'encrypted',
-        size: encrypted.cipherBytes.length,
-        mimeType: 'application/octet-stream',
-        thumbnailUrl: thumbnailUrl,
-        attachmentKey: encrypted.keyBase64,
-        attachmentNonce: encrypted.nonceBase64,
-        thumbnailKey: thumbnailKey,
-        thumbnailNonce: thumbnailNonce,
-      );
     }
 
+    final (thumbnailUrl, thumbnailKey, thumbnailNonce) =
+        await _uploadEncryptedThumbnail(thumbBytes);
+    final encrypted = await secret_crypto.encryptAttachment(originalBytes);
+    final tempFile = await _writeTempUploadFile(encrypted.cipherBytes);
     final result = await _session.api!.uploadFile(
-      file,
+      tempFile,
       onProgress: onProgress,
       cancelToken: cancelToken,
     );
+    unawaited(tempFile.delete().catchError((_) => tempFile));
     return UploadedAttachment(
       isImage: isImage,
       url: result.url,
-      fileName: result.fileName,
-      size: result.size,
-      mimeType: result.mimeType,
+      fileName: 'encrypted',
+      size: encrypted.cipherBytes.length,
+      mimeType: 'application/octet-stream',
       thumbnailUrl: thumbnailUrl,
+      attachmentKey: encrypted.keyBase64,
+      attachmentNonce: encrypted.nonceBase64,
+      thumbnailKey: thumbnailKey,
+      thumbnailNonce: thumbnailNonce,
     );
   }
 
@@ -988,21 +1056,12 @@ class RoomChatController extends ChangeNotifier {
     List<File> files, {
     void Function(int index, int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
-  }) async {
-    final uploaded = <UploadedAttachment>[];
-    for (var i = 0; i < files.length; i++) {
-      uploaded.add(
-        await uploadLocalFile(
-          files[i],
-          onProgress: onProgress == null
-              ? null
-              : (sent, total) => onProgress(i, sent, total),
-          cancelToken: cancelToken,
-        ),
-      );
-    }
-    return uploaded;
-  }
+  }) => _uploadInOrder(
+    files,
+    (file, progress) =>
+        uploadLocalFile(file, onProgress: progress, cancelToken: cancelToken),
+    onProgress: onProgress,
+  );
 
   /// 이미 업로드가 끝난 첨부(uploadAttachment 결과)로 채팅 메시지를 보낸다. [caption]을 같이
   /// 주면(첨부 후 텍스트도 입력한 경우) 그 메시지 하나에 첨부와 텍스트가 함께 실린다. 비밀
@@ -1082,41 +1141,19 @@ class RoomChatController extends ChangeNotifier {
     );
   }
 
-  /// 이미지 첨부일 때만(=[thumbBytes]가 있을 때만) 채팅 버블 미리보기용 축소 썸네일을
-  /// 올린다. 비밀 대화면 원본과 마찬가지로 자기만의 랜덤 키/nonce로 암호화해서 올리고(원본
-  /// 키를 재사용하지 않음), 평문 방이면 그대로 올린다. 이미지가 아니거나 썸네일 생성에
-  /// 실패했으면([thumbBytes] == null) 전부 null — 버블은 원본(fileUrl)을 그대로 보여주게 된다.
-  Future<(String?, String?, String?)> _uploadThumbnailIfImage(
+  /// 비밀 대화의 이미지 첨부일 때만(=[thumbBytes]가 있을 때만) 채팅 버블 미리보기용 축소
+  /// 썸네일을 원본과 마찬가지로 자기만의 랜덤 키/nonce로 암호화해서 올린다(원본 키를 재사용하지
+  /// 않음). 이미지가 아니거나 썸네일 생성에 실패했으면([thumbBytes] == null) 전부 null — 버블은
+  /// 원본(fileUrl)을 그대로 보여주게 된다. 평문 방 썸네일은 _uploadPlainAttachment가 올린다.
+  Future<(String?, String?, String?)> _uploadEncryptedThumbnail(
     Uint8List? thumbBytes,
   ) async {
     if (thumbBytes == null) return (null, null, null);
-
-    if (room.isSecret) {
-      final encrypted = await secret_crypto.encryptAttachment(thumbBytes);
-      final tempFile = await _writeTempFile(encrypted.cipherBytes);
-      final result = await _session.api!.uploadFile(tempFile);
-      unawaited(tempFile.delete().catchError((_) => tempFile));
-      return (result.url, encrypted.keyBase64, encrypted.nonceBase64);
-    }
-
-    final tempFile = await _writeTempFile(thumbBytes);
+    final encrypted = await secret_crypto.encryptAttachment(thumbBytes);
+    final tempFile = await _writeTempUploadFile(encrypted.cipherBytes);
     final result = await _session.api!.uploadFile(tempFile);
     unawaited(tempFile.delete().catchError((_) => tempFile));
-    return (result.url, null, null);
-  }
-
-  /// 암호화한 첨부 바이트를 기존 uploadFile(File)에 그대로 태우기 위한 임시 파일. 썸네일
-  /// 업로드에도 재사용한다(평문 썸네일도 File 형태로 올려야 uploadFile을 그대로 쓸 수 있어서).
-  ///
-  /// 이름에 일련번호를 붙이는 이유: Windows는 시계 해상도가 낮아서 연속 호출이 **같은**
-  /// microsecondsSinceEpoch를 돌려준다. 시각만으로 이름을 만들면 사진 여러 장을 한 번에
-  /// 보낼 때 세 썸네일이 같은 파일을 서로 덮어써서, 올라간 썸네일이 전부 한 장의 이미지가
-  /// 되는 문제가 있었다.
-  Future<File> _writeTempFile(Uint8List bytes) async {
-    final dir = await getTemporaryDirectory();
-    final name =
-        'upload_${DateTime.now().microsecondsSinceEpoch}_${pid}_${_tempFileSeq++}.bin';
-    return File('${dir.path}/$name').writeAsBytes(bytes);
+    return (result.url, encrypted.keyBase64, encrypted.nonceBase64);
   }
 
   @override

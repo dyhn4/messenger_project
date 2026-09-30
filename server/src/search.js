@@ -1,29 +1,11 @@
 import { Router } from 'express';
 import { searchMessages } from './db/queries/messages.js';
-import { findRoomById, listRoomMemberUsers } from './db/queries/rooms.js';
+import { findRoomById } from './db/queries/rooms.js';
 import { isTeamMember } from './db/queries/teams.js';
+// 결과의 방 이름은 클라이언트 Room.displayName()과 같은 규칙(나와의 대화 포함) — 예약 메시지 목록과 한 벌로 쓴다.
+import { roomDisplayName } from './rooms.js';
 
 export const searchRouter = Router();
-
-/**
- * 클라이언트 Room.displayName()과 동일한 규칙: 이름이 있으면 그대로, DM은 상대방 이름,
- * 이름 없는 그룹은 나를 뺀 나머지 멤버 이름을 이름순으로 나열.
- */
-async function displayNameFor(room, myUserId) {
-  if (room.name) return room.name;
-  const members = await listRoomMemberUsers(room.id);
-  const nameOf = (id) => members.find((u) => u.id === id)?.name;
-  if (room.type === 'dm') {
-    const other = members.find((m) => m.id !== myUserId);
-    return other ? (nameOf(other.id) ?? '(알 수 없음)') : '(알 수 없음)';
-  }
-  const names = members
-    .filter((m) => m.id !== myUserId)
-    .map((m) => m.name)
-    .filter(Boolean)
-    .sort();
-  return names.length > 0 ? names.join(', ') : '(알 수 없음)';
-}
 
 /**
  * 내가 속한 모든 방을 가로지르는 통합 검색. 메시지 텍스트와 파일명, 보드 뷰 게시글 제목을 대상으로 합니다.
@@ -57,7 +39,7 @@ searchRouter.get('/search', async (req, res) => {
   for (const m of rows) {
     if (roomNameById.has(m.roomId)) continue;
     const room = await findRoomById(m.roomId);
-    roomNameById.set(m.roomId, room ? await displayNameFor(room, req.user.sub) : null);
+    roomNameById.set(m.roomId, room ? await roomDisplayName(room, req.user.sub) : null);
   }
 
   res.json(

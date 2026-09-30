@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../models/room.dart';
-import '../services/api_client.dart' show PositionOption;
+import '../services/api_client.dart' show ApiException, PositionOption;
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/floating_dialog.dart';
@@ -34,9 +34,35 @@ Future<void> showInviteMembers(
   }
 }
 
+/// "멤버 선택"을 연다 — 새 그룹채팅 만들기처럼 멤버만 골라 받을 때(초대 요청은 하지 않는다). 멤버
+/// 초대하기와 같은 모양으로, 넓은 화면(PC)은 떠 있는 창, 좁은 화면(모바일)은 전체 화면이다.
+/// [initialSelected]를 미리 고른 채로 열고, "확인"이면 고른 멤버를 고른 순서대로, 취소하면 null을
+/// 돌려준다. 나는 목록에 없다.
+Future<List<AppUser>?> showPickMembers(
+  BuildContext context,
+  Session session, {
+  String title = '멤버 선택',
+  List<String> initialSelected = const [],
+}) {
+  PickMembersScreen screen({required bool asDialog}) => PickMembersScreen(
+    session: session,
+    title: title,
+    initialSelected: initialSelected,
+    asDialog: asDialog,
+  );
+  if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
+    return showDialog<List<AppUser>>(
+      context: context,
+      builder: (_) => screen(asDialog: true),
+    );
+  }
+  return Navigator.of(context).push<List<AppUser>>(
+    MaterialPageRoute(builder: (_) => screen(asDialog: false)),
+  );
+}
+
 /// 토픽·그룹 "멤버 초대하기" — 잔디처럼 위에 검색 조건(멤버 검색·직책), 왼쪽에 팀 멤버, 오른쪽에
-/// 선택된 멤버. 부서·직급은 이 앱에 없어서 뺐다. 넓은 화면(PC)은 두 칸, 좁은 화면(모바일)은
-/// 한 칸 목록 + 아래 선택 칩으로 쌓는다.
+/// 선택된 멤버([MemberPicker]). 이미 방에 있는 사람은 목록에서 뺀다.
 class InviteMembersScreen extends StatefulWidget {
   final Session session;
   final Room room;
@@ -52,13 +78,6 @@ class InviteMembersScreen extends StatefulWidget {
   State<InviteMembersScreen> createState() => _InviteMembersScreenState();
 }
 
-/// 직책 드롭다운의 "전체"와 "직책 없음" — 실제 직책 이름과 겹치지 않는 값.
-const _allPositions = '\u0000all';
-const _noPosition = '\u0000none';
-
-/// 두 칸 배치로 바꾸는 너비.
-const _twoPaneMinWidth = 640.0;
-
 class _InviteMembersScreenState extends State<InviteMembersScreen>
     with CloseWhenRoomRemoved {
   // 초대하는 동안 토픽이 삭제되거나 내보내지면 이 창도 닫는다.
@@ -67,14 +86,216 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
   @override
   String get watchedRoomId => widget.room.id;
 
-  /// 초대할 수 있는 팀 멤버(이미 방에 있는 사람 제외, 이름순).
+  /// 창을 연 순간의 방 멤버 — 목록에서 뺄 사람.
+  late final _memberIds = {for (final m in widget.room.members) m.id};
+  bool _submitting = false;
+
+  Future<void> _submit(List<AppUser> selected) async {
+    if (selected.isEmpty || _submitting) return;
+    setState(() => _submitting = true);
+    try {
+      await widget.session.inviteMembers(widget.room.id, [
+        for (final u in selected) u.id,
+      ]);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) showAppToast(context, '초대하지 못했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MemberPickerFrame(
+      title: '멤버 초대하기',
+      asDialog: widget.asDialog,
+      child: MemberPicker(
+        session: widget.session,
+        excludeIds: _memberIds,
+        emptySelectedText: '초대할 멤버를 선택하세요.',
+        noMembersText: '초대할 수 있는 멤버가 없습니다.',
+        actionsBuilder: (context, selected, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton(
+              onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+              child: const Text('닫기'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: selected.isEmpty || _submitting
+                  ? null
+                  : () => _submit(selected),
+              child: _submitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(
+                      selected.isEmpty ? '초대하기' : '초대하기 (${selected.length})',
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "멤버 선택"([showPickMembers]) — 멤버 초대하기와 같은 모양으로 멤버만 골라 돌려준다. 고른 멤버를
+/// 모두 빼고 "확인"해도 된다(빈 목록을 돌려준다 — 필요한지는 부른 창이 따진다).
+class PickMembersScreen extends StatelessWidget {
+  final Session session;
+  final String title;
+  final List<String> initialSelected;
+  final bool asDialog;
+  const PickMembersScreen({
+    super.key,
+    required this.session,
+    this.title = '멤버 선택',
+    this.initialSelected = const [],
+    this.asDialog = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MemberPickerFrame(
+      title: title,
+      asDialog: asDialog,
+      child: MemberPicker(
+        session: session,
+        excludeIds: {?session.userId},
+        initialSelected: initialSelected,
+        emptySelectedText: '함께할 멤버를 선택하세요.',
+        noMembersText: '선택할 수 있는 멤버가 없습니다.',
+        actionsBuilder: (context, selected, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('취소'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              key: const ValueKey('pick-members-confirm'),
+              onPressed: () => Navigator.of(context).pop(selected),
+              child: Text(selected.isEmpty ? '확인' : '확인 (${selected.length})'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 멤버 고르기 창의 틀 — 넓은 화면은 떠 있는 창(멤버 초대하기 크기), 좁은 화면은 전체 화면.
+/// 멤버 초대하기·멤버 선택·채팅 시작하기가 같이 쓴다.
+class MemberPickerFrame extends StatelessWidget {
+  final String title;
+  final bool asDialog;
+  final Widget child;
+  const MemberPickerFrame({
+    super.key,
+    required this.title,
+    required this.asDialog,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (asDialog) {
+      return FloatingDialog(
+        title: title,
+        maxWidth: 940,
+        maxHeight: 780,
+        child: child,
+      );
+    }
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: SafeArea(
+        child: Padding(padding: const EdgeInsets.all(16), child: child),
+      ),
+    );
+  }
+}
+
+/// 직책 드롭다운의 "전체"와 "직책 없음" — 실제 직책 이름과 겹치지 않는 값.
+const _allPositions = '\u0000all';
+const _noPosition = '\u0000none';
+
+/// 두 칸 배치로 바꾸는 너비.
+const _twoPaneMinWidth = 640.0;
+
+/// 두 칸 배치에 필요한 높이 — 넓어도 이보다 낮으면(가로로 눕힌 휴대폰, 작은 PC 창) 목록 칸이 눌려
+/// 넘치지 않게 스크롤되는 한 칸 배치로 그린다.
+const _twoPaneMinHeight = 440.0;
+
+/// 팀 멤버 고르기 몸통 — 위에 검색 조건(멤버 검색·직책)과 검색 조건 초기화, 왼쪽에 팀 멤버(체크박스),
+/// 오른쪽에 선택된 멤버(✕로 빼기), 아래에 [footer]와 버튼 줄. 부서·직급은 이 앱에 없어서 뺐다. 넓은
+/// 화면(PC)은 두 칸, 좁은 화면(모바일)은 한 칸 목록 + 아래 선택 칩으로 쌓는다. 멤버 초대하기·멤버
+/// 선택·채팅 시작하기가 같이 쓰고, 고른 멤버로 무엇을 할지는 [actionsBuilder]의 버튼이 정한다.
+class MemberPicker extends StatefulWidget {
+  final Session session;
+
+  /// 목록에서 뺄 사람(이미 방에 있는 멤버, 나 등).
+  final Set<String> excludeIds;
+
+  /// 미리 골라 둘 멤버(이 순서대로 "선택된 멤버"에 보인다) — 목록에 없는 사람은 빠진다.
+  final List<String> initialSelected;
+
+  /// 팀 멤버 목록 맨 위의 "모든 멤버 선택하기" 줄.
+  final bool showSelectAll;
+
+  /// 팀 멤버 목록 맨 위에 늘 고정해 둘 줄(채팅 시작하기의 "나와의 대화") — 검색 조건과 상관없이 보인다.
+  final Widget? pinnedRow;
+
+  /// false면 멤버를 고를 수 없다(준회원의 채팅 시작하기 — 목록은 보이지만 흐리게).
+  final bool enabled;
+
+  /// 오른쪽 "선택된 멤버"가 비었을 때의 안내.
+  final String emptySelectedText;
+
+  /// 고를 수 있는 팀 멤버가 한 명도 없을 때의 안내.
+  final String noMembersText;
+
+  /// 버튼 줄 옆(넓을 때) 또는 위(좁을 때)의 안내·오류 한 줄.
+  final Widget? footer;
+
+  /// 아래 버튼 줄 — 고른 멤버(고른 순서)와 폭이 넓은지를 받아 만든다. 넓을 때는 [footer] 옆에
+  /// 놓이므로 Expanded 없이 제 크기만 차지해야 한다.
+  final Widget Function(BuildContext context, List<AppUser> selected, bool wide)
+  actionsBuilder;
+
+  const MemberPicker({
+    super.key,
+    required this.session,
+    this.excludeIds = const {},
+    this.initialSelected = const [],
+    this.showSelectAll = true,
+    this.pinnedRow,
+    this.enabled = true,
+    required this.emptySelectedText,
+    required this.noMembersText,
+    this.footer,
+    required this.actionsBuilder,
+  });
+
+  @override
+  State<MemberPicker> createState() => _MemberPickerState();
+}
+
+class _MemberPickerState extends State<MemberPicker> {
+  /// 고를 수 있는 팀 멤버(목록에서 뺄 사람 제외, 이름순).
   List<AppUser>? _users;
   List<PositionOption> _positionOptions = const [];
   String? _error;
 
   /// 고른 순서를 지켜서 오른쪽 "선택된 멤버"에 그 순서대로 보여준다.
-  final _selected = <String>{};
-  bool _submitting = false;
+  late final _selected = <String>{...widget.initialSelected};
 
   final _search = TextEditingController();
   String _position = _allPositions;
@@ -94,9 +315,8 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
   Future<void> _load() async {
     try {
       final users = await widget.session.fetchTeamMembers();
-      final memberIds = widget.room.members.map((m) => m.id).toSet();
       users
-        ..removeWhere((u) => memberIds.contains(u.id))
+        ..removeWhere((u) => widget.excludeIds.contains(u.id))
         ..sort((a, b) => a.name.compareTo(b.name));
       // 직책 목록은 드롭다운 순서를 맞추는 데만 쓴다 — 못 받아와도 멤버에게 붙은 직책으로 채운다.
       List<PositionOption> options = const [];
@@ -104,14 +324,26 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
         options = await widget.session.fetchPublicPositionOptions();
       } catch (_) {}
       if (!mounted) return;
+      final ids = {for (final u in users) u.id};
       setState(() {
         _users = users;
         _positionOptions = options;
+        // 미리 고른 사람이 그사이 팀을 떠났으면 뺀다 — 버튼의 인원 수가 어긋나지 않게.
+        _selected.removeWhere((id) => !ids.contains(id));
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(
+        () => _error = e is ApiException
+            ? e.message
+            : '팀 멤버를 불러오지 못했습니다. 잠시 후 다시 시도하세요.',
+      );
     }
+  }
+
+  void _retry() {
+    setState(() => _error = null);
+    _load();
   }
 
   static String? _positionOf(AppUser u) {
@@ -180,46 +412,65 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
     }
   });
 
-  Future<void> _submit() async {
-    if (_selected.isEmpty || _submitting) return;
-    setState(() => _submitting = true);
-    try {
-      await widget.session.inviteMembers(widget.room.id, _selected.toList());
-      if (!mounted) return;
-      Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) showAppToast(context, '초대하지 못했습니다: $e');
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
+  List<AppUser> get _selectedUsers {
+    final byId = {for (final u in _users ?? const <AppUser>[]) u.id: u};
+    return [
+      for (final id in _selected)
+        if (byId[id] != null) byId[id]!,
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
-    final body = _error != null
-        ? Center(child: Text(_error!))
-        : _users == null
-        ? const Center(child: CircularProgressIndicator())
-        : LayoutBuilder(
-            builder: (context, constraints) =>
-                constraints.maxWidth >= _twoPaneMinWidth
-                ? _buildWide(context)
-                : _buildNarrow(context),
-          );
+    if (_users == null) return _buildPending(context);
+    return LayoutBuilder(
+      builder: (context, constraints) =>
+          constraints.maxWidth >= _twoPaneMinWidth &&
+              constraints.maxHeight >= _twoPaneMinHeight
+          ? _buildWide(context)
+          : _buildNarrow(context),
+    );
+  }
 
-    if (widget.asDialog) {
-      return FloatingDialog(
-        title: '멤버 초대하기',
-        maxWidth: 940,
-        maxHeight: 780,
-        child: body,
-      );
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('멤버 초대하기')),
-      body: SafeArea(
-        child: Padding(padding: const EdgeInsets.all(16), child: body),
-      ),
+  /// 팀 멤버를 받는 중이거나 못 받았을 때. 맨 위 고정 줄(채팅 시작하기의 나와의 대화)은 멤버 목록과
+  /// 상관없이 바로 열 수 있어야 해서 그대로 두고, 그 아래에 불러오는 중·실패 안내(다시 시도)를 둔다.
+  Widget _buildPending(BuildContext context) {
+    final error = _error;
+    final status = error == null
+        ? const Center(child: CircularProgressIndicator())
+        : Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(error, textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    key: const ValueKey('member-picker-retry'),
+                    onPressed: _retry,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('다시 시도'),
+                  ),
+                ],
+              ),
+            ),
+          );
+    final pinned = widget.pinnedRow;
+    if (pinned == null) return status;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: pinned,
+        ),
+        Expanded(child: status),
+      ],
     );
   }
 
@@ -243,20 +494,23 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
           ),
         ),
         const SizedBox(height: 16),
-        _buildActions(),
+        _buildBottom(context, wide: true),
       ],
     );
   }
 
   /// 한 칸 배치에서 목록이 한 줄이라도 보이려면 필요한 세로 자리 — 이보다 좁으면(휴대폰에서
   /// 검색하느라 키보드가 올라온 경우 등) 이 높이로 그리고 화면 전체를 스크롤한다. 예전엔 목록 칸이
-  /// 0으로 눌려 사라지고 아래가 넘쳤다. 선택 칩이 보이면 그 몫이 더 든다. 터치 기기(48px 터치
-  /// 영역)와 PC(촘촘한 밀도)는 줄 높이가 달라서 따로 둔다 — 작은 PC 창의 대화상자에서 괜히
-  /// 스크롤이 생겨 버튼이 가려지지 않게.
-  static double _narrowMinHeight(BuildContext context, {required bool chips}) {
+  /// 0으로 눌려 사라지고 아래가 넘쳤다. 선택 칩·고정 줄·안내 줄이 보이면 그 몫이 더 든다. 터치
+  /// 기기(48px 터치 영역)와 PC(촘촘한 밀도)는 줄 높이가 달라서 따로 둔다 — 작은 PC 창의
+  /// 대화상자에서 괜히 스크롤이 생겨 버튼이 가려지지 않게.
+  double _narrowMinHeight(BuildContext context, {required bool chips}) {
     final touch =
         Theme.of(context).materialTapTargetSize == MaterialTapTargetSize.padded;
-    return (touch ? 330.0 : 290.0) + (chips ? (touch ? 140.0 : 120.0) : 0);
+    return (touch ? 330.0 : 290.0) +
+        (chips ? (touch ? 140.0 : 120.0) : 0) +
+        (widget.pinnedRow != null ? 56 : 0) +
+        (widget.footer != null ? 44 : 0);
   }
 
   Widget _buildNarrow(BuildContext context) {
@@ -304,7 +558,9 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
                                 radius: 12,
                               ),
                               label: Text(u.name),
-                              onDeleted: () => _toggle(u),
+                              onDeleted: widget.enabled
+                                  ? () => _toggle(u)
+                                  : null,
                             ),
                         ],
                       ),
@@ -312,7 +568,11 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
                   ),
                 ],
                 const SizedBox(height: 12),
-                _buildActions(),
+                // 넓은데 낮아서 한 칸으로 그릴 때(가로 휴대폰 등)는 버튼 줄은 넓은 모양 그대로 둔다.
+                _buildBottom(
+                  context,
+                  wide: constraints.maxWidth >= _twoPaneMinWidth,
+                ),
               ],
             ),
           ),
@@ -321,12 +581,31 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
     );
   }
 
-  List<AppUser> get _selectedUsers {
-    final byId = {for (final u in _users ?? const <AppUser>[]) u.id: u};
-    return [
-      for (final id in _selected)
-        if (byId[id] != null) byId[id]!,
-    ];
+  /// 아래 안내 줄과 버튼 줄 — 폭이 넓으면 안내를 버튼 왼쪽에, 좁으면 버튼 위에 둔다.
+  Widget _buildBottom(BuildContext context, {required bool wide}) {
+    final actions = widget.actionsBuilder(context, _selectedUsers, wide);
+    final footer = widget.footer;
+    if (footer == null) {
+      return Align(alignment: AlignmentDirectional.centerEnd, child: actions);
+    }
+    if (wide) {
+      return Row(
+        children: [
+          Expanded(child: footer),
+          const SizedBox(width: 16),
+          actions,
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        footer,
+        const SizedBox(height: 10),
+        Align(alignment: AlignmentDirectional.centerEnd, child: actions),
+      ],
+    );
   }
 
   /// 상단 검색 조건 상자 — 멤버 검색 칸과 직책 드롭다운.
@@ -483,7 +762,7 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
     );
   }
 
-  /// 왼쪽 "팀 멤버" — 맨 위 "모든 멤버 선택하기", 그 아래 프로필 사진·이름·직책 목록.
+  /// 왼쪽 "팀 멤버" — 맨 위 고정 줄·"모든 멤버 선택하기", 그 아래 프로필 사진·이름·직책 목록.
   /// [labelTrailing]은 "팀 멤버 N" 줄 오른쪽에 붙일 것(휴대폰의 검색 조건 초기화).
   Widget _buildMembersPane(
     BuildContext context,
@@ -491,6 +770,7 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
     Widget? labelTrailing,
   }) {
     final theme = Theme.of(context);
+    final canPick = widget.enabled && visible.isNotEmpty;
     final picked = visible.where((u) => _selected.contains(u.id)).length;
     final bool? allValue = picked == 0
         ? false
@@ -509,43 +789,49 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Material(
-                  type: MaterialType.transparency,
-                  child: InkWell(
-                    key: const ValueKey('invite-select-all'),
-                    onTap: visible.isEmpty ? null : () => _toggleAll(visible),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      child: Row(
-                        children: [
-                          Checkbox(
-                            tristate: true,
-                            value: visible.isEmpty ? false : allValue,
-                            onChanged: visible.isEmpty
-                                ? null
-                                : (_) => _toggleAll(visible),
-                          ),
-                          const Text(
-                            '모든 멤버 선택하기',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
+                if (widget.pinnedRow case final pinned?) ...[
+                  pinned,
+                  const Divider(height: 1),
+                ],
+                if (widget.showSelectAll) ...[
+                  Material(
+                    type: MaterialType.transparency,
+                    child: InkWell(
+                      key: const ValueKey('invite-select-all'),
+                      onTap: canPick ? () => _toggleAll(visible) : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              tristate: true,
+                              value: visible.isEmpty ? false : allValue,
+                              onChanged: canPick
+                                  ? (_) => _toggleAll(visible)
+                                  : null,
                             ),
-                          ),
-                        ],
+                            const Text(
+                              '모든 멤버 선택하기',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const Divider(height: 1),
+                  const Divider(height: 1),
+                ],
                 Expanded(
                   child: visible.isEmpty
                       ? _EmptyText(
                           _users!.isEmpty
-                              ? '초대할 수 있는 멤버가 없습니다.'
+                              ? widget.noMembersText
                               : '조회 가능한 멤버가 없습니다.',
                         )
                       : ListView.builder(
@@ -556,9 +842,10 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
                               key: ValueKey('invite-member-${u.id}'),
                               user: u,
                               position: _positionOf(u),
+                              picking: true,
                               selected: _selected.contains(u.id),
                               resolveUrl: widget.session.resolveUrl,
-                              onTap: () => _toggle(u),
+                              onTap: widget.enabled ? () => _toggle(u) : null,
                             );
                           },
                         ),
@@ -587,7 +874,7 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
             ),
             clipBehavior: Clip.antiAlias,
             child: selectedUsers.isEmpty
-                ? const _EmptyText('초대할 멤버를 선택하세요.')
+                ? _EmptyText(widget.emptySelectedText)
                 : ListView(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     children: [
@@ -597,7 +884,7 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
                           user: u,
                           position: _positionOf(u),
                           resolveUrl: widget.session.resolveUrl,
-                          onRemove: () => _toggle(u),
+                          onRemove: widget.enabled ? () => _toggle(u) : null,
                         ),
                     ],
                   ),
@@ -606,34 +893,15 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
       ],
     );
   }
-
-  Widget _buildActions() => Row(
-    mainAxisAlignment: MainAxisAlignment.end,
-    children: [
-      TextButton(
-        onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-        child: const Text('닫기'),
-      ),
-      const SizedBox(width: 8),
-      FilledButton(
-        onPressed: _selected.isEmpty || _submitting ? null : _submit,
-        child: _submitting
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Text(_selected.isEmpty ? '초대하기' : '초대하기 (${_selected.length})'),
-      ),
-    ],
-  );
 }
 
-/// 멤버 한 줄 — 왼쪽 목록에서는 체크박스로 고르고, 오른쪽 목록에서는 ✕로 뺀다.
+/// 멤버 한 줄 — 왼쪽 목록([picking])에서는 체크박스로 고르고, 오른쪽 목록에서는 ✕로 뺀다.
+/// 고르는 줄인데 [onTap]이 없으면 고를 수 없는 줄이라 흐리게 그린다.
 class _MemberRow extends StatelessWidget {
   final AppUser user;
   final String? position;
   final String Function(String relative)? resolveUrl;
+  final bool picking;
   final bool selected;
   final VoidCallback? onTap;
   final VoidCallback? onRemove;
@@ -643,6 +911,7 @@ class _MemberRow extends StatelessWidget {
     required this.user,
     required this.position,
     required this.resolveUrl,
+    this.picking = false,
     this.selected = false,
     this.onTap,
     this.onRemove,
@@ -651,7 +920,7 @@ class _MemberRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final picking = onTap != null;
+    final onTap = this.onTap;
     return Material(
       type: MaterialType.transparency,
       child: InkWell(
@@ -661,51 +930,57 @@ class _MemberRow extends StatelessWidget {
               ? theme.colorScheme.primaryContainer.withValues(alpha: 0.35)
               : null,
           padding: EdgeInsets.fromLTRB(picking ? 6 : 12, 6, 6, 6),
-          child: Row(
-            children: [
-              if (picking)
-                Checkbox(value: selected, onChanged: (_) => onTap!()),
-              UserAvatar(user: user, resolveUrl: resolveUrl, radius: 16),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        user.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    if (position != null) ...[
-                      const SizedBox(width: 8),
+          child: Opacity(
+            opacity: picking && onTap == null ? 0.55 : 1,
+            child: Row(
+              children: [
+                if (picking)
+                  Checkbox(
+                    value: selected,
+                    onChanged: onTap == null ? null : (_) => onTap(),
+                  ),
+                UserAvatar(user: user, resolveUrl: resolveUrl, radius: 16),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Row(
+                    children: [
                       Flexible(
                         child: Text(
-                          position!,
+                          user.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.hintColor,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),
+                      if (position != null) ...[
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            position!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.hintColor,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-              if (onRemove != null)
-                IconButton(
-                  tooltip: '선택 해제',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.close, size: 18),
-                  onPressed: onRemove,
-                ),
-            ],
+                if (onRemove != null)
+                  IconButton(
+                    tooltip: '선택 해제',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: onRemove,
+                  ),
+              ],
+            ),
           ),
         ),
       ),

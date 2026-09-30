@@ -3,9 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../screens/inquiry_inbox_screen.dart';
+import '../screens/scheduled_messages_screen.dart';
 import '../services/session.dart';
 
-/// 상단 툴바의 "메뉴"(격자 아이콘) 팝업 — "파일", "링크", "문의함"을 모아둔다.
+/// 상단 툴바의 "메뉴"(격자 아이콘) 팝업 — "파일", "링크", "메시지 예약", "문의함"을 모아둔다.
 /// desktop_home_screen.dart의 _TopBar와 room_list_screen.dart(안드로이드) AppBar가 같이 쓴다.
 /// [onOpenFiles]는 플랫폼마다 다르다 — PC는 우측 패널을 토글하고, 안드로이드는 전체화면으로
 /// 새로 연다. [onOpenLinks]("링크" — 주고받은 링크 모아보기)도 같다.
@@ -41,12 +42,41 @@ class AppMenuButton extends StatelessWidget {
           ),
         ),
         PopupMenuItem(
+          onTap: () => showScheduledMessages(context, session),
+          child: const Row(
+            children: [_ScheduleTypeIcon(), SizedBox(width: 8), Text('메시지 예약')],
+          ),
+        ),
+        PopupMenuItem(
           onTap: () => showInquiryInboxScreen(context, session),
           child: const Row(
             children: [_InquiryTypeIcon(), SizedBox(width: 8), Text('문의함')],
           ),
         ),
       ],
+    );
+  }
+}
+
+/// "메시지 예약" 항목 앞에 붙는 색깔 있는 아이콘 — 연보라 둥근 배경 위에 진한 보라색 예약 발송 아이콘.
+class _ScheduleTypeIcon extends StatelessWidget {
+  const _ScheduleTypeIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: const Color(0xFFEDE3FF),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      alignment: Alignment.center,
+      child: const Icon(
+        Icons.schedule_send_rounded,
+        size: 16,
+        color: Color(0xFF7048E8),
+      ),
     );
   }
 }

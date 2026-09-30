@@ -6,6 +6,7 @@ import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
 import { findTeamMember, listTeamIdsForUser, listTeamsForUser } from './db/queries/teams.js';
 import { clearTopicAdminRoles } from './db/queries/rooms.js';
+import { deleteScheduledMessagesForUser } from './db/queries/scheduledMessages.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
 import { isOnline } from './presence.js';
 import { accountRole, canCreateProject, canCreateTeamInviteLink } from './permissions.js';
@@ -309,6 +310,8 @@ export function createUsersRouter(io) {
     await renameSenderMessages(user.id, DELETED_USER_NAME);
     // 탈퇴한 사람은 토픽을 관리할 수 없다 — 토픽 관리자 역할은 거둔다(아래 방 정보 재전송에 같이 반영).
     await clearTopicAdminRoles(user.id);
+    // 예약 메시지는 탈퇴한 계정으로는 영영 못 보낸다(scheduledMessages.js) — 발송 실패로 쌓아 두지 말고 지운다.
+    await deleteScheduledMessagesForUser(user.id);
 
     io.in(`user:${user.id}`).disconnectSockets(true);
     await broadcastMemberUpdate(io, user.id);

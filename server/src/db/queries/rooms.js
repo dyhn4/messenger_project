@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { dmHistoryFloors, roomMembers, rooms, teamMembers, topicFolderItems, topicFolders, users } from '../schema.js';
@@ -109,6 +110,29 @@ export async function listTopicSummaries(roomIds) {
 export async function insertRoom(fields) {
   const [row] = await db.insert(rooms).values(fields).returning();
   return row;
+}
+
+/**
+ * 나와의 대화 — 그 팀에서 이 사람의 것을 찾고, 없으면 만든다. 여러 요청이 동시에 불러도 (team_id, dm_key)
+ * 유일 인덱스에 ON CONFLICT로 기대서 하나만 생긴다. 멤버 행도 없으면 넣는다(이미 있으면 그대로).
+ * 이번에 새로 만들었으면 created가 true — 호출부가 그 사람의 소켓을 새 방에 넣는다.
+ */
+export async function ensureSelfRoom(userId, teamId) {
+  const dmKey = `${userId}:${userId}`;
+  let room = await findDmRoomByKey(teamId, dmKey);
+  let inserted = null;
+  if (!room) {
+    [inserted] = await db
+      .insert(rooms)
+      .values({ id: randomUUID(), teamId, type: 'dm', name: null, dmKey, createdBy: userId, isSelf: true })
+      .onConflictDoNothing({ target: [rooms.teamId, rooms.dmKey] })
+      .returning();
+    room = inserted ?? (await findDmRoomByKey(teamId, dmKey));
+  }
+  // 같은 키를 쓰는 옛 DM이 있었다면(자기 자신과의 DM) 그게 곧 나와의 대화다 — 표시만 맞춘다.
+  if (room && !room.isSelf) room = await updateRoom(room.id, { isSelf: true });
+  await addRoomMembers(room.id, [userId]);
+  return { room, created: !!inserted };
 }
 
 /** 토픽 정보·설정 변경/보관(rooms.js) — 넘긴 필드만 바꾸고 바뀐 행을 돌려준다. */

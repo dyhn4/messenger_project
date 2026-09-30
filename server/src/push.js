@@ -106,6 +106,8 @@ export const SECRET_PREVIEW_PLACEHOLDER = '새 메시지가 있습니다';
 
 /** session.dart의 _handleIncomingMessage와 같은 규칙(알림 제목의 [태그] 부분). */
 export function roomTagFor(room) {
+  // 나와의 대화는 1:1이 아니라 내 메모 공간이다 — 탱고톡 환영 안내·팀원 참여/제외 알림이 여기로 온다.
+  if (room.isSelf) return '나와의 대화';
   if (room.type === 'dm') return '1:1';
   if (room.type === 'group') return room.name ?? '그룹채팅';
   if (room.type === 'topic') return room.name ?? null;

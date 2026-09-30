@@ -69,6 +69,27 @@ export function toStoredUploadUrl(url) {
   return raw && /^\/uploads\/[^/\\]+$/.test(raw) ? raw : null;
 }
 
+/**
+ * 이미 저장해 둔 파일을 다시 알아볼 때만 쓴다(예약 메시지 수정의 기존 첨부, 그룹 아이콘 그대로 저장) — 서명만
+ * 맞으면 만료됐어도 원본 경로를 돌려준다. 화면이 몇 시간 들고 있던 DTO의 링크를 그대로 돌려보내도 같은 파일로
+ * 알아보려는 것이라, 호출부는 결과를 반드시 "원래 저장돼 있던 경로"와 비교해서만 쓴다(새 파일은 toStoredUploadUrl).
+ */
+export function knownUploadPath(url) {
+  if (typeof url !== 'string') return null;
+  const match = /^\/files\/(.+)$/.exec(url);
+  let raw = url;
+  if (match) {
+    try {
+      const payload = jwt.verify(match[1], JWT_SECRET, { ignoreExpiration: true });
+      if (payload.type !== 'file' || typeof payload.file !== 'string') return null;
+      raw = `/uploads/${payload.file}`;
+    } catch {
+      return null;
+    }
+  }
+  return /^\/uploads\/[^/\\]+$/.test(raw) ? raw : null;
+}
+
 /** /files/:token 라우트에서 쓴다. 서명이 유효하고 만료 전이면 실제 파일 경로(+원본 파일명)를 돌려준다. */
 export function resolveSignedFile(token) {
   const payload = jwt.verify(token, JWT_SECRET); // 서명/만료 실패 시 throw

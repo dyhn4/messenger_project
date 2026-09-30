@@ -1,44 +1,17 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
+import '../models/room.dart';
+import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
-import '../widgets/avatar_utils.dart';
-import '../widgets/floating_dialog.dart';
-import '../widgets/icon_edit_dialog.dart';
-import '../widgets/user_avatar.dart';
-import 'chat_screen.dart';
+import '../widgets/room_avatar.dart' show SelfRoomAvatar;
+import 'invite_members_screen.dart';
 
-/// 그룹 아이콘 선택지 — team_settings_dialog.dart의 팀 이모지(🏢💼🚀💡🛠️📊🎨🧪📣🤝🌱⭐,
-/// 업무 느낌)와 안 겹치게 사람/취향 느낌으로 골랐다. 팀은 사각(둥근모서리) 아이콘이라, 원형인
-/// 그룹 아바타(room_avatar.dart)와도 모양으로 구분된다.
-const _groupEmojis = [
-  '👥',
-  '💬',
-  '🎉',
-  '🍀',
-  '🎈',
-  '🌟',
-  '☕',
-  '🎵',
-  '🏖️',
-  '🎮',
-  '📷',
-  '🐾',
-];
-
-const _groupColors = [
-  Color(0xFF9575CD),
-  Color(0xFF4C6EF5),
-  Color(0xFF15AABF),
-  Color(0xFF37B24D),
-  Color(0xFFFAB005),
-  Color(0xFFFF6B35),
-  Color(0xFFE64980),
-  Color(0xFF8D6E63),
-];
-
+/// "채팅 시작하기" — 멤버 초대하기와 같은 모양(멤버 검색·직책·검색 조건 초기화, 왼쪽 팀 멤버, 오른쪽
+/// 선택된 멤버)에서 대화할 사람을 고른다. 1명이면 1:1 채팅, 2명 이상이면 그룹채팅(이름·아이콘은
+/// 기본값)을 만들고, 1명일 때는 비밀 대화도 시작할 수 있다. 목록 맨 위의 "나와의 대화"는 고르지
+/// 않고 누르면 바로 연다. 만들거나 연 방을 돌려주며 닫힌다 — 여는 건 부른 쪽(start_chat_dialog.dart)이
+/// 한다. 준회원은 대화를 시작할 수 없어서(서버도 막는다) 나와의 대화만 열 수 있다.
 class NewChatScreen extends StatefulWidget {
   final Session session;
   final bool asDialog;
@@ -52,627 +25,287 @@ class NewChatScreen extends StatefulWidget {
   State<NewChatScreen> createState() => _NewChatScreenState();
 }
 
+/// 지금 보내고 있는 요청 — 그동안은 다른 버튼과 닫기를 막는다.
+enum _Busy { self, chat, secret }
+
 class _NewChatScreenState extends State<NewChatScreen> {
-  List<AppUser>? _users;
+  _Busy? _busy;
   String? _error;
-  final _selected = <String>{};
-  final _groupName = TextEditingController();
-  late final _groupNameFocus = FocusNode()..addListener(() => setState(() {}));
-  bool _submitting = false;
-  bool _submittingSecret = false;
 
-  // 그룹 아이콘 — 이모지를 안 고르면(null) 그룹 이름 앞 2글자 이니셜이고, 이름까지 비어 있으면
-  // 예전처럼 멤버 사진 두 개를 겹쳐 보여준다('members'). 배경색은 창을 열 때 무작위로 정해두고
-  // 이니셜·이모지 모두에 쓴다.
-  String? _iconEmoji;
-  Color _iconColor = _groupColors[Random().nextInt(_groupColors.length)];
+  Session get _session => widget.session;
 
-  /// 올린 사진(업로드 응답의 서명된 링크) — 있으면 이모지·이니셜보다 우선한다.
-  String? _iconUrl;
-
-  String get _iconType => _iconUrl != null
-      ? 'photo'
-      : _iconEmoji != null
-      ? 'emoji'
-      : _groupName.text.trim().isEmpty
-      ? 'members'
-      : 'initial';
-
-  IconChoice get _iconChoice =>
-      IconChoice(emoji: _iconEmoji, color: _iconColor, photoUrl: _iconUrl);
-
-  Widget _groupIcon(IconChoice icon, double radius) => _GroupIcon(
-    name: _groupName.text.trim(),
-    emoji: icon.emoji,
-    color: icon.color ?? _iconColor,
-    photoUrl: icon.photoUrl,
-    resolveUrl: widget.session.resolveUrl,
-    radius: radius,
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final users = await widget.session.fetchTeamMembers();
-      users.removeWhere((u) => u.id == widget.session.userId);
-      if (!mounted) return;
-      setState(() => _users = users);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
-    }
-  }
-
-  @override
-  void dispose() {
-    _groupName.dispose();
-    _groupNameFocus.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_selected.isEmpty) return;
-    setState(() => _submitting = true);
-    try {
-      final groupName = _groupName.text.trim();
-      final room = _selected.length == 1
-          ? await widget.session.startDm(_selected.first)
-          : await widget.session.createGroup(
-              name: groupName.isEmpty ? null : groupName,
-              memberIds: _selected.toList(),
-              iconType: _iconType,
-              iconEmoji: _iconEmoji,
-              iconColor: _iconType == 'members' ? null : colorToHex(_iconColor),
-              iconUrl: _iconUrl,
-            );
-      if (!mounted) return;
-      if (widget.asDialog) {
-        Navigator.of(context).pop(room);
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => ChatScreen(session: widget.session, room: room),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('생성 실패: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
-  /// "프로필 사진 편집"과 같은 편집 팝업(초기화/아이콘 선택하기/사진 올리기)을 띄운다 — 이
-  /// 팝업을 열지 않고 그냥 만들면 이름 앞 2글자 이니셜(이름이 없으면 멤버 사진)이 된다.
-  /// "아이콘 선택하기"는 그룹 고유의 이모지 목록(_GroupIconPickerDialog)을 연다.
-  Future<void> _editGroupIcon() async {
-    final result = await showIconEditDialog(
-      context,
-      title: '그룹 아이콘 편집',
-      session: widget.session,
-      initial: _iconChoice,
-      preview: (icon, size) => _groupIcon(icon, size / 2),
-      pickIcon: (current) async {
-        final picked = await showDialog<(String?, Color)>(
-          context: context,
-          builder: (_) => _GroupIconPickerDialog(
-            previewName: _groupName.text.trim(),
-            initialEmoji: current.emoji,
-            initialColor: current.color ?? _iconColor,
-          ),
-        );
-        if (picked == null) return null;
-        final (emoji, color) = picked;
-        return IconChoice(emoji: emoji, color: color);
-      },
-    );
-    if (result == null || !mounted) return;
+  /// 방을 만들거나 받아 오는 요청을 보내고, 되면 그 방을 돌려주며 닫는다. 실패하면 버튼 줄 옆에
+  /// 이유를 보여준다(서버가 준 안내는 그대로).
+  Future<void> _run(
+    _Busy kind,
+    Future<Room> Function() request,
+    String failure,
+  ) async {
+    if (_busy != null) return;
     setState(() {
-      _iconEmoji = result.emoji;
-      _iconColor = result.color ?? _iconColor;
-      _iconUrl = result.photoUrl;
+      _busy = kind;
+      _error = null;
     });
-  }
-
-  /// 상대 1명만 선택했을 때만 가능(비밀 대화는 1:1 전용) — member_profile_dialog.dart의
-  /// _startSecretChat과 동일하게 별도 dmKey의 방을 새로 만들거나 기존 진행중인 방으로 이동한다.
-  Future<void> _submitSecret() async {
-    if (_selected.length != 1) return;
-    setState(() => _submittingSecret = true);
     try {
-      final room = await widget.session.startSecretChat(_selected.first);
+      final room = await request();
       if (!mounted) return;
-      if (widget.asDialog) {
-        Navigator.of(context).pop(room);
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => ChatScreen(session: widget.session, room: room),
-          ),
-        );
-      }
+      // 닫히는 동안에도 버튼은 잠가 둔다(새로운 토픽 생성하기와 같다).
+      Navigator.of(context).pop(room);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('비밀 대화 시작 실패: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _submittingSecret = false);
+      if (!mounted) return;
+      setState(() {
+        _busy = null;
+        _error = e is ApiException ? e.message : failure;
+      });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final body = _error != null
-        ? Center(child: Text(_error!))
-        : _users == null
-        ? const Center(child: CircularProgressIndicator())
-        : Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  children: [
-                    for (final user in _users!)
-                      ListTile(
-                        leading: UserAvatar(
-                          user: user,
-                          resolveUrl: widget.session.resolveUrl,
-                        ),
-                        title: Text(user.name),
-                        selected: _selected.contains(user.id),
-                        selectedTileColor: Theme.of(
-                          context,
-                        ).colorScheme.primaryContainer.withValues(alpha: 0.4),
-                        onTap: () => setState(() {
-                          if (_selected.contains(user.id)) {
-                            _selected.remove(user.id);
-                          } else {
-                            _selected.add(user.id);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
-              ),
-              if (_selected.isNotEmpty) ...[
-                const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                    '선택된 멤버 ${_selected.length}',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final id in _selected)
-                        Chip(
-                          avatar: UserAvatar(
-                            user: _users!.firstWhere((u) => u.id == id),
-                            resolveUrl: widget.session.resolveUrl,
-                          ),
-                          label: Text(
-                            _users!.firstWhere((u) => u.id == id).name,
-                          ),
-                          onDeleted: () => setState(() => _selected.remove(id)),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-              if (_selected.length > 1) ...[
-                // 팀 설정의 "팀 아이콘"/"팀 이름"과 같은 배치 — 제목 한 줄 아래에 아이콘과
-                // 이름 입력칸을 나란히 두고, 입력칸은 아이콘 높이의 가운데에 맞춘다.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 64,
-                            child: Text(
-                              '그룹 아이콘',
-                              style: Theme.of(context).textTheme.labelMedium,
-                            ),
-                          ),
-                          const SizedBox(width: 20),
-                          Expanded(
-                            child: Text(
-                              '그룹 이름',
-                              style: Theme.of(context).textTheme.labelMedium,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          // 아이콘의 사진기 배지를 누르면 편집 팝업이 뜬다(내 프로필 카드의
-                          // 아바타 클릭-편집과 같은 방식).
-                          SizedBox(
-                            width: 64,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: CameraBadge(
-                                onTap: _editGroupIcon,
-                                child: _groupIcon(_iconChoice, 28),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 20),
-                          Expanded(
-                            child: TextField(
-                              controller: _groupName,
-                              focusNode: _groupNameFocus,
-                              decoration: InputDecoration(
-                                // 입력칸을 누르면(포커스) 안내 문구를 숨긴다.
-                                hintText: _groupNameFocus.hasFocus
-                                    ? null
-                                    : '멤버 이름으로 표시',
-                                border: const OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              // 왼쪽 아이콘 미리보기의 이니셜을 입력하는 대로 갱신한다.
-                              onChanged: (_) => setState(() {}),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                        ),
-                        onPressed: _submitting || _submittingSecret
-                            ? null
-                            : () => Navigator.of(context).pop(),
-                        child: const Text('취소', maxLines: 1),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: FilledButton.icon(
-                        // 활성화됐을 때만 초록으로 강조하고, 비활성화 상태의 배경/글자색은
-                        // 직접 지정하지 않고 비워둬서 '대화 시작하기'(평범한 FilledButton)의
-                        // 비활성화 스타일(테마 기본값)을 그대로 물려받게 한다.
-                        style:
-                            FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                            ).copyWith(
-                              backgroundColor:
-                                  WidgetStateProperty.resolveWith<Color?>(
-                                    (states) =>
-                                        states.contains(WidgetState.disabled)
-                                        ? null
-                                        : Colors.green,
-                                  ),
-                              foregroundColor:
-                                  WidgetStateProperty.resolveWith<Color?>(
-                                    (states) =>
-                                        states.contains(WidgetState.disabled)
-                                        ? null
-                                        : Colors.white,
-                                  ),
-                            ),
-                        onPressed:
-                            _selected.length != 1 ||
-                                _submitting ||
-                                _submittingSecret
-                            ? null
-                            : _submitSecret,
-                        icon: _submittingSecret
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.lock_outline, size: 18),
-                        label: const Text(
-                          '비밀 대화 시작',
-                          maxLines: 1,
-                          overflow: TextOverflow.visible,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                        ),
-                        onPressed:
-                            _selected.isEmpty ||
-                                _submitting ||
-                                _submittingSecret
-                            ? null
-                            : _submit,
-                        child: _submitting
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('대화 시작하기', maxLines: 1),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
+  void _openSelf() => _run(
+    _Busy.self,
+    () => _session.openSelfChat(),
+    '나와의 대화를 열지 못했습니다. 잠시 후 다시 시도하세요.',
+  );
 
-    if (widget.asDialog) {
-      // 하단에 버튼 3개(취소/비밀 대화 시작/대화 시작하기)가 한 줄에 들어가려면 기본
-      // 480px로는 좁아서 줄바꿈이 생긴다 — 여유 있게 넓힌다.
-      return FloatingDialog(title: '새 대화', maxWidth: 480, child: body);
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('새 대화')),
-      body: body,
-    );
-  }
-}
+  /// 1명이면 1:1 채팅(이미 있으면 그 방), 2명 이상이면 이름 없는 그룹채팅 — 이름은 멤버 이름으로
+  /// 보이고, 아이콘은 멤버 사진이다(바꾸려면 채팅 정보 변경).
+  void _start(List<AppUser> selected) => _run(
+    _Busy.chat,
+    () => selected.length == 1
+        ? _session.startDm(selected.single.id)
+        : _session.createGroup(memberIds: [for (final u in selected) u.id]),
+    '채팅을 시작하지 못했습니다. 잠시 후 다시 시도하세요.',
+  );
 
-/// 그룹 아이콘 한 개 — [photoUrl]이 있으면 그 사진, [emoji]가 있으면 [color] 배경의 이모지,
-/// 없으면 [name] 앞 2글자 이니셜, 이름까지 비어 있으면 멤버 사진 겹침('members')을 뜻하는
-/// 회색 사람 아이콘.
-class _GroupIcon extends StatelessWidget {
-  final String name;
-  final String? emoji;
-  final Color color;
-  final String? photoUrl;
-  final String Function(String relative)? resolveUrl;
-  final double radius;
-  const _GroupIcon({
-    required this.name,
-    required this.emoji,
-    required this.color,
-    this.photoUrl,
-    this.resolveUrl,
-    required this.radius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (photoUrl != null && resolveUrl != null) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundImage: NetworkImage(resolveUrl!(photoUrl!)),
-      );
-    }
-    if (emoji != null) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: color,
-        child: Text(emoji!, style: TextStyle(fontSize: radius)),
-      );
-    }
-    if (name.isEmpty) {
-      return CircleAvatar(
-        radius: radius,
-        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Icon(
-          Icons.groups_outlined,
-          size: radius,
-          color: Theme.of(context).hintColor,
-        ),
-      );
-    }
-    return InitialsAvatar(name: name, color: color, radius: radius);
-  }
-}
-
-/// "그룹 아이콘 선택하기" 팝업 — my_profile_dialog.dart의 "캐릭터 선택하기"와 같은 모양이다.
-/// 아이콘 첫 칸은 그룹 이름 앞 2글자 이니셜(팀 설정의 팀 아이콘과 같은 방식)이고, 배경색은
-/// 이니셜·이모지 모두에 적용된다. "확인"을 누르면 (이모지(이니셜이면 null), 배경색)을 돌려준다.
-class _GroupIconPickerDialog extends StatefulWidget {
-  final String previewName;
-  final String? initialEmoji;
-  final Color initialColor;
-  const _GroupIconPickerDialog({
-    required this.previewName,
-    required this.initialEmoji,
-    required this.initialColor,
-  });
-
-  @override
-  State<_GroupIconPickerDialog> createState() => _GroupIconPickerDialogState();
-}
-
-class _GroupIconPickerDialogState extends State<_GroupIconPickerDialog> {
-  late String? _emoji = widget.initialEmoji;
-  late Color _color = widget.initialColor;
-
-  Widget _icon(String? emoji, double radius) => _GroupIcon(
-    name: widget.previewName,
-    emoji: emoji,
-    color: _color,
-    radius: radius,
+  /// 비밀 대화는 1:1 전용 — member_profile_dialog.dart처럼 별도 방을 새로 만들거나 진행 중인 방을 연다.
+  void _startSecret(List<AppUser> selected) => _run(
+    _Busy.secret,
+    () => _session.startSecretChat(selected.single.id),
+    '비밀 대화를 시작하지 못했습니다. 잠시 후 다시 시도하세요.',
   );
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 380),
+    final canStart = _session.canCreateRooms;
+    // 요청이 가는 동안은 Esc·뒤로 가기·바깥 누르기로 닫히지 않게 한다 — 닫혀 버리면 방은 만들어지는데
+    // 열리지 않는다.
+    return PopScope(
+      canPop: _busy == null,
+      child: MemberPickerFrame(
+        title: '채팅 시작하기',
+        asDialog: widget.asDialog,
+        child: MemberPicker(
+          session: _session,
+          excludeIds: {?_session.userId},
+          showSelectAll: false,
+          enabled: canStart,
+          pinnedRow: _SelfChatRow(
+            session: _session,
+            busy: _busy == _Busy.self,
+            onTap: _busy == null ? _openSelf : null,
+          ),
+          emptySelectedText: '대화할 멤버를 선택하세요.',
+          noMembersText: '대화할 수 있는 멤버가 없습니다.',
+          footer: _buildFooter(context, canStart),
+          actionsBuilder: (context, selected, wide) =>
+              _buildActions(selected, wide: wide, canStart: canStart),
+        ),
+      ),
+    );
+  }
+
+  /// 버튼 줄 옆의 한 줄 — 오류가 있으면 오류, 준회원이면 못 쓰는 이유, 아니면 몇 명을 고르면 무엇이
+  /// 만들어지는지.
+  Widget _buildFooter(BuildContext context, bool canStart) {
+    final theme = Theme.of(context);
+    final error = _error;
+    final (icon, text, color) = error != null
+        ? (Icons.error_outline, error, theme.colorScheme.error)
+        : !canStart
+        ? (
+            Icons.lock_outline,
+            '준회원은 대화를 시작할 수 없어요. 나와의 대화만 열 수 있어요.',
+            theme.colorScheme.error,
+          )
+        : (
+            Icons.info_outline,
+            // 휴대폰 폭(360)에서도 한 줄에 들게 짧게 — 길면 끝의 '요.'만 다음 줄로 넘어갔다.
+            '1명은 1:1 채팅, 2명 이상은 그룹채팅으로 만들어요.',
+            theme.hintColor,
+          );
+    return Row(
+      key: const ValueKey('start-chat-footer'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 새로운 토픽 생성하기의 안내 줄(보기 방식은 만든 뒤에 바꿀 수 없습니다)과 같은 크기.
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 14, color: color),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(text, style: TextStyle(fontSize: 12, color: color)),
+        ),
+      ],
+    );
+  }
+
+  /// 취소 / 비밀 대화 시작(정확히 1명일 때만) / 채팅 시작. 좁은 화면은 한 줄을 나눠 채운다(휴대폰
+  /// 폭에서 세 버튼이 넘치지 않게).
+  Widget _buildActions(
+    List<AppUser> selected, {
+    required bool wide,
+    required bool canStart,
+  }) {
+    final idle = _busy == null;
+    // 비밀 대화는 초록(채팅 목록의 초록 이름·자물쇠와 짝)으로 구분한다. 꺼져 있을 때는 테마 기본색.
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final green = dark ? Colors.green.shade300 : Colors.green.shade700;
+    final secretButton = OutlinedButton.icon(
+      key: const ValueKey('start-chat-secret'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: green,
+        side: selected.length == 1 && canStart
+            ? BorderSide(color: green.withValues(alpha: 0.8))
+            : null,
+        padding: wide ? null : const EdgeInsets.symmetric(horizontal: 8),
+      ),
+      onPressed: canStart && selected.length == 1 && idle
+          ? () => _startSecret(selected)
+          : null,
+      icon: _busy == _Busy.secret
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.lock_outline, size: 18),
+      label: const _OneLine('비밀 대화 시작'),
+    );
+    final startButton = FilledButton(
+      key: const ValueKey('start-chat-submit'),
+      style: wide
+          ? null
+          : FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+      onPressed: canStart && selected.isNotEmpty && idle
+          ? () => _start(selected)
+          : null,
+      child: _busy == _Busy.chat
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const _OneLine('채팅 시작'),
+    );
+    final cancel = TextButton(
+      onPressed: idle ? () => Navigator.of(context).pop() : null,
+      child: const Text('취소'),
+    );
+    if (wide) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          cancel,
+          const SizedBox(width: 8),
+          secretButton,
+          const SizedBox(width: 8),
+          startButton,
+        ],
+      );
+    }
+    return Row(
+      children: [
+        cancel,
+        const SizedBox(width: 8),
+        Expanded(child: secretButton),
+        const SizedBox(width: 8),
+        Expanded(child: startButton),
+      ],
+    );
+  }
+}
+
+/// 버튼 글자 — 아주 좁은 폭에서는 줄바꿈 대신 조금 줄여서 한 줄에 둔다.
+class _OneLine extends StatelessWidget {
+  final String text;
+  const _OneLine(this.text);
+
+  @override
+  Widget build(BuildContext context) =>
+      FittedBox(fit: BoxFit.scaleDown, child: Text(text, maxLines: 1));
+}
+
+/// 팀 멤버 목록 맨 위에 늘 고정된 "나와의 대화" 줄 — 고르는 줄이 아니라 누르면 바로 연다. 사진은
+/// 아래 멤버 줄의 사진과 줄을 맞춘다(체크박스 자리를 비워 둔다).
+class _SelfChatRow extends StatelessWidget {
+  final Session session;
+  final bool busy;
+  final VoidCallback? onTap;
+  const _SelfChatRow({
+    required this.session,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        key: const ValueKey('start-chat-self'),
+        onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          padding: const EdgeInsets.fromLTRB(6, 6, 14, 6),
+          child: Row(
             children: [
-              Text(
-                '그룹 아이콘 선택하기',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              _icon(_emoji, 44),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '아이콘',
-                  style: Theme.of(context).textTheme.labelMedium,
+              // 멤버 줄의 체크박스와 같은 크기의 빈 자리(밀도·터치 영역에 따라 크기가 달라서 보이지
+              // 않는 체크박스로 잰다).
+              const ExcludeSemantics(
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: 0,
+                    child: Checkbox(value: false, onChanged: null),
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final e in <String?>[null, ..._groupEmojis])
-                    _EmojiChoice(
-                      selected: e == _emoji,
-                      onTap: () => setState(() => _emoji = e),
-                      child: _icon(e, 16),
+              SelfRoomAvatar(session: session, size: 32),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      selfRoomName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '배경색',
-                  style: Theme.of(context).textTheme.labelMedium,
+                    Text(
+                      '나만 보는 메모 공간 · 바로 열기',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: theme.hintColor),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final c in _groupColors)
-                    _ColorChoice(
-                      color: c,
-                      selected: c.toARGB32() == _color.toARGB32(),
-                      onTap: () => setState(() => _color = c),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('취소'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () =>
-                          Navigator.of(context).pop((_emoji, _color)),
-                      child: const Text('확인'),
-                    ),
-                  ),
-                ],
-              ),
+              const SizedBox(width: 8),
+              if (busy)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(Icons.chevron_right, size: 20, color: theme.hintColor),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// team_settings_dialog.dart의 같은 이름 위젯과 모양이 동일하다(선택 시 테두리 강조되는
-/// 정사각 탭 영역) — 그쪽은 private이라 그대로 가져다 쓸 수 없어 똑같이 하나 더 둔다.
-class _EmojiChoice extends StatelessWidget {
-  final bool selected;
-  final VoidCallback onTap;
-  final Widget child;
-  const _EmojiChoice({
-    required this.selected,
-    required this.onTap,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Container(
-        width: 40,
-        height: 40,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).dividerColor,
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: child,
-      ),
-    );
-  }
-}
-
-class _ColorChoice extends StatelessWidget {
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-  const _ColorChoice({
-    required this.color,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Colors.transparent,
-            width: 3,
           ),
         ),
       ),

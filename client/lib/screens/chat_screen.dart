@@ -51,13 +51,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// 앱바 제목 — 토픽 이름·공개 여부·읽기 전용·보관이 그 자리에서 바뀌므로 세션 변경을 따라
-  /// 다시 그린다(대화 목록 본문까지 다시 그리지 않게 제목만).
+  /// 다시 그린다(대화 목록 본문까지 다시 그리지 않게 제목만). 설명이 있는 그룹채팅·토픽은 이름
+  /// 아래에 설명 한 줄, 나와의 대화는 '나' 꼬리표를 단 내 아바타.
   Widget _buildTitle(BuildContext context, Room room) {
     final session = widget.session;
     final otherMember = room.type == RoomType.dm
         ? room.members.where((m) => m.id != session.userId).firstOrNull
         : null;
     final isTopic = room.type == RoomType.topic;
+    final description = roomHeaderDescription(room);
     return LayoutBuilder(
       builder: (context, constraints) {
         // 휴대폰 앱바는 오른쪽 버튼들(멤버·알림·초대·더보기) 때문에 제목 자리가 좁다 — 좁으면
@@ -71,16 +73,17 @@ class _ChatScreenState extends State<ChatScreen> {
             : room.readOnly
             ? const TopicBadge.readOnly(key: ValueKey('chat-header-read-only'))
             : null;
+        final avatar = room.isSelf
+            ? SelfRoomAvatar(session: session, size: 24)
+            : RoomAvatar(
+                room: room,
+                myUserId: session.userId ?? '',
+                resolveUrl: session.resolveUrl,
+                onlineUserIds: session.onlineUserIds,
+                size: 24,
+              );
         final nameRow = Row(
           children: [
-            RoomAvatar(
-              room: room,
-              myUserId: session.userId ?? '',
-              resolveUrl: session.resolveUrl,
-              onlineUserIds: session.onlineUserIds,
-              size: 24,
-            ),
-            const SizedBox(width: 8),
             if (room.isSecret) ...[
               const Icon(Icons.lock, size: 14, color: Colors.green),
               const SizedBox(width: 4),
@@ -113,11 +116,47 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ],
         );
-        if (stateBadge == null || !compact) return nameRow;
+        final badgeBelow = compact ? stateBadge : null;
+        // 설명만 있으면 이름 아래 줄, 이름과 같은 자리(아바타 오른쪽)에서 시작한다.
+        final firstLine = Row(
+          children: [
+            avatar,
+            const SizedBox(width: 8),
+            Expanded(
+              child: description == null || badgeBelow != null
+                  ? nameRow
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        nameRow,
+                        const SizedBox(height: 2),
+                        RoomDescriptionLine(description),
+                      ],
+                    ),
+            ),
+          ],
+        );
+        if (badgeBelow == null) return firstLine;
+        // 아래로 내린 상태 배지는 좁은 앱바에서 한 칸이라도 넓게 제목 칸 왼쪽 끝부터 두고, 설명이
+        // 있으면 그 옆에 잇는다(앱바 높이 안에 두 줄까지만).
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [nameRow, const SizedBox(height: 2), stateBadge],
+          children: [
+            firstLine,
+            const SizedBox(height: 2),
+            if (description == null)
+              badgeBelow
+            else
+              Row(
+                children: [
+                  badgeBelow,
+                  const SizedBox(width: 6),
+                  Flexible(child: RoomDescriptionLine(description)),
+                ],
+              ),
+          ],
         );
       },
     );

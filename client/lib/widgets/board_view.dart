@@ -11,6 +11,7 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../screens/message_thread_screen.dart';
 import '../screens/post_editor_dialog.dart';
+import '../screens/scheduled_messages_screen.dart' show ScheduledRoomBar;
 import '../services/edit_policy.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
@@ -292,13 +293,28 @@ class BoardViewState extends State<BoardView> {
         );
         // 글을 쓸 수 없는 읽기 전용·보관된 보드 — 채팅 입력칸 자리의 안내(chat_input_bar.dart)와 같은
         // 문구를 아래에 둔다(보드에는 입력칸이 없어 글쓰기 버튼이 왜 없는지 알 수 없으니).
-        if (canWrite || !(widget.room.readOnly || widget.room.isArchived)) {
-          return board;
-        }
+        final readOnly =
+            !canWrite && (widget.room.readOnly || widget.room.isArchived);
         return Column(
           children: [
+            // 이 보드에 예약해 둔 게시글이 있으면 맨 위에 "예약된 게시글 N개 · 보기"(없으면 자리도 없다).
+            ColoredBox(
+              color: colors.background,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: _boardMaxWidth + 32,
+                  ),
+                  child: ScheduledRoomBar(
+                    session: widget.session,
+                    room: widget.room,
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  ),
+                ),
+              ),
+            ),
             Expanded(child: board),
-            _ReadOnlyNotice(archived: widget.room.isArchived),
+            if (readOnly) _ReadOnlyNotice(archived: widget.room.isArchived),
           ],
         );
       },

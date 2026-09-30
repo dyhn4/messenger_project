@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/room.dart';
 import '../services/session.dart';
@@ -30,6 +33,10 @@ class RoomPickerField extends StatefulWidget {
 class _RoomPickerFieldState extends State<RoomPickerField> {
   final _fieldKey = GlobalKey();
   final _layerLink = LayerLink();
+
+  /// 목록을 닫으면 포커스를 이 칸으로 되돌린다 — 목록의 검색창은 창 밖(Overlay)에 있어서, 그냥 닫으면
+  /// 포커스가 사라져 이 칸이 든 창의 단축키(Esc·Ctrl+Enter)가 먹지 않았다.
+  final _focusNode = FocusNode(debugLabel: 'room-picker-field');
   OverlayEntry? _entry;
 
   @override
@@ -38,6 +45,7 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
     // 단언(defunct element)이 난다(공유·전달 창을 닫을 때마다).
     _entry?.remove();
     _entry = null;
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -50,9 +58,12 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
   }
 
   void _removeOverlay() {
+    final wasOpen = _entry != null;
     _entry?.remove();
     _entry = null;
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (wasOpen) _focusNode.requestFocus();
   }
 
   void _openOverlay() {
@@ -83,6 +94,7 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
                   widget.onChanged(room);
                   _removeOverlay();
                 },
+                onDismiss: _removeOverlay,
               ),
             ),
           ),
@@ -100,6 +112,7 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
       link: _layerLink,
       child: InkWell(
         key: _fieldKey,
+        focusNode: _focusNode,
         borderRadius: BorderRadius.circular(8),
         onTap: _toggle,
         child: Container(
@@ -139,12 +152,14 @@ class _RoomPickerDropdown extends StatefulWidget {
   final Room? value;
   final bool Function(Room room)? filter;
   final ValueChanged<Room> onSelected;
+  final VoidCallback onDismiss;
   const _RoomPickerDropdown({
     required this.width,
     required this.session,
     required this.value,
     required this.filter,
     required this.onSelected,
+    required this.onDismiss,
   });
 
   @override
@@ -153,22 +168,43 @@ class _RoomPickerDropdown extends StatefulWidget {
 
 class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
   final _searchController = TextEditingController();
+  final _searchFocus = FocusNode(debugLabel: 'room-picker-search');
   String _filter = '';
-  RoomType _tab = RoomType.topic;
+
+  /// 골라 둔 방이 있으면 그 방의 탭부터 보여준다(나와의 대화를 골라 뒀으면 채팅 탭).
+  late RoomType _tab = widget.value?.type ?? RoomType.topic;
+
+  @override
+  void initState() {
+    super.initState();
+    // PC는 목록을 열자마자 검색어를 칠 수 있게(Esc로 닫기도) 검색창에 포커스를 옮긴다 — 이 목록은
+    // 대화상자 밖(Overlay)에 떠서 autofocus만으로는 포커스가 오지 않는다. 휴대폰은 화상 키보드가
+    // 목록을 가리지 않게 누를 때만.
+    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _searchFocus.requestFocus();
+      });
+    }
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final myUserId = widget.session.userId ?? '';
+    final teamId = widget.session.currentTeam?.id;
     final lowerFilter = _filter.trim().toLowerCase();
     final rooms =
         widget.session.rooms
             .where((r) => r.type == _tab && !r.isSecret)
+            // session.rooms엔 다른 팀 방도 다 들어 있다 — 다른 목록 화면처럼 지금 팀 방만 보여 준다(팀마다
+            // 하나씩 있는 나와의 대화가 여러 줄로 겹쳐 보이지 않게).
+            .where((r) => teamId == null || r.teamId == teamId)
             .where((r) => widget.filter?.call(r) ?? true)
             .where(
               (r) =>
@@ -176,8 +212,23 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
                   r.displayName(myUserId).toLowerCase().contains(lowerFilter),
             )
             .toList()
-          ..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
+          // 나와의 대화는 채팅 탭 맨 위에 둔다(사이드바처럼) — 나머지는 최근 활동 순.
+          ..sort((a, b) {
+            if (a.isSelf != b.isSelf) return a.isSelf ? -1 : 1;
+            return b.lastActivityAt.compareTo(a.lastActivityAt);
+          });
 
+    // 목록이 떠 있는 동안 Esc는 목록만 닫는다 — 이 목록은 대화상자 밖(Overlay)에 떠 있어서, 그냥
+    // 두면 아무도 Esc를 받지 않는다.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): widget.onDismiss,
+      },
+      child: _buildPanel(context, rooms, myUserId),
+    );
+  }
+
+  Widget _buildPanel(BuildContext context, List<Room> rooms, String myUserId) {
     return Material(
       elevation: 6,
       borderRadius: BorderRadius.circular(8),
@@ -190,6 +241,7 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
               padding: const EdgeInsets.all(8),
               child: TextField(
                 controller: _searchController,
+                focusNode: _searchFocus,
                 autofocus: true,
                 decoration: const InputDecoration(
                   isDense: true,
@@ -257,7 +309,13 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
                         return ListTile(
                           dense: true,
                           leading: _tab == RoomType.topic
-                              ? const CircleAvatar(child: Icon(Icons.tag))
+                              ? CircleAvatar(
+                                  child: Icon(
+                                    room.isBoard
+                                        ? Icons.dashboard_outlined
+                                        : Icons.tag,
+                                  ),
+                                )
                               : RoomAvatar(
                                   room: room,
                                   myUserId: myUserId,

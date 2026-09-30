@@ -19,6 +19,8 @@ import '../services/room_chat_controller.dart';
 import '../services/typing_gate.dart';
 import '../services/session.dart';
 import '../screens/capture/capture_window.dart';
+import '../screens/schedule_message_dialog.dart';
+import '../screens/scheduled_messages_screen.dart' show ScheduledRoomBar;
 import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'call_button.dart';
@@ -557,62 +559,113 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  /// "메시지 예약"(시계 단추) — 쓰던 글(서식 포함)과 이미 올라간 첨부를 채운 채로 예약 편집기를 연다.
+  /// 예약하면 넘긴 글·첨부를 입력칸에서 비운다(예약으로 옮겨 갔으니). 취소하면 그대로 남는다.
+  Future<void> _openScheduleEditor() async {
+    if (!_canWrite || _sending || _uploading) return;
+    final draftText = _controller.text;
+    final (:text, :format) = _controller.formatted();
+    final staged = List<_PendingAttachment>.from(_attachments);
+    final saved = await showScheduleMessageEditor(
+      context,
+      widget.session,
+      room: _liveRoom,
+      text: text,
+      textFormat: format,
+      attachments: [
+        for (final a in staged)
+          ScheduleDraftAttachment(
+            a.result!,
+            thumbnailBytes: a.thumbnailBytes,
+            file: a.file,
+          ),
+      ],
+    );
+    if (saved == null || !mounted) return;
+    setState(() => _attachments.removeWhere(staged.contains));
+    // 그 사이 새로 쓴 글이 있으면(다른 경로로 입력칸이 바뀐 드문 경우) 지우지 않는다.
+    if (_controller.text == draftText) _controller.clear();
+  }
+
+  /// 입력칸 위의 "예약된 메시지 N개 · 보기" 줄 — 이 방에 내 예약이 있을 때만 보인다.
+  Widget _buildScheduledBar() => ScheduledRoomBar(
+    session: widget.session,
+    room: _liveRoom,
+    padding: const EdgeInsets.only(bottom: 6),
+  );
+
+  /// 나와의 대화에는 함께할 사람이 없어서 화상회의 단추를 두지 않는다.
+  bool get _showCallButton => !_liveRoom.isSelf;
+
   /// 글을 쓸 수 없는 사람에게 입력칸 대신 보여주는 안내 줄(입력칸·첨부·이모티콘 버튼 없음).
   /// 화상회의는 글쓰기가 아니라서 진행 중인 회의에 참여할 수 있게 버튼을 남긴다.
   Widget _buildReadOnlyNotice(BuildContext context) {
     final theme = Theme.of(context);
-    final callButton = widget.session.callsEnabled && !widget.room.isSecret;
+    final callButton =
+        widget.session.callsEnabled && !widget.room.isSecret && _showCallButton;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Container(
-          key: const ValueKey('chat-input-read-only-notice'),
-          constraints: const BoxConstraints(minHeight: 46),
-          padding: EdgeInsets.fromLTRB(14, 4, callButton ? 4 : 14, 4),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest.withValues(
-              alpha: 0.7,
-            ),
-            borderRadius: BorderRadius.circular(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 쓸 수 없게 된 뒤에도 남은 예약(보낼 때 실패한다)을 찾아 정리할 수 있게 둔다.
+            _buildScheduledBar(),
+            _buildReadOnlyBox(theme, callButton),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 읽기 전용·보관 안내 상자 — [callButton]이면 오른쪽 끝에 화상회의 단추가 붙는다.
+  Widget _buildReadOnlyBox(ThemeData theme, bool callButton) {
+    return Container(
+      key: const ValueKey('chat-input-read-only-notice'),
+      constraints: const BoxConstraints(minHeight: 46),
+      padding: EdgeInsets.fromLTRB(14, 4, callButton ? 4 : 14, 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _archived ? Icons.inventory_2_outlined : Icons.lock_outline,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          child: Row(
-            children: [
-              Icon(
-                _archived ? Icons.inventory_2_outlined : Icons.lock_outline,
-                size: 18,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 10),
-              // 좁은 화면에서는 두 문장을 두 줄로 나눠서, 한글이 낱자로 어색하게 끊기지 않게 한다.
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) => Text.rich(
+          const SizedBox(width: 10),
+          // 좁은 화면에서는 두 문장을 두 줄로 나눠서, 한글이 낱자로 어색하게 끊기지 않게 한다.
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) => Text.rich(
+                TextSpan(
+                  children: [
                     TextSpan(
-                      children: [
-                        TextSpan(
-                          text: _archived ? '보관된 토픽입니다.' : '읽기 전용 토픽입니다.',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        TextSpan(text: constraints.maxWidth < 360 ? '\n' : ' '),
-                        const TextSpan(text: '토픽 관리자만 글을 쓸 수 있습니다.'),
-                      ],
+                      text: _archived ? '보관된 토픽입니다.' : '읽기 전용 토픽입니다.',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.4,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+                    TextSpan(text: constraints.maxWidth < 360 ? '\n' : ' '),
+                    const TextSpan(text: '토픽 관리자만 글을 쓸 수 있습니다.'),
+                  ],
+                ),
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.4,
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-              // 화상회의를 쓰지 않는 서버면 CallButton이 스스로 빈칸이 된다.
-              Theme(
-                data: theme.copyWith(visualDensity: VisualDensity.compact),
-                child: CallButton(session: widget.session, room: widget.room),
-              ),
-            ],
+            ),
           ),
-        ),
+          // 화상회의를 쓰지 않는 서버면 CallButton이 스스로 빈칸이 된다.
+          if (_showCallButton)
+            Theme(
+              data: theme.copyWith(visualDensity: VisualDensity.compact),
+              child: CallButton(session: widget.session, room: widget.room),
+            ),
+        ],
       ),
     );
   }
@@ -631,6 +684,7 @@ class ChatInputBarState extends State<ChatInputBar> {
           // 채웠지만, 이제는 입력칸이 직접 자식이라 stretch로 채운다).
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _buildScheduledBar(),
             // 읽기 전용·보관된 토픽인데 토픽 관리자라 쓸 수 있는 경우 — 다른 멤버는 못 쓴다는 걸
             // 잊지 않게 얇게 알려 준다.
             if (_restricted)
@@ -785,7 +839,8 @@ class ChatInputBarState extends State<ChatInputBar> {
                       PopupMenuItem(value: false, child: Text('메신저 창 포함하여 캡처')),
                     ],
                   ),
-                CallButton(session: widget.session, room: widget.room),
+                if (_showCallButton)
+                  CallButton(session: widget.session, room: widget.room),
                 // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
                 if (widget.session.canSendInquiryIn(widget.room))
                   IconButton(
@@ -803,6 +858,16 @@ class ChatInputBarState extends State<ChatInputBar> {
                         )
                       : const SizedBox.shrink(),
                 ),
+                // 메시지 예약 — 보내기 바로 옆에 둔다(비밀 대화는 서버가 예약을 받지 않는다).
+                if (canScheduleIn(widget.session, _liveRoom))
+                  IconButton(
+                    key: const ValueKey('chat-schedule'),
+                    icon: const Icon(Icons.schedule_send_outlined),
+                    onPressed: _sending || uploading
+                        ? null
+                        : _openScheduleEditor,
+                    tooltip: uploading ? '업로드가 끝나면 예약할 수 있어요' : '메시지 예약',
+                  ),
                 if (_sending)
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 12),

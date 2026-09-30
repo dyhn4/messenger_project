@@ -8,6 +8,7 @@ import '../models/inquiry.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../models/scheduled_message.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
 import 'pinned_tls.dart';
@@ -475,8 +476,41 @@ class ChatSocket {
       StreamController<SecretRekeyEvent>.broadcast();
   final _roomRemovedController = StreamController<RoomRemovedEvent>.broadcast();
   final _topicFoldersChangedController = StreamController<String>.broadcast();
+  final _scheduledMessageEventController =
+      StreamController<ScheduledMessageEvent>.broadcast();
+  final _scheduledChangedController = StreamController<String>.broadcast();
 
   Stream<Message> get messages => _messageController.stream;
+
+  /// 내 예약 메시지가 보내졌거나(scheduled:sent) 보내지 못했을 때(scheduled:failed) — user: 방으로만 온다.
+  Stream<ScheduledMessageEvent> get scheduledMessageEvents =>
+      _scheduledMessageEventController.stream;
+
+  /// 내(다른 기기 포함) 예약 메시지 목록이 바뀌었을 때(scheduled:changed) — 그 팀 id가 흐른다.
+  Stream<String> get scheduledChanged => _scheduledChangedController.stream;
+
+  /// 예약 메시지 이벤트를 스트림으로 옮기는 처리 — connect()가 소켓에 걸고, 테스트는
+  /// [debugReceiveScheduledEvent]로 같은 처리를 소켓 없이 태운다.
+  late final Map<String, void Function(dynamic data)> _scheduledHandlers = {
+    'scheduled:sent': (data) => _scheduledMessageEventController.add(
+      ScheduledMessageEvent.fromSentJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    ),
+    'scheduled:failed': (data) => _scheduledMessageEventController.add(
+      ScheduledMessageEvent.fromFailedJson(
+        Map<String, dynamic>.from(data as Map),
+      ),
+    ),
+    'scheduled:changed': (data) => _scheduledChangedController.add(
+      data is Map ? (data['teamId'] as String? ?? '') : '',
+    ),
+  };
+
+  /// 소켓 없이 'scheduled:sent' / 'scheduled:failed' / 'scheduled:changed'를 받은 것처럼 처리한다.
+  @visibleForTesting
+  void debugReceiveScheduledEvent(String event, Object? data) =>
+      _scheduledHandlers[event]?.call(data);
 
   /// 토픽에서 내보내졌거나 토픽이 삭제됐을 때(room:removed).
   Stream<RoomRemovedEvent> get roomRemoved => _roomRemovedController.stream;
@@ -707,6 +741,7 @@ class ChatSocket {
         data is Map ? (data['teamId'] as String? ?? '') : '',
       );
     });
+    _scheduledHandlers.forEach(socket.on);
     // 팀 갱신과 팀 합류는 클라이언트에서 하는 일이 같다(팀 목록에 upsert) — 같은 스트림으로 묶는다.
     for (final event in ['team:updated', 'team:joined']) {
       socket.on(event, (data) {

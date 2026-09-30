@@ -268,15 +268,19 @@ class _SettingsTabState extends State<_SettingsTab>
   }
 
   /// 방 값이 바뀌었으면(내 저장 또는 다른 관리자의 변경) 손대지 않은 칸만 따라가게 한다. 보관
-  /// 여부만 바뀌어도 다시 그린다(보관 칸의 제목·버튼).
+  /// 여부만 바뀌어도 다시 그린다(보관 칸의 제목·버튼). 글 칸은 그 값이 실제로 바뀌었을 때만 덮는다 —
+  /// 다른 값(읽기 전용 등)만 바뀌었는데 덮으면, 이름 끝에 막 친 띄어쓰기가 지워지고 커서가 튄다.
   void _syncFromRoom() {
     if (!mounted) return;
     final now = _valuesOf(_room);
     if (now == _baseline) return;
     final before = _baseline;
     setState(() {
-      if (_name.text.trim() == before.name) _name.text = now.name;
-      if (_description.text.trim() == before.description) {
+      if (now.name != before.name && _name.text.trim() == before.name) {
+        _name.text = now.name;
+      }
+      if (now.description != before.description &&
+          _description.text.trim() == before.description) {
         _description.text = now.description;
       }
       if (_isPublic == before.isPublic) _isPublic = now.isPublic;

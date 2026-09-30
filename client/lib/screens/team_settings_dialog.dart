@@ -1116,9 +1116,9 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
         : ListView(
             shrinkWrap: true,
             children: [
-              // 체크박스 대신 '새 대화' 화면(new_chat_screen.dart)과 같은 방식 — 눌러서
-              // 선택/해제하고, 선택된 항목은 배경색으로 표시한다. 등급은 계정에 붙어 있는
-              // 값이라 여기서 고르는 게 아니라 보여주기만 한다.
+              // 체크박스 없이 눌러서 선택/해제하고, 선택된 항목은 배경색으로 표시한다(아래
+              // "토픽 생성 권한 지정"과 같은 방식). 등급은 계정에 붙어 있는 값이라 여기서
+              // 고르는 게 아니라 보여주기만 한다.
               for (final user in _candidates!)
                 ListTile(
                   leading: UserAvatar(

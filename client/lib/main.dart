@@ -17,6 +17,7 @@ import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/project/project_window.dart';
+import 'screens/scheduled_messages_screen.dart' show ScheduledMessageToasts;
 import 'screens/server_setup_screen.dart';
 import 'services/app_lock.dart';
 import 'services/app_settings.dart';
@@ -462,18 +463,23 @@ class _MyAppState extends State<MyApp>
             ),
           ),
           themeMode: appSettings.themeMode,
-          home: ListenableBuilder(
-            listenable: session,
-            builder: (context, _) {
-              return switch (session.stage) {
-                AuthStage.loadingConfig => const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                ),
-                AuthStage.needsServer => ServerSetupScreen(session: session),
-                AuthStage.needsLogin => LoginScreen(session: session),
-                AuthStage.ready => HomeScreen(session: session),
-              };
-            },
+          // 예약 메시지 발송 결과(보냈음/못 보냄) 토스트 — 첫 화면(루트 라우트) 안에서 들어야 토스트가
+          // 다른 화면·대화상자 위에 뜬다(Navigator 바깥 context로는 Overlay를 못 찾는다).
+          home: ScheduledMessageToasts(
+            session: session,
+            child: ListenableBuilder(
+              listenable: session,
+              builder: (context, _) {
+                return switch (session.stage) {
+                  AuthStage.loadingConfig => const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  ),
+                  AuthStage.needsServer => ServerSetupScreen(session: session),
+                  AuthStage.needsLogin => LoginScreen(session: session),
+                  AuthStage.ready => HomeScreen(session: session),
+                };
+              },
+            ),
           ),
           // 지금 보고 있는 화면이 채팅방이든 다이얼로그든 상관없이 앱 전체 위에 얹히도록,
           // 각 화면이 아니라 MaterialApp 레벨(Navigator 트리 전체를 감싸는 자리)에서 한 번만

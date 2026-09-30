@@ -3,15 +3,19 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/room.dart';
 import '../models/team.dart';
 import '../services/session.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/email_address_field.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/org_section.dart';
+import 'chat_screen.dart';
+import 'home_screen.dart' show wideBreakpoint;
 
 /// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 이름 + 등급 + 팀/직책
-/// (member_profile_dialog.dart의 다른 사람 프로필 카드와 같은 모양) + 개인정보 설정 + 로그아웃.
-/// 아바타를 누르면 사진 편집 화면으로, 이름 옆 연필을 누르면 바로 수정할 수 있다. 아이디/
+/// (member_profile_dialog.dart의 다른 사람 프로필 카드와 같은 모양) + 나와의 대화 + 개인정보 설정 +
+/// 로그아웃. 아바타를 누르면 사진 편집 화면으로, 이름 옆 연필을 누르면 바로 수정할 수 있다. 아이디/
 /// 이메일/비밀번호/회원 탈퇴는 "개인정보 설정"(비밀번호 확인 후 진입)으로 옮겼다.
 class MyProfileDialog extends StatelessWidget {
   final Session session;
@@ -220,6 +224,14 @@ class MyProfileDialog extends StatelessWidget {
                   // 걸 막기 위함) — "회원"/"멤버" 탭에서 남이 바꿔줘야 한다.
                   onEdit: null,
                 ),
+                // 나와의 대화는 팀마다 하나라, 팀을 고르기 전(팀 목록 화면)에는 뺀다.
+                if (session.currentTeam != null) ...[
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _SelfChatButton(session: session),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 InkWell(
                   onTap: () => _openPersonalInfo(context),
@@ -274,6 +286,69 @@ class MyProfileDialog extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// 프로필 카드의 "나와의 대화" — 지금 팀의 나와의 대화를 연다(목록에 없으면 서버에서 받는다).
+/// 프로필 카드와 그 아래 떠 있던 창(멤버 목록 등)을 닫고, 넓은 화면은 오른쪽 대화 패널에서
+/// (requestOpenRoom), 좁은 화면은 대화 화면을 띄워 연다 — 1:1 메시지를 열 때와 같은 방식.
+class _SelfChatButton extends StatefulWidget {
+  final Session session;
+  const _SelfChatButton({required this.session});
+
+  @override
+  State<_SelfChatButton> createState() => _SelfChatButtonState();
+}
+
+class _SelfChatButtonState extends State<_SelfChatButton> {
+  bool _opening = false;
+
+  Future<void> _open() async {
+    final session = widget.session;
+    final Room room;
+    try {
+      final loaded = session.selfRoom;
+      if (loaded != null) {
+        room = loaded;
+      } else {
+        setState(() => _opening = true);
+        room = await session.openSelfChat();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _opening = false);
+      showAppToast(context, '나와의 대화를 열지 못했습니다: $e');
+      return;
+    }
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
+    navigator.popUntil((route) => route is! PopupRoute);
+    if (wide) {
+      session.requestOpenRoom(room);
+    } else if (session.activeRoomId != room.id) {
+      // 이미 그 대화 화면에서 연 프로필이면 창만 닫는다(같은 방을 두 번 쌓지 않게).
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(session: session, room: room),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: _opening ? null : _open,
+      icon: _opening
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.chat_bubble_outline),
+      label: const Text(selfRoomName),
     );
   }
 }

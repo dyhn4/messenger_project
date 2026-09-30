@@ -505,6 +505,13 @@
       "when": 1790700804506,
       "tag": "0071_stale_topic_admin_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790725043955,
+      "tag": "0072_self_rooms_scheduled_messages",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,7 @@ import { createAnnouncementsRouter } from './announcements.js';
 import { createInquiriesRouter } from './inquiries.js';
 import { createProjectsRouter } from './projects.js';
 import { createRoomsRouter } from './rooms.js';
+import { createScheduledMessagesRouter, startScheduledMessageJob } from './scheduledMessages.js';
 import { createSecretChatsRouter } from './secretChats.js';
 import { startSecretExpiryJob } from './secretExpiry.js';
 import { startAnnouncementAutoUnpinJob } from './announcementAutoUnpin.js';
@@ -85,6 +86,8 @@ app.use('/api', requireAuth, createAnnouncementsRouter(io));
 app.use('/api', requireAuth, createInquiriesRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
+// 메시지 예약 발송 — 만든 사람만 보고 고친다. 실제 발송은 아래 startScheduledMessageJob이 한다.
+app.use('/api', requireAuth, createScheduledMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
@@ -129,6 +132,7 @@ startRetentionJob();
 startSecretExpiryJob(io);
 startAnnouncementAutoUnpinJob(io);
 startProjectDueReminderJob(io);
+startScheduledMessageJob(io);
 
 // 코드가 기대하는 스키마와 DB가 어긋난 채로 뜨면, 서버는 멀쩡해 보이는데 새 컬럼을 읽는
 // 화면만 조용히 비어 보인다 — 뜨기 전에 확인해서 콘솔에 크게 알린다(막지는 않는다).

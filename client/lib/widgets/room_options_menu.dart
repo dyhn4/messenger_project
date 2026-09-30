@@ -5,6 +5,7 @@ import '../models/room.dart';
 import '../screens/announcement_list_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/files_screen.dart';
+import '../screens/group_settings_dialog.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/invite_members_screen.dart';
 import '../screens/links_screen.dart';
@@ -64,6 +65,37 @@ class TopicBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 대화 헤더에 설명 줄을 붙일 방이면 그 설명(앞뒤 공백을 뗀 것), 아니면 null — 설명이 있는
+/// 그룹채팅·토픽만(1:1·나와의 대화엔 설명이 없다).
+String? roomHeaderDescription(Room room) {
+  if (room.type == RoomType.dm) return null;
+  final text = room.description?.trim();
+  return text == null || text.isEmpty ? null : text;
+}
+
+/// 대화 헤더(PC 패널·모바일 앱바) 이름 아래의 설명 한 줄 — 넘치면 말줄임표로 자르고, 마우스를
+/// 올리거나 길게 누르면 전체 설명을 툴팁으로 보여 준다.
+class RoomDescriptionLine extends StatelessWidget {
+  final String description;
+  const RoomDescriptionLine(this.description, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: description,
+      child: Text(
+        // 한 줄에 담으려고 줄바꿈은 띄어쓰기로 — 툴팁에는 원래 줄바꿈 그대로 보인다.
+        description.replaceAll(RegExp(r'\s*\n\s*'), ' '),
+        key: const ValueKey('chat-header-description'),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
       ),
     );
   }
@@ -308,7 +340,9 @@ Future<void> showHideDmDialog(
 
 /// 채팅 화면 우측 상단 — 자주 쓰는 **멤버(인원 수) · 알림 켜기/끄기 · 멤버 초대**는 "더보기" 왼쪽에
 /// 아이콘으로 꺼내 두고, 나머지(공지 · 파일 보기 · 링크 보기 · 자동 삭제 타이머 · 대화 내보내기 ·
-/// 나가기)는 "더보기" 메뉴에 둔다. DM은 멤버가 항상 나+상대방 둘뿐이라 멤버/초대 아이콘이 없다.
+/// 정보 변경 · 나에게만 이름 변경 · 나가기)는 "더보기" 메뉴에 둔다. DM은 멤버가 항상 나+상대방
+/// 둘뿐이라 멤버/초대 아이콘이 없다. 나와의 대화는 나 혼자라 파일·링크 보기와 대화 내보내기만 남는다
+/// (나가기·숨기기는 서버도 막는다).
 class RoomOptionsMenu extends StatelessWidget {
   final Session session;
   final Room room;
@@ -574,22 +608,60 @@ class RoomOptionsMenu extends StatelessWidget {
                   ],
                 ),
               ),
-            PopupMenuItem<void>(
-              onTap: () => showLeaveRoomDialog(context, session, room),
-              child: Row(
-                children: [
-                  const Icon(Icons.exit_to_app, color: Colors.redAccent),
-                  const SizedBox(width: 8),
-                  Text(
-                    leaveLabel,
-                    style: const TextStyle(color: Colors.redAccent),
-                  ),
-                ],
+            if (room.type == RoomType.group) ...[
+              _groupInfoItem(context, room),
+              // 나에게만 다른 이름으로 부르기(다른 멤버에겐 그대로) — 방 목록 우클릭·길게 누르기와 같다.
+              PopupMenuItem<void>(
+                onTap: () => showRenameRoomForMeDialog(context, session, room),
+                child: Row(
+                  children: [
+                    const Icon(Icons.drive_file_rename_outline),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        renameRoomMenuLabel(room, session.userId ?? ''),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
+            if (!room.isSelf)
+              PopupMenuItem<void>(
+                onTap: () => showLeaveRoomDialog(context, session, room),
+                child: Row(
+                  children: [
+                    const Icon(Icons.exit_to_app, color: Colors.redAccent),
+                    const SizedBox(width: 8),
+                    Text(
+                      leaveLabel,
+                      style: const TextStyle(color: Colors.redAccent),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ],
+    );
+  }
+
+  /// 그룹채팅 "정보 변경"(이름·설명·아이콘을 모두에게) — 멤버인 정회원 이상만. 준회원에게는 흐리게
+  /// 두고 이유를 툴팁으로 보여 준다(서버 PATCH도 같은 문구로 막는다).
+  PopupMenuItem<void> _groupInfoItem(BuildContext context, Room room) {
+    final canEdit = room.canEditGroupInfo(session);
+    const row = Row(
+      children: [Icon(Icons.edit_outlined), SizedBox(width: 8), Text('정보 변경')],
+    );
+    return PopupMenuItem<void>(
+      enabled: canEdit,
+      onTap: canEdit
+          ? () => showGroupSettingsDialog(context, session, room)
+          : null,
+      child: canEdit
+          ? row
+          : const Tooltip(message: groupInfoGuestNotice, child: row),
     );
   }
 }
@@ -616,13 +688,14 @@ Future<void> showRenameRoomForMeDialog(
   }
 }
 
-/// 메뉴 항목에 보여줄 "이름 변경" 문구 — 별칭을 붙여둔 방이면 원래 방 이름을 괄호로 같이 보여준다.
+/// 메뉴 항목에 보여줄 "나에게만 이름 변경" 문구 — 모두에게 바꾸는 그룹 "정보 변경"과 헷갈리지 않게
+/// 이렇게 부른다. 별칭을 붙여둔 방이면 원래 방 이름을 괄호로 같이 보여준다.
 String renameRoomMenuLabel(Room room, String myUserId) =>
     room.customName == null
-    ? '이름 변경'
-    : '이름 변경(${room.originalDisplayName(myUserId)})';
+    ? '나에게만 이름 변경'
+    : '나에게만 이름 변경(${room.originalDisplayName(myUserId)})';
 
-/// "이름 변경" 입력 대화상자 — 저장하면 입력값(빈 문자열이면 별칭 삭제)을, 취소하면 null을 돌려준다.
+/// "나에게만 이름 변경" 입력 대화상자 — 저장하면 입력값(빈 문자열이면 별칭 삭제)을, 취소하면 null을 돌려준다.
 class _RenameRoomDialog extends StatefulWidget {
   final String initial;
   final String originalName;
@@ -644,7 +717,7 @@ class _RenameRoomDialogState extends State<_RenameRoomDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('이름 변경'),
+      title: const Text('나에게만 이름 변경'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,

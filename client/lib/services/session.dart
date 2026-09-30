@@ -16,6 +16,7 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/room_permissions.dart';
+import '../models/scheduled_message.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/topic_folder.dart';
@@ -38,8 +39,10 @@ import 'typing_gate.dart';
 import 'update_socket.dart';
 
 // 토픽 권한 확장(room.canManage(session)/canWrite(session))은 Session과 늘 같이 쓰이므로,
-// session.dart만 import해도 바로 쓸 수 있게 같이 내보낸다.
+// session.dart만 import해도 바로 쓸 수 있게 같이 내보낸다. 예약 메시지 모델·이벤트(Session의
+// scheduledMessages/scheduledMessageEvents가 주는 모양)도 같은 이유로 같이 내보낸다.
 export '../models/room_permissions.dart';
+export '../models/scheduled_message.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -262,6 +265,8 @@ class Session extends ChangeNotifier {
   StreamSubscription? _secretRekeyAckSub;
   StreamSubscription<RoomRemovedEvent>? _roomRemovedSub;
   StreamSubscription<String>? _topicFoldersChangedSub;
+  StreamSubscription<ScheduledMessageEvent>? _scheduledEventSub;
+  StreamSubscription<String>? _scheduledChangedSub;
   StreamSubscription<String>? _fcmTokenRefreshSub;
 
   /// 지금 소켓으로 연결되어 있는(온라인) 사용자 id 집합. 멤버 목록의 초록 점 표시에 쓴다.
@@ -1097,6 +1102,14 @@ class Session extends ChangeNotifier {
     _topicFoldersChangedSub = chatSocket.topicFoldersChanged.listen(
       handleTopicFoldersChanged,
     );
+    _scheduledEventSub?.cancel();
+    _scheduledEventSub = chatSocket.scheduledMessageEvents.listen(
+      handleScheduledMessageEvent,
+    );
+    _scheduledChangedSub?.cancel();
+    _scheduledChangedSub = chatSocket.scheduledChanged.listen(
+      handleScheduledChanged,
+    );
     _readSub?.cancel();
     _readSub = chatSocket.readEvents.listen((e) {
       final match = rooms.where((r) => r.id == e.roomId);
@@ -1601,8 +1614,10 @@ class Session extends ChangeNotifier {
         _forgetRoom(gone.id);
       }
       notifyListeners();
-      // 끊긴 동안 다른 기기에서 바꾼 토픽 폴더(topic-folders:changed)를 놓쳤을 수 있다.
+      // 끊긴 동안 다른 기기에서 바꾼 토픽 폴더(topic-folders:changed)와 예약 메시지의 발송 결과·
+      // 변경(scheduled:*)을 놓쳤을 수 있다.
       unawaited(loadTopicFolders());
+      unawaited(_refreshScheduledMessages());
     } catch (_) {
       // 재연결 직후 방 목록 갱신 실패는 조용히 넘어간다 — 다음 재연결 때 다시 시도됨.
     } finally {
@@ -1986,7 +2001,8 @@ class Session extends ChangeNotifier {
     final teamTag = _teamTagFor(room);
     final roomTag = switch (room?.type) {
       null => null,
-      RoomType.dm => '1:1',
+      // 나와의 대화엔 남이 쓰지 않는다 — 들어오는 건 봇 안내(팀 참여 등)뿐이라 방 이름으로 알린다.
+      RoomType.dm => room!.isSelf ? selfRoomName : '1:1',
       // 이름 없는 그룹채팅은 멤버 이름을 전부 나열하지 않고 "그룹채팅"이라고만 표시한다.
       RoomType.group => room!.name ?? '그룹채팅',
       RoomType.topic => room!.displayName(userId ?? ''),
@@ -2070,7 +2086,7 @@ class Session extends ChangeNotifier {
     if (room?.muted == true) return;
     final roomTag = switch (room?.type) {
       null => null,
-      RoomType.dm => '1:1',
+      RoomType.dm => room!.isSelf ? selfRoomName : '1:1',
       RoomType.group => room!.name ?? '그룹채팅',
       RoomType.topic => room!.displayName(userId ?? ''),
     };
@@ -2376,8 +2392,11 @@ class Session extends ChangeNotifier {
   /// 이벤트가 "다른 사람이 삭제했다"는 안내로 이 기기에 뜨지 않게 거른다.
   final _deletingTopicIds = <String>{};
 
+  /// 새 그룹채팅(지금 팀). 이름·설명은 앞뒤 공백을 떼고, 비어 있으면 안 보낸다(이름이 없으면 멤버
+  /// 이름으로 보인다). 아이콘 값은 ApiClient.createGroup 참고.
   Future<Room> createGroup({
     String? name,
+    String? description,
     required List<String> memberIds,
     String? iconType,
     String? iconEmoji,
@@ -2386,7 +2405,8 @@ class Session extends ChangeNotifier {
   }) async {
     final room = await api!.createGroup(
       teamId: _requireTeamId,
-      name: name,
+      name: name?.trim(),
+      description: description?.trim(),
       memberIds: memberIds,
       iconType: iconType,
       iconEmoji: iconEmoji,
@@ -2396,9 +2416,68 @@ class Session extends ChangeNotifier {
     return _upsertRoom(room);
   }
 
+  /// 그룹채팅 정보 변경(그 방 멤버인 정회원 이상 — 판정은 room.canEditGroupInfo, 서버가 다시 검사한다).
+  /// 준 값만 바꾸고, 이름·설명은 빈 문자열이면 지운다(이름을 지우면 멤버 이름으로 보인다). 아이콘을
+  /// 바꿀 땐 [iconType]과 그 모양에 필요한 값을 같이 준다('members'면 아이콘을 지운다). 돌려받은 방은
+  /// 목록의 그 인스턴스에 그대로 반영된다(다른 멤버에겐 room:created로 퍼진다).
+  Future<Room> updateGroupInfo(
+    Room room, {
+    String? name,
+    String? description,
+    String? iconType,
+    String? iconEmoji,
+    String? iconColor,
+    String? iconUrl,
+  }) async {
+    final updated = await api!.updateGroupInfo(
+      room.id,
+      name: name?.trim(),
+      description: description?.trim(),
+      iconType: iconType,
+      iconEmoji: iconEmoji,
+      iconColor: iconColor,
+      iconUrl: iconUrl,
+    );
+    return _upsertRoom(updated);
+  }
+
+  // ---- 나와의 대화 ----
+
+  /// 지금 팀의 나와의 대화(나만 보는 메모 방) — 서버가 방 목록(GET /rooms)을 줄 때 만들어 두므로
+  /// 보통 들어 있다. 아직 없으면 null — 그때는 [openSelfChat]으로 받는다.
+  Room? get selfRoom {
+    final teamId = currentTeam?.id;
+    return teamId == null ? null : _selfRoomIn(teamId);
+  }
+
+  Room? _selfRoomIn(String teamId) {
+    for (final r in rooms) {
+      if (r.isSelf && r.teamId == teamId) return r;
+    }
+    return null;
+  }
+
+  /// 팀별로 가는 중인 나와의 대화 요청 — 여러 곳에서 동시에 열어도 요청은 한 번만 간다.
+  final _selfRoomRequests = <String, Future<Room>>{};
+
+  /// 나와의 대화를 연다 — 목록에 있으면 그 방을 바로 돌려주고, 없으면 서버에서 받아(없으면 서버가
+  /// 만든다, POST /rooms/self) 목록에 넣고 돌려준다. [teamId]를 안 주면 지금 팀.
+  Future<Room> openSelfChat({String? teamId}) async {
+    final team = teamId ?? _requireTeamId;
+    final existing = _selfRoomIn(team);
+    if (existing != null) return existing;
+    // whenComplete에 remove의 결과(= 이 Future 자신)를 돌려주면 자기를 기다리며 멈춘다 — 블록으로 버린다.
+    final request = _selfRoomRequests[team] ??= api!
+        .openSelfRoom(team)
+        .whenComplete(() {
+          _selfRoomRequests.remove(team);
+        });
+    return _upsertRoom(await request);
+  }
+
   Future<Room> startDm(String targetUserId) async {
     final room = await api!.startDm(_requireTeamId, targetUserId);
-    return _upsertRoom(room);
+    return _upsertStartedDm(room);
   }
 
   /// 조직도에서 1:1 대화를 시작할 때 쓴다 — 아직 팀을 고르지 않은 상태(팀 목록 화면)에서도
@@ -2406,12 +2485,21 @@ class Session extends ChangeNotifier {
   /// rooms.js) 나와 상대가 함께 속한 팀이어야 하고(조직도 화면이 미리 계산해서 넘긴다).
   /// requestOpenRoom이 그 팀으로 전환하고 새 방을 바로 열어준다.
   Future<Room> startDmInTeam(String teamId, String targetUserId) async {
-    final room = _upsertRoom(await api!.startDm(teamId, targetUserId));
+    final room = _upsertStartedDm(await api!.startDm(teamId, targetUserId));
     requestOpenRoom(room);
     return room;
   }
 
-  /// 지금 팀의 멤버 목록(조직도/새 대화 상대 선택) — 서버 전체 사용자가 아니라 팀 단위다.
+  /// 1:1 시작 응답을 목록에 넣는다. 숨겨 둔 1:1이면 서버가 다시 보이게 하고 응답에 hidden:false를
+  /// 싣는데, 목록 병합(_upsertRoom)은 숨김 같은 개인 값을 안 바꾸므로 여기서 먼저 옮긴다 — 안 그러면
+  /// 방금 연 방이 숨긴 채로 남아 목록에 안 보이고, PC 패널은 숨긴 방으로 보고 바로 닫는다.
+  Room _upsertStartedDm(Room incoming) {
+    _findRoom(incoming.id)?.hidden = incoming.hidden;
+    return _upsertRoom(incoming);
+  }
+
+  /// 지금 팀의 멤버 목록(조직도, 채팅 시작하기·새 그룹채팅 만들기의 멤버 고르기) — 서버 전체 사용자가
+  /// 아니라 팀 단위다.
   Future<List<AppUser>> fetchTeamMembers() =>
       api!.fetchTeamMembers(_requireTeamId);
 
@@ -2640,10 +2728,12 @@ class Session extends ChangeNotifier {
     return null;
   }
 
-  /// 보고 있는 팀이 바뀌면 이전 팀 폴더는 바로 비우고 새 팀 것을 불러온다.
+  /// 보고 있는 팀이 바뀌면 이전 팀 폴더·예약 메시지는 바로 비우고 새 팀 것을 불러온다.
   void _onCurrentTeamChanged() {
     topicFolders.clear();
     unawaited(loadTopicFolders());
+    _resetScheduledMessages();
+    unawaited(_refreshScheduledMessages());
   }
 
   /// 지금 팀의 내 토픽 폴더를 서버에서 다시 받는다. 폴더는 목록을 묶어 보여주는 부가 정보라
@@ -2830,6 +2920,435 @@ class Session extends ChangeNotifier {
     }
   }
 
+  // ---- 메시지 예약 발송(개인, 팀별) ----
+
+  /// 지금 팀에서 내가 예약한 메시지 — 발송 실패 먼저, 그다음 발송 시각 순(compareScheduledMessages).
+  /// 팀을 고르거나 바꿀 때·재연결 뒤·다른 기기에서 바꿨을 때(scheduled:changed) 서버에서 다시 받고,
+  /// 보내지면(scheduled:sent) 빠지고 못 보내면(scheduled:failed) 그 자리에서 사유와 함께 '발송 실패'로
+  /// 바뀐다. 화면은 읽기만 하고, 바꾸는 건 아래 메서드로 한다(값이 바뀌면 새 인스턴스로 갈아 끼운다).
+  final List<ScheduledMessage> scheduledMessages = [];
+
+  /// [scheduledMessages]를 지금 팀 기준으로 한 번이라도 받아왔는지 — 받기 전엔 목록 화면이 로딩을 보여준다.
+  bool get scheduledMessagesLoaded => _scheduledLoaded;
+  bool _scheduledLoaded = false;
+
+  /// 팀 전환 중에 늦게 도착한 옛 팀 예약 응답을 버리기 위한 요청 번호.
+  int _scheduledLoadSeq = 0;
+
+  /// 서버로 가는 중인 내 예약 조작 수 — 그동안 도착한 다시 불러오기(대개 내 조작의 scheduled:changed
+  /// 에코)는 조작이 끝난 뒤로 미룬다(토픽 폴더와 같은 방식 — 낙관적으로 바꾼 목록이 튀지 않게).
+  int _scheduledOpsInFlight = 0;
+  bool _scheduledReloadQueued = false;
+
+  /// 이 기기에서 "지금 보내기"를 누른 예약 — 서버가 같은 예약의 scheduled:sent/failed를 따로 보내도
+  /// [scheduledMessageEvents]는 한 번만 흐르게 한다. 그 예약이 다시 '예약됨'으로 보이면 뺀다.
+  final _sentNowScheduledIds = <String>{};
+
+  /// "지금 보내기" 요청이 오가는 중인 예약과, 그 사이 온 발송 완료(scheduled:sent) — 예약 시각이 되어
+  /// 발송 스케줄러가 먼저 보내 버리면 요청은 실패(행이 지워져 404 등)하지만 실제로는 보내졌으니 오류
+  /// 대신 이 알림으로 결과를 대신한다(보내지 못한 줄 알고 손으로 다시 보내 겹치지 않게).
+  final _sendingNowScheduledIds = <String>{};
+  final _sentWhileSendingNow = <String, ScheduledMessageEvent>{};
+
+  final _scheduledEventController =
+      StreamController<ScheduledMessageEvent>.broadcast();
+
+  /// 예약 메시지 발송 결과 — 예약 시각에 보내졌거나(sent) 못 보냈을 때(failed, 사유 포함), 그리고 이
+  /// 기기의 [sendScheduledMessageNow] 성공(sent). 루트 화면이 event.toastText로 알린다. 다른 팀
+  /// 예약도 흐르고(event.teamId), roomName은 내 목록의 지금 이름(없으면 예약할 때 이름)으로 채워져 있다.
+  Stream<ScheduledMessageEvent> get scheduledMessageEvents =>
+      _scheduledEventController.stream;
+
+  ScheduledMessage? scheduledMessageById(String id) {
+    for (final m in scheduledMessages) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  /// [roomId]로 갈 예약들(목록 순서 그대로) — 목록의 '이 대화방만' 보기.
+  List<ScheduledMessage> scheduledMessagesFor(String roomId) => [
+    for (final m in scheduledMessages)
+      if (m.roomId == roomId) m,
+  ];
+
+  /// [roomId]에 아직 보내지 않은 예약 수(보내는 중 포함) — 입력칸 위 "예약된 메시지 N개" 줄.
+  /// [includeFailed]면 발송 실패도 센다.
+  int scheduledCountFor(String roomId, {bool includeFailed = false}) {
+    var count = 0;
+    for (final m in scheduledMessages) {
+      if (m.roomId == roomId && (includeFailed || !m.isFailed)) count++;
+    }
+    return count;
+  }
+
+  /// 예약 메시지가 갈 대화방 이름 — 내 목록에 있는 방이면 지금 보이는 이름(1:1은 상대 이름, 나와의
+  /// 대화, 나에게만 바꾼 이름 포함), 없으면(나갔거나 삭제됨) 예약할 때 저장해 둔 이름.
+  String scheduledRoomName(ScheduledMessage m) =>
+      _scheduledRoomLabel(m.roomId, m.roomName);
+
+  String _scheduledRoomLabel(String? roomId, String? snapshot) {
+    final room = roomId == null ? null : _findRoom(roomId);
+    if (room != null) return room.displayName(userId ?? '');
+    final name = snapshot?.trim();
+    return name == null || name.isEmpty ? '대화방' : name;
+  }
+
+  /// 지금 팀의 내 예약을 서버에서 다시 받는다. 실패하면 예외를 그대로 던진다(목록 화면이 안내할 수
+  /// 있게) — 팀 전환·재연결·변경 알림 때의 자동 새로고침은 조용히 넘어간다. 내 조작이 서버로 가는
+  /// 중이면 끝난 뒤로 미룬다.
+  Future<void> loadScheduledMessages() async {
+    final teamId = currentTeam?.id;
+    final seq = ++_scheduledLoadSeq;
+    if (teamId == null || api == null) {
+      if (scheduledMessages.isNotEmpty || _scheduledLoaded) {
+        scheduledMessages.clear();
+        _scheduledLoaded = false;
+        notifyListeners();
+      }
+      return;
+    }
+    if (_scheduledOpsInFlight > 0) {
+      _scheduledReloadQueued = true;
+      return;
+    }
+    final List<ScheduledMessage> fresh;
+    try {
+      fresh = await api!.fetchScheduledMessages(teamId);
+    } catch (_) {
+      // 그 사이 팀이 바뀌었거나 더 새 요청이 나갔으면 이 실패는 알릴 필요가 없다.
+      if (seq != _scheduledLoadSeq || currentTeam?.id != teamId) return;
+      rethrow;
+    }
+    if (seq != _scheduledLoadSeq || currentTeam?.id != teamId) return;
+    if (_scheduledOpsInFlight > 0) {
+      _scheduledReloadQueued = true;
+      return;
+    }
+    fresh.sort(compareScheduledMessages);
+    scheduledMessages
+      ..clear()
+      ..addAll(fresh);
+    _scheduledLoaded = true;
+    // 다시 '예약됨'이 된(다른 기기에서 고친) 예약은 앞으로의 발송 결과를 그대로 알린다.
+    _sentNowScheduledIds.removeWhere(
+      (id) => scheduledMessageById(id)?.isScheduled ?? false,
+    );
+    notifyListeners();
+  }
+
+  /// 자동 새로고침(팀 전환·재연결·변경 알림) — 목록 화면을 열 때 다시 받으므로 실패는 조용히 넘어간다.
+  Future<void> _refreshScheduledMessages() async {
+    try {
+      await loadScheduledMessages();
+    } catch (_) {}
+  }
+
+  /// 팀이 바뀌면 옛 팀 예약은 바로 비운다(늦게 오는 옛 팀 응답도 버린다).
+  void _resetScheduledMessages() {
+    _scheduledLoadSeq++;
+    scheduledMessages.clear();
+    _scheduledLoaded = false;
+    _sentNowScheduledIds.clear();
+  }
+
+  /// 예약 하나를 목록에 넣거나 같은 id를 갈아 끼우고 순서를 맞춘다(알림은 부르는 쪽이 한다).
+  void _putScheduled(ScheduledMessage m) {
+    final i = scheduledMessages.indexWhere((x) => x.id == m.id);
+    if (i >= 0) {
+      scheduledMessages[i] = m;
+    } else {
+      scheduledMessages.add(m);
+    }
+    scheduledMessages.sort(compareScheduledMessages);
+  }
+
+  /// 서버가 돌려준 예약(만들기·고치기 결과)을 목록에 반영한다 — 다른 팀 대화방으로 옮겨진 예약은 이
+  /// 팀 목록에서 뺀다(그 팀 목록은 그 팀에 들어갈 때 받는다).
+  void _applyServerScheduled(ScheduledMessage m) {
+    if (m.teamId.isNotEmpty && m.teamId != currentTeam?.id) {
+      scheduledMessages.removeWhere((x) => x.id == m.id);
+    } else {
+      _putScheduled(m);
+    }
+    notifyListeners();
+  }
+
+  /// 예약 조작 하나를 서버에 보낸다. 실패하면 [rollback]으로 낙관적 변경을 되돌리고, 조작이 다 끝난 뒤
+  /// 서버 상태를 한 번 더 받아와 확실히 맞춘 다음 예외를 다시 던진다(토픽 폴더의 _topicFolderOp와 같다).
+  Future<T> _scheduledOp<T>(
+    Future<T> Function() request, {
+    void Function()? rollback,
+  }) async {
+    _scheduledOpsInFlight++;
+    try {
+      return await request();
+    } catch (_) {
+      if (rollback != null) {
+        rollback();
+        _scheduledReloadQueued = true;
+        notifyListeners();
+      }
+      rethrow;
+    } finally {
+      _scheduledOpsInFlight--;
+      if (_scheduledOpsInFlight == 0 && _scheduledReloadQueued) {
+        _scheduledReloadQueued = false;
+        unawaited(_refreshScheduledMessages());
+      }
+    }
+  }
+
+  /// 서버 규칙을 먼저 걸러, 걸린 첫 문구로 [ApiException]을 던진다(보내기 전에 편집 화면이 바로 알리게).
+  void _checkScheduled(List<String?> problems) {
+    for (final problem in problems) {
+      if (problem != null) throw ApiException(problem);
+    }
+  }
+
+  /// 보낼 제목 — 보드 뷰 토픽이면 앞뒤 공백을 뗀 제목, 그 밖의 대화방이면 없음. 내 목록에 없는 방이면
+  /// (판단할 수 없어) 받은 그대로 다듬어 보낸다.
+  String? _scheduledTitleFor(Room? room, String? title) {
+    if (room != null && !room.isBoard) return null;
+    final trimmed = title?.trim() ?? '';
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// 메시지를 예약한다(지금 팀의 [roomId]로, [sendAt]에 — 15분 단위, 앞으로 90일 안). 보드 뷰 토픽이면
+  /// [title]이 게시글 제목(필수)이고, 그 밖의 대화방이면 제목은 버린다. [attachments]는 이미 올린 첨부
+  /// ([uploadAttachments] 결과나 입력칸에서 올려 둔 것, 10개까지). [textFormat]은 [text](앞뒤 공백을 뗀
+  /// 것)의 글자 서식. 서버와 같은 규칙으로 먼저 걸러 [ApiException](서버와 같은 문구)을 던지고, 만들어진
+  /// 예약을 목록에 넣어 돌려준다.
+  Future<ScheduledMessage> scheduleMessage({
+    required String roomId,
+    String? title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+    List<UploadedAttachment> attachments = const [],
+    required DateTime sendAt,
+  }) async {
+    final teamId = _requireTeamId;
+    final room = _findRoom(roomId);
+    final sendTitle = _scheduledTitleFor(room, title);
+    final trimmedText = text.trim();
+    _checkScheduled([
+      if (room?.isSecret == true) '비밀 대화에는 예약할 수 없습니다.',
+      if (room != null)
+        validateScheduledTitle(sendTitle, isBoard: room.isBoard),
+      validateScheduledText(text),
+      validateScheduledAttachmentCount(attachments.length),
+      validateScheduledSendAt(sendAt),
+      if (_scheduledLoaded &&
+          scheduledMessages.length >= scheduledMessageMaxCount)
+        '예약 메시지는 최대 $scheduledMessageMaxCount건까지 만들 수 있습니다.',
+    ]);
+    final created = await _scheduledOp(
+      () => api!.createScheduledMessage(
+        roomId: roomId,
+        title: sendTitle,
+        text: trimmedText,
+        textFormat: trimmedText == text ? textFormat : null,
+        attachments: attachments,
+        sendAt: sendAt,
+      ),
+    );
+    if (currentTeam?.id == teamId) _applyServerScheduled(created);
+    return created;
+  }
+
+  /// 예약을 고친다 — 준 값만 바꾸고(발송 실패였어도 다시 '예약됨'), 서버가 돌려준 예약으로 목록을 갈아
+  /// 끼워 돌려준다. [text]를 주면 [textFormat]도 같이 간다(null이면 서식이 지워진다). [attachments]는
+  /// 바꿀 때만 준다(지금 첨부는 ScheduledMessage.uploadedAttachments, 모두 빼려면 빈 목록). 보드 뷰
+  /// 토픽이 아닌 대화방으로 옮기면 제목은 알아서 지운다. scheduleMessage와 같은 규칙으로 먼저 걸러
+  /// [ApiException]을 던진다.
+  Future<ScheduledMessage> updateScheduledMessage(
+    String id, {
+    String? roomId,
+    String? title,
+    String? text,
+    List<TextFormatRun>? textFormat,
+    List<UploadedAttachment>? attachments,
+    DateTime? sendAt,
+  }) async {
+    final teamId = _requireTeamId;
+    final existing = scheduledMessageById(id);
+    final targetRoomId = roomId ?? existing?.roomId;
+    final room = targetRoomId == null ? null : _findRoom(targetRoomId);
+    // 게시글 예약을 채팅방으로 옮기면 서버엔 빈 제목을 보내 지운다(원래 제목이 있을 때만).
+    final String? sendTitle;
+    if (room != null && !room.isBoard) {
+      sendTitle = title != null || existing?.title != null ? '' : null;
+    } else {
+      sendTitle = title?.trim();
+    }
+    final trimmedText = text?.trim();
+    _checkScheduled([
+      if (roomId != null && room?.isSecret == true) '비밀 대화에는 예약할 수 없습니다.',
+      if (room != null && room.isBoard && (title != null || roomId != null))
+        validateScheduledTitle(sendTitle ?? existing?.title, isBoard: true),
+      if (text != null) validateScheduledText(text),
+      if (attachments != null)
+        validateScheduledAttachmentCount(attachments.length),
+      if (sendAt != null) validateScheduledSendAt(sendAt),
+    ]);
+    final updated = await _scheduledOp(
+      () => api!.updateScheduledMessage(
+        id,
+        roomId: roomId,
+        title: sendTitle,
+        text: trimmedText,
+        textFormat: trimmedText == text ? textFormat : null,
+        attachments: attachments,
+        sendAt: sendAt,
+      ),
+    );
+    // 다시 예약했으니 앞으로의 발송 결과는 그대로 알린다.
+    _sentNowScheduledIds.remove(id);
+    if (currentTeam?.id == teamId) _applyServerScheduled(updated);
+    return updated;
+  }
+
+  /// 예약 취소 — 목록에서 바로 빼고, 서버가 거절하면 되돌린 뒤 예외를 다시 던진다.
+  Future<void> cancelScheduledMessage(String id) async {
+    final teamId = currentTeam?.id;
+    final removed = scheduledMessageById(id);
+    if (removed != null) {
+      scheduledMessages.remove(removed);
+      notifyListeners();
+    }
+    await _scheduledOp(
+      () => api!.deleteScheduledMessage(id),
+      rollback: () {
+        if (removed == null ||
+            currentTeam?.id != teamId ||
+            scheduledMessageById(id) != null) {
+          return;
+        }
+        _putScheduled(removed);
+      },
+    );
+  }
+
+  /// 지금 보내기 — 보내는 동안 그 예약을 '보내는 중'(isSending)으로 두고, 보내지면 목록에서 빼고
+  /// [scheduledMessageEvents]로 sent를 한 번 흘린다(루트 토스트가 알리니 화면이 따로 성공 토스트를
+  /// 띄우지 않는다). 보내지 못하면 되돌린 뒤 서버 상태(대개 사유가 붙은 '발송 실패')를 다시 받아오고
+  /// 예외(서버 사유)를 다시 던진다 — 이때는 이벤트가 흐르지 않는다(부른 화면이 알린다). 단, 요청이
+  /// 오가는 사이 서버가 먼저 보냈다는 알림(scheduled:sent)이 왔으면 보낸 것으로 친다. 보내진 메시지
+  /// id들을 돌려준다.
+  Future<List<String>> sendScheduledMessageNow(String id) async {
+    final teamId = currentTeam?.id;
+    final before = scheduledMessageById(id);
+    if (before != null) {
+      _putScheduled(before.withStatus(ScheduledMessageStatus.sending));
+      notifyListeners();
+    }
+    _sentNowScheduledIds.add(id);
+    _sendingNowScheduledIds.add(id);
+    final List<String> messageIds;
+    try {
+      messageIds = await _scheduledOp(
+        () => api!.sendScheduledMessageNow(id),
+        rollback: () {
+          // 그 사이 발송 결과(scheduled:failed)가 먼저 와서 바뀌었으면 그대로 둔다.
+          if (before == null ||
+              currentTeam?.id != teamId ||
+              scheduledMessageById(id)?.isSending != true) {
+            return;
+          }
+          _putScheduled(before);
+        },
+      );
+    } catch (_) {
+      // 요청은 실패했지만 그 사이 서버가 이미 보냈다(발송 스케줄러와 겹침) — 보냈다고 알린다.
+      final sent = _sentWhileSendingNow.remove(id);
+      if (sent == null) rethrow;
+      _scheduledEventController.add(sent);
+      return sent.messageIds;
+    } finally {
+      _sendingNowScheduledIds.remove(id);
+      _sentWhileSendingNow.remove(id);
+    }
+    if (currentTeam?.id == teamId && scheduledMessageById(id) != null) {
+      scheduledMessages.removeWhere((m) => m.id == id);
+      notifyListeners();
+    }
+    _scheduledEventController.add(
+      ScheduledMessageEvent(
+        type: ScheduledMessageEventType.sent,
+        id: id,
+        teamId: before?.teamId ?? teamId,
+        roomId: before?.roomId,
+        roomName: _scheduledRoomLabel(before?.roomId, before?.roomName),
+        messageIds: messageIds,
+      ),
+    );
+    return messageIds;
+  }
+
+  /// 소켓 scheduled:sent / scheduled:failed — 목록을 그 자리에서 맞추고(보내진 예약은 빼고, 못 보낸
+  /// 예약은 사유와 함께 '발송 실패'로) [scheduledMessageEvents]로 흘린다. 테스트가 소켓 없이 부를 수
+  /// 있게 밖으로 열어 둔다.
+  @visibleForTesting
+  void handleScheduledMessageEvent(ScheduledMessageEvent event) {
+    final existing = scheduledMessageById(event.id);
+    if (event.isSent) {
+      if (existing != null) {
+        scheduledMessages.remove(existing);
+        notifyListeners();
+      }
+    } else if (existing != null) {
+      _putScheduled(
+        existing.withStatus(
+          ScheduledMessageStatus.failed,
+          failReason: event.reason,
+        ),
+      );
+      notifyListeners();
+    } else if (event.teamId == currentTeam?.id) {
+      // 목록에 아직 없던 예약(다른 기기에서 막 만든 것 등) — 서버 목록으로 맞춘다.
+      unawaited(_refreshScheduledMessages());
+    }
+    final named = event.withRoomName(
+      _scheduledRoomLabel(event.roomId, event.roomName ?? existing?.roomName),
+    );
+    // 이 기기에서 "지금 보내기"한 예약은 그 결과로 한 번만 알린다(sendScheduledMessageNow). 요청이
+    // 아직 오가는 중에 온 발송 완료는, 요청이 실패로 끝나면 대신 알리도록 맡겨 둔다.
+    if (_sentNowScheduledIds.remove(event.id)) {
+      if (event.isSent && _sendingNowScheduledIds.contains(event.id)) {
+        _sentWhileSendingNow[event.id] = named;
+      }
+      return;
+    }
+    _scheduledEventController.add(named);
+  }
+
+  /// 소켓 scheduled:changed — 내(다른 기기 포함) 예약이 바뀌었으니 지금 팀 것이면 다시 받는다.
+  @visibleForTesting
+  void handleScheduledChanged(String teamId) {
+    if (teamId.isNotEmpty && teamId != currentTeam?.id) return;
+    unawaited(_refreshScheduledMessages());
+  }
+
+  /// 방과 무관하게(비밀 대화 암호화 없이) 로컬 파일들을 순서대로 올린다 — 채팅 입력칸과 같은
+  /// 업로드(이미지는 축소 썸네일도 함께)라 결과를 [scheduleMessage]·sendPost에 그대로 넘기면 된다.
+  /// 예약 메시지 편집처럼 아직 보낼 방이 정해지지 않은 화면이 쓴다. [onProgress]는 지금 올리는
+  /// 파일의 순번(0부터)과 그 파일의 진행 바이트, [cancelToken]을 취소하면 올리던 파일에서 멈춘다
+  /// (UploadCancelledException). 하나라도 실패하면 그 예외가 그대로 나간다.
+  Future<List<UploadedAttachment>> uploadAttachments(
+    List<File> files, {
+    void Function(int index, int sent, int total)? onProgress,
+    UploadCancelToken? cancelToken,
+  }) async {
+    final client = api;
+    if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+    return uploadPlainFiles(
+      client,
+      files,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+  }
+
   // ---- 보드 뷰 게시글 ----
 
   /// 게시글 조작이 갈 그 방 컨트롤러 — 이미 있으면 그것을 쓰고, 목록에서 사라진 방(나가기·
@@ -2930,6 +3449,8 @@ class Session extends ChangeNotifier {
     await _secretRekeyAckSub?.cancel();
     await _roomRemovedSub?.cancel();
     await _topicFoldersChangedSub?.cancel();
+    await _scheduledEventSub?.cancel();
+    await _scheduledChangedSub?.cancel();
     chatSocket.dispose();
     for (final c in _controllers.values) {
       c.dispose();
@@ -2937,6 +3458,8 @@ class Session extends ChangeNotifier {
     _controllers.clear();
     topicFolders.clear();
     _topicFoldersLoadSeq++; // 로그아웃 전에 나간 폴더 요청이 늦게 와도 버린다.
+    _resetScheduledMessages(); // 예약 목록도 같은 이유로 비우고 늦은 응답은 버린다.
+    _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();
     secretSessionManager = null;

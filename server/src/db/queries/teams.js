@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { db } from '../client.js';
 import { projectMembers, projects, teamMembers, teams, topicCreators, users } from '../schema.js';
 
@@ -37,11 +37,14 @@ export async function deleteTeam(id) {
 
 /** 여러 명을 한 번에 팀에 넣는다(이미 멤버면 조용히 무시). role은 'owner'|'member'만 쓴다. */
 export async function addTeamMembers(teamId, userIds, role = 'member') {
-  if (userIds.length === 0) return;
-  await db
+  if (userIds.length === 0) return [];
+  // 이번에 실제로 새로 들어간 사람 id만 돌려준다 — 나와의 대화 환영·관리자 알림을 그 사람들에게만 보낸다.
+  const rows = await db
     .insert(teamMembers)
     .values(userIds.map((userId) => ({ teamId, userId, role })))
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ userId: teamMembers.userId });
+  return rows.map((r) => r.userId);
 }
 
 export async function removeTeamMember(teamId, userId) {
@@ -112,6 +115,23 @@ export function listTeamMemberIdsByRole(teamId, role) {
     .then((rows) => rows.map((r) => r.userId));
 }
 
+
+/** 팀 관리자 — 그 팀의 소유자 + 계정 등급이 관리자인 팀원(탈퇴한 계정 제외). 팀원이 들어오고 나갈 때
+ * 나와의 대화로 알림을 받는 사람들이다(selfRoomNotices.js). */
+export function listTeamManagerIds(teamId) {
+  return db
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .innerJoin(users, eq(users.id, teamMembers.userId))
+    .where(
+      and(
+        eq(teamMembers.teamId, teamId),
+        or(eq(teamMembers.role, 'owner'), eq(users.role, 'admin')),
+        isNull(users.deletedAt),
+      ),
+    )
+    .then((rows) => rows.map((r) => r.userId));
+}
 
 /** 팀 멤버 id만(가볍게 필요할 때). */
 export function listTeamMemberIds(teamId) {

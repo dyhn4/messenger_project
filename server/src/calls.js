@@ -3,6 +3,7 @@ import { AccessToken } from 'livekit-server-sdk';
 import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_PORT, LIVEKIT_URL } from './config.js';
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { SELF_ROOM_DENIAL } from './permissions.js';
 
 /**
  * 화상회의(LiveKit SFU) — 대화방 하나당 회의방 하나를 그대로 대응시킨다(LiveKit room 이름 =
@@ -178,6 +179,8 @@ export function createCallsRouter() {
     if (room.isSecret) {
       return res.status(400).json({ error: '비밀 대화에서는 아직 화상회의를 쓸 수 없습니다.' });
     }
+    // 나와의 대화는 나 혼자라 회의할 상대가 없다(클라이언트도 버튼을 감춘다).
+    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
 
     const url = livekitUrlFor(req);
     if (!url) return res.status(500).json({ error: 'LiveKit 주소를 알 수 없습니다.' });

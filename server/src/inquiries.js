@@ -10,6 +10,7 @@ import {
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { resolvePosition } from './orgInfo.js';
+import { SELF_ROOM_DENIAL } from './permissions.js';
 import { signFileUrl } from './upload.js';
 
 const STATUSES = ['open', 'in_progress', 'resolved'];
@@ -37,6 +38,7 @@ export function createInquiriesRouter(io) {
   router.post('/rooms/:id/inquiries', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     if (room.type !== 'dm' || room.isSecret) {
       return res.status(400).json({ error: '1:1 대화방에서만 문의할 수 있습니다.' });
     }

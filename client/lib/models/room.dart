@@ -38,6 +38,13 @@ extension TopicViewModeLabel on TopicViewMode {
 const topicNameMaxLength = 60;
 const topicDescriptionMaxLength = 300;
 
+/// 그룹채팅 이름(글자 수)·설명 최대 길이 — 서버가 토픽과 같은 규칙으로 다시 검사한다.
+const groupNameMaxLength = topicNameMaxLength;
+const groupDescriptionMaxLength = topicDescriptionMaxLength;
+
+/// 나와의 대화(나만 보는 메모 방)의 이름 — 방 목록·대화 헤더·알림이 같이 쓴다.
+const selfRoomName = '나와의 대화';
+
 /// 보관 시각 없이 archived만 온 경우(부분 응답)에도 보관 상태는 놓치지 않는다.
 DateTime? _archivedAtFromJson(Map<String, dynamic> json) {
   final ms = json['archivedAt'] as num?;
@@ -102,6 +109,10 @@ class Room {
   /// true면 text는 클라이언트가 만든 암호문 JSON이라 Session이 송수신 경계에서 암복호화한다.
   final bool isSecret;
 
+  /// 나와의 대화(나만 보는 메모 방)인지 — isSecret처럼 dm 위에 얹는 플래그이고 멤버는 나 하나뿐이다
+  /// (서버 rooms.is_self, 팀마다 하나). 초대·나가기·숨기기·별칭은 서버가 막고, 이름은 늘 [selfRoomName].
+  final bool isSelf;
+
   /// 초대로만 들어오는 비공개 토픽 — 방 목록·대화 헤더에서 이름 옆에 자물쇠를 붙인다.
   bool get isPrivateTopic => type == RoomType.topic && !isPublic;
 
@@ -141,15 +152,15 @@ class Room {
   /// [hasUnreadAnnouncement]가 true일 때 안 읽은 공지가 몇 개인지(알림 센터 배지 숫자).
   int unreadAnnouncementCount;
 
-  /// 그룹채팅 아이콘 — 만들 때만 고를 수 있고(new_chat_screen.dart), 이후 수정 UI는 없다.
+  /// 그룹채팅 아이콘 — 만들 때 고르고, 이후 "채팅 정보 변경"으로 바꿀 수 있다(바뀌면 room:created로
+  /// 다시 와서 [mergeServerState]가 그 자리에서 반영한다 — 그래서 non-final).
   /// null 또는 'members'면 room_avatar.dart가 기존처럼 멤버 아바타 두 개를 겹쳐 보여준다.
   /// 'initial'이면 그룹 이름 앞 2글자, 'emoji'면 iconEmoji, 'photo'면 iconUrl(서명된
   /// /files/ 링크)을 보여준다. iconColor는 initial·emoji의 배경색. 토픽/DM은 항상 null.
-  /// 서버가 다시 계산해줄 값이 아니라 생성 시점에 고정되므로 final — 단 iconUrl은 때마다
-  /// 새로 서명되는(만료되는) 링크라 방 갱신 때 새 값으로 바꾼다([mergeServerState]).
-  final String? iconType;
-  final String? iconEmoji;
-  final String? iconColor;
+  /// iconUrl은 때마다 새로 서명되는(만료되는) 링크라 방 갱신 때마다 새 값으로 바뀐다.
+  String? iconType;
+  String? iconEmoji;
+  String? iconColor;
   String? iconUrl;
 
   /// 토픽의 보기 방식 — 챗 뷰/보드 뷰. 만든 뒤에는 바꿀 수 없어서(서버 PATCH가 거부) final.
@@ -193,6 +204,7 @@ class Room {
     this.lastMessagePreview,
     DateTime? lastActivityAt,
     this.isSecret = false,
+    this.isSelf = false,
     this.secretStatus,
     this.secretSelfDestructSeconds,
     this.secretDepartedMemberName,
@@ -215,7 +227,7 @@ class Room {
        adminIds = adminIds ?? [];
 
   /// 새 토픽 필드(viewMode~createdBy)가 없는 예전 서버 응답이면 전부 기본값(챗 뷰, 설정 꺼짐,
-  /// 보관 안 됨, 토픽 관리자 없음)으로 읽는다.
+  /// 보관 안 됨, 토픽 관리자 없음)으로 읽는다. isSelf가 없으면 나와의 대화가 아니다.
   factory Room.fromJson(Map<String, dynamic> json) {
     return Room(
       id: json['id'] as String,
@@ -245,6 +257,7 @@ class Room {
             )
           : null,
       isSecret: json['isSecret'] as bool? ?? false,
+      isSelf: json['isSelf'] as bool? ?? false,
       secretStatus: json['secretStatus'] as String?,
       secretSelfDestructSeconds: (json['secretSelfDestructSeconds'] as num?)
           ?.toInt(),
@@ -306,6 +319,9 @@ class Room {
     secretSelfDestructSeconds = incoming.secretSelfDestructSeconds;
     secretDepartedMemberName = incoming.secretDepartedMemberName;
     latestAnnouncement = incoming.latestAnnouncement;
+    iconType = incoming.iconType;
+    iconEmoji = incoming.iconEmoji;
+    iconColor = incoming.iconColor;
     iconUrl = incoming.iconUrl;
     readOnly = incoming.readOnly;
     autoInvite = incoming.autoInvite;
@@ -326,7 +342,9 @@ class Room {
   }
 
   /// 화면에 보여줄 이름. DM은 상대방 이름, 이름 없는 그룹은 멤버 이름을 이름순 정렬해 보여준다.
+  /// 나와의 대화는 늘 [selfRoomName]이다.
   String displayName(String myUserId) {
+    if (isSelf) return selfRoomName;
     final custom = customName;
     if (custom != null && custom.isNotEmpty) return custom;
     return originalDisplayName(myUserId);
@@ -335,6 +353,7 @@ class Room {
   /// 나만의 별칭([customName])을 무시한 원래 이름 — 이름 변경 메뉴가 "이름 변경(원래 이름)"으로
   /// 보여주고, 별칭을 지웠을 때 돌아갈 이름을 안내하는 데 쓴다.
   String originalDisplayName(String myUserId) {
+    if (isSelf) return selfRoomName;
     if (name != null) return name!;
     if (type == RoomType.dm) {
       for (final m in members) {
@@ -345,6 +364,12 @@ class Room {
       }
       return '(알 수 없음)';
     }
+    return memberNames(myUserId);
+  }
+
+  /// 이름 없는 그룹채팅이 대신 보여주는 이름 — 나를 뺀 멤버 이름(이름순)을 쉼표로 잇는다. 이름이
+  /// 있는 그룹에서도 "비워 두면 이렇게 보여요" 안내(채팅 정보 변경)에 쓴다.
+  String memberNames(String myUserId) {
     final names =
         members.where((m) => m.id != myUserId).map((m) => m.name).toList()
           ..sort();

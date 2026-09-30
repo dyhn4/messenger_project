@@ -221,6 +221,21 @@ export const POST_TEXT_MAX = 20000;
 export const POST_ATTACHMENT_MAX = 30;
 export const MESSAGE_ATTACHMENT_MAX = 20;
 
+// 그룹채팅 이름·설명은 토픽과 같은 길이 제한을 쓴다(채팅 정보 변경 창의 글자 수 표시와 같은 기준).
+export const GROUP_NAME_MAX = TOPIC_NAME_MAX;
+export const GROUP_DESCRIPTION_MAX = TOPIC_DESCRIPTION_MAX;
+
+/** 나와의 대화(나 혼자만 멤버인 방)에서 막는 기능(초대·나가기·숨기기·별칭 등)의 공통 거절 문구. */
+export const SELF_ROOM_DENIAL = '나와의 대화에서는 할 수 없는 기능입니다.';
+
+// ── 메시지 예약 발송(scheduledMessages.js) ─────────────────────────────
+export const SCHEDULED_MAX_PER_TEAM = 30; // 한 사람이 한 팀에 둘 수 있는 예약(예약됨 + 발송 실패)
+export const SCHEDULED_TEXT_MAX = 5000;
+export const SCHEDULED_TITLE_MAX = 50; // 보드 뷰 게시글 제목
+export const SCHEDULED_ATTACHMENT_MAX = 10;
+export const SCHEDULED_STEP_MS = 15 * 60 * 1000; // 발송 시간은 15분 단위
+export const SCHEDULED_MAX_AHEAD_MS = 90 * 24 * 60 * 60 * 1000; // 최대 90일 뒤까지
+
 const graphemeSegmenter = new Intl.Segmenter('ko', { granularity: 'grapheme' });
 export function graphemeLength(s) {
   let n = 0;

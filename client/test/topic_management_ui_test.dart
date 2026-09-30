@@ -1261,6 +1261,36 @@ void main() {
       await _flushToasts(tester);
     });
 
+    testWidgets('상관없는 변경(읽기 전용 등)이 와도 입력 중인 이름·설명 끝의 띄어쓰기는 지워지지 않는다', (
+      tester,
+    ) async {
+      final server = _FakeServer();
+      final room = _room(extra: {'description': '분기 계획'});
+      final session = settingsSession(server, room);
+      await _open(
+        tester,
+        (context) => showTopicSettingsDialog(context, session, room),
+      );
+      await tester.enterText(_key('topic-settings-name'), '마케팅 회의 ');
+      await tester.enterText(_key('topic-settings-description'), '분기 계획 ');
+      await tester.pumpAndSettle();
+
+      // 다른 관리자가 읽기 전용만 켰다.
+      room.readOnly = true;
+      session.notifyListeners();
+      await tester.pumpAndSettle();
+
+      TextEditingController controllerOf(String key) =>
+          tester.widget<TextField>(_key(key)).controller!;
+      expect(controllerOf('topic-settings-name').text, '마케팅 회의 ');
+      expect(controllerOf('topic-settings-description').text, '분기 계획 ');
+      // 손대지 않은 스위치는 따라간다.
+      expect(
+        tester.widget<SwitchListTile>(_key('topic-settings-read-only')).value,
+        isTrue,
+      );
+    });
+
     testWidgets('멤버 내보내기: 검색으로 가려진 멤버도 고른 채로 남아 함께 내보낸다', (tester) async {
       final server = _FakeServer();
       server.routes['POST /api/rooms/r1/kick'] = (r) => _json(_roomJson());

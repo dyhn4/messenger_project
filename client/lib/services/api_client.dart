@@ -14,10 +14,12 @@ import '../models/team_invite_link.dart';
 import '../models/message.dart';
 import '../models/project.dart';
 import '../models/room.dart';
+import '../models/scheduled_message.dart';
 import '../models/shared_link.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/topic_folder.dart';
+import '../models/uploaded_attachment.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
 
 class ApiException implements Exception {
@@ -1106,7 +1108,8 @@ class ApiClient {
         .toList();
   }
 
-  /// 팀 멤버 목록 — 조직도(멤버 패널)와 "새 대화" 상대 선택이 쓴다(서버 전체가 아니라 팀 단위).
+  /// 팀 멤버 목록 — 조직도(멤버 패널)와 채팅 시작하기·새 그룹채팅 만들기의 멤버 고르기가 쓴다(서버
+  /// 전체가 아니라 팀 단위).
   Future<List<AppUser>> fetchTeamMembers(String teamId) async {
     final list = await _get('/api/teams/$teamId/members') as List;
     return list
@@ -2387,13 +2390,15 @@ class ApiClient {
     await _put('/api/rooms/$roomId/folder', {'folderId': folderId});
   }
 
+  /// 새 그룹채팅 — [description](설명, 300자까지)은 비어 있으면 안 보낸다.
   Future<Room> createGroup({
     required String teamId,
     String? name,
+    String? description,
     required List<String> memberIds,
-    // 'members'(기본, 안 보내도 됨) | 'initial' | 'emoji' | 'photo' — new_chat_screen.dart의
-    // 아이콘 선택. 'emoji'면 iconEmoji, 'photo'면 iconUrl(업로드 응답의 URL)이 필요하고,
-    // iconColor는 initial·emoji의 배경색(선택).
+    // 'members'(기본, 안 보내도 됨) | 'initial' | 'emoji' | 'photo' — 새 그룹채팅 만들기의
+    // 아이콘 선택(group_icon_picker.dart). 'emoji'면 iconEmoji, 'photo'면 iconUrl(업로드 응답의
+    // URL)이 필요하고, iconColor는 initial·emoji의 배경색(선택).
     String? iconType,
     String? iconEmoji,
     String? iconColor,
@@ -2404,6 +2409,8 @@ class ApiClient {
             'teamId': teamId,
             'type': 'group',
             if (name != null && name.isNotEmpty) 'name': name,
+            if (description != null && description.isNotEmpty)
+              'description': description,
             'memberIds': memberIds,
             'iconType': ?(iconType != null && iconType != 'members'
                 ? iconType
@@ -2416,6 +2423,39 @@ class ApiClient {
     );
   }
 
+  /// 그룹채팅 정보 변경(그 방 멤버인 정회원 이상) — 준 값만 보낸다. 이름·설명은 빈 문자열이면
+  /// 지운다(이름을 지우면 멤버 이름으로 보인다). 아이콘을 바꿀 땐 [iconType]과 그 모양에 필요한 값을
+  /// 같이 준다(createGroup과 같은 규칙, 'members'면 아이콘을 지운다). 바뀐 방은 room:created로도 퍼진다.
+  Future<Room> updateGroupInfo(
+    String roomId, {
+    String? name,
+    String? description,
+    String? iconType,
+    String? iconEmoji,
+    String? iconColor,
+    String? iconUrl,
+  }) async {
+    return Room.fromJson(
+      await _patch('/api/rooms/$roomId', {
+            'name': ?name,
+            'description': ?description,
+            'iconType': ?iconType,
+            'iconEmoji': ?iconEmoji,
+            'iconColor': ?iconColor,
+            'iconUrl': ?iconUrl,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 그 팀의 나와의 대화 — 없으면 서버가 만들어서라도 돌려준다(멱등, POST /rooms/self).
+  Future<Room> openSelfRoom(String teamId) async {
+    return Room.fromJson(
+      await _post('/api/rooms/self', {'teamId': teamId})
+          as Map<String, dynamic>,
+    );
+  }
+
   Future<Room> startDm(String teamId, String targetUserId) async {
     return Room.fromJson(
       await _post('/api/rooms/dm', {
@@ -2424,6 +2464,90 @@ class ApiClient {
           })
           as Map<String, dynamic>,
     );
+  }
+
+  // ---- 메시지 예약 발송(server/src/scheduledMessages.js) — 나만 보고 바꿀 수 있다 ----
+
+  /// 그 팀에서 내가 예약한 메시지(발송 실패 먼저, 그다음 발송 시각 순). [roomId]를 주면 그 방만.
+  Future<List<ScheduledMessage>> fetchScheduledMessages(
+    String teamId, {
+    String? roomId,
+  }) async {
+    final query = StringBuffer(
+      '/api/scheduled-messages?teamId=${Uri.encodeQueryComponent(teamId)}',
+    );
+    if (roomId != null) {
+      query.write('&roomId=${Uri.encodeQueryComponent(roomId)}');
+    }
+    final list = await _get(query.toString()) as List;
+    return list
+        .map((e) => ScheduledMessage.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 예약 만들기 — [title]은 보드 뷰 토픽의 게시글 제목(그 밖엔 비워 둔다), [attachments]는 이미
+  /// 올린 첨부(채팅 입력칸과 같은 모양), [sendAt]은 15분 단위의 앞으로 90일 안.
+  Future<ScheduledMessage> createScheduledMessage({
+    required String roomId,
+    String? title,
+    required String text,
+    List<TextFormatRun>? textFormat,
+    List<UploadedAttachment> attachments = const [],
+    required DateTime sendAt,
+  }) async {
+    return ScheduledMessage.fromJson(
+      await _post('/api/scheduled-messages', {
+            'roomId': roomId,
+            if (title != null && title.isNotEmpty) 'title': title,
+            'text': text,
+            'textFormat': ?textFormatToJson(textFormat),
+            if (attachments.isNotEmpty)
+              'attachments': [for (final a in attachments) a.toPayload()],
+            'sendAt': sendAt.millisecondsSinceEpoch,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 예약 고치기 — 준 값만 바꾸고, 발송 실패였어도 다시 '예약됨'이 된다. [text]를 주면 [textFormat]도
+  /// 늘 같이 보낸다(null이면 서식을 지운다 — 옛 서식이 새 글과 어긋나지 않게). 제목을 지우려면 빈
+  /// 문자열, 첨부를 모두 빼려면 빈 목록.
+  Future<ScheduledMessage> updateScheduledMessage(
+    String id, {
+    String? roomId,
+    String? title,
+    String? text,
+    List<TextFormatRun>? textFormat,
+    List<UploadedAttachment>? attachments,
+    DateTime? sendAt,
+  }) async {
+    return ScheduledMessage.fromJson(
+      await _patch('/api/scheduled-messages/$id', {
+            'roomId': ?roomId,
+            'title': ?title,
+            if (text != null) ...{
+              'text': text,
+              'textFormat': textFormatToJson(textFormat),
+            },
+            if (attachments != null)
+              'attachments': [for (final a in attachments) a.toPayload()],
+            if (sendAt != null) 'sendAt': sendAt.millisecondsSinceEpoch,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 예약 취소 — 행이 지워진다.
+  Future<void> deleteScheduledMessage(String id) async {
+    await _delete('/api/scheduled-messages/$id');
+  }
+
+  /// 지금 보내기 — 보내진 메시지 id들을 돌려준다. 보내지 못하면 서버가 그 예약을 '발송 실패'(사유와
+  /// 함께)로 바꾸고, 그 사유로 [ApiException]이 난다.
+  Future<List<String>> sendScheduledMessageNow(String id) async {
+    final body = await _post('/api/scheduled-messages/$id/send-now', const {});
+    final ids = body is Map ? body['messageIds'] : null;
+    return ids is List ? ids.whereType<String>().toList() : const [];
   }
 
   /// 비밀 대화(E2EE)용 기기 신원 등록(멱등 — 같은 deviceId면 공개키만 갱신). 개인키는 절대 여기
@@ -2722,6 +2846,25 @@ class ApiClient {
   /// 그 파이프를 도중에 끊어(구독 취소 + sink를 끝까지 안 채우고 닫음) 요청을 미완성 상태로
   /// 만드는 방식이라 서버에 별도로 알릴 필요가 없다.
   Future<UploadResult> uploadFile(
+    File file, {
+    void Function(int sent, int total)? onProgress,
+    UploadCancelToken? cancelToken,
+  }) async {
+    try {
+      return await _uploadFile(
+        file,
+        onProgress: onProgress,
+        cancelToken: cancelToken,
+      );
+    } catch (_) {
+      // 취소로 요청을 도중에 끊어서 난 실패면 [UploadCancelledException]으로 알린다 — 입력칸들이 이걸로
+      // "취소는 조용히 넘기고, 진짜 실패만 알린다"를 가른다.
+      if (cancelToken?.isCancelled == true) throw UploadCancelledException();
+      rethrow;
+    }
+  }
+
+  Future<UploadResult> _uploadFile(
     File file, {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,

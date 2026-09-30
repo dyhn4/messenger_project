@@ -33,3 +33,24 @@ String formatDateTime(DateTime dt) {
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   return '$date $time';
 }
+
+const _koreanWeekdays = ['월', '화', '수', '목', '금', '토', '일'];
+
+/// 예약 메시지의 날짜 — "10월 2일 (목)". 올해가 아니면 앞에 "2027년 "을 붙인다(90일 뒤까지라
+/// 해를 넘길 수 있다).
+String formatScheduleDate(DateTime dt, {DateTime? now}) {
+  final thisYear = (now ?? DateTime.now()).year;
+  final year = dt.year == thisYear ? '' : '${dt.year}년 ';
+  return '$year${dt.month}월 ${dt.day}일 (${_koreanWeekdays[dt.weekday - 1]})';
+}
+
+/// 예약 메시지의 시각 — "오전 9:00"/"오후 12:30"(15분 단위 시간 목록도 이 모양).
+String formatScheduleClock(DateTime dt) {
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final minute = dt.minute.toString().padLeft(2, '0');
+  return '${dt.hour < 12 ? '오전' : '오후'} $hour12:$minute';
+}
+
+/// 예약 메시지 목록·토스트에 쓰는 발송 시각 — "10월 2일 (목) 오전 9:00".
+String formatScheduleTime(DateTime dt, {DateTime? now}) =>
+    '${formatScheduleDate(dt, now: now)} ${formatScheduleClock(dt)}';

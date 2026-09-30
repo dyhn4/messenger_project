@@ -6,6 +6,7 @@ import {
   countTopicFolders,
   deleteRoom,
   deleteTopicFolder,
+  ensureSelfRoom,
   findDmRoomByKey,
   findRoomById,
   findTopicFolderById,
@@ -23,6 +24,7 @@ import {
   listBrowsableTopics,
   listRoomMemberIds,
   listRoomMemberRoles,
+  listRoomMemberUsers,
   listRoomMemberUsersWithOrg,
   listRoomsForUser,
   listTopicFolderRoomIds,
@@ -52,6 +54,9 @@ import {
   canCreateTopic,
   canManageTeam,
   graphemeLength,
+  GROUP_DESCRIPTION_MAX,
+  GROUP_NAME_MAX,
+  SELF_ROOM_DENIAL,
   TOPIC_DESCRIPTION_MAX,
   TOPIC_FOLDER_MAX_PER_TEAM,
   TOPIC_FOLDER_NAME_MAX,
@@ -83,8 +88,10 @@ import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
 import { notifyOfflineMembers, previewFor, roomTagFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
-import { signFileUrl, toStoredUploadUrl } from './upload.js';
+import { knownUploadPath, signFileUrl, toStoredUploadUrl } from './upload.js';
 import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
+import { listScheduledForRoom } from './db/queries/scheduledMessages.js';
+import { failScheduledForArchivedTopic, failScheduledForDeletedRoom } from './scheduledMessages.js';
 
 /** teams.js의 memberListResponse와 같은 규칙 — 서버 설정(orgScope)에 따라 팀 값(team_members)
  * 또는 계정 값(users) 중 하나를 부서/직책으로 쓴다. 채팅방 상단 헤더/방 목록의 직책 표시
@@ -142,10 +149,81 @@ function parseTopicDescription(raw) {
   return { value: value || null };
 }
 
+/** 그룹채팅 이름 — 선택(비우면 null = 멤버 이름으로 표시), 앞뒤 공백을 빼고 60자까지(토픽과 같은 글자 단위). */
+function parseGroupName(raw) {
+  if (raw == null) return { value: null };
+  if (typeof raw !== 'string') return { error: '그룹 채팅 이름이 올바르지 않습니다.' };
+  const value = raw.trim();
+  if (graphemeLength(value) > GROUP_NAME_MAX) {
+    return { error: `그룹 채팅 이름은 ${GROUP_NAME_MAX}자 이내로 입력하세요.` };
+  }
+  return { value: value || null };
+}
+
+/** 그룹채팅 설명 — 선택, 앞뒤 공백을 빼고 300자까지. 비면 null. */
+function parseGroupDescription(raw) {
+  if (raw == null) return { value: null };
+  if (typeof raw !== 'string') return { error: '설명이 올바르지 않습니다.' };
+  const value = raw.trim();
+  if (graphemeLength(value) > GROUP_DESCRIPTION_MAX) {
+    return { error: `설명은 ${GROUP_DESCRIPTION_MAX}자 이내로 입력하세요.` };
+  }
+  return { value: value || null };
+}
+
+const GROUP_ICON_TYPES = ['members', 'initial', 'emoji', 'photo'];
+const GROUP_ICON_KEYS = ['iconType', 'iconEmoji', 'iconColor', 'iconUrl'];
+
+/**
+ * 그룹채팅 아이콘 — 'members'(기본, null과 같음 — 멤버 아바타를 겹쳐 보여줌) | 'initial'(그룹 이름 앞 2글자) |
+ * 'emoji'(iconEmoji 필수) | 'photo'(iconUrl 필수 — 업로드 응답의 URL). iconColor는 initial·emoji의 배경색이다.
+ * 만들 때(POST /rooms)와 정보 변경(PATCH)이 같이 쓴다. 통과하면 저장할 네 칸 `{ icon }`, 아니면 `{ error }`.
+ */
+function parseGroupIcon({ iconType, iconEmoji, iconColor, iconUrl }) {
+  if (iconType != null && !GROUP_ICON_TYPES.includes(iconType)) return { error: 'iconType이 올바르지 않습니다.' };
+  if (iconType === 'emoji' && (typeof iconEmoji !== 'string' || !iconEmoji)) return { error: '이모지를 선택하세요.' };
+  const storedIconUrl = iconType === 'photo' ? toStoredUploadUrl(iconUrl) : null;
+  if (iconType === 'photo' && !storedIconUrl) {
+    return { error: '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.' };
+  }
+  return {
+    icon: {
+      iconType: iconType && iconType !== 'members' ? iconType : null,
+      iconEmoji: iconType === 'emoji' ? String(iconEmoji) : null,
+      iconColor:
+        (iconType === 'emoji' || iconType === 'initial') && typeof iconColor === 'string' && iconColor
+          ? iconColor
+          : null,
+      iconUrl: storedIconUrl,
+    },
+  };
+}
+
 /** 시스템 메시지 문구("OOO 님이 참여했습니다" 등)에 쓸 표시 이름. 이름이 없으면 아이디로 대체. */
 export async function nameOf(id) {
   const u = await findUserById(id);
   return u?.name ?? u?.username ?? '알 수 없음';
+}
+
+/**
+ * 서버가 방 이름을 글로 써야 할 때(검색 결과, 예약 메시지 목록) — 클라이언트 Room.displayName()과 같은 규칙:
+ * 나와의 대화는 '나와의 대화', 이름이 있으면 그대로, DM은 상대방 이름, 이름 없는 그룹은 [viewerId]를 뺀 나머지
+ * 멤버 이름을 이름순으로 나열.
+ */
+export async function roomDisplayName(room, viewerId) {
+  if (room.isSelf) return '나와의 대화';
+  if (room.name) return room.name;
+  const members = await listRoomMemberUsers(room.id);
+  if (room.type === 'dm') {
+    const other = members.find((m) => m.id !== viewerId);
+    return other?.name ?? '(알 수 없음)';
+  }
+  const names = members
+    .filter((m) => m.id !== viewerId)
+    .map((m) => m.name)
+    .filter(Boolean)
+    .sort();
+  return names.length > 0 ? names.join(', ') : '(알 수 없음)';
 }
 
 /**
@@ -199,6 +277,8 @@ export async function toRoomDto(room, requesterId) {
     lastActivityAt,
     lastMessagePreview,
     isSecret: !!room.isSecret,
+    // 나와의 대화(나 혼자만 멤버인 DM) — 클라이언트가 '나와의 대화'로 이름 붙이고 채팅 목록 맨 위에 고정한다.
+    isSelf: !!room.isSelf,
     // 토픽방 채팅 화면 상단 배너용 — 방을 열 때 별도 요청 없이 바로 그릴 수 있게 방 DTO에
     // 얹는다(announcements.js의 latestAnnouncementDtoFor). 그룹/DM은 공지가 없는 기능이라
     // 쿼리 자체를 건너뛴다.
@@ -277,6 +357,16 @@ export async function notifyMembership(io, room) {
   const userRooms = memberIds.map((id) => `user:${id}`);
   if (userRooms.length > 0) io.in(userRooms).socketsJoin(room.id);
   io.to(room.id).emit('room:created', await toRoomDto(room));
+}
+
+/**
+ * 나와의 대화를 찾거나 만든다(db/queries/rooms.js ensureSelfRoom). 이번에 새로 만들었으면 그 사람의 소켓(모든
+ * 기기)을 방에 넣고 room:created로 알린다 — 다른 방이 새로 생길 때와 같은 경로(notifyMembership).
+ */
+export async function openSelfRoom(io, userId, teamId) {
+  const { room, created } = await ensureSelfRoom(userId, teamId);
+  if (created) await notifyMembership(io, room);
+  return room;
 }
 
 /** 이 사람이 속한 모든 방(다른 기기 포함)에 갱신된 멤버 정보를 알린다 — 프로필/탈퇴 변경 후. */
@@ -406,6 +496,10 @@ export function createRoomsRouter(io) {
       res.status(404).json({ error: '방을 찾을 수 없습니다.' });
       return null;
     }
+    if (room.isSelf) {
+      res.status(400).json({ error: SELF_ROOM_DENIAL });
+      return null;
+    }
     if (room.type !== 'topic') {
       res.status(400).json({ error: '토픽에서만 할 수 있습니다.' });
       return null;
@@ -425,8 +519,21 @@ export function createRoomsRouter(io) {
   router.get('/rooms', async (req, res) => {
     const teamId = await requireTeamId(req, res, req.query.teamId);
     if (!teamId) return;
+    // 나와의 대화는 팀원마다 늘 있어야 한다 — 목록을 줄 때 없으면 먼저 만든다(이 응답에 바로 들어간다).
+    // 만들다 실패해도 나머지 방 목록은 그대로 준다(다음 요청이나 POST /rooms/self에서 다시 만든다).
+    await openSelfRoom(io, req.user.sub, teamId).catch((err) =>
+      console.error('[rooms] 나와의 대화 준비 실패:', err?.message ?? err),
+    );
     const myRooms = await listRoomsForUser(req.user.sub, teamId);
     res.json(await Promise.all(myRooms.map((r) => toRoomDto(r, req.user.sub))));
+  });
+
+  /** 나와의 대화 열기 — 없으면 만들고(GET /rooms와 같은 방식) 그 방을 돌려준다. */
+  router.post('/rooms/self', async (req, res) => {
+    const teamId = await requireTeamId(req, res, req.body?.teamId);
+    if (!teamId) return;
+    const room = await openSelfRoom(io, req.user.sub, teamId);
+    res.json(await toRoomDto(room, req.user.sub));
   });
 
   // ── 사이드바 토픽 폴더(개인 설정) ────────────────────────────────
@@ -641,8 +748,9 @@ export function createRoomsRouter(io) {
     if (!targetUserId || typeof targetUserId !== 'string') {
       return res.status(400).json({ error: 'targetUserId가 필요합니다.' });
     }
+    // 나 혼자 쓰는 대화는 나와의 대화(POST /rooms/self)가 맡는다 — 자기 자신과의 DM은 따로 만들지 않는다.
     if (targetUserId === req.user.sub) {
-      return res.status(400).json({ error: '자기 자신과는 DM을 시작할 수 없습니다.' });
+      return res.status(400).json({ error: SELF_ROOM_DENIAL });
     }
     const target = await findUserById(targetUserId);
     if (!target) return res.status(404).json({ error: '대상 사용자를 찾을 수 없습니다.' });
@@ -660,6 +768,11 @@ export function createRoomsRouter(io) {
       if (missing.length > 0) {
         await addRoomMembers(existing.id, missing);
         await notifyMembership(io, existing);
+      }
+      // 내가 숨겨 둔 DM이면 내 쪽만 다시 보이게 한다(내 다른 기기에도 알림) — 상대의 숨김 상태는 그대로 둔다.
+      if (await getMemberHidden(existing.id, req.user.sub)) {
+        await setMemberHidden(existing.id, req.user.sub, false);
+        io.to(`user:${req.user.sub}`).emit('room:hidden', { roomId: existing.id, hidden: false });
       }
       return res.status(200).json(await toRoomDto(existing, req.user.sub));
     }
@@ -689,18 +802,17 @@ export function createRoomsRouter(io) {
     if (type !== 'topic' && type !== 'group') {
       return res.status(400).json({ error: "type은 'topic' 또는 'group'이어야 합니다 (DM은 /rooms/dm 사용)." });
     }
-    // 그룹채팅 아이콘 — 만들 때만 고른다(new_chat_screen.dart). 'members'(기본, 안 보내도 됨) |
-    // 'initial'(그룹 이름 앞 2글자) | 'emoji'(iconEmoji 필수) | 'photo'(iconUrl 필수 — 업로드
-    // 응답의 URL). iconColor는 initial·emoji의 배경색이다. 토픽은 이 값들을 무시한다(항상 null).
-    if (type === 'group' && iconType != null && !['members', 'initial', 'emoji', 'photo'].includes(iconType)) {
-      return res.status(400).json({ error: 'iconType이 올바르지 않습니다.' });
-    }
-    if (type === 'group' && iconType === 'emoji' && (typeof iconEmoji !== 'string' || !iconEmoji)) {
-      return res.status(400).json({ error: '이모지를 선택하세요.' });
-    }
-    const storedIconUrl = type === 'group' && iconType === 'photo' ? toStoredUploadUrl(iconUrl) : null;
-    if (type === 'group' && iconType === 'photo' && !storedIconUrl) {
-      return res.status(400).json({ error: '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.' });
+    // 그룹채팅 아이콘·이름·설명 — 채팅 정보 변경(PATCH /rooms/:id)과 같은 검사(parseGroupIcon 등)를 쓴다.
+    // 토픽은 아이콘 값들을 무시한다(항상 null).
+    let group = null;
+    if (type === 'group') {
+      const iconCheck = parseGroupIcon({ iconType, iconEmoji, iconColor, iconUrl });
+      if (iconCheck.error) return res.status(400).json({ error: iconCheck.error });
+      const nameCheck = parseGroupName(name);
+      if (nameCheck.error) return res.status(400).json({ error: nameCheck.error });
+      const descriptionCheck = parseGroupDescription(description);
+      if (descriptionCheck.error) return res.status(400).json({ error: descriptionCheck.error });
+      group = { icon: iconCheck.icon, name: nameCheck.value, description: descriptionCheck.value };
     }
     // 토픽은 팀 설정(topicCreationPolicy)이 정한 등급 이상만 — 그룹채팅은 위 canCreateRooms
     // 체크(정회원 이상)로 이미 충분하고 이 설정과 무관하다(README "토픽 생성 권한" 참고).
@@ -748,8 +860,8 @@ export function createRoomsRouter(io) {
       id: randomUUID(),
       teamId,
       type,
-      name: trimmedName || null,
-      description: topic?.description ?? null,
+      name: group ? group.name : trimmedName || null,
+      description: group ? group.description : (topic?.description ?? null),
       // 공개 토픽은 지금 회원뿐 아니라 나중에 가입하는 회원에게도 계속 보인다(/rooms/browse).
       isPublic: type === 'topic' ? topic.isPublic : null,
       ...(topic
@@ -761,16 +873,7 @@ export function createRoomsRouter(io) {
           }
         : {}),
       createdBy: req.user.sub,
-      iconType: type === 'group' && iconType && iconType !== 'members' ? iconType : null,
-      iconEmoji: type === 'group' && iconType === 'emoji' ? String(iconEmoji) : null,
-      iconColor:
-        type === 'group' &&
-        (iconType === 'emoji' || iconType === 'initial') &&
-        typeof iconColor === 'string' &&
-        iconColor
-          ? iconColor
-          : null,
-      iconUrl: storedIconUrl,
+      ...(group ? group.icon : { iconType: null, iconEmoji: null, iconColor: null, iconUrl: null }),
     });
     if (type === 'topic') {
       // 토픽을 만든 사람은 토픽 관리자로 시작한다.
@@ -801,6 +904,7 @@ export function createRoomsRouter(io) {
   router.post('/rooms/:id/join', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     if (room.type !== 'topic') return res.status(403).json({ error: '토픽방만 자유롭게 참여할 수 있습니다.' });
     if (room.isPublic === false) {
       return res.status(403).json({ error: '비공개 토픽은 초대를 통해서만 참여할 수 있습니다.' });
@@ -823,6 +927,7 @@ export function createRoomsRouter(io) {
   router.post('/rooms/:id/invite', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     if (room.type === 'dm') return res.status(403).json({ error: 'DM에는 멤버를 초대할 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     // 이미 있는 방에 멤버를 추가로 초대하는 건 팀 설정과 무관하게 정회원 이상이면 누구나 —
@@ -858,6 +963,8 @@ export function createRoomsRouter(io) {
   router.post('/rooms/:id/leave', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    // 나와의 대화는 나가기·숨기기가 없다(팀마다 늘 하나씩 있는 내 메모 공간).
+    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
 
     if (room.isSecret) {
@@ -985,6 +1092,7 @@ export function createRoomsRouter(io) {
   router.post('/rooms/:id/nickname', async (req, res) => {
     const room = await findRoomById(req.params.id);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
+    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     if (room.type !== 'group') return res.status(400).json({ error: '그룹채팅방만 이름을 바꿀 수 있습니다.' });
 
@@ -1000,8 +1108,74 @@ export function createRoomsRouter(io) {
   // 바뀐 방 DTO는 기존 방식대로 room:created로 멤버 전원에게 다시 뿌린다(클라이언트가 같은 id면
   // 덮어쓴다). 안내 문구는 시스템 메시지로 남긴다(보드 뷰는 클라이언트가 시스템 메시지를 숨긴다).
 
-  /** 토픽 정보·설정 변경 — 이름, 설명, 공개 여부, 읽기 전용, 정회원 자동 초대, 조용히 나가기. */
+  /**
+   * 그룹채팅 정보 변경('채팅 정보 변경' 창) — 이름('' → null = 멤버 이름으로 표시), 설명, 아이콘. 토픽처럼 관리자를
+   * 따로 두지 않고 그 방 멤버 중 정회원 이상이면 누구나 바꾼다. 실제로 달라진 게 있을 때만 저장하고, 방 정보를
+   * 다시 뿌리고(room:created), 안내를 한 줄 남긴다 — 이름이 바뀌었으면 이름 안내, 아니면 "채팅 정보를 변경했습니다".
+   */
+  async function updateGroupInfo(req, res, room) {
+    if (!(await isRoomMember(room.id, req.user.sub))) {
+      return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    }
+    // 팀에서 빠진 사람은 옛 대화를 보려고 방 멤버십만 남아 있다 — 그 팀의 방 정보는 못 바꾼다(토픽 관리와 같은 원칙).
+    const access = await teamAccess(room.teamId, req.user.sub);
+    if (!access.isMember) return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+    if (access.role === 'guest') {
+      return res.status(403).json({ error: '준회원은 채팅 정보를 바꿀 수 없습니다.' });
+    }
+    const body = req.body ?? {};
+    const fields = {};
+    if ('name' in body) {
+      const { value, error } = parseGroupName(body.name);
+      if (error) return res.status(400).json({ error });
+      fields.name = value;
+    }
+    if ('description' in body) {
+      const { value, error } = parseGroupDescription(body.description);
+      if (error) return res.status(400).json({ error });
+      fields.description = value;
+    }
+    if (GROUP_ICON_KEYS.some((key) => key in body)) {
+      // 보낸 칸만 바꾸고(색만 바꾸는 등) 나머지는 지금 값을 그대로 합쳐서, 만들 때와 같은 규칙으로 검사한다.
+      // 지금 사진을 그대로 돌려보냈으면(방 정보를 받은 지 오래돼 서명 링크가 만료됐을 수 있다) 지금 값으로 본다.
+      const sentIconUrl = 'iconUrl' in body ? body.iconUrl : room.iconUrl;
+      const { icon, error } = parseGroupIcon({
+        iconType: 'iconType' in body ? body.iconType : room.iconType,
+        iconEmoji: 'iconEmoji' in body ? body.iconEmoji : room.iconEmoji,
+        iconColor: 'iconColor' in body ? body.iconColor : room.iconColor,
+        iconUrl: room.iconUrl && knownUploadPath(sentIconUrl) === room.iconUrl ? room.iconUrl : sentIconUrl,
+      });
+      if (error) return res.status(400).json({ error });
+      Object.assign(fields, icon);
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+
+    // 그대로 다시 저장한 칸은 뺀다 — 아무것도 안 바뀌었으면 안내도 방 정보 재전송도 없이 지금 모습을 돌려준다.
+    for (const key of Object.keys(fields)) {
+      if ((room[key] ?? null) === fields[key]) delete fields[key];
+    }
+    if (Object.keys(fields).length === 0) return res.json(await toRoomDto(room, req.user.sub));
+
+    const updated = await updateRoom(room.id, fields);
+    io.to(room.id).emit('room:created', await toRoomDto(updated));
+    const actor = await nameOf(req.user.sub);
+    let notice;
+    if ('name' in fields) {
+      notice = fields.name
+        ? `${actor} 님이 그룹 채팅 이름을 '${fields.name}'(으)로 바꿨습니다.`
+        : `${actor} 님이 그룹 채팅 이름을 지웠습니다.`;
+    } else {
+      notice = `${actor} 님이 채팅 정보를 변경했습니다.`;
+    }
+    await postSystemMessage(io, updated, notice);
+    res.json(await toRoomDto(updated, req.user.sub));
+  }
+
+  /** 토픽 정보·설정 변경 — 이름, 설명, 공개 여부, 읽기 전용, 정회원 자동 초대, 조용히 나가기. 그룹채팅은
+   * 위 updateGroupInfo(채팅 정보 변경)로 보낸다. */
   router.patch('/rooms/:id', async (req, res) => {
+    const target = await findRoomById(req.params.id);
+    if (target?.type === 'group') return updateGroupInfo(req, res, target);
     const scope = await requireTopicManager(req, res);
     if (!scope) return;
     const { room } = scope;
@@ -1083,6 +1257,8 @@ export function createRoomsRouter(io) {
         updated,
         archived ? `${actor} 님이 토픽을 보관했습니다.` : `${actor} 님이 토픽 보관을 해제했습니다.`,
       );
+      // 보관된 토픽에는 토픽 관리자만 쓴다 — 다른 사람들의 예약은 보낼 시각을 기다리지 않고 지금 실패로 알린다.
+      if (archived) await failScheduledForArchivedTopic(io, updated);
     }
     res.json(await toRoomDto(updated, req.user.sub));
   });
@@ -1102,7 +1278,10 @@ export function createRoomsRouter(io) {
     for (const userId of memberIds) io.to(`user:${userId}`).emit('room:removed', payload);
     io.in(room.id).socketsLeave(room.id);
     const [actorName, team] = await Promise.all([nameOf(req.user.sub), findTeamById(room.teamId)]);
+    // 지우면 예약의 방 id가 비워지므로(set null) 그 전에 이 방 예약을 골라 두었다가, 지운 뒤 실패로 알린다.
+    const scheduled = await listScheduledForRoom(room.id);
     await deleteRoom(room.id);
+    await failScheduledForDeletedRoom(io, room, scheduled);
     recordAudit({
       actorId: req.user.sub,
       actorName,

@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
 import '../models/announcement.dart';
+import '../models/app_notification.dart';
 import '../models/inquiry.dart';
 import '../models/comment.dart';
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
@@ -461,6 +463,10 @@ class ChatSocket {
   final _projectNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _projectNotificationSyncController = StreamController<int>.broadcast();
+  final _notificationNewController =
+      StreamController<NotificationNewEvent>.broadcast();
+  final _notificationSyncController =
+      StreamController<NotificationCounts>.broadcast();
   final _secretInviteController =
       StreamController<SecretInviteEvent>.broadcast();
   final _secretAcceptedController =
@@ -644,6 +650,14 @@ class ChatSocket {
   Stream<int> get projectNotificationSync =>
       _projectNotificationSyncController.stream;
 
+  /// 알림 센터의 멘션·보드 알림 한 건(서버 notification:new) — 새 알림과 그 뒤의 안 읽음 개수.
+  Stream<NotificationNewEvent> get notificationNew =>
+      _notificationNewController.stream;
+
+  /// 멘션·보드 안 읽음 개수가 바뀜(다른 기기에서 읽음, 방을 읽음 — 서버 notification:sync).
+  Stream<NotificationCounts> get notificationSync =>
+      _notificationSyncController.stream;
+
   /// 서버가 handshake에서 인증을 거부했을 때(만료됐거나 비밀번호 변경 등으로 폐기된
   /// accessToken으로 연결을 시도한 경우) 흘러나온다. Session이 새 accessToken을 받아
   /// 다시 연결을 시도하는 데 쓴다.
@@ -787,6 +801,16 @@ class ChatSocket {
       (data) => _projectNotificationSyncController.add(
         ((data as Map)['unreadCount'] as num?)?.toInt() ?? 0,
       ),
+    );
+    socket.on('notification:new', (data) {
+      _notificationNewController.add(
+        NotificationNewEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on(
+      'notification:sync',
+      (data) =>
+          _notificationSyncController.add(NotificationCounts.fromJson(data)),
     );
     socket.on('org:updated', (data) {
       _orgUpdatedController.add(
@@ -977,6 +1001,9 @@ class ChatSocket {
 
     /// [text]의 글자 서식(rich_text_format.dart) — 비밀 대화는 서버가 받지 않는다.
     List<TextFormatRun>? textFormat,
+
+    /// [text] 안의 멘션 구간 — 비밀 대화는 보내지 않는다(서버가 본문을 모른다).
+    List<Mention>? mentions,
     String? fileUrl,
     String? fileName,
     int? fileSize,
@@ -1002,6 +1029,7 @@ class ChatSocket {
       'title': ?title,
       'text': ?text,
       'textFormat': ?textFormatToJson(textFormat),
+      'mentions': ?mentionsToJson(mentions),
       'fileUrl': ?fileUrl,
       'fileName': ?fileName,
       'fileSize': ?fileSize,

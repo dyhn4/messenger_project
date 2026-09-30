@@ -142,22 +142,19 @@ export async function notifyOfflineMembers({
   entry,
   roomTag,
   kind, // 'message' | 'comment' | 'announcement'
+  excludeUserIds = [], // 같은 글로 멘션 푸시를 이미 받는 사람 — 두 번 울리지 않게 뺀다(notifications.js).
 }) {
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
 
   const mutedIds = new Set(await listMutedUserIdsForRoom(room.id));
+  const excluded = new Set(excludeUserIds);
   const targets = memberIds.filter(
-    (id) => id !== senderId && !isOnline(id) && !mutedIds.has(id),
+    (id) => id !== senderId && !isOnline(id) && !mutedIds.has(id) && !excluded.has(id),
   );
   if (targets.length === 0) return;
 
   const preview = room.isSecret ? SECRET_PREVIEW_PLACEHOLDER : previewFor(entry);
-  // 여러 팀 알림이 섞여 오므로 제목 끝에 팀 이름을 배지처럼 붙인다(앱이 켜져 있을 때 뜨는
-  // 로컬 알림과 같은 모양 — client/lib/services/session.dart 참고).
-  const { name: teamName, badge: teamBadge } = await teamBadgeFor(room.teamId);
-  // 안드로이드는 title을 통째로 쓰지 않고 "보낸사람"과 "대화방 이름"을 따로 받아서 대화
-  // 레이아웃을 그린다(notification_service.dart 참고) — 그래서 합친 title과 별개로 조각도 보낸다.
   const conversationTitle = roomTag
     ? kind === 'comment'
       ? `${roomTag}·댓글`
@@ -165,6 +162,31 @@ export async function notifyOfflineMembers({
         ? `${roomTag}·공지`
         : roomTag
     : null;
+  await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body: preview });
+}
+
+/**
+ * 멘션·게시글 수정처럼 **알림 기록(notifications)에서 고른 사람**에게 채팅 푸시와 같은 모양으로 보낸다 — 누구에게
+ * 보낼지(뮤트·mentionAll 설정·온라인 여부)는 notificationRules.js의 pushTargetsFor가 이미 골랐다. [kind]는 'mention' |
+ * 'mention_all' | 'board_edit'이고 [conversationTag]는 제목 꼬리표('멘션' 등). 탭하면 그 방이 열린다(roomId).
+ */
+export async function notifyRecordPush({ targets, room, sender, senderName, kind, conversationTag, body, roomTag }) {
+  if (targets.length === 0) return;
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+  const conversationTitle = roomTag ? `${roomTag}·${conversationTag}` : conversationTag;
+  await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body });
+}
+
+/** 채팅 푸시 본체 — notifyOfflineMembers(메시지·댓글·공지)와 notifyRecordPush(멘션 등)가 같은 모양으로 보낸다. */
+async function sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body: preview }) {
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+  // 여러 팀 알림이 섞여 오므로 제목 끝에 팀 이름을 배지처럼 붙인다(앱이 켜져 있을 때 뜨는
+  // 로컬 알림과 같은 모양 — client/lib/services/session.dart 참고).
+  const { name: teamName, badge: teamBadge } = await teamBadgeFor(room.teamId);
+  // 안드로이드는 title을 통째로 쓰지 않고 "보낸사람"과 "대화방 이름"을 따로 받아서 대화
+  // 레이아웃을 그린다(notification_service.dart 참고) — 그래서 합친 title과 별개로 조각도 보낸다.
   const title = conversationTitle
     ? `${senderName} [${conversationTitle}]${teamBadge}`
     : `${senderName}${teamBadge}`;

@@ -9,9 +9,12 @@ import 'package:flutter/material.dart';
 
 import '../../models/project.dart';
 import '../../services/app_links.dart';
+import '../../services/notification_controller.dart' show NotificationTab;
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/muted_scrollbar.dart';
+import '../../widgets/notifications_panel.dart'
+    show showNotificationsCenterDialog;
 import 'project_detail_view.dart';
 import 'project_menu_dialog.dart' show ProjectMenuResult, showProjectMenuDialog;
 import 'my_tasks_view.dart';
@@ -285,6 +288,19 @@ class _ProjectDialogState extends State<ProjectDialog> {
     if (n.taskId != null) _openTask(n.taskId!);
   }
 
+  /// 프로젝트 대화상자를 닫고 메신저의 알림 센터(프로젝트 탭)를 연다.
+  void _openNotificationCenter() {
+    final rootContext = Navigator.of(context, rootNavigator: true).context;
+    Navigator.of(context).pop();
+    unawaited(
+      showNotificationsCenterDialog(
+        rootContext,
+        widget.session,
+        initialTab: NotificationTab.project,
+      ),
+    );
+  }
+
   Future<void> _createProject({String? templateId}) async {
     final teamId = _teamId;
     if (teamId == null) return;
@@ -416,6 +432,10 @@ class _ProjectDialogState extends State<ProjectDialog> {
                     ProjectNotificationsBell(
                       session: widget.session,
                       onOpen: _openNotification,
+                      // 대화상자로 열린 프로젝트(안드로이드)는 같은 알림을 알림 센터의 "프로젝트" 탭에서도 볼 수 있다.
+                      onOpenCenter: widget.embedInWindow
+                          ? null
+                          : _openNotificationCenter,
                     ),
                     if (!widget.embedInWindow)
                       IconButton(

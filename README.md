@@ -94,6 +94,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **투표** — 토픽·그룹·1:1·나와의 대화(비밀 대화 제외)에 제목·보기(2~20개)·마감 시각(최대 90일 뒤)을 정해 올리고, 익명/복수 선택 여부를 고릅니다. 만든 뒤에는 수정할 수 없고, 다시 투표할 수 있으며, 만든 사람이나 방 관리자가 일찍 마감할 수 있습니다. 투표는 방 멤버마다 즐겨찾기할 수 있고, 게시글처럼 시간 제한 없이 삭제할 수 있으며(관리자도 가능) 댓글도 달 수 있습니다. 앱에서는 입력칸의 투표 단추(보드 뷰 토픽은 오른쪽 아래 작은 단추, 파일도 30개까지 붙일 수 있음)로 만들고, 카드의 ⋯ 메뉴에서 댓글·즐겨찾기·투표 마감·삭제를 하며, 기명 투표는 득표 수를 눌러 투표자를 봅니다
 - 메시지 인용 공유(다른 방으로), 메시지 전달
 - 방별 안읽음 개수, 읽음 시각 동기화(`room:read`)
+- **멘션** — 글 안의 `@이름`(개인)과 `@all`(방 전체)을 구간(`mentions: [{ type, userId?, s, e }]`, `s`/`e`는 본문 글자 위치 — 글자 서식과 같은 단위)으로 함께 저장합니다. 메시지 전송(`message:send` — 사진·파일에 붙인 설명글 포함)·예약 발송·보드 게시글·메시지/댓글 수정·댓글 작성이 모두 `mentions`를 받고, 서버가 그 방의 멤버가 아닌 사람·본인·구간 오류·겹침·중복을 **에러 없이 그 항목만 버려** 정리해 저장합니다(최대 50개, `@all`은 한 글에 하나 — 토픽·그룹에서만, 1:1·나와의 대화·비밀 대화는 안 됨). 수정은 멘션 집합을 통째로 바꾸고(안 보내면 해제), **새로 생긴 멘션에게만** 알림을 보내며 사라진 멘션의 알림 기록은 지웁니다. 메시지 DTO·댓글 DTO에 `mentions`(없으면 `[]`)를 내려줍니다
+- **멘션 입력·표시(앱)** — 입력칸에서 글자 `@`를 치거나(앞이 글 처음이거나 공백일 때) 입력칸 아래 **@ 단추**를 누르면 방 멤버 자동완성이 입력칸 위에 뜹니다(이름·아이디로 검색, 토픽·그룹이면 맨 위에 `@all`). PC는 ↑/↓ 고르기 · Enter/Tab 넣기 · Esc 닫기, 모바일은 목록을 누릅니다. 고르면 글에 `@이름 `이 들어가고 그 구간이 `mentions`로 추적되며, 이름을 고치거나 지우면 그 멘션만 풀립니다(구간 추적·후보 고르기는 `client/lib/services/mention_logic.dart`의 순수 함수). 채팅 입력·예약·게시글 본문·댓글 입력·메시지/댓글 수정 화면에서 같은 자동완성(`widgets/mention_autocomplete.dart`)을 쓰고, 수정 화면은 기존 멘션을 이어 받아 고친 뒤 통째로 다시 보냅니다. 좁은 화면에서 단추 줄에 자리가 없으면 파일 단추 메뉴(파일 · 투표 · 멘션)에 들어갑니다. 비밀 대화에서는 @ 단추·자동완성이 없고, 1:1·나와의 대화에서는 `@all`이 나오지 않습니다. 말풍선·댓글·게시글 본문에서 멘션은 강조되고(나를 멘션했거나 `@all`이면 더 진하게 + 말풍선에 얇은 강조선), 이름을 누르면 멤버 프로필이 열리며, 방 목록은 안 읽은 멘션이 있으면 안읽음 배지 옆에 `@`를 붙입니다
 - 메시지 페이지네이션(기본 50개, 최대 200개, `before` 커서로 과거 메시지 추가 로드)
 - 전체 채팅방 통합 검색(`/search` — 내가 속한 방으로 결과 범위 강제, 비밀 대화는 제외)
 
@@ -130,6 +132,10 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   바로 구분됩니다. 앱이 켜져 있을 때의 로컬 알림과 꺼져 있을 때의 FCM 푸시가 같은 모양입니다
 - PC는 새 메시지가 오면 **작업표시줄 버튼이 창을 열 때까지 계속 깜빡입니다**(Windows가 기본 3회만
   깜빡이고 멈추므로 창이 앞으로 올 때까지 다시 걸어줍니다)
+- **알림 기록(알림 센터)** — 멘션과 보드 알림을 범용 `notifications` 표에 받는 사람마다 한 줄씩 남깁니다(`server/src/notifications.js`의 `createNotifications`가 유일한 생성 지점 — 행 bulk insert + 소켓 `notification:new` + 푸시). 종류는 `mention`(개인 멘션)·`mention_all`(@all)·`board_post`·`board_edit`·`board_comment`이고, 알림 센터는 팀을 가로질러 보여줍니다. 메시지·댓글이 삭제되면 그 알림도 지워지고, 90일이 지난 기록은 하루 한 번 정리됩니다. 방에서 `room:read`를 보내면 그 방의 멘션·보드 알림이 자동으로 읽음 처리되어 내 다른 기기에 `notification:sync`가 갑니다. 방 목록 DTO에 그 방의 읽지 않은 멘션 수 `unreadMentionCount`가 붙습니다
+- **멘션 푸시 규칙** — 개인 멘션은 방을 뮤트한 사람에게도 푸시합니다(`"{이름}님이 회원님을 멘션했습니다: {미리보기}"`). `@all`은 방 뮤트를 존중하고 알림 설정 `mentionAll=false`면 푸시만 생략합니다(기록은 남음, `"{이름}님이 모두를 멘션했습니다: …"`). 같은 글로 멘션 푸시를 받는 사람은 일반 채팅 푸시에서 빠져 두 번 울리지 않습니다. 누구에게 푸시할지는 FCM과 분리된 순수 함수(`server/src/notificationRules.js`의 `pushTargetsFor`)로 계산하며 `node --test`로 검증합니다
+- **보드 알림** — 보드 뷰 토픽에서 새 게시글(`board_post`)·게시글 수정(`board_edit`)·게시글 댓글(`board_comment`)이 알림 기록으로 남습니다. 받는 사람은 그 방 멤버에서 행위자를 뺀 사람 중 **보드 알림 수준**(`boardLevel`)에 맞는 사람입니다 — `all`(새 글·수정·댓글), `important`(새 글 + 내가 쓴 글에 달린 댓글, **기본값**), `new`(새 글만). 방을 뮤트한 멤버도 기록은 남고 푸시만 생략하며, 같은 글로 멘션 알림을 받은 사람에게는 보드 알림을 따로 만들지 않습니다. 큰 토픽도 수신자 설정을 한 번에 조회하고 행을 한 번의 bulk insert로 넣습니다
+- **알림 센터(앱)** — 상단 종 모양 버튼(모바일은 앱바)으로 열고 탭이 다섯 개입니다: **전체 · 멘션 · 안 읽은 대화 · 보드·공지 · 프로젝트**. 탭마다 안 읽음 배지가 붙고, 안 읽은 멘션이 있으면 `멘션` 탭, 없으면 `전체` 탭으로 열립니다. 상단에 **안 읽은 것만** 필터와 **모두 읽음**(현재 탭 기준 — 안 읽은 대화를 읽음으로 돌릴 때는 확인을 받습니다)이 있고, 톱니에서 **`@all` 알림 받기** 스위치와 **보드 알림 수준**(전체 / 중요 알림 / 새 글 알림)을 고릅니다. `안 읽은 대화` 탭은 예전 알림 센터 그대로(안 읽은 메시지·공지가 있는 방을 여러 팀에 걸쳐 마지막 활동순), `보드·공지`는 보드 알림과 안 읽은 공지를 시간순으로, `프로젝트`는 기존 프로젝트 알림함(`/api/project-notifications`)을 같은 줄 모양으로 보여 주며(프로젝트 창 안의 종 모양 알림함도 그대로 있고, 대화상자로 열린 프로젝트는 거기서 "알림 센터에서 보기"로 이 탭을 엽니다), `전체`는 넷을 시간순으로 섞습니다. 멘션·보드 탭은 `before` 커서로 이어 받는 무한 스크롤이고, 항목을 누르면 그 방(다른 팀이면 팀 전환 후)의 그 메시지로 이동·강조하면서 읽음 처리합니다(없어진 대화는 토스트). 모바일은 탭줄이 가로로 스크롤되는 전체 화면입니다. 목록·개수·설정과 소켓(`notification:new`/`notification:sync`) 반영은 `client/lib/services/notification_controller.dart`, 서버 호출은 `notification_api.dart`, 화면은 `widgets/notifications_panel.dart`입니다
 
 **서버 연결 / 배포**
 - 자체 서명 TLS 인증서 + 클라이언트 인증서 핀닝(공인 CA 미사용)
@@ -633,6 +639,8 @@ messenger_project/
 │  │  ├─ moderation.js            메시지/댓글 수정·삭제 가능 여부(팀 메시지 설정 + 등급 + 방 멤버십)
 │  │  ├─ rooms.js                 채팅방 생성/조회/멤버 관리/메시지 목록(전부 팀 범위)
 │  │  ├─ messages.js / comments.js  메시지·댓글 수정/삭제
+│  │  ├─ notifications.js         알림 기록(멘션·보드 알림)·읽음·알림 설정 API, createNotifications(유일한 생성 지점)
+│  │  ├─ notificationRules.js     멘션 정리·푸시 대상·보드 수신자 순수 규칙(단위 테스트 대상)
 │  │  ├─ secretChats.js / secretExpiry.js  비밀 대화 성립/자동 삭제
 │  │  ├─ devices.js               E2EE 기기 신원 등록/조회/폐기
 │  │  ├─ search.js                통합 검색
@@ -1117,7 +1125,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | Method | Path | 설명 |
 |---|---|---|
-| PATCH | `/api/messages/:id` | 메시지 수정(팀 설정의 수정/삭제 가능 시간 안에서, **본인만**) |
+| PATCH | `/api/messages/:id` | 메시지 수정(팀 설정의 수정/삭제 가능 시간 안에서, **본인만**). 글 메시지는 `{ text, textFormat?, mentions? }`. |
 | DELETE | `/api/messages/:id` | 메시지 삭제(소프트 삭제 — 같은 시간 안에서, 본인 또는 참여 중인 방의 소유자·관리자). 게시글·투표는 시간 제한 없음 |
 | POST | `/api/messages/:messageId/comments` | 댓글 작성 |
 | POST | `/api/rooms/:roomId/polls` | **투표 만들기** — `{ title, description?, options[2~20], anonymous?, multiple?, closesAt(epoch ms, 최대 90일 뒤), attachments? }`. 방에 `type:'poll'` 메시지(`poll` 필드 포함)로 올라간다. 비밀 대화는 400, 첨부는 보드 뷰 토픽만. 소켓 `message:send`로는 못 만든다 |
@@ -1127,6 +1135,10 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/polls/favorites?teamId=` | 내가 즐겨찾기한 투표 목록(최근 즐겨찾기순) |
 | PATCH | `/api/comments/:id` | 댓글 수정 |
 | DELETE | `/api/comments/:id` | 댓글 삭제(메시지 삭제와 동일한 규칙) |
+| GET | `/api/notifications` | 알림 기록(`kind`=`mention`\|`board`\|`all`, `before`(ms 커서), `limit`(기본 30·최대 100), `unreadOnly`) → `{ items, hasMore }`. 항목: `id`,`kind`,`teamId`,`teamName`,`roomId`,`roomName`,`messageId`,`commentId`,`actorId`,`actorName`,`preview`,`createdAt`,`readAt`,`roomType`. 없어진 방·메시지나 내가 나간 방의 알림은 안 내려줌 |
+| GET | `/api/notifications/unread-counts` | 읽지 않은 알림 수 `{ mention, board }`(내 모든 팀 합계) |
+| POST | `/api/notifications/read` | 읽음 처리 — `{ ids }` \| `{ kind: 'mention'\|'board' }` \| `{ messageId }`. 내 다른 기기에 소켓 `notification:sync` |
+| GET/PATCH | `/api/notification-settings` | 내 알림 설정 `{ mentionAll(기본 true), boardLevel('all'\|'important'\|'new', 기본 'important') }` — PATCH는 일부 필드만 보내도 됨 |
 
 **기기 / 비밀 대화(E2EE)** (`/api`)
 
@@ -1252,6 +1264,8 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 |
 | 서버→클라이언트 | `message:new` / `message:edited` / `message:deleted` / `message:expired` | 메시지 변경 브로드캐스트 |
 | 서버→클라이언트 | `comment:new` / `comment:edited` / `comment:deleted` | 댓글 변경 브로드캐스트 |
+| 서버→클라이언트 | `notification:new` | `user:<id>`에게 새 알림 한 건 `{ notification, unread: { mention, board } }` |
+| 서버→클라이언트 | `notification:sync` | `user:<id>`에게 읽음·삭제로 바뀐 안 읽음 수 `{ mention, board }`(다른 기기 동기화) |
 | 서버→클라이언트 | `room:created` | 방 생성/멤버 변경 시 최신 방 정보 |
 | 서버→클라이언트 | `team:updated` / `team:joined` / `team:left` | 팀 정보 변경 / 팀에 추가됨 / 팀에서 빠짐 |
 | 서버→클라이언트 | `presence:update` | 온라인/오프라인 |
@@ -1282,6 +1296,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `calendars` / `calendar_members` / `calendar_events` / `calendar_event_attendees` / `calendar_event_colors` | 캘린더. 팀 단위 `calendars`(`kind`: `personal`\|`team`\|`shared`, 팀당 팀 캘린더 1개·사람당 기본 캘린더 1개는 partial unique index), 멤버·구독·개인 색/숨김(`calendar_members` — `role`: `admin`\|`write`\|`read`\|`subscriber`), 일정(`calendar_events` — `recurrence` jsonb, 빠진 회차 `exdates`), 참석자, 사람별 일정 색. `users.birthday`(`MM-DD`)는 생일 캘린더에 쓰인다 |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우) |
+| `notifications` | 알림 기록(받는 사람마다 한 줄 — 멘션·보드 알림). `kind`(`mention`\|`mention_all`\|`board_post`\|`board_edit`\|`board_comment`), `team_id`, `room_id`/`message_id`/`comment_id`(cascade), `actor_id`/`actor_name`, `preview`(본문 앞 120자·게시글은 제목), `room_name`(알림 당시 이름), `read_at`. 90일 지난 것은 `retention.js`가 정리. 멘션 구간은 `messages`·`message_comments`·`scheduled_messages`의 `mentions`(jsonb)에 저장 |
+| `notification_settings` | 사람별 알림 설정(`user_id` PK). `mention_all`(@all 푸시, 기본 true), `board_level`(`all`\|`important`\|`new`, 기본 `important`) — 행이 없으면 기본값 |
 | `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `color`(대표 색 `#RRGGBB`), `is_public`(공개 프로젝트 여부), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |
 | `project_members` | 프로젝트 구성원. `role`(`owner`=담당자 / `member`), `favorite`(사이드바 즐겨찾기 — 사람마다 다른 개인 설정) |
 | `tasks` | 업무. `seq`(프로젝트 안 번호 → 화면에는 `MKT-1001`로 표시), `status`(`todo` / `doing` / `done`), `priority`, `assignee_id`, `type_id`(→ `task_types`, 삭제 시 null), `start_date`/`due_date`, `completed_at` |

@@ -10,6 +10,7 @@ import {
   setMemberLastRead,
   setMemberLastReadAnnouncementAt,
 } from './db/queries/rooms.js';
+import { markRoomNotificationsRead } from './notifications.js';
 import { postSystemMessage } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
@@ -90,6 +91,11 @@ export function registerSocket(io) {
       await setMemberLastRead(room.id, socket.data.userId, lastReadAt);
 
       io.to(room.id).emit('room:read', { roomId: room.id, userId: socket.data.userId, lastReadAt });
+
+      // 방을 보고 있으니 이 방의 멘션·보드 알림(그 시각 이전 것)도 읽은 걸로 — 다른 기기에는 notification:sync로 알린다.
+      await markRoomNotificationsRead(io, socket.data.userId, room.id, lastReadAt).catch((err) =>
+        console.error('[notifications] 자동 읽음 실패:', err?.message ?? err),
+      );
     });
 
     // payload: { roomId } — 공지 목록/상세를 실제로 열었다는 뜻(room:read와 별개 —

@@ -1,3 +1,4 @@
+import 'mention.dart';
 import 'message.dart';
 import 'text_format.dart';
 import 'uploaded_attachment.dart';
@@ -48,6 +49,9 @@ class ScheduledMessage {
   final String text;
   final List<TextFormatRun>? textFormat;
 
+  /// [text] 안의 멘션 구간 — 보내지는 순간 서버가 방 멤버인지 다시 확인한다.
+  final List<Mention> mentions;
+
   /// 같이 보낼 첨부 — 메시지 첨부처럼 서명된 링크로 온다. 고쳐서 다시 보낼 땐 [uploadedAttachments].
   final List<MessageAttachment> attachments;
   final DateTime sendAt;
@@ -66,6 +70,7 @@ class ScheduledMessage {
     this.title,
     required this.text,
     this.textFormat,
+    this.mentions = const [],
     this.attachments = const [],
     required this.sendAt,
     this.status = ScheduledMessageStatus.scheduled,
@@ -99,6 +104,7 @@ class ScheduledMessage {
       title: title == null || title.isEmpty ? null : title,
       text: json['text'] as String? ?? '',
       textFormat: parseTextFormat(json['textFormat']),
+      mentions: parseMentions(json['mentions']),
       attachments: attachments,
       sendAt: sendAt,
       status: scheduledStatusFromWire(json['status'] as String?),
@@ -138,6 +144,7 @@ class ScheduledMessage {
     title: title,
     text: text,
     textFormat: textFormat,
+    mentions: mentions,
     attachments: attachments,
     sendAt: sendAt,
     status: status,

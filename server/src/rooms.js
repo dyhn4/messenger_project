@@ -44,6 +44,7 @@ import {
   updateTopicFolder,
   withRoomLock,
 } from './db/queries/rooms.js';
+import { countUnreadMentionsInRoom } from './db/queries/notifications.js';
 import { findTeamById, isTeamMember, isTopicCreator, listTeamMemberIds } from './db/queries/teams.js';
 import { teamAccess, topicAccess } from './access.js';
 import { AUDIT, recordAudit } from './audit.js';
@@ -328,6 +329,8 @@ export async function toRoomDto(room, requesterId) {
       countUnreadCommentsForUser(room.id, requesterId, myLastRead),
     ]);
     dto.unreadCount = unreadMessages + unreadComments;
+    // 이 방에서 내가 읽지 않은 멘션 알림 수 — 방 목록의 안읽음 옆 "@" 표시(notifications.js).
+    dto.unreadMentionCount = await countUnreadMentionsInRoom(requesterId, room.id);
     dto.favorite = await getMemberFavorite(room.id, requesterId);
     dto.muted = await getMemberMuted(room.id, requesterId);
     dto.customName = room.type === 'group' ? await getMemberCustomName(room.id, requesterId) : null;

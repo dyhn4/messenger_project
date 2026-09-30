@@ -6,8 +6,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/mention.dart';
 import '../models/text_format.dart';
 import '../services/app_links.dart';
+import '../services/mention_logic.dart';
 
 export '../models/text_format.dart';
 
@@ -125,6 +127,14 @@ class RichTextEditingController extends TextEditingController {
   /// 서식을 담을지 — 비밀 대화처럼 서식을 못 보내는 곳이면 false(입력은 평문 그대로).
   bool formattingEnabled = true;
 
+  /// 멘션(@이름·@all)을 추적할지 — 채팅·댓글·게시글·예약 입력칸만 켠다(비밀 대화는 끈다).
+  bool mentionsEnabled = false;
+
+  /// 글 안에서 지금 멘션으로 잡혀 있는 구간들(시작 위치순). 글이 바뀌면 [remapMentionsForEdit]로 따라가고,
+  /// 이름을 고치거나 지워서 어긋나면 그 멘션은 풀린다.
+  List<Mention> _mentions = [];
+  List<Mention> get mentions => List.unmodifiable(_mentions);
+
   bool _manual = false;
 
   /// 한글 등 IME로 글자를 조합하고 있는지 — Windows는 조합 중이 아니어도 조합 영역을
@@ -173,6 +183,9 @@ class RichTextEditingController extends TextEditingController {
     final removedEnd = o.length - suf;
     final insertedEnd = n.length - suf;
     final count = insertedEnd - pre;
+    if (mentionsEnabled && _mentions.isNotEmpty) {
+      _mentions = remapMentionsForEdit(_mentions, pre, removedEnd - pre, count);
+    }
 
     var flags = 0;
     String? href;
@@ -214,6 +227,7 @@ class RichTextEditingController extends TextEditingController {
           pre + count,
           List<String?>.filled(display.length, pasted.trim()),
         );
+        _remapMentions(pre, count, display.length);
         return TextEditingValue(
           text: n.replaceRange(pre, insertedEnd, display),
           selection: TextSelection.collapsed(offset: pre + display.length),
@@ -242,6 +256,7 @@ class RichTextEditingController extends TextEditingController {
     if (line.length == m.end) {
       _chars.flags.removeRange(lineStart, nl + 1);
       _chars.hrefs.removeRange(lineStart, nl + 1);
+      _remapMentions(lineStart, nl + 1 - lineStart, 0);
       return TextEditingValue(
         text: t.replaceRange(lineStart, nl + 1, ''),
         selection: TextSelection.collapsed(offset: lineStart),
@@ -254,10 +269,17 @@ class RichTextEditingController extends TextEditingController {
     final quote = _chars.flags[nl] & Fmt.quote;
     _chars.flags.insertAll(at, List.filled(prefix.length, quote));
     _chars.hrefs.insertAll(at, List<String?>.filled(prefix.length, null));
+    _remapMentions(at, 0, prefix.length);
     return TextEditingValue(
       text: t.replaceRange(at, at, prefix),
       selection: TextSelection.collapsed(offset: at + prefix.length),
     );
+  }
+
+  void _remapMentions(int at, int removed, int inserted) {
+    if (mentionsEnabled && _mentions.isNotEmpty) {
+      _mentions = remapMentionsForEdit(_mentions, at, removed, inserted);
+    }
   }
 
   /// 서식 배열을 직접 고친 뒤(글은 그대로) 화면을 다시 그리게 한다.
@@ -272,6 +294,7 @@ class RichTextEditingController extends TextEditingController {
     var t = text;
     final sorted = [...ops]..sort((a, b) => b.$1.compareTo(a.$1));
     for (final (at, remove, insert, flags) in sorted) {
+      _remapMentions(at, remove, insert.length);
       t = t.replaceRange(at, at + remove, insert);
       _chars.flags.replaceRange(
         at,
@@ -531,9 +554,16 @@ class RichTextEditingController extends TextEditingController {
   // ── 불러오기 / 내보내기 ──
 
   /// 저장된 글과 서식을 입력칸에 채운다(수정할 때).
-  void load(String text, List<TextFormatRun>? format) {
+  void load(
+    String text,
+    List<TextFormatRun>? format, {
+    List<Mention>? mentions,
+  }) {
     _chars = _Chars.fromRuns(text.length, format);
     _pending = null;
+    _mentions = mentionsEnabled && mentions != null
+        ? sanitizeMentions(mentions, text)
+        : [];
     _manual = true;
     try {
       super.value = TextEditingValue(
@@ -548,13 +578,7 @@ class RichTextEditingController extends TextEditingController {
   /// 보낼 글(앞뒤 공백을 뗀 것)과 그에 맞춘 서식 구간. 서식이 없으면 format은 null.
   ({String text, List<TextFormatRun>? format}) formatted() {
     final t = text;
-    var start = 0, end = t.length;
-    while (start < end && _isSpace(t.codeUnitAt(start))) {
-      start++;
-    }
-    while (end > start && _isSpace(t.codeUnitAt(end - 1))) {
-      end--;
-    }
+    final (start, end) = _trimRange(t);
     final body = t.substring(start, end);
     if (!formattingEnabled || _chars.flags.length != t.length) {
       return (text: body, format: null);
@@ -563,12 +587,69 @@ class RichTextEditingController extends TextEditingController {
     return (text: body, format: runs.isEmpty ? null : runs);
   }
 
+  /// 앞뒤 공백을 뗀 [시작, 끝) — formatted()와 [formattedMentions]가 같은 기준을 쓴다.
+  (int, int) _trimRange(String t) {
+    var start = 0, end = t.length;
+    while (start < end && _isSpace(t.codeUnitAt(start))) {
+      start++;
+    }
+    while (end > start && _isSpace(t.codeUnitAt(end - 1))) {
+      end--;
+    }
+    return (start, end);
+  }
+
+  /// 보낼 글([formatted]의 text)에 맞춘 멘션 — 앞뒤 공백을 뗀 만큼 위치를 당기고, 어긋났거나(글자가 '@'가
+  /// 아님) 허용 안 되는 것([allowAll] 아니면 @all, 자기 자신, 중복, 50개 초과)은 뺀다. 멘션을 안 쓰는
+  /// 입력칸이면 빈 목록.
+  List<Mention> formattedMentions({bool allowAll = true, String? selfUserId}) {
+    if (!mentionsEnabled || _mentions.isEmpty) return const [];
+    final t = text;
+    final (start, end) = _trimRange(t);
+    return sanitizeMentions(
+      sliceMentions(_mentions, start, end),
+      t.substring(start, end),
+      allowAll: allowAll,
+      selfUserId: selfUserId,
+    );
+  }
+
+  /// 자동완성에서 고른 사람을 입력칸에 넣는다 — [start, end)("@"와 지금까지 친 글자)를 "@이름 "으로
+  /// 바꾸고 커서를 그 뒤로 옮기며 그 구간을 멘션으로 잡는다. [userId]가 null이면 @all.
+  void insertMention({
+    required int start,
+    required int end,
+    required String label,
+    String? userId,
+  }) {
+    if (!mentionsEnabled) return;
+    final insert = '@$label ';
+    final hasSpaceAfter = end < text.length && _isSpace(text.codeUnitAt(end));
+    // 커서 뒤에 이미 공백이 있으면 하나 더 넣지 않는다.
+    final inserted = hasSpaceAfter
+        ? insert.substring(0, insert.length - 1)
+        : insert;
+    final spanEnd = start + 1 + label.length;
+    _edit(
+      [(start, end - start, inserted, 0)],
+      (_) => TextSelection.collapsed(
+        offset: start + inserted.length + (hasSpaceAfter ? 1 : 0),
+      ),
+    );
+    final m = userId == null
+        ? Mention.all(start: start, end: spanEnd)
+        : Mention.user(userId, start: start, end: spanEnd);
+    _mentions = [..._mentions, m]..sort((a, b) => a.start.compareTo(b.start));
+    _touch();
+  }
+
   static bool _isSpace(int c) =>
       c == 0x20 || c == 0x0A || c == 0x0D || c == 0x09 || c == 0x3000;
 
   @override
   void clear() {
     _pending = null;
+    _mentions = [];
     super.clear();
   }
 
@@ -592,18 +673,32 @@ class RichTextEditingController extends TextEditingController {
         : TextRange.empty;
     bool inComposing(int i) =>
         composing.isValid && i >= composing.start && i < composing.end;
+    // 멘션으로 잡힌 글자 — 입력하는 중에도 "@이름"이 멘션으로 보이게 강조한다.
+    final mentionAt = mentionsEnabled && _mentions.isNotEmpty
+        ? _mentionIndex(t.length, _mentions)
+        : null;
+    final mentionColor = Theme.of(context).colorScheme.primary;
     final children = <TextSpan>[];
     var i = 0;
     while (i < t.length) {
       final f = _chars.flags[i], h = _chars.hrefs[i], c = inComposing(i);
+      final mi = mentionAt?[i] ?? -1;
       var j = i + 1;
       while (j < t.length &&
           _chars.flags[j] == f &&
           _chars.hrefs[j] == h &&
-          inComposing(j) == c) {
+          inComposing(j) == c &&
+          (mentionAt?[j] ?? -1) == mi) {
         j++;
       }
       var s = formatStyle(context, base, f, h);
+      if (mi >= 0) {
+        s = s.copyWith(
+          color: mentionColor,
+          fontWeight: FontWeight.w600,
+          backgroundColor: mentionColor.withValues(alpha: 0.12),
+        );
+      }
       if (c) {
         s = s.copyWith(
           decoration: TextDecoration.combine([
@@ -617,6 +712,19 @@ class RichTextEditingController extends TextEditingController {
     }
     return TextSpan(style: style, children: children);
   }
+}
+
+/// 글자마다 어느 멘션에 속하는지(없으면 -1) — 글 길이 안에 온전히 들어오는 구간만 본다.
+List<int> _mentionIndex(int length, List<Mention> mentions) {
+  final out = List<int>.filled(length, -1);
+  for (var k = 0; k < mentions.length; k++) {
+    final m = mentions[k];
+    if (m.start < 0 || m.end > length || m.end <= m.start) continue;
+    for (var i = m.start; i < m.end; i++) {
+      out[i] = k;
+    }
+  }
+  return out;
 }
 
 /// 서식 입력칸(TextField)을 감싸는 래퍼 —
@@ -1344,6 +1452,16 @@ class FormattedText extends StatefulWidget {
   /// 마우스로 긁어 선택할 수 있게(SelectableText) 그릴지.
   final bool selectable;
 
+  /// 본문 안의 멘션 구간 — 강조해서 그린다. 나([myUserId])를 멘션한 것(@all 포함)은 더 진하게.
+  final List<Mention> mentions;
+  final String? myUserId;
+
+  /// 멘션한 사람 이름을 눌렀을 때(@all은 안 불린다) — 멤버 프로필을 여는 쪽이 받는다.
+  final void Function(Mention mention)? onMentionTap;
+
+  /// 멘션 글자색 — 없으면 테마 primary.
+  final Color? mentionColor;
+
   const FormattedText(
     this.text, {
     super.key,
@@ -1351,6 +1469,10 @@ class FormattedText extends StatefulWidget {
     this.style,
     this.linkColor,
     this.selectable = false,
+    this.mentions = const [],
+    this.myUserId,
+    this.onMentionTap,
+    this.mentionColor,
   });
 
   @override
@@ -1423,16 +1545,43 @@ class _FormattedTextState extends State<FormattedText> {
     }
   }
 
+  /// 글자마다 어느 멘션에 속하는지(없으면 -1) — build에서 채운다. 멘션이 없으면 비어 있다.
+  List<int> _mentionOf = const [];
+
+  TextSpan _mentionSpan(String piece, TextStyle style, Mention m) {
+    final color = widget.mentionColor ?? Theme.of(context).colorScheme.primary;
+    final mine =
+        m.isAll || (widget.myUserId != null && m.userId == widget.myUserId);
+    TapGestureRecognizer? recognizer;
+    if (!m.isAll && widget.onMentionTap != null) {
+      recognizer = TapGestureRecognizer()
+        ..onTap = () => widget.onMentionTap!(m);
+      _recognizers.add(recognizer);
+    }
+    return TextSpan(
+      text: piece,
+      recognizer: recognizer,
+      mouseCursor: recognizer == null ? null : SystemMouseCursors.click,
+      style: style.copyWith(
+        color: color,
+        fontWeight: mine ? FontWeight.w800 : FontWeight.w600,
+        backgroundColor: color.withValues(alpha: mine ? 0.22 : 0.10),
+      ),
+    );
+  }
+
   List<InlineSpan> _spans(_Chars chars, int from, int to, TextStyle base) {
     final t = widget.text;
     final out = <InlineSpan>[];
     var i = from;
     while (i < to) {
       final f = chars.flags[i] & ~Fmt.quote, h = chars.hrefs[i];
+      final mi = _mentionOf.isEmpty ? -1 : _mentionOf[i];
       var j = i + 1;
       while (j < to &&
           (chars.flags[j] & ~Fmt.quote) == f &&
-          chars.hrefs[j] == h) {
+          chars.hrefs[j] == h &&
+          (_mentionOf.isEmpty || _mentionOf[j] == mi)) {
         j++;
       }
       final piece = t.substring(i, j);
@@ -1443,7 +1592,9 @@ class _FormattedTextState extends State<FormattedText> {
         h,
         linkColor: widget.linkColor,
       );
-      if (h != null) {
+      if (mi >= 0 && h == null) {
+        out.add(_mentionSpan(piece, style, widget.mentions[mi]));
+      } else if (h != null) {
         out.add(TextSpan(text: piece, style: style, recognizer: _open(h)));
       } else if (f & Fmt.code != 0) {
         out.add(TextSpan(text: piece, style: style));
@@ -1466,6 +1617,9 @@ class _FormattedTextState extends State<FormattedText> {
     final base = DefaultTextStyle.of(context).style.merge(widget.style);
     final t = widget.text;
     final chars = _Chars.fromRuns(t.length, widget.format);
+    _mentionOf = widget.mentions.isEmpty
+        ? const []
+        : _mentionIndex(t.length, widget.mentions);
 
     // 줄마다 인용인지(그 줄 첫 글자에 인용 서식이 있는지) 보고, 같은 종류끼리 묶어 블록으로.
     final blocks = <(bool, int, int)>[];

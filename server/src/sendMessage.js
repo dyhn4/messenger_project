@@ -9,6 +9,8 @@ import { topicAccess } from './access.js';
 import { MESSAGE_ATTACHMENT_MAX, parsePostFields, POST_ATTACHMENT_MAX, topicWriteDenial } from './permissions.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { toMessageDto } from './messages.js';
+import { mentionsToStore, sanitizeMentions } from './notificationRules.js';
+import { notifyBoard, notifyMentions } from './notifications.js';
 import { toPollDto } from './polls.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { resolveRawUrl } from './upload.js';
@@ -30,6 +32,8 @@ import { sanitizeTextFormat } from './textFormat.js';
  * 메시지 롱프레스 메뉴, message_share_screen.dart/message_forward_screen.dart 참고.)
  * 보드 뷰 게시글: { roomId, type: 'post', title, text, textFormat?, attachments? } — 보드 뷰 토픽은
  * 게시글만(투표 제외), 그 밖의 방은 게시글을 받지 않는다.
+ * 멘션: text/post에 mentions?: [{type:'user',userId,s,e} | {type:'all',s,e}] — 방 멤버만·구간 검사 등은
+ * notificationRules.js의 sanitizeMentions가 걸러 저장하고, 저장 뒤 notifications.js가 알림 기록·푸시를 만든다.
  * 투표: { roomId, type: 'poll', attachments? } + [poll]({ title, description, optionTexts, anonymous, multiple,
  * closesAt } — polls.js의 parsePollFields가 검사한 값). 투표는 REST(POST /rooms/:roomId/polls)로만 만든다 —
  * 소켓 message:send는 [poll]을 넘길 수 없어서 type:'poll'을 거절한다. 첨부는 보드 뷰 토픽의 투표만 30개까지.
@@ -123,6 +127,25 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
     .filter((a) => a.fileUrl);
   const head = attachments[0];
 
+  // 멘션 — 본문이 있는 텍스트·게시글과 사진/파일에 붙인 설명글(캡션)에, 그 방의 멤버만(클라이언트 입력칸은 첨부 설명글에서도
+  // @ 멘션을 고를 수 있다). 스티커·투표는 본문이 아니라 제외. 멘션이 없으면 멤버 조회를 건너뛴다(푸시 때 어차피 읽는다).
+  let memberIds = null;
+  let mentions = null;
+  const mentionable = !isPoll && payload.type !== 'sticker';
+  if (mentionable && !room.isSecret && Array.isArray(payload.mentions) && payload.mentions.length > 0) {
+    memberIds = await listRoomMemberIds(room.id);
+    const rawText = payload.text;
+    mentions = mentionsToStore(
+      sanitizeMentions(payload.mentions, isPost ? post.text : payload.text, {
+        room,
+        senderId,
+        memberIdSet: new Set(memberIds),
+        // 게시글 본문은 앞뒤 공백을 잘라 저장하므로 잘린 만큼 구간을 당긴다(서식과 같은 이유).
+        shift: isPost && typeof rawText === 'string' ? rawText.length - rawText.trimStart().length : 0,
+      }),
+    );
+  }
+
   // 게시글은 제목·본문(앞뒤 공백 뺀 값)과 첨부 목록만 쓴다 — 단일 파일 칸(fileUrl 등)·인용·전달
   // 값은 일반 메시지 전용이라 무시한다. 투표는 messages.text에 제목을 그대로 넣는다(검색·알림·미리보기가
   // text를 쓰므로) — 보기·마감 같은 나머지는 polls 표에 있다.
@@ -141,6 +164,7 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
         : room.isSecret || typeof payload.text !== 'string'
           ? null
           : sanitizeTextFormat(payload.textFormat, payload.text),
+    mentions,
     fileUrl: head?.fileUrl ?? (isRich ? null : fileUrl),
     fileName:
       head?.fileName ?? (!isRich && typeof payload.fileName === 'string' ? payload.fileName : null),
@@ -203,20 +227,32 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
 
   // 응답(소켓 ack 등)을 기다리게 하지 않도록 백그라운드로 보낸다 — 실패해도(토큰 만료 등)
   // notifyOfflineMembers 내부에서 개별적으로 처리되고 메시지 전송 자체엔 영향 없다.
-  listRoomMemberIds(room.id)
-    .then((memberIds) =>
-      notifyOfflineMembers({
-        memberIds,
-        senderId,
-        senderName: message.senderName,
-        sender,
-        room,
-        entry: message,
-        roomTag: roomTagFor(room),
-        kind: 'message',
-      }),
-    )
-    .catch((err) => console.error('[push] message:send 알림 실패:', err?.message ?? err));
+  (async () => {
+    const ids = memberIds ?? (await listRoomMemberIds(room.id));
+    // 알림 기록(멘션, 보드 새 게시글)을 먼저 — 실패해도 일반 푸시는 그대로 나간다. 멘션 푸시를 받는 사람은 일반 푸시에서 뺀다.
+    let pushedUserIds = [];
+    try {
+      const actor = { id: senderId, name: message.senderName, user: sender };
+      const mentioned = await notifyMentions({ io, room, message, actor, mentions: message.mentions, memberIds: ids });
+      pushedUserIds = mentioned.pushedUserIds;
+      if (isPost) {
+        await notifyBoard({ io, event: 'post', room, post: message, actor, memberIds: ids, excludeIds: mentioned.notifiedUserIds });
+      }
+    } catch (err) {
+      console.error('[notifications] 알림 기록 실패:', err?.message ?? err);
+    }
+    await notifyOfflineMembers({
+      memberIds: ids,
+      senderId,
+      senderName: message.senderName,
+      sender,
+      room,
+      entry: message,
+      roomTag: roomTagFor(room),
+      kind: 'message',
+      excludeUserIds: pushedUserIds,
+    });
+  })().catch((err) => console.error('[push] message:send 알림 실패:', err?.message ?? err));
 
   // 링크 미리보기도 백그라운드로 — 외부 사이트를 긁어오는 거라 몇 초 걸릴 수 있는데 메시지
   // 전송 자체를 그만큼 늦출 이유가 없다. 비밀 대화는 서버가 내용을 아예 못 봐야 하므로(암호문)

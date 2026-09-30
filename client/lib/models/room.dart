@@ -152,6 +152,10 @@ class Room {
   /// [hasUnreadAnnouncement]가 true일 때 안 읽은 공지가 몇 개인지(알림 센터 배지 숫자).
   int unreadAnnouncementCount;
 
+  /// 이 방에서 내가 아직 읽지 않은 멘션 알림 수 — 방 목록이 안읽음 배지 옆에 "@"를 붙이는 데 쓴다.
+  /// 서버가 방 목록에 실어 주고, 실시간으로는 notification:new가 올리고 그 방을 읽으면 0이 된다.
+  int unreadMentionCount;
+
   /// 그룹채팅 아이콘 — 만들 때 고르고, 이후 "채팅 정보 변경"으로 바꿀 수 있다(바뀌면 room:created로
   /// 다시 와서 [mergeServerState]가 그 자리에서 반영한다 — 그래서 non-final).
   /// null 또는 'members'면 room_avatar.dart가 기존처럼 멤버 아바타 두 개를 겹쳐 보여준다.
@@ -212,6 +216,7 @@ class Room {
     this.latestAnnouncement,
     this.hasUnreadAnnouncement = false,
     this.unreadAnnouncementCount = 0,
+    this.unreadMentionCount = 0,
     this.iconType,
     this.iconEmoji,
     this.iconColor,
@@ -271,6 +276,7 @@ class Room {
       hasUnreadAnnouncement: json['hasUnreadAnnouncement'] as bool? ?? false,
       unreadAnnouncementCount:
           (json['unreadAnnouncementCount'] as num?)?.toInt() ?? 0,
+      unreadMentionCount: (json['unreadMentionCount'] as num?)?.toInt() ?? 0,
       iconType: json['iconType'] as String?,
       iconEmoji: json['iconEmoji'] as String?,
       iconColor: json['iconColor'] as String?,
@@ -339,6 +345,7 @@ class Room {
     lastMessagePreview = incoming.lastMessagePreview;
     hasUnreadAnnouncement = incoming.hasUnreadAnnouncement;
     unreadAnnouncementCount = incoming.unreadAnnouncementCount;
+    unreadMentionCount = incoming.unreadMentionCount;
   }
 
   /// 화면에 보여줄 이름. DM은 상대방 이름, 이름 없는 그룹은 멤버 이름을 이름순 정렬해 보여준다.

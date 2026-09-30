@@ -11,9 +11,11 @@ import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
+import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
 import '../services/typing_gate.dart';
 import 'attachment_widgets.dart';
+import 'mention_autocomplete.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
 
@@ -78,6 +80,7 @@ class CommentInputBar extends StatefulWidget {
 class CommentInputBarState extends State<CommentInputBar> {
   final _controller = RichTextEditingController();
   final _focusNode = FocusNode();
+  final _mentionKey = GlobalKey<MentionAutocompleteState>();
   final _attachments = <_PendingAttachment>[];
   bool _sending = false;
 
@@ -137,6 +140,8 @@ class CommentInputBarState extends State<CommentInputBar> {
       return false;
     }
     // ChatInputBarState와 동일 — 환경설정 "메시지 전송 옵션"대로(기본: Enter 전송·Shift+Enter 줄바꿈).
+    // 멘션 자동완성 목록이 떠 있으면 Enter는 목록에서 고르는 데 쓴다(mention_autocomplete.dart).
+    if (_mentionKey.currentState?.isOpen == true) return false;
     final shift = HardwareKeyboard.instance.isShiftPressed;
     final sendKey = widget.controller.session.settings.sendWithShiftEnter
         ? shift
@@ -248,6 +253,11 @@ class CommentInputBarState extends State<CommentInputBar> {
 
   Future<void> _send() async {
     final (:text, :format) = _controller.formatted();
+    final mentions = mentionsToSend(
+      _controller,
+      widget.controller.room,
+      widget.controller.session.userId,
+    );
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
     if (_uploading) return;
@@ -277,6 +287,7 @@ class CommentInputBarState extends State<CommentInputBar> {
           widget.messageId,
           text,
           format: format,
+          mentions: mentions,
         );
       } else {
         // 첨부와 함께 입력한 댓글은 별도 댓글로 보내지 않고, 첫 번째 첨부의 캡션으로 붙인다.
@@ -288,6 +299,7 @@ class CommentInputBarState extends State<CommentInputBar> {
             a.result!,
             caption: i == 0 ? text : null,
             captionFormat: i == 0 ? format : null,
+            captionMentions: i == 0 ? mentions : null,
           );
         }
       }
@@ -356,33 +368,46 @@ class CommentInputBarState extends State<CommentInputBar> {
               ),
               child: ScrollbarTheme(
                 data: mutedScrollbarThemeData,
-                child: RichFieldWrapper(
+                child: MentionAutocomplete(
+                  key: _mentionKey,
                   controller: _controller,
-                  child: TextField(
-                    key: const ValueKey('comment-input'),
+                  focusNode: _focusNode,
+                  room: widget.controller.room,
+                  myUserId: widget.controller.session.userId,
+                  resolveUrl: widget.controller.session.resolveUrl,
+                  child: RichFieldWrapper(
                     controller: _controller,
-                    focusNode: _focusNode,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                      // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                      hintText: _focusNode.hasFocus ? null : '댓글 입력',
-                      border: _formatOpen
-                          ? InputBorder.none
-                          : const OutlineInputBorder(),
-                      // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
-                      // 가깝게 붙인다.
-                      contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
+                    child: TextField(
+                      key: const ValueKey('comment-input'),
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                        // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                        hintText: _focusNode.hasFocus ? null : '댓글 입력',
+                        border: _formatOpen
+                            ? InputBorder.none
+                            : const OutlineInputBorder(),
+                        // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
+                        // 가깝게 붙인다.
+                        contentPadding: const EdgeInsets.fromLTRB(
+                          12,
+                          12,
+                          2,
+                          12,
+                        ),
+                      ),
+                      minLines: 1,
+                      maxLines: 6,
+                      // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
+                      // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
+                      // _handleKey가 순수 Enter만 직접 가로채 보낸다.
+                      textInputAction: Platform.isWindows
+                          ? TextInputAction.newline
+                          : TextInputAction.send,
+                      onSubmitted: (_) => _send(),
                     ),
-                    minLines: 1,
-                    maxLines: 6,
-                    // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
-                    // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
-                    // _handleKey가 순수 Enter만 직접 가로채 보낸다.
-                    textInputAction: Platform.isWindows
-                        ? TextInputAction.newline
-                        : TextInputAction.send,
-                    onSubmitted: (_) => _send(),
                   ),
                 ),
               ),
@@ -412,6 +437,12 @@ class CommentInputBarState extends State<CommentInputBar> {
                         tooltip: '이모티콘',
                       ),
                     ),
+                    if (roomAllowsMention(widget.controller.room))
+                      MentionButton(
+                        onPressed: _sending
+                            ? null
+                            : () => _mentionKey.currentState?.insertTrigger(),
+                      ),
                     IconButton(
                       icon: const Icon(Icons.attach_file),
                       onPressed: _sending ? null : _pickFile,

@@ -928,11 +928,11 @@ void main() {
       expect(session.scheduledMessageById('post'), same(retried));
       expect(session.scheduledMessages.map((m) => m.id), ['chat', 'post']);
 
-      // 글을 바꾸면 서식도 늘 같이 간다(없으면 null로 지운다).
+      // 글을 바꾸면 서식·멘션도 늘 같이 간다(없으면 null·빈 목록으로 지운다).
       await session.updateScheduledMessage('post', text: ' 새 본문 ');
       expect(
         _body(server.called('PATCH', '/api/scheduled-messages/post').last),
-        {'text': '새 본문', 'textFormat': null},
+        {'text': '새 본문', 'textFormat': null, 'mentions': <Object>[]},
       );
 
       // 게시글 예약을 채팅 토픽으로 옮기면 제목은 알아서 지운다.

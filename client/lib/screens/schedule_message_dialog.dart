@@ -10,11 +10,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
 
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
     show ApiException, UploadCancelToken, UploadCancelledException;
 import '../services/file_type_utils.dart';
+import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart' show UploadedAttachment;
 import '../services/session.dart';
 import '../services/time_format.dart';
@@ -23,6 +25,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart'
     show DropZoneOverlay, formatFileSize;
 import '../widgets/floating_dialog.dart';
+import '../widgets/mention_autocomplete.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/rich_text_format.dart';
 import '../widgets/room_picker_field.dart';
@@ -60,6 +63,7 @@ Future<ScheduledMessage?> showScheduleMessageEditor(
   String? title,
   String text = '',
   List<TextFormatRun>? textFormat,
+  List<Mention>? mentions,
   List<ScheduleDraftAttachment> attachments = const [],
   ScheduledMessage? editing,
 }) async {
@@ -70,6 +74,7 @@ Future<ScheduledMessage?> showScheduleMessageEditor(
     title: title,
     text: text,
     textFormat: textFormat,
+    mentions: mentions,
     attachments: attachments,
     editing: editing,
     asDialog: wide,
@@ -198,6 +203,7 @@ class ScheduleMessageEditor extends StatefulWidget {
   final String? title;
   final String text;
   final List<TextFormatRun>? textFormat;
+  final List<Mention>? mentions;
   final List<ScheduleDraftAttachment> attachments;
 
   /// 고칠 예약(없으면 새로 만든다).
@@ -213,6 +219,7 @@ class ScheduleMessageEditor extends StatefulWidget {
     this.title,
     this.text = '',
     this.textFormat,
+    this.mentions,
     this.attachments = const [],
     this.editing,
     this.asDialog = true,
@@ -226,8 +233,9 @@ class ScheduleMessageEditor extends StatefulWidget {
 class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
   late final TextEditingController _title;
   final _titleFocus = FocusNode(debugLabel: 'schedule-title');
-  final _message = RichTextEditingController();
+  final _message = RichTextEditingController()..mentionsEnabled = true;
   final _messageFocus = FocusNode(debugLabel: 'schedule-message');
+  final _mentionKey = GlobalKey<MentionAutocompleteState>();
   final _scroll = ScrollController();
   final _dateField = GlobalKey<_DateFieldState>();
   final _items = <_Item>[];
@@ -274,7 +282,11 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       final roomId = editing.roomId;
       _room = roomId == null ? null : session.roomById(roomId);
       _initialTitle = editing.title ?? '';
-      _message.load(editing.text, editing.textFormat);
+      _message.load(
+        editing.text,
+        editing.textFormat,
+        mentions: editing.mentions,
+      );
       for (final a in editing.attachments) {
         _items.add(
           _Item.ready(
@@ -295,7 +307,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     } else {
       _room = widget.room;
       _initialTitle = widget.title ?? '';
-      _message.load(widget.text, widget.textFormat);
+      _message.load(widget.text, widget.textFormat, mentions: widget.mentions);
       for (final a in widget.attachments) {
         _items.add(
           _Item.ready(a.uploaded, file: a.file, thumbBytes: a.thumbnailBytes),
@@ -625,11 +637,14 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
 
   bool _sameText(
     ({String text, List<TextFormatRun>? format}) now,
+    List<Mention> nowMentions,
     ScheduledMessage m,
   ) =>
       now.text == m.text &&
       jsonEncode(textFormatToJson(now.format)) ==
-          jsonEncode(textFormatToJson(m.textFormat));
+          jsonEncode(textFormatToJson(m.textFormat)) &&
+      jsonEncode(mentionsToJson(nowMentions)) ==
+          jsonEncode(mentionsToJson(m.mentions));
 
   bool get _attachmentsChanged {
     if (_items.length != _initialItems.length) return true;
@@ -659,6 +674,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       }
       final room = _room!;
       final body = _message.formatted();
+      final mentions = mentionsToSend(_message, room, widget.session.userId);
       final attachments = [for (final i in _items) i.result!];
       final editing = _editing;
       final session = widget.session;
@@ -669,18 +685,20 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
           title: room.isBoard ? _title.text : null,
           text: body.text,
           textFormat: body.format,
+          mentions: mentions,
           attachments: attachments,
           sendAt: _sendAt,
         );
       } else {
         // 바뀐 칸만 보낸다 — 발송 시간은 서버가 늘 다시 보므로(지난 시각이면 거절) 늘 보낸다.
-        final textChanged = !_sameText(body, editing);
+        final textChanged = !_sameText(body, mentions, editing);
         saved = await session.updateScheduledMessage(
           editing.id,
           roomId: room.id == editing.roomId ? null : room.id,
           title: room.isBoard ? _title.text.trim() : null,
           text: textChanged ? body.text : null,
           textFormat: textChanged ? body.format : null,
+          mentions: textChanged ? mentions : null,
           attachments: _attachmentsChanged ? attachments : null,
           sendAt: _sendAt,
         );
@@ -965,12 +983,23 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
             height: 28,
             child: Theme(
               data: theme.copyWith(visualDensity: VisualDensity.compact),
-              child: RichFormatToggleButton(
-                open: _formatOpen,
-                onPressed: () {
-                  setState(() => _formatOpen = !_formatOpen);
-                  _messageFocus.requestFocus();
-                },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_room != null && roomAllowsMention(_room!))
+                    MentionButton(
+                      onPressed: _submitting
+                          ? null
+                          : () => _mentionKey.currentState?.insertTrigger(),
+                    ),
+                  RichFormatToggleButton(
+                    open: _formatOpen,
+                    onPressed: () {
+                      setState(() => _formatOpen = !_formatOpen);
+                      _messageFocus.requestFocus();
+                    },
+                  ),
+                ],
               ),
             ),
           ),
@@ -1003,6 +1032,18 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     OutlineInputBorder border(Color color, double width) => OutlineInputBorder(
       borderSide: BorderSide(color: color, width: width),
     );
+    final room = _room;
+    Widget mentionWrap(Widget field) => room == null
+        ? field
+        : MentionAutocomplete(
+            key: _mentionKey,
+            controller: _message,
+            focusNode: _messageFocus,
+            room: room,
+            myUserId: widget.session.userId,
+            resolveUrl: widget.session.resolveUrl,
+            child: field,
+          );
     return RichFormatFrame(
       open: _formatOpen,
       focused: _messageFocus.hasFocus,
@@ -1010,32 +1051,36 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         controller: _message,
         focusNode: _messageFocus,
       ),
-      child: RichFieldWrapper(
-        controller: _message,
-        child: TextField(
-          key: const ValueKey('schedule-message'),
+      child: mentionWrap(
+        RichFieldWrapper(
           controller: _message,
-          focusNode: _messageFocus,
-          enabled: !_submitting,
-          minLines: 4,
-          maxLines: 10,
-          keyboardType: TextInputType.multiline,
-          textAlignVertical: TextAlignVertical.top,
-          decoration: InputDecoration(
-            hintText: _isBoard ? '게시글 내용을 입력하세요' : '보낼 메시지를 입력하세요',
-            isDense: true,
-            contentPadding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
-            border: _formatOpen ? InputBorder.none : const OutlineInputBorder(),
-            enabledBorder: _formatOpen
-                ? InputBorder.none
-                : error
-                ? border(theme.colorScheme.error, 1)
-                : null,
-            focusedBorder: _formatOpen
-                ? InputBorder.none
-                : error
-                ? border(theme.colorScheme.error, 2)
-                : null,
+          child: TextField(
+            key: const ValueKey('schedule-message'),
+            controller: _message,
+            focusNode: _messageFocus,
+            enabled: !_submitting,
+            minLines: 4,
+            maxLines: 10,
+            keyboardType: TextInputType.multiline,
+            textAlignVertical: TextAlignVertical.top,
+            decoration: InputDecoration(
+              hintText: _isBoard ? '게시글 내용을 입력하세요' : '보낼 메시지를 입력하세요',
+              isDense: true,
+              contentPadding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+              border: _formatOpen
+                  ? InputBorder.none
+                  : const OutlineInputBorder(),
+              enabledBorder: _formatOpen
+                  ? InputBorder.none
+                  : error
+                  ? border(theme.colorScheme.error, 1)
+                  : null,
+              focusedBorder: _formatOpen
+                  ? InputBorder.none
+                  : error
+                  ? border(theme.colorScheme.error, 2)
+                  : null,
+            ),
           ),
         ),
       ),

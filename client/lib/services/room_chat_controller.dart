@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/comment.dart';
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
@@ -375,6 +376,7 @@ class RoomChatController extends ChangeNotifier {
     String messageId,
     String text, {
     List<TextFormatRun>? format,
+    List<Mention>? mentions,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
@@ -383,6 +385,7 @@ class RoomChatController extends ChangeNotifier {
       messageId,
       text: payload,
       textFormat: room.isSecret || trimmed != text ? null : format,
+      mentions: room.isSecret || trimmed != text ? null : mentions,
     );
   }
 
@@ -399,6 +402,7 @@ class RoomChatController extends ChangeNotifier {
     UploadedAttachment u, {
     String? caption,
     List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
   }) async {
     final trimmedCaption = caption?.trim();
     if (room.isSecret) {
@@ -430,6 +434,7 @@ class RoomChatController extends ChangeNotifier {
       messageId,
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
       textFormat: trimmedCaption == caption ? captionFormat : null,
+      mentions: trimmedCaption == caption ? captionMentions : null,
       type: u.isImage ? 'image' : 'file',
       fileUrl: u.url,
       fileName: u.fileName,
@@ -445,6 +450,7 @@ class RoomChatController extends ChangeNotifier {
     String commentId,
     String text, {
     List<TextFormatRun>? format,
+    List<Mention>? mentions,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
@@ -453,6 +459,7 @@ class RoomChatController extends ChangeNotifier {
       commentId,
       payload!,
       textFormat: room.isSecret || trimmed != text ? null : format,
+      mentions: room.isSecret ? null : (trimmed != text ? const [] : mentions),
     );
   }
 
@@ -469,6 +476,7 @@ class RoomChatController extends ChangeNotifier {
     if (target == null) return;
     target.text = edited.text;
     target.textFormat = edited.textFormat;
+    target.mentions = edited.mentions;
     target.editedAt = edited.editedAt;
     notifyListeners();
   }
@@ -511,6 +519,7 @@ class RoomChatController extends ChangeNotifier {
     String messageId,
     String text, {
     List<TextFormatRun>? format,
+    List<Mention>? mentions,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
@@ -519,6 +528,7 @@ class RoomChatController extends ChangeNotifier {
       messageId,
       payload!,
       textFormat: room.isSecret || trimmed != text ? null : format,
+      mentions: room.isSecret ? null : (trimmed != text ? const [] : mentions),
     );
   }
 
@@ -542,6 +552,7 @@ class RoomChatController extends ChangeNotifier {
     for (final m in targets) {
       m.text = edited.text;
       m.textFormat = edited.textFormat;
+      m.mentions = edited.mentions;
       m.editedAt = edited.editedAt;
       m.title = edited.title;
       m.pinnedAt = edited.pinnedAt;
@@ -581,6 +592,7 @@ class RoomChatController extends ChangeNotifier {
     existing.title = incoming.title;
     existing.text = incoming.text;
     existing.textFormat = incoming.textFormat;
+    existing.mentions = incoming.mentions;
     existing.editedAt = incoming.editedAt;
     existing.pinnedAt = incoming.pinnedAt;
     existing.deleted = incoming.deleted;
@@ -601,6 +613,7 @@ class RoomChatController extends ChangeNotifier {
       }
       existing.text = c.text;
       existing.textFormat = c.textFormat;
+      existing.mentions = c.mentions;
       existing.editedAt = c.editedAt;
       existing.deleted = c.deleted;
     }
@@ -951,7 +964,11 @@ class RoomChatController extends ChangeNotifier {
 
   /// [format]은 [text]의 글자 서식 — [text]는 이미 앞뒤 공백을 뗀 것이어야 위치가 맞는다
   /// (RichTextEditingController.formatted). 비밀 대화는 서식 없이 보낸다.
-  Future<void> sendText(String text, {List<TextFormatRun>? format}) async {
+  Future<void> sendText(
+    String text, {
+    List<TextFormatRun>? format,
+    List<Mention>? mentions,
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final payload = await _session.encryptOutgoing(room, trimmed);
@@ -960,6 +977,7 @@ class RoomChatController extends ChangeNotifier {
       type: 'text',
       text: payload,
       textFormat: room.isSecret || trimmed != text ? null : format,
+      mentions: room.isSecret || trimmed != text ? null : mentions,
     );
   }
 
@@ -983,6 +1001,7 @@ class RoomChatController extends ChangeNotifier {
     required String title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     List<UploadedAttachment> attachments = const [],
   }) async {
     final trimmedTitle = title.trim();
@@ -997,6 +1016,7 @@ class RoomChatController extends ChangeNotifier {
       title: trimmedTitle,
       text: trimmedText,
       textFormat: trimmedText == text ? textFormat : null,
+      mentions: trimmedText == text ? mentions : null,
       attachments: attachments.isEmpty
           ? null
           : [for (final u in attachments) u.toPayload()],
@@ -1010,6 +1030,7 @@ class RoomChatController extends ChangeNotifier {
     required String title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
   }) async {
     final trimmedTitle = title.trim();
     final trimmedText = text.trim();
@@ -1019,6 +1040,7 @@ class RoomChatController extends ChangeNotifier {
       title: trimmedTitle,
       text: trimmedText,
       textFormat: trimmedText == text ? textFormat : null,
+      mentions: trimmedText == text ? mentions : const [],
     );
     applyEdit(updated);
     return updated;
@@ -1142,6 +1164,7 @@ class RoomChatController extends ChangeNotifier {
     UploadedAttachment u, {
     String? caption,
     List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
   }) async {
     final trimmedCaption = caption?.trim();
     if (room.isSecret) {
@@ -1174,6 +1197,7 @@ class RoomChatController extends ChangeNotifier {
       type: u.isImage ? 'image' : 'file',
       text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
       textFormat: trimmedCaption == caption ? captionFormat : null,
+      mentions: trimmedCaption == caption ? captionMentions : null,
       fileUrl: u.url,
       fileName: u.fileName,
       fileSize: u.size,
@@ -1189,6 +1213,7 @@ class RoomChatController extends ChangeNotifier {
     List<UploadedAttachment> items, {
     String? caption,
     List<TextFormatRun>? captionFormat,
+    List<Mention>? captionMentions,
   }) async {
     if (items.isEmpty) return;
     if (items.length == 1 || room.isSecret) {
@@ -1197,6 +1222,7 @@ class RoomChatController extends ChangeNotifier {
           items[i],
           caption: i == 0 ? caption : null,
           captionFormat: i == 0 ? captionFormat : null,
+          captionMentions: i == 0 ? captionMentions : null,
         );
       }
       return;
@@ -1208,6 +1234,7 @@ class RoomChatController extends ChangeNotifier {
       type: items.every((u) => u.isImage) ? 'image' : 'file',
       text: trimmed?.isNotEmpty == true ? trimmed : null,
       textFormat: trimmed == caption ? captionFormat : null,
+      mentions: trimmed == caption ? captionMentions : null,
       attachments: [for (final u in items) u.toPayload()],
     );
   }

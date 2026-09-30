@@ -1,3 +1,4 @@
+import 'mention.dart';
 import 'message.dart';
 import 'text_format.dart';
 
@@ -15,6 +16,9 @@ class Comment {
 
   /// [text]에 걸린 글자 서식(굵게 등). 수정하면 같이 바뀐다.
   List<TextFormatRun>? textFormat;
+
+  /// [text] 안의 멘션 구간(@이름·@all). 수정하면 같이 바뀐다.
+  List<Mention> mentions;
   final String? fileUrl; // 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다.
 
   /// message.dart와 동일 — 비밀 대화에서는 복호화한 뒤 원본 값으로 덮어쓰므로 non-final.
@@ -50,6 +54,7 @@ class Comment {
     this.type = MessageType.text,
     this.text,
     this.textFormat,
+    List<Mention>? mentions,
     this.fileUrl,
     this.fileName,
     this.fileSize,
@@ -63,7 +68,7 @@ class Comment {
     this.thumbnailUrl,
     this.thumbnailKey,
     this.thumbnailNonce,
-  });
+  }) : mentions = mentions ?? <Mention>[];
 
   factory Comment.fromJson(Map<String, dynamic> json) {
     return Comment(
@@ -81,6 +86,7 @@ class Comment {
           : MessageType.text,
       text: json['text'] as String?,
       textFormat: parseTextFormat(json['textFormat']),
+      mentions: parseMentions(json['mentions']),
       fileUrl: json['fileUrl'] as String?,
       fileName: json['fileName'] as String?,
       fileSize: (json['fileSize'] as num?)?.toInt(),

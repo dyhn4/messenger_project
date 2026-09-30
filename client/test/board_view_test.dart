@@ -921,6 +921,8 @@ void main() {
       expect(_body(server.called('PATCH', '/api/messages/mine').single), {
         'title': '고친 제목',
         'text': '원래 본문',
+        // 수정은 멘션 집합을 통째로 보낸다(멘션이 없으면 빈 목록).
+        'mentions': <Object>[],
       });
       expect(find.byType(PostEditor), findsNothing);
       expect(find.text('고친 제목'), findsOneWidget);

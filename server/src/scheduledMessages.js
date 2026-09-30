@@ -15,7 +15,7 @@ import {
   markScheduledMessageFailed,
   updateScheduledMessageIfIdle,
 } from './db/queries/scheduledMessages.js';
-import { findRoomById, isRoomMember } from './db/queries/rooms.js';
+import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { isTeamMember } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import {
@@ -28,6 +28,7 @@ import {
   SCHEDULED_TITLE_MAX,
   topicWriteDenial,
 } from './permissions.js';
+import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
 import { roomDisplayName } from './rooms.js';
 import { sendUserMessage } from './sendMessage.js';
 import { sanitizeTextFormat } from './textFormat.js';
@@ -74,6 +75,7 @@ export function toScheduledDto(row) {
     title: row.title ?? null,
     text: row.text,
     textFormat: row.textFormat ?? null,
+    mentions: mentionsOrEmpty(row.mentions),
     attachments: (Array.isArray(row.attachments) ? row.attachments : []).map((a) => ({
       id: a.id,
       kind: a.kind,
@@ -131,7 +133,7 @@ function parseMessageText(raw, rawFormat) {
           : r,
       )
     : null;
-  return { text, textFormat: sanitizeTextFormat(shifted, text) };
+  return { text, textFormat: sanitizeTextFormat(shifted, text), lead };
 }
 
 /**
@@ -207,6 +209,17 @@ async function validateScheduled(userId, input, existing = null) {
   if (title.error) return title;
   const text = parseMessageText(input.text, input.textFormat);
   if (text.error) return text;
+  // 멘션은 예약을 만들 때 한 번 걸러 저장하고(이 방의 멤버만), 보낼 때(sendUserMessage) 그때의 멤버로 다시 걸러 알림을 만든다.
+  const mentions = Array.isArray(input.mentions) && input.mentions.length > 0
+    ? mentionsToStore(
+        sanitizeMentions(input.mentions, text.text, {
+          room,
+          senderId: userId,
+          memberIdSet: new Set(await listRoomMemberIds(room.id)),
+          shift: text.lead,
+        }),
+      )
+    : null;
   const attachments = parseAttachments(input.attachments, existing?.attachments);
   if (attachments.error) return attachments;
   const sendAt = parseSendAt(input.sendAt);
@@ -220,6 +233,7 @@ async function validateScheduled(userId, input, existing = null) {
       title: title.value,
       text: text.text,
       textFormat: text.textFormat,
+      mentions,
       attachments: attachments.value,
       sendAt: sendAt.value,
     },
@@ -262,6 +276,7 @@ function payloadsFor(row, room) {
         title: row.title,
         text: row.text,
         textFormat: row.textFormat,
+        mentions: row.mentions,
         attachments: attachments.map(toPayload),
       },
     ];
@@ -278,7 +293,7 @@ function payloadsFor(row, room) {
   };
   bubble(attachments.filter((a) => a.kind === 'image'), 'image');
   bubble(attachments.filter((a) => a.kind !== 'image'), 'file');
-  payloads.push({ roomId: room.id, type: 'text', text: row.text, textFormat: row.textFormat });
+  payloads.push({ roomId: room.id, type: 'text', text: row.text, textFormat: row.textFormat, mentions: row.mentions });
   return payloads;
 }
 
@@ -448,7 +463,7 @@ export function createScheduledMessagesRouter(io) {
     res.json(rows.map(toScheduledDto));
   });
 
-  /** 예약 만들기 — { roomId, title?, text, textFormat?, attachments?, sendAt(ms) }. */
+  /** 예약 만들기 — { roomId, title?, text, textFormat?, mentions?, attachments?, sendAt(ms) }. */
   router.post('/scheduled-messages', async (req, res) => {
     const checked = await validateScheduled(req.user.sub, req.body ?? {});
     if (checked.error) return res.status(400).json({ error: checked.error });
@@ -475,6 +490,7 @@ export function createScheduledMessagesRouter(io) {
       title: 'title' in body ? body.title : undefined, // 안 보냈으면 validateScheduled가 지금 제목을 쓴다
       text: 'text' in body ? body.text : row.text,
       textFormat: 'textFormat' in body ? body.textFormat : 'text' in body ? null : row.textFormat,
+      mentions: 'mentions' in body ? body.mentions : 'text' in body ? null : row.mentions,
       attachments: 'attachments' in body ? body.attachments : row.attachments,
       sendAt: 'sendAt' in body ? body.sendAt : new Date(row.sendAt).getTime(),
     };

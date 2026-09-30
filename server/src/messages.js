@@ -10,10 +10,13 @@ import {
   updateMessageText,
   updatePost,
 } from './db/queries/messages.js';
-import { isRoomMember } from './db/queries/rooms.js';
+import { isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
+import { findUserById } from './db/queries/users.js';
 import { topicAccess } from './access.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
+import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
+import { notifyBoard, removeNotificationsForMessage, updateMentions } from './notifications.js';
 import { parsePostFields, topicWriteDenial } from './permissions.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
@@ -62,6 +65,8 @@ export function toMessageDto(m) {
     pinnedAt: m.pinnedAt && !m.deletedAt ? new Date(m.pinnedAt).getTime() : null,
     text: m.text,
     textFormat: m.deletedAt ? null : (m.textFormat ?? null),
+    // 멘션 구간([{type:'user',userId,s,e} | {type:'all',s,e}]) — 없으면 [].
+    mentions: m.deletedAt ? [] : mentionsOrEmpty(m.mentions),
     fileUrl: signFileUrl(m.fileUrl, m.fileName),
     fileName: m.fileName,
     fileSize: m.fileSize,
@@ -100,8 +105,38 @@ export function toMessageDto(m) {
   };
 }
 
+/** 본문 앞 공백을 서버가 잘라낸 글자 수 — 멘션 구간도 서식 구간처럼 그만큼 당겨 맞춘다. */
+function trimmedLead(raw) {
+  return typeof raw === 'string' ? raw.length - raw.trimStart().length : 0;
+}
+
 export function createMessagesRouter(io) {
   const router = Router();
+
+  /**
+   * 글을 고친 뒤의 알림 — 새로 생긴 멘션에만 알리고 사라진 멘션의 알림 기록은 지운다(notifications.js updateMentions).
+   * 보드 게시글이면 boardLevel이 'all'인 멤버에게 '게시글 수정' 알림도 기록한다(멘션 알림을 받은 사람은 뺀다).
+   * 응답을 기다리게 하지 않도록 백그라운드로 돌리고, 실패해도 수정 자체엔 영향 없다.
+   */
+  function notifyAfterEdit({ room, before, updated, actorId }) {
+    (async () => {
+      if (!room || room.isSecret) return;
+      const [actorUser, memberIds] = await Promise.all([findUserById(actorId), listRoomMemberIds(room.id)]);
+      const actor = { id: actorId, name: updated.senderName, user: actorUser };
+      const mentioned = await updateMentions({
+        io,
+        room,
+        message: updated,
+        actor,
+        before: before.mentions,
+        after: updated.mentions,
+        memberIds,
+      });
+      if (updated.type === 'post') {
+        await notifyBoard({ io, event: 'edit', room, post: updated, actor, memberIds, excludeIds: mentioned.notifiedUserIds });
+      }
+    })().catch((err) => console.error('[notifications] 수정 알림 실패:', err?.message ?? err));
+  }
 
   // ── 즐겨찾기한 파일 ───────────────────────────────────────────────────
   //
@@ -137,6 +172,13 @@ export function createMessagesRouter(io) {
       })),
     );
   });
+
+  /** 요청의 mentions를 이 방 기준으로 정리해 저장할 값으로(없으면 null). 수정은 멘션 집합을 통째로 바꾼다 — 안 보내면 없음. */
+  async function cleanMentions(raw, text, room, senderId, shift) {
+    if (!Array.isArray(raw) || raw.length === 0 || !room) return null;
+    const memberIdSet = new Set(await listRoomMemberIds(room.id));
+    return mentionsToStore(sanitizeMentions(raw, text, { room, senderId, memberIdSet, shift }));
+  }
 
   /** 게시글 응답·브로드캐스트용 DTO — 방금 고친 행에는 첨부 목록이 안 붙어 있어서 다시 붙인다
    * (안 붙이면 toMessageDto가 게시글 첨부를 빈 목록으로 내려 화면에서 첨부가 사라진다). */
@@ -179,24 +221,30 @@ export function createMessagesRouter(io) {
     if (isPost) {
       const fields = parsePostFields(req.body?.title, req.body?.text);
       if (fields.error) return res.status(400).json({ error: fields.error });
+      const mentions = await cleanMentions(req.body?.mentions, fields.text, room, req.user.sub, trimmedLead(req.body?.text));
       const updated = await updatePost(message.id, {
         title: fields.title,
         text: fields.text,
         textFormat: sanitizeTextFormat(req.body?.textFormat, fields.text),
+        mentions,
       });
       const dto = await postDto(updated);
       io.to(message.roomId).emit('message:edited', dto);
-      return res.json(dto);
+      res.json(dto);
+      notifyAfterEdit({ room, before: message, updated, actorId: req.user.sub });
+      return;
     }
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '메시지 내용을 입력하세요.' });
 
     const textFormat = room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text);
-    const updated = await updateMessageText(message.id, text, textFormat);
+    const mentions = await cleanMentions(req.body?.mentions, text, room, req.user.sub, trimmedLead(req.body?.text));
+    const updated = await updateMessageText(message.id, text, textFormat, mentions);
     const dto = toMessageDto(updated);
     io.to(message.roomId).emit('message:edited', dto);
     res.json(dto);
+    notifyAfterEdit({ room, before: message, updated, actorId: req.user.sub });
   });
 
   /**
@@ -267,6 +315,9 @@ export function createMessagesRouter(io) {
     if (message.senderId !== req.user.sub) {
       await recordModerationAudit(req, message, isPost ? 'post' : isPoll ? 'poll' : 'message');
     }
+
+    // 이 글의 멘션·보드 알림 기록도 같이 지운다(소프트 삭제는 cascade가 안 타므로 명시적으로).
+    await removeNotificationsForMessage(io, message.id);
 
     if (seenByOther) {
       await softDeleteMessage(message.id);

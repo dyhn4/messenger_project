@@ -41,10 +41,10 @@ export function findCommentById(id) {
     .then((rows) => rows[0] ?? null);
 }
 
-export async function updateCommentText(id, text, textFormat = null) {
+export async function updateCommentText(id, text, textFormat = null, mentions = null) {
   const [row] = await db
     .update(messageComments)
-    .set({ text, textFormat, editedAt: new Date() })
+    .set({ text, textFormat, mentions, editedAt: new Date() })
     .where(eq(messageComments.id, id))
     .returning();
   return row;

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import 'comment.dart';
+import 'mention.dart';
 import 'poll.dart';
 import 'text_format.dart';
 
@@ -75,6 +76,9 @@ class Message {
 
   /// [text]에 걸린 글자 서식(굵게 등). 수정하면 같이 바뀐다.
   List<TextFormatRun>? textFormat;
+
+  /// [text] 안의 멘션 구간(@이름·@all). 수정하면 같이 바뀐다. 비밀 대화는 늘 빈 목록.
+  List<Mention> mentions;
   final String? fileUrl; // 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다.
 
   /// 비밀 대화에서는 서버가 실제 파일명/종류를 못 보게 더미 값("encrypted" 등)만 받고,
@@ -185,6 +189,7 @@ class Message {
     required this.type,
     this.text,
     this.textFormat,
+    List<Mention>? mentions,
     this.fileUrl,
     this.fileName,
     this.fileSize,
@@ -216,7 +221,8 @@ class Message {
     this.isPoll = false,
     this.poll,
     List<Comment>? comments,
-  }) : comments = comments ?? [];
+  }) : comments = comments ?? [],
+       mentions = mentions ?? <Mention>[];
 
   /// 고정된 게시글인지(보드 상단 "고정된 게시글").
   bool get isPinned => pinnedAt != null;
@@ -245,6 +251,7 @@ class Message {
       type: _typeFromString(json['type'] as String?),
       text: json['text'] as String?,
       textFormat: parseTextFormat(json['textFormat']),
+      mentions: parseMentions(json['mentions']),
       fileUrl: json['fileUrl'] as String?,
       fileName: json['fileName'] as String?,
       fileSize: (json['fileSize'] as num?)?.toInt(),

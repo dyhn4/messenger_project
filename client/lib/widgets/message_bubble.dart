@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'sticker_view.dart';
 import '../models/app_user.dart';
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../screens/chat_screen.dart';
@@ -17,11 +18,14 @@ import '../screens/my_profile_dialog.dart';
 import '../services/edit_policy.dart';
 import '../models/project.dart' show parseTypeColor;
 import '../services/app_links.dart';
+import '../services/mention_logic.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'external_image.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'mention_autocomplete.dart';
+import 'mention_profile.dart';
 import 'message_actions.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
@@ -48,6 +52,7 @@ class MessageBubble extends StatefulWidget {
     String messageId,
     String text, {
     List<TextFormatRun>? format,
+    List<Mention>? mentions,
   })?
   onEdit; // "수정" 저장.
   final Future<void> Function(String messageId)? onDelete; // "삭제" 확인.
@@ -177,7 +182,14 @@ class _MessageBubbleState extends State<MessageBubble> {
       return;
     }
     setState(() => _editing = true);
-    _editController.load(widget.message.text ?? '', widget.message.textFormat);
+    // 수정 화면에서도 멘션을 고칠 수 있다 — 지금 멘션 구간을 입력칸에 넘겨 받는다.
+    final room = widget.session.roomById(widget.message.roomId);
+    _editController.mentionsEnabled = room != null && roomAllowsMention(room);
+    _editController.load(
+      widget.message.text ?? '',
+      widget.message.textFormat,
+      mentions: widget.message.mentions,
+    );
     _syncToolbarPortal(); // 수정 중에는 툴바를 닫는다.
   }
 
@@ -189,9 +201,18 @@ class _MessageBubbleState extends State<MessageBubble> {
   Future<void> _saveEdit() async {
     final (:text, :format) = _editController.formatted();
     if (text.isEmpty) return;
+    final room = widget.session.roomById(widget.message.roomId);
+    final mentions = room == null
+        ? const <Mention>[]
+        : mentionsToSend(_editController, room, widget.session.userId);
     setState(() => _savingEdit = true);
     try {
-      await widget.onEdit!(widget.message.id, text, format: format);
+      await widget.onEdit!(
+        widget.message.id,
+        text,
+        format: format,
+        mentions: mentions,
+      );
       if (mounted) setState(() => _editing = false);
     } catch (e) {
       if (mounted) {
@@ -278,6 +299,14 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
+  /// 본문 안 멘션 이름을 눌렀을 때 — 그 멤버의 프로필(mention_profile.dart).
+  void _openMention(Mention mention) => openMentionProfile(
+    context,
+    widget.session,
+    roomId: widget.message.roomId,
+    mention: mention,
+  );
+
   Future<void> _openProfile(BuildContext context) async {
     if (_isMine) {
       showDialog(
@@ -339,6 +368,12 @@ class _MessageBubbleState extends State<MessageBubble> {
         message.type == MessageType.sticker &&
         !message.deleted &&
         !message.decryptFailed;
+    // 남이 나를(또는 @all로 모두를) 멘션한 글 — 말풍선에 강조선을 둘러 눈에 띄게 한다.
+    final mentionsMe =
+        !isMine &&
+        !message.deleted &&
+        !message.decryptFailed &&
+        mentionsUser(message.mentions, widget.session.userId);
 
     final bubbleRow = MouseRegion(
       onEnter: (_) => _setBubbleHovering(true),
@@ -383,6 +418,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                                         context,
                                       ).colorScheme.surfaceContainerHighest),
                           borderRadius: BorderRadius.circular(14),
+                          // 나를 멘션한 글은 말풍선에 얇은 강조선을 두른다.
+                          border: mentionsMe
+                              ? Border.all(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withValues(alpha: 0.7),
+                                  width: 1.2,
+                                )
+                              : null,
                         ),
                   child: message.deleted
                       ? Text(
@@ -436,6 +480,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 message.text!,
                                 format: message.textFormat,
                                 linkColor: Colors.blue,
+                                mentions: message.mentions,
+                                myUserId: widget.session.userId,
+                                onMentionTap: _openMention,
                               ),
                               const SizedBox(height: 6),
                             ],
@@ -716,24 +763,40 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
   }
 
+  /// 수정 입력칸에도 "@" 자동완성을 붙인다(방을 모르거나 비밀 대화면 그대로).
+  Widget _withMentions(Widget field) {
+    final room = widget.session.roomById(widget.message.roomId);
+    if (room == null || !roomAllowsMention(room)) return field;
+    return MentionAutocomplete(
+      controller: _editController,
+      focusNode: _editFocus,
+      room: room,
+      myUserId: widget.session.userId,
+      resolveUrl: widget.session.resolveUrl,
+      child: field,
+    );
+  }
+
   Widget _buildEditor(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         RichFormatToolbar(controller: _editController, focusNode: _editFocus),
-        RichFieldWrapper(
-          controller: _editController,
-          child: TextField(
+        _withMentions(
+          RichFieldWrapper(
             controller: _editController,
-            focusNode: _editFocus,
-            autofocus: true,
-            maxLines: null,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
+            child: TextField(
+              controller: _editController,
+              focusNode: _editFocus,
+              autofocus: true,
+              maxLines: null,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _saveEdit(),
             ),
-            onSubmitted: (_) => _saveEdit(),
           ),
         ),
         const SizedBox(height: 4),
@@ -829,6 +892,9 @@ class _MessageBubbleState extends State<MessageBubble> {
           style: Theme.of(context).textTheme.bodyMedium,
           linkColor: Colors.blue,
           selectable: Platform.isWindows,
+          mentions: message.mentions,
+          myUserId: widget.session.userId,
+          onMentionTap: _openMention,
         );
       case MessageType.sticker:
         return StickerView(
@@ -893,6 +959,9 @@ class _MessageBubbleState extends State<MessageBubble> {
             style: theme.textTheme.bodyMedium,
             linkColor: Colors.blue,
             selectable: Platform.isWindows,
+            mentions: message.mentions,
+            myUserId: widget.session.userId,
+            onMentionTap: _openMention,
           ),
         ],
         if (images.isNotEmpty) ...[

@@ -11,8 +11,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/stickers.dart';
+import '../models/app_notification.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
@@ -29,6 +31,8 @@ import 'calendar_api.dart';
 import 'calendar_controller.dart';
 import 'call_controller.dart';
 import 'chat_socket.dart';
+import 'notification_api.dart';
+import 'notification_controller.dart';
 import 'deep_link_service.dart';
 import 'device_identity.dart';
 import 'download_storage.dart';
@@ -181,6 +185,20 @@ class Session extends ChangeNotifier {
     reconnected: chatSocket.reconnected,
     userId: () => userId,
     isGuest: () => accountRole == AccountRole.guest,
+  );
+
+  /// 알림 센터의 멘션·보드 알림 목록/안 읽음 개수/설정(notification_controller.dart). 소켓
+  /// notification:new·sync를 스스로 듣고, 방 목록의 "@" 표시만 아래 콜백으로 Session이 맞춘다.
+  /// 처음 쓰일 때 만들어진다 — 로그인하면 [_enterApp]이 바로 불러 구독을 시작한다.
+  late final notificationCenter = NotificationController(
+    apiProvider: () => RemoteNotificationApi(api!),
+    newEvents: chatSocket.notificationNew,
+    syncEvents: chatSocket.notificationSync,
+    projectEvents: chatSocket.projectNotifications,
+    reconnected: chatSocket.reconnected,
+    onNew: _onNotificationNew,
+    onRead: _onNotificationsRead,
+    onSync: _onNotificationSync,
   );
   final _updateSocket = UpdateSocket();
   StreamSubscription<UpdateAvailableEvent>? _updateSub;
@@ -423,7 +441,17 @@ class Session extends ChangeNotifier {
     return token;
   }
 
-  void requestOpenRoom(Room room) {
+  /// 알림 센터에서 멘션·보드 알림을 눌러 "그 방의 그 메시지"로 갈 때 — 방을 연 뒤 스크롤·강조할 메시지.
+  /// 팀 전환으로 화면(DesktopHomeScreen)이 새로 만들어져도 잃지 않게 방 요청과 같이 들고 있다.
+  String? _pendingOpenMessageId;
+  String? consumePendingOpenMessageId() {
+    final id = _pendingOpenMessageId;
+    _pendingOpenMessageId = null;
+    return id;
+  }
+
+  void requestOpenRoom(Room room, {String? messageId}) {
+    _pendingOpenMessageId = messageId;
     // 다른 팀의 방을 열어달라는 요청(예: 다른 팀에서 온 메시지 알림을 눌렀을 때)이면
     // 그 팀으로 먼저 전환한다 — 안 그러면 지금 팀 화면에 없는 방을 열려다 아무 일도 안 난다.
     if (room.teamId != currentTeam?.id) {
@@ -1088,6 +1116,7 @@ class Session extends ChangeNotifier {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
     if (canUseProjects) unawaited(refreshProjectUnread());
+    unawaited(notificationCenter.refreshCounts());
 
     // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
     // 로그아웃(_forceLogout)됐을 수 있다(예: 이 토큰이 새 서버 버전 이전에 발급된 옛날
@@ -2309,9 +2338,112 @@ class Session extends ChangeNotifier {
   /// 방을 열 때 안읽음 뱃지를 0으로 되돌린다.
   void clearUnreadCount(String roomId) {
     final match = rooms.where((r) => r.id == roomId);
-    if (match.isEmpty || match.first.unreadCount == 0) return;
-    match.first.unreadCount = 0;
+    if (match.isEmpty) return;
+    final room = match.first;
+    // 방을 열면 서버가 그 방의 멘션·보드 알림도 읽음으로 돌린다(notification:sync) — "@" 표시는 바로 지운다.
+    if (room.unreadCount == 0 && room.unreadMentionCount == 0) return;
+    room.unreadCount = 0;
+    room.unreadMentionCount = 0;
     notifyListeners();
+  }
+
+  /// 알림 센터의 "모두 읽음" — 방을 열지 않고 읽음으로만 돌린다(메시지·공지 둘 다).
+  void markRoomReadWithoutOpening(Room room) {
+    chatSocket.markRead(room.id);
+    clearUnreadCount(room.id);
+    markAnnouncementsRead(room);
+  }
+
+  /// 소켓 notification:new — 그 방 목록의 "@" 표시를 올리고, 알림을 끈 방에서 나를 직접 멘션한 글이면(서버가
+  /// 뮤트를 무시하고 보낸다) 일반 메시지 알림이 막혀 있으니 여기서 대신 알린다.
+  void _onNotificationNew(AppNotification n) {
+    if (!n.isMention) return;
+    final room = _findRoom(n.roomId ?? '');
+    if (room == null) return;
+    final viewing = room.id == _activeRoomId && appInForeground;
+    if (!viewing) {
+      room.unreadMentionCount++;
+      notifyListeners();
+    }
+    if (viewing ||
+        suppressNotifications ||
+        room.muted != true ||
+        n.kind != NotificationKind.mention) {
+      return;
+    }
+    final teamTag = _teamTagFor(room);
+    final roomTag = room.displayName(userId ?? '');
+    notifications.showMessage(
+      title:
+          '${n.actorName ?? ''} [$roomTag]${teamTag == null ? '' : ' [$teamTag]'}',
+      body: room.isSecret
+          ? _secretPreviewPlaceholder
+          : '${n.actorName ?? ''}님이 회원님을 멘션했습니다: ${n.preview}',
+      roomId: room.id,
+      senderName: n.actorName,
+      conversationTitle: teamTag == null ? roomTag : '$roomTag · $teamTag',
+    );
+  }
+
+  /// 알림 센터에서 멘션을 읽음으로 돌렸다 — 그 방의 "@" 표시를 하나씩 줄인다.
+  void _onNotificationsRead(List<AppNotification> read) {
+    var changed = false;
+    for (final n in read) {
+      if (!n.isMention) continue;
+      final room = _findRoom(n.roomId ?? '');
+      if (room == null || room.unreadMentionCount == 0) continue;
+      room.unreadMentionCount--;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// 소켓 notification:sync(다른 기기에서 읽음 등) — 안 읽은 멘션이 없어졌으면 모든 방의 "@" 표시를 지운다.
+  /// 아직 남아 있는데 이 기기가 들고 있는 "@" 표시 합이 서버 개수보다 많으면(다른 기기에서 어느 한 방을 읽어서
+  /// 그 방만 줄었다 — sync는 방을 알려 주지 않는다) 방 목록의 서버 값으로 "@" 표시만 다시 맞춘다.
+  void _onNotificationSync(NotificationCounts counts) {
+    if (counts.mention > 0) {
+      var marked = 0;
+      for (final room in rooms) {
+        marked += room.unreadMentionCount;
+      }
+      if (marked > counts.mention) unawaited(_reconcileMentionMarkers());
+      return;
+    }
+    var changed = false;
+    for (final room in rooms) {
+      if (room.unreadMentionCount == 0) continue;
+      room.unreadMentionCount = 0;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  bool _reconcilingMentionMarkers = false;
+
+  /// 모든 팀의 방 목록에서 서버가 센 "@"(안 읽은 멘션) 수만 받아 와 이 기기의 방 표시에 덮어쓴다.
+  Future<void> _reconcileMentionMarkers() async {
+    final client = api;
+    if (client == null || _reconcilingMentionMarkers) return;
+    _reconcilingMentionMarkers = true;
+    try {
+      var changed = false;
+      for (final team in teams.toList()) {
+        for (final fresh in await client.fetchRooms(team.id)) {
+          final room = _findRoom(fresh.id);
+          if (room == null || room.unreadMentionCount == fresh.unreadMentionCount) {
+            continue;
+          }
+          room.unreadMentionCount = fresh.unreadMentionCount;
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
+    } catch (_) {
+      // 다음 알림·재연결 때 다시 맞춰진다.
+    } finally {
+      _reconcilingMentionMarkers = false;
+    }
   }
 
   /// 방을 열 때 호출. 이미 열려있으면 캐시된 컨트롤러를 그대로 재사용한다. 컨트롤러는 목록에
@@ -3172,6 +3304,7 @@ class Session extends ChangeNotifier {
     String? title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     List<UploadedAttachment> attachments = const [],
     required DateTime sendAt,
   }) async {
@@ -3196,6 +3329,7 @@ class Session extends ChangeNotifier {
         title: sendTitle,
         text: trimmedText,
         textFormat: trimmedText == text ? textFormat : null,
+        mentions: trimmedText == text ? mentions : null,
         attachments: attachments,
         sendAt: sendAt,
       ),
@@ -3215,6 +3349,7 @@ class Session extends ChangeNotifier {
     String? title,
     String? text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     List<UploadedAttachment>? attachments,
     DateTime? sendAt,
   }) async {
@@ -3246,6 +3381,7 @@ class Session extends ChangeNotifier {
         title: sendTitle,
         text: trimmedText,
         textFormat: trimmedText == text ? textFormat : null,
+        mentions: trimmedText == text ? mentions : null,
         attachments: attachments,
         sendAt: sendAt,
       ),
@@ -3416,12 +3552,14 @@ class Session extends ChangeNotifier {
     required String title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     List<UploadedAttachment> attachments = const [],
   }) async {
     return (await _postControllerFor(room)).sendPost(
       title: title,
       text: text,
       textFormat: textFormat,
+      mentions: mentions,
       attachments: attachments,
     );
   }
@@ -3433,10 +3571,15 @@ class Session extends ChangeNotifier {
     required String title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
   }) async {
-    return (await _postControllerFor(
-      room,
-    )).editPost(messageId, title: title, text: text, textFormat: textFormat);
+    return (await _postControllerFor(room)).editPost(
+      messageId,
+      title: title,
+      text: text,
+      textFormat: textFormat,
+      mentions: mentions,
+    );
   }
 
   /// 게시글 고정/해제 — RoomChatController.setPostPinned와 같다.
@@ -3546,6 +3689,7 @@ class Session extends ChangeNotifier {
     _topicFoldersLoadSeq++; // 로그아웃 전에 나간 폴더 요청이 늦게 와도 버린다.
     _resetScheduledMessages(); // 예약 목록도 같은 이유로 비우고 늦은 응답은 버린다.
     calendar.reset(); // 캘린더 캐시도 — 다음에 로그인하는 사람에게 남지 않게.
+    notificationCenter.reset(); // 알림 센터 목록·개수도 같은 이유로.
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();

@@ -6,13 +6,17 @@ import 'package:intl/intl.dart';
 import 'sticker_view.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../services/edit_policy.dart';
+import '../services/mention_logic.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'mention_autocomplete.dart';
+import 'mention_profile.dart';
 import 'message_actions.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
@@ -62,6 +66,7 @@ class MessageCommentsCard extends StatelessWidget {
     String commentId,
     String text, {
     List<TextFormatRun>? format,
+    List<Mention>? mentions,
   })?
   onEditComment;
   final Future<void> Function(String commentId)? onDeleteComment;
@@ -284,6 +289,7 @@ class CommentEntryLine extends StatefulWidget {
     String commentId,
     String text, {
     List<TextFormatRun>? format,
+    List<Mention>? mentions,
   })?
   onEdit;
   final Future<void> Function(String commentId)? onDelete;
@@ -407,7 +413,14 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       return;
     }
     setState(() => _editing = true);
-    _editController.load(widget.comment.text ?? '', widget.comment.textFormat);
+    // 수정 화면에서도 멘션을 고칠 수 있다 — 지금 멘션 구간을 입력칸에 넘겨 받는다.
+    final room = widget.session.roomById(widget.comment.roomId);
+    _editController.mentionsEnabled = room != null && roomAllowsMention(room);
+    _editController.load(
+      widget.comment.text ?? '',
+      widget.comment.textFormat,
+      mentions: widget.comment.mentions,
+    );
     _syncToolbarPortal(); // 수정 중에는 툴바를 닫는다.
   }
 
@@ -419,9 +432,18 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
   Future<void> _saveEdit() async {
     final (:text, :format) = _editController.formatted();
     if (text.isEmpty) return;
+    final room = widget.session.roomById(widget.comment.roomId);
+    final mentions = room == null
+        ? const <Mention>[]
+        : mentionsToSend(_editController, room, widget.session.userId);
     setState(() => _savingEdit = true);
     try {
-      await widget.onEdit!(widget.comment.id, text, format: format);
+      await widget.onEdit!(
+        widget.comment.id,
+        text,
+        format: format,
+        mentions: mentions,
+      );
       if (mounted) setState(() => _editing = false);
     } catch (e) {
       if (mounted) {
@@ -510,6 +532,14 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     );
   }
 
+  /// 본문 안 멘션 이름을 눌렀을 때 — 그 멤버의 프로필(mention_profile.dart).
+  void _openMention(Mention mention) => openMentionProfile(
+    context,
+    widget.session,
+    roomId: widget.comment.roomId,
+    mention: mention,
+  );
+
   Widget _buildBubbleContent(BuildContext context) {
     final comment = widget.comment;
     final sender = widget.sender;
@@ -575,6 +605,9 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
               format: comment.textFormat,
               style: const TextStyle(fontSize: 13),
               linkColor: Colors.blue,
+              mentions: comment.mentions,
+              myUserId: widget.session.userId,
+              onMentionTap: _openMention,
             ),
             const SizedBox(height: 4),
           ],
@@ -584,6 +617,9 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
               format: comment.textFormat,
               style: const TextStyle(fontSize: 13),
               linkColor: Colors.blue,
+              mentions: comment.mentions,
+              myUserId: widget.session.userId,
+              onMentionTap: _openMention,
             )
           else
             _buildAttachment(context),
@@ -816,25 +852,41 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
     );
   }
 
+  /// 수정 입력칸에도 "@" 자동완성을 붙인다(방을 모르거나 비밀 대화면 그대로).
+  Widget _withMentions(Widget field) {
+    final room = widget.session.roomById(widget.comment.roomId);
+    if (room == null || !roomAllowsMention(room)) return field;
+    return MentionAutocomplete(
+      controller: _editController,
+      focusNode: _editFocus,
+      room: room,
+      myUserId: widget.session.userId,
+      resolveUrl: widget.session.resolveUrl,
+      child: field,
+    );
+  }
+
   Widget _buildEditor(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         RichFormatToolbar(controller: _editController, focusNode: _editFocus),
-        RichFieldWrapper(
-          controller: _editController,
-          child: TextField(
+        _withMentions(
+          RichFieldWrapper(
             controller: _editController,
-            focusNode: _editFocus,
-            autofocus: true,
-            maxLines: null,
-            style: const TextStyle(fontSize: 13),
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
+            child: TextField(
+              controller: _editController,
+              focusNode: _editFocus,
+              autofocus: true,
+              maxLines: null,
+              style: const TextStyle(fontSize: 13),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => _saveEdit(),
             ),
-            onSubmitted: (_) => _saveEdit(),
           ),
         ),
         const SizedBox(height: 4),

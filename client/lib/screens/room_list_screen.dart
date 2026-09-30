@@ -772,9 +772,19 @@ class _RoomRow extends StatelessWidget {
           formatRoomActivityTime(room.lastActivityAt),
           style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor),
         ),
-      if (room.unreadCount > 0) ...[
+      if (room.unreadCount > 0 || room.unreadMentionCount > 0) ...[
         if (showActivityTime) const SizedBox(height: 4),
-        UnreadBadge(count: room.unreadCount),
+        // 안 읽은 멘션이 있으면 안읽음 숫자 옆에 "@"를 붙인다.
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (room.unreadMentionCount > 0) ...[
+              const MentionMarker(),
+              if (room.unreadCount > 0) const SizedBox(width: 4),
+            ],
+            if (room.unreadCount > 0) UnreadBadge(count: room.unreadCount),
+          ],
+        ),
       ],
     ];
     if (children.isEmpty) return null;

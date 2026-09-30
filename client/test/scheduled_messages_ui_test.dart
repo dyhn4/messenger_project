@@ -804,6 +804,8 @@ void main() {
       expect(patch, {
         'text': '회의 자료 다시 공유드립니다',
         'textFormat': null,
+        // 글을 바꾸면 멘션도 같이 간다(멘션이 없으면 빈 목록).
+        'mentions': <Object>[],
         'sendAt': _later.millisecondsSinceEpoch,
       });
       expect(find.text('예약 메시지 수정'), findsNothing);

@@ -13,9 +13,11 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../services/api_client.dart' show UploadCancelToken;
 import '../services/file_type_utils.dart';
+import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/mention_autocomplete.dart';
 import '../widgets/attachment_widgets.dart'
     show DropZoneOverlay, formatFileSize;
 import '../widgets/rich_text_format.dart';
@@ -180,7 +182,11 @@ class PostEditorState extends State<PostEditor> {
     _roomListed = widget.session.roomById(widget.room.id) != null;
     widget.session.addListener(_onSessionChanged);
     final post = widget.post;
-    if (post != null) _body.load(post.text ?? '', post.textFormat);
+    // 본문 안의 "@이름" — 고치는 글이면 기존 멘션 구간을 이어 받는다.
+    _body.mentionsEnabled = roomAllowsMention(widget.room);
+    if (post != null) {
+      _body.load(post.text ?? '', post.textFormat, mentions: post.mentions);
+    }
     _lastTitle = _title.text;
     _lastBody = _body.text;
     _title.addListener(_onTitleChanged);
@@ -403,6 +409,7 @@ class PostEditorState extends State<PostEditor> {
     if (_submitting || _scheduling) return;
     final title = _title.text.trim();
     final body = _body.formatted();
+    final mentions = mentionsToSend(_body, widget.room, widget.session.userId);
     if (!_validate(title, body.text)) return;
     if (_hasFailedUpload) {
       showAppToast(context, '올리지 못한 첨부 파일이 있습니다. 다시 시도하거나 빼 주세요.');
@@ -417,6 +424,7 @@ class PostEditorState extends State<PostEditor> {
           title: title,
           text: body.text,
           textFormat: body.format,
+          mentions: mentions,
         );
       } else {
         // 아직 올라가는 첨부가 있으면 끝날 때까지 기다렸다가 이어서 게시한다.
@@ -432,6 +440,7 @@ class PostEditorState extends State<PostEditor> {
           title: title,
           text: body.text,
           textFormat: body.format,
+          mentions: mentions,
           attachments: [for (final d in _drafts) d.result!],
         );
       }
@@ -479,6 +488,7 @@ class PostEditorState extends State<PostEditor> {
         title: _title.text.trim(),
         text: body.text,
         textFormat: body.format,
+        mentions: mentionsToSend(_body, widget.room, widget.session.userId),
         attachments: [
           for (final d in _drafts)
             ScheduleDraftAttachment(d.result!, file: d.isImage ? d.file : null),
@@ -786,7 +796,7 @@ class PostEditorState extends State<PostEditor> {
     final focused = _bodyFocus.hasFocus;
     final hasError = _bodyError != null;
     const radius = BorderRadius.all(Radius.circular(8));
-    final field = RichFieldWrapper(
+    final rawField = RichFieldWrapper(
       controller: _body,
       child: TextField(
         key: const ValueKey('post-body'),
@@ -806,6 +816,17 @@ class PostEditorState extends State<PostEditor> {
         ),
       ),
     );
+    // 본문에서도 "@"로 멤버를 멘션할 수 있다(비밀 대화는 지원하지 않는다).
+    final field = roomAllowsMention(widget.room)
+        ? MentionAutocomplete(
+            controller: _body,
+            focusNode: _bodyFocus,
+            room: widget.room,
+            myUserId: widget.session.userId,
+            resolveUrl: widget.session.resolveUrl,
+            child: rawField,
+          )
+        : rawField;
     return DecoratedBox(
       position: DecorationPosition.foreground,
       decoration: BoxDecoration(

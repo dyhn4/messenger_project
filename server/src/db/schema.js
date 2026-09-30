@@ -470,6 +470,9 @@ export const messages = pgTable(
     text: text('text'),
     // 글자 서식 구간 — [{s, e, f, h?}] (textFormat.js 참고). 본문은 평문 그대로라 미리보기·검색은 그대로 쓴다.
     textFormat: jsonb('text_format'),
+    // 멘션 — [{ type: 'user', userId, s, e } | { type: 'all', s, e }] (s/e는 text 안의 글자 위치 구간, textFormat과
+    // 같은 단위). 정리는 notifications.js의 sanitizeMentions가 한다. 멘션이 없으면 null.
+    mentions: jsonb('mentions'),
     fileUrl: text('file_url'),
     fileName: text('file_name'),
     fileSize: integer('file_size'),
@@ -593,6 +596,8 @@ export const scheduledMessages = pgTable(
     title: text('title'),
     text: text('text').notNull(),
     textFormat: jsonb('text_format'),
+    // 멘션 구간(messages.mentions와 같은 모양) — 예약 발송 때 같이 보내 그때 알림이 간다.
+    mentions: jsonb('mentions'),
     attachments: jsonb('attachments').notNull().default([]),
     sendAt: timestamp('send_at', { withTimezone: true }).notNull(),
     // 'scheduled' | 'sending' | 'failed'
@@ -1267,6 +1272,7 @@ export const messageComments = pgTable(
     type: text('type').notNull().default('text'), // 'text' | 'image' | 'file' — messages.type과 동일 규칙.
     text: text('text'), // 첨부만 있고 캡션이 없는 댓글도 있어서 nullable(messages.text와 동일).
     textFormat: jsonb('text_format'), // messages.textFormat과 동일.
+    mentions: jsonb('mentions'), // messages.mentions와 동일.
     fileUrl: text('file_url'),
     fileName: text('file_name'),
     fileSize: integer('file_size'),
@@ -1280,6 +1286,53 @@ export const messageComments = pgTable(
   },
   (t) => [index('message_comments_message_id_idx').on(t.messageId, t.createdAt)],
 );
+
+/**
+ * 알림 기록(알림 센터의 "멘션"·"보드·공지" 탭) — 받는 사람마다 한 줄. 멘션과 보드 알림이 같은 구조를 쓰고, 앞으로의
+ * 종류도 kind 문자열만 늘리면 된다(notifications.js의 createNotifications가 유일한 생성 지점).
+ * 프로젝트 알림은 project_notifications가 따로 있다. 메시지가 지워지면 cascade로(소프트 삭제는 messages.js가
+ * 명시적으로) 같이 지운다. roomName·actorName·preview는 알림 당시 표시용 스냅샷이다. 90일 지난 것은 retention.js가 지운다.
+ */
+export const notifications = pgTable(
+  'notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    // 'mention' | 'mention_all' | 'board_post' | 'board_edit' | 'board_comment'
+    kind: text('kind').notNull(),
+    roomId: text('room_id').references(() => rooms.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+    commentId: uuid('comment_id').references(() => messageComments.id, { onDelete: 'cascade' }),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    actorName: text('actor_name'),
+    preview: text('preview'),
+    roomName: text('room_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('notifications_user_created_idx').on(t.userId, t.createdAt.desc()),
+    index('notifications_user_kind_read_idx').on(t.userId, t.kind, t.readAt),
+    index('notifications_message_idx').on(t.messageId),
+  ],
+);
+
+/** 사람별 알림 설정 — 행이 없으면 기본값(mentionAll true, boardLevel 'important')으로 본다. */
+export const notificationSettings = pgTable('notification_settings', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  // @all(방 전체 멘션) 푸시를 받을지 — 끄면 기록은 남고 푸시만 안 간다.
+  mentionAll: boolean('mention_all').notNull().default(true),
+  // 보드 알림 수준: 'all'(새 글·수정·댓글) | 'important'(새 글 + 내 글의 댓글) | 'new'(새 글만)
+  boardLevel: text('board_level').notNull().default('important'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * 비밀 대화(E2EE)에 쓰는 기기 신원. deviceId는 클라이언트가 생성한 UUID(로그인 계정과 별개로

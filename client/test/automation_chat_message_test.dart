@@ -185,7 +185,7 @@ void main() {
               // 호출부가 senderId == userId로 비교하다 둘 다 null이면 true가 올 수 있다.
               isMine: isMine,
               onOpenThread: (_) {},
-              onEdit: (_, _, {format}) async {},
+              onEdit: (_, _, {format, mentions}) async {},
               onDelete: (_) async {},
             ),
           ),

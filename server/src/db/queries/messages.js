@@ -4,6 +4,7 @@ import {
   dmHistoryFloors,
   favoriteFiles,
   messageAttachments,
+  notifications,
   roomMembers,
   rooms,
   messages,
@@ -74,10 +75,10 @@ export async function getLastMessageForPreview(roomId) {
   return row ?? null;
 }
 
-export async function updateMessageText(id, text, textFormat = null) {
+export async function updateMessageText(id, text, textFormat = null, mentions = null) {
   const [row] = await db
     .update(messages)
-    .set({ text, textFormat, editedAt: new Date() })
+    .set({ text, textFormat, mentions, editedAt: new Date() })
     .where(eq(messages.id, id))
     .returning();
   return row;
@@ -108,6 +109,7 @@ export async function softDeleteMessage(id) {
       deletedAt: new Date(),
       text: null,
       textFormat: null,
+      mentions: null,
       fileUrl: null,
       fileName: null,
       fileSize: null,
@@ -121,10 +123,10 @@ export async function softDeleteMessage(id) {
 }
 
 /** 게시글 수정(messages.js) — 제목·본문·서식을 한 번에 바꾸고 "(수정됨)" 시각을 찍는다. */
-export async function updatePost(id, { title, text, textFormat = null }) {
+export async function updatePost(id, { title, text, textFormat = null, mentions = null }) {
   const [row] = await db
     .update(messages)
-    .set({ title, text, textFormat, editedAt: new Date() })
+    .set({ title, text, textFormat, mentions, editedAt: new Date() })
     .where(eq(messages.id, id))
     .returning();
   return row;
@@ -261,6 +263,8 @@ export async function deleteMessagesBySender(userId) {
 /** 회원 탈퇴 시 과거 메시지의 작성자 표시도 다시 쓴다. */
 export async function renameSenderMessages(userId, newName) {
   await db.update(messages).set({ senderName: newName }).where(eq(messages.senderId, userId));
+  // 알림 기록에 박제된 행위자 이름(멘션한 사람 등)도 같이 — 탈퇴 전 이름이 알림 센터에 남지 않게.
+  await db.update(notifications).set({ actorName: newName }).where(eq(notifications.actorId, userId));
 }
 
 // searchMessages/listAttachments가 공유하는 조건 — DM "진짜 나가기" 이력이 있으면(dm_history_floors)

@@ -1,0 +1,144 @@
+import '../models/app_notification.dart';
+import '../models/project.dart' show ProjectNotification;
+import '../models/room.dart';
+import 'notification_controller.dart';
+
+/// 알림 센터 목록의 한 줄 — 서로 다른 출처(서버 알림·안 읽은 대화·안 읽은 공지·프로젝트 알림)를 한 목록에 섞어
+/// 보여 주려고 같은 모양으로 감싼다. 어느 줄이든 [time](정렬 기준)과 [unread]가 있다.
+sealed class CenterEntry {
+  const CenterEntry();
+  DateTime get time;
+  bool get unread;
+}
+
+/// 멘션·보드 알림 한 건(서버 notifications 표).
+final class ServerEntry extends CenterEntry {
+  final AppNotification notification;
+  const ServerEntry(this.notification);
+  @override
+  DateTime get time => notification.createdAt;
+  @override
+  bool get unread => !notification.isRead;
+}
+
+/// 안 읽은 메시지가 있는 방 — 시각은 마지막 활동 시각.
+final class RoomEntry extends CenterEntry {
+  final Room room;
+  const RoomEntry(this.room);
+  @override
+  DateTime get time => room.lastActivityAt;
+  @override
+  bool get unread => true;
+}
+
+/// 안 읽은 공지가 있는 방 — 시각은 공지가 올라온 시각(없으면 마지막 활동 시각).
+final class AnnouncementEntry extends CenterEntry {
+  final Room room;
+  const AnnouncementEntry(this.room);
+  @override
+  DateTime get time =>
+      room.latestAnnouncement?.createdAt ?? room.lastActivityAt;
+  @override
+  bool get unread => true;
+}
+
+/// 프로젝트 알림함의 한 건.
+final class ProjectEntry extends CenterEntry {
+  final ProjectNotification notification;
+  const ProjectEntry(this.notification);
+  @override
+  DateTime get time => notification.createdAt;
+  @override
+  bool get unread => !notification.read;
+}
+
+/// [tab]에 보여 줄 줄들(최신순).
+///
+///   - 안 읽은 대화: 안 읽은 메시지나 공지가 있는 방 전부(지금 팀도, 여러 팀에 걸쳐) — 예전 알림 센터가 보여
+///     주던 것 그대로, 마지막 활동순.
+///   - 멘션: 서버 멘션 알림.
+///   - 보드·공지: 서버 보드 알림 + 안 읽은 공지가 있는 방(공지 시각).
+///   - 프로젝트: 프로젝트 알림함.
+///   - 전체: 위 넷을 시간순으로 섞는다. 안 읽은 대화는 공지 때문에만 뜬 방을 뺀다(공지는 공지 줄로 따로 나온다).
+///
+/// [unreadRooms]는 Session.unreadRooms. [center]의 "안 읽은 것만" 필터가 켜져 있으면 서버 목록은 이미 안
+/// 읽은 것만 받아 왔고, 프로젝트 알림은 여기서 걸러낸다(방·공지는 원래 전부 안 읽은 것이다).
+List<CenterEntry> buildCenterEntries({
+  required NotificationTab tab,
+  required NotificationController center,
+  required List<Room> unreadRooms,
+}) {
+  final unreadOnly = center.unreadOnly(tab);
+  List<ProjectEntry> project() => [
+    for (final n in center.project)
+      if (!unreadOnly || !n.read) ProjectEntry(n),
+  ];
+  List<AnnouncementEntry> announcements() => [
+    for (final r in unreadRooms)
+      if (r.hasUnreadAnnouncement) AnnouncementEntry(r),
+  ];
+
+  switch (tab) {
+    case NotificationTab.unreadChats:
+      return [for (final r in _byActivity(unreadRooms)) RoomEntry(r)];
+    case NotificationTab.mention:
+      return [for (final n in center.itemsFor(tab)) ServerEntry(n)];
+    case NotificationTab.project:
+      return project();
+    case NotificationTab.board:
+    case NotificationTab.all:
+      final entries = <CenterEntry>[
+        for (final n in center.itemsFor(tab)) ServerEntry(n),
+        ...announcements(),
+        if (tab == NotificationTab.all) ...[
+          for (final r in unreadRooms)
+            if (r.unreadCount > 0) RoomEntry(r),
+          ...project(),
+        ],
+      ]..sort((a, b) => b.time.compareTo(a.time));
+      // 서버 목록이 아직 더 있으면, 받아 둔 가장 오래된 알림보다 오래된 줄은 그 뒤에 나올 새 알림이 끼어들 자리라
+      // 미리 보이지 않게 한다(순서가 뒤집히지 않게 — NotificationController.mergeCutoffFor).
+      final cutoff = center.mergeCutoffFor(tab);
+      if (cutoff == null) return entries;
+      return [
+        for (final e in entries)
+          if (!e.time.isBefore(cutoff)) e,
+      ];
+  }
+}
+
+List<Room> _byActivity(List<Room> rooms) =>
+    [...rooms]..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
+
+/// 탭 배지에 쓸 안 읽음 수.
+///   - 멘션·보드: 서버가 센 개수(보드는 안 읽은 공지 수를 더한다).
+///   - 안 읽은 대화: 안 읽은 방의 수.
+///   - 프로젝트: [projectUnread](Session.projectUnread — 소켓으로 실시간).
+///   - 전체: 넷의 합.
+int notificationTabBadge(
+  NotificationTab tab, {
+  required NotificationController center,
+  required List<Room> unreadRooms,
+  required int projectUnread,
+}) {
+  final announcements = unreadRooms
+      .where((r) => r.hasUnreadAnnouncement)
+      .fold<int>(
+        0,
+        (sum, r) =>
+            sum +
+            (r.unreadAnnouncementCount > 0 ? r.unreadAnnouncementCount : 1),
+      );
+  final board = center.counts.board + announcements;
+  return switch (tab) {
+    NotificationTab.mention => center.counts.mention,
+    NotificationTab.board => board,
+    NotificationTab.unreadChats => unreadRooms.length,
+    NotificationTab.project => projectUnread,
+    NotificationTab.all =>
+      center.counts.mention +
+          board +
+          unreadRooms.where((r) => r.unreadCount > 0).length +
+          projectUnread,
+  };
+}

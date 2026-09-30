@@ -11,6 +11,7 @@ import '../models/comment.dart';
 import '../models/inquiry.dart';
 import '../models/invite_link.dart';
 import '../models/team_invite_link.dart';
+import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/poll.dart';
 import '../models/project.dart';
@@ -2532,6 +2533,7 @@ class ApiClient {
     String? title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     List<UploadedAttachment> attachments = const [],
     required DateTime sendAt,
   }) async {
@@ -2541,6 +2543,7 @@ class ApiClient {
             if (title != null && title.isNotEmpty) 'title': title,
             'text': text,
             'textFormat': ?textFormatToJson(textFormat),
+            'mentions': ?mentionsToJson(mentions),
             if (attachments.isNotEmpty)
               'attachments': [for (final a in attachments) a.toPayload()],
             'sendAt': sendAt.millisecondsSinceEpoch,
@@ -2558,6 +2561,7 @@ class ApiClient {
     String? title,
     String? text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     List<UploadedAttachment>? attachments,
     DateTime? sendAt,
   }) async {
@@ -2568,6 +2572,8 @@ class ApiClient {
             if (text != null) ...{
               'text': text,
               'textFormat': textFormatToJson(textFormat),
+              // 글을 바꿀 때는 멘션도 늘 같이 보낸다(textFormat과 같은 이유 — 옛 구간이 새 글과 어긋나지 않게).
+              'mentions': mentionsToJson(mentions) ?? [],
             },
             if (attachments != null)
               'attachments': [for (final a in attachments) a.toPayload()],
@@ -2722,6 +2728,7 @@ class ApiClient {
     String messageId, {
     String? text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
     String type = 'text',
     String? fileUrl,
     String? fileName,
@@ -2733,6 +2740,7 @@ class ApiClient {
       await _post('/api/messages/$messageId/comments', {
             'text': ?text,
             'textFormat': ?textFormatToJson(textFormat),
+            'mentions': ?mentionsToJson(mentions),
             'type': type,
             'fileUrl': ?fileUrl,
             'fileName': ?fileName,
@@ -2748,11 +2756,14 @@ class ApiClient {
     String commentId,
     String text, {
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
   }) async {
     return Comment.fromJson(
       await _patch('/api/comments/$commentId', {
             'text': text,
             'textFormat': ?textFormatToJson(textFormat),
+            // 수정할 때는 빈 목록도 보낸다 — 멘션을 모두 지웠다는 뜻(안 보내면 서버가 이전 것을 유지할 수 있다).
+            if (mentions != null) 'mentions': mentionsToJson(mentions) ?? [],
           })
           as Map<String, dynamic>,
     );
@@ -2766,11 +2777,13 @@ class ApiClient {
     String messageId,
     String text, {
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
   }) async {
     return Message.fromJson(
       await _patch('/api/messages/$messageId', {
             'text': text,
             'textFormat': ?textFormatToJson(textFormat),
+            if (mentions != null) 'mentions': mentionsToJson(mentions) ?? [],
           })
           as Map<String, dynamic>,
     );
@@ -2787,12 +2800,14 @@ class ApiClient {
     required String title,
     required String text,
     List<TextFormatRun>? textFormat,
+    List<Mention>? mentions,
   }) async {
     return Message.fromJson(
       await _patch('/api/messages/$messageId', {
             'title': title,
             'text': text,
             'textFormat': ?textFormatToJson(textFormat),
+            if (mentions != null) 'mentions': mentionsToJson(mentions) ?? [],
           })
           as Map<String, dynamic>,
     );

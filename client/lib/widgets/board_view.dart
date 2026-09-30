@@ -21,6 +21,7 @@ import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'mention_profile.dart';
 import 'muted_scrollbar.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
@@ -1551,6 +1552,14 @@ class PostDetailHead extends StatelessWidget {
             style: const TextStyle(fontSize: 15, height: 1.6),
             linkColor: Colors.blue,
             selectable: Platform.isWindows,
+            mentions: post.mentions,
+            myUserId: session.userId,
+            onMentionTap: (m) => openMentionProfile(
+              context,
+              session,
+              roomId: room.id,
+              mention: m,
+            ),
           ),
           if (images.isNotEmpty) ...[
             const SizedBox(height: 16),

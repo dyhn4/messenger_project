@@ -201,6 +201,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     final pending = widget.session.consumePendingOpenRoom();
     if (pending != null) {
       _selectedRoom = pending;
+      // 알림 센터에서 멘션을 눌러 온 경우 — 그 메시지로 스크롤·강조.
+      _highlightMessageId = widget.session.consumePendingOpenMessageId();
       return;
     }
 
@@ -250,6 +252,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     final pending = widget.session.consumePendingOpenRoom();
     if (pending != null) {
       _selectRoom(pending);
+      final highlight = widget.session.consumePendingOpenMessageId();
+      if (highlight != null) setState(() => _highlightMessageId = highlight);
       return;
     }
     // 메인/분할/스레드가 가리키던 방이 목록에서 사라졌거나(예: 그룹/토픽 나가기) 숨겨졌으면
@@ -364,17 +368,24 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   /// 팀이 아니면 currentTeam을 먼저 그 팀으로 바꾸고 "펼쳐서 보여줄 방"을 예약해두는데,
   /// _onSessionChanged가 곧이어 그 예약을 소비해서 _selectRoom을 대신 호출해준다(main.dart의
   /// 알림 클릭 처리, org_chart_screen.dart의 멤버 선택과 같은 패턴).
-  void _openNotificationRoom(Room room) {
+  void _openNotificationRoom(
+    Room room, {
+    String? messageId,
+    bool announcementPopup = true,
+  }) {
     final hadUnreadAnnouncement = room.hasUnreadAnnouncement;
     setState(() => _notificationsOpen = false);
-    widget.session.requestOpenRoom(room);
+    // [messageId]가 있으면(멘션·보드 알림) 그 방을 연 뒤 그 메시지로 스크롤·강조한다.
+    widget.session.requestOpenRoom(room, messageId: messageId);
     // 안 읽은 공지 때문에 알림 센터에 떠 있던 방이면 공지 내용도 팝업으로 띄운다.
-    showUnreadAnnouncementPopup(
-      context,
-      widget.session,
-      room,
-      hadUnreadAnnouncement: hadUnreadAnnouncement,
-    );
+    if (announcementPopup) {
+      showUnreadAnnouncementPopup(
+        context,
+        widget.session,
+        room,
+        hadUnreadAnnouncement: hadUnreadAnnouncement,
+      );
+    }
   }
 
   @override
@@ -2200,6 +2211,11 @@ class _RoomTileState extends State<_RoomTile> {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // 안 읽은 멘션이 있으면 안읽음 숫자 옆에 "@"를 붙인다.
+              if (widget.room.unreadMentionCount > 0) ...[
+                const MentionMarker(),
+                const SizedBox(width: 4),
+              ],
               if (widget.unreadCount > 0) ...[
                 UnreadBadge(count: widget.unreadCount),
                 const SizedBox(width: 4),

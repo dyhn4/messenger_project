@@ -1,14 +1,27 @@
+import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../models/app_notification.dart';
+import '../models/project.dart' show ProjectNotification;
 import '../models/room.dart';
 import '../screens/announcement_list_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
+import '../screens/project/project_dialog.dart' show showProjectDialog;
+import '../screens/project/project_notifications.dart'
+    show ProjectNotificationTile;
+import '../screens/project/project_window.dart' show openProjectWindow;
+import '../services/app_links.dart';
+import '../services/notification_controller.dart';
+import '../services/notification_entries.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
+import 'app_toast.dart';
 import 'muted_scrollbar.dart';
+import 'notification_settings_dialog.dart';
 import 'room_avatar.dart';
 import 'team_avatar.dart';
 import 'unread_badge.dart';
@@ -34,7 +47,7 @@ void showUnreadAnnouncementPopup(
   );
 }
 
-/// 상단 툴바의 종 모양 "알림 센터" 버튼 — 안 읽은 방이 하나라도 있으면(Session.unreadRooms)
+/// 상단 툴바의 종 모양 "알림 센터" 버튼 — 볼 알림이 하나라도 있으면(안 읽은 대화·멘션·보드·프로젝트 알림)
 /// 오른쪽 위에 작은 빨간 점을 얹는다. desktop_home_screen.dart의 넓은 화면 툴바와
 /// team_select_screen.dart의 "팀 리스트" 화면이 같이 쓴다.
 class NotificationBellButton extends StatelessWidget {
@@ -49,12 +62,16 @@ class NotificationBellButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // session이 바뀔 때마다(새 메시지로 unreadCount 증감 등) 이 아이콘만 다시 그린다 —
-    // 호출부가 매번 setState 해주지 않아도 항상 최신 상태를 보여준다.
+    // 호출부가 매번 setState 해주지 않아도 항상 최신 상태를 보여준다. 멘션·보드 안 읽음 개수는
+    // 알림 센터 컨트롤러가 따로 들고 있어서 같이 듣는다.
     return ListenableBuilder(
-      listenable: session,
+      listenable: Listenable.merge([session, session.notificationCenter]),
       builder: (context, _) => IconButton(
         icon: Badge(
-          isLabelVisible: session.unreadRooms.isNotEmpty,
+          isLabelVisible:
+              session.unreadRooms.isNotEmpty ||
+              session.notificationCenter.totalUnread > 0 ||
+              session.projectUnread > 0,
           // 방 목록의 안읽음 숫자 뱃지(UnreadBadge)와 같은 빨강으로 맞춘다.
           backgroundColor: Colors.redAccent,
           smallSize: 7,
@@ -70,103 +87,793 @@ class NotificationBellButton extends StatelessWidget {
   }
 }
 
-/// "알림 센터" 안 읽은 방 패널 — 검색/멤버 패널과 같은 틀(헤더+목록)을 쓰되 필터는 없다.
-/// 안 읽은 메시지가 있는 방을 전부(지금 보고 있는 팀 포함, 여러 팀에 걸쳐) 모아 최근
-/// 활동순으로 보여준다. Session.unreadRooms 참고. desktop_home_screen.dart는 이걸 우측
-/// 사이드 패널로, team_select_screen.dart는 [showNotificationsCenterDialog]로 가운데
-/// 뜨는 대화상자로 띄운다 — 헤더/닫기 버튼을 이 위젯이 스스로 그리므로 둘 다 그대로 쓴다.
+/// 알림 센터에서 방(과 메시지)을 열어 달라는 요청 — 호출한 화면이 그 방으로 간다. [messageId]가 있으면(멘션·보드
+/// 알림) 그 메시지로 스크롤·강조하고, [announcementPopup]이면 안 읽은 공지 목록도 띄운다(안 읽은 대화·공지 줄).
+typedef NotificationRoomOpener =
+    void Function(Room room, {String? messageId, bool announcementPopup});
+
+/// 프로젝트 알림을 눌렀을 때 그 프로젝트(업무)를 여는 기본 방법 — Windows는 독립된 프로젝트 창(업무 알림이면
+/// 그 업무까지), 그 밖(안드로이드)은 프로젝트 대화상자. 종 모양 프로젝트 알림함(ProjectNotificationsBell)은
+/// 프로젝트 창 안에서 열리므로 여기와 별개로 그 프로젝트 화면으로 이동한다.
+void openProjectFromNotification(
+  BuildContext context,
+  Session session,
+  ProjectNotification n,
+) {
+  final taskId = n.taskId;
+  final link = taskId == null
+      ? null
+      : AppLinks.task(
+          id: taskId,
+          title: n.title.isNotEmpty ? n.title : (n.projectName ?? '업무'),
+          project: n.projectName,
+          color: n.projectColor,
+        );
+  if (Platform.isWindows) {
+    unawaited(openProjectWindow(session, openLink: link));
+    return;
+  }
+  if (link != null) AppLinks.requestOpen(link);
+  unawaited(
+    showProjectDialog(
+      context,
+      session,
+    ).whenComplete(() => AppLinks.request.value = null),
+  );
+}
+
+/// "알림 센터" 패널 — 검색/멤버 패널과 같은 틀(헤더+목록)에 탭 다섯 개를 얹었다:
+/// `전체 | 멘션 | 안 읽은 대화 | 보드·공지 | 프로젝트`. 여러 팀에 걸쳐(지금 보고 있는 팀 포함) 모아 보여 준다.
+/// 탭마다 안 읽음 배지, 상단에 "안 읽은 것만" 필터와 "모두 읽음", 헤더 톱니에 알림 설정이 있다.
+/// desktop_home_screen.dart는 이걸 우측 사이드 패널로, team_select_screen.dart·모바일은
+/// [showNotificationsCenterDialog]로 띄운다 — 헤더/닫기 버튼을 이 위젯이 스스로 그리므로 둘 다 그대로 쓴다.
+///
+/// 기본으로 열리는 탭은 안 읽은 멘션이 있으면 `멘션`, 아니면 `전체`([initialTab]으로 정할 수도 있다).
 class NotificationsPanel extends StatefulWidget {
   final Session session;
   final VoidCallback onClose;
-  final ValueChanged<Room> onSelectRoom;
+  final NotificationRoomOpener onSelectRoom;
+
+  /// 처음 열 탭 — 없으면 위 기본 규칙.
+  final NotificationTab? initialTab;
+
+  /// 프로젝트 알림을 눌렀을 때 — 없으면 [openProjectFromNotification].
+  final void Function(ProjectNotification n)? onOpenProject;
+
   const NotificationsPanel({
     super.key,
     required this.session,
     required this.onClose,
     required this.onSelectRoom,
+    this.initialTab,
+    this.onOpenProject,
   });
 
   @override
   State<NotificationsPanel> createState() => _NotificationsPanelState();
 }
 
-class _NotificationsPanelState extends State<NotificationsPanel> {
+class _NotificationsPanelState extends State<NotificationsPanel>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  final _scroll = ScrollController();
+  late NotificationTab _lastTab;
+
+  NotificationController get _center => widget.session.notificationCenter;
+  NotificationTab get _tab => NotificationTab.values[_tabs.index];
+
   @override
   void initState() {
     super.initState();
-    // 안읽음 수가 실시간으로 바뀔 때마다(새 메시지 수신, 다른 곳에서 읽음 처리 등) 목록을
-    // 다시 그린다 — _MembersPanel의 onlineUserIds 갱신과 같은 이유.
-    widget.session.addListener(_onSessionChanged);
+    final initial =
+        widget.initialTab ??
+        (_center.counts.mention > 0
+            ? NotificationTab.mention
+            : NotificationTab.all);
+    _lastTab = initial;
+    // 탭을 바꿀 때 미끄러지는 효과는 두지 않는다 — 내용은 TabBarView가 아니라 고른 탭 하나만 그린다.
+    _tabs = TabController(
+      length: NotificationTab.values.length,
+      vsync: this,
+      initialIndex: initial.index,
+      animationDuration: Duration.zero,
+    )..addListener(_onTabChanged);
+    _scroll.addListener(_onScroll);
+    // 컨트롤러는 받기 시작할 때 바로 알리는데(로딩 표시), 그 알림이 이 패널을 만드는 빌드 중에 나가면 같은
+    // 컨트롤러를 듣는 종 모양 버튼 등이 "빌드 중 setState" 오류를 낸다 — 첫 프레임이 끝난 뒤에 받기 시작한다.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_center.refreshCounts());
+      _load(_tab);
+    });
   }
 
   @override
   void dispose() {
-    widget.session.removeListener(_onSessionChanged);
+    _tabs.removeListener(_onTabChanged);
+    _tabs.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
-  void _onSessionChanged() {
+  void _load(NotificationTab tab) {
+    if (tab == NotificationTab.project && !widget.session.canUseProjects) {
+      return;
+    }
+    unawaited(_center.ensureLoaded(tab));
+  }
+
+  void _onTabChanged() {
+    final tab = _tab;
+    if (tab == _lastTab) return;
+    _lastTab = tab;
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _load(tab);
     if (mounted) setState(() {});
   }
 
+  /// 끝에 가까워지면 다음 페이지를 붙인다(멘션·보드·전체 탭의 무한 스크롤).
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final tab = _tab;
+    if (_scroll.position.extentAfter < 240 &&
+        _center.hasMore(tab) &&
+        !_center.isLoading(tab)) {
+      unawaited(_center.loadMore(tab));
+    }
+  }
+
+  /// 받은 목록이 화면을 다 못 채웠는데 더 있으면 이어서 받는다(스크롤할 길이가 없으면 스크롤 이벤트가 없다).
+  void _fillIfShort() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final tab = _tab;
+      if (_scroll.position.maxScrollExtent <= 0 &&
+          _center.hasMore(tab) &&
+          !_center.isLoading(tab)) {
+        unawaited(_center.loadMore(tab));
+      }
+    });
+  }
+
+  // ---- 눌렀을 때 ----
+
+  void _openServer(AppNotification n) {
+    unawaited(_center.markRead(n));
+    final room = n.roomId == null ? null : widget.session.roomById(n.roomId!);
+    if (room == null) {
+      showAppToast(context, '더 이상 볼 수 없는 대화입니다.');
+      return;
+    }
+    widget.onSelectRoom(room, messageId: n.messageId, announcementPopup: false);
+  }
+
+  Future<void> _openProject(ProjectNotification n) async {
+    if (!n.read) {
+      try {
+        await _center.markProjectRead(ids: [n.id]);
+        await widget.session.refreshProjectUnread();
+      } catch (_) {
+        // 읽음 표시가 실패해도 이동은 한다.
+      }
+    }
+    if (!mounted) return;
+    final open = widget.onOpenProject;
+    if (open != null) {
+      open(n);
+    } else {
+      openProjectFromNotification(context, widget.session, n);
+    }
+  }
+
+  Future<void> _markAllRead() async {
+    final session = widget.session;
+    final tab = _tab;
+    final chatRooms = [
+      for (final r in session.unreadRooms)
+        if (tab == NotificationTab.unreadChats ||
+            (tab == NotificationTab.all && r.unreadCount > 0))
+          r,
+    ];
+    if (chatRooms.isNotEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('모두 읽음'),
+          content: Text('안 읽은 대화 ${chatRooms.length}개를 읽음으로 표시할까요?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('읽음으로 표시'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    try {
+      // 서버 알림(멘션·보드)과 프로젝트 알림.
+      await _center.markAllRead(tab);
+      if (tab == NotificationTab.all || tab == NotificationTab.project) {
+        if (session.canUseProjects) {
+          await _center.markProjectRead();
+          await session.refreshProjectUnread();
+        }
+      }
+    } catch (e) {
+      if (mounted) showAppToast(context, '읽음 처리하지 못했습니다: $e');
+    }
+    // 방 쪽 — 안 읽은 공지(보드·공지·전체 탭)와 안 읽은 대화.
+    if (tab == NotificationTab.board || tab == NotificationTab.all) {
+      for (final r in session.unreadRooms) {
+        if (r.hasUnreadAnnouncement) session.markAnnouncementsRead(r);
+      }
+    }
+    for (final r in chatRooms) {
+      session.markRoomReadWithoutOpening(r);
+    }
+  }
+
+  // ---- 그리기 ----
+
   @override
   Widget build(BuildContext context) {
-    final rooms = widget.session.unreadRooms.toList()
-      ..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
-
-    return ColoredBox(
+    final session = widget.session;
+    // ColoredBox가 아니라 Material — 줄(InkWell·ListTile)의 눌림 효과가 이 바탕 위에 그려져야 보인다.
+    return Material(
       color: Theme.of(context).colorScheme.surface,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: ListenableBuilder(
+        // 안읽음 수가 실시간으로 바뀔 때마다(새 메시지 수신, 다른 곳에서 읽음 처리 등) 목록을 다시
+        // 그린다 — _MembersPanel의 onlineUserIds 갱신과 같은 이유.
+        listenable: Listenable.merge([session, _center]),
+        builder: (context, _) {
+          final tab = _tab;
+          final unreadRooms = session.unreadRooms;
+          final entries = buildCenterEntries(
+            tab: tab,
+            center: _center,
+            unreadRooms: unreadRooms,
+          );
+          int badge(NotificationTab t) => notificationTabBadge(
+            t,
+            center: _center,
+            unreadRooms: unreadRooms,
+            projectUnread: session.projectUnread,
+          );
+          _fillIfShort();
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 4, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '알림 센터',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    IconButton(
+                      key: const ValueKey('notif-settings'),
+                      icon: const Icon(Icons.settings_outlined),
+                      tooltip: '알림 설정',
+                      onPressed: () =>
+                          showNotificationSettingsDialog(context, session),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: widget.onClose,
+                    ),
+                  ],
+                ),
+              ),
+              // 탭 다섯 개는 좁은 폭(360dp)에 다 안 들어가서 가로로 스크롤된다 — 고른 탭은 자동으로 보이는 쪽으로.
+              TabBar(
+                key: const ValueKey('notif-tabs'),
+                controller: _tabs,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                dividerHeight: 1,
+                labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+                tabs: [
+                  for (final t in NotificationTab.values)
+                    Tab(
+                      key: ValueKey('notif-tab-${t.name}'),
+                      height: 44,
+                      child: _TabLabel(label: t.label, count: badge(t)),
+                    ),
+                ],
+              ),
+              _buildToolbar(context, tab, badge(tab)),
+              const Divider(height: 1),
+              Expanded(child: _buildBody(context, tab, entries)),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 탭 아래 줄 — "안 읽은 것만" 필터(안 읽은 대화 탭은 원래 전부 안 읽은 것이라 없다)와 "모두 읽음".
+  Widget _buildToolbar(BuildContext context, NotificationTab tab, int unread) {
+    final hasUnread = tab == NotificationTab.unreadChats
+        ? unread > 0
+        : unread > 0 ||
+              (tab == NotificationTab.project &&
+                  _center.project.any((n) => !n.read));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '알림 센터',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: widget.onClose,
-                ),
-              ],
+          if (tab != NotificationTab.unreadChats)
+            FilterChip(
+              key: const ValueKey('notif-unread-only'),
+              label: const Text('안 읽은 것만'),
+              visualDensity: VisualDensity.compact,
+              selected: _center.unreadOnly(tab),
+              onSelected: (v) => _center.setUnreadOnly(tab, v),
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: rooms.isEmpty
-                ? Center(
-                    child: Text(
-                      '안 읽은 메시지가 없습니다.',
-                      style: TextStyle(color: Theme.of(context).hintColor),
-                    ),
-                  )
-                : MutedScrollbar(
-                    child: ListView.separated(
-                      itemCount: rooms.length,
-                      separatorBuilder: (_, _) => const Padding(
-                        padding: EdgeInsets.only(right: 12),
-                        child: Divider(height: 1),
-                      ),
-                      itemBuilder: (context, i) => _NotificationRow(
-                        session: widget.session,
-                        room: rooms[i],
-                        onTap: () => widget.onSelectRoom(rooms[i]),
-                      ),
-                    ),
-                  ),
+          const Spacer(),
+          TextButton(
+            key: const ValueKey('notif-read-all'),
+            onPressed: hasUnread ? _markAllRead : null,
+            child: const Text('모두 읽음'),
           ),
         ],
       ),
     );
   }
+
+  String _emptyText(NotificationTab tab) {
+    if (_center.unreadOnly(tab)) return '안 읽은 알림이 없습니다.';
+    return switch (tab) {
+      NotificationTab.all => '새 알림이 없습니다.',
+      NotificationTab.mention => '멘션 알림이 없습니다.',
+      NotificationTab.unreadChats => '안 읽은 메시지가 없습니다.',
+      NotificationTab.board => '보드·공지 알림이 없습니다.',
+      NotificationTab.project => '프로젝트 알림이 없습니다.',
+    };
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    NotificationTab tab,
+    List<CenterEntry> entries,
+  ) {
+    final hint = Theme.of(context).hintColor;
+    final loading = _center.isLoading(tab);
+    final error = _center.errorFor(tab);
+    if (entries.isEmpty) {
+      if (loading && !_center.isLoaded(tab)) {
+        return const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      }
+      if (error != null) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(error, textAlign: TextAlign.center),
+                TextButton(
+                  onPressed: () => _center.refresh(tab),
+                  child: const Text('다시 시도'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return Center(
+        child: Text(_emptyText(tab), style: TextStyle(color: hint)),
+      );
+    }
+    final footer = loading && _center.isLoaded(tab);
+    return MutedScrollbar(
+      controller: _scroll,
+      child: ListView.separated(
+        key: ValueKey('notif-list-${tab.name}'),
+        controller: _scroll,
+        itemCount: entries.length + (footer ? 1 : 0),
+        separatorBuilder: (_, _) => const Padding(
+          padding: EdgeInsets.only(right: 12),
+          child: Divider(height: 1),
+        ),
+        itemBuilder: (context, i) {
+          if (i >= entries.length) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            );
+          }
+          return _entryRow(entries[i]);
+        },
+      ),
+    );
+  }
+
+  Widget _entryRow(CenterEntry e) {
+    final session = widget.session;
+    return switch (e) {
+      ServerEntry(:final notification) => _ServerNotificationRow(
+        key: ValueKey('notif-${notification.id}'),
+        session: session,
+        notification: notification,
+        onTap: () => _openServer(notification),
+      ),
+      RoomEntry(:final room) => _NotificationRow(
+        session: session,
+        room: room,
+        onTap: () => widget.onSelectRoom(room, announcementPopup: true),
+      ),
+      AnnouncementEntry(:final room) => _AnnouncementRow(
+        key: ValueKey('notif-announcement-${room.id}'),
+        session: session,
+        room: room,
+        onTap: () => widget.onSelectRoom(room, announcementPopup: true),
+      ),
+      ProjectEntry(:final notification) => ProjectNotificationTile(
+        key: ValueKey('notif-project-${notification.id}'),
+        notification: notification,
+        onTap: () => _openProject(notification),
+      ),
+    };
+  }
 }
 
-/// 알림 센터 한 줄: [팀 아바타(+팀 이름)] [방 아바타] [방 이름 · 시각 / 미리보기 · 안읽음 수].
+/// 탭 이름 + 안 읽음 숫자 배지(0이면 숫자 없음).
+class _TabLabel extends StatelessWidget {
+  final String label;
+  final int count;
+  const _TabLabel({required this.label, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label),
+        if (count > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            key: ValueKey('notif-tab-badge-$label'),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            constraints: const BoxConstraints(minWidth: 16),
+            decoration: BoxDecoration(
+              color: Colors.redAccent,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Text(
+              count > 99 ? '99+' : '$count',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// 줄 왼쪽의 팀 칸 — 여러 팀 알림이 한 목록에 섞이므로 어느 팀인지 한눈에 구분돼야 한다(팀 아바타 + 이름).
+/// 방 아바타와 겹치지 않게 완전히 별도 칸으로 둔다.
+class _TeamColumn extends StatelessWidget {
+  final Session session;
+  final String teamId;
+  final String? fallbackName;
+  const _TeamColumn({
+    required this.session,
+    required this.teamId,
+    this.fallbackName,
+  });
+
+  static const width = 44.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final team = session.teams.where((t) => t.id == teamId).firstOrNull;
+    final hint = Theme.of(context).hintColor;
+    final nameStyle = Theme.of(
+      context,
+    ).textTheme.labelSmall?.copyWith(color: hint, fontSize: 10);
+    return SizedBox(
+      width: width,
+      child: team != null
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TeamAvatar(
+                  team: team,
+                  resolveUrl: session.resolveUrl,
+                  size: 32,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  team.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: nameStyle,
+                ),
+              ],
+            )
+          : (fallbackName == null
+                ? null
+                : Text(
+                    fallbackName!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: nameStyle,
+                  )),
+    );
+  }
+}
+
+/// 안 읽은 표시(빨간 점) — 읽은 알림은 그 자리를 비워 둔다.
+class _UnreadDot extends StatelessWidget {
+  const _UnreadDot();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 8,
+    height: 8,
+    decoration: const BoxDecoration(
+      color: Colors.redAccent,
+      shape: BoxShape.circle,
+    ),
+  );
+}
+
+/// 멘션·보드 알림 한 줄: [팀 칸] [종류 아이콘] [방 이름 · 시각 / 보낸 사람·미리보기 · 안 읽음 점].
+class _ServerNotificationRow extends StatelessWidget {
+  final Session session;
+  final AppNotification notification;
+  final VoidCallback onTap;
+  const _ServerNotificationRow({
+    super.key,
+    required this.session,
+    required this.notification,
+    required this.onTap,
+  });
+
+  IconData get _icon => switch (notification.kind) {
+    NotificationKind.mention => Icons.alternate_email,
+    NotificationKind.mentionAll => Icons.groups_outlined,
+    NotificationKind.boardPost => Icons.dashboard_outlined,
+    NotificationKind.boardEdit => Icons.edit_note,
+    NotificationKind.boardComment => Icons.mode_comment_outlined,
+    NotificationKind.other => Icons.notifications_none,
+  };
+
+  /// 두 번째 줄 — 멘션은 "보낸 사람: 미리보기", 보드는 "새 글 · 제목" 같은 식.
+  String get _summary {
+    final n = notification;
+    final actor = n.actorName ?? '';
+    return switch (n.kind) {
+      NotificationKind.mention => '$actor님이 멘션했습니다: ${n.preview}',
+      NotificationKind.mentionAll => '$actor님이 모두를 멘션했습니다: ${n.preview}',
+      NotificationKind.boardPost => '새 글 · ${n.preview}',
+      NotificationKind.boardEdit => '글 수정 · ${n.preview}',
+      NotificationKind.boardComment => '댓글 · ${n.preview}',
+      NotificationKind.other => n.preview,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final n = notification;
+    final read = n.isRead;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _TeamColumn(
+              session: session,
+              teamId: n.teamId,
+              fallbackName: n.teamName,
+            ),
+            const SizedBox(width: 10),
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: theme.colorScheme.primary.withValues(
+                alpha: read ? 0.08 : 0.16,
+              ),
+              child: Icon(
+                _icon,
+                size: 17,
+                color: read ? theme.hintColor : theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          n.roomName ?? '(볼 수 없는 대화)',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: read
+                                ? theme.hintColor
+                                : theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        formatRoomActivityTime(n.createdAt),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _summary,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: read ? theme.hintColor : null,
+                            fontWeight: read
+                                ? FontWeight.normal
+                                : FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      if (!read) ...[
+                        const SizedBox(width: 8),
+                        const Padding(
+                          padding: EdgeInsets.only(top: 4),
+                          child: _UnreadDot(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 안 읽은 공지 한 줄(보드·공지, 전체 탭) — 공지가 있는 방과 공지 내용.
+class _AnnouncementRow extends StatelessWidget {
+  final Session session;
+  final Room room;
+  final VoidCallback onTap;
+  const _AnnouncementRow({
+    super.key,
+    required this.session,
+    required this.room,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final announcement = room.latestAnnouncement;
+    final time = announcement?.createdAt ?? room.lastActivityAt;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _TeamColumn(session: session, teamId: room.teamId),
+            const SizedBox(width: 10),
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: theme.colorScheme.primary.withValues(
+                alpha: 0.16,
+              ),
+              child: Icon(
+                Icons.campaign_outlined,
+                size: 17,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          room.displayName(session.userId ?? ''),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        formatRoomActivityTime(time),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '공지 · ${announcement?.text ?? '새 공지가 있습니다'}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: _UnreadDot(),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 알림 센터 "안 읽은 대화" 한 줄: [팀 아바타(+팀 이름)] [방 아바타] [방 이름 · 시각 / 미리보기 · 안읽음 수].
 /// 팀 아바타는 방 아바타와 겹치지 않게 완전히 별도 칸으로 왼쪽에 둔다 — 여러 팀 알림이 한
 /// 목록에 섞이므로 어느 팀인지 한눈에 구분돼야 한다(검색 결과 행과 같은 뼈대에 이 칸만 더함).
 class _NotificationRow extends StatelessWidget {
@@ -297,6 +1004,11 @@ class _NotificationRow extends StatelessWidget {
                               ),
                       ),
                       const SizedBox(width: 8),
+                      // 안 읽은 멘션이 있으면 안읽음 숫자 옆에 "@"를 붙인다(방 목록과 같다).
+                      if (room.unreadMentionCount > 0) ...[
+                        const MentionMarker(),
+                        const SizedBox(width: 4),
+                      ],
                       // 안 읽은 공지도 개수대로 배지에 합산한다 — 전엔 room.unreadCount(메시지만)만
                       // 써서 공지만 안 읽었을 땐 0으로 떴고, 그 뒤엔 공지가 몇 개든 1로만 셌다.
                       UnreadBadge(
@@ -318,18 +1030,73 @@ class _NotificationRow extends StatelessWidget {
   }
 }
 
-/// team_select_screen.dart("팀 리스트" 화면)에서 알림 센터를 가운데 뜨는 대화상자로 연다 —
-/// 그 화면은 desktop_home_screen.dart처럼 옆으로 붙는 사이드 패널 자리가 없어서(아직 팀을
-/// 안 고른 상태) 대신 대화상자로 띄운다. 방을 고르면 그 방이 속한 팀으로 전환한 뒤(넓은
-/// 화면은 Session.requestOpenRoom으로 DesktopHomeScreen이 이어서 펼쳐 보여줌) 그 방을 연다.
-/// 좁은(모바일) 화면은 requestOpenRoom만으로는 안 열린다 — RoomListScreen(좁은 화면의 홈)은
+/// 알림 센터를 연다 — 넓은 화면은 가운데 뜨는 대화상자(team_select_screen.dart("팀 리스트" 화면)는
+/// desktop_home_screen.dart처럼 옆으로 붙는 사이드 패널 자리가 없다), 좁은(모바일) 화면은 탭 다섯 개가
+/// 잘리지 않게 전체 화면으로. 방을 고르면 그 방이 속한 팀으로 전환한 뒤(넓은 화면은
+/// Session.requestOpenRoom으로 DesktopHomeScreen이 이어서 펼쳐 보여줌) 그 방을 연다.
+/// 좁은 화면은 requestOpenRoom만으로는 안 열린다 — RoomListScreen(좁은 화면의 홈)은
 /// message_bubble.dart의 프로필 대화상자 등과 마찬가지로 requestOpenRoom의 "대기 중인 방"을
 /// 소비하지 않고 항상 직접 push된 ChatScreen으로만 열리므로, 여기서도 같은 패턴대로 직접
-/// push한다.
+/// push한다(멘션·보드 알림이면 그 메시지로 스크롤·강조).
 Future<void> showNotificationsCenterDialog(
   BuildContext context,
-  Session session,
-) {
+  Session session, {
+  NotificationTab? initialTab,
+}) {
+  final narrow = MediaQuery.sizeOf(context).width < wideBreakpoint;
+
+  void openRoom(Room room, {String? messageId, bool announcementPopup = true}) {
+    final hadUnreadAnnouncement = room.hasUnreadAnnouncement;
+    if (!narrow) {
+      session.requestOpenRoom(room, messageId: messageId);
+    } else {
+      // 좁은 화면에서도 다른 팀의 방일 수 있으니 팀 전환만 requestOpenRoom에 맡기고
+      // (내부적으로 currentTeam만 바꿔줌 — _pendingOpenRoom은 이 경로에서 안 쓰임),
+      // 화면 전환 자체는 직접 push한다.
+      session.requestOpenRoom(room);
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            session: session,
+            room: room,
+            highlightMessageId: messageId,
+          ),
+        ),
+      );
+    }
+    if (announcementPopup) {
+      showUnreadAnnouncementPopup(
+        context,
+        session,
+        room,
+        hadUnreadAnnouncement: hadUnreadAnnouncement,
+      );
+    }
+  }
+
+  if (narrow) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (routeContext) => Scaffold(
+          body: SafeArea(
+            child: NotificationsPanel(
+              session: session,
+              initialTab: initialTab,
+              onClose: () => Navigator.of(routeContext).pop(),
+              onSelectRoom: (room, {messageId, announcementPopup = true}) {
+                Navigator.of(routeContext).pop();
+                openRoom(
+                  room,
+                  messageId: messageId,
+                  announcementPopup: announcementPopup,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => Dialog(
@@ -342,28 +1109,14 @@ Future<void> showNotificationsCenterDialog(
         constraints: const BoxConstraints(maxWidth: 420, maxHeight: 640),
         child: NotificationsPanel(
           session: session,
+          initialTab: initialTab,
           onClose: () => Navigator.of(dialogContext).pop(),
-          onSelectRoom: (room) {
-            final hadUnreadAnnouncement = room.hasUnreadAnnouncement;
+          onSelectRoom: (room, {messageId, announcementPopup = true}) {
             Navigator.of(dialogContext).pop();
-            if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
-              session.requestOpenRoom(room);
-            } else {
-              // 좁은 화면에서도 다른 팀의 방일 수 있으니 팀 전환만 requestOpenRoom에 맡기고
-              // (내부적으로 currentTeam만 바꿔줌 — _pendingOpenRoom은 이 경로에서 안 쓰임),
-              // 화면 전환 자체는 직접 push한다.
-              session.requestOpenRoom(room);
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatScreen(session: session, room: room),
-                ),
-              );
-            }
-            showUnreadAnnouncementPopup(
-              context,
-              session,
+            openRoom(
               room,
-              hadUnreadAnnouncement: hadUnreadAnnouncement,
+              messageId: messageId,
+              announcementPopup: announcementPopup,
             );
           },
         ),

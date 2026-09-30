@@ -10,11 +10,13 @@ import 'package:pasteboard/pasteboard.dart';
 
 import '../data/stickers.dart';
 import '../models/inquiry.dart';
+import '../models/mention.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
+import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
 import '../services/typing_gate.dart';
 import '../services/session.dart';
@@ -26,6 +28,7 @@ import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'call_button.dart';
 import 'capture_upload_dialog.dart';
+import 'mention_autocomplete.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
 
@@ -103,6 +106,7 @@ class ChatInputBar extends StatefulWidget {
 class ChatInputBarState extends State<ChatInputBar> {
   final _controller = RichTextEditingController();
   final _focusNode = FocusNode();
+  final _mentionKey = GlobalKey<MentionAutocompleteState>();
   final _attachments = <_PendingAttachment>[];
   bool _sending = false;
 
@@ -248,6 +252,8 @@ class ChatInputBarState extends State<ChatInputBar> {
     // 삽입을 막아야 한다(안 그러면 보내는 키를 눌러도 줄바꿈이 먼저 들어가 버린다).
     final shift = HardwareKeyboard.instance.isShiftPressed;
     final sendKey = widget.session.settings.sendWithShiftEnter ? shift : !shift;
+    // 멘션 자동완성 목록이 떠 있으면 Enter는 목록에서 고르는 데 쓴다(mention_autocomplete.dart).
+    if (_mentionKey.currentState?.isOpen == true) return false;
     if (event is KeyDownEvent &&
         (event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
@@ -490,6 +496,12 @@ class ChatInputBarState extends State<ChatInputBar> {
     // 읽기 전용·보관된 토픽에서는 입력칸이 없지만, 남아 있던 이모티콘 등이 새지 않게 한 번 더 막는다.
     if (!_canWrite) return;
     final (:text, :format) = _controller.formatted();
+    // 비우기 전에 잡아 둔다 — 멘션 구간은 입력칸이 들고 있다.
+    final mentions = mentionsToSend(
+      _controller,
+      _liveRoom,
+      widget.session.userId,
+    );
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
     if (_uploading) return; // 버튼 자체도 막지만, 이중 방어.
@@ -513,7 +525,11 @@ class ChatInputBarState extends State<ChatInputBar> {
       if (sticker != null) await widget.controller.sendSticker(sticker.id);
 
       if (toSend.isEmpty) {
-        await widget.controller.sendText(text, format: format);
+        await widget.controller.sendText(
+          text,
+          format: format,
+          mentions: mentions,
+        );
       } else {
         // 첨부와 함께 입력한 메시지는 별도 메시지로 보내지 않고, 첫 번째 첨부의 캡션으로
         // 붙인다. 업로드는 첨부하는 순간 이미 끝나 있으므로(_stageAndUpload) 여기선 그
@@ -529,20 +545,24 @@ class ChatInputBarState extends State<ChatInputBar> {
         ];
         var caption = text;
         List<TextFormatRun>? captionFormat = format;
+        List<Mention>? captionMentions = mentions;
         if (images.isNotEmpty) {
           await widget.controller.sendUploadedAttachments(
             images,
             caption: caption,
             captionFormat: captionFormat,
+            captionMentions: captionMentions,
           );
           caption = '';
           captionFormat = null;
+          captionMentions = null;
         }
         if (files.isNotEmpty) {
           await widget.controller.sendUploadedAttachments(
             files,
             caption: caption.isEmpty ? null : caption,
             captionFormat: captionFormat,
+            captionMentions: captionMentions,
           );
         }
       }
@@ -560,12 +580,12 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  /// 단추 줄에 투표 단추를 따로 놓을 자리가 있는지 — 단추 줄은 고정 폭 단추들이라 좁은 화면(휴대폰에
+  /// 단추 줄에 멘션(@)·투표 단추를 따로 놓을 자리가 있는지 — 단추 줄은 고정 폭 단추들이라 좁은 화면(휴대폰에
   /// 팀장 문의 단추까지 붙은 경우 등)에서 하나 더 넣으면 줄이 넘친다. 지금 보일 단추 수로 필요한
-  /// 폭을 어림해서(단추당 48) 남는 자리가 있을 때만 별도 단추로 그리고(촘촘한 폭 40), 없으면 파일
-  /// 단추가 (파일 · 투표) 메뉴가 되어 거기에 합친다 — 어떤 폭에서도 투표를 만들 수 있고 줄은
-  /// 넘치지 않는다.
-  bool _standalonePoll(double maxWidth) {
+  /// 폭을 어림해서(단추당 48) 남는 자리가 있을 때만 별도 단추로 그리고(멘션이 먼저, 둘 다 촘촘한 폭 40),
+  /// 없으면 파일 단추가 (파일 · 투표 · 멘션) 메뉴가 되어 거기에 합친다 — 어떤 폭에서도 세 기능에 모두
+  /// 들어갈 수 있고 줄은 넘치지 않는다.
+  ({bool mention, bool poll}) _standaloneButtons(double maxWidth) {
     final session = widget.session;
     final room = _liveRoom;
     var others = 3; // 이모티콘 · 파일 · 보내기.
@@ -574,32 +594,52 @@ class ChatInputBarState extends State<ChatInputBar> {
     if (_showCallButton && session.callsEnabled) others++;
     if (session.canSendInquiryIn(widget.room)) others++;
     if (canScheduleIn(session, room)) others++;
+    var left = maxWidth - others * 48.0;
     const compact = 40.0;
-    return canCreatePollIn(session, room) &&
-        maxWidth - others * 48.0 >= compact;
+    final mention = roomAllowsMention(room) && left >= compact;
+    if (mention) left -= compact;
+    final poll = canCreatePollIn(session, room) && left >= compact;
+    return (mention: mention, poll: poll);
   }
 
-  /// 투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가 메뉴가 된다.
-  bool _needsAttachMenu(double maxWidth) =>
-      canCreatePollIn(widget.session, _liveRoom) && !_standalonePoll(maxWidth);
+  /// 멘션·투표 중 별도 단추를 못 놓은 것이 있으면(좁은 화면) 파일 단추가 메뉴가 된다.
+  bool _needsAttachMenu(double maxWidth) {
+    final room = _liveRoom;
+    final own = _standaloneButtons(maxWidth);
+    return (canCreatePollIn(widget.session, room) && !own.poll) ||
+        (roomAllowsMention(room) && !own.mention);
+  }
 
-  /// 좁은 화면의 파일 단추 — 별도 단추를 못 놓은 투표를 메뉴 항목으로 모아 둔다.
-  Widget _buildAttachMenu() {
+  /// 좁은 화면의 파일 단추 — 별도 단추를 못 놓은 기능(투표·멘션)을 메뉴 항목으로 모아 둔다.
+  Widget _buildAttachMenu(double maxWidth) {
+    final room = _liveRoom;
+    final own = _standaloneButtons(maxWidth);
+    final poll = canCreatePollIn(widget.session, room) && !own.poll;
+    final mention = roomAllowsMention(room) && !own.mention;
     return PopupMenuButton<String>(
       key: const ValueKey('chat-attach-menu'),
       icon: const Icon(Icons.attach_file),
-      tooltip: '파일 · 투표',
+      tooltip: ['파일', if (poll) '투표', if (mention) '멘션'].join(' · '),
       enabled: !_sending,
       onSelected: (v) {
-        if (v == 'poll') {
-          _openPollCreator();
-        } else {
-          _pickFile();
+        switch (v) {
+          case 'poll':
+            _openPollCreator();
+          case 'mention':
+            _mentionKey.currentState?.insertTrigger();
+          default:
+            _pickFile();
         }
       },
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'file', child: Text('파일 보내기')),
-        PopupMenuItem(value: 'poll', child: Text('투표')),
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'file', child: Text('파일 보내기')),
+        if (poll) const PopupMenuItem(value: 'poll', child: Text('투표')),
+        if (mention)
+          const PopupMenuItem(
+            key: ValueKey('chat-attach-mention'),
+            value: 'mention',
+            child: Text('멘션 (@)'),
+          ),
       ],
     );
   }
@@ -624,6 +664,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       room: _liveRoom,
       text: text,
       textFormat: format,
+      mentions: mentionsToSend(_controller, _liveRoom, widget.session.userId),
       attachments: [
         for (final a in staged)
           ScheduleDraftAttachment(
@@ -812,35 +853,48 @@ class ChatInputBarState extends State<ChatInputBar> {
               ),
               child: ScrollbarTheme(
                 data: mutedScrollbarThemeData,
-                child: RichFieldWrapper(
+                child: MentionAutocomplete(
+                  key: _mentionKey,
                   controller: _controller,
-                  child: TextField(
-                    key: const ValueKey('chat-input'),
+                  focusNode: _focusNode,
+                  room: _liveRoom,
+                  myUserId: widget.session.userId,
+                  resolveUrl: widget.session.resolveUrl,
+                  child: RichFieldWrapper(
                     controller: _controller,
-                    focusNode: _focusNode,
-                    decoration: InputDecoration(
-                      // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                      // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                      hintText: _focusNode.hasFocus ? null : '메시지 입력',
-                      border: _formatOpen
-                          ? InputBorder.none
-                          : const OutlineInputBorder(),
-                      // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
-                      // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
-                      contentPadding: const EdgeInsets.fromLTRB(12, 12, 2, 12),
+                    child: TextField(
+                      key: const ValueKey('chat-input'),
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      decoration: InputDecoration(
+                        // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                        // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                        hintText: _focusNode.hasFocus ? null : '메시지 입력',
+                        border: _formatOpen
+                            ? InputBorder.none
+                            : const OutlineInputBorder(),
+                        // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
+                        // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
+                        contentPadding: const EdgeInsets.fromLTRB(
+                          12,
+                          12,
+                          2,
+                          12,
+                        ),
+                      ),
+                      minLines: 1,
+                      maxLines: 6,
+                      // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
+                      // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
+                      // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
+                      // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
+                      // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
+                      // 그대로 둔다.
+                      textInputAction: Platform.isWindows
+                          ? TextInputAction.newline
+                          : TextInputAction.send,
+                      onSubmitted: (_) => _send(),
                     ),
-                    minLines: 1,
-                    maxLines: 6,
-                    // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
-                    // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
-                    // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
-                    // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
-                    // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
-                    // 그대로 둔다.
-                    textInputAction: Platform.isWindows
-                        ? TextInputAction.newline
-                        : TextInputAction.send,
-                    onSubmitted: (_) => _send(),
                   ),
                 ),
               ),
@@ -866,10 +920,18 @@ class ChatInputBarState extends State<ChatInputBar> {
                       tooltip: '이모티콘',
                     ),
                   ),
-                  // 투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가
-                  // 같은 자리의 메뉴(파일 보내기 · 투표)가 된다.
+                  // 멘션 — 입력칸에 @를 넣어 대화 멤버 자동완성을 연다(비밀 대화는 지원하지 않는다).
+                  // 좁아서 자리가 없으면 아래 파일 단추의 메뉴에 "멘션"으로 들어간다.
+                  if (_standaloneButtons(constraints.maxWidth).mention)
+                    MentionButton(
+                      onPressed: _sending
+                          ? null
+                          : () => _mentionKey.currentState?.insertTrigger(),
+                    ),
+                  // 멘션·투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가
+                  // 같은 자리의 메뉴(파일 보내기 · 투표 · 멘션)가 된다.
                   if (_needsAttachMenu(constraints.maxWidth))
-                    _buildAttachMenu()
+                    _buildAttachMenu(constraints.maxWidth)
                   else
                     IconButton(
                       icon: const Icon(Icons.attach_file),
@@ -877,7 +939,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                       tooltip: '파일 보내기',
                     ),
                   // 투표 만들기 — 비밀 대화에서는 서버가 막으니 단추 자체를 숨긴다.
-                  if (_standalonePoll(constraints.maxWidth))
+                  if (_standaloneButtons(constraints.maxWidth).poll)
                     IconButton(
                       key: const ValueKey('chat-poll'),
                       visualDensity: VisualDensity.compact,

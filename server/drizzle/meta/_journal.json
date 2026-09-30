@@ -547,6 +547,13 @@
       "when": 1790797906630,
       "tag": "0077_true_scarecrow",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790797926038,
+      "tag": "0078_tan_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

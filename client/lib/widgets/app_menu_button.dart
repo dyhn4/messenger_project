@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../screens/favorites_screen.dart';
 import '../screens/inquiry_inbox_screen.dart';
 import '../screens/poll_create_dialog.dart';
 import '../screens/scheduled_messages_screen.dart';
@@ -10,12 +11,13 @@ import 'app_toast.dart';
 import 'compact_menu.dart';
 
 /// 상단 툴바의 "메뉴"(격자 아이콘) 드롭다운 — 둥근 색 아이콘 타일과 아래 라벨을 격자로 늘어놓은 모양이고
-/// "생성"(메시지 예약 · 투표)과 "리스트"(파일 · 링크 · 문의함) 두 묶음으로 나뉜다.
+/// "생성"(메시지 예약 · 투표)과 "리스트"(파일 · 링크 · 문의함 · 즐겨찾기) 두 묶음으로 나뉜다.
 /// desktop_home_screen.dart의 _TopBar와 room_list_screen.dart(안드로이드) AppBar가 같이 쓴다.
 /// [onOpenFiles]는 플랫폼마다 다르다 — PC는 우측 패널을 토글하고, 안드로이드는 전체화면으로
 /// 새로 연다. [onOpenLinks]("링크" — 주고받은 링크 모아보기)도 같다.
 ///
-/// "투표"는 투표 만들기 창을 연다(맨 위 "대화방" 칸에서 방을 고른다).
+/// "투표"는 투표 만들기 창을 연다(맨 위 "대화방" 칸에서 방을 고른다). "즐겨찾기"는 메시지·파일·댓글·투표·대화방·멤버를
+/// 종류별 탭으로 모아 보는 통합 즐겨찾기 화면(favorites_screen.dart)을 연다 — 예전 "투표 즐겨찾기" 화면도 그 탭으로 합쳤다.
 class AppMenuButton extends StatelessWidget {
   final Session session;
   final VoidCallback onOpenFiles;
@@ -119,6 +121,14 @@ class AppMenuButton extends StatelessWidget {
                         onTap: run(
                           () => showInquiryInboxScreen(buttonContext, session),
                         ),
+                      ),
+                      _MenuTile(
+                        key: const ValueKey('menu-favorites'),
+                        label: '즐겨찾기',
+                        color: const Color(0xFFE0A100),
+                        background: const Color(0xFFFFF1C2),
+                        icon: const Icon(Icons.star_rounded),
+                        onTap: run(() => showFavorites(buttonContext, session)),
                       ),
                     ],
                   ),

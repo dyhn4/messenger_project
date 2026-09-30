@@ -542,16 +542,21 @@ void main() {
       _post('other', title: '남의 글', minutes: 2),
     ];
 
-    testWidgets('보통 멤버 — 내 글은 수정·삭제, 남의 글은 메뉴가 없다', (tester) async {
+    testWidgets('보통 멤버 — 내 글은 수정·삭제·즐겨찾기, 남의 글은 즐겨찾기만', (tester) async {
       final room = _room('r1');
       final session = _session(_boardServer(history: history()), rooms: [room]);
       await _pumpBoard(tester, session, room);
 
-      expect(
-        find.descendant(of: _card('other'), matching: find.byTooltip('더보기')),
-        findsNothing,
-      );
+      // 남의 글 메뉴에는 고정·수정·삭제가 없고 즐겨찾기만 있다(즐겨찾기는 누구나).
+      await _openMenu(tester, 'other');
+      expect(find.text('즐겨찾기'), findsOneWidget);
+      expect(find.text('수정'), findsNothing);
+      expect(find.text('삭제'), findsNothing);
+      expect(find.text('게시글 고정'), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
       await _openMenu(tester, 'mine');
+      expect(find.text('즐겨찾기'), findsOneWidget);
       expect(find.text('수정'), findsOneWidget);
       expect(find.text('삭제'), findsOneWidget);
       expect(find.text('게시글 고정'), findsNothing);
@@ -606,15 +611,15 @@ void main() {
       expect(find.text('읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.'), findsNothing);
     });
 
-    testWidgets('팀이 메시지 수정/삭제를 꺼두면 작성자도 수정·삭제 메뉴가 없다', (tester) async {
+    testWidgets('팀이 메시지 수정/삭제를 꺼두면 작성자도 수정·삭제 메뉴가 없다(즐겨찾기만)', (tester) async {
       final room = _room('r1');
       final session = _session(_boardServer(history: history()), rooms: [room]);
       session.currentTeam!.messageEditDeleteEnabled = false;
       await _pumpBoard(tester, session, room);
-      expect(
-        find.descendant(of: _card('mine'), matching: find.byTooltip('더보기')),
-        findsNothing,
-      );
+      await _openMenu(tester, 'mine');
+      expect(find.text('즐겨찾기'), findsOneWidget);
+      expect(find.text('수정'), findsNothing);
+      expect(find.text('삭제'), findsNothing);
     });
   });
 

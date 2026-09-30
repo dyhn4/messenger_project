@@ -529,6 +529,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       session: widget.session,
       message: messageFromComment(comment),
       senderDisplayName: displayName,
+      isComment: true,
     );
   }
 
@@ -697,6 +698,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
               session: widget.session,
               message: messageFromComment(comment),
               senderDisplayName: displayName,
+              isComment: true,
             ),
             if (canEditDelete) hoverMenuDivider(),
             // 메시지 수정과 동일하게, 텍스트 댓글만 수정할 수 있다(서버도 동일하게 막음).

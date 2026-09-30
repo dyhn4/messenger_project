@@ -11,6 +11,7 @@ import '../screens/message_share_screen.dart';
 import '../screens/project/project_forms.dart' show showNewTaskDialog;
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'favorite_actions.dart';
 import 'hover_toolbar.dart' show hoverMenuItem;
 import 'message_announce.dart';
 
@@ -251,11 +252,14 @@ void showMessageActionSheet(
   VoidCallback? onEdit,
   // 진짜 메시지(댓글이 아닌)에서만 true — 토픽의 텍스트·이미지 메시지에 "공지 등록"을 붙인다.
   bool offerAnnouncement = false,
+  // 댓글이면 true — 즐겨찾기가 메시지가 아니라 댓글(comment_favorites)로 들어간다.
+  bool isComment = false,
 }) {
   final sourceRoom = session.rooms.where((r) => r.id == message.roomId);
   final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
   // 투표는 공유·전달을 못 한다(카드가 원본 하나로만 존재한다) — 비밀 대화와 같이 항목을 뺀다.
   final cannotShare = isSecretRoom || message.isPoll;
+  final favoriteOn = isEntryFavorite(session, message.id, isComment: isComment);
 
   showModalBottomSheet(
     context: context,
@@ -304,6 +308,24 @@ void showMessageActionSheet(
                 showSelectCopyDialog(context, message);
               },
             ),
+            if (canFavoriteEntry(session, message, isComment: isComment))
+              ListTile(
+                key: const ValueKey('action-favorite'),
+                leading: Icon(
+                  favoriteOn ? Icons.star : Icons.star_border,
+                  color: favoriteOn ? Colors.amber : null,
+                ),
+                title: Text(favoriteOn ? '즐겨찾기 해제' : '즐겨찾기'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  toggleEntryFavorite(
+                    context,
+                    session,
+                    message.id,
+                    isComment: isComment,
+                  );
+                },
+              ),
             if (!isSecretRoom && session.canUseProjects)
               ListTile(
                 leading: const Icon(Icons.assignment_outlined),
@@ -367,11 +389,14 @@ List<Widget> messageActionMenuItems(
   required String senderDisplayName,
   // 진짜 메시지(댓글이 아닌)에서만 true — 토픽의 텍스트·이미지 메시지에 "공지 등록"을 붙인다.
   bool offerAnnouncement = false,
+  // 댓글이면 true — 즐겨찾기가 메시지가 아니라 댓글(comment_favorites)로 들어간다.
+  bool isComment = false,
 }) {
   final sourceRoom = session.rooms.where((r) => r.id == message.roomId);
   final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
   // 투표는 공유·전달을 못 한다(카드가 원본 하나로만 존재한다) — 비밀 대화와 같이 항목을 뺀다.
   final cannotShare = isSecretRoom || message.isPoll;
+  final favoriteOn = isEntryFavorite(session, message.id, isComment: isComment);
 
   return [
     if (!cannotShare)
@@ -390,6 +415,17 @@ List<Widget> messageActionMenuItems(
       label: '복사',
       onPressed: () => copyMessageText(context, message),
     ),
+    if (canFavoriteEntry(session, message, isComment: isComment))
+      hoverMenuItem(
+        icon: favoriteOn ? Icons.star : Icons.star_border,
+        label: favoriteOn ? '즐겨찾기 해제' : '즐겨찾기',
+        onPressed: () => toggleEntryFavorite(
+          context,
+          session,
+          message.id,
+          isComment: isComment,
+        ),
+      ),
     if (!isSecretRoom && session.canUseProjects)
       hoverMenuItem(
         icon: Icons.assignment_outlined,

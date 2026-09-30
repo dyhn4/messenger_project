@@ -36,6 +36,8 @@ import 'notification_controller.dart';
 import 'deep_link_service.dart';
 import 'device_identity.dart';
 import 'download_storage.dart';
+import 'favorites_api.dart';
+import 'favorites_controller.dart';
 import 'message_preview.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
@@ -199,6 +201,15 @@ class Session extends ChangeNotifier {
     onNew: _onNotificationNew,
     onRead: _onNotificationsRead,
     onSync: _onNotificationSync,
+  );
+
+  /// 통합 즐겨찾기(메시지·파일·댓글·투표·대화방·멤버) — 내가 담은 id와 탭별 목록, 소켓 favorite:changed
+  /// (favorites_controller.dart). 로그인하면 [_enterApp]이 id를 받아 두고, 로그아웃하면 [logout]이 비운다.
+  late final favorites = FavoritesController(
+    apiProvider: () => RemoteFavoritesApi(api!),
+    teamIdProvider: () => currentTeam?.id,
+    changed: chatSocket.favoriteChanged,
+    reconnected: chatSocket.reconnected,
   );
   final _updateSocket = UpdateSocket();
   StreamSubscription<UpdateAvailableEvent>? _updateSub;
@@ -1117,6 +1128,7 @@ class Session extends ChangeNotifier {
     }
     if (canUseProjects) unawaited(refreshProjectUnread());
     unawaited(notificationCenter.refreshCounts());
+    unawaited(favorites.loadIds());
 
     // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
     // 로그아웃(_forceLogout)됐을 수 있다(예: 이 토큰이 새 서버 버전 이전에 발급된 옛날
@@ -2911,6 +2923,7 @@ class Session extends ChangeNotifier {
   /// 보고 있는 팀이 바뀌면 이전 팀 폴더·예약 메시지는 바로 비우고 새 팀 것을 불러온다.
   void _onCurrentTeamChanged() {
     topicFolders.clear();
+    favorites.invalidate(); // 즐겨찾기 목록은 팀 단위라 이전 팀 것을 비운다.
     unawaited(loadTopicFolders());
     _resetScheduledMessages();
     unawaited(_refreshScheduledMessages());
@@ -3690,6 +3703,7 @@ class Session extends ChangeNotifier {
     _resetScheduledMessages(); // 예약 목록도 같은 이유로 비우고 늦은 응답은 버린다.
     calendar.reset(); // 캘린더 캐시도 — 다음에 로그인하는 사람에게 남지 않게.
     notificationCenter.reset(); // 알림 센터 목록·개수도 같은 이유로.
+    favorites.reset(); // 즐겨찾기 id·목록도.
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();

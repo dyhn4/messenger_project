@@ -20,6 +20,7 @@ import '../services/time_format.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
+import 'favorite_actions.dart';
 import 'hover_toolbar.dart';
 import 'mention_profile.dart';
 import 'muted_scrollbar.dart';
@@ -625,9 +626,22 @@ class PostMoreButton extends StatelessWidget {
     final canPin = canPinPost(session, room, post);
     final canEdit = canEditPost(session, room, post);
     final canDelete = canDeletePost(session, room, post);
-    if (!canPin && !canEdit && !canDelete) return const SizedBox(width: 8);
+    // 즐겨찾기는 누구나 켤 수 있어 이 단추는 이제 항상 보인다(favorite_actions.dart).
+    final canFavorite = canFavoriteEntry(session, post, isComment: false);
+    final favoriteOn = isEntryFavorite(session, post.id, isComment: false);
+    if (!canPin && !canEdit && !canDelete && !canFavorite) {
+      return const SizedBox(width: 8);
+    }
     return MenuAnchor(
       menuChildren: [
+        if (canFavorite)
+          hoverMenuItem(
+            icon: favoriteOn ? Icons.star : Icons.star_border,
+            label: favoriteOn ? '즐겨찾기 해제' : '즐겨찾기',
+            onPressed: () =>
+                toggleEntryFavorite(context, session, post.id, isComment: false),
+          ),
+        if (canFavorite && (canPin || canEdit || canDelete)) hoverMenuDivider(),
         if (canPin)
           hoverMenuItem(
             icon: post.isPinned ? Icons.push_pin : Icons.push_pin_outlined,

@@ -435,6 +435,8 @@ class ChatSocket {
   final _pollUpdatedController = StreamController<PollUpdatedEvent>.broadcast();
   final _pollFavoriteController =
       StreamController<PollFavoriteEvent>.broadcast();
+  final _favoriteChangedController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _messageDeletedController =
       StreamController<MessageDeletedEvent>.broadcast();
   final _commentEditedController = StreamController<Comment>.broadcast();
@@ -572,6 +574,11 @@ class ChatSocket {
 
   /// 내 다른 기기에서 투표 즐겨찾기를 바꿨다(poll:favorite) — 내 user 룸으로만 온다.
   Stream<PollFavoriteEvent> get pollFavorite => _pollFavoriteController.stream;
+
+  /// 내 다른 기기에서 메시지·댓글·멤버 즐겨찾기를 바꿨다(favorite:changed — `{kind, id, favorite, teamId?}`).
+  /// 내 user 룸으로만 온다. 받는 쪽은 services/favorites_controller.dart.
+  Stream<Map<String, dynamic>> get favoriteChanged =>
+      _favoriteChangedController.stream;
 
   /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted).
   Stream<MessageDeletedEvent> get messageDeleted =>
@@ -841,6 +848,9 @@ class ChatSocket {
       _pollFavoriteController.add(
         PollFavoriteEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
+    });
+    socket.on('favorite:changed', (data) {
+      _favoriteChangedController.add(Map<String, dynamic>.from(data as Map));
     });
     socket.on('message:deleted', (data) {
       _messageDeletedController.add(

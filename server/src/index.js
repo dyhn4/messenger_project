@@ -28,6 +28,7 @@ import { PAIRING_PORT, PORT } from './config.js';
 import { createCallsRouter } from './calls.js';
 import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
+import { createFavoritesRouter } from './favorites.js';
 import { createDevicesRouter } from './devices.js';
 import { createInvitesRouter } from './invites.js';
 import { createTeamInvitesRouter } from './teamInvites.js';
@@ -95,6 +96,7 @@ app.use('/api', requireAuth, createPollsRouter(io));
 // 메시지 예약 발송 — 만든 사람만 보고 고친다. 실제 발송은 아래 startScheduledMessageJob이 한다.
 app.use('/api', requireAuth, createScheduledMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
+app.use('/api', requireAuth, createFavoritesRouter(io));
 // 알림 센터(멘션·보드 알림 기록, 읽음, 알림 설정) — notifications.js.
 app.use('/api', requireAuth, createNotificationsRouter(io));
 // 캘린더(기본/팀/공유 캘린더, 일정, 반복, 공휴일·생일) — 권한은 calendars.js의 calendarAccess 한 곳에서 계산한다.

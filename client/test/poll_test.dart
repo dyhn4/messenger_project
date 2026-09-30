@@ -1694,12 +1694,12 @@ void main() {
       );
       await tester.tap(find.byTooltip('메뉴'));
       await tester.pumpAndSettle();
-      for (final label in ['메시지 예약', '투표', '파일', '링크', '문의함']) {
+      for (final label in ['메시지 예약', '투표', '파일', '링크', '문의함', '즐겨찾기']) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
       expect(tester.takeException(), isNull);
       final right = tester
-          .getTopRight(find.byKey(const ValueKey('menu-inquiries')))
+          .getTopRight(find.byKey(const ValueKey('menu-favorites')))
           .dx;
       expect(right, lessThanOrEqualTo(360));
     });

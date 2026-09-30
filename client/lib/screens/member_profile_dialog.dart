@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/team.dart';
 import '../services/session.dart';
+import '../widgets/favorite_actions.dart';
 import '../widgets/org_section.dart';
 import '../widgets/user_avatar.dart';
 
@@ -202,6 +203,16 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
     }
   }
 
+  /// 멤버 즐겨찾기는 팀 단위다 — 지금 보고 있는 팀(조직도에서는 함께 속한 팀 중 지금 팀, 없으면 첫 팀).
+  /// 함께 속한 팀이 없으면 null(별을 안 그린다).
+  String? get _favoriteTeamId {
+    final current = widget.session.currentTeam?.id;
+    if (!widget.fromOrgChart) return current;
+    final shared = widget.orgChartDmTeamCandidates;
+    if (shared.isEmpty) return null;
+    return shared.any((t) => t.id == current) ? current : shared.first.id;
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = _user;
@@ -229,23 +240,42 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              height: 90,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(16),
+            Stack(
+              // 아바타가 머리 칸 아래로 삐져나오므로 잘리지 않게 한다.
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  height: 90,
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(16),
+                    ),
+                  ),
+                  alignment: Alignment.bottomCenter,
+                  child: Transform.translate(
+                    offset: const Offset(0, 30),
+                    child: UserAvatar(
+                      user: user,
+                      resolveUrl: widget.session.resolveUrl,
+                      radius: 32,
+                    ),
+                  ),
                 ),
-              ),
-              alignment: Alignment.bottomCenter,
-              child: Transform.translate(
-                offset: const Offset(0, 30),
-                child: UserAvatar(
-                  user: user,
-                  resolveUrl: widget.session.resolveUrl,
-                  radius: 32,
-                ),
-              ),
+                // 멤버 즐겨찾기 별 — 팀을 알 수 있을 때만(조직도에서 함께 속한 팀이 없으면 없다).
+                if (_favoriteTeamId != null)
+                  Positioned(
+                    top: 2,
+                    right: 2,
+                    child: MemberFavoriteStar(
+                      session: widget.session,
+                      userId: user.id,
+                      teamId: _favoriteTeamId!,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 40),
             Text(

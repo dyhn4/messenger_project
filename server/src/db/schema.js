@@ -1645,3 +1645,65 @@ export const calendarEventColors = pgTable(
   },
   (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
 );
+
+// ── 통합 즐겨찾기 ───────────────────────────────────────────────────────
+// 즐겨찾기는 사람마다 따로라서 모두 (userId, 대상) 한 줄이다. 파일(favorite_files)·투표(poll_favorites)·
+// 대화방(room_members.favorite)은 예전부터 있던 표를 그대로 쓰고, 여기엔 메시지·댓글·멤버만 추가한다.
+// 대상이 지워지면 cascade로 같이 사라진다(메시지·댓글의 "삭제"는 소프트 삭제라 조회에서 거른다).
+
+/** 사람마다 따로 "즐겨찾기"해 두는 메시지 — 일반 메시지와 보드 게시글(투표는 poll_favorites). */
+export const messageFavorites = pgTable(
+  'message_favorites',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.messageId] }),
+    index('message_favorites_user_created_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+/** 사람마다 따로 "즐겨찾기"해 두는 댓글. */
+export const commentFavorites = pgTable(
+  'comment_favorites',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    commentId: uuid('comment_id')
+      .notNull()
+      .references(() => messageComments.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.commentId] }),
+    index('comment_favorites_user_created_idx').on(t.userId, t.createdAt),
+  ],
+);
+
+/** 사람마다 따로 "즐겨찾기"해 두는 팀 멤버 — 팀마다 따로(같은 사람이라도 팀별로 담는다). */
+export const memberFavorites = pgTable(
+  'member_favorites',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    favoriteUserId: uuid('favorite_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.teamId, t.favoriteUserId] }),
+    index('member_favorites_user_team_idx').on(t.userId, t.teamId, t.createdAt),
+  ],
+);

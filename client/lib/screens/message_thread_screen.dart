@@ -299,6 +299,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                                   widget.session.userId,
                               sender: _memberOf(widget.message.senderId),
                               onEdit: widget.controller.editMessage,
+                              onEditMedia: widget.controller.editMediaMessage,
                               onDelete: widget.controller.deleteMessage,
                             ),
                           const Padding(

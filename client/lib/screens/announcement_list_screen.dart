@@ -332,9 +332,14 @@ class _AnnouncementTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
               ],
+              // 사진 공지는 글 앞에 사진 아이콘을 붙이고(글이 없으면 "[사진]"), 사진은 상세에서 본다.
+              if (announcement.hasImage) ...[
+                const Icon(Icons.image_outlined, size: 16),
+                const SizedBox(width: 4),
+              ],
               Expanded(
                 child: Text(
-                  announcement.text,
+                  announcement.previewText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

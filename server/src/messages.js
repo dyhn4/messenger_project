@@ -20,6 +20,7 @@ import { notifyBoard, removeNotificationsForMessage, updateMentions } from './no
 import { parsePostFields, topicWriteDenial } from './permissions.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
+import { editMediaMessage } from './messageAttachmentEdit.js';
 
 // 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르므로 여기 상수가 아니라
 // moderation.js의 canModifyContent가 판단한다.
@@ -194,8 +195,10 @@ export function createMessagesRouter(io) {
     if (message.type === 'poll') {
       return res.status(400).json({ error: '투표는 수정할 수 없습니다.' });
     }
-    if (message.type !== 'text' && !isPost) {
-      return res.status(400).json({ error: '텍스트 메시지만 수정할 수 있습니다.' });
+    // 사진·파일 메시지는 설명글 수정과 첨부 삭제만 된다(messageAttachmentEdit.js). 이모티콘·시스템 메시지는 불가.
+    const isMedia = message.type === 'image' || message.type === 'file';
+    if (message.type !== 'text' && !isPost && !isMedia) {
+      return res.status(400).json({ error: '텍스트·사진·파일 메시지만 수정할 수 있습니다.' });
     }
     // 수정도 삭제와 같은 규칙(팀 [메시지 설정]의 허용 여부 + 수정/삭제 가능 시간)을 따른다.
     // 다만 남의 메시지 수정은 관리자도 할 수 없다 — moderation.js가 action으로 구분한다.
@@ -216,6 +219,28 @@ export function createMessagesRouter(io) {
     if (room?.type === 'topic' && (room.readOnly || room.archivedAt)) {
       const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, req.user.sub)).canManage });
       if (denial) return res.status(403).json({ error: denial });
+    }
+
+    if (isMedia) {
+      // 비밀 대화는 설명글이 첨부 키 봉투와 한 덩어리 암호문이고 서버가 안을 못 봐서 고치거나 첨부를 덜어낼 수 없다.
+      if (room?.isSecret) {
+        return res.status(400).json({ error: '비밀 대화의 사진·파일 메시지는 수정할 수 없습니다.' });
+      }
+      const result = await editMediaMessage({
+        message,
+        room,
+        body: req.body,
+        userId: req.user.sub,
+        cleanMentions,
+        trimmedLead,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      const dto = toMessageDto(result.updated);
+      if (result.changed) {
+        io.to(message.roomId).emit('message:edited', dto);
+        notifyAfterEdit({ room, before: message, updated: result.updated, actorId: req.user.sub });
+      }
+      return res.json(dto);
     }
 
     if (isPost) {

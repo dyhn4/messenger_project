@@ -532,6 +532,29 @@ class RoomChatController extends ChangeNotifier {
     );
   }
 
+  /// 사진·파일 메시지를 수정한다 — 설명글(빈 문자열이면 지운다)과 [removeAttachmentIds](지울 첨부 id)를
+  /// 함께 고친다. 첨부를 **더하지는** 못 한다(잔디처럼 삭제만). 글 메시지와 달리 글이 비어도 보낸다 —
+  /// 첨부를 다 지우는데 글도 없으면 서버가 거절한다(메시지를 삭제하라는 뜻, 화면이 먼저 묻는다). 비밀
+  /// 대화의 사진·파일은 서버가 못 고쳐서 화면이 수정 자체를 막는다. 반영은 message:edited(applyEdit).
+  Future<void> editMediaMessage(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+    List<Mention>? mentions,
+    List<String> removeAttachmentIds = const [],
+  }) async {
+    final trimmed = text.trim();
+    await _session.api!.editMessage(
+      messageId,
+      trimmed,
+      textFormat: trimmed.isEmpty || trimmed != text ? null : format,
+      mentions: trimmed.isEmpty
+          ? const []
+          : (trimmed != text ? const [] : mentions),
+      removeAttachmentIds: removeAttachmentIds,
+    );
+  }
+
   /// 메시지를 삭제한다(본인, 작성 5분 이내만 서버가 허용). 실제 반영은
   /// message:deleted 브로드캐스트(applyDelete)로 이뤄진다.
   Future<void> deleteMessage(String messageId) =>
@@ -556,6 +579,17 @@ class RoomChatController extends ChangeNotifier {
       m.editedAt = edited.editedAt;
       m.title = edited.title;
       m.pinnedAt = edited.pinnedAt;
+      // 사진·파일 메시지의 첨부 삭제 — 글 메시지끼리의 수정(비밀 대화 포함)에서는 파일 칸을 건드리지 않는다
+      // (비밀 대화는 복호화한 파일 이름 등을 제자리에 덮어쓰고 있어서 서버 값으로 되돌리면 안 된다).
+      if (m.type != MessageType.text || edited.type != MessageType.text) {
+        m.type = edited.type;
+        m.fileUrl = edited.fileUrl;
+        m.fileName = edited.fileName;
+        m.fileSize = edited.fileSize;
+        m.mimeType = edited.mimeType;
+        m.thumbnailUrl = edited.thumbnailUrl;
+        m.attachments = edited.attachments;
+      }
     }
     if (edited.isPost) _syncPinned(targets.first);
     notifyListeners();

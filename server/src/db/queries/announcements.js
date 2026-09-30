@@ -16,6 +16,10 @@ export function listAnnouncementsForRoom(roomId) {
       autoUnpinAt: announcements.autoUnpinAt,
       createdAt: announcements.createdAt,
       editedAt: announcements.editedAt,
+      sourceMessageId: announcements.sourceMessageId,
+      imageUrl: announcements.imageUrl,
+      imageThumbnailUrl: announcements.imageThumbnailUrl,
+      imageName: announcements.imageName,
       commentCount: sql`count(${announcementComments.id})`.mapWith(Number),
     })
     .from(announcements)
@@ -64,7 +68,19 @@ export function findAnnouncementById(id) {
 /** 새 공지를 쓰면 그 방의 기존 고정 공지(있다면)는 자동으로 내려가고 새 글이 고정된다 — 한
  * 방에 고정 공지는 동시에 하나뿐이라는 불변식을 트랜잭션으로 지킨다. [autoUnpinAt]은 "공지
  * 자동 내리기"를 골랐을 때만 Date, 아니면 null(기본 — 자동으로 안 내려감). */
-export async function insertAnnouncement({ id, roomId, authorId, authorName, text, autoUnpinAt = null }) {
+export async function insertAnnouncement({
+  id,
+  roomId,
+  authorId,
+  authorName,
+  text,
+  autoUnpinAt = null,
+  // "메시지를 공지로 등록"으로 만들 때만 — 출처 메시지 id와 이미지 스냅샷(announcements.js 참고).
+  sourceMessageId = null,
+  imageUrl = null,
+  imageThumbnailUrl = null,
+  imageName = null,
+}) {
   return db.transaction(async (tx) => {
     await tx
       .update(announcements)
@@ -72,7 +88,19 @@ export async function insertAnnouncement({ id, roomId, authorId, authorName, tex
       .where(and(eq(announcements.roomId, roomId), eq(announcements.pinned, true)));
     const [row] = await tx
       .insert(announcements)
-      .values({ id, roomId, authorId, authorName, text, pinned: true, autoUnpinAt })
+      .values({
+        id,
+        roomId,
+        authorId,
+        authorName,
+        text,
+        pinned: true,
+        autoUnpinAt,
+        sourceMessageId,
+        imageUrl,
+        imageThumbnailUrl,
+        imageName,
+      })
       .returning();
     return row;
   });
@@ -114,6 +142,23 @@ export async function softDeleteAnnouncement(id) {
     .where(eq(announcements.id, id))
     .returning();
   return row;
+}
+
+/** 이 메시지를 출처로 한 "지금 고정된" 공지(없으면 null) — 같은 메시지를 공지로 두 번 올리지 않게 막는 데 쓴다. */
+export async function findPinnedAnnouncementBySourceMessage(roomId, messageId) {
+  const [row] = await db
+    .select()
+    .from(announcements)
+    .where(
+      and(
+        eq(announcements.roomId, roomId),
+        eq(announcements.sourceMessageId, messageId),
+        eq(announcements.pinned, true),
+        isNull(announcements.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
 }
 
 export function listCommentsForAnnouncement(announcementId) {

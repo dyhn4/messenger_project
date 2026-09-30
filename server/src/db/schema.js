@@ -639,6 +639,14 @@ export const announcements = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     editedAt: timestamp('edited_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    // "메시지를 공지로 등록"(메시지 더보기 > 공지 등록)으로 만든 공지의 출처 — 원본 메시지 id(말풍선의 작은
+    // 공지 표시용, 원본이 지워지면 null로 남고 공지는 그대로 있다)와, 이미지 메시지였다면 그 첫 사진의 경로
+    // (원본이 지워져도 공지에 계속 보이게 스냅샷으로 복사한다 — 미서명 /uploads/ 경로). 전부 없으면 예전처럼
+    // 글만 있는 공지다.
+    sourceMessageId: uuid('source_message_id').references(() => messages.id, { onDelete: 'set null' }),
+    imageUrl: text('image_url'),
+    imageThumbnailUrl: text('image_thumbnail_url'),
+    imageName: text('image_name'),
   },
   (t) => [index('announcements_room_id_created_at_idx').on(t.roomId, t.createdAt)],
 );

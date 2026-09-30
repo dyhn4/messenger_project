@@ -1253,6 +1253,19 @@ class ApiClient {
     );
   }
 
+  /// 메시지 더보기의 "공지 등록" — 글을 직접 받지 않고 그 메시지에서 공지를 만든다(텍스트 메시지의 본문,
+  /// 이미지 메시지의 첫 사진 + 설명글). 이미 고정 공지가 있으면 그 자리를 이 공지가 차지하고 이전 공지는
+  /// 히스토리로 남는다. 텍스트·이미지가 아니거나 이미 이 메시지가 고정 공지이면 서버가 거절한다.
+  Future<Announcement> createAnnouncementFromMessage(
+    String roomId,
+    String messageId,
+  ) async {
+    return Announcement.fromJson(
+      await _post('/api/rooms/$roomId/announcements', {'messageId': messageId})
+          as Map<String, dynamic>,
+    );
+  }
+
   /// 공지 수정 — 본인 작성 글만 가능(서버가 다시 확인).
   Future<Announcement> updateAnnouncement(
     String roomId,
@@ -2786,12 +2799,16 @@ class ApiClient {
     String text, {
     List<TextFormatRun>? textFormat,
     List<Mention>? mentions,
+    // 사진·파일 메시지에서 지울 첨부 id들(서버가 내려준 attachments[].id). 글 메시지엔 안 보낸다.
+    List<String>? removeAttachmentIds,
   }) async {
     return Message.fromJson(
       await _patch('/api/messages/$messageId', {
             'text': text,
             'textFormat': ?textFormatToJson(textFormat),
             if (mentions != null) 'mentions': mentionsToJson(mentions) ?? [],
+            if (removeAttachmentIds != null && removeAttachmentIds.isNotEmpty)
+              'removeAttachmentIds': removeAttachmentIds,
           })
           as Map<String, dynamic>,
     );

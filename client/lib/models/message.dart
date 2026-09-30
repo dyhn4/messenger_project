@@ -69,7 +69,9 @@ class Message {
   /// (서버 rooms.js의 postSystemMessage 참고).
   final String? senderId;
   final String senderName;
-  final MessageType type;
+
+  /// 사진·파일 메시지의 첨부를 전부 지우고 설명글만 남기면 글 메시지로 바뀐다(applyEdit) — 그래서 non-final.
+  MessageType type;
 
   /// 수정하면 그 자리에서 바뀐다(RoomChatController.applyEdit) — 그래서 non-final.
   String? text;
@@ -79,7 +81,9 @@ class Message {
 
   /// [text] 안의 멘션 구간(@이름·@all). 수정하면 같이 바뀐다. 비밀 대화는 늘 빈 목록.
   List<Mention> mentions;
-  final String? fileUrl; // 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다.
+  /// 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다. 첨부를 지워 첫 첨부가
+  /// 바뀌면 같이 바뀌므로(applyEdit) non-final.
+  String? fileUrl;
 
   /// 비밀 대화에서는 서버가 실제 파일명/종류를 못 보게 더미 값("encrypted" 등)만 받고,
   /// 복호화한 뒤 원본 값으로 그 자리에서 덮어쓴다(Session.decryptInPlace 참고) — 그래서 non-final.
@@ -116,13 +120,14 @@ class Message {
   /// 그대로 보여준다. 비밀 대화의 thumbnailKey/Nonce는 attachmentKey/Nonce와 동일한 방식으로
   /// 썸네일 전용 키다(원본과 다른 랜덤 키로 따로 암호화됨) — Session.decryptInPlace가 첨부
   /// 봉투에서 풀어서 채운다.
-  final String? thumbnailUrl;
+  String? thumbnailUrl;
   String? thumbnailKey;
   String? thumbnailNonce;
 
   /// 이 메시지에 딸린 첨부들. 서버가 늘 채워 보낸다 — 예전 메시지는 위의 fileUrl 한 칸을
-  /// 첨부 하나로 바꿔서 내려주므로, 화면은 이 목록만 보면 된다(사진 여러 장이면 격자).
-  final List<MessageAttachment> attachments;
+  /// 첨부 하나로 바꿔서 내려주므로, 화면은 이 목록만 보면 된다(사진 여러 장이면 격자). 수정에서 첨부를
+  /// 지우면 그 자리에서 바뀐다(applyEdit) — non-final.
+  List<MessageAttachment> attachments;
 
   /// 비밀 대화 자동 삭제 타이머용 — 상대가 이 메시지를 읽은 시각(null이면 아직 안 읽음)과,
   /// 그때부터 방의 타이머(초)만큼 지나 삭제될 시각. secret:message-read 브로드캐스트로 그 자리에서

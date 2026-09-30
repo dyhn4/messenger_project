@@ -2233,7 +2233,7 @@ class Session extends ChangeNotifier {
     if (suppressNotifications) return;
     notifications.showMessage(
       title: '${a.authorName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
-      body: a.text,
+      body: a.previewText,
       roomId: room.id,
       senderName: a.authorName,
       conversationTitle: teamTag == null ? tag : '$tag · $teamTag',

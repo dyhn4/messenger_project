@@ -540,6 +540,13 @@
       "when": 1790792544938,
       "tag": "0076_shallow_mandrill",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790797906630,
+      "tag": "0077_true_scarecrow",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
+import '../widgets/announcement_image.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import 'home_screen.dart' show wideBreakpoint;
@@ -228,7 +229,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
         roomId: widget.room.id,
         type: 'text',
         quotedSenderName: _announcement.authorName,
-        quotedPreview: _announcement.text,
+        quotedPreview: _announcement.previewText,
       );
       if (mounted) showAppToast(context, '현재 채팅방에 공유했습니다.');
     } catch (e) {
@@ -296,7 +297,10 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
         ],
       ),
     );
-    if (text == null || text.isEmpty || !mounted) return;
+    // 사진 공지는 글 없이 사진만 둘 수 있다(서버도 같은 규칙).
+    if (text == null || (text.isEmpty && !_announcement.hasImage) || !mounted) {
+      return;
+    }
     try {
       final updated = await widget.session.api!.updateAnnouncement(
         widget.room.id,
@@ -397,6 +401,14 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
           time: _announcement.createdAt,
           edited: _announcement.editedAt != null,
           text: _announcement.text,
+          extra: _announcement.hasImage
+              ? AnnouncementImage(
+                  session: widget.session,
+                  announcement: _announcement,
+                  maxHeight: 280,
+                  maxWidth: 400,
+                )
+              : null,
           trailing: _canManage
               ? PopupMenuButton<void>(
                   icon: const Icon(Icons.more_vert),
@@ -488,6 +500,8 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
     required bool edited,
     required String text,
     required Widget? trailing,
+    // 글 아래에 붙일 것(사진 공지의 사진).
+    Widget? extra,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -526,7 +540,11 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              Text(text),
+              if (text.isNotEmpty) Text(text),
+              if (extra != null) ...[
+                if (text.isNotEmpty) const SizedBox(height: 8),
+                extra,
+              ],
             ],
           ),
         ),

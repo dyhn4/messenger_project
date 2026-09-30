@@ -12,6 +12,7 @@ import '../screens/project/project_forms.dart' show showNewTaskDialog;
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'hover_toolbar.dart' show hoverMenuItem;
+import 'message_announce.dart';
 
 /// message_bubble.dart(실제 메시지)와 message_comments_card.dart(댓글)가 공용으로 쓰는
 /// 액션들 — 롱프레스 액션 시트(모바일)와 "더보기" 메뉴(PC) 양쪽에서 호출한다. 댓글은
@@ -246,6 +247,10 @@ void showMessageActionSheet(
   required Message message,
   required String senderDisplayName,
   void Function(Message message)? onOpenThread,
+  // 본인 메시지 수정(모바일은 호버 툴바가 없어 이 시트가 수정의 입구다) — null이면 항목을 안 보인다.
+  VoidCallback? onEdit,
+  // 진짜 메시지(댓글이 아닌)에서만 true — 토픽의 텍스트·이미지 메시지에 "공지 등록"을 붙인다.
+  bool offerAnnouncement = false,
 }) {
   final sourceRoom = session.rooms.where((r) => r.id == message.roomId);
   final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
@@ -254,78 +259,99 @@ void showMessageActionSheet(
 
   showModalBottomSheet(
     context: context,
+    // 항목이 늘어 작은 화면에서는 시트 높이(화면의 9/16)를 넘을 수 있어서 스크롤되게 한다.
     builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (!cannotShare)
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!cannotShare)
+              ListTile(
+                leading: const Icon(Icons.share_outlined),
+                title: const Text('메시지 공유'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  pushMessageShareScreen(
+                    context,
+                    session: session,
+                    message: message,
+                    senderDisplayName: senderDisplayName,
+                  );
+                },
+              ),
+            if (onOpenThread != null)
+              ListTile(
+                leading: const Icon(Icons.mode_comment_outlined),
+                title: const Text('댓글'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onOpenThread(message);
+                },
+              ),
             ListTile(
-              leading: const Icon(Icons.share_outlined),
-              title: const Text('메시지 공유'),
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('복사'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                pushMessageShareScreen(
-                  context,
-                  session: session,
-                  message: message,
-                  senderDisplayName: senderDisplayName,
-                );
+                copyMessageText(context, message);
               },
             ),
-          if (onOpenThread != null)
             ListTile(
-              leading: const Icon(Icons.mode_comment_outlined),
-              title: const Text('댓글'),
+              leading: const Icon(Icons.text_fields),
+              title: const Text('선택 복사'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                onOpenThread(message);
+                showSelectCopyDialog(context, message);
               },
             ),
-          ListTile(
-            leading: const Icon(Icons.copy_outlined),
-            title: const Text('복사'),
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              copyMessageText(context, message);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.text_fields),
-            title: const Text('선택 복사'),
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              showSelectCopyDialog(context, message);
-            },
-          ),
-          if (!isSecretRoom && session.canUseProjects)
-            ListTile(
-              leading: const Icon(Icons.assignment_outlined),
-              title: const Text('업무로 등록'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                registerMessageAsTask(
-                  context,
-                  session: session,
-                  message: message,
-                  senderDisplayName: senderDisplayName,
-                );
-              },
-            ),
-          if (!cannotShare)
-            ListTile(
-              leading: const Icon(Icons.forward_outlined),
-              title: const Text('메시지 전달'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                pushMessageForwardScreen(
-                  context,
-                  session: session,
-                  message: message,
-                  senderDisplayName: senderDisplayName,
-                );
-              },
-            ),
-        ],
+            if (!isSecretRoom && session.canUseProjects)
+              ListTile(
+                leading: const Icon(Icons.assignment_outlined),
+                title: const Text('업무로 등록'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  registerMessageAsTask(
+                    context,
+                    session: session,
+                    message: message,
+                    senderDisplayName: senderDisplayName,
+                  );
+                },
+              ),
+            if (!cannotShare)
+              ListTile(
+                leading: const Icon(Icons.forward_outlined),
+                title: const Text('메시지 전달'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  pushMessageForwardScreen(
+                    context,
+                    session: session,
+                    message: message,
+                    senderDisplayName: senderDisplayName,
+                  );
+                },
+              ),
+            if (offerAnnouncement && canAnnounceMessage(session, message))
+              ListTile(
+                leading: const Icon(Icons.campaign_outlined),
+                title: const Text('공지 등록'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  announceMessage(context, session, message);
+                },
+              ),
+            if (onEdit != null)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('수정'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onEdit();
+                },
+              ),
+          ],
+        ),
       ),
     ),
   );
@@ -339,6 +365,8 @@ List<Widget> messageActionMenuItems(
   required Session session,
   required Message message,
   required String senderDisplayName,
+  // 진짜 메시지(댓글이 아닌)에서만 true — 토픽의 텍스트·이미지 메시지에 "공지 등록"을 붙인다.
+  bool offerAnnouncement = false,
 }) {
   final sourceRoom = session.rooms.where((r) => r.id == message.roomId);
   final isSecretRoom = sourceRoom.isNotEmpty && sourceRoom.first.isSecret;
@@ -383,6 +411,12 @@ List<Widget> messageActionMenuItems(
           message: message,
           senderDisplayName: senderDisplayName,
         ),
+      ),
+    if (offerAnnouncement && canAnnounceMessage(session, message))
+      hoverMenuItem(
+        icon: Icons.campaign_outlined,
+        label: '공지 등록',
+        onPressed: () => announceMessage(context, session, message),
       ),
   ];
 }

@@ -847,7 +847,7 @@ class _AnnouncementRow extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          '공지 · ${announcement?.text ?? '새 공지가 있습니다'}',
+                          '공지 · ${announcement?.previewText ?? '새 공지가 있습니다'}',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -981,7 +981,7 @@ class _NotificationRow extends StatelessWidget {
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
-                                      room.latestAnnouncement?.text ??
+                                      room.latestAnnouncement?.previewText ??
                                           '새 공지가 있습니다',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,

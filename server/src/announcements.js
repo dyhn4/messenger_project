@@ -4,6 +4,7 @@ import { teamAccess, topicAccess } from './access.js';
 import {
   findAnnouncementById,
   findLatestAnnouncementForRoom,
+  findPinnedAnnouncementBySourceMessage,
   insertAnnouncement,
   insertAnnouncementComment,
   listAnnouncementsForRoom,
@@ -12,14 +13,25 @@ import {
   unpinAnnouncement,
   updateAnnouncementText,
 } from './db/queries/announcements.js';
+import { announcementFieldsFromMessage } from './announcementFromMessage.js';
+import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findTeamById, isTopicCreator } from './db/queries/teams.js';
 import { canCreateTopic, topicWriteDenial } from './permissions.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
+import { signFileUrl } from './upload.js';
 
 function toDto(row) {
+  // 출처 칸(sourceMessageId·image*)은 DB 이름 그대로 내보내지 않고 messageId와 서명된 이미지 주소로 바꾼다.
+  const { sourceMessageId, imageUrl, imageThumbnailUrl, imageName, ...rest } = row;
   return {
-    ...row,
+    ...rest,
+    // "메시지를 공지로 등록"으로 만든 공지면 원본 메시지 id(원본이 지워졌으면 null) — 말풍선의 공지 표시용.
+    messageId: sourceMessageId ?? null,
+    // 이미지 메시지에서 온 공지의 사진 한 장(없으면 전부 null). 원본이 지워져도 공지 쪽 스냅샷이 남는다.
+    imageUrl: imageUrl ? signFileUrl(imageUrl, imageName) : null,
+    imageThumbnailUrl: imageThumbnailUrl ? signFileUrl(imageThumbnailUrl) : null,
+    imageName: imageName ?? null,
     commentCount: row.commentCount ?? 0,
     createdAt: new Date(row.createdAt).getTime(),
     editedAt: row.editedAt ? new Date(row.editedAt).getTime() : null,
@@ -115,9 +127,30 @@ export function createAnnouncementsRouter(io) {
     const denial = topicWriteDenial({ room, canManage: access.canManage });
     if (denial) return res.status(403).json({ error: denial });
 
-    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });
-    if (text.length > 2000) return res.status(400).json({ error: '공지는 2000자 이내로 작성하세요.' });
+    // 메시지 더보기의 "공지 등록" — messageId가 오면 글을 직접 받지 않고 그 메시지에서 뽑는다(텍스트 메시지의 본문,
+    // 이미지 메시지의 사진 한 장 + 설명글). 그 밖의 글쓰기 경로는 예전과 같다.
+    let text;
+    let source = null;
+    let image = null;
+    if (req.body?.messageId !== undefined && req.body?.messageId !== null) {
+      const messageId = req.body.messageId;
+      const message = typeof messageId === 'string' ? await findMessageById(messageId).catch(() => null) : null;
+      if (!message || message.deletedAt || message.roomId !== room.id) {
+        return res.status(404).json({ error: '이 토픽에서 메시지를 찾을 수 없습니다.' });
+      }
+      const fields = announcementFieldsFromMessage(message);
+      if (!fields.ok) return res.status(fields.status).json({ error: fields.error });
+      if (await findPinnedAnnouncementBySourceMessage(room.id, message.id)) {
+        return res.status(409).json({ error: '이미 공지로 등록된 메시지입니다.' });
+      }
+      text = fields.text;
+      image = fields.image;
+      source = message;
+    } else {
+      text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });
+      if (text.length > 2000) return res.status(400).json({ error: '공지는 2000자 이내로 작성하세요.' });
+    }
 
     const autoUnpin = parseAutoUnpinAt(req.body?.autoUnpinAt);
     if (!autoUnpin.ok) return res.status(400).json({ error: autoUnpin.error });
@@ -129,6 +162,10 @@ export function createAnnouncementsRouter(io) {
       authorName: access.user?.name ?? access.user?.username ?? '알 수 없음',
       text,
       autoUnpinAt: autoUnpin.value,
+      sourceMessageId: source?.id ?? null,
+      imageUrl: image?.url ?? null,
+      imageThumbnailUrl: image?.thumbnailUrl ?? null,
+      imageName: image?.name ?? null,
     });
     const dto = toDto({ ...row, commentCount: 0 });
     // 방 멤버 전원의 채팅방 상단 배너가 즉시 이 공지로 바뀌도록 알린다(chat_socket.dart의
@@ -148,7 +185,7 @@ export function createAnnouncementsRouter(io) {
         senderName: dto.authorName,
         sender: access.user,
         room,
-        entry: { type: 'text', text: dto.text },
+        entry: { type: 'text', text: dto.text || '[사진]' },
         roomTag: roomTagFor(room),
         kind: 'announcement',
       });
@@ -165,7 +202,8 @@ export function createAnnouncementsRouter(io) {
     if (denial) return res.status(403).json({ error: denial });
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });
+    // 사진 공지는 글 없이 사진만 둘 수도 있다 — 글을 지워도 된다.
+    if (!text && !announcement.imageUrl) return res.status(400).json({ error: '내용을 입력하세요.' });
     if (text.length > 2000) return res.status(400).json({ error: '공지는 2000자 이내로 작성하세요.' });
 
     const row = await updateAnnouncementText(announcement.id, text);

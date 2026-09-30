@@ -27,6 +27,8 @@ import 'hover_toolbar.dart';
 import 'mention_autocomplete.dart';
 import 'mention_profile.dart';
 import 'message_actions.dart';
+import 'message_announce.dart';
+import 'message_edit_attachments.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
@@ -55,6 +57,17 @@ class MessageBubble extends StatefulWidget {
     List<Mention>? mentions,
   })?
   onEdit; // "수정" 저장.
+
+  /// 사진·파일 메시지의 "수정" 저장 — 설명글과 지울 첨부 id를 함께 보낸다(RoomChatController.editMediaMessage).
+  /// 없으면 사진·파일 메시지는 수정 항목이 안 뜬다.
+  final Future<void> Function(
+    String messageId,
+    String text, {
+    List<TextFormatRun>? format,
+    List<Mention>? mentions,
+    List<String> removeAttachmentIds,
+  })?
+  onEditMedia;
   final Future<void> Function(String messageId)? onDelete; // "삭제" 확인.
 
   const MessageBubble({
@@ -70,6 +83,7 @@ class MessageBubble extends StatefulWidget {
     this.highlighted = false,
     this.onOpenThread,
     this.onEdit,
+    this.onEditMedia,
     this.onDelete,
   });
 
@@ -96,6 +110,9 @@ class _MessageBubbleState extends State<MessageBubble> {
   Timer? _hoverExitTimer;
   bool _editing = false;
   bool _savingEdit = false;
+
+  /// 수정 모드에서 X로 "삭제 예정"으로 표시한 첨부 id들 — [저장]을 눌러야 실제로 지워진다.
+  final _removedAttachmentIds = <String>{};
   final _editController = RichTextEditingController();
   final _editFocus = FocusNode();
 
@@ -139,6 +156,25 @@ class _MessageBubbleState extends State<MessageBubble> {
   /// 그래서 수정·본인 삭제 메뉴도 안 뜬다(관리자 삭제는 남의 메시지와 같은 규칙).
   bool get _isMine => widget.isMine && !widget.message.isAutomation;
 
+  /// 사진·파일 메시지는 설명글 수정과 첨부 삭제가 된다 — 비밀 대화는 서버가 첨부·설명글(키 봉투와 한 덩어리
+  /// 암호문)을 못 봐서 고칠 수 없으니 수정 항목을 안 보인다.
+  bool get _isEditableMedia {
+    final m = widget.message;
+    if (m.type != MessageType.image && m.type != MessageType.file) return false;
+    return widget.onEditMedia != null &&
+        widget.session.roomById(m.roomId)?.isSecret != true;
+  }
+
+  /// 본인 메시지의 수정 항목(PC 더보기 메뉴·모바일 길게 누르기 시트)을 보일지. 게시글은 제목까지 함께
+  /// 고쳐야 해서 말풍선 안 수정 대신 게시글 편집기로만 고친다.
+  bool get _canEditMessage =>
+      _isMine &&
+      isEditDeleteAllowed(widget.session) &&
+      !widget.message.isPost &&
+      !widget.message.isPoll &&
+      ((widget.message.type == MessageType.text && widget.onEdit != null) ||
+          _isEditableMedia);
+
   /// 투표는 카드 안의 더보기(⋯: 댓글·즐겨찾기·마감·삭제)가 이 툴바를 대신한다 — 공유·전달·수정을
   /// 못 하는 메시지라 툴바 항목이 사실상 겹치기만 한다.
   bool get _canShowToolbar =>
@@ -181,6 +217,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       );
       return;
     }
+    _removedAttachmentIds.clear();
     setState(() => _editing = true);
     // 수정 화면에서도 멘션을 고칠 수 있다 — 지금 멘션 구간을 입력칸에 넘겨 받는다.
     final room = widget.session.roomById(widget.message.roomId);
@@ -200,19 +237,42 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   Future<void> _saveEdit() async {
     final (:text, :format) = _editController.formatted();
-    if (text.isEmpty) return;
+    final media = _isEditableMedia;
+    // 사진·파일 메시지는 설명글이 비어도 저장할 수 있다(첨부만 남긴다). 글 메시지는 빈 글 저장 불가.
+    if (text.isEmpty && !media) return;
     final room = widget.session.roomById(widget.message.roomId);
     final mentions = room == null
         ? const <Mention>[]
         : mentionsToSend(_editController, room, widget.session.userId);
+    final removed = _removedAttachmentIds.toList();
+    if (media && text.isEmpty) {
+      final remaining = widget.message.attachments
+          .where((a) => !_removedAttachmentIds.contains(a.id))
+          .length;
+      if (remaining == 0) {
+        // 첨부를 다 지웠는데 설명글도 없으면 남는 게 없다 — 저장 대신 메시지 삭제를 권한다.
+        await _offerDeleteWhenEmpty();
+        return;
+      }
+    }
     setState(() => _savingEdit = true);
     try {
-      await widget.onEdit!(
-        widget.message.id,
-        text,
-        format: format,
-        mentions: mentions,
-      );
+      if (media) {
+        await widget.onEditMedia!(
+          widget.message.id,
+          text,
+          format: format,
+          mentions: mentions,
+          removeAttachmentIds: removed,
+        );
+      } else {
+        await widget.onEdit!(
+          widget.message.id,
+          text,
+          format: format,
+          mentions: mentions,
+        );
+      }
       if (mounted) setState(() => _editing = false);
     } catch (e) {
       if (mounted) {
@@ -222,6 +282,37 @@ class _MessageBubbleState extends State<MessageBubble> {
       }
     } finally {
       if (mounted) setState(() => _savingEdit = false);
+    }
+  }
+
+  /// 사진·파일 메시지에서 첨부를 모두 지우고 설명글도 비웠을 때 — 메시지가 빈 채로 남을 수 없으니 전체
+  /// 삭제를 권한다("삭제"를 고르면 그 메시지를 지우고, "계속 수정"이면 수정 모드로 돌아간다).
+  Future<void> _offerDeleteWhenEmpty() async {
+    final delete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('메시지 삭제'),
+        content: const Text('첨부를 모두 지우고 내용도 없으면 남는 메시지가 없습니다.\n메시지를 삭제할까요?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('계속 수정'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (delete != true || !mounted || widget.onDelete == null) return;
+    try {
+      await widget.onDelete!(widget.message.id);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('삭제 실패: $e')));
     }
   }
 
@@ -349,6 +440,9 @@ class _MessageBubbleState extends State<MessageBubble> {
       message: message,
       senderDisplayName: displayName,
       onOpenThread: widget.onOpenThread,
+      // 모바일은 호버 툴바가 없어서 수정도 이 시트로 들어간다. 토픽의 텍스트·이미지 메시지엔 "공지 등록".
+      onEdit: _canEditMessage ? _startEdit : null,
+      offerAnnouncement: true,
     );
   }
 
@@ -459,6 +553,40 @@ class _MessageBubbleState extends State<MessageBubble> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            // 지금 이 토픽의 고정 공지로 올라가 있는 메시지면 작은 "공지" 표시.
+                            if (!_editing &&
+                                isPinnedAnnouncementSource(
+                                  widget.session,
+                                  message,
+                                )) ...[
+                              Row(
+                                key: const ValueKey('announcement-marker'),
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 13,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '공지',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                            ],
                             // "메시지 전달"로 생겼고 "포함" 토글이 켜져 있었으면 원본 발신자 표시.
                             if (message.forwardedFromSenderName != null) ...[
                               Text(
@@ -473,7 +601,8 @@ class _MessageBubbleState extends State<MessageBubble> {
                             ],
                             // 이미지/파일에 캡션(같이 입력한 메시지)이 붙어 있으면 그 위에 먼저 보여준다.
                             // 이모티콘은 text 필드 자체가 캡션이 아니라 스티커 id라 이 대상이 아니다.
-                            if (message.type != MessageType.text &&
+                            if (!_editing &&
+                                message.type != MessageType.text &&
                                 message.type != MessageType.sticker &&
                                 (message.text?.isNotEmpty ?? false)) ...[
                               FormattedText(
@@ -720,19 +849,18 @@ class _MessageBubbleState extends State<MessageBubble> {
               session: widget.session,
               message: message,
               senderDisplayName: displayName,
+              offerAnnouncement: true,
             ),
             // 팀이 메시지 수정/삭제를 꺼두면([메시지 설정]) 본인 메시지도 못 고치고 못 지운다.
             if (isMine &&
                 isEditDeleteAllowed(widget.session) &&
-                (widget.onEdit != null || widget.onDelete != null))
+                (widget.onEdit != null ||
+                    widget.onEditMedia != null ||
+                    widget.onDelete != null))
               hoverMenuDivider(),
-            // 게시글은 제목까지 함께 고쳐야 해서 말풍선 안 수정 대신 게시글 편집기로만 고친다.
-            if (isMine &&
-                isEditDeleteAllowed(widget.session) &&
-                message.type == MessageType.text &&
-                !message.isPost &&
-                !message.isPoll &&
-                widget.onEdit != null)
+            // 게시글은 제목까지 함께 고쳐야 해서 말풍선 안 수정 대신 게시글 편집기로만 고친다. 사진·파일
+            // 메시지는 설명글 수정과 첨부 삭제가 된다(_canEditMessage).
+            if (_canEditMessage)
               hoverMenuItem(
                 icon: Icons.edit,
                 label: '수정',
@@ -782,6 +910,20 @@ class _MessageBubbleState extends State<MessageBubble> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // 사진·파일 메시지: 첨부마다 X로 지울 것을 표시한다(더할 수는 없다).
+        if (_isEditableMedia && widget.message.attachments.isNotEmpty) ...[
+          EditAttachmentStrip(
+            session: widget.session,
+            attachments: widget.message.attachments,
+            removedIds: _removedAttachmentIds,
+            onToggle: (id) => setState(() {
+              if (!_removedAttachmentIds.remove(id)) {
+                _removedAttachmentIds.add(id);
+              }
+            }),
+          ),
+          const SizedBox(height: 8),
+        ],
         RichFormatToolbar(controller: _editController, focusNode: _editFocus),
         _withMentions(
           RichFieldWrapper(
@@ -791,9 +933,10 @@ class _MessageBubbleState extends State<MessageBubble> {
               focusNode: _editFocus,
               autofocus: true,
               maxLines: null,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 isDense: true,
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                hintText: _isEditableMedia ? '설명 (선택)' : null,
               ),
               onSubmitted: (_) => _saveEdit(),
             ),

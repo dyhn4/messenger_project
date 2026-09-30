@@ -90,6 +90,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 본인 메시지·댓글 수정/삭제(소프트 삭제) — 허용 여부와 허용 시간(기본 5분, 최대 7일)은 팀
   설정([메시지 설정](#메시지-설정))을 따릅니다. 팀의 소유자·관리자는 자신이 참여 중인 방(비밀
   대화 제외)에서 같은 시간 안에 남의 메시지·댓글도 **삭제**할 수 있습니다(수정은 불가)
+- **사진·파일 메시지 수정**(잔디의 메시지 수정과 같은 방식) — 본인의 사진·파일 메시지도 고칠 수 있습니다(PC는 호버 ⋯ > 수정, 모바일은 메시지를 길게 눌러 시트의 수정). 수정 모드에서 **설명글(캡션)을 고치고**, 첨부마다 붙은 **X로 잘못 붙인 첨부를 지웁니다**(저장 전에는 "삭제 예정"으로 흐리게 보이고 같은 버튼으로 되돌릴 수 있음). 첨부를 **더하지는** 못 합니다. 여러 장 묶음에서 일부만 지우면 남은 첨부로 말풍선이 그려지고(`messages`의 파일 칸은 남은 첫 번째로 맞춤), 첨부를 **전부** 지우면 설명글이 남는 경우에만 글 메시지로 바뀌며 설명글도 없으면 저장 대신 "메시지를 삭제할까요?"를 권합니다. 수정 권한·허용 시간·읽기 전용 토픽 규칙은 글 메시지 수정과 같고, 글 수정 때처럼 `mentions`를 통째로 다시 보내야 합니다. **비밀 대화의 사진·파일은 수정할 수 없습니다**(설명글이 첨부 키 봉투와 한 덩어리 암호문이라 서버가 못 고침). 지운 파일 자체는 서버 디스크에서 지우지 않습니다(전달·공지·즐겨찾기가 같은 파일을 가리킬 수 있음). 수정된 메시지에는 기존처럼 "(수정됨)"이 붙고, 수정 결과는 갱신된 첨부 목록과 함께 `message:edited`로 퍼집니다
+- **토픽 공지** — 토픽 채팅 상단에 공지 하나가 고정됩니다(이전 공지는 공지 목록의 기록으로 남고, 고정은 토픽마다 최대 1개). 메시지 더보기(PC ⋯ / 모바일 길게 누르기 시트)의 **공지 등록**으로 그 메시지를 바로 공지로 올리며(등록 전 확인 없이 토스트, 이미 고정 공지가 있으면 "기존 공지를 이 메시지로 바꿀까요?"만 한 번 확인), 대상은 **일반 텍스트 메시지와 이미지 메시지**뿐입니다(파일·이모티콘·시스템·보드 게시글·투표·댓글·삭제된 메시지 제외, 그룹·1:1·비밀 대화에는 공지가 없음). 이미지 메시지는 **첫 사진 한 장**과 설명글이 공지가 되고(글 서식·멘션은 평문 공지라 빠짐), 사진은 원본 메시지가 나중에 지워져도 남도록 공지 쪽에 경로를 복사해 둡니다. 공지를 **등록할 수 있는 사람**은 새 공지를 쓸 수 있는 사람과 같습니다 — 잔디는 누구나지만 이 앱은 팀의 토픽 생성 권한 + 그 토픽의 관리자 규칙을 그대로 쓰고, 권한이 없으면 메뉴 항목을 숨깁니다. 고정된 메시지의 말풍선에는 작은 "공지" 표시가 붙습니다. 배너에서는 **접어두기**(한 줄로 줄임/펼침), **숨기기**(나에게만 이 공지를 치움 — 공지 자체와 다른 사람 화면은 그대로, 새 공지가 오면 다시 보임), **삭제하기**(작성자만, 공지 목록에서도 사라짐)를 할 수 있고, 배너를 누르면 공지 목록(히스토리)이 열립니다. 접힘·숨김은 이 기기에 저장됩니다(`SharedPreferences`, 사람×토픽별 — 여러 기기 동기화는 하지 않음). 화면은 `client/lib/widgets/announcement_banner.dart`·`message_announce.dart`, 서버는 `server/src/announcements.js`·`announcementFromMessage.js`입니다
 - 메시지별 댓글(스레드) — PC는 옆 패널, 모바일은 전체화면
 - **투표** — 토픽·그룹·1:1·나와의 대화(비밀 대화 제외)에 제목·보기(2~20개)·마감 시각(최대 90일 뒤)을 정해 올리고, 익명/복수 선택 여부를 고릅니다. 만든 뒤에는 수정할 수 없고, 다시 투표할 수 있으며, 만든 사람이나 방 관리자가 일찍 마감할 수 있습니다. 투표는 방 멤버마다 즐겨찾기할 수 있고, 게시글처럼 시간 제한 없이 삭제할 수 있으며(관리자도 가능) 댓글도 달 수 있습니다. 앱에서는 입력칸의 투표 단추(보드 뷰 토픽은 오른쪽 아래 작은 단추, 파일도 30개까지 붙일 수 있음)나 [메뉴] → 투표로 만들고(투표 만들기 창 맨 위 "대화방" 칸에서 방을 고르며, 입력칸에서 열면 그 방이 미리 채워져 있고 바꿀 수도 있음 — 비밀 대화와 읽기 전용·보관된 토픽은 목록에서 빠짐), 카드의 ⋯ 메뉴에서 댓글·즐겨찾기·투표 마감·삭제를 하며, 기명 투표는 득표 수를 눌러 투표자를 봅니다
 - 메시지 인용 공유(다른 방으로), 메시지 전달
@@ -1127,7 +1129,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | Method | Path | 설명 |
 |---|---|---|
-| PATCH | `/api/messages/:id` | 메시지 수정(팀 설정의 수정/삭제 가능 시간 안에서, **본인만**). 글 메시지는 `{ text, textFormat?, mentions? }`. |
+| PATCH | `/api/messages/:id` | 메시지 수정(팀 설정의 수정/삭제 가능 시간 안에서, **본인만**). 글 메시지는 `{ text, textFormat?, mentions? }`. **사진·파일 메시지**는 `{ text?(설명글, 빈 문자열이면 지움), textFormat?, mentions?, removeAttachmentIds?(지울 첨부 id) }` — 첨부는 지우기만 되고(더하기 불가), 전부 지우면 설명글이 있을 때만 글 메시지로 바뀌며 없으면 400. 비밀 대화의 사진·파일은 400. 응답·`message:edited`에 갱신된 `attachments`가 들어 있음 |
 | DELETE | `/api/messages/:id` | 메시지 삭제(소프트 삭제 — 같은 시간 안에서, 본인 또는 참여 중인 방의 소유자·관리자). 게시글·투표는 시간 제한 없음 |
 | POST | `/api/messages/:messageId/comments` | 댓글 작성 |
 | POST | `/api/rooms/:roomId/polls` | **투표 만들기** — `{ title, description?, options[2~20], anonymous?, multiple?, closesAt(epoch ms, 최대 90일 뒤), attachments? }`. 방에 `type:'poll'` 메시지(`poll` 필드 포함)로 올라간다. 비밀 대화는 400, 첨부는 보드 뷰 토픽만. 소켓 `message:send`로는 못 만든다 |
@@ -1135,6 +1137,11 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/polls/:pollId/close` | 일찍 마감(만든 사람 또는 방 관리자). 방에 `poll:updated` + 시스템 메시지 |
 | PUT | `/api/polls/:pollId/favorite` | 투표 즐겨찾기(`{ favorite }`). 내 다른 기기에 소켓 `poll:favorite` |
 | GET | `/api/polls/favorites?teamId=` | 내가 즐겨찾기한 투표 목록(최근 즐겨찾기순) |
+| GET | `/api/rooms/:id/announcements` | **토픽 공지** 히스토리(최신순) — `pinned:true`인 항목이 지금 채팅방 상단에 고정된 공지. 항목: `text`, `authorName`, `messageId`(메시지로 등록한 공지의 원본, 없으면 null), `imageUrl`/`imageThumbnailUrl`/`imageName`(사진 공지, 서명된 `/files` 경로), `commentCount` 등 |
+| POST | `/api/rooms/:id/announcements` | 공지 등록(토픽 멤버 중 토픽 생성 권한자·토픽 관리자). `{ text, autoUnpinAt? }`로 직접 쓰거나 `{ messageId }`로 **메시지를 공지로 등록**(텍스트·이미지 메시지만, 같은 토픽의 지워지지 않은 메시지여야 하고 이미 그 메시지가 고정 공지이면 409). 새 공지가 고정되고 이전 고정은 기록으로 내려감 → 방에 `announcement:new` |
+| PATCH / DELETE | `/api/rooms/:id/announcements/:announcementId` | 공지 수정(글만 — 사진 공지는 글을 비워도 됨) / 삭제 — **작성자만** → `announcement:updated` / `announcement:deleted` |
+| POST | `/api/rooms/:id/announcements/:announcementId/unpin` | 공지 내리기(작성자만, 기록엔 남음) → `announcement:unpinned` |
+| GET / POST | `/api/rooms/:id/announcements/:announcementId/comments` | 공지 댓글 목록 / 작성 |
 | PATCH | `/api/comments/:id` | 댓글 수정 |
 | DELETE | `/api/comments/:id` | 댓글 삭제(메시지 삭제와 동일한 규칙) |
 | GET | `/api/notifications` | 알림 기록(`kind`=`mention`\|`board`\|`all`, `before`(ms 커서), `limit`(기본 30·최대 100), `unreadOnly`) → `{ items, hasMore }`. 항목: `id`,`kind`,`teamId`,`teamName`,`roomId`,`roomName`,`messageId`,`commentId`,`actorId`,`actorName`,`preview`,`createdAt`,`readAt`,`roomType`. 없어진 방·메시지나 내가 나간 방의 알림은 안 내려줌 |
@@ -1297,6 +1304,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다 |
 | `calendars` / `calendar_members` / `calendar_events` / `calendar_event_attendees` / `calendar_event_colors` | 캘린더. 팀 단위 `calendars`(`kind`: `personal`\|`team`\|`shared`, 팀당 팀 캘린더 1개·사람당 기본 캘린더 1개는 partial unique index), 멤버·구독·개인 색/숨김(`calendar_members` — `role`: `admin`\|`write`\|`read`\|`subscriber`), 일정(`calendar_events` — `recurrence` jsonb, 빠진 회차 `exdates`), 참석자, 사람별 일정 색. `users.birthday`(`MM-DD`)는 생일 캘린더에 쓰인다 |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
+| `message_attachments` | 메시지 하나에 딸린 첨부들(`kind` image\|file, `file_url`/`thumbnail_url`, `position`). 첨부가 둘 이상일 때(보드 게시글은 하나여도) 저장하고, 첨부 하나뿐인 예전 방식 메시지는 `messages`의 파일 칸이 곧 첨부 하나입니다. 메시지 수정의 첨부 삭제는 이 행을 지우고 파일 칸을 남은 첫 첨부로 맞춥니다 |
+| `announcements` / `announcement_comments` | 토픽 공지와 공지 댓글. 공지는 여러 개(기록)지만 `pinned`는 토픽마다 최대 1개, `auto_unpin_at`(자동 내리기), 작성자만 수정/삭제. **메시지로 등록한 공지**는 `source_message_id`(원본 메시지, 원본이 지워지면 null)와 사진 스냅샷 `image_url`/`image_thumbnail_url`/`image_name`(미서명 `/uploads/` 경로)을 가집니다 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우) |
 | `notifications` | 알림 기록(받는 사람마다 한 줄 — 멘션·보드 알림). `kind`(`mention`\|`mention_all`\|`board_post`\|`board_edit`\|`board_comment`), `team_id`, `room_id`/`message_id`/`comment_id`(cascade), `actor_id`/`actor_name`, `preview`(본문 앞 120자·게시글은 제목), `room_name`(알림 당시 이름), `read_at`. 90일 지난 것은 `retention.js`가 정리. 멘션 구간은 `messages`·`message_comments`·`scheduled_messages`의 `mentions`(jsonb)에 저장 |
 | `notification_settings` | 사람별 알림 설정(`user_id` PK). `mention_all`(@all 푸시, 기본 true), `board_level`(`all`\|`important`\|`new`, 기본 `important`) — 행이 없으면 기본값 |

@@ -19,6 +19,21 @@ class Announcement {
   /// 스윕) pinned가 false로 바뀌는 것으로 반영된다(이 값 자체는 기록으로 남아 그대로 있음).
   final DateTime? autoUnpinAt;
 
+  /// "메시지 더보기 > 공지 등록"으로 만든 공지의 원본 메시지 id(원본이 지워졌거나 직접 쓴 공지면 null) —
+  /// 말풍선에 작은 "공지" 표시를 붙이는 데 쓴다.
+  final String? messageId;
+
+  /// 이미지 메시지를 공지로 등록했을 때의 사진 한 장(서명된 /files 경로 — Session.resolveUrl로 절대 주소)과
+  /// 그 축소본·파일 이름. 글만 있는 공지는 모두 null. 사진만 있는 공지는 [text]가 빈 문자열이다.
+  final String? imageUrl;
+  final String? imageThumbnailUrl;
+  final String? imageName;
+
+  bool get hasImage => imageUrl != null;
+
+  /// 배너·알림처럼 한 줄로 보여줄 글 — 사진만 있는 공지는 "[사진]".
+  String get previewText => text.trim().isEmpty && hasImage ? '[사진]' : text;
+
   Announcement({
     required this.id,
     required this.roomId,
@@ -30,6 +45,10 @@ class Announcement {
     this.pinned = true,
     this.commentCount = 0,
     this.autoUnpinAt,
+    this.messageId,
+    this.imageUrl,
+    this.imageThumbnailUrl,
+    this.imageName,
   });
 
   factory Announcement.fromJson(Map<String, dynamic> json) => Announcement(
@@ -53,6 +72,10 @@ class Announcement {
         : DateTime.fromMillisecondsSinceEpoch(
             (json['autoUnpinAt'] as num).toInt(),
           ),
+    messageId: json['messageId'] as String?,
+    imageUrl: json['imageUrl'] as String?,
+    imageThumbnailUrl: json['imageThumbnailUrl'] as String?,
+    imageName: json['imageName'] as String?,
   );
 }
 

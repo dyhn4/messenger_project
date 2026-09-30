@@ -144,6 +144,12 @@ class Room {
   /// 공지가 올라와 id가 달라지면(chat_panel.dart의 _AnnouncementBanner) 자동으로 다시 뜬다.
   String? dismissedAnnouncementId;
 
+  /// 배너를 접어 둔(한 줄로) 공지 id — [dismissedAnnouncementId]와 같은 로컬 값이고 같은 방식으로 새 공지가
+  /// 올라오면 풀린다. 둘 다 이 기기에 저장돼(announcement_view_prefs.dart) 앱을 다시 켜도 남는다 —
+  /// [announcementViewLoaded]는 저장된 값을 이 인스턴스에 이미 읽어 왔는지.
+  String? collapsedAnnouncementId;
+  bool announcementViewLoaded = false;
+
   /// 알림 센터에 "안 읽은 공지"로 띄울지(rooms.js가 계산해서 내려줌 — 공지 목록/상세를 실제로
   /// 열어본 적 있는지 기준, X로 배너만 닫은 건 해당 안 됨). 실시간으로는 Session이 소켓
   /// 이벤트로 직접 갱신한다(latestAnnouncement와 같은 방식) — 그래서 non-final.

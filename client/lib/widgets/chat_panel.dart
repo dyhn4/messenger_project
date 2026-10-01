@@ -605,6 +605,39 @@ class _ChatPanelState extends State<ChatPanel> {
     );
   }
 
+  /// 이모티콘 패널(열려 있을 때)과 고른 이모티콘 미리보기 — 메시지 목록 영역의 Stack 맨 아래에 겹쳐 그린다.
+  /// 메시지가 하나도 없는 방(처음 여는 1:1 등)의 "아직 메시지가 없습니다." 화면에도 같은 오버레이가 있어야
+  /// 첫 메시지로 이모티콘을 보낼 수 있어서 따로 뺐다.
+  List<Widget> _stickerOverlay() => [
+    if (_stickerPickerOpen)
+      Positioned(
+        left: 8,
+        bottom: 8,
+        // 패널 바깥 아무 곳(입력창, 헤더, 메시지 목록 등)을 클릭하면 닫는다 —
+        // TapRegion은 이 Stack 범위를 넘어 앱 전체의 탭을 감지하므로 위치와
+        // 무관하게 동작한다. groupId로 토글 버튼(ChatInputBar)도 같은 그룹에
+        // 묶어야 한다 — 안 그러면 버튼을 눌러 닫으려는 탭이 "바깥 탭"으로도
+        // 잡혀서 _closeStickerPicker가 먼저(pointer down) 닫고, 버튼의
+        // onPressed(pointer up)가 다시 열어버리는 깜빡임이 생긴다.
+        child: TapRegion(
+          groupId: this,
+          onTapOutside: (_) => _closeStickerPicker(),
+          child: StickerPicker(onSelected: _selectSticker),
+        ),
+      )
+    else if (_pendingSticker != null)
+      // 입력창의 이모티콘 버튼(이미지 버튼 다음 두 번째 아이콘) 바로 위쯤에 오도록
+      // 왼쪽으로 붙인다 — 전체 폭을 채우던 것에서 바꿈.
+      Positioned(
+        left: 10,
+        bottom: 8,
+        child: StickerPreviewCard(
+          sticker: _pendingSticker!,
+          onRemove: _removeSticker,
+        ),
+      ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     if (widget.room.isBoard) return _buildBoard(context);
@@ -627,7 +660,13 @@ class _ChatPanelState extends State<ChatPanel> {
                 }
                 final msgs = controller.messages;
                 if (msgs.isEmpty) {
-                  return const Center(child: Text('아직 메시지가 없습니다.'));
+                  // 메시지가 없어도 이모티콘 패널·미리보기는 떠야 한다(첫 메시지를 이모티콘으로 보낼 수 있게).
+                  return Stack(
+                    children: [
+                      const Center(child: Text('아직 메시지가 없습니다.')),
+                      ..._stickerOverlay(),
+                    ],
+                  );
                 }
 
                 final boundary = controller.readBoundary;
@@ -874,33 +913,7 @@ class _ChatPanelState extends State<ChatPanel> {
                     // 이미 그만큼 자리를 쓰고 있음) Positioned가 하단 근처 어디에 있든 진짜
                     // 레이아웃 범위 안이라 마우스 클릭도 정상적으로 먹는다(Stack 밖으로 "그림만"
                     // 넘치는 방식과 달리 히트테스트가 안 끊긴다).
-                    if (_stickerPickerOpen)
-                      Positioned(
-                        left: 8,
-                        bottom: 8,
-                        // 패널 바깥 아무 곳(입력창, 헤더, 메시지 목록 등)을 클릭하면 닫는다 —
-                        // TapRegion은 이 Stack 범위를 넘어 앱 전체의 탭을 감지하므로 위치와
-                        // 무관하게 동작한다. groupId로 토글 버튼(ChatInputBar)도 같은 그룹에
-                        // 묶어야 한다 — 안 그러면 버튼을 눌러 닫으려는 탭이 "바깥 탭"으로도
-                        // 잡혀서 _closeStickerPicker가 먼저(pointer down) 닫고, 버튼의
-                        // onPressed(pointer up)가 다시 열어버리는 깜빡임이 생긴다.
-                        child: TapRegion(
-                          groupId: this,
-                          onTapOutside: (_) => _closeStickerPicker(),
-                          child: StickerPicker(onSelected: _selectSticker),
-                        ),
-                      )
-                    else if (_pendingSticker != null)
-                      // 입력창의 이모티콘 버튼(이미지 버튼 다음 두 번째 아이콘) 바로 위쯤에 오도록
-                      // 왼쪽으로 붙인다 — 전체 폭을 채우던 것에서 바꿈.
-                      Positioned(
-                        left: 10,
-                        bottom: 8,
-                        child: StickerPreviewCard(
-                          sticker: _pendingSticker!,
-                          onRemove: _removeSticker,
-                        ),
-                      ),
+                    ..._stickerOverlay(),
                     // "맨 아래로" 버튼 + "새로운 메시지가 있습니다" 알약. 스크롤할 때마다
                     // 바뀌는 상태라 setState 대신 ValueNotifier로 이 부분만 다시 그린다
                     // (_newMessagesBelow의 주석 참고 — 리스트까지 다시 빌드하면 죽는다).

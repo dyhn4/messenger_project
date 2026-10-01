@@ -343,7 +343,7 @@ void main() {
   });
 
   group('방 종류별 허용', () {
-    test('@all은 토픽·그룹에서만, 비밀 대화는 멘션 자체가 안 된다', () {
+    test('멘션·@all은 토픽·그룹에서만 — 1:1·나와의 대화·비밀 대화는 안 된다', () {
       expect(roomAllowsMentionAll(_room(RoomType.topic)), isTrue);
       expect(roomAllowsMentionAll(_room(RoomType.group)), isTrue);
       expect(roomAllowsMentionAll(_room(RoomType.dm)), isFalse);
@@ -352,8 +352,12 @@ void main() {
         roomAllowsMentionAll(_room(RoomType.topic, secret: true)),
         isFalse,
       );
-      expect(roomAllowsMention(_room(RoomType.dm)), isTrue);
+      expect(roomAllowsMention(_room(RoomType.topic)), isTrue);
+      expect(roomAllowsMention(_room(RoomType.group)), isTrue);
+      expect(roomAllowsMention(_room(RoomType.dm)), isFalse);
+      expect(roomAllowsMention(_room(RoomType.dm, self: true)), isFalse);
       expect(roomAllowsMention(_room(RoomType.dm, secret: true)), isFalse);
+      expect(roomAllowsMention(_room(RoomType.group, secret: true)), isFalse);
     });
   });
 

@@ -688,7 +688,7 @@ class PostEditorState extends State<PostEditor> {
               children: [
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: _TopicChip(session: widget.session, room: widget.room),
+                  child: TopicChip(session: widget.session, room: widget.room),
                 ),
                 const SizedBox(height: 12),
                 _buildTitleField(context),
@@ -733,7 +733,7 @@ class PostEditorState extends State<PostEditor> {
           Flexible(
             child: Align(
               alignment: Alignment.centerLeft,
-              child: _TopicChip(session: widget.session, room: widget.room),
+              child: TopicChip(session: widget.session, room: widget.room),
             ),
           ),
           IconButton(
@@ -1126,11 +1126,11 @@ class PostEditorState extends State<PostEditor> {
   }
 }
 
-/// 어느 보드에 올리는지 — "보드 뷰" 아이콘 + 토픽 이름.
-class _TopicChip extends StatelessWidget {
+/// 어느 보드에 올리는지 — "보드 뷰" 아이콘 + 토픽 이름(공지 작성창도 같이 쓴다).
+class TopicChip extends StatelessWidget {
   final Session session;
   final Room room;
-  const _TopicChip({required this.session, required this.room});
+  const TopicChip({super.key, required this.session, required this.room});
 
   @override
   Widget build(BuildContext context) {

@@ -19,7 +19,6 @@ import 'package:client/widgets/rich_text_format.dart';
 import 'package:client/widgets/unread_badge.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -338,21 +337,22 @@ void main() {
       expect(_popup, findsNothing);
     });
 
-    testWidgets('1:1·나와의 대화에는 @all이 없고, 그룹에는 있다', (tester) async {
-      await _pumpField(
+    testWidgets('1:1·나와의 대화에는 멘션 자동완성이 없고, 그룹에는 @all이 있다', (tester) async {
+      final dm = await _pumpField(
         tester,
         _room('dm', type: RoomType.dm, members: [_me, _kim]),
       );
       await _enter(tester, '@');
-      expect(find.text('@all'), findsNothing);
-      expect(find.text('김철수'), findsOneWidget);
+      // 1:1은 상대가 한 명뿐이라 멘션 기능 자체가 없다(패널도, 멘션 추적도).
+      expect(_popup, findsNothing);
+      expect(dm.controller.mentionsEnabled, isFalse);
 
       await _pumpField(
         tester,
         _room('self', type: RoomType.dm, self: true, members: [_me]),
       );
       await _enter(tester, '@');
-      // 나와의 대화엔 멘션할 사람이 없다 — @all도 안 나오므로 패널 자체가 없다.
+      // 나와의 대화엔 멘션할 사람이 없다.
       expect(_popup, findsNothing);
 
       await _pumpField(tester, _room('g', type: RoomType.group));
@@ -496,6 +496,20 @@ void main() {
       ]);
     });
 
+    testWidgets('1:1·나와의 대화에는 @ 단추가 없고 글자 @를 쳐도 자동완성이 안 뜬다', (tester) async {
+      for (final room in [
+        _room('dm', type: RoomType.dm, members: [_me, _kim]),
+        _room('self', type: RoomType.dm, self: true, members: [_me]),
+      ]) {
+        await pump(tester, room);
+        expect(find.byKey(const ValueKey('mention-button')), findsNothing);
+        expect(find.byKey(const ValueKey('chat-attach-mention')), findsNothing);
+        await tester.enterText(find.byKey(const ValueKey('chat-input')), '@');
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('mention-popup')), findsNothing);
+      }
+    });
+
     testWidgets('비밀 대화에는 @ 단추가 없고 글자 @를 쳐도 자동완성이 안 뜬다', (tester) async {
       await pump(
         tester,
@@ -596,6 +610,15 @@ void main() {
       return session;
     }
 
+    /// 말풍선 안의 멘션 칩(둥근 연두 바탕 + 굵은 연두 글씨) — [mine]이면 나를 멘션한 진한 칩.
+    Finder chip({bool mine = false}) =>
+        find.byKey(ValueKey(mine ? 'mention-chip-mine' : 'mention-chip'));
+    Text chipText(WidgetTester tester, Finder chip) => tester.widget<Text>(
+      find.descendant(of: chip, matching: find.byType(Text)),
+    );
+    BoxDecoration chipDecoration(WidgetTester tester, Finder chip) =>
+        tester.widget<Container>(chip).decoration! as BoxDecoration;
+
     /// 본문 RichText 안에서 [text] 글자를 가진 TextSpan의 스타일.
     TextStyle? spanStyle(WidgetTester tester, String text) {
       TextStyle? found;
@@ -622,11 +645,17 @@ void main() {
 
     testWidgets('멘션 구간은 강조되고, 나를 멘션하지 않았으면 말풍선에 강조선이 없다', (tester) async {
       await pumpBubble(tester, msg());
-      final style = spanStyle(tester, '@이영희');
-      expect(style, isNotNull);
-      expect(style!.fontWeight, FontWeight.w600);
-      expect(style.backgroundColor, isNotNull);
-      expect(spanStyle(tester, ' 확인 부탁해요')?.fontWeight, isNot(FontWeight.w600));
+      // 연두색 굵은 글씨 + 옅은 연두 바탕의 둥근 칩.
+      expect(chip(), findsOneWidget);
+      final text = chipText(tester, chip());
+      expect(text.data, '@이영희');
+      expect(text.style!.fontWeight, FontWeight.w700);
+      expect(text.style!.color, const Color(0xFF02C472));
+      final deco = chipDecoration(tester, chip());
+      expect(deco.color, const Color(0xFFD6F6E9));
+      expect(deco.borderRadius, isNotNull);
+      expect(chip(mine: true), findsNothing);
+      expect(spanStyle(tester, ' 확인 부탁해요')?.fontWeight, isNot(FontWeight.w700));
       expect(_bubbleBorder(tester), isNull);
     });
 
@@ -638,9 +667,14 @@ void main() {
           mentions: const [Mention.user('me', start: 0, end: 2)],
         ),
       );
-      final mine = spanStyle(tester, '@나');
-      expect(mine!.fontWeight, FontWeight.w800);
-      expect(mine.backgroundColor!.a, greaterThan(0.15));
+      expect(chip(), findsNothing);
+      expect(chip(mine: true), findsOneWidget);
+      expect(chipText(tester, chip(mine: true)).data, '@나');
+      // 나를 멘션한 칩은 바탕이 조금 더 진하다.
+      expect(
+        chipDecoration(tester, chip(mine: true)).color,
+        const Color(0xFFBDEFD9),
+      );
       expect(_bubbleBorder(tester), isNotNull);
     });
 
@@ -652,7 +686,8 @@ void main() {
           mentions: const [Mention.all(start: 0, end: 4)],
         ),
       );
-      expect(spanStyle(tester, '@all')!.fontWeight, FontWeight.w800);
+      expect(chip(mine: true), findsOneWidget);
+      expect(chipText(tester, chip(mine: true)).data, '@all');
       expect(_bubbleBorder(tester), isNotNull);
     });
 
@@ -666,40 +701,12 @@ void main() {
         ),
       );
       expect(_bubbleBorder(tester), isNull);
-      expect(spanStyle(tester, '@all'), isNotNull);
+      expect(chip(mine: true), findsOneWidget);
     });
 
     testWidgets('멘션한 이름을 누르면 그 멤버의 프로필이 열린다', (tester) async {
       await pumpBubble(tester, msg());
-      // 본문의 "@이영희" 자리를 누른다(글자 위치에서 좌표를 얻는다) — Windows는 끌어서 고를 수 있는
-      // SelectableText, 그 밖은 Text라서 둘 다 본다.
-      final selectable = find.byType(SelectableText);
-      late final Offset at;
-      if (selectable.evaluate().isNotEmpty) {
-        final editable = tester
-            .state<EditableTextState>(
-              find.descendant(
-                of: selectable,
-                matching: find.byType(EditableText),
-              ),
-            )
-            .renderEditable;
-        final box = editable.getBoxesForSelection(
-          const TextSelection(baseOffset: 0, extentOffset: 4),
-        );
-        at = editable.localToGlobal(box.first.toRect().center);
-      } else {
-        final paragraph = tester.renderObject<RenderParagraph>(
-          find.byWidgetPredicate(
-            (w) => w is RichText && w.text.toPlainText().contains('@이영희'),
-          ),
-        );
-        final box = paragraph.getBoxesForSelection(
-          const TextSelection(baseOffset: 0, extentOffset: 4),
-        );
-        at = paragraph.localToGlobal(box.first.toRect().center);
-      }
-      await tester.tapAt(at);
+      await tester.tap(chip());
       await tester.pumpAndSettle();
       expect(find.byType(MemberProfileDialog), findsOneWidget);
     });
@@ -733,16 +740,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      var found = false;
-      for (final r in tester.widgetList<RichText>(find.byType(RichText))) {
-        r.text.visitChildren((span) {
-          if (span is TextSpan && span.text == '@나') {
-            found = span.style?.fontWeight == FontWeight.w800;
-          }
-          return true;
-        });
-      }
-      expect(found, isTrue);
+      // 댓글 줄도 같은 연두 칩이고, 나를 멘션했으니 진한 칩이다.
+      expect(find.byKey(const ValueKey('mention-chip-mine')), findsOneWidget);
     });
   });
 

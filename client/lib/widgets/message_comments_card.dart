@@ -12,6 +12,7 @@ import '../models/room.dart';
 import '../services/edit_policy.dart';
 import '../services/mention_logic.dart';
 import '../services/session.dart';
+import '../services/time_format.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
@@ -22,7 +23,6 @@ import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
 
 final _timeFormat = DateFormat('a h:mm');
-final _dateTimeFormat = DateFormat('yyyy/MM/dd a h:mm');
 
 /// [comments]의 [i]번째 댓글에 시간을 보여줄지 — 같은 사람이 같은 분(分)에 연달아 단 댓글은
 /// 그 묶음의 마지막 댓글에만 보여준다(채팅 메시지에서 시간을 묶는 것과 같은 규칙 — 그쪽도
@@ -559,7 +559,7 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
             SelfDestructCountdown(expiresAt: widget.expiresAt!),
           if (widget.showTime)
             Text(
-              _dateTimeFormat.format(comment.createdAt),
+              formatPostDateTime(comment.createdAt),
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: Theme.of(context).hintColor,
               ),

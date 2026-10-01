@@ -10,6 +10,10 @@ import 'sticker_view.dart';
 ///
 /// 탭은 서버에 올린 그림 이모티콘 세트(예: "리마인")가 먼저, 그 뒤에 기본 이모지 세트가 온다.
 /// 그림 세트가 새로 올라오면(서버 목록을 다시 받으면) 스스로 탭을 다시 그린다.
+///
+/// 세트가 많아 세트 이름 줄이 한 화면에 안 들어가면 그 줄 양끝에 **이전/다음 페이지 단추**(‹ ›)가 나타나서,
+/// 누를 때마다 한 화면(보이는 폭)씩 넘긴다 — 마우스 휠로는 가로 스크롤이 잘 안 돼서 PC에서 뒤쪽 세트에 닿기
+/// 어려웠다. 끝에 닿으면 그쪽 단추는 꺼진다.
 class StickerPicker extends StatefulWidget {
   final void Function(Sticker sticker) onSelected;
   const StickerPicker({super.key, required this.onSelected});
@@ -21,6 +25,72 @@ class StickerPicker extends StatefulWidget {
 class _StickerPickerState extends State<StickerPicker> {
   /// 탭은 이름으로 기억한다 — 서버 세트가 늘거나 줄어도 보던 탭이 그대로 남게.
   String? _categoryName;
+
+  /// 세트 이름 줄의 가로 스크롤 — 페이지 단추가 이걸 한 화면씩 움직인다.
+  final _tabScroll = ScrollController();
+
+  /// 세트 이름 줄이 한 화면을 넘는지(페이지 단추를 보일지), 맨 앞/맨 뒤인지(그쪽 단추를 끌지).
+  bool _tabsOverflow = false;
+  bool _tabsAtStart = true;
+  bool _tabsAtEnd = true;
+
+  @override
+  void dispose() {
+    _tabScroll.dispose();
+    super.dispose();
+  }
+
+  /// 스크롤 위치·크기가 바뀔 때마다 단추 상태를 다시 계산한다(바뀐 게 있을 때만 다시 그린다).
+  bool _onTabMetrics(ScrollMetrics m) {
+    final overflow = m.maxScrollExtent > 0.5;
+    final atStart = m.pixels <= m.minScrollExtent + 0.5;
+    final atEnd = m.pixels >= m.maxScrollExtent - 0.5;
+    if (overflow != _tabsOverflow ||
+        atStart != _tabsAtStart ||
+        atEnd != _tabsAtEnd) {
+      setState(() {
+        _tabsOverflow = overflow;
+        _tabsAtStart = atStart;
+        _tabsAtEnd = atEnd;
+      });
+    }
+    return false;
+  }
+
+  /// 세트 이름 줄을 한 화면(보이는 폭의 90% — 걸친 칩이 다음 화면 첫머리에 보이게 조금 겹친다)만큼 넘긴다.
+  void _pageTabs(int direction) {
+    if (!_tabScroll.hasClients) return;
+    final pos = _tabScroll.position;
+    final target = (pos.pixels + direction * pos.viewportDimension * 0.9).clamp(
+      pos.minScrollExtent,
+      pos.maxScrollExtent,
+    );
+    _tabScroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _pageButton({
+    required Key key,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    return SizedBox(
+      width: 28,
+      child: IconButton(
+        key: key,
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        visualDensity: VisualDensity.compact,
+        tooltip: tooltip,
+        icon: Icon(icon),
+        onPressed: onPressed,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,33 +122,66 @@ class _StickerPickerState extends State<StickerPicker> {
                   // ChoiceChip 자체 높이(패딩 포함)보다 이 줄이 낮으면 칩이 눌려서 글자가
                   // 위로 밀려 보인다 — 칩이 눌리지 않을 만큼 넉넉하게 준다.
                   height: 32,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    itemCount: categories.length,
-                    itemBuilder: (context, i) {
-                      final c = categories[i];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: ChoiceChip(
-                          label: Text(c.name),
-                          // 선택 시 체크마크가 붙으면 글자가 가운데서 옆으로 밀려 보이므로 끈다.
-                          showCheckmark: false,
-                          selected: identical(c, category),
-                          visualDensity: VisualDensity.compact,
-                          // 최소 터치 영역 확보용 여백이 위아래 비대칭으로 남는 걸 없애서
-                          // 글자가 칩 세로 가운데에 오도록 한다.
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          onSelected: (_) =>
-                              setState(() => _categoryName = c.name),
+                  child: Row(
+                    children: [
+                      if (_tabsOverflow)
+                        _pageButton(
+                          key: const ValueKey('sticker-tabs-prev'),
+                          icon: Icons.chevron_left,
+                          tooltip: '이전 세트',
+                          onPressed: _tabsAtStart ? null : () => _pageTabs(-1),
                         ),
-                      );
-                    },
+                      Expanded(
+                        // ScrollMetricsNotification은 크기가 바뀔 때(첫 배치·세트 목록 변경), ScrollNotification은
+                        // 스크롤 위치가 바뀔 때 온다 — 둘 다 단추 상태를 다시 계산한다.
+                        child: NotificationListener<ScrollMetricsNotification>(
+                          onNotification: (n) => _onTabMetrics(n.metrics),
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: (n) => _onTabMetrics(n.metrics),
+                            child: ListView.builder(
+                              controller: _tabScroll,
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              itemCount: categories.length,
+                              itemBuilder: (context, i) {
+                                final c = categories[i];
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                  ),
+                                  child: ChoiceChip(
+                                    label: Text(c.name),
+                                    // 선택 시 체크마크가 붙으면 글자가 가운데서 옆으로 밀려 보이므로 끈다.
+                                    showCheckmark: false,
+                                    selected: identical(c, category),
+                                    visualDensity: VisualDensity.compact,
+                                    // 최소 터치 영역 확보용 여백이 위아래 비대칭으로 남는 걸 없애서
+                                    // 글자가 칩 세로 가운데에 오도록 한다.
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                    ),
+                                    onSelected: (_) =>
+                                        setState(() => _categoryName = c.name),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_tabsOverflow)
+                        _pageButton(
+                          key: const ValueKey('sticker-tabs-next'),
+                          icon: Icons.chevron_right,
+                          tooltip: '다음 세트',
+                          onPressed: _tabsAtEnd ? null : () => _pageTabs(1),
+                        ),
+                    ],
                   ),
                 ),
                 const Divider(height: 1),

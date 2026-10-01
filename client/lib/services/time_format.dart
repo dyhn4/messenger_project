@@ -34,7 +34,18 @@ String formatDateTime(DateTime dt) {
   return '$date $time';
 }
 
-const _koreanWeekdays = ['월', '화', '수', '목', '금', '토', '일'];
+/// 보드 뷰 토픽의 게시글·댓글과 토픽 공지에서 쓰는 작성 시각 — "2026/10/01 AM 3:44". 12시간제, AM/PM 대문자,
+/// 시는 0 없이(3:44, 12:05)·분은 두 자리, 날짜는 yyyy/MM/dd. 자정은 "AM 12:00", 정오는 "PM 12:00".
+/// 채팅 말풍선·방 목록의 시각 표기(formatRoomActivityTime 등)는 따로 두고 이 함수는 건드리지 않는다.
+String formatPostDateTime(DateTime dt) {
+  final date =
+      '${dt.year.toString().padLeft(4, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.day.toString().padLeft(2, '0')}';
+  final hour12 = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final minute = dt.minute.toString().padLeft(2, '0');
+  return '$date ${dt.hour < 12 ? 'AM' : 'PM'} $hour12:$minute';
+}
+
+const _koreanWeekdays =['월', '화', '수', '목', '금', '토', '일'];
 
 /// 예약 메시지의 날짜 — "10월 2일 (목)". 올해가 아니면 앞에 "2027년 "을 붙인다(90일 뒤까지라
 /// 해를 넘길 수 있다).

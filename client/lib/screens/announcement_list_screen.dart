@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/announcement.dart';
@@ -7,8 +8,11 @@ import '../models/room.dart';
 import '../services/chat_socket.dart' show AnnouncementRemovedEvent;
 import '../services/session.dart';
 import '../services/time_format.dart';
-import '../widgets/app_toast.dart';
+import '../widgets/avatar_utils.dart';
+import '../widgets/board_view.dart'
+    show BoardColors, PinnedPostTag, boardCardDecoration;
 import 'announcement_detail_screen.dart';
+import 'announcement_editor_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
 
 /// 토픽방 "공지" — 카카오톡과 같은 개념. 누구나 볼 수 있고(방 멤버라면), 토픽을 만들 수
@@ -148,47 +152,55 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
     }
   }
 
+  /// 글쓰기 — 게시글 작성창과 같은 틀의 공지 쓰기 창(announcement_editor_dialog.dart). 등록 실패는 창 안에서
+  /// 토스트로 알리고 쓰던 글을 남겨 둔다.
   Future<void> _write() async {
-    final result = await showDialog<(String, Duration?)>(
-      context: context,
-      builder: (_) => const _AnnouncementWriteDialog(),
+    await showAnnouncementEditor(
+      context,
+      session: widget.session,
+      room: widget.room,
+      onSubmit: (draft) async {
+        final autoUnpinAfter = draft.autoUnpinAfter;
+        final Announcement created;
+        try {
+          created = await widget.session.api!.createAnnouncement(
+            widget.room.id,
+            draft.text,
+            autoUnpinAt: autoUnpinAfter == null
+                ? null
+                : DateTime.now().add(autoUnpinAfter),
+          );
+        } catch (e) {
+          throw '공지를 등록하지 못했습니다: $e';
+        }
+        if (!mounted) return;
+        // 소켓 echo(위 _newSub)와 중복되지 않도록 id로 한 번 더 확인한다.
+        setState(() {
+          final items = _items ?? [];
+          if (items.any((e) => e.id == created.id)) return;
+          _items = [created, ...items];
+        });
+      },
     );
-    if (result == null || !mounted) return;
-    final (text, autoUnpinAfter) = result;
-    if (text.isEmpty) return;
-    try {
-      final created = await widget.session.api!.createAnnouncement(
-        widget.room.id,
-        text,
-        autoUnpinAt: autoUnpinAfter == null
-            ? null
-            : DateTime.now().add(autoUnpinAfter),
-      );
-      if (!mounted) return;
-      // 소켓 echo(위 _newSub)와 중복되지 않도록 id로 한 번 더 확인한다.
-      setState(() {
-        final items = _items ?? [];
-        if (items.any((e) => e.id == created.id)) return;
-        _items = [created, ...items];
-      });
-    } catch (e) {
-      if (mounted) showAppToast(context, '공지를 등록하지 못했습니다: $e');
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final content = _buildContent(context);
+    final colors = BoardColors.of(Theme.of(context));
+    final content = ColoredBox(
+      color: colors.background,
+      child: _buildContent(context, colors),
+    );
     // 좁은 화면은 showAnnouncementListScreen이 이미 Scaffold+AppBar를 씌워서 push하므로
-    // 그대로 쓰고, 넓은 화면(Dialog)에서는 FloatingDialog와 같은 헤더+닫기 버튼을 직접 그린다.
+    // 그대로 쓰고, 넓은 화면(Dialog)에서는 헤더+닫기 버튼을 직접 그린다.
     final isWide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
     if (!isWide) return content;
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+          child: Row(
             children: [
               Expanded(
                 child: Text(
@@ -198,18 +210,18 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
               ),
               IconButton(
                 icon: const Icon(Icons.close),
+                tooltip: '닫기',
                 onPressed: () => Navigator.of(context).pop(),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Expanded(child: content),
-        ],
-      ),
+        ),
+        Expanded(child: content),
+      ],
     );
   }
 
-  Widget _buildContent(BuildContext context) {
+  Widget _buildContent(BuildContext context, BoardColors colors) {
     if (_error != null) return Center(child: Text(_error!));
     final items = _items;
     if (items == null) return const Center(child: CircularProgressIndicator());
@@ -228,37 +240,57 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_canWrite)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
-                onPressed: _write,
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                label: const Text('글쓰기'),
+        // 보드의 "고정된 게시글 N" 머리줄처럼 — 아이콘 + "공지 N", 오른쪽에 글쓰기(권한 있는 사람만).
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 16, 4),
+          child: Row(
+            children: [
+              Icon(Icons.campaign_outlined, size: 18, color: colors.pin),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '공지 ${items.length}',
+                  key: const ValueKey('announcement-list-header'),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-            ),
+              if (_canWrite)
+                FilledButton.icon(
+                  key: const ValueKey('announcement-write'),
+                  onPressed: _write,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('글쓰기'),
+                ),
+            ],
           ),
+        ),
         Expanded(
           child: items.isEmpty
               ? const Center(child: Text('등록된 공지가 없습니다.'))
               : ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   itemCount: items.length,
-                  separatorBuilder: (_, _) => const Divider(height: 24),
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, i) => _AnnouncementTile(
+                    key: ValueKey('announcement-tile-${items[i].id}'),
+                    session: widget.session,
+                    room: widget.room,
                     announcement: items[i],
                     unread: unreadIds.contains(items[i].id),
-                    onTap: () {
+                    onTap: () async {
                       // 상세를 열어본 공지는 "안 읽음" 표시를 지운다.
                       setState(() => unreadIds.remove(items[i].id));
-                      showAnnouncementDetailScreen(
+                      await showAnnouncementDetailScreen(
                         context,
                         widget.session,
                         widget.room,
                         items[i],
                       );
+                      // 상세에서 고치거나 댓글을 달았다면(같은 객체를 고친다) 카드도 새로 그린다.
+                      if (mounted) setState(() {});
                     },
                   ),
                 ),
@@ -268,11 +300,19 @@ class _AnnouncementListScreenState extends State<AnnouncementListScreen> {
   }
 }
 
+/// 공지 목록의 카드 — 보드의 "고정된 게시글" 카드(작은 카드 + 굵은 글 줄 + `작성자 · 시각` + 댓글 수)와 같은 모양.
+/// 공지는 제목이 없어서 본문 앞부분(3줄 말줄임)을 굵은 글 줄 자리에 두고, 앞에 작성자 아바타, 오른쪽에 사진
+/// 공지의 작은 썸네일·댓글 수를 둔다. 지금 채팅방에 고정된 공지에는 "고정" 표시, 안 읽은 공지에는 "안 읽음".
 class _AnnouncementTile extends StatelessWidget {
+  final Session session;
+  final Room room;
   final Announcement announcement;
   final VoidCallback onTap;
   final bool unread;
   const _AnnouncementTile({
+    super.key,
+    required this.session,
+    required this.room,
     required this.announcement,
     required this.onTap,
     this.unread = false,
@@ -280,269 +320,163 @@ class _AnnouncementTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (announcement.pinned)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.push_pin,
-                    size: 14,
-                    color: Theme.of(context).colorScheme.primary,
+    final theme = Theme.of(context);
+    final colors = BoardColors.of(theme);
+    final primary = theme.colorScheme.primary;
+    final hint = theme.hintColor;
+    final author = room.members
+        .where((m) => m.id == announcement.authorId)
+        .firstOrNull;
+    final hasText = announcement.text.trim().isNotEmpty;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      decoration: boardCardDecoration(
+        colors,
+        border: unread ? primary : null,
+        borderWidth: unread ? 1.5 : 1,
+        color: unread
+            ? Color.alphaBlend(primary.withValues(alpha: 0.06), colors.card)
+            : null,
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AvatarView(
+                  username: announcement.authorName,
+                  avatarType: author?.avatarType ?? 'initial',
+                  avatarEmoji: author?.avatarEmoji,
+                  avatarColor: author?.avatarColor,
+                  avatarUrl: author?.avatarUrl,
+                  resolveUrl: session.resolveUrl,
+                  radius: 17,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (unread || announcement.pinned)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (unread)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.redAccent,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Text(
+                                    '안 읽음',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              if (announcement.pinned) const PinnedPostTag(),
+                            ],
+                          ),
+                        ),
+                      // 사진만 있는 공지는 "[사진]".
+                      Text(
+                        hasText ? announcement.text : announcement.previewText,
+                        key: const ValueKey('announcement-tile-text'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${announcement.authorName} · '
+                        '${formatPostDateTime(announcement.createdAt)}',
+                        key: const ValueKey('announcement-tile-meta'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: hint),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '채팅방에 고정됨',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
+                ),
+                // 오른쪽 — 사진 공지의 작은 썸네일, 그 아래(또는 혼자) 댓글 수. 아래 줄(작성자·시각)이 잘리지 않게
+                // 한 칸에 모았다.
+                if (announcement.hasImage || announcement.commentCount > 0) ...[
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (announcement.hasImage)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: CachedNetworkImage(
+                            key: const ValueKey('announcement-tile-thumb'),
+                            imageUrl: session.resolveUrl(
+                              announcement.imageThumbnailUrl ??
+                                  announcement.imageUrl ??
+                                  '',
+                            ),
+                            width: 44,
+                            height: 44,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Container(
+                              width: 44,
+                              height: 44,
+                              color: theme.colorScheme.surfaceContainerHighest,
+                            ),
+                            errorWidget: (_, _, _) => Container(
+                              width: 44,
+                              height: 44,
+                              color: theme.colorScheme.surfaceContainerHighest,
+                              child: Icon(Icons.image_outlined, color: hint),
+                            ),
+                          ),
+                        ),
+                      if (announcement.hasImage &&
+                          announcement.commentCount > 0)
+                        const SizedBox(height: 6),
+                      if (announcement.commentCount > 0)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.mode_comment_outlined,
+                              size: 14,
+                              color: hint,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              '${announcement.commentCount}',
+                              style: TextStyle(fontSize: 12, color: hint),
+                            ),
+                          ],
+                        ),
+                    ],
                   ),
                 ],
-              ),
-            ),
-          Row(
-            children: [
-              if (unread) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 1,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.redAccent,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text(
-                    '안 읽음',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-              ],
-              // 사진 공지는 글 앞에 사진 아이콘을 붙이고(글이 없으면 "[사진]"), 사진은 상세에서 본다.
-              if (announcement.hasImage) ...[
-                const Icon(Icons.image_outlined, size: 16),
-                const SizedBox(width: 4),
-              ],
-              Expanded(
-                child: Text(
-                  announcement.previewText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '${formatRelativeTime(announcement.createdAt)} · ${announcement.authorName} · 댓글 ${announcement.commentCount}개',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// "공지 작성" 대화상자 — 내용 입력칸 아래에 "공지 자동 내리기" 빠른 선택 버튼들을 둔다.
-/// 완료를 누르면 (텍스트, 자동 내리기까지 남은 기간) 튜플을 돌려준다(기간이 null이면 자동
-/// 내리기 없음 — 기본값).
-class _AnnouncementWriteDialog extends StatefulWidget {
-  const _AnnouncementWriteDialog();
-
-  @override
-  State<_AnnouncementWriteDialog> createState() =>
-      _AnnouncementWriteDialogState();
-}
-
-class _AnnouncementWriteDialogState extends State<_AnnouncementWriteDialog> {
-  final _controller = TextEditingController();
-  Duration? _autoUnpinAfter;
-  // "지정"으로 고른 값인지 — 빠른 선택지와 우연히 같은 길이(예: 24시간=1일)를 골라도 칩 표시가
-  // 헷갈리지 않도록 별도로 구분한다.
-  bool _isCustom = false;
-
-  static const _quickOptions = <(String, Duration?)>[
-    ('없음', null),
-    ('1시간', Duration(hours: 1)),
-    ('4시간', Duration(hours: 4)),
-    ('9시간', Duration(hours: 9)),
-    ('1일', Duration(days: 1)),
-    ('7일', Duration(days: 7)),
-    ('30일', Duration(days: 30)),
-  ];
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _selectQuick(Duration? duration) {
-    setState(() {
-      _autoUnpinAfter = duration;
-      _isCustom = false;
-    });
-  }
-
-  Future<void> _pickCustom() async {
-    final result = await showDialog<Duration>(
-      context: context,
-      builder: (_) => const _CustomAutoUnpinDialog(),
-    );
-    if (result == null || !mounted) return;
-    setState(() {
-      _autoUnpinAfter = result;
-      _isCustom = true;
-    });
-  }
-
-  String _customChipLabel() {
-    final d = _autoUnpinAfter;
-    if (!_isCustom || d == null) return '지정';
-    final days = d.inDays;
-    final hours = d.inHours % 24;
-    if (days > 0 && hours > 0) return '지정 ($days일 $hours시간)';
-    if (days > 0) return '지정 ($days일)';
-    return '지정 ($hours시간)';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('공지 작성'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              maxLines: 6,
-              minLines: 3,
-              maxLength: 2000,
-              decoration: const InputDecoration(
-                hintText: '공지 내용을 입력하세요',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text('공지 자동 내리기', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final (label, duration) in _quickOptions)
-                  ChoiceChip(
-                    label: Text(label),
-                    selected: !_isCustom && _autoUnpinAfter == duration,
-                    onSelected: (_) => _selectQuick(duration),
-                  ),
-                ChoiceChip(
-                  label: Text(_customChipLabel()),
-                  selected: _isCustom,
-                  onSelected: (_) => _pickCustom(),
-                ),
               ],
             ),
-          ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final text = _controller.text.trim();
-            if (text.isEmpty) return;
-            Navigator.of(context).pop((text, _autoUnpinAfter));
-          },
-          child: const Text('완료'),
-        ),
-      ],
-    );
-  }
-}
-
-/// "지정" 칩을 누르면 뜨는 일/시간 직접 입력 대화상자.
-class _CustomAutoUnpinDialog extends StatefulWidget {
-  const _CustomAutoUnpinDialog();
-
-  @override
-  State<_CustomAutoUnpinDialog> createState() => _CustomAutoUnpinDialogState();
-}
-
-class _CustomAutoUnpinDialogState extends State<_CustomAutoUnpinDialog> {
-  final _daysController = TextEditingController(text: '0');
-  final _hoursController = TextEditingController(text: '0');
-
-  @override
-  void dispose() {
-    _daysController.dispose();
-    _hoursController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('공지 자동 내리기 — 직접 지정'),
-      content: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _daysController,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '일'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: _hoursController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '시간'),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final days = int.tryParse(_daysController.text) ?? 0;
-            final hours = int.tryParse(_hoursController.text) ?? 0;
-            if (days <= 0 && hours <= 0) return;
-            Navigator.of(context).pop(Duration(days: days, hours: hours));
-          },
-          child: const Text('완료'),
-        ),
-      ],
     );
   }
 }

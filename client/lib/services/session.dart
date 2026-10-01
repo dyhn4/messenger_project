@@ -198,6 +198,7 @@ class Session extends ChangeNotifier {
     syncEvents: chatSocket.notificationSync,
     projectEvents: chatSocket.projectNotifications,
     reconnected: chatSocket.reconnected,
+    userId: () => userId,
     onNew: _onNotificationNew,
     onRead: _onNotificationsRead,
     onSync: _onNotificationSync,
@@ -1128,6 +1129,7 @@ class Session extends ChangeNotifier {
     }
     if (canUseProjects) unawaited(refreshProjectUnread());
     unawaited(notificationCenter.refreshCounts());
+    unawaited(notificationCenter.loadViewPrefs());
     unawaited(favorites.loadIds());
 
     // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
@@ -1256,6 +1258,7 @@ class Session extends ChangeNotifier {
         type: c.type,
         text: c.text,
         fileName: c.fileName,
+        senderName: c.senderName,
       );
       _handleIncomingComment(c);
     });
@@ -2016,6 +2019,7 @@ class Session extends ChangeNotifier {
     required MessageType type,
     String? text,
     String? fileName,
+    String? senderName,
   }) {
     if (type == MessageType.system || type == MessageType.comment) return;
     final match = rooms.where((r) => r.id == roomId);
@@ -2024,6 +2028,7 @@ class Session extends ChangeNotifier {
     room.lastMessagePreview = room.isSecret
         ? _secretPreviewPlaceholder
         : formatMessagePreview(type: type, text: text, fileName: fileName);
+    room.lastMessageSenderName = room.isSecret ? null : senderName;
     notifyListeners();
   }
 
@@ -2046,6 +2051,7 @@ class Session extends ChangeNotifier {
           ? _pollPreview(m)
           : m.text,
       fileName: m.fileName,
+      senderName: m.senderName,
     );
     _handleIncomingMessage(m);
   }

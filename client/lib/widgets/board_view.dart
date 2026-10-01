@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../models/app_user.dart';
 import '../models/message.dart';
@@ -26,8 +25,6 @@ import 'mention_profile.dart';
 import 'muted_scrollbar.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
-
-final _fullDateFormat = DateFormat('yyyy/MM/dd a h:mm');
 
 /// 보드 목록 한 줄(카드)의 최대 폭 — 넓은 창에서 카드가 한없이 늘어나지 않게 가운데에 모은다.
 const _boardMaxWidth = 820.0;
@@ -697,7 +694,20 @@ BoxDecoration _cardDecoration(
   boxShadow: colors.shadow,
 );
 
-/// 보드 목록의 게시글 카드 — 작성자·상대 시각(수정됨), 굵은 제목, 본문 세 줄, 첨부 미리보기(사진
+/// 공지 목록 카드처럼 보드 밖에서 같은 카드 모양을 쓰는 화면용.
+BoxDecoration boardCardDecoration(
+  BoardColors colors, {
+  Color? border,
+  double borderWidth = 1,
+  Color? color,
+}) => _cardDecoration(
+  colors,
+  border: border,
+  borderWidth: borderWidth,
+  color: color,
+);
+
+/// 보드 목록의 게시글 카드 — 작성자·작성 시각(yyyy/MM/dd AM h:mm, 수정됨), 굵은 제목, 본문 세 줄, 첨부 미리보기(사진
 /// 네 장까지 + 파일 N개), 댓글 수. 누르면 상세(본문+댓글)가 열린다.
 class PostCard extends StatelessWidget {
   final Session session;
@@ -772,15 +782,12 @@ class PostCard extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: 1),
-                          Tooltip(
-                            message: _fullDateFormat.format(post.createdAt),
-                            child: Text(
-                              '${formatRelativeTime(post.createdAt)}'
-                              '${post.editedAt != null ? ' (수정됨)' : ''}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: hint),
-                            ),
+                          Text(
+                            '${formatPostDateTime(post.createdAt)}'
+                            '${post.editedAt != null ? ' (수정됨)' : ''}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: hint),
                           ),
                         ],
                       ),
@@ -912,14 +919,11 @@ class PollBoardCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 1),
-                    Tooltip(
-                      message: _fullDateFormat.format(poll.createdAt),
-                      child: Text(
-                        formatRelativeTime(poll.createdAt),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: theme.hintColor),
-                      ),
+                    Text(
+                      formatPostDateTime(poll.createdAt),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: theme.hintColor),
                     ),
                   ],
                 ),
@@ -1248,7 +1252,7 @@ class _PinnedPostTile extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${_authorName(room, post)} · ${formatRelativeTime(post.createdAt)}',
+                        '${_authorName(room, post)} · ${formatPostDateTime(post.createdAt)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 12, color: hint),
@@ -1529,7 +1533,7 @@ class PostDetailHead extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '${_fullDateFormat.format(post.createdAt)}'
+                    '${formatPostDateTime(post.createdAt)}'
                     '${post.editedAt != null ? ' (수정됨)' : ''}',
                     style: TextStyle(fontSize: 12, color: hint),
                   ),

@@ -19,7 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 알림 센터 화면 — 5개 탭(전체·멘션·안 읽은 대화·보드·공지·프로젝트), 기본 탭 규칙, 탭별 배지, 모두 읽음,
+/// 알림 센터 화면 — 5개 탭(전체·멘션·메시지·보드·공지·프로젝트), 기본 탭 규칙, 탭별 배지, 모두 읽음,
 /// 안 읽은 것만, 눌러서 이동+읽음, 무한 스크롤, 설정, 그리고 모바일 폭(360)의 전체 화면·가로 스크롤 탭줄.
 
 class _QuietNotifications extends NotificationService {
@@ -183,11 +183,15 @@ Room _room(
   bool announcement = false,
   String teamId = 't1',
   String? preview,
+  String? sender,
+  RoomType type = RoomType.topic,
+  TopicViewMode viewMode = TopicViewMode.chat,
   int activityMinutesAgo = 0,
 }) => Room(
   id: id,
   teamId: teamId,
-  type: RoomType.topic,
+  type: type,
+  viewMode: viewMode,
   name: name,
   members: const [],
   createdAt: DateTime(2026),
@@ -195,6 +199,7 @@ Room _room(
   unreadCount: unread,
   unreadMentionCount: mentions,
   lastMessagePreview: preview,
+  lastMessageSenderName: sender,
   lastActivityAt: _now.subtract(Duration(minutes: activityMinutesAgo)),
   hasUnreadAnnouncement: announcement,
   unreadAnnouncementCount: announcement ? 1 : 0,
@@ -275,6 +280,9 @@ void _size(WidgetTester tester, [Size size = const Size(1000, 800)]) {
   addTearDown(tester.view.reset);
 }
 
+/// 두 번째 줄이 굵은 앞부분 + 본문으로 이어진 Text.rich라서 이어 붙인 글자로 찾는다.
+Finder _rich(String text) => find.text(text, findRichText: true);
+
 Finder _tab(NotificationTab t) => find.byKey(ValueKey('notif-tab-${t.name}'));
 Finder _badge(String label) => find.byKey(ValueKey('notif-tab-badge-$label'));
 
@@ -309,7 +317,7 @@ Future<void> _settle(WidgetTester tester) async {
 
 void main() {
   group('탭 다섯 개와 기본 탭', () {
-    testWidgets('전체 · 멘션 · 안 읽은 대화 · 보드·공지 · 프로젝트 — 안 읽은 멘션이 있으면 멘션 탭으로 열린다', (
+    testWidgets('전체 · 멘션 · 메시지 · 보드·공지 · 프로젝트 — 안 읽은 멘션이 있으면 멘션 탭으로 열린다', (
       tester,
     ) async {
       final server = _Server()
@@ -328,7 +336,7 @@ void main() {
         tester.widget<TabBar>(find.byType(TabBar)).controller!.index,
         NotificationTab.mention.index,
       );
-      expect(find.text('김철수님이 멘션했습니다: 확인 부탁드려요'), findsNWidgets(2));
+      expect(_rich('김철수: 확인 부탁드려요'), findsNWidgets(2));
       // 멘션 탭만 요청했다(안 연 탭은 받지 않는다).
       expect(
         server
@@ -371,7 +379,7 @@ void main() {
       expect(badgeText('멘션').data, '2');
       // 보드 1 + 안 읽은 공지 1.
       expect(badgeText('보드·공지').data, '2');
-      expect(badgeText('안 읽은 대화').data, '2');
+      expect(badgeText('메시지').data, '2');
       expect(badgeText('프로젝트').data, '4');
       // 전체: 멘션 2 + 보드·공지 2 + 메시지 있는 방 2 + 프로젝트 4.
       expect(badgeText('전체').data, '10');
@@ -390,7 +398,7 @@ void main() {
     });
   });
 
-  group('안 읽은 대화 탭 — 예전 알림 센터 그대로', () {
+  group('메시지 탭(예전 "안 읽은 대화") — 예전 알림 센터 그대로', () {
     testWidgets('안 읽은 방(여러 팀)을 마지막 활동순으로 팀 이름과 함께 보여 주고, 누르면 그 방으로', (
       tester,
     ) async {
@@ -471,7 +479,7 @@ void main() {
       expect(find.byType(MentionMarker), findsOneWidget);
     });
 
-    testWidgets('탭의 "안 읽은 것만"은 없고 "모두 읽음"은 확인을 받은 뒤 방을 읽음으로 돌린다', (
+    testWidgets('탭 아래에 "안 읽은 것만" 칩은 없고 "모두 읽음"은 확인을 받은 뒤 방을 읽음으로 돌린다', (
       tester,
     ) async {
       final session = _session(
@@ -512,11 +520,14 @@ void main() {
       final opened = _Opened();
       await _pump(tester, session, opened: opened);
       await _settle(tester);
-      expect(find.text('김철수님이 멘션했습니다: @나 자료 확인'), findsOneWidget);
-      expect(find.text('김철수님이 모두를 멘션했습니다: @all 회의'), findsOneWidget);
+      expect(_rich('김철수: @나 자료 확인'), findsOneWidget);
+      expect(_rich('김철수: @all 회의'), findsOneWidget);
       expect(find.text('개발팀'), findsOneWidget); // 팀을 가로질러 — 팀 이름이 붙는다.
+      // 개인 멘션도 @all도 같은 @ 아이콘이다.
+      expect(find.byIcon(Icons.alternate_email), findsNWidgets(2));
+      expect(find.byIcon(Icons.groups_outlined), findsNothing);
 
-      await tester.tap(find.text('김철수님이 멘션했습니다: @나 자료 확인'));
+      await tester.tap(_rich('김철수: @나 자료 확인'));
       await _settle(tester);
       expect(opened.room!.id, 'r1');
       expect(opened.messageId, 'msg-77');
@@ -539,7 +550,7 @@ void main() {
       final opened = _Opened();
       await _pump(tester, session, opened: opened);
       await _settle(tester);
-      await tester.tap(find.text('김철수님이 멘션했습니다: 확인 부탁드려요'));
+      await tester.tap(_rich('김철수: 확인 부탁드려요'));
       await _settle(tester);
       expect(opened.room, isNull);
       expect(find.text('더 이상 볼 수 없는 대화입니다.'), findsOneWidget);
@@ -566,15 +577,15 @@ void main() {
         initialTab: NotificationTab.board,
       );
       await _settle(tester);
-      expect(find.text('새 글 · 9월 주간 보고'), findsOneWidget);
-      expect(find.text('글 수정 · 8월 주간 보고'), findsOneWidget);
-      expect(find.text('댓글 · 확인했습니다'), findsOneWidget);
+      expect(_rich('김철수: 9월 주간 보고'), findsOneWidget);
+      expect(_rich('김철수 · 수정: 8월 주간 보고'), findsOneWidget);
+      expect(_rich('김철수 · 댓글: 확인했습니다'), findsOneWidget);
       expect(find.text('공지 · 월간 회의 안내'), findsOneWidget);
-      expect(find.text('김철수님이 멘션했습니다: 확인 부탁드려요'), findsNothing);
+      expect(_rich('김철수: 확인 부탁드려요'), findsNothing);
       // 시간순 — 새 글(10분) → 공지(16분) → 글 수정(20분).
-      double y(String t) => tester.getTopLeft(find.text(t)).dy;
-      expect(y('새 글 · 9월 주간 보고'), lessThan(y('공지 · 월간 회의 안내')));
-      expect(y('공지 · 월간 회의 안내'), lessThan(y('글 수정 · 8월 주간 보고')));
+      double y(String t) => tester.getTopLeft(_rich(t)).dy;
+      expect(y('김철수: 9월 주간 보고'), lessThan(y('공지 · 월간 회의 안내')));
+      expect(y('공지 · 월간 회의 안내'), lessThan(y('김철수 · 수정: 8월 주간 보고')));
       expect(
         server
             .called('GET', '/api/notifications')
@@ -590,7 +601,7 @@ void main() {
       expect(opened.room!.id, 'r1');
       expect(opened.popup, isTrue);
       // 보드 알림 줄은 그 글로 간다.
-      await tester.tap(find.text('새 글 · 9월 주간 보고'));
+      await tester.tap(_rich('김철수: 9월 주간 보고'));
       await _settle(tester);
       expect(opened.messageId, 'm-b1');
       expect(opened.popup, isFalse);
@@ -616,16 +627,16 @@ void main() {
         () => session.notificationCenter.ensureLoaded(NotificationTab.project),
       );
       await _settle(tester);
-      double y(String t) => tester.getTopLeft(find.text(t)).dy;
+      double y(String t) => tester.getTopLeft(_rich(t)).dy;
       final order = [
         '대화 글', // 방 5분 전
-        '새 글 · 보드 글', // 20분
+        '김철수: 보드 글', // 20분
         '업무를 배정했습니다 p1', // 35분
         '공지 · 월간 회의 안내', // 공지 41분
-        '김철수님이 멘션했습니다: 멘션 글', // 50분
+        '김철수: 멘션 글', // 50분
       ];
       for (var i = 0; i < order.length - 1; i++) {
-        expect(find.text(order[i]), findsOneWidget, reason: order[i]);
+        expect(_rich(order[i]), findsOneWidget, reason: order[i]);
         expect(
           y(order[i]),
           lessThan(y(order[i + 1])),
@@ -682,6 +693,134 @@ void main() {
     });
   });
 
+  group('메시지 탭 — 보낸 사람 이름과 멘션만 안 읽은 방', () {
+    String previewOf(WidgetTester tester, String roomName) {
+      final row = find.ancestor(
+        of: find.text(roomName),
+        matching: find.byType(InkWell),
+      );
+      final preview = find.descendant(
+        of: row.first,
+        matching: find.byKey(const ValueKey('notif-row-preview')),
+      );
+      final w = tester.widget(preview);
+      return w is Text ? (w.data ?? w.textSpan!.toPlainText()) : '';
+    }
+
+    testWidgets('그룹채팅·토픽 줄은 "보낸 사람: 미리보기", 1:1은 미리보기만', (tester) async {
+      final session = _session(
+        _Server(),
+        rooms: [
+          _room(
+            'g1',
+            '점심 모임',
+            type: RoomType.group,
+            unread: 1,
+            preview: '오늘 한식 어때요?',
+            sender: '김철수',
+            activityMinutesAgo: 1,
+          ),
+          _room(
+            't1',
+            '영업방',
+            unread: 1,
+            preview: '견적 확인 부탁',
+            sender: '이영희',
+            activityMinutesAgo: 2,
+          ),
+          _room(
+            'd1',
+            '박민수',
+            type: RoomType.dm,
+            unread: 1,
+            preview: '네 알겠습니다',
+            sender: '박민수',
+            activityMinutesAgo: 3,
+          ),
+        ],
+      );
+      await _pump(tester, session, initialTab: NotificationTab.unreadChats);
+      await _settle(tester);
+      expect(previewOf(tester, '점심 모임'), '김철수: 오늘 한식 어때요?');
+      expect(previewOf(tester, '영업방'), '이영희: 견적 확인 부탁');
+      expect(previewOf(tester, '박민수'), '네 알겠습니다');
+    });
+
+    testWidgets('보드 뷰 토픽은 메시지 탭·전체 탭·배지에 안 뜬다 — 보드 알림(보드·공지 탭)으로 온다', (
+      tester,
+    ) async {
+      final server = _Server()
+        ..items.add(
+          _n('b1', kind: 'board_post', roomName: '주간 보고', preview: '9월 보고'),
+        );
+      final session = _session(
+        server,
+        rooms: [
+          _room(
+            'board',
+            '주간 보고',
+            unread: 3,
+            viewMode: TopicViewMode.board,
+            preview: '게시글: 9월 보고',
+            sender: '김철수',
+          ),
+          _room('chat', '일반 채팅 토픽', unread: 1, preview: '안녕'),
+        ],
+      );
+      await _pump(tester, session, initialTab: NotificationTab.unreadChats);
+      await _settle(tester);
+      expect(find.text('주간 보고'), findsNothing);
+      expect(find.text('일반 채팅 토픽'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(of: _badge('메시지'), matching: find.byType(Text)),
+            )
+            .data,
+        '1',
+      );
+
+      // 전체 탭에는 보드 알림 줄만 있고 보드 방의 안 읽은 대화 줄은 없다.
+      await tester.tap(_tab(NotificationTab.all));
+      await _settle(tester);
+      expect(_rich('김철수: 9월 보고'), findsOneWidget);
+      expect(find.text('게시글: 9월 보고'), findsNothing);
+    });
+
+    testWidgets('안 읽은 메시지가 전부 멘션인 방은 메시지 탭·전체 탭·배지에서 빠지고, 멘션 말고도 있으면 보인다', (
+      tester,
+    ) async {
+      final server = _Server()..items.add(_n('m1'));
+      final session = _session(
+        server,
+        rooms: [
+          _room('only', '멘션만 온 방', unread: 2, mentions: 2, preview: '@나 확인'),
+          _room('mixed', '섞인 방', unread: 3, mentions: 1, preview: '일반 메시지'),
+          _room('plain', '일반 방', unread: 1, preview: '안녕'),
+        ],
+      );
+      await _pump(tester, session, initialTab: NotificationTab.unreadChats);
+      await _settle(tester);
+      expect(find.text('멘션만 온 방'), findsNothing);
+      expect(find.text('섞인 방'), findsOneWidget);
+      expect(find.text('일반 방'), findsOneWidget);
+      // 탭 배지도 보이는 방만 센다(2개).
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(of: _badge('메시지'), matching: find.byType(Text)),
+            )
+            .data,
+        '2',
+      );
+
+      // 멘션 탭에는 그 알림이 있다 — 안 읽은 방은 멘션 알림 쪽으로 보인다.
+      await tester.tap(_tab(NotificationTab.all));
+      await _settle(tester);
+      expect(find.text('멘션만 온 방'), findsNothing);
+    });
+  });
+
   group('모두 읽음 · 안 읽은 것만', () {
     testWidgets('멘션 탭의 모두 읽음 — kind=mention으로 보내고 줄·배지가 읽음으로 바뀐다', (
       tester,
@@ -708,7 +847,40 @@ void main() {
       expect(button.onPressed, isNull);
     });
 
-    testWidgets('"안 읽은 것만" — 켜면 unreadOnly=true로 새로 받고, 끄면 전부', (tester) async {
+    testWidgets('제목 줄과 탭 사이에 가로 구분선이 있다', (tester) async {
+      final session = _session(_Server());
+      await _pump(tester, session);
+      await _settle(tester);
+      expect(find.byKey(const ValueKey('notif-title-divider')), findsOneWidget);
+      // 탭 아래 도구줄에는 "안 읽은 것만" 칩이 더는 없다.
+      expect(find.byKey(const ValueKey('notif-unread-only')), findsNothing);
+      expect(find.text('안 읽은 것만'), findsNothing);
+    });
+
+    testWidgets('알림 설정에서 탭별 "안 읽은 알림만 표시" — 전체·멘션·보드·프로젝트 네 개(안 읽은 대화는 없음)', (
+      tester,
+    ) async {
+      final session = _session(_Server());
+      await _pump(tester, session);
+      await _settle(tester);
+      await tester.tap(find.byKey(const ValueKey('notif-settings')));
+      await _settle(tester);
+      expect(find.text('안 읽은 알림만 표시'), findsOneWidget);
+      for (final name in ['all', 'mention', 'board', 'project']) {
+        expect(
+          find.byKey(ValueKey('notif-setting-unread-only-$name')),
+          findsOneWidget,
+        );
+      }
+      expect(
+        find.byKey(const ValueKey('notif-setting-unread-only-unreadChats')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('"안 읽은 알림만 표시" — 설정에서 켜면 unreadOnly=true로 새로 받고, 끄면 전부', (
+      tester,
+    ) async {
       final server = _Server()
         ..items.addAll([
           _n('unread', minutesAgo: 1, preview: '안 읽은 글'),
@@ -717,8 +889,14 @@ void main() {
       final session = _session(server);
       await _pump(tester, session, initialTab: NotificationTab.mention);
       await _settle(tester);
-      expect(find.text('김철수님이 멘션했습니다: 읽은 글'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('notif-unread-only')));
+      expect(_rich('김철수: 읽은 글'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('notif-settings')));
+      await _settle(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('notif-setting-unread-only-mention')),
+      );
+      await _settle(tester);
+      await tester.tap(find.text('닫기'));
       await _settle(tester);
       expect(
         server
@@ -728,11 +906,17 @@ void main() {
             .queryParameters['unreadOnly'],
         'true',
       );
-      expect(find.text('김철수님이 멘션했습니다: 읽은 글'), findsNothing);
-      expect(find.text('김철수님이 멘션했습니다: 안 읽은 글'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('notif-unread-only')));
+      expect(_rich('김철수: 읽은 글'), findsNothing);
+      expect(_rich('김철수: 안 읽은 글'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('notif-settings')));
       await _settle(tester);
-      expect(find.text('김철수님이 멘션했습니다: 읽은 글'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('notif-setting-unread-only-mention')),
+      );
+      await _settle(tester);
+      await tester.tap(find.text('닫기'));
+      await _settle(tester);
+      expect(_rich('김철수: 읽은 글'), findsOneWidget);
     });
 
     testWidgets('프로젝트 탭의 모두 읽음 — 프로젝트 알림함 전체 읽음', (tester) async {
@@ -786,7 +970,7 @@ void main() {
         session.notificationCenter.itemsFor(NotificationTab.mention),
         hasLength(45),
       );
-      expect(find.text('김철수님이 멘션했습니다: 글 44'), findsOneWidget);
+      expect(_rich('김철수: 글 44'), findsOneWidget);
     });
   });
 
@@ -1023,7 +1207,7 @@ void main() {
       await tester.tap(find.text('열기'));
       await tester.pumpAndSettle();
       await _settle(tester);
-      await tester.tap(find.text('김철수님이 멘션했습니다: 확인 부탁드려요'));
+      await tester.tap(_rich('김철수: 확인 부탁드려요'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
       expect(find.byType(NotificationsPanel), findsNothing);

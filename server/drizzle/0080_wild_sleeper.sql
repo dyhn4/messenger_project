@@ -1,0 +1,1 @@
+ALTER TABLE "notification_settings" ALTER COLUMN "board_level" SET DEFAULT 'important';

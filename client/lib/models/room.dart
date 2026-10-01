@@ -99,6 +99,10 @@ class Room {
   /// 받은 메시지/댓글의 실제(복호화된) 내용으로 직접 갱신한다 — 그래서 non-final.
   String? lastMessagePreview;
 
+  /// [lastMessagePreview]를 보낸 사람 이름 — 알림 센터 "메시지" 탭이 그룹·토픽에서 "이름: 미리보기"로 보여 준다.
+  /// 미리보기와 같은 방식으로 서버가 로그인 시점 값을, Session이 실시간 값을 채운다(비밀 대화는 null).
+  String? lastMessageSenderName;
+
   /// 이 방에서 마지막으로 활동(메시지/댓글)이 있었던 시각 — 방 목록에서 카테고리 안 정렬
   /// 기준으로 쓴다. 서버가 로그인 시점 기준(오프라인 동안 쌓인 활동 포함)으로 계산해서
   /// 내려주고(rooms.js의 toRoomDto), 이후 이번 세션 동안은 실시간으로 메시지/댓글을
@@ -139,15 +143,11 @@ class Room {
   /// (message.dart의 lastMessagePreview와 같은 방식) — 그래서 non-final.
   Announcement? latestAnnouncement;
 
-  /// 상단 배너의 X 버튼으로 이 공지를 닫았는지(카카오톡처럼) — 서버에는 없는 순수 로컬 상태라
-  /// JSON에 없고 fromJson도 안 건드린다. latestAnnouncement.id와 같으면 배너를 숨기고, 새
-  /// 공지가 올라와 id가 달라지면(chat_panel.dart의 _AnnouncementBanner) 자동으로 다시 뜬다.
+  /// 상단 배너의 X 버튼으로 이 공지를 숨겼는지(나에게만) — 서버에는 없는 순수 로컬 상태라 JSON에 없고
+  /// fromJson도 안 건드린다. latestAnnouncement.id와 같으면 배너를 숨기고, 새 공지가 올라와 id가 달라지면
+  /// (widgets/announcement_banner.dart) 자동으로 다시 뜬다. 이 기기에 저장돼(announcement_view_prefs.dart)
+  /// 앱을 다시 켜도 남는다 — [announcementViewLoaded]는 저장된 값을 이 인스턴스에 이미 읽어 왔는지.
   String? dismissedAnnouncementId;
-
-  /// 배너를 접어 둔(한 줄로) 공지 id — [dismissedAnnouncementId]와 같은 로컬 값이고 같은 방식으로 새 공지가
-  /// 올라오면 풀린다. 둘 다 이 기기에 저장돼(announcement_view_prefs.dart) 앱을 다시 켜도 남는다 —
-  /// [announcementViewLoaded]는 저장된 값을 이 인스턴스에 이미 읽어 왔는지.
-  String? collapsedAnnouncementId;
   bool announcementViewLoaded = false;
 
   /// 알림 센터에 "안 읽은 공지"로 띄울지(rooms.js가 계산해서 내려줌 — 공지 목록/상세를 실제로
@@ -212,6 +212,7 @@ class Room {
     this.customName,
     this.hidden = false,
     this.lastMessagePreview,
+    this.lastMessageSenderName,
     DateTime? lastActivityAt,
     this.isSecret = false,
     this.isSelf = false,
@@ -262,6 +263,7 @@ class Room {
       customName: json['customName'] as String?,
       hidden: json['hidden'] as bool? ?? false,
       lastMessagePreview: json['lastMessagePreview'] as String?,
+      lastMessageSenderName: json['lastMessageSenderName'] as String?,
       lastActivityAt: (json['lastActivityAt'] as num?) != null
           ? DateTime.fromMillisecondsSinceEpoch(
               (json['lastActivityAt'] as num).toInt(),
@@ -349,6 +351,7 @@ class Room {
     hidden = incoming.hidden;
     lastActivityAt = incoming.lastActivityAt;
     lastMessagePreview = incoming.lastMessagePreview;
+    lastMessageSenderName = incoming.lastMessageSenderName;
     hasUnreadAnnouncement = incoming.hasUnreadAnnouncement;
     unreadAnnouncementCount = incoming.unreadAnnouncementCount;
     unreadMentionCount = incoming.unreadMentionCount;

@@ -326,6 +326,21 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('확인했습니다'), findsNothing);
+      // 시각은 "yyyy/MM/dd AM h:mm" — "3분 전" 같은 상대 시각이 아니다.
+      expect(
+        find.descendant(
+          of: _card('p1'),
+          matching: find.text('2026/09/29 AM 9:01'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: _card('p2'),
+          matching: find.text('2026/09/29 AM 9:02'),
+        ),
+        findsOneWidget,
+      );
       // 보드 뷰 토픽은 채팅 입력창을 아예 그리지 않는다.
       expect(find.byType(ChatInputBar), findsNothing);
       expect(find.byType(BoardView), findsOneWidget);
@@ -992,6 +1007,10 @@ void main() {
       expect(find.byType(PinnedPostTag), findsOneWidget);
       expect(find.textContaining('(수정됨)'), findsOneWidget);
       expect(find.text('댓글 2'), findsOneWidget);
+      // 게시글·댓글 시각도 같은 형식(게시글은 작성 시각 + 수정됨).
+      expect(find.text('2026/09/29 AM 9:00 (수정됨)'), findsOneWidget);
+      expect(find.text('2026/09/29 AM 9:06'), findsOneWidget);
+      expect(find.text('2026/09/29 AM 9:07'), findsOneWidget);
       expect(find.text('참석합니다'), findsOneWidget);
       expect(find.text('저도요'), findsOneWidget);
       expect(find.byType(CommentInputBar), findsOneWidget);

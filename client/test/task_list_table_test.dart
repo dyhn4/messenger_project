@@ -195,6 +195,112 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
+  /// 메뉴에서 [name] 줄에 체크가 붙어 있는지.
+  bool checked(WidgetTester tester, String name) =>
+      tester
+          .widget<MenuItemButton>(find.widgetWithText(MenuItemButton, name))
+          .trailingIcon !=
+      null;
+
+  testWidgets('배지로 값을 바꾼 뒤 다시 열면 새 값에 체크가 있다(이전 값이 아니라)', (tester) async {
+    // 표를 다시 그릴 때 쓸 업무 — 서버에서 다시 읽어 온 것처럼 바꿔 끼운다.
+    var current = Task.fromJson(task('1', '랜딩페이지 히어로 카피'));
+    late StateSetter rebuild;
+    final s = session();
+    tester.view.physicalSize = const Size(1400, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              rebuild = setState;
+              return TaskListTable(
+                tasks: [current],
+                session: s,
+                onOpen: (_) {},
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 상태: 제작 중 → 집행
+    await tester.tap(find.text('제작 중'));
+    await tester.pumpAndSettle();
+    expect(checked(tester, '제작 중'), isTrue);
+    await tester.tap(find.text('집행'));
+    await tester.pumpAndSettle();
+    expect(patched['statusId'], 's3');
+
+    // 서버에서 다시 읽어 온 값(집행)으로 표가 바뀐 뒤에 열어도 새 값에 체크.
+    rebuild(() {
+      current = Task.fromJson({
+        ...task('1', '랜딩페이지 히어로 카피'),
+        'status': 'done',
+        'statusId': 's3',
+        'statusName': '집행',
+      });
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('집행'));
+    await tester.pumpAndSettle();
+    expect(checked(tester, '집행'), isTrue);
+    expect(checked(tester, '제작 중'), isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('다시 불러와 순서가 바뀌어도 줄의 배지 상태가 다른 업무로 넘어가지 않는다', (tester) async {
+    var tasks = [
+      Task.fromJson(task('1', '첫 업무')),
+      Task.fromJson({
+        ...task('2', '둘째 업무'),
+        'priorityId': 'pr-urgent',
+        'priorityName': '긴급',
+      }),
+    ];
+    late StateSetter rebuild;
+    final s = session();
+    tester.view.physicalSize = const Size(1400, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              rebuild = setState;
+              return TaskListTable(tasks: tasks, session: s, onOpen: (_) {});
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // 첫 줄(첫 업무, 높음)의 우선순위 메뉴를 한 번 연다 — 체크가 "높음".
+    await tester.tap(find.text('높음'));
+    await tester.pumpAndSettle();
+    expect(checked(tester, '높음'), isTrue);
+    await tester.tapAt(const Offset(5, 690));
+    await tester.pumpAndSettle();
+
+    // 순서가 뒤집혀 첫 줄에 둘째 업무(긴급)가 오면, 그 줄 메뉴의 체크도 "긴급"이어야 한다.
+    rebuild(() => tasks = tasks.reversed.toList());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('긴급'));
+    await tester.pumpAndSettle();
+    expect(checked(tester, '긴급'), isTrue);
+    expect(checked(tester, '높음'), isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
   testWidgets('우선순위 배지로 우선순위를 바꾼다', (tester) async {
     await pump(tester);
     await tester.tap(find.text('높음'));

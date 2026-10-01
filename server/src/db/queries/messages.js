@@ -67,6 +67,7 @@ export async function getLastMessageForPreview(roomId) {
       title: messages.title, // 게시글 미리보기("게시글: 제목")용
       text: messages.text,
       fileName: messages.fileName,
+      senderName: messages.senderName, // 알림 센터 "메시지" 탭의 "보낸 사람: 미리보기"용
       createdAt: messages.createdAt,
     })
     .from(messages)

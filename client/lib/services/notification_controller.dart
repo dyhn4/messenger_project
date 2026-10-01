@@ -5,15 +5,16 @@ import 'package:flutter/foundation.dart';
 import '../models/app_notification.dart';
 import '../models/project.dart' show ProjectNotification;
 import 'notification_api.dart';
+import 'notification_view_prefs.dart';
 
-/// 알림 센터의 탭 — `전체 | 멘션 | 안 읽은 대화 | 보드·공지 | 프로젝트`.
+/// 알림 센터의 탭 — `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트`. 메시지 탭이 예전의 "안 읽은 대화"(안 읽은 메시지가 있는 방 목록)다.
 enum NotificationTab { all, mention, unreadChats, board, project }
 
 extension NotificationTabLabel on NotificationTab {
   String get label => switch (this) {
     NotificationTab.all => '전체',
     NotificationTab.mention => '멘션',
-    NotificationTab.unreadChats => '안 읽은 대화',
+    NotificationTab.unreadChats => '메시지',
     NotificationTab.board => '보드·공지',
     NotificationTab.project => '프로젝트',
   };
@@ -48,10 +49,11 @@ class NotificationController extends ChangeNotifier {
     Stream<NotificationCounts>? syncEvents,
     Stream<Map<String, dynamic>>? projectEvents,
     Stream<void>? reconnected,
+    String? Function()? userId,
     this.onNew,
     this.onRead,
     this.onSync,
-  }) {
+  }) : _userId = userId ?? (() => null) {
     _newSub = newEvents?.listen(handleNew);
     _syncSub = syncEvents?.listen(handleSync);
     _projectSub = projectEvents?.listen((_) {
@@ -61,6 +63,9 @@ class NotificationController extends ChangeNotifier {
   }
 
   final NotificationApi Function() apiProvider;
+
+  /// "안 읽은 알림만 표시" 선택을 사용자별로 저장할 때 쓰는 현재 로그인 사용자 id.
+  final String? Function() _userId;
 
   /// 방 목록의 "@" 표시처럼 알림과 함께 움직이는 곳(Session)이 듣는다.
   final void Function(AppNotification n)? onNew;
@@ -127,7 +132,8 @@ class NotificationController extends ChangeNotifier {
 
   final Map<String, _Feed> _feeds = {};
 
-  /// 탭별 "안 읽은 것만" 필터. 안 읽은 대화 탭은 늘 안 읽은 것만이라 쓰지 않는다.
+  /// 탭별 "안 읽은 알림만 표시" 선택(알림 설정 대화상자에서 켜고 끈다). 안 읽은 대화 탭은 늘 안 읽은
+  /// 것만이라 쓰지 않는다. 이 기기에 사용자별로 저장해서(notification_view_prefs.dart) 다시 열어도 유지된다.
   final Map<NotificationTab, bool> _unreadOnly = {};
 
   bool unreadOnly(NotificationTab tab) => _unreadOnly[tab] ?? false;
@@ -136,7 +142,25 @@ class NotificationController extends ChangeNotifier {
     if (unreadOnly(tab) == value) return;
     _unreadOnly[tab] = value;
     _notify();
+    unawaited(_saveViewPrefs());
     await ensureLoaded(tab);
+  }
+
+  Future<void> _saveViewPrefs() => NotificationViewPrefs.save(_userId(), {
+    for (final e in _unreadOnly.entries) e.key.name: e.value,
+  });
+
+  /// 저장해 둔 선택을 불러온다 — 로그인 직후 한 번(Session._enterApp). 받아 둔 목록은 필터가 다르면 다른
+  /// 목록([_feed])이라 건드릴 필요 없고, 화면은 [notifyListeners]로 새로 그려진다.
+  Future<void> loadViewPrefs() async {
+    final epoch = _epoch;
+    final saved = await NotificationViewPrefs.load(_userId());
+    if (epoch != _epoch || _disposed) return;
+    for (final tab in NotificationTab.values) {
+      if (tab == NotificationTab.unreadChats) continue;
+      _unreadOnly[tab] = saved[tab.name] ?? false;
+    }
+    _notify();
   }
 
   _Feed _feed(String kind, bool unreadOnly) =>

@@ -12,6 +12,7 @@ import 'task_detail_panel.dart' show TaskPanelScope;
 import 'task_views.dart';
 import 'task_filter.dart';
 import 'gantt_chart_view.dart';
+import 'my_tasks_view.dart' show compareTaskKeys;
 
 /// 프로젝트 머리의 위 여백(창 상단 바 밑줄부터 이름까지)과 아래 여백(설명부터 탭 줄 윗줄까지).
 const _kHeaderTopGap = 14.0;
@@ -281,7 +282,10 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
         return TaskListTable(
           // 한 프로젝트 안이라 업무 아래 프로젝트 이름은 뺀다.
           showProjectName: false,
-          tasks: tasks,
+          // 업무 번호순으로 고정한다("내 업무"와 같은 규칙) — 서버는 상태·마감일순으로 내려주는데, 그대로 쓰면
+          // 배지에서 상태를 바꾸는 순간 그 업무가 다른 줄로 옮겨 가고, 그 자리에 온 다른 업무의 배지(우선순위
+          // 등)가 보여서 값이 바뀐 것처럼 보였다.
+          tasks: [...tasks]..sort(compareTaskKeys),
           session: widget.session,
           onOpen: _openTask,
           members: project.members,

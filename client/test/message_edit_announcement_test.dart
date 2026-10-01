@@ -21,7 +21,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 메시지 수정 업그레이드(사진·파일 메시지의 설명글 수정 + 첨부 삭제)와 토픽 공지 업그레이드(메시지를 공지로
-/// 등록, 배너의 접어두기·숨기기·삭제하기, 사진 공지)를 위젯 수준에서 본다. PC(호버 더보기)와 폭 360 모바일
+/// 등록, 배너의 X 숨기기·몸통 탭 상세보기, 사진 공지)를 위젯 수준에서 본다(상세·목록·글쓰기 창은 announcement_ui_test.dart). PC(호버 더보기)와 폭 360 모바일
 /// (길게 누르기 시트) 둘 다.
 
 class _QuietNotifications extends NotificationService {
@@ -728,7 +728,9 @@ void main() {
     Text announcementText(WidgetTester tester) =>
         tester.widget<Text>(find.byKey(const ValueKey('announcement-text')));
 
-    testWidgets('접어두기: 펼친 모양(여러 줄)에서 한 줄로 줄고, 같은 버튼으로 다시 펼친다', (tester) async {
+    testWidgets('접기·펼치기·⋯ 메뉴는 없고 오른쪽 끝에 X(숨기기) 하나뿐이다 — 글 3줄과 작성자·시각 줄', (
+      tester,
+    ) async {
       final room = _room(
         announcement: Announcement.fromJson(
           _announcementJson(
@@ -740,61 +742,23 @@ void main() {
       final session = _session(_Server(), [room]);
       await pumpBanner(tester, session, room, size: const Size(360, 600));
       expect(announcementText(tester).maxLines, 3);
-
-      await tester.tap(
+      expect(
         find.byKey(const ValueKey('announcement-collapse-toggle')),
+        findsNothing,
       );
-      await tester.pump();
-      expect(announcementText(tester).maxLines, 1);
-      expect(find.byTooltip('펼치기'), findsOneWidget);
-
-      await tester.tap(
-        find.byKey(const ValueKey('announcement-collapse-toggle')),
-      );
-      await tester.pump();
-      expect(announcementText(tester).maxLines, 3);
+      expect(find.byKey(const ValueKey('announcement-more')), findsNothing);
+      expect(find.byIcon(Icons.more_vert), findsNothing);
+      expect(find.byTooltip('접어두기'), findsNothing);
+      expect(find.byTooltip('펼치기'), findsNothing);
+      expect(find.byKey(const ValueKey('announcement-hide')), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsOneWidget);
+      // 시각은 "yyyy/MM/dd AM h:mm" — 9월 30일 0시 정각이라 AM 12:00.
+      expect(find.text('김철수 · 2026/09/30 AM 12:00'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await _finish(tester);
     });
 
-    testWidgets('접어둔 상태는 기기에 저장되어 앱을 다시 켜도(새 방 인스턴스) 그대로, 새 공지가 오면 펼쳐진다', (
-      tester,
-    ) async {
-      final room = _room(
-        announcement: Announcement.fromJson(_announcementJson('a1')),
-      );
-      final session = _session(_Server(), [room]);
-      await pumpBanner(tester, session, room);
-      await tester.tap(
-        find.byKey(const ValueKey('announcement-collapse-toggle')),
-      );
-      await tester.pump();
-      await _finish(tester);
-
-      // 같은 공지 — 새 인스턴스가 저장된 값을 읽어 접힌 채로 뜬다.
-      final room2 = _room(
-        announcement: Announcement.fromJson(_announcementJson('a1')),
-      );
-      final session2 = _session(_Server(), [room2]);
-      await pumpBanner(tester, session2, room2);
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(announcementText(tester).maxLines, 1);
-      await _finish(tester);
-
-      // 다른 공지(id가 다름) — 펼쳐진 채로 뜬다.
-      final room3 = _room(
-        announcement: Announcement.fromJson(
-          _announcementJson('a2', text: '새 공지'),
-        ),
-      );
-      final session3 = _session(_Server(), [room3]);
-      await pumpBanner(tester, session3, room3);
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(announcementText(tester).maxLines, 3);
-      await _finish(tester);
-    });
-
-    testWidgets('숨기기: 나에게만 배너를 치우고(저장), 새 공지가 오면 다시 보인다', (tester) async {
+    testWidgets('X로 숨기기: 나에게만 배너를 치우고(저장), 새 공지가 오면 다시 보인다', (tester) async {
       final server = _Server();
       final room = _room(
         announcement: Announcement.fromJson(_announcementJson('a1')),
@@ -803,11 +767,7 @@ void main() {
       await pumpBanner(tester, session, room);
       expect(find.byKey(const ValueKey('announcement-text')), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('announcement-more')));
-      await _settle(tester);
-      // 작성자가 아니므로 삭제하기는 없다.
-      expect(find.text('삭제하기'), findsNothing);
-      await tester.tap(find.text('숨기기 (나에게만)'));
+      await tester.tap(find.byKey(const ValueKey('announcement-hide')));
       await _settle(tester);
       expect(find.byKey(const ValueKey('announcement-text')), findsNothing);
       // 서버에는 아무것도 보내지 않는다(나에게만).
@@ -831,47 +791,85 @@ void main() {
       await _finish(tester);
     });
 
-    testWidgets('삭제하기: 작성자에게만 보이고 확인 뒤 공지를 지운다', (tester) async {
+    testWidgets('예전 접어두기 값이 같은 키에 남아 있어도 숨김만 읽는다', (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'announcement_view:me:r1': jsonEncode({
+          'hidden': 'a1',
+          'collapsed': 'a1',
+        }),
+      });
+      final room = _room(
+        announcement: Announcement.fromJson(_announcementJson('a1')),
+      );
+      await pumpBanner(tester, _session(_Server(), [room]), room);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byKey(const ValueKey('announcement-text')), findsNothing);
+      await _finish(tester);
+    });
+
+    testWidgets('배너 몸통을 누르면 그 공지의 상세보기가 바로 열린다(작성자 줄·본문·댓글 입력칸)', (
+      tester,
+    ) async {
       final server = _Server();
       final room = _room(
-        announcement: Announcement.fromJson(
-          _announcementJson('a1', authorId: 'me'),
-        ),
+        announcement: Announcement.fromJson(_announcementJson('a1')),
       );
       final session = _session(server, [room]);
+      await pumpBanner(tester, session, room, size: const Size(360, 700));
+      await tester.tap(find.byKey(const ValueKey('announcement-text')));
+      await _settle(tester);
+      // 공지 목록이 아니라 상세보기다.
+      expect(
+        find.byKey(const ValueKey('announcement-detail-card')),
+        findsOneWidget,
+      );
+      expect(find.text('댓글을 입력하세요....'), findsOneWidget);
+      expect(find.text('등록된 공지가 없습니다.'), findsNothing);
+      expect(
+        server.called('GET', '/api/rooms/r1/announcements/a1/comments'),
+        hasLength(1),
+      );
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+
+    testWidgets('X를 눌러도 상세가 열리지 않는다', (tester) async {
+      final room = _room(
+        announcement: Announcement.fromJson(_announcementJson('a1')),
+      );
+      final session = _session(_Server(), [room]);
       await pumpBanner(tester, session, room);
-      await tester.tap(find.byKey(const ValueKey('announcement-more')));
-      await _settle(tester);
-      await tester.tap(find.text('삭제하기'));
-      await _settle(tester);
-      expect(find.textContaining('이 공지를 삭제할까요?'), findsOneWidget);
-      await tester.tap(find.widgetWithText(TextButton, '삭제'));
+      await tester.tap(find.byKey(const ValueKey('announcement-hide')));
       await _settle(tester);
       expect(
-        server.called('DELETE', '/api/rooms/r1/announcements/a1'),
-        hasLength(1),
+        find.byKey(const ValueKey('announcement-detail-card')),
+        findsNothing,
       );
       await _finish(tester);
     });
 
-    testWidgets('사진 공지는 배너(펼친 모양)에 사진이 보이고 접으면 "[사진]" 한 줄', (tester) async {
+    testWidgets('사진 공지는 배너에 사진이 보이고, 사진을 눌러도 상세보기가 열린다', (tester) async {
       final room = _room(
         announcement: Announcement.fromJson(
           _announcementJson('a1', text: '', imageUrl: '/files/tok'),
         ),
       );
       final session = _session(_Server(), [room]);
-      await pumpBanner(tester, session, room, size: const Size(360, 600));
+      await pumpBanner(tester, session, room, size: const Size(360, 700));
       expect(find.byKey(const ValueKey('announcement-image')), findsOneWidget);
       // 글이 없으면 글 줄은 안 그린다.
       expect(find.byKey(const ValueKey('announcement-text')), findsNothing);
 
+      // 사진 위젯은 터치를 무시하고(IgnorePointer) 아래 배너 몸통이 받는다.
       await tester.tap(
-        find.byKey(const ValueKey('announcement-collapse-toggle')),
+        find.byKey(const ValueKey('announcement-image')),
+        warnIfMissed: false,
       );
-      await tester.pump();
-      expect(find.byKey(const ValueKey('announcement-image')), findsNothing);
-      expect(find.text('[사진]'), findsOneWidget);
+      await _settle(tester);
+      expect(
+        find.byKey(const ValueKey('announcement-detail-card')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
       await _finish(tester);
     });

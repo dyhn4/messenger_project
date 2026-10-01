@@ -10,19 +10,30 @@
 export const MENTION_MAX = 50; // 한 글에 담을 수 있는 멘션 수
 export const PREVIEW_MAX = 120; // 알림 미리보기 길이
 export const BOARD_LEVELS = ['all', 'important', 'new'];
+// 보드 알림 기본은 'important'(새 글 + 내가 쓴 글에 달린 댓글) — 글 수정·남의 글 댓글까지 받고 싶은 사람은 알림 설정에서
+// '전체'로 바꾼다. 큰 토픽에서 수정·댓글마다 멤버 전원에게 알림 행이 생기는 걸 기본으로 두지 않으려는 선택이다.
 export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({ mentionAll: true, boardLevel: 'important' });
 
 export const MENTION_KINDS = ['mention', 'mention_all'];
 export const BOARD_KINDS = ['board_post', 'board_edit', 'board_comment'];
 
-/** `@all`(방 전체 멘션)을 쓸 수 있는 방 — 토픽·그룹만. 1:1·나와의 대화·비밀 대화는 안 된다. */
-export function canMentionAll(room) {
+/**
+ * 멘션을 쓸 수 있는 방 — 토픽·그룹만. 1:1은 상대가 한 명뿐이라 멘션 없이도 모든 메시지가 그 사람에게 가고(오히려
+ * 개인 멘션이 방 알림 끔 설정을 건너뛰는 알림이 된다), 나와의 대화는 부를 사람이 없으며, 비밀 대화는 서버가 본문을
+ * 몰라 멘션을 지원하지 않는다.
+ */
+export function canMention(room) {
   return !!room && !room.isSecret && !room.isSelf && (room.type === 'topic' || room.type === 'group');
+}
+
+/** `@all`(방 전체 멘션)을 쓸 수 있는 방 — 지금은 멘션을 쓸 수 있는 방과 같다(토픽·그룹). */
+export function canMentionAll(room) {
+  return canMention(room);
 }
 
 /**
  * 클라이언트가 보낸 멘션을 저장할 모양으로 정리한다 — 잘못된 항목은 에러 없이 그 항목만 버린다.
- *  - 비밀 대화는 본문을 서버가 모르니 전부 버린다.
+ *  - 토픽·그룹이 아닌 방(1:1·나와의 대화·비밀 대화)에서는 전부 버린다([canMention]).
  *  - user: 방 멤버([memberIdSet])여야 하고 보낸 사람 본인은 뺀다. 같은 사람은 본문에서 먼저 나온 하나만.
  *  - all: 토픽·그룹에서만, 한 글에 하나.
  *  - 구간은 0 ≤ s < e ≤ text.length 여야 한다. 서로 겹치는 구간은 앞선 것만 남긴다(같은 글자를 두 번 강조할 수 없다).
@@ -31,7 +42,7 @@ export function canMentionAll(room) {
  */
 export function sanitizeMentions(rawMentions, text, { room, senderId, memberIdSet, shift = 0 } = {}) {
   if (!Array.isArray(rawMentions) || rawMentions.length === 0) return [];
-  if (typeof text !== 'string' || text.length === 0 || !room || room.isSecret) return [];
+  if (typeof text !== 'string' || text.length === 0 || !canMention(room)) return [];
   const allowAll = canMentionAll(room);
   const candidates = [];
   for (const m of rawMentions.slice(0, MENTION_MAX * 4)) {

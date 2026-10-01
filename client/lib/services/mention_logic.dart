@@ -6,14 +6,16 @@ import '../models/room.dart';
 // 글이 바뀌면 멘션 구간이 어떻게 따라가고(밀리고, 어긋나면 풀리고), "@" 뒤 글자로 누구를 보여 줄지를
 // 여기서 정하므로 위젯 없이 단위 시험을 한다(test/mention_logic_test.dart).
 
-/// 멘션을 쓸 수 있는 방인지 — 비밀 대화는 서버가 본문을 몰라서 멘션을 지원하지 않는다.
-bool roomAllowsMention(Room room) => !room.isSecret;
-
-/// `@all`을 쓸 수 있는 방인지 — 토픽·그룹채팅만(1:1, 나와의 대화, 비밀 대화는 안 된다).
-bool roomAllowsMentionAll(Room room) =>
+/// 멘션을 쓸 수 있는 방인지 — 토픽·그룹채팅만. 1:1은 상대가 한 명뿐이라 멘션 없이도 모든 메시지가 그 사람에게
+/// 가고(개인 멘션은 방 알림 끔을 건너뛰는 알림이 된다), 나와의 대화는 부를 사람이 없고, 비밀 대화는 서버가 본문을
+/// 몰라 멘션을 지원하지 않는다. 서버의 canMention(notificationRules.js)과 같은 기준이다.
+bool roomAllowsMention(Room room) =>
     !room.isSecret &&
     !room.isSelf &&
     (room.type == RoomType.topic || room.type == RoomType.group);
+
+/// `@all`을 쓸 수 있는 방인지 — 지금은 멘션을 쓸 수 있는 방과 같다(토픽·그룹채팅).
+bool roomAllowsMentionAll(Room room) => roomAllowsMention(room);
 
 /// 글의 [at, at+removed)가 [inserted] 글자로 바뀌었을 때 멘션 구간을 따라 옮긴다.
 ///   - 구간 앞쪽에서 바뀌면 그만큼 밀고, 뒤쪽에서 바뀌면 그대로 둔다.

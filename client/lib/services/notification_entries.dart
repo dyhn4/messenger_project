@@ -3,6 +3,45 @@ import '../models/project.dart' show ProjectNotification;
 import '../models/room.dart';
 import 'notification_controller.dart';
 
+/// 메시지 탭(안 읽은 대화)에 보여 줄 안 읽은 방인지.
+///   - 보드 뷰 토픽은 뺀다 — 거기 올라온 새 글·수정·댓글은 보드 알림(보드·공지 탭)으로 따로 오고, 채팅이 아니다.
+///   - 안 읽은 메시지가 전부 나를 멘션한 것이면(안 읽은 멘션 수만큼) 그 알림이 멘션 탭에 이미 있어서 뺀다.
+///     멘션 말고도 안 읽은 메시지가 있으면 방은 그대로 보인다. [Room.unreadMentionCount]는 서버가 센 이 방의
+///     안 읽은 멘션 알림 수다.
+bool isUnreadChatRoom(Room room) =>
+    !room.isBoard && room.unreadCount > room.unreadMentionCount;
+
+/// 메시지 탭 줄의 미리보기 한 줄 — 사람이 여럿인 방(그룹채팅·토픽)에서는 "보낸 사람: 미리보기"로, 1:1이나
+/// 비밀 대화는 미리보기만(상대가 뻔하거나 서버가 내용을 모른다).
+String roomPreviewLine(Room room) {
+  final preview = room.lastMessagePreview ?? '';
+  final sender = room.lastMessageSenderName;
+  final multi = room.type == RoomType.group || room.type == RoomType.topic;
+  if (!multi || room.isSecret || sender == null || sender.isEmpty) {
+    return preview;
+  }
+  return preview.isEmpty ? preview : '$sender: $preview';
+}
+
+/// 멘션·보드 알림 줄의 두 번째 줄 — [lead]는 굵게 보이는 앞부분(보낸 사람 이름 + 필요하면 " · 수정"/" · 댓글"),
+/// [body]는 미리보기다. 화면은 `$lead: $body`로 이어서 그린다.
+///   - 멘션(@all 포함)·새 글: "보낸 사람: 미리보기" — 새 글에는 "새 글" 같은 꼬리표를 붙이지 않는다.
+///   - 글 수정: "작성자 · 수정: 미리보기", 댓글: "작성자 · 댓글: 미리보기".
+/// 보낸 사람 이름을 모르면(탈퇴 등) 이름 없이 꼬리표만 남는다.
+({String lead, String body}) serverNotificationSummary(AppNotification n) {
+  final actor = (n.actorName ?? '').trim();
+  final label = switch (n.kind) {
+    NotificationKind.boardEdit => '수정',
+    NotificationKind.boardComment => '댓글',
+    _ => '',
+  };
+  final lead = [
+    if (actor.isNotEmpty) actor,
+    if (label.isNotEmpty) label,
+  ].join(' · ');
+  return (lead: lead, body: n.preview);
+}
+
 /// 알림 센터 목록의 한 줄 — 서로 다른 출처(서버 알림·안 읽은 대화·안 읽은 공지·프로젝트 알림)를 한 목록에 섞어
 /// 보여 주려고 같은 모양으로 감싼다. 어느 줄이든 [time](정렬 기준)과 [unread]가 있다.
 sealed class CenterEntry {
@@ -80,7 +119,11 @@ List<CenterEntry> buildCenterEntries({
 
   switch (tab) {
     case NotificationTab.unreadChats:
-      return [for (final r in _byActivity(unreadRooms)) RoomEntry(r)];
+      // 안 읽은 메시지가 있는 방(멘션만 안 읽은 방은 멘션 탭에 있으니 뺀다)과 안 읽은 공지가 있는 방.
+      return [
+        for (final r in _byActivity(unreadRooms))
+          if (isUnreadChatRoom(r) || r.hasUnreadAnnouncement) RoomEntry(r),
+      ];
     case NotificationTab.mention:
       return [for (final n in center.itemsFor(tab)) ServerEntry(n)];
     case NotificationTab.project:
@@ -92,7 +135,7 @@ List<CenterEntry> buildCenterEntries({
         ...announcements(),
         if (tab == NotificationTab.all) ...[
           for (final r in unreadRooms)
-            if (r.unreadCount > 0) RoomEntry(r),
+            if (isUnreadChatRoom(r)) RoomEntry(r),
           ...project(),
         ],
       ]..sort((a, b) => b.time.compareTo(a.time));
@@ -133,12 +176,15 @@ int notificationTabBadge(
   return switch (tab) {
     NotificationTab.mention => center.counts.mention,
     NotificationTab.board => board,
-    NotificationTab.unreadChats => unreadRooms.length,
+    NotificationTab.unreadChats =>
+      unreadRooms
+          .where((r) => isUnreadChatRoom(r) || r.hasUnreadAnnouncement)
+          .length,
     NotificationTab.project => projectUnread,
     NotificationTab.all =>
       center.counts.mention +
           board +
-          unreadRooms.where((r) => r.unreadCount > 0).length +
+          unreadRooms.where(isUnreadChatRoom).length +
           projectUnread,
   };
 }

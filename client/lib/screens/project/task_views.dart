@@ -690,6 +690,9 @@ class _TaskTable extends StatelessWidget {
                     controller: verticalController,
                     itemCount: rows.length,
                     itemBuilder: (context, i) => DecoratedBox(
+                      // 줄 상태(배지의 메뉴·체크, 제목 고치기)가 자리가 아니라 그 업무를 따라가게 업무 id로 묶는다 —
+                      // 다시 불러와 순서가 바뀌어도 다른 업무의 배지 상태를 이어받지 않는다.
+                      key: ValueKey(rows[i].task.id),
                       decoration: BoxDecoration(
                         border: Border(bottom: BorderSide(color: border)),
                       ),
@@ -816,29 +819,30 @@ class _EditablePillState extends State<_EditablePill> {
   String? _currentId;
   bool _loading = false;
 
+  /// 열 때마다 목록과 "지금 값"을 다시 읽는다 — 예전에는 처음 연 값을 계속 들고 있어서, 배지로 값을 바꾼 뒤
+  /// 다시 열면 이전 값에 체크가 남아 있었다. 목록은 표가 프로젝트별로 기억해 두므로(_optionsFor) 다시 읽어도
+  /// 서버를 다시 부르지 않고, 처음 한 번만 불러오는 동안 동그라미를 보인다.
   Future<void> _open() async {
     if (_menu.isOpen) {
       _menu.close();
       return;
     }
-    if (_options == null) {
-      if (_loading) return;
-      setState(() => _loading = true);
-      try {
-        final loaded = await widget.loadOptions();
-        if (!mounted) return;
-        setState(() {
-          _options = loaded.options;
-          _currentId = loaded.currentId;
-        });
-      } catch (e) {
-        if (mounted) {
-          setState(() => _loading = false);
-          showAppToast(context, '목록을 불러오지 못했습니다: $e');
-        }
-        return;
+    if (_loading) return;
+    if (_options == null) setState(() => _loading = true);
+    try {
+      final loaded = await widget.loadOptions();
+      if (!mounted) return;
+      setState(() {
+        _options = loaded.options;
+        _currentId = loaded.currentId;
+        _loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        showAppToast(context, '목록을 불러오지 못했습니다: $e');
       }
-      setState(() => _loading = false);
+      return;
     }
     _menu.open();
   }

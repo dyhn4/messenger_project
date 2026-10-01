@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../models/app_notification.dart';
 import '../models/project.dart' show ProjectNotification;
 import '../models/room.dart';
+import '../screens/announcement_detail_screen.dart';
 import '../screens/announcement_list_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
@@ -28,6 +29,7 @@ import 'unread_badge.dart';
 
 /// 알림 센터에서 안 읽은 "공지"가 있는 방을 눌러 열었을 때, 공지 목록을 팝업으로 함께 띄운다
 /// (안 읽은 공지에는 "안 읽음" 표시가 붙고, 하나를 눌러 상세를 본 뒤 뒤로 가면 이 목록으로 돌아온다).
+/// 안 읽은 공지가 하나뿐이고 그게 지금 고정된 공지면 목록 대신 그 공지의 상세보기를 바로 연다.
 /// 방만 열면 공지를 실제로 열어본 적이 없어서(session.markAnnouncementsRead는 공지 목록/상세를
 /// 열 때만 호출된다) 알림 센터에 계속 "안 읽음"으로 남기 때문이다. [hadUnreadAnnouncement]는
 /// 방을 열기 "전"의 값이어야 한다.
@@ -39,11 +41,18 @@ void showUnreadAnnouncementPopup(
 }) {
   if (!hadUnreadAnnouncement || !context.mounted) return;
   // 목록을 여는 순간 읽음 처리되어 개수가 0이 되므로 그 전에 값을 잡아둔다.
+  final unreadCount = math.max(1, room.unreadAnnouncementCount);
+  // 안 읽은 공지가 하나뿐이고 그게 지금 고정된 공지면 목록을 거치지 않고 상세보기를 바로 연다.
+  final latest = room.latestAnnouncement;
+  if (unreadCount == 1 && latest != null && latest.authorId != session.userId) {
+    showAnnouncementDetailScreen(context, session, room, latest);
+    return;
+  }
   showAnnouncementListScreen(
     context,
     session,
     room,
-    unreadCount: math.max(1, room.unreadAnnouncementCount),
+    unreadCount: unreadCount,
   );
 }
 
@@ -123,7 +132,7 @@ void openProjectFromNotification(
 }
 
 /// "알림 센터" 패널 — 검색/멤버 패널과 같은 틀(헤더+목록)에 탭 다섯 개를 얹었다:
-/// `전체 | 멘션 | 안 읽은 대화 | 보드·공지 | 프로젝트`. 여러 팀에 걸쳐(지금 보고 있는 팀 포함) 모아 보여 준다.
+/// `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트`. 여러 팀에 걸쳐(지금 보고 있는 팀 포함) 모아 보여 준다.
 /// 탭마다 안 읽음 배지, 상단에 "안 읽은 것만" 필터와 "모두 읽음", 헤더 톱니에 알림 설정이 있다.
 /// desktop_home_screen.dart는 이걸 우측 사이드 패널로, team_select_screen.dart·모바일은
 /// [showNotificationsCenterDialog]로 띄운다 — 헤더/닫기 버튼을 이 위젯이 스스로 그리므로 둘 다 그대로 쓴다.
@@ -269,10 +278,12 @@ class _NotificationsPanelState extends State<NotificationsPanel>
   Future<void> _markAllRead() async {
     final session = widget.session;
     final tab = _tab;
+    // 메시지 탭에 보이는 방만 읽음 처리한다 — 멘션만 안 읽은 방은 멘션 탭 몫이다(isUnreadChatRoom).
     final chatRooms = [
       for (final r in session.unreadRooms)
-        if (tab == NotificationTab.unreadChats ||
-            (tab == NotificationTab.all && r.unreadCount > 0))
+        if ((tab == NotificationTab.unreadChats &&
+                (isUnreadChatRoom(r) || r.hasUnreadAnnouncement)) ||
+            (tab == NotificationTab.all && isUnreadChatRoom(r)))
           r,
     ];
     if (chatRooms.isNotEmpty) {
@@ -372,6 +383,8 @@ class _NotificationsPanelState extends State<NotificationsPanel>
                   ],
                 ),
               ),
+              // 제목 줄과 탭 사이의 구분선.
+              const Divider(key: ValueKey('notif-title-divider'), height: 1),
               // 탭 다섯 개는 좁은 폭(360dp)에 다 안 들어가서 가로로 스크롤된다 — 고른 탭은 자동으로 보이는 쪽으로.
               TabBar(
                 key: const ValueKey('notif-tabs'),
@@ -399,7 +412,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     );
   }
 
-  /// 탭 아래 줄 — "안 읽은 것만" 필터(안 읽은 대화 탭은 원래 전부 안 읽은 것이라 없다)와 "모두 읽음".
+  /// 탭 아래 줄 — "모두 읽음". "안 읽은 알림만 표시"는 탭마다 알림 설정(톱니)에서 정한다.
   Widget _buildToolbar(BuildContext context, NotificationTab tab, int unread) {
     final hasUnread = tab == NotificationTab.unreadChats
         ? unread > 0
@@ -410,14 +423,6 @@ class _NotificationsPanelState extends State<NotificationsPanel>
       padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
       child: Row(
         children: [
-          if (tab != NotificationTab.unreadChats)
-            FilterChip(
-              key: const ValueKey('notif-unread-only'),
-              label: const Text('안 읽은 것만'),
-              visualDensity: VisualDensity.compact,
-              selected: _center.unreadOnly(tab),
-              onSelected: (v) => _center.setUnreadOnly(tab, v),
-            ),
           const Spacer(),
           TextButton(
             key: const ValueKey('notif-read-all'),
@@ -661,25 +666,41 @@ class _ServerNotificationRow extends StatelessWidget {
 
   IconData get _icon => switch (notification.kind) {
     NotificationKind.mention => Icons.alternate_email,
-    NotificationKind.mentionAll => Icons.groups_outlined,
+    // @all도 개인 멘션과 같은 @ 아이콘 — 알림 센터에서 "멘션"은 한 가지 아이콘으로 읽힌다.
+    NotificationKind.mentionAll => Icons.alternate_email,
     NotificationKind.boardPost => Icons.dashboard_outlined,
     NotificationKind.boardEdit => Icons.edit_note,
     NotificationKind.boardComment => Icons.mode_comment_outlined,
     NotificationKind.other => Icons.notifications_none,
   };
 
-  /// 두 번째 줄 — 멘션은 "보낸 사람: 미리보기", 보드는 "새 글 · 제목" 같은 식.
-  String get _summary {
-    final n = notification;
-    final actor = n.actorName ?? '';
-    return switch (n.kind) {
-      NotificationKind.mention => '$actor님이 멘션했습니다: ${n.preview}',
-      NotificationKind.mentionAll => '$actor님이 모두를 멘션했습니다: ${n.preview}',
-      NotificationKind.boardPost => '새 글 · ${n.preview}',
-      NotificationKind.boardEdit => '글 수정 · ${n.preview}',
-      NotificationKind.boardComment => '댓글 · ${n.preview}',
-      NotificationKind.other => n.preview,
-    };
+  /// 두 번째 줄 — "보낸 사람: 미리보기"(멘션·새 글), "작성자 · 수정: 미리보기"(글 수정), "작성자 · 댓글: 미리보기"
+  /// (serverNotificationSummary). 앞부분(이름·꼬리표)은 굵게.
+  Widget _summaryText(BuildContext context, bool read) {
+    final (:lead, :body) = serverNotificationSummary(notification);
+    final theme = Theme.of(context);
+    return Text.rich(
+      TextSpan(
+        children: [
+          if (lead.isNotEmpty) ...[
+            TextSpan(
+              text: lead,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const TextSpan(text: ': '),
+          ],
+          TextSpan(text: body),
+        ],
+      ),
+      key: const ValueKey('notif-server-summary'),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 12,
+        color: read ? theme.hintColor : null,
+        fontWeight: read ? FontWeight.normal : FontWeight.w500,
+      ),
+    );
   }
 
   @override
@@ -744,20 +765,7 @@ class _ServerNotificationRow extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          _summary,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: read ? theme.hintColor : null,
-                            fontWeight: read
-                                ? FontWeight.normal
-                                : FontWeight.w500,
-                          ),
-                        ),
-                      ),
+                      Expanded(child: _summaryText(context, read)),
                       if (!read) ...[
                         const SizedBox(width: 8),
                         const Padding(
@@ -873,7 +881,40 @@ class _AnnouncementRow extends StatelessWidget {
   }
 }
 
-/// 알림 센터 "안 읽은 대화" 한 줄: [팀 아바타(+팀 이름)] [방 아바타] [방 이름 · 시각 / 미리보기 · 안읽음 수].
+/// 메시지 탭 줄의 미리보기 — 그룹채팅·토픽은 보낸 사람 이름을 굵게 앞에 붙인다([roomPreviewLine]과 같은 규칙).
+Widget _previewText(BuildContext context, Room room) {
+  final style = Theme.of(context).textTheme.bodySmall;
+  final line = roomPreviewLine(room);
+  final sender = room.lastMessageSenderName;
+  final withSender =
+      sender != null && sender.isNotEmpty && line.startsWith('$sender: ');
+  if (!withSender) {
+    return Text(
+      line,
+      key: const ValueKey('notif-row-preview'),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
+  }
+  return Text.rich(
+    TextSpan(
+      children: [
+        TextSpan(
+          text: sender,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        TextSpan(text: line.substring(sender.length)),
+      ],
+    ),
+    key: const ValueKey('notif-row-preview'),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: style,
+  );
+}
+
+/// 알림 센터 "메시지" 탭(예전 "안 읽은 대화") 한 줄: [팀 아바타(+팀 이름)] [방 아바타] [방 이름 · 시각 / 미리보기 · 안읽음 수].
 /// 팀 아바타는 방 아바타와 겹치지 않게 완전히 별도 칸으로 왼쪽에 둔다 — 여러 팀 알림이 한
 /// 목록에 섞이므로 어느 팀인지 한눈에 구분돼야 한다(검색 결과 행과 같은 뼈대에 이 칸만 더함).
 class _NotificationRow extends StatelessWidget {
@@ -996,12 +1037,7 @@ class _NotificationRow extends StatelessWidget {
                                   ),
                                 ],
                               )
-                            : Text(
-                                room.lastMessagePreview ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
+                            : _previewText(context, room),
                       ),
                       const SizedBox(width: 8),
                       // 안 읽은 멘션이 있으면 안읽음 숫자 옆에 "@"를 붙인다(방 목록과 같다).

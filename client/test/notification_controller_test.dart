@@ -6,6 +6,7 @@ import 'package:client/models/room.dart';
 import 'package:client/services/notification_controller.dart';
 import 'package:client/services/notification_entries.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers/fake_notification_api.dart';
 
@@ -268,6 +269,47 @@ void main() {
     });
   });
 
+  group('멘션·보드 알림 줄의 요약(serverNotificationSummary)', () {
+    ({String lead, String body}) summary(
+      NotificationKind kind, {
+      String actor = '김철수',
+      String preview = '9월 주간 보고',
+    }) => serverNotificationSummary(
+      notif('n', kind: kind, actor: actor, preview: preview),
+    );
+
+    test('멘션은 "보낸 사람: 미리보기" — "님이 멘션했습니다" 문구 없이 사람 이름을 보여 준다', () {
+      for (final kind in [
+        NotificationKind.mention,
+        NotificationKind.mentionAll,
+      ]) {
+        final s = summary(kind, preview: '@나 확인 부탁');
+        expect(s.lead, '김철수');
+        expect(s.body, '@나 확인 부탁');
+      }
+    });
+
+    test('새 글은 "작성자: 제목" — "새 글" 꼬리표를 붙이지 않는다', () {
+      final s = summary(NotificationKind.boardPost);
+      expect(s.lead, '김철수');
+      expect(s.body, '9월 주간 보고');
+    });
+
+    test('글 수정은 "작성자 · 수정: 제목", 댓글은 "작성자 · 댓글: 내용"', () {
+      expect(summary(NotificationKind.boardEdit).lead, '김철수 · 수정');
+      expect(
+        summary(NotificationKind.boardComment, preview: '확인했습니다').lead,
+        '김철수 · 댓글',
+      );
+    });
+
+    test('보낸 사람 이름을 모르면 이름 없이 꼬리표만 남는다', () {
+      expect(summary(NotificationKind.mention, actor: '').lead, '');
+      expect(summary(NotificationKind.boardEdit, actor: '').lead, '수정');
+      expect(summary(NotificationKind.boardPost, actor: '  ').lead, '');
+    });
+  });
+
   group('안 읽은 것만 필터', () {
     test('켜면 unreadOnly로 새로 받고, 탭마다 따로다', () async {
       final api = FakeNotificationApi(
@@ -288,6 +330,34 @@ void main() {
       expect(c.unreadOnly(NotificationTab.board), isFalse);
       await c.setUnreadOnly(NotificationTab.mention, false);
       expect(c.itemsFor(NotificationTab.mention), hasLength(2));
+    });
+
+    test('선택은 이 기기에 사용자별로 저장되고, 다시 불러오면 그대로이며 다른 사용자에겐 안 보인다', () async {
+      SharedPreferences.setMockInitialValues({});
+      NotificationController make(String userId) {
+        final c = NotificationController(
+          apiProvider: () => FakeNotificationApi(items: []),
+          userId: () => userId,
+        );
+        addTearDown(c.dispose);
+        return c;
+      }
+
+      final first = make('u1');
+      await first.setUnreadOnly(NotificationTab.mention, true);
+      await first.setUnreadOnly(NotificationTab.project, true);
+      await first.setUnreadOnly(NotificationTab.project, false);
+
+      final again = make('u1');
+      expect(again.unreadOnly(NotificationTab.mention), isFalse);
+      await again.loadViewPrefs();
+      expect(again.unreadOnly(NotificationTab.mention), isTrue);
+      expect(again.unreadOnly(NotificationTab.project), isFalse);
+      expect(again.unreadOnly(NotificationTab.board), isFalse);
+
+      final other = make('u2');
+      await other.loadViewPrefs();
+      expect(other.unreadOnly(NotificationTab.mention), isFalse);
     });
   });
 
@@ -502,6 +572,7 @@ void main() {
       final c = _make(api).controller;
       await c.loadSettings();
       api.failWith = '허용되지 않는 값';
+      expect(c.settings!.boardLevel, BoardNotifyLevel.important); // 기본값
       await expectLater(
         c.updateSettings(boardLevel: BoardNotifyLevel.all),
         throwsA(anything),
@@ -514,7 +585,9 @@ void main() {
       expect(BoardNotifyLevel.important.wire, 'important');
       expect(BoardNotifyLevel.newPosts.wire, 'new');
       expect(boardLevelFromWire('new'), BoardNotifyLevel.newPosts);
+      // 모르는 값·없는 값은 기본값(important).
       expect(boardLevelFromWire('?'), BoardNotifyLevel.important);
+      expect(boardLevelFromWire(null), BoardNotifyLevel.important);
       expect(BoardNotifyLevel.values.map((l) => l.label), [
         '전체',
         '중요 알림',

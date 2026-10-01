@@ -256,6 +256,8 @@ export async function toRoomDto(room, requesterId) {
   // push.js와 같은 고정 문구를 쓴다. 로그인 시점엔 이 값을 그대로 쓰고, 이후 실시간으로는
   // Session이 소켓으로 받은 메시지/댓글의 실제(복호화된) 내용으로 직접 갱신한다.
   let lastMessagePreview = null;
+  // 그 미리보기를 보낸 사람 이름 — 알림 센터 "메시지" 탭이 그룹·토픽에서 "이름: 미리보기"로 보여 준다.
+  let lastMessageSenderName = null;
   if (room.isSecret) {
     if (lastMessageRow || lastCommentRow) lastMessagePreview = SECRET_PREVIEW_PLACEHOLDER;
   } else {
@@ -263,7 +265,10 @@ export async function toRoomDto(room, requesterId) {
       lastMessageRow && lastCommentRow
         ? (new Date(lastMessageRow.createdAt) >= new Date(lastCommentRow.createdAt) ? lastMessageRow : lastCommentRow)
         : lastMessageRow ?? lastCommentRow;
-    if (newerRow) lastMessagePreview = previewFor(newerRow);
+    if (newerRow) {
+      lastMessagePreview = previewFor(newerRow);
+      lastMessageSenderName = newerRow.senderName ?? null;
+    }
   }
   const isTopic = room.type === 'topic';
   const dto = {
@@ -278,6 +283,7 @@ export async function toRoomDto(room, requesterId) {
     lastRead,
     lastActivityAt,
     lastMessagePreview,
+    lastMessageSenderName,
     isSecret: !!room.isSecret,
     // 나와의 대화(나 혼자만 멤버인 DM) — 클라이언트가 '나와의 대화'로 이름 붙이고 채팅 목록 맨 위에 고정한다.
     isSelf: !!room.isSelf,

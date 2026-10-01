@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  DEFAULT_NOTIFICATION_SETTINGS,
   MENTION_MAX,
   boardRecipientsFor,
   canMentionAll,
@@ -97,6 +98,14 @@ test('sanitizeMentions: 비밀 대화는 개인 멘션도 전부 버린다', () 
   assert.deepEqual(sanitizeMentions([{ type: 'user', userId: A, s: 0, e: 2 }], '@가', opts(secret)), []);
 });
 
+test('sanitizeMentions: 1:1·나와의 대화에서도 개인 멘션을 전부 버린다(토픽·그룹에서만 멘션)', () => {
+  const raw = [{ type: 'user', userId: A, s: 0, e: 2 }];
+  assert.deepEqual(sanitizeMentions(raw, '@가', opts(dm)), []);
+  assert.deepEqual(sanitizeMentions(raw, '@가', opts(self)), []);
+  assert.deepEqual(sanitizeMentions(raw, '@가', opts(topic)), raw);
+  assert.deepEqual(sanitizeMentions(raw, '@가', opts(group)), raw);
+});
+
 test('sanitizeMentions: 최대 50개', () => {
   const many = new Set(Array.from({ length: 80 }, (_, i) => `u${i}`));
   const raw = Array.from({ length: 80 }, (_, i) => ({ type: 'user', userId: `u${i}`, s: i * 2, e: i * 2 + 1 }));
@@ -187,8 +196,8 @@ test('pushTargetsFor: 게시글 수정은 뮤트 제외, 새 글·댓글은 일�
 
 // ── 보드 알림 수신자 ──────────────────────────────────────────────────────
 
-const levels = { [A]: 'all', [B]: 'important', [OUT]: 'new' };
-const levelOf = (id) => levels[id] ?? null; // ME는 설정 없음 → 기본 important
+const levels = { [ME]: 'important', [A]: 'all', [B]: 'important', [OUT]: 'new' };
+const levelOf = (id) => levels[id] ?? null; // 설정 없는 사람은 null → 기본값(important)
 const everyone = [ME, A, B, OUT];
 
 test('boardRecipientsFor: 새 게시글은 모든 수준의 멤버(행위자 제외)가 받는다', () => {
@@ -206,6 +215,18 @@ test('boardRecipientsFor: 댓글은 all=전원, important=글쓴이만, new=없�
   assert.deepEqual(boardRecipientsFor({ event: 'comment', memberIds: everyone, actorId: ME, postAuthorId: OUT, levelOf }), [A]);
   // 글쓴이 본인이 댓글을 달면 본인은 제외
   assert.deepEqual(boardRecipientsFor({ event: 'comment', memberIds: everyone, actorId: B, postAuthorId: B, levelOf }), [A]);
+});
+
+test('boardRecipientsFor: 설정이 없는 사람은 기본값(important) — 새 글과 내 글의 댓글만, 수정은 못 받는다', () => {
+  assert.equal(DEFAULT_NOTIFICATION_SETTINGS.boardLevel, 'important');
+  const none = () => null;
+  assert.deepEqual(boardRecipientsFor({ event: 'post', memberIds: everyone, actorId: ME, levelOf: none }), [A, B, OUT]);
+  assert.deepEqual(boardRecipientsFor({ event: 'edit', memberIds: everyone, actorId: ME, levelOf: none }), []);
+  // 글쓴이(B)만 댓글 알림을 받는다.
+  assert.deepEqual(
+    boardRecipientsFor({ event: 'comment', memberIds: everyone, actorId: ME, postAuthorId: B, levelOf: none }),
+    [B],
+  );
 });
 
 test('boardRecipientsFor: 같은 글로 멘션 알림을 받는 사람은 뺀다', () => {

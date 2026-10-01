@@ -147,7 +147,7 @@ class NotificationNewEvent {
       );
 }
 
-/// 보드 알림 수준 — 서버 `boardLevel`. 기본은 [important].
+/// 보드 알림 수준 — 서버 `boardLevel`. 기본은 [important](새 글 + 내가 쓴 글에 달린 댓글).
 enum BoardNotifyLevel { all, important, newPosts }
 
 BoardNotifyLevel boardLevelFromWire(String? s) => switch (s) {

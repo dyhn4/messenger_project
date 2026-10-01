@@ -77,7 +77,7 @@ export async function getLastCommentAt(roomId) {
  * getLastMessageForPreview와 짝 — rooms.js의 toRoomDto가 둘 중 더 최근 걸 고른다). */
 export async function getLastCommentForPreview(roomId) {
   const [row] = await db
-    .select({ type: messageComments.type, text: messageComments.text, fileName: messageComments.fileName, createdAt: messageComments.createdAt })
+    .select({ type: messageComments.type, text: messageComments.text, fileName: messageComments.fileName, senderName: messageComments.senderName, createdAt: messageComments.createdAt })
     .from(messageComments)
     .where(and(eq(messageComments.roomId, roomId), isNull(messageComments.deletedAt)))
     .orderBy(desc(messageComments.createdAt))

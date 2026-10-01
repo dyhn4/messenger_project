@@ -46,6 +46,103 @@ Map<String, dynamic> _task(
 
 void main() {
   setUp(TaskListTable.resetRememberedWidths);
+
+  testWidgets('리스트 탭은 업무 번호순으로 고정 — 서버가 상태순으로 줘도, 상태를 바꿔도 줄이 안 움직인다', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1300, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    // 서버(listTasks)는 상태 → 마감일 순으로 내려준다 — 그 순서를 흉내 낸다.
+    var tasks = [
+      _task('2', '둘째', status: 'doing'),
+      _task('3', '셋째', status: 'done'),
+      _task('1', '첫째'),
+      _task('4', '넷째'),
+    ];
+    final client = MockClient((request) async {
+      final path = request.url.path;
+      const json = {'content-type': 'application/json'};
+      if (path == '/api/projects/p1') {
+        return http.Response(
+          jsonEncode({
+            'id': 'p1',
+            'teamId': 't1',
+            'name': '잔디톡',
+            'identifier': 'TA',
+            'color': '#5B8DEF',
+            'myRole': 'owner',
+            'createdAt': DateTime.now().millisecondsSinceEpoch,
+            'members': [
+              {'id': 'u1', 'username': 'riley', 'name': 'Riley'},
+            ],
+          }),
+          200,
+          headers: json,
+        );
+      }
+      if (path == '/api/projects/p1/tasks') {
+        return http.Response(jsonEncode(tasks), 200, headers: json);
+      }
+      return http.Response('[]', 200, headers: json);
+    });
+    final session = Session(
+      notifications: NotificationService(),
+      settings: AppSettings(),
+    );
+    session.api = ApiClient(
+      baseUrl: 'https://test.local',
+      token: 't',
+      httpClient: client,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProjectDetailView(
+            session: session,
+            projectId: 'p1',
+            reloadTick: 0,
+            onDeleted: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('리스트'));
+    await tester.pumpAndSettle();
+
+    List<String> order() {
+      final titles = ['첫째', '둘째', '셋째', '넷째'];
+      final ys = {
+        for (final t in titles) t: tester.getTopLeft(find.text(t)).dy,
+      };
+      return [...titles]..sort((a, b) => ys[a]!.compareTo(ys[b]!));
+    }
+
+    expect(order(), ['첫째', '둘째', '셋째', '넷째']);
+
+    // 첫째의 상태가 '완료'로 바뀌어 서버 순서가 달라져도(다시 불러와도) 줄은 그대로다.
+    tasks = [
+      _task('2', '둘째', status: 'doing'),
+      _task('1', '첫째', status: 'done'),
+      _task('3', '셋째', status: 'done'),
+      _task('4', '넷째'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ProjectDetailView(
+            session: session,
+            projectId: 'p1',
+            reloadTick: 1,
+            onDeleted: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(order(), ['첫째', '둘째', '셋째', '넷째']);
+  });
   testWidgets('프로젝트 보기: 대시보드·칸반(드래그)·리스트·간트·캘린더', (tester) async {
     tester.view.physicalSize = const Size(1300, 900);
     tester.view.devicePixelRatio = 1.0;

@@ -1548,25 +1548,49 @@ class _FormattedTextState extends State<FormattedText> {
   /// 글자마다 어느 멘션에 속하는지(없으면 -1) — build에서 채운다. 멘션이 없으면 비어 있다.
   List<int> _mentionOf = const [];
 
-  TextSpan _mentionSpan(String piece, TextStyle style, Mention m) {
-    final color = widget.mentionColor ?? Theme.of(context).colorScheme.primary;
+  /// 말풍선 안의 멘션 — 연두색 굵은 글씨를 옅은 연두 바탕의 둥근 칩으로 감싼다(잔디 멘션과 같은 모양).
+  /// TextSpan의 배경은 모서리를 둥글게 못 그려서 글자 줄 안에 끼우는 WidgetSpan으로 그린다. 나를 멘션한
+  /// 것(@all 포함)은 바탕을 조금 더 진하게. 이름을 누르면 [FormattedText.onMentionTap](@all은 안 불린다).
+  InlineSpan _mentionSpan(String piece, TextStyle style, Mention m) {
     final mine =
         m.isAll || (widget.myUserId != null && m.userId == widget.myUserId);
-    TapGestureRecognizer? recognizer;
-    if (!m.isAll && widget.onMentionTap != null) {
-      recognizer = TapGestureRecognizer()
-        ..onTap = () => widget.onMentionTap!(m);
-      _recognizers.add(recognizer);
-    }
-    return TextSpan(
-      text: piece,
-      recognizer: recognizer,
-      mouseCursor: recognizer == null ? null : SystemMouseCursors.click,
-      style: style.copyWith(
-        color: color,
-        fontWeight: mine ? FontWeight.w800 : FontWeight.w600,
-        backgroundColor: color.withValues(alpha: mine ? 0.22 : 0.10),
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final accent =
+        widget.mentionColor ??
+        (dark ? const Color(0xFF4ADE9C) : const Color(0xFF02C472));
+    final background = dark
+        ? const Color(0xFF02C472).withValues(alpha: mine ? 0.34 : 0.22)
+        : (mine ? const Color(0xFFBDEFD9) : const Color(0xFFD6F6E9));
+    Widget chip = Container(
+      key: ValueKey(mine ? 'mention-chip-mine' : 'mention-chip'),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(6),
       ),
+      child: Text(
+        piece,
+        style: style.copyWith(
+          color: accent,
+          fontWeight: FontWeight.w700,
+          decoration: TextDecoration.none,
+        ),
+      ),
+    );
+    if (!m.isAll && widget.onMentionTap != null) {
+      chip = MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => widget.onMentionTap!(m),
+          child: chip,
+        ),
+      );
+    }
+    return WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: chip,
     );
   }
 
@@ -1578,11 +1602,18 @@ class _FormattedTextState extends State<FormattedText> {
       final f = chars.flags[i] & ~Fmt.quote, h = chars.hrefs[i];
       final mi = _mentionOf.isEmpty ? -1 : _mentionOf[i];
       var j = i + 1;
-      while (j < to &&
-          (chars.flags[j] & ~Fmt.quote) == f &&
-          chars.hrefs[j] == h &&
-          (_mentionOf.isEmpty || _mentionOf[j] == mi)) {
-        j++;
+      if (mi >= 0 && h == null) {
+        // 멘션은 글자 서식이 중간에 바뀌어도 칩 하나로 — 같은 멘션 구간(링크 아닌 글자)이 이어지는 데까지.
+        while (j < to && _mentionOf[j] == mi && chars.hrefs[j] == null) {
+          j++;
+        }
+      } else {
+        while (j < to &&
+            (chars.flags[j] & ~Fmt.quote) == f &&
+            chars.hrefs[j] == h &&
+            (_mentionOf.isEmpty || _mentionOf[j] == mi)) {
+          j++;
+        }
       }
       final piece = t.substring(i, j);
       final style = formatStyle(

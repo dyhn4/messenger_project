@@ -14,6 +14,7 @@ import '../widgets/compact_menu.dart';
 import '../widgets/account_menu_button.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/app_menu_button.dart';
+import '../widgets/chat_font_scope.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/favorite_star.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -23,6 +24,7 @@ import '../widgets/position_badge.dart';
 import '../widgets/private_topic_lock.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
+import 'topic_members_dialog.dart' show TopicMembersScreen;
 import '../widgets/team_avatar.dart';
 import '../services/app_settings.dart' show TeamSwitchStyle;
 import '../widgets/team_switcher.dart';
@@ -92,6 +94,10 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Room? _splitRoom;
   bool _searchOpen = false;
   bool _membersOpen = false;
+
+  /// null이 아니면 위 멤버 패널이 상단 "멤버"(팀 전체)가 아니라, 방 헤더의 "멤버" 버튼으로 연 그
+  /// 방의 "참여 멤버" 패널이다(토픽·그룹채팅).
+  Room? _membersRoom;
   bool _filesOpen = false;
 
   /// "메뉴 > 링크" 패널(links_screen.dart) — 파일 패널과 같은 자리를 서로 번갈아 쓴다.
@@ -113,6 +119,27 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       _linksOpen = links;
       _searchOpen = false;
       _membersOpen = false;
+      _notificationsOpen = false;
+      _threadMessage = null;
+      _threadRoom = null;
+      _splitRoom = null;
+    });
+  }
+
+  /// 방 헤더의 "멤버" — 그 방의 참여 멤버 패널을 연다. 이미 그 방 것이 열려 있으면 닫는다(토글).
+  /// 다른 오른쪽 패널·분할 패널은 닫는다(상단 메뉴로 열 때와 같다).
+  void _openRoomMembers(Room room) {
+    setState(() {
+      if (_membersOpen && _membersRoom?.id == room.id) {
+        _membersOpen = false;
+        _membersRoom = null;
+        return;
+      }
+      _membersOpen = true;
+      _membersRoom = room;
+      _searchOpen = false;
+      _filesOpen = false;
+      _linksOpen = false;
       _notificationsOpen = false;
       _threadMessage = null;
       _threadRoom = null;
@@ -405,7 +432,10 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               }
             }),
             onShowMembers: () => setState(() {
-              _membersOpen = !_membersOpen;
+              // 방 참여 멤버 패널이 열려 있었으면 팀 전체 멤버로 바꿔서 연다(닫지 않는다).
+              final switchToTeam = _membersOpen && _membersRoom != null;
+              _membersRoom = null;
+              _membersOpen = switchToTeam || !_membersOpen;
               if (_membersOpen) {
                 _searchOpen = false;
                 _filesOpen = false;
@@ -496,11 +526,22 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
                   const VerticalDivider(width: 1),
                   SizedBox(
                     width: _sidePanelWidth,
-                    child: _MembersPanel(
-                      session: widget.session,
-                      onClose: () => setState(() => _membersOpen = false),
-                      onSelectMember: _openMemberProfile,
-                    ),
+                    child: _membersRoom != null
+                        ? TopicMembersScreen(
+                            key: ValueKey('room-members-${_membersRoom!.id}'),
+                            session: widget.session,
+                            room: _membersRoom!,
+                            asPanel: true,
+                            onClose: () => setState(() {
+                              _membersOpen = false;
+                              _membersRoom = null;
+                            }),
+                          )
+                        : _MembersPanel(
+                            session: widget.session,
+                            onClose: () => setState(() => _membersOpen = false),
+                            onSelectMember: _openMemberProfile,
+                          ),
                   ),
                 ],
                 if (_filesOpen) ...[
@@ -844,6 +885,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             room: room,
             onOpenFiles: (r) => _openRoomPanel(r, links: false),
             onOpenLinks: (r) => _openRoomPanel(r, links: true),
+            onOpenMembers: _openRoomMembers,
           ),
         ],
       ),
@@ -977,7 +1019,7 @@ class _TopBar extends StatelessWidget {
                     ),
                     IconButton(
                       icon: const Icon(Icons.people_outline),
-                      tooltip: '멤버',
+                      tooltip: '팀 멤버',
                       onPressed: onShowMembers,
                     ),
                     IconButton(
@@ -1085,7 +1127,7 @@ class _MembersPanelState extends State<_MembersPanel> {
               children: [
                 Expanded(
                   child: Text(
-                    _users == null ? '멤버' : '멤버 총 ${_users!.length}명',
+                    _users == null ? '팀 멤버' : '팀 멤버 총 ${_users!.length}명',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
@@ -2184,13 +2226,20 @@ class _RoomTileState extends State<_RoomTile> {
                 const SizedBox(width: 4),
               ],
               Flexible(
-                child: Text(
-                  widget.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: widget.isSecret
-                      ? const TextStyle(color: Colors.green)
-                      : null,
+                // 방 이름은 환경설정 > 화면 설정 > 글꼴을 따른다(chat_font_scope.dart).
+                child: ChatFont(
+                  settings: widget.session.settings,
+                  builder: (context, font) => Text(
+                    widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: applyChatFont(
+                      widget.isSecret
+                          ? const TextStyle(color: Colors.green)
+                          : null,
+                      font,
+                    ),
+                  ),
                 ),
               ),
               if (widget.room.isPrivateTopic) const PrivateTopicLock(),

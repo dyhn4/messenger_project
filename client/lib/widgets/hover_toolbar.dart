@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'compact_menu.dart';
+
 /// 툴바 한 줄의 높이(버튼 지름 + 위아래 테두리) — 마지막 메시지 아래에 툴바가 뜰 자리를
 /// 미리 비워둘 때 쓴다(chat_panel.dart, message_thread_screen.dart 참고).
 const kHoverToolbarHeight = HoverToolbarButton.dimension + 2;
@@ -88,26 +90,45 @@ class FloatingHoverToolbar extends StatelessWidget {
   }
 }
 
-/// 툴바 "더보기" 메뉴의 항목 한 줄. 메시지·댓글·이미지 썸네일의 더보기 메뉴가 모두 이걸
-/// 써서 아이콘 크기(18)와 글자 크기가 같아진다. 폭은 따로 정하지 않는다 — 메뉴가 항목 중
-/// 가장 긴 글자에 맞춰(+오른쪽 여백 15) 알아서 넓어진다.
+/// 툴바 "더보기" 메뉴의 항목 한 줄 — 채팅 목록 우클릭 메뉴([CompactMenu])와 같은 모양(작은
+/// 글씨, 좁은 줄 간격, 작고 흐린 아이콘)이다. 메시지·댓글·이미지 썸네일의 더보기 메뉴가 모두
+/// 이걸 써서 같아진다. 메뉴 자체의 모양(흰 바탕·둥근 모서리·최소 폭)은 [hoverMenuStyle].
 Widget hoverMenuItem({
   required IconData icon,
   required String label,
   required VoidCallback onPressed,
   Color? color,
 }) => MenuItemButton(
-  leadingIcon: Icon(icon, size: 18, color: color),
+  leadingIcon: Builder(
+    builder: (context) =>
+        Icon(icon, size: 16, color: color ?? Theme.of(context).hintColor),
+  ),
   onPressed: onPressed,
-  child: Padding(
-    padding: const EdgeInsets.only(right: 15),
-    child: Text(label, style: color == null ? null : TextStyle(color: color)),
+  style: const ButtonStyle(
+    minimumSize: WidgetStatePropertyAll(Size(0, CompactMenu.itemHeight)),
+    padding: WidgetStatePropertyAll(CompactMenu.itemPadding),
+    textStyle: WidgetStatePropertyAll(CompactMenu.textStyle),
+  ),
+  child: Text(
+    label,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: color == null ? null : TextStyle(color: color),
   ),
 );
 
-/// 더보기 메뉴의 구분선(예: 공용 항목과 수정/삭제 사이). 메뉴 폭은 항목들이 정하므로
-/// 여기서는 가로를 차지하지 않는다.
-Widget hoverMenuDivider() => const Divider(height: 8);
+/// 더보기 메뉴의 구분선(예: 공용 항목과 수정/삭제 사이) — 우클릭 메뉴의 구분선과 같은 높이.
+Widget hoverMenuDivider() => const Divider(height: 9);
+
+/// 더보기 메뉴(MenuAnchor)의 바탕·모서리·여백·최소 폭을 우클릭 메뉴([CompactMenu])와 맞춘다.
+MenuStyle hoverMenuStyle(BuildContext context) => MenuStyle(
+  backgroundColor: WidgetStatePropertyAll(CompactMenu.color(context)),
+  shape: WidgetStatePropertyAll(CompactMenu.shape as OutlinedBorder),
+  padding: const WidgetStatePropertyAll(CompactMenu.menuPadding),
+  minimumSize: WidgetStatePropertyAll(
+    Size(CompactMenu.constraints.minWidth, 0),
+  ),
+);
 
 /// HoverToolbar 안에 들어가는 아이콘 버튼 하나. [menuChildren]을 주면 눌렀을 때 메뉴가 뜨고
 /// ([hoverMenuItem]으로 만든 항목들), 안 주면 [onPressed]를 그대로 호출하는 일반 버튼이 된다.
@@ -162,6 +183,7 @@ class HoverToolbarButton extends StatelessWidget {
         // 팝업메뉴(PopupMenuButton) 대신 MenuAnchor를 쓴다 — 여는 애니메이션이 없어 바로
         // 뜨고, 항목 모양도 이미지 썸네일의 더보기 메뉴와 같아진다.
         ? MenuAnchor(
+            style: hoverMenuStyle(context),
             menuChildren: items,
             onOpen: () => onMenuOpenChanged?.call(true),
             onClose: () => onMenuOpenChanged?.call(false),

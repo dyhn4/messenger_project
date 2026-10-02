@@ -39,6 +39,7 @@ class _QuietNotifications extends NotificationService {
     String? avatarColor,
     String? avatarUrl,
     bool isSecret = false,
+    bool flashTaskbarUntilRoomOpened = false,
   }) async {}
 }
 
@@ -240,7 +241,10 @@ void _size(WidgetTester tester, Size size) {
 }
 
 /// `GET /api/favorites`를 type별로 받아 주는 가짜 — [byType]에 없는 type은 빈 목록.
-void _serveFavorites(_Server server, Map<String?, List<Map<String, dynamic>>> byType) {
+void _serveFavorites(
+  _Server server,
+  Map<String?, List<Map<String, dynamic>>> byType,
+) {
   server.on('GET', '/api/favorites', (r) {
     final type = r.url.queryParameters['type'];
     final items = byType[type] ?? const [];
@@ -450,7 +454,11 @@ void main() {
       );
       expect(
         api.calls,
-        containsAll(['message m1 false', 'comment c1 true', 'member t1 u2 true']),
+        containsAll([
+          'message m1 false',
+          'comment c1 true',
+          'member t1 u2 true',
+        ]),
       );
     });
 
@@ -563,11 +571,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('favorites-tab-message')));
       await tester.pumpAndSettle();
       expect(
-        server
-            .called('GET', '/api/favorites')
-            .last
-            .url
-            .queryParameters['type'],
+        server.called('GET', '/api/favorites').last.url.queryParameters['type'],
         'message',
       );
       expect(find.byType(PollCard), findsNothing);
@@ -685,7 +689,11 @@ void main() {
       _serveFavorites(server, {
         null: [_roomItem(), _pollItem()],
       });
-      server.on('POST', '/api/rooms/r1/favorite', (_) => _json(<String, Object?>{}));
+      server.on(
+        'POST',
+        '/api/rooms/r1/favorite',
+        (_) => _json(<String, Object?>{}),
+      );
       server.on('PUT', '/api/polls/p1/favorite', (r) {
         return _json({'favorite': _body(r)['favorite']});
       });
@@ -695,10 +703,9 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('favorite-unstar-room:r1')));
       await tester.pumpAndSettle();
-      expect(
-        _body(server.called('POST', '/api/rooms/r1/favorite').single),
-        {'favorite': false},
-      );
+      expect(_body(server.called('POST', '/api/rooms/r1/favorite').single), {
+        'favorite': false,
+      });
       expect(session.roomById('r1')!.favorite, isFalse);
       expect(find.text('토픽'), findsNothing);
 
@@ -711,7 +718,9 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
-    testWidgets('메시지·댓글·투표를 누르면 대화상자가 닫히고 그 방의 그 메시지로 이동을 요청한다', (tester) async {
+    testWidgets('메시지·댓글·투표를 누르면 대화상자가 닫히고 그 방의 그 메시지로 이동을 요청한다', (
+      tester,
+    ) async {
       final server = _Server();
       _serveFavorites(server, {
         null: [_messageItem(), _commentItem()],
@@ -766,9 +775,10 @@ void main() {
 
       await tester.tap(star);
       await tester.pumpAndSettle();
-      expect(_body(server.called('PUT', '/api/teams/t1/members/u2/favorite').single), {
-        'favorite': false,
-      });
+      expect(
+        _body(server.called('PUT', '/api/teams/t1/members/u2/favorite').single),
+        {'favorite': false},
+      );
       expect(session.favorites.isMemberFavorite('t1', 'u2'), isFalse);
       await tester.pump(const Duration(seconds: 3));
     });
@@ -825,7 +835,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('favorite-message:m2')), findsOneWidget);
       expect(
-        server.called('GET', '/api/favorites').last.url.queryParameters['before'],
+        server
+            .called('GET', '/api/favorites')
+            .last
+            .url
+            .queryParameters['before'],
         '9000',
       );
       expect(find.byKey(const ValueKey('favorites-more')), findsNothing);

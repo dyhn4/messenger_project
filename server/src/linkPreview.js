@@ -147,7 +147,34 @@ function extractMetaContent(html, property) {
   return null;
 }
 
-function parseOgTags(html, pageUrl) {
+/** og:image가 없는 페이지(더쿠 등 일부 커뮤니티 게시판 — 글 안에 사진은 있는데 오픈그래프
+ * 태그를 안 채움)를 위해, 본문에 있는 첫 실제 사진을 썸네일 대신 쓴다. 로고·아이콘·이모티콘
+ * 같은 작은 UI 이미지는 width/height·src 이름으로 걸러낸다. */
+function extractFallbackImage(html, pageUrl) {
+  const imgRe = /<img\b[^>]*>/gi;
+  let m;
+  while ((m = imgRe.exec(html))) {
+    const tag = m[0];
+    const src = tag.match(/\bsrc=["']([^"']+)["']/i)?.[1];
+    if (!src || src.startsWith('data:')) continue;
+    const width = Number(tag.match(/\bwidth=["']?(\d+)/i)?.[1] ?? NaN);
+    const height = Number(tag.match(/\bheight=["']?(\d+)/i)?.[1] ?? NaN);
+    if ((Number.isFinite(width) && width < 150) || (Number.isFinite(height) && height < 150)) continue;
+    if (/logo|icon|avatar|emoticon|emoji|sprite|spacer|blank|pixel\.(gif|png)/i.test(src)) continue;
+    try {
+      const resolved = new URL(src, pageUrl).toString();
+      if (resolved.startsWith('javascript:')) continue;
+      return resolved;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** @visibleForTesting — fetchLinkPreview의 네트워크 요청 없이 HTML 파싱만 단위 테스트하기
+ * 위해 내보낸다. */
+export function parseOgTags(html, pageUrl) {
   const title =
     extractMetaContent(html, 'og:title') ??
     html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ??
@@ -164,6 +191,7 @@ function parseOgTags(html, pageUrl) {
       imageUrl = null;
     }
   }
+  if (!imageUrl) imageUrl = extractFallbackImage(html, pageUrl);
   if (!title && !description && !imageUrl) return null;
 
   return {

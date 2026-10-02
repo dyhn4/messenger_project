@@ -1,0 +1,1 @@
+ALTER TABLE "sticker_packs" ADD COLUMN "kind" text DEFAULT 'sticker' NOT NULL;

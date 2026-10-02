@@ -46,6 +46,7 @@ class _QuietNotifications extends NotificationService {
     String? avatarColor,
     String? avatarUrl,
     bool isSecret = false,
+    bool flashTaskbarUntilRoomOpened = false,
   }) async {}
 }
 
@@ -436,10 +437,7 @@ List<Room> demoRoomsWith({
   List<Room> extra = const [],
 }) {
   final byId = {for (final r in replace) r.id: r};
-  return [
-    for (final r in demoRooms()) byId[r.id] ?? r,
-    ...extra,
-  ];
+  return [for (final r in demoRooms()) byId[r.id] ?? r, ...extra];
 }
 
 /// 공개 직책 목록 — '조장' 이상이면 1:1 목록에 직책 배지가 붙는다(position_badge.dart).

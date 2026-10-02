@@ -9,8 +9,11 @@ import 'package:window_manager/window_manager.dart';
 import '../services/app_settings.dart';
 import '../services/download_storage.dart' show kAndroidDownloadSubfolder;
 import '../services/session.dart';
+import '../services/system_fonts.dart';
+import '../widgets/filter_dropdown.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/update_dialog.dart';
 import 'project/project_window.dart';
 
 const _appName = 'TangoTalk';
@@ -18,15 +21,17 @@ const _appName = 'TangoTalk';
 /// 화면 테마 카드의 선택 색(첨부 디자인의 초록).
 const _accentGreen = Color(0xFF2BB673);
 
-enum _Section { messenger, system }
+enum _Section { messenger, display, system }
 
 String _sectionLabel(_Section s) => switch (s) {
   _Section.messenger => '메신저 설정',
+  _Section.display => '화면 설정',
   _Section.system => '시스템 설정',
 };
 
 IconData _sectionIcon(_Section s) => switch (s) {
   _Section.messenger => Icons.chat_bubble_outline,
+  _Section.display => Icons.desktop_windows_outlined,
   _Section.system => Icons.settings_outlined,
 };
 
@@ -60,6 +65,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _alwaysOnTop = widget.session.settings.alwaysOnTop;
   late double _windowOpacity = widget.session.settings.windowOpacity;
   late bool _autoLockOnSleep = widget.session.settings.autoLockOnSleep;
+  late bool _flashTaskbarWhenFocused =
+      widget.session.settings.flashTaskbarWhenFocused;
+  late double _textScale = widget.session.settings.textScale;
+  late String _fontFamily = widget.session.settings.fontFamily;
   bool _saving = false;
 
   /// "저장하기"를 눌러 실제로 반영됐는지 — false인 채로 화면이 닫히면(취소/X/바깥 클릭)
@@ -67,6 +76,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _saved = false;
   final _scrollController = ScrollController();
   PackageInfo? _packageInfo;
+
+  /// 이 PC에 깔린 글꼴 이름 — WinAPI 열거(system_fonts.dart)는 몇백 개라도 수 밀리초 안에
+  /// 끝나는 동기 호출이라, 비동기로 미루지 않고 그냥 바로 받는다.
+  late final List<String>? _systemFonts = Platform.isWindows
+      ? listInstalledFontFamilies()
+      : null;
 
   @override
   void initState() {
@@ -109,6 +124,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setAlwaysOnTop(_alwaysOnTop);
     await settings.setWindowOpacity(_windowOpacity);
     await settings.setAutoLockOnSleep(_autoLockOnSleep);
+    await settings.setFlashTaskbarWhenFocused(_flashTaskbarWhenFocused);
+    await settings.setTextScale(_textScale);
+    await settings.setFontFamily(_fontFamily);
     // "프로젝트" 창이 열려있으면 완전히 다른 엔진이라 위 setThemeMode만으론 안 바뀐다 —
     // 따로 알려준다(project_window.dart, Windows 전용이라 함수 안에서 자체적으로 걸러냄).
     if (Platform.isWindows) unawaited(broadcastThemeChange(_themeMode));
@@ -246,9 +264,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// 오른쪽 내용 — 테두리 있는 칸에 제목 + 항목들(스크롤).
   Widget _buildPane(BuildContext context) {
     final theme = Theme.of(context);
-    final items = _section == _Section.messenger
-        ? _messengerItems(context)
-        : _systemItems(context);
+    final items = switch (_section) {
+      _Section.messenger => _messengerItems(context),
+      _Section.display => _displayItems(context),
+      _Section.system => _systemItems(context),
+    };
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: theme.dividerColor),
@@ -370,6 +390,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
   ];
 
+  // ── 화면 설정 ──
+
+  List<Widget> _displayItems(BuildContext context) => [
+    _Item(
+      label: '텍스트 크기',
+      caption: '앱 전체(채팅·목록 등)의 글자 크기를 조절합니다.',
+      child: _TextSizeStepper(
+        scale: _textScale,
+        onChanged: (v) => setState(() => _textScale = v),
+      ),
+    ),
+    // 글꼴 이름(맑은 고딕 등)은 PC에 깔려 있는 시스템 글꼴을 그대로 쓰는 방식이라 — 안드로이드엔
+    // 이 이름들이 없어서(그려도 기본 글꼴로만 보여 설정한 보람이 없다) 아예 숨긴다.
+    if (Platform.isWindows)
+      _Item(
+        label: '글꼴',
+        caption: '새로 고른 글꼴은 저장한 뒤 적용됩니다.',
+        child: _FontFilterButton(
+          value: _fontFamily,
+          options: _systemFonts,
+          onSelected: (v) => setState(() => _fontFamily = v),
+        ),
+      ),
+    _Item(
+      label: '화면 테마',
+      caption: '본인이 선호하는 컬러 테마를 설정할 수 있습니다.',
+      child: Row(
+        children: [
+          Expanded(
+            child: _ThemeCard(
+              label: '화이트 (기본)',
+              selected: _themeMode != ThemeMode.dark,
+              onTap: () => setState(() => _themeMode = ThemeMode.light),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _ThemeCard(
+              label: '다크',
+              selected: _themeMode == ThemeMode.dark,
+              onTap: () => setState(() => _themeMode = ThemeMode.dark),
+            ),
+          ),
+        ],
+      ),
+    ),
+    if (Platform.isWindows)
+      _Item(
+        label: '반투명',
+        child: Row(
+          children: [
+            Expanded(
+              child: Slider(
+                // 완전히 0%로 내리면 창이 안 보여서 다시 잡기 어려우니 최소 20%는 남겨둔다.
+                value: _windowOpacity,
+                min: 0.2,
+                max: 1.0,
+                divisions: 16,
+                label: '${(_windowOpacity * 100).round()}%',
+                onChanged: (v) {
+                  setState(() => _windowOpacity = v);
+                  // 슬라이더를 끄는 동안 실제 창에도 바로 반영해서 미리보기가 되게 한다 —
+                  // 저장을 눌러야 그 값이 확정/저장된다(dispose 참고: 취소하면 원래 값으로
+                  // 되돌아간다).
+                  windowManager.setOpacity(v);
+                },
+              ),
+            ),
+            SizedBox(
+              width: 44,
+              child: Text(
+                '${(_windowOpacity * 100).round()}%',
+                textAlign: TextAlign.end,
+              ),
+            ),
+          ],
+        ),
+      ),
+    if (Platform.isWindows)
+      _Item(
+        label: '작업표시줄 깜빡임',
+        caption:
+            '메신저 창을 보고 있는 중에, 지금 보고 있는 방이 아닌 다른 방에 메시지가 오면 '
+            '작업표시줄의 $_appName 버튼을 깜빡일지 정합니다.',
+        child: RadioGroup<bool>(
+          groupValue: _flashTaskbarWhenFocused,
+          onChanged: (v) =>
+              setState(() => _flashTaskbarWhenFocused = v ?? false),
+          child: const Column(
+            children: [
+              RadioListTile<bool>(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: false,
+                title: Text('깜빡이지 않음 (기본값)'),
+              ),
+              RadioListTile<bool>(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: true,
+                title: Text('해당 채팅방을 열 때까지 계속 깜빡임'),
+              ),
+            ],
+          ),
+        ),
+      ),
+  ];
+
   // ── 시스템 설정 ──
 
   List<Widget> _systemItems(BuildContext context) {
@@ -393,61 +521,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ],
-      _Item(
-        label: '화면 테마',
-        caption: '본인이 선호하는 컬러 테마를 설정할 수 있습니다.',
-        child: Row(
-          children: [
-            Expanded(
-              child: _ThemeCard(
-                label: '화이트 (기본)',
-                selected: _themeMode != ThemeMode.dark,
-                onTap: () => setState(() => _themeMode = ThemeMode.light),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _ThemeCard(
-                label: '다크',
-                selected: _themeMode == ThemeMode.dark,
-                onTap: () => setState(() => _themeMode = ThemeMode.dark),
-              ),
-            ),
-          ],
-        ),
-      ),
-      if (Platform.isWindows)
-        _Item(
-          label: '반투명',
-          child: Row(
-            children: [
-              Expanded(
-                child: Slider(
-                  // 완전히 0%로 내리면 창이 안 보여서 다시 잡기 어려우니 최소 20%는 남겨둔다.
-                  value: _windowOpacity,
-                  min: 0.2,
-                  max: 1.0,
-                  divisions: 16,
-                  label: '${(_windowOpacity * 100).round()}%',
-                  onChanged: (v) {
-                    setState(() => _windowOpacity = v);
-                    // 슬라이더를 끄는 동안 실제 창에도 바로 반영해서 미리보기가 되게 한다 —
-                    // 저장을 눌러야 그 값이 확정/저장된다(dispose 참고: 취소하면 원래 값으로
-                    // 되돌아간다).
-                    windowManager.setOpacity(v);
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 44,
-                child: Text(
-                  '${(_windowOpacity * 100).round()}%',
-                  textAlign: TextAlign.end,
-                ),
-              ),
-            ],
-          ),
-        ),
       _Item(
         label: '파일 다운로드',
         // 안드로이드는 폴더를 고르지 않는다 — 폴더 선택 창에서 Download 자체를 고를 수
@@ -479,15 +552,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : '$_appName ${_packageInfo!.version}',
               style: TextStyle(color: hint),
             ),
+            // 화면 위 알약(UpdateBanner)을 닫아도(이번 실행 동안만 숨김) 여기서는 계속
+            // 알려주고, 버튼으로 바로 설치 대화상자를 다시 열 수 있게 한다.
             if (widget.session.updateAvailableVersion != null)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '새 버전 ${widget.session.updateAvailableVersion} 사용 가능',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '새 버전 ${widget.session.updateAvailableVersion} 사용 가능',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton.tonalIcon(
+                      onPressed: () => showDialog<void>(
+                        context: context,
+                        builder: (_) => UpdateDialog(
+                          session: widget.session,
+                          version: widget.session.updateAvailableVersion!,
+                        ),
+                      ),
+                      icon: const Icon(Icons.system_update_outlined, size: 18),
+                      label: const Text('업데이트'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        minimumSize: const Size(0, 32),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -778,6 +875,218 @@ class _ThemeCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "텍스트 크기" — 가운데 알약(지금 배율, 누르면 100%로 초기화)을 양옆의 −/+ 단추로 10%씩
+/// 줄이거나 늘린다(80%~150%, app_settings.dart의 min/maxTextScale). 끝에 닿으면 그쪽 단추는
+/// 꺼진다.
+class _TextSizeStepper extends StatelessWidget {
+  final double scale;
+  final ValueChanged<double> onChanged;
+  const _TextSizeStepper({required this.scale, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final percent = (scale * 100).round();
+    final canDecrease = scale > minTextScale + 0.001;
+    final canIncrease = scale < maxTextScale - 0.001;
+    return Row(
+      children: [
+        Text('작게', style: TextStyle(color: theme.hintColor, fontSize: 12)),
+        const SizedBox(width: 8),
+        _StepButton(
+          icon: Icons.remove,
+          onPressed: canDecrease
+              ? () => onChanged(((scale - textScaleStep) * 10).round() / 10)
+              : null,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => onChanged(1.0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: percent == 100 ? _accentGreen : theme.dividerColor,
+                  width: percent == 100 ? 1.5 : 1,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  '$percent% 기본 크기',
+                  style: TextStyle(
+                    fontWeight: percent == 100 ? FontWeight.w600 : null,
+                    color: percent == 100 ? _accentGreen : null,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _StepButton(
+          icon: Icons.add,
+          onPressed: canIncrease
+              ? () => onChanged(((scale + textScaleStep) * 10).round() / 10)
+              : null,
+        ),
+        const SizedBox(width: 8),
+        Text('크게', style: TextStyle(color: theme.hintColor, fontSize: 12)),
+      ],
+    );
+  }
+}
+
+class _StepButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onPressed;
+  const _StepButton({required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final enabled = onPressed != null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onPressed,
+      child: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: theme.dividerColor),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: enabled ? null : theme.disabledColor,
+        ),
+      ),
+    );
+  }
+}
+
+/// "글꼴" — 이 PC에 깔린 수백 개 글꼴 중 하나를 검색해서 고른다(panel_filters.dart의 "참여
+/// 대화방"·"모든 멤버" 필터와 같은 앵커 드롭다운 + 검색칸 + 목록 틀을 그대로 쓴다). [options]가
+/// null이면(아직 받는 중) "시스템 기본"만 있는 목록으로 보여준다.
+class _FontFilterButton extends StatelessWidget {
+  final String value;
+  final List<String>? options;
+  final ValueChanged<String> onSelected;
+  const _FontFilterButton({
+    required this.value,
+    required this.options,
+    required this.onSelected,
+  });
+
+  // 글꼴 이름이 길면("Segoe UI Historic" 같은) 단추 밖으로 삐져나오는 대신 끝을 "..."로
+  // 자르도록(FilterDropdownButton의 라벨에 이미 있는 ellipsis) 폭을 넉넉히 고정해 둔다 —
+  // 안 그러면 단추가 내용 길이만큼 계속 넓어져서 잘릴 일이 없어진다.
+  static const _buttonWidth = 240.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: _buttonWidth,
+      child: FilterDropdownButton(
+        label: fontFamilyLabel(value),
+        expand: true,
+        panelBuilder: (close) => FilterPanelShell(
+          width: 260,
+          child: _FontFilterPanel(
+            value: value,
+            options: options,
+            onSelected: (v) {
+              onSelected(v);
+              close();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FontFilterPanel extends StatefulWidget {
+  final String value;
+  final List<String>? options;
+  final ValueChanged<String> onSelected;
+  const _FontFilterPanel({
+    required this.value,
+    required this.options,
+    required this.onSelected,
+  });
+
+  @override
+  State<_FontFilterPanel> createState() => _FontFilterPanelState();
+}
+
+class _FontFilterPanelState extends State<_FontFilterPanel> {
+  String _filter = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final options = widget.options;
+    final fonts = options == null
+        ? const <String>[]
+        : options
+              .where((f) => f.toLowerCase().contains(_filter.toLowerCase()))
+              .toList();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        filterSearchBox((v) => setState(() => _filter = v)),
+        const Divider(height: 1),
+        Flexible(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              if (_filter.isEmpty)
+                ListTile(
+                  dense: true,
+                  title: const Text('시스템 기본'),
+                  trailing: widget.value.isEmpty
+                      ? const Icon(Icons.check, size: 18)
+                      : null,
+                  onTap: () => widget.onSelected(''),
+                ),
+              if (options == null)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else
+                for (final f in fonts)
+                  ListTile(
+                    dense: true,
+                    title: Text(
+                      f,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontFamily: f),
+                    ),
+                    trailing: widget.value == f
+                        ? const Icon(Icons.check, size: 18)
+                        : null,
+                    onTap: () => widget.onSelected(f),
+                  ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

@@ -12,6 +12,7 @@ import '../services/time_format.dart';
 import '../widgets/account_menu_button.dart';
 import '../widgets/app_menu_button.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/chat_font_scope.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/position_badge.dart';
 import '../widgets/private_topic_lock.dart';
@@ -713,13 +714,18 @@ class _RoomRow extends StatelessWidget {
             const SizedBox(width: 4),
           ],
           Flexible(
-            child: Text(
-              room.displayName(session.userId ?? ''),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: room.isSecret
-                  ? const TextStyle(color: Colors.green)
-                  : null,
+            // 방 이름은 환경설정 > 화면 설정 > 글꼴을 따른다(chat_font_scope.dart).
+            child: ChatFont(
+              settings: session.settings,
+              builder: (context, font) => Text(
+                room.displayName(session.userId ?? ''),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: applyChatFont(
+                  room.isSecret ? const TextStyle(color: Colors.green) : null,
+                  font,
+                ),
+              ),
             ),
           ),
           if (room.isPrivateTopic) const PrivateTopicLock(),

@@ -44,7 +44,13 @@ Session _session() {
                   'type': 'file',
                   'text': null,
                   'fileName': 'photo$i.jpg',
-                  'createdAt': DateTime(2026, 9, 29, 14, i).millisecondsSinceEpoch,
+                  'createdAt': DateTime(
+                    2026,
+                    9,
+                    29,
+                    14,
+                    i,
+                  ).millisecondsSinceEpoch,
                 },
             ],
             // 받아 온 것(3건)보다 전체가 더 많다 — "결과 N건"은 전체 건수.
@@ -65,7 +71,13 @@ Session _session() {
                 'type': 'file',
                 'fileUrl': '/uploads/f$i.pdf',
                 'fileName': 'f$i.pdf',
-                'createdAt': DateTime(2026, 9, 23, 14, i).millisecondsSinceEpoch,
+                'createdAt': DateTime(
+                  2026,
+                  9,
+                  23,
+                  14,
+                  i,
+                ).millisecondsSinceEpoch,
               },
           ]),
           200,
@@ -158,7 +170,10 @@ void main() {
       final now = DateTime(2026, 9, 30, 12);
       expect(const PanelPeriod().preset, PeriodPreset.year);
       expect(const PanelPeriod().label, '1년 (기본)');
-      expect(const PanelPeriod().since(now), now.subtract(const Duration(days: 365)));
+      expect(
+        const PanelPeriod().since(now),
+        now.subtract(const Duration(days: 365)),
+      );
       expect(const PanelPeriod().until, isNull);
       expect(const PanelPeriod().rangeText, isNull);
       expect(const PanelPeriod(PeriodPreset.all).since(now), isNull);
@@ -185,7 +200,9 @@ void main() {
   });
 
   group('검색 패널', () {
-    testWidgets('필터 아래에 전체 · 메시지 · 투표 · 파일 ⌄ 탭과 최신 순 단추가 검색 전에도 보인다', (tester) async {
+    testWidgets('필터 아래에 전체 · 메시지 · 투표 · 파일 ⌄ 탭과 최신 순 단추가 검색 전에도 보인다', (
+      tester,
+    ) async {
       await _mount(tester, SearchScreen(session: _session()));
       for (final label in ['전체', '메시지', '투표', '파일']) {
         expect(find.text(label), findsOneWidget, reason: label);
@@ -201,7 +218,37 @@ void main() {
       await _close(tester);
     });
 
-    testWidgets('검색하면 결과 N건(서버가 준 전체 건수)이 뜨고, 탭·파일 형식·정렬이 요청에 실린다', (tester) async {
+    testWidgets('검색칸이 파일 패널 "파일명 검색"칸과 같다 — 입력을 멈추면(엔터 없이) 찾고, 지우기(X)로 비운다', (
+      tester,
+    ) async {
+      await _mount(tester, SearchScreen(session: _session()));
+      final field = find.byKey(const ValueKey('search-panel-field'));
+      expect(field, findsOneWidget);
+      // 파일 패널 검색칸과 같은 모양 — 왼쪽 돋보기, 처음엔 지우기(X) 없음.
+      expect(
+        find.descendant(of: field, matching: find.byIcon(Icons.search)),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.close), findsNothing);
+
+      // 엔터 없이 입력을 멈추기만 해도(디바운스) 찾는다 — 파일명 검색과 동일.
+      await tester.enterText(field, '.jpg');
+      expect(_requests.where((u) => u.path == '/api/search'), isEmpty);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      expect(_last('/api/search').queryParameters['q'], '.jpg');
+
+      // 글자가 있으면 지우기(X)가 뜨고, 누르면 비우면서 바로(기다리지 않고) 다시 찾는다.
+      expect(find.byIcon(Icons.close), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pump();
+      expect(find.text('내가 속한 모든 방을 대상으로 검색합니다.'), findsOneWidget);
+      await _close(tester);
+    });
+
+    testWidgets('검색하면 결과 N건(서버가 준 전체 건수)이 뜨고, 탭·파일 형식·정렬이 요청에 실린다', (
+      tester,
+    ) async {
       await _mount(tester, SearchScreen(session: _session()));
       await tester.enterText(find.byType(TextField).first, '.jpg');
       await tester.testTextInput.receiveAction(TextInputAction.search);
@@ -262,55 +309,61 @@ void main() {
       await _close(tester);
     });
 
-    testWidgets('기간 필터 — "설정 안 함"으로 바뀌었고, 직접 설정은 새 업무 창의 달력이며 날짜가 결과 줄 오른쪽에 뜬다', (
+    testWidgets(
+      '기간 필터 — "설정 안 함"으로 바뀌었고, 직접 설정은 새 업무 창의 달력이며 날짜가 결과 줄 오른쪽에 뜬다',
+      (tester) async {
+        await _mount(tester, SearchScreen(session: _session()));
+        await tester.enterText(find.byType(TextField).first, 'a');
+        await tester.testTextInput.receiveAction(TextInputAction.search);
+        await tester.pump();
+        await tester.pump();
+
+        await tester.tap(find.text('1년 (기본)'));
+        await tester.pumpAndSettle();
+        expect(find.text('설정 안 함'), findsOneWidget);
+        expect(find.text('기간 설정 안 함'), findsNothing);
+        for (final label in ['1주일', '1개월', '3개월', '직접 설정']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+        await tester.tap(find.text('직접 설정'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('period-calendar')), findsOneWidget);
+        expect(find.text('시작일을 선택하세요'), findsOneWidget);
+
+        final expected = await _pickLastMonthRange(tester, 3, 12);
+        // 고르면 닫히고, 그 기간으로 다시 검색하고, 결과 줄 오른쪽에 날짜가 보인다.
+        expect(find.byKey(const ValueKey('period-calendar')), findsNothing);
+        expect(find.text('직접 설정'), findsOneWidget); // 기간 단추의 글자
+        expect(find.byKey(const ValueKey('panel-range-text')), findsOneWidget);
+        expect(find.text(expected), findsOneWidget);
+        final req = _last('/api/search');
+        final since = DateTime.fromMillisecondsSinceEpoch(
+          int.parse(req.queryParameters['since']!),
+        );
+        final until = DateTime.fromMillisecondsSinceEpoch(
+          int.parse(req.queryParameters['until']!),
+        );
+        expect(since.day, 3);
+        expect(until.day, 12);
+        expect(until.hour, 23); // 종료일은 그날 끝까지
+
+        // "설정 안 함"을 고르면 날짜가 사라지고 since를 안 보낸다.
+        await tester.tap(find.text('직접 설정'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('설정 안 함'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('panel-range-text')), findsNothing);
+        expect(
+          _last('/api/search').queryParameters.containsKey('since'),
+          isFalse,
+        );
+        await _close(tester);
+      },
+    );
+
+    testWidgets('폭 360 — 탭 줄·필터 줄·결과 줄이 넘치지 않고 기간 달력이 화면 안에 뜬다', (
       tester,
     ) async {
-      await _mount(tester, SearchScreen(session: _session()));
-      await tester.enterText(find.byType(TextField).first, 'a');
-      await tester.testTextInput.receiveAction(TextInputAction.search);
-      await tester.pump();
-      await tester.pump();
-
-      await tester.tap(find.text('1년 (기본)'));
-      await tester.pumpAndSettle();
-      expect(find.text('설정 안 함'), findsOneWidget);
-      expect(find.text('기간 설정 안 함'), findsNothing);
-      for (final label in ['1주일', '1개월', '3개월', '직접 설정']) {
-        expect(find.text(label), findsOneWidget, reason: label);
-      }
-      await tester.tap(find.text('직접 설정'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('period-calendar')), findsOneWidget);
-      expect(find.text('시작일을 선택하세요'), findsOneWidget);
-
-      final expected = await _pickLastMonthRange(tester, 3, 12);
-      // 고르면 닫히고, 그 기간으로 다시 검색하고, 결과 줄 오른쪽에 날짜가 보인다.
-      expect(find.byKey(const ValueKey('period-calendar')), findsNothing);
-      expect(find.text('직접 설정'), findsOneWidget); // 기간 단추의 글자
-      expect(find.byKey(const ValueKey('panel-range-text')), findsOneWidget);
-      expect(find.text(expected), findsOneWidget);
-      final req = _last('/api/search');
-      final since = DateTime.fromMillisecondsSinceEpoch(
-        int.parse(req.queryParameters['since']!),
-      );
-      final until = DateTime.fromMillisecondsSinceEpoch(
-        int.parse(req.queryParameters['until']!),
-      );
-      expect(since.day, 3);
-      expect(until.day, 12);
-      expect(until.hour, 23); // 종료일은 그날 끝까지
-
-      // "설정 안 함"을 고르면 날짜가 사라지고 since를 안 보낸다.
-      await tester.tap(find.text('직접 설정'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('설정 안 함'));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('panel-range-text')), findsNothing);
-      expect(_last('/api/search').queryParameters.containsKey('since'), isFalse);
-      await _close(tester);
-    });
-
-    testWidgets('폭 360 — 탭 줄·필터 줄·결과 줄이 넘치지 않고 기간 달력이 화면 안에 뜬다', (tester) async {
       await _mount(
         tester,
         SearchScreen(session: _session()),
@@ -365,7 +418,9 @@ void main() {
       await _close(tester);
     });
 
-    testWidgets('이름 검색 · 파일 형식 · 정렬 · 직접 설정 기간이 요청에 실리고 날짜가 오른쪽에 뜬다', (tester) async {
+    testWidgets('이름 검색 · 파일 형식 · 정렬 · 직접 설정 기간이 요청에 실리고 날짜가 오른쪽에 뜬다', (
+      tester,
+    ) async {
       await _mount(tester, FilesScreen(session: _session()));
       await tester.enterText(
         find.byKey(const ValueKey('panel-search-field')),
@@ -399,10 +454,7 @@ void main() {
       await tester.pumpAndSettle();
       final expected = await _pickLastMonthRange(tester, 5, 20);
       expect(find.text(expected), findsOneWidget);
-      expect(
-        _last('/api/attachments').queryParameters['until'],
-        isNotNull,
-      );
+      expect(_last('/api/attachments').queryParameters['until'], isNotNull);
       await _close(tester);
     });
 
@@ -442,53 +494,61 @@ void main() {
   });
 
   group('링크 패널', () {
-    testWidgets('긴 대화방 단추 대신 파일 패널과 같은 상단 — 검색칸 · 필터 줄 · 정렬 · 결과 줄(파일 단추는 없다)', (tester) async {
-      await _mount(
-        tester,
-        LinksScreen(
-          session: _session(),
-          initialRoomId: 'r1',
-          onOpenMessage: (_, _) {},
-        ),
-      );
-      expect(find.byKey(const ValueKey('panel-search-field')), findsOneWidget);
-      expect(find.text('링크 검색'), findsOneWidget);
-      expect(find.text('모든 멤버'), findsOneWidget);
-      expect(find.text('1년 (기본)'), findsOneWidget);
-      expect(find.text('최신순'), findsOneWidget);
-      expect(find.byKey(const ValueKey('panel-file-kind')), findsNothing);
-      expect(find.text('"1"개가 로딩되었습니다.'), findsOneWidget);
-      // 방 필터는 세 칸 필터 줄 안의 한 칸이다(가로로 긴 단독 단추가 아니다).
-      final room = tester.getSize(find.widgetWithText(OutlinedButton, '잔디톡 팀'));
-      expect(room.width, lessThan(400));
+    testWidgets(
+      '긴 대화방 단추 대신 파일 패널과 같은 상단 — 검색칸 · 필터 줄 · 정렬 · 결과 줄(파일 단추는 없다)',
+      (tester) async {
+        await _mount(
+          tester,
+          LinksScreen(
+            session: _session(),
+            initialRoomId: 'r1',
+            onOpenMessage: (_, _) {},
+          ),
+        );
+        expect(
+          find.byKey(const ValueKey('panel-search-field')),
+          findsOneWidget,
+        );
+        expect(find.text('링크 검색'), findsOneWidget);
+        expect(find.text('모든 멤버'), findsOneWidget);
+        expect(find.text('1년 (기본)'), findsOneWidget);
+        expect(find.text('최신순'), findsOneWidget);
+        expect(find.byKey(const ValueKey('panel-file-kind')), findsNothing);
+        expect(find.text('"1"개가 로딩되었습니다.'), findsOneWidget);
+        // 방 필터는 세 칸 필터 줄 안의 한 칸이다(가로로 긴 단독 단추가 아니다).
+        final room = tester.getSize(
+          find.widgetWithText(OutlinedButton, '잔디톡 팀'),
+        );
+        expect(room.width, lessThan(400));
 
-      var req = _last('/api/links');
-      expect(req.queryParameters['roomId'], 'r1');
-      expect(req.queryParameters['since'], isNotNull);
+        var req = _last('/api/links');
+        expect(req.queryParameters['roomId'], 'r1');
+        expect(req.queryParameters['since'], isNotNull);
 
-      await tester.enterText(
-        find.byKey(const ValueKey('panel-search-field')),
-        'youtube',
-      );
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.pump();
-      req = _last('/api/links');
-      expect(req.queryParameters['q'], 'youtube');
+        await tester.enterText(
+          find.byKey(const ValueKey('panel-search-field')),
+          'youtube',
+        );
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump();
+        req = _last('/api/links');
+        expect(req.queryParameters['q'], 'youtube');
 
-      await tester.tap(find.byKey(const ValueKey('panel-sort')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('과거순'));
-      await tester.pumpAndSettle();
-      expect(_last('/api/links').queryParameters['order'], 'asc');
+        await tester.tap(find.byKey(const ValueKey('panel-sort')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('과거순'));
+        await tester.pumpAndSettle();
+        expect(_last('/api/links').queryParameters['order'], 'asc');
 
-      await tester.tap(find.text('1년 (기본)'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('직접 설정'));
-      await tester.pumpAndSettle();
-      final expected = await _pickLastMonthRange(tester, 2, 9);
-      expect(find.text(expected), findsOneWidget);
-      await _close(tester);
-    });
+        await tester.tap(find.text('1년 (기본)'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('직접 설정'));
+        await tester.pumpAndSettle();
+        final expected = await _pickLastMonthRange(tester, 2, 9);
+        expect(find.text(expected), findsOneWidget);
+        await _close(tester);
+      },
+    );
 
     testWidgets('폭 360에서도 넘치지 않는다', (tester) async {
       await _mount(

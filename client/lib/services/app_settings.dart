@@ -23,12 +23,35 @@ const _kWindowOpacity = 'settings_window_opacity';
 const _kSendWithShiftEnter = 'settings_send_with_shift_enter';
 const _kAutoLockOnSleep = 'settings_auto_lock_on_sleep';
 const _kAppLocked = 'settings_app_locked';
+const _kFlashTaskbarWhenFocused = 'settings_flash_taskbar_when_focused';
+const _kStickerCategoryOrder = 'settings_sticker_category_order';
+const _kTextScale = 'settings_text_scale';
+const _kFontFamily = 'settings_font_family';
+
+/// "글꼴"(화면 설정, Windows 전용) 값 — PC에 깔려 있는 시스템 글꼴 이름을 그대로 쓴다(새
+/// 글꼴 파일을 번들하지 않음, 고를 수 있는 전체 목록은 services/system_fonts.dart가 그때그때
+/// 그 PC에서 직접 받아온다). 안드로이드는 이 이름들이 없어서 설정 자체를 숨긴다
+/// (settings_screen.dart). 빈 문자열이 "시스템 기본"이다. 채팅 내용과 방 목록에만 적용되고
+/// (widgets/chat_font_scope.dart) 그 외 화면(설정·관리자 콘솔 등)은 항상 기본 모습이다.
+String fontFamilyLabel(String family) => family.isEmpty ? '시스템 기본' : family;
+
+/// 옛한글(고어) 자모 조합 글리프 — 기본 폰트(Roboto 등)에는 없어서 네모(tofu)로 보인다.
+/// pubspec.yaml에 번들된 폰트(SIL OFL 1.1, assets/fonts/OFL.txt 참고) — 앱 전체 기본 테마
+/// (main.dart)와, 채팅·방 목록에서 직접 고른 글꼴(widgets/chat_font_scope.dart) 양쪽 다
+/// 이 글꼴을 폴백으로 얹어서 어느 글꼴을 쓰든 옛한글이 깨지지 않는다.
+const oldHangulFontFamily = 'NanumBarunGothicYetHangul';
 
 /// 모바일(안드로이드 스타일) 레이아웃으로 바뀌는 창 폭 기준(home_screen.dart의
 /// wideBreakpoint=700)보다 확실히 더 좁게 줄일 수 있도록 하는 최소 창 크기 — 사용자가
 /// 창을 직접 끌어서 줄이면 이 앱의 기존 반응형 레이아웃이 자동으로 모바일 화면으로
 /// 바뀐다("미니보기"는 별도 기능이 아니라 이 최소 크기 제한을 완화하는 것으로 충분하다).
 const minWindowSize = Size(350, 600);
+
+/// "텍스트 크기"(화면 설정) 스텝퍼의 범위·간격 — 80%~150%를 10%씩. 1.0(100%)이 기본값이고
+/// 가운데 알약을 누르면 바로 이 값으로 돌아간다(settings_screen.dart).
+const minTextScale = 0.8;
+const maxTextScale = 1.5;
+const textScaleStep = 0.1;
 
 /// 알림에 메시지 내용을 얼마나 보여줄지 — [all]은 지금까지의 기본 동작(비밀 대화 제외 전부
 /// 원문 미리보기), [publicTopicOnly]는 공개 토픽방만 원문을 보여주고 그 외(그룹/DM/비공개
@@ -58,6 +81,13 @@ class AppSettings extends ChangeNotifier {
   bool alwaysOnTop = false;
   double windowOpacity = 1.0;
 
+  /// 앱 전체 글자 크기 배율(1.0 = 100%, 기본) — main.dart가 MaterialApp.builder에서
+  /// MediaQuery.textScaler로 앱 전체(채팅·목록·설정 등 모든 화면)에 적용한다.
+  double textScale = 1.0;
+
+  /// 글꼴(화면 설정, Windows 전용) — 시스템 글꼴 이름, 빈 문자열이면 시스템 기본.
+  String fontFamily = '';
+
   /// 메시지 전송 키 — false(기본)면 Enter로 전송·Shift+Enter로 줄바꿈, true면 그 반대.
   bool sendWithShiftEnter = false;
 
@@ -67,6 +97,17 @@ class AppSettings extends ChangeNotifier {
   /// 지금 잠겨 있는지 — 비밀번호를 넣어 풀 때까지 유지된다. 앱을 껐다 켜도 잠긴 채로 떠야
   /// 하므로 저장해 둔다.
   bool appLocked = false;
+
+  /// 창이 이미 포커스돼 있을 때(= 메신저를 보고 있는 중)도, 지금 보고 있는 방이 아닌 다른
+  /// 방에 메시지가 오면 그 방을 열 때까지 작업표시줄을 깜빡일지 — false(기본)면 창을 보고
+  /// 있으면 안 깜빡인다(notification_service.dart의 _flashWindowsTaskbar).
+  bool flashTaskbarWhenFocused = false;
+
+  /// 채팅 입력창 이모티콘 목록의 세트 탭 순서(이름으로 기억 — widgets/category_tab_row.dart를
+  /// 꾹 눌러서 끌면 바뀐다, sticker_picker.dart). 빈 목록이면 기본 순서(서버 세트 먼저, 그 뒤
+  /// 기본 이모지 세트). 새로 생긴 세트(아직 이 목록에 없는 이름)는 끌어서 넣기 전까지 그
+  /// 기본 순서 자리에 그대로 끼어 보인다.
+  List<String> stickerCategoryOrder = const [];
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -88,6 +129,15 @@ class AppSettings extends ChangeNotifier {
     sendWithShiftEnter = _prefs.getBool(_kSendWithShiftEnter) ?? false;
     autoLockOnSleep = _prefs.getBool(_kAutoLockOnSleep) ?? false;
     appLocked = _prefs.getBool(_kAppLocked) ?? false;
+    flashTaskbarWhenFocused =
+        _prefs.getBool(_kFlashTaskbarWhenFocused) ?? false;
+    stickerCategoryOrder =
+        _prefs.getStringList(_kStickerCategoryOrder) ?? const [];
+    textScale = (_prefs.getDouble(_kTextScale) ?? 1.0).clamp(
+      minTextScale,
+      maxTextScale,
+    );
+    fontFamily = _prefs.getString(_kFontFamily) ?? '';
     if (Platform.isWindows) {
       launchAtStartup = _readStartupPath() != null;
       // 창 자체의 실제 속성(항상 위로/불투명도)이라 위젯 재빌드만으론 반영이 안 되고, 매번
@@ -180,6 +230,33 @@ class AppSettings extends ChangeNotifier {
   Future<void> setAutoLockOnSleep(bool value) async {
     autoLockOnSleep = value;
     await _prefs.setBool(_kAutoLockOnSleep, value);
+    notifyListeners();
+  }
+
+  Future<void> setFlashTaskbarWhenFocused(bool value) async {
+    flashTaskbarWhenFocused = value;
+    await _prefs.setBool(_kFlashTaskbarWhenFocused, value);
+    notifyListeners();
+  }
+
+  /// [minTextScale]~[maxTextScale] 밖의 값은 그 끝으로 붙인다(스텝퍼가 끝에서 더 못 가게
+  /// 막아두지만, 혹시 몰라 여기서도 한 번 더 막는다).
+  Future<void> setTextScale(double value) async {
+    textScale = value.clamp(minTextScale, maxTextScale);
+    await _prefs.setDouble(_kTextScale, textScale);
+    notifyListeners();
+  }
+
+  /// [fontFamilyOptions]에 없는 값은 조용히 "시스템 기본"으로 저장한다.
+  Future<void> setFontFamily(String value) async {
+    fontFamily = value;
+    await _prefs.setString(_kFontFamily, fontFamily);
+    notifyListeners();
+  }
+
+  Future<void> setStickerCategoryOrder(List<String> order) async {
+    stickerCategoryOrder = order;
+    await _prefs.setStringList(_kStickerCategoryOrder, order);
     notifyListeners();
   }
 

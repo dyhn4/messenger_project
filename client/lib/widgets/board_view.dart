@@ -630,6 +630,7 @@ class PostMoreButton extends StatelessWidget {
       return const SizedBox(width: 8);
     }
     return MenuAnchor(
+      style: hoverMenuStyle(context),
       menuChildren: [
         if (canFavorite)
           hoverMenuItem(

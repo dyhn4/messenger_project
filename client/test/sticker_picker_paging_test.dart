@@ -1,5 +1,6 @@
 import 'package:client/data/stickers.dart';
 import 'package:client/models/sticker_pack.dart';
+import 'package:client/services/app_settings.dart';
 import 'package:client/widgets/sticker_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,15 +32,17 @@ Future<void> _pump(WidgetTester tester, {required int packs}) async {
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: Center(child: StickerPicker(onSelected: (_) {})),
+        body: Center(
+          child: StickerPicker(onSelected: (_) {}, settings: AppSettings()),
+        ),
       ),
     ),
   );
   await tester.pumpAndSettle();
 }
 
-final _prev = find.byKey(const ValueKey('sticker-tabs-prev'));
-final _next = find.byKey(const ValueKey('sticker-tabs-next'));
+final _prev = find.byKey(const ValueKey('category-tabs-prev'));
+final _next = find.byKey(const ValueKey('category-tabs-next'));
 
 double _offset(WidgetTester tester) => tester
     .state<ScrollableState>(

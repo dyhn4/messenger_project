@@ -22,6 +22,7 @@ import 'package:win32/win32.dart'
         TEXT;
 
 import '../widgets/avatar_utils.dart' show parseHexColor;
+import 'avatar_thumbnail.dart';
 
 /// 비밀 대화 자물쇠 배지를 아바타의 어느 모서리에 그릴지 — _badgeWithLock 문서 참고.
 enum _BadgeCorner { topLeft, bottomRight }
@@ -215,6 +216,10 @@ class NotificationService {
   /// 나란히 붙일 수 없어서, 그 대신 아바타 이미지 쪽에 배지를 합성하는 방식으로 표현한다.
   /// [senderName]/[conversationTitle]은 안드로이드의 "대화(conversation)" 알림 레이아웃을
   /// 만들기 위해 [title]("보낸사람 [방]")을 쪼개서 받는 것이다 — 안 주면 [title]로 폴백한다.
+  ///
+  /// [flashTaskbarUntilRoomOpened]는 환경설정 "작업표시줄 깜빡임" 값(AppSettings.
+  /// flashTaskbarWhenFocused) 그대로다 — Windows 창이 이미 포커스돼 있어도, 이 방([roomId])을
+  /// 열 때까지 작업표시줄을 계속 깜빡일지. 기본 false면 창을 보고 있을 때는 안 깜빡인다.
   Future<void> showMessage({
     required String title,
     required String body,
@@ -226,6 +231,7 @@ class NotificationService {
     String? avatarColor,
     String? avatarUrl,
     bool isSecret = false,
+    bool flashTaskbarUntilRoomOpened = false,
   }) async {
     final baseAvatarBytes = await _resolveAvatarBytes(
       avatarType: avatarType,
@@ -283,6 +289,11 @@ class NotificationService {
         importance: Importance.high,
         priority: Priority.high,
         shortcutId: roomId,
+        // 방마다 알림이 따로라 그냥 두면 상단 상태바에 방 개수만큼 아이콘이 쌓인다 — 한
+        // 묶음(그룹)으로 묶고 요약 알림을 하나 둬서 아이콘은 하나만 보이게 한다
+        // (_syncMessageSummary 참고). 소리·진동은 요약이 아니라 각 방 알림이 낸다.
+        groupKey: _messageGroupKey,
+        groupAlertBehavior: GroupAlertBehavior.children,
         // 런처 아이콘 배지 숫자 — 안 지운 이 방 메시지 개수(위 _appendHistory 참고).
         number: history?.length,
         styleInformation: MessagingStyleInformation(
@@ -349,17 +360,87 @@ class NotificationService {
       notificationDetails: details,
       payload: roomId,
     );
+    if (Platform.isAndroid) await _syncMessageSummary(include: roomId.hashCode);
 
-    if (Platform.isWindows) _flashWindowsTaskbar();
+    if (Platform.isWindows) {
+      _flashWindowsTaskbar(
+        roomId,
+        untilRoomOpened: flashTaskbarUntilRoomOpened,
+      );
+    }
   }
 
   /// 방을 열 때(또는 다시 포그라운드로 돌아와 그 방을 계속 보고 있을 때) 그 방으로 떠있는
   /// 알림을 지운다 — showMessage와 같은 id(roomId.hashCode)를 써야 같은 알림을 가리킨다.
+  /// "그 방을 열 때까지 계속 깜빡임"이 걸려 있던 방이면 목록에서 빼고, 그게 마지막 방이었으면
+  /// (_pendingFlashRooms가 다 비면) 깜빡임도 같이 멈춘다.
   Future<void> cancelForRoom(String roomId) async {
     await _plugin.cancel(id: roomId.hashCode);
     if (Platform.isAndroid) {
       await _historyPrefs.remove('$_historyKeyPrefix$roomId');
+      await _syncMessageSummary(exclude: roomId.hashCode);
     }
+    if (_pendingFlashRooms.remove(roomId) && _pendingFlashRooms.isEmpty) {
+      stopWindowsTaskbarFlash();
+    }
+  }
+
+  /// 안드로이드 메시지 알림을 한 묶음으로 모으는 그룹 키와, 그 묶음의 요약 알림 id.
+  /// (방 알림 id는 roomId.hashCode라 이 고정 id와 겹칠 일은 사실상 없다.)
+  static const _messageGroupKey = 'com.teamtalk.messenger.MESSAGES';
+  static const _messageSummaryId = 0x54540001;
+
+  /// 메시지 묶음의 요약 알림을 지금 떠 있는 방 알림에 맞춘다 — 방 알림이 하나라도 있으면
+  /// 요약을 (다시) 띄우고, 하나도 없으면 지운다. 요약이 있어야 OS가 묶음으로 접어서 상단
+  /// 상태바에 아이콘을 하나만 보여준다(방이 하나뿐이면 OS가 요약 대신 그 방 알림만 보여준다).
+  ///
+  /// 방금 띄운/지운 알림이 getActiveNotifications에 곧바로 반영 안 될 수 있어서
+  /// [include]/[exclude]로 그 방 id를 직접 보정한다. 사용자가 방 알림을 하나씩 옆으로 밀어
+  /// 지우는 건 앱이 알 수 없어서 요약 숫자가 잠깐 안 맞을 수 있지만, 다음 알림이 오거나 방을
+  /// 열 때(cancelForRoom) 다시 맞춰진다.
+  Future<void> _syncMessageSummary({int? include, int? exclude}) async {
+    final List<ActiveNotification> active;
+    try {
+      active = await _plugin.getActiveNotifications();
+    } catch (_) {
+      return;
+    }
+    final titles = <int, String>{
+      for (final n in active)
+        if (n.groupKey == _messageGroupKey &&
+            n.id != null &&
+            n.id != _messageSummaryId)
+          n.id!: n.title ?? '',
+    };
+    if (include != null) titles.putIfAbsent(include, () => '');
+    if (exclude != null) titles.remove(exclude);
+    if (titles.isEmpty) {
+      await _plugin.cancel(id: _messageSummaryId);
+      return;
+    }
+    final summary = '${titles.length}개 대화방의 새 메시지';
+    await _plugin.show(
+      id: _messageSummaryId,
+      title: 'TangoTalk',
+      body: summary,
+      notificationDetails: NotificationDetails(
+        android: AndroidNotificationDetails(
+          'messages',
+          '새 메시지',
+          channelDescription: '새 채팅 메시지 알림',
+          importance: Importance.high,
+          priority: Priority.high,
+          groupKey: _messageGroupKey,
+          setAsGroupSummary: true,
+          groupAlertBehavior: GroupAlertBehavior.children,
+          onlyAlertOnce: true,
+          styleInformation: InboxStyleInformation([
+            for (final t in titles.values)
+              if (t.isNotEmpty) t,
+          ], summaryText: summary),
+        ),
+      ),
+    );
   }
 
   /// [fallbackLabel]의 첫 글자로 만든 원형 아바타를 마지막 대안으로 쓴다(위젯의 "이니셜"
@@ -375,12 +456,20 @@ class NotificationService {
   }) async {
     if (avatarType == 'photo' && avatarUrl != null) {
       try {
-        final res = await http
+        var res = await http
             .get(Uri.parse(avatarUrl))
-            .timeout(const Duration(seconds: 3));
-        if (res.statusCode == 200) return res.bodyBytes;
+            .timeout(const Duration(seconds: 8));
+        // 방 멤버 목록에 들어 있던 사진 링크는 최대 2시간 뒤에 만료된다(401) — 새 링크를 받아 한 번 더.
+        final resign = resignFileUrl;
+        if (res.statusCode == 401 && resign != null) {
+          final fresh = await resign(Uri.parse(avatarUrl).path);
+          res = await http
+              .get(Uri.parse(fresh))
+              .timeout(const Duration(seconds: 8));
+        }
+        if (res.statusCode == 200) return await _shrinkAvatar(res.bodyBytes);
       } catch (_) {
-        // 프로필 사진을 못 받아오면 아래 이니셜 아바타로 대체한다.
+        // 프로필 사진을 못 받아오거나 못 읽으면 아래 이니셜 아바타로 대체한다.
       }
     } else if (avatarType == 'character' && avatarEmoji != null) {
       return _renderCharacterAvatar(
@@ -392,6 +481,17 @@ class NotificationService {
       fallbackLabel.isNotEmpty ? fallbackLabel[0] : '?',
     );
   }
+
+  /// 만료된 파일 링크(/files/<토큰>)를 새로 받는 함수 — Session이 로그인한 API로 채운다(안 채우면
+  /// 만료된 링크는 그냥 실패). 인자는 링크의 경로 부분, 돌려주는 값은 서버 주소까지 붙은 새 링크.
+  Future<String> Function(String path)? resignFileUrl;
+
+  /// 프로필 사진 원본(휴대폰 사진이면 수 MB·수천 픽셀)을 알림 아이콘에 그대로 넣으면 안드로이드가
+  /// 너무 큰 비트맵이라 아이콘을 못 그리거나 알림 자체가 늦어진다 — 가운데를 정사각형으로 오려
+  /// 192px 작은 PNG로 줄인다. 읽을 수 없는 형식이면 던져서 호출부가 이니셜 아바타로 대체하게 한다.
+  /// (새로 올리는 사진은 올릴 때 이미 썸네일이라 이건 예전에 원본으로 올린 사진용이다.)
+  Future<Uint8List> _shrinkAvatar(Uint8List bytes) =>
+      makeAvatarThumbnail(bytes, size: 192);
 
   /// 이모지+배경색을 원형 PNG로 직접 그린다(위젯 트리 없이 dart:ui Canvas만 사용).
   Future<Uint8List> _renderCharacterAvatar({
@@ -621,40 +721,76 @@ class NotificationService {
   /// 설정(기본 3회)만큼만 깜빡이고 멈춰서, 그 뒤로도 사용자가 창을 열 때까지 다시 걸어준다.
   Timer? _flashTimer;
 
-  void _flashWindowsTaskbar() {
+  /// "그 방을 열 때까지 계속 깜빡임"(환경설정)일 때, 아직 안 연 방들 — cancelForRoom이
+  /// 방을 열 때마다 하나씩 빼고, 다 비면 깜빡임을 멈춘다. 창이 포커스돼 있었든 백그라운드
+  /// 였든 상관없이 이 목록 하나로만 멈출지 정한다(그 옵션이 꺼져 있을 때는 안 쓴다 —
+  /// 그때는 예전처럼 "창에 포커스가 돌아오면" 멈춘다).
+  final Set<String> _pendingFlashRooms = {};
+
+  void _flashWindowsTaskbar(String roomId, {required bool untilRoomOpened}) {
     final hwnd = _findOurWindow();
-    if (hwnd == 0 || GetForegroundWindow() == hwnd) {
-      return; // 창이 없거나 이미 보고 있으면 건너뜀
+    if (hwnd == 0) return;
+
+    if (!untilRoomOpened) {
+      // 환경설정 기본값 — 창이 포커스돼 있으면 안 깜빡이고, 백그라운드면 창에 포커스가
+      // 돌아올 때까지만 깜빡인다(예전 동작 그대로).
+      _pendingFlashRooms.clear();
+      if (GetForegroundWindow() == hwnd) return;
+      _flash(hwnd, stop: false);
+      _flashTimer?.cancel();
+      _flashTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        final current = _findOurWindow();
+        if (current == 0 || GetForegroundWindow() == current) {
+          stopWindowsTaskbarFlash();
+          return;
+        }
+        _flash(current, stop: false);
+      });
+      return;
     }
-    _flash(hwnd, stop: false);
+
+    // "그 방을 열 때까지 계속 깜빡임" — 창이 포커스돼 있었든 백그라운드였든 상관없이, 알림이
+    // 쌓인 방을 전부 열 때까지 계속 깜빡인다. FLASHW_TIMERNOFG("포커스를 받으면 멈춤")는 이
+    // 목적과 안 맞아서(포커스를 줘도 방을 안 열었으면 계속 깜빡여야 하니) 포커스 여부와 무관
+    // 하게 항상 직접 횟수를 세는 방식만 쓴다.
+    _pendingFlashRooms.add(roomId);
+    _flash(hwnd, stop: false, forced: true);
     _flashTimer?.cancel();
     _flashTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_pendingFlashRooms.isEmpty) {
+        timer.cancel();
+        return;
+      }
       final current = _findOurWindow();
-      if (current == 0 || GetForegroundWindow() == current) {
+      if (current == 0) {
         stopWindowsTaskbarFlash();
         return;
       }
-      _flash(current, stop: false);
+      _flash(current, stop: false, forced: true);
     });
   }
 
-  /// 창을 열었거나(포커스) 알림을 눌렀을 때 깜빡임을 멈추고 원래 모습으로 되돌린다.
+  /// 창을 열었거나(포커스) 알림을 눌렀을 때, 또는 깜빡임이 가리키던 방을 모두 열었을 때
+  /// 깜빡임을 멈추고 원래 모습으로 되돌린다.
   void stopWindowsTaskbarFlash() {
     _flashTimer?.cancel();
     _flashTimer = null;
+    _pendingFlashRooms.clear();
     if (!Platform.isWindows) return;
     final hwnd = _findOurWindow();
     if (hwnd != 0) _flash(hwnd, stop: true);
   }
 
-  void _flash(int hwnd, {required bool stop}) {
+  void _flash(int hwnd, {required bool stop, bool forced = false}) {
     final info = calloc<_FLASHWINFO>();
     try {
       info.ref
         ..cbSize = sizeOf<_FLASHWINFO>()
         ..hwnd = hwnd
-        ..dwFlags = stop ? _flashwStop : (_flashwAll | _flashwTimerNoFg)
-        ..uCount = 0
+        ..dwFlags = stop
+            ? _flashwStop
+            : (forced ? _flashwAll : (_flashwAll | _flashwTimerNoFg))
+        ..uCount = forced ? _flashwForcedCount : 0
         ..dwTimeout = 0;
       _flashWindowEx(info);
     } finally {
@@ -668,6 +804,8 @@ class NotificationService {
 const _flashwStop = 0x00000000; // 깜빡임 중지(원래 상태로)
 const _flashwAll = 0x00000003; // FLASHW_CAPTION | FLASHW_TRAY
 const _flashwTimerNoFg = 0x0000000C; // 포커스를 받을 때까지 계속 깜빡임
+// 창이 이미 포커스돼 있을 때(forced) 몇 번 깜빡이고 멈출지 — TIMERNOFG가 못 쓰이니 직접 횟수를 준다.
+const _flashwForcedCount = 4;
 
 final class _FLASHWINFO extends Struct {
   @Uint32()

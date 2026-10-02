@@ -72,6 +72,15 @@ IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 #define VERSION_AS_STRING "1.0.0"
 #endif
 
+// path_provider는 CompanyName\ProductName으로 %APPDATA% 아래 데이터 폴더(설정·로그인 토큰·
+// 고정 인증서)를 정한다. Debug 빌드는 제품명을 달리해서, 같은 PC에 설치된 운영용 앱과
+// 서버 주소·로그인 상태를 공유하지 않게 한다(Release는 그대로 "TangoTalk").
+#ifdef _DEBUG
+#define PRODUCT_NAME_STRING "TangoTalk-Debug"
+#else
+#define PRODUCT_NAME_STRING "TangoTalk"
+#endif
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION VERSION_AS_NUMBER
  PRODUCTVERSION VERSION_AS_NUMBER
@@ -95,7 +104,7 @@ BEGIN
             VALUE "InternalName", "TangoTalk" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
             VALUE "OriginalFilename", "client.exe" "\0"
-            VALUE "ProductName", "TangoTalk" "\0"
+            VALUE "ProductName", PRODUCT_NAME_STRING "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

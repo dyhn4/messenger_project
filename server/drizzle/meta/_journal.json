@@ -568,6 +568,20 @@
       "when": 1790829617067,
       "tag": "0080_wild_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790843043426,
+      "tag": "0081_stormy_grim_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790925271930,
+      "tag": "0082_bumpy_norrin_radd",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:client/data/stickers.dart';
 import 'package:client/models/sticker_pack.dart';
 import 'package:client/screens/admin_stickers_tab.dart';
+import 'package:client/screens/my_profile_dialog.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
@@ -77,7 +78,12 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: Center(child: StickerPicker(onSelected: (s) => picked = s)),
+          body: Center(
+            child: StickerPicker(
+              onSelected: (s) => picked = s,
+              settings: AppSettings(),
+            ),
+          ),
         ),
       ),
     );
@@ -255,6 +261,284 @@ void main() {
       await tester.pump();
       expect(find.text('세트 12'), findsOneWidget);
       expect(find.text('리마인'), findsNothing);
+      s.dispose();
+    });
+
+    testWidgets('이모티콘/캐릭터 세그먼트를 바꾸면 그 kind만 다시 받는다', (tester) async {
+      final requestedKinds = <String>[];
+      Map<String, dynamic> packJson(String kind) => {
+        ..._packJson(),
+        'id': 'p-$kind',
+        'name': kind == 'character' ? '캐릭터세트' : '리마인',
+        'kind': kind,
+      };
+      final client = MockClient((request) async {
+        if (request.url.path == '/api/stickers') {
+          final kind = request.url.queryParameters['kind'] ?? 'sticker';
+          requestedKinds.add(kind);
+          return http.Response(
+            jsonEncode([packJson(kind)]),
+            200,
+            headers: _json,
+          );
+        }
+        return http.Response('[]', 200, headers: _json);
+      });
+      final s = Session(
+        notifications: NotificationService(),
+        settings: AppSettings(),
+      );
+      s.serverUrl = 'https://test.local';
+      s.api = ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: client,
+      );
+      await pumpTab(tester, s);
+      expect(find.text('리마인'), findsOneWidget);
+      expect(requestedKinds, ['sticker']);
+
+      await tester.tap(find.text('캐릭터'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('캐릭터세트'), findsOneWidget);
+      expect(find.text('리마인'), findsNothing);
+      expect(requestedKinds, ['sticker', 'character']);
+
+      // "새 세트" 창 제목도 지금 고른 kind를 따라간다.
+      await tester.tap(find.widgetWithText(FilledButton, '새 세트'));
+      await tester.pumpAndSettle();
+      expect(find.text('새 캐릭터 세트'), findsOneWidget);
+      s.dispose();
+    });
+  });
+
+  group('프로필 카드 > 캐릭터 선택하기: 세트에서 고르기', () {
+    testWidgets('세트 탭에서 캐릭터 그림을 고르고 확인을 누르면 저장되고 창이 닫힌다', (tester) async {
+      String? postedPath;
+      final client = MockClient((request) async {
+        if (request.method == 'GET' && request.url.path == '/api/stickers') {
+          expect(request.url.queryParameters['kind'], 'character');
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'cp1',
+                'name': '리마인 캐릭터',
+                'kind': 'character',
+                'hidden': false,
+                'stickers': [
+                  {
+                    'id': 'c1',
+                    'packId': 'cp1',
+                    'url': '/files/char1',
+                    'fileName': '1.png',
+                    'mimeType': 'image/png',
+                    'hidden': false,
+                  },
+                ],
+              },
+            ]),
+            200,
+            headers: _json,
+          );
+        }
+        if (request.method == 'POST' &&
+            request.url.path == '/api/users/me/avatar/character/c1') {
+          postedPath = request.url.path;
+          return http.Response(
+            jsonEncode({
+              'username': 'me',
+              'name': '나',
+              'avatarType': 'photo',
+              'avatarUrl': '/files/signed-char1',
+            }),
+            200,
+            headers: _json,
+          );
+        }
+        return http.Response('[]', 200, headers: _json);
+      });
+      final s = Session(
+        notifications: NotificationService(),
+        settings: AppSettings(),
+      );
+      s.serverUrl = 'https://test.local';
+      s.api = ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: client,
+      );
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(child: CharacterPickerDialog(session: s)),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // 처음엔 "기본 캐릭터" 탭(이모지)이 열려 있고, 세트 탭 줄에 서버 세트 이름이 보인다.
+      expect(find.widgetWithText(ChoiceChip, '리마인 캐릭터'), findsOneWidget);
+      expect(find.byType(StickerView), findsNothing);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, '리마인 캐릭터'));
+      await tester.pump();
+      expect(find.byType(StickerView), findsOneWidget); // 이 세트의 그림 하나
+
+      await tester.tap(find.byType(StickerView));
+      await tester.pump();
+      expect(postedPath, isNull); // "확인"을 눌러야 저장된다 — 그림만 골랐을 땐 아직 안 보낸다.
+
+      await tester.tap(find.widgetWithText(FilledButton, '확인'));
+      await tester.pump();
+      await tester.pump();
+      expect(postedPath, '/api/users/me/avatar/character/c1');
+      expect(s.avatarType, 'photo');
+      expect(s.avatarUrl, '/files/signed-char1');
+      s.dispose();
+    });
+
+    testWidgets('캐릭터 세트가 없으면 "기본 캐릭터" 탭만 있고 이모지 고르기만 보인다', (tester) async {
+      final client = MockClient(
+        (request) async => http.Response('[]', 200, headers: _json),
+      );
+      final s = Session(
+        notifications: NotificationService(),
+        settings: AppSettings(),
+      );
+      s.serverUrl = 'https://test.local';
+      s.api = ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: client,
+      );
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(child: CharacterPickerDialog(session: s)),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.widgetWithText(ChoiceChip, '기본 캐릭터'), findsOneWidget);
+      expect(find.text('캐릭터'), findsOneWidget); // 이모지 고르기 쪽 라벨
+      expect(find.byType(StickerView), findsNothing);
+      s.dispose();
+    });
+
+    testWidgets('이 앱의 최소 창 크기(350×600)에서도 레이아웃이 넘치지 않는다', (tester) async {
+      final client = MockClient((request) async {
+        if (request.method == 'GET' && request.url.path == '/api/stickers') {
+          return http.Response(
+            jsonEncode([_packJson(hideSecond: false)]),
+            200,
+            headers: _json,
+          );
+        }
+        return http.Response('[]', 200, headers: _json);
+      });
+      final s = Session(
+        notifications: NotificationService(),
+        settings: AppSettings(),
+      );
+      s.serverUrl = 'https://test.local';
+      s.api = ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: client,
+      );
+      tester.view.physicalSize = const Size(350, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(child: CharacterPickerDialog(session: s)),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(tester.takeException(), isNull); // RenderFlex overflow 등 렌더 오류 없음.
+      s.dispose();
+    });
+
+    testWidgets('세트마다 그림 개수가 달라도 창 크기가 그대로고, 닫기/확인은 늘 보인다', (tester) async {
+      Map<String, dynamic> packJson(String name, int stickerCount) => {
+        'id': name,
+        'name': name,
+        'kind': 'character',
+        'hidden': false,
+        'stickers': [
+          for (var i = 1; i <= stickerCount; i++)
+            {
+              'id': '$name-$i',
+              'packId': name,
+              'url': '/files/$name-$i',
+              'fileName': '$i.jpg',
+              'mimeType': 'image/jpeg',
+              'hidden': false,
+            },
+        ],
+      };
+      final client = MockClient((request) async {
+        if (request.method == 'GET' && request.url.path == '/api/stickers') {
+          return http.Response(
+            jsonEncode([packJson('한장', 1), packJson('스무장', 20)]),
+            200,
+            headers: _json,
+          );
+        }
+        return http.Response('[]', 200, headers: _json);
+      });
+      final s = Session(
+        notifications: NotificationService(),
+        settings: AppSettings(),
+      );
+      s.serverUrl = 'https://test.local';
+      s.api = ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: client,
+      );
+      tester.view.physicalSize = const Size(800, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(child: CharacterPickerDialog(session: s)),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      Size dialogSize() => tester.getSize(find.byType(Dialog));
+      bool buttonsVisible() =>
+          tester.getRect(find.widgetWithText(FilledButton, '확인')).bottom <=
+          tester.getRect(find.byType(Dialog)).bottom;
+
+      final builtinSize = dialogSize();
+      expect(buttonsVisible(), isTrue);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, '한장'));
+      await tester.pump();
+      expect(dialogSize(), builtinSize); // 그림 1장짜리 세트로 바꿔도 창 크기 그대로.
+      expect(buttonsVisible(), isTrue);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, '스무장'));
+      await tester.pump();
+      expect(dialogSize(), builtinSize); // 그림 20장짜리 세트로 바꿔도 창 크기 그대로.
+      expect(buttonsVisible(), isTrue);
       s.dispose();
     });
   });

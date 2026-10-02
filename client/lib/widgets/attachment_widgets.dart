@@ -31,13 +31,28 @@ bool _isInAppViewable(String fileName) {
 
 /// 첨부를 내려받아 [attachmentKey]/[attachmentNonce]가 있으면(비밀 대화) 그 자리에서 복호화까지
 /// 한다 — 서버는 암호화된 바이트만 갖고 있으므로 표시/저장 전에 항상 이 함수를 거쳐야 한다.
+///
+/// 메시지에 실려 온 링크는 최대 2시간 뒤에 만료돼서(서버 signFileUrl) 앱을 오래 켜 둔 채 받으면
+/// 401이 난다. [session]을 주면 그때 서버에서 새 링크를 받아 한 번 더 시도한다.
 Future<Uint8List> fetchAttachmentBytes({
   required String url,
   String? attachmentKey,
   String? attachmentNonce,
+  Session? session,
 }) async {
-  final res = await http.get(Uri.parse(url));
-  if (res.statusCode >= 400) throw Exception('다운로드에 실패했습니다.');
+  var res = await http.get(Uri.parse(url));
+  final api = session?.api;
+  if (res.statusCode == 401 && api != null) {
+    try {
+      final fresh = await api.resignFileUrl(Uri.parse(url).path);
+      res = await http.get(Uri.parse(session!.resolveUrl(fresh)));
+    } catch (_) {
+      // 새 링크를 못 받으면 아래에서 처음 응답 그대로 실패로 처리한다.
+    }
+  }
+  if (res.statusCode >= 400) {
+    throw Exception('다운로드에 실패했습니다. (HTTP ${res.statusCode})');
+  }
   if (attachmentKey == null || attachmentNonce == null) return res.bodyBytes;
 
   final plain = await secret_crypto.decryptAttachment(
@@ -62,6 +77,7 @@ Future<String?> saveAttachment({
   String? attachmentNonce,
 }) async {
   final bytes = await fetchAttachmentBytes(
+    session: session,
     url: url,
     attachmentKey: attachmentKey,
     attachmentNonce: attachmentNonce,
@@ -135,6 +151,7 @@ List<ViewerImage> roomViewerImages(Session session, List<Message> messages) {
             loadBytes: m.attachmentKey == null
                 ? null
                 : () => fetchAttachmentBytes(
+                    session: session,
                     url: session.resolveUrl(a.fileUrl),
                     attachmentKey: m.attachmentKey,
                     attachmentNonce: m.attachmentNonce,
@@ -166,6 +183,7 @@ Future<({int count, String folder})?> saveAllAttachments({
   var count = 0;
   for (final item in items) {
     final bytes = await fetchAttachmentBytes(
+      session: session,
       url: item.url,
       attachmentKey: attachmentKey,
       attachmentNonce: attachmentNonce,
@@ -379,6 +397,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
     super.initState();
     if (_previewIsSecret) {
       _previewBytes = fetchAttachmentBytes(
+        session: widget.session,
         url: _previewUrl,
         attachmentKey: _previewKey,
         attachmentNonce: _previewNonce,
@@ -419,6 +438,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
           // 이미 축소 썸네일로 봤으니 굳이 미리 받아둘 필요가 없다.
           imageBytesFuture: widget.attachmentKey != null
               ? fetchAttachmentBytes(
+                  session: widget.session,
                   url: widget.url,
                   attachmentKey: widget.attachmentKey,
                   attachmentNonce: widget.attachmentNonce,
@@ -607,6 +627,7 @@ class ChatImageAttachments extends StatelessWidget {
         loadBytes: attachmentKey == null
             ? null
             : () => fetchAttachmentBytes(
+                session: session,
                 url: session.resolveUrl(a.fileUrl),
                 attachmentKey: attachmentKey,
                 attachmentNonce: attachmentNonce,
@@ -798,6 +819,7 @@ class _ChatImageTileState extends State<_ChatImageTile> {
     super.initState();
     if (_previewIsSecret) {
       _previewBytes = fetchAttachmentBytes(
+        session: widget.session,
         url: _previewUrl,
         attachmentKey: _previewKey,
         attachmentNonce: _previewNonce,
@@ -1082,6 +1104,7 @@ class _DownloadableFileState extends State<DownloadableFile> {
     setState(() => _opening = true);
     try {
       final bytes = await fetchAttachmentBytes(
+        session: widget.session,
         url: widget.url,
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,

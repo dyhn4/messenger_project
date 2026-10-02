@@ -9,7 +9,8 @@ import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
-import '../widgets/hover_toolbar.dart' show hoverMenuDivider, hoverMenuItem;
+import '../widgets/hover_toolbar.dart'
+    show hoverMenuDivider, hoverMenuItem, hoverMenuStyle;
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/room_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
@@ -764,6 +765,7 @@ class _MoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MenuAnchor(
+      style: hoverMenuStyle(context),
       menuChildren: [
         hoverMenuItem(
           icon: Icons.edit_outlined,

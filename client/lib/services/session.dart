@@ -66,7 +66,11 @@ class Session extends ChangeNotifier {
     required this.notifications,
     required this.settings,
     this.suppressNotifications = false,
-  });
+  }) {
+    // 알림 아이콘용 프로필 사진 링크가 만료됐을 때 새로 받는다(notification_service.dart).
+    notifications.resignFileUrl = (path) async =>
+        resolveUrl(await api!.resignFileUrl(path));
+  }
 
   /// 세션이 바뀌면 앱 전체(방 목록·대화 목록 등)가 다시 그려진다 — 입력칸에서 한글을 조합하며
   /// 빠르게 치는 동안에는 그 알림을 잠깐 모아 두었다가 내보낸다(typing_gate.dart 참고).
@@ -1382,6 +1386,7 @@ class Session extends ChangeNotifier {
             : '비밀대화 요청$teamBadge',
         body: '비밀 대화(종단간 암호화)를 요청했습니다.',
         roomId: e.roomId,
+        flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
         senderName: initiator?.name,
         conversationTitle: teamTag == null ? '비밀대화 요청' : '비밀대화 요청 · $teamTag',
         avatarType: initiator?.avatarType ?? 'initial',
@@ -2132,6 +2137,7 @@ class Session extends ChangeNotifier {
           : m.senderName,
       body: preview,
       roomId: m.roomId,
+      flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
       senderName: m.senderName,
       conversationTitle: roomTag == null
           ? null
@@ -2206,6 +2212,7 @@ class Session extends ChangeNotifier {
       title: '${c.senderName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: preview,
       roomId: c.roomId,
+      flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
       senderName: c.senderName,
       conversationTitle: teamTag == null ? tag : '$tag · $teamTag',
       avatarType: sender?.avatarType ?? 'initial',
@@ -2253,6 +2260,7 @@ class Session extends ChangeNotifier {
       title: '${a.authorName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: a.previewText,
       roomId: room.id,
+      flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
       senderName: a.authorName,
       conversationTitle: teamTag == null ? tag : '$tag · $teamTag',
       avatarType: sender?.avatarType ?? 'initial',
@@ -2398,6 +2406,7 @@ class Session extends ChangeNotifier {
           ? _secretPreviewPlaceholder
           : '${n.actorName ?? ''}님이 회원님을 멘션했습니다: ${n.preview}',
       roomId: room.id,
+      flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
       senderName: n.actorName,
       conversationTitle: teamTag == null ? roomTag : '$roomTag · $teamTag',
     );
@@ -2449,7 +2458,8 @@ class Session extends ChangeNotifier {
       for (final team in teams.toList()) {
         for (final fresh in await client.fetchRooms(team.id)) {
           final room = _findRoom(fresh.id);
-          if (room == null || room.unreadMentionCount == fresh.unreadMentionCount) {
+          if (room == null ||
+              room.unreadMentionCount == fresh.unreadMentionCount) {
             continue;
           }
           room.unreadMentionCount = fresh.unreadMentionCount;
@@ -2719,6 +2729,17 @@ class Session extends ChangeNotifier {
     this.avatarEmoji = me.avatarEmoji;
     this.avatarColor = me.avatarColor;
     this.avatarUrl = me.avatarUrl;
+    notifyListeners();
+  }
+
+  /// 서버 운영자가 올린 "캐릭터" 세트에서 그림 하나를 내 프로필 사진으로 고른다
+  /// (api_client.dart — 서버가 avatarType:'photo'로 바꿔서 돌려준다).
+  Future<void> setAvatarToServerCharacter(String stickerId) async {
+    final me = await api!.setAvatarToServerCharacter(stickerId);
+    avatarType = me.avatarType;
+    avatarEmoji = me.avatarEmoji;
+    avatarColor = me.avatarColor;
+    avatarUrl = me.avatarUrl;
     notifyListeners();
   }
 
@@ -3632,7 +3653,7 @@ class Session extends ChangeNotifier {
     );
     return _stickersLoading = () async {
       try {
-        final packs = await api?.fetchStickerPacks();
+        final packs = await api?.fetchStickerPacks(kind: 'sticker');
         if (packs != null) serverStickers.replace(packs, resolveUrl);
       } catch (_) {
         // 못 받아도 기본 이모티콘은 그대로 쓴다 — 다음 연결·다음 요청 때 다시 시도.

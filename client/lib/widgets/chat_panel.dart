@@ -622,7 +622,10 @@ class _ChatPanelState extends State<ChatPanel> {
         child: TapRegion(
           groupId: this,
           onTapOutside: (_) => _closeStickerPicker(),
-          child: StickerPicker(onSelected: _selectSticker),
+          child: StickerPicker(
+            onSelected: _selectSticker,
+            settings: widget.session.settings,
+          ),
         ),
       )
     else if (_pendingSticker != null)

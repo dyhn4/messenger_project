@@ -8,6 +8,7 @@ import { findTeamMember, listTeamIdsForUser, listTeamsForUser } from './db/queri
 import { clearTopicAdminRoles } from './db/queries/rooms.js';
 import { deleteScheduledMessagesForUser } from './db/queries/scheduledMessages.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
+import { findStickerWithPack } from './db/queries/stickers.js';
 import { isOnline } from './presence.js';
 import { accountRole, canCreateProject, canCreateTeamInviteLink } from './permissions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
@@ -273,6 +274,40 @@ export function createUsersRouter(io) {
     // 이 사람이 속한 모든 방(다른 기기 포함, 그 방의 멤버 전원)에 갱신된 멤버 정보를 알린다.
     await broadcastMemberUpdate(io, user.id);
 
+    res.json(publicUser(updated));
+  });
+
+  /**
+   * 서버 운영자가 올린 "캐릭터" 세트(stickers.js, kind:'character')에서 그림 하나를 내 프로필
+   * 사진으로 고른다. 실제로는 "사진 올리기"와 똑같이 avatarType:'photo' + avatarUrl만 바꾸는
+   * 것이라(렌더링 쪽은 손댈 필요가 없다 — publicUser가 매번 새로 서명해서 내려준다) 그 캐릭터
+   * 그림의 원본 경로(avatarUrl과 같은 미서명 /uploads/ 형식 — stickers.js의 fileUrl)를 그대로
+   * 복사해 넣는다. 세트가 나중에 숨겨지거나 삭제돼도, 이미 고른 사람의 프로필 사진은 독립된
+   * 값이라 그대로 남는다(파일 자체를 지우지 않는 한 — 세트 삭제도 소프트 삭제라 괜찮다).
+   */
+  router.post('/users/me/avatar/character/:stickerId', async (req, res) => {
+    const user = await findUserById(req.user.sub);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+
+    const found = await findStickerWithPack(req.params.stickerId);
+    if (
+      !found ||
+      found.pack.kind !== 'character' ||
+      found.pack.deletedAt ||
+      found.pack.hidden ||
+      found.hidden
+    ) {
+      return res.status(404).json({ error: '캐릭터를 찾을 수 없습니다.' });
+    }
+
+    const updated = await updateUser(user.id, {
+      avatarType: 'photo',
+      avatarEmoji: null,
+      avatarColor: null,
+      // 프로필 사진은 작게만 그려지므로 썸네일이 있으면 그걸 복사한다(없으면 원본).
+      avatarUrl: found.thumbnailUrl ?? found.fileUrl,
+    });
+    await broadcastMemberUpdate(io, user.id);
     res.json(publicUser(updated));
   });
 

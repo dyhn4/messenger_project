@@ -16,6 +16,7 @@ import '../screens/topic_settings_dialog.dart';
 import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'compact_menu.dart';
 import 'export_chat_dialog.dart';
 import 'floating_dialog.dart';
 import 'self_destruct_picker_dialog.dart';
@@ -141,8 +142,12 @@ mixin CloseWhenRoomRemoved<T extends StatefulWidget> on State<T> {
     if (!_roomWasListed || !mounted) return;
     if (roomSession.roomById(watchedRoomId) != null) return;
     _roomWasListed = false;
-    closeOwnRoute(context);
+    onWatchedRoomRemoved();
   }
+
+  /// 방이 사라졌을 때 — 기본은 이 화면의 라우트를 닫는다. 라우트가 아니라 옆 패널로 떠 있는
+  /// 화면(참여 멤버 패널)은 라우트를 건드리면 안 되므로 이걸 덮어써서 패널만 닫는다.
+  void onWatchedRoomRemoved() => closeOwnRoute(context);
 }
 
 /// RoomOptionsMenu의 자동 삭제 타이머 항목 트레일링 표시용 — self_destruct_picker_dialog.dart의
@@ -352,12 +357,17 @@ class RoomOptionsMenu extends StatelessWidget {
   final ValueChanged<Room>? onOpenFiles;
   final ValueChanged<Room>? onOpenLinks;
 
+  /// "멤버" 버튼 — PC는 오른쪽 "참여 멤버" 패널로 연다(desktop_home_screen.dart). 안 주면(모바일)
+  /// 예전처럼 창/전체화면으로 연다.
+  final ValueChanged<Room>? onOpenMembers;
+
   const RoomOptionsMenu({
     super.key,
     required this.session,
     required this.room,
     this.onOpenFiles,
     this.onOpenLinks,
+    this.onOpenMembers,
   });
 
   void _openFiles(BuildContext context) {
@@ -443,6 +453,8 @@ class RoomOptionsMenu extends StatelessWidget {
   }
 
   void _showMembers(BuildContext context, Room room) {
+    final handler = onOpenMembers;
+    if (handler != null) return handler(room);
     // 토픽은 순서·배지·검색·내보내기가 있는 "참여 멤버" 창, 그룹은 지금까지의 간단한 목록.
     if (room.type == RoomType.topic) {
       showTopicMembersDialog(context, session, room);
@@ -491,6 +503,93 @@ class RoomOptionsMenu extends StatelessWidget {
         : (isDm ? '채팅방 숨기기' : (isTopic ? '토픽 나가기' : '채팅방 나가기'));
     final iconColor = IconTheme.of(context).color;
 
+    // "더보기" 메뉴 — 채팅 목록 우클릭 메뉴와 같은 간결한 모양(compact_menu.dart). 항목 묶음
+    // (공지 / 파일·링크·타이머 / 내보내기 / 정보 변경 / 나가기) 사이에 구분선을 넣는다.
+    final moreMenuSections = [
+      [
+        // 공지는 읽기가 방 멤버 전원에게 열려 있으므로(채팅방 상단 배너, 히스토리 목록) 이
+        // 메뉴 항목 자체는 누구나 본다 — "글쓰기" 버튼만 토픽 생성 권한이 있는 사람에게
+        // 보인다(announcement_list_screen.dart의 _canWrite).
+        if (isTopic)
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.campaign_outlined,
+            label: '공지',
+            onTap: () => showAnnouncementListScreen(context, session, room),
+          ),
+      ],
+      [
+        // 비밀 대화는 서버가 내용을 몰라서(종단간 암호화) 파일·링크 모아보기에서 빠진다.
+        if (!room.isSecret) ...[
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.insert_drive_file_outlined,
+            label: '파일 보기',
+            onTap: () => _openFiles(context),
+          ),
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.link,
+            label: '링크 보기',
+            onTap: () => _openLinks(context),
+          ),
+        ],
+        if (room.isSecret)
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.timer_outlined,
+            label: room.secretSelfDestructSeconds == null
+                ? '자동 삭제 타이머'
+                : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
+            onTap: () => showDialog(
+              context: context,
+              builder: (_) =>
+                  SelfDestructPickerDialog(session: session, room: room),
+            ),
+          ),
+      ],
+      [
+        // 비밀 대화는 서버가 평문을 몰라서(종단간 암호화) 지원하지 않는다 — export_chat_dialog.dart 참고.
+        if (!room.isSecret)
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.file_download_outlined,
+            label: '대화 내보내기',
+            onTap: () => showExportChatDialog(context, session, room),
+          ),
+      ],
+      [
+        // 토픽을 관리할 수 있는 사람(토픽 관리자·팀 관리자)만 — 이름·설정·보관·삭제·멤버 관리.
+        if (isTopic && room.canManage(session))
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.edit_outlined,
+            label: '정보 변경하기',
+            onTap: () => showTopicSettingsDialog(context, session, room),
+          ),
+        if (room.type == RoomType.group) ...[
+          _groupInfoItem(context, room),
+          // 나에게만 다른 이름으로 부르기(다른 멤버에겐 그대로) — 방 목록 우클릭·길게 누르기와 같다.
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.drive_file_rename_outline,
+            label: renameRoomMenuLabel(room, session.userId ?? ''),
+            onTap: () => showRenameRoomForMeDialog(context, session, room),
+          ),
+        ],
+      ],
+      [
+        if (!room.isSelf)
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.exit_to_app,
+            label: leaveLabel,
+            color: Colors.redAccent,
+            onTap: () => showLeaveRoomDialog(context, session, room),
+          ),
+      ],
+    ].where((s) => s.isNotEmpty).toList();
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -527,120 +626,15 @@ class RoomOptionsMenu extends StatelessWidget {
         PopupMenuButton<void>(
           icon: const Icon(Icons.more_vert),
           tooltip: '더보기',
+          color: CompactMenu.color(context),
+          shape: CompactMenu.shape,
+          menuPadding: CompactMenu.menuPadding,
+          constraints: CompactMenu.constraints,
           itemBuilder: (context) => [
-            // 공지는 읽기가 방 멤버 전원에게 열려 있으므로(채팅방 상단 배너, 히스토리 목록) 이
-            // 메뉴 항목 자체는 누구나 본다 — "글쓰기" 버튼만 토픽 생성 권한이 있는 사람에게
-            // 보인다(announcement_list_screen.dart의 _canWrite).
-            if (isTopic)
-              PopupMenuItem<void>(
-                onTap: () => showAnnouncementListScreen(context, session, room),
-                child: const Row(
-                  children: [
-                    Icon(Icons.campaign_outlined),
-                    SizedBox(width: 8),
-                    Text('공지'),
-                  ],
-                ),
-              ),
-            // 비밀 대화는 서버가 내용을 몰라서(종단간 암호화) 파일·링크 모아보기에서 빠진다.
-            if (!room.isSecret) ...[
-              PopupMenuItem<void>(
-                onTap: () => _openFiles(context),
-                child: const Row(
-                  children: [
-                    Icon(Icons.insert_drive_file_outlined),
-                    SizedBox(width: 8),
-                    Text('파일 보기'),
-                  ],
-                ),
-              ),
-              PopupMenuItem<void>(
-                onTap: () => _openLinks(context),
-                child: const Row(
-                  children: [
-                    Icon(Icons.link),
-                    SizedBox(width: 8),
-                    Text('링크 보기'),
-                  ],
-                ),
-              ),
+            for (var i = 0; i < moreMenuSections.length; i++) ...[
+              if (i > 0) CompactMenu.divider,
+              ...moreMenuSections[i],
             ],
-            if (room.isSecret)
-              PopupMenuItem<void>(
-                onTap: () => showDialog(
-                  context: context,
-                  builder: (_) =>
-                      SelfDestructPickerDialog(session: session, room: room),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.timer_outlined),
-                    const SizedBox(width: 8),
-                    Text(
-                      room.secretSelfDestructSeconds == null
-                          ? '자동 삭제 타이머'
-                          : '자동 삭제 타이머 (${_formatSeconds(room.secretSelfDestructSeconds!)})',
-                    ),
-                  ],
-                ),
-              ),
-            // 비밀 대화는 서버가 평문을 몰라서(종단간 암호화) 지원하지 않는다 — export_chat_dialog.dart 참고.
-            if (!room.isSecret)
-              PopupMenuItem<void>(
-                onTap: () => showExportChatDialog(context, session, room),
-                child: const Row(
-                  children: [
-                    Icon(Icons.file_download_outlined),
-                    SizedBox(width: 8),
-                    Text('대화 내보내기'),
-                  ],
-                ),
-              ),
-            // 토픽을 관리할 수 있는 사람(토픽 관리자·팀 관리자)만 — 이름·설정·보관·삭제·멤버 관리.
-            if (isTopic && room.canManage(session))
-              PopupMenuItem<void>(
-                onTap: () => showTopicSettingsDialog(context, session, room),
-                child: const Row(
-                  children: [
-                    Icon(Icons.edit_outlined),
-                    SizedBox(width: 8),
-                    Text('정보 변경하기'),
-                  ],
-                ),
-              ),
-            if (room.type == RoomType.group) ...[
-              _groupInfoItem(context, room),
-              // 나에게만 다른 이름으로 부르기(다른 멤버에겐 그대로) — 방 목록 우클릭·길게 누르기와 같다.
-              PopupMenuItem<void>(
-                onTap: () => showRenameRoomForMeDialog(context, session, room),
-                child: Row(
-                  children: [
-                    const Icon(Icons.drive_file_rename_outline),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        renameRoomMenuLabel(room, session.userId ?? ''),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (!room.isSelf)
-              PopupMenuItem<void>(
-                onTap: () => showLeaveRoomDialog(context, session, room),
-                child: Row(
-                  children: [
-                    const Icon(Icons.exit_to_app, color: Colors.redAccent),
-                    const SizedBox(width: 8),
-                    Text(
-                      leaveLabel,
-                      style: const TextStyle(color: Colors.redAccent),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
       ],
@@ -651,17 +645,21 @@ class RoomOptionsMenu extends StatelessWidget {
   /// 두고 이유를 툴팁으로 보여 준다(서버 PATCH도 같은 문구로 막는다).
   PopupMenuItem<void> _groupInfoItem(BuildContext context, Room room) {
     final canEdit = room.canEditGroupInfo(session);
-    const row = Row(
-      children: [Icon(Icons.edit_outlined), SizedBox(width: 8), Text('정보 변경')],
+    final row = Row(
+      children: [
+        Icon(Icons.edit_outlined, size: 16, color: Theme.of(context).hintColor),
+        const SizedBox(width: 8),
+        const Text('정보 변경', style: CompactMenu.textStyle),
+      ],
     );
     return PopupMenuItem<void>(
       enabled: canEdit,
+      height: CompactMenu.itemHeight,
+      padding: CompactMenu.itemPadding,
       onTap: canEdit
           ? () => showGroupSettingsDialog(context, session, room)
           : null,
-      child: canEdit
-          ? row
-          : const Tooltip(message: groupInfoGuestNotice, child: row),
+      child: canEdit ? row : Tooltip(message: groupInfoGuestNotice, child: row),
     );
   }
 }

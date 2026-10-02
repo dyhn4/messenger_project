@@ -14,6 +14,7 @@ import {
   updateStickerPack,
 } from './db/queries/stickers.js';
 import { signFileUrl, uploadsDir } from './upload.js';
+import { makeStickerThumbnail } from './stickerThumbnail.js';
 
 /** 이모티콘으로 올릴 수 있는 그림 형식(움직이는 GIF 포함) — 확장자로 본다(앱의 업로드는 형식을
  * application/octet-stream으로 보내서, 보내온 형식 값은 믿을 수 없다). */
@@ -50,6 +51,8 @@ function stickerDto(s) {
     id: s.id,
     packId: s.packId,
     url: signFileUrl(s.fileUrl),
+    // 화면에 그릴 땐 이걸 쓴다(없으면 null — 원본 url을 그대로).
+    thumbnailUrl: s.thumbnailUrl ? signFileUrl(s.thumbnailUrl) : null,
     fileName: s.fileName ?? null,
     mimeType: s.mimeType ?? null,
     hidden: s.hidden,
@@ -60,15 +63,20 @@ function packDto(p) {
   return {
     id: p.id,
     name: p.name,
+    kind: p.kind ?? 'sticker',
     hidden: p.hidden,
     deleted: !!p.deletedAt,
     stickers: (p.stickers ?? []).map(stickerDto),
   };
 }
 
+const STICKER_PACK_KINDS = new Set(['sticker', 'character']);
+
 /**
- * 이모티콘(그림 스티커) API. 목록은 로그인한 누구나 받고(숨긴 것도 — 예전 메시지를 그리려고),
- * 세트 만들기·그림 올리기·숨기기는 서버 운영자만 한다(admin.js와 같은 isServerAdmin 기준).
+ * 이모티콘(그림 스티커)/캐릭터(프로필 사진 세트) API. 둘 다 같은 테이블·업로드·숨기기·삭제
+ * 로직을 쓰고 kind로만 갈린다(db/schema.js 주석 참고). 목록은 로그인한 누구나 받고(숨긴 것도 —
+ * 예전 메시지를 그리려고), 세트 만들기·그림 올리기·숨기기는 서버 운영자만 한다(admin.js와
+ * 같은 isServerAdmin 기준).
  */
 export function createStickersRouter() {
   const router = Router();
@@ -81,14 +89,17 @@ export function createStickersRouter() {
     next();
   };
 
+  /** ?kind=sticker|character — 안 주면 'sticker'(채팅 선택창의 기존 호출을 그대로 지킨다). */
   router.get('/stickers', async (req, res) => {
-    res.json((await listStickerPacks()).map(packDto));
+    const kind = STICKER_PACK_KINDS.has(req.query?.kind) ? req.query.kind : 'sticker';
+    res.json((await listStickerPacks(kind)).map(packDto));
   });
 
   router.post('/stickers/packs', requireServerAdmin, async (req, res) => {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
     if (!name) return res.status(400).json({ error: '세트 이름을 입력하세요.' });
-    res.status(201).json(packDto(await createStickerPack(name)));
+    const kind = STICKER_PACK_KINDS.has(req.body?.kind) ? req.body.kind : 'sticker';
+    res.status(201).json(packDto(await createStickerPack(name, kind)));
   });
 
   /** 세트 이름 바꾸기·숨기기(숨기면 선택창에서만 빠지고 예전 메시지는 그대로 보인다). */
@@ -120,14 +131,17 @@ export function createStickersRouter() {
     if (files.length === 0) {
       return res.status(400).json({ error: '올릴 그림이 없습니다(PNG·JPG·GIF·WEBP, 한 장 5MB 이하).' });
     }
-    const rows = await addStickers(
-      pack.id,
-      files.map((f) => ({
+    const items = [];
+    for (const f of files) {
+      const thumb = await makeStickerThumbnail(f.path);
+      items.push({
         fileUrl: `/uploads/${f.filename}`,
+        thumbnailUrl: thumb ? `/uploads/${thumb}` : null,
         fileName: f.originalname,
         mimeType: STICKER_MIME[extOf(f.originalname)],
-      })),
-    );
+      });
+    }
+    const rows = await addStickers(pack.id, items);
     res.status(201).json(rows.map(stickerDto));
   });
 

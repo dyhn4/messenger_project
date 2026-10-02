@@ -1,15 +1,24 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../data/stickers.dart' show Sticker, serverStickerPrefix;
 import '../models/room.dart';
+import '../models/sticker_pack.dart';
 import '../models/team.dart';
+import '../services/avatar_thumbnail.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/avatar_utils.dart' show AvatarView;
+import '../widgets/category_tab_row.dart';
 import '../widgets/email_address_field.dart';
+import '../widgets/muted_scrollbar.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/org_section.dart';
+import '../widgets/sticker_view.dart';
 import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
@@ -225,37 +234,6 @@ class MyProfileDialog extends StatelessWidget {
                   // 걸 막기 위함) — "회원"/"멤버" 탭에서 남이 바꿔줘야 한다.
                   onEdit: null,
                 ),
-                // 생일 — 월/일만(연도 없음). 정한 값은 팀원들의 캘린더 "멤버 생일"에 표시된다.
-                InkWell(
-                  key: const ValueKey('profile-birthday'),
-                  onTap: () => showBirthdayDialog(context, session),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.cake_outlined, size: 18, color: hint),
-                        const SizedBox(width: 10),
-                        const Expanded(child: Text('생일')),
-                        Text(
-                          birthdayText(session.birthday) ?? '설정 안 함',
-                          style: TextStyle(color: hint),
-                        ),
-                        Icon(Icons.chevron_right, color: hint),
-                      ],
-                    ),
-                  ),
-                ),
-                // 나와의 대화는 팀마다 하나라, 팀을 고르기 전(팀 목록 화면)에는 뺀다.
-                if (session.currentTeam != null) ...[
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: _SelfChatButton(session: session),
-                  ),
-                ],
                 const SizedBox(height: 12),
                 InkWell(
                   onTap: () => _openPersonalInfo(context),
@@ -278,8 +256,16 @@ class MyProfileDialog extends StatelessWidget {
                     ),
                   ),
                 ),
+                // 나와의 대화는 팀마다 하나라, 팀을 고르기 전(팀 목록 화면)에는 뺀다.
+                if (session.currentTeam != null) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: _SelfChatButton(session: session),
+                  ),
+                ],
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                   child: SizedBox(
                     width: double.infinity,
                     child: TextButton.icon(
@@ -546,6 +532,46 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                           session: widget.session,
                           verifiedPassword: widget.verifiedPassword,
                           onDone: () => _toggle(_InfoSection.email),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      // 생일 — 월/일만(연도 없음). 정한 값은 팀원들의 캘린더 "멤버 생일"에 표시된다.
+                      InkWell(
+                        key: const ValueKey('profile-birthday'),
+                        onTap: () =>
+                            showBirthdayDialog(context, widget.session),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 14,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.cake_outlined,
+                                size: 18,
+                                color: Theme.of(context).hintColor,
+                              ),
+                              const SizedBox(width: 10),
+                              const SizedBox(
+                                width: _infoLabelWidth,
+                                child: Text('생일'),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  birthdayText(widget.session.birthday) ??
+                                      '설정 안 함',
+                                  style: TextStyle(
+                                    color: Theme.of(context).hintColor,
+                                  ),
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right,
+                                color: Theme.of(context).hintColor,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       const Divider(height: 1),
@@ -1101,28 +1127,108 @@ class AvatarEditDialog extends StatefulWidget {
   State<AvatarEditDialog> createState() => _AvatarEditDialogState();
 }
 
+/// 프로필 사진 편집 창에서 고른 새 아바타 — "저장"을 눌러야 실제로 바뀐다(그 전에는 미리보기만).
+class AvatarDraft {
+  /// 'initial' | 'character' | 'photo'
+  final String type;
+  final String? emoji;
+  final String? color;
+
+  /// 'photo'의 미리보기에 쓰는 서명된 링크.
+  final String? previewUrl;
+
+  /// 사진 올리기로 고른 사진의 썸네일(PNG) — 미리보기에 쓰고, "저장"을 누를 때 비로소 서버에
+  /// 올린다(저장 안 하고 닫으면 서버엔 아무 것도 안 올라간다).
+  final Uint8List? photoBytes;
+
+  /// 서버 캐릭터 세트에서 고른 그림이면 그 id — 저장할 땐 전용 API를 쓴다.
+  final String? serverStickerId;
+  const AvatarDraft({
+    required this.type,
+    this.emoji,
+    this.color,
+    this.previewUrl,
+    this.photoBytes,
+    this.serverStickerId,
+  });
+}
+
 class _AvatarEditDialogState extends State<AvatarEditDialog> {
   bool _busy = false;
 
-  Future<void> _reset() async {
+  /// 고른 새 아바타 — null이면 아직 아무 것도 안 바꾼 것(저장 단추도 꺼져 있다).
+  AvatarDraft? _draft;
+
+  void _reset() => setState(() => _draft = const AvatarDraft(type: 'initial'));
+
+  Future<void> _pickCharacter() async {
+    final picked = await showDialog<AvatarDraft>(
+      context: context,
+      builder: (_) =>
+          CharacterPickerDialog(session: widget.session, pickOnly: true),
+    );
+    if (picked != null && mounted) setState(() => _draft = picked);
+  }
+
+  Future<void> _save() async {
+    final draft = _draft;
+    if (draft == null) return;
     setState(() => _busy = true);
     try {
-      await widget.session.updateAvatar(avatarType: 'initial');
+      if (draft.serverStickerId != null) {
+        await widget.session.setAvatarToServerCharacter(draft.serverStickerId!);
+      } else if (draft.photoBytes != null) {
+        // 이제서야 서버에 올린다 — 임시 파일로 쓰고, 올린 뒤(실패해도) 지운다.
+        final temp = File(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'avatar_${DateTime.now().microsecondsSinceEpoch}.png',
+        );
+        await temp.writeAsBytes(draft.photoBytes!, flush: true);
+        try {
+          final uploaded = await widget.session.api!.uploadFile(temp);
+          await widget.session.updateAvatar(
+            avatarType: 'photo',
+            avatarUrl: uploaded.url,
+          );
+        } finally {
+          unawaited(temp.delete().catchError((_) => temp));
+        }
+      } else {
+        await widget.session.updateAvatar(
+          avatarType: draft.type,
+          avatarEmoji: draft.emoji,
+          avatarColor: draft.color,
+        );
+      }
+      if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('실패: $e')));
+        ).showSnackBar(SnackBar(content: Text('저장 실패: $e')));
+        setState(() => _busy = false);
       }
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _pickCharacter() async {
-    await showDialog(
-      context: context,
-      builder: (_) => CharacterPickerDialog(session: widget.session),
+  /// 미리보기 — 고른 게 있으면 그것, 없으면 지금 내 아바타.
+  Widget _preview() {
+    final draft = _draft;
+    if (draft == null) return MyAvatar(session: widget.session, radius: 80);
+    if (draft.photoBytes != null) {
+      return CircleAvatar(
+        radius: 80,
+        backgroundImage: MemoryImage(draft.photoBytes!),
+      );
+    }
+    return AvatarView(
+      username: widget.session.name ?? widget.session.username ?? '',
+      avatarType: draft.type,
+      avatarEmoji: draft.emoji,
+      avatarColor: draft.color,
+      avatarUrl: draft.previewUrl,
+      resolveUrl: widget.session.resolveUrl,
+      radius: 80,
     );
   }
 
@@ -1134,16 +1240,20 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
     if (picked == null) return;
     setState(() => _busy = true);
     try {
-      final uploaded = await widget.session.api!.uploadFile(File(picked.path));
-      await widget.session.updateAvatar(
-        avatarType: 'photo',
-        avatarUrl: uploaded.url,
-      );
+      // 프로필 사진은 작게만 그려지므로 원본 대신 256px 정사각형 썸네일을 쓴다 — 저장할 때 이
+      // 썸네일만 올라가서 올리는 시간·서버 저장 용량·알림/미리보기 로딩이 모두 줄고, 보이는
+      // 모양도 같다.
+      final bytes = await makeAvatarThumbnail(await picked.readAsBytes());
+      if (mounted) {
+        setState(
+          () => _draft = AvatarDraft(type: 'photo', photoBytes: bytes),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
+        ).showSnackBar(SnackBar(content: Text('사진을 읽지 못했습니다: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1178,9 +1288,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                       color: Theme.of(
                         context,
                       ).colorScheme.surfaceContainerHighest,
-                      child: Center(
-                        child: MyAvatar(session: widget.session, radius: 80),
-                      ),
+                      child: Center(child: _preview()),
                     ),
                   ),
                 ),
@@ -1193,26 +1301,54 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (_busy)
-                  const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: CircularProgressIndicator(),
-                  )
-                else
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    children: [
-                      TextButton(onPressed: _reset, child: const Text('초기화')),
-                      TextButton(
-                        onPressed: _pickCharacter,
-                        child: const Text('캐릭터 선택하기'),
+                // 작업 중(사진 읽는 중·저장 중)에도 이 줄을 바꿔 끼우지 않고 눌리지만 않게 한다 —
+                // 그래야 창 높이가 그대로다(진행 표시는 저장 단추 안에).
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  children: [
+                    TextButton(
+                      onPressed: _busy ? null : _reset,
+                      child: const Text('초기화'),
+                    ),
+                    TextButton(
+                      onPressed: _busy ? null : _pickCharacter,
+                      child: const Text('캐릭터 선택하기'),
+                    ),
+                    TextButton(
+                      onPressed: _busy ? null : _uploadPhoto,
+                      child: const Text('사진 올리기'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // 맨 아래 고정 — 고른 걸 저장하거나(미리보기만 바뀐 상태), 그대로 닫는다.
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _busy
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        child: const Text('닫기'),
                       ),
-                      TextButton(
-                        onPressed: _uploadPhoto,
-                        child: const Text('사진 올리기'),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _busy || _draft == null ? null : _save,
+                        child: _busy
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('저장'),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1250,10 +1386,32 @@ const _characterColors = [
   Color(0xFF8D6E63),
 ];
 
-/// "캐릭터 선택하기" 화면: 이모지 12개 중 하나 + 배경색 10개 중 하나를 골라 확인.
+/// "캐릭터 선택하기" 화면: 서버 운영자가 올린 캐릭터 세트(있으면, 서버 관리 > 이모티콘 >
+/// 캐릭터)에서 그림을 바로 고르거나, 이모지 12개 중 하나 + 배경색 10개 중 하나를 골라 확인.
+/// "기본 캐릭터"(이모지 12개) 또는 서버 캐릭터 세트 하나를 가리키는 탭 하나.
+class _CharSetTab {
+  final String name;
+
+  /// null이면 "기본 캐릭터" 탭.
+  final ServerStickerPack? pack;
+  const _CharSetTab(this.name, this.pack);
+
+  bool get isBuiltin => pack == null;
+}
+
+const _builtinCharSetName = '기본 캐릭터';
+
 class CharacterPickerDialog extends StatefulWidget {
   final Session session;
-  const CharacterPickerDialog({super.key, required this.session});
+
+  /// true면 "확인"이 서버에 저장하지 않고 고른 것을 [AvatarDraft]로 돌려준다 — 프로필 사진 편집
+  /// 창이 미리보기로 받아 두었다가 "저장"에서 한꺼번에 반영한다. 기본(false)은 바로 저장한다.
+  final bool pickOnly;
+  const CharacterPickerDialog({
+    super.key,
+    required this.session,
+    this.pickOnly = false,
+  });
 
   @override
   State<CharacterPickerDialog> createState() => _CharacterPickerDialogState();
@@ -1263,16 +1421,89 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
   late String _emoji = widget.session.avatarEmoji ?? _characterEmojis.first;
   late Color _color =
       parseHexColor(widget.session.avatarColor) ?? _characterColors.first;
+
+  /// 서버 세트에서 고른 그림 — 있으면 미리보기·확인이 이쪽을 쓴다. 기본 캐릭터(이모지)를
+  /// 다시 고르면 null로 돌아간다.
+  ServerSticker? _pendingServer;
+
+  /// 어느 세트를 보고 있는지 — 처음엔 늘 "기본 캐릭터"에서 시작한다(지금 아바타가 서버
+  /// 캐릭터였어도 그게 어느 세트였는지는 따로 기억해 두지 않는다 — avatarUrl만 복사해 쓰므로).
+  String _tabName = _builtinCharSetName;
+
   bool _saving = false;
 
+  /// 서버 캐릭터 세트 — null이면 받는 중.
+  List<ServerStickerPack>? _characterPacks;
+
+  // 스크롤 영역이 두 군데(위쪽 전체·아래 "세트 내용" 칸)라 각자 컨트롤러를 둔다 — 안 그러면
+  // 둘 다 PrimaryScrollController에 알아서 붙으려다가 "두 ScrollView가 같은 컨트롤러를
+  // 쓰려 한다"는 충돌이 난다.
+  final _outerScroll = ScrollController();
+  final _contentScroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCharacterPacks();
+  }
+
+  @override
+  void dispose() {
+    _outerScroll.dispose();
+    _contentScroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadCharacterPacks() async {
+    try {
+      final packs = await widget.session.api!.fetchStickerPacks(
+        kind: 'character',
+      );
+      if (mounted) {
+        setState(
+          () => _characterPacks = [
+            for (final p in packs)
+              if (!p.deleted && !p.hidden && p.stickers.any((s) => !s.hidden))
+                p,
+          ],
+        );
+      }
+    } catch (_) {
+      // 세트를 못 받아도(네트워크 등) "기본 캐릭터"로는 그대로 고를 수 있어야 한다.
+      if (mounted) setState(() => _characterPacks = []);
+    }
+  }
+
   Future<void> _confirm() async {
+    if (widget.pickOnly) {
+      final pending = _pendingServer;
+      Navigator.of(context).pop(
+        pending != null
+            ? AvatarDraft(
+                type: 'photo',
+                previewUrl: pending.displayUrl,
+                serverStickerId: pending.id,
+              )
+            : AvatarDraft(
+                type: 'character',
+                emoji: _emoji,
+                color: colorToHex(_color),
+              ),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
-      await widget.session.updateAvatar(
-        avatarType: 'character',
-        avatarEmoji: _emoji,
-        avatarColor: colorToHex(_color),
-      );
+      final pending = _pendingServer;
+      if (pending != null) {
+        await widget.session.setAvatarToServerCharacter(pending.id);
+      } else {
+        await widget.session.updateAvatar(
+          avatarType: 'character',
+          avatarEmoji: _emoji,
+          avatarColor: colorToHex(_color),
+        );
+      }
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
@@ -1285,117 +1516,144 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
     }
   }
 
+  Sticker _asSticker(ServerSticker s) => Sticker(
+    '$serverStickerPrefix${s.id}',
+    '',
+    s.fileName ?? '',
+    imageUrl: widget.session.resolveUrl(s.displayUrl),
+  );
+
   @override
   Widget build(BuildContext context) {
+    final tabs = [
+      const _CharSetTab(_builtinCharSetName, null),
+      for (final p in _characterPacks ?? const <ServerStickerPack>[])
+        _CharSetTab(p.name, p),
+    ];
+    final tab = tabs.firstWhere(
+      (t) => t.name == _tabName,
+      orElse: () => tabs.first,
+    );
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 380),
+        constraints: BoxConstraints(
+          maxWidth: 380,
+          // 아주 작은 창(이 앱 최소 크기)에서만 위쪽(아래 고정 칸 제외)이 안에서 스크롤될
+          // 여유 — 평소엔 아래 "세트 내용" 칸이 늘 같은 높이라 창 크기도 늘 똑같다.
+          // 닫기/확인 버튼은 이 스크롤 바깥(맨 아래 고정)이라 항상 보인다.
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
         child: Padding(
-          padding: const EdgeInsets.all(20),
+          // 오른쪽만 0 — 아래 "세트 내용" 스크롤바가 다이얼로그 오른쪽 모서리에 바로 붙게
+          // 하고, 그 안의 다른 줄들은 각자 Padding(right: 20)으로 맞춘다.
+          padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '프로필 사진 편집',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '캐릭터 선택하기',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).hintColor,
-                ),
-              ),
-              const SizedBox(height: 16),
-              CircleAvatar(
-                radius: 44,
-                backgroundColor: _color,
-                child: Text(_emoji, style: const TextStyle(fontSize: 40)),
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '캐릭터',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final e in _characterEmojis)
-                    _PickCircle(
-                      selected: e == _emoji,
-                      onTap: () => setState(() => _emoji = e),
-                      child: CircleAvatar(
-                        radius: 22,
-                        backgroundColor: _color,
-                        child: Text(e, style: const TextStyle(fontSize: 20)),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '색상',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  for (final c in _characterColors)
-                    _PickCircle(
-                      selected: c.toARGB32() == _color.toARGB32(),
-                      onTap: () => setState(() => _color = c),
-                      child: CircleAvatar(
-                        radius: 14,
-                        backgroundColor: c,
-                        child: c.toARGB32() == _color.toARGB32()
-                            ? const Icon(
-                                Icons.check,
-                                size: 16,
-                                color: Colors.white,
+              Flexible(
+                child: SingleChildScrollView(
+                  controller: _outerScroll,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '프로필 사진 편집',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '캐릭터 선택하기',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Theme.of(context).hintColor),
+                        ),
+                        const SizedBox(height: 16),
+                        // 미리보기 — 서버 캐릭터를 골랐으면 그 그림, 아니면 이모지+색상.
+                        _pendingServer != null
+                            ? ClipOval(
+                                child: StickerView(
+                                  stickerId:
+                                      '$serverStickerPrefix${_pendingServer!.id}',
+                                  sticker: _asSticker(_pendingServer!),
+                                  emojiSize: 40,
+                                  imageSize: 88,
+                                ),
                               )
-                            : null,
-                      ),
+                            : CircleAvatar(
+                                radius: 44,
+                                backgroundColor: _color,
+                                child: Text(
+                                  _emoji,
+                                  style: const TextStyle(fontSize: 40),
+                                ),
+                              ),
+                        const SizedBox(height: 16),
+                        // 채팅 입력창 이모티콘 목록과 같은 모양의 세트 탭 — 세트가 많으면 양 끝에
+                        // 이전/다음 단추가 뜬다(category_tab_row.dart).
+                        CategoryTabRow<_CharSetTab>(
+                          items: tabs,
+                          selected: tab,
+                          labelOf: (t) => t.name,
+                          onSelected: (t) => setState(() => _tabName = t.name),
+                        ),
+                      ],
                     ),
-                ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // 세트 내용 — 탭마다 그림 개수가 달라도 창 크기가 바뀌지 않도록 늘 같은 높이로
+              // 고정하고, 그 안에서만 스크롤한다. 스크롤바는 이 칸의 오른쪽(다이얼로그 오른쪽
+              // 모서리)에 붙는다.
+              SizedBox(
+                height: 220,
+                child: MutedScrollbar(
+                  controller: _contentScroll,
+                  child: SingleChildScrollView(
+                    controller: _contentScroll,
+                    padding: const EdgeInsets.only(right: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: tab.isBuiltin
+                          ? _builtinContent()
+                          : _packContent(tab.pack!),
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _saving
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      child: const Text('닫기'),
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _saving
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        child: const Text('닫기'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _saving ? null : _confirm,
-                      child: _saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('확인'),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _saving ? null : _confirm,
+                        child: _saving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('확인'),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -1403,6 +1661,91 @@ class _CharacterPickerDialogState extends State<CharacterPickerDialog> {
       ),
     );
   }
+
+  /// "기본 캐릭터" 탭 — 이모지를 먼저 고르고, 그 아래에서 배경색을 고른다(기존 방식 그대로).
+  List<Widget> _builtinContent() => [
+    Align(
+      alignment: Alignment.centerLeft,
+      child: Text('캐릭터', style: Theme.of(context).textTheme.labelMedium),
+    ),
+    const SizedBox(height: 8),
+    Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final e in _characterEmojis)
+          _PickCircle(
+            selected: _pendingServer == null && e == _emoji,
+            onTap: () => setState(() {
+              _emoji = e;
+              _pendingServer = null;
+            }),
+            child: CircleAvatar(
+              radius: 22,
+              backgroundColor: _color,
+              child: Text(e, style: const TextStyle(fontSize: 20)),
+            ),
+          ),
+      ],
+    ),
+    const SizedBox(height: 16),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: Text('색상', style: Theme.of(context).textTheme.labelMedium),
+    ),
+    const SizedBox(height: 8),
+    Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final c in _characterColors)
+          _PickCircle(
+            selected:
+                _pendingServer == null && c.toARGB32() == _color.toARGB32(),
+            onTap: () => setState(() {
+              _color = c;
+              _pendingServer = null;
+            }),
+            child: CircleAvatar(
+              radius: 14,
+              backgroundColor: c,
+              child: c.toARGB32() == _color.toARGB32()
+                  ? const Icon(Icons.check, size: 16, color: Colors.white)
+                  : null,
+            ),
+          ),
+      ],
+    ),
+  ];
+
+  /// 서버 캐릭터 세트 탭 — 그림을 고르면 위 미리보기가 바뀐다("확인"을 눌러야 저장된다).
+  List<Widget> _packContent(ServerStickerPack pack) => [
+    Align(
+      alignment: Alignment.centerLeft,
+      child: Text(pack.name, style: Theme.of(context).textTheme.labelMedium),
+    ),
+    const SizedBox(height: 8),
+    Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final s in pack.stickers.where((s) => !s.hidden))
+          _PickCircle(
+            selected: _pendingServer?.id == s.id,
+            onTap: () => setState(() => _pendingServer = s),
+            child: ClipOval(
+              child: StickerView(
+                stickerId: '$serverStickerPrefix${s.id}',
+                sticker: _asSticker(s),
+                emojiSize: 44,
+                imageSize: 44,
+                smooth: true,
+              ),
+            ),
+          ),
+      ],
+    ),
+  ];
 }
 
 class _PickCircle extends StatelessWidget {

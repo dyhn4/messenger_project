@@ -41,6 +41,7 @@ class _QuietNotifications extends NotificationService {
     String? avatarColor,
     String? avatarUrl,
     bool isSecret = false,
+    bool flashTaskbarUntilRoomOpened = false,
   }) async {}
 }
 
@@ -1481,7 +1482,9 @@ void main() {
       expect(find.byTooltip('파일 보내기'), findsOneWidget);
     });
 
-    testWidgets('[메뉴] → 투표 — 투표 만들기 창이 뜨고 맨 위 대화방 칸에서 방을 골라야 만들 수 있다', (tester) async {
+    testWidgets('[메뉴] → 투표 — 투표 만들기 창이 뜨고 맨 위 대화방 칸에서 방을 골라야 만들 수 있다', (
+      tester,
+    ) async {
       final server = _Server();
       server.on('POST', '/api/rooms/r2/polls', (r) {
         return _json(_messageJson(senderId: 'me'), 201);
@@ -1611,9 +1614,7 @@ void main() {
       _size(tester, const Size(1280, 900));
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: inputBar(session, session.rooms.first),
-          ),
+          home: Scaffold(body: inputBar(session, session.rooms.first)),
         ),
       );
       await tester.pumpAndSettle();
@@ -1639,7 +1640,9 @@ void main() {
       );
     });
 
-    testWidgets('폭 360 — 메뉴의 투표는 전체 화면으로 열리고 대화방 칸 목록이 화면 안에 뜬다', (tester) async {
+    testWidgets('폭 360 — 메뉴의 투표는 전체 화면으로 열리고 대화방 칸 목록이 화면 안에 뜬다', (
+      tester,
+    ) async {
       final session = _session(_Server(), rooms: [_topic('r1')]);
       _size(tester, const Size(360, 700));
       await tester.pumpWidget(

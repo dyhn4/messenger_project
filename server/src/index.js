@@ -52,6 +52,7 @@ import { searchRouter } from './search.js';
 import { createTeamsRouter } from './teams.js';
 import { registerSocket } from './socket.js';
 import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
+import { createFileResignRouter } from './fileResign.js';
 import { createUsersRouter } from './users.js';
 import { guideStatic, helpApiRouter, versionRouter, watchForVersionChanges } from './version.js';
 import { firebaseConfigRouter } from './push.js';
@@ -80,6 +81,7 @@ const io = new Server(httpServer, { cors: { origin: '*' } });
 app.use('/auth', createAuthRouter(io));
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', uploadErrorHandler);
+app.use('/api', requireAuth, createFileResignRouter());
 app.use('/api', requireAuth, createUsersRouter(io));
 // 서버 운영자 전용(관리자 콘솔) — 라우터 안에서 isServerAdmin을 다시 확인한다.
 app.use('/api', requireAuth, createAdminRouter(io));

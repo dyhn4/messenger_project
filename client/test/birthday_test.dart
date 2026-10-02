@@ -223,14 +223,17 @@ void main() {
     });
   });
 
-  group('내 프로필 카드', () {
+  // 생일은 프로필 카드가 아니라 "개인정보 설정" 창 안에 있다.
+  group('개인정보 설정', () {
     Future<void> pumpProfile(WidgetTester tester, Session session) async {
       tester.view.physicalSize = const Size(900, 1200);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: MyProfileDialog(session: session)),
+          home: Scaffold(
+            body: PersonalInfoDialog(session: session, verifiedPassword: 'pw'),
+          ),
         ),
       );
       await tester.pumpAndSettle();

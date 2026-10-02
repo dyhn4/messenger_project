@@ -35,6 +35,7 @@ class FileActions {
   });
 
   Future<Uint8List> _bytes() => fetchAttachmentBytes(
+    session: session,
     url: url,
     attachmentKey: attachmentKey,
     attachmentNonce: attachmentNonce,

@@ -731,6 +731,14 @@ class ApiClient {
     return MyProfile.fromJson(body as Map<String, dynamic>);
   }
 
+  /// 서버 운영자가 올린 "캐릭터" 세트(관리자 > 이모티콘 탭)에서 그림 하나를 내 프로필 사진으로
+  /// 고른다 — 서버가 avatarType:'photo'로 바꿔서 돌려주므로(users.js), 그 뒤로는 "사진 올리기"로
+  /// 고른 것과 똑같이 다뤄진다.
+  Future<MyProfile> setAvatarToServerCharacter(String stickerId) async {
+    final body = await _post('/api/users/me/avatar/character/$stickerId', {});
+    return MyProfile.fromJson(body as Map<String, dynamic>);
+  }
+
   /// 제공한 필드만 바꾼다(이름만, 이메일만, 또는 둘 다).
   /// [email]을 바꿀 때는 서버가 [currentPassword]로 본인 확인을 한다(비밀번호 변경과
   /// 같은 정책 — 이메일은 계정 복구 수단이라 이름/아바타보다 한 단계 더 확인한다).
@@ -2219,6 +2227,15 @@ class ApiClient {
     return res['favorited'] as bool? ?? false;
   }
 
+  /// 만료된 첨부 링크(/files/<토큰>)를 새로 받는다 — 서버가 내가 들어 있는 방의 첨부일 때만
+  /// 새 링크(/files/<토큰>)를 준다(server/src/fileResign.js).
+  Future<String> resignFileUrl(String filePath) async {
+    final res =
+        await _post('/api/files/resign', {'url': filePath})
+            as Map<String, dynamic>;
+    return res['url'] as String;
+  }
+
   Future<void> deleteTask(String taskId) async {
     await _delete('/api/tasks/$taskId');
   }
@@ -3034,17 +3051,26 @@ class ApiClient {
 
   // ── 그림 이모티콘(server/src/stickers.js) ──
 
-  /// 세트 전부(숨긴 것 포함 — 예전 메시지를 그리려고).
-  Future<List<ServerStickerPack>> fetchStickerPacks() async {
-    final list = await _get('/api/stickers') as List;
+  /// 세트 전부(숨긴 것 포함 — 예전 메시지를 그리려고). [kind]는 'sticker'(기본, 채팅 선택창) |
+  /// 'character'(프로필 사진 세트) — 서버가 그 종류만 걸러서 돌려줘서 둘이 안 섞인다.
+  Future<List<ServerStickerPack>> fetchStickerPacks({
+    String kind = 'sticker',
+  }) async {
+    final list = await _get('/api/stickers?kind=$kind') as List;
     return list
         .map((e) => ServerStickerPack.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
   /// 새 세트(서버 운영자만).
-  Future<ServerStickerPack> createStickerPack(String name) async {
-    final json = await _post('/api/stickers/packs', {'name': name});
+  Future<ServerStickerPack> createStickerPack(
+    String name, {
+    String kind = 'sticker',
+  }) async {
+    final json = await _post('/api/stickers/packs', {
+      'name': name,
+      'kind': kind,
+    });
     return ServerStickerPack.fromJson(json as Map<String, dynamic>);
   }
 

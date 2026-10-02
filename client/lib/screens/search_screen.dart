@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -64,6 +66,10 @@ class _SearchScreenState extends State<SearchScreen> {
   FileCategory _fileKind = FileCategory.all;
   bool _newestFirst = true;
 
+  // 검색칸을 파일 패널("파일명 검색")과 같은 모양으로 — 입력을 멈추고 잠깐 뒤(또는 엔터)에
+  // 찾는다(panel_filters.dart의 PanelFilterBar와 같은 디바운스).
+  Timer? _debounce;
+
   @override
   void initState() {
     super.initState();
@@ -123,6 +129,19 @@ class _SearchScreenState extends State<SearchScreen> {
     if (_query.text.trim().isNotEmpty) _search();
   }
 
+  /// 검색칸에 입력할 때마다 — 지우기(X) 단추 표시를 갱신하고, 잠깐(350ms) 멈추면 찾는다.
+  void _onQueryChanged(String _) {
+    setState(() {});
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), _search);
+  }
+
+  /// 엔터를 누르거나 지우기(X)를 눌렀을 때 — 기다리지 않고 바로 찾는다.
+  void _searchNow() {
+    _debounce?.cancel();
+    _search();
+  }
+
   void _selectType(SearchType type) {
     if (_type == type) return;
     setState(() => _type = type);
@@ -170,6 +189,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _query.dispose();
     _listScrollController.dispose();
     super.dispose();
@@ -187,18 +207,29 @@ class _SearchScreenState extends State<SearchScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
+            key: const ValueKey('search-panel-field'),
             controller: _query,
             autofocus: true,
             decoration: InputDecoration(
               hintText: '메시지 검색',
+              isDense: true,
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: _query.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      tooltip: '지우기',
+                      onPressed: () {
+                        _query.clear();
+                        setState(() {});
+                        _searchNow();
+                      },
+                    ),
               border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.search),
-                onPressed: _search,
-              ),
             ),
             textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _search(),
+            onChanged: _onQueryChanged,
+            onSubmitted: (_) => _searchNow(),
           ),
           const SizedBox(height: 12),
           // 세 버튼 모두 Expanded로 감싸서 남는 폭을 동일한 비율로 나눠 갖는다.
@@ -694,4 +725,3 @@ class _SearchResultRow extends StatelessWidget {
     );
   }
 }
-

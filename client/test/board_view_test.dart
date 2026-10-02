@@ -52,6 +52,7 @@ class _QuietNotifications extends NotificationService {
     String? avatarColor,
     String? avatarUrl,
     bool isSecret = false,
+    bool flashTaskbarUntilRoomOpened = false,
   }) async {}
 }
 

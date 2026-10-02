@@ -22,7 +22,12 @@ class StickerView extends StatelessWidget {
     this.sticker,
     required this.emojiSize,
     required this.imageSize,
+    this.smooth = false,
   });
+
+  /// 큰 그림을 작은 칸에 줄여 나열하는 목록(이모티콘 선택창·캐릭터 목록)용 — 그리는 크기에 맞춰
+  /// 디코딩 단계에서 줄이고 고품질로 보간해서, 화면에서 한 번에 확 줄일 때보다 또렷하다.
+  final bool smooth;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +50,10 @@ class StickerView extends StatelessWidget {
           width: imageSize,
           height: imageSize,
           fit: BoxFit.contain,
+          filterQuality: smooth ? FilterQuality.high : FilterQuality.low,
+          memCacheWidth: smooth
+              ? (imageSize * MediaQuery.devicePixelRatioOf(context)).round()
+              : null,
           fadeInDuration: const Duration(milliseconds: 120),
           placeholder: (_, _) => _placeholder(context),
           errorWidget: (_, _, _) => _placeholder(context, broken: true),

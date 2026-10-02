@@ -15,6 +15,7 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import 'attachment_widgets.dart';
 import 'avatar_utils.dart';
+import 'chat_font_scope.dart';
 import 'hover_toolbar.dart';
 import 'mention_autocomplete.dart';
 import 'mention_profile.dart';
@@ -549,22 +550,37 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
       mainAxisSize: MainAxisSize.min,
       children: [
         // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 이름(과 아바타)을 보여준다.
-        if (widget.showAvatar)
-          Text(
-            sender?.name ?? comment.senderName,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        // 댓글 패널(fullWidth)은 날짜를 이름 오른쪽에 나란히 보여준다(이름이 없는 줄이면 날짜만).
+        if (widget.showAvatar || (widget.fullWidth && widget.showTime))
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              if (widget.showAvatar)
+                Flexible(
+                  child: Text(
+                    sender?.name ?? comment.senderName,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              if (widget.fullWidth && widget.showTime) ...[
+                if (widget.showAvatar) const SizedBox(width: 8),
+                Text(
+                  formatPostDateTime(comment.createdAt),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).hintColor,
+                  ),
+                ),
+              ],
+            ],
           ),
-        if (widget.fullWidth) ...[
-          if (widget.expiresAt != null)
-            SelfDestructCountdown(expiresAt: widget.expiresAt!),
-          if (widget.showTime)
-            Text(
-              formatPostDateTime(comment.createdAt),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).hintColor,
-              ),
-            ),
-        ],
+        if (widget.fullWidth && widget.expiresAt != null)
+          SelfDestructCountdown(expiresAt: widget.expiresAt!),
         if (comment.deleted)
           Text(
             '삭제된 댓글입니다',
@@ -601,26 +617,34 @@ class _CommentEntryLineState extends State<CommentEntryLine> {
           if (comment.type != MessageType.text &&
               comment.type != MessageType.sticker &&
               (comment.text?.isNotEmpty ?? false)) ...[
-            FormattedText(
-              comment.text!,
-              format: comment.textFormat,
-              style: const TextStyle(fontSize: 13),
-              linkColor: Colors.blue,
-              mentions: comment.mentions,
-              myUserId: widget.session.userId,
-              onMentionTap: _openMention,
+            // 댓글 내용은 환경설정 > 화면 설정 > 글꼴을 따른다(chat_font_scope.dart).
+            ChatFont(
+              settings: widget.session.settings,
+              builder: (context, font) => FormattedText(
+                comment.text!,
+                format: comment.textFormat,
+                style: applyChatFont(const TextStyle(fontSize: 13), font),
+                linkColor: Colors.blue,
+                mentions: comment.mentions,
+                myUserId: widget.session.userId,
+                onMentionTap: _openMention,
+              ),
             ),
             const SizedBox(height: 4),
           ],
           if (comment.type == MessageType.text)
-            FormattedText(
-              comment.text ?? '',
-              format: comment.textFormat,
-              style: const TextStyle(fontSize: 13),
-              linkColor: Colors.blue,
-              mentions: comment.mentions,
-              myUserId: widget.session.userId,
-              onMentionTap: _openMention,
+            // 댓글 내용은 환경설정 > 화면 설정 > 글꼴을 따른다(chat_font_scope.dart).
+            ChatFont(
+              settings: widget.session.settings,
+              builder: (context, font) => FormattedText(
+                comment.text ?? '',
+                format: comment.textFormat,
+                style: applyChatFont(const TextStyle(fontSize: 13), font),
+                linkColor: Colors.blue,
+                mentions: comment.mentions,
+                myUserId: widget.session.userId,
+                onMentionTap: _openMention,
+              ),
             )
           else
             _buildAttachment(context),

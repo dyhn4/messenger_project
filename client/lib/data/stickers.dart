@@ -110,7 +110,7 @@ class ServerStickerCatalog extends ChangeNotifier {
           '$serverStickerPrefix${s.id}',
           '',
           '${pack.name} ${i + 1}',
-          imageUrl: resolveUrl(s.url),
+          imageUrl: resolveUrl(s.displayUrl),
         );
         byId[sticker.id] = sticker;
         if (!s.hidden) shown.add(sticker);

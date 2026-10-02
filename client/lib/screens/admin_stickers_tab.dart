@@ -16,13 +16,19 @@ import '../widgets/sticker_view.dart';
 /// 올릴 수 있는 그림 확장자(server/src/stickers.js의 STICKER_MIME과 같다).
 const _imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
 
-/// "서버 관리 > 이모티콘" — 그림 이모티콘 세트를 만들고 그림을 올린다(server/src/stickers.js).
-/// 올린 이모티콘은 앱을 새로 배포하지 않아도 모든 사람의 이모티콘 선택창에 바로 나온다.
+/// "서버 관리 > 이모티콘" — 그림 이모티콘 세트, 그리고(세그먼트를 "캐릭터"로 바꾸면) 프로필
+/// 사진으로 고르는 캐릭터 세트를 만들고 그림을 올린다(server/src/stickers.js). 둘은 서버의
+/// 같은 테이블·API를 kind만 다르게 써서(server/src/db/schema.js 주석 참고) 화면도 이 한
+/// 위젯을 공유하고, 세그먼트로 고른 kind만 목록·만들기 호출에 실어 보낸다.
 ///
-/// 목록은 세트마다 대표 이미지(첫 그림) + 이름 카드이고, 대표 이미지를 누르면 그 세트의 이모티콘
-/// 모음으로 바뀐다. 대표 이미지에 마우스를 올리면 "더보기"(그림 올리기 · 이름 바꾸기 · 세트
-/// 숨기기 · 세트 삭제). 이미 보낸 메시지가 그 이모티콘을 가리키고 있어서 그림은 지우지 않고
-/// 숨기기만 하고, 세트 삭제도 목록에서만 없앤다 — 예전 메시지의 그림은 그대로 보인다.
+/// 올린 이모티콘은 앱을 새로 배포하지 않아도 모든 사람의 이모티콘 선택창(또는 캐릭터는
+/// 프로필 사진 편집 화면)에 바로 나온다.
+///
+/// 목록은 세트마다 대표 이미지(첫 그림) + 이름 카드이고, 대표 이미지를 누르면 그 세트의 모음으로
+/// 바뀐다. 대표 이미지에 마우스를 올리면 "더보기"(그림 올리기 · 이름 바꾸기 · 세트 숨기기 ·
+/// 세트 삭제). 이모티콘은 이미 보낸 메시지가, 캐릭터는 이미 그 그림을 프로필 사진으로 고른
+/// 사람이 그 그림을 가리키고 있을 수 있어서 그림은 지우지 않고 숨기기만 하고, 세트 삭제도
+/// 목록에서만 없앤다.
 class AdminStickersTab extends StatefulWidget {
   final Session session;
   const AdminStickersTab({super.key, required this.session});
@@ -35,11 +41,15 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
   /// 한 쪽에 보이는 세트 수(5칸 × 2줄쯤).
   static const _pageSize = 10;
 
+  /// 'sticker'(채팅 이모티콘, 기본) | 'character'(프로필 사진 캐릭터).
+  String _kind = 'sticker';
+  bool get _isCharacter => _kind == 'character';
+
   List<ServerStickerPack>? _packs;
   String? _error;
   int _page = 0;
 
-  /// 이모티콘 모음을 보고 있는 세트 — null이면 세트 목록.
+  /// 세트 모음을 보고 있는 세트 — null이면 세트 목록.
   String? _openPackId;
 
   /// 그림을 올리는 중인 세트 id.
@@ -58,9 +68,20 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     super.dispose();
   }
 
+  void _switchKind(String kind) {
+    if (kind == _kind) return;
+    setState(() {
+      _kind = kind;
+      _packs = null;
+      _openPackId = null;
+      _page = 0;
+    });
+    _load();
+  }
+
   Future<void> _load() async {
     try {
-      final packs = await widget.session.api!.fetchStickerPacks();
+      final packs = await widget.session.api!.fetchStickerPacks(kind: _kind);
       if (mounted) {
         setState(() {
           _packs = [
@@ -75,10 +96,12 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     }
   }
 
-  /// 바꾼 뒤 — 이 화면 목록과 앱의 이모티콘 선택창을 같이 새로 받는다.
+  /// 바꾼 뒤 — 이 화면 목록과(이모티콘이면) 앱의 이모티콘 선택창을 같이 새로 받는다. 캐릭터는
+  /// 상시 캐시해두는 선택창이 따로 없어서(프로필 사진 편집을 열 때마다 받는다) 이 화면만 새로
+  /// 고치면 된다.
   Future<void> _changed() async {
     await _load();
-    await widget.session.loadServerStickers(force: true);
+    if (!_isCharacter) await widget.session.loadServerStickers(force: true);
   }
 
   Future<List<File>> _pickImages(String title) async {
@@ -100,12 +123,16 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
   Future<void> _createPack() async {
     final result = await showDialog<(String, List<File>)>(
       context: context,
-      builder: (_) => _NewPackDialog(pickImages: _pickImages),
+      builder: (_) =>
+          _NewPackDialog(pickImages: _pickImages, isCharacter: _isCharacter),
     );
     if (result == null) return;
     final (name, files) = result;
     try {
-      final pack = await widget.session.api!.createStickerPack(name);
+      final pack = await widget.session.api!.createStickerPack(
+        name,
+        kind: _kind,
+      );
       if (files.isNotEmpty) {
         setState(() => _uploadingPackId = pack.id);
         await widget.session.api!.uploadStickers(pack.id, files);
@@ -194,8 +221,12 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       builder: (c) => AlertDialog(
         title: const Text('세트 삭제'),
         content: Text(
-          '"${pack.name}" 세트를 삭제할까요?\n'
-          '이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
+          _isCharacter
+              ? '"${pack.name}" 세트를 삭제할까요?\n'
+                    '"캐릭터 선택하기"와 이 목록에서 사라집니다. 이미 이 세트의 그림을 프로필 '
+                    '사진으로 고른 사람은 그대로 유지됩니다.'
+              : '"${pack.name}" 세트를 삭제할까요?\n'
+                    '이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
         ),
         actions: [
           TextButton(
@@ -273,7 +304,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     '$serverStickerPrefix${s.id}',
     '',
     s.fileName ?? '',
-    imageUrl: widget.session.resolveUrl(s.url),
+    imageUrl: widget.session.resolveUrl(s.displayUrl),
   );
 
   // ── 화면 ──
@@ -281,13 +312,47 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
   @override
   Widget build(BuildContext context) {
     final packs = _packs;
-    if (_error != null) return Center(child: Text(_error!));
-    if (packs == null) return const Center(child: CircularProgressIndicator());
-    final open = packs.where((p) => p.id == _openPackId).firstOrNull;
-    return open != null
-        ? _buildPack(context, open)
-        : _buildList(context, packs);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _kindSwitch(context),
+        const SizedBox(height: 12),
+        Expanded(
+          child: _error != null
+              ? Center(child: Text(_error!))
+              : packs == null
+              ? const Center(child: CircularProgressIndicator())
+              : () {
+                  final open = packs
+                      .where((p) => p.id == _openPackId)
+                      .firstOrNull;
+                  return open != null
+                      ? _buildPack(context, open)
+                      : _buildList(context, packs);
+                }(),
+        ),
+      ],
+    );
   }
+
+  /// 이모티콘(채팅용) / 캐릭터(프로필 사진용) 세그먼트 — 바꾸면 목록으로 돌아가 그 kind만 받는다.
+  Widget _kindSwitch(BuildContext context) => SegmentedButton<String>(
+    segments: const [
+      ButtonSegment(
+        value: 'sticker',
+        label: Text('이모티콘'),
+        icon: Icon(Icons.emoji_emotions_outlined, size: 16),
+      ),
+      ButtonSegment(
+        value: 'character',
+        label: Text('캐릭터'),
+        icon: Icon(Icons.face_outlined, size: 16),
+      ),
+    ],
+    selected: {_kind},
+    showSelectedIcon: false,
+    onSelectionChanged: (s) => _switchKind(s.first),
+  );
 
   Widget _buildList(BuildContext context, List<ServerStickerPack> packs) {
     final theme = Theme.of(context);
@@ -301,9 +366,13 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
           children: [
             Expanded(
               child: Text(
-                '그림 이모티콘 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 '
-                '새로 배포하지 않아도 모든 사람의 이모티콘 선택창에 바로 나옵니다. 대표 이미지를 '
-                '누르면 이모티콘 모음을 봅니다.',
+                _isCharacter
+                    ? '캐릭터 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 '
+                          '새로 배포하지 않아도 모든 사람의 "캐릭터 선택하기"(프로필 사진 편집)에 '
+                          '바로 나옵니다. 대표 이미지를 누르면 세트 모음을 봅니다.'
+                    : '그림 이모티콘 세트를 만들고 그림(PNG·JPG·GIF·WEBP, 한 장 5MB 이하)을 올리면 앱을 '
+                          '새로 배포하지 않아도 모든 사람의 이모티콘 선택창에 바로 나옵니다. 대표 이미지를 '
+                          '누르면 이모티콘 모음을 봅니다.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.hintColor,
                 ),
@@ -320,7 +389,13 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         const SizedBox(height: 16),
         Expanded(
           child: packs.isEmpty
-              ? const Center(child: Text('아직 이모티콘 세트가 없습니다. "새 세트"로 만들어 보세요.'))
+              ? Center(
+                  child: Text(
+                    _isCharacter
+                        ? '아직 캐릭터 세트가 없습니다. "새 세트"로 만들어 보세요.'
+                        : '아직 이모티콘 세트가 없습니다. "새 세트"로 만들어 보세요.',
+                  ),
+                )
               : LayoutBuilder(
                   builder: (context, constraints) {
                     // 카드 폭이 170쯤 되게 열 수를 정한다(넓으면 5칸).
@@ -340,8 +415,11 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
                           crossAxisCount: columns,
                           crossAxisSpacing: 12,
                           mainAxisSpacing: 16,
-                          // 정사각형 그림 + 아래 두 줄(이름·개수).
-                          mainAxisExtent: cardWidth + 50,
+                          // 정사각형 그림 + 아래 두 줄(이름·개수). Windows 디스플레이 배율
+                          // (125% 등)에서 글자 두 줄의 실제 높이가 반올림 때문에 1px 정도
+                          // 더 커져서 "BOTTOM OVERFLOWED BY 1.00 PIXELS"가 뜨는 경우가
+                          // 있었다 — 여유를 좀 더 둔다.
+                          mainAxisExtent: cardWidth + 56,
                         ),
                         itemCount: items.length,
                         itemBuilder: (context, i) {
@@ -420,6 +498,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
                 ),
               ),
             MenuAnchor(
+              style: hoverMenuStyle(context),
               menuChildren: _packMenu(pack),
               // 기본 IconButton은 누르는 칸(48)이 넓어서 아이콘이 오른쪽 끝에서 한참 안쪽에 보인다 —
               // 칸을 아이콘 크기로 줄여 오른쪽 끝(아래 스크롤바 줄)에 붙인다.
@@ -440,8 +519,11 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
           child: Text(
-            '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 선택창에서만 빠지고, 이미 보낸 '
-            '메시지에서는 그대로 보입니다).',
+            _isCharacter
+                ? '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 "캐릭터 선택하기"에서만 '
+                      '빠지고, 이미 프로필 사진으로 고른 사람에게는 그대로 보입니다).'
+                : '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 선택창에서만 빠지고, 이미 보낸 '
+                      '메시지에서는 그대로 보입니다).',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ),
@@ -626,7 +708,8 @@ class _PackCardState extends State<_PackCard> {
 /// "새 세트" — 세트 이름과 올릴 그림을 한 창에서 고른다(그림은 나중에 올려도 된다).
 class _NewPackDialog extends StatefulWidget {
   final Future<List<File>> Function(String title) pickImages;
-  const _NewPackDialog({required this.pickImages});
+  final bool isCharacter;
+  const _NewPackDialog({required this.pickImages, required this.isCharacter});
 
   @override
   State<_NewPackDialog> createState() => _NewPackDialogState();
@@ -657,7 +740,7 @@ class _NewPackDialogState extends State<_NewPackDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('새 이모티콘 세트'),
+      title: Text(widget.isCharacter ? '새 캐릭터 세트' : '새 이모티콘 세트'),
       content: SizedBox(
         width: 420,
         child: Column(

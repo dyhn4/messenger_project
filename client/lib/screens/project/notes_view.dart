@@ -12,7 +12,7 @@ import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/dashed_add_button.dart';
 import '../../widgets/floating_dialog.dart';
-import '../../widgets/hover_toolbar.dart' show hoverMenuItem;
+import '../../widgets/hover_toolbar.dart' show hoverMenuItem, hoverMenuStyle;
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
 import '../../widgets/rich_text_format.dart';
@@ -1065,6 +1065,7 @@ class _NotesViewState extends State<NotesView> {
                 onPressed: () => _openHistory(note),
               ),
               MenuAnchor(
+                style: hoverMenuStyle(context),
                 alignmentOffset: const Offset(-110, 4),
                 menuChildren: [
                   if (note.canEdit)

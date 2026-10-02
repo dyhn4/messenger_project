@@ -922,46 +922,45 @@ class ChatInputBarState extends State<ChatInputBar> {
                       child: Actions(
                         actions: <Type, Action<Intent>>{
                           PasteTextIntent: _pasteAction,
-                          _PlainPasteIntent:
-                              CallbackAction<_PlainPasteIntent>(
-                                onInvoke: (_) {
-                                  unawaited(_pasteAsPlainText());
-                                  return null;
-                                },
-                              ),
+                          _PlainPasteIntent: CallbackAction<_PlainPasteIntent>(
+                            onInvoke: (_) {
+                              unawaited(_pasteAsPlainText());
+                              return null;
+                            },
+                          ),
                         },
                         child: TextField(
-                      key: const ValueKey('chat-input'),
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      decoration: InputDecoration(
-                        // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                        // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                        hintText: _focusNode.hasFocus ? null : '메시지 입력',
-                        border: _formatOpen
-                            ? InputBorder.none
-                            : const OutlineInputBorder(),
-                        // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
-                        // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
-                        contentPadding: const EdgeInsets.fromLTRB(
-                          12,
-                          12,
-                          2,
-                          12,
-                        ),
-                      ),
-                      minLines: 1,
-                      maxLines: 6,
-                      // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
-                      // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
-                      // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
-                      // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
-                      // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
-                      // 그대로 둔다.
-                      textInputAction: Platform.isWindows
-                          ? TextInputAction.newline
-                          : TextInputAction.send,
-                      onSubmitted: (_) => _send(),
+                          key: const ValueKey('chat-input'),
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          decoration: InputDecoration(
+                            // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                            // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                            hintText: _focusNode.hasFocus ? null : '메시지 입력',
+                            border: _formatOpen
+                                ? InputBorder.none
+                                : const OutlineInputBorder(),
+                            // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
+                            // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
+                            contentPadding: const EdgeInsets.fromLTRB(
+                              12,
+                              12,
+                              2,
+                              12,
+                            ),
+                          ),
+                          minLines: 1,
+                          maxLines: 6,
+                          // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
+                          // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
+                          // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
+                          // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
+                          // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
+                          // 그대로 둔다.
+                          textInputAction: Platform.isWindows
+                              ? TextInputAction.newline
+                              : TextInputAction.send,
+                          onSubmitted: (_) => _send(),
                         ),
                       ),
                     ),

@@ -75,7 +75,7 @@ void main() {
     );
   }
 
-  testWidgets('환경설정: 왼쪽 사이드바(메신저 설정 / 시스템 설정)와 각 항목', (tester) async {
+  testWidgets('환경설정: 왼쪽 사이드바(메신저 설정 / 화면 설정 / 시스템 설정)와 각 항목', (tester) async {
     tester.view.physicalSize = const Size(1100, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -88,6 +88,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('메신저 설정'), findsWidgets); // 사이드바 + 오른쪽 제목
+    expect(find.text('화면 설정'), findsOneWidget);
     expect(find.text('시스템 설정'), findsOneWidget);
 
     // 메신저 설정 — 팀 전환 방식 · 메시지 내용 미리보기 · 메시지 전송 옵션 설정.
@@ -110,24 +111,17 @@ void main() {
     expect(checkOf('Enter로 전송').icon, Icons.circle_outlined);
     expect(find.text('화면 테마'), findsNothing);
 
-    // 시스템 설정 — 시작 시 자동 실행 · 항상 위로 · 화면 테마 · 반투명 · 파일 다운로드 · 자동 잠금.
-    await tester.tap(find.text('시스템 설정'));
+    // 화면 설정 — 텍스트 크기 · 화면 테마 · 반투명 · 작업표시줄 깜빡임.
+    await tester.tap(find.text('화면 설정'));
     await tester.pump();
-    for (final label in [
-      '시작 시 자동 실행',
-      '항상 위로',
-      '화면 테마',
-      '반투명',
-      '파일 다운로드',
-      '자동 잠금',
-    ]) {
+    for (final label in ['텍스트 크기', '화면 테마', '반투명', '작업표시줄 깜빡임', '글꼴']) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
     expect(find.text('화이트 (기본)'), findsOneWidget);
     expect(find.text('다크'), findsOneWidget);
     expect(find.text('본인이 선호하는 컬러 테마를 설정할 수 있습니다.'), findsOneWidget);
-    expect(find.text('절전모드 시 TangoTalk 자동 잠금'), findsOneWidget);
     expect(find.text('팀 전환 방식'), findsNothing);
+    expect(find.text('시작 시 자동 실행'), findsNothing); // 시스템 설정으로 남아 있다.
 
     Icon radioOf(String label) => tester.widget<Icon>(
       find.descendant(
@@ -140,6 +134,18 @@ void main() {
     await tester.pump();
     expect(radioOf('다크').icon, Icons.radio_button_checked);
     expect(radioOf('화이트 (기본)').icon, Icons.radio_button_off);
+
+    // 시스템 설정 — 시작 시 자동 실행 · 항상 위로 · 파일 다운로드 · 자동 잠금(화면 설정으로
+    // 옮긴 화면 테마·반투명·작업표시줄 깜빡임은 여기 없다).
+    await tester.tap(find.text('시스템 설정'));
+    await tester.pump();
+    for (final label in ['시작 시 자동 실행', '항상 위로', '파일 다운로드', '자동 잠금']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+    expect(find.text('화면 테마'), findsNothing);
+    expect(find.text('반투명'), findsNothing);
+    expect(find.text('작업표시줄 깜빡임'), findsNothing);
+    expect(find.text('절전모드 시 TangoTalk 자동 잠금'), findsOneWidget);
   });
 
   testWidgets('잠금 화면: 잠겨 있으면 앱 전체를 덮고, 비밀번호가 맞아야 풀린다', (tester) async {
@@ -189,6 +195,144 @@ void main() {
       ),
     );
     expect(find.textContaining('현재 화면 잠금모드입니다.'), findsNothing);
+  });
+
+  testWidgets(
+    '텍스트 크기: -/+ 단추로 10%씩 바뀌고, 가운데 알약을 누르면 100%로 돌아가며, 80~150% 밖으로는 안 간다',
+    (tester) async {
+      mockWindowManager(tester);
+      final s = _session();
+      await s.settings.init();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SettingsScreen(session: s)),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('화면 설정'));
+      await tester.pump();
+
+      expect(find.text('100% 기본 크기'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
+      expect(find.text('110% 기본 크기'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
+      expect(find.text('120% 기본 크기'), findsOneWidget);
+
+      // 가운데 알약을 누르면 100%로 바로 돌아간다.
+      await tester.tap(find.text('120% 기본 크기'));
+      await tester.pump();
+      expect(find.text('100% 기본 크기'), findsOneWidget);
+
+      // 최솟값(80%)에서 더 안 내려간다.
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(find.byIcon(Icons.remove));
+        await tester.pump();
+      }
+      expect(find.text('80% 기본 크기'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.remove));
+      await tester.pump();
+      expect(find.text('80% 기본 크기'), findsOneWidget); // 더 안 내려감
+
+      // 최댓값(150%)에서 더 안 올라간다.
+      for (var i = 0; i < 7; i++) {
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pump();
+      }
+      expect(find.text('150% 기본 크기'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pump();
+      expect(find.text('150% 기본 크기'), findsOneWidget); // 더 안 올라감
+    },
+  );
+
+  testWidgets('AppSettings.setTextScale: 저장되고, 범위 밖 값은 80~150%로 붙는다', (
+    tester,
+  ) async {
+    mockWindowManager(tester);
+    final settings = AppSettings();
+    await settings.init();
+
+    await settings.setTextScale(1.2);
+    expect(settings.textScale, 1.2);
+    var prefs = await SharedPreferences.getInstance();
+    expect(prefs.getDouble('settings_text_scale'), 1.2);
+
+    await settings.setTextScale(2.0); // 범위 밖 — 최댓값으로 붙는다.
+    expect(settings.textScale, maxTextScale);
+
+    await settings.setTextScale(0.1); // 범위 밖 — 최솟값으로 붙는다.
+    expect(settings.textScale, minTextScale);
+  });
+
+  testWidgets('글꼴: 화면 설정 > 글꼴에서 검색해서 고르고 저장하면 저장된다', (tester) async {
+    mockWindowManager(tester);
+    final s = _session();
+    await s.settings.init();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SettingsScreen(session: s)),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('화면 설정'));
+    await tester.pump();
+
+    // 아직 안 고르면 단추 글자가 "시스템 기본".
+    expect(find.text('시스템 기본'), findsOneWidget);
+    await tester.tap(find.text('시스템 기본'));
+    await tester.pumpAndSettle();
+
+    // 검색해서 좁힌다 — 이 PC에 실제로 깔려 있는 "맑은 고딕"을 쓴다(Windows 기본 글꼴).
+    await tester.enterText(find.byType(TextField), '맑은');
+    await tester.pump();
+    expect(find.text('맑은 고딕'), findsOneWidget);
+    await tester.tap(find.text('맑은 고딕'));
+    await tester.pumpAndSettle();
+
+    // 패널이 닫히고 단추 글자가 바뀐다.
+    expect(find.text('맑은 고딕'), findsOneWidget);
+    expect(find.text('시스템 기본'), findsNothing);
+
+    await tester.tap(find.text('저장하기'));
+    await tester.pump();
+    expect(s.settings.fontFamily, '맑은 고딕');
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('settings_font_family'), '맑은 고딕');
+  });
+
+  testWidgets('글꼴 초기화: 드롭다운 목록의 "시스템 기본"을 고르면 되돌아가고 저장도 된다', (tester) async {
+    mockWindowManager(tester);
+    final s = _session();
+    await s.settings.init();
+    await s.settings.setFontFamily('맑은 고딕');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SettingsScreen(session: s)),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('화면 설정'));
+    await tester.pump();
+
+    // 이미 글꼴을 고른 상태로 열렸으니 단추 글자가 그 이름이다. 목록을 열면 맨 위에
+    // "시스템 기본"이 늘 있다(별도 "초기화" 단추 없이 이걸로 되돌린다).
+    expect(find.text('맑은 고딕'), findsOneWidget);
+    await tester.tap(find.text('맑은 고딕'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('시스템 기본'));
+    await tester.pumpAndSettle();
+    expect(find.text('시스템 기본'), findsOneWidget);
+    expect(find.text('맑은 고딕'), findsNothing);
+
+    await tester.tap(find.text('저장하기'));
+    await tester.pump();
+    expect(s.settings.fontFamily, '');
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('settings_font_family'), '');
   });
 
   group('메시지 전송 옵션', () {

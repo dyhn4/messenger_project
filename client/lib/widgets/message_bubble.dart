@@ -21,6 +21,7 @@ import '../services/app_links.dart';
 import '../services/mention_logic.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
+import 'chat_font_scope.dart';
 import 'external_image.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
@@ -1029,15 +1030,19 @@ class _MessageBubbleState extends State<MessageBubble> {
         // Windows(마우스)에서는 텍스트 선택이 롱프레스가 아니라 클릭+드래그로 이뤄져서
         // onLongPress와 경합하지 않으므로, 마우스 호버 시 커서가 I-beam으로 바뀌고 드래그로
         // 바로 선택할 수 있도록 SelectableText를 쓴다.
-        return FormattedText(
-          message.text ?? '',
-          format: message.textFormat,
-          style: Theme.of(context).textTheme.bodyMedium,
-          linkColor: Colors.blue,
-          selectable: Platform.isWindows,
-          mentions: message.mentions,
-          myUserId: widget.session.userId,
-          onMentionTap: _openMention,
+        // 메시지 본문은 환경설정 > 화면 설정 > 글꼴을 따른다(chat_font_scope.dart).
+        return ChatFont(
+          settings: widget.session.settings,
+          builder: (context, font) => FormattedText(
+            message.text ?? '',
+            format: message.textFormat,
+            style: applyChatFont(Theme.of(context).textTheme.bodyMedium, font),
+            linkColor: Colors.blue,
+            selectable: Platform.isWindows,
+            mentions: message.mentions,
+            myUserId: widget.session.userId,
+            onMentionTap: _openMention,
+          ),
         );
       case MessageType.sticker:
         return StickerView(

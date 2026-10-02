@@ -1421,16 +1421,23 @@ export const secretRekeys = pgTable(
   (t) => [index('secret_rekeys_room_id_epoch_idx').on(t.roomId, t.keyEpoch)],
 );
 
-// ── 이모티콘(그림 스티커) ────────────────────────────────────────────────
+// ── 이모티콘(그림 스티커) / 캐릭터(프로필 사진 세트) ───────────────────────
 // 서버 운영자가 앱의 "서버 관리 > 이모티콘"(또는 scripts/import-stickers.mjs)으로 세트(팩)를 만들고
 // 그림을 올린다 — 앱을 새로 배포하지 않아도 모든 기기에 바로 보인다. 그림 파일은 첨부와 같은
 // 업로드 폴더에 두고(/uploads/<uuid>.png) 목록을 줄 때마다 서명된 링크로 내려준다.
 // 메시지에는 "srv:<스티커 id>"만 실린다(client/lib/data/stickers.dart). 그래서 지우지 않고
 // 숨기기만 한다(hidden) — 숨긴 것도 목록에는 내려줘서 예전 메시지는 계속 그림이 보이고,
 // 이모티콘 선택창에서만 빠진다.
+//
+// kind로 "이모티콘"(채팅에 보내는 용도)과 "캐릭터"(프로필 사진으로 고르는 용도)를 구분한다
+// — 테이블/업로드/숨기기·삭제 로직은 완전히 같아서 같이 쓰고, 선택창·목록에서 보여줄 때만
+// kind로 갈라서 서로 섞이지 않게 한다(stickers.js). 캐릭터를 프로필 사진으로 고르면 users
+// 테이블에 그 그림의 원본 경로를 avatarType:'photo'로 그대로 복사해 넣는다(users.js) — 그
+// 뒤로는 "사진 올리기"와 똑같이 다뤄져서 렌더링 쪽은 손댈 게 없다.
 export const stickerPacks = pgTable('sticker_packs', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
+  kind: text('kind').notNull().default('sticker'), // 'sticker' | 'character'
   position: integer('position').notNull().default(0),
   hidden: boolean('hidden').notNull().default(false),
   // "세트 삭제" — 관리 화면·선택창에서 사라지지만 행은 남겨서 예전 메시지의 그림은 계속 보인다.
@@ -1446,6 +1453,9 @@ export const stickers = pgTable(
       .notNull()
       .references(() => stickerPacks.id, { onDelete: 'cascade' }),
     fileUrl: text('file_url').notNull(),
+    // 화면(선택창·말풍선·프로필 미리보기)에 그릴 작은 그림 — 없으면(움직이는 그림, 이미 작은 그림,
+    // 예전에 올린 것) 원본(fileUrl)을 그대로 쓴다. stickerThumbnail.js 참고.
+    thumbnailUrl: text('thumbnail_url'),
     fileName: text('file_name'),
     mimeType: text('mime_type'),
     position: integer('position').notNull().default(0),

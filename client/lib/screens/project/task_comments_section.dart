@@ -4,7 +4,7 @@ import '../../models/app_user.dart';
 import '../../models/project.dart';
 import '../../services/session.dart';
 import '../../services/time_format.dart';
-import '../../widgets/hover_toolbar.dart' show hoverMenuItem;
+import '../../widgets/hover_toolbar.dart' show hoverMenuItem, hoverMenuStyle;
 import '../../widgets/rich_text_format.dart';
 import '../../widgets/my_avatar.dart';
 import '../../widgets/user_avatar.dart';
@@ -495,6 +495,7 @@ class _CommentsSectionState extends State<CommentsSection> {
                       ),
                       if (mine || canDelete)
                         MenuAnchor(
+                          style: hoverMenuStyle(context),
                           menuChildren: [
                             if (mine)
                               hoverMenuItem(

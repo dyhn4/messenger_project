@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../data/stickers.dart';
+import '../services/app_settings.dart';
+import 'category_tab_row.dart';
 import 'sticker_view.dart';
 
 /// 카테고리 탭 + 이모티콘 그리드. 채팅/댓글 화면에서 메시지 목록 위에 떠 있는 오버레이 카드로
@@ -8,15 +10,21 @@ import 'sticker_view.dart';
 /// 가진 카드 모양이다. 하나를 탭하면 [onSelected]만 호출하고 스스로 닫히지 않는다 — 실제로
 /// 보낼지/취소할지, 패널을 닫을지는 호출부(채팅/댓글 화면)가 정한다.
 ///
-/// 탭은 서버에 올린 그림 이모티콘 세트(예: "리마인")가 먼저, 그 뒤에 기본 이모지 세트가 온다.
-/// 그림 세트가 새로 올라오면(서버 목록을 다시 받으면) 스스로 탭을 다시 그린다.
+/// 탭은 기본으로 서버에 올린 그림 이모티콘 세트(예: "리마인")가 먼저, 그 뒤에 기본 이모지
+/// 세트가 온다 — 단, [settings]에 저장해 둔 순서(탭을 꾹 눌러서 끌어 바꾼 적이 있으면)가
+/// 있으면 그 순서를 따른다(category_tab_row.dart). 그림 세트가 새로 올라오면(서버 목록을
+/// 다시 받으면) 스스로 탭을 다시 그린다.
 ///
-/// 세트가 많아 세트 이름 줄이 한 화면에 안 들어가면 그 줄 양끝에 **이전/다음 페이지 단추**(‹ ›)가 나타나서,
-/// 누를 때마다 한 화면(보이는 폭)씩 넘긴다 — 마우스 휠로는 가로 스크롤이 잘 안 돼서 PC에서 뒤쪽 세트에 닿기
-/// 어려웠다. 끝에 닿으면 그쪽 단추는 꺼진다.
+/// 세트가 많아 세트 이름 줄이 한 화면에 안 들어가면 그 줄 양끝에 이전/다음 페이지 단추(‹ ›)가
+/// 나타난다(category_tab_row.dart).
 class StickerPicker extends StatefulWidget {
   final void Function(Sticker sticker) onSelected;
-  const StickerPicker({super.key, required this.onSelected});
+  final AppSettings settings;
+  const StickerPicker({
+    super.key,
+    required this.onSelected,
+    required this.settings,
+  });
 
   @override
   State<StickerPicker> createState() => _StickerPickerState();
@@ -26,70 +34,21 @@ class _StickerPickerState extends State<StickerPicker> {
   /// 탭은 이름으로 기억한다 — 서버 세트가 늘거나 줄어도 보던 탭이 그대로 남게.
   String? _categoryName;
 
-  /// 세트 이름 줄의 가로 스크롤 — 페이지 단추가 이걸 한 화면씩 움직인다.
-  final _tabScroll = ScrollController();
-
-  /// 세트 이름 줄이 한 화면을 넘는지(페이지 단추를 보일지), 맨 앞/맨 뒤인지(그쪽 단추를 끌지).
-  bool _tabsOverflow = false;
-  bool _tabsAtStart = true;
-  bool _tabsAtEnd = true;
-
-  @override
-  void dispose() {
-    _tabScroll.dispose();
-    super.dispose();
-  }
-
-  /// 스크롤 위치·크기가 바뀔 때마다 단추 상태를 다시 계산한다(바뀐 게 있을 때만 다시 그린다).
-  bool _onTabMetrics(ScrollMetrics m) {
-    final overflow = m.maxScrollExtent > 0.5;
-    final atStart = m.pixels <= m.minScrollExtent + 0.5;
-    final atEnd = m.pixels >= m.maxScrollExtent - 0.5;
-    if (overflow != _tabsOverflow ||
-        atStart != _tabsAtStart ||
-        atEnd != _tabsAtEnd) {
-      setState(() {
-        _tabsOverflow = overflow;
-        _tabsAtStart = atStart;
-        _tabsAtEnd = atEnd;
-      });
-    }
-    return false;
-  }
-
-  /// 세트 이름 줄을 한 화면(보이는 폭의 90% — 걸친 칩이 다음 화면 첫머리에 보이게 조금 겹친다)만큼 넘긴다.
-  void _pageTabs(int direction) {
-    if (!_tabScroll.hasClients) return;
-    final pos = _tabScroll.position;
-    final target = (pos.pixels + direction * pos.viewportDimension * 0.9).clamp(
-      pos.minScrollExtent,
-      pos.maxScrollExtent,
-    );
-    _tabScroll.animateTo(
-      target,
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
-    );
-  }
-
-  Widget _pageButton({
-    required Key key,
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback? onPressed,
-  }) {
-    return SizedBox(
-      width: 28,
-      child: IconButton(
-        key: key,
-        padding: EdgeInsets.zero,
-        iconSize: 20,
-        visualDensity: VisualDensity.compact,
-        tooltip: tooltip,
-        icon: Icon(icon),
-        onPressed: onPressed,
-      ),
-    );
+  /// [natural](기본 순서) 중 [order]에 있는 이름은 그 순서대로, 없는 이름(아직 안 끌어서
+  /// 넣어본 새 세트)은 기본 순서 그대로 뒤에 남는다.
+  List<StickerCategory> _ordered(
+    List<StickerCategory> natural,
+    List<String> order,
+  ) {
+    if (order.isEmpty) return natural;
+    final byName = {for (final c in natural) c.name: c};
+    final result = [
+      for (final name in order)
+        if (byName.remove(name) != null)
+          natural.firstWhere((c) => c.name == name),
+    ];
+    result.addAll(byName.values);
+    return result;
   }
 
   @override
@@ -97,10 +56,10 @@ class _StickerPickerState extends State<StickerPicker> {
     return ListenableBuilder(
       listenable: serverStickers,
       builder: (context, _) {
-        final categories = [
+        final categories = _ordered([
           ...serverStickers.visibleCategories,
           ...stickerCategories,
-        ];
+        ], widget.settings.stickerCategoryOrder);
         final category = categories.firstWhere(
           (c) => c.name == _categoryName,
           orElse: () => categories.first,
@@ -118,71 +77,15 @@ class _StickerPickerState extends State<StickerPicker> {
             height: images ? 220 : 140,
             child: Column(
               children: [
-                SizedBox(
-                  // ChoiceChip 자체 높이(패딩 포함)보다 이 줄이 낮으면 칩이 눌려서 글자가
-                  // 위로 밀려 보인다 — 칩이 눌리지 않을 만큼 넉넉하게 준다.
-                  height: 32,
-                  child: Row(
-                    children: [
-                      if (_tabsOverflow)
-                        _pageButton(
-                          key: const ValueKey('sticker-tabs-prev'),
-                          icon: Icons.chevron_left,
-                          tooltip: '이전 세트',
-                          onPressed: _tabsAtStart ? null : () => _pageTabs(-1),
-                        ),
-                      Expanded(
-                        // ScrollMetricsNotification은 크기가 바뀔 때(첫 배치·세트 목록 변경), ScrollNotification은
-                        // 스크롤 위치가 바뀔 때 온다 — 둘 다 단추 상태를 다시 계산한다.
-                        child: NotificationListener<ScrollMetricsNotification>(
-                          onNotification: (n) => _onTabMetrics(n.metrics),
-                          child: NotificationListener<ScrollNotification>(
-                            onNotification: (n) => _onTabMetrics(n.metrics),
-                            child: ListView.builder(
-                              controller: _tabScroll,
-                              scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              itemCount: categories.length,
-                              itemBuilder: (context, i) {
-                                final c = categories[i];
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                  ),
-                                  child: ChoiceChip(
-                                    label: Text(c.name),
-                                    // 선택 시 체크마크가 붙으면 글자가 가운데서 옆으로 밀려 보이므로 끈다.
-                                    showCheckmark: false,
-                                    selected: identical(c, category),
-                                    visualDensity: VisualDensity.compact,
-                                    // 최소 터치 영역 확보용 여백이 위아래 비대칭으로 남는 걸 없애서
-                                    // 글자가 칩 세로 가운데에 오도록 한다.
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                    onSelected: (_) =>
-                                        setState(() => _categoryName = c.name),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (_tabsOverflow)
-                        _pageButton(
-                          key: const ValueKey('sticker-tabs-next'),
-                          icon: Icons.chevron_right,
-                          tooltip: '다음 세트',
-                          onPressed: _tabsAtEnd ? null : () => _pageTabs(1),
-                        ),
-                    ],
-                  ),
+                CategoryTabRow<StickerCategory>(
+                  items: categories,
+                  selected: category,
+                  labelOf: (c) => c.name,
+                  onSelected: (c) => setState(() => _categoryName = c.name),
+                  onReorder: (newOrder) =>
+                      widget.settings.setStickerCategoryOrder([
+                        for (final c in newOrder) c.name,
+                      ]),
                 ),
                 const Divider(height: 1),
                 Expanded(
@@ -210,6 +113,7 @@ class _StickerPickerState extends State<StickerPicker> {
                               sticker: sticker,
                               emojiSize: 28,
                               imageSize: 64,
+                              smooth: true,
                             ),
                           ),
                         ),

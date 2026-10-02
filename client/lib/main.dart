@@ -190,15 +190,15 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-/// 옛한글(고어) 자모 조합 글리프 — 기본 폰트(Roboto)에는 없어서 채팅에 옛한글을 쓰면
-/// 네모(tofu)로 보인다. pubspec.yaml에 번들된 폰트(SIL OFL 1.1, assets/fonts/OFL.txt 참고).
-const _oldHangulFontFamily = 'NanumBarunGothicYetHangul';
-
-/// 기존 테마의 폰트/글자 크기는 그대로 두고, 기본 폰트에 없는 글리프만 [_oldHangulFontFamily]로
+/// 기존 테마의 폰트/글자 크기는 그대로 두고, 기본 폰트에 없는 글리프만 [oldHangulFontFamily]로
 /// 대체되도록 fontFamilyFallback만 얹는다 — 그래서 채팅 내용뿐 아니라 입력창, 방 제목 등
 /// 텍스트가 나오는 모든 곳에서 옛한글이 깨지지 않고 보인다.
+///
+/// 환경설정 > 화면 설정 > 글꼴(Windows 전용)에서 고른 글꼴은 여기(앱 전체 기본 테마)가 아니라
+/// 채팅 내용·방 목록에만 적용된다(widgets/chat_font_scope.dart) — 그 외 화면(설정·관리자
+/// 콘솔·프로젝트 등)은 이 글꼴 설정과 무관하게 항상 지금 이 기본 모습 그대로다.
 ThemeData _withOldHangulFallback(ThemeData theme) {
-  const fallback = [_oldHangulFontFamily];
+  const fallback = [oldHangulFontFamily];
   return theme.copyWith(
     textTheme: theme.textTheme.apply(fontFamilyFallback: fallback),
     primaryTextTheme: theme.primaryTextTheme.apply(
@@ -486,13 +486,20 @@ class _MyAppState extends State<MyApp>
           // 그린다 — UpdateDialog(로그인/홈 화면이 한 번 띄우는 모달)과 달리 계속 떠 있는
           // 은근한 알림이라 여기 둬야 어느 화면에서도 안 사라진다.
           // 자동 잠금(환경설정 > 시스템 설정) — 잠겨 있으면 화면·다이얼로그 전부를 잠금 화면이 덮는다.
-          builder: (context, child) => AppLockGate(
-            session: session,
-            child: Stack(
-              children: [
-                ?child,
-                UpdateBanner(session: session, navigatorKey: navigatorKey),
-              ],
+          // 글자 크기(환경설정 > 화면 설정)도 여기서 한 번만 — MediaQuery.textScaler를 덮어써서
+          // 앱 전체(채팅·목록·대화상자 전부)에 똑같이 적용한다.
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(appSettings.textScale)),
+            child: AppLockGate(
+              session: session,
+              child: Stack(
+                children: [
+                  ?child,
+                  UpdateBanner(session: session, navigatorKey: navigatorKey),
+                ],
+              ),
             ),
           ),
         );

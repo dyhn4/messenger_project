@@ -16,6 +16,7 @@ import { findTeamById } from './db/queries/teams.js';
 import {
   BOARD_LEVELS,
   DEFAULT_NOTIFICATION_SETTINGS,
+  NOTIFICATION_GROUPS,
   boardRecipientsFor,
   diffMentions,
   mentionTargets,
@@ -24,6 +25,7 @@ import {
   pushTagSuffix,
   pushTargetsFor,
   roomNameForViewer,
+  unreadCountsOf,
 } from './notificationRules.js';
 import { notifyRecordPush, previewFor, roomTagFor } from './push.js';
 
@@ -37,8 +39,9 @@ export { sanitizeMentions } from './notificationRules.js';
  * 누구에게/무슨 종류로/푸시를 보낼지 같은 **규칙은 notificationRules.js**(순수 함수, 단위 시험 대상)에 있고, 여기는 그 결과로
  * 행을 넣고 소켓·푸시를 보내는 일을 한다.
  *
- * 소켓(user:<id>): notification:new { notification, unread:{mention,board} } — 새 알림 한 건과 새 안 읽음 수,
- *                  notification:sync { mention, board } — 읽음·삭제로 안 읽음 수가 바뀌었을 때(다른 기기 동기화).
+ * 소켓(user:<id>): notification:new { notification, unread:{mention,board,mentionPersonal,mentionAll} } — 새 알림 한 건과 새 안 읽음 수
+ *                  (mention = 개인 멘션 + @all 합계),
+ *                  notification:sync { mention, board, mentionPersonal, mentionAll } — 읽음·삭제로 안 읽음 수가 바뀌었을 때(다른 기기 동기화).
  */
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,9 +65,9 @@ export function toNotificationDto(row) {
   };
 }
 
-/** 내 안 읽은 멘션·보드 알림 수 — 내 모든 팀 합계. */
+/** 내 안 읽은 멘션·보드 알림 수 — 내 모든 팀 합계. {mention(=mentionPersonal+mentionAll), board, mentionPersonal, mentionAll} */
 export async function unreadCounts(userId) {
-  return (await unreadCountsForUsers([userId])).get(userId) ?? { mention: 0, board: 0 };
+  return (await unreadCountsForUsers([userId])).get(userId) ?? unreadCountsOf();
 }
 
 /** 안 읽음 수가 바뀐 사람들의 다른 기기에 새 수를 알린다(notification:sync). */
@@ -273,11 +276,14 @@ export async function markRoomNotificationsRead(io, userId, roomId, atMs) {
 export function createNotificationsRouter(io) {
   const router = Router();
 
-  /** 알림 목록 — kind=mention|board|all(생략=all), before(ms 커서), limit(기본 30·최대 100), unreadOnly. */
+  /**
+   * 알림 목록 — kind=mention(개인 멘션+@all)|mention_personal|mention_all|board|all(생략=all), before(ms 커서),
+   * limit(기본 30·최대 100), unreadOnly.
+   */
   router.get('/notifications', async (req, res) => {
     const kind = typeof req.query.kind === 'string' && req.query.kind ? req.query.kind : 'all';
-    if (!['mention', 'board', 'all'].includes(kind)) {
-      return res.status(400).json({ error: 'kind는 mention, board, all 중 하나여야 합니다.' });
+    if (kind !== 'all' && !NOTIFICATION_GROUPS.includes(kind)) {
+      return res.status(400).json({ error: `kind는 ${[...NOTIFICATION_GROUPS, 'all'].join(', ')} 중 하나여야 합니다.` });
     }
     const before = req.query.before == null || req.query.before === '' ? null : Number(req.query.before);
     if (before !== null && !Number.isFinite(before)) return res.status(400).json({ error: 'before가 올바르지 않습니다.' });
@@ -296,7 +302,7 @@ export function createNotificationsRouter(io) {
     res.json(await unreadCounts(req.user.sub));
   });
 
-  /** 읽음 처리 — { ids: [...] } 또는 { kind: 'mention'|'board' } 또는 { messageId }. */
+  /** 읽음 처리 — { ids: [...] } 또는 { kind: 'mention'|'mention_personal'|'mention_all'|'board' } 또는 { messageId }. */
   router.post('/notifications/read', async (req, res) => {
     const body = req.body ?? {};
     const userId = req.user.sub;
@@ -304,8 +310,8 @@ export function createNotificationsRouter(io) {
       const ids = body.ids.filter((id) => typeof id === 'string' && UUID_RE.test(id));
       if (ids.length > 0) await markNotificationsRead({ userId, ids });
     } else if (typeof body.kind === 'string') {
-      if (body.kind !== 'mention' && body.kind !== 'board') {
-        return res.status(400).json({ error: 'kind는 mention 또는 board여야 합니다.' });
+      if (!NOTIFICATION_GROUPS.includes(body.kind)) {
+        return res.status(400).json({ error: `kind는 ${NOTIFICATION_GROUPS.join(', ')} 중 하나여야 합니다.` });
       }
       await markNotificationsRead({ userId, group: body.kind });
     } else if (typeof body.messageId === 'string') {

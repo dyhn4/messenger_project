@@ -6,7 +6,8 @@ import 'api_client.dart';
 /// 추상 클래스만 알아서, 테스트는 가짜 구현을 끼우고 실제 앱은 [RemoteNotificationApi]가 [ApiClient]로
 /// 서버를 부른다.
 abstract class NotificationApi {
-  /// `GET /api/notifications` — [kind]는 'mention' | 'board' | 'all'. [before]는 이 시각(ms)보다 오래된 것만
+  /// `GET /api/notifications` — [kind]는 'mention'(개인 멘션+@all) | 'mention_personal' | 'mention_all' | 'board' |
+  /// 'all'. [before]는 이 시각(ms)보다 오래된 것만
   /// (무한 스크롤 커서), 최신순이다.
   Future<({List<AppNotification> items, bool hasMore})> fetchNotifications({
     required String kind,

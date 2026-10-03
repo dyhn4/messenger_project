@@ -79,17 +79,27 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
   /// 파일 메시지로.
   String get _wireType {
     final message = widget.message;
-    if (!message.isPost || message.attachments.isEmpty) {
+    if (!message.isPost || message.liveAttachments.isEmpty) {
       return _typeToWire(message.type);
     }
-    return message.attachments.every((a) => a.isImage) ? 'image' : 'file';
+    return message.liveAttachments.every((a) => a.isImage) ? 'image' : 'file';
   }
 
   Future<void> _forward() async {
     final room = _targetRoom;
     if (room == null || !canForwardTo(widget.session, room)) return;
-    setState(() => _sending = true);
     final message = widget.message;
+    // 파일 삭제로 지워진 파일은 전달할 수 없다(메시지 자리와 댓글만 남아 있다).
+    final isFileMessage =
+        message.type == MessageType.image || message.type == MessageType.file;
+    if (isFileMessage && message.attachments.isNotEmpty &&
+        message.liveAttachments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('삭제된 파일은 전달할 수 없습니다.')),
+      );
+      return;
+    }
+    setState(() => _sending = true);
     final text = message.type == MessageType.sticker
         ? message.text
         : (_textController.text.trim().isEmpty
@@ -97,8 +107,8 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
               : _textController.text.trim());
     // 게시글은 첨부가 하나여도 목록으로 넘긴다(게시글 첨부는 목록에만 온전히 있다).
     final sendList =
-        message.attachments.length > 1 ||
-        (message.isPost && message.attachments.isNotEmpty);
+        message.liveAttachments.length > 1 ||
+        (message.isPost && message.liveAttachments.isNotEmpty);
     try {
       await widget.session.chatSocket.send(
         roomId: room.id,
@@ -112,7 +122,7 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
         // 사진·파일 여러 개가 딸린 메시지는 전부 같이 넘긴다(없으면 첫 번째만 전달된다).
         attachments: sendList
             ? [
-                for (final a in message.attachments)
+                for (final a in message.liveAttachments)
                   {
                     'kind': a.kind,
                     'fileUrl': a.fileUrl,

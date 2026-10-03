@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
-import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../models/topic_folder.dart';
@@ -17,31 +14,22 @@ import '../widgets/app_menu_button.dart';
 import '../widgets/chat_font_scope.dart';
 import '../widgets/chat_panel.dart';
 import '../widgets/favorite_star.dart';
-import '../widgets/muted_scrollbar.dart';
 import '../widgets/notifications_panel.dart';
-import '../widgets/pagination.dart';
 import '../widgets/position_badge.dart';
 import '../widgets/private_topic_lock.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
-import 'topic_members_dialog.dart' show TopicMembersScreen;
+import '../widgets/side_panels.dart';
 import '../widgets/team_avatar.dart';
 import '../services/app_settings.dart' show TeamSwitchStyle;
 import '../widgets/team_switcher.dart';
 import '../widgets/topic_folder_widgets.dart';
+import 'invite_rooms_dialog.dart' show showInviteToMultipleRooms;
 import '../widgets/unread_badge.dart';
-import '../widgets/user_avatar.dart';
 import 'calendar/calendar_screen.dart';
 import 'create_topic_screen.dart';
-import 'files_screen.dart';
-import 'links_screen.dart';
-import 'member_profile_dialog.dart';
 import 'message_thread_screen.dart';
-import 'project/project_dialog.dart';
-import 'project/project_window.dart';
-import 'my_profile_dialog.dart';
 import 'new_group_dialog.dart';
-import 'search_screen.dart';
 import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
 
@@ -92,62 +80,85 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   // "대화창 분할하기"(방 목록 우클릭 메뉴)로 연 두 번째 채팅 패널 — 오른쪽에 나란히 뜬다.
   // _selectedRoom과 같은 방이면 분할할 의미가 없으므로 _effectiveSplitRoom에서 걸러진다.
   Room? _splitRoom;
-  bool _searchOpen = false;
-  bool _membersOpen = false;
 
-  /// null이 아니면 위 멤버 패널이 상단 "멤버"(팀 전체)가 아니라, 방 헤더의 "멤버" 버튼으로 연 그
-  /// 방의 "참여 멤버" 패널이다(토픽·그룹채팅).
-  Room? _membersRoom;
-  bool _filesOpen = false;
+  /// 오른쪽에 열려 있는 패널의 키(side_panels.dart의 SidePanelSpec.key — 검색·파일·링크·즐겨찾기·알림 센터·멤버 …).
+  /// 한 번에 하나만 열려서 다른 패널을 열면 교체되고, 댓글 스레드·대화창 분할과도 서로 자리를 비킨다. 없으면 null.
+  /// 새 패널은 이 파일을 고치지 않고 side_panels.dart의 sidePanelSpecs에 등록한다.
+  String? _panelKey;
 
-  /// "메뉴 > 링크" 패널(links_screen.dart) — 파일 패널과 같은 자리를 서로 번갈아 쓴다.
-  bool _linksOpen = false;
-
-  /// 방 헤더 "더보기"의 "파일 보기"/"링크 보기"로 연 패널이 걸러 볼 방. null이면(상단 메뉴로 연
-  /// 경우) 지금 보고 있는 방으로 시작한다. 패널은 [_panelGeneration]을 키로 써서, 이미 열려 있어도
-  /// 다른 방에서 누르면 그 방으로 새로 시작한다.
-  String? _panelRoomId;
+  /// 방 헤더의 "파일 보기"/"링크 보기"/"멤버"로 연 패널이 가리키는 방. null이면(상단 메뉴로 연 경우) 파일·링크는 지금
+  /// 보고 있는 방으로 시작하고 멤버는 팀 전체다. 패널은 [_panelGeneration]을 키로 써서, 이미 열려 있어도 다른 방에서
+  /// 누르면 그 방으로 새로 시작한다.
+  Room? _panelRoom;
   int _panelGeneration = 0;
 
-  /// 방 헤더의 "파일 보기"/"링크 보기" — 오른쪽 패널을 그 방으로 걸러서 연다. 다른 오른쪽 패널과
-  /// 분할 패널은 닫는다(상단 메뉴로 열 때와 같다).
-  void _openRoomPanel(Room room, {required bool links}) {
+  /// [key] 패널을 연다(이미 열려 있는 패널은 새로 시작). 다른 오른쪽 패널과 댓글 스레드·분할 패널은 닫는다.
+  void _showPanel(String key, {Room? room}) {
     setState(() {
-      _panelRoomId = room.id;
+      _panelKey = key;
+      _panelRoom = room;
       _panelGeneration++;
-      _filesOpen = !links;
-      _linksOpen = links;
-      _searchOpen = false;
-      _membersOpen = false;
-      _notificationsOpen = false;
       _threadMessage = null;
       _threadRoom = null;
       _splitRoom = null;
     });
   }
+
+  void _closePanel() => setState(() {
+    _panelKey = null;
+    _panelRoom = null;
+  });
+
+  /// 상단 버튼·메뉴 타일로 패널을 토글한다 — 열려 있으면 닫고, 아니면 연다. 단 방 헤더로 연 "참여 멤버" 패널이 열려 있을 때
+  /// 상단 "팀 멤버"를 누르면 닫지 않고 팀 전체 멤버로 바꿔서 연다.
+  void _togglePanel(String key) {
+    final switchToTeam =
+        key == 'members' && _panelKey == key && _panelRoom != null;
+    if (_panelKey == key && !switchToTeam) {
+      _closePanel();
+      return;
+    }
+    _showPanel(key);
+  }
+
+  /// 방 헤더의 "파일 보기"/"링크 보기" — 오른쪽 패널을 그 방으로 걸러서 연다.
+  void _openRoomPanel(Room room, {required bool links}) =>
+      _showPanel(links ? 'links' : 'files', room: room);
 
   /// 방 헤더의 "멤버" — 그 방의 참여 멤버 패널을 연다. 이미 그 방 것이 열려 있으면 닫는다(토글).
-  /// 다른 오른쪽 패널·분할 패널은 닫는다(상단 메뉴로 열 때와 같다).
   void _openRoomMembers(Room room) {
+    if (_panelKey == 'members' && _panelRoom?.id == room.id) {
+      _closePanel();
+      return;
+    }
+    _showPanel('members', room: room);
+  }
+
+  /// 오른쪽 패널(검색 결과·링크의 "대화방에서 보기"·즐겨찾기 …)에서 방을 누르면 — 가운데 채팅 자리를 그 방으로 바꾼다
+  /// ([messageId]가 있으면 그 메시지로 스크롤·강조). 다른 팀의 방이면 팀 전환부터 requestOpenRoom이 한다.
+  void _openRoomFromPanel(Room room, {String? messageId}) {
+    if (room.teamId != widget.session.currentTeam?.id) {
+      widget.session.requestOpenRoom(room, messageId: messageId);
+      return;
+    }
     setState(() {
-      if (_membersOpen && _membersRoom?.id == room.id) {
-        _membersOpen = false;
-        _membersRoom = null;
-        return;
-      }
-      _membersOpen = true;
-      _membersRoom = room;
-      _searchOpen = false;
-      _filesOpen = false;
-      _linksOpen = false;
-      _notificationsOpen = false;
+      _selectedRoom = room;
       _threadMessage = null;
       _threadRoom = null;
-      _splitRoom = null;
+      _highlightMessageId = messageId;
     });
   }
 
-  bool _notificationsOpen = false;
+  /// 캘린더 — 사이드바+채팅 자리를 캘린더로 바꾼다. 한 번 더 누르거나 방을 고르면 돌아온다.
+  void _toggleCalendar() => setState(() {
+    _calendarOpen = !_calendarOpen;
+    if (_calendarOpen) {
+      _threadMessage = null;
+      _threadRoom = null;
+      _splitRoom = null;
+    }
+  });
+
   String? _highlightMessageId;
   Message? _threadMessage; // 열려있는 댓글 스레드 패널(있으면 그 메시지).
   // 위 _threadMessage가 메인 패널 것인지 분할 패널 것인지 구분해야 그 스레드를 올바른 방의
@@ -192,18 +203,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   }
 
   /// 방 목록 우클릭 메뉴의 "대화창 분할하기" — 이미 메인에 열려 있는 방이면 아무 것도 안 한다
-  /// (같은 방을 두 번 그릴 이유가 없다). 검색/멤버/파일/알림 센터 패널과는 서로 자리를
-  /// 다투므로(한 화면에 다 욱여넣으면 너무 좁아짐), 그 넷과 똑같이 서로 배타적으로 만든다 —
-  /// 분할 패널을 열면 그 넷을 닫고, 그 넷 중 하나를 열면(위 _TopBar 콜백들) 분할 패널을 닫는다.
+  /// (같은 방을 두 번 그릴 이유가 없다). 오른쪽 패널(검색/멤버/파일/링크/즐겨찾기/알림 센터)과는 서로 자리를
+  /// 다투므로(한 화면에 다 욱여넣으면 너무 좁아짐) 서로 배타적으로 만든다 —
+  /// 분할 패널을 열면 오른쪽 패널을 닫고, 오른쪽 패널을 열면(_showPanel) 분할 패널을 닫는다.
   void _openSplitRoom(Room room) {
     if (room.id == _selectedRoom?.id) return;
     setState(() {
       _splitRoom = room;
-      _searchOpen = false;
-      _membersOpen = false;
-      _filesOpen = false;
-      _linksOpen = false;
-      _notificationsOpen = false;
+      _panelKey = null;
+      _panelRoom = null;
       _threadMessage = null;
       _threadRoom = null;
     });
@@ -365,247 +373,78 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     }
   }
 
-  Future<void> _openMemberProfile(AppUser user) async {
-    // 멤버 목록에서 로그인한 사용자 자신을 클릭하면, 다른 멤버 볼 때 쓰는 카드(DM 시작 등)
-    // 대신 삼선 메뉴의 "내 프로필"과 같은 카드(이름/이메일/비밀번호 수정)를 보여준다.
-    if (user.id == widget.session.userId) {
-      await showDialog(
-        context: context,
-        builder: (_) => MyProfileDialog(session: widget.session),
-      );
-      return;
-    }
-    final room = await showDialog<Room>(
-      context: context,
-      builder: (_) => MemberProfileDialog(session: widget.session, user: user),
-    );
-    if (room != null) {
-      setState(() {
-        _selectedRoom = room;
-        _threadMessage = null;
-        _threadRoom = null;
-        _membersOpen = false;
-        _highlightMessageId = null;
-      });
-    }
-  }
-
-  /// "알림 센터"에서 방을 누르면 — 다른 팀 방일 수 있으므로(그게 이 패널의 핵심 목적이다)
-  /// _selectRoom으로 바로 바꾸지 않고 requestOpenRoom을 거친다. 그 방이 지금 보고 있는
-  /// 팀이 아니면 currentTeam을 먼저 그 팀으로 바꾸고 "펼쳐서 보여줄 방"을 예약해두는데,
-  /// _onSessionChanged가 곧이어 그 예약을 소비해서 _selectRoom을 대신 호출해준다(main.dart의
-  /// 알림 클릭 처리, org_chart_screen.dart의 멤버 선택과 같은 패턴).
-  void _openNotificationRoom(
-    Room room, {
-    String? messageId,
-    bool announcementPopup = true,
-  }) {
-    final hadUnreadAnnouncement = room.hasUnreadAnnouncement;
-    setState(() => _notificationsOpen = false);
-    // [messageId]가 있으면(멘션·보드 알림) 그 방을 연 뒤 그 메시지로 스크롤·강조한다.
-    widget.session.requestOpenRoom(room, messageId: messageId);
-    // 안 읽은 공지 때문에 알림 센터에 떠 있던 방이면 공지 내용도 팝업으로 띄운다.
-    if (announcementPopup) {
-      showUnreadAnnouncementPopup(
-        context,
-        widget.session,
-        room,
-        hadUnreadAnnouncement: hadUnreadAnnouncement,
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Column(
-        children: [
-          _TopBar(
-            session: widget.session,
-            calendarOpen: _calendarOpen,
-            onToggleCalendar: () => setState(() {
-              _calendarOpen = !_calendarOpen;
-              if (_calendarOpen) {
-                _threadMessage = null;
-                _threadRoom = null;
-                _splitRoom = null;
-              }
-            }),
-            onShowMembers: () => setState(() {
-              // 방 참여 멤버 패널이 열려 있었으면 팀 전체 멤버로 바꿔서 연다(닫지 않는다).
-              final switchToTeam = _membersOpen && _membersRoom != null;
-              _membersRoom = null;
-              _membersOpen = switchToTeam || !_membersOpen;
-              if (_membersOpen) {
-                _searchOpen = false;
-                _filesOpen = false;
-                _linksOpen = false;
-                _notificationsOpen = false;
-                _threadMessage = null;
-                _threadRoom = null;
-                _splitRoom = null;
-              }
-            }),
-            onToggleSearch: () => setState(() {
-              _searchOpen = !_searchOpen;
-              if (_searchOpen) {
-                _membersOpen = false;
-                _filesOpen = false;
-                _linksOpen = false;
-                _notificationsOpen = false;
-                _threadMessage = null;
-                _threadRoom = null;
-                _splitRoom = null;
-              }
-            }),
-            onOpenFiles: () => setState(() {
-              _filesOpen = !_filesOpen;
-              if (_filesOpen) {
-                _panelRoomId = null;
-                _linksOpen = false;
-                _searchOpen = false;
-                _membersOpen = false;
-                _notificationsOpen = false;
-                _threadMessage = null;
-                _threadRoom = null;
-                _splitRoom = null;
-              }
-            }),
-            onOpenLinks: () => setState(() {
-              _linksOpen = !_linksOpen;
-              if (_linksOpen) {
-                _panelRoomId = null;
-                _filesOpen = false;
-                _searchOpen = false;
-                _membersOpen = false;
-                _notificationsOpen = false;
-                _threadMessage = null;
-                _threadRoom = null;
-                _splitRoom = null;
-              }
-            }),
-            onToggleNotifications: () => setState(() {
-              _notificationsOpen = !_notificationsOpen;
-              if (_notificationsOpen) {
-                _searchOpen = false;
-                _membersOpen = false;
-                _filesOpen = false;
-                _linksOpen = false;
-                _threadMessage = null;
-                _threadRoom = null;
-                _splitRoom = null;
-              }
-            }),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _calendarOpen
-                      ? CalendarScreen(session: widget.session, embedded: true)
-                      : _buildSidebarAndChat(context),
-                ),
-                if (_searchOpen) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: _sidePanelWidth,
-                    child: SearchScreen(
-                      session: widget.session,
-                      asPanel: true,
-                      onClose: () => setState(() => _searchOpen = false),
-                      onOpenRoom: (room, messageId) => setState(() {
-                        _selectedRoom = room;
-                        _threadMessage = null;
-                        _highlightMessageId = messageId;
-                      }),
-                    ),
-                  ),
-                ],
-                if (_membersOpen) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: _sidePanelWidth,
-                    child: _membersRoom != null
-                        ? TopicMembersScreen(
-                            key: ValueKey('room-members-${_membersRoom!.id}'),
-                            session: widget.session,
-                            room: _membersRoom!,
-                            asPanel: true,
-                            onClose: () => setState(() {
-                              _membersOpen = false;
-                              _membersRoom = null;
-                            }),
-                          )
-                        : _MembersPanel(
-                            session: widget.session,
-                            onClose: () => setState(() => _membersOpen = false),
-                            onSelectMember: _openMemberProfile,
-                          ),
-                  ),
-                ],
-                if (_filesOpen) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: _sidePanelWidth,
-                    child: FilesScreen(
-                      key: ValueKey('files-$_panelGeneration'),
-                      session: widget.session,
-                      initialRoomId: _panelRoomId ?? _selectedRoom?.id,
-                      onClose: () => setState(() => _filesOpen = false),
-                    ),
-                  ),
-                ],
-                if (_linksOpen) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: _sidePanelWidth,
-                    child: LinksScreen(
-                      key: ValueKey('links-$_panelGeneration'),
-                      session: widget.session,
-                      initialRoomId: _panelRoomId ?? _selectedRoom?.id,
-                      onClose: () => setState(() => _linksOpen = false),
-                      // "대화방에서 보기" — 검색 결과를 눌렀을 때처럼 그 방을 열고 메시지로 스크롤.
-                      onOpenMessage: (room, messageId) => setState(() {
-                        _selectedRoom = room;
-                        _threadMessage = null;
-                        _highlightMessageId = messageId;
-                      }),
-                    ),
-                  ),
-                ],
-                if (_notificationsOpen) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: _sidePanelWidth,
-                    child: NotificationsPanel(
-                      session: widget.session,
-                      onClose: () => setState(() => _notificationsOpen = false),
-                      onSelectRoom: _openNotificationRoom,
-                    ),
-                  ),
-                ],
-                if (_threadMessage != null && _threadRoom != null) ...[
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: _sidePanelWidth,
-                    child: MessageThreadScreen(
-                      session: widget.session,
-                      room: _threadRoom!,
-                      message: _threadMessage!,
-                      controller: widget.session.controllerFor(_threadRoom!),
-                      asPanel: true,
-                      onClose: () => setState(() {
-                        _threadMessage = null;
-                        _threadRoom = null;
-                      }),
-                    ),
-                  ),
-                ],
-              ],
+    final panelSpec = _panelKey == null ? null : sidePanelSpecFor(_panelKey!);
+    // 메뉴·패널이 홈 화면의 일(패널 열기, 캘린더 전환, 방 열기)을 부를 수 있게 손잡이를 내려 준다.
+    return HomeShellScope(
+      openPanelKey: _panelKey,
+      panelRoom: _panelRoom,
+      panelGeneration: _panelGeneration,
+      currentRoomId: _selectedRoom?.id,
+      togglePanel: _togglePanel,
+      closePanel: _closePanel,
+      toggleCalendar: _toggleCalendar,
+      openRoom: _openRoomFromPanel,
+      child: Scaffold(
+        body: Column(
+          children: [
+            _TopBar(
+              session: widget.session,
+              onShowMembers: () => _togglePanel('members'),
+              onToggleSearch: () => _togglePanel('search'),
+              onToggleNotifications: () => _togglePanel('notifications'),
             ),
-          ),
-        ],
+            const Divider(height: 1),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _calendarOpen
+                        ? CalendarScreen(
+                            session: widget.session,
+                            embedded: true,
+                          )
+                        : _buildSidebarAndChat(context),
+                  ),
+                  // 오른쪽 패널(검색·파일·링크·즐겨찾기·알림 센터·멤버 …) — 등록 목록은 side_panels.dart.
+                  if (panelSpec != null) ...[
+                    const VerticalDivider(width: 1),
+                    SizedBox(
+                      key: ValueKey('side-panel-${panelSpec.key}'),
+                      width: _sidePanelWidth,
+                      child: Builder(
+                        builder: (panelContext) => buildSidePanel(
+                          panelContext,
+                          widget.session,
+                          panelSpec,
+                          _closePanel,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_threadMessage != null && _threadRoom != null) ...[
+                    const VerticalDivider(width: 1),
+                    SizedBox(
+                      width: _sidePanelWidth,
+                      child: MessageThreadScreen(
+                        session: widget.session,
+                        room: _threadRoom!,
+                        message: _threadMessage!,
+                        controller: widget.session.controllerFor(_threadRoom!),
+                        asPanel: true,
+                        onClose: () => setState(() {
+                          _threadMessage = null;
+                          _threadRoom = null;
+                        }),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -758,15 +597,12 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             room: room,
             highlightMessageId: isSplit ? null : _highlightMessageId,
             // 오른쪽 패널은 한 번에 하나만 — 댓글을 열면 열려 있던 다른 패널(파일 모아보기
-            // 등)은 닫아서 자리를 넘겨준다(반대로 그 패널들을 열면 댓글이 닫힌다).
+            // 등)은 닫아서 자리를 넘겨준다(반대로 그 패널들을 열면 댓글이 닫힌다, _showPanel).
             onOpenThread: (m) => setState(() {
               _threadMessage = m;
               _threadRoom = room;
-              _searchOpen = false;
-              _membersOpen = false;
-              _filesOpen = false;
-              _linksOpen = false;
-              _notificationsOpen = false;
+              _panelKey = null;
+              _panelRoom = null;
             }),
           ),
         ),
@@ -885,6 +721,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             room: room,
             onOpenFiles: (r) => _openRoomPanel(r, links: false),
             onOpenLinks: (r) => _openRoomPanel(r, links: true),
+            onOpenAlbums: (r) => _showPanel('albums', room: r),
             onOpenMembers: _openRoomMembers,
           ),
         ],
@@ -924,26 +761,16 @@ class _SidebarToggleStrip extends StatelessWidget {
   }
 }
 
-/// 창 전체 폭을 가로지르는 최상단 바: 앱 이름(좌) + 멤버/검색/삼선(햄버거) 메뉴(우측 끝).
+/// 창 전체 폭을 가로지르는 최상단 바: 팀 전환(좌) + 알림/멤버/검색/메뉴(격자)/계정 메뉴(우측 끝).
 class _TopBar extends StatelessWidget {
   final Session session;
-
-  /// 캘린더 화면을 보고 있는지 / 캘린더 버튼을 눌렀을 때.
-  final bool calendarOpen;
-  final VoidCallback onToggleCalendar;
   final VoidCallback onShowMembers;
   final VoidCallback onToggleSearch;
-  final VoidCallback onOpenFiles;
-  final VoidCallback onOpenLinks;
   final VoidCallback onToggleNotifications;
   const _TopBar({
     required this.session,
-    required this.calendarOpen,
-    required this.onToggleCalendar,
     required this.onShowMembers,
     required this.onToggleSearch,
-    required this.onOpenFiles,
-    required this.onOpenLinks,
     required this.onToggleNotifications,
   });
 
@@ -979,40 +806,6 @@ class _TopBar extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // "프로젝트"는 대화(토픽/방)와 성격이 다른 별도 공간이라, 나머지 아이콘들과
-                    // 구분선으로 한 번 끊어서 왼쪽에 둔다(잔디와 같은 배치).
-                    if (session.canUseProjects)
-                      IconButton(
-                        icon: ListenableBuilder(
-                          listenable: session,
-                          builder: (context, _) => Badge(
-                            isLabelVisible: session.projectUnread > 0,
-                            backgroundColor: Colors.redAccent,
-                            label: Text('${session.projectUnread}'),
-                            child: const Icon(Icons.track_changes),
-                          ),
-                        ),
-                        tooltip: '프로젝트',
-                        // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로
-                        // 열고, 그 외(안드로이드)는 지금처럼 대화상자로 연다.
-                        onPressed: () => Platform.isWindows
-                            ? openProjectWindow(session)
-                            : showProjectDialog(context, session),
-                      ),
-                    // 캘린더도 대화와 성격이 다른 별도 공간이라 프로젝트 옆에 둔다. 누르면
-                    // 사이드바+채팅 자리가 캘린더로 바뀌고, 한 번 더 누르거나 방을 고르면 돌아온다.
-                    IconButton(
-                      key: const ValueKey('open-calendar'),
-                      icon: const Icon(Icons.calendar_month_outlined),
-                      selectedIcon: const Icon(Icons.calendar_month),
-                      isSelected: calendarOpen,
-                      tooltip: '캘린더',
-                      onPressed: onToggleCalendar,
-                    ),
-                    const SizedBox(
-                      height: 24,
-                      child: VerticalDivider(width: 16, thickness: 1),
-                    ),
                     NotificationBellButton(
                       session: session,
                       onPressed: onToggleNotifications,
@@ -1027,11 +820,8 @@ class _TopBar extends StatelessWidget {
                       tooltip: '검색',
                       onPressed: onToggleSearch,
                     ),
-                    AppMenuButton(
-                      session: session,
-                      onOpenFiles: onOpenFiles,
-                      onOpenLinks: onOpenLinks,
-                    ),
+                    // 파일·즐겨찾기·링크·캘린더·프로젝트·문의함 …은 이 메뉴 안에 있다(menu_entries.dart).
+                    AppMenuButton(session: session),
                     AccountMenuButton(session: session),
                   ],
                 ),
@@ -1040,219 +830,6 @@ class _TopBar extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// "멤버" 버튼으로 여는 우측 패널. 검색 패널과 같은 틀(헤더+검색창+목록)을 쓰고,
-/// 각 멤버를 카드로 보여준다. 카드를 누르면 프로필 플로팅 다이얼로그가 뜬다.
-class _MembersPanel extends StatefulWidget {
-  final Session session;
-  final VoidCallback onClose;
-  final ValueChanged<AppUser> onSelectMember;
-  const _MembersPanel({
-    required this.session,
-    required this.onClose,
-    required this.onSelectMember,
-  });
-
-  @override
-  State<_MembersPanel> createState() => _MembersPanelState();
-}
-
-class _MembersPanelState extends State<_MembersPanel> {
-  final _listScrollController = ScrollController();
-  List<AppUser>? _users;
-  String? _error;
-  String _filter = '';
-  int _page = 0; // 0-based.
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-    // onlineUserIds가 바뀔 때마다(누가 접속/해제) 초록 점을 다시 그리도록 다시 빌드한다.
-    widget.session.addListener(_onSessionChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.session.removeListener(_onSessionChanged);
-    _listScrollController.dispose();
-    super.dispose();
-  }
-
-  void _onSessionChanged() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _load() async {
-    try {
-      final users = await widget.session.fetchTeamMembers();
-      users.sort((a, b) => a.name.compareTo(b.name));
-      if (!mounted) return;
-      setState(() => _users = users);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final list = (_users ?? const <AppUser>[])
-        .where(
-          (u) =>
-              _filter.isEmpty ||
-              u.name.toLowerCase().contains(_filter.toLowerCase()),
-        )
-        .toList();
-    final totalPages = list.isEmpty
-        ? 1
-        : (list.length / paginationPageSize).ceil();
-    final page = _page.clamp(0, totalPages - 1);
-    final pageItems = list
-        .skip(page * paginationPageSize)
-        .take(paginationPageSize)
-        .toList();
-
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _users == null ? '팀 멤버' : '팀 멤버 총 ${_users!.length}명',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: widget.onClose,
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: TextField(
-              decoration: const InputDecoration(
-                hintText: '멤버 검색',
-                isDense: true,
-                prefixIcon: Icon(Icons.search, size: 18),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (v) => setState(() {
-                _filter = v;
-                _page = 0;
-              }),
-            ),
-          ),
-          Expanded(
-            child: _error != null
-                ? Center(child: Text(_error!))
-                : _users == null
-                ? const Center(child: CircularProgressIndicator())
-                : list.isEmpty
-                ? const Center(child: Text('검색 결과가 없습니다.'))
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Divider(height: 1),
-                      Expanded(
-                        child: MutedScrollbar(
-                          controller: _listScrollController,
-                          child: ListView.separated(
-                            controller: _listScrollController,
-                            itemCount: pageItems.length,
-                            // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
-                            separatorBuilder: (_, _) => const Padding(
-                              padding: EdgeInsets.only(right: 12),
-                              child: Divider(height: 1),
-                            ),
-                            itemBuilder: (context, i) => _MemberRow(
-                              user: pageItems[i],
-                              resolveUrl: widget.session.resolveUrl,
-                              online: widget.session.onlineUserIds.contains(
-                                pageItems[i].id,
-                              ),
-                              onTap: () => widget.onSelectMember(pageItems[i]),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const Divider(height: 1),
-                      Pagination(
-                        currentPage: page,
-                        totalPages: totalPages,
-                        onPageSelected: (p) => setState(() => _page = p),
-                      ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 멤버 목록 한 줄: 아바타 + 이름. 카드 테두리 없이 ListView.separated의 Divider로만
-/// 서로 구분한다(검색 결과 화면과 같은 스타일).
-class _MemberRow extends StatelessWidget {
-  final AppUser user;
-  final String Function(String relative) resolveUrl;
-  final bool online;
-  final VoidCallback onTap;
-  const _MemberRow({
-    required this.user,
-    required this.resolveUrl,
-    required this.online,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            UserAvatar(
-              user: user,
-              resolveUrl: resolveUrl,
-              radius: 20,
-              online: online,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    user.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  // 부서·직책이 등록돼 있으면 조직도답게 이름 아래 같이 보여준다.
-                  if (user.orgLine != null)
-                    Text(
-                      user.orgLine!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).hintColor,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -1506,6 +1083,13 @@ class _Sidebar extends StatelessWidget {
                         Icons.explore_outlined,
                         '참여 가능한 토픽 보기',
                         onBrowseTopics,
+                      ),
+                      // 멤버 여러 명을 내가 참여 중인 토픽·그룹채팅 여러 곳에 한 번에 초대한다(PC 전용 — 이 사이드바는 PC뿐).
+                      _plusItem(
+                        context,
+                        Icons.group_add_outlined,
+                        '여러 토픽/그룹채팅에 초대',
+                        () => showInviteToMultipleRooms(hostContext, session),
                       ),
                       CompactMenu.divider,
                     ],

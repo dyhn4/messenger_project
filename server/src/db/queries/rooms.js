@@ -141,6 +141,44 @@ export async function updateRoom(id, fields) {
   return row ?? null;
 }
 
+/**
+ * 그룹채팅 → 토픽 전환(rooms.js POST /rooms/:id/convert-to-topic) — 방 행을 잠근 트랜잭션 안에서 한 번에:
+ * 아직 그룹일 때만 type을 'topic'으로 바꾸고(이름·설명·비공개, 그룹 전용 아이콘 칸 비움, 챗 뷰·기본 설정),
+ * 전환한 사람을 토픽 관리자로 올리고, 토픽에선 쓰지 않는 나만의 별칭(custom_name)을 모두 지운다.
+ * 메시지·멤버·읽음 기록은 그대로다. 이미 다른 요청이 전환했거나 그룹이 아니면 null.
+ */
+export function convertGroupToTopic(roomId, actorId, { name, description }) {
+  return withRoomLock(roomId, async (tx) => {
+    const [current] = await tx.select().from(rooms).where(eq(rooms.id, roomId));
+    if (!current || current.type !== 'group' || current.isSecret || current.isSelf) return null;
+    const [updated] = await tx
+      .update(rooms)
+      .set({
+        type: 'topic',
+        name,
+        description,
+        isPublic: false,
+        viewMode: 'chat',
+        readOnly: false,
+        autoInvite: false,
+        quietLeave: false,
+        archivedAt: null,
+        iconType: null,
+        iconEmoji: null,
+        iconColor: null,
+        iconUrl: null,
+      })
+      .where(eq(rooms.id, roomId))
+      .returning();
+    await tx
+      .update(roomMembers)
+      .set({ role: 'admin' })
+      .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, actorId)));
+    await tx.update(roomMembers).set({ customName: null }).where(eq(roomMembers.roomId, roomId));
+    return updated;
+  });
+}
+
 /** 방을 완전히 지운다(멤버/메시지/비밀 대화 세션은 전부 onDelete:'cascade'로 함께 지워짐).
  * 비밀 대화를 거절했을 때처럼, 다시 대화를 걸 수 있도록 dmKey 자체를 비워줘야 하는 경우에 쓴다. */
 export async function deleteRoom(id) {

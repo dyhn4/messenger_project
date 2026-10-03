@@ -589,6 +589,9 @@ class RoomChatController extends ChangeNotifier {
         m.mimeType = edited.mimeType;
         m.thumbnailUrl = edited.thumbnailUrl;
         m.attachments = edited.attachments;
+      } else if (edited.isPost || edited.isPoll) {
+        // 게시글·투표에 붙은 파일을 지웠을 때(파일 삭제) — 글 수정에서는 첨부가 안 바뀌고 그대로 내려온다.
+        m.attachments = edited.attachments;
       }
     }
     if (edited.isPost) _syncPinned(targets.first);

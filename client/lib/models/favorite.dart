@@ -101,9 +101,8 @@ class FavoriteItem {
     if (kind == null) {
       throw FormatException('알 수 없는 즐겨찾기 종류: ${json['type']}');
     }
-    Map<String, dynamic>? map(String key) => json[key] is Map
-        ? Map<String, dynamic>.from(json[key] as Map)
-        : null;
+    Map<String, dynamic>? map(String key) =>
+        json[key] is Map ? Map<String, dynamic>.from(json[key] as Map) : null;
     final parent = map('parentMessage');
     final messageJson = map('message');
     final commentJson = map('comment');
@@ -111,9 +110,7 @@ class FavoriteItem {
     final at = (json['favoritedAt'] as num?)?.toInt();
     return FavoriteItem(
       kind: kind,
-      favoritedAt: at == null
-          ? null
-          : DateTime.fromMillisecondsSinceEpoch(at),
+      favoritedAt: at == null ? null : DateTime.fromMillisecondsSinceEpoch(at),
       roomId: json['roomId'] as String?,
       roomName: json['roomName'] as String?,
       message: messageJson == null ? null : Message.fromJson(messageJson),
@@ -151,10 +148,7 @@ class FavoriteIds {
     comments: {for (final e in (json['comments'] as List? ?? const [])) '$e'},
     members: {
       for (final e in (json['members'] as List? ?? const []))
-        memberKey(
-          (e as Map)['teamId'] as String,
-          e['userId'] as String,
-        ),
+        memberKey((e as Map)['teamId'] as String, e['userId'] as String),
     },
   );
 }

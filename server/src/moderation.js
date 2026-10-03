@@ -87,7 +87,7 @@ export async function recordModerationAudit(req, content, kind) {
   const team = room ? await findTeamById(room.teamId) : null;
   const actor = await findUserById(req.user.sub);
   // 게시글('post')·투표('poll')는 행위 코드는 메시지 삭제 그대로 두고(관리자 콘솔 필터가 같은 항목으로 묶임) 문구만 구분한다.
-  const label = { comment: '댓글', post: '게시글', poll: '투표' }[kind] ?? '메시지';
+  const label = { comment: '댓글', post: '게시글', poll: '투표', file: '파일' }[kind] ?? '메시지';
 
   recordAudit({
     actorId: req.user.sub,

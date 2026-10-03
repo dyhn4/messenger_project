@@ -395,7 +395,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Widget> _displayItems(BuildContext context) => [
     _Item(
       label: '텍스트 크기',
-      caption: '앱 전체(채팅·목록 등)의 글자 크기를 조절합니다.',
+      caption: '채팅 내용(메시지·댓글)과 방 이름의 글자 크기를 조절합니다.',
       child: _TextSizeStepper(
         scale: _textScale,
         onChanged: (v) => setState(() => _textScale = v),

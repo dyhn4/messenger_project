@@ -361,6 +361,260 @@ void main() {
     });
   });
 
+  group('멘션 탭 필터(전체 멘션 / @나를 멘션 / @all 멘션)', () {
+    FakeNotificationApi mixed() => FakeNotificationApi(
+      items: [
+        notif('p1', minutesAgo: 1),
+        notif('p2', minutesAgo: 4, read: true),
+        notif('a1', kind: NotificationKind.mentionAll, minutesAgo: 2),
+        notif('a2', kind: NotificationKind.mentionAll, minutesAgo: 3),
+        notif('b1', kind: NotificationKind.boardPost, minutesAgo: 5),
+      ],
+    );
+
+    test('기본은 전체 멘션 — kind=mention 하나로 두 종류를 받는다', () async {
+      final api = mixed();
+      final c = _make(api).controller;
+      expect(c.mentionFilter, MentionFilter.all);
+      await c.ensureLoaded(NotificationTab.mention);
+      expect(api.calls.single, startsWith('fetch kind=mention '));
+      expect(c.itemsFor(NotificationTab.mention).map((n) => n.id), [
+        'p1',
+        'a1',
+        'a2',
+        'p2',
+      ]);
+    });
+
+    test('종류를 고르면 서버의 새 kind로 그 종류만 받고, 종류마다 목록·캐시가 따로다', () async {
+      final api = mixed();
+      final c = _make(api).controller;
+      await c.ensureLoaded(NotificationTab.mention);
+      await c.setMentionFilter(MentionFilter.everyone);
+      expect(api.calls.last, startsWith('fetch kind=mention_all '));
+      expect(c.itemsFor(NotificationTab.mention).map((n) => n.id), [
+        'a1',
+        'a2',
+      ]);
+      await c.setMentionFilter(MentionFilter.personal);
+      expect(api.calls.last, startsWith('fetch kind=mention_personal '));
+      expect(c.itemsFor(NotificationTab.mention).map((n) => n.id), [
+        'p1',
+        'p2',
+      ]);
+      // 받아 둔 종류로 돌아가면 다시 받지 않는다.
+      final fetches = api.callCount('fetch');
+      await c.setMentionFilter(MentionFilter.all);
+      await c.setMentionFilter(MentionFilter.everyone);
+      expect(api.callCount('fetch'), fetches);
+      expect(c.itemsFor(NotificationTab.mention), hasLength(2));
+    });
+
+    test('종류별 페이지네이션 — 고른 종류의 before 커서로만 이어 받는다', () async {
+      final api = FakeNotificationApi(
+        items: [
+          for (var i = 0; i < 35; i++)
+            notif('a$i', kind: NotificationKind.mentionAll, minutesAgo: i + 10),
+          notif('p1', minutesAgo: 1),
+        ],
+      );
+      final c = _make(api).controller;
+      await c.setMentionFilter(MentionFilter.everyone);
+      expect(c.itemsFor(NotificationTab.mention), hasLength(30));
+      expect(c.hasMore(NotificationTab.mention), isTrue);
+      await c.loadMore(NotificationTab.mention);
+      expect(api.calls.last, startsWith('fetch kind=mention_all before='));
+      expect(c.itemsFor(NotificationTab.mention), hasLength(35));
+      expect(c.hasMore(NotificationTab.mention), isFalse);
+      // 개인 멘션 목록은 건드리지 않았다.
+      await c.setMentionFilter(MentionFilter.personal);
+      expect(c.itemsFor(NotificationTab.mention).map((n) => n.id), ['p1']);
+    });
+
+    test('탭 배지는 고른 종류의 안 읽은 개수, 전체 탭은 필터와 상관없이 합계', () async {
+      final api = mixed();
+      final c = _make(api).controller;
+      await c.refreshCounts();
+      expect(c.counts.mention, 3);
+      expect(c.counts.mentionPersonal, 1);
+      expect(c.counts.mentionAll, 2);
+      int badge(NotificationTab t) => notificationTabBadge(
+        t,
+        center: c,
+        unreadRooms: const [],
+        projectUnread: 0,
+      );
+      expect(badge(NotificationTab.mention), 3);
+      await c.setMentionFilter(MentionFilter.personal);
+      expect(badge(NotificationTab.mention), 1);
+      await c.setMentionFilter(MentionFilter.everyone);
+      expect(badge(NotificationTab.mention), 2);
+      // 전체 탭 = 멘션 3 + 보드 1.
+      expect(badge(NotificationTab.all), 4);
+    });
+
+    test('전체 탭은 필터와 상관없이 멘션 두 종류를 모두 섞어 받는다', () async {
+      final api = mixed();
+      final c = _make(api).controller;
+      await c.setMentionFilter(MentionFilter.personal);
+      api.calls.clear();
+      await c.ensureLoaded(NotificationTab.all);
+      expect(
+        api.calls.where((x) => x.startsWith('fetch kind=mention ')),
+        hasLength(1),
+      );
+      expect(api.calls.where((x) => x.contains('mention_personal')), isEmpty);
+      expect(c.itemsFor(NotificationTab.all).map((n) => n.id), [
+        'p1',
+        'a1',
+        'a2',
+        'p2',
+        'b1',
+      ]);
+    });
+
+    test('모두 읽음은 고른 종류만 — 서버 kind와 개수·목록 모두', () async {
+      final api = mixed();
+      final c = _make(api).controller;
+      await c.refreshCounts();
+      await c.ensureLoaded(NotificationTab.mention);
+      await c.setMentionFilter(MentionFilter.everyone);
+      await c.markAllRead(NotificationTab.mention);
+      expect(api.lastReadKind, 'mention_all');
+      expect(c.counts.mentionAll, 0);
+      expect(c.counts.mentionPersonal, 1);
+      expect(c.counts.mention, 1);
+      expect(c.counts.board, 1);
+      expect(
+        c.itemsFor(NotificationTab.mention).every((n) => n.isRead),
+        isTrue,
+      );
+      // 전체 멘션 목록에서도 개인 멘션은 그대로 안 읽음.
+      await c.setMentionFilter(MentionFilter.all);
+      final unread = c
+          .itemsFor(NotificationTab.mention)
+          .where((n) => !n.isRead);
+      expect(unread.map((n) => n.id), ['p1']);
+      // 개인 멘션만.
+      await c.setMentionFilter(MentionFilter.personal);
+      await c.markAllRead(NotificationTab.mention);
+      expect(api.lastReadKind, 'mention_personal');
+      expect(c.counts, const NotificationCounts(board: 1));
+    });
+
+    test('전체 멘션의 모두 읽음은 kind=mention — 두 종류 모두', () async {
+      final api = mixed();
+      final h = _make(api);
+      final c = h.controller;
+      await c.refreshCounts();
+      await c.ensureLoaded(NotificationTab.mention);
+      await c.markAllRead(NotificationTab.mention);
+      expect(api.lastReadKind, 'mention');
+      expect(c.counts.mention, 0);
+      expect(c.counts.mentionPersonal, 0);
+      expect(c.counts.mentionAll, 0);
+      expect(h.syncSeen.last.mention, 0);
+    });
+
+    test('안 읽은 것만 표시는 고른 종류를 따른다', () async {
+      final api = mixed();
+      final c = _make(api).controller;
+      await c.setMentionFilter(MentionFilter.personal);
+      await c.setUnreadOnly(NotificationTab.mention, true);
+      expect(api.calls.last, startsWith('fetch kind=mention_personal '));
+      expect(api.calls.last, contains('unreadOnly=true'));
+      expect(c.itemsFor(NotificationTab.mention).map((n) => n.id), ['p1']);
+    });
+
+    test('하나를 읽으면 그 종류의 개수만 줄고, 소켓으로 온 새 알림은 맞는 종류 목록에만 끼는다', () async {
+      final api = mixed();
+      final h = _make(api);
+      final c = h.controller;
+      await c.refreshCounts();
+      await c.ensureLoaded(NotificationTab.mention);
+      await c.setMentionFilter(MentionFilter.everyone);
+      await c.setMentionFilter(MentionFilter.personal);
+      final a1 = c.itemsFor(NotificationTab.mention).first; // p1
+      await c.markRead(a1);
+      expect(c.counts.mentionPersonal, 0);
+      expect(c.counts.mentionAll, 2);
+      expect(c.counts.mention, 2);
+
+      // 개수 없이 온 @all 알림 — @all 목록(받아 둔)에만 끼고 개인 목록엔 안 낀다.
+      final fresh = notif('a-new', kind: NotificationKind.mentionAll);
+      h.newEvents.add(NotificationNewEvent(fresh, null));
+      await Future<void>.delayed(Duration.zero);
+      expect(c.counts.mentionAll, 3);
+      expect(c.counts.mentionPersonal, 0);
+      expect(c.itemsFor(NotificationTab.mention).map((n) => n.id), [
+        'p1',
+        'p2',
+      ]);
+      await c.setMentionFilter(MentionFilter.everyone);
+      expect(c.itemsFor(NotificationTab.mention).first.id, 'a-new');
+    });
+
+    test('sync로 @all이 0이 되면 받아 둔 @all 줄만 읽음으로', () async {
+      final api = mixed();
+      final h = _make(api);
+      final c = h.controller;
+      await c.refreshCounts();
+      await c.ensureLoaded(NotificationTab.mention);
+      h.syncEvents.add(NotificationCounts.of(mentionPersonal: 1, board: 1));
+      await Future<void>.delayed(Duration.zero);
+      final items = c.itemsFor(NotificationTab.mention);
+      expect(items.where((n) => !n.isRead).map((n) => n.id), ['p1']);
+    });
+
+    test('선택은 이 기기에 사용자별로 저장되고 다시 불러오면 그대로, 다른 사용자에겐 기본, reset하면 기본', () async {
+      SharedPreferences.setMockInitialValues({});
+      NotificationController make(String userId) {
+        final c = NotificationController(
+          apiProvider: () => FakeNotificationApi(items: []),
+          userId: () => userId,
+        );
+        addTearDown(c.dispose);
+        return c;
+      }
+
+      final first = make('u1');
+      await first.setMentionFilter(MentionFilter.everyone);
+
+      final again = make('u1');
+      expect(again.mentionFilter, MentionFilter.all);
+      await again.loadViewPrefs();
+      expect(again.mentionFilter, MentionFilter.everyone);
+
+      final other = make('u2');
+      await other.loadViewPrefs();
+      expect(other.mentionFilter, MentionFilter.all);
+
+      // 전체 멘션으로 되돌리면 저장값도 지워진다.
+      await first.setMentionFilter(MentionFilter.all);
+      final third = make('u1');
+      await third.loadViewPrefs();
+      expect(third.mentionFilter, MentionFilter.all);
+
+      again.reset();
+      expect(again.mentionFilter, MentionFilter.all);
+    });
+
+    test('필터 이름·메뉴 글자·서버 kind', () {
+      expect(
+        [for (final f in MentionFilter.values) f.wire],
+        ['mention', 'mention_personal', 'mention_all'],
+      );
+      expect(
+        [for (final f in MentionFilter.values) f.menuLabel],
+        ['전체 멘션', '@나를 멘션', '@all 멘션'],
+      );
+      expect(
+        [for (final f in MentionFilter.values) f.tabLabel],
+        ['멘션', '@나', '@all'],
+      );
+    });
+  });
+
   group('읽음 처리', () {
     test('하나 읽음 — 목록·개수를 먼저 바꾸고 서버에 ids로 알린다', () async {
       final api = FakeNotificationApi(
@@ -676,6 +930,25 @@ void main() {
         const NotificationCounts(mention: 2),
       );
       expect(NotificationCounts.fromJson(null), const NotificationCounts());
+      // 새 서버는 종류별 개수를 함께 준다 — 옛 키(mention=합계)도 그대로.
+      final split = NotificationCounts.fromJson({
+        'mention': 5,
+        'board': 1,
+        'mentionPersonal': 2,
+        'mentionAll': 3,
+      });
+      expect(split.mention, 5);
+      expect(split.mentionPersonal, 2);
+      expect(split.mentionAll, 3);
+      expect(split.board, 1);
+      expect(
+        split,
+        NotificationCounts.of(mentionPersonal: 2, mentionAll: 3, board: 1),
+      );
+      // 옛 서버(종류별 개수 없음)는 합계를 전부 개인 멘션으로 본다.
+      final legacy = NotificationCounts.fromJson({'mention': 4, 'board': 0});
+      expect(legacy.mentionPersonal, 4);
+      expect(legacy.mentionAll, 0);
 
       final s = NotificationSettings.fromJson({
         'mentionAll': false,

@@ -3,6 +3,7 @@ import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import {
   addRoomMembers,
+  convertGroupToTopic,
   countTopicFolders,
   deleteRoom,
   deleteTopicFolder,
@@ -94,6 +95,16 @@ import { knownUploadPath, signFileUrl, toStoredUploadUrl } from './upload.js';
 import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
 import { listScheduledForRoom } from './db/queries/scheduledMessages.js';
 import { failScheduledForArchivedTopic, failScheduledForDeletedRoom } from './scheduledMessages.js';
+import {
+  bulkInviteRoomError,
+  convertDenial,
+  convertNotice,
+  INVITE_FAIL_NOT_TEAM_MEMBER,
+  parseConvertBody,
+  parseInviteBulkBody,
+  planInvite,
+  plausibleRoomId,
+} from './roomInviteRules.js';
 
 /** teams.js의 memberListResponse와 같은 규칙 — 서버 설정(orgScope)에 따라 팀 값(team_members)
  * 또는 계정 값(users) 중 하나를 부서/직책으로 쓴다. 채팅방 상단 헤더/방 목록의 직책 표시
@@ -403,6 +414,45 @@ export async function unhideDmForOtherMembers(io, room, senderId) {
       io.to(`user:${userId}`).emit('room:hidden', { roomId: room.id, hidden: false });
     }
   }
+}
+
+function uniqueStringIds(raw) {
+  return Array.isArray(raw) ? [...new Set(raw.filter((id) => typeof id === 'string' && id))] : [];
+}
+
+/**
+ * 한 방에 멤버를 초대하는 공통 경로(POST /rooms/:id/invite 단건, POST /rooms/invite-bulk 일괄) — 이미 멤버인
+ * 사람과 이 팀 멤버가 아닌 사람을 가려내고, 나머지를 추가한 뒤 소켓 알림(notifyMembership)과 "OOO 님이 …
+ * 초대했습니다" 시스템 메시지를 남긴다. 호출부가 방 멤버십·정회원 등급을 이미 확인했어야 한다.
+ * 일괄 초대는 방마다 부르므로 팀 멤버 id 집합([teamMemberIds])과 이름 캐시([nameCache])를 넘겨 재조회를 줄인다.
+ * 돌려주는 값: `{ invited, alreadyMembers, failed }` — 각 `{ userId, name }`(failed는 reason도).
+ */
+export async function inviteMembersToRoom(io, room, inviterId, userIds, { teamMemberIds, nameCache } = {}) {
+  const [currentMemberIds, eligibleIds] = await Promise.all([
+    listRoomMemberIds(room.id),
+    teamMemberIds ?? listTeamMemberIds(room.teamId),
+  ]);
+  const plan = planInvite(userIds, new Set(currentMemberIds), new Set(eligibleIds));
+  const names = nameCache ?? new Map();
+  const nameFor = async (id) => {
+    if (!names.has(id)) names.set(id, await nameOf(id));
+    return names.get(id);
+  };
+  const withName = async (id) => ({ userId: id, name: await nameFor(id) });
+
+  if (plan.toInvite.length > 0) {
+    await addRoomMembers(room.id, plan.toInvite);
+    await notifyMembership(io, room);
+    const invitedNames = await Promise.all(plan.toInvite.map(nameFor));
+    await postSystemMessage(io, room, `${await nameFor(inviterId)} 님이 ${invitedNames.join(', ')} 님을 초대했습니다.`);
+  }
+  return {
+    invited: await Promise.all(plan.toInvite.map(withName)),
+    alreadyMembers: await Promise.all(plan.alreadyMembers.map(withName)),
+    failed: await Promise.all(
+      plan.failed.map(async (id) => ({ ...(await withName(id)), reason: INVITE_FAIL_NOT_TEAM_MEMBER })),
+    ),
+  };
 }
 
 /** 참여/초대/퇴장 안내 문구를 일반 메시지처럼 저장하고 방에 브로드캐스트한다. */
@@ -948,26 +998,101 @@ export function createRoomsRouter(io) {
     }
 
     const { userIds } = req.body ?? {};
-    const currentMemberIds = await listRoomMemberIds(room.id);
-    const candidateIds = (Array.isArray(userIds) ? userIds : []).filter(
-      (id) => typeof id === 'string' && !currentMemberIds.includes(id),
-    );
-    const toInvite = [];
-    for (const id of candidateIds) {
-      // 방은 팀 안에만 있으므로, 그 팀 멤버만 초대할 수 있다.
-      if ((await findUserById(id)) && (await isTeamMember(room.teamId, id))) toInvite.push(id);
-    }
-    if (toInvite.length === 0) {
+    const result = await inviteMembersToRoom(io, room, req.user.sub, uniqueStringIds(userIds));
+    if (result.invited.length === 0) {
       return res.status(400).json({ error: '초대할 멤버를 선택하세요.' });
     }
 
-    await addRoomMembers(room.id, toInvite);
-    await notifyMembership(io, room);
-
-    const invitedNames = await Promise.all(toInvite.map(nameOf));
-    await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 ${invitedNames.join(', ')} 님을 초대했습니다.`);
-
     res.json(await toRoomDto(room, req.user.sub));
+  });
+
+  /**
+   * 여러 토픽·그룹채팅에 한 번에 초대('여러 토픽/그룹채팅에 초대') — 정회원 이상. 방마다 단건 초대와 같은 코드
+   * (inviteMembersToRoom)로 처리해 시스템 메시지·소켓 알림이 똑같고, 방별로 부분 성공을 허용한다.
+   * 내가 멤버가 아닌 방·1:1·나와의 대화·비밀 대화·다른 팀 방은 그 방만 `error` 코드로 표시하고 건너뛴다.
+   * 응답: `{ results: [{ roomId, roomName, roomType, invited, alreadyMembers, failed, error? }] }` (요청한 방 순서).
+   */
+  router.post('/rooms/invite-bulk', async (req, res) => {
+    const parsed = parseInviteBulkBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const scope = await requireTeamRole(req, res, parsed.teamId);
+    if (!scope) return;
+    if (!canCreateRooms(scope.role)) {
+      return res.status(403).json({ error: '멤버를 초대할 권한이 없습니다.' });
+    }
+    const { teamId, userIds, roomIds } = parsed;
+    const teamMemberIds = new Set(await listTeamMemberIds(teamId));
+    const nameCache = new Map();
+    const results = [];
+    for (const roomId of roomIds) {
+      const entry = { roomId, roomName: null, roomType: null, invited: [], alreadyMembers: [], failed: [] };
+      results.push(entry);
+      try {
+        const room = plausibleRoomId(roomId) ? await findRoomById(roomId) : null;
+        const isMember = room ? await isRoomMember(room.id, req.user.sub) : false;
+        const code = bulkInviteRoomError(room, { teamId, isMember });
+        if (code) {
+          entry.error = code;
+          // 내가 멤버인 방만 이름·종류를 알려 준다(남의 방은 있는지조차 알려 주지 않는다).
+          if (room && isMember) {
+            entry.roomName = await roomDisplayName(room, req.user.sub);
+            entry.roomType = room.type;
+          }
+          continue;
+        }
+        entry.roomName = await roomDisplayName(room, req.user.sub);
+        entry.roomType = room.type;
+        Object.assign(entry, await inviteMembersToRoom(io, room, req.user.sub, userIds, { teamMemberIds, nameCache }));
+      } catch (err) {
+        console.error('[rooms] 일괄 초대 실패:', roomId, err?.message ?? err);
+        entry.error = 'failed';
+      }
+    }
+    res.json({ results });
+  });
+
+  /**
+   * 그룹채팅 → 토픽 전환('채팅 정보 변경' 창의 '토픽으로 전환') — 대화 내용·멤버는 그대로, 비공개 토픽이 되고 전환한
+   * 사람이 토픽 관리자가 된다. 되돌릴 수 없다. 정회원 이상 멤버만 — 토픽 생성 권한 정책(topicCreationPolicy)이 있는
+   * 팀은 새 토픽을 만드는 것과 같은 기준을 따른다. 방 정보는 기존 방 정보 변경과 같은 room:created로 뿌린다.
+   */
+  router.post('/rooms/:id/convert-to-topic', async (req, res) => {
+    const room = await findRoomById(req.params.id);
+    const denial = convertDenial(room);
+    if (denial) return res.status(room ? 400 : 404).json({ error: denial });
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    const access = await teamAccess(room.teamId, req.user.sub);
+    if (!access.isMember) return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+    if (!canCreateRooms(access.role)) {
+      return res.status(403).json({ error: '준회원은 그룹채팅을 토픽으로 전환할 수 없습니다.' });
+    }
+    const team = await findTeamById(room.teamId);
+    const isDesignatedTopicCreator =
+      team?.topicCreationPolicy === 'designated' ? await isTopicCreator(room.teamId, req.user.sub) : false;
+    if (!canCreateTopic({ role: access.role, isOwner: access.isOwner, isDesignatedTopicCreator, team })) {
+      const need = { admin: '관리자 이상', owner: '소유자', designated: '지정된 사람' }[team?.topicCreationPolicy] ?? '정회원 이상';
+      return res.status(403).json({ error: `이 팀은 ${need}만 토픽을 만들 수 있도록 설정되어 있습니다.` });
+    }
+    const parsed = parseConvertBody(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const updated = await convertGroupToTopic(room.id, req.user.sub, parsed);
+    if (!updated) return res.status(409).json({ error: '이미 전환되었거나 그룹채팅이 아닙니다.' });
+    io.to(room.id).emit('room:created', await toRoomDto(updated));
+    const actorName = await nameOf(req.user.sub);
+    await postSystemMessage(io, updated, convertNotice(actorName, updated.name));
+    recordAudit({
+      actorId: req.user.sub,
+      actorName,
+      action: AUDIT.roomConvert,
+      teamId: room.teamId,
+      teamName: team?.name ?? null,
+      targetType: 'room',
+      targetId: room.id,
+      targetLabel: updated.name,
+      detail: '그룹채팅을 비공개 토픽으로 전환',
+    });
+    res.json(await toRoomDto(updated, req.user.sub));
   });
 
   router.post('/rooms/:id/leave', async (req, res) => {

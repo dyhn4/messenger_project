@@ -41,7 +41,8 @@ attachmentsRouter.get('/attachments', async (req, res) => {
   // 게시글('post')과 첨부를 붙인 투표('poll')는 첨부가 하나여도 펼친다 — 목록의 각 줄은 항상 'image'/'file'이어야 한다.
   const byMessage = await listAttachmentsForMessages(rows.map((m) => m.id));
   const items = rows.flatMap((m) => {
-    const list = byMessage[m.id];
+    // 파일 삭제로 자리만 남은 첨부(deletedAt)는 목록에서 뺀다.
+    const list = byMessage[m.id]?.filter((a) => !a.deletedAt);
     const isCard = m.type === 'post' || m.type === 'poll';
     if (isCard && !list) return [];
     if (!list || (list.length < 2 && !isCard)) return [m];

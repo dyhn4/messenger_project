@@ -18,6 +18,17 @@ export const MENTION_KINDS = ['mention', 'mention_all'];
 export const BOARD_KINDS = ['board_post', 'board_edit', 'board_comment'];
 
 /**
+ * 알림 목록·읽음 처리·안 읽음 수가 쓰는 묶음 이름. `mention`은 개인 멘션과 @all을 함께, `mention_personal`은 개인 멘션
+ * (DB kind `mention`)만, `mention_all`은 @all(DB kind `mention_all`)만이다 — 알림 센터 멘션 탭의 드롭다운 필터가 쓴다.
+ */
+export const NOTIFICATION_GROUPS = ['mention', 'mention_personal', 'mention_all', 'board'];
+
+/** 안 읽음 수 한 벌 — `mention`은 `mentionPersonal + mentionAll`의 합이다(옛 클라이언트가 읽는 키는 그대로 둔다). */
+export function unreadCountsOf({ mentionPersonal = 0, mentionAll = 0, board = 0 } = {}) {
+  return { mention: mentionPersonal + mentionAll, board, mentionPersonal, mentionAll };
+}
+
+/**
  * 멘션을 쓸 수 있는 방 — 토픽·그룹만. 1:1은 상대가 한 명뿐이라 멘션 없이도 모든 메시지가 그 사람에게 가고(오히려
  * 개인 멘션이 방 알림 끔 설정을 건너뛰는 알림이 된다), 나와의 대화는 부를 사람이 없으며, 비밀 대화는 서버가 본문을
  * 몰라 멘션을 지원하지 않는다.

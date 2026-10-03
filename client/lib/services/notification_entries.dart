@@ -95,7 +95,7 @@ final class ProjectEntry extends CenterEntry {
 ///
 ///   - 안 읽은 대화: 안 읽은 메시지나 공지가 있는 방 전부(지금 팀도, 여러 팀에 걸쳐) — 예전 알림 센터가 보여
 ///     주던 것 그대로, 마지막 활동순.
-///   - 멘션: 서버 멘션 알림.
+///   - 멘션: 서버 멘션 알림(멘션 탭 드롭다운에서 고른 종류만 — [NotificationController.mentionFilter]).
 ///   - 보드·공지: 서버 보드 알림 + 안 읽은 공지가 있는 방(공지 시각).
 ///   - 프로젝트: 프로젝트 알림함.
 ///   - 전체: 위 넷을 시간순으로 섞는다. 안 읽은 대화는 공지 때문에만 뜬 방을 뺀다(공지는 공지 줄로 따로 나온다).
@@ -154,7 +154,8 @@ List<Room> _byActivity(List<Room> rooms) =>
     [...rooms]..sort((a, b) => b.lastActivityAt.compareTo(a.lastActivityAt));
 
 /// 탭 배지에 쓸 안 읽음 수.
-///   - 멘션·보드: 서버가 센 개수(보드는 안 읽은 공지 수를 더한다).
+///   - 멘션·보드: 서버가 센 개수(멘션은 고른 필터 종류만 — 전체 멘션/@나를 멘션/@all 멘션, 보드는 안 읽은 공지 수를
+///     더한다). 전체 탭은 멘션 필터와 상관없이 멘션 두 종류의 합이다.
 ///   - 안 읽은 대화: 안 읽은 방의 수.
 ///   - 프로젝트: [projectUnread](Session.projectUnread — 소켓으로 실시간).
 ///   - 전체: 넷의 합.
@@ -174,7 +175,7 @@ int notificationTabBadge(
       );
   final board = center.counts.board + announcements;
   return switch (tab) {
-    NotificationTab.mention => center.counts.mention,
+    NotificationTab.mention => center.mentionUnread(center.mentionFilter),
     NotificationTab.board => board,
     NotificationTab.unreadChats =>
       unreadRooms

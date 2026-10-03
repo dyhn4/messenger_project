@@ -14,6 +14,7 @@ import 'app_toast.dart';
 import 'favorite_actions.dart';
 import 'hover_toolbar.dart' show hoverMenuItem;
 import 'message_announce.dart';
+import 'todo_from_message.dart';
 
 /// message_bubble.dart(실제 메시지)와 message_comments_card.dart(댓글)가 공용으로 쓰는
 /// 액션들 — 롱프레스 액션 시트(모바일)와 "더보기" 메뉴(PC) 양쪽에서 호출한다. 댓글은
@@ -340,6 +341,21 @@ void showMessageActionSheet(
                   );
                 },
               ),
+            if (canRegisterAsTodo(session, message))
+              ListTile(
+                key: const ValueKey('action-todo'),
+                leading: const Icon(Icons.checklist_rounded),
+                title: const Text('할 일로 등록'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  registerMessageAsTodo(
+                    context,
+                    session: session,
+                    message: message,
+                    isComment: isComment,
+                  );
+                },
+              ),
             if (!cannotShare)
               ListTile(
                 leading: const Icon(Icons.forward_outlined),
@@ -435,6 +451,17 @@ List<Widget> messageActionMenuItems(
           session: session,
           message: message,
           senderDisplayName: senderDisplayName,
+        ),
+      ),
+    if (canRegisterAsTodo(session, message))
+      hoverMenuItem(
+        icon: Icons.checklist_rounded,
+        label: '할 일로 등록',
+        onPressed: () => registerMessageAsTodo(
+          context,
+          session: session,
+          message: message,
+          isComment: isComment,
         ),
       ),
     if (!cannotShare)

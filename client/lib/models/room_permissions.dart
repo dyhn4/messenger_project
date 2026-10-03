@@ -38,6 +38,10 @@ extension RoomPermissions on Room {
       s.accountRole != AccountRole.guest &&
       members.any((m) => m.id == s.userId);
 
+  /// 그룹채팅을 토픽으로 전환할 수 있는지 — 채팅 정보를 바꿀 수 있는 정회원 이상이고, 이 팀이 새 토픽을 만들 수
+  /// 있게 허용한 사람이어야 한다(서버 POST /rooms/:id/convert-to-topic과 같은 규칙).
+  bool canConvertToTopic(Session s) => canEditGroupInfo(s) && s.canCreateTopic;
+
   /// 이 방이 속한 팀을 내가 관리할 수 있는지(팀 관리자 = 소유자 또는 계정 등급 관리자). 방이
   /// 지금 보고 있는 팀이 아닐 수도 있어서(알림 센터 등) 방의 팀을 먼저 찾고, 못 찾으면 지금
   /// 팀 기준(canManageCurrentTeam)으로 본다.

@@ -27,7 +27,8 @@ bool canAnnounceMessage(Session session, Message message) {
   }
   if (message.type == MessageType.text) {
     if (message.text?.trim().isEmpty ?? true) return false;
-  } else if ((message.fileUrl ?? '').isEmpty && message.attachments.isEmpty) {
+  } else if ((message.fileUrl ?? '').isEmpty &&
+      message.liveAttachments.isEmpty) {
     return false;
   }
   if (room.latestAnnouncement?.messageId == message.id) return false;

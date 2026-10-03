@@ -188,20 +188,14 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('"메뉴"에 링크 항목이 있다', (tester) async {
-    var links = 0;
+  testWidgets('"메뉴"에 링크 항목이 있고, 홈 화면 밖(모바일)에서는 전체 화면으로 열린다', (tester) async {
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          appBar: AppBar(
-            actions: [
-              AppMenuButton(
-                session: session(),
-                onOpenFiles: () {},
-                onOpenLinks: () => links++,
-              ),
-            ],
-          ),
+          appBar: AppBar(actions: [AppMenuButton(session: session())]),
         ),
       ),
     );
@@ -212,7 +206,13 @@ void main() {
     expect(find.text('문의함'), findsOneWidget);
     await tester.tap(find.text('링크'));
     await tester.pumpAndSettle();
-    expect(links, 1);
+    expect(find.byType(LinksScreen), findsOneWidget);
+    // 패널이 자기 머리글(제목 + 닫기)을 그린다 — 닫으면 메뉴가 있던 화면으로 돌아온다.
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(LinksScreen), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('참여 대화방 필터: 토픽 · 그룹채팅 · 채팅 탭, 골라 둔 방의 탭부터 보인다', (tester) async {

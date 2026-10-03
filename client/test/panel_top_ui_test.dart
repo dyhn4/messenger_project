@@ -200,13 +200,20 @@ void main() {
   });
 
   group('검색 패널', () {
-    testWidgets('필터 아래에 전체 · 메시지 · 투표 · 파일 ⌄ 탭과 최신 순 단추가 검색 전에도 보인다', (
+    testWidgets('필터 아래에 전체 · 메시지 · 투표 · 파일 ⌄ · 대화방 탭과 최신 순 단추가 검색 전에도 보인다', (
       tester,
     ) async {
       await _mount(tester, SearchScreen(session: _session()));
-      for (final label in ['전체', '메시지', '투표', '파일']) {
+      for (final label in ['전체', '메시지', '투표', '파일', '대화방']) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
+      // 대화방 탭은 파일 탭의 오른쪽.
+      expect(
+        tester.getTopLeft(find.text('대화방')).dx,
+        greaterThan(tester.getTopLeft(find.text('파일')).dx),
+      );
+      // 가입한 팀이 하나뿐이면(이 테스트 세션) 검색 범위 단추가 없다.
+      expect(find.byKey(const ValueKey('panel-scope')), findsNothing);
       expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
       expect(find.text('최신 순'), findsOneWidget);
       // 필터 줄: 참여 대화방 / 모든 멤버 / 1년 (기본).

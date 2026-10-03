@@ -247,7 +247,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         : mentionsToSend(_editController, room, widget.session.userId);
     final removed = _removedAttachmentIds.toList();
     if (media && text.isEmpty) {
-      final remaining = widget.message.attachments
+      final remaining = widget.message.liveAttachments
           .where((a) => !_removedAttachmentIds.contains(a.id))
           .length;
       if (remaining == 0) {
@@ -912,10 +912,10 @@ class _MessageBubbleState extends State<MessageBubble> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // 사진·파일 메시지: 첨부마다 X로 지울 것을 표시한다(더할 수는 없다).
-        if (_isEditableMedia && widget.message.attachments.isNotEmpty) ...[
+        if (_isEditableMedia && widget.message.liveAttachments.isNotEmpty) ...[
           EditAttachmentStrip(
             session: widget.session,
-            attachments: widget.message.attachments,
+            attachments: widget.message.liveAttachments,
             removedIds: _removedAttachmentIds,
             onToggle: (id) => setState(() {
               if (!_removedAttachmentIds.remove(id)) {
@@ -994,8 +994,10 @@ class _MessageBubbleState extends State<MessageBubble> {
           thumbnailNonce: message.thumbnailNonce,
         );
       case MessageType.file:
-        // 파일 여러 개를 한 말풍선으로 보냈으면 목록 + "전체 다운로드".
-        if (message.attachments.length > 1) {
+        // 파일 여러 개를 한 말풍선으로 보냈으면 목록 + "전체 다운로드". 지운 파일(파일 삭제)이 하나라도
+        // 끼어 있으면(하나뿐이던 파일을 지운 경우 포함) 목록 위젯이 "삭제된 파일입니다" 카드로 그린다.
+        if (message.attachments.length > 1 ||
+            message.attachments.any((a) => a.deleted)) {
           return ChatFileAttachments(
             session: widget.session,
             attachments: message.attachments,
@@ -1010,6 +1012,9 @@ class _MessageBubbleState extends State<MessageBubble> {
           url: url,
           fileName: message.fileName ?? '파일',
           message: message,
+          attachmentId: message.attachments.isEmpty
+              ? null
+              : message.attachments.first.id,
           attachmentKey: message.attachmentKey,
           attachmentNonce: message.attachmentNonce,
         );
@@ -1066,11 +1071,11 @@ class _MessageBubbleState extends State<MessageBubble> {
     final theme = Theme.of(context);
     final hint = theme.hintColor;
     final images = [
-      for (final a in message.attachments)
+      for (final a in message.liveAttachments)
         if (a.isImage) a,
     ];
     final files = [
-      for (final a in message.attachments)
+      for (final a in message.liveAttachments)
         if (!a.isImage) a,
     ];
     final text = message.text ?? '';

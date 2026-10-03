@@ -10,6 +10,7 @@ import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/inquiry.dart';
 import '../models/invite_link.dart';
+import '../models/invite_result.dart';
 import '../models/team_invite_link.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
@@ -282,6 +283,10 @@ class SearchResult {
   /// 보드 게시글이면 제목(서버가 실어줄 때만).
   final String? title;
 
+  /// 방이 속한 팀 — "모든 팀"(scope=all)으로 찾았을 때만 서버가 실어준다.
+  final String? teamId;
+  final String? teamName;
+
   const SearchResult({
     required this.id,
     required this.roomId,
@@ -293,6 +298,8 @@ class SearchResult {
     required this.createdAt,
     this.type,
     this.title,
+    this.teamId,
+    this.teamName,
   });
 
   bool get isPost => type == 'post';
@@ -311,7 +318,60 @@ class SearchResult {
     ),
     type: json['type'] as String?,
     title: json['title'] as String?,
+    teamId: json['teamId'] as String?,
+    teamName: json['teamName'] as String?,
   );
+}
+
+/// 대화방 이름 검색([ApiClient.searchRoomsPage]) 결과 한 줄 — 내가 멤버인 방 하나.
+class RoomSearchResult {
+  final String roomId;
+  final String teamId;
+  final String teamName;
+
+  /// 'topic' | 'group' | 'dm'.
+  final String type;
+
+  /// 화면에 보이는 이름(1:1은 상대 이름, 이름 없는 그룹은 멤버 이름들, 나와의 대화).
+  final String name;
+  final int memberCount;
+  final bool archived;
+  final bool isSelf;
+  final DateTime lastActivityAt;
+
+  const RoomSearchResult({
+    required this.roomId,
+    required this.teamId,
+    required this.teamName,
+    required this.type,
+    required this.name,
+    required this.memberCount,
+    required this.archived,
+    required this.isSelf,
+    required this.lastActivityAt,
+  });
+
+  factory RoomSearchResult.fromJson(Map<String, dynamic> json) =>
+      RoomSearchResult(
+        roomId: json['roomId'] as String,
+        teamId: json['teamId'] as String,
+        teamName: json['teamName'] as String? ?? '',
+        type: json['type'] as String? ?? 'group',
+        name: json['name'] as String? ?? '',
+        memberCount: (json['memberCount'] as num?)?.toInt() ?? 0,
+        archived: json['archived'] as bool? ?? false,
+        isSelf: json['isSelf'] as bool? ?? false,
+        lastActivityAt: DateTime.fromMillisecondsSinceEpoch(
+          (json['lastActivityAt'] as num?)?.toInt() ?? 0,
+        ),
+      );
+}
+
+/// 대화방 검색 한 번의 결과 — [total]은 한도에 잘리기 전의 건수.
+class RoomSearchPage {
+  final List<RoomSearchResult> items;
+  final int total;
+  const RoomSearchPage(this.items, this.total);
 }
 
 /// 즐겨찾기한 첨부 하나를 가리키는 키 — 메시지 id + 파일 이름(서명된 URL은 매번 바뀌어서 못 쓴다).
@@ -2748,6 +2808,41 @@ class ApiClient {
     );
   }
 
+  /// 그룹채팅 → 토픽 전환(정회원 이상, 되돌릴 수 없다) — 비공개 토픽이 되고 전환한 사람이 토픽 관리자가 된다.
+  /// 바뀐 방은 room:created로도 퍼진다.
+  Future<Room> convertGroupToTopic(
+    String roomId, {
+    required String name,
+    String? description,
+  }) async {
+    return Room.fromJson(
+      await _post('/api/rooms/$roomId/convert-to-topic', {
+            'name': name,
+            'description': description ?? '',
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 여러 토픽·그룹채팅에 한 번에 초대(정회원 이상) — 방별 결과(부분 성공 허용)를 요청한 방 순서대로 돌려준다.
+  Future<List<RoomInviteResult>> inviteBulk(
+    String teamId,
+    List<String> userIds,
+    List<String> roomIds,
+  ) async {
+    final json =
+        await _post('/api/rooms/invite-bulk', {
+              'teamId': teamId,
+              'userIds': userIds,
+              'roomIds': roomIds,
+            })
+            as Map<String, dynamic>;
+    return [
+      for (final r in (json['results'] as List? ?? const []))
+        RoomInviteResult.fromJson(r as Map<String, dynamic>),
+    ];
+  }
+
   Future<void> setFavorite(String roomId, bool favorite) async {
     await _post('/api/rooms/$roomId/favorite', {'favorite': favorite});
   }
@@ -2833,6 +2928,13 @@ class ApiClient {
 
   Future<void> deleteMessage(String messageId) async {
     await _delete('/api/messages/$messageId');
+  }
+
+  /// 파일 하나를 지운다(업로드한 본인 또는 팀 관리자) — 소프트 삭제라 메시지와 댓글은 그대로 남고, 지운 자리는
+  /// "삭제된 파일입니다"로 바뀐다. [attachmentId]는 첨부 id(첨부 하나짜리 옛 메시지는 메시지 id).
+  /// 방 멤버에게는 message:edited로 퍼진다.
+  Future<void> deleteMessageFile(String messageId, String attachmentId) async {
+    await _delete('/api/messages/$messageId/attachments/$attachmentId');
   }
 
   /// 보드 게시글 수정(작성자만 — 게시글은 팀의 수정 가능 시간 제한을 받지 않는다). 첨부는
@@ -2957,10 +3059,12 @@ class ApiClient {
     String? fileKind,
     bool newestFirst = true,
     int? limit,
+    bool allTeams = false,
   }) async {
+    // allTeams면 teamId 대신 scope=all — 서버가 내가 속한 모든 팀에서 찾고 결과에 teamId·teamName을 붙인다.
     final params = StringBuffer(
       '/api/search?q=${Uri.encodeQueryComponent(query)}'
-      '&teamId=${Uri.encodeQueryComponent(teamId)}'
+      '${allTeams ? '&scope=all' : '&teamId=${Uri.encodeQueryComponent(teamId)}'}'
       '&withTotal=1',
     );
     if (roomId != null) {
@@ -2984,6 +3088,29 @@ class ApiClient {
         .toList();
     final total = body is Map ? (body['total'] as num?)?.toInt() : null;
     return SearchPage(items, total ?? items.length);
+  }
+
+  /// 검색 패널 "대화방" 탭 — 내가 멤버인 토픽·그룹채팅·채팅·나와의 대화를 이름으로 찾는다
+  /// (server/src/search.js, GET /api/search/rooms). [allTeams]면 현재 팀이 아니라 내가 속한 모든 팀.
+  /// 정렬은 마지막 활동순([newestFirst] = 최근 활동이 먼저).
+  Future<RoomSearchPage> searchRoomsPage(
+    String query, {
+    required String teamId,
+    bool allTeams = false,
+    bool newestFirst = true,
+    int? limit,
+  }) async {
+    final params = StringBuffer(
+      '/api/search/rooms?q=${Uri.encodeQueryComponent(query)}'
+      '${allTeams ? '&scope=all' : '&teamId=${Uri.encodeQueryComponent(teamId)}'}',
+    );
+    if (!newestFirst) params.write('&order=asc');
+    if (limit != null) params.write('&limit=$limit');
+    final body = await _get(params.toString()) as Map<String, dynamic>;
+    final items = (body['items'] as List)
+        .map((e) => RoomSearchResult.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return RoomSearchPage(items, (body['total'] as num?)?.toInt() ?? items.length);
   }
 
   /// 방(들)에 첨부된 이미지/파일 목록(files_screen.dart). roomId를 안 주면 내가 속한 모든

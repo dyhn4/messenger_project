@@ -691,6 +691,9 @@ void main() {
       );
       await _settle(tester);
       expect(find.text('공지 등록'), findsOneWidget);
+      // 시트 항목이 늘어(할 일로 등록 등) 작은 화면에서는 스크롤해야 보인다.
+      await tester.ensureVisible(find.text('공지 등록'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('공지 등록'));
       await _settle(tester);
       expect(

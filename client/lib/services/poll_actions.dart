@@ -85,6 +85,7 @@ extension SessionPolls on Session {
     existingControllerFor(
       event.roomId,
     )?.applyPollUpdate(event, myUserId: userId);
+    pollEvents.emitUpdated(event); // 투표 목록 패널에 있는 사본도 고치게.
   }
 
   /// 소켓 poll:favorite — 방을 모르는 이벤트라 열려 있는 방 컨트롤러를 모두 훑는다.

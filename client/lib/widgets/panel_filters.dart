@@ -419,6 +419,64 @@ class PanelSortButton extends StatelessWidget {
   }
 }
 
+/// 검색 범위(현재 팀 / 모든 팀) 단추 — [PanelSortButton]과 같은 폰트·크기(라벨 12px, 흐린 색)에 글자 오른쪽 꺽쇠.
+/// 누르면 같은 모양의 드롭다운이 뜬다. 가입한 팀이 하나뿐이면 호출하는 쪽이 아예 그리지 않는다.
+class PanelScopeButton extends StatelessWidget {
+  final bool allTeams;
+  final ValueChanged<bool> onChanged;
+  const PanelScopeButton({
+    super.key,
+    required this.allTeams,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return PopupMenuButton<bool>(
+      key: const ValueKey('panel-scope'),
+      tooltip: '검색 범위',
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 4),
+      color: CompactMenu.color(context),
+      shape: CompactMenu.shape,
+      menuPadding: CompactMenu.menuPadding,
+      constraints: const BoxConstraints(minWidth: 120, maxWidth: 200),
+      initialValue: allTeams,
+      onSelected: onChanged,
+      itemBuilder: (context) => [
+        _checkItem<bool>(
+          context,
+          value: false,
+          label: '현재 팀',
+          selected: !allTeams,
+        ),
+        _checkItem<bool>(
+          context,
+          value: true,
+          label: '모든 팀',
+          selected: allTeams,
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              allTeams ? '모든 팀' : '현재 팀',
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: hint),
+            ),
+            Icon(Icons.keyboard_arrow_down, size: 16, color: hint),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 파일 형식 메뉴(전체 파일 / 이미지 / 문서 / … / 기타) — [child]를 누르면 설정 메뉴 모양의 팝업이 뜬다.
 class FileCategoryMenu extends StatelessWidget {
   final FileCategory selected;
@@ -522,8 +580,22 @@ class PanelFilterBar extends StatefulWidget {
   final PanelPeriod period;
   final ValueChanged<PanelPeriod> onPeriodChanged;
   final Widget? leading;
+
+  /// true면 [leading]이 정렬 단추를 뺀 줄 나머지를 다 차지한다(즐겨찾기 패널의 가로 스크롤 종류 탭).
+  final bool leadingExpands;
+
+  /// 종류에 따라 걸 수 없는 필터는 흐리게 막는다(즐겨찾기 패널 — 멤버 탭은 대화방 필터가 안 먹는다 등).
+  final bool roomEnabled;
+  final bool memberEnabled;
+  final bool periodEnabled;
   final bool newestFirst;
   final ValueChanged<bool> onSortChanged;
+
+  /// false면 맨 위 검색칸을 그리지 않는다(검색어 없이 필터만 쓰는 투표 목록·내가 쓴 글 패널).
+  final bool showSearch;
+
+  /// false면 필터 줄에서 "모든 멤버" 칸을 뺀다(보낸 사람이 늘 나인 내가 쓴 글 패널).
+  final bool showMember;
 
   const PanelFilterBar({
     super.key,
@@ -539,8 +611,14 @@ class PanelFilterBar extends StatefulWidget {
     required this.period,
     required this.onPeriodChanged,
     this.leading,
+    this.leadingExpands = false,
+    this.roomEnabled = true,
+    this.memberEnabled = true,
+    this.periodEnabled = true,
     required this.newestFirst,
     required this.onSortChanged,
+    this.showSearch = true,
+    this.showMember = true,
   });
 
   @override
@@ -576,66 +654,83 @@ class _PanelFilterBarState extends State<PanelFilterBar> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: EdgeInsets.fromLTRB(16, widget.showSearch ? 16 : 12, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            key: const ValueKey('panel-search-field'),
-            controller: _controller,
-            decoration: InputDecoration(
-              hintText: widget.searchHint,
-              isDense: true,
-              prefixIcon: const Icon(Icons.search, size: 20),
-              suffixIcon: _controller.text.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close, size: 18),
-                      tooltip: '지우기',
-                      onPressed: () {
-                        _controller.clear();
-                        setState(() {});
-                        _emit();
-                      },
-                    ),
-              border: const OutlineInputBorder(),
+          if (widget.showSearch) ...[
+            TextField(
+              key: const ValueKey('panel-search-field'),
+              controller: _controller,
+              decoration: InputDecoration(
+                hintText: widget.searchHint,
+                isDense: true,
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _controller.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        tooltip: '지우기',
+                        onPressed: () {
+                          _controller.clear();
+                          setState(() {});
+                          _emit();
+                        },
+                      ),
+                border: const OutlineInputBorder(),
+              ),
+              textInputAction: TextInputAction.search,
+              onChanged: _onChanged,
+              onSubmitted: (_) => _emit(),
             ),
-            textInputAction: TextInputAction.search,
-            onChanged: _onChanged,
-            onSubmitted: (_) => _emit(),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
+          ],
           Row(
             children: [
               Expanded(
-                child: RoomFilterButton(
-                  session: widget.session,
-                  selectedRoomId: widget.roomId,
-                  expand: true,
-                  onSelected: widget.onRoomChanged,
+                child: _Disableable(
+                  enabled: widget.roomEnabled,
+                  child: RoomFilterButton(
+                    session: widget.session,
+                    selectedRoomId: widget.roomId,
+                    expand: true,
+                    onSelected: widget.onRoomChanged,
+                  ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MemberFilterButton(
-                  users: widget.members,
-                  selectedSenderId: widget.senderId,
-                  onSelected: widget.onSenderChanged,
+              if (widget.showMember) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _Disableable(
+                    enabled: widget.memberEnabled,
+                    child: MemberFilterButton(
+                      users: widget.members,
+                      selectedSenderId: widget.senderId,
+                      onSelected: widget.onSenderChanged,
+                    ),
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(width: 8),
               Expanded(
-                child: PeriodFilterButton(
-                  period: widget.period,
-                  onChanged: widget.onPeriodChanged,
+                child: _Disableable(
+                  enabled: widget.periodEnabled,
+                  child: PeriodFilterButton(
+                    period: widget.period,
+                    onChanged: widget.onPeriodChanged,
+                  ),
                 ),
               ),
             ],
           ),
           Row(
             children: [
-              ?widget.leading,
-              const Spacer(),
+              if (widget.leadingExpands && widget.leading != null)
+                Expanded(child: widget.leading!)
+              else ...[
+                ?widget.leading,
+                const Spacer(),
+              ],
               PanelSortButton(
                 spaced: false,
                 newestFirst: widget.newestFirst,
@@ -649,32 +744,69 @@ class _PanelFilterBarState extends State<PanelFilterBar> {
   }
 }
 
+/// [enabled]가 false면 흐리게 하고 눌리지 않게 한다.
+class _Disableable extends StatelessWidget {
+  final bool enabled;
+  final Widget child;
+  const _Disableable({required this.enabled, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (enabled) return child;
+    return IgnorePointer(child: Opacity(opacity: 0.4, child: child));
+  }
+}
+
 // ── 결과 줄 ─────────────────────────────────────────────────────────
 
 /// 목록 바로 위 줄 — 왼쪽에 건수 문구, 오른쪽에 (직접 설정한) 기간.
 class PanelResultLine extends StatelessWidget {
   final Widget summary;
   final String? rangeText;
-  const PanelResultLine({super.key, required this.summary, this.rangeText});
+
+  /// 오른쪽 끝에 더 붙일 단추(좁은 폭에서 탭 줄에 못 둔 검색 범위 단추). 기간 표시와 함께 있어 좁으면
+  /// 둘이 위아래로 줄바꿈된다(기간 표시 위, 단추 아래).
+  final Widget? trailing;
+  const PanelResultLine({
+    super.key,
+    required this.summary,
+    this.rangeText,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final range = rangeText == null
+        ? null
+        : Text(
+            rangeText!,
+            key: const ValueKey('panel-range-text'),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+          );
     return Container(
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        trailing == null ? 10 : 2,
+        16,
+        trailing == null ? 10 : 2,
+      ),
       child: Row(
         children: [
           Expanded(child: summary),
-          if (rangeText != null) ...[
-            const SizedBox(width: 8),
-            Text(
-              rangeText!,
-              key: const ValueKey('panel-range-text'),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.hintColor,
+          if (trailing != null)
+            Flexible(
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [?range, trailing!],
               ),
-            ),
+            )
+          else if (range != null) ...[
+            const SizedBox(width: 8),
+            range,
           ],
         ],
       ),

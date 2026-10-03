@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { eq, or } from 'drizzle-orm';
 import { db } from './db/client.js';
-import { messageAttachments, messageComments, messages, stickers, users } from './db/schema.js';
+import { albumItems, albums, messageAttachments, messageComments, messages, stickers, users } from './db/schema.js';
 import { isRoomMember } from './db/queries/rooms.js';
 import { knownUploadPath, signFileUrl } from './upload.js';
 
@@ -9,7 +9,7 @@ import { knownUploadPath, signFileUrl } from './upload.js';
  * 첨부 다운로드 링크 새로 받기 — 메시지에 실려 온 /files/<토큰> 링크는 최대 2시간 뒤에 만료되는데,
  * 앱은 방을 한 번 불러오면 그 메시지를 계속 들고 있어서 오래 켜 둔 채 내려받으면 만료된 링크로
  * 요청하게 된다(401). 이때 앱이 만료된 링크를 여기 보내면, 그 파일이 **내가 들어 있는 방의**
- * 메시지·댓글 첨부일 때만 새로 서명한 링크를 돌려준다(requireAuth 뒤 — 로그인한 사람 기준).
+ * 메시지·댓글·앨범 첨부일 때만 새로 서명한 링크를 돌려준다(requireAuth 뒤 — 로그인한 사람 기준).
  * 서명이 위조됐거나 내가 못 보는 방의 파일이면 404.
  */
 export function createFileResignRouter() {
@@ -33,6 +33,12 @@ export function createFileResignRouter() {
         .select({ roomId: messageComments.roomId, fileName: messageComments.fileName })
         .from(messageComments)
         .where(or(eq(messageComments.fileUrl, raw), eq(messageComments.thumbnailUrl, raw)))),
+      // 앨범 항목 — 앨범이 있는 방의 멤버에게만(앨범은 대화방 파일과 별개의 저장소다).
+      ...(await db
+        .select({ roomId: albums.roomId, fileName: albumItems.fileName })
+        .from(albumItems)
+        .innerJoin(albums, eq(albums.id, albumItems.albumId))
+        .where(or(eq(albumItems.fileUrl, raw), eq(albumItems.thumbnailUrl, raw)))),
     ];
     // 프로필 사진(캐릭터 세트에서 고른 그림 포함)은 같은 서비스를 쓰는 누구에게나 보이는 것이라
     // 방 멤버 여부를 따지지 않는다 — 알림 아이콘이 만료된 사진 링크를 새로 받을 때 쓴다.

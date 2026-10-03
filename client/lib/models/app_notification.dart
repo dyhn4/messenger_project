@@ -108,15 +108,45 @@ class AppNotification {
 /// 탭 배지용 안 읽음 개수 — 서버 `GET /notifications/unread-counts`, 소켓 `notification:sync`와
 /// `notification:new`의 unread가 이 모양이다.
 class NotificationCounts {
+  /// 안 읽은 멘션 합계(개인 멘션 + `@all`).
   final int mention;
   final int board;
-  const NotificationCounts({this.mention = 0, this.board = 0});
+
+  /// 안 읽은 개인 멘션(`@나를 멘션`)과 `@all` 멘션 — 멘션 탭의 드롭다운 필터가 종류별 배지에 쓴다. 서버가
+  /// 안 주거나 생략하면(옛 서버·옛 호출) 멘션 합계를 전부 개인 멘션으로 본다.
+  final int mentionPersonal;
+  final int mentionAll;
+
+  const NotificationCounts({
+    this.mention = 0,
+    this.board = 0,
+    int? mentionPersonal,
+    int? mentionAll,
+  }) : mentionPersonal = mentionPersonal ?? (mentionAll == null ? mention : 0),
+       mentionAll = mentionAll ?? 0;
+
+  /// 종류별 개수에서 합계를 맞춰 만든다.
+  factory NotificationCounts.of({
+    int mentionPersonal = 0,
+    int mentionAll = 0,
+    int board = 0,
+  }) => NotificationCounts(
+    mention: mentionPersonal + mentionAll,
+    board: board,
+    mentionPersonal: mentionPersonal,
+    mentionAll: mentionAll,
+  );
 
   factory NotificationCounts.fromJson(Object? json) {
     if (json is! Map) return const NotificationCounts();
+    final personal = (json['mentionPersonal'] as num?)?.toInt();
+    final all = (json['mentionAll'] as num?)?.toInt();
     return NotificationCounts(
-      mention: (json['mention'] as num?)?.toInt() ?? 0,
+      mention:
+          (json['mention'] as num?)?.toInt() ?? (personal ?? 0) + (all ?? 0),
       board: (json['board'] as num?)?.toInt() ?? 0,
+      mentionPersonal: personal,
+      mentionAll: all,
     );
   }
 
@@ -124,10 +154,12 @@ class NotificationCounts {
   bool operator ==(Object other) =>
       other is NotificationCounts &&
       other.mention == mention &&
-      other.board == board;
+      other.board == board &&
+      other.mentionPersonal == mentionPersonal &&
+      other.mentionAll == mentionAll;
 
   @override
-  int get hashCode => Object.hash(mention, board);
+  int get hashCode => Object.hash(mention, board, mentionPersonal, mentionAll);
 }
 
 /// 소켓 `notification:new` — 새 알림 한 건과 그 뒤의 안 읽음 개수.

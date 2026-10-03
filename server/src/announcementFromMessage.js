@@ -23,7 +23,7 @@ export function announcementFieldsFromMessage(message) {
     return { ok: true, text, image: null };
   }
   if (message.type === 'image') {
-    if (!message.fileUrl) return { ok: false, status: 400, error: '사진을 찾을 수 없습니다.' };
+    if (!message.fileUrl || message.fileDeletedAt) return { ok: false, status: 400, error: '사진을 찾을 수 없습니다.' };
     return {
       ok: true,
       text,

@@ -118,12 +118,7 @@ class FavoritesController extends ChangeNotifier {
     );
   }
 
-  void _apply(
-    FavoriteKind kind,
-    String id,
-    bool favorite, {
-    String? teamId,
-  }) {
+  void _apply(FavoriteKind kind, String id, bool favorite, {String? teamId}) {
     final next = FavoriteIds(
       messages: {..._ids.messages},
       comments: {..._ids.comments},
@@ -153,11 +148,14 @@ class FavoritesController extends ChangeNotifier {
     } else {
       removeWhere(
         (i) => switch (kind) {
-          FavoriteKind.message => i.kind == FavoriteKind.message && i.message?.id == id,
-          FavoriteKind.comment => i.kind == FavoriteKind.comment && i.comment?.id == id,
-          _ => i.kind == FavoriteKind.member &&
-              i.user?.id == id &&
-              (teamId == null || i.teamId == teamId),
+          FavoriteKind.message =>
+            i.kind == FavoriteKind.message && i.message?.id == id,
+          FavoriteKind.comment =>
+            i.kind == FavoriteKind.comment && i.comment?.id == id,
+          _ =>
+            i.kind == FavoriteKind.member &&
+                i.user?.id == id &&
+                (teamId == null || i.teamId == teamId),
         },
       );
     }
@@ -169,7 +167,8 @@ class FavoritesController extends ChangeNotifier {
   final Map<FavoriteKind?, FavoriteFeed> _feeds = {};
 
   /// 탭([kind]가 null이면 '전체')의 목록 상태.
-  FavoriteFeed feed(FavoriteKind? kind) => _feeds.putIfAbsent(kind, FavoriteFeed.new);
+  FavoriteFeed feed(FavoriteKind? kind) =>
+      _feeds.putIfAbsent(kind, FavoriteFeed.new);
 
   /// 모든 탭의 목록을 비운다(다음에 보일 때 다시 받는다) — 화면을 열 때, 팀을 바꿀 때, 새로 담았을 때.
   void invalidate() {
@@ -191,7 +190,10 @@ class FavoritesController extends ChangeNotifier {
     f.error = null;
     _notify();
     try {
-      final page = await apiProvider().fetchFavorites(teamId: teamId, kind: kind);
+      final page = await apiProvider().fetchFavorites(
+        teamId: teamId,
+        kind: kind,
+      );
       if (epoch != f.epoch || globalEpoch != _epoch) return;
       f.items
         ..clear()
@@ -262,8 +264,7 @@ class FavoritesController extends ChangeNotifier {
   }
 
   /// 목록 항목을 키로 뺀다(투표·파일·대화방처럼 다른 경로로 풀었을 때).
-  void removeItem(FavoriteItem item) =>
-      removeWhere((i) => i.key == item.key);
+  void removeItem(FavoriteItem item) => removeWhere((i) => i.key == item.key);
 
   /// 로그아웃 — 이전 계정의 것이 다음 사람에게 남지 않게.
   void reset() {

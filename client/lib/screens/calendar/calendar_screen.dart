@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../models/calendar.dart';
+import '../../services/api_client.dart' show ApiException;
 import '../../services/calendar_controller.dart';
 import '../../services/calendar_layout.dart';
+import '../../services/calendar_move.dart';
 import '../../services/session.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/date_picker_popup.dart';
 import '../home_screen.dart' show wideBreakpoint;
 import 'calendar_common.dart';
 import 'calendar_event_widgets.dart';
 import 'calendar_list_panel.dart';
 import 'calendar_month_view.dart';
+import 'calendar_search_view.dart';
 import 'calendar_time_grid.dart';
 import 'event_detail.dart';
 import 'event_editor.dart';
@@ -58,6 +63,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   late final CalendarController _c =
       widget.controller ?? widget.session.calendar;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  // PC 검색창: 결과 패널을 검색창 아래에 붙이고(LayerLink), 바깥을 누르면 닫는다.
+  final _searchLink = LayerLink();
+  final _searchGroup = Object();
+  bool _searchOpen = false;
 
   CalendarViewMode _mode = CalendarViewMode.month;
   late DateTime _focused;
@@ -184,6 +194,120 @@ class _CalendarScreenState extends State<CalendarScreen> {
   String _calendarName(EventOccurrence e) =>
       _c.calendarById(e.calendarId)?.name ?? '';
 
+  /// 일정을 끌어다 놓았다 — 서버에 저장하고(컨트롤러가 낙관적으로 화면을 바꾼다) 실패하면 원위치 + 토스트.
+  Future<void> _moveEvent(EventOccurrence event, EventMove move) async {
+    try {
+      await _c.moveEvent(event, move);
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, e is ApiException ? e.message : '일정을 옮기지 못했습니다.');
+    }
+  }
+
+  // ---- 검색 ----
+
+  /// 검색 결과의 일정 상세 — 설명 같은 전체 내용을 위해 서버에서 다시 읽고, 못 읽으면 결과의 요약으로 연다.
+  Future<void> _openSearchItem(CalendarSearchItem item) async {
+    var event = item.toOccurrence();
+    try {
+      event = await _c.fetchEvent(item.eventId);
+    } catch (_) {
+      // 결과에 담긴 요약으로 연다.
+    }
+    if (!mounted) return;
+    _openEvent(event);
+  }
+
+  /// "이동" — 현재 보기를 유지한 채 그 일정이 등록된 날짜로 캘린더를 옮긴다.
+  void _jumpToDay(DateTime day) {
+    _setState(() {
+      _focused = dateOnly(day);
+      _selected = _focused;
+    });
+  }
+
+  void _moveToSearchItem(CalendarSearchItem item) {
+    setState(() => _searchOpen = false);
+    _jumpToDay(item.firstDay);
+  }
+
+  Future<void> _openSearchScreen() async {
+    final day = await Navigator.of(context).push<DateTime>(
+      MaterialPageRoute(
+        builder: (_) =>
+            CalendarSearchScreen(controller: _c, onOpen: _openSearchItem),
+      ),
+    );
+    _c.search.clear();
+    if (day != null && mounted) _jumpToDay(day);
+  }
+
+  Widget _buildSearchField() {
+    return CompositedTransformTarget(
+      link: _searchLink,
+      child: TapRegion(
+        groupId: _searchGroup,
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                setState(() => _searchOpen = false),
+          },
+          child: CalendarSearchField(
+            controller: _c.search,
+            width: 200,
+            onActivate: () {
+              if (!_searchOpen) setState(() => _searchOpen = true);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 검색창 아래에 뜨는 결과 패널(검색어가 있고 열려 있을 때만).
+  Widget _buildSearchPanel(BuildContext context) {
+    return Positioned(
+      left: 0,
+      top: 0,
+      child: ListenableBuilder(
+        listenable: _c.search,
+        builder: (context, _) => _searchOpen && _c.search.hasQuery
+            ? _searchPanelBody(context)
+            : const SizedBox.shrink(),
+      ),
+    );
+  }
+
+  Widget _searchPanelBody(BuildContext context) {
+    return CompositedTransformFollower(
+      link: _searchLink,
+      targetAnchor: Alignment.bottomRight,
+      followerAnchor: Alignment.topRight,
+      offset: const Offset(0, 4),
+      child: TapRegion(
+        groupId: _searchGroup,
+        onTapOutside: (_) => setState(() => _searchOpen = false),
+        child: Material(
+          key: const ValueKey('cal-search-panel'),
+          elevation: 8,
+          borderRadius: BorderRadius.circular(8),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440, maxHeight: 460),
+            child: SizedBox(
+              width: 440,
+              child: CalendarSearchResults(
+                controller: _c.search,
+                onOpen: _openSearchItem,
+                onMove: _moveToSearchItem,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showMore(DateTime day) {
     showDayEventsDialog(
       context,
@@ -220,12 +344,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
         ),
         const VerticalDivider(width: 1),
         Expanded(
-          child: Column(
+          child: Stack(
+            clipBehavior: Clip.none,
             children: [
-              _buildToolbar(context),
-              const Divider(height: 1),
-              _statusBar(context),
-              Expanded(child: _buildView(context, wide: true)),
+              Column(
+                children: [
+                  _buildToolbar(context),
+                  const Divider(height: 1),
+                  _statusBar(context),
+                  Expanded(child: _buildView(context, wide: true)),
+                ],
+              ),
+              _buildSearchPanel(context),
             ],
           ),
         ),
@@ -297,6 +427,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 ),
               ],
             ),
+            _buildSearchField(),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -372,6 +503,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
       appBar: AppBar(
         title: const Text('캘린더'),
         actions: [
+          IconButton(
+            key: const ValueKey('cal-search-open'),
+            tooltip: '일정 검색',
+            icon: const Icon(Icons.search),
+            onPressed: _openSearchScreen,
+          ),
           IconButton(
             key: const ValueKey('cal-today'),
             tooltip: '오늘',
@@ -476,6 +613,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             onDayTap: _createOn,
             onEventTap: _openEvent,
             onMoreTap: _showMore,
+            onEventMove: _moveEvent,
           );
         }
         return _buildNarrowMonth(context, events);
@@ -488,6 +626,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           onEventTap: _openEvent,
           onSlotTap: _createOn,
           onMoreTap: _showMore,
+          onEventMove: _moveEvent,
           onDayHeaderTap: (d) => _setState(() {
             _focused = d;
             _mode = CalendarViewMode.day;
@@ -502,6 +641,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           onEventTap: _openEvent,
           onSlotTap: _createOn,
           onMoreTap: _showMore,
+          onEventMove: _moveEvent,
         );
       case CalendarViewMode.list:
         return CalendarListView(

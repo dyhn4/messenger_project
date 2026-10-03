@@ -21,6 +21,7 @@ import { parsePostFields, topicWriteDenial } from './permissions.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
+import { isFileDeleted } from './db/queries/fileDelete.js';
 
 // 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르므로 여기 상수가 아니라
 // moderation.js의 canModifyContent가 판단한다.
@@ -29,21 +30,32 @@ import { editMediaMessage } from './messageAttachmentEdit.js';
 function toAttachmentDtos(m) {
   const rows = m.attachments;
   if (Array.isArray(rows) && rows.length > 0) {
-    return rows.map((a) => ({
-      id: a.id,
-      kind: a.kind,
-      fileUrl: signFileUrl(a.fileUrl, a.fileName),
-      fileName: a.fileName ?? null,
-      fileSize: a.fileSize ?? null,
-      mimeType: a.mimeType ?? null,
-      thumbnailUrl: signFileUrl(a.thumbnailUrl),
-    }));
+    return rows.map((a) =>
+      // 지운 첨부(소프트 삭제)는 파일 경로를 내려주지 않고 자리만 — 클라이언트가 "삭제된 파일입니다" 카드를 그린다.
+      a.deletedAt
+        ? { id: a.id, kind: a.kind, fileUrl: null, fileName: a.fileName ?? null, fileSize: null, mimeType: a.mimeType ?? null, thumbnailUrl: null, deleted: true }
+        : {
+            id: a.id,
+            kind: a.kind,
+            fileUrl: signFileUrl(a.fileUrl, a.fileName),
+            fileName: a.fileName ?? null,
+            fileSize: a.fileSize ?? null,
+            mimeType: a.mimeType ?? null,
+            thumbnailUrl: signFileUrl(a.thumbnailUrl),
+            deleted: false,
+          },
+    );
   }
   if (!m.fileUrl || (m.type !== 'image' && m.type !== 'file')) return [];
+  if (m.fileDeletedAt) {
+    // 첨부 하나짜리(messages의 파일 칸만 쓰는) 메시지의 파일을 지운 경우.
+    return [{ id: m.id, kind: m.type, fileUrl: null, fileName: m.fileName ?? null, fileSize: null, mimeType: m.mimeType ?? null, thumbnailUrl: null, deleted: true }];
+  }
   return [
     {
       id: m.id,
       kind: m.type,
+      deleted: false,
       fileUrl: signFileUrl(m.fileUrl, m.fileName),
       fileName: m.fileName ?? null,
       fileSize: m.fileSize ?? null,
@@ -68,11 +80,12 @@ export function toMessageDto(m) {
     textFormat: m.deletedAt ? null : (m.textFormat ?? null),
     // 멘션 구간([{type:'user',userId,s,e} | {type:'all',s,e}]) — 없으면 [].
     mentions: m.deletedAt ? [] : mentionsOrEmpty(m.mentions),
-    fileUrl: signFileUrl(m.fileUrl, m.fileName),
+    // 파일을 지운 메시지(file_deleted_at)는 파일 칸 경로를 내려주지 않는다(이름은 자리 표시용으로 남긴다).
+    fileUrl: m.fileDeletedAt ? null : signFileUrl(m.fileUrl, m.fileName),
     fileName: m.fileName,
     fileSize: m.fileSize,
     mimeType: m.mimeType,
-    thumbnailUrl: signFileUrl(m.thumbnailUrl),
+    thumbnailUrl: m.fileDeletedAt ? null : signFileUrl(m.thumbnailUrl),
     // 사진 여러 장을 한 말풍선에 보여주려고 첨부를 목록으로 내려준다. message_attachments
     // 행이 있으면 그걸 쓰고, 없으면(예전 메시지) messages의 파일 칸을 첨부 하나로 본다.
     // 지워진 메시지는 첨부 행이 남아 있어도 내려주지 않는다(내용을 비운 소프트 삭제와 같은 뜻).
@@ -151,6 +164,9 @@ export function createMessagesRouter(io) {
     }
     const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl : null;
     if (!fileUrl) return res.status(400).json({ error: '파일을 알 수 없습니다.' });
+    if (await isFileDeleted(message, resolveRawUrl(fileUrl))) {
+      return res.status(410).json({ error: '삭제된 파일입니다.' });
+    }
     const favorited = await toggleFavoriteFile({
       userId: req.user.sub,
       messageId: message.id,

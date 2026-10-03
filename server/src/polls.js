@@ -5,6 +5,7 @@ import {
   findPollById,
   listFavoritePollIds,
   listFavoritePolls,
+  listPollPanelRows,
   listOptionsForPolls,
   listPollsByMessageIds,
   listVotesForPolls,
@@ -17,6 +18,8 @@ import { isTeamMember } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
 import { canManageTeam, graphemeLength } from './permissions.js';
+import { formatCursor } from './pageCursor.js';
+import { parsePollListQuery } from './pollListRules.js';
 import { postSystemMessage, roomDisplayName } from './rooms.js';
 import { sendUserMessage } from './sendMessage.js';
 
@@ -243,6 +246,38 @@ export function createPollsRouter(io) {
         favoritedAt: new Date(r.favoritedAt).getTime(),
       })),
     );
+  });
+
+  // 투표 목록 패널 — 이 팀에서 내가 멤버인 방(비밀 대화 제외)의 투표를 만든 시각순으로, 필터·무한 스크롤.
+  // 각 항목은 방 메시지 DTO(poll은 보는 사람 기준 myOptionIds/favorite 포함)에 roomName(받는 사람 기준 표시 이름)을 더한 것.
+  router.get('/polls', async (req, res) => {
+    const q = parsePollListQuery(req.query);
+    if (q.error) return res.status(400).json({ error: q.error });
+    if (!(await isTeamMember(q.teamId, req.user.sub))) {
+      return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
+    }
+    const { rows, total } = await listPollPanelRows(req.user.sub, q);
+    const kept = rows.slice(0, q.limit); // 하나 더 받아 온 것은 hasMore 계산에만 쓴다.
+    const messageRows = kept.map((r) => r.message);
+    const [attachmentsByMessage, withPolls] = await Promise.all([
+      listAttachmentsForMessages(messageRows.map((m) => m.id)),
+      attachPolls(messageRows, req.user.sub),
+    ]);
+    const roomNames = new Map();
+    for (const r of kept) {
+      if (!roomNames.has(r.room.id)) roomNames.set(r.room.id, await roomDisplayName(r.room, req.user.sub));
+    }
+    const hasMore = rows.length > q.limit;
+    const last = kept[kept.length - 1];
+    res.json({
+      items: kept.map((r, i) => ({
+        ...toMessageDto({ ...withPolls[i], attachments: attachmentsByMessage[r.message.id] }),
+        roomName: roomNames.get(r.room.id) ?? null,
+      })),
+      hasMore,
+      total,
+      nextBefore: hasMore && last ? formatCursor(Number(last.pollMs), last.pollId) : null,
+    });
   });
 
   router.put('/polls/:pollId/vote', async (req, res) => {

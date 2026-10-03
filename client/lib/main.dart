@@ -486,20 +486,15 @@ class _MyAppState extends State<MyApp>
           // 그린다 — UpdateDialog(로그인/홈 화면이 한 번 띄우는 모달)과 달리 계속 떠 있는
           // 은근한 알림이라 여기 둬야 어느 화면에서도 안 사라진다.
           // 자동 잠금(환경설정 > 시스템 설정) — 잠겨 있으면 화면·다이얼로그 전부를 잠금 화면이 덮는다.
-          // 글자 크기(환경설정 > 화면 설정)도 여기서 한 번만 — MediaQuery.textScaler를 덮어써서
-          // 앱 전체(채팅·목록·대화상자 전부)에 똑같이 적용한다.
-          builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: TextScaler.linear(appSettings.textScale)),
-            child: AppLockGate(
-              session: session,
-              child: Stack(
-                children: [
-                  ?child,
-                  UpdateBanner(session: session, navigatorKey: navigatorKey),
-                ],
-              ),
+          // (글자 크기 설정은 여기서 앱 전체에 걸지 않는다 — 글꼴과 같은 곳, 곧 채팅 내용(메시지·댓글 본문)과
+          // 방 이름에만 ChatFont(widgets/chat_font_scope.dart)가 적용한다.)
+          builder: (context, child) => AppLockGate(
+            session: session,
+            child: Stack(
+              children: [
+                ?child,
+                UpdateBanner(session: session, navigatorKey: navigatorKey),
+              ],
             ),
           ),
         );

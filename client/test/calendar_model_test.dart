@@ -230,7 +230,10 @@ void main() {
 
       test('기기가 UTC-8이면 한국 날짜가 하루 뒤라 +1, 한국이면 0', () {
         expect(kstWeekdayShift(start, localOffset: utcMinus8), 1);
-        expect(kstWeekdayShift(start, localOffset: const Duration(hours: 9)), 0);
+        expect(
+          kstWeekdayShift(start, localOffset: const Duration(hours: 9)),
+          0,
+        );
         // 기기가 한국보다 훨씬 동쪽(UTC+14)이면 한국 날짜가 하루 앞(11/8 21:00 KST = UTC+14 11/9 02:00).
         expect(
           kstWeekdayShift(
@@ -260,10 +263,9 @@ void main() {
           recurrence: const Recurrence(freq: 'weekly', byWeekday: [1]),
         );
         final shift = kstWeekdayShift(start);
-        expect(
-          (input.toJson()['recurrence'] as Map)['byWeekday'],
-          [(1 + shift) % 7],
-        );
+        expect((input.toJson()['recurrence'] as Map)['byWeekday'], [
+          (1 + shift) % 7,
+        ]);
         final allDay = EventInput(
           title: 't',
           start: allDayToMs(DateTime(2026, 11, 9)),
@@ -386,6 +388,58 @@ void main() {
         formatViewTitle(CalendarViewMode.week, d),
         '2026년 9월 27일 – 10월 3일',
       );
+    });
+  });
+
+  group('CalendarSearchItem (제목 검색 결과)', () {
+    test('종일 일정은 UTC 날짜로 읽고, 반복·참석자·권한을 담는다', () {
+      final item = CalendarSearchItem.fromJson({
+        'eventId': 'e1',
+        'calendarId': 'c1',
+        'calendarName': '디자인팀',
+        'color': '#8E24AA',
+        'title': '제주 워크숍',
+        'start': DateTime.utc(2026, 9, 30).millisecondsSinceEpoch,
+        'end': DateTime.utc(2026, 10, 2).millisecondsSinceEpoch,
+        'allDay': true,
+        'recurring': true,
+        'recurrence': {
+          'freq': 'weekly',
+          'interval': 1,
+          'byWeekday': [3],
+        },
+        'attendees': [
+          {'userId': 'u2', 'name': '김철수'},
+        ],
+        'creatorName': '홍길동',
+        'canEdit': true,
+      });
+      expect(item.firstDay, DateTime(2026, 9, 30));
+      expect(item.recurring, isTrue);
+      expect(item.recurrence!.byWeekday, [3]);
+      expect(item.attendees.single.name, '김철수');
+      final occ = item.toOccurrence();
+      expect(occ.key, 'e1:${item.start}');
+      expect(occ.lastDay, DateTime(2026, 10, 1));
+      expect(occ.canEdit, isTrue);
+    });
+
+    test('recurrence 가 null 이면 반복이 아니고, 쪽 응답은 nextBefore 를 가진다', () {
+      final item = CalendarSearchItem.fromJson({
+        'eventId': 'e2',
+        'calendarId': 'c1',
+        'title': '회의',
+        'start': 1700000000000,
+        'end': 1700003600000,
+        'recurrence': null,
+        'attendees': [],
+      });
+      expect(item.recurring, isFalse);
+      expect(item.recurrence, isNull);
+      expect(item.attendees, isEmpty);
+      expect(item.canEdit, isFalse);
+      const page = CalendarSearchPage(items: [], nextBefore: '1:abc');
+      expect(page.nextBefore, '1:abc');
     });
   });
 }

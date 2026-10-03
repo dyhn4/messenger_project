@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   MENTION_MAX,
+  NOTIFICATION_GROUPS,
   boardRecipientsFor,
   canMentionAll,
   diffMentions,
@@ -14,6 +15,7 @@ import {
   pushTargetsFor,
   roomNameForViewer,
   sanitizeMentions,
+  unreadCountsOf,
 } from '../src/notificationRules.js';
 
 const ME = 'user-me';
@@ -246,4 +248,21 @@ test('roomNameForViewer: 나와의 대화·이름 있는 방·DM 상대·이름 
   assert.equal(roomNameForViewer({ name: '영업', type: 'topic' }, users, ME), '영업');
   assert.equal(roomNameForViewer({ type: 'dm' }, [users[0], users[1]], ME), '가나');
   assert.equal(roomNameForViewer({ type: 'group' }, users, ME), '가나, 다라');
+});
+
+// ── 멘션 필터(개인 멘션 / @all) ───────────────────────────────────────────
+
+test('NOTIFICATION_GROUPS: 멘션 전체·개인 멘션·@all·보드 네 묶음', () => {
+  assert.deepEqual(NOTIFICATION_GROUPS, ['mention', 'mention_personal', 'mention_all', 'board']);
+});
+
+test('unreadCountsOf: mention은 개인 멘션과 @all의 합이고 옛 키(mention, board)는 그대로 있다', () => {
+  assert.deepEqual(unreadCountsOf({ mentionPersonal: 2, mentionAll: 3, board: 4 }), {
+    mention: 5,
+    board: 4,
+    mentionPersonal: 2,
+    mentionAll: 3,
+  });
+  assert.deepEqual(unreadCountsOf(), { mention: 0, board: 0, mentionPersonal: 0, mentionAll: 0 });
+  assert.deepEqual(unreadCountsOf({ mentionAll: 1 }), { mention: 1, board: 0, mentionPersonal: 0, mentionAll: 1 });
 });

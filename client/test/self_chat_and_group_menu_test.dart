@@ -709,6 +709,7 @@ void main() {
       expect(_menuLabels(tester), [
         '파일 보기',
         '링크 보기',
+        '앨범 보기',
         '대화 내보내기',
         '정보 변경',
         '나에게만 이름 변경',
@@ -752,12 +753,12 @@ void main() {
       await _finish(tester);
     });
 
-    testWidgets('나와의 대화: 파일 보기 · 링크 보기 · 대화 내보내기만, 멤버·초대 없이 알림은 있다', (
+    testWidgets('나와의 대화: 파일 보기 · 링크 보기 · 앨범 보기 · 대화 내보내기만, 멤버·초대 없이 알림은 있다', (
       tester,
     ) async {
       final session = _session(server);
       await _pumpMenu(tester, session, session.roomById('self1')!);
-      expect(_menuLabels(tester), ['파일 보기', '링크 보기', '대화 내보내기']);
+      expect(_menuLabels(tester), ['파일 보기', '링크 보기', '앨범 보기', '대화 내보내기']);
       await tester.tapAt(const Offset(10, 700));
       await tester.pumpAndSettle();
       expect(find.byTooltip('멤버'), findsNothing);
@@ -773,13 +774,20 @@ void main() {
         '공지',
         '파일 보기',
         '링크 보기',
+        '앨범 보기',
         '대화 내보내기',
         '토픽 나가기',
       ]);
       await _finish(tester);
 
       await _pumpMenu(tester, session, session.roomById('dm1')!);
-      expect(_menuLabels(tester), ['파일 보기', '링크 보기', '대화 내보내기', '채팅방 숨기기']);
+      expect(_menuLabels(tester), [
+        '파일 보기',
+        '링크 보기',
+        '앨범 보기',
+        '대화 내보내기',
+        '채팅방 숨기기',
+      ]);
       await _finish(tester);
     });
   });

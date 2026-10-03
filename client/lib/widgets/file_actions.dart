@@ -12,6 +12,93 @@ import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'message_actions.dart' show pushMessageForwardScreen;
 
+/// "이 파일을 삭제할까요?" 확인 대화상자 — 삭제하겠다고 하면 true. 파일을 지워도 그 파일에 달린 댓글은 남는다.
+Future<bool> confirmDeleteFile(BuildContext context) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('파일 삭제'),
+      content: const Text('이 파일을 삭제할까요? 파일에 달린 댓글은 남아 있습니다.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          key: const ValueKey('confirm-delete-file'),
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('삭제'),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
+}
+
+/// 모바일에서 파일 줄을 길게 눌렀을 때 뜨는 시트 — 더보기 메뉴(fileActionMenuItems)와 같은 일을 목록으로 보여 준다.
+/// "삭제"는 올린 본인·팀 관리자에게만 나온다.
+Future<void> showFileActionSheet(
+  BuildContext context,
+  FileActions actions, {
+  required bool isImage,
+  bool favorited = false,
+  VoidCallback? onToggleFavorite,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      Widget tile(
+        IconData icon,
+        String label,
+        VoidCallback onTap, {
+        Color? color,
+      }) => ListTile(
+        leading: Icon(icon, color: color),
+        title: Text(label, style: TextStyle(color: color)),
+        onTap: () {
+          Navigator.of(sheetContext).pop();
+          onTap();
+        },
+      );
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            tile(Icons.send_outlined, '파일 전달', () => actions.forward(context)),
+            tile(
+              Icons.download_outlined,
+              '다운로드',
+              () => actions.download(context),
+            ),
+            tile(
+              favorited ? Icons.star : Icons.star_border,
+              favorited ? '즐겨찾기 빼기' : '즐겨찾기',
+              onToggleFavorite ?? () => actions.toggleFavorite(context),
+            ),
+            if (isImage)
+              tile(
+                Icons.image_outlined,
+                '원본 파일 보기',
+                () => actions.openOriginal(context),
+              ),
+            if (actions.canDelete)
+              tile(
+                Icons.delete_outline,
+                '삭제',
+                () => actions.deleteFile(context),
+                color: Theme.of(sheetContext).colorScheme.error,
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 /// 첨부 하나에 대해 할 수 있는 일들 — 썸네일의 "더보기" 메뉴와 뷰어 상단 버튼이 같은 동작을
 /// 쓰도록 한곳에 모았다. 비밀 대화(E2EE) 첨부는 원본이 암호문이라, 받아서 복호화한 다음에
 /// 저장·인쇄·열기를 한다.
@@ -25,6 +112,13 @@ class FileActions {
   final String? attachmentKey;
   final String? attachmentNonce;
 
+  /// 파일 삭제가 가리킬 첨부 id — 첨부 하나짜리 옛 메시지는 메시지 id(안 주면 그렇게 본다).
+  final String? attachmentId;
+
+  /// 파일을 지운 뒤 — 목록을 쓰는 화면(파일 패널·즐겨찾기)이 줄을 빼거나 다시 불러온다. 말풍선은 서버의
+  /// message:edited로 알아서 바뀐다.
+  final VoidCallback? onDeleted;
+
   const FileActions({
     required this.session,
     required this.message,
@@ -32,7 +126,41 @@ class FileActions {
     required this.fileName,
     this.attachmentKey,
     this.attachmentNonce,
+    this.attachmentId,
+    this.onDeleted,
   });
+
+  /// 이 파일을 지울 수 있는 사람인지 — 올린 본인(= 그 메시지를 보낸 사람) 또는 팀 관리자. 서버가 최종 판단하고,
+  /// 비밀 대화는 서버가 내용을 몰라 관리자도 못 지운다.
+  bool get canDelete {
+    if (message.deleted || message.type == MessageType.comment) return false;
+    final me = session.userId;
+    if (me != null && message.senderId == me) return true;
+    final secret = session.rooms
+        .where((r) => r.id == message.roomId)
+        .any((r) => r.isSecret);
+    return session.canModerateContent && !secret;
+  }
+
+  /// 확인을 받고 파일을 지운다 — 지웠으면 true. 메시지와 댓글은 남는다.
+  Future<bool> deleteFile(BuildContext context) async {
+    final ok = await confirmDeleteFile(context);
+    if (!ok) return false;
+    try {
+      await session.api!.deleteMessageFile(
+        message.id,
+        attachmentId ?? message.id,
+      );
+    } catch (e) {
+      if (context.mounted) showAppToast(context, '파일을 삭제하지 못했습니다: $e');
+      return false;
+    }
+    // 서버가 이 파일의 즐겨찾기 항목을 정리했으니 즐겨찾기 화면은 다음에 보일 때 다시 받는다.
+    session.favorites.invalidate();
+    onDeleted?.call();
+    if (context.mounted) showAppToast(context, '파일을 삭제했습니다.');
+    return true;
+  }
 
   Future<Uint8List> _bytes() => fetchAttachmentBytes(
     session: session,

@@ -8,6 +8,7 @@ import '../services/api_client.dart' show ApiException, PositionOption;
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/invite_result_dialog.dart';
 import '../widgets/room_options_menu.dart' show CloseWhenRoomRemoved;
 import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
@@ -37,17 +38,22 @@ Future<void> showInviteMembers(
 /// "멤버 선택"을 연다 — 새 그룹채팅 만들기처럼 멤버만 골라 받을 때(초대 요청은 하지 않는다). 멤버
 /// 초대하기와 같은 모양으로, 넓은 화면(PC)은 떠 있는 창, 좁은 화면(모바일)은 전체 화면이다.
 /// [initialSelected]를 미리 고른 채로 열고, "확인"이면 고른 멤버를 고른 순서대로, 취소하면 null을
-/// 돌려준다. 나는 목록에 없다.
+/// 돌려준다. 나는 목록에 없다. [confirmLabel]·[requireSelection]은 "여러 토픽/그룹채팅에 초대"의 첫 단계처럼
+/// 확인 단추를 "다음"으로 바꾸고 한 명 이상 골라야 누를 수 있게 할 때 쓴다.
 Future<List<AppUser>?> showPickMembers(
   BuildContext context,
   Session session, {
   String title = '멤버 선택',
   List<String> initialSelected = const [],
+  String confirmLabel = '확인',
+  bool requireSelection = false,
 }) {
   PickMembersScreen screen({required bool asDialog}) => PickMembersScreen(
     session: session,
     title: title,
     initialSelected: initialSelected,
+    confirmLabel: confirmLabel,
+    requireSelection: requireSelection,
     asDialog: asDialog,
   );
   if (MediaQuery.sizeOf(context).width >= wideBreakpoint) {
@@ -97,6 +103,25 @@ class _InviteMembersScreenState extends State<InviteMembersScreen>
       await widget.session.inviteMembers(widget.room.id, [
         for (final u in selected) u.id,
       ]);
+      if (!mounted) return;
+      // 초대 완료 창이 떠 있는 동안 아래 창의 진행 표시는 멈춰 둔다.
+      setState(() => _submitting = false);
+      // 호출 전에 이미 방에 있던 사람은 목록에서 빠져 있으므로 고른 사람이 곧 새로 초대된 사람이다.
+      await showInviteResultDialog(
+        context,
+        session: widget.session,
+        results: [
+          RoomInviteResult(
+            roomId: widget.room.id,
+            roomName: widget.room.displayName(widget.session.userId ?? ''),
+            roomType: widget.room.type,
+            invited: [
+              for (final u in selected)
+                InvitePerson(userId: u.id, name: u.name),
+            ],
+          ),
+        ],
+      );
       if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
@@ -151,12 +176,20 @@ class PickMembersScreen extends StatelessWidget {
   final Session session;
   final String title;
   final List<String> initialSelected;
+
+  /// 확인 단추 문구(기본 "확인") — 여러 대화방에 초대하는 첫 단계는 "다음".
+  final String confirmLabel;
+
+  /// true면 한 명 이상 골라야 확인 단추가 켜진다.
+  final bool requireSelection;
   final bool asDialog;
   const PickMembersScreen({
     super.key,
     required this.session,
     this.title = '멤버 선택',
     this.initialSelected = const [],
+    this.confirmLabel = '확인',
+    this.requireSelection = false,
     this.asDialog = false,
   });
 
@@ -181,8 +214,14 @@ class PickMembersScreen extends StatelessWidget {
             const SizedBox(width: 8),
             FilledButton(
               key: const ValueKey('pick-members-confirm'),
-              onPressed: () => Navigator.of(context).pop(selected),
-              child: Text(selected.isEmpty ? '확인' : '확인 (${selected.length})'),
+              onPressed: requireSelection && selected.isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(selected),
+              child: Text(
+                selected.isEmpty
+                    ? confirmLabel
+                    : '$confirmLabel (${selected.length})',
+              ),
             ),
           ],
         ),

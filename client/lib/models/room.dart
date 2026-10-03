@@ -60,7 +60,7 @@ class Room {
   /// 이 방이 속한 팀. 방 목록/조직도/검색/파일이 전부 팀 단위로 갈리고, 다른 팀에서 온
   /// 메시지를 눌렀을 때 그 팀으로 전환하는 데도 쓴다(Session.requestOpenRoom 참고).
   final String teamId;
-  final RoomType type;
+  RoomType type;
 
   /// 이름·설명·공개 여부·멤버는 토픽 정보 변경/초대/내보내기로 바뀌어 room:created로 다시
   /// 오고, Session이 화면이 들고 있는 이 인스턴스에 그 자리에서 반영한다([mergeServerState])
@@ -318,6 +318,11 @@ class Room {
   /// 받은 목록)만 덮어쓴다. 배너 닫기(dismissedAnnouncementId)는 순수 로컬 값이라 늘 그대로 둔다.
   void mergeServerState(Room incoming, {bool includePersonal = false}) {
     if (identical(incoming, this)) return;
+    // 그룹채팅 → 토픽 전환 — 종류가 바뀌면 따라가고, 토픽에서 쓰지 않는 나만의 별칭은 버린다.
+    if (type != incoming.type) {
+      type = incoming.type;
+      if (type != RoomType.group) customName = null;
+    }
     name = incoming.name;
     description = incoming.description;
     isPublic = incoming.isPublic;

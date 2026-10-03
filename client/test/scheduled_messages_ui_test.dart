@@ -420,15 +420,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            appBar: AppBar(
-              actions: [
-                AppMenuButton(
-                  session: t.session,
-                  onOpenFiles: () {},
-                  onOpenLinks: () {},
-                ),
-              ],
-            ),
+            appBar: AppBar(actions: [AppMenuButton(session: t.session)]),
           ),
         ),
       );

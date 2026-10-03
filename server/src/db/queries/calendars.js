@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import {
   calendarEventAttendees,
@@ -376,6 +376,50 @@ export function listEventsForWindow({ teamId, calendarIds, attendeeUserId, fromM
     .then((rows) =>
       rows.map((r) => ({ ...r.event, creatorName: r.creatorName ?? r.creatorUsername ?? null })),
     );
+}
+
+/**
+ * 제목 검색 — [calendarIds]에 속한 일정 + 내가 참석자인 일정(그 팀 안), 제목에 [like]가 들어간(대소문자 무시, 패턴은
+ * escapeLike로 이스케이프된 것) 일정 마스터를 시작 시각 내림차순(같으면 id 내림차순)으로 [limit]개.
+ * 비공개 일정은 만든 사람·참석자·[managedCalendarIds](내가 소유자/관리자인 캘린더)일 때만 걸린다.
+ * [before]={ms, id|null}이면 그 커서보다 앞(더 오래된) 것만.
+ */
+export function searchEventsByTitle({ teamId, calendarIds, managedCalendarIds, userId, like, before, limit }) {
+  const attendeeEventIds = db
+    .select({ id: calendarEventAttendees.eventId })
+    .from(calendarEventAttendees)
+    .where(eq(calendarEventAttendees.userId, userId));
+  let cursor;
+  if (before) {
+    const at = new Date(before.ms);
+    cursor = before.id
+      ? or(lt(calendarEvents.startAt, at), and(eq(calendarEvents.startAt, at), lt(calendarEvents.id, before.id)))
+      : lt(calendarEvents.startAt, at);
+  }
+  return db
+    .select({ event: calendarEvents, creatorName: users.name, creatorUsername: users.username })
+    .from(calendarEvents)
+    .innerJoin(calendars, eq(calendars.id, calendarEvents.calendarId))
+    .leftJoin(users, eq(users.id, calendarEvents.creatorId))
+    .where(
+      and(
+        eq(calendars.teamId, teamId),
+        calendarIds.length > 0
+          ? or(inArray(calendarEvents.calendarId, calendarIds), inArray(calendarEvents.id, attendeeEventIds))
+          : inArray(calendarEvents.id, attendeeEventIds),
+        sql`${calendarEvents.title} ilike ${like}`,
+        or(
+          ne(calendarEvents.visibility, 'private'),
+          eq(calendarEvents.creatorId, userId),
+          inArray(calendarEvents.id, attendeeEventIds),
+          managedCalendarIds.length > 0 ? inArray(calendarEvents.calendarId, managedCalendarIds) : undefined,
+        ),
+        cursor,
+      ),
+    )
+    .orderBy(desc(calendarEvents.startAt), desc(calendarEvents.id))
+    .limit(limit)
+    .then((rows) => rows.map((r) => ({ ...r.event, creatorName: r.creatorName ?? r.creatorUsername ?? null })));
 }
 
 export function findEventWithCreatorName(id) {

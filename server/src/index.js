@@ -25,19 +25,23 @@ import { createStickersRouter } from './stickers.js';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { certPath, ensureTlsCredentials } from './certs.js';
 import { PAIRING_PORT, PORT } from './config.js';
+import { createBookmarksRouter } from './bookmarks.js';
 import { createCallsRouter } from './calls.js';
 import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
 import { createFavoritesRouter } from './favorites.js';
+import { createMyPostsRouter } from './myPosts.js';
 import { createDevicesRouter } from './devices.js';
 import { createInvitesRouter } from './invites.js';
 import { createTeamInvitesRouter } from './teamInvites.js';
 import { createMessagesRouter } from './messages.js';
+import { createMessageFilesRouter } from './messageFiles.js';
 import { createNotificationsRouter } from './notifications.js';
 import { checkPendingMigrations } from './migrationCheck.js';
 import { generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
 import { createAdminRouter } from './admin.js';
+import { createAlbumsRouter } from './albums.js';
 import { createAnnouncementsRouter } from './announcements.js';
 import { createInquiriesRouter } from './inquiries.js';
 import { createPollsRouter } from './polls.js';
@@ -50,6 +54,7 @@ import { startAnnouncementAutoUnpinJob } from './announcementAutoUnpin.js';
 import { startProjectDueReminderJob } from './projectNotify.js';
 import { searchRouter } from './search.js';
 import { createTeamsRouter } from './teams.js';
+import { createTodosRouter, startTodoReminderJob } from './todos.js';
 import { registerSocket } from './socket.js';
 import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
 import { createFileResignRouter } from './fileResign.js';
@@ -93,16 +98,26 @@ app.use('/api', requireAuth, createAnnouncementsRouter(io));
 app.use('/api', requireAuth, createInquiriesRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
+// 파일 삭제(업로드한 본인·팀 관리자) — 소프트 삭제라 댓글은 남는다(messageFiles.js).
+app.use('/api', requireAuth, createMessageFilesRouter(io));
 // 투표 — 만들기(방 메시지)·투표하기·마감·즐겨찾기. 소켓 message:send로는 못 만든다(polls.js).
 app.use('/api', requireAuth, createPollsRouter(io));
+// 앨범 — 대화방 안에서 이미지·영상을 주제별로 모으는 공간(만들기·항목 추가/삭제·공유). albums.js.
+app.use('/api', requireAuth, createAlbumsRouter(io));
 // 메시지 예약 발송 — 만든 사람만 보고 고친다. 실제 발송은 아래 startScheduledMessageJob이 한다.
 app.use('/api', requireAuth, createScheduledMessagesRouter(io));
 app.use('/api', requireAuth, createCommentsRouter(io));
 app.use('/api', requireAuth, createFavoritesRouter(io));
+// 내가 쓴 글 모아보기(내가 보낸 메시지·댓글) — myPosts.js.
+app.use('/api', requireAuth, createMyPostsRouter());
+// 북마크(팀/개인, 순서 변경, 링크 정보 가져오기) — bookmarks.js.
+app.use('/api', requireAuth, createBookmarksRouter(io));
 // 알림 센터(멘션·보드 알림 기록, 읽음, 알림 설정) — notifications.js.
 app.use('/api', requireAuth, createNotificationsRouter(io));
 // 캘린더(기본/팀/공유 캘린더, 일정, 반복, 공휴일·생일) — 권한은 calendars.js의 calendarAccess 한 곳에서 계산한다.
 app.use('/api', requireAuth, createCalendarsRouter(io));
+// 할 일(To-Do) — 대화방에 딸린 가벼운 할 일(담당자·기한·첨부·알림 일정). 프로젝트 업무와는 별개(todos.js).
+app.use('/api', requireAuth, createTodosRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
 app.use('/api', requireAuth, createCallsRouter());
@@ -148,6 +163,7 @@ startSecretExpiryJob(io);
 startAnnouncementAutoUnpinJob(io);
 startProjectDueReminderJob(io);
 startScheduledMessageJob(io);
+startTodoReminderJob(io);
 
 // 코드가 기대하는 스키마와 DB가 어긋난 채로 뜨면, 서버는 멀쩡해 보이는데 새 컬럼을 읽는
 // 화면만 조용히 비어 보인다 — 뜨기 전에 확인해서 콘솔에 크게 알린다(막지는 않는다).

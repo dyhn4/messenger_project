@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 알림 센터 화면 — 5개 탭(전체·멘션·메시지·보드·공지·프로젝트), 기본 탭 규칙, 탭별 배지, 모두 읽음,
 /// 안 읽은 것만, 눌러서 이동+읽음, 무한 스크롤, 설정, 그리고 모바일 폭(360)의 전체 화면·가로 스크롤 탭줄.
@@ -90,9 +91,24 @@ class _Server {
   bool _isBoard(Map<String, dynamic> n) =>
       (n['kind'] as String).startsWith('board_');
 
+  /// 서버의 kind 묶음 — mention(개인+@all) | mention_personal | mention_all | board | all.
+  bool _inKind(String kind, Map<String, dynamic> n) => switch (kind) {
+    'all' => true,
+    'mention' => _isMention(n),
+    'mention_personal' => n['kind'] == 'mention',
+    'mention_all' => n['kind'] == 'mention_all',
+    'board' => _isBoard(n),
+    _ => false,
+  };
+
+  int _unread(String kind) =>
+      items.where((n) => _inKind(kind, n) && n['readAt'] == null).length;
+
   Map<String, dynamic> get counts => {
-    'mention': items.where((n) => _isMention(n) && n['readAt'] == null).length,
-    'board': items.where((n) => _isBoard(n) && n['readAt'] == null).length,
+    'mention': _unread('mention'),
+    'board': _unread('board'),
+    'mentionPersonal': _unread('mention_personal'),
+    'mentionAll': _unread('mention_all'),
   };
 
   http.Response _ok(Object? body) => http.Response.bytes(
@@ -113,9 +129,7 @@ class _Server {
       final list =
           [
             for (final n in items)
-              if ((kind == 'all' ||
-                      (kind == 'mention' && _isMention(n)) ||
-                      (kind == 'board' && _isBoard(n))) &&
+              if (_inKind(kind, n) &&
                   (before == null || (n['createdAt'] as int) < before) &&
                   (!unreadOnly || n['readAt'] == null))
                 n,
@@ -136,8 +150,7 @@ class _Server {
       for (final n in items) {
         final hit =
             (body['ids'] is List && (body['ids'] as List).contains(n['id'])) ||
-            (body['kind'] == 'mention' && _isMention(n)) ||
-            (body['kind'] == 'board' && _isBoard(n));
+            (body['kind'] is String && _inKind(body['kind'] as String, n));
         if (hit) n['readAt'] ??= now;
       }
       return _ok({'ok': true});
@@ -1105,6 +1118,308 @@ void main() {
         find.byKey(const ValueKey('project-bell-open-center')),
         findsNothing,
       );
+    });
+  });
+
+  group('멘션 탭 꺾쇠(⌄) 드롭다운 필터', () {
+    final chevron = find.byKey(const ValueKey('notif-mention-filter'));
+    Finder item(String name) =>
+        find.byKey(ValueKey('notif-mention-filter-$name'));
+    Finder inMentionTab(String text) => find.descendant(
+      of: _tab(NotificationTab.mention),
+      matching: find.text(text),
+    );
+    Finder badgeText(String label, String count) =>
+        find.descendant(of: _badge(label), matching: find.text(count));
+
+    // 개인 멘션 2(안 읽음 2), @all 3(안 읽음 2 + 읽음 1), 보드 1.
+    _Server mixed() => _Server()
+      ..items.addAll([
+        _n('p1', minutesAgo: 1, preview: '나 개인1'),
+        _n('p2', minutesAgo: 4, preview: '나 개인2'),
+        _n('a1', kind: 'mention_all', minutesAgo: 2, preview: '모두 하나'),
+        _n('a2', kind: 'mention_all', minutesAgo: 3, preview: '모두 둘'),
+        _n(
+          'a3',
+          kind: 'mention_all',
+          minutesAgo: 5,
+          read: true,
+          preview: '모두 읽음',
+        ),
+        _n('b1', kind: 'board_post', minutesAgo: 6, preview: '보드 글'),
+      ]);
+
+    Future<void> choose(WidgetTester tester, String name) async {
+      await tester.tap(chevron);
+      await tester.pumpAndSettle();
+      await tester.tap(item(name));
+      await tester.pumpAndSettle();
+      await _settle(tester);
+    }
+
+    String? lastKind(_Server server) => server
+        .called('GET', '/api/notifications')
+        .last
+        .url
+        .queryParameters['kind'];
+
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    testWidgets('멘션 탭 이름 오른쪽에만 꺾쇠가 있고, 기본은 "멘션" · 전체 멘션이다', (tester) async {
+      final session = _session(mixed());
+      await _pump(tester, session);
+      await _settle(tester);
+      expect(chevron, findsOneWidget);
+      expect(
+        find.descendant(of: _tab(NotificationTab.mention), matching: chevron),
+        findsOneWidget,
+      );
+      expect(inMentionTab('멘션'), findsOneWidget);
+      expect(badgeText('멘션', '4'), findsOneWidget); // 개인 2 + @all 2
+      // 멘션 두 종류가 다 보인다.
+      expect(_rich('김철수: 나 개인1'), findsOneWidget);
+      expect(_rich('김철수: 모두 하나'), findsOneWidget);
+    });
+
+    testWidgets('꺾쇠를 누르면 탭 바로 아래에 메뉴가 열리고 전체 멘션에 체크가 붙는다', (tester) async {
+      final session = _session(mixed());
+      await _pump(tester, session);
+      await _settle(tester);
+      await tester.tap(chevron);
+      await tester.pumpAndSettle();
+      expect(find.text('전체 멘션'), findsOneWidget);
+      expect(find.text('@나를 멘션'), findsOneWidget);
+      expect(find.text('@all 멘션'), findsOneWidget);
+      expect(
+        find.descendant(of: item('all'), matching: find.byIcon(Icons.check)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: item('personal'),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsNothing,
+      );
+      // 탭 줄 바로 아래에서 열린다.
+      final tabBottom = tester.getRect(_tab(NotificationTab.mention)).bottom;
+      final menuTop = tester.getRect(item('all')).top;
+      expect(menuTop, greaterThanOrEqualTo(tabBottom - 1));
+      expect(menuTop, lessThan(tabBottom + 40));
+    });
+
+    testWidgets('탭 이름을 누르는 것(탭 전환)과 꺾쇠를 누르는 것(메뉴)은 분리된다', (tester) async {
+      final session = _session(mixed());
+      await _pump(tester, session, initialTab: NotificationTab.board);
+      await _settle(tester);
+      // 이름을 누르면 메뉴 없이 멘션 탭으로만 간다.
+      await tester.tap(inMentionTab('멘션'));
+      await _settle(tester);
+      expect(find.text('@all 멘션'), findsNothing);
+      expect(_rich('김철수: 나 개인1'), findsOneWidget);
+      // 다른 탭으로 갔다가 꺾쇠를 누르면 멘션 탭으로 옮겨 가면서 메뉴가 열린다.
+      await tester.tap(_tab(NotificationTab.unreadChats));
+      await _settle(tester);
+      expect(_rich('김철수: 나 개인1'), findsNothing);
+      await tester.tap(chevron);
+      await tester.pumpAndSettle();
+      await _settle(tester);
+      expect(find.text('@all 멘션'), findsOneWidget);
+      expect(
+        tester
+            .widget<TabBar>(find.byKey(const ValueKey('notif-tabs')))
+            .controller!
+            .index,
+        NotificationTab.mention.index,
+      );
+      expect(_rich('김철수: 나 개인1'), findsOneWidget);
+    });
+
+    testWidgets(
+      '@all 멘션을 고르면 탭 이름이 "@all"로, 목록·배지가 @all만(서버 kind=mention_all)',
+      (tester) async {
+        final server = mixed();
+        final session = _session(server);
+        await _pump(tester, session);
+        await _settle(tester);
+        await choose(tester, 'everyone');
+        expect(lastKind(server), 'mention_all');
+        expect(inMentionTab('@all'), findsOneWidget);
+        expect(inMentionTab('멘션'), findsNothing);
+        expect(_rich('김철수: 모두 하나'), findsOneWidget);
+        expect(_rich('김철수: 모두 둘'), findsOneWidget);
+        expect(_rich('김철수: 모두 읽음'), findsOneWidget);
+        expect(_rich('김철수: 나 개인1'), findsNothing);
+        // 배지는 @all의 안 읽은 개수(2).
+        expect(badgeText('@all', '2'), findsOneWidget);
+        // 다시 열면 체크가 옮겨 가 있다.
+        await tester.tap(chevron);
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: item('everyone'),
+            matching: find.byIcon(Icons.check),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: item('all'), matching: find.byIcon(Icons.check)),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets('@나를 멘션을 고르면 "@나" · 개인 멘션만 · 배지 2, 전체 멘션으로 되돌리면 "멘션"', (
+      tester,
+    ) async {
+      final server = mixed();
+      final session = _session(server);
+      await _pump(tester, session);
+      await _settle(tester);
+      await choose(tester, 'personal');
+      expect(lastKind(server), 'mention_personal');
+      expect(inMentionTab('@나'), findsOneWidget);
+      expect(_rich('김철수: 나 개인1'), findsOneWidget);
+      expect(_rich('김철수: 나 개인2'), findsOneWidget);
+      expect(_rich('김철수: 모두 하나'), findsNothing);
+      expect(badgeText('@나', '2'), findsOneWidget);
+      await choose(tester, 'all');
+      expect(inMentionTab('멘션'), findsOneWidget);
+      expect(_rich('김철수: 모두 하나'), findsOneWidget);
+    });
+
+    testWidgets('빈 종류는 종류에 맞는 안내 문구', (tester) async {
+      final server = _Server()..items.add(_n('p1', preview: '나 개인1'));
+      final session = _session(server);
+      await _pump(tester, session);
+      await _settle(tester);
+      await choose(tester, 'everyone');
+      expect(find.text('@all 멘션 알림이 없습니다.'), findsOneWidget);
+    });
+
+    testWidgets('전체 탭은 필터와 상관없이 멘션 두 종류를 모두 섞어 보여 준다', (tester) async {
+      final server = mixed();
+      final session = _session(server);
+      await _pump(tester, session);
+      await _settle(tester);
+      await choose(tester, 'everyone');
+      await tester.tap(_tab(NotificationTab.all));
+      await _settle(tester);
+      expect(_rich('김철수: 나 개인1'), findsOneWidget);
+      expect(_rich('김철수: 모두 하나'), findsOneWidget);
+      expect(_rich('김철수: 보드 글'), findsOneWidget);
+      // 전체 탭 요청은 kind=mention·board — 새 kind를 쓰지 않는다.
+      final kinds = [
+        for (final r in server.called('GET', '/api/notifications'))
+          r.url.queryParameters['kind'],
+      ];
+      expect(kinds, containsAll(['mention', 'board']));
+      // 전체 탭 배지 = 멘션 합계 4 + 보드 1.
+      expect(badgeText('전체', '5'), findsOneWidget);
+    });
+
+    testWidgets('모두 읽음은 고른 종류만 — kind=mention_all로 보내고 다른 종류 배지는 남는다', (
+      tester,
+    ) async {
+      final server = mixed();
+      final session = _session(server);
+      await _pump(tester, session);
+      await _settle(tester);
+      await choose(tester, 'everyone');
+      await tester.tap(find.byKey(const ValueKey('notif-read-all')));
+      await _settle(tester);
+      expect(
+        jsonDecode(
+          server.called('POST', '/api/notifications/read').single.body,
+        ),
+        {'kind': 'mention_all'},
+      );
+      expect(_badge('@all'), findsNothing);
+      final button = tester.widget<TextButton>(
+        find.byKey(const ValueKey('notif-read-all')),
+      );
+      expect(button.onPressed, isNull);
+      // 개인 멘션은 그대로 안 읽음 — 전체 멘션으로 돌아가면 배지 2.
+      await choose(tester, 'all');
+      expect(badgeText('멘션', '2'), findsOneWidget);
+    });
+
+    testWidgets('"안 읽은 알림만 표시"는 고른 종류를 따른다', (tester) async {
+      final server = mixed();
+      final session = _session(server);
+      await _pump(tester, session);
+      await _settle(tester);
+      await choose(tester, 'everyone');
+      await tester.tap(find.byKey(const ValueKey('notif-settings')));
+      await _settle(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('notif-setting-unread-only-mention')),
+      );
+      await _settle(tester);
+      await tester.tap(find.text('닫기'));
+      await _settle(tester);
+      final last = server.called('GET', '/api/notifications').last.url;
+      expect(last.queryParameters['kind'], 'mention_all');
+      expect(last.queryParameters['unreadOnly'], 'true');
+      expect(_rich('김철수: 모두 하나'), findsOneWidget);
+      expect(_rich('김철수: 모두 읽음'), findsNothing);
+    });
+
+    testWidgets('고른 종류는 이 기기에 저장돼 다시 열어도 유지된다', (tester) async {
+      final server = mixed();
+      final first = _session(server);
+      await _pump(tester, first);
+      await _settle(tester);
+      await choose(tester, 'everyone');
+
+      // 앱을 다시 켠 것처럼 새 세션 — 저장값을 불러오면 "@all" 그대로.
+      await tester.pumpWidget(const SizedBox()); // 앞의 패널을 내려 State를 새로 만든다.
+      final again = _session(server);
+      await tester.runAsync(again.notificationCenter.loadViewPrefs);
+      await _pump(tester, again);
+      await _settle(tester);
+      expect(inMentionTab('@all'), findsOneWidget);
+      expect(_rich('김철수: 모두 하나'), findsOneWidget);
+      expect(_rich('김철수: 나 개인1'), findsNothing);
+    });
+
+    testWidgets('모바일 폭 360에서도 탭줄의 꺾쇠를 눌러 고를 수 있다', (tester) async {
+      final server = mixed();
+      final session = _session(server);
+      _size(tester, const Size(360, 740));
+      await tester.runAsync(session.notificationCenter.refreshCounts);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () =>
+                      showNotificationsCenterDialog(context, session),
+                  child: const Text('열기'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('열기'));
+      await tester.pumpAndSettle();
+      await _settle(tester);
+      final bar = tester.getRect(find.byKey(const ValueKey('notif-tabs')));
+      expect(tester.getRect(chevron).right, lessThanOrEqualTo(bar.right));
+      await tester.tap(chevron);
+      await tester.pumpAndSettle();
+      expect(find.text('@all 멘션'), findsOneWidget);
+      // 메뉴가 화면 밖으로 나가지 않는다.
+      expect(tester.getRect(item('all')).right, lessThanOrEqualTo(360));
+      await tester.tap(item('everyone'));
+      await tester.pumpAndSettle();
+      await _settle(tester);
+      expect(inMentionTab('@all'), findsOneWidget);
+      expect(_rich('김철수: 모두 하나'), findsOneWidget);
+      expect(_rich('김철수: 나 개인1'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 

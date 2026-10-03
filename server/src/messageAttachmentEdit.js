@@ -17,7 +17,8 @@ import { sanitizeTextFormat } from './textFormat.js';
  * `{ ok: false, status, error }`.
  */
 export async function editMediaMessage({ message, room, body, userId, cleanMentions, trimmedLead }) {
-  const rows = (await listAttachmentsForMessages([message.id]))[message.id] ?? [];
+  // 파일 삭제(소프트 삭제)로 자리만 남은 첨부는 고르거나 세지 않는다.
+  const rows = ((await listAttachmentsForMessages([message.id]))[message.id] ?? []).filter((a) => !a.deletedAt);
   const plan = planAttachmentEdit({ message, rows, removeIds: body?.removeAttachmentIds });
   if (!plan.ok) return { ok: false, status: 400, error: plan.error };
 

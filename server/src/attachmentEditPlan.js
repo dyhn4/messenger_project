@@ -10,6 +10,7 @@ const REMOVE_IDS_MAX = 100;
  */
 export function currentAttachmentsOf(message, rows) {
   if (Array.isArray(rows) && rows.length > 0) return rows;
+  if (message.fileDeletedAt) return []; // 파일을 지운(소프트 삭제) 메시지 — 남은 첨부가 없다.
   if (!message.fileUrl || (message.type !== 'image' && message.type !== 'file')) return [];
   return [
     {

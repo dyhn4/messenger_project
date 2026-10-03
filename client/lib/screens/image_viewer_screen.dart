@@ -33,8 +33,12 @@ class ViewerImage {
   /// 목록이 바뀌어도(과거 메시지를 더 불러와 앞에 붙어도) 같은 장을 찾기 위한 이름.
   final String id;
 
+  /// 이 장이 메시지의 어느 첨부인지(파일 삭제용) — 첨부 하나짜리 옛 메시지나 모르면 null(메시지 id로 본다).
+  final String? attachmentId;
+
   const ViewerImage({
     required this.url,
+    this.attachmentId,
     this.bytesFuture,
     this.loadBytes,
     this.fileName = 'image.png',
@@ -100,6 +104,9 @@ class ImageViewerScreen extends StatefulWidget {
   /// 목록이 바뀔 수 있으면(방의 앞뒤 메시지 사진) — 없으면 [images]만 넘겨본다.
   final ViewerImageSource? source;
 
+  /// 뷰어에서 사진 한 장을 지운 뒤 — 목록을 따로 들고 있는 화면(파일 패널)이 다시 받는다.
+  final VoidCallback? onFileDeleted;
+
   const ImageViewerScreen({
     super.key,
     required this.images,
@@ -108,6 +115,7 @@ class ImageViewerScreen extends StatefulWidget {
     this.message,
     this.room,
     this.source,
+    this.onFileDeleted,
   });
 
   /// 한 장짜리 예전 호출부를 그대로 쓰기 위한 편의 생성자.
@@ -127,7 +135,8 @@ class ImageViewerScreen extends StatefulWidget {
          ),
        ],
        initialIndex = 0,
-       source = null;
+       source = null,
+       onFileDeleted = null;
 
   @override
   State<ImageViewerScreen> createState() => _ImageViewerScreenState();
@@ -507,8 +516,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
       message: message,
       url: image.url,
       fileName: image.fileName,
+      attachmentId: image.attachmentId,
       attachmentKey: message.attachmentKey,
       attachmentNonce: message.attachmentNonce,
+      // 지운 사진은 더 볼 수 없으니 뷰어를 닫는다(말풍선은 서버 알림으로 "삭제된 파일입니다"가 된다).
+      onDeleted: () {
+        widget.onFileDeleted?.call();
+        if (mounted) Navigator.of(context).pop();
+      },
     );
   }
 
@@ -610,6 +625,13 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                   tooltip: '파일 전달',
                   onPressed: () => actions.forward(context),
                 ),
+                // 올린 본인과 팀 관리자에게만 — 파일만 지우고 메시지와 댓글은 남는다.
+                if (actions.canDelete)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: '삭제',
+                    onPressed: () => actions.deleteFile(context),
+                  ),
               ],
             ],
           ),

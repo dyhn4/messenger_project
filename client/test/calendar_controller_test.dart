@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:client/models/calendar.dart';
 import 'package:client/services/api_client.dart' show ApiException;
 import 'package:client/services/calendar_controller.dart';
+import 'package:client/services/calendar_move.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -342,6 +343,117 @@ void main() {
     await c.setTeam('t1');
     expect(c.error, '팀 멤버가 아닙니다.');
     expect(c.calendarsLoaded, isFalse);
+  });
+
+  group('moveEvent (드래그 이동)', () {
+    final src = timedEvent(
+      'e1',
+      DateTime(2026, 9, 10, 9),
+      DateTime(2026, 9, 10, 10),
+    );
+
+    Future<CalendarController> loaded(FakeCalendarApi api) async {
+      final c = _controller(api);
+      await c.setTeam('t1');
+      await c.watch(_sep, _oct);
+      return c;
+    }
+
+    test('놓자마자 캐시를 새 자리로 바꾸고 start/end/allDay 만 PATCH 한 뒤 다시 받는다', () async {
+      final api = FakeCalendarApi(events: [src]);
+      final c = await loaded(api);
+      final fetches = api.callCount('fetchEvents');
+      final move = moveEventToDay(src, DateTime(2026, 9, 17));
+      final done = c.moveEvent(src, move);
+      // 낙관적 갱신: 서버 응답을 기다리기 전에 이미 새 자리.
+      expect(c.eventsBetween(_sep, _oct).single.start, move.start);
+      await done;
+      expect(api.lastEventFields, {
+        'start': move.start,
+        'end': move.end,
+        'allDay': false,
+      });
+      expect(api.lastScope, isNull);
+      expect(api.lastOccurrenceStart, isNull);
+      expect(api.callCount('fetchEvents'), greaterThan(fetches));
+      expect(c.eventsBetween(_sep, _oct).single.start, move.start);
+    });
+
+    test('서버가 거절하면 원래 자리로 되돌리고 오류를 다시 던진다', () async {
+      final api = FakeCalendarApi(events: [src])..failWith = '권한이 없습니다.';
+      final c = await loaded(api);
+      final move = moveEventToDay(src, DateTime(2026, 9, 17));
+      await expectLater(
+        c.moveEvent(src, move),
+        throwsA(
+          isA<ApiException>().having((e) => e.message, 'message', '권한이 없습니다.'),
+        ),
+      );
+      expect(c.eventsBetween(_sep, _oct).single.start, src.start);
+    });
+
+    test('종일 일정은 UTC 날짜 표현으로 보낸다', () async {
+      final trip = allDayEvent(
+        'a',
+        DateTime(2026, 9, 29),
+        DateTime(2026, 9, 30),
+      );
+      final api = FakeCalendarApi(events: [trip]);
+      final c = await loaded(api);
+      final move = moveEventToDay(trip, DateTime(2026, 10, 2));
+      await c.moveEvent(trip, move);
+      expect(api.lastEventFields!['allDay'], isTrue);
+      expect(
+        api.lastEventFields!['start'],
+        DateTime.utc(2026, 10, 2).millisecondsSinceEpoch,
+      );
+      expect(
+        api.lastEventFields!['end'],
+        DateTime.utc(2026, 10, 4).millisecondsSinceEpoch,
+      );
+    });
+
+    test('다른 달로 옮기면 그 달 덩어리에 들어가 바로 보인다', () async {
+      final api = FakeCalendarApi(events: [src]);
+      final c = _controller(api);
+      await c.setTeam('t1');
+      await c.watch(DateTime(2026, 8, 30), DateTime(2026, 10, 4));
+      final move = moveEventToDay(src, DateTime(2026, 10, 2));
+      final done = c.moveEvent(src, move);
+      expect(c.eventsBetween(_sep, _oct), isEmpty);
+      expect(
+        c.eventsBetween(_oct, DateTime(2026, 11, 1)).single.start,
+        move.start,
+      );
+      await done;
+    });
+
+    test('반복·권한 없는 일정은 옮길 수 없다(StateError, 서버 호출 없음)', () async {
+      final recurring = timedEvent(
+        'r',
+        DateTime(2026, 9, 10, 9),
+        DateTime(2026, 9, 10, 10),
+        recurring: true,
+        recurrence: const Recurrence(freq: 'daily'),
+      );
+      final api = FakeCalendarApi(events: [recurring]);
+      final c = await loaded(api);
+      await expectLater(
+        c.moveEvent(recurring, moveEventByDays(recurring, 1)),
+        throwsStateError,
+      );
+      final readOnly = timedEvent(
+        'ro',
+        DateTime(2026, 9, 10, 9),
+        DateTime(2026, 9, 10, 10),
+        canEdit: false,
+      );
+      await expectLater(
+        c.moveEvent(readOnly, moveEventByDays(readOnly, 1)),
+        throwsStateError,
+      );
+      expect(api.callCount('updateEvent'), 0);
+    });
   });
 
   test('reset 은 팀과 캐시를 비운다', () async {

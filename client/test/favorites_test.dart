@@ -13,14 +13,16 @@ import 'package:client/services/favorites_controller.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/app_menu_button.dart';
+import 'package:client/widgets/side_panels.dart';
 import 'package:client/widgets/message_actions.dart';
+import 'package:client/widgets/panel_filters.dart';
 import 'package:client/widgets/poll_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 통합 즐겨찾기 — 모델 파싱, 컨트롤러(담은 id·쪽 나누기·소켓 동기화), 즐겨찾기 화면(탭·이동·해제·빈 상태·폭 360),
+/// 통합 즐겨찾기 — 모델 파싱, 컨트롤러(담은 id·쪽 나누기·소켓 동기화), 즐겨찾기 패널(탭·이동·해제·빈 상태·필터·검색·정렬·폭 360),
 /// 메뉴 타일, 메시지·댓글 메뉴의 "즐겨찾기". 서버는 요청을 기록하는 가짜 HTTP 클라이언트로 대신한다.
 
 class _QuietNotifications extends NotificationService {
@@ -141,9 +143,12 @@ Map<String, dynamic> _pollMessage() => {
   },
 };
 
+/// 테스트 안의 "담은 시각" 기준 — 기본 기간(최근 1년)에 걸러지지 않도록 지금 근처로 잡는다.
+final _base = DateTime.now().millisecondsSinceEpoch;
+
 Map<String, dynamic> _messageItem({String id = 'm1', int at = 9000}) => {
   'type': 'message',
-  'favoritedAt': at,
+  'favoritedAt': _base + at,
   'roomId': 'r1',
   'roomName': '공지방',
   'message': _message(id: id),
@@ -151,7 +156,7 @@ Map<String, dynamic> _messageItem({String id = 'm1', int at = 9000}) => {
 
 Map<String, dynamic> _commentItem() => {
   'type': 'comment',
-  'favoritedAt': 8000,
+  'favoritedAt': _base + 8000,
   'roomId': 'r1',
   'roomName': '공지방',
   'comment': {
@@ -175,7 +180,7 @@ Map<String, dynamic> _commentItem() => {
 
 Map<String, dynamic> _fileItem() => {
   'type': 'file',
-  'favoritedAt': 7000,
+  'favoritedAt': _base + 7000,
   'roomId': 'r1',
   'roomName': '공지방',
   'messageId': 'mf',
@@ -190,7 +195,7 @@ Map<String, dynamic> _fileItem() => {
 
 Map<String, dynamic> _pollItem() => {
   'type': 'poll',
-  'favoritedAt': 6500,
+  'favoritedAt': _base + 6500,
   'roomId': 'r1',
   'roomName': '공지방',
   'message': _pollMessage(),
@@ -208,7 +213,7 @@ Map<String, dynamic> _roomItem() => {
 
 Map<String, dynamic> _memberItem() => {
   'type': 'member',
-  'favoritedAt': 6000,
+  'favoritedAt': _base + 6000,
   'teamId': 't1',
   'user': _user('u2', '김철수'),
 };
@@ -252,6 +257,31 @@ void _serveFavorites(
   });
 }
 
+/// 종류 탭을 누른다 — 탭 줄은 가로 스크롤이라 화면 밖의 탭은 먼저 밀어서 보이게 한다.
+Future<void> _tapTab(WidgetTester tester, String name) async {
+  final tab = find.byKey(ValueKey('favorites-tab-$name'));
+  await tester.scrollUntilVisible(
+    tab,
+    80,
+    scrollable: find.descendant(
+      of: find.byKey(const ValueKey('favorites-tabs')),
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.ensureVisible(tab); // 캐시 범위에 만들어져 있어도 화면 밖일 수 있다
+  await tester.pumpAndSettle();
+  await tester.tap(tab);
+  await tester.pumpAndSettle();
+}
+
+/// 패널이 "이 방을 열어라"고 홈 화면에 요청한 것들 — (방 id, 메시지 id).
+final _opened = <(String, String?)>[];
+
+/// 패널의 X(닫기)가 눌린 횟수.
+var _closed = 0;
+
+/// 즐겨찾기 패널을 연다. 넓은 창은 PC 홈 화면처럼 오른쪽에 폭 420으로 붙이고(홈 셸 손잡이는 기록만 한다),
+/// 좁은 창(700 미만)은 메뉴가 쓰는 [openSidePanel]로 전체 화면 라우트를 연다.
 Future<void> _openScreen(
   WidgetTester tester,
   Session session, {
@@ -259,20 +289,55 @@ Future<void> _openScreen(
   FavoriteKind? initialKind,
 }) async {
   _size(tester, size);
+  _opened.clear();
+  _closed = 0;
+  if (size.width < 700) {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => openSidePanel(context, session, 'favorites'),
+              child: const Text('열기'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+    return;
+  }
   await tester.pumpWidget(
     MaterialApp(
-      home: Builder(
-        builder: (context) => Scaffold(
-          body: TextButton(
-            onPressed: () =>
-                showFavorites(context, session, initialKind: initialKind),
-            child: const Text('열기'),
+      home: HomeShellScope(
+        openPanelKey: 'favorites',
+        panelRoom: null,
+        panelGeneration: 0,
+        currentRoomId: null,
+        togglePanel: (_) {},
+        closePanel: () => _closed++,
+        toggleCalendar: () {},
+        openRoom: (room, {messageId}) => _opened.add((room.id, messageId)),
+        child: Scaffold(
+          body: Row(
+            children: [
+              const Expanded(child: SizedBox()),
+              const VerticalDivider(width: 1),
+              SizedBox(
+                width: 420,
+                child: FavoritesScreen(
+                  session: session,
+                  initialKind: initialKind,
+                  onClose: () => _closed++,
+                ),
+              ),
+            ],
           ),
         ),
       ),
     ),
   );
-  await tester.tap(find.text('열기'));
   await tester.pumpAndSettle();
 }
 
@@ -331,7 +396,10 @@ void main() {
       expect(message.kind, FavoriteKind.message);
       expect(message.message!.text, '내일 회의 자료 공유드립니다');
       expect(message.roomName, '공지방');
-      expect(message.favoritedAt, DateTime.fromMillisecondsSinceEpoch(9000));
+      expect(
+        message.favoritedAt,
+        DateTime.fromMillisecondsSinceEpoch(_base + 9000),
+      );
       expect(message.key, 'message:m1');
 
       final comment = _item(_commentItem());
@@ -498,7 +566,7 @@ void main() {
       await controller.load(FavoriteKind.message);
       expect(controller.feed(FavoriteKind.message).hasMore, isTrue);
       await controller.loadMore(FavoriteKind.message);
-      expect(api.lastBefore, 9000);
+      expect(api.lastBefore, _base + 9000);
       expect(
         controller.feed(FavoriteKind.message).items.map((i) => i.message!.id),
         ['m1', 'm2'],
@@ -512,7 +580,7 @@ void main() {
         ..add(const []);
       await controller.load(null);
       await controller.loadMore(null);
-      expect(api.lastBefore, 7000);
+      expect(api.lastBefore, _base + 7000);
     });
 
     test('reset — 로그아웃하면 id와 목록을 비운다', () async {
@@ -547,16 +615,24 @@ void main() {
 
       // 머리글과 탭 일곱 개.
       expect(find.text('즐겨찾기'), findsWidgets);
-      for (final label in ['전체', '메시지', '파일', '댓글', '투표', '대화방', '멤버']) {
-        expect(
-          find.descendant(
-            of: find.byKey(const ValueKey('favorites-tabs')),
-            matching: find.text(label),
-          ),
-          findsOneWidget,
-          reason: label,
-        );
+      // 탭 줄은 가로로 스크롤되어 끝 탭은 밀어야 보인다 — 오른쪽 끝까지 밀며 일곱 개를 다 확인한다.
+      final tabs = find.byKey(const ValueKey('favorites-tabs'));
+      final seen = <String>{};
+      for (var i = 0; i < 6; i++) {
+        for (final label in ['전체', '메시지', '파일', '댓글', '투표', '대화방', '멤버']) {
+          if (find
+              .descendant(of: tabs, matching: find.text(label))
+              .evaluate()
+              .isNotEmpty) {
+            seen.add(label);
+          }
+        }
+        await tester.drag(tabs, const Offset(-150, 0));
+        await tester.pumpAndSettle();
       }
+      expect(seen, {'전체', '메시지', '파일', '댓글', '투표', '대화방', '멤버'});
+      await tester.drag(tabs, const Offset(2000, 0)); // 다시 맨 앞으로
+      await tester.pumpAndSettle();
       final all = server.called('GET', '/api/favorites').single;
       expect(all.url.queryParameters['teamId'], 't1');
       expect(all.url.queryParameters.containsKey('type'), isFalse);
@@ -568,8 +644,7 @@ void main() {
       // 대화방 항목(토픽)이 맨 앞에 온다.
       expect(find.text('토픽'), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('favorites-tab-message')));
-      await tester.pumpAndSettle();
+      await _tapTab(tester, 'message');
       expect(
         server.called('GET', '/api/favorites').last.url.queryParameters['type'],
         'message',
@@ -578,8 +653,7 @@ void main() {
       expect(find.text('확인했습니다'), findsNothing);
       expect(find.text('내일 회의 자료 공유드립니다'), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('favorites-tab-member')));
-      await tester.pumpAndSettle();
+      await _tapTab(tester, 'member');
       expect(find.text('김철수'), findsOneWidget);
       expect(find.text('개발팀 · 팀장'), findsOneWidget);
       await tester.pump(const Duration(seconds: 3));
@@ -593,14 +667,11 @@ void main() {
       expect(find.byKey(const ValueKey('favorites-empty')), findsOneWidget);
       expect(find.textContaining('즐겨찾기한 항목이 없습니다'), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('favorites-tab-comment')));
-      await tester.pumpAndSettle();
+      await _tapTab(tester, 'comment');
       expect(find.textContaining('즐겨찾기한 댓글이 없습니다'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('favorites-tab-poll')));
-      await tester.pumpAndSettle();
+      await _tapTab(tester, 'poll');
       expect(find.textContaining('즐겨찾기한 투표가 없습니다'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('favorites-tab-member')));
-      await tester.pumpAndSettle();
+      await _tapTab(tester, 'member');
       expect(find.textContaining('즐겨찾기한 멤버가 없습니다'), findsOneWidget);
       await tester.pump(const Duration(seconds: 3));
     });
@@ -718,29 +789,42 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
-    testWidgets('메시지·댓글·투표를 누르면 대화상자가 닫히고 그 방의 그 메시지로 이동을 요청한다', (
+    testWidgets('메시지·댓글·투표를 누르면 홈 화면에 그 방의 그 메시지를 열어 달라고 하고 패널은 그대로다', (
       tester,
     ) async {
       final server = _Server();
       _serveFavorites(server, {
-        null: [_messageItem(), _commentItem()],
+        null: [_messageItem(), _commentItem(), _roomItem()],
       });
       final session = _session(server);
       await _openScreen(tester, session);
 
       await tester.tap(find.text('내일 회의 자료 공유드립니다'));
       await tester.pumpAndSettle();
-      expect(find.byType(FavoritesScreen), findsNothing);
-      expect(session.consumePendingOpenRoom()?.id, 'r1');
-      expect(session.consumePendingOpenMessageId(), 'm1');
+      expect(_opened.single, ('r1', 'm1'));
+      expect(find.byType(FavoritesScreen), findsOneWidget);
 
-      await tester.pumpWidget(const SizedBox());
-      await _openScreen(tester, session);
       // 댓글은 원문 메시지로 간다.
       await tester.tap(find.text('확인했습니다'));
       await tester.pumpAndSettle();
-      expect(session.consumePendingOpenRoom()?.id, 'r1');
-      expect(session.consumePendingOpenMessageId(), 'm1');
+      expect(_opened.last, ('r1', 'm1'));
+
+      // 대화방 항목은 메시지 없이 그 방만.
+      await tester.tap(find.text('공지방').first);
+      await tester.pumpAndSettle();
+      expect(_opened.last, ('r1', null));
+      expect(_opened, hasLength(3));
+    });
+
+    testWidgets('머리글의 닫기(X)는 패널을 닫아 달라고 알린다', (tester) async {
+      final server = _Server();
+      _serveFavorites(server, {});
+      final session = _session(server);
+      await _openScreen(tester, session);
+      await tester.tap(find.byTooltip('닫기'));
+      await tester.pump();
+      expect(_closed, 1);
+      await tester.pump(const Duration(seconds: 3));
     });
 
     testWidgets('멤버를 누르면 프로필 카드가 열리고 별이 켜져 있다', (tester) async {
@@ -783,7 +867,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
-    testWidgets('폭 360 — 탭이 가로로 스크롤되고 넘침 없이 전체 화면으로 열린다', (tester) async {
+    testWidgets('폭 360 — 전체 화면으로 열리고 탭이 가로로 스크롤되며 넘침이 없다', (tester) async {
       final server = _Server();
       _serveFavorites(server, {
         null: [
@@ -797,8 +881,14 @@ void main() {
       });
       final session = _session(server);
       await _openScreen(tester, session, size: const Size(360, 780));
-      expect(find.byType(AppBar), findsOneWidget);
+      // 패널이 제목·닫기를 직접 그린다(파일 패널과 같다) — 앱바는 따로 없다.
+      expect(find.byType(FavoritesScreen), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
       expect(find.byType(Dialog), findsNothing);
+      expect(find.byKey(const ValueKey('panel-search-field')), findsOneWidget);
+      expect(find.text('참여 대화방'), findsOneWidget);
+      expect(find.text('모든 멤버'), findsOneWidget);
+      expect(find.text('1년 (기본)'), findsOneWidget);
       expect(tester.takeException(), isNull);
       // 탭 일곱 개가 한 화면에 다 안 들어가므로 끝 탭은 스크롤해야 보인다.
       final tabs = find.byKey(const ValueKey('favorites-tabs'));
@@ -806,9 +896,12 @@ void main() {
       expect(find.byKey(const ValueKey('favorites-tab-member')), findsNothing);
       await tester.drag(tabs, const Offset(-400, 0));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('favorites-tab-member')));
-      await tester.pumpAndSettle();
+      await _tapTab(tester, 'member');
       expect(tester.takeException(), isNull);
+      // 닫으면(X) 전체 화면 라우트가 걷힌다.
+      await tester.tap(find.byTooltip('닫기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(FavoritesScreen), findsNothing);
       await tester.pump(const Duration(seconds: 3));
     });
 
@@ -840,15 +933,344 @@ void main() {
             .last
             .url
             .queryParameters['before'],
-        '9000',
+        '${_base + 9000}',
       );
       expect(find.byKey(const ValueKey('favorites-more')), findsNothing);
       await tester.pump(const Duration(seconds: 3));
     });
   });
 
+  group('즐겨찾기 패널 상단 — 필터 · 종류 탭 · 검색 · 정렬', () {
+    Future<void> typeQuery(WidgetTester tester, String text) async {
+      await tester.enterText(
+        find.byKey(const ValueKey('panel-search-field')),
+        text,
+      );
+      await tester.pump(const Duration(milliseconds: 400)); // 입력을 멈춘 뒤 거른다
+      await tester.pumpAndSettle();
+    }
+
+    final all = <Map<String, dynamic>>[
+      _roomItem(),
+      _messageItem(),
+      _commentItem(),
+      _fileItem(),
+      _pollItem(),
+      _memberItem(),
+    ];
+
+    String loaded(WidgetTester tester) => tester
+        .widget<Text>(find.byKey(const ValueKey('panel-loaded-count')))
+        .data!;
+
+    testWidgets('파일 패널과 같은 구조 — 검색칸 · 필터 줄 · 종류 탭 · 정렬 · "N개가 로딩되었습니다."', (
+      tester,
+    ) async {
+      final server = _Server();
+      _serveFavorites(server, {null: all});
+      final session = _session(server);
+      await _openScreen(tester, session);
+
+      expect(find.byKey(const ValueKey('panel-search-field')), findsOneWidget);
+      expect(find.text('즐겨찾기 검색'), findsOneWidget);
+      expect(find.text('참여 대화방'), findsOneWidget);
+      expect(find.text('모든 멤버'), findsOneWidget);
+      expect(find.text('1년 (기본)'), findsOneWidget);
+      expect(find.byKey(const ValueKey('panel-sort')), findsOneWidget);
+      expect(find.text('최신순'), findsOneWidget);
+      expect(loaded(tester), '"6"개가 로딩되었습니다.');
+      // 위에서 아래로: 검색칸 → 필터 줄 → 종류 탭 → 건수 줄 → 목록.
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final order = [
+        top(find.byKey(const ValueKey('panel-search-field'))),
+        top(find.text('참여 대화방')),
+        top(find.byKey(const ValueKey('favorites-tabs'))),
+        top(find.byKey(const ValueKey('panel-loaded-count'))),
+        top(find.byKey(const ValueKey('favorite-message:m1'))),
+      ];
+      expect(order, [...order]..sort());
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('검색 — 본문·파일명·보낸 사람·투표 항목·멤버 이름에서 찾고, 건수가 따라간다', (tester) async {
+      final server = _Server();
+      _serveFavorites(server, {null: all});
+      final session = _session(server);
+      await _openScreen(tester, session);
+
+      await typeQuery(tester, '보고서');
+      expect(loaded(tester), '"1"개가 로딩되었습니다.');
+      expect(find.text('보고서.pdf'), findsOneWidget);
+      expect(find.text('내일 회의 자료 공유드립니다'), findsNothing);
+
+      await typeQuery(tester, '라면'); // 투표 선택지
+      expect(loaded(tester), '"1"개가 로딩되었습니다.');
+      expect(find.byType(PollCard), findsOneWidget);
+
+      await typeQuery(tester, '김철수'); // 보낸 사람 · 멤버 이름
+      expect(
+        find.byKey(const ValueKey('favorite-member:t1:u2')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('favorite-message:m1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('favorite-room:r1')), findsNothing);
+
+      await typeQuery(tester, '없는말');
+      expect(loaded(tester), '"0"개가 로딩되었습니다.');
+      expect(find.byKey(const ValueKey('favorites-no-match')), findsOneWidget);
+
+      // 지우기(X)로 되돌린다.
+      await typeQuery(tester, '');
+      expect(loaded(tester), '"6"개가 로딩되었습니다.');
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('정렬 — 최신순은 서버 순서(담은 시각 최신 먼저), 과거순은 그 반대(대화방은 맨 뒤)', (
+      tester,
+    ) async {
+      final server = _Server();
+      _serveFavorites(server, {
+        null: [
+          _roomItem(),
+          _messageItem(id: 'm1', at: 9000),
+          _messageItem(id: 'm2', at: 5000),
+          _messageItem(id: 'm3', at: 7000),
+        ],
+      });
+      final session = _session(server);
+      await _openScreen(tester, session);
+
+      double y(String key) => tester.getTopLeft(find.byKey(ValueKey(key))).dy;
+      List<String> order() {
+        final keys = ['room:r1', 'message:m1', 'message:m2', 'message:m3'];
+        keys.sort((a, b) => y('favorite-$a').compareTo(y('favorite-$b')));
+        return keys;
+      }
+
+      // 최신순: 담은 시각이 없는 대화방이 맨 앞, 이어서 9000 → 7000 → 5000.
+      expect(order(), ['room:r1', 'message:m1', 'message:m3', 'message:m2']);
+
+      await tester.tap(find.byKey(const ValueKey('panel-sort')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('과거순').last);
+      await tester.pumpAndSettle();
+      expect(find.text('과거순'), findsOneWidget);
+      expect(order(), ['message:m2', 'message:m3', 'message:m1', 'room:r1']);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('기간 — 기본 1년이라 오래된 것은 빠지고, "설정 안 함"으로 바꾸면 보인다', (tester) async {
+      final server = _Server();
+      final old = DateTime.now()
+          .subtract(const Duration(days: 800))
+          .millisecondsSinceEpoch;
+      _serveFavorites(server, {
+        null: [
+          _messageItem(id: 'm1', at: 9000),
+          {..._messageItem(id: 'm2'), 'favoritedAt': old},
+        ],
+      });
+      final session = _session(server);
+      await _openScreen(tester, session);
+      expect(loaded(tester), '"1"개가 로딩되었습니다.');
+      expect(find.byKey(const ValueKey('favorite-message:m2')), findsNothing);
+
+      await tester.tap(find.text('1년 (기본)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('period-all')));
+      await tester.pumpAndSettle();
+      expect(loaded(tester), '"2"개가 로딩되었습니다.');
+      expect(find.byKey(const ValueKey('favorite-message:m2')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('대화방 필터 — 그 방의 항목만 남고 방이 없는 멤버 항목은 그대로 둔다', (tester) async {
+      final server = _Server();
+      _serveFavorites(server, {
+        null: [
+          _messageItem(id: 'm1', at: 9000),
+          {
+            ..._messageItem(id: 'm2', at: 8000),
+            'roomId': 'r2',
+            'roomName': '영업방',
+          },
+          _memberItem(),
+        ],
+      });
+      final session = _session(server);
+      await _openScreen(tester, session);
+      expect(loaded(tester), '"3"개가 로딩되었습니다.');
+
+      await tester.tap(find.text('참여 대화방'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('영업방').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('favorite-message:m1')), findsNothing);
+      expect(find.byKey(const ValueKey('favorite-message:m2')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('favorite-member:t1:u2')),
+        findsOneWidget,
+      );
+      expect(loaded(tester), '"2"개가 로딩되었습니다.');
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('멤버(보낸 사람) 필터 — 메시지는 보낸 사람으로, 멤버 항목은 그 사람으로 거른다', (
+      tester,
+    ) async {
+      final server = _Server();
+      _serveFavorites(server, {
+        null: [
+          _messageItem(id: 'm1', at: 9000), // 김철수가 보냄
+          {
+            ..._messageItem(id: 'm2', at: 8000),
+            'message': {
+              ..._message(id: 'm2'),
+              'senderId': 'me',
+              'senderName': '나',
+            },
+          },
+          _memberItem(), // 김철수
+          _roomItem(), // 보낸 사람이 없는 항목은 영향받지 않는다
+        ],
+      });
+      final session = _session(server);
+      await _openScreen(tester, session);
+      expect(loaded(tester), '"4"개가 로딩되었습니다.');
+
+      await tester.tap(find.text('모든 멤버'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(of: find.byType(ListTile), matching: find.text('김철수')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('favorite-message:m1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('favorite-message:m2')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('favorite-member:t1:u2')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('favorite-room:r1')), findsOneWidget);
+      expect(loaded(tester), '"3"개가 로딩되었습니다.');
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('항목에 그 정보가 없는 종류에서는 필터 단추가 막힌다(멤버 탭은 대화방, 대화방 탭은 멤버·기간)', (
+      tester,
+    ) async {
+      final server = _Server();
+      _serveFavorites(server, {
+        null: all,
+        'member': [_memberItem()],
+        'room': [_roomItem()],
+      });
+      final session = _session(server);
+      await _openScreen(tester, session);
+
+      Future<void> expectBlocked(String label, bool blocked) async {
+        final ignoring = tester
+            .widgetList<IgnorePointer>(
+              find.ancestor(
+                of: find.text(label),
+                matching: find.byType(IgnorePointer),
+              ),
+            )
+            .any((w) => w.ignoring);
+        expect(ignoring, blocked, reason: label);
+      }
+
+      await expectBlocked('참여 대화방', false);
+      await expectBlocked('모든 멤버', false);
+      await expectBlocked('1년 (기본)', false);
+
+      await _tapTab(tester, 'member');
+      await expectBlocked('참여 대화방', true);
+      await expectBlocked('모든 멤버', false);
+      await expectBlocked('1년 (기본)', false);
+
+      await _tapTab(tester, 'room');
+      await expectBlocked('참여 대화방', false);
+      await expectBlocked('모든 멤버', true);
+      await expectBlocked('1년 (기본)', true);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('필터로 다 걸러져도 서버에 더 있으면 "더 보기"가 남는다', (tester) async {
+      final server = _Server();
+      server.on('GET', '/api/favorites', (r) {
+        return _json({
+          'items': [_messageItem(id: 'm1', at: 9000)],
+          'hasMore': true,
+        });
+      });
+      final session = _session(server);
+      await _openScreen(tester, session);
+      await typeQuery(tester, '없는말');
+      expect(loaded(tester), '"0"개가 로딩되었습니다.');
+      expect(find.byKey(const ValueKey('favorites-more')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    test('FavoriteFilter — 대화방·보낸 사람·기간·검색을 항목이 가진 정보로만 건다', () {
+      final now = DateTime(2026, 10, 3);
+      final recent = _item({
+        ..._messageItem(),
+        'favoritedAt': now
+            .subtract(const Duration(days: 10))
+            .millisecondsSinceEpoch,
+      });
+      final old = _item({
+        ..._messageItem(id: 'm2'),
+        'favoritedAt': now
+            .subtract(const Duration(days: 400))
+            .millisecondsSinceEpoch,
+      });
+      final room = _item(_roomItem());
+      final member = _item(_memberItem());
+
+      // 기간: 기본 1년이면 400일 전 것이 빠지고, 담은 시각이 없는 대화방은 영향받지 않는다.
+      const year = PanelPeriod();
+      expect(FavoriteFilter(period: year, now: now).matches(recent), isTrue);
+      expect(FavoriteFilter(period: year, now: now).matches(old), isFalse);
+      expect(FavoriteFilter(period: year, now: now).matches(room), isTrue);
+      expect(
+        FavoriteFilter(
+          period: const PanelPeriod(PeriodPreset.all),
+          now: now,
+        ).matches(old),
+        isTrue,
+      );
+      expect(
+        FavoriteFilter(
+          period: const PanelPeriod(PeriodPreset.week),
+          now: now,
+        ).matches(recent),
+        isFalse,
+      );
+
+      // 대화방: 방이 없는 멤버 항목은 영향받지 않는다.
+      expect(const FavoriteFilter(roomId: 'r2').matches(recent), isFalse);
+      expect(const FavoriteFilter(roomId: 'r1').matches(recent), isTrue);
+      expect(const FavoriteFilter(roomId: 'r2').matches(member), isTrue);
+
+      // 보낸 사람: 메시지는 보낸 사람, 멤버는 그 사람, 대화방은 영향받지 않는다.
+      expect(const FavoriteFilter(senderId: 'u2').matches(recent), isTrue);
+      expect(const FavoriteFilter(senderId: 'me').matches(recent), isFalse);
+      expect(const FavoriteFilter(senderId: 'u2').matches(member), isTrue);
+      expect(const FavoriteFilter(senderId: 'me').matches(member), isFalse);
+      expect(const FavoriteFilter(senderId: 'me').matches(room), isTrue);
+
+      // 검색: 대소문자 무시, 방 이름까지.
+      expect(const FavoriteFilter(query: '회의').matches(recent), isTrue);
+      expect(const FavoriteFilter(query: '공지방').matches(recent), isTrue);
+      expect(const FavoriteFilter(query: '영업').matches(recent), isFalse);
+    });
+  });
+
   group('메뉴와 즐겨찾기 켜기', () {
-    testWidgets('메뉴의 리스트에 "즐겨찾기" 타일이 있고 누르면 즐겨찾기 화면이 열린다', (tester) async {
+    testWidgets('메뉴의 리스트에 "즐겨찾기" 타일이 있고 누르면 즐겨찾기 패널이 열린다(홈 화면 밖에서는 전체 화면)', (
+      tester,
+    ) async {
       final server = _Server();
       _serveFavorites(server, {
         null: [_messageItem()],
@@ -858,22 +1280,23 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            appBar: AppBar(
-              actions: [
-                AppMenuButton(
-                  session: session,
-                  onOpenFiles: () {},
-                  onOpenLinks: () {},
-                ),
-              ],
-            ),
+            appBar: AppBar(actions: [AppMenuButton(session: session)]),
           ),
         ),
       );
       await tester.tap(find.byTooltip('메뉴'));
       await tester.pumpAndSettle();
       // 기존 타일·투표 만들기 진입은 그대로다.
-      for (final label in ['메시지 예약', '투표', '파일', '링크', '문의함', '즐겨찾기']) {
+      for (final label in [
+        '메시지 예약',
+        '투표',
+        '파일',
+        '즐겨찾기',
+        '링크',
+        '캘린더',
+        '프로젝트',
+        '문의함',
+      ]) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
       await tester.tap(find.byKey(const ValueKey('menu-favorites')));

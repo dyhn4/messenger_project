@@ -17,6 +17,7 @@ import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'deleted_file_card.dart';
 import 'file_actions.dart';
 import 'hover_toolbar.dart';
 
@@ -141,9 +142,11 @@ List<ViewerImage> roomViewerImages(Session session, List<Message> messages) {
   return [
     for (final m in images)
       for (final (i, a) in imageAttachmentsOf(m).indexed)
-        if (a.isImage)
+        // 파일 삭제로 지워진 사진은 넘겨 볼 목록에서 뺀다(번호 i는 말풍선의 칸 번호 그대로 둔다).
+        if (a.isImage && !a.deleted)
           ViewerImage(
             id: viewerImageId(m, i),
+            attachmentId: a.id,
             message: m,
             url: session.resolveUrl(a.fileUrl),
             fileName: a.fileName ?? 'image.png',
@@ -302,24 +305,35 @@ class ChatFileAttachments extends StatelessWidget {
       children: [
         for (var i = 0; i < attachments.length; i++) ...[
           if (i > 0) const SizedBox(height: 6),
-          DownloadableFile(
-            session: session,
-            url: session.resolveUrl(attachments[i].fileUrl),
-            fileName: attachments[i].fileName ?? '파일',
-            message: message,
-            attachmentKey: attachmentKey,
-            attachmentNonce: attachmentNonce,
-          ),
+          if (attachments[i].deleted)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: DeletedFileCard(
+                fileName: attachments[i].fileName,
+                isImage: attachments[i].isImage,
+              ),
+            )
+          else
+            DownloadableFile(
+              session: session,
+              url: session.resolveUrl(attachments[i].fileUrl),
+              fileName: attachments[i].fileName ?? '파일',
+              message: message,
+              attachmentId: attachments[i].id,
+              attachmentKey: attachmentKey,
+              attachmentNonce: attachmentNonce,
+            ),
         ],
-        if (attachments.length > 1)
+        if (attachments.where((a) => !a.deleted).length > 1)
           AllDownloadBar(
             session: session,
             items: [
               for (final a in attachments)
-                (
-                  url: session.resolveUrl(a.fileUrl),
-                  fileName: a.fileName ?? '파일',
-                ),
+                if (!a.deleted)
+                  (
+                    url: session.resolveUrl(a.fileUrl),
+                    fileName: a.fileName ?? '파일',
+                  ),
             ],
             attachmentKey: attachmentKey,
             attachmentNonce: attachmentNonce,
@@ -618,21 +632,23 @@ class ChatImageAttachments extends StatelessWidget {
   /// 이 말풍선의 사진만 넘겨볼 때의 목록 — 비밀 대화면 그 장을 볼 때 원본을 받아 복호화한다.
   List<ViewerImage> _viewerImages() => [
     for (final (i, a) in attachments.indexed)
-      ViewerImage(
-        id: message == null ? null : viewerImageId(message!, i),
-        message: message,
-        url: session.resolveUrl(a.fileUrl),
-        fileName: a.fileName ?? 'image.png',
-        fileSize: a.fileSize,
-        loadBytes: attachmentKey == null
-            ? null
-            : () => fetchAttachmentBytes(
-                session: session,
-                url: session.resolveUrl(a.fileUrl),
-                attachmentKey: attachmentKey,
-                attachmentNonce: attachmentNonce,
-              ),
-      ),
+      if (!a.deleted)
+        ViewerImage(
+          id: message == null ? null : viewerImageId(message!, i),
+          attachmentId: a.id,
+          message: message,
+          url: session.resolveUrl(a.fileUrl),
+          fileName: a.fileName ?? 'image.png',
+          fileSize: a.fileSize,
+          loadBytes: attachmentKey == null
+              ? null
+              : () => fetchAttachmentBytes(
+                  session: session,
+                  url: session.resolveUrl(a.fileUrl),
+                  attachmentKey: attachmentKey,
+                  attachmentNonce: attachmentNonce,
+                ),
+        ),
   ];
 
   void _open(BuildContext context, int index) {
@@ -668,9 +684,11 @@ class ChatImageAttachments extends StatelessWidget {
         );
       }
     }
+    // 지워진 사진은 목록에서 빠지므로 눌린 칸(index)이 목록에서 몇 번째인지 다시 센다.
+    final live = attachments.take(index).where((a) => !a.deleted).length;
     return ImageViewerScreen(
       images: _viewerImages(),
-      initialIndex: index,
+      initialIndex: live,
       session: session,
       message: message,
       room: room,
@@ -687,6 +705,15 @@ class ChatImageAttachments extends StatelessWidget {
             ? math.min(kChatImageMaxWidth, constraints.maxWidth)
             : kChatImageMaxWidth;
         if (attachments.length == 1) {
+          if (attachments.first.deleted) {
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: DeletedFileCard(
+                fileName: attachments.first.fileName,
+                isImage: true,
+              ),
+            );
+          }
           return _ChatImageTile(
             session: session,
             message: message,
@@ -724,29 +751,40 @@ class ChatImageAttachments extends StatelessWidget {
                 runSpacing: gap,
                 children: [
                   for (var i = 0; i < attachments.length; i++)
-                    _ChatImageTile(
-                      session: session,
-                      message: message,
-                      attachment: attachments[i],
-                      width: cell,
-                      fixedHeight: tileHeight,
-                      onTap: () => _open(context, i),
-                    ),
+                    if (attachments[i].deleted)
+                      // 지워진 사진 칸 — 자리는 그대로 두고 흐린 카드로 바꾼다.
+                      DeletedFileCard(
+                        compact: true,
+                        isImage: true,
+                        width: cell,
+                        height: tileHeight,
+                      )
+                    else
+                      _ChatImageTile(
+                        session: session,
+                        message: message,
+                        attachment: attachments[i],
+                        width: cell,
+                        fixedHeight: tileHeight,
+                        onTap: () => _open(context, i),
+                      ),
                 ],
               ),
-              // 여러 장이면 말풍선 아래를 한 줄 늘려 오른쪽 끝에 "전체 다운로드"를 둔다.
-              AllDownloadBar(
-                session: session,
-                items: [
-                  for (final a in attachments)
-                    (
-                      url: session.resolveUrl(a.fileUrl),
-                      fileName: a.fileName ?? 'image.png',
-                    ),
-                ],
-                attachmentKey: attachmentKey,
-                attachmentNonce: attachmentNonce,
-              ),
+              // 여러 장이면 말풍선 아래를 한 줄 늘려 오른쪽 끝에 "전체 다운로드"를 둔다(지워진 사진은 뺀다).
+              if (attachments.any((a) => !a.deleted))
+                AllDownloadBar(
+                  session: session,
+                  items: [
+                    for (final a in attachments)
+                      if (!a.deleted)
+                        (
+                          url: session.resolveUrl(a.fileUrl),
+                          fileName: a.fileName ?? 'image.png',
+                        ),
+                  ],
+                  attachmentKey: attachmentKey,
+                  attachmentNonce: attachmentNonce,
+                ),
             ],
           ),
         );
@@ -862,6 +900,7 @@ class _ChatImageTileState extends State<_ChatImageTile> {
       message: message,
       url: widget.session.resolveUrl(widget.attachment.fileUrl),
       fileName: widget.attachment.fileName ?? 'image.png',
+      attachmentId: widget.attachment.id,
       attachmentKey: widget.attachmentKey,
       attachmentNonce: widget.attachmentNonce,
     );
@@ -1005,7 +1044,7 @@ class _ChatImageTileState extends State<_ChatImageTile> {
 }
 
 /// 첨부(이미지/파일) "더보기" 메뉴의 항목들 — 파일 전달 · 다운로드 · 즐겨찾기 (+이미지는
-/// "원본 파일 보기"까지). 파일은 누르면 어차피 원본을 받아서 여는 동작이라 그 항목이 없다.
+/// "원본 파일 보기"까지, 올린 본인·팀 관리자에게는 "삭제"까지). 파일은 누르면 어차피 원본을 받아서 여는 동작이라 그 항목이 없다.
 /// 별 표시를 따로 들고 있는 화면(파일 패널)은 [favorited]·[onToggleFavorite]를 줘서 메뉴의
 /// 즐겨찾기도 그 별과 같이 바뀌게 한다(안 주면 서버에만 토글하고 알약으로 알린다).
 List<Widget> fileActionMenuItems(
@@ -1036,6 +1075,16 @@ List<Widget> fileActionMenuItems(
       label: '원본 파일 보기',
       onPressed: () => actions.openOriginal(context),
     ),
+  // 올린 본인과 팀 관리자에게만 — 파일만 지우고 메시지와 댓글은 남는다.
+  if (actions.canDelete) ...[
+    hoverMenuDivider(),
+    hoverMenuItem(
+      icon: Icons.delete_outline,
+      label: '삭제',
+      color: Theme.of(context).colorScheme.error,
+      onPressed: () => actions.deleteFile(context),
+    ),
+  ],
 ];
 
 /// 채팅/댓글에 올라온 파일 하나. 누르면 항상 먼저 전체를 다 받은 뒤에 PDF/텍스트는 인앱
@@ -1050,6 +1099,12 @@ class DownloadableFile extends StatefulWidget {
   /// 같은 규칙으로, 안 주면 다운로드 버튼만 보인다(파일 모아보기 미리보기 등).
   final Message? message;
 
+  /// 파일 삭제가 가리킬 첨부 id — 안 주면 메시지 id(첨부 하나짜리 옛 메시지).
+  final String? attachmentId;
+
+  /// 파일을 지운 뒤(파일 패널의 미리보기 화면이 목록을 다시 받는다).
+  final VoidCallback? onDeleted;
+
   /// DownloadableImage와 동일한 의미 — 있으면 서버 URL은 암호화된 바이트라, 복호화해야
   /// 실제 내용을 볼 수 있다.
   final String? attachmentKey;
@@ -1060,6 +1115,8 @@ class DownloadableFile extends StatefulWidget {
     required this.url,
     required this.fileName,
     this.message,
+    this.attachmentId,
+    this.onDeleted,
     this.attachmentKey,
     this.attachmentNonce,
   });
@@ -1215,6 +1272,8 @@ class _DownloadableFileState extends State<DownloadableFile> {
                             message: widget.message!,
                             url: widget.url,
                             fileName: widget.fileName,
+                            attachmentId: widget.attachmentId,
+                            onDeleted: widget.onDeleted,
                             attachmentKey: widget.attachmentKey,
                             attachmentNonce: widget.attachmentNonce,
                           ),

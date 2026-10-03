@@ -51,6 +51,9 @@ export async function applyMediaEdit(messageId, { fields, plan }) {
         set.fileSize = null;
         set.mimeType = null;
         set.thumbnailUrl = null;
+        // 파일 삭제로 자리만 남은(소프트 삭제) 첨부 행도 정리한다 — 글 메시지가 됐으니 "삭제된 파일" 카드는 더 필요 없다.
+        if (plan.hasRows) await tx.delete(messageAttachments).where(eq(messageAttachments.messageId, messageId));
+        set.fileDeletedAt = null;
       } else {
         // 사진+파일이 섞인 메시지에서 파일을 다 지웠으면 사진 메시지로(보낼 때와 같은 규칙 — attachmentEditPlan.js).
         if (plan.nextType) set.type = plan.nextType;

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
+import '../models/album.dart';
 import '../models/announcement.dart';
 import '../models/app_notification.dart';
 import '../models/inquiry.dart';
@@ -437,6 +438,14 @@ class ChatSocket {
       StreamController<PollFavoriteEvent>.broadcast();
   final _favoriteChangedController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _bookmarkChangedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _todoChangedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _todoReminderController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _albumChangedController =
+      StreamController<AlbumChangedEvent>.broadcast();
   final _messageDeletedController =
       StreamController<MessageDeletedEvent>.broadcast();
   final _commentEditedController = StreamController<Comment>.broadcast();
@@ -579,6 +588,24 @@ class ChatSocket {
   /// 내 user 룸으로만 온다. 받는 쪽은 services/favorites_controller.dart.
   Stream<Map<String, dynamic>> get favoriteChanged =>
       _favoriteChangedController.stream;
+
+  /// 북마크가 만들어지거나 바뀌거나 지워지거나 순서가 바뀌었다(bookmark:changed — `{teamId, kind}`). 팀 북마크는 그 팀
+  /// 멤버 모두에게, 개인 북마크는 본인에게만 온다. 받는 쪽은 services/bookmark_controller.dart.
+  Stream<Map<String, dynamic>> get bookmarkChanged =>
+      _bookmarkChangedController.stream;
+
+  /// 할 일이 만들어지거나 바뀌거나 지워졌다(todo:changed — `{teamId, roomId, todoId, kind, actorId?, title?,
+  /// addedAssigneeIds?}`) — 그 방 멤버에게 온다. 받는 쪽은 services/todo_controller.dart.
+  Stream<Map<String, dynamic>> get todoChanged => _todoChangedController.stream;
+
+  /// 할 일 알림 시각이 됐다(todo:reminder — `{teamId, roomId, todoId, title, dueDate?, remindAt}`) — 담당자(없으면 만든
+  /// 사람)에게만 온다. 앱이 켜져 있으면 토스트로 보여 준다(session.dart).
+  Stream<Map<String, dynamic>> get todoReminder =>
+      _todoReminderController.stream;
+
+  /// 앨범이 만들어지거나 바뀌거나 지워졌거나 항목이 늘고 줄었다(album:changed) — 그 방 멤버에게 온다.
+  /// 받는 쪽은 services/album_controller.dart.
+  Stream<AlbumChangedEvent> get albumChanged => _albumChangedController.stream;
 
   /// 누군가 메시지를 삭제했다는 브로드캐스트(message:deleted).
   Stream<MessageDeletedEvent> get messageDeleted =>
@@ -851,6 +878,20 @@ class ChatSocket {
     });
     socket.on('favorite:changed', (data) {
       _favoriteChangedController.add(Map<String, dynamic>.from(data as Map));
+    });
+    socket.on('bookmark:changed', (data) {
+      _bookmarkChangedController.add(Map<String, dynamic>.from(data as Map));
+    });
+    socket.on('todo:changed', (data) {
+      _todoChangedController.add(Map<String, dynamic>.from(data as Map));
+    });
+    socket.on('todo:reminder', (data) {
+      _todoReminderController.add(Map<String, dynamic>.from(data as Map));
+    });
+    socket.on('album:changed', (data) {
+      _albumChangedController.add(
+        AlbumChangedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
     });
     socket.on('message:deleted', (data) {
       _messageDeletedController.add(

@@ -85,6 +85,15 @@ abstract class CalendarApi {
     RecurrenceScope? scope,
     int? occurrenceStart,
   });
+
+  /// 14. 일정 제목 검색(부분 일치, 대소문자 무시) — 시작 시각 최신순. 이어 받으려면 이전 쪽의
+  /// [CalendarSearchPage.nextBefore]를 [before]로 준다.
+  Future<CalendarSearchPage> searchEvents(
+    String teamId,
+    String q, {
+    String? before,
+    int limit = 50,
+  });
 }
 
 /// [ApiClient.requestJson]으로 서버를 부르는 실제 구현.
@@ -309,6 +318,33 @@ class RemoteCalendarApi implements CalendarApi {
     await _api.requestJson(
       'DELETE',
       '/api/events/$eventId${query.isEmpty ? '' : '?$query'}',
+    );
+  }
+
+  @override
+  Future<CalendarSearchPage> searchEvents(
+    String teamId,
+    String q, {
+    String? before,
+    int limit = 50,
+  }) async {
+    final params = [
+      'q=${Uri.encodeQueryComponent(q)}',
+      'limit=$limit',
+      if (before != null) 'before=${Uri.encodeQueryComponent(before)}',
+    ].join('&');
+    final body = _map(
+      await _api.requestJson(
+        'GET',
+        '/api/teams/$teamId/calendar/search?$params',
+      ),
+    );
+    return CalendarSearchPage(
+      items: [
+        for (final j in _maps(body['items'] ?? const []))
+          CalendarSearchItem.fromJson(j),
+      ],
+      nextBefore: body['nextBefore'] as String?,
     );
   }
 }

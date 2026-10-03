@@ -464,28 +464,121 @@ class EventOccurrence {
     return !d.isBefore(firstDay) && !d.isAfter(lastDay);
   }
 
-  EventOccurrence copyWith({String? color}) => EventOccurrence(
-    key: key,
+  /// 색을 바꾸거나 [start]/[end]로 시각을 옮긴 복사본 — 옮기면 [key]도 새 시작 시각에 맞춰 바뀐다(서버 키와 같은 모양).
+  EventOccurrence copyWith({String? color, int? start, int? end}) =>
+      EventOccurrence(
+        key: start == null || eventId == null ? key : '$eventId:$start',
+        eventId: eventId,
+        calendarId: calendarId,
+        source: source,
+        title: title,
+        description: description,
+        location: location,
+        start: start ?? this.start,
+        end: end ?? this.end,
+        allDay: allDay,
+        visibility: visibility,
+        restricted: restricted,
+        recurring: recurring,
+        recurrence: recurrence,
+        creatorId: creatorId,
+        creatorName: creatorName,
+        attendees: attendees,
+        color: color ?? this.color,
+        canEdit: canEdit,
+        canDelete: canDelete,
+      );
+}
+
+/// 일정 제목 검색 결과 한 줄(GET /teams/:teamId/calendar/search) — 일정(반복이면 시리즈) 하나가 한 줄이고,
+/// [start]/[end]는 그 일정의 첫 회차다(종일이면 UTC 날짜 표현 그대로).
+class CalendarSearchItem {
+  final String eventId;
+  final String calendarId;
+  final String calendarName;
+  final String color;
+  final String title;
+  final int start;
+  final int end;
+  final bool allDay;
+  final bool recurring;
+  final Recurrence? recurrence;
+  final List<Attendee> attendees;
+  final String? creatorName;
+  final bool canEdit;
+
+  const CalendarSearchItem({
+    required this.eventId,
+    required this.calendarId,
+    this.calendarName = '',
+    this.color = '#4285F4',
+    required this.title,
+    required this.start,
+    required this.end,
+    this.allDay = false,
+    this.recurring = false,
+    this.recurrence,
+    this.attendees = const [],
+    this.creatorName,
+    this.canEdit = false,
+  });
+
+  factory CalendarSearchItem.fromJson(Map<String, dynamic> json) {
+    final recurrence = json['recurrence'];
+    final start = (json['start'] as num).toInt();
+    final allDay = json['allDay'] as bool? ?? false;
+    return CalendarSearchItem(
+      eventId: json['eventId'] as String,
+      calendarId: (json['calendarId'] as String?) ?? '',
+      calendarName: (json['calendarName'] as String?) ?? '',
+      color: (json['color'] as String?) ?? '#4285F4',
+      title: (json['title'] as String?) ?? '',
+      start: start,
+      end: (json['end'] as num).toInt(),
+      allDay: allDay,
+      recurring: json['recurring'] as bool? ?? recurrence is Map,
+      recurrence: recurrence is Map
+          ? Recurrence.fromJson(
+              Map<String, dynamic>.from(recurrence),
+              weekdayShift: allDay ? 0 : -kstWeekdayShift(start),
+            )
+          : null,
+      attendees: [
+        for (final a in (json['attendees'] as List?) ?? const [])
+          Attendee.fromJson(Map<String, dynamic>.from(a as Map)),
+      ],
+      creatorName: json['creatorName'] as String?,
+      canEdit: json['canEdit'] as bool? ?? false,
+    );
+  }
+
+  /// 이 일정이 등록된 첫날(기기 시간대 날짜, 종일은 UTC y/m/d) — "이동" 버튼이 캘린더를 옮겨 갈 날짜.
+  DateTime get firstDay => toOccurrence().firstDay;
+
+  /// 기간 문구·상세 열기에 쓰는 첫 회차 모양.
+  EventOccurrence toOccurrence() => EventOccurrence(
+    key: '$eventId:$start',
     eventId: eventId,
     calendarId: calendarId,
-    source: source,
     title: title,
-    description: description,
-    location: location,
     start: start,
     end: end,
     allDay: allDay,
-    visibility: visibility,
-    restricted: restricted,
     recurring: recurring,
     recurrence: recurrence,
-    creatorId: creatorId,
     creatorName: creatorName,
     attendees: attendees,
-    color: color ?? this.color,
+    color: color,
     canEdit: canEdit,
-    canDelete: canDelete,
+    canDelete: canEdit,
   );
+}
+
+/// 검색 결과 한 쪽([nextBefore]가 null이 아니면 이어서 더 있다).
+class CalendarSearchPage {
+  final List<CalendarSearchItem> items;
+  final String? nextBefore;
+  const CalendarSearchPage({required this.items, this.nextBefore});
 }
 
 /// 일정 만들기 요청 본문(POST /calendars/:id/events). 수정(PATCH)은 바꿀 필드만 담은 Map을 따로 보낸다.

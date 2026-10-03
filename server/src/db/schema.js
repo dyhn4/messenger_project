@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 스키마의 원본(source of truth). `npm run db:generate`가 이 파일을 이전 스냅샷과 비교해서
@@ -519,10 +519,15 @@ export const messages = pgTable(
     // 보드 뷰에서 "게시글 고정"한 시각 — 토픽을 관리할 수 있는 사람만 고정/해제한다(messages.js).
     // 고정 목록은 이 시각이 아니라 게시글 작성 시각 최신순으로 보여준다.
     pinnedAt: timestamp('pinned_at', { withTimezone: true }),
+    // 옛 방식(첨부를 이 행의 fileUrl 한 칸에만 담던 메시지)의 파일 소프트 삭제 시각. 새 방식 첨부는
+    // message_attachments.deletedAt을 쓴다. 파일만 지우는 것이라 메시지(와 그 댓글)는 그대로 남는다.
+    fileDeletedAt: timestamp('file_deleted_at', { withTimezone: true }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
     index('messages_sender_id_idx').on(t.senderId),
+    // "내가 쓴 글 모아보기" — 보낸 사람별 최신순/과거순 스캔(방·기간 필터는 이 위에서 걸러낸다).
+    index('messages_sender_created_idx').on(t.senderId, t.createdAt.desc()),
     index('messages_expires_at_idx').on(t.expiresAt),
   ],
 );
@@ -548,6 +553,10 @@ export const messageAttachments = pgTable(
     mimeType: text('mime_type'),
     thumbnailUrl: text('thumbnail_url'),
     position: integer('position').notNull().default(0),
+    // 파일 소프트 삭제 — 업로드한 본인 또는 팀 관리자가 지우면 행은 남기고 이 값만 찍는다(첨부에
+    // 달린 댓글이 계속 이 파일을 참조한다). 파일 패널·검색·즐겨찾기는 이 값이 null인 것만 보여준다.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: uuid('deleted_by').references(() => users.id, { onDelete: 'set null' }),
   },
   (t) => [index('message_attachments_message_id_idx').on(t.messageId, t.position)],
 );
@@ -1292,7 +1301,11 @@ export const messageComments = pgTable(
     editedAt: timestamp('edited_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
-  (t) => [index('message_comments_message_id_idx').on(t.messageId, t.createdAt)],
+  (t) => [
+    index('message_comments_message_id_idx').on(t.messageId, t.createdAt),
+    // "내가 쓴 글 모아보기" — 댓글 작성자별 최신순/과거순 스캔.
+    index('message_comments_sender_created_idx').on(t.senderId, t.createdAt.desc()),
+  ],
 );
 
 /**
@@ -1492,7 +1505,12 @@ export const polls = pgTable(
     closedBy: uuid('closed_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('polls_room_id_idx').on(t.roomId)],
+  (t) => [
+    index('polls_room_id_idx').on(t.roomId),
+    // 투표 목록 필터 — 대화방별 최신순, 작성자별 최신순.
+    index('polls_room_created_idx').on(t.roomId, t.createdAt.desc()),
+    index('polls_creator_created_idx').on(t.creatorId, t.createdAt.desc()),
+  ],
 );
 
 export const pollOptions = pgTable(
@@ -1522,7 +1540,12 @@ export const pollVotes = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.optionId, t.userId] }), index('poll_votes_poll_id_idx').on(t.pollId)],
+  (t) => [
+    primaryKey({ columns: [t.optionId, t.userId] }),
+    index('poll_votes_poll_id_idx').on(t.pollId),
+    // 투표 목록의 "참여 여부" 필터 — 내가 투표한 투표를 userId로 바로 찾는다.
+    index('poll_votes_user_poll_idx').on(t.userId, t.pollId),
+  ],
 );
 
 /** 사람마다 따로 "즐겨찾기"해 두는 투표. */
@@ -1716,4 +1739,175 @@ export const memberFavorites = pgTable(
     primaryKey({ columns: [t.userId, t.teamId, t.favoriteUserId] }),
     index('member_favorites_user_team_idx').on(t.userId, t.teamId, t.createdAt),
   ],
+);
+
+// ── 할 일(To-Do) ────────────────────────────────────────────────────────
+// 대화방에 연결된 가벼운 할 일 — 프로젝트 업무(tasks)와는 별개다. 한 번 만들면 다른 대화방으로 옮길 수 없다
+// (roomId는 만든 뒤 고정). 진척률(progress 0~100)로 상태를 가른다: 0 = 대기, 1~99 = 진행, 100 = 완료
+// (completedAt은 100이 된 시각 — 다시 100 미만으로 내리면 null). 생성자는 담당자 관리·삭제까지 전부,
+// 담당자는 제목·설명·파일·기한·알림만 고친다(권한 판단은 API가 한다).
+export const todos = pgTable(
+  'todos',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    // 이 할 일이 속한 대화방 — 담당자는 이 방의 멤버 중에서만 고른다.
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    // 날짜 단위('YYYY-MM-DD') — 시간대와 무관하게 "그날"을 뜻한다. 시작일 없이 기한만 있어도 된다.
+    startDate: date('start_date', { mode: 'string' }),
+    dueDate: date('due_date', { mode: 'string' }),
+    progress: integer('progress').notNull().default(0),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    // "메시지·댓글에서 바로 할 일로 등록"한 경우의 출처 — 원본이 지워져도 할 일은 남는다(set null).
+    sourceMessageId: uuid('source_message_id').references(() => messages.id, { onDelete: 'set null' }),
+    sourceCommentId: uuid('source_comment_id').references(() => messageComments.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('todos_team_created_idx').on(t.teamId, t.createdAt),
+    index('todos_room_id_idx').on(t.roomId),
+    index('todos_creator_id_idx').on(t.creatorId),
+  ],
+);
+
+/** 할 일의 담당자(여러 명). 사용자가 탈퇴하면 담당 행도 같이 사라진다. */
+export const todoAssignees = pgTable(
+  'todo_assignees',
+  {
+    todoId: uuid('todo_id')
+      .notNull()
+      .references(() => todos.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // "나의 할 일" 조회용으로 userId 인덱스를 따로 둔다.
+  (t) => [primaryKey({ columns: [t.todoId, t.userId] }), index('todo_assignees_user_id_idx').on(t.userId)],
+);
+
+/** 할 일에 붙은 파일(최대 30개 — 개수 제한은 API가 건다). message_attachments와 같은 모양. */
+export const todoAttachments = pgTable(
+  'todo_attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    todoId: uuid('todo_id')
+      .notNull()
+      .references(() => todos.id, { onDelete: 'cascade' }),
+    // 'image' | 'file'
+    kind: text('kind').notNull(),
+    fileUrl: text('file_url').notNull(),
+    fileName: text('file_name'),
+    fileSize: integer('file_size'),
+    mimeType: text('mime_type'),
+    thumbnailUrl: text('thumbnail_url'),
+    position: integer('position').notNull().default(0),
+  },
+  (t) => [index('todo_attachments_todo_id_idx').on(t.todoId, t.position)],
+);
+
+/** 할 일 알림 일정 — 한 할 일에 여러 개. 보낼 때가 된 것은 sentAt이 null이고 remindAt이 지난 행이다. */
+export const todoReminders = pgTable(
+  'todo_reminders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    todoId: uuid('todo_id')
+      .notNull()
+      .references(() => todos.id, { onDelete: 'cascade' }),
+    remindAt: timestamp('remind_at', { withTimezone: true }).notNull(),
+    // 알림을 보낸 시각 — 한 번 보내면 찍어서 다시 보내지 않는다.
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('todo_reminders_due_idx').on(t.remindAt, t.sentAt),
+    index('todo_reminders_todo_id_idx').on(t.todoId),
+  ],
+);
+
+// ── 북마크 ──────────────────────────────────────────────────────────────
+/**
+ * 자주 쓰는 링크 모음. kind: 'team'(팀 전체가 보는 북마크 — 순서는 관리자만 바꾼다) | 'personal'
+ * (만든 사람 혼자 보는 북마크 — ownerId가 주인, 순서는 본인이 바꾼다). 만든 뒤 종류는 못 바꾼다.
+ * 수정·삭제는 생성자와 관리자만. 팀 북마크는 ownerId가 null이고, 만든 사람이 탈퇴해도 남는다(creatorId set null).
+ */
+export const bookmarks = pgTable(
+  'bookmarks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(), // 'team' | 'personal'
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'cascade' }),
+    creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    url: text('url').notNull(),
+    // 미리보기 이미지 — 직접 올린 사진이면 미서명 /uploads/ 경로, 아니면 외부 URL.
+    imageUrl: text('image_url'),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('bookmarks_team_kind_position_idx').on(t.teamId, t.kind, t.position),
+    index('bookmarks_owner_id_idx').on(t.ownerId),
+  ],
+);
+
+// ── 앨범 ────────────────────────────────────────────────────────────────
+// 대화방 안에서 이미지·GIF·영상을 주제별로 모으는 공간. 대화방 파일(message_attachments)과 자동 연동이
+// 없는 독립 저장소이고, 방 멤버가 보고 올린다. 파일은 한 번에 100개까지 올릴 수 있다(API가 제한).
+
+export const albums = pgTable(
+  'albums',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    creatorId: uuid('creator_id').references(() => users.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    // 대표 이미지로 쓸 album_items.id. 순환 FK를 피하려고 참조를 걸지 않았다 — 항목이 지워져 가리킬
+    // 곳이 없어지면 API가 첫 항목으로 대신 보여준다.
+    coverItemId: uuid('cover_item_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('albums_room_created_idx').on(t.roomId, t.createdAt.desc()), index('albums_team_id_idx').on(t.teamId)],
+);
+
+export const albumItems = pgTable(
+  'album_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    albumId: uuid('album_id')
+      .notNull()
+      .references(() => albums.id, { onDelete: 'cascade' }),
+    uploaderId: uuid('uploader_id').references(() => users.id, { onDelete: 'set null' }),
+    // 'image'(GIF 포함) | 'video'
+    kind: text('kind').notNull(),
+    fileUrl: text('file_url').notNull(),
+    fileName: text('file_name'),
+    fileSize: integer('file_size'),
+    mimeType: text('mime_type'),
+    thumbnailUrl: text('thumbnail_url'),
+    width: integer('width'),
+    height: integer('height'),
+    // 영상 길이(밀리초) — 이미지는 null.
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('album_items_album_created_idx').on(t.albumId, t.createdAt)],
 );

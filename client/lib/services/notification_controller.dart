@@ -20,9 +20,43 @@ extension NotificationTabLabel on NotificationTab {
   };
 }
 
-/// 서버에서 페이지 단위로 받는 알림 목록 하나(멘션 또는 보드, 안 읽은 것만 여부별로 따로).
+/// 멘션 탭의 드롭다운 필터 — `전체 멘션`(개인 멘션 + `@all`, 기본) / `@나를 멘션`(개인 멘션만) / `@all 멘션`.
+/// 전체 탭은 이 필터와 상관없이 멘션 두 종류를 늘 모두 보여 준다.
+enum MentionFilter { all, personal, everyone }
+
+extension MentionFilterInfo on MentionFilter {
+  /// 서버 `GET /api/notifications`의 kind(읽음 처리 `{kind}`도 같다).
+  String get wire => switch (this) {
+    MentionFilter.all => 'mention',
+    MentionFilter.personal => 'mention_personal',
+    MentionFilter.everyone => 'mention_all',
+  };
+
+  /// 드롭다운 메뉴 항목 글자.
+  String get menuLabel => switch (this) {
+    MentionFilter.all => '전체 멘션',
+    MentionFilter.personal => '@나를 멘션',
+    MentionFilter.everyone => '@all 멘션',
+  };
+
+  /// 탭 줄에 보이는 짧은 이름 — 고르지 않았으면(전체) 그냥 `멘션`.
+  String get tabLabel => switch (this) {
+    MentionFilter.all => '멘션',
+    MentionFilter.personal => '@나',
+    MentionFilter.everyone => '@all',
+  };
+
+  /// 이 종류의 알림인지([MentionFilter.all]은 멘션 두 종류 모두).
+  bool accepts(AppNotification n) => switch (this) {
+    MentionFilter.all => n.isMention,
+    MentionFilter.personal => n.kind == NotificationKind.mention,
+    MentionFilter.everyone => n.kind == NotificationKind.mentionAll,
+  };
+}
+
+/// 서버에서 페이지 단위로 받는 알림 목록 하나(멘션·개인 멘션·@all·보드, 안 읽은 것만 여부별로 따로).
 class _Feed {
-  final String kind; // 'mention' | 'board'
+  final String kind; // 'mention' | 'mention_personal' | 'mention_all' | 'board'
   final bool unreadOnly;
   _Feed(this.kind, this.unreadOnly);
 
@@ -107,24 +141,58 @@ class NotificationController extends ChangeNotifier {
 
   /// 소켓 `notification:sync` — 다른 기기에서 읽어서 개수가 바뀜. 목록의 읽음 표시도 맞춘다.
   void handleSync(NotificationCounts c) {
-    final mentionDropped = c.mention < counts.mention;
+    final personalDropped = c.mentionPersonal < counts.mentionPersonal;
+    final everyoneDropped = c.mentionAll < counts.mentionAll;
     final boardDropped = c.board < counts.board;
     counts = c;
     // 안 읽은 게 0이 됐으면 들고 있는 목록도 전부 읽은 것으로 — 개수만 줄고 목록은 그대로 안 읽음이면
-    // 어긋나 보인다.
-    if (c.mention == 0 && mentionDropped) _markLoadedRead('mention');
-    if (c.board == 0 && boardDropped) _markLoadedRead('board');
+    // 어긋나 보인다. 개인 멘션·@all은 종류별로 따로 본다.
+    if (c.mentionPersonal == 0 && personalDropped) {
+      _markLoadedRead((n) => n.kind == NotificationKind.mention);
+    }
+    if (c.mentionAll == 0 && everyoneDropped) {
+      _markLoadedRead((n) => n.kind == NotificationKind.mentionAll);
+    }
+    if (c.board == 0 && boardDropped) _markLoadedRead((n) => n.isBoard);
     onSync?.call(c);
     _notify();
   }
 
-  void _markLoadedRead(String kind) {
+  void _markLoadedRead(bool Function(AppNotification n) test) {
     final now = DateTime.now();
     for (final f in _feeds.values) {
-      if (f.kind != kind) continue;
       for (final n in f.items) {
-        n.readAt ??= now;
+        if (test(n)) n.readAt ??= now;
       }
+    }
+  }
+
+  /// 멘션 탭 필터 [f]를 골랐을 때 탭 배지에 보일 안 읽은 멘션 수.
+  int mentionUnread(MentionFilter f) => switch (f) {
+    MentionFilter.all => counts.mention,
+    MentionFilter.personal => counts.mentionPersonal,
+    MentionFilter.everyone => counts.mentionAll,
+  };
+
+  /// 알림 [n] 하나만큼 안 읽음 개수를 늘리거나(+1) 줄인다(-1) — 소켓이 개수를 같이 안 줬을 때와 읽음 처리 때.
+  void _shiftCounts(AppNotification n, int delta) {
+    int shifted(int v) => v + delta < 0 ? 0 : v + delta;
+    if (n.isMention) {
+      final isAll = n.kind == NotificationKind.mentionAll;
+      counts = NotificationCounts.of(
+        mentionPersonal: isAll
+            ? counts.mentionPersonal
+            : shifted(counts.mentionPersonal),
+        mentionAll: isAll ? shifted(counts.mentionAll) : counts.mentionAll,
+        board: counts.board,
+      );
+    } else if (n.isBoard) {
+      counts = NotificationCounts(
+        mention: counts.mention,
+        board: shifted(counts.board),
+        mentionPersonal: counts.mentionPersonal,
+        mentionAll: counts.mentionAll,
+      );
     }
   }
 
@@ -150,32 +218,64 @@ class NotificationController extends ChangeNotifier {
     for (final e in _unreadOnly.entries) e.key.name: e.value,
   });
 
+  /// 멘션 탭의 드롭다운 필터(전체 멘션 / @나를 멘션 / @all 멘션). 이 기기에 사용자별로 저장해서 다시 열어도
+  /// 유지된다. 종류마다 서버 목록([_feed])이 따로라 바꿔도 이미 받아 둔 목록은 그대로 두고, 새 종류의 첫 페이지만 받는다.
+  MentionFilter _mentionFilter = MentionFilter.all;
+
+  MentionFilter get mentionFilter => _mentionFilter;
+
+  Future<void> setMentionFilter(MentionFilter filter) async {
+    if (_mentionFilter == filter) return;
+    _mentionFilter = filter;
+    _notify();
+    unawaited(NotificationViewPrefs.saveMentionFilter(_userId(), filter.name));
+    await ensureLoaded(NotificationTab.mention);
+  }
+
   /// 저장해 둔 선택을 불러온다 — 로그인 직후 한 번(Session._enterApp). 받아 둔 목록은 필터가 다르면 다른
   /// 목록([_feed])이라 건드릴 필요 없고, 화면은 [notifyListeners]로 새로 그려진다.
   Future<void> loadViewPrefs() async {
     final epoch = _epoch;
     final saved = await NotificationViewPrefs.load(_userId());
+    final savedFilter = await NotificationViewPrefs.loadMentionFilter(
+      _userId(),
+    );
     if (epoch != _epoch || _disposed) return;
     for (final tab in NotificationTab.values) {
       if (tab == NotificationTab.unreadChats) continue;
       _unreadOnly[tab] = saved[tab.name] ?? false;
     }
+    _mentionFilter = MentionFilter.values.firstWhere(
+      (f) => f.name == savedFilter,
+      orElse: () => MentionFilter.all,
+    );
     _notify();
   }
 
   _Feed _feed(String kind, bool unreadOnly) =>
       _feeds.putIfAbsent('$kind|$unreadOnly', () => _Feed(kind, unreadOnly));
 
-  /// 이 탭이 보여 줄 서버 목록들(전체 탭은 멘션+보드 둘).
+  /// 이 탭이 보여 줄 서버 목록들 — 멘션 탭은 고른 [mentionFilter] 종류 하나, 보드 탭은 보드, 전체 탭은
+  /// 필터와 상관없이 멘션(두 종류 모두)+보드 둘.
   List<_Feed> _feedsFor(NotificationTab tab) {
     final uo = unreadOnly(tab);
     return switch (tab) {
-      NotificationTab.mention => [_feed('mention', uo)],
+      NotificationTab.mention => [_feed(_mentionFilter.wire, uo)],
       NotificationTab.board => [_feed('board', uo)],
       NotificationTab.all => [_feed('mention', uo), _feed('board', uo)],
       _ => const [],
     };
   }
+
+  /// 서버 목록 [feedKind]에 알림 [n]이 속하는지.
+  static bool _feedAccepts(String feedKind, AppNotification n) =>
+      switch (feedKind) {
+        'mention' => n.isMention,
+        'mention_personal' => n.kind == NotificationKind.mention,
+        'mention_all' => n.kind == NotificationKind.mentionAll,
+        'board' => n.isBoard,
+        _ => false,
+      };
 
   /// 멘션·보드·전체 탭의 서버 알림(최신순). 전체 탭은 두 목록을 시간순으로 섞는다.
   List<AppNotification> itemsFor(NotificationTab tab) {
@@ -307,27 +407,16 @@ class NotificationController extends ChangeNotifier {
   /// 소켓 `notification:new` — 받아 둔 목록 맨 앞에 끼우고 개수를 맞춘다.
   void handleNew(NotificationNewEvent event) {
     final n = event.notification;
-    final kind = n.isMention ? 'mention' : (n.isBoard ? 'board' : null);
-    if (kind != null) {
-      for (final f in _feeds.values) {
-        if (f.kind != kind || !f.loaded) continue;
-        if (f.items.any((x) => x.id == n.id)) continue;
-        f.items.insert(0, n);
-      }
+    for (final f in _feeds.values) {
+      if (!f.loaded || !_feedAccepts(f.kind, n)) continue;
+      if (f.items.any((x) => x.id == n.id)) continue;
+      f.items.insert(0, n);
     }
     final unread = event.unread;
     if (unread != null) {
       counts = unread;
-    } else if (kind == 'mention') {
-      counts = NotificationCounts(
-        mention: counts.mention + 1,
-        board: counts.board,
-      );
-    } else if (kind == 'board') {
-      counts = NotificationCounts(
-        mention: counts.mention,
-        board: counts.board + 1,
-      );
+    } else {
+      _shiftCounts(n, 1);
     }
     onNew?.call(n);
     _notify();
@@ -349,7 +438,7 @@ class NotificationController extends ChangeNotifier {
       }
     }
     if (!touched.any((x) => identical(x, n))) n.readAt = now;
-    _decrement(n);
+    _shiftCounts(n, -1);
     onRead?.call([n]);
     _notify();
     try {
@@ -359,47 +448,39 @@ class NotificationController extends ChangeNotifier {
     }
   }
 
-  void _decrement(AppNotification n) {
-    if (n.isMention) {
-      counts = NotificationCounts(
-        mention: counts.mention > 0 ? counts.mention - 1 : 0,
-        board: counts.board,
-      );
-    } else if (n.isBoard) {
-      counts = NotificationCounts(
-        mention: counts.mention,
-        board: counts.board > 0 ? counts.board - 1 : 0,
-      );
-    }
-  }
-
-  /// [tab]의 서버 알림을 전부 읽음으로(전체 탭은 멘션·보드 둘 다). 안 읽은 대화·공지 같은 방 쪽 일은 화면이
-  /// Session으로 따로 한다.
+  /// [tab]의 서버 알림을 전부 읽음으로(전체 탭은 멘션·보드 둘 다, 멘션 탭은 고른 [mentionFilter] 종류만). 안 읽은
+  /// 대화·공지 같은 방 쪽 일은 화면이 Session으로 따로 한다.
   Future<void> markAllRead(NotificationTab tab) async {
     final kinds = switch (tab) {
-      NotificationTab.mention => ['mention'],
+      NotificationTab.mention => [_mentionFilter.wire],
       NotificationTab.board => ['board'],
       NotificationTab.all => ['mention', 'board'],
       _ => const <String>[],
     };
     if (kinds.isEmpty) return;
+    bool targeted(AppNotification n) => kinds.any((k) => _feedAccepts(k, n));
     final now = DateTime.now();
     final read = <AppNotification>[];
     for (final f in _feeds.values) {
-      if (!kinds.contains(f.kind)) continue;
       for (final n in f.items) {
-        if (!n.isRead) {
+        if (!n.isRead && targeted(n)) {
           n.readAt = now;
           read.add(n);
         }
       }
     }
-    counts = NotificationCounts(
-      mention: kinds.contains('mention') ? 0 : counts.mention,
+    // 읽음 처리한 종류의 개수만 0으로.
+    final personal = kinds.any(
+      (k) => k == 'mention' || k == 'mention_personal',
+    );
+    final everyone = kinds.any((k) => k == 'mention' || k == 'mention_all');
+    counts = NotificationCounts.of(
+      mentionPersonal: personal ? 0 : counts.mentionPersonal,
+      mentionAll: everyone ? 0 : counts.mentionAll,
       board: kinds.contains('board') ? 0 : counts.board,
     );
     onRead?.call(read);
-    if (kinds.contains('mention')) onSync?.call(counts);
+    if (personal || everyone) onSync?.call(counts);
     _notify();
     final api = apiProvider();
     try {
@@ -535,6 +616,7 @@ class NotificationController extends ChangeNotifier {
     counts = const NotificationCounts();
     _feeds.clear();
     _unreadOnly.clear();
+    _mentionFilter = MentionFilter.all;
     project = const [];
     _projectLoaded = false;
     _projectLoading = false;

@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../models/favorite.dart';
@@ -11,57 +9,31 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/file_actions.dart';
+import '../widgets/home_shell_scope.dart';
+import '../widgets/panel_filters.dart';
 import '../widgets/poll_card.dart';
+import '../widgets/side_panel_header.dart';
 import '../widgets/user_avatar.dart';
-import 'chat_screen.dart';
-import 'home_screen.dart' show wideBreakpoint;
 import 'member_profile_dialog.dart';
 
-/// "즐겨찾기" — 내가 즐겨찾기한 메시지·파일·댓글·투표·대화방·멤버를 종류별 탭으로 한눈에 모아 보고, 항목을 누르면 그 자리로
-/// 이동한다(메시지·댓글·투표는 그 대화방의 그 메시지로, 파일은 열기, 멤버는 프로필, 대화방은 그 방). 넓은 창(PC)은 대화상자,
-/// 좁은 창(모바일)은 전체 화면으로 연다. 메뉴(격자 아이콘)의 "리스트 > 즐겨찾기"에서 들어온다.
-Future<void> showFavorites(
-  BuildContext context,
-  Session session, {
-  FavoriteKind? initialKind,
-}) {
-  final wide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
-  if (wide) {
-    final height = MediaQuery.sizeOf(context).height;
-    return showDialog<void>(
-      context: context,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          width: 620,
-          height: math.min(740, height - 48),
-          child: FavoritesScreen(
-            session: session,
-            asDialog: true,
-            initialKind: initialKind,
-          ),
-        ),
-      ),
-    );
-  }
-  return Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => FavoritesScreen(session: session, initialKind: initialKind),
-    ),
-  );
-}
-
+/// "즐겨찾기" 패널 — 내가 즐겨찾기한 메시지·파일·댓글·투표·대화방·멤버를 한곳에 모아 보고, 항목을 누르면 그 자리로
+/// 이동한다(메시지·댓글·투표는 그 대화방의 그 메시지로, 파일은 열기, 멤버는 프로필, 대화방은 그 방). 파일 패널과 같은
+/// 틀이다 — 위에서부터 검색칸, 필터 줄(참여 대화방 / 모든 멤버 / 기간), 종류 탭(전체 | 메시지 | 파일 | 댓글 | 투표 |
+/// 대화방 | 멤버 — 가로 스크롤)과 정렬, `"N"개가 로딩되었습니다.` 줄, 목록. PC는 오른쪽 패널, 모바일은 전체 화면으로
+/// 열린다(side_panels.dart의 'favorites'). 메뉴(격자 아이콘)의 "리스트 > 즐겨찾기"에서 들어온다.
+///
+/// 필터는 서버를 거치지 않고 **이미 불러온 목록**(favorites_controller.dart, 한 번에 30개씩 "더 보기")을 클라이언트에서
+/// 거른다. 항목이 가진 정보로만 걸 수 있다(자세한 규칙은 [FavoriteFilter]).
 class FavoritesScreen extends StatefulWidget {
   final Session session;
-  final bool asDialog;
+  final VoidCallback? onClose;
 
   /// 처음 열 탭 — null이면 '전체'.
   final FavoriteKind? initialKind;
   const FavoritesScreen({
     super.key,
     required this.session,
-    this.asDialog = false,
+    this.onClose,
     this.initialKind,
   });
 
@@ -69,10 +41,89 @@ class FavoritesScreen extends StatefulWidget {
   State<FavoritesScreen> createState() => _FavoritesScreenState();
 }
 
+/// 즐겨찾기 항목이 필터에 들어맞는지 — 화면 상태와 떼어 둔 순수 클래스라 테스트가 직접 쓴다. 항목이 가진 정보로만 건다:
+///  - 대화방: 메시지·파일·댓글·투표·대화방 항목이 방 id를 가진다. 멤버 항목은 방이 없어 영향받지 않는다.
+///  - 멤버(보낸 사람): 메시지·파일·댓글·투표는 보낸 사람, 멤버 항목은 즐겨찾기한 그 사람이다. 대화방 항목은 영향받지 않는다.
+///  - 기간: 즐겨찾기에 **담은 시각**(favoritedAt) 기준이다 — 서버가 주는 순서(최신순)와 같은 축이다. 담은 시각이 없는
+///    대화방 항목은 영향받지 않는다.
+///  - 검색: 본문·제목·파일명·보낸 사람·대화방 이름·투표 제목/항목·멤버 이름/조직에서 찾는다.
+@visibleForTesting
+class FavoriteFilter {
+  final String query;
+  final String? roomId;
+  final String? senderId;
+  final PanelPeriod period;
+
+  /// 테스트용 "지금".
+  final DateTime? now;
+  const FavoriteFilter({
+    this.query = '',
+    this.roomId,
+    this.senderId,
+    this.period = const PanelPeriod(),
+    this.now,
+  });
+
+  bool matches(FavoriteItem item) {
+    if (roomId != null && item.roomId != null && item.roomId != roomId) {
+      return false;
+    }
+    final who = senderOf(item);
+    if (senderId != null && who != null && who != senderId) return false;
+    final at = item.favoritedAt;
+    if (at != null) {
+      final since = period.since(now);
+      if (since != null && at.isBefore(since)) return false;
+      final until = period.until;
+      if (until != null && at.isAfter(until)) return false;
+    }
+    final q = query.trim().toLowerCase();
+    if (q.isNotEmpty && !searchText(item).contains(q)) return false;
+    return true;
+  }
+
+  /// 메시지·파일·댓글·투표는 보낸 사람, 멤버는 그 사람. 대화방은 null.
+  static String? senderOf(FavoriteItem item) => switch (item.kind) {
+    FavoriteKind.message ||
+    FavoriteKind.poll ||
+    FavoriteKind.file => item.message?.senderId,
+    FavoriteKind.comment => item.comment?.senderId,
+    FavoriteKind.member => item.user?.id,
+    FavoriteKind.room => null,
+  };
+
+  static String searchText(FavoriteItem item) {
+    final m = item.message;
+    final c = item.comment;
+    final parts = <String?>[
+      item.roomName,
+      item.fileName,
+      m?.text,
+      m?.title,
+      m?.senderName,
+      c?.text,
+      c?.senderName,
+      item.parentText,
+      item.parentSender,
+      m?.poll?.title,
+      ...?m?.poll?.options.map((o) => o.text),
+      item.user?.name,
+      item.user?.orgLine,
+    ];
+    return parts.whereType<String>().join(' ').toLowerCase();
+  }
+}
+
 class _FavoritesScreenState extends State<FavoritesScreen> {
   FavoritesController get _favorites => widget.session.favorites;
   final _scroll = ScrollController();
   late FavoriteKind? _kind = widget.initialKind;
+
+  String _query = '';
+  String? _roomId; // null = 참여 대화방(전체)
+  String? _senderId; // null = 모든 멤버
+  PanelPeriod _period = const PanelPeriod();
+  bool _newestFirst = true;
 
   @override
   void initState() {
@@ -111,32 +162,15 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   // ---- 이동 ----
 
-  /// [roomId] 방을 연다 — 넓은 창은 옆 패널의 방을 바꾸고(다른 팀이면 팀 전환까지 requestOpenRoom이 한다), 좁은 창은
-  /// 채팅 화면을 위에 얹는다. [messageId]가 있으면 그 메시지로 스크롤·강조한다.
+  /// [roomId] 방을 연다 — PC는 가운데 채팅이 바뀌고(다른 팀이면 팀 전환까지), 모바일은 채팅 화면을 위에 얹는다.
+  /// [messageId]가 있으면 그 메시지로 스크롤·강조한다.
   void _openRoom(String? roomId, {String? messageId}) {
     final room = roomId == null ? null : widget.session.roomById(roomId);
     if (room == null) {
       showAppToast(context, '대화방을 찾을 수 없습니다.');
       return;
     }
-    final navigator = Navigator.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < wideBreakpoint;
-    if (widget.asDialog) navigator.pop();
-    if (!narrow) {
-      widget.session.requestOpenRoom(room, messageId: messageId);
-      return;
-    }
-    // 좁은 화면도 다른 팀의 방일 수 있어 팀 전환만 requestOpenRoom에 맡기고 화면은 직접 얹는다.
-    widget.session.requestOpenRoom(room);
-    navigator.push(
-      MaterialPageRoute(
-        builder: (_) => ChatScreen(
-          session: widget.session,
-          room: room,
-          highlightMessageId: messageId,
-        ),
-      ),
-    );
+    openRoomFromPanel(context, widget.session, room, messageId: messageId);
   }
 
   Future<void> _openMember(FavoriteItem item) async {
@@ -217,16 +251,50 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     }
   }
 
+  // ---- 거르기 · 정렬 ----
+
+  /// 대화방 필터가 바뀌면 보낸 사람 필터(이전 방 멤버 기준으로 골랐던 값)가 새 범위에 안 맞을 수 있어 같이 초기화한다.
+  void _onRoomSelected(String? roomId) => setState(() {
+    _roomId = roomId;
+    _senderId = null;
+  });
+
+  /// 지금 탭의 불러온 목록에서 필터를 통과한 것을 정렬해 돌려준다.
+  List<FavoriteItem> _visibleItems(List<FavoriteItem> items) {
+    final filter = FavoriteFilter(
+      query: _query,
+      roomId: _roomId,
+      senderId: _senderId,
+      period: _period,
+    );
+    final indexed = [
+      for (final (i, item) in items.indexed)
+        if (filter.matches(item)) (i, item),
+    ];
+    // 담은 시각 순. 담은 시각이 없는 항목(대화방)은 최신순에서 맨 앞, 과거순에서 맨 뒤. 같으면 서버가 준 순서.
+    indexed.sort((a, b) {
+      final x = a.$2.favoritedAt;
+      final y = b.$2.favoritedAt;
+      if (x == null || y == null) {
+        if (x == y) return a.$1.compareTo(b.$1);
+        return (x == null) == _newestFirst ? -1 : 1;
+      }
+      final byTime = _newestFirst ? y.compareTo(x) : x.compareTo(y);
+      return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+    });
+    return [for (final (_, item) in indexed) item];
+  }
+
   // ---- 그리기 ----
 
   Widget _tabs(BuildContext context) {
     final tabs = <FavoriteKind?>[null, ...FavoriteKind.values];
     return SizedBox(
-      height: 48,
+      height: 40,
       child: ListView.separated(
         key: const ValueKey('favorites-tabs'),
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         itemCount: tabs.length,
         separatorBuilder: (_, _) => const SizedBox(width: 6),
         itemBuilder: (context, i) {
@@ -242,6 +310,28 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
       ),
     );
   }
+
+  /// "N개가 로딩되었습니다." 줄 — 비어 있어도 보이고, 직접 설정한 기간은 그 오른쪽에 보인다.
+  Widget _countLine(BuildContext context, int count) => PanelResultLine(
+    summary: Text(
+      '"$count"개가 로딩되었습니다.',
+      key: const ValueKey('panel-loaded-count'),
+      style: Theme.of(context).textTheme.labelLarge,
+    ),
+    rangeText: _period.rangeText,
+  );
+
+  Widget _message(BuildContext context, String text, Key key) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        text,
+        key: key,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Theme.of(context).hintColor),
+      ),
+    ),
+  );
 
   Widget _body(BuildContext context) {
     final feed = _favorites.feed(_kind);
@@ -261,123 +351,139 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     }
     if (!feed.loaded) return const Center(child: CircularProgressIndicator());
     if (feed.items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            _kind?.emptyHint ??
-                '즐겨찾기한 항목이 없습니다.\n메시지·파일·댓글·투표·대화방·멤버를 즐겨찾기에 담아 두세요.',
-            key: const ValueKey('favorites-empty'),
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Theme.of(context).hintColor),
-          ),
-        ),
-      );
-    }
-    final footer = feed.hasMore || feed.loading ? 1 : 0;
-    return RefreshIndicator(
-      onRefresh: () => _favorites.load(_kind, refresh: true),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (n) {
-          if (n.metrics.extentAfter < 240) _favorites.loadMore(_kind);
-          return false;
-        },
-        child: ListView.separated(
-          controller: _scroll,
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-          itemCount: feed.items.length + footer,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, i) {
-            if (i >= feed.items.length) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Center(
-                  child: feed.loading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : TextButton(
-                          key: const ValueKey('favorites-more'),
-                          onPressed: () => _favorites.loadMore(_kind),
-                          child: const Text('더 보기'),
-                        ),
-                ),
-              );
-            }
-            final item = feed.items[i];
-            return KeyedSubtree(
-              key: ValueKey('favorite-${item.key}'),
-              child: _FavoriteTile(
-                session: widget.session,
-                item: item,
-                onOpen: () => _open(item),
-                onOpenRoom: () => _openRoom(
-                  item.roomId,
-                  messageId: item.message?.id ?? item.comment?.messageId,
-                ),
-                onUnfavorite: () => _unfavorite(item),
-                onPollChanged: () {
-                  final poll = item.message?.poll;
-                  if (item.message?.deleted == true ||
-                      poll == null ||
-                      !poll.favorite) {
-                    _favorites.removeItem(item);
-                  } else {
-                    setState(() {});
-                  }
-                },
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final content = Column(
-      children: [
-        _tabs(context),
-        const Divider(height: 1),
-        Expanded(child: _body(context)),
-      ],
-    );
-    if (widget.asDialog) {
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 8, 4),
-            child: Row(
-              children: [
-                const Icon(Icons.star, color: Color(0xFFF5A623)),
-                const SizedBox(width: 10),
-                Text(
-                  '즐겨찾기',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: '닫기',
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
+          _countLine(context, 0),
+          const Divider(height: 1),
+          Expanded(
+            child: _message(
+              context,
+              _kind?.emptyHint ??
+                  '즐겨찾기한 항목이 없습니다.\n메시지·파일·댓글·투표·대화방·멤버를 즐겨찾기에 담아 두세요.',
+              const ValueKey('favorites-empty'),
             ),
           ),
-          Expanded(child: content),
         ],
       );
     }
-    return Scaffold(
-      appBar: AppBar(title: const Text('즐겨찾기')),
-      body: content,
+    final items = _visibleItems(feed.items);
+    final footer = feed.hasMore || feed.loading ? 1 : 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _countLine(context, items.length),
+        const Divider(height: 1),
+        Expanded(
+          child: items.isEmpty && footer == 0
+              ? _message(
+                  context,
+                  '조건에 맞는 즐겨찾기가 없습니다.',
+                  const ValueKey('favorites-no-match'),
+                )
+              : RefreshIndicator(
+                  onRefresh: () => _favorites.load(_kind, refresh: true),
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: (n) {
+                      if (n.metrics.extentAfter < 240) {
+                        _favorites.loadMore(_kind);
+                      }
+                      return false;
+                    },
+                    child: ListView.separated(
+                      controller: _scroll,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+                      itemCount: items.length + footer,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        if (i >= items.length) return _footer(feed);
+                        final item = items[i];
+                        return KeyedSubtree(
+                          key: ValueKey('favorite-${item.key}'),
+                          child: _FavoriteTile(
+                            session: widget.session,
+                            item: item,
+                            onOpen: () => _open(item),
+                            onOpenRoom: () => _openRoom(
+                              item.roomId,
+                              messageId:
+                                  item.message?.id ?? item.comment?.messageId,
+                            ),
+                            onUnfavorite: () => _unfavorite(item),
+                            onPollChanged: () {
+                              final poll = item.message?.poll;
+                              if (item.message?.deleted == true ||
+                                  poll == null ||
+                                  !poll.favorite) {
+                                _favorites.removeItem(item);
+                              } else {
+                                setState(() {});
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  /// 목록 맨 아래 — 받는 중이면 돌리는 표시, 더 있으면 "더 보기".
+  Widget _footer(FavoriteFeed feed) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Center(
+      child: feed.loading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : TextButton(
+              key: const ValueKey('favorites-more'),
+              onPressed: () => _favorites.loadMore(_kind),
+              child: const Text('더 보기'),
+            ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final kind = _kind;
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SidePanelHeader(title: '즐겨찾기', onClose: widget.onClose),
+          const Divider(height: 1),
+          PanelFilterBar(
+            searchHint: '즐겨찾기 검색',
+            onQueryChanged: (q) => setState(() => _query = q),
+            session: widget.session,
+            roomId: _roomId,
+            onRoomChanged: _onRoomSelected,
+            members: memberChoicesFor(widget.session, _roomId),
+            senderId: _senderId,
+            onSenderChanged: (v) => setState(() => _senderId = v),
+            period: _period,
+            onPeriodChanged: (v) => setState(() => _period = v),
+            // 항목에 그 정보가 없는 종류에서는 필터를 막는다([FavoriteFilter] 설명 참고).
+            roomEnabled: kind != FavoriteKind.member,
+            memberEnabled: kind != FavoriteKind.room,
+            periodEnabled: kind != FavoriteKind.room,
+            leading: _tabs(context),
+            leadingExpands: true,
+            newestFirst: _newestFirst,
+            onSortChanged: (v) => setState(() => _newestFirst = v),
+          ),
+          const SizedBox(height: 4),
+          Expanded(child: _body(context)),
+        ],
+      ),
     );
   }
 }

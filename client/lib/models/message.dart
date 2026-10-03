@@ -81,6 +81,7 @@ class Message {
 
   /// [text] 안의 멘션 구간(@이름·@all). 수정하면 같이 바뀐다. 비밀 대화는 늘 빈 목록.
   List<Mention> mentions;
+
   /// 서버 기준 상대 경로. 표시할 땐 Session.resolveUrl로 절대 주소를 만듭니다. 첨부를 지워 첫 첨부가
   /// 바뀌면 같이 바뀌므로(applyEdit) non-final.
   String? fileUrl;
@@ -128,6 +129,10 @@ class Message {
   /// 첨부 하나로 바꿔서 내려주므로, 화면은 이 목록만 보면 된다(사진 여러 장이면 격자). 수정에서 첨부를
   /// 지우면 그 자리에서 바뀐다(applyEdit) — non-final.
   List<MessageAttachment> attachments;
+
+  /// 파일 패널(GET /api/attachments)의 한 줄이 가리키는 첨부 id — 여러 첨부를 한 줄씩 펼친 목록이라 줄마다
+  /// 다르다(그 외 경로에서는 null). 파일 삭제가 어느 첨부인지 알려 줄 때 쓴다.
+  final String? attachmentId;
 
   /// 비밀 대화 자동 삭제 타이머용 — 상대가 이 메시지를 읽은 시각(null이면 아직 안 읽음)과,
   /// 그때부터 방의 타이머(초)만큼 지나 삭제될 시각. secret:message-read 브로드캐스트로 그 자리에서
@@ -207,6 +212,7 @@ class Message {
     this.attachmentNonce,
     this.thumbnailUrl,
     this.attachments = const [],
+    this.attachmentId,
     this.thumbnailKey,
     this.thumbnailNonce,
     this.readAt,
@@ -228,6 +234,13 @@ class Message {
     List<Comment>? comments,
   }) : comments = comments ?? [],
        mentions = mentions ?? <Mention>[];
+
+  /// 지우지 않은 첨부들 — 파일 삭제로 자리만 남은 첨부([MessageAttachment.deleted])를 뺀 목록.
+  /// 전달·다운로드·게시글/투표 첨부 목록처럼 "실제 파일"만 다루는 곳에서 쓴다.
+  List<MessageAttachment> get liveAttachments => [
+    for (final a in attachments)
+      if (!a.deleted) a,
+  ];
 
   /// 고정된 게시글인지(보드 상단 "고정된 게시글").
   bool get isPinned => pinnedAt != null;
@@ -269,6 +282,7 @@ class Message {
               )
               .toList() ??
           const [],
+      attachmentId: json['attachmentId'] as String?,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         (json['createdAt'] as num).toInt(),
       ),
@@ -344,6 +358,10 @@ class MessageAttachment {
   final String? mimeType;
   final String? thumbnailUrl;
 
+  /// 파일 삭제(업로드한 본인·팀 관리자)로 지워진 첨부 — 서버가 경로([fileUrl])를 비우고 이름만 남겨 내려준다.
+  /// 말풍선은 이 자리를 "삭제된 파일입니다" 카드로 그린다(메시지와 댓글은 그대로 남는다).
+  final bool deleted;
+
   const MessageAttachment({
     required this.id,
     required this.kind,
@@ -352,6 +370,7 @@ class MessageAttachment {
     this.fileSize,
     this.mimeType,
     this.thumbnailUrl,
+    this.deleted = false,
   });
 
   bool get isImage => kind == 'image';
@@ -360,10 +379,11 @@ class MessageAttachment {
       MessageAttachment(
         id: json['id'] as String,
         kind: json['kind'] as String? ?? 'file',
-        fileUrl: json['fileUrl'] as String,
+        fileUrl: json['fileUrl'] as String? ?? '',
         fileName: json['fileName'] as String?,
         fileSize: (json['fileSize'] as num?)?.toInt(),
         mimeType: json['mimeType'] as String?,
         thumbnailUrl: json['thumbnailUrl'] as String?,
+        deleted: json['deleted'] as bool? ?? false,
       );
 }

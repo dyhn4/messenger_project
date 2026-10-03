@@ -1,11 +1,18 @@
 import { and, desc, eq, inArray, isNull, lt, lte, or, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { notificationSettings, notifications, roomMembers, rooms, teams } from '../schema.js';
+import { unreadCountsOf } from '../../notificationRules.js';
 
 // 'mention'·'mention_all'은 멘션, 'board_'로 시작하는 것은 보드 알림 — 알림 센터 탭과 배지가 이 두 묶음으로 센다.
 const isMentionKind = inArray(notifications.kind, ['mention', 'mention_all']);
 const isBoardKind = sql`left(${notifications.kind}, 6) = 'board_'`;
-const GROUPS = { mention: isMentionKind, board: isBoardKind };
+// mention_personal(개인 멘션만)·mention_all(@all만)은 알림 센터 멘션 탭의 드롭다운 필터용 — notificationRules.js NOTIFICATION_GROUPS.
+const GROUPS = {
+  mention: isMentionKind,
+  mention_personal: eq(notifications.kind, 'mention'),
+  mention_all: eq(notifications.kind, 'mention_all'),
+  board: isBoardKind,
+};
 
 // 받는 사람이 지금도 그 방의 멤버인 알림만 본다(나간 방의 알림이 배지에 남지 않게). 방이 없는 알림(앞으로의 종류)은 통과.
 const stillMember = or(isNull(notifications.roomId), isNotNull(roomMembers.userId));
@@ -19,22 +26,26 @@ export async function insertNotifications(rows) {
   return inserted;
 }
 
-/** 사람마다 안 읽은 멘션·보드 알림 수 {userId: {mention, board}} — 요청한 모든 사람이 (0이라도) 들어 있다. */
+/**
+ * 사람마다 안 읽은 멘션·보드 알림 수 {userId: {mention, board, mentionPersonal, mentionAll}} — 요청한 모든 사람이
+ * (0이라도) 들어 있다. `mention`은 개인 멘션 + @all 합계다.
+ */
 export async function unreadCountsForUsers(userIds) {
-  const map = new Map(userIds.map((id) => [id, { mention: 0, board: 0 }]));
+  const map = new Map(userIds.map((id) => [id, unreadCountsOf()]));
   for (let i = 0; i < userIds.length; i += 1000) {
     const chunk = userIds.slice(i, i + 1000);
     const rows = await db
       .select({
         userId: notifications.userId,
-        mention: sql`count(*) filter (where ${isMentionKind})`.mapWith(Number),
+        mentionPersonal: sql`count(*) filter (where ${GROUPS.mention_personal})`.mapWith(Number),
+        mentionAll: sql`count(*) filter (where ${GROUPS.mention_all})`.mapWith(Number),
         board: sql`count(*) filter (where ${isBoardKind})`.mapWith(Number),
       })
       .from(notifications)
       .leftJoin(roomMembers, and(eq(roomMembers.roomId, notifications.roomId), eq(roomMembers.userId, notifications.userId)))
       .where(and(inArray(notifications.userId, chunk), isNull(notifications.readAt), stillMember))
       .groupBy(notifications.userId);
-    for (const r of rows) map.set(r.userId, { mention: r.mention, board: r.board });
+    for (const r of rows) map.set(r.userId, unreadCountsOf(r));
   }
   return map;
 }
@@ -49,7 +60,7 @@ export async function countUnreadMentionsInRoom(userId, roomId) {
 }
 
 /**
- * 알림 목록(최신순). [group]은 'mention' | 'board' | null(전부). 더 없는지 알려면 limit+1개를 읽어 오는 쪽(호출부)이
+ * 알림 목록(최신순). [group]은 'mention' | 'mention_personal' | 'mention_all' | 'board' | null(전부). 더 없는지 알려면 limit+1개를 읽어 오는 쪽(호출부)이
  * 자른다. 방이 없어졌거나 내가 더는 멤버가 아닌 항목은 뺀다.
  */
 export async function listNotificationRows({ userId, group, before, limit, unreadOnly }) {

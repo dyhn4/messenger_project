@@ -39,10 +39,25 @@ class FakeNotificationApi implements NotificationApi {
     if (failWith != null) throw ApiException(failWith!);
   }
 
-  NotificationCounts get counts => NotificationCounts(
-    mention: items.where((n) => n.isMention && !n.isRead).length,
+  NotificationCounts get counts => NotificationCounts.of(
+    mentionPersonal: items
+        .where((n) => n.kind == NotificationKind.mention && !n.isRead)
+        .length,
+    mentionAll: items
+        .where((n) => n.kind == NotificationKind.mentionAll && !n.isRead)
+        .length,
     board: items.where((n) => n.isBoard && !n.isRead).length,
   );
+
+  /// 서버의 kind 묶음(mention·mention_personal·mention_all·board)에 [n]이 드는지.
+  static bool inKind(String kind, AppNotification n) => switch (kind) {
+    'all' => true,
+    'mention' => n.isMention,
+    'mention_personal' => n.kind == NotificationKind.mention,
+    'mention_all' => n.kind == NotificationKind.mentionAll,
+    'board' => n.isBoard,
+    _ => false,
+  };
 
   @override
   Future<({List<AppNotification> items, bool hasMore})> fetchNotifications({
@@ -59,9 +74,7 @@ class FakeNotificationApi implements NotificationApi {
     _maybeFail();
     final matching = [
       for (final n in items)
-        if ((kind == 'all' ||
-                (kind == 'mention' && n.isMention) ||
-                (kind == 'board' && n.isBoard)) &&
+        if (inKind(kind, n) &&
             (before == null || n.createdAt.millisecondsSinceEpoch < before) &&
             (!unreadOnly || !n.isRead))
           n,
@@ -93,8 +106,7 @@ class FakeNotificationApi implements NotificationApi {
     for (final n in items) {
       final hit =
           (ids != null && ids.contains(n.id)) ||
-          (kind == 'mention' && n.isMention) ||
-          (kind == 'board' && n.isBoard) ||
+          (kind != null && kind != 'all' && inKind(kind, n)) ||
           (messageId != null && n.messageId == messageId);
       if (hit) n.readAt ??= now;
     }

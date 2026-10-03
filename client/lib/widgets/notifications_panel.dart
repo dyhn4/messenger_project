@@ -21,6 +21,7 @@ import '../services/notification_entries.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import 'app_toast.dart';
+import 'compact_menu.dart';
 import 'muted_scrollbar.dart';
 import 'notification_settings_dialog.dart';
 import 'room_avatar.dart';
@@ -48,12 +49,7 @@ void showUnreadAnnouncementPopup(
     showAnnouncementDetailScreen(context, session, room, latest);
     return;
   }
-  showAnnouncementListScreen(
-    context,
-    session,
-    room,
-    unreadCount: unreadCount,
-  );
+  showAnnouncementListScreen(context, session, room, unreadCount: unreadCount);
 }
 
 /// 상단 툴바의 종 모양 "알림 센터" 버튼 — 볼 알림이 하나라도 있으면(안 읽은 대화·멘션·보드·프로젝트 알림)
@@ -176,7 +172,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     super.initState();
     final initial =
         widget.initialTab ??
-        (_center.counts.mention > 0
+        (_center.mentionUnread(_center.mentionFilter) > 0
             ? NotificationTab.mention
             : NotificationTab.all);
     _lastTab = initial;
@@ -219,6 +215,19 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     if (_scroll.hasClients) _scroll.jumpTo(0);
     _load(tab);
     if (mounted) setState(() {});
+  }
+
+  /// 멘션 탭 꺾쇠를 눌러 메뉴가 열릴 때 — 다른 탭을 보고 있었으면 멘션 탭으로 옮겨 간다.
+  void _onMentionMenuOpened() {
+    if (_tab != NotificationTab.mention) {
+      _tabs.index = NotificationTab.mention.index;
+    }
+  }
+
+  /// 멘션 탭 필터(전체 멘션 / @나를 멘션 / @all 멘션)를 골랐다 — 새 종류의 목록을 맨 위부터 보여 준다.
+  void _selectMentionFilter(MentionFilter filter) {
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    unawaited(_center.setMentionFilter(filter));
   }
 
   /// 끝에 가까워지면 다음 페이지를 붙인다(멘션·보드·전체 탭의 무한 스크롤).
@@ -398,7 +407,18 @@ class _NotificationsPanelState extends State<NotificationsPanel>
                     Tab(
                       key: ValueKey('notif-tab-${t.name}'),
                       height: 44,
-                      child: _TabLabel(label: t.label, count: badge(t)),
+                      child: t == NotificationTab.mention
+                          // 멘션 탭만 이름 오른쪽에 꺾쇠(드롭다운)가 붙는다 — 탭 이름은 고른 종류를 짧게 반영한다.
+                          ? _TabLabel(
+                              label: _center.mentionFilter.tabLabel,
+                              count: badge(t),
+                              trailing: _MentionFilterButton(
+                                filter: _center.mentionFilter,
+                                onOpened: _onMentionMenuOpened,
+                                onSelected: _selectMentionFilter,
+                              ),
+                            )
+                          : _TabLabel(label: t.label, count: badge(t)),
                     ),
                 ],
               ),
@@ -438,7 +458,11 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     if (_center.unreadOnly(tab)) return '안 읽은 알림이 없습니다.';
     return switch (tab) {
       NotificationTab.all => '새 알림이 없습니다.',
-      NotificationTab.mention => '멘션 알림이 없습니다.',
+      NotificationTab.mention => switch (_center.mentionFilter) {
+        MentionFilter.all => '멘션 알림이 없습니다.',
+        MentionFilter.personal => '나를 멘션한 알림이 없습니다.',
+        MentionFilter.everyone => '@all 멘션 알림이 없습니다.',
+      },
       NotificationTab.unreadChats => '안 읽은 메시지가 없습니다.',
       NotificationTab.board => '보드·공지 알림이 없습니다.',
       NotificationTab.project => '프로젝트 알림이 없습니다.',
@@ -543,11 +567,77 @@ class _NotificationsPanelState extends State<NotificationsPanel>
   }
 }
 
-/// 탭 이름 + 안 읽음 숫자 배지(0이면 숫자 없음).
+/// 멘션 탭 이름 옆 꺾쇠(⌄) — 누르면 탭 바로 아래에 설정 메뉴와 같은 모양의 드롭다운이 열려 `전체 멘션` /
+/// `@나를 멘션` / `@all 멘션` 중 하나를 고른다(고른 것에 체크). 탭 자체를 누르는 동작(탭 전환)과 겹치지 않게
+/// 이 단추가 자기 영역의 탭을 따로 받는다.
+class _MentionFilterButton extends StatelessWidget {
+  final MentionFilter filter;
+  final VoidCallback onOpened;
+  final ValueChanged<MentionFilter> onSelected;
+  const _MentionFilterButton({
+    required this.filter,
+    required this.onOpened,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<MentionFilter>(
+      key: const ValueKey('notif-mention-filter'),
+      tooltip: '멘션 종류',
+      position: PopupMenuPosition.under,
+      offset: Offset.zero,
+      color: CompactMenu.color(context),
+      shape: CompactMenu.shape,
+      menuPadding: CompactMenu.menuPadding,
+      constraints: CompactMenu.constraints,
+      initialValue: filter,
+      onOpened: onOpened,
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        for (final f in MentionFilter.values)
+          PopupMenuItem<MentionFilter>(
+            key: ValueKey('notif-mention-filter-${f.name}'),
+            value: f,
+            height: CompactMenu.itemHeight,
+            padding: CompactMenu.itemPadding,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    f.menuLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: CompactMenu.textStyle,
+                  ),
+                ),
+                if (f == filter) const Icon(Icons.check, size: 16),
+              ],
+            ),
+          ),
+      ],
+      // 탭 높이(44)만큼 세로로 길게 잡아 손가락으로도 누르기 쉽고, 메뉴가 탭 줄 바로 아래에서 열린다.
+      child: SizedBox(
+        width: 26,
+        height: 44,
+        child: Center(
+          child: Icon(
+            Icons.keyboard_arrow_down,
+            size: 18,
+            color: DefaultTextStyle.of(context).style.color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 탭 이름 + (있으면) 오른쪽 위젯 + 안 읽음 숫자 배지(0이면 숫자 없음).
 class _TabLabel extends StatelessWidget {
   final String label;
   final int count;
-  const _TabLabel({required this.label, required this.count});
+  final Widget? trailing;
+  const _TabLabel({required this.label, required this.count, this.trailing});
 
   @override
   Widget build(BuildContext context) {
@@ -555,6 +645,7 @@ class _TabLabel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(label),
+        ?trailing,
         if (count > 0) ...[
           const SizedBox(width: 4),
           Container(

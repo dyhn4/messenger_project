@@ -81,8 +81,8 @@ class AppSettings extends ChangeNotifier {
   bool alwaysOnTop = false;
   double windowOpacity = 1.0;
 
-  /// 앱 전체 글자 크기 배율(1.0 = 100%, 기본) — main.dart가 MaterialApp.builder에서
-  /// MediaQuery.textScaler로 앱 전체(채팅·목록·설정 등 모든 화면)에 적용한다.
+  /// 글자 크기 배율(1.0 = 100%, 기본) — 글꼴 설정과 같은 곳(채팅 내용의 메시지·댓글 본문, 방 이름)에만
+  /// widgets/chat_font_scope.dart의 ChatFont가 MediaQuery.textScaler로 적용한다. 그 밖의 화면은 항상 기본 크기.
   double textScale = 1.0;
 
   /// 글꼴(화면 설정, Windows 전용) — 시스템 글꼴 이름, 빈 문자열이면 시스템 기본.

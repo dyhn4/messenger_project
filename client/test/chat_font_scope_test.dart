@@ -58,6 +58,55 @@ void main() {
     });
   });
 
+  group('텍스트 크기도 같은 곳에만', () {
+    testWidgets('ChatFont 안의 글자만 커지고 바깥 글자는 그대로다', (tester) async {
+      final settings = AppSettings()..textScale = 1.5;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Column(
+            children: [
+              const Text('바깥 글자', style: TextStyle(fontSize: 20)),
+              ChatFont(
+                settings: settings,
+                builder: (context, font) => Text(
+                  '안쪽 글자',
+                  style: applyChatFont(const TextStyle(fontSize: 20), font),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      final outside = tester.getSize(find.text('바깥 글자')).height;
+      final inside = tester.getSize(find.text('안쪽 글자')).height;
+      // 같은 20pt인데 ChatFont 안쪽만 1.5배(줄 높이가 1.5배쯤).
+      expect(inside / outside, closeTo(1.5, 0.15));
+    });
+
+    testWidgets('100%이면 아무것도 안 바꾸고, 저장하면 바로 다시 그린다', (tester) async {
+      final settings = AppSettings();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: ChatFont(
+              settings: settings,
+              builder: (context, font) => Text(
+                '방 이름',
+                style: applyChatFont(const TextStyle(fontSize: 20), font),
+              ),
+            ),
+          ),
+        ),
+      );
+      final base = tester.getSize(find.text('방 이름')).height;
+      settings.textScale = 1.2;
+      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+      settings.notifyListeners();
+      await tester.pump();
+      expect(tester.getSize(find.text('방 이름')).height, greaterThan(base));
+    });
+  });
+
   testWidgets('말풍선: 메시지 본문만 고른 글꼴, 보낸 사람 이름은 기본 글꼴 그대로', (tester) async {
     tester.view.physicalSize = const Size(1000, 800);
     tester.view.devicePixelRatio = 1.0;

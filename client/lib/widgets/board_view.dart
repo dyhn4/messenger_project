@@ -827,7 +827,7 @@ class PostCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                      if (post.attachments.isNotEmpty) ...[
+                      if (post.liveAttachments.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         _AttachmentPreview(session: session, post: post),
                       ],
@@ -956,11 +956,12 @@ class _AttachmentPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final live = post.liveAttachments;
     final images = [
-      for (final a in post.attachments)
+      for (final a in live)
         if (a.isImage) a,
     ];
-    final files = post.attachments.length - images.length;
+    final files = live.length - images.length;
     const gap = 8.0;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1506,11 +1507,11 @@ class PostDetailHead extends StatelessWidget {
     final theme = Theme.of(context);
     final hint = theme.hintColor;
     final images = [
-      for (final a in post.attachments)
+      for (final a in post.liveAttachments)
         if (a.isImage) a,
     ];
     final files = [
-      for (final a in post.attachments)
+      for (final a in post.liveAttachments)
         if (!a.isImage) a,
     ];
     return Column(

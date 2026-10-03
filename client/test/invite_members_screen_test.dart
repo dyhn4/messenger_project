@@ -232,7 +232,7 @@ void main() {
     expect(memberRow('u4'), findsOneWidget);
   });
 
-  testWidgets('초대하기는 선택한 멤버로 요청하고 창을 닫는다', (tester) async {
+  testWidgets('초대하기는 선택한 멤버로 요청하고 초대 완료 창을 거쳐 창을 닫는다', (tester) async {
     final session = buildSession();
     await pumpDialog(tester, session);
 
@@ -249,6 +249,13 @@ void main() {
       (r) => r.url.path == '/api/rooms/r1/invite',
     );
     expect(jsonDecode(post.body)['userIds'], ['u2', 'u5']);
+    // 성공하면 `초대 완료` 창(방 1개짜리 결과)이 뜨고, 확인을 눌러야 두 창이 닫힌다.
+    expect(find.text('초대 완료'), findsOneWidget);
+    expect(find.text('1개 대화방에 2명을 초대했습니다'), findsOneWidget);
+    expect(find.byType(InviteMembersScreen), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '확인'));
+    await tester.pumpAndSettle();
+    expect(find.text('초대 완료'), findsNothing);
     expect(find.byType(InviteMembersScreen), findsNothing);
   });
 

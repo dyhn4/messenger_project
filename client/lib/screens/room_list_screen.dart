@@ -26,11 +26,8 @@ import '../widgets/topic_folder_widgets.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
-import 'calendar/calendar_screen.dart' show openCalendarScreen;
 import 'chat_screen.dart';
 import 'create_topic_screen.dart';
-import 'files_screen.dart';
-import 'links_screen.dart';
 import 'invite_link_screen.dart';
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
@@ -251,45 +248,6 @@ class _RoomListScreenState extends State<RoomListScreen> {
     }
   }
 
-  /// "메뉴" 팝업의 "파일" — PC는 우측 패널로 토글하지만, 좁은 화면엔 그런 패널이 없어서
-  /// 전체화면으로 새로 연다. FilesScreen 자체가 제목+닫기 버튼을 그리는 헤더를 갖고 있어서
-  /// 별도 AppBar 없이 그대로 띄우고, onClose가 뒤로가기 역할을 한다.
-  void _openFiles() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (routeContext) => Scaffold(
-          body: SafeArea(
-            child: FilesScreen(
-              session: widget.session,
-              onClose: () => Navigator.of(routeContext).pop(),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// "메뉴" 팝업의 "링크" — 파일과 같은 이유로 전체화면으로 연다. "대화방에서 보기"는 링크 화면을
-  /// 닫고 그 방을 열어 해당 메시지로 스크롤한다(검색 결과를 눌렀을 때와 같은 방식).
-  void _openLinks() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (routeContext) => Scaffold(
-          body: SafeArea(
-            child: LinksScreen(
-              session: widget.session,
-              onClose: () => Navigator.of(routeContext).pop(),
-              onOpenMessage: (room, messageId) {
-                Navigator.of(routeContext).pop();
-                _pushChat(room, highlightMessageId: messageId);
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_pendingReopenRoom != null) {
@@ -309,23 +267,13 @@ class _RoomListScreenState extends State<RoomListScreen> {
         appBar: AppBar(
           title: TeamSwitcher(session: widget.session),
           actions: [
-            // 캘린더는 대화 목록 탭과 성격이 다른 별도 화면이라 탭을 늘리지 않고 앱바에 둔다.
-            IconButton(
-              key: const ValueKey('open-calendar'),
-              icon: const Icon(Icons.calendar_month_outlined),
-              tooltip: '캘린더',
-              onPressed: () => openCalendarScreen(context, widget.session),
-            ),
             NotificationBellButton(
               session: widget.session,
               onPressed: () =>
                   showNotificationsCenterDialog(context, widget.session),
             ),
-            AppMenuButton(
-              session: widget.session,
-              onOpenFiles: _openFiles,
-              onOpenLinks: _openLinks,
-            ),
+            // 캘린더·파일·즐겨찾기·링크·프로젝트·문의함 …은 이 메뉴 안에 있다(menu_entries.dart).
+            AppMenuButton(session: widget.session),
             AccountMenuButton(session: widget.session),
           ],
         ),

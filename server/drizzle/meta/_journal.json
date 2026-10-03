@@ -582,6 +582,13 @@
       "when": 1790925271930,
       "tag": "0082_bumpy_norrin_radd",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1791008618479,
+      "tag": "0083_tired_sunfire",
+      "breakpoints": true
     }
   ]
 }

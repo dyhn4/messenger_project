@@ -1,5 +1,6 @@
-import { and, asc, desc, eq, gte, inArray, isNull, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
+import { afterCursor, cursorOrder, epochMs } from './cursorSql.js';
 import {
   dmHistoryFloors,
   messageAttachments,
@@ -154,4 +155,50 @@ export async function listFavoritePolls(userId, teamId) {
       ),
     )
     .orderBy(desc(pollFavorites.createdAt));
+}
+
+/**
+ * 투표 목록 패널(`GET /api/polls`) — 이 팀에서 내가 아직 멤버인 방(비밀 대화 제외)의, 지워지지 않은 투표를 만든 시각순으로.
+ * [q]는 pollListRules.js의 parsePollListQuery 결과(status·participated·creatorId·roomId·since/until·order·cursor).
+ * 기간·커서·정렬은 모두 투표를 만든 시각(polls.created_at) 기준이다. DM "진짜 나가기" 이전 투표는 다른 조회와 같은 하한으로 뺀다.
+ * 돌려주는 값: `{ rows: [{ message, room, pollId, pollMs }](limit + 1개까지), total }` — total은 커서와 상관없이 조건에 맞는 전체 개수.
+ */
+export async function listPollPanelRows(userId, q) {
+  const now = new Date();
+  const base = [
+    eq(rooms.teamId, q.teamId),
+    eq(rooms.isSecret, false),
+    isNull(messages.deletedAt),
+    or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(messages.createdAt, dmHistoryFloors.hiddenBeforeAt)),
+  ];
+  if (q.roomId) base.push(eq(polls.roomId, q.roomId));
+  if (q.creatorId) base.push(eq(polls.creatorId, q.creatorId));
+  if (q.since) base.push(gte(polls.createdAt, q.since));
+  if (q.until) base.push(lte(polls.createdAt, q.until));
+  // 마감 = 일찍 마감했거나 마감 시각이 지났다(polls.js의 isPollClosed와 같은 기준).
+  const closed = or(sql`${polls.closedAt} is not null`, lte(polls.closesAt, now));
+  if (q.status === 'closed') base.push(closed);
+  if (q.status === 'open') base.push(and(isNull(polls.closedAt), sql`${polls.closesAt} > ${now.toISOString()}::timestamptz`));
+  if (q.participated !== 'all') {
+    const voted = sql`exists (select 1 from ${pollVotes} where ${pollVotes.pollId} = ${polls.id} and ${pollVotes.userId} = ${userId})`;
+    base.push(q.participated === 'yes' ? voted : sql`not ${voted}`);
+  }
+
+  const joined = (fields) =>
+    db
+      .select(fields)
+      .from(polls)
+      .innerJoin(messages, eq(messages.id, polls.messageId))
+      .innerJoin(rooms, eq(rooms.id, polls.roomId))
+      .innerJoin(roomMembers, and(eq(roomMembers.roomId, rooms.id), eq(roomMembers.userId, userId)))
+      .leftJoin(dmHistoryFloors, and(eq(dmHistoryFloors.roomId, rooms.id), eq(dmHistoryFloors.userId, userId)));
+
+  const [rows, [{ total }]] = await Promise.all([
+    joined({ message: messages, room: rooms, pollId: polls.id, pollMs: epochMs(polls.createdAt) })
+      .where(and(...base, afterCursor(polls.createdAt, polls.id, q.cursor, q.order)))
+      .orderBy(...cursorOrder(polls.createdAt, polls.id, q.order))
+      .limit(q.limit + 1),
+    joined({ total: sql`count(*)::int` }).where(and(...base)),
+  ]);
+  return { rows, total };
 }

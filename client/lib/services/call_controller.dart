@@ -6,6 +6,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:livekit_client/livekit_client.dart';
 
 import 'api_client.dart';
+import 'call_hands.dart';
 
 /// 통화 중에만 도는 Android 포그라운드 서비스. 이게 없으면 통화 중에 홈으로 나가는 순간
 /// OS가 카메라/마이크 접근을 끊어서(Android 14+) 상대방에게 내 영상·소리가 안 간다.
@@ -108,6 +109,11 @@ class CallController extends ChangeNotifier {
       // Room은 ChangeNotifier라 UI가 직접 구독한다 — 여기서도 연결 상태 변화를 그대로
       // 위로 흘려보내, 통화 화면이 CallController 하나만 구독하면 되게 한다.
       room.addListener(notifyListeners);
+      // 손들기 신호(데이터 채널)와 참가자 입·퇴장은 연결 전에 구독해 둔다 — 놓치는 메시지가 없게.
+      _roomListener = room.createListener()
+        ..on<DataReceivedEvent>(_onData)
+        ..on<ParticipantConnectedEvent>(_onParticipantConnected)
+        ..on<ParticipantDisconnectedEvent>(_onParticipantDisconnected);
       await room.connect(credentials.url, credentials.token);
       await room.localParticipant?.setMicrophoneEnabled(true);
       await room.localParticipant?.setCameraEnabled(true);
@@ -119,6 +125,8 @@ class CallController extends ChangeNotifier {
       _error = e.toString();
       _roomId = null;
       _room = null;
+      await _roomListener?.dispose();
+      _roomListener = null;
       rethrow;
     } finally {
       _connecting = false;
@@ -131,7 +139,13 @@ class CallController extends ChangeNotifier {
     _room = null;
     _roomId = null;
     _connecting = false;
+    // 손은 통화를 나가면 저절로 내려간다 — 남은 사람들은 퇴장 이벤트로 이 사람의 손을 지운다.
+    _hands.clear();
+    _handResendTimer?.cancel();
+    final roomListener = _roomListener;
+    _roomListener = null;
     notifyListeners();
+    await roomListener?.dispose();
     await _stopCallForegroundService();
     if (room == null) return;
     room.removeListener(notifyListeners);
@@ -189,12 +203,86 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ───────────── 손들기 ─────────────
+  //
+  // 내 손 상태를 LiveKit 데이터 채널(reliable, topic 'call')로 방 전체에 `{type:'hand', raised}`로
+  // 알린다. 서버(Node)는 이 경로에 끼지 않는다. 늦게 들어온 사람은 이미 든 손을 모르므로,
+  // 새 참가자가 연결되면 내 손이 올라가 있을 때 그 사람에게만 한 번 다시 알린다.
+
+  final HandRaiseBook _hands = HandRaiseBook();
+  EventsListener<RoomEvent>? _roomListener;
+  Timer? _handResendTimer;
+  final StreamController<String> _handRaisedNames =
+      StreamController<String>.broadcast();
+
+  /// identity → 손든 시각(나 포함).
+  Map<String, DateTime> get raisedHands => _hands.raised;
+
+  bool get handRaised {
+    final me = _room?.localParticipant?.identity;
+    return me != null && _hands.isRaised(me);
+  }
+
+  /// 다른 사람이 새로 손을 들 때마다 그 사람의 이름이 흐른다 — 화면이 토스트로 알린다.
+  Stream<String> get handRaisedNames => _handRaisedNames.stream;
+
+  Future<void> toggleHand() async {
+    final me = _room?.localParticipant;
+    if (me == null) return;
+    final raise = !_hands.isRaised(me.identity);
+    _hands.apply(me.identity, raise, DateTime.now());
+    notifyListeners();
+    await _publishHand(raise);
+  }
+
+  Future<void> _publishHand(bool raised, {List<String>? to}) async {
+    try {
+      await _room?.localParticipant?.publishData(
+        encodeHandMessage(raised),
+        reliable: true,
+        topic: callDataTopic,
+        destinationIdentities: to,
+      );
+    } catch (_) {
+      // 손들기 신호가 한 번 못 가도 통화 자체엔 영향이 없다 — 다음 토글/입장 때 다시 맞춰진다.
+    }
+  }
+
+  void _onData(DataReceivedEvent e) {
+    if (e.topic != callDataTopic) return;
+    final sender = e.participant;
+    if (sender == null) return;
+    final raised = decodeHandMessage(e.data);
+    if (raised == null) return;
+    final fresh = _hands.apply(sender.identity, raised, DateTime.now());
+    if (fresh) {
+      _handRaisedNames.add(sender.name.isEmpty ? sender.identity : sender.name);
+    }
+    notifyListeners();
+  }
+
+  void _onParticipantConnected(ParticipantConnectedEvent e) {
+    if (!handRaised) return;
+    final identity = e.participant.identity;
+    // 막 들어온 사람의 데이터 채널이 아직 열리기 전일 수 있어 잠깐 뒤에 보낸다.
+    _handResendTimer?.cancel();
+    _handResendTimer = Timer(const Duration(seconds: 1), () {
+      if (handRaised) _publishHand(true, to: [identity]);
+    });
+  }
+
+  void _onParticipantDisconnected(ParticipantDisconnectedEvent e) {
+    _hands.remove(e.participant.identity);
+    notifyListeners();
+  }
+
   /// 포그라운드 서비스 알림에 쓸 방 이름 — join()에서 받아둔 값을 화면 공유 전환 때도 쓴다.
   String _screenShareLabel = '화상회의';
 
   @override
   void dispose() {
     unawaited(leave());
+    unawaited(_handRaisedNames.close());
     super.dispose();
   }
 }

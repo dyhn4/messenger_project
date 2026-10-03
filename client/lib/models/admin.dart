@@ -207,6 +207,7 @@ String auditActionLabel(String action) => switch (action) {
   'team.delete' => '팀 삭제',
   'team.transferOwner' => '소유권 이양',
   'topic.delete' => '토픽 삭제',
+  'room.convert' => '그룹채팅 토픽 전환',
   'user.suspend' => '계정 정지',
   'user.unsuspend' => '정지 해제',
   'user.logoutAll' => '강제 로그아웃',

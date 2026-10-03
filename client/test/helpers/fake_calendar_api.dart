@@ -38,6 +38,11 @@ class FakeCalendarApi implements CalendarApi {
   String? lastCreateColor;
   bool? lastCreateIsPublic;
 
+  /// 제목 검색이 돌려줄 일정 후보(제목에 검색어가 들어간 것, start 내림차순) — [searchPageSize]개씩 끊어 준다.
+  List<CalendarSearchItem> searchableEvents = [];
+  int searchPageSize = 50;
+  String? lastEventSearchQuery;
+
   /// 일정 조회를 붙잡아 둘 때(늦은 응답 시험) 쓰는 대기.
   Future<void>? fetchGate;
 
@@ -309,7 +314,44 @@ class FakeCalendarApi implements CalendarApi {
     lastScope = scope;
     lastOccurrenceStart = occurrenceStart;
     _maybeFail();
-    return events.firstWhere((e) => e.eventId == eventId);
+    final i = events.indexWhere((e) => e.eventId == eventId);
+    // 시각이 오면 서버처럼 저장한다(드래그 이동 시험이 다시 받은 결과를 본다).
+    if (fields['start'] is int && fields['end'] is int) {
+      events = [
+        for (final e in events)
+          if (e.eventId == eventId)
+            e.copyWith(
+              start: fields['start'] as int,
+              end: fields['end'] as int,
+            )
+          else
+            e,
+      ];
+    }
+    return events[i];
+  }
+
+  @override
+  Future<CalendarSearchPage> searchEvents(
+    String teamId,
+    String q, {
+    String? before,
+    int limit = 50,
+  }) async {
+    calls.add('searchEvents $q ${before ?? ''}');
+    lastEventSearchQuery = q;
+    _maybeFail();
+    final all = [
+      for (final i in searchableEvents)
+        if (i.title.toLowerCase().contains(q.toLowerCase())) i,
+    ]..sort((a, b) => b.start.compareTo(a.start));
+    final from = before == null ? 0 : int.parse(before);
+    final size = searchPageSize < limit ? searchPageSize : limit;
+    final end = from + size > all.length ? all.length : from + size;
+    return CalendarSearchPage(
+      items: all.sublist(from, end),
+      nextBefore: end < all.length ? '$end' : null,
+    );
   }
 
   @override

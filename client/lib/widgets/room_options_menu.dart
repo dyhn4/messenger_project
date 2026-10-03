@@ -15,6 +15,7 @@ import '../screens/topic_members_dialog.dart';
 import '../screens/topic_settings_dialog.dart';
 import '../services/api_client.dart' show ApiException;
 import '../services/session.dart';
+import 'albums_panel.dart' show openAlbumsForRoom;
 import 'app_toast.dart';
 import 'compact_menu.dart';
 import 'export_chat_dialog.dart';
@@ -357,6 +358,9 @@ class RoomOptionsMenu extends StatelessWidget {
   final ValueChanged<Room>? onOpenFiles;
   final ValueChanged<Room>? onOpenLinks;
 
+  /// "앨범 보기" — PC는 오른쪽 앨범 패널을 이 방으로 걸러서 연다. 안 주면(모바일) 전체화면으로 연다.
+  final ValueChanged<Room>? onOpenAlbums;
+
   /// "멤버" 버튼 — PC는 오른쪽 "참여 멤버" 패널로 연다(desktop_home_screen.dart). 안 주면(모바일)
   /// 예전처럼 창/전체화면으로 연다.
   final ValueChanged<Room>? onOpenMembers;
@@ -367,8 +371,15 @@ class RoomOptionsMenu extends StatelessWidget {
     required this.room,
     this.onOpenFiles,
     this.onOpenLinks,
+    this.onOpenAlbums,
     this.onOpenMembers,
   });
+
+  void _openAlbums(BuildContext context) {
+    final handler = onOpenAlbums;
+    if (handler != null) return handler(room);
+    openAlbumsForRoom(context, session, room);
+  }
 
   void _openFiles(BuildContext context) {
     final handler = onOpenFiles;
@@ -532,6 +543,12 @@ class RoomOptionsMenu extends StatelessWidget {
             icon: Icons.link,
             label: '링크 보기',
             onTap: () => _openLinks(context),
+          ),
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.photo_library_outlined,
+            label: '앨범 보기',
+            onTap: () => _openAlbums(context),
           ),
         ],
         if (room.isSecret)

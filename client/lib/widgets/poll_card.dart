@@ -443,11 +443,11 @@ class _PollCardState extends State<PollCard> {
   List<Widget> _attachmentWidgets() {
     final message = widget.message;
     final images = [
-      for (final a in message.attachments)
+      for (final a in message.liveAttachments)
         if (a.isImage) a,
     ];
     final files = [
-      for (final a in message.attachments)
+      for (final a in message.liveAttachments)
         if (!a.isImage) a,
     ];
     return [

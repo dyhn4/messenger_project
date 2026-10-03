@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset, Size;
+
 import '../models/calendar.dart';
 
 // 캘린더 화면의 순수 계산 — 위젯 없이 테스트할 수 있도록 격자 계산·일정 배치를 따로 뺐다.
@@ -358,4 +360,21 @@ DateTime ceilToMinutes(DateTime t, [int minutes = 10]) {
       t.second == 0 &&
       t.millisecond == 0;
   return exact ? floored : floored.add(Duration(minutes: minutes));
+}
+
+/// 월간 격자(주 [weeks])에서 [local](격자 영역 안 좌표, [size]는 영역 크기)이 가리키는 날짜 칸 — 영역 밖이면 null.
+DateTime? monthCellDayAt(Size size, Offset local, List<List<DateTime>> weeks) {
+  if (weeks.isEmpty || size.isEmpty) return null;
+  if (local.dx < 0 ||
+      local.dy < 0 ||
+      local.dx >= size.width ||
+      local.dy >= size.height) {
+    return null;
+  }
+  final row = (local.dy / (size.height / weeks.length)).floor().clamp(
+    0,
+    weeks.length - 1,
+  );
+  final col = (local.dx / (size.width / 7)).floor().clamp(0, 6);
+  return weeks[row][col];
 }

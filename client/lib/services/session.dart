@@ -14,6 +14,7 @@ import '../data/stickers.dart';
 import '../models/app_notification.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/invite_result.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/poll.dart';
@@ -38,10 +39,14 @@ import 'device_identity.dart';
 import 'download_storage.dart';
 import 'favorites_api.dart';
 import 'favorites_controller.dart';
+import 'album_api.dart';
+import 'album_controller.dart';
 import 'message_preview.dart';
 import 'notification_service.dart';
 import 'pinned_tls.dart';
 import 'poll_actions.dart';
+import 'poll_events.dart';
+import 'todo_actions.dart';
 import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
 import 'secret_session_manager.dart';
@@ -51,10 +56,13 @@ import 'update_socket.dart';
 // 토픽 권한 확장(room.canManage(session)/canWrite(session))은 Session과 늘 같이 쓰이므로,
 // session.dart만 import해도 바로 쓸 수 있게 같이 내보낸다. 예약 메시지 모델·이벤트(Session의
 // scheduledMessages/scheduledMessageEvents가 주는 모양)도 같은 이유로 같이 내보낸다.
+export '../models/invite_result.dart';
 export '../models/room_permissions.dart';
 export '../models/scheduled_message.dart';
 // 투표 조작(session.votePoll 등)도 같은 이유로 확장으로 따로 두고 같이 내보낸다.
 export 'poll_actions.dart';
+// 할 일(To-Do) 호출 손잡이(session.todoApi)와 소켓 토스트 문구.
+export 'todo_actions.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
 
@@ -82,6 +90,7 @@ class Session extends ChangeNotifier {
   void dispose() {
     _stickerRefresh?.cancel();
     TypingGate.instance.cancel(this);
+    pollEvents.dispose();
     super.dispose();
   }
 
@@ -172,6 +181,9 @@ class Session extends ChangeNotifier {
   String? updateError; // installUpdate() 실패 시 사용자에게 보여줄 메시지.
   final chatSocket = ChatSocket();
 
+  /// 투표 소켓 이벤트를 투표 목록 패널에 나눠 주는 통로(poll_events.dart).
+  final pollEvents = PollEvents();
+
   /// 화상회의(LiveKit) — 서버에 LiveKit이 설정돼 있을 때만 true이고, false면 통화 버튼 자체를
   /// 감춘다(server/src/calls.js의 /calls/config). 지금 진행 중인 통화(callStates)는 방마다
   /// "통화 중" 표시와 수신 화면 판단에 쓴다.
@@ -214,6 +226,16 @@ class Session extends ChangeNotifier {
     apiProvider: () => RemoteFavoritesApi(api!),
     teamIdProvider: () => currentTeam?.id,
     changed: chatSocket.favoriteChanged,
+    reconnected: chatSocket.reconnected,
+  );
+
+  /// 앨범(대화방 안에서 이미지·영상을 주제별로 모으는 공간) — 목록·열어 본 앨범·올리는 중인 파일·소켓 album:changed
+  /// (album_controller.dart). 팀을 바꾸면 [_onCurrentTeamChanged]가 비우고, 로그아웃하면 [logout]이 비운다.
+  /// (테스트가 가짜 API를 끼운 컨트롤러로 바꿔 끼울 수 있게 final이 아니다.)
+  late AlbumController albums = AlbumController(
+    apiProvider: () => RemoteAlbumApi(api!),
+    teamIdProvider: () => currentTeam?.id,
+    changed: chatSocket.albumChanged,
     reconnected: chatSocket.reconnected,
   );
   final _updateSocket = UpdateSocket();
@@ -285,6 +307,10 @@ class Session extends ChangeNotifier {
   StreamSubscription? _renamedSub;
   StreamSubscription? _projectNotifSub;
   StreamSubscription? _projectNotifSyncSub;
+
+  /// 할 일 소켓 이벤트(todo:changed의 담당 지정, todo:reminder 알림)를 토스트로 알린다 — todo_actions.dart.
+  StreamSubscription? _todoToastSub;
+  StreamSubscription? _todoReminderSub;
 
   /// 프로젝트 알림함의 안 읽은 개수 — 툴바 "프로젝트" 버튼의 배지와 프로젝트 창 사이드바가 쓴다.
   int projectUnread = 0;
@@ -1219,6 +1245,15 @@ class Session extends ChangeNotifier {
       projectUnread = count;
       notifyListeners();
     });
+    _todoToastSub?.cancel();
+    _todoToastSub = chatSocket.todoChanged.listen((e) {
+      final text = todoAssignedToast(e, myUserId: userId);
+      if (text != null) _showToast(text);
+    });
+    _todoReminderSub?.cancel();
+    _todoReminderSub = chatSocket.todoReminder.listen(
+      (e) => _showToast(todoReminderToast(e)),
+    );
     _renamedSub?.cancel();
     _renamedSub = chatSocket.renamedEvents.listen((e) {
       final match = rooms.where((r) => r.id == e.roomId);
@@ -1272,6 +1307,8 @@ class Session extends ChangeNotifier {
       // 복호화한다 — 안 그러면 수정 전 평문이 영구 캐시에 박제되어 계속 그것만 보인다.
       await decryptInPlace(_findRoom(m.roomId), m, forceDecrypt: true);
       _controllers[m.roomId]?.applyEdit(m);
+      // 파일 삭제(누가 지웠든) — 서버가 그 파일의 즐겨찾기 항목을 정리했으니 즐겨찾기 목록을 다시 받게 한다.
+      if (m.attachments.any((a) => a.deleted)) favorites.invalidate();
     });
     _messageLinkPreviewSub?.cancel();
     _messageLinkPreviewSub = chatSocket.messageLinkPreview.listen((m) {
@@ -2043,6 +2080,7 @@ class Session extends ChangeNotifier {
   Future<void> handleSocketMessage(Message m) async {
     await decryptInPlace(_findRoom(m.roomId), m);
     _controllers[m.roomId]?.feed(m);
+    if (m.isPoll) pollEvents.emitCreated(m); // 투표 목록 패널의 "새 투표" 알림줄.
     // 내가 보낸 메시지도 이 방 소켓으로 그대로 되돌아오므로(feed 참고), 보낸/받은 경우 모두
     // 여기서 한 번에 방을 "최근 활동"으로 끌어올릴 수 있다 — _handleIncomingMessage는 내가
     // 보낸 경우 알림/안읽음 처리를 건너뛰지만, 방 목록 정렬은 그것과 무관하게 항상 갱신한다.
@@ -2713,6 +2751,28 @@ class Session extends ChangeNotifier {
     _upsertRoom(room);
   }
 
+  /// 여러 토픽·그룹채팅에 한 번에 초대(정회원 이상) — 방별 결과를 돌려준다. 방 목록의 멤버 변화는 서버가 방마다
+  /// 보내는 room:created로 들어온다.
+  Future<List<RoomInviteResult>> inviteMembersBulk(
+    List<String> userIds,
+    List<String> roomIds,
+  ) => api!.inviteBulk(_requireTeamId, userIds, roomIds);
+
+  /// 그룹채팅을 토픽으로 전환(정회원 이상, 되돌릴 수 없다) — 돌려받은 방은 목록의 그 인스턴스에 그대로
+  /// 반영되어(Room.mergeServerState) 열려 있던 대화 화면이 그대로 토픽으로 바뀐다(다른 멤버에겐 room:created로 퍼진다).
+  Future<Room> convertGroupToTopic(
+    Room room, {
+    required String name,
+    String? description,
+  }) async {
+    final updated = await api!.convertGroupToTopic(
+      room.id,
+      name: name.trim(),
+      description: description?.trim(),
+    );
+    return _upsertRoom(updated);
+  }
+
   Future<void> updateAvatar({
     required String avatarType,
     String? avatarEmoji,
@@ -2951,6 +3011,7 @@ class Session extends ChangeNotifier {
   void _onCurrentTeamChanged() {
     topicFolders.clear();
     favorites.invalidate(); // 즐겨찾기 목록은 팀 단위라 이전 팀 것을 비운다.
+    albums.invalidate(); // 앨범 목록도 팀 단위.
     unawaited(loadTopicFolders());
     _resetScheduledMessages();
     unawaited(_refreshScheduledMessages());
@@ -3690,6 +3751,8 @@ class Session extends ChangeNotifier {
     await _renamedSub?.cancel();
     await _projectNotifSub?.cancel();
     await _projectNotifSyncSub?.cancel();
+    await _todoToastSub?.cancel();
+    await _todoReminderSub?.cancel();
     projectUnread = 0;
     await _hiddenSub?.cancel();
     await _teamSub?.cancel();
@@ -3731,6 +3794,7 @@ class Session extends ChangeNotifier {
     calendar.reset(); // 캘린더 캐시도 — 다음에 로그인하는 사람에게 남지 않게.
     notificationCenter.reset(); // 알림 센터 목록·개수도 같은 이유로.
     favorites.reset(); // 즐겨찾기 id·목록도.
+    albums.reset(); // 앨범 목록·올리는 중인 파일도.
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();

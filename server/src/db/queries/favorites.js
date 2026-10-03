@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import {
   commentFavorites,
   dmHistoryFloors,
   favoriteFiles,
   memberFavorites,
+  messageAttachments,
   messageComments,
   messageFavorites,
   messages,
@@ -169,6 +170,9 @@ export function listFavoriteFileRows(userId, teamId, { before, limit }) {
   const conditions = [
     eq(favoriteFiles.userId, userId),
     isNull(messages.deletedAt),
+    // 파일을 지운 항목은 지울 때 즐겨찾기 행도 함께 지우지만, 혹시 남아 있어도 목록에는 내지 않는다.
+    isNull(messages.fileDeletedAt),
+    sql`not exists (select 1 from ${messageAttachments} where ${messageAttachments.messageId} = ${favoriteFiles.messageId} and ${messageAttachments.fileUrl} = ${favoriteFiles.fileUrl} and ${messageAttachments.deletedAt} is not null)`,
     visibleIn(messages.createdAt, teamId),
   ];
   if (before) conditions.push(lt(favoriteFiles.createdAt, before));

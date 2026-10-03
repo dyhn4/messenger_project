@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/calendar.dart';
 import 'api_client.dart' show ApiException;
 import 'calendar_api.dart';
+import 'calendar_move.dart';
+import 'calendar_search.dart';
 
 /// 캘린더 화면의 상태: 선택한 팀의 캘린더 목록, 보이는 구간의 일정 캐시, 숨김 토글, 소켓
 /// `calendar:changed` 수신 시 새로고침.
@@ -62,6 +64,17 @@ class CalendarController extends ChangeNotifier {
   final Map<DateTime, Future<void>> _inflight = {};
   List<({DateTime from, DateTime to})> _watched = [];
 
+  // ---- 제목 검색 ----
+
+  CalendarSearchController? _search;
+
+  /// 일정 제목 검색 상태(처음 쓸 때 만든다). 숨긴 캘린더의 결과는 [CalendarSearchController.visibleItems]가 뺀다.
+  CalendarSearchController get search => _search ??= CalendarSearchController(
+    apiProvider: apiProvider,
+    teamId: () => teamId,
+    isHidden: isHidden,
+  );
+
   // ---- 캘린더 목록 ----
 
   /// 준회원인지 — 새 캘린더 만들기·구독은 정회원 이상만 할 수 있다(서버도 막는다).
@@ -109,6 +122,7 @@ class CalendarController extends ChangeNotifier {
   Future<void> setTeam(String? id) async {
     if (id != teamId) {
       teamId = id;
+      _search?.clear();
       _resetData();
       notifyListeners();
     }
@@ -139,6 +153,7 @@ class CalendarController extends ChangeNotifier {
     _watched = [];
     _hiddenBuiltinLoaded = false;
     _hiddenBuiltin.clear();
+    _search?.clear();
     _resetData();
     notifyListeners();
   }
@@ -274,7 +289,11 @@ class CalendarController extends ChangeNotifier {
     _inflight.clear();
     final needed = _neededChunks();
     _chunks.removeWhere((key, _) => !needed.contains(key));
-    await Future.wait([loadCalendars(), _fetchWatched(force: true)]);
+    await Future.wait([
+      loadCalendars(),
+      _fetchWatched(force: true),
+      ?_search?.refreshIfActive(),
+    ]);
   }
 
   /// 소켓 calendar:changed — 지금 보는 팀의 변경이면 새로고침한다.
@@ -402,6 +421,58 @@ class CalendarController extends ChangeNotifier {
   Future<EventOccurrence> fetchEvent(String eventId) =>
       apiProvider().fetchEvent(eventId);
 
+  /// 일정을 드래그로 옮긴다(반복이 아닌 일정만 — [canDragEvent]). 놓자마자 화면의 일정을 새 자리로 바꾸고(낙관적)
+  /// `PATCH /events/:id`(start/end/allDay)를 보낸다. 서버가 거절하면 원래 자리로 되돌리고 오류를 다시 던지며,
+  /// 성공하면 보이는 구간을 다시 받는다.
+  Future<void> moveEvent(EventOccurrence event, EventMove move) async {
+    final id = event.eventId;
+    if (id == null || !canDragEvent(event)) {
+      throw StateError('옮길 수 없는 일정입니다.');
+    }
+    final snapshot = Map<DateTime, List<EventOccurrence>>.of(_chunks);
+    final epoch = _eventsEpoch;
+    _replaceEventInChunks(id, move.applyTo(event));
+    notifyListeners();
+    try {
+      await apiProvider().updateEvent(id, move.toFields());
+    } catch (_) {
+      if (epoch == _eventsEpoch) {
+        _chunks
+          ..clear()
+          ..addAll(snapshot);
+        notifyListeners();
+      } else {
+        // 그 사이 다시 받았다면 되돌릴 옛 데이터가 없다 — 서버 값을 새로 받는다.
+        unawaited(_reloadEventsOnly());
+      }
+      rethrow;
+    }
+    await _reloadEventsOnly();
+  }
+
+  /// 캐시에서 [eventId]의 회차들을 빼고 [moved]를 새 자리의 덩어리(없으면 원래 있던 덩어리)에 넣는다.
+  void _replaceEventInChunks(String eventId, EventOccurrence moved) {
+    final had = <DateTime>{};
+    for (final key in _chunks.keys.toList()) {
+      final list = _chunks[key]!;
+      if (list.any((e) => e.eventId == eventId)) {
+        had.add(key);
+        _chunks[key] = [
+          for (final e in list)
+            if (e.eventId != eventId) e,
+        ];
+      }
+    }
+    final targets = <DateTime>{
+      for (final d in [moved.firstDay, moved.lastDay])
+        if (_chunks.containsKey(DateTime(d.year, d.month, 1)))
+          DateTime(d.year, d.month, 1),
+    };
+    for (final key in targets.isEmpty ? had : targets) {
+      _chunks[key] = [..._chunks[key]!, moved];
+    }
+  }
+
   // ---- 캘린더 관리 (관리 대화상자가 쓴다 — 성공하면 목록을 다시 받는다) ----
 
   Future<CalendarInfo> createCalendar({
@@ -493,6 +564,7 @@ class CalendarController extends ChangeNotifier {
     _disposed = true;
     _changedSub?.cancel();
     _reconnectSub?.cancel();
+    _search?.dispose();
     super.dispose();
   }
 }

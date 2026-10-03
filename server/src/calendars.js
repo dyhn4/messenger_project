@@ -41,6 +41,7 @@ import {
   listTeamMemberIdSet,
   listTeamNonGuestMemberIds,
   listUserNames,
+  searchEventsByTitle,
   searchSubscribableCalendars,
   setEventColor,
   setMemberRole,
@@ -49,6 +50,7 @@ import {
   updateEvent,
   upsertMemberPreferences,
 } from './db/queries/calendars.js';
+import { canSearchEventTitle, parseCalendarSearchQuery, searchCursorOf, toSearchItem } from './calendarSearchRules.js';
 import { listTeamIdsForUser } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import { holidaysInRange } from './holidays.js';
@@ -778,6 +780,78 @@ export function createCalendarsRouter(io) {
     const sortKey = (o) => (o.allDay ? o.start : o.start + KST_OFFSET_MS);
     result.sort((a, b) => sortKey(a) - sortKey(b) || Number(b.allDay) - Number(a.allDay) || a.title.localeCompare(b.title, 'ko'));
     res.json(result);
+  });
+
+  // ── 9-2. 일정 제목 검색 ──
+  // 내가 볼 수 있는 캘린더(숨김 여부는 서버가 모른다 — 클라이언트가 거른다)와 내가 참석자인 일정 중 제목에 q가 들어간 것.
+  // 공휴일·생일은 대상이 아니다. 결과는 일정(마스터) 단위, 시작 시각 최신순(start 내림차순). 반복 일정의 start는 첫 회차다.
+  router.get('/teams/:teamId/calendar/search', async (req, res) => {
+    const team = await requireTeam(req, res);
+    if (!team) return;
+    const parsed = parseCalendarSearchQuery(req.query);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const teamId = req.params.teamId;
+    const userId = req.user.sub;
+
+    const candidates = await listCalendarCandidates(teamId, userId);
+    const infoById = new Map();
+    for (const { calendar, member } of candidates) {
+      infoById.set(calendar.id, { calendar, access: await calendarAccess(calendar, userId, { team, member }) });
+    }
+    const infos = [...infoById.values()];
+    const rows = await searchEventsByTitle({
+      teamId,
+      calendarIds: infos.filter((i) => i.access.canView).map((i) => i.calendar.id),
+      managedCalendarIds: infos.filter((i) => i.access.isOwner === true || i.access.isManager === true).map((i) => i.calendar.id),
+      userId,
+      like: parsed.like,
+      before: parsed.before,
+      limit: parsed.limit + 1,
+    });
+    const hasMore = rows.length > parsed.limit;
+    const events = rows.slice(0, parsed.limit);
+
+    // 참석자로만 초대받은 일정의 캘린더(내가 못 보는 캘린더) 정보도 채운다.
+    const missing = [...new Set(events.map((e) => e.calendarId))].filter((id) => !infoById.has(id));
+    if (missing.length > 0) {
+      const rowsOfMine = await listMemberRowsForUser(userId, missing);
+      for (const calendar of await findCalendarsByIds(missing)) {
+        infoById.set(calendar.id, {
+          calendar,
+          access: await calendarAccess(calendar, userId, { team, member: rowsOfMine.get(calendar.id) ?? null }),
+        });
+      }
+    }
+
+    const eventIds = events.map((e) => e.id);
+    const [attendeesByEvent, colors, ownerNames] = await Promise.all([
+      listAttendeesForEvents(eventIds),
+      listEventColorsForUser(eventIds, userId),
+      listUserNames([...new Set(events.map((e) => infoById.get(e.calendarId)?.calendar.ownerId).filter(Boolean))]),
+    ]);
+
+    const items = [];
+    for (const event of events) {
+      const info = infoById.get(event.calendarId);
+      if (!info) continue;
+      const attendees = attendeesByEvent.get(event.id) ?? [];
+      const isAttendee = attendees.some((a) => a.userId === userId);
+      if (!info.access.canView && !isAttendee) continue;
+      // 쿼리가 이미 거르지만, 가려진("비공개 일정") 제목이 걸리는 일은 절대 없도록 한 번 더 확인한다.
+      if (!canSearchEventTitle({ event, viewerId: userId, isAttendee, access: info.access })) continue;
+      const { calendar, access } = info;
+      items.push(
+        toSearchItem({
+          event,
+          calendarName: calendar.kind === 'personal' ? (ownerNames.get(calendar.ownerId) ?? calendar.name) : calendar.name,
+          color: colors.get(event.id) ?? access.member?.color ?? calendar.color,
+          attendees,
+          creatorName: event.creatorName,
+          canEdit: canModifyCalendarEvent({ access, event, userId }),
+        }),
+      );
+    }
+    res.json({ items, nextBefore: hasMore && items.length > 0 ? searchCursorOf(items[items.length - 1]) : null });
   });
 
   // ── 10. 일정 만들기 ──

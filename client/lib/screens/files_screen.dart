@@ -94,7 +94,17 @@ class _FilesScreenState extends State<FilesScreen> {
     message: m,
     url: widget.session.resolveUrl(m.fileUrl ?? ''),
     fileName: m.fileName ?? (m.type == MessageType.image ? 'image.png' : '파일'),
+    // 목록의 한 줄은 첨부 하나다 — 서버가 줄마다 그 첨부 id를 준다(옛 메시지는 메시지 id).
+    attachmentId: m.attachmentId,
+    // 지운 파일은 목록에서 사라진다 — 미리보기 화면이었다면 목록으로 돌아가서 다시 받는다.
+    onDeleted: _onFileDeleted,
   );
+
+  void _onFileDeleted() {
+    if (!mounted) return;
+    setState(() => _preview = null);
+    _load();
+  }
 
   @override
   void initState() {
@@ -320,6 +330,13 @@ class _FilesScreenState extends State<FilesScreen> {
                 actions: _actionsFor(pageItems[i]),
                 onToggleFavorite: () => _toggleFavorite(pageItems[i]),
                 onTap: () => setState(() => _preview = pageItems[i]),
+                onLongPress: () => showFileActionSheet(
+                  context,
+                  _actionsFor(pageItems[i]),
+                  isImage: pageItems[i].type == MessageType.image,
+                  favorited: _isFavorite(pageItems[i]),
+                  onToggleFavorite: () => _toggleFavorite(pageItems[i]),
+                ),
               ),
             ),
           ),
@@ -374,6 +391,7 @@ class _FilesScreenState extends State<FilesScreen> {
       for (final x in photos)
         ViewerImage(
           id: idOf(x),
+          attachmentId: x.attachmentId,
           message: x,
           url: widget.session.resolveUrl(x.fileUrl ?? ''),
           fileName: x.fileName ?? 'image.png',
@@ -385,6 +403,7 @@ class _FilesScreenState extends State<FilesScreen> {
       images = [
         ViewerImage(
           id: idOf(m),
+          attachmentId: m.attachmentId,
           message: m,
           url: widget.session.resolveUrl(m.fileUrl ?? ''),
           fileName: m.fileName ?? 'image.png',
@@ -400,6 +419,7 @@ class _FilesScreenState extends State<FilesScreen> {
           initialIndex: start,
           session: widget.session,
           message: m,
+          onFileDeleted: _onFileDeleted,
           // 댓글 패널은 그 사진의 방에서 연다(방을 모르면 댓글 버튼만 안 보인다).
           room: widget.session.rooms.where((r) => r.id == m.roomId).firstOrNull,
         ),
@@ -468,10 +488,14 @@ class _FilesScreenState extends State<FilesScreen> {
               onOpen: () => _openViewer(m),
             )
           else
+            // 마우스를 올리면 더보기(파일 전달·다운로드·즐겨찾기·삭제)가 뜬다.
             DownloadableFile(
               session: widget.session,
               url: widget.session.resolveUrl(m.fileUrl ?? ''),
               fileName: m.fileName ?? '파일',
+              message: m,
+              attachmentId: m.attachmentId,
+              onDeleted: _onFileDeleted,
             ),
         ],
       ),
@@ -492,6 +516,9 @@ class _FileResultRow extends StatefulWidget {
   final FileActions actions;
   final VoidCallback onToggleFavorite;
   final VoidCallback onTap;
+
+  /// 길게 누르기(모바일) — 파일 전달·다운로드·즐겨찾기·삭제 시트.
+  final VoidCallback onLongPress;
   const _FileResultRow({
     required this.session,
     required this.message,
@@ -501,6 +528,7 @@ class _FileResultRow extends StatefulWidget {
     required this.actions,
     required this.onToggleFavorite,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -593,6 +621,7 @@ class _FileResultRowState extends State<_FileResultRow> {
     final roomName = widget.roomName;
     return InkWell(
       onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(

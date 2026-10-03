@@ -8,6 +8,8 @@ import {
   roomMembers,
   rooms,
   messages,
+  teamMembers,
+  teams,
 } from '../schema.js';
 import { fileKindSql } from '../../fileKinds.js';
 
@@ -282,6 +284,7 @@ const notBeforeDmHistoryFloor = or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(m
 export async function searchMessages({
   requesterId,
   teamId,
+  allTeams = false, // true면 teamId 대신 내가 속한 모든 팀의 방에서 찾는다(검색 패널의 "모든 팀") — 결과 행에 roomTeamId·roomTeamName이 붙는다.
   roomId,
   senderId,
   since,
@@ -300,13 +303,19 @@ export async function searchMessages({
     eq(roomMembers.userId, requesterId),
     or(
       sql`lower(${messages.text}) like ${pattern}`,
-      sql`lower(${messages.fileName}) like ${pattern}`,
+      // 지워진 파일(file_deleted_at)의 이름으로는 더 이상 찾지 않는다.
+      sql`(${messages.fileDeletedAt} is null and lower(${messages.fileName}) like ${pattern})`,
       // 보드 뷰 게시글은 제목으로도 찾는다(다른 메시지는 title이 null이라 영향 없음).
       sql`lower(${messages.title}) like ${pattern}`,
     ),
     notBeforeDmHistoryFloor,
   ];
-  if (teamId) conditions.push(eq(rooms.teamId, teamId));
+  if (allTeams) {
+    // 팀 멤버십 확인 — 내가 방 멤버여도 이미 나간 팀의 방은 빠진다.
+    conditions.push(
+      sql`${rooms.teamId} in (select ${teamMembers.teamId} from ${teamMembers} where ${teamMembers.userId} = ${requesterId})`,
+    );
+  } else if (teamId) conditions.push(eq(rooms.teamId, teamId));
   if (roomId) conditions.push(eq(messages.roomId, roomId));
   if (senderId) conditions.push(eq(messages.senderId, senderId));
   if (since) conditions.push(gte(messages.createdAt, new Date(since)));
@@ -314,7 +323,7 @@ export async function searchMessages({
   if (type === 'poll') conditions.push(eq(messages.type, 'poll'));
   else if (type === 'message') conditions.push(inArray(messages.type, ['text', 'post']));
   else if (type === 'file') {
-    conditions.push(inArray(messages.type, ['image', 'file']));
+    conditions.push(inArray(messages.type, ['image', 'file']), isNull(messages.fileDeletedAt));
     if (fileKind) conditions.push(fileKindSql(fileKind, messages.mimeType, messages.fileName));
   }
 
@@ -325,6 +334,7 @@ export async function searchMessages({
       .from(messages)
       .innerJoin(roomMembers, eq(roomMembers.roomId, messages.roomId))
       .innerJoin(rooms, eq(rooms.id, messages.roomId))
+      .innerJoin(teams, eq(teams.id, rooms.teamId))
       .leftJoin(
         dmHistoryFloors,
         and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, requesterId)),
@@ -332,10 +342,10 @@ export async function searchMessages({
       .where(where);
 
   const rows = (
-    await joined({ message: messages })
+    await joined({ message: messages, roomTeamId: rooms.teamId, roomTeamName: teams.name })
       .orderBy(order === 'asc' ? asc(messages.createdAt) : desc(messages.createdAt))
       .limit(limit)
-  ).map((r) => r.message);
+  ).map((r) => (allTeams ? { ...r.message, roomTeamId: r.roomTeamId, roomTeamName: r.roomTeamName } : r.message));
   if (!withTotal) return rows;
   const [{ total }] = await joined({ total: sql`count(*)::int` });
   return { rows, total };
@@ -364,6 +374,8 @@ export async function listAttachments({
     // 비어 빠진다 — 호출부 attachments.js가 첨부 한 줄씩 펼친다).
     inArray(messages.type, ['image', 'file', 'post', 'poll']),
     isNotNull(messages.fileUrl),
+    // 파일을 지운(소프트 삭제) 첨부는 모아보기에 안 나온다 — 첨부가 여럿이면 남은 첨부로 messages의 파일 칸을 다시 맞춰 둔다.
+    isNull(messages.fileDeletedAt),
     isNull(messages.deletedAt),
     notBeforeDmHistoryFloor,
   ];
@@ -377,7 +389,7 @@ export async function listAttachments({
     conditions.push(
       or(
         sql`lower(${messages.fileName}) like ${pattern}`,
-        sql`exists (select 1 from ${messageAttachments} where ${messageAttachments.messageId} = ${messages.id} and lower(${messageAttachments.fileName}) like ${pattern})`,
+        sql`exists (select 1 from ${messageAttachments} where ${messageAttachments.messageId} = ${messages.id} and ${messageAttachments.deletedAt} is null and lower(${messageAttachments.fileName}) like ${pattern})`,
       ),
     );
   }

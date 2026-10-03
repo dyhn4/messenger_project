@@ -11,6 +11,7 @@ import '../widgets/group_icon_picker.dart';
 import '../widgets/icon_edit_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/room_options_menu.dart' show CloseWhenRoomRemoved;
+import 'convert_to_topic_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'new_group_dialog.dart'
     show GroupFormLabel, GroupFormNotice, GroupIconField;
@@ -155,6 +156,15 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
   }
 
   bool get _canEdit => _room.canEditGroupInfo(_session);
+
+  /// "토픽으로 전환" — 정회원 이상(토픽 생성이 허용된 사람)에게만 단추가 보인다. 전환되면 이 창은 그룹채팅용이라 닫는다
+  /// (대화 화면은 그대로 열려 있고 방이 토픽으로 바뀐다).
+  Future<void> _convertToTopic() async {
+    final converted = await showConvertToTopicDialog(context, _session, _room);
+    if (!converted || !mounted) return;
+    showAppToast(context, '토픽으로 전환했습니다.');
+    Navigator.of(context).pop();
+  }
 
   /// 방의 지금 아이콘 모양 — 예전에 만든 그룹은 값이 없다(= 멤버 사진).
   String get _roomIconType => _room.iconType ?? 'members';
@@ -433,6 +443,26 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen>
           ),
           onChanged: (_) => setState(() {}),
         ),
+        if (_room.canConvertToTopic(_session)) ...[
+          const SizedBox(height: 20),
+          const Divider(height: 1),
+          const SizedBox(height: 16),
+          const GroupFormLabel('토픽으로 전환'),
+          Text(
+            '더 많은 멤버와 이야기하고 싶다면 이 그룹채팅을 토픽으로 바꿀 수 있어요. 대화 내용은 그대로 유지돼요.',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              key: const ValueKey('group-settings-convert'),
+              onPressed: _saving ? null : _convertToTopic,
+              icon: const Icon(Icons.tag, size: 18),
+              label: const Text('토픽으로 전환'),
+            ),
+          ),
+        ],
         if (_error != null) ...[
           const SizedBox(height: 12),
           GroupFormNotice(

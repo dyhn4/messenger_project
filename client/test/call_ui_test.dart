@@ -173,7 +173,9 @@ void main() {
       expect(find.text('손들기'), findsNWidgets(2)); // 라벨 + 툴팁
     });
 
-    testWidgets('폰 폭(360): 넘치지 않고 라벨은 숨기고 나가기는 항상 보인다', (tester) async {
+    testWidgets('폰 폭(360): 주요 단추 + 더보기 + 나가기가 겹치지 않고 화면 안에 다 들어간다', (
+      tester,
+    ) async {
       _size(tester, const Size(360, 640));
       final log = <String>[];
       await tester.pumpWidget(
@@ -185,19 +187,89 @@ void main() {
         ),
       );
       expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('call-bar-scroll')), findsNothing);
+      // 라벨 없이 단추만, 더보기로 옮긴 기능은 바에 없다.
       expect(find.text('손들기'), findsNothing);
-      expect(find.text('나가기'), findsOneWidget);
-      final leave = tester.getRect(find.byKey(const ValueKey('call-leave')));
-      expect(leave.right, lessThanOrEqualTo(360));
+      expect(find.byKey(const ValueKey('call-share')), findsNothing);
 
-      // 가려진 단추도 가로 스크롤로 닿는다.
-      await tester.drag(
-        find.byKey(const ValueKey('call-bar-scroll')),
-        const Offset(-400, 0),
+      final keys = [
+        'call-mic',
+        'call-camera',
+        'call-participants',
+        'call-chat',
+        'call-more',
+        'call-leave',
+      ];
+      Rect? prev;
+      for (final k in keys) {
+        final r = tester.getRect(find.byKey(ValueKey(k)));
+        expect(r.left, greaterThanOrEqualTo(0), reason: k);
+        expect(r.right, lessThanOrEqualTo(360), reason: k);
+        // 배지(오른쪽 위로 4 튀어나옴)까지 이웃 단추와 겹치지 않을 만큼 띄운다.
+        if (prev != null) {
+          expect(r.left - prev.right, greaterThanOrEqualTo(8), reason: k);
+        }
+        prev = r;
+      }
+
+      for (final k in keys) {
+        await tester.tap(find.byKey(ValueKey(k)));
+        await tester.pumpAndSettle();
+        if (k == 'call-more') {
+          await tester.tapAt(const Offset(180, 20)); // 메뉴 바깥을 눌러 닫는다.
+          await tester.pumpAndSettle();
+        }
+      }
+      expect(log, ['mic', 'camera', 'participants', 'chat', 'leave']);
+    });
+
+    testWidgets('폰 폭(360): 더보기 메뉴에서 화면 공유·손들기·화이트보드·보기 전환', (
+      tester,
+    ) async {
+      _size(tester, const Size(360, 640));
+      final log = <String>[];
+      await tester.pumpWidget(
+        _app(Align(alignment: Alignment.bottomCenter, child: _bar(log: log))),
       );
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('call-view')));
-      expect(log, ['view']);
+      for (final (key, expected) in [
+        ('call-share', 'share'),
+        ('call-hand', 'hand'),
+        ('call-whiteboard', 'whiteboard'),
+        ('call-view', 'view'),
+      ]) {
+        await tester.tap(find.byKey(const ValueKey('call-more')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(ValueKey(key)));
+        await tester.pumpAndSettle();
+        // 누르면 메뉴는 닫힌다.
+        expect(find.byKey(ValueKey(key)), findsNothing, reason: key);
+        expect(log.last, expected);
+      }
+    });
+
+    testWidgets('폰 폭(360): 더보기 안의 기능이 켜져 있으면 더보기에 점, 메뉴엔 현재 상태', (
+      tester,
+    ) async {
+      _size(tester, const Size(360, 640));
+      await tester.pumpWidget(
+        _app(Align(alignment: Alignment.bottomCenter, child: _bar())),
+      );
+      expect(find.byKey(const ValueKey('call-bar-dot')), findsNothing);
+
+      await tester.pumpWidget(
+        _app(
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: _bar(sharing: true, handRaised: true),
+          ),
+        ),
+      );
+      expect(find.byKey(const ValueKey('call-bar-dot')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('call-more')));
+      await tester.pumpAndSettle();
+      expect(find.text('화면 공유 중지'), findsOneWidget);
+      expect(find.text('손 내리기'), findsOneWidget);
     });
   });
 

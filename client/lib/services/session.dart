@@ -350,6 +350,8 @@ class Session extends ChangeNotifier {
   StreamSubscription? _presenceSub;
   StreamSubscription<CallState>? _callStateSub;
   StreamSubscription<CallMicRequest>? _callMicSub;
+  StreamSubscription<CallDeclined>? _callDeclinedSub;
+  StreamSubscription<CallCardUpdate>? _callCardSub;
   StreamSubscription<Announcement>? _announcementSub;
   StreamSubscription<Announcement>? _announcementUpdatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _announcementDeletedSub;
@@ -754,6 +756,7 @@ class Session extends ChangeNotifier {
         deviceId: deviceIdentity?.deviceId,
       );
       // 새로 연결한 소켓은 reconnected를 안 보내므로, 끊겨 있던 동안 놓친 것을 직접 받아온다.
+      _reannounceCall();
       unawaited(_resyncAfterReconnect());
     }
     notifyListeners();
@@ -1526,6 +1529,19 @@ class Session extends ChangeNotifier {
     unawaited(loadServerStickers(force: true));
     _callStateSub?.cancel();
     _callStateSub = chatSocket.callStates.listen(_applyCallState);
+    _callCardSub?.cancel();
+    _callCardSub = chatSocket.callCards.listen(
+      // 그 방을 열어 본 적이 있어 메시지가 메모리에 있을 때만 그 자리에서 바꾼다(아니면 나중에 열 때 최신을 받는다).
+      (u) => existingControllerFor(u.roomId)?.applyCallCard(u.messageId, u.card),
+    );
+    _callDeclinedSub?.cancel();
+    _callDeclinedSub = chatSocket.callDeclined.listen((e) {
+      // 사용자(계정) 단위로 오므로, 이 기기가 그 통화에 들어와 있을 때만 알린다(같은 계정의 다른
+      // 기기에서 통화 중이면 그 기기가 알린다). 통화 화면이든 잠깐 다른 화면에 나와 있든 보이도록
+      // 앱 전체 알약 알림으로 띄운다.
+      if (callController.roomId != e.roomId) return;
+      _showToast('${e.name}님이 화상회의를 거절했습니다');
+    });
     _callMicSub?.cancel();
     _callMicSub = chatSocket.callMicRequests.listen((request) {
       // 지금 이 기기가 그 통화에 있을 때만(다른 기기에서 통화 중이면 그 기기가 따른다).
@@ -1689,9 +1705,10 @@ class Session extends ChangeNotifier {
       secretSessionManager?.handleRekeyAck(e);
     });
     _reconnectSub?.cancel();
-    _reconnectSub = chatSocket.reconnected.listen(
-      (_) => _resyncAfterReconnect(),
-    );
+    _reconnectSub = chatSocket.reconnected.listen((_) {
+      _reannounceCall();
+      unawaited(_resyncAfterReconnect());
+    });
     _connectFailureSub?.cancel();
     _connectFailureSub = chatSocket.connectFailures.listen(
       (_) => unawaited(_reselectServerEndpoint()),
@@ -1811,21 +1828,42 @@ class Session extends ChangeNotifier {
   /// 서버가 보내주는 방별 통화 상태(call:state)를 반영하고, 그 결과로 "지금 나에게 걸려온
   /// 통화"가 있는지 판단한다 — 통화가 켜져 있는데 참가자 목록에 내가 없고 내가 건 것도
   /// 아니면 아직 안 받은 통화다. 내가 이미 다른 통화 중이면 벨을 울리지 않는다.
+  /// 내가 이미 응답한(참여했거나 거절한) 통화들 — [_callKey]. 통화 중에 누가 들어오고 나갈 때마다 call:state가
+  /// 다시 오는데, 그때 "통화 진행 중 + 나는 참가자 아님 + 나는 통화 중 아님"만 보고 벨을 울리면 내가 나가기를
+  /// 누른 직후나 거절한 뒤에도 같은 통화의 수신 창이 또 뜬다. 그 통화가 끝나면 지운다 — 같은 방에서 새로 거는
+  /// 통화는 다시 울려야 하니까.
+  final Set<String> _answeredCalls = {};
+
+  /// 통화 한 통을 가리키는 열쇠 — 같은 방이라도 새로 시작한 통화는 시작 시각이 달라 다른 통화다.
+  static String _callKey(String roomId, CallState? state) =>
+      '$roomId@${state?.startedAt?.millisecondsSinceEpoch}';
+
+  void _markCallAnswered(String roomId) =>
+      _answeredCalls.add(_callKey(roomId, callStates[roomId]));
+
+  /// 테스트가 소켓 없이 call:state를 흘려 넣을 때.
+  @visibleForTesting
+  void debugApplyCallState(CallState state) => _applyCallState(state);
+
   void _applyCallState(CallState state) {
     if (state.active) {
       callStates[state.roomId] = state;
     } else {
       callStates.remove(state.roomId);
+      _answeredCalls.removeWhere((k) => k.startsWith('${state.roomId}@'));
     }
     if (state.active && callController.roomId == state.roomId) {
       _syncCallController(state);
     }
 
     final iAmIn = state.participantIds.contains(userId);
+    // 다른 기기에서 받았어도 이 통화엔 응답한 것이다.
+    if (state.active && iAmIn) _markCallAnswered(state.roomId);
     if (state.active &&
         !iAmIn &&
         state.startedBy != userId &&
-        callController.roomId == null) {
+        callController.roomId == null &&
+        !_answeredCalls.contains(_callKey(state.roomId, state))) {
       incomingCallRoomId = state.roomId;
     } else if (incomingCallRoomId == state.roomId && (!state.active || iAmIn)) {
       // 통화가 끝났거나(아무도 안 남음) 내가 다른 기기에서 받았으면 벨을 끈다.
@@ -1843,6 +1881,7 @@ class Session extends ChangeNotifier {
   /// 소켓으로 알려서, 연결 실패한 사람이 참가자 목록에 남지 않게 한다.
   Future<void> joinCall(String roomId) async {
     incomingCallRoomId = null;
+    _markCallAnswered(roomId);
     notifyListeners();
     final match = rooms.where((r) => r.id == roomId);
     await callController.join(
@@ -1873,14 +1912,32 @@ class Session extends ChangeNotifier {
 
   Future<void> leaveCall() async {
     final roomId = callController.roomId;
+    // 나간 통화가 계속 진행 중이어도(남은 사람이 있어도) 다시 울리지 않게.
+    if (roomId != null) _markCallAnswered(roomId);
     await callController.leave();
     if (roomId != null) chatSocket.leaveCall(roomId);
     notifyListeners();
   }
 
   /// 수신 화면에서 "거절" — 이 기기에서만 벨을 끈다(다른 기기나 통화 자체는 그대로).
+  /// 소켓이 다시 붙었을 때(재연결·주소 전환) 통화 중이었으면 서버에 참여를 다시 알린다. 서버는 끊긴
+  /// 소켓을 잠깐 기다렸다 통화에서 빼는데(server/src/callEvents.js의 CALL_DISCONNECT_GRACE_MS), 그 안에
+  /// 다시 알리면 통화가 그대로 이어지고 대화 기록에 "나갔습니다/참여했습니다"가 남지 않는다. 안 알리면
+  /// 영상은 계속 되는데 서버만 이 사람을 통화에서 빼 버려, 참가자 목록·통화 기록이 어긋난다.
+  void _reannounceCall() {
+    final roomId = callController.roomId;
+    if (roomId != null && callController.connected) chatSocket.joinCall(roomId);
+  }
+
   void declineIncomingCall() {
+    final roomId = incomingCallRoomId;
     incomingCallRoomId = null;
+    if (roomId != null) {
+      _markCallAnswered(roomId);
+      // 통화 중인 사람들(건 사람 포함)에게 거절했다고 알린다 — 안 그러면 안 받는 건지 거절한 건지 모른다.
+      chatSocket.declineCall(roomId);
+      unawaited(notifications.cancelIncomingCall(roomId));
+    }
     notifyListeners();
   }
 

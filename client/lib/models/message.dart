@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import 'album.dart' show SharedAlbum;
+import 'call_card.dart';
 import 'comment.dart';
 import 'mention.dart';
 import 'poll.dart';
@@ -199,6 +200,10 @@ class Message {
   /// 할 일을 만들 때 올라간 할 일 카드(todo_message_card.dart) — 아니면 null. 메시지 자체는 일반 글(`[할 일] 제목`)이다.
   final SharedTodo? sharedTodo;
 
+  /// 화상회의 기록 카드(시스템 메시지 — call_message_card.dart) — 아니면 null. 통화가 진행되는 동안
+  /// call:card로 그 자리에서 바뀐다(RoomChatController.applyCallCard) — non-final.
+  CallCard? callCard;
+
   /// 막 도착한 메시지(message:new)의 알림을 받을 사람만 — 있으면 이 사람들 말고는 알림을 띄우지 않는다(메시지는 보이고
   /// 안읽음도 는다). 할 일 생성 창에서 "대화방에 알리기"를 끄고 올린 할 일 카드가 담당자만 적어 보낸다. 보통은 null.
   final List<String>? notifyOnly;
@@ -245,6 +250,7 @@ class Message {
     this.poll,
     this.sharedAlbum,
     this.sharedTodo,
+    this.callCard,
     this.notifyOnly,
     List<Comment>? comments,
   }) : comments = comments ?? [],
@@ -345,6 +351,7 @@ class Message {
           : Poll.fromJson(Map<String, dynamic>.from(json['poll'] as Map)),
       sharedAlbum: SharedAlbum.fromJson(json['sharedAlbum']),
       sharedTodo: SharedTodo.fromJson(json['sharedTodo']),
+      callCard: CallCard.fromJson(json['callCard']),
       notifyOnly: (json['notifyOnly'] as List?)?.whereType<String>().toList(),
     );
   }

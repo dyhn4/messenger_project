@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../models/call_card.dart';
 import '../models/comment.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
@@ -739,6 +740,17 @@ class RoomChatController extends ChangeNotifier {
       changed = true;
     }
     return changed;
+  }
+
+  /// 화상회의 기록 카드가 바뀌었을 때(call:card) — 그 메시지의 카드를 바꾼다. 목록에 없으면 false.
+  bool applyCallCard(String messageId, CallCard card) {
+    for (final m in messages) {
+      if (m.id != messageId) continue;
+      m.callCard = card;
+      notifyListeners();
+      return true;
+    }
+    return false;
   }
 
   /// 투표가 들어 있는 메시지 — 메시지 id로 먼저, 없으면 투표 id로 찾는다(아직 못 받은 방이면 null).

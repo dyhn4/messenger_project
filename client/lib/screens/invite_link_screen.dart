@@ -5,6 +5,7 @@ import '../models/invite_link.dart';
 import '../services/invite_share.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 
@@ -52,9 +53,7 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppToast(context, message);
   }
 
   Future<void> _create() async {
@@ -154,7 +153,7 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.add_link),
-              label: const Text('새 초대 링크 만들기'),
+              label: const Text('초대 링크 만들기'),
             ),
           ),
           const SizedBox(height: 16),

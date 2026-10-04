@@ -16,6 +16,7 @@ import '../services/session.dart';
 import 'announcement_banner.dart';
 import 'attachment_widgets.dart';
 import 'board_view.dart';
+import 'call_message_card.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
 import 'date_picker_popup.dart';
@@ -742,7 +743,15 @@ class _ChatPanelState extends State<ChatPanel> {
                                 prev.type == MessageType.comment;
 
                             Widget row;
-                            if (m.type == MessageType.system) {
+                            if (m.type == MessageType.system &&
+                                m.callCard != null) {
+                              // 화상회의 기록 카드 — 통화 한 통에 한 장(시작·참여·거절·나감을 펼쳐 본다).
+                              row = CallMessageCard(
+                                session: widget.session,
+                                room: widget.room,
+                                message: m,
+                              );
+                            } else if (m.type == MessageType.system) {
                               row = SystemMessageRow(message: m);
                             } else if (m.type == MessageType.comment) {
                               final parent = _findMessage(

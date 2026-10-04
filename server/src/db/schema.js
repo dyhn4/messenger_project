@@ -532,6 +532,10 @@ export const messages = pgTable(
     // (todoRules.js todoCardMessage). 앱은 스냅샷을 먼저 그리고 할 일을 다시 받아 최신으로 바꾼다.
     todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
     todoCard: jsonb('todo_card'),
+    // 화상회의 한 통의 기록 카드(type='system' 메시지에만, callCards.js) — 통화가 시작될 때 한 장 만들고 참여·거절·
+    // 나감마다 고친다: { status: 'active'|'ended', startedAt, endedAt, durationMs, answered, events: [{ at, userId,
+    // name, kind: 'start'|'join'|'leave'|'decline' }] }. 대화에 시스템 메시지를 여러 줄 남기는 대신 이 한 장으로 본다.
+    callCard: jsonb('call_card'),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),

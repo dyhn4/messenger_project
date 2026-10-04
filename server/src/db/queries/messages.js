@@ -88,6 +88,22 @@ export async function updateMessageText(id, text, textFormat = null, mentions = 
   return row;
 }
 
+/** 화상회의 기록 카드를 고친다(callCards.js) — 사람이 고친 게 아니라 editedAt은 안 건드린다. [text]를 주면 같이 바꾼다. */
+export async function updateMessageCallCard(id, callCard, text) {
+  await db
+    .update(messages)
+    .set(text === undefined ? { callCard } : { callCard, text })
+    .where(eq(messages.id, id));
+}
+
+/** 아직 "진행 중"으로 남은 화상회의 카드들 — 서버가 재시작돼 통화 상태(메모리)를 잃었을 때 닫으려고 찾는다. */
+export function listActiveCallCardMessages() {
+  return db
+    .select({ id: messages.id, callCard: messages.callCard })
+    .from(messages)
+    .where(sql`${messages.callCard}->>'status' = 'active'`);
+}
+
 /** 링크 미리보기 결과를 채운다 — updateMessageText와 달리 editedAt을 안 건드린다(사용자가
  * 고친 게 아니라 서버가 나중에 긁어온 값이라 "(수정됨)" 표시가 붙으면 안 된다). */
 export async function updateMessageLinkPreview(id, preview) {

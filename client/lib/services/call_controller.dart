@@ -458,6 +458,10 @@ class CallController extends ChangeNotifier {
   void _onParticipantConnected(ParticipantConnectedEvent e) {
     _updateLocalTier();
     final identity = e.participant.identity;
+    // 이미 통화 중인 사람들에게 누가 들어왔는지 알린다(퇴장 알림과 짝). 내가 들어갈 때 이미 있던
+    // 사람들은 이 이벤트로 오지 않으므로(연결 시점의 기존 참가자) 들어가자마자 알림이 쏟아지지 않는다.
+    final name = e.participant.name.isEmpty ? identity : e.participant.name;
+    _notices.add('$name님이 들어왔습니다');
     _scheduleWhiteboardSnapshot(identity);
     if (!handRaised) return;
     // 막 들어온 사람의 데이터 채널이 아직 열리기 전일 수 있어 잠깐 뒤에 보낸다.
@@ -470,6 +474,11 @@ class CallController extends ChangeNotifier {
   void _onParticipantDisconnected(ParticipantDisconnectedEvent e) {
     _hands.remove(e.participant.identity);
     _updateLocalTier();
+    // 남은 사람들이 누가 나갔는지 알 수 있게 통화 화면에 알린다([나가기]뿐 아니라 앱이 꺼지거나 연결이
+    // 끊겨 빠진 경우도 같은 이벤트라 "나갔습니다"로 묶는다). 내가 나갈 때는 leave()가 리스너를 먼저
+    // 치우므로 여기로 오지 않는다.
+    final p = e.participant;
+    _notices.add('${p.name.isEmpty ? p.identity : p.name}님이 나갔습니다');
     notifyListeners();
   }
 

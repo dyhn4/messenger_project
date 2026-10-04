@@ -17,7 +17,7 @@ import '../widgets/muted_scrollbar.dart';
 /// session.canCreateTeamInviteLink(서버 설정 "팀 초대 링크 생성 권한")가 있을 때만 열린다 —
 /// 서버도 매 요청마다 다시 확인한다(teamInvites.js).
 ///
-/// [initialTeamId]를 주면(팀 설정 화면에서 열 때) "새 팀 초대 링크 만들기" 다이얼로그의 팀
+/// [initialTeamId]를 주면(팀 설정 화면에서 열 때) "팀 초대 링크 만들기" 다이얼로그의 팀
 /// 선택이 그 팀으로 미리 맞춰진다.
 Future<void> showTeamInviteLinkScreen(
   BuildContext context,
@@ -68,9 +68,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppToast(context, message);
   }
 
   Future<void> _create() async {
@@ -182,7 +180,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.group_add_outlined),
-              label: const Text('새 팀 초대 링크 만들기'),
+              label: const Text('팀 초대 링크 만들기'),
             ),
           ),
           const SizedBox(height: 16),

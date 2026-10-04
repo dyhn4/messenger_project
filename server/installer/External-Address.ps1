@@ -55,7 +55,9 @@ function Set-ExternalAddressInEnv {
     if (-not $found) {
         $newLines = $newLines + @('', '# External-Address.ps1이 지정한 외부(LTE/5G) 접속 주소(비우면 사내망 전용)', "EXTERNAL_ADDRESS=$Value")
     }
-    Set-Content -Path $EnvFile -Value $newLines -Encoding utf8
+    # BOM 없는 UTF-8로 쓴다 — PowerShell 5.1의 Set-Content -Encoding utf8은 BOM을 붙이는데, 첫 줄이
+    # 설정이면 dotenv가 그 키 이름을 BOM째로 읽어 값을 못 찾는다.
+    [System.IO.File]::WriteAllLines($EnvFile, [string[]]$newLines, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 $ServerPort = Get-EnvValue 'PORT'

@@ -4,8 +4,13 @@ import 'call_logic.dart';
 import 'call_stage.dart' show callHandColor, callSpeakingColor;
 
 /// 화면 아래 가운데의 줌 스타일 컨트롤바 — 둥근 아이콘 단추 줄(아이콘 + 작은 라벨)과 맨 오른쪽의
-/// 빨간 "나가기". 단추가 많아 좁은 폭(폰)에서는 단추 줄만 가로로 스크롤되고 라벨은 숨기며, 나가기는
-/// 항상 보인다. 마우스를 올리면 각 단추의 툴팁이 뜬다.
+/// 빨간 "나가기". 마우스를 올리면 각 단추의 툴팁이 뜬다.
+///
+/// 좁은 폭(폰·좁은 창, [labelBreakpoint] 미만)에서는 단추 8개가 한 줄에 다 안 들어가서, 예전에는
+/// 단추 줄을 가로 스크롤로 넘겼더니 끝의 단추가 나가기 옆에서 반쯤 잘려 겹쳐 보였다. 그래서 줌·미트
+/// 모바일처럼 자주 쓰는 것(마이크·카메라·참가자·채팅)만 고르게 늘어놓고, 나머지(화면 공유·손들기·
+/// 화이트보드·보기 전환)는 [더보기] 단추가 아래에서 올리는 메뉴로 옮긴다. 그중 켜져 있는 것(공유 중,
+/// 손 든 상태, 화이트보드 열림)이 있으면 더보기 단추에 점을 찍어 알린다.
 class CallControlBar extends StatelessWidget {
   final bool micOn;
   final bool camOn;
@@ -48,12 +53,14 @@ class CallControlBar extends StatelessWidget {
     required this.onLeave,
   });
 
-  /// 이 폭보다 좁으면 라벨을 숨기고 단추만 둔다.
-  static const labelBreakpoint = 560.0;
+  /// 이 폭보다 좁으면 라벨 달린 한 줄 대신 [좁은 배치](주요 단추 + 더보기)로 바꾼다 — 라벨 달린
+  /// 단추 8개(68씩)와 사이 간격, 나가기 알약, 여백을 합친 폭이 대략 이만큼이다.
+  static const labelBreakpoint = 780.0;
 
   @override
   Widget build(BuildContext context) {
     final showLabels = MediaQuery.sizeOf(context).width >= labelBreakpoint;
+    if (!showLabels) return _buildCompact(context);
     final speaker = viewMode == CallViewMode.speaker;
     final items = <Widget>[
       CallBarButton(
@@ -202,11 +209,169 @@ class CallControlBar extends StatelessWidget {
       ),
     );
   }
+
+  /// 좁은 배치 — 마이크·카메라·참가자·채팅·더보기·나가기(원형)를 한 줄에 고르게 놓는다. 360 폭
+  /// 폰에서도 단추 6개(44)와 간격이 다 들어가서 스크롤도 잘림도 없다.
+  Widget _buildCompact(BuildContext context) {
+    final moreActive = sharing || handRaised || whiteboardOpen;
+    final items = <Widget>[
+      CallBarButton(
+        key: const ValueKey('call-mic'),
+        icon: micOn ? Icons.mic : Icons.mic_off,
+        label: micOn ? '음소거' : '음소거 해제',
+        tooltip: micOn ? '마이크 끄기' : '마이크 켜기',
+        off: !micOn,
+        showLabel: false,
+        onPressed: onToggleMic,
+      ),
+      CallBarButton(
+        key: const ValueKey('call-camera'),
+        icon: camOn ? Icons.videocam : Icons.videocam_off,
+        label: camOn ? '비디오 중지' : '비디오 시작',
+        tooltip: camOn ? '카메라 끄기' : '카메라 켜기',
+        off: !camOn,
+        showLabel: false,
+        onPressed: onToggleCamera,
+      ),
+      CallBarButton(
+        key: const ValueKey('call-participants'),
+        icon: Icons.people,
+        label: '참가자',
+        tooltip: '참가자 목록',
+        badge: participantCount,
+        selected: panel == CallPanel.participants,
+        showLabel: false,
+        onPressed: onToggleParticipants,
+      ),
+      CallBarButton(
+        key: const ValueKey('call-chat'),
+        icon: Icons.chat_bubble,
+        label: '채팅',
+        tooltip: '통화 채팅',
+        badge: chatUnread,
+        badgeColor: Colors.redAccent,
+        selected: panel == CallPanel.chat,
+        showLabel: false,
+        onPressed: onToggleChat,
+      ),
+      CallBarButton(
+        key: const ValueKey('call-more'),
+        icon: Icons.more_horiz,
+        label: '더보기',
+        tooltip: '더보기(화면 공유·손들기·화이트보드·보기 전환)',
+        dot: moreActive,
+        showLabel: false,
+        onPressed: () => _openMoreSheet(context),
+      ),
+      Tooltip(
+        message: '통화 나가기',
+        child: Material(
+          key: const ValueKey('call-leave'),
+          color: const Color(0xFFE53935),
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onLeave,
+            child: const SizedBox(
+              width: 44,
+              height: 44,
+              child: Icon(Icons.call_end, color: Colors.white, size: 22),
+            ),
+          ),
+        ),
+      ),
+    ];
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+        child: Row(
+          key: const ValueKey('call-bar-compact'),
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: items,
+        ),
+      ),
+    );
+  }
+
+  /// 더보기 메뉴 — 좁은 배치에서 빠진 기능들. 항목을 누르면 메뉴를 먼저 닫고 실행한다(화면 공유는
+  /// 안드로이드 시스템 확인 창이 뜨므로 그 위에 메뉴가 남아 있으면 어색하다).
+  Future<void> _openMoreSheet(BuildContext context) {
+    final speaker = viewMode == CallViewMode.speaker;
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF242424),
+      showDragHandle: true,
+      builder: (sheetContext) {
+        Widget item({
+          required Key key,
+          required IconData icon,
+          required String label,
+          required VoidCallback onTap,
+          Color? activeColor,
+        }) {
+          return ListTile(
+            key: key,
+            leading: CircleAvatar(
+              radius: 20,
+              backgroundColor: activeColor ?? Colors.white12,
+              child: Icon(
+                icon,
+                color: activeColor != null ? Colors.black87 : Colors.white,
+                size: 22,
+              ),
+            ),
+            title: Text(label, style: const TextStyle(color: Colors.white)),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              onTap();
+            },
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              item(
+                key: const ValueKey('call-share'),
+                icon: sharing ? Icons.stop_screen_share : Icons.screen_share,
+                label: sharing ? '화면 공유 중지' : '화면 공유',
+                activeColor: sharing ? callSpeakingColor : null,
+                onTap: onToggleShare,
+              ),
+              item(
+                key: const ValueKey('call-hand'),
+                icon: Icons.front_hand,
+                label: handRaised ? '손 내리기' : '손들기',
+                activeColor: handRaised ? callHandColor : null,
+                onTap: onToggleHand,
+              ),
+              item(
+                key: const ValueKey('call-whiteboard'),
+                icon: Icons.draw,
+                label: whiteboardOpen ? '화이트보드 닫기' : '화이트보드 열기',
+                activeColor: whiteboardOpen ? Colors.white70 : null,
+                onTap: onToggleWhiteboard,
+              ),
+              item(
+                key: const ValueKey('call-view'),
+                icon: speaker ? Icons.grid_view : Icons.person_pin,
+                label: speaker ? '갤러리 보기로 전환' : '스피커 보기로 전환',
+                onTap: onToggleView,
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 /// 컨트롤바의 둥근 단추 하나 — 위에 원형 아이콘, 아래에 작은 라벨, 오른쪽 위에 수 배지.
 /// [off]면 꺼진 장치(빨간 아이콘, 마이크/카메라), [highlight]면 켜진 기능(색 원, 화면 공유/손들기),
-/// [selected]면 열려 있는 패널(밝은 테두리).
+/// [selected]면 열려 있는 패널(밝은 테두리), [dot]이면 오른쪽 위의 작은 점(더보기 안에 켜진 기능이 있음).
 class CallBarButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -216,6 +381,7 @@ class CallBarButton extends StatelessWidget {
   final Color? highlight;
   final int badge;
   final Color badgeColor;
+  final bool dot;
   final bool showLabel;
   final VoidCallback onPressed;
   const CallBarButton({
@@ -229,6 +395,7 @@ class CallBarButton extends StatelessWidget {
     this.highlight,
     this.badge = 0,
     this.badgeColor = const Color(0xFF5C6BC0),
+    this.dot = false,
     this.showLabel = true,
   });
 
@@ -263,6 +430,23 @@ class CallBarButton extends StatelessWidget {
               ),
             ),
           ),
+          if (dot && badge == 0)
+            Positioned(
+              right: 0,
+              top: 0,
+              child: IgnorePointer(
+                child: Container(
+                  key: const ValueKey('call-bar-dot'),
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: callSpeakingColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black54, width: 1.5),
+                  ),
+                ),
+              ),
+            ),
           if (badge > 0)
             Positioned(
               right: -4,

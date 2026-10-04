@@ -1,6 +1,7 @@
 import { verifySocketToken } from './auth.js';
 import {
   activeCallStatesFor,
+  callStateFor,
   callSummaryText,
   canControlMic,
   joinCall,
@@ -8,6 +9,8 @@ import {
   leaveCall,
   refreshVideoTiers,
 } from './calls.js';
+import { finishCallCard, recordCallEvent, startCallCard } from './callCards.js';
+import { CALL_DISCONNECT_GRACE_MS } from './callEvents.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { markMessageRead } from './db/queries/messages.js';
 import {
@@ -35,19 +38,20 @@ function emitVideoTierChanges(io) {
 }
 
 /**
- * 통화가 끝났으면(마지막 참가자가 나갔으면) 그 대화에 요약 한 줄을 시스템 메시지로 남긴다.
- * 녹화 대신 "언제 누가 얼마나 회의했는지"는 남기자는 결정(calls.js의 callSummaryText).
+ * 누가 통화에서 빠진 뒤 화상회의 카드(callCards.js)를 고친다 — 그 사람이 통화에서 완전히 빠졌으면(다른 기기로
+ * 아직 들어와 있지 않으면) "나감"을 붙이고, 그걸로 통화가 끝났으면 카드를 닫는다. 카드가 없는 통화(서버 재시작
+ * 전에 시작된 통화)가 끝나면 예전처럼 요약 한 줄을 시스템 메시지로 남긴다.
  */
-async function postCallSummary(io, state) {
+async function postCallLeft(io, state, userId, wasIn) {
+  if (wasIn && !state.participantIds.includes(userId)) {
+    await recordCallEvent(io, state.roomId, userId, 'leave');
+  }
   if (!state.ended) return;
+  if (await finishCallCard(io, state.roomId, state.ended)) return;
   const room = await findRoomById(state.roomId);
   if (!room) return;
-  // 참여자 id만 들고 있으므로 여기서 이름으로 바꿔준다 — 통화가 끝나는 순간에만 도는
-  // 경로라 인원수만큼 조회해도 부담이 없다.
   const users = await Promise.all(state.ended.participantIds.map(findUserById));
-  const names = users
-    .filter(Boolean)
-    .map((u) => u.name ?? u.username ?? '알 수 없음');
+  const names = users.filter(Boolean).map((u) => u.name ?? u.username ?? '알 수 없음');
   await postSystemMessage(io, room, callSummaryText(state.ended, names));
 }
 
@@ -205,6 +209,9 @@ export function registerSocket(io) {
     socket.on('call:join', async (payload) => {
       const room = await findRoomById(payload?.roomId);
       if (!room || !(await isRoomMember(room.id, socket.data.userId))) return;
+      // 이미 통화에 들어와 있던 사람(다른 기기, 또는 연결이 잠깐 끊겼다 다시 붙어 참여를 다시 알린 것)이면
+      // 화상회의 카드에 "참여"를 다시 붙이지 않는다.
+      const wasIn = callStateFor(room.id).participantIds.includes(socket.data.userId);
       const state = joinCall(room.id, socket.data.userId, socket.id);
       io.to(room.id).emit('call:state', state);
       emitVideoTierChanges(io);
@@ -214,7 +221,12 @@ export function registerSocket(io) {
       // 한 사람의 폰이 계속 울리게 된다.
       const isFirstParticipant =
         state.participantIds.length === 1 && state.startedBy === socket.data.userId;
-      if (!isFirstParticipant) return;
+      if (!wasIn) {
+        // 통화를 막 시작했으면 대화방에 화상회의 카드를 새로 올리고, 합류면 그 카드에 "참여"를 붙인다.
+        if (isFirstParticipant) await startCallCard(io, room, socket.data.userId);
+        else await recordCallEvent(io, room.id, socket.data.userId, 'join');
+      }
+      if (wasIn || !isFirstParticipant) return;
 
       const [caller, memberIds] = await Promise.all([
         findUserById(socket.data.userId),
@@ -233,10 +245,30 @@ export function registerSocket(io) {
     socket.on('call:leave', async (payload) => {
       const roomId = payload?.roomId;
       if (typeof roomId !== 'string') return;
+      const wasIn = callStateFor(roomId).participantIds.includes(socket.data.userId);
       const state = leaveCall(roomId, socket.data.userId, socket.id);
       io.to(roomId).emit('call:state', state);
       emitVideoTierChanges(io);
-      await postCallSummary(io, state);
+      await postCallLeft(io, state, socket.data.userId, wasIn);
+    });
+
+    // payload: { roomId } — 걸려온 통화의 수신 창에서 [거절]을 눌렀을 때. 통화에 지금 들어와 있는 사람들
+    // (건 사람 포함)의 기기에 누가 거절했는지 알린다 — 안 그러면 건 사람은 상대가 안 받는 건지 거절한
+    // 건지 모른 채 계속 기다린다. 통화가 이미 끝났거나 거절한 사람이 이미 통화에 들어와 있으면(다른
+    // 기기에서 받음) 알릴 게 없다.
+    socket.on('call:decline', async (payload) => {
+      const roomId = payload?.roomId;
+      if (typeof roomId !== 'string') return;
+      const state = callStateFor(roomId);
+      const userId = socket.data.userId;
+      if (!state.active || state.participantIds.includes(userId)) return;
+      if (!(await isRoomMember(roomId, userId))) return;
+      const user = await findUserById(userId);
+      const event = { roomId, userId, name: user?.name ?? user?.username ?? '상대방' };
+      for (const participantId of state.participantIds) {
+        io.to(`user:${participantId}`).emit('call:declined', event);
+      }
+      await recordCallEvent(io, roomId, userId, 'decline');
     });
 
     // payload: { roomId, targetId, on } — 진행자가 참가자 패널에서 다른 사람의 마이크를 끄거나(on=false), 켜 달라고
@@ -254,13 +286,18 @@ export function registerSocket(io) {
     socket.on('disconnect', () => {
       // 통화 중에 앱이 꺼지거나 네트워크가 끊기면 "나가기"를 보낼 새가 없다 — 소켓이
       // 끊긴 것으로 대신 정리해준다(안 하면 유령 참가자가 남아 통화가 영영 안 끝난다).
-      for (const state of leaveAllCallsForSocket(socket.data.userId, socket.id)) {
-        io.to(state.roomId).emit('call:state', state);
-        postCallSummary(io, state).catch((err) =>
-          console.error('[call] 통화 기록 남기기 실패:', err?.message ?? err),
-        );
-      }
-      emitVideoTierChanges(io);
+      // 잠깐 끊긴 것일 수 있어 조금 기다렸다 뺀다(callEvents.js의 CALL_DISCONNECT_GRACE_MS) — 그 사이 다시 붙어
+      // 참여를 다시 알렸으면 새 소켓으로 이미 들어와 있어서, 여기서 옛 소켓만 빠지고 통화·기록은 그대로다.
+      const userId = socket.data.userId;
+      setTimeout(() => {
+        for (const state of leaveAllCallsForSocket(userId, socket.id)) {
+          io.to(state.roomId).emit('call:state', state);
+          postCallLeft(io, state, userId, true).catch((err) =>
+            console.error('[call] 통화 기록 남기기 실패:', err?.message ?? err),
+          );
+        }
+        emitVideoTierChanges(io);
+      }, CALL_DISCONNECT_GRACE_MS).unref();
       // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다.
       if (markDisconnected(socket.data.userId)) {
         io.emit('presence:update', { userId: socket.data.userId, online: false });

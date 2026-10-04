@@ -29,6 +29,7 @@ import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT } from 
 import { startLivekitNatSync } from './livekitNat.js';
 import { LIVEKIT_PROXY_PREFIX, attachLivekitUpgradeProxy, livekitHttpProxy } from './livekitProxy.js';
 import { createBookmarksRouter } from './bookmarks.js';
+import { closeStaleCallCards } from './callCards.js';
 import { callsEnabled, createCallsRouter } from './calls.js';
 import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
@@ -189,6 +190,8 @@ startTodoReminderJob(io);
 // 코드가 기대하는 스키마와 DB가 어긋난 채로 뜨면, 서버는 멀쩡해 보이는데 새 컬럼을 읽는
 // 화면만 조용히 비어 보인다 — 뜨기 전에 확인해서 콘솔에 크게 알린다(막지는 않는다).
 await checkPendingMigrations();
+// 지난 실행 중에 "진행 중"으로 남은 화상회의 카드를 닫는다(통화 상태는 메모리에만 있어 재시작하면 사라진다 — callCards.js).
+await closeStaleCallCards().catch((err) => console.error('[call] 화상회의 카드 정리 실패:', err?.message ?? err));
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

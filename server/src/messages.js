@@ -124,6 +124,8 @@ export function toMessageDto(m) {
     sharedAlbum: toSharedAlbumDto(m),
     // 할 일을 만들 때 올린 할 일 카드 { id(할 일이 지워졌으면 null), title, … 스냅샷 } — 아니면 null(todoRules.js).
     sharedTodo: toSharedTodoDto(m),
+    // 화상회의 기록 카드(시스템 메시지 — callCards.js) — 아니면 null.
+    callCard: m.callCard ?? null,
   };
 }
 

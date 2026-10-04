@@ -5,6 +5,7 @@ import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
 import '../models/album.dart';
 import '../models/announcement.dart';
+import '../models/call_card.dart';
 import '../models/app_notification.dart';
 import '../models/inquiry.dart';
 import '../models/comment.dart';
@@ -378,6 +379,12 @@ class CallState {
 /// 진행자가 내 마이크를 켜거나 끄라고 했다(call:mic — 서버가 진행자인지 확인한 뒤 내 기기들에만 보낸다).
 typedef CallMicRequest = ({String roomId, bool on});
 
+/// 내가 들어가 있는 통화를 누가 수신 창에서 거절했다(call:declined) — 서버 socket.js의 call:decline.
+typedef CallDeclined = ({String roomId, String userId, String name});
+
+/// 화상회의 기록 카드가 바뀌었다(call:card — 서버 callCards.js). 끝났을 때는 메시지 글(요약)도 같이 온다.
+typedef CallCardUpdate = ({String roomId, String messageId, CallCard card, String? text});
+
 /// 토픽에서 내보내졌거나 토픽이 삭제돼서 이 방이 내 목록에서 사라졌다는 알림(room:removed) —
 /// user: 방으로만 온다. Session이 방을 정리한 뒤 같은 모양으로 roomRemovedEvents에 흘려서
 /// 화면이 안내 토스트([toastText])를 띄우고 열려 있던 그 방을 닫게 한다.
@@ -476,6 +483,8 @@ class ChatSocket {
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
   final _callStateController = StreamController<CallState>.broadcast();
   final _callMicController = StreamController<CallMicRequest>.broadcast();
+  final _callDeclinedController = StreamController<CallDeclined>.broadcast();
+  final _callCardController = StreamController<CallCardUpdate>.broadcast();
   final _announcementController = StreamController<Announcement>.broadcast();
   final _announcementUpdatedController =
       StreamController<Announcement>.broadcast();
@@ -665,6 +674,12 @@ class ChatSocket {
 
   /// 진행자의 마이크 켜기/끄기 요청(call:mic).
   Stream<CallMicRequest> get callMicRequests => _callMicController.stream;
+
+  /// 내가 들어가 있는 통화를 누가 거절했다는 알림(call:declined).
+  Stream<CallDeclined> get callDeclined => _callDeclinedController.stream;
+
+  /// 대화방의 화상회의 기록 카드가 바뀌었다(call:card) — 참여·거절·나감·종료.
+  Stream<CallCardUpdate> get callCards => _callCardController.stream;
 
   /// 토픽방 공지가 새로 올라올 때마다(announcement:new) — 방 상단 배너와 공지 목록 화면이
   /// 이걸로 즉시 갱신된다.
@@ -1054,6 +1069,29 @@ class ChatSocket {
         _callMicController.add((roomId: roomId, on: on));
       }
     });
+    socket.on('call:card', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      final roomId = m['roomId'];
+      final messageId = m['messageId'];
+      final card = CallCard.fromJson(m['card']);
+      if (roomId is String && messageId is String && card != null) {
+        _callCardController.add((
+          roomId: roomId,
+          messageId: messageId,
+          card: card,
+          text: m['text'] as String?,
+        ));
+      }
+    });
+    socket.on('call:declined', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      final roomId = m['roomId'];
+      final userId = m['userId'];
+      final name = m['name'];
+      if (roomId is String && userId is String && name is String) {
+        _callDeclinedController.add((roomId: roomId, userId: userId, name: name));
+      }
+    });
     socket.on('presence:update', (data) {
       _presenceController.add(
         PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -1262,6 +1300,11 @@ class ChatSocket {
   /// 정상 종료는 명시적으로 알려야 남은 사람들 화면이 즉시 갱신된다.
   void leaveCall(String roomId) =>
       _socket?.emit('call:leave', {'roomId': roomId});
+
+  /// 걸려온 통화를 거절했다고 알린다 — 서버가 지금 통화에 들어와 있는 사람들(건 사람 포함)에게
+  /// "○○님이 화상회의를 거절했습니다"를 보낸다(call:declined).
+  void declineCall(String roomId) =>
+      _socket?.emit('call:decline', {'roomId': roomId});
 
   /// 진행자가 [targetId]의 마이크를 켜거나 끈다 — 서버가 진행자인지 확인하고 그 사람 기기에 전한다.
   void controlCallMic(String roomId, String targetId, bool on) => _socket?.emit(

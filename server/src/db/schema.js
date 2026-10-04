@@ -1743,9 +1743,11 @@ export const memberFavorites = pgTable(
 
 // ── 할 일(To-Do) ────────────────────────────────────────────────────────
 // 대화방에 연결된 가벼운 할 일 — 프로젝트 업무(tasks)와는 별개다. 한 번 만들면 다른 대화방으로 옮길 수 없다
-// (roomId는 만든 뒤 고정). 진척률(progress 0~100)로 상태를 가른다: 0 = 대기, 1~99 = 진행, 100 = 완료
-// (completedAt은 100이 된 시각 — 다시 100 미만으로 내리면 null). 생성자는 담당자 관리·삭제까지 전부,
-// 담당자는 제목·설명·파일·기한·알림만 고친다(권한 판단은 API가 한다).
+// (roomId는 만든 뒤 고정). 진척률(progress 0·25·50·75·100)로 상태를 가른다: 0 = 대기, 1~99 = 진행, 100 = 완료
+// (completedAt은 100이 된 시각 — 다시 100 미만으로 내리면 null). 진척률은 담당자마다 따로(todo_assignees.progress,
+// 잔디 "개별 진행")이고, todos.progress는 그 방에 아직 있는 담당자들로 다시 계산한 전체(집계) 값이다 — 담당자가
+// 없는 할 일만 만든 사람이 todos.progress를 직접 바꾼다. 생성자는 담당자 관리·삭제까지 전부, 담당자는 제목·설명·
+// 파일·기한·알림과 자기 진척률만 고친다(권한 판단은 API가 한다).
 export const todos = pgTable(
   'todos',
   {
@@ -1778,7 +1780,10 @@ export const todos = pgTable(
   ],
 );
 
-/** 할 일의 담당자(여러 명). 사용자가 탈퇴하면 담당 행도 같이 사라진다. */
+/**
+ * 할 일의 담당자(여러 명)와 그 사람의 진척률. 사용자가 탈퇴하면 담당 행도 같이 사라진다. 담당자 목록을 고쳐도
+ * 남는 사람의 행(진척률)은 그대로 두고, 빠진 사람만 지우고 새 사람만 0으로 넣는다.
+ */
 export const todoAssignees = pgTable(
   'todo_assignees',
   {
@@ -1789,9 +1794,28 @@ export const todoAssignees = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // 이 담당자의 진척률(0·25·50·75·100)과 100이 된 시각 — 규칙은 todos.progress/completedAt과 같다.
+    progress: integer('progress').notNull().default(0),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   // "나의 할 일" 조회용으로 userId 인덱스를 따로 둔다.
   (t) => [primaryKey({ columns: [t.todoId, t.userId] }), index('todo_assignees_user_id_idx').on(t.userId)],
+);
+
+/** 사람마다 따로 "즐겨찾기"해 두는 할 일 — 목록에서 즐겨찾기한 것이 먼저 나온다. */
+export const todoFavorites = pgTable(
+  'todo_favorites',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    todoId: uuid('todo_id')
+      .notNull()
+      .references(() => todos.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.todoId] }), index('todo_favorites_todo_id_idx').on(t.todoId)],
 );
 
 /** 할 일에 붙은 파일(최대 30개 — 개수 제한은 API가 건다). message_attachments와 같은 모양. */

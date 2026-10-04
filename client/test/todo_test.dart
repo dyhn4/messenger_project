@@ -20,6 +20,7 @@ import 'package:client/widgets/menu_entries.dart';
 import 'package:client/widgets/message_actions.dart';
 import 'package:client/widgets/side_panels.dart';
 import 'package:client/widgets/todo_from_message.dart';
+import 'package:client/widgets/todo_widgets.dart';
 import 'package:client/widgets/todos_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,9 +29,11 @@ import 'package:http/testing.dart';
 
 import 'helpers/fake_todo_api.dart';
 
-/// 할 일(To-Do) — 모델·입력 검사, 컨트롤러(탭·필터·무한 스크롤·소켓 갱신), 패널(카드·완료 체크·상세), 생성/수정 창(제목
-/// 필수·담당자는 방 멤버만·첨부 30개·알림), 상세(권한별 ⋯·진척률·삭제), 메시지·댓글에서 만들기(미리 채움), 메뉴·패널 등록.
-/// 서버는 가짜 API(helpers/fake_todo_api.dart)로 대신한다.
+/// 할 일(To-Do) — 모델·입력 검사, 컨트롤러(보기·필터·정렬·무한 스크롤·소켓 갱신), 패널(보기 드롭다운·`N개의 할 일`·
+/// 보기만 하는 카드 `진행률 : N%` — 진척률은 상세에서 바꾼다), 생성/수정 창(제목 필수·담당자 기본은 나·방 멤버만·첨부
+/// 30개·알림), 상세(권한별 ••• 메뉴·내 진척률 고르기 상자·삭제), 메시지·댓글에서 만들기(미리 채움), 메뉴·패널 등록. 서버는
+/// 가짜 API(helpers/fake_todo_api.dart)로 대신한다. 잔디 화면에 맞춘 자세한 시험은
+/// todo_panel/editor/detail/notification/foundation_test.dart에 있다.
 
 class _QuietNotifications extends NotificationService {
   @override
@@ -142,6 +145,30 @@ Future<void> _pumpOpener(
 }
 
 Finder _key(String k) => find.byKey(ValueKey(k));
+
+/// 보기 드롭다운(나의 할 일 / 부여한 할 일 / 모든 할 일)에서 [scope]를 고른다.
+Future<void> _pickScope(WidgetTester tester, TodoScope scope) async {
+  await tester.tap(_key('todo-scope'));
+  await tester.pumpAndSettle();
+  await tester.tap(_key('todo-scope-${scope.wire}'));
+  await tester.pumpAndSettle();
+}
+
+/// 카드 첫 줄 `진행률 : N%`의 숫자 부분(목록이 보는 관점의 진척률).
+String? _percent(WidgetTester tester, String id) =>
+    tester.widget<Text>(_key('todo-card-progress-$id')).data;
+
+/// 상세의 내 진척률 고르기 상자가 보이는 값.
+int _myProgress(WidgetTester tester) =>
+    tester.widget<TodoProgressSelect>(_key('todo-detail-my-progress')).progress;
+
+/// 상세의 내 진척률 고르기 상자를 열고 [progress]를 고른다.
+Future<void> _pickMyProgress(WidgetTester tester, int progress) async {
+  await tester.tap(_key('todo-detail-my-progress'));
+  await tester.pumpAndSettle();
+  await tester.tap(_key('todo-progress-option-$progress'));
+  await tester.pumpAndSettle();
+}
 
 String _ymd(DateTime d) => todoDateWire(d);
 
@@ -380,29 +407,34 @@ void main() {
       ],
     );
 
-    test('탭마다 scope가 다르다 — 나의 / 부여한 / 팀', () async {
+    test('보기마다 scope가 다르다 — 나의 / 부여한 / 모든', () async {
       final api = seeded();
       final c = TodoController(api: api, teamId: 't1');
       await c.load();
-      expect(c.items.map((t) => t.id), ['a', 'b']);
+      // 처음 정렬은 생성 순 — 최근에 만든 b가 먼저.
+      expect(c.items.map((t) => t.id), ['b', 'a']);
       c.setScope(TodoScope.assignedByMe);
       await pumpEventQueue();
-      expect(c.items.map((t) => t.id), unorderedEquals(['a', 'b', 'c']));
+      // 부여한 할 일 = 내가 만들어 다른 사람에게 맡긴 것(나만 담당인 a·b는 빠진다).
+      expect(c.items.map((t) => t.id), ['c']);
       c.setScope(TodoScope.team);
       await pumpEventQueue();
       expect(c.items.length, 4);
       c.dispose();
     });
 
-    test('정렬 — 미완료 먼저, 기한 임박순(기한 없음은 뒤)', () async {
+    test('정렬 — 처음은 생성 순(최근 것 먼저), 기한 순은 미완료 먼저·기한 임박순(기한 없음은 뒤)', () async {
       final api = seeded();
       final c = TodoController(api: api, teamId: 't1', scope: TodoScope.team);
       await c.load();
+      expect(c.sort, TodoSort.created);
+      expect(api.calls.last, contains('sort=created'));
+      expect(c.items.map((t) => t.id), ['d', 'c', 'b', 'a']);
+      c.setSort(TodoSort.due);
+      await pumpEventQueue();
+      expect(api.calls.last, contains('sort=due'));
       // 미완료: a(10/09), c(없음, 최신), d(없음) → a, d(4), c(3) 순, 완료 b는 맨 끝.
       expect(c.items.map((t) => t.id), ['a', 'd', 'c', 'b']);
-      c.setSort(TodoSort.created);
-      await pumpEventQueue();
-      expect(c.items.map((t) => t.id), ['d', 'c', 'b', 'a']);
       c.dispose();
     });
 
@@ -502,7 +534,7 @@ void main() {
 
   // ────────────────────────── 패널 ──────────────────────────
   group('할 일 패널', () {
-    testWidgets('탭·필터·건수 줄·카드(상태 칩·기한·담당자 +N·대화방·첨부)', (tester) async {
+    testWidgets('보기 드롭다운·필터·건수 줄·카드(진행률 %·일정·담당자 수·대화방·첨부)', (tester) async {
       final session = _session();
       final api = FakeTodoApi(
         me: 'me',
@@ -512,7 +544,7 @@ void main() {
             title: '지난 기한 할 일',
             assignees: ['me', 'u2', 'u3', 'u4', 'u5'],
             dueDate: '2020-01-02',
-            progress: 40,
+            progress: 50,
             attachmentCount: 3,
           ),
           todoJson(
@@ -525,28 +557,44 @@ void main() {
         ],
       );
       await _pumpPanel(tester, session, api);
-      expect(find.text('나의 할 일'), findsOneWidget);
+      // 보기는 탭이 아니라 드롭다운 — 지금 값만 보이고, 펼치면 세 항목.
+      expect(
+        find.descendant(of: _key('todo-scope'), matching: find.text('나의 할 일')),
+        findsOneWidget,
+      );
+      expect(find.text('부여한 할 일'), findsNothing);
+      await tester.tap(_key('todo-scope'));
+      await tester.pumpAndSettle();
       expect(find.text('부여한 할 일'), findsOneWidget);
-      expect(find.text('팀 할 일'), findsOneWidget);
-      expect(find.text('참여 대화방'), findsOneWidget);
+      expect(find.text('모든 할 일'), findsOneWidget);
+      // 지금 보기를 다시 고르면 닫히기만 하고 다시 받지 않는다.
+      await tester.tap(_key('todo-scope-mine'));
+      await tester.pumpAndSettle();
+      expect(_key('todo-scope-team'), findsNothing);
+      expect(api.callCount('list'), 1);
+      expect(find.text('참여한 대화방'), findsOneWidget);
       expect(_key('todo-exclude-done'), findsOneWidget);
-      expect(find.text('"2"개가 로딩되었습니다.'), findsOneWidget);
+      expect(find.text('완료된 할 일 제외'), findsOneWidget);
+      expect(find.text('2개의 할 일'), findsOneWidget);
       expect(find.text('지난 기한 할 일'), findsOneWidget);
-      expect(find.text('진행 40%'), findsOneWidget);
-      expect(find.text('대기'), findsOneWidget);
+      // 나의 할 일이라 카드의 진행률은 내 진척률 %.
+      expect(_percent(tester, 'a'), '50%');
+      expect(_percent(tester, 'b'), '0%');
       // 지난 기한은 빨강, 아닌 것은 흐린 색.
       final overdue = tester.widget<Text>(_key('todo-period-a'));
-      expect(overdue.data, '~ 2020/01/02');
+      expect(overdue.data, '일정: ~ 2020/01/02');
       expect(overdue.style?.color, ThemeData().colorScheme.error);
       final fine = tester.widget<Text>(_key('todo-period-b'));
-      expect(fine.data, '~ 2099/12/31');
+      expect(fine.data, '일정: ~ 2099/12/31');
       expect(fine.style?.color, isNot(ThemeData().colorScheme.error));
-      expect(find.text('+2'), findsOneWidget); // 담당자 5명 중 3명만 그리고 +2
-      expect(find.text('3'), findsOneWidget); // 첨부 클립 수
-      expect(find.text('영업 토픽'), findsWidgets);
+      // 담당자는 아바타 줄(+N) 대신 수로.
+      expect(tester.widget<Text>(_key('todo-assignees-a')).data, '담당자 5명');
+      expect(find.text('+2'), findsNothing);
+      expect(tester.widget<Text>(_key('todo-clips-a')).data, '3'); // 첨부 클립 수
+      expect(tester.widget<Text>(_key('todo-room-a')).data, '영업 토픽');
     });
 
-    testWidgets('탭을 누르면 그 scope로 다시 받고, 건수 줄이 바뀐다', (tester) async {
+    testWidgets('보기를 바꾸면 그 scope로 다시 받고, 건수 줄이 바뀐다', (tester) async {
       final session = _session();
       final api = FakeTodoApi(
         me: 'me',
@@ -565,17 +613,18 @@ void main() {
       await _pumpPanel(tester, session, api);
       expect(find.text('나에게'), findsOneWidget);
       expect(find.text('내가 부여'), findsNothing);
-      await tester.tap(find.text('부여한 할 일'));
-      await tester.pumpAndSettle();
+      await _pickScope(tester, TodoScope.assignedByMe);
       expect(api.calls.last, startsWith('list assigned_by_me'));
       expect(find.text('내가 부여'), findsOneWidget);
-      await tester.tap(find.text('팀 할 일'));
-      await tester.pumpAndSettle();
-      expect(find.text('"3"개가 로딩되었습니다.'), findsOneWidget);
+      expect(find.text('나에게'), findsNothing);
+      expect(find.text('1개의 할 일'), findsOneWidget);
+      await _pickScope(tester, TodoScope.team);
+      expect(api.calls.last, startsWith('list team'));
+      expect(find.text('3개의 할 일'), findsOneWidget);
       expect(find.text('남의 일'), findsOneWidget);
     });
 
-    testWidgets('완료 제외 토글과 정렬 메뉴가 서버 조회를 바꾼다', (tester) async {
+    testWidgets('완료된 할 일 제외 토글과 정렬 메뉴가 서버 조회를 바꾼다', (tester) async {
       final session = _session();
       final api = FakeTodoApi(
         me: 'me',
@@ -585,6 +634,7 @@ void main() {
         ],
       );
       await _pumpPanel(tester, session, api);
+      expect(api.calls.single, contains('sort=created'), reason: '처음은 생성 순');
       expect(find.text('끝난 일'), findsOneWidget);
       await tester.tap(_key('todo-exclude-done'));
       await tester.pumpAndSettle();
@@ -592,43 +642,66 @@ void main() {
       expect(find.text('끝난 일'), findsNothing);
       await tester.tap(_key('todo-sort'));
       await tester.pumpAndSettle();
-      await tester.tap(_key('todo-sort-created'));
+      await tester.tap(_key('todo-sort-due'));
       await tester.pumpAndSettle();
-      expect(api.calls.last, contains('sort=created'));
+      expect(api.calls.last, contains('sort=due'));
+      expect(api.calls.last, contains('done=false'), reason: '완료 제외는 그대로');
+      expect(api.callCount('list'), 3);
     });
 
-    testWidgets('완료 체크로 빠르게 완료/해제, 권한 없는 카드는 체크가 꺼져 있다', (tester) async {
-      final session = _session();
-      final api = FakeTodoApi(
-        me: 'me',
-        todos: [
-          todoJson(id: 'a', title: '내 할 일', assignees: ['me']),
-        ],
-      );
-      await _pumpPanel(tester, session, api);
-      await tester.tap(_key('todo-check-a'));
-      await tester.pumpAndSettle();
-      expect(api.lastUpdate, {'progress': 100});
-      expect(find.text('완료'), findsOneWidget);
-      await tester.tap(_key('todo-check-a'));
-      await tester.pumpAndSettle();
-      expect(api.lastUpdate, {'progress': 0});
+    testWidgets(
+      '카드는 보기만 — 진척률은 상세의 고르기 상자로 완료/되돌리고 돌아오면 카드에 반영, 남의 할 일은 못 바꾼다',
+      (tester) async {
+        final session = _session();
+        final api = FakeTodoApi(
+          me: 'me',
+          todos: [
+            todoJson(id: 'a', title: '내 할 일', assignees: ['me']),
+          ],
+        );
+        await _pumpPanel(tester, session, api);
+        // 예전 왼쪽 완료 체크도, 카드의 진척률 메뉴도 없다 — 카드는 `진행률 : 0%` 글자만(잔디).
+        expect(_key('todo-check-a'), findsNothing);
+        expect(find.byType(PopupMenuButton<int>), findsNothing);
+        expect(_percent(tester, 'a'), '0%');
 
-      // 팀 탭에서 남의 할 일은 체크할 수 없다.
-      api.todos.add(
-        todoJson(
-          id: 'v',
-          title: '남의 일',
-          creatorId: 'u2',
-          assignees: ['u3'],
-          createdAt: 9,
-        ),
-      );
-      await tester.tap(find.text('팀 할 일'));
-      await tester.pumpAndSettle();
-      final box = tester.widget<Checkbox>(_key('todo-check-v'));
-      expect(box.onChanged, isNull);
-    });
+        /// 카드 → 상세(모바일 전체 화면)의 내 줄 고르기 상자로 [p]를 고르고 ←로 돌아온다.
+        Future<void> pickInDetail(int p) async {
+          await tester.tap(find.text('내 할 일'));
+          await tester.pumpAndSettle();
+          await _pickMyProgress(tester, p);
+          expect(api.lastUpdate, {'progress': p});
+          expect(_myProgress(tester), p);
+          // 바뀐 게 있어 닫히면 목록이 조용히 다시 받는다.
+          await tester.tap(_key('todo-detail-close'));
+          await tester.pumpAndSettle();
+          expect(find.byType(TodoDetail), findsNothing);
+        }
+
+        await pickInDetail(100);
+        expect(_percent(tester, 'a'), '100%');
+        await pickInDetail(0);
+        expect(_percent(tester, 'a'), '0%');
+
+        // 모든 할 일의 남의 할 일은 상세에도 고르기 상자가 없다(진척률은 담당자만 자기 것을 바꾼다).
+        api.todos.add(
+          todoJson(
+            id: 'v',
+            title: '남의 일',
+            creatorId: 'u2',
+            assignees: ['u3'],
+            createdAt: 9,
+          ),
+        );
+        await _pickScope(tester, TodoScope.team);
+        expect(_percent(tester, 'v'), '0%');
+        await tester.tap(find.text('남의 일'));
+        await tester.pumpAndSettle();
+        expect(_key('todo-detail-title'), findsOneWidget);
+        expect(_key('todo-detail-my-progress'), findsNothing);
+        expect(api.callCount('update'), 2);
+      },
+    );
 
     testWidgets('목록 끝으로 스크롤하면 다음 쪽을 받는다', (tester) async {
       final session = _session();
@@ -653,17 +726,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(api.callCount('list'), 2);
       expect(api.calls.last, contains('offset=30'));
-      expect(find.text('"45"개가 로딩되었습니다.'), findsOneWidget);
+      expect(find.text('45개의 할 일'), findsOneWidget);
+      expect(find.text('할 일 번호 44'), findsOneWidget, reason: '둘째 쪽까지 받았다');
     });
 
-    testWidgets('비어 있으면 탭에 맞는 안내', (tester) async {
+    testWidgets('비어 있으면 보기에 맞는 안내', (tester) async {
       final session = _session();
       await _pumpPanel(tester, session, FakeTodoApi(me: 'me'));
       expect(find.text('나에게 지정된 할 일이 없어요.'), findsOneWidget);
-      expect(find.text('"0"개가 로딩되었습니다.'), findsOneWidget);
-      await tester.tap(find.text('팀 할 일'));
-      await tester.pumpAndSettle();
-      expect(find.text('이 팀에 등록된 할 일이 없어요.'), findsOneWidget);
+      expect(find.text('0개의 할 일'), findsOneWidget);
+      await _pickScope(tester, TodoScope.assignedByMe);
+      expect(find.text('다른 멤버에게 부여한 할 일이 없어요.'), findsOneWidget);
+      await _pickScope(tester, TodoScope.team);
+      expect(find.text('참여한 대화방에 등록된 할 일이 없어요.'), findsOneWidget);
     });
 
     testWidgets('카드를 누르면 상세가 열린다', (tester) async {
@@ -704,7 +779,11 @@ void main() {
       );
       await _pumpPanel(tester, session, api, size: const Size(360, 780));
       expect(tester.takeException(), isNull);
-      expect(find.text('진행 75%'), findsOneWidget);
+      expect(_percent(tester, 'a'), '75%');
+      expect(
+        tester.widget<Text>(_key('todo-period-a')).data,
+        '일정: ~ 2020/01/02',
+      );
     });
   });
 
@@ -718,6 +797,10 @@ void main() {
         (c) => showTodoEditor(c, session: session, api: api),
       );
       expect(find.text('할 일 생성'), findsOneWidget);
+      expect(
+        find.descendant(of: _key('todo-submit'), matching: find.text('저장하기')),
+        findsOneWidget,
+      );
       FilledButton submit() => tester.widget<FilledButton>(_key('todo-submit'));
       expect(submit().onPressed, isNull, reason: '대화방·제목 둘 다 없다');
       await tester.enterText(_key('todo-title-field'), '제목만 있음');
@@ -748,7 +831,7 @@ void main() {
       expect(api.lastCreateRoomId, 'r1');
       expect(api.lastCreate!['title'], '견적서 보내기');
       expect(api.lastCreate!['description'], '내용');
-      expect(api.lastCreate!['assigneeIds'], isEmpty, reason: '담당자 기본은 없음');
+      expect(api.lastCreate!['assigneeIds'], ['me'], reason: '담당자 기본은 나');
       expect(saved?.title, '견적서 보내기');
       expect(_key('todo-submit'), findsNothing, reason: '저장되면 창이 닫힌다');
     });
@@ -786,10 +869,16 @@ void main() {
           api: api,
         ),
       );
+      // 기본 담당자는 나 — "담당자 관리"로 고르는 창에서도 체크된 채로 시작한다.
+      expect(_key('todo-assignee-chip-me'), findsOneWidget);
       await tester.tap(_key('todo-assignee-add'));
       await tester.pumpAndSettle();
       // 멤버 셋(나·김철수·이영희)만 보인다.
       expect(_key('todo-assignee-option-me'), findsOneWidget);
+      expect(
+        tester.widget<CheckboxListTile>(_key('todo-assignee-option-me')).value,
+        isTrue,
+      );
       expect(_key('todo-assignee-option-u2'), findsOneWidget);
       expect(_key('todo-assignee-option-u3'), findsOneWidget);
       expect(_key('todo-assignee-option-u9'), findsNothing);
@@ -798,6 +887,7 @@ void main() {
       await tester.pump();
       await tester.tap(_key('todo-assignee-ok'));
       await tester.pumpAndSettle();
+      expect(_key('todo-assignee-chip-me'), findsOneWidget);
       expect(_key('todo-assignee-chip-u2'), findsOneWidget);
       expect(_key('todo-assignee-chip-u3'), findsOneWidget);
       // 칩의 x로 뺀다.
@@ -808,7 +898,7 @@ void main() {
       await tester.pump();
       await tester.tap(_key('todo-submit'));
       await tester.pumpAndSettle();
-      expect(api.lastCreate!['assigneeIds'], ['u2']);
+      expect(api.lastCreate!['assigneeIds'], ['me', 'u2']);
     });
 
     testWidgets('setAssignees는 방 멤버가 아닌 사람을 버린다', (tester) async {
@@ -832,7 +922,9 @@ void main() {
       expect(_key('todo-assignee-chip-outsider'), findsNothing);
     });
 
-    testWidgets('대화방을 바꾸면 그 방에 없는 담당자는 빠진다', (tester) async {
+    testWidgets('대화방을 바꾸면 확인 후 담당자가 새 방의 나로 초기화된다(새 방에 있는 사람도)', (
+      tester,
+    ) async {
       final other = Room.fromJson({
         'id': 'r3',
         'teamId': 't1',
@@ -842,13 +934,14 @@ void main() {
         'createdAt': 1000,
       });
       final session = _session(rooms: [_topic('r1'), other]);
+      final api = FakeTodoApi(me: 'me');
       await _pumpOpener(
         tester,
         (c) => showTodoEditor(
           c,
           session: session,
           room: session.rooms.first,
-          api: FakeTodoApi(me: 'me'),
+          api: api,
         ),
       );
       final state = tester.state<TodoEditorState>(find.byType(TodoEditor));
@@ -861,10 +954,21 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('작은 토픽').last);
       await tester.pumpAndSettle();
-      expect(_key('todo-assignee-chip-u3'), findsOneWidget);
+      // 담당자가 기본값([나])이 아니라 먼저 묻는다(잔디: 대화방을 바꾸면 첨부·담당자 초기화).
+      expect(find.text('대화방을 변경하면\n첨부한 파일과 담당자 정보가 초기화됩니다.'), findsOneWidget);
+      await tester.tap(_key('todo-room-change-confirm'));
+      await tester.pumpAndSettle();
+      // 예전처럼 새 방에 없는 사람만 걸러 내지 않는다 — 새 방에도 있는 이영희까지 빠지고 나만 남는다.
+      expect(_key('todo-assignee-chip-me'), findsOneWidget);
       expect(_key('todo-assignee-chip-u2'), findsNothing);
-      expect(find.text('이 대화방에 없는 담당자 1명을 뺐습니다.'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 3));
+      expect(_key('todo-assignee-chip-u3'), findsNothing);
+      expect(find.text('이 대화방에 없는 담당자 1명을 뺐습니다.'), findsNothing);
+      await tester.enterText(_key('todo-title-field'), '옮겨 만든 할 일');
+      await tester.pump();
+      await tester.tap(_key('todo-submit'));
+      await tester.pumpAndSettle();
+      expect(api.lastCreateRoomId, 'r3');
+      expect(api.lastCreate!['assigneeIds'], ['me']);
     });
 
     testWidgets('읽기 전용 토픽·비밀 대화는 대화방 목록에서 빠진다', (tester) async {
@@ -893,6 +997,9 @@ void main() {
         ),
       );
       await tester.enterText(_key('todo-title-field'), '기한 있는 일');
+      // 기한은 담당자 아래(잔디 순서)라 창 아래쪽이다 — 보이게 민 뒤 누른다.
+      await tester.ensureVisible(_key('todo-period-field'));
+      await tester.pumpAndSettle();
       await tester.tap(_key('todo-period-field'));
       await tester.pumpAndSettle();
       expect(find.text('시작일을 선택하세요'), findsOneWidget);
@@ -925,6 +1032,8 @@ void main() {
         ),
       );
       await tester.enterText(_key('todo-title-field'), '순서');
+      await tester.ensureVisible(_key('todo-period-field'));
+      await tester.pumpAndSettle();
       await tester.tap(_key('todo-period-field'));
       await tester.pumpAndSettle();
       await _tapDay(tester, '20');
@@ -966,13 +1075,17 @@ void main() {
       );
       final state = tester.state<TodoEditorState>(find.byType(TodoEditor));
       expect(state.attachmentCount, 30, reason: '31개를 줘도 30개만');
-      expect(find.text('30/30'), findsOneWidget);
+      // 파일 업로드 단추 오른쪽 아래 `N / 30`.
+      expect(
+        tester.widget<Text>(_key('todo-file-count')).textSpan!.toPlainText(),
+        '30 / 30',
+      );
       state.addFiles([File('nope.txt')]);
       await tester.pump();
       expect(state.attachmentCount, 30);
       expect(find.text('첨부 파일은 30개까지 올릴 수 있습니다.'), findsOneWidget);
       await tester.pump(const Duration(seconds: 3));
-      final attach = tester.widget<OutlinedButton>(_key('todo-attach'));
+      final attach = tester.widget<ButtonStyleButton>(_key('todo-attach'));
       expect(attach.onPressed, isNull, reason: '가득 차면 단추가 꺼진다');
     });
 
@@ -1032,7 +1145,7 @@ void main() {
       expect(_key('todo-reminder-0'), findsOneWidget);
     });
 
-    testWidgets('작성 중에 닫으면 확인을 묻는다', (tester) async {
+    testWidgets('바뀐 게 없으면(담당자는 기본값 나 그대로) 묻지 않고 닫힌다', (tester) async {
       final session = _session();
       await _pumpOpener(
         tester,
@@ -1238,7 +1351,7 @@ void main() {
       return api;
     }
 
-    testWidgets('내용 — 제목·상태·설명·기간·담당자·대화방·알림·만든 사람', (tester) async {
+    testWidgets('내용 — 제목·진행률·설명·기간·담당자·대화방·알림·만든 사람', (tester) async {
       await open(
         tester,
         json: todoJson(
@@ -1260,77 +1373,112 @@ void main() {
         ),
       );
       expect(find.text('상세 확인'), findsOneWidget);
-      expect(find.text('진행 25%'), findsOneWidget);
-      expect(find.text('25%'), findsWidgets);
+      // 전체 진행률은 담당자 둘의 집계 %(완료한 사람 수 대신), 담당자 줄마다 그 사람의 진척률(색 글자).
+      expect(tester.widget<Text>(_key('todo-detail-status')).data, '25%');
+      expect(find.text('총 2명'), findsOneWidget);
+      for (final id in ['u2', 'u3']) {
+        expect(
+          find.descendant(
+            of: _key('todo-detail-assignee-$id'),
+            matching: find.text('진행(25%)'),
+          ),
+          findsOneWidget,
+        );
+      }
+      // 나는 만든 사람이지만 담당자가 아니라 고르기 상자가 없다(예전 안내 문구도 없다 — 잔디).
+      expect(_key('todo-detail-my-progress'), findsNothing);
+      expect(_key('todo-progress-hint'), findsNothing);
       expect(find.text('설명 내용'), findsOneWidget);
       expect(find.text('2026/10/01 ~ 2099/10/05'), findsOneWidget);
       expect(_key('todo-detail-assignee-u2'), findsOneWidget);
       expect(_key('todo-detail-assignee-u3'), findsOneWidget);
       expect(find.text('영업 토픽'), findsOneWidget);
       expect(find.text('2099/10/04 오후 6:00'), findsOneWidget);
-      expect(find.textContaining('나 · '), findsOneWidget);
+      expect(find.text('나 님이 할 일을 추가했습니다.'), findsOneWidget);
       expect(find.text('자료0.pdf'), findsOneWidget);
     });
 
-    testWidgets('⋯ 메뉴 — 만든 사람은 수정·삭제, 담당자는 수정만, 그 외는 메뉴가 없다', (tester) async {
+    testWidgets('••• 메뉴 — 만든 사람은 즐겨찾기·할 일 수정·할 일 삭제(첨부가 없으면 파일 다운로드는 없다)', (
+      tester,
+    ) async {
       await open(tester, json: todoJson());
       await tester.tap(_key('todo-detail-menu'));
       await tester.pumpAndSettle();
+      expect(_key('todo-menu-favorite'), findsOneWidget);
       expect(_key('todo-menu-edit'), findsOneWidget);
       expect(_key('todo-menu-delete'), findsOneWidget);
+      expect(_key('todo-menu-download'), findsNothing);
     });
 
-    testWidgets('담당자의 ⋯ 메뉴는 수정만', (tester) async {
+    testWidgets('담당자의 ••• 메뉴는 즐겨찾기·할 일 수정(삭제는 없다)', (tester) async {
       await open(
         tester,
         json: todoJson(creatorId: 'u2', assignees: ['me']),
       );
       await tester.tap(_key('todo-detail-menu'));
       await tester.pumpAndSettle();
+      expect(_key('todo-menu-favorite'), findsOneWidget);
       expect(_key('todo-menu-edit'), findsOneWidget);
       expect(_key('todo-menu-delete'), findsNothing);
     });
 
-    testWidgets('권한 없는 사람은 ⋯ 메뉴도 진척률 조절도 없다(읽기 전용)', (tester) async {
+    testWidgets('권한 없는 사람은 ••• 메뉴에 즐겨찾기만, 진척률 고르기 상자·안내 문구도 없다(읽기 전용)', (
+      tester,
+    ) async {
       await open(
         tester,
         json: todoJson(creatorId: 'u2', assignees: ['u3']),
       );
-      expect(_key('todo-detail-menu'), findsNothing);
-      final chip = tester.widget<ChoiceChip>(_key('todo-progress-50'));
-      expect(chip.onSelected, isNull);
-      expect(find.text('만든 사람과 담당자만 수정할 수 있습니다.'), findsOneWidget);
-      final complete = tester.widget<FilledButton>(
-        _key('todo-complete-button'),
-      );
-      expect(complete.onPressed, isNull);
+      // 진척률은 담당자만 자기 것을 바꾼다 — 담당자 줄은 색 글자만, 안내 문구는 두지 않는다(잔디).
+      expect(_key('todo-detail-my-progress'), findsNothing);
+      expect(find.text('담당자만 자신의 진척률을 바꿀 수 있습니다.'), findsNothing);
+      expect(find.text('만든 사람과 담당자만 수정할 수 있습니다.'), findsNothing);
+      // •••는 누구에게나 있다(즐겨찾기는 사람마다 따로) — 수정·삭제는 없다.
+      await tester.tap(_key('todo-detail-menu'));
+      await tester.pumpAndSettle();
+      expect(_key('todo-menu-favorite'), findsOneWidget);
+      expect(_key('todo-menu-edit'), findsNothing);
+      expect(_key('todo-menu-delete'), findsNothing);
+      expect(_key('todo-menu-download'), findsNothing);
     });
 
-    testWidgets('진척률 단추와 완료 단추 — 서버로 보내고 상태 칩이 바뀐다', (tester) async {
+    testWidgets('담당자 없는 내 할 일 — 진행률 칸의 고르기 상자로 내 진척률을 보낸다(완료 100%·대기로 되돌리기)', (
+      tester,
+    ) async {
+      // 만든 사람이 진행률(할 일의 값)을 바꾼다 — 값 글자 대신 그 자리에 고르기 상자.
       final api = await open(tester, json: todoJson());
-      expect(find.text('대기'), findsOneWidget);
-      await tester.tap(_key('todo-progress-50'));
-      await tester.pumpAndSettle();
+      expect(find.text('진행률'), findsOneWidget);
+      expect(_key('todo-detail-status'), findsNothing);
+      expect(_myProgress(tester), 0);
+      expect(find.text('대기(0%)'), findsOneWidget);
+      await _pickMyProgress(tester, 50);
       expect(api.lastUpdate, {'progress': 50});
-      expect(find.text('진행 50%'), findsOneWidget);
-      await tester.tap(_key('todo-complete-button'));
-      await tester.pumpAndSettle();
+      expect(_myProgress(tester), 50);
+      expect(find.text('진행(50%)'), findsOneWidget);
+      // 완료는 따로 단추 없이 "완료(100%)" 항목으로.
+      expect(_key('todo-complete-button'), findsNothing);
+      expect(find.text('완료 취소'), findsNothing);
+      await _pickMyProgress(tester, 100);
       expect(api.lastUpdate, {'progress': 100});
-      expect(find.text('완료'), findsWidgets);
-      // 완료되면 "완료 취소"로 바뀐다.
-      expect(find.text('완료 취소'), findsOneWidget);
-      await tester.tap(_key('todo-complete-button'));
-      await tester.pumpAndSettle();
+      expect(_myProgress(tester), 100);
+      expect(find.text('완료(100%)'), findsOneWidget);
+      // 잔디처럼 끝난 할 일의 제목에 취소선을 긋지 않는다.
+      expect(
+        tester.widget<Text>(_key('todo-detail-title')).style?.decoration,
+        isNot(TextDecoration.lineThrough),
+      );
+      await _pickMyProgress(tester, 0);
       expect(api.lastUpdate, {'progress': 0});
-      expect(find.text('대기'), findsOneWidget);
+      expect(_myProgress(tester), 0);
+      expect(api.callCount('update'), 3);
     });
 
-    testWidgets('진척률을 바꾸지 못하면 토스트로 알린다', (tester) async {
+    testWidgets('진척률을 바꾸지 못하면 토스트로 알리고 고르기 상자는 원래 값으로', (tester) async {
       final api = await open(tester, json: todoJson());
       api.failWith = '권한이 없습니다.';
-      await tester.tap(_key('todo-progress-75'));
-      await tester.pumpAndSettle();
+      await _pickMyProgress(tester, 75);
       expect(find.textContaining('진척률을 바꾸지 못했습니다'), findsOneWidget);
+      expect(_myProgress(tester), 0);
       await tester.pump(const Duration(seconds: 3));
     });
 
@@ -1603,6 +1751,7 @@ void main() {
       expect(api.lastCreate!['title'], '고친 제목');
       expect(api.lastCreate!['sourceMessageId'], 'm1');
       expect(api.lastCreate!['sourceCommentId'], isNull);
+      expect(api.lastCreate!['assigneeIds'], ['me'], reason: '담당자 기본은 나');
       expect(api.lastCreateAttachments, hasLength(2));
       expect(api.lastCreateAttachments.first.url, '/files/t0');
       expect(find.text('할 일로 등록했습니다.'), findsOneWidget);
@@ -1760,6 +1909,9 @@ class _FailingListApi extends FakeTodoApi {
     required TodoScope scope,
     bool includeDone = true,
     String? roomId,
+    String? assigneeId,
+    DateTime? from,
+    DateTime? to,
     TodoSort sort = TodoSort.due,
     int offset = 0,
     int limit = 30,

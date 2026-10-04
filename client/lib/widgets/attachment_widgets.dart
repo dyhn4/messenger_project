@@ -444,7 +444,8 @@ class _DownloadableImageState extends State<DownloadableImage> {
   void _open() {
     final onOpen = widget.onOpen;
     if (onOpen != null) return onOpen();
-    Navigator.of(context).push(
+    // 뷰어는 늘 창 전체(루트 Navigator)에 — PC 할 일 패널 안 화면(중첩 Navigator)에서 열어도 패널 폭에 갇히지 않게.
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => ImageViewerScreen.single(
           imageUrl: widget.url,
@@ -617,6 +618,10 @@ class ChatImageAttachments extends StatelessWidget {
   final String? thumbnailKey;
   final String? thumbnailNonce;
 
+  /// 여러 장일 때 격자 아래에 "전체 다운로드" 줄을 둘지 — 기본은 둔다(말풍선). 할 일 상세처럼 전부 받기를 다른 곳
+  /// (••• → 파일 다운로드)이 맡는 화면은 끈다.
+  final bool showDownloadAll;
+
   const ChatImageAttachments({
     super.key,
     required this.session,
@@ -627,6 +632,7 @@ class ChatImageAttachments extends StatelessWidget {
     this.attachmentNonce,
     this.thumbnailKey,
     this.thumbnailNonce,
+    this.showDownloadAll = true,
   });
 
   /// 이 말풍선의 사진만 넘겨볼 때의 목록 — 비밀 대화면 그 장을 볼 때 원본을 받아 복호화한다.
@@ -652,8 +658,10 @@ class ChatImageAttachments extends StatelessWidget {
   ];
 
   void _open(BuildContext context, int index) {
+    // 뷰어는 늘 창 전체(루트 Navigator)에 — PC 할 일 패널 안 화면(중첩 Navigator)에서 열어도 패널 폭에 갇히지 않게.
     Navigator.of(
       context,
+      rootNavigator: true,
     ).push(MaterialPageRoute(builder: (_) => _viewer(index)));
   }
 
@@ -771,7 +779,7 @@ class ChatImageAttachments extends StatelessWidget {
                 ],
               ),
               // 여러 장이면 말풍선 아래를 한 줄 늘려 오른쪽 끝에 "전체 다운로드"를 둔다(지워진 사진은 뺀다).
-              if (attachments.any((a) => !a.deleted))
+              if (showDownloadAll && attachments.any((a) => !a.deleted))
                 AllDownloadBar(
                   session: session,
                   items: [
@@ -1170,7 +1178,8 @@ class _DownloadableFileState extends State<DownloadableFile> {
 
       if (_isInAppViewable(widget.fileName)) {
         final ext = widget.fileName.split('.').last.toLowerCase();
-        await Navigator.of(context).push(
+        // 뷰어는 늘 창 전체(루트 Navigator)에 — PC 할 일 패널 안 화면(중첩 Navigator)에서 열어도 패널 폭에 갇히지 않게.
+        await Navigator.of(context, rootNavigator: true).push(
           MaterialPageRoute(
             builder: (_) => ext == 'pdf'
                 ? PdfViewerScreen(

@@ -41,7 +41,7 @@ import {
   TOPIC_CREATION_LEVELS,
 } from './permissions.js';
 import { teamAccess, userAccess } from './access.js';
-import { nameOf, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
+import { nameOf, notifyMembership, notifyTodosResynced, postSystemMessage, toRoomDto } from './rooms.js';
 import { announceTeamJoin, announceTeamRemoval } from './selfRoomNotices.js';
 import { publicUser } from './users.js';
 import { signFileUrl, toStoredUploadUrl } from './upload.js';
@@ -408,8 +408,9 @@ export function createTeamsRouter(io) {
         const before = await listRoomMemberIds(room.id);
         const missing = autoJoinIds.filter((id) => !before.includes(id));
         if (missing.length === 0) continue;
-        await addRoomMembers(room.id, missing);
+        const changedTodos = await addRoomMembers(room.id, missing);
         await notifyMembership(io, room);
+        await notifyTodosResynced(io, room, changedTodos, req.user.sub); // 예전 담당 행이 남아 있던 사람이 다시 들어옴.
         const names = await Promise.all(missing.map(nameOf));
         await postSystemMessage(io, room, `${names.join(', ')} 님이 참여했습니다.`);
       }

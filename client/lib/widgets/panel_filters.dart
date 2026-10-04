@@ -196,12 +196,19 @@ class MemberFilterButton extends StatelessWidget {
   final List<AppUser>? users;
   final String? selectedSenderId;
   final ValueChanged<String?> onSelected;
+
+  /// true면 펼침 패널을 단추 오른쪽 끝에 맞춘다(줄 오른쪽 끝 칸 — [FilterDropdownButton.alignEnd]).
+  final bool alignEnd;
   const MemberFilterButton({
     super.key,
     required this.users,
     required this.selectedSenderId,
     required this.onSelected,
+    this.alignEnd = false,
   });
+
+  /// 펼침 패널 폭.
+  static const panelWidth = 220.0;
 
   String get _label {
     final id = selectedSenderId;
@@ -217,8 +224,10 @@ class MemberFilterButton extends StatelessWidget {
     return FilterDropdownButton(
       label: _label,
       expand: true,
+      alignEnd: alignEnd,
+      panelWidth: panelWidth,
       panelBuilder: (close) => FilterPanelShell(
-        width: 220,
+        width: panelWidth,
         child: _MemberFilterPanel(
           users: users ?? const <AppUser>[],
           selectedSenderId: selectedSenderId,
@@ -304,15 +313,22 @@ class _MemberFilterPanelState extends State<_MemberFilterPanel> {
 }
 
 /// 파일·링크 패널의 "모든 멤버" 후보 — 방을 하나 골랐으면 그 방 멤버만, 전체면 비밀 아닌 내 방들의
-/// 멤버를 모아 보여준다(검색 패널과 달리 조직 전체 사용자 목록은 쓰지 않는다).
-List<AppUser> memberChoicesFor(Session session, String? roomId) {
+/// 멤버를 모아 보여준다(검색 패널과 달리 조직 전체 사용자 목록은 쓰지 않는다). [teamId]를 주면 그 팀의
+/// 방만 본다 — session.rooms에는 모든 팀의 방이 들어 있어서, 팀 안에서만 찾는 패널(할 일)은 다른 팀
+/// 사람을 골라도 결과가 없다.
+List<AppUser> memberChoicesFor(
+  Session session,
+  String? roomId, {
+  String? teamId,
+}) {
+  bool inTeam(Room r) => teamId == null || r.teamId == teamId;
   if (roomId != null) {
     for (final r in session.rooms) {
-      if (r.id == roomId) return r.members;
+      if (r.id == roomId && inTeam(r)) return r.members;
     }
   }
   final byId = <String, AppUser>{};
-  for (final Room r in session.rooms.where((r) => !r.isSecret)) {
+  for (final Room r in session.rooms.where((r) => !r.isSecret && inTeam(r))) {
     for (final m in r.members) {
       byId[m.id] = m;
     }

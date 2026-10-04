@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { dmHistoryFloors, roomMembers, rooms, teamMembers, topicFolderItems, topicFolders, users } from '../schema.js';
+import { resyncTodoProgressForMembers } from './todos.js';
 
 export function findRoomById(id) {
   return db
@@ -219,36 +220,51 @@ export async function getDmHistoryFloor(roomId, userId) {
 }
 
 /** 여러 명을 한 번에 멤버로 추가한다(이미 멤버면 조용히 무시 — 초대/공개토픽 자동가입에서 중복 방지).
- * [role]은 토픽을 만든 사람을 토픽 관리자('admin')로 넣을 때만 쓴다. */
+ * [role]은 토픽을 만든 사람을 토픽 관리자('admin')로 넣을 때만 쓴다. 새로 들어온 사람에게 이 방 할 일의 담당 행이
+ * 남아 있으면(나갔다가 다시 들어옴) 같은 트랜잭션에서 그 할 일들의 전체 진척률을 다시 맞추고, 실제로 바뀐 할 일 행을
+ * 돌려준다(호출부가 rooms.js notifyTodosResynced로 알린다 — 새로 만든 방이면 늘 빈 목록). */
 export async function addRoomMembers(roomId, userIds, role = 'member') {
-  if (userIds.length === 0) return;
-  await db
-    .insert(roomMembers)
-    .values(userIds.map((userId) => ({ roomId, userId, role })))
-    .onConflictDoNothing();
+  if (userIds.length === 0) return [];
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(roomMembers)
+      .values(userIds.map((userId) => ({ roomId, userId, role })))
+      .onConflictDoNothing()
+      .returning({ userId: roomMembers.userId });
+    return resyncTodoProgressForMembers(tx, roomId, inserted.map((r) => r.userId));
+  });
 }
 
 /**
  * 멤버에서 뺀다 — 그 사람의 토픽 폴더 배치(topic_folder_items)도 같이 지운다(나갔다가 다시
  * 들어오면 폴더 밖 목록에서 시작). 폴더 배치가 실제로 지워졌으면 true — 호출부가 그 사람의
- * 다른 기기에 폴더 목록을 다시 불러오라고 알릴지 정한다.
+ * 다른 기기에 폴더 목록을 다시 불러오라고 알릴지 정한다. 할 일 집계도 removeRoomMembers가 맞추지만
+ * 바뀐 할 일은 돌려주지 않으므로, 할 일이 있을 수 있는 방(그룹·토픽)은 removeRoomMembers를 직접 쓴다.
  */
 export async function removeRoomMember(roomId, userId) {
   const { folderItemRemoved } = await removeRoomMembers(roomId, [userId]);
   return folderItemRemoved;
 }
 
-/** 여러 명을 한 번에 멤버에서 뺀다(토픽 "내보내기") — removeRoomMember와 같은 규칙. [tx]를 주면
- * (withRoomLock 안) 그 트랜잭션에서 지운다. */
+/** 여러 명을 한 번에 멤버에서 뺀다(나가기·토픽 "내보내기") — removeRoomMember와 같은 규칙. [tx]를 주면
+ * (withRoomLock 안) 그 트랜잭션에서 지운다. 실제로 빠진 사람이 담당자인 이 방 할 일들의 전체 진척률도 같은 트랜잭션에서
+ * 다시 맞춘다(방을 나간 담당자는 집계에서 빠진다 — 담당 행은 남겨 두어 다시 들어오면 그대로 이어지고, 담당자가 하나도
+ * 남지 않게 된 할 일은 S3 규칙의 값을 이어받는다). 돌려주는 값은 `{ folderItemRemoved, changedTodos }` — changedTodos는
+ * 전체 진척률이 실제로 바뀐 할 일 행(호출부가 rooms.js notifyTodosResynced로 알린다). */
 export async function removeRoomMembers(roomId, userIds, tx) {
-  if (userIds.length === 0) return { folderItemRemoved: false };
+  if (userIds.length === 0) return { folderItemRemoved: false, changedTodos: [] };
   const run = async (t) => {
-    await t.delete(roomMembers).where(and(eq(roomMembers.roomId, roomId), inArray(roomMembers.userId, userIds)));
+    const left = await t
+      .delete(roomMembers)
+      .where(and(eq(roomMembers.roomId, roomId), inArray(roomMembers.userId, userIds)))
+      .returning({ userId: roomMembers.userId });
     const removed = await t
       .delete(topicFolderItems)
       .where(and(eq(topicFolderItems.roomId, roomId), inArray(topicFolderItems.userId, userIds)))
       .returning({ userId: topicFolderItems.userId });
-    return { folderItemRemoved: removed.length > 0 };
+    // 바로 전까지 멤버였던 사람만 — 그래야 "바로 전까지 그 방에 있던 담당자"(S3 규칙의 기준)가 맞다.
+    const changedTodos = await resyncTodoProgressForMembers(t, roomId, left.map((r) => r.userId), { left: true });
+    return { folderItemRemoved: removed.length > 0, changedTodos };
   };
   return tx ? run(tx) : db.transaction(run);
 }

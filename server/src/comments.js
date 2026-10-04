@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { findCommentById, insertComment, softDeleteComment, updateCommentText } from './db/queries/comments.js';
 import { findMessageById } from './db/queries/messages.js';
-import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
+import { findRoomById, getDmHistoryFloor, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
+import { isUuid } from './favoritesRules.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { findUserById } from './db/queries/users.js';
@@ -128,6 +129,27 @@ export function createCommentsRouter(io) {
         excludeUserIds: pushedUserIds,
       });
     })().catch((err) => console.error('[push] 댓글 알림 실패:', err?.message ?? err));
+  });
+
+  /**
+   * 댓글 한 건 — 메시지 한 건(GET /messages/:id)과 같은 용도·규칙: 그 방 멤버만(403), 지운 댓글과 비밀 대화는 404, DM
+   * "진짜 나가기" 이전 글(부모 메시지)에 달린 댓글도 방 메시지 목록에서처럼 없는 것으로(404). 응답은 댓글 DTO(파일 댓글이면
+   * 파일 칸 포함).
+   */
+  router.get('/comments/:id', async (req, res) => {
+    const notFound = () => res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+    const comment = isUuid(req.params.id) ? await findCommentById(req.params.id) : null;
+    if (!comment || comment.deletedAt) return notFound();
+    const room = await findRoomById(comment.roomId);
+    if (!room) return notFound();
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    if (room.isSecret) return notFound();
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
+    if (floor) {
+      const parent = await findMessageById(comment.messageId);
+      if (!parent || parent.createdAt < floor) return notFound();
+    }
+    res.json(toCommentDto(comment));
   });
 
   router.patch('/comments/:id', async (req, res) => {

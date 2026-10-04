@@ -16,19 +16,26 @@ import '../services/session.dart';
 import '../services/todo_api.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart' show formatFileSize;
+import '../widgets/compact_menu.dart';
 import '../widgets/date_range_calendar_panel.dart';
 import '../widgets/room_picker_field.dart';
+import '../widgets/todo_widgets.dart';
 import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
 import 'schedule_message_dialog.dart' show SchedulePicker;
 
-/// 할 일 만들기·고치기 화면을 연다 — 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면. 저장했으면 서버가 돌려준
-/// 할 일, 닫기만 했으면 null.
+/// 할 일 만들기·고치기 화면을 연다 — [mode]를 안 주면 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면.
+/// [TodoViewMode.panel]이면 가장 가까운 Navigator(PC 할 일 패널의 중첩 Navigator)에 패널 안 화면으로 올린다 — 머리
+/// `← 할 일 … ✕`의 ←는 이 화면만 닫고(쓰던 내용이 있으면 먼저 묻는다), ✕는 [onClosePanel](패널 전체 닫기 — 역시 먼저
+/// 묻는다)을 부른다. 패널 밖에서 패널을 닫거나 바꿀 때(같은 메뉴 타일·다른 패널·댓글 열기)도 쓰던 내용이 있으면 먼저
+/// 묻는다([TodoPanelDrafts]). 저장했으면 서버가 돌려준 할 일, 닫기만 했으면(고치기에서 바꾼 게 없이 [저장하기]도) null.
 ///
-/// - [editing]을 주면 고치기다: 대화방은 잠기고(한 번 만든 할 일은 다른 방으로 옮길 수 없다), 담당자 칸은 만든 사람만
-///   바꿀 수 있다(담당자는 읽기 전용 — `canManage`).
+/// - [editing]을 주면 고치기다: 대화방은 잠기고(한 번 만든 할 일은 다른 방으로 옮길 수 없다 — 만들 때도 대화방 칸 아래에
+///   이 안내가 늘 보인다), 담당자 칸은 만든 사람만 바꿀 수 있다(담당자는 읽기 전용 — `canManage`).
 /// - [room]을 주면 그 방이 대화방 칸에 채워진다. [lockRoom]이면 못 바꾼다(메시지·댓글에서 "할 일로 등록"할 때).
+/// - 새로 만들 때 담당자 기본값은 나다(지울 수 있다 — 나와의 대화도 같다). 고른 대화방을 다른 방으로 바꾸면 첨부와
+///   담당자가 초기화된다(잔디와 같다 — 지울 게 있으면 먼저 묻는다).
 /// - [initialTitle]·[initialDescription]·[initialAttachments]·[sourceMessageId]·[sourceCommentId]는 메시지·댓글에서
 ///   만들 때 미리 채우는 값이다(제목·설명은 고칠 수 있다).
 /// - [api]는 테스트가 가짜를 끼우는 자리 — 안 주면 [SessionTodos.todoApi].
@@ -44,8 +51,14 @@ Future<Todo?> showTodoEditor(
   String? sourceMessageId,
   String? sourceCommentId,
   TodoApi? api,
-}) async {
-  final wide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
+  TodoViewMode? mode,
+  VoidCallback? onClosePanel,
+}) {
+  final viewMode =
+      mode ??
+      (MediaQuery.sizeOf(context).width >= wideBreakpoint
+          ? TodoViewMode.dialog
+          : TodoViewMode.page);
   final editor = TodoEditor(
     session: session,
     room: room,
@@ -57,19 +70,48 @@ Future<Todo?> showTodoEditor(
     sourceMessageId: sourceMessageId,
     sourceCommentId: sourceCommentId,
     api: api,
-    asDialog: wide,
+    mode: viewMode,
+    onClosePanel: onClosePanel,
   );
-  return wide
-      ? await showDialog<Todo>(
-          context: context,
-          // 바깥을 잘못 눌러 쓰던 내용이 날아가지 않게 — 닫기는 취소·X(내용이 있으면 확인 후)로만.
-          barrierDismissible: false,
-          builder: (_) => editor,
-        )
-      : await Navigator.of(context).push<Todo>(
-          MaterialPageRoute(fullscreenDialog: true, builder: (_) => editor),
-        );
+  return switch (viewMode) {
+    TodoViewMode.dialog => showDialog<Todo>(
+      context: context,
+      // 바깥을 잘못 눌러 쓰던 내용이 날아가지 않게 — 닫기는 취소·X(내용이 있으면 확인 후)로만.
+      barrierDismissible: false,
+      builder: (_) => editor,
+    ),
+    TodoViewMode.page => Navigator.of(context).push<Todo>(
+      MaterialPageRoute(fullscreenDialog: true, builder: (_) => editor),
+    ),
+    TodoViewMode.panel => Navigator.of(
+      context,
+    ).push<Todo>(todoPanelRoute((_) => editor)),
+  };
 }
+
+// 잔디 생성 창의 모양 값 — 칸마다 왼쪽에 회색 아이콘(이름표 없음), 오른쪽에 같은 높이의 옅은 테두리 상자.
+
+/// 한 줄짜리 칸(대화방·제목·파일 업로드·담당자 상자·기간·알림)의 높이와 모서리 — 높이는 공용 대화방 칸
+/// (RoomPickerField — 위아래 여백 14 + 테두리 + 한 줄)과 같게 맞췄다. PC의 촘촘한 밀도(compact)에서도 줄지 않게 글자 칸과
+/// 단추는 표준 밀도로 그린다.
+const double _fieldHeight = 50;
+const double _fieldRadius = 8;
+
+/// 왼쪽 아이콘 크기와 아이콘~칸 사이.
+const double _iconSize = 20;
+const double _iconGap = 12;
+
+/// 줄과 줄 사이.
+const double _rowGap = 20;
+
+/// 칸 테두리 — 잔디처럼 옅은 회색. 대화방 칸(RoomPickerField)도 같은 색으로 맞춘다.
+Color _fieldBorder(ThemeData theme) => theme.colorScheme.outlineVariant;
+
+/// 옅은 회색 바탕 — 파일 업로드 단추·담당자 상자·추가한 알림 줄(목록의 `+ 할 일 생성` 단추와 같은 색).
+Color _softFill(ThemeData theme) => theme.colorScheme.surfaceContainerHighest;
+
+/// 왼쪽 아이콘 색 — 차분한 회색(어두운 테마에서도 보이게 outline).
+Color _iconColor(ThemeData theme) => theme.colorScheme.outline;
 
 /// 붙인 파일 하나 — 붙이자마자 올리고, 저장할 때는 올라간 결과만 보낸다. 이미 서버에 있는 첨부(고치기·메시지에서
 /// 만들기)는 처음부터 [result]가 있다.
@@ -113,8 +155,11 @@ class _ReminderDraft {
   final bool sent;
 }
 
-/// 할 일 만들기·고치기(대화상자/전체 화면 공용) — 대화방(맨 위), 제목(필수), 설명, 담당자(방 멤버 중 여러 명), 기한
-/// (시작일~종료일), 파일 첨부(30개까지), 알림 일정(5개까지). 제목이 있고 입력이 서버 규칙 안일 때만 저장할 수 있다.
+/// 할 일 만들기·고치기(대화상자/전체 화면/패널 안 화면 공용) — 잔디 생성 창 모양: 칸마다 왼쪽에 회색 아이콘(이름표·글자
+/// 수 카운터 없음), 위에서부터 대화방(맨 위 — 아래에 "만든 뒤에는 못 바꾼다" 안내), 제목(필수), 설명, 파일 업로드(30개까지 —
+/// 오른쪽 아래 `N / 30`), 담당자(회색 상자 + 오른쪽 아래 `✏ 담당자 관리` — 방 멤버 중 여러 명, 새로 만들 때 기본은 나),
+/// 기간(시작일 ~ 종료일 상자 둘 — 누르면 아래에 달력), 알림(`알림을 받아보세요 (선택) ▾` — 5개까지), 맨 아래 [취소][저장하기].
+/// 제목이 있고 입력이 서버 규칙 안일 때만 저장할 수 있다.
 class TodoEditor extends StatefulWidget {
   final Session session;
   final Room? room;
@@ -126,7 +171,12 @@ class TodoEditor extends StatefulWidget {
   final String? sourceMessageId;
   final String? sourceCommentId;
   final TodoApi? api;
-  final bool asDialog;
+
+  /// 그리는 모양 — 안 주면 [asDialog]로 정한다(true = 대화상자, false = 전체 화면).
+  final TodoViewMode mode;
+
+  /// 패널 모드의 ✕ — 패널 전체를 닫는다(TodosPanel.onClose). 없으면 ✕가 안 보인다.
+  final VoidCallback? onClosePanel;
 
   const TodoEditor({
     super.key,
@@ -140,14 +190,19 @@ class TodoEditor extends StatefulWidget {
     this.sourceMessageId,
     this.sourceCommentId,
     this.api,
-    this.asDialog = true,
-  });
+    bool asDialog = true,
+    TodoViewMode? mode,
+    this.onClosePanel,
+  }) : mode = mode ?? (asDialog ? TodoViewMode.dialog : TodoViewMode.page);
+
+  /// 대화상자로 그리는지(예전 이름 — [mode]가 [TodoViewMode.dialog]인가).
+  bool get asDialog => mode == TodoViewMode.dialog;
 
   @override
   State<TodoEditor> createState() => TodoEditorState();
 }
 
-class TodoEditorState extends State<TodoEditor> {
+class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   late final TodoApi _api = widget.api ?? widget.session.todoApi;
   final _title = TextEditingController();
   final _description = TextEditingController();
@@ -164,6 +219,13 @@ class TodoEditorState extends State<TodoEditor> {
 
   bool _periodOpen = false;
   final _periodPanelKey = GlobalKey();
+
+  /// 떠 있는 창(작성 취소·대화방 변경 확인·담당자 관리·알림 시각 — 대화상자는 루트 Navigator에 뜬다). 패널 안 화면(중첩
+  /// Navigator)이 먼저 닫히면(상세가 지워졌다는 알림으로 함께 닫힘·팀 전환) 창만 남지 않게 [dispose]에서 치운다.
+  final _dialogs = <Route<Object?>>{};
+
+  /// 패널 안 화면이면 들어가 있는 "쓰는 중인 할 일" 목록 — 홈 화면이 패널을 밖에서 닫거나 바꾸기 전에 이 화면에 묻는다.
+  TodoDraftRegistry? _drafts;
 
   Todo? get _editing => widget.editing;
   bool get _isEdit => _editing != null;
@@ -211,21 +273,45 @@ class TodoEditorState extends State<TodoEditor> {
     } else {
       _title.text = widget.initialTitle ?? '';
       _description.text = widget.initialDescription ?? '';
+      // 담당자 기본값은 나(잔디) — 지울 수 있다. 대화방이 아직 없으면 처음 고를 때 채운다.
+      _assignees = _defaultAssignees(_room);
       for (final a in widget.initialAttachments.take(todoAttachmentsMaxCount)) {
         _files.add(_TodoFile.existing(a));
       }
     }
     _title.addListener(_rebuild);
     _description.addListener(_rebuild);
+    // 기본 담당자(나)도 처음 값에 넣는다 — 그대로 닫으면 "바뀐 게 있나" 묻지 않는다.
     _initialSnapshot = _snapshot();
   }
 
   @override
-  void dispose() {
-    for (final f in _files) {
-      f.removed = true;
-      f.token.cancel();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // PC 할 일 패널 안 화면이면 패널의 "쓰는 중인 할 일" 목록에 든다(대화상자·전체 화면은 패널 밖이라 없다).
+    final drafts = widget.mode == TodoViewMode.panel
+        ? TodoPanelDrafts.maybeOf(context)
+        : null;
+    if (!identical(drafts, _drafts)) {
+      _drafts?.remove(this);
+      _drafts = drafts?..add(this);
     }
+  }
+
+  @override
+  void dispose() {
+    _drafts?.remove(this);
+    _drafts = null;
+    // 화면을 치우는 중에는 다른 Navigator를 바꿀 수 없어 남은 창은 다음 프레임에 닫는다(결과는 null — 기다리던 쪽은 이미
+    // 없다).
+    final leftovers = _dialogs.toList();
+    _dialogs.clear();
+    if (leftovers.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => leftovers.forEach(closeTodoRoute),
+      );
+    }
+    _clearFiles();
     _title.dispose();
     _description.dispose();
     super.dispose();
@@ -234,6 +320,32 @@ class TodoEditorState extends State<TodoEditor> {
   void _rebuild() {
     if (mounted) setState(() => _serverError = null);
   }
+
+  /// [showDialog]와 같고, 떠 있는 동안 [_dialogs]에 담아 둔다.
+  Future<T?> _showDialog<T>(WidgetBuilder builder) async {
+    Route<Object?>? route;
+    var open = true;
+    try {
+      return await showDialog<T>(
+        context: context,
+        builder: (dialogContext) {
+          // 닫히는 동안 다시 그려져도 닫힌 창을 다시 담지 않게 [open]일 때만.
+          if (open && route == null) {
+            route = ModalRoute.of(dialogContext);
+            final captured = route;
+            if (captured != null) _dialogs.add(captured);
+          }
+          return builder(dialogContext);
+        },
+      );
+    } finally {
+      open = false;
+      _dialogs.remove(route);
+    }
+  }
+
+  /// 아래쪽 알림(토스트) — 앱 맨 위 Overlay(창 가운데 아래)에 뜬다(패널 안 화면에서도 — [showAppToast]).
+  void _toast(String message) => showAppToast(context, message);
 
   /// 입력 상태를 한 줄로 — 닫을 때 "바뀐 게 있나" 비교용.
   String _snapshot() => [
@@ -247,7 +359,12 @@ class TodoEditorState extends State<TodoEditor> {
     ..._reminders.map((r) => '${r.id}@${r.at.millisecondsSinceEpoch}'),
   ].join('|');
 
-  bool get _dirty => _snapshot() != _initialSnapshot;
+  /// 처음 연 뒤로 바뀐 입력이 있는지(닫을 때 "작성 취소"로 물을지).
+  bool get isDirty => _snapshot() != _initialSnapshot;
+
+  /// 패널을 밖에서 닫거나 바꿀 때 물어야 하는지 — 바뀐 게 있고 저장하는 중이 아닐 때.
+  @override
+  bool get needsDiscardConfirm => !_submitting && isDirty;
 
   TodoDraftCheck get _check => checkTodoDraft(
     title: _title.text,
@@ -278,29 +395,68 @@ class TodoEditorState extends State<TodoEditor> {
 
   // ── 대화방·담당자 ──────────────────────────────────────────────────
 
-  void _onRoomPicked(Room room) {
-    final members = {for (final m in room.members) m.id};
-    final dropped = _assignees.where((a) => !members.contains(a.id)).length;
-    setState(() {
-      _room = room;
-      _serverError = null;
-      _assignees = [
-        for (final a in _assignees)
-          if (members.contains(a.id)) a,
-      ];
-    });
-    if (dropped > 0) {
-      showAppToast(context, '이 대화방에 없는 담당자 $dropped명을 뺐습니다.');
-    }
+  /// [room]의 멤버 중 나 — 멤버 목록에 내가 없으면 null.
+  AppUser? _meIn(Room? room) {
+    final myId = widget.session.userId;
+    if (room == null || myId == null) return null;
+    return room.members.where((m) => m.id == myId).firstOrNull;
   }
 
-  /// 담당자 고르기 — 이 대화방 멤버 중에서 여러 명.
+  /// 새로 만들 때의 담당자 기본값 — [room]의 나 한 명(대화방이 없으면 비어 있다).
+  List<AppUser> _defaultAssignees(Room? room) => [?_meIn(room)];
+
+  /// 대화방을 바꾸면 사라질 입력이 있는지 — 첨부가 있거나 담당자가 기본값([나])이 아닐 때.
+  bool _hasRoomBoundInput(Room room) =>
+      _files.isNotEmpty ||
+      _assignees.map((a) => a.id).join('|') !=
+          _defaultAssignees(room).map((a) => a.id).join('|');
+
+  /// 대화방 고르기. 처음 고르면 담당자를 나로 채운다. 이미 고른 방에서 다른 방으로 바꾸면 첨부와 담당자가 초기화된다
+  /// (잔디: 할 일의 대화방을 바꾸면 올린 첨부 파일과 담당자 정보가 초기화) — 지울 게 있으면 먼저 묻고, 취소하면 원래
+  /// 방·첨부·담당자 그대로다. 대화방 칸은 [_room]을 보여 주므로 묻는 동안에도, 취소한 뒤에도 원래 방이 보인다.
+  Future<void> _onRoomPicked(Room room) async {
+    final before = _room;
+    if (before?.id == room.id) return;
+    if (before != null && _hasRoomBoundInput(before)) {
+      final change = await _confirmRoomChange();
+      if (!change || !mounted) return;
+    }
+    setState(() {
+      if (before != null) _clearFiles();
+      _room = room;
+      _assignees = _defaultAssignees(room);
+      _serverError = null;
+    });
+  }
+
+  /// "대화방을 바꾸면 첨부와 담당자가 초기화된다" 확인 — [변경]을 눌렀을 때만 true.
+  Future<bool> _confirmRoomChange() async {
+    final change = await _showDialog<bool>(
+      (dialogContext) => AlertDialog(
+        content: const Text('대화방을 변경하면\n첨부한 파일과 담당자 정보가 초기화됩니다.'),
+        actions: [
+          TextButton(
+            key: const ValueKey('todo-room-change-cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            key: const ValueKey('todo-room-change-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('변경'),
+          ),
+        ],
+      ),
+    );
+    return change == true;
+  }
+
+  /// 담당자 고르기(담당자 관리) — 이 대화방 멤버 중에서 여러 명.
   Future<void> _pickAssignees() async {
     final room = _room;
     if (room == null || !_canManageAssignees) return;
-    final picked = await showDialog<List<AppUser>>(
-      context: context,
-      builder: (_) => _AssigneePickerDialog(
+    final picked = await _showDialog<List<AppUser>>(
+      (_) => _AssigneePickerDialog(
         session: widget.session,
         members: room.members,
         selected: _assignees,
@@ -351,7 +507,7 @@ class TodoEditorState extends State<TodoEditor> {
     final room = todoAttachmentsMaxCount - _files.length;
     final accepted = files.take(math.max(0, room)).toList();
     if (accepted.length < files.length) {
-      showAppToast(context, '첨부 파일은 $todoAttachmentsMaxCount개까지 올릴 수 있습니다.');
+      _toast('첨부 파일은 $todoAttachmentsMaxCount개까지 올릴 수 있습니다.');
     }
     if (accepted.isEmpty) return;
     setState(() {
@@ -396,7 +552,7 @@ class TodoEditorState extends State<TodoEditor> {
         } catch (e) {
           if (!mounted || next.removed) continue;
           setState(() => next.error = '$e');
-          showAppToast(context, "'${next.name}' 파일을 올리지 못했습니다: $e");
+          _toast("'${next.name}' 파일을 올리지 못했습니다: $e");
         }
       }
     } finally {
@@ -411,19 +567,28 @@ class TodoEditorState extends State<TodoEditor> {
     setState(() => _files.remove(f));
   }
 
+  /// 첨부를 모두 뺀다 — 올리는 중인 것은 [_removeFile]처럼 올리기를 멈춘다(대화방을 바꿀 때·창을 닫을 때).
+  void _clearFiles() {
+    for (final f in _files) {
+      f.removed = true;
+      f.token.cancel();
+    }
+    _files.clear();
+  }
+
   // ── 알림 일정 ─────────────────────────────────────────────────────
 
   void _addReminder(DateTime at) {
     if (_reminders.length >= todoRemindersMaxCount) {
-      showAppToast(context, '알림은 $todoRemindersMaxCount개까지 추가할 수 있습니다.');
+      _toast('알림은 $todoRemindersMaxCount개까지 추가할 수 있습니다.');
       return;
     }
     if (!at.isAfter(DateTime.now())) {
-      showAppToast(context, '이미 지난 시각에는 알림을 만들 수 없습니다.');
+      _toast('이미 지난 시각에는 알림을 만들 수 없습니다.');
       return;
     }
     if (_reminders.any((r) => r.at == at)) {
-      showAppToast(context, '같은 시각의 알림이 이미 있습니다.');
+      _toast('같은 시각의 알림이 이미 있습니다.');
       return;
     }
     setState(() {
@@ -437,7 +602,7 @@ class TodoEditorState extends State<TodoEditor> {
   void _addRelativeReminder(Duration before) {
     final due = _due;
     if (due == null) {
-      showAppToast(context, '기한을 먼저 정하세요.');
+      _toast('기한을 먼저 정하세요.');
       return;
     }
     _addReminder(todoReminderBeforeDue(due, before));
@@ -447,9 +612,8 @@ class TodoEditorState extends State<TodoEditor> {
     var value = ceilToScheduleSlot(
       DateTime.now().add(const Duration(hours: 1)),
     );
-    final picked = await showDialog<DateTime>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
+    final picked = await _showDialog<DateTime>(
+      (dialogContext) => StatefulBuilder(
         builder: (context, setLocal) => AlertDialog(
           title: const Text('알림 시각'),
           content: SizedBox(
@@ -480,6 +644,15 @@ class TodoEditorState extends State<TodoEditor> {
 
   Future<void> _submit() async {
     if (!canSubmit) return;
+    final editing = _editing;
+    final changes = editing == null ? null : _changedFields(editing);
+    // 고치기에서 바뀐 칸이 하나도 없으면(아무것도 안 고쳤거나, 담당자를 뺐다가 다시 넣는 등 원래대로 돌려놨으면) 서버에
+    // 보내지 않고 그냥 닫는다(잔디처럼) — 빈 수정은 서버가 "수정할 내용이 없습니다."로 거절한다. 결과는 null이라 상세는
+    // "수정했습니다"를 띄우지 않고 다시 받지도 않는다.
+    if (changes != null && changes.isEmpty) {
+      Navigator.of(context).pop();
+      return;
+    }
     setState(() {
       _submitting = true;
       _serverError = null;
@@ -488,7 +661,6 @@ class TodoEditorState extends State<TodoEditor> {
       final description = _description.text.trim();
       final attachments = [for (final f in _files) f.result!];
       final Todo saved;
-      final editing = _editing;
       if (editing == null) {
         saved = await _api.create(
           _room!.id,
@@ -504,7 +676,7 @@ class TodoEditorState extends State<TodoEditor> {
           sourceCommentId: widget.sourceCommentId,
         );
       } else {
-        saved = await _api.update(editing.id, _changedFields(editing));
+        saved = await _api.update(editing.id, changes!);
       }
       if (mounted) Navigator.of(context).pop(saved);
     } catch (e) {
@@ -557,32 +729,42 @@ class TodoEditorState extends State<TodoEditor> {
     return fields;
   }
 
+  /// 쓰던 내용을 버려도 되는지 — 바뀐 게 없으면 묻지 않고 true, 있으면 "작성 취소" 확인에서 [닫기]를 눌렀을 때만 true.
+  /// 이 화면의 ←·✕·[취소]·뒤로 가기, 그리고 패널 안 화면이면 홈 화면이 패널을 닫거나 바꾸기 전에도 묻는다.
+  @override
+  Future<bool> confirmDiscard() async {
+    if (!isDirty) return true;
+    final discard = await _showDialog<bool>(
+      (dialogContext) => AlertDialog(
+        title: const Text('작성 취소'),
+        content: Text(_isEdit ? '수정한 내용을 버리고 닫을까요?' : '작성 중인 할 일을 버리고 닫을까요?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(_isEdit ? '계속 수정' : '계속 쓰기'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('닫기', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    return discard == true;
+  }
+
   Future<void> _requestClose() async {
     if (_submitting) return;
-    if (_dirty) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('작성 취소'),
-          content: Text(_isEdit ? '수정한 내용을 버리고 닫을까요?' : '작성 중인 할 일을 버리고 닫을까요?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(_isEdit ? '계속 수정' : '계속 쓰기'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(
-                '닫기',
-                style: TextStyle(color: Colors.redAccent),
-              ),
-            ),
-          ],
-        ),
-      );
-      if (discard != true || !mounted) return;
-    }
+    if (!await confirmDiscard() || !mounted) return;
     Navigator.of(context).pop();
+  }
+
+  /// 패널 모드의 ✕ — 쓰던 내용이 있으면 먼저 묻고 패널 전체를 닫는다(패널 자신의 닫기라 홈 화면은 다시 묻지 않는다).
+  Future<void> _requestClosePanel() async {
+    final close = widget.onClosePanel;
+    if (_submitting || close == null) return;
+    if (!await confirmDiscard() || !mounted) return;
+    close();
   }
 
   // ── 화면 ──────────────────────────────────────────────────────────
@@ -596,10 +778,44 @@ class TodoEditorState extends State<TodoEditor> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _requestClose();
       },
-      child: widget.asDialog ? _buildDialog(context) : _buildPage(context),
+      child: switch (widget.mode) {
+        TodoViewMode.dialog => _buildDialog(context),
+        TodoViewMode.page => _buildPage(context),
+        TodoViewMode.panel => _buildPanel(context),
+      },
     );
   }
 
+  /// 패널 안 화면(잔디 할 일 생성 화면) — 머리 `← 할 일 … ✕`(←는 이 화면만 닫기, ✕는 패널 전체 닫기 — 쓰던 내용이
+  /// 있으면 둘 다 먼저 묻는다), 스크롤되는 입력 칸들, 아래 [취소][저장하기] 줄. 바탕을 칠해 밀려 들어오는 동안 아래
+  /// 화면이 비치지 않게 한다.
+  Widget _buildPanel(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TodoPageHeader(
+            onBack: _requestClose,
+            onClose: widget.onClosePanel == null ? null : _requestClosePanel,
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _formScroll(
+              context,
+              const EdgeInsets.fromLTRB(16, 20, 16, 12),
+            ),
+          ),
+          const Divider(height: 1),
+          _errorLine(context),
+          _actionRow(context, horizontal: 16),
+        ],
+      ),
+    );
+  }
+
+  /// 대화상자(넓은 창에서 패널 밖 — 메시지·댓글·알림 센터의 "할 일로 등록") — 머리는 패널 안 화면 머리와 같은 모양에
+  /// ← 없이 `할 일 생성`/`할 일 수정` + ✕.
   Widget _buildDialog(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
     final theme = Theme.of(context);
@@ -617,19 +833,14 @@ class TodoEditorState extends State<TodoEditor> {
               padding: const EdgeInsets.fromLTRB(20, 12, 8, 12),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.checklist_rounded,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    _heading,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
+                  Expanded(
+                    child: Text(
+                      _heading,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge,
                     ),
                   ),
-                  const Spacer(),
                   IconButton(
                     key: const ValueKey('todo-editor-close'),
                     icon: const Icon(Icons.close),
@@ -641,36 +852,21 @@ class TodoEditorState extends State<TodoEditor> {
             ),
             const Divider(height: 1),
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: _formChildren(context),
-                ),
+              child: _formScroll(
+                context,
+                const EdgeInsets.fromLTRB(20, 20, 20, 12),
               ),
             ),
             const Divider(height: 1),
             _errorLine(context),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: _submitting ? null : _requestClose,
-                    child: const Text('취소'),
-                  ),
-                  const SizedBox(width: 8),
-                  _submitButton(),
-                ],
-              ),
-            ),
+            _actionRow(context),
           ],
         ),
       ),
     );
   }
 
+  /// 전체 화면(모바일) — 앱 바에 ✕ · 제목 · [저장하기].
   Widget _buildPage(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -692,17 +888,44 @@ class TodoEditorState extends State<TodoEditor> {
         child: Column(
           children: [
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: _formChildren(context),
-                ),
+              child: _formScroll(
+                context,
+                const EdgeInsets.fromLTRB(16, 16, 16, 24),
               ),
             ),
             _errorLine(context),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _formScroll(BuildContext context, EdgeInsets padding) =>
+      SingleChildScrollView(
+        padding: padding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: _formChildren(context),
+        ),
+      );
+
+  /// 아래 [취소][저장하기] 줄(대화상자·패널 안 화면) — 잔디처럼 오른쪽 끝에, 취소는 흐린 글자 단추.
+  Widget _actionRow(BuildContext context, {double horizontal = 20}) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(horizontal, 12, horizontal, 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          TextButton(
+            onPressed: _submitting ? null : _requestClose,
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).hintColor,
+            ),
+            child: const Text('취소'),
+          ),
+          const SizedBox(width: 8),
+          _submitButton(),
+        ],
       ),
     );
   }
@@ -738,274 +961,482 @@ class TodoEditorState extends State<TodoEditor> {
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : Text(uploading ? '업로드 중' : (_isEdit ? '저장' : '만들기')),
+          : Text(uploading ? '업로드 중' : '저장하기'),
+    );
+  }
+
+  /// 글자 칸 모양 — 옅은 테두리의 낮은 상자(한 줄이면 높이 [_fieldHeight]), 안내 글만 있고 이름표·글자 수 카운터는 없다
+  /// (글자 수 한도 maxLength는 그대로).
+  InputDecoration _inputDecoration(
+    ThemeData theme, {
+    required String hint,
+    String? errorText,
+  }) {
+    final scheme = theme.colorScheme;
+    OutlineInputBorder border(Color color, [double width = 1]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(_fieldRadius),
+          borderSide: BorderSide(color: color, width: width),
+        );
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+      isDense: true,
+      visualDensity: VisualDensity.standard,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+      counterText: '',
+      errorText: errorText,
+      border: border(_fieldBorder(theme)),
+      enabledBorder: border(_fieldBorder(theme)),
+      disabledBorder: border(_fieldBorder(theme).withValues(alpha: 0.6)),
+      focusedBorder: border(scheme.primary, 1.5),
+      errorBorder: border(scheme.error),
+      focusedErrorBorder: border(scheme.error, 1.5),
     );
   }
 
   List<Widget> _formChildren(BuildContext context) {
     final theme = Theme.of(context);
-    final hint = theme.hintColor;
     final check = _check;
+    const gap = SizedBox(height: _rowGap);
+    // 잔디 생성 창 순서 — 대화방 → 제목 → 설명 → 파일 업로드 → 담당자 → 기간 → 알림. 칸 이름표 대신 왼쪽에 아이콘
+    // (줄 순서를 확인하는 키 todo-label-<칸>은 그 아이콘에).
     return [
-      const _SectionLabel('대화방'),
-      if (_roomLocked)
-        Container(
-          key: const ValueKey('todo-room-locked'),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest.withValues(
-              alpha: 0.5,
-            ),
-            border: Border.all(color: theme.dividerColor),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _room?.displayName(widget.session.userId ?? '') ??
-                      _editing?.roomName ??
-                      '대화방',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Icon(Icons.lock_outline, size: 16, color: hint),
-            ],
-          ),
-        )
-      else
-        KeyedSubtree(
-          key: const ValueKey('todo-room-field'),
-          child: IgnorePointer(
-            ignoring: _submitting,
-            child: RoomPickerField(
-              session: widget.session,
-              value: _room,
-              filter: widget.session.canCreateTodoIn,
-              onChanged: _onRoomPicked,
-            ),
-          ),
-        ),
-      if (_isEdit)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            '한 번 만든 할 일은 다른 대화방으로 옮길 수 없습니다.',
-            style: TextStyle(fontSize: 12, color: hint),
-          ),
-        ),
-      const SizedBox(height: 16),
-      const _SectionLabel('제목'),
-      TextField(
-        key: const ValueKey('todo-title-field'),
-        controller: _title,
-        enabled: !_submitting,
-        autofocus: _room != null && _title.text.isEmpty,
-        maxLength: todoTitleMaxLength,
-        textInputAction: TextInputAction.next,
-        decoration: const InputDecoration(
-          hintText: '할 일 제목을 입력하세요',
-          border: OutlineInputBorder(),
+      _FieldRow(
+        id: 'room',
+        icon: Icons.chat_bubble_outline,
+        label: '대화방',
+        child: _roomField(context),
+      ),
+      gap,
+      _FieldRow(
+        id: 'title',
+        icon: Icons.title,
+        label: '제목',
+        child: TextField(
+          key: const ValueKey('todo-title-field'),
+          controller: _title,
+          enabled: !_submitting,
+          autofocus: _room != null && _title.text.isEmpty,
+          maxLength: todoTitleMaxLength,
+          textInputAction: TextInputAction.next,
+          style: theme.textTheme.bodyMedium,
+          decoration: _inputDecoration(theme, hint: '제목을 입력하세요'),
         ),
       ),
-      const SizedBox(height: 8),
-      const _SectionLabel('설명'),
-      TextField(
-        key: const ValueKey('todo-description-field'),
-        controller: _description,
-        enabled: !_submitting,
-        maxLength: todoDescriptionMaxLength,
-        minLines: 3,
-        maxLines: 8,
-        decoration: InputDecoration(
-          hintText: '설명을 입력하세요 (선택)',
-          border: const OutlineInputBorder(),
-          errorText: check.descriptionError,
-        ),
-      ),
-      const SizedBox(height: 8),
-      _SectionLabel(
-        '담당자',
-        trailing: '${_assignees.length}/$todoAssigneesMaxCount',
-      ),
-      _assigneeField(context),
-      const SizedBox(height: 16),
-      const _SectionLabel('기한'),
-      _periodField(context),
-      if (check.periodError != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            check.periodError!,
-            style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
+      gap,
+      _FieldRow(
+        id: 'description',
+        icon: Icons.format_quote,
+        label: '설명',
+        child: TextField(
+          key: const ValueKey('todo-description-field'),
+          controller: _description,
+          enabled: !_submitting,
+          maxLength: todoDescriptionMaxLength,
+          minLines: 3,
+          maxLines: 8,
+          style: theme.textTheme.bodyMedium,
+          decoration: _inputDecoration(
+            theme,
+            hint: '설명을 입력하세요 (선택)',
+            errorText: check.descriptionError,
           ),
         ),
-      const SizedBox(height: 16),
-      _SectionLabel(
-        '파일 첨부',
-        trailing: '${_files.length}/$todoAttachmentsMaxCount',
       ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: OutlinedButton.icon(
-          key: const ValueKey('todo-attach'),
-          onPressed: _submitting || _files.length >= todoAttachmentsMaxCount
-              ? null
-              : _pickFiles,
-          icon: const Icon(Icons.attach_file, size: 18),
-          label: const Text('파일 첨부'),
-          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
-        ),
+      gap,
+      _FieldRow(
+        id: 'files',
+        icon: Icons.insert_drive_file_outlined,
+        label: '파일',
+        child: _fileField(context),
       ),
-      if (_files.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              for (final f in _files)
-                _FileTile(
-                  key: ObjectKey(f),
-                  file: f,
-                  onRemove: _submitting ? null : () => _removeFile(f),
-                  onRetry: () {
-                    setState(() {
-                      f.error = null;
-                      f.sent = 0;
-                      f.total = 0;
-                    });
-                    unawaited(_pumpUploads());
-                  },
-                ),
-            ],
-          ),
-        ),
-      const SizedBox(height: 16),
-      _SectionLabel(
-        '알림 일정',
-        trailing: '${_reminders.length}/$todoRemindersMaxCount',
+      gap,
+      _FieldRow(
+        id: 'assignees',
+        icon: Icons.people_outline,
+        label: '담당자',
+        child: _assigneeField(context),
       ),
-      _reminderSection(context),
+      gap,
+      _FieldRow(
+        id: 'period',
+        icon: Icons.schedule,
+        label: '기간',
+        child: _periodField(context, check),
+      ),
+      gap,
+      _FieldRow(
+        id: 'reminders',
+        icon: Icons.alarm,
+        label: '알림',
+        child: _reminderField(context),
+      ),
     ];
   }
 
-  Widget _assigneeField(BuildContext context) {
+  /// 대화방 — 고르는 칸(▾) 또는 잠긴 칸(🔒), 그 바로 아래 "만든 뒤에는 대화방을 바꿀 수 없다"는 안내(잔디처럼 만들 때는
+  /// 고르기 전에 미리, 고칠 때는 칸이 잠긴 까닭으로).
+  Widget _roomField(BuildContext context) {
     final theme = Theme.of(context);
-    final readOnly = !_canManageAssignees;
+    final hint = theme.hintColor;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_assignees.isNotEmpty)
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: [
-              for (final a in _assignees)
-                InputChip(
-                  key: ValueKey('todo-assignee-chip-${a.id}'),
-                  avatar: UserAvatar(
-                    user: a,
-                    resolveUrl: widget.session.resolveUrl,
-                    radius: 10,
+        if (_roomLocked)
+          Container(
+            key: const ValueKey('todo-room-locked'),
+            height: _fieldHeight,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: _softFill(theme).withValues(alpha: 0.5),
+              border: Border.all(color: _fieldBorder(theme)),
+              borderRadius: BorderRadius.circular(_fieldRadius),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _room?.displayName(widget.session.userId ?? '') ??
+                        _editing?.roomName ??
+                        '대화방',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  label: Text(a.name),
-                  visualDensity: VisualDensity.compact,
-                  onDeleted: readOnly || _submitting
-                      ? null
-                      : () => setState(() => _assignees.remove(a)),
                 ),
-            ],
-          )
-        else
-          Text(
-            readOnly ? '담당자가 없습니다.' : '담당자를 지정하지 않았습니다.',
-            style: TextStyle(fontSize: 13, color: theme.hintColor),
-          ),
-        if (!readOnly)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              key: const ValueKey('todo-assignee-add'),
-              onPressed: _submitting || _room == null ? null : _pickAssignees,
-              icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
-              label: Text(_room == null ? '대화방을 먼저 고르세요' : '담당자 선택'),
+                Icon(Icons.lock_outline, size: 16, color: hint),
+              ],
             ),
           )
         else
-          Text(
-            '담당자는 만든 사람만 바꿀 수 있습니다.',
+          KeyedSubtree(
+            key: const ValueKey('todo-room-field'),
+            child: IgnorePointer(
+              ignoring: _submitting,
+              // 공용 대화방 칸(RoomPickerField)의 테두리·▾를 이 창의 다른 칸과 같게(옅은 테두리, ▾ 20 — 높이 50).
+              child: Theme(
+                data: theme.copyWith(dividerColor: _fieldBorder(theme)),
+                child: IconTheme.merge(
+                  data: IconThemeData(size: _iconSize, color: hint),
+                  child: RoomPickerField(
+                    session: widget.session,
+                    value: _room,
+                    filter: widget.session.canCreateTodoIn,
+                    onChanged: _onRoomPicked,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        Padding(
+          key: const ValueKey('todo-room-hint'),
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            _isEdit
+                ? '한 번 만든 할 일은 다른 대화방으로 옮길 수 없습니다.'
+                : '할 일 생성 후에는 대화방 변경이 불가능합니다.',
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 파일 업로드 — 가로 전체 옅은 단추, 그 오른쪽 아래 `N / 30`(N 굵게), 그 아래 붙인 파일(한 줄에 하나).
+  Widget _fileField(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final full = _files.length >= todoAttachmentsMaxCount;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.tonalIcon(
+          key: const ValueKey('todo-attach'),
+          onPressed: _submitting || full ? null : _pickFiles,
+          icon: const Icon(Icons.add, size: 18),
+          label: const Text('파일 업로드 (선택)'),
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(_fieldHeight),
+            visualDensity: VisualDensity.standard,
+            backgroundColor: _softFill(theme),
+            foregroundColor: scheme.onSurface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(_fieldRadius),
+            ),
+            textStyle: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text.rich(
+            key: const ValueKey('todo-file-count'),
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '${_files.length}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                TextSpan(text: ' / $todoAttachmentsMaxCount'),
+              ],
+            ),
+            textAlign: TextAlign.right,
             style: TextStyle(fontSize: 12, color: theme.hintColor),
+          ),
+        ),
+        for (final f in _files)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _FileTile(
+              key: ObjectKey(f),
+              file: f,
+              onRemove: _submitting ? null : () => _removeFile(f),
+              onRetry: () {
+                setState(() {
+                  f.error = null;
+                  f.sent = 0;
+                  f.total = 0;
+                });
+                unawaited(_pumpUploads());
+              },
+            ),
           ),
       ],
     );
   }
 
-  /// 기한 — 칸을 누르면 그 아래로 달력이 펼쳐지고 시작일 → 종료일 차례로 고른다(프로젝트 "새 업무"의 기간 달력과 같다).
-  /// 띄우는 팝업이 아니라 폼 안에 펼치는 이유: 이 칸은 폼 아래쪽이라 팝업은 창 밖으로 잘리기 쉽다(모바일 전체 화면도 같다).
-  Widget _periodField(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
-    Widget dateText(DateTime? value, String placeholder) => Text(
-      value == null ? placeholder : formatTodoDate(value),
-      style: TextStyle(fontSize: 14, color: value == null ? hint : null),
+  /// 담당자 — 옅은 회색 상자에 담당자 칩(아바타 + 이름, 나는 "(나)", x로 빼기), 상자 오른쪽 아래 `✏ 담당자 관리`(잔디).
+  /// 담당자로 고칠 때는 칩만(읽기 전용 — 빼기·담당자 관리 없음)이고 그 까닭을 작게 알린다.
+  Widget _assigneeField(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final readOnly = !_canManageAssignees;
+    final myId = widget.session.userId;
+    final box = Container(
+      key: const ValueKey('todo-assignee-box'),
+      constraints: const BoxConstraints(minHeight: _fieldHeight),
+      padding: const EdgeInsets.all(8),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: _softFill(theme),
+        borderRadius: BorderRadius.circular(_fieldRadius),
+      ),
+      child: _assignees.isNotEmpty
+          ? Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final a in _assignees)
+                  _assigneeChip(a, me: a.id == myId, readOnly: readOnly),
+              ],
+            )
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                readOnly
+                    ? '담당자가 없습니다.'
+                    : _room == null && !_isEdit
+                    ? '대화방을 먼저 선택하세요.'
+                    : '담당자를 지정하지 않았습니다.',
+                style: TextStyle(fontSize: 13, color: hint),
+              ),
+            ),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          key: const ValueKey('todo-period-field'),
-          borderRadius: BorderRadius.circular(8),
-          onTap: _submitting ? null : _togglePeriod,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: _periodOpen
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).dividerColor,
-              ),
-              borderRadius: BorderRadius.circular(8),
+        box,
+        if (readOnly)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '담당자는 만든 사람만 바꿀 수 있습니다.',
+              style: TextStyle(fontSize: 12, color: hint),
             ),
-            child: Row(
-              children: [
-                Icon(Icons.calendar_today_outlined, size: 16, color: hint),
-                const SizedBox(width: 8),
-                dateText(_start, '시작일'),
-                Text('  ~  ', style: TextStyle(color: hint)),
-                dateText(_due, '종료일'),
-                const Spacer(),
-                if (_start != null || _due != null)
-                  IconButton(
-                    key: const ValueKey('todo-period-clear'),
-                    icon: const Icon(Icons.close, size: 16),
-                    tooltip: '기한 지우기',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: _submitting
-                        ? null
-                        : () => setState(() {
-                            _start = null;
-                            _due = null;
-                          }),
-                  ),
-              ],
+          )
+        else
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              key: const ValueKey('todo-assignee-add'),
+              onPressed: _submitting || _room == null ? null : _pickAssignees,
+              icon: const Icon(Icons.edit, size: 14),
+              label: const Text('담당자 관리'),
+              style: TextButton.styleFrom(
+                foregroundColor: hint,
+                // 단추 글꼴은 테마에서 이어받는다(새 TextStyle은 글꼴·옛한글 대체 글꼴을 잃는다).
+                textStyle: theme.textTheme.labelLarge?.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w400,
+                ),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+              ),
             ),
           ),
+      ],
+    );
+  }
+
+  /// 담당자 칩 하나 — 회색 상자 위의 바탕색 칩. 바꿀 수 있으면 x로 빼는 [InputChip], 읽기 전용이면 보통 [Chip](눌리지
+  /// 않는 InputChip은 흐린 "꺼짐" 색으로 그려져 이름이 잘 안 읽힌다).
+  Widget _assigneeChip(AppUser a, {required bool me, required bool readOnly}) {
+    final theme = Theme.of(context);
+    final key = ValueKey('todo-assignee-chip-${a.id}');
+    final avatar = UserAvatar(
+      user: a,
+      resolveUrl: widget.session.resolveUrl,
+      radius: 10,
+    );
+    final label = Text(me ? '${a.name} (나)' : a.name);
+    final labelStyle = theme.textTheme.bodyMedium;
+    final background = theme.colorScheme.surface;
+    if (readOnly) {
+      return Chip(
+        key: key,
+        avatar: avatar,
+        label: label,
+        labelStyle: labelStyle,
+        backgroundColor: background,
+        side: BorderSide.none,
+        shape: const StadiumBorder(),
+        visualDensity: VisualDensity.compact,
+      );
+    }
+    return InputChip(
+      key: key,
+      avatar: avatar,
+      label: label,
+      labelStyle: labelStyle,
+      backgroundColor: background,
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      visualDensity: VisualDensity.compact,
+      deleteIcon: const Icon(Icons.close, size: 16),
+      deleteButtonTooltipMessage: '담당자에서 빼기',
+      onDeleted: _submitting
+          ? null
+          : () => setState(() => _assignees.remove(a)),
+    );
+  }
+
+  /// 기간 — `[시작일 ▾] ~ [종료일 ▾]` 상자 둘(정했으면 오른쪽에 지우기 x). 어느 쪽을 눌러도 그 아래로 달력이 펼쳐지고
+  /// 시작일 → 종료일 차례로 고른다(프로젝트 "새 업무"의 기간 달력과 같다 — 지금 고를 쪽 상자의 테두리를 강조). 띄우는
+  /// 팝업이 아니라 폼 안에 펼치는 이유: 이 칸은 폼 아래쪽이라 팝업은 창 밖으로 잘리기 쉽다(모바일 전체 화면도 같다).
+  Widget _periodField(BuildContext context, TodoDraftCheck check) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    // 달력이 펼쳐져 있으면 지금 고를 쪽 — 시작일이 없거나 둘 다 정했으면(다시 고르기) 시작일, 아니면 종료일.
+    final pickingStart = _start == null || _due != null;
+    Widget box(String key, DateTime? value, String placeholder, bool active) =>
+        Expanded(
+          child: InkWell(
+            key: ValueKey(key),
+            borderRadius: BorderRadius.circular(_fieldRadius),
+            onTap: _submitting ? null : _togglePeriod,
+            child: Container(
+              height: _fieldHeight,
+              padding: const EdgeInsets.only(left: 12, right: 8),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: active
+                      ? theme.colorScheme.primary
+                      : _fieldBorder(theme),
+                  width: active ? 1.5 : 1,
+                ),
+                borderRadius: BorderRadius.circular(_fieldRadius),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      value == null ? placeholder : formatTodoDate(value),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.fade,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: value == null ? hint : null,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.arrow_drop_down, size: _iconSize, color: hint),
+                ],
+              ),
+            ),
+          ),
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 상자 사이의 `~`를 눌러도 펼친다(상자는 각자 눌림 물결).
+        GestureDetector(
+          key: const ValueKey('todo-period-field'),
+          behavior: HitTestBehavior.opaque,
+          onTap: _submitting ? null : _togglePeriod,
+          child: Row(
+            children: [
+              box(
+                'todo-period-start',
+                _start,
+                '시작일',
+                _periodOpen && pickingStart,
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                child: Text('~', style: TextStyle(color: hint)),
+              ),
+              box('todo-period-end', _due, '종료일', _periodOpen && !pickingStart),
+              if (_start != null || _due != null)
+                IconButton(
+                  key: const ValueKey('todo-period-clear'),
+                  icon: const Icon(Icons.close, size: 16),
+                  tooltip: '기한 지우기',
+                  color: hint,
+                  // 좁은 폭(360)에서도 날짜가 잘리지 않게 — 휴대폰에서도 작은(32) 단추.
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  style: IconButton.styleFrom(
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: _submitting
+                      ? null
+                      : () => setState(() {
+                          _start = null;
+                          _due = null;
+                        }),
+                ),
+            ],
+          ),
         ),
+        if (check.periodError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              check.periodError!,
+              style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
+            ),
+          ),
         if (_periodOpen)
           Container(
             key: _periodPanelKey,
-            margin: const EdgeInsets.only(top: 6),
+            margin: const EdgeInsets.only(top: 8),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              border: Border.all(color: Theme.of(context).dividerColor),
+              border: Border.all(color: _fieldBorder(theme)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _start == null || _due != null ? '시작일을 선택하세요' : '종료일을 선택하세요',
+                  pickingStart ? '시작일을 선택하세요' : '종료일을 선택하세요',
                   style: TextStyle(color: hint, fontSize: 12),
                 ),
                 const SizedBox(height: 6),
@@ -1045,121 +1476,174 @@ class TodoEditorState extends State<TodoEditor> {
     });
   }
 
-  Widget _reminderSection(BuildContext context) {
+  /// 알림 — 테두리 선택 상자 `알림을 받아보세요 (선택) ▾`(누르면 상자 폭의 메뉴: 기한 하루 전 / 기한 1시간 전 / 직접
+  /// 지정), 그 아래 추가한 알림(한 줄에 하나, x로 지우기). 5개를 채우면 상자가 꺼진다. 메뉴는 창 전체(루트 Navigator,
+  /// [todoPopupRouteName])에 띄운다 — 패널 안 화면에서 열어도 바깥(채팅 쪽)을 누르면 닫힌다(자리는 상자 바로 아래).
+  Widget _reminderField(BuildContext context) {
     final theme = Theme.of(context);
+    final hint = theme.hintColor;
     final full = _reminders.length >= todoRemindersMaxCount;
+    final enabled = !_submitting && !full;
+    final textColor = enabled
+        ? theme.colorScheme.onSurface
+        : theme.disabledColor;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var i = 0; i < _reminders.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Row(
-              key: ValueKey('todo-reminder-$i'),
-              children: [
-                Icon(
-                  Icons.notifications_active_outlined,
-                  size: 16,
-                  color: theme.hintColor,
+        LayoutBuilder(
+          builder: (context, constraints) => PopupMenuButton<String>(
+            key: const ValueKey('todo-reminder-add'),
+            enabled: enabled,
+            tooltip: '알림 추가',
+            useRootNavigator: true,
+            routeSettings: todoPopupRouteSettings,
+            position: PopupMenuPosition.under,
+            offset: const Offset(0, 4),
+            borderRadius: BorderRadius.circular(_fieldRadius),
+            color: CompactMenu.color(context),
+            shape: CompactMenu.shape,
+            menuPadding: CompactMenu.menuPadding,
+            // 선택 상자처럼 메뉴도 상자 폭 그대로.
+            constraints: BoxConstraints.tightFor(width: constraints.maxWidth),
+            onSelected: (v) {
+              switch (v) {
+                case 'day':
+                  _addRelativeReminder(const Duration(days: 1));
+                case 'hour':
+                  _addRelativeReminder(const Duration(hours: 1));
+                case 'custom':
+                  unawaited(_addCustomReminder());
+              }
+            },
+            itemBuilder: (context) => [
+              for (final (value, label) in const [
+                ('day', '기한 하루 전 (전날 오후 6시)'),
+                ('hour', '기한 1시간 전 (기한일 오후 5시)'),
+                ('custom', '직접 지정'),
+              ])
+                PopupMenuItem<String>(
+                  key: ValueKey('todo-reminder-option-$value'),
+                  value: value,
+                  height: CompactMenu.itemHeight,
+                  padding: CompactMenu.itemPadding,
+                  child: Text(label, style: CompactMenu.textStyle),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    formatTodoDateTime(_reminders[i].at) +
-                        (_reminders[i].sent ? ' (알림 보냄)' : ''),
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: _reminders[i].sent ? theme.hintColor : null,
+            ],
+            child: Container(
+              height: _fieldHeight,
+              // ▾ 자리를 대화방 칸의 ▾와 맞춘다(오른쪽 여백 12).
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: enabled
+                      ? _fieldBorder(theme)
+                      : _fieldBorder(theme).withValues(alpha: 0.6),
+                ),
+                borderRadius: BorderRadius.circular(_fieldRadius),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      full
+                          ? '알림은 $todoRemindersMaxCount개까지 추가할 수 있습니다.'
+                          : '알림을 받아보세요 (선택)',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: textColor,
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  key: ValueKey('todo-reminder-remove-$i'),
-                  icon: const Icon(Icons.remove_circle_outline, size: 18),
-                  tooltip: '알림 삭제',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: _submitting
-                      ? null
-                      : () => setState(() => _reminders.removeAt(i)),
-                ),
-              ],
-            ),
-          ),
-        PopupMenuButton<String>(
-          key: const ValueKey('todo-reminder-add'),
-          enabled: !_submitting && !full,
-          tooltip: '알림 추가',
-          onSelected: (v) {
-            switch (v) {
-              case 'day':
-                _addRelativeReminder(const Duration(days: 1));
-              case 'hour':
-                _addRelativeReminder(const Duration(hours: 1));
-              case 'custom':
-                unawaited(_addCustomReminder());
-            }
-          },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'day', child: Text('기한 하루 전 (전날 오후 6시)')),
-            PopupMenuItem(value: 'hour', child: Text('기한 1시간 전 (기한일 오후 5시)')),
-            PopupMenuItem(value: 'custom', child: Text('직접 지정')),
-          ],
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.add,
-                  size: 18,
-                  color: full ? theme.disabledColor : theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '알림 추가',
-                  style: TextStyle(
-                    color: full
-                        ? theme.disabledColor
-                        : theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
+                  Icon(
+                    Icons.arrow_drop_down,
+                    size: _iconSize,
+                    color: enabled ? hint : theme.disabledColor,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
+        for (var i = 0; i < _reminders.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Container(
+              key: ValueKey('todo-reminder-$i'),
+              padding: const EdgeInsets.only(left: 12),
+              decoration: BoxDecoration(
+                color: _softFill(theme),
+                borderRadius: BorderRadius.circular(_fieldRadius),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      formatTodoDateTime(_reminders[i].at) +
+                          (_reminders[i].sent ? ' (알림 보냄)' : ''),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: _reminders[i].sent ? hint : null,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: ValueKey('todo-reminder-remove-$i'),
+                    icon: const Icon(Icons.close, size: 16),
+                    tooltip: '알림 삭제',
+                    color: hint,
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _submitting
+                        ? null
+                        : () => setState(() => _reminders.removeAt(i)),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  final String? trailing;
-  const _SectionLabel(this.text, {this.trailing});
+/// 입력 한 줄 — 왼쪽 회색 아이콘(칸 이름표 대신 — 키 `todo-label-<id>`, 화면 읽기 프로그램에는 [label]) + 오른쪽 입력.
+/// 아이콘은 한 줄짜리 칸(높이 [_fieldHeight])의 가운데 높이에 둔다(여러 줄인 설명 칸은 첫 줄 높이).
+class _FieldRow extends StatelessWidget {
+  final String id;
+  final IconData icon;
+  final String label;
+  final Widget child;
+  const _FieldRow({
+    required this.id,
+    required this.icon,
+    required this.label,
+    required this.child,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Text(
-            text,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: (_fieldHeight - _iconSize) / 2),
+          child: Icon(
+            icon,
+            key: ValueKey('todo-label-$id'),
+            size: _iconSize,
+            color: _iconColor(Theme.of(context)),
+            semanticLabel: label,
           ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            Text(trailing!, style: TextStyle(fontSize: 12, color: hint)),
-          ],
-        ],
-      ),
+        ),
+        const SizedBox(width: _iconGap),
+        Expanded(child: child),
+      ],
     );
   }
 }
 
-/// 첨부 한 개 — 아이콘 + 이름 + 크기(올리는 중이면 진행 막대), 오른쪽 위 x로 빼기.
+/// 첨부 한 줄 — 파일 아이콘 + 이름 + 크기(올리는 중이면 진행 막대, 실패하면 다시 시도), 오른쪽 x로 빼기.
 class _FileTile extends StatelessWidget {
   final _TodoFile file;
   final VoidCallback? onRemove;
@@ -1211,79 +1695,62 @@ class _FileTile extends StatelessWidget {
         style: TextStyle(fontSize: 11, color: hint),
       );
     }
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 220,
-          height: 60,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            border: Border.all(
-              color: file.error != null
-                  ? theme.colorScheme.error
-                  : theme.dividerColor,
-            ),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                fileIconFor(file.name),
-                size: 24,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      file.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    status,
-                  ],
-                ),
-              ),
-            ],
-          ),
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.only(left: 12, right: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border.all(
+          color: file.error != null
+              ? theme.colorScheme.error
+              : _fieldBorder(theme),
         ),
-        if (onRemove != null)
-          Positioned(
-            top: -6,
-            right: -6,
-            child: Tooltip(
-              message: '첨부 빼기',
-              child: GestureDetector(
-                onTap: onRemove,
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.65),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
+        borderRadius: BorderRadius.circular(_fieldRadius),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            fileIconFor(file.name),
+            size: 22,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  file.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                   ),
-                  child: const Icon(Icons.close, size: 12, color: Colors.white),
                 ),
-              ),
+                const SizedBox(height: 3),
+                status,
+              ],
             ),
           ),
-      ],
+          if (onRemove != null)
+            IconButton(
+              icon: const Icon(Icons.close, size: 16),
+              tooltip: '첨부 빼기',
+              color: hint,
+              visualDensity: VisualDensity.compact,
+              onPressed: onRemove,
+            )
+          else
+            const SizedBox(width: 8),
+        ],
+      ),
     );
   }
 }
 
-/// 담당자 고르기 — 이 대화방 멤버 목록에서 여러 명을 체크한다(이름 검색 포함, 30명까지).
+/// 담당자 관리 — 이 대화방 멤버 목록에서 여러 명을 체크한다(이름 검색 포함, 30명까지).
 class _AssigneePickerDialog extends StatefulWidget {
   final Session session;
   final List<AppUser> members;
@@ -1310,7 +1777,7 @@ class _AssigneePickerDialogState extends State<_AssigneePickerDialog> {
         if (q.isEmpty || m.name.toLowerCase().contains(q)) m,
     ]..sort((a, b) => a.name.compareTo(b.name));
     return AlertDialog(
-      title: const Text('담당자 선택'),
+      title: const Text('담당자 관리'),
       contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
       content: SizedBox(
         width: 360,

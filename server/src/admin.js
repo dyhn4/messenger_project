@@ -30,7 +30,7 @@ import {
   listAutoInviteTopics,
   listRoomMemberIds,
 } from './db/queries/rooms.js';
-import { notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
+import { notifyMembership, notifyTodosResynced, postSystemMessage, toRoomDto } from './rooms.js';
 
 /**
  * 서버 운영자(users.isServerAdmin)만 쓸 수 있는 관리자 콘솔 API.
@@ -307,8 +307,9 @@ export function createAdminRouter(io) {
         for (const room of await listAutoInviteTopics(teamId)) {
           const memberIds = await listRoomMemberIds(room.id);
           if (memberIds.includes(target.id)) continue;
-          await addRoomMembers(room.id, [target.id]);
+          const changedTodos = await addRoomMembers(room.id, [target.id]);
           await notifyMembership(io, room);
+          await notifyTodosResynced(io, room, changedTodos, req.user.sub); // 예전 담당 행이 남아 있던 사람이 다시 들어옴.
           await postSystemMessage(io, room, `${target.name ?? target.username} 님이 참여했습니다.`);
         }
       }

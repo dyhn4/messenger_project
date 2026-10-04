@@ -589,6 +589,13 @@
       "when": 1791008618479,
       "tag": "0083_tired_sunfire",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1791019870363,
+      "tag": "0084_wealthy_hobgoblin",
+      "breakpoints": true
     }
   ]
 }

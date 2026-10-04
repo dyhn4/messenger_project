@@ -92,16 +92,49 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   Room? _panelRoom;
   int _panelGeneration = 0;
 
+  /// 열려 있는 패널이 맡긴 "닫기 전에 물어볼 것"(할 일 패널 안에서 쓰던 할 일)과 맡긴 쪽 — [HomeShellScope.setPanelLeaveGuard].
+  PanelLeaveGuard? _leaveGuard;
+  Object? _leaveGuardOwner;
+
+  void _setPanelLeaveGuard(Object owner, PanelLeaveGuard? guard) {
+    if (guard != null) {
+      _leaveGuardOwner = owner;
+      _leaveGuard = guard;
+    } else if (identical(_leaveGuardOwner, owner)) {
+      // 맡긴 쪽이 거둘 때만(먼저 사라진 패널이 새 패널의 것을 지우지 않게).
+      _leaveGuardOwner = null;
+      _leaveGuard = null;
+    }
+  }
+
+  /// 열려 있는 패널을 밖에서 닫거나 바꾸는 [action] — 패널이 물어볼 게 있으면(할 일 패널 안에서 쓰던 할 일) 먼저 묻고
+  /// [닫기]를 골랐을 때만 한다. 물어볼 게 없으면 바로(같은 프레임에) 한다. 패널 자신의 닫기(✕ — [_closePanel])는 그 패널이
+  /// 이미 물었으니 여기를 거치지 않는다.
+  void _leavePanelThen(VoidCallback action) {
+    final guard = _panelKey == null ? null : _leaveGuard;
+    if (guard == null || !guard.needsConfirm()) {
+      action();
+      return;
+    }
+    unawaited(
+      guard.confirm().then((ok) {
+        if (ok && mounted) action();
+      }),
+    );
+  }
+
   /// [key] 패널을 연다(이미 열려 있는 패널은 새로 시작). 다른 오른쪽 패널과 댓글 스레드·분할 패널은 닫는다.
   void _showPanel(String key, {Room? room}) {
-    setState(() {
-      _panelKey = key;
-      _panelRoom = room;
-      _panelGeneration++;
-      _threadMessage = null;
-      _threadRoom = null;
-      _splitRoom = null;
-    });
+    _leavePanelThen(
+      () => setState(() {
+        _panelKey = key;
+        _panelRoom = room;
+        _panelGeneration++;
+        _threadMessage = null;
+        _threadRoom = null;
+        _splitRoom = null;
+      }),
+    );
   }
 
   void _closePanel() => setState(() {
@@ -115,7 +148,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     final switchToTeam =
         key == 'members' && _panelKey == key && _panelRoom != null;
     if (_panelKey == key && !switchToTeam) {
-      _closePanel();
+      _leavePanelThen(_closePanel);
       return;
     }
     _showPanel(key);
@@ -208,13 +241,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   /// 분할 패널을 열면 오른쪽 패널을 닫고, 오른쪽 패널을 열면(_showPanel) 분할 패널을 닫는다.
   void _openSplitRoom(Room room) {
     if (room.id == _selectedRoom?.id) return;
-    setState(() {
-      _splitRoom = room;
-      _panelKey = null;
-      _panelRoom = null;
-      _threadMessage = null;
-      _threadRoom = null;
-    });
+    _leavePanelThen(
+      () => setState(() {
+        _splitRoom = room;
+        _panelKey = null;
+        _panelRoom = null;
+        _threadMessage = null;
+        _threadRoom = null;
+      }),
+    );
   }
 
   bool _isRoomGone(String roomId) => isRoomGoneFrom(widget.session, roomId);
@@ -386,6 +421,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       closePanel: _closePanel,
       toggleCalendar: _toggleCalendar,
       openRoom: _openRoomFromPanel,
+      setPanelLeaveGuard: _setPanelLeaveGuard,
       child: Scaffold(
         body: Column(
           children: [
@@ -598,12 +634,15 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
             highlightMessageId: isSplit ? null : _highlightMessageId,
             // 오른쪽 패널은 한 번에 하나만 — 댓글을 열면 열려 있던 다른 패널(파일 모아보기
             // 등)은 닫아서 자리를 넘겨준다(반대로 그 패널들을 열면 댓글이 닫힌다, _showPanel).
-            onOpenThread: (m) => setState(() {
-              _threadMessage = m;
-              _threadRoom = room;
-              _panelKey = null;
-              _panelRoom = null;
-            }),
+            // 할 일 패널 안에서 쓰던 할 일이 있으면 먼저 묻는다.
+            onOpenThread: (m) => _leavePanelThen(
+              () => setState(() {
+                _threadMessage = m;
+                _threadRoom = room;
+                _panelKey = null;
+                _panelRoom = null;
+              }),
+            ),
           ),
         ),
       ],

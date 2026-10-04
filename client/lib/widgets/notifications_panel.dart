@@ -20,12 +20,14 @@ import '../services/notification_controller.dart';
 import '../services/notification_entries.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
+import '../services/todo_api.dart';
 import 'app_toast.dart';
 import 'compact_menu.dart';
 import 'muted_scrollbar.dart';
 import 'notification_settings_dialog.dart';
 import 'room_avatar.dart';
 import 'team_avatar.dart';
+import 'todo_from_message.dart';
 import 'unread_badge.dart';
 
 /// 알림 센터에서 안 읽은 "공지"가 있는 방을 눌러 열었을 때, 공지 목록을 팝업으로 함께 띄운다
@@ -145,6 +147,9 @@ class NotificationsPanel extends StatefulWidget {
   /// 프로젝트 알림을 눌렀을 때 — 없으면 [openProjectFromNotification].
   final void Function(ProjectNotification n)? onOpenProject;
 
+  /// 멘션 알림 ⋯의 "할 일로 등록"이 쓸 할 일 API — 테스트가 가짜를 끼우는 자리(없으면 [SessionTodos.todoApi]).
+  final TodoApi? todoApi;
+
   const NotificationsPanel({
     super.key,
     required this.session,
@@ -152,6 +157,7 @@ class NotificationsPanel extends StatefulWidget {
     required this.onSelectRoom,
     this.initialTab,
     this.onOpenProject,
+    this.todoApi,
   });
 
   @override
@@ -264,6 +270,26 @@ class _NotificationsPanelState extends State<NotificationsPanel>
       return;
     }
     widget.onSelectRoom(room, messageId: n.messageId, announcementPopup: false);
+  }
+
+  /// "할 일로 등록"을 처리하는 중인지 — 원본 메시지를 받아 오는 동안(그 사이엔 아직 창이 안 떠 있다) ⋯를 또 눌러 생성 창이
+  /// 두 개 뜨지 않게 하나씩만.
+  bool _registeringTodo = false;
+
+  /// 멘션 알림 ⋯ > 할 일로 등록 — 그 방으로 고정된 할 일 생성 창을 연다(원본 메시지로 채운다). 줄을 누를 때와 달리 방을
+  /// 열지도, 읽음 처리하지도 않는다. 줄은 목록이 다시 그려지면 바뀔 수 있어서 패널의 context로 연다(저장 뒤 토스트도
+  /// 여기에 뜬다).
+  void _registerTodo(AppNotification n) {
+    if (!mounted || _registeringTodo) return;
+    _registeringTodo = true;
+    unawaited(
+      registerNotificationAsTodo(
+        context,
+        session: widget.session,
+        notification: n,
+        api: widget.todoApi,
+      ).whenComplete(() => _registeringTodo = false),
+    );
   }
 
   Future<void> _openProject(ProjectNotification n) async {
@@ -546,6 +572,10 @@ class _NotificationsPanelState extends State<NotificationsPanel>
         session: session,
         notification: notification,
         onTap: () => _openServer(notification),
+        // 멘션 알림에만 ⋯ — 그 방에 할 일을 만들 수 있을 때(보드 뷰 토픽·비밀 대화·쓰기가 막힌 방, 내 목록에 없는 방은 뺀다).
+        onRegisterTodo: canRegisterNotificationAsTodo(session, notification)
+            ? () => _registerTodo(notification)
+            : null,
       ),
       RoomEntry(:final room) => _NotificationRow(
         session: session,
@@ -744,15 +774,20 @@ class _UnreadDot extends StatelessWidget {
 }
 
 /// 멘션·보드 알림 한 줄: [팀 칸] [종류 아이콘] [방 이름 · 시각 / 보낸 사람·미리보기 · 안 읽음 점].
+/// [onRegisterTodo]가 있으면(할 일을 만들 수 있는 방의 멘션 알림) 오른쪽 위 시각 옆에 ⋯가 붙는다.
 class _ServerNotificationRow extends StatelessWidget {
   final Session session;
   final AppNotification notification;
   final VoidCallback onTap;
+
+  /// ⋯ > 할 일로 등록 — null이면 ⋯ 자체가 없다.
+  final VoidCallback? onRegisterTodo;
   const _ServerNotificationRow({
     super.key,
     required this.session,
     required this.notification,
     required this.onTap,
+    this.onRegisterTodo,
   });
 
   IconData get _icon => switch (notification.kind) {
@@ -799,79 +834,161 @@ class _ServerNotificationRow extends StatelessWidget {
     final theme = Theme.of(context);
     final n = notification;
     final read = n.isRead;
+    final registerTodo = onRegisterTodo;
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _TeamColumn(
+            session: session,
+            teamId: n.teamId,
+            fallbackName: n.teamName,
+          ),
+          const SizedBox(width: 10),
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: theme.colorScheme.primary.withValues(
+              alpha: read ? 0.08 : 0.16,
+            ),
+            child: Icon(
+              _icon,
+              size: 17,
+              color: read ? theme.hintColor : theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        n.roomName ?? '(볼 수 없는 대화)',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: read
+                              ? theme.hintColor
+                              : theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      formatRoomActivityTime(n.createdAt),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.hintColor,
+                      ),
+                    ),
+                    // ⋯가 들어갈 자리만 비워 둔다 — 단추 자체는 아래 Stack에서 줄 오른쪽 위에 얹는다.
+                    if (registerTodo != null)
+                      const SizedBox(width: _NotificationMoreButton.reserve),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _summaryText(context, read)),
+                    if (!read) ...[
+                      const SizedBox(width: 8),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: _UnreadDot(),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (registerTodo == null) return InkWell(onTap: onTap, child: content);
+    // ⋯는 줄의 InkWell 안에 얹는다(마우스를 올린 줄 강조는 그대로) — 단추가 탭을 가져가서 줄 자체의 탭(그 메시지로 이동 +
+    // 읽음)은 불리지 않는다. 첫 줄 높이에 묶이지 않게 줄 오른쪽 위 여백까지 누를 자리로 써서 손가락으로도 누르기 쉽다.
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _TeamColumn(
-              session: session,
-              teamId: n.teamId,
-              fallbackName: n.teamName,
+      child: Stack(
+        children: [
+          content,
+          Positioned(
+            top: 0,
+            right: 0,
+            child: _NotificationMoreButton(
+              notificationId: n.id,
+              onRegisterTodo: registerTodo,
             ),
-            const SizedBox(width: 10),
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: theme.colorScheme.primary.withValues(
-                alpha: read ? 0.08 : 0.16,
-              ),
-              child: Icon(
-                _icon,
-                size: 17,
-                color: read ? theme.hintColor : theme.colorScheme.primary,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          n.roomName ?? '(볼 수 없는 대화)',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: read
-                                ? theme.hintColor
-                                : theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        formatRoomActivityTime(n.createdAt),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.hintColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _summaryText(context, read)),
-                      if (!read) ...[
-                        const SizedBox(width: 8),
-                        const Padding(
-                          padding: EdgeInsets.only(top: 4),
-                          child: _UnreadDot(),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// 멘션 알림 줄 오른쪽 위의 ⋯ — 누르면 설정 메뉴와 같은 모양의 작은 메뉴에 `할 일로 등록` 하나가 뜬다(잔디: [알림센터] >
+/// [멘션] > 메시지 […] > [할 일]). 마우스를 올려야 보이는 게 아니라 늘 보여서 모바일에서도 그대로 쓴다.
+class _NotificationMoreButton extends StatelessWidget {
+  final String notificationId;
+  final VoidCallback onRegisterTodo;
+  const _NotificationMoreButton({
+    required this.notificationId,
+    required this.onRegisterTodo,
+  });
+
+  /// 첫 줄에서 시각 오른쪽에 비워 두는 폭 — 줄 오른쪽 끝에 붙은 단추의 둥근 강조(32)가 시각에 닿지 않을 만큼.
+  static const reserve = 20.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return PopupMenuButton<void>(
+      key: ValueKey('notif-more-$notificationId'),
+      tooltip: '더보기',
+      icon: Icon(Icons.more_horiz, color: hint),
+      iconSize: 18,
+      padding: EdgeInsets.zero,
+      // 둥근 강조는 아이콘 둘레(32)만 작게, 누를 자리는 PC·모바일 모두 손가락 크기(40) — 줄 위 여백(10)과 첫 줄(20)을 합친
+      // 높이의 가운데에 아이콘이 와서 시각과 한 줄로 선다.
+      style: IconButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.padded,
+      ),
+      position: PopupMenuPosition.under,
+      // 누를 자리(40) 아래 끝이 아니라 아이콘 바로 아래에서 열리게 조금 당긴다.
+      offset: const Offset(0, -8),
+      color: CompactMenu.color(context),
+      shape: CompactMenu.shape,
+      menuPadding: CompactMenu.menuPadding,
+      constraints: CompactMenu.constraints,
+      itemBuilder: (context) => [
+        PopupMenuItem<void>(
+          key: ValueKey('notif-todo-$notificationId'),
+          height: CompactMenu.itemHeight,
+          padding: CompactMenu.itemPadding,
+          // 메뉴를 먼저 닫은 뒤에 불린다 — 그 위로 할 일 생성 창이 열린다.
+          onTap: onRegisterTodo,
+          child: Row(
+            children: [
+              Icon(Icons.checklist_rounded, size: 16, color: hint),
+              const SizedBox(width: 8),
+              const Flexible(
+                child: Text(
+                  '할 일로 등록',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: CompactMenu.textStyle,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

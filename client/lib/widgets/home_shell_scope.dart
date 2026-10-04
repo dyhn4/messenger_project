@@ -33,6 +33,11 @@ class HomeShellScope extends InheritedWidget {
   /// 방을 가운데 채팅 자리에 연다([messageId]가 있으면 그 메시지로 스크롤·강조). 다른 팀의 방이면 팀을 바꾼다.
   final void Function(Room room, {String? messageId}) openRoom;
 
+  /// 열려 있는 패널이 "닫기 전에 물어볼 것"을 맡긴다([owner]는 맡긴 쪽 — 같은 쪽이 null을 주면 거둔다). 홈 화면은 패널을 밖에서
+  /// 닫거나 다른 패널·댓글·대화창 분할로 바꾸기 전에 이것에 묻는다(패널 안에서 쓰던 할 일이 날아가지 않게). 패널 자신의
+  /// 닫기([closePanel])는 묻지 않는다 — 그 패널이 이미 물었다. 홈 화면 밖(시험 하네스 등)은 없어도 된다.
+  final void Function(Object owner, PanelLeaveGuard? guard)? setPanelLeaveGuard;
+
   const HomeShellScope({
     super.key,
     required this.openPanelKey,
@@ -43,6 +48,7 @@ class HomeShellScope extends InheritedWidget {
     required this.closePanel,
     required this.toggleCalendar,
     required this.openRoom,
+    this.setPanelLeaveGuard,
     required super.child,
   });
 
@@ -56,6 +62,18 @@ class HomeShellScope extends InheritedWidget {
       panelRoom?.id != old.panelRoom?.id ||
       panelGeneration != old.panelGeneration ||
       currentRoomId != old.currentRoomId;
+}
+
+/// 오른쪽 패널을 밖에서 닫거나 바꾸기 전에 물어보는 손잡이([HomeShellScope.setPanelLeaveGuard]) — 할 일 패널 안에서 쓰던
+/// 할 일(생성·수정 화면)이 있을 때.
+class PanelLeaveGuard {
+  /// 지금 물어봐야 하는지 — false면 홈 화면은 묻지 않고 바로(같은 프레임에) 닫거나 바꾼다.
+  final bool Function() needsConfirm;
+
+  /// 물어본다 — 닫아도 되면 true(그때만 홈 화면이 이어서 닫거나 바꾼다).
+  final Future<bool> Function() confirm;
+
+  const PanelLeaveGuard({required this.needsConfirm, required this.confirm});
 }
 
 /// 패널 안에서 방을 누르면 — PC는 홈 셸이 가운데 채팅 자리를 바꾸고, 모바일은 채팅 화면을 위에 얹는다.

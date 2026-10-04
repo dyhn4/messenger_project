@@ -101,7 +101,10 @@ class _RoomPickerFieldState extends State<RoomPickerField> {
         ],
       ),
     );
-    Overlay.of(context).insert(_entry!);
+    // 앱 맨 위(루트) Overlay에 — 바깥을 누르면 닫히는 막이 창 전체를 덮게(PC 할 일 패널 안 생성 화면에서 열어도 채팅 쪽을
+    // 누르면 닫히고 그 누름은 아래로 가지 않는다). 목록은 칸 바로 아래·칸 폭이라 자리는 그대로다. 다른 화면은 가장 가까운
+    // Overlay가 곧 루트라 예전과 같다.
+    Overlay.of(context, rootOverlay: true).insert(_entry!);
     setState(() {});
   }
 

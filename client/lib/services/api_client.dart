@@ -1295,6 +1295,15 @@ class ApiClient {
         .toList();
   }
 
+  /// 메시지 한 건(GET /api/messages/:id) — 방 메시지 목록의 항목과 같은 모양(본문 원문·서명된 첨부·투표, 댓글은
+  /// 없음). 접근 규칙도 목록과 같아서 그 방 멤버가 아니면, 지운 메시지·비밀 대화·1:1 "진짜 나가기" 이전 메시지면
+  /// 던진다. 알림 센터의 "할 일로 등록"이 알림 미리보기(한 줄로 줄이고 잘린 스냅샷) 대신 지금의 원본을 받을 때 쓴다.
+  Future<Message> fetchMessage(String messageId) async {
+    return Message.fromJson(
+      await _get('/api/messages/$messageId') as Map<String, dynamic>,
+    );
+  }
+
   /// 토픽방 공지 히스토리(최신순) — server/src/announcements.js 참고.
   Future<List<Announcement>> fetchAnnouncements(String roomId) async {
     final list = await _get('/api/rooms/$roomId/announcements') as List;
@@ -2854,6 +2863,14 @@ class ApiClient {
   /// 그룹채팅방 이름을 나에게만 바꾼다. 빈 문자열이면 별칭을 지운다.
   Future<void> setRoomNickname(String roomId, String name) async {
     await _post('/api/rooms/$roomId/nickname', {'name': name});
+  }
+
+  /// 댓글 한 건(GET /api/comments/:id) — [fetchMessage]와 같은 용도·규칙(1:1 "진짜 나가기" 이전은 부모 메시지로
+  /// 따진다). 파일 댓글이면 서명된 파일 칸까지 온다.
+  Future<Comment> fetchComment(String commentId) async {
+    return Comment.fromJson(
+      await _get('/api/comments/$commentId') as Map<String, dynamic>,
+    );
   }
 
   /// [text] 없이 첨부만(이미지/파일) 다는 댓글도 가능하다 — 그때는 [type]과 [fileUrl] 등을 채워서 호출.

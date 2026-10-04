@@ -20,7 +20,8 @@ import 'side_panel_header.dart';
 import 'team_members_panel.dart';
 import 'todos_panel.dart';
 
-export 'home_shell_scope.dart' show HomeShellScope, openRoomFromPanel;
+export 'home_shell_scope.dart'
+    show HomeShellScope, PanelLeaveGuard, openRoomFromPanel;
 export 'side_panel_header.dart';
 
 // ──────────────────────────────────────────────────────────────────────────

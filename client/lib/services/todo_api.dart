@@ -6,11 +6,19 @@ import 'api_client.dart';
 /// [RemoteTodoApi]가 [ApiClient]로 서버(server/src/todos.js)를 부른다(bookmark_api.dart와 같은 방식).
 abstract class TodoApi {
   /// `GET /api/todos` — 내가 아직 멤버인 방의 할 일. 정렬이 복합 키라 커서 대신 [offset]으로 이어 받는다.
+  /// 내가 즐겨찾기한 것이 먼저 오고, 완료 제외([includeDone] false)·기한순 정렬은 "기준 진척률"([assigneeId]가 있으면
+  /// 그 사람의 것, 나의 할 일이면 내 것, 그 밖은 전체)로 따진다. [assigneeId]는 그 사람이 담당인 것만(어느 scope에나),
+  /// [from]·[to](둘 다 주거나 둘 다 빼기, 최대 [todoRangeMaxDays]일)는 기간이 그 범위에 걸치는 것만(날짜 없는 할 일은
+  /// 빠진다) — 이때 [limit]은 [todoRangeMaxLimit]까지(없으면 [todoListMaxLimit]까지). 응답의 `total`(같은 필터에 맞는
+  /// 전체 개수, offset·limit 무관)은 [TodoPage.total]로 — 예전 서버면 null.
   Future<TodoPage> list({
     required String teamId,
     required TodoScope scope,
     bool includeDone = true,
     String? roomId,
+    String? assigneeId,
+    DateTime? from,
+    DateTime? to,
     TodoSort sort = TodoSort.due,
     int offset = 0,
     int limit = 30,
@@ -34,11 +42,15 @@ abstract class TodoApi {
   });
 
   /// `PATCH /api/todos/:id` — [fields]에 담긴 것만 바뀐다(키: title·description·assigneeIds·startDate·dueDate·
-  /// attachments·reminders·progress). 담당자는 `assigneeIds`를 보내면 403이다.
+  /// attachments·reminders·progress). 담당자는 `assigneeIds`를 보내면 403이다. `progress`는 "내 진척률"
+  /// ([todoProgressSteps] 중 하나) — 담당자는 자기 것만, 담당자가 없는 할 일은 만든 사람이 바꾸고, 그 밖은 403이다.
   Future<Todo> update(String id, Map<String, dynamic> fields);
 
   /// `DELETE /api/todos/:id` — 만든 사람만.
   Future<void> delete(String id);
+
+  /// `PUT /api/todos/:id/favorite` — 내 즐겨찾기를 켜고 끈다. 서버가 확정한 값을 돌려준다.
+  Future<bool> setFavorite(String id, bool favorite);
 }
 
 class RemoteTodoApi implements TodoApi {
@@ -54,6 +66,9 @@ class RemoteTodoApi implements TodoApi {
     required TodoScope scope,
     bool includeDone = true,
     String? roomId,
+    String? assigneeId,
+    DateTime? from,
+    DateTime? to,
     TodoSort sort = TodoSort.due,
     int offset = 0,
     int limit = 30,
@@ -66,6 +81,9 @@ class RemoteTodoApi implements TodoApi {
       'offset': '$offset',
       'limit': '$limit',
       'roomId': ?roomId,
+      'assigneeId': ?assigneeId,
+      if (from != null) 'from': todoDateWire(from),
+      if (to != null) 'to': todoDateWire(to),
     };
     final qs = query.entries
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
@@ -120,5 +138,17 @@ class RemoteTodoApi implements TodoApi {
   @override
   Future<void> delete(String id) async {
     await _api.requestJson('DELETE', '/api/todos/$id');
+  }
+
+  @override
+  Future<bool> setFavorite(String id, bool favorite) async {
+    final body = _map(
+      await _api.requestJson(
+        'PUT',
+        '/api/todos/$id/favorite',
+        body: {'favorite': favorite},
+      ),
+    );
+    return body['favorite'] as bool? ?? favorite;
   }
 }

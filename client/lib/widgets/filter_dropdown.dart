@@ -6,6 +6,10 @@ import '../services/session.dart';
 /// 검색/파일 패널 등에서 쓰는 필터 드롭다운 버튼 — 버튼을 누르면 앵커 방식으로 오버레이
 /// 패널이 뜬다. Material `DropdownMenu`는 방 필터의 토픽/채팅 탭 같은 커스텀 내용을 못 넣어서
 /// `CompositedTransformTarget/Follower` + `OverlayEntry`로 직접 앵커 드롭다운을 만든다.
+///
+/// 펼침 패널은 앱 맨 위(루트) Overlay에 띄운다 — 바깥을 누르면 닫히는 막이 창 전체를 덮어, 화면 일부만 덮는 Overlay 안
+/// (PC 할 일 패널의 중첩 Navigator)에서 열어도 그 밖(채팅 쪽)을 누르면 닫히고 그 누름은 아래로 가지 않는다. 다른 화면은
+/// 가장 가까운 Overlay가 곧 루트라 예전과 같다.
 class FilterDropdownButton extends StatefulWidget {
   final String label;
   final bool expand;
@@ -13,12 +17,18 @@ class FilterDropdownButton extends StatefulWidget {
   /// true면 패널의 오른쪽 끝을 버튼의 오른쪽 끝에 맞춘다 — 패널이 버튼보다 넓을 때 창 오른쪽
   /// 밖으로 삐져나가지 않게(맨 오른쪽 "기간" 필터의 달력).
   final bool alignEnd;
+
+  /// 펼침 패널의 폭(정해져 있을 때) — 주면 패널이 창(가장 가까운 Overlay — PC 할 일 패널 안 화면이면 그 패널) 좌우
+  /// 가장자리 8 안에 들어오도록 가로 위치를 당긴다. 좁은 화면 가운데 단추처럼 어느 쪽 끝에 맞춰도 반대쪽이 창 밖으로
+  /// 잘리는 경우를 위해서다. 안 주면(폭이 바뀌는 "기간" 패널 등) 예전처럼 단추 끝에만 맞춘다.
+  final double? panelWidth;
   final Widget Function(VoidCallback close) panelBuilder;
   const FilterDropdownButton({
     super.key,
     required this.label,
     this.expand = false,
     this.alignEnd = false,
+    this.panelWidth,
     required this.panelBuilder,
   });
 
@@ -30,8 +40,33 @@ class _FilterDropdownButtonState extends State<FilterDropdownButton> {
   final _link = LayerLink();
   OverlayEntry? _entry;
 
+  /// 펼침 패널과 창 가장자리 사이에 남기는 여백.
+  static const _edgeMargin = 8.0;
+
+  /// 단추 아래로 패널을 내리는 거리.
+  static const _drop = 44.0;
+
   void _open() {
-    final overlay = Overlay.of(context);
+    // 띄우는 곳은 루트 Overlay(막이 창 전체를 덮게), 가로 자리를 당기는 기준은 가장 가까운 Overlay(PC 할 일 패널 안이면
+    // 패널 — 패널 밖으로 삐져나가지 않게). 둘은 보통 같다.
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final bounds = Overlay.of(context);
+    var anchor = widget.alignEnd ? Alignment.topRight : Alignment.topLeft;
+    var offset = const Offset(0, _drop);
+    final panelWidth = widget.panelWidth;
+    final box = context.findRenderObject() as RenderBox?;
+    final overlayBox = bounds.context.findRenderObject() as RenderBox?;
+    if (panelWidth != null && box != null && overlayBox != null) {
+      // 단추 끝에 맞춘 자리에서 시작해 창 안으로 당긴다 — 창이 패널보다 좁으면 앞(왼쪽)이 보이게 여백에 붙인다.
+      final left = box.localToGlobal(Offset.zero, ancestor: overlayBox).dx;
+      final want = widget.alignEnd ? left + box.size.width - panelWidth : left;
+      final maxLeft = overlayBox.size.width - _edgeMargin - panelWidth;
+      final x = maxLeft < _edgeMargin
+          ? _edgeMargin
+          : want.clamp(_edgeMargin, maxLeft);
+      anchor = Alignment.topLeft;
+      offset = Offset(x - left, _drop);
+    }
     _entry = OverlayEntry(
       builder: (_) => Stack(
         children: [
@@ -44,13 +79,9 @@ class _FilterDropdownButtonState extends State<FilterDropdownButton> {
           CompositedTransformFollower(
             link: _link,
             showWhenUnlinked: false,
-            targetAnchor: widget.alignEnd
-                ? Alignment.topRight
-                : Alignment.topLeft,
-            followerAnchor: widget.alignEnd
-                ? Alignment.topRight
-                : Alignment.topLeft,
-            offset: const Offset(0, 44),
+            targetAnchor: anchor,
+            followerAnchor: anchor,
+            offset: offset,
             child: widget.panelBuilder(_close),
           ),
         ],
@@ -149,22 +180,38 @@ class RoomFilterButton extends StatelessWidget {
   final Session session;
   final String? selectedRoomId;
   final bool expand;
+
+  /// true면 펼침 패널을 단추 오른쪽 끝에 맞춘다(줄 가운데·오른쪽 칸 — [FilterDropdownButton.alignEnd]).
+  final bool alignEnd;
+
+  /// 방을 고르지 않았을 때(전체)의 단추 글자 — 기본 `참여 대화방`(할 일 패널은 잔디처럼 `참여한 대화방`).
+  final String allLabel;
+
+  /// 펼침 패널 첫 줄(방을 고르지 않음)의 글자 — 안 주면 `전체`. 할 일 패널은 단추와 같은 `참여한 대화방`(잔디의 보기
+  /// `참여한 대화방 / 특정 대화방` — 고른 줄과 단추 글자가 맞게).
+  final String? allOptionLabel;
   final ValueChanged<String?> onSelected;
   const RoomFilterButton({
     super.key,
     required this.session,
     required this.selectedRoomId,
     this.expand = false,
+    this.alignEnd = false,
+    this.allLabel = '참여 대화방',
+    this.allOptionLabel,
     required this.onSelected,
   });
 
+  /// 펼침 패널 폭.
+  static const panelWidth = 260.0;
+
   String get _label {
     final id = selectedRoomId;
-    if (id == null) return '참여 대화방';
+    if (id == null) return allLabel;
     for (final r in session.rooms) {
       if (r.id == id) return r.displayName(session.userId ?? '');
     }
-    return '참여 대화방';
+    return allLabel;
   }
 
   @override
@@ -172,11 +219,14 @@ class RoomFilterButton extends StatelessWidget {
     return FilterDropdownButton(
       label: _label,
       expand: expand,
+      alignEnd: alignEnd,
+      panelWidth: panelWidth,
       panelBuilder: (close) => FilterPanelShell(
-        width: 260,
+        width: panelWidth,
         child: _RoomFilterPanel(
           session: session,
           selectedRoomId: selectedRoomId,
+          allLabel: allOptionLabel ?? '전체',
           onSelected: (id) {
             onSelected(id);
             close();
@@ -190,10 +240,14 @@ class RoomFilterButton extends StatelessWidget {
 class _RoomFilterPanel extends StatefulWidget {
   final Session session;
   final String? selectedRoomId;
+
+  /// 첫 줄(방을 고르지 않음)의 글자.
+  final String allLabel;
   final ValueChanged<String?> onSelected;
   const _RoomFilterPanel({
     required this.session,
     required this.selectedRoomId,
+    required this.allLabel,
     required this.onSelected,
   });
 
@@ -255,8 +309,9 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
             shrinkWrap: true,
             children: [
               ListTile(
+                key: const ValueKey('room-filter-all'),
                 dense: true,
-                title: const Text('전체'),
+                title: Text(widget.allLabel),
                 trailing: widget.selectedRoomId == null
                     ? const Icon(Icons.check, size: 18)
                     : null,

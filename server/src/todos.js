@@ -1,16 +1,18 @@
 import { Router } from 'express';
 import { topicAccess } from './access.js';
 import { findCommentById } from './db/queries/comments.js';
-import { findMessageById } from './db/queries/messages.js';
+import { findMessageById, listAttachmentsForMessages } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listMutedUserIdsForRoom, listRoomMemberIds } from './db/queries/rooms.js';
 import { isTeamMember } from './db/queries/teams.js';
 import {
   claimDueTodoReminders,
+  countTodos,
   deleteTodo,
   findTodoById,
   insertTodo,
   listAssigneesForTodos,
   listAttachmentsForTodos,
+  listFavoriteTodoIds,
   listRemindersForTodos,
   listTodoAssigneeIds,
   listTodoAttachmentRows,
@@ -18,6 +20,8 @@ import {
   listTodos,
   listTodosByIds,
   listUsersByIds,
+  setTodoFavorite,
+  TodoProgressDeniedError,
   updateTodo,
 } from './db/queries/todos.js';
 import { findUserById } from './db/queries/users.js';
@@ -28,20 +32,24 @@ import { roomDisplayName } from './rooms.js';
 import {
   checkDateOrder,
   isUuid,
+  myProgressOf,
   newlyAssigned,
-  nextCompletedAt,
   parseAttachments,
   parseTodoCreate,
   parseTodoListQuery,
   parseTodoPatch,
   patchDenial,
   planReminders,
+  progressTarget,
   pushTargets,
   reminderTargets,
   shouldDeliverReminder,
+  sourceFilePaths,
   statusOf,
+  storedAttachmentPaths,
   todoPermissions,
   todoRole,
+  todoRoomError,
 } from './todoRules.js';
 import { signFileUrl } from './upload.js';
 
@@ -60,16 +68,18 @@ function toTodoUser(u) {
 }
 
 /**
- * 할 일 행들을 보는 사람([viewerId]) 기준 DTO로 — 담당자·첨부·알림·만든 사람·방 이름을 한 번씩만 조회한다.
- * myRole/canEdit/canManage는 보는 사람마다 달라서 여기서 계산한다(소켓으로 모두에게 같은 DTO를 뿌리지 않는 이유).
+ * 할 일 행들을 보는 사람([viewerId]) 기준 DTO로 — 담당자·첨부·알림·즐겨찾기·만든 사람·방 이름을 한 번씩만 조회한다.
+ * myRole/canEdit/canManage/myProgress/favorite는 보는 사람마다 달라서 여기서 계산한다(소켓으로 모두에게 같은 DTO를
+ * 뿌리지 않는 이유). progress/status/completedAt은 전체(집계) 값이고, 담당자마다의 값은 assignees[]에 있다.
  */
 export async function loadTodoDtos(rows, viewerId) {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
-  const [assigneeRows, attachmentRows, reminderRows] = await Promise.all([
+  const [assigneeRows, attachmentRows, reminderRows, favoriteIds] = await Promise.all([
     listAssigneesForTodos(ids),
     listAttachmentsForTodos(ids),
     listRemindersForTodos(ids),
+    listFavoriteTodoIds(ids, viewerId),
   ]);
   const creatorIds = [...new Set(rows.map((r) => r.creatorId).filter(Boolean))];
   const creators = new Map((await listUsersByIds(creatorIds)).map((u) => [u.id, u]));
@@ -80,9 +90,22 @@ export async function loadTodoDtos(rows, viewerId) {
   }
 
   return rows.map((t) => {
-    const assignees = assigneeRows.filter((a) => a.todoId === t.id).map((a) => toTodoUser(a.user));
+    const assignees = assigneeRows
+      .filter((a) => a.todoId === t.id)
+      .map((a) => ({
+        ...toTodoUser(a.user),
+        progress: a.progress,
+        status: statusOf(a.progress),
+        completedAt: ms(a.completedAt),
+      }));
     const role = todoRole({ creatorId: t.creatorId, assigneeIds: assignees.map((a) => a.id), userId: viewerId });
     const { canEdit, canManage } = todoPermissions({ role, creatorId: t.creatorId });
+    const myProgress = myProgressOf({
+      creatorId: t.creatorId,
+      assignees: assignees.map((a) => ({ userId: a.id, progress: a.progress })),
+      progress: t.progress,
+      userId: viewerId,
+    });
     const creator = t.creatorId ? creators.get(t.creatorId) : null;
     return {
       id: t.id,
@@ -117,6 +140,10 @@ export async function loadTodoDtos(rows, viewerId) {
       myRole: role,
       canEdit,
       canManage,
+      // 내 진척률 — 담당자면 내 담당 행, 담당자가 없고 만든 사람이면 할 일 값, 그 밖은 null(바꿀 수 없음).
+      myProgress,
+      canSetProgress: myProgress !== null,
+      favorite: favoriteIds.has(t.id),
       createdAt: ms(t.createdAt),
       updatedAt: ms(t.updatedAt),
     };
@@ -124,8 +151,9 @@ export async function loadTodoDtos(rows, viewerId) {
 }
 
 /**
- * 할 일 — 만들기·목록(나의/부여한/팀)·상세·수정·삭제와 알림 일정 작업(startTodoReminderJob).
- * 모든 조회·변경은 "그 대화방의 멤버"여야 하고, 할 일은 만든 뒤 다른 대화방으로 옮길 수 없다. 프로젝트의 업무(tasks)와는 별개다.
+ * 할 일 — 만들기·목록(나의/부여한/모든 할 일, 기간)·상세·수정(담당자마다 따로인 진척률)·삭제·즐겨찾기와 알림 일정 작업
+ * (startTodoReminderJob). 모든 조회·변경은 "그 대화방의 멤버"여야 하고, 할 일은 만든 뒤 다른 대화방으로 옮길 수 없다.
+ * 프로젝트의 업무(tasks)와는 별개다.
  */
 export function createTodosRouter(io) {
   const router = Router();
@@ -182,6 +210,36 @@ export function createTodosRouter(io) {
     return ids.every((id) => members.has(id)) ? null : '이 대화방의 멤버만 담당자로 지정할 수 있습니다.';
   }
 
+  /**
+   * "메시지·댓글에서 할 일로 등록"의 출처 — 이 방의, 지워지지 않은 글이어야 한다(다른 방 글을 끌어다 붙이지 못하게).
+   * `{ sourceMessageId, sourceCommentId, filePaths }` 또는 `{ error, filePaths: [] }`를 돌려준다. filePaths는 그 원본 글에
+   * 지금 붙어 있는 파일 경로들(sourceFilePaths) — 오래전에 불러온 메시지라 첨부의 서명 링크가 만료됐어도 그 파일이면 받도록
+   * 첨부 검사(parseTodoCreate)에 넘긴다. id가 uuid가 아니면 찾지 않는다(그 거절은 parseTodoCreate가 한다).
+   */
+  async function loadTodoSource(room, body) {
+    const messageId = isUuid(body?.sourceMessageId) ? body.sourceMessageId : null;
+    const commentId = isUuid(body?.sourceCommentId) ? body.sourceCommentId : null;
+    if (commentId) {
+      const comment = await findCommentById(commentId);
+      if (!comment || comment.deletedAt || comment.roomId !== room.id) {
+        return { error: '원본 댓글을 찾을 수 없습니다.', filePaths: [] };
+      }
+      if (messageId && messageId !== comment.messageId) {
+        return { error: '원본 댓글과 메시지가 맞지 않습니다.', filePaths: [] };
+      }
+      return { sourceMessageId: comment.messageId, sourceCommentId: commentId, filePaths: sourceFilePaths({ comment }) };
+    }
+    if (messageId) {
+      const message = await findMessageById(messageId);
+      if (!message || message.deletedAt || message.roomId !== room.id) {
+        return { error: '원본 메시지를 찾을 수 없습니다.', filePaths: [] };
+      }
+      const attachments = (await listAttachmentsForMessages([message.id]))[message.id] ?? [];
+      return { sourceMessageId: messageId, sourceCommentId: null, filePaths: sourceFilePaths({ message, attachments }) };
+    }
+    return { sourceMessageId: null, sourceCommentId: null, filePaths: [] };
+  }
+
   router.post('/rooms/:roomId/todos', async (req, res) => {
     const room = await findRoomById(req.params.roomId);
     if (!room) return res.status(404).json({ error: '방을 찾을 수 없습니다.' });
@@ -189,36 +247,24 @@ export function createTodosRouter(io) {
     if (!(await isRoomMember(room.id, me))) {
       return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     }
-    // 서버가 내용을 볼 수 없는 비밀 대화에는 둘 수 없고, 읽기 전용·보관 토픽은 글쓰기와 같게 토픽 관리자만 만든다.
-    if (room.isSecret) return res.status(400).json({ error: '비밀 대화에서는 할 일을 만들 수 없습니다.' });
+    // 서버가 내용을 볼 수 없는 비밀 대화와 보드 뷰 토픽(잔디: 챗 뷰 토픽·채팅에서만)에는 만들 수 없고, 읽기 전용·보관
+    // 토픽은 글쓰기와 같게 토픽 관리자만 만든다. 이미 있는 할 일의 조회·수정은 그대로 된다.
+    const roomError = todoRoomError(room);
+    if (roomError) return res.status(400).json({ error: roomError });
     if (room.type === 'topic' && (room.readOnly || room.archivedAt)) {
       const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, me)).canManage });
       if (denial) return res.status(403).json({ error: denial.replace('글을 쓸', '할 일을 만들') });
     }
 
-    const input = parseTodoCreate(req.body);
+    // 출처 글은 본문 검사보다 먼저 찾아 둔다 — 그 글에 붙어 있는 파일은 첨부 서명이 만료됐어도 알아보게(다른 파일은 그대로
+    // 거절). 출처가 잘못됐다는 거절은 예전처럼 본문·담당자 검사 뒤에 한다.
+    const source = await loadTodoSource(room, req.body);
+    const input = parseTodoCreate(req.body, Date.now(), source.filePaths);
     if (input.error) return res.status(400).json({ error: input.error });
     const memberError = await assigneeError(room, input.assigneeIds);
     if (memberError) return res.status(400).json({ error: memberError });
-
-    // "메시지·댓글에서 할 일로 등록"의 출처 — 이 방의, 지워지지 않은 글이어야 한다(다른 방 글을 끌어다 붙이지 못하게).
-    let sourceMessageId = input.sourceMessageId;
-    let sourceCommentId = input.sourceCommentId;
-    if (sourceCommentId) {
-      const comment = await findCommentById(sourceCommentId);
-      if (!comment || comment.deletedAt || comment.roomId !== room.id) {
-        return res.status(400).json({ error: '원본 댓글을 찾을 수 없습니다.' });
-      }
-      if (sourceMessageId && sourceMessageId !== comment.messageId) {
-        return res.status(400).json({ error: '원본 댓글과 메시지가 맞지 않습니다.' });
-      }
-      sourceMessageId = comment.messageId;
-    } else if (sourceMessageId) {
-      const message = await findMessageById(sourceMessageId);
-      if (!message || message.deletedAt || message.roomId !== room.id) {
-        return res.status(400).json({ error: '원본 메시지를 찾을 수 없습니다.' });
-      }
-    }
+    if (source.error) return res.status(400).json({ error: source.error });
+    const { sourceMessageId, sourceCommentId } = source;
 
     const row = await insertTodo({
       todo: {
@@ -254,9 +300,10 @@ export function createTodosRouter(io) {
     if (!(await isTeamMember(q.teamId, me))) {
       return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
     }
-    const rows = await listTodos({ userId: me, ...q });
+    // total = 같은 조건(scope·방·담당자·기간·완료 제외)에 맞는 전체 개수 — offset/limit와 무관(앱의 "N개의 할 일").
+    const [rows, total] = await Promise.all([listTodos({ userId: me, ...q }), countTodos({ userId: me, ...q })]);
     const hasMore = rows.length > q.limit;
-    res.json({ items: await loadTodoDtos(rows.slice(0, q.limit), me), hasMore });
+    res.json({ items: await loadTodoDtos(rows.slice(0, q.limit), me), hasMore, total });
   });
 
   router.get('/todos/:id', async (req, res) => {
@@ -275,8 +322,15 @@ export function createTodosRouter(io) {
     const parsed = parseTodoPatch(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { fields } = parsed;
+    // progress는 "내 진척률" — 이번 수정을 마친 뒤의 담당자 목록 기준으로, 내가 담당자면 내 담당 행, 담당자가 없고
+    // 내가 만든 사람이면 할 일 값(todos.progress)에 쓴다. 그 밖은 만든 사람이라도 403. 여기서는 빨리 거절하려고 요청
+    // 전에 읽은 담당자로 한 번 보고, 실제로 쓸 곳은 updateTodo가 할 일 행을 잠근 뒤 다시 정한다(그새 바뀌었으면 403).
+    const target =
+      fields.progress !== undefined
+        ? progressTarget({ creatorId: todo.creatorId, assigneeIds: fields.assigneeIds ?? currentAssignees, userId: me })
+        : null;
     // 권한은 값 검사보다 먼저 — 남이 보낸 잘못된 값의 내용까지 알려줄 필요가 없다.
-    const denial = patchDenial(role, todo.creatorId, Object.keys(fields));
+    const denial = patchDenial(role, todo.creatorId, Object.keys(fields), target);
     if (denial) return res.status(denial.status).json({ error: denial.error });
 
     // 시작일/종료일은 둘 중 하나만 보내도 저장된 다른 쪽과 순서를 맞춰 본다.
@@ -287,7 +341,9 @@ export function createTodosRouter(io) {
 
     let attachments;
     if (fields.attachments !== undefined) {
-      const existing = (await listTodoAttachmentRows(todo.id)).map((a) => a.fileUrl);
+      // 이 할 일에 저장된 첨부의 원본·미리보기 경로 — 화면이 오래 들고 있던(서명이 만료된) 링크로 기존 첨부를 돌려보내도
+      // 같은 파일로 알아본다(미리보기도 넣어야 기존 사진의 미리보기가 조용히 null로 저장되지 않는다).
+      const existing = storedAttachmentPaths(await listTodoAttachmentRows(todo.id));
       const r = parseAttachments(fields.attachments, existing);
       if (r.error) return res.status(400).json({ error: r.error });
       attachments = r.value;
@@ -313,17 +369,22 @@ export function createTodosRouter(io) {
     for (const key of ['title', 'description', 'startDate', 'dueDate']) {
       if (key in fields) columns[key] = fields[key];
     }
-    if (fields.progress !== undefined) {
-      columns.progress = fields.progress;
-      columns.completedAt = nextCompletedAt(fields.progress, todo.completedAt);
-    }
+    // 담당자 진척률은 그 사람 행만, 담당자 없는 할 일은 예전처럼 할 일 값 — 전체 진척률은 updateTodo가 다시 맞춘다.
+    const progressWrite = fields.progress !== undefined ? { userId: me, progress: fields.progress } : undefined;
 
-    const row = await updateTodo(todo.id, {
-      fields: columns,
-      assigneeIds: fields.assigneeIds,
-      attachments,
-      reminderPlan,
-    });
+    let row;
+    try {
+      row = await updateTodo(todo.id, {
+        fields: columns,
+        assigneeIds: fields.assigneeIds,
+        attachments,
+        reminderPlan,
+        progressWrite,
+      });
+    } catch (e) {
+      if (e instanceof TodoProgressDeniedError) return res.status(403).json({ error: e.message });
+      throw e;
+    }
     if (!row) return res.status(404).json({ error: '할 일을 찾을 수 없습니다.' });
 
     const added = fields.assigneeIds ? newlyAssigned(currentAssignees, fields.assigneeIds, me) : [];
@@ -350,6 +411,37 @@ export function createTodosRouter(io) {
     res.json({ ok: true });
   });
 
+  // 즐겨찾기(별) — 사람마다 따로. 켜기는 그 방 멤버만, 끄기는 권한을 보지 않는다(방을 나간 뒤에도 내 표시는 지울 수
+  // 있게 — 행만 지우고, 없어도 200). 내 다른 기기만 알면 되므로 소켓은 내 user:<me>에만 보낸다(끄기는 실제로 지운
+  // 행이 있을 때만 — 멤버가 아닌 사람에게 남의 할 일이 어느 방 것인지 알려주지 않게).
+  router.put('/todos/:id/favorite', async (req, res) => {
+    const favorite = req.body?.favorite;
+    if (typeof favorite !== 'boolean') return res.status(400).json({ error: 'favorite는 true/false여야 합니다.' });
+    const me = req.user.sub;
+    let todo;
+    if (favorite) {
+      const ctx = await requireTodo(req, res);
+      if (!ctx) return;
+      todo = ctx.todo;
+    } else {
+      todo = isUuid(req.params.id) ? await findTodoById(req.params.id) : null;
+    }
+    if (todo) {
+      const changed = await setTodoFavorite(todo.id, me, favorite);
+      if (favorite || changed) {
+        io.to(`user:${me}`).emit('todo:changed', {
+          teamId: todo.teamId,
+          roomId: todo.roomId,
+          todoId: todo.id,
+          kind: 'favorite',
+          actorId: me,
+          favorite,
+        });
+      }
+    }
+    res.json({ favorite });
+  });
+
   return router;
 }
 
@@ -359,8 +451,9 @@ const REMINDER_SWEEP_INTERVAL_MS = 60 * 1000;
 
 /**
  * 보낼 때가 된 알림을 한 번 훑는다. 알림을 먼저 찜(sentAt 기록)한 뒤에 보내므로 중복 발송이 없고, 발송 도중 실패해도
- * 다시 폭주하지 않는다. 이미 완료된 할 일·너무 오래 묵은 알림은 찜만 하고 보내지 않는다. 받는 사람은 담당자들(없으면
- * 만든 사람) — 소켓 todo:reminder는 모두에게, 푸시는 소켓이 안 붙은 사람에게만.
+ * 다시 폭주하지 않는다. 이미 완료된(집계 100) 할 일·너무 오래 묵은 알림은 찜만 하고 보내지 않는다. 받는 사람은 아직
+ * 다 하지 않은(진척률 100 미만) 담당자들(담당자가 없으면 만든 사람) — 소켓 todo:reminder는 모두에게, 푸시는 소켓이
+ * 안 붙은 사람에게만.
  */
 export async function sweepTodoReminders(io, now = new Date()) {
   const claimed = await claimDueTodoReminders(now);
@@ -373,8 +466,10 @@ export async function sweepTodoReminders(io, now = new Date()) {
     if (!todo) continue;
     const remindAt = new Date(reminder.remindAt).getTime();
     if (!shouldDeliverReminder({ progress: todo.progress, remindAt, now: now.getTime() })) continue;
-    const assigneeIds = assigneeRows.filter((a) => a.todoId === todo.id).map((a) => a.user.id);
-    const targets = reminderTargets(assigneeIds, todo.creatorId);
+    const assignees = assigneeRows
+      .filter((a) => a.todoId === todo.id)
+      .map((a) => ({ userId: a.user.id, progress: a.progress }));
+    const targets = reminderTargets(assignees, todo.creatorId);
     if (targets.length === 0) continue;
     const room = await findRoomById(todo.roomId);
     if (!room) continue;

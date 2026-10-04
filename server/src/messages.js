@@ -10,14 +10,16 @@ import {
   updateMessageText,
   updatePost,
 } from './db/queries/messages.js';
-import { isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
+import { getDmHistoryFloor, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { topicAccess } from './access.js';
+import { isUuid } from './favoritesRules.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
 import { notifyBoard, removeNotificationsForMessage, updateMentions } from './notifications.js';
 import { parsePostFields, topicWriteDenial } from './permissions.js';
+import { attachPolls } from './polls.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
@@ -203,6 +205,27 @@ export function createMessagesRouter(io) {
     const byMessage = await listAttachmentsForMessages([row.id]);
     return toMessageDto({ ...row, attachments: byMessage[row.id] });
   }
+
+  /**
+   * 메시지 한 건 — 알림 센터의 "할 일로 등록"처럼 알림의 미리보기(한 줄로 줄이고 잘린 스냅샷) 대신 지금의 원본(본문·첨부)이
+   * 필요할 때 읽는다. 접근 규칙은 방 메시지 목록(GET /rooms/:id/messages)과 같다 — 그 방 멤버만(403), DM "진짜 나가기"
+   * 이전 메시지는 없는 것처럼(404). 지운 메시지와 비밀 대화(서버는 암호문만 안다)도 404. 응답은 목록 항목과 같은 메시지
+   * DTO(첨부·투표 포함 — 댓글은 싣지 않는다).
+   */
+  router.get('/messages/:id', async (req, res) => {
+    const notFound = () => res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
+    const message = isUuid(req.params.id) ? await findMessageById(req.params.id) : null;
+    if (!message || message.deletedAt) return notFound();
+    const room = await findRoomById(message.roomId);
+    if (!room) return notFound();
+    if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    if (room.isSecret) return notFound();
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
+    if (floor && message.createdAt < floor) return notFound();
+    const [withPoll] = await attachPolls([message], req.user.sub);
+    const byMessage = await listAttachmentsForMessages([message.id]);
+    res.json(toMessageDto({ ...withPoll, attachments: byMessage[message.id] }));
+  });
 
   router.patch('/messages/:id', async (req, res) => {
     const message = await findMessageById(req.params.id);

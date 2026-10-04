@@ -381,6 +381,28 @@ export async function notifyMembership(io, room) {
 }
 
 /**
+ * 멤버가 바뀌어(나가기·내보내기·참여·초대) 전체 진척률이 다시 맞춰진 할 일들([todos] — db/queries/rooms.js의
+ * removeRoomMembers/addRoomMembers가 돌려준 행)을 지금 그 방 멤버 모두의 user:<id>에 todo:changed(kind 'updated')로
+ * 알린다 — 열려 있는 할 일 패널·상세가 다시 받는다(todos.js emitChanged와 같은 모양, 새로 지정된 담당자는 없음).
+ */
+export async function notifyTodosResynced(io, room, todos, actorId) {
+  if (!todos || todos.length === 0) return;
+  const memberIds = await listRoomMemberIds(room.id);
+  for (const todo of todos) {
+    const payload = {
+      teamId: todo.teamId,
+      roomId: todo.roomId,
+      todoId: todo.id,
+      kind: 'updated',
+      actorId,
+      title: todo.title,
+      addedAssigneeIds: [],
+    };
+    for (const id of memberIds) io.to(`user:${id}`).emit('todo:changed', payload);
+  }
+}
+
+/**
  * 나와의 대화를 찾거나 만든다(db/queries/rooms.js ensureSelfRoom). 이번에 새로 만들었으면 그 사람의 소켓(모든
  * 기기)을 방에 넣고 room:created로 알린다 — 다른 방이 새로 생길 때와 같은 경로(notifyMembership).
  */
@@ -441,8 +463,9 @@ export async function inviteMembersToRoom(io, room, inviterId, userIds, { teamMe
   const withName = async (id) => ({ userId: id, name: await nameFor(id) });
 
   if (plan.toInvite.length > 0) {
-    await addRoomMembers(room.id, plan.toInvite);
+    const changedTodos = await addRoomMembers(room.id, plan.toInvite);
     await notifyMembership(io, room);
+    await notifyTodosResynced(io, room, changedTodos, inviterId); // 다시 들어온 담당자가 있던 할 일.
     const invitedNames = await Promise.all(plan.toInvite.map(nameFor));
     await postSystemMessage(io, room, `${await nameFor(inviterId)} 님이 ${invitedNames.join(', ')} 님을 초대했습니다.`);
   }
@@ -826,8 +849,9 @@ export function createRoomsRouter(io) {
       const memberIds = await listRoomMemberIds(existing.id);
       const missing = [req.user.sub, targetUserId].filter((id) => !memberIds.includes(id));
       if (missing.length > 0) {
-        await addRoomMembers(existing.id, missing);
+        const changedTodos = await addRoomMembers(existing.id, missing);
         await notifyMembership(io, existing);
+        await notifyTodosResynced(io, existing, changedTodos, req.user.sub);
       }
       // 내가 숨겨 둔 DM이면 내 쪽만 다시 보이게 한다(내 다른 기기에도 알림) — 상대의 숨김 상태는 그대로 둔다.
       if (await getMemberHidden(existing.id, req.user.sub)) {
@@ -977,8 +1001,9 @@ export function createRoomsRouter(io) {
     }
 
     if (!(await isRoomMember(room.id, req.user.sub))) {
-      await addRoomMembers(room.id, [req.user.sub]);
+      const changedTodos = await addRoomMembers(room.id, [req.user.sub]);
       await notifyMembership(io, room);
+      await notifyTodosResynced(io, room, changedTodos, req.user.sub); // 나갔다가 다시 들어온 담당자.
       await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 참여했습니다.`);
     }
     res.json(await toRoomDto(room, req.user.sub));
@@ -1159,13 +1184,13 @@ export function createRoomsRouter(io) {
     }
 
     // 그룹/토픽 — 진짜 멤버십이 없어지는 공개적인 이벤트라 지금까지처럼 실제로 나간다(내 토픽 폴더
-    // 배치도 같이 지워진다).
-    let folderItemRemoved;
+    // 배치도 같이 지워지고, 내가 담당자인 이 방 할 일의 전체 진척률도 다시 맞춰진다).
+    let left;
     if (room.type === 'topic') {
       // 토픽 관리자가 마지막 한 명이면 먼저 다른 멤버를 토픽 관리자로 정해야 나갈 수 있다 — 관리할
       // 사람 없이 남은 멤버들만 두고 떠나지 않게(나 혼자 남은 토픽이면 그냥 나갈 수 있다). 확인과
       // 나가기를 방 잠금 안에서 한 번에 해서, 관리자 둘이 동시에 나가도 둘 다 빠지지 않게 한다.
-      const left = await withRoomLock(room.id, async (tx) => {
+      left = await withRoomLock(room.id, async (tx) => {
         const members = await listRoomMemberRoles(room.id, tx);
         const isAdmin = members.some((m) => m.userId === req.user.sub && m.role === 'admin');
         // 토픽 관리자로 지정할 수 있는 사람(정회원 이상)이 남아 있을 때만 막는다 — 남은 멤버가 모두
@@ -1181,9 +1206,8 @@ export function createRoomsRouter(io) {
           .status(400)
           .json({ error: '토픽 관리자는 다른 멤버를 토픽 관리자로 지정한 뒤에 나갈 수 있습니다.' });
       }
-      folderItemRemoved = left.folderItemRemoved;
     } else {
-      folderItemRemoved = await removeRoomMember(room.id, req.user.sub);
+      left = await removeRoomMembers(room.id, [req.user.sub]);
     }
 
     io.in(`user:${req.user.sub}`).socketsLeave(room.id); // 나간 사람은 이후 이 방 메시지를 더 이상 받지 않게.
@@ -1193,7 +1217,9 @@ export function createRoomsRouter(io) {
     }
     io.to(room.id).emit('room:created', await toRoomDto(room)); // 남은 멤버들의 목록을 갱신시킨다.
     // 폴더에 넣어뒀던 토픽이면 내 다른 기기의 폴더 목록도 다시 불러오게 한다.
-    if (folderItemRemoved) io.to(`user:${req.user.sub}`).emit('topic-folders:changed', { teamId: room.teamId });
+    if (left.folderItemRemoved) io.to(`user:${req.user.sub}`).emit('topic-folders:changed', { teamId: room.teamId });
+    // 내가 담당자였던 할 일은 남은 담당자들로 전체 진척률이 바뀌었을 수 있다 — 남은 멤버의 할 일 화면을 새로 고친다.
+    await notifyTodosResynced(io, room, left.changedTodos, req.user.sub);
 
     res.json({ ok: true });
   });
@@ -1456,15 +1482,17 @@ export function createRoomsRouter(io) {
       if (!canManageTeam(access) && found.some((id) => members.get(id).role === 'admin')) {
         return { status: 403, error: '토픽 관리자는 다른 토픽 관리자를 내보낼 수 없습니다.' };
       }
-      await removeRoomMembers(room.id, found, tx); // 그 사람들의 토픽 폴더 배치도 같이 지운다.
-      return { targets: found };
+      // 그 사람들의 토픽 폴더 배치도 같이 지우고, 그 사람들이 담당자인 할 일의 전체 진척률도 다시 맞춘다.
+      const { changedTodos } = await removeRoomMembers(room.id, found, tx);
+      return { targets: found, changedTodos };
     });
     if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
-    const { targets } = outcome;
+    const { targets, changedTodos } = outcome;
     io.in(targets.map((id) => `user:${id}`)).socketsLeave(room.id);
     const payload = { roomId: room.id, reason: 'kicked', name: room.name };
     for (const userId of targets) io.to(`user:${userId}`).emit('room:removed', payload);
     io.to(room.id).emit('room:created', await toRoomDto(room)); // 남은 멤버들의 목록을 갱신시킨다.
+    await notifyTodosResynced(io, room, changedTodos, req.user.sub);
     if (!room.quietLeave) {
       const names = await Promise.all(targets.map(nameOf));
       await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 ${names.join(', ')} 님을 내보냈습니다.`);

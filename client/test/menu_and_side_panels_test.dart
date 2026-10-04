@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:client/models/message.dart';
 import 'package:client/models/room.dart';
 import 'package:client/models/team.dart';
 import 'package:client/screens/calendar/calendar_screen.dart';
@@ -7,20 +8,25 @@ import 'package:client/screens/desktop_home_screen.dart';
 import 'package:client/screens/favorites_screen.dart';
 import 'package:client/screens/files_screen.dart';
 import 'package:client/screens/links_screen.dart';
+import 'package:client/screens/message_thread_screen.dart';
 import 'package:client/screens/my_posts_screen.dart';
 import 'package:client/screens/polls_screen.dart';
 import 'package:client/screens/room_list_screen.dart';
 import 'package:client/screens/search_screen.dart';
+import 'package:client/screens/todo_editor_dialog.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/services/typing_gate.dart';
 import 'package:client/widgets/app_menu_button.dart';
+import 'package:client/widgets/chat_panel.dart';
 import 'package:client/widgets/menu_entries.dart';
 import 'package:client/widgets/notifications_panel.dart';
 import 'package:client/widgets/side_panels.dart';
 import 'package:client/widgets/team_members_panel.dart';
+import 'package:client/widgets/todos_panel.dart';
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -55,6 +61,9 @@ Session _session({AccountRole role = AccountRole.member, List<Room>? rooms}) {
     }
     if (request.url.path == '/api/my-posts') {
       return _json({'items': <Object>[], 'hasMore': false});
+    }
+    if (request.url.path == '/api/todos') {
+      return _json({'items': <Object>[], 'hasMore': false, 'total': 0});
     }
     return _json(<Object>[]);
   });
@@ -625,6 +634,177 @@ void main() {
       await _openMenuTile(tester, 'favorites');
       expect(find.byType(CalendarScreen), findsOneWidget);
       expect(find.byType(FavoritesScreen), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+  });
+
+  // 할 일 패널 안 생성·수정 화면은 홈 화면이 패널을 밖에서 닫거나 바꾸기 전에(같은 메뉴 타일·다른 패널·댓글·대화창 분할)
+  // 쓰던 내용을 묻는다 — 패널 자신의 ✕는 그 화면이 이미 물으니 한 번만.
+  group('PC 홈 화면 — 할 일 패널 안에서 쓰던 할 일', () {
+    Future<void> openTodoEditor(WidgetTester tester) async {
+      await _openMenuTile(tester, 'todos');
+      expect(find.byType(TodosPanel), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('todo-create')));
+      await tester.pumpAndSettle();
+      expect(find.byType(TodoEditor), findsOneWidget);
+    }
+
+    Future<void> write(WidgetTester tester) async {
+      await tester.enterText(
+        find.byKey(const ValueKey('todo-title-field')),
+        '쓰던 할 일',
+      );
+      await tester.pump();
+    }
+
+    /// 떠 있는 "작성 취소" 확인에서 [button]을 누른다.
+    Future<void> answer(WidgetTester tester, String button) async {
+      expect(find.text('작성 취소'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, button));
+      await tester.pumpAndSettle();
+      expect(find.text('작성 취소'), findsNothing);
+    }
+
+    testWidgets(
+      '같은 메뉴 타일로 닫거나 다른 패널(상단 검색)로 바꾸면 먼저 묻는다 — [계속 쓰기]면 그대로, [닫기]면 진행',
+      (tester) async {
+        final session = _session(rooms: [_topic('r1', '공지방')]);
+        await _pumpDesktop(tester, session);
+        await openTodoEditor(tester);
+        await write(tester);
+
+        await _openMenuTile(tester, 'todos');
+        await answer(tester, '계속 쓰기');
+        expect(find.byType(TodoEditor), findsOneWidget);
+        expect(find.text('쓰던 할 일'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('검색'));
+        await tester.pumpAndSettle();
+        await answer(tester, '계속 쓰기');
+        expect(find.byType(SearchScreen), findsNothing);
+        expect(find.text('쓰던 할 일'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('검색'));
+        await tester.pumpAndSettle();
+        await answer(tester, '닫기');
+        expect(find.byType(SearchScreen), findsOneWidget);
+        expect(find.byType(TodosPanel), findsNothing);
+
+        // 다시 열면 새 목록 — 쓰던 할 일이 없으니 같은 타일로 닫을 때 묻지 않는다.
+        await _openMenuTile(tester, 'todos');
+        expect(find.byType(TodosPanel), findsOneWidget);
+        expect(find.byType(TodoEditor), findsNothing);
+        await _openMenuTile(tester, 'todos');
+        expect(find.text('작성 취소'), findsNothing);
+        expect(find.byType(TodosPanel), findsNothing);
+        expect(tester.takeException(), isNull);
+        await _finish(tester);
+      },
+    );
+
+    testWidgets('쓰던 게 없으면(열기만 한 생성 화면) 묻지 않고 바로 바꾸거나 닫는다', (tester) async {
+      final session = _session(rooms: [_topic('r1', '공지방')]);
+      await _pumpDesktop(tester, session);
+      await openTodoEditor(tester);
+      await tester.tap(find.byTooltip('검색'));
+      await tester.pumpAndSettle();
+      expect(find.text('작성 취소'), findsNothing);
+      expect(find.byType(SearchScreen), findsOneWidget);
+      expect(find.byType(TodosPanel), findsNothing);
+
+      await _openMenuTile(tester, 'todos');
+      await tester.tap(find.byKey(const ValueKey('todo-create')));
+      await tester.pumpAndSettle();
+      await _openMenuTile(tester, 'todos');
+      expect(find.text('작성 취소'), findsNothing);
+      expect(find.byType(TodosPanel), findsNothing);
+      await _finish(tester);
+    });
+
+    testWidgets('생성 화면의 ✕(패널 닫기)는 한 번만 묻는다 — 홈 화면은 다시 묻지 않는다', (tester) async {
+      final session = _session(rooms: [_topic('r1', '공지방')]);
+      await _pumpDesktop(tester, session);
+      await openTodoEditor(tester);
+      await write(tester);
+      await tester.tap(find.byKey(const ValueKey('todo-page-close')));
+      await tester.pumpAndSettle();
+      await answer(tester, '닫기');
+      expect(find.text('작성 취소'), findsNothing);
+      expect(find.byType(TodosPanel), findsNothing);
+      await _finish(tester);
+    });
+
+    testWidgets('메시지의 댓글을 열면(오른쪽 칸을 댓글로 바꿈) 먼저 묻는다', (tester) async {
+      final session = _session(rooms: [_topic('r1', '공지방')]);
+      await _pumpDesktop(tester, session);
+      session.requestOpenRoom(session.roomById('r1')!);
+      await tester.pumpAndSettle();
+      expect(find.byType(ChatPanel), findsOneWidget);
+      await openTodoEditor(tester);
+      await write(tester);
+      final message = Message.fromJson({
+        'id': 'm1',
+        'roomId': 'r1',
+        'senderId': 'me',
+        'senderName': '나',
+        'type': 'text',
+        'text': '댓글을 달 메시지',
+        'createdAt': 1,
+      });
+      void openThread() => tester
+          .widget<ChatPanel>(find.byType(ChatPanel))
+          .onOpenThread!(message);
+
+      openThread();
+      await tester.pumpAndSettle();
+      await answer(tester, '계속 쓰기');
+      expect(find.byType(MessageThreadScreen), findsNothing);
+      expect(find.text('쓰던 할 일'), findsOneWidget);
+
+      openThread();
+      await tester.pumpAndSettle();
+      await answer(tester, '닫기');
+      expect(find.byType(MessageThreadScreen), findsOneWidget);
+      expect(find.byType(TodosPanel), findsNothing);
+      // 댓글 패널 자체의 가로 넘침(시험 글꼴에서 입력 줄 단추가 420 칸을 넘는다 — 할 일 패널 없이 댓글만 열어도 난다)은
+      // 이 시험과 무관해 비운다. 그 밖의 오류는 그대로 실패한다.
+      final error = tester.takeException();
+      if (error != null) expect('$error', contains('RenderFlex overflowed'));
+      await _finish(tester);
+    });
+
+    testWidgets('방 목록 우클릭의 "대화창 분할하기"도 먼저 묻는다', (tester) async {
+      final session = _session(
+        rooms: [_topic('r1', '공지방'), _topic('r2', '개발방')],
+      );
+      await _pumpDesktop(tester, session);
+      session.requestOpenRoom(session.roomById('r1')!);
+      await tester.pumpAndSettle();
+      await openTodoEditor(tester);
+      await write(tester);
+      Future<void> split() async {
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(const ValueKey('topic-row-r2')),
+            matching: find.text('개발방'),
+          ),
+          buttons: kSecondaryButton,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('대화창 분할하기'));
+        await tester.pumpAndSettle();
+      }
+
+      await split();
+      await answer(tester, '계속 쓰기');
+      expect(find.byType(ChatPanel), findsOneWidget, reason: '분할하지 않았다');
+      expect(find.text('쓰던 할 일'), findsOneWidget);
+
+      await split();
+      await answer(tester, '닫기');
+      expect(find.byType(ChatPanel), findsNWidgets(2));
+      expect(find.byType(TodosPanel), findsNothing);
       expect(tester.takeException(), isNull);
       await _finish(tester);
     });

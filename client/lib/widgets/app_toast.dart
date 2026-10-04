@@ -5,19 +5,27 @@ import 'package:flutter/material.dart';
 /// toasts 스트림(비밀 대화 거절/양쪽 나가기처럼 "방이 사라지는" 이벤트)뿐 아니라, 초대 링크
 /// 복사처럼 다이얼로그 안에서 즉시 피드백을 줄 때도 쓴다.
 ///
-/// [context]가 가리키는 가장 가까운 [Overlay]에 직접 [OverlayEntry]를 꽂는다 — 예전에는
+/// [context]가 든 앱의 맨 위(루트) [Overlay]에 직접 [OverlayEntry]를 꽂는다 — 예전에는
 /// SnackBar(ScaffoldMessenger)를 썼는데, ScaffoldMessenger.showSnackBar는 실제로는 그
 /// context 위쪽에 있는 **Scaffold**(다이얼로그를 연 원래 화면 쪽) 안에 그려진다. FloatingDialog
 /// 같은 Dialog 위젯은 그 자신은 Scaffold가 아니므로, 다이얼로그 안에서 부르면 SnackBar가
 /// 다이얼로그 뒤 화면에 그려져 떠 있는 다이얼로그에 완전히 가려 안 보였다(예: 팀 초대 링크
 /// 화면의 "링크 복사" 토스트). Overlay는 다이얼로그를 포함해 지금 열려 있는 모든 라우트보다
 /// "나중에 삽입"되므로 어디서 불러도 항상 맨 위에 뜬다.
+///
+/// 가장 가까운 Overlay가 아니라 루트 것인 까닭: 화면 일부에만 깔린 Overlay(PC 할 일 패널의 중첩
+/// Navigator, 채팅·댓글 목록의 Overlay.wrap) 안에서 부르면 창 폭으로 잡는 양옆 여백 때문에 그 좁은
+/// 칸 안에서 알약이 찌그러지거나(폭 0) 칸 아래에 따로 떴다 — 늘 창 가운데 아래에 같은 모양으로 띄운다.
 void showAppToast(
   BuildContext context,
   String message, {
   Duration duration = const Duration(milliseconds: 2000),
 }) {
-  showAppToastOnOverlay(Overlay.of(context), message, duration: duration);
+  showAppToastOnOverlay(
+    Overlay.of(context, rootOverlay: true),
+    message,
+    duration: duration,
+  );
 }
 
 /// [showAppToast]와 같지만 [Overlay]를 직접 받는다 — 알림을 띄우기 전에 창이 닫히거나 목록 항목이 없어져
@@ -79,7 +87,8 @@ class _AppToastState extends State<_AppToast> {
       // 잡는다(고정 margin이면 넓은 PC 화면에서 가로로 길게 늘어져 알약처럼 안 보인다).
       left: width * 0.3,
       right: width * 0.3,
-      bottom: 32,
+      // 화상 키보드가 올라와 있으면 그 위에(휴대폰 채팅 입력 중 — 루트 Overlay는 키보드만큼 줄지 않는다).
+      bottom: 32 + MediaQuery.viewInsetsOf(context).bottom,
       child: IgnorePointer(
         child: AnimatedOpacity(
           opacity: _opacity,

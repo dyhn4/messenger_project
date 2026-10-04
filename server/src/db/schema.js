@@ -669,8 +669,8 @@ export const announcements = pgTable(
   (t) => [index('announcements_room_id_created_at_idx').on(t.roomId, t.createdAt)],
 );
 
-/** 공지에 달린 댓글 — message_comments와 같은 모양이지만 부모가 메시지가 아니라 공지다.
- * 수정/삭제는 지원하지 않는다(공지 댓글은 단순 의견 남기기 용도로만 요청받았다). */
+/** 공지에 달린 댓글 — message_comments와 같은 모양이지만 부모가 메시지가 아니라 공지다. 수정(작성자)·삭제(작성자·
+ * 관리자)는 되지만 지우면 행을 바로 없앤다(메시지 댓글과 달리 알림·멘션 기록이 없다 — moderation.js isSimpleComment). */
 export const announcementComments = pgTable(
   'announcement_comments',
   {
@@ -685,6 +685,7 @@ export const announcementComments = pgTable(
     authorName: text('author_name').notNull(),
     text: text('text').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
   },
   (t) => [index('announcement_comments_announcement_id_idx').on(t.announcementId, t.createdAt)],
 );
@@ -1866,6 +1867,23 @@ export const todoReminders = pgTable(
     index('todo_reminders_due_idx').on(t.remindAt, t.sentAt),
     index('todo_reminders_todo_id_idx').on(t.todoId),
   ],
+);
+
+/** 할 일에 달린 댓글 — announcement_comments와 같은 모양(수정은 작성자, 삭제는 작성자·관리자). 할 일이 지워지면 같이 지워진다. */
+export const todoComments = pgTable(
+  'todo_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    todoId: uuid('todo_id')
+      .notNull()
+      .references(() => todos.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    authorName: text('author_name').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    editedAt: timestamp('edited_at', { withTimezone: true }),
+  },
+  (t) => [index('todo_comments_todo_id_idx').on(t.todoId, t.createdAt)],
 );
 
 // ── 북마크 ──────────────────────────────────────────────────────────────

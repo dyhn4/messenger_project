@@ -9,7 +9,16 @@ import {
   TODO_PROGRESS_DENIED,
 } from '../../todoRules.js';
 import { db } from '../client.js';
-import { roomMembers, todoAssignees, todoAttachments, todoFavorites, todoReminders, todos, users } from '../schema.js';
+import {
+  roomMembers,
+  todoAssignees,
+  todoAttachments,
+  todoComments,
+  todoFavorites,
+  todoReminders,
+  todos,
+  users,
+} from '../schema.js';
 
 // 할 일(todos.js)의 쿼리 모음. 할 일·담당자·첨부·알림은 항상 같이 움직여서 쓰기는 트랜잭션 하나로 묶는다.
 
@@ -418,4 +427,29 @@ export async function claimDueTodoReminders(now, limit = 200) {
 export function listTodosByIds(ids) {
   if (ids.length === 0) return Promise.resolve([]);
   return db.select().from(todos).where(inArray(todos.id, ids));
+}
+
+// ── 댓글 ────────────────────────────────────────────────────────────────
+
+export function listCommentsForTodo(todoId) {
+  return db.select().from(todoComments).where(eq(todoComments.todoId, todoId)).orderBy(asc(todoComments.createdAt));
+}
+
+export async function insertTodoComment({ todoId, authorId, authorName, text }) {
+  const [row] = await db.insert(todoComments).values({ todoId, authorId, authorName, text }).returning();
+  return row;
+}
+
+export async function findTodoCommentById(id) {
+  const [row] = await db.select().from(todoComments).where(eq(todoComments.id, id));
+  return row ?? null;
+}
+
+export async function updateTodoCommentText(id, text) {
+  const [row] = await db.update(todoComments).set({ text, editedAt: new Date() }).where(eq(todoComments.id, id)).returning();
+  return row ?? null;
+}
+
+export async function deleteTodoComment(id) {
+  await db.delete(todoComments).where(eq(todoComments.id, id));
 }

@@ -8,10 +8,14 @@ import {
   claimDueTodoReminders,
   countTodos,
   deleteTodo,
+  deleteTodoComment,
   findTodoById,
+  findTodoCommentById,
   insertTodo,
+  insertTodoComment,
   listAssigneesForTodos,
   listAttachmentsForTodos,
+  listCommentsForTodo,
   listFavoriteTodoIds,
   listRemindersForTodos,
   listTodoAssigneeIds,
@@ -23,8 +27,10 @@ import {
   setTodoFavorite,
   TodoProgressDeniedError,
   updateTodo,
+  updateTodoCommentText,
 } from './db/queries/todos.js';
 import { findUserById } from './db/queries/users.js';
+import { canModifyContent } from './moderation.js';
 import { topicWriteDenial } from './permissions.js';
 import { isOnline } from './presence.js';
 import { notifyRecordPush, roomTagFor } from './push.js';
@@ -54,6 +60,10 @@ import {
 import { signFileUrl } from './upload.js';
 
 const ms = (d) => (d ? new Date(d).getTime() : null);
+
+function toCommentDto(row, roomId) {
+  return { ...row, roomId, createdAt: ms(row.createdAt), editedAt: ms(row.editedAt) };
+}
 
 /** 할 일 DTO에 싣는 사람 정보 — 이메일 복호화 같은 무거운 값 없이 아바타 그리기에 필요한 것만. */
 function toTodoUser(u) {
@@ -187,6 +197,11 @@ export function createTodosRouter(io) {
       body: `할 일이 지정되었습니다: ${todo.title}`,
       roomTag: roomTagFor(room),
     });
+  }
+
+  /** 댓글 소식(새 댓글·수정·삭제)을 그 방 멤버 전원의 개인 룸으로 — 할 일 상세를 열어 둔 사람이 바로 받는다. */
+  async function emitComment(todo, event, payload) {
+    for (const id of await listRoomMemberIds(todo.roomId)) io.to(`user:${id}`).emit(event, payload);
   }
 
   /** 할 일 행 + 방 + 내 역할까지 — 방 멤버가 아니면 403을 보내고 null. */
@@ -412,6 +427,88 @@ export function createTodosRouter(io) {
     }
     if (!(await deleteTodo(todo.id))) return res.status(404).json({ error: '할 일을 찾을 수 없습니다.' });
     await emitChanged(todo, 'deleted', { actorId: req.user.sub, title: todo.title });
+    res.json({ ok: true });
+  });
+
+  // 댓글 — 공지 댓글(announcements.js)과 같은 모양. 그 방 멤버면 누구나 읽고 쓴다(수정·삭제 없음). 새 댓글은 그 방 멤버
+  // 전원의 개인 룸으로 — 할 일 상세를 열어 둔 사람이 바로 받는다.
+  router.get('/todos/:id/comments', async (req, res) => {
+    const ctx = await requireTodo(req, res);
+    if (!ctx) return;
+    const rows = await listCommentsForTodo(ctx.todo.id);
+    res.json(rows.map((r) => toCommentDto(r, ctx.todo.roomId)));
+  });
+
+  router.post('/todos/:id/comments', async (req, res) => {
+    const ctx = await requireTodo(req, res);
+    if (!ctx) return;
+    const { todo } = ctx;
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    if (text.length > 1000) return res.status(400).json({ error: '댓글은 1000자 이내로 작성하세요.' });
+
+    const me = await findUserById(req.user.sub);
+    const row = await insertTodoComment({
+      todoId: todo.id,
+      authorId: req.user.sub,
+      authorName: me?.name ?? me?.username ?? '알 수 없음',
+      text,
+    });
+    const dto = toCommentDto(row, todo.roomId);
+    await emitComment(todo, 'todo:comment:new', dto);
+    res.status(201).json(dto);
+  });
+
+  /** 할 일 댓글 수정·삭제의 공통 — 이 할 일의 댓글인지까지 확인한다. 없으면 404를 보내고 null. */
+  async function requireTodoComment(req, res) {
+    const ctx = await requireTodo(req, res);
+    if (!ctx) return null;
+    const comment = isUuid(req.params.commentId) ? await findTodoCommentById(req.params.commentId) : null;
+    if (!comment || comment.todoId !== ctx.todo.id) {
+      res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+      return null;
+    }
+    return { ...ctx, comment };
+  }
+
+  /** 수정은 작성자만, 삭제는 작성자와 관리자(팀 관리자·토픽 관리자) — 시간 제한 없음(moderation.js isSimpleComment). */
+  function canModifyComment(req, todo, comment, action) {
+    return canModifyContent({
+      roomId: todo.roomId,
+      senderId: comment.authorId,
+      createdAt: comment.createdAt,
+      requesterId: req.user.sub,
+      action,
+      noun: '댓글',
+      isSimpleComment: true,
+    });
+  }
+
+  router.patch('/todos/:id/comments/:commentId', async (req, res) => {
+    const ctx = await requireTodoComment(req, res);
+    if (!ctx) return;
+    const { todo, comment } = ctx;
+    const verdict = await canModifyComment(req, todo, comment, 'edit');
+    if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    if (text.length > 1000) return res.status(400).json({ error: '댓글은 1000자 이내로 작성하세요.' });
+
+    const updated = await updateTodoCommentText(comment.id, text);
+    if (!updated) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+    const dto = toCommentDto(updated, todo.roomId);
+    await emitComment(todo, 'todo:comment:edited', dto);
+    res.json(dto);
+  });
+
+  router.delete('/todos/:id/comments/:commentId', async (req, res) => {
+    const ctx = await requireTodoComment(req, res);
+    if (!ctx) return;
+    const { todo, comment } = ctx;
+    const verdict = await canModifyComment(req, todo, comment, 'delete');
+    if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
+    await deleteTodoComment(comment.id);
+    await emitComment(todo, 'todo:comment:deleted', { id: comment.id, todoId: todo.id, roomId: todo.roomId });
     res.json({ ok: true });
   });
 

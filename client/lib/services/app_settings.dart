@@ -24,6 +24,7 @@ const _kSendWithShiftEnter = 'settings_send_with_shift_enter';
 const _kAutoLockOnSleep = 'settings_auto_lock_on_sleep';
 const _kAppLocked = 'settings_app_locked';
 const _kFlashTaskbarWhenFocused = 'settings_flash_taskbar_when_focused';
+const _kFlashWindowFrame = 'settings_flash_window_frame';
 const _kStickerCategoryOrder = 'settings_sticker_category_order';
 const _kTextScale = 'settings_text_scale';
 const _kFontFamily = 'settings_font_family';
@@ -103,6 +104,10 @@ class AppSettings extends ChangeNotifier {
   /// 있으면 안 깜빡인다(notification_service.dart의 _flashWindowsTaskbar).
   bool flashTaskbarWhenFocused = false;
 
+  /// 알림이 올 때 작업표시줄 버튼과 함께 창 테두리(제목 표시줄)도 깜빡일지 — true(기본)면 같이
+  /// 깜빡이고, false면 작업표시줄 버튼만 깜빡인다(notification_service.dart의 _flash).
+  bool flashWindowFrame = true;
+
   /// 채팅 입력창 이모티콘 목록의 세트 탭 순서(이름으로 기억 — widgets/category_tab_row.dart를
   /// 꾹 눌러서 끌면 바뀐다, sticker_picker.dart). 빈 목록이면 기본 순서(서버 세트 먼저, 그 뒤
   /// 기본 이모지 세트). 새로 생긴 세트(아직 이 목록에 없는 이름)는 끌어서 넣기 전까지 그
@@ -131,6 +136,7 @@ class AppSettings extends ChangeNotifier {
     appLocked = _prefs.getBool(_kAppLocked) ?? false;
     flashTaskbarWhenFocused =
         _prefs.getBool(_kFlashTaskbarWhenFocused) ?? false;
+    flashWindowFrame = _prefs.getBool(_kFlashWindowFrame) ?? true;
     stickerCategoryOrder =
         _prefs.getStringList(_kStickerCategoryOrder) ?? const [];
     textScale = (_prefs.getDouble(_kTextScale) ?? 1.0).clamp(
@@ -236,6 +242,12 @@ class AppSettings extends ChangeNotifier {
   Future<void> setFlashTaskbarWhenFocused(bool value) async {
     flashTaskbarWhenFocused = value;
     await _prefs.setBool(_kFlashTaskbarWhenFocused, value);
+    notifyListeners();
+  }
+
+  Future<void> setFlashWindowFrame(bool value) async {
+    flashWindowFrame = value;
+    await _prefs.setBool(_kFlashWindowFrame, value);
     notifyListeners();
   }
 

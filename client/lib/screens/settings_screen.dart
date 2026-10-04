@@ -67,6 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _autoLockOnSleep = widget.session.settings.autoLockOnSleep;
   late bool _flashTaskbarWhenFocused =
       widget.session.settings.flashTaskbarWhenFocused;
+  late bool _flashWindowFrame = widget.session.settings.flashWindowFrame;
   late double _textScale = widget.session.settings.textScale;
   late String _fontFamily = widget.session.settings.fontFamily;
   bool _saving = false;
@@ -125,6 +126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setWindowOpacity(_windowOpacity);
     await settings.setAutoLockOnSleep(_autoLockOnSleep);
     await settings.setFlashTaskbarWhenFocused(_flashTaskbarWhenFocused);
+    await settings.setFlashWindowFrame(_flashWindowFrame);
     await settings.setTextScale(_textScale);
     await settings.setFontFamily(_fontFamily);
     // "프로젝트" 창이 열려있으면 완전히 다른 엔진이라 위 setThemeMode만으론 안 바뀐다 —
@@ -466,6 +468,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    if (Platform.isWindows)
+      _Item(
+        label: '창 깜빡임',
+        caption: '알림이 왔을 때 작업표시줄 버튼과 함께 메신저 창의 테두리도 깜빡일지 정합니다.',
+        child: RadioGroup<bool>(
+          groupValue: _flashWindowFrame,
+          onChanged: (v) => setState(() => _flashWindowFrame = v ?? true),
+          child: const Column(
+            children: [
+              RadioListTile<bool>(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: false,
+                title: Text('깜빡이지 않음'),
+              ),
+              RadioListTile<bool>(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: true,
+                title: Text('깜빡임 (기본값)'),
+              ),
+            ],
+          ),
         ),
       ),
     if (Platform.isWindows)

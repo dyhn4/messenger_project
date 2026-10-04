@@ -124,6 +124,7 @@ Future<_Opened> _open(
   TodoOpenRoom? onOpenRoom,
   Stream<Map<String, dynamic>>? changed,
   TodoDownloader? download,
+  Stream<TodoComment>? commentStream,
   TodoViewMode mode = TodoViewMode.dialog,
   Size? size,
   bool settle = true,
@@ -146,6 +147,7 @@ Future<_Opened> _open(
         onOpenRoom: onOpenRoom,
         changed: changed ?? const Stream.empty(),
         download: download,
+        commentStream: commentStream ?? const Stream.empty(),
         mode: panel ? TodoViewMode.panel : null,
         onClosePanel: panel ? () => opened.panelClosed++ : null,
       );
@@ -591,6 +593,238 @@ void main() {
   });
 
   // ────────────────────────── 상자 — 진행률·대화방·담당자·일정 ──────────────────────────
+  group('댓글 — 공지 상세와 같은 모양', () {
+    for (final mode in TodoViewMode.values) {
+      testWidgets(
+        '${mode.name}: 받아 둔 댓글, 맨 아래 입력칸 — 보내면 목록에 붙고 소켓으로 같은 댓글이 또 와도 한 번만',
+        (tester) async {
+          final json = _threeAssignees(id: 'c-${mode.name}');
+          final api = FakeTodoApi(me: 'me', todos: [json]);
+          api.todoComments[json['id'] as String] = [
+            TodoComment(
+              id: 'old',
+              todoId: json['id'] as String,
+              authorId: 'u2',
+              authorName: '김철수',
+              text: '먼저 단 댓글',
+              createdAt: DateTime(2026, 10, 1, 9),
+            ),
+          ];
+          final comments = StreamController<TodoComment>.broadcast();
+          await _open(
+            tester,
+            json: json,
+            api: api,
+            mode: mode,
+            commentStream: comments.stream,
+          );
+          expect(api.commentFetches, 1);
+          expect(find.text('먼저 단 댓글'), findsOneWidget);
+          expect(
+            tester
+                .widget<Text>(_key('todo-comment-count'))
+                .textSpan!
+                .toPlainText(),
+            '댓글 1',
+          );
+
+          await tester.enterText(_key('todo-comment-input'), '  새 댓글  ');
+          await tester.tap(_key('todo-comment-send'));
+          await tester.pumpAndSettle();
+          expect(api.calls, contains('postComment ${json['id']} 새 댓글'));
+          expect(find.text('새 댓글'), findsOneWidget);
+          expect(
+            tester
+                .widget<Text>(_key('todo-comment-count'))
+                .textSpan!
+                .toPlainText(),
+            '댓글 2',
+          );
+
+          // 내가 보낸 댓글이 소켓으로 또 오고, 다른 할 일의 댓글도 온다 — 둘 다 붙지 않는다.
+          comments.add(api.todoComments[json['id']]!.last);
+          comments.add(
+            TodoComment(
+              id: 'other',
+              todoId: 'someone-else',
+              authorName: '이영희',
+              text: '다른 할 일',
+              createdAt: DateTime(2026, 10, 2),
+            ),
+          );
+          // 남이 단 새 댓글은 붙는다.
+          comments.add(
+            TodoComment(
+              id: 'live',
+              todoId: json['id'] as String,
+              authorId: 'u3',
+              authorName: '이영희',
+              text: '실시간 댓글',
+              createdAt: DateTime(2026, 10, 2),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('새 댓글'), findsOneWidget);
+          expect(find.text('다른 할 일'), findsNothing);
+          expect(find.text('실시간 댓글'), findsOneWidget);
+          expect(
+            tester
+                .widget<Text>(_key('todo-comment-count'))
+                .textSpan!
+                .toPlainText(),
+            '댓글 3',
+          );
+          await comments.close();
+        },
+      );
+    }
+
+    for (final mode in [TodoViewMode.dialog, TodoViewMode.panel]) {
+      testWidgets(
+        '${mode.name}: 내 댓글 ⋯ — 수정하기(그 자리에서 고치고 `(수정됨)`) · 삭제하기(묻고 지우면 댓글 수도 준다)',
+        (tester) async {
+          final json = _threeAssignees(id: 'ce-${mode.name}');
+          final id = json['id'] as String;
+          final api = FakeTodoApi(me: 'me', todos: [json]);
+          api.todoComments[id] = [
+            TodoComment(
+              id: 'mine',
+              todoId: id,
+              authorId: 'me',
+              authorName: '나',
+              text: '고칠 댓글',
+              createdAt: DateTime(2026, 10, 1, 9),
+            ),
+          ];
+          await _open(tester, json: json, api: api, mode: mode);
+          expect(find.textContaining('(수정됨)'), findsNothing);
+
+          await tester.tap(_key('post-comment-more-mine'));
+          await tester.pumpAndSettle();
+          expect(find.text('수정하기'), findsOneWidget);
+          expect(find.text('삭제하기'), findsOneWidget);
+          await tester.tap(find.text('수정하기'));
+          await tester.pumpAndSettle();
+          // 고치는 동안 ⋯는 숨는다.
+          expect(_key('post-comment-more-mine'), findsNothing);
+          await tester.enterText(_key('post-comment-edit-input'), ' 고친 댓글 ');
+          await tester.tap(_key('post-comment-edit-save'));
+          await tester.pumpAndSettle();
+          expect(api.calls, contains('updateComment $id mine 고친 댓글'));
+          expect(find.text('고친 댓글'), findsOneWidget);
+          expect(find.textContaining('(수정됨)'), findsOneWidget);
+          expect(_key('post-comment-edit-input'), findsNothing);
+
+          await tester.tap(_key('post-comment-more-mine'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('삭제하기'));
+          await tester.pumpAndSettle();
+          expect(find.text('댓글 삭제'), findsOneWidget);
+          await tester.tap(_key('post-comment-delete-confirm'));
+          await tester.pumpAndSettle();
+          expect(api.calls, contains('deleteComment $id mine'));
+          expect(find.text('고친 댓글'), findsNothing);
+          expect(
+            tester
+                .widget<Text>(_key('todo-comment-count'))
+                .textSpan!
+                .toPlainText(),
+            '댓글 0',
+          );
+        },
+      );
+    }
+
+    testWidgets('수정하기 → 취소면 그대로, 삭제 확인에서 취소면 지우지 않는다', (tester) async {
+      final json = _threeAssignees(id: 'ce-cancel');
+      final id = json['id'] as String;
+      final api = FakeTodoApi(me: 'me', todos: [json]);
+      api.todoComments[id] = [
+        TodoComment(
+          id: 'mine',
+          todoId: id,
+          authorId: 'me',
+          authorName: '나',
+          text: '그대로',
+          createdAt: DateTime(2026, 10, 1, 9),
+        ),
+      ];
+      await _open(tester, json: json, api: api);
+      await tester.tap(_key('post-comment-more-mine'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('수정하기'));
+      await tester.pumpAndSettle();
+      await tester.enterText(_key('post-comment-edit-input'), '안 보낼 글');
+      await tester.tap(_key('post-comment-edit-cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('그대로'), findsOneWidget);
+
+      await tester.tap(_key('post-comment-more-mine'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('삭제하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(find.text('그대로'), findsOneWidget);
+      expect(api.callCount('updateComment'), 0);
+      expect(api.callCount('deleteComment'), 0);
+    });
+
+    testWidgets('남의 댓글 — 일반 멤버는 ⋯가 없고, 관리자는 삭제하기만', (tester) async {
+      final json = _threeAssignees(id: 'ce-other');
+      final id = json['id'] as String;
+      List<TodoComment> comments() => [
+        TodoComment(
+          id: 'theirs',
+          todoId: id,
+          authorId: 'u2',
+          authorName: '김철수',
+          text: '남의 댓글',
+          createdAt: DateTime(2026, 10, 1, 9),
+        ),
+      ];
+      final api = FakeTodoApi(me: 'me', todos: [json]);
+      api.todoComments[id] = comments();
+      await _open(tester, json: json, api: api);
+      expect(find.text('남의 댓글'), findsOneWidget);
+      expect(_key('post-comment-more-theirs'), findsNothing);
+
+      final admin = _session()..accountRole = AccountRole.admin;
+      final adminApi = FakeTodoApi(me: 'me', todos: [json]);
+      adminApi.todoComments[id] = comments();
+      await _open(tester, json: json, api: adminApi, session: admin);
+      await tester.tap(_key('post-comment-more-theirs'));
+      await tester.pumpAndSettle();
+      expect(find.text('수정하기'), findsNothing);
+      expect(find.text('삭제하기'), findsOneWidget);
+      await tester.tap(find.text('삭제하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('post-comment-delete-confirm'));
+      await tester.pumpAndSettle();
+      expect(adminApi.calls, contains('deleteComment $id theirs'));
+      expect(find.text('남의 댓글'), findsNothing);
+    });
+
+    testWidgets('댓글이 없으면 `아직 댓글이 없습니다.`, 못 보내면 쓴 글을 돌려 놓고 알린다', (tester) async {
+      final json = _threeAssignees(id: 'c-fail');
+      final api = FakeTodoApi(me: 'me', todos: [json]);
+      await _open(tester, json: json, api: api);
+      expect(find.text('아직 댓글이 없습니다.'), findsOneWidget);
+      api.failWith = '권한이 없습니다.';
+      await tester.enterText(_key('todo-comment-input'), '안 가는 댓글');
+      await tester.tap(_key('todo-comment-send'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('댓글을 등록하지 못했습니다'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(_key('todo-comment-input')).controller!.text,
+        '안 가는 댓글',
+      );
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+    });
+  });
+
   group('상자 — 진행률 · 대화방 · 담당자 · 일정', () {
     testWidgets(
       '담당자 셋 중 나 — 진행률은 전체 %(굵게·진척률 색), 총 3명, 내 줄만 고르기 상자, 다른 사람은 색 글자',

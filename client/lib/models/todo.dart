@@ -503,6 +503,59 @@ class TodoPage {
   );
 }
 
+/// 할 일에 달린 댓글(`GET/POST /api/todos/:id/comments`, 소켓 todo:comment:new) — 공지 댓글과 같은 모양(수정·삭제 없음).
+class TodoComment {
+  final String id;
+  final String todoId;
+  final String? roomId;
+  final String? authorId;
+  final String authorName;
+  final String text;
+  final DateTime createdAt;
+
+  /// 고친 시각 — 안 고쳤으면 null(`(수정됨)` 표시).
+  final DateTime? editedAt;
+
+  const TodoComment({
+    required this.id,
+    required this.todoId,
+    this.roomId,
+    this.authorId,
+    required this.authorName,
+    required this.text,
+    required this.createdAt,
+    this.editedAt,
+  });
+
+  factory TodoComment.fromJson(Map<String, dynamic> json) => TodoComment(
+    id: json['id'] as String,
+    todoId: json['todoId'] as String,
+    roomId: json['roomId'] as String?,
+    authorId: json['authorId'] as String?,
+    authorName: json['authorName'] as String,
+    text: json['text'] as String,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(
+      (json['createdAt'] as num).toInt(),
+    ),
+    editedAt: json['editedAt'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(
+            (json['editedAt'] as num).toInt(),
+          ),
+  );
+
+  TodoComment copyWith({String? text, DateTime? editedAt}) => TodoComment(
+    id: id,
+    todoId: todoId,
+    roomId: roomId,
+    authorId: authorId,
+    authorName: authorName,
+    text: text ?? this.text,
+    createdAt: createdAt,
+    editedAt: editedAt ?? this.editedAt,
+  );
+}
+
 /// 생성·수정 창의 입력 검사 결과 — 필드마다 문구가 있으면 그 칸 아래에 보인다.
 class TodoDraftCheck {
   final String? titleError;

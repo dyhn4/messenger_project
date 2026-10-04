@@ -199,3 +199,21 @@ export async function insertAnnouncementComment({ id, announcementId, roomId, au
     .returning();
   return row;
 }
+
+export async function findAnnouncementCommentById(id) {
+  const [row] = await db.select().from(announcementComments).where(eq(announcementComments.id, id));
+  return row ?? null;
+}
+
+export async function updateAnnouncementCommentText(id, text) {
+  const [row] = await db
+    .update(announcementComments)
+    .set({ text, editedAt: new Date() })
+    .where(eq(announcementComments.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteAnnouncementComment(id) {
+  await db.delete(announcementComments).where(eq(announcementComments.id, id));
+}

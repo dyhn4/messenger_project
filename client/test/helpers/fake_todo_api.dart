@@ -398,6 +398,60 @@ class FakeTodoApi implements TodoApi {
     t['favorite'] = favorite;
     return favorite;
   }
+
+  /// 할 일마다 달린 댓글(오래된 것부터).
+  final todoComments = <String, List<TodoComment>>{};
+
+  /// 댓글 목록 조회 횟수 — 상세를 열 때마다 부르므로 [calls]에는 남기지 않는다(다른 호출 순서 시험이 흔들리지 않게).
+  int commentFetches = 0;
+
+  @override
+  Future<List<TodoComment>> comments(String id) async {
+    commentFetches++;
+    return [...?todoComments[id]];
+  }
+
+  @override
+  Future<TodoComment> postComment(String id, String text) async {
+    calls.add('postComment $id $text');
+    _maybeFail();
+    final comment = TodoComment(
+      id: 'comment-${++_seq}',
+      todoId: id,
+      authorId: me,
+      authorName: me,
+      text: text,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(9000 + _seq),
+    );
+    (todoComments[id] ??= []).add(comment);
+    return comment;
+  }
+
+  @override
+  Future<TodoComment> updateComment(
+    String id,
+    String commentId,
+    String text,
+  ) async {
+    calls.add('updateComment $id $commentId $text');
+    _maybeFail();
+    final list = todoComments[id] ?? [];
+    final i = list.indexWhere((c) => c.id == commentId);
+    if (i < 0) throw const ApiException('댓글을 찾을 수 없습니다.');
+    final updated = list[i].copyWith(
+      text: text,
+      editedAt: DateTime.fromMillisecondsSinceEpoch(20000 + ++_seq),
+    );
+    list[i] = updated;
+    return updated;
+  }
+
+  @override
+  Future<void> deleteComment(String id, String commentId) async {
+    calls.add('deleteComment $id $commentId');
+    _maybeFail();
+    todoComments[id]?.removeWhere((c) => c.id == commentId);
+  }
 }
 
 List<Map<String, dynamic>> _assignees(Map<String, dynamic> t) =>

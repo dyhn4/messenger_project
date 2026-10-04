@@ -116,6 +116,17 @@ class _Server {
         201,
       );
     }
+    if (request.method == 'PATCH' && path.contains('/comments/')) {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      return _json({
+        ..._comment(
+          path.split('/').last,
+          body['text'] as String,
+          authorId: 'me',
+        ),
+        'editedAt': DateTime(2026, 10, 2).millisecondsSinceEpoch,
+      });
+    }
     if (request.method == 'PATCH') {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
       return _json({
@@ -438,6 +449,62 @@ void main() {
       );
       await _finish(tester);
     });
+
+    testWidgets(
+      '내 댓글 ⋯ — 수정하기(그 자리에서 고치고 `(수정됨)`) · 삭제하기(묻고 지우면 댓글 수도 준다), 남의 댓글은 ⋯ 없음',
+      (tester) async {
+        final server = _Server(
+          comments: [
+            _comment('mine', '고칠 댓글', authorId: 'me'),
+            _comment('theirs', '남의 댓글'),
+          ],
+        );
+        await openDetail(tester, server, json: _a('a1', commentCount: 2));
+        expect(
+          find.byKey(const ValueKey('post-comment-more-theirs')),
+          findsNothing,
+        );
+
+        await tester.tap(find.byKey(const ValueKey('post-comment-more-mine')));
+        await _settle(tester);
+        await tester.tap(find.text('수정하기'));
+        await _settle(tester);
+        await tester.enterText(
+          find.byKey(const ValueKey('post-comment-edit-input')),
+          '고친 댓글',
+        );
+        await tester.tap(find.byKey(const ValueKey('post-comment-edit-save')));
+        await _settle(tester);
+        final patched = server.called(
+          'PATCH',
+          '/announcements/a1/comments/mine',
+        );
+        expect(patched, hasLength(1));
+        expect(jsonDecode(patched.single.body), {'text': '고친 댓글'});
+        expect(find.text('고친 댓글'), findsOneWidget);
+        expect(find.textContaining('(수정됨)'), findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('post-comment-more-mine')));
+        await _settle(tester);
+        await tester.tap(find.text('삭제하기'));
+        await _settle(tester);
+        await tester.tap(
+          find.byKey(const ValueKey('post-comment-delete-confirm')),
+        );
+        await _settle(tester);
+        expect(
+          server.called('DELETE', '/announcements/a1/comments/mine'),
+          hasLength(1),
+        );
+        expect(find.text('고친 댓글'), findsNothing);
+        expect(find.text('남의 댓글'), findsOneWidget);
+        expect(
+          _plain(tester, const ValueKey('announcement-comment-count')),
+          '댓글 1',
+        );
+        await _finish(tester);
+      },
+    );
   });
 
   group('공지 목록', () {

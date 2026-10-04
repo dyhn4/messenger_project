@@ -28,6 +28,7 @@ class _FakeNotifications extends NotificationService {
     String? avatarUrl,
     bool isSecret = false,
     bool flashTaskbarUntilRoomOpened = false,
+    bool flashWindowFrame = true,
   }) async {
     shown.add({
       'title': title,

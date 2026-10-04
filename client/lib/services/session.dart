@@ -333,6 +333,7 @@ class Session extends ChangeNotifier {
   StreamSubscription<AnnouncementRemovedEvent>? _announcementUnpinnedSub;
   StreamSubscription<AnnouncementReadEvent>? _announcementReadSub;
   StreamSubscription<AnnouncementComment>? _announcementCommentSub;
+  StreamSubscription<SimpleCommentDeleted>? _announcementCommentDeletedSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
   StreamSubscription? _roleUpdatedSub;
@@ -1393,6 +1394,9 @@ class Session extends ChangeNotifier {
     _announcementCommentSub = chatSocket.announcementComments.listen(
       handleAnnouncementComment,
     );
+    _announcementCommentDeletedSub?.cancel();
+    _announcementCommentDeletedSub = chatSocket.announcementCommentDeleted
+        .listen(handleAnnouncementCommentDeleted);
     _announcementReadSub?.cancel();
     _announcementReadSub = chatSocket.announcementRead.listen((e) {
       // user: 방에만 오므로 항상 "나"의 다른 기기에서 읽었다는 뜻이다(markAnnouncementsRead 참고).
@@ -1430,6 +1434,7 @@ class Session extends ChangeNotifier {
         body: '비밀 대화(종단간 암호화)를 요청했습니다.',
         roomId: e.roomId,
         flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
+        flashWindowFrame: settings.flashWindowFrame,
         senderName: initiator?.name,
         conversationTitle: teamTag == null ? '비밀대화 요청' : '비밀대화 요청 · $teamTag',
         avatarType: initiator?.avatarType ?? 'initial',
@@ -2182,6 +2187,7 @@ class Session extends ChangeNotifier {
       body: preview,
       roomId: m.roomId,
       flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
+      flashWindowFrame: settings.flashWindowFrame,
       senderName: m.senderName,
       conversationTitle: roomTag == null
           ? null
@@ -2257,6 +2263,7 @@ class Session extends ChangeNotifier {
       body: preview,
       roomId: c.roomId,
       flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
+      flashWindowFrame: settings.flashWindowFrame,
       senderName: c.senderName,
       conversationTitle: teamTag == null ? tag : '$tag · $teamTag',
       avatarType: sender?.avatarType ?? 'initial',
@@ -2277,6 +2284,13 @@ class Session extends ChangeNotifier {
     final latest = match.first.latestAnnouncement;
     if (latest == null || latest.id != c.announcementId) return;
     if (latest.noteLiveComment(c.id)) notifyListeners();
+  }
+
+  /// 공지 댓글이 지워졌을 때(announcement:comment:deleted) — 그 방 상단 공지면 공지바의 댓글 수를 하나 내린다.
+  void handleAnnouncementCommentDeleted(SimpleCommentDeleted e) {
+    final latest = _findRoom(e.roomId)?.latestAnnouncement;
+    if (latest == null || latest.id != e.parentId) return;
+    if (latest.noteDeletedComment(e.id)) notifyListeners();
   }
 
   /// 토픽방에 새 공지가 올라왔을 때(announcement:new) — 배너 갱신, 알림 센터의 "안 읽은 공지"
@@ -2315,6 +2329,7 @@ class Session extends ChangeNotifier {
       body: a.previewText,
       roomId: room.id,
       flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
+      flashWindowFrame: settings.flashWindowFrame,
       senderName: a.authorName,
       conversationTitle: teamTag == null ? tag : '$tag · $teamTag',
       avatarType: sender?.avatarType ?? 'initial',
@@ -2461,6 +2476,7 @@ class Session extends ChangeNotifier {
           : '${n.actorName ?? ''}님이 회원님을 멘션했습니다: ${n.preview}',
       roomId: room.id,
       flashTaskbarUntilRoomOpened: settings.flashTaskbarWhenFocused,
+      flashWindowFrame: settings.flashWindowFrame,
       senderName: n.actorName,
       conversationTitle: teamTag == null ? roomTag : '$roomTag · $teamTag',
     );

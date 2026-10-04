@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../models/todo.dart';
+import '../services/chat_socket.dart' show SimpleCommentDeleted;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../services/todo_api.dart';
@@ -15,6 +16,7 @@ import '../widgets/attachment_widgets.dart'
     show ChatImageAttachments, DownloadableFile;
 import '../widgets/avatar_utils.dart';
 import '../widgets/compact_menu.dart';
+import '../widgets/post_comments.dart';
 import '../widgets/todo_menu.dart';
 import '../widgets/todo_widgets.dart';
 import '../widgets/user_avatar.dart';
@@ -40,7 +42,7 @@ typedef TodoDownloader =
 /// 진척률·즐겨찾기를 바꿨으면 true를 돌려준다(목록이 다시 받는다).
 ///
 /// [onOpenRoom]은 대화방 칸·"원본 메시지 보기"를 눌렀을 때 그 방을 여는 손잡이 — 없으면 그 단추들은 안 보인다.
-/// [api]·[changed]·[download]는 테스트가 가짜를 끼우는 자리.
+/// [api]·[changed]·[download]·[commentStream]은 테스트가 가짜를 끼우는 자리.
 Future<bool> showTodoDetail(
   BuildContext context, {
   required Session session,
@@ -49,6 +51,7 @@ Future<bool> showTodoDetail(
   TodoApi? api,
   Stream<Map<String, dynamic>>? changed,
   TodoDownloader? download,
+  Stream<TodoComment>? commentStream,
   TodoViewMode? mode,
   VoidCallback? onClosePanel,
 }) async {
@@ -64,6 +67,7 @@ Future<bool> showTodoDetail(
     api: api,
     changed: changed,
     download: download,
+    commentStream: commentStream,
     mode: viewMode,
     onClosePanel: onClosePanel,
   );
@@ -95,6 +99,9 @@ class TodoDetail extends StatefulWidget {
   final Stream<Map<String, dynamic>>? changed;
   final TodoDownloader? download;
 
+  /// 새 댓글 소식 — 없으면 소켓(todo:comment:new). 테스트가 가짜를 끼우는 자리.
+  final Stream<TodoComment>? commentStream;
+
   /// 그리는 모양 — 안 주면 [asDialog]로 정한다(true = 대화상자, false = 전체 화면).
   final TodoViewMode mode;
 
@@ -109,6 +116,7 @@ class TodoDetail extends StatefulWidget {
     this.api,
     this.changed,
     this.download,
+    this.commentStream,
     bool asDialog = true,
     TodoViewMode? mode,
     this.onClosePanel,
@@ -145,6 +153,15 @@ class _TodoDetailState extends State<TodoDetail> {
   Route<Object?>? _confirmRoute;
   StreamSubscription<Map<String, dynamic>>? _sub;
 
+  /// 댓글(오래된 것부터) — 받기 전이면 null. 못 받았으면 [_commentsError].
+  List<TodoComment>? _comments;
+  String? _commentsError;
+  final _commentController = TextEditingController();
+  bool _sendingComment = false;
+  StreamSubscription<TodoComment>? _commentSub;
+  StreamSubscription<TodoComment>? _commentEditedSub;
+  StreamSubscription<SimpleCommentDeleted>? _commentDeletedSub;
+
   @override
   void initState() {
     super.initState();
@@ -165,11 +182,31 @@ class _TodoDetailState extends State<TodoDetail> {
       }
       unawaited(_reload());
     });
+    unawaited(_loadComments());
+    final comments =
+        widget.commentStream ?? widget.session.chatSocket.todoComments;
+    _commentSub = comments.listen((c) {
+      if (c.todoId != _todo.id || !mounted) return;
+      setState(() => _addComment(c));
+    });
+    final socket = widget.session.chatSocket;
+    _commentEditedSub = socket.todoCommentEdited.listen((c) {
+      if (c.todoId != _todo.id || !mounted) return;
+      setState(() => _replaceComment(c));
+    });
+    _commentDeletedSub = socket.todoCommentDeleted.listen((e) {
+      if (e.parentId != _todo.id || !mounted) return;
+      setState(() => _removeComment(e.id));
+    });
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _commentSub?.cancel();
+    _commentEditedSub?.cancel();
+    _commentDeletedSub?.cancel();
+    _commentController.dispose();
     // 패널 안 상세가 먼저 닫혔는데(팀을 바꿔 패널이 목록으로 돌아감) 루트 Navigator의 삭제 확인이 남았으면 다음 프레임에
     // 닫는다 — 결과는 null이라 DELETE를 보내지 않는다.
     final confirm = _confirmRoute;
@@ -213,6 +250,73 @@ class _TodoDetailState extends State<TodoDetail> {
     } catch (_) {
       // 다시 받지 못해도 지금 화면은 그대로 둔다.
     }
+  }
+
+  Future<void> _loadComments() async {
+    try {
+      final comments = await _api.comments(_todo.id);
+      if (mounted) setState(() => _comments = comments);
+    } catch (e) {
+      if (mounted) setState(() => _commentsError = '댓글을 불러오지 못했습니다: $e');
+    }
+  }
+
+  /// 내가 보낸 댓글의 응답과 소켓 소식이 둘 다 오니 같은 댓글은 한 번만 넣는다. 아직 목록을 받는 중이면 받은 목록에
+  /// 들어 있을 테니 건너뛴다.
+  /// 고친 댓글로 바꾼다(소켓 소식과 내 응답이 둘 다 와도 같은 값이다).
+  void _replaceComment(TodoComment c) {
+    final comments = _comments;
+    if (comments == null) return;
+    _comments = [for (final e in comments) e.id == c.id ? c : e];
+  }
+
+  void _removeComment(String id) {
+    final comments = _comments;
+    if (comments == null) return;
+    _comments = [
+      for (final e in comments)
+        if (e.id != id) e,
+    ];
+  }
+
+  Future<void> _editComment(TodoComment c, String text) async {
+    final updated = await _api.updateComment(_todo.id, c.id, text);
+    if (mounted) setState(() => _replaceComment(updated));
+  }
+
+  Future<void> _deleteComment(TodoComment c) async {
+    await _api.deleteComment(_todo.id, c.id);
+    if (mounted) setState(() => _removeComment(c.id));
+  }
+
+  void _addComment(TodoComment c) {
+    final comments = _comments;
+    if (comments == null || comments.any((e) => e.id == c.id)) return;
+    _comments = [...comments, c];
+  }
+
+  Future<void> _postComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty || _sendingComment) return;
+    setState(() => _sendingComment = true);
+    _commentController.clear();
+    try {
+      final created = await _api.postComment(_todo.id, text);
+      if (mounted) setState(() => _addComment(created));
+    } catch (e) {
+      // 못 보냈으면 쓴 글을 돌려 놓는다(그 사이 새로 친 게 없을 때만).
+      if (mounted && _commentController.text.isEmpty) {
+        _commentController.text = text;
+      }
+      if (mounted) _toast('댓글을 등록하지 못했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _sendingComment = false);
+    }
+  }
+
+  AppUser? _memberOf(String? userId) {
+    if (userId == null) return null;
+    return _room?.members.where((m) => m.id == userId).firstOrNull;
   }
 
   /// 알림 토스트 — 앱 맨 위 Overlay(창 가운데 아래)에 뜬다(패널 모드에서도 — [showAppToast]).
@@ -388,6 +492,8 @@ class _TodoDetailState extends State<TodoDetail> {
               ),
             ),
           ),
+          const Divider(height: 1),
+          _commentInput(),
         ],
       ),
     );
@@ -440,6 +546,8 @@ class _TodoDetailState extends State<TodoDetail> {
                   ),
                 ),
               ),
+              const Divider(height: 1),
+              _commentInput(),
             ],
           ),
         ),
@@ -459,16 +567,89 @@ class _TodoDetailState extends State<TodoDetail> {
         ),
         title: const Text('할 일'),
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: _bodyChildren(context),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: SafeArea(
+              bottom: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _bodyChildren(context),
+                ),
+              ),
+            ),
           ),
-        ),
+          const Divider(height: 1),
+          _commentInput(),
+        ],
       ),
     );
+  }
+
+  /// 맨 아래 고정된 댓글 입력칸(공지 상세와 같은 모양).
+  Widget _commentInput() => PostCommentInput(
+    controller: _commentController,
+    sending: _sendingComment,
+    onSubmit: _postComment,
+    inputKey: const ValueKey('todo-comment-input'),
+    sendKey: const ValueKey('todo-comment-send'),
+  );
+
+  /// 댓글 — 구분선 아래 `댓글 N`과 목록(공지 상세와 같은 모양).
+  List<Widget> _commentSection(BuildContext context) {
+    final comments = _comments;
+    final error = _commentsError;
+    return [
+      const SizedBox(height: 20),
+      const Divider(height: 1),
+      const SizedBox(height: 12),
+      PostCommentCount(
+        comments?.length ?? 0,
+        textKey: const ValueKey('todo-comment-count'),
+      ),
+      if (error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            error,
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        )
+      else
+        PostCommentList<TodoComment>(
+          comments: comments,
+          itemPadding: const EdgeInsets.only(top: 8, bottom: 6),
+          emptyPadding: const EdgeInsets.only(top: 8),
+          itemBuilder: (c) {
+            // ⋯는 고치거나 지울 수 있을 때만(작성자는 수정·삭제, 관리자는 삭제 — [simpleCommentPermissions]).
+            final can = simpleCommentPermissions(
+              widget.session,
+              _room,
+              c.authorId,
+            );
+            return PostCommentTile(
+              key: ValueKey('todo-comment-${c.id}'),
+              commentId: c.id,
+              avatarUser: _memberOf(c.authorId),
+              authorName: c.authorName,
+              createdAt: c.createdAt,
+              editedAt: c.editedAt,
+              text: c.text,
+              resolveUrl: widget.session.resolveUrl,
+              onEdit: can.edit ? (text) => _editComment(c, text) : null,
+              onDelete: can.delete ? () => _deleteComment(c) : null,
+              // 할 일이 지워지면 ••• 메뉴처럼 같이 닫힌다(_closeDeleted의 closeTodoPopups).
+              menuRouteSettings: todoPopupRouteSettings,
+            );
+          },
+        ),
+    ];
   }
 
   /// 본문 — 만든 사람 줄(★ •••) → 제목 → 설명 → 상자(진행률 · 대화방 · 담당자 · 일정) → 첨부 → 원본 메시지.
@@ -551,6 +732,7 @@ class _TodoDetailState extends State<TodoDetail> {
           ),
         ),
       ],
+      ..._commentSection(context),
     ];
   }
 

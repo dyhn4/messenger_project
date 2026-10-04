@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import '../models/announcement.dart';
 import '../models/app_user.dart';
 import '../models/room.dart';
-import '../services/chat_socket.dart' show AnnouncementRemovedEvent;
+import '../services/chat_socket.dart'
+    show AnnouncementRemovedEvent, SimpleCommentDeleted;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/announcement_image.dart';
@@ -15,6 +16,7 @@ import '../widgets/avatar_utils.dart';
 import '../widgets/board_view.dart'
     show BoardColors, PinnedPostTag, boardCardDecoration;
 import '../widgets/compact_menu.dart';
+import '../widgets/post_comments.dart';
 import '../widgets/rich_text_format.dart' show FormattedText;
 import '../widgets/room_options_menu.dart' show closeOwnRoute;
 import 'announcement_editor_dialog.dart';
@@ -89,29 +91,6 @@ Future<void> pushAnnouncementDetailPage(
     ),
   );
 }
-
-const _quickEmojis = [
-  '😀',
-  '😂',
-  '😍',
-  '😊',
-  '😉',
-  '😢',
-  '😭',
-  '😡',
-  '👍',
-  '👎',
-  '👏',
-  '🙏',
-  '🎉',
-  '❤️',
-  '🔥',
-  '✨',
-  '💯',
-  '👀',
-  '🤔',
-  '😅',
-];
 
 // ── ⋯ 더보기 메뉴(상세와 공지 패널 카드가 같이 쓴다) ─────────────────────────────
 
@@ -415,6 +394,8 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
   bool _sending = false;
 
   StreamSubscription<AnnouncementComment>? _commentSub;
+  StreamSubscription<AnnouncementComment>? _commentEditedSub;
+  StreamSubscription<SimpleCommentDeleted>? _commentDeletedSub;
   StreamSubscription<Announcement>? _updatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _unpinnedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _deletedSub;
@@ -437,6 +418,16 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
         _announcement.commentCount += 1;
       });
     });
+    _commentEditedSub = widget.session.chatSocket.announcementCommentEdited
+        .listen((c) {
+          if (c.announcementId != _announcement.id || !mounted) return;
+          setState(() => _replaceComment(c));
+        });
+    _commentDeletedSub = widget.session.chatSocket.announcementCommentDeleted
+        .listen((e) {
+          if (e.parentId != _announcement.id || !mounted) return;
+          setState(() => _removeComment(e.id));
+        });
     _updatedSub = widget.session.chatSocket.announcementUpdated.listen((a) {
       if (a.id != _announcement.id || !mounted) return;
       setState(() {
@@ -459,6 +450,8 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
   @override
   void dispose() {
     _commentSub?.cancel();
+    _commentEditedSub?.cancel();
+    _commentDeletedSub?.cancel();
     _updatedSub?.cancel();
     _unpinnedSub?.cancel();
     _deletedSub?.cancel();
@@ -512,49 +505,6 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
     } finally {
       if (mounted) setState(() => _sending = false);
     }
-  }
-
-  void _insertEmoji(String emoji) {
-    final sel = _commentController.selection;
-    final text = _commentController.text;
-    if (!sel.isValid) {
-      _commentController.text = text + emoji;
-      return;
-    }
-    final newText = text.replaceRange(sel.start, sel.end, emoji);
-    _commentController.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: sel.start + emoji.length),
-    );
-  }
-
-  void _showEmojiPicker() {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final emoji in _quickEmojis)
-                InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: () {
-                    _insertEmoji(emoji);
-                    Navigator.of(sheetContext).pop();
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Text(emoji, style: const TextStyle(fontSize: 26)),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   AppUser? _memberOf(String? userId) {
@@ -653,8 +603,6 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
 
   Widget _buildBody(BuildContext context, BoardColors colors) {
     if (_error != null) return Center(child: Text(_error!));
-    final theme = Theme.of(context);
-    final hint = theme.hintColor;
     final comments = _comments;
     final count = comments?.length ?? _announcement.commentCount;
     final hasText = _announcement.text.trim().isNotEmpty;
@@ -740,45 +688,15 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                 Divider(height: 1, color: colors.border),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(0, 12, 8, 4),
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        const TextSpan(
-                          text: '댓글 ',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        TextSpan(
-                          text: '$count',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: count > 0 ? theme.colorScheme.primary : hint,
-                          ),
-                        ),
-                      ],
-                    ),
-                    key: const ValueKey('announcement-comment-count'),
-                    style: const TextStyle(fontSize: 14),
+                  child: PostCommentCount(
+                    count,
+                    textKey: const ValueKey('announcement-comment-count'),
                   ),
                 ),
-                if (comments == null)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (comments.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 8, 8, 14),
-                    child: Text(
-                      '아직 댓글이 없습니다.',
-                      style: TextStyle(fontSize: 13, color: hint),
-                    ),
-                  )
-                else
-                  for (final c in comments)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(0, 8, 8, 10),
-                      child: _buildComment(context, c),
-                    ),
+                PostCommentList<AnnouncementComment>(
+                  comments: comments,
+                  itemBuilder: (c) => _buildComment(context, c),
+                ),
               ],
             ),
           ),
@@ -871,113 +789,72 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
     );
   }
 
+  /// 댓글 한 줄 — ⋯는 고치거나 지울 수 있을 때만(작성자는 수정·삭제, 관리자는 삭제 — [simpleCommentPermissions]).
   Widget _buildComment(BuildContext context, AnnouncementComment c) {
-    final hint = Theme.of(context).hintColor;
-    final user = _memberOf(c.authorId);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        AvatarView(
-          username: c.authorName,
-          avatarType: user?.avatarType ?? 'initial',
-          avatarEmoji: user?.avatarEmoji,
-          avatarColor: user?.avatarColor,
-          avatarUrl: user?.avatarUrl,
-          resolveUrl: widget.session.resolveUrl,
-          radius: 16,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                c.authorName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-              Text(
-                formatPostDateTime(c.createdAt),
-                style: TextStyle(fontSize: 12, color: hint),
-              ),
-              const SizedBox(height: 6),
-              Text(c.text, style: const TextStyle(fontSize: 14, height: 1.5)),
-            ],
-          ),
-        ),
-      ],
+    final can = simpleCommentPermissions(
+      widget.session,
+      widget.room,
+      c.authorId,
+    );
+    return PostCommentTile(
+      key: ValueKey('announcement-comment-${c.id}'),
+      commentId: c.id,
+      avatarUser: _memberOf(c.authorId),
+      authorName: c.authorName,
+      createdAt: c.createdAt,
+      editedAt: c.editedAt,
+      text: c.text,
+      resolveUrl: widget.session.resolveUrl,
+      onEdit: can.edit ? (text) => _editComment(c, text) : null,
+      onDelete: can.delete ? () => _deleteComment(c) : null,
     );
   }
 
-  /// 맨 아래 고정된 댓글 입력칸 — 둥근 테두리, "댓글을 입력하세요....".
-  Widget _buildCommentInput(BuildContext context) {
-    final theme = Theme.of(context);
-    final outline = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: theme.dividerColor),
+  Future<void> _editComment(AnnouncementComment c, String text) async {
+    final updated = await widget.session.api!.updateAnnouncementComment(
+      widget.room.id,
+      _announcement.id,
+      c.id,
+      text,
     );
-    return Material(
-      color: theme.colorScheme.surface,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          child: TextField(
-            key: const ValueKey('announcement-comment-input'),
-            controller: _commentController,
-            minLines: 1,
-            maxLines: 4,
-            decoration: InputDecoration(
-              hintText: '댓글을 입력하세요....',
-              hintStyle: TextStyle(color: theme.hintColor),
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              border: outline,
-              enabledBorder: outline,
-              focusedBorder: outline.copyWith(
-                borderSide: BorderSide(
-                  color: theme.colorScheme.primary,
-                  width: 1.5,
-                ),
-              ),
-              prefixIcon: IconButton(
-                icon: const Icon(Icons.emoji_emotions_outlined, size: 20),
-                onPressed: _showEmojiPicker,
-                tooltip: '이모티콘',
-              ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 44),
-              suffixIcon: _sending
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : IconButton(
-                      key: const ValueKey('announcement-comment-send'),
-                      icon: Icon(
-                        Icons.send_rounded,
-                        size: 20,
-                        color: theme.colorScheme.primary,
-                      ),
-                      tooltip: '댓글 등록',
-                      onPressed: _postComment,
-                    ),
-              suffixIconConstraints: const BoxConstraints(minWidth: 44),
-            ),
-            onSubmitted: (_) => _postComment(),
-          ),
-        ),
-      ),
-    );
+    if (mounted) setState(() => _replaceComment(updated));
   }
+
+  Future<void> _deleteComment(AnnouncementComment c) async {
+    await widget.session.api!.deleteAnnouncementComment(
+      widget.room.id,
+      _announcement.id,
+      c.id,
+    );
+    if (mounted) setState(() => _removeComment(c.id));
+  }
+
+  /// 고친 댓글로 바꾼다(소켓 소식과 내 응답이 둘 다 와도 같은 값이다).
+  void _replaceComment(AnnouncementComment c) {
+    final comments = _comments;
+    if (comments == null) return;
+    _comments = [for (final e in comments) e.id == c.id ? c : e];
+  }
+
+  /// 지운 댓글을 뺀다 — 목록에 있었을 때만 댓글 수를 내린다(내 응답과 소켓 소식이 둘 다 와도 한 번만). 공지바의 실시간
+  /// 댓글 수도 같은 인스턴스면 같이 맞춘다.
+  void _removeComment(String id) {
+    final comments = _comments;
+    if (comments == null || !comments.any((e) => e.id == id)) return;
+    _comments = [
+      for (final e in comments)
+        if (e.id != id) e,
+    ];
+    if (_announcement.commentCount > 0) _announcement.commentCount -= 1;
+    _announcement.noteDeletedComment(id);
+  }
+
+  /// 맨 아래 고정된 댓글 입력칸 — 둥근 테두리, "댓글을 입력하세요....".
+  Widget _buildCommentInput(BuildContext context) => PostCommentInput(
+    controller: _commentController,
+    sending: _sending,
+    onSubmit: _postComment,
+    inputKey: const ValueKey('announcement-comment-input'),
+    sendKey: const ValueKey('announcement-comment-send'),
+  );
 }

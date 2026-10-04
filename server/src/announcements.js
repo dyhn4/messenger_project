@@ -3,6 +3,8 @@ import { Router } from 'express';
 import { teamAccess, topicAccess } from './access.js';
 import {
   countAnnouncementComments,
+  deleteAnnouncementComment,
+  findAnnouncementCommentById,
   findAnnouncementById,
   findLatestAnnouncementForRoom,
   findPinnedAnnouncementBySourceMessage,
@@ -12,6 +14,7 @@ import {
   listCommentsForAnnouncement,
   softDeleteAnnouncement,
   unpinAnnouncement,
+  updateAnnouncementCommentText,
   updateAnnouncementText,
 } from './db/queries/announcements.js';
 import { announcementFieldsFromMessage } from './announcementFromMessage.js';
@@ -20,6 +23,7 @@ import { parseAnnouncementText } from './announcementText.js';
 import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findTeamById, isTopicCreator } from './db/queries/teams.js';
+import { canModifyContent } from './moderation.js';
 import { canCreateTopic, topicWriteDenial } from './permissions.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
@@ -44,7 +48,11 @@ function parseAutoUnpinAt(raw) {
 }
 
 function toCommentDto(row) {
-  return { ...row, createdAt: new Date(row.createdAt).getTime() };
+  return {
+    ...row,
+    createdAt: new Date(row.createdAt).getTime(),
+    editedAt: row.editedAt ? new Date(row.editedAt).getTime() : null,
+  };
 }
 
 /**
@@ -264,6 +272,65 @@ export function createAnnouncementsRouter(io) {
     const dto = toCommentDto(row);
     io.to(room.id).emit('announcement:comment:new', dto);
     res.status(201).json(dto);
+  });
+
+  /** 공지 댓글 수정·삭제의 공통 — 이 방·이 공지의 댓글인지까지 확인한다. 없으면 404를 보내고 null. */
+  async function requireAnnouncementComment(req, res) {
+    const room = await requireTopicMember(req, res);
+    if (!room) return null;
+    const comment = await findAnnouncementCommentById(req.params.commentId);
+    if (!comment || comment.roomId !== room.id || comment.announcementId !== req.params.announcementId) {
+      res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+      return null;
+    }
+    return { room, comment };
+  }
+
+  /** 수정은 작성자만, 삭제는 작성자와 관리자(팀 관리자·토픽 관리자) — 시간 제한 없음(moderation.js isSimpleComment). */
+  function canModifyComment(req, room, comment, action) {
+    return canModifyContent({
+      roomId: room.id,
+      senderId: comment.authorId,
+      createdAt: comment.createdAt,
+      requesterId: req.user.sub,
+      action,
+      noun: '댓글',
+      isSimpleComment: true,
+    });
+  }
+
+  router.patch('/rooms/:id/announcements/:announcementId/comments/:commentId', async (req, res) => {
+    const ctx = await requireAnnouncementComment(req, res);
+    if (!ctx) return;
+    const { room, comment } = ctx;
+    const verdict = await canModifyComment(req, room, comment, 'edit');
+    if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
+
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    if (text.length > 1000) return res.status(400).json({ error: '댓글은 1000자 이내로 작성하세요.' });
+
+    const updated = await updateAnnouncementCommentText(comment.id, text);
+    if (!updated) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
+    const dto = toCommentDto(updated);
+    io.to(room.id).emit('announcement:comment:edited', dto);
+    res.json(dto);
+  });
+
+  router.delete('/rooms/:id/announcements/:announcementId/comments/:commentId', async (req, res) => {
+    const ctx = await requireAnnouncementComment(req, res);
+    if (!ctx) return;
+    const { room, comment } = ctx;
+    const verdict = await canModifyComment(req, room, comment, 'delete');
+    if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
+
+    await deleteAnnouncementComment(comment.id);
+    io.to(room.id).emit('announcement:comment:deleted', {
+      id: comment.id,
+      announcementId: comment.announcementId,
+      roomId: room.id,
+    });
+    res.json({ ok: true });
   });
 
   return router;

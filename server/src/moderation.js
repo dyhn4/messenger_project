@@ -30,9 +30,22 @@ import { canModerateContent, editDeleteWindowSeconds, formatWindow } from './per
  * 등급)와 — 토픽이면 — 토픽 관리자가 지울 수 있다(투표는 그룹·1:1에도 올라와서 게시글과 달리 토픽
  * 관리자만으로 좁히지 않는다). 투표 자체는 수정할 수 없으므로 action은 실제로 'delete'만 온다.
  *
+ * 공지·할 일 댓글([isSimpleComment])은 투표와 같다 — 수정/삭제 가능 시간 제한이 없고, 남의 댓글은 팀 관리자와
+ * (토픽이면) 토픽 관리자가 지울 수 있다. 수정은 다른 글처럼 본인만.
+ *
  * [action]은 'edit' | 'delete'. 안내 문구를 그에 맞게 만드는 데도 쓴다.
  */
-export async function canModifyContent({ roomId, senderId, createdAt, requesterId, action, noun, isPost = false, isPoll = false }) {
+export async function canModifyContent({
+  roomId,
+  senderId,
+  createdAt,
+  requesterId,
+  action,
+  noun,
+  isPost = false,
+  isPoll = false,
+  isSimpleComment = false,
+}) {
   const verb = action === 'edit' ? '수정' : '삭제';
   noun ??= isPoll ? '투표' : isPost ? '게시글' : '메시지';
 
@@ -57,7 +70,8 @@ export async function canModifyContent({ roomId, senderId, createdAt, requesterI
     if (!access.isRoomMember) return denied;
     // 남의 글 삭제 = 그 팀을 관리할 수 있는 사람(팀 소유자 또는 계정 등급 관리자). 게시글은
     // 토픽 관리자까지(access.canManage — 팀 관리자도 포함한다).
-    const allowed = isPoll
+    const allowed =
+      isPoll || isSimpleComment
       ? access.canManage || canModerateContent(access)
       : isPost
         ? access.canManage
@@ -66,7 +80,7 @@ export async function canModifyContent({ roomId, senderId, createdAt, requesterI
   }
 
   const windowSeconds = editDeleteWindowSeconds(team);
-  if (!isPost && !isPoll && Date.now() - new Date(createdAt).getTime() > windowSeconds * 1000) {
+  if (!isPost && !isPoll && !isSimpleComment && Date.now() - new Date(createdAt).getTime() > windowSeconds * 1000) {
     return {
       ok: false,
       status: 403,

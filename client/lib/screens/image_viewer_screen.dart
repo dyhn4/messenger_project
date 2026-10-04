@@ -170,6 +170,10 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   double _scale = 1;
 
+  /// 지금 장을 마지막으로 그릴 때 100%(보간 없이)였는지 — 손가락으로 돌리기만 해서 배율은 그대로여도
+  /// 이 값이 바뀌면 다시 그려 보간을 켜거나 끈다.
+  bool _drawnActualSize = true;
+
   /// 도구모음은 열리자마자 잠깐 보여주고 3초 뒤 흐려진다 — 마우스를 창 위로 움직이면 다시 뜬다.
   bool _toolbarVisible = true;
   Timer? _hideToolbar;
@@ -277,9 +281,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   }
 
   void _onPhotoChanged(PhotoViewControllerValue value) {
+    if (!mounted) return;
     final scale = value.scale ?? 1;
-    if (mounted && (scale - _scale).abs() > 0.001) {
-      setState(() => _scale = scale);
+    final actualSize = _isActualSize(_current.id);
+    if ((scale - _scale).abs() > 0.001 || actualSize != _drawnActualSize) {
+      setState(() {
+        _scale = scale;
+        _drawnActualSize = actualSize;
+      });
     }
   }
 
@@ -334,6 +343,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   /// 작거나 같으면 100% 그대로 둔다(작은 이미지를 억지로 키우면 흐려진다).
   double _initialScale(String id) => math.min(1.0, _containedScale(id) ?? 1.0);
 
+  /// 그 장이 지금 100%(원본 픽셀 크기)이고 90° 단위로만 돌아가 있는지 — 그러면 보간 없이 그린다.
+  bool _isActualSize(String id) {
+    final value = _controllers[id]?.value;
+    final scale = value?.scale ?? _initialScale(id);
+    final turns = (value?.rotation ?? 0) / (math.pi / 2);
+    return (scale - 1).abs() < 0.001 && (turns - turns.round()).abs() < 0.001;
+  }
+
   bool get _canGoBack =>
       _index > 0 || ((widget.source?.hasOlder() ?? false) && !_loadingOlder);
   bool get _canGoForward => _index < _images.length - 1;
@@ -356,6 +373,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
     setState(() {
       _index = index;
       _scale = _controllerFor(_current.id).scale ?? _initialScale(_current.id);
+      _drawnActualSize = _isActualSize(_current.id);
     });
     // 앞쪽 끝에 가까워지면 그 앞(과거 메시지)의 사진을 미리 불러 둔다.
     if (index <= 1) unawaited(_loadOlder());
@@ -419,8 +437,11 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
         // photo_view의 기본값(FilterQuality.none)은 확대·축소를 "가장 가까운 픽셀 고르기"로 해서,
         // 큰 사진을 화면에 맞춰 줄이면 선이 계단처럼 자글자글해진다. medium은 줄일 때 미리 줄여 둔
         // 단계(밉맵)를 섞어 쓰고 키울 때는 부드럽게 보간해서, 몇 배로 줄여도 깨끗하다(이 값이
-        // none이 아니면 photo_view가 그 배율의 크기로 직접 그린다).
-        filterQuality: FilterQuality.medium,
+        // none이 아니면 photo_view가 그 배율의 크기로 직접 그린다). 다만 100%(원본 크기)일 때는
+        // 보간할 게 없고, 위치가 반 픽셀 어긋나면 오히려 번져 보이니 원본 픽셀 그대로 그린다.
+        filterQuality: _isActualSize(id)
+            ? FilterQuality.none
+            : FilterQuality.medium,
         backgroundDecoration: const BoxDecoration(color: Colors.black),
         loadingBuilder: (context, event) =>
             const Center(child: CircularProgressIndicator()),

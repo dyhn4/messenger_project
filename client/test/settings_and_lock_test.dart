@@ -111,10 +111,17 @@ void main() {
     expect(checkOf('Enter로 전송').icon, Icons.circle_outlined);
     expect(find.text('화면 테마'), findsNothing);
 
-    // 화면 설정 — 텍스트 크기 · 화면 테마 · 반투명 · 작업표시줄 깜빡임.
+    // 화면 설정 — 텍스트 크기 · 화면 테마 · 반투명 · 창 깜빡임 · 작업표시줄 깜빡임.
     await tester.tap(find.text('화면 설정'));
     await tester.pump();
-    for (final label in ['텍스트 크기', '화면 테마', '반투명', '작업표시줄 깜빡임', '글꼴']) {
+    for (final label in [
+      '텍스트 크기',
+      '화면 테마',
+      '반투명',
+      '창 깜빡임',
+      '작업표시줄 깜빡임',
+      '글꼴',
+    ]) {
       expect(find.text(label), findsOneWidget, reason: label);
     }
     expect(find.text('화이트 (기본)'), findsOneWidget);
@@ -145,6 +152,7 @@ void main() {
     expect(find.text('화면 테마'), findsNothing);
     expect(find.text('반투명'), findsNothing);
     expect(find.text('작업표시줄 깜빡임'), findsNothing);
+    expect(find.text('창 깜빡임'), findsNothing);
     expect(find.text('절전모드 시 TangoTalk 자동 잠금'), findsOneWidget);
   });
 
@@ -266,6 +274,31 @@ void main() {
 
     await settings.setTextScale(0.1); // 범위 밖 — 최솟값으로 붙는다.
     expect(settings.textScale, minTextScale);
+  });
+
+  testWidgets('창 깜빡임: 기본은 깜빡임, 화면 설정에서 "깜빡이지 않음"을 골라 저장하면 저장된다', (
+    tester,
+  ) async {
+    mockWindowManager(tester);
+    final s = _session();
+    await s.settings.init();
+    expect(s.settings.flashWindowFrame, isTrue);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SettingsScreen(session: s)),
+      ),
+    );
+    await tester.tap(find.text('화면 설정'));
+    await tester.pump();
+    expect(find.text('깜빡임 (기본값)'), findsOneWidget);
+    await tester.ensureVisible(find.text('깜빡이지 않음'));
+    await tester.tap(find.text('깜빡이지 않음'));
+    await tester.pump();
+    await tester.tap(find.text('저장하기'));
+    await tester.pumpAndSettle();
+    expect(s.settings.flashWindowFrame, isFalse);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('settings_flash_window_frame'), isFalse);
   });
 
   testWidgets('글꼴: 화면 설정 > 글꼴에서 검색해서 고르고 저장하면 저장된다', (tester) async {

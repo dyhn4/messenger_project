@@ -51,12 +51,22 @@ class Announcement {
   /// 상세보기가 같은 인스턴스의 [commentCount]를 직접 올리기도 해서(열어 둔 동안 들어온 댓글) 둘 중 큰 값을 쓴다
   /// — 같은 댓글이 양쪽에서 두 번 세지지 않는다.
   int get liveCommentCount {
-    final live = _baseCommentCount + _liveCommentIds.length;
-    return live > commentCount ? live : commentCount;
+    final live =
+        _baseCommentCount + _liveCommentIds.length - _deletedCommentIds.length;
+    final count = live > commentCount ? live : commentCount;
+    return count < 0 ? 0 : count;
   }
 
   /// 실시간으로 들어온 댓글 하나를 센다 — 처음 보는 id면 true(다시 그려야 함).
   bool noteLiveComment(String commentId) => _liveCommentIds.add(commentId);
+
+  /// 만든 뒤 지워진(announcement:comment:deleted) 댓글 id들 — [liveCommentCount]에서 뺀다.
+  final Set<String> _deletedCommentIds = {};
+
+  /// 지워진 댓글 하나를 센다 — 처음 보는 id면 true(다시 그려야 함). 상세보기는 같은 인스턴스의 [commentCount]도 하나
+  /// 내리므로(그 댓글을 목록에 들고 있었을 때) 둘이 어긋나지 않는다.
+  bool noteDeletedComment(String commentId) =>
+      _deletedCommentIds.add(commentId);
 
   Announcement({
     required this.id,
@@ -115,6 +125,9 @@ class AnnouncementComment {
   final String text;
   final DateTime createdAt;
 
+  /// 고친 시각 — 안 고쳤으면 null(`(수정됨)` 표시).
+  final DateTime? editedAt;
+
   const AnnouncementComment({
     required this.id,
     required this.announcementId,
@@ -123,6 +136,7 @@ class AnnouncementComment {
     required this.authorName,
     required this.text,
     required this.createdAt,
+    this.editedAt,
   });
 
   factory AnnouncementComment.fromJson(Map<String, dynamic> json) =>
@@ -136,5 +150,10 @@ class AnnouncementComment {
         createdAt: DateTime.fromMillisecondsSinceEpoch(
           (json['createdAt'] as num).toInt(),
         ),
+        editedAt: json['editedAt'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(
+                (json['editedAt'] as num).toInt(),
+              ),
       );
 }

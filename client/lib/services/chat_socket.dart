@@ -15,6 +15,7 @@ import '../models/room.dart';
 import '../models/scheduled_message.dart';
 import '../models/team.dart';
 import '../models/text_format.dart';
+import '../models/todo.dart' show TodoComment;
 import 'pinned_tls.dart';
 
 /// room:read 브로드캐스트 한 건. 누가(userId) 언제(lastReadAt) 어느 방(roomId)을 읽었는지.
@@ -173,6 +174,9 @@ class AnnouncementReadEvent {
 }
 
 /// 공지가 삭제되거나(announcement:deleted) 내려갔을 때(announcement:unpinned) 오는 최소 정보.
+/// 공지·할 일 댓글이 지워졌다는 소식 — [parentId]는 그 공지(또는 할 일)의 id.
+typedef SimpleCommentDeleted = ({String id, String parentId, String roomId});
+
 class AnnouncementRemovedEvent {
   final String id;
   final String roomId;
@@ -444,6 +448,11 @@ class ChatSocket {
       StreamController<Map<String, dynamic>>.broadcast();
   final _todoReminderController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _todoCommentController = StreamController<TodoComment>.broadcast();
+  final _todoCommentEditedController =
+      StreamController<TodoComment>.broadcast();
+  final _todoCommentDeletedController =
+      StreamController<SimpleCommentDeleted>.broadcast();
   final _albumChangedController =
       StreamController<AlbumChangedEvent>.broadcast();
   final _messageDeletedController =
@@ -462,6 +471,10 @@ class ChatSocket {
       StreamController<AnnouncementRemovedEvent>.broadcast();
   final _announcementCommentController =
       StreamController<AnnouncementComment>.broadcast();
+  final _announcementCommentEditedController =
+      StreamController<AnnouncementComment>.broadcast();
+  final _announcementCommentDeletedController =
+      StreamController<SimpleCommentDeleted>.broadcast();
   final _announcementReadController =
       StreamController<AnnouncementReadEvent>.broadcast();
   final _inquiryNewController = StreamController<Inquiry>.broadcast();
@@ -598,6 +611,17 @@ class ChatSocket {
   /// addedAssigneeIds?}`) — 그 방 멤버에게 온다. 받는 쪽은 services/todo_controller.dart.
   Stream<Map<String, dynamic>> get todoChanged => _todoChangedController.stream;
 
+  /// 할 일에 새 댓글이 달렸다(todo:comment:new) — 그 방 멤버에게 온다. 받는 쪽은 할 일 상세(todo_detail_dialog.dart).
+  Stream<TodoComment> get todoComments => _todoCommentController.stream;
+
+  /// 할 일 댓글이 고쳐졌다(todo:comment:edited).
+  Stream<TodoComment> get todoCommentEdited =>
+      _todoCommentEditedController.stream;
+
+  /// 할 일 댓글이 지워졌다(todo:comment:deleted — parentId는 할 일 id).
+  Stream<SimpleCommentDeleted> get todoCommentDeleted =>
+      _todoCommentDeletedController.stream;
+
   /// 할 일 알림 시각이 됐다(todo:reminder — `{teamId, roomId, todoId, title, dueDate?, dueTime?, remindAt}`) — 담당자(없으면 만든
   /// 사람)에게만 온다. 앱이 켜져 있으면 토스트로 보여 준다(session.dart).
   Stream<Map<String, dynamic>> get todoReminder =>
@@ -645,6 +669,14 @@ class ChatSocket {
   /// 공지에 새 댓글이 달렸을 때(announcement:comment:new).
   Stream<AnnouncementComment> get announcementComments =>
       _announcementCommentController.stream;
+
+  /// 공지 댓글이 고쳐졌을 때(announcement:comment:edited).
+  Stream<AnnouncementComment> get announcementCommentEdited =>
+      _announcementCommentEditedController.stream;
+
+  /// 공지 댓글이 지워졌을 때(announcement:comment:deleted — parentId는 공지 id).
+  Stream<SimpleCommentDeleted> get announcementCommentDeleted =>
+      _announcementCommentDeletedController.stream;
 
   /// 내가(다른 기기 포함) 공지 목록/상세를 열어서 읽음 처리됐을 때(announcement:read) — 알림
   /// 센터의 "안 읽은 공지" 표시를 다른 기기와 동기화하는 데 쓴다.
@@ -888,6 +920,24 @@ class ChatSocket {
     socket.on('todo:reminder', (data) {
       _todoReminderController.add(Map<String, dynamic>.from(data as Map));
     });
+    socket.on('todo:comment:new', (data) {
+      _todoCommentController.add(
+        TodoComment.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('todo:comment:edited', (data) {
+      _todoCommentEditedController.add(
+        TodoComment.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('todo:comment:deleted', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      _todoCommentDeletedController.add((
+        id: m['id'] as String,
+        parentId: m['todoId'] as String,
+        roomId: m['roomId'] as String,
+      ));
+    });
     socket.on('album:changed', (data) {
       _albumChangedController.add(
         AlbumChangedEvent.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -936,6 +986,19 @@ class ChatSocket {
       _announcementCommentController.add(
         AnnouncementComment.fromJson(Map<String, dynamic>.from(data as Map)),
       );
+    });
+    socket.on('announcement:comment:edited', (data) {
+      _announcementCommentEditedController.add(
+        AnnouncementComment.fromJson(Map<String, dynamic>.from(data as Map)),
+      );
+    });
+    socket.on('announcement:comment:deleted', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      _announcementCommentDeletedController.add((
+        id: m['id'] as String,
+        parentId: m['announcementId'] as String,
+        roomId: m['roomId'] as String,
+      ));
     });
     socket.on('announcement:read', (data) {
       _announcementReadController.add(

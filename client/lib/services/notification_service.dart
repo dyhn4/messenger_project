@@ -220,6 +220,8 @@ class NotificationService {
   /// [flashTaskbarUntilRoomOpened]는 환경설정 "작업표시줄 깜빡임" 값(AppSettings.
   /// flashTaskbarWhenFocused) 그대로다 — Windows 창이 이미 포커스돼 있어도, 이 방([roomId])을
   /// 열 때까지 작업표시줄을 계속 깜빡일지. 기본 false면 창을 보고 있을 때는 안 깜빡인다.
+  /// [flashWindowFrame]은 환경설정 "창 깜빡임" 값(AppSettings.flashWindowFrame) — false면
+  /// 창 테두리는 그대로 두고 작업표시줄 버튼만 깜빡인다.
   Future<void> showMessage({
     required String title,
     required String body,
@@ -232,6 +234,7 @@ class NotificationService {
     String? avatarUrl,
     bool isSecret = false,
     bool flashTaskbarUntilRoomOpened = false,
+    bool flashWindowFrame = true,
   }) async {
     final baseAvatarBytes = await _resolveAvatarBytes(
       avatarType: avatarType,
@@ -363,6 +366,7 @@ class NotificationService {
     if (Platform.isAndroid) await _syncMessageSummary(include: roomId.hashCode);
 
     if (Platform.isWindows) {
+      _flashFrame = flashWindowFrame;
       _flashWindowsTaskbar(
         roomId,
         untilRoomOpened: flashTaskbarUntilRoomOpened,
@@ -727,6 +731,10 @@ class NotificationService {
   /// 그때는 예전처럼 "창에 포커스가 돌아오면" 멈춘다).
   final Set<String> _pendingFlashRooms = {};
 
+  /// 작업표시줄 버튼과 함께 창 테두리도 깜빡일지(환경설정 "창 깜빡임") — 마지막 알림 때 받은 값을
+  /// 타이머가 다시 걸 때도 그대로 쓴다.
+  bool _flashFrame = true;
+
   void _flashWindowsTaskbar(String roomId, {required bool untilRoomOpened}) {
     final hwnd = _findOurWindow();
     if (hwnd == 0) return;
@@ -783,13 +791,14 @@ class NotificationService {
 
   void _flash(int hwnd, {required bool stop, bool forced = false}) {
     final info = calloc<_FLASHWINFO>();
+    final target = _flashFrame ? _flashwAll : _flashwTray;
     try {
       info.ref
         ..cbSize = sizeOf<_FLASHWINFO>()
         ..hwnd = hwnd
         ..dwFlags = stop
             ? _flashwStop
-            : (forced ? _flashwAll : (_flashwAll | _flashwTimerNoFg))
+            : (forced ? target : (target | _flashwTimerNoFg))
         ..uCount = forced ? _flashwForcedCount : 0
         ..dwTimeout = 0;
       _flashWindowEx(info);
@@ -803,6 +812,7 @@ class NotificationService {
 // 최소한의 FFI 선언을 직접 추가했다 (다른 Win32 호출은 전부 win32 패키지 것을 그대로 씀).
 const _flashwStop = 0x00000000; // 깜빡임 중지(원래 상태로)
 const _flashwAll = 0x00000003; // FLASHW_CAPTION | FLASHW_TRAY
+const _flashwTray = 0x00000002; // FLASHW_TRAY — 작업표시줄 버튼만(창 테두리는 그대로)
 const _flashwTimerNoFg = 0x0000000C; // 포커스를 받을 때까지 계속 깜빡임
 // 창이 이미 포커스돼 있을 때(forced) 몇 번 깜빡이고 멈출지 — TIMERNOFG가 못 쓰이니 직접 횟수를 준다.
 const _flashwForcedCount = 4;

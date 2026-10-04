@@ -54,6 +54,18 @@ abstract class TodoApi {
 
   /// `PUT /api/todos/:id/favorite` — 내 즐겨찾기를 켜고 끈다. 서버가 확정한 값을 돌려준다.
   Future<bool> setFavorite(String id, bool favorite);
+
+  /// `GET /api/todos/:id/comments` — 오래된 것부터.
+  Future<List<TodoComment>> comments(String id);
+
+  /// `POST /api/todos/:id/comments` — 그 방 멤버 누구나(1000자까지).
+  Future<TodoComment> postComment(String id, String text);
+
+  /// `PATCH /api/todos/:id/comments/:commentId` — 작성자만. 고친 댓글을 돌려준다.
+  Future<TodoComment> updateComment(String id, String commentId, String text);
+
+  /// `DELETE /api/todos/:id/comments/:commentId` — 작성자와 관리자.
+  Future<void> deleteComment(String id, String commentId);
 }
 
 class RemoteTodoApi implements TodoApi {
@@ -157,5 +169,43 @@ class RemoteTodoApi implements TodoApi {
       ),
     );
     return body['favorite'] as bool? ?? favorite;
+  }
+
+  @override
+  Future<List<TodoComment>> comments(String id) async {
+    final body = await _api.requestJson('GET', '/api/todos/$id/comments');
+    return [for (final c in body as List) TodoComment.fromJson(_map(c))];
+  }
+
+  @override
+  Future<TodoComment> postComment(String id, String text) async =>
+      TodoComment.fromJson(
+        _map(
+          await _api.requestJson(
+            'POST',
+            '/api/todos/$id/comments',
+            body: {'text': text},
+          ),
+        ),
+      );
+
+  @override
+  Future<TodoComment> updateComment(
+    String id,
+    String commentId,
+    String text,
+  ) async => TodoComment.fromJson(
+    _map(
+      await _api.requestJson(
+        'PATCH',
+        '/api/todos/$id/comments/$commentId',
+        body: {'text': text},
+      ),
+    ),
+  );
+
+  @override
+  Future<void> deleteComment(String id, String commentId) async {
+    await _api.requestJson('DELETE', '/api/todos/$id/comments/$commentId');
   }
 }

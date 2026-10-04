@@ -1405,6 +1405,33 @@ class ApiClient {
     );
   }
 
+  /// 공지 댓글 수정 — 작성자만(서버 moderation.js isSimpleComment).
+  Future<AnnouncementComment> updateAnnouncementComment(
+    String roomId,
+    String announcementId,
+    String commentId,
+    String text,
+  ) async {
+    return AnnouncementComment.fromJson(
+      await _patch(
+            '/api/rooms/$roomId/announcements/$announcementId/comments/$commentId',
+            {'text': text},
+          )
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 공지 댓글 삭제 — 작성자와 관리자(팀 관리자·토픽 관리자).
+  Future<void> deleteAnnouncementComment(
+    String roomId,
+    String announcementId,
+    String commentId,
+  ) async {
+    await _delete(
+      '/api/rooms/$roomId/announcements/$announcementId/comments/$commentId',
+    );
+  }
+
   /// "팀장에게 문의하기" — 그 방(1:1)의 상대가 팀장일 때만 서버가 허용한다
   /// (session.canSendInquiryIn과 같은 조건을 서버가 다시 확인).
   Future<Inquiry> createInquiry(

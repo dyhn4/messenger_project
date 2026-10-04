@@ -294,6 +294,39 @@ class FakeAlbumApi implements AlbumApi {
     lastShare = (roomId: roomId, itemIds: itemIds);
   }
 
+  /// 마지막 "앨범 공유"(앨범 카드 메시지) 요청.
+  ({
+    String albumId,
+    String roomId,
+    String text,
+    List<Map<String, dynamic>>? textFormat,
+    List<Map<String, dynamic>>? mentions,
+  })?
+  lastAlbumShare;
+
+  @override
+  Future<void> shareAlbum(
+    String albumId, {
+    required String roomId,
+    required String text,
+    List<Map<String, dynamic>>? textFormat,
+    List<Map<String, dynamic>>? mentions,
+  }) async {
+    calls.add('shareAlbum $albumId $roomId');
+    _album(albumId);
+    if (rejectShareRooms.contains(roomId)) {
+      throw const ApiException('보드 뷰 토픽에는 앨범을 공유할 수 없습니다.');
+    }
+    if (text.trim().isEmpty) throw const ApiException('메시지를 입력하세요.');
+    lastAlbumShare = (
+      albumId: albumId,
+      roomId: roomId,
+      text: text,
+      textFormat: textFormat,
+      mentions: mentions,
+    );
+  }
+
   @override
   Future<UploadResult> uploadFile(
     File file, {

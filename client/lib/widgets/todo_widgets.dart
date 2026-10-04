@@ -9,7 +9,7 @@ import 'compact_menu.dart';
 // (TodoProgressSelect), 그리고 PC 할 일 패널 안에서 화면을 바꾸는 모양(TodoViewMode)·전환(todoPanelRoute)·머리
 // (TodoPageHeader)·창 전체에 띄우는 메뉴의 이름표(todoPopupRouteName)·쓰는 중인 할 일 목록(TodoPanelDrafts).
 
-/// 할 일 화면이 창 전체(루트 Navigator)에 띄우는 메뉴(정렬·••• · 진척률·알림 메뉴)의 라우트 이름. PC 할 일 패널 안 화면은
+/// 할 일 화면이 창 전체(루트 Navigator)에 띄우는 메뉴(••• · 진척률·알림 메뉴)의 라우트 이름. PC 할 일 패널 안 화면은
 /// 패널의 중첩 Navigator에 있지만, 메뉴를 거기 띄우면 바깥을 누르는 막이 패널만 덮어 채팅 쪽을 눌러도 안 닫히고 그 누름이
 /// 채팅에 간다 — 그래서 메뉴는 루트에 띄우고(자리는 패널 안), 패널 화면을 닫는 쪽(지워졌다는 알림·팀 전환)이 이 이름으로
 /// 남은 메뉴를 찾아 닫는다.
@@ -27,13 +27,15 @@ void closeTodoPopups(NavigatorState navigator) =>
 /// (PC 할 일 패널 안 화면이면 패널) 안에 띄울 때와 같게 정한다: 그 Overlay의 오른쪽 끝에 더 가까운 단추면 단추 오른쪽 끝에
 /// 맞춰 왼쪽으로, 아니면 왼쪽 끝에 맞춰 오른쪽으로. 루트 Navigator의 기본 자리 잡기는 창을 기준으로 정해서, 패널 왼쪽의
 /// 단추도 "창 오른쪽 끝에 가깝다"고 보고 왼쪽으로(패널 밖까지) 펴 버린다. 다른 화면은 가장 가까운 Overlay가 곧 루트라
-/// 기본과 같다. 고른 값, 닫기만 했으면 null.
+/// 기본과 같다. [height]는 메뉴 높이를 알 때(목록 높이를 정해 둔 긴 목록 — 시간 고르기) 준다: 단추 아래 자리가 모자라면
+/// 단추를 덮지 않게 단추 바로 위로 편다(모르면 늘 아래 — 넘치면 창 안으로 밀려 올라온다). 고른 값, 닫기만 했으면 null.
 Future<T?> showTodoMenu<T>(
   BuildContext buttonContext, {
   required List<PopupMenuEntry<T>> items,
   T? initialValue,
   BoxConstraints? constraints,
   double gap = 4,
+  double? height,
 }) {
   final button = buttonContext.findRenderObject() as RenderBox?;
   final bounds = Overlay.of(buttonContext).context.findRenderObject();
@@ -57,16 +59,23 @@ Future<T?> showTodoMenu<T>(
       ancestor: root,
     );
     final width = root.size.width;
-    final bottom = root.size.height - at.dy;
+    // 메뉴 위 끝 — 보통은 단추 바로 아래. 높이를 알고 아래가 모자라면(창 가장자리 여백 8 포함) 단추 바로 위로.
+    var top = at.dy;
+    if (height != null && root.size.height - at.dy < height + 8) {
+      final above =
+          button.localToGlobal(Offset.zero, ancestor: root).dy - gap - height;
+      if (above >= 8) top = above;
+    }
+    final bottom = root.size.height - top;
     // 메뉴 자리 잡기는 왼쪽 거리 > 오른쪽 거리면 오른쪽 끝([right])에 맞춰 왼쪽으로, 아니면 왼쪽 끝에 맞춰 오른쪽으로 편다.
     return last = leftInArea > rightGap
         ? RelativeRect.fromLTRB(
             width,
-            at.dy,
+            top,
             width - at.dx - button.size.width,
             bottom,
           )
-        : RelativeRect.fromLTRB(at.dx, at.dy, width, bottom);
+        : RelativeRect.fromLTRB(at.dx, top, width, bottom);
   }
 
   return showMenu<T>(

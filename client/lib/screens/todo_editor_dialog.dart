@@ -17,7 +17,7 @@ import '../services/todo_api.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart' show formatFileSize;
 import '../widgets/compact_menu.dart';
-import '../widgets/date_range_calendar_panel.dart';
+import '../widgets/date_time_range_field.dart';
 import '../widgets/room_picker_field.dart';
 import '../widgets/todo_widgets.dart';
 import '../widgets/user_avatar.dart';
@@ -158,7 +158,7 @@ class _ReminderDraft {
 /// 할 일 만들기·고치기(대화상자/전체 화면/패널 안 화면 공용) — 잔디 생성 창 모양: 칸마다 왼쪽에 회색 아이콘(이름표·글자
 /// 수 카운터 없음), 위에서부터 대화방(맨 위 — 아래에 "만든 뒤에는 못 바꾼다" 안내), 제목(필수), 설명, 파일 업로드(30개까지 —
 /// 오른쪽 아래 `N / 30`), 담당자(회색 상자 + 오른쪽 아래 `✏ 담당자 관리` — 방 멤버 중 여러 명, 새로 만들 때 기본은 나),
-/// 기간(시작일 ~ 종료일 상자 둘 — 누르면 아래에 달력), 알림(`알림을 받아보세요 (선택) ▾` — 5개까지), 맨 아래 [취소][저장하기].
+/// 기간(`시작 ~ 종료` 한 칸 — 누르면 달력과 시작/종료 시간 판), 알림(`알림을 받아보세요 (선택) ▾` — 5개까지), 맨 아래 [취소][저장하기].
 /// 제목이 있고 입력이 서버 규칙 안일 때만 저장할 수 있다.
 class TodoEditor extends StatefulWidget {
   final Session session;
@@ -211,14 +211,18 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   List<AppUser> _assignees = [];
   DateTime? _start;
   DateTime? _due;
+
+  /// 시작/종료 시간(자정부터 분) — 그 날짜가 있을 때만 있고, null이면 `시간 없음`(날짜만).
+  int? _startMinutes;
+  int? _dueMinutes;
   late Room? _room;
   bool _submitting = false;
   String? _serverError;
   Completer<void>? _uploadsIdle;
   late final String _initialSnapshot;
 
-  bool _periodOpen = false;
-  final _periodPanelKey = GlobalKey();
+  /// 기간 칸 — 뒤로 가기가 편집기보다 펼친 기간 판을 먼저 닫게.
+  final _periodKey = GlobalKey<DateTimeRangeFieldState>();
 
   /// 떠 있는 창(작성 취소·대화방 변경 확인·담당자 관리·알림 시각 — 대화상자는 루트 Navigator에 뜬다). 패널 안 화면(중첩
   /// Navigator)이 먼저 닫히면(상세가 지워졌다는 알림으로 함께 닫힘·팀 전환) 창만 남지 않게 [dispose]에서 치운다.
@@ -253,6 +257,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       _assignees = List.of(editing.assignees);
       _start = editing.start;
       _due = editing.due;
+      _startMinutes = editing.startMinutes;
+      _dueMinutes = editing.dueMinutes;
       for (final a in editing.attachments) {
         _files.add(
           _TodoFile.existing(
@@ -355,6 +361,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     ..._assignees.map((a) => a.id),
     _start?.toIso8601String(),
     _due?.toIso8601String(),
+    '$_startMinutes~$_dueMinutes',
     ..._files.map((f) => f.result?.url ?? f.name),
     ..._reminders.map((r) => '${r.id}@${r.at.millisecondsSinceEpoch}'),
   ].join('|');
@@ -371,6 +378,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     description: _description.text,
     start: _start,
     due: _due,
+    startMinutes: _startMinutes,
+    dueMinutes: _dueMinutes,
     attachmentCount: _files.length,
     assigneeCount: _assignees.length,
     reminderCount: _reminders.length,
@@ -598,14 +607,24 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     });
   }
 
-  /// "기한 하루 전"·"기한 1시간 전" — 기한일 오후 6시를 기한 시각으로 본다. 기한이 없으면 안내만.
+  /// "기한 하루 전"·"기한 1시간 전" — 종료 시간이 있으면 기한일의 그 시각, 없으면 기한일 오후 6시를 기한 시각으로 본다.
+  /// 기한이 없으면 안내만.
   void _addRelativeReminder(Duration before) {
     final due = _due;
     if (due == null) {
       _toast('기한을 먼저 정하세요.');
       return;
     }
-    _addReminder(todoReminderBeforeDue(due, before));
+    _addReminder(todoReminderBeforeDue(due, before, dueMinutes: _dueMinutes));
+  }
+
+  /// 알림 메뉴의 "기한 하루 전"·"기한 1시간 전" 문구 — 기한이 있으면 울릴 시각(`기한 하루 전 (2026/10/24 오후 6:00)`),
+  /// 없으면 기준만(`기한 하루 전 (전날 오후 6시)` — 종료 시간이 없는 기한은 오후 6시 기준).
+  String _relativeReminderLabel(String name, Duration before, String fallback) {
+    final due = _due;
+    if (due == null) return '$name ($fallback)';
+    final at = todoReminderBeforeDue(due, before, dueMinutes: _dueMinutes);
+    return '$name (${formatTodoDateTime(at)})';
   }
 
   Future<void> _addCustomReminder() async {
@@ -669,6 +688,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           assigneeIds: [for (final a in _assignees) a.id],
           startDate: _start == null ? null : todoDateWire(_start!),
           dueDate: _due == null ? null : todoDateWire(_due!),
+          startTime: _startTimeWire,
+          dueTime: _dueTimeWire,
           attachments: attachments,
           // 이미 지난 시각의 알림은 서버가 거절하므로 만들 때는 미래 것만 보낸다(추가할 때 이미 걸렀다).
           reminders: [for (final r in _reminders) r.at],
@@ -687,6 +708,13 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     }
   }
 
+  /// 서버에 보내는 시작/종료 시간('HH:mm') — 그 날짜가 없거나 `시간 없음`이면 null.
+  String? get _startTimeWire => _start == null || _startMinutes == null
+      ? null
+      : todoTimeWire(_startMinutes!);
+  String? get _dueTimeWire =>
+      _due == null || _dueMinutes == null ? null : todoTimeWire(_dueMinutes!);
+
   /// 고치기 — 바뀐 칸만 보낸다(담당자가 보내면 안 되는 `assigneeIds`는 바꾼 적 없으면 아예 빼서 403을 피한다).
   Map<String, dynamic> _changedFields(Todo before) {
     final fields = <String, dynamic>{};
@@ -700,6 +728,13 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     final dueWire = _due == null ? null : todoDateWire(_due!);
     if (startWire != before.startDate) fields['startDate'] = startWire;
     if (dueWire != before.dueDate) fields['dueDate'] = dueWire;
+    // 시간은 바뀌었을 때만 — 날짜를 지우면 서버가 그 시간도 함께 지우므로 따로 보내지 않는다.
+    if (_start != null && _startMinutes != before.startMinutes) {
+      fields['startTime'] = _startTimeWire;
+    }
+    if (_due != null && _dueMinutes != before.dueMinutes) {
+      fields['dueTime'] = _dueTimeWire;
+    }
     if (_canManageAssignees) {
       final now = _assignees.map((a) => a.id).toSet();
       final was = before.assignees.map((a) => a.id).toSet();
@@ -776,7 +811,10 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _requestClose();
+        if (didPop) return;
+        // 기간 판이 펼쳐져 있으면 그것만 닫는다(안드로이드 뒤로 가기).
+        if (_periodKey.currentState?.hidePopup() ?? false) return;
+        _requestClose();
       },
       child: switch (widget.mode) {
         TodoViewMode.dialog => _buildDialog(context),
@@ -1324,160 +1362,57 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     );
   }
 
-  /// 기간 — `[시작일 ▾] ~ [종료일 ▾]` 상자 둘(정했으면 오른쪽에 지우기 x). 어느 쪽을 눌러도 그 아래로 달력이 펼쳐지고
-  /// 시작일 → 종료일 차례로 고른다(프로젝트 "새 업무"의 기간 달력과 같다 — 지금 고를 쪽 상자의 테두리를 강조). 띄우는
-  /// 팝업이 아니라 폼 안에 펼치는 이유: 이 칸은 폼 아래쪽이라 팝업은 창 밖으로 잘리기 쉽다(모바일 전체 화면도 같다).
+  /// 기간 — 한 칸(`2026/10/13 오전 9:00 ~ 2026/10/14 오후 6:00`, 좁으면 `~` 뒤에서 두 줄, 비어 있으면 `기간을 선택하세요
+  /// (선택)`, 정했으면 ✕ — 날짜와 시간을 모두 지운다). 누르면 칸 바로 아래(자리가 모자라면 위)에 투표 마감 시각과 같은 모양의
+  /// 판([DateTimeRangeField]): 기간 달력(첫 누름 시작일, 둘째 누름 종료일)과 그 아래 `시작 시간` · 바로 밑 `종료 시간`
+  /// (`시간 없음` 또는 15분 단위). 날짜를 새로 고르고 그 시간이 비어 있으면 지금 이후의 가장 가까운 15분 단위
+  /// ([todoDefaultTimeMinutes])로 채운다. 판은 바깥 · 칸 · Esc(안드로이드는 뒤로 가기)로 닫는다. 같은 날이면 시간으로
+  /// 순서를 본다([checkTodoDraft] — 칸 아래 안내).
   Widget _periodField(BuildContext context, TodoDraftCheck check) {
     final theme = Theme.of(context);
-    final hint = theme.hintColor;
-    // 달력이 펼쳐져 있으면 지금 고를 쪽 — 시작일이 없거나 둘 다 정했으면(다시 고르기) 시작일, 아니면 종료일.
-    final pickingStart = _start == null || _due != null;
-    Widget box(String key, DateTime? value, String placeholder, bool active) =>
-        Expanded(
-          child: InkWell(
-            key: ValueKey(key),
-            borderRadius: BorderRadius.circular(_fieldRadius),
-            onTap: _submitting ? null : _togglePeriod,
-            child: Container(
-              height: _fieldHeight,
-              padding: const EdgeInsets.only(left: 12, right: 8),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: active
-                      ? theme.colorScheme.primary
-                      : _fieldBorder(theme),
-                  width: active ? 1.5 : 1,
-                ),
-                borderRadius: BorderRadius.circular(_fieldRadius),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      value == null ? placeholder : formatTodoDate(value),
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.fade,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: value == null ? hint : null,
-                      ),
-                    ),
-                  ),
-                  Icon(Icons.arrow_drop_down, size: _iconSize, color: hint),
-                ],
-              ),
-            ),
-          ),
-        );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 상자 사이의 `~`를 눌러도 펼친다(상자는 각자 눌림 물결).
-        GestureDetector(
-          key: const ValueKey('todo-period-field'),
-          behavior: HitTestBehavior.opaque,
-          onTap: _submitting ? null : _togglePeriod,
-          child: Row(
-            children: [
-              box(
-                'todo-period-start',
-                _start,
-                '시작일',
-                _periodOpen && pickingStart,
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 5),
-                child: Text('~', style: TextStyle(color: hint)),
-              ),
-              box('todo-period-end', _due, '종료일', _periodOpen && !pickingStart),
-              if (_start != null || _due != null)
-                IconButton(
-                  key: const ValueKey('todo-period-clear'),
-                  icon: const Icon(Icons.close, size: 16),
-                  tooltip: '기한 지우기',
-                  color: hint,
-                  // 좁은 폭(360)에서도 날짜가 잘리지 않게 — 휴대폰에서도 작은(32) 단추.
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
-                  ),
-                  style: IconButton.styleFrom(
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: _submitting
-                      ? null
-                      : () => setState(() {
-                          _start = null;
-                          _due = null;
-                        }),
-                ),
-            ],
+        DateTimeRangeField(
+          key: _periodKey,
+          keyPrefix: 'todo',
+          value: DateTimeRangeSelection(
+            start: _start,
+            end: _due,
+            startMinutes: _startMinutes,
+            endMinutes: _dueMinutes,
           ),
+          enabled: !_submitting,
+          placeholder: '기간을 선택하세요 (선택)',
+          defaultMinutes: todoDefaultTimeMinutes,
+          formatPoint: formatTodoDay,
+          formatClock: formatTodoClock,
+          height: _fieldHeight,
+          radius: _fieldRadius,
+          borderColor: _fieldBorder(theme),
+          onChanged: (v) => setState(() {
+            _start = v.start;
+            _due = v.end;
+            _startMinutes = v.startMinutes;
+            _dueMinutes = v.endMinutes;
+            _serverError = null;
+          }),
         ),
         if (check.periodError != null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
               check.periodError!,
+              key: const ValueKey('todo-period-error'),
               style: TextStyle(fontSize: 12, color: theme.colorScheme.error),
-            ),
-          ),
-        if (_periodOpen)
-          Container(
-            key: _periodPanelKey,
-            margin: const EdgeInsets.only(top: 8),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              border: Border.all(color: _fieldBorder(theme)),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  pickingStart ? '시작일을 선택하세요' : '종료일을 선택하세요',
-                  style: TextStyle(color: hint, fontSize: 12),
-                ),
-                const SizedBox(height: 6),
-                DateRangeCalendarPanel(
-                  start: _start,
-                  end: _due,
-                  onChanged: (start, end) {
-                    setState(() {
-                      _start = start;
-                      _due = end;
-                      _serverError = null;
-                      // 종료일까지 골랐으면 더 볼 게 없으니 접는다.
-                      if (end != null) _periodOpen = false;
-                    });
-                  },
-                ),
-              ],
             ),
           ),
       ],
     );
   }
 
-  void _togglePeriod() {
-    setState(() => _periodOpen = !_periodOpen);
-    if (!_periodOpen) return;
-    // 펼친 달력이 화면 밖이면 보이는 곳까지 스크롤한다.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _periodPanelKey.currentContext;
-      if (ctx != null && ctx.mounted) {
-        Scrollable.ensureVisible(
-          ctx,
-          duration: const Duration(milliseconds: 150),
-          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-        );
-      }
-    });
-  }
-
   /// 알림 — 테두리 선택 상자 `알림을 받아보세요 (선택) ▾`(누르면 상자 폭의 메뉴: 기한 하루 전 / 기한 1시간 전 / 직접
-  /// 지정), 그 아래 추가한 알림(한 줄에 하나, x로 지우기). 5개를 채우면 상자가 꺼진다. 메뉴는 창 전체(루트 Navigator,
+  /// 지정 — 기한이 있으면 앞의 둘에 울릴 시각을 함께 보인다), 그 아래 추가한 알림(한 줄에 하나, x로 지우기). 5개를 채우면 상자가 꺼진다. 메뉴는 창 전체(루트 Navigator,
   /// [todoPopupRouteName])에 띄운다 — 패널 안 화면에서 열어도 바깥(채팅 쪽)을 누르면 닫힌다(자리는 상자 바로 아래).
   Widget _reminderField(BuildContext context) {
     final theme = Theme.of(context);
@@ -1516,9 +1451,23 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               }
             },
             itemBuilder: (context) => [
-              for (final (value, label) in const [
-                ('day', '기한 하루 전 (전날 오후 6시)'),
-                ('hour', '기한 1시간 전 (기한일 오후 5시)'),
+              for (final (value, label) in [
+                (
+                  'day',
+                  _relativeReminderLabel(
+                    '기한 하루 전',
+                    const Duration(days: 1),
+                    '전날 오후 6시',
+                  ),
+                ),
+                (
+                  'hour',
+                  _relativeReminderLabel(
+                    '기한 1시간 전',
+                    const Duration(hours: 1),
+                    '기한일 오후 5시',
+                  ),
+                ),
                 ('custom', '직접 지정'),
               ])
                 PopupMenuItem<String>(

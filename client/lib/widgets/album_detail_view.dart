@@ -5,11 +5,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../models/album.dart';
-import '../screens/album_create_dialog.dart';
 import '../services/album_controller.dart';
 import '../services/album_download.dart';
 import '../services/album_media.dart';
 import '../services/session.dart';
+import 'album_actions.dart';
 import 'album_share_dialog.dart';
 import 'album_viewer.dart';
 import 'app_toast.dart';
@@ -78,45 +78,6 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
   }
 
   // ── 단추 동작 ─────────────────────────────────────────────────────
-
-  Future<void> _edit(Album album) async {
-    final result = await showAlbumEditor(
-      context,
-      session: widget.session,
-      album: album,
-    );
-    if (result != null && mounted) showAppToast(context, '앨범을 수정했습니다.');
-  }
-
-  Future<void> _deleteAlbum(Album album) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('앨범 삭제'),
-        content: Text(
-          "'${album.title}' 앨범을 삭제할까요? 앨범의 사진·영상이 모두 사라집니다. 대화방에 공유한 메시지는 그대로 남습니다.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final overlay = Overlay.of(context);
-    try {
-      await _albums.deleteAlbum();
-      showAppToastOnOverlay(overlay, '앨범을 삭제했습니다.');
-    } catch (e) {
-      showAppToastOnOverlay(overlay, '앨범을 삭제하지 못했습니다: $e');
-    }
-  }
 
   Future<void> _download(List<AlbumItem> items) async {
     if (_downloadDone != null || items.isEmpty) return;
@@ -248,7 +209,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
             if (_albums.selecting) _selectionBar(context, album),
           ],
         );
-        if (!_desktop) return body;
+        // 공유 메시지로만 보는 사람(보기 전용)은 올릴 수 없으니 끌어다 놓기도 받지 않는다.
+        if (!_desktop || album.viewOnly) return body;
         return DropTarget(
           onDragEntered: (_) => setState(() => _dragHovering = true),
           onDragExited: (_) => setState(() => _dragHovering = false),
@@ -325,7 +287,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
-          PopupMenuButton<String>(
+          PopupMenuButton<AlbumAction>(
             key: const ValueKey('album-more'),
             tooltip: '더보기',
             position: PopupMenuPosition.under,
@@ -333,41 +295,19 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
             shape: CompactMenu.shape,
             menuPadding: CompactMenu.menuPadding,
             constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
-            onSelected: (v) {
-              switch (v) {
-                case 'edit':
-                  _edit(album);
-                case 'download':
+            onSelected: (a) {
+              switch (a) {
+                case AlbumAction.download:
                   _downloadAll();
-                case 'delete':
-                  _deleteAlbum(album);
+                case AlbumAction.share:
+                  shareAlbumToRoom(context, widget.session, album);
+                case AlbumAction.edit:
+                  editAlbumWithDialog(context, widget.session, album);
+                case AlbumAction.delete:
+                  confirmAndDeleteAlbum(context, widget.session, album);
               }
             },
-            itemBuilder: (context) => [
-              if (album.canEdit)
-                CompactMenu.item<String>(
-                  context,
-                  value: 'edit',
-                  icon: Icons.edit_outlined,
-                  label: '수정',
-                ),
-              CompactMenu.item<String>(
-                context,
-                value: 'download',
-                icon: Icons.file_download_outlined,
-                label: '전체 다운로드',
-              ),
-              if (album.canDelete) ...[
-                CompactMenu.divider,
-                CompactMenu.item<String>(
-                  context,
-                  value: 'delete',
-                  icon: Icons.delete_outline,
-                  label: '앨범 삭제',
-                  color: Colors.redAccent,
-                ),
-              ],
-            ],
+            itemBuilder: (context) => albumActionMenuItems(context, album),
           ),
           IconButton(
             icon: const Icon(Icons.close),
@@ -420,9 +360,17 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                       key: const ValueKey('album-meta'),
                       style: TextStyle(fontSize: 12, color: hint),
                     ),
+                    if (album.viewOnly) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '공유된 앨범입니다. 이 앨범의 대화방 멤버만 사진·영상을 올리거나 지울 수 있습니다.',
+                        key: const ValueKey('album-view-only'),
+                        style: TextStyle(fontSize: 12, color: hint),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     _actionRow(context, album),
-                    if (_desktop && !_albums.selecting) ...[
+                    if (_desktop && !_albums.selecting && !album.viewOnly) ...[
                       const SizedBox(height: 10),
                       _dropHint(context),
                     ],
@@ -458,7 +406,9 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                       padding: const EdgeInsets.all(24),
                       child: Text(
                         _albums.detailError ??
-                            '아직 사진·영상이 없습니다.\n+ 파일 추가로 올려 보세요.',
+                            (album.viewOnly
+                                ? '아직 사진·영상이 없습니다.'
+                                : '아직 사진·영상이 없습니다.\n+ 파일 추가로 올려 보세요.'),
                         key: const ValueKey('album-items-empty'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: hint, height: 1.5),
@@ -549,14 +499,17 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     }
     return Row(
       children: [
-        Expanded(
-          child: FilledButton.icon(
-            key: const ValueKey('album-add-files'),
-            onPressed: _pickFiles,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('파일 추가'),
+        if (album.viewOnly)
+          const Spacer()
+        else
+          Expanded(
+            child: FilledButton.icon(
+              key: const ValueKey('album-add-files'),
+              onPressed: _pickFiles,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('파일 추가'),
+            ),
           ),
-        ),
         const SizedBox(width: 8),
         OutlinedButton(
           key: const ValueKey('album-select'),
@@ -782,12 +735,13 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                   ? null
                   : () => _download(selected),
             ),
-            action(
-              key: const ValueKey('album-action-share'),
-              icon: Icons.share_outlined,
-              label: '공유',
-              onPressed: empty ? null : () => _share(album),
-            ),
+            if (album.canShare && !album.viewOnly)
+              action(
+                key: const ValueKey('album-action-share'),
+                icon: Icons.share_outlined,
+                label: '공유',
+                onPressed: empty ? null : () => _share(album),
+              ),
             if (canCover)
               action(
                 key: const ValueKey('album-action-cover'),
@@ -795,15 +749,16 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
                 label: '대표로',
                 onPressed: _setCover,
               ),
-            action(
-              key: const ValueKey('album-action-delete'),
-              icon: Icons.delete_outline,
-              label: '삭제',
-              color: Colors.redAccent,
-              onPressed: empty || !canDeleteAny
-                  ? null
-                  : () => _deleteSelected(album),
-            ),
+            if (!album.viewOnly)
+              action(
+                key: const ValueKey('album-action-delete'),
+                icon: Icons.delete_outline,
+                label: '삭제',
+                color: Colors.redAccent,
+                onPressed: empty || !canDeleteAny
+                    ? null
+                    : () => _deleteSelected(album),
+              ),
           ],
         ),
       ),

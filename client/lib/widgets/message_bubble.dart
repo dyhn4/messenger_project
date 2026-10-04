@@ -33,6 +33,7 @@ import 'message_edit_attachments.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
+import 'shared_album_card.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -668,6 +669,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                                 ),
                               ),
                             ],
+                            // "앨범 공유"로 보낸 글 — 구분선, "{팀}에서 공유된 앨범입니다.", 앨범 보기, 앨범 카드.
+                            if (!_editing && message.sharedAlbum != null)
+                              SharedAlbumSection(
+                                session: widget.session,
+                                album: message.sharedAlbum!,
+                              ),
                             // "메시지 공유"로 붙은 원본 인용 — 새로 쓴 내용(위) 아래에 구분선과 함께
                             // 붙는다(첨부 이미지 참고). 공유 당시 스냅샷이라 원본이 나중에 바뀌어도
                             // 그대로 남는다(models/message.dart 참고).

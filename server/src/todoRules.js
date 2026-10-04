@@ -26,6 +26,7 @@ export const TODO_SORTS = ['due', 'created'];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const STORED_UPLOAD_RE = /^\/uploads\/[^/\\]+$/;
 
 export function isUuid(value) {
@@ -90,6 +91,60 @@ function parseDate(raw, label) {
 export function checkDateOrder(startDate, dueDate) {
   if (startDate && dueDate && startDate > dueDate) return '시작일은 종료일보다 늦을 수 없습니다.';
   return null;
+}
+
+/** 'HH:mm'(24시간, 00:00~23:59)인지 — 날짜 칸과 같은 "그 지역의 벽시계" 시각이다. */
+export function isValidTimeString(value) {
+  return typeof value === 'string' && TIME_RE.test(value);
+}
+
+function parseTime(raw, label) {
+  if (raw === undefined || raw === null || raw === '') return { value: null };
+  if (!isValidTimeString(raw)) return { error: `${label}이 올바르지 않습니다. (HH:mm)` };
+  return { value: raw };
+}
+
+/**
+ * 기간(시작일·시작 시간 ~ 종료일·종료 시간) 검사 — 시간은 그 날짜가 있어야 하고, 두 날짜가 다 있으면 (날짜, 시간) 순으로
+ * 시작이 종료보다 늦으면 안 된다. 시간이 없는 쪽은 날짜만 비교하도록 시작은 00:00, 종료는 23:59로 본다(같은 날 시작
+ * 15:00 ~ 종료 시간 없음은 통과). 'YYYY-MM-DDTHH:mm' 문자열 비교가 곧 시각 비교다. 문제가 없으면 null.
+ */
+export function checkPeriod({ startDate = null, startTime = null, dueDate = null, dueTime = null }) {
+  if (startTime && !startDate) return '시작 시간은 시작일과 함께 정해야 합니다.';
+  if (dueTime && !dueDate) return '종료 시간은 종료일과 함께 정해야 합니다.';
+  if (startDate && dueDate && `${startDate}T${startTime ?? '00:00'}` > `${dueDate}T${dueTime ?? '23:59'}`) {
+    return startDate > dueDate ? '시작일은 종료일보다 늦을 수 없습니다.' : '시작 시간은 종료 시간보다 늦을 수 없습니다.';
+  }
+  return null;
+}
+
+/**
+ * PATCH의 기간 필드(startDate·startTime·dueDate·dueTime 중 보낸 것)를 저장된 값([stored])과 합친 결과 — 안 보낸 쪽은
+ * 저장된 값 그대로지만, 날짜를 지우면(null) 그 시간도 함께 지운다. 통과하면 `{ value: 합친 기간, columns: 쓸 컬럼 }`
+ * (columns는 보낸 필드 + 날짜를 지워 함께 지우는 시간), 아니면 `{ error }`(checkPeriod — 시간만 있고 날짜가 없음·순서).
+ */
+export function mergeTodoPeriod(stored, fields) {
+  const value = {};
+  const columns = {};
+  for (const [dateKey, timeKey] of [
+    ['startDate', 'startTime'],
+    ['dueDate', 'dueTime'],
+  ]) {
+    value[dateKey] = dateKey in fields ? fields[dateKey] : (stored?.[dateKey] ?? null);
+    if (dateKey in fields) columns[dateKey] = fields[dateKey];
+    if (timeKey in fields) {
+      value[timeKey] = fields[timeKey];
+      columns[timeKey] = fields[timeKey];
+    } else if (dateKey in fields && fields[dateKey] === null) {
+      value[timeKey] = null;
+      columns[timeKey] = null;
+    } else {
+      value[timeKey] = stored?.[timeKey] ?? null;
+    }
+  }
+  const error = checkPeriod(value);
+  if (error) return { error };
+  return { value, columns };
 }
 
 function parseAssigneeIds(raw) {
@@ -195,8 +250,9 @@ export function parseNewReminders(raw, now = Date.now()) {
 }
 
 /**
- * POST /rooms/:roomId/todos 본문 검사 — 통과하면 `{ title, description, assigneeIds, startDate, dueDate,
- * attachments, reminders(ms[]), sourceMessageId, sourceCommentId }`, 아니면 `{ error }`.
+ * POST /rooms/:roomId/todos 본문 검사 — 통과하면 `{ title, description, assigneeIds, startDate, startTime, dueDate,
+ * dueTime, attachments, reminders(ms[]), sourceMessageId, sourceCommentId }`, 아니면 `{ error }`. 시간('HH:mm')은
+ * 그 날짜가 있어야 하고, 시작은 종료보다 늦을 수 없다(checkPeriod).
  * 담당자가 그 방 멤버인지, 출처 글이 그 방의 것인지는 DB가 필요해서 todos.js가 따로 본다. [sourceFileUrls]는 출처 글에
  * 지금 붙어 있는 파일 경로들(sourceFilePaths) — 오래전에 불러온 메시지를 등록해 첨부 서명이 만료됐어도 그 파일이면 받는다.
  */
@@ -211,8 +267,17 @@ export function parseTodoCreate(body, now = Date.now(), sourceFileUrls = []) {
   if (start.error) return start;
   const due = parseDate(body?.dueDate, '종료일');
   if (due.error) return due;
-  const orderError = checkDateOrder(start.value, due.value);
-  if (orderError) return { error: orderError };
+  const startTime = parseTime(body?.startTime, '시작 시간');
+  if (startTime.error) return startTime;
+  const dueTime = parseTime(body?.dueTime, '종료 시간');
+  if (dueTime.error) return dueTime;
+  const periodError = checkPeriod({
+    startDate: start.value,
+    startTime: startTime.value,
+    dueDate: due.value,
+    dueTime: dueTime.value,
+  });
+  if (periodError) return { error: periodError };
   const attachments = parseAttachments(body?.attachments ?? [], sourceFileUrls);
   if (attachments.error) return attachments;
   const reminders = parseNewReminders(body?.reminders ?? [], now);
@@ -227,7 +292,9 @@ export function parseTodoCreate(body, now = Date.now(), sourceFileUrls = []) {
     description: description.value,
     assigneeIds: assignees.value,
     startDate: start.value,
+    startTime: startTime.value,
     dueDate: due.value,
+    dueTime: dueTime.value,
     attachments: attachments.value,
     reminders: reminders.value,
     sourceMessageId: body?.sourceMessageId ?? null,
@@ -241,7 +308,9 @@ export const PATCH_FIELDS = [
   'description',
   'assigneeIds',
   'startDate',
+  'startTime',
   'dueDate',
+  'dueTime',
   'attachments',
   'reminders',
   'progress',
@@ -250,10 +319,11 @@ export const ASSIGNEE_FORBIDDEN_FIELDS = ['assigneeIds'];
 
 /**
  * PATCH 본문 1차 검사 — 보낸 필드만 `fields`에 담는다(없는 필드는 안 바뀐다). 방을 옮기려는 시도(roomId·teamId)는
- * 거절한다. 통과하면 `{ fields: { title?, description?, assigneeIds?, startDate?, dueDate?, attachments?, reminders?, progress? } }`.
- * progress는 보내는 사람의 "내 진척률"(0·25·50·75·100 — 어디에 쓰는지는 progressTarget). reminders는 [{id?, remindAt}]
- * 그대로 두고(기존 것과 맞춰 보는 planReminders가 검사), attachments의 기존 링크 인정과 시작일≤종료일(안 보낸 쪽은
- * 저장된 값 기준)은 todos.js가 현재 값과 합쳐 다시 본다.
+ * 거절한다. 통과하면 `{ fields: { title?, description?, assigneeIds?, startDate?, startTime?, dueDate?, dueTime?,
+ * attachments?, reminders?, progress? } }`. progress는 보내는 사람의 "내 진척률"(0·25·50·75·100 — 어디에 쓰는지는
+ * progressTarget). reminders는 [{id?, remindAt}] 그대로 두고(기존 것과 맞춰 보는 planReminders가 검사), attachments의
+ * 기존 링크 인정과 기간(시간만 있고 날짜 없음·시작≤종료 — 안 보낸 쪽은 저장된 값 기준, mergeTodoPeriod)은 todos.js가
+ * 현재 값과 합쳐 다시 본다.
  */
 export function parseTodoPatch(body) {
   if (!body || typeof body !== 'object') return { error: '수정할 내용이 없습니다.' };
@@ -283,6 +353,16 @@ export function parseTodoPatch(body) {
     const r = parseDate(body.dueDate, '종료일');
     if (r.error) return r;
     fields.dueDate = r.value;
+  }
+  if ('startTime' in body) {
+    const r = parseTime(body.startTime, '시작 시간');
+    if (r.error) return r;
+    fields.startTime = r.value;
+  }
+  if ('dueTime' in body) {
+    const r = parseTime(body.dueTime, '종료 시간');
+    if (r.error) return r;
+    fields.dueTime = r.value;
   }
   if ('attachments' in body) {
     if (!Array.isArray(body.attachments)) return { error: '첨부 목록이 올바르지 않습니다.' };

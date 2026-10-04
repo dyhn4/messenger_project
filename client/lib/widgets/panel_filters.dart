@@ -6,7 +6,7 @@ import '../models/app_user.dart';
 import '../models/file_category.dart';
 import '../models/room.dart';
 import '../services/session.dart';
-import 'compact_menu.dart';
+import 'compact_menu_anchor.dart';
 import 'date_range_calendar_panel.dart';
 import 'filter_dropdown.dart';
 
@@ -338,42 +338,8 @@ List<AppUser> memberChoicesFor(
 
 // ── 정렬 · 파일 형식 메뉴 ───────────────────────────────────────────
 
-/// 설정(삼선) 메뉴와 같은 간결한 팝업 항목(작은 글씨·좁은 줄 간격·선택된 것에 체크).
-PopupMenuItem<T> _checkItem<T>(
-  BuildContext context, {
-  required T value,
-  required String label,
-  required bool selected,
-  IconData? icon,
-  Key? key,
-}) {
-  return PopupMenuItem<T>(
-    key: key,
-    value: value,
-    height: CompactMenu.itemHeight,
-    padding: CompactMenu.itemPadding,
-    child: Row(
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 16, color: Theme.of(context).hintColor),
-          const SizedBox(width: 8),
-        ],
-        Expanded(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: CompactMenu.textStyle,
-          ),
-        ),
-        if (selected) const Icon(Icons.check, size: 16),
-      ],
-    ),
-  );
-}
-
-/// 결과 정렬(최신 순/과거 순) 단추 — 누르면 메신저 "설정" 메뉴([CompactMenu])와 같은 모양의
-/// 드롭다운이 뜬다. [spaced]면 "최신 순", 아니면 "최신순"(파일·링크 패널 표기).
+/// 결과 정렬(최신 순/과거 순) 단추 — 누르면 메시지 예약 패널의 정렬 메뉴와 같은 드롭다운([CompactMenuAnchor])이
+/// 단추 오른쪽 끝에 맞춰 바로 뜬다. [spaced]면 "최신 순", 아니면 "최신순"(파일·링크 패널 표기).
 class PanelSortButton extends StatelessWidget {
   final bool newestFirst;
   final ValueChanged<bool> onChanged;
@@ -390,33 +356,19 @@ class PanelSortButton extends StatelessWidget {
     final hint = Theme.of(context).hintColor;
     final newest = spaced ? '최신 순' : '최신순';
     final oldest = spaced ? '과거 순' : '과거순';
-    return PopupMenuButton<bool>(
-      key: const ValueKey('panel-sort'),
-      tooltip: '정렬',
-      position: PopupMenuPosition.under,
-      offset: const Offset(0, 4),
-      color: CompactMenu.color(context),
-      shape: CompactMenu.shape,
-      menuPadding: CompactMenu.menuPadding,
-      constraints: const BoxConstraints(minWidth: 140, maxWidth: 200),
-      initialValue: newestFirst,
+    return CompactMenuAnchor<bool>(
+      alignEnd: true,
+      selected: newestFirst,
       onSelected: onChanged,
-      itemBuilder: (context) => [
-        _checkItem<bool>(
-          context,
-          value: true,
-          label: newest,
-          selected: newestFirst,
-        ),
-        _checkItem<bool>(
-          context,
-          value: false,
-          label: oldest,
-          selected: !newestFirst,
-        ),
+      entries: [
+        CompactMenuOption(value: true, label: newest),
+        CompactMenuOption(value: false, label: oldest),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      builder: (context, open, toggle) => _MenuLabelButton(
+        buttonKey: const ValueKey('panel-sort'),
+        tooltip: '정렬',
+        open: open,
+        onTap: toggle,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -435,55 +387,134 @@ class PanelSortButton extends StatelessWidget {
   }
 }
 
-/// 검색 범위(현재 팀 / 모든 팀) 단추 — [PanelSortButton]과 같은 폰트·크기(라벨 12px, 흐린 색)에 글자 오른쪽 꺽쇠.
-/// 누르면 같은 모양의 드롭다운이 뜬다. 가입한 팀이 하나뿐이면 호출하는 쪽이 아예 그리지 않는다.
-class PanelScopeButton extends StatelessWidget {
-  final bool allTeams;
-  final ValueChanged<bool> onChanged;
-  const PanelScopeButton({
-    super.key,
-    required this.allTeams,
-    required this.onChanged,
+/// 드롭다운을 여는 작은 글자 단추 — 툴팁, 펼침 여부(접근성), 누르기, 위아래 8·좌우 4 여백.
+class _MenuLabelButton extends StatelessWidget {
+  /// 누르는 칸(InkWell)의 키 — 테스트가 단추를 찾는 데 쓴다.
+  final Key? buttonKey;
+  final String tooltip;
+  final bool open;
+  final VoidCallback onTap;
+  final EdgeInsetsGeometry padding;
+  final Widget child;
+  const _MenuLabelButton({
+    this.buttonKey,
+    required this.tooltip,
+    required this.open,
+    required this.onTap,
+    this.padding = const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+    required this.child,
   });
 
   @override
   Widget build(BuildContext context) {
+    return Semantics(
+      expanded: open,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          key: buttonKey,
+          onTap: onTap,
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
+    );
+  }
+}
+
+/// 검색 범위(현재 팀 / 모든 팀 / ─ / 가입한 팀 이름들) 단추 — [PanelSortButton]과 같은 폰트·크기(라벨 12px,
+/// 흐린 색)에 글자 오른쪽 꺽쇠. 누르면 같은 모양의 드롭다운이 뜬다. [teams]를 주면 구분선 아래에 팀 이름이
+/// 하나씩 붙어 그 팀 하나만 골라 찾을 수 있고, 골랐으면([teamId]) 단추 글자가 그 팀 이름이 된다.
+/// 가입한 팀이 하나뿐이면 호출하는 쪽이 아예 그리지 않는다.
+class PanelScopeButton extends StatelessWidget {
+  final bool allTeams;
+  final ValueChanged<bool> onChanged;
+
+  /// 특정 팀 선택지(가입한 팀 전부) — 비어 있으면 현재 팀 / 모든 팀만.
+  final List<({String id, String name})> teams;
+
+  /// 고른 특정 팀 id — null이면 [allTeams]에 따라 현재 팀 또는 모든 팀.
+  final String? teamId;
+  final ValueChanged<String>? onTeamSelected;
+  const PanelScopeButton({
+    super.key,
+    required this.allTeams,
+    required this.onChanged,
+    this.teams = const [],
+    this.teamId,
+    this.onTeamSelected,
+  });
+
+  // 메뉴 값 — 팀 id와 겹치지 않게 콜론으로 시작한다.
+  static const _current = ':current';
+  static const _all = ':all';
+
+  /// 단추 글자 — 고른 팀이 목록에 없으면(그 사이 팀을 나간 경우 등) 현재 팀 / 모든 팀으로.
+  String get _label {
+    final id = teamId;
+    if (id != null) {
+      for (final t in teams) {
+        if (t.id == id) return t.name;
+      }
+    }
+    return allTeams ? '모든 팀' : '현재 팀';
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
-    return PopupMenuButton<bool>(
-      key: const ValueKey('panel-scope'),
-      tooltip: '검색 범위',
-      position: PopupMenuPosition.under,
-      offset: const Offset(0, 4),
-      color: CompactMenu.color(context),
-      shape: CompactMenu.shape,
-      menuPadding: CompactMenu.menuPadding,
-      constraints: const BoxConstraints(minWidth: 120, maxWidth: 200),
-      initialValue: allTeams,
-      onSelected: onChanged,
-      itemBuilder: (context) => [
-        _checkItem<bool>(
-          context,
-          value: false,
+    final picked = teamId != null && teams.any((t) => t.id == teamId);
+    final value = picked ? teamId! : (allTeams ? _all : _current);
+    return CompactMenuAnchor<String>(
+      alignEnd: true,
+      maxWidth: 220,
+      selected: value,
+      onSelected: (v) {
+        if (v == _current || v == _all) {
+          onChanged(v == _all);
+        } else {
+          onTeamSelected?.call(v);
+        }
+      },
+      entries: [
+        const CompactMenuOption(
+          key: ValueKey('panel-scope-current'),
+          value: _current,
           label: '현재 팀',
-          selected: !allTeams,
         ),
-        _checkItem<bool>(
-          context,
-          value: true,
+        const CompactMenuOption(
+          key: ValueKey('panel-scope-all'),
+          value: _all,
           label: '모든 팀',
-          selected: allTeams,
         ),
+        if (teams.isNotEmpty && onTeamSelected != null) ...[
+          const CompactMenuDivider(),
+          for (final t in teams)
+            CompactMenuOption(
+              key: ValueKey('panel-scope-team-${t.id}'),
+              value: t.id,
+              label: t.name,
+            ),
+        ],
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      builder: (context, open, toggle) => _MenuLabelButton(
+        buttonKey: const ValueKey('panel-scope'),
+        tooltip: '검색 범위',
+        open: open,
+        onTap: toggle,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              allTeams ? '모든 팀' : '현재 팀',
-              style: Theme.of(
-                context,
-              ).textTheme.labelMedium?.copyWith(color: hint),
+            // 팀 이름이 길면 말줄임 — 탭 줄·결과 줄을 밀어내지 않게.
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: Text(
+                _label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: hint),
+              ),
             ),
             Icon(Icons.keyboard_arrow_down, size: 16, color: hint),
           ],
@@ -493,7 +524,8 @@ class PanelScopeButton extends StatelessWidget {
   }
 }
 
-/// 파일 형식 메뉴(전체 파일 / 이미지 / 문서 / … / 기타) — [child]를 누르면 설정 메뉴 모양의 팝업이 뜬다.
+/// 파일 형식 메뉴(전체 파일 / 이미지 / 문서 / … / 기타) — [child]를 누르면 정렬 메뉴와 같은 모양의 드롭다운
+/// ([CompactMenuAnchor], 항목마다 형식 아이콘)이 뜬다.
 class FileCategoryMenu extends StatelessWidget {
   final FileCategory selected;
   final ValueChanged<FileCategory> onSelected;
@@ -509,29 +541,27 @@ class FileCategoryMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<FileCategory>(
-      key: const ValueKey('panel-file-kind'),
-      tooltip: tooltip,
-      position: PopupMenuPosition.under,
-      offset: const Offset(0, 4),
-      color: CompactMenu.color(context),
-      shape: CompactMenu.shape,
-      menuPadding: CompactMenu.menuPadding,
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 220),
-      padding: EdgeInsets.zero,
+    return CompactMenuAnchor<FileCategory>(
+      maxWidth: 220,
+      selected: selected,
       onSelected: onSelected,
-      itemBuilder: (context) => [
+      entries: [
         for (final c in FileCategory.values)
-          _checkItem<FileCategory>(
-            context,
+          CompactMenuOption(
             key: ValueKey('file-kind-${c.name}'),
             value: c,
             label: c.label,
             icon: c.icon,
-            selected: selected == c,
           ),
       ],
-      child: child,
+      builder: (context, open, toggle) => _MenuLabelButton(
+        buttonKey: const ValueKey('panel-file-kind'),
+        tooltip: tooltip,
+        open: open,
+        onTap: toggle,
+        padding: EdgeInsets.zero,
+        child: child,
+      ),
     );
   }
 }
@@ -825,6 +855,62 @@ class PanelResultLine extends StatelessWidget {
             range,
           ],
         ],
+      ),
+    );
+  }
+}
+
+// ── 종류 ────────────────────────────────────────────────────────────
+
+/// 종류(전체 / 메시지 / 댓글 …) 고르기 단추 — 즐겨찾기·내가 쓴 글 패널이 정렬 단추 줄 왼쪽 끝에 둔다. [PanelSortButton]과
+/// 같은 폰트·크기(라벨 12px, 흐린 색)에 글자 오른쪽 꺽쇠, 누르면 같은 모양의 드롭다운(설정 메뉴 모양, 지금 종류에 체크)이
+/// 뜬다. [values]에 null(전체)이 들어 있어도 되게 메뉴 값은 순번으로 다룬다.
+class PanelKindButton<T> extends StatelessWidget {
+  final List<T> values;
+  final T selected;
+  final String Function(T value) labelOf;
+  final ValueChanged<T> onChanged;
+  final String tooltip;
+
+  /// 메뉴 항목마다 붙일 키(테스트가 항목을 찾는 데 쓴다).
+  final Key? Function(T value)? itemKey;
+  const PanelKindButton({
+    super.key,
+    required this.values,
+    required this.selected,
+    required this.labelOf,
+    required this.onChanged,
+    this.tooltip = '종류',
+    this.itemKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final current = values.indexOf(selected);
+    return CompactMenuAnchor<int>(
+      selected: current < 0 ? null : current,
+      onSelected: (i) => onChanged(values[i]),
+      entries: [
+        for (final (i, v) in values.indexed)
+          CompactMenuOption(key: itemKey?.call(v), value: i, label: labelOf(v)),
+      ],
+      builder: (context, open, toggle) => _MenuLabelButton(
+        tooltip: tooltip,
+        open: open,
+        onTap: toggle,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              labelOf(selected),
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: hint),
+            ),
+            Icon(Icons.keyboard_arrow_down, size: 16, color: hint),
+          ],
+        ),
       ),
     );
   }

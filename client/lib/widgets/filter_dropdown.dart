@@ -190,6 +190,9 @@ class RoomFilterButton extends StatelessWidget {
   /// 펼침 패널 첫 줄(방을 고르지 않음)의 글자 — 안 주면 `전체`. 할 일 패널은 단추와 같은 `참여한 대화방`(잔디의 보기
   /// `참여한 대화방 / 특정 대화방` — 고른 줄과 단추 글자가 맞게).
   final String? allOptionLabel;
+
+  /// 펼침 패널에 보일 방의 팀 — 안 주면 지금 팀(검색 패널에서 특정 팀을 골랐으면 그 팀).
+  final String? teamId;
   final ValueChanged<String?> onSelected;
   const RoomFilterButton({
     super.key,
@@ -199,6 +202,7 @@ class RoomFilterButton extends StatelessWidget {
     this.alignEnd = false,
     this.allLabel = '참여 대화방',
     this.allOptionLabel,
+    this.teamId,
     required this.onSelected,
   });
 
@@ -227,6 +231,7 @@ class RoomFilterButton extends StatelessWidget {
           session: session,
           selectedRoomId: selectedRoomId,
           allLabel: allOptionLabel ?? '전체',
+          teamId: teamId,
           onSelected: (id) {
             onSelected(id);
             close();
@@ -243,11 +248,13 @@ class _RoomFilterPanel extends StatefulWidget {
 
   /// 첫 줄(방을 고르지 않음)의 글자.
   final String allLabel;
+  final String? teamId; // null이면 지금 팀.
   final ValueChanged<String?> onSelected;
   const _RoomFilterPanel({
     required this.session,
     required this.selectedRoomId,
     required this.allLabel,
+    this.teamId,
     required this.onSelected,
   });
 
@@ -268,7 +275,7 @@ class _RoomFilterPanelState extends State<_RoomFilterPanel> {
   @override
   Widget build(BuildContext context) {
     final myId = widget.session.userId ?? '';
-    final teamId = widget.session.currentTeam?.id;
+    final teamId = widget.teamId ?? widget.session.currentTeam?.id;
     final rooms = widget.session.rooms
         // 비밀 대화는 검색/파일 목록 자체가 안 되므로(요구사항) 방 범위 선택지에도
         // 노출하지 않는다 — 서버 쪽도 별도로 막고 있다(server/src/db/queries/messages.js).

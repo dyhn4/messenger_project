@@ -248,7 +248,8 @@ export function createPollsRouter(io) {
     );
   });
 
-  // 투표 목록 패널 — 이 팀에서 내가 멤버인 방(비밀 대화 제외)의 투표를 만든 시각순으로, 필터·무한 스크롤.
+  // 투표 목록 패널 — 이 팀에서 내가 멤버인 방(비밀 대화 제외)의 투표를 만든 시각순(기본) 또는 기한 순(sort=deadline)으로,
+  // 필터·무한 스크롤(nextBefore 커서는 두 정렬 모두 "<정렬 키>:<pollId>" — pollListRules.js).
   // 각 항목은 방 메시지 DTO(poll은 보는 사람 기준 myOptionIds/favorite 포함)에 roomName(받는 사람 기준 표시 이름)을 더한 것.
   router.get('/polls', async (req, res) => {
     const q = parsePollListQuery(req.query);
@@ -276,7 +277,7 @@ export function createPollsRouter(io) {
       })),
       hasMore,
       total,
-      nextBefore: hasMore && last ? formatCursor(Number(last.pollMs), last.pollId) : null,
+      nextBefore: hasMore && last ? formatCursor(Number(last.cursorKey), last.pollId) : null,
     });
   });
 

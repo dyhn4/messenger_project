@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import 'app_user.dart';
@@ -10,9 +11,28 @@ const todoAssigneesMaxCount = 30;
 const todoAttachmentsMaxCount = 30;
 const todoRemindersMaxCount = 5;
 
-/// 기한 기준 알림("기한 하루 전"·"기한 1시간 전")에서 기한일을 몇 시로 칠지 — 기한은 날짜만 있어서, 업무 시간이 끝나는
-/// 오후 6시를 기한 시각으로 본다(전날 오후 6시 / 기한일 오후 5시에 울린다).
+/// 기한 기준 알림("기한 하루 전"·"기한 1시간 전")에서 종료 시간이 없는 기한일을 몇 시로 칠지 — 업무 시간이 끝나는
+/// 오후 6시를 기한 시각으로 본다(전날 오후 6시 / 기한일 오후 5시에 울린다). 종료 시간이 있으면 그 시각이 기준이다.
 const todoDueHour = 18;
+
+/// 시작/종료 시간 고르기의 간격(분) — 오전 12:00 … 오후 11:45.
+const todoTimeSlotMinutes = 15;
+
+/// 할 일 화면이 "지금"으로 읽는 시계 — 테스트가 바꿔 끼운다(날짜를 새로 고를 때 채우는 시간이 지금에 따라 달라서).
+@visibleForTesting
+DateTime Function() todoClock = DateTime.now;
+
+/// 시작일·종료일을 새로 고를 때(그 시간이 비어 있으면) 채우는 시간(자정부터 분) — **지금 이후의 가장 가까운 15분 단위**
+/// (이미 15분 단위면 그대로, 자정을 넘기면 오후 11:45). `시간 없음`으로 바꿀 수 있다.
+int todoDefaultTimeMinutes([DateTime? now]) {
+  final t = now ?? todoClock();
+  final exact = t.second == 0 && t.millisecond == 0 && t.microsecond == 0;
+  final minutes = t.hour * 60 + t.minute;
+  final up = minutes % todoTimeSlotMinutes == 0 && exact
+      ? minutes
+      : (minutes ~/ todoTimeSlotMinutes + 1) * todoTimeSlotMinutes;
+  return up < 24 * 60 ? up : 24 * 60 - todoTimeSlotMinutes;
+}
 
 /// 진척률로 고를 수 있는 값 — 대기 0, 진행 25·50·75, 완료 100(서버가 이 값만 받는다).
 const todoProgressSteps = [0, 25, 50, 75, 100];
@@ -111,11 +131,33 @@ String formatTodoDate(DateTime d) =>
     '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}';
 
 /// 알림 시각 표기 `yyyy/MM/dd 오전|오후 h:mm`.
-String formatTodoDateTime(DateTime t) {
-  final hour12 = t.hour % 12 == 0 ? 12 : t.hour % 12;
-  final ampm = t.hour < 12 ? '오전' : '오후';
-  return '${formatTodoDate(t)} $ampm $hour12:${t.minute.toString().padLeft(2, '0')}';
+String formatTodoDateTime(DateTime t) =>
+    '${formatTodoDate(t)} ${formatTodoClock(t.hour * 60 + t.minute)}';
+
+/// 시각(자정부터 분) 표기 `오전|오후 h:mm` — 0 → `오전 12:00`, 12:00 → `오후 12:00`.
+String formatTodoClock(int minutes) {
+  final hour = minutes ~/ 60 % 24;
+  final hour12 = hour % 12 == 0 ? 12 : hour % 12;
+  final ampm = hour < 12 ? '오전' : '오후';
+  return '$ampm $hour12:${(minutes % 60).toString().padLeft(2, '0')}';
 }
+
+/// 'HH:mm'(24시간 — 서버의 startTime·dueTime) → 자정부터 분. 못 읽으면 null.
+int? parseTodoTime(String? hhmm) {
+  if (hhmm == null) return null;
+  final m = RegExp(r'^([01]\d|2[0-3]):([0-5]\d)$').firstMatch(hhmm);
+  if (m == null) return null;
+  return int.parse(m.group(1)!) * 60 + int.parse(m.group(2)!);
+}
+
+/// 자정부터 분 → 서버에 보내는 'HH:mm'.
+String todoTimeWire(int minutes) =>
+    '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+/// 날짜(+시각) 표기 — 시각([minutes])이 있으면 `yyyy/MM/dd 오전|오후 h:mm`, 없으면 `yyyy/MM/dd`.
+String formatTodoDay(DateTime date, int? minutes) => minutes == null
+    ? formatTodoDate(date)
+    : formatTodoDateTime(DateTime(date.year, date.month, date.day, 0, minutes));
 
 /// 할 일 일정(달력)이 [month]에 그리는 칸의 범위 — 그 달 1일이 있는 주의 일요일부터 6주(42일). 끝 날도 범위에 든다
 /// (`GET /api/todos`의 from/to로 그대로 보낸다).
@@ -220,6 +262,10 @@ class Todo {
   final String? startDate;
   final String? dueDate;
 
+  /// 그 날짜의 시각 'HH:mm'(24시간, 날짜와 같은 그 지역의 벽시계 값) — 날짜가 있을 때만 있고, 없으면 날짜만의 기간.
+  final String? startTime;
+  final String? dueTime;
+
   /// 전체(집계) 진척률 — 담당자가 있으면 서버가 담당자들의 진척률로 다시 계산한 값(모두 100 → 100, 모두 0 → 0,
   /// 그 밖은 평균을 1~99로), 없으면 만든 사람이 정한 값.
   final int progress;
@@ -263,6 +309,8 @@ class Todo {
     this.description,
     this.startDate,
     this.dueDate,
+    this.startTime,
+    this.dueTime,
     this.progress = 0,
     this.completedAt,
     this.creator,
@@ -288,7 +336,12 @@ class Todo {
   DateTime? get start => parseTodoDate(startDate);
   DateTime? get due => parseTodoDate(dueDate);
 
-  /// 기한이 오늘보다 앞서고 아직 끝나지 않았는가 — 목록·상세에서 기한을 빨갛게 보여 준다.
+  /// 시작/종료 시간(자정부터 분) — 날짜가 없거나 시간이 없으면 null.
+  int? get startMinutes => startDate == null ? null : parseTodoTime(startTime);
+  int? get dueMinutes => dueDate == null ? null : parseTodoTime(dueTime);
+
+  /// 기한이 지났고 아직 끝나지 않았는가 — 목록·상세에서 기한을 빨갛게 보여 준다. 종료 시간이 있으면 그 시각이 지난 때,
+  /// 없으면 기한일이 다 지난(오늘보다 앞선) 때.
   bool isOverdue([DateTime? now]) => isOverdueFor(progress, now);
 
   /// [isOverdue]를 다른 진척률 기준으로 — 목록이 보는 관점(내 것·고른 담당자의 것)으로 "아직 안 끝남"을 따질 때.
@@ -296,6 +349,10 @@ class Todo {
     final d = due;
     if (d == null || progress >= 100) return false;
     final base = now ?? DateTime.now();
+    final minutes = dueMinutes;
+    if (minutes != null) {
+      return DateTime(d.year, d.month, d.day, 0, minutes).isBefore(base);
+    }
     return d.isBefore(DateTime(base.year, base.month, base.day));
   }
 
@@ -323,6 +380,8 @@ class Todo {
     description: description,
     startDate: startDate,
     dueDate: dueDate,
+    startTime: startTime,
+    dueTime: dueTime,
     progress: progress ?? this.progress,
     completedAt: completedAt,
     creator: creator,
@@ -342,16 +401,17 @@ class Todo {
     updatedAt: updatedAt,
   );
 
-  /// 카드 한 칸의 기한 문구 — `~ 2026/10/05`(시작일이 있으면 `2026/10/01 ~ 2026/10/05`).
+  /// 카드·상세·일정의 기간 문구 — `~ 2026/10/05`(시작일이 있으면 `2026/10/01 ~ 2026/10/05`). 시간이 있으면 그 날짜
+  /// 뒤에 붙는다(`2026/10/01 오후 3:00 ~ 2026/10/02 오후 6:00` — 한쪽만 있으면 그쪽만).
   String? get periodText {
     final s = start;
     final d = due;
     if (s == null && d == null) return null;
-    if (s != null && d != null) {
-      return '${formatTodoDate(s)} ~ ${formatTodoDate(d)}';
-    }
-    if (d != null) return '~ ${formatTodoDate(d)}';
-    return '${formatTodoDate(s!)} ~';
+    final from = s == null ? null : formatTodoDay(s, startMinutes);
+    final to = d == null ? null : formatTodoDay(d, dueMinutes);
+    if (from != null && to != null) return '$from ~ $to';
+    if (to != null) return '~ $to';
+    return '$from ~';
   }
 
   /// 전체 진척률의 상태 문구 — 대기 / 진행 40% / 완료([todoProgressText]).
@@ -388,6 +448,9 @@ class Todo {
       description: json['description'] as String?,
       startDate: json['startDate'] as String?,
       dueDate: json['dueDate'] as String?,
+      // 예전 서버 응답(시간 칸 없음)이면 null — 날짜만의 기간.
+      startTime: json['startTime'] as String?,
+      dueTime: json['dueTime'] as String?,
       progress: (json['progress'] as num?)?.toInt() ?? 0,
       completedAt: time(json['completedAt']),
       creator: user(json['creator']),
@@ -466,12 +529,47 @@ class TodoDraftCheck {
       remindersError == null;
 }
 
+/// 기간 검사(서버 checkPeriod와 같다) — 두 날짜가 다 있으면 (날짜, 시간) 순으로 시작이 종료보다 늦으면 안 된다. 시간이
+/// 없는 쪽은 날짜만 비교하도록 시작은 00:00, 종료는 23:59로 본다. 문제가 없으면 null.
+String? todoPeriodError({
+  DateTime? start,
+  int? startMinutes,
+  DateTime? due,
+  int? dueMinutes,
+}) {
+  if (start == null || due == null) return null;
+  final from = DateTime(
+    start.year,
+    start.month,
+    start.day,
+    0,
+    startMinutes ?? 0,
+  );
+  final to = DateTime(
+    due.year,
+    due.month,
+    due.day,
+    0,
+    dueMinutes ?? 23 * 60 + 59,
+  );
+  if (!from.isAfter(to)) return null;
+  return DateTime(
+        start.year,
+        start.month,
+        start.day,
+      ).isAfter(DateTime(due.year, due.month, due.day))
+      ? '시작일은 종료일보다 늦을 수 없습니다.'
+      : '시작 시간은 종료 시간보다 늦을 수 없습니다.';
+}
+
 /// 서버가 받아 줄 입력인지 미리 본다(서버도 같은 값으로 다시 검사한다). 제목은 공백만이면 비어 있는 것으로 본다.
 TodoDraftCheck checkTodoDraft({
   required String title,
   String description = '',
   DateTime? start,
   DateTime? due,
+  int? startMinutes,
+  int? dueMinutes,
   int attachmentCount = 0,
   int assigneeCount = 0,
   int reminderCount = 0,
@@ -487,9 +585,12 @@ TodoDraftCheck checkTodoDraft({
         description.trim().characters.length > todoDescriptionMaxLength
         ? '설명은 $todoDescriptionMaxLength자 이내로 입력하세요.'
         : null,
-    periodError: start != null && due != null && start.isAfter(due)
-        ? '시작일은 종료일보다 늦을 수 없습니다.'
-        : null,
+    periodError: todoPeriodError(
+      start: start,
+      startMinutes: startMinutes,
+      due: due,
+      dueMinutes: dueMinutes,
+    ),
     attachmentsError: attachmentCount > todoAttachmentsMaxCount
         ? '첨부 파일은 $todoAttachmentsMaxCount개까지 올릴 수 있습니다.'
         : null,
@@ -514,10 +615,16 @@ String todoTitleFromText(String? text) {
       : first;
 }
 
-/// 기한 기준 알림 시각 — [dueDate]의 [todoDueHour]시를 기한 시각으로 보고 [before]만큼 앞선 때.
-DateTime todoReminderBeforeDue(DateTime dueDate, Duration before) => DateTime(
+/// 기한 기준 알림 시각 — [dueDate]의 종료 시간([dueMinutes], 자정부터 분)을 기한 시각으로 보고(없으면 [todoDueHour]시)
+/// [before]만큼 앞선 때.
+DateTime todoReminderBeforeDue(
+  DateTime dueDate,
+  Duration before, {
+  int? dueMinutes,
+}) => DateTime(
   dueDate.year,
   dueDate.month,
   dueDate.day,
-  todoDueHour,
+  0,
+  dueMinutes ?? todoDueHour * 60,
 ).subtract(before);

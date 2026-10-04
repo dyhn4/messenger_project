@@ -132,11 +132,14 @@ class _AlbumEditorState extends State<AlbumEditor> {
     try {
       final Album result;
       if (_isEdit) {
-        await albums.updateAlbum(
-          title: _title.text,
-          description: _description.text,
-        );
-        result = albums.album ?? widget.editing!;
+        // 목록 카드의 ⋯ 메뉴에서는 열지 않은 앨범을 고치므로 id를 꼭 준다.
+        result =
+            await albums.updateAlbum(
+              albumId: widget.editing!.id,
+              title: _title.text,
+              description: _description.text,
+            ) ??
+            widget.editing!;
       } else {
         result = await albums.createAlbum(
           _room!.id,
@@ -192,7 +195,7 @@ class _AlbumEditorState extends State<AlbumEditor> {
     );
   }
 
-  String get _heading => _isEdit ? '앨범 수정' : '앨범 만들기';
+  String get _heading => _isEdit ? '앨범 수정' : '앨범 생성';
 
   Widget _submitButton() => FilledButton(
     key: const ValueKey('album-editor-submit'),

@@ -6,9 +6,12 @@ import {
   aggregateProgress,
   aggregateResync,
   checkDateOrder,
+  checkPeriod,
   diffAssignees,
   isValidDateString,
   isValidProgress,
+  isValidTimeString,
+  mergeTodoPeriod,
   myProgressOf,
   nearestProgressStep,
   newlyAssigned,
@@ -98,6 +101,87 @@ test('parseTodoCreate: 날짜 형식·순서', () => {
   assert.equal(ok.startDate, '2026-10-01');
   assert.equal(ok.dueDate, '2026-10-05');
   assert.equal(parseTodoCreate({ title: 't', dueDate: '2026-10-05' }, NOW).startDate, null);
+});
+
+test('isValidTimeString: HH:mm 24시간 00:00~23:59만', () => {
+  for (const ok of ['00:00', '09:05', '12:30', '23:59']) assert.ok(isValidTimeString(ok), ok);
+  for (const bad of ['24:00', '9:00', '09:60', '0900', '09:00:00', '', null, 900]) {
+    assert.ok(!isValidTimeString(bad), String(bad));
+  }
+});
+
+test('checkPeriod: 시간은 날짜와 함께, 시작은 종료보다 늦을 수 없음(없는 시간은 시작 00:00 / 종료 23:59)', () => {
+  assert.equal(checkPeriod({}), null);
+  assert.ok(checkPeriod({ startTime: '09:00' }));
+  assert.ok(checkPeriod({ dueTime: '18:00', startDate: '2026-10-01' }));
+  assert.equal(checkPeriod({ startDate: '2026-10-01', startTime: '09:00' }), null);
+  assert.equal(checkPeriod({ dueDate: '2026-10-01', dueTime: '00:00' }), null);
+  // 같은 날 — 시간으로 비교.
+  const day = '2026-10-01';
+  assert.equal(checkPeriod({ startDate: day, startTime: '09:00', dueDate: day, dueTime: '09:00' }), null);
+  assert.equal(checkPeriod({ startDate: day, startTime: '09:00', dueDate: day, dueTime: '18:00' }), null);
+  assert.ok(checkPeriod({ startDate: day, startTime: '18:00', dueDate: day, dueTime: '09:00' }));
+  // 한쪽 시간이 없으면 날짜만 비교한 것과 같다.
+  assert.equal(checkPeriod({ startDate: day, startTime: '23:59', dueDate: day }), null);
+  assert.equal(checkPeriod({ startDate: day, dueDate: day, dueTime: '00:00' }), null);
+  // 다른 날 — 날짜가 앞서면 시간은 상관없음, 날짜가 뒤면 거절.
+  assert.equal(checkPeriod({ startDate: day, startTime: '23:00', dueDate: '2026-10-02', dueTime: '01:00' }), null);
+  assert.equal(
+    checkPeriod({ startDate: '2026-10-02', startTime: '00:00', dueDate: day, dueTime: '23:59' }),
+    '시작일은 종료일보다 늦을 수 없습니다.',
+  );
+});
+
+test('parseTodoCreate: 시작/종료 시간 — 형식·날짜 없는 시간·순서', () => {
+  const ok = parseTodoCreate(
+    { title: 't', startDate: '2026-10-01', startTime: '15:00', dueDate: '2026-10-02', dueTime: '18:00' },
+    NOW,
+  );
+  assert.equal(ok.startTime, '15:00');
+  assert.equal(ok.dueTime, '18:00');
+  const none = parseTodoCreate({ title: 't', startDate: '2026-10-01', startTime: null }, NOW);
+  assert.equal(none.startTime, null);
+  assert.equal(none.dueTime, null);
+  assert.ok(parseTodoCreate({ title: 't', startDate: '2026-10-01', startTime: '25:00' }, NOW).error);
+  assert.ok(parseTodoCreate({ title: 't', startTime: '09:00' }, NOW).error);
+  assert.ok(parseTodoCreate({ title: 't', startDate: '2026-10-01', dueTime: '09:00' }, NOW).error);
+  const day = '2026-10-01';
+  assert.ok(parseTodoCreate({ title: 't', startDate: day, startTime: '18:00', dueDate: day, dueTime: '09:00' }, NOW).error);
+});
+
+test('parseTodoPatch: startTime/dueTime은 형식만 보고 보낸 것만 담는다(null은 지우기)', () => {
+  assert.deepEqual(parseTodoPatch({ startTime: '09:30' }).fields, { startTime: '09:30' });
+  assert.deepEqual(parseTodoPatch({ dueTime: null }).fields, { dueTime: null });
+  assert.ok(parseTodoPatch({ dueTime: '9:30' }).error);
+});
+
+test('mergeTodoPeriod: 안 보낸 쪽은 저장된 값, 날짜를 지우면 그 시간도 지움, 날짜 없는 시간·순서는 거절', () => {
+  const stored = { startDate: '2026-10-01', startTime: '09:00', dueDate: '2026-10-02', dueTime: '18:00' };
+  // 시간만 바꾸기.
+  let r = mergeTodoPeriod(stored, { dueTime: '20:00' });
+  assert.deepEqual(r.value, { ...stored, dueTime: '20:00' });
+  assert.deepEqual(r.columns, { dueTime: '20:00' });
+  // 날짜만 바꾸면 시간은 그대로(컬럼에도 안 들어감).
+  r = mergeTodoPeriod(stored, { dueDate: '2026-10-05' });
+  assert.equal(r.value.dueTime, '18:00');
+  assert.deepEqual(r.columns, { dueDate: '2026-10-05' });
+  // 날짜를 지우면 시간도 지운다.
+  r = mergeTodoPeriod(stored, { startDate: null });
+  assert.equal(r.value.startTime, null);
+  assert.deepEqual(r.columns, { startDate: null, startTime: null });
+  r = mergeTodoPeriod(stored, { startDate: null, dueDate: null });
+  assert.deepEqual(r.columns, { startDate: null, startTime: null, dueDate: null, dueTime: null });
+  // 날짜를 지우면서 시간을 주면 거절, 날짜가 없는 할 일에 시간만 주면 거절.
+  assert.ok(mergeTodoPeriod(stored, { startDate: null, startTime: '09:00' }).error);
+  assert.ok(mergeTodoPeriod({ startDate: null, dueDate: null }, { dueTime: '09:00' }).error);
+  // 저장된 쪽과 합쳐 순서를 본다 — 같은 날로 당기면 시간으로.
+  assert.ok(mergeTodoPeriod(stored, { dueDate: '2026-10-01', dueTime: '08:00' }).error);
+  assert.ok(mergeTodoPeriod(stored, { dueDate: '2026-10-01' }).value);
+  assert.ok(mergeTodoPeriod({ ...stored, dueDate: '2026-10-01', dueTime: null }, { startTime: '23:59' }).value);
+  // 시간 칸이 없던 예전 행(undefined)도 null로.
+  r = mergeTodoPeriod({ startDate: '2026-10-01', dueDate: null }, { title: 'x' });
+  assert.deepEqual(r.value, { startDate: '2026-10-01', startTime: null, dueDate: null, dueTime: null });
+  assert.deepEqual(r.columns, {});
 });
 
 test('parseTodoCreate: 알림은 미래 시각 최대 5개, 중복은 하나로', () => {

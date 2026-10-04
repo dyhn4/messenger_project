@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { compareByCursor, formatCursor, parseCursor } from '../src/pageCursor.js';
 import {
+  DEADLINE_CLOSED_BASE,
   POLL_LIST_DEFAULT_LIMIT,
   POLL_LIST_MAX_LIMIT,
+  compareByDeadline,
   parsePollListQuery,
+  pollDeadlineKey,
+  pollEndMs,
   pollIsClosedAt,
   pollMatchesFilter,
 } from '../src/pollListRules.js';
@@ -24,6 +28,7 @@ test('parsePollListQuery: teamId는 UUID여야 하고, 나머지는 기본값이
   assert.equal(ok.since, null);
   assert.equal(ok.until, null);
   assert.equal(ok.cursor, null);
+  assert.equal(ok.sort, 'created');
   assert.ok(parsePollListQuery({}).error);
   assert.ok(parsePollListQuery({ teamId: 'nope' }).error);
 });
@@ -109,6 +114,82 @@ test('pollMatchesFilter: 상태·참여·작성자·방·기간을 모두 만족
   assert.equal(pollMatchesFilter(open, f({ since: new Date(5001) }), { now }), false);
   assert.equal(pollMatchesFilter(open, f({ until: new Date(5000) }), { now }), true);
   assert.equal(pollMatchesFilter(open, f({ until: new Date(4999) }), { now }), false);
+});
+
+test('parsePollListQuery: sort는 created|deadline(기본 created, 빈 문자열은 안 준 것과 같다)', () => {
+  assert.equal(parsePollListQuery({ teamId: TEAM, sort: 'deadline' }).sort, 'deadline');
+  assert.equal(parsePollListQuery({ teamId: TEAM, sort: 'created' }).sort, 'created');
+  assert.equal(parsePollListQuery({ teamId: TEAM, sort: '' }).sort, 'created');
+  assert.ok(parsePollListQuery({ teamId: TEAM, sort: 'title' }).error);
+  // 기한 순 커서도 "<키>:<id>" — 마감된 쪽 키(1e14 근처)도 그대로 읽힌다.
+  const key = DEADLINE_CLOSED_BASE - 1700000000000;
+  assert.deepEqual(parsePollListQuery({ teamId: TEAM, sort: 'deadline', before: `${key}:${USER}` }).cursor, {
+    ms: key,
+    id: USER,
+  });
+});
+
+test('pollEndMs · pollDeadlineKey: 진행 중은 마감 시각, 마감됨은 기준값 - 끝난 시각(일찍 마감이면 마감한 시각)', () => {
+  const now = 1_700_000_000_000;
+  const open = { closedAt: null, closesAt: new Date(now + 5000) };
+  const expired = { closedAt: null, closesAt: new Date(now - 5000) };
+  const early = { closedAt: new Date(now - 100), closesAt: new Date(now + 9000) };
+  assert.equal(pollEndMs(open), now + 5000);
+  assert.equal(pollEndMs(early), now - 100);
+  assert.equal(pollDeadlineKey(open, now), now + 5000);
+  assert.equal(pollDeadlineKey(expired, now), DEADLINE_CLOSED_BASE - (now - 5000));
+  assert.equal(pollDeadlineKey(early, now), DEADLINE_CLOSED_BASE - (now - 100));
+  // 진행 중인 어떤 투표(2100년 마감)라도 마감된 투표보다 앞이다.
+  const far = { closedAt: null, closesAt: new Date(Date.UTC(2100, 0, 1)) };
+  assert.ok(pollDeadlineKey(far, now) < pollDeadlineKey(early, now));
+  assert.ok(Number.isSafeInteger(DEADLINE_CLOSED_BASE));
+});
+
+test('기한 순: 진행 중(마감 가까운 순) → 마감됨(최근에 끝난 순), 같은 키는 id 순', () => {
+  const now = 1_000_000;
+  const p = (id, closesAt, closedAt = null) => ({ id, closesAt: new Date(closesAt), closedAt: closedAt && new Date(closedAt) });
+  const polls = [
+    p('a', now + 300),
+    p('b', now - 50), // 마감(최근)
+    p('c', now + 100),
+    p('d', now - 900), // 마감(오래전)
+    p('e', now + 9000, now - 10), // 일찍 마감(가장 최근)
+    p('f', now + 100), // c와 같은 마감 시각 → id 순
+  ];
+  const sorted = [...polls].sort(compareByDeadline(now)).map((x) => x.id);
+  assert.deepEqual(sorted, ['c', 'f', 'a', 'e', 'b', 'd']);
+});
+
+test('기한 순 쪽 나누기: "키:id" 커서로 이어 받으면 빠지거나 겹치는 것 없이 전부 나온다', () => {
+  const now = 5_000_000;
+  const all = [];
+  for (let i = 0; i < 23; i++) {
+    const id = `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+    // 같은 마감 시각이 여럿(i % 4), 절반은 마감됨.
+    const closesAt = i % 2 === 0 ? now + 1000 * (i % 4) + 1 : now - 1000 * (i % 4) - 1;
+    all.push({ id, closesAt: new Date(closesAt), closedAt: null });
+  }
+  const expected = [...all].sort(compareByDeadline(now)).map((x) => x.id);
+  // SQL의 커서 조건과 같은 규칙: 키가 크거나, 같으면 id가 크다.
+  const pageAfter = (cursor, limit) =>
+    [...all]
+      .sort(compareByDeadline(now))
+      .filter((x) => {
+        if (!cursor) return true;
+        const k = pollDeadlineKey(x, now);
+        return k > cursor.ms || (k === cursor.ms && x.id > cursor.id);
+      })
+      .slice(0, limit);
+  const seen = [];
+  let cursor = null;
+  for (let guard = 0; guard < 10; guard++) {
+    const page = pageAfter(cursor, 5);
+    seen.push(...page.map((x) => x.id));
+    if (page.length < 5) break;
+    const last = page[page.length - 1];
+    cursor = parseCursor(formatCursor(pollDeadlineKey(last, now), last.id));
+  }
+  assert.deepEqual(seen, expected);
 });
 
 test('커서: formatCursor ↔ parseCursor 왕복, 정렬 비교는 (시각, id) 순', () => {

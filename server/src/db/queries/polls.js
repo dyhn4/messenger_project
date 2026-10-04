@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { afterCursor, cursorOrder, epochMs } from './cursorSql.js';
+import { DEADLINE_CLOSED_BASE } from '../../pollListRules.js';
 import {
   dmHistoryFloors,
   messageAttachments,
@@ -158,10 +159,12 @@ export async function listFavoritePolls(userId, teamId) {
 }
 
 /**
- * 투표 목록 패널(`GET /api/polls`) — 이 팀에서 내가 아직 멤버인 방(비밀 대화 제외)의, 지워지지 않은 투표를 만든 시각순으로.
- * [q]는 pollListRules.js의 parsePollListQuery 결과(status·participated·creatorId·roomId·since/until·order·cursor).
- * 기간·커서·정렬은 모두 투표를 만든 시각(polls.created_at) 기준이다. DM "진짜 나가기" 이전 투표는 다른 조회와 같은 하한으로 뺀다.
- * 돌려주는 값: `{ rows: [{ message, room, pollId, pollMs }](limit + 1개까지), total }` — total은 커서와 상관없이 조건에 맞는 전체 개수.
+ * 투표 목록 패널(`GET /api/polls`) — 이 팀에서 내가 아직 멤버인 방(비밀 대화 제외)의, 지워지지 않은 투표를 만든 시각순(기본)
+ * 또는 기한 순(`sort=deadline`)으로. [q]는 pollListRules.js의 parsePollListQuery 결과(status·participated·creatorId·roomId·
+ * since/until·sort·order·cursor). 기간은 투표를 만든 시각(polls.created_at) 기준이고 since/until이 없으면 전체 기간이다.
+ * DM "진짜 나가기" 이전 투표는 다른 조회와 같은 하한으로 뺀다.
+ * 돌려주는 값: `{ rows: [{ message, room, pollId, cursorKey }](limit + 1개까지), total }` — cursorKey는 다음 쪽 커서의 키(만든
+ * 시각 ms 또는 기한 순 키, pg bigint라 문자열), total은 커서와 상관없이 조건에 맞는 전체 개수.
  */
 export async function listPollPanelRows(userId, q) {
   const now = new Date();
@@ -193,11 +196,32 @@ export async function listPollPanelRows(userId, q) {
       .innerJoin(roomMembers, and(eq(roomMembers.roomId, rooms.id), eq(roomMembers.userId, userId)))
       .leftJoin(dmHistoryFloors, and(eq(dmHistoryFloors.roomId, rooms.id), eq(dmHistoryFloors.userId, userId)));
 
-  const [rows, [{ total }]] = await Promise.all([
-    joined({ message: messages, room: rooms, pollId: polls.id, pollMs: epochMs(polls.createdAt) })
+  const fields = { message: messages, room: rooms, pollId: polls.id };
+  let page;
+  if (q.sort === 'deadline') {
+    // 기한 순 — pollListRules.js의 pollDeadlineKey와 같은 키(진행 중: 마감 시각 ms 오름차순, 그 뒤 마감됨: 최근에 끝난 순)
+    // → id 오름차순. 커서는 "<키>:<pollId>"이고 키는 정수라 밀리초 자르기 없이 그대로 비교한다.
+    const nowSql = sql`${now.toISOString()}::timestamptz`;
+    const endMs = epochMs(sql`least(coalesce(${polls.closedAt}, ${polls.closesAt}), ${polls.closesAt})`);
+    const key = sql`(case when ${polls.closedAt} is null and ${polls.closesAt} > ${nowSql} then ${endMs} else ${sql.raw(String(DEADLINE_CLOSED_BASE))}::bigint - ${endMs} end)`;
+    let after;
+    if (q.cursor) {
+      const at = sql`${String(q.cursor.ms)}::bigint`;
+      after = q.cursor.id
+        ? sql`(${key} > ${at} or (${key} = ${at} and ${polls.id} > ${q.cursor.id}::uuid))`
+        : sql`${key} > ${at}`;
+    }
+    page = joined({ ...fields, cursorKey: key })
+      .where(and(...base, after))
+      .orderBy(asc(key), asc(polls.id));
+  } else {
+    page = joined({ ...fields, cursorKey: epochMs(polls.createdAt) })
       .where(and(...base, afterCursor(polls.createdAt, polls.id, q.cursor, q.order)))
-      .orderBy(...cursorOrder(polls.createdAt, polls.id, q.order))
-      .limit(q.limit + 1),
+      .orderBy(...cursorOrder(polls.createdAt, polls.id, q.order));
+  }
+
+  const [rows, [{ total }]] = await Promise.all([
+    page.limit(q.limit + 1),
     joined({ total: sql`count(*)::int` }).where(and(...base)),
   ]);
   return { rows, total };

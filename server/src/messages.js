@@ -14,6 +14,7 @@ import { getDmHistoryFloor, isRoomMember, listRoomMemberIds } from './db/queries
 import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { topicAccess } from './access.js';
+import { toSharedAlbumDto } from './albumRules.js';
 import { isUuid } from './favoritesRules.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
@@ -118,6 +119,8 @@ export function toMessageDto(m) {
     // 행에 붙여 둔 m.poll(polls.js의 attachPolls / 새 투표는 sendMessage.js)을 그대로 옮긴다. 지워진
     // 메시지나 투표가 아닌 메시지는 항상 null.
     poll: m.type === 'poll' && !m.deletedAt ? (m.poll ?? null) : null,
+    // "앨범 공유" 메시지의 앨범 카드 { id(앨범이 지워졌으면 null), title, teamName } — 아니면 null(albumRules.js).
+    sharedAlbum: toSharedAlbumDto(m),
   };
 }
 

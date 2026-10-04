@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   ALBUM_ITEMS_PER_REQUEST_MAX,
+  ALBUM_SHARE_TEXT_MAX,
   albumKindOfMime,
+  albumPerms,
   albumRoomDenial,
+  albumShareSnapshot,
   albumShareTargetDenial,
   albumWriteDenial,
   canDeleteAlbum,
@@ -13,9 +16,11 @@ import {
   parseAlbumFields,
   parseAlbumItems,
   parseAlbumListQuery,
+  parseAlbumShareMessage,
   parseItemIds,
   partitionDeletableItems,
   shareMessageType,
+  toSharedAlbumDto,
   toShareAttachment,
 } from '../src/albumRules.js';
 
@@ -153,4 +158,58 @@ test('공유 메시지: 이미지만이면 image, 영상이 섞이면 file 첨�
   assert.equal(toShareAttachment(img).kind, 'image');
   assert.equal(toShareAttachment(vid).kind, 'file');
   assert.equal(toShareAttachment(vid).mimeType, 'video/mp4');
+});
+
+test('앨범 공유 메시지: 필수·5,000자, 앞 공백을 떼면 서식·멘션 구간도 당긴다', () => {
+  assert.equal(parseAlbumShareMessage({ text: '  ' }).error, '메시지를 입력하세요.');
+  assert.ok(parseAlbumShareMessage({}).error);
+  assert.ok(parseAlbumShareMessage({ text: 5 }).error);
+  assert.equal(parseAlbumShareMessage({ text: 'a'.repeat(ALBUM_SHARE_TEXT_MAX + 1) }).error, '메시지는 5,000자 이내로 입력하세요.');
+  // 이모지 한 덩어리는 1자.
+  assert.equal(parseAlbumShareMessage({ text: '👍'.repeat(ALBUM_SHARE_TEXT_MAX) }).error, undefined);
+
+  const parsed = parseAlbumShareMessage({
+    text: '  @김철수 사진 보세요  ',
+    textFormat: [{ s: 6, e: 8, f: 1 }],
+    mentions: [{ type: 'user', userId: 'u2', s: 2, e: 6 }],
+  });
+  assert.equal(parsed.text, '@김철수 사진 보세요');
+  assert.deepEqual(parsed.textFormat, [{ s: 4, e: 6, f: 1 }]);
+  assert.deepEqual(parsed.mentions, [{ type: 'user', userId: 'u2', s: 0, e: 4 }]);
+  // 구간이 없으면 null(그대로 sendUserMessage가 정리한다).
+  assert.equal(parseAlbumShareMessage({ text: 'hi' }).textFormat, null);
+});
+
+test('앨범 카드 DTO: 공유 메시지에만, 지운 메시지는 null, 앨범이 지워졌으면 id null', () => {
+  const snap = albumShareSnapshot({ title: '제주 여행' }, '잔디팀');
+  assert.deepEqual(snap, { title: '제주 여행', teamName: '잔디팀' });
+  assert.equal(albumShareSnapshot({ title: 'x' }, '').teamName, null);
+
+  assert.deepEqual(toSharedAlbumDto({ albumId: ID1, albumShare: snap }), { id: ID1, title: '제주 여행', teamName: '잔디팀' });
+  assert.deepEqual(toSharedAlbumDto({ albumId: null, albumShare: snap }), { id: null, title: '제주 여행', teamName: '잔디팀' });
+  assert.equal(toSharedAlbumDto({ albumId: ID1, albumShare: snap, deletedAt: new Date() }), null);
+  assert.equal(toSharedAlbumDto({ albumId: null, albumShare: null }), null);
+  assert.equal(toSharedAlbumDto({}), null);
+});
+
+test('앨범 권한 묶음: 방 멤버는 규칙대로, 공유로만 보는 사람은 보기 전용', () => {
+  assert.deepEqual(albumPerms({ album, userId: 'creator', access: member }), {
+    canEdit: true,
+    canDelete: true,
+    canDeleteAnyItem: true,
+    canShare: true,
+    viewOnly: false,
+  });
+  const other = albumPerms({ album, userId: 'x', access: roomAdmin });
+  assert.equal(other.canEdit, true); // 방 관리자는 고칠 수 있지만
+  assert.equal(other.canDelete, false); // 지우지는 못한다
+  assert.equal(other.viewOnly, false);
+  // 공유 메시지로만 보는 사람 — 만든 사람이어도(방을 나간 경우) 아무것도 못 고친다.
+  assert.deepEqual(albumPerms({ album, userId: 'creator', access: null, viaShare: true }), {
+    canEdit: false,
+    canDelete: false,
+    canDeleteAnyItem: false,
+    canShare: false,
+    viewOnly: true,
+  });
 });

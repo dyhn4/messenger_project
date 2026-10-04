@@ -38,8 +38,18 @@ import { sanitizeTextFormat } from './textFormat.js';
  * closesAt } — polls.js의 parsePollFields가 검사한 값). 투표는 REST(POST /rooms/:roomId/polls)로만 만든다 —
  * 소켓 message:send는 [poll]을 넘길 수 없어서 type:'poll'을 거절한다. 첨부는 보드 뷰 토픽의 투표만 30개까지.
  * 거절 결과에는 REST 응답용 [status]가 붙을 수 있다(소켓 ack에서는 무시된다).
+ * 앨범 공유: [albumShare]({ albumId, title, teamName } — albums.js POST /albums/:id/messages가 검사한 값)를 주면
+ * 글 메시지에 앨범 카드(messages.album_id·album_share)를 붙인다. 소켓 payload로는 넘길 수 없다.
  */
-export async function sendUserMessage({ io, senderId, payload, room: knownRoom = null, fallbackName = null, poll = null }) {
+export async function sendUserMessage({
+  io,
+  senderId,
+  payload,
+  room: knownRoom = null,
+  fallbackName = null,
+  poll = null,
+  albumShare = null,
+}) {
   const room = knownRoom ?? (await findRoomById(payload.roomId));
   if (!room || !(await isRoomMember(room.id, senderId))) {
     return { ok: false, error: '이 방의 멤버가 아닙니다.', status: 403 };
@@ -181,6 +191,9 @@ export async function sendUserMessage({ io, senderId, payload, room: knownRoom =
       !isRich && typeof payload.forwardedFromCreatedAt === 'number' ? new Date(payload.forwardedFromCreatedAt) : null,
     isInquiryNotice: inquiryId != null,
     inquiryId,
+    ...(albumShare && !isRich
+      ? { albumId: albumShare.albumId, albumShare: { title: albumShare.title, teamName: albumShare.teamName ?? null } }
+      : {}),
   };
 
   let message;

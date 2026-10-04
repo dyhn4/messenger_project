@@ -1172,6 +1172,112 @@ void main() {
       expect(find.byType(PollCreator), findsNothing);
     });
 
+    testWidgets(
+      '마감 시각 — 한 칸을 누르면 달력과 그 아래 시간 드롭다운이 펼쳐지고, 날짜는 펼친 채로·시간은 고르면 닫힌다',
+      (tester) async {
+        final server = _Server();
+        server.on('POST', '/api/rooms/r1/polls', (r) {
+          return _json(_messageJson(senderId: 'me'), 201);
+        });
+        final session = _session(server);
+        await openCreator(tester, session, session.rooms.first);
+
+        // 날짜·시각 두 칸이 아니라 한 칸이다.
+        expect(field('schedule-date'), findsNothing);
+        expect(field('schedule-time'), findsNothing);
+        await reveal(tester, field('schedule-datetime'));
+        await tester.tap(field('schedule-datetime'));
+        await tester.pumpAndSettle();
+        final popup = field('schedule-datetime-popup');
+        expect(popup, findsOneWidget);
+        expect(find.text('시간'), findsOneWidget);
+        // 시간은 버튼 목록이 아니라 드롭다운 — 칸을 누르기 전에는 목록이 없다.
+        expect(field('schedule-time-list'), findsNothing);
+        expect(field('schedule-time-box'), findsOneWidget);
+
+        // 모레를 누르면 날짜만 바뀌고 판은 그대로 열려 있다(그달이 아니면 다음 달로 넘긴다).
+        final now = DateTime.now();
+        final day = DateTime(now.year, now.month, now.day + 2);
+        if (day.month != now.month) {
+          await tester.tap(find.byTooltip('다음 달'));
+          await tester.pumpAndSettle();
+        }
+        await tester.tap(
+          field('schedule-day-${day.year}-${day.month}-${day.day}'),
+        );
+        await tester.pumpAndSettle();
+        expect(popup, findsOneWidget);
+
+        // 시간 칸을 눌러 목록을 펼치고 오후 3:30을 고르면 닫히고, 칸에 날짜와 시각이 함께 보인다.
+        await tester.tap(field('schedule-time-box'));
+        await tester.pumpAndSettle();
+        expect(field('schedule-time-list'), findsOneWidget);
+        expect(popup, findsOneWidget);
+        final slot = field('schedule-slot-${15 * 60 + 30}');
+        await tester.scrollUntilVisible(
+          slot,
+          150,
+          scrollable: find.descendant(
+            of: field('schedule-time-list'),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        // 목록 끝에 반쯤 걸쳐 있으면 누른 자리가 목록 밖이 된다 — 다 보이게 올린 뒤 누른다.
+        await tester.ensureVisible(slot);
+        await tester.pumpAndSettle();
+        await tester.tap(slot);
+        await tester.pumpAndSettle();
+        expect(popup, findsNothing);
+        expect(
+          find.descendant(
+            of: field('schedule-datetime'),
+            matching: find.textContaining('오후 3:30'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.enterText(field('poll-title-field'), '점심');
+        await tester.enterText(field('poll-option-field-0'), '한식');
+        await tester.enterText(field('poll-option-field-1'), '중식');
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('poll-create-submit')));
+        await tester.pumpAndSettle();
+        final body = _body(server.called('POST', '/api/rooms/r1/polls').single);
+        expect(
+          DateTime.fromMillisecondsSinceEpoch(body['closesAt'] as int),
+          DateTime(day.year, day.month, day.day, 15, 30),
+        );
+      },
+    );
+
+    testWidgets('마감 시각 — 오늘의 지난 시간은 흐리고 누를 수 없다', (tester) async {
+      final session = _session(_Server());
+      await openCreator(tester, session, session.rooms.first);
+      await reveal(tester, field('schedule-datetime'));
+      await tester.tap(field('schedule-datetime'));
+      await tester.pumpAndSettle();
+      final now = DateTime.now();
+      await tester.tap(
+        field('schedule-day-${now.year}-${now.month}-${now.day}'),
+      );
+      await tester.pumpAndSettle();
+      // 자정(오전 12:00)은 이미 지났다 — 목록을 펼쳐 맨 위로 올려 보면 눌리지 않는다.
+      await tester.tap(field('schedule-time-box'));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find
+            .descendant(
+              of: field('schedule-datetime-popup'),
+              matching: find.byType(Scrollable),
+            )
+            .last,
+        const Offset(0, 5000),
+      );
+      await tester.pumpAndSettle();
+      final midnight = tester.widget<InkWell>(field('schedule-slot-0'));
+      expect(midnight.onTap, isNull);
+    });
+
     testWidgets('설명을 켜지 않으면 description을 보내지 않는다', (tester) async {
       final server = _Server();
       server.on(

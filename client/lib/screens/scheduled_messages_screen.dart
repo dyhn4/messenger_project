@@ -16,8 +16,9 @@ import '../widgets/room_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'schedule_message_dialog.dart';
 
-/// "메시지 예약" 목록을 연다 — [메뉴]에서, 또는 입력칸·보드 위의 "예약된 메시지 N개 · 보기"에서([room]을
-/// 주면 '이 대화방만'이 켜진 채로). 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면.
+/// "메시지 예약" 목록을 연다 — 입력칸·보드 위의 "예약된 메시지 N개 · 보기"에서([room]을 주면 '이 대화방만'이
+/// 켜진 채로). 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면. [메뉴]의 "메시지 예약"은 오른쪽 패널
+/// (widgets/scheduled_panel.dart — side_panels.dart의 'scheduled')로 연다.
 Future<void> showScheduledMessages(
   BuildContext context,
   Session session, {

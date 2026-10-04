@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart' show StringCharacters;
 
+import 'album.dart' show SharedAlbum;
 import 'comment.dart';
 import 'mention.dart';
 import 'poll.dart';
@@ -191,6 +192,9 @@ class Message {
   /// (RoomChatController.applyPollUpdate) — non-final.
   Poll? poll;
 
+  /// "앨범 공유"로 보낸 글에 붙은 앨범 카드(album_share_dialog.dart) — 아니면 null. 메시지 자체는 일반 글이다.
+  final SharedAlbum? sharedAlbum;
+
   Message({
     required this.id,
     required this.roomId,
@@ -231,6 +235,7 @@ class Message {
     this.pinnedAt,
     this.isPoll = false,
     this.poll,
+    this.sharedAlbum,
     List<Comment>? comments,
   }) : comments = comments ?? [],
        mentions = mentions ?? <Mention>[];
@@ -328,6 +333,7 @@ class Message {
       poll: json['poll'] == null
           ? null
           : Poll.fromJson(Map<String, dynamic>.from(json['poll'] as Map)),
+      sharedAlbum: SharedAlbum.fromJson(json['sharedAlbum']),
     );
   }
 

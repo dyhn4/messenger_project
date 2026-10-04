@@ -7,7 +7,6 @@ import '../screens/calendar/calendar_screen.dart' show openCalendarScreen;
 import '../screens/inquiry_inbox_screen.dart';
 import '../screens/project/project_dialog.dart' show showProjectDialog;
 import '../screens/project/project_window.dart' show openProjectWindow;
-import '../screens/scheduled_messages_screen.dart';
 import '../services/session.dart';
 import 'side_panels.dart';
 
@@ -120,7 +119,8 @@ final menuEntries = <MenuEntry>[
     color: const Color(0xFF7048E8),
     background: const Color(0xFFEDE3FF),
     order: 10,
-    onOpen: (context, session) => showScheduledMessages(context, session),
+    // 내 예약 메시지 목록 패널(상단의 "+ 메시지 예약"으로 만들기 창이 열린다) — PC는 오른쪽 패널, 모바일은 전체 화면.
+    onOpen: (context, session) => openSidePanel(context, session, 'scheduled'),
   ),
   MenuEntry(
     key: 'todos',

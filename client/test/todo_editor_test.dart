@@ -10,9 +10,9 @@ import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
-import 'package:client/widgets/date_range_calendar_panel.dart';
 import 'package:client/widgets/todo_widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -21,7 +21,8 @@ import 'helpers/fake_todo_api.dart';
 
 /// 할 일 생성·수정 창(잔디 생성 화면 모양) — 칸마다 이름표 대신 왼쪽 회색 아이콘(줄 순서: 대화방 → 제목 → 설명 → 파일
 /// 업로드 → 담당자 → 기간 → 알림), 글자 수 카운터 없음, 대화방 칸 아래 안내(만들 때·고칠 때 문구), 가로 전체 `+ 파일 업로드
-/// (선택)` + `N / 30`, 담당자 회색 상자 + `✏ 담당자 관리`, 기간 상자 둘(누르면 아래 달력), 알림 선택 상자(메뉴 세 가지), 저장
+/// (선택)` + `N / 30`, 담당자 회색 상자 + `✏ 담당자 관리`, 기간 한 칸(누르면 칸을 덮지 않는 판 —
+/// 기간 달력 + 시작 시간 · 그 밑 종료 시간, 판 안에서 펼치는 시간 목록), 알림 선택 상자(메뉴 세 가지), 저장
 /// 단추 `저장하기`(대화상자·패널·모바일 앱 바), 새로 만들 때 담당자 기본값 나, 대화방을 바꾸면 첨부·담당자 초기화(지울 게
 /// 있으면 확인 → 변경/취소), 보드 뷰 토픽 제외, 담당자로 고칠 때 담당자 칸 읽기 전용, 패널 안 화면(`← 할 일 … ✕`)과 그
 /// 화면의 토스트. 서버는 가짜 API(helpers/fake_todo_api.dart)로 대신한다.
@@ -237,15 +238,79 @@ Future<void> _submitWithTitle(WidgetTester tester, String title) async {
   await tester.pumpAndSettle();
 }
 
-/// 펼친 기간 달력에서 [day]일을 누른다.
-Future<void> _tapDay(WidgetTester tester, String day) async {
-  final cell = find.descendant(
-    of: find.byType(DateRangeCalendarPanel),
-    matching: find.text(day),
-  );
-  await tester.ensureVisible(cell.last);
+/// 펼친 기간 판(달력 + 시작/종료 시간).
+final _popup = _key('todo-period-popup');
+
+/// 기간 칸을 눌러 판을 연다 — 칸이 창 아래쪽이면 보이게 민 뒤.
+Future<void> _openPeriod(WidgetTester tester) async {
+  await tester.ensureVisible(_key('todo-period-field'));
   await tester.pumpAndSettle();
-  await tester.tap(cell.last);
+  await tester.tap(_key('todo-period-field'));
+  await tester.pumpAndSettle();
+}
+
+/// 판 달력의 [day] 칸.
+Finder _dayKey(DateTime day) =>
+    _key('todo-period-day-${day.year}-${day.month}-${day.day}');
+
+/// 펼친 기간 판의 달력에서 [day]를 누른다.
+Future<void> _tapDay(WidgetTester tester, DateTime day) async {
+  await tester.tap(_dayKey(day));
+  await tester.pumpAndSettle();
+}
+
+/// 기간 칸에 보이는 글자(두 줄이면 한 줄로 이어서).
+String _periodText(WidgetTester tester) => tester
+    .widgetList<Text>(
+      find.descendant(
+        of: _key('todo-period-field'),
+        matching: find.byType(Text),
+      ),
+    )
+    .map((t) => t.data)
+    .join(' ');
+
+/// 달력 [day] 칸의 원을 채운 색(시작일·종료일) — 없으면 null.
+Color? _dayFill(WidgetTester tester, DateTime day) {
+  final circle = tester.widget<Container>(
+    find.descendant(of: _dayKey(day), matching: find.byType(Container)).first,
+  );
+  return (circle.decoration as BoxDecoration?)?.color;
+}
+
+/// 달력 [day] 칸에 기간 띠가 깔렸는지.
+bool _hasBand(WidgetTester tester, DateTime day) => tester
+    .widgetList<ColoredBox>(
+      find.descendant(of: _dayKey(day), matching: find.byType(ColoredBox)),
+    )
+    .any((b) => b.color.a > 0);
+
+/// 판이 화면([screen]) 안에 있고 기간 칸을 덮지 않는다(칸 바로 아래나 위).
+void _expectPopupBeside(WidgetTester tester, Size screen) {
+  final popup = tester.getRect(_popup);
+  final field = tester.getRect(_key('todo-period-field'));
+  expect(popup.overlaps(field), isFalse, reason: '칸을 덮지 않는다');
+  expect(
+    popup.top >= field.bottom || popup.bottom <= field.top,
+    isTrue,
+    reason: '칸 바로 아래나 위',
+  );
+  expect(popup.left, moreOrLessEquals(field.left, epsilon: 0.5));
+  expect(popup.left, greaterThanOrEqualTo(0));
+  expect(popup.right, lessThanOrEqualTo(screen.width));
+  expect(popup.top, greaterThanOrEqualTo(0));
+  expect(popup.bottom, lessThanOrEqualTo(screen.height));
+}
+
+/// 안드로이드 뒤로 가기 — 시스템이 보내는 popRoute.
+Future<void> _systemBack(WidgetTester tester) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    'flutter/navigation',
+    SystemChannels.navigation.codec.encodeMethodCall(
+      const MethodCall('popRoute'),
+    ),
+    (_) {},
+  );
   await tester.pumpAndSettle();
 }
 
@@ -264,7 +329,13 @@ const _resetMessage = '대화방을 변경하면\n첨부한 파일과 담당자 
 const _createRoomHint = '할 일 생성 후에는 대화방 변경이 불가능합니다.';
 const _editRoomHint = '한 번 만든 할 일은 다른 대화방으로 옮길 수 없습니다.';
 
+/// 날짜를 새로 고를 때 채우는 시간이 지금에 따라 달라 — 시험은 시계를 2026/10/04 오전 10:07로 고정한다(채우는 값은
+/// 그다음 15분 단위 오전 10:15).
+final _fixedNow = DateTime(2026, 10, 4, 10, 7);
+
 void main() {
+  setUp(() => todoClock = () => _fixedNow);
+  tearDown(() => todoClock = DateTime.now);
   // ────────────────────────── 모양·순서·문구 ──────────────────────────
   group('모양·순서·문구', () {
     testWidgets(
@@ -325,8 +396,7 @@ void main() {
           'todo-room-field',
           'todo-title-field',
           'todo-attach',
-          'todo-period-start',
-          'todo-period-end',
+          'todo-period-field',
           'todo-reminder-add',
         ]) {
           expect(tester.getSize(_key(k)).height, 50, reason: k);
@@ -998,7 +1068,8 @@ void main() {
   // ────────────────────────── 기간 ──────────────────────────
   group('기간', () {
     testWidgets(
-      '[시작일 ▾] ~ [종료일 ▾] 같은 크기 상자 둘 — 누르면 아래에 달력(지금 고를 쪽 상자 강조), 종료일까지 고르면 접히고 x로 지운다',
+      '한 칸(높이 50, 비어 있으면 "기간을 선택하세요 (선택)") — 누르면 칸을 덮지 않는 판(달력 위, 그 아래 시작 시간 · 바로 밑 종료 시간), '
+      '첫 누름 시작일 · 둘째 누름 종료일(사이는 띠), 새로 고른 날짜의 빈 시간은 지금 다음의 15분 단위, 골라도 판은 열린 채 — 바깥 · 칸 · Esc로 닫는다',
       (tester) async {
         final session = _session();
         final api = FakeTodoApi(me: 'me');
@@ -1010,81 +1081,87 @@ void main() {
             room: session.rooms.first,
             api: api,
           ),
+          size: const Size(1280, 900),
         );
-        final start = _key('todo-period-start');
-        final end = _key('todo-period-end');
+        final field = _key('todo-period-field');
         expect(
-          find.descendant(of: start, matching: find.text('시작일')),
-          findsOneWidget,
-        );
-        expect(
-          find.descendant(of: end, matching: find.text('종료일')),
+          find.descendant(of: field, matching: find.text('기간을 선택하세요 (선택)')),
           findsOneWidget,
         );
         expect(
           find.descendant(
-            of: start,
+            of: field,
             matching: find.byIcon(Icons.arrow_drop_down),
           ),
           findsOneWidget,
         );
-        expect(tester.getSize(start), tester.getSize(end));
-        final tilde = find.descendant(
-          of: _key('todo-period-field'),
-          matching: find.text('~'),
-        );
+        expect(tester.getSize(field).height, 50);
         expect(
-          tester.getCenter(tilde).dx,
-          inExclusiveRange(
-            tester.getRect(start).right,
-            tester.getRect(end).left,
-          ),
+          tester.getSize(field).width,
+          tester.getSize(_key('todo-title-field')).width,
+          reason: '가로 전체 한 칸',
         );
         expect(_key('todo-period-clear'), findsNothing);
-        expect(find.byType(DateRangeCalendarPanel), findsNothing);
-        final scheme = Theme.of(tester.element(start)).colorScheme;
+        expect(_popup, findsNothing);
+        final scheme = Theme.of(tester.element(field)).colorScheme;
 
-        // 종료일 상자를 눌러도 시작일부터 고른다(시작일 상자 강조).
-        await tester.ensureVisible(_key('todo-period-field'));
-        await tester.pumpAndSettle();
-        await tester.tap(end);
-        await tester.pumpAndSettle();
-        final calendar = find.byType(DateRangeCalendarPanel);
-        expect(calendar, findsOneWidget);
-        expect(
-          tester.getTopLeft(calendar).dy,
-          greaterThan(tester.getBottomLeft(start).dy),
-          reason: '달력은 상자 아래에 펼친다',
-        );
+        await _openPeriod(tester);
+        expect(_popup, findsOneWidget);
+        _expectPopupBeside(tester, const Size(1280, 900));
+        expect(_borderOf(tester, field), scheme.primary, reason: '펼친 동안 강조');
         expect(find.text('시작일을 선택하세요'), findsOneWidget);
-        expect(_borderOf(tester, start), scheme.primary);
-        expect(_borderOf(tester, end), isNot(scheme.primary));
-
-        await _tapDay(tester, '10');
-        expect(find.text('종료일을 선택하세요'), findsOneWidget);
-        expect(_borderOf(tester, end), scheme.primary);
-        expect(_borderOf(tester, start), isNot(scheme.primary));
         final now = DateTime.now();
         final s = DateTime(now.year, now.month, 10);
+        final m = DateTime(now.year, now.month, 15);
         final d = DateTime(now.year, now.month, 20);
+        // 달력 아래 `시작 시간`, 그 바로 밑 `종료 시간`(같은 폭으로 위아래).
+        final startBox = tester.getRect(_key('todo-time-start'));
+        final endBox = tester.getRect(_key('todo-time-end'));
+        expect(startBox.top, greaterThan(tester.getRect(_dayKey(d)).bottom));
+        expect(endBox.left, startBox.left);
+        expect(endBox.width, startBox.width);
+        expect(endBox.top, greaterThan(startBox.bottom));
         expect(
-          find.descendant(of: start, matching: find.text(formatTodoDate(s))),
-          findsOneWidget,
-        );
-        await _tapDay(tester, '20');
-        expect(calendar, findsNothing, reason: '종료일까지 고르면 접힌다');
-        expect(
-          find.descendant(of: end, matching: find.text(formatTodoDate(d))),
-          findsOneWidget,
+          tester.getTopLeft(find.text('종료 시간')).dy,
+          inExclusiveRange(startBox.bottom, endBox.top),
         );
 
-        // 상자 사이의 ~를 눌러도 펼치고 접는다.
-        await tester.tap(tilde);
+        await _tapDay(tester, s);
+        expect(find.text('종료일을 선택하세요'), findsOneWidget);
+        expect(_periodText(tester), '${formatTodoDate(s)} 오전 10:15 ~');
+        await _tapDay(tester, d);
+        expect(_popup, findsOneWidget, reason: '골라도 판은 열린 채');
+        expect(
+          _periodText(tester),
+          '${formatTodoDate(s)} 오전 10:15 ~ ${formatTodoDate(d)} 오전 10:15',
+        );
+        expect(find.text('시작일을 선택하세요'), findsOneWidget, reason: '다시 누르면 새 기간');
+        // 시작일 · 종료일은 채운 원, 사이는 옅은 띠(기간 밖은 없음).
+        expect(_dayFill(tester, s), scheme.primary);
+        expect(_dayFill(tester, d), scheme.primary);
+        expect(_dayFill(tester, m), isNull);
+        expect(_hasBand(tester, m), isTrue);
+        expect(_hasBand(tester, DateTime(now.year, now.month, 25)), isFalse);
+
+        // 바깥을 누르면 닫힌다(값은 그대로).
+        await tester.tapAt(const Offset(4, 4));
         await tester.pumpAndSettle();
-        expect(calendar, findsOneWidget);
-        await tester.tap(tilde);
+        expect(_popup, findsNothing);
+        expect(find.byType(TodoEditor), findsOneWidget);
+        expect(_key('todo-period-clear'), findsOneWidget);
+        // 칸을 다시 눌러도 닫힌다.
+        await _openPeriod(tester);
+        expect(_popup, findsOneWidget);
+        await tester.tap(field, warnIfMissed: false); // 막이 받는다
         await tester.pumpAndSettle();
-        expect(calendar, findsNothing);
+        expect(_popup, findsNothing);
+        // Esc는 판만 닫는다(편집기는 그대로 — 작성 취소도 묻지 않는다).
+        await _openPeriod(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(_popup, findsNothing);
+        expect(find.byType(TodoEditor), findsOneWidget);
+        expect(find.byType(AlertDialog), findsNothing);
 
         await tester.enterText(_key('todo-title-field'), '기간 있는 일');
         await tester.pump();
@@ -1092,10 +1169,12 @@ void main() {
         await tester.pumpAndSettle();
         expect(api.lastCreate!['startDate'], todoDateWire(s));
         expect(api.lastCreate!['dueDate'], todoDateWire(d));
+        expect(api.lastCreate!['startTime'], '10:15');
+        expect(api.lastCreate!['dueTime'], '10:15');
       },
     );
 
-    testWidgets('x(기한 지우기)로 둘 다 비운다', (tester) async {
+    testWidgets('칸 안의 ✕(기간 지우기)로 날짜와 시간을 모두 비운다', (tester) async {
       final session = _session();
       final json = todoJson(
         id: 'e1',
@@ -1113,24 +1192,464 @@ void main() {
           api: api,
         ),
       );
-      expect(find.text('2099/10/01'), findsOneWidget);
-      expect(find.text('2099/10/07'), findsOneWidget);
+      expect(_periodText(tester), '2099/10/01 ~ 2099/10/07');
       final clear = _key('todo-period-clear');
       expect(
-        tester.getTopLeft(clear).dx,
-        greaterThanOrEqualTo(tester.getTopRight(_key('todo-period-end')).dx),
-        reason: '두 상자 오른쪽',
+        find.descendant(of: _key('todo-period-field'), matching: clear),
+        findsOneWidget,
+        reason: '칸 안 오른쪽',
       );
       await tester.ensureVisible(clear);
       await tester.pumpAndSettle();
       await tester.tap(clear);
       await tester.pump();
-      expect(find.text('시작일'), findsOneWidget);
-      expect(find.text('종료일'), findsOneWidget);
+      expect(find.text('기간을 선택하세요 (선택)'), findsOneWidget);
       expect(clear, findsNothing);
+      expect(_popup, findsNothing, reason: '지우기는 판을 열지 않는다');
       await tester.tap(_key('todo-submit'));
       await tester.pumpAndSettle();
       expect(api.lastUpdate, {'startDate': null, 'dueDate': null});
+    });
+
+    testWidgets(
+      '좁으면(390) 칸 안 기간은 ~ 뒤에서 두 줄, 판은 화면 안에서 칸을 덮지 않고, 뒤로 가기는 판부터 닫는다',
+      (tester) async {
+        final session = _session();
+        final json = todoJson(
+          id: 'e1',
+          title: '모바일',
+          startDate: '2099-10-01',
+          startTime: '09:00',
+          dueDate: '2099-10-02',
+          dueTime: '18:00',
+        );
+        final api = FakeTodoApi(me: 'me', todos: [json]);
+        await _open(
+          tester,
+          (c) => showTodoEditor(
+            c,
+            session: session,
+            editing: Todo.fromJson(json),
+            api: api,
+          ),
+          size: const Size(390, 844),
+        );
+        expect(
+          tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+          TodoViewMode.page,
+        );
+        final field = _key('todo-period-field');
+        final first = find.descendant(
+          of: field,
+          matching: find.text('2099/10/01 오전 9:00 ~'),
+        );
+        final second = find.descendant(
+          of: field,
+          matching: find.text('2099/10/02 오후 6:00'),
+        );
+        expect(first, findsOneWidget);
+        expect(second, findsOneWidget);
+        expect(
+          tester.getTopLeft(second).dy,
+          greaterThan(tester.getTopLeft(first).dy),
+        );
+        await _openPeriod(tester);
+        _expectPopupBeside(tester, const Size(390, 844));
+        // 판이 처음 보여 주는 달은 시작일의 달.
+        expect(_dayKey(DateTime(2099, 10, 1)), findsOneWidget);
+        // 시간 목록도 화면 안.
+        await tester.tap(_key('todo-time-end'));
+        await tester.pumpAndSettle();
+        final list = tester.getRect(_key('todo-time-list'));
+        expect(list.left, greaterThanOrEqualTo(0));
+        expect(list.right, lessThanOrEqualTo(390));
+        expect(list.top, greaterThanOrEqualTo(0));
+        // 안드로이드 뒤로 가기 — 판(과 목록)만 닫고 편집기는 그대로.
+        await _systemBack(tester);
+        expect(_popup, findsNothing);
+        expect(find.byType(TodoEditor), findsOneWidget);
+        // 판이 없으면 편집기를 닫는다(바뀐 게 없으니 묻지 않는다).
+        await _systemBack(tester);
+        expect(find.byType(TodoEditor), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  });
+
+  // ────────────────────────── 기간 — 시작/종료 시간 ──────────────────────────
+  group('기간 — 시작/종료 시간', () {
+    /// 판 안의 시간 칸 [id]('start'|'end')를 눌러 목록을 연다.
+    Future<void> openTime(WidgetTester tester, String id) async {
+      await tester.tap(_key('todo-time-$id'));
+      await tester.pumpAndSettle();
+    }
+
+    /// 열린 시간 목록에서 [option](`none` 또는 분)을 고른다 — 목록 맨 위로 옮긴 뒤 보일 때까지 내린다.
+    Future<void> pickTime(WidgetTester tester, Object option) async {
+      final item = _key('todo-time-option-$option');
+      final list = find.descendant(
+        of: _key('todo-time-list'),
+        matching: find.byType(Scrollable),
+      );
+      if (item.evaluate().isEmpty) {
+        tester.state<ScrollableState>(list).position.jumpTo(0);
+        await tester.pumpAndSettle();
+      }
+      if (item.evaluate().isEmpty) {
+        await tester.scrollUntilVisible(item, 150, scrollable: list);
+      }
+      await tester.ensureVisible(item);
+      await tester.pumpAndSettle();
+      await tester.tap(item);
+      await tester.pumpAndSettle();
+    }
+
+    String boxText(WidgetTester tester, String id) => tester
+        .widgetList<Text>(
+          find.descendant(
+            of: _key('todo-time-$id'),
+            matching: find.byType(Text),
+          ),
+        )
+        .map((t) => t.data)
+        .join();
+
+    testWidgets(
+      '판의 시작 시간 · 종료 시간 칸(높이 36, 글자 14, 시계 아이콘 · ▾) — 날짜가 없으면 꺼짐, 날짜를 고르면 지금 다음의 15분 단위, '
+      '목록은 그 칸 바로 위로 판 안에서 달력을 덮고(시간 없음 + 15분 단위 97줄, 지금 값 체크, 보이게 스크롤), 고르면 목록만 닫힌다',
+      (tester) async {
+        final session = _session();
+        final api = FakeTodoApi(me: 'me');
+        await _open(
+          tester,
+          (c) => showTodoEditor(
+            c,
+            session: session,
+            room: session.rooms.first,
+            api: api,
+          ),
+        );
+        await _openPeriod(tester);
+        for (final (id, label) in const [
+          ('start', '시작 시간'),
+          ('end', '종료 시간'),
+        ]) {
+          final box = _key('todo-time-$id');
+          expect(box, findsOneWidget);
+          expect(tester.getSize(box).height, 36);
+          expect(find.text(label), findsOneWidget);
+          expect(boxText(tester, id), '시간 없음');
+          expect(
+            tester.widget<InkWell>(box).onTap,
+            isNull,
+            reason: '날짜가 없으면 꺼짐',
+          );
+          expect(
+            find.descendant(of: box, matching: find.byIcon(Icons.schedule)),
+            findsOneWidget,
+          );
+          expect(
+            find.descendant(
+              of: box,
+              matching: find.byIcon(Icons.arrow_drop_down),
+            ),
+            findsOneWidget,
+          );
+          final text = tester.widget<Text>(
+            find.descendant(of: box, matching: find.text('시간 없음')),
+          );
+          expect(text.style?.fontSize, 14);
+        }
+
+        final now = DateTime.now();
+        final s = DateTime(now.year, now.month, 10);
+        await _tapDay(tester, s);
+        expect(boxText(tester, 'start'), '오전 10:15');
+        expect(
+          tester.widget<InkWell>(_key('todo-time-start')).onTap,
+          isNotNull,
+        );
+        expect(boxText(tester, 'end'), '시간 없음');
+        await _tapDay(tester, DateTime(now.year, now.month, 20));
+        expect(boxText(tester, 'end'), '오전 10:15');
+
+        // 종료 시간 목록 — 그 칸 바로 위, 판 안(달력을 덮는다).
+        await openTime(tester, 'end');
+        final listFinder = _key('todo-time-list');
+        final list = tester.getRect(listFinder);
+        final popup = tester.getRect(_popup);
+        final endBox = tester.getRect(_key('todo-time-end'));
+        expect(list.bottom, lessThanOrEqualTo(endBox.top));
+        expect(endBox.top - list.bottom, lessThan(8));
+        expect(list.top, greaterThanOrEqualTo(popup.top));
+        expect(list.left, greaterThanOrEqualTo(popup.left));
+        expect(list.right, lessThanOrEqualTo(popup.right));
+        expect(
+          list.top,
+          lessThan(tester.getRect(_key('todo-time-start')).top),
+          reason: '시작 시간 칸과 달력 쪽을 덮는다',
+        );
+        expect(_popup, findsOneWidget);
+        // 첫 줄 시간 없음, 그다음 오전 12:00 … 오후 11:45(15분 단위 96줄).
+        final view = tester.widget<ListView>(
+          find.descendant(of: listFinder, matching: find.byType(ListView)),
+        );
+        expect(
+          (view.childrenDelegate as SliverChildBuilderDelegate).childCount,
+          97,
+        );
+        // 지금 값(오전 10:15)에 체크 — 목록 안에 보이게 열린다.
+        final current = _key('todo-time-option-615');
+        expect(
+          find.descendant(of: current, matching: find.byIcon(Icons.check)),
+          findsOneWidget,
+        );
+        final row = tester.getRect(current);
+        expect(row.top, greaterThanOrEqualTo(list.top - 0.5));
+        expect(row.bottom, lessThanOrEqualTo(list.bottom + 0.5));
+        expect(list.height, lessThan(300), reason: '한 번에 여섯 줄쯤');
+        expect(
+          tester
+              .widget<Text>(
+                find.descendant(of: current, matching: find.text('오전 10:15')),
+              )
+              .style
+              ?.fontSize,
+          14,
+        );
+        expect(_key('todo-time-option-620'), findsNothing, reason: '15분 단위');
+        // 맨 위는 시간 없음(체크 없음), 맨 아래는 오후 11:45.
+        final scrollable = find.descendant(
+          of: listFinder,
+          matching: find.byType(Scrollable),
+        );
+        tester.state<ScrollableState>(scrollable).position.jumpTo(0);
+        await tester.pumpAndSettle();
+        final none = _key('todo-time-option-none');
+        expect(
+          find.descendant(of: none, matching: find.text('시간 없음')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: none, matching: find.byIcon(Icons.check)),
+          findsNothing,
+        );
+        expect(tester.getTopLeft(none).dy, lessThan(list.top + 8));
+        expect(
+          find.descendant(
+            of: _key('todo-time-option-0'),
+            matching: find.text('오전 12:00'),
+          ),
+          findsOneWidget,
+        );
+        await tester.scrollUntilVisible(
+          _key('todo-time-option-1425'),
+          150,
+          scrollable: scrollable,
+        );
+        expect(
+          find.descendant(
+            of: _key('todo-time-option-1425'),
+            matching: find.text('오후 11:45'),
+          ),
+          findsOneWidget,
+        );
+        // 판 안의 다른 곳(달력 머리)을 누르면 목록만 닫힌다.
+        await tester.tapAt(tester.getCenter(find.text('시작일을 선택하세요')));
+        await tester.pumpAndSettle();
+        expect(listFinder, findsNothing);
+        expect(_popup, findsOneWidget);
+        // Esc도 목록부터.
+        await openTime(tester, 'end');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(listFinder, findsNothing);
+        expect(_popup, findsOneWidget);
+
+        await openTime(tester, 'end');
+        await pickTime(tester, 21 * 60 + 30);
+        expect(listFinder, findsNothing, reason: '고르면 목록은 닫히고');
+        expect(_popup, findsOneWidget, reason: '판은 열린 채');
+        expect(boxText(tester, 'end'), '오후 9:30');
+        expect(_periodText(tester), endsWith('오후 9:30'));
+
+        // 시작 시간을 `시간 없음`으로 — 칸에는 날짜만.
+        await openTime(tester, 'start');
+        await pickTime(tester, 'none');
+        expect(boxText(tester, 'start'), '시간 없음');
+        expect(_periodText(tester), startsWith('${formatTodoDate(s)} ~ '));
+
+        await tester.tapAt(const Offset(4, 4));
+        await tester.pumpAndSettle();
+        await _submitWithTitle(tester, '시간 있는 일');
+        expect(api.lastCreate!['startDate'], todoDateWire(s));
+        expect(api.lastCreate!['startTime'], isNull);
+        expect(api.lastCreate!['dueTime'], '21:30');
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('같은 날 시작 시간이 종료 시간보다 늦으면 안내하고 저장할 수 없다 — ✕는 날짜와 시간을 모두 지운다', (
+      tester,
+    ) async {
+      final session = _session();
+      final api = FakeTodoApi(me: 'me');
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          room: session.rooms.first,
+          api: api,
+        ),
+      );
+      await tester.enterText(_key('todo-title-field'), '같은 날');
+      await _openPeriod(tester);
+      final now = DateTime.now();
+      final day = DateTime(now.year, now.month, 10);
+      await _tapDay(tester, day);
+      await _tapDay(tester, day);
+      const error = '시작 시간은 종료 시간보다 늦을 수 없습니다.';
+      expect(find.text(error), findsNothing, reason: '둘 다 오전 10:15');
+      await openTime(tester, 'start');
+      await pickTime(tester, 19 * 60);
+      expect(find.text(error), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(_key('todo-submit')).onPressed,
+        isNull,
+      );
+      await openTime(tester, 'end');
+      await pickTime(tester, 19 * 60);
+      expect(find.text(error), findsNothing, reason: '같은 시각은 된다');
+      expect(
+        tester.widget<FilledButton>(_key('todo-submit')).onPressed,
+        isNotNull,
+      );
+
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(_key('todo-period-clear'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-period-clear'));
+      await tester.pumpAndSettle();
+      await _openPeriod(tester);
+      expect(boxText(tester, 'start'), '시간 없음');
+      expect(boxText(tester, 'end'), '시간 없음');
+      await tester.tapAt(const Offset(4, 4));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-submit'));
+      await tester.pumpAndSettle();
+      expect(api.lastCreate!['startDate'], isNull);
+      expect(api.lastCreate!['startTime'], isNull);
+      expect(api.lastCreate!['dueTime'], isNull);
+    });
+
+    testWidgets(
+      '고치기 — 바뀐 시간만 보낸다, 단위 밖 시각(17:40)도 목록에 체크되어 보인다, 이미 시간이 있는 날짜를 옮기면 시간은 그대로',
+      (tester) async {
+        final session = _session();
+        final json = todoJson(
+          id: 'e1',
+          title: '시간 있는 일',
+          startDate: '2099-10-01',
+          startTime: '17:40',
+          dueDate: '2099-10-02',
+          dueTime: '00:00',
+        );
+        final api = FakeTodoApi(me: 'me', todos: [json]);
+        await _open(
+          tester,
+          (c) => showTodoEditor(
+            c,
+            session: session,
+            editing: Todo.fromJson(json),
+            api: api,
+          ),
+        );
+        expect(_periodText(tester), '2099/10/01 오후 5:40 ~ 2099/10/02 오전 12:00');
+        await _openPeriod(tester);
+        expect(boxText(tester, 'start'), '오후 5:40');
+        await openTime(tester, 'start');
+        final odd = _key('todo-time-option-1060');
+        expect(
+          find.descendant(of: odd, matching: find.text('오후 5:40')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: odd, matching: find.byIcon(Icons.check)),
+          findsOneWidget,
+        );
+        expect(
+          tester.getTopLeft(odd).dy,
+          inExclusiveRange(
+            tester.getTopLeft(_key('todo-time-option-1050')).dy,
+            tester.getTopLeft(_key('todo-time-option-1065')).dy,
+          ),
+          reason: '제자리(오후 5:30과 5:45 사이)',
+        );
+        await pickTime(tester, 18 * 60);
+        await tester.tapAt(const Offset(4, 4));
+        await tester.pumpAndSettle();
+        await tester.tap(_key('todo-submit'));
+        await tester.pumpAndSettle();
+        expect(api.lastUpdate, {'startTime': '18:00'});
+        expect(api.todos.single['startTime'], '18:00');
+        expect(api.todos.single['dueTime'], '00:00');
+      },
+    );
+
+    testWidgets('종료 시간이 있으면 "기한 하루 전 / 1시간 전"은 그 시각 기준 — 메뉴 문구에 울릴 시각', (
+      tester,
+    ) async {
+      final session = _session();
+      final json = todoJson(
+        id: 'e1',
+        title: '오후 3시 마감',
+        dueDate: '2099-12-25',
+        dueTime: '15:00',
+      );
+      final api = FakeTodoApi(me: 'me', todos: [json]);
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          editing: Todo.fromJson(json),
+          api: api,
+        ),
+      );
+      await tester.ensureVisible(_key('todo-reminder-add'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-reminder-add'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: _key('todo-reminder-option-day'),
+          matching: find.text('기한 하루 전 (2099/12/24 오후 3:00)'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: _key('todo-reminder-option-hour'),
+          matching: find.text('기한 1시간 전 (2099/12/25 오후 2:00)'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(_key('todo-reminder-option-hour'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: _key('todo-reminder-0'),
+          matching: find.text('2099/12/25 오후 2:00'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(_key('todo-submit'));
+      await tester.pumpAndSettle();
+      expect(api.lastUpdate!['reminders'], [
+        {'remindAt': DateTime(2099, 12, 25, 14).millisecondsSinceEpoch},
+      ]);
     });
   });
 
@@ -1199,30 +1718,27 @@ void main() {
         expect(_key('todo-reminder-0'), findsNothing);
         await tester.pump(const Duration(seconds: 3));
 
-        // 기한을 멀리(다음 달 25일) 잡고 하루 전·1시간 전을 더한다.
-        await tester.ensureVisible(_key('todo-period-field'));
+        // 기한을 멀리(다음 달 25일) 잡고 하루 전·1시간 전을 더한다 — 종료 시간은 새로 고른 날짜라 지금 다음의 15분
+        // 단위(시계 고정 — 오전 10:15)가 채워진다.
+        final now = DateTime.now();
+        final due = DateTime(now.year, now.month + 1, 25);
+        await _openPeriod(tester);
+        await tester.tap(_key('todo-period-next'));
         await tester.pumpAndSettle();
-        await tester.tap(_key('todo-period-start'));
+        await _tapDay(tester, due);
+        await _tapDay(tester, due);
+        await tester.tapAt(const Offset(4, 4));
         await tester.pumpAndSettle();
-        await tester.tap(
-          find.descendant(
-            of: find.byType(DateRangeCalendarPanel),
-            matching: find.byIcon(Icons.chevron_right),
-          ),
-        );
-        await tester.pumpAndSettle();
-        await _tapDay(tester, '25');
-        await _tapDay(tester, '25');
         await pick('day');
         await pick('hour');
         final first = _key('todo-reminder-0');
         final second = _key('todo-reminder-1');
         expect(
-          find.descendant(of: first, matching: find.textContaining('오후 6:00')),
+          find.descendant(of: first, matching: find.textContaining('오전 10:15')),
           findsOneWidget,
         );
         expect(
-          find.descendant(of: second, matching: find.textContaining('오후 5:00')),
+          find.descendant(of: second, matching: find.textContaining('오전 9:15')),
           findsOneWidget,
         );
         expect(
@@ -1232,20 +1748,21 @@ void main() {
         );
         expect(tester.getSize(first).width, tester.getSize(select).width);
         // 지우기.
+        await tester.ensureVisible(_key('todo-reminder-remove-0'));
+        await tester.pumpAndSettle();
         await tester.tap(_key('todo-reminder-remove-0'));
         await tester.pump();
         expect(second, findsNothing);
         expect(
-          find.descendant(of: first, matching: find.textContaining('오후 5:00')),
+          find.descendant(of: first, matching: find.textContaining('오전 9:15')),
           findsOneWidget,
         );
         await _submitWithTitle(tester, '알림 있는 일');
-        final now = DateTime.now();
-        final due = DateTime(now.year, now.month + 1, 25);
         expect(api.lastCreate!['reminders'], [
           todoReminderBeforeDue(
             due,
             const Duration(hours: 1),
+            dueMinutes: 10 * 60 + 15,
           ).millisecondsSinceEpoch,
         ]);
       },
@@ -1969,6 +2486,33 @@ void main() {
       expect(menu.top, greaterThan(box.bottom));
       await closeFromChat(option, '알림 메뉴');
       expect(_key('todo-reminder-0'), findsNothing, reason: '고르지 않았다');
+
+      // 기간 판 — 칸을 덮지 않고 패널 안(루트 Overlay), 채팅 쪽을 누르면 닫히고 그 누름은 채팅에 가지 않는다.
+      await _openPeriod(tester);
+      final popup = tester.getRect(_popup);
+      expectInPanel(popup, '기간 판');
+      expect(popup.top, greaterThanOrEqualTo(panel.top));
+      expect(
+        popup.overlaps(tester.getRect(_key('todo-period-field'))),
+        isFalse,
+      );
+      expect(
+        popup.left,
+        moreOrLessEquals(
+          tester.getRect(_key('todo-period-field')).left,
+          epsilon: 0.5,
+        ),
+      );
+      await closeFromChat(_popup, '기간 판');
+      // 시간 목록이 열려 있어도 채팅 쪽을 누르면 판째 닫힌다.
+      await _openPeriod(tester);
+      final now = DateTime.now();
+      await _tapDay(tester, DateTime(now.year, now.month, 10));
+      await tester.tap(_key('todo-time-start'));
+      await tester.pumpAndSettle();
+      expectInPanel(tester.getRect(_key('todo-time-list')), '시간 목록');
+      await closeFromChat(_key('todo-time-list'), '시간 목록');
+      expect(_popup, findsNothing);
       expect(find.byType(TodoEditor), findsOneWidget);
       expect(tester.takeException(), isNull);
     });

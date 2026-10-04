@@ -231,6 +231,9 @@ void main() {
       await _mount(tester, SearchScreen(session: _session()));
       final field = find.byKey(const ValueKey('search-panel-field'));
       expect(field, findsOneWidget);
+      // 안내 글자는 "통합 검색"(메시지만이 아니라 대화방 이름·파일까지 찾는다).
+      expect(find.text('통합 검색'), findsOneWidget);
+      expect(find.text('메시지 검색'), findsNothing);
       // 파일 패널 검색칸과 같은 모양 — 왼쪽 돋보기, 처음엔 지우기(X) 없음.
       expect(
         find.descendant(of: field, matching: find.byIcon(Icons.search)),
@@ -249,7 +252,7 @@ void main() {
       expect(find.byIcon(Icons.close), findsOneWidget);
       await tester.tap(find.byIcon(Icons.close));
       await tester.pump();
-      expect(find.text('내가 속한 모든 방을 대상으로 검색합니다.'), findsOneWidget);
+      expect(find.text('대화방 이름과 메시지·파일을 검색합니다.'), findsOneWidget);
       await _close(tester);
     });
 
@@ -298,15 +301,12 @@ void main() {
       expect(find.text('이미지'), findsOneWidget);
       expect(find.text('파일'), findsNothing);
 
-      // 정렬 — 설정 메뉴와 같은 간결한 팝업으로 최신 순 / 과거 순.
+      // 정렬 — 메시지 예약 패널의 정렬과 같은 간결한 메뉴(MenuAnchor)로 최신 순 / 과거 순.
       await tester.tap(find.byKey(const ValueKey('panel-sort')));
       await tester.pumpAndSettle();
-      final oldest = find.widgetWithText(PopupMenuItem<bool>, '과거 순');
+      final oldest = find.widgetWithText(MenuItemButton, '과거 순');
       expect(oldest, findsOneWidget);
-      expect(
-        tester.widget<PopupMenuItem<bool>>(oldest).height,
-        CompactMenu.itemHeight,
-      );
+      expect(tester.getSize(oldest).height, CompactMenu.itemHeight);
       await tester.tap(oldest);
       await tester.pumpAndSettle();
       req = _last('/api/search');

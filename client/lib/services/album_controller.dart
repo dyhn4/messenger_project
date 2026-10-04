@@ -402,32 +402,82 @@ class AlbumController extends ChangeNotifier {
     return created;
   }
 
-  /// 열어 둔 앨범의 제목·설명·대표 이미지를 바꾼다([coverItemId]를 `''`로 주면 대표를 비운다).
-  Future<void> updateAlbum({
+  /// 앨범의 제목·설명·대표 이미지를 바꾼다([coverItemId]를 `''`로 주면 대표를 비운다). [albumId]가 없으면 열어 둔
+  /// 앨범(목록 카드의 ⋯ 메뉴는 열지 않은 앨범을 고친다). 바뀐 앨범을 돌려준다(대상이 없으면 null).
+  Future<Album?> updateAlbum({
+    String? albumId,
     String? title,
     String? description,
     String? coverItemId,
   }) async {
-    final current = album;
-    if (current == null) return;
+    final id = albumId ?? album?.id;
+    if (id == null) return null;
     final updated = await apiProvider().updateAlbum(
-      current.id,
+      id,
       title: title?.trim(),
       description: description?.trim(),
       coverItemId: coverItemId,
     );
-    album = updated;
+    if (album?.id == id) album = updated;
     _syncSummary(updated);
     _notify();
+    return updated;
   }
 
-  /// 열어 둔 앨범을 지우고 목록으로 돌아간다.
-  Future<void> deleteAlbum() async {
-    final current = album;
-    if (current == null) return;
-    await apiProvider().deleteAlbum(current.id);
-    albums.removeWhere((a) => a.id == current.id);
-    closeAlbum();
+  /// 앨범을 지운다 — [albumId]가 없으면 열어 둔 앨범. 열어 둔 앨범이었으면 목록으로 돌아간다.
+  Future<void> deleteAlbum({String? albumId}) async {
+    final id = albumId ?? album?.id;
+    if (id == null) return;
+    await apiProvider().deleteAlbum(id);
+    albums.removeWhere((a) => a.id == id);
+    if (album?.id == id) {
+      closeAlbum();
+    } else {
+      _notify();
+    }
+  }
+
+  /// 열지 않은 앨범의 항목을 끝까지 받아 돌려준다(목록 카드의 "전체 다운로드") — 화면 상태는 건드리지 않는다.
+  Future<List<AlbumItem>> fetchAllItemsOf(String albumId) async {
+    final api = apiProvider();
+    final all = <AlbumItem>[];
+    var hasMore = true;
+    while (hasMore) {
+      final page = await api.fetchItems(
+        albumId,
+        before: all.isEmpty ? null : all.last.createdAt.millisecondsSinceEpoch,
+        limit: _itemsPageSize,
+      );
+      all.addAll(page.items);
+      hasMore = page.hasMore && page.items.isNotEmpty;
+    }
+    return all;
+  }
+
+  /// "앨범 공유" — [albumId] 앨범을 [roomId] 대화방에 메시지([text], 필수)와 앨범 카드로 알린다.
+  Future<void> shareAlbum(
+    String albumId, {
+    required String roomId,
+    required String text,
+    List<Map<String, dynamic>>? textFormat,
+    List<Map<String, dynamic>>? mentions,
+  }) => apiProvider().shareAlbum(
+    albumId,
+    roomId: roomId,
+    text: text,
+    textFormat: textFormat,
+    mentions: mentions,
+  );
+
+  /// 패널을 새로 열면서 바로 펼칠 앨범(메시지의 "앨범 보기") — 패널이 처음 만들어질 때 [takePendingAlbum]으로 꺼내 쓴다.
+  String? _pendingAlbumId;
+
+  void openWhenPanelOpens(String albumId) => _pendingAlbumId = albumId;
+
+  String? takePendingAlbum() {
+    final id = _pendingAlbumId;
+    _pendingAlbumId = null;
+    return id;
   }
 
   /// 항목을 지운다 — 권한 있는 것만 지워지고 나머지는 skipped로 센다.

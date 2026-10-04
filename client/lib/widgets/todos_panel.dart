@@ -10,7 +10,7 @@ import '../services/session.dart';
 import '../services/todo_api.dart';
 import '../services/todo_controller.dart';
 import 'app_toast.dart';
-import 'compact_menu.dart';
+import 'compact_menu_anchor.dart';
 import 'filter_dropdown.dart';
 import 'home_shell_scope.dart';
 import 'panel_filters.dart';
@@ -36,7 +36,7 @@ Color todoCardColor(BuildContext context) {
 
 /// 할 일 패널(side_panels.dart의 'todos') — 잔디의 할 일 목록 화면과 같다. 위에서부터 머리(`할 일` 바로 옆 작은 회색
 /// `할 일 일정` 칩, 오른쪽 끝 ✕), 가로 전체 `+ 할 일 생성`, 필터 줄(참여한 대화방 · 보기 — 모든 할 일 / 나의 할 일 /
-/// 부여한 할 일 · 부여한 할 일이면 담당 멤버), 정렬(생성 순 / 기한 순)과 `완료된 할 일 제외` 스위치, 그 아래 옅은 회색
+/// 부여한 할 일 · 부여한 할 일이면 담당 멤버), 왼쪽 `완료된 할 일 제외` 스위치와 오른쪽 정렬(생성 순 / 기한 순), 그 아래 옅은 회색
 /// 바탕에 `N개의 할 일`(서버가 센 전체 개수)과 카드 목록(무한 스크롤)이다. 카드는 보기만 하고, 누르면 상세가 열린다.
 ///
 /// PC 오른쪽 칸(홈 셸 아래)에서는 패널 안에 Navigator를 따로 두고 목록을 첫 화면으로 삼아, 상세·생성·수정·할 일 일정을
@@ -142,9 +142,10 @@ class _TodosPanelState extends State<TodosPanel> {
     setState(_attach);
   }
 
-  /// 목록 위에 띄운 화면을 닫는다 — PC는 패널 안 Navigator를 첫 화면(목록)까지(그 화면들이 창 전체에 띄운 메뉴 — 정렬·
-  /// ••• · 진척률·알림 — 부터), 모바일은 할 일 일정 화면만(이전 팀의 컨트롤러를 들고 있다).
+  /// 목록 위에 띄운 화면을 닫는다 — 목록의 정렬 메뉴부터, PC는 패널 안 Navigator를 첫 화면(목록)까지(그 화면들이 창
+  /// 전체에 띄운 메뉴 — ••• · 진척률·알림 — 부터), 모바일은 할 일 일정 화면만(이전 팀의 컨트롤러를 들고 있다).
   void _closePages() {
+    _sortMenu.close();
     final pages = _pages.currentState;
     if (pages != null) {
       closeTodoPopups(Navigator.of(context, rootNavigator: true));
@@ -208,13 +209,13 @@ class _TodosPanelState extends State<TodosPanel> {
         .firstOrNull;
     final self = session.selfRoom;
     final room = current ?? (self != null && usable(self) ? self : null);
+    // 만들기는 투표 만들기처럼 PC는 가운데 대화상자, 모바일은 전체 화면으로 연다(상세·수정·일정은 패널 안 화면).
     final saved = await showTodoEditor(
-      _pageHost,
+      context,
       session: session,
       room: room,
       api: widget.api,
-      mode: _pageMode,
-      onClosePanel: _closePanel,
+      mode: _inPanel ? TodoViewMode.dialog : TodoViewMode.page,
     );
     if (saved == null || !mounted) return;
     showAppToast(context, '할 일을 만들었습니다.');
@@ -570,7 +571,7 @@ class _TodosPanelState extends State<TodosPanel> {
     );
   }
 
-  /// 왼쪽 정렬, 오른쪽 `완료된 할 일 제외` 스위치(글자를 눌러도 켜고 끈다).
+  /// 왼쪽 `완료된 할 일 제외` 스위치(스위치 · 글자 — 글자를 눌러도 켜고 끈다), 오른쪽 끝 정렬.
   Widget _optionBar(BuildContext context) {
     final c = _controller;
     final theme = Theme.of(context);
@@ -578,16 +579,29 @@ class _TodosPanelState extends State<TodosPanel> {
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       child: Row(
         children: [
-          _sortButton(context),
-          const SizedBox(width: 8),
           Expanded(
             child: Align(
-              alignment: Alignment.centerRight,
+              alignment: Alignment.centerLeft,
               // 글자와 스위치를 한 마디(켜짐/꺼짐)로 읽게 합친다.
               child: MergeSemantics(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 잔디처럼 작은 스위치 — 그대로는 줄보다 크다. 누르는 자리 여백을 빼야 모바일·PC에서 같은
+                    // 크기로 줄어든다(모바일은 글자를 눌러도 된다).
+                    SizedBox(
+                      height: 24,
+                      child: FittedBox(
+                        child: Switch(
+                          key: const ValueKey('todo-exclude-done'),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          value: c.excludeDone,
+                          onChanged: c.setExcludeDone,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
                     Flexible(
                       child: InkWell(
                         onTap: () => c.setExcludeDone(!c.excludeDone),
@@ -608,46 +622,48 @@ class _TodosPanelState extends State<TodosPanel> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 2),
-                    // 잔디처럼 작은 스위치 — 그대로는 줄보다 크다. 누르는 자리 여백을 빼야 모바일·PC에서 같은
-                    // 크기로 줄어든다(모바일은 글자를 눌러도 된다).
-                    SizedBox(
-                      height: 24,
-                      child: FittedBox(
-                        child: Switch(
-                          key: const ValueKey('todo-exclude-done'),
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          value: c.excludeDone,
-                          onChanged: c.setExcludeDone,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          _sortButton(context),
         ],
       ),
     );
   }
 
-  /// 정렬 메뉴가 떠 있는지(단추를 "펼침"으로 읽힌다).
-  bool _sortMenuOpen = false;
+  /// 정렬 메뉴 — 팀을 바꿔 목록을 새로 시작할 때 떠 있던 메뉴를 닫는다.
+  final _sortMenu = MenuController();
 
-  /// 정렬(생성 순 / 기한 순) 단추.
+  /// 정렬(생성 순 / 기한 순) 단추 — 메시지 예약 패널의 정렬과 같은 드롭다운([CompactMenuAnchor])이 단추 오른쪽 끝에 맞춰
+  /// 바로 뜬다. 메뉴는 가장 가까운 Overlay(PC는 패널 안 Navigator — 자리가 패널 안)에 뜨고, 바깥 어디를(PC는 채팅 쪽까지)
+  /// 눌러도 닫히며 그 누름은 아래로 가지 않는다.
   Widget _sortButton(BuildContext context) {
     final theme = Theme.of(context);
     final hint = theme.hintColor;
-    return Semantics(
-      expanded: _sortMenuOpen,
-      child: Tooltip(
-        message: '정렬',
-        child: Builder(
-          builder: (buttonContext) => InkWell(
+    return CompactMenuAnchor<TodoSort>(
+      controller: _sortMenu,
+      alignEnd: true,
+      consumeOutsideTap: true,
+      selected: _controller.sort,
+      onSelected: _controller.setSort,
+      entries: [
+        for (final s in TodoSort.menuOrder)
+          CompactMenuOption(
+            key: ValueKey('todo-sort-${s.wire}'),
+            value: s,
+            label: s.label,
+          ),
+      ],
+      builder: (context, open, toggle) => Semantics(
+        expanded: open,
+        child: Tooltip(
+          message: '정렬',
+          child: InkWell(
             key: const ValueKey('todo-sort'),
-            onTap: () => _openSortMenu(buttonContext),
+            onTap: toggle,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
               child: Row(
@@ -666,37 +682,6 @@ class _TodosPanelState extends State<TodosPanel> {
         ),
       ),
     );
-  }
-
-  /// 정렬 메뉴 — 창 전체(루트 Navigator)에 띄워 바깥(PC는 채팅 쪽까지)을 누르면 닫히게 하고, 자리는 단추 바로 아래에서
-  /// 단추 왼쪽 끝부터 오른쪽(패널 안)으로 편다([showTodoMenu] — 펴는 쪽을 창이 아니라 패널 기준으로 정한다).
-  Future<void> _openSortMenu(BuildContext buttonContext) async {
-    if (_sortMenuOpen) return;
-    final current = _controller.sort;
-    setState(() => _sortMenuOpen = true);
-    final picked = await showTodoMenu<TodoSort>(
-      buttonContext,
-      initialValue: current,
-      constraints: const BoxConstraints(minWidth: 140, maxWidth: 200),
-      items: [
-        for (final s in TodoSort.menuOrder)
-          PopupMenuItem<TodoSort>(
-            key: ValueKey('todo-sort-${s.wire}'),
-            value: s,
-            height: CompactMenu.itemHeight,
-            padding: CompactMenu.itemPadding,
-            child: Row(
-              children: [
-                Expanded(child: Text(s.label, style: CompactMenu.textStyle)),
-                if (s == current) const Icon(Icons.check, size: 16),
-              ],
-            ),
-          ),
-      ],
-    );
-    if (!mounted) return;
-    setState(() => _sortMenuOpen = false);
-    if (picked != null) _controller.setSort(picked);
   }
 
   /// `N개의 할 일` — 지금 필터에 맞는 전체 개수(다음 쪽을 아직 안 받았어도 다 센다), 숫자는 굵게. 처음 받는 중·필터나
@@ -966,7 +951,8 @@ class TodoCard extends StatelessWidget {
             child: Text(
               '일정: ${todo.periodText ?? '없음'}',
               key: ValueKey('todo-period-${todo.id}'),
-              maxLines: 1,
+              // 시간까지 있으면 좁은 폭(휴대폰 360)에서는 종료 시각이 잘리지 않게 두 줄까지.
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 13,

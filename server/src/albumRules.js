@@ -210,3 +210,75 @@ export function shareMessageType(items) {
 export function canBeCover(item) {
   return item.kind === 'image' || !!item.thumbnailUrl;
 }
+
+// ── 앨범 공유(앨범 카드 메시지) ──────────────────────────────────────────
+// 앨범 하나를 통째로 대화방에 알리는 글 메시지 — 사람이 쓴 메시지(필수) 아래에 "{팀}에서 공유된 앨범입니다."와
+// 앨범 카드가 붙는다. 메시지는 일반 글(type 'text')이라 검색·미리보기·수정·멘션을 그대로 쓰고, 카드는
+// messages.album_id(앨범이 지워지면 null)·album_share({ title, teamName } 스냅샷)로 그린다.
+
+/** 공유 메시지 최대 길이(예약 메시지와 같은 5,000자 — 글자 = 이모지 한 덩어리 1자). */
+export const ALBUM_SHARE_TEXT_MAX = 5000;
+
+function shiftRanges(raw, lead, length) {
+  if (!Array.isArray(raw)) return null;
+  if (lead === 0) return raw;
+  return raw.map((r) =>
+    r && Number.isInteger(r.s) && Number.isInteger(r.e)
+      ? { ...r, s: Math.max(0, r.s - lead), e: Math.min(length, r.e - lead) }
+      : r,
+  );
+}
+
+/**
+ * 앨범 공유 메시지 본문 — 필수, 앞뒤 공백을 빼고 5,000자까지. 뗀 앞 공백만큼 서식·멘션 구간도 당긴다(구간은 본문의
+ * UTF-16 위치 기준 — 정리는 sendUserMessage가 textFormat.js·notificationRules.js로 한다).
+ * 통과하면 `{ text, textFormat, mentions }`, 아니면 `{ error }`.
+ */
+export function parseAlbumShareMessage(body) {
+  const raw = body?.text;
+  if (typeof raw !== 'string' || !raw.trim()) return { error: '메시지를 입력하세요.' };
+  const lead = raw.length - raw.trimStart().length;
+  const text = raw.trim();
+  if (graphemeLength(text) > ALBUM_SHARE_TEXT_MAX) {
+    return { error: `메시지는 ${ALBUM_SHARE_TEXT_MAX.toLocaleString('en-US')}자 이내로 입력하세요.` };
+  }
+  return {
+    text,
+    textFormat: shiftRanges(body?.textFormat, lead, text.length),
+    mentions: shiftRanges(body?.mentions, lead, text.length),
+  };
+}
+
+/** 메시지에 실어 둘 앨범 스냅샷 — 카드의 제목과 "{팀 이름}에서 공유된 앨범입니다." 문구에 쓴다. */
+export function albumShareSnapshot(album, teamName) {
+  return { title: album.title, teamName: typeof teamName === 'string' && teamName ? teamName : null };
+}
+
+/**
+ * 메시지 DTO의 `sharedAlbum` — 앨범 공유 메시지가 아니거나 지운 메시지면 null. 앨범이 지워졌으면 id가 null이다
+ * (카드는 "삭제된 앨범"으로 보인다).
+ */
+export function toSharedAlbumDto(m) {
+  const snap = m?.albumShare;
+  if (!snap || typeof snap !== 'object' || m.deletedAt) return null;
+  return {
+    id: m.albumId ?? null,
+    title: typeof snap.title === 'string' ? snap.title : '',
+    teamName: typeof snap.teamName === 'string' ? snap.teamName : null,
+  };
+}
+
+/** 앨범 상세의 내 권한 — 그 방 멤버가 아니라 공유 메시지로만 보는 사람([viaShare])은 보기·내려받기만 된다. */
+export function albumPerms({ album, userId, access, viaShare = false }) {
+  if (viaShare) {
+    return { canEdit: false, canDelete: false, canDeleteAnyItem: false, canShare: false, viewOnly: true };
+  }
+  return {
+    canEdit: canEditAlbum({ album, userId, access }),
+    canDelete: canDeleteAlbum({ album, userId, access }),
+    // 항목을 지우는 쪽 "전부 가능" 여부 — 앨범 만든 사람·팀 관리자(그 밖에는 항목마다 canDelete를 본다).
+    canDeleteAnyItem: canDeleteAlbumItem({ album, item: { uploaderId: null }, userId, access }),
+    canShare: true,
+    viewOnly: false,
+  };
+}

@@ -15,7 +15,6 @@ import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/services/todo_controller.dart';
-import 'package:client/widgets/date_range_calendar_panel.dart';
 import 'package:client/widgets/menu_entries.dart';
 import 'package:client/widgets/message_actions.dart';
 import 'package:client/widgets/side_panels.dart';
@@ -172,19 +171,34 @@ Future<void> _pickMyProgress(WidgetTester tester, int progress) async {
 
 String _ymd(DateTime d) => todoDateWire(d);
 
-/// 기한 달력(폼 안에 펼쳐진 것)의 [day]일을 누른다 — 화면 밖이면 스크롤해서.
-Future<void> _tapDay(WidgetTester tester, String day) async {
-  final finder = find.descendant(
-    of: find.byType(DateRangeCalendarPanel),
-    matching: find.text(day),
-  );
-  await tester.ensureVisible(finder.last);
+/// 기간 칸을 눌러 판(달력 + 시작/종료 시간)을 연다 — 칸이 창 아래쪽이면 보이게 민 뒤.
+Future<void> _openPeriod(WidgetTester tester) async {
+  await tester.ensureVisible(_key('todo-period-field'));
   await tester.pumpAndSettle();
-  await tester.tap(finder.last);
+  await tester.tap(_key('todo-period-field'));
   await tester.pumpAndSettle();
 }
 
+/// 펼친 기간 판의 달력에서 [day]를 누른다.
+Future<void> _tapDay(WidgetTester tester, DateTime day) async {
+  await tester.tap(_key('todo-period-day-${day.year}-${day.month}-${day.day}'));
+  await tester.pumpAndSettle();
+}
+
+/// 펼친 기간 판을 바깥(창 왼쪽 위 — 판 밖)을 눌러 닫는다.
+Future<void> _closePeriod(WidgetTester tester) async {
+  await tester.tapAt(const Offset(4, 4));
+  await tester.pumpAndSettle();
+}
+
+/// 날짜를 새로 고를 때 채우는 시간이 지금에 따라 달라 — 시험은 시계를 2026/10/04 오전 10:07로 고정한다(채우는 값은
+/// 그다음 15분 단위 오전 10:15).
+final _fixedNow = DateTime(2026, 10, 4, 10, 7);
+
 void main() {
+  setUp(() => todoClock = () => _fixedNow);
+  tearDown(() => todoClock = DateTime.now);
+
   // ────────────────────────── 모델 ──────────────────────────
   group('Todo 모델', () {
     test('fromJson — 상태·기한·담당자·권한', () {
@@ -337,6 +351,199 @@ void main() {
       expect(
         todoReminderBeforeDue(due, const Duration(hours: 1)),
         DateTime(2026, 10, 5, 17),
+      );
+    });
+
+    // ── 시작/종료 시간 ──
+    test('시간 표기·변환 — HH:mm ↔ 분, 오전/오후 h:mm', () {
+      expect(parseTodoTime('00:00'), 0);
+      expect(parseTodoTime('17:40'), 17 * 60 + 40);
+      expect(parseTodoTime('23:59'), 23 * 60 + 59);
+      for (final bad in ['24:00', '9:00', '09:60', '0900', null]) {
+        expect(parseTodoTime(bad), isNull, reason: '$bad');
+      }
+      expect(todoTimeWire(0), '00:00');
+      expect(todoTimeWire(9 * 60 + 5), '09:05');
+      expect(todoTimeWire(23 * 60 + 45), '23:45');
+      expect(formatTodoClock(0), '오전 12:00');
+      expect(formatTodoClock(9 * 60), '오전 9:00');
+      expect(formatTodoClock(12 * 60), '오후 12:00');
+      expect(formatTodoClock(23 * 60 + 45), '오후 11:45');
+      // 날짜를 새로 고를 때 채우는 시간 — 지금 다음의 15분 단위(이미 15분 단위면 그대로, 자정을 넘기면 오후 11:45).
+      expect(
+        todoDefaultTimeMinutes(DateTime(2026, 10, 4, 10, 7)),
+        10 * 60 + 15,
+      );
+      expect(
+        todoDefaultTimeMinutes(DateTime(2026, 10, 4, 10, 15)),
+        10 * 60 + 15,
+      );
+      expect(
+        todoDefaultTimeMinutes(DateTime(2026, 10, 4, 10, 15, 1)),
+        10 * 60 + 30,
+      );
+      expect(todoDefaultTimeMinutes(DateTime(2026, 10, 4, 10, 46)), 11 * 60);
+      expect(todoDefaultTimeMinutes(DateTime(2026, 10, 4, 0, 0)), 0);
+      expect(
+        todoDefaultTimeMinutes(DateTime(2026, 10, 4, 23, 50)),
+        23 * 60 + 45,
+      );
+      expect(todoDefaultTimeMinutes(), 10 * 60 + 15, reason: '시계(todoClock)');
+      expect(formatTodoDay(DateTime(2026, 10, 1), null), '2026/10/01');
+      expect(
+        formatTodoDay(DateTime(2026, 10, 1), 15 * 60),
+        '2026/10/01 오후 3:00',
+      );
+    });
+
+    test('기간 문구 — 시간이 있으면 그 날짜 뒤에(한쪽만 있으면 그쪽만), 날짜가 없으면 시간도 무시', () {
+      Todo t({String? sd, String? st, String? dd, String? dt}) => Todo.fromJson(
+        todoJson(startDate: sd, startTime: st, dueDate: dd, dueTime: dt),
+      );
+      expect(
+        t(
+          sd: '2026-10-01',
+          st: '15:00',
+          dd: '2026-10-02',
+          dt: '18:00',
+        ).periodText,
+        '2026/10/01 오후 3:00 ~ 2026/10/02 오후 6:00',
+      );
+      expect(
+        t(
+          sd: '2025-11-13',
+          st: '17:40',
+          dd: '2025-11-14',
+          dt: '00:00',
+        ).periodText,
+        '2025/11/13 오후 5:40 ~ 2025/11/14 오전 12:00',
+      );
+      expect(
+        t(sd: '2026-10-01', dd: '2026-10-02', dt: '18:00').periodText,
+        '2026/10/01 ~ 2026/10/02 오후 6:00',
+      );
+      expect(
+        t(dd: '2026-10-02', dt: '09:30').periodText,
+        '~ 2026/10/02 오전 9:30',
+      );
+      expect(
+        t(sd: '2026-10-01', st: '09:00').periodText,
+        '2026/10/01 오전 9:00 ~',
+      );
+      expect(
+        t(sd: '2026-10-01', dd: '2026-10-02').periodText,
+        '2026/10/01 ~ 2026/10/02',
+      );
+      final noDate = t(st: '09:00');
+      expect(noDate.startMinutes, isNull);
+      expect(noDate.periodText, isNull);
+      // 예전 서버 응답(시간 칸 없음)은 날짜만.
+      final old = Todo.fromJson(
+        todoJson(dueDate: '2026-10-02')
+          ..remove('startTime')
+          ..remove('dueTime'),
+      );
+      expect(old.dueTime, isNull);
+      expect(old.periodText, '~ 2026/10/02');
+    });
+
+    test('지난 기한 — 종료 시간이 있으면 그 시각이 지나야, 없으면 그날이 다 지나야', () {
+      final withTime = Todo.fromJson(
+        todoJson(dueDate: '2026-10-03', dueTime: '15:00'),
+      );
+      expect(withTime.isOverdue(DateTime(2026, 10, 3, 14, 59)), isFalse);
+      expect(withTime.isOverdue(DateTime(2026, 10, 3, 15, 1)), isTrue);
+      expect(withTime.isOverdueFor(100, DateTime(2026, 10, 4)), isFalse);
+      final dateOnly = Todo.fromJson(todoJson(dueDate: '2026-10-03'));
+      expect(dateOnly.isOverdue(DateTime(2026, 10, 3, 23, 59)), isFalse);
+      expect(dateOnly.isOverdue(DateTime(2026, 10, 4)), isTrue);
+    });
+
+    test('기한 기준 알림 — 종료 시간이 있으면 그 시각 기준(없으면 오후 6시)', () {
+      final due = DateTime(2026, 10, 5);
+      expect(
+        todoReminderBeforeDue(due, const Duration(days: 1), dueMinutes: 9 * 60),
+        DateTime(2026, 10, 4, 9),
+      );
+      expect(
+        todoReminderBeforeDue(due, const Duration(hours: 1), dueMinutes: 30),
+        DateTime(2026, 10, 4, 23, 30),
+        reason: '자정 넘어 전날로',
+      );
+      expect(
+        todoReminderBeforeDue(due, const Duration(hours: 1), dueMinutes: null),
+        DateTime(2026, 10, 5, 17),
+      );
+    });
+
+    test('입력 검사 — 같은 날이면 시간으로, 한쪽 시간이 없으면 날짜만 비교', () {
+      final day = DateTime(2026, 10, 1);
+      String? err({int? s, int? d, DateTime? due}) => checkTodoDraft(
+        title: 't',
+        start: day,
+        due: due ?? day,
+        startMinutes: s,
+        dueMinutes: d,
+      ).periodError;
+      expect(err(s: 9 * 60, d: 18 * 60), isNull);
+      expect(
+        err(s: 9 * 60, d: 9 * 60),
+        isNull,
+        reason: '같은 시각은 허용',
+      );
+      expect(err(s: 19 * 60, d: 18 * 60), '시작 시간은 종료 시간보다 늦을 수 없습니다.');
+      expect(err(s: 23 * 60 + 59), isNull, reason: '종료 시간 없음 = 그날 끝');
+      expect(err(d: 0), isNull, reason: '시작 시간 없음 = 그날 시작');
+      expect(
+        err(s: 0, d: 23 * 60, due: DateTime(2026, 9, 30)),
+        '시작일은 종료일보다 늦을 수 없습니다.',
+      );
+      expect(err(s: 23 * 60, d: 1 * 60, due: DateTime(2026, 10, 2)), isNull);
+    });
+
+    test('가짜 API도 서버처럼 기간을 검사한다 — 형식·날짜 없는 시간·순서, 날짜를 지우면 시간도', () async {
+      final api = FakeTodoApi(me: 'me');
+      await expectLater(
+        api.create('r1', title: 't', startTime: '09:00'),
+        throwsA(isA<ApiException>()),
+      );
+      await expectLater(
+        api.create('r1', title: 't', dueDate: '2026-10-01', dueTime: '24:00'),
+        throwsA(isA<ApiException>()),
+      );
+      await expectLater(
+        api.create(
+          'r1',
+          title: 't',
+          startDate: '2026-10-01',
+          startTime: '18:00',
+          dueDate: '2026-10-01',
+          dueTime: '09:00',
+        ),
+        throwsA(isA<ApiException>()),
+      );
+      expect(api.todos, isEmpty);
+      final made = await api.create(
+        'r1',
+        title: 't',
+        startDate: '2026-10-01',
+        startTime: '09:00',
+        dueDate: '2026-10-01',
+        dueTime: '18:00',
+      );
+      expect(made.periodText, '2026/10/01 오전 9:00 ~ 2026/10/01 오후 6:00');
+      await expectLater(
+        api.update(made.id, {'dueTime': '08:00'}),
+        throwsA(isA<ApiException>()),
+      );
+      final cleared = await api.update(made.id, {'dueDate': null});
+      expect(cleared.dueDate, isNull);
+      expect(cleared.dueTime, isNull, reason: '날짜를 지우면 그 시간도');
+      expect(cleared.startTime, '09:00');
+      await expectLater(
+        api.update(made.id, {'dueTime': '10:00'}),
+        throwsA(isA<ApiException>()),
+        reason: '날짜 없는 시간',
       );
     });
 
@@ -998,19 +1205,29 @@ void main() {
       );
       await tester.enterText(_key('todo-title-field'), '기한 있는 일');
       // 기한은 담당자 아래(잔디 순서)라 창 아래쪽이다 — 보이게 민 뒤 누른다.
-      await tester.ensureVisible(_key('todo-period-field'));
-      await tester.pumpAndSettle();
-      await tester.tap(_key('todo-period-field'));
-      await tester.pumpAndSettle();
+      await _openPeriod(tester);
       expect(find.text('시작일을 선택하세요'), findsOneWidget);
-      await _tapDay(tester, '10');
-      expect(find.text('종료일을 선택하세요'), findsOneWidget);
-      await _tapDay(tester, '20');
       final now = DateTime.now();
       final start = DateTime(now.year, now.month, 10);
       final due = DateTime(now.year, now.month, 20);
-      expect(find.text(formatTodoDate(start)), findsOneWidget);
-      expect(find.text(formatTodoDate(due)), findsOneWidget);
+      await _tapDay(tester, start);
+      expect(find.text('종료일을 선택하세요'), findsOneWidget);
+      await _tapDay(tester, due);
+      await _closePeriod(tester);
+      expect(
+        find.descendant(
+          of: _key('todo-period-field'),
+          matching: find.textContaining(formatTodoDate(start)),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: _key('todo-period-field'),
+          matching: find.textContaining(formatTodoDate(due)),
+        ),
+        findsOneWidget,
+      );
       await tester.tap(_key('todo-submit'));
       await tester.pumpAndSettle();
       expect(api.lastCreate!['startDate'], _ymd(start));
@@ -1032,23 +1249,26 @@ void main() {
         ),
       );
       await tester.enterText(_key('todo-title-field'), '순서');
-      await tester.ensureVisible(_key('todo-period-field'));
-      await tester.pumpAndSettle();
-      await tester.tap(_key('todo-period-field'));
-      await tester.pumpAndSettle();
-      await _tapDay(tester, '20');
-      await _tapDay(tester, '10');
+      await _openPeriod(tester);
+      final now = DateTime.now();
+      await _tapDay(tester, DateTime(now.year, now.month, 20));
+      await _tapDay(tester, DateTime(now.year, now.month, 10));
       // 아직 종료일을 못 골랐다 — 10일이 시작일로 바뀌었다.
       expect(find.text('종료일을 선택하세요'), findsOneWidget);
-      final now = DateTime.now();
+      await _closePeriod(tester);
       expect(
-        find.text(formatTodoDate(DateTime(now.year, now.month, 10))),
+        find.descendant(
+          of: _key('todo-period-field'),
+          matching: find.text(
+            '${formatTodoDate(DateTime(now.year, now.month, 10))} 오전 10:15 ~',
+          ),
+        ),
         findsOneWidget,
       );
       await tester.ensureVisible(_key('todo-period-clear'));
       await tester.tap(_key('todo-period-clear'));
       await tester.pump();
-      expect(find.text('시작일'), findsOneWidget);
+      expect(find.text('기간을 선택하세요 (선택)'), findsOneWidget);
     });
 
     testWidgets('첨부는 30개까지 — 넘치면 막고 알린다', (tester) async {
@@ -1113,32 +1333,53 @@ void main() {
       expect(_key('todo-reminder-0'), findsNothing);
 
       // 기한을 멀리(다음 달 25일) 잡고 추가.
-      await tester.tap(_key('todo-period-field'));
+      await _openPeriod(tester);
+      await tester.tap(_key('todo-period-next'));
+      await tester.pumpAndSettle();
+      final now = DateTime.now();
+      final due = DateTime(now.year, now.month + 1, 25);
+      await _tapDay(tester, due);
+      await _tapDay(tester, due);
+      await _closePeriod(tester);
+      // 종료일을 새로 고르면 종료 시간은 지금 다음의 15분 단위(시계를 오전 10:07로 고정 — 오전 10:15) — 메뉴 문구에 울릴
+      // 시각이 보인다.
+      await tester.ensureVisible(_key('todo-reminder-add'));
+      await tester.tap(_key('todo-reminder-add'));
       await tester.pumpAndSettle();
       await tester.tap(
-        find.descendant(
-          of: find.byType(DateRangeCalendarPanel),
-          matching: find.byIcon(Icons.chevron_right),
+        find.text(
+          '기한 하루 전 (${formatTodoDateTime(DateTime(due.year, due.month, due.day - 1, 10, 15))})',
         ),
       );
       await tester.pumpAndSettle();
-      await _tapDay(tester, '25');
-      await _tapDay(tester, '25');
-      await tester.ensureVisible(_key('todo-reminder-add'));
-      await tester.tap(_key('todo-reminder-add'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('기한 하루 전 (전날 오후 6시)'));
-      await tester.pumpAndSettle();
       expect(_key('todo-reminder-0'), findsOneWidget);
-      expect(find.textContaining('오후 6:00'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: _key('todo-reminder-0'),
+          matching: find.textContaining('오전 10:15'),
+        ),
+        findsOneWidget,
+      );
       await tester.ensureVisible(_key('todo-reminder-add'));
       await tester.tap(_key('todo-reminder-add'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('기한 1시간 전 (기한일 오후 5시)'));
+      await tester.tap(
+        find.text(
+          '기한 1시간 전 (${formatTodoDateTime(DateTime(due.year, due.month, due.day, 9, 15))})',
+        ),
+      );
       await tester.pumpAndSettle();
       expect(_key('todo-reminder-1'), findsOneWidget);
-      expect(find.textContaining('오후 5:00'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: _key('todo-reminder-1'),
+          matching: find.textContaining('오전 9:15'),
+        ),
+        findsOneWidget,
+      );
       // 삭제.
+      await tester.ensureVisible(_key('todo-reminder-remove-0'));
+      await tester.pumpAndSettle();
       await tester.tap(_key('todo-reminder-remove-0'));
       await tester.pump();
       expect(_key('todo-reminder-1'), findsNothing);

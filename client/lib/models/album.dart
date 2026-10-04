@@ -7,6 +7,9 @@ const albumUploadMaxCount = 100;
 /// 한 번에 대화방에 공유할 수 있는 최대 개수(서버 ALBUM_SHARE_MAX).
 const albumShareMaxCount = 10;
 
+/// "앨범 공유" 메시지 최대 길이(서버 ALBUM_SHARE_TEXT_MAX).
+const albumShareTextMaxLength = 5000;
+
 const albumTitleMaxLength = 50;
 const albumDescriptionMaxLength = 300;
 
@@ -31,11 +34,18 @@ class Album {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  /// 상세에서만 채워진다(목록은 false) — 제목·설명·대표 이미지를 고칠 수 있는지 / 앨범을 지울 수 있는지 /
-  /// 남이 올린 항목까지 지울 수 있는지(앨범 만든 사람·팀 관리자).
+  /// 보는 사람 기준 권한(목록·상세 모두 서버가 채운다) — 제목·설명·대표 이미지를 고칠 수 있는지 / 앨범을 지울 수
+  /// 있는지 / 남이 올린 항목까지 지울 수 있는지(앨범 만든 사람·팀 관리자).
   final bool canEdit;
   final bool canDelete;
   final bool canDeleteAnyItem;
+
+  /// 대화방에 "앨범 공유"를 할 수 있는지 — 앨범 방의 멤버만(공유 메시지로만 보는 사람은 안 된다). 예전 서버는 이 값을
+  /// 안 보내므로 없으면 true.
+  final bool canShare;
+
+  /// 앨범 방의 멤버가 아니라 공유 메시지로만 보는 중 — 보기·내려받기만 되고 올리기·고치기·지우기·공유는 숨긴다.
+  final bool viewOnly;
 
   const Album({
     required this.id,
@@ -54,6 +64,8 @@ class Album {
     this.canEdit = false,
     this.canDelete = false,
     this.canDeleteAnyItem = false,
+    this.canShare = true,
+    this.viewOnly = false,
   });
 
   factory Album.fromJson(Map<String, dynamic> json) => Album(
@@ -77,6 +89,8 @@ class Album {
     canEdit: json['canEdit'] as bool? ?? false,
     canDelete: json['canDelete'] as bool? ?? false,
     canDeleteAnyItem: json['canDeleteAnyItem'] as bool? ?? false,
+    canShare: json['canShare'] as bool? ?? true,
+    viewOnly: json['viewOnly'] as bool? ?? false,
   );
 
   Album copyWith({
@@ -102,7 +116,29 @@ class Album {
     canEdit: canEdit,
     canDelete: canDelete,
     canDeleteAnyItem: canDeleteAnyItem,
+    canShare: canShare,
+    viewOnly: viewOnly,
   );
+}
+
+/// "앨범 공유" 메시지에 붙은 앨범 카드(메시지 DTO의 `sharedAlbum`) — 제목·팀 이름은 공유 당시 값이고(제목은 앨범을 고치면
+/// 서버가 같이 고친다), 앨범이 지워졌으면 [id]가 null이다.
+class SharedAlbum {
+  final String? id;
+  final String title;
+  final String? teamName;
+  const SharedAlbum({this.id, required this.title, this.teamName});
+
+  bool get deleted => id == null;
+
+  static SharedAlbum? fromJson(Object? json) {
+    if (json is! Map) return null;
+    return SharedAlbum(
+      id: json['id'] as String?,
+      title: json['title'] as String? ?? '',
+      teamName: json['teamName'] as String?,
+    );
+  }
 }
 
 class AlbumItem {

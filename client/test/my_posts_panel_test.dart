@@ -15,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 내가 쓴 글 패널(MyPostsScreen) — 헤더 · 필터 줄(멤버 필터 없음) · 탭 · 정렬 · 로딩 줄 · 목록(방 이름·시각·본문 2줄·
+/// 내가 쓴 글 패널(MyPostsScreen) — 헤더 · 필터 줄(멤버 필터 없음) · 종류 드롭다운 · 정렬 · 로딩 줄 · 목록(방 이름·시각·본문 2줄·
 /// 게시글 제목·댓글 원본·편집됨), 서버로 가는 요청 파라미터, 눌러서 이동, 무한 스크롤, 빈 상태, 폭 360.
 
 class _QuietNotifications extends NotificationService {
@@ -176,6 +176,14 @@ Future<void> _finish(WidgetTester tester) async {
 
 Finder _key(String k) => find.byKey(ValueKey(k));
 
+/// 정렬 줄 왼쪽 끝의 종류 드롭다운을 열고 [name] 종류를 고른다.
+Future<void> _pickKind(WidgetTester tester, String name) async {
+  await tester.tap(_key('my-posts-kind'));
+  await tester.pumpAndSettle();
+  await tester.tap(_key('my-posts-tab-$name'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late _Server server;
   setUp(() {
@@ -200,7 +208,7 @@ void main() {
     );
   });
 
-  testWidgets('헤더 · 필터 줄(멤버 필터 없음) · 탭 · 로딩 줄 · 목록과 기본 요청(최신순 1년)', (
+  testWidgets('헤더 · 필터 줄(멤버 필터 없음) · 종류 드롭다운 · 로딩 줄 · 목록과 기본 요청(최신순 1년)', (
     tester,
   ) async {
     final session = _session(server);
@@ -221,9 +229,48 @@ void main() {
     expect(find.text('1년 (기본)'), findsOneWidget);
     expect(find.text('모든 멤버'), findsNothing); // 글쓴이는 늘 나라 멤버 필터가 없다.
     expect(_key('panel-search-field'), findsNothing);
-    for (final tab in ['전체', '메시지', '댓글']) {
-      expect(find.text(tab), findsOneWidget, reason: tab);
+    // 종류는 정렬 줄 왼쪽 끝의 드롭다운 하나(처음엔 '전체') — 정렬 단추와 같은 줄, 같은 글자 크기·색.
+    final kind = _key('my-posts-kind');
+    final sort = _key('panel-sort');
+    final kindText = tester.widget<Text>(
+      find.descendant(of: kind, matching: find.text('전체')),
+    );
+    final sortText = tester.widget<Text>(
+      find.descendant(of: sort, matching: find.text('최신순')),
+    );
+    expect(kindText.style?.fontSize, sortText.style?.fontSize);
+    expect(kindText.style?.color, sortText.style?.color);
+    expect(tester.getCenter(kind).dy, tester.getCenter(sort).dy);
+    expect(tester.getTopLeft(kind).dx, 16);
+    expect(tester.getTopLeft(kind).dx, lessThan(tester.getTopLeft(sort).dx));
+    expect(find.text('메시지'), findsNothing); // 메뉴를 열기 전에는 다른 종류가 안 보인다.
+    await tester.tap(kind);
+    await tester.pumpAndSettle();
+    for (final (name, label) in [
+      ('all', '전체'),
+      ('message', '메시지'),
+      ('comment', '댓글'),
+    ]) {
+      final item = _key('my-posts-tab-$name');
+      expect(
+        find.descendant(of: item, matching: find.text(label)),
+        findsOneWidget,
+        reason: label,
+      );
+      expect(
+        find.descendant(of: item, matching: find.byIcon(Icons.check)),
+        name == 'all' ? findsOneWidget : findsNothing,
+        reason: label,
+      );
     }
+    await tester.tap(_key('my-posts-tab-comment'));
+    await tester.pumpAndSettle();
+    expect(server.lastQuery['kind'], 'comment');
+    expect(
+      find.descendant(of: kind, matching: find.text('댓글')),
+      findsOneWidget,
+    );
+    await _pickKind(tester, 'all');
     expect(find.text('최신순'), findsOneWidget);
     expect(find.text('"4"개가 로딩되었습니다.'), findsOneWidget);
 
@@ -291,21 +338,21 @@ void main() {
     await _finish(tester);
   });
 
-  testWidgets('탭 · 방 · 기간 · 정렬을 바꿀 때마다 서버로 걸러서 다시 받는다', (tester) async {
+  testWidgets('종류 · 방 · 기간 · 정렬을 바꿀 때마다 서버로 걸러서 다시 받는다', (tester) async {
     final session = _session(server);
     await _pump(tester, session);
     final before = server.calls.length;
 
-    await tester.tap(_key('my-posts-tab-comment'));
+    await _pickKind(tester, 'comment');
     await tester.pumpAndSettle();
     expect(server.calls.length, before + 1);
     expect(server.lastQuery['kind'], 'comment');
 
-    await tester.tap(_key('my-posts-tab-message'));
+    await _pickKind(tester, 'message');
     await tester.pumpAndSettle();
     expect(server.lastQuery['kind'], 'message');
 
-    await tester.tap(_key('my-posts-tab-all'));
+    await _pickKind(tester, 'all');
     await tester.pumpAndSettle();
     expect(server.lastQuery.containsKey('kind'), isFalse);
 
@@ -368,7 +415,7 @@ void main() {
     await _pump(tester, session, size: const Size(480, 700));
     expect(find.text('"30"개가 로딩되었습니다.'), findsOneWidget);
 
-    await tester.tap(_key('my-posts-tab-message'));
+    await _pickKind(tester, 'message');
     await tester.pumpAndSettle();
     final list = _key('my-posts-list');
     for (var i = 0; i < 40; i++) {
@@ -404,7 +451,7 @@ void main() {
           ? _json({'error': '서버가 바쁩니다.'}, 500)
           : _json(_page([_msg('1')]));
     });
-    await tester.tap(_key('my-posts-tab-comment'));
+    await _pickKind(tester, 'comment');
     await tester.pumpAndSettle();
     expect(_key('my-posts-error'), findsOneWidget);
     fail = false;
@@ -414,14 +461,14 @@ void main() {
     await _finish(tester);
   });
 
-  testWidgets('폭 360 — 넘치지 않고 필터 줄과 탭, 행이 화면 안에 있다', (tester) async {
+  testWidgets('폭 360 — 넘치지 않고 필터 줄과 종류·정렬 줄, 행이 화면 안에 있다', (tester) async {
     final session = _session(server);
     await _pump(tester, session, size: const Size(360, 780));
     expect(tester.takeException(), isNull);
     for (final f in [
       find.text('참여 대화방'),
       find.text('1년 (기본)'),
-      find.text('댓글'),
+      _key('my-posts-kind'),
       find.text('최신순'),
       _key('my-post-m:m1'),
       _key('my-post-c:c3'),

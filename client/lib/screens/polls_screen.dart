@@ -9,16 +9,24 @@ import '../models/room.dart';
 import '../services/panel_lists_api.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/compact_menu.dart';
+import '../widgets/filter_dropdown.dart';
 import '../widgets/home_shell_scope.dart';
-import '../widgets/panel_filters.dart';
+import '../widgets/hover_toolbar.dart' show hoverMenuStyle;
 import '../widgets/poll_card.dart';
 import '../widgets/side_panel_header.dart';
 import 'poll_create_dialog.dart';
 
 /// "투표" 패널 — 이 팀에서 내가 멤버인 방(비밀 대화 제외)의 투표를 한곳에 모아 보고, 그 자리에서 바로 투표한다.
-/// 파일·즐겨찾기 패널과 같은 틀이다 — 위에서부터 헤더(`투표` + 닫기), `+ 투표 만들기` 단추, 필터 줄(참여 대화방 / 작성자 /
-/// 기간), 상태 칩(전체 | 진행 중 | 마감)과 정렬, 참여 여부 칩(전체 | 참여함 | 참여 안 함), `"N"개가 로딩되었습니다.` 줄,
-/// 투표 카드 목록(무한 스크롤). 카드는 채팅의 [PollCard]를 그대로 쓰고, 카드 위 줄의 "방으로 이동"을 누르면 그 방의 그 투표로 간다.
+/// 할 일 패널(todos_panel.dart)과 같은 틀이다 — 위에서부터 헤더(`투표` + 닫기), 가로 전체 옅은 회색 `+ 투표 만들기`,
+/// 필터 줄(참여한 대화방 · 참여 여부 — 전체 / 참여함 / 참여 안 함), 작은 글씨 줄(왼쪽 `마감된 투표 제외` 스위치, 오른쪽
+/// 정렬 — 생성 순 / 기한 순), 그 아래 옅은 회색 바탕에 `N개의 투표`(서버가 센 전체 개수)와 흰 둥근 카드 목록(무한
+/// 스크롤)이다. 기간 제한은 없다(만든 지 오래된 투표도 다 나온다). 카드는 위 줄(대화방 이름 · "방으로 이동")과 채팅의
+/// [PollCard]를 그대로 담아 그 자리에서 투표한다. "방으로 이동"을 누르면 그 방의 그 투표로 간다.
+///
+/// 정렬 — 생성 순은 최근에 만든 것부터, 기한 순은 진행 중인 투표를 마감이 가까운 것부터 보이고 그 뒤에 마감된 투표를
+/// 최근에 끝난 것부터 보인다(`마감된 투표 제외`를 켜면 진행 중인 것만). 펼침 메뉴(참여 여부·정렬)는 메시지 예약 패널의
+/// 정렬과 같은 [MenuAnchor]라 애니메이션 없이 바로 뜬다.
 /// PC는 오른쪽 패널, 모바일은 전체 화면으로 열린다(side_panels.dart의 'polls'). 메뉴(격자 아이콘)의 "생성 > 투표"에서 들어온다.
 ///
 /// 필터·정렬은 전부 서버가 건다(`GET /api/polls`, panel_lists_api.dart) — 필터를 바꿀 때마다 처음부터 다시 받는다. 열려 있는
@@ -48,12 +56,12 @@ class _PollsScreenState extends State<PollsScreen> {
   final _items = <PollListItem>[];
   final _scroll = ScrollController();
 
-  String? _roomId; // null = 참여 대화방(전체)
-  String? _creatorId; // null = 모든 멤버
-  PollStatusFilter _status = PollStatusFilter.all;
+  String? _roomId; // null = 참여한 대화방(전체)
   PollParticipationFilter _participated = PollParticipationFilter.all;
-  PanelPeriod _period = const PanelPeriod();
-  bool _newestFirst = true;
+
+  /// `마감된 투표 제외` — 켜면 진행 중인 투표만(서버 status=open).
+  bool _excludeClosed = false;
+  PollSort _sort = PollSort.created;
 
   bool _loaded = false;
   bool _loading = false;
@@ -73,10 +81,8 @@ class _PollsScreenState extends State<PollsScreen> {
 
   bool get _filtered =>
       _roomId != null ||
-      _creatorId != null ||
-      _status != PollStatusFilter.all ||
-      _participated != PollParticipationFilter.all ||
-      _period.preset != PeriodPreset.year;
+      _excludeClosed ||
+      _participated != PollParticipationFilter.all;
 
   @override
   void initState() {
@@ -99,29 +105,24 @@ class _PollsScreenState extends State<PollsScreen> {
     super.dispose();
   }
 
-  /// 팀을 바꾸면 방·작성자 필터가 이전 팀 기준이라 풀고 새 팀의 목록을 받는다.
+  /// 팀을 바꾸면 방 필터가 이전 팀 기준이라 풀고 새 팀의 목록을 받는다.
   void _onSessionChanged() {
     final team = _session.currentTeam?.id;
     if (team == _teamId) return;
     _teamId = team;
-    setState(() {
-      _roomId = null;
-      _creatorId = null;
-    });
+    setState(() => _roomId = null);
     _reload();
   }
 
   // ---- 받기 ----
 
+  /// 기간은 보내지 않는다 — 서버는 since/until이 없으면 전체 기간에서 찾는다.
   Future<PollListPage> _fetch({String? before}) => _session.api!.fetchPollList(
     teamId: _teamId!,
     roomId: _roomId,
-    status: _status,
-    creatorId: _creatorId,
+    status: _excludeClosed ? PollStatusFilter.open : PollStatusFilter.all,
     participated: _participated,
-    since: _period.since(),
-    until: _period.until,
-    newestFirst: _newestFirst,
+    sort: _sort,
     before: before,
     limit: _pageSize,
   );
@@ -248,69 +249,273 @@ class _PollsScreenState extends State<PollsScreen> {
   }
 
   void _onRoomSelected(String? roomId) {
-    setState(() {
-      _roomId = roomId;
-      _creatorId = null; // 이전 방 멤버 기준으로 골랐던 작성자는 새 범위에 안 맞을 수 있다.
-    });
+    setState(() => _roomId = roomId);
+    _reload();
+  }
+
+  void _setParticipated(PollParticipationFilter v) {
+    if (v == _participated) return;
+    setState(() => _participated = v);
+    _reload();
+  }
+
+  void _setExcludeClosed(bool v) {
+    if (v == _excludeClosed) return;
+    setState(() => _excludeClosed = v);
+    _reload();
+  }
+
+  void _setSort(PollSort v) {
+    if (v == _sort) return;
+    setState(() => _sort = v);
     _reload();
   }
 
   // ---- 그리기 ----
 
-  Widget _chips<T>({
-    required Key listKey,
-    required String prefix,
-    required List<T> values,
-    required T selected,
-    required String Function(T) label,
-    required ValueChanged<T> onSelected,
-  }) {
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        key: listKey,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 6),
-        itemBuilder: (context, i) {
-          final v = values[i];
-          return ChoiceChip(
-            key: ValueKey('$prefix-${(v as Enum).name}'),
-            label: Text(label(v)),
-            selected: v == selected,
-            // 칩이 두 줄이라 폭 360에서도 한 줄에 다 들어가게 선택 표시(체크)는 칠한 바탕으로만 한다.
-            showCheckmark: false,
-            visualDensity: VisualDensity.compact,
-            onSelected: (_) => onSelected(v),
-          );
-        },
+  /// 목록 아래쪽 옅은 회색 바탕 — 그 위에 [_cardColor] 카드가 떠 보인다(할 일 패널과 같은 색).
+  static Color _listBackground(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.surfaceContainerLow
+        : theme.colorScheme.surfaceContainer;
+  }
+
+  /// 투표 카드 바탕 — 밝은 테마는 패널 바탕(surface)과 같은 흰색.
+  static Color _cardColor(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.brightness == Brightness.dark
+        ? theme.colorScheme.surfaceContainerHigh
+        : theme.colorScheme.surface;
+  }
+
+  /// 가로 전체 `+ 투표 만들기` — 할 일 패널의 `+ 할 일 생성`과 같은 옅은 회색 둥근 단추.
+  Widget _createButton(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: FilledButton.icon(
+        key: const ValueKey('polls-create'),
+        onPressed: _create,
+        style: FilledButton.styleFrom(
+          backgroundColor: scheme.surfaceContainerHighest,
+          foregroundColor: scheme.onSurface,
+          minimumSize: const Size.fromHeight(44),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          textStyle: theme.textTheme.labelLarge?.copyWith(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        icon: const Icon(Icons.add, size: 20),
+        label: const Text(
+          '투표 만들기',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }
 
-  Widget _participationRow(BuildContext context) {
-    final hint = Theme.of(context).hintColor;
+  /// 대화방 필터에서 방을 고르지 않았을 때의 글자(할 일 패널과 같다).
+  static const _allRoomsLabel = '참여한 대화방';
+
+  /// 참여 여부 단추 글자 — 펼침 목록은 `전체 / 참여함 / 참여 안 함`이고, 전체일 때 단추만 무엇의 전체인지 보인다.
+  String get _participationLabel => _participated == PollParticipationFilter.all
+      ? '참여 여부'
+      : _participated.label;
+
+  /// 필터 줄 — 참여한 대화방, 그 오른쪽 참여 여부. 할 일 패널의 `참여한 대화방` · `나의 할 일`처럼 두 단추를 같은 폭으로
+  /// 나누고, 넘치는 글자는 말줄임표로 줄인다.
+  Widget _filterBar() {
+    final room = RoomFilterButton(
+      session: _session,
+      selectedRoomId: _roomId,
+      expand: true,
+      allLabel: _allRoomsLabel,
+      allOptionLabel: _allRoomsLabel,
+      onSelected: _onRoomSelected,
+    );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Row(
         children: [
-          Text('참여 여부', style: TextStyle(fontSize: 12.5, color: hint)),
+          Expanded(child: room),
           const SizedBox(width: 8),
-          Expanded(
-            child: _chips<PollParticipationFilter>(
-              listKey: const ValueKey('polls-participated'),
-              prefix: 'polls-participated',
-              values: PollParticipationFilter.values,
-              selected: _participated,
-              label: (v) => v.label,
-              onSelected: (v) {
-                setState(() => _participated = v);
-                _reload();
-              },
+          Expanded(child: _participationButton()),
+        ],
+      ),
+    );
+  }
+
+  /// 작은 메뉴 항목 — 메시지 예약 패널의 정렬 메뉴와 같은 모양(작은 글씨·좁은 줄 간격·고른 것에 체크).
+  Widget _menuItem({
+    required Key key,
+    required String label,
+    required bool selected,
+    required VoidCallback onPressed,
+  }) {
+    return MenuItemButton(
+      key: key,
+      onPressed: onPressed,
+      style: const ButtonStyle(
+        minimumSize: WidgetStatePropertyAll(Size(140, CompactMenu.itemHeight)),
+        padding: WidgetStatePropertyAll(CompactMenu.itemPadding),
+        textStyle: WidgetStatePropertyAll(CompactMenu.textStyle),
+      ),
+      trailingIcon: selected
+          ? const Icon(Icons.check, size: 16)
+          : const SizedBox(width: 16),
+      child: Text(label),
+    );
+  }
+
+  /// 참여 여부 드롭다운(전체 / 참여함 / 참여 안 함) — 단추는 옆 대화방 단추([FilterDropdownButton])와 같은 테두리 단추,
+  /// 펼침 메뉴는 메시지 예약 패널의 정렬과 같은 [MenuAnchor](바로 뜬다).
+  Widget _participationButton() {
+    return MenuAnchor(
+      style: hoverMenuStyle(context),
+      alignmentOffset: const Offset(0, 4),
+      menuChildren: [
+        for (final p in PollParticipationFilter.values)
+          _menuItem(
+            key: ValueKey('polls-participated-${p.name}'),
+            label: p.label,
+            selected: p == _participated,
+            onPressed: () => _setParticipated(p),
+          ),
+      ],
+      builder: (context, controller, _) => Semantics(
+        expanded: controller.isOpen,
+        child: SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            key: const ValueKey('polls-participated'),
+            onPressed: () =>
+                controller.isOpen ? controller.close() : controller.open(),
+            // FilterDropdownButton과 같은 모양 — 아이콘 앞 여백 10, 내용은 왼쪽에 붙인다.
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 0, 0),
+              alignment: Alignment.centerLeft,
+            ),
+            icon: Icon(
+              controller.isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+            ),
+            label: Text(
+              _participationLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 작은 글씨 줄 — 왼쪽 `마감된 투표 제외` 스위치(스위치 · 글자 — 글자를 눌러도 켜고 끈다, 할 일 패널의 `완료된 할 일
+  /// 제외`와 같다), 오른쪽 끝 정렬.
+  Widget _optionBar(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              // 글자와 스위치를 한 마디(켜짐/꺼짐)로 읽게 합친다.
+              child: MergeSemantics(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 작은 스위치 — 누르는 자리 여백을 빼야 모바일·PC에서 같은 크기로 줄어든다.
+                    SizedBox(
+                      height: 24,
+                      child: FittedBox(
+                        child: Switch(
+                          key: const ValueKey('polls-exclude-closed'),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          value: _excludeClosed,
+                          onChanged: _setExcludeClosed,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    Flexible(
+                      child: InkWell(
+                        key: const ValueKey('polls-exclude-closed-label'),
+                        onTap: () => _setExcludeClosed(!_excludeClosed),
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 6,
+                          ),
+                          child: Text(
+                            '마감된 투표 제외',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _sortButton(context),
         ],
+      ),
+    );
+  }
+
+  /// 정렬(생성 순 / 기한 순) 단추 — 메시지 예약 패널의 정렬과 같은 작은 회색 글자와 [MenuAnchor] 메뉴.
+  Widget _sortButton(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    return MenuAnchor(
+      style: hoverMenuStyle(context),
+      alignmentOffset: const Offset(0, 4),
+      menuChildren: [
+        for (final s in PollSort.values)
+          _menuItem(
+            key: ValueKey('polls-sort-${s.name}'),
+            label: s.label,
+            selected: s == _sort,
+            onPressed: () => _setSort(s),
+          ),
+      ],
+      builder: (context, controller, _) => Semantics(
+        expanded: controller.isOpen,
+        child: Tooltip(
+          message: '정렬',
+          child: InkWell(
+            key: const ValueKey('polls-sort'),
+            onTap: () =>
+                controller.isOpen ? controller.close() : controller.open(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.swap_vert, size: 16, color: hint),
+                  const SizedBox(width: 2),
+                  Text(
+                    _sort.label,
+                    style: theme.textTheme.labelMedium?.copyWith(color: hint),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -346,71 +551,142 @@ class _PollsScreenState extends State<PollsScreen> {
     );
   }
 
-  Widget _countLine(BuildContext context) => PanelResultLine(
-    summary: Text(
-      '"$_total"개가 로딩되었습니다.',
-      key: const ValueKey('panel-loaded-count'),
-      style: Theme.of(context).textTheme.labelLarge,
-    ),
-    rangeText: _period.rangeText,
-  );
-
-  Widget _message(BuildContext context, String text, Key key) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Text(
-        text,
-        key: key,
-        textAlign: TextAlign.center,
-        style: TextStyle(color: Theme.of(context).hintColor),
-      ),
-    ),
-  );
-
-  Widget _card(BuildContext context, PollListItem item) {
+  /// `N개의 투표` — 지금 필터에 맞는 전체 개수(다음 쪽을 아직 안 받았어도 다 센다), 숫자는 굵게. 처음 받기 전에는 개수를
+  /// 모르므로 같은 높이의 빈 줄만 둔다.
+  Widget _countLine(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      key: ValueKey('polls-item-${item.message.id}'),
-      padding: const EdgeInsets.fromLTRB(14, 4, 6, 12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    const bold = TextStyle(fontWeight: FontWeight.w700);
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurface,
+    );
+    final Widget line;
+    if (_loaded) {
+      line = Text.rich(
+        key: const ValueKey('panel-loaded-count'),
+        TextSpan(
+          children: [
+            TextSpan(text: '$_total', style: bold),
+            const TextSpan(text: '개의 투표'),
+          ],
+        ),
+        style: style,
+      );
+    } else {
+      line = ExcludeSemantics(
+        child: Text.rich(
+          key: const ValueKey('panel-count-pending'),
+          const TextSpan(
             children: [
-              Icon(Icons.tag, size: 14, color: theme.hintColor),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  item.roomName ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: theme.hintColor),
-                ),
-              ),
-              TextButton(
-                key: ValueKey('polls-goto-${item.message.id}'),
-                onPressed: () => _openRoom(item),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                ),
-                child: const Text('방으로 이동'),
-              ),
+              TextSpan(text: ' ', style: bold),
+              TextSpan(text: ' '),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: PollCard(
-              session: _session,
-              message: item.message,
-              maxWidth: 520,
-              onChanged: () => _onCardChanged(item),
+          style: style,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      child: line,
+    );
+  }
+
+  /// 투표 카드 — 흰 둥근 카드에 위 줄(대화방 종류 아이콘 + 이름, 오른쪽 "방으로 이동")과 채팅과 같은 [PollCard].
+  Widget _card(BuildContext context, PollListItem item) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final room = _session.roomById(item.roomId);
+    final roomName =
+        room?.displayName(_session.userId ?? '') ?? item.roomName ?? '';
+    return Material(
+      key: ValueKey('polls-item-${item.message.id}'),
+      color: _cardColor(context),
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 8, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  iconForRoomType(room?.type ?? RoomType.topic),
+                  size: 13,
+                  color: hint,
+                ),
+                const SizedBox(width: 3),
+                Expanded(
+                  child: Text(
+                    roomName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: hint),
+                  ),
+                ),
+                TextButton(
+                  key: ValueKey('polls-goto-${item.message.id}'),
+                  onPressed: () => _openRoom(item),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    textStyle: theme.textTheme.labelMedium,
+                  ),
+                  child: const Text('방으로 이동'),
+                ),
+              ],
             ),
-          ),
-        ],
+            // "방으로 이동"은 누르는 자리 여백만큼 오른쪽에 붙고, 구분선·투표 카드는 좌우 16으로 맞춘다.
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Divider(
+                height: 1,
+                color: theme.colorScheme.outlineVariant,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: PollCard(
+                session: _session,
+                message: item.message,
+                maxWidth: 520,
+                onChanged: () => _onCardChanged(item),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 빈 목록 — 할 일 패널처럼 아이콘 · 문구 · 작은 안내.
+  Widget _empty(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.how_to_vote_outlined, size: 40, color: theme.hintColor),
+            const SizedBox(height: 12),
+            Text(
+              _filtered ? '조건에 맞는 투표가 없습니다.' : '등록된 투표가 없습니다.',
+              key: const ValueKey('polls-empty'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _filtered ? '필터를 바꿔 보세요.' : '"투표 만들기"로 대화방에 첫 투표를 만들어 보세요.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -421,22 +697,22 @@ class _PollsScreenState extends State<PollsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_error!, key: const ValueKey('polls-error')),
-            TextButton(onPressed: _reload, child: const Text('다시 시도')),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                _error!,
+                key: const ValueKey('polls-error'),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: _reload, child: const Text('다시 시도')),
           ],
         ),
       );
     }
     if (!_loaded) return const Center(child: CircularProgressIndicator());
-    if (_items.isEmpty) {
-      return _message(
-        context,
-        _filtered
-            ? '조건에 맞는 투표가 없습니다.'
-            : '등록된 투표가 없습니다.\n위의 "투표 만들기"로 첫 투표를 만들어 보세요.',
-        const ValueKey('polls-empty'),
-      );
-    }
+    if (_items.isEmpty) return _empty(context);
     final footer = _hasMore || _loading ? 1 : 0;
     return RefreshIndicator(
       onRefresh: _reload,
@@ -449,7 +725,7 @@ class _PollsScreenState extends State<PollsScreen> {
           key: const ValueKey('polls-list'),
           controller: _scroll,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
           itemCount: _items.length + footer,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
@@ -480,63 +756,29 @@ class _PollsScreenState extends State<PollsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
+    return Material(
       color: Theme.of(context).colorScheme.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SidePanelHeader(title: '투표', onClose: widget.onClose),
           const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: FilledButton.icon(
-              key: const ValueKey('polls-create'),
-              onPressed: _create,
-              icon: const Icon(Icons.add, size: 20),
-              label: const Text('투표 만들기'),
-            ),
-          ),
-          PanelFilterBar(
-            searchHint: '',
-            showSearch: false,
-            onQueryChanged: (_) {},
-            session: _session,
-            roomId: _roomId,
-            onRoomChanged: _onRoomSelected,
-            members: memberChoicesFor(_session, _roomId),
-            senderId: _creatorId,
-            onSenderChanged: (v) {
-              setState(() => _creatorId = v);
-              _reload();
-            },
-            period: _period,
-            onPeriodChanged: (v) {
-              setState(() => _period = v);
-              _reload();
-            },
-            leading: _chips<PollStatusFilter>(
-              listKey: const ValueKey('polls-status'),
-              prefix: 'polls-status',
-              values: PollStatusFilter.values,
-              selected: _status,
-              label: (v) => v.label,
-              onSelected: (v) {
-                setState(() => _status = v);
-                _reload();
-              },
-            ),
-            leadingExpands: true,
-            newestFirst: _newestFirst,
-            onSortChanged: (v) {
-              setState(() => _newestFirst = v);
-              _reload();
-            },
-          ),
-          _participationRow(context),
+          _createButton(context),
+          _filterBar(),
+          _optionBar(context),
           if (_newPollNotice) _newPollLine(context),
-          _countLine(context),
-          const Divider(height: 1),
-          Expanded(child: _body(context)),
+          Expanded(
+            child: ColoredBox(
+              color: _listBackground(context),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _countLine(context),
+                  Expanded(child: _body(context)),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

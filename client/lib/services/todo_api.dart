@@ -27,7 +27,8 @@ abstract class TodoApi {
   /// `GET /api/todos/:id`.
   Future<Todo> get(String id);
 
-  /// `POST /api/rooms/:roomId/todos`. 날짜는 'YYYY-MM-DD', [reminders]는 ms 시각들.
+  /// `POST /api/rooms/:roomId/todos`. 날짜는 'YYYY-MM-DD', 시간([startTime]·[dueTime])은 그 날짜의 'HH:mm'(날짜 없이
+  /// 시간만 보내면 400), [reminders]는 ms 시각들.
   Future<Todo> create(
     String roomId, {
     required String title,
@@ -35,14 +36,16 @@ abstract class TodoApi {
     List<String> assigneeIds = const [],
     String? startDate,
     String? dueDate,
+    String? startTime,
+    String? dueTime,
     List<UploadedAttachment> attachments = const [],
     List<DateTime> reminders = const [],
     String? sourceMessageId,
     String? sourceCommentId,
   });
 
-  /// `PATCH /api/todos/:id` — [fields]에 담긴 것만 바뀐다(키: title·description·assigneeIds·startDate·dueDate·
-  /// attachments·reminders·progress). 담당자는 `assigneeIds`를 보내면 403이다. `progress`는 "내 진척률"
+  /// `PATCH /api/todos/:id` — [fields]에 담긴 것만 바뀐다(키: title·description·assigneeIds·startDate·startTime·
+  /// dueDate·dueTime·attachments·reminders·progress — 날짜를 null로 지우면 그 시간도 지워진다). 담당자는 `assigneeIds`를 보내면 403이다. `progress`는 "내 진척률"
   /// ([todoProgressSteps] 중 하나) — 담당자는 자기 것만, 담당자가 없는 할 일은 만든 사람이 바꾸고, 그 밖은 403이다.
   Future<Todo> update(String id, Map<String, dynamic> fields);
 
@@ -105,6 +108,8 @@ class RemoteTodoApi implements TodoApi {
     List<String> assigneeIds = const [],
     String? startDate,
     String? dueDate,
+    String? startTime,
+    String? dueTime,
     List<UploadedAttachment> attachments = const [],
     List<DateTime> reminders = const [],
     String? sourceMessageId,
@@ -120,6 +125,8 @@ class RemoteTodoApi implements TodoApi {
           'assigneeIds': assigneeIds,
           'startDate': ?startDate,
           'dueDate': ?dueDate,
+          'startTime': ?startTime,
+          'dueTime': ?dueTime,
           'attachments': [for (final a in attachments) a.toPayload()],
           'reminders': [for (final r in reminders) r.millisecondsSinceEpoch],
           'sourceMessageId': ?sourceMessageId,

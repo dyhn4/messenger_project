@@ -9,6 +9,7 @@ import '../../services/calendar_move.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/date_picker_popup.dart';
+import '../../widgets/home_shell_scope.dart';
 import '../home_screen.dart' show wideBreakpoint;
 import 'calendar_common.dart';
 import 'calendar_event_widgets.dart';
@@ -439,12 +440,28 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('일정 만들기'),
                 ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  key: const ValueKey('cal-close'),
+                  onPressed: _close,
+                  child: const Text('닫기'),
+                ),
               ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// `닫기` — PC 홈에 끼워 넣은 캘린더는 홈 셸의 캘린더를 접어 채팅 화면으로 돌아가고, 따로 띄운 화면이면 닫는다.
+  void _close() {
+    final shell = widget.embedded ? HomeShellScope.maybeOf(context) : null;
+    if (shell != null) {
+      shell.toggleCalendar();
+    } else {
+      Navigator.of(context).maybePop();
+    }
   }
 
   Widget _modeSelector() {

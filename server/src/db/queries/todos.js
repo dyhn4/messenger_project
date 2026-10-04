@@ -309,7 +309,14 @@ export function listTodos(params) {
     sql`(${todoFavorites.userId} is null)`,
     ...(sort === 'created'
       ? [desc(todos.createdAt), asc(todos.id)]
-      : [sql`(${refProgress} >= 100)`, sql`${todos.dueDate} asc nulls last`, desc(todos.createdAt), asc(todos.id)]),
+      : [
+          sql`(${refProgress} >= 100)`,
+          sql`${todos.dueDate} asc nulls last`,
+          // 같은 기한일이면 종료 시간 순(시간이 없으면 그날 끝 — 23:59 뒤).
+          sql`${todos.dueTime} asc nulls last`,
+          desc(todos.createdAt),
+          asc(todos.id),
+        ]),
   ];
   return query({ todo: todos }, (q) =>
     q.leftJoin(todoFavorites, and(eq(todoFavorites.todoId, todos.id), eq(todoFavorites.userId, userId))),

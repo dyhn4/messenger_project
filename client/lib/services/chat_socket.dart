@@ -598,7 +598,7 @@ class ChatSocket {
   /// addedAssigneeIds?}`) — 그 방 멤버에게 온다. 받는 쪽은 services/todo_controller.dart.
   Stream<Map<String, dynamic>> get todoChanged => _todoChangedController.stream;
 
-  /// 할 일 알림 시각이 됐다(todo:reminder — `{teamId, roomId, todoId, title, dueDate?, remindAt}`) — 담당자(없으면 만든
+  /// 할 일 알림 시각이 됐다(todo:reminder — `{teamId, roomId, todoId, title, dueDate?, dueTime?, remindAt}`) — 담당자(없으면 만든
   /// 사람)에게만 온다. 앱이 켜져 있으면 토스트로 보여 준다(session.dart).
   Stream<Map<String, dynamic>> get todoReminder =>
       _todoReminderController.stream;

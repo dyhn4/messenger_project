@@ -844,6 +844,20 @@ void main() {
       expect(_key('todo-detail-no-reminder'), findsOneWidget);
       expect(find.byIcon(Icons.alarm), findsOneWidget);
 
+      // 시간이 있으면 기간에 시간까지(잔디 `2025/11/13 17:40 ~ 2025/11/14 00:00`처럼) — 먼 기한이라 빨갛지 않다.
+      await _open(
+        tester,
+        json: todoJson(
+          startDate: '2099-11-13',
+          startTime: '17:40',
+          dueDate: '2099-11-14',
+          dueTime: '00:00',
+        ),
+      );
+      final timed = tester.widget<Text>(_key('todo-detail-period'));
+      expect(timed.data, '2099/11/13 오후 5:40 ~ 2099/11/14 오전 12:00');
+      expect(timed.style?.color, isNot(theme.colorScheme.error));
+
       await _open(tester, json: todoJson(dueDate: '2020-01-01', progress: 100));
       expect(
         tester.widget<Text>(_key('todo-detail-period')).style?.color,

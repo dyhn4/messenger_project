@@ -1281,6 +1281,45 @@ void main() {
       expect(find.text('디자인 리뷰'), findsOneWidget);
     });
 
+    testWidgets('일정 만들기 오른쪽의 닫기 — 따로 띄운 캘린더 화면을 닫는다', (tester) async {
+      final api = api0();
+      _size(tester, const Size(1280, 900));
+      final controller = _controller(api);
+      final session = _session();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: FilledButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CalendarScreen(
+                        session: session,
+                        controller: controller,
+                        now: _now,
+                      ),
+                    ),
+                  ),
+                  child: const Text('열기'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('열기'));
+      await tester.pumpAndSettle();
+      final create = tester.getRect(find.byKey(const ValueKey('cal-create')));
+      final close = tester.getRect(find.byKey(const ValueKey('cal-close')));
+      expect(close.left, greaterThan(create.right));
+      expect(close.center.dy, closeTo(create.center.dy, 1));
+      await tester.tap(find.byKey(const ValueKey('cal-close')));
+      await tester.pumpAndSettle();
+      expect(find.byType(CalendarScreen), findsNothing);
+      expect(find.text('열기'), findsOneWidget);
+    });
+
     testWidgets('일정 만들기 버튼은 편집기를 열고, 저장하면 목록에 나타난다', (tester) async {
       final api = api0();
       await _pumpScreen(tester, api);

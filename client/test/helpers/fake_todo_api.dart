@@ -15,6 +15,8 @@ import 'package:client/services/todo_api.dart';
 ///   다시 계산한다. 담당자 목록 수정은 차이만 반영해 남는 사람의 진척률을 지킨다. 담당자를 모두 빼면 할 일의 진척률은
 ///   [orphanedTodoProgress](검토 S3)를 이어받고, 같이 보낸 `progress`가 있으면 그 값이 이긴다. 바꿀 칸이 없는 수정(`{}`)은
 ///   서버처럼 거절한다(`수정할 내용이 없습니다.`).
+/// - 기간(시작일·시작 시간·종료일·종료 시간)은 서버처럼 검사한다([fakeTodoPeriodError] — 시간 형식, 날짜 없는 시간, 순서).
+///   수정은 안 보낸 쪽을 저장된 값과 합쳐 보고, 날짜를 null로 지우면 그 시간도 지운다.
 class FakeTodoApi implements TodoApi {
   FakeTodoApi({required this.me, List<Map<String, dynamic>>? todos})
     : todos = todos ?? [];
@@ -175,6 +177,14 @@ class FakeTodoApi implements TodoApi {
           if (bd == null) return -1;
           return ad.compareTo(bd);
         }
+        // 같은 기한일이면 종료 시간 순(시간이 없으면 뒤 — 서버와 같다).
+        final at = a['dueTime'] as String?;
+        final bt = b['dueTime'] as String?;
+        if (at != bt) {
+          if (at == null) return 1;
+          if (bt == null) return -1;
+          return at.compareTo(bt);
+        }
       }
       final byCreated = (b['createdAt'] as int).compareTo(
         a['createdAt'] as int,
@@ -207,6 +217,8 @@ class FakeTodoApi implements TodoApi {
     List<String> assigneeIds = const [],
     String? startDate,
     String? dueDate,
+    String? startTime,
+    String? dueTime,
     List<UploadedAttachment> attachments = const [],
     List<DateTime> reminders = const [],
     String? sourceMessageId,
@@ -214,6 +226,14 @@ class FakeTodoApi implements TodoApi {
   }) async {
     calls.add('create $roomId $title');
     _maybeFail();
+    // 서버처럼 기간 검사(형식·날짜 없는 시간·순서) — 거절되면 아무것도 만들지 않는다.
+    final periodError = fakeTodoPeriodError({
+      'startDate': startDate,
+      'startTime': startTime,
+      'dueDate': dueDate,
+      'dueTime': dueTime,
+    });
+    if (periodError != null) throw ApiException(periodError);
     lastCreateRoomId = roomId;
     lastCreateAttachments = attachments;
     lastCreate = {
@@ -222,6 +242,8 @@ class FakeTodoApi implements TodoApi {
       'assigneeIds': assigneeIds,
       'startDate': startDate,
       'dueDate': dueDate,
+      'startTime': startTime,
+      'dueTime': dueTime,
       'reminders': [for (final r in reminders) r.millisecondsSinceEpoch],
       'sourceMessageId': sourceMessageId,
       'sourceCommentId': sourceCommentId,
@@ -233,6 +255,8 @@ class FakeTodoApi implements TodoApi {
       description: description,
       startDate: startDate,
       dueDate: dueDate,
+      startTime: startTime,
+      dueTime: dueTime,
       creatorId: me,
       assignees: assigneeIds,
       attachmentCount: attachments.length,
@@ -279,6 +303,23 @@ class FakeTodoApi implements TodoApi {
         !(isCreator && assigneesAfter.isEmpty)) {
       throw const ApiException('담당자만 진척률을 바꿀 수 있습니다.');
     }
+    // 기간은 안 보낸 쪽을 저장된 값과 합쳐 본다(서버 mergeTodoPeriod) — 날짜를 지우면 그 시간도 지운다.
+    final period = <String, Object?>{};
+    for (final (dateKey, timeKey) in const [
+      ('startDate', 'startTime'),
+      ('dueDate', 'dueTime'),
+    ]) {
+      period[dateKey] = fields.containsKey(dateKey)
+          ? fields[dateKey]
+          : t[dateKey];
+      period[timeKey] = fields.containsKey(timeKey)
+          ? fields[timeKey]
+          : fields.containsKey(dateKey) && fields[dateKey] == null
+          ? null
+          : t[timeKey];
+    }
+    final periodError = fakeTodoPeriodError(period);
+    if (periodError != null) throw ApiException(periodError);
 
     // 바로 전의 담당자별 진척률 — 이번 수정으로 담당자가 모두 빠지면 할 일이 이어받을 값을 여기서 정한다.
     final progressBefore = {
@@ -311,10 +352,13 @@ class FakeTodoApi implements TodoApi {
                 'sent': false,
               },
           ];
+        case 'startDate' || 'startTime' || 'dueDate' || 'dueTime':
+          break; // 합친 기간으로 아래에서 한꺼번에.
         default:
           t[e.key] = e.value;
       }
     }
+    t.addAll(period);
     if (progressBefore.isNotEmpty && _assignees(t).isEmpty) {
       t['progress'] = orphanedTodoProgress(
         (t['creator'] as Map?)?['id'] as String?,
@@ -373,6 +417,35 @@ Map<String, dynamic> _assigneeJson(String id, String name, int progress) => {
   'status': _statusOf(progress),
   'completedAt': progress >= 100 ? 5000 : null,
 };
+
+/// 기간 검사(서버 parseTime + checkPeriod와 같다) — 시간은 'HH:mm'(00:00~23:59)이고 그 날짜가 있어야 하며, 두 날짜가
+/// 다 있으면 (날짜, 시간) 순으로 시작 ≤ 종료(없는 시간은 시작 00:00 / 종료 23:59). 문제가 없으면 null.
+String? fakeTodoPeriodError(Map<String, Object?> p) {
+  final timeRe = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
+  for (final (key, label) in const [
+    ('startTime', '시작 시간'),
+    ('dueTime', '종료 시간'),
+  ]) {
+    final v = p[key];
+    if (v != null && (v is! String || !timeRe.hasMatch(v))) {
+      return '$label이 올바르지 않습니다. (HH:mm)';
+    }
+  }
+  final sd = p['startDate'] as String?;
+  final st = p['startTime'] as String?;
+  final dd = p['dueDate'] as String?;
+  final dt = p['dueTime'] as String?;
+  if (st != null && sd == null) return '시작 시간은 시작일과 함께 정해야 합니다.';
+  if (dt != null && dd == null) return '종료 시간은 종료일과 함께 정해야 합니다.';
+  if (sd != null &&
+      dd != null &&
+      '${sd}T${st ?? '00:00'}'.compareTo('${dd}T${dt ?? '23:59'}') > 0) {
+    return sd.compareTo(dd) > 0
+        ? '시작일은 종료일보다 늦을 수 없습니다.'
+        : '시작 시간은 종료 시간보다 늦을 수 없습니다.';
+  }
+  return null;
+}
 
 /// 담당자들의 진척률 → 전체(집계) 진척률 — 모두 100이면 100, 모두 0이면 0, 그 밖은 평균을 반올림해 1~99로(서버와 같다).
 int aggregateTodoProgress(List<int> values) {
@@ -453,6 +526,8 @@ Map<String, dynamic> todoJson({
   String? description,
   String? startDate,
   String? dueDate,
+  String? startTime,
+  String? dueTime,
   int progress = 0,
   String creatorId = 'me',
   String creatorName = '나',
@@ -475,6 +550,8 @@ Map<String, dynamic> todoJson({
     'description': description,
     'startDate': startDate,
     'dueDate': dueDate,
+    'startTime': startTime,
+    'dueTime': dueTime,
     'progress': progress,
     'creator': {'id': creatorId, 'name': creatorName, 'avatarType': 'initial'},
     'assignees': [

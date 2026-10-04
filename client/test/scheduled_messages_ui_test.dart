@@ -17,6 +17,7 @@ import 'package:client/services/time_format.dart';
 import 'package:client/widgets/app_menu_button.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/chat_panel.dart';
+import 'package:client/widgets/scheduled_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -383,6 +384,40 @@ Future<void> _settleIo(WidgetTester tester, bool Function() done) async {
 Finder get _submit => find.byKey(const ValueKey('schedule-submit'));
 Finder get _messageField => find.byKey(const ValueKey('schedule-message'));
 
+/// 발송 시간 한 칸, 누르면 펼쳐지는 판(달력 + 시간 칸), 판 안의 시간 칸·목록.
+Finder get _sendAtField => find.byKey(const ValueKey('schedule-datetime'));
+Finder get _sendAtPopup =>
+    find.byKey(const ValueKey('schedule-datetime-popup'));
+Finder get _timeBox => find.byKey(const ValueKey('schedule-time-box'));
+Finder get _timeList => find.byKey(const ValueKey('schedule-time-list'));
+Finder _day(DateTime d) =>
+    find.byKey(ValueKey('schedule-day-${d.year}-${d.month}-${d.day}'));
+Finder _slot(int minutes) => find.byKey(ValueKey('schedule-slot-$minutes'));
+
+/// 발송 시간 칸에 보이는 글자.
+Finder _sendAtText(Finder text) =>
+    find.descendant(of: _sendAtField, matching: text);
+
+/// 펼친 시간 목록을 [slot]이 보일 때까지 굴린다 — 한 번에 150px 이상(작게 끌면 터치 슬롭에 먹힌다).
+/// 시간 목록을 [slot]이 보일 때까지 굴린다 — 목록 끝에 반쯤 걸쳐 있으면 누른 자리가 목록 밖이 되므로(지금 시각에
+/// 따라 처음 스크롤 위치가 달라 가끔만 걸린다) 다 보이게 한 번 더 올린다.
+Future<void> _scrollToSlot(
+  WidgetTester tester,
+  Finder slot, {
+  double delta = 150,
+}) async {
+  await tester.scrollUntilVisible(
+    slot,
+    delta,
+    scrollable: find.descendant(
+      of: _timeList,
+      matching: find.byType(Scrollable),
+    ),
+  );
+  await tester.ensureVisible(slot);
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pressCtrlEnter(WidgetTester tester) async {
   await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
   await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -414,7 +449,7 @@ void _expectSlot(int ms) {
 
 void main() {
   group('[메뉴] → 예약 목록', () {
-    testWidgets('"메시지 예약"을 누르면 예약 목록이 열리고 서버에서 새로 받는다', (tester) async {
+    testWidgets('"메시지 예약"을 누르면 메시지 예약 패널이 열리고 서버에서 새로 받는다', (tester) async {
       final t = _setup([_row('s1')]);
       _wide(tester);
       await tester.pumpWidget(
@@ -432,8 +467,10 @@ void main() {
       await tester.tap(find.text('메시지 예약'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(ScheduledMessagesScreen), findsOneWidget);
-      expect(find.byType(Dialog), findsOneWidget); // 넓은 화면은 대화상자
+      // 예전 목록 대화상자가 아니라 메시지 예약 패널(홈 화면 밖이라 전체 화면 라우트)이다.
+      expect(find.byType(ScheduledMessagesScreen), findsNothing);
+      expect(find.byType(ScheduledPanel), findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
       expect(t.server.called('GET', '/api/scheduled-messages'), hasLength(1));
       expect(
         t.server
@@ -444,13 +481,17 @@ void main() {
         't1',
       );
       expect(find.text('예약 1/30', findRichText: true), findsOneWidget);
+      expect(find.text('1개의 예약 메시지', findRichText: true), findsOneWidget);
       expect(find.text('예약한 메시지', findRichText: true), findsOneWidget);
-      expect(find.text('메시지 예약 생성'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('scheduled-panel-create')),
+        findsOneWidget,
+      );
 
-      // Esc로 닫힌다.
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      // ✕로 닫힌다.
+      await tester.tap(find.byKey(const ValueKey('scheduled-panel-close')));
       await tester.pumpAndSettle();
-      expect(find.byType(ScheduledMessagesScreen), findsNothing);
+      expect(find.byType(ScheduledPanel), findsNothing);
     });
 
     testWidgets('예약이 없으면 비어 있다는 안내, 30건이면 만들기 단추가 막힌다', (tester) async {
@@ -809,7 +850,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('scheduled-edit-f1')));
       await tester.pumpAndSettle();
       expect(
-        find.text(formatScheduleDate(defaultScheduleTime())),
+        _sendAtText(find.text(formatScheduleTime(defaultScheduleTime()))),
         findsOneWidget,
       );
       await tester.tap(_submit);
@@ -924,15 +965,13 @@ void main() {
       await _open(tester);
       expect(find.text('메시지 예약 생성'), findsOneWidget);
       expect(find.byKey(const ValueKey('schedule-title')), findsNothing);
-      // 기본 발송 시각 — 지금부터 15분 뒤 이후의 가장 가까운 15분 단위.
+      // 기본 발송 시각 — 지금부터 15분 뒤 이후의 가장 가까운 15분 단위. 날짜와 시각이 한 칸에 보인다.
       expect(
-        find.text(formatScheduleDate(defaultScheduleTime())),
+        _sendAtText(find.text(formatScheduleTime(defaultScheduleTime()))),
         findsOneWidget,
       );
-      expect(
-        find.text(formatScheduleClock(defaultScheduleTime())),
-        findsOneWidget,
-      );
+      expect(find.byKey(const ValueKey('schedule-date')), findsNothing);
+      expect(find.byKey(const ValueKey('schedule-time')), findsNothing);
       expect(find.text('0/5000'), findsOneWidget);
 
       await tester.tap(_submit);
@@ -1035,8 +1074,10 @@ void main() {
       await tester.pumpAndSettle();
       final now = DateTime.now();
       final tomorrowNine = DateTime(now.year, now.month, now.day + 1, 9);
-      expect(find.text(formatScheduleDate(tomorrowNine)), findsOneWidget);
-      expect(find.text('오전 9:00'), findsWidgets);
+      expect(
+        _sendAtText(find.text(formatScheduleTime(tomorrowNine))),
+        findsOneWidget,
+      );
       await tester.tap(_submit);
       await tester.pumpAndSettle();
       final body = _body(
@@ -1294,15 +1335,17 @@ void main() {
       );
       await _open(tester);
 
-      await tester.tap(find.byKey(const ValueKey('schedule-date')));
+      await tester.tap(_sendAtField);
       await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsOneWidget);
+      // 시간은 판 아래의 드롭다운 — 누르기 전에는 목록이 없다.
+      expect(_timeBox, findsOneWidget);
+      expect(_timeList, findsNothing);
       final now = DateTime.now();
       final yesterday = DateTime(now.year, now.month, now.day - 1);
-      Finder day(DateTime d) =>
-          find.byKey(ValueKey('schedule-day-${d.year}-${d.month}-${d.day}'));
       // 어제는(이번 달에 있으면) 누를 수 없다.
       if (yesterday.month == now.month) {
-        expect(tester.widget<InkWell>(day(yesterday)).onTap, isNull);
+        expect(tester.widget<InkWell>(_day(yesterday)).onTap, isNull);
       }
       // 이전 달로는 못 가고, 90일 뒤가 있는 달까지만 넘긴다.
       expect(
@@ -1323,25 +1366,69 @@ void main() {
       expect(find.text('${last.year}년 ${last.month}월'), findsOneWidget);
       final afterLast = DateTime(last.year, last.month, last.day + 1);
       if (afterLast.month == last.month) {
-        expect(tester.widget<InkWell>(day(afterLast)).onTap, isNull);
+        expect(tester.widget<InkWell>(_day(afterLast)).onTap, isNull);
       }
-      // 마지막 날(90일째)은 고를 수 있다.
-      await tester.tap(day(last));
+      // 마지막 날(90일째)은 고를 수 있다 — 날짜만 바뀌고 판은 열려 있다.
+      await tester.tap(_day(last));
       await tester.pumpAndSettle();
-      expect(find.text(formatScheduleDate(last)), findsOneWidget);
+      expect(_sendAtPopup, findsOneWidget);
+      expect(
+        _sendAtText(find.textContaining(formatScheduleDate(last))),
+        findsOneWidget,
+      );
+      // 90일째에는 그 시각을 넘는 15분 단위가 흐리고 누를 수 없다(그 앞 칸은 고를 수 있다).
+      final lastSlot = DateTime(
+        last.year,
+        last.month,
+        last.day,
+        last.hour,
+        last.minute - last.minute % scheduledSlotMinutes,
+      );
+      final overSlot = lastSlot.add(
+        const Duration(minutes: scheduledSlotMinutes),
+      );
+      await tester.tap(_timeBox);
+      await tester.pumpAndSettle();
+      expect(_timeList, findsOneWidget);
+      if (overSlot.day == last.day) {
+        final m = overSlot.hour * 60 + overSlot.minute;
+        await _scrollToSlot(tester, _slot(m));
+        expect(tester.widget<InkWell>(_slot(m)).onTap, isNull);
+        final ok = lastSlot.hour * 60 + lastSlot.minute;
+        await _scrollToSlot(tester, _slot(ok), delta: -150);
+        expect(tester.widget<InkWell>(_slot(ok)).onTap, isNotNull);
+      }
+      // Esc는 편집기보다 펼친 판(시간 목록 포함)을 먼저 닫는다.
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsNothing);
+      expect(find.byType(ScheduleMessageEditor), findsOneWidget);
 
       // 시각 — "내일 오전 9:00"으로 옮긴 뒤 15분 단위 목록에서 바로 앞 칸(오전 8:45)을 고른다.
       await tester.tap(find.widgetWithText(ChoiceChip, '내일 오전 9:00'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('schedule-time')));
+      await tester.tap(_sendAtField);
+      await tester.pumpAndSettle();
+      await tester.tap(_timeBox);
       await tester.pumpAndSettle();
       // 목록은 15분 간격 — 9:00 바로 위가 8:45다(8:50 같은 칸은 없다).
-      final nine = tester.getCenter(find.text('오전 9:00').last);
-      final before = tester.getCenter(find.text('오전 8:45').last);
+      final nine = tester.getCenter(_slot(9 * 60));
+      final before = tester.getCenter(_slot(8 * 60 + 45));
       expect(before.dy, lessThan(nine.dy));
-      expect(find.text('오전 8:50'), findsNothing);
-      await tester.tap(find.text('오전 8:45').last);
+      expect(_slot(8 * 60 + 50), findsNothing);
+      expect(
+        find.descendant(of: _slot(8 * 60 + 45), matching: find.text('오전 8:45')),
+        findsOneWidget,
+      );
+      await tester.tap(_slot(8 * 60 + 45));
       await tester.pumpAndSettle();
+      // 시각을 고르면 판이 닫히고 칸에 날짜와 시각이 함께 보인다.
+      expect(_sendAtPopup, findsNothing);
+      final tomorrow = DateTime(now.year, now.month, now.day + 1, 8, 45);
+      expect(
+        _sendAtText(find.text(formatScheduleTime(tomorrow))),
+        findsOneWidget,
+      );
       await tester.enterText(_messageField, '회의 알림');
       await tester.tap(_submit);
       await tester.pumpAndSettle();
@@ -1351,9 +1438,110 @@ void main() {
             )['sendAt']
             as int,
       );
-      final tomorrow = DateTime(now.year, now.month, now.day + 1, 8, 45);
       expect(sendAt, tomorrow);
       await _flushToasts(tester);
+    });
+
+    testWidgets('오늘의 지난 시각은 흐리고 누를 수 없다, 목록을 굴려 고른 시각으로 예약된다', (tester) async {
+      final t = _setup();
+      final room = t.session.roomById('r1')!;
+      await _pumpApp(
+        tester,
+        t.session,
+        _launcher((c) => showScheduleMessageEditor(c, t.session, room: room)),
+      );
+      await _open(tester);
+      await tester.enterText(_messageField, '오후 회의 알림');
+
+      // 오늘(자정 직전이라 오늘을 고를 수 없으면 건너뛴다) — 자정(오전 12:00)은 이미 지났다.
+      final now = DateTime.now();
+      await tester.tap(_sendAtField);
+      await tester.pumpAndSettle();
+      final today = _day(now);
+      if (today.evaluate().isNotEmpty &&
+          tester.widget<InkWell>(today).onTap != null) {
+        await tester.tap(today);
+        await tester.pumpAndSettle();
+        await tester.tap(_timeBox);
+        await tester.pumpAndSettle();
+        await _scrollToSlot(tester, _slot(0), delta: -150);
+        expect(tester.widget<InkWell>(_slot(0)).onTap, isNull);
+        // 지난 시각을 눌러도 아무 일 없다(판도 그대로).
+        await tester.tap(_slot(0));
+        await tester.pumpAndSettle();
+        expect(_timeList, findsOneWidget);
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsNothing);
+
+      // 내일 오전 9:00에서 목록을 아래로 굴려 오후 3:30을 고른다.
+      await tester.tap(find.widgetWithText(ChoiceChip, '내일 오전 9:00'));
+      await tester.pumpAndSettle();
+      await tester.tap(_sendAtField);
+      await tester.pumpAndSettle();
+      await tester.tap(_timeBox);
+      await tester.pumpAndSettle();
+      final slot = _slot(15 * 60 + 30);
+      expect(slot, findsNothing); // 처음에는 9:00 언저리만 보인다
+      await _scrollToSlot(tester, slot);
+      await tester.tap(slot);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsNothing);
+      final at = DateTime(now.year, now.month, now.day + 1, 15, 30);
+      expect(_sendAtText(find.text(formatScheduleTime(at))), findsOneWidget);
+      expect(find.byKey(const ValueKey('schedule-time-hint')), findsOneWidget);
+
+      await tester.tap(_submit);
+      await tester.pumpAndSettle();
+      final body = _body(
+        t.server.called('POST', '/api/scheduled-messages').single,
+      );
+      expect(body['sendAt'], at.millisecondsSinceEpoch);
+      await _flushToasts(tester);
+    });
+
+    testWidgets('발송 시간 판이 떠 있으면 Esc는 판부터 닫고, 한 번 더 누르면 편집기를 닫는다', (
+      tester,
+    ) async {
+      final t = _setup();
+      final room = t.session.roomById('r1')!;
+      await _pumpApp(
+        tester,
+        t.session,
+        _launcher((c) => showScheduleMessageEditor(c, t.session, room: room)),
+      );
+      await _open(tester);
+
+      // 달력만 펼친 채로.
+      await tester.tap(_sendAtField);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsNothing);
+      expect(find.byType(ScheduleMessageEditor), findsOneWidget);
+
+      // 시간 목록까지 펼친 채로 — 한 번에 판 전체가 닫히고, 고른 시각은 그대로다.
+      final before = tester.widget<Text>(
+        find.descendant(of: _sendAtField, matching: find.byType(Text)),
+      );
+      await tester.tap(_sendAtField);
+      await tester.pumpAndSettle();
+      await tester.tap(_timeBox);
+      await tester.pumpAndSettle();
+      expect(_timeList, findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsNothing);
+      expect(_timeList, findsNothing);
+      expect(find.byType(ScheduleMessageEditor), findsOneWidget);
+      expect(_sendAtText(find.text(before.data!)), findsOneWidget);
+
+      // 판이 닫혀 있으면(쓴 게 없으니) 편집기가 바로 닫힌다.
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(ScheduleMessageEditor), findsNothing);
     });
   });
 
@@ -1815,12 +2003,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('제목을 입력하세요.'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      // 발송 시간 판(296px)도 좁은 화면 안에 뜬다.
+      await tester.ensureVisible(_sendAtField);
+      await tester.pumpAndSettle();
+      await tester.tap(_sendAtField);
+      await tester.pumpAndSettle();
+      final popup = tester.getRect(_sendAtPopup);
+      expect(popup.left, greaterThanOrEqualTo(0));
+      expect(popup.right, lessThanOrEqualTo(360));
+      expect(popup.top, greaterThanOrEqualTo(0));
+      expect(popup.bottom, lessThanOrEqualTo(740));
+      expect(tester.takeException(), isNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_sendAtPopup, findsNothing);
+      expect(find.byType(ScheduleMessageEditor), findsOneWidget);
       await tester.tap(find.byTooltip('취소'));
       await tester.pumpAndSettle();
       expect(find.byType(ScheduleMessageEditor), findsNothing);
     });
 
-    testWidgets('메시지를 쓰다가 날짜를 누르면 화상 키보드를 내리고, 달력은 화면 안에 뜬다', (tester) async {
+    testWidgets('메시지를 쓰다가 발송 시간을 누르면 화상 키보드를 내리고, 판은 화면 안에 뜬다', (tester) async {
       const screen = Size(390, 844);
       final t = _setup();
       final room = t.session.roomById('r-board')!;
@@ -1835,7 +2038,7 @@ void main() {
       await tester.enterText(_messageField, '이번 주 진행 상황입니다.');
       expect(tester.testTextInput.isVisible, isTrue);
 
-      // 화상 키보드가 아래 300px을 가린 채로 폼을 끝까지 내려 날짜 칸을 누른다.
+      // 화상 키보드가 아래 300px을 가린 채로 폼을 끝까지 내려 발송 시간 칸을 누른다.
       tester.view.viewInsets = const FakeViewPadding(bottom: 300);
       await tester.pumpAndSettle();
       await tester.drag(
@@ -1848,34 +2051,41 @@ void main() {
         const Offset(0, -1500),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('schedule-date')));
+      await tester.tap(_sendAtField);
       await tester.pumpAndSettle();
-      // 입력칸에서 포커스가 빠져 키보드가 내려간다(달력 아래쪽이 키보드에 가리지 않게).
+      // 입력칸에서 포커스가 빠져 키보드가 내려간다(판 아래쪽이 키보드에 가리지 않게).
       expect(
         tester.widget<TextField>(_messageField).focusNode!.hasFocus,
         isFalse,
       );
       expect(tester.testTextInput.isVisible, isFalse);
 
-      // 키보드가 내려가며 폼이 다시 자리를 잡아(칸이 아래로 밀린다) 달력도 자리를 다시 잡는다 —
-      // 화면 안에, 날짜 칸을 가리지 않게.
+      // 키보드가 내려가며 폼이 다시 자리를 잡아(칸이 아래로 밀린다) 판도 자리를 다시 잡는다 —
+      // 화면 안에, 발송 시간 칸을 가리지 않게.
       tester.view.resetViewInsets();
       await tester.pumpAndSettle();
-      final calendar = tester.getRect(
-        find.byWidgetPredicate(
-          (w) => w.runtimeType.toString() == '_ScheduleCalendar',
-        ),
-      );
-      final field = tester.getRect(find.byKey(const ValueKey('schedule-date')));
-      expect(calendar.top, greaterThanOrEqualTo(0));
-      expect(calendar.bottom, lessThanOrEqualTo(screen.height));
-      // 밀려 내려간 칸 아래로는 6줄짜리 달이 들어갈 자리가 없어서 칸 위로 옮겨 뜬다.
-      expect(screen.height - field.bottom, lessThan(330));
+      Rect popup() => tester.getRect(_sendAtPopup);
+      final field = tester.getRect(_sendAtField);
+      expect(popup().top, greaterThanOrEqualTo(0));
+      expect(popup().bottom, lessThanOrEqualTo(screen.height));
+      expect(popup().left, greaterThanOrEqualTo(0));
+      expect(popup().right, lessThanOrEqualTo(screen.width));
+      // 밀려 내려간 칸 아래로는 판(달력 + 시간 칸)이 들어갈 자리가 없어서 칸 위로 옮겨 뜬다.
       expect(
-        calendar.bottom,
+        popup().bottom,
         lessThanOrEqualTo(field.top),
-        reason: '달력 $calendar 이 날짜 칸 $field 위로 옮겨 가야 한다',
+        reason: '판 ${popup()} 이 발송 시간 칸 $field 위로 옮겨 가야 한다',
       );
+
+      // 시간 목록은 판 안에서 펼쳐져 판 크기가 그대로다 — 화면 밖으로 나가지 않고 칸도 가리지 않는다.
+      final closed = popup();
+      await tester.tap(_timeBox);
+      await tester.pumpAndSettle();
+      final list = tester.getRect(_timeList);
+      expect(popup(), closed);
+      expect(list.top, greaterThanOrEqualTo(closed.top));
+      expect(list.bottom, lessThanOrEqualTo(field.top));
+      expect(tester.takeException(), isNull);
     });
   });
 }

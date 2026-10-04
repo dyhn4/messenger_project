@@ -18,9 +18,9 @@ import 'member_profile_dialog.dart';
 
 /// "즐겨찾기" 패널 — 내가 즐겨찾기한 메시지·파일·댓글·투표·대화방·멤버를 한곳에 모아 보고, 항목을 누르면 그 자리로
 /// 이동한다(메시지·댓글·투표는 그 대화방의 그 메시지로, 파일은 열기, 멤버는 프로필, 대화방은 그 방). 파일 패널과 같은
-/// 틀이다 — 위에서부터 검색칸, 필터 줄(참여 대화방 / 모든 멤버 / 기간), 종류 탭(전체 | 메시지 | 파일 | 댓글 | 투표 |
-/// 대화방 | 멤버 — 가로 스크롤)과 정렬, `"N"개가 로딩되었습니다.` 줄, 목록. PC는 오른쪽 패널, 모바일은 전체 화면으로
-/// 열린다(side_panels.dart의 'favorites'). 메뉴(격자 아이콘)의 "리스트 > 즐겨찾기"에서 들어온다.
+/// 틀이다 — 위에서부터 검색칸, 필터 줄(참여 대화방 / 모든 멤버 / 기간), 그 아래 줄(왼쪽 끝 종류 드롭다운 — 전체 / 메시지 /
+/// 파일 / 댓글 / 투표 / 대화방 / 멤버 — 과 오른쪽 끝 정렬), `"N"개가 로딩되었습니다.` 줄, 목록. PC는 오른쪽 패널, 모바일은
+/// 전체 화면으로 열린다(side_panels.dart의 'favorites'). 메뉴(격자 아이콘)의 "리스트 > 즐겨찾기"에서 들어온다.
 ///
 /// 필터는 서버를 거치지 않고 **이미 불러온 목록**(favorites_controller.dart, 한 번에 30개씩 "더 보기")을 클라이언트에서
 /// 거른다. 항목이 가진 정보로만 걸 수 있다(자세한 규칙은 [FavoriteFilter]).
@@ -28,7 +28,7 @@ class FavoritesScreen extends StatefulWidget {
   final Session session;
   final VoidCallback? onClose;
 
-  /// 처음 열 탭 — null이면 '전체'.
+  /// 처음 고를 종류 — null이면 '전체'.
   final FavoriteKind? initialKind;
   const FavoritesScreen({
     super.key,
@@ -144,7 +144,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   void _onChanged() {
     if (!mounted) return;
     setState(() {});
-    // 목록이 비워졌으면(다른 기기에서 새로 담음·팀 전환) 지금 탭을 다시 받는다.
+    // 목록이 비워졌으면(다른 기기에서 새로 담음·팀 전환) 지금 종류를 다시 받는다.
     final feed = _favorites.feed(_kind);
     if (!feed.loaded && !feed.loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -259,7 +259,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     _senderId = null;
   });
 
-  /// 지금 탭의 불러온 목록에서 필터를 통과한 것을 정렬해 돌려준다.
+  /// 지금 종류의 불러온 목록에서 필터를 통과한 것을 정렬해 돌려준다.
   List<FavoriteItem> _visibleItems(List<FavoriteItem> items) {
     final filter = FavoriteFilter(
       query: _query,
@@ -287,29 +287,15 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
   // ---- 그리기 ----
 
-  Widget _tabs(BuildContext context) {
-    final tabs = <FavoriteKind?>[null, ...FavoriteKind.values];
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        key: const ValueKey('favorites-tabs'),
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: tabs.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 6),
-        itemBuilder: (context, i) {
-          final kind = tabs[i];
-          return ChoiceChip(
-            key: ValueKey('favorites-tab-${kind?.name ?? 'all'}'),
-            label: Text(kind?.label ?? '전체'),
-            selected: kind == _kind,
-            visualDensity: VisualDensity.compact,
-            onSelected: (_) => _selectKind(kind),
-          );
-        },
-      ),
-    );
-  }
+  /// 정렬 단추 줄 왼쪽 끝의 종류 드롭다운(전체 / 메시지 / 파일 / 댓글 / 투표 / 대화방 / 멤버).
+  Widget _kindButton() => PanelKindButton<FavoriteKind?>(
+    key: const ValueKey('favorites-kind'),
+    values: const [null, ...FavoriteKind.values],
+    selected: _kind,
+    labelOf: (kind) => kind?.label ?? '전체',
+    itemKey: (kind) => ValueKey('favorites-tab-${kind?.name ?? 'all'}'),
+    onChanged: _selectKind,
+  );
 
   /// "N개가 로딩되었습니다." 줄 — 비어 있어도 보이고, 직접 설정한 기간은 그 오른쪽에 보인다.
   Widget _countLine(BuildContext context, int count) => PanelResultLine(
@@ -475,8 +461,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             roomEnabled: kind != FavoriteKind.member,
             memberEnabled: kind != FavoriteKind.room,
             periodEnabled: kind != FavoriteKind.room,
-            leading: _tabs(context),
-            leadingExpands: true,
+            leading: _kindButton(),
             newestFirst: _newestFirst,
             onSortChanged: (v) => setState(() => _newestFirst = v),
           ),

@@ -131,16 +131,27 @@ void main() {
   });
 
   group('목록', () {
-    testWidgets('방에서 열면 그 방으로 걸러 받고, 카드에 제목·개수·방 이름·날짜가 보인다', (tester) async {
+    testWidgets('방에서 열면 그 방으로 걸러 받고, 카드에 제목·개수(왼쪽 위)·방 이름·날짜가 보인다', (
+      tester,
+    ) async {
       await pumpPanel(tester, session, roomId: 'r1');
       expect(api.calls.first, contains('room=r1'));
       expect(find.text('제주 여행'), findsOneWidget);
       expect(find.text('가을 소풍'), findsNothing); // 다른 방 앨범
-      expect(find.text('사진·영상 4개'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('album-count-a1')),
+          matching: find.text('4'),
+        ),
+        findsOneWidget,
+      );
       expect(find.textContaining('2026/09/29'), findsOneWidget);
       expect(find.textContaining('잔디톡 팀'), findsWidgets);
-      expect(find.text('앨범 만들기'), findsOneWidget);
+      expect(find.text('앨범 생성'), findsOneWidget);
       expect(find.byKey(const ValueKey('album-sort')), findsOneWidget);
+      expect(find.text('업데이트 순'), findsOneWidget); // 기본 정렬
+      expect(find.byKey(const ValueKey('album-view-grid')), findsOneWidget);
+      expect(find.byKey(const ValueKey('album-view-list')), findsOneWidget);
       expect(tester.takeException(), isNull);
       await finish(tester);
     });
@@ -155,7 +166,7 @@ void main() {
       expect(find.text('제주 여행'), findsOneWidget);
       expect(find.text('가을 소풍'), findsOneWidget);
 
-      // 최신순(기본): 제주 여행(9/29)이 먼저(두 칸이 같은 줄이면 왼쪽).
+      // 업데이트 순(기본): 제주 여행(9/29)이 먼저(두 칸이 같은 줄이면 왼쪽).
       bool before(String x, String y) {
         final p = tester.getTopLeft(find.text(x));
         final q = tester.getTopLeft(find.text(y));
@@ -263,11 +274,12 @@ void main() {
       expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
       expect(tester.takeException(), isNull);
 
-      // ⋯ 메뉴: 내가 만든 앨범이라 수정·전체 다운로드·삭제가 있다.
+      // ⋯ 메뉴: 내가 만든 앨범이라 전체 다운로드·앨범 공유·앨범 수정·앨범 삭제가 있다.
       await tester.tap(find.byKey(const ValueKey('album-more')));
       await tester.pumpAndSettle();
-      expect(find.text('수정'), findsOneWidget);
       expect(find.text('전체 다운로드'), findsOneWidget);
+      expect(find.text('앨범 공유'), findsOneWidget);
+      expect(find.text('앨범 수정'), findsOneWidget);
       expect(find.text('앨범 삭제'), findsOneWidget);
       await tester.tapAt(const Offset(5, 5));
       await tester.pumpAndSettle();
@@ -285,9 +297,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('album-more')));
       await tester.pumpAndSettle();
-      expect(find.text('수정'), findsNothing);
+      expect(find.text('앨범 수정'), findsNothing);
       expect(find.text('앨범 삭제'), findsNothing);
       expect(find.text('전체 다운로드'), findsOneWidget);
+      expect(find.text('앨범 공유'), findsOneWidget);
       await finish(tester);
     });
 

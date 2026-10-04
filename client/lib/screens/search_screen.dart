@@ -21,6 +21,7 @@ import '../widgets/room_options_menu.dart' show TopicBadge;
 import 'chat_screen.dart';
 
 /// 검색 패널의 종류 탭 — 전체 / 메시지 / 투표 / 파일(꺽쇠로 파일 형식) / 대화방(내가 멤버인 방의 이름).
+/// 전체 탭은 메시지·투표·파일에 더해 이름이 맞는 대화방 몇 개를 맨 위 묶음으로 보여 준다.
 enum SearchType { all, message, poll, file, room }
 
 extension on SearchType {
@@ -64,6 +65,9 @@ class _SearchScreenState extends State<SearchScreen> {
   final _listScrollController = ScrollController();
   List<SearchResult>? _results;
   List<RoomSearchResult>? _roomResults; // 대화방 탭의 결과(메시지 결과와 둘 중 하나만 있다).
+  // 전체 탭 맨 위 "대화방" 묶음 — 이름이 맞는 방 몇 개와 전체 건수(더 보기 → 대화방 탭). 못 받아 오면 비운다.
+  List<RoomSearchResult> _roomPreview = const [];
+  int _roomPreviewTotal = 0;
   bool _resultAllTeams = false; // 이 결과를 "모든 팀"으로 찾았는지 — 맞으면 줄마다 팀 이름 칩.
   int _requestSeq = 0; // 늦게 도착한 옛 응답이 새 결과를 덮어쓰지 않게.
   int _total = 0; // 한도에 잘리기 전의 전체 건수.
@@ -80,7 +84,10 @@ class _SearchScreenState extends State<SearchScreen> {
   bool _newestFirst = true;
 
   // 검색 범위 — 패널을 열 때마다 "현재 팀"으로 시작한다(기기에 저장하지 않는다). 가입한 팀이 하나뿐이면 단추 자체가 없다.
+  // [_scopeTeamId]는 범위 메뉴에서 이름으로 고른 특정 팀(null이면 _allTeams에 따라 현재 팀 / 모든 팀).
   bool _allTeams = false;
+  String? _scopeTeamId;
+  int _usersSeq = 0; // 팀을 바꿔 멤버 목록을 다시 받을 때, 늦게 온 옛 응답을 버리려고.
 
   // 검색칸을 파일 패널("파일명 검색")과 같은 모양으로 — 입력을 멈추고 잠깐 뒤(또는 엔터)에
   // 찾는다(panel_filters.dart의 PanelFilterBar와 같은 디바운스).
@@ -92,13 +99,46 @@ class _SearchScreenState extends State<SearchScreen> {
     _loadUsers();
   }
 
-  Future<void> _loadUsers() async {
+  /// "모든 멤버" 필터의 후보 — [teamId]를 주면 그 팀(범위에서 고른 특정 팀), 아니면 지금 팀의 멤버.
+  /// 고른 멤버가 새 후보에 없으면 필터를 풀고 다시 찾는다.
+  Future<void> _loadUsers([String? teamId]) async {
+    final seq = ++_usersSeq;
     try {
-      final users = await widget.session.fetchTeamMembers();
-      if (!mounted) return;
-      setState(() => _users = users);
+      final users = teamId == null
+          ? await widget.session.fetchTeamMembers()
+          : await widget.session.api!.fetchTeamMembers(teamId);
+      if (!mounted || seq != _usersSeq) return;
+      final sender = _senderId;
+      final dropSender = sender != null && !users.any((u) => u.id == sender);
+      setState(() {
+        _users = users;
+        if (dropSender) _senderId = null;
+      });
+      if (dropSender) _refresh();
     } catch (_) {
       // 멤버 필터는 부가 기능이라 실패해도 조용히 무시한다.
+    }
+  }
+
+  /// 전체 탭 맨 위 "대화방" 묶음에 보일 방 수.
+  static const _roomPreviewCount = 3;
+
+  /// 전체 탭의 대화방 묶음 — 이름이 맞는 방 앞의 몇 개와 전체 건수. 부가 결과라 실패하면 null(메시지 결과만 보인다).
+  Future<RoomSearchPage?> _fetchRoomPreview(
+    String q, {
+    required String teamId,
+    required bool allTeams,
+  }) async {
+    try {
+      return await widget.session.api!.searchRoomsPage(
+        q,
+        teamId: teamId,
+        allTeams: allTeams,
+        newestFirst: _newestFirst,
+        limit: _roomPreviewCount,
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -109,6 +149,8 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _results = null;
         _roomResults = null;
+        _roomPreview = const [];
+        _roomPreviewTotal = 0;
         _loading = false;
       });
       return;
@@ -118,8 +160,9 @@ class _SearchScreenState extends State<SearchScreen> {
       _error = null;
     });
     final api = widget.session.api!;
-    // 기본은 지금 보고 있는 팀 안에서만 — 다른 팀 대화는 "모든 팀"을 골랐을 때만 섞인다.
-    final teamId = widget.session.currentTeam!.id;
+    // 기본은 지금 보고 있는 팀 안에서만 — 다른 팀 대화는 "모든 팀"을 골랐을 때만 섞인다. 범위에서 특정 팀을
+    // 골랐으면 그 팀 안에서만(서버가 그 팀 멤버인지 확인한다).
+    final teamId = _pickedTeamId ?? widget.session.currentTeam!.id;
     final allTeams = _allTeamsActive;
     try {
       if (_type == SearchType.room) {
@@ -135,12 +178,20 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _roomResults = page.items;
           _results = null;
+          _roomPreview = const [];
+          _roomPreviewTotal = 0;
           _resultAllTeams = allTeams;
           _total = page.total;
           _page = 0;
         });
         return;
       }
+      // 전체 탭은 이름이 맞는 대화방도 맨 위에 몇 개 보여 준다 — 메시지 검색과 함께(동시에) 받는다. 방·멤버로
+      // 좁혔으면 메시지만 찾는 뜻이라 대화방 묶음은 뺀다.
+      final roomsFuture =
+          _type == SearchType.all && _roomId == null && _senderId == null
+          ? _fetchRoomPreview(q, teamId: teamId, allTeams: allTeams)
+          : Future<RoomSearchPage?>.value(null);
       final page = await api.searchPage(
         q,
         teamId: teamId,
@@ -154,10 +205,13 @@ class _SearchScreenState extends State<SearchScreen> {
         newestFirst: _newestFirst,
         limit: searchFetchLimit,
       );
+      final rooms = await roomsFuture;
       if (!mounted || seq != _requestSeq) return;
       setState(() {
         _results = page.items;
         _roomResults = null;
+        _roomPreview = rooms?.items ?? const [];
+        _roomPreviewTotal = rooms?.total ?? 0;
         _resultAllTeams = allTeams;
         _total = page.total;
         _page = 0;
@@ -173,13 +227,51 @@ class _SearchScreenState extends State<SearchScreen> {
   /// 가입한 팀이 둘 이상일 때만 검색 범위 단추가 있다.
   bool get _hasScopeChoice => widget.session.teams.length > 1;
 
+  /// 범위 메뉴에서 이름으로 고른 팀 — 단추가 없거나, 그 사이 그 팀을 나갔으면 null(현재 팀 / 모든 팀).
+  String? get _pickedTeamId {
+    final id = _scopeTeamId;
+    if (id == null || !_hasScopeChoice) return null;
+    return widget.session.teams.any((t) => t.id == id) ? id : null;
+  }
+
   /// 지금 "모든 팀"으로 찾는 중인지(단추가 없으면 늘 현재 팀).
-  bool get _allTeamsActive => _allTeams && _hasScopeChoice;
+  bool get _allTeamsActive =>
+      _allTeams && _hasScopeChoice && _pickedTeamId == null;
 
   void _selectScope(bool allTeams) {
-    if (_allTeams == allTeams) return;
-    setState(() => _allTeams = allTeams);
+    if (_allTeams == allTeams && _scopeTeamId == null) return;
+    final hadTeam = _pickedTeamId;
+    setState(() {
+      _allTeams = allTeams;
+      _scopeTeamId = null;
+    });
+    _onFilterTeamChanged(hadTeam);
     _refresh();
+  }
+
+  /// 범위 메뉴에서 특정 팀을 골랐을 때 — 그 팀 하나에서만 찾는다.
+  void _selectTeam(String teamId) {
+    if (_scopeTeamId == teamId) return;
+    final hadTeam = _pickedTeamId;
+    setState(() {
+      _scopeTeamId = teamId;
+      _allTeams = false;
+    });
+    _onFilterTeamChanged(hadTeam);
+    _refresh();
+  }
+
+  /// 참여 대화방·멤버 필터의 후보는 고른 팀(없으면 지금 팀)의 것이다 — 그 팀이 바뀌면 다른 팀 방을 골라 둔
+  /// 방 필터는 풀고, 멤버 후보를 다시 받는다. [before]는 바꾸기 전에 고른 팀.
+  void _onFilterTeamChanged(String? before) {
+    final after = _pickedTeamId;
+    if (before == after) return;
+    final teamId = after ?? widget.session.currentTeam?.id;
+    final room = _roomId == null ? null : widget.session.roomById(_roomId!);
+    if (room != null && room.teamId != teamId) {
+      setState(() => _roomId = null);
+    }
+    _loadUsers(after);
   }
 
   /// 조건(필터·탭·정렬)이 바뀌었을 때 — 이미 검색어가 있으면 그 조건으로 다시 찾는다.
@@ -291,7 +383,7 @@ class _SearchScreenState extends State<SearchScreen> {
             controller: _query,
             autofocus: true,
             decoration: InputDecoration(
-              hintText: _type == SearchType.room ? '대화방 이름 검색' : '메시지 검색',
+              hintText: _type == SearchType.room ? '대화방 이름 검색' : '통합 검색',
               isDense: true,
               prefixIcon: const Icon(Icons.search, size: 20),
               suffixIcon: _query.text.isEmpty
@@ -321,6 +413,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   child: RoomFilterButton(
                     session: widget.session,
                     selectedRoomId: _roomId,
+                    teamId: _pickedTeamId,
                     expand: true,
                     onSelected: (value) {
                       setState(() => _roomId = value);
@@ -359,7 +452,17 @@ class _SearchScreenState extends State<SearchScreen> {
     final body = LayoutBuilder(
       builder: (context, constraints) {
         final scope = _hasScopeChoice
-            ? PanelScopeButton(allTeams: _allTeams, onChanged: _selectScope)
+            ? PanelScopeButton(
+                allTeams: _allTeamsActive,
+                onChanged: _selectScope,
+                // 가입한 팀 전부(현재 팀 포함) — 이름으로 골라 그 팀 하나만 찾는다.
+                teams: [
+                  for (final t in widget.session.teams)
+                    (id: t.id, name: t.name),
+                ],
+                teamId: _pickedTeamId,
+                onTeamSelected: _selectTeam,
+              )
             : null;
         final inline =
             scope != null && constraints.maxWidth - 32 >= _scopeInlineMinWidth;
@@ -369,8 +472,14 @@ class _SearchScreenState extends State<SearchScreen> {
             controls,
             const SizedBox(height: 4),
             _buildTypeBar(context, inline ? scope : null),
+            // 결과 줄로 내려온 단추는 줄 오른쪽 끝에 붙인다(결과 줄의 오른쪽 칸이 글자 폭만큼만 잡혀 가운데쯤에 뜨지 않게).
             Expanded(
-              child: _buildResults(context, inline ? null : scope),
+              child: _buildResults(
+                context,
+                inline || scope == null
+                    ? null
+                    : Align(alignment: Alignment.centerRight, child: scope),
+              ),
             ),
           ],
         );
@@ -498,11 +607,11 @@ class _SearchScreenState extends State<SearchScreen> {
           : Center(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text(
-                  _type == SearchType.room
-                      ? '내가 참여 중인 토픽·그룹채팅·채팅의 이름을 검색합니다.'
-                      : '내가 속한 모든 방을 대상으로 검색합니다.',
-                ),
+                child: Text(switch (_type) {
+                  SearchType.room => '내가 참여 중인 토픽·그룹채팅·채팅의 이름을 검색합니다.',
+                  SearchType.all => '대화방 이름과 메시지·파일을 검색합니다.',
+                  _ => '내가 속한 모든 방을 대상으로 검색합니다.',
+                }, textAlign: TextAlign.center),
               ),
             );
       if (scope == null) return message;
@@ -516,6 +625,11 @@ class _SearchScreenState extends State<SearchScreen> {
       );
     }
     final count = isRooms ? roomResults.length : messageResults!.length;
+    // 전체 탭 맨 위의 대화방 묶음 — 결과 N건에도 더한다(더 보기로 대화방 탭에서 다 볼 수 있어 "표시"에도 넣는다).
+    final preview = isRooms ? const <RoomSearchResult>[] : _roomPreview;
+    final roomTotal = preview.isEmpty ? 0 : _roomPreviewTotal;
+    final total = _total + roomTotal;
+    final shown = count + roomTotal;
     final theme = Theme.of(context);
     final summary = Text.rich(
       key: const ValueKey('search-result-count'),
@@ -524,7 +638,7 @@ class _SearchScreenState extends State<SearchScreen> {
         children: [
           const TextSpan(text: '결과 '),
           TextSpan(
-            text: '$_total',
+            text: '$total',
             style: TextStyle(
               fontWeight: FontWeight.bold,
               color: theme.colorScheme.onSurface,
@@ -532,11 +646,8 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
           const TextSpan(text: '건'),
           // 한도를 넘으면 목록에는 앞의 일부만 있다는 걸 알린다.
-          if (_total > count)
-            TextSpan(
-              text: ' ($count건까지 표시)',
-              style: theme.textTheme.bodySmall,
-            ),
+          if (total > shown)
+            TextSpan(text: ' ($shown건까지 표시)', style: theme.textTheme.bodySmall),
         ],
       ),
     );
@@ -547,7 +658,7 @@ class _SearchScreenState extends State<SearchScreen> {
       trailing: scope,
     );
 
-    if (count == 0) {
+    if (count == 0 && preview.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -566,11 +677,51 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     // 정렬은 서버가 한다(한도에 잘리는 쪽이 정렬 방향을 따라야 해서).
-    final totalPages = (count / paginationPageSize).ceil();
+    final totalPages = count == 0 ? 1 : (count / paginationPageSize).ceil();
     final page = _page.clamp(0, totalPages - 1);
     final start = page * paginationPageSize;
     final pageCount = (count - start).clamp(0, paginationPageSize);
     final query = _query.text.trim();
+
+    // 전체 탭 첫 쪽 맨 위 — "대화방" 머리줄 + 이름이 맞는 방 몇 개(+ 더 보기 → 대화방 탭), 그 아래 "메시지" 머리줄.
+    final lead = <Widget>[];
+    final headerIndexes = <int>{};
+    if (page == 0 && preview.isNotEmpty) {
+      headerIndexes.add(0);
+      lead.add(
+        _SectionHeader(
+          key: const ValueKey('search-section-rooms'),
+          label: '대화방',
+          count: roomTotal,
+          onMore: roomTotal > preview.length
+              ? () => _selectType(SearchType.room)
+              : null,
+        ),
+      );
+      for (final r in preview) {
+        lead.add(
+          _RoomResultRow(
+            key: ValueKey('search-room-preview-${r.roomId}'),
+            result: r,
+            room: widget.session.roomById(r.roomId),
+            session: widget.session,
+            query: query,
+            showTeam: _resultAllTeams,
+            onTap: () => _openRoomResult(r),
+          ),
+        );
+      }
+      if (count > 0) {
+        headerIndexes.add(lead.length);
+        lead.add(
+          _SectionHeader(
+            key: const ValueKey('search-section-messages'),
+            label: '메시지',
+            count: _total,
+          ),
+        );
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -582,13 +733,19 @@ class _SearchScreenState extends State<SearchScreen> {
             controller: _listScrollController,
             child: ListView.separated(
               controller: _listScrollController,
-              itemCount: pageCount,
-              // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다.
-              separatorBuilder: (_, _) => const Padding(
-                padding: EdgeInsets.only(right: 12),
-                child: Divider(height: 1),
-              ),
-              itemBuilder: (context, i) {
+              itemCount: lead.length + pageCount,
+              // 오른쪽 끝에 겹치는 스크롤바 아래로 선이 파고들지 않도록 그만큼 짧게 그린다. 묶음 머리줄의 위아래는
+              // 머리줄 바탕색이 나눠 주므로 선을 긋지 않는다.
+              separatorBuilder: (_, i) =>
+                  headerIndexes.contains(i) || headerIndexes.contains(i + 1)
+                  ? const SizedBox.shrink()
+                  : const Padding(
+                      padding: EdgeInsets.only(right: 12),
+                      child: Divider(height: 1),
+                    ),
+              itemBuilder: (context, index) {
+                if (index < lead.length) return lead[index];
+                final i = index - lead.length;
                 if (isRooms) {
                   final item = roomResults[start + i];
                   return _RoomResultRow(
@@ -843,7 +1000,8 @@ class _SearchResultRow extends StatelessWidget {
     String query, {
     int? maxLines,
     TextStyle? style,
-  }) => _highlightedText(context, text, query, maxLines: maxLines, style: style);
+  }) =>
+      _highlightedText(context, text, query, maxLines: maxLines, style: style);
 }
 
 /// [text] 안의 [query]를 형광펜으로 칠한 것처럼 보여준다(대소문자 무시).
@@ -914,7 +1072,86 @@ class _TeamChip extends StatelessWidget {
   }
 }
 
-/// 대화방 탭의 결과 한 줄: 방 아바타 + 방 이름(검색어 하이라이트, 비공개 토픽은 자물쇠) +
+/// 전체 탭 결과 목록의 묶음 머리줄 — `대화방 5 … 더 보기 ›` / `메시지 383`. 옅은 바탕으로 묶음을 나눈다.
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  final int count;
+
+  /// 주면 오른쪽에 "더 보기 ›"(그 종류의 탭으로).
+  final VoidCallback? onMore;
+  const _SectionHeader({
+    super.key,
+    required this.label,
+    required this.count,
+    this.onMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final more = onMore;
+    return ColoredBox(
+      color: scheme.surfaceContainerLow,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, more == null ? 16 : 8, 0),
+        child: SizedBox(
+          height: 32,
+          child: Row(
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+              const Spacer(),
+              if (more != null)
+                InkWell(
+                  key: const ValueKey('search-section-more'),
+                  onTap: more,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(6, 4, 2, 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '더 보기',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: theme.hintColor,
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right,
+                          size: 16,
+                          color: theme.hintColor,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 대화방 탭(과 전체 탭 맨 위 "대화방" 묶음)의 결과 한 줄: 방 아바타 + 방 이름(검색어 하이라이트, 비공개 토픽은 자물쇠) +
 /// 종류(토픽/그룹채팅/채팅)·보관됨·멤버 수·(모든 팀이면) 팀 이름 칩.
 class _RoomResultRow extends StatelessWidget {
   final RoomSearchResult result;
@@ -924,6 +1161,7 @@ class _RoomResultRow extends StatelessWidget {
   final bool showTeam;
   final VoidCallback onTap;
   const _RoomResultRow({
+    super.key,
     required this.result,
     required this.room,
     required this.session,

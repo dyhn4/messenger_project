@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
-import { albumItems, albums, dmHistoryFloors, roomMembers, rooms, users } from '../schema.js';
+import { albumItems, albums, dmHistoryFloors, messages, roomMembers, rooms, users } from '../schema.js';
 
 // 앨범 조회·저장. 대화방 파일(message_attachments)과는 독립이라 항목은 album_items에만 있다.
 
@@ -143,6 +143,37 @@ export function insertAlbumItems(albumId, uploaderId, items) {
     await tx.update(albums).set({ updatedAt: new Date() }).where(eq(albums.id, albumId));
     return rows;
   });
+}
+
+/**
+ * 이 앨범을 공유한 메시지가 내가 볼 수 있는 방에 있는지 — 내가 멤버인(비밀 대화 아닌) 방의 지우지 않은 공유 메시지이고,
+ * DM "진짜 나가기" 하한 이후의 것이어야 한다. 있으면 앨범 방의 멤버가 아니어도 그 앨범을 볼 수 있다(보기 전용).
+ */
+export async function hasVisibleAlbumShare(albumId, userId) {
+  const rows = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .innerJoin(roomMembers, and(eq(roomMembers.roomId, messages.roomId), eq(roomMembers.userId, userId)))
+    .leftJoin(dmHistoryFloors, and(eq(dmHistoryFloors.roomId, messages.roomId), eq(dmHistoryFloors.userId, userId)))
+    .where(
+      and(
+        eq(messages.albumId, albumId),
+        isNull(messages.deletedAt),
+        eq(rooms.isSecret, false),
+        or(isNull(dmHistoryFloors.hiddenBeforeAt), gte(messages.createdAt, dmHistoryFloors.hiddenBeforeAt)),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** 앨범 제목을 고치면 그 앨범을 공유한 메시지들의 카드 제목(album_share.title 스냅샷)도 같이 고친다. */
+export async function updateAlbumShareTitles(albumId, title) {
+  await db
+    .update(messages)
+    .set({ albumShare: sql`jsonb_set(coalesce(${messages.albumShare}, '{}'::jsonb), '{title}', to_jsonb(${title}::text))` })
+    .where(eq(messages.albumId, albumId));
 }
 
 /** 항목 삭제 — 지운 행들을 돌려준다. 지운 항목이 대표였으면 coverItemId도 비운다(첫 항목으로 대신 보인다). */

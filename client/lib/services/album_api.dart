@@ -59,6 +59,16 @@ abstract class AlbumApi {
     required List<String> itemIds,
   });
 
+  /// `POST /api/albums/:id/messages` — "앨범 공유": [roomId] 대화방에 [text](필수) 아래 앨범 카드가 붙은 글 메시지를
+  /// 보낸다. [textFormat]·[mentions]는 입력칸의 서식·멘션(json 모양).
+  Future<void> shareAlbum(
+    String albumId, {
+    required String roomId,
+    required String text,
+    List<Map<String, dynamic>>? textFormat,
+    List<Map<String, dynamic>>? mentions,
+  });
+
   /// `POST /api/upload` — 앨범에 담을 파일(또는 썸네일) 하나를 올린다.
   Future<UploadResult> uploadFile(
     File file, {
@@ -216,6 +226,26 @@ class RemoteAlbumApi implements AlbumApi {
       'POST',
       '/api/albums/$albumId/share',
       body: {'roomId': roomId, 'itemIds': itemIds},
+    );
+  }
+
+  @override
+  Future<void> shareAlbum(
+    String albumId, {
+    required String roomId,
+    required String text,
+    List<Map<String, dynamic>>? textFormat,
+    List<Map<String, dynamic>>? mentions,
+  }) async {
+    await _api.requestJson(
+      'POST',
+      '/api/albums/$albumId/messages',
+      body: {
+        'roomId': roomId,
+        'text': text,
+        'textFormat': ?textFormat,
+        'mentions': ?mentions,
+      },
     );
   }
 

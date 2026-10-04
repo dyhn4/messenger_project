@@ -12,11 +12,12 @@ import '../widgets/side_panel_header.dart';
 
 /// "내가 쓴 글" 패널 — 내가 직접 보낸 메시지·게시글과 내가 단 댓글을 키워드 없이 시간순으로 모아 보고, 누르면 원본 대화의
 /// 그 메시지로 이동한다. 파일·즐겨찾기 패널과 같은 틀이다 — 위에서부터 헤더(`내가 쓴 글` + 닫기), 필터 줄(참여 대화방 /
-/// 기간 — 글쓴이는 늘 나라 멤버 필터는 없다), 탭(전체 | 메시지 | 댓글)과 정렬, `"N"개가 로딩되었습니다.` 줄, 목록(무한 스크롤).
+/// 기간 — 글쓴이는 늘 나라 멤버 필터는 없다), 그 아래 줄(왼쪽 끝 종류 드롭다운 — 전체 / 메시지 / 댓글 — 과 오른쪽 끝 정렬),
+/// `"N"개가 로딩되었습니다.` 줄, 목록(무한 스크롤).
 /// 텍스트 없이 파일·이미지만 보낸 메시지는 여기 없고(파일 패널에서 본다), 내가 나간 방·비밀 대화의 글도 없다.
 /// PC는 오른쪽 패널, 모바일은 전체 화면으로 열린다(side_panels.dart의 'myposts'). 메뉴의 "리스트 > 내가 쓴 글"에서 들어온다.
 ///
-/// 방·기간·탭·정렬은 전부 서버가 건다(`GET /api/my-posts`, panel_lists_api.dart) — 바꿀 때마다 처음부터 다시 받는다.
+/// 방·기간·종류·정렬은 전부 서버가 건다(`GET /api/my-posts`, panel_lists_api.dart) — 바꿀 때마다 처음부터 다시 받는다.
 class MyPostsScreen extends StatefulWidget {
   final Session session;
   final VoidCallback? onClose;
@@ -166,32 +167,19 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
 
   // ---- 그리기 ----
 
-  Widget _tabs() {
-    return SizedBox(
-      height: 40,
-      child: ListView.separated(
-        key: const ValueKey('my-posts-tabs'),
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: MyPostKind.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 6),
-        itemBuilder: (context, i) {
-          final kind = MyPostKind.values[i];
-          return ChoiceChip(
-            key: ValueKey('my-posts-tab-${kind.name}'),
-            label: Text(kind.label),
-            selected: kind == _kind,
-            visualDensity: VisualDensity.compact,
-            onSelected: (_) {
-              if (kind == _kind) return;
-              setState(() => _kind = kind);
-              _reload();
-            },
-          );
-        },
-      ),
-    );
-  }
+  /// 정렬 단추 줄 왼쪽 끝의 종류 드롭다운(전체 / 메시지 / 댓글).
+  Widget _kindButton() => PanelKindButton<MyPostKind>(
+    key: const ValueKey('my-posts-kind'),
+    values: MyPostKind.values,
+    selected: _kind,
+    labelOf: (kind) => kind.label,
+    itemKey: (kind) => ValueKey('my-posts-tab-${kind.name}'),
+    onChanged: (kind) {
+      if (kind == _kind) return;
+      setState(() => _kind = kind);
+      _reload();
+    },
+  );
 
   Widget _countLine(BuildContext context) => PanelResultLine(
     summary: Text(
@@ -375,8 +363,7 @@ class _MyPostsScreenState extends State<MyPostsScreen> {
               setState(() => _period = v);
               _reload();
             },
-            leading: _tabs(),
-            leadingExpands: true,
+            leading: _kindButton(),
             newestFirst: _newestFirst,
             onSortChanged: (v) {
               setState(() => _newestFirst = v);

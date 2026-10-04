@@ -30,8 +30,8 @@ import { isOnline } from './presence.js';
 import { notifyRecordPush, roomTagFor } from './push.js';
 import { roomDisplayName } from './rooms.js';
 import {
-  checkDateOrder,
   isUuid,
+  mergeTodoPeriod,
   myProgressOf,
   newlyAssigned,
   parseAttachments,
@@ -115,7 +115,10 @@ export async function loadTodoDtos(rows, viewerId) {
       title: t.title,
       description: t.description ?? null,
       startDate: t.startDate ?? null,
+      // 'HH:mm'(그 날짜의 벽시계 시각) — 날짜가 없으면 늘 null.
+      startTime: t.startTime ?? null,
       dueDate: t.dueDate ?? null,
+      dueTime: t.dueTime ?? null,
       progress: t.progress,
       status: statusOf(t.progress),
       completedAt: ms(t.completedAt),
@@ -274,7 +277,9 @@ export function createTodosRouter(io) {
         title: input.title,
         description: input.description,
         startDate: input.startDate,
+        startTime: input.startTime,
         dueDate: input.dueDate,
+        dueTime: input.dueTime,
         sourceMessageId,
         sourceCommentId,
       },
@@ -333,11 +338,10 @@ export function createTodosRouter(io) {
     const denial = patchDenial(role, todo.creatorId, Object.keys(fields), target);
     if (denial) return res.status(denial.status).json({ error: denial.error });
 
-    // 시작일/종료일은 둘 중 하나만 보내도 저장된 다른 쪽과 순서를 맞춰 본다.
-    const startDate = 'startDate' in fields ? fields.startDate : todo.startDate;
-    const dueDate = 'dueDate' in fields ? fields.dueDate : todo.dueDate;
-    const orderError = checkDateOrder(startDate, dueDate);
-    if (orderError) return res.status(400).json({ error: orderError });
+    // 기간(시작일·시작 시간·종료일·종료 시간)은 일부만 보내도 저장된 나머지와 합쳐 순서를 본다 — 날짜를 지우면 그 시간도
+    // 함께 지우고, 날짜 없이 시간만 남게 되면 400.
+    const period = mergeTodoPeriod(todo, fields);
+    if (period.error) return res.status(400).json({ error: period.error });
 
     let attachments;
     if (fields.attachments !== undefined) {
@@ -365,8 +369,8 @@ export function createTodosRouter(io) {
       if (memberError) return res.status(400).json({ error: memberError });
     }
 
-    const columns = {};
-    for (const key of ['title', 'description', 'startDate', 'dueDate']) {
+    const columns = { ...period.columns };
+    for (const key of ['title', 'description']) {
       if (key in fields) columns[key] = fields[key];
     }
     // 담당자 진척률은 그 사람 행만, 담당자 없는 할 일은 예전처럼 할 일 값 — 전체 진척률은 updateTodo가 다시 맞춘다.
@@ -480,6 +484,7 @@ export async function sweepTodoReminders(io, now = new Date()) {
       todoId: todo.id,
       title: todo.title,
       dueDate: todo.dueDate ?? null,
+      dueTime: todo.dueTime ?? null,
       remindAt,
     };
     for (const id of targets) io.to(`user:${id}`).emit('todo:reminder', payload);
@@ -495,7 +500,9 @@ export async function sweepTodoReminders(io, now = new Date()) {
         senderName: '할 일 알림',
         kind: 'todo_reminder',
         conversationTag: '할 일',
-        body: todo.dueDate ? `${todo.title} (기한 ${todo.dueDate.replaceAll('-', '/')})` : todo.title,
+        body: todo.dueDate
+          ? `${todo.title} (기한 ${todo.dueDate.replaceAll('-', '/')}${todo.dueTime ? ` ${todo.dueTime}` : ''})`
+          : todo.title,
         roomTag: roomTagFor(room),
       }).catch((e) => console.error('[todos] 알림 푸시 실패:', e?.message ?? e));
     }

@@ -473,7 +473,7 @@ void main() {
           findsNothing,
           reason: '부여한 할 일에서만',
         );
-        // 정렬은 왼쪽(처음은 생성 순), 완료 제외 스위치는 오른쪽 끝.
+        // 완료 제외 스위치(스위치 · 글자)는 왼쪽, 정렬은 오른쪽 끝(처음은 생성 순) — 한 줄.
         expect(
           find.descendant(of: _key('todo-sort'), matching: find.text('생성 순')),
           findsOneWidget,
@@ -482,10 +482,16 @@ void main() {
         final sort = tester.getRect(_key('todo-sort'));
         final toggle = tester.getRect(_key('todo-exclude-done'));
         final label = tester.getRect(find.text('완료된 할 일 제외'));
-        expect(sort.top, greaterThan(room.bottom));
-        expect(sort.left, lessThan(30));
-        expect(label.right, lessThanOrEqualTo(toggle.left));
-        expect(toggle.right, greaterThan(400));
+        expect(toggle.top, greaterThan(room.bottom));
+        expect(toggle.left, lessThan(30));
+        expect(toggle.right, lessThanOrEqualTo(label.left));
+        expect(label.right, lessThan(sort.left));
+        expect(sort.right, greaterThan(400));
+        expect(
+          sort.center.dy,
+          moreOrLessEquals(toggle.center.dy, epsilon: 2),
+          reason: '같은 줄',
+        );
         expect(_switch(tester).value, isFalse);
         // 건수 줄 — 숫자는 굵게.
         expect(find.text('2개의 할 일'), findsOneWidget);
@@ -871,14 +877,14 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byType(FilterPanelShell), findsNothing);
       }
-      // 정렬 메뉴도 패널 안 — 단추 바로 아래, 단추 왼쪽 끝에서 패널 쪽으로.
+      // 정렬 메뉴도 패널 안 — 단추 바로 아래, 단추 오른쪽 끝(패널 오른쪽)에서 패널 쪽(왼쪽)으로.
       await tester.tap(_key('todo-sort'));
       await tester.pumpAndSettle();
       final sort = tester.getRect(_key('todo-sort'));
       final item = tester.getRect(_key('todo-sort-due'));
       expect(item.top, greaterThan(sort.bottom - 1));
-      expect(item.left, moreOrLessEquals(sort.left, epsilon: 1));
-      expect(item.right, lessThanOrEqualTo(panel.right));
+      expect(item.right, moreOrLessEquals(sort.right, epsilon: 1));
+      expect(item.left, greaterThanOrEqualTo(panel.left));
       await tester.tap(_key('todo-sort-due'));
       await tester.pumpAndSettle();
       expect(api.calls.last, contains('sort=due'));
@@ -1064,6 +1070,36 @@ void main() {
       await _pickScope(tester, TodoScope.team);
       expect(period().style?.color, error, reason: '전체(50)는 아직이다');
       expect(period().style?.fontWeight, FontWeight.w600);
+    });
+
+    testWidgets('시간이 있는 기간 — 목록 카드·일정 화면 카드는 시간까지, 달력의 점은 날짜로(자정에 끝나도 그날까지)', (
+      tester,
+    ) async {
+      final tomorrow = DateTime(_today.year, _today.month, _today.day + 1);
+      final api = await _pump(tester, [
+        todoJson(
+          id: 't',
+          title: '시간 있는 일',
+          assignees: ['me'],
+          startDate: _w(_today),
+          startTime: '17:40',
+          dueDate: _w(tomorrow),
+          dueTime: '00:00',
+        ),
+      ]);
+      final text =
+          '일정: ${formatTodoDate(_today)} 오후 5:40 ~ ${formatTodoDate(tomorrow)} 오전 12:00';
+      expect(tester.widget<Text>(_key('todo-period-t')).data, text);
+      await _openCalendar(tester);
+      expect(api.lastList!['from'], isNotNull);
+      expect(_dot(_today), isTrue);
+      expect(_dot(tomorrow), isTrue);
+      final calendarCard = find.descendant(
+        of: find.byType(TodoCalendarPage),
+        matching: _key('todo-period-t'),
+      );
+      expect(tester.widget<Text>(calendarCard).data, text);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('카드는 보기만 한다 — 별 자리를 눌러도 상세가 열리고, 진척률·즐겨찾기를 보내지 않는다', (
@@ -1255,31 +1291,57 @@ void main() {
       expect(find.byType(TodoDetail), findsOneWidget);
     });
 
-    testWidgets('PC — 할 일 생성은 패널 안 생성 화면(지금 연 방이 대화방 칸에) — ←로 닫는다', (
-      tester,
-    ) async {
-      var closed = 0;
-      await _pumpShell(
-        tester,
-        const [],
-        currentRoomId: 'r2',
-        onClose: () => closed++,
-      );
-      await tester.tap(_key('todo-create'));
-      await tester.pumpAndSettle();
-      final editor = tester.widget<TodoEditor>(find.byType(TodoEditor));
-      expect(editor.mode, TodoViewMode.panel);
-      expect(editor.onClosePanel, isNotNull);
-      expect(editor.room?.id, 'r2');
-      expect(editor.editing, isNull);
-      expect(tester.getRect(find.byType(TodoEditor)), _panelRect(tester));
-      expect(find.byType(Dialog), findsNothing);
-      await tester.tap(_key('todo-page-back'));
-      await tester.pumpAndSettle();
-      expect(find.byType(TodoEditor), findsNothing);
-      expect(_key('todo-create'), findsOneWidget);
-      expect(closed, 0);
-    });
+    testWidgets(
+      'PC — 할 일 생성은 투표 만들기처럼 창 가운데 대화상자(패널 밖, 지금 연 방이 대화방 칸에) — ✕로 닫으면 목록 그대로',
+      (tester) async {
+        var closed = 0;
+        await _pumpShell(
+          tester,
+          const [],
+          currentRoomId: 'r2',
+          onClose: () => closed++,
+        );
+        await tester.tap(_key('todo-create'));
+        await tester.pumpAndSettle();
+        final editor = tester.widget<TodoEditor>(find.byType(TodoEditor));
+        expect(editor.mode, TodoViewMode.dialog);
+        expect(editor.onClosePanel, isNull);
+        expect(editor.room?.id, 'r2');
+        expect(editor.editing, isNull);
+        expect(
+          find.descendant(
+            of: find.byType(TodoEditor),
+            matching: find.byType(Dialog),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: _key('panel-box'),
+            matching: find.byType(TodoEditor),
+          ),
+          findsNothing,
+          reason: '패널 안 Navigator가 아니라 창 전체(루트)에',
+        );
+        final dialog = tester.getRect(find.byType(Dialog));
+        expect(dialog.center.dx, closeTo(640, 1), reason: '창 가운데');
+        expect(dialog.left, lessThan(_panelRect(tester).left));
+        // 패널 안 화면 머리(← 할 일 … ✕)가 아니라 대화상자 머리(`할 일 생성` + ✕).
+        expect(_key('todo-page-back'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(Dialog),
+            matching: find.text('할 일 생성'),
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(_key('todo-editor-close'));
+        await tester.pumpAndSettle();
+        expect(find.byType(TodoEditor), findsNothing);
+        expect(_key('todo-create'), findsOneWidget);
+        expect(closed, 0);
+      },
+    );
 
     testWidgets('PC — 할 일 일정은 패널 안 화면(← 할 일 … ✕) — ←로 닫으면 달력 받기를 멈춘다', (
       tester,
@@ -1486,6 +1548,14 @@ void main() {
         me: 'me',
         todos: [
           todoJson(id: 'a', title: '영업팀 할 일', assignees: ['me']),
+          todoJson(
+            id: 'z',
+            teamId: 't2',
+            roomId: 'x1',
+            roomName: '개발팀 토픽',
+            title: '개발팀 할 일',
+            assignees: ['me'],
+          ),
         ],
       );
       await _pumpShell(tester, const [], api: api, session: session);
@@ -1505,9 +1575,17 @@ void main() {
       expect(api.callCount('delete'), 0);
       expect(api.lastList!['teamId'], 't2');
 
-      // 생성 화면의 "작성 취소" 확인도.
-      await tester.tap(_key('todo-create'));
+      // 패널 안 수정 화면(상세 ••• → 할 일 수정)의 "작성 취소" 확인도.
+      await tester.tap(find.text('개발팀 할 일'));
       await tester.pumpAndSettle();
+      await tester.tap(_key('todo-detail-menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-menu-edit'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+        TodoViewMode.panel,
+      );
       await tester.enterText(_key('todo-title-field'), '쓰던 제목');
       await tester.pump();
       await tester.tap(_key('todo-page-back'));
@@ -1518,7 +1596,8 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('작성 취소'), findsNothing);
       expect(find.byType(TodoEditor), findsNothing);
-      expect(api.callCount('create'), 0);
+      expect(find.byType(TodoDetail), findsNothing);
+      expect(api.callCount('update'), 0);
       expect(find.text('영업팀 할 일'), findsOneWidget);
     });
 
@@ -1562,6 +1641,13 @@ void main() {
       final editor = tester.widget<TodoEditor>(find.byType(TodoEditor));
       expect(editor.mode, TodoViewMode.page);
       expect(editor.onClosePanel, isNull);
+      // 생성은 대화상자가 아니라 앱 Navigator의 전체 화면(앱 바 ✕ · 할 일 생성 · 저장하기).
+      expect(find.byType(Dialog), findsNothing);
+      expect(tester.getSize(find.byType(TodoEditor)), const Size(390, 800));
+      expect(
+        find.descendant(of: find.byType(AppBar), matching: find.text('할 일 생성')),
+        findsOneWidget,
+      );
       await _systemBack(tester);
       expect(find.byType(TodoEditor), findsNothing);
 
@@ -2488,7 +2574,7 @@ void main() {
         await tester.tap(_key('todo-create'));
         await tester.pumpAndSettle();
         final editor = tester.widget<TodoEditor>(find.byType(TodoEditor));
-        expect(editor.mode, TodoViewMode.panel);
+        expect(editor.mode, TodoViewMode.dialog);
         final id = editor.room?.id;
         if (id == 'self') {
           expect(_key('todo-assignee-chip-me'), findsOneWidget);
@@ -2500,7 +2586,7 @@ void main() {
             findsOneWidget,
           );
         }
-        await tester.tap(_key('todo-page-back'));
+        await tester.tap(_key('todo-editor-close'));
         await tester.pumpAndSettle();
         return id;
       }
@@ -2634,144 +2720,212 @@ void main() {
 
   // ────────────────────────── PC — 패널 안 메뉴는 창 전체 위에 ──────────────────────────
   group('PC — 패널 안 화면의 메뉴·펼침 목록은 창 전체 위에(자리는 패널 안)', () {
-    testWidgets('여덟 가지(정렬·보기·대화방·멤버·상세 •••·진척률·생성 화면의 대화방 칸·알림) 모두 패널 안에 뜨고, '
-        '패널 밖 채팅 쪽을 누르면 닫히며 그 누름은 채팅에 가지 않는다', (tester) async {
-      final api = FakeTodoApi(
-        me: 'me',
-        todos: [
-          todoJson(
-            id: 'a',
-            title: '같이 하는 일',
-            assignees: ['me', 'u2'],
-            assigneeProgress: {'me': 50, 'u2': 0},
-          ),
-        ],
-      );
-      final controller = TodoController(
-        api: api,
-        teamId: 't1',
-        scope: TodoScope.assignedByMe,
-      );
-      await _pumpShell(tester, const [], api: api, controller: controller);
-      // 채팅 자리는 누르면 센다(시험 하네스가 맞는지).
-      await tester.tapAt(_chatPoint);
-      await tester.pump();
-      expect(_chatTaps, 1);
-      _chatTaps = 0;
-
-      Future<void> tap(Finder f) async {
-        await tester.ensureVisible(f);
-        await tester.pumpAndSettle();
-        await tester.tap(f);
-        await tester.pumpAndSettle();
-      }
-
-      /// 팝업 메뉴는 루트 Navigator의 할 일 메뉴 라우트다.
-      void expectRootPopup(Finder item, String what) {
-        final element = tester.element(item);
-        expect(
-          ModalRoute.of(element)?.settings.name,
-          todoPopupRouteName,
-          reason: what,
-        );
-        expect(
-          Navigator.of(element),
-          same(Navigator.of(element, rootNavigator: true)),
-          reason: '$what — 루트 Navigator',
-        );
-      }
-
-      // 목록 화면 — 정렬(단추 왼쪽 끝부터 오른쪽으로).
-      await _expectClosesFromChat(
-        tester,
-        what: '정렬',
-        open: () async {
-          await tap(_key('todo-sort'));
-          expectRootPopup(_key('todo-sort-due'), '정렬');
-          expect(
-            _menuRect(tester, _key('todo-sort-due')).left,
-            moreOrLessEquals(
-              tester.getRect(_key('todo-sort')).left,
-              epsilon: 1,
+    testWidgets(
+      '열 가지(정렬·보기·대화방·멤버·상세 •••·진척률·수정 화면의 알림·기간 판·판 안의 시작/종료 시간 목록) 모두 패널 안에 뜨고, '
+      '패널 밖 채팅 쪽을 누르면 닫히며 그 누름은 채팅에 가지 않는다 — 생성 대화상자의 대화방 칸·알림은 대화상자 안',
+      (tester) async {
+        final api = FakeTodoApi(
+          me: 'me',
+          todos: [
+            todoJson(
+              id: 'a',
+              title: '같이 하는 일',
+              assignees: ['me', 'u2'],
+              assigneeProgress: {'me': 50, 'u2': 0},
+              startDate: '2099-10-01',
+              dueDate: '2099-10-07',
+              dueTime: '18:00',
             ),
+          ],
+        );
+        final controller = TodoController(
+          api: api,
+          teamId: 't1',
+          scope: TodoScope.assignedByMe,
+        );
+        await _pumpShell(tester, const [], api: api, controller: controller);
+        // 채팅 자리는 누르면 센다(시험 하네스가 맞는지).
+        await tester.tapAt(_chatPoint);
+        await tester.pump();
+        expect(_chatTaps, 1);
+        _chatTaps = 0;
+
+        Future<void> tap(Finder f) async {
+          await tester.ensureVisible(f);
+          await tester.pumpAndSettle();
+          await tester.tap(f);
+          await tester.pumpAndSettle();
+        }
+
+        /// 팝업 메뉴는 루트 Navigator의 할 일 메뉴 라우트다.
+        void expectRootPopup(Finder item, String what) {
+          final element = tester.element(item);
+          expect(
+            ModalRoute.of(element)?.settings.name,
+            todoPopupRouteName,
+            reason: what,
           );
-        },
-        shown: _key('todo-sort-due'),
-        rect: () => _menuRect(tester, _key('todo-sort-due')),
-      );
-      // 보기·대화방·멤버 펼침 패널.
-      for (final (what, button) in [
-        ('보기', _key('todo-scope')),
-        ('대화방', find.byType(RoomFilterButton)),
-        ('멤버', _key('todo-assignee-filter')),
-      ]) {
+          expect(
+            Navigator.of(element),
+            same(Navigator.of(element, rootNavigator: true)),
+            reason: '$what — 루트 Navigator',
+          );
+        }
+
+        // 목록 화면 — 정렬(줄 오른쪽 끝의 단추 — 단추 오른쪽 끝부터 왼쪽으로). 정렬은 메시지 예약 패널과 같은
+        // MenuAnchor 메뉴라 라우트가 아니라 패널 안 Navigator의 Overlay에 뜬다(바깥 누름은 TapRegion이 받는다).
         await _expectClosesFromChat(
           tester,
-          what: what,
-          open: () => tap(button),
-          shown: find.byType(FilterPanelShell),
-          rect: () => tester.getRect(find.byType(FilterPanelShell)),
+          what: '정렬',
+          open: () async {
+            await tap(_key('todo-sort'));
+            expect(
+              ModalRoute.of(
+                tester.element(_key('todo-sort-due')),
+              )?.settings.name,
+              isNot(todoPopupRouteName),
+              reason: '정렬 — 팝업 라우트가 아니다',
+            );
+            expect(
+              _menuRect(tester, _key('todo-sort-due')).right,
+              moreOrLessEquals(
+                tester.getRect(_key('todo-sort')).right,
+                epsilon: 1,
+              ),
+            );
+          },
+          shown: _key('todo-sort-due'),
+          rect: () => _menuRect(tester, _key('todo-sort-due')),
         );
-      }
-      expect(api.callCount('list'), 1, reason: '바깥을 눌러 닫기만 했다');
-      expect(controller.sort, TodoSort.created);
+        // 보기·대화방·멤버 펼침 패널.
+        for (final (what, button) in [
+          ('보기', _key('todo-scope')),
+          ('대화방', find.byType(RoomFilterButton)),
+          ('멤버', _key('todo-assignee-filter')),
+        ]) {
+          await _expectClosesFromChat(
+            tester,
+            what: what,
+            open: () => tap(button),
+            shown: find.byType(FilterPanelShell),
+            rect: () => tester.getRect(find.byType(FilterPanelShell)),
+          );
+        }
+        expect(api.callCount('list'), 1, reason: '바깥을 눌러 닫기만 했다');
+        expect(controller.sort, TodoSort.created);
 
-      // 패널 안 상세 — ••• 와 내 진척률.
-      await tap(find.text('같이 하는 일'));
-      expect(find.byType(TodoDetail), findsOneWidget);
-      await _expectClosesFromChat(
-        tester,
-        what: '상세 •••',
-        open: () async {
-          await tap(_key('todo-detail-menu'));
-          expectRootPopup(_key('todo-menu-edit'), '상세 •••');
-        },
-        shown: _key('todo-menu-edit'),
-        rect: () => _menuRect(tester, _key('todo-menu-edit')),
-      );
-      await _expectClosesFromChat(
-        tester,
-        what: '내 진척률',
-        open: () async {
-          await tap(_key('todo-detail-my-progress'));
-          expectRootPopup(_key('todo-progress-option-100'), '내 진척률');
-        },
-        shown: _key('todo-progress-option-100'),
-        rect: () => _menuRect(tester, _key('todo-progress-option-100')),
-      );
-      expect(api.callCount('update'), 0);
-      expect(find.byType(TodoDetail), findsOneWidget, reason: '상세는 그대로');
-      await tap(_key('todo-page-back'));
+        // 패널 안 상세 — ••• 와 내 진척률.
+        await tap(find.text('같이 하는 일'));
+        expect(find.byType(TodoDetail), findsOneWidget);
+        await _expectClosesFromChat(
+          tester,
+          what: '상세 •••',
+          open: () async {
+            await tap(_key('todo-detail-menu'));
+            expectRootPopup(_key('todo-menu-edit'), '상세 •••');
+          },
+          shown: _key('todo-menu-edit'),
+          rect: () => _menuRect(tester, _key('todo-menu-edit')),
+        );
+        await _expectClosesFromChat(
+          tester,
+          what: '내 진척률',
+          open: () async {
+            await tap(_key('todo-detail-my-progress'));
+            expectRootPopup(_key('todo-progress-option-100'), '내 진척률');
+          },
+          shown: _key('todo-progress-option-100'),
+          rect: () => _menuRect(tester, _key('todo-progress-option-100')),
+        );
+        expect(api.callCount('update'), 0);
+        expect(find.byType(TodoDetail), findsOneWidget, reason: '상세는 그대로');
 
-      // 패널 안 생성 화면 — 대화방 칸과 알림 메뉴.
-      await tap(_key('todo-create'));
-      expect(
-        tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
-        TodoViewMode.panel,
-      );
-      await _expectClosesFromChat(
-        tester,
-        what: '대화방 칸',
-        open: () => tap(_key('todo-room-field')),
-        shown: _roomPickerDropdown,
-        rect: () => tester.getRect(_roomPickerDropdown),
-      );
-      await _expectClosesFromChat(
-        tester,
-        what: '알림',
-        open: () async {
-          await tap(_key('todo-reminder-add'));
-          expectRootPopup(_key('todo-reminder-option-day'), '알림');
-        },
-        shown: _key('todo-reminder-option-day'),
-        rect: () => _menuRect(tester, _key('todo-reminder-option-day')),
-      );
-      expect(find.byType(TodoEditor), findsOneWidget, reason: '생성 화면은 그대로');
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      controller.dispose();
-    });
+        // 패널 안 수정 화면(상세 ••• → 할 일 수정) — 알림 메뉴와 기간 달력 아래의 시간 메뉴.
+        await tap(_key('todo-detail-menu'));
+        await tap(_key('todo-menu-edit'));
+        expect(
+          tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+          TodoViewMode.panel,
+        );
+        await _expectClosesFromChat(
+          tester,
+          what: '알림',
+          open: () async {
+            await tap(_key('todo-reminder-add'));
+            expectRootPopup(_key('todo-reminder-option-day'), '알림');
+          },
+          shown: _key('todo-reminder-option-day'),
+          rect: () => _menuRect(tester, _key('todo-reminder-option-day')),
+        );
+        // 기간 판(달력 + 시작/종료 시간)과 판 안의 시간 목록 — 루트 Overlay(자리는 패널 안).
+        await _expectClosesFromChat(
+          tester,
+          what: '기간 판',
+          open: () => tap(_key('todo-period-field')),
+          shown: _key('todo-period-popup'),
+          rect: () => tester.getRect(_key('todo-period-popup')),
+        );
+        for (final (what, box, option) in [
+          ('시작 시간', 'todo-time-start', 'todo-time-option-none'),
+          ('종료 시간', 'todo-time-end', 'todo-time-option-1080'),
+        ]) {
+          await _expectClosesFromChat(
+            tester,
+            what: what,
+            open: () async {
+              await tap(_key('todo-period-field'));
+              await tap(_key(box));
+              expect(_key(option), findsOneWidget, reason: what);
+            },
+            shown: _key('todo-time-list'),
+            rect: () => tester.getRect(_key('todo-time-list')),
+          );
+          expect(_key('todo-period-popup'), findsNothing, reason: '판째 닫힌다');
+        }
+        expect(find.byType(TodoEditor), findsOneWidget, reason: '수정 화면은 그대로');
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(api.callCount('update'), 0);
+        // 바뀐 게 없으니 묻지 않고 상세로, 상세에서 목록으로.
+        await tap(_key('todo-page-back'));
+        expect(find.byType(TodoEditor), findsNothing);
+        await tap(_key('todo-page-back'));
+
+        // 할 일 생성은 창 가운데 대화상자 — 대화방 칸·알림 메뉴도 대화상자 안에 뜨고, 바깥(채팅 쪽)을 누르면 닫히며 그 누름은
+        // 채팅에 가지 않는다(대화상자는 그대로).
+        await tap(_key('todo-create'));
+        expect(
+          tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+          TodoViewMode.dialog,
+        );
+        final dialog = find.byType(Dialog);
+        for (final (what, open, shown) in [
+          ('대화방 칸', _key('todo-room-field'), _roomPickerDropdown),
+          ('알림', _key('todo-reminder-add'), _key('todo-reminder-option-day')),
+        ]) {
+          await tap(open);
+          expect(shown, findsWidgets, reason: '$what — 떴다');
+          final rect = shown == _roomPickerDropdown
+              ? tester.getRect(shown)
+              : _menuRect(tester, shown);
+          final box = tester.getRect(dialog);
+          expect(
+            rect.left,
+            greaterThanOrEqualTo(box.left - 0.01),
+            reason: what,
+          );
+          expect(rect.right, lessThanOrEqualTo(box.right + 0.01), reason: what);
+          await tester.tapAt(_chatPoint);
+          await tester.pumpAndSettle();
+          expect(shown, findsNothing, reason: '$what — 바깥을 누르면 닫힌다');
+          expect(_chatTaps, 0, reason: '$what — 그 누름은 채팅에 가지 않는다');
+          expect(dialog, findsOneWidget, reason: '$what — 대화상자는 그대로');
+        }
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        controller.dispose();
+      },
+    );
 
     testWidgets('팀을 바꾸면 창 전체에 떠 있던 메뉴(정렬·상세 •••)도 함께 닫힌다', (tester) async {
       final session = _session();
@@ -2822,7 +2976,7 @@ void main() {
   // ────────────────────────── PC — 패널을 밖에서 닫기 전에 묻기 ──────────────────────────
   group('PC — 홈 화면이 패널을 닫거나 바꾸기 전에 쓰던 할 일을 묻는다', () {
     testWidgets(
-      '패널은 홈 화면에 "닫기 전에 물어보기"를 맡긴다 — 쓰던 생성·수정 화면이 있을 때만 물을 게 있고, 묻는 것은 그 화면의 작성 취소',
+      '패널은 홈 화면에 "닫기 전에 물어보기"를 맡긴다 — 패널 안에 쓰던 수정 화면이 있을 때만 물을 게 있고(생성 대화상자는 패널 밖), 묻는 것은 그 화면의 작성 취소',
       (tester) async {
         PanelLeaveGuard? guard;
         Object? owner;
@@ -2845,36 +2999,20 @@ void main() {
         expect(guard!.needsConfirm(), isFalse, reason: '쓰는 중인 할 일이 없다');
         expect(await guard!.confirm(), isTrue);
 
-        // 생성 화면 — 그대로면 묻지 않고, 쓰기 시작하면 묻는다.
+        // 생성은 패널 밖 대화상자(투표 만들기처럼)라 패널이 물을 게 아니다 — 써도 패널의 "쓰는 중인 할 일"이 아니다.
         await tester.tap(_key('todo-create'));
         await tester.pumpAndSettle();
-        expect(guard!.needsConfirm(), isFalse);
-        await tester.enterText(_key('todo-title-field'), '쓰던 제목');
+        expect(find.byType(Dialog), findsOneWidget);
+        await tester.enterText(_key('todo-title-field'), '대화상자에 쓴 제목');
         await tester.pump();
-        expect(guard!.needsConfirm(), isTrue);
-        final keep = guard!.confirm();
-        await tester.pumpAndSettle();
-        expect(find.text('작성 취소'), findsOneWidget);
-        await tester.tap(find.widgetWithText(TextButton, '계속 쓰기'));
-        await tester.pumpAndSettle();
-        expect(await keep, isFalse);
-        expect(find.byType(TodoEditor), findsOneWidget);
-        expect(find.text('쓰던 제목'), findsOneWidget);
-        final leave = guard!.confirm();
-        await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(TextButton, '닫기'));
-        await tester.pumpAndSettle();
-        expect(await leave, isTrue, reason: '닫는 것은 홈 화면이 한다');
-        expect(find.byType(TodoEditor), findsOneWidget);
-        // ←로 닫으면(이 화면이 묻는다) 쓰는 중인 할 일이 없어진다.
-        await tester.tap(_key('todo-page-back'));
+        expect(guard!.needsConfirm(), isFalse);
+        await tester.tap(_key('todo-editor-close'));
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(TextButton, '닫기'));
         await tester.pumpAndSettle();
         expect(find.byType(TodoEditor), findsNothing);
-        expect(guard!.needsConfirm(), isFalse);
 
-        // 상세의 할 일 수정도 같다.
+        // 패널 안 수정 화면(상세 ••• → 할 일 수정) — 그대로면 묻지 않고, 쓰기 시작하면 묻는다.
         await tester.tap(find.text('고칠 할 일'));
         await tester.pumpAndSettle();
         await tester.tap(_key('todo-detail-menu'));
@@ -2885,8 +3023,37 @@ void main() {
         await tester.enterText(_key('todo-title-field'), '고친 제목');
         await tester.pump();
         expect(guard!.needsConfirm(), isTrue);
+        final keep = guard!.confirm();
+        await tester.pumpAndSettle();
+        expect(find.text('작성 취소'), findsOneWidget);
+        await tester.tap(find.widgetWithText(TextButton, '계속 수정'));
+        await tester.pumpAndSettle();
+        expect(await keep, isFalse);
+        expect(find.byType(TodoEditor), findsOneWidget);
+        expect(find.text('고친 제목'), findsOneWidget);
+        final leave = guard!.confirm();
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, '닫기'));
+        await tester.pumpAndSettle();
+        expect(await leave, isTrue, reason: '닫는 것은 홈 화면이 한다');
+        expect(find.byType(TodoEditor), findsOneWidget);
+        // ←로 닫으면(이 화면이 묻는다) 쓰는 중인 할 일이 없어진다(상세로 돌아간다).
+        await tester.tap(_key('todo-page-back'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, '닫기'));
+        await tester.pumpAndSettle();
+        expect(find.byType(TodoEditor), findsNothing);
+        expect(find.byType(TodoDetail), findsOneWidget);
+        expect(guard!.needsConfirm(), isFalse);
 
-        // 패널이 사라지면 거둔다.
+        // 다시 수정 화면을 열어 쓰던 채로 — 패널이 사라지면 거둔다.
+        await tester.tap(_key('todo-detail-menu'));
+        await tester.pumpAndSettle();
+        await tester.tap(_key('todo-menu-edit'));
+        await tester.pumpAndSettle();
+        await tester.enterText(_key('todo-title-field'), '또 고친 제목');
+        await tester.pump();
+        expect(guard!.needsConfirm(), isTrue);
         await tester.pumpWidget(const SizedBox());
         expect(guard, isNull);
       },

@@ -522,9 +522,15 @@ export const messages = pgTable(
     // 옛 방식(첨부를 이 행의 fileUrl 한 칸에만 담던 메시지)의 파일 소프트 삭제 시각. 새 방식 첨부는
     // message_attachments.deletedAt을 쓴다. 파일만 지우는 것이라 메시지(와 그 댓글)는 그대로 남는다.
     fileDeletedAt: timestamp('file_deleted_at', { withTimezone: true }),
+    // "앨범 공유"(albums.js POST /albums/:id/messages)로 보낸 글에 붙는 앨범 카드 — 앨범이 지워지면 album_id만
+    // 비고(카드는 "삭제된 앨범"), album_share는 공유 당시 스냅샷 { title, teamName }이다(앨범 제목을 고치면
+    // albums.js가 같이 고친다). 이 메시지가 보이는 방의 멤버는 앨범 방의 멤버가 아니어도 그 앨범을 볼 수 있다.
+    albumId: uuid('album_id').references(() => albums.id, { onDelete: 'set null' }),
+    albumShare: jsonb('album_share'),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
+    index('messages_album_id_idx').on(t.albumId),
     index('messages_sender_id_idx').on(t.senderId),
     // "내가 쓴 글 모아보기" — 보낸 사람별 최신순/과거순 스캔(방·기간 필터는 이 위에서 걸러낸다).
     index('messages_sender_created_idx').on(t.senderId, t.createdAt.desc()),
@@ -1765,6 +1771,9 @@ export const todos = pgTable(
     // 날짜 단위('YYYY-MM-DD') — 시간대와 무관하게 "그날"을 뜻한다. 시작일 없이 기한만 있어도 된다.
     startDate: date('start_date', { mode: 'string' }),
     dueDate: date('due_date', { mode: 'string' }),
+    // 그 날짜의 시각('HH:mm', 24시간 — 날짜와 같은 "그 지역의 벽시계" 값). 날짜가 있을 때만 있고, 없으면 날짜만의 기간.
+    startTime: text('start_time'),
+    dueTime: text('due_time'),
     progress: integer('progress').notNull().default(0),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     // "메시지·댓글에서 바로 할 일로 등록"한 경우의 출처 — 원본이 지워져도 할 일은 남는다(set null).

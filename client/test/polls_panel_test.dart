@@ -11,13 +11,16 @@ import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
+import 'package:client/widgets/filter_dropdown.dart';
 import 'package:client/widgets/poll_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 투표 목록 패널(PollsScreen) — 상단 만들기 단추·필터·상태/참여 칩, 서버로 가는 요청 파라미터, 카드에서 바로 투표, 무한 스크롤,
+/// 투표 목록 패널(PollsScreen) — 할 일 패널과 같은 틀(만들기 단추 · 필터 줄 — 참여한 대화방 / 참여 여부 · 작은 글씨 줄 —
+/// 마감된 투표 제외 스위치 / 정렬(생성 순 · 기한 순) · 회색 바탕의 `N개의 투표`와 흰 카드), 서버로 가는 요청 파라미터(기간 없음),
+/// 메시지 예약 패널과 같은 MenuAnchor 메뉴, 카드에서 바로 투표, 무한 스크롤,
 /// 소켓으로 바뀐 투표 반영과 "새 투표" 알림줄, 폭 360. 서버는 요청을 기록하는 가짜 HTTP 클라이언트로 대신한다.
 
 class _QuietNotifications extends NotificationService {
@@ -206,6 +209,17 @@ Future<void> _finish(WidgetTester tester) async {
 
 Finder _key(String k) => find.byKey(ValueKey(k));
 
+/// `N개의 투표` 건수 줄(숫자만 굵은 Text.rich).
+Finder _count(int n) => find.text('$n개의 투표', findRichText: true);
+
+/// 드롭다운·작은 메뉴 단추([button])를 열고 항목([item])을 고른다.
+Future<void> _pick(WidgetTester tester, String button, String item) async {
+  await tester.tap(_key(button));
+  await tester.pumpAndSettle();
+  await tester.tap(_key(item));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late _Server server;
   setUp(() {
@@ -218,138 +232,309 @@ void main() {
     );
   });
 
-  testWidgets('위에서부터 헤더 · 투표 만들기 · 필터 줄 · 상태/참여 칩 · 로딩 줄 · 카드, 기본 요청은 최신순 1년', (
-    tester,
-  ) async {
-    final session = _session(server);
-    await _pump(tester, session);
+  testWidgets(
+    '위에서부터 헤더 · 투표 만들기 · 필터 줄(대화방/참여 여부) · 마감 제외 스위치·정렬 줄 · 회색 바탕의 건수 줄 · 흰 카드, 기본 요청은 생성 순 전체 기간',
+    (tester) async {
+      final session = _session(server);
+      await _pump(tester, session);
 
-    final q = server.lastPollQuery;
-    expect(q['teamId'], 't1');
-    expect(q['order'], 'desc');
-    expect(q['limit'], '20');
-    expect(q.containsKey('status'), isFalse);
-    expect(q.containsKey('participated'), isFalse);
-    expect(q.containsKey('roomId'), isFalse);
-    expect(q.containsKey('creatorId'), isFalse);
-    // 기간 기본 1년 — since는 365일 전쯤.
-    final since = DateTime.fromMillisecondsSinceEpoch(int.parse(q['since']!));
-    expect(DateTime.now().difference(since).inDays, inInclusiveRange(364, 366));
+      final q = server.lastPollQuery;
+      expect(q['teamId'], 't1');
+      expect(q['order'], 'desc');
+      expect(q['limit'], '20');
+      expect(q.containsKey('sort'), isFalse); // 생성 순(서버 기본)
+      expect(q.containsKey('status'), isFalse);
+      expect(q.containsKey('participated'), isFalse);
+      expect(q.containsKey('roomId'), isFalse);
+      expect(q.containsKey('creatorId'), isFalse);
+      // 기간 제한 없음 — 1년 전까지만 받던 since/until을 보내지 않는다.
+      expect(q.containsKey('since'), isFalse);
+      expect(q.containsKey('until'), isFalse);
 
-    double top(Finder f) => tester.getTopLeft(f).dy;
-    final header = find.text('투표').first;
-    expect(top(header), lessThan(top(_key('polls-create'))));
-    expect(top(_key('polls-create')), lessThan(top(find.text('참여 대화방'))));
-    expect(top(find.text('참여 대화방')), lessThan(top(_key('polls-status'))));
-    expect(
-      top(_key('polls-status')),
-      lessThan(top(_key('polls-participated'))),
-    );
-    expect(
-      top(_key('polls-participated')),
-      lessThan(top(_key('panel-loaded-count'))),
-    );
-    expect(
-      top(_key('panel-loaded-count')),
-      lessThan(top(_key('polls-item-m1'))),
-    );
+      double top(Finder f) => tester.getTopLeft(f).dy;
+      final header = find.text('투표').first;
+      expect(top(header), lessThan(top(_key('polls-create'))));
+      expect(top(_key('polls-create')), lessThan(top(find.text('참여한 대화방'))));
+      // 필터 줄 한 줄: 참여한 대화방 · 그 오른쪽 참여 여부(같은 테두리 단추).
+      final filterRow = tester.getCenter(find.text('참여한 대화방')).dy;
+      expect(tester.getCenter(_key('polls-participated')).dy, filterRow);
+      expect(
+        tester.getRect(find.text('참여한 대화방')).right,
+        lessThan(tester.getRect(_key('polls-participated')).left),
+      );
+      expect(tester.widget(_key('polls-participated')), isA<OutlinedButton>());
+      expect(
+        tester.getSize(_key('polls-participated')).height,
+        tester
+            .getSize(
+              find
+                  .ancestor(
+                    of: find.text('참여한 대화방'),
+                    matching: find.byType(OutlinedButton),
+                  )
+                  .first,
+            )
+            .height,
+      );
+      // 그 아래 작은 글씨 줄: 왼쪽 마감된 투표 제외(스위치 · 글자), 오른쪽 끝 정렬.
+      expect(filterRow, lessThan(top(_key('polls-exclude-closed'))));
+      final optionRow = tester.getCenter(_key('polls-exclude-closed')).dy;
+      expect(
+        tester.getCenter(find.text('마감된 투표 제외')).dy,
+        moreOrLessEquals(optionRow, epsilon: 1),
+      );
+      expect(
+        tester.getCenter(_key('polls-sort')).dy,
+        moreOrLessEquals(optionRow, epsilon: 1),
+      );
+      expect(
+        tester.getRect(_key('polls-exclude-closed')).right,
+        lessThanOrEqualTo(tester.getRect(find.text('마감된 투표 제외')).left),
+      );
+      expect(
+        tester.getRect(find.text('마감된 투표 제외')).right,
+        lessThan(tester.getRect(_key('polls-sort')).left),
+      );
+      expect(tester.getRect(_key('polls-sort')).right, 480 - 12);
+      expect(tester.widget<Switch>(_key('polls-exclude-closed')).value, false);
+      expect(
+        top(_key('polls-exclude-closed')),
+        lessThan(top(_key('panel-loaded-count'))),
+      );
+      expect(
+        top(_key('panel-loaded-count')),
+        lessThan(top(_key('polls-item-m1'))),
+      );
 
-    // 필터 줄: 참여 대화방 · 멤버 · 기간(1년 (기본)).
-    expect(find.text('참여 대화방'), findsOneWidget);
-    expect(find.text('모든 멤버'), findsOneWidget);
-    expect(find.text('1년 (기본)'), findsOneWidget);
-    // 칩: 전체 | 진행 중 | 마감, 참여 여부: 전체 | 참여함 | 참여 안 함.
-    for (final label in ['진행 중', '마감', '참여함', '참여 안 함']) {
-      expect(find.text(label), findsOneWidget, reason: label);
-    }
-    expect(find.text('전체'), findsNWidgets(2));
-    expect(find.text('참여 여부'), findsOneWidget);
-    expect(find.text('최신순'), findsOneWidget);
-    expect(find.text('"2"개가 로딩되었습니다.'), findsOneWidget);
+      expect(find.text('참여한 대화방'), findsOneWidget);
+      expect(find.text('참여 여부'), findsOneWidget);
+      expect(find.text('생성 순'), findsOneWidget);
+      // 없어진 필터 — 작성자(모든 멤버) · 상태(전체 상태) · 기간(1년).
+      expect(find.text('모든 멤버'), findsNothing);
+      expect(find.text('전체 상태'), findsNothing);
+      expect(find.text('1년 (기본)'), findsNothing);
+      expect(find.text('최신 순'), findsNothing);
+      expect(_key('polls-status'), findsNothing);
+      expect(_key('polls-creator'), findsNothing);
+      expect(_key('polls-period'), findsNothing);
+      // 참여 여부·정렬의 항목은 펼쳐야 보인다.
+      expect(find.text('참여 안 함'), findsNothing);
+      expect(find.text('기한 순'), findsNothing);
+      expect(_count(2), findsOneWidget);
 
-    // 카드 두 장 — 방 이름 줄 + 방으로 이동 + 채팅과 같은 투표 카드.
-    expect(_key('poll-card-p1'), findsOneWidget);
-    expect(_key('poll-card-p2'), findsOneWidget);
-    expect(find.text('투표 1'), findsOneWidget);
-    expect(find.text('공지방'), findsOneWidget);
-    expect(find.text('영업방'), findsOneWidget);
-    expect(find.text('방으로 이동'), findsNWidgets(2));
-    expect(find.byType(PollCard), findsNWidgets(2));
-    expect(tester.takeException(), isNull);
-    await _finish(tester);
-  });
+      // 회색 바탕 위의 흰 둥근 카드(할 일 패널과 같은 색).
+      final scheme = Theme.of(tester.element(_key('polls-list'))).colorScheme;
+      final background = tester.widget<ColoredBox>(
+        find
+            .ancestor(
+              of: _key('panel-loaded-count'),
+              matching: find.byType(ColoredBox),
+            )
+            .first,
+      );
+      expect(background.color, scheme.surfaceContainer);
+      final card = tester.widget<Material>(_key('polls-item-m1'));
+      expect(card.color, scheme.surface);
+      expect(card.borderRadius, BorderRadius.circular(12));
 
-  testWidgets('필터를 바꿀 때마다 서버로 걸러서 다시 받는다 — 상태 · 참여 여부 · 정렬 · 방 · 작성자 · 기간', (
+      // 카드 두 장 — 방 이름 줄 + 방으로 이동 + 채팅과 같은 투표 카드.
+      expect(_key('poll-card-p1'), findsOneWidget);
+      expect(_key('poll-card-p2'), findsOneWidget);
+      expect(find.text('투표 1'), findsOneWidget);
+      expect(find.text('공지방'), findsOneWidget);
+      expect(find.text('영업방'), findsOneWidget);
+      expect(find.text('방으로 이동'), findsNWidgets(2));
+      expect(find.byType(PollCard), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    },
+  );
+
+  testWidgets(
+    '참여 여부 드롭다운 — 메시지 예약 패널 정렬과 같은 MenuAnchor 메뉴(애니메이션 없이 바로 뜬다), 고르면 단추 글자가 바뀌고 서버로 거른다',
+    (tester) async {
+      final session = _session(server);
+      await _pump(tester, session);
+      final before = server.called('GET', '/api/polls').length;
+
+      await tester.tap(_key('polls-participated'));
+      await tester.pump(); // 한 프레임 만에 다 떠 있다.
+      expect(find.byType(MenuItemButton), findsNWidgets(3));
+      for (final p in ['all', 'yes', 'no']) {
+        expect(_key('polls-participated-$p'), findsOneWidget, reason: p);
+      }
+      for (final label in ['전체', '참여함', '참여 안 함']) {
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+      expect(
+        find.descendant(
+          of: _key('polls-participated-all'),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+      // 메뉴는 단추 바로 아래.
+      expect(
+        tester.getTopLeft(_key('polls-participated-all')).dy,
+        greaterThan(tester.getRect(_key('polls-participated')).bottom),
+      );
+
+      await tester.tap(_key('polls-participated-no'));
+      await tester.pumpAndSettle();
+      expect(_key('polls-participated-no'), findsNothing); // 닫혔다.
+      expect(
+        find.descendant(
+          of: _key('polls-participated'),
+          matching: find.text('참여 안 함'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('참여 여부'), findsNothing);
+      expect(server.called('GET', '/api/polls'), hasLength(before + 1));
+      expect(server.lastPollQuery['participated'], 'no');
+
+      await _pick(tester, 'polls-participated', 'polls-participated-yes');
+      expect(server.lastPollQuery['participated'], 'yes');
+
+      // 같은 것을 다시 고르면 다시 받지 않는다.
+      final count = server.called('GET', '/api/polls').length;
+      await _pick(tester, 'polls-participated', 'polls-participated-yes');
+      expect(server.called('GET', '/api/polls'), hasLength(count));
+
+      await _pick(tester, 'polls-participated', 'polls-participated-all');
+      expect(server.lastPollQuery.containsKey('participated'), isFalse);
+      expect(find.text('참여 여부'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    },
+  );
+
+  testWidgets('마감된 투표 제외 — 스위치나 글자를 누르면 켜고 끈다, 켜면 진행 중(status=open)만 받는다', (
     tester,
   ) async {
     final session = _session(server);
     await _pump(tester, session);
     final before = server.called('GET', '/api/polls').length;
 
-    await tester.tap(_key('polls-status-closed'));
+    await tester.tap(_key('polls-exclude-closed'));
     await tester.pumpAndSettle();
-    expect(server.called('GET', '/api/polls').length, before + 1);
-    expect(server.lastPollQuery['status'], 'closed');
-
-    await tester.tap(_key('polls-status-open'));
-    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(_key('polls-exclude-closed')).value, true);
+    expect(server.called('GET', '/api/polls'), hasLength(before + 1));
     expect(server.lastPollQuery['status'], 'open');
 
-    await tester.tap(_key('polls-participated-yes'));
-    await tester.pumpAndSettle();
-    expect(server.lastPollQuery['participated'], 'yes');
-    expect(server.lastPollQuery['status'], 'open'); // 조합이 유지된다.
-
-    await tester.tap(_key('polls-participated-no'));
-    await tester.pumpAndSettle();
+    // 다른 필터와 함께 걸린다.
+    await _pick(tester, 'polls-participated', 'polls-participated-no');
+    expect(server.lastPollQuery['status'], 'open');
     expect(server.lastPollQuery['participated'], 'no');
 
-    await tester.tap(_key('polls-participated-all'));
-    await tester.tap(_key('polls-status-all'));
+    // 글자를 눌러도 끈다.
+    await tester.tap(find.text('마감된 투표 제외'));
     await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(_key('polls-exclude-closed')).value, false);
     expect(server.lastPollQuery.containsKey('status'), isFalse);
-    expect(server.lastPollQuery.containsKey('participated'), isFalse);
+    expect(server.lastPollQuery['participated'], 'no');
+    expect(server.called('GET', '/api/polls'), hasLength(before + 3));
+    expect(tester.takeException(), isNull);
+    await _finish(tester);
+  });
 
-    // 정렬 — 과거순.
-    await tester.tap(_key('panel-sort'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('과거순').last);
-    await tester.pumpAndSettle();
-    expect(server.lastPollQuery['order'], 'asc');
+  testWidgets(
+    '정렬 생성 순 / 기한 순 — 메시지 예약 패널과 같은 MenuAnchor 메뉴, 기한 순이면 sort=deadline으로 다시 받는다',
+    (tester) async {
+      final session = _session(server);
+      await _pump(tester, session);
+      final before = server.called('GET', '/api/polls').length;
 
-    // 참여 대화방.
-    await tester.tap(find.text('참여 대화방'));
+      await tester.tap(_key('polls-sort'));
+      await tester.pump(); // 한 프레임 만에 다 떠 있다.
+      expect(find.byType(MenuItemButton), findsNWidgets(2));
+      expect(_key('polls-sort-created'), findsOneWidget);
+      expect(_key('polls-sort-deadline'), findsOneWidget);
+      expect(find.text('기한 순'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: _key('polls-sort-created'),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
+      // 메뉴는 화면 안에 있다(오른쪽 끝 단추).
+      expect(
+        tester.getRect(_key('polls-sort-deadline')).right,
+        lessThanOrEqualTo(480),
+      );
+
+      await tester.tap(_key('polls-sort-deadline'));
+      await tester.pumpAndSettle();
+      expect(_key('polls-sort-deadline'), findsNothing); // 닫혔다.
+      expect(server.called('GET', '/api/polls'), hasLength(before + 1));
+      expect(server.lastPollQuery['sort'], 'deadline');
+      expect(
+        find.descendant(of: _key('polls-sort'), matching: find.text('기한 순')),
+        findsOneWidget,
+      );
+
+      // 마감 제외와 함께.
+      await tester.tap(_key('polls-exclude-closed'));
+      await tester.pumpAndSettle();
+      expect(server.lastPollQuery['sort'], 'deadline');
+      expect(server.lastPollQuery['status'], 'open');
+
+      // 같은 것을 다시 고르면 다시 받지 않는다.
+      final count = server.called('GET', '/api/polls').length;
+      await _pick(tester, 'polls-sort', 'polls-sort-deadline');
+      expect(server.called('GET', '/api/polls'), hasLength(count));
+
+      await _pick(tester, 'polls-sort', 'polls-sort-created');
+      expect(server.lastPollQuery.containsKey('sort'), isFalse);
+      expect(server.lastPollQuery['order'], 'desc');
+      expect(find.text('생성 순'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    },
+  );
+
+  for (final width in [420.0, 360.0]) {
+    testWidgets(
+      '폭 ${width.toInt()} — 참여한 대화방·참여 여부 단추는 할 일 패널처럼 같은 폭으로 나뉜다(고른 뒤에도)',
+      (tester) async {
+        final session = _session(server);
+        await _pump(tester, session, size: Size(width, 900));
+        Rect room() => tester.getRect(
+          find
+              .ancestor(
+                of: find.text('참여한 대화방'),
+                matching: find.byType(OutlinedButton),
+              )
+              .first,
+        );
+        Rect part() => tester.getRect(_key('polls-participated'));
+        expect(part().width, closeTo(room().width, 0.5));
+        expect(part().top, closeTo(room().top, 0.5));
+        expect(part().left - room().right, closeTo(8, 0.5));
+        await _pick(tester, 'polls-participated', 'polls-participated-no');
+        expect(part().width, closeTo(room().width, 0.5));
+        expect(tester.takeException(), isNull);
+        await _finish(tester);
+      },
+    );
+  }
+
+  testWidgets('참여한 대화방을 고르면 그 방만 받고, 다른 필터·정렬은 유지한다', (tester) async {
+    final session = _session(server);
+    await _pump(tester, session);
+    await _pick(tester, 'polls-sort', 'polls-sort-deadline');
+    await _pick(tester, 'polls-participated', 'polls-participated-yes');
+
+    await tester.tap(find.text('참여한 대화방'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('영업방').last);
     await tester.pumpAndSettle();
-    expect(server.lastPollQuery['roomId'], 'r2');
-
-    // 작성자(멤버).
-    await tester.tap(find.text('모든 멤버'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('김철수').last);
-    await tester.pumpAndSettle();
-    expect(server.lastPollQuery['creatorId'], 'u2');
-    expect(server.lastPollQuery['roomId'], 'r2');
-    expect(server.lastPollQuery['order'], 'asc');
-
-    // 기간 — 1주일.
-    await tester.tap(find.text('1년 (기본)'));
-    await tester.pumpAndSettle();
-    await tester.tap(_key('period-week'));
-    await tester.pumpAndSettle();
-    final since = DateTime.fromMillisecondsSinceEpoch(
-      int.parse(server.lastPollQuery['since']!),
-    );
-    expect(DateTime.now().difference(since).inDays, inInclusiveRange(6, 8));
-
-    // 방을 다시 바꾸면 이전 방 기준으로 골랐던 작성자는 풀린다.
-    await tester.tap(find.text('영업방').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('공지방').last);
-    await tester.pumpAndSettle();
-    expect(server.lastPollQuery['roomId'], 'r1');
-    expect(server.lastPollQuery.containsKey('creatorId'), isFalse);
+    final q = server.lastPollQuery;
+    expect(q['roomId'], 'r2');
+    expect(q['sort'], 'deadline');
+    expect(q['participated'], 'yes');
+    expect(q.containsKey('since'), isFalse);
     expect(tester.takeException(), isNull);
     await _finish(tester);
   });
@@ -414,18 +599,20 @@ void main() {
     });
     final session = _session(server);
     await _pump(tester, session, size: const Size(480, 700));
-    expect(find.text('"22"개가 로딩되었습니다.'), findsOneWidget);
+    // 건수는 받은 20장이 아니라 서버가 센 전체 개수.
+    expect(_count(22), findsOneWidget);
     expect(server.called('GET', '/api/polls'), hasLength(1));
 
-    await tester.tap(_key('polls-status-open'));
+    await tester.tap(_key('polls-exclude-closed'));
     await tester.pumpAndSettle();
-    expect(server.called('GET', '/api/polls'), hasLength(2));
+    await _pick(tester, 'polls-sort', 'polls-sort-deadline');
+    expect(server.called('GET', '/api/polls'), hasLength(3));
 
     final list = _key('polls-list');
     for (var i = 0; i < 40; i++) {
       await tester.drag(list, const Offset(0, -1500));
       await tester.pumpAndSettle();
-      if (server.called('GET', '/api/polls').length > 2) break;
+      if (server.called('GET', '/api/polls').length > 3) break;
     }
     final more = server
         .called('GET', '/api/polls')
@@ -433,6 +620,7 @@ void main() {
         .toList();
     expect(more, isNotEmpty);
     expect(more.first.url.queryParameters['status'], 'open');
+    expect(more.first.url.queryParameters['sort'], 'deadline');
     // 이어 붙었다 — 22번째 카드까지 있고 더 보기는 없다.
     await tester.drag(list, const Offset(0, -20000));
     await tester.pumpAndSettle();
@@ -621,12 +809,14 @@ void main() {
     final session = _session(server);
     await _pump(tester, session);
     expect(_key('polls-empty'), findsOneWidget);
-    expect(find.textContaining('등록된 투표가 없습니다'), findsOneWidget);
-    expect(find.text('"0"개가 로딩되었습니다.'), findsOneWidget);
+    expect(find.text('등록된 투표가 없습니다.'), findsOneWidget);
+    expect(find.textContaining('투표 만들기'), findsNWidgets(2)); // 단추 + 안내
+    expect(_count(0), findsOneWidget);
 
-    await tester.tap(_key('polls-status-closed'));
+    await tester.tap(_key('polls-exclude-closed'));
     await tester.pumpAndSettle();
     expect(find.text('조건에 맞는 투표가 없습니다.'), findsOneWidget);
+    expect(find.text('등록된 투표가 없습니다.'), findsNothing);
 
     var fail = true;
     server.on('GET', '/api/polls', (_) {
@@ -634,43 +824,93 @@ void main() {
           ? _json({'error': '서버가 바쁩니다.'}, 500)
           : _json(_page([_item('1')]));
     });
-    await tester.tap(_key('polls-status-open'));
-    await tester.pumpAndSettle();
+    await _pick(tester, 'polls-participated', 'polls-participated-yes');
     expect(_key('polls-error'), findsOneWidget);
     fail = false;
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
     expect(_key('polls-item-m1'), findsOneWidget);
+    expect(_count(1), findsOneWidget);
     await _finish(tester);
   });
 
-  testWidgets('폭 360 — 넘치지 않고 필터 줄 · 칩 · 카드가 모두 화면 안에 있다', (tester) async {
+  testWidgets('받기 전에는 건수 자리에 같은 높이의 빈 줄만 둔다', (tester) async {
+    final gate = Completer<void>();
+    server.on('GET', '/api/polls', (_) async {
+      await gate.future;
+      return _json(_page([_item('1')]));
+    });
     final session = _session(server);
-    await _pump(tester, session, size: const Size(360, 780));
-    expect(tester.takeException(), isNull);
-    for (final f in [
-      _key('polls-create'),
-      find.text('참여 대화방'),
-      find.text('모든 멤버'),
-      find.text('1년 (기본)'),
-      find.text('진행 중'),
-      find.text('최신순'),
-      find.text('참여 안 함'),
-      _key('polls-item-m1'),
-    ]) {
-      final rect = tester.getRect(f);
-      expect(rect.left, greaterThanOrEqualTo(0), reason: '$f');
-      expect(rect.right, lessThanOrEqualTo(360), reason: '$f');
-    }
-    // 만들기 단추는 폭을 가득 채운다(좌우 여백 16).
-    final create = tester.getRect(_key('polls-create'));
-    expect(create.left, 16);
-    expect(create.right, 344);
-
-    // 필터를 걸어도 넘치지 않는다.
-    await tester.tap(_key('polls-participated-no'));
+    _size(tester, const Size(480, 1000));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PollsScreen(session: session)),
+      ),
+    );
+    await tester.pump();
+    expect(_key('panel-count-pending'), findsOneWidget);
+    expect(_key('panel-loaded-count'), findsNothing);
+    final pendingHeight = tester.getSize(_key('panel-count-pending')).height;
+    gate.complete();
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
+    expect(_count(1), findsOneWidget);
+    expect(_key('panel-count-pending'), findsNothing);
+    expect(tester.getSize(_key('panel-loaded-count')).height, pendingHeight);
     await _finish(tester);
   });
+
+  for (final width in [360.0, 390.0]) {
+    testWidgets(
+      '폭 ${width.toInt()} — 넘치지 않고 만들기 · 필터 줄 · 작은 글씨 줄 · 카드가 모두 화면 안에 있다',
+      (tester) async {
+        final session = _session(server);
+        await _pump(tester, session, size: Size(width, 780));
+        expect(tester.takeException(), isNull);
+        void inside() {
+          for (final f in [
+            _key('polls-create'),
+            find
+                .descendant(
+                  of: find.byType(RoomFilterButton),
+                  matching: find.byType(OutlinedButton),
+                )
+                .first,
+            _key('polls-participated'),
+            _key('polls-exclude-closed'),
+            find.text('마감된 투표 제외'),
+            _key('polls-sort'),
+            _key('polls-item-m1'),
+          ]) {
+            final rect = tester.getRect(f);
+            expect(rect.left, greaterThanOrEqualTo(0), reason: '$f');
+            expect(rect.right, lessThanOrEqualTo(width), reason: '$f');
+          }
+        }
+
+        inside();
+        // 만들기 단추는 폭을 가득 채운다(좌우 여백 16).
+        final create = tester.getRect(_key('polls-create'));
+        expect(create.left, 16);
+        expect(create.right, width - 16);
+        // 필터 줄 두 칸도 좌우 여백 16 안에 꽉 찬다.
+        expect(
+          tester.getRect(_key('polls-participated')).right,
+          moreOrLessEquals(width - 16, epsilon: 0.5),
+        );
+
+        // 필터를 걸어 글자가 길어져도 넘치지 않는다.
+        await _pick(tester, 'polls-participated', 'polls-participated-no');
+        await _pick(tester, 'polls-sort', 'polls-sort-deadline');
+        await tester.tap(_key('polls-exclude-closed'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('참여한 대화방'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('영업방').last);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        inside();
+        await _finish(tester);
+      },
+    );
+  }
 }

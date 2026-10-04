@@ -17,7 +17,7 @@ import '../widgets/attachment_widgets.dart' show formatFileSize;
 import '../widgets/room_picker_field.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
-import 'schedule_message_dialog.dart' show SchedulePicker;
+import 'schedule_message_dialog.dart' show ScheduleDateTimeField;
 
 /// 투표를 만들 수 있는 방인지 — 비밀 대화에서는 못 만든다(서버가 400으로 막는다). 읽기 전용·보관된
 /// 토픽은 토픽 관리자만 글을 쓸 수 있으니 투표도 같다. 입력칸 옆 "투표" 단추와 보드의 단추가 같이 쓴다.
@@ -650,7 +650,7 @@ class PollCreatorState extends State<PollCreator> {
         ),
       const SizedBox(height: 8),
       const _SectionLabel('마감 시각'),
-      SchedulePicker(
+      ScheduleDateTimeField(
         value: _closesAt,
         enabled: !_submitting,
         onChanged: (v) => setState(() {

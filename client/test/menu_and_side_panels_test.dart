@@ -25,12 +25,15 @@ import 'package:client/widgets/menu_entries.dart';
 import 'package:client/widgets/notifications_panel.dart';
 import 'package:client/widgets/side_panels.dart';
 import 'package:client/widgets/team_members_panel.dart';
+import 'package:client/widgets/todo_widgets.dart' show TodoViewMode;
 import 'package:client/widgets/todos_panel.dart';
 import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+
+import 'helpers/fake_todo_api.dart' show todoJson;
 
 /// 메뉴 재구성(생성 · 리스트 · 툴 세 묶음, 등록 목록으로 항목을 더하는 구조)과 오른쪽 패널 인프라
 /// (패널 하나만 열리고 서로 교체, 등록 목록으로 패널을 더하는 구조, 모바일은 전체 화면), 그리고 캘린더·프로젝트
@@ -49,7 +52,12 @@ http.Response _json(Object? body) => http.Response.bytes(
 
 final _requests = <http.Request>[];
 
-Session _session({AccountRole role = AccountRole.member, List<Room>? rooms}) {
+/// [todos]는 할 일 목록(`GET /api/todos`)이 돌려줄 DTO들 — 한 건 조회(`GET /api/todos/:id`)도 이 중에서 준다.
+Session _session({
+  AccountRole role = AccountRole.member,
+  List<Room>? rooms,
+  List<Map<String, dynamic>> todos = const [],
+}) {
   _requests.clear();
   final client = MockClient((request) async {
     _requests.add(request);
@@ -63,7 +71,12 @@ Session _session({AccountRole role = AccountRole.member, List<Room>? rooms}) {
       return _json({'items': <Object>[], 'hasMore': false});
     }
     if (request.url.path == '/api/todos') {
-      return _json({'items': <Object>[], 'hasMore': false, 'total': 0});
+      return _json({'items': todos, 'hasMore': false, 'total': todos.length});
+    }
+    if (request.url.path.startsWith('/api/todos/')) {
+      final id = request.url.pathSegments.last;
+      final todo = todos.where((t) => t['id'] == id).firstOrNull;
+      if (todo != null) return _json(todo);
     }
     return _json(<Object>[]);
   });
@@ -362,13 +375,14 @@ void main() {
       added.clear();
     });
 
-    test('기본으로 검색·파일·링크·앨범·할 일·즐겨찾기·투표·내가 쓴 글·북마크·알림 센터·멤버가 등록돼 있다', () {
+    test('기본으로 검색·파일·링크·앨범·할 일·메시지 예약·즐겨찾기·투표·내가 쓴 글·북마크·알림 센터·멤버가 등록돼 있다', () {
       expect(sidePanelSpecs.map((s) => s.key), [
         'search',
         'files',
         'links',
         'albums',
         'todos',
+        'scheduled',
         'favorites',
         'polls',
         'myposts',
@@ -639,15 +653,42 @@ void main() {
     });
   });
 
-  // 할 일 패널 안 생성·수정 화면은 홈 화면이 패널을 밖에서 닫거나 바꾸기 전에(같은 메뉴 타일·다른 패널·댓글·대화창 분할)
-  // 쓰던 내용을 묻는다 — 패널 자신의 ✕는 그 화면이 이미 물으니 한 번만.
+  // 할 일 패널 안 수정 화면(상세 ••• → 할 일 수정)은 홈 화면이 패널을 밖에서 닫거나 바꾸기 전에(같은 메뉴 타일·다른
+  // 패널·댓글·대화창 분할) 쓰던 내용을 묻는다 — 패널 자신의 ✕는 그 화면이 이미 물으니 한 번만. 생성은 투표 만들기처럼 패널
+  // 밖 대화상자라 여기에 들지 않는다(todo_panel_test.dart).
   group('PC 홈 화면 — 할 일 패널 안에서 쓰던 할 일', () {
-    Future<void> openTodoEditor(WidgetTester tester) async {
-      await _openMenuTile(tester, 'todos');
+    /// 공지방(r1)의 고칠 할 일 한 건이 있는 세션.
+    Session todoSession({List<Room>? rooms}) => _session(
+      rooms: rooms ?? [_topic('r1', '공지방')],
+      todos: [
+        todoJson(
+          id: 'a',
+          roomId: 'r1',
+          roomName: '공지방',
+          title: '고칠 할 일',
+          assignees: ['me'],
+        ),
+      ],
+    );
+
+    /// 할 일 패널을 열고([openPanel]) 그 할 일의 상세 → ••• → 할 일 수정 — 패널 안 수정 화면.
+    Future<void> openTodoEditor(
+      WidgetTester tester, {
+      bool openPanel = true,
+    }) async {
+      if (openPanel) await _openMenuTile(tester, 'todos');
       expect(find.byType(TodosPanel), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('todo-create')));
+      await tester.tap(find.text('고칠 할 일'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('todo-detail-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('todo-menu-edit')));
       await tester.pumpAndSettle();
       expect(find.byType(TodoEditor), findsOneWidget);
+      expect(
+        tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+        TodoViewMode.panel,
+      );
     }
 
     Future<void> write(WidgetTester tester) async {
@@ -667,21 +708,21 @@ void main() {
     }
 
     testWidgets(
-      '같은 메뉴 타일로 닫거나 다른 패널(상단 검색)로 바꾸면 먼저 묻는다 — [계속 쓰기]면 그대로, [닫기]면 진행',
+      '같은 메뉴 타일로 닫거나 다른 패널(상단 검색)로 바꾸면 먼저 묻는다 — [계속 수정]이면 그대로, [닫기]면 진행',
       (tester) async {
-        final session = _session(rooms: [_topic('r1', '공지방')]);
+        final session = todoSession();
         await _pumpDesktop(tester, session);
         await openTodoEditor(tester);
         await write(tester);
 
         await _openMenuTile(tester, 'todos');
-        await answer(tester, '계속 쓰기');
+        await answer(tester, '계속 수정');
         expect(find.byType(TodoEditor), findsOneWidget);
         expect(find.text('쓰던 할 일'), findsOneWidget);
 
         await tester.tap(find.byTooltip('검색'));
         await tester.pumpAndSettle();
-        await answer(tester, '계속 쓰기');
+        await answer(tester, '계속 수정');
         expect(find.byType(SearchScreen), findsNothing);
         expect(find.text('쓰던 할 일'), findsOneWidget);
 
@@ -703,8 +744,8 @@ void main() {
       },
     );
 
-    testWidgets('쓰던 게 없으면(열기만 한 생성 화면) 묻지 않고 바로 바꾸거나 닫는다', (tester) async {
-      final session = _session(rooms: [_topic('r1', '공지방')]);
+    testWidgets('쓰던 게 없으면(열기만 한 수정 화면) 묻지 않고 바로 바꾸거나 닫는다', (tester) async {
+      final session = todoSession();
       await _pumpDesktop(tester, session);
       await openTodoEditor(tester);
       await tester.tap(find.byTooltip('검색'));
@@ -714,16 +755,43 @@ void main() {
       expect(find.byType(TodosPanel), findsNothing);
 
       await _openMenuTile(tester, 'todos');
-      await tester.tap(find.byKey(const ValueKey('todo-create')));
-      await tester.pumpAndSettle();
+      await openTodoEditor(tester, openPanel: false);
       await _openMenuTile(tester, 'todos');
       expect(find.text('작성 취소'), findsNothing);
       expect(find.byType(TodosPanel), findsNothing);
       await _finish(tester);
     });
 
-    testWidgets('생성 화면의 ✕(패널 닫기)는 한 번만 묻는다 — 홈 화면은 다시 묻지 않는다', (tester) async {
-      final session = _session(rooms: [_topic('r1', '공지방')]);
+    testWidgets('생성 대화상자는 패널 밖이라 홈 화면이 묻지 않는다 — 대화상자는 제 ✕·취소로만 닫힌다', (
+      tester,
+    ) async {
+      final session = todoSession();
+      await _pumpDesktop(tester, session);
+      await _openMenuTile(tester, 'todos');
+      await tester.tap(find.byKey(const ValueKey('todo-create')));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+        TodoViewMode.dialog,
+      );
+      expect(find.byType(Dialog), findsOneWidget);
+      await write(tester);
+      // 대화상자의 ✕ — 이 화면이 한 번 묻는다.
+      await tester.tap(find.byKey(const ValueKey('todo-editor-close')));
+      await tester.pumpAndSettle();
+      await answer(tester, '닫기');
+      expect(find.byType(TodoEditor), findsNothing);
+      expect(find.byType(TodosPanel), findsOneWidget, reason: '패널은 그대로');
+      // 쓰던 할 일이 패널에 없으니 같은 타일로 닫을 때 묻지 않는다.
+      await _openMenuTile(tester, 'todos');
+      expect(find.text('작성 취소'), findsNothing);
+      expect(find.byType(TodosPanel), findsNothing);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+
+    testWidgets('수정 화면의 ✕(패널 닫기)는 한 번만 묻는다 — 홈 화면은 다시 묻지 않는다', (tester) async {
+      final session = todoSession();
       await _pumpDesktop(tester, session);
       await openTodoEditor(tester);
       await write(tester);
@@ -736,7 +804,7 @@ void main() {
     });
 
     testWidgets('메시지의 댓글을 열면(오른쪽 칸을 댓글로 바꿈) 먼저 묻는다', (tester) async {
-      final session = _session(rooms: [_topic('r1', '공지방')]);
+      final session = todoSession();
       await _pumpDesktop(tester, session);
       session.requestOpenRoom(session.roomById('r1')!);
       await tester.pumpAndSettle();
@@ -758,7 +826,7 @@ void main() {
 
       openThread();
       await tester.pumpAndSettle();
-      await answer(tester, '계속 쓰기');
+      await answer(tester, '계속 수정');
       expect(find.byType(MessageThreadScreen), findsNothing);
       expect(find.text('쓰던 할 일'), findsOneWidget);
 
@@ -775,7 +843,7 @@ void main() {
     });
 
     testWidgets('방 목록 우클릭의 "대화창 분할하기"도 먼저 묻는다', (tester) async {
-      final session = _session(
+      final session = todoSession(
         rooms: [_topic('r1', '공지방'), _topic('r2', '개발방')],
       );
       await _pumpDesktop(tester, session);
@@ -797,7 +865,7 @@ void main() {
       }
 
       await split();
-      await answer(tester, '계속 쓰기');
+      await answer(tester, '계속 수정');
       expect(find.byType(ChatPanel), findsOneWidget, reason: '분할하지 않았다');
       expect(find.text('쓰던 할 일'), findsOneWidget);
 

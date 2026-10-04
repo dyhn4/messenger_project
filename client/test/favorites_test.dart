@@ -22,7 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 통합 즐겨찾기 — 모델 파싱, 컨트롤러(담은 id·쪽 나누기·소켓 동기화), 즐겨찾기 패널(탭·이동·해제·빈 상태·필터·검색·정렬·폭 360),
+/// 통합 즐겨찾기 — 모델 파싱, 컨트롤러(담은 id·쪽 나누기·소켓 동기화), 즐겨찾기 패널(종류 드롭다운·이동·해제·빈 상태·필터·검색·정렬·폭 360),
 /// 메뉴 타일, 메시지·댓글 메뉴의 "즐겨찾기". 서버는 요청을 기록하는 가짜 HTTP 클라이언트로 대신한다.
 
 class _QuietNotifications extends NotificationService {
@@ -257,20 +257,11 @@ void _serveFavorites(
   });
 }
 
-/// 종류 탭을 누른다 — 탭 줄은 가로 스크롤이라 화면 밖의 탭은 먼저 밀어서 보이게 한다.
+/// 종류를 고른다 — 정렬 줄 왼쪽 끝의 종류 드롭다운을 열고 그 항목을 누른다.
 Future<void> _tapTab(WidgetTester tester, String name) async {
-  final tab = find.byKey(ValueKey('favorites-tab-$name'));
-  await tester.scrollUntilVisible(
-    tab,
-    80,
-    scrollable: find.descendant(
-      of: find.byKey(const ValueKey('favorites-tabs')),
-      matching: find.byType(Scrollable),
-    ),
-  );
-  await tester.ensureVisible(tab); // 캐시 범위에 만들어져 있어도 화면 밖일 수 있다
+  await tester.tap(find.byKey(const ValueKey('favorites-kind')));
   await tester.pumpAndSettle();
-  await tester.tap(tab);
+  await tester.tap(find.byKey(ValueKey('favorites-tab-$name')));
   await tester.pumpAndSettle();
 }
 
@@ -596,7 +587,9 @@ void main() {
   });
 
   group('즐겨찾기 화면', () {
-    testWidgets('전체 탭 — 모든 종류가 한 목록에, 종류별 탭으로 다시 받는다', (tester) async {
+    testWidgets('전체 — 모든 종류가 한 목록에, 종류 드롭다운으로 고르면 그 종류만 다시 받는다', (
+      tester,
+    ) async {
       final server = _Server();
       _serveFavorites(server, {
         null: [
@@ -613,25 +606,29 @@ void main() {
       final session = _session(server);
       await _openScreen(tester, session);
 
-      // 머리글과 탭 일곱 개.
+      // 머리글과 종류 드롭다운(처음엔 '전체') — 열면 종류 일곱 개가 뜨고 지금 것('전체')에만 체크가 있다.
       expect(find.text('즐겨찾기'), findsWidgets);
-      // 탭 줄은 가로로 스크롤되어 끝 탭은 밀어야 보인다 — 오른쪽 끝까지 밀며 일곱 개를 다 확인한다.
-      final tabs = find.byKey(const ValueKey('favorites-tabs'));
-      final seen = <String>{};
-      for (var i = 0; i < 6; i++) {
-        for (final label in ['전체', '메시지', '파일', '댓글', '투표', '대화방', '멤버']) {
-          if (find
-              .descendant(of: tabs, matching: find.text(label))
-              .evaluate()
-              .isNotEmpty) {
-            seen.add(label);
-          }
-        }
-        await tester.drag(tabs, const Offset(-150, 0));
-        await tester.pumpAndSettle();
+      final kindButton = find.byKey(const ValueKey('favorites-kind'));
+      expect(
+        find.descendant(of: kindButton, matching: find.text('전체')),
+        findsOneWidget,
+      );
+      await tester.tap(kindButton);
+      await tester.pumpAndSettle();
+      final names = ['all', ...FavoriteKind.values.map((k) => k.name)];
+      final labels = ['전체', '메시지', '파일', '댓글', '투표', '대화방', '멤버'];
+      for (final (i, name) in names.indexed) {
+        final item = find.byKey(ValueKey('favorites-tab-$name'));
+        expect(
+          find.descendant(of: item, matching: find.text(labels[i])),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: item, matching: find.byIcon(Icons.check)),
+          i == 0 ? findsOneWidget : findsNothing,
+        );
       }
-      expect(seen, {'전체', '메시지', '파일', '댓글', '투표', '대화방', '멤버'});
-      await tester.drag(tabs, const Offset(2000, 0)); // 다시 맨 앞으로
+      await tester.tapAt(const Offset(5, 5)); // 메뉴 닫기
       await tester.pumpAndSettle();
       final all = server.called('GET', '/api/favorites').single;
       expect(all.url.queryParameters['teamId'], 't1');
@@ -656,6 +653,14 @@ void main() {
       await _tapTab(tester, 'member');
       expect(find.text('김철수'), findsOneWidget);
       expect(find.text('개발팀 · 팀장'), findsOneWidget);
+      // 단추 글자가 고른 종류로 바뀐다.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('favorites-kind')),
+          matching: find.text('멤버'),
+        ),
+        findsOneWidget,
+      );
       await tester.pump(const Duration(seconds: 3));
     });
 
@@ -867,7 +872,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
-    testWidgets('폭 360 — 전체 화면으로 열리고 탭이 가로로 스크롤되며 넘침이 없다', (tester) async {
+    testWidgets('폭 360 — 전체 화면으로 열리고 종류 드롭다운이 넘침 없이 들어간다', (tester) async {
       final server = _Server();
       _serveFavorites(server, {
         null: [
@@ -890,12 +895,9 @@ void main() {
       expect(find.text('모든 멤버'), findsOneWidget);
       expect(find.text('1년 (기본)'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      // 탭 일곱 개가 한 화면에 다 안 들어가므로 끝 탭은 스크롤해야 보인다.
-      final tabs = find.byKey(const ValueKey('favorites-tabs'));
-      expect(tabs, findsOneWidget);
+      // 종류는 단추 하나 — 열기 전에는 항목이 없고, 열어서 끝 종류(멤버)까지 고를 수 있다.
+      expect(find.byKey(const ValueKey('favorites-kind')), findsOneWidget);
       expect(find.byKey(const ValueKey('favorites-tab-member')), findsNothing);
-      await tester.drag(tabs, const Offset(-400, 0));
-      await tester.pumpAndSettle();
       await _tapTab(tester, 'member');
       expect(tester.takeException(), isNull);
       // 닫으면(X) 전체 화면 라우트가 걷힌다.
@@ -940,7 +942,7 @@ void main() {
     });
   });
 
-  group('즐겨찾기 패널 상단 — 필터 · 종류 탭 · 검색 · 정렬', () {
+  group('즐겨찾기 패널 상단 — 필터 · 종류 드롭다운 · 검색 · 정렬', () {
     Future<void> typeQuery(WidgetTester tester, String text) async {
       await tester.enterText(
         find.byKey(const ValueKey('panel-search-field')),
@@ -963,7 +965,7 @@ void main() {
         .widget<Text>(find.byKey(const ValueKey('panel-loaded-count')))
         .data!;
 
-    testWidgets('파일 패널과 같은 구조 — 검색칸 · 필터 줄 · 종류 탭 · 정렬 · "N개가 로딩되었습니다."', (
+    testWidgets('파일 패널과 같은 구조 — 검색칸 · 필터 줄 · 종류 드롭다운 · 정렬 · "N개가 로딩되었습니다."', (
       tester,
     ) async {
       final server = _Server();
@@ -979,16 +981,33 @@ void main() {
       expect(find.byKey(const ValueKey('panel-sort')), findsOneWidget);
       expect(find.text('최신순'), findsOneWidget);
       expect(loaded(tester), '"6"개가 로딩되었습니다.');
-      // 위에서 아래로: 검색칸 → 필터 줄 → 종류 탭 → 건수 줄 → 목록.
+      // 위에서 아래로: 검색칸 → 필터 줄 → 종류 드롭다운·정렬 → 건수 줄 → 목록.
       double top(Finder f) => tester.getTopLeft(f).dy;
+      final kind = find.byKey(const ValueKey('favorites-kind'));
+      final sort = find.byKey(const ValueKey('panel-sort'));
       final order = [
         top(find.byKey(const ValueKey('panel-search-field'))),
         top(find.text('참여 대화방')),
-        top(find.byKey(const ValueKey('favorites-tabs'))),
+        top(kind),
         top(find.byKey(const ValueKey('panel-loaded-count'))),
         top(find.byKey(const ValueKey('favorite-message:m1'))),
       ];
       expect(order, [...order]..sort());
+      // 종류 드롭다운은 정렬 단추와 같은 줄의 왼쪽 끝(필터 줄 왼쪽 끝에 맞춤), 정렬은 오른쪽 끝이고 글자 크기가 같다.
+      expect(tester.getCenter(kind).dy, tester.getCenter(sort).dy);
+      expect(
+        tester.getTopLeft(kind).dx,
+        tester.getTopLeft(find.byKey(const ValueKey('panel-search-field'))).dx,
+      );
+      expect(tester.getTopLeft(kind).dx, lessThan(tester.getTopLeft(sort).dx));
+      final kindText = tester.widget<Text>(
+        find.descendant(of: kind, matching: find.text('전체')),
+      );
+      final sortText = tester.widget<Text>(
+        find.descendant(of: sort, matching: find.text('최신순')),
+      );
+      expect(kindText.style?.fontSize, sortText.style?.fontSize);
+      expect(kindText.style?.color, sortText.style?.color);
       await tester.pump(const Duration(seconds: 3));
     });
 
@@ -1155,7 +1174,7 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
-    testWidgets('항목에 그 정보가 없는 종류에서는 필터 단추가 막힌다(멤버 탭은 대화방, 대화방 탭은 멤버·기간)', (
+    testWidgets('항목에 그 정보가 없는 종류에서는 필터 단추가 막힌다(멤버면 대화방, 대화방이면 멤버·기간)', (
       tester,
     ) async {
       final server = _Server();

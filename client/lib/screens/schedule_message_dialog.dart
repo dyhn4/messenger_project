@@ -170,6 +170,20 @@ DateTime _lastSlot(DateTime now) {
 bool _slotAllowed(DateTime slot, DateTime now) =>
     slot.isAfter(now) && !slot.isAfter(latestScheduleTime(now));
 
+/// [value]의 시각은 그대로 두고 날짜만 [day]로 옮긴다 — 그날 고를 수 없는 시각(지난 시각·90일 넘음)이면
+/// 가장 가까운 고를 수 있는 시각으로 옮긴다(오늘이면 기본 시각, 아니면 첫/마지막 15분 단위).
+DateTime _valueOnDay(DateTime value, DateTime day) {
+  final now = DateTime.now();
+  var next = DateTime(day.year, day.month, day.day, value.hour, value.minute);
+  if (!next.isAfter(now)) {
+    final preferred = defaultScheduleTime(now);
+    next = _dayOf(preferred) == _dayOf(next) ? preferred : _firstSlotAfter(now);
+  } else if (next.isAfter(latestScheduleTime(now))) {
+    next = _lastSlot(now);
+  }
+  return next;
+}
+
 /// "3시간 15분 뒤" — 발송 시간 아래 안내(분 단위는 올림).
 String _untilText(DateTime sendAt, DateTime now) {
   final total = math.max(1, (sendAt.difference(now).inSeconds / 60).ceil());
@@ -193,7 +207,7 @@ List<(String, DateTime)> _quickTimes(DateTime now) => [
 ];
 
 /// 예약 메시지 작성·수정 화면(대화상자/전체 화면 공용) — 대화방, 제목(보드 뷰 토픽만), 메시지(서식 가능),
-/// 파일 첨부(10개까지, 고르면 바로 올라간다), 발송 시간(날짜·15분 단위 시각·빠른 선택). 칸마다 서버와
+/// 파일 첨부(10개까지, 고르면 바로 올라간다), 발송 시간(날짜·15분 단위 시각을 한 칸에서·빠른 선택). 칸마다 서버와
 /// 같은 규칙으로 바로 알려 주고, Ctrl+Enter로 예약, Esc로 닫는다(쓰던 게 있으면 묻는다).
 class ScheduleMessageEditor extends StatefulWidget {
   final Session session;
@@ -237,7 +251,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
   final _messageFocus = FocusNode(debugLabel: 'schedule-message');
   final _mentionKey = GlobalKey<MentionAutocompleteState>();
   final _scroll = ScrollController();
-  final _dateField = GlobalKey<_DateFieldState>();
+  final _sendAtField = GlobalKey<_ScheduleDateTimeFieldState>();
   final _items = <_Item>[];
 
   /// 처음 채워진 값 — 닫을 때 "고친 게 있는지", 수정할 때 "무엇이 바뀌었는지"를 가린다.
@@ -584,28 +598,6 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     });
   }
 
-  /// 날짜를 바꾸면 시각은 그대로 두되, 그날 고를 수 없는 시각이면(오늘의 지난 시각·90일째의 늦은 시각)
-  /// 그날 고를 수 있는 가장 가까운 시각으로 옮긴다.
-  void _pickDate(DateTime day) {
-    final now = DateTime.now();
-    var next = DateTime(
-      day.year,
-      day.month,
-      day.day,
-      _sendAt.hour,
-      _sendAt.minute,
-    );
-    if (!next.isAfter(now)) {
-      final preferred = defaultScheduleTime(now);
-      next = _dayOf(preferred) == _dayOf(next)
-          ? preferred
-          : _firstSlotAfter(now);
-    } else if (next.isAfter(latestScheduleTime(now))) {
-      next = _lastSlot(now);
-    }
-    _setSendAt(next);
-  }
-
   /// 서버와 같은 규칙으로 먼저 걸러 칸 아래에 바로 알린다. 첫 번째로 걸린 칸으로 커서를 옮긴다.
   bool _validate() {
     final room = _room;
@@ -724,9 +716,9 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       _message.text.trim() != _initialText.trim() ||
       _attachmentsChanged;
 
-  /// 취소·Esc·뒤로 가기 — 달력이 떠 있으면 달력만 닫고, 쓰던 내용이 있으면 한 번 묻는다.
+  /// 취소·Esc·뒤로 가기 — 발송 시간 판(달력·시간 목록)이 떠 있으면 판만 닫고, 쓰던 내용이 있으면 한 번 묻는다.
   Future<void> _requestClose() async {
-    if (_dateField.currentState?.hideCalendar() ?? false) return;
+    if (_sendAtField.currentState?.hidePopup() ?? false) return;
     if (_submitting) return;
     if (_dirty) {
       final editing = _editing != null;
@@ -802,6 +794,9 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       title: _screenTitle,
       maxWidth: 600,
       maxHeight: 860,
+      // 스크롤바를 창 오른쪽 모서리에 붙인다 — 오른쪽 여백은 안쪽(입력칸·단추·제목 줄)이 스스로 둔다.
+      padding: const EdgeInsets.fromLTRB(20, 20, 0, 20),
+      headerEndPadding: 12,
       child: Stack(
         children: [
           Column(
@@ -813,8 +808,8 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
                   controller: _scroll,
                   child: SingleChildScrollView(
                     controller: _scroll,
-                    // 스크롤바(10px)가 입력칸을 덮지 않게 오른쪽을 비운다.
-                    padding: const EdgeInsets.only(right: 16),
+                    // 스크롤바(창 끝에 붙은 10px)가 입력칸을 덮지 않게 오른쪽을 비운다.
+                    padding: const EdgeInsets.only(right: 20),
                     child: _buildForm(context),
                   ),
                 ),
@@ -822,7 +817,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
               const SizedBox(height: 16),
               // 단추 끝을 위 입력칸들의 오른쪽 끝(스크롤바 자리를 비운 곳)에 맞춘다.
               Padding(
-                padding: const EdgeInsets.only(right: 16),
+                padding: const EdgeInsets.only(right: 20),
                 child: _buildActions(context),
               ),
             ],
@@ -1202,48 +1197,15 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
 
   Widget _buildTimePicker(BuildContext context) {
     final now = DateTime.now();
-    final first = _firstSlotAfter(now);
-    final last = _lastSlot(now);
-    final day = _dayOf(_sendAt);
-    final minutes = _sendAt.hour * 60 + _sendAt.minute;
-    final date = _DateField(
-      key: _dateField,
-      value: _sendAt,
-      first: _dayOf(first),
-      last: _dayOf(last),
-      enabled: !_submitting,
-      onPicked: _pickDate,
-    );
-    final time = _TimeField(
-      minutes: minutes,
-      enabled: !_submitting,
-      allowed: (m) => _slotAllowed(
-        DateTime(day.year, day.month, day.day, 0, m),
-        DateTime.now(),
-      ),
-      onChanged: (m) =>
-          _setSendAt(DateTime(day.year, day.month, day.day, 0, m)),
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            // 좁은 화면(휴대폰)에서는 날짜와 시각을 위아래로 쌓는다.
-            if (constraints.maxWidth < 380) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [date, const SizedBox(height: 8), time],
-              );
-            }
-            return Row(
-              children: [
-                Expanded(flex: 3, child: date),
-                const SizedBox(width: 10),
-                Expanded(flex: 2, child: time),
-              ],
-            );
-          },
+        // 날짜와 시각을 한 칸에서 — 누르면 달력과 그 밑 시간 드롭다운이 펼쳐진다(투표 마감 시각과 같다).
+        ScheduleDateTimeField(
+          key: _sendAtField,
+          value: _sendAt,
+          enabled: !_submitting,
+          onChanged: _setSendAt,
         ),
         const SizedBox(height: 10),
         Wrap(
@@ -1380,11 +1342,17 @@ class _PickerBox extends StatelessWidget {
   final bool active;
   final bool enabled;
   final Widget child;
+
+  /// 상자 높이와 왼쪽 아이콘 크기 — 기본은 입력칸과 같은 48/18, 달력 밑 시간 칸처럼 작게 쓸 때만 바꾼다.
+  final double height;
+  final double iconSize;
   const _PickerBox({
     required this.icon,
     required this.active,
     required this.enabled,
     required this.child,
+    this.height = 48,
+    this.iconSize = 18,
   });
 
   @override
@@ -1399,7 +1367,7 @@ class _PickerBox extends StatelessWidget {
     // 강조 테두리(2px)가 되어도 안의 글자가 움직이지 않게 그만큼 안쪽 여백을 줄인다.
     final width = active ? 2.0 : 1.0;
     return Container(
-      height: 48,
+      height: height,
       padding: EdgeInsets.only(left: 13 - width, right: 7 - width),
       decoration: BoxDecoration(
         border: Border.all(color: color, width: width),
@@ -1407,7 +1375,7 @@ class _PickerBox extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: enabled ? theme.hintColor : color),
+          Icon(icon, size: iconSize, color: enabled ? theme.hintColor : color),
           const SizedBox(width: 10),
           Expanded(child: child),
         ],
@@ -1424,7 +1392,6 @@ class _DateField extends StatefulWidget {
   final bool enabled;
   final ValueChanged<DateTime> onPicked;
   const _DateField({
-    super.key,
     required this.value,
     required this.first,
     required this.last,
@@ -1473,7 +1440,7 @@ class _DateFieldState extends State<_DateField> with WidgetsBindingObserver {
     });
   }
 
-  /// 떠 있던 달력을 닫았으면 true(Esc가 편집기보다 달력을 먼저 닫게).
+  /// 떠 있던 달력을 닫았으면 true.
   bool hideCalendar() {
     if (!_overlay.isShowing) return false;
     _overlay.hide();
@@ -2090,9 +2057,9 @@ class _RemoveBadge extends StatelessWidget {
   }
 }
 
-/// 날짜(달력)와 15분 단위 시각을 고르는 입력 — 예약 발송 시간과 같은 UI·같은 범위(지금 이후~90일
-/// 안)라서, 투표 마감 시각처럼 같은 종류의 시각을 고르는 다른 화면이 그대로 쓴다. 날짜를 바꿨을 때
-/// 그날 고를 수 없는 시각이면 가장 가까운 시각으로 옮기는 규칙도 예약 편집기와 같다.
+/// 날짜(달력)와 15분 단위 시각을 두 칸으로 나란히 고르는 입력 — 고를 수 있는 범위(지금 이후~90일 안)와
+/// 날짜를 바꿨을 때 그날 고를 수 없는 시각이면 가장 가까운 시각으로 옮기는 규칙은 [ScheduleDateTimeField]와
+/// 같다. 할 일 편집기의 직접 지정 알림이 쓴다.
 class SchedulePicker extends StatelessWidget {
   final DateTime value;
   final bool enabled;
@@ -2104,19 +2071,7 @@ class SchedulePicker extends StatelessWidget {
     this.enabled = true,
   });
 
-  void _pickDate(DateTime day) {
-    final now = DateTime.now();
-    var next = DateTime(day.year, day.month, day.day, value.hour, value.minute);
-    if (!next.isAfter(now)) {
-      final preferred = defaultScheduleTime(now);
-      next = _dayOf(preferred) == _dayOf(next)
-          ? preferred
-          : _firstSlotAfter(now);
-    } else if (next.isAfter(latestScheduleTime(now))) {
-      next = _lastSlot(now);
-    }
-    onChanged(next);
-  }
+  void _pickDate(DateTime day) => onChanged(_valueOnDay(value, day));
 
   @override
   Widget build(BuildContext context) {
@@ -2157,6 +2112,401 @@ class SchedulePicker extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// 날짜와 시각을 **한 칸**에서 고르는 입력 — 칸에는 `10월 5일 (일) 오후 3:00`처럼 한 줄로 보이고, 누르면 바로
+/// 아래(자리가 모자라면 위)에 달력이 펼쳐지고 달력 밑의 시간 드롭다운에서 15분 단위 시각까지 고른다. 날짜를
+/// 누르면 펼친 채로 날짜만 바뀌고(그날 고를 수 없는 시각이면 [SchedulePicker]와 같은 규칙으로 옮긴다), 시각을
+/// 고르거나 바깥을 누르면 닫힌다. 고를 수 있는 범위(지금 이후~90일 안)도 [SchedulePicker]와 같다. 예약 메시지
+/// 발송 시간과 투표 마감 시각이 쓴다.
+class ScheduleDateTimeField extends StatefulWidget {
+  final DateTime value;
+  final bool enabled;
+  final ValueChanged<DateTime> onChanged;
+  const ScheduleDateTimeField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  @override
+  State<ScheduleDateTimeField> createState() => _ScheduleDateTimeFieldState();
+}
+
+class _ScheduleDateTimeFieldState extends State<ScheduleDateTimeField>
+    with WidgetsBindingObserver {
+  final _overlay = OverlayPortalController();
+  final _link = LayerLink();
+
+  /// 판을 열 때 포커스를 이 칸으로 옮긴다 — 글을 쓰던 중이면 휴대폰 화상 키보드가 내려가서 펼친 판을
+  /// 가리지 않는다(_DateField와 같다).
+  final _focus = FocusNode(debugLabel: 'schedule-datetime');
+
+  /// 칸과 펼친 달력을 한 묶음으로 본다 — 열린 채 칸을 다시 누르면 닫히기만 한다(_DateField와 같다).
+  final _tapGroup = UniqueKey();
+
+  /// 칸 위에 펼치는지(아래 자리가 모자라고 위가 더 넓을 때), 오른쪽 끝을 넘지 않게 옮긴 가로 거리 —
+  /// [_place]가 정한다.
+  bool _above = false;
+  double _dx = 0;
+
+  /// 달력 밑 시간 드롭다운의 목록이 펼쳐져 있는지.
+  bool _timeOpen = false;
+
+  /// 달력이 가장 길 때(6주)의 높이 — 자리를 잴 때 쓴다.
+  static const _calendarMaxHeight = 300.0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!_overlay.isShowing) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _overlay.isShowing) setState(_place);
+    });
+  }
+
+  /// 펼친 판(달력·시간 목록)을 닫았으면 true — 예약 편집기의 Esc·뒤로 가기가 편집기보다 판을 먼저 닫게.
+  bool hidePopup() {
+    if (!_overlay.isShowing) return false;
+    _overlay.hide();
+    _timeOpen = false;
+    if (mounted) setState(() {});
+    return true;
+  }
+
+  /// 아래 자리가 모자라고 위가 더 넓으면 칸 위로 펼친다. 오른쪽 끝도 넘지 않게. 시간 목록은 판 안에서
+  /// 달력을 덮으며 펼쳐지므로 판 크기는 그대로다.
+  void _place() {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final origin = box.localToGlobal(Offset.zero);
+    final screen = MediaQuery.sizeOf(context);
+    // 칸과의 틈(6) + 화면 끝 여백(8).
+    final below = screen.height - origin.dy - box.size.height - 14;
+    final above = origin.dy - 14;
+    const full = _calendarMaxHeight + 1 + _ScheduleTimeBox.height;
+    _above = below < full && above > below;
+    final maxLeft = math.max(8.0, screen.width - _calendarWidth - 8);
+    _dx = origin.dx.clamp(8.0, maxLeft) - origin.dx;
+  }
+
+  void _toggle() {
+    if (hidePopup()) return;
+    _focus.requestFocus();
+    setState(_place);
+    _overlay.show();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final now = DateTime.now();
+    final value = widget.value;
+    final day = _dayOf(value);
+    final minutes = value.hour * 60 + value.minute;
+    return OverlayPortal(
+      controller: _overlay,
+      overlayChildBuilder: (context) => CompositedTransformFollower(
+        link: _link,
+        targetAnchor: _above ? Alignment.topLeft : Alignment.bottomLeft,
+        followerAnchor: _above ? Alignment.bottomLeft : Alignment.topLeft,
+        offset: Offset(_dx, _above ? -6 : 6),
+        child: Align(
+          alignment: _above ? Alignment.bottomLeft : Alignment.topLeft,
+          child: TapRegion(
+            groupId: _tapGroup,
+            onTapOutside: (_) => hidePopup(),
+            child: Material(
+              key: const ValueKey('schedule-datetime-popup'),
+              elevation: 8,
+              borderRadius: BorderRadius.circular(12),
+              clipBehavior: Clip.antiAlias,
+              color: theme.colorScheme.surfaceContainerHigh,
+              child: Stack(
+                children: [
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _ScheduleCalendar(
+                        value: value,
+                        first: _dayOf(_firstSlotAfter(now)),
+                        last: _dayOf(_lastSlot(now)),
+                        onPicked: (d) =>
+                            widget.onChanged(_valueOnDay(value, d)),
+                      ),
+                      SizedBox(
+                        width: _calendarWidth,
+                        child: Divider(height: 1, color: theme.dividerColor),
+                      ),
+                      _ScheduleTimeBox(
+                        minutes: minutes,
+                        open: _timeOpen,
+                        onTap: () => setState(() => _timeOpen = !_timeOpen),
+                      ),
+                    ],
+                  ),
+                  // 시간 목록은 칸 바로 위로, 달력을 덮으며 펼친다(판 크기가 바뀌지 않아 화면 밖으로 안 나간다).
+                  if (_timeOpen)
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      bottom: _ScheduleTimeBox.boxBottom + 4,
+                      child: _ScheduleTimeList(
+                        minutes: minutes,
+                        allowed: (m) => _slotAllowed(
+                          DateTime(day.year, day.month, day.day, 0, m),
+                          DateTime.now(),
+                        ),
+                        onPicked: (m) {
+                          hidePopup();
+                          widget.onChanged(
+                            DateTime(day.year, day.month, day.day, 0, m),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      child: CompositedTransformTarget(
+        link: _link,
+        child: TapRegion(
+          groupId: _tapGroup,
+          child: InkWell(
+            key: const ValueKey('schedule-datetime'),
+            focusNode: _focus,
+            borderRadius: BorderRadius.circular(4),
+            onTap: widget.enabled ? _toggle : null,
+            child: _PickerBox(
+              icon: Icons.event_outlined,
+              active: _overlay.isShowing,
+              enabled: widget.enabled,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      formatScheduleTime(value),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: widget.enabled
+                            ? theme.colorScheme.onSurface
+                            : theme.disabledColor,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _overlay.isShowing
+                        ? Icons.arrow_drop_up
+                        : Icons.arrow_drop_down,
+                    size: 24,
+                    color: theme.hintColor,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 달력 밑의 시간 드롭다운 칸 — `시간` 글자 아래에 지금 시각과 ▾. 누르면 [_ScheduleTimeList]가 이 칸 바로 위로
+/// 펼쳐진다(달력을 덮는다). 목록을 따로 띄우지 않고 판 안에 그리는 이유: 펼친 달력 판은 바깥을 누르면 닫히는데,
+/// 따로 뜨는 메뉴의 항목을 누르는 것도 "바깥"으로 잡혀 판이 먼저 닫혀 버린다.
+class _ScheduleTimeBox extends StatelessWidget {
+  /// 시각 칸 높이 — 펼친 목록의 글자 크기(14)에 맞춘 작은 칸.
+  static const _boxHeight = 36.0;
+
+  /// 이 칸 전체 높이(위 여백·글자·칸·아래 여백)와, 판 아래 끝에서 시각 칸 위 끝까지의 거리.
+  static const height = 8 + 24 + _boxHeight + 12.0;
+  static const boxBottom = 12 + _boxHeight;
+
+  final int minutes;
+  final bool open;
+  final VoidCallback onTap;
+  const _ScheduleTimeBox({
+    required this.minutes,
+    required this.open,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      width: _calendarWidth,
+      height: height,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 24,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Text(
+                  '시간',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: theme.hintColor,
+                  ),
+                ),
+              ),
+            ),
+            InkWell(
+              key: const ValueKey('schedule-time-box'),
+              borderRadius: BorderRadius.circular(4),
+              onTap: onTap,
+              child: _PickerBox(
+                icon: Icons.schedule,
+                active: open,
+                enabled: true,
+                height: _boxHeight,
+                iconSize: 16,
+                child: Row(
+                  children: [
+                    Expanded(
+                      // 펼친 목록의 글자와 같은 크기.
+                      child: Text(
+                        formatScheduleClock(DateTime(2000, 1, 1, 0, minutes)),
+                        style: TextStyle(
+                          fontSize: _ScheduleTimeList.fontSize,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      open ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                      size: 20,
+                      color: theme.hintColor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 시간 드롭다운의 목록 — 15분 단위(오전 12:00 … 오후 11:45), 펼칠 때 고른 시각이 보이게 스크롤해 둔다. 그날
+/// 고를 수 없는 시각(지난 시각·90일을 넘는 시각)은 흐리게 두고 누를 수 없다.
+class _ScheduleTimeList extends StatefulWidget {
+  static const height = 216.0;
+  static const fontSize = 14.0;
+  static const _rowHeight = 36.0;
+
+  final int minutes;
+  final bool Function(int minutes) allowed;
+  final ValueChanged<int> onPicked;
+  const _ScheduleTimeList({
+    required this.minutes,
+    required this.allowed,
+    required this.onPicked,
+  });
+
+  @override
+  State<_ScheduleTimeList> createState() => _ScheduleTimeListState();
+}
+
+class _ScheduleTimeListState extends State<_ScheduleTimeList> {
+  // 고른 시각이 둘째 줄쯤 오게 — 그 앞 시각도 조금 보인다.
+  late final _scroll = ScrollController(
+    initialScrollOffset: math.max(
+      0,
+      (widget.minutes ~/ scheduledSlotMinutes - 1) *
+          _ScheduleTimeList._rowHeight,
+    ),
+  );
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Material(
+      key: const ValueKey('schedule-time-list'),
+      elevation: 4,
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: _ScheduleTimeList.height,
+        child: ListView.builder(
+          controller: _scroll,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          itemExtent: _ScheduleTimeList._rowHeight,
+          itemCount: 24 * 60 ~/ scheduledSlotMinutes,
+          itemBuilder: (context, i) {
+            final m = i * scheduledSlotMinutes;
+            final enabled = widget.allowed(m);
+            final selected = m == widget.minutes;
+            return InkWell(
+              key: ValueKey('schedule-slot-$m'),
+              onTap: enabled ? () => widget.onPicked(m) : null,
+              child: Container(
+                color: selected ? scheme.primaryContainer : null,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        formatScheduleClock(DateTime(2000, 1, 1, 0, m)),
+                        style: TextStyle(
+                          fontSize: _ScheduleTimeList.fontSize,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.normal,
+                          color: selected
+                              ? scheme.onPrimaryContainer
+                              : enabled
+                              ? null
+                              : theme.disabledColor,
+                        ),
+                      ),
+                    ),
+                    if (selected)
+                      Icon(
+                        Icons.check,
+                        size: 16,
+                        color: scheme.onPrimaryContainer,
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

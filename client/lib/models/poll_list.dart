@@ -5,6 +5,17 @@ enum PollStatusFilter { all, open, closed }
 
 enum PollParticipationFilter { all, yes, no }
 
+/// 투표 목록 패널 정렬 — 생성 순(만든 시각 최근 순, 기본) / 기한 순(진행 중은 마감이 가까운 순, 그 뒤 마감된 투표는 최근에
+/// 끝난 순). 서버 `GET /api/polls`의 `sort` 값(created | deadline)과 같은 이름이다.
+enum PollSort { created, deadline }
+
+extension PollSortLabel on PollSort {
+  String get label => switch (this) {
+    PollSort.created => '생성 순',
+    PollSort.deadline => '기한 순',
+  };
+}
+
 extension PollStatusFilterLabel on PollStatusFilter {
   String get label => switch (this) {
     PollStatusFilter.all => '전체',

@@ -14,6 +14,10 @@ class FloatingDialog extends StatelessWidget {
   /// 문제가 있어서(자식이 그려지는 자리와 히트테스트 판정 영역이 다름) 실제 레이아웃 폭
   /// 자체를 넓혀주는 이 방식이 더 안전하다.
   final EdgeInsetsGeometry padding;
+
+  /// 제목 줄(제목 · ✕)만 오른쪽을 더 띄운다 — [padding]의 오른쪽을 0으로 줘서 스크롤바를 창 끝에 붙일 때 ✕까지
+  /// 끝에 붙지 않게(기본 0).
+  final double headerEndPadding;
   const FloatingDialog({
     super.key,
     required this.title,
@@ -21,6 +25,7 @@ class FloatingDialog extends StatelessWidget {
     this.maxWidth = 480,
     this.maxHeight = 640,
     this.padding = const EdgeInsets.all(20),
+    this.headerEndPadding = 0,
   });
 
   @override
@@ -35,21 +40,24 @@ class FloatingDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleLarge,
+              Padding(
+                padding: EdgeInsets.only(right: headerEndPadding),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    // maybePop — 안의 PopScope(요청 중에는 닫지 않기, 닫을 때 결과 넘기기)가 Esc·바깥
-                    // 클릭과 똑같이 ✕에도 적용되게 한다.
-                    onPressed: () => Navigator.of(context).maybePop(),
-                  ),
-                ],
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      // maybePop — 안의 PopScope(요청 중에는 닫지 않기, 닫을 때 결과 넘기기)가 Esc·바깥
+                      // 클릭과 똑같이 ✕에도 적용되게 한다.
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 12),
               Flexible(child: child),

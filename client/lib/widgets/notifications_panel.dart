@@ -289,9 +289,9 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     // 메시지 탭에 보이는 방만 읽음 처리한다 — 멘션만 안 읽은 방은 멘션 탭 몫이다(isUnreadChatRoom).
     final chatRooms = [
       for (final r in session.unreadRooms)
-        if ((tab == NotificationTab.unreadChats &&
-                (isUnreadChatRoom(r) || r.hasUnreadAnnouncement)) ||
-            (tab == NotificationTab.all && isUnreadChatRoom(r)))
+        if ((tab == NotificationTab.unreadChats ||
+                tab == NotificationTab.all) &&
+            isUnreadChatRoom(r))
           r,
     ];
     if (chatRooms.isNotEmpty) {
@@ -1106,39 +1106,8 @@ class _NotificationRow extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        // 안 읽은 공지가 있으면 그게 이 방이 여기 뜬 이유이므로 그 내용을
-                        // 우선 보여준다 — 예전엔 이 자리에 항상 "마지막 채팅 내용"만 보여줘서
-                        // 메시지는 다 읽었고 공지만 안 읽은 경우에도 엉뚱한 채팅 미리보기가
-                        // 뜨는 문제가 있었다.
-                        child: room.hasUnreadAnnouncement
-                            ? Row(
-                                children: [
-                                  Icon(
-                                    Icons.campaign_outlined,
-                                    size: 14,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(
-                                      room.latestAnnouncement?.previewText ??
-                                          '새 공지가 있습니다',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : _previewText(context, room),
+                        // 메시지 줄 — 안 읽은 대화의 마지막 채팅 내용(공지는 보드·공지 탭의 공지 줄에 따로 나온다).
+                        child: _previewText(context, room),
                       ),
                       const SizedBox(width: 8),
                       // 안 읽은 멘션이 있으면 안읽음 숫자 옆에 "@"를 붙인다(방 목록과 같다).
@@ -1146,15 +1115,8 @@ class _NotificationRow extends StatelessWidget {
                         const MentionMarker(),
                         const SizedBox(width: 4),
                       ],
-                      // 안 읽은 공지도 개수대로 배지에 합산한다 — 전엔 room.unreadCount(메시지만)만
-                      // 써서 공지만 안 읽었을 땐 0으로 떴고, 그 뒤엔 공지가 몇 개든 1로만 셌다.
-                      UnreadBadge(
-                        count:
-                            room.unreadCount +
-                            (room.hasUnreadAnnouncement
-                                ? math.max(1, room.unreadAnnouncementCount)
-                                : 0),
-                      ),
+                      // 안 읽은 메시지 수 — 공지는 보드·공지 탭에서 센다.
+                      UnreadBadge(count: room.unreadCount),
                     ],
                   ),
                 ],

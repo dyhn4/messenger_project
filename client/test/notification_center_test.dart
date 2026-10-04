@@ -411,7 +411,7 @@ void main() {
     });
   });
 
-  group('메시지 탭(예전 "안 읽은 대화") — 예전 알림 센터 그대로', () {
+  group('메시지 탭(예전 "안 읽은 대화") — 안 읽은 메시지가 있는 방', () {
     testWidgets('안 읽은 방(여러 팀)을 마지막 활동순으로 팀 이름과 함께 보여 주고, 누르면 그 방으로', (
       tester,
     ) async {
@@ -468,19 +468,46 @@ void main() {
       expect(server.called('GET', '/api/notifications'), isEmpty);
     });
 
-    testWidgets('안 읽은 공지만 있는 방도 뜨고, 없으면 안내 문구', (tester) async {
+    testWidgets('공지는 메시지 탭에 뜨지 않는다 — 공지만 안 읽은 방은 없고(보드·공지 탭에 있다) 안내 문구', (
+      tester,
+    ) async {
       final server = _Server();
       final session = _session(
         server,
         rooms: [_room('r1', '공지방', announcement: true)],
       );
       await _pump(tester, session, initialTab: NotificationTab.unreadChats);
-      expect(find.text('공지방'), findsOneWidget);
-      expect(find.text('월간 회의 안내'), findsOneWidget);
-
-      final empty = _session(_Server(), rooms: [_room('r1', '공지방')]);
-      await _pump(tester, empty, initialTab: NotificationTab.unreadChats);
+      expect(find.text('공지방'), findsNothing);
+      expect(find.text('월간 회의 안내'), findsNothing);
       expect(find.text('안 읽은 메시지가 없습니다.'), findsOneWidget);
+
+      // 보드·공지 탭에는 그대로 있다(같은 패널을 다시 그리면 탭이 그대로라 새로 연다).
+      await tester.pumpWidget(const SizedBox());
+      await _pump(tester, session, initialTab: NotificationTab.board);
+      await _settle(tester);
+      expect(find.text('공지 · 월간 회의 안내'), findsOneWidget);
+    });
+
+    testWidgets('메시지와 공지를 둘 다 안 읽은 방 — 메시지 탭 줄은 채팅 미리보기와 메시지 수만', (
+      tester,
+    ) async {
+      final session = _session(
+        _Server(),
+        rooms: [
+          _room(
+            'r1',
+            '공지방',
+            unread: 2,
+            preview: '회의 10분 전',
+            announcement: true,
+          ),
+        ],
+      );
+      await _pump(tester, session, initialTab: NotificationTab.unreadChats);
+      expect(find.text('공지방'), findsOneWidget);
+      expect(find.textContaining('회의 10분 전'), findsOneWidget);
+      expect(find.text('월간 회의 안내'), findsNothing);
+      expect(tester.widget<UnreadBadge>(find.byType(UnreadBadge)).count, 2);
     });
 
     testWidgets('방 줄에 안 읽은 멘션이 있으면 "@" 표시', (tester) async {

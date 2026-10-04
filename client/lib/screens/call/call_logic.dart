@@ -33,6 +33,9 @@ class CallPerson {
   final bool sharing;
   final bool speaking;
 
+  /// 이 통화의 진행자인지(참가자 패널에 "진행자" 표시).
+  final bool isHost;
+
   /// 손을 든 시각. null이면 손을 내린 상태.
   final DateTime? handRaisedAt;
 
@@ -47,6 +50,7 @@ class CallPerson {
     this.camOn = true,
     this.sharing = false,
     this.speaking = false,
+    this.isHost = false,
     this.handRaisedAt,
     this.user,
   });

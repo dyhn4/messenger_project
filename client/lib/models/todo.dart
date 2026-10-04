@@ -289,6 +289,14 @@ class Todo {
   final String? sourceMessageId;
   final String? sourceCommentId;
 
+  /// 받아 갈 파일이 있는 폴더 경로(생성 창 "파일 다운로드 (경로 선택)"에서 파일 대신 폴더를 고름) — 상세에서 누르면 윈도우
+  /// 탐색기로 연다. 없으면 null.
+  final String? downloadPath;
+
+  /// 결과물을 올릴 폴더 경로("파일 업로드 (경로 선택)") — 있으면 ⋯ "파일 업로드"가 이 폴더로 복사하고, 없으면 만든 사람에게
+  /// 메시지로 보낸다(todo_upload.dart).
+  final String? uploadPath;
+
   /// 'creator' | 'assignee' | 'viewer' — 보는 사람 기준.
   final String myRole;
 
@@ -323,6 +331,8 @@ class Todo {
     this.reminders = const [],
     this.sourceMessageId,
     this.sourceCommentId,
+    this.downloadPath,
+    this.uploadPath,
     this.myRole = 'viewer',
     this.canEdit = false,
     this.canManage = false,
@@ -394,6 +404,8 @@ class Todo {
     reminders: reminders,
     sourceMessageId: sourceMessageId,
     sourceCommentId: sourceCommentId,
+    downloadPath: downloadPath,
+    uploadPath: uploadPath,
     myRole: myRole,
     canEdit: canEdit,
     canManage: canManage,
@@ -474,6 +486,8 @@ class Todo {
       ],
       sourceMessageId: json['sourceMessageId'] as String?,
       sourceCommentId: json['sourceCommentId'] as String?,
+      downloadPath: _nonEmpty(json['downloadPath']),
+      uploadPath: _nonEmpty(json['uploadPath']),
       myRole: json['myRole'] as String? ?? 'viewer',
       canEdit: json['canEdit'] as bool? ?? false,
       canManage: json['canManage'] as bool? ?? false,
@@ -681,3 +695,76 @@ DateTime todoReminderBeforeDue(
   0,
   dueMinutes ?? todoDueHour * 60,
 ).subtract(before);
+
+/// 빈 글자는 null로(예전 서버·빈 경로).
+String? _nonEmpty(Object? value) =>
+    value is String && value.trim().isNotEmpty ? value : null;
+
+/// 할 일을 만들 때 그 대화방에 올라간 "할 일 카드"(메시지 DTO의 `sharedTodo` — server todoRules.js todoCardMessage).
+/// 메시지 자체는 일반 글(`[할 일] 제목` + 토픽·그룹이면 담당자 멘션)이고, 이것은 보낼 때의 스냅샷이다 — 카드는 이것을 먼저
+/// 그리고, 할 일을 다시 받아 최신 내용으로 바꾼다([id]가 null이면 할 일이 지워졌다).
+class SharedTodo {
+  final String? id;
+  final String title;
+  final String? description;
+  final String? startDate;
+  final String? startTime;
+  final String? dueDate;
+  final String? dueTime;
+
+  /// 첨부 파일 이름(앞의 몇 개만)과 전체 개수.
+  final List<String> attachmentNames;
+  final int attachmentCount;
+  final List<String> assigneeNames;
+
+  const SharedTodo({
+    this.id,
+    required this.title,
+    this.description,
+    this.startDate,
+    this.startTime,
+    this.dueDate,
+    this.dueTime,
+    this.attachmentNames = const [],
+    this.attachmentCount = 0,
+    this.assigneeNames = const [],
+  });
+
+  bool get deleted => id == null;
+
+  static SharedTodo? fromJson(Object? json) {
+    if (json is! Map) return null;
+    return SharedTodo(
+      id: json['id'] as String?,
+      title: json['title'] as String? ?? '',
+      description: _nonEmpty(json['description']),
+      startDate: json['startDate'] as String?,
+      startTime: json['startTime'] as String?,
+      dueDate: json['dueDate'] as String?,
+      dueTime: json['dueTime'] as String?,
+      attachmentNames: [
+        for (final a in (json['attachments'] as List?) ?? const [])
+          if (a is Map && a['fileName'] is String) a['fileName'] as String,
+      ],
+      attachmentCount: (json['attachmentCount'] as num?)?.toInt() ?? 0,
+      assigneeNames: [
+        for (final n in (json['assigneeNames'] as List?) ?? const [])
+          if (n is String) n,
+      ],
+    );
+  }
+
+  /// 기간 문구 — 할 일 카드·상세와 같은 모양([Todo.periodText]).
+  String? get periodText => Todo(
+    id: id ?? '',
+    teamId: '',
+    roomId: '',
+    title: title,
+    startDate: startDate,
+    startTime: startTime,
+    dueDate: dueDate,
+    dueTime: dueTime,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+  ).periodText;
+}

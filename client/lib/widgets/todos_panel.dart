@@ -10,6 +10,7 @@ import '../services/session.dart';
 import '../services/todo_api.dart';
 import '../services/todo_controller.dart';
 import '../services/todo_download.dart';
+import '../services/todo_upload.dart';
 import 'app_toast.dart';
 import 'compact_menu_anchor.dart';
 import 'filter_dropdown.dart';
@@ -70,7 +71,39 @@ class TodosPanel extends StatefulWidget {
   State<TodosPanel> createState() => _TodosPanelState();
 }
 
+/// 할 일 하나를 할 일 패널 안의 상세로 연다(채팅의 할 일 카드를 눌렀을 때) — PC(홈 셸 아래)는 오른쪽 할 일 패널을 열고(이미
+/// 열려 있으면 그대로) 그 안에 상세를 띄운다. 모바일처럼 패널이 없으면 예전처럼 상세만 연다(좁으면 전체 화면).
+Future<void> openTodoInPanel(
+  BuildContext context,
+  Session session,
+  Todo todo, {
+  TodoApi? api,
+}) async {
+  final shell = HomeShellScope.maybeOf(context);
+  if (shell == null) {
+    await showTodoDetail(context, session: session, todo: todo, api: api);
+    return;
+  }
+  for (final panel in _TodosPanelState._mounted) {
+    if (panel.mounted && panel._inPanel) {
+      _pendingTodo = null;
+      await panel._open(todo);
+      return;
+    }
+  }
+  // 패널을 새로 연다 — 패널이 만들어지며 [_pendingTodo]를 가져가 상세를 띄운다.
+  _pendingTodo = todo;
+  if (shell.openPanelKey != 'todos') shell.togglePanel('todos');
+}
+
+/// [openTodoInPanel]이 새로 열 할 일 패널에 넘기는 "처음 띄울 상세" — 패널은 side_panels.dart의 builder가 만들어서 여기 잠깐
+/// 두고 패널이 처음 그려진 뒤 한 번 가져간다.
+Todo? _pendingTodo;
+
 class _TodosPanelState extends State<TodosPanel> {
+  /// 지금 떠 있는 할 일 패널 — 할 일 카드를 눌렀을 때 이미 열린 패널 안에 상세만 띄우려고([openTodoInPanel]).
+  static final _mounted = <_TodosPanelState>{};
+
   late TodoController _controller;
   bool _ownsController = false;
   final _scroll = ScrollController();
@@ -98,8 +131,15 @@ class _TodosPanelState extends State<TodosPanel> {
   @override
   void initState() {
     super.initState();
+    _mounted.add(this);
     _attach();
     widget.session.addListener(_onSessionChanged);
+    // 할 일 카드를 눌러 열었으면 패널 안 Navigator가 그려진 뒤 그 할 일의 상세를 목록 위에 띄운다(←로 목록에 돌아온다).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final todo = _pendingTodo;
+      _pendingTodo = null;
+      if (todo != null && mounted) unawaited(_open(todo));
+    });
   }
 
   @override
@@ -181,6 +221,7 @@ class _TodosPanelState extends State<TodosPanel> {
 
   @override
   void dispose() {
+    _mounted.remove(this);
     _setLeaveGuard?.call(this, null);
     widget.session.removeListener(_onSessionChanged);
     _detach();
@@ -276,6 +317,8 @@ class _TodosPanelState extends State<TodosPanel> {
         unawaited(_edit(todo));
       case TodoMenuAction.download:
         unawaited(_download(todo));
+      case TodoMenuAction.upload:
+        unawaited(uploadTodoFiles(context, widget.session, todo));
       case TodoMenuAction.delete:
         unawaited(_delete(todo));
     }

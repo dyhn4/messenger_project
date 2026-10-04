@@ -1,6 +1,5 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/bookmark.dart';
@@ -10,21 +9,20 @@ import '../services/bookmark_controller.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'bookmark_image.dart';
+import 'panel_create_button.dart';
 import 'side_panel_header.dart';
 
 /// 북마크 패널(side_panels.dart의 'bookmarks') — 잔디의 북마크와 같다. 이미지·제목·링크 카드를 팀 북마크/개인 북마크
-/// 탭으로 나눠 보여 주고, 카드를 누르면 외부 브라우저로 연다. 수정·삭제는 만든 사람과 팀 관리자만(⋯ 메뉴), "순서 변경"은
-/// PC에서만 있고 팀 북마크 순서는 팀 관리자만 바꾼다(드래그 후 "완료").
+/// 탭으로 나눠 보여 주고, 카드를 누르면 외부 브라우저로 연다. 수정·삭제는 만든 사람과 팀 관리자만(⋯ 메뉴). 순서는 카드를
+/// 꾹 누르면 바꾸는 상태가 되어 카드마다 손잡이가 나오고, 끌어서 옮긴 뒤 목록 위 안내 줄의 "완료"로 저장한다(PC·모바일
+/// 같다). 팀 북마크 순서는 팀 관리자만 바꾼다.
 ///
 /// 상태는 패널이 열릴 때 만드는 [BookmarkController]가 들고 있고(Session에는 두지 않는다), 서버의 bookmark:changed
-/// 알림이 오면 조용히 다시 받는다. [controller]·[isDesktop]·[openUrl]은 테스트가 바꿔 끼우는 값이다.
+/// 알림이 오면 조용히 다시 받는다. [controller]·[openUrl]은 테스트가 바꿔 끼우는 값이다.
 class BookmarksPanel extends StatefulWidget {
   final Session session;
   final VoidCallback? onClose;
   final BookmarkController? controller;
-
-  /// 순서 변경 단추를 보일지(PC) — 안 주면 안드로이드·iOS가 아니면 PC로 본다.
-  final bool? isDesktop;
   final Future<void> Function(Uri uri)? openUrl;
 
   const BookmarksPanel({
@@ -32,7 +30,6 @@ class BookmarksPanel extends StatefulWidget {
     required this.session,
     this.onClose,
     this.controller,
-    this.isDesktop,
     this.openUrl,
   });
 
@@ -49,8 +46,6 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
   List<Bookmark>? _draft;
   bool _savingOrder = false;
 
-  bool get _desktop =>
-      widget.isDesktop ?? !(Platform.isAndroid || Platform.isIOS);
   bool get _reordering => _draft != null;
 
   @override
@@ -183,12 +178,19 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
         widget.session.canManageCurrentTeam;
   }
 
-  void _toggleReorder() {
-    if (_reordering) {
-      _finishReorder();
-    } else {
-      setState(() => _draft = List.of(_controller.of(_kind)));
+  /// 카드를 꾹 눌렀다 — 순서를 바꿀 수 있으면 손잡이가 나오는 순서 변경 상태로, 아니면 까닭을 알린다.
+  void _startReorder() {
+    if (_reordering) return;
+    if (!_canReorderHere) {
+      showAppToast(context, '팀 북마크 순서는 관리자만 바꿀 수 있어요');
+      return;
     }
+    if (_controller.of(_kind).length < 2) {
+      showAppToast(context, '순서를 바꿀 북마크가 둘 이상 있어야 해요');
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    setState(() => _draft = List.of(_controller.of(_kind)));
   }
 
   Future<void> _finishReorder() async {
@@ -242,43 +244,43 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
     );
   }
 
+  /// 가로 전체 `+ 북마크 추가`(투표 패널의 `+ 투표 만들기`와 같은 옅은 회색 둥근 단추).
   Widget _actionBar(BuildContext context) {
-    final reorderButton = _desktop ? _reorderButton() : null;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 12, 4),
-      child: Row(
-        children: [
-          FilledButton.icon(
-            key: const ValueKey('bookmark-add'),
-            onPressed: _reordering ? null : _add,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('북마크 추가'),
-          ),
-          const Spacer(),
-          ?reorderButton,
-        ],
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: PanelCreateButton(
+        key: const ValueKey('bookmark-add'),
+        label: '북마크 추가',
+        onPressed: _reordering ? null : _add,
       ),
     );
   }
 
-  Widget _reorderButton() {
-    final canReorder = _canReorderHere;
-    final enough = _controller.of(_kind).length >= 2;
-    final enabled = _reordering || (canReorder && enough);
-    final tooltip = _reordering
-        ? ''
-        : !canReorder
-        ? '팀 북마크 순서는 관리자만 바꿀 수 있어요'
-        : !enough
-        ? '순서를 바꿀 북마크가 둘 이상 있어야 해요'
-        : '';
-    return Tooltip(
-      message: tooltip,
-      child: TextButton.icon(
-        key: const ValueKey('bookmark-reorder'),
-        onPressed: enabled && !_savingOrder ? _toggleReorder : null,
-        icon: Icon(_reordering ? Icons.check : Icons.swap_vert, size: 18),
-        label: Text(_reordering ? '완료' : '순서 변경'),
+  /// 순서 변경 중에만 목록 위에 뜨는 안내 줄 — `끌어서 순서를 바꾸세요` + `완료`(저장).
+  Widget _reorderBar(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('bookmark-reorder-bar'),
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+      padding: const EdgeInsets.fromLTRB(16, 2, 8, 2),
+      child: Row(
+        children: [
+          Icon(Icons.swap_vert, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '손잡이를 끌어서 순서를 바꾸세요',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('bookmark-reorder-done'),
+            onPressed: _savingOrder ? null : _finishReorder,
+            child: const Text('완료'),
+          ),
+        ],
       ),
     );
   }
@@ -344,30 +346,12 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
     final items = _draft ?? c.of(_kind);
     if (items.isEmpty) return _empty(context);
     if (_reordering) {
-      return ReorderableListView.builder(
-        key: const ValueKey('bookmark-reorder-list'),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        buildDefaultDragHandles: false,
-        itemCount: items.length,
-        onReorderItem: (from, to) => setState(() {
-          final draft = _draft!;
-          draft.insert(to, draft.removeAt(from));
-        }),
-        itemBuilder: (context, i) => _BookmarkCard(
-          key: ValueKey('bookmark-${items[i].id}'),
-          session: widget.session,
-          bookmark: items[i],
-          handle: ReorderableDragStartListener(
-            index: i,
-            child: const MouseRegion(
-              cursor: SystemMouseCursors.grab,
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: Icon(Icons.drag_indicator),
-              ),
-            ),
-          ),
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _reorderBar(context),
+          Expanded(child: _reorderList(items)),
+        ],
       );
     }
     return ListView.builder(
@@ -378,8 +362,38 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
         session: widget.session,
         bookmark: items[i],
         onTap: () => _open(items[i]),
+        onLongPress: _startReorder,
         onEdit: items[i].canEdit ? () => _edit(items[i]) : null,
         onDelete: items[i].canEdit ? () => _delete(items[i]) : null,
+      ),
+    );
+  }
+
+  /// 순서 변경 중의 목록 — 카드 앞 손잡이를 끌어 옮긴다(바뀐 순서는 사본에만, "완료"에서 저장).
+  Widget _reorderList(List<Bookmark> items) {
+    return ReorderableListView.builder(
+      key: const ValueKey('bookmark-reorder-list'),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      buildDefaultDragHandles: false,
+      itemCount: items.length,
+      onReorderItem: (from, to) => setState(() {
+        final draft = _draft!;
+        draft.insert(to, draft.removeAt(from));
+      }),
+      itemBuilder: (context, i) => _BookmarkCard(
+        key: ValueKey('bookmark-${items[i].id}'),
+        session: widget.session,
+        bookmark: items[i],
+        handle: ReorderableDragStartListener(
+          index: i,
+          child: const MouseRegion(
+            cursor: SystemMouseCursors.grab,
+            child: Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.drag_indicator),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -417,12 +431,13 @@ class _BookmarksPanelState extends State<BookmarksPanel> {
   }
 }
 
-/// 북마크 카드 한 장 — 왼쪽 정사각 이미지, 제목, 도메인, 오른쪽 ⋯(수정·삭제). 순서 변경 중에는 [handle]이 앞에 붙고
-/// 누르기·⋯는 없다.
+/// 북마크 카드 한 장 — 왼쪽 정사각 이미지, 제목, 도메인, 오른쪽 ⋯(수정·삭제). 꾹 누르면 [onLongPress](순서 변경 시작).
+/// 순서 변경 중에는 [handle]이 앞에 붙고 누르기·⋯는 없다.
 class _BookmarkCard extends StatelessWidget {
   final Session session;
   final Bookmark bookmark;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   final Widget? handle;
@@ -432,6 +447,7 @@ class _BookmarkCard extends StatelessWidget {
     required this.session,
     required this.bookmark,
     this.onTap,
+    this.onLongPress,
     this.onEdit,
     this.onDelete,
     this.handle,
@@ -445,6 +461,7 @@ class _BookmarkCard extends StatelessWidget {
       color: theme.colorScheme.surface,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
           child: Row(

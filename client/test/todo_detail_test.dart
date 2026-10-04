@@ -261,6 +261,7 @@ List<String> _menuKeys(WidgetTester tester) {
       'todo-menu-favorite',
       'todo-menu-edit',
       'todo-menu-download',
+      'todo-menu-upload',
       'todo-menu-delete',
     ])
       if (_key(k).evaluate().isNotEmpty) k,
@@ -433,8 +434,10 @@ void main() {
       expect(_menuKeys(tester), [
         'todo-menu-favorite',
         'todo-menu-edit',
+        'todo-menu-upload',
         'todo-menu-delete',
       ]);
+      expect(_in('todo-menu-upload', '파일 업로드'), findsOneWidget);
       expect(_in('todo-menu-favorite', '즐겨찾기'), findsOneWidget);
       expect(_in('todo-menu-edit', '할 일 수정'), findsOneWidget);
       final delete = tester.widget<Text>(_in('todo-menu-delete', '할 일 삭제'));
@@ -453,6 +456,7 @@ void main() {
         'todo-menu-favorite',
         'todo-menu-edit',
         'todo-menu-download',
+        'todo-menu-upload',
         'todo-menu-delete',
       ]);
       expect(_in('todo-menu-download', '파일 다운로드'), findsOneWidget);
@@ -466,7 +470,12 @@ void main() {
         json: todoJson(creatorId: 'u2', assignees: ['me']),
       );
       await _openMenu(tester);
-      expect(_menuKeys(tester), ['todo-menu-favorite', 'todo-menu-edit']);
+      // 담당자도 결과물을 올린다(파일 업로드).
+      expect(_menuKeys(tester), [
+        'todo-menu-favorite',
+        'todo-menu-edit',
+        'todo-menu-upload',
+      ]);
 
       await _open(
         tester,
@@ -477,6 +486,7 @@ void main() {
         'todo-menu-favorite',
         'todo-menu-edit',
         'todo-menu-download',
+        'todo-menu-upload',
       ]);
     });
 
@@ -822,6 +832,47 @@ void main() {
       );
       await tester.pump(const Duration(seconds: 3));
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('폴더 경로 — 파일 다운로드 · 파일 업로드', () {
+    testWidgets(
+      '지정한 경로가 "파일 다운로드"·"파일 업로드" 칸에 보이고, 누르면 윈도우 탐색기로 연다(없는 폴더면 알림)',
+      (tester) async {
+        await _open(
+          tester,
+          json: todoJson(
+            id: 'path1',
+            downloadPath: r'Z:\없는\자료',
+            uploadPath: r'Z:\없는\결과',
+          ),
+        );
+        expect(find.text('파일 다운로드'), findsOneWidget);
+        expect(find.text('파일 업로드'), findsOneWidget);
+        expect(_in('todo-detail-download-path', r'Z:\없는\자료'), findsOneWidget);
+        expect(_in('todo-detail-upload-path', r'Z:\없는\결과'), findsOneWidget);
+        expect(
+          tester.getTopLeft(_key('todo-detail-upload-path')).dy,
+          greaterThan(tester.getTopLeft(_key('todo-detail-download-path')).dy),
+        );
+
+        await tester.ensureVisible(_key('todo-detail-upload-path'));
+        // 폴더가 있는지 실제 파일 시스템에 묻는다 — 진짜 비동기로 기다린다.
+        await tester.runAsync(() async {
+          await tester.tap(_in('todo-detail-upload-path', r'Z:\없는\결과'));
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        });
+        await tester.pump();
+        expect(find.text(r'이 PC에서 폴더를 찾을 수 없습니다: Z:\없는\결과'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 3));
+      },
+    );
+
+    testWidgets('경로가 없으면 그 칸이 없다', (tester) async {
+      await _open(tester, json: todoJson(id: 'path2'));
+      expect(_key('todo-detail-download-path'), findsNothing);
+      expect(_key('todo-detail-upload-path'), findsNothing);
+      expect(find.text('파일 업로드'), findsNothing);
     });
   });
 
@@ -1510,7 +1561,11 @@ void main() {
         mode: TodoViewMode.panel,
       );
       await _openMenu(tester);
-      expect(_menuKeys(tester), ['todo-menu-favorite', 'todo-menu-edit']);
+      expect(_menuKeys(tester), [
+        'todo-menu-favorite',
+        'todo-menu-edit',
+        'todo-menu-upload',
+      ]);
       final host = tester.getRect(_key('panel-host'));
       final menuRect = tester.getRect(_key('todo-menu-edit'));
       expect(host.contains(menuRect.topLeft), isTrue);
@@ -2112,6 +2167,7 @@ void main() {
         'todo-menu-favorite',
         'todo-menu-edit',
         'todo-menu-download',
+        'todo-menu-upload',
       ]);
       await tester.tapAt(const Offset(5, 400));
       await tester.pumpAndSettle();

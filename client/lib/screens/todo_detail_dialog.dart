@@ -1,16 +1,20 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../models/todo.dart';
 import '../services/chat_socket.dart' show SimpleCommentDeleted;
+import '../services/folder_dialog.dart' show openFolderInExplorer;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../services/todo_api.dart';
 import '../services/todo_download.dart';
+import '../services/todo_upload.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart'
     show ChatImageAttachments, DownloadableFile;
@@ -445,6 +449,18 @@ class _TodoDetailState extends State<TodoDetail> {
     }
   }
 
+  /// 폴더 경로를 윈도우 탐색기로 연다. 못 열면(폴더가 없음·PC가 아님) 까닭을 알리고, PC가 아니면 경로를 복사해 둔다.
+  Future<void> _openFolder(String path) async {
+    final error = await openFolderInExplorer(path);
+    if (error == null || !mounted) return;
+    if (!Platform.isWindows) {
+      await Clipboard.setData(ClipboardData(text: path));
+      if (mounted) _toast('$error 경로를 복사했습니다.');
+      return;
+    }
+    _toast(error);
+  }
+
   void _openRoom({String? messageId}) {
     final room = _room;
     final open = widget.onOpenRoom;
@@ -715,6 +731,25 @@ class _TodoDetailState extends State<TodoDetail> {
           ),
         ],
       ],
+      // 폴더 경로(만든 사람이 생성 창에서 고른 것) — 누르면 이 PC의 윈도우 탐색기로 연다.
+      if (t.downloadPath case final path?) ...[
+        const SizedBox(height: 20),
+        const _Label('파일 다운로드'),
+        _FolderPathLink(
+          key: const ValueKey('todo-detail-download-path'),
+          path: path,
+          onOpen: () => _openFolder(path),
+        ),
+      ],
+      if (t.uploadPath case final path?) ...[
+        const SizedBox(height: 20),
+        const _Label('파일 업로드'),
+        _FolderPathLink(
+          key: const ValueKey('todo-detail-upload-path'),
+          path: path,
+          onOpen: () => _openFolder(path),
+        ),
+      ],
       if (t.sourceMessageId != null && canOpenRoom) ...[
         const SizedBox(height: 12),
         Align(
@@ -828,6 +863,11 @@ class _TodoDetailState extends State<TodoDetail> {
         TodoMenuAction.favorite => _toggleFavorite(),
         TodoMenuAction.edit => _edit(),
         TodoMenuAction.download => _download(),
+        TodoMenuAction.upload => uploadTodoFiles(
+          context,
+          widget.session,
+          _todo,
+        ),
         TodoMenuAction.delete => _delete(),
       },
       // 목록·일정 카드의 ⋯와 같은 항목(todo_menu.dart).
@@ -1129,6 +1169,49 @@ class _TodoDetailState extends State<TodoDetail> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 폴더 경로 한 줄 — 📁 + 경로(강조색·밑줄). 누르면 [onOpen](윈도우 탐색기로 열기).
+class _FolderPathLink extends StatelessWidget {
+  final String path;
+  final VoidCallback onOpen;
+  const _FolderPathLink({super.key, required this.path, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Tooltip(
+        message: '윈도우 탐색기로 열기',
+        child: InkWell(
+          onTap: onOpen,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.folder_open_outlined, size: 18, color: primary),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    path,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: primary,
+                      decoration: TextDecoration.underline,
+                      decorationColor: primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

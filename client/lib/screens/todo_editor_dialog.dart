@@ -10,6 +10,7 @@ import '../models/room.dart';
 import '../models/todo.dart';
 import '../services/api_client.dart' show UploadCancelToken;
 import '../services/file_type_utils.dart';
+import '../services/folder_dialog.dart';
 import '../services/room_chat_controller.dart'
     show UploadedAttachment, uploadPlainFile;
 import '../services/session.dart';
@@ -156,8 +157,9 @@ class _ReminderDraft {
 }
 
 /// 할 일 만들기·고치기(대화상자/전체 화면/패널 안 화면 공용) — 잔디 생성 창 모양: 칸마다 왼쪽에 회색 아이콘(이름표·글자
-/// 수 카운터 없음), 위에서부터 대화방(맨 위 — 아래에 "만든 뒤에는 못 바꾼다" 안내), 제목(필수), 설명, 파일 업로드(30개까지 —
-/// 오른쪽 아래 `N / 30`), 담당자(회색 상자 + 오른쪽 아래 `✏ 담당자 관리` — 방 멤버 중 여러 명, 새로 만들 때 기본은 나),
+/// 수 카운터 없음), 위에서부터 대화방(맨 위 — 아래에 "만든 뒤에는 못 바꾼다" 안내), 제목(필수), 설명, 파일(`파일 다운로드 (경로
+/// 선택)` — 받아 갈 파일을 30개까지 붙이거나(오른쪽 아래 `N / 30`), PC에서는 파일 대신 폴더를 골라 그 경로를 지정, 그 아래
+/// `파일 업로드 (경로 선택)` — 결과물을 올릴 폴더, PC 전용), 담당자(회색 상자 + 오른쪽 아래 `✏ 담당자 관리` — 방 멤버 중 여러 명, 새로 만들 때 기본은 나),
 /// 기간(`시작 ~ 종료` 한 칸 — 누르면 달력과 시작/종료 시간 판), 알림(`알림을 받아보세요 (선택) ▾` — 5개까지), 맨 아래 [취소][저장하기].
 /// 제목이 있고 입력이 서버 규칙 안일 때만 저장할 수 있다.
 class TodoEditor extends StatefulWidget {
@@ -208,6 +210,15 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   final _description = TextEditingController();
   final _files = <_TodoFile>[];
   final _reminders = <_ReminderDraft>[];
+
+  /// 받아 갈 파일이 있는 폴더(`파일 다운로드 (경로 선택)`에서 파일 대신 폴더를 고름)와 결과물을 올릴 폴더(`파일 업로드 (경로
+  /// 선택)`) — 없으면 null.
+  String? _downloadPath;
+  String? _uploadPath;
+
+  /// "대화방에 알리기"(만들 때만, 기본 켜짐) — 할 일 카드는 어느 쪽이든 그 방에 올라가고 토픽·그룹이면 담당자를 멘션한다.
+  /// 켜면 방 멤버 모두에게 알림이 가고, 끄면 담당자만 멘션(알림 센터)으로 받는다.
+  bool _announce = true;
   List<AppUser> _assignees = [];
   DateTime? _start;
   DateTime? _due;
@@ -259,6 +270,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       _due = editing.due;
       _startMinutes = editing.startMinutes;
       _dueMinutes = editing.dueMinutes;
+      _downloadPath = editing.downloadPath;
+      _uploadPath = editing.uploadPath;
       for (final a in editing.attachments) {
         _files.add(
           _TodoFile.existing(
@@ -364,6 +377,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     '$_startMinutes~$_dueMinutes',
     ..._files.map((f) => f.result?.url ?? f.name),
     ..._reminders.map((r) => '${r.id}@${r.at.millisecondsSinceEpoch}'),
+    'download:$_downloadPath',
+    'upload:$_uploadPath',
   ].join('|');
 
   /// 처음 연 뒤로 바뀐 입력이 있는지(닫을 때 "작성 취소"로 물을지).
@@ -500,6 +515,43 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       return 0;
     }
   }
+
+  /// `파일 다운로드 (경로 선택)` — PC는 파일을 고르면 붙이고, 파일을 고르지 않고 [열기]를 누르면 그때 열린 폴더를 받아 갈
+  /// 경로로 지정한다(folder_dialog.dart). 모바일은 예전처럼 파일만 고른다.
+  Future<void> _pickDownload() async {
+    if (!Platform.isWindows) return _pickFiles();
+    final picked = await pickFilesOrFolder(
+      title: '파일을 고르거나, 폴더를 연 채로 [열기]를 누르면 그 폴더 경로가 지정됩니다',
+    );
+    if (picked == null || !mounted) return;
+    final folder = picked.folder;
+    if (folder != null) {
+      setDownloadPath(folder);
+    } else {
+      addFiles([for (final f in picked.files) File(f)]);
+    }
+  }
+
+  /// `파일 업로드 (경로 선택)` — 결과물을 올릴 폴더를 고른다(PC).
+  Future<void> _pickUploadFolder() async {
+    final folder = await FilePicker.getDirectoryPath(
+      dialogTitle: '담당자가 파일을 올릴 폴더 선택',
+      initialDirectory: _uploadPath,
+    );
+    if (folder != null && mounted) setUploadPath(folder);
+  }
+
+  /// 받아 갈 파일이 있는 폴더를 지정한다(null이면 지운다) — 테스트가 직접 부르기도 한다.
+  void setDownloadPath(String? path) => setState(() {
+    _downloadPath = path;
+    _serverError = null;
+  });
+
+  /// 결과물을 올릴 폴더를 지정한다(null이면 지운다) — 테스트가 직접 부르기도 한다.
+  void setUploadPath(String? path) => setState(() {
+    _uploadPath = path;
+    _serverError = null;
+  });
 
   Future<void> _pickFiles() async {
     final result = await FilePicker.pickFiles(allowMultiple: true);
@@ -693,6 +745,9 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           attachments: attachments,
           // 이미 지난 시각의 알림은 서버가 거절하므로 만들 때는 미래 것만 보낸다(추가할 때 이미 걸렀다).
           reminders: [for (final r in _reminders) r.at],
+          downloadPath: _downloadPath,
+          uploadPath: _uploadPath,
+          announce: _announce,
           sourceMessageId: widget.sourceMessageId,
           sourceCommentId: widget.sourceCommentId,
         );
@@ -755,6 +810,11 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       for (final r in before.reminders)
         '${r.id}@${r.remindAt.millisecondsSinceEpoch}',
     ];
+    // 폴더 경로 — 지웠으면 null을 보낸다.
+    if (_downloadPath != before.downloadPath) {
+      fields['downloadPath'] = _downloadPath;
+    }
+    if (_uploadPath != before.uploadPath) fields['uploadPath'] = _uploadPath;
     if (reminderNow.join('|') != reminderBefore.join('|')) {
       fields['reminders'] = [
         for (final r in _reminders)
@@ -1110,7 +1170,55 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
         label: '알림',
         child: _reminderField(context),
       ),
+      // 만들 때만 — 고칠 때는 카드를 다시 올리지 않는다(새로 추가된 담당자에게는 알림만 간다).
+      if (!_isEdit) ...[gap, _announceField(context)],
     ];
+  }
+
+  /// "대화방에 알리기" 체크 — 할 일 카드는 어느 쪽이든 그 대화방에 올라가고 토픽·그룹이면 담당자를 멘션한다. 켜면(기본)
+  /// 방 멤버 모두에게 알림이 가고, 끄면 담당자만 멘션(알림 센터)으로 받는다.
+  Widget _announceField(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return InkWell(
+      key: const ValueKey('todo-announce'),
+      borderRadius: BorderRadius.circular(_fieldRadius),
+      onTap: _submitting ? null : () => setState(() => _announce = !_announce),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Checkbox(
+              key: const ValueKey('todo-announce-check'),
+              value: _announce,
+              visualDensity: VisualDensity.compact,
+              onChanged: _submitting
+                  ? null
+                  : (v) => setState(() => _announce = v ?? true),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('대화방에 알리기'),
+                    const SizedBox(height: 2),
+                    Text(
+                      _announce
+                          ? '대화방 멤버 모두에게 알리고, 담당자는 멘션합니다.'
+                          : '할 일 카드는 대화방에 올라가고, 알림은 담당자에게만 멘션으로 갑니다.',
+                      style: TextStyle(fontSize: 12, color: hint),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 대화방 — 고르는 칸(▾) 또는 잠긴 칸(🔒), 그 바로 아래 "만든 뒤에는 대화방을 바꿀 수 없다"는 안내(잔디처럼 만들 때는
@@ -1180,31 +1288,35 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     );
   }
 
-  /// 파일 업로드 — 가로 전체 옅은 단추, 그 오른쪽 아래 `N / 30`(N 굵게), 그 아래 붙인 파일(한 줄에 하나).
+  /// 파일 — `파일 다운로드 (경로 선택)`(가로 전체 옅은 단추, 그 오른쪽 아래 `N / 30`(N 굵게), 그 아래 붙인 파일과 지정한
+  /// 폴더 경로), 그 아래 `파일 업로드 (경로 선택)`(PC — 결과물을 올릴 폴더)와 지정한 경로.
   Widget _fileField(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final full = _files.length >= todoAttachmentsMaxCount;
+    final buttonStyle = FilledButton.styleFrom(
+      minimumSize: const Size.fromHeight(_fieldHeight),
+      visualDensity: VisualDensity.standard,
+      backgroundColor: _softFill(theme),
+      foregroundColor: scheme.onSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(_fieldRadius),
+      ),
+      textStyle: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w500,
+      ),
+    );
+    final downloadPath = _downloadPath;
+    final uploadPath = _uploadPath;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.tonalIcon(
           key: const ValueKey('todo-attach'),
-          onPressed: _submitting || full ? null : _pickFiles,
+          onPressed: _submitting || full ? null : _pickDownload,
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('파일 업로드 (선택)'),
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(_fieldHeight),
-            visualDensity: VisualDensity.standard,
-            backgroundColor: _softFill(theme),
-            foregroundColor: scheme.onSurface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(_fieldRadius),
-            ),
-            textStyle: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          label: const Text('파일 다운로드 (경로 선택)'),
+          style: buttonStyle,
         ),
         Padding(
           padding: const EdgeInsets.only(top: 6),
@@ -1241,6 +1353,46 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
                 });
                 unawaited(_pumpUploads());
               },
+            ),
+          ),
+        if (downloadPath != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _FolderPathTile(
+              key: const ValueKey('todo-download-path'),
+              path: downloadPath,
+              onClear: _submitting ? null : () => setDownloadPath(null),
+              clearKey: const ValueKey('todo-download-path-clear'),
+            ),
+          ),
+        // 결과물을 올릴 폴더 — 윈도우 폴더 경로라 PC에서만 고른다(모바일은 이미 지정된 경로만 보이고 지울 수 있다).
+        if (Platform.isWindows) ...[
+          const SizedBox(height: 10),
+          FilledButton.tonalIcon(
+            key: const ValueKey('todo-upload-path-button'),
+            onPressed: _submitting ? null : _pickUploadFolder,
+            icon: const Icon(Icons.drive_folder_upload_outlined, size: 18),
+            label: const Text('파일 업로드 (경로 선택)'),
+            style: buttonStyle,
+          ),
+        ],
+        if (uploadPath != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _FolderPathTile(
+              key: const ValueKey('todo-upload-path'),
+              path: uploadPath,
+              onClear: _submitting ? null : () => setUploadPath(null),
+              clearKey: const ValueKey('todo-upload-path-clear'),
+            ),
+          ),
+        if (Platform.isWindows && uploadPath == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '지정하지 않으면 담당자가 올린 파일은 나에게 메시지로 옵니다.',
+              key: const ValueKey('todo-upload-path-hint'),
+              style: TextStyle(fontSize: 12, color: theme.hintColor),
             ),
           ),
       ],
@@ -1593,6 +1745,58 @@ class _FieldRow extends StatelessWidget {
 }
 
 /// 첨부 한 줄 — 파일 아이콘 + 이름 + 크기(올리는 중이면 진행 막대, 실패하면 다시 시도), 오른쪽 x로 빼기.
+/// 지정한 폴더 경로 한 줄 — 📁 경로(길면 말줄임, 마우스를 올리면 전체) + ✕(지우기).
+class _FolderPathTile extends StatelessWidget {
+  final String path;
+  final VoidCallback? onClear;
+  final Key clearKey;
+  const _FolderPathTile({
+    super.key,
+    required this.path,
+    required this.onClear,
+    required this.clearKey,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: _fieldBorder(theme)),
+        borderRadius: BorderRadius.circular(_fieldRadius),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.folder_outlined,
+            size: 20,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Tooltip(
+              message: path,
+              child: Text(
+                path,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          ),
+          IconButton(
+            key: clearKey,
+            tooltip: '경로 지우기',
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: onClear,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FileTile extends StatelessWidget {
   final _TodoFile file;
   final VoidCallback? onRemove;

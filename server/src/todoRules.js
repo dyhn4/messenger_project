@@ -81,6 +81,23 @@ function parseDescription(raw) {
   return { value };
 }
 
+/** 폴더 경로 글자 길이 상한 — Windows 긴 경로(32767)까지는 필요 없고 공유 폴더 경로면 넉넉하다. */
+export const TODO_PATH_MAX = 1000;
+
+/**
+ * 폴더 경로(downloadPath·uploadPath) — 빈 값·null은 "지정 안 함"(null). 한 줄 글자만(줄바꿈·제어 문자 거절), 길이 상한.
+ * 서버는 그 폴더가 있는지 모른다(사용자 PC나 공유 폴더의 경로라) — 여는 것·올리는 것은 앱이 그 PC에서 한다.
+ */
+export function parseFolderPath(raw, label) {
+  if (raw === undefined || raw === null) return { value: null };
+  if (typeof raw !== 'string') return { error: `${label} 경로가 올바르지 않습니다.` };
+  const value = raw.trim();
+  if (!value) return { value: null };
+  if (/[\u0000-\u001f]/.test(value)) return { error: `${label} 경로가 올바르지 않습니다.` };
+  if (value.length > TODO_PATH_MAX) return { error: `${label} 경로가 너무 깁니다.` };
+  return { value };
+}
+
 function parseDate(raw, label) {
   if (raw === undefined || raw === null || raw === '') return { value: null };
   if (!isValidDateString(raw)) return { error: `${label}이 올바르지 않습니다. (YYYY-MM-DD)` };
@@ -282,6 +299,10 @@ export function parseTodoCreate(body, now = Date.now(), sourceFileUrls = []) {
   if (attachments.error) return attachments;
   const reminders = parseNewReminders(body?.reminders ?? [], now);
   if (reminders.error) return reminders;
+  const downloadPath = parseFolderPath(body?.downloadPath, '파일 다운로드');
+  if (downloadPath.error) return downloadPath;
+  const uploadPath = parseFolderPath(body?.uploadPath, '파일 업로드');
+  if (uploadPath.error) return uploadPath;
   for (const key of ['sourceMessageId', 'sourceCommentId']) {
     if (body?.[key] !== undefined && body?.[key] !== null && !isUuid(body[key])) {
       return { error: '원본 메시지 정보가 올바르지 않습니다.' };
@@ -297,6 +318,8 @@ export function parseTodoCreate(body, now = Date.now(), sourceFileUrls = []) {
     dueTime: dueTime.value,
     attachments: attachments.value,
     reminders: reminders.value,
+    downloadPath: downloadPath.value,
+    uploadPath: uploadPath.value,
     sourceMessageId: body?.sourceMessageId ?? null,
     sourceCommentId: body?.sourceCommentId ?? null,
   };
@@ -314,6 +337,8 @@ export const PATCH_FIELDS = [
   'attachments',
   'reminders',
   'progress',
+  'downloadPath',
+  'uploadPath',
 ];
 export const ASSIGNEE_FORBIDDEN_FIELDS = ['assigneeIds'];
 
@@ -378,6 +403,15 @@ export function parseTodoPatch(body) {
   if ('progress' in body) {
     if (!isValidProgress(body.progress)) return { error: '진척률은 0·25·50·75·100 중 하나여야 합니다.' };
     fields.progress = body.progress;
+  }
+  for (const [key, label] of [
+    ['downloadPath', '파일 다운로드'],
+    ['uploadPath', '파일 업로드'],
+  ]) {
+    if (!(key in body)) continue;
+    const r = parseFolderPath(body[key], label);
+    if (r.error) return r;
+    fields[key] = r.value;
   }
   if (Object.keys(fields).length === 0) return { error: '수정할 내용이 없습니다.' };
   return { fields };
@@ -693,4 +727,57 @@ export function parseTodoListQuery(query) {
     limit,
     offset,
   };
+}
+
+// ── 할 일 카드 메시지 ───────────────────────────────────────────────────
+
+/** 카드 스냅샷의 설명 글자 수·첨부 이름 수 상한 — 카드에는 앞부분만 보이고 자세한 건 상세에서 본다. */
+export const TODO_CARD_DESCRIPTION_MAX = 300;
+export const TODO_CARD_ATTACHMENTS_MAX = 5;
+
+/**
+ * 할 일을 만들 때 그 대화방에 올리는 "할 일 카드" 메시지(생성 창 "대화방에 알리기" — 잔디의 할 일 메시지) — `{ text,
+ * mentions, card }`. 메시지 자체는 일반 글(type 'text')이고 messages.todo_id·todo_card로 카드가 붙는다(앨범 공유와 같은
+ * 방식). [text]는 미리보기·검색·알림에 쓰이는 `[할 일] 제목`이고, 멘션할 수 있는 방(토픽·그룹 — [roomCanMention])이면 다음
+ * 줄에 `담당: @이름 @이름`을 붙여 담당자(만든 사람 빼고)를 멘션한다 — 그러면 다른 멤버에게는 평범한 메시지이고 담당자만
+ * 멘션 알림을 받는다. 1:1은 상대가 한 명뿐이라 일반 메시지 알림으로 충분하고, 나와의 대화는 알림이 없다. [card]는 보낼
+ * 때의 스냅샷(제목·설명 앞부분·기간·첨부 이름·담당자 이름) — 앱은 이것을 먼저 그리고, 할 일을 다시 받아 최신으로 바꾼다.
+ */
+export function todoCardMessage({ todo, assignees = [], creatorId, attachments = [], roomCanMention }) {
+  const description = typeof todo.description === 'string' ? todo.description : null;
+  const card = {
+    title: todo.title,
+    description: description && description.length > TODO_CARD_DESCRIPTION_MAX
+      ? `${description.slice(0, TODO_CARD_DESCRIPTION_MAX)}…`
+      : description,
+    startDate: todo.startDate ?? null,
+    startTime: todo.startTime ?? null,
+    dueDate: todo.dueDate ?? null,
+    dueTime: todo.dueTime ?? null,
+    attachments: attachments
+      .slice(0, TODO_CARD_ATTACHMENTS_MAX)
+      .map((a) => ({ kind: a.kind === 'file' ? 'file' : 'image', fileName: a.fileName ?? null })),
+    attachmentCount: attachments.length,
+    assigneeNames: assignees.map((a) => a.name),
+  };
+  let text = `[할 일] ${todo.title}`;
+  const mentions = [];
+  const targets = roomCanMention ? assignees.filter((a) => a.id !== creatorId) : [];
+  if (targets.length > 0) {
+    text += '\n담당:';
+    for (const a of targets) {
+      text += ' ';
+      const s = text.length;
+      text += `@${a.name}`;
+      mentions.push({ type: 'user', userId: a.id, s, e: text.length });
+    }
+  }
+  return { text, mentions, card };
+}
+
+/** 메시지 DTO의 할 일 카드 `{ id(할 일이 지워졌으면 null), ...스냅샷 }` — 카드가 없거나 지운 메시지면 null. */
+export function toSharedTodoDto(m) {
+  const card = m?.todoCard;
+  if (!card || typeof card !== 'object' || m.deletedAt) return null;
+  return { ...card, id: m.todoId ?? null };
 }

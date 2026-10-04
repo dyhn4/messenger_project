@@ -31,6 +31,7 @@ import '../models/announcement.dart';
 import 'calendar_api.dart';
 import 'calendar_controller.dart';
 import 'call_controller.dart';
+import 'call_quality.dart' show callVideoTierFromWire;
 import 'chat_socket.dart';
 import 'notification_api.dart';
 import 'notification_controller.dart';
@@ -327,6 +328,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _commentDeletedSub;
   StreamSubscription? _presenceSub;
   StreamSubscription<CallState>? _callStateSub;
+  StreamSubscription<CallMicRequest>? _callMicSub;
   StreamSubscription<Announcement>? _announcementSub;
   StreamSubscription<Announcement>? _announcementUpdatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _announcementDeletedSub;
@@ -1351,6 +1353,12 @@ class Session extends ChangeNotifier {
     unawaited(loadServerStickers(force: true));
     _callStateSub?.cancel();
     _callStateSub = chatSocket.callStates.listen(_applyCallState);
+    _callMicSub?.cancel();
+    _callMicSub = chatSocket.callMicRequests.listen((request) {
+      // 지금 이 기기가 그 통화에 있을 때만(다른 기기에서 통화 중이면 그 기기가 따른다).
+      if (callController.roomId != request.roomId) return;
+      unawaited(callController.applyHostMic(request.on));
+    });
     _announcementSub?.cancel();
     _announcementSub = chatSocket.announcements.listen(
       _handleIncomingAnnouncement,
@@ -1632,6 +1640,9 @@ class Session extends ChangeNotifier {
     } else {
       callStates.remove(state.roomId);
     }
+    if (state.active && callController.roomId == state.roomId) {
+      _syncCallController(state);
+    }
 
     final iAmIn = state.participantIds.contains(userId);
     if (state.active &&
@@ -1661,8 +1672,26 @@ class Session extends ChangeNotifier {
       roomId,
       roomLabel: match.isEmpty ? null : match.first.displayName(userId ?? ''),
     );
+    // 이미 진행 중이던 통화면 지금 아는 진행자·화질 단계를 먼저 넘긴다(내 참가로 바뀐 값은 곧 call:state로 온다).
+    final known = callStates[roomId];
+    if (known != null) _syncCallController(known);
     chatSocket.joinCall(roomId);
     notifyListeners();
+  }
+
+  /// 서버가 알려준 통화 상태(진행자·화질 단계)를 지금 통화 중인 컨트롤러에 넘긴다.
+  void _syncCallController(CallState state) {
+    callController.applyServerCallState(
+      hostId: state.hostId,
+      videoTier: callVideoTierFromWire(state.videoTier),
+    );
+  }
+
+  /// 진행자가 참가자 패널에서 [targetId]의 마이크를 켜거나 끈다 — 서버가 진행자인지 확인한다.
+  void controlCallMic(String targetId, bool on) {
+    final roomId = callController.roomId;
+    if (roomId == null) return;
+    chatSocket.controlCallMic(roomId, targetId, on);
   }
 
   Future<void> leaveCall() async {
@@ -2135,6 +2164,9 @@ class Session extends ChangeNotifier {
     }
 
     final room = match.isEmpty ? null : match.first;
+    // 알림을 받을 사람이 정해진 메시지(담당자에게만 알리는 할 일 카드)면 그 밖의 사람은 안읽음만 늘고 알림은 없다.
+    final notifyOnly = m.notifyOnly;
+    if (notifyOnly != null && !notifyOnly.contains(userId)) return;
     // 알림 끄기는 안읽음 뱃지(이미 위에서 증가시켰다)는 그대로 두고, 알림(배너/토스트)만 막는다.
     if (room?.muted == true) return;
     final teamTag = _teamTagFor(room);
@@ -2746,8 +2778,9 @@ class Session extends ChangeNotifier {
     return _upsertRoom(await request);
   }
 
-  Future<Room> startDm(String targetUserId) async {
-    final room = await api!.startDm(_requireTeamId, targetUserId);
+  /// [targetUserId]와의 1:1 대화방(없으면 서버가 만든다) — [teamId]를 안 주면 지금 팀. 방을 열지는 않는다.
+  Future<Room> startDm(String targetUserId, {String? teamId}) async {
+    final room = await api!.startDm(teamId ?? _requireTeamId, targetUserId);
     return _upsertStartedDm(room);
   }
 

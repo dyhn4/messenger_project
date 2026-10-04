@@ -5,6 +5,7 @@ import 'comment.dart';
 import 'mention.dart';
 import 'poll.dart';
 import 'text_format.dart';
+import 'todo.dart' show SharedTodo;
 
 /// 메시지에 들어있는 링크의 오픈그래프 미리보기(server/src/linkPreview.js) — 메시지 전송
 /// 직후엔 없다가(서버가 백그라운드로 긁어옴) 나중에 message:linkPreview로 채워질 수 있어서
@@ -195,6 +196,13 @@ class Message {
   /// "앨범 공유"로 보낸 글에 붙은 앨범 카드(album_share_dialog.dart) — 아니면 null. 메시지 자체는 일반 글이다.
   final SharedAlbum? sharedAlbum;
 
+  /// 할 일을 만들 때 올라간 할 일 카드(todo_message_card.dart) — 아니면 null. 메시지 자체는 일반 글(`[할 일] 제목`)이다.
+  final SharedTodo? sharedTodo;
+
+  /// 막 도착한 메시지(message:new)의 알림을 받을 사람만 — 있으면 이 사람들 말고는 알림을 띄우지 않는다(메시지는 보이고
+  /// 안읽음도 는다). 할 일 생성 창에서 "대화방에 알리기"를 끄고 올린 할 일 카드가 담당자만 적어 보낸다. 보통은 null.
+  final List<String>? notifyOnly;
+
   Message({
     required this.id,
     required this.roomId,
@@ -236,6 +244,8 @@ class Message {
     this.isPoll = false,
     this.poll,
     this.sharedAlbum,
+    this.sharedTodo,
+    this.notifyOnly,
     List<Comment>? comments,
   }) : comments = comments ?? [],
        mentions = mentions ?? <Mention>[];
@@ -334,6 +344,8 @@ class Message {
           ? null
           : Poll.fromJson(Map<String, dynamic>.from(json['poll'] as Map)),
       sharedAlbum: SharedAlbum.fromJson(json['sharedAlbum']),
+      sharedTodo: SharedTodo.fromJson(json['sharedTodo']),
+      notifyOnly: (json['notifyOnly'] as List?)?.whereType<String>().toList(),
     );
   }
 

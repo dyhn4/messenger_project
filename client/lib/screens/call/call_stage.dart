@@ -422,6 +422,72 @@ class CallAvatar extends StatelessWidget {
 }
 
 /// 컨트롤바 위에 잠깐 뜨는 안내(예: "○○님이 손을 들었습니다").
+/// 진행자가 마이크를 켜 달라고 요청했을 때 영상 위쪽에 뜨는 안내 띠 — [마이크 켜기] / [그대로 두기]. 답할 때까지
+/// 남아 있고, 스스로 마이크를 켜도 사라진다.
+class CallMicRequestBanner extends StatelessWidget {
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
+  const CallMicRequestBanner({
+    super.key,
+    required this.onAccept,
+    required this.onDecline,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: const ValueKey('call-mic-request'),
+      color: const Color(0xF0323232),
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.mic, size: 18, color: callSpeakingColor),
+                SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '진행자가 마이크를 켜 달라고 요청했습니다',
+                    style: TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  key: const ValueKey('call-mic-request-decline'),
+                  onPressed: onDecline,
+                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                  child: const Text('그대로 두기'),
+                ),
+                const SizedBox(width: 4),
+                FilledButton.icon(
+                  key: const ValueKey('call-mic-request-accept'),
+                  onPressed: onAccept,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: callSpeakingColor,
+                    foregroundColor: Colors.black87,
+                  ),
+                  icon: const Icon(Icons.mic, size: 16),
+                  label: const Text('마이크 켜기'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class CallToast extends StatelessWidget {
   final String message;
   const CallToast({super.key, required this.message});

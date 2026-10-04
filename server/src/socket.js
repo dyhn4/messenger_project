@@ -1,5 +1,13 @@
 import { verifySocketToken } from './auth.js';
-import { activeCallStatesFor, callSummaryText, joinCall, leaveAllCallsForSocket, leaveCall } from './calls.js';
+import {
+  activeCallStatesFor,
+  callSummaryText,
+  canControlMic,
+  joinCall,
+  leaveAllCallsForSocket,
+  leaveCall,
+  refreshVideoTiers,
+} from './calls.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { markMessageRead } from './db/queries/messages.js';
 import {
@@ -17,6 +25,14 @@ import { findUserById } from './db/queries/users.js';
 import { markConnected, markDisconnected } from './presence.js';
 import { notifyIncomingCall, roomTagFor } from './push.js';
 import { sendUserMessage } from './sendMessage.js';
+
+/**
+ * 서버 전체 통화 참가자 수가 바뀌어 화질 단계가 달라진 **다른** 통화들에 새 상태를 다시 알린다(callQuality.js) — 참가·
+ * 퇴장한 그 방은 이미 바로 위에서 알렸다.
+ */
+function emitVideoTierChanges(io) {
+  for (const state of refreshVideoTiers()) io.to(state.roomId).emit('call:state', state);
+}
 
 /**
  * 통화가 끝났으면(마지막 참가자가 나갔으면) 그 대화에 요약 한 줄을 시스템 메시지로 남긴다.
@@ -191,6 +207,7 @@ export function registerSocket(io) {
       if (!room || !(await isRoomMember(room.id, socket.data.userId))) return;
       const state = joinCall(room.id, socket.data.userId, socket.id);
       io.to(room.id).emit('call:state', state);
+      emitVideoTierChanges(io);
 
       // 통화를 **막 시작한 경우에만** 앱이 꺼져 있는 멤버들에게 전화를 건다(참가자가 나
       // 혼자고 시작한 사람도 나). 중간에 누가 합류할 때마다 다시 울리면, 이미 안 받기로
@@ -218,7 +235,20 @@ export function registerSocket(io) {
       if (typeof roomId !== 'string') return;
       const state = leaveCall(roomId, socket.data.userId, socket.id);
       io.to(roomId).emit('call:state', state);
+      emitVideoTierChanges(io);
       await postCallSummary(io, state);
+    });
+
+    // payload: { roomId, targetId, on } — 진행자가 참가자 패널에서 다른 사람의 마이크를 끄거나(on=false), 켜 달라고
+    // 요청한다(on=true — 대상 앱이 [마이크 켜기]/[그대로 두기]를 묻고 본인이 수락해야 켜진다). 진행자인지·대상이 지금
+    // 통화에 있는지는 여기서 확인하고(calls.js canControlMic), 대상의 기기들(user:<id>)에 그대로 전한다 — 마이크를
+    // 실제로 켜고 끄는 건 대상 앱이 한다(LiveKit 트랙은 그 사람 기기의 것이라).
+    socket.on('call:mic', (payload) => {
+      const roomId = payload?.roomId;
+      const targetId = payload?.targetId;
+      if (typeof roomId !== 'string' || typeof targetId !== 'string' || typeof payload?.on !== 'boolean') return;
+      if (!canControlMic(roomId, socket.data.userId, targetId)) return;
+      io.to(`user:${targetId}`).emit('call:mic', { roomId, on: payload.on, byId: socket.data.userId });
     });
 
     socket.on('disconnect', () => {
@@ -230,6 +260,7 @@ export function registerSocket(io) {
           console.error('[call] 통화 기록 남기기 실패:', err?.message ?? err),
         );
       }
+      emitVideoTierChanges(io);
       // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다.
       if (markDisconnected(socket.data.userId)) {
         io.emit('presence:update', { userId: socket.data.userId, online: false });

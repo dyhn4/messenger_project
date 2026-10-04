@@ -284,6 +284,30 @@ void main() {
       await _close(tester);
     });
 
+    testWidgets('검색 전에는 탭 줄 아래가 옅은 회색(메시지 예약 패널과 같은 색), 결과가 나오면 사라진다', (
+      tester,
+    ) async {
+      await _mount(tester, _session(teamCount: 1), onOpenRoom: (_, _) {});
+      final idle = find.byKey(const ValueKey('search-idle-area'));
+      expect(idle, findsOneWidget);
+      final theme = Theme.of(tester.element(idle));
+      expect(
+        tester.widget<ColoredBox>(idle).color,
+        theme.colorScheme.surfaceContainer,
+      );
+      // 회색 영역은 탭 줄 바로 아래부터 패널 바닥까지.
+      final tabBottom = tester
+          .getBottomLeft(find.byKey(const ValueKey('search-tab-all')))
+          .dy;
+      expect(tester.getTopLeft(idle).dy, greaterThanOrEqualTo(tabBottom));
+      expect(tester.getBottomLeft(idle).dy, 900);
+
+      await _search(tester, '마케팅');
+      expect(idle, findsNothing);
+      expect(find.byKey(const ValueKey('search-result-count')), findsOneWidget);
+      await _close(tester);
+    });
+
     testWidgets('대화방 결과를 누르면 그 방으로 간다 — 같은 팀이면 onOpenRoom(메시지 없음)', (
       tester,
     ) async {

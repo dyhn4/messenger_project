@@ -93,12 +93,12 @@ final class ProjectEntry extends CenterEntry {
 
 /// [tab]에 보여 줄 줄들(최신순).
 ///
-///   - 안 읽은 대화: 안 읽은 메시지나 공지가 있는 방 전부(지금 팀도, 여러 팀에 걸쳐) — 예전 알림 센터가 보여
-///     주던 것 그대로, 마지막 활동순.
+///   - 안 읽은 대화(메시지 탭): 안 읽은 메시지가 있는 방 전부(지금 팀도, 여러 팀에 걸쳐), 마지막 활동순. 공지는 메시지가
+///     아니라 보드·공지 탭(공지 줄)으로만 간다 — 공지만 안 읽은 방은 여기 없다.
 ///   - 멘션: 서버 멘션 알림(멘션 탭 드롭다운에서 고른 종류만 — [NotificationController.mentionFilter]).
 ///   - 보드·공지: 서버 보드 알림 + 안 읽은 공지가 있는 방(공지 시각).
 ///   - 프로젝트: 프로젝트 알림함.
-///   - 전체: 위 넷을 시간순으로 섞는다. 안 읽은 대화는 공지 때문에만 뜬 방을 뺀다(공지는 공지 줄로 따로 나온다).
+///   - 전체: 위 넷을 시간순으로 섞는다.
 ///
 /// [unreadRooms]는 Session.unreadRooms. [center]의 "안 읽은 것만" 필터가 켜져 있으면 서버 목록은 이미 안
 /// 읽은 것만 받아 왔고, 프로젝트 알림은 여기서 걸러낸다(방·공지는 원래 전부 안 읽은 것이다).
@@ -119,10 +119,10 @@ List<CenterEntry> buildCenterEntries({
 
   switch (tab) {
     case NotificationTab.unreadChats:
-      // 안 읽은 메시지가 있는 방(멘션만 안 읽은 방은 멘션 탭에 있으니 뺀다)과 안 읽은 공지가 있는 방.
+      // 안 읽은 메시지가 있는 방(멘션만 안 읽은 방은 멘션 탭에 있으니 뺀다). 공지는 보드·공지 탭 몫이다.
       return [
         for (final r in _byActivity(unreadRooms))
-          if (isUnreadChatRoom(r) || r.hasUnreadAnnouncement) RoomEntry(r),
+          if (isUnreadChatRoom(r)) RoomEntry(r),
       ];
     case NotificationTab.mention:
       return [for (final n in center.itemsFor(tab)) ServerEntry(n)];
@@ -156,7 +156,7 @@ List<Room> _byActivity(List<Room> rooms) =>
 /// 탭 배지에 쓸 안 읽음 수.
 ///   - 멘션·보드: 서버가 센 개수(멘션은 고른 필터 종류만 — 전체 멘션/@나를 멘션/@all 멘션, 보드는 안 읽은 공지 수를
 ///     더한다). 전체 탭은 멘션 필터와 상관없이 멘션 두 종류의 합이다.
-///   - 안 읽은 대화: 안 읽은 방의 수.
+///   - 안 읽은 대화: 안 읽은 메시지가 있는 방의 수(공지는 보드에 센다).
 ///   - 프로젝트: [projectUnread](Session.projectUnread — 소켓으로 실시간).
 ///   - 전체: 넷의 합.
 int notificationTabBadge(
@@ -177,10 +177,7 @@ int notificationTabBadge(
   return switch (tab) {
     NotificationTab.mention => center.mentionUnread(center.mentionFilter),
     NotificationTab.board => board,
-    NotificationTab.unreadChats =>
-      unreadRooms
-          .where((r) => isUnreadChatRoom(r) || r.hasUnreadAnnouncement)
-          .length,
+    NotificationTab.unreadChats => unreadRooms.where(isUnreadChatRoom).length,
     NotificationTab.project => projectUnread,
     NotificationTab.all =>
       center.counts.mention +

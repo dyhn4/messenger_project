@@ -21,93 +21,16 @@ export function callsEnabled() {
   return !!LIVEKIT_API_SECRET;
 }
 
-/**
- * 지금 진행 중인 통화 — roomId -> { startedBy, startedAt, participants: Map<userId, Set<socketId>> }.
- *
- * 미디어는 LiveKit이 알아서 처리하므로 여기 상태는 오직 **신호(누가 통화를 걸었고 지금 누가
- * 들어와 있는지)**를 위한 것이다. 서버 메모리에만 두는 이유: 통화는 서버가 살아있는 동안만
- * 의미가 있고(재시작되면 LiveKit 연결도 끊긴다) DB에 남길 이유가 없다. 통화 기록(부재중 등)은
- * 나중에 별도로 메시지로 남긴다.
- *
- * 한 사용자가 여러 기기로 접속할 수 있어서 userId -> socketId 집합으로 센다 — 폰에서 나가도
- * PC에서 아직 통화 중이면 참가자 목록에서 빠지면 안 되기 때문이다.
- */
-const activeCalls = new Map();
-
-function toState(roomId) {
-  const call = activeCalls.get(roomId);
-  if (!call) return { roomId, active: false, startedBy: null, startedAt: null, participantIds: [] };
-  return {
-    roomId,
-    active: true,
-    startedBy: call.startedBy,
-    startedAt: call.startedAt,
-    participantIds: [...call.participants.keys()],
-  };
-}
-
-export function callStateFor(roomId) {
-  return toState(roomId);
-}
-
-/**
- * 지금 통화가 진행 중인 방들의 상태 — 소켓이 막 붙었을 때(앱을 켰을 때) 한 번 내려준다.
- * call:state는 "바뀌는 순간"에만 브로드캐스트되므로, 이게 없으면 통화가 이미 진행 중인 방에
- * 나중에 들어온 사람은 그 통화를 아예 모른다(참여 버튼이 안 뜬다).
- */
-export function activeCallStatesFor(roomIds) {
-  return roomIds.filter((id) => activeCalls.has(id)).map(toState);
-}
-
-/** 통화 참가(이미 진행 중이면 합류, 아니면 이 사람이 시작한 것). 바뀐 상태를 돌려준다. */
-export function joinCall(roomId, userId, socketId) {
-  let call = activeCalls.get(roomId);
-  if (!call) {
-    call = {
-      startedBy: userId,
-      startedAt: Date.now(),
-      participants: new Map(),
-      // 통화가 끝난 뒤 "몇 명이 참여했는지"를 남기려면, **지금** 남아있는 사람이 아니라
-      // 한 번이라도 들어왔던 사람을 세야 한다(먼저 나간 사람도 참여자다).
-      everJoined: new Set(),
-    };
-    activeCalls.set(roomId, call);
-  }
-  const sockets = call.participants.get(userId) ?? new Set();
-  sockets.add(socketId);
-  call.participants.set(userId, sockets);
-  call.everJoined.add(userId);
-  return toState(roomId);
-}
-
-/**
- * 통화에서 나가기. 마지막 참가자가 나가면 통화 자체가 끝난다.
- *
- * 통화가 끝난 경우 [state.ended]에 요약(시작 시각·길이·참여자 수)을 같이 담아 돌려준다 —
- * 호출부(socket.js)가 그걸로 대화에 "화상회의 · 12분 · 3명 참여" 같은 기록을 남긴다.
- */
-export function leaveCall(roomId, userId, socketId) {
-  const call = activeCalls.get(roomId);
-  if (!call) return toState(roomId);
-  const sockets = call.participants.get(userId);
-  if (sockets) {
-    sockets.delete(socketId);
-    if (sockets.size === 0) call.participants.delete(userId);
-  }
-  if (call.participants.size > 0) return toState(roomId);
-
-  activeCalls.delete(roomId);
-  return {
-    ...toState(roomId),
-    ended: {
-      startedBy: call.startedBy,
-      durationMs: Date.now() - call.startedAt,
-      // 건 사람만 들어왔다 나갔으면 아무도 안 받은 것 = 부재중.
-      participantIds: [...call.everJoined],
-      answered: call.everJoined.size > 1,
-    },
-  };
-}
+// 진행 중인 통화의 메모리 상태(참가자·진행자·화질 단계)는 callState.js에 있다 — DB를 몰라 단위 테스트가 그대로 돌린다.
+export {
+  activeCallStatesFor,
+  callStateFor,
+  canControlMic,
+  joinCall,
+  leaveAllCallsForSocket,
+  leaveCall,
+  refreshVideoTiers,
+} from './callState.js';
 
 /**
  * 통화가 끝났을 때 대화에 남길 한 줄. 녹화 대신 "언제 누가 얼마나 회의했는지"를 대화 기록에
@@ -126,17 +49,6 @@ export function callSummaryText(ended, names) {
   const rest = names.length - shown.length;
   const who = rest > 0 ? `${shown.join(', ')} 외 ${rest}명` : shown.join(', ');
   return `화상회의 · ${length} · ${who} 참여`;
-}
-
-/** 소켓이 끊겼을 때(앱 종료/네트워크 끊김) 그 소켓이 들어가 있던 모든 통화에서 빼낸다. */
-export function leaveAllCallsForSocket(userId, socketId) {
-  const changed = [];
-  for (const [roomId, call] of activeCalls) {
-    if (call.participants.get(userId)?.has(socketId)) {
-      changed.push(leaveCall(roomId, userId, socketId));
-    }
-  }
-  return changed;
 }
 
 /**

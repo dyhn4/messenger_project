@@ -15,6 +15,7 @@ import { findRoomById, getRoomLastReadMap } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { topicAccess } from './access.js';
 import { toSharedAlbumDto } from './albumRules.js';
+import { toSharedTodoDto } from './todoRules.js';
 import { isUuid } from './favoritesRules.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
@@ -121,6 +122,8 @@ export function toMessageDto(m) {
     poll: m.type === 'poll' && !m.deletedAt ? (m.poll ?? null) : null,
     // "앨범 공유" 메시지의 앨범 카드 { id(앨범이 지워졌으면 null), title, teamName } — 아니면 null(albumRules.js).
     sharedAlbum: toSharedAlbumDto(m),
+    // 할 일을 만들 때 올린 할 일 카드 { id(할 일이 지워졌으면 null), title, … 스냅샷 } — 아니면 null(todoRules.js).
+    sharedTodo: toSharedTodoDto(m),
   };
 }
 

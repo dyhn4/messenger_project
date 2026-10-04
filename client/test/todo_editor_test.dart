@@ -627,9 +627,161 @@ void main() {
   });
 
   // ────────────────────────── 파일 업로드 ──────────────────────────
+  group('대화방에 알리기', () {
+    testWidgets('만들 때만 보이고 기본은 켜짐 — 끄고 저장하면 announce=false', (tester) async {
+      final session = _session();
+      final api = FakeTodoApi(me: 'me');
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          room: session.rooms.first,
+          api: api,
+        ),
+      );
+      expect(find.text('대화방에 알리기'), findsOneWidget);
+      expect(
+        tester.widget<Checkbox>(_key('todo-announce-check')).value,
+        isTrue,
+      );
+      await _submitWithTitle(tester, '켜 둔 채로');
+      expect(api.lastCreate!['announce'], isTrue);
+
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          room: session.rooms.first,
+          api: api,
+        ),
+      );
+      await tester.ensureVisible(_key('todo-announce'));
+      await tester.tap(_key('todo-announce'));
+      await tester.pump();
+      expect(
+        tester.widget<Checkbox>(_key('todo-announce-check')).value,
+        isFalse,
+      );
+      await _submitWithTitle(tester, '조용히');
+      expect(api.lastCreate!['announce'], isFalse);
+    });
+
+    testWidgets('고치기에는 없다(카드를 다시 올리지 않는다)', (tester) async {
+      final session = _session();
+      final json = todoJson(id: 'a1', title: '이미 있는 일');
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          editing: Todo.fromJson(json),
+          api: FakeTodoApi(me: 'me', todos: [json]),
+        ),
+      );
+      expect(_key('todo-announce'), findsNothing);
+    });
+  });
+
   group('파일 업로드', () {
     testWidgets(
-      '가로 전체 옅은 단추 "+ 파일 업로드 (선택)", 그 오른쪽 아래 "N / 30"(N 굵게), 붙인 파일은 그 아래 한 줄씩 — x로 빼면 수가 준다',
+      '폴더 경로 — 다운로드 경로(파일 대신 폴더)와 그 아래 "파일 업로드 (경로 선택)" 단추, 지정하면 경로 줄(✕로 지움)과 함께 만든다',
+      (tester) async {
+        final session = _session();
+        final api = FakeTodoApi(me: 'me');
+        await _open(
+          tester,
+          (c) => showTodoEditor(
+            c,
+            session: session,
+            room: session.rooms.first,
+            api: api,
+          ),
+        );
+        final download = _key('todo-attach');
+        final upload = _key('todo-upload-path-button');
+        expect(
+          find.descendant(of: upload, matching: find.text('파일 업로드 (경로 선택)')),
+          findsOneWidget,
+        );
+        expect(
+          tester.getTopLeft(upload).dy,
+          greaterThan(tester.getBottomLeft(download).dy),
+          reason: '업로드 단추는 다운로드 단추 아래',
+        );
+        // 업로드 경로가 없으면 메시지로 받는다는 안내.
+        expect(find.text('지정하지 않으면 담당자가 올린 파일은 나에게 메시지로 옵니다.'), findsOneWidget);
+
+        final state = _state(tester);
+        state.setDownloadPath(r'\\nas\자료\견적');
+        state.setUploadPath(r'\\nas\결과');
+        await tester.pump();
+        expect(
+          find.descendant(
+            of: _key('todo-download-path'),
+            matching: find.text(r'\\nas\자료\견적'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: _key('todo-upload-path'),
+            matching: find.text(r'\\nas\결과'),
+          ),
+          findsOneWidget,
+        );
+        expect(_key('todo-upload-path-hint'), findsNothing);
+
+        // ✕로 지웠다가 다시 지정.
+        await tester.tap(_key('todo-download-path-clear'));
+        await tester.pump();
+        expect(_key('todo-download-path'), findsNothing);
+        state.setDownloadPath(r'C:\자료');
+        await tester.pump();
+
+        await _submitWithTitle(tester, '견적서 보내기');
+        expect(api.lastCreate!['downloadPath'], r'C:\자료');
+        expect(api.lastCreate!['uploadPath'], r'\\nas\결과');
+      },
+    );
+
+    testWidgets('고치기 — 지정된 경로가 보이고, 바꾸거나 지운 것만 보낸다', (tester) async {
+      final session = _session();
+      final json = todoJson(
+        id: 'p1',
+        title: '경로 있는 일',
+        downloadPath: r'\\nas\자료',
+        uploadPath: r'\\nas\결과',
+      );
+      final api = FakeTodoApi(me: 'me', todos: [json]);
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          editing: Todo.fromJson(json),
+          api: api,
+        ),
+      );
+      expect(_key('todo-download-path'), findsOneWidget);
+      expect(_key('todo-upload-path'), findsOneWidget);
+      await tester.ensureVisible(_key('todo-upload-path-clear'));
+      await tester.tap(_key('todo-upload-path-clear'));
+      await tester.pump();
+      _state(tester).setDownloadPath(r'\\nas\새 자료');
+      await tester.pump();
+      await tester.ensureVisible(_key('todo-submit'));
+      await tester.tap(_key('todo-submit'));
+      await tester.pumpAndSettle();
+      expect(api.lastUpdate, {
+        'downloadPath': r'\\nas\새 자료',
+        'uploadPath': null,
+      });
+    });
+
+    testWidgets(
+      '가로 전체 옅은 단추 "+ 파일 다운로드 (경로 선택)", 그 오른쪽 아래 "N / 30"(N 굵게), 붙인 파일은 그 아래 한 줄씩 — x로 빼면 수가 준다',
       (tester) async {
         final session = _session();
         final api = FakeTodoApi(me: 'me');
@@ -648,7 +800,7 @@ void main() {
         );
         final attach = _key('todo-attach');
         expect(
-          find.descendant(of: attach, matching: find.text('파일 업로드 (선택)')),
+          find.descendant(of: attach, matching: find.text('파일 다운로드 (경로 선택)')),
           findsOneWidget,
         );
         expect(
@@ -2421,6 +2573,9 @@ void main() {
           onClosePanel: () {},
         ),
       );
+      // 맨 아래 알림 칸 밑에 메뉴가 들어갈 만큼 창을 키운다(파일 칸에 업로드 경로 단추가 더해져 생성 화면이 길어졌다).
+      tester.view.physicalSize = const Size(1200, 1000);
+      await tester.pumpAndSettle();
       final panel = tester.getRect(_key('panel-host'));
       void expectInPanel(Rect rect, String what) {
         expect(

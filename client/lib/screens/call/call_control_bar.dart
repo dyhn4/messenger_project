@@ -11,6 +11,7 @@ class CallControlBar extends StatelessWidget {
   final bool camOn;
   final bool sharing;
   final bool handRaised;
+  final bool whiteboardOpen;
   final CallViewMode viewMode;
   final CallPanel panel;
   final int participantCount;
@@ -21,6 +22,7 @@ class CallControlBar extends StatelessWidget {
   final VoidCallback onToggleParticipants;
   final VoidCallback onToggleChat;
   final VoidCallback onToggleHand;
+  final VoidCallback onToggleWhiteboard;
   final VoidCallback onToggleView;
   final VoidCallback onLeave;
 
@@ -30,6 +32,7 @@ class CallControlBar extends StatelessWidget {
     required this.camOn,
     required this.sharing,
     required this.handRaised,
+    this.whiteboardOpen = false,
     required this.viewMode,
     required this.panel,
     required this.participantCount,
@@ -40,6 +43,7 @@ class CallControlBar extends StatelessWidget {
     required this.onToggleParticipants,
     required this.onToggleChat,
     required this.onToggleHand,
+    required this.onToggleWhiteboard,
     required this.onToggleView,
     required this.onLeave,
   });
@@ -108,6 +112,15 @@ class CallControlBar extends StatelessWidget {
         highlight: handRaised ? callHandColor : null,
         showLabel: showLabels,
         onPressed: onToggleHand,
+      ),
+      CallBarButton(
+        key: const ValueKey('call-whiteboard'),
+        icon: Icons.draw,
+        label: '화이트보드',
+        tooltip: whiteboardOpen ? '화이트보드 닫기' : '화이트보드 열기',
+        selected: whiteboardOpen,
+        showLabel: showLabels,
+        onPressed: onToggleWhiteboard,
       ),
       CallBarButton(
         key: const ValueKey('call-view'),

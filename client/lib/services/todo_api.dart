@@ -28,7 +28,8 @@ abstract class TodoApi {
   Future<Todo> get(String id);
 
   /// `POST /api/rooms/:roomId/todos`. 날짜는 'YYYY-MM-DD', 시간([startTime]·[dueTime])은 그 날짜의 'HH:mm'(날짜 없이
-  /// 시간만 보내면 400), [reminders]는 ms 시각들.
+  /// 시간만 보내면 400), [reminders]는 ms 시각들, [downloadPath]·[uploadPath]는 폴더 경로(글자 — 없으면 null).
+  /// [announce]면(생성 창 "대화방에 알리기", 기본 켜짐) 서버가 그 방에 할 일 카드를 올리고 토픽·그룹이면 담당자를 멘션한다.
   Future<Todo> create(
     String roomId, {
     required String title,
@@ -40,6 +41,9 @@ abstract class TodoApi {
     String? dueTime,
     List<UploadedAttachment> attachments = const [],
     List<DateTime> reminders = const [],
+    String? downloadPath,
+    String? uploadPath,
+    bool announce = true,
     String? sourceMessageId,
     String? sourceCommentId,
   });
@@ -124,6 +128,9 @@ class RemoteTodoApi implements TodoApi {
     String? dueTime,
     List<UploadedAttachment> attachments = const [],
     List<DateTime> reminders = const [],
+    String? downloadPath,
+    String? uploadPath,
+    bool announce = true,
     String? sourceMessageId,
     String? sourceCommentId,
   }) async => Todo.fromJson(
@@ -141,6 +148,9 @@ class RemoteTodoApi implements TodoApi {
           'dueTime': ?dueTime,
           'attachments': [for (final a in attachments) a.toPayload()],
           'reminders': [for (final r in reminders) r.millisecondsSinceEpoch],
+          'downloadPath': ?downloadPath,
+          'uploadPath': ?uploadPath,
+          'announce': announce,
           'sourceMessageId': ?sourceMessageId,
           'sourceCommentId': ?sourceCommentId,
         },

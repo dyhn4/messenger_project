@@ -343,12 +343,20 @@ class CallState {
   final DateTime? startedAt;
   final List<String> participantIds;
 
+  /// 진행자 — 참가자 패널에서 다른 사람의 마이크를 켜고 끌 수 있다(예전 서버면 null).
+  final String? hostId;
+
+  /// 서버가 정한 영상 화질 단계('fhd'|'hd'|'sd'|'ld' — call_quality.dart, 예전 서버면 null).
+  final String? videoTier;
+
   const CallState({
     required this.roomId,
     required this.active,
     this.startedBy,
     this.startedAt,
     this.participantIds = const [],
+    this.hostId,
+    this.videoTier,
   });
 
   factory CallState.fromJson(Map<String, dynamic> json) => CallState(
@@ -362,8 +370,13 @@ class CallState {
           ),
     participantIds:
         (json['participantIds'] as List?)?.cast<String>() ?? const [],
+    hostId: json['hostId'] as String?,
+    videoTier: json['videoTier'] as String?,
   );
 }
+
+/// 진행자가 내 마이크를 켜거나 끄라고 했다(call:mic — 서버가 진행자인지 확인한 뒤 내 기기들에만 보낸다).
+typedef CallMicRequest = ({String roomId, bool on});
 
 /// 토픽에서 내보내졌거나 토픽이 삭제돼서 이 방이 내 목록에서 사라졌다는 알림(room:removed) —
 /// user: 방으로만 온다. Session이 방을 정리한 뒤 같은 모양으로 roomRemovedEvents에 흘려서
@@ -462,6 +475,7 @@ class ChatSocket {
       StreamController<CommentDeletedEvent>.broadcast();
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
   final _callStateController = StreamController<CallState>.broadcast();
+  final _callMicController = StreamController<CallMicRequest>.broadcast();
   final _announcementController = StreamController<Announcement>.broadcast();
   final _announcementUpdatedController =
       StreamController<Announcement>.broadcast();
@@ -647,6 +661,9 @@ class ChatSocket {
 
   /// 화상회의 상태가 바뀔 때마다(누가 들어오고 나갈 때) 그 방의 멤버 전원에게 온다.
   Stream<CallState> get callStates => _callStateController.stream;
+
+  /// 진행자의 마이크 켜기/끄기 요청(call:mic).
+  Stream<CallMicRequest> get callMicRequests => _callMicController.stream;
 
   /// 토픽방 공지가 새로 올라올 때마다(announcement:new) — 방 상단 배너와 공지 목록 화면이
   /// 이걸로 즉시 갱신된다.
@@ -1020,6 +1037,14 @@ class ChatSocket {
         CallState.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
+    socket.on('call:mic', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      final roomId = m['roomId'];
+      final on = m['on'];
+      if (roomId is String && on is bool) {
+        _callMicController.add((roomId: roomId, on: on));
+      }
+    });
     socket.on('presence:update', (data) {
       _presenceController.add(
         PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
@@ -1229,6 +1254,12 @@ class ChatSocket {
   /// 정상 종료는 명시적으로 알려야 남은 사람들 화면이 즉시 갱신된다.
   void leaveCall(String roomId) =>
       _socket?.emit('call:leave', {'roomId': roomId});
+
+  /// 진행자가 [targetId]의 마이크를 켜거나 끈다 — 서버가 진행자인지 확인하고 그 사람 기기에 전한다.
+  void controlCallMic(String roomId, String targetId, bool on) => _socket?.emit(
+    'call:mic',
+    {'roomId': roomId, 'targetId': targetId, 'on': on},
+  );
 
   /// 비밀 대화 메시지가 실제로 화면에 노출됐다는 신호 — 자동 삭제 타이머가 이 시점부터 시작된다.
   void markSecretMessageRead(String roomId, String messageId) {

@@ -34,6 +34,7 @@ import 'poll_card.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
 import 'shared_album_card.dart';
+import 'todo_message_card.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -174,6 +175,8 @@ class _MessageBubbleState extends State<MessageBubble> {
       isEditDeleteAllowed(widget.session) &&
       !widget.message.isPost &&
       !widget.message.isPoll &&
+      // 할 일 카드는 할 일에서 고친다(글을 고칠 게 없다).
+      widget.message.sharedTodo == null &&
       ((widget.message.type == MessageType.text && widget.onEdit != null) ||
           _isEditableMedia);
 
@@ -1034,6 +1037,10 @@ class _MessageBubbleState extends State<MessageBubble> {
             onOpenThread: widget.onOpenThread,
             onDelete: widget.onDelete,
           );
+        }
+        // 할 일을 만들 때 올라간 할 일 카드 — 글(`[할 일] 제목` + 담당자 멘션) 대신 카드를 그린다.
+        if (message.sharedTodo != null) {
+          return TodoMessageCard(session: widget.session, message: message);
         }
         // 안드로이드(터치)에서는 SelectableText였을 때 자체 롱프레스(단어 선택)가 부모
         // GestureDetector의 onLongPress(액션 시트)와 같은 롱프레스 기반이라 제스처 아레나를

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:client/models/message.dart';
 import 'package:client/models/room.dart';
 import 'package:client/models/team.dart';
 import 'package:client/models/todo.dart';
@@ -22,6 +23,7 @@ import 'package:client/widgets/filter_dropdown.dart';
 import 'package:client/widgets/home_shell_scope.dart';
 import 'package:client/widgets/panel_filters.dart' show memberChoicesFor;
 import 'package:client/widgets/todo_calendar_view.dart';
+import 'package:client/widgets/todo_message_card.dart';
 import 'package:client/widgets/todo_menu.dart';
 import 'package:client/widgets/todo_widgets.dart';
 import 'package:client/widgets/todos_panel.dart';
@@ -897,6 +899,112 @@ void main() {
   });
 
   // ────────────────────────── 카드 ──────────────────────────
+  group('채팅의 할 일 카드를 누르면 — 할 일 패널 안의 상세', () {
+    testWidgets(
+      'PC — 닫혀 있던 할 일 패널이 열리며 그 안에 상세가 뜨고(대화상자 아님), 열린 채로 다시 누르면 그 안에 또 뜬다',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 900);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final api = FakeTodoApi(
+          me: 'me',
+          todos: [
+            todoJson(id: 'c1', title: '카드로 연 할 일', assignees: ['me']),
+            todoJson(id: 'c2', title: '목록의 다른 일', assignees: ['me']),
+          ],
+        );
+        final session = _session();
+        var openKey = '';
+        var toggled = 0;
+        Message card(String id, String title) => Message.fromJson({
+          'id': 'm-$id',
+          'roomId': 'r1',
+          'senderId': 'me',
+          'senderName': '나',
+          'type': 'text',
+          'text': '[할 일] $title',
+          'createdAt': 1000,
+          'sharedTodo': {'id': id, 'title': title},
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: StatefulBuilder(
+              builder: (context, setOuter) => Scaffold(
+                body: HomeShellScope(
+                  openPanelKey: openKey.isEmpty ? null : openKey,
+                  panelRoom: null,
+                  panelGeneration: 0,
+                  currentRoomId: 'r1',
+                  togglePanel: (key) => setOuter(() {
+                    toggled++;
+                    openKey = openKey == key ? '' : key;
+                  }),
+                  closePanel: () => setOuter(() => openKey = ''),
+                  toggleCalendar: () {},
+                  openRoom: (room, {messageId}) {},
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            TodoMessageCard(
+                              session: session,
+                              message: card('c1', '카드로 연 할 일'),
+                              api: api,
+                              changed: const Stream.empty(),
+                            ),
+                            const SizedBox(height: 12),
+                            TodoMessageCard(
+                              session: session,
+                              message: card('c2', '목록의 다른 일'),
+                              api: api,
+                              changed: const Stream.empty(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (openKey == 'todos')
+                        SizedBox(
+                          key: const ValueKey('panel-box'),
+                          width: 420,
+                          child: TodosPanel(session: session, api: api),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(_key('panel-box'), findsNothing);
+
+        await tester.tap(find.byKey(const ValueKey('todo-card-m-c1')));
+        await tester.pumpAndSettle();
+        expect(toggled, 1, reason: '할 일 패널을 연다');
+        expect(find.byType(Dialog), findsNothing, reason: '대화상자가 아니다');
+        Finder inPanel(Finder f) =>
+            find.descendant(of: _key('panel-box'), matching: f);
+        expect(inPanel(find.byType(TodoDetail)), findsOneWidget);
+        expect(
+          tester.widget<Text>(inPanel(_key('todo-detail-title'))).data,
+          '카드로 연 할 일',
+        );
+
+        // 패널이 열린 채로 다른 카드를 누르면 패널을 다시 토글하지 않고 그 안에 상세를 올린다.
+        await tester.tap(find.byKey(const ValueKey('todo-card-m-c2')));
+        await tester.pumpAndSettle();
+        expect(toggled, 1, reason: '열린 패널을 닫지 않는다');
+        expect(
+          tester.widget<Text>(inPanel(_key('todo-detail-title')).last).data,
+          '목록의 다른 일',
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  });
+
   group('할 일 카드', () {
     testWidgets(
       '진행률 : N%(관점·진척률 색) · 생성일 · 즐겨찾기 별 · 굵은 제목 · 설명 두 줄 · 대화방/담당자/첨부 · 구분선 아래 일정',
@@ -1274,6 +1382,7 @@ void main() {
         'todo-menu-favorite',
         'todo-menu-edit',
         'todo-menu-download',
+        'todo-menu-upload',
         'todo-menu-delete',
       ]);
       Finder inItem(String key, String text) =>
@@ -1281,6 +1390,7 @@ void main() {
       expect(inItem('todo-menu-favorite', '즐겨찾기'), findsOneWidget);
       expect(inItem('todo-menu-edit', '할 일 수정'), findsOneWidget);
       expect(inItem('todo-menu-download', '파일 다운로드'), findsOneWidget);
+      expect(inItem('todo-menu-upload', '파일 업로드'), findsOneWidget);
       final delete = tester.widget<Text>(inItem('todo-menu-delete', '할 일 삭제'));
       final context = tester.element(_key('todo-menu-delete'));
       expect(delete.style?.color, Theme.of(context).colorScheme.error);
@@ -1292,8 +1402,13 @@ void main() {
       expect(ModalRoute.of(context)?.settings.name, todoPopupRouteName);
       await dismissMenu(tester);
 
+      // 담당자도 결과물을 올린다(파일 업로드).
       await openCardMenu(tester, 'assigned');
-      expect(menuKeys(tester), ['todo-menu-favorite', 'todo-menu-edit']);
+      expect(menuKeys(tester), [
+        'todo-menu-favorite',
+        'todo-menu-edit',
+        'todo-menu-upload',
+      ]);
       await dismissMenu(tester);
 
       await openCardMenu(tester, 'viewer');

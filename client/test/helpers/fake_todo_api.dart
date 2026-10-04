@@ -221,6 +221,9 @@ class FakeTodoApi implements TodoApi {
     String? dueTime,
     List<UploadedAttachment> attachments = const [],
     List<DateTime> reminders = const [],
+    String? downloadPath,
+    String? uploadPath,
+    bool announce = true,
     String? sourceMessageId,
     String? sourceCommentId,
   }) async {
@@ -247,6 +250,9 @@ class FakeTodoApi implements TodoApi {
       'reminders': [for (final r in reminders) r.millisecondsSinceEpoch],
       'sourceMessageId': sourceMessageId,
       'sourceCommentId': sourceCommentId,
+      'downloadPath': downloadPath,
+      'uploadPath': uploadPath,
+      'announce': announce,
     };
     final json = todoJson(
       id: 'new-${++_seq}',
@@ -262,6 +268,8 @@ class FakeTodoApi implements TodoApi {
       attachmentCount: attachments.length,
       sourceMessageId: sourceMessageId,
       sourceCommentId: sourceCommentId,
+      downloadPath: downloadPath,
+      uploadPath: uploadPath,
       me: me,
     );
     todos.add(json);
@@ -592,6 +600,8 @@ Map<String, dynamic> todoJson({
   List<Map<String, dynamic>> reminders = const [],
   String? sourceMessageId,
   String? sourceCommentId,
+  String? downloadPath,
+  String? uploadPath,
   String me = 'me',
   int createdAt = 1000,
 }) {
@@ -626,6 +636,8 @@ Map<String, dynamic> todoJson({
     'reminders': reminders,
     'sourceMessageId': sourceMessageId,
     'sourceCommentId': sourceCommentId,
+    'downloadPath': downloadPath,
+    'uploadPath': uploadPath,
     'createdAt': createdAt,
     'updatedAt': createdAt,
   };

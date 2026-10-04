@@ -159,7 +159,6 @@ void main() {
     WidgetTester tester,
     FakeBookmarkApi api, {
     Session? s,
-    bool desktop = true,
     double width = 420,
     List<Uri>? opened,
   }) async {
@@ -174,7 +173,6 @@ void main() {
           body: BookmarksPanel(
             session: s ?? session(),
             controller: controller,
-            isDesktop: desktop,
             openUrl: opened == null ? null : (uri) async => opened.add(uri),
           ),
         ),
@@ -340,30 +338,57 @@ void main() {
       await settleToasts(tester);
     });
 
-    testWidgets('팀 관리자: 순서 변경 → 핸들 → 드래그 → 완료에서 서버에 새 순서를 보낸다', (tester) async {
+    testWidgets('순서 변경 단추는 없다 — 카드를 꾹 눌러야 손잡이가 나온다', (tester) async {
+      await pumpPanel(tester, sample(admin: true));
+      expect(find.text('순서 변경'), findsNothing);
+      expect(find.byKey(const ValueKey('bookmark-reorder-bar')), findsNothing);
+      expect(find.byIcon(Icons.drag_indicator), findsNothing);
+      // 그냥 누르면 여는 것뿐, 손잡이는 안 나온다.
+      await tester.tap(find.text('결재 시스템'));
+      await tester.pump();
+      expect(find.byIcon(Icons.drag_indicator), findsNothing);
+    });
+
+    testWidgets('팀 관리자: 꾹 누르기 → 손잡이 → 드래그 → 완료에서 서버에 새 순서를 보낸다', (
+      tester,
+    ) async {
       final api = sample(admin: true);
       await pumpPanel(tester, api);
-      expect(find.byIcon(Icons.drag_indicator), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('bookmark-reorder')));
+      await tester.longPress(find.text('사내 위키'));
       await tester.pump();
-      expect(find.text('완료'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('bookmark-reorder-bar')),
+        findsOneWidget,
+      );
+      expect(find.text('손잡이를 끌어서 순서를 바꾸세요'), findsOneWidget);
       expect(find.byIcon(Icons.drag_indicator), findsNWidgets(3));
-      // 순서 변경 중에는 ⋯ 메뉴와 탭 전환이 없다.
+      // 순서 변경 중에는 ⋯ 메뉴·북마크 추가·탭 전환이 없다.
       expect(find.byIcon(Icons.more_vert), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.descendant(
+                of: find.byKey(const ValueKey('bookmark-add')),
+                matching: find.byWidgetPredicate((w) => w is FilledButton),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
 
-      // 첫 카드의 핸들을 두 칸 아래로.
+      // 첫 카드의 손잡이를 두 칸 아래로.
       await tester.drag(
         find.byIcon(Icons.drag_indicator).first,
         const Offset(0, 140),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('bookmark-reorder')));
+      await tester.tap(find.byKey(const ValueKey('bookmark-reorder-done')));
       await tester.pumpAndSettle();
       expect(
         api.calls.where((c) => c.startsWith('reorder:')).single,
         'reorder:team:t2,t3,t1',
       );
-      expect(find.text('순서 변경'), findsOneWidget);
+      expect(find.byKey(const ValueKey('bookmark-reorder-bar')), findsNothing);
       expect(find.byIcon(Icons.drag_indicator), findsNothing);
       await settleToasts(tester);
     });
@@ -371,41 +396,60 @@ void main() {
     testWidgets('순서를 안 바꾸고 완료하면 서버를 부르지 않는다', (tester) async {
       final api = sample(admin: true);
       await pumpPanel(tester, api);
-      await tester.tap(find.byKey(const ValueKey('bookmark-reorder')));
+      await tester.longPress(find.text('사내 위키'));
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('bookmark-reorder')));
+      await tester.tap(find.byKey(const ValueKey('bookmark-reorder-done')));
       await tester.pump();
       expect(api.calls.where((c) => c.startsWith('reorder')), isEmpty);
+      expect(find.byIcon(Icons.drag_indicator), findsNothing);
     });
 
-    testWidgets('일반 멤버: 팀 북마크의 순서 변경은 비활성 + 안내, 개인 북마크는 가능', (tester) async {
+    testWidgets('일반 멤버: 팀 북마크를 꾹 누르면 안내만, 개인 북마크는 손잡이가 나온다', (tester) async {
       await pumpPanel(tester, sample());
-      final button = tester.widget<TextButton>(
-        find.byKey(const ValueKey('bookmark-reorder')),
-      );
-      expect(button.onPressed, isNull);
-      expect(find.byTooltip('팀 북마크 순서는 관리자만 바꿀 수 있어요'), findsOneWidget);
+      await tester.longPress(find.text('결재 시스템'));
+      await tester.pump();
+      expect(find.text('팀 북마크 순서는 관리자만 바꿀 수 있어요'), findsOneWidget);
+      expect(find.byIcon(Icons.drag_indicator), findsNothing);
+      // 안내 토스트가 사라질 때까지(패널은 그대로).
+      await tester.pump(const Duration(seconds: 3));
 
       await tester.tap(find.byKey(const ValueKey('bookmark-tab-personal')));
       await tester.pump();
-      final personal = tester.widget<TextButton>(
-        find.byKey(const ValueKey('bookmark-reorder')),
+      await tester.longPress(find.text('내 블로그'));
+      await tester.pump();
+      expect(find.byIcon(Icons.drag_indicator), findsNWidgets(2));
+    });
+
+    testWidgets('북마크가 하나뿐이면 꾹 눌러도 안내만', (tester) async {
+      final api = FakeBookmarkApi(
+        BookmarkLists(
+          personal: [
+            _b(
+              'p1',
+              '내 블로그',
+              kind: BookmarkKind.personal,
+              canEdit: true,
+              canReorder: true,
+            ),
+          ],
+        ),
       );
-      expect(personal.onPressed, isNotNull);
+      await pumpPanel(tester, api);
+      await tester.tap(find.byKey(const ValueKey('bookmark-tab-personal')));
+      await tester.pump();
+      await tester.longPress(find.text('내 블로그'));
+      await tester.pump();
+      expect(find.text('순서를 바꿀 북마크가 둘 이상 있어야 해요'), findsOneWidget);
+      expect(find.byIcon(Icons.drag_indicator), findsNothing);
+      await settleToasts(tester);
     });
 
-    testWidgets('모바일: 순서 변경 단추가 없다', (tester) async {
-      await pumpPanel(tester, sample(admin: true), desktop: false, width: 360);
-      expect(find.byKey(const ValueKey('bookmark-reorder')), findsNothing);
-      expect(find.text('순서 변경'), findsNothing);
-      expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('폭 360에서 넘치지 않는다', (tester) async {
+    testWidgets('폭 360(모바일)에서도 꾹 눌러 순서를 바꾸고, 넘치지 않는다', (tester) async {
       await pumpPanel(tester, sample(admin: true), width: 360);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.byKey(const ValueKey('bookmark-reorder')));
+      await tester.longPress(find.text('사내 위키'));
       await tester.pump();
+      expect(find.byIcon(Icons.drag_indicator), findsNWidgets(3));
       expect(tester.takeException(), isNull);
     });
 
@@ -419,11 +463,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: BookmarksPanel(
-              session: session(),
-              controller: controller,
-              isDesktop: true,
-            ),
+            body: BookmarksPanel(session: session(), controller: controller),
           ),
         ),
       );

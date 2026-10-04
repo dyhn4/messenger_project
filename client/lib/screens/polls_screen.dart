@@ -13,6 +13,7 @@ import '../widgets/compact_menu.dart';
 import '../widgets/filter_dropdown.dart';
 import '../widgets/home_shell_scope.dart';
 import '../widgets/hover_toolbar.dart' show hoverMenuStyle;
+import '../widgets/panel_create_button.dart';
 import '../widgets/poll_card.dart';
 import '../widgets/side_panel_header.dart';
 import 'poll_create_dialog.dart';
@@ -291,29 +292,12 @@ class _PollsScreenState extends State<PollsScreen> {
 
   /// 가로 전체 `+ 투표 만들기` — 할 일 패널의 `+ 할 일 생성`과 같은 옅은 회색 둥근 단추.
   Widget _createButton(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: FilledButton.icon(
+      child: PanelCreateButton(
         key: const ValueKey('polls-create'),
+        label: '투표 만들기',
         onPressed: _create,
-        style: FilledButton.styleFrom(
-          backgroundColor: scheme.surfaceContainerHighest,
-          foregroundColor: scheme.onSurface,
-          minimumSize: const Size.fromHeight(44),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          textStyle: theme.textTheme.labelLarge?.copyWith(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        icon: const Icon(Icons.add, size: 20),
-        label: const Text(
-          '투표 만들기',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
       ),
     );
   }

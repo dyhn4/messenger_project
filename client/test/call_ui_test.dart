@@ -67,6 +67,7 @@ CallControlBar _bar({
     onToggleParticipants: () => l('participants'),
     onToggleChat: () => l('chat'),
     onToggleHand: () => l('hand'),
+    onToggleWhiteboard: () => l('whiteboard'),
     onToggleView: () => l('view'),
     onLeave: () => l('leave'),
   );

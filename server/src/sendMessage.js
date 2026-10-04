@@ -40,6 +40,11 @@ import { sanitizeTextFormat } from './textFormat.js';
  * 거절 결과에는 REST 응답용 [status]가 붙을 수 있다(소켓 ack에서는 무시된다).
  * 앨범 공유: [albumShare]({ albumId, title, teamName } — albums.js POST /albums/:id/messages가 검사한 값)를 주면
  * 글 메시지에 앨범 카드(messages.album_id·album_share)를 붙인다. 소켓 payload로는 넘길 수 없다.
+ * 할 일 카드: [todoShare]({ todoId, card } — todos.js가 할 일을 만들 때 todoRules.js todoCardMessage로 만든 값)를 주면
+ * 글 메시지에 할 일 카드(messages.todo_id·todo_card)를 붙인다. 소켓 payload로는 넘길 수 없다.
+ * [notifyOnly](userId 배열)를 주면 일반 메시지 알림(푸시)을 그 사람들에게만 보내고, 방송하는 메시지에도 실어 앱이 다른
+ * 사람에게는 알림을 띄우지 않게 한다(메시지는 모두에게 보이고 안읽음도 는다 — 할 일 생성 창 "대화방에 알리기"를 끈 카드).
+ * 멘션 알림은 그대로 간다.
  */
 export async function sendUserMessage({
   io,
@@ -49,6 +54,8 @@ export async function sendUserMessage({
   fallbackName = null,
   poll = null,
   albumShare = null,
+  todoShare = null,
+  notifyOnly = null,
 }) {
   const room = knownRoom ?? (await findRoomById(payload.roomId));
   if (!room || !(await isRoomMember(room.id, senderId))) {
@@ -194,6 +201,7 @@ export async function sendUserMessage({
     ...(albumShare && !isRich
       ? { albumId: albumShare.albumId, albumShare: { title: albumShare.title, teamName: albumShare.teamName ?? null } }
       : {}),
+    ...(todoShare && !isRich ? { todoId: todoShare.todoId, todoCard: todoShare.card } : {}),
   };
 
   let message;
@@ -236,6 +244,7 @@ export async function sendUserMessage({
   // 서명은 toMessageDto 안에서 실시간으로만 이뤄진다 — DB에는 항상 원본을 유지해서
   // 나중에 다시 조회될 때도 그때 시점 기준으로 새로 서명할 수 있게 한다.
   const broadcastMessage = toMessageDto(pollDto ? { ...message, poll: pollDto } : message);
+  if (Array.isArray(notifyOnly)) broadcastMessage.notifyOnly = notifyOnly;
   io.to(room.id).emit('message:new', broadcastMessage);
 
   // 응답(소켓 ack 등)을 기다리게 하지 않도록 백그라운드로 보낸다 — 실패해도(토큰 만료 등)
@@ -255,7 +264,7 @@ export async function sendUserMessage({
       console.error('[notifications] 알림 기록 실패:', err?.message ?? err);
     }
     await notifyOfflineMembers({
-      memberIds: ids,
+      memberIds: Array.isArray(notifyOnly) ? ids.filter((id) => notifyOnly.includes(id)) : ids,
       senderId,
       senderName: message.senderName,
       sender,

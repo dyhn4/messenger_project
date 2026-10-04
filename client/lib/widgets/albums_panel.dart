@@ -13,6 +13,7 @@ import 'compact_menu.dart';
 import 'compact_menu_anchor.dart';
 import 'filter_dropdown.dart';
 import 'home_shell_scope.dart';
+import 'panel_create_button.dart';
 import 'panel_filters.dart';
 import 'side_panel_header.dart';
 
@@ -211,13 +212,15 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         SidePanelHeader(title: '앨범', onClose: widget.onClose),
+        // 제목 아래 가로 구분선 — 투표·북마크 패널과 같다.
+        const Divider(height: 1),
+        // 가로 전체 `+ 앨범 생성` — 투표 패널의 `+ 투표 만들기`와 같은 옅은 회색 둥근 단추.
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: FilledButton.icon(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: PanelCreateButton(
             key: const ValueKey('album-create-button'),
+            label: '앨범 생성',
             onPressed: _create,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('앨범 생성'),
           ),
         ),
         Padding(

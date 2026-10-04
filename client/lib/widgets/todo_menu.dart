@@ -10,14 +10,15 @@ import 'todo_widgets.dart';
 // downloadTodoAttachments, 삭제 확인은 [confirmTodoDelete]를 함께 쓴다.
 
 /// 할 일 더보기 메뉴의 항목. 항목 키는 `todo-menu-<name>`(`todo-menu-favorite` …).
-enum TodoMenuAction { favorite, edit, download, delete }
+enum TodoMenuAction { favorite, edit, download, upload, delete }
 
 /// 더보기 메뉴의 폭 — 상세 •••와 카드 ⋯가 같다.
 const todoMenuConstraints = BoxConstraints(minWidth: 160, maxWidth: 240);
 
 /// 더보기 메뉴 항목(잔디) — `즐겨찾기`/`즐겨찾기 해제`(누구나) · `할 일 수정`(만든 사람·담당자 — [Todo.canEdit]) ·
-/// `파일 다운로드`(첨부가 있을 때, [downloading]이면 꺼짐) · `할 일 삭제`(만든 사람 — [Todo.canManage], 빨강). 작은
-/// 아이콘(흐린 색) + 13px 글자의 간결한 메뉴([CompactMenu]) 모양.
+/// `파일 다운로드`(첨부가 있을 때, [downloading]이면 꺼짐) · `파일 업로드`(만든 사람·담당자 — 결과물을 업로드 경로로, 없으면
+/// 만든 사람에게 메시지로 — todo_upload.dart) · `할 일 삭제`(만든 사람 — [Todo.canManage], 빨강). 작은 아이콘(흐린 색) +
+/// 13px 글자의 간결한 메뉴([CompactMenu]) 모양.
 List<PopupMenuEntry<TodoMenuAction>> todoMenuItems(
   BuildContext context,
   Todo todo, {
@@ -69,6 +70,8 @@ List<PopupMenuEntry<TodoMenuAction>> todoMenuItems(
         Icons.file_download_outlined,
         enabled: !downloading,
       ),
+    if (todo.canEdit)
+      item(TodoMenuAction.upload, '파일 업로드', Icons.file_upload_outlined),
     if (todo.canManage)
       item(
         TodoMenuAction.delete,

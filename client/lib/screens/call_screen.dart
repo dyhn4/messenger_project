@@ -14,6 +14,7 @@ import 'call/call_logic.dart';
 import 'call/call_participants_panel.dart';
 import 'call/call_snapshot.dart';
 import 'call/call_stage.dart';
+import 'call/call_whiteboard_view.dart';
 
 /// 화상회의 화면 — PC(Windows)와 폰 모두 이 한 화면을 그대로 쓴다. 줌처럼 어두운 화면에 영상
 /// 타일(갤러리 보기/스피커 보기), 아래 가운데에 둥근 컨트롤바(마이크·카메라·화면 공유·참가자·채팅·
@@ -58,6 +59,12 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _toastTimer;
   StreamSubscription<String>? _handSub;
 
+  /// 진행자가 내 마이크를 바꿈·누가 화이트보드를 엶 같은 알림 토스트.
+  StreamSubscription<String>? _noticeSub;
+
+  /// 영상 자리에 화이트보드를 띄웠는지(이 화면만 — 다른 사람은 각자 연다).
+  bool _whiteboardOpen = false;
+
   /// 통화 채팅 안읽음 — 채팅 패널을 닫아 둔 동안 남이 보낸 메시지 수.
   late final RoomChatController _chat;
   DateTime? _unreadBaseline;
@@ -69,6 +76,7 @@ class _CallScreenState extends State<CallScreen> {
     _handSub = widget.session.callController.handRaisedNames.listen(
       (name) => _showToast('$name님이 손을 들었습니다'),
     );
+    _noticeSub = widget.session.callController.notices.listen(_showToast);
     _chat = widget.session.controllerFor(widget.room);
     _unreadBaseline = latestMessageTime(_chat.messages) ?? DateTime.now();
     _chat.addListener(_onChatChanged);
@@ -78,6 +86,7 @@ class _CallScreenState extends State<CallScreen> {
   void dispose() {
     _chat.removeListener(_onChatChanged);
     _handSub?.cancel();
+    _noticeSub?.cancel();
     _toastTimer?.cancel();
     super.dispose();
   }
@@ -136,6 +145,31 @@ class _CallScreenState extends State<CallScreen> {
     } catch (e) {
       if (mounted) showAppToast(context, '화면 공유를 시작하지 못했습니다: $e');
     }
+  }
+
+  /// 화이트보드를 열고 닫는다 — 열 때는 다른 참가자들에게 알린다(그 사람들 화면은 각자 연다).
+  void _toggleWhiteboard() {
+    final board = widget.session.callController.whiteboard;
+    if (board == null) return;
+    setState(() => _whiteboardOpen = !_whiteboardOpen);
+    if (_whiteboardOpen) board.announceOpened();
+  }
+
+  /// 참가자 패널의 마이크 단추 — 내 줄이면 내 마이크, 다른 사람이면(진행자만) 그 사람의 마이크를 켜고 끈다.
+  void _toggleParticipantMic(CallPerson person) {
+    final controller = widget.session.callController;
+    if (person.isMe) {
+      unawaited(controller.toggleMic());
+      return;
+    }
+    if (!controller.isHost) return;
+    // 끄기는 바로 꺼지고, 켜기는 그 사람에게 켜 달라는 요청만 간다(본인이 [마이크 켜기]를 눌러야 켜진다).
+    widget.session.controlCallMic(person.id, !person.micOn);
+    _showToast(
+      person.micOn
+          ? '${person.name}님의 마이크를 껐습니다'
+          : '${person.name}님에게 마이크를 켜 달라고 요청했습니다',
+    );
   }
 
   Future<void> _leave() async {
@@ -198,11 +232,14 @@ class _CallScreenState extends State<CallScreen> {
                 lkRoom,
                 controller.raisedHands,
                 widget.room.members,
+                hostId: controller.hostId,
               );
         return CallParticipantsPanel(
           people: people,
           onClose: onClose,
           resolveUrl: session.resolveUrl,
+          canControlOthers: controller.isHost,
+          onToggleMic: _toggleParticipantMic,
         );
       },
     );
@@ -224,8 +261,11 @@ class _CallScreenState extends State<CallScreen> {
                 lkRoom,
                 controller.raisedHands,
                 widget.room.members,
+                hostId: controller.hostId,
               )
             : const <CallPerson>[];
+        final whiteboard = controller.whiteboard;
+        final showWhiteboard = ready && _whiteboardOpen && whiteboard != null;
         final tiles = ready ? buildCallTiles(lkRoom, people) : <CallTileData>[];
         final mode = effectiveViewMode(
           _chosenMode,
@@ -291,6 +331,12 @@ class _CallScreenState extends State<CallScreen> {
                                       ],
                                     ),
                                   )
+                                : showWhiteboard
+                                ? CallWhiteboardView(
+                                    board: whiteboard,
+                                    onClose: () =>
+                                        setState(() => _whiteboardOpen = false),
+                                  )
                                 : CallStage(
                                     tiles: tiles,
                                     speakingIds: activeSpeakerIds(lkRoom),
@@ -298,6 +344,21 @@ class _CallScreenState extends State<CallScreen> {
                                     resolveUrl: session.resolveUrl,
                                   ),
                           ),
+                          if (controller.micRequested)
+                            Positioned(
+                              left: 16,
+                              right: 16,
+                              top: 12,
+                              child: Center(
+                                child: CallMicRequestBanner(
+                                  onAccept: () =>
+                                      controller.answerMicRequest(accept: true),
+                                  onDecline: () => controller.answerMicRequest(
+                                    accept: false,
+                                  ),
+                                ),
+                              ),
+                            ),
                           if (_toast != null)
                             Positioned(
                               left: 16,
@@ -317,6 +378,7 @@ class _CallScreenState extends State<CallScreen> {
                       camOn: controller.cameraEnabled,
                       sharing: controller.screenShareEnabled,
                       handRaised: controller.handRaised,
+                      whiteboardOpen: showWhiteboard,
                       viewMode: mode,
                       panel: _panel,
                       participantCount: people.length,
@@ -329,6 +391,7 @@ class _CallScreenState extends State<CallScreen> {
                       onToggleChat: () =>
                           _togglePanel(CallPanel.chat, wide: wide),
                       onToggleHand: controller.toggleHand,
+                      onToggleWhiteboard: _toggleWhiteboard,
                       onToggleView: () => setMode(
                         mode == CallViewMode.speaker
                             ? CallViewMode.gallery

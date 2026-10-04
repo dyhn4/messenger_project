@@ -30,6 +30,7 @@ import {
   updateTodoCommentText,
 } from './db/queries/todos.js';
 import { findUserById } from './db/queries/users.js';
+import { canMention } from './notificationRules.js';
 import { canModifyContent } from './moderation.js';
 import { topicWriteDenial } from './permissions.js';
 import { isOnline } from './presence.js';
@@ -54,9 +55,11 @@ import {
   statusOf,
   storedAttachmentPaths,
   todoPermissions,
+  todoCardMessage,
   todoRole,
   todoRoomError,
 } from './todoRules.js';
+import { sendUserMessage } from './sendMessage.js';
 import { signFileUrl } from './upload.js';
 
 const ms = (d) => (d ? new Date(d).getTime() : null);
@@ -150,6 +153,9 @@ export async function loadTodoDtos(rows, viewerId) {
         .map((r) => ({ id: r.id, remindAt: ms(r.remindAt), sent: !!r.sentAt })),
       sourceMessageId: t.sourceMessageId ?? null,
       sourceCommentId: t.sourceCommentId ?? null,
+      // 폴더 경로(글자) — 상세에서 누르면 그 PC의 윈도우 탐색기로 연다.
+      downloadPath: t.downloadPath ?? null,
+      uploadPath: t.uploadPath ?? null,
       myRole: role,
       canEdit,
       canManage,
@@ -202,6 +208,40 @@ export function createTodosRouter(io) {
   /** 댓글 소식(새 댓글·수정·삭제)을 그 방 멤버 전원의 개인 룸으로 — 할 일 상세를 열어 둔 사람이 바로 받는다. */
   async function emitComment(todo, event, payload) {
     for (const id of await listRoomMemberIds(todo.roomId)) io.to(`user:${id}`).emit(event, payload);
+  }
+
+  /**
+   * 할 일 카드 메시지를 그 방에 올린다(todoRules.js todoCardMessage) — 올렸으면 true. 실패해도 할 일은 그대로 만든다.
+   * [notifyAll]이 false면 일반 메시지 알림을 담당자에게만 보낸다(sendUserMessage notifyOnly).
+   */
+  async function postTodoCard({ room, todo, me, input, notifyAll }) {
+    try {
+      const users = new Map((await listUsersByIds(input.assigneeIds)).map((u) => [u.id, u]));
+      const assignees = input.assigneeIds
+        .map((id) => users.get(id))
+        .filter(Boolean)
+        .map((u) => ({ id: u.id, name: u.name ?? u.username ?? '알 수 없음' }));
+      const { text, mentions, card } = todoCardMessage({
+        todo,
+        assignees,
+        creatorId: me,
+        attachments: input.attachments,
+        roomCanMention: canMention(room),
+      });
+      const result = await sendUserMessage({
+        io,
+        senderId: me,
+        room,
+        todoShare: { todoId: todo.id, card },
+        payload: { roomId: room.id, type: 'text', text, mentions },
+        notifyOnly: notifyAll ? null : input.assigneeIds,
+      });
+      if (!result.ok) console.error('[todos] 할 일 카드를 올리지 못했습니다:', result.error);
+      return !!result.ok;
+    } catch (e) {
+      console.error('[todos] 할 일 카드를 올리지 못했습니다:', e?.message ?? e);
+      return false;
+    }
   }
 
   /** 할 일 행 + 방 + 내 역할까지 — 방 멤버가 아니면 403을 보내고 null. */
@@ -295,6 +335,8 @@ export function createTodosRouter(io) {
         startTime: input.startTime,
         dueDate: input.dueDate,
         dueTime: input.dueTime,
+        downloadPath: input.downloadPath,
+        uploadPath: input.uploadPath,
         sourceMessageId,
         sourceCommentId,
       },
@@ -305,10 +347,16 @@ export function createTodosRouter(io) {
 
     const actor = await findUserById(me);
     const added = newlyAssigned([], input.assigneeIds, me);
+    // 할 일 카드는 늘 그 방에 올리고 토픽·그룹이면 담당자를 멘션한다. "대화방에 알리기"(기본 켜짐)면 방 멤버 모두에게 일반 메시지
+    // 알림이 가고, 끄면 담당자에게만 간다(카드는 그대로 보인다). 카드가 올라갔으면 그 메시지의 알림이 담당자 알림을 대신하므로
+    // 따로 보내는 담당자 푸시는 뺀다(못 올렸을 때만 예전처럼 푸시).
+    const announced = await postTodoCard({ room, todo: row, me, input, notifyAll: req.body?.announce !== false });
     await emitChanged(row, 'created', { actorId: me, title: row.title, addedAssigneeIds: added });
-    pushAssigned({ todo: row, room, actor, userIds: added }).catch((e) =>
-      console.error('[todos] 담당자 푸시 실패:', e?.message ?? e),
-    );
+    if (!announced) {
+      pushAssigned({ todo: row, room, actor, userIds: added }).catch((e) =>
+        console.error('[todos] 담당자 푸시 실패:', e?.message ?? e),
+      );
+    }
     const [dto] = await loadTodoDtos([row], me);
     res.status(201).json(dto);
   });
@@ -385,7 +433,7 @@ export function createTodosRouter(io) {
     }
 
     const columns = { ...period.columns };
-    for (const key of ['title', 'description']) {
+    for (const key of ['title', 'description', 'downloadPath', 'uploadPath']) {
       if (key in fields) columns[key] = fields[key];
     }
     // 담당자 진척률은 그 사람 행만, 담당자 없는 할 일은 예전처럼 할 일 값 — 전체 진척률은 updateTodo가 다시 맞춘다.

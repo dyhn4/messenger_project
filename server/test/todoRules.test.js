@@ -18,6 +18,7 @@ import {
   nextCompletedAt,
   orphanedProgress,
   parseAttachments,
+  parseFolderPath,
   parseTodoCreate,
   parseTodoListQuery,
   parseTodoPatch,
@@ -33,9 +34,11 @@ import {
   sourceFilePaths,
   statusOf,
   storedAttachmentPaths,
+  todoCardMessage,
   todoPermissions,
   todoRole,
   todoRoomError,
+  toSharedTodoDto,
   TODO_ATTACHMENTS_MAX,
   TODO_PROGRESS_DENIED,
   TODO_REMINDERS_MAX,
@@ -672,4 +675,78 @@ test('progressPerspective: assigneeId → 그 사람, 나의 할 일 → 나, �
   assert.equal(progressPerspective({ scope: 'assigned_by_me', assigneeId: U2, userId: U1 }), U2);
   assert.equal(progressPerspective({ scope: 'mine', assigneeId: U3, userId: U1 }), U3);
   assert.equal(progressPerspective({ scope: 'team', assigneeId: U2, userId: U1 }), U2);
+});
+
+test('폴더 경로(파일 다운로드·업로드) — 빈 값은 지정 안 함, 한 줄 글자만, 만들기·수정 모두', () => {
+  assert.deepEqual(parseFolderPath(undefined, '파일 업로드'), { value: null });
+  assert.deepEqual(parseFolderPath('   ', '파일 업로드'), { value: null });
+  const share = String.raw`\\nas\공유\보고서`;
+  assert.deepEqual(parseFolderPath(`  ${share} `, '파일 업로드'), { value: share });
+  assert.ok(parseFolderPath('C:/a\nb', '파일 업로드').error);
+  assert.ok(parseFolderPath(3, '파일 업로드').error);
+  assert.ok(parseFolderPath('C:/' + 'a'.repeat(1001), '파일 업로드').error);
+
+  const local = String.raw`C:\자료`;
+  const created = parseTodoCreate({ title: '보고서', downloadPath: local, uploadPath: '' });
+  assert.equal(created.downloadPath, local);
+  assert.equal(created.uploadPath, null);
+  assert.equal(parseTodoCreate({ title: '보고서' }).downloadPath, null);
+
+  const result = String.raw`\\nas\결과`;
+  assert.deepEqual(parseTodoPatch({ uploadPath: result }).fields, { uploadPath: result });
+  // null로 보내면 지운다.
+  assert.deepEqual(parseTodoPatch({ downloadPath: null }).fields, { downloadPath: null });
+  // 담당자도 고칠 수 있다(제목·설명과 같은 편집 권한).
+  assert.equal(patchDenial('assignee', 'u-creator', ['downloadPath', 'uploadPath']), null);
+  assert.ok(patchDenial('viewer', 'u-creator', ['uploadPath']));
+});
+
+test('할 일 카드 메시지 — 토픽·그룹이면 만든 사람을 뺀 담당자를 멘션하고, 구간은 글자와 맞는다', () => {
+  const todo = { title: '견적서 보내기', description: '거래처 A', dueDate: '2026-10-10', dueTime: '18:00' };
+  const assignees = [
+    { id: 'me', name: '나' },
+    { id: 'u2', name: '김철수' },
+    { id: 'u3', name: '이영희' },
+  ];
+  const { text, mentions, card } = todoCardMessage({
+    todo,
+    assignees,
+    creatorId: 'me',
+    attachments: [{ kind: 'file', fileName: '견적.xlsx', fileUrl: '/uploads/x' }],
+    roomCanMention: true,
+  });
+  assert.equal(text, '[할 일] 견적서 보내기\n담당: @김철수 @이영희');
+  assert.deepEqual(
+    mentions.map((m) => [m.userId, text.slice(m.s, m.e)]),
+    [
+      ['u2', '@김철수'],
+      ['u3', '@이영희'],
+    ],
+  );
+  assert.equal(card.title, '견적서 보내기');
+  assert.equal(card.dueTime, '18:00');
+  assert.deepEqual(card.attachments, [{ kind: 'file', fileName: '견적.xlsx' }]);
+  assert.equal(card.attachmentCount, 1);
+  assert.deepEqual(card.assigneeNames, ['나', '김철수', '이영희']);
+});
+
+test('할 일 카드 메시지 — 1:1·나와의 대화(멘션 못 하는 방)나 담당자가 나뿐이면 멘션 없이 제목만', () => {
+  const todo = { title: '보고서' };
+  const dm = todoCardMessage({ todo, assignees: [{ id: 'u2', name: '김철수' }], creatorId: 'me', roomCanMention: false });
+  assert.equal(dm.text, '[할 일] 보고서');
+  assert.deepEqual(dm.mentions, []);
+  const selfOnly = todoCardMessage({ todo, assignees: [{ id: 'me', name: '나' }], creatorId: 'me', roomCanMention: true });
+  assert.equal(selfOnly.text, '[할 일] 보고서');
+  assert.deepEqual(selfOnly.mentions, []);
+  // 긴 설명은 앞부분만.
+  const long = todoCardMessage({ todo: { title: 't', description: 'a'.repeat(400) }, roomCanMention: false });
+  assert.equal(long.card.description.length, 301);
+});
+
+test('메시지 DTO의 할 일 카드 — 할 일이 지워지면 id가 null, 지운 메시지·카드 없는 메시지는 null', () => {
+  const card = { title: '보고서' };
+  assert.deepEqual(toSharedTodoDto({ todoId: 't1', todoCard: card }), { title: '보고서', id: 't1' });
+  assert.deepEqual(toSharedTodoDto({ todoId: null, todoCard: card }), { title: '보고서', id: null });
+  assert.equal(toSharedTodoDto({ todoId: 't1', todoCard: card, deletedAt: new Date() }), null);
+  assert.equal(toSharedTodoDto({ text: 'hi' }), null);
 });

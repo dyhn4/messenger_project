@@ -986,7 +986,7 @@ void main() {
       _room('both', unread: 2, announcement: true, activityMinutesAgo: 15),
     ];
 
-    test('안 읽은 대화 탭 — 예전 알림 센터 그대로: 안 읽은 메시지·공지가 있는 방을 마지막 활동순으로', () async {
+    test('메시지 탭 — 안 읽은 메시지가 있는 방만 마지막 활동순으로(공지만 안 읽은 방은 보드·공지 탭 몫)', () async {
       final h = await loaded();
       final entries = buildCenterEntries(
         tab: NotificationTab.unreadChats,
@@ -998,7 +998,6 @@ void main() {
         'chat-new',
         'both',
         'chat-old',
-        'ann-only',
       ]);
     });
 
@@ -1091,7 +1090,8 @@ void main() {
       expect(badge(NotificationTab.mention), 1);
       // 보드 1 + 공지 2곳(각 1).
       expect(badge(NotificationTab.board), 3);
-      expect(badge(NotificationTab.unreadChats), 4);
+      // 메시지가 있는 방 3곳 — 공지만 안 읽은 방은 세지 않는다(보드에 센다).
+      expect(badge(NotificationTab.unreadChats), 3);
       expect(badge(NotificationTab.project), 4);
       // 멘션 1 + 보드 3 + 메시지가 있는 방 3 + 프로젝트 4.
       expect(badge(NotificationTab.all), 1 + 3 + 3 + 4);

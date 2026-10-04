@@ -527,10 +527,16 @@ export const messages = pgTable(
     // albums.js가 같이 고친다). 이 메시지가 보이는 방의 멤버는 앨범 방의 멤버가 아니어도 그 앨범을 볼 수 있다.
     albumId: uuid('album_id').references(() => albums.id, { onDelete: 'set null' }),
     albumShare: jsonb('album_share'),
+    // 할 일을 만들 때 그 방에 올린 "할 일 카드"(todos.js — 생성 창 "대화방에 알리기") — 할 일이 지워지면 todo_id만 비고
+    // (카드는 "삭제된 할 일"), todo_card는 보낼 때의 스냅샷 { title, description, 기간, attachments, assigneeNames }
+    // (todoRules.js todoCardMessage). 앱은 스냅샷을 먼저 그리고 할 일을 다시 받아 최신으로 바꾼다.
+    todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
+    todoCard: jsonb('todo_card'),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
     index('messages_album_id_idx').on(t.albumId),
+    index('messages_todo_id_idx').on(t.todoId),
     index('messages_sender_id_idx').on(t.senderId),
     // "내가 쓴 글 모아보기" — 보낸 사람별 최신순/과거순 스캔(방·기간 필터는 이 위에서 걸러낸다).
     index('messages_sender_created_idx').on(t.senderId, t.createdAt.desc()),
@@ -1783,6 +1789,12 @@ export const todos = pgTable(
     // "메시지·댓글에서 바로 할 일로 등록"한 경우의 출처 — 원본이 지워져도 할 일은 남는다(set null).
     sourceMessageId: uuid('source_message_id').references(() => messages.id, { onDelete: 'set null' }),
     sourceCommentId: uuid('source_comment_id').references(() => messageComments.id, { onDelete: 'set null' }),
+    // 폴더 경로(Windows — 보통 공유 폴더 \\서버\폴더) — 서버는 그 폴더를 보지 않고 글자로만 보관한다. 담당자가 상세에서 누르면
+    // 그 PC의 윈도우 탐색기로 연다. downloadPath = 받아 갈 파일이 있는 곳(생성 창 "파일 다운로드 (경로 선택)"에서 파일 대신
+    // 폴더를 고름), uploadPath = 결과물을 올릴 곳("파일 업로드 (경로 선택)" — 없으면 ⋯ "파일 업로드"가 만든 사람에게 메시지로
+    // 보낸다).
+    downloadPath: text('download_path'),
+    uploadPath: text('upload_path'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

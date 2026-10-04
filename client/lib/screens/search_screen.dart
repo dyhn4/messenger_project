@@ -600,7 +600,13 @@ class _SearchScreenState extends State<SearchScreen> {
     final messageResults = _results;
     final isRooms = roomResults != null;
     if (_loading || _error != null || (messageResults == null && !isRooms)) {
-      final Widget message = _loading
+      // 결과가 아직 없을 때(검색 전·검색 중·오류)는 탭 줄 아래를 옅은 회색으로 칠해 위의 검색 도구와 나눈다 — 메시지 예약·
+      // 할 일 패널의 목록 바탕과 같은 색.
+      final theme = Theme.of(context);
+      final background = theme.brightness == Brightness.dark
+          ? theme.colorScheme.surfaceContainerLow
+          : theme.colorScheme.surfaceContainer;
+      final Widget text = _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? Center(child: Text(_error!))
@@ -614,6 +620,11 @@ class _SearchScreenState extends State<SearchScreen> {
                 }, textAlign: TextAlign.center),
               ),
             );
+      final message = ColoredBox(
+        key: const ValueKey('search-idle-area'),
+        color: background,
+        child: text,
+      );
       if (scope == null) return message;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

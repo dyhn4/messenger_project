@@ -20,8 +20,9 @@ class CallTileData {
 List<CallPerson> buildCallPeople(
   lk.Room room,
   Map<String, DateTime> hands,
-  List<AppUser> members,
-) {
+  List<AppUser> members, {
+  String? hostId,
+}) {
   final participants = <lk.Participant>[
     ?room.localParticipant,
     ...room.remoteParticipants.values,
@@ -37,6 +38,7 @@ List<CallPerson> buildCallPeople(
         camOn: p.isCameraEnabled(),
         sharing: p.isScreenShareEnabled(),
         speaking: p.isSpeaking,
+        isHost: hostId != null && p.identity == hostId,
         handRaisedAt: hands[p.identity],
         user: _memberById(members, p.identity),
       ),

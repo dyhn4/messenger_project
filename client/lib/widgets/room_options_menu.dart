@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../models/room.dart';
-import '../screens/announcement_list_screen.dart';
+import '../screens/announcement_list_screen.dart' show openAnnouncementPanel;
 import '../screens/chat_screen.dart';
 import '../screens/files_screen.dart';
 import '../screens/group_settings_dialog.dart';
@@ -519,14 +519,14 @@ class RoomOptionsMenu extends StatelessWidget {
     final moreMenuSections = [
       [
         // 공지는 읽기가 방 멤버 전원에게 열려 있으므로(채팅방 상단 배너, 히스토리 목록) 이
-        // 메뉴 항목 자체는 누구나 본다 — "글쓰기" 버튼만 토픽 생성 권한이 있는 사람에게
-        // 보인다(announcement_list_screen.dart의 _canWrite).
+        // 메뉴 항목 자체는 누구나 본다 — "공지 쓰기" 버튼만 토픽 생성 권한이 있는 사람에게
+        // 보인다(announcement_list_screen.dart의 _canWrite). PC는 오른쪽 공지 패널, 모바일은 전체 화면.
         if (isTopic)
           CompactMenu.item<void>(
             context,
             icon: Icons.campaign_outlined,
             label: '공지',
-            onTap: () => showAnnouncementListScreen(context, session, room),
+            onTap: () => openAnnouncementPanel(context, session, room),
           ),
       ],
       [

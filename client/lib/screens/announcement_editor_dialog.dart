@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -8,25 +9,35 @@ import '../models/announcement.dart';
 import '../models/room.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/rich_text_format.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show TopicChip;
+import 'schedule_message_dialog.dart' show ScheduleDateTimeField;
 
 /// 공지 본문 글자 수 한도 — 서버(announcements.js)와 같다.
 const announcementTextMaxLength = 2000;
 
+/// "공지 자동 내리기 > 지정"으로 고를 수 있는 가장 먼 날 — 서버(announcements.js parseAutoUnpinAt)는 366일까지
+/// 받는데, 하루 여유를 두고 1년(365일)까지만 고르게 한다.
+const announcementAutoUnpinMaxDays = 365;
+
 /// 한도에 이만큼 가까워지면 입력칸 아래에 "n/2000"을 보여준다(평소엔 숨김 — 게시글 작성창과 같다).
 const _counterFrom = announcementTextMaxLength * 9 ~/ 10;
 
-/// 공지 작성 창이 넘겨주는 값 — 글과 "자동 내리기"까지 남은 기간(null이면 자동 내리기 없음, 기본값).
+/// 공지 작성 창이 넘겨주는 값 — 글(앞뒤 공백 뗌)과 그 글에 맞춘 서식 구간([format], 서식 도구모음으로 고른 것 —
+/// 없으면 null), "자동 내리기"까지 남은 기간(null이면 자동 내리기 없음, 기본값. "지정"으로 시각을 골랐으면 등록을
+/// 누른 때부터 그 시각까지).
 class AnnouncementDraft {
   final String text;
   final Duration? autoUnpinAfter;
-  const AnnouncementDraft(this.text, this.autoUnpinAfter);
+  final List<TextFormatRun>? format;
+  const AnnouncementDraft(this.text, this.autoUnpinAfter, {this.format});
 }
 
 /// 공지 쓰기([announcement]가 없을 때)·수정 창을 연다 — 게시글 작성창(post_editor_dialog.dart)과 같은 틀로,
 /// 넓은 창(PC)은 대화상자, 좁은 창(모바일)은 전체 화면이다. 게시글과 달리 **제목 입력칸이 없다**(공지는 글
-/// 한 덩어리). [onSubmit]이 등록/저장을 맡는다 — 실패하면 던진 오류를 토스트로 알리고 창과 쓰던 글을 그대로
+/// 한 덩어리). 본문 칸 위에는 프로젝트 노트 편집기와 같은 서식 도구모음(글자색·제목·굵게…·목록·구분선)이 늘
+/// 붙어 있다. [onSubmit]이 등록/저장을 맡는다 — 실패하면 던진 오류를 토스트로 알리고 창과 쓰던 글을 그대로
 /// 둔다. 등록(저장)했으면 true.
 Future<bool> showAnnouncementEditor(
   BuildContext context, {
@@ -79,17 +90,24 @@ class AnnouncementEditor extends StatefulWidget {
 }
 
 class _AnnouncementEditorState extends State<AnnouncementEditor> {
-  late final _controller = TextEditingController(
-    text: widget.announcement?.text ?? '',
-  );
+  /// 서식을 입력한 그대로 보여주는 본문 컨트롤러 — 글은 평문, 서식은 따로(rich_text_format.dart).
+  final _controller = RichTextEditingController();
   final _focus = FocusNode(debugLabel: 'announcement-body');
   String? _error;
   String _lastText = '';
   bool _submitting = false;
+
+  /// 빠른 선택으로 고른 자동 내리기 기간(없음이면 null).
   Duration? _autoUnpinAfter;
-  // "지정"으로 고른 값인지 — 빠른 선택지와 우연히 같은 길이(예: 24시간=1일)를 골라도 칩 표시가
-  // 헷갈리지 않도록 별도로 구분한다.
+
+  /// "지정"을 골랐는지와 그때 고른 시각 — 달력+시각 한 칸(ScheduleDateTimeField)이 칩 아래에 펼쳐진다.
   bool _isCustom = false;
+  DateTime? _customAt;
+  final _customField = GlobalKey(debugLabel: 'announcement-auto-unpin-at');
+
+  /// 수정 창을 열 때의 글·서식(JSON) — 바뀌었는지(닫기 전에 물을지) 비교한다.
+  String _originalText = '';
+  String _originalFormat = 'null';
 
   static const _quickOptions = <(String, Duration?)>[
     ('없음', null),
@@ -106,6 +124,13 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
   @override
   void initState() {
     super.initState();
+    final a = widget.announcement;
+    if (a != null) {
+      _controller.load(a.text, a.textFormat);
+      final saved = _controller.formatted();
+      _originalText = saved.text;
+      _originalFormat = jsonEncode(textFormatToJson(saved.format));
+    }
     _lastText = _controller.text;
     _controller.addListener(_onTextChanged);
     _focus.addListener(() {
@@ -127,14 +152,16 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
   }
 
   bool get _dirty {
-    final original = widget.announcement?.text;
-    if (original != null) return _controller.text != original;
-    return _controller.text.trim().isNotEmpty;
+    if (!_editing) return _controller.text.trim().isNotEmpty;
+    final now = _controller.formatted();
+    return now.text != _originalText ||
+        jsonEncode(textFormatToJson(now.format)) != _originalFormat;
   }
 
   Future<void> _submit() async {
     if (_submitting) return;
-    final text = _controller.text.trim();
+    final draft = _controller.formatted();
+    final text = draft.text;
     // 사진 공지는 글 없이 사진만 둘 수 있다(서버도 같은 규칙).
     final allowEmpty = widget.announcement?.hasImage ?? false;
     if (text.isEmpty && !allowEmpty) {
@@ -142,9 +169,21 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       _focus.requestFocus();
       return;
     }
+    var autoUnpinAfter = _autoUnpinAfter;
+    final customAt = _customAt;
+    if (!_editing && _isCustom && customAt != null) {
+      autoUnpinAfter = customAt.difference(DateTime.now());
+      // 창을 열어 둔 사이에 고른 시각이 지났으면 다시 고르게 한다(서버도 지난 시각은 받지 않는다).
+      if (autoUnpinAfter <= Duration.zero) {
+        showAppToast(context, '자동 내리기 시각이 지났습니다. 다시 골라 주세요.');
+        return;
+      }
+    }
     setState(() => _submitting = true);
     try {
-      await widget.onSubmit(AnnouncementDraft(text, _autoUnpinAfter));
+      await widget.onSubmit(
+        AnnouncementDraft(text, autoUnpinAfter, format: draft.format),
+      );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) showAppToast(context, '$e');
@@ -155,6 +194,8 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
 
   /// 취소·Esc·뒤로 가기 — 쓰던 내용이 있으면 한 번 묻는다.
   Future<void> _requestClose() async {
+    // "지정" 달력 판이 펼쳐져 있으면 그것만 닫는다(예약 메시지 편집기와 같다).
+    if (ScheduleDateTimeField.hidePopupOf(_customField)) return;
     if (_submitting) return;
     if (_dirty) {
       final discard = await showDialog<bool>(
@@ -191,26 +232,32 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
     });
   }
 
-  Future<void> _pickCustom() async {
-    final result = await showDialog<Duration>(
-      context: context,
-      builder: (_) => const _CustomAutoUnpinDialog(),
-    );
-    if (result == null || !mounted) return;
+  /// "지정" — 칩 아래에 날짜+시각 한 칸을 펼친다. 처음 고르면 내일 이맘때(15분 단위로 올림)부터.
+  void _pickCustom() {
     setState(() {
-      _autoUnpinAfter = result;
       _isCustom = true;
+      _customAt ??= ceilToScheduleSlot(
+        DateTime.now().add(const Duration(days: 1)),
+      );
     });
   }
 
-  String _customChipLabel() {
-    final d = _autoUnpinAfter;
-    if (!_isCustom || d == null) return '지정';
-    final days = d.inDays;
-    final hours = d.inHours % 24;
-    if (days > 0 && hours > 0) return '지정 ($days일 $hours시간)';
-    if (days > 0) return '지정 ($days일)';
-    return '지정 ($hours시간)';
+  /// "3일 4시간 뒤에 내려갑니다" — 지정 칸 옆(좁으면 아래) 안내. 분 단위는 올림.
+  static String _untilText(DateTime at, DateTime now) {
+    final total = (at.difference(now).inSeconds / 60).ceil();
+    if (total <= 0) return '이미 지난 시각입니다. 다시 골라 주세요.';
+    final days = total ~/ (24 * 60);
+    final hours = total % (24 * 60) ~/ 60;
+    final minutes = total % 60;
+    final String span;
+    if (days > 0) {
+      span = hours > 0 ? '$days일 $hours시간' : '$days일';
+    } else if (hours > 0) {
+      span = minutes > 0 ? '$hours시간 $minutes분' : '$hours시간';
+    } else {
+      span = '$minutes분';
+    }
+    return '$span 뒤에 자동으로 내려갑니다';
   }
 
   @override
@@ -345,12 +392,45 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
     );
   }
 
-  /// 여러 줄 본문 — 게시글 작성창의 본문 칸과 같은 테두리·글꼴(서식 도구줄만 뺀다 — 공지는 평문이다).
+  /// 여러 줄 본문 — 게시글 작성창의 본문 칸과 같은 테두리·글꼴. 맨 위에는 프로젝트 "새 노트" 편집기와 같은 서식
+  /// 도구모음(글자색·제목 1~3 | 굵게·기울임·밑줄·취소선 | 링크·코드·인용 | 번호·글머리 목록 | 구분선)이 늘 붙어
+  /// 있고, 고른 서식은 공지와 함께 저장돼 상세·목록·공지바에서 그대로 보인다(Ctrl+B/I/U도 된다).
   Widget _buildBodyField(BuildContext context, {bool expand = true}) {
     final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
     final focused = _focus.hasFocus;
     final hasError = _error != null;
     const radius = BorderRadius.all(Radius.circular(8));
+    final field = RichFieldWrapper(
+      controller: _controller,
+      child: TextField(
+        key: const ValueKey('announcement-body'),
+        controller: _controller,
+        focusNode: _focus,
+        autofocus: true,
+        enabled: !_submitting,
+        expands: expand,
+        minLines: expand ? null : 8,
+        maxLines: null,
+        maxLength: announcementTextMaxLength,
+        // 기본 글자 수 표시는 끄고(아래 _buildBodyFooter가 한도 근처에서만 보여준다).
+        buildCounter:
+            (
+              _, {
+              required currentLength,
+              required isFocused,
+              required maxLength,
+            }) => null,
+        keyboardType: TextInputType.multiline,
+        textAlignVertical: TextAlignVertical.top,
+        style: const TextStyle(fontSize: 14.5, height: 1.5),
+        decoration: const InputDecoration(
+          hintText: '공지 내용을 입력하세요',
+          border: InputBorder.none,
+          contentPadding: EdgeInsets.all(14),
+        ),
+      ),
+    );
     return DecoratedBox(
       position: DecorationPosition.foreground,
       decoration: BoxDecoration(
@@ -366,32 +446,27 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: TextField(
-          key: const ValueKey('announcement-body'),
-          controller: _controller,
-          focusNode: _focus,
-          autofocus: true,
-          enabled: !_submitting,
-          expands: expand,
-          minLines: expand ? null : 8,
-          maxLines: null,
-          maxLength: announcementTextMaxLength,
-          // 기본 글자 수 표시는 끄고(아래 _buildBodyFooter가 한도 근처에서만 보여준다).
-          buildCounter:
-              (
-                _, {
-                required currentLength,
-                required isFocused,
-                required maxLength,
-              }) => null,
-          keyboardType: TextInputType.multiline,
-          textAlignVertical: TextAlignVertical.top,
-          style: const TextStyle(fontSize: 14.5, height: 1.5),
-          decoration: const InputDecoration(
-            hintText: '공지 내용을 입력하세요',
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.all(14),
-          ),
+        child: Column(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              key: const ValueKey('announcement-format-toolbar'),
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.04)
+                  : const Color(0xFFF7F8FA),
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: RichFormatToolbar(
+                controller: _controller,
+                focusNode: _focus,
+                showColor: true,
+                showHeadings: true,
+                showRule: true,
+              ),
+            ),
+            Divider(height: 1, color: theme.dividerColor),
+            expand ? Expanded(child: field) : field,
+          ],
         ),
       ),
     );
@@ -435,9 +510,12 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
     );
   }
 
-  /// "공지 자동 내리기" 빠른 선택 — 새 공지에서만(서버가 수정에서는 글만 바꾼다).
+  /// "공지 자동 내리기" 빠른 선택 — 새 공지에서만(서버가 수정에서는 글만 바꾼다). "지정"을 고르면 칩 아래에
+  /// 투표 마감 시각과 같은 날짜+시각 한 칸(`10월 5일 (월) 오후 3:30`, 누르면 달력과 그 밑 시간 목록)이 펼쳐진다 —
+  /// 지금 이후~1년 안에서 15분 단위.
   Widget _buildAutoUnpin(BuildContext context) {
     final theme = Theme.of(context);
+    final customAt = _customAt;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -459,12 +537,56 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                 onSelected: _submitting ? null : (_) => _selectQuick(duration),
               ),
             ChoiceChip(
-              label: Text(_customChipLabel()),
+              key: const ValueKey('announcement-auto-unpin-custom'),
+              label: const Text('지정'),
               selected: _isCustom,
               onSelected: _submitting ? null : (_) => _pickCustom(),
             ),
           ],
         ),
+        if (_isCustom && customAt != null) ...[
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final passed = !customAt.isAfter(DateTime.now());
+              final field = ScheduleDateTimeField(
+                key: _customField,
+                value: customAt,
+                enabled: !_submitting,
+                maxDaysAhead: announcementAutoUnpinMaxDays,
+                onChanged: (v) => setState(() => _customAt = v),
+              );
+              final hint = Text(
+                _untilText(customAt, DateTime.now()),
+                key: const ValueKey('announcement-auto-unpin-hint'),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: passed ? theme.colorScheme.error : theme.hintColor,
+                ),
+              );
+              // 좁은 화면(휴대폰)은 칸을 꽉 채우고 안내를 아래에, 넓으면 칸 옆에.
+              if (constraints.maxWidth < 480) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    field,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+                      child: hint,
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  SizedBox(width: 280, child: field),
+                  const SizedBox(width: 12),
+                  Expanded(child: hint),
+                ],
+              );
+            },
+          ),
+        ],
       ],
     );
   }
@@ -514,69 +636,6 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
               ],
             )
           : Text(_editing ? '저장' : '등록'),
-    );
-  }
-}
-
-/// "지정" 칩을 누르면 뜨는 일/시간 직접 입력 대화상자.
-class _CustomAutoUnpinDialog extends StatefulWidget {
-  const _CustomAutoUnpinDialog();
-
-  @override
-  State<_CustomAutoUnpinDialog> createState() => _CustomAutoUnpinDialogState();
-}
-
-class _CustomAutoUnpinDialogState extends State<_CustomAutoUnpinDialog> {
-  final _daysController = TextEditingController(text: '0');
-  final _hoursController = TextEditingController(text: '0');
-
-  @override
-  void dispose() {
-    _daysController.dispose();
-    _hoursController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('공지 자동 내리기 — 직접 지정'),
-      content: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _daysController,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '일'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: _hoursController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '시간'),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final days = int.tryParse(_daysController.text) ?? 0;
-            final hours = int.tryParse(_hoursController.text) ?? 0;
-            if (days <= 0 && hours <= 0) return;
-            Navigator.of(context).pop(Duration(days: days, hours: hours));
-          },
-          child: const Text('완료'),
-        ),
-      ],
     );
   }
 }

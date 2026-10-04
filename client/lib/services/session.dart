@@ -332,6 +332,7 @@ class Session extends ChangeNotifier {
   StreamSubscription<AnnouncementRemovedEvent>? _announcementDeletedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _announcementUnpinnedSub;
   StreamSubscription<AnnouncementReadEvent>? _announcementReadSub;
+  StreamSubscription<AnnouncementComment>? _announcementCommentSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
   StreamSubscription? _roleUpdatedSub;
@@ -1355,13 +1356,14 @@ class Session extends ChangeNotifier {
     );
     _announcementUpdatedSub?.cancel();
     _announcementUpdatedSub = chatSocket.announcementUpdated.listen((a) {
-      // 댓글 개수는 이 이벤트에 항상 0으로 온다(서버가 다시 세지 않음) — 배너에 반영된 글이면
-      // text/editedAt만 갱신하고 나머지(pinned/commentCount)는 그대로 둔다.
+      // 배너에 반영된 글이면 text/editedAt만 갱신하고 나머지(pinned/commentCount)는 그대로 둔다 — 댓글 수는
+      // 실시간 댓글(handleAnnouncementComment)로 따로 늘어난다(예전 서버는 이 이벤트에 댓글 수를 0으로 보냈다).
       final match = rooms.where((r) => r.id == a.roomId);
       if (match.isEmpty) return;
       final current = match.first.latestAnnouncement;
       if (current == null || current.id != a.id) return;
       current.text = a.text;
+      current.textFormat = a.textFormat;
       current.editedAt = a.editedAt;
       notifyListeners();
     });
@@ -1387,6 +1389,10 @@ class Session extends ChangeNotifier {
         notifyListeners();
       }
     });
+    _announcementCommentSub?.cancel();
+    _announcementCommentSub = chatSocket.announcementComments.listen(
+      handleAnnouncementComment,
+    );
     _announcementReadSub?.cancel();
     _announcementReadSub = chatSocket.announcementRead.listen((e) {
       // user: 방에만 오므로 항상 "나"의 다른 기기에서 읽었다는 뜻이다(markAnnouncementsRead 참고).
@@ -2261,6 +2267,16 @@ class Session extends ChangeNotifier {
           : null,
       isSecret: room?.isSecret == true,
     );
+  }
+
+  /// 공지에 새 댓글이 달렸을 때(announcement:comment:new) — 그 방 상단에 고정된 공지면 공지바의 댓글 수를
+  /// 바로 올린다(Announcement.liveCommentCount — 상세보기가 같은 인스턴스를 올려도 두 번 세지 않는다).
+  void handleAnnouncementComment(AnnouncementComment c) {
+    final match = rooms.where((r) => r.id == c.roomId);
+    if (match.isEmpty) return;
+    final latest = match.first.latestAnnouncement;
+    if (latest == null || latest.id != c.announcementId) return;
+    if (latest.noteLiveComment(c.id)) notifyListeners();
   }
 
   /// 토픽방에 새 공지가 올라왔을 때(announcement:new) — 배너 갱신, 알림 센터의 "안 읽은 공지"

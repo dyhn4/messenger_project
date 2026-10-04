@@ -1,3 +1,5 @@
+import 'text_format.dart';
+
 /// 토픽방 공지(카카오톡 공지와 같은 개념) — server/src/announcements.js의 응답과 1:1 대응.
 /// 여러 개를 쓸 수 있고(공지 목록 화면이 히스토리를 보여줌), [pinned]인 것(방마다 최대 1개)이
 /// 채팅방 상단 배너에 고정된다. text/editedAt/pinned/commentCount는 non-final — 실시간
@@ -10,6 +12,10 @@ class Announcement {
   final String authorName;
   final DateTime createdAt;
   String text;
+
+  /// [text]에 걸린 글자 서식 구간(공지 쓰기 창의 서식 도구모음 — 굵게·제목·글자색 등, 서버 textFormat.js).
+  /// 없으면 null(평문). 수정하면 [text]와 함께 바뀐다 — 화면은 FormattedText(text, format: textFormat)로 그린다.
+  List<TextFormatRun>? textFormat;
   DateTime? editedAt;
   bool pinned;
   int commentCount;
@@ -34,12 +40,31 @@ class Announcement {
   /// 배너·알림처럼 한 줄로 보여줄 글 — 사진만 있는 공지는 "[사진]".
   String get previewText => text.trim().isEmpty && hasImage ? '[사진]' : text;
 
+  /// 이 인스턴스를 만들 때(서버 응답) 받은 댓글 수 — [liveCommentCount]의 기준점.
+  final int _baseCommentCount;
+
+  /// 만든 뒤 실시간(announcement:comment:new)으로 들어온 댓글 id들 — Session이 방 상단 공지(Room.latestAnnouncement)에
+  /// 대해 [noteLiveComment]로 모은다. 같은 id는 한 번만 센다.
+  final Set<String> _liveCommentIds = {};
+
+  /// 공지바(announcement_banner.dart)에 보여줄 댓글 수 — 서버가 준 수 + 실시간으로 들어온 새 댓글 수.
+  /// 상세보기가 같은 인스턴스의 [commentCount]를 직접 올리기도 해서(열어 둔 동안 들어온 댓글) 둘 중 큰 값을 쓴다
+  /// — 같은 댓글이 양쪽에서 두 번 세지지 않는다.
+  int get liveCommentCount {
+    final live = _baseCommentCount + _liveCommentIds.length;
+    return live > commentCount ? live : commentCount;
+  }
+
+  /// 실시간으로 들어온 댓글 하나를 센다 — 처음 보는 id면 true(다시 그려야 함).
+  bool noteLiveComment(String commentId) => _liveCommentIds.add(commentId);
+
   Announcement({
     required this.id,
     required this.roomId,
     this.authorId,
     required this.authorName,
     required this.text,
+    this.textFormat,
     required this.createdAt,
     this.editedAt,
     this.pinned = true,
@@ -49,7 +74,7 @@ class Announcement {
     this.imageUrl,
     this.imageThumbnailUrl,
     this.imageName,
-  });
+  }) : _baseCommentCount = commentCount;
 
   factory Announcement.fromJson(Map<String, dynamic> json) => Announcement(
     id: json['id'] as String,
@@ -57,6 +82,7 @@ class Announcement {
     authorId: json['authorId'] as String?,
     authorName: json['authorName'] as String,
     text: json['text'] as String,
+    textFormat: parseTextFormat(json['textFormat']),
     createdAt: DateTime.fromMillisecondsSinceEpoch(
       (json['createdAt'] as num).toInt(),
     ),

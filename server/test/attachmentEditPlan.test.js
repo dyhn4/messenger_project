@@ -54,7 +54,7 @@ test('planAttachmentEdit: 없는 id·잘못된 모양은 거절, 안 보내면 �
 
 test('announcementFieldsFromMessage: 텍스트와 이미지만, 나머지는 거절', () => {
   const text = announcementFieldsFromMessage({ type: 'text', text: '  안녕  ' });
-  assert.deepEqual(text, { ok: true, text: '안녕', image: null });
+  assert.deepEqual(text, { ok: true, text: '안녕', textFormat: null, image: null });
 
   const image = announcementFieldsFromMessage({
     type: 'image',

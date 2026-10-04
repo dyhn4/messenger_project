@@ -7,6 +7,7 @@ import '../models/todo.dart';
 import '../services/session.dart';
 import '../services/todo_controller.dart';
 import 'filter_dropdown.dart' show iconForRoomType;
+import 'todo_menu.dart' show TodoCardActions;
 import 'todo_widgets.dart' show TodoPageHeader, TodoViewMode;
 import 'todos_panel.dart' show TodoCard, todoCardColor, todoListBackgroundColor;
 
@@ -28,6 +29,9 @@ class TodoCalendarPage extends StatelessWidget {
   final Session session;
   final TodoController controller;
   final ValueChanged<Todo> onOpen;
+
+  /// 카드 ⋯ 메뉴의 손잡이(목록 카드와 같다) — 없으면 ⋯가 없다.
+  final TodoCardActions? actions;
   final TodoViewMode mode;
   final VoidCallback? onClosePanel;
 
@@ -36,6 +40,7 @@ class TodoCalendarPage extends StatelessWidget {
     required this.session,
     required this.controller,
     required this.onOpen,
+    this.actions,
     this.mode = TodoViewMode.page,
     this.onClosePanel,
   });
@@ -46,6 +51,7 @@ class TodoCalendarPage extends StatelessWidget {
       session: session,
       controller: controller,
       onOpen: onOpen,
+      actions: actions,
     );
     if (mode != TodoViewMode.panel) {
       return Scaffold(
@@ -80,17 +86,21 @@ class TodoCalendarPage extends StatelessWidget {
 /// 받기와 필터는 [TodoController]의 달력 상태(calendarMonth·calendarItems)를 그대로 쓴다 — 목록 화면에서 고른 보기·
 /// 대화방·담당 멤버·완료 제외가 그대로 걸리고, 이 화면에는 필터가 없다. 달을 옮기면 [TodoController.loadCalendar]로 그
 /// 달을 받는다. 고른 날은 처음엔 오늘이고, 달을 옮기면 그 달 안이면 그대로, 아니면 그 달 1일이 된다. 카드를 누르면
-/// [onOpen](패널이 상세를 연다).
+/// [onOpen](패널이 상세를 연다), 카드 오른쪽 위 ⋯는 목록 카드와 같은 메뉴([actions]).
 class TodoCalendarView extends StatefulWidget {
   final Session session;
   final TodoController controller;
   final ValueChanged<Todo> onOpen;
+
+  /// 카드 ⋯ 메뉴의 손잡이 — 없으면 ⋯가 없다.
+  final TodoCardActions? actions;
 
   const TodoCalendarView({
     super.key,
     required this.session,
     required this.controller,
     required this.onOpen,
+    this.actions,
   });
 
   @override
@@ -558,6 +568,7 @@ class _TodoCalendarViewState extends State<TodoCalendarView> {
                 controller: _c,
                 todo: t,
                 onTap: () => widget.onOpen(t),
+                actions: widget.actions,
                 showRoom: false,
                 framed: false,
               ),

@@ -7,10 +7,13 @@ import 'package:client/models/room.dart';
 import 'package:client/models/team.dart';
 import 'package:client/models/text_format.dart';
 import 'package:client/models/mention.dart';
+import 'package:client/screens/announcement_list_screen.dart'
+    show AnnouncementsPanel;
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
+import 'package:client/services/time_format.dart';
 import 'package:client/widgets/announcement_banner.dart';
 import 'package:client/widgets/message_bubble.dart';
 import 'package:flutter/gestures.dart';
@@ -44,17 +47,21 @@ Map<String, dynamic> _announcementJson(
   String authorId = 'u2',
   String? messageId,
   String? imageUrl,
+  int? commentCount,
+  String? authorName,
 }) => {
   'id': id,
   'roomId': 'r1',
   'authorId': authorId,
-  'authorName': authorId == 'me' ? '나' : '김철수',
+  'authorName': authorName ?? (authorId == 'me' ? '나' : '김철수'),
   'text': text,
   'createdAt': DateTime(2026, 9, 30).millisecondsSinceEpoch,
   'pinned': true,
   'messageId': messageId,
   'imageUrl': imageUrl,
   'imageThumbnailUrl': imageUrl,
+  // 예전 서버 응답(commentCount 없음)도 그대로 읽혀야 한다 — 없으면 키를 안 넣는다.
+  'commentCount': ?commentCount,
 };
 
 Room _room({
@@ -75,9 +82,17 @@ Room _room({
 );
 
 class _Server {
+  _Server({this.announcements = const []});
+
+  /// 공지 목록 응답(공지 패널) — 공지바를 누르면 패널이 열리며 받아 간다.
+  final List<Map<String, dynamic>> announcements;
   final requests = <http.Request>[];
   late final client = MockClient((request) async {
     requests.add(request);
+    if (request.method == 'GET' &&
+        request.url.path == '/api/rooms/r1/announcements') {
+      return _json(announcements);
+    }
     if (request.method == 'POST' &&
         request.url.path == '/api/rooms/r1/announcements') {
       return _json(_announcementJson('a-new', messageId: 'm1'), 201);
@@ -731,33 +746,297 @@ void main() {
     Text announcementText(WidgetTester tester) =>
         tester.widget<Text>(find.byKey(const ValueKey('announcement-text')));
 
-    testWidgets('접기·펼치기·⋯ 메뉴는 없고 오른쪽 끝에 X(숨기기) 하나뿐이다 — 글 3줄과 작성자·시각 줄', (
+    /// 한 줄 안에서 왼쪽→오른쪽 순서인지(같은 줄 = 세로 가운데가 거의 같다).
+    void expectInOneRowInOrder(WidgetTester tester, List<Finder> finders) {
+      final rects = finders.map(tester.getRect).toList();
+      for (var i = 1; i < rects.length; i++) {
+        expect(
+          (rects[i].center.dy - rects[0].center.dy).abs(),
+          lessThan(4),
+          reason: '${finders[i]}는 같은 줄에 있어야 한다',
+        );
+        expect(
+          rects[i].left,
+          greaterThanOrEqualTo(rects[i - 1].right - 0.5),
+          reason: '${finders[i]}는 ${finders[i - 1]} 오른쪽에 있어야 한다',
+        );
+      }
+    }
+
+    testWidgets('PC 폭: 한 줄에 [공지] 글 · 시각 · 댓글 수 · 작성자 사진·이름 · X', (
       tester,
     ) async {
       final room = _room(
         announcement: Announcement.fromJson(
           _announcementJson(
             'a1',
-            text: '회식은 금요일 저녁 7시에 합니다. 장소는 사무실 근처 식당이고 참석 여부를 알려 주세요.',
+            text: '회식은 금요일 저녁 7시에 합니다.\n장소는 사무실 근처 식당이고 참석 여부를 알려 주세요.',
+            commentCount: 3,
           ),
         ),
       );
       final session = _session(_Server(), [room]);
-      await pumpBanner(tester, session, room, size: const Size(360, 600));
-      expect(announcementText(tester).maxLines, 3);
+      await pumpBanner(tester, session, room, size: const Size(800, 600));
+      // 글은 한 줄 — 줄바꿈은 띄어쓰기로 이어 붙인다.
+      expect(announcementText(tester).maxLines, 1);
+      expect(announcementText(tester).overflow, TextOverflow.ellipsis);
+      expect(
+        announcementText(tester).data,
+        '회식은 금요일 저녁 7시에 합니다. 장소는 사무실 근처 식당이고 참석 여부를 알려 주세요.',
+      );
+      // "공지" 표시(보드 뷰 "고정" 표시와 같은 알약 모양).
+      expect(find.byKey(const ValueKey('announcement-tag')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('announcement-tag')),
+          matching: find.text('공지'),
+        ),
+        findsOneWidget,
+      );
+      // 시각은 "yyyy/MM/dd AM h:mm" — 9월 30일 0시 정각이라 AM 12:00.
+      expect(find.text('2026/09/30 AM 12:00'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('announcement-comment-count')),
+            )
+            .data,
+        '3',
+      );
+      expect(find.byIcon(Icons.mode_comment_outlined), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('announcement-author-avatar')),
+        findsOneWidget,
+      );
+      expect(find.text('김철수'), findsOneWidget);
+      expectInOneRowInOrder(tester, [
+        find.byKey(const ValueKey('announcement-tag')),
+        find.byKey(const ValueKey('announcement-text')),
+        find.byKey(const ValueKey('announcement-time')),
+        find.byKey(const ValueKey('announcement-comments')),
+        find.byKey(const ValueKey('announcement-author-avatar')),
+        find.byKey(const ValueKey('announcement-author')),
+        find.byKey(const ValueKey('announcement-hide')),
+      ]);
+      // 접기·펼치기·⋯ 메뉴는 없고 오른쪽 끝에 X(숨기기) 하나뿐이다.
       expect(
         find.byKey(const ValueKey('announcement-collapse-toggle')),
         findsNothing,
       );
       expect(find.byKey(const ValueKey('announcement-more')), findsNothing);
       expect(find.byIcon(Icons.more_vert), findsNothing);
-      expect(find.byTooltip('접어두기'), findsNothing);
-      expect(find.byTooltip('펼치기'), findsNothing);
-      expect(find.byKey(const ValueKey('announcement-hide')), findsOneWidget);
       expect(find.byIcon(Icons.close), findsOneWidget);
-      // 시각은 "yyyy/MM/dd AM h:mm" — 9월 30일 0시 정각이라 AM 12:00.
-      expect(find.text('김철수 · 2026/09/30 AM 12:00'), findsOneWidget);
+      // 공지바는 한 줄 높이(48 안팎)다.
+      expect(
+        tester.getSize(find.byType(AnnouncementBanner)).height,
+        lessThanOrEqualTo(52),
+      );
       expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+
+    for (final width in [390.0, 360.0]) {
+      testWidgets('모바일 폭 $width: 이름은 빼고 시각은 짧게 — 넘치지 않고 X는 오른쪽 끝에', (
+        tester,
+      ) async {
+        final room = _room(
+          announcement: Announcement.fromJson(
+            _announcementJson(
+              'a1',
+              text: '아주 긴 공지 ' * 20,
+              commentCount: 128,
+              authorName: '이름이아주아주긴작성자입니다',
+              authorId: 'gone',
+            ),
+          ),
+        );
+        final session = _session(_Server(), [room]);
+        await pumpBanner(tester, session, room, size: Size(width, 700));
+        expect(tester.takeException(), isNull);
+        // 작성자 이름은 빠지고 사진만(누가 썼는지는 툴팁으로).
+        expect(find.byKey(const ValueKey('announcement-author')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('announcement-author-avatar')),
+          findsOneWidget,
+        );
+        expect(find.byTooltip('이름이아주아주긴작성자입니다'), findsOneWidget);
+        // 시각은 짧게 — "4일 전"처럼(일주일이 지나면 "2026/09/30"처럼 날짜만), 긴 "AM 12:00" 표기는 안 쓴다.
+        expect(
+          tester
+              .widget<Text>(find.byKey(const ValueKey('announcement-time')))
+              .data,
+          formatRelativeTime(DateTime(2026, 9, 30)),
+        );
+        expect(find.textContaining('AM 12:00'), findsNothing);
+        expect(find.text('128'), findsOneWidget);
+        expectInOneRowInOrder(tester, [
+          find.byKey(const ValueKey('announcement-tag')),
+          find.byKey(const ValueKey('announcement-text')),
+          find.byKey(const ValueKey('announcement-time')),
+          find.byKey(const ValueKey('announcement-comments')),
+          find.byKey(const ValueKey('announcement-author-avatar')),
+          find.byKey(const ValueKey('announcement-hide')),
+        ]);
+        // 공지 글 칸이 아직 읽을 만큼은 남는다.
+        expect(
+          tester.getSize(find.byKey(const ValueKey('announcement-text'))).width,
+          greaterThan(90),
+        );
+        expect(
+          tester.getRect(find.byKey(const ValueKey('announcement-hide'))).right,
+          lessThanOrEqualTo(width),
+        );
+        await _finish(tester);
+      });
+    }
+
+    testWidgets('아주 좁으면(280) 시각까지 빼고도 넘치지 않는다', (tester) async {
+      final room = _room(
+        announcement: Announcement.fromJson(
+          _announcementJson('a1', commentCount: 5),
+        ),
+      );
+      final session = _session(_Server(), [room]);
+      await pumpBanner(tester, session, room, size: const Size(280, 600));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('announcement-time')), findsNothing);
+      expect(find.byKey(const ValueKey('announcement-hide')), findsOneWidget);
+      expect(find.text('5'), findsOneWidget);
+      await _finish(tester);
+    });
+
+    testWidgets('작성자 사진·이름은 지금 방 멤버 정보를 쓴다(바뀐 이름 반영), 예전 응답의 댓글 수는 0이라 안 보인다', (
+      tester,
+    ) async {
+      final kim = AppUser(
+        id: 'u2',
+        username: 'kim',
+        name: '김철수(개명)',
+        avatarType: 'character',
+        avatarEmoji: '🐱',
+      );
+      final room = Room(
+        id: 'r1',
+        teamId: 't1',
+        type: RoomType.topic,
+        name: '영업방',
+        members: [_me, kim],
+        createdAt: DateTime(2026),
+        lastRead: {},
+        // commentCount 없는 예전 서버 응답.
+        latestAnnouncement: Announcement.fromJson(_announcementJson('a1')),
+      );
+      final session = _session(_Server(), [room]);
+      await pumpBanner(tester, session, room, size: const Size(800, 600));
+      expect(find.text('김철수(개명)'), findsOneWidget);
+      expect(find.text('김철수'), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('announcement-author-avatar')),
+          matching: find.text('🐱'),
+        ),
+        findsOneWidget,
+      );
+      // 댓글이 없으면 댓글 아이콘·숫자(0) 모두 없다.
+      expect(find.byKey(const ValueKey('announcement-comments')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('announcement-comment-count')),
+        findsNothing,
+      );
+      expect(find.byIcon(Icons.mode_comment_outlined), findsNothing);
+      expect(find.text('0'), findsNothing);
+      await _finish(tester);
+    });
+
+    testWidgets('댓글이 0인 공지에 실시간 댓글이 오면 그때 댓글 아이콘·수가 나타난다', (tester) async {
+      final room = _room(
+        announcement: Announcement.fromJson(
+          _announcementJson('a1', commentCount: 0),
+        ),
+      );
+      final session = _session(_Server(), [room]);
+      await pumpBanner(tester, session, room, size: const Size(800, 600));
+      expect(find.byKey(const ValueKey('announcement-comments')), findsNothing);
+      expect(find.byIcon(Icons.mode_comment_outlined), findsNothing);
+
+      session.handleAnnouncementComment(
+        AnnouncementComment(
+          id: 'c1',
+          announcementId: 'a1',
+          roomId: 'r1',
+          authorId: 'u2',
+          authorName: '김철수',
+          text: '참석합니다',
+          createdAt: DateTime(2026, 10, 1),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('announcement-comments')), findsOne);
+      expect(find.byIcon(Icons.mode_comment_outlined), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('announcement-comment-count')),
+            )
+            .data,
+        '1',
+      );
+      // 시각과 작성자 사이, 같은 줄.
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('announcement-comments')))
+            .left,
+        greaterThan(
+          tester.getRect(find.byKey(const ValueKey('announcement-time'))).right,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+
+    testWidgets('새 댓글이 실시간으로 오면 댓글 수가 바로 늘고, 같은 댓글은 한 번만 센다', (tester) async {
+      final room = _room(
+        announcement: Announcement.fromJson(
+          _announcementJson('a1', commentCount: 2),
+        ),
+      );
+      final session = _session(_Server(), [room]);
+      await pumpBanner(tester, session, room, size: const Size(800, 600));
+      String count() => tester
+          .widget<Text>(
+            find.byKey(const ValueKey('announcement-comment-count')),
+          )
+          .data!;
+      expect(count(), '2');
+
+      AnnouncementComment comment(String id, {String announcementId = 'a1'}) =>
+          AnnouncementComment(
+            id: id,
+            announcementId: announcementId,
+            roomId: 'r1',
+            authorId: 'u2',
+            authorName: '김철수',
+            text: '참석합니다',
+            createdAt: DateTime(2026, 10, 1),
+          );
+      session.handleAnnouncementComment(comment('c1'));
+      await tester.pump();
+      expect(count(), '3');
+      // 같은 댓글이 또 와도(재전송 등) 그대로.
+      session.handleAnnouncementComment(comment('c1'));
+      await tester.pump();
+      expect(count(), '3');
+      // 상세보기가 같은 인스턴스의 commentCount를 올려도(같은 댓글) 두 번 세지 않는다.
+      room.latestAnnouncement!.commentCount += 1;
+      await tester.pump();
+      expect(count(), '3');
+      // 다른 공지(내려간 예전 공지)의 댓글은 공지바와 상관없다.
+      session.handleAnnouncementComment(comment('c2', announcementId: 'old'));
+      await tester.pump();
+      expect(count(), '3');
+      session.handleAnnouncementComment(comment('c3'));
+      await tester.pump();
+      expect(count(), '4');
       await _finish(tester);
     });
 
@@ -810,27 +1089,93 @@ void main() {
       await _finish(tester);
     });
 
-    testWidgets('배너 몸통을 누르면 그 공지의 상세보기가 바로 열린다(작성자 줄·본문·댓글 입력칸)', (
+    testWidgets(
+      '모바일: 배너 몸통을 누르면 공지 패널(전체 화면)이 열리고 그 위에 이 공지의 상세가 뜬다 — ←는 목록으로',
+      (tester) async {
+        final server = _Server(
+          announcements: [
+            _announcementJson('a1'),
+            {..._announcementJson('a0', text: '지난 공지'), 'pinned': false},
+          ],
+        );
+        final room = _room(
+          announcement: Announcement.fromJson(_announcementJson('a1')),
+        )..hasUnreadAnnouncement = true;
+        final session = _session(server, [room]);
+        await pumpBanner(tester, session, room, size: const Size(360, 700));
+        await tester.tap(find.byKey(const ValueKey('announcement-text')));
+        await _settle(tester);
+        // 맨 위는 이 공지의 상세보기(작성자 줄·본문·댓글 입력칸)다.
+        expect(
+          find.byKey(const ValueKey('announcement-detail-card')),
+          findsOneWidget,
+        );
+        expect(find.text('댓글을 입력하세요....'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('announcement-detail-back')),
+          findsOne,
+        );
+        expect(
+          server.called('GET', '/api/rooms/r1/announcements/a1/comments'),
+          hasLength(1),
+        );
+        // 아래에는 공지 패널(목록)이 깔려 있고 목록도 받아 왔다. 패널을 열었으니 안 읽은 공지 표시는 지워진다.
+        expect(
+          find.byType(AnnouncementsPanel, skipOffstage: false),
+          findsOneWidget,
+        );
+        expect(
+          server.called('GET', '/api/rooms/r1/announcements'),
+          hasLength(1),
+        );
+        expect(room.hasUnreadAnnouncement, isFalse);
+
+        // ← — 공지 목록으로 돌아온다.
+        await tester.tap(
+          find.byKey(const ValueKey('announcement-detail-back')),
+        );
+        await _settle(tester);
+        expect(
+          find.byKey(const ValueKey('announcement-detail-card')),
+          findsNothing,
+        );
+        expect(find.byType(AnnouncementsPanel), findsOneWidget);
+        expect(find.byKey(const ValueKey('announcement-tile-a1')), findsOne);
+        expect(find.byKey(const ValueKey('announcement-tile-a0')), findsOne);
+        // 상세로 이미 본 공지라 "안 읽음" 표시가 붙지 않는다.
+        expect(find.text('안 읽음'), findsNothing);
+        expect(tester.takeException(), isNull);
+        await _finish(tester);
+      },
+    );
+
+    testWidgets('PC: 배너 몸통을 누르면 대화상자 대신 공지 패널 안에 상세가 뜬다(홈 셸 밖이면 가운데 패널 대화상자)', (
       tester,
     ) async {
-      final server = _Server();
+      final server = _Server(announcements: [_announcementJson('a1')]);
       final room = _room(
         announcement: Announcement.fromJson(_announcementJson('a1')),
       );
       final session = _session(server, [room]);
-      await pumpBanner(tester, session, room, size: const Size(360, 700));
+      await pumpBanner(tester, session, room, size: const Size(1200, 800));
       await tester.tap(find.byKey(const ValueKey('announcement-text')));
       await _settle(tester);
-      // 공지 목록이 아니라 상세보기다.
+      final panel = find.byType(AnnouncementsPanel);
+      expect(panel, findsOneWidget);
+      // 상세는 패널 안 화면 — ←(목록으로)와 ✕(패널 닫기)가 있다.
       expect(
-        find.byKey(const ValueKey('announcement-detail-card')),
+        find.descendant(
+          of: panel,
+          matching: find.byKey(const ValueKey('announcement-detail-card')),
+        ),
         findsOneWidget,
       );
-      expect(find.text('댓글을 입력하세요....'), findsOneWidget);
-      expect(find.text('등록된 공지가 없습니다.'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('announcement-detail-back')));
+      await _settle(tester);
+      expect(find.byKey(const ValueKey('announcement-tile-a1')), findsOne);
       expect(
-        server.called('GET', '/api/rooms/r1/announcements/a1/comments'),
-        hasLength(1),
+        find.byKey(const ValueKey('announcement-detail-card')),
+        findsNothing,
       );
       expect(tester.takeException(), isNull);
       await _finish(tester);
@@ -851,7 +1196,9 @@ void main() {
       await _finish(tester);
     });
 
-    testWidgets('사진 공지는 배너에 사진이 보이고, 사진을 눌러도 상세보기가 열린다', (tester) async {
+    testWidgets('사진 공지는 배너에 작은 사진과 [사진]이 보이고, 사진을 눌러도 상세보기가 열린다', (
+      tester,
+    ) async {
       final room = _room(
         announcement: Announcement.fromJson(
           _announcementJson('a1', text: '', imageUrl: '/files/tok'),
@@ -860,8 +1207,13 @@ void main() {
       final session = _session(_Server(), [room]);
       await pumpBanner(tester, session, room, size: const Size(360, 700));
       expect(find.byKey(const ValueKey('announcement-image')), findsOneWidget);
-      // 글이 없으면 글 줄은 안 그린다.
-      expect(find.byKey(const ValueKey('announcement-text')), findsNothing);
+      // 한 줄 공지바라 사진은 작은 축소본이고, 글 없는 사진 공지는 "[사진]"으로 보인다.
+      expect(
+        tester.getSize(find.byKey(const ValueKey('announcement-image'))).height,
+        lessThanOrEqualTo(24),
+      );
+      expect(announcementText(tester).data, '[사진]');
+      expect(tester.takeException(), isNull);
 
       // 사진 위젯은 터치를 무시하고(IgnorePointer) 아래 배너 몸통이 받는다.
       await tester.tap(
@@ -896,6 +1248,26 @@ void main() {
       expect(plain.hasImage, isFalse);
       expect(plain.previewText, '이번 주 금요일 회식');
     });
+
+    test(
+      '공지 JSON: 댓글 수(없으면 0)와 실시간 댓글 수(같은 댓글은 한 번만, 상세보기의 직접 증가와 겹치지 않음)',
+      () {
+        final old = Announcement.fromJson(_announcementJson('a1'));
+        expect(old.commentCount, 0);
+        expect(old.liveCommentCount, 0);
+        final a = Announcement.fromJson(
+          _announcementJson('a2', commentCount: 4),
+        );
+        expect(a.liveCommentCount, 4);
+        expect(a.noteLiveComment('c1'), isTrue);
+        expect(a.noteLiveComment('c1'), isFalse);
+        expect(a.liveCommentCount, 5);
+        a.commentCount += 1; // 상세보기가 같은 댓글로 올림
+        expect(a.liveCommentCount, 5);
+        a.commentCount += 1; // 상세보기에서만 본 댓글
+        expect(a.liveCommentCount, 6);
+      },
+    );
 
     test('RoomChatController.applyEdit: 첨부를 지운 수정이 첨부 목록·파일 칸·타입을 바꾼다', () {
       final room = _room();

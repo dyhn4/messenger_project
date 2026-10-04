@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { teamAccess, topicAccess } from './access.js';
 import {
+  countAnnouncementComments,
   findAnnouncementById,
   findLatestAnnouncementForRoom,
   findPinnedAnnouncementBySourceMessage,
@@ -14,6 +15,8 @@ import {
   updateAnnouncementText,
 } from './db/queries/announcements.js';
 import { announcementFieldsFromMessage } from './announcementFromMessage.js';
+import { toAnnouncementDto } from './announcementDto.js';
+import { parseAnnouncementText } from './announcementText.js';
 import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findTeamById, isTopicCreator } from './db/queries/teams.js';
@@ -22,21 +25,7 @@ import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
 
 function toDto(row) {
-  // 출처 칸(sourceMessageId·image*)은 DB 이름 그대로 내보내지 않고 messageId와 서명된 이미지 주소로 바꾼다.
-  const { sourceMessageId, imageUrl, imageThumbnailUrl, imageName, ...rest } = row;
-  return {
-    ...rest,
-    // "메시지를 공지로 등록"으로 만든 공지면 원본 메시지 id(원본이 지워졌으면 null) — 말풍선의 공지 표시용.
-    messageId: sourceMessageId ?? null,
-    // 이미지 메시지에서 온 공지의 사진 한 장(없으면 전부 null). 원본이 지워져도 공지 쪽 스냅샷이 남는다.
-    imageUrl: imageUrl ? signFileUrl(imageUrl, imageName) : null,
-    imageThumbnailUrl: imageThumbnailUrl ? signFileUrl(imageThumbnailUrl) : null,
-    imageName: imageName ?? null,
-    commentCount: row.commentCount ?? 0,
-    createdAt: new Date(row.createdAt).getTime(),
-    editedAt: row.editedAt ? new Date(row.editedAt).getTime() : null,
-    autoUnpinAt: row.autoUnpinAt ? new Date(row.autoUnpinAt).getTime() : null,
-  };
+  return toAnnouncementDto(row, signFileUrl);
 }
 
 /** "공지 자동 내리기" — 클라이언트는 밀리초 epoch만 보낸다(announcement_list_screen.dart의
@@ -130,6 +119,7 @@ export function createAnnouncementsRouter(io) {
     // 메시지 더보기의 "공지 등록" — messageId가 오면 글을 직접 받지 않고 그 메시지에서 뽑는다(텍스트 메시지의 본문,
     // 이미지 메시지의 사진 한 장 + 설명글). 그 밖의 글쓰기 경로는 예전과 같다.
     let text;
+    let textFormat = null;
     let source = null;
     let image = null;
     if (req.body?.messageId !== undefined && req.body?.messageId !== null) {
@@ -144,10 +134,11 @@ export function createAnnouncementsRouter(io) {
         return res.status(409).json({ error: '이미 공지로 등록된 메시지입니다.' });
       }
       text = fields.text;
+      textFormat = fields.textFormat ?? null;
       image = fields.image;
       source = message;
     } else {
-      text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+      ({ text, textFormat } = parseAnnouncementText(req.body?.text, req.body?.textFormat));
       if (!text) return res.status(400).json({ error: '내용을 입력하세요.' });
       if (text.length > 2000) return res.status(400).json({ error: '공지는 2000자 이내로 작성하세요.' });
     }
@@ -161,6 +152,7 @@ export function createAnnouncementsRouter(io) {
       authorId: req.user.sub,
       authorName: access.user?.name ?? access.user?.username ?? '알 수 없음',
       text,
+      textFormat,
       autoUnpinAt: autoUnpin.value,
       sourceMessageId: source?.id ?? null,
       imageUrl: image?.url ?? null,
@@ -201,13 +193,15 @@ export function createAnnouncementsRouter(io) {
     const denial = topicWriteDenial({ room, canManage: (await topicAccess(room, req.user.sub)).canManage });
     if (denial) return res.status(403).json({ error: denial });
 
-    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    // 서식(textFormat)을 안 보내면 지운다 — 글이 바뀌면 예전 서식 위치가 어긋나기 때문(announcementText.js).
+    const { text, textFormat } = parseAnnouncementText(req.body?.text, req.body?.textFormat);
     // 사진 공지는 글 없이 사진만 둘 수도 있다 — 글을 지워도 된다.
     if (!text && !announcement.imageUrl) return res.status(400).json({ error: '내용을 입력하세요.' });
     if (text.length > 2000) return res.status(400).json({ error: '공지는 2000자 이내로 작성하세요.' });
 
-    const row = await updateAnnouncementText(announcement.id, text);
-    const dto = toDto(row);
+    const row = await updateAnnouncementText(announcement.id, text, textFormat);
+    // 수정해도 댓글 수는 그대로 실어 보낸다(예전엔 0으로 나갔다 — 공지바가 댓글 수를 보여준다).
+    const dto = toDto({ ...row, commentCount: await countAnnouncementComments(announcement.id) });
     io.to(room.id).emit('announcement:updated', dto);
     res.json(dto);
   });

@@ -1,0 +1,1 @@
+ALTER TABLE "announcements" ADD COLUMN "text_format" jsonb;

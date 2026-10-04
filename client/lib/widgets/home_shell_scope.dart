@@ -12,7 +12,7 @@ class HomeShellScope extends InheritedWidget {
   /// 지금 오른쪽에 열려 있는 패널의 키(side_panels.dart의 [SidePanelSpec.key]). 없으면 null.
   final String? openPanelKey;
 
-  /// 방 헤더의 "파일 보기"·"링크 보기"·"멤버"로 연 패널이 가리키는 방. 상단 메뉴로 연 패널이면 null.
+  /// 방 헤더의 "파일 보기"·"링크 보기"·"멤버"·"공지"로 연 패널이 가리키는 방. 상단 메뉴로 연 패널이면 null.
   final Room? panelRoom;
 
   /// 패널을 열 때마다 올라간다 — 이미 열려 있는 패널을 다른 방으로 "새로 시작"시키는 위젯 키로 쓴다.
@@ -23,6 +23,11 @@ class HomeShellScope extends InheritedWidget {
 
   /// 패널을 토글한다(열려 있으면 닫고, 아니면 연다).
   final void Function(String key) togglePanel;
+
+  /// 한 방의 것만 보는 패널(공지 등)을 [room]으로 연다 — 이미 그 방으로 열려 있으면 닫고(토글), 다른 방이면 그 방으로
+  /// 새로 시작한다. side_panels.dart의 `openSidePanel(..., room: room)`이 부른다. 없으면(시험 하네스 등) [togglePanel]로
+  /// 열고, 패널은 [currentRoomId]의 방을 쓴다.
+  final void Function(String key, Room room)? openRoomPanel;
 
   /// 열려 있는 오른쪽 패널을 닫는다.
   final VoidCallback closePanel;
@@ -45,6 +50,7 @@ class HomeShellScope extends InheritedWidget {
     required this.panelGeneration,
     required this.currentRoomId,
     required this.togglePanel,
+    this.openRoomPanel,
     required this.closePanel,
     required this.toggleCalendar,
     required this.openRoom,

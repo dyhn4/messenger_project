@@ -158,6 +158,16 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   void _openRoomPanel(Room room, {required bool links}) =>
       _showPanel(links ? 'links' : 'files', room: room);
 
+  /// 한 방의 것만 보는 패널(토픽 ⋯의 "공지" 등 — side_panels.dart의 `openSidePanel(..., room:)`)을 그 방으로 연다.
+  /// 이미 그 방 것이 열려 있으면 닫고(토글), 다른 방 것이 열려 있으면 그 방으로 새로 시작한다.
+  void _toggleRoomPanel(String key, Room room) {
+    if (_panelKey == key && _panelRoom?.id == room.id) {
+      _leavePanelThen(_closePanel);
+      return;
+    }
+    _showPanel(key, room: room);
+  }
+
   /// 방 헤더의 "멤버" — 그 방의 참여 멤버 패널을 연다. 이미 그 방 것이 열려 있으면 닫는다(토글).
   void _openRoomMembers(Room room) {
     if (_panelKey == 'members' && _panelRoom?.id == room.id) {
@@ -418,6 +428,7 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       panelGeneration: _panelGeneration,
       currentRoomId: _selectedRoom?.id,
       togglePanel: _togglePanel,
+      openRoomPanel: _toggleRoomPanel,
       closePanel: _closePanel,
       toggleCalendar: _toggleCalendar,
       openRoom: _openRoomFromPanel,

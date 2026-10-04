@@ -1315,14 +1315,18 @@ class ApiClient {
   /// 공지 작성 — 새로 쓴 것이 자동으로 그 방의 "지금 고정된 공지"가 된다. 토픽을 만들 수
   /// 있는 사람만 가능(서버가 다시 확인 — canCreateTopic과 같은 권한). [autoUnpinAt]을 주면
   /// 그 시각에 서버가 자동으로 "공지 내리기"를 한다(공지 작성 다이얼로그의 빠른 선택 버튼).
+  /// [textFormat]은 공지 쓰기 창의 서식 도구모음이 만든 서식 구간(AnnouncementDraft.format, 없으면 평문).
   Future<Announcement> createAnnouncement(
     String roomId,
     String text, {
     DateTime? autoUnpinAt,
+    List<TextFormatRun>? textFormat,
   }) async {
+    final format = textFormatToJson(textFormat);
     return Announcement.fromJson(
       await _post('/api/rooms/$roomId/announcements', {
             'text': text,
+            'textFormat': ?format,
             if (autoUnpinAt != null)
               'autoUnpinAt': autoUnpinAt.millisecondsSinceEpoch,
           })
@@ -1343,15 +1347,19 @@ class ApiClient {
     );
   }
 
-  /// 공지 수정 — 본인 작성 글만 가능(서버가 다시 확인).
+  /// 공지 수정 — 본인 작성 글만 가능(서버가 다시 확인). 글과 서식을 함께 바꾼다 — [textFormat]을 안 주면
+  /// 서버가 서식을 지운다(글이 바뀌면 예전 서식 위치가 어긋나므로).
   Future<Announcement> updateAnnouncement(
     String roomId,
     String announcementId,
-    String text,
-  ) async {
+    String text, {
+    List<TextFormatRun>? textFormat,
+  }) async {
+    final format = textFormatToJson(textFormat);
     return Announcement.fromJson(
       await _patch('/api/rooms/$roomId/announcements/$announcementId', {
             'text': text,
+            'textFormat': ?format,
           })
           as Map<String, dynamic>,
     );
@@ -3127,7 +3135,10 @@ class ApiClient {
     final items = (body['items'] as List)
         .map((e) => RoomSearchResult.fromJson(e as Map<String, dynamic>))
         .toList();
-    return RoomSearchPage(items, (body['total'] as num?)?.toInt() ?? items.length);
+    return RoomSearchPage(
+      items,
+      (body['total'] as num?)?.toInt() ?? items.length,
+    );
   }
 
   /// 방(들)에 첨부된 이미지/파일 목록(files_screen.dart). roomId를 안 주면 내가 속한 모든

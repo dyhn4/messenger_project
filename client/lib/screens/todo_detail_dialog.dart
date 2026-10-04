@@ -15,6 +15,7 @@ import '../widgets/attachment_widgets.dart'
     show ChatImageAttachments, DownloadableFile;
 import '../widgets/avatar_utils.dart';
 import '../widgets/compact_menu.dart';
+import '../widgets/todo_menu.dart';
 import '../widgets/todo_widgets.dart';
 import '../widgets/user_avatar.dart';
 import 'home_screen.dart' show wideBreakpoint;
@@ -319,36 +320,14 @@ class _TodoDetailState extends State<TodoDetail> {
   }
 
   Future<void> _delete() async {
-    var open = true;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        // 지워졌다는 알림이 오면 이 창도 닫으려고 붙잡아 둔다(패널 모드에서는 상세와 다른 Navigator에 뜬다). 닫히는
-        // 동안 다시 그려져도 닫힌 창을 다시 붙잡지 않게 [open]일 때만.
-        if (open) _confirmRoute = ModalRoute.of(dialogContext);
-        return AlertDialog(
-          title: const Text('할 일 삭제'),
-          content: Text('"${_todo.title}" 할 일을 삭제할까요?\n삭제하면 되돌릴 수 없습니다.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              key: const ValueKey('todo-confirm-delete'),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(dialogContext).colorScheme.error,
-              ),
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('삭제'),
-            ),
-          ],
-        );
-      },
+    // 지워졌다는 알림이 오면 확인 창도 닫으려고 붙잡아 둔다(패널 모드에서는 상세와 다른 Navigator에 뜬다).
+    final ok = await confirmTodoDelete(
+      context,
+      _todo,
+      onRoute: (route) => _confirmRoute = route,
     );
-    open = false;
     _confirmRoute = null;
-    if (ok != true || !mounted || _deleting) return;
+    if (!ok || !mounted || _deleting) return;
     // 지우고 나면 상세가 닫혀 context가 사라지므로 알릴 곳(앱 맨 위 Overlay)을 먼저 잡아 둔다.
     final overlay = Overlay.of(context, rootOverlay: true);
     _deleting = true;
@@ -652,78 +631,26 @@ class _TodoDetailState extends State<TodoDetail> {
   /// 할 일 삭제(만든 사람, 빨강). 창 전체(루트 Navigator, [todoPopupRouteName])에 띄운다 — 패널 안 상세에서 열어도 바깥
   /// (채팅 쪽)을 누르면 닫힌다(자리는 단추 오른쪽 끝에 맞춰 패널 안).
   Widget _menu(BuildContext context) {
-    final t = _todo;
-    final theme = Theme.of(context);
-    PopupMenuItem<String> item(
-      String value,
-      String label,
-      IconData icon, {
-      Color? color,
-      Color? iconColor,
-      bool enabled = true,
-    }) => PopupMenuItem<String>(
-      key: ValueKey('todo-menu-$value'),
-      value: value,
-      enabled: enabled,
-      height: CompactMenu.itemHeight,
-      padding: CompactMenu.itemPadding,
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: iconColor ?? color ?? theme.hintColor),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: color == null
-                  ? CompactMenu.textStyle
-                  : CompactMenu.textStyle.copyWith(color: color),
-            ),
-          ),
-        ],
-      ),
-    );
-    return PopupMenuButton<String>(
+    return PopupMenuButton<TodoMenuAction>(
       key: const ValueKey('todo-detail-menu'),
       tooltip: '더보기',
-      icon: Icon(Icons.more_horiz, color: theme.hintColor),
+      icon: Icon(Icons.more_horiz, color: Theme.of(context).hintColor),
       useRootNavigator: true,
       routeSettings: todoPopupRouteSettings,
       position: PopupMenuPosition.under,
       color: CompactMenu.color(context),
       shape: CompactMenu.shape,
       menuPadding: CompactMenu.menuPadding,
-      constraints: const BoxConstraints(minWidth: 160, maxWidth: 240),
-      onSelected: (v) => switch (v) {
-        'favorite' => _toggleFavorite(),
-        'edit' => _edit(),
-        'download' => _download(),
-        _ => _delete(),
+      constraints: todoMenuConstraints,
+      onSelected: (action) => switch (action) {
+        TodoMenuAction.favorite => _toggleFavorite(),
+        TodoMenuAction.edit => _edit(),
+        TodoMenuAction.download => _download(),
+        TodoMenuAction.delete => _delete(),
       },
-      itemBuilder: (context) => [
-        item(
-          'favorite',
-          t.favorite ? '즐겨찾기 해제' : '즐겨찾기',
-          t.favorite ? Icons.star : Icons.star_border,
-          iconColor: t.favorite ? Colors.amber : null,
-        ),
-        if (t.canEdit) item('edit', '할 일 수정', Icons.edit_outlined),
-        if (t.attachments.isNotEmpty)
-          item(
-            'download',
-            '파일 다운로드',
-            Icons.file_download_outlined,
-            enabled: !_downloading,
-          ),
-        if (t.canManage)
-          item(
-            'delete',
-            '할 일 삭제',
-            Icons.delete_outline,
-            color: theme.colorScheme.error,
-          ),
-      ],
+      // 목록·일정 카드의 ⋯와 같은 항목(todo_menu.dart).
+      itemBuilder: (context) =>
+          todoMenuItems(context, _todo, downloading: _downloading),
     );
   }
 

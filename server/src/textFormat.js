@@ -11,14 +11,31 @@
  */
 export const TEXT_FORMAT_MASK = 63;
 
-export function sanitizeTextFormat(value, text) {
+/** 공지처럼 노트 편집기와 같은 도구모음을 쓰는 곳 — 위 서식에 더해 제목(64 H1·128 H2·256 H3, 줄 단위)과
+ * 글자색(512 "색 있음" 비트 + 1024배 자리부터 RGB 24비트 — 클라이언트 models/text_format.dart Fmt.withColor). */
+export const RICH_TEXT_FORMAT_MASK = 511;
+const COLOR_BIT = 512;
+const COLOR_UNIT = 1024;
+
+/** 서식 비트 정리 — 글자색 자리는 32비트를 넘어서(최대 2^34) 비트 연산(&) 대신 나눗셈으로 자른다. */
+function sanitizeFlags(raw, rich) {
+  if (!rich) return raw & TEXT_FORMAT_MASK;
+  if (!Number.isSafeInteger(raw) || raw < 0) return 0;
+  const low = (raw % COLOR_BIT) & RICH_TEXT_FORMAT_MASK;
+  if (Math.floor(raw / COLOR_BIT) % 2 === 0) return low;
+  const rgb = Math.floor(raw / COLOR_UNIT) % 0x1000000;
+  return low + COLOR_BIT + rgb * COLOR_UNIT;
+}
+
+/** [rich]가 true면 제목·글자색까지 받는다(공지). 채팅·댓글·게시글은 기본(false) 그대로다. */
+export function sanitizeTextFormat(value, text, { rich = false } = {}) {
   if (!Array.isArray(value) || typeof text !== 'string' || text.length === 0) return null;
   const out = [];
   for (const r of value.slice(0, 2000)) {
     if (!r || typeof r !== 'object') continue;
     const { s, e } = r;
     if (!Number.isInteger(s) || !Number.isInteger(e) || s < 0 || e <= s || e > text.length) continue;
-    const f = Number.isInteger(r.f) ? r.f & TEXT_FORMAT_MASK : 0;
+    const f = Number.isInteger(r.f) ? sanitizeFlags(r.f, rich) : 0;
     const h =
       typeof r.h === 'string' && r.h.length <= 2000 && /^(https?:\/\/|mailto:|tangotalk:\/\/)/i.test(r.h) ? r.h : null;
     if (!f && !h) continue;

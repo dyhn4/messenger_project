@@ -375,23 +375,27 @@ void main() {
       added.clear();
     });
 
-    test('기본으로 검색·파일·링크·앨범·할 일·메시지 예약·즐겨찾기·투표·내가 쓴 글·북마크·알림 센터·멤버가 등록돼 있다', () {
-      expect(sidePanelSpecs.map((s) => s.key), [
-        'search',
-        'files',
-        'links',
-        'albums',
-        'todos',
-        'scheduled',
-        'favorites',
-        'polls',
-        'myposts',
-        'bookmarks',
-        'notifications',
-        'members',
-      ]);
-      expect(sidePanelSpecFor('nope'), isNull);
-    });
+    test(
+      '기본으로 검색·파일·링크·앨범·할 일·메시지 예약·즐겨찾기·투표·내가 쓴 글·북마크·알림 센터·멤버·공지가 등록돼 있다',
+      () {
+        expect(sidePanelSpecs.map((s) => s.key), [
+          'search',
+          'files',
+          'links',
+          'albums',
+          'todos',
+          'scheduled',
+          'favorites',
+          'polls',
+          'myposts',
+          'bookmarks',
+          'notifications',
+          'members',
+          'announcements',
+        ]);
+        expect(sidePanelSpecFor('nope'), isNull);
+      },
+    );
 
     testWidgets('홈 화면 밖(모바일)에서는 같은 builder가 전체 화면 라우트로 열리고 앱바 제목이 붙는다', (
       tester,

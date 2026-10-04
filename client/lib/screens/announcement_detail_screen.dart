@@ -14,23 +14,31 @@ import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart';
 import '../widgets/board_view.dart'
     show BoardColors, PinnedPostTag, boardCardDecoration;
+import '../widgets/compact_menu.dart';
+import '../widgets/rich_text_format.dart' show FormattedText;
+import '../widgets/room_options_menu.dart' show closeOwnRoute;
 import 'announcement_editor_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
 
-/// 공지 "상세보기" — 배너·공지 목록·알림 센터에서 연다. 잔디의 게시글 상세처럼 카드 하나에 작성자 아바타·이름·
+/// 공지 "상세보기" — 배너·공지 패널·알림 센터에서 연다. 잔디의 게시글 상세처럼 카드 하나에 작성자 아바타·이름·
 /// `2026/10/01 AM 3:44`, 오른쪽 위 ⋯(작성자만: 수정하기·공지 내리기·삭제하기 …), 본문, 사진(있으면), 구분선,
-/// `댓글 N`과 댓글 목록을 담고, 맨 아래에 고정된 댓글 입력칸이 있다. PC는 대화상자, 모바일은 전체 화면이다.
+/// `댓글 N`과 댓글 목록을 담고, 맨 아래에 고정된 댓글 입력칸이 있다.
+///
+/// 이 함수(배너·알림 센터)는 PC면 대화상자(머리 `공지 … ✕`), 모바일이면 전체 화면(머리 `← 공지`)으로 연다. 공지 패널은
+/// 이 함수 대신 [AnnouncementDetailScreen]을 직접 띄운다 — PC는 패널 안 화면(`← 공지 … ✕`, ←는 목록으로, ✕는 패널 닫기),
+/// 모바일은 이것과 같은 전체 화면이다(announcement_list_screen.dart). [onDeleted]는 공지를 지워서 닫힐 때 부른다.
 Future<void> showAnnouncementDetailScreen(
   BuildContext context,
   Session session,
   Room room,
-  Announcement announcement,
-) {
+  Announcement announcement, {
+  VoidCallback? onDeleted,
+}) {
   final isWide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
   if (isWide) {
     return showDialog<void>(
       context: context,
-      builder: (_) => Dialog(
+      builder: (dialogContext) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         clipBehavior: Clip.antiAlias,
         child: SizedBox(
@@ -40,19 +48,42 @@ Future<void> showAnnouncementDetailScreen(
             session: session,
             room: room,
             announcement: announcement,
+            onClose: () => Navigator.of(dialogContext).pop(),
+            onDeleted: onDeleted,
           ),
         ),
       ),
     );
   }
-  return Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('공지')),
-        body: AnnouncementDetailScreen(
-          session: session,
-          room: room,
-          announcement: announcement,
+  return pushAnnouncementDetailPage(
+    Navigator.of(context),
+    session,
+    room,
+    announcement,
+    onDeleted: onDeleted,
+  );
+}
+
+/// 모바일 전체 화면 상세 — 앱바 대신 패널 안 화면과 같은 머리(`← 공지`)를 그린다. 공지 패널(모바일)도 이걸 쓴다.
+Future<void> pushAnnouncementDetailPage(
+  NavigatorState navigator,
+  Session session,
+  Room room,
+  Announcement announcement, {
+  VoidCallback? onDeleted,
+}) {
+  return navigator.push(
+    MaterialPageRoute<void>(
+      builder: (routeContext) => Scaffold(
+        body: SafeArea(
+          bottom: false,
+          child: AnnouncementDetailScreen(
+            session: session,
+            room: room,
+            announcement: announcement,
+            onBack: () => Navigator.of(routeContext).maybePop(),
+            onDeleted: onDeleted,
+          ),
         ),
       ),
     ),
@@ -82,17 +113,293 @@ const _quickEmojis = [
   '😅',
 ];
 
-enum _MoreAction { share, edit, unpin, delete }
+// ── ⋯ 더보기 메뉴(상세와 공지 패널 카드가 같이 쓴다) ─────────────────────────────
+
+/// 공지 ⋯ 메뉴의 동작 — 수정하기 · 공지 내리기 / 현재 채팅방에 공유하기 / 삭제하기.
+enum AnnouncementMoreAction { share, edit, unpin, delete }
+
+/// [AnnouncementMoreAction]을 한 뒤 공지가 어떻게 됐는지 — 부른 쪽이 다시 그리거나(changed) 닫거나 목록에서 뺀다(deleted).
+enum AnnouncementActionResult { none, changed, deleted }
+
+/// 지금 사용자가 [announcement]의 ⋯에서 할 수 있는 동작 — 작성자만 모두 할 수 있다(Session.canManageAnnouncement,
+/// 서버와 같은 규칙). "공지 내리기"는 지금 채팅방에 고정된 공지에만. 빈 목록이면 ⋯를 아예 숨긴다.
+List<AnnouncementMoreAction> announcementMoreActions(
+  Session session,
+  Announcement announcement,
+) {
+  if (!session.canManageAnnouncement(announcement)) return const [];
+  return [
+    AnnouncementMoreAction.edit,
+    if (announcement.pinned) AnnouncementMoreAction.unpin,
+    AnnouncementMoreAction.share,
+    AnnouncementMoreAction.delete,
+  ];
+}
+
+/// 공지 ⋯ 더보기 단추 — 토픽방 머리의 ⋯ 메뉴(room_options_menu.dart)와 같은 간결한 메뉴([CompactMenu]: 흰 바탕·작은
+/// 글씨·작고 흐린 아이콘, 묶음 사이 구분선). 묶음은 수정하기·공지 내리기 / 현재 채팅방에 공유하기 / 삭제하기(빨강) 중
+/// [announcementMoreActions]가 허락한 것만이고, 하나도 없으면 아무것도 그리지 않는다. 메뉴는 창 전체(루트 Navigator)에
+/// 띄운다 — 공지 패널 안 화면(중첩 Navigator)에서도 바깥(채팅 쪽)을 누르면 닫힌다. 상세(작성자 줄 오른쪽)와 공지 패널의
+/// 카드(오른쪽 위)가 같이 쓴다 — 고른 동작은 [onSelected]로 넘기고, 보통 [runAnnouncementMoreAction]으로 한다.
+class AnnouncementMoreButton extends StatelessWidget {
+  final Session session;
+  final Announcement announcement;
+  final ValueChanged<AnnouncementMoreAction> onSelected;
+
+  /// 아이콘 크기·색과 누르는 칸(정사각형 한 변) — 카드처럼 좁은 자리는 작게 준다. null이면 IconButton 기본.
+  final double? iconSize;
+  final Color? iconColor;
+  final double? buttonSize;
+
+  /// 안쪽 PopupMenuButton의 키(테스트가 단추를 찾는 데 쓴다).
+  final Key? buttonKey;
+
+  const AnnouncementMoreButton({
+    super.key,
+    this.buttonKey,
+    required this.session,
+    required this.announcement,
+    required this.onSelected,
+    this.iconSize,
+    this.iconColor,
+    this.buttonSize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = announcementMoreActions(session, announcement);
+    if (actions.isEmpty) return const SizedBox.shrink();
+    final hasEditGroup =
+        actions.contains(AnnouncementMoreAction.edit) ||
+        actions.contains(AnnouncementMoreAction.unpin);
+    final hasShare = actions.contains(AnnouncementMoreAction.share);
+    final hasDelete = actions.contains(AnnouncementMoreAction.delete);
+    final size = buttonSize;
+    return PopupMenuButton<AnnouncementMoreAction>(
+      key: buttonKey,
+      icon: Icon(Icons.more_horiz, size: iconSize, color: iconColor),
+      tooltip: '더보기',
+      padding: EdgeInsets.zero,
+      iconSize: iconSize,
+      style: size == null
+          ? null
+          : IconButton.styleFrom(
+              fixedSize: Size.square(size),
+              minimumSize: Size.square(size),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+      useRootNavigator: true,
+      color: CompactMenu.color(context),
+      shape: CompactMenu.shape,
+      menuPadding: CompactMenu.menuPadding,
+      constraints: CompactMenu.constraints,
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        if (actions.contains(AnnouncementMoreAction.edit))
+          CompactMenu.item(
+            context,
+            icon: Icons.edit_outlined,
+            label: '수정하기',
+            value: AnnouncementMoreAction.edit,
+          ),
+        if (actions.contains(AnnouncementMoreAction.unpin))
+          CompactMenu.item(
+            context,
+            icon: Icons.push_pin_outlined,
+            label: '공지 내리기',
+            value: AnnouncementMoreAction.unpin,
+          ),
+        if (hasEditGroup && (hasShare || hasDelete)) CompactMenu.divider,
+        if (hasShare)
+          CompactMenu.item(
+            context,
+            icon: Icons.forward_outlined,
+            label: '현재 채팅방에 공유하기',
+            value: AnnouncementMoreAction.share,
+          ),
+        if (hasShare && hasDelete) CompactMenu.divider,
+        if (hasDelete)
+          CompactMenu.item(
+            context,
+            icon: Icons.delete_outline,
+            label: '삭제하기',
+            color: Colors.redAccent,
+            value: AnnouncementMoreAction.delete,
+          ),
+      ],
+    );
+  }
+}
+
+/// ⋯에서 고른 [action]을 한다 — 확인 창·서버 요청·실패 토스트까지. 고치거나 내리면 [announcement] 객체의 값을 그
+/// 자리에서 바꾸고 [AnnouncementActionResult.changed], 지웠으면 [AnnouncementActionResult.deleted], 취소·실패·공유는
+/// [AnnouncementActionResult.none]을 돌려준다. [context]는 확인 창·토스트를 띄울 자리(상세 화면이나 공지 패널).
+Future<AnnouncementActionResult> runAnnouncementMoreAction(
+  BuildContext context,
+  Session session,
+  Room room,
+  Announcement announcement,
+  AnnouncementMoreAction action,
+) async {
+  switch (action) {
+    case AnnouncementMoreAction.share:
+      await _shareAnnouncementToRoom(context, session, room, announcement);
+      return AnnouncementActionResult.none;
+    case AnnouncementMoreAction.edit:
+      return await _editAnnouncement(context, session, room, announcement)
+          ? AnnouncementActionResult.changed
+          : AnnouncementActionResult.none;
+    case AnnouncementMoreAction.unpin:
+      return await _unpinAnnouncement(context, session, room, announcement)
+          ? AnnouncementActionResult.changed
+          : AnnouncementActionResult.none;
+    case AnnouncementMoreAction.delete:
+      return await _deleteAnnouncement(context, session, room, announcement)
+          ? AnnouncementActionResult.deleted
+          : AnnouncementActionResult.none;
+  }
+}
+
+/// 현재 채팅방에 공유하기 — 공지를 인용한 메시지를 그 방에 보낸다.
+Future<void> _shareAnnouncementToRoom(
+  BuildContext context,
+  Session session,
+  Room room,
+  Announcement announcement,
+) async {
+  try {
+    await session.chatSocket.send(
+      roomId: room.id,
+      type: 'text',
+      quotedSenderName: announcement.authorName,
+      quotedPreview: announcement.previewText,
+    );
+    if (context.mounted) showAppToast(context, '현재 채팅방에 공유했습니다.');
+  } catch (e) {
+    if (context.mounted) showAppToast(context, '공유하지 못했습니다: $e');
+  }
+}
+
+/// 공지 내리기 — 묻고 나서 채팅방 상단에서 내린다(목록에는 남는다). 내렸으면 true.
+Future<bool> _unpinAnnouncement(
+  BuildContext context,
+  Session session,
+  Room room,
+  Announcement announcement,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('공지 내리기'),
+      content: const Text('이 공지를 채팅방 상단에서 내릴까요? 목록에는 그대로 남습니다.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('내리기'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return false;
+  try {
+    await session.api!.unpinAnnouncement(room.id, announcement.id);
+    announcement.pinned = false;
+    return true;
+  } catch (e) {
+    if (context.mounted) showAppToast(context, '공지를 내리지 못했습니다: $e');
+    return false;
+  }
+}
+
+/// 수정 — 공지 쓰기와 같은 틀의 창(announcement_editor_dialog.dart)에서 글을 고친다. 고쳤으면 true.
+Future<bool> _editAnnouncement(
+  BuildContext context,
+  Session session,
+  Room room,
+  Announcement announcement,
+) async {
+  var changed = false;
+  await showAnnouncementEditor(
+    context,
+    session: session,
+    room: room,
+    announcement: announcement,
+    onSubmit: (draft) async {
+      final updated = await session.api!.updateAnnouncement(
+        room.id,
+        announcement.id,
+        draft.text,
+        textFormat: draft.format,
+      );
+      announcement.text = updated.text;
+      announcement.textFormat = updated.textFormat;
+      announcement.editedAt = updated.editedAt;
+      changed = true;
+    },
+  );
+  return changed;
+}
+
+/// 삭제 — 묻고 나서 지운다(댓글도 함께). 지웠으면 true.
+Future<bool> _deleteAnnouncement(
+  BuildContext context,
+  Session session,
+  Room room,
+  Announcement announcement,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('공지 삭제'),
+      content: const Text('이 공지를 삭제할까요? 댓글도 함께 삭제되며 되돌릴 수 없습니다.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('취소'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return false;
+  try {
+    await session.api!.deleteAnnouncement(room.id, announcement.id);
+    return true;
+  } catch (e) {
+    if (context.mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+    return false;
+  }
+}
 
 class AnnouncementDetailScreen extends StatefulWidget {
   final Session session;
   final Room room;
   final Announcement announcement;
+
+  /// 머리 왼쪽 ←(뒤로) — 주면 보인다(모바일 전체 화면·패널 안 화면: 목록으로 돌아간다).
+  final VoidCallback? onBack;
+
+  /// 머리 오른쪽 ✕(닫기) — 주면 보인다(PC 대화상자는 대화상자를, 패널 안 화면은 패널 전체를 닫는다).
+  final VoidCallback? onClose;
+
+  /// 이 공지를 지워서(여기서 삭제했거나 다른 기기에서 지워져) 상세가 닫힐 때 — 목록이 그 카드를 뺀다.
+  final VoidCallback? onDeleted;
+
   const AnnouncementDetailScreen({
     super.key,
     required this.session,
     required this.room,
     required this.announcement,
+    this.onBack,
+    this.onClose,
+    this.onDeleted,
   });
 
   @override
@@ -111,8 +418,6 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
   StreamSubscription<Announcement>? _updatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _unpinnedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _deletedSub;
-
-  bool get _canManage => widget.session.canManageAnnouncement(_announcement);
 
   @override
   void initState() {
@@ -136,6 +441,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
       if (a.id != _announcement.id || !mounted) return;
       setState(() {
         _announcement.text = a.text;
+        _announcement.textFormat = a.textFormat;
         _announcement.editedAt = a.editedAt;
       });
     });
@@ -162,11 +468,13 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
 
   bool _closed = false;
 
-  /// 상세를 닫는다 — 삭제 응답과 소켓 알림이 둘 다 오니 한 번만(두 번 닫으면 뒤 화면까지 닫힌다).
+  /// 공지가 지워져 상세를 닫는다 — 삭제 응답과 소켓 알림이 둘 다 오니 한 번만(두 번 닫으면 뒤 화면까지 닫힌다). 이 화면의
+  /// 라우트(대화상자·전체 화면·패널 안 화면)만 닫는다 — 위에 메뉴가 떠 있어도 엉뚱한 것을 닫지 않게.
   void _close() {
     if (_closed || !mounted) return;
     _closed = true;
-    Navigator.of(context).pop();
+    widget.onDeleted?.call();
+    closeOwnRoute(context);
   }
 
   Future<void> _load() async {
@@ -257,150 +565,87 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
     return null;
   }
 
-  Future<void> _shareToRoom() async {
-    try {
-      await widget.session.chatSocket.send(
-        roomId: widget.room.id,
-        type: 'text',
-        quotedSenderName: _announcement.authorName,
-        quotedPreview: _announcement.previewText,
-      );
-      if (mounted) showAppToast(context, '현재 채팅방에 공유했습니다.');
-    } catch (e) {
-      if (mounted) showAppToast(context, '공유하지 못했습니다: $e');
-    }
-  }
-
-  Future<void> _unpin() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('공지 내리기'),
-        content: const Text('이 공지를 채팅방 상단에서 내릴까요? 목록에는 그대로 남습니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('내리기'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await widget.session.api!.unpinAnnouncement(
-        widget.room.id,
-        _announcement.id,
-      );
-      if (mounted) setState(() => _announcement.pinned = false);
-    } catch (e) {
-      if (mounted) showAppToast(context, '공지를 내리지 못했습니다: $e');
-    }
-  }
-
-  /// 수정 — 공지 쓰기와 같은 틀의 창(announcement_editor_dialog.dart)에서 글을 고친다.
-  Future<void> _edit() async {
-    await showAnnouncementEditor(
+  /// ⋯에서 고른 동작 — 공지 패널 카드의 ⋯와 같은 코드([runAnnouncementMoreAction]). 지웠으면 상세를 닫는다.
+  Future<void> _onMore(AnnouncementMoreAction action) async {
+    final result = await runAnnouncementMoreAction(
       context,
-      session: widget.session,
-      room: widget.room,
-      announcement: _announcement,
-      onSubmit: (draft) async {
-        final updated = await widget.session.api!.updateAnnouncement(
-          widget.room.id,
-          _announcement.id,
-          draft.text,
-        );
-        if (mounted) {
-          setState(() {
-            _announcement.text = updated.text;
-            _announcement.editedAt = updated.editedAt;
-          });
-        }
-      },
+      widget.session,
+      widget.room,
+      _announcement,
+      action,
     );
-  }
-
-  Future<void> _delete() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('공지 삭제'),
-        content: const Text('이 공지를 삭제할까요? 댓글도 함께 삭제되며 되돌릴 수 없습니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('취소'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await widget.session.api!.deleteAnnouncement(
-        widget.room.id,
-        _announcement.id,
-      );
-      if (mounted) _close();
-    } catch (e) {
-      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
-    }
-  }
-
-  void _onMore(_MoreAction action) {
-    switch (action) {
-      case _MoreAction.share:
-        _shareToRoom();
-      case _MoreAction.edit:
-        _edit();
-      case _MoreAction.unpin:
-        _unpin();
-      case _MoreAction.delete:
-        _delete();
+    if (!mounted) return;
+    switch (result) {
+      case AnnouncementActionResult.changed:
+        setState(() {});
+      case AnnouncementActionResult.deleted:
+        _close();
+      case AnnouncementActionResult.none:
+        break;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // 좁은 화면은 showAnnouncementDetailScreen이 이미 Scaffold+AppBar를 씌워서 push하므로 그대로 쓰고,
-    // 넓은 화면(Dialog)에서는 헤더+닫기 버튼을 직접 그린다.
-    final isWide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
-    final colors = BoardColors.of(Theme.of(context));
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (isWide) _buildDialogHeader(context),
-        Expanded(
-          child: ColoredBox(
-            color: colors.background,
-            child: _buildBody(context, colors),
+    final theme = Theme.of(context);
+    final colors = BoardColors.of(theme);
+    // 패널 안 화면은 밀려 들어오는 동안 아래 목록이 비치지 않게 제 바탕을 칠한다.
+    return Material(
+      color: theme.colorScheme.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildHeader(context),
+          const Divider(height: 1),
+          Expanded(
+            child: ColoredBox(
+              color: colors.background,
+              child: _buildBody(context, colors),
+            ),
           ),
-        ),
-        _buildCommentInput(context),
-      ],
+          _buildCommentInput(context),
+        ],
+      ),
     );
   }
 
-  Widget _buildDialogHeader(BuildContext context) {
+  /// 머리 — `← 공지 … ✕`. ←는 [AnnouncementDetailScreen.onBack], ✕는 [AnnouncementDetailScreen.onClose]가 있을 때만.
+  /// 높이·여백은 다른 패널 머리(SidePanelHeader)·할 일 패널 안 화면 머리(TodoPageHeader)와 같다.
+  Widget _buildHeader(BuildContext context) {
+    final back = widget.onBack;
+    final close = widget.onClose;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+      // ←가 있으면 단추 안쪽 여백만큼 덜 띄워 화살표를 본문 왼쪽 끝에 맞춘다.
+      padding: EdgeInsets.fromLTRB(back == null ? 16 : 8, 12, 8, 12),
       child: Row(
         children: [
+          if (back != null) ...[
+            IconButton(
+              key: const ValueKey('announcement-detail-back'),
+              icon: const Icon(Icons.arrow_back),
+              tooltip: '뒤로',
+              onPressed: back,
+            ),
+            const SizedBox(width: 4),
+          ],
           Expanded(
-            child: Text('공지', style: Theme.of(context).textTheme.titleLarge),
+            child: Text(
+              '공지',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            tooltip: '닫기',
-            onPressed: () => Navigator.of(context).pop(),
-          ),
+          if (close != null)
+            IconButton(
+              key: const ValueKey('announcement-detail-close'),
+              icon: const Icon(Icons.close),
+              tooltip: '닫기',
+              onPressed: close,
+            ),
+          // 머리 높이를 다른 패널과 같게(단추가 하나도 없어도).
+          if (back == null && close == null)
+            const SizedBox(height: kMinInteractiveDimension),
         ],
       ),
     );
@@ -437,7 +682,13 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                       const PinnedPostTag(),
                       const SizedBox(width: 2),
                     ],
-                    if (_canManage) _buildMoreMenu(),
+                    // ⋯ — 할 수 있는 게 없으면(작성자가 아니면) 그리지 않는다.
+                    AnnouncementMoreButton(
+                      buttonKey: const ValueKey('announcement-detail-more'),
+                      session: widget.session,
+                      announcement: _announcement,
+                      onSelected: _onMore,
+                    ),
                   ],
                 ),
                 Padding(
@@ -448,7 +699,19 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                       if (hasText) ...[
                         const SizedBox(height: 14),
                         // Windows(마우스)에서는 끌어서 바로 고를 수 있게(게시글 상세와 같은 규칙).
-                        Platform.isWindows
+                        // 공지 쓰기 창에서 서식을 입혔으면 서식대로(선택 가능 여부는 같은 규칙).
+                        _announcement.textFormat != null
+                            ? FormattedText(
+                                _announcement.text,
+                                key: const ValueKey('announcement-detail-text'),
+                                format: _announcement.textFormat,
+                                selectable: Platform.isWindows,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  height: 1.6,
+                                ),
+                              )
+                            : Platform.isWindows
                             ? SelectableText(
                                 _announcement.text,
                                 key: const ValueKey('announcement-detail-text'),
@@ -518,59 +781,6 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                     ),
               ],
             ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMoreMenu() {
-    return PopupMenuButton<_MoreAction>(
-      key: const ValueKey('announcement-detail-more'),
-      icon: const Icon(Icons.more_horiz),
-      tooltip: '더보기',
-      padding: EdgeInsets.zero,
-      onSelected: _onMore,
-      itemBuilder: (_) => [
-        const PopupMenuItem(
-          value: _MoreAction.edit,
-          child: Row(
-            children: [
-              Icon(Icons.edit_outlined),
-              SizedBox(width: 8),
-              Text('수정하기'),
-            ],
-          ),
-        ),
-        if (_announcement.pinned)
-          const PopupMenuItem(
-            value: _MoreAction.unpin,
-            child: Row(
-              children: [
-                Icon(Icons.push_pin_outlined),
-                SizedBox(width: 8),
-                Text('공지 내리기'),
-              ],
-            ),
-          ),
-        const PopupMenuItem(
-          value: _MoreAction.share,
-          child: Row(
-            children: [
-              Icon(Icons.forward_outlined),
-              SizedBox(width: 8),
-              Text('현재 채팅방에 공유하기'),
-            ],
-          ),
-        ),
-        const PopupMenuItem(
-          value: _MoreAction.delete,
-          child: Row(
-            children: [
-              Icon(Icons.delete_outline, color: Colors.redAccent),
-              SizedBox(width: 8),
-              Text('삭제하기', style: TextStyle(color: Colors.redAccent)),
-            ],
           ),
         ),
       ],

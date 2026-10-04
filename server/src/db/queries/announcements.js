@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { announcementComments, announcements } from '../schema.js';
 
@@ -12,6 +12,7 @@ export function listAnnouncementsForRoom(roomId) {
       authorId: announcements.authorId,
       authorName: announcements.authorName,
       text: announcements.text,
+      textFormat: announcements.textFormat,
       pinned: announcements.pinned,
       autoUnpinAt: announcements.autoUnpinAt,
       createdAt: announcements.createdAt,
@@ -29,10 +30,19 @@ export function listAnnouncementsForRoom(roomId) {
     .orderBy(desc(announcements.createdAt));
 }
 
-/** 채팅방 상단 배너용 — 지금 고정된(pinned=true) 공지 1건(없으면 null). */
+/** 채팅방 상단 배너용 — 지금 고정된(pinned=true) 공지 1건(없으면 null). 공지바가 댓글 수를 보여주므로
+ * commentCount(그 공지의 댓글 수)를 함께 센다. */
 export async function findLatestAnnouncementForRoom(roomId) {
   const [row] = await db
-    .select()
+    .select({
+      ...getTableColumns(announcements),
+      // 상관 서브쿼리 — 컬럼을 ${}로 넣으면 드리즐이 테이블 이름 없이("id") 그려서 안쪽 테이블의 id로 잘못 묶인다.
+      // 그래서 테이블 이름까지 직접 쓴다.
+      commentCount:
+        sql`(select count(*)::int from "announcement_comments" where "announcement_comments"."announcement_id" = "announcements"."id")`.mapWith(
+          Number,
+        ),
+    })
     .from(announcements)
     .where(and(eq(announcements.roomId, roomId), eq(announcements.pinned, true), isNull(announcements.deletedAt)))
     .limit(1);
@@ -74,6 +84,8 @@ export async function insertAnnouncement({
   authorId,
   authorName,
   text,
+  // 글자 서식 구간(announcementText.js가 정리한 것, 없으면 null).
+  textFormat = null,
   autoUnpinAt = null,
   // "메시지를 공지로 등록"으로 만들 때만 — 출처 메시지 id와 이미지 스냅샷(announcements.js 참고).
   sourceMessageId = null,
@@ -94,6 +106,7 @@ export async function insertAnnouncement({
         authorId,
         authorName,
         text,
+        textFormat,
         pinned: true,
         autoUnpinAt,
         sourceMessageId,
@@ -121,10 +134,11 @@ export function findAnnouncementsPastAutoUnpin() {
     );
 }
 
-export async function updateAnnouncementText(id, text) {
+/** 글과 서식을 함께 바꾼다 — [textFormat]이 null이면 서식을 지운다(글이 바뀌면 예전 위치가 어긋나므로). */
+export async function updateAnnouncementText(id, text, textFormat = null) {
   const [row] = await db
     .update(announcements)
-    .set({ text, editedAt: new Date() })
+    .set({ text, textFormat, editedAt: new Date() })
     .where(eq(announcements.id, id))
     .returning();
   return row;
@@ -159,6 +173,15 @@ export async function findPinnedAnnouncementBySourceMessage(roomId, messageId) {
     )
     .limit(1);
   return row ?? null;
+}
+
+/** 공지 하나의 댓글 수 — 수정(PATCH) 응답·announcement:updated에 실어 보낸다. */
+export async function countAnnouncementComments(announcementId) {
+  const [row] = await db
+    .select({ n: sql`count(*)::int` })
+    .from(announcementComments)
+    .where(eq(announcementComments.announcementId, announcementId));
+  return row?.n ?? 0;
 }
 
 export function listCommentsForAnnouncement(announcementId) {

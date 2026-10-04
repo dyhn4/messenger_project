@@ -19,6 +19,7 @@ import 'package:client/services/chat_socket.dart' show RoomRemovedEvent;
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/attachment_widgets.dart' show AllDownloadBar;
+import 'package:client/widgets/avatar_utils.dart' show AvatarView;
 import 'package:client/widgets/board_view.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/chat_panel.dart';
@@ -379,7 +380,19 @@ void main() {
       final server = _boardServer(
         history: [_post('p9', title: '보통 글', minutes: 30)],
         pinned: [
-          for (var i = 1; i <= 4; i++)
+          _post(
+            'pin1',
+            title: '고정 1',
+            minutes: 19,
+            pinnedAt: _at(40),
+            senderId: 'u3',
+            senderName: '이영희',
+            comments: [
+              _comment('pc1', 'pin1', '확인', minutes: 21),
+              _comment('pc2', 'pin1', '좋아요', minutes: 22),
+            ],
+          ),
+          for (var i = 2; i <= 4; i++)
             _post('pin$i', title: '고정 $i', minutes: 20 - i, pinnedAt: _at(40)),
         ],
       );
@@ -390,6 +403,41 @@ void main() {
       expect(find.byKey(const ValueKey('pinned-pin1')), findsOneWidget);
       expect(find.byKey(const ValueKey('pinned-pin3')), findsOneWidget);
       expect(find.byKey(const ValueKey('pinned-pin4')), findsNothing);
+
+      // 한 줄 — 제목 오른쪽에 댓글 수(댓글이 있을 때만 — 0이면 아이콘·숫자 모두 없다), 그 오른쪽에 작성자 아바타·
+      // 이름. 작성 시각은 없다.
+      final pin1 = find.byKey(const ValueKey('pinned-pin1'));
+      final pin2 = find.byKey(const ValueKey('pinned-pin2'));
+      Finder inTile(Finder tile, Finder f) =>
+          find.descendant(of: tile, matching: f);
+      expect(
+        inTile(pin1, find.byKey(const ValueKey('pinned-comments'))),
+        findsOneWidget,
+      );
+      expect(inTile(pin1, find.text('2')), findsOneWidget);
+      expect(
+        inTile(pin2, find.byKey(const ValueKey('pinned-comments'))),
+        findsNothing,
+      );
+      expect(
+        inTile(pin2, find.byIcon(Icons.mode_comment_outlined)),
+        findsNothing,
+      );
+      expect(inTile(pin2, find.text('0')), findsNothing);
+      expect(inTile(pin1, find.text('이영희')), findsOneWidget);
+      expect(inTile(pin2, find.text('김철수')), findsOneWidget);
+      expect(inTile(pin1, find.byType(AvatarView)), findsOneWidget);
+      expect(inTile(pin1, find.textContaining('2026/')), findsNothing);
+      expect(inTile(pin1, find.textContaining('·')), findsNothing);
+      final titleRight = tester.getTopRight(inTile(pin1, find.text('고정 1')));
+      final countLeft = tester.getTopLeft(inTile(pin1, find.text('2')));
+      final avatarLeft = tester.getTopLeft(
+        inTile(pin1, find.byType(AvatarView)),
+      );
+      final nameLeft = tester.getTopLeft(inTile(pin1, find.text('이영희')));
+      expect(titleRight.dx, lessThan(countLeft.dx));
+      expect(countLeft.dx, lessThan(avatarLeft.dx));
+      expect(avatarLeft.dx, lessThan(nameLeft.dx));
       // 고정 영역이 보통 글보다 위다.
       expect(
         tester.getTopLeft(find.text('고정된 게시글 4')).dy,
@@ -540,12 +588,49 @@ void main() {
         pinned: [
           _post('p1', title: long, pinnedAt: _at(5)),
           for (var i = 2; i <= 4; i++)
-            _post('pin$i', title: long, pinnedAt: _at(5)),
+            _post(
+              'pin$i',
+              title: long,
+              pinnedAt: _at(5),
+              senderName: '이름이 아주 긴 사람 김철수철수',
+              senderId: 'u9',
+              comments: [
+                if (i == 2) _comment('pc$i', 'pin$i', '확인', minutes: 6),
+              ],
+            ),
         ],
       );
       final session = _session(server, rooms: [room]);
       await _pumpBoard(tester, session, room, size: const Size(360, 740));
       expect(tester.takeException(), isNull);
+      // 고정 줄은 제목부터 말줄임 — 댓글 수·작성자는 그대로 보인다(긴 이름은 그 칸에서 말줄임). 댓글이 없는 줄은
+      // 댓글 수 자리 없이 작성자가 붙는다.
+      final pin2 = find.byKey(const ValueKey('pinned-pin2'));
+      expect(
+        find.descendant(of: pin2, matching: find.text('1')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('pinned-pin3')),
+          matching: find.byKey(const ValueKey('pinned-comments')),
+        ),
+        findsNothing,
+      );
+      final name = tester.renderObject<RenderParagraph>(
+        find.descendant(of: pin2, matching: find.text('이름이 아주 긴 사람 김철수철수')),
+      );
+      expect(name.didExceedMaxLines, isTrue);
+      final title = tester.renderObject<RenderParagraph>(
+        find.descendant(of: pin2, matching: find.text(long)),
+      );
+      expect(title.didExceedMaxLines, isTrue);
+      expect(
+        tester
+            .getSize(find.descendant(of: pin2, matching: find.text(long)))
+            .width,
+        greaterThan(60),
+      );
       // 좁은 화면의 글쓰기 버튼은 동그란 연필만.
       expect(find.byTooltip('게시글 작성'), findsOneWidget);
       expect(find.text('게시글 작성'), findsNothing);

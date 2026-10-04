@@ -1462,6 +1462,11 @@ class FormattedText extends StatefulWidget {
   /// 멘션 글자색 — 없으면 테마 primary.
   final Color? mentionColor;
 
+  /// 미리보기처럼 몇 줄까지만 보일 때(공지 목록·공지바 등) — 주면 인용 줄도 세로줄 블록 없이 한 덩어리 글로 그려
+  /// [maxLines]에서 [overflow](기본 말줄임)로 자른다. 없으면 전부 그린다.
+  final int? maxLines;
+  final TextOverflow? overflow;
+
   const FormattedText(
     this.text, {
     super.key,
@@ -1473,6 +1478,8 @@ class FormattedText extends StatefulWidget {
     this.myUserId,
     this.onMentionTap,
     this.mentionColor,
+    this.maxLines,
+    this.overflow,
   });
 
   @override
@@ -1651,6 +1658,13 @@ class _FormattedTextState extends State<FormattedText> {
     _mentionOf = widget.mentions.isEmpty
         ? const []
         : _mentionIndex(t.length, widget.mentions);
+    if (widget.maxLines != null) {
+      return Text.rich(
+        TextSpan(children: _spans(chars, 0, t.length, base)),
+        maxLines: widget.maxLines,
+        overflow: widget.overflow ?? TextOverflow.ellipsis,
+      );
+    }
 
     // 줄마다 인용인지(그 줄 첫 글자에 인용 서식이 있는지) 보고, 같은 종류끼리 묶어 블록으로.
     final blocks = <(bool, int, int)>[];

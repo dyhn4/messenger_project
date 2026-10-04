@@ -16,14 +16,17 @@ import 'package:client/widgets/app_toast.dart';
 import 'package:client/widgets/attachment_widgets.dart'
     show ChatImageAttachments, DownloadableFile;
 import 'package:client/widgets/category_tab_row.dart';
+import 'package:client/widgets/compact_menu.dart';
 import 'package:client/widgets/favorite_star.dart';
 import 'package:client/widgets/filter_dropdown.dart';
 import 'package:client/widgets/home_shell_scope.dart';
 import 'package:client/widgets/panel_filters.dart' show memberChoicesFor;
 import 'package:client/widgets/todo_calendar_view.dart';
+import 'package:client/widgets/todo_menu.dart';
 import 'package:client/widgets/todo_widgets.dart';
 import 'package:client/widgets/todos_panel.dart';
 import 'package:client/widgets/user_avatar.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,8 +37,8 @@ import 'helpers/fake_todo_api.dart';
 
 /// 할 일 패널(잔디 2차 — 실제 화면에 맞추기) — 목록 화면(머리의 `할 일 일정` 칩·가로 전체 `+ 할 일 생성`·참여한 대화방 →
 /// 보기 → 부여한 할 일의 담당 멤버·정렬(생성 순 / 기한 순)·`완료된 할 일 제외` 스위치·`N개의 할 일`(서버가 센 전체 개수)),
-/// 카드(`진행률 : 75%` 관점 진척률과 진척률 색·생성일·즐겨찾기 표시·설명·대화방/담당자/첨부·일정과 지난 기한, 카드에서는
-/// 바꾸지 않음), 화면 흐름(PC는 패널 안 Navigator에 상세·생성·일정 — ←·✕·시스템 뒤로 가기·팀 바꾸면 목록으로 / 모바일은
+/// 카드(`진행률 : 75%` 관점 진척률과 진척률 색·생성일·즐겨찾기 표시·설명·대화방/담당자/첨부·일정과 지난 기한, 오른쪽 위
+/// ⋯ — 상세 •••와 같은 항목·권한·동작, 마우스 올림 색), 화면 흐름(PC는 패널 안 Navigator에 상세·생성·일정 — ←·✕·시스템 뒤로 가기·팀 바꾸면 목록으로 / 모바일은
 /// 앱 Navigator의 전체 화면), 할 일 일정 화면(42칸 범위 받기·할 일 점·고른 날의 대화방별 묶음과 접기·달/해 이동·오늘·목록
 /// 필터 그대로·받는 중/실패·상세 뒤 다시 받기), 펼침 패널 위치, 어두운 테마, 폭 360·390·420. 서버는 가짜 API
 /// (helpers/fake_todo_api.dart)로 대신한다.
@@ -997,7 +1000,10 @@ void main() {
               .first,
         );
         expect(card.color, todoCardColor(context));
-        expect(card.borderRadius, BorderRadius.circular(12));
+        expect(
+          (card.shape! as RoundedRectangleBorder).borderRadius,
+          BorderRadius.circular(12),
+        );
         expect(todoCardColor(context), isNot(todoListBackgroundColor(context)));
         final listRect = tester.getRect(_key('todo-list'));
         final cardRect = tester.getRect(_key('todo-a'));
@@ -1006,7 +1012,8 @@ void main() {
           tester.getRect(_key('todo-g')).top - cardRect.bottom,
           moreOrLessEquals(10),
         );
-        // 카드에서는 진척률·즐겨찾기를 바꾸지 않는다 — 원·고르는 칩(메뉴)·별 단추·아바타 줄(+N)이 없다.
+        // 카드에서는 진척률을 바꾸지 않고 별은 표시만이다(즐겨찾기는 ⋯ 메뉴) — 원·고르는 칩(메뉴)·별 단추·아바타 줄(+N)이
+        // 없다.
         expect(_key('todo-ring-a'), findsNothing);
         expect(find.byType(PopupMenuButton<int>), findsNothing);
         expect(find.byType(FavoriteStar), findsNothing);
@@ -1102,7 +1109,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('카드는 보기만 한다 — 별 자리를 눌러도 상세가 열리고, 진척률·즐겨찾기를 보내지 않는다', (
+    testWidgets('카드의 별은 표시만 — 별 자리를 눌러도 상세가 열리고, 진척률·즐겨찾기를 보내지 않는다', (
       tester,
     ) async {
       final api = await _pump(tester, [
@@ -1160,6 +1167,515 @@ void main() {
         reason: '어두운 테마의 밝은 주황',
       );
     });
+  });
+
+  // ────────────────────────── 카드 ⋯ 메뉴 · 마우스 올림 ──────────────────────────
+  group('카드 ⋯ 메뉴(상세 •••와 같은 항목·권한) · 마우스 올림', () {
+    /// 카드 [id]의 ⋯를 눌러 메뉴를 띄운다.
+    Future<void> openCardMenu(WidgetTester tester, String id) async {
+      await tester.ensureVisible(_key('todo-card-menu-$id'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-card-menu-$id'));
+      await tester.pumpAndSettle();
+    }
+
+    /// 떠 있는 메뉴의 항목 키 — 위에서부터.
+    List<String> menuKeys(WidgetTester tester) {
+      final keys = [
+        for (final a in TodoMenuAction.values)
+          if (_key('todo-menu-${a.name}').evaluate().isNotEmpty)
+            'todo-menu-${a.name}',
+      ];
+      keys.sort(
+        (a, b) => tester
+            .getTopLeft(_key(a))
+            .dy
+            .compareTo(tester.getTopLeft(_key(b)).dy),
+      );
+      return keys;
+    }
+
+    Future<void> dismissMenu(WidgetTester tester) async {
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+    }
+
+    final roleTodos = [
+      // 내가 만든 것(첨부 2개) — 전부.
+      todoJson(
+        id: 'mine',
+        title: '내가 만든 할 일',
+        assignees: ['me'],
+        attachmentCount: 2,
+        createdAt: 3,
+      ),
+      // 남이 만들고 내가 담당 — 즐겨찾기 · 수정.
+      todoJson(
+        id: 'assigned',
+        title: '맡은 할 일',
+        creatorId: 'u2',
+        creatorName: '김철수',
+        assignees: ['me'],
+        createdAt: 2,
+      ),
+      // 남이 만들고 남이 담당(첨부 1개) — 즐겨찾기 · 파일 다운로드(보기만 하는 사람도).
+      todoJson(
+        id: 'viewer',
+        title: '보기만 하는 할 일',
+        creatorId: 'u2',
+        creatorName: '김철수',
+        assignees: ['u2'],
+        attachmentCount: 1,
+        createdAt: 1,
+      ),
+    ];
+
+    testWidgets('카드마다 오른쪽 위 ⋯ — 항목·권한·모양이 상세 •••와 같다(만든 사람 · 담당자 · 보기만)', (
+      tester,
+    ) async {
+      final api = FakeTodoApi(me: 'me', todos: roleTodos);
+      final controller = TodoController(
+        api: api,
+        teamId: 't1',
+        scope: TodoScope.team,
+      );
+      addTearDown(controller.dispose);
+      await _pump(tester, const [], api: api, controller: controller);
+      // ⋯는 카드 오른쪽 위 — 생성일 오른쪽, 첫 줄 높이에.
+      for (final id in ['mine', 'assigned', 'viewer']) {
+        final card = tester.getRect(_key('todo-$id'));
+        final button = tester.getRect(_key('todo-card-menu-$id'));
+        expect(card.right - button.right, moreOrLessEquals(11), reason: id);
+        expect(button.top - card.top, moreOrLessEquals(12), reason: id);
+        expect(
+          button.left,
+          greaterThan(tester.getRect(_key('todo-created-$id')).right),
+          reason: '$id — 생성일과 겹치지 않는다',
+        );
+        expect(
+          tester.getCenter(_key('todo-card-menu-$id')).dy,
+          moreOrLessEquals(
+            tester.getCenter(_key('todo-created-$id')).dy,
+            epsilon: 3,
+          ),
+          reason: '$id — 첫 줄과 나란하다',
+        );
+        expect(
+          find.descendant(
+            of: _key('todo-card-menu-$id'),
+            matching: find.byIcon(Icons.more_horiz),
+          ),
+          findsOneWidget,
+        );
+      }
+
+      await openCardMenu(tester, 'mine');
+      expect(menuKeys(tester), [
+        'todo-menu-favorite',
+        'todo-menu-edit',
+        'todo-menu-download',
+        'todo-menu-delete',
+      ]);
+      Finder inItem(String key, String text) =>
+          find.descendant(of: _key(key), matching: find.text(text));
+      expect(inItem('todo-menu-favorite', '즐겨찾기'), findsOneWidget);
+      expect(inItem('todo-menu-edit', '할 일 수정'), findsOneWidget);
+      expect(inItem('todo-menu-download', '파일 다운로드'), findsOneWidget);
+      final delete = tester.widget<Text>(inItem('todo-menu-delete', '할 일 삭제'));
+      final context = tester.element(_key('todo-menu-delete'));
+      expect(delete.style?.color, Theme.of(context).colorScheme.error);
+      // 상세 •••와 같은 간결한 메뉴 — 32 높이 항목, 창 전체(루트)의 할 일 메뉴 라우트.
+      final item = tester.widget<PopupMenuItem<TodoMenuAction>>(
+        _key('todo-menu-edit'),
+      );
+      expect(item.height, CompactMenu.itemHeight);
+      expect(ModalRoute.of(context)?.settings.name, todoPopupRouteName);
+      await dismissMenu(tester);
+
+      await openCardMenu(tester, 'assigned');
+      expect(menuKeys(tester), ['todo-menu-favorite', 'todo-menu-edit']);
+      await dismissMenu(tester);
+
+      await openCardMenu(tester, 'viewer');
+      expect(menuKeys(tester), ['todo-menu-favorite', 'todo-menu-download']);
+      await dismissMenu(tester);
+      expect(find.byType(TodoDetail), findsNothing);
+      expect(api.callCount('setFavorite'), 0);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('⋯를 눌러도 카드(상세)는 열리지 않는다 — 메뉴만 뜨고, 바깥을 눌러 닫아도 그대로', (
+      tester,
+    ) async {
+      final api = await _pump(tester, [
+        todoJson(id: 'a', title: '할 일 하나', assignees: ['me']),
+      ]);
+      await openCardMenu(tester, 'a');
+      expect(_key('todo-menu-favorite'), findsOneWidget);
+      expect(find.byType(TodoDetail), findsNothing);
+      await dismissMenu(tester);
+      expect(_key('todo-menu-favorite'), findsNothing);
+      expect(find.byType(TodoDetail), findsNothing);
+      // 카드의 다른 자리는 여전히 상세를 연다.
+      await tester.tap(find.text('할 일 하나'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TodoDetail), findsOneWidget);
+      expect(api.callCount('get'), 0);
+    });
+
+    testWidgets('즐겨찾기 / 즐겨찾기 해제 — 바로 별이 붙고 서버에 보낸 뒤 목록을 다시 받는다(즐겨찾기 먼저)', (
+      tester,
+    ) async {
+      final api = await _pump(tester, [
+        todoJson(id: 'new', title: '새 할 일', assignees: ['me'], createdAt: 2),
+        todoJson(id: 'old', title: '옛 할 일', assignees: ['me'], createdAt: 1),
+      ]);
+      double top(String id) => tester.getTopLeft(_key('todo-$id')).dy;
+      expect(top('new'), lessThan(top('old')));
+      await openCardMenu(tester, 'old');
+      await tester.tap(_key('todo-menu-favorite'));
+      await tester.pumpAndSettle();
+      expect(api.calls, contains('setFavorite old true'));
+      expect(_key('todo-fav-old'), findsOneWidget);
+      expect(api.callCount('list'), 2, reason: '조용히 다시 받는다');
+      expect(top('old'), lessThan(top('new')), reason: '즐겨찾기가 맨 앞');
+      expect(find.byType(TodoDetail), findsNothing);
+
+      await openCardMenu(tester, 'old');
+      expect(
+        find.descendant(
+          of: _key('todo-menu-favorite'),
+          matching: find.text('즐겨찾기 해제'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(_key('todo-menu-favorite'));
+      await tester.pumpAndSettle();
+      expect(api.calls, contains('setFavorite old false'));
+      expect(_key('todo-fav-old'), findsNothing);
+
+      // 실패하면 되돌리고 알린다.
+      api.failWith = '서버 오류';
+      await openCardMenu(tester, 'new');
+      await tester.tap(_key('todo-menu-favorite'));
+      await tester.pumpAndSettle();
+      expect(_key('todo-fav-new'), findsNothing);
+      expect(find.textContaining('즐겨찾기를 바꾸지 못했습니다'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('할 일 수정 — PC는 패널 안 수정 화면, 저장하면 알리고 목록을 다시 받는다', (tester) async {
+      final api = await _pumpShell(tester, [
+        todoJson(id: 'a', title: '고칠 할 일', assignees: ['me']),
+      ]);
+      await openCardMenu(tester, 'a');
+      await tester.tap(_key('todo-menu-edit'));
+      await tester.pumpAndSettle();
+      final editor = tester.widget<TodoEditor>(find.byType(TodoEditor));
+      expect(editor.mode, TodoViewMode.panel);
+      expect(editor.editing?.id, 'a');
+      expect(editor.onClosePanel, isNull, reason: '패널 닫기 손잡이가 없는 하네스');
+      expect(tester.getRect(find.byType(TodoEditor)), _panelRect(tester));
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(TodoDetail), findsNothing, reason: '상세를 거치지 않는다');
+      await tester.enterText(_key('todo-title-field'), '고친 제목');
+      await tester.pump();
+      await tester.tap(_key('todo-submit'));
+      await tester.pumpAndSettle();
+      expect(api.lastUpdate?['title'], '고친 제목');
+      expect(find.byType(TodoEditor), findsNothing);
+      expect(find.text('할 일을 수정했습니다.'), findsOneWidget);
+      expect(find.text('고친 제목'), findsOneWidget);
+      expect(api.callCount('list'), 2);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('할 일 수정 — 모바일은 전체 화면 수정 화면', (tester) async {
+      await _pump(tester, [
+        todoJson(id: 'a', title: '고칠 할 일', assignees: ['me']),
+      ], size: const Size(390, 800));
+      await openCardMenu(tester, 'a');
+      await tester.tap(_key('todo-menu-edit'));
+      await tester.pumpAndSettle();
+      final editor = tester.widget<TodoEditor>(find.byType(TodoEditor));
+      expect(editor.mode, TodoViewMode.page);
+      expect(editor.editing?.id, 'a');
+      expect(tester.getSize(find.byType(TodoEditor)).width, 390);
+    });
+
+    testWidgets('할 일 삭제 — 상세와 같은 확인 뒤 지우고 카드가 빠진다([취소]면 그대로)', (tester) async {
+      final api = await _pump(tester, [
+        todoJson(id: 'a', title: '지울 할 일', assignees: ['me']),
+        todoJson(id: 'b', title: '남길 할 일', assignees: ['me']),
+      ]);
+      expect(find.text('2개의 할 일'), findsOneWidget);
+      await openCardMenu(tester, 'a');
+      await tester.tap(_key('todo-menu-delete'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('할 일 삭제'), findsOneWidget);
+      expect(find.textContaining('"지울 할 일" 할 일을 삭제할까요?'), findsOneWidget);
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(api.callCount('delete'), 0);
+      expect(_key('todo-a'), findsOneWidget);
+
+      await openCardMenu(tester, 'a');
+      await tester.tap(_key('todo-menu-delete'));
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-confirm-delete'));
+      await tester.pumpAndSettle();
+      expect(api.calls, contains('delete a'));
+      expect(_key('todo-a'), findsNothing);
+      expect(_key('todo-b'), findsOneWidget);
+      expect(find.text('1개의 할 일'), findsOneWidget);
+      expect(find.text('할 일을 삭제했습니다.'), findsOneWidget);
+      expect(find.byType(TodoDetail), findsNothing);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('PC — 카드 ⋯의 삭제 확인을 띄운 채 팀을 바꾸면 확인 창도 닫히고 지우지 않는다', (
+      tester,
+    ) async {
+      final session = _session();
+      final dev = Team(id: 't2', name: '개발팀', createdAt: DateTime(2026));
+      session.teams.add(dev);
+      final api = await _pumpShell(tester, [
+        todoJson(id: 'a', title: '영업팀 할 일', assignees: ['me']),
+      ], session: session);
+      await openCardMenu(tester, 'a');
+      await tester.tap(_key('todo-menu-delete'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      session.enterTeam(dev);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(api.callCount('delete'), 0);
+      expect(api.lastList!['teamId'], 't2');
+    });
+
+    testWidgets('파일 다운로드 — 첨부가 있을 때만, 그 할 일의 첨부를 받고 받는 동안은 꺼진다', (
+      tester,
+    ) async {
+      final api = FakeTodoApi(
+        me: 'me',
+        todos: [
+          todoJson(
+            id: 'f',
+            title: '첨부 있는 할 일',
+            assignees: ['me'],
+            attachmentCount: 3,
+            createdAt: 2,
+          ),
+          todoJson(
+            id: 'n',
+            title: '첨부 없는 할 일',
+            assignees: ['me'],
+            createdAt: 1,
+          ),
+        ],
+      );
+      final gate = Completer<void>();
+      Todo? downloaded;
+      tester.view.physicalSize = const Size(420, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TodosPanel(
+              session: _session(),
+              api: api,
+              download: (context, session, todo, {onProgress}) async {
+                downloaded = todo;
+                onProgress?.call(0, todo.attachments.length);
+                await gate.future;
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openCardMenu(tester, 'n');
+      expect(_key('todo-menu-download'), findsNothing);
+      await dismissMenu(tester);
+
+      await openCardMenu(tester, 'f');
+      await tester.tap(_key('todo-menu-download'));
+      await tester.pumpAndSettle();
+      expect(downloaded?.id, 'f');
+      expect(find.text('파일 3개를 다운로드하는 중입니다.'), findsOneWidget);
+      expect(find.byType(TodoDetail), findsNothing);
+      await openCardMenu(tester, 'f');
+      PopupMenuItem<TodoMenuAction> item() => tester
+          .widget<PopupMenuItem<TodoMenuAction>>(_key('todo-menu-download'));
+      expect(item().enabled, isFalse, reason: '받는 동안');
+      await dismissMenu(tester);
+      gate.complete();
+      await tester.pumpAndSettle();
+      await openCardMenu(tester, 'f');
+      expect(item().enabled, isTrue);
+      await dismissMenu(tester);
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets(
+      'PC — ⋯ 메뉴는 패널 안(단추 오른쪽 끝에 맞춰)에 뜨고, 채팅 쪽을 누르면 닫히며 그 누름은 채팅에 가지 않는다',
+      (tester) async {
+        await _pumpShell(tester, [
+          todoJson(
+            id: 'a',
+            title: '할 일 하나',
+            assignees: ['me'],
+            attachmentCount: 1,
+          ),
+        ]);
+        await _expectClosesFromChat(
+          tester,
+          what: '카드 ⋯',
+          open: () async {
+            await openCardMenu(tester, 'a');
+            expect(
+              _menuRect(tester, _key('todo-menu-edit')).right,
+              moreOrLessEquals(
+                tester.getRect(_key('todo-card-menu-a')).right,
+                epsilon: 1,
+              ),
+            );
+          },
+          shown: _key('todo-menu-edit'),
+          rect: () => _menuRect(tester, _key('todo-menu-edit')),
+        );
+        expect(find.byType(TodoDetail), findsNothing);
+        expect(find.byType(TodoEditor), findsNothing);
+      },
+    );
+
+    testWidgets('할 일 일정 화면의 카드에도 ⋯ — 즐겨찾기하면 목록과 일정을 다시 받는다, 수정은 일정 위에', (
+      tester,
+    ) async {
+      final api = await _pumpShell(tester, [
+        todoJson(
+          id: 'a',
+          title: '오늘 할 일',
+          assignees: ['me'],
+          startDate: _w(_today),
+          dueDate: _w(_today),
+        ),
+      ]);
+      await _openCalendar(tester);
+      final inCalendar = find.descendant(
+        of: find.byType(TodoCalendarPage),
+        matching: _key('todo-card-menu-a'),
+      );
+      expect(inCalendar, findsOneWidget);
+      await tester.ensureVisible(inCalendar);
+      await tester.pumpAndSettle();
+      final calendarLists = api.calls
+          .where((c) => c.startsWith('list') && !c.endsWith('to=null'))
+          .length;
+      await tester.tap(inCalendar);
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-menu-favorite'));
+      await tester.pumpAndSettle();
+      expect(api.calls, contains('setFavorite a true'));
+      expect(
+        api.calls
+            .where((c) => c.startsWith('list') && !c.endsWith('to=null'))
+            .length,
+        calendarLists + 1,
+        reason: '일정도 다시 받는다',
+      );
+      expect(
+        find.descendant(
+          of: find.byType(TodoCalendarPage),
+          matching: _key('todo-fav-a'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(inCalendar);
+      await tester.pumpAndSettle();
+      await tester.tap(_key('todo-menu-edit'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TodoEditor>(find.byType(TodoEditor)).mode,
+        TodoViewMode.panel,
+      );
+      await tester.tap(_key('todo-page-back'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(TodoCalendarPage),
+        findsOneWidget,
+        reason: '일정으로 돌아온다',
+      );
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets(
+        '마우스를 올리면 카드 테두리가 주 색으로 바뀐다(${brightness.name}) — 카드 바탕은 그대로, 덧칠 없음',
+        (tester) async {
+          final theme = ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.indigo,
+              brightness: brightness,
+            ),
+            useMaterial3: true,
+          );
+          await _pump(tester, [
+            todoJson(id: 'a', title: '할 일 하나', assignees: ['me'], createdAt: 2),
+            todoJson(id: 'b', title: '할 일 둘', assignees: ['me'], createdAt: 1),
+          ], theme: theme);
+          final context = tester.element(_key('todo-a'));
+          final card = todoCardColor(context);
+          final border = todoCardHoverBorder(context);
+          expect(
+            border.color,
+            theme.colorScheme.primary.withValues(alpha: 0.55),
+          );
+          expect(border.width, 1.5);
+          // 테두리 카드는 덧칠하지 않는다(흰 카드에 옅은 주 색을 얹으면 밝은 테마의 연보라 바탕과 같아졌다).
+          final ink = tester.widget<InkWell>(
+            find
+                .descendant(of: _key('todo-a'), matching: find.byType(InkWell))
+                .first,
+          );
+          expect(ink.hoverColor, Colors.transparent);
+          expect(ink.highlightColor, todoCardPressColor(context));
+
+          Material frame(String id) => tester.widget<Material>(
+            find
+                .descendant(
+                  of: _key('todo-$id'),
+                  matching: find.byType(Material),
+                )
+                .first,
+          );
+          BorderSide side(String id) =>
+              (frame(id).shape! as RoundedRectangleBorder).side;
+          expect(side('a'), BorderSide.none);
+
+          final gesture = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          await gesture.addPointer(location: Offset.zero);
+          addTearDown(gesture.removePointer);
+          await gesture.moveTo(tester.getCenter(find.text('할 일 하나')));
+          await tester.pumpAndSettle();
+          expect(side('a'), border);
+          expect(side('b'), BorderSide.none);
+          expect(frame('a').color, card, reason: '바탕은 그대로');
+          // ⋯ 위로 옮겨도 카드는 올린 그대로다(⋯가 카드 안에 있다).
+          await gesture.moveTo(tester.getCenter(_key('todo-card-menu-a')));
+          await tester.pumpAndSettle();
+          expect(side('a'), border);
+          // 카드 밖으로 나가면 테두리가 사라진다.
+          await gesture.moveTo(const Offset(1, 1));
+          await tester.pumpAndSettle();
+          expect(side('a'), BorderSide.none);
+        },
+      );
+    }
   });
 
   // ────────────────────────── 화면 흐름 ──────────────────────────

@@ -8,7 +8,7 @@ import '../models/app_notification.dart';
 import '../models/project.dart' show ProjectNotification;
 import '../models/room.dart';
 import '../screens/announcement_detail_screen.dart';
-import '../screens/announcement_list_screen.dart';
+import '../screens/announcement_list_screen.dart' show openAnnouncementPanel;
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/project/project_dialog.dart' show showProjectDialog;
@@ -28,12 +28,12 @@ import 'room_avatar.dart';
 import 'team_avatar.dart';
 import 'unread_badge.dart';
 
-/// 알림 센터에서 안 읽은 "공지"가 있는 방을 눌러 열었을 때, 공지 목록을 팝업으로 함께 띄운다
-/// (안 읽은 공지에는 "안 읽음" 표시가 붙고, 하나를 눌러 상세를 본 뒤 뒤로 가면 이 목록으로 돌아온다).
+/// 알림 센터에서 안 읽은 "공지"가 있는 방을 눌러 열었을 때, 그 방의 공지 패널을 함께 연다(PC는 오른쪽 패널, 모바일은
+/// 전체 화면 — 안 읽은 공지에는 "안 읽음" 표시가 붙고, 하나를 눌러 상세를 본 뒤 ←로 이 목록으로 돌아온다).
 /// 안 읽은 공지가 하나뿐이고 그게 지금 고정된 공지면 목록 대신 그 공지의 상세보기를 바로 연다.
-/// 방만 열면 공지를 실제로 열어본 적이 없어서(session.markAnnouncementsRead는 공지 목록/상세를
+/// 방만 열면 공지를 실제로 열어본 적이 없어서(session.markAnnouncementsRead는 공지 패널/상세를
 /// 열 때만 호출된다) 알림 센터에 계속 "안 읽음"으로 남기 때문이다. [hadUnreadAnnouncement]는
-/// 방을 열기 "전"의 값이어야 한다.
+/// 방을 열기 "전"의 값이어야 한다. 공지 패널은 열 때의 방 상태(안 읽은 공지 수)로 "안 읽음" 표시를 붙인다.
 void showUnreadAnnouncementPopup(
   BuildContext context,
   Session session,
@@ -41,7 +41,6 @@ void showUnreadAnnouncementPopup(
   required bool hadUnreadAnnouncement,
 }) {
   if (!hadUnreadAnnouncement || !context.mounted) return;
-  // 목록을 여는 순간 읽음 처리되어 개수가 0이 되므로 그 전에 값을 잡아둔다.
   final unreadCount = math.max(1, room.unreadAnnouncementCount);
   // 안 읽은 공지가 하나뿐이고 그게 지금 고정된 공지면 목록을 거치지 않고 상세보기를 바로 연다.
   final latest = room.latestAnnouncement;
@@ -49,7 +48,7 @@ void showUnreadAnnouncementPopup(
     showAnnouncementDetailScreen(context, session, room, latest);
     return;
   }
-  showAnnouncementListScreen(context, session, room, unreadCount: unreadCount);
+  openAnnouncementPanel(context, session, room);
 }
 
 /// 상단 툴바의 종 모양 "알림 센터" 버튼 — 볼 알림이 하나라도 있으면(안 읽은 대화·멘션·보드·프로젝트 알림)

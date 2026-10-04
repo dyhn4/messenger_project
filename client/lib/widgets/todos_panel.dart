@@ -9,12 +9,14 @@ import '../screens/todo_editor_dialog.dart';
 import '../services/session.dart';
 import '../services/todo_api.dart';
 import '../services/todo_controller.dart';
+import '../services/todo_download.dart';
 import 'app_toast.dart';
 import 'compact_menu_anchor.dart';
 import 'filter_dropdown.dart';
 import 'home_shell_scope.dart';
 import 'panel_filters.dart';
 import 'todo_calendar_view.dart';
+import 'todo_menu.dart';
 import 'todo_widgets.dart';
 
 /// 할 일 목록·일정 화면 아래쪽의 옅은 회색 바탕 — 그 위에 [todoCardColor] 카드가 떠 보인다(잔디). 어두운 테마는 위쪽
@@ -37,7 +39,9 @@ Color todoCardColor(BuildContext context) {
 /// 할 일 패널(side_panels.dart의 'todos') — 잔디의 할 일 목록 화면과 같다. 위에서부터 머리(`할 일` 바로 옆 작은 회색
 /// `할 일 일정` 칩, 오른쪽 끝 ✕), 가로 전체 `+ 할 일 생성`, 필터 줄(참여한 대화방 · 보기 — 모든 할 일 / 나의 할 일 /
 /// 부여한 할 일 · 부여한 할 일이면 담당 멤버), 왼쪽 `완료된 할 일 제외` 스위치와 오른쪽 정렬(생성 순 / 기한 순), 그 아래 옅은 회색
-/// 바탕에 `N개의 할 일`(서버가 센 전체 개수)과 카드 목록(무한 스크롤)이다. 카드는 보기만 하고, 누르면 상세가 열린다.
+/// 바탕에 `N개의 할 일`(서버가 센 전체 개수)과 카드 목록(무한 스크롤)이다. 카드를 누르면 상세가 열리고, 카드 오른쪽 위
+/// ⋯는 상세 •••와 같은 메뉴(즐겨찾기 · 할 일 수정 · 파일 다운로드 · 할 일 삭제 — 권한도 같다)다. 할 일 일정 화면의 카드도
+/// 같다.
 ///
 /// PC 오른쪽 칸(홈 셸 아래)에서는 패널 안에 Navigator를 따로 두고 목록을 첫 화면으로 삼아, 상세·생성·수정·할 일 일정을
 /// 패널 안 화면(머리 `← 할 일 … ✕` — ←는 그 화면만, ✕는 패널 전체를 닫는다)으로 띄운다(잔디와 같다). 모바일(패널이
@@ -45,12 +49,13 @@ Color todoCardColor(BuildContext context) {
 /// 새 팀의 목록으로 돌아간다.
 ///
 /// 상태는 패널이 열릴 때 만드는 [TodoController]가 들고 있고(Session에는 두지 않는다), 서버의 todo:changed 알림이 오면
-/// 조용히 다시 받는다. [controller]·[api]는 테스트가 바꿔 끼우는 값이다.
+/// 조용히 다시 받는다. [controller]·[api]·[download]는 테스트가 바꿔 끼우는 값이다.
 class TodosPanel extends StatefulWidget {
   final Session session;
   final VoidCallback? onClose;
   final TodoController? controller;
   final TodoApi? api;
+  final TodoDownloader? download;
 
   const TodosPanel({
     super.key,
@@ -58,6 +63,7 @@ class TodosPanel extends StatefulWidget {
     this.onClose,
     this.controller,
     this.api,
+    this.download,
   });
 
   @override
@@ -146,11 +152,14 @@ class _TodosPanelState extends State<TodosPanel> {
   /// 전체에 띄운 메뉴 — ••• · 진척률·알림 — 부터), 모바일은 할 일 일정 화면만(이전 팀의 컨트롤러를 들고 있다).
   void _closePages() {
     _sortMenu.close();
+    // 카드 ⋯에서 띄운 삭제 확인(창 전체에 뜬다) — 이전 팀의 할 일이라 지우지 않고(결과 null) 닫는다.
+    final confirm = _confirmRoute;
+    _confirmRoute = null;
+    if (confirm != null) closeTodoRoute(confirm);
     final pages = _pages.currentState;
-    if (pages != null) {
-      closeTodoPopups(Navigator.of(context, rootNavigator: true));
-      pages.popUntil((route) => route.isFirst);
-    }
+    // 카드 ⋯ 메뉴도 창 전체에 뜬다(모바일도) — 함께 닫는다.
+    closeTodoPopups(Navigator.of(context, rootNavigator: true));
+    if (pages != null) pages.popUntil((route) => route.isFirst);
     final calendar = _calendarRoute;
     _calendarRoute = null;
     if (calendar != null && calendar.isActive) {
@@ -245,6 +254,100 @@ class _TodosPanelState extends State<TodosPanel> {
     if (month != null) _controller.loadCalendar(month, silent: true);
   }
 
+  // ---- 카드 ⋯ 메뉴 — 상세 •••와 같은 항목·동작 ----
+
+  /// 첨부를 받는 중인 할 일(id) — 받는 동안 그 카드의 `파일 다운로드`는 꺼진다.
+  final _downloading = <String>{};
+
+  /// 카드 ⋯에서 띄운 삭제 확인 — 팀을 바꾸면 닫는다([_closePages]).
+  Route<Object?>? _confirmRoute;
+
+  /// 목록·일정 카드에 내려 주는 ⋯ 손잡이.
+  late final _cardActions = TodoCardActions(
+    onSelected: _onCardMenu,
+    isDownloading: (todo) => _downloading.contains(todo.id),
+  );
+
+  void _onCardMenu(Todo todo, TodoMenuAction action) {
+    switch (action) {
+      case TodoMenuAction.favorite:
+        unawaited(_toggleFavorite(todo));
+      case TodoMenuAction.edit:
+        unawaited(_edit(todo));
+      case TodoMenuAction.download:
+        unawaited(_download(todo));
+      case TodoMenuAction.delete:
+        unawaited(_delete(todo));
+    }
+  }
+
+  /// 즐겨찾기 켜고 끄기 — 목록·일정에서 바로 바꿔 보이고(컨트롤러가 조용히 다시 받아 "즐겨찾기 먼저" 순서를 맞춘다),
+  /// 실패하면 되돌리고 알린다.
+  Future<void> _toggleFavorite(Todo todo) async {
+    try {
+      await _controller.toggleFavorite(todo);
+    } catch (e) {
+      if (mounted) showAppToast(context, '즐겨찾기를 바꾸지 못했습니다: $e');
+    }
+  }
+
+  /// 할 일 수정 — 상세의 수정과 같은 모양으로 연다(PC는 패널 안 화면, 모바일은 전체 화면).
+  Future<void> _edit(Todo todo) async {
+    final updated = await showTodoEditor(
+      _pageHost,
+      session: widget.session,
+      editing: todo,
+      api: widget.api,
+      mode: _pageMode,
+      onClosePanel: _closePanel,
+    );
+    if (updated == null || !mounted) return;
+    showAppToast(context, '할 일을 수정했습니다.');
+    _refresh();
+  }
+
+  /// 첨부 전부 받기 — 상세의 `파일 다운로드`와 같다(PC는 폴더를 골라 차례로, 안드로이드는 공용 Download 폴더). 받기
+  /// 시작하면 알리고, 끝난 알림은 내려받기 쪽이 띄운다.
+  Future<void> _download(Todo todo) async {
+    if (todo.attachments.isEmpty || !_downloading.add(todo.id)) return;
+    final TodoDownloader download = widget.download ?? downloadTodoAttachments;
+    try {
+      await download(
+        context,
+        widget.session,
+        todo,
+        onProgress: (done, total) {
+          if (done == 0 && mounted) {
+            showAppToast(context, '파일 $total개를 다운로드하는 중입니다.');
+          }
+        },
+      );
+    } catch (e) {
+      if (mounted) showAppToast(context, '다운로드하지 못했습니다: $e');
+    } finally {
+      _downloading.remove(todo.id);
+    }
+  }
+
+  /// 할 일 삭제 — 상세와 같은 확인 뒤 지우고 목록·일정에서 뺀다.
+  Future<void> _delete(Todo todo) async {
+    final controller = _controller;
+    final ok = await confirmTodoDelete(
+      context,
+      todo,
+      onRoute: (route) => _confirmRoute = route,
+    );
+    _confirmRoute = null;
+    // 그사이 팀을 바꿨으면(확인 창이 닫혔다) 지우지 않는다.
+    if (!ok || !mounted || !identical(controller, _controller)) return;
+    try {
+      await controller.remove(todo);
+      if (mounted) showAppToast(context, '할 일을 삭제했습니다.');
+    } catch (e) {
+      if (mounted) showAppToast(context, '할 일을 삭제하지 못했습니다: $e');
+    }
+  }
+
   /// `할 일 일정` — 오늘이 있는 달을 받으며 일정 화면을 띄우고(PC는 패널 안, 모바일은 전체 화면), 닫히면 달력 받기를
   /// 멈춘다(소켓 알림에 달력까지 다시 받지 않게).
   Future<void> _openCalendar() async {
@@ -255,6 +358,7 @@ class _TodosPanelState extends State<TodosPanel> {
       session: widget.session,
       controller: c,
       onOpen: _open,
+      actions: _cardActions,
       mode: _pageMode,
       onClosePanel: _closePanel,
     );
@@ -779,6 +883,7 @@ class _TodosPanelState extends State<TodosPanel> {
             controller: c,
             todo: todo,
             onTap: () => _open(todo),
+            actions: _cardActions,
           );
         },
       ),
@@ -821,10 +926,28 @@ class _TodosPanelState extends State<TodosPanel> {
   }
 }
 
+/// 테두리 없이 그리는 카드(일정 화면의 대화방 묶음 안 — 흰 묶음 바탕 위)에 마우스를 올렸을 때 얹는 옅은 주 색. 회색 목록
+/// 바탕 위의 카드(테두리 카드)는 이 색 대신 [todoCardHoverBorder]로 구분한다 — 흰 카드에 옅은 주 색을 얹으면 밝은 테마의
+/// 연보라 목록 바탕과 거의 같아져 구분이 안 됐다.
+Color todoCardHoverColor(BuildContext context) =>
+    Theme.of(context).colorScheme.primary.withValues(alpha: 0.06);
+
+/// 카드에 마우스를 올렸을 때의 테두리(공지 카드와 같은 규칙) — 카드 바탕은 그대로 두고 둥근 테두리만 주 색으로 그린다.
+BorderSide todoCardHoverBorder(BuildContext context) => BorderSide(
+  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.55),
+  width: 1.5,
+);
+
+/// 카드를 누르는 동안(물결·눌림) 얹는 색 — [todoCardHoverColor]보다 조금 짙다.
+Color todoCardPressColor(BuildContext context) =>
+    Theme.of(context).colorScheme.primary.withValues(alpha: 0.08);
+
 /// 목록·일정의 할 일 카드(잔디) — 첫 줄 `진행률 : 75%`(숫자는 진척률 색)와 오른쪽 `생성일: 2026/10/03`, 굵은 제목(두 줄,
 /// 즐겨찾기면 앞에 작은 노란 별), 설명 미리보기(두 줄, 있을 때만), 대화방·담당자 수·첨부 수 한 줄(작게), 구분선 아래
-/// `일정: 2026/10/01 ~ 2026/10/07`(지난 기한이고 아직 안 끝났으면 빨강, 날짜가 없으면 `일정: 없음`). 카드에서는 진척률·
-/// 즐겨찾기를 바꾸지 않는다 — 누르면 [onTap](상세).
+/// `일정: 2026/10/01 ~ 2026/10/07`(지난 기한이고 아직 안 끝났으면 빨강, 날짜가 없으면 `일정: 없음`). 누르면 [onTap](상세).
+/// [actions]가 있으면 오른쪽 위에 ⋯([TodoCardMenuButton] — 상세 •••와 같은 메뉴: 즐겨찾기 · 할 일 수정 · 파일 다운로드 ·
+/// 할 일 삭제)가 붙는다. 진척률은 카드에서 바꾸지 않는다(상세에서). 마우스를 올리면 카드 테두리가 주 색
+/// ([todoCardHoverBorder])으로 바뀐다(테두리 없이 그릴 때는 옅은 주 색 [todoCardHoverColor]을 얹는다).
 ///
 /// 진척률은 목록이 보는 관점([TodoController.perspectiveProgress] — 나의 할 일은 내 것, 담당 멤버를 골랐으면 그 사람 것,
 /// 그 밖은 전체)으로 보이고, 지난 기한의 "아직 안 끝남"도 그 값으로 따진다.
@@ -833,6 +956,9 @@ class TodoCard extends StatelessWidget {
   final TodoController controller;
   final Todo todo;
   final VoidCallback? onTap;
+
+  /// ⋯ 메뉴의 손잡이 — 없으면 ⋯를 그리지 않는다.
+  final TodoCardActions? actions;
 
   /// false면 대화방 이름을 빼고 그린다(일정 화면처럼 대화방별로 묶어 보일 때).
   final bool showRoom;
@@ -846,23 +972,58 @@ class TodoCard extends StatelessWidget {
     required this.controller,
     required this.todo,
     this.onTap,
+    this.actions,
     this.showRoom = true,
     this.framed = true,
   });
 
+  /// ⋯ 단추 자리 — 카드 위 끝에서, 오른쪽 끝에서(아이콘 오른쪽 끝이 내용 오른쪽 끝(16)에 오게).
+  static const _menuTop = 12.0;
+  static const _menuRight = 11.0;
+
+  /// 첫 줄 오른쪽에 ⋯ 몫으로 비워 두는 폭(생성일이 ⋯ 밑으로 들어가지 않게).
+  static const _menuReserve =
+      TodoCardMenuButton.size + _menuRight - _contentRight + 4;
+
+  /// 내용의 오른쪽 여백.
+  static const _contentRight = 16.0;
+
   @override
   Widget build(BuildContext context) {
-    final content = InkWell(onTap: onTap, child: _content(context));
-    if (!framed) return content;
-    return Material(
+    final menu = actions;
+    Widget body = _content(context, reserveMenu: menu != null);
+    if (menu != null) {
+      // ⋯는 카드(InkWell) 안에 둔다 — 그 위에 마우스를 올려도 카드가 올린 것으로 보이고, ⋯를 누르면 ⋯만 눌린다(카드의
+      // 눌림·상세 열기는 없다).
+      body = Stack(
+        children: [
+          body,
+          Positioned(
+            top: _menuTop,
+            right: _menuRight,
+            child: TodoCardMenuButton(todo: todo, actions: menu),
+          ),
+        ],
+      );
+    }
+    InkWell ink({ValueChanged<bool>? onHover}) => InkWell(
+      onTap: onTap,
+      onHover: onHover,
+      // 테두리 카드는 덧칠 없이 테두리로만 올린 것을 보인다.
+      hoverColor: framed ? Colors.transparent : todoCardHoverColor(context),
+      highlightColor: todoCardPressColor(context),
+      splashColor: todoCardPressColor(context),
+      child: body,
+    );
+    if (!framed) return ink();
+    return _HoverFramedCard(
+      key: ValueKey('todo-card-frame-${todo.id}'),
       color: todoCardColor(context),
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: content,
+      builder: (onHover) => ink(onHover: onHover),
     );
   }
 
-  Widget _content(BuildContext context) {
+  Widget _content(BuildContext context, {required bool reserveMenu}) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final progress = controller.perspectiveProgress(todo);
@@ -870,7 +1031,7 @@ class TodoCard extends StatelessWidget {
     final description = todo.description?.trim() ?? '';
     final info = _infoLine(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 14, _contentRight, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -902,6 +1063,7 @@ class TodoCard extends StatelessWidget {
                   style: TextStyle(fontSize: 12, color: theme.hintColor),
                 ),
               ),
+              if (reserveMenu) const SizedBox(width: _menuReserve),
             ],
           ),
           const SizedBox(height: 6),
@@ -1018,5 +1180,41 @@ class TodoCard extends StatelessWidget {
     }
     if (parts.isEmpty) return null;
     return Row(children: parts);
+  }
+}
+
+/// 마우스를 올리면 둥근 테두리가 주 색([todoCardHoverBorder])으로 바뀌는 카드 틀 — 바탕색은 그대로다. [builder]는 안쪽
+/// InkWell을 만들며 받은 onHover를 넘겨 올림 여부를 알린다.
+class _HoverFramedCard extends StatefulWidget {
+  final Color color;
+  final Widget Function(ValueChanged<bool> onHover) builder;
+  const _HoverFramedCard({
+    super.key,
+    required this.color,
+    required this.builder,
+  });
+
+  @override
+  State<_HoverFramedCard> createState() => _HoverFramedCardState();
+}
+
+class _HoverFramedCardState extends State<_HoverFramedCard> {
+  bool _hovered = false;
+
+  void _onHover(bool value) {
+    if (value != _hovered) setState(() => _hovered = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: widget.color,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: _hovered ? todoCardHoverBorder(context) : BorderSide.none,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: widget.builder(_onHover),
+    );
   }
 }

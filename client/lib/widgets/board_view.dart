@@ -636,8 +636,12 @@ class PostMoreButton extends StatelessWidget {
           hoverMenuItem(
             icon: favoriteOn ? Icons.star : Icons.star_border,
             label: favoriteOn ? '즐겨찾기 해제' : '즐겨찾기',
-            onPressed: () =>
-                toggleEntryFavorite(context, session, post.id, isComment: false),
+            onPressed: () => toggleEntryFavorite(
+              context,
+              session,
+              post.id,
+              isComment: false,
+            ),
           ),
         if (canFavorite && (canPin || canEdit || canDelete)) hoverMenuDivider(),
         if (canPin)
@@ -1216,8 +1220,9 @@ class _PinnedPostTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = BoardColors.of(theme);
-    final hint = theme.hintColor;
     final comments = _visibleCommentCount(post);
+    // 댓글이 있을 때만 강조색 댓글 수를 보인다 — 0이면 아이콘·숫자 모두 뺀다(작성자 쪽이 그 자리를 쓴다).
+    final commentColor = theme.colorScheme.primary;
     return DecoratedBox(
       decoration: _cardDecoration(colors),
       child: Material(
@@ -1227,23 +1232,25 @@ class _PinnedPostTile extends StatelessWidget {
           onTap: onOpen,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: colors.pin.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.push_pin, size: 15, color: colors.pin),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
+            // 한 줄 — 고정 표시 · 제목 · (오른쪽) 댓글 수 · 작성자 아바타·이름. 작성 시각은 빼고,
+            // 폭이 모자라면 제목이 먼저 말줄임되며 작성자 이름은 폭의 일부(최대 140)까지만 쓴다.
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final nameMax = math.min(140.0, constraints.maxWidth * 0.26);
+                return Row(
+                  children: [
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: colors.pin.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.push_pin, size: 15, color: colors.pin),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
                         post.title ?? '',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1252,26 +1259,50 @@ class _PinnedPostTile extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${_authorName(room, post)} · ${formatPostDateTime(post.createdAt)}',
+                    ),
+                    const SizedBox(width: 12),
+                    if (comments > 0) ...[
+                      Row(
+                        key: const ValueKey('pinned-comments'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.mode_comment_outlined,
+                            size: 14,
+                            color: commentColor,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$comments',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: commentColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+                    ],
+                    _authorAvatar(session, room, post, 11),
+                    const SizedBox(width: 6),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: nameMax),
+                      child: Text(
+                        _authorName(room, post),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: hint),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.75,
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                ),
-                if (comments > 0) ...[
-                  const SizedBox(width: 8),
-                  Icon(Icons.mode_comment_outlined, size: 14, color: hint),
-                  const SizedBox(width: 3),
-                  Text(
-                    '$comments',
-                    style: TextStyle(fontSize: 12, color: hint),
-                  ),
-                ],
-              ],
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),

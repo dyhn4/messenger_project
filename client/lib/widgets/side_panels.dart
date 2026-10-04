@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
 import '../models/room.dart';
+import '../screens/announcement_list_screen.dart'
+    show
+        AnnouncementsPanel,
+        AnnouncementsPanelNoRoom,
+        announcementPanelKey,
+        takeInitialAnnouncementFor;
 import '../screens/favorites_screen.dart';
 import '../screens/files_screen.dart';
 import '../screens/links_screen.dart';
@@ -46,6 +52,8 @@ export 'side_panel_header.dart';
 //   부른다 — PC는 가운데 채팅이 바뀌고(다른 팀이면 팀 전환까지), 모바일은 채팅 화면이 위에 얹힌다.
 // - 방 헤더에서 열린 경우의 방 필터는 `HomeShellScope.maybeOf(context)?.panelRoom` / `.currentRoomId`로 읽는다
 //   (파일·링크 패널의 builder가 예시).
+// - 한 방의 것만 보는 패널(공지)은 `openSidePanel(context, session, key, room: room)`으로 열고 builder에서
+//   [sidePanelRoomOf]로 그 방을 읽는다(PC는 홈 셸의 panelRoom, 모바일은 라우트에 얹은 방).
 //
 // 패널 열기: 메뉴 항목의 onOpen이나 어디서든 `openSidePanel(context, session, 'todos')` 한 줄.
 //   - PC: 오른쪽 패널로 토글(이미 열려 있으면 닫고, 다른 패널이 열려 있으면 교체한다. 댓글 스레드·대화창
@@ -245,7 +253,49 @@ final sidePanelSpecs = <SidePanelSpec>[
       );
     },
   ),
+  SidePanelSpec(
+    key: announcementPanelKey,
+    title: '공지',
+    ownHeader: true,
+    builder: (context, session, onClose) {
+      // 토픽 ⋯의 "공지"·알림 센터의 안 읽은 공지로 연 방. 방 없이 열렸으면(시험 하네스 등) 지금 보고 있는 토픽.
+      final shell = HomeShellScope.maybeOf(context);
+      final current = shell?.currentRoomId;
+      final room =
+          sidePanelRoomOf(context) ??
+          (current == null ? null : session.roomById(current));
+      if (room == null || room.type != RoomType.topic) {
+        return AnnouncementsPanelNoRoom(onClose: onClose);
+      }
+      return AnnouncementsPanel(
+        // 다른 방에서 다시 열면 그 방으로 새로 시작한다(패널 안에 띄운 상세도 닫힌다).
+        key: ValueKey(
+          'announcements-${room.id}-${shell?.panelGeneration ?? 0}',
+        ),
+        session: session,
+        room: session.roomById(room.id) ?? room,
+        onClose: onClose,
+        // 공지바를 눌러 열었으면 그 공지의 상세를 목록 위에 바로 띄운다(openAnnouncementPanel이 맡겨 둔 것 — 한 번만).
+        initialAnnouncement: takeInitialAnnouncementFor(room.id),
+      );
+    },
+  ),
 ];
+
+/// [openSidePanel]의 `room:`으로 연 패널이 가리키는 방 — PC는 홈 셸의 [HomeShellScope.panelRoom], 모바일(전체 화면
+/// 라우트)은 그 라우트에 얹어 둔 방. 방 없이 열었으면 null.
+Room? sidePanelRoomOf(BuildContext context) =>
+    context.dependOnInheritedWidgetOfExactType<_SidePanelRoomScope>()?.room ??
+    HomeShellScope.maybeOf(context)?.panelRoom;
+
+/// 모바일에서 `room:`으로 연 패널 라우트에 그 방을 얹어 둔다([sidePanelRoomOf]가 읽는다).
+class _SidePanelRoomScope extends InheritedWidget {
+  final Room room;
+  const _SidePanelRoomScope({required this.room, required super.child});
+
+  @override
+  bool updateShouldNotify(_SidePanelRoomScope old) => room.id != old.room.id;
+}
 
 /// 멤버 카드 — 로그인한 본인이면 "내 프로필", 다른 멤버면 프로필 카드(DM 시작 등). DM을 열었으면 그 방을 돌려준다.
 Future<Room?> _showMemberCard(
@@ -275,7 +325,15 @@ SidePanelSpec? sidePanelSpecFor(String key) {
 
 /// [key] 패널을 연다 — PC는 오른쪽 패널로 토글(열려 있으면 닫고, 다른 패널이면 교체), 모바일은 전체 화면.
 /// [context]는 홈 화면 아래의 것이어야 PC 패널로 열린다(위 주석 참고).
-void openSidePanel(BuildContext context, Session session, String key) {
+///
+/// [room]을 주면 그 방의 패널로 연다(builder는 [sidePanelRoomOf]로 읽는다) — PC는 같은 방 것이 열려 있을 때만 닫고,
+/// 다른 방 것이 열려 있으면 그 방으로 새로 시작한다.
+void openSidePanel(
+  BuildContext context,
+  Session session,
+  String key, {
+  Room? room,
+}) {
   final spec = sidePanelSpecFor(key);
   assert(
     spec != null,
@@ -284,22 +342,32 @@ void openSidePanel(BuildContext context, Session session, String key) {
   if (spec == null) return;
   final shell = HomeShellScope.maybeOf(context);
   if (shell != null) {
-    shell.togglePanel(key);
+    final openRoomPanel = shell.openRoomPanel;
+    if (room != null && openRoomPanel != null) {
+      openRoomPanel(key, room);
+    } else {
+      shell.togglePanel(key);
+    }
     return;
   }
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (routeContext) => Scaffold(
-        appBar: spec.ownHeader ? null : AppBar(title: Text(spec.title)),
-        body: SafeArea(
-          top: spec.ownHeader,
-          child: spec.builder(
-            routeContext,
-            session,
-            () => Navigator.of(routeContext).pop(),
-          ),
-        ),
-      ),
+      builder: (routeContext) {
+        void close() => Navigator.of(routeContext).pop();
+        final body = room == null
+            ? spec.builder(routeContext, session, close)
+            : _SidePanelRoomScope(
+                room: room,
+                child: Builder(
+                  builder: (bodyContext) =>
+                      spec.builder(bodyContext, session, close),
+                ),
+              );
+        return Scaffold(
+          appBar: spec.ownHeader ? null : AppBar(title: Text(spec.title)),
+          body: SafeArea(top: spec.ownHeader, child: body),
+        );
+      },
     ),
   );
 }

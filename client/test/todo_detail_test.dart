@@ -15,6 +15,7 @@ import 'package:client/services/session.dart';
 import 'package:client/services/todo_download.dart';
 import 'package:client/widgets/attachment_widgets.dart'
     show AllDownloadBar, ChatImageAttachments;
+import 'package:client/widgets/todo_menu.dart';
 import 'package:client/widgets/todo_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1417,7 +1418,7 @@ void main() {
       await _openMenu(tester);
       expect(
         tester
-            .widget<PopupMenuItem<String>>(_key('todo-menu-download'))
+            .widget<PopupMenuItem<TodoMenuAction>>(_key('todo-menu-download'))
             .enabled,
         isFalse,
       );
@@ -1428,7 +1429,7 @@ void main() {
       await _openMenu(tester);
       expect(
         tester
-            .widget<PopupMenuItem<String>>(_key('todo-menu-download'))
+            .widget<PopupMenuItem<TodoMenuAction>>(_key('todo-menu-download'))
             .enabled,
         isTrue,
       );

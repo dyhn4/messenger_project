@@ -642,6 +642,9 @@ export const announcements = pgTable(
     authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
     authorName: text('author_name').notNull(),
     text: text('text').notNull(),
+    // 글자 서식 구간 — [{s, e, f, h?}](messages.textFormat과 같은 모양, 공지는 노트처럼 제목·글자색까지 —
+    // textFormat.js RICH_TEXT_FORMAT_MASK). 없으면 null(평문 공지).
+    textFormat: jsonb('text_format'),
     // 한 방에 pinned=true인 행은 최대 하나뿐이다 — 그게 채팅방 상단 배너/목록의 "고정됨"이다.
     // 새 공지를 쓰면 기존 pinned 행을 자동으로 내리고 새 글이 pinned=true가 된다(announcements.js
     // insertAnnouncement). "공지 내리기"는 삭제하지 않고 이 값만 false로 바꾼다 — 히스토리에는

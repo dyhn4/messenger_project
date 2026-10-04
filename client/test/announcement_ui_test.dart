@@ -262,7 +262,7 @@ void main() {
       },
     );
 
-    testWidgets('모바일은 전체 화면(AppBar "공지"), 폭 360에서 긴 글·긴 이름도 넘치지 않는다', (
+    testWidgets('모바일은 전체 화면(머리 "← 공지"), 폭 360에서 긴 글·긴 이름도 넘치지 않는다', (
       tester,
     ) async {
       final server = _Server(comments: [_comment('c1', '아주 긴 댓글 ' * 30)]);
@@ -277,7 +277,16 @@ void main() {
         ),
       );
       expect(find.byType(Dialog), findsNothing);
-      expect(find.widgetWithText(AppBar, '공지'), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+      expect(find.text('공지'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('announcement-detail-back')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('announcement-detail-close')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('announcement-detail-image-card')),
         findsOneWidget,
@@ -285,6 +294,14 @@ void main() {
       expect(find.byKey(const ValueKey('announcement-image')), findsOneWidget);
       expect(find.text('회식장소.png'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      // ←로 닫힌다.
+      await tester.tap(find.byKey(const ValueKey('announcement-detail-back')));
+      await _settle(tester);
+      expect(
+        find.byKey(const ValueKey('announcement-detail-card')),
+        findsNothing,
+      );
+      expect(find.text('열기'), findsOneWidget);
       await _finish(tester);
     });
 
@@ -292,6 +309,10 @@ void main() {
       await openDetail(tester, _Server(), size: const Size(1000, 800));
       expect(find.byType(Dialog), findsOneWidget);
       expect(find.byTooltip('닫기'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('announcement-detail-back')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('announcement-detail-card')),
         findsOneWidget,
@@ -427,16 +448,14 @@ void main() {
       int unreadCount = 0,
       Size size = const Size(360, 780),
     }) async {
-      final room = _room();
+      // 안 읽은 공지 수는 열 때의 방 상태로 정한다(알림 센터 배지와 같은 값).
+      final room = _room()
+        ..hasUnreadAnnouncement = unreadCount > 0
+        ..unreadAnnouncementCount = unreadCount;
       final session = _session(server, room, team: team);
       await _pumpHost(
         tester,
-        (context) => showAnnouncementListScreen(
-          context,
-          session,
-          room,
-          unreadCount: unreadCount,
-        ),
+        (context) async => openAnnouncementPanel(context, session, room),
         size: size,
       );
     }
@@ -456,8 +475,8 @@ void main() {
     ) async {
       await openList(tester, _Server(announcements: items));
       expect(
-        _plain(tester, const ValueKey('announcement-list-header')),
-        '공지 2',
+        _plain(tester, const ValueKey('announcement-list-count')),
+        '2개의 공지',
       );
       // 카드 — 본문은 3줄까지 말줄임.
       final text = tester.widget<Text>(
@@ -549,13 +568,13 @@ void main() {
       await openList(tester, _Server());
       expect(find.text('등록된 공지가 없습니다.'), findsOneWidget);
       expect(
-        _plain(tester, const ValueKey('announcement-list-header')),
-        '공지 0',
+        _plain(tester, const ValueKey('announcement-list-count')),
+        '0개의 공지',
       );
       await _finish(tester);
     });
 
-    testWidgets('PC: 대화상자에 닫기 버튼과 같은 카드 목록', (tester) async {
+    testWidgets('홈 화면 밖의 넓은 화면(팀 리스트의 알림 센터 등)은 같은 패널을 대화상자로', (tester) async {
       await openList(
         tester,
         _Server(announcements: items),
@@ -598,11 +617,28 @@ void main() {
         body['autoUnpinAt'] as int,
       );
       expect(unpinAt.difference(DateTime.now()).inDays, anyOf(6, 7));
-      expect(find.text('공지 쓰기'), findsNothing);
+      // 쓰기 창은 닫히고(패널의 `+ 공지 쓰기` 단추만 남는다) 새 글이 맨 위에 고정으로 붙는다.
+      expect(find.byKey(const ValueKey('announcement-body')), findsNothing);
+      expect(find.text('공지 내용을 입력하세요'), findsNothing);
       expect(find.text('새 공지 글'), findsOneWidget);
       expect(
-        _plain(tester, const ValueKey('announcement-list-header')),
-        '공지 3',
+        find.descendant(
+          of: find.byKey(const ValueKey('announcement-tile-a-new')),
+          matching: find.text('고정'),
+        ),
+        findsOneWidget,
+      );
+      // 새 공지가 고정되면 그전 고정 공지(a2)는 내려간다.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('announcement-tile-a2')),
+          matching: find.text('고정'),
+        ),
+        findsNothing,
+      );
+      expect(
+        _plain(tester, const ValueKey('announcement-list-count')),
+        '3개의 공지',
       );
       expect(tester.takeException(), isNull);
       await _finish(tester);
@@ -634,7 +670,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('announcement-list-header')),
+        find.byKey(const ValueKey('announcement-list-count')),
         findsNothing,
       );
       await _finish(tester);
@@ -643,7 +679,7 @@ void main() {
     testWidgets('여럿이면 목록(안 읽음 표시)이 열리고, 카드를 누르면 상세보기', (tester) async {
       await openFromNotification(tester, 2);
       expect(
-        find.byKey(const ValueKey('announcement-list-header')),
+        find.byKey(const ValueKey('announcement-list-count')),
         findsOneWidget,
       );
       await tester.tap(find.byKey(const ValueKey('announcement-tile-a1')));
@@ -681,7 +717,7 @@ void main() {
       );
     }
 
-    testWidgets('PC 대화상자: 헤더(공지 쓰기·토픽 칩·닫기)·본문 칸·하단 취소/등록 — 제목칸·서식 도구줄은 없다', (
+    testWidgets('PC 대화상자: 헤더(공지 쓰기·토픽 칩·닫기)·서식 도구줄·본문 칸·하단 취소/등록 — 제목칸은 없다', (
       tester,
     ) async {
       await openEditor(tester, size: const Size(1000, 800));
@@ -691,6 +727,11 @@ void main() {
       expect(find.byTooltip('닫기'), findsOneWidget);
       expect(find.byKey(const ValueKey('post-title')), findsNothing);
       expect(find.text('제목을 입력하세요'), findsNothing);
+      // 본문 칸 위에 프로젝트 "새 노트"와 같은 서식 도구줄(announcement_editor_test.dart에서 자세히).
+      expect(
+        find.byKey(const ValueKey('announcement-format-toolbar')),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('announcement-body')), findsOneWidget);
       expect(find.widgetWithText(TextButton, '취소'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, '등록'), findsOneWidget);

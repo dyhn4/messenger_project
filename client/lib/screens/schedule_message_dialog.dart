@@ -158,28 +158,41 @@ DateTime _firstSlotAfter(DateTime now) {
       : slot.add(const Duration(minutes: scheduledSlotMinutes));
 }
 
-/// 고를 수 있는 가장 늦은 15분 단위(지금부터 90일 뒤와 같거나 이른).
-DateTime _lastSlot(DateTime now) {
-  final limit = latestScheduleTime(now);
+/// 고를 수 있는 가장 늦은 시각 — 지금부터 [maxDays]일 뒤(기본 90일, 예약 메시지·투표 마감).
+DateTime _latestAllowed(DateTime now, int maxDays) =>
+    maxDays == scheduledMaxDaysAhead
+    ? latestScheduleTime(now)
+    : now.add(Duration(days: maxDays));
+
+/// 고를 수 있는 가장 늦은 15분 단위(지금부터 [maxDays]일(기본 90일) 뒤와 같거나 이른).
+DateTime _lastSlot(DateTime now, [int maxDays = scheduledMaxDaysAhead]) {
+  final limit = _latestAllowed(now, maxDays);
   final slot = ceilToScheduleSlot(limit);
   return slot.isAfter(limit)
       ? slot.subtract(const Duration(minutes: scheduledSlotMinutes))
       : slot;
 }
 
-bool _slotAllowed(DateTime slot, DateTime now) =>
-    slot.isAfter(now) && !slot.isAfter(latestScheduleTime(now));
+bool _slotAllowed(
+  DateTime slot,
+  DateTime now, [
+  int maxDays = scheduledMaxDaysAhead,
+]) => slot.isAfter(now) && !slot.isAfter(_latestAllowed(now, maxDays));
 
-/// [value]의 시각은 그대로 두고 날짜만 [day]로 옮긴다 — 그날 고를 수 없는 시각(지난 시각·90일 넘음)이면
+/// [value]의 시각은 그대로 두고 날짜만 [day]로 옮긴다 — 그날 고를 수 없는 시각(지난 시각·[maxDays]일 넘음)이면
 /// 가장 가까운 고를 수 있는 시각으로 옮긴다(오늘이면 기본 시각, 아니면 첫/마지막 15분 단위).
-DateTime _valueOnDay(DateTime value, DateTime day) {
+DateTime _valueOnDay(
+  DateTime value,
+  DateTime day, [
+  int maxDays = scheduledMaxDaysAhead,
+]) {
   final now = DateTime.now();
   var next = DateTime(day.year, day.month, day.day, value.hour, value.minute);
   if (!next.isAfter(now)) {
     final preferred = defaultScheduleTime(now);
     next = _dayOf(preferred) == _dayOf(next) ? preferred : _firstSlotAfter(now);
-  } else if (next.isAfter(latestScheduleTime(now))) {
-    next = _lastSlot(now);
+  } else if (next.isAfter(_latestAllowed(now, maxDays))) {
+    next = _lastSlot(now, maxDays);
   }
   return next;
 }
@@ -2120,17 +2133,29 @@ class SchedulePicker extends StatelessWidget {
 /// 아래(자리가 모자라면 위)에 달력이 펼쳐지고 달력 밑의 시간 드롭다운에서 15분 단위 시각까지 고른다. 날짜를
 /// 누르면 펼친 채로 날짜만 바뀌고(그날 고를 수 없는 시각이면 [SchedulePicker]와 같은 규칙으로 옮긴다), 시각을
 /// 고르거나 바깥을 누르면 닫힌다. 고를 수 있는 범위(지금 이후~90일 안)도 [SchedulePicker]와 같다. 예약 메시지
-/// 발송 시간과 투표 마감 시각이 쓴다.
+/// 발송 시간과 투표 마감 시각, 공지 자동 내리기의 "지정" 시각이 쓴다.
 class ScheduleDateTimeField extends StatefulWidget {
   final DateTime value;
   final bool enabled;
   final ValueChanged<DateTime> onChanged;
+
+  /// 고를 수 있는 가장 늦은 시각을 지금부터 며칠 뒤로 둘지 — 기본은 예약 메시지·투표 마감과 같은 90일
+  /// ([scheduledMaxDaysAhead]). 공지 자동 내리기는 서버 한도(1년)에 맞춰 더 길게 준다.
+  final int maxDaysAhead;
   const ScheduleDateTimeField({
     super.key,
     required this.value,
     required this.onChanged,
     this.enabled = true,
+    this.maxDaysAhead = scheduledMaxDaysAhead,
   });
+
+  /// [key]를 준 칸의 펼친 판(달력·시간 목록)을 닫았으면 true — 다른 화면의 편집기가 Esc·뒤로 가기에서 창보다
+  /// 판을 먼저 닫게(예약 편집기의 hidePopup과 같다).
+  static bool hidePopupOf(GlobalKey key) {
+    final state = key.currentState;
+    return state is _ScheduleDateTimeFieldState && state.hidePopup();
+  }
 
   @override
   State<ScheduleDateTimeField> createState() => _ScheduleDateTimeFieldState();
@@ -2245,9 +2270,10 @@ class _ScheduleDateTimeFieldState extends State<ScheduleDateTimeField>
                       _ScheduleCalendar(
                         value: value,
                         first: _dayOf(_firstSlotAfter(now)),
-                        last: _dayOf(_lastSlot(now)),
-                        onPicked: (d) =>
-                            widget.onChanged(_valueOnDay(value, d)),
+                        last: _dayOf(_lastSlot(now, widget.maxDaysAhead)),
+                        onPicked: (d) => widget.onChanged(
+                          _valueOnDay(value, d, widget.maxDaysAhead),
+                        ),
                       ),
                       SizedBox(
                         width: _calendarWidth,
@@ -2271,6 +2297,7 @@ class _ScheduleDateTimeFieldState extends State<ScheduleDateTimeField>
                         allowed: (m) => _slotAllowed(
                           DateTime(day.year, day.month, day.day, 0, m),
                           DateTime.now(),
+                          widget.maxDaysAhead,
                         ),
                         onPicked: (m) {
                           hidePopup();

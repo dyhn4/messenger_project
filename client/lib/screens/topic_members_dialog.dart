@@ -70,9 +70,10 @@ bool topicMemberMatches(AppUser m, String query) {
       (m.position?.toLowerCase().contains(q) ?? false);
 }
 
-/// 멤버 이름 옆 배지 — '토픽 관리자'(강조색), '소유자'(팀), '관리자'(계정), '준회원'. 정회원은 배지가
-/// 없다. [withTopicAdmin]이 false면 토픽 관리자 배지를 뺀다(토픽 관리자 지정 목록처럼 체크로 이미
-/// 보이는 곳).
+/// 멤버 이름 옆 배지 — '토픽 관리자'(강조색, 토픽을 관리할 수 있는 멤버), '토픽 소유자'(팀 소유자), '토픽
+/// 관리자'(계정 관리자), '준회원'. 정회원은 배지가 없다. [withTopicAdmin]이 false면 토픽 관리(권한) 배지를
+/// 뺀다(토픽 관리자 지정 목록처럼 체크로 이미 보이는 곳). 계정 관리자가 동시에 토픽 관리자로도 지정돼 있으면
+/// 같은 글자("토픽 관리자")가 두 번 뜨지 않게 하나만 남긴다.
 List<Widget> topicMemberBadges(
   BuildContext context,
   Room room,
@@ -83,15 +84,17 @@ List<Widget> topicMemberBadges(
   final owner = roleBadgeColors(context, 'owner');
   final admin = roleBadgeColors(context, 'admin');
   final guest = roleBadgeColors(context, 'guest');
+  final isTopicAdmin = withTopicAdmin && room.isTopicAdmin(m.id);
   return [
-    if (withTopicAdmin && room.isTopicAdmin(m.id))
+    if (isTopicAdmin)
       RoleBadge(
         label: '토픽 관리자',
         bg: scheme.primary.withValues(alpha: 0.16),
         fg: scheme.primary,
       ),
-    if (m.isOwner) RoleBadge(label: '소유자', bg: owner.bg, fg: owner.fg),
-    if (m.role == 'admin') RoleBadge(label: '관리자', bg: admin.bg, fg: admin.fg),
+    if (m.isOwner) RoleBadge(label: '토픽 소유자', bg: owner.bg, fg: owner.fg),
+    if (m.role == 'admin' && !isTopicAdmin)
+      RoleBadge(label: '토픽 관리자', bg: admin.bg, fg: admin.fg),
     if (m.role == 'guest') RoleBadge(label: '준회원', bg: guest.bg, fg: guest.fg),
   ];
 }

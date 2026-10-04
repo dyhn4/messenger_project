@@ -628,8 +628,8 @@ class ChatSocket {
   /// 이걸로 즉시 갱신된다.
   Stream<Announcement> get announcements => _announcementController.stream;
 
-  /// 공지가 수정됐을 때(announcement:updated) — 수정된 공지 전체가 온다(댓글 개수는 항상 0으로
-  /// 오므로 호출부에서 기존 값을 덮어쓰지 않고 text/editedAt만 반영해야 한다).
+  /// 공지가 수정됐을 때(announcement:updated) — 수정된 공지 전체가 온다(예전 서버는 댓글 개수를 0으로
+  /// 보냈으므로 호출부에서 기존 값을 덮어쓰지 않고 text/editedAt만 반영한다).
   Stream<Announcement> get announcementUpdated =>
       _announcementUpdatedController.stream;
 

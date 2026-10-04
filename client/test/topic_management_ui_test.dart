@@ -760,12 +760,13 @@ void main() {
       expect(badge('me', '토픽 관리자'), findsOneWidget);
       expect(find.text('김하나 (나)'), findsOneWidget);
       expect(badge('u2', '토픽 관리자'), findsOneWidget);
-      expect(badge('u3', '소유자'), findsOneWidget);
-      expect(badge('u3', '관리자'), findsOneWidget);
-      expect(badge('u4', '관리자'), findsOneWidget);
+      expect(badge('u3', '토픽 소유자'), findsOneWidget);
+      // u3는 팀 소유자이면서 계정 관리자이기도 하다 — "토픽 관리자" 배지가 두 번은 아니고 한 번만 뜬다.
+      expect(badge('u3', '토픽 관리자'), findsOneWidget);
+      expect(badge('u4', '토픽 관리자'), findsOneWidget);
       expect(badge('u5', '사원'), findsOneWidget); // 직책
       expect(badge('u7', '준회원'), findsOneWidget);
-      for (final label in ['토픽 관리자', '소유자', '관리자', '준회원']) {
+      for (final label in ['토픽 관리자', '토픽 소유자', '준회원']) {
         expect(badge('u6', label), findsNothing, reason: label);
       }
 

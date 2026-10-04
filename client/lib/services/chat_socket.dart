@@ -495,6 +495,7 @@ class ChatSocket {
   final _inquiryStatusChangedController = StreamController<Inquiry>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
+  final _connectFailedController = StreamController<void>.broadcast();
   final _roleUpdatedController = StreamController<void>.broadcast();
   final _orgUpdatedController = StreamController<OrgUpdate>.broadcast();
   final _projectChangedController = StreamController<void>.broadcast();
@@ -746,6 +747,11 @@ class ChatSocket {
   /// 다시 연결을 시도하는 데 쓴다.
   Stream<void> get authErrors => _authErrorController.stream;
 
+  /// 인증 문제가 아닌 이유로 연결(재연결 시도 포함)이 실패할 때마다 흘러나온다 — 서버에 아예
+  /// 닿지 않는 경우(사내 와이파이를 벗어남 등). Session이 사내/외부 주소 중 되는 쪽을 다시
+  /// 찾는 데 쓴다(server_endpoints.dart). 재연결 시도마다 오므로 받는 쪽에서 간격을 둔다.
+  Stream<void> get connectFailures => _connectFailedController.stream;
+
   Stream<SecretInviteEvent> get secretInvites => _secretInviteController.stream;
   Stream<SecretAcceptedEvent> get secretAccepted =>
       _secretAcceptedController.stream;
@@ -764,6 +770,9 @@ class ChatSocket {
       _secretRekeyAckController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
+
+  /// connect()로 소켓을 만든 뒤 아직 dispose()하지 않은 상태(연결 중·재연결 대기 포함).
+  bool get isStarted => _socket != null;
 
   /// 소켓이 아직 **만들어지기도 전에** 들어온 읽음 처리 요청들. 알림을 눌러 앱이 켜지는
   /// 경로에서는 방 목록을 받자마자 채팅방이 열리는데(main.dart의 _openRoomFromNotification),
@@ -1098,12 +1107,11 @@ class ChatSocket {
       );
     });
     socket.onReconnect((_) => _reconnectController.add(null));
-    socket.onConnectError((err) {
-      if (_looksLikeAuthError(err)) _authErrorController.add(null);
-    });
-    socket.onReconnectError((err) {
-      if (_looksLikeAuthError(err)) _authErrorController.add(null);
-    });
+    void onFailure(dynamic err) => _looksLikeAuthError(err)
+        ? _authErrorController.add(null)
+        : _connectFailedController.add(null);
+    socket.onConnectError(onFailure);
+    socket.onReconnectError(onFailure);
 
     socket.connect();
     _socket = socket;

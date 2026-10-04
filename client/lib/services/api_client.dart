@@ -380,7 +380,10 @@ String favoriteFileKey(String messageId, String? fileName) =>
 
 /// Node.js 서버(REST 부분)와 통신하는 얇은 클라이언트.
 class ApiClient {
-  final String baseUrl; // 예: https://192.168.0.62:3000 (끝에 슬래시 없음)
+  /// 예: https://192.168.0.62:3000 (끝에 슬래시 없음). 사내 주소 ↔ 외부(LTE/5G) 주소로 자동
+  /// 전환될 때 Session이 이 필드를 직접 바꾼다 — 화면들이 들고 있는 이 인스턴스가 그대로 새
+  /// 주소로 요청하게 하려는 것(server_endpoints.dart 참고).
+  String baseUrl;
   String? token; // accessToken. 갱신되면 Session이 이 필드를 직접 덮어쓴다.
 
   /// 요청이 401을 받았을 때 한 번 호출된다. accessToken 갱신에 성공하면(=이 인스턴스의
@@ -429,15 +432,35 @@ class ApiClient {
     return res;
   }
 
-  Future<bool> checkHealth() async {
+  Future<bool> checkHealth({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
     try {
-      final res = await _client
-          .get(_uri('/health'))
-          .timeout(const Duration(seconds: 5));
+      final res = await _client.get(_uri('/health')).timeout(timeout);
       return res.statusCode == 200;
     } catch (_) {
       return false;
     }
+  }
+
+  /// 서버에 설정된 외부(LTE/5G) 접속 주소(서버 .env의 EXTERNAL_ADDRESS — 없으면 null)와 서버 PC의
+  /// 사내 주소들(GET /server-info). 물어보지 못했으면(오프라인·예전 서버 등) 예외 — "외부 주소
+  /// 없음"과 구분해야 Session이 저장해둔 주소를 잘못 지우지 않는다.
+  Future<({String? externalUrl, List<String> internalUrls})>
+  fetchServerInfo() async {
+    final res = await _client
+        .get(_uri('/server-info'))
+        .timeout(const Duration(seconds: 5));
+    if (res.statusCode != 200) {
+      throw ApiException('서버 정보를 가져오지 못했습니다(${res.statusCode}).');
+    }
+    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    return (
+      externalUrl: body['externalUrl'] as String?,
+      internalUrls: (body['internalUrls'] as List? ?? const [])
+          .whereType<String>()
+          .toList(),
+    );
   }
 
   /// 서버에 배포된 최신 클라이언트 버전(version.js 참고). 아직 배포된 빌드가 없으면 null.

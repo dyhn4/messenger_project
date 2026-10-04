@@ -63,6 +63,7 @@ Source: "Get-PairingCode.ps1"; DestDir: "{app}"
 Source: "Update-Server.ps1"; DestDir: "{app}"
 Source: "Restart-Server.ps1"; DestDir: "{app}"
 Source: "Storage-Path.ps1"; DestDir: "{app}"
+Source: "External-Address.ps1"; DestDir: "{app}"
 Source: "Backup-Data.ps1"; DestDir: "{app}"
 Source: "Restore-Data.ps1"; DestDir: "{app}"
 Source: "Reset-Data.ps1"; DestDir: "{app}"
@@ -96,6 +97,8 @@ Name: "{group}\서버 업데이트"; Filename: "powershell.exe"; Parameters: "-N
 Name: "{group}\서버 재시작"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Restart-Server.ps1"""
 ; 첨부파일 저장 위치 확인/변경(NAS·다른 PC 공유 폴더 등) — 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\첨부파일 저장소"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Storage-Path.ps1"""
+; 사내망 밖(LTE/5G) 접속 주소(DDNS·공인 IP) 확인/변경 — .env의 EXTERNAL_ADDRESS. 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\외부 접속 주소"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\External-Address.ps1"""
 ; DB를 파일 하나로 백업한다({app}\backups\에 저장) — pg_dump 경로/포트/비밀번호를 몰라도
 ; 콘솔 명령어 없이 바로 된다. 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\백업"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Backup-Data.ps1"""

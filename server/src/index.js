@@ -23,10 +23,13 @@ import { attachmentsRouter } from './attachments.js';
 import { linksRouter } from './links.js';
 import { createStickersRouter } from './stickers.js';
 import { createAuthRouter, requireAuth } from './auth.js';
-import { certPath, ensureTlsCredentials } from './certs.js';
-import { PAIRING_PORT, PORT } from './config.js';
+import { limits, rateLimit } from './authGuard.js';
+import { certPath, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
+import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT } from './config.js';
+import { startLivekitNatSync } from './livekitNat.js';
+import { LIVEKIT_PROXY_PREFIX, attachLivekitUpgradeProxy, livekitHttpProxy } from './livekitProxy.js';
 import { createBookmarksRouter } from './bookmarks.js';
-import { createCallsRouter } from './calls.js';
+import { callsEnabled, createCallsRouter } from './calls.js';
 import { createCalendarsRouter } from './calendars.js';
 import { createCommentsRouter } from './comments.js';
 import { createFavoritesRouter } from './favorites.js';
@@ -38,7 +41,7 @@ import { createMessagesRouter } from './messages.js';
 import { createMessageFilesRouter } from './messageFiles.js';
 import { createNotificationsRouter } from './notifications.js';
 import { checkPendingMigrations } from './migrationCheck.js';
-import { generatePairingCode, startPairingServer } from './pairing.js';
+import { createPairHandler, generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
 import { createAdminRouter } from './admin.js';
 import { createAlbumsRouter } from './albums.js';
@@ -77,11 +80,19 @@ process.on('uncaughtException', (err) => {
 
 const app = express();
 app.use(cors());
+// 화상회의 신호를 같은 PC의 LiveKit으로 넘긴다(livekitProxy.js) — 본문을 그대로 흘려야 해서 json 파서보다 먼저.
+app.use(LIVEKIT_PROXY_PREFIX, livekitHttpProxy(LIVEKIT_PORT));
 app.use(express.json());
 
-const tls = await ensureTlsCredentials();
+const tls = await ensureTlsCredentials({ extraHosts: EXTERNAL_ADDRESS ? [EXTERNAL_ADDRESS.host] : [] });
 const httpServer = createServer(tls, app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
+attachLivekitUpgradeProxy(httpServer, LIVEKIT_PORT);
+// 사내망 밖(LTE/5G)에서도 재페어링할 수 있게 메인 HTTPS 포트에도 페어링을 연다(pairing.js의 createPairHandler).
+// 밖에서도 닿으므로 IP마다 시도 횟수를 제한한다(authGuard.js — 4자리 코드 맞혀보기 방지).
+app.get('/pair/:code', rateLimit(limits.pairIp, '페어링 시도'), createPairHandler(() => tls.cert));
+// 외부 주소가 있으면 LiveKit이 공인 IP도 알리게 livekit.yaml을 맞춘다(livekitNat.js).
+const livekitMediaPorts = await startLivekitNatSync({ externalAddress: EXTERNAL_ADDRESS, enabled: callsEnabled() && !LIVEKIT_URL });
 
 app.use('/auth', createAuthRouter(io));
 app.use('/api', requireAuth, uploadRouter);
@@ -133,6 +144,16 @@ app.use('/api', requireAuth, helpApiRouter);
 app.use(filesRouter);
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+// 앱이 외부 접속 주소(.env의 EXTERNAL_ADDRESS)와 사내 주소들을 받아 저장해뒀다가, 지금 네트워크에서
+// 되는 쪽으로 자동 전환한다(client session.dart) — 사내 주소로 연결해둔 앱은 밖에서 외부 주소로,
+// 밖에서 외부 주소로 페어링한 앱은 사내로 돌아오면 사내 주소로. 로그인 전에도 받아야 해서 인증 없이
+// 열어둔다 — 인증서 핀닝으로 이 서버가 맞는지는 이미 확인된 연결이다.
+app.get('/server-info', (req, res) =>
+  res.json({
+    externalUrl: EXTERNAL_ADDRESS?.url ?? null,
+    internalUrls: lanAddressesInCert(tls.cert).map((ip) => `https://${ip}:${PORT}`),
+  }),
+);
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).
 app.use(versionRouter);
 // 초보자용 도움말(server/guide/ 정적 페이지) — 모든 회원이 보는 공개 문서라 인증 없이(version.js).
@@ -178,6 +199,15 @@ httpServer.listen(PORT, () => {
   console.log(`메신저 서버 실행 중 (HTTPS, 포트 ${PORT})`);
   console.log('같은 와이파이의 다른 기기에서 접속할 주소:');
   for (const addr of lanAddresses) console.log(`  https://${addr}:${PORT}`);
+  if (EXTERNAL_ADDRESS) {
+    console.log(`외부(LTE/5G)에서 접속할 주소: ${EXTERNAL_ADDRESS.url}`);
+    console.log(`  공유기에서 외부 포트 ${EXTERNAL_ADDRESS.port}(TCP) → 이 PC의 포트 ${PORT}로 포워딩해야 합니다.`);
+    console.log(`  초대 링크 안내 페이지를 밖에서도 열려면 TCP ${PAIRING_PORT}도 같은 번호로 포워딩하세요(밖에서는 안내 페이지·설치 파일만 열리고 페어링은 막힘).`);
+    if (livekitMediaPorts) {
+      const { udpStart, udpEnd, tcp } = livekitMediaPorts;
+      console.log(`  화상회의도 쓰려면 UDP ${udpStart}-${udpEnd}와 TCP ${tcp}도 이 PC의 같은 포트로 포워딩하세요.`);
+    }
+  }
   console.log(`TLS 인증서(자체 서명): ${certPath}`);
   console.log('클라이언트 앱의 "서버 주소 변경"에서 페어링 코드로 이 인증서를 받아 연결할 수 있습니다.');
   console.log('새 기기를 연결하려면 이 콘솔에 "pair"를 입력하고 Enter 하세요(pm2 등으로 띄웠다면 같은 PC에서 "npm run pair").');

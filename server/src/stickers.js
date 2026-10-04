@@ -13,7 +13,7 @@ import {
   updateSticker,
   updateStickerPack,
 } from './db/queries/stickers.js';
-import { signFileUrl, uploadsDir } from './upload.js';
+import { UPLOAD_FILENAME_CHARSET, signFileUrl, uploadsDir } from './upload.js';
 import { makeStickerThumbnail } from './stickerThumbnail.js';
 
 /** 이모티콘으로 올릴 수 있는 그림 형식(움직이는 GIF 포함) — 확장자로 본다(앱의 업로드는 형식을
@@ -31,15 +31,12 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const upload = multer({
   storage: multer.diskStorage({
     destination: uploadsDir,
-    // 한글 파일명은 fileFilter(먼저 불린다)에서 이미 되돌려 놓았다.
     filename: (req, file, cb) => cb(null, `${randomUUID()}${extOf(file.originalname)}`),
   }),
+  // 한글 파일명을 UTF-8로 읽는다(upload.js와 같은 이유).
+  defParamCharset: UPLOAD_FILENAME_CHARSET,
   limits: { fileSize: MAX_FILE_BYTES, files: 200 },
-  fileFilter: (req, file, cb) => {
-    // upload.js와 같은 이유로 한글 파일명을 되돌린다(멀티파트 파일명은 latin1로 디코딩된다).
-    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
-    cb(null, extOf(file.originalname) in STICKER_MIME);
-  },
+  fileFilter: (req, file, cb) => cb(null, extOf(file.originalname) in STICKER_MIME),
 });
 
 /** "1.jpg, 2.jpg, … 10.jpg"가 사람이 보는 순서대로 가게 숫자를 숫자로 비교한다. */

@@ -51,6 +51,7 @@ import 'todo_actions.dart';
 import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
 import 'secret_session_manager.dart';
+import 'server_endpoints.dart';
 import 'typing_gate.dart';
 import 'update_socket.dart';
 
@@ -101,6 +102,8 @@ class Session extends ChangeNotifier {
   final bool suppressNotifications;
 
   static const _kServerUrl = 'server_base_url';
+  static const _kExternalServerUrl = 'server_external_url';
+  static const _kInternalServerUrls = 'server_internal_urls';
   static const _kToken = 'auth_token';
   static const _kRefreshToken = 'auth_refresh_token';
   static const _kUserId = 'auth_user_id';
@@ -117,10 +120,28 @@ class Session extends ChangeNotifier {
   static const kActiveRoomIdPrefsKey = 'active_room_id';
   static const kAppInForegroundPrefsKey = 'app_in_foreground';
 
+  /// 지금 쓰는 서버 주소(사내 주소 또는 외부 주소, [serverUrl]) — FCM 백그라운드 핸들러가
+  /// 알림의 프로필 사진을 받을 때 사내망 밖이면 외부 주소를 써야 해서 같이 적어둔다.
+  static const kActiveServerUrlPrefsKey = 'server_active_url';
+
   late SharedPreferences _prefs;
 
   AuthStage stage = AuthStage.loadingConfig;
+
+  /// 지금 실제로 요청·소켓에 쓰는 주소 — [primaryServerUrl]이거나, 사내망 밖이라 자동 전환된
+  /// [externalServerUrl]. 화면들은 이 값만 보면 된다.
   String? serverUrl;
+
+  /// 사용자가 "서버 주소 변경"에서 넣은 주소(보통 사내 주소).
+  String? primaryServerUrl;
+
+  /// 서버가 알려준 외부(LTE/5G) 접속 주소(서버 .env의 EXTERNAL_ADDRESS). 없으면 전환 안 함.
+  String? externalServerUrl;
+
+  /// 서버가 알려준 서버 PC의 사내 주소들 — 사내망 밖에서 외부 주소로 페어링한 앱이 사내로
+  /// 돌아왔을 때 붙을 주소다(server_endpoints.dart의 endpointCandidates).
+  List<String> internalServerUrls = const [];
+
   String? token; // accessToken (짧게 삼)
   String? refreshToken; // accessToken 만료 시 재발급받는 데 쓰는 긴 토큰
   String? userId;
@@ -338,6 +359,7 @@ class Session extends ChangeNotifier {
   StreamSubscription<SimpleCommentDeleted>? _announcementCommentDeletedSub;
   StreamSubscription? _reconnectSub;
   StreamSubscription? _authErrorSub;
+  StreamSubscription? _connectFailureSub;
   StreamSubscription? _roleUpdatedSub;
   StreamSubscription? _orgUpdatedSub;
   StreamSubscription? _secretInviteSub;
@@ -423,6 +445,9 @@ class Session extends ChangeNotifier {
       clearUnreadCount(_activeRoomId!);
       notifications.cancelForRoom(_activeRoomId!);
     }
+    // 백그라운드에 있는 동안 사내 와이파이 ↔ LTE가 바뀌었을 수 있다(특히 모바일) — 돌아올 때
+    // 지금 되는 주소를 다시 확인한다. 사내로 돌아왔으면 외부 주소에서 사내 주소로 되돌아간다.
+    if (value && wasBackground) unawaited(_reselectServerEndpoint());
   }
 
   /// FCM 백그라운드 핸들러가 읽을 수 있도록 activeRoomId/appInForeground를
@@ -481,6 +506,14 @@ class Session extends ChangeNotifier {
   /// 제출이 성공하면 지운다(consumePendingTeamInviteToken).
   String? pendingTeamInviteToken;
 
+  /// "서버 주소 변경"에서 직접 입력한 코드로 페어링에 성공했을 때 — 4자리 페어링 코드가 아니라
+  /// 초대 링크의 코드였다면 가입할 때 같이 보내야 한다. 팀 초대면 팀 자동 합류에, 설치 초대든
+  /// 팀 초대든 사내망 밖에서 가입할 자격(server auth.js — 밖에서는 초대받은 사람만 가입)에 쓰인다.
+  void rememberInviteCode(String code) {
+    if (RegExp(r'^\d{4}$').hasMatch(code)) return;
+    pendingTeamInviteToken = code;
+  }
+
   String? consumePendingTeamInviteToken() {
     final token = pendingTeamInviteToken;
     pendingTeamInviteToken = null;
@@ -518,13 +551,17 @@ class Session extends ChangeNotifier {
     // 안 불려서 _persistForegroundState가 늦게까지 실행 안 될 수 있다 — 여기서 한 번
     // 명시적으로 찍어둬서 FCM 백그라운드 핸들러가 항상 최신 값을 읽을 수 있게 한다.
     _persistForegroundState();
-    serverUrl = _prefs.getString(_kServerUrl);
+    var primary = _prefs.getString(_kServerUrl);
     // 서버가 HTTP에서 HTTPS로 바뀌면서, 예전에 http://로 저장해둔 주소는 더 이상 연결되지
     // 않는다. 같은 호스트:포트를 https://로만 바꿔서 자동으로 맞춰준다.
-    if (serverUrl != null && serverUrl!.startsWith('http://')) {
-      serverUrl = 'https://${serverUrl!.substring('http://'.length)}';
-      await _prefs.setString(_kServerUrl, serverUrl!);
+    if (primary != null && primary.startsWith('http://')) {
+      primary = 'https://${primary.substring('http://'.length)}';
+      await _prefs.setString(_kServerUrl, primary);
     }
+    primaryServerUrl = primary;
+    externalServerUrl = _prefs.getString(_kExternalServerUrl);
+    internalServerUrls = _prefs.getStringList(_kInternalServerUrls) ?? const [];
+    if (primary != null) serverUrl = await _initialServerEndpoint(primary);
     token = _prefs.getString(_kToken);
     refreshToken = _prefs.getString(_kRefreshToken);
     userId = _prefs.getString(_kUserId);
@@ -542,6 +579,7 @@ class Session extends ChangeNotifier {
         httpClient: await PinnedTls.httpClient(),
       );
       unawaited(_checkForUpdate());
+      unawaited(_refreshServerAddresses());
       unawaited(_updateSocket.connect(serverUrl!));
       if (token == null) {
         stage = AuthStage.needsLogin;
@@ -569,6 +607,11 @@ class Session extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     _persistForegroundState();
     this.serverUrl = serverUrl;
+    // 메인 창이 지금 쓰는 주소(외부 주소일 수도 있음)를 넘겨받는다 — 자동 전환은 이 창도
+    // 따로 하므로 사내/외부 주소는 메인 창과 같은 저장값에서 읽는다.
+    primaryServerUrl = _prefs.getString(_kServerUrl) ?? serverUrl;
+    externalServerUrl = _prefs.getString(_kExternalServerUrl);
+    internalServerUrls = _prefs.getStringList(_kInternalServerUrls) ?? const [];
     this.token = token;
     this.refreshToken = refreshToken;
     this.userId = userId;
@@ -598,18 +641,148 @@ class Session extends ChangeNotifier {
       return false;
     }
     serverUrl = normalized;
+    primaryServerUrl = normalized;
     await _prefs.setString(_kServerUrl, normalized);
+    await _prefs.setString(kActiveServerUrlPrefsKey, normalized);
+    // 다른 서버로 바꿨을 수도 있으니 예전 서버의 주소들은 버리고 새 서버에 다시 묻는다.
+    externalServerUrl = null;
+    internalServerUrls = const [];
+    await _prefs.remove(_kExternalServerUrl);
+    await _prefs.remove(_kInternalServerUrls);
     api = ApiClient(
       baseUrl: normalized,
       onUnauthorized: _tryRefreshAndApply,
       httpClient: pinnedClient,
     );
     unawaited(_checkForUpdate());
+    unawaited(_refreshServerAddresses());
     unawaited(_updateSocket.connect(serverUrl!));
     error = null;
     stage = AuthStage.needsLogin;
     notifyListeners();
     return true;
+  }
+
+  // ── 사내 주소 ↔ 외부(LTE/5G) 주소 자동 전환 — 규칙은 server_endpoints.dart ──────────
+
+  /// 주소 하나가 되는지 볼 때 기다리는 시간. 사내망 밖에서 사내 IP는 응답 없이 시간만 끌어서
+  /// 기본(5초)보다 짧게 잡는다.
+  static const _endpointProbeTimeout = Duration(seconds: 3);
+
+  /// 소켓은 재연결을 시도할 때마다 실패를 알려오므로, 그때마다 다시 확인하지 않게 간격을 둔다.
+  static const _endpointRecheckInterval = Duration(seconds: 10);
+  bool _reselectingEndpoint = false;
+  DateTime? _lastEndpointCheck;
+
+  /// 지금 서버에 붙을 수 있는 주소 후보(사내 주소가 앞, 외부 주소가 맨 뒤). 하나뿐이면 전환할 일이 없다.
+  List<String> get _serverEndpointCandidates {
+    final primary = primaryServerUrl;
+    if (primary == null) return const [];
+    return endpointCandidates(
+      primary: primary,
+      external: externalServerUrl,
+      internals: internalServerUrls,
+    );
+  }
+
+  Future<String?> _pickServerEndpoint({
+    String? current,
+    bool currentFirst = false,
+  }) async {
+    final candidates = _serverEndpointCandidates;
+    if (candidates.isEmpty) return null;
+    final client = await PinnedTls.httpClient();
+    return findReachableEndpoint(
+      endpointProbeOrder(
+        candidates,
+        current: current ?? serverUrl,
+        currentFirst: currentFirst,
+      ),
+      (url) => ApiClient(
+        baseUrl: url,
+        httpClient: client,
+      ).checkHealth(timeout: _endpointProbeTimeout),
+    );
+  }
+
+  /// 앱을 켤 때 쓸 주소. 전환할 후보가 없으면 그냥 [primary], 있으면 지난번에 쓰던 주소부터
+  /// 확인한다(밖에서 켤 때마다 사내 주소 확인 시간만큼 늦게 뜨지 않게). 다 안 되면(오프라인)
+  /// 지난번 주소 그대로 — 그 뒤 소켓 재연결 실패가 오면 다시 확인한다.
+  Future<String> _initialServerEndpoint(String primary) async {
+    final candidates = _serverEndpointCandidates;
+    final last = _prefs.getString(kActiveServerUrlPrefsKey);
+    final current = last != null && candidates.contains(last) ? last : primary;
+    final picked = candidates.length <= 1
+        ? primary
+        : await _pickServerEndpoint(current: current, currentFirst: true) ??
+              current;
+    await _prefs.setString(kActiveServerUrlPrefsKey, picked);
+    return picked;
+  }
+
+  /// 지금 되는 주소를 다시 찾아서 다르면 전환한다(소켓 연결 실패, 앱 복귀 때). 사내 주소를
+  /// 먼저 보므로 사내 와이파이로 돌아오면 외부 주소에서 사내 주소로 되돌아간다.
+  Future<void> _reselectServerEndpoint() async {
+    if (_serverEndpointCandidates.length <= 1 || serverUrl == null) return;
+    if (_reselectingEndpoint) return;
+    final now = DateTime.now();
+    final last = _lastEndpointCheck;
+    if (last != null && now.difference(last) < _endpointRecheckInterval) return;
+    _lastEndpointCheck = now;
+    _reselectingEndpoint = true;
+    try {
+      final picked = await _pickServerEndpoint();
+      if (picked != null && picked != serverUrl) {
+        await _switchServerEndpoint(picked);
+      }
+    } finally {
+      _reselectingEndpoint = false;
+    }
+  }
+
+  Future<void> _switchServerEndpoint(String url) async {
+    serverUrl = url;
+    await _prefs.setString(kActiveServerUrlPrefsKey, url);
+    // 화면들이 들고 있는 ApiClient 인스턴스를 그대로 둔 채 주소만 바꾼다.
+    api?.baseUrl = url;
+    unawaited(_updateSocket.connect(url));
+    // 앱에 들어가기 전(로그인 화면·_enterApp 진행 중)이면 소켓은 나중에 serverUrl로 붙는다.
+    if (chatSocket.isStarted && token != null) {
+      await chatSocket.connect(
+        baseUrl: url,
+        token: token!,
+        deviceId: deviceIdentity?.deviceId,
+      );
+      // 새로 연결한 소켓은 reconnected를 안 보내므로, 끊겨 있던 동안 놓친 것을 직접 받아온다.
+      unawaited(_resyncAfterReconnect());
+    }
+    notifyListeners();
+  }
+
+  /// 서버에 설정된 외부 주소와 서버 PC의 사내 주소들을 받아 저장해둔다(서버에서 외부 주소를
+  /// 지웠으면 같이 지운다). 서버에 못 물어봤으면(오프라인 등) 저장해둔 값을 그대로 둔다.
+  Future<void> _refreshServerAddresses() async {
+    final client = api;
+    if (primaryServerUrl == null || client == null) return;
+    final ({String? externalUrl, List<String> internalUrls}) info;
+    try {
+      info = await client.fetchServerInfo();
+    } catch (_) {
+      return;
+    }
+    final external = normalizeServerUrl(info.externalUrl);
+    final internals = info.internalUrls
+        .map(normalizeServerUrl)
+        .whereType<String>()
+        .toList();
+    externalServerUrl = external;
+    internalServerUrls = internals;
+    if (external == null) {
+      await _prefs.remove(_kExternalServerUrl);
+    } else {
+      await _prefs.setString(_kExternalServerUrl, external);
+    }
+    await _prefs.setStringList(_kInternalServerUrls, internals);
   }
 
   /// 서버에 지금 이 앱보다 최신 버전이 배포돼 있으면 [updateAvailableVersion]을 채운다.
@@ -1518,6 +1691,10 @@ class Session extends ChangeNotifier {
     _reconnectSub?.cancel();
     _reconnectSub = chatSocket.reconnected.listen(
       (_) => _resyncAfterReconnect(),
+    );
+    _connectFailureSub?.cancel();
+    _connectFailureSub = chatSocket.connectFailures.listen(
+      (_) => unawaited(_reselectServerEndpoint()),
     );
     _authErrorSub?.cancel();
     _authErrorSub = chatSocket.authErrors.listen((_) async {
@@ -3833,6 +4010,7 @@ class Session extends ChangeNotifier {
     await _presenceSub?.cancel();
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();
+    await _connectFailureSub?.cancel();
     await _roleUpdatedSub?.cancel();
     await _orgUpdatedSub?.cancel();
     await _secretInviteSub?.cancel();

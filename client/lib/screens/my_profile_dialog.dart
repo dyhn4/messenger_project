@@ -10,6 +10,7 @@ import '../models/room.dart';
 import '../models/sticker_pack.dart';
 import '../models/team.dart';
 import '../services/avatar_thumbnail.dart';
+import '../services/password_policy.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart' show AvatarView;
@@ -861,6 +862,11 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
 
   Future<void> _submit() async {
     if (_current.text.isEmpty || _newPassword.text.isEmpty) return;
+    final passwordError = passwordPolicyError(_newPassword.text);
+    if (passwordError != null) {
+      setState(() => _error = '새 $passwordError');
+      return;
+    }
     if (_newPassword.text != _confirm.text) {
       setState(() => _error = '새 비밀번호가 서로 다릅니다.');
       return;
@@ -902,6 +908,7 @@ class _PasswordChangePanelState extends State<_PasswordChangePanel> {
           obscureText: true,
           decoration: const InputDecoration(
             labelText: '새 비밀번호',
+            hintText: kPasswordHint,
             border: OutlineInputBorder(),
           ),
         ),

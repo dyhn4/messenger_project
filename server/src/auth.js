@@ -1,8 +1,19 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
+import { AUDIT, recordAudit } from "./audit.js";
+import {
+  clientIp,
+  isLanAddress,
+  limits,
+  minutesText,
+  rateLimit,
+  tooMany,
+  userKey,
+} from "./authGuard.js";
 import { JWT_SECRET } from "./config.js";
 import { encryptField, lookupHash } from "./crypto.js";
+import { passwordPolicyError } from "./passwordPolicy.js";
 import {
   findUserByEmailLookup,
   findUserById,
@@ -17,6 +28,7 @@ import {
   isTeamInviteLinkValid,
   markTeamInviteLinkUsed,
 } from "./db/queries/teamInviteLinks.js";
+import { findInviteLinkByToken, isInviteLinkValid } from "./db/queries/inviteLinks.js";
 import { addTeamMembers } from "./db/queries/teams.js";
 import { addRoomMembers, listAutoInviteTopics, listRoomMemberIds } from "./db/queries/rooms.js";
 import { findDefaultPositionOption } from "./db/queries/positionOptions.js";
@@ -68,6 +80,70 @@ const randomOf = (list) => list[Math.floor(Math.random() * list.length)];
 const ACCESS_TOKEN_TTL = "1h";
 const REFRESH_TOKEN_TTL = "30d";
 
+// 없는 아이디로 로그인할 때도 bcrypt 비교 한 번만큼 시간을 쓰게 하는 더미 해시 — 응답 시간
+// 차이로 "이 아이디는 있다/없다"를 알아내지 못하게 한다.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("dummy-password-for-timing", 10);
+
+/**
+ * 무차별 대입으로 막히기 시작한 순간을 콘솔과 감사 로그(관리자 콘솔)에 남긴다. 같은 키는
+ * 차단이 풀릴 때까지 다시 안 찍히므로 공격이 계속돼도 기록이 넘치지 않는다.
+ */
+function reportLockout({ ip, username, user, detail }) {
+  console.warn(`[보안] ${detail} — IP ${ip}, 아이디 "${username}"`);
+  recordAudit({
+    actorName: `IP ${ip}`,
+    action: AUDIT.authLockout,
+    targetType: "user",
+    targetId: user?.id ?? null,
+    targetLabel: username || null,
+    detail,
+  });
+}
+
+/**
+ * 비밀번호 재설정(보안 질문) 경로의 무차별 대입 방어. 막혀 있으면 429를 보내고 null,
+ * 아니면 실패/성공을 알릴 함수들을 돌려준다.
+ */
+function recoveryGuard(req, res, username) {
+  const ip = clientIp(req);
+  const external = !isLanAddress(ip);
+  const uk = userKey(username);
+  const ipUser = `${ip}|${uk}`;
+  const wait = Math.max(
+    limits.recoveryIpUser.blockedFor(ipUser),
+    external ? limits.recoveryUserExternal.blockedFor(uk) : 0,
+  );
+  if (wait > 0) {
+    tooMany(res, wait, "확인 시도");
+    return null;
+  }
+  return {
+    external,
+    fail(user) {
+      if (limits.recoveryIpUser.fail(ipUser)) {
+        reportLockout({ ip, username: uk, user, detail: `비밀번호 재설정 확인 3회 실패 — 이 IP에서 ${minutesText(limits.recoveryIpUser.blockMs)} 차단` });
+      }
+      if (external && limits.recoveryUserExternal.fail(uk)) {
+        reportLockout({ ip, username: uk, user, detail: `사내망 밖에서 비밀번호 재설정 확인 10회 실패 — 밖에서는 ${minutesText(limits.recoveryUserExternal.blockMs)} 재설정 불가` });
+      }
+    },
+    succeed() {
+      limits.recoveryIpUser.reset(ipUser);
+    },
+  };
+}
+
+/** 지금 유효한 초대 링크(팀 초대 또는 설치 초대)의 토큰인지. */
+async function isValidInviteToken(token) {
+  if (typeof token !== "string" || !token) return false;
+  if (isTeamInviteLinkValid(await findTeamInviteLinkByToken(token))) return true;
+  return isInviteLinkValid(await findInviteLinkByToken(token));
+}
+
+/** 보안 질문이 없는(이 기능 전에 가입한) 계정은 아이디+이메일만으로 재설정되므로 사내망에서만 허용한다. */
+const NO_QUESTION_EXTERNAL_ERROR =
+  "보안 질문이 등록되지 않은 계정은 사내 와이파이에서만 비밀번호를 재설정할 수 있습니다. 서버 운영자에게 문의하세요.";
+
 export function issueTokenPair(user) {
   const tokenVersion = user.tokenVersion ?? 0;
   const accessToken = jwt.sign(
@@ -91,7 +167,7 @@ export function createAuthRouter(io) {
   /** 회원가입 폼에서 "중복 확인" 버튼이 누르는 참조용 가용성 체크. 실제 가입은 아니라 200으로
    *  응답하고, 이후 register에서도 (여기 통과 후 사이에 다른 사람이 선점했을 수 있으니) 다시
    *  한번 검사한다. */
-  router.get("/username-available", async (req, res) => {
+  router.get("/username-available", rateLimit(limits.usernameCheckIp, "중복 확인 시도"), async (req, res) => {
     const username = req.query.username ?? "";
     if (username.length < 4 || username.length > 20) {
       return res.json({ available: false, error: USERNAME_LENGTH_ERROR });
@@ -106,7 +182,7 @@ export function createAuthRouter(io) {
     res.json({ available: true });
   });
 
-  router.post("/register", async (req, res) => {
+  router.post("/register", rateLimit(limits.registerIp, "가입 시도"), async (req, res) => {
     const {
       username,
       password,
@@ -116,6 +192,15 @@ export function createAuthRouter(io) {
       securityAnswer,
       teamInviteToken,
     } = req.body ?? {};
+    // 사내망 밖(LTE/5G)에서는 초대 링크(설치 초대·팀 초대)를 받은 사람만 가입할 수 있다 — 공유기
+    // 포트를 열면 인터넷 누구나 가입 화면에 닿기 때문이다. 앱은 초대 링크로 열렸거나 "서버 주소
+    // 변경"에 초대 코드를 넣어 페어링했을 때 그 코드를 teamInviteToken으로 보낸다.
+    if (!isLanAddress(clientIp(req)) && !(await isValidInviteToken(teamInviteToken))) {
+      return res.status(403).json({
+        error:
+          "사내 와이파이 밖에서는 초대 링크로만 가입할 수 있습니다. 초대 링크를 받아 그 코드로 서버에 연결하거나, 사내 와이파이에서 가입하세요.",
+      });
+    }
     if (!username || !password || !email || !name) {
       return res
         .status(400)
@@ -124,8 +209,9 @@ export function createAuthRouter(io) {
     if (username.length < 4 || username.length > 20) {
       return res.status(400).json({ error: USERNAME_LENGTH_ERROR });
     }
-    if (password.length < 4 || password.length > 20) {
-      return res.status(400).json({ error: "비밀번호는 4~20자여야 합니다." });
+    const passwordError = passwordPolicyError(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     if (!EMAIL_PATTERN.test(email)) {
       return res
@@ -225,7 +311,7 @@ export function createAuthRouter(io) {
   });
 
   /** 이메일로 아이디를 찾는다. 가입할 때 등록해둔 이메일이 있어야 동작한다. */
-  router.post("/find-id", async (req, res) => {
+  router.post("/find-id", rateLimit(limits.lookupIp, "조회 시도"), async (req, res) => {
     const { email } = req.body ?? {};
     const user = await findUserByEmailLookup(lookupHash(email));
     if (!user) {
@@ -239,7 +325,7 @@ export function createAuthRouter(io) {
    * 이 컬럼이 생기기 전에 가입한 계정은 질문이 없으므로 question: null을 돌려주고,
    * 클라이언트는 그 경우 답변 확인 단계 없이 바로 재설정하게 한다.
    */
-  router.post("/security-question", async (req, res) => {
+  router.post("/security-question", rateLimit(limits.lookupIp, "조회 시도"), async (req, res) => {
     const { username, email } = req.body ?? {};
     const user = await findUserByUsernameAndEmailLookup(
       username,
@@ -249,6 +335,9 @@ export function createAuthRouter(io) {
       return res
         .status(404)
         .json({ error: "아이디와 이메일이 일치하는 계정이 없습니다." });
+    }
+    if (!user.securityAnswerHash && !isLanAddress(clientIp(req))) {
+      return res.status(403).json({ error: NO_QUESTION_EXTERNAL_ERROR });
     }
     res.json({ question: user.securityQuestion ?? null });
   });
@@ -260,11 +349,14 @@ export function createAuthRouter(io) {
    */
   router.post("/verify-security-answer", async (req, res) => {
     const { username, email, securityAnswer } = req.body ?? {};
+    const guard = recoveryGuard(req, res, username);
+    if (!guard) return;
     const user = await findUserByUsernameAndEmailLookup(
       username,
       lookupHash(email),
     );
     if (!user) {
+      guard.fail(null);
       return res
         .status(400)
         .json({ error: "아이디와 이메일이 일치하는 계정이 없습니다." });
@@ -277,10 +369,13 @@ export function createAuthRouter(io) {
           user.securityAnswerHash,
         ));
       if (!matches) {
+        guard.fail(user);
         return res
           .status(400)
           .json({ error: "보안 질문 답변이 일치하지 않습니다." });
       }
+    } else if (guard.external) {
+      return res.status(403).json({ error: NO_QUESTION_EXTERNAL_ERROR });
     }
     res.json({ ok: true });
   });
@@ -292,17 +387,19 @@ export function createAuthRouter(io) {
    */
   router.post("/reset-password", async (req, res) => {
     const { username, email, securityAnswer, newPassword } = req.body ?? {};
-    if (!newPassword || newPassword.length < 4) {
-      return res
-        .status(400)
-        .json({ error: "비밀번호는 4자 이상이어야 합니다." });
+    const passwordError = passwordPolicyError(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
 
+    const guard = recoveryGuard(req, res, username);
+    if (!guard) return;
     const user = await findUserByUsernameAndEmailLookup(
       username,
       lookupHash(email),
     );
     if (!user) {
+      guard.fail(null);
       return res
         .status(400)
         .json({ error: "아이디와 이메일이 일치하는 계정이 없습니다." });
@@ -315,11 +412,15 @@ export function createAuthRouter(io) {
           user.securityAnswerHash,
         ));
       if (!matches) {
+        guard.fail(user);
         return res
           .status(400)
           .json({ error: "보안 질문 답변이 일치하지 않습니다." });
       }
+    } else if (guard.external) {
+      return res.status(403).json({ error: NO_QUESTION_EXTERNAL_ERROR });
     }
+    guard.succeed();
 
     // 비밀번호가 바뀌었으니 이전에 발급된 모든 토큰을 무효화한다: AccessToken은 남은
     // 유효기간(최대 1시간) 뒤에, RefreshToken은 즉시(다음 재발급 시도부터) 막히고,
@@ -335,12 +436,39 @@ export function createAuthRouter(io) {
 
   router.post("/login", async (req, res) => {
     const { username, password } = req.body ?? {};
+    // 무차별 대입 방어(authGuard.js) — 같은 IP·아이디, 같은 IP(여러 아이디), 사내망 밖에서
+    // 한 아이디 세 갈래로 센다. 막혀 있는 동안은 비밀번호가 맞아도 들여보내지 않는다.
+    const ip = clientIp(req);
+    const external = !isLanAddress(ip);
+    const uk = userKey(username);
+    const ipUser = `${ip}|${uk}`;
+    const wait = Math.max(
+      limits.loginIpUser.blockedFor(ipUser),
+      limits.loginIp.blockedFor(ip),
+      external ? limits.loginUserExternal.blockedFor(uk) : 0,
+    );
+    if (wait > 0) return tooMany(res, wait, "로그인 시도");
+
     const user = await findUserByUsername(username);
-    if (!user || !(await bcrypt.compare(password ?? "", user.passwordHash))) {
+    const passwordOk = await bcrypt.compare(
+      String(password ?? ""),
+      user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    );
+    if (!user || !passwordOk) {
+      if (limits.loginIpUser.fail(ipUser)) {
+        reportLockout({ ip, username: uk, user, detail: `비밀번호 5회 오류 — 이 IP에서 이 아이디 ${minutesText(limits.loginIpUser.blockMs)} 로그인 차단` });
+      }
+      if (limits.loginIp.fail(ip)) {
+        reportLockout({ ip, username: uk, user, detail: `한 IP에서 여러 아이디로 비밀번호 20회 오류 — 이 IP ${minutesText(limits.loginIp.blockMs)} 로그인 차단` });
+      }
+      if (external && limits.loginUserExternal.fail(uk)) {
+        reportLockout({ ip, username: uk, user, detail: `사내망 밖에서 이 아이디로 비밀번호 20회 오류 — 밖에서는 ${minutesText(limits.loginUserExternal.blockMs)} 로그인 차단(사내에서는 가능)` });
+      }
       return res
         .status(401)
         .json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
     }
+    limits.loginIpUser.reset(ipUser);
     if (user.deletedAt) {
       return res.status(403).json({ error: "탈퇴한 계정입니다." });
     }

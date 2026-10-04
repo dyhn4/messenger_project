@@ -9,7 +9,7 @@ import {
   listInviteLinksByCreator,
   revokeInviteLink,
 } from './db/queries/inviteLinks.js';
-import { PAIRING_PORT } from './config.js';
+import { EXTERNAL_ADDRESS, PAIRING_PORT } from './config.js';
 import { canCreateInviteLink } from './permissions.js';
 
 /** 초대 링크는 발급되면 항상 이 기간(일)만큼만 유효하다 — 굳이 고를 필요 없게 고정. */
@@ -36,6 +36,9 @@ function toInviteLinkDto(link, { serverAddress }) {
     valid: isInviteLinkValid(link),
     // 안내 페이지 URL — 평문 HTTP(페어링 포트)라 자체 서명 인증서 경고 없이 브라우저로 열린다.
     url: serverAddress ? `http://${serverAddress.host}:${PAIRING_PORT}/invite/${link.token}` : null,
+    // 사내망 밖(LTE/5G)에서 열 주소 — 외부 주소(EXTERNAL_ADDRESS)가 있을 때만. 공유기에서 페어링 포트도
+    // 같은 번호로 열어둬야 한다(밖에서는 안내 페이지·설치 파일만 열린다 — pairing.js).
+    externalUrl: EXTERNAL_ADDRESS ? `http://${EXTERNAL_ADDRESS.host}:${PAIRING_PORT}/invite/${link.token}` : null,
   };
 }
 

@@ -79,6 +79,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
         ).showSnackBar(SnackBar(content: Text('인증서를 받지 못했습니다: $e')));
         return;
       }
+      widget.session.rememberInviteCode(code);
     }
     final ok = await widget.session.setServerUrl(_controller.text);
     if (!mounted) return;

@@ -102,14 +102,12 @@ export function resolveSignedFile(token) {
   };
 }
 
+/** 업로드 파일명 문자셋 — stickers.js도 같은 값을 쓴다(위 upload 설정의 주석 참고). */
+export const UPLOAD_FILENAME_CHARSET = 'utf8';
+
 const storage = multer.diskStorage({
   destination: uploadsDir,
   filename: (req, file, cb) => {
-    // 멀티파트 스펙에 파일명 인코딩이 정해져 있지 않아서, busboy가 헤더를 기본값인 latin1로
-    // 디코딩한다. 클라이언트(Dart http 패키지)는 파일명을 UTF-8 바이트 그대로 보내므로
-    // 한글 등 비ASCII 파일명이 깨져 들어온다 — latin1로 다시 인코딩해서 원래 UTF-8 바이트로
-    // 되돌린다(흔히 알려진 멀티파트 업로드 한글 깨짐 문제의 표준적인 해결법).
-    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
     const ext = path.extname(file.originalname);
     cb(null, `${randomUUID()}${ext}`);
   },
@@ -117,6 +115,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
+  // 멀티파트 스펙에 파일명 인코딩이 정해져 있지 않아서 busboy는 기본값 latin1로 읽는데,
+  // 클라이언트(Dart http 패키지)는 파일명을 UTF-8 바이트 그대로 보낸다 — 그대로 두면 한글
+  // 파일명이 깨진다. multer 2부터는 이 기본 문자셋을 직접 정할 수 있어서 UTF-8로 읽게 한다
+  // (예전에는 latin1로 읽힌 이름을 다시 UTF-8로 되돌리는 우회 코드를 썼다).
+  defParamCharset: UPLOAD_FILENAME_CHARSET,
   limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB. 필요에 맞게 조절하세요.
 });
 

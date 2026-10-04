@@ -8,6 +8,9 @@ import {
   isTeamInviteLinkValid,
   markTeamInviteLinkUsed,
 } from './db/queries/teamInviteLinks.js';
+import { clientIp, isLanAddress, limits, minutesText } from './authGuard.js';
+import { allowedFromOutside } from './pairingPaths.js';
+import { EXTERNAL_ADDRESS } from './config.js';
 import { roleLabel } from './permissions.js';
 import { guideStatic, releasesDir } from './version.js';
 
@@ -205,6 +208,8 @@ const INVITE_PAGE_STYLE = `
   .field code { font-size: 14px; word-break: break-all; }
   .hint { color: #888; font-size: 13px; }
   .warn { color: #e03131; font-weight: bold; }
+  .net-caution { background: #fff4e6; border: 1px solid #f08c00; border-radius: 10px; padding: 10px 14px;
+                 color: #7c4a03; font-size: 14px; margin: 12px 0; }
   details { margin: 12px 0; color: #555; }
   summary { cursor: pointer; }
   /* 가이드를 상시 노출로 바꾸면서(아래 .page-layout 참고) 페이지 폭이 좁으면 오른쪽에
@@ -268,12 +273,19 @@ ${deepLinkScript}
 </body></html>`;
 }
 
+/**
+ * 사내망 밖에서 이 페이지를 열었을 때 맨 위에 띄우는 주의 — 이 페이지와 설치 파일은 평문 HTTP라
+ * 공용 와이파이처럼 믿을 수 없는 네트워크에서는 중간에서 바꿔치기될 수 있다(공인 인증서 없이는
+ * 기술적으로 막을 방법이 없어서 안내로 대신한다 — README "외부(LTE/5G)에서 접속하기").
+ */
+const PUBLIC_WIFI_CAUTION = `<p class="net-caution"><b>⚠ 공용 와이파이(카페·공항·호텔 등)에서는 열지 마세요.</b><br />
+  이 페이지와 설치 파일은 암호화되지 않은 연결로 받습니다. LTE/5G나 집 와이파이로 바꾼 뒤 다시 여세요.</p>`;
+
 /** 초대 링크를 열었을 때 보여주는 안내 페이지 — 자체 서명 인증서 경고 없이(평문 HTTP) 누구나
  * 열어볼 수 있어야 해서 인증/세션 없이 정적으로 그린다. */
-function renderInvitePage({ host, mainPort, token, link }) {
+function renderInvitePage({ serverAddress, token, link, outside }) {
   const valid = isInviteLinkValid(link);
   const title = 'TangoTalk 초대';
-  const serverAddress = `https://${host}:${mainPort}`;
   // tangotalk:// 커스텀 스킴 — 앱이 이미 설치돼 있으면 이 링크로 바로 열리면서 서버 주소/코드가
   // 자동입력된다(설치 여부를 서버가 알 방법은 없으니, 그냥 시도해보고 반응이 없으면 — 즉 이
   // 페이지가 그대로 보이고 있으면 — 아래 설치 안내를 그대로 따라가면 되는 구조).
@@ -284,6 +296,7 @@ function renderInvitePage({ host, mainPort, token, link }) {
       ? `<p class="warn">이 링크는 ${link.revokedAt ? '취소되었습니다' : '만료되었습니다'}. 초대한 사람에게 새 링크를 요청하세요.</p>`
       : `
         <p>${escapeHtml(link.createdByName)}님이 TangoTalk에 초대했습니다. 남은 기간: ${formatRemaining(new Date(link.expiresAt).getTime() - Date.now())}</p>
+        ${outside ? PUBLIC_WIFI_CAUTION : ''}
         <p class="hint">TangoTalk이 이미 설치되어 있다면 잠시 후 앱이 자동으로 열립니다. 반응이 없다면 아직 설치되지 않은 것이니, 아래에서 설치 파일을 받으세요.</p>
         <div class="downloads">
           <a class="btn" href="/invite/${token}/download/windows">Windows용 다운로드</a>
@@ -303,10 +316,9 @@ function renderInvitePage({ host, mainPort, token, link }) {
 /** 팀 초대 링크 안내 페이지 — renderInvitePage와 거의 같지만, 가입하면 어느 팀에 어떤
  * 등급으로 자동 합류하는지 알려준다. link에는 findTeamInviteLinkByToken이 이미 join해서
  * 넣어준 teamName이 들어있다. */
-function renderTeamInvitePage({ host, mainPort, token, link }) {
+function renderTeamInvitePage({ serverAddress, token, link, outside }) {
   const valid = isTeamInviteLinkValid(link);
   const title = 'TangoTalk 팀 초대';
-  const serverAddress = `https://${host}:${mainPort}`;
   const deepLink = `tangotalk://pair/?address=${encodeURIComponent(serverAddress)}&code=${encodeURIComponent(token)}`;
   const body = !link
     ? `<p class="warn">유효하지 않은 초대 링크입니다.</p>`
@@ -316,6 +328,7 @@ function renderTeamInvitePage({ host, mainPort, token, link }) {
         <p>${escapeHtml(link.createdByName)}님이 <b>${escapeHtml(link.teamName)}</b> 팀에 초대했습니다. 이 링크로 가입하면
         자동으로 이 팀에 합류하고 <b>${roleLabel(link.assignedRole)}</b> 등급이 부여됩니다.
         남은 기간: ${formatRemaining(new Date(link.expiresAt).getTime() - Date.now())}</p>
+        ${outside ? PUBLIC_WIFI_CAUTION : ''}
         <p class="hint">TangoTalk이 이미 설치되어 있다면 잠시 후 앱이 자동으로 열립니다. 반응이 없다면 아직 설치되지 않은 것이니, 아래에서 설치 파일을 받으세요.</p>
         <div class="downloads">
           <a class="btn" href="/team-invite/${token}/download/windows">Windows용 다운로드</a>
@@ -343,26 +356,15 @@ function downloadInstaller(req, res) {
 }
 
 /**
- * 인증서를 앱에 미리 내장하지 않고, 새 기기를 페어링 코드로 연결할 수 있게 해주는
- * 평문 HTTP 부트스트랩 서버. 여기서 내려주는 건 TLS 인증서의 공개 부분뿐이라(비밀키 아님)
- * 정보 자체가 새어나가도 큰 문제는 아니지만, 엉뚱한 서버가 아니라 지금 이 서버가 맞다는 걸
- * 관리자가 직접 불러준 코드로 확인시켜주는 게 목적이다 — 그래서 코드는 5분짜리 1회용으로 짧게 둔다.
- *
- * 코드 생성은 두 가지 경로로 할 수 있다: ①서버를 일반 터미널(`npm start`)로 띄웠다면 그
- * 콘솔에 "pair"를 입력(index.js의 readline) ②pm2처럼 콘솔 입력을 받을 수 없는 방식으로
- * 띄웠다면 같은 PC에서 `npm run pair`(scripts/pair.mjs가 아래 /admin/generate를 호출) —
- * 이 라우트는 같은 PC(loopback)에서만 호출 가능해서 외부에 노출되지 않는다.
- *
- * 같은 서버에 **초대 링크**(invites.js에서 발급, `/invite/<토큰>`) 랜딩 페이지와 설치 파일
- * 다운로드도 얹는다 — 자체 서명 인증서 경고 없이 누구나 브라우저로 바로 열어볼 수 있어야
- * 하므로, 회원가입 절차 없이 여는 메인 HTTPS 서버(index.js)가 아니라 일부러 이 평문 서버에
- * 둔다. 인증서를 실제로 받는 부분(/pair/:code)은 4자리 코드든 초대 토큰이든 같은 방식으로
- * 처리해서, 클라이언트(server_setup_screen.dart 등)는 코드 입력칸 하나만 있으면 된다.
+ * GET /pair/:code — 페어링 코드(또는 초대 토큰)를 확인하고 이 서버의 TLS 인증서(공개 부분)를
+ * 돌려준다. 사내망의 평문 페어링 서버(아래 startPairingServer)와, 사내망 밖(LTE/5G)에서도
+ * 재페어링할 수 있게 메인 HTTPS 서버(index.js — 공유기에는 이 포트만 열려 있다) 양쪽에 붙인다.
+ * HTTPS 쪽은 앱이 아직 이 인증서를 모르는 상태라 인증서 확인 없이 붙되, 응답에 실린 인증서가
+ * 실제 TLS 연결의 인증서와 같은지 대조한다(client pinned_tls.dart). 코드 상태(5분·1회용·10번
+ * 틀리면 무효)는 두 경로가 함께 쓴다.
  */
-export function startPairingServer({ port, mainPort, getCertPem }) {
-  const app = express();
-
-  app.get('/pair/:code', async (req, res) => {
+export function createPairHandler(getCertPem) {
+  return async (req, res) => {
     const { code } = req.params;
     if (/^\d{4}$/.test(code)) {
       if (!tryConsumeLegacyCode(code)) {
@@ -387,7 +389,50 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
       return res.json({ cert: getCertPem() });
     }
     return res.status(404).json({ error: '코드가 올바르지 않거나 만료되었습니다.' });
+  };
+}
+
+/**
+ * 인증서를 앱에 미리 내장하지 않고, 새 기기를 페어링 코드로 연결할 수 있게 해주는
+ * 평문 HTTP 부트스트랩 서버. 여기서 내려주는 건 TLS 인증서의 공개 부분뿐이라(비밀키 아님)
+ * 정보 자체가 새어나가도 큰 문제는 아니지만, 엉뚱한 서버가 아니라 지금 이 서버가 맞다는 걸
+ * 관리자가 직접 불러준 코드로 확인시켜주는 게 목적이다 — 그래서 코드는 5분짜리 1회용으로 짧게 둔다.
+ *
+ * 코드 생성은 두 가지 경로로 할 수 있다: ①서버를 일반 터미널(`npm start`)로 띄웠다면 그
+ * 콘솔에 "pair"를 입력(index.js의 readline) ②pm2처럼 콘솔 입력을 받을 수 없는 방식으로
+ * 띄웠다면 같은 PC에서 `npm run pair`(scripts/pair.mjs가 아래 /admin/generate를 호출) —
+ * 이 라우트는 같은 PC(loopback)에서만 호출 가능해서 외부에 노출되지 않는다.
+ *
+ * 같은 서버에 **초대 링크**(invites.js에서 발급, `/invite/<토큰>`) 랜딩 페이지와 설치 파일
+ * 다운로드도 얹는다 — 자체 서명 인증서 경고 없이 누구나 브라우저로 바로 열어볼 수 있어야
+ * 하므로, 회원가입 절차 없이 여는 메인 HTTPS 서버(index.js)가 아니라 일부러 이 평문 서버에
+ * 둔다. 인증서를 실제로 받는 부분(/pair/:code)은 4자리 코드든 초대 토큰이든 같은 방식으로
+ * 처리해서, 클라이언트(server_setup_screen.dart 등)는 코드 입력칸 하나만 있으면 된다.
+ */
+export function startPairingServer({ port, mainPort, getCertPem }) {
+  const app = express();
+
+  // 사내망 밖(LTE/5G)에서 이 평문 포트에 닿는 건 초대 링크 안내 페이지·설치 파일·도움말을 열 때뿐이어야
+  // 한다 — 공유기에서 이 포트를 열어 초대받은 사람이 밖에서도 안내 페이지를 볼 수 있게 하되, 인증서를
+  // 평문으로 내려주는 /pair는 막는다(밖에서는 앱이 메인 HTTPS 포트로 페어링한다 — pinned_tls.dart).
+  // 초대 토큰을 맞혀보는 걸 늦추려고 밖에서 온 요청은 IP마다 요청 수도 제한한다.
+  app.use((req, res, next) => {
+    if (isLanAddress(clientIp(req))) return next();
+    if (!allowedFromOutside(req.path)) {
+      return res.status(403).json({ error: '사내망 밖에서는 이 주소로 연결할 수 없습니다. 앱에 외부 주소(https://)를 넣어 연결하세요.' });
+    }
+    if (req.path.startsWith('/guide')) return next();
+    const wait = limits.invitePageIp.hit(clientIp(req));
+    if (wait > 0) return res.status(429).send(`요청이 너무 많습니다. ${minutesText(wait)} 후 다시 시도하세요.`);
+    next();
   });
+
+  /** 안내 페이지에 적을 메인 HTTPS 주소 — 지금 이 페이지를 연 주소의 호스트에 메인 포트. 외부 주소
+   * (EXTERNAL_ADDRESS)로 열었으면 그 주소 그대로(공유기에서 메인 포트를 다른 번호로 열었을 수 있다). */
+  const mainAddressFor = (req) =>
+    EXTERNAL_ADDRESS && req.hostname === EXTERNAL_ADDRESS.host ? EXTERNAL_ADDRESS.url : `https://${req.hostname}:${mainPort}`;
+
+  app.get('/pair/:code', createPairHandler(getCertPem));
 
   app.post('/admin/generate', (req, res) => {
     if (!isLoopback(req)) return res.status(404).json({ error: '코드가 올바르지 않거나 만료되었습니다.' });
@@ -399,7 +444,7 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
   app.get('/invite/:token', async (req, res) => {
     const link = await findInviteLinkByToken(req.params.token);
     res.type('html').send(
-      renderInvitePage({ host: req.hostname, mainPort, token: req.params.token, link }),
+      renderInvitePage({ serverAddress: mainAddressFor(req), token: req.params.token, link, outside: !isLanAddress(clientIp(req)) }),
     );
   });
 
@@ -415,7 +460,7 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
   app.get('/team-invite/:token', async (req, res) => {
     const link = await findTeamInviteLinkByToken(req.params.token);
     res.type('html').send(
-      renderTeamInvitePage({ host: req.hostname, mainPort, token: req.params.token, link }),
+      renderTeamInvitePage({ serverAddress: mainAddressFor(req), token: req.params.token, link, outside: !isLanAddress(clientIp(req)) }),
     );
   });
 

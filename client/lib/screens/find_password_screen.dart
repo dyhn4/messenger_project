@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/password_policy.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
 
@@ -102,6 +103,11 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
   }
 
   Future<void> _resetPassword() async {
+    final passwordError = passwordPolicyError(_newPassword.text);
+    if (passwordError != null) {
+      setState(() => _error = passwordError);
+      return;
+    }
     if (_newPassword.text != _confirmPassword.text) {
       setState(() => _error = '새 비밀번호가 서로 다릅니다.');
       return;
@@ -241,6 +247,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
             controller: _newPassword,
             decoration: const InputDecoration(
               labelText: '새 비밀번호',
+              hintText: kPasswordHint,
               border: OutlineInputBorder(),
             ),
             obscureText: true,

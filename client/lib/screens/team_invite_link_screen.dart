@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/team.dart';
 import '../models/team_invite_link.dart';
 import '../services/api_client.dart' show PositionOption;
+import '../services/invite_share.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
@@ -107,7 +108,9 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
 
   Future<void> _copyAndNotify(TeamInviteLink link) async {
     if (link.url == null) return;
-    await Clipboard.setData(ClipboardData(text: link.url!));
+    await Clipboard.setData(
+      ClipboardData(text: inviteShareText(link.url!, link.externalUrl)),
+    );
     if (!mounted) return;
     showAppToast(context, '링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.');
   }

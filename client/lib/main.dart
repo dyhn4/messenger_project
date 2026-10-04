@@ -111,8 +111,11 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // push.js가 sender의 아바타 정보를 data payload에 실어 보낸다(avatarUrl은 서버가 이미
   // 서명해서 상대경로로 보냄) — 프로필 사진을 받아오려면 이 isolate에도 자체 서명 인증서
   // 신뢰 설정과 서버 주소가 필요하다(둘 다 세션 없이 SharedPreferences에서 직접 읽는다).
+  // 사내망 밖이라 외부 주소로 전환돼 있었으면 그 주소를 써야 사진이 받아진다.
   await PinnedTls.installGlobalHttpOverrides();
-  final serverUrl = await prefs.getString('flutter.server_base_url');
+  final serverUrl =
+      await prefs.getString('flutter.${Session.kActiveServerUrlPrefsKey}') ??
+      await prefs.getString('flutter.server_base_url');
   final avatarUrlRaw = data['avatarUrl'] as String?;
   final avatarUrl = avatarUrlRaw == null
       ? null

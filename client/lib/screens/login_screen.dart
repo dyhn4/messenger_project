@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/password_policy.dart';
 import '../services/pinned_tls.dart';
 import '../services/security_questions.dart';
 import '../services/session.dart';
@@ -165,6 +166,13 @@ class _LoginScreenState extends State<LoginScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('아이디 중복 확인을 해주세요.')));
+        return;
+      }
+      final passwordError = passwordPolicyError(_password.text);
+      if (passwordError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(passwordError)));
         return;
       }
       if (_password.text != _confirmPassword.text) {
@@ -369,12 +377,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: _password,
-                          maxLength: _isRegister ? 20 : null,
+                          maxLength: _isRegister ? kPasswordMaxLength : null,
                           decoration: InputDecoration(
                             labelText: '비밀번호',
-                            hintText: _isRegister
-                                ? '문자, 숫자 4~20자 (특수문자 가능)'
-                                : null,
+                            hintText: _isRegister ? kPasswordHint : null,
                             counterText: _isRegister ? '' : null,
                             border: const OutlineInputBorder(),
                           ),
@@ -770,6 +776,7 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
   late final _controller = TextEditingController(
     text:
         widget.initialAddress ??
+        widget.session.primaryServerUrl ??
         widget.session.serverUrl ??
         'https://192.168.0.62:3000',
   );
@@ -801,6 +808,7 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
         });
         return;
       }
+      widget.session.rememberInviteCode(code);
     }
     final ok = await widget.session.setServerUrl(_controller.text);
     if (!mounted) return;

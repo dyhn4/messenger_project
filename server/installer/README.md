@@ -26,6 +26,7 @@
 | `Get-PairingCode.ps1` | 시작 메뉴 "새 기기 페어링 코드 발급"이 호출 — `server/scripts/pair.mjs`와 같은 일을 Node 없이 순수 PowerShell로 |
 | `Update-Server.ps1` | "서버 업데이트" — 업데이트 zip을 파일 선택 창에서 골라 적용(WinForms GUI). DB는 안 건드림, npm install+마이그레이션+서비스 재시작 자동. 관리자 권한 필요해 스스로 승격 |
 | `Storage-Path.ps1` | "첨부파일 저장소" — 첨부파일 저장 위치(`UPLOADS_DIR`)를 보여주고 NAS/다른 PC 공유 폴더 등으로 바꿈(WinForms GUI). 기존 파일 이동 여부를 물어보고 `.env` 갱신 + 서비스 재시작. 관리자 권한 필요해 스스로 승격 |
+| `External-Address.ps1` | "외부 접속 주소" — 사내망 밖(LTE/5G)에서 접속할 DDNS 도메인/공인 IP(`EXTERNAL_ADDRESS`)를 보여주고 바꾸거나 끔(WinForms GUI). 그 주소가 지금 인증서에 없으면(서버가 인증서를 새로 만들어 모든 클라이언트 재페어링 필요) 적용 전에 경고. `.env` 갱신 + 서비스 재시작(화상회의 공인 IP는 서버가 `livekit.yaml`에 넣고 LiveKit 서비스를 재시작 — `server/src/livekitNat.js`). 공유기 포트포워딩(메인 포트, 화상회의 UDP 범위·TCP, 초대 안내 페이지를 밖에서 열려면 페어링 포트)은 직접 해야 함. 관리자 권한 필요해 스스로 승격 |
 | `Backup-Data.ps1` | "백업" — DB를 `{app}\backups\messenger_<날짜시각>.dump`로 저장(`pg_dump -F c`). 서버는 멈추지 않음. 관리자 권한 필요해 스스로 승격 |
 | `Restore-Data.ps1` | "복원" — 파일 선택 창(WinForms)에서 `.dump`를 골라 `pg_restore --clean --if-exists`로 되돌림. `Reset-Data.ps1`과 같은 안전장치(서버 운영자 계정 인증 + `RESTORE` 입력 확인) 필수, 복원 중엔 서비스 정지 후 재시작. 관리자 권한 필요해 스스로 승격 |
 | `Reset-Data.ps1` | "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움. 서버 운영자 계정 인증 + `RESET` 입력 확인 둘 다 필수 |

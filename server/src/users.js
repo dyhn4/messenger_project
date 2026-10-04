@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { issueTokenPair } from './auth.js';
+import { limits, tooMany } from './authGuard.js';
+import { passwordPolicyError } from './passwordPolicy.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
 import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
@@ -110,6 +112,26 @@ async function myOrgInfo(user, settings) {
   return { orgScope: 'team', department: null, position: null, teamPositions };
 }
 
+/**
+ * 로그인한 상태에서 현재 비밀번호를 다시 확인한다(화면 잠금 해제·이메일 변경·비밀번호 변경·탈퇴).
+ * 훔친 토큰으로 비밀번호를 맞혀보는 걸 막으려고 틀린 횟수를 센다(authGuard.js — 10번 틀리면
+ * 15분). 막혔거나 틀렸으면 응답을 보내고 false.
+ */
+async function checkCurrentPassword(res, user, password, wrongMessage) {
+  const wait = limits.reauthUser.blockedFor(user.id);
+  if (wait > 0) {
+    tooMany(res, wait, '비밀번호 확인 시도');
+    return false;
+  }
+  if (!password || !(await bcrypt.compare(String(password), user.passwordHash))) {
+    limits.reauthUser.fail(user.id);
+    res.status(401).json({ error: wrongMessage });
+    return false;
+  }
+  limits.reauthUser.reset(user.id);
+  return true;
+}
+
 /** io를 캡처해 프로필(이름/이메일/아바타)이 바뀌면 이 사람이 속한 모든 방에 최신 멤버
  * 정보를 브로드캐스트한다 — 안 그러면 다른 기기/다른 사람 화면의 방 목록·채팅방 제목이
  * 예전 이름/아바타로 남아있게 된다. */
@@ -204,9 +226,7 @@ export function createUsersRouter(io) {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     const { password } = req.body ?? {};
-    if (!password || !(await bcrypt.compare(password, user.passwordHash))) {
-      return res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' });
-    }
+    if (!(await checkCurrentPassword(res, user, password, '비밀번호가 올바르지 않습니다.'))) return;
     res.json({ ok: true });
   });
 
@@ -249,9 +269,7 @@ export function createUsersRouter(io) {
     if (email !== undefined) {
       // 이메일은 아이디/비밀번호 찾기에 쓰이는 계정 복구 수단이라, 이름/아바타와 달리
       // 현재 비밀번호로 본인 확인을 한 번 더 받는다(비밀번호 변경과 같은 정책).
-      if (!currentPassword || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
-        return res.status(401).json({ error: '현재 비밀번호가 올바르지 않습니다.' });
-      }
+      if (!(await checkCurrentPassword(res, user, currentPassword, '현재 비밀번호가 올바르지 않습니다.'))) return;
       if (!EMAIL_PATTERN.test(email)) {
         return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
       }
@@ -321,12 +339,9 @@ export function createUsersRouter(io) {
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
     const { currentPassword, newPassword } = req.body ?? {};
-    if (!newPassword || newPassword.length < 4) {
-      return res.status(400).json({ error: '새 비밀번호는 4자 이상이어야 합니다.' });
-    }
-    if (!currentPassword || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
-      return res.status(401).json({ error: '현재 비밀번호가 올바르지 않습니다.' });
-    }
+    const passwordError = passwordPolicyError(newPassword);
+    if (passwordError) return res.status(400).json({ error: `새 ${passwordError}` });
+    if (!(await checkCurrentPassword(res, user, currentPassword, '현재 비밀번호가 올바르지 않습니다.'))) return;
 
     const updated = await updateUser(user.id, {
       passwordHash: await bcrypt.hash(newPassword, 10),
@@ -360,9 +375,7 @@ export function createUsersRouter(io) {
     if (user.deletedAt) return res.status(400).json({ error: '이미 탈퇴한 계정입니다.' });
 
     const { password } = req.body ?? {};
-    if (!password || !(await bcrypt.compare(password, user.passwordHash))) {
-      return res.status(401).json({ error: '비밀번호가 올바르지 않습니다.' });
-    }
+    if (!(await checkCurrentPassword(res, user, password, '비밀번호가 올바르지 않습니다.'))) return;
 
     await updateUser(user.id, {
       deletedAt: new Date(),

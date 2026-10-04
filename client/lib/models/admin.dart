@@ -223,6 +223,7 @@ String auditActionLabel(String action) => switch (action) {
   'invite.revoke' => '초대 링크 폐기',
   'teamInvite.create' => '팀 초대 링크 생성',
   'teamInvite.revoke' => '팀 초대 링크 폐기',
+  'auth.lockout' => '로그인 시도 차단',
   _ => action,
 };
 
@@ -242,6 +243,7 @@ const auditActionFilters = [
   'user.serverAdmin',
   'invite.create',
   'teamInvite.create',
+  'auth.lockout',
 ];
 
 /// 계정 등급 코드 → 한국어 이름(관리자 콘솔 목록용).

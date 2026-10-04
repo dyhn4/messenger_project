@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/invite_link.dart';
+import '../services/invite_share.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/floating_dialog.dart';
@@ -79,7 +80,9 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
 
   Future<void> _copyAndNotify(InviteLink link) async {
     if (link.url == null) return;
-    await Clipboard.setData(ClipboardData(text: link.url!));
+    await Clipboard.setData(
+      ClipboardData(text: inviteShareText(link.url!, link.externalUrl)),
+    );
     _toast('링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.');
   }
 

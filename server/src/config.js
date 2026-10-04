@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseExternalAddress } from './externalAddress.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, '..');
@@ -43,6 +44,18 @@ export const PORT = process.env.PORT || 3000;
 
 // 새 기기 페어링용 평문 HTTP 부트스트랩 서버 포트(pairing.js). 기본값은 메인 포트+1.
 export const PAIRING_PORT = Number(process.env.PAIRING_PORT) || Number(PORT) + 1;
+
+// 사내망 밖(LTE/5G)에서 접속할 주소(DDNS 도메인 또는 공인 IP, 포트포워딩 필요). 안 정하면
+// null — 지금처럼 사내망에서만 쓴다. 형식·쓰임새는 externalAddress.js 참고. 형식이 잘못됐으면
+// 서버(서비스)가 통째로 안 뜨는 것보다는 외부 접속만 끈 채로 뜨고 콘솔에 크게 알린다.
+export const EXTERNAL_ADDRESS = (() => {
+  try {
+    return parseExternalAddress(process.env.EXTERNAL_ADDRESS, PORT);
+  } catch (e) {
+    console.error(`[config] ⚠ ${e.message} — 외부 접속 없이 사내망 전용으로 실행합니다.`);
+    return null;
+  }
+})();
 
 // 첨부파일 저장 위치. 지정 안 하면 서버 폴더 밑 uploads/를 그대로 쓴다. UNC 경로
 // (\\다른PC\공유폴더\uploads)나 매핑된 네트워크 드라이브(Z:\uploads)도 그대로 쓸 수 있다 —

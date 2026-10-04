@@ -11,7 +11,7 @@ import {
 } from './db/queries/teamInviteLinks.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
-import { PAIRING_PORT } from './config.js';
+import { EXTERNAL_ADDRESS, PAIRING_PORT } from './config.js';
 import { ACCOUNT_ROLES, canCreateTeamInviteLink, canManageTeam, roleLabel, ROLE_RANK } from './permissions.js';
 
 /** 팀 초대 링크도 설치→가입 초대 링크와 같은 기간만큼만 유효하다 — 고를 필요 없게 고정. */
@@ -40,6 +40,9 @@ function toTeamInviteLinkDto(link, { serverAddress }) {
     valid: isTeamInviteLinkValid(link),
     // 설치 초대 링크와 같은 평문 페어링 포트로 서빙 — 자체 서명 인증서 경고 없이 열린다.
     url: serverAddress ? `http://${serverAddress.host}:${PAIRING_PORT}/team-invite/${link.token}` : null,
+    // 사내망 밖(LTE/5G)에서 열 주소 — 외부 주소(EXTERNAL_ADDRESS)가 있을 때만. 공유기에서 페어링 포트도
+    // 같은 번호로 열어둬야 한다(밖에서는 안내 페이지·설치 파일만 열린다 — pairing.js).
+    externalUrl: EXTERNAL_ADDRESS ? `http://${EXTERNAL_ADDRESS.host}:${PAIRING_PORT}/team-invite/${link.token}` : null,
   };
 }
 

@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { AccessToken } from 'livekit-server-sdk';
-import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_PORT, LIVEKIT_URL } from './config.js';
+import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL } from './config.js';
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { LIVEKIT_PROXY_PREFIX } from './livekitProxy.js';
 import { SELF_ROOM_DENIAL } from './permissions.js';
 
 /**
@@ -52,16 +53,16 @@ export function callSummaryText(ended, names) {
 }
 
 /**
- * 클라이언트가 접속할 LiveKit 주소. 보통은 지금 이 요청이 들어온 바로 그 호스트의 LiveKit
- * 포트다 — 클라이언트는 이미 이 서버 주소로 접속해 있으므로(페어링으로 정해둔 주소) 그
- * 호스트를 그대로 재사용하면 별도 설정이 필요 없다. LiveKit을 다른 장비에 띄운 경우에만
- * LIVEKIT_URL로 덮어쓴다.
+ * 클라이언트가 접속할 LiveKit 주소. 지금 이 요청이 들어온 바로 그 주소(호스트:포트)의 /livekit —
+ * 메인 HTTPS 서버가 같은 PC의 LiveKit으로 넘겨준다(livekitProxy.js). 클라이언트가 사내 주소로
+ * 왔든 외부(LTE/5G) 주소로 왔든 그 주소를 그대로 쓰므로 별도 설정이 필요 없고, 공유기에는 메인
+ * 포트만 열면 된다. LiveKit을 다른 장비에 띄운 경우에만 LIVEKIT_URL로 덮어쓴다.
  */
 function livekitUrlFor(req) {
   if (LIVEKIT_URL) return LIVEKIT_URL;
-  const host = req.hostname;
+  const host = req.headers.host;
   if (!host) return null;
-  return `ws://${host}:${LIVEKIT_PORT}`;
+  return `wss://${host}${LIVEKIT_PROXY_PREFIX}`;
 }
 
 export function createCallsRouter() {

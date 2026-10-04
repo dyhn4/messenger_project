@@ -20,6 +20,9 @@ class InviteLink {
   /// 상대방에게 그대로 보내면 되는 안내 페이지 주소(평문 HTTP, 자체 서명 인증서 경고 없음).
   final String? url;
 
+  /// 사내망 밖(LTE/5G)에서 열 안내 페이지 주소 — 서버에 외부 주소가 설정돼 있을 때만 온다.
+  final String? externalUrl;
+
   const InviteLink({
     required this.id,
     required this.token,
@@ -32,6 +35,7 @@ class InviteLink {
     this.lastUsedAt,
     this.valid = true,
     this.url,
+    this.externalUrl,
   });
 
   factory InviteLink.fromJson(Map<String, dynamic> json) => InviteLink(
@@ -54,6 +58,7 @@ class InviteLink {
           ),
     valid: json['valid'] as bool? ?? true,
     url: json['url'] as String?,
+    externalUrl: json['externalUrl'] as String?,
   );
 
   /// "만료됨" / "취소됨" / "만료까지 3일" 처럼 상태를 한 줄로.

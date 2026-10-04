@@ -29,6 +29,8 @@ export const AUDIT = {
   topicDelete: 'topic.delete',
   // 그룹채팅 → 토픽 전환(rooms.js POST /rooms/:id/convert-to-topic) — 되돌릴 수 없는 일이라 남긴다.
   roomConvert: 'room.convert',
+  // 비밀번호·보안 질문 답을 계속 틀려 로그인/재설정이 막히기 시작함(authGuard.js) — 행위자는 그 IP.
+  authLockout: 'auth.lockout',
 };
 
 /**

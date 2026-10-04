@@ -18,9 +18,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest 진행률 표시를 끄면 훨씬 빠르다.
 
 # ── 버전 고정(나중에 올릴 때는 이 값들만 바꾸면 됨) ─────────────────────────
-$NodeVersion = '24.9.0'
+$NodeVersion = '24.21.0'
 $NodeZipUrl = "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip"
-$PgVersion = '17.7-1'
+$PgVersion = '17.11-1'
 $PgInstallerUrl = "https://get.enterprisedb.com/postgresql/postgresql-$PgVersion-windows-x64.exe"
 $NssmVersion = '2.24'
 $NssmZipUrl = "https://nssm.cc/release/nssm-$NssmVersion.zip"
@@ -36,9 +36,20 @@ $Stage = Join-Path $Installer 'stage'
 
 New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 
+# bin/에 받아둔 파일이 위에 고정한 버전과 같은지 — 같으면 다시 안 받는다. 버전 값을 올렸는데
+# 예전에 받아둔 파일이 남아 있으면 옛 버전이 그대로 설치 파일에 들어가므로, 받을 때마다
+# bin/<이름>.version에 버전을 적어두고 다르면 새로 받는다(이 기록이 없던 예전 캐시도 새로 받음).
+function Test-CachedVersion([string]$Name, [string]$Version, [string]$Path) {
+  $stamp = Join-Path $Bin "$Name.version"
+  return (Test-Path $Path) -and (Test-Path $stamp) -and ((Get-Content $stamp -Raw).Trim() -eq $Version)
+}
+function Set-CachedVersion([string]$Name, [string]$Version) {
+  Set-Content -Path (Join-Path $Bin "$Name.version") -Value $Version -Encoding ascii
+}
+
 # ── 1) Node.js 포터블 런타임 ────────────────────────────────────────────
 $nodeDestDir = Join-Path $Bin 'node'
-if (-not (Test-Path (Join-Path $nodeDestDir 'node.exe'))) {
+if (-not (Test-CachedVersion 'node' $NodeVersion (Join-Path $nodeDestDir 'node.exe'))) {
   Write-Host "1) Node.js v$NodeVersion 다운로드 중..."
   $nodeZip = Join-Path $Bin 'node.zip'
   Invoke-WebRequest -Uri $NodeZipUrl -OutFile $nodeZip
@@ -49,15 +60,17 @@ if (-not (Test-Path (Join-Path $nodeDestDir 'node.exe'))) {
   Move-Item (Join-Path $nodeExtractTmp "node-v$NodeVersion-win-x64") $nodeDestDir
   Remove-Item $nodeExtractTmp -Recurse -Force
   Remove-Item $nodeZip -Force
+  Set-CachedVersion 'node' $NodeVersion
 } else {
   Write-Host '1) Node.js 이미 준비됨 — 건너뜀'
 }
 
 # ── 2) PostgreSQL 설치 프로그램 ─────────────────────────────────────────
 $pgInstallerExe = Join-Path $Bin 'pgsql-installer.exe'
-if (-not (Test-Path $pgInstallerExe)) {
+if (-not (Test-CachedVersion 'pgsql' $PgVersion $pgInstallerExe)) {
   Write-Host "2) PostgreSQL $PgVersion 설치 프로그램 다운로드 중(용량이 커서 시간이 걸릴 수 있습니다)..."
   Invoke-WebRequest -Uri $PgInstallerUrl -OutFile $pgInstallerExe
+  Set-CachedVersion 'pgsql' $PgVersion
 } else {
   Write-Host '2) PostgreSQL 설치 프로그램 이미 준비됨 — 건너뜀'
 }
@@ -80,13 +93,14 @@ if (-not (Test-Path $nssmExe)) {
 
 # ── 3.5) LiveKit 서버(화상회의 SFU) ─────────────────────────────────────
 $liveKitDir = Join-Path $Bin 'livekit'
-if (-not (Test-Path (Join-Path $liveKitDir 'livekit-server.exe'))) {
+if (-not (Test-CachedVersion 'livekit' $LiveKitVersion (Join-Path $liveKitDir 'livekit-server.exe'))) {
   Write-Host "3.5) LiveKit $LiveKitVersion 다운로드 중..."
   New-Item -ItemType Directory -Force -Path $liveKitDir | Out-Null
   $lkZip = Join-Path $Bin 'livekit.zip'
   Invoke-WebRequest -Uri $LiveKitZipUrl -OutFile $lkZip
   Expand-Archive -Path $lkZip -DestinationPath $liveKitDir -Force
   Remove-Item $lkZip -Force
+  Set-CachedVersion 'livekit' $LiveKitVersion
 } else {
   Write-Host '3.5) LiveKit 이미 준비됨 — 건너뜀'
 }

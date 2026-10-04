@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -50,11 +51,20 @@ class PinnedTls {
     HttpOverrides.global = _PinnedHttpOverrides(await _loadContext());
   }
 
-  /// 서버 콘솔에 "pair"를 입력하면 나오는 4자리 코드로, 인증서를 빌드에 내장하지 않고도
-  /// 평문 HTTP 부트스트랩(server/src/pairing.js)에서 받아와 [saveDynamicCert]로 고정(pin)한다.
-  /// [address]는 메인 HTTPS 주소(예: https://192.168.0.62:3000) — 페어링 서버는 그 포트+1에서 대기한다.
+  /// 서버 콘솔에 "pair"를 입력하면 나오는 4자리 코드(또는 초대 토큰)로, 인증서를 빌드에 내장하지
+  /// 않고도 서버에서 받아와 [saveDynamicCert]로 고정(pin)한다. [address]는 메인 HTTPS 주소(예:
+  /// https://192.168.0.62:3000).
+  ///
+  /// 먼저 메인 HTTPS 포트의 /pair로 받는다 — 공유기에 이 포트만 열려 있는 사내망 밖(LTE/5G)에서도
+  /// 되게 하려는 것이다([_pairOverHttps]). 그 경로가 없는 예전 서버이거나 연결이 안 되면, 사내망의
+  /// 평문 페어링 서버(메인 포트+1, server/src/pairing.js)로 받는다.
   static Future<void> pairAndSaveCert(String address, String code) async {
     final uri = Uri.parse(address.trim());
+    final pem = await _pairOverHttps(uri, code);
+    if (pem != null) {
+      await saveDynamicCert(pem);
+      return;
+    }
     final pairingPort = (uri.hasPort ? uri.port : 443) + 1;
     final pairingUri = Uri(
       scheme: 'http',
@@ -68,6 +78,64 @@ class PinnedTls {
       throw body['error'] as String? ?? '코드가 올바르지 않거나 만료되었습니다.';
     }
     await saveDynamicCert(body['cert'] as String);
+  }
+
+  /// 메인 HTTPS 포트에서 인증서를 받는다. 아직 이 서버 인증서를 모르는 상태(그래서 페어링하는
+  /// 것)라 인증서 검증 없이 연결하되, 응답에 실린 인증서가 **실제 TLS 연결에 쓰인 인증서와
+  /// 같은지** 대조해서 다르면 거부한다 — 평문 HTTP로 받던 기존 방식보다 중간에서 바꿔치기하기
+  /// 어렵다. 코드가 틀렸으면 서버의 에러 문구로 예외, 이 경로가 없는 예전 서버이거나 연결이
+  /// 안 되면 null(평문 페어링 서버로 넘어간다).
+  static Future<String?> _pairOverHttps(Uri address, String code) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 8)
+      ..badCertificateCallback = (_, _, _) => true;
+    try {
+      final request = await client.getUrl(
+        address.replace(path: '/pair/$code', query: null),
+      );
+      final response = await request.close().timeout(
+        const Duration(seconds: 10),
+      );
+      final text = await response.transform(utf8.decoder).join();
+      final Map<String, dynamic> body;
+      try {
+        body = jsonDecode(text) as Map<String, dynamic>;
+      } on FormatException {
+        return null; // 예전 서버(이 경로 없음 — Express 기본 404 페이지).
+      }
+      if (response.statusCode != 200) {
+        throw body['error'] as String? ?? '코드가 올바르지 않거나 만료되었습니다.';
+      }
+      final pem = body['cert'] as String;
+      final presented = response.certificate?.der;
+      if (presented == null || !_sameCertificate(pem, presented)) {
+        throw '서버 인증서가 일치하지 않습니다. 네트워크를 바꿔 다시 시도하거나 관리자에게 문의하세요.';
+      }
+      return pem;
+    } on SocketException {
+      return null;
+    } on TimeoutException {
+      return null;
+    } on HandshakeException {
+      return null;
+    } on HttpException {
+      return null;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static bool _sameCertificate(String pem, List<int> der) {
+    final base64Body = pem
+        .split(RegExp(r'\r?\n'))
+        .where((l) => l.isNotEmpty && !l.startsWith('-----'))
+        .join();
+    final pemDer = base64Decode(base64Body);
+    if (pemDer.length != der.length) return false;
+    for (var i = 0; i < der.length; i++) {
+      if (pemDer[i] != der[i]) return false;
+    }
+    return true;
   }
 
   /// REST 호출(ApiClient)에 쓸, 이 인증서만 신뢰하는 http.Client. 앱 전체에서 하나만

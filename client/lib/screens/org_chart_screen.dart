@@ -573,7 +573,7 @@ class _OrgMemberTableRow extends StatelessWidget {
                   ),
                   if (isOwner)
                     RoleBadge(
-                      label: '소유자',
+                      label: '팀 소유자',
                       bg: ownerColors.bg,
                       fg: ownerColors.fg,
                     ),

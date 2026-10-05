@@ -490,7 +490,10 @@ class CallMicRequestBanner extends StatelessWidget {
 
 class CallToast extends StatelessWidget {
   final String message;
-  const CallToast({super.key, required this.message});
+
+  /// 손들기 알림이면 노란 손, 그 밖의 알림(들어옴·나감·진행자가 마이크를 끔 등)은 정보 아이콘.
+  final bool hand;
+  const CallToast({super.key, required this.message, this.hand = true});
 
   @override
   Widget build(BuildContext context) {
@@ -504,7 +507,13 @@ class CallToast extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.front_hand, size: 16, color: callHandColor),
+          hand
+              ? const Icon(Icons.front_hand, size: 16, color: callHandColor)
+              : const Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: Colors.white70,
+                ),
           const SizedBox(width: 8),
           Flexible(
             child: Text(

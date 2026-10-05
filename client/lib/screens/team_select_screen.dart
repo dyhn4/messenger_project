@@ -176,7 +176,7 @@ class _TeamRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subtitle = [
-      if (team.isOwner) '소유자',
+      if (team.isOwner) '팀 소유자',
       if (team.memberCount != null) '${team.memberCount}명',
     ].join(' · ');
 

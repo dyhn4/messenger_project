@@ -686,7 +686,7 @@ void main() {
 
   group('파일 업로드', () {
     testWidgets(
-      '폴더 경로 — 다운로드 경로(파일 대신 폴더)와 그 아래 "파일 업로드 (경로 선택)" 단추, 지정하면 경로 줄(✕로 지움)과 함께 만든다',
+      '폴더 경로 — 다운로드 경로(파일 대신 폴더)와 그 아래 "업로드 경로 지정" 단추, 지정하면 경로 줄(✕로 지움)과 함께 만든다',
       (tester) async {
         final session = _session();
         final api = FakeTodoApi(me: 'me');
@@ -702,7 +702,7 @@ void main() {
         final download = _key('todo-attach');
         final upload = _key('todo-upload-path-button');
         expect(
-          find.descendant(of: upload, matching: find.text('파일 업로드 (경로 선택)')),
+          find.descendant(of: upload, matching: find.text('업로드 경로 지정')),
           findsOneWidget,
         );
         expect(
@@ -781,7 +781,7 @@ void main() {
     });
 
     testWidgets(
-      '가로 전체 옅은 단추 "+ 파일 다운로드 (경로 선택)", 그 오른쪽 아래 "N / 30"(N 굵게), 붙인 파일은 그 아래 한 줄씩 — x로 빼면 수가 준다',
+      '가로 전체 옅은 단추 "+ 파일 첨부(또는 폴더 경로 지정)", 그 오른쪽 아래 "N / 30"(N 굵게), 붙인 파일은 그 아래 한 줄씩 — x로 빼면 수가 준다',
       (tester) async {
         final session = _session();
         final api = FakeTodoApi(me: 'me');
@@ -800,7 +800,7 @@ void main() {
         );
         final attach = _key('todo-attach');
         expect(
-          find.descendant(of: attach, matching: find.text('파일 다운로드 (경로 선택)')),
+          find.descendant(of: attach, matching: find.text('파일 첨부(또는 폴더 경로 지정)')),
           findsOneWidget,
         );
         expect(

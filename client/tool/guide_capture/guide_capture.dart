@@ -288,6 +288,7 @@ Future<void> pumpGuideWidget(
   bool settle = true,
 }) async {
   _callouts.value = null;
+  _textPatches.value = const [];
   await tester.pumpWidget(
     RepaintBoundary(
       key: _frameKey,
@@ -295,6 +296,16 @@ Future<void> pumpGuideWidget(
         textDirection: TextDirection.ltr,
         children: [
           Positioned.fill(child: app),
+          // patchUnnamedFontText가 덧그린 글자(번호 표시보다 아래).
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ValueListenableBuilder<List<Widget>>(
+                valueListenable: _textPatches,
+                builder: (context, patches, _) =>
+                    Stack(textDirection: TextDirection.ltr, children: patches),
+              ),
+            ),
+          ),
           Positioned.fill(
             child: IgnorePointer(
               child: ValueListenableBuilder<_CalloutScene?>(
@@ -310,6 +321,107 @@ Future<void> pumpGuideWidget(
     ),
   );
   if (settle) await settleGuide(tester);
+}
+
+// ───────────────────────────── 글꼴 이름 없는 글자 덧그리기 ─────────────────────────────
+
+final _textPatches = ValueNotifier<List<Widget>>(const []);
+
+/// 글꼴 이름도 대체 글꼴도 없이 그려진 글자(예: 단추 글자 모양을 `TextStyle(fontSize: 13)`처럼
+/// 크기만 준 스타일로 통째로 바꾼 MenuAnchor 메뉴 항목 — CompactMenu.textStyle)를 같은 자리에
+/// 'Segoe UI' + [guideFontFallback]으로 덧그린다. 테스트 엔진은 이런 글자를 시험용 글꼴로 그려서
+/// 한글이 네모(□)로 찍히지만, 실제 Windows는 운영체제가 Segoe UI·맑은 고딕으로 그려 준다 —
+/// 그 모습을 흉내 낸다(앱 화면은 그대로 두고 그림 위에만 덮는다).
+///
+/// [within] 안(없으면 화면 전체)의 해당 글자를 찾아 덮고, 덮은 개수를 돌려준다. 바탕은 가장 가까운
+/// 불투명한 Material/ColoredBox 색(없으면 흰색) — [background]로 정할 수도 있다. 덮은 글자는 화면이
+/// 바뀌어도 그 자리에 남으므로, 메뉴를 닫은 뒤 다른 그림을 찍기 전에 [clearTextPatches]를 부른다
+/// (pumpGuideApp/pumpGuideWidget으로 새로 올리면 저절로 지워진다).
+int patchUnnamedFontText(
+  WidgetTester tester, {
+  Finder? within,
+  Color? background,
+}) {
+  final rich = find.byType(RichText);
+  final finder = within == null
+      ? rich
+      : find.descendant(of: within, matching: rich);
+  final patches = <Widget>[];
+  for (final element in finder.evaluate()) {
+    final widget = element.widget as RichText;
+    final span = widget.text;
+    final style = span.style;
+    if (style == null ||
+        style.fontFamily != null ||
+        (style.fontFamilyFallback?.isNotEmpty ?? false)) {
+      continue;
+    }
+    if (span is TextSpan && (span.children?.isNotEmpty ?? false)) continue;
+    final text = span.toPlainText();
+    if (text.trim().isEmpty) continue;
+    final box = element.renderObject;
+    if (box is! RenderBox || !box.hasSize || !box.attached) continue;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    final align = switch (widget.textAlign) {
+      TextAlign.center => Alignment.center,
+      TextAlign.right || TextAlign.end => Alignment.centerRight,
+      _ => Alignment.centerLeft,
+    };
+    patches.add(
+      Positioned.fromRect(
+        rect: Rect.fromLTRB(
+          rect.left - 1,
+          rect.top - 4,
+          rect.right + 2,
+          rect.bottom + 4,
+        ),
+        child: ColoredBox(
+          color: background ?? _opaqueBackgroundOf(element),
+          child: OverflowBox(
+            alignment: align,
+            maxWidth: double.infinity,
+            maxHeight: double.infinity,
+            child: Text(
+              text,
+              maxLines: 1,
+              softWrap: false,
+              textDirection: TextDirection.ltr,
+              style: style.copyWith(
+                fontFamily: 'Segoe UI',
+                fontFamilyFallback: guideFontFallback,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  _textPatches.value = [..._textPatches.value, ...patches];
+  return patches.length;
+}
+
+/// [patchUnnamedFontText]로 덧그린 글자를 모두 지운다.
+void clearTextPatches() => _textPatches.value = const [];
+
+Color _opaqueBackgroundOf(Element element) {
+  Color? found;
+  element.visitAncestorElements((a) {
+    final w = a.widget;
+    final c = switch (w) {
+      Material(type: final t, color: final c)
+          when t != MaterialType.transparency =>
+        c,
+      ColoredBox(color: final c) => c,
+      DecoratedBox(decoration: BoxDecoration(color: final c)) => c,
+      _ => null,
+    };
+    if (c != null && c.a > 0.99) {
+      found = c;
+      return false;
+    }
+    return true;
+  });
+  return found ?? Colors.white;
 }
 
 /// 창 크기만 바꾼다(배율은 그대로) — 넓은 창에서 프로젝트를 열어 둔 뒤 좁은 창으로 줄여서,

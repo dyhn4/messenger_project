@@ -54,8 +54,9 @@ class _CallScreenState extends State<CallScreen> {
   /// 한 번 고르면 통화 중 그대로 유지한다.
   CallViewMode? _chosenMode;
 
-  /// 손들기 토스트("○○님이 손을 들었습니다").
+  /// 손들기 토스트("○○님이 손을 들었습니다")와 그 밖의 알림(들어옴·나감 등) — [_toastIsHand]로 아이콘을 고른다.
   String? _toast;
+  bool _toastIsHand = true;
   Timer? _toastTimer;
   StreamSubscription<String>? _handSub;
 
@@ -74,7 +75,7 @@ class _CallScreenState extends State<CallScreen> {
   void initState() {
     super.initState();
     _handSub = widget.session.callController.handRaisedNames.listen(
-      (name) => _showToast('$name님이 손을 들었습니다'),
+      (name) => _showToast('$name님이 손을 들었습니다', hand: true),
     );
     _noticeSub = widget.session.callController.notices.listen(_showToast);
     _chat = widget.session.controllerFor(widget.room);
@@ -91,9 +92,12 @@ class _CallScreenState extends State<CallScreen> {
     super.dispose();
   }
 
-  void _showToast(String message) {
+  void _showToast(String message, {bool hand = false}) {
     if (!mounted) return;
-    setState(() => _toast = message);
+    setState(() {
+      _toast = message;
+      _toastIsHand = hand;
+    });
     _toastTimer?.cancel();
     _toastTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _toast = null);
@@ -366,7 +370,7 @@ class _CallScreenState extends State<CallScreen> {
                               bottom: 12,
                               child: IgnorePointer(
                                 child: Center(
-                                  child: CallToast(message: _toast!),
+                                  child: CallToast(message: _toast!, hand: _toastIsHand),
                                 ),
                               ),
                             ),

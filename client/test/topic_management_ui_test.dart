@@ -737,11 +737,12 @@ void main() {
   });
 
   group('참여 멤버', () {
-    testWidgets('본인 > 토픽 관리자 > 소유자 > 관리자 > 정회원 > 준회원 순서와 배지, 검색, Esc로 닫기', (
+    testWidgets('본인 > 토픽 소유자 > 토픽 관리자 > 팀 소유자 > 관리자 > 정회원 > 준회원 순서와 배지, 검색, Esc로 닫기', (
       tester,
     ) async {
       final server = _FakeServer();
-      final room = _room();
+      // u2가 이 토픽을 만든 사람(토픽 소유자)이면서 토픽 관리자다.
+      final room = _room(extra: const {'createdBy': 'u2'});
       final session = _session(server, rooms: [room]);
       await _open(
         tester,
@@ -759,15 +760,20 @@ void main() {
         matching: find.text(label),
       );
       expect(badge('me', '토픽 관리자'), findsOneWidget);
+      expect(badge('me', '토픽 소유자'), findsNothing);
       expect(find.text('김하나 (나)'), findsOneWidget);
+      // 배지마다 다른 사실이라 여러 개에 해당하면 다 붙는다.
+      expect(badge('u2', '토픽 소유자'), findsOneWidget);
       expect(badge('u2', '토픽 관리자'), findsOneWidget);
-      expect(badge('u3', '토픽 소유자'), findsOneWidget);
-      // u3는 팀 소유자이면서 계정 관리자이기도 하다 — "토픽 관리자" 배지가 두 번은 아니고 한 번만 뜬다.
-      expect(badge('u3', '토픽 관리자'), findsOneWidget);
-      expect(badge('u4', '토픽 관리자'), findsOneWidget);
+      // u3는 팀 소유자이면서 계정 관리자 — 지정된 토픽 관리자가 아니므로 '토픽 관리자'는 없다.
+      expect(badge('u3', '팀 소유자'), findsOneWidget);
+      expect(badge('u3', '관리자'), findsOneWidget);
+      expect(badge('u3', '토픽 관리자'), findsNothing);
+      expect(badge('u4', '관리자'), findsOneWidget);
+      expect(badge('u4', '토픽 관리자'), findsNothing);
       expect(badge('u5', '사원'), findsOneWidget); // 직책
       expect(badge('u7', '준회원'), findsOneWidget);
-      for (final label in ['토픽 관리자', '토픽 소유자', '준회원']) {
+      for (final label in ['토픽 관리자', '토픽 소유자', '팀 소유자', '관리자', '준회원']) {
         expect(badge('u6', label), findsNothing, reason: label);
       }
 

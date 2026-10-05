@@ -960,6 +960,9 @@ List<Map<String, dynamic>> launchMessages() {
     // 길게 누를 lm3 뒤에 메시지가 더 있어야 lm3가 아래에서 올라오는 메뉴에 가려지지 않는다.
     m('lm4', seoYeon, 36, '좋아요! 쿠폰 디자인은 제가 맡을게요.'),
     m('lm5', junHo, 42, '쿠폰 기간은 출시일부터 2주 정도면 어떨까요?'),
+    // 메뉴 항목이 늘어(즐겨찾기 · 할 일로 등록 …) 메뉴가 높아져서 몇 개 더 둔다.
+    m('lm6', doHyun, 45, '좋습니다 👍'),
+    m('lm7', yuNa, 47, '사내 공지도 같이 준비할게요.'),
   ];
 }
 
@@ -1244,15 +1247,33 @@ void main() {
     final session = demoSession();
     await pumpGuideApp(tester, DesktopHomeScreen(session: session));
     await settleGuide(tester);
-    final button = find.byTooltip('프로젝트');
+    // 프로젝트는 오른쪽 위 "메뉴"(격자) › 툴 묶음의 "프로젝트" 타일에 있다(menu_entries.dart).
+    final button = find.byTooltip('메뉴');
     final r = tester.getRect(button);
+    await tester.tap(button);
+    await settleGuide(tester);
+    final tile = find.byKey(const ValueKey('menu-project'));
+    final menu = tester.getRect(
+      find.ancestor(of: tile, matching: find.byType(PopupMenuItem<void>)),
+    );
     await shot(
       tester,
       'project-open',
       callouts: [
         GuideCallout.rect(r.deflate(2), number: 1, badge: CalloutBadge.left),
+        GuideCallout.box(
+          tile,
+          number: 2,
+          badge: CalloutBadge.right,
+          padding: 2,
+        ),
       ],
-      crop: Rect.fromLTRB(r.left - 150, 0, 1280, r.bottom + 16),
+      crop: Rect.fromLTRB(
+        math.min(menu.left, r.left) - 50,
+        0,
+        1280,
+        menu.bottom + 16,
+      ),
     );
   });
 

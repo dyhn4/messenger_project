@@ -38,17 +38,18 @@ Future<void> showTopicMembersDialog(
   }
 }
 
-/// 참여 멤버 정렬 무리 — 본인 > 토픽 관리자 > 소유자(팀) > 관리자(계정) > 정회원 > 준회원.
+/// 참여 멤버 정렬 무리 — 본인 > 토픽 소유자(만든 사람) > 토픽 관리자 > 팀 소유자 > 관리자(계정) > 정회원 > 준회원.
 int _memberRank(Room room, AppUser m, String? myId) {
   if (m.id == myId) return 0;
-  if (room.isTopicAdmin(m.id)) return 1;
-  if (m.isOwner) return 2;
-  if (m.role == 'admin') return 3;
-  if (m.role == 'guest') return 5;
-  return 4;
+  if (room.createdBy == m.id) return 1;
+  if (room.isTopicAdmin(m.id)) return 2;
+  if (m.isOwner) return 3;
+  if (m.role == 'admin') return 4;
+  if (m.role == 'guest') return 6;
+  return 5;
 }
 
-/// 토픽 멤버를 참여 멤버 창의 순서(본인 > 토픽 관리자 > 소유자 > 관리자 > 정회원 > 준회원, 같은
+/// 토픽 멤버를 참여 멤버 창의 순서(본인 > 토픽 소유자 > 토픽 관리자 > 팀 소유자 > 관리자 > 정회원 > 준회원, 같은
 /// 무리 안에서는 이름순)로 — 토픽 정보 변경하기의 멤버 목록도 같은 순서를 쓴다.
 List<AppUser> sortTopicMembers(Room room, String? myId) {
   return room.members.toList()..sort((a, b) {
@@ -70,10 +71,12 @@ bool topicMemberMatches(AppUser m, String query) {
       (m.position?.toLowerCase().contains(q) ?? false);
 }
 
-/// 멤버 이름 옆 배지 — '토픽 관리자'(강조색, 토픽을 관리할 수 있는 멤버), '토픽 소유자'(팀 소유자), '토픽
-/// 관리자'(계정 관리자), '준회원'. 정회원은 배지가 없다. [withTopicAdmin]이 false면 토픽 관리(권한) 배지를
-/// 뺀다(토픽 관리자 지정 목록처럼 체크로 이미 보이는 곳). 계정 관리자가 동시에 토픽 관리자로도 지정돼 있으면
-/// 같은 글자("토픽 관리자")가 두 번 뜨지 않게 하나만 남긴다.
+/// 멤버 이름 옆 배지 — 배지마다 서로 다른 사실 하나만 나타내고, 여러 개에 해당하면 다 붙인다:
+/// '토픽 소유자'(이 토픽을 만든 사람 — room.createdBy), '토픽 관리자'(이 토픽의 관리자로 지정된 사람),
+/// '팀 소유자'(그 팀의 소유자), '관리자'(계정 등급 관리자), '준회원'. 정회원은 배지가 없다.
+/// 팀 소유자·관리자는 지정되지 않아도 그 팀의 모든 토픽을 관리할 수 있지만(room_permissions.dart의 canManage),
+/// '토픽 관리자'는 실제로 지정된 사람에게만 붙여서 "토픽 관리자 지정" 목록의 체크와 숫자가 맞게 한다.
+/// [withTopicAdmin]이 false면 '토픽 관리자' 배지를 뺀다(토픽 관리자 지정 목록처럼 체크로 이미 보이는 곳).
 List<Widget> topicMemberBadges(
   BuildContext context,
   Room room,
@@ -84,17 +87,21 @@ List<Widget> topicMemberBadges(
   final owner = roleBadgeColors(context, 'owner');
   final admin = roleBadgeColors(context, 'admin');
   final guest = roleBadgeColors(context, 'guest');
-  final isTopicAdmin = withTopicAdmin && room.isTopicAdmin(m.id);
   return [
-    if (isTopicAdmin)
+    if (room.createdBy == m.id)
+      RoleBadge(
+        label: '토픽 소유자',
+        bg: scheme.tertiary.withValues(alpha: 0.16),
+        fg: scheme.tertiary,
+      ),
+    if (withTopicAdmin && room.isTopicAdmin(m.id))
       RoleBadge(
         label: '토픽 관리자',
         bg: scheme.primary.withValues(alpha: 0.16),
         fg: scheme.primary,
       ),
-    if (m.isOwner) RoleBadge(label: '토픽 소유자', bg: owner.bg, fg: owner.fg),
-    if (m.role == 'admin' && !isTopicAdmin)
-      RoleBadge(label: '토픽 관리자', bg: admin.bg, fg: admin.fg),
+    if (m.isOwner) RoleBadge(label: '팀 소유자', bg: owner.bg, fg: owner.fg),
+    if (m.role == 'admin') RoleBadge(label: '관리자', bg: admin.bg, fg: admin.fg),
     if (m.role == 'guest') RoleBadge(label: '준회원', bg: guest.bg, fg: guest.fg),
   ];
 }

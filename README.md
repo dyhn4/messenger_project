@@ -58,6 +58,13 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 회원가입 시 보안 질문(프리셋 5종 중 선택 또는 직접 작성)+답변 **필수** 등록
 - 아이디 찾기(이메일로 조회) → 그 자리에서 바로 비밀번호 찾기로 이어가기
 - 비밀번호 찾기: 아이디+이메일 확인 → 보안 질문 답변 확인(계정에 질문이 없으면 생략) → 새 비밀번호 설정, 단계별 플로팅 다이얼로그
+  (보안 질문이 없는 예전 계정은 사내망에서만 재설정 가능)
+- 새 비밀번호는 **8~20자**(가입·비밀번호 찾기·비밀번호 변경 공통 — `server/src/passwordPolicy.js`, 앱 `password_policy.dart`).
+  이미 쓰던 짧은 비밀번호로 로그인하는 건 그대로 됩니다
+- **무차별 대입 방어** — 비밀번호·보안 질문 답을 계속 틀리면 잠시 로그인/재설정이 막히고(`server/src/authGuard.js`
+  — 예: 같은 IP·아이디로 비밀번호 5회 오류 시 15분), 막히기 시작하면 관리자 콘솔 감사 로그에 "로그인 시도 차단"이 남습니다.
+  사내 IP에서는 계정 단위 잠금을 걸지 않아 밖의 공격자가 직원 계정을 잠그지 못합니다
+- **사내망 밖(LTE/5G)에서는 초대 링크로만 가입** — 사내망 안에서는 누구나 가입(준회원으로 시작)
 - 프로필: 이름/아바타(초기값·이모지 캐릭터·사진 업로드) 변경, 이메일 변경(현재 비밀번호 재확인 필요), 비밀번호 변경
 - 회원 탈퇴(비밀번호 확인) — 로그인 차단 + 이름/이메일/아바타 익명화, 과거 메시지 발신자 표시도 "탈퇴한 사용자"로 갱신, 1년 뒤 메시지 자동 파기(첨부파일 제외)
 - 아이디 중복 확인, "아이디 기억하기"/"로그인 상태 유지"
@@ -135,6 +142,18 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 감사 로그: 관리자 권한으로 한 일(메시지 삭제, 등급 변경, 계정 정지 등)을 전부 기록
 - 운영 현황: 회원·팀·방·메시지 수, 오늘 활동량, 업로드 용량
 
+**화상회의** (LiveKit SFU — 자세한 구조는 [화상회의(LiveKit)](#화상회의livekit))
+- 1:1·그룹·토픽 대화방 위쪽 캠코더 버튼으로 시작/참여(진행 중이면 초록색 + 인원 배지). 비밀 대화에서는 없음
+- 걸려온 통화는 **화상회의 요청** 창(참여/거절) — 앱이 꺼진 안드로이드는 전화처럼 전체화면 알림. **거절하면 통화 중인 사람들에게
+  "○○님이 화상회의를 거절했습니다" 알림**, 이미 응답한(참여·거절·나간) 통화는 다시 울리지 않음
+- 통화 화면: 갤러리/스피커 보기, 마이크·카메라·화면 공유·참가자·채팅·손들기·화이트보드·보기 전환·나가기. 폰처럼 좁은
+  화면은 주요 단추(마이크·카메라·참가자·채팅) + **⋯ 더보기** 메뉴(화면 공유·손들기·화이트보드·보기 전환)로 정리
+- 진행자(시작한 사람)는 참가자 패널에서 다른 사람 마이크를 끄거나 켜 달라고 요청할 수 있음
+- 통화 중 **입장·퇴장 알림**("○○님이 들어왔습니다/나갔습니다")
+- 대화방에는 통화 한 통마다 **화상회의 카드** 한 장 — 진행 중(경과 시간 + [참여]), 종료(길이), 부재중. 누르면
+  시작·참여·거절·나감을 시간순으로 펼쳐 봅니다(`messages.call_card`, `server/src/callCards.js`)
+- 사내망 밖(LTE/5G)에서도 됨(외부 접속을 설정한 서버 — [환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기")
+
 **알림**
 - FCM 푸시(Android 전용 — Windows는 미지원, 코드에서 `Platform.isAndroid`로 분기): 소켓이 붙어 있지 않은(=완전히 종료된) 기기에만 발송, data-only 페이로드를 클라이언트가 직접 렌더링
 - 안드로이드 "대화" 스타일 알림(발신자 아바타 아이콘 포함), 뮤트한 방은 발송 안 함
@@ -151,6 +170,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 **서버 연결 / 배포**
 - 자체 서명 TLS 인증서 + 클라이언트 인증서 핀닝(공인 CA 미사용)
 - 페어링 코드(4자리, 5분 유효, 1회용)로 앱 재빌드 없이 새 인증서 발급/서버 이전
+- **사내망 밖(LTE/5G) 접속** — 서버에 외부 주소(DDNS·공인 IP)를 설정하면 앱이 사내 주소 ↔ 외부 주소를 자동 전환하고,
+  밖에서도 재페어링·화상회의가 됩니다([환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기")
 - **초대 링크**(설치→가입, 서버 운영자·계정 관리자·팀 소유자가 발급) — [초대 링크](#초대-링크-설치가입) 참고
 - **팀 초대 링크**(설치+가입+팀 자동 합류+등급 자동 부여, 서버 설정이 정한 등급 이상만 발급) —
   [팀 초대 링크](#팀-초대-링크자동-합류등급-부여) 참고
@@ -331,8 +352,10 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 에서 만듭니다 — 관리자 콘솔과 달리 이 메뉴는 서버 운영자가 아닌 팀 소유자에게도 보입니다.
 
 **만드는 값**: 메모(선택, 예: "9월 신입")뿐입니다 — 유효기간은 고르지 않고 항상 **발급 후
-7일**로 고정입니다(`server/src/invites.js`의 `INVITE_EXPIRY_DAYS`). 생성하면 링크가 자동으로
-클립보드에 복사되어 카카오톡·이메일 등 원하는 곳에 바로 붙여넣어 보낼 수 있습니다. 페어링
+7일**로 고정입니다(`server/src/invites.js`의 `INVITE_EXPIRY_DAYS`). **초대 링크 만들기**를 누르면 링크가 자동으로
+클립보드에 복사되어(알약 알림) 카카오톡·이메일 등 원하는 곳에 바로 붙여넣어 보낼 수 있습니다. 서버에 외부 주소
+(`EXTERNAL_ADDRESS`)가 있으면 복사 글에 "사내 와이파이에서: …" / "사내 와이파이 밖(LTE/5G)에서: …" 두 주소와
+"공용 와이파이 말고 LTE/5G나 집 와이파이에서 열라"는 주의가 함께 들어갑니다(`client/lib/services/invite_share.dart`). 페어링
 코드(4자리, 5분, 1회용)와 달리 이 링크의 코드는 사람이 직접 입력할 일이 거의 없어(복사 +
 붙여넣기, 또는 아래 딥링크 자동입력) 훨씬 길고(96비트 무작위) 오래 살아있으며, **1회용이
 아닙니다** — 유효기간 안에서는 여러 기기(예: 이번 달 입사한 신입 여러 명)가 같은 링크를 나눠
@@ -970,8 +993,9 @@ npm run dev         # 개발용 — 파일 변경 시 자동 재시작(node --wa
 ```
 
 - PC 방화벽이 처음 실행 시 "네트워크 접근 허용" 팝업을 띄우면 허용해야 다른 기기에서 접속됩니다.
-- 클라이언트와 서버가 **같은 LAN(와이파이/유선망)**에 있어야 합니다. 외부망(LTE 등)에서 쓰려면
-  공유기 포트포워딩 + 고정 IP(또는 DDNS)가 추가로 필요합니다.
+- 기본은 클라이언트와 서버가 **같은 LAN(와이파이/유선망)**에 있어야 합니다. 외부망(LTE 등)에서 쓰려면
+  공유기 포트포워딩 + DDNS(또는 고정 공인 IP)를 하고 `.env`의 `EXTERNAL_ADDRESS`를 설정합니다 —
+  [환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기" 참고.
 - 첨부파일 저장 위치/용량 제한은 [환경 변수 설정](#환경-변수-설정)과 아래 [보안 및 암호화](#보안-및-암호화)를 참고하세요. 파일 업로드 용량 제한은 **1GB**입니다(`server/src/upload.js`의 `limits.fileSize`).
 - 새 기기를 페어링하려면(인증서 발급) 서버 콘솔에 `pair`를 입력하고 Enter — 4자리 코드(5분간
   유효, 1회용)가 나오면 클라이언트의 "서버 주소 변경" 화면에 같이 입력합니다.
@@ -1389,6 +1413,11 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 서버→클라이언트 | `todo:changed` | 할 일이 만들어짐·수정됨·삭제됨 `{ teamId, roomId, todoId, kind: created｜updated｜deleted, actorId, title, addedAssigneeIds }` — 그 방 멤버 모두의 `user:<id>`에게. 담당자가 방을 나가거나 내보내지거나 다시 들어와 **전체 진척률이 바뀐 할 일**도 `kind: updated`(`actorId`는 나간·들어온 사람이나 내보내기·초대한 사람, `addedAssigneeIds`는 빈 목록)로 지금 그 방 멤버에게 보냅니다. 받으면 열려 있는 할 일 패널·상세가 조용히 다시 불러오고, `addedAssigneeIds`에 내가 있으면(내가 한 일 제외) `할 일이 지정되었습니다` 토스트. **즐겨찾기** `{ teamId, roomId, todoId, kind: favorite, actorId, favorite }`는 사람마다 따로라 바꾼 사람의 `user:<id>`에만(끄기는 실제로 지운 행이 있을 때만) |
 | 서버→클라이언트 | `todo:reminder` | 알림 시각이 됐다 `{ teamId, roomId, todoId, title, dueDate, remindAt }` — **아직 다 하지 않은(진척률 100 미만) 담당자들**(그 방에 있는 사람, 담당자가 없으면 만든 사람)의 `user:<id>`에게(전체 진척률이 100이면 안 보냄). 앱이 켜져 있으면 `할 일 알림: 제목` 토스트, 꺼져 있는(소켓이 없는) 사람에게는 FCM 푸시 |
 | 서버→클라이언트 | `album:changed` | 앨범이 만들어짐·수정됨·삭제됨·항목이 늘거나 줆 `{ teamId, roomId, albumId, kind: created｜updated｜deleted｜items }` — 그 방 멤버에게(방 시스템 메시지는 남기지 않음) |
+| 클라이언트→서버 | `call:join` / `call:leave` / `call:decline` / `call:mic` | 화상회의 참여(재연결 뒤 다시 알림 포함)·나가기·수신 거절·진행자의 마이크 제어 |
+| 서버→클라이언트 | `call:state` | 방의 통화 상태 `{ roomId, active, startedBy, startedAt, hostId, videoTier, participantIds }` |
+| 서버→클라이언트 | `call:declined` | 통화 중인 사람들(`user:<id>`)에게 누가 거절했는지 `{ roomId, userId, name }` |
+| 서버→클라이언트 | `call:card` | 화상회의 카드가 바뀜 `{ roomId, messageId, card, text? }`(끝날 때 `text`는 요약 문구) |
+| 서버→클라이언트 | `call:mic` | 진행자가 내 마이크를 끄거나 켜 달라고 요청 `{ roomId, on, byId }` |
 | 서버→클라이언트 | `secret:invite` / `secret:accepted` / `secret:rejected` / `secret:left` | 비밀 대화 생명주기 |
 
 ## DB 구조
@@ -1410,7 +1439,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(비밀 대화 상대 혼자 나갔을 때 표시용), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
-| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`) |
+| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`) |
 | `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다. 목록 필터용 인덱스: `polls (room_id, created_at desc)`·`polls (creator_id, created_at desc)`·`poll_votes (user_id, poll_id)` |
 | `albums` / `album_items` | 앨범. `albums`는 방(`room_id`)에 딸린 앨범 한 건(제목·설명·대표 항목 `cover_item_id` — FK 없이 두어 항목이 지워져 가리킬 곳이 없으면 API가 가장 최근 사진으로 대신 보여 줌), `album_items`는 그 안의 이미지·영상(`kind` image|video, `file_url`/`thumbnail_url`은 업로드 원본 경로, 크기·`mime_type`·`width`/`height`·`duration_ms`)입니다. 대화방 파일(`message_attachments`)과는 독립이고, 앨범을 지우면 항목이 cascade로 지워집니다. 인덱스: `albums (room_id, created_at desc)`·`albums (team_id)`·`album_items (album_id, created_at)` |
 | `message_favorites` / `comment_favorites` / `member_favorites` | 통합 즐겨찾기(사람별). 메시지(`user_id`+`message_id` 복합 PK)·댓글(`user_id`+`comment_id`)·멤버(`user_id`+`team_id`+`favorite_user_id`) 즐겨찾기를 `created_at`(담은 시각, 목록 정렬·`before` 커서)과 함께 보관하고, 대상·사람·팀이 지워지면 cascade로 같이 지워집니다. 파일(`favorite_files`)·투표(`poll_favorites`)·대화방(`room_members.favorite`)은 예전 표를 그대로 씁니다 |
@@ -1529,9 +1558,10 @@ Node 서버가 이를 같은 PC의 LiveKit(`ws://127.0.0.1:7880`)으로 넘깁�
 
 **통화 화면은 줌처럼 어두운 화면에 영상 타일과 아래 가운데의 둥근 컨트롤바**로 이뤄집니다
 (`client/lib/screens/call_screen.dart`, 세부는 `screens/call/`). 컨트롤바는 `음소거 · 비디오 · 화면
-공유 · 참가자(수 배지) · 채팅(안 읽은 수 배지) · 손들기 · 보기 전환`과 맨 오른쪽의 빨간 `나가기`이고,
-꺼진 마이크·카메라는 빨간 슬래시 아이콘으로 보입니다(좁은 폰 폭에서는 라벨을 숨기고 단추 줄만 가로로
-스크롤). **갤러리 보기**는 사람 수에 맞춰 열 수를 자동으로 잡는 균등 격자, **스피커 보기**는 말하는 사람
+공유 · 참가자(수 배지) · 채팅(안 읽은 수 배지) · 손들기 · 화이트보드 · 보기 전환`과 맨 오른쪽의 빨간 `나가기`이고,
+꺼진 마이크·카메라는 빨간 슬래시 아이콘으로 보입니다. 라벨 달린 한 줄이 다 안 들어가는 폭(780 미만 — 폰·좁은 창)에서는
+`마이크 · 카메라 · 참가자 · 채팅 · ⋯ 더보기 · 나가기(원형)`만 고르게 놓고, 화면 공유·손들기·화이트보드·보기 전환은
+⋯ 더보기가 올리는 메뉴로 옮깁니다(그중 켜진 것이 있으면 ⋯에 점 — `screens/call/call_control_bar.dart`). **갤러리 보기**는 사람 수에 맞춰 열 수를 자동으로 잡는 균등 격자, **스피커 보기**는 말하는 사람
 (LiveKit `activeSpeakers`)을 큰 메인 타일로 두고 나머지를 스크롤되는 썸네일 줄로 둡니다 — 다른 사람의
 화면 공유가 있으면 공유 화면이 메인이고, 메인은 한 번 정해지면 1.5초는 유지해 깜빡이지 않으며, 보기를
 고르지 않았다면 화면 공유가 있을 때만 스피커 보기로 시작합니다(고른 뒤에는 통화 중 그대로). 참가자/채팅
@@ -1544,8 +1574,25 @@ LiveKit 데이터 채널(reliable, topic `call`)로 `{"type":"hand","raised":tru
 
 **녹화는 넣지 않았습니다.** LiveKit의 녹화 컴포넌트(Egress)는 바이너리 배포가 없고 Docker 전용
 (+Redis)이라 Windows 설치 모델과 맞지 않고, 클라이언트 녹화도 Windows에 쓸 만한 부품이
-없습니다(`flutter_webrtc`의 MediaRecorder는 Windows 미구현). 대신 통화가 끝나면 그 대화에
-`화상회의 · 12분 · 홍길동, 김철수 참여`(아무도 안 받으면 `부재중 화상회의`) 한 줄이 남습니다.
+없습니다(`flutter_webrtc`의 MediaRecorder는 Windows 미구현). 대신 대화에 **화상회의 카드**가 남습니다(아래).
+
+**수신·거절** — 통화가 시작되면 방 멤버 전원에게 `call:state`가 가고, 앱은 "진행 중 + 나는 참가자 아님 + 나는 통화
+중 아님"이면 **화상회의 요청** 창을 띄웁니다(앱이 꺼진 안드로이드는 FCM 전화 알림). 한 번 응답한 통화(참여·거절·나감,
+다른 기기에서 받음)는 기억해 두고 그 통화가 끝날 때까지 다시 울리지 않습니다(`session.dart`의 `_answeredCalls`).
+**거절**은 `call:decline`으로 서버에 알리고, 서버는 통화 중인 사람들(`user:<id>`)에게 `call:declined`를 보내
+"○○님이 화상회의를 거절했습니다" 알약 알림을 띄우게 합니다. 통화 중 누가 들어오고 나가면 LiveKit 참가자 이벤트로
+"○○님이 들어왔습니다/나갔습니다"를 통화 화면에 띄웁니다(`call_controller.dart`).
+
+**화상회의 카드** — 통화 한 통마다 대화방에 시스템 메시지 한 장(`messages.call_card`, jsonb)을 두고 시작·참여·거절·
+나감을 그 카드에 쌓습니다(`server/src/callCards.js`, 규칙은 `callEvents.js`). 바뀔 때마다 DB를 고치고 `call:card`
+`{ roomId, messageId, card, text? }`로 방에 알려 대화방의 카드가 그 자리에서 바뀌고(`widgets/call_message_card.dart`),
+끝나면 "종료 · 길이"/"부재중"으로 닫으며 메시지 글을 `화상회의 · 12분 · 홍길동, 김철수 참여` 요약으로 바꿉니다
+(검색·내보내기용). 시스템 메시지라 안 읽은 수·푸시·방 목록 미리보기에는 끼지 않습니다. 통화 상태는 서버 메모리에만 있어서,
+서버가 켜질 때 "진행 중"으로 남은 카드는 종료로 정리합니다.
+
+**잠깐 끊김 유예** — 통화 중 소켓이 끊기면 서버는 10초(`CALL_DISCONNECT_GRACE_MS`) 기다렸다 그 사람을 통화에서 빼고,
+앱은 소켓이 다시 붙으면 통화 참여(`call:join`)를 다시 알립니다 — 그래서 잠깐 끊긴 것만으로 "나감/참여"가 쌓이거나,
+혼자 남은 사람이 끊겼다고 통화가 끝났다 다시 시작되며 모두에게 전화가 다시 울리지 않습니다. [나가기]는 바로 처리합니다.
 
 ## Android 릴리즈 서명
 

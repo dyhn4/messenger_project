@@ -159,7 +159,7 @@ class _ReminderDraft {
 /// 할 일 만들기·고치기(대화상자/전체 화면/패널 안 화면 공용) — 잔디 생성 창 모양: 칸마다 왼쪽에 회색 아이콘(이름표·글자
 /// 수 카운터 없음), 위에서부터 대화방(맨 위 — 아래에 "만든 뒤에는 못 바꾼다" 안내), 제목(필수), 설명, 파일(`파일 다운로드 (경로
 /// 선택)` — 받아 갈 파일을 30개까지 붙이거나(오른쪽 아래 `N / 30`), PC에서는 파일 대신 폴더를 골라 그 경로를 지정, 그 아래
-/// `파일 업로드 (경로 선택)` — 결과물을 올릴 폴더, PC 전용), 담당자(회색 상자 + 오른쪽 아래 `✏ 담당자 관리` — 방 멤버 중 여러 명, 새로 만들 때 기본은 나),
+/// `업로드 경로 지정` — 결과물을 올릴 폴더, PC 전용), 담당자(회색 상자 + 오른쪽 아래 `✏ 담당자 관리` — 방 멤버 중 여러 명, 새로 만들 때 기본은 나),
 /// 기간(`시작 ~ 종료` 한 칸 — 누르면 달력과 시작/종료 시간 판), 알림(`알림을 받아보세요 (선택) ▾` — 5개까지), 맨 아래 [취소][저장하기].
 /// 제목이 있고 입력이 서버 규칙 안일 때만 저장할 수 있다.
 class TodoEditor extends StatefulWidget {
@@ -211,7 +211,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   final _files = <_TodoFile>[];
   final _reminders = <_ReminderDraft>[];
 
-  /// 받아 갈 파일이 있는 폴더(`파일 다운로드 (경로 선택)`에서 파일 대신 폴더를 고름)와 결과물을 올릴 폴더(`파일 업로드 (경로
+  /// 받아 갈 파일이 있는 폴더(`파일 첨부(또는 폴더 경로 지정)`에서 파일 대신 폴더를 고름)와 결과물을 올릴 폴더(`파일 업로드 (경로
   /// 선택)`) — 없으면 null.
   String? _downloadPath;
   String? _uploadPath;
@@ -516,7 +516,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     }
   }
 
-  /// `파일 다운로드 (경로 선택)` — PC는 파일을 고르면 붙이고, 파일을 고르지 않고 [열기]를 누르면 그때 열린 폴더를 받아 갈
+  /// `파일 첨부(또는 폴더 경로 지정)` — PC는 파일을 고르면 붙이고, 파일을 고르지 않고 [열기]를 누르면 그때 열린 폴더를 받아 갈
   /// 경로로 지정한다(folder_dialog.dart). 모바일은 예전처럼 파일만 고른다.
   Future<void> _pickDownload() async {
     if (!Platform.isWindows) return _pickFiles();
@@ -532,7 +532,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     }
   }
 
-  /// `파일 업로드 (경로 선택)` — 결과물을 올릴 폴더를 고른다(PC).
+  /// `업로드 경로 지정` — 결과물을 올릴 폴더를 고른다(PC).
   Future<void> _pickUploadFolder() async {
     final folder = await FilePicker.getDirectoryPath(
       dialogTitle: '담당자가 파일을 올릴 폴더 선택',
@@ -1288,8 +1288,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     );
   }
 
-  /// 파일 — `파일 다운로드 (경로 선택)`(가로 전체 옅은 단추, 그 오른쪽 아래 `N / 30`(N 굵게), 그 아래 붙인 파일과 지정한
-  /// 폴더 경로), 그 아래 `파일 업로드 (경로 선택)`(PC — 결과물을 올릴 폴더)와 지정한 경로.
+  /// 파일 — `파일 첨부(또는 폴더 경로 지정)`(가로 전체 옅은 단추, 그 오른쪽 아래 `N / 30`(N 굵게), 그 아래 붙인 파일과 지정한
+  /// 폴더 경로), 그 아래 `업로드 경로 지정`(PC — 결과물을 올릴 폴더)와 지정한 경로.
   Widget _fileField(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -1315,7 +1315,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           key: const ValueKey('todo-attach'),
           onPressed: _submitting || full ? null : _pickDownload,
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('파일 다운로드 (경로 선택)'),
+          label: const Text('파일 첨부(또는 폴더 경로 지정)'),
           style: buttonStyle,
         ),
         Padding(
@@ -1372,7 +1372,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
             key: const ValueKey('todo-upload-path-button'),
             onPressed: _submitting ? null : _pickUploadFolder,
             icon: const Icon(Icons.drive_folder_upload_outlined, size: 18),
-            label: const Text('파일 업로드 (경로 선택)'),
+            label: const Text('업로드 경로 지정'),
             style: buttonStyle,
           ),
         ],

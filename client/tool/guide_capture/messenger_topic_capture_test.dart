@@ -17,6 +17,7 @@ import 'package:client/models/room.dart';
 import 'package:client/models/topic_folder.dart';
 import 'package:client/screens/post_editor_dialog.dart';
 import 'package:client/screens/room_list_screen.dart';
+import 'package:client/screens/topic_members_dialog.dart';
 import 'package:client/widgets/board_view.dart';
 import 'package:client/widgets/chat_panel.dart';
 import 'package:client/widgets/rich_text_format.dart';
@@ -210,9 +211,7 @@ List<Map<String, dynamic>> boardPosts() => [
     text: '로고 · 색상 · 글꼴 규칙이 바뀌었습니다.',
     pinned: true,
     attachments: [postFile('f-guide', '브랜드_가이드라인_v2.pdf', 3200)],
-    comments: [
-      postComment('c21', 'p2', me, ago(days: 5), '잘 봤습니다!'),
-    ],
+    comments: [postComment('c21', 'p2', me, ago(days: 5), '잘 봤습니다!')],
   ),
   post(
     'p1',
@@ -348,10 +347,7 @@ Future<void> openFolders(WidgetTester tester) async {
     roomName: null,
     session: demoSession(rooms: folderRooms(), folders: demoFolders()),
   );
-  await tester.drag(
-    byTypeName('_ResizeDivider').first,
-    const Offset(0, 170),
-  );
+  await tester.drag(byTypeName('_ResizeDivider').first, const Offset(0, 170));
   await settleGuide(tester);
 }
 
@@ -402,7 +398,12 @@ void main() {
       // 나머지 두 항목(참여 가능한 토픽 보기 · 폴더 생성)에는 번호를 달지 않는다 — 바로 다음 그림
       // (새로운 토픽 생성하기 창)의 번호와 겹치지 않게. 각각 다른 절에서 설명한다.
       callouts: [
-        menuItemCallout(tester, item('새로운 토픽 생성하기'), 2, badge: CalloutBadge.right),
+        menuItemCallout(
+          tester,
+          item('새로운 토픽 생성하기'),
+          2,
+          badge: CalloutBadge.right,
+        ),
       ],
       crop: clampToScreen(
         tester,
@@ -471,6 +472,7 @@ void main() {
         badge: CalloutBadge.left,
       );
     }
+
     final card = tester.getRect(dialogCard);
     // 창이 길어서(설정이 많다) 안쪽이 스크롤된다 — 위쪽(이름~토픽 설명)과, 끝까지 내린 아래쪽
     // (폴더 선택~생성)을 두 장으로 나눠 찍는다.
@@ -635,6 +637,7 @@ void main() {
 
   // ── 토픽 관리하기 ──
 
+  // PC에서는 "멤버 N"을 누르면 오른쪽 칸에 참여 멤버 패널이 열린다(TopicMembersScreen asPanel).
   guideCapture('참여 멤버', desktop, (tester) async {
     await openDesktop(
       tester,
@@ -651,6 +654,7 @@ void main() {
     );
     await settleGuide(tester);
     Finder row(AppUser u) => find.byKey(ValueKey('topic-member-${u.id}'));
+    final panel = tester.getRect(find.byType(TopicMembersScreen));
     await saveGuideShot(
       tester,
       'messenger-topic-members',
@@ -660,23 +664,26 @@ void main() {
           number: 1,
           badge: CalloutBadge.left,
         ),
-        GuideCallout.box(
-          buttonWith('멤버 초대하기'),
-          number: 2,
-          badge: CalloutBadge.left,
-        ),
         GuideCallout.rect(
-          unionRect(tester, [row(me), row(seHoon)], padding: 2),
-          number: 3,
+          unionRect(tester, [row(me), row(seHoon)], padding: 0).deflate(2),
+          number: 2,
           badge: CalloutBadge.left,
         ),
         GuideCallout.box(
           find.descendant(of: row(junHo), matching: find.text('내보내기')),
-          number: 4,
-          badge: CalloutBadge.right,
+          number: 3,
+          badge: CalloutBadge.left,
         ),
       ],
-      crop: cropAround(tester, [dialogCard], margin: 24),
+      crop: clampToScreen(
+        tester,
+        Rect.fromLTRB(
+          panel.left - 30,
+          panel.top - 1,
+          panel.right,
+          tester.getRect(row(seHoon)).bottom + 24,
+        ),
+      ),
     );
   });
 
@@ -895,12 +902,7 @@ void main() {
           badge: CalloutBadge.left,
           padding: 6,
         ),
-        GuideCallout.box(
-          card,
-          number: 3,
-          badge: CalloutBadge.left,
-          padding: 3,
-        ),
+        GuideCallout.box(card, number: 3, badge: CalloutBadge.left, padding: 3),
         GuideCallout.rect(
           unionRect(tester, [
             find.descendant(
@@ -1016,6 +1018,9 @@ void main() {
     await tester.tap(more);
     await settleGuide(tester);
     final items = find.byType(MenuItemButton);
+    // 메뉴 글자는 글꼴 이름 없이 크기만 준 스타일이라 테스트 엔진에서 네모로 찍힌다 — 덧그린다.
+    patchUnnamedFontText(tester, within: items);
+    await tester.pump();
     final menu = unionRect(tester, [items.first, items.last], padding: 6);
     await saveGuideShot(
       tester,
@@ -1144,7 +1149,12 @@ void main() {
           number: 3,
           badge: CalloutBadge.right,
         ),
-        GuideCallout.box(lock, number: 4, badge: CalloutBadge.right, padding: 3),
+        GuideCallout.box(
+          lock,
+          number: 4,
+          badge: CalloutBadge.right,
+          padding: 3,
+        ),
         GuideCallout.rect(
           tester.getRect(archived).deflate(1),
           number: 5,
@@ -1344,8 +1354,10 @@ void main() {
     await tester.longPress(row);
     await settleGuide(tester);
     final sheet = find.byType(BottomSheet);
-    Finder tile(String text) =>
-        find.descendant(of: sheet, matching: find.widgetWithText(ListTile, text));
+    Finder tile(String text) => find.descendant(
+      of: sheet,
+      matching: find.widgetWithText(ListTile, text),
+    );
     await saveGuideShot(
       tester,
       'messenger-phone-topic-long-press',
@@ -1356,8 +1368,10 @@ void main() {
           badge: CalloutBadge.topLeft,
         ),
         GuideCallout.rect(
-          unionRect(tester, [tile('폴더로 이동'), tile('폴더에서 빼기')], padding: 0)
-              .deflate(3),
+          unionRect(tester, [
+            tile('폴더로 이동'),
+            tile('폴더에서 빼기'),
+          ], padding: 0).deflate(3),
           number: 2,
           badge: CalloutBadge.right,
         ),

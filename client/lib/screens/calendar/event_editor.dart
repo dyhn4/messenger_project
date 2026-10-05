@@ -622,7 +622,8 @@ class EventEditorState extends State<EventEditor> {
                 children: [
                   Flexible(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.only(right: 4),
+                      // 위 여백 — 맨 위 "제목" 칸의 떠 있는 라벨이 스크롤 영역 위 끝에 잘리지 않게.
+                      padding: const EdgeInsets.only(top: 8, right: 4),
                       child: form,
                     ),
                   ),

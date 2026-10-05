@@ -15,7 +15,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:client/models/app_user.dart';
+import 'package:client/screens/announcement_list_screen.dart';
 import 'package:client/screens/chat_screen.dart';
 import 'package:client/screens/room_list_screen.dart';
 import 'package:client/screens/server_setup_screen.dart';
@@ -27,6 +27,7 @@ import 'package:client/widgets/filter_dropdown.dart';
 import 'package:client/widgets/hover_toolbar.dart';
 import 'package:client/widgets/rich_text_format.dart';
 import 'package:client/widgets/room_options_menu.dart';
+import 'package:client/widgets/team_members_panel.dart';
 import 'package:client/widgets/team_switcher.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -120,7 +121,7 @@ void main() {
     final chat = tester.getRect(find.byType(ChatPanel));
     final input = tester.getRect(find.byType(ChatInputBar));
     final icons = unionRect(tester, [
-      topBarButton('프로젝트'),
+      topBarButton('알림 센터'),
       topBarButton('설정'),
     ], padding: 2);
     await saveGuideShot(
@@ -156,7 +157,8 @@ void main() {
   guideCapture('오른쪽 위 아이콘', desktop, (tester) async {
     // 방을 열지 않은 상태 — 아래쪽에 대화방 머리글(⋮)이 같이 잘려 들어오지 않게.
     await openDesktop(tester, roomName: null);
-    final tips = ['프로젝트', '알림 센터', '멤버', '검색', '메뉴', '설정'];
+    // 프로젝트는 "메뉴"(격자) 안의 툴 묶음으로 옮겨 갔다(menu_entries.dart).
+    final tips = ['알림 센터', '팀 멤버', '검색', '메뉴', '설정'];
     final row = unionRect(tester, [
       for (final t in tips) topBarButton(t),
     ], padding: 0);
@@ -258,66 +260,88 @@ void main() {
 
   // ── 3. 대화 시작하기 ──
 
+  // 채팅 칸 + → "채팅 시작하기"(new_chat_screen.dart) — 멤버 초대하기와 같은 모양에서 한 명을 고른다.
+  // 창이 커서 + 버튼을 덮으므로, 누르기 전(+ 버튼)과 연 창을 따로 찍어 화살표로 잇는다. 창은 창 폭을
+  // 따라 줄어들어서, 연 뒤 창을 좁혀 본문 폭에 맞춘다.
   guideCapture('1대1 대화', desktop, (tester) async {
+    final parts = createGuideTempDir();
     await openDesktop(tester, roomName: null);
-    final plus = plusButton('새 대화');
+    final plus = plusButton('채팅 시작하기');
     final plusRect = tester.getRect(plus);
-    await tester.tap(plus);
-    await settleGuide(tester);
-    final dialog = find.byType(Dialog);
-    final row = find.descendant(
-      of: dialog,
-      matching: find.widgetWithText(ListTile, doHyun.name),
-    );
-    await tester.tap(row);
-    await settleGuide(tester);
-    final card = tester.getRect(dialogCard);
-    await saveGuideShot(
+    final before = await saveGuideShot(
       tester,
-      'messenger-new-dm',
+      'dm-a',
+      dir: parts,
       callouts: [
         GuideCallout.rect(
           plusRect.inflate(2),
           number: 1,
-          badge: CalloutBadge.top,
+          badge: CalloutBadge.left,
         ),
-        GuideCallout.box(row, number: 2, badge: CalloutBadge.left),
+      ],
+      crop: Rect.fromLTRB(
+        0,
+        plusRect.top - 18,
+        tester.getRect(sidebar).right,
+        plusRect.bottom + 18,
+      ),
+    );
+    await tester.tap(plus);
+    await settleGuide(tester);
+    await resizeGuideWindow(tester, const Size(640, 700));
+    final row = find.byKey(ValueKey('invite-member-${doHyun.id}'));
+    await tester.tap(row);
+    await settleGuide(tester);
+    final after = await saveGuideShot(
+      tester,
+      'dm-b',
+      dir: parts,
+      callouts: [
+        GuideCallout.box(row, number: 2, badge: CalloutBadge.left, padding: 2),
         GuideCallout.box(
-          buttonWith('대화 시작하기'),
+          find.byKey(const ValueKey('start-chat-submit')),
           number: 3,
           badge: CalloutBadge.bottom,
         ),
+        GuideCallout.box(
+          find.byKey(const ValueKey('start-chat-secret')),
+          number: 4,
+          badge: CalloutBadge.bottom,
+        ),
+        GuideCallout.box(
+          find.byKey(const ValueKey('start-chat-self')),
+          number: 5,
+          badge: CalloutBadge.left,
+          padding: 0,
+        ),
       ],
-      crop: clampToScreen(
-        tester,
-        Rect.fromLTRB(0, card.top - 20, card.right + 24, card.bottom + 20),
-      ),
+      crop: cropAround(tester, [dialogCard], margin: 30),
     );
+    composeShots([before, after], 'messenger-new-dm');
   });
 
+  // 그룹채팅 칸 + → "새 그룹채팅 만들기"(new_group_dialog.dart) — 이름·설명을 쓰고 "멤버 선택" 창에서
+  // 세 명을 고른 뒤의 모습.
   guideCapture('그룹 대화', desktop, (tester) async {
     await openDesktop(tester, roomName: null);
     final plus = plusButton('새 그룹채팅');
     final plusRect = tester.getRect(plus);
     await tester.tap(plus);
     await settleGuide(tester);
-    final dialog = find.byType(Dialog);
-    Finder row(AppUser u) => find.descendant(
-      of: dialog,
-      matching: find.widgetWithText(ListTile, u.name),
-    );
+    final name = find.byKey(const ValueKey('new-group-name'));
+    final description = find.byKey(const ValueKey('new-group-description'));
+    await tester.enterText(name, '신규 캠페인 준비');
+    await tester.enterText(description, '11월 신규 캠페인 아이디어와 일정 정리');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.tap(find.byKey(const ValueKey('new-group-pick-members')));
+    await settleGuide(tester);
     for (final u in [seoYeon, junHo, yuNa]) {
-      await tester.tap(row(u));
+      await tester.tap(find.byKey(ValueKey('invite-member-${u.id}')));
       await tester.pump();
     }
+    await tester.tap(find.byKey(const ValueKey('pick-members-confirm')));
     await settleGuide(tester);
-    final nameField = find.descendant(
-      of: dialog,
-      matching: find.byType(TextField),
-    );
-    await tester.enterText(nameField, '신규 캠페인 준비');
-    FocusManager.instance.primaryFocus?.unfocus();
-    await settleGuide(tester);
+    final dialog = find.byType(Dialog);
     final card = tester.getRect(dialogCard);
     await saveGuideShot(
       tester,
@@ -329,27 +353,50 @@ void main() {
           badge: CalloutBadge.top,
         ),
         GuideCallout.rect(
-          unionRect(tester, [row(seoYeon), row(yuNa)]),
+          unionRect(tester, [
+            find.descendant(
+              of: dialog,
+              matching: find.textContaining(
+                RegExp('^그룹 아이콘'),
+                findRichText: true,
+              ),
+            ),
+            find.byKey(const ValueKey('new-group-icon-edit')),
+          ], padding: 6),
           number: 2,
           badge: CalloutBadge.left,
         ),
         GuideCallout.rect(
           unionRect(tester, [
-            find.descendant(of: dialog, matching: find.text('그룹 아이콘')),
-            nameField,
-          ], padding: 10),
+            find.descendant(
+              of: dialog,
+              matching: find.textContaining(
+                RegExp('^그룹 이름'),
+                findRichText: true,
+              ),
+            ),
+            description,
+          ], padding: 6),
           number: 3,
           badge: CalloutBadge.left,
         ),
-        GuideCallout.box(
-          buttonWith('대화 시작하기'),
+        GuideCallout.rect(
+          unionRect(tester, [
+            find.byKey(const ValueKey('new-group-pick-members')),
+            find.byKey(const ValueKey('new-group-members')),
+          ], padding: 6),
           number: 4,
+          badge: CalloutBadge.left,
+        ),
+        GuideCallout.box(
+          find.byKey(const ValueKey('new-group-submit')),
+          number: 5,
           badge: CalloutBadge.bottom,
         ),
       ],
       crop: clampToScreen(
         tester,
-        Rect.fromLTRB(0, card.top - 20, card.right + 24, card.bottom + 20),
+        Rect.fromLTRB(0, card.top - 20, card.right + 24, card.bottom + 24),
       ),
     );
   });
@@ -600,7 +647,10 @@ void main() {
 
   // ── 5. 메시지 활용 ──
 
+  // 메뉴가 길어져(즐겨찾기 · 할 일로 등록 …) 마우스를 올린 말풍선을 덮으며 위로 열린다 — 누르기 전
+  // (말풍선 · ⋮)과 누른 뒤(메뉴)를 따로 찍어 화살표로 잇는다(화면 캡처 그림과 같은 방식).
   guideCapture('메시지 더보기 메뉴', compact, (tester) async {
+    final parts = createGuideTempDir();
     await openDesktop(tester);
     final textRect = tester.getRect(
       find.textContaining(myLastText, findRichText: true).first,
@@ -611,17 +661,12 @@ void main() {
       of: find.byType(HoverToolbar),
       matching: find.byIcon(Icons.more_vert),
     );
-    await tester.tap(more);
-    await tester.pump(const Duration(milliseconds: 300));
-    final menuItems = find.byType(MenuItemButton);
-    final menu = unionRect(tester, [
-      menuItems.first,
-      menuItems.last,
-    ], padding: 8);
     final bubbleBox = tester.getRect(bubbleBoxOf(myLastText));
-    await saveGuideShot(
+    final moreRect = tester.getRect(more);
+    final before = await saveGuideShot(
       tester,
-      'messenger-message-menu',
+      'menu-a',
+      dir: parts,
       callouts: [
         GuideCallout.rect(
           bubbleBox.inflate(4),
@@ -631,21 +676,46 @@ void main() {
         GuideCallout.box(
           more,
           number: 2,
-          badge: CalloutBadge.bottom,
+          badge: CalloutBadge.right,
           padding: 2,
         ),
-        GuideCallout.rect(menu, number: 3, badge: CalloutBadge.right),
       ],
       crop: clampToScreen(
         tester,
         Rect.fromLTRB(
-          math.max(282, bubbleBox.left - 70),
-          math.min(menu.top, bubbleBox.top) - 30,
-          math.max(menu.right, bubbleBox.right) + 90,
-          math.max(menu.bottom, bubbleBox.bottom) + 60,
+          bubbleBox.left - 50,
+          bubbleBox.top - 40,
+          bubbleBox.right + 90,
+          moreRect.bottom + 24,
         ),
       ),
     );
+    await tester.tap(more);
+    await tester.pump(const Duration(milliseconds: 300));
+    final menuItems = find.byType(MenuItemButton);
+    patchUnnamedFontText(tester, within: menuItems);
+    await tester.pump();
+    final menu = unionRect(tester, [
+      menuItems.first,
+      menuItems.last,
+    ], padding: 8);
+    final after = await saveGuideShot(
+      tester,
+      'menu-b',
+      dir: parts,
+      callouts: [GuideCallout.rect(menu, number: 3, badge: CalloutBadge.right)],
+      crop: clampToScreen(
+        tester,
+        Rect.fromLTRB(
+          menu.left - 16,
+          menu.top - 16,
+          menu.right + 50,
+          menu.bottom + 16,
+        ),
+      ),
+    );
+    clearTextPatches();
+    composeShots([before, after], 'messenger-message-menu');
   });
 
   guideCapture('댓글', desktop, (tester) async {
@@ -972,10 +1042,13 @@ void main() {
 
   // ── 8. 공지 ──
 
+  // 토픽 맨 위 한 줄짜리 공지바(announcement_banner.dart) — [공지] 글 · 시각 · 댓글 수 · 작성자 · ✕.
   guideCapture('공지 배너', compact, (tester) async {
     await openDesktop(tester, roomName: '전사 공지');
-    final banner = byTypeName('_AnnouncementBanner');
+    final banner = find.byKey(const ValueKey('announcement-open'));
     final bannerRect = tester.getRect(banner);
+    final hide = find.byKey(const ValueKey('announcement-hide'));
+    final hideRect = tester.getRect(hide);
     final header = tester.getRect(find.byType(RoomOptionsMenu));
     await saveGuideShot(
       tester,
@@ -985,17 +1058,13 @@ void main() {
           Rect.fromLTRB(
             bannerRect.left,
             bannerRect.top,
-            bannerRect.right - 50,
+            hideRect.left - 4,
             bannerRect.bottom,
           ).deflate(2),
           number: 1,
           badge: CalloutBadge.bottom,
         ),
-        GuideCallout.box(
-          find.byTooltip('공지 닫기'),
-          number: 2,
-          badge: CalloutBadge.bottom,
-        ),
+        GuideCallout.box(hide, number: 2, badge: CalloutBadge.bottom),
       ],
       crop: clampToScreen(
         tester,
@@ -1009,35 +1078,51 @@ void main() {
     );
   });
 
+  // 공지 패널(announcement_list_screen.dart) — PC는 오른쪽 칸에 열린다. 대화방 ⋮ › 공지로 연다(공지바를
+  // 누르면 그 공지의 상세가 바로 뜬다).
   guideCapture('공지 목록', desktop, (tester) async {
     await openDesktop(tester, roomName: '전사 공지');
-    await tester.tap(byTypeName('_AnnouncementBanner'));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(RoomOptionsMenu),
+        matching: find.byTooltip('더보기'),
+      ),
+    );
     await settleGuide(tester);
-    final pinned = byTypeName('_AnnouncementTile').first;
-    final card = tester.getRect(dialogCard);
+    await tester.tap(find.text('공지').last);
+    await settleGuide(tester);
+    final pinned = find.byKey(const ValueKey('announcement-tile-an1'));
+    final panel = find.byType(AnnouncementsPanel);
+    final panelRect = tester.getRect(panel);
     await saveGuideShot(
       tester,
       'messenger-announcement-list',
       callouts: [
         GuideCallout.box(
-          pinned,
+          find.byKey(const ValueKey('announcement-write')),
           number: 3,
-          badge: CalloutBadge.left,
-          padding: 6,
+          badge: CalloutBadge.topLeft,
         ),
         GuideCallout.box(
-          buttonWith('글쓰기'),
+          find.byKey(const ValueKey('announcement-exclude-unpinned-label')),
           number: 4,
-          badge: CalloutBadge.left,
+          badge: CalloutBadge.right,
+          padding: 2,
+        ),
+        GuideCallout.box(
+          pinned,
+          number: 5,
+          badge: CalloutBadge.topLeft,
+          padding: 2,
         ),
       ],
       crop: clampToScreen(
         tester,
         Rect.fromLTRB(
-          card.left - 30,
-          card.top - 24,
-          card.right + 24,
-          card.top + 420,
+          panelRect.left - 6,
+          panelRect.top - 1,
+          panelRect.right,
+          tester.getRect(pinned).bottom + 120,
         ),
       ),
     );
@@ -1047,14 +1132,14 @@ void main() {
 
   guideCapture('멤버와 프로필', desktop, (tester) async {
     await openDesktop(tester);
-    final membersIcon = topBarButton('멤버');
+    final membersIcon = topBarButton('팀 멤버');
     final iconRect = tester.getRect(membersIcon);
     await tester.tap(membersIcon);
     await settleGuide(tester);
-    final panel = byTypeName('_MembersPanel');
+    final panel = find.byType(TeamMembersPanel);
     final row = find.ancestor(
       of: textIn(panel, doHyun.name),
-      matching: byTypeName('_MemberRow'),
+      matching: find.byType(TeamMemberRow),
     );
     final rowRect = tester.getRect(row);
     await tester.tap(row);
@@ -1135,8 +1220,8 @@ void main() {
 
   // ── 10. 환경설정 ──
 
-  // 환경설정 창(settings_screen.dart) — 왼쪽에서 "메신저 설정 / 시스템 설정"을 고르면 오른쪽에 그
-  // 항목들이 보인다. 창을 연 뒤 창 크기를 줄여서(대화상자가 창 폭을 따라 줄어든다) 본문 폭에 맞춘다.
+  // 환경설정 창(settings_screen.dart) — 왼쪽에서 "메신저 설정 / 화면 설정 / 시스템 설정"을 고르면 오른쪽에
+  // 그 항목들이 보인다. 창을 연 뒤 창 크기를 줄여서(대화상자가 창 폭을 따라 줄어든다) 본문 폭에 맞춘다.
   guideCapture('환경설정', desktop, (tester) async {
     await openDesktop(tester);
     await tester.tap(topBarButton('설정'));
@@ -1164,15 +1249,45 @@ void main() {
       number: number,
       badge: CalloutBadge.left,
     );
+    // 오른쪽 칸을 [label] 항목이 맨 위에 오게 내린다.
+    Future<void> scrollTo(String label) async {
+      final position = tester
+          .state<ScrollableState>(
+            find
+                .descendant(of: pane(), matching: find.byType(Scrollable))
+                .first,
+          )
+          .position;
+      final top = tester.getRect(item(label)).top;
+      position.jumpTo(
+        (top - tester.getRect(pane()).top + position.pixels - 12).clamp(
+          0,
+          position.maxScrollExtent,
+        ),
+      );
+      await settleGuide(tester);
+    }
+
+    // 오른쪽 칸만 — 스크롤 영역에 칸 제목 줄과 테두리까지 더한다.
+    Rect paneCrop() {
+      final scroll = tester.getRect(pane());
+      return clampToScreen(
+        tester,
+        Rect.fromLTRB(
+          scroll.left - 23,
+          scroll.top - 80,
+          scroll.right + 23,
+          scroll.bottom + 23,
+        ),
+      );
+    }
+
     await saveGuideShot(
       tester,
       'messenger-settings',
       callouts: [
         GuideCallout.rect(
-          unionRect(tester, [
-            nav('메신저 설정'),
-            nav('시스템 설정'),
-          ], padding: 3),
+          unionRect(tester, [nav('메신저 설정'), nav('시스템 설정')], padding: 3),
           number: 1,
           badge: CalloutBadge.left,
         ),
@@ -1188,52 +1303,43 @@ void main() {
       crop: cropAround(tester, [dialogCard], margin: 20),
     );
 
-    // 시스템 설정 — 항목이 길어서 오른쪽 칸이 스크롤된다. 처음 보이는 네 항목(창 전체)과, "파일
-    // 다운로드"부터 보이게 내린 오른쪽 칸(다음 두 항목 — 맨 아래 버전 정보는 글로만 설명)을 따로 찍는다.
+    // 화면 설정 — 처음 보이는 세 항목(창 전체)과, 아래로 내린 오른쪽 칸(반투명 · 깜빡임 두 항목)을 따로 찍는다.
+    await tester.tap(nav('화면 설정'));
+    await settleGuide(tester);
+    await saveGuideShot(
+      tester,
+      'messenger-settings-display',
+      callouts: [section('텍스트 크기', 1), section('글꼴', 2), section('화면 테마', 3)],
+      crop: cropAround(tester, [dialogCard], margin: 20),
+    );
+    await scrollTo('반투명');
+    await saveGuideShot(
+      tester,
+      'messenger-settings-display-2',
+      callouts: [
+        section('반투명', 4),
+        section('창 깜빡임', 5),
+        section('작업표시줄 깜빡임', 6),
+      ],
+      crop: paneCrop(),
+    );
+
+    // 시스템 설정 — 위 두 항목(창 전체)과 아래로 내린 오른쪽 칸(파일 다운로드 · 자동 잠금 — 맨 아래 버전
+    // 정보는 글로만 설명).
     await tester.tap(nav('시스템 설정'));
     await settleGuide(tester);
     await saveGuideShot(
       tester,
       'messenger-settings-system',
-      callouts: [
-        section('시작 시 자동 실행', 1),
-        section('항상 위로', 2),
-        section('화면 테마', 3),
-        section('반투명', 4),
-      ],
+      callouts: [section('시작 시 자동 실행', 1), section('항상 위로', 2)],
       crop: cropAround(tester, [dialogCard], margin: 20),
     );
-    final position = tester
-        .state<ScrollableState>(
-          find.descendant(of: pane(), matching: find.byType(Scrollable)).first,
-        )
-        .position;
-    final download = tester.getRect(item('파일 다운로드'));
-    position.jumpTo(
-      (download.top - tester.getRect(pane()).top + position.pixels - 12).clamp(
-        0,
-        position.maxScrollExtent,
-      ),
-    );
-    await settleGuide(tester);
-    // 오른쪽 칸만 — 스크롤 영역에 칸 제목("시스템 설정") 줄과 테두리까지 더한다.
-    final scroll = tester.getRect(pane());
+    await scrollTo('파일 다운로드');
     await saveGuideShot(
       tester,
       'messenger-settings-system-2',
-      callouts: [
-        section('파일 다운로드', 5),
-        section('자동 잠금', 6),
-      ],
-      crop: clampToScreen(
-        tester,
-        Rect.fromLTRB(
-          scroll.left - 23,
-          scroll.top - 80,
-          scroll.right + 23,
-          scroll.bottom + 23,
-        ),
-      ),
+      callouts: [section('파일 다운로드', 3), section('자동 잠금', 4)],
+      crop: paneCrop(),
     );
   });
 

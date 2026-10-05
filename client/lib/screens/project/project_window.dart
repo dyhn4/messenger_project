@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../services/app_platform.dart';
 import '../../services/app_settings.dart';
 import '../../services/notification_service.dart';
 import '../../services/pinned_tls.dart';
@@ -86,7 +86,7 @@ Future<void> openProjectWindow(Session session, {String? openLink}) async {
 /// 마찬가지로) settings.setThemeMode 한 번으로는 반영되지 않는다 — 창 사이 채널로 직접
 /// 알려준다(project_window.dart의 runProjectWindow가 'theme_changed'를 받아 처리한다).
 Future<void> broadcastThemeChange(ThemeMode mode) async {
-  if (!Platform.isWindows) return;
+  if (!AppPlatform.isWindows) return;
   for (final controller in await _findProjectWindows()) {
     try {
       await controller.invokeMethod('theme_changed', {'mode': mode.name});
@@ -99,7 +99,7 @@ Future<void> broadcastThemeChange(ThemeMode mode) async {
 /// 메인 창이 잠기거나(자동 잠금) 풀렸을 때 부른다(app_lock.dart) — 열려 있는 프로젝트 창도
 /// 같이 가리고 푼다. 이 창은 다른 엔진이라 잠금 화면을 따로 그려야 한다(아래 'lock_changed').
 Future<void> broadcastLockChange(bool locked) async {
-  if (!Platform.isWindows) return;
+  if (!AppPlatform.isWindows) return;
   // 창 목록을 못 얻어도(창 플러그인이 없는 환경 등) 잠금·해제 자체는 이미 끝났으니 조용히 넘어간다.
   List<WindowController> windows;
   try {

@@ -1,9 +1,10 @@
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:custom_mouse_cursor/custom_mouse_cursor.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../services/app_platform.dart';
 
 /// 끌 수 있는 것 위의 "손"(펼친 손)과 끄는 동안의 "쥔 손" 커서.
 ///
@@ -22,7 +23,7 @@ abstract final class GrabCursors {
   static MouseCursor get closed => _closed;
 
   static Future<void> init() async {
-    if (kIsWeb || !Platform.isWindows) return;
+    if (kIsWeb || !AppPlatform.isWindows) return;
     try {
       _open = await _make(_openHand);
       _closed = await _make(_closedHand);

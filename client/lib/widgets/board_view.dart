@@ -12,6 +12,7 @@ import '../screens/message_thread_screen.dart';
 import '../screens/poll_create_dialog.dart';
 import '../screens/post_editor_dialog.dart';
 import '../screens/scheduled_messages_screen.dart' show ScheduledRoomBar;
+import '../services/app_platform.dart';
 import '../services/edit_policy.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
@@ -1593,7 +1594,7 @@ class PostDetailHead extends StatelessWidget {
           )
         else ...[
           // Windows(마우스)에서는 제목·본문을 끌어서 바로 고를 수 있게(말풍선과 같은 규칙).
-          Platform.isWindows
+          AppPlatform.isWindows
               ? SelectableText(post.title ?? '', style: _titleStyle(theme))
               : Text(post.title ?? '', style: _titleStyle(theme)),
           const SizedBox(height: 12),
@@ -1602,7 +1603,7 @@ class PostDetailHead extends StatelessWidget {
             format: post.textFormat,
             style: const TextStyle(fontSize: 15, height: 1.6),
             linkColor: Colors.blue,
-            selectable: Platform.isWindows,
+            selectable: AppPlatform.isWindows,
             mentions: post.mentions,
             myUserId: session.userId,
             onMentionTap: (m) => openMentionProfile(

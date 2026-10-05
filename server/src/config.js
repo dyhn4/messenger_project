@@ -62,6 +62,11 @@ export const EXTERNAL_ADDRESS = (() => {
 // 단 그 경로가 항상 접근 가능해야 첨부파일 업로드/다운로드가 된다(upload.js 참고).
 export const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(rootDir, 'uploads');
 
+// 웹 앱(아이폰 등 앱이 없는 기기용) 빌드 결과물 폴더 — client에서 `flutter build web`으로 만든
+// build/web의 내용을 여기에 넣으면 서버 주소(https://서버:3000/)로 바로 열린다. 폴더가 없으면 웹
+// 앱만 꺼진다. 웹 앱은 브라우저가 TLS를 검증하므로 서버에 공인 인증서가 있어야 제대로 쓸 수 있다.
+export const WEB_DIR = process.env.WEB_DIR || path.join(rootDir, 'web');
+
 // JWT 서명용 비밀키.
 export const JWT_SECRET = resolveSecret('JWT_SECRET', '.jwt-secret', 48);
 

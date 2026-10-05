@@ -13,6 +13,7 @@ import '../models/mention.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
+import '../services/app_platform.dart';
 import '../services/clipboard_paste.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
@@ -21,7 +22,8 @@ import '../services/room_chat_controller.dart';
 import '../services/table_image.dart';
 import '../services/typing_gate.dart';
 import '../services/session.dart';
-import '../screens/capture/capture_window.dart';
+import '../screens/capture/capture_window.dart'
+    if (dart.library.js_interop) '../screens/capture/capture_window_stub.dart';
 import '../screens/poll_create_dialog.dart';
 import '../screens/schedule_message_dialog.dart';
 import '../screens/scheduled_messages_screen.dart' show ScheduledRoomBar;
@@ -320,7 +322,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 붙여넣은 PNG를 임시 파일로 쓰고 클릭으로 고른 첨부와 같은 업로드 미리보기에 올린다.
   Future<void> _stagePastedPng(Uint8List bytes, String displayName) async {
     final path =
-        '${Directory.systemTemp.path}${Platform.pathSeparator}paste_${DateTime.now().microsecondsSinceEpoch}.png';
+        '${Directory.systemTemp.path}${AppPlatform.pathSeparator}paste_${DateTime.now().microsecondsSinceEpoch}.png';
     final file = File(path);
     await file.writeAsBytes(bytes);
     if (!mounted) return;
@@ -638,7 +640,7 @@ class ChatInputBarState extends State<ChatInputBar> {
     final room = _liveRoom;
     var others = 3; // 이모티콘 · 파일 · 보내기.
     if (!room.isSecret) others++; // 서식(T)
-    if (Platform.isWindows) others++; // 화면 캡처
+    if (AppPlatform.isWindows) others++; // 화면 캡처
     if (_showCallButton && session.callsEnabled) others++;
     if (session.canSendInquiryIn(widget.room)) others++;
     if (canScheduleIn(session, room)) others++;
@@ -957,7 +959,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                           // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
                           // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
                           // 그대로 둔다.
-                          textInputAction: Platform.isWindows
+                          textInputAction: AppPlatform.isWindows
                               ? TextInputAction.newline
                               : TextInputAction.send,
                           onSubmitted: (_) => _send(),
@@ -1026,7 +1028,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                     ),
                   // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
                   // 찍을지 먼저 고른다.
-                  if (Platform.isWindows)
+                  if (AppPlatform.isWindows)
                     PopupMenuButton<bool>(
                       icon: const Icon(Icons.filter_center_focus),
                       tooltip: '화면 캡처',
@@ -1051,7 +1053,7 @@ class ChatInputBarState extends State<ChatInputBar> {
                     ),
                   // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
                   Expanded(
-                    child: Platform.isWindows
+                    child: AppPlatform.isWindows
                         ? _SendKeyHint(
                             widget.session.settings.sendWithShiftEnter
                                 ? 'Shift + Enter 로 전송'

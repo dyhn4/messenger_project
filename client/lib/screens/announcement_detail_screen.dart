@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
 import '../models/announcement.dart';
 import '../models/app_user.dart';
 import '../models/room.dart';
+import '../services/app_platform.dart';
 import '../services/chat_socket.dart'
     show AnnouncementRemovedEvent, SimpleCommentDeleted;
 import '../services/session.dart';
@@ -653,13 +653,13 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                                 _announcement.text,
                                 key: const ValueKey('announcement-detail-text'),
                                 format: _announcement.textFormat,
-                                selectable: Platform.isWindows,
+                                selectable: AppPlatform.isWindows,
                                 style: const TextStyle(
                                   fontSize: 15,
                                   height: 1.6,
                                 ),
                               )
-                            : Platform.isWindows
+                            : AppPlatform.isWindows
                             ? SelectableText(
                                 _announcement.text,
                                 key: const ValueKey('announcement-detail-text'),

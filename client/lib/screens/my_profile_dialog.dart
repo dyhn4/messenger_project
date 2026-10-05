@@ -9,6 +9,7 @@ import '../data/stickers.dart' show Sticker, serverStickerPrefix;
 import '../models/room.dart';
 import '../models/sticker_pack.dart';
 import '../models/team.dart';
+import '../services/app_platform.dart';
 import '../services/avatar_thumbnail.dart';
 import '../services/password_policy.dart';
 import '../services/session.dart';
@@ -1187,7 +1188,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
       } else if (draft.photoBytes != null) {
         // 이제서야 서버에 올린다 — 임시 파일로 쓰고, 올린 뒤(실패해도) 지운다.
         final temp = File(
-          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          '${Directory.systemTemp.path}${AppPlatform.pathSeparator}'
           'avatar_${DateTime.now().microsecondsSinceEpoch}.png',
         );
         await temp.writeAsBytes(draft.photoBytes!, flush: true);

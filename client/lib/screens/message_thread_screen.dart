@@ -7,6 +7,7 @@ import '../data/stickers.dart';
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../services/app_platform.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
@@ -380,7 +381,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
           ],
         );
 
-        if (!Platform.isWindows) return column;
+        if (!AppPlatform.isWindows) return column;
 
         // chat_panel.dart와 동일 — 댓글 목록 + 입력창 전체를 드롭 영역으로 잡고, 호버 중엔
         // 패널 전체를 덮는 안내 오버레이를 보여준다. 게시글 편집기나 다른 창이 위에 떠 있으면 꺼

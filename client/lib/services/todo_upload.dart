@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../models/room.dart';
 import '../models/todo.dart';
 import '../widgets/app_toast.dart';
+import 'app_platform.dart';
 import 'session.dart';
 
 /// 한 메시지에 담는 첨부 수 — 더 많으면 나눠 보낸다(채팅 입력칸과 같다).
@@ -26,7 +27,7 @@ Future<void> uploadTodoFiles(
 
   final folder = todo.uploadPath;
   if (folder != null) {
-    if (!Platform.isWindows) {
+    if (!AppPlatform.isWindows) {
       toast('지정된 업로드 경로로는 PC(Windows)에서만 올릴 수 있습니다.');
       return;
     }
@@ -124,7 +125,7 @@ Future<String> uniqueTargetPath(
   String name,
   String senderName,
 ) async {
-  final sep = Platform.pathSeparator;
+  final sep = AppPlatform.pathSeparator;
   final base = folder.endsWith(sep) ? folder : '$folder$sep';
   var candidate = '$base$name';
   if (!await File(candidate).exists()) return candidate;

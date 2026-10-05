@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 
 import '../screens/project/project_window.dart' show broadcastLockChange;
+import 'app_platform.dart';
 import 'session.dart';
 
 /// 환경설정 > 시스템 설정 > "자동 잠금" — PC가 절전 모드에 들어가거나 화면이 꺼지면 메신저를
@@ -18,7 +18,7 @@ class AppLock {
 
   /// 메인 창에서 한 번 부른다(main.dart).
   static void install(Session session) {
-    if (!Platform.isWindows) return;
+    if (!AppPlatform.isWindows) return;
     _power.setMethodCallHandler((call) async {
       if (call.method != 'suspend' && call.method != 'displayOff') return;
       if (!session.settings.autoLockOnSleep) return;

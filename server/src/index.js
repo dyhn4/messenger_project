@@ -25,7 +25,7 @@ import { createStickersRouter } from './stickers.js';
 import { createAuthRouter, requireAuth } from './auth.js';
 import { limits, rateLimit } from './authGuard.js';
 import { certPath, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
-import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT } from './config.js';
+import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT, WEB_DIR } from './config.js';
 import { startLivekitNatSync } from './livekitNat.js';
 import { LIVEKIT_PROXY_PREFIX, attachLivekitUpgradeProxy, livekitHttpProxy } from './livekitProxy.js';
 import { createBookmarksRouter } from './bookmarks.js';
@@ -161,6 +161,9 @@ app.use(versionRouter);
 app.use('/guide', guideStatic);
 // FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
 app.use(firebaseConfigRouter);
+// 웹 앱(Flutter 웹 빌드) — 위의 API 경로들에 걸리지 않은 요청만 여기로 온다. 페이지를 내려준 이
+// 서버가 곧 웹 앱의 서버 주소다(client session.dart의 webServerUrl). 폴더가 없으면 404.
+app.use(express.static(WEB_DIR));
 
 // 모든 라우트 다음에 두는 공통 에러 처리 — express-async-errors 덕에 라우트 안에서 던진/
 // reject한 에러가 여기로 온다. 이게 없던 동안에는 그런 요청이 응답 없이 그대로 멈춰서

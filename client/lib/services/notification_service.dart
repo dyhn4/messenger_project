@@ -1,28 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:conversation_shortcuts/conversation_shortcuts.dart';
-import 'package:ffi/ffi.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:win32/win32.dart'
-    show
-        FindWindow,
-        GetForegroundWindow,
-        SW_RESTORE,
-        SetForegroundWindow,
-        ShowWindow,
-        TEXT;
 
 import '../widgets/avatar_utils.dart' show parseHexColor;
+import 'app_platform.dart';
 import 'avatar_thumbnail.dart';
+import 'win32_window.dart'
+    if (dart.library.js_interop) 'win32_window_stub.dart';
 
 /// 비밀 대화 자물쇠 배지를 아바타의 어느 모서리에 그릴지 — _badgeWithLock 문서 참고.
 enum _BadgeCorner { topLeft, bottomRight }
@@ -62,7 +55,7 @@ class NotificationService {
         windows: windows,
       ),
       onDidReceiveNotificationResponse: (response) {
-        if (Platform.isWindows) _bringWindowToFront();
+        if (AppPlatform.isWindows) _bringWindowToFront();
         final roomId = response.payload;
         if (roomId != null) onTap(roomId);
       },
@@ -256,7 +249,7 @@ class NotificationService {
         corner: _BadgeCorner.topLeft,
         fallbackLabel: senderName ?? title,
       );
-      if (Platform.isWindows) {
+      if (AppPlatform.isWindows) {
         windowsAvatarBytes = await _badgedOrFallback(
           baseAvatarBytes,
           corner: _BadgeCorner.bottomRight,
@@ -266,7 +259,7 @@ class NotificationService {
       }
     }
 
-    final windowsImageUri = Platform.isWindows
+    final windowsImageUri = AppPlatform.isWindows
         ? await _writeTempPng(windowsAvatarBytes ?? avatarBytes)
         : null;
 
@@ -281,7 +274,7 @@ class NotificationService {
       important: true,
       icon: ByteArrayAndroidIcon(avatarBytes),
     );
-    final history = Platform.isAndroid
+    final history = AppPlatform.isAndroid
         ? await _appendHistory(roomId, senderName ?? title, body)
         : null;
     final details = NotificationDetails(
@@ -340,7 +333,7 @@ class NotificationService {
     );
     // 위 MessagingStyle이 실제 "대화" 레이아웃으로 승격되려면 알림보다 먼저 같은 id의
     // long-lived 단축키가 등록돼 있어야 한다(ConversationShortcuts 주석 참고).
-    if (Platform.isAndroid) {
+    if (AppPlatform.isAndroid) {
       await ConversationShortcuts.push(
         id: roomId,
         // 단축키는 사람이 아니라 "대화방"을 가리킨다. 이 라벨이 알림 윗줄(대화방 이름)로도
@@ -355,7 +348,9 @@ class NotificationService {
     // 그래서 "녹색 자물쇠"를 색으로는 못 넣고, 대신 이름 왼쪽에 자물쇠 이모지를 붙여서
     // 비밀 대화라는 표시를 준다. 안드로이드는 MessagingStyle이 title을 그대로 안 쓰고
     // 자체 레이아웃(Person 이름)으로 그리므로 안 건드린다.
-    final windowsTitle = (isSecret && Platform.isWindows) ? '🔒 $title' : title;
+    final windowsTitle = (isSecret && AppPlatform.isWindows)
+        ? '🔒 $title'
+        : title;
     await _plugin.show(
       id: roomId.hashCode,
       title: windowsTitle,
@@ -363,9 +358,11 @@ class NotificationService {
       notificationDetails: details,
       payload: roomId,
     );
-    if (Platform.isAndroid) await _syncMessageSummary(include: roomId.hashCode);
+    if (AppPlatform.isAndroid) {
+      await _syncMessageSummary(include: roomId.hashCode);
+    }
 
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       _flashFrame = flashWindowFrame;
       _flashWindowsTaskbar(
         roomId,
@@ -380,7 +377,7 @@ class NotificationService {
   /// (_pendingFlashRooms가 다 비면) 깜빡임도 같이 멈춘다.
   Future<void> cancelForRoom(String roomId) async {
     await _plugin.cancel(id: roomId.hashCode);
-    if (Platform.isAndroid) {
+    if (AppPlatform.isAndroid) {
       await _historyPrefs.remove('$_historyKeyPrefix$roomId');
       await _syncMessageSummary(exclude: roomId.hashCode);
     }
@@ -691,34 +688,17 @@ class NotificationService {
 
   Future<Uri> _writeTempPng(Uint8List bytes) async {
     final path =
-        '${Directory.systemTemp.path}${Platform.pathSeparator}msg_avatar_${DateTime.now().microsecondsSinceEpoch}.png';
+        '${Directory.systemTemp.path}${AppPlatform.pathSeparator}msg_avatar_${DateTime.now().microsecondsSinceEpoch}.png';
     final file = File(path);
     await file.writeAsBytes(bytes);
     return Uri.file(file.path, windows: true);
   }
 
-  /// 메인 창 핸들. "프로젝트"/캡처 같은 보조 창도 창 클래스가 같아서, 제목("TangoTalk")까지
-  /// 맞춰 먼저 찾고 못 찾을 때만 클래스만으로 찾는다 — 안 그러면 보조 창이 먼저 잡혀서
-  /// 작업표시줄 깜빡임이 엉뚱한 창에 걸린다.
-  int _findOurWindow() {
-    final classNamePtr = TEXT('FLUTTER_RUNNER_WIN32_WINDOW');
-    final titlePtr = TEXT('TangoTalk');
-    try {
-      final byTitle = FindWindow(classNamePtr, titlePtr);
-      if (byTitle != 0) return byTitle;
-      return FindWindow(classNamePtr, nullptr);
-    } finally {
-      calloc.free(classNamePtr);
-      calloc.free(titlePtr);
-    }
-  }
-
   void _bringWindowToFront() {
-    final hwnd = _findOurWindow();
+    final hwnd = findMainWindow();
     if (hwnd == 0) return;
     stopWindowsTaskbarFlash();
-    ShowWindow(hwnd, SW_RESTORE);
-    SetForegroundWindow(hwnd);
+    restoreAndFocusWindow(hwnd);
   }
 
   /// 창을 볼 때까지 계속 깜빡이게 하는 타이머 — Windows는 FLASHW_TIMERNOFG를 줘도 시스템
@@ -736,19 +716,19 @@ class NotificationService {
   bool _flashFrame = true;
 
   void _flashWindowsTaskbar(String roomId, {required bool untilRoomOpened}) {
-    final hwnd = _findOurWindow();
+    final hwnd = findMainWindow();
     if (hwnd == 0) return;
 
     if (!untilRoomOpened) {
       // 환경설정 기본값 — 창이 포커스돼 있으면 안 깜빡이고, 백그라운드면 창에 포커스가
       // 돌아올 때까지만 깜빡인다(예전 동작 그대로).
       _pendingFlashRooms.clear();
-      if (GetForegroundWindow() == hwnd) return;
+      if (foregroundWindow() == hwnd) return;
       _flash(hwnd, stop: false);
       _flashTimer?.cancel();
       _flashTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        final current = _findOurWindow();
-        if (current == 0 || GetForegroundWindow() == current) {
+        final current = findMainWindow();
+        if (current == 0 || foregroundWindow() == current) {
           stopWindowsTaskbarFlash();
           return;
         }
@@ -769,7 +749,7 @@ class NotificationService {
         timer.cancel();
         return;
       }
-      final current = _findOurWindow();
+      final current = findMainWindow();
       if (current == 0) {
         stopWindowsTaskbarFlash();
         return;
@@ -784,55 +764,11 @@ class NotificationService {
     _flashTimer?.cancel();
     _flashTimer = null;
     _pendingFlashRooms.clear();
-    if (!Platform.isWindows) return;
-    final hwnd = _findOurWindow();
+    if (!AppPlatform.isWindows) return;
+    final hwnd = findMainWindow();
     if (hwnd != 0) _flash(hwnd, stop: true);
   }
 
-  void _flash(int hwnd, {required bool stop, bool forced = false}) {
-    final info = calloc<_FLASHWINFO>();
-    final target = _flashFrame ? _flashwAll : _flashwTray;
-    try {
-      info.ref
-        ..cbSize = sizeOf<_FLASHWINFO>()
-        ..hwnd = hwnd
-        ..dwFlags = stop
-            ? _flashwStop
-            : (forced ? target : (target | _flashwTimerNoFg))
-        ..uCount = forced ? _flashwForcedCount : 0
-        ..dwTimeout = 0;
-      _flashWindowEx(info);
-    } finally {
-      calloc.free(info);
-    }
-  }
+  void _flash(int hwnd, {required bool stop, bool forced = false}) =>
+      flashWindow(hwnd, stop: stop, forced: forced, frame: _flashFrame);
 }
-
-// win32 5.x 패키지 바인딩에 FlashWindowEx가 아직 없어서, 여기서만 필요한
-// 최소한의 FFI 선언을 직접 추가했다 (다른 Win32 호출은 전부 win32 패키지 것을 그대로 씀).
-const _flashwStop = 0x00000000; // 깜빡임 중지(원래 상태로)
-const _flashwAll = 0x00000003; // FLASHW_CAPTION | FLASHW_TRAY
-const _flashwTray = 0x00000002; // FLASHW_TRAY — 작업표시줄 버튼만(창 테두리는 그대로)
-const _flashwTimerNoFg = 0x0000000C; // 포커스를 받을 때까지 계속 깜빡임
-// 창이 이미 포커스돼 있을 때(forced) 몇 번 깜빡이고 멈출지 — TIMERNOFG가 못 쓰이니 직접 횟수를 준다.
-const _flashwForcedCount = 4;
-
-final class _FLASHWINFO extends Struct {
-  @Uint32()
-  external int cbSize;
-  @IntPtr()
-  external int hwnd;
-  @Uint32()
-  external int dwFlags;
-  @Uint32()
-  external int uCount;
-  @Uint32()
-  external int dwTimeout;
-}
-
-typedef _FlashWindowExNative = Int32 Function(Pointer<_FLASHWINFO>);
-typedef _FlashWindowExDart = int Function(Pointer<_FLASHWINFO>);
-
-final _user32 = DynamicLibrary.open('user32.dll');
-final _flashWindowEx = _user32
-    .lookupFunction<_FlashWindowExNative, _FlashWindowExDart>('FlashWindowEx');

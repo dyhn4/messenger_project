@@ -9,6 +9,7 @@ import 'package:pasteboard/pasteboard.dart';
 import '../data/stickers.dart';
 import '../services/api_client.dart'
     show UploadCancelToken, UploadCancelledException;
+import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
 import '../services/mention_logic.dart';
@@ -164,7 +165,7 @@ class CommentInputBarState extends State<CommentInputBar> {
     }
 
     final path =
-        '${Directory.systemTemp.path}${Platform.pathSeparator}image_${DateTime.now().microsecondsSinceEpoch}.png';
+        '${Directory.systemTemp.path}${AppPlatform.pathSeparator}image_${DateTime.now().microsecondsSinceEpoch}.png';
     final file = File(path);
     await file.writeAsBytes(bytes);
     if (!mounted) return;
@@ -403,7 +404,7 @@ class CommentInputBarState extends State<CommentInputBar> {
                       // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
                       // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
                       // _handleKey가 순수 Enter만 직접 가로채 보낸다.
-                      textInputAction: Platform.isWindows
+                      textInputAction: AppPlatform.isWindows
                           ? TextInputAction.newline
                           : TextInputAction.send,
                       onSubmitted: (_) => _send(),
@@ -419,7 +420,7 @@ class CommentInputBarState extends State<CommentInputBar> {
             LayoutBuilder(
               builder: (context, constraints) {
                 final showHint =
-                    Platform.isWindows && constraints.maxWidth > 320;
+                    AppPlatform.isWindows && constraints.maxWidth > 320;
                 return Row(
                   children: [
                     TapRegion(

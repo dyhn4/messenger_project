@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:open_file/open_file.dart';
 
+import 'app_platform.dart';
+
 /// 안드로이드에서 다운로드한 파일이 모이는 폴더 — 휴대폰 공용 Download 아래의 이 이름.
 const kAndroidDownloadSubfolder = 'TangoTalk';
 
@@ -28,7 +30,7 @@ Future<String> androidDownloadFolder() async {
 
 /// 알림 등에 보여줄 경로 — 안드로이드는 "/storage/emulated/0/"을 떼고 "Download/…"부터 보인다.
 String displayDownloadPath(String path) {
-  if (!Platform.isAndroid) return path;
+  if (!AppPlatform.isAndroid) return path;
   final i = path.indexOf('/Download/');
   return i < 0 ? path : path.substring(i + 1);
 }
@@ -46,12 +48,12 @@ Future<String> writeDownloadFile({
   required List<int> bytes,
   bool reuseIdentical = false,
 }) async {
-  if (Platform.isAndroid && !await _ensureAndroidWritePermission()) {
+  if (AppPlatform.isAndroid && !await _ensureAndroidWritePermission()) {
     throw const FileSystemException('저장 권한이 없어 다운로드할 수 없습니다.');
   }
   await Directory(folder).create(recursive: true);
 
-  final sep = Platform.pathSeparator;
+  final sep = AppPlatform.pathSeparator;
   final dot = fileName.lastIndexOf('.');
   final base = dot > 0 ? fileName.substring(0, dot) : fileName;
   final ext = dot > 0 ? fileName.substring(dot) : '';
@@ -68,12 +70,12 @@ Future<String> writeDownloadFile({
     }
     try {
       await File(path).writeAsBytes(bytes, flush: true);
-      if (Platform.isAndroid) unawaited(_scan(path));
+      if (AppPlatform.isAndroid) unawaited(_scan(path));
       return path;
     } on FileSystemException catch (e) {
       // 안드로이드는 다른 앱(또는 다시 설치하기 전의 이 앱)이 만든 같은 이름의 파일이 이 앱에는
       // 안 보이는 채로 있을 수 있다 — 그 이름으로는 쓰기가 실패하니 다음 번호로 넘어간다.
-      if (!Platform.isAndroid) rethrow;
+      if (!AppPlatform.isAndroid) rethrow;
       lastError = e;
     }
   }

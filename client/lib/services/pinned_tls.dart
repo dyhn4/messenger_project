@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' as http_io;
 import 'package:path_provider/path_provider.dart';
 import 'package:web_socket/io_web_socket.dart';
 import 'package:web_socket/web_socket.dart' as ws;
+
+import 'app_platform.dart';
 
 /// 서버가 자체 서명 인증서를 쓰기 때문에, 공인 CA 목록이 아니라 이 인증서 하나만
 /// 신뢰하도록 설정한다(핀닝). 인증서 검증을 통째로 꺼버리는 방식(아무 인증서나 허용)은
@@ -17,13 +20,18 @@ import 'package:web_socket/web_socket.dart' as ws;
 /// (기존 방식), 또는 로그인 화면의 "서버 주소 변경"에서 페어링 코드로 받아와 로컬에 저장한
 /// 인증서(우선순위가 더 높음 — [saveDynamicCert] 참고). 서버를 다른 PC로 옮겨 인증서가
 /// 바뀌었을 때 앱을 재빌드하지 않고도 페어링으로 새 인증서를 받을 수 있게 하기 위함이다.
+///
+/// 웹 빌드는 TLS를 브라우저가 맡아서 앱이 인증서를 고를 수 없다 — 그래서 웹에서는 핀닝 없이
+/// 브라우저 기본 연결을 쓰고, 서버는 브라우저가 신뢰하는 공인 인증서를 써야 한다.
 class PinnedTls {
   static SecurityContext? _context;
   static http.Client? _httpClient;
 
   static Future<File> _dynamicCertFile() async {
     final dir = await getApplicationSupportDirectory();
-    return File('${dir.path}${Platform.pathSeparator}pinned_server_cert.pem');
+    return File(
+      '${dir.path}${AppPlatform.pathSeparator}pinned_server_cert.pem',
+    );
   }
 
   static Future<SecurityContext> _loadContext() async {
@@ -143,6 +151,7 @@ class PinnedTls {
   static Future<http.Client> httpClient() async {
     final cached = _httpClient;
     if (cached != null) return cached;
+    if (kIsWeb) return _httpClient = http.Client();
     final context = await _loadContext();
     final client = http_io.IOClient(HttpClient(context: context));
     _httpClient = client;
@@ -158,6 +167,14 @@ class PinnedTls {
     })
   >
   webSocketConnector() async {
+    if (kIsWeb) {
+      // 브라우저 WebSocket은 헤더를 붙일 수 없다(토큰은 socket.io auth로 보내서 상관없다).
+      return (
+        Uri uri, {
+        Iterable<String>? protocols,
+        Map<String, String>? headers,
+      }) => ws.WebSocket.connect(uri, protocols: protocols);
+    }
     final context = await _loadContext();
     return (
       Uri uri, {
@@ -180,6 +197,7 @@ class PinnedTls {
   /// 앱 전체의 `HttpClient()` 생성 자체를 가로채서 전부 이 인증서를 신뢰하도록 만든다.
   /// main()에서 runApp() 전에 반드시 await로 호출해야 한다.
   static Future<void> installGlobalHttpOverrides() async {
+    if (kIsWeb) return;
     final context = await _loadContext();
     HttpOverrides.global = _PinnedHttpOverrides(context);
   }

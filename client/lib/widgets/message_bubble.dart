@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/app_platform.dart';
 import 'sticker_view.dart';
 import '../models/app_user.dart';
 import '../models/mention.dart';
@@ -1057,7 +1057,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             format: message.textFormat,
             style: applyChatFont(Theme.of(context).textTheme.bodyMedium, font),
             linkColor: Colors.blue,
-            selectable: Platform.isWindows,
+            selectable: AppPlatform.isWindows,
             mentions: message.mentions,
             myUserId: widget.session.userId,
             onMentionTap: _openMention,
@@ -1125,7 +1125,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             format: message.textFormat,
             style: theme.textTheme.bodyMedium,
             linkColor: Colors.blue,
-            selectable: Platform.isWindows,
+            selectable: AppPlatform.isWindows,
             mentions: message.mentions,
             myUserId: widget.session.userId,
             onMentionTap: _openMention,

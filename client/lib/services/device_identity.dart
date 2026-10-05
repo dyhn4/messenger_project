@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import 'api_client.dart';
+import 'app_platform.dart';
 
 const _kDeviceId = 'secret_device_id';
 const _kIdentitySeed = 'secret_identity_seed'; // X25519 개인키(32바이트 시드).
@@ -73,7 +73,7 @@ class DeviceIdentity {
     try {
       await api.registerDevice(
         deviceId: deviceId,
-        name: name ?? Platform.operatingSystem,
+        name: name ?? AppPlatform.operatingSystem,
         identityPublicKey: await publicKeyBase64(identityKeyPair),
         signingPublicKey: await publicKeyBase64(signingKeyPair),
       );

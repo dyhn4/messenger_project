@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../services/password_policy.dart';
@@ -540,22 +541,25 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                        Center(
-                          child: TextButton(
-                            onPressed: () => showDialog(
-                              context: context,
-                              builder: (_) =>
-                                  _ServerAddressDialog(session: widget.session),
-                            ),
-                            child: Text(
-                              '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
+                        // 웹 앱은 페이지를 내려준 서버에만 붙는다(session.dart의 webServerUrl) — 바꿀 주소가 없다.
+                        if (!kIsWeb)
+                          Center(
+                            child: TextButton(
+                              onPressed: () => showDialog(
+                                context: context,
+                                builder: (_) => _ServerAddressDialog(
+                                  session: widget.session,
+                                ),
+                              ),
+                              child: Text(
+                                '서버 주소 변경${widget.session.serverUrl != null ? ' (${widget.session.serverUrl})' : ''}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
                               ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),

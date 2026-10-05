@@ -9,8 +9,10 @@ import '../models/app_user.dart';
 import '../models/room.dart';
 import '../models/todo.dart';
 import '../services/api_client.dart' show UploadCancelToken;
+import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
-import '../services/folder_dialog.dart';
+import '../services/folder_dialog.dart'
+    if (dart.library.js_interop) '../services/folder_dialog_stub.dart';
 import '../services/room_chat_controller.dart'
     show UploadedAttachment, uploadPlainFile;
 import '../services/session.dart';
@@ -519,7 +521,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   /// `파일 첨부(또는 폴더 경로 지정)` — PC는 파일을 고르면 붙이고, 파일을 고르지 않고 [열기]를 누르면 그때 열린 폴더를 받아 갈
   /// 경로로 지정한다(folder_dialog.dart). 모바일은 예전처럼 파일만 고른다.
   Future<void> _pickDownload() async {
-    if (!Platform.isWindows) return _pickFiles();
+    if (!AppPlatform.isWindows) return _pickFiles();
     final picked = await pickFilesOrFolder(
       title: '파일을 고르거나, 폴더를 연 채로 [열기]를 누르면 그 폴더 경로가 지정됩니다',
     );
@@ -1366,7 +1368,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
             ),
           ),
         // 결과물을 올릴 폴더 — 윈도우 폴더 경로라 PC에서만 고른다(모바일은 이미 지정된 경로만 보이고 지울 수 있다).
-        if (Platform.isWindows) ...[
+        if (AppPlatform.isWindows) ...[
           const SizedBox(height: 10),
           FilledButton.tonalIcon(
             key: const ValueKey('todo-upload-path-button'),
@@ -1386,7 +1388,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               clearKey: const ValueKey('todo-upload-path-clear'),
             ),
           ),
-        if (Platform.isWindows && uploadPath == null)
+        if (AppPlatform.isWindows && uploadPath == null)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(

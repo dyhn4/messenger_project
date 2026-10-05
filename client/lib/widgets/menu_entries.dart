@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import '../screens/calendar/calendar_screen.dart' show openCalendarScreen;
 import '../screens/inquiry_inbox_screen.dart';
 import '../screens/project/project_dialog.dart' show showProjectDialog;
 import '../screens/project/project_window.dart' show openProjectWindow;
+import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'side_panels.dart';
 
@@ -237,11 +237,11 @@ final menuEntries = <MenuEntry>[
     order: 20,
     // 안드로이드 앱에는 아직 프로젝트 화면이 없다(예전에도 모바일 앱바에는 프로젝트 버튼이 없었다).
     visible: (session) =>
-        session.canUseProjects && !(Platform.isAndroid || Platform.isIOS),
+        session.canUseProjects && !(AppPlatform.isAndroid || AppPlatform.isIOS),
     badge: (session) => session.projectUnread,
     // Windows는 독립된 OS 창(작업표시줄에 따로 뜨고 최소화/최대화/리사이즈가 된다)으로 열고, 그 외(안드로이드)는
     // 대화상자로 연다.
-    onOpen: (context, session) => Platform.isWindows
+    onOpen: (context, session) => AppPlatform.isWindows
         ? openProjectWindow(session)
         : showProjectDialog(context, session),
   ),

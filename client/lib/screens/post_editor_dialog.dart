@@ -12,6 +12,7 @@ import 'package:pasteboard/pasteboard.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../services/api_client.dart' show UploadCancelToken;
+import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
@@ -274,7 +275,7 @@ class PostEditorState extends State<PostEditor> {
     }
     if (bytes == null || bytes.isEmpty || !mounted) return;
     final file = File(
-      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      '${Directory.systemTemp.path}${AppPlatform.pathSeparator}'
       'image_${DateTime.now().microsecondsSinceEpoch}.png',
     );
     await file.writeAsBytes(bytes);
@@ -574,7 +575,7 @@ class PostEditorState extends State<PostEditor> {
         child: widget.asDialog ? _buildDialog(context) : _buildPage(context),
       ),
     );
-    if (!Platform.isWindows || _editing) return editor;
+    if (!AppPlatform.isWindows || _editing) return editor;
     return DropTarget(
       enable: !_scheduling,
       onDragEntered: (_) => setState(() => _dragHovering = true),
@@ -947,7 +948,7 @@ class PostEditorState extends State<PostEditor> {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              Platform.isWindows
+              AppPlatform.isWindows
                   ? '사진·파일을 이 창에 끌어다 놓거나 붙여넣어도 첨부됩니다.'
                   : '사진·파일을 $postAttachmentsMaxCount개까지 첨부할 수 있습니다.',
               style: TextStyle(fontSize: 12, color: hint),
@@ -1059,7 +1060,7 @@ class PostEditorState extends State<PostEditor> {
           // 남는 폭을 안내 글자가 다 차지해서 단추들이 늘 오른쪽 끝에 붙는다(Flexible + Spacer로 나누면
           // 안내가 짧을 때 남는 절반이 단추 오른쪽에 빈칸으로 남았다).
           Expanded(
-            child: Platform.isWindows
+            child: AppPlatform.isWindows
                 ? Text(
                     'Ctrl + Enter 로 ${_editing ? '저장' : '게시'} · Esc 로 닫기',
                     maxLines: 1,

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -16,6 +15,7 @@ import '../screens/project/project_notifications.dart'
     show ProjectNotificationTile;
 import '../screens/project/project_window.dart' show openProjectWindow;
 import '../services/app_links.dart';
+import '../services/app_platform.dart';
 import '../services/notification_controller.dart';
 import '../services/notification_entries.dart';
 import '../services/session.dart';
@@ -113,7 +113,7 @@ void openProjectFromNotification(
           project: n.projectName,
           color: n.projectColor,
         );
-  if (Platform.isWindows) {
+  if (AppPlatform.isWindows) {
     unawaited(openProjectWindow(session, openLink: link));
     return;
   }

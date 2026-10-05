@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,8 +7,11 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../models/todo.dart';
+import '../services/app_platform.dart';
 import '../services/chat_socket.dart' show SimpleCommentDeleted;
-import '../services/folder_dialog.dart' show openFolderInExplorer;
+import '../services/folder_dialog.dart'
+    if (dart.library.js_interop) '../services/folder_dialog_stub.dart'
+    show openFolderInExplorer;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../services/todo_api.dart';
@@ -453,7 +455,7 @@ class _TodoDetailState extends State<TodoDetail> {
   Future<void> _openFolder(String path) async {
     final error = await openFolderInExplorer(path);
     if (error == null || !mounted) return;
-    if (!Platform.isWindows) {
+    if (!AppPlatform.isWindows) {
       await Clipboard.setData(ClipboardData(text: path));
       if (mounted) _toast('$error 경로를 복사했습니다.');
       return;

@@ -8,6 +8,7 @@ import '../models/album.dart';
 import '../services/album_controller.dart';
 import '../services/album_download.dart';
 import '../services/album_media.dart';
+import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'album_actions.dart';
 import 'album_share_dialog.dart';
@@ -35,7 +36,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
   int _downloadTotal = 0;
 
   AlbumController get _albums => widget.session.albums;
-  bool get _desktop => !(Platform.isAndroid || Platform.isIOS);
+  bool get _desktop => !(AppPlatform.isAndroid || AppPlatform.isIOS);
 
   @override
   void dispose() {
@@ -49,8 +50,8 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     final result = await FilePicker.pickFiles(
       allowMultiple: true,
       // 안드로이드는 갤러리(사진·영상)에서, PC는 이미지·영상 확장자로 거른 파일 선택 창.
-      type: Platform.isAndroid ? FileType.media : FileType.custom,
-      allowedExtensions: Platform.isAndroid ? null : albumPickerExtensions,
+      type: AppPlatform.isAndroid ? FileType.media : FileType.custom,
+      allowedExtensions: AppPlatform.isAndroid ? null : albumPickerExtensions,
     );
     final files = [
       for (final f in result?.files ?? const <PlatformFile>[])

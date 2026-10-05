@@ -1,11 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../models/album.dart';
 import '../models/room.dart';
 import '../screens/album_create_dialog.dart';
 import '../services/album_controller.dart';
+import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'album_actions.dart';
 import 'album_detail_view.dart';
@@ -353,7 +352,7 @@ class _AlbumsPanelState extends State<AlbumsPanel> {
 }
 
 /// 휴대폰(안드로이드·iOS)인지 — 마우스 올리기가 없어서 카드의 ⋯ 단추를 늘 보여 준다.
-bool get _touchPlatform => Platform.isAndroid || Platform.isIOS;
+bool get _touchPlatform => AppPlatform.isAndroid || AppPlatform.isIOS;
 
 /// 앨범 카드 — 대표 이미지(왼쪽 위에 사진·영상 개수), 아래에 제목과 방 이름·만든 날짜(yyyy/MM/dd). PC는 마우스를
 /// 올리면 오른쪽 위에 ⋯ 단추가 뜨고(모바일은 늘 보인다), 누르면 전체 다운로드·앨범 공유·앨범 수정·앨범 삭제 중 내가

@@ -7,6 +7,7 @@ import '../models/album.dart';
 import 'album_api.dart';
 import 'album_media.dart';
 import 'api_client.dart' show ApiException, UploadCancelToken;
+import 'app_platform.dart';
 
 /// 올리는 중인 파일 하나의 상태.
 enum AlbumUploadStatus { queued, uploading, done, failed }
@@ -653,7 +654,9 @@ class AlbumController extends ChangeNotifier {
     final thumb = prep.thumbnail;
     if (thumb != null) {
       final dir = await Directory.systemTemp.createTemp('album_thumb_');
-      final thumbFile = File('${dir.path}${Platform.pathSeparator}thumb.jpg');
+      final thumbFile = File(
+        '${dir.path}${AppPlatform.pathSeparator}thumb.jpg',
+      );
       try {
         await thumbFile.writeAsBytes(thumb);
         thumbUrl = (await api.uploadFile(thumbFile)).url;

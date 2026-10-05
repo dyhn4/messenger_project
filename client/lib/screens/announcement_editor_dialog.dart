@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../models/announcement.dart';
 import '../models/room.dart';
+import '../services/app_platform.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/rich_text_format.dart';
@@ -598,7 +598,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
       child: Row(
         children: [
           Expanded(
-            child: Platform.isWindows
+            child: AppPlatform.isWindows
                 ? Text(
                     'Ctrl + Enter 로 ${_editing ? '저장' : '등록'} · Esc 로 닫기',
                     maxLines: 1,

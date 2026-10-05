@@ -7,6 +7,7 @@ import '../models/todo.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart'
     show fetchAttachmentBytes, saveAttachment;
+import 'app_platform.dart';
 import 'download_storage.dart';
 import 'session.dart';
 
@@ -74,7 +75,7 @@ String todoDownloadResultText(TodoDownloadSummary summary) {
   return '${summary.saved}개를 다운로드했습니다. ${summary.failed}개는 실패했습니다.$where';
 }
 
-bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+bool get _isMobile => AppPlatform.isAndroid || AppPlatform.isIOS;
 
 /// 할 일의 첨부를 전부 내려받는다(상세 ⋯ 메뉴의 "파일 다운로드") — 앨범 내려받기(album_download.dart)와 같은 방식이다.
 /// PC는 폴더 선택 대화상자로 받은 폴더에 차례로 저장하고(메시지의 "전체 다운로드"처럼 "저장 위치 안 물어보기"가 켜져 있으면
@@ -157,7 +158,7 @@ Future<void> downloadTodoAttachments(
 /// 저장한 폴더를 탐색기로 연다(Windows만) — 설정의 openDownloadFolder는 설정 폴더만 열어서, 다른 폴더를 골랐을 때도
 /// 받은 파일이 있는 곳이 열리게 직접 연다. 안드로이드는 폴더를 열지 않는다(토스트에 경로가 있다).
 Future<void> _openFolder(String folder) async {
-  if (!Platform.isWindows) return;
+  if (!AppPlatform.isWindows) return;
   try {
     await Process.start('explorer.exe', [folder]);
   } catch (_) {

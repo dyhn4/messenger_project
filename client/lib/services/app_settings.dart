@@ -1,16 +1,13 @@
-import 'dart:ffi' hide Size;
 import 'dart:io';
 
-import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:win32/win32.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'app_platform.dart';
 import 'download_storage.dart';
-
-const _kRunKeyPath = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run';
-const _kRunValueName = 'MessengerClient';
+import 'startup_registry.dart'
+    if (dart.library.js_interop) 'startup_registry_stub.dart';
 
 const _kDownloadWithoutAsking = 'settings_download_without_asking';
 const _kDownloadFolder = 'settings_download_folder';
@@ -118,7 +115,7 @@ class AppSettings extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     downloadWithoutAsking = _prefs.getBool(_kDownloadWithoutAsking) ?? false;
     // 안드로이드는 폴더를 고르지 않고 늘 공용 Download/TangoTalk에 저장한다(download_storage.dart).
-    downloadFolder = Platform.isAndroid
+    downloadFolder = AppPlatform.isAndroid
         ? await androidDownloadFolder()
         : _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
     openFolderAfterDownload = _prefs.getBool(_kOpenFolderAfterDownload) ?? true;
@@ -144,8 +141,8 @@ class AppSettings extends ChangeNotifier {
       maxTextScale,
     );
     fontFamily = _prefs.getString(_kFontFamily) ?? '';
-    if (Platform.isWindows) {
-      launchAtStartup = _readStartupPath() != null;
+    if (AppPlatform.isWindows) {
+      launchAtStartup = readStartupPath() != null;
       // 창 자체의 실제 속성(항상 위로/불투명도)이라 위젯 재빌드만으론 반영이 안 되고, 매번
       // 앱을 켤 때마다 여기서 직접 적용해줘야 한다(테마 등 다른 값과 다른 점).
       await windowManager.setMinimumSize(minWindowSize);
@@ -167,18 +164,18 @@ class AppSettings extends ChangeNotifier {
 
   String _defaultDownloadFolder() {
     final home =
-        Platform.environment['USERPROFILE'] ??
-        Platform.environment['HOME'] ??
+        AppPlatform.environment['USERPROFILE'] ??
+        AppPlatform.environment['HOME'] ??
         '';
-    return home.isEmpty ? '' : '$home${Platform.pathSeparator}Downloads';
+    return home.isEmpty ? '' : '$home${AppPlatform.pathSeparator}Downloads';
   }
 
   Future<void> setLaunchAtStartup(bool value) async {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       if (value) {
-        _writeStartupPath(Platform.resolvedExecutable);
+        writeStartupPath(AppPlatform.resolvedExecutable);
       } else {
-        _deleteStartupPath();
+        deleteStartupPath();
       }
     }
     launchAtStartup = value;
@@ -188,7 +185,7 @@ class AppSettings extends ChangeNotifier {
   /// 저장 위치를 묻지 않고 [downloadFolder]에 바로 저장하는지 — 안드로이드는 늘 바로 저장한다.
   bool get savesWithoutAsking =>
       downloadFolder.isNotEmpty &&
-      (Platform.isAndroid || downloadWithoutAsking);
+      (AppPlatform.isAndroid || downloadWithoutAsking);
 
   Future<void> setDownloadWithoutAsking(bool value) async {
     downloadWithoutAsking = value;
@@ -197,7 +194,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   Future<void> setDownloadFolder(String path) async {
-    if (Platform.isAndroid) return; // 안드로이드는 Download/TangoTalk 고정.
+    if (AppPlatform.isAndroid) return; // 안드로이드는 Download/TangoTalk 고정.
     downloadFolder = path;
     await _prefs.setString(_kDownloadFolder, path);
     notifyListeners();
@@ -281,7 +278,7 @@ class AppSettings extends ChangeNotifier {
 
   Future<void> setAlwaysOnTop(bool value) async {
     alwaysOnTop = value;
-    if (Platform.isWindows) await windowManager.setAlwaysOnTop(value);
+    if (AppPlatform.isWindows) await windowManager.setAlwaysOnTop(value);
     await _prefs.setBool(_kAlwaysOnTop, value);
     notifyListeners();
   }
@@ -291,117 +288,14 @@ class AppSettings extends ChangeNotifier {
   /// 않기 위함) — 이 메서드는 "저장하기"를 눌렀을 때만 호출되어 실제로 값을 확정/저장한다.
   Future<void> setWindowOpacity(double value) async {
     windowOpacity = value;
-    if (Platform.isWindows) await windowManager.setOpacity(value);
+    if (AppPlatform.isWindows) await windowManager.setOpacity(value);
     await _prefs.setDouble(_kWindowOpacity, value);
     notifyListeners();
   }
 
-  // ---- Windows 레지스트리(HKCU\Software\Microsoft\Windows\CurrentVersion\Run) ----
-
-  int? _openRunKey(int access) {
-    final keyPtr = TEXT(_kRunKeyPath);
-    final hKeyPtr = calloc<IntPtr>();
-    try {
-      final status = RegOpenKeyEx(
-        HKEY_CURRENT_USER,
-        keyPtr,
-        0,
-        access,
-        hKeyPtr,
-      );
-      if (status != ERROR_SUCCESS) return null;
-      return hKeyPtr.value;
-    } finally {
-      calloc.free(keyPtr);
-      calloc.free(hKeyPtr);
-    }
-  }
-
-  String? _readStartupPath() {
-    final hKey = _openRunKey(KEY_QUERY_VALUE);
-    if (hKey == null) return null;
-    try {
-      final valueNamePtr = TEXT(_kRunValueName);
-      final typePtr = calloc<Uint32>();
-      final sizePtr = calloc<Uint32>();
-      try {
-        var status = RegQueryValueEx(
-          hKey,
-          valueNamePtr,
-          nullptr,
-          typePtr,
-          nullptr,
-          sizePtr,
-        );
-        if (status != ERROR_SUCCESS || sizePtr.value == 0) return null;
-        final buffer = calloc<Uint8>(sizePtr.value);
-        try {
-          status = RegQueryValueEx(
-            hKey,
-            valueNamePtr,
-            nullptr,
-            typePtr,
-            buffer,
-            sizePtr,
-          );
-          if (status != ERROR_SUCCESS) return null;
-          return buffer.cast<Utf16>().toDartString();
-        } finally {
-          calloc.free(buffer);
-        }
-      } finally {
-        calloc.free(valueNamePtr);
-        calloc.free(typePtr);
-        calloc.free(sizePtr);
-      }
-    } finally {
-      RegCloseKey(hKey);
-    }
-  }
-
-  void _writeStartupPath(String exePath) {
-    final hKey = _openRunKey(KEY_SET_VALUE);
-    if (hKey == null) return;
-    try {
-      final valueNamePtr = TEXT(_kRunValueName);
-      final quoted = '"$exePath"';
-      final dataPtr = quoted.toNativeUtf16();
-      try {
-        RegSetValueEx(
-          hKey,
-          valueNamePtr,
-          0,
-          REG_SZ,
-          dataPtr.cast<Uint8>(),
-          (quoted.length + 1) * 2,
-        );
-      } finally {
-        calloc.free(valueNamePtr);
-        calloc.free(dataPtr);
-      }
-    } finally {
-      RegCloseKey(hKey);
-    }
-  }
-
-  void _deleteStartupPath() {
-    final hKey = _openRunKey(KEY_SET_VALUE);
-    if (hKey == null) return;
-    try {
-      final valueNamePtr = TEXT(_kRunValueName);
-      try {
-        RegDeleteValue(hKey, valueNamePtr);
-      } finally {
-        calloc.free(valueNamePtr);
-      }
-    } finally {
-      RegCloseKey(hKey);
-    }
-  }
-
   /// 다운로드 완료 후 "폴더 열기"를 골랐을 때 호출(Windows 전용, 그 외 플랫폼은 아무 것도 안 함).
   Future<void> openDownloadFolder() async {
-    if (!Platform.isWindows || downloadFolder.isEmpty) return;
+    if (!AppPlatform.isWindows || downloadFolder.isEmpty) return;
     await Process.start('explorer.exe', [downloadFolder]);
   }
 }

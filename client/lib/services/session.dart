@@ -26,6 +26,7 @@ import '../models/text_format.dart';
 import '../models/topic_folder.dart';
 import '../widgets/avatar_utils.dart' show automationAvatarColor, colorToHex;
 import 'api_client.dart';
+import 'app_platform.dart';
 import 'app_settings.dart';
 import '../models/announcement.dart';
 import 'calendar_api.dart';
@@ -123,6 +124,14 @@ class Session extends ChangeNotifier {
   /// 지금 쓰는 서버 주소(사내 주소 또는 외부 주소, [serverUrl]) — FCM 백그라운드 핸들러가
   /// 알림의 프로필 사진을 받을 때 사내망 밖이면 외부 주소를 써야 해서 같이 적어둔다.
   static const kActiveServerUrlPrefsKey = 'server_active_url';
+
+  /// 웹 빌드의 서버 주소 — 웹 앱은 메신저 서버가 직접 내려주므로 페이지 주소가 곧 서버 주소다
+  /// (주소 입력·페어링 없음). `flutter run -d chrome`처럼 따로 띄울 때만
+  /// `--dart-define=SERVER_URL=https://...`로 바꾼다.
+  static String get webServerUrl {
+    const override = String.fromEnvironment('SERVER_URL');
+    return override.isNotEmpty ? override : Uri.base.origin;
+  }
 
   late SharedPreferences _prefs;
 
@@ -553,10 +562,10 @@ class Session extends ChangeNotifier {
     // 안 불려서 _persistForegroundState가 늦게까지 실행 안 될 수 있다 — 여기서 한 번
     // 명시적으로 찍어둬서 FCM 백그라운드 핸들러가 항상 최신 값을 읽을 수 있게 한다.
     _persistForegroundState();
-    var primary = _prefs.getString(_kServerUrl);
+    var primary = kIsWeb ? webServerUrl : _prefs.getString(_kServerUrl);
     // 서버가 HTTP에서 HTTPS로 바뀌면서, 예전에 http://로 저장해둔 주소는 더 이상 연결되지
     // 않는다. 같은 호스트:포트를 https://로만 바꿔서 자동으로 맞춰준다.
-    if (primary != null && primary.startsWith('http://')) {
+    if (!kIsWeb && primary != null && primary.startsWith('http://')) {
       primary = 'https://${primary.substring('http://'.length)}';
       await _prefs.setString(_kServerUrl, primary);
     }
@@ -680,6 +689,8 @@ class Session extends ChangeNotifier {
   List<String> get _serverEndpointCandidates {
     final primary = primaryServerUrl;
     if (primary == null) return const [];
+    // 웹은 페이지를 내려준 서버 하나뿐이다 — 다른 주소로 바꾸면 브라우저가 다른 출처로 막는다.
+    if (kIsWeb) return [primary];
     return endpointCandidates(
       primary: primary,
       external: externalServerUrl,
@@ -792,6 +803,8 @@ class Session extends ChangeNotifier {
   /// 실패해도(오프라인, 아직 배포된 빌드 없음 등) 조용히 무시한다 — 부가 기능이라 앱 사용에
   /// 지장을 주면 안 된다.
   Future<void> _checkForUpdate() async {
+    // 웹은 설치 파일이 없다 — 서버가 새 웹 빌드를 내려주면 새로고침만으로 바뀐다.
+    if (kIsWeb) return;
     try {
       final latest = await api?.fetchLatestVersion();
       if (latest == null) return;
@@ -860,14 +873,16 @@ class Session extends ChangeNotifier {
     updateError = null;
     notifyListeners();
     try {
-      final platformPath = Platform.isAndroid ? 'android' : 'windows';
-      final fileName = Platform.isAndroid ? 'update.apk' : 'update-setup.exe';
+      final platformPath = AppPlatform.isAndroid ? 'android' : 'windows';
+      final fileName = AppPlatform.isAndroid
+          ? 'update.apk'
+          : 'update-setup.exe';
       final response = await api!.downloadUpdate(platformPath);
       if (response.statusCode != 200) {
         throw '다운로드에 실패했습니다 (${response.statusCode}).';
       }
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}${Platform.pathSeparator}$fileName');
+      final file = File('${dir.path}${AppPlatform.pathSeparator}$fileName');
       final sink = file.openWrite();
       final total = response.contentLength;
       var received = 0;
@@ -880,7 +895,7 @@ class Session extends ChangeNotifier {
         }
       }).asFuture<void>();
       await sink.close();
-      if (Platform.isWindows) {
+      if (AppPlatform.isWindows) {
         // OpenFile(Windows 구현)은 문서 파일 위주로 검증돼 있어서 설치 프로그램(.exe)에는
         // 조용히 실패하는 경우가 있었다 — 실패해도 예외를 던지지 않아 "설치하기"를 눌러도
         // 아무 반응 없이 대화상자만 닫히는 버그로 나타났다. 설치 파일 실행은 Process.start로
@@ -1763,7 +1778,7 @@ class Session extends ChangeNotifier {
   /// 앱 사용 자체는 계속돼야 하므로 전부 조용히 무시한다 — 소켓이 붙어있는 동안은 기존
   /// 방식으로도 알림이 정상적으로 오고, FCM은 "앱이 완전히 꺼졌을 때"를 위한 보강일 뿐이다.
   Future<void> _registerFcmToken() async {
-    if (!Platform.isAndroid) return;
+    if (!AppPlatform.isAndroid) return;
     try {
       if (!await _ensureFirebaseInitialized()) return;
       final messaging = FirebaseMessaging.instance;
@@ -4030,7 +4045,7 @@ class Session extends ChangeNotifier {
     if (settings.appLocked) await settings.setAppLocked(false);
     // 인증이 아직 유효한 동안(아래에서 token을 지우기 전) 이 기기의 FCM 토큰을 서버에서
     // 지워둔다 — 안 그러면 로그아웃한 뒤에도 이 기기로 그 계정 알림이 계속 온다.
-    if (Platform.isAndroid && deviceIdentity != null && api != null) {
+    if (AppPlatform.isAndroid && deviceIdentity != null && api != null) {
       try {
         await api!.registerFcmToken(deviceIdentity!.deviceId, null);
       } catch (_) {

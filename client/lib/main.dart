@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -12,7 +11,8 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'screens/call_screen.dart';
-import 'screens/capture/capture_window.dart';
+import 'screens/capture/capture_window.dart'
+    if (dart.library.js_interop) 'screens/capture/capture_window_stub.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -20,6 +20,7 @@ import 'screens/project/project_window.dart';
 import 'screens/scheduled_messages_screen.dart' show ScheduledMessageToasts;
 import 'screens/server_setup_screen.dart';
 import 'services/app_lock.dart';
+import 'services/app_platform.dart';
 import 'services/app_settings.dart';
 import 'services/deep_link_service.dart';
 import 'services/fcm_config_cache.dart';
@@ -145,9 +146,9 @@ Future<void> main() async {
   // "프로젝트" 창(project_window.dart)처럼 desktop_multi_window로 만든 서브 창도 똑같이
   // 이 main()을 처음부터 다시 탄다(엔진이 통째로 새로 생기므로) — 그래서 제일 먼저, 지금
   // 실행 중인 게 메인 창인지 서브 창인지부터 가른다. desktop_multi_window는 Windows/macOS/
-  // Linux만 지원해서 이 확인 자체를 Platform.isWindows 뒤에 둔다(그 외엔 서브 창 개념이
+  // Linux만 지원해서 이 확인 자체를 AppPlatform.isWindows 뒤에 둔다(그 외엔 서브 창 개념이
   // 없고 기존처럼 showProjectDialog만 쓴다).
-  if (Platform.isWindows) {
+  if (AppPlatform.isWindows) {
     final windowController = await WindowController.fromCurrentEngine();
     if (windowController.arguments.isNotEmpty) {
       Map<String, dynamic> windowArgs = const {};
@@ -173,7 +174,7 @@ Future<void> main() async {
   // 관리자 콘솔에서 고객사가 직접 넣은 값 — fcm_config_cache.dart 참고)으로 초기화한다. 아직
   // 한 번도 못 받아왔으면(첫 실행, 아직 로그인 전, 관리자가 설정 전 등) 조용히 건너뛴다 — 이후
   // 로그인에 성공하면 session.dart의 _registerFcmToken이 서버에서 받아와 즉시 초기화한다.
-  if (Platform.isAndroid) {
+  if (AppPlatform.isAndroid) {
     final prefs = await SharedPreferences.getInstance();
     final fcmOptions = FcmConfigCache.read(prefs);
     if (fcmOptions != null) {
@@ -186,7 +187,7 @@ Future<void> main() async {
   // 창 닫기(X)를 눌러도 앱이 종료되지 않고 시스템 트레이로 내려가도록(백그라운드에서 계속
   // 알림을 받게) — setPreventClose로 OS의 기본 닫기 동작을 막고, 실제 처리는
   // _MyAppState.onWindowClose(WindowListener)가 한다.
-  if (Platform.isWindows) {
+  if (AppPlatform.isWindows) {
     await windowManager.ensureInitialized();
     await windowManager.setPreventClose(true);
   }
@@ -239,7 +240,7 @@ class _MyAppState extends State<MyApp>
     super.initState();
     // 노트·업무 링크를 누르면 프로젝트 창을 띄워 그 노트·업무를 연다.
     AppLinks.handler = (href) {
-      if (Platform.isWindows) openProjectWindow(session, openLink: href);
+      if (AppPlatform.isWindows) openProjectWindow(session, openLink: href);
     };
     WidgetsBinding.instance.addObserver(this);
     appSettings.init();
@@ -256,7 +257,7 @@ class _MyAppState extends State<MyApp>
     // session.toasts는 HomeScreen이 자기 자신의 context로 구독해서 보여준다(main.dart의
     // navigatorKey.currentContext는 Navigator 위젯 자체의 context라 SnackBar/Overlay가
     // 화면에 그려지지 않는다 — home_screen.dart 참고).
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       windowManager.addListener(this);
       trayManager.addListener(this);
       _initTray();
@@ -267,7 +268,7 @@ class _MyAppState extends State<MyApp>
   /// (Windows는 SendAppLinkToInstance가 이미 그렇게 해주지만, 콜드 스타트로 막 켜진
   /// 경우까지 포함해 한 번 더 확실히 해둔다 — 안드로이드는 OS가 알아서 앱을 앞으로 보낸다).
   void _onPairRequest(PairRequest request) {
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       windowManager.show();
       windowManager.focus();
     }
@@ -280,7 +281,7 @@ class _MyAppState extends State<MyApp>
     session.removeListener(_tryOpenPendingLaunchRoom);
     _pairRequestSub?.cancel();
     session.chatSocket.dispose();
-    if (Platform.isWindows) {
+    if (AppPlatform.isWindows) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);
     }
@@ -363,7 +364,7 @@ class _MyAppState extends State<MyApp>
   Future<void> _openRoomFromNotification(String payload) async {
     // 프로젝트 알림을 누르면 프로젝트 창을 연다(안드로이드에는 별도 창이 없어 앱만 앞으로 온다).
     if (payload.startsWith(NotificationService.projectPayloadPrefix)) {
-      if (Platform.isWindows) openProjectWindow(session);
+      if (AppPlatform.isWindows) openProjectWindow(session);
       return;
     }
     // 통화 수신 알림을 누른 경우엔 방만 여는 게 아니라 통화에 바로 참여한다

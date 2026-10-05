@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/widgets.dart';
 
@@ -7,6 +5,7 @@ import '../models/album.dart';
 import '../widgets/attachment_widgets.dart'
     show fetchAttachmentBytes, saveAttachment;
 import '../widgets/app_toast.dart';
+import 'app_platform.dart';
 import 'download_storage.dart';
 import 'session.dart';
 
@@ -60,7 +59,7 @@ Future<AlbumDownloadSummary> saveAlbumItemsToFolder({
   return AlbumDownloadSummary(saved: saved, failed: failed, folder: folder);
 }
 
-bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+bool get _isMobile => AppPlatform.isAndroid || AppPlatform.isIOS;
 
 /// 앨범 항목들을 내려받는다 — Windows 등 PC는 폴더 선택 대화상자로 받은 폴더에 차례로 저장하고, 안드로이드는 파일 하나
 /// 다운로드와 같은 방식(공용 Download/TangoTalk)으로 항목마다 저장한다. 끝나면 토스트로 알린다. 서명 링크(약 2시간)가

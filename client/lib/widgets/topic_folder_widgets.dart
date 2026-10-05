@@ -1,11 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
 import '../models/topic_folder.dart';
+import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'unread_badge.dart';
@@ -780,7 +779,7 @@ bool get isTouchPlatform {
   if (override != null) {
     return override == TargetPlatform.android || override == TargetPlatform.iOS;
   }
-  return Platform.isAndroid || Platform.isIOS;
+  return AppPlatform.isAndroid || AppPlatform.isIOS;
 }
 
 /// 마우스로 이만큼(논리 픽셀) 넘게 움직여야 끌기로 본다 — 그보다 적게 흔들린 클릭은 그대로 연다.

@@ -13,6 +13,7 @@ import '../models/room.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
+import '../services/app_platform.dart';
 import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
@@ -1211,7 +1212,7 @@ class _DownloadableFileState extends State<DownloadableFile> {
         );
       } else {
         final temp = (await getTemporaryDirectory()).path;
-        path = '$temp${Platform.pathSeparator}${widget.fileName}';
+        path = '$temp${AppPlatform.pathSeparator}${widget.fileName}';
         await File(path).writeAsBytes(bytes);
       }
       await openLocalFile(path);

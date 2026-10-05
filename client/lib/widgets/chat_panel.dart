@@ -11,6 +11,7 @@ import '../models/comment.dart';
 import '../models/message.dart';
 import '../models/room.dart';
 import '../screens/post_editor_dialog.dart' show postEditorsOpen;
+import '../services/app_platform.dart';
 import '../services/room_chat_controller.dart' show RoomChatController;
 import '../services/session.dart';
 import 'announcement_banner.dart';
@@ -562,7 +563,7 @@ class _ChatPanelState extends State<ChatPanel> {
         ),
       ],
     );
-    if (!Platform.isWindows) return column;
+    if (!AppPlatform.isWindows) return column;
     return _dropArea(
       column,
       onFiles: (files) {
@@ -1057,7 +1058,7 @@ class _ChatPanelState extends State<ChatPanel> {
       ],
     );
 
-    if (!Platform.isWindows) return column;
+    if (!AppPlatform.isWindows) return column;
 
     // 메시지 목록 + 입력창 전체를 드롭 영역으로 잡는다(입력창만이 아니라 어디에 놓아도
     // 첨부되도록) — 호버 중엔 채팅방 전체를 덮는 안내 오버레이(DropZoneOverlay)를 보여준다.

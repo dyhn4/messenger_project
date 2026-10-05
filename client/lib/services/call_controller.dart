@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:livekit_client/livekit_client.dart';
 
 import 'api_client.dart';
+import 'app_platform.dart';
 import 'call_hands.dart';
 import 'call_quality.dart';
 import 'call_whiteboard.dart';
@@ -20,7 +20,7 @@ Future<void> _startCallForegroundService(
   String roomName, {
   bool includeMediaProjection = false,
 }) async {
-  if (!Platform.isAndroid) return;
+  if (!AppPlatform.isAndroid) return;
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(
       channelId: 'ongoing_call',
@@ -56,7 +56,7 @@ Future<void> _startCallForegroundService(
 }
 
 Future<void> _stopCallForegroundService() async {
-  if (!Platform.isAndroid) return;
+  if (!AppPlatform.isAndroid) return;
   await FlutterForegroundTask.stopService();
 }
 
@@ -365,7 +365,7 @@ class CallController extends ChangeNotifier {
     final me = _room?.localParticipant;
     if (me == null) return;
     final enable = !me.isScreenShareEnabled();
-    if (enable && Platform.isAndroid) {
+    if (enable && AppPlatform.isAndroid) {
       await _startCallForegroundService(
         _screenShareLabel,
         includeMediaProjection: true,
@@ -379,7 +379,7 @@ class CallController extends ChangeNotifier {
         params: callVideoSpecFor(videoTier).screen,
       ),
     );
-    if (!enable && Platform.isAndroid) {
+    if (!enable && AppPlatform.isAndroid) {
       // 공유를 끄면 화면 캡처 권한이 더 필요 없으므로 원래(카메라/마이크) 서비스로 되돌린다.
       await _startCallForegroundService(_screenShareLabel);
     }

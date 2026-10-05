@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../models/room.dart';
+import '../services/app_platform.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
@@ -139,7 +139,7 @@ class _CallScreenState extends State<CallScreen> {
     try {
       // Windows는 어느 창을 공유할지 우리가 직접 고르게 하고(OS가 안 물어봄), Android는
       // MediaProjection 시스템 화면이 알아서 뜬다.
-      if (!controller.screenShareEnabled && Platform.isWindows) {
+      if (!controller.screenShareEnabled && AppPlatform.isWindows) {
         final sourceId = await showScreenSharePicker(context);
         if (sourceId == null) return;
         await controller.toggleScreenShare(sourceId: sourceId);

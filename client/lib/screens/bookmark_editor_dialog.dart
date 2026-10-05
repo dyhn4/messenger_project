@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/bookmark.dart';
 import '../models/team.dart' show AccountRole;
+import '../services/app_platform.dart';
 import '../services/bookmark_controller.dart';
 import '../services/session.dart';
 import '../widgets/bookmark_image.dart';
@@ -25,7 +26,7 @@ Future<bool> showBookmarkEditor(
   bool? fullScreen,
   Future<File?> Function()? pickImage,
 }) async {
-  final full = fullScreen ?? (Platform.isAndroid || Platform.isIOS);
+  final full = fullScreen ?? (AppPlatform.isAndroid || AppPlatform.isIOS);
   final result = full
       ? await Navigator.of(context).push<bool>(
           MaterialPageRoute(

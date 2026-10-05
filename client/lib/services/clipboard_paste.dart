@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
 
+import 'app_platform.dart';
 import 'table_paste.dart';
 
 /// 붙여넣는 순간의 클립보드 — 이미지(엑셀은 표를 복사하면 비트맵도 함께 올린다)·글자·HTML(Windows만 읽을 수 있다).
@@ -29,7 +28,7 @@ Future<ClipboardSnapshot> readSystemClipboard() async {
     text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
   } catch (_) {}
   String? html;
-  if (Platform.isWindows) {
+  if (AppPlatform.isWindows) {
     try {
       html = await Pasteboard.html;
     } catch (_) {}

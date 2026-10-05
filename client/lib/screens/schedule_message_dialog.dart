@@ -15,6 +15,7 @@ import '../models/message.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
     show ApiException, UploadCancelToken, UploadCancelledException;
+import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart' show UploadedAttachment;
@@ -452,7 +453,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     }
     if (bytes == null || bytes.isEmpty || !mounted) return;
     final file = File(
-      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      '${Directory.systemTemp.path}${AppPlatform.pathSeparator}'
       'image_${DateTime.now().microsecondsSinceEpoch}.png',
     );
     await file.writeAsBytes(bytes);
@@ -786,7 +787,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         ),
       ),
     );
-    if (!Platform.isWindows) return editor;
+    if (!AppPlatform.isWindows) return editor;
     return DropTarget(
       // 이 창 위에 다른 창(달력·확인 창 등)이 떠 있으면 받지 않는다.
       enable: ModalRoute.isCurrentOf(context) ?? true,
@@ -890,7 +891,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       children: [
         // 남는 폭을 안내 글자가 다 차지해서 단추들이 늘 오른쪽 끝(입력칸 끝)에 붙는다.
         Expanded(
-          child: Platform.isWindows && widget.asDialog
+          child: AppPlatform.isWindows && widget.asDialog
               ? Text(
                   'Ctrl + Enter 로 ${editing ? '저장' : '예약'} · Esc 로 닫기',
                   maxLines: 1,
@@ -1173,7 +1174,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              Platform.isWindows
+              AppPlatform.isWindows
                   ? '파일을 이 창에 끌어다 놓거나 붙여넣어도 첨부됩니다. 고르면 바로 올라가요.'
                   : '파일은 $scheduledAttachmentMaxCount개까지 첨부할 수 있어요. 고르면 바로 올라가요.',
               style: TextStyle(fontSize: 12, color: hint),

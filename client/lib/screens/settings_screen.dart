@@ -1,15 +1,16 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../services/app_platform.dart';
 import '../services/app_settings.dart';
 import '../services/download_storage.dart' show kAndroidDownloadSubfolder;
 import '../services/session.dart';
-import '../services/system_fonts.dart';
+import '../services/system_fonts.dart'
+    if (dart.library.js_interop) '../services/system_fonts_stub.dart';
 import '../widgets/filter_dropdown.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -80,7 +81,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 이 PC에 깔린 글꼴 이름 — WinAPI 열거(system_fonts.dart)는 몇백 개라도 수 밀리초 안에
   /// 끝나는 동기 호출이라, 비동기로 미루지 않고 그냥 바로 받는다.
-  late final List<String>? _systemFonts = Platform.isWindows
+  late final List<String>? _systemFonts = AppPlatform.isWindows
       ? listInstalledFontFamilies()
       : null;
 
@@ -95,7 +96,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
-    if (!_saved && Platform.isWindows) {
+    if (!_saved && AppPlatform.isWindows) {
       // 저장하지 않고 닫힌 경우 — 슬라이더로 미리보기만 하던 불투명도를 원래 저장된
       // 값으로 되돌린다. dispose는 async를 기다릴 수 없어 그냥 던져둔다(fire-and-forget).
       windowManager.setOpacity(widget.session.settings.windowOpacity);
@@ -131,7 +132,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setFontFamily(_fontFamily);
     // "프로젝트" 창이 열려있으면 완전히 다른 엔진이라 위 setThemeMode만으론 안 바뀐다 —
     // 따로 알려준다(project_window.dart, Windows 전용이라 함수 안에서 자체적으로 걸러냄).
-    if (Platform.isWindows) unawaited(broadcastThemeChange(_themeMode));
+    if (AppPlatform.isWindows) unawaited(broadcastThemeChange(_themeMode));
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -365,7 +366,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     ),
     // 키보드로 보내는 방식이라 PC 전용 — 모바일은 키보드의 "전송" 버튼으로 보낸다.
-    if (Platform.isWindows)
+    if (AppPlatform.isWindows)
       _Item(
         label: '메시지 전송 옵션 설정',
         child: Row(
@@ -405,7 +406,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
     // 글꼴 이름(맑은 고딕 등)은 PC에 깔려 있는 시스템 글꼴을 그대로 쓰는 방식이라 — 안드로이드엔
     // 이 이름들이 없어서(그려도 기본 글꼴로만 보여 설정한 보람이 없다) 아예 숨긴다.
-    if (Platform.isWindows)
+    if (AppPlatform.isWindows)
       _Item(
         label: '글꼴',
         caption: '새로 고른 글꼴은 저장한 뒤 적용됩니다.',
@@ -438,7 +439,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     ),
-    if (Platform.isWindows)
+    if (AppPlatform.isWindows)
       _Item(
         label: '반투명',
         child: Row(
@@ -470,7 +471,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-    if (Platform.isWindows)
+    if (AppPlatform.isWindows)
       _Item(
         label: '창 깜빡임',
         caption: '알림이 왔을 때 작업표시줄 버튼과 함께 메신저 창의 테두리도 깜빡일지 정합니다.',
@@ -495,7 +496,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
-    if (Platform.isWindows)
+    if (AppPlatform.isWindows)
       _Item(
         label: '작업표시줄 깜빡임',
         caption:
@@ -530,7 +531,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Widget> _systemItems(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     return [
-      if (Platform.isWindows) ...[
+      if (AppPlatform.isWindows) ...[
         _Item(
           label: '시작 시 자동 실행',
           child: _CheckRow(
@@ -552,11 +553,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         label: '파일 다운로드',
         // 안드로이드는 폴더를 고르지 않는다 — 폴더 선택 창에서 Download 자체를 고를 수
         // 없어서(안드로이드 11+ OS 제한) 늘 Download/TangoTalk에 바로 저장한다.
-        child: Platform.isAndroid
+        child: AppPlatform.isAndroid
             ? const _AndroidDownloadFolder()
             : _desktopDownload(context),
       ),
-      if (Platform.isWindows)
+      if (AppPlatform.isWindows)
         _Item(
           label: '자동 잠금',
           caption:

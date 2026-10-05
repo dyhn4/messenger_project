@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/room.dart';
+import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'room_avatar.dart';
 
@@ -183,7 +182,7 @@ class _RoomPickerDropdownState extends State<_RoomPickerDropdown> {
     // PC는 목록을 열자마자 검색어를 칠 수 있게(Esc로 닫기도) 검색창에 포커스를 옮긴다 — 이 목록은
     // 대화상자 밖(Overlay)에 떠서 autofocus만으로는 포커스가 오지 않는다. 휴대폰은 화상 키보드가
     // 목록을 가리지 않게 누를 때만.
-    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    if (AppPlatform.isWindows || AppPlatform.isMacOS || AppPlatform.isLinux) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _searchFocus.requestFocus();
       });

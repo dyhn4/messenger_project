@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +12,7 @@ import '../services/api_client.dart'
 import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
+import '../services/memory_file.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
 import '../services/typing_gate.dart';
@@ -23,7 +24,7 @@ import 'rich_text_format.dart';
 /// ChatInputBar의 _PendingAttachment와 동일한 목적 — 첨부한 즉시 업로드가 시작되고,
 /// [result]가 채워지면 업로드가 끝난 것.
 class _PendingAttachment {
-  final File file;
+  final XFile file;
   final bool isImage;
   final String displayName;
   final int totalBytes;
@@ -164,11 +165,11 @@ class CommentInputBarState extends State<CommentInputBar> {
       return; // 클립보드에 이미지가 없으면 아무 것도 안 함.
     }
 
-    final path =
-        '${Directory.systemTemp.path}${AppPlatform.pathSeparator}image_${DateTime.now().microsecondsSinceEpoch}.png';
-    final file = File(path);
-    await file.writeAsBytes(bytes);
-    if (!mounted) return;
+    final file = bytesAsFile(
+      bytes,
+      'image_${DateTime.now().microsecondsSinceEpoch}.png',
+      mimeType: 'image/png',
+    );
     unawaited(_stageAndUpload(file, true, 'image.png'));
   }
 
@@ -179,24 +180,20 @@ class CommentInputBarState extends State<CommentInputBar> {
     final picked = result?.files ?? const [];
     if (picked.isEmpty || !mounted) return;
     for (final file in picked) {
-      final path = file.path;
-      if (path == null) continue;
+      // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+      if (file.path == null && file.bytes == null) continue;
       unawaited(
-        _stageAndUpload(File(path), looksLikeImagePath(path), file.name),
+        _stageAndUpload(file.xFile, looksLikeImagePath(file.name), file.name),
       );
     }
   }
 
   /// ChatInputBarState.addDroppedFiles와 동일 — message_thread_screen.dart의 DropTarget이 호출.
-  void addDroppedFiles(List<File> files) {
+  void addDroppedFiles(List<XFile> files) {
     if (files.isEmpty || !mounted) return;
     for (final file in files) {
       unawaited(
-        _stageAndUpload(
-          file,
-          looksLikeImagePath(file.path),
-          file.uri.pathSegments.last,
-        ),
+        _stageAndUpload(file, looksLikeImagePath(file.name), file.name),
       );
     }
   }
@@ -204,7 +201,7 @@ class CommentInputBarState extends State<CommentInputBar> {
   /// ChatInputBarState._stageAndUpload와 동일 — 첨부를 즉시 스테이징 목록에 넣고 곧바로
   /// 서버 업로드를 시작한다.
   Future<void> _stageAndUpload(
-    File file,
+    XFile file,
     bool isImage,
     String displayName,
   ) async {

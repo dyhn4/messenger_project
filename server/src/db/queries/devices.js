@@ -81,6 +81,34 @@ export function listFcmTokensForUser(userId) {
     .then((rows) => rows.filter((r) => !!r.fcmToken));
 }
 
+/** 웹 앱의 웹 푸시 구독(JSON 문자열, null이면 지움) — setDeviceFcmToken의 웹판. */
+export async function setDeviceWebPushSubscription(id, userId, subscriptionJson) {
+  const [row] = await db
+    .update(devices)
+    .set({ webPushSubscription: subscriptionJson, lastSeenAt: new Date() })
+    .where(and(eq(devices.id, id), eq(devices.userId, userId), isNull(devices.revokedAt)))
+    .returning();
+  return row ?? null;
+}
+
+/** 오프라인 사용자에게 웹 푸시를 보낼 때 — 폐기되지 않은 기기 중 구독이 있는 것만(파싱해서 돌려준다). */
+export async function listWebPushSubscriptionsForUser(userId) {
+  const rows = await db
+    .select({ deviceId: devices.id, webPushSubscription: devices.webPushSubscription })
+    .from(devices)
+    .where(and(eq(devices.userId, userId), isNull(devices.revokedAt)));
+  const result = [];
+  for (const r of rows) {
+    if (!r.webPushSubscription) continue;
+    try {
+      result.push({ deviceId: r.deviceId, subscription: JSON.parse(r.webPushSubscription) });
+    } catch {
+      // 망가진 값은 건너뛴다(다음 구독 등록 때 덮어써진다).
+    }
+  }
+  return result;
+}
+
 export async function revokeDevice(id, userId) {
   const [row] = await db
     .update(devices)

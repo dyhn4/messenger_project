@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:cross_file/cross_file.dart';
 
 import '../models/album.dart';
 import 'api_client.dart';
@@ -71,7 +71,7 @@ abstract class AlbumApi {
 
   /// `POST /api/upload` — 앨범에 담을 파일(또는 썸네일) 하나를 올린다.
   Future<UploadResult> uploadFile(
-    File file, {
+    XFile file, {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   });
@@ -251,7 +251,7 @@ class RemoteAlbumApi implements AlbumApi {
 
   @override
   Future<UploadResult> uploadFile(
-    File file, {
+    XFile file, {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   }) => _api.uploadFile(file, onProgress: onProgress, cancelToken: cancelToken);

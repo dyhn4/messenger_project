@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:client/models/album.dart';
 import 'package:client/services/album_api.dart';
 import 'package:client/services/api_client.dart'
     show ApiException, UploadCancelToken, UploadResult;
+import 'package:cross_file/cross_file.dart';
 
 /// 서버 없이 앨범 컨트롤러·화면을 시험하는 가짜 API. 앨범과 항목은 메모리에 들고 있고, 목록·항목 조회는 진짜 서버처럼
 /// roomId·before·limit을 지켜 최신순으로 돌려준다. 항목의 `canDelete`는 서버와 같은 규칙(올린 사람·앨범 만든 사람·
@@ -329,7 +328,7 @@ class FakeAlbumApi implements AlbumApi {
 
   @override
   Future<UploadResult> uploadFile(
-    File file, {
+    XFile file, {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   }) async {

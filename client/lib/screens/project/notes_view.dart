@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -433,11 +431,14 @@ class _NotesViewState extends State<NotesView> {
   /// 그림 넣기 — 골라서 올리고, 본문에 그림 줄을 넣는다(보기 화면에서 그림으로 보인다).
   Future<void> _insertImage() async {
     final picked = await FilePicker.pickFiles(type: FileType.image);
-    final path = picked?.files.single.path;
-    if (path == null || !mounted) return;
+    final file = picked?.files.single;
+    // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+    if (file == null || (file.path == null && file.bytes == null) || !mounted) {
+      return;
+    }
     setState(() => _uploading = true);
     try {
-      final up = await widget.session.api!.uploadFile(File(path));
+      final up = await widget.session.api!.uploadFile(file.xFile);
       final name = picked!.files.single.name;
       _body.insertBlock(
         '$noteImagePrefix$name',

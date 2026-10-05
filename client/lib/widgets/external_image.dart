@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 /// 외부 웹사이트 이미지(링크 미리보기 그림 등) — 그냥 Image.network를 쓰면 못 불러온다.
@@ -91,6 +92,20 @@ class _ExternalImageState extends State<ExternalImage> {
 
   @override
   Widget build(BuildContext context) {
+    // 웹은 우리 서버 인증서 핀닝(HttpOverrides)이 없어 위의 우회가 필요 없다. 다른 사이트 그림은
+    // CORS를 안 열어 둔 곳이 많아서, 그럴 땐 <img> 요소로 그리게 둔다(fallback).
+    if (kIsWeb) {
+      return Image.network(
+        widget.url,
+        width: widget.width,
+        height: widget.height,
+        fit: widget.fit,
+        webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
+        loadingBuilder: (_, child, progress) =>
+            progress == null ? child : widget.placeholder,
+        errorBuilder: (_, _, _) => widget.placeholder,
+      );
+    }
     return FutureBuilder<Uint8List>(
       future: _future,
       builder: (context, snapshot) {

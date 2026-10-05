@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:cross_file/cross_file.dart';
 
 import '../models/bookmark.dart';
 import 'api_client.dart';
@@ -40,7 +40,7 @@ abstract class BookmarkApi {
   Future<BookmarkPreview> preview(String url);
 
   /// `POST /api/upload` — 북마크 이미지 직접 올리기. 저장에는 [UploadResult.url], 미리보기에는 [UploadResult.signedUrl].
-  Future<UploadResult> uploadImage(File file);
+  Future<UploadResult> uploadImage(XFile file);
 }
 
 class RemoteBookmarkApi implements BookmarkApi {
@@ -129,5 +129,5 @@ class RemoteBookmarkApi implements BookmarkApi {
   );
 
   @override
-  Future<UploadResult> uploadImage(File file) => _api.uploadFile(file);
+  Future<UploadResult> uploadImage(XFile file) => _api.uploadFile(file);
 }

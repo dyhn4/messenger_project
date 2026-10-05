@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -56,9 +56,11 @@ class _PollFile {
     required this.isImage,
   });
 
-  final File file;
+  final XFile file;
   final String name;
-  final int size;
+
+  /// 처음엔 0 — 붙인 직후 파일 크기를 읽어 채운다(XFile.length()가 비동기라).
+  int size;
   final bool isImage;
   final UploadCancelToken token = UploadCancelToken();
   int sent = 0;
@@ -222,27 +224,18 @@ class PollCreatorState extends State<PollCreator> {
 
   // ── 첨부 ──────────────────────────────────────────────────────────
 
-  static String _nameOf(File f) => f.path.split(RegExp(r'[\\/]')).last;
-
-  static int _sizeOf(File f) {
-    try {
-      return f.lengthSync();
-    } catch (_) {
-      return 0;
-    }
-  }
-
   Future<void> _pickFiles() async {
     final result = await FilePicker.pickFiles(allowMultiple: true);
     final picked = [
       for (final f in result?.files ?? const <PlatformFile>[])
-        if (f.path != null) File(f.path!),
+        // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+        if (f.path != null || f.bytes != null) f.xFile,
     ];
     if (picked.isNotEmpty && mounted) addFiles(picked);
   }
 
   /// 파일을 목록에 더하고 바로 올리기 시작한다. 30개를 넘는 만큼은 빼고 알린다(테스트가 직접 부르기도 한다).
-  void addFiles(List<File> files) {
+  void addFiles(List<XFile> files) {
     if (!_isBoard || files.isEmpty || !mounted) return;
     final room = pollAttachmentsMaxCount - _files.length;
     final accepted = files.take(math.max(0, room)).toList();
@@ -250,18 +243,23 @@ class PollCreatorState extends State<PollCreator> {
       showAppToast(context, '첨부 파일은 $pollAttachmentsMaxCount개까지 올릴 수 있습니다.');
     }
     if (accepted.isEmpty) return;
-    setState(() {
-      for (final f in accepted) {
-        _files.add(
-          _PollFile(
-            file: f,
-            name: _nameOf(f),
-            size: _sizeOf(f),
-            isImage: looksLikeImagePath(f.path),
-          ),
-        );
-      }
-    });
+    final added = [
+      for (final f in accepted)
+        _PollFile(
+          file: f,
+          name: f.name,
+          size: 0,
+          isImage: looksLikeImagePath(f.name),
+        ),
+    ];
+    setState(() => _files.addAll(added));
+    for (final p in added) {
+      unawaited(
+        p.file.length().then((n) {
+          if (mounted) setState(() => p.size = n);
+        }, onError: (_) {}),
+      );
+    }
     unawaited(_pumpUploads());
   }
 

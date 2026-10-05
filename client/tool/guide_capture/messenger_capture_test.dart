@@ -29,6 +29,7 @@ import 'package:client/widgets/rich_text_format.dart';
 import 'package:client/widgets/room_options_menu.dart';
 import 'package:client/widgets/team_members_panel.dart';
 import 'package:client/widgets/team_switcher.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -437,13 +438,13 @@ void main() {
     await openDesktop(tester);
     final dir = Directory.systemTemp.createTempSync('guide_files_');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final sheet = File('${dir.path}/고객사_반응_정리.xlsx')
+    final sheet = File('${dir.path}${Platform.pathSeparator}고객사_반응_정리.xlsx')
       ..writeAsBytesSync(List.filled(186 * 1024, 7));
-    final photo = File('${dir.path}/배너_시안.jpg')
+    final photo = File('${dir.path}${Platform.pathSeparator}배너_시안.jpg')
       ..writeAsBytesSync(img.encodeJpg(bannerImage(), quality: 90));
     final state = tester.state<ChatInputBarState>(find.byType(ChatInputBar));
     await tester.runAsync(() async {
-      state.addDroppedFiles([photo, sheet]);
+      state.addDroppedFiles([XFile(photo.path), XFile(sheet.path)]);
       await Future<void>.delayed(const Duration(seconds: 3));
     });
     await tester.pump();

@@ -4,6 +4,7 @@ import {
   listDevicesForUser,
   revokeDevice,
   setDeviceFcmToken,
+  setDeviceWebPushSubscription,
   upsertDevice,
 } from './db/queries/devices.js';
 
@@ -62,6 +63,27 @@ export function createDevicesRouter() {
       return res.status(400).json({ error: 'token은 문자열 또는 null이어야 합니다.' });
     }
     const device = await setDeviceFcmToken(req.params.deviceId, req.user.sub, token);
+    if (!device) return res.status(404).json({ error: '기기를 찾을 수 없습니다.' });
+    res.json({ ok: true });
+  });
+
+  // 웹 앱의 웹 푸시 구독(fcm-token의 웹판, webPush.js). null을 보내면(로그아웃 등) 지운다.
+  router.patch('/devices/:deviceId/web-push', async (req, res) => {
+    const sub = req.body?.subscription;
+    let stored = null;
+    if (sub !== null) {
+      const { endpoint, keys } = sub ?? {};
+      if (
+        typeof endpoint !== 'string' ||
+        !endpoint.startsWith('https://') ||
+        typeof keys?.p256dh !== 'string' ||
+        typeof keys?.auth !== 'string'
+      ) {
+        return res.status(400).json({ error: 'subscription은 endpoint와 keys(p256dh, auth)가 있는 객체 또는 null이어야 합니다.' });
+      }
+      stored = JSON.stringify({ endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth } });
+    }
+    const device = await setDeviceWebPushSubscription(req.params.deviceId, req.user.sub, stored);
     if (!device) return res.status(404).json({ error: '기기를 찾을 수 없습니다.' });
     res.json({ ok: true });
   });

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../models/album.dart';
@@ -57,7 +55,7 @@ Future<void> openAlbumVideo(
     );
     final folder = session.settings.downloadFolder;
     final path = await writeDownloadFile(
-      folder: folder.isEmpty ? Directory.systemTemp.path : folder,
+      folder: folder.isEmpty ? await downloadTempFolder() : folder,
       fileName: albumItemFileName(item, 0),
       bytes: bytes,
       reuseIdentical: true,

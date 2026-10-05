@@ -115,7 +115,7 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 $robocopyArgs = @(
   $Server, $Stage, '/E',
   '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', '.livekit',
-  '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', '.livekit-secret', 'firebase-service-account.json', 'db.json.bak', 'ecosystem.config.cjs',
+  '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', '.web-push-vapid.json', '.livekit-secret', 'firebase-service-account.json', 'db.json.bak', 'ecosystem.config.cjs',
   '/NFL', '/NDL', '/NJH', '/NJS'
 )
 robocopy @robocopyArgs | Out-Null

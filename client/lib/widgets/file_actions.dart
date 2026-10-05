@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -220,7 +219,7 @@ class FileActions {
       final bytes = await _bytes();
       final folder = session.settings.downloadFolder;
       final path = await writeDownloadFile(
-        folder: folder.isEmpty ? Directory.systemTemp.path : folder,
+        folder: folder.isEmpty ? await downloadTempFolder() : folder,
         fileName: fileName,
         bytes: bytes,
         reuseIdentical: true,

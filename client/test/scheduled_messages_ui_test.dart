@@ -18,6 +18,7 @@ import 'package:client/widgets/app_menu_button.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/chat_panel.dart';
 import 'package:client/widgets/scheduled_panel.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1206,9 +1207,12 @@ void main() {
       });
       final dir = Directory.systemTemp.createTempSync('scheduled_ui_test_');
       addTearDown(() => dir.deleteSync(recursive: true));
-      File file(String name) =>
-          File('${dir.path}${Platform.pathSeparator}$name')
-            ..writeAsStringSync('hello');
+      XFile file(String name) {
+        final path = '${dir.path}${Platform.pathSeparator}$name';
+        File(path).writeAsStringSync('hello');
+        return XFile(path);
+      }
+
       final room = t.session.roomById('r1')!;
       await _pumpApp(
         tester,
@@ -1576,7 +1580,7 @@ void main() {
       );
       tester
           .state<ChatInputBarState>(find.byType(ChatInputBar))
-          .addDroppedFiles([file]);
+          .addDroppedFiles([XFile(file.path)]);
       await _settleIo(
         tester,
         () => uploads == 1 && find.byTooltip('메시지 예약').evaluate().isNotEmpty,
@@ -1787,7 +1791,9 @@ void main() {
 
       await tester.tap(find.byTooltip('게시글 작성'));
       await tester.pumpAndSettle();
-      tester.state<PostEditorState>(find.byType(PostEditor)).addFiles([file]);
+      tester.state<PostEditorState>(find.byType(PostEditor)).addFiles([
+        XFile(file.path),
+      ]);
       final editor = tester.state<PostEditorState>(find.byType(PostEditor));
       await _settleIo(tester, () => uploads == 1 && !editor.debugUploading);
       await tester.enterText(

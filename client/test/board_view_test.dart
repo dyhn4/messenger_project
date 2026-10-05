@@ -25,6 +25,7 @@ import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/chat_panel.dart';
 import 'package:client/widgets/comment_input_bar.dart';
 import 'package:client/widgets/message_bubble.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart' show DropTarget;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -874,8 +875,9 @@ void main() {
 
       // 보드에 파일을 끌어다 놓은 것처럼 — 그 파일을 붙인 채로 편집기가 열리고 바로 올라간다.
       final board = tester.state<BoardViewState>(find.byType(BoardView));
-      unawaited(board.compose(files: [a, b]));
-      await tester.pumpAndSettle();
+      unawaited(board.compose(files: [XFile(a.path), XFile(b.path)]));
+      // 파일 크기를 읽기 전엔 진행 막대가 계속 돌아 pumpAndSettle이 업로드 시간 초과까지 시계를 돌린다.
+      await tester.pump();
       final editor = tester.state<PostEditorState>(find.byType(PostEditor));
       await _settleIo(tester, () => uploads == 2 && !editor.debugUploading);
       expect(uploads, 2);
@@ -955,7 +957,7 @@ void main() {
       // 목록 개수만 본다 — 없는 경로라 업로드는 파일을 열지도 못한 채 멈춰 있다.
       final files = [
         for (var i = 0; i < 32; i++)
-          File('${Directory.systemTemp.path}/board_view_none_$i.txt'),
+          XFile('${Directory.systemTemp.path}/board_view_none_$i.txt'),
       ];
       await _pumpBoard(tester, session, room);
       await tester.tap(find.byTooltip('게시글 작성'));

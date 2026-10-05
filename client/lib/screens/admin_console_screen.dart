@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -652,11 +651,12 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
-    final path = result?.files.single.path;
-    if (path == null) return;
+    final file = result?.files.single;
+    // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+    if (file == null || (file.path == null && file.bytes == null)) return;
     try {
       final json =
-          jsonDecode(await File(path).readAsString()) as Map<String, dynamic>;
+          jsonDecode(await file.xFile.readAsString()) as Map<String, dynamic>;
       final projectInfo = json['project_info'] as Map<String, dynamic>?;
       final clients = json['client'] as List?;
       final client = clients?.isNotEmpty == true
@@ -703,10 +703,10 @@ class _FcmSettingsEditorState extends State<_FcmSettingsEditor> {
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
-    final path = result?.files.single.path;
-    if (path == null) return;
+    final file = result?.files.single;
+    if (file == null || (file.path == null && file.bytes == null)) return;
     try {
-      final content = await File(path).readAsString();
+      final content = await file.xFile.readAsString();
       jsonDecode(content); // 최소한 JSON 형식인지만 여기서 미리 확인.
       setState(() => _serviceAccountJson.text = content);
       if (mounted) {

@@ -18,6 +18,7 @@ import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/message_actions.dart';
 import 'package:client/widgets/message_bubble.dart';
 import 'package:client/widgets/poll_card.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1379,9 +1380,11 @@ void main() {
       );
       final dir = Directory.systemTemp.createTempSync('poll_test_');
       addTearDown(() => dir.deleteSync(recursive: true));
-      File file(String name) =>
-          File('${dir.path}${Platform.pathSeparator}$name')
-            ..writeAsStringSync('hello');
+      XFile file(String name) {
+        final path = '${dir.path}${Platform.pathSeparator}$name';
+        File(path).writeAsStringSync('hello');
+        return XFile(path);
+      }
 
       await openCreator(tester, session, session.rooms[1]);
       final creator = tester.state<PollCreatorState>(find.byType(PollCreator));

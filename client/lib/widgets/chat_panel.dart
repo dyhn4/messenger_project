@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
@@ -21,6 +22,7 @@ import 'call_message_card.dart';
 import 'chat_input_bar.dart';
 import 'date_divider.dart';
 import 'date_picker_popup.dart';
+import 'dropped_files.dart';
 import 'hover_toolbar.dart' show kHoverToolbarHeight;
 import 'indexed_scrollbar.dart';
 import 'message_bubble.dart';
@@ -563,7 +565,7 @@ class _ChatPanelState extends State<ChatPanel> {
         ),
       ],
     );
-    if (!AppPlatform.isWindows) return column;
+    if (!AppPlatform.isWindows && !kIsWeb) return column;
     return _dropArea(
       column,
       onFiles: (files) {
@@ -579,7 +581,7 @@ class _ChatPanelState extends State<ChatPanel> {
   /// 가려진 드롭 영역에도 파일을 줘서, 그 창에 놓은 파일이 뒤의 입력칸이나 새 게시글로 들어간다.
   Widget _dropArea(
     Widget child, {
-    required void Function(List<File> files) onFiles,
+    required void Function(List<XFile> files) onFiles,
     bool Function()? accepts,
   }) {
     return ValueListenableBuilder<int>(
@@ -592,7 +594,7 @@ class _ChatPanelState extends State<ChatPanel> {
         onDragExited: (_) => setState(() => _dragHovering = false),
         onDragDone: (details) {
           setState(() => _dragHovering = false);
-          onFiles(details.files.map((f) => File(f.path)).toList());
+          onFiles(droppedFiles(details));
         },
         child: Stack(
           children: [
@@ -1058,7 +1060,7 @@ class _ChatPanelState extends State<ChatPanel> {
       ],
     );
 
-    if (!AppPlatform.isWindows) return column;
+    if (!AppPlatform.isWindows && !kIsWeb) return column;
 
     // 메시지 목록 + 입력창 전체를 드롭 영역으로 잡는다(입력창만이 아니라 어디에 놓아도
     // 첨부되도록) — 호버 중엔 채팅방 전체를 덮는 안내 오버레이(DropZoneOverlay)를 보여준다.

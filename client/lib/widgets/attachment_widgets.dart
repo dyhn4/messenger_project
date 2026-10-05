@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -28,7 +29,8 @@ import 'hover_toolbar.dart';
 /// 두지 않는 한), 인앱 뷰어는 부담 없이 구현 가능한 PDF/텍스트로 한정한다.
 bool _isInAppViewable(String fileName) {
   final ext = fileName.split('.').last.toLowerCase();
-  return ext == 'pdf' || ext == 'txt';
+  // 웹은 PDF를 브라우저 자체 뷰어(새 탭)로 연다 — 앱의 PDF 뷰어(pdfx)는 웹에서 pdf.js를 따로 받아 와야 해서.
+  return (ext == 'pdf' && !kIsWeb) || ext == 'txt';
 }
 
 /// 첨부를 내려받아 [attachmentKey]/[attachmentNonce]가 있으면(비밀 대화) 그 자리에서 복호화까지
@@ -84,6 +86,11 @@ Future<String?> saveAttachment({
     attachmentKey: attachmentKey,
     attachmentNonce: attachmentNonce,
   );
+
+  // 웹은 저장 위치를 고를 수 없다 — 브라우저 다운로드로 받는다(download_storage.dart).
+  if (kIsWeb) {
+    return writeDownloadFile(folder: '', fileName: fileName, bytes: bytes);
+  }
 
   final settings = session.settings;
   String? savedPath;
@@ -175,7 +182,10 @@ Future<({int count, String folder})?> saveAllAttachments({
   String? attachmentNonce,
 }) async {
   final settings = session.settings;
-  final folder = settings.savesWithoutAsking
+  // 웹은 폴더가 없다 — 파일마다 브라우저 다운로드로 받는다(download_storage.dart).
+  final folder = kIsWeb
+      ? ''
+      : settings.savesWithoutAsking
       ? settings.downloadFolder
       : await FilePicker.getDirectoryPath(
           initialDirectory: settings.downloadFolder.isEmpty
@@ -237,7 +247,9 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
       if (!mounted || result == null) return;
       showAppToast(
         context,
-        '${result.count}개를 다운로드했습니다: ${displayDownloadPath(result.folder)}',
+        result.folder.isEmpty
+            ? '${result.count}개를 다운로드했습니다.'
+            : '${result.count}개를 다운로드했습니다: ${displayDownloadPath(result.folder)}',
       );
     } catch (e) {
       if (mounted) showAppToast(context, '다운로드 실패: $e');
@@ -1203,7 +1215,8 @@ class _DownloadableFileState extends State<DownloadableFile> {
       final isSecret = widget.attachmentKey != null;
       final downloadFolder = widget.session.settings.downloadFolder;
       final String path;
-      if (!isSecret && downloadFolder.isNotEmpty) {
+      if (kIsWeb || (!isSecret && downloadFolder.isNotEmpty)) {
+        // 웹은 폴더 없이 새 탭으로 연다(download_storage.dart).
         path = await writeDownloadFile(
           folder: downloadFolder,
           fileName: widget.fileName,

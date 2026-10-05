@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -9,8 +8,8 @@ import '../data/stickers.dart' show Sticker, serverStickerPrefix;
 import '../models/room.dart';
 import '../models/sticker_pack.dart';
 import '../models/team.dart';
-import '../services/app_platform.dart';
 import '../services/avatar_thumbnail.dart';
+import '../services/memory_file.dart';
 import '../services/password_policy.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
@@ -1186,21 +1185,18 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
       if (draft.serverStickerId != null) {
         await widget.session.setAvatarToServerCharacter(draft.serverStickerId!);
       } else if (draft.photoBytes != null) {
-        // 이제서야 서버에 올린다 — 임시 파일로 쓰고, 올린 뒤(실패해도) 지운다.
-        final temp = File(
-          '${Directory.systemTemp.path}${AppPlatform.pathSeparator}'
-          'avatar_${DateTime.now().microsecondsSinceEpoch}.png',
+        // 이제서야 서버에 올린다(디스크에 쓰지 않고 메모리에서 바로).
+        final uploaded = await widget.session.api!.uploadFile(
+          bytesAsFile(
+            draft.photoBytes!,
+            'avatar_${DateTime.now().microsecondsSinceEpoch}.png',
+            mimeType: 'image/png',
+          ),
         );
-        await temp.writeAsBytes(draft.photoBytes!, flush: true);
-        try {
-          final uploaded = await widget.session.api!.uploadFile(temp);
-          await widget.session.updateAvatar(
-            avatarType: 'photo',
-            avatarUrl: uploaded.url,
-          );
-        } finally {
-          unawaited(temp.delete().catchError((_) => temp));
-        }
+        await widget.session.updateAvatar(
+          avatarType: 'photo',
+          avatarUrl: uploaded.url,
+        );
       } else {
         await widget.session.updateAvatar(
           avatarType: draft.type,

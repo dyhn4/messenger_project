@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
@@ -208,7 +208,7 @@ class BoardViewState extends State<BoardView> {
   }
 
   /// 새 게시글 쓰기 — 보드에 파일을 끌어다 놓으면(chat_panel.dart) 그 파일을 붙인 채로 연다.
-  Future<void> compose({List<File> files = const []}) async {
+  Future<void> compose({List<XFile> files = const []}) async {
     if (!widget.room.canWrite(widget.session)) return;
     await showPostEditor(
       context,

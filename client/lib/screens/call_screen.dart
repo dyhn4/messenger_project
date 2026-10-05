@@ -136,6 +136,11 @@ class _CallScreenState extends State<CallScreen> {
 
   Future<void> _toggleScreenShare() async {
     final controller = widget.session.callController;
+    if (AppPlatform.isWebOnIOS) {
+      // 아이폰·아이패드 브라우저에는 화면을 찍어 보내는 기능(getDisplayMedia)이 아예 없다.
+      _showToast('아이폰·아이패드 브라우저에서는 화면 공유를 할 수 없습니다.');
+      return;
+    }
     try {
       // Windows는 어느 창을 공유할지 우리가 직접 고르게 하고(OS가 안 물어봄), Android는
       // MediaProjection 시스템 화면이 알아서 뜬다.

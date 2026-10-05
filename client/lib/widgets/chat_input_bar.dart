@@ -17,6 +17,7 @@ import '../services/app_platform.dart';
 import '../services/clipboard_paste.dart';
 import '../services/file_type_utils.dart';
 import '../services/image_thumbnail.dart';
+import '../services/memory_file.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
 import '../services/table_image.dart';
@@ -39,7 +40,7 @@ import 'rich_text_format.dart';
 /// 업로드가 시작되고, [result]가 채워지면 업로드가 끝난 것 — "보내기"는 이미 끝난 결과만
 /// RoomChatController.sendUploadedAttachment에 넘긴다(다시 올리지 않는다).
 class _PendingAttachment {
-  final File file;
+  final XFile file;
   final bool isImage;
   final String displayName;
   final int totalBytes;
@@ -319,13 +320,13 @@ class ChatInputBarState extends State<ChatInputBar> {
     );
   }
 
-  /// 붙여넣은 PNG를 임시 파일로 쓰고 클릭으로 고른 첨부와 같은 업로드 미리보기에 올린다.
+  /// 붙여넣은 PNG를 클릭으로 고른 첨부와 같은 업로드 미리보기에 올린다(디스크에 쓰지 않고 메모리에서 바로).
   Future<void> _stagePastedPng(Uint8List bytes, String displayName) async {
-    final path =
-        '${Directory.systemTemp.path}${AppPlatform.pathSeparator}paste_${DateTime.now().microsecondsSinceEpoch}.png';
-    final file = File(path);
-    await file.writeAsBytes(bytes);
-    if (!mounted) return;
+    final file = bytesAsFile(
+      bytes,
+      'paste_${DateTime.now().microsecondsSinceEpoch}.png',
+      mimeType: 'image/png',
+    );
     unawaited(_stageAndUpload(file, true, displayName));
   }
 
@@ -377,7 +378,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       final bytes = await file.readAsBytes();
       final thumb = await generateThumbnail(bytes);
       final uploaded = await controller.uploadAttachment(
-        file,
+        XFile(file.path),
         isImage: true,
         originalBytes: bytes,
         thumbBytes: thumb,
@@ -415,10 +416,10 @@ class ChatInputBarState extends State<ChatInputBar> {
     final picked = result?.files ?? const [];
     if (picked.isEmpty || !mounted) return;
     for (final file in picked) {
-      final path = file.path;
-      if (path == null) continue;
+      // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+      if (file.path == null && file.bytes == null) continue;
       unawaited(
-        _stageAndUpload(File(path), looksLikeImagePath(path), file.name),
+        _stageAndUpload(file.xFile, looksLikeImagePath(file.name), file.name),
       );
     }
   }
@@ -470,7 +471,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// (chat_panel.dart의 DropTarget.onDragDone에서 호출). 클릭으로 고를 때(_pickFile)와
   /// 완전히 같은 방식으로 즉시 업로드가 시작된다 — 다만 "어느 버튼으로 골랐는지" 신호가 없어서
   /// 이미지 여부는 확장자로 판별한다(looksLikeImagePath).
-  void addDroppedFiles(List<File> files) {
+  void addDroppedFiles(List<XFile> files) {
     if (files.isEmpty || !mounted) return;
     if (!_canWrite) {
       // 읽기 전용·보관된 토픽 — 끌어다 놓아도 올리지 않고 이유만 알린다.
@@ -479,11 +480,7 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
     for (final file in files) {
       unawaited(
-        _stageAndUpload(
-          file,
-          looksLikeImagePath(file.path),
-          file.uri.pathSegments.last,
-        ),
+        _stageAndUpload(file, looksLikeImagePath(file.name), file.name),
       );
     }
   }
@@ -492,7 +489,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   /// 업로드를 시작한다 — "보내기"를 누르기 전부터 진행률이 보이고, 실제로 보내기를 누르는
   /// 시점엔 이미 업로드가 끝나 있어 지연 없이 바로 전송된다.
   Future<void> _stageAndUpload(
-    File file,
+    XFile file,
     bool isImage,
     String displayName,
   ) async {
@@ -1165,18 +1162,20 @@ class _InquiryDialogState extends State<_InquiryDialog> {
       imageQuality: 85,
     );
     if (picked == null) return;
-    unawaited(_stageAndUpload(File(picked.path), true, picked.name));
+    unawaited(_stageAndUpload(picked, true, picked.name));
   }
 
   Future<void> _pickFile() async {
     final result = await FilePicker.pickFiles();
     final picked = result?.files.single;
-    if (picked?.path == null) return;
-    unawaited(_stageAndUpload(File(picked!.path!), false, picked.name));
+    if (picked == null || (picked.path == null && picked.bytes == null)) {
+      return;
+    }
+    unawaited(_stageAndUpload(picked.xFile, false, picked.name));
   }
 
   Future<void> _stageAndUpload(
-    File file,
+    XFile file,
     bool isImage,
     String displayName,
   ) async {

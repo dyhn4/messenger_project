@@ -13,6 +13,7 @@ import 'package:client/services/room_chat_controller.dart';
 // ScheduledMessage·ScheduledMessageEvent·room.canEditGroupInfo는 session.dart가 같이 내보낸다.
 import 'package:client/services/session.dart';
 import 'package:client/services/time_format.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1318,8 +1319,8 @@ void main() {
 
       final progress = <int>{};
       final uploaded = await session.uploadAttachments([
-        memo,
-        photo,
+        XFile(memo.path),
+        XFile(photo.path),
       ], onProgress: (index, sent, total) => progress.add(index));
       expect(uploaded, hasLength(2));
       expect(uploaded[0].isImage, isFalse);
@@ -1329,7 +1330,7 @@ void main() {
       expect(uploaded[1].url, '/uploads/3-photo.png');
       expect(uploaded[1].fileName, 'photo.png');
       // 사진은 채팅 입력칸처럼 축소 썸네일을 먼저 올린다.
-      expect(uploaded[1].thumbnailUrl, startsWith('/uploads/2-upload_'));
+      expect(uploaded[1].thumbnailUrl, '/uploads/2-upload.bin');
       expect(uploads, hasLength(3));
       expect(progress, {0, 1});
       // 평문 업로드라 비밀 대화 키는 없다.
@@ -1350,12 +1351,12 @@ void main() {
         ..writeAsStringSync('x' * 1000);
       final token = UploadCancelToken()..cancel();
       await expectLater(
-        api.uploadFile(file, cancelToken: token),
+        api.uploadFile(XFile(file.path), cancelToken: token),
         throwsA(isA<UploadCancelledException>()),
       );
       // 취소하지 않은 실패는 그대로 알린다.
       await expectLater(
-        api.uploadFile(file, cancelToken: UploadCancelToken()),
+        api.uploadFile(XFile(file.path), cancelToken: UploadCancelToken()),
         _apiError('파일이 없습니다.'),
       );
     });

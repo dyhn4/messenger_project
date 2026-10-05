@@ -39,3 +39,6 @@ deploy/output/
 
 # 웹 앱 빌드 결과물(client/build/web을 복사해 넣는다 — config.js의 WEB_DIR).
 web/
+
+# 웹 푸시(VAPID) 키 — webPush.js가 처음 실행될 때 만든다. 바뀌면 브라우저 구독이 전부 무효가 된다.
+.web-push-vapid.json

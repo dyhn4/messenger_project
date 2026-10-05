@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:client/models/room.dart';
 import 'package:client/models/team.dart';
@@ -11,6 +10,7 @@ import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/todo_widgets.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -889,7 +889,7 @@ void main() {
         tester.widget<ButtonStyleButton>(_key('todo-attach')).onPressed,
         isNull,
       );
-      state.addFiles([File('nope.txt')]);
+      state.addFiles([XFile('nope.txt')]);
       await tester.pump();
       expect(state.attachmentCount, 30);
       expect(find.text('첨부 파일은 30개까지 올릴 수 있습니다.'), findsOneWidget);
@@ -2119,7 +2119,7 @@ void main() {
       );
       final state = _state(tester);
       // 없는 파일 — 테스트 안에서는 올리기가 끝나지 않아 "올리는 중"으로 남는다.
-      state.addFiles([File('올리는_중.txt')]);
+      state.addFiles([XFile('올리는_중.txt')]);
       await tester.pump();
       expect(state.attachmentCount, 1);
       expect(state.debugUploading, isTrue);
@@ -2389,7 +2389,7 @@ void main() {
         );
         final state = _state(tester);
         expect(state.attachmentCount, todoAttachmentsMaxCount);
-        state.addFiles([File('하나_더.txt')]);
+        state.addFiles([XFile('하나_더.txt')]);
         await tester.pump();
         const message = '첨부 파일은 30개까지 올릴 수 있습니다.';
         expect(find.text(message), findsOneWidget);

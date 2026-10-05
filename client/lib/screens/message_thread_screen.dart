@@ -1,6 +1,5 @@
-import 'dart:io';
-
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../data/stickers.dart';
@@ -13,6 +12,7 @@ import '../services/session.dart';
 import '../widgets/attachment_widgets.dart';
 import '../widgets/board_view.dart' show PostDetailHead;
 import '../widgets/comment_input_bar.dart';
+import '../widgets/dropped_files.dart';
 import '../widgets/hover_toolbar.dart' show kHoverToolbarHeight;
 import '../widgets/message_bubble.dart';
 import '../widgets/message_comments_card.dart';
@@ -381,7 +381,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
           ],
         );
 
-        if (!AppPlatform.isWindows) return column;
+        if (!AppPlatform.isWindows && !kIsWeb) return column;
 
         // chat_panel.dart와 동일 — 댓글 목록 + 입력창 전체를 드롭 영역으로 잡고, 호버 중엔
         // 패널 전체를 덮는 안내 오버레이를 보여준다. 게시글 편집기나 다른 창이 위에 떠 있으면 꺼
@@ -395,7 +395,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
             onDragDone: (details) {
               setState(() => _dragHovering = false);
               _commentInputBarKey.currentState?.addDroppedFiles(
-                details.files.map((f) => File(f.path)).toList(),
+                droppedFiles(details),
               );
             },
             child: Stack(

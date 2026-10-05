@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:client/models/album.dart';
 import 'package:client/services/album_api.dart';
 import 'package:client/services/album_controller.dart';
 import 'package:client/services/album_media.dart';
 import 'package:client/services/api_client.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -232,8 +232,8 @@ void main() {
   });
 
   group('올리기', () {
-    List<File> files(int n, {String ext = 'png'}) => [
-      for (var i = 0; i < n; i++) File('f$i.$ext'),
+    List<XFile> files(int n, {String ext = 'png'}) => [
+      for (var i = 0; i < n; i++) XFile('f$i.$ext'),
     ];
 
     test('한 번에 100개까지만 올리고 넘는 만큼은 알린다', () async {
@@ -256,10 +256,10 @@ void main() {
       api.albums.add(fakeAlbum('a1'));
       await controller.openAlbum(api.albums.first);
       final result = controller.addFiles([
-        File('a.png'),
-        File('b.pdf'),
-        File('c.mp4'),
-        File('d.txt'),
+        XFile('a.png'),
+        XFile('b.pdf'),
+        XFile('c.mp4'),
+        XFile('d.txt'),
       ]);
       expect(result.accepted, 2);
       expect(result.unsupported, 2);
@@ -415,7 +415,7 @@ void main() {
       api.albums.add(fakeAlbum('a1'));
       api.uploadDelay = const Duration(milliseconds: 30);
       await controller.openAlbum(api.albums.first);
-      controller.addFiles([File('a.png')]);
+      controller.addFiles([XFile('a.png')]);
       controller.reset();
       expect(controller.uploads, isEmpty);
       await Future<void>.delayed(const Duration(milliseconds: 100));

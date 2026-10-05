@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -12,6 +12,7 @@ import '../widgets/hover_toolbar.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
 import '../widgets/sticker_view.dart';
+import '../widgets/xfile_image.dart';
 
 /// 올릴 수 있는 그림 확장자(server/src/stickers.js의 STICKER_MIME과 같다).
 const _imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
@@ -104,7 +105,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     if (!_isCharacter) await widget.session.loadServerStickers(force: true);
   }
 
-  Future<List<File>> _pickImages(String title) async {
+  Future<List<XFile>> _pickImages(String title) async {
     final picked = await FilePicker.pickFiles(
       allowMultiple: true,
       type: FileType.custom,
@@ -113,7 +114,8 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     );
     return [
       for (final f in picked?.files ?? const <PlatformFile>[])
-        if (f.path != null) File(f.path!),
+        // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+        if (f.path != null || f.bytes != null) f.xFile,
     ];
   }
 
@@ -121,7 +123,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
 
   /// 새 세트 — 이름과 그림을 한 창에서 같이 정한다.
   Future<void> _createPack() async {
-    final result = await showDialog<(String, List<File>)>(
+    final result = await showDialog<(String, List<XFile>)>(
       context: context,
       builder: (_) =>
           _NewPackDialog(pickImages: _pickImages, isCharacter: _isCharacter),
@@ -707,7 +709,7 @@ class _PackCardState extends State<_PackCard> {
 
 /// "새 세트" — 세트 이름과 올릴 그림을 한 창에서 고른다(그림은 나중에 올려도 된다).
 class _NewPackDialog extends StatefulWidget {
-  final Future<List<File>> Function(String title) pickImages;
+  final Future<List<XFile>> Function(String title) pickImages;
   final bool isCharacter;
   const _NewPackDialog({required this.pickImages, required this.isCharacter});
 
@@ -717,7 +719,7 @@ class _NewPackDialog extends StatefulWidget {
 
 class _NewPackDialogState extends State<_NewPackDialog> {
   final _name = TextEditingController();
-  List<File> _files = const [];
+  List<XFile> _files = const [];
 
   @override
   void dispose() {
@@ -788,7 +790,7 @@ class _NewPackDialogState extends State<_NewPackDialog> {
                       for (final f in _files)
                         ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
+                          child: XFileImage(
                             f,
                             width: 48,
                             height: 48,

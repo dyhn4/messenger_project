@@ -1397,6 +1397,9 @@ export const devices = pgTable(
     // FCM 푸시 토큰(안드로이드 전용 — Windows는 FCM을 공식 지원하지 않아 항상 null).
     // 앱이 완전히 종료된 상태에서도 새 메시지를 알리기 위한 용도로, 소켓 연결이 없을 때만 쓴다.
     fcmToken: text('fcm_token'),
+    // 웹 푸시 구독(웹 앱 전용 — FCM 토큰의 웹판). 브라우저가 준 PushSubscription JSON(endpoint·keys)
+    // 그대로이고, FCM과 같이 소켓 연결이 없을 때만 쓴다(webPush.js).
+    webPushSubscription: text('web_push_subscription'),
   },
   (t) => [index('devices_user_id_idx').on(t.userId)],
 );

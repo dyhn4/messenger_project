@@ -15,6 +15,7 @@ import 'package:client/widgets/album_share_dialog.dart';
 import 'package:client/widgets/albums_panel.dart';
 import 'package:client/widgets/app_menu_button.dart';
 import 'package:client/widgets/room_options_menu.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -492,7 +493,7 @@ void main() {
     testWidgets('업로드 실패는 카드에 남아 재시도·건너뛰기가 된다', (tester) async {
       api.failOnceNames.add('bad.png');
       await openA1(tester);
-      session.albums.addFiles([File('ok.png'), File('bad.png')]);
+      session.albums.addFiles([XFile('ok.png'), XFile('bad.png')]);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('album-uploads')), findsOneWidget);
       expect(find.text('업로드 1개 실패'), findsOneWidget);

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/admin.dart';
@@ -482,6 +482,22 @@ class ApiClient {
   /// 클라이언트가 Firebase.initializeApp()에 쓸 4개 값(GET /firebase-client-config) —
   /// fetchLatestVersion과 같은 성격의 인증 불필요 엔드포인트. 관리자가 아직 FCM을 설정
   /// 안 했으면 필드가 전부 null로 온다(session.dart가 이 경우 FCM을 조용히 비활성화한다).
+  /// 웹 푸시(VAPID) 공개키 — 브라우저가 구독할 때 "이 서버가 보내는 푸시만 받겠다"고 넘기는 값이라 비밀이
+  /// 아니다(server/src/webPush.js). 웹 푸시를 못 쓰는 서버(예전 버전)거나 못 닿으면 null.
+  Future<String?> fetchWebPushPublicKey() async {
+    try {
+      final res = await _client
+          .get(_uri('/web-push/public-key'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      return body['publicKey'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, String?>?> fetchFirebaseClientConfig() async {
     try {
       final res = await _client
@@ -2790,6 +2806,17 @@ class ApiClient {
     await _patch('/api/devices/$deviceId/fcm-token', {'token': token});
   }
 
+  /// 웹 푸시 구독(endpoint·keys)을 등록/갱신한다(웹 전용 — FCM 토큰의 웹판). null이면(로그아웃 등)
+  /// 서버가 지워서 더 이상 이 브라우저로 푸시를 안 보낸다.
+  Future<void> registerWebPushSubscription(
+    String deviceId,
+    Map<String, dynamic>? subscription,
+  ) async {
+    await _patch('/api/devices/$deviceId/web-push', {
+      'subscription': subscription,
+    });
+  }
+
   /// rooms.teamId는 서버에서 NOT NULL이라 비밀 대화 방도 어느 팀인가 하나를 걸어야 한다
   /// (그 팀 멤버인지는 나만 확인받는다 — 상대는 어느 팀 소속이든 상관없다, server/src/secretChats.js).
   Future<Room> startSecretChat({
@@ -3297,7 +3324,7 @@ class ApiClient {
   }
 
   /// 그림 여러 장을 세트 맨 뒤에 올린다(서버 운영자만) — 파일 이름 순서대로 붙는다.
-  Future<void> uploadStickers(String packId, List<File> files) async {
+  Future<void> uploadStickers(String packId, List<XFile> files) async {
     final res = await _send(() async {
       final req =
           http.MultipartRequest(
@@ -3306,8 +3333,7 @@ class ApiClient {
             )
             ..headers.addAll(_authHeaders)
             ..files.addAll([
-              for (final f in files)
-                await http.MultipartFile.fromPath('files', f.path),
+              for (final f in files) await _multipartFile('files', f),
             ]);
       return http.Response.fromStream(await _client.send(req));
     });
@@ -3341,7 +3367,7 @@ class ApiClient {
   /// 그 파이프를 도중에 끊어(구독 취소 + sink를 끝까지 안 채우고 닫음) 요청을 미완성 상태로
   /// 만드는 방식이라 서버에 별도로 알릴 필요가 없다.
   Future<UploadResult> uploadFile(
-    File file, {
+    XFile file, {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   }) async {
@@ -3359,15 +3385,25 @@ class ApiClient {
     }
   }
 
+  /// 업로드할 파일 하나 — 경로 대신 XFile에서 스트림으로 읽어서 웹(브라우저가 준 바이트)과
+  /// 네이티브(디스크 파일, 큰 파일도 메모리에 다 올리지 않음)가 같은 코드로 올린다.
+  Future<http.MultipartFile> _multipartFile(String field, XFile file) async =>
+      http.MultipartFile(
+        field,
+        file.openRead(),
+        await file.length(),
+        filename: file.name,
+      );
+
   Future<UploadResult> _uploadFile(
-    File file, {
+    XFile file, {
     void Function(int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   }) async {
     final res = await _send(() async {
       final req = http.MultipartRequest('POST', _uri('/api/upload'))
         ..headers.addAll(_authHeaders)
-        ..files.add(await http.MultipartFile.fromPath('file', file.path));
+        ..files.add(await _multipartFile('file', file));
 
       if (onProgress == null && cancelToken == null) {
         final streamed = await _client.send(req);

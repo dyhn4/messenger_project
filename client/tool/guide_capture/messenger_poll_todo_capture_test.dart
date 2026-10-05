@@ -23,6 +23,7 @@ import 'package:client/services/session.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/filter_dropdown.dart';
 import 'package:client/widgets/hover_toolbar.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -814,11 +815,11 @@ void main() {
     );
     final dir = Directory.systemTemp.createTempSync('guide_todo_files_');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final file = File('${dir.path}/뉴스레터_기획안.docx')
+    final file = File('${dir.path}${Platform.pathSeparator}뉴스레터_기획안.docx')
       ..writeAsBytesSync(List.filled(312 * 1024, 7));
     final editor = tester.state<TodoEditorState>(find.byType(TodoEditor));
     await tester.runAsync(() async {
-      editor.addFiles([file]);
+      editor.addFiles([XFile(file.path)]);
       await Future<void>.delayed(const Duration(seconds: 2));
     });
     editor.setUploadPath(r'\\fileserver\마케팅\뉴스레터\11월');

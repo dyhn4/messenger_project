@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -116,7 +114,7 @@ class _IconEditDialogState extends State<_IconEditDialog> {
     if (picked == null) return;
     setState(() => _busy = true);
     try {
-      final uploaded = await widget.session.api!.uploadFile(File(picked.path));
+      final uploaded = await widget.session.api!.uploadFile(picked);
       if (!mounted) return;
       setState(
         () => _choice = IconChoice(

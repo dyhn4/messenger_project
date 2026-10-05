@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -55,6 +56,7 @@ import 'secret_session_manager.dart';
 import 'server_endpoints.dart';
 import 'typing_gate.dart';
 import 'update_socket.dart';
+import 'web_notifications.dart';
 
 // 토픽 권한 확장(room.canManage(session)/canWrite(session))은 Session과 늘 같이 쓰이므로,
 // session.dart만 import해도 바로 쓸 수 있게 같이 내보낸다. 예약 메시지 모델·이벤트(Session의
@@ -956,7 +958,7 @@ class Session extends ChangeNotifier {
       throw ApiException(message);
     }
     final bytes = await response.stream.toBytes();
-    final dirPath = settings.downloadFolder.isNotEmpty
+    final dirPath = settings.downloadFolder.isNotEmpty || kIsWeb
         ? settings.downloadFolder
         : (await getTemporaryDirectory()).path;
     return writeDownloadFile(folder: dirPath, fileName: fileName, bytes: bytes);
@@ -1377,6 +1379,7 @@ class Session extends ChangeNotifier {
     // 토큰이 영영 등록되지 않는다(원인을 알기 어려운 형태로). 기기 등록만 먼저 기다린다.
     await deviceIdentity!.registerWithServer(api!);
     unawaited(_registerFcmToken());
+    unawaited(_registerWebPush());
 
     await chatSocket.connect(
       baseUrl: serverUrl!,
@@ -1798,6 +1801,36 @@ class Session extends ChangeNotifier {
       // 다음 로그인/토큰 갱신 때 다시 시도된다 — 그래도 원인을 눈으로 확인할 수 있게 로그는 남긴다.
       debugPrint('[fcm] 토큰 등록 실패: $e');
     }
+  }
+
+  /// 웹 앱의 웹 푸시 구독을 서버에 등록한다 — 앱(탭)을 닫아도 알림이 오게 하는, 안드로이드 FCM의 웹판
+  /// (server/src/webPush.js). 권한을 이미 받아 둔 경우에만 조용히 등록한다 — 권한 묻기는 아이폰 규칙상
+  /// 사용자가 단추를 누를 때만 할 수 있어서 [enableWebNotifications]가 맡는다. 실패해도(구독 불가 브라우저,
+  /// 예전 서버 등) 앱이 켜져 있는 동안의 알림은 그대로 뜬다.
+  Future<void> _registerWebPush() async {
+    if (!kIsWeb || webNotificationPermission != 'granted') return;
+    try {
+      final key = await api?.fetchWebPushPublicKey();
+      if (key == null) return;
+      final subscription = await subscribeWebPush(key);
+      if (subscription == null) return;
+      await api!.registerWebPushSubscription(
+        deviceIdentity!.deviceId,
+        subscription,
+      );
+    } catch (e) {
+      debugPrint('[web-push] 구독 등록 실패: $e');
+    }
+  }
+
+  /// "알림 켜기" 단추(웹) — 알림 권한을 묻고, 허용하면 웹 푸시까지 등록한다. 결과 권한('granted' |
+  /// 'denied' | 'default' | 'unsupported')을 돌려준다. 단추의 onPressed에서 곧바로 불러야 한다(아이폰은
+  /// 사용자의 누름으로 시작된 동작에서만 권한을 물을 수 있다).
+  Future<String> enableWebNotifications() async {
+    final permission = await requestWebNotificationPermission();
+    if (permission == 'granted') await _registerWebPush();
+    notifyListeners();
+    return permission;
   }
 
   /// FCM 초기화 값을 서버에서 받아와 캐싱하고(fcm_config_cache.dart), 이 프로세스에서 아직
@@ -3934,7 +3967,7 @@ class Session extends ChangeNotifier {
   /// 파일의 순번(0부터)과 그 파일의 진행 바이트, [cancelToken]을 취소하면 올리던 파일에서 멈춘다
   /// (UploadCancelledException). 하나라도 실패하면 그 예외가 그대로 나간다.
   Future<List<UploadedAttachment>> uploadAttachments(
-    List<File> files, {
+    List<XFile> files, {
     void Function(int index, int sent, int total)? onProgress,
     UploadCancelToken? cancelToken,
   }) async {
@@ -4051,6 +4084,13 @@ class Session extends ChangeNotifier {
       } catch (_) {
         // 오프라인 등으로 실패해도 로그아웃 자체는 계속 진행한다.
       }
+    }
+    // 웹 푸시 구독도 같은 이유로 서버에서 지우고 브라우저 구독도 끊는다.
+    if (kIsWeb && deviceIdentity != null && api != null) {
+      try {
+        await api!.registerWebPushSubscription(deviceIdentity!.deviceId, null);
+        await unsubscribeWebPush();
+      } catch (_) {}
     }
     await _fcmTokenRefreshSub?.cancel();
     await _prefs.remove(_kToken);

@@ -29,7 +29,7 @@ Write-Host '1) server/ 소스 정리 중(실데이터/비밀값 제외)...' -For
 $robocopyArgs = @(
     $Server, $Stage, '/E',
     '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', 'deploy',
-    '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', 'firebase-service-account.json', 'db.json.bak',
+    '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', '.web-push-vapid.json', 'firebase-service-account.json', 'db.json.bak',
     '/NFL', '/NDL', '/NJH', '/NJS'
 )
 robocopy @robocopyArgs | Out-Null

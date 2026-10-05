@@ -10,6 +10,10 @@ import { findTeamById } from './db/queries/teams.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { isOnline } from './presence.js';
 import { signFileUrl } from './upload.js';
+import { sendWebPushToUser } from './webPush.js';
+
+// 웹 앱(webPush.js)은 FCM과 따로 간다 — FCM이 아직 설정 안 된 서버(서비스 계정 없음)여도 웹 푸시는
+// VAPID 키만으로 보낼 수 있어서, 아래 발송 함수들은 messaging이 없어도 웹 푸시는 보낸다.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 예전 방식(파일을 서버 폴더에 직접 놓기) — 이미 이렇게 설정해둔 기존 설치를 깨지 않으려고
@@ -144,9 +148,6 @@ export async function notifyOfflineMembers({
   kind, // 'message' | 'comment' | 'announcement'
   excludeUserIds = [], // 같은 글로 멘션 푸시를 이미 받는 사람 — 두 번 울리지 않게 뺀다(notifications.js).
 }) {
-  const { messaging } = await getMessagingInstance();
-  if (!messaging) return;
-
   const mutedIds = new Set(await listMutedUserIdsForRoom(room.id));
   const excluded = new Set(excludeUserIds);
   const targets = memberIds.filter(
@@ -172,8 +173,6 @@ export async function notifyOfflineMembers({
  */
 export async function notifyRecordPush({ targets, room, sender, senderName, kind, conversationTag, body, roomTag }) {
   if (targets.length === 0) return;
-  const { messaging } = await getMessagingInstance();
-  if (!messaging) return;
   const conversationTitle = roomTag ? `${roomTag}·${conversationTag}` : conversationTag;
   await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body });
 }
@@ -181,7 +180,6 @@ export async function notifyRecordPush({ targets, room, sender, senderName, kind
 /** 채팅 푸시 본체 — notifyOfflineMembers(메시지·댓글·공지)와 notifyRecordPush(멘션 등)가 같은 모양으로 보낸다. */
 async function sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body: preview }) {
   const { messaging } = await getMessagingInstance();
-  if (!messaging) return;
   // 여러 팀 알림이 섞여 오므로 제목 끝에 팀 이름을 배지처럼 붙인다(앱이 켜져 있을 때 뜨는
   // 로컬 알림과 같은 모양 — client/lib/services/session.dart 참고).
   const { name: teamName, badge: teamBadge } = await teamBadgeFor(room.teamId);
@@ -191,9 +189,18 @@ async function sendChatDataPush({ targets, room, sender, senderName, kind, conve
     ? `${senderName} [${conversationTitle}]${teamBadge}`
     : `${senderName}${teamBadge}`;
   const avatarUrl = sender?.avatarUrl ? signFileUrl(sender.avatarUrl) : null;
+  // 웹 알림은 그림을 합성할 수 없어서 비밀 대화는 PC 앱 토스트처럼 제목 앞에 자물쇠를 붙인다.
+  const webPayload = {
+    kind,
+    roomId: room.id,
+    title: room.isSecret ? `🔒 ${title}` : title,
+    body: preview,
+  };
 
   await Promise.all(
     targets.map(async (userId) => {
+      await sendWebPushToUser(userId, webPayload);
+      if (!messaging) return;
       const tokens = await listFcmTokensForUser(userId);
       await Promise.all(
         tokens.map(({ deviceId, fcmToken }) =>
@@ -240,9 +247,10 @@ async function sendChatDataPush({ targets, room, sender, senderName, kind, conve
  * 채팅 푸시와 달리 알림 payload(notification)를 넣어서, 앱이 꺼져 있어도 OS가 바로 그려준다.
  */
 export async function notifyProjectPush({ userId, title, body, projectId, taskId }) {
+  if (isOnline(userId)) return;
+  await sendWebPushToUser(userId, { kind: 'project', projectId, title, body });
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
-  if (isOnline(userId)) return;
   const tokens = await listFcmTokensForUser(userId);
   await Promise.all(
     tokens.map(({ deviceId, fcmToken }) =>
@@ -277,7 +285,6 @@ export async function notifyProjectPush({ userId, title, body, projectId, taskId
  */
 export async function notifyIncomingCall({ memberIds, callerId, caller, room, roomTag }) {
   const { messaging } = await getMessagingInstance();
-  if (!messaging) return;
 
   const targets = memberIds.filter((id) => id !== callerId && !isOnline(id));
   if (targets.length === 0) return;
@@ -288,6 +295,18 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
 
   await Promise.all(
     targets.map(async (userId) => {
+      // 웹 앱은 전화 화면 없이 알림만 — 눌러서 열면 통화에 참여한다(sw.js의 'call:' payload). 늦은 전화는 의미가 없어 45초만.
+      await sendWebPushToUser(
+        userId,
+        {
+          kind: 'call',
+          roomId: room.id,
+          title: `${callerName}${teamBadge}`,
+          body: roomTag ? `${roomTag} · 화상회의 요청` : '화상회의 요청',
+        },
+        { ttl: 45 },
+      );
+      if (!messaging) return;
       const tokens = await listFcmTokensForUser(userId);
       await Promise.all(
         tokens.map(({ deviceId, fcmToken }) =>
@@ -329,15 +348,21 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
  * 두 번 뜨지 않게) 여기서는 건너뛴다. notifyOfflineMembers와 같은 분리 방식.
  * [teamId]는 제목 끝의 팀 이름 배지에만 쓴다(방이 속한 팀). */
 export async function notifySecretChatInvite({ targetUserId, initiator, roomId, teamId }) {
-  const { messaging } = await getMessagingInstance();
-  if (!messaging) return;
   if (isOnline(targetUserId)) return;
-
-  const tokens = await listFcmTokensForUser(targetUserId);
-  if (tokens.length === 0) return;
 
   const senderName = initiator?.name ?? initiator?.username ?? '알 수 없음';
   const { name: teamName, badge: teamBadge } = await teamBadgeFor(teamId);
+  await sendWebPushToUser(targetUserId, {
+    kind: 'secretInvite',
+    roomId,
+    title: `🔒 ${senderName} [비밀대화 요청]${teamBadge}`,
+    body: '비밀 대화(종단간 암호화)를 요청했습니다.',
+  });
+
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+  const tokens = await listFcmTokensForUser(targetUserId);
+  if (tokens.length === 0) return;
   const avatarUrl = initiator?.avatarUrl ? signFileUrl(initiator.avatarUrl) : null;
 
   await Promise.all(

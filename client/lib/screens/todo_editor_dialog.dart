@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -120,7 +120,7 @@ Color _iconColor(ThemeData theme) => theme.colorScheme.outline;
 /// 만들기)는 처음부터 [result]가 있다.
 class _TodoFile {
   _TodoFile.picked({
-    required File this.file,
+    required XFile this.file,
     required this.name,
     required this.size,
     required this.isImage,
@@ -132,9 +132,11 @@ class _TodoFile {
       size = result.size,
       isImage = result.isImage;
 
-  final File? file;
+  final XFile? file;
   final String name;
-  final int size;
+
+  /// 새로 고른 파일은 처음엔 0 — 붙인 직후 파일 크기를 읽어 채운다(XFile.length()가 비동기라).
+  int size;
   final bool isImage;
   final UploadCancelToken token = UploadCancelToken();
   int sent = 0;
@@ -508,16 +510,6 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
 
   // ── 첨부 ──────────────────────────────────────────────────────────
 
-  static String _nameOf(File f) => f.path.split(RegExp(r'[\\/]')).last;
-
-  static int _sizeOf(File f) {
-    try {
-      return f.lengthSync();
-    } catch (_) {
-      return 0;
-    }
-  }
-
   /// `파일 첨부(또는 폴더 경로 지정)` — PC는 파일을 고르면 붙이고, 파일을 고르지 않고 [열기]를 누르면 그때 열린 폴더를 받아 갈
   /// 경로로 지정한다(folder_dialog.dart). 모바일은 예전처럼 파일만 고른다.
   Future<void> _pickDownload() async {
@@ -530,7 +522,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     if (folder != null) {
       setDownloadPath(folder);
     } else {
-      addFiles([for (final f in picked.files) File(f)]);
+      addFiles([for (final f in picked.files) XFile(f)]);
     }
   }
 
@@ -559,13 +551,14 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
     final result = await FilePicker.pickFiles(allowMultiple: true);
     final picked = [
       for (final f in result?.files ?? const <PlatformFile>[])
-        if (f.path != null) File(f.path!),
+        // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+        if (f.path != null || f.bytes != null) f.xFile,
     ];
     if (picked.isNotEmpty && mounted) addFiles(picked);
   }
 
   /// 파일을 목록에 더하고 바로 올리기 시작한다. 30개를 넘는 만큼은 빼고 알린다(테스트가 직접 부르기도 한다).
-  void addFiles(List<File> files) {
+  void addFiles(List<XFile> files) {
     if (files.isEmpty || !mounted) return;
     final room = todoAttachmentsMaxCount - _files.length;
     final accepted = files.take(math.max(0, room)).toList();
@@ -573,18 +566,23 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
       _toast('첨부 파일은 $todoAttachmentsMaxCount개까지 올릴 수 있습니다.');
     }
     if (accepted.isEmpty) return;
-    setState(() {
-      for (final f in accepted) {
-        _files.add(
-          _TodoFile.picked(
-            file: f,
-            name: _nameOf(f),
-            size: _sizeOf(f),
-            isImage: looksLikeImagePath(f.path),
-          ),
-        );
-      }
-    });
+    final added = [
+      for (final f in accepted)
+        _TodoFile.picked(
+          file: f,
+          name: f.name,
+          size: 0,
+          isImage: looksLikeImagePath(f.name),
+        ),
+    ];
+    setState(() => _files.addAll(added));
+    for (final t in added) {
+      unawaited(
+        t.file!.length().then((n) {
+          if (mounted) setState(() => t.size = n);
+        }, onError: (_) {}),
+      );
+    }
     unawaited(_pumpUploads());
   }
 

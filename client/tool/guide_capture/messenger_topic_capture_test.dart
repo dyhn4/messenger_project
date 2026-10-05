@@ -22,6 +22,7 @@ import 'package:client/widgets/board_view.dart';
 import 'package:client/widgets/chat_panel.dart';
 import 'package:client/widgets/rich_text_format.dart';
 import 'package:client/widgets/room_options_menu.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -950,14 +951,14 @@ void main() {
         dir.deleteSync(recursive: true);
       } on FileSystemException catch (_) {}
     });
-    final banner = File('${dir.path}/이벤트_배너.png')
+    final banner = File('${dir.path}${Platform.pathSeparator}이벤트_배너.png')
       ..writeAsBytesSync(img.encodePng(bannerImage()));
-    final plan = File('${dir.path}/SNS_이벤트_기획안.pptx')
+    final plan = File('${dir.path}${Platform.pathSeparator}SNS_이벤트_기획안.pptx')
       ..writeAsBytesSync(List.filled(2400 * 1024, 7));
     final editor = tester.state<PostEditorState>(find.byType(PostEditor));
     // 첨부는 붙이자마자 올라간다(가짜 서버) — 사진 미리보기와 업로드는 실제 시간으로 흘려보낸다.
     await tester.runAsync(() async {
-      editor.addFiles([banner, plan]);
+      editor.addFiles([XFile(banner.path), XFile(plan.path)]);
       await Future<void>.delayed(const Duration(seconds: 3));
     });
     // 사진 미리보기(Image.file)는 파일 읽기와 그림 풀기가 실제 시간에 번갈아 일어난다 — 실제

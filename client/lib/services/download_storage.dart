@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:open_file/open_file.dart';
 
 import 'app_platform.dart';
+import 'browser_files.dart';
 
 /// 안드로이드에서 다운로드한 파일이 모이는 폴더 — 휴대폰 공용 Download 아래의 이 이름.
 const kAndroidDownloadSubfolder = 'TangoTalk';
@@ -48,6 +49,7 @@ Future<String> writeDownloadFile({
   required List<int> bytes,
   bool reuseIdentical = false,
 }) async {
+  if (kIsWeb) return _webWrite(fileName, bytes, toOpen: reuseIdentical);
   if (AppPlatform.isAndroid && !await _ensureAndroidWritePermission()) {
     throw const FileSystemException('저장 권한이 없어 다운로드할 수 없습니다.');
   }
@@ -95,6 +97,7 @@ bool _sameContent(File file, List<int> bytes) {
 /// 막아서(7.0+) open_file이 FileProvider로 감싼 주소로 넘긴다. PC는 탐색기에서 더블클릭한 것과
 /// 같다(ShellExecute).
 Future<void> openLocalFile(String path) async {
+  if (kIsWeb) return _webOpen(path);
   final result = await OpenFile.open(path);
   switch (result.type) {
     case ResultType.done:
@@ -127,3 +130,36 @@ Future<void> _scan(String path) async {
     // 스캔은 보이기 좋으라고 하는 것뿐 — 실패해도 파일은 이미 저장돼 있다.
   }
 }
+
+// ── 웹 ──────────────────────────────────────────────────────────────────────────
+// 웹에는 다운로드 폴더도 "기본 앱으로 열기"도 없다. 그래서 받기([reuseIdentical] 없이)는 곧바로
+// 브라우저 다운로드로, 보려고 받기([reuseIdentical])는 바이트를 잠깐 들고 있다가 이어지는
+// [openLocalFile]이 새 탭으로 연다 — 호출부는 네이티브와 똑같이 "쓰고 → 연다"를 부르면 된다.
+// [folder]는 웹에서 쓰지 않으니 호출부는 빈 문자열을 넘겨도 된다([downloadTempFolder] 참고).
+
+/// 보려고 받아 둔 첨부(가짜 경로 → 바이트). [openLocalFile]이 열면서 꺼내 간다.
+final _webPendingOpens = <String, ({Uint8List bytes, String fileName})>{};
+var _webOpenSeq = 0;
+
+String _webWrite(String fileName, List<int> bytes, {required bool toOpen}) {
+  final data = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+  if (!toOpen) {
+    downloadBytes(data, fileName);
+    // 이미 내려받은 파일이라 뒤이어 여는(openLocalFile) 일은 없다 — 이름만 돌려준다.
+    return fileName;
+  }
+  final path = 'web-open:${_webOpenSeq++}/$fileName';
+  _webPendingOpens[path] = (bytes: data, fileName: fileName);
+  return path;
+}
+
+void _webOpen(String path) {
+  final pending = _webPendingOpens.remove(path);
+  if (pending == null) return; // 이미 내려받은 파일 — 다시 열지 않는다.
+  openBytes(pending.bytes, pending.fileName);
+}
+
+/// 다운로드 폴더를 안 정했을 때 "보려고" 받을 임시 폴더. 웹은 폴더가 없어 빈 문자열이다
+/// ([writeDownloadFile]이 웹에서는 폴더를 쓰지 않는다).
+Future<String> downloadTempFolder() async =>
+    kIsWeb ? '' : Directory.systemTemp.path;

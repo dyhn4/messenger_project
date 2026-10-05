@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:client/models/app_user.dart';
 import 'package:client/models/message.dart';
@@ -21,6 +20,7 @@ import 'package:client/widgets/side_panels.dart';
 import 'package:client/widgets/todo_from_message.dart';
 import 'package:client/widgets/todo_widgets.dart';
 import 'package:client/widgets/todos_panel.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1300,7 +1300,7 @@ void main() {
         tester.widget<Text>(_key('todo-file-count')).textSpan!.toPlainText(),
         '30 / 30',
       );
-      state.addFiles([File('nope.txt')]);
+      state.addFiles([XFile('nope.txt')]);
       await tester.pump();
       expect(state.attachmentCount, 30);
       expect(find.text('첨부 파일은 30개까지 올릴 수 있습니다.'), findsOneWidget);

@@ -1,10 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -14,6 +15,7 @@ import '../models/room.dart';
 import '../services/api_client.dart' show UploadCancelToken;
 import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
+import '../services/memory_file.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart';
 import '../services/session.dart';
@@ -21,7 +23,9 @@ import '../widgets/app_toast.dart';
 import '../widgets/mention_autocomplete.dart';
 import '../widgets/attachment_widgets.dart'
     show DropZoneOverlay, formatFileSize;
+import '../widgets/dropped_files.dart';
 import '../widgets/rich_text_format.dart';
+import '../widgets/xfile_image.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'schedule_message_dialog.dart';
 
@@ -41,7 +45,7 @@ Future<bool> showPostEditor(
   required Session session,
   required Room room,
   Message? post,
-  List<File> initialFiles = const [],
+  List<XFile> initialFiles = const [],
 }) async {
   final wide = MediaQuery.sizeOf(context).width >= wideBreakpoint;
   final editor = PostEditor(
@@ -80,9 +84,11 @@ class _Draft {
     required this.isImage,
   });
 
-  final File file;
+  final XFile file;
   final String name;
-  final int size;
+
+  /// 처음엔 0 — 붙인 직후 파일 크기를 읽어 채운다(XFile.length()가 비동기라).
+  int size;
   final bool isImage;
 
   /// 다시 시도하면 새 토큰으로 바꾼다 — 예전 시도의 늦은 결과를 알아보려고.
@@ -112,7 +118,7 @@ class PostEditor extends StatefulWidget {
 
   /// 고칠 게시글(없으면 새 글).
   final Message? post;
-  final List<File> initialFiles;
+  final List<XFile> initialFiles;
 
   /// 대화상자(PC)로 그릴지, 전체 화면(모바일)으로 그릴지.
   final bool asDialog;
@@ -274,27 +280,18 @@ class PostEditorState extends State<PostEditor> {
       return; // 그림 붙여넣기를 못 하는 플랫폼 — 글자 붙여넣기는 이미 됐다.
     }
     if (bytes == null || bytes.isEmpty || !mounted) return;
-    final file = File(
-      '${Directory.systemTemp.path}${AppPlatform.pathSeparator}'
-      'image_${DateTime.now().microsecondsSinceEpoch}.png',
-    );
-    await file.writeAsBytes(bytes);
-    if (mounted) addFiles([file]);
-  }
-
-  static String _nameOf(File f) => f.path.split(RegExp(r'[\\/]')).last;
-
-  static int _sizeOf(File f) {
-    try {
-      return f.lengthSync();
-    } catch (_) {
-      return 0;
-    }
+    addFiles([
+      bytesAsFile(
+        bytes,
+        'image_${DateTime.now().microsecondsSinceEpoch}.png',
+        mimeType: 'image/png',
+      ),
+    ]);
   }
 
   /// 파일을 첨부 목록에 더하고 바로 올리기 시작한다(파일 첨부 버튼·끌어다 놓기·붙여넣기). 30개를
   /// 넘는 만큼은 빼고 알린다.
-  void addFiles(List<File> files) {
+  void addFiles(List<XFile> files) {
     if (_editing || files.isEmpty || !mounted) return;
     final room = postAttachmentsMaxCount - _drafts.length;
     final accepted = files.take(math.max(0, room)).toList();
@@ -302,18 +299,23 @@ class PostEditorState extends State<PostEditor> {
       showAppToast(context, '첨부 파일은 $postAttachmentsMaxCount개까지 올릴 수 있습니다.');
     }
     if (accepted.isEmpty) return;
-    setState(() {
-      for (final f in accepted) {
-        _drafts.add(
-          _Draft(
-            file: f,
-            name: _nameOf(f),
-            size: _sizeOf(f),
-            isImage: looksLikeImagePath(f.path),
-          ),
-        );
-      }
-    });
+    final added = [
+      for (final f in accepted)
+        _Draft(
+          file: f,
+          name: f.name,
+          size: 0,
+          isImage: looksLikeImagePath(f.name),
+        ),
+    ];
+    setState(() => _drafts.addAll(added));
+    for (final d in added) {
+      unawaited(
+        d.file.length().then((n) {
+          if (mounted) setState(() => d.size = n);
+        }, onError: (_) {}),
+      );
+    }
     unawaited(_pumpUploads());
   }
 
@@ -321,7 +323,8 @@ class PostEditorState extends State<PostEditor> {
     final result = await FilePicker.pickFiles(allowMultiple: true);
     final picked = [
       for (final f in result?.files ?? const <PlatformFile>[])
-        if (f.path != null) File(f.path!),
+        // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+        if (f.path != null || f.bytes != null) f.xFile,
     ];
     if (picked.isNotEmpty && mounted) addFiles(picked);
   }
@@ -575,7 +578,7 @@ class PostEditorState extends State<PostEditor> {
         child: widget.asDialog ? _buildDialog(context) : _buildPage(context),
       ),
     );
-    if (!AppPlatform.isWindows || _editing) return editor;
+    if ((!AppPlatform.isWindows && !kIsWeb) || _editing) return editor;
     return DropTarget(
       enable: !_scheduling,
       onDragEntered: (_) => setState(() => _dragHovering = true),
@@ -583,7 +586,7 @@ class PostEditorState extends State<PostEditor> {
       onDragDone: (details) {
         setState(() => _dragHovering = false);
         if (_submitting) return;
-        addFiles([for (final f in details.files) File(f.path)]);
+        addFiles(droppedFiles(details));
       },
       child: editor,
     );
@@ -1222,7 +1225,7 @@ class _ImageDraftTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             child: ColoredBox(
               color: scheme.surfaceContainerHighest,
-              child: Image.file(
+              child: XFileImage(
                 draft.file,
                 width: _tileSize,
                 height: _tileSize,

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:client/models/bookmark.dart';
 import 'package:client/models/team.dart';
@@ -11,6 +10,7 @@ import 'package:client/services/bookmark_controller.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/bookmarks_panel.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -122,7 +122,7 @@ class FakeBookmarkApi implements BookmarkApi {
   }
 
   @override
-  Future<UploadResult> uploadImage(File file) async {
+  Future<UploadResult> uploadImage(XFile file) async {
     calls.add('upload');
     return const UploadResult(
       url: '/uploads/pic.png',
@@ -482,7 +482,7 @@ void main() {
       AccountRole role = AccountRole.member,
       bool fullScreen = false,
       double width = 800,
-      Future<File?> Function()? pickImage,
+      Future<XFile?> Function()? pickImage,
       void Function(bool saved)? onResult,
     }) async {
       tester.view.physicalSize = Size(width, 900);
@@ -620,7 +620,7 @@ void main() {
 
     testWidgets('이미지 선택은 올려서 저장 값에는 미서명 경로를 쓴다', (tester) async {
       final api = FakeBookmarkApi(const BookmarkLists());
-      await openEditor(tester, api, pickImage: () async => File('x.png'));
+      await openEditor(tester, api, pickImage: () async => XFile('x.png'));
       await tester.enterText(
         find.byKey(const ValueKey('bookmark-title')),
         '제목',

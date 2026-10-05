@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:image/image.dart' as img;
 
@@ -70,7 +70,7 @@ class AlbumImagePrep {
 
 /// 파일을 올리기 전에 준비한다 — 이미지는 썸네일과 크기, 영상은 없음. 디코딩이 안 되는 형식(HEIC 등)은 빈 결과.
 typedef AlbumMediaPreparer =
-    Future<AlbumImagePrep> Function(File file, AlbumItemKind kind);
+    Future<AlbumImagePrep> Function(XFile file, AlbumItemKind kind);
 
 const _thumbMaxSide = 480;
 
@@ -93,7 +93,7 @@ AlbumImagePrep _prepareSync(Uint8List bytes) {
 }
 
 Future<AlbumImagePrep> defaultAlbumMediaPreparer(
-  File file,
+  XFile file,
   AlbumItemKind kind,
 ) async {
   if (kind != AlbumItemKind.image) return const AlbumImagePrep();

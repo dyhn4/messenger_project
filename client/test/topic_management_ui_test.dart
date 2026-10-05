@@ -20,6 +20,7 @@ import 'package:client/services/session.dart';
 import 'package:client/widgets/capture_upload_dialog.dart';
 import 'package:client/widgets/chat_input_bar.dart';
 import 'package:client/widgets/room_options_menu.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1487,7 +1488,7 @@ void main() {
         ..writeAsStringSync('hi');
       const full = '읽기 전용 토픽입니다. 토픽 관리자만 글을 쓸 수 있습니다.';
       expect(find.text(full), findsOneWidget); // 안내 줄
-      bar.addDroppedFiles([file]);
+      bar.addDroppedFiles([XFile(file.path)]);
       await tester.pump();
       expect(server.called('POST', '/api/upload'), isEmpty);
       expect(find.text(full), findsNWidgets(2)); // 안내 줄 + 토스트

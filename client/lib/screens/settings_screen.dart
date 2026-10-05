@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
@@ -15,6 +16,7 @@ import '../widgets/filter_dropdown.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/update_dialog.dart';
+import '../widgets/web_push_prompt.dart';
 import 'project/project_window.dart';
 
 const _appName = 'TangoTalk';
@@ -549,14 +551,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ],
-      _Item(
-        label: '파일 다운로드',
-        // 안드로이드는 폴더를 고르지 않는다 — 폴더 선택 창에서 Download 자체를 고를 수
-        // 없어서(안드로이드 11+ OS 제한) 늘 Download/TangoTalk에 바로 저장한다.
-        child: AppPlatform.isAndroid
-            ? const _AndroidDownloadFolder()
-            : _desktopDownload(context),
-      ),
+      if (kIsWeb)
+        _Item(
+          label: '알림',
+          child: WebNotificationSetting(session: widget.session),
+        ),
+      // 웹은 저장 위치를 브라우저가 정한다(받은 파일은 브라우저 다운로드로 내려간다).
+      if (!kIsWeb)
+        _Item(
+          label: '파일 다운로드',
+          // 안드로이드는 폴더를 고르지 않는다 — 폴더 선택 창에서 Download 자체를 고를 수
+          // 없어서(안드로이드 11+ OS 제한) 늘 Download/TangoTalk에 바로 저장한다.
+          child: AppPlatform.isAndroid
+              ? const _AndroidDownloadFolder()
+              : _desktopDownload(context),
+        ),
       if (AppPlatform.isWindows)
         _Item(
           label: '자동 잠금',

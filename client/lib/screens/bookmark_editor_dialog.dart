@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -24,7 +24,7 @@ Future<bool> showBookmarkEditor(
   Bookmark? editing,
   BookmarkKind initialKind = BookmarkKind.team,
   bool? fullScreen,
-  Future<File?> Function()? pickImage,
+  Future<XFile?> Function()? pickImage,
 }) async {
   final full = fullScreen ?? (AppPlatform.isAndroid || AppPlatform.isIOS);
   final result = full
@@ -84,7 +84,7 @@ class BookmarkEditor extends StatefulWidget {
   final void Function(bool saved) onDone;
 
   /// "이미지 선택"을 대신하는 선택기(테스트용). 없으면 파일 선택 창을 연다.
-  final Future<File?> Function()? pickImage;
+  final Future<XFile?> Function()? pickImage;
 
   const BookmarkEditor({
     super.key,
@@ -223,14 +223,17 @@ class _BookmarkEditorState extends State<BookmarkEditor> {
   }
 
   Future<void> _chooseImage() async {
-    File? file;
+    XFile? file;
     final custom = widget.pickImage;
     if (custom != null) {
       file = await custom();
     } else {
       final result = await FilePicker.pickFiles(type: FileType.image);
-      final path = result?.files.single.path;
-      if (path != null) file = File(path);
+      final picked = result?.files.single;
+      // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+      if (picked != null && (picked.path != null || picked.bytes != null)) {
+        file = picked.xFile;
+      }
     }
     if (file == null || !mounted) return;
     setState(() {

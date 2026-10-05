@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:conversation_shortcuts/conversation_shortcuts.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/painting.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
@@ -14,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/avatar_utils.dart' show parseHexColor;
 import 'app_platform.dart';
 import 'avatar_thumbnail.dart';
+import 'web_notifications.dart';
 import 'win32_window.dart'
     if (dart.library.js_interop) 'win32_window_stub.dart';
 
@@ -41,6 +43,10 @@ class NotificationService {
     required void Function(String roomId) onTap,
     bool requestPermission = true,
   }) async {
+    // 웹은 flutter_local_notifications가 없다 — 브라우저 알림을 우리 서비스 워커로 띄운다.
+    // 권한은 아이폰 규칙상 사용자가 단추를 누를 때만 물을 수 있어서 여기서 묻지 않는다
+    // (web_push_prompt.dart).
+    if (kIsWeb) return initWebNotifications(onTap);
     // 알림 아이콘은 흰 실루엣 전용 그림 — 앱 아이콘(적응형)을 쓰면 안 된다(AndroidManifest.xml 참고).
     const android = AndroidInitializationSettings('@drawable/ic_notification');
     const windows = WindowsInitializationSettings(
@@ -74,6 +80,7 @@ class NotificationService {
   /// 눌러서 새로 뜬 이번 프로세스인데, 콜백은 "이미 실행 중이던 앱을 포그라운드로 끌어올린"
   /// 탭에만 반응하기 때문이다. 대신 시작 시 이 메서드로 "무엇을 눌러서 켜졌는지" 직접 물어야 한다.
   Future<String?> getLaunchPayload() async {
+    if (kIsWeb) return takeLaunchNotificationPayload();
     final details = await _plugin.getNotificationAppLaunchDetails();
     if (details?.didNotificationLaunchApp != true) return null;
     return details?.notificationResponse?.payload;
@@ -89,6 +96,14 @@ class NotificationService {
     required String body,
     required String projectId,
   }) async {
+    if (kIsWeb) {
+      return showWebNotification(
+        title: title,
+        body: body,
+        tag: '$projectPayloadPrefix$projectId',
+        payload: '$projectPayloadPrefix$projectId',
+      );
+    }
     await _plugin.show(
       id: 'project:${DateTime.now().microsecondsSinceEpoch}'.hashCode,
       title: title,
@@ -121,6 +136,16 @@ class NotificationService {
     required String callerName,
     String? conversationTitle,
   }) async {
+    if (kIsWeb) {
+      return showWebNotification(
+        title: callerName,
+        body: conversationTitle == null
+            ? '화상회의 요청'
+            : '$conversationTitle · 화상회의 요청',
+        tag: '$callPayloadPrefix$roomId',
+        payload: '$callPayloadPrefix$roomId',
+      );
+    }
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'calls',
@@ -149,8 +174,9 @@ class NotificationService {
   }
 
   /// 통화 수신 알림을 지운다(받았거나, 상대가 끊었을 때).
-  Future<void> cancelIncomingCall(String roomId) =>
-      _plugin.cancel(id: 'call:$roomId'.hashCode);
+  Future<void> cancelIncomingCall(String roomId) => kIsWeb
+      ? closeWebNotifications('$callPayloadPrefix$roomId')
+      : _plugin.cancel(id: 'call:$roomId'.hashCode);
 
   /// 방마다 아직 안 지운(=사용자가 확인 안 한) 알림 메시지 기록 — 같은 방에서 메시지가 여러 개
   /// 와도 알림 id는 방 하나당 하나(roomId.hashCode)라 새 메시지가 이전 알림을 덮어써서, 예전엔
@@ -229,6 +255,15 @@ class NotificationService {
     bool flashTaskbarUntilRoomOpened = false,
     bool flashWindowFrame = true,
   }) async {
+    if (kIsWeb) {
+      // 브라우저 알림은 그림을 합성해 넣을 수 없어서 Windows처럼 자물쇠를 이름 앞 글자로 붙인다.
+      return showWebNotification(
+        title: isSecret ? '🔒 $title' : title,
+        body: body,
+        tag: roomId,
+        payload: roomId,
+      );
+    }
     final baseAvatarBytes = await _resolveAvatarBytes(
       avatarType: avatarType,
       avatarEmoji: avatarEmoji,
@@ -376,6 +411,7 @@ class NotificationService {
   /// "그 방을 열 때까지 계속 깜빡임"이 걸려 있던 방이면 목록에서 빼고, 그게 마지막 방이었으면
   /// (_pendingFlashRooms가 다 비면) 깜빡임도 같이 멈춘다.
   Future<void> cancelForRoom(String roomId) async {
+    if (kIsWeb) return closeWebNotifications(roomId);
     await _plugin.cancel(id: roomId.hashCode);
     if (AppPlatform.isAndroid) {
       await _historyPrefs.remove('$_historyKeyPrefix$roomId');

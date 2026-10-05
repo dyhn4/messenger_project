@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
 
 import '../models/album.dart';
@@ -79,7 +80,8 @@ Future<void> downloadAlbumItems(
   );
 
   AlbumDownloadSummary summary;
-  if (_isMobile) {
+  // 웹은 폴더를 고를 수 없어 모바일처럼 하나씩 받는다(브라우저 다운로드).
+  if (_isMobile || kIsWeb) {
     var saved = 0;
     var failed = 0;
     onProgress?.call(0, items.length);
@@ -99,7 +101,7 @@ Future<void> downloadAlbumItems(
     summary = AlbumDownloadSummary(
       saved: saved,
       failed: failed,
-      folder: await androidDownloadFolder(),
+      folder: kIsWeb ? null : await androidDownloadFolder(),
     );
   } else {
     final initial = session.settings.downloadFolder;

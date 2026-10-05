@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/album.dart';
 import 'album_api.dart';
 import 'album_media.dart';
 import 'api_client.dart' show ApiException, UploadCancelToken;
-import 'app_platform.dart';
+import 'memory_file.dart';
 
 /// 올리는 중인 파일 하나의 상태.
 enum AlbumUploadStatus { queued, uploading, done, failed }
@@ -25,9 +25,11 @@ class AlbumUpload {
 
   final int id;
   final String albumId;
-  final File file;
+  final XFile file;
   final String name;
-  final int size;
+
+  /// 처음엔 0 — 담은 직후 파일 크기를 읽어 채운다(XFile.length()가 비동기라).
+  int size;
   final String mimeType;
   final AlbumItemKind kind;
   final UploadCancelToken token = UploadCancelToken();
@@ -560,14 +562,14 @@ class AlbumController extends ChangeNotifier {
 
   /// 파일들을 열어 둔 앨범에 올리기 시작한다 — 한 번에 100개까지(넘는 만큼은 빼고 결과로 알린다), 이미지·영상만.
   /// 파일은 [uploadConcurrency]개씩 동시에 올리고, 끝나면 올라간 것을 한꺼번에 앨범에 담는다.
-  AlbumAddResult addFiles(List<File> files) {
+  AlbumAddResult addFiles(List<XFile> files) {
     final current = album;
     if (current == null || files.isEmpty) return const AlbumAddResult();
     var unsupported = 0;
     var over = 0;
     var accepted = 0;
     for (final f in files) {
-      final mime = albumMimeForPath(f.path);
+      final mime = albumMimeForPath(f.name);
       final kind = albumKindForMime(mime);
       if (mime == null || kind == null) {
         unsupported++;
@@ -577,20 +579,21 @@ class AlbumController extends ChangeNotifier {
         over++;
         continue;
       }
-      int size = 0;
-      try {
-        size = f.lengthSync();
-      } catch (_) {}
-      uploads.add(
-        AlbumUpload(
-          id: ++_uploadSeq,
-          albumId: current.id,
-          file: f,
-          name: albumFileName(f.path),
-          size: size,
-          mimeType: mime,
-          kind: kind,
-        ),
+      final upload = AlbumUpload(
+        id: ++_uploadSeq,
+        albumId: current.id,
+        file: f,
+        name: albumFileName(f.name),
+        size: 0,
+        mimeType: mime,
+        kind: kind,
+      );
+      uploads.add(upload);
+      unawaited(
+        f.length().then((n) {
+          upload.size = n;
+          _notify();
+        }, onError: (_) {}),
       );
       accepted++;
     }
@@ -653,17 +656,10 @@ class AlbumController extends ChangeNotifier {
     String? thumbUrl;
     final thumb = prep.thumbnail;
     if (thumb != null) {
-      final dir = await Directory.systemTemp.createTemp('album_thumb_');
-      final thumbFile = File(
-        '${dir.path}${AppPlatform.pathSeparator}thumb.jpg',
-      );
       try {
-        await thumbFile.writeAsBytes(thumb);
-        thumbUrl = (await api.uploadFile(thumbFile)).url;
+        thumbUrl = (await api.uploadFile(bytesAsFile(thumb, 'thumb.jpg'))).url;
       } catch (_) {
         thumbUrl = null; // 썸네일은 없어도 된다 — 격자가 원본을 대신 그린다.
-      } finally {
-        unawaited(dir.delete(recursive: true).catchError((_) => dir));
       }
     }
     final result = await api.uploadFile(

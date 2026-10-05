@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -17,12 +18,14 @@ import '../services/api_client.dart'
     show ApiException, UploadCancelToken, UploadCancelledException;
 import '../services/app_platform.dart';
 import '../services/file_type_utils.dart';
+import '../services/memory_file.dart';
 import '../services/mention_logic.dart';
 import '../services/room_chat_controller.dart' show UploadedAttachment;
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../services/typing_gate.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/dropped_files.dart';
 import '../widgets/attachment_widgets.dart'
     show DropZoneOverlay, formatFileSize;
 import '../widgets/floating_dialog.dart';
@@ -30,6 +33,7 @@ import '../widgets/mention_autocomplete.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/rich_text_format.dart';
 import '../widgets/room_picker_field.dart';
+import '../widgets/xfile_image.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
 
@@ -46,7 +50,7 @@ bool canScheduleIn(Session session, Room room) =>
 class ScheduleDraftAttachment {
   final UploadedAttachment uploaded;
   final Uint8List? thumbnailBytes;
-  final File? file;
+  final XFile? file;
   const ScheduleDraftAttachment(
     this.uploaded, {
     this.thumbnailBytes,
@@ -104,7 +108,7 @@ Future<ScheduledMessage?> showScheduleMessageEditor(
 /// 올라간 것(입력칸에서 넘어온 것·수정할 예약의 첨부)은 [result]가 처음부터 있다.
 class _Item {
   _Item.local(
-    File this.file, {
+    XFile this.file, {
     required this.name,
     required this.size,
     required this.isImage,
@@ -120,9 +124,11 @@ class _Item {
        isImage = uploaded.isImage,
        result = uploaded;
 
-  final File? file;
+  final XFile? file;
   final String name;
-  final int size;
+
+  /// 새로 고른 파일은 처음엔 0 — 붙인 직후 파일 크기를 읽어 채운다(XFile.length()가 비동기라).
+  int size;
   final bool isImage;
   Uint8List? thumbBytes;
 
@@ -452,12 +458,13 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       return; // 그림 붙여넣기를 못 하는 플랫폼 — 글자 붙여넣기는 이미 됐다.
     }
     if (bytes == null || bytes.isEmpty || !mounted) return;
-    final file = File(
-      '${Directory.systemTemp.path}${AppPlatform.pathSeparator}'
-      'image_${DateTime.now().microsecondsSinceEpoch}.png',
-    );
-    await file.writeAsBytes(bytes);
-    if (mounted) addFiles([file]);
+    addFiles([
+      bytesAsFile(
+        bytes,
+        'image_${DateTime.now().microsecondsSinceEpoch}.png',
+        mimeType: 'image/png',
+      ),
+    ]);
   }
 
   bool get _isBoard => _room?.isBoard ?? false;
@@ -486,19 +493,9 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     return null;
   }
 
-  static String _nameOf(File f) => f.path.split(RegExp(r'[\\/]')).last;
-
-  static int _sizeOf(File f) {
-    try {
-      return f.lengthSync();
-    } catch (_) {
-      return 0;
-    }
-  }
-
   /// 파일을 첨부 목록에 더하고 바로 올리기 시작한다(파일 첨부 버튼·끌어다 놓기·붙여넣기). 10개를
   /// 넘는 만큼은 빼고 알린다.
-  void addFiles(List<File> files) {
+  void addFiles(List<XFile> files) {
     if (files.isEmpty || !mounted || _submitting) return;
     final room = scheduledAttachmentMaxCount - _items.length;
     final accepted = files.take(math.max(0, room)).toList();
@@ -506,19 +503,26 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       showAppToast(context, scheduledAttachmentLimitMessage);
     }
     if (accepted.isEmpty) return;
+    final added = [
+      for (final f in accepted)
+        _Item.local(
+          f,
+          name: f.name,
+          size: 0,
+          isImage: looksLikeImagePath(f.name),
+        ),
+    ];
     setState(() {
-      for (final f in accepted) {
-        _items.add(
-          _Item.local(
-            f,
-            name: _nameOf(f),
-            size: _sizeOf(f),
-            isImage: looksLikeImagePath(f.path),
-          ),
-        );
-      }
+      _items.addAll(added);
       _filesError = validateScheduledAttachmentCount(_items.length);
     });
+    for (final item in added) {
+      unawaited(
+        item.file!.length().then((n) {
+          if (mounted) setState(() => item.size = n);
+        }, onError: (_) {}),
+      );
+    }
     unawaited(_pumpUploads());
   }
 
@@ -526,7 +530,8 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
     final result = await FilePicker.pickFiles(allowMultiple: true);
     final picked = [
       for (final f in result?.files ?? const <PlatformFile>[])
-        if (f.path != null) File(f.path!),
+        // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+        if (f.path != null || f.bytes != null) f.xFile,
     ];
     if (picked.isNotEmpty && mounted) addFiles(picked);
   }
@@ -787,7 +792,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
         ),
       ),
     );
-    if (!AppPlatform.isWindows) return editor;
+    if (!AppPlatform.isWindows && !kIsWeb) return editor;
     return DropTarget(
       // 이 창 위에 다른 창(달력·확인 창 등)이 떠 있으면 받지 않는다.
       enable: ModalRoute.isCurrentOf(context) ?? true,
@@ -795,7 +800,7 @@ class ScheduleMessageEditorState extends State<ScheduleMessageEditor> {
       onDragExited: (_) => setState(() => _dragHovering = false),
       onDragDone: (details) {
         setState(() => _dragHovering = false);
-        addFiles([for (final f in details.files) File(f.path)]);
+        addFiles(droppedFiles(details));
       },
       child: editor,
     );
@@ -1857,7 +1862,7 @@ class _AttachmentTile extends StatelessWidget {
     }
     final file = item.file;
     if (file != null) {
-      return Image.file(
+      return XFileImage(
         file,
         width: _tile,
         height: _tile,

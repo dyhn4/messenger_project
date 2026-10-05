@@ -16,6 +16,7 @@ import 'package:client/services/notification_service.dart';
 import 'package:client/services/room_chat_controller.dart';
 // room.canManage/canWrite/canKick은 session.dart가 같이 내보낸다(room_permissions.dart).
 import 'package:client/services/session.dart';
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1185,7 +1186,7 @@ void main() {
 
       final progress = <int>[];
       final uploaded = await controller.uploadLocalFiles([
-        file,
+        XFile(file.path),
       ], onProgress: (index, sent, total) => progress.add(index));
       expect(uploaded.single.isImage, isFalse);
       expect(uploaded.single.toPayload(), {

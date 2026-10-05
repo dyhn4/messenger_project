@@ -652,6 +652,13 @@
       "when": 1791117888942,
       "tag": "0092_message_call_card",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791213323153,
+      "tag": "0093_device_web_push",
+      "breakpoints": true
     }
   ]
 }

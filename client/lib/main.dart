@@ -29,6 +29,7 @@ import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'widgets/app_lock_overlay.dart';
 import 'widgets/update_banner.dart';
+import 'widgets/web_push_prompt.dart';
 import 'services/app_links.dart';
 import 'widgets/grab_cursors.dart';
 
@@ -349,11 +350,18 @@ class _MyAppState extends State<MyApp>
   }
 
   void _tryOpenPendingLaunchRoom() {
-    final roomId = _pendingLaunchRoomId;
-    if (roomId == null || session.stage != AuthStage.ready) return;
-    if (session.rooms.every((r) => r.id != roomId)) return;
+    final payload = _pendingLaunchRoomId;
+    if (payload == null || session.stage != AuthStage.ready) return;
+    // payload는 방 id거나 'call:<방 id>'·'project:<id>'다 — 방이 로딩될 때까지 기다리는 건 방 쪽만.
+    final isProject = payload.startsWith(
+      NotificationService.projectPayloadPrefix,
+    );
+    final roomId = payload.startsWith(NotificationService.callPayloadPrefix)
+        ? payload.substring(NotificationService.callPayloadPrefix.length)
+        : payload;
+    if (!isProject && session.rooms.every((r) => r.id != roomId)) return;
     _pendingLaunchRoomId = null;
-    _openRoomFromNotification(roomId);
+    _openRoomFromNotification(payload);
   }
 
   @override
@@ -498,6 +506,8 @@ class _MyAppState extends State<MyApp>
               children: [
                 ?child,
                 UpdateBanner(session: session, navigatorKey: navigatorKey),
+                // 웹 앱에서 알림을 켜자고 권하는 알약(웹 전용 — 네이티브에서는 아무것도 안 그린다).
+                WebPushPrompt(session: session, navigatorKey: navigatorKey),
               ],
             ),
           ),

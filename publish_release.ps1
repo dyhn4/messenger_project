@@ -72,7 +72,20 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
   Start-Sleep -Seconds 5
 }
 
-Write-Host "4) server/releases/로 복사..."
+Write-Host "4) 웹 앱 빌드 → server/web/..."
+Push-Location $client
+flutter build web --release --no-wasm-dry-run
+$buildExit = $LASTEXITCODE
+Pop-Location
+if ($buildExit -ne 0) { throw "웹 빌드 실패(코드 $buildExit)" }
+# 서버는 이 폴더를 그대로 내려준다(server/src/config.js의 WEB_DIR) — 재시작 없이 다음 새로고침부터 새 웹 앱이
+# 뜬다. 예전 빌드의 파일이 섞이지 않게 비우고 새로 넣는다. 운영 서버에는 package_server_update.ps1이 이
+# 폴더째로 실어 보낸다.
+$webDir = Join-Path $root "server\web"
+if (Test-Path $webDir) { Remove-Item $webDir -Recurse -Force }
+Copy-Item "$client\build\web" $webDir -Recurse
+
+Write-Host "5) server/releases/로 복사..."
 New-Item -ItemType Directory -Force -Path $releases | Out-Null
 Copy-Item "$client\windows\installer\output\messenger-setup.exe" "$releases\client-windows-setup.exe" -Force
 Copy-Item "$client\build\app\outputs\flutter-apk\app-release.apk" "$releases\client-android.apk" -Force

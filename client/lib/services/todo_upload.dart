@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -41,15 +42,17 @@ Future<void> uploadTodoFiles(
     allowMultiple: true,
     dialogTitle: folder == null ? '보낼 파일 선택' : '업로드할 파일 선택',
   );
-  final files = [
+  final files = <XFile>[
     for (final f in picked?.files ?? const <PlatformFile>[])
-      if (f.path != null) File(f.path!),
+      // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+      if (f.path != null || f.bytes != null) f.xFile,
   ];
   if (files.isEmpty) return;
 
   if (folder != null) {
+    // 업로드 경로는 Windows에서만 쓰므로(위에서 걸렀다) 고른 파일에는 늘 경로가 있다.
     final result = await copyFilesToFolder(
-      files,
+      [for (final f in files) File(f.path)],
       folder,
       senderName: session.name ?? '',
     );

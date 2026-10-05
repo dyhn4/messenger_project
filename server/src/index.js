@@ -65,6 +65,7 @@ import { createFileResignRouter } from './fileResign.js';
 import { createUsersRouter } from './users.js';
 import { guideStatic, helpApiRouter, versionRouter, watchForVersionChanges } from './version.js';
 import { firebaseConfigRouter } from './push.js';
+import { webPushRouter } from './webPush.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
 // 미들웨어로 잡힌다. 이건 그 바깥(소켓 이벤트 핸들러, 백그라운드 작업 등 요청/응답 주기
@@ -161,6 +162,8 @@ app.use(versionRouter);
 app.use('/guide', guideStatic);
 // FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
 app.use(firebaseConfigRouter);
+// 웹 앱의 웹 푸시 공개키(VAPID) — 브라우저가 구독할 때 쓰는 공개값이라 인증 없이(webPush.js).
+app.use(webPushRouter);
 // 웹 앱(Flutter 웹 빌드) — 위의 API 경로들에 걸리지 않은 요청만 여기로 온다. 페이지를 내려준 이
 // 서버가 곧 웹 앱의 서버 주소다(client session.dart의 webServerUrl). 폴더가 없으면 404.
 app.use(express.static(WEB_DIR));

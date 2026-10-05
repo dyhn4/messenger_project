@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +15,7 @@ import 'album_viewer.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart' show DropZoneOverlay;
 import 'compact_menu.dart';
+import 'dropped_files.dart';
 import 'panel_filters.dart' show formatPanelDate;
 
 /// 앨범 상세 — 위에 뒤로가기·제목·⋯(수정/전체 다운로드/삭제), 설명, `+ 파일 추가`·`선택` 단추, 드래그 앤 드롭 영역(PC),
@@ -55,13 +55,14 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
     );
     final files = [
       for (final f in result?.files ?? const <PlatformFile>[])
-        if (f.path != null) File(f.path!),
+        // 웹은 경로 없이 바이트만 온다 — xFile이 둘 다 감싼다.
+        if (f.path != null || f.bytes != null) f.xFile,
     ];
     if (files.isNotEmpty && mounted) addFiles(files);
   }
 
   /// 파일을 올리기 시작한다 — 한 번에 100개까지, 넘으면 앞의 100개만 올리고 알린다(드롭도 같은 길).
-  void addFiles(List<File> files) {
+  void addFiles(List<XFile> files) {
     final result = _albums.addFiles(files);
     if (!mounted) return;
     final notes = <String>[
@@ -217,7 +218,7 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
           onDragExited: (_) => setState(() => _dragHovering = false),
           onDragDone: (details) {
             setState(() => _dragHovering = false);
-            addFiles([for (final f in details.files) File(f.path)]);
+            addFiles(droppedFiles(details));
           },
           child: Stack(
             children: [

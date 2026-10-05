@@ -1,12 +1,14 @@
 {
-    "name": "client",
-    "short_name": "client",
-    "start_url": ".",
+    "name": "TangoTalk",
+    "short_name": "TangoTalk",
+    "id": "/",
+    "start_url": "./",
+    "scope": "./",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#FFFFFF",
+    "theme_color": "#3F51B5",
+    "description": "TangoTalk 메신저",
+    "lang": "ko",
     "prefer_related_applications": false,
     "icons": [
         {

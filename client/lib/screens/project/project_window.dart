@@ -11,6 +11,7 @@ import '../../services/notification_service.dart';
 import '../../services/pinned_tls.dart';
 import '../../services/app_links.dart';
 import '../../services/session.dart';
+import '../../widgets/esc_to_minimize.dart';
 import 'project_dialog.dart';
 
 /// 창 생성 인자(JSON)의 "type" 값 — 지금은 "프로젝트" 창 하나뿐이지만, 나중에 다른 종류의
@@ -214,6 +215,9 @@ Future<void> runProjectWindow(WindowController controller) async {
   runApp(_ProjectWindowApp(session: session));
 }
 
+/// 이 창의 Navigator — ESC로 창을 최소화할지(위에 뜬 화면이 없을 때만) 보는 데 쓴다(esc_to_minimize.dart).
+final _projectNavigatorKey = GlobalKey<NavigatorState>();
+
 class _ProjectWindowApp extends StatelessWidget {
   final Session session;
   const _ProjectWindowApp({required this.session});
@@ -237,14 +241,19 @@ class _ProjectWindowApp extends StatelessWidget {
         ),
         darkTheme: ThemeData(colorScheme: darkColorScheme, useMaterial3: true),
         themeMode: session.settings.themeMode,
+        navigatorKey: _projectNavigatorKey,
         // 메인 창이 잠겨 있으면(자동 잠금) 이 창도 가린다 — 잠금 해제는 메인 창에서 한다.
+        // ESC는 메인 창처럼 창을 최소화한다(esc_to_minimize.dart).
         builder: (context, child) {
           final locked = session.settings.appLocked;
-          return Stack(
-            children: [
-              ExcludeFocus(excluding: locked, child: child!),
-              if (locked) const Positioned.fill(child: _LockedCover()),
-            ],
+          return EscToMinimize(
+            navigatorKey: _projectNavigatorKey,
+            child: Stack(
+              children: [
+                ExcludeFocus(excluding: locked, child: child!),
+                if (locked) const Positioned.fill(child: _LockedCover()),
+              ],
+            ),
           );
         },
         home: ListenableBuilder(

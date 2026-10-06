@@ -28,6 +28,7 @@ import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'widgets/app_lock_overlay.dart';
+import 'widgets/esc_to_minimize.dart';
 import 'widgets/update_banner.dart';
 import 'widgets/web_push_prompt.dart';
 import 'services/app_links.dart';
@@ -500,15 +501,19 @@ class _MyAppState extends State<MyApp>
           // 자동 잠금(환경설정 > 시스템 설정) — 잠겨 있으면 화면·다이얼로그 전부를 잠금 화면이 덮는다.
           // (글자 크기 설정은 여기서 앱 전체에 걸지 않는다 — 글꼴과 같은 곳, 곧 채팅 내용(메시지·댓글 본문)과
           // 방 이름에만 ChatFont(widgets/chat_font_scope.dart)가 적용한다.)
-          builder: (context, child) => AppLockGate(
-            session: session,
-            child: Stack(
-              children: [
-                ?child,
-                UpdateBanner(session: session, navigatorKey: navigatorKey),
-                // 웹 앱에서 알림을 켜자고 권하는 알약(웹 전용 — 네이티브에서는 아무것도 안 그린다).
-                WebPushPrompt(session: session, navigatorKey: navigatorKey),
-              ],
+          // ESC — 대화상자 등이 안 받은 ESC는 카카오톡처럼 창을 최소화한다(Windows, esc_to_minimize.dart).
+          builder: (context, child) => EscToMinimize(
+            navigatorKey: navigatorKey,
+            child: AppLockGate(
+              session: session,
+              child: Stack(
+                children: [
+                  ?child,
+                  UpdateBanner(session: session, navigatorKey: navigatorKey),
+                  // 웹 앱에서 알림을 켜자고 권하는 알약(웹 전용 — 네이티브에서는 아무것도 안 그린다).
+                  WebPushPrompt(session: session, navigatorKey: navigatorKey),
+                ],
+              ),
             ),
           ),
         );

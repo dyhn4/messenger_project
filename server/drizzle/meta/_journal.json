@@ -659,6 +659,13 @@
       "when": 1791213323153,
       "tag": "0093_device_web_push",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791290916661,
+      "tag": "0094_team_invite_max_uses",
+      "breakpoints": true
     }
   ]
 }

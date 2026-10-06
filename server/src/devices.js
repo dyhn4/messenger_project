@@ -36,6 +36,8 @@ export function createDevicesRouter() {
       identityPublicKey,
       signingPublicKey,
     });
+    // 다른 사람이 쓰는 기기 id — 덮어쓰지 않는다. 앱은 이 409를 받으면 새 기기 id로 다시 등록한다.
+    if (!device) return res.status(409).json({ error: '다른 계정이 쓰고 있는 기기입니다.', code: 'device_owned_by_other' });
     res.status(201).json(toDeviceDto(device));
   });
 

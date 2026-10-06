@@ -933,7 +933,13 @@ export function createRoomsRouter(io) {
       );
       roomMemberIds = [req.user.sub, ...new Set(invited)];
     } else {
-      const memberIdSet = new Set([req.user.sub, ...(Array.isArray(memberIds) ? memberIds : [])]);
+      // 그룹도 이 팀 안의 대화라 이 팀 멤버만 넣는다 — 예전엔 아무 사용자 id나 넣을 수 있어서 다른 팀 사람을 마음대로
+      // 대화방에 끌어들이고 그 사람 정보를 받아 볼 수 있었다.
+      const teamMemberIds = new Set(await listTeamMemberIds(teamId));
+      const invited = (Array.isArray(memberIds) ? memberIds : []).filter(
+        (id) => typeof id === 'string' && teamMemberIds.has(id),
+      );
+      const memberIdSet = new Set([req.user.sub, ...invited]);
       if (type === 'group' && memberIdSet.size < 2) {
         return res.status(400).json({ error: '그룹에는 나 이외의 멤버가 최소 1명 필요합니다.' });
       }
@@ -1018,7 +1024,8 @@ export function createRoomsRouter(io) {
     // 이미 있는 방에 멤버를 추가로 초대하는 건 팀 설정과 무관하게 정회원 이상이면 누구나 —
     // 준회원만 불가(canCreateRooms와 같은 기준). 새 토픽을 만드는 것과는 별개 규칙이다.
     const inviter = await teamAccess(room.teamId, req.user.sub);
-    if (!canCreateRooms(inviter.role)) {
+    // 팀에서 빠진 사람은 옛 대화를 보려고 방 멤버십만 남아 있는 것이라, 그 방에 사람을 데려올 수는 없다.
+    if (!inviter.isMember || !canCreateRooms(inviter.role)) {
       return res.status(403).json({ error: '멤버를 초대할 권한이 없습니다.' });
     }
 
@@ -1507,7 +1514,7 @@ export function createRoomsRouter(io) {
   router.put('/rooms/:id/admins', async (req, res) => {
     const scope = await requireTopicManager(req, res);
     if (!scope) return;
-    const { room } = scope;
+    const { room, access } = scope;
     const ids = Array.isArray(req.body?.userIds)
       ? [...new Set(req.body.userIds.filter((id) => typeof id === 'string'))]
       : [];
@@ -1526,6 +1533,11 @@ export function createRoomsRouter(io) {
         }
       }
       const before = new Set(memberRows.filter((m) => m.role === 'admin').map((m) => m.userId));
+      // 토픽 관리자는 다른 토픽 관리자를 뺄 수 없다(자기 자신만) — 내보내기의 같은 규칙을 "먼저 관리자에서 빼고 그다음
+      // 내보내기"로 돌아가지 못하게. 팀 소유자·관리자는 그대로 누구든 바꿀 수 있다.
+      if (!canManageTeam(access) && [...before].some((id) => id !== req.user.sub && !ids.includes(id))) {
+        return { error: '토픽 관리자는 다른 토픽 관리자를 해제할 수 없습니다. 팀 소유자·관리자에게 요청하세요.' };
+      }
       const changed = before.size !== ids.length || ids.some((id) => !before.has(id));
       // 그대로 다시 저장한 것이면 안내를 또 남기지 않는다.
       if (changed) await setRoomAdmins(room.id, ids, tx);

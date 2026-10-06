@@ -17,6 +17,19 @@ import { ACCOUNT_ROLES, canCreateTeamInviteLink, canManageTeam, roleLabel, ROLE_
 /** 팀 초대 링크도 설치→가입 초대 링크와 같은 기간만큼만 유효하다 — 고를 필요 없게 고정. */
 export const TEAM_INVITE_EXPIRY_DAYS = 7;
 
+/**
+ * 링크 하나로 가입할 수 있는 사람 수 — 만들 때 고른다(기본 1명, 최대 100명). 링크가 메시지 전달 등으로 새도
+ * 끝없이 가입되지 않게 하려는 것이다. 관리자 등급을 주는 링크는 늘 1명이다(관리자는 모든 팀을 관리할 수 있어서).
+ */
+export const TEAM_INVITE_MAX_USES_LIMIT = 100;
+
+export function teamInviteMaxUses(requested, assignedRole) {
+  if (assignedRole === 'admin') return 1;
+  const n = Number(requested);
+  if (!Number.isInteger(n) || n < 1) return 1;
+  return Math.min(n, TEAM_INVITE_MAX_USES_LIMIT);
+}
+
 /** 4자리 페어링 코드/설치 초대 링크 토큰과 겹치지 않도록 같은 방식(96비트 무작위)으로 만든다. */
 function generateToken() {
   return crypto.randomBytes(12).toString('hex');
@@ -36,6 +49,7 @@ function toTeamInviteLinkDto(link, { serverAddress }) {
     expiresAt: new Date(link.expiresAt).getTime(),
     revoked: !!link.revokedAt,
     usedCount: link.usedCount,
+    maxUses: link.maxUses ?? null,
     lastUsedAt: link.lastUsedAt ? new Date(link.lastUsedAt).getTime() : null,
     valid: isTeamInviteLinkValid(link),
     // 설치 초대 링크와 같은 평문 페어링 포트로 서빙 — 자체 서명 인증서 경고 없이 열린다.
@@ -130,6 +144,7 @@ export function createTeamInvitesRouter() {
       createdBy: req.user.sub,
       createdByName: req.inviteActor.user?.name ?? req.inviteActor.user?.username ?? '(알 수 없음)',
       label: label || null,
+      maxUses: teamInviteMaxUses(req.body?.maxUses, assignedRole),
       expiresAt: new Date(Date.now() + TEAM_INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
     });
     const link = await findTeamInviteLinkById(inserted.id);
@@ -146,7 +161,7 @@ export function createTeamInvitesRouter() {
       detail:
         `팀 초대 링크 발급(${roleLabel(assignedRole)} 등급` +
         (assignedPosition ? ` · ${assignedPosition} 직책` : '') +
-        ` 부여, ${TEAM_INVITE_EXPIRY_DAYS}일)`,
+        ` 부여, ${TEAM_INVITE_EXPIRY_DAYS}일, ${link.maxUses}명)`,
     });
 
     res.status(201).json(toTeamInviteLinkDto(link, { serverAddress: serverAddressFrom(req) }));

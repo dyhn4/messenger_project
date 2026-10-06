@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { eq, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { db } from './db/client.js';
 import { albumItems, albums, messageAttachments, messageComments, messages, stickers, users } from './db/schema.js';
 import { isRoomMember } from './db/queries/rooms.js';
@@ -23,16 +23,34 @@ export function createFileResignRouter() {
       ...(await db
         .select({ roomId: messages.roomId, fileName: messages.fileName })
         .from(messages)
-        .where(or(eq(messages.fileUrl, raw), eq(messages.thumbnailUrl, raw)))),
+        // 지운 메시지·지운 파일은 다시 받을 수 없다(삭제한 뒤에도 예전 링크로 새 링크를 받던 문제).
+        .where(
+          and(
+            or(eq(messages.fileUrl, raw), eq(messages.thumbnailUrl, raw)),
+            isNull(messages.deletedAt),
+            isNull(messages.fileDeletedAt),
+          ),
+        )),
       ...(await db
         .select({ roomId: messages.roomId, fileName: messageAttachments.fileName })
         .from(messageAttachments)
         .innerJoin(messages, eq(messages.id, messageAttachments.messageId))
-        .where(or(eq(messageAttachments.fileUrl, raw), eq(messageAttachments.thumbnailUrl, raw)))),
+        .where(
+          and(
+            or(eq(messageAttachments.fileUrl, raw), eq(messageAttachments.thumbnailUrl, raw)),
+            isNull(messageAttachments.deletedAt),
+            isNull(messages.deletedAt),
+          ),
+        )),
       ...(await db
         .select({ roomId: messageComments.roomId, fileName: messageComments.fileName })
         .from(messageComments)
-        .where(or(eq(messageComments.fileUrl, raw), eq(messageComments.thumbnailUrl, raw)))),
+        .where(
+          and(
+            or(eq(messageComments.fileUrl, raw), eq(messageComments.thumbnailUrl, raw)),
+            isNull(messageComments.deletedAt),
+          ),
+        )),
       // 앨범 항목 — 앨범이 있는 방의 멤버에게만(앨범은 대화방 파일과 별개의 저장소다).
       ...(await db
         .select({ roomId: albums.roomId, fileName: albumItems.fileName })

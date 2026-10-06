@@ -11,7 +11,19 @@ test('8자 미만이면 거부 — 예전 기준(4자)은 더 이상 통과하�
 });
 
 test('8~20자는 통과, 20자 초과는 거부', () => {
-  assert.equal(passwordPolicyError('abcd1234'), null);
-  assert.equal(passwordPolicyError('a'.repeat(20)), null);
-  assert.equal(passwordPolicyError('a'.repeat(21)), '비밀번호는 20자 이하여야 합니다.');
+  assert.equal(passwordPolicyError('Tango!ride27'), null);
+  assert.equal(passwordPolicyError('k7#Rm2pQ9vLx4nW8zT5e'), null);
+  assert.equal(passwordPolicyError('k7#Rm2pQ9vLx4nW8zT5eY'), '비밀번호는 20자 이하여야 합니다.');
+});
+
+test('흔한 비밀번호와 단순한 나열은 거부한다(대소문자 무관)', () => {
+  const weak = '너무 흔하거나 단순한 비밀번호입니다. 다른 비밀번호를 쓰세요.';
+  for (const p of ['password1', 'Password123', 'qwer1234', '1q2w3e4r', 'abcd1234', '12345678', '87654321', 'abcdefgh', 'aaaaaaaa', 'abababab']) {
+    assert.equal(passwordPolicyError(p), weak, p);
+  }
+});
+
+test('아이디가 들어간 비밀번호는 거부한다', () => {
+  assert.equal(passwordPolicyError('hong2026!x', { username: 'Hong2026' }), '아이디가 들어간 비밀번호는 쓸 수 없습니다.');
+  assert.equal(passwordPolicyError('Tango!ride27', { username: 'hong2026' }), null);
 });

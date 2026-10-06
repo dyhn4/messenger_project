@@ -15,7 +15,11 @@ export function findSecretSessionByRoomId(roomId) {
     .then((rows) => rows[0] ?? null);
 }
 
-export async function acceptSecretSession(roomId, { responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature }) {
+/**
+ * 초대받은 사람([responderUserId])이 아직 대기 중인 초대를 수락할 때만 바뀐다(아니면 null). 예전엔 방 멤버면 누구나,
+ * 이미 시작된 대화에도 응답자 키를 덮어써서 상대의 비밀 대화를 깨거나 키를 바꿔치기할 수 있었다.
+ */
+export async function acceptSecretSession(roomId, { responderUserId, responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature }) {
   const [row] = await db
     .update(secretSessions)
     .set({
@@ -25,9 +29,15 @@ export async function acceptSecretSession(roomId, { responderDeviceId, responder
       status: 'active',
       acceptedAt: new Date(),
     })
-    .where(eq(secretSessions.roomId, roomId))
+    .where(
+      and(
+        eq(secretSessions.roomId, roomId),
+        eq(secretSessions.responderUserId, responderUserId),
+        eq(secretSessions.status, 'pending'),
+      ),
+    )
     .returning();
-  return row;
+  return row ?? null;
 }
 
 export async function rejectSecretSession(roomId) {

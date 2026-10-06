@@ -142,7 +142,10 @@ class _LoginScreenState extends State<LoginScreen> {
       _usernameCheckMessage = null;
     });
     try {
-      final reason = await widget.session.api!.checkUsernameAvailable(username);
+      final reason = await widget.session.api!.checkUsernameAvailable(
+        username,
+        inviteToken: widget.session.pendingTeamInviteToken,
+      );
       if (!mounted) return;
       setState(() {
         _usernameAvailable = reason == null;

@@ -13,7 +13,7 @@ import {
   setPollFavorite,
 } from './db/queries/polls.js';
 import { findMessageById, listAttachmentsForMessages } from './db/queries/messages.js';
-import { findRoomById, isRoomMember } from './db/queries/rooms.js';
+import { findRoomById, getDmHistoryFloor, isRoomMember } from './db/queries/rooms.js';
 import { isTeamMember } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
@@ -217,6 +217,12 @@ export function createPollsRouter(io) {
     const room = await findRoomById(poll.roomId);
     if (!room || !(await isRoomMember(room.id, req.user.sub))) {
       res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+      return null;
+    }
+    // 1:1 대화에서 "기록 지우고 나가기" 전의 투표는 다시 들어와도 안 보인다(메시지 조회와 같은 규칙).
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
+    if (floor && message.createdAt < floor) {
+      res.status(404).json({ error: '투표를 찾을 수 없습니다.' });
       return null;
     }
     return { poll, message, room };

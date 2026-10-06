@@ -15,6 +15,7 @@ import express from 'express';
 // 응답한다(요청이 실패하는 건 똑같지만, 몇십 초 멈춰 있다가 "요청 시간 초과"로 끝나는 대신
 // 즉시 실제 원인이 담긴 메시지로 끝난다).
 import 'express-async-errors';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:https';
 import os from 'node:os';
 import readline from 'node:readline';
@@ -22,8 +23,8 @@ import { Server } from 'socket.io';
 import { attachmentsRouter } from './attachments.js';
 import { linksRouter } from './links.js';
 import { createStickersRouter } from './stickers.js';
-import { createAuthRouter, requireAuth } from './auth.js';
-import { limits, rateLimit } from './authGuard.js';
+import { createAuthRouter, hasValidAccessToken, requireAuth } from './auth.js';
+import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
 import { certPath, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
 import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT, WEB_DIR } from './config.js';
 import { startLivekitNatSync } from './livekitNat.js';
@@ -81,14 +82,29 @@ process.on('uncaughtException', (err) => {
 });
 
 const app = express();
-app.use(cors());
+// 기본 보안 헤더 — 인터넷에 열리면서 붙였다. Express 이름을 숨기고, 형식 추측을 막고, 다른 사이트가 이 서버의
+// 페이지(웹 앱·도움말)를 몰래 iframe에 띄워 누르게 만드는 것(클릭재킹)을 막고, 링크를 눌러 나갈 때 주소(서명된
+// 파일 링크 등)가 상대 사이트에 넘어가지 않게 한다. 웹 앱 전용 CSP는 아래 express.static(WEB_DIR)에서 붙인다.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+// 다른 사이트(출처)의 브라우저 스크립트가 이 API를 부르는 건 막는다 — 앱(PC·안드로이드)은 출처 개념이 없고, 웹 앱은 같은
+// 주소에서 내려받으니 CORS가 필요 없다. 개발 중 `flutter run -d chrome`(localhost의 다른 포트)만 열어 둔다.
+const corsOptions = {
+  origin: (origin, callback) => callback(null, !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)),
+};
+app.use(cors(corsOptions));
 // 화상회의 신호를 같은 PC의 LiveKit으로 넘긴다(livekitProxy.js) — 본문을 그대로 흘려야 해서 json 파서보다 먼저.
 app.use(LIVEKIT_PROXY_PREFIX, livekitHttpProxy(LIVEKIT_PORT));
 app.use(express.json());
 
 const tls = await ensureTlsCredentials({ extraHosts: EXTERNAL_ADDRESS ? [EXTERNAL_ADDRESS.host] : [] });
 const httpServer = createServer(tls, app);
-const io = new Server(httpServer, { cors: { origin: '*' } });
+const io = new Server(httpServer, { cors: corsOptions });
 attachLivekitUpgradeProxy(httpServer, LIVEKIT_PORT);
 // 사내망 밖(LTE/5G)에서도 재페어링할 수 있게 메인 HTTPS 포트에도 페어링을 연다(pairing.js의 createPairHandler).
 // 밖에서도 닿으므로 IP마다 시도 횟수를 제한한다(authGuard.js — 4자리 코드 맞혀보기 방지).
@@ -150,10 +166,15 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // 되는 쪽으로 자동 전환한다(client session.dart) — 사내 주소로 연결해둔 앱은 밖에서 외부 주소로,
 // 밖에서 외부 주소로 페어링한 앱은 사내로 돌아오면 사내 주소로. 로그인 전에도 받아야 해서 인증 없이
 // 열어둔다 — 인증서 핀닝으로 이 서버가 맞는지는 이미 확인된 연결이다.
+// 사내 주소(사설 IP)는 사내에서 묻거나 로그인한 앱이 물을 때만 알려준다 — 인터넷의 아무에게나 사내망 구성을 알려줄
+// 필요는 없다(밖에서 로그인한 앱은 토큰을 붙여 묻는다).
 app.get('/server-info', (req, res) =>
   res.json({
     externalUrl: EXTERNAL_ADDRESS?.url ?? null,
-    internalUrls: lanAddressesInCert(tls.cert).map((ip) => `https://${ip}:${PORT}`),
+    internalUrls:
+      isLanAddress(clientIp(req)) || hasValidAccessToken(req)
+        ? lanAddressesInCert(tls.cert).map((ip) => `https://${ip}:${PORT}`)
+        : [],
   }),
 );
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).
@@ -164,9 +185,25 @@ app.use('/guide', guideStatic);
 app.use(firebaseConfigRouter);
 // 웹 앱의 웹 푸시 공개키(VAPID) — 브라우저가 구독할 때 쓰는 공개값이라 인증 없이(webPush.js).
 app.use(webPushRouter);
+// 웹 앱 페이지의 CSP — 스크립트는 이 서버에서 온 파일만(인라인·외부 스크립트 금지) 돌게 해서, 혹시 화면에 남의
+// 글이 HTML로 섞여도 스크립트로 실행되지 않게 한다. Flutter 웹이 쓰는 것만 연다: CanvasKit(WebAssembly 컴파일),
+// 인라인 스타일, 링크 미리보기의 외부 그림, 화면에 없는 글자용 구글 글꼴, 첨부·푸시용 blob:, 화상회의 wss:.
+const WEB_APP_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https: http:",
+  "media-src 'self' data: blob:",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "connect-src 'self' data: blob: wss: https://fonts.gstatic.com https://fonts.googleapis.com",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
 // 웹 앱(Flutter 웹 빌드) — 위의 API 경로들에 걸리지 않은 요청만 여기로 온다. 페이지를 내려준 이
 // 서버가 곧 웹 앱의 서버 주소다(client session.dart의 webServerUrl). 폴더가 없으면 404.
-app.use(express.static(WEB_DIR));
+app.use(express.static(WEB_DIR, { setHeaders: (res) => res.setHeader('Content-Security-Policy', WEB_APP_CSP) }));
 
 // 모든 라우트 다음에 두는 공통 에러 처리 — express-async-errors 덕에 라우트 안에서 던진/
 // reject한 에러가 여기로 온다. 이게 없던 동안에는 그런 요청이 응답 없이 그대로 멈춰서
@@ -180,6 +217,16 @@ app.use((err, req, res, next) => {
   // err.message가 아니라 err.cause에 담아둔다 — err.message만 보내면 "Failed query: ..."
   // 라는 SQL문만 보이고 정작 왜 실패했는지는 안 보인다. 콘솔을 못 보는 상황(운영 서버 등)
   // 에서도 화면 메시지만으로 원인을 알 수 있도록 cause도 같이 붙여 보낸다.
+  //
+  // 단, 사내망 밖에서 온 요청에는 DB 오류를 그대로 보여주지 않는다 — "Failed query: <SQL> params: <값>"과
+  // Postgres 오류문에 테이블 구조와 데이터가 그대로 실려서, 인터넷의 누구에게나 내부 구조를 알려주게 된다.
+  // 그럴 땐 고유 번호만 주고 자세한 내용은 콘솔에만 남긴다(사내에서 보면 지금처럼 다 보인다).
+  const isDbError = err?.name === 'DrizzleQueryError' || typeof err?.query === 'string' || !!err?.cause?.code;
+  if (isDbError && !isLanAddress(clientIp(req))) {
+    const ref = randomUUID().slice(0, 8);
+    console.error(`[요청 처리 오류] 참조 번호 ${ref}`);
+    return res.status(500).json({ error: `서버 오류가 발생했습니다. (참조 번호 ${ref})` });
+  }
   const detail = err?.cause?.message ? ` — ${err.cause.message}` : '';
   res.status(500).json({ error: (err?.message || '서버 오류가 발생했습니다.') + detail });
 });

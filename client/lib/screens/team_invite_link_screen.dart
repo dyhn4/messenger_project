@@ -94,6 +94,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
         assignedRole: result.assignedRole,
         assignedPosition: result.assignedPosition,
         label: result.label.isEmpty ? null : result.label,
+        maxUses: result.maxUses,
       );
       if (mounted) setState(() => _links = [link, ...?_links]);
       if (mounted) await _copyAndNotify(link);
@@ -257,7 +258,7 @@ class _TeamInviteLinkRow extends StatelessWidget {
         '${link.teamName} · ${link.assignedRole.label}'
         '${link.assignedPosition != null ? ' · ${link.assignedPosition}' : ''}'
         ' · ${link.statusLabel} · '
-        '사용 ${link.usedCount}회 · ${formatDateTime(link.createdAt)} 생성',
+        '${link.usageLabel} · ${formatDateTime(link.createdAt)} 생성',
         style: TextStyle(color: hint),
       ),
       trailing: Row(
@@ -286,13 +287,18 @@ class _CreateTeamInviteLinkResult {
   final AccountRole assignedRole;
   final String? assignedPosition;
   final String label;
+  final int maxUses;
   const _CreateTeamInviteLinkResult({
     required this.teamId,
     required this.assignedRole,
     this.assignedPosition,
     required this.label,
+    required this.maxUses,
   });
 }
+
+/// 링크 하나로 가입할 수 있는 사람 수 고르기(서버 최대 100명, teamInvites.js).
+const _maxUsesOptions = [1, 5, 10, 30, 100];
 
 class _CreateTeamInviteLinkDialog extends StatefulWidget {
   final Session session;
@@ -316,6 +322,11 @@ class _CreateTeamInviteLinkDialogState
       widget.teams.where((t) => t.id == widget.initialTeamId).firstOrNull?.id ??
       widget.teams.first.id;
   AccountRole _assignedRole = AccountRole.member;
+  int _maxUses = 1;
+
+  /// 관리자 등급을 주는 링크는 고른 값과 상관없이 1명이다.
+  int get _effectiveMaxUses =>
+      _assignedRole == AccountRole.admin ? 1 : _maxUses;
 
   /// 직책 목록(서열순, position_options) — 로딩 전엔 null.
   List<PositionOption>? _positionOptions;
@@ -400,6 +411,35 @@ class _CreateTeamInviteLinkDialogState
               onSelectionChanged: (s) =>
                   setState(() => _assignedRole = s.first),
             ),
+            const SizedBox(height: 16),
+            Text('가입 인원', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 4),
+            // 링크가 다른 데로 새도 정한 인원만 가입할 수 있다. 관리자 등급을 주는 링크는 늘 1명(서버도 같다).
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final n in _maxUsesOptions)
+                  ChoiceChip(
+                    label: Text('$n명'),
+                    selected: _effectiveMaxUses == n,
+                    onSelected: _assignedRole == AccountRole.admin && n != 1
+                        ? null
+                        : (_) => setState(() => _maxUses = n),
+                  ),
+              ],
+            ),
+            if (_assignedRole == AccountRole.admin)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '관리자 등급을 주는 링크는 1명만 가입할 수 있습니다.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).hintColor,
+                  ),
+                ),
+              ),
             if (_availablePositions.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(
@@ -451,6 +491,7 @@ class _CreateTeamInviteLinkDialogState
               assignedRole: _assignedRole,
               assignedPosition: _assignedPosition,
               label: _label.text.trim(),
+              maxUses: _effectiveMaxUses,
             ),
           ),
           child: const Text('만들기'),

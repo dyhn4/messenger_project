@@ -480,6 +480,17 @@ export async function updateTask(id, fields) {
   return row ?? null;
 }
 
+/**
+ * 업무를 다른 프로젝트로 옮긴 뒤처리(projects.js POST /tasks/:id/move) — 원래 프로젝트에 남는 하위 업무는 옮겨 간
+ * 부모를 더 가리키지 않게 최상위로 떼고, 그 업무의 댓글은 새 프로젝트 소속으로 바꾼다. 안 그러면 새 프로젝트
+ * 사람들이 부모를 통해 원래 프로젝트의 하위 업무를 보거나 지울 수 있었고(부모를 지우면 같이 지워진다), 댓글 권한은
+ * 계속 원래 프로젝트 기준으로 판정됐다.
+ */
+export async function detachMovedTask(taskId, newProjectId) {
+  await db.update(tasks).set({ parentTaskId: null, updatedAt: new Date() }).where(eq(tasks.parentTaskId, taskId));
+  await db.update(taskComments).set({ projectId: newProjectId }).where(eq(taskComments.taskId, taskId));
+}
+
 /** 지운 행이 있었는지 돌려준다 — 같은 업무를 동시에 지우는 요청 중 실제로 지운 쪽만 뒤처리를 한다. */
 export async function deleteTask(id) {
   const rows = await db.delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id });

@@ -6,7 +6,6 @@ import { findInviteLinkByToken, isInviteLinkValid, markInviteLinkUsed } from './
 import {
   findTeamInviteLinkByToken,
   isTeamInviteLinkValid,
-  markTeamInviteLinkUsed,
 } from './db/queries/teamInviteLinks.js';
 import { clientIp, isLanAddress, limits, minutesText } from './authGuard.js';
 import { allowedFromOutside } from './pairingPaths.js';
@@ -293,7 +292,13 @@ function renderInvitePage({ serverAddress, token, link, outside }) {
   const body = !link
     ? `<p class="warn">유효하지 않은 초대 링크입니다.</p>`
     : !valid
-      ? `<p class="warn">이 링크는 ${link.revokedAt ? '취소되었습니다' : '만료되었습니다'}. 초대한 사람에게 새 링크를 요청하세요.</p>`
+      ? `<p class="warn">이 링크는 ${
+          link.revokedAt
+            ? '취소되었습니다'
+            : link.maxUses != null && link.usedCount >= link.maxUses
+              ? '정해진 인원이 모두 가입해 더 쓸 수 없습니다'
+              : '만료되었습니다'
+        }. 초대한 사람에게 새 링크를 요청하세요.</p>`
       : `
         <p>${escapeHtml(link.createdByName)}님이 TangoTalk에 초대했습니다. 남은 기간: ${formatRemaining(new Date(link.expiresAt).getTime() - Date.now())}</p>
         ${outside ? PUBLIC_WIFI_CAUTION : ''}
@@ -323,7 +328,13 @@ function renderTeamInvitePage({ serverAddress, token, link, outside }) {
   const body = !link
     ? `<p class="warn">유효하지 않은 초대 링크입니다.</p>`
     : !valid
-      ? `<p class="warn">이 링크는 ${link.revokedAt ? '취소되었습니다' : '만료되었습니다'}. 초대한 사람에게 새 링크를 요청하세요.</p>`
+      ? `<p class="warn">이 링크는 ${
+          link.revokedAt
+            ? '취소되었습니다'
+            : link.maxUses != null && link.usedCount >= link.maxUses
+              ? '정해진 인원이 모두 가입해 더 쓸 수 없습니다'
+              : '만료되었습니다'
+        }. 초대한 사람에게 새 링크를 요청하세요.</p>`
       : `
         <p>${escapeHtml(link.createdByName)}님이 <b>${escapeHtml(link.teamName)}</b> 팀에 초대했습니다. 이 링크로 가입하면
         자동으로 이 팀에 합류하고 <b>${roleLabel(link.assignedRole)}</b> 등급이 부여됩니다.
@@ -383,7 +394,7 @@ export function createPairHandler(getCertPem) {
     const teamLink = await findTeamInviteLinkByToken(code);
     if (isTeamInviteLinkValid(teamLink)) {
       // 팀 초대 링크는 인증서 발급 시점에는 아직 안 지운다 — 실제 팀 합류/등급 부여는
-      // 회원가입(auth.js)에서 일어나고, 거기서 다시 한번 유효성을 확인하고 markTeamInviteLinkUsed를
+      // 회원가입(auth.js)에서 일어나고, 거기서 다시 한번 유효성을 확인하고 consumeTeamInviteLink로 한 자리를
       // 부른다. 여기서 먼저 소진해버리면 인증서만 받고 아직 가입 전인 상태에서 링크가
       // 무효화돼버릴 수 있다.
       return res.json({ cert: getCertPem() });

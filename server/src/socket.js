@@ -142,7 +142,10 @@ export function registerSocket(io) {
       const expiresAt = session?.selfDestructSeconds
         ? Date.now() + session.selfDestructSeconds * 1000
         : null;
-      const updated = await markMessageRead(payload.messageId, expiresAt);
+      const updated = await markMessageRead(payload.messageId, expiresAt, {
+        roomId: room.id,
+        readerId: socket.data.userId,
+      });
       if (!updated) return; // 이미 읽음 처리된 메시지(멱등) — 중복 브로드캐스트 안 함.
 
       io.to(room.id).emit('secret:message-read', {

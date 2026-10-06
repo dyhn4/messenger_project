@@ -42,6 +42,19 @@ export async function applyFileDelete(messageId, { plan, message, userId }) {
 }
 
 /** 이 메시지의 [fileUrl](미서명 원본 경로) 파일이 이미 지워졌는지 — 지운 파일은 즐겨찾기에 담을 수 없다. */
+/** [fileUrl](원본 경로)이 정말 이 메시지에 붙은 파일인지 — 즐겨찾기가 남의 방 파일 경로를 내 메시지에 걸어 두고
+ * 새 다운로드 링크를 계속 받아 가는 데 쓰이지 않게 한다. */
+export async function isFileOfMessage(message, fileUrl) {
+  if (!fileUrl) return false;
+  if (message.fileUrl === fileUrl) return true;
+  const rows = await db
+    .select({ id: messageAttachments.id })
+    .from(messageAttachments)
+    .where(and(eq(messageAttachments.messageId, message.id), eq(messageAttachments.fileUrl, fileUrl)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function isFileDeleted(message, fileUrl) {
   if (message.fileDeletedAt && message.fileUrl === fileUrl) return true;
   const rows = await db

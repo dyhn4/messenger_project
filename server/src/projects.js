@@ -109,6 +109,7 @@ import {
   takeNextTaskSeq,
   updateProject,
   updateTask,
+  detachMovedTask,
   updateTaskType,
   ensurePublicProjectMembers,
   ensurePublicMembershipsForUser,
@@ -142,7 +143,7 @@ import {
   validateAutomationInput,
 } from './projectAutomation.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
-import { isTeamMember } from './db/queries/teams.js';
+import { isTeamMember, listTeamMemberIds } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import { teamAccess } from './access.js';
 import { accountRole, canCreateProject, canManageProject } from './permissions.js';
@@ -627,6 +628,7 @@ export function createProjectsRouter(io) {
   router.post('/projects/:id/join', async (req, res) => {
     const project = await findProjectById(req.params.id);
     if (!project || !project.isPublic) return res.status(404).json({ error: '참여할 수 있는 공개 프로젝트가 아닙니다.' });
+    if (rejectIfArchived(res, project)) return;
     if (!(await isTeamMember(project.teamId, req.user.sub))) {
       return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
     }
@@ -670,7 +672,11 @@ export function createProjectsRouter(io) {
     if (rawColor != null && (typeof rawColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(rawColor))) {
       return res.status(400).json({ error: '색은 #RRGGBB 형식이어야 합니다.' });
     }
-    const memberIds = Array.isArray(req.body?.memberIds) ? req.body.memberIds.filter((id) => typeof id === 'string') : [];
+    // 처음 넣을 구성원은 이 팀 멤버만 — 다른 팀 사람이나 없는 id가 섞이지 않게.
+    const teamMemberIdSet = new Set(await listTeamMemberIds(teamId));
+    const memberIds = Array.isArray(req.body?.memberIds)
+      ? [...new Set(req.body.memberIds.filter((id) => typeof id === 'string' && teamMemberIdSet.has(id)))]
+      : [];
     // 템플릿을 골랐으면 기본 상태·유형·우선순위 대신 그 구성으로 채운다(같은 팀 것만).
     let template = null;
     if (req.body?.templateId != null) {
@@ -2267,6 +2273,7 @@ export function createProjectsRouter(io) {
       customValues: {},
       parentTaskId: null,
     });
+    await detachMovedTask(task.id, target.id);
     // 참조자·담당자는 새 프로젝트 구성원이 아닐 수 있다 — 구성원이 아닌 사람은 뗀다.
     const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
     const keep = [];
@@ -2277,7 +2284,7 @@ export function createProjectsRouter(io) {
     if (moved.assigneeId && !(await isProjectMember(target.id, moved.assigneeId))) {
       await updateTask(task.id, { assigneeId: null });
     }
-    // 하위 업무는 부모를 따라오지 않는다 — 부모만 옮기고 하위는 원래 프로젝트에 남긴다.
+    // 하위 업무는 부모를 따라오지 않는다 — 부모만 옮기고 하위는 원래 프로젝트에 최상위로 남긴다(detachMovedTask).
     await notifyProjectMembers(found.project, null);
     await notifyProjectMembers(target, task.id);
     const fresh = await findTaskById(task.id);

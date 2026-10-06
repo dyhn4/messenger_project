@@ -25,7 +25,7 @@ import { attachPolls } from './polls.js';
 import { resolveRawUrl, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
-import { isFileDeleted } from './db/queries/fileDelete.js';
+import { isFileDeleted, isFileOfMessage } from './db/queries/fileDelete.js';
 
 // 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르므로 여기 상수가 아니라
 // moderation.js의 canModifyContent가 판단한다.
@@ -174,6 +174,9 @@ export function createMessagesRouter(io) {
     }
     const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl : null;
     if (!fileUrl) return res.status(400).json({ error: '파일을 알 수 없습니다.' });
+    if (!(await isFileOfMessage(message, resolveRawUrl(fileUrl)))) {
+      return res.status(400).json({ error: '이 메시지의 파일이 아닙니다.' });
+    }
     if (await isFileDeleted(message, resolveRawUrl(fileUrl))) {
       return res.status(410).json({ error: '삭제된 파일입니다.' });
     }

@@ -113,6 +113,10 @@ export const limits = {
   loginIp: new FailureLimiter({ max: 20, windowMs: 15 * MIN, blockMs: 30 * MIN }),
   // 비밀번호: 한 아이디가 사내망 밖 여러 IP에서 20번 틀리면 1시간 — 사내에서는 그대로 로그인된다.
   loginUserExternal: new FailureLimiter({ max: 20, windowMs: HOUR, blockMs: HOUR }),
+  // 비밀번호: 사내망 밖 전체에서 15분에 300번 틀리면 15분 동안 밖에서의 로그인을 전부 멈춘다 — 수많은 IP로 나눠서
+  // 아이디마다 흔한 비밀번호를 몇 개씩 넣어보는 공격(위 IP·아이디 단위 제한에 안 걸린다)을 늦춘다. 그동안에도
+  // 사내에서는 그대로 로그인된다. 키는 하나('all')뿐이다.
+  loginExternalGlobal: new FailureLimiter({ max: 300, windowMs: 15 * MIN, blockMs: 15 * MIN }),
   // 보안 질문 답(비밀번호 재설정): 답은 짧고 추측하기 쉬워 더 엄격하게 — 같은 IP·아이디로 3번 틀리면 30분.
   recoveryIpUser: new FailureLimiter({ max: 3, windowMs: 30 * MIN, blockMs: 30 * MIN }),
   // 보안 질문 답: 한 아이디가 사내망 밖에서 하루에 10번 틀리면 하루 동안 밖에서는 재설정 불가.

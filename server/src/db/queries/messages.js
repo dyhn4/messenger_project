@@ -483,21 +483,36 @@ export async function listLinkMessages({
 }
 
 /** 비밀 대화 자동 삭제(secretExpiry.js): 상대방이 읽어서 expiresAt이 잡힌 뒤 그 시각이
- * 지난 메시지. 최초 1회만 읽음 처리되도록 readAt이 아직 없을 때만 세팅한다. */
-export async function markMessageRead(id, expiresAt) {
+ * 지난 메시지. 최초 1회만 읽음 처리되도록 readAt이 아직 없을 때만 세팅한다.
+ *
+ * 그 비밀 대화방([roomId])의 메시지이고 읽은 사람([readerId])이 보낸 것이 아닐 때만 찍는다 — 안 그러면
+ * 비밀 대화방 하나만 가진 사람이 다른 방의 메시지 id를 넣어 자동 삭제(영구 삭제) 타이머를 걸 수 있었다. */
+export async function markMessageRead(id, expiresAt, { roomId, readerId }) {
   const [row] = await db
     .update(messages)
     .set({ readAt: new Date(), expiresAt: expiresAt ? new Date(expiresAt) : null })
-    .where(and(eq(messages.id, id), sql`${messages.readAt} is null`))
+    .where(
+      and(
+        eq(messages.id, id),
+        eq(messages.roomId, roomId),
+        or(isNull(messages.senderId), ne(messages.senderId, readerId)),
+        sql`${messages.readAt} is null`,
+      ),
+    )
     .returning();
   return row ?? null;
 }
 
+/** 자동 삭제 시각이 지난 메시지 — 비밀 대화방 것만(일반 방 메시지는 어떤 경우에도 여기서 지우지 않는다). */
 export function findExpiredSecretMessages() {
   return db
-    .select()
+    .select({ message: messages })
     .from(messages)
-    .where(and(isNotNull(messages.expiresAt), lte(messages.expiresAt, new Date())));
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(
+      and(isNotNull(messages.expiresAt), lte(messages.expiresAt, new Date()), eq(rooms.isSecret, true)),
+    )
+    .then((rows) => rows.map((r) => r.message));
 }
 
 /** 행 자체를 완전히 없앤다(댓글도 FK cascade로 함께 삭제됨 — 부모 없는 댓글 스레드가 남는
@@ -531,12 +546,20 @@ export async function toggleFavoriteFile({ userId, messageId, fileUrl, fileName 
   return true;
 }
 
+/**
+ * 이 사람이 즐겨찾기한 파일 — 그 메시지가 있는 방에 지금도 들어가 있고, 메시지가 지워지지 않은 것만. 방에서 나간
+ * 뒤에도 즐겨찾기 목록이 그 방 파일의 새 다운로드 링크를 계속 내주던 문제를 막는다(즐겨찾기 행 자체는 남겨 둔다 —
+ * 다시 들어오면 그대로 보인다).
+ */
 export function listFavoriteFiles(userId) {
   return db
-    .select()
+    .select({ favorite: favoriteFiles })
     .from(favoriteFiles)
-    .where(eq(favoriteFiles.userId, userId))
-    .orderBy(desc(favoriteFiles.createdAt));
+    .innerJoin(messages, eq(messages.id, favoriteFiles.messageId))
+    .innerJoin(roomMembers, and(eq(roomMembers.roomId, messages.roomId), eq(roomMembers.userId, userId)))
+    .where(and(eq(favoriteFiles.userId, userId), isNull(messages.deletedAt)))
+    .orderBy(desc(favoriteFiles.createdAt))
+    .then((rows) => rows.map((r) => r.favorite));
 }
 
 /** 이 사람이 즐겨찾기한 파일 경로 집합 — 메시지 목록에 별 표시를 붙일 때 쓴다. */

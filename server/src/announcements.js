@@ -117,7 +117,8 @@ export function createAnnouncementsRouter(io) {
     const team = await findTeamById(room.teamId);
     const isDesignatedTopicCreator =
       team?.topicCreationPolicy === 'designated' ? await isTopicCreator(room.teamId, req.user.sub) : false;
-    if (!access.canManage && !canCreateTopic({ ...access, isDesignatedTopicCreator, team })) {
+    // 팀에서 빠진 사람(방 멤버십만 남음)은 쓸 수 없다 — canManage는 이미 팀 멤버만이지만 canCreateTopic은 등급만 본다.
+    if (!access.isMember || (!access.canManage && !canCreateTopic({ ...access, isDesignatedTopicCreator, team }))) {
       return res.status(403).json({ error: '공지를 작성할 권한이 없습니다.' });
     }
     // 읽기 전용·보관된 토픽은 공지도 토픽을 관리할 수 있는 사람만 — 공지로 읽기 전용을 우회하지 못하게.

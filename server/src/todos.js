@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { topicAccess } from './access.js';
 import { findCommentById } from './db/queries/comments.js';
 import { findMessageById, listAttachmentsForMessages } from './db/queries/messages.js';
-import { findRoomById, isRoomMember, listMutedUserIdsForRoom, listRoomMemberIds } from './db/queries/rooms.js';
+import { findRoomById, getDmHistoryFloor, isRoomMember, listMutedUserIdsForRoom, listRoomMemberIds } from './db/queries/rooms.js';
 import { isTeamMember } from './db/queries/teams.js';
 import {
   claimDueTodoReminders,
@@ -254,6 +254,12 @@ export function createTodosRouter(io) {
     const room = await findRoomById(todo.roomId);
     if (!room || !(await isRoomMember(room.id, req.user.sub))) {
       res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+      return null;
+    }
+    // 1:1 대화에서 "기록 지우고 나가기" 전의 할 일은 다시 들어와도 안 보인다(메시지 조회와 같은 규칙).
+    const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
+    if (floor && todo.createdAt < floor) {
+      res.status(404).json({ error: '할 일을 찾을 수 없습니다.' });
       return null;
     }
     const assigneeIds = await listTodoAssigneeIds(todo.id);

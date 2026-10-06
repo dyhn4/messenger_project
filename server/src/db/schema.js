@@ -276,6 +276,9 @@ export const teamInviteLinks = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     usedCount: integer('used_count').notNull().default(0),
+    // 이 링크로 가입할 수 있는 사람 수(다 차면 무효). null은 이 칸이 생기기 전에 만든 링크(제한 없음)뿐 —
+    // 새 링크는 늘 값이 있다(teamInvites.js). 링크 하나가 새도 끝없이 가입되지 않게 하려는 것.
+    maxUses: integer('max_uses'),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

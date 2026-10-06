@@ -11,13 +11,15 @@ export async function upsertDevice({ id, userId, name, identityPublicKey, signin
     .values({ id, userId, name, identityPublicKey, signingPublicKey, lastSeenAt: new Date() })
     .onConflictDoUpdate({
       target: devices.id,
-      // userId도 갱신 대상에 포함 — 같은 물리 기기에서 계정을 바꿔가며 로그인해도(예: 공용
-      // PC) 이 deviceId는 항상 "마지막으로 로그인한 계정 소유"로 정리된다. 개인키가 로컬에만
-      // 있으니 이전 계정은 어차피 이 deviceId로 서명 검증을 통과할 수 없어 안전하다.
-      set: { userId, name, identityPublicKey, signingPublicKey, revokedAt: null, lastSeenAt: new Date() },
+      set: { name, identityPublicKey, signingPublicKey, revokedAt: null, lastSeenAt: new Date() },
+      // 같은 사람의 기기일 때만 갱신한다. 예전엔 다른 사람 것도 덮어써서(소유자까지 바꿔서), 비밀 대화
+      // 상대에게 보이는 기기 id만 알면 그 기기를 가로채 상대의 비밀 대화를 깨고 푸시를 엉뚱하게 보낼 수
+      // 있었다. 공용 PC에서 계정을 바꿔 로그인하면 여기서 null이 되고, 앱이 새 기기 id를 만들어 다시
+      // 등록한다(client device_identity.dart).
+      setWhere: eq(devices.userId, userId),
     })
     .returning();
-  return row;
+  return row ?? null;
 }
 
 export function findDeviceById(id) {

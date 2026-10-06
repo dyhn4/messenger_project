@@ -1,6 +1,7 @@
 import { and, eq, isNull, lte, ne, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { users } from '../schema.js';
+import { invalidateAccountState } from '../../authState.js';
 
 export function findUserById(id) {
   return db
@@ -66,6 +67,8 @@ export async function insertUser(fields) {
 /** 부분 업데이트. 프로필 수정/아바타 변경/tokenVersion 증가/탈퇴 익명화/비밀번호 변경이 전부 이걸 쓴다. */
 export async function updateUser(id, patch) {
   const [row] = await db.update(users).set(patch).where(eq(users.id, id)).returning();
+  // 토큰 버전·정지·탈퇴가 바뀌면 요청 인증(authState.js)이 기억해 둔 상태를 바로 버린다.
+  if ('tokenVersion' in patch || 'suspendedAt' in patch || 'deletedAt' in patch) invalidateAccountState(id);
   return row;
 }
 

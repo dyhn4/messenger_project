@@ -47,7 +47,8 @@ class _FindIdScreenState extends State<FindIdScreen> {
       context: context,
       builder: (_) => FindPasswordScreen(
         session: session,
-        initialUsername: username,
+        // 사내망 밖에서는 서버가 아이디 앞 두 글자만 알려준다(나머지는 *) — 그건 미리 채우지 않고 직접 넣게 한다.
+        initialUsername: username.contains('*') ? null : username,
         initialEmail: email,
       ),
     );

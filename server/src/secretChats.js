@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { findActiveDeviceForUser } from './db/queries/devices.js';
 import { deleteRoom, findSecretRoomByDmKey, insertRoom } from './db/queries/rooms.js';
-import { isTeamMember } from './db/queries/teams.js';
+import { isTeamMember, listTeamIdsForUser } from './db/queries/teams.js';
 import {
   acceptSecretSession,
   findSecretSessionByRoomId,
@@ -79,6 +79,12 @@ export function createSecretChatsRouter(io) {
     }
     const target = await findUserById(targetUserId);
     if (!target) return res.status(404).json({ error: '대상 사용자를 찾을 수 없습니다.' });
+    // 같은 팀에 함께 있는 사람과만 — 팀 하나만 있으면(준회원 포함) 서버의 아무 회원에게나 비밀 대화 요청을 보낼 수
+    // 있던 것을 막는다(어느 팀이든 하나만 겹치면 되고, 위 teamId 팀일 필요는 없다).
+    const myTeams = new Set(await listTeamIdsForUser(req.user.sub));
+    if (!(await listTeamIdsForUser(targetUserId)).some((id) => myTeams.has(id))) {
+      return res.status(403).json({ error: '같은 팀에 있는 사람과만 비밀 대화를 할 수 있습니다.' });
+    }
 
     // 비밀 대화는 평문 DM과 별도의 방으로 취급한다(dmKey에 'secret:' 접두사를 붙여 평문
     // DM과 절대 같은 방으로 합쳐지지 않게 한다).
@@ -168,10 +174,13 @@ export function createSecretChatsRouter(io) {
     }
 
     const session = await acceptSecretSession(room.id, {
+      responderUserId: req.user.sub,
       responderDeviceId: device.id,
       responderEphemeralPublicKey,
       responderEphemeralSignature,
     });
+    // 초대받은 사람이 대기 중인 초대를 수락할 때만(acceptSecretSession 참고).
+    if (!session) return res.status(409).json({ error: '수락할 수 있는 비밀 대화 요청이 없습니다.' });
     io.to(room.id).emit('secret:accepted', {
       roomId: room.id,
       responderDeviceId: device.id,
@@ -186,6 +195,11 @@ export function createSecretChatsRouter(io) {
     const room = await findRoomById(req.params.roomId);
     if (!room || !room.isSecret) return res.status(404).json({ error: '비밀 대화를 찾을 수 없습니다.' });
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
+    // 거절(=방 통째 삭제)은 아직 시작 전인 요청에만 — 이미 시작된 대화를 상대 동의 없이 기록째 지우는 데 쓰이지 않게.
+    const pending = await findSecretSessionByRoomId(room.id);
+    if (pending && pending.status !== 'pending') {
+      return res.status(409).json({ error: '이미 시작된 비밀 대화는 거절할 수 없습니다.' });
+    }
 
     // 아직 메시지가 없는 상태(핸드셰이크 중)라 방 자체를 완전히 지운다 — dmKey를 비워둬야
     // 나중에 같은 상대에게 다시 비밀 대화를 걸 수 있다(안 지우면 unique 제약 위반으로 서버가

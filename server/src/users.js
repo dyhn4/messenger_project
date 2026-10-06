@@ -22,13 +22,17 @@ const VALID_AVATAR_TYPES = new Set(['initial', 'character', 'photo']);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const DELETED_USER_NAME = '탈퇴한 사용자';
 
-/** 비밀번호 등 민감 정보를 뺀, 다른 곳에 내려줘도 되는 사용자 정보. */
+/**
+ * 다른 사람에게 내려줘도 되는 사용자 정보 — 비밀번호는 물론 이메일·생일도 뺀다. 이메일은 아이디·비밀번호
+ * 찾기에 쓰는 값이라 남에게 보이면 계정을 노리는 발판이 되고(전체 회원 목록 GET /users로 서버의 모든
+ * 이메일이 새던 문제), 생일은 캘린더가 팀 단위로 따로 받는다(calendars.js의 listTeamBirthdays). 본인 것은
+ * [selfUser]로 내려준다.
+ */
 export function publicUser(u) {
   return {
     id: u.id,
     username: u.username,
     name: u.name ?? u.username,
-    email: u.emailEnc ? decryptField(u.emailEnc) : null,
     avatarType: u.avatarType ?? 'initial',
     avatarEmoji: u.avatarEmoji ?? null,
     avatarColor: u.avatarColor ?? null,
@@ -37,7 +41,14 @@ export function publicUser(u) {
     // 계정 등급 — 팀 설정의 "팀원 추가"나 조직도에서 등급을 보여주는 데 쓴다.
     // 바꾸는 것은 서버 운영자만 가능하다(admin.js).
     role: accountRole(u),
-    // 생일('MM-DD', 없으면 null) — 캘린더의 "멤버 생일"이 쓴다. 팀 멤버끼리는 보이는 정보다(캘린더 규약).
+  };
+}
+
+/** 본인 프로필(GET/PATCH /users/me 등) — [publicUser]에 본인만 보는 이메일과 생일('MM-DD', 없으면 null)을 더한다. */
+export function selfUser(u) {
+  return {
+    ...publicUser(u),
+    email: u.emailEnc ? decryptField(u.emailEnc) : null,
     birthday: u.birthday ?? null,
   };
 }
@@ -197,7 +208,7 @@ export function createUsersRouter(io) {
     const settings = await getServerSettings();
     const orgInfo = await myOrgInfo(user, settings);
     res.json({
-      ...publicUser(user),
+      ...selfUser(user),
       isServerAdmin: !!user.isServerAdmin,
       canCreateTeamInviteLink: canCreateTeamInviteLink({
         role: accountRole(user),
@@ -292,7 +303,7 @@ export function createUsersRouter(io) {
     // 이 사람이 속한 모든 방(다른 기기 포함, 그 방의 멤버 전원)에 갱신된 멤버 정보를 알린다.
     await broadcastMemberUpdate(io, user.id);
 
-    res.json(publicUser(updated));
+    res.json(selfUser(updated));
   });
 
   /**
@@ -326,7 +337,7 @@ export function createUsersRouter(io) {
       avatarUrl: found.thumbnailUrl ?? found.fileUrl,
     });
     await broadcastMemberUpdate(io, user.id);
-    res.json(publicUser(updated));
+    res.json(selfUser(updated));
   });
 
   /**
@@ -339,7 +350,7 @@ export function createUsersRouter(io) {
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
     const { currentPassword, newPassword } = req.body ?? {};
-    const passwordError = passwordPolicyError(newPassword);
+    const passwordError = passwordPolicyError(newPassword, { username: user.username });
     if (passwordError) return res.status(400).json({ error: `새 ${passwordError}` });
     if (!(await checkCurrentPassword(res, user, currentPassword, '현재 비밀번호가 올바르지 않습니다.'))) return;
 

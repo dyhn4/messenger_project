@@ -13,7 +13,8 @@ import {
 } from "./authGuard.js";
 import { JWT_SECRET } from "./config.js";
 import { encryptField, lookupHash } from "./crypto.js";
-import { passwordPolicyError } from "./passwordPolicy.js";
+import { PASSWORD_MIN_LENGTH, passwordPolicyError } from "./passwordPolicy.js";
+import { accountState } from "./authState.js";
 import {
   findUserByEmailLookup,
   findUserById,
@@ -26,7 +27,7 @@ import {
 import {
   findTeamInviteLinkByToken,
   isTeamInviteLinkValid,
-  markTeamInviteLinkUsed,
+  consumeTeamInviteLink,
 } from "./db/queries/teamInviteLinks.js";
 import { findInviteLinkByToken, isInviteLinkValid } from "./db/queries/inviteLinks.js";
 import { addTeamMembers } from "./db/queries/teams.js";
@@ -34,6 +35,8 @@ import { addRoomMembers, listAutoInviteTopics, listRoomMemberIds } from "./db/qu
 import { findDefaultPositionOption } from "./db/queries/positionOptions.js";
 import { notifyMembership, postSystemMessage } from "./rooms.js";
 import { announceTeamJoin } from "./selfRoomNotices.js";
+import { teamAccess } from "./access.js";
+import { canManageTeam, ROLE_RANK } from "./permissions.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_LENGTH_ERROR = "아이디는 4~20자여야 합니다.";
@@ -133,6 +136,19 @@ function recoveryGuard(req, res, username) {
   };
 }
 
+/**
+ * 팀 초대 링크를 만든 사람이 지금도 그 링크를 만들 수 있는 사람인지 — 링크는 7일 동안 살아 있는데, 그 사이 만든 사람이
+ * 팀에서 빠지거나 등급이 내려가면 그 사람이 더는 줄 수 없는 팀 합류·등급을 링크가 계속 주게 된다(teamInvites.js의 발급
+ * 조건과 같다: 그 팀을 관리할 수 있고, 부여 등급이 자기 등급 이하 — 서버 운영자는 등급 제한 없음).
+ */
+async function inviteCreatorStillAllowed(link) {
+  if (!link?.createdBy) return false;
+  const creator = await teamAccess(link.teamId, link.createdBy);
+  if (!creator.user || creator.user.deletedAt || creator.user.suspendedAt) return false;
+  if (!creator.isMember || !canManageTeam(creator)) return false;
+  return creator.isServerAdmin || ROLE_RANK[link.assignedRole] <= ROLE_RANK[creator.role];
+}
+
 /** 지금 유효한 초대 링크(팀 초대 또는 설치 초대)의 토큰인지. */
 async function isValidInviteToken(token) {
   if (typeof token !== "string" || !token) return false;
@@ -169,8 +185,14 @@ export function createAuthRouter(io) {
    *  한번 검사한다. */
   router.get("/username-available", rateLimit(limits.usernameCheckIp, "중복 확인 시도"), async (req, res) => {
     const username = req.query.username ?? "";
-    if (username.length < 4 || username.length > 20) {
+    if (typeof username !== "string" || username.length < 4 || username.length > 20) {
       return res.json({ available: false, error: USERNAME_LENGTH_ERROR });
+    }
+    // 사내망 밖에서 초대 링크 없이 묻는 건 어차피 가입할 수 없는 사람이다 — 아이디가 있는지 알려주면 인터넷의
+    // 누구나 직원 아이디 목록을 맞혀볼 수 있어서, DB를 보지 않고 "쓸 수 있음"으로만 답한다(실제 가입 때 다시
+    // 검사해서 겹치면 그때 알린다). 초대 링크로 열린 앱은 그 토큰(inviteToken)을 같이 보낸다.
+    if (!isLanAddress(clientIp(req)) && !(await isValidInviteToken(req.query.inviteToken))) {
+      return res.json({ available: true });
     }
     const exists = await findUserByUsername(username);
     if (exists) {
@@ -209,7 +231,7 @@ export function createAuthRouter(io) {
     if (username.length < 4 || username.length > 20) {
       return res.status(400).json({ error: USERNAME_LENGTH_ERROR });
     }
-    const passwordError = passwordPolicyError(password);
+    const passwordError = passwordPolicyError(password, { username });
     if (passwordError) {
       return res.status(400).json({ error: passwordError });
     }
@@ -220,6 +242,10 @@ export function createAuthRouter(io) {
     }
     if (!securityQuestion?.trim() || !securityAnswer?.trim()) {
       return res.status(400).json({ error: "보안 질문과 답변을 입력하세요." });
+    }
+    // 답이 한 글자면 몇 번 만에 맞혀서 비밀번호를 바꿀 수 있다(사내망 밖에서도 재설정할 수 있어서).
+    if (String(securityAnswer).trim().length < 2) {
+      return res.status(400).json({ error: "보안 질문 답변은 2자 이상 입력하세요." });
     }
 
     const exists = await findUserByUsername(username);
@@ -275,7 +301,8 @@ export function createAuthRouter(io) {
     // role: 'admin'으로 시작하고 팀 개념과 무관하므로 건너뛴다.
     if (!firstAccount && typeof teamInviteToken === "string" && teamInviteToken) {
       const link = await findTeamInviteLinkByToken(teamInviteToken);
-      if (isTeamInviteLinkValid(link)) {
+      // 자리를 먼저 차지한다(consumeTeamInviteLink) — 인원이 다 찼으면 가입만 되고 팀에는 안 들어간다.
+      if (isTeamInviteLinkValid(link) && (await inviteCreatorStillAllowed(link)) && (await consumeTeamInviteLink(link.id))) {
         await addTeamMembers(link.teamId, [user.id], "member");
         const patch = {};
         if (link.assignedRole !== user.role) patch.role = link.assignedRole;
@@ -285,7 +312,6 @@ export function createAuthRouter(io) {
         if (Object.keys(patch).length > 0) {
           await updateUser(user.id, patch);
         }
-        await markTeamInviteLinkUsed(link.id);
         // 준회원으로 부여됐다면(assignedRole === 'guest') 토픽 자동 가입 대상이
         // 아니다 — admin.js의 등급 상향 처리와 같은 규칙. 정회원 이상은 팀 멤버 추가(teams.js)와
         // 같이 '정회원 자동 초대'가 켜진 토픽에만 들어간다.
@@ -313,11 +339,18 @@ export function createAuthRouter(io) {
   /** 이메일로 아이디를 찾는다. 가입할 때 등록해둔 이메일이 있어야 동작한다. */
   router.post("/find-id", rateLimit(limits.lookupIp, "조회 시도"), async (req, res) => {
     const { email } = req.body ?? {};
+    if (typeof email !== "string" || email.length > 200) {
+      return res.status(400).json({ error: "이메일을 확인하세요." });
+    }
     const user = await findUserByEmailLookup(lookupHash(email));
     if (!user) {
       return res.status(404).json({ error: "일치하는 계정이 없습니다." });
     }
-    res.json({ username: user.username });
+    // 사내망 밖에서는 앞 두 글자만 보여준다 — 이메일만 알면 아이디를 통째로 알아내 로그인·재설정 공격에 쓰는 걸
+    // 막는다(본인은 앞부분만 봐도 대개 기억난다). 사내에서는 지금처럼 전부 보인다.
+    const name = user.username;
+    const shown = isLanAddress(clientIp(req)) ? name : name.slice(0, 2) + "*".repeat(Math.max(2, name.length - 2));
+    res.json({ username: shown });
   });
 
   /**
@@ -387,7 +420,7 @@ export function createAuthRouter(io) {
    */
   router.post("/reset-password", async (req, res) => {
     const { username, email, securityAnswer, newPassword } = req.body ?? {};
-    const passwordError = passwordPolicyError(newPassword);
+    const passwordError = passwordPolicyError(newPassword, { username });
     if (passwordError) {
       return res.status(400).json({ error: passwordError });
     }
@@ -436,8 +469,13 @@ export function createAuthRouter(io) {
 
   router.post("/login", async (req, res) => {
     const { username, password } = req.body ?? {};
+    // 아이디·비밀번호 칸 길이(20자)를 한참 넘는 값은 바로 거절한다 — 제한 기록의 키로 쓰이므로, 아주 긴 값을
+    // 계속 바꿔 보내 서버 메모리를 채우는 걸 막는다.
+    if (typeof username !== "string" || username.length > 64 || (password != null && String(password).length > 200)) {
+      return res.status(400).json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
+    }
     // 무차별 대입 방어(authGuard.js) — 같은 IP·아이디, 같은 IP(여러 아이디), 사내망 밖에서
-    // 한 아이디 세 갈래로 센다. 막혀 있는 동안은 비밀번호가 맞아도 들여보내지 않는다.
+    // 한 아이디, 사내망 밖 전체 네 갈래로 센다. 막혀 있는 동안은 비밀번호가 맞아도 들여보내지 않는다.
     const ip = clientIp(req);
     const external = !isLanAddress(ip);
     const uk = userKey(username);
@@ -446,6 +484,7 @@ export function createAuthRouter(io) {
       limits.loginIpUser.blockedFor(ipUser),
       limits.loginIp.blockedFor(ip),
       external ? limits.loginUserExternal.blockedFor(uk) : 0,
+      external ? limits.loginExternalGlobal.blockedFor("all") : 0,
     );
     if (wait > 0) return tooMany(res, wait, "로그인 시도");
 
@@ -464,6 +503,9 @@ export function createAuthRouter(io) {
       if (external && limits.loginUserExternal.fail(uk)) {
         reportLockout({ ip, username: uk, user, detail: `사내망 밖에서 이 아이디로 비밀번호 20회 오류 — 밖에서는 ${minutesText(limits.loginUserExternal.blockMs)} 로그인 차단(사내에서는 가능)` });
       }
+      if (external && limits.loginExternalGlobal.fail("all")) {
+        reportLockout({ ip, username: uk, user: null, detail: `사내망 밖 전체에서 비밀번호 오류가 15분에 300회를 넘음(여러 IP의 대입 공격 의심) — 밖에서의 로그인 ${minutesText(limits.loginExternalGlobal.blockMs)} 전부 차단(사내에서는 가능)` });
+      }
       return res
         .status(401)
         .json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
@@ -476,6 +518,12 @@ export function createAuthRouter(io) {
       return res
         .status(403)
         .json({ error: "정지된 계정입니다. 서버 운영자에게 문의하세요." });
+    }
+    // 최소 길이를 8자로 올리기 전에 정한 짧은 비밀번호는 사내에서만 받는다 — 밖에서는 맞히기 너무 쉽다.
+    if (external && String(password).length < PASSWORD_MIN_LENGTH) {
+      return res.status(403).json({
+        error: `비밀번호가 ${PASSWORD_MIN_LENGTH}자보다 짧아 사내망 밖에서는 로그인할 수 없습니다. 사내에서 로그인해 비밀번호를 바꾼 뒤 다시 시도하세요.`,
+      });
     }
 
     res.json({
@@ -532,18 +580,37 @@ export function createAuthRouter(io) {
  * 매 요청마다 걸리는 경로라 DB 조회 없이 서명/만료(그리고 AccessToken인지)만 검증한다 —
  * tokenVersion 대조는 RefreshToken 재발급 시점(/auth/refresh)과 소켓 연결 시점에만 한다.
  */
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const header = req.headers.authorization ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: "토큰이 없습니다." });
 
+  let payload;
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    payload = jwt.verify(token, JWT_SECRET);
     if (payload.type !== "access") throw new Error("invalid token type");
-    req.user = payload;
-    next();
   } catch {
-    res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+  }
+  // 정지·탈퇴·강제 로그아웃·비밀번호 변경(토큰 버전이 오른 것) 뒤의 토큰은 만료 전이라도 바로 막는다(authState.js —
+  // 30초 캐시라 요청마다 DB를 읽지는 않는다). 401이면 앱은 RefreshToken으로 갱신을 시도하고, 그것도 같은 이유로
+  // 거절되면 로그아웃된다.
+  const state = await accountState(payload.sub);
+  if (state.blocked || state.tokenVersion !== (payload.tokenVersion ?? 0)) {
+    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+  }
+  req.user = payload;
+  next();
+}
+
+/** 요청에 유효한 AccessToken이 붙어 있는지만 본다(없거나 틀려도 거절하지 않는 공개 경로용 — /server-info 등). */
+export function hasValidAccessToken(req) {
+  const header = req.headers.authorization ?? "";
+  if (!header.startsWith("Bearer ")) return false;
+  try {
+    return jwt.verify(header.slice(7), JWT_SECRET).type === "access";
+  } catch {
+    return false;
   }
 }
 

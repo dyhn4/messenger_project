@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { teamInviteLinks, teams } from '../schema.js';
 
@@ -46,17 +46,30 @@ export async function revokeTeamInviteLink(id) {
   return row;
 }
 
-/** 초대 페이지/가입에서 쓸 때마다 사용 횟수와 마지막 사용 시각을 갱신한다(1회용이 아니다). */
-export async function markTeamInviteLinkUsed(id) {
-  await db
+/**
+ * 가입 한 건에 링크 한 자리를 쓴다 — 아직 유효하고(폐기·만료 안 됨) 자리가 남았을 때만, 확인과 차감을 한
+ * 문장으로 해서 동시에 여러 명이 가입해도 정한 인원을 넘지 않는다. 썼으면 true, 못 썼으면(다 참 등) false.
+ */
+export async function consumeTeamInviteLink(id) {
+  const rows = await db
     .update(teamInviteLinks)
     .set({ usedCount: sql`${teamInviteLinks.usedCount} + 1`, lastUsedAt: new Date() })
-    .where(eq(teamInviteLinks.id, id));
+    .where(
+      and(
+        eq(teamInviteLinks.id, id),
+        isNull(teamInviteLinks.revokedAt),
+        gt(teamInviteLinks.expiresAt, new Date()),
+        or(isNull(teamInviteLinks.maxUses), lt(teamInviteLinks.usedCount, teamInviteLinks.maxUses)),
+      ),
+    )
+    .returning({ id: teamInviteLinks.id });
+  return rows.length > 0;
 }
 
-/** 지금 유효한(만료·폐기 안 된) 링크인지. */
+/** 지금 유효한(만료·폐기 안 됐고 가입 인원이 남은) 링크인지. */
 export function isTeamInviteLinkValid(link) {
   if (!link) return false;
   if (link.revokedAt) return false;
+  if (link.maxUses != null && link.usedCount >= link.maxUses) return false;
   return new Date(link.expiresAt).getTime() > Date.now();
 }

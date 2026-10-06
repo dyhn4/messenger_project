@@ -73,6 +73,12 @@ class UploadCancelToken {
   bool get isCancelled => _cancelled;
 }
 
+/// 기기 등록이 "다른 계정이 쓰는 기기 id"라서 거절됐을 때(409) — 공용 PC에서 계정을 바꿔 로그인한 경우다.
+/// DeviceIdentity가 이걸 받으면 새 기기 id·키를 만들어 다시 등록한다(server/src/devices.js).
+class DeviceOwnedByOtherException implements Exception {
+  const DeviceOwnedByOtherException();
+}
+
 class UploadCancelledException implements Exception {
   @override
   String toString() => '업로드가 취소되었습니다.';
@@ -448,8 +454,9 @@ class ApiClient {
   /// 없음"과 구분해야 Session이 저장해둔 주소를 잘못 지우지 않는다.
   Future<({String? externalUrl, List<String> internalUrls})>
   fetchServerInfo() async {
+    // 로그인했으면 토큰을 붙인다 — 사내망 밖에서는 토큰이 있어야 서버가 사내 주소를 알려준다.
     final res = await _client
-        .get(_uri('/server-info'))
+        .get(_uri('/server-info'), headers: _authHeaders)
         .timeout(const Duration(seconds: 5));
     if (res.statusCode != 200) {
       throw ApiException('서버 정보를 가져오지 못했습니다(${res.statusCode}).');
@@ -547,10 +554,15 @@ class ApiClient {
 
   /// 회원가입 폼의 "중복 확인" 버튼용. 사용 가능하면 null, 아니면(형식 오류/중복) 사유
   /// 문구를 돌려준다.
-  Future<String?> checkUsernameAvailable(String username) async {
+  /// [inviteToken]은 초대 링크로 열린 앱이 받은 코드 — 사내망 밖에서는 이게 있어야 서버가 실제로 확인해 준다
+  /// (없으면 누구나 아이디 목록을 맞혀볼 수 있어서 서버가 늘 "사용 가능"으로만 답한다).
+  Future<String?> checkUsernameAvailable(
+    String username, {
+    String? inviteToken,
+  }) async {
     final res = await _client.get(
-      _uri(
-        '/auth/username-available?username=${Uri.encodeQueryComponent(username)}',
+      _uri('/auth/username-available').replace(
+        queryParameters: {'username': username, 'inviteToken': ?inviteToken},
       ),
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
@@ -1136,12 +1148,14 @@ class ApiClient {
     required AccountRole assignedRole,
     String? assignedPosition,
     String? label,
+    int? maxUses,
   }) async => TeamInviteLink.fromJson(
     await _post('/api/team-invite-links', {
           'teamId': teamId,
           'assignedRole': assignedRole.wire,
           'assignedPosition': ?assignedPosition,
           'label': ?label,
+          'maxUses': ?maxUses,
         })
         as Map<String, dynamic>,
   );
@@ -2792,12 +2806,25 @@ class ApiClient {
     required String identityPublicKey,
     required String signingPublicKey,
   }) async {
-    await _post('/api/devices', {
-      'deviceId': deviceId,
-      'name': ?name,
-      'identityPublicKey': identityPublicKey,
-      'signingPublicKey': signingPublicKey,
-    });
+    final res = await _send(
+      () => _client.post(
+        _uri('/api/devices'),
+        headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'deviceId': deviceId,
+          'name': ?name,
+          'identityPublicKey': identityPublicKey,
+          'signingPublicKey': signingPublicKey,
+        }),
+      ),
+    );
+    if (res.statusCode == 409) throw const DeviceOwnedByOtherException();
+    if (res.statusCode >= 400) {
+      final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+      throw ApiException(
+        (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+      );
+    }
   }
 
   /// FCM 토큰을 등록/갱신한다(안드로이드 전용). null을 보내면(로그아웃 등) 서버가 토큰을

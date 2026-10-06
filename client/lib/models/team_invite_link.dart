@@ -21,9 +21,12 @@ class TeamInviteLink {
   final DateTime expiresAt;
   final bool revoked;
   final int usedCount;
+
+  /// 이 링크로 가입할 수 있는 사람 수 — 다 차면 더 못 쓴다. null은 이 제한이 생기기 전에 만든 링크(제한 없음).
+  final int? maxUses;
   final DateTime? lastUsedAt;
 
-  /// 지금 실제로 쓸 수 있는지(만료·폐기 안 됨) — 서버가 판정해서 내려준다.
+  /// 지금 실제로 쓸 수 있는지(만료·폐기 안 됐고 인원이 남음) — 서버가 판정해서 내려준다.
   final bool valid;
 
   /// 상대방에게 그대로 보내면 되는 안내 페이지 주소(평문 HTTP, 자체 서명 인증서 경고 없음).
@@ -45,6 +48,7 @@ class TeamInviteLink {
     required this.expiresAt,
     this.revoked = false,
     this.usedCount = 0,
+    this.maxUses,
     this.lastUsedAt,
     this.valid = true,
     this.url,
@@ -68,6 +72,7 @@ class TeamInviteLink {
     ),
     revoked: json['revoked'] as bool? ?? false,
     usedCount: (json['usedCount'] as num?)?.toInt() ?? 0,
+    maxUses: (json['maxUses'] as num?)?.toInt(),
     lastUsedAt: json['lastUsedAt'] == null
         ? null
         : DateTime.fromMillisecondsSinceEpoch(
@@ -81,10 +86,15 @@ class TeamInviteLink {
   /// "만료됨" / "취소됨" / "만료까지 3일" 처럼 상태를 한 줄로.
   String get statusLabel {
     if (revoked) return '취소됨';
+    if (maxUses != null && usedCount >= maxUses!) return '인원 마감';
     if (!valid) return '만료됨';
     final remaining = expiresAt.difference(DateTime.now());
     if (remaining.inHours < 1) return '곧 만료';
     if (remaining.inDays < 1) return '오늘 만료';
     return '만료까지 ${remaining.inDays}일';
   }
+
+  /// "가입 2/5명"처럼 — 인원 제한이 없는 예전 링크는 "가입 2명".
+  String get usageLabel =>
+      maxUses == null ? '가입 $usedCount명' : '가입 $usedCount/$maxUses명';
 }

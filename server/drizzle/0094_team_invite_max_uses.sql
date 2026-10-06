@@ -1,0 +1,1 @@
+ALTER TABLE "team_invite_links" ADD COLUMN "max_uses" integer;

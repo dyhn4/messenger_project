@@ -18,14 +18,28 @@ function rawHeaderLines(rawHeaders) {
   return lines;
 }
 
-/** 실제 접속한 클라이언트 IP를 LiveKit 로그에 남기도록 X-Forwarded-For를 붙인다. */
+/**
+ * 화상회의 앱(LiveKit SDK)이 쓰는 경로만 넘긴다 — 신호 WebSocket(/rtc)과 연결 확인(/rtc/validate). 그 밖의 LiveKit HTTP
+ * 경로(방 관리 API 등)는 인터넷에서 닿을 이유가 없다.
+ */
+function allowedPath(url, { websocket }) {
+  const pathname = (url ?? '').split('?')[0];
+  return websocket ? pathname === '/rtc' : pathname === '/rtc/validate';
+}
+
+/**
+ * LiveKit으로 넘길 헤더 — 참가 토큰(Authorization)과 WebSocket 연결에 필요한 것은 그대로 두고, 이 서버와 무관한 쿠키와
+ * 클라이언트가 꾸며 보낸 X-Forwarded-*는 버린다. 실제 접속한 IP만 X-Forwarded-For로 붙여 LiveKit 로그에 남긴다.
+ */
 function forwardedHeaders(req, port) {
-  const prior = req.headers['x-forwarded-for'];
-  const client = req.socket.remoteAddress ?? '';
+  const headers = { ...req.headers };
+  for (const name of Object.keys(headers)) {
+    if (name === 'cookie' || name.startsWith('x-forwarded-') || name === 'forwarded') delete headers[name];
+  }
   return {
-    ...req.headers,
+    ...headers,
     host: `127.0.0.1:${port}`,
-    'x-forwarded-for': prior ? `${prior}, ${client}` : client,
+    'x-forwarded-for': req.socket.remoteAddress ?? '',
     'x-forwarded-proto': 'https',
   };
 }
@@ -36,6 +50,7 @@ function forwardedHeaders(req, port) {
  */
 export function livekitHttpProxy(port) {
   return (req, res) => {
+    if (!allowedPath(req.url, { websocket: false })) return res.status(404).end();
     const upstream = http.request(
       { host: '127.0.0.1', port, method: req.method, path: req.url, headers: forwardedHeaders(req, port) },
       (upRes) => {
@@ -58,6 +73,10 @@ export function livekitHttpProxy(port) {
 export function attachLivekitUpgradeProxy(server, port) {
   server.on('upgrade', (req, socket, head) => {
     if (!req.url?.startsWith(`${LIVEKIT_PROXY_PREFIX}/`)) return;
+    if (!allowedPath(req.url.slice(LIVEKIT_PROXY_PREFIX.length), { websocket: true })) {
+      socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      return;
+    }
     const upstream = http.request({
       host: '127.0.0.1',
       port,

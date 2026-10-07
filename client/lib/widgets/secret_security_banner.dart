@@ -12,6 +12,8 @@ import 'secret_safety_number_dialog.dart';
 ///     고정해 둔 키로 확인이 안 돼 멈췄으면 "상대 기기 키 다시 받기"(확인 창을 거쳐 그 키를 지운다)도 보인다.
 ///  2. 상대 기기 바뀜(노랑): 예전에 보안 코드를 확인한 기기가 아닌 다른 기기와 맺어졌다 — 보안 코드를 다시 비교하게.
 ///  3. 예전 앱(회색): 상대가 맥락 서명(v2)을 보내지 않는 예전 앱이라 보안 확인이 일부만 된다 — 업데이트를 권한다.
+///  4. 예전 방식 대화(회색): 이 업데이트 전에 맺은(또는 예전 앱과 맺은) 대화라 예전 규약(v1)을 쓴다 — 두 사람 모두
+///     새 앱이면 새로 시작했을 때 새 규약(더블 래칫)으로 바뀐다고 알린다.
 /// 상태는 SecretSessionManager가 이 기기에 저장해 둔 값이다(Session.secretTrustOf) — 방을 열 때 읽어 온다.
 class SecretSecurityBanner extends StatefulWidget {
   final Session session;
@@ -51,6 +53,7 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
         if (trust.blocked) return _blocked(context, trust);
         if (trust.showDeviceChangedNotice) return _deviceChanged(context);
         if (trust.showLegacyNotice) return _legacy(context);
+        if (trust.showProtocolNotice) return _oldProtocol(context);
         return const SizedBox.shrink();
       },
     );
@@ -229,6 +232,25 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
         ),
       ],
       onClose: () => widget.session.dismissSecretLegacyNotice(widget.room.id),
+    );
+  }
+
+  Widget _oldProtocol(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return _bar(
+      context,
+      key: const ValueKey('secret-security-old-protocol'),
+      background: scheme.surfaceContainerHighest,
+      foreground: scheme.onSurfaceVariant,
+      icon: Icons.info_outline,
+      body: const [
+        Text(
+          '이 비밀 대화는 예전 방식으로 맺어져 있습니다. 상대도 최신 앱으로 업데이트했다면, 이 대화를 끝내고 새로 시작해 '
+          '더 안전하고 메시지가 더 안정적으로 오가는 새 방식으로 바꿀 수 있습니다(대화를 끝내면 이 대화의 메시지는 '
+          '지워집니다). 둘 다 최신 앱인데 새로 시작해도 이 안내가 다시 뜨면 관리자에게 서버 업데이트를 요청해 주세요.',
+        ),
+      ],
+      onClose: () => widget.session.dismissSecretProtocolNotice(widget.room.id),
     );
   }
 }

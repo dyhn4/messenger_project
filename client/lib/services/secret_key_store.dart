@@ -2,27 +2,46 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:cryptography/cryptography.dart' show Sha256;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/message.dart';
 import 'secret_peer_store.dart';
+import 'secret_ratchet.dart';
 
-/// 비밀 대화 방 하나의 현재 래칫 상태. chainKey는 항상 "다음 메시지에 쓸" 체인키를 가리킨다
-/// (secret_chat_crypto.dart의 ratchet 함수가 매 메시지 후 이 자리를 갱신한다).
+/// 예전 규약(v1) 비밀 대화 방 하나의 현재 래칫 상태. chainKey는 항상 "다음 메시지에 쓸" 체인키를 가리킨다
+/// (secret_chat_crypto.dart의 ratchet 함수가 매 메시지 후 이 자리를 갱신한다). 새 규약(v3) 방은
+/// secret_ratchet.dart의 SecretRatchetState를 쓴다.
 class SecretChainState {
   final int epoch;
   final int n;
   final List<int> chainKey;
-  final int? prevEpoch;
-  final List<int>? prevChainKeySnapshot; // 오프라인 중 재키잉을 놓쳤을 때 뒤쫓아가기용 스냅샷.
   const SecretChainState({
     required this.epoch,
     required this.n,
     required this.chainKey,
-    this.prevEpoch,
-    this.prevChainKeySnapshot,
   });
+
+  String encode() =>
+      jsonEncode({'e': epoch, 'n': n, 'k': base64Encode(chainKey)});
+
+  /// 깨진 값이면 null.
+  static SecretChainState? decode(String raw) {
+    try {
+      final json = jsonDecode(raw);
+      if (json is! Map) return null;
+      final epoch = json['e'];
+      final n = json['n'];
+      final key = json['k'];
+      if (epoch is! int || n is! int || n < 0 || key is! String) return null;
+      final bytes = base64Decode(key);
+      if (bytes.length != 32) return null;
+      return SecretChainState(epoch: epoch, n: n, chainKey: bytes);
+    } on FormatException {
+      return null;
+    }
+  }
 }
 
 /// 이 기기에 저장해 둔 비밀 대화 평문 하나의 자리·만료 정보 — 메모리 색인용이라 평문 자체는 담지 않는다.
@@ -87,6 +106,9 @@ class SecretTextRef {
     required this.createdAt,
     this.expiryKnown = false,
     this.expiresAt,
+    this.envelope,
+    this.fromMe,
+    this.senderId,
   });
 
   final String roomId;
@@ -100,6 +122,18 @@ class SecretTextRef {
   /// 서버가 정한 자동 삭제 시각 그대로다 — null이면 읽을 때 타이머가 꺼져 있어 자동 삭제되지 않는다.
   final bool expiryKnown;
   final DateTime? expiresAt;
+
+  /// 서버가 지금 이 메시지로 보여 주는 암호문 봉투(text) — 저장할 때 그 지문을 함께 적고, 읽을 때 지문이 다르면(수정된
+  /// 메시지·서버가 다른 봉투를 붙임) 저장해 둔 평문을 주지 않는다. 모르면 null(확인하지 않는다).
+  final String? envelope;
+
+  /// 서버가 이 메시지를 내가 보낸 것으로 보여 주는지 — 저장할 때 적고, 읽을 때 다르면(서버가 보낸 사람을 바꿔 붙임)
+  /// 저장해 둔 평문을 주지 않는다. 모르면 null.
+  final bool? fromMe;
+
+  /// 서버가 알려 준 보낸 사람 id(탈퇴한 사람이면 null) — [fromMe]와 같이 적고, 둘 다 알 때 다르면(서버가 다른 사람으로
+  /// 바꿔 붙임) 저장해 둔 평문을 주지 않는다.
+  final String? senderId;
 }
 
 const _textKeyPrefix = 'secretcache/';
@@ -131,20 +165,61 @@ const _securityField = 'security';
 /// 상대가 수락하면 이걸로 수락 맥락 서명을 확인한다(서버가 알려 주는 "수락한 사람"을 그대로 믿지 않으려고).
 const _pendingInitField = 'pendingInit';
 
+/// 새 규약(v3) 방의 더블 래칫 상태(secret_ratchet.dart SecretRatchetState — 남겨 둔 메시지 키는 [_skippedField]에 따로).
+const _ratchetField = 'ratchet';
+
+/// 예전 규약(v1) 방의 래칫 상태 — epoch·n·체인키를 JSON 한 값에(한 번에 바뀐다). 예전에는 칸마다 따로 적어서, 그
+/// 사이에 쓰기가 실패하거나 앱이 꺼지면 새 번호와 옛 체인키가 섞여 그 대화가 영영 어긋났다. 예전 칸은 [_legacyChainFields].
+const _chainField = 'chain';
+
+/// 이 업데이트 전 앱이 적던 예전 규약(v1) 래칫 상태의 칸들 — 읽기만 하고, 새로 적을 때([_chainField]) 지운다.
+/// prevEpoch·prevChainKeySnapshot은 예전 재키잉 직전의 체인키라(재키잉을 하지 않아 더 쓸 데가 없다) 버린다. 이 순서로
+/// 지운다 — chainKey가 마지막이라, 그것이 남아 있으면 다 지우지 못한 것이다(SecretKeyStore.readChainState가 다시 지운다).
+const _legacyChainFields = [
+  'epoch',
+  'n',
+  'prevEpoch',
+  'prevChainKeySnapshot',
+  'chainKey',
+];
+
+/// 늦게 올 메시지를 위해 남겨 둔 메시지 키(secret_ratchet.dart encodeSkippedKeys) — 방 하나는 한 규약만 쓰므로 두 규약이
+/// 같은 칸을 쓴다. 바뀔 때만 다시 쓴다(키가 많으면 커서 메시지마다 다시 쓰지 않게).
+const _skippedField = 'skipped';
+
+/// 이 기기가 수락을 보냈는데 서버가 받았다는 답을 아직 못 받은 대화의 표시 — 있으면 같은 초대를 다시 수락할 수 있고
+/// (응답을 못 받은 수락 다시 하기), 없으면 이미 맺은 대화라 다시 온 초대를 무시한다(SecretSessionManager.acceptInvite).
+const _acceptPendingField = 'acceptPending';
+
 /// 이 기기에 남은 방의 세션 키 상태(평문 캐시·계정 표시·보안 상태는 빼고) — 핸드셰이크를 되돌릴 때 지운다. 보안
 /// 상태([_securityField])는 멈춤을 지키며 따로 정리한다(clearSessionKeys).
 const _sessionKeyFields = [
-  'epoch',
-  'n',
-  'chainKey',
-  'prevEpoch',
-  'prevChainKeySnapshot',
+  ..._legacyChainFields,
+  _chainField,
+  _skippedField,
+  _ratchetField,
+  _acceptPendingField,
   'pendingEphemeralSeed',
   _pendingInitField,
   'pendingRekeyEpoch',
   'pendingRekeySeed',
   _peerField,
 ];
+
+/// 세션의 키 재료만(묶인 상대·보안 상태·대기 중인 초대는 빼고) — 멈춘 방에서 더 쓰지 않을 키를 지울 때와, 수락을 다시 해
+/// 새 세션을 적기 전에 예전 것(다른 규약 포함)을 비울 때.
+const _sessionKeyMaterialFields = [
+  ..._legacyChainFields,
+  _chainField,
+  _skippedField,
+  _ratchetField,
+  'pendingRekeyEpoch',
+  'pendingRekeySeed',
+];
+
+/// 예전 앱이 남긴 재키잉 임시키를 한 번 다 치웠다는 표시 — 새 앱은 재키잉 임시키를 만들지 않아서 한 번이면 된다.
+/// 'secret/'·'secretcache/'·'secretmsg/'·'secretpin/'으로 시작하지 않아 방·평문·고정으로 읽히지 않는다.
+const _staleRekeyCleanupKey = 'secretmeta/rekey-cleanup-v3';
 
 /// GET /rooms/:id/messages가 한 번에 주는 최대 개수(server/src/rooms.js — 더 달라고 해도 이만큼만 준다).
 const _serverHistoryPageMax = 200;
@@ -221,6 +296,15 @@ Set<String> secretCacheIdsGoneFromPage({
   return gone;
 }
 
+/// 저장소 작업 하나가 한참 지나도 끝나지 않아(저장소가 멈춤) 그 작업이 끝날 때까지 다른 저장소 작업을 하지 않을 때 —
+/// 그 사이 저장소를 건드리면 멈춘 작업이 뒤늦게 쓴 값과 섞여 키 상태가 되돌아가거나 어긋난다.
+class SecretStorageBusyException implements Exception {
+  const SecretStorageBusyException();
+
+  @override
+  String toString() => '비밀 대화 저장소가 응답하지 않습니다. 잠시 뒤 다시 시도해 주세요.';
+}
+
 /// flutter_secure_storage(Windows DPAPI / Android Keystore)에 방별 네임스페이스로 래칫 상태를
 /// 저장한다. 여러 기기 동기화를 안 하는 요구사항의 핵심 — 이 값들은 이 기기에만 있고, 서버에는
 /// 절대 올라가지 않는다.
@@ -239,81 +323,254 @@ class SecretKeyStore {
   // 줄을 서면(_serial 안의 _serial) 서로 기다리다 멈추므로, 줄 안에서 쓰는 도우미는 이름 끝에 Locked를 붙였다.
   static Future<void> _tail = Future<void>.value();
 
+  /// 한참([storageOpTimeout]) 지나도 끝나지 않은 저장소 작업 — 끝날 때까지 뒤 작업은 저장소를 건드리지 않고 바로
+  /// [SecretStorageBusyException]으로 실패한다.
+  static Future<void>? _stuck;
+
+  /// 저장소 작업 하나가 이만큼 지나도 끝나지 않으면 멈춘 것으로 본다.
+  @visibleForTesting
+  static const storageOpTimeout = Duration(seconds: 30);
+
   Future<T> _serial<T>(Future<T> Function() op) {
-    final result = _tail.then((_) => op());
-    // 저장소 호출 하나가 멈춰 버려도 뒤 작업(체인키 저장 등)이 영영 막히지 않게, 한참 지나면 다음 차례로 넘긴다.
-    _tail = result
-        .then<void>((_) {}, onError: (Object _) {})
-        .timeout(const Duration(seconds: 30), onTimeout: () {});
-    return result;
+    final previous = _tail;
+    final turn = Completer<void>();
+    _tail = turn.future;
+    return previous.then((_) {
+      if (_stuck != null) {
+        turn.complete();
+        throw const SecretStorageBusyException();
+      }
+      final result = Future<T>.sync(op);
+      final settled = result.then<void>((_) {}, onError: (Object _) {});
+      // 저장소 호출 하나가 멈춰 버리면, 이 작업이 시작하고 한참 지난 뒤 줄은 넘기되 그 작업이 끝날 때까지 뒤 작업은
+      // 저장소를 건드리지 않고 실패하게 한다(앱 전체가 영영 기다리지 않게). 멈춘 작업이 뒤늦게 쓰는 값과 뒤 작업의
+      // 쓰기가 섞이면 래칫 상태가 되돌아가 같은 키를 다시 쓰거나 대화가 어긋난다. 시간은 이 작업이 시작한 때부터
+      // 잰다 — 줄이 길 때(평문 캐시가 커서 쓰기 하나가 오래 걸리는데 읽음 표시가 한꺼번에 몰림 등) 앞 작업이 끝나기
+      // 전에 뒤 작업이 실패하지 않게.
+      final timer = Timer(storageOpTimeout, () {
+        _stuck = settled;
+        if (!turn.isCompleted) turn.complete();
+      });
+      unawaited(
+        settled.whenComplete(() {
+          timer.cancel();
+          if (identical(_stuck, settled)) _stuck = null;
+          if (!turn.isCompleted) turn.complete();
+        }),
+      );
+      return result;
+    });
   }
 
   String _k(String roomId, String field) => '$_roomKeyPrefix$roomId/$field';
 
-  Future<void> saveChainState(String roomId, SecretChainState state) =>
-      _serial(() async {
-        _keyedRoomIds.add(roomId);
-        await _storage.write(
-          key: _k(roomId, 'epoch'),
-          value: state.epoch.toString(),
-        );
-        await _storage.write(key: _k(roomId, 'n'), value: state.n.toString());
-        await _storage.write(
-          key: _k(roomId, 'chainKey'),
-          value: base64Encode(state.chainKey),
-        );
-        if (state.prevEpoch != null) {
-          await _storage.write(
-            key: _k(roomId, 'prevEpoch'),
-            value: state.prevEpoch.toString(),
-          );
-        }
-        if (state.prevChainKeySnapshot != null) {
-          await _storage.write(
-            key: _k(roomId, 'prevChainKeySnapshot'),
-            value: base64Encode(state.prevChainKeySnapshot!),
-          );
-        }
-      });
+  /// 예전 칸([_legacyChainFields])이 남아 있는 예전 규약 방(이번 실행에서 그 형식으로 읽었거나, 지우다 실패해 남은 것을
+  /// 봄) — 다음에 적을 때 그 칸들을 지운다(그 체인키로 그 뒤 메시지를 풀 수 있어 남겨 두면 안 된다).
+  final Set<String> _legacyChainRooms = {};
 
+  /// 이번 실행에서 예전 칸이 남았는지 이미 본 방 — 읽을 때마다 다시 보지 않게.
+  final Set<String> _legacyCheckedRooms = {};
+
+  /// 예전 규약(v1) 방의 래칫 상태를 적는다 — 한 값([_chainField])이라 한 번에 바뀐다. [skipped]를 주면 늦게 올 메시지를
+  /// 위해 남겨 둔 키도 같은 줄에서 먼저 바꾼다(비면 지운다) — 그 사이 꺼져도 다시 받은 메시지로 같은 키를 다시 만든다.
+  Future<void> saveChainState(
+    String roomId,
+    SecretChainState state, {
+    List<SecretSkippedKey>? skipped,
+  }) => _serial(() async {
+    _keyedRoomIds.add(roomId);
+    if (skipped != null) await _writeSkippedLocked(roomId, skipped);
+    await _storage.write(key: _k(roomId, _chainField), value: state.encode());
+    // 이 업데이트 전 형식의 칸이 남아 있으면 지운다 — 새 값을 먼저 적었으니 그 사이 꺼져도 다음에는 새 값을 읽는다.
+    // 지우다 실패해도 이 상태는 적혔으니 실패로 보지 않고, 다음에 적을 때 다시 지운다.
+    if (_legacyChainRooms.contains(roomId)) {
+      try {
+        for (final field in _legacyChainFields) {
+          await _storage.delete(key: _k(roomId, field));
+        }
+        _legacyChainRooms.remove(roomId);
+      } catch (e) {
+        debugPrint('[secret] 예전 형식의 체인 상태를 지우지 못함(다음에 다시): room=$roomId $e');
+      }
+    }
+  });
+
+  /// 예전 규약(v1) 방의 래칫 상태(없거나 깨졌으면 null). 이 업데이트 전 형식(칸마다 따로)도 읽는다.
   Future<SecretChainState?> readChainState(String roomId) => _serial(() async {
+    final raw = await _storage.read(key: _k(roomId, _chainField));
+    if (raw != null) {
+      // 예전 칸을 지우다 실패해 남았으면(앱이 꺼졌거나 저장소 오류 — 체인키를 마지막에 지운다) 다음에 적을 때 지운다.
+      if (_legacyCheckedRooms.add(roomId) &&
+          await _storage.read(key: _k(roomId, 'chainKey')) != null) {
+        _legacyChainRooms.add(roomId);
+      }
+      return SecretChainState.decode(raw);
+    }
     final epoch = await _storage.read(key: _k(roomId, 'epoch'));
     final n = await _storage.read(key: _k(roomId, 'n'));
     final chainKey = await _storage.read(key: _k(roomId, 'chainKey'));
     if (epoch == null || n == null || chainKey == null) return null;
-    final prevEpoch = await _storage.read(key: _k(roomId, 'prevEpoch'));
-    final prevChainKey = await _storage.read(
-      key: _k(roomId, 'prevChainKeySnapshot'),
-    );
-    return SecretChainState(
-      epoch: int.parse(epoch),
-      n: int.parse(n),
-      chainKey: base64Decode(chainKey),
-      prevEpoch: prevEpoch != null ? int.parse(prevEpoch) : null,
-      prevChainKeySnapshot: prevChainKey != null
-          ? base64Decode(prevChainKey)
-          : null,
+    final parsedEpoch = int.tryParse(epoch);
+    final parsedN = int.tryParse(n);
+    final List<int> key;
+    try {
+      key = base64Decode(chainKey);
+    } on FormatException {
+      return null;
+    }
+    if (parsedEpoch == null || parsedN == null || key.length != 32) return null;
+    _legacyChainRooms.add(roomId);
+    return SecretChainState(epoch: parsedEpoch, n: parsedN, chainKey: key);
+  });
+
+  Future<void> _writeSkippedLocked(
+    String roomId,
+    List<SecretSkippedKey> skipped,
+  ) async {
+    if (skipped.isEmpty) {
+      await _storage.delete(key: _k(roomId, _skippedField));
+    } else {
+      await _storage.write(
+        key: _k(roomId, _skippedField),
+        value: jsonEncode(encodeSkippedKeys(skipped)),
+      );
+    }
+  }
+
+  Future<List<SecretSkippedKey>> _readSkippedLocked(String roomId) async {
+    final raw = await _storage.read(key: _k(roomId, _skippedField));
+    if (raw == null) return const [];
+    try {
+      return decodeSkippedKeys(jsonDecode(raw)) ?? const [];
+    } on FormatException {
+      return const [];
+    }
+  }
+
+  /// 예전 규약(v1) 방에 남겨 둔 메시지 키만 바꾼다(늦게 온 메시지를 풀고 그 키를 지울 때 — 체인은 그대로).
+  Future<void> saveV1SkippedKeys(
+    String roomId,
+    List<SecretSkippedKey> skipped,
+  ) => _serial(() => _writeSkippedLocked(roomId, skipped));
+
+  /// 예전 규약(v1) 방에 남겨 둔 메시지 키(없거나 깨졌으면 빈 목록).
+  Future<List<SecretSkippedKey>> readV1SkippedKeys(String roomId) =>
+      _serial(() => _readSkippedLocked(roomId));
+
+  /// 새 규약(v3) 방의 더블 래칫 상태를 적는다. 남겨 둔 메시지 키([SecretRatchetState.skipped])는 따로 적고, 그 키가
+  /// 바뀌었을 때([skippedChanged])만 다시 쓴다(먼저 — 그 사이 꺼지면 다시 받은 메시지로 같은 키를 다시 만들 뿐이다).
+  Future<void> saveRatchetState(
+    String roomId,
+    SecretRatchetState state, {
+    bool skippedChanged = true,
+  }) => _serial(() async {
+    _keyedRoomIds.add(roomId);
+    if (skippedChanged) await _writeSkippedLocked(roomId, state.skipped);
+    await _storage.write(
+      key: _k(roomId, _ratchetField),
+      value: state.encode(includeSkipped: false),
     );
   });
 
-  /// 핸드셰이크/재키잉 중에는 REST 왕복 사이 이 기기의 임시 개인키(시드)를 잠깐 들고 있어야
+  /// 새 규약(v3) 방의 더블 래칫 상태(남겨 둔 키를 붙여서) — 없으면 [present]가 false, 있는데 깨졌으면 [state]만 null.
+  Future<({bool present, SecretRatchetState? state})> readRatchetState(
+    String roomId,
+  ) => _serial(() async {
+    final raw = await _storage.read(key: _k(roomId, _ratchetField));
+    if (raw == null) return (present: false, state: null);
+    final state = SecretRatchetState.decode(raw);
+    if (state == null) return (present: true, state: null);
+    final stored = await _readSkippedLocked(roomId);
+    if (state.skipped.isEmpty) {
+      return (present: true, state: state.withSkipped(stored));
+    }
+    // 남겨 둔 키를 상태 안에 함께 적은 값(이 형식을 정하기 전의 시험판) — 따로 적는 칸으로 옮긴다. 상태를 다시 적을 때는
+    // 남겨 둔 키가 바뀌었을 때만 그 칸을 적어서, 옮기지 않으면 그 키를 잃는다.
+    final merged = appendSkippedKeys(stored, state.skipped);
+    await _writeSkippedLocked(roomId, merged);
+    await _storage.write(
+      key: _k(roomId, _ratchetField),
+      value: state.encode(includeSkipped: false),
+    );
+    return (present: true, state: state.withSkipped(merged));
+  });
+
+  /// 이 방에 맺어 둔 세션의 규약 — 새 규약(더블 래칫)이면 3, 예전 규약이면 1, 세션이 없으면 null.
+  /// 상태가 깨져 있어도 그 규약이다(세션이 없다고 보면 다시 맺거나 예전 대화로 잘못 묶는다).
+  Future<int?> sessionProtocol(String roomId) => _serial(() async {
+    if (await _storage.read(key: _k(roomId, _ratchetField)) != null) return 3;
+    if (await _storage.read(key: _k(roomId, _chainField)) != null) return 1;
+    if (await _storage.read(key: _k(roomId, 'chainKey')) != null) return 1;
+    return null;
+  });
+
+  /// 이 방에 맺어 둔 세션(어느 규약이든)이 있는지.
+  Future<bool> hasSession(String roomId) async =>
+      await sessionProtocol(roomId) != null;
+
+  /// 세션의 키 재료만 지운다([_sessionKeyMaterialFields] — 묶인 상대·보안 상태·대기 중인 초대는 둔다). 멈춘 방에서 더
+  /// 쓰지 않을 키를 지울 때와, 수락을 다시 해 새 세션을 적기 전에 예전 것(다른 규약의 칸 포함)을 비울 때 쓴다.
+  Future<void> deleteSessionKeyMaterial(String roomId) => _serial(() async {
+    for (final field in _sessionKeyMaterialFields) {
+      await _storage.delete(key: _k(roomId, field));
+    }
+    _legacyChainRooms.remove(roomId);
+  });
+
+  /// 이 기기가 보낸 수락을 서버가 받았다는 답을 아직 못 받았다고 적는다([_acceptPendingField]) — 세션을 적기 전에.
+  Future<void> markAcceptPending(String roomId) => _serial(() async {
+    _keyedRoomIds.add(roomId);
+    await _storage.write(key: _k(roomId, _acceptPendingField), value: '1');
+  });
+
+  /// 서버가 이 기기의 수락을 받았다 — 그 표시를 지운다(없으면 쓰지 않는다).
+  Future<void> clearAcceptPending(String roomId) => _serial(() async {
+    final key = _k(roomId, _acceptPendingField);
+    if (await _storage.read(key: key) != null) {
+      await _storage.delete(key: key);
+    }
+  });
+
+  /// 이 기기가 보낸 수락이 아직 확인되지 않았는지.
+  Future<bool> hasAcceptPending(String roomId) => _serial(
+    () async =>
+        await _storage.read(key: _k(roomId, _acceptPendingField)) != null,
+  );
+
+  /// 계정 [userId]의 방들에서 예전 앱이 남긴 재키잉 임시키를 이미 다 치웠는지([_staleRekeyCleanupKey]).
+  Future<bool> staleRekeyCleanupDone(String userId) => _serial(
+    () async =>
+        await _storage.read(key: '$_staleRekeyCleanupKey/$userId') != null,
+  );
+
+  Future<void> markStaleRekeyCleanupDone(String userId) => _serial(
+    () => _storage.write(key: '$_staleRekeyCleanupKey/$userId', value: '1'),
+  );
+
+  /// 핸드셰이크 중에는 REST 왕복 사이 이 기기의 임시 개인키(시드)를 잠깐 들고 있어야
   /// 한다 — 상대가 응답하면 그때 공유비밀을 계산하고 즉시 지운다. [targetUserId]·[myDeviceId]는 초대한 상대와
-  /// 그때의 이 기기 id — 수락이 오면 그 맥락 서명을 이 값으로 다시 만들어 확인한다.
+  /// 그때의 이 기기 id — 수락이 오면 그 맥락 서명을 이 값으로 다시 만들어 확인한다. [offeredProtocol]은 초대에 실어
+  /// 보낸 규약 번호(새 규약을 안다고 알렸으면 3) — 수락이 그 규약의 맥락 서명으로 왔는지 볼 때 쓴다.
   Future<void> savePendingEphemeralSeed(
     String roomId,
     List<int> seed, {
     String? targetUserId,
     String? myDeviceId,
+    int? offeredProtocol,
   }) => _serial(() async {
     _keyedRoomIds.add(roomId);
     await _storage.write(
       key: _k(roomId, 'pendingEphemeralSeed'),
       value: base64Encode(seed),
     );
-    if (targetUserId != null || myDeviceId != null) {
+    if (targetUserId != null || myDeviceId != null || offeredProtocol != null) {
       await _storage.write(
         key: _k(roomId, _pendingInitField),
-        value: jsonEncode({'t': ?targetUserId, 'd': ?myDeviceId}),
+        value: jsonEncode({
+          't': ?targetUserId,
+          'd': ?myDeviceId,
+          'p': ?offeredProtocol,
+        }),
       );
     }
   });
@@ -324,11 +581,10 @@ class SecretKeyStore {
         return v == null ? null : base64Decode(v);
       });
 
-  /// 대기 중인 초대의 상대·이 기기 id([savePendingEphemeralSeed]). 이 값을 남기기 전(업데이트 전)에 건 초대거나 깨진
-  /// 값이면 둘 다 null.
-  Future<({String? targetUserId, String? myDeviceId})> readPendingInit(
-    String roomId,
-  ) => _serial(() async {
+  /// 대기 중인 초대의 상대·이 기기 id·실어 보낸 규약 번호([savePendingEphemeralSeed]). 이 값을 남기기 전(업데이트
+  /// 전)에 건 초대거나 깨진 값이면 모두 null.
+  Future<({String? targetUserId, String? myDeviceId, int? offeredProtocol})>
+  readPendingInit(String roomId) => _serial(() async {
     final raw = await _storage.read(key: _k(roomId, _pendingInitField));
     if (raw != null) {
       try {
@@ -336,16 +592,18 @@ class SecretKeyStore {
         if (json is Map) {
           final target = json['t'];
           final device = json['d'];
+          final protocol = json['p'];
           return (
             targetUserId: target is String ? target : null,
             myDeviceId: device is String ? device : null,
+            offeredProtocol: protocol is int ? protocol : null,
           );
         }
       } on FormatException {
         // 깨진 값 — 모르는 것으로 둔다(방 멤버로 상대를 정한다).
       }
     }
-    return (targetUserId: null, myDeviceId: null);
+    return (targetUserId: null, myDeviceId: null, offeredProtocol: null);
   });
 
   Future<void> clearPendingEphemeralSeed(String roomId) => _serial(() async {
@@ -353,30 +611,18 @@ class SecretKeyStore {
     await _storage.delete(key: _k(roomId, _pendingInitField));
   });
 
-  Future<void> savePendingRekeySeed(String roomId, int epoch, List<int> seed) =>
-      _serial(() async {
-        _keyedRoomIds.add(roomId);
-        await _storage.write(
-          key: _k(roomId, 'pendingRekeyEpoch'),
-          value: epoch.toString(),
-        );
-        await _storage.write(
-          key: _k(roomId, 'pendingRekeySeed'),
-          value: base64Encode(seed),
-        );
-      });
-
-  Future<(int, List<int>)?> readPendingRekeySeed(String roomId) =>
-      _serial(() async {
-        final epoch = await _storage.read(key: _k(roomId, 'pendingRekeyEpoch'));
-        final seed = await _storage.read(key: _k(roomId, 'pendingRekeySeed'));
-        if (epoch == null || seed == null) return null;
-        return (int.parse(epoch), base64Decode(seed));
-      });
-
-  Future<void> clearPendingRekeySeed(String roomId) => _serial(() async {
-    await _storage.delete(key: _k(roomId, 'pendingRekeyEpoch'));
-    await _storage.delete(key: _k(roomId, 'pendingRekeySeed'));
+  /// 예전 앱이 재키잉을 제안하고 수락을 기다리며 남겨 둔 임시 개인키를 지운다 — 이제 재키잉을 하지 않아 쓸 일이
+  /// 없다(secret_session_manager.dart). 남아 있어 지웠으면 true(없으면 저장소에 쓰지 않는다).
+  Future<bool> clearStaleRekeySeed(String roomId) => _serial(() async {
+    final epochKey = _k(roomId, 'pendingRekeyEpoch');
+    final seedKey = _k(roomId, 'pendingRekeySeed');
+    if (await _storage.read(key: epochKey) == null &&
+        await _storage.read(key: seedKey) == null) {
+      return false;
+    }
+    await _storage.delete(key: epochKey);
+    await _storage.delete(key: seedKey);
+    return true;
   });
 
   /// 방 나가기/비밀 대화 거절 시 이 방의 모든 로컬 키 상태를 흔적 없이 지운다 — 이 기기에 저장해 둔
@@ -389,6 +635,7 @@ class SecretKeyStore {
       }
       _keyedRoomIds.remove(roomId);
       _roomOwners.remove(roomId);
+      _legacyChainRooms.remove(roomId);
     });
     await clearRoomTexts(roomId);
   }
@@ -402,6 +649,7 @@ class SecretKeyStore {
     for (final field in _sessionKeyFields) {
       await _storage.delete(key: _k(roomId, field));
     }
+    _legacyChainRooms.remove(roomId);
     final securityKey = _k(roomId, _securityField);
     final raw = await _storage.read(key: securityKey);
     if (raw == null) return;
@@ -504,6 +752,27 @@ class SecretKeyStore {
 
   /// 기기 [deviceId]의 고정을 지운다 — 사용자가 "상대 기기 키 다시 받기"를 골랐을 때만(SecretSessionManager.
   /// resetPeerDevicePin). 다음에 그 기기를 만나면 처음 보는 기기처럼 서버에 다시 묻는다.
+  /// 기기 [deviceId]의 고정이 아직 [expected]와 같은 고정이면 "새 규약(v3)으로 말함"을 적는다(SecretDevicePin.speaksV3) —
+  /// 바꿨으면 true. 그 사이 고정이 지워졌거나 다시 받았거나 다툼이 적혔으면 아무것도 안 한다.
+  Future<bool> markDevicePinSpeaksV3(
+    String deviceId,
+    SecretDevicePin expected,
+  ) => _serial(() async {
+    final raw = await _storage.read(key: _pinKey(deviceId));
+    final current = raw == null ? null : SecretDevicePin.decode(raw);
+    if (current == null ||
+        current.disputed ||
+        current.speaksV3 ||
+        !current.isSamePinAs(expected)) {
+      return false;
+    }
+    await _storage.write(
+      key: _pinKey(deviceId),
+      value: current.markSpeaksV3().encode(),
+    );
+    return true;
+  });
+
   Future<void> deleteDevicePin(String deviceId) =>
       _serial(() => _storage.delete(key: _pinKey(deviceId)));
 
@@ -751,6 +1020,13 @@ class SecretKeyStore {
         final broken = <String>[];
         for (final entry in all.entries) {
           final key = entry.key;
+          if (key.startsWith(_roomKeyPrefix) &&
+              (key.endsWith('/pendingRekeyEpoch') ||
+                  key.endsWith('/pendingRekeySeed'))) {
+            // 예전 앱이 재키잉을 제안하고 남겨 둔 임시 개인키 — 이제 재키잉을 하지 않아 쓸 일이 없다(목록에 없는 방 것도).
+            broken.add(key);
+            continue;
+          }
           if (key.startsWith(_textKeyPrefix)) {
             final info = _parseTextEntry(key, entry.value);
             if (info == null) {
@@ -761,7 +1037,9 @@ class SecretKeyStore {
             }
           } else if (key.startsWith(_legacyTextKeyPrefix)) {
             final id = key.substring(_legacyTextKeyPrefix.length);
-            if (id.isNotEmpty && !_texts.containsKey(id)) _legacyTextIds.add(id);
+            if (id.isNotEmpty && !_texts.containsKey(id)) {
+              _legacyTextIds.add(id);
+            }
           } else if (key.startsWith(_roomKeyPrefix)) {
             final rest = key.substring(_roomKeyPrefix.length);
             final slash = rest.indexOf('/');
@@ -776,7 +1054,7 @@ class SecretKeyStore {
             _legacySweptUsers.add(key.substring(_legacySweptKeyPrefix.length));
           }
         }
-        // 형식이 깨진 값은 읽을 수도 없고 언제 지워야 하는지도 몰라 지운다.
+        // 형식이 깨진 값은 읽을 수도 없고 언제 지워야 하는지도 몰라 지운다(쓸 일이 없는 예전 재키잉 임시키도 함께).
         for (final key in broken) {
           await _storage.delete(key: key);
         }
@@ -798,6 +1076,9 @@ class SecretKeyStore {
     String? parentId,
     int? expiresAtMs,
     bool expiryFixed,
+    String? envelopeHash,
+    bool? fromMe,
+    String? senderId,
   })?
   _decodeTextValue(String raw) {
     try {
@@ -808,26 +1089,49 @@ class SecretKeyStore {
       if (text is! String || createdAt is! num) return null;
       final parentId = json['p'];
       final expiresAt = json['e'];
+      final hash = json['h'];
+      final fromMe = json['o'];
+      final sender = json['s'];
       return (
         text: text,
         createdAtMs: createdAt.toInt(),
         parentId: parentId is String ? parentId : null,
         expiresAtMs: expiresAt is num ? expiresAt.toInt() : null,
         expiryFixed: json['f'] == true,
+        envelopeHash: hash is String ? hash : null,
+        fromMe: fromMe is bool ? fromMe : null,
+        senderId: sender is String ? sender : null,
       );
     } on FormatException {
       return null;
     }
   }
 
-  static String _encodeTextValue(String text, SecretCachedTextInfo info) =>
-      jsonEncode({
-        't': text,
-        'c': info.createdAtMs,
-        if (info.parentId != null) 'p': info.parentId,
-        if (info.expiresAtMs != null) 'e': info.expiresAtMs,
-        if (info.expiryFixed) 'f': true,
-      });
+  /// [envelopeHash]·[fromMe]·[senderId]는 그 평문을 처음 풀 때 서버가 보여 준 봉투의 지문과 보낸 쪽·보낸 사람
+  /// ([SecretTextRef]) — 이 칸이 생기기 전에 저장한 항목에는 없다. 삭제 예정 시각만 고쳐 적을 때도 그대로 옮겨 적어야
+  /// 한다(빠지면 그 항목은 확인 없이 아무 메시지에나 붙는다).
+  static String _encodeTextValue(
+    String text,
+    SecretCachedTextInfo info, {
+    String? envelopeHash,
+    bool? fromMe,
+    String? senderId,
+  }) => jsonEncode({
+    't': text,
+    'c': info.createdAtMs,
+    if (info.parentId != null) 'p': info.parentId,
+    if (info.expiresAtMs != null) 'e': info.expiresAtMs,
+    if (info.expiryFixed) 'f': true,
+    'h': ?envelopeHash,
+    'o': ?fromMe,
+    's': ?senderId,
+  });
+
+  /// 암호문 봉투의 지문 — SHA-256의 앞 16바이트(base64). 평문 캐시가 "그 봉투를 푼 평문"인지 견주는 데만 쓴다.
+  static Future<String> _envelopeHash(String envelope) async {
+    final digest = await Sha256().hash(utf8.encode(envelope));
+    return base64Encode(digest.bytes.sublist(0, 16));
+  }
 
   static SecretCachedTextInfo? _parseTextEntry(String key, String value) {
     final rest = key.substring(_textKeyPrefix.length);
@@ -857,7 +1161,10 @@ class SecretKeyStore {
   }
 
   /// [migrated]면 예전 형식에서 옮기는 항목 — 원래 있던 메시지라 "요청 뒤에 생긴 것" 보호(저장 순번)가 필요 없다.
-  SecretCachedTextInfo _newTextInfo(SecretTextRef ref, {bool migrated = false}) {
+  SecretCachedTextInfo _newTextInfo(
+    SecretTextRef ref, {
+    bool migrated = false,
+  }) {
     final (expiresAtMs, fixed) = _expiryFor(ref);
     return SecretCachedTextInfo(
       roomId: ref.roomId,
@@ -870,14 +1177,22 @@ class SecretKeyStore {
     );
   }
 
-  /// 처음 복호화에 성공한 평문을 저장한다(수정된 메시지면 덮어쓴다).
+  /// 처음 복호화에 성공한 평문을 저장한다(수정된 메시지면 덮어쓴다). [ref]의 봉투 지문·보낸 쪽도 함께 적는다.
   Future<void> saveDecryptedText(SecretTextRef ref, String text) async {
     final loaded = await _ensureTextIndex();
+    final envelope = ref.envelope;
+    final hash = envelope == null ? null : await _envelopeHash(envelope);
     await _serial(() async {
       final info = _newTextInfo(ref);
       await _storage.write(
         key: _textKey(ref.roomId, ref.id),
-        value: _encodeTextValue(text, info),
+        value: _encodeTextValue(
+          text,
+          info,
+          envelopeHash: hash,
+          fromMe: ref.fromMe,
+          senderId: ref.senderId,
+        ),
       );
       _texts[ref.id] = info;
       // 예전 형식으로 남아 있던 값은 지운다 — 색인을 못 읽었으면 있는지 몰라서 그냥 지워 본다.
@@ -916,16 +1231,44 @@ class SecretKeyStore {
   /// 저장해 둔 평문(없으면 null). 예전 형식으로 저장된 값이면 [ref]의 방·시각을 붙여 새 형식으로 옮겨
   /// 적는다 — 그래야 이후 만료·재조정 대상이 된다. 서버가 확정한 삭제 예정 시각이 적어 둔 값과 다르면
   /// (끊긴 동안 상대가 읽음 등) 그 값으로 맞춘다.
-  Future<String?> readDecryptedText(SecretTextRef ref) async {
+  ///
+  /// 서버가 보여 주는 것과 저장해 둔 것이 다르면 주지 않는다(서버가 메시지 id만 같게 해서 저장된 평문을 끌어다 쓰지
+  /// 못하게): 다른 방의 메시지이거나, 댓글이 달린 원본 메시지가 다르거나(메시지를 댓글로·댓글을 다른 글 아래로 옮김),
+  /// 보낸 쪽([SecretTextRef.fromMe])·보낸 사람([SecretTextRef.senderId])이 다르거나, 봉투 지문([SecretTextRef.envelope])이
+  /// 다르면(수정된 메시지 등 — 새 봉투를 풀어야 한다). [requireEnvelopeMatch]면 봉투 지문이 저장돼 있고 같을 때만 준다
+  /// (message:edited처럼 같은 id의 내용이 바뀌었을 수 있을 때 — 같은 봉투면 다시 풀 필요가 없다).
+  Future<String?> readDecryptedText(
+    SecretTextRef ref, {
+    bool requireEnvelopeMatch = false,
+  }) async {
     final loaded = await _ensureTextIndex();
+    final envelope = ref.envelope;
+    final hash = envelope == null ? null : await _envelopeHash(envelope);
     final (text, expiryStale, migrated) = await _serial<(String?, bool, bool)>(
       () async {
         final info = _texts[ref.id];
+        if (info != null && info.roomId != ref.roomId) {
+          return (null, false, false);
+        }
         if (info != null || !loaded) {
-          final key = _textKey(info?.roomId ?? ref.roomId, ref.id);
+          final key = _textKey(ref.roomId, ref.id);
           final raw = await _storage.read(key: key);
           final stored = raw == null ? null : _decodeTextValue(raw);
           if (stored != null) {
+            final storedSender = stored.senderId;
+            final sameSender =
+                (stored.fromMe == null ||
+                    ref.fromMe == null ||
+                    stored.fromMe == ref.fromMe) &&
+                (storedSender == null ||
+                    ref.senderId == null ||
+                    storedSender == ref.senderId);
+            if (stored.parentId != ref.parentId) return (null, false, false);
+            final storedHash = stored.envelopeHash;
+            final sameEnvelope = storedHash == null || hash == null
+                ? !requireEnvelopeMatch
+                : storedHash == hash;
+            if (!sameSender || !sameEnvelope) return (null, false, false);
             final stale =
                 info != null &&
                 ref.expiryKnown &&
@@ -940,7 +1283,9 @@ class SecretKeyStore {
             return (null, false, false);
           }
         }
-        if (!loaded || _legacyTextIds.contains(ref.id)) {
+        // 예전 형식 값에는 봉투 지문이 없어 같은 봉투인지 알 수 없다.
+        if (!requireEnvelopeMatch &&
+            (!loaded || _legacyTextIds.contains(ref.id))) {
           final legacy = await _migrateLegacyLocked(ref);
           return (legacy, false, legacy != null);
         }
@@ -1067,11 +1412,7 @@ class SecretKeyStore {
   /// 서버가 메시지 읽음을 확정했다(secret:message-read 또는 readAt이 있는 히스토리) — [expiresAt]이 null이면
   /// 타이머 없이 읽혀서 자동 삭제되지 않는다. 그 메시지의 댓글들도 같은 시각에 지워진다.
   Future<void> noteMessageRead(String messageId, DateTime? expiresAt) =>
-      _applyExpiry(
-        messageId,
-        expiresAt?.millisecondsSinceEpoch,
-        fixed: true,
-      );
+      _applyExpiry(messageId, expiresAt?.millisecondsSinceEpoch, fixed: true);
 
   /// 이 기기가 [messageId]의 읽음을 서버에 보냈다 — 타이머가 켜진 방이면 서버도 지금부터 [selfDestruct]
   /// 뒤에 지운다. 그 확정 알림을 끊겨서 못 받아도 평문이 남지 않게 어림한 시각을 먼저 적어 둔다(아직
@@ -1099,7 +1440,11 @@ class SecretKeyStore {
 
   /// 항목 [id]의 삭제 예정 시각을 저장소와 색인에 적는다(이미 그 값이면 그대로 둔다). 실패하면 조용히 넘어간다 —
   /// 시각을 못 고쳐도 평문은 그대로 있고, 다음에 히스토리를 받을 때 다시 맞춘다.
-  Future<void> _writeExpiry(String id, int? expiresAtMs, {required bool fixed}) async {
+  Future<void> _writeExpiry(
+    String id,
+    int? expiresAtMs, {
+    required bool fixed,
+  }) async {
     try {
       await _serial(() async {
         final current = _texts[id];
@@ -1117,7 +1462,13 @@ class SecretKeyStore {
         final next = current._withExpiry(expiresAtMs, fixed: fixed);
         await _storage.write(
           key: key,
-          value: _encodeTextValue(stored.text, next),
+          value: _encodeTextValue(
+            stored.text,
+            next,
+            envelopeHash: stored.envelopeHash,
+            fromMe: stored.fromMe,
+            senderId: stored.senderId,
+          ),
         );
         _texts[id] = next;
       });
@@ -1286,10 +1637,7 @@ class SecretKeyStore {
     if (_legacySweptUsers.contains(userId)) return;
     try {
       await _serial(() async {
-        await _storage.write(
-          key: '$_legacySweptKeyPrefix$userId',
-          value: '1',
-        );
+        await _storage.write(key: '$_legacySweptKeyPrefix$userId', value: '1');
         _legacySweptUsers.add(userId);
       });
     } catch (_) {

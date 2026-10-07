@@ -17,6 +17,7 @@ import 'image_thumbnail.dart';
 import 'memory_file.dart';
 import 'secret_chat_crypto.dart' as secret_crypto;
 import 'secret_key_store.dart' show SecretCachedTextInfo;
+import 'secret_session_manager.dart' show SecretTextPlace;
 import 'session.dart';
 import 'typing_gate.dart';
 
@@ -449,7 +450,11 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final payload = await _session.encryptOutgoing(room, trimmed);
+    final payload = await _session.encryptOutgoing(
+      room,
+      trimmed,
+      place: SecretTextPlace.comment(parentId: messageId),
+    );
     await _session.api!.addComment(
       messageId,
       text: payload,
@@ -460,7 +465,11 @@ class RoomChatController extends ChangeNotifier {
 
   /// 댓글로 이모티콘을 단다 — sendSticker와 동일한 방식(파일 업로드 없이 id만 전송).
   Future<void> postCommentSticker(String messageId, String stickerId) async {
-    final payload = await _session.encryptOutgoing(room, stickerId);
+    final payload = await _session.encryptOutgoing(
+      room,
+      stickerId,
+      place: SecretTextPlace.comment(parentId: messageId),
+    );
     await _session.api!.addComment(messageId, text: payload, type: 'sticker');
   }
 
@@ -485,6 +494,7 @@ class RoomChatController extends ChangeNotifier {
         attachmentNonce: u.attachmentNonce!,
         thumbnailKey: u.thumbnailKey,
         thumbnailNonce: u.thumbnailNonce,
+        place: SecretTextPlace.comment(parentId: messageId),
       );
       await _session.api!.addComment(
         messageId,
@@ -523,7 +533,14 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final payload = await _session.encryptOutgoing(room, trimmed);
+    final payload = await _session.encryptOutgoing(
+      room,
+      trimmed,
+      place: SecretTextPlace.comment(
+        parentId: _findComment(commentId)?.messageId,
+        editOf: commentId,
+      ),
+    );
     await _session.api!.editComment(
       commentId,
       payload!,
@@ -590,7 +607,11 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
-    final payload = await _session.encryptOutgoing(room, trimmed);
+    final payload = await _session.encryptOutgoing(
+      room,
+      trimmed,
+      place: SecretTextPlace.message(editOf: messageId),
+    );
     await _session.api!.editMessage(
       messageId,
       payload!,
@@ -1094,6 +1115,9 @@ class RoomChatController extends ChangeNotifier {
     final signalLive = _session.secretReadSignalLive;
     for (final m in messages) {
       if (m.senderId == _session.userId) continue;
+      // 이 기기에서 풀지 못한 메시지는 읽었다고 알리지 않는다 — 자동 삭제 타이머가 그때부터 돌아, 이 대화를 맺은 기기가
+      // 읽기도 전에(또는 늦게 와 아직 못 푼 메시지가) 서버에서 지워진다.
+      if (m.decryptFailed) continue;
       if (m.type != MessageType.text &&
           m.type != MessageType.image &&
           m.type != MessageType.file) {

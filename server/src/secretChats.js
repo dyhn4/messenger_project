@@ -14,7 +14,12 @@ import { findUserById } from './db/queries/users.js';
 import { notifySecretChatInvite } from './push.js';
 import { SELF_ROOM_DENIAL } from './permissions.js';
 import { dmKeyFor, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
-import { parseContextSignature, secretAcceptedPayload, secretInvitePayload } from './secretContextRules.js';
+import {
+  parseContextSignature,
+  parseSecretProtocol,
+  secretAcceptedPayload,
+  secretInvitePayload,
+} from './secretContextRules.js';
 
 const MIN_SELF_DESTRUCT_SECONDS = 1;
 const MAX_SELF_DESTRUCT_SECONDS = 7 * 24 * 60 * 60; // 1주.
@@ -61,6 +66,7 @@ export function createSecretChatsRouter(io) {
       initiatorEphemeralPublicKey,
       initiatorEphemeralSignature,
       initiatorContextSignature,
+      protocol,
       deviceId,
       teamId,
     } = req.body ?? {};
@@ -78,6 +84,9 @@ export function createSecretChatsRouter(io) {
     // (받는 앱이 상대 기기 키로 검증한다 — secretContextRules.js). 낡은 방을 지우거나 새 방을 만들기 전에 거른다.
     const initiatorContext = parseContextSignature(initiatorContextSignature, 'initiatorContextSignature');
     if (initiatorContext.error) return res.status(400).json({ error: initiatorContext.error });
+    // 초대한 앱이 아는 규약 번호(새 앱은 3) — 예전 앱은 안 보낸다. 저장해 초대에 그대로 실을 뿐이다(secretContextRules.js).
+    const initiatorProtocol = parseSecretProtocol(protocol);
+    if (initiatorProtocol.error) return res.status(400).json({ error: initiatorProtocol.error });
     // rooms.teamId는 DB에서 NOT NULL이라(팀 도입 전에는 없던 제약) 비밀 대화 방도 어느 팀인가
     // 하나를 걸어야 한다 — 다만 평문 DM(rooms.js)과 달리 "상대가 그 팀 멤버인지"는 확인하지
     // 않는다: 비밀 대화는 팀 소속과 무관하게 아무 회원과나 시작할 수 있는 개인 채널이고, 여기
@@ -131,6 +140,7 @@ export function createSecretChatsRouter(io) {
       initiatorEphemeralPublicKey,
       initiatorEphemeralSignature,
       initiatorContextSignature: initiatorContext.value,
+      initiatorProtocol: initiatorProtocol.value,
     });
     await notifyMembership(io, room);
     // 저장한 세션 행으로 만든다 — 앱이 꺼져 있다가 GET /secret-chats/:roomId/invite로 받는 값과 똑같게.
@@ -163,6 +173,24 @@ export function createSecretChatsRouter(io) {
     }
     // secret:invite 이벤트와 같은 모양(맥락 서명 포함) — secretContextRules.js의 secretInvitePayload.
     res.json(secretInvitePayload(session));
+  });
+
+  /**
+   * 초대한 사람이 상대의 수락(secret:accepted)을 놓쳤을 때 — 수락은 그 순간 연결된 기기에만 가서, 초대해 두고 앱을 끈 사이
+   * 상대가 수락하면 초대한 기기는 수락한 기기의 임시 공개키를 받을 길이 없어 그 대화를 영영 쓰지 못했다. 같은 모양으로 다시
+   * 준다(secretAcceptedPayload — 맥락 서명 포함). 받는 앱이 고정한 키로 서명을 확인하므로 서버가 꾸민 값은 통하지 않는다.
+   */
+  router.get('/secret-chats/:roomId/accepted', async (req, res) => {
+    const room = await findRoomById(req.params.roomId);
+    if (!room || !room.isSecret) return res.status(404).json({ error: '비밀 대화를 찾을 수 없습니다.' });
+    const session = await findSecretSessionByRoomId(room.id);
+    if (!session || session.status !== 'active') {
+      return res.status(404).json({ error: '수락된 비밀 대화가 없습니다.' });
+    }
+    if (session.initiatorUserId !== req.user.sub || !(await isRoomMember(room.id, req.user.sub))) {
+      return res.status(403).json({ error: '이 요청을 볼 수 없습니다.' });
+    }
+    res.json(secretAcceptedPayload(session));
   });
 
   router.post('/secret-chats/:roomId/accept', async (req, res) => {

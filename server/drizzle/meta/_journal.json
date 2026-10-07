@@ -687,6 +687,13 @@
       "when": 1791362279822,
       "tag": "0097_secret_context_signatures",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1791382275278,
+      "tag": "0098_secret_initiator_protocol",
+      "breakpoints": true
     }
   ]
 }

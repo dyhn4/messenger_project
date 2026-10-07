@@ -62,9 +62,27 @@ export async function bumpSecretSessionEpoch(roomId, newEpoch) {
   await db.update(secretSessions).set({ keyEpoch: newEpoch }).where(eq(secretSessions.roomId, roomId));
 }
 
-export async function insertSecretRekey(fields) {
-  const [row] = await db.insert(secretRekeys).values(fields).returning();
-  return row;
+/**
+ * 재키잉 제안 하나를 적는다 — 같은 방·같은 epoch에 같은 제안자가 낸, 아직 수락되지 않은 예전 제안이 있으면 지우고
+ * 적는다(예전 앱 둘이 동시에 낸 서로의 제안은 건드리지 않는다). 예전 앱은 수락이 올 때까지 메시지마다 새 임시키로 다시
+ * 제안하는데, 새 앱은 재키잉에 응하지 않아(client secret_session_manager.dart) 그대로 두면 그런 방에서는 메시지마다 행이
+ * 하나씩 쌓인다.
+ */
+export async function replaceSecretRekeyProposal(fields) {
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(secretRekeys)
+      .where(
+        and(
+          eq(secretRekeys.roomId, fields.roomId),
+          eq(secretRekeys.keyEpoch, fields.keyEpoch),
+          eq(secretRekeys.proposerUserId, fields.proposerUserId),
+          eq(secretRekeys.status, 'proposed'),
+        ),
+      );
+    const [row] = await tx.insert(secretRekeys).values(fields).returning();
+    return row;
+  });
 }
 
 export function findSecretRekey(roomId, keyEpoch) {

@@ -1,0 +1,1 @@
+ALTER TABLE "secret_sessions" ADD COLUMN "initiator_protocol" integer;

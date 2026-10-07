@@ -36,6 +36,23 @@ export function parseContextSignature(raw, field) {
   return { value: raw };
 }
 
+/** 초대에 실을 수 있는 비밀 대화 규약 번호의 범위 — 지금 앱은 3(새 규약 v3)을 보낸다. 다음 규약도 서버를 바꾸지 않고 전하게
+ * 작은 정수는 모두 받는다(받는 앱이 자기가 아는 규약 중에서 고른다). */
+export const SECRET_PROTOCOL_MAX = 255;
+
+/**
+ * POST /secret-chats 본문의 `protocol`(초대한 앱이 아는 규약 번호) → `{ value }`(없으면 — undefined·null, 예전 앱 — null) |
+ * `{ error }`. 서버는 이 값을 저장해 초대에 그대로 실을 뿐 아무것도 정하지 않는다 — 두 앱이 v3로 대화하는지는 받는 앱의 v3 수락
+ * 맥락 서명으로 초대한 앱이 확인한다(client secret_session_manager.dart). 정수가 아니거나 범위 밖이면 400.
+ */
+export function parseSecretProtocol(raw) {
+  if (raw === undefined || raw === null) return { value: null };
+  if (!Number.isInteger(raw) || raw < 1 || raw > SECRET_PROTOCOL_MAX) {
+    return { error: '비밀 대화 규약 번호(protocol)가 올바르지 않습니다.' };
+  }
+  return { value: raw };
+}
+
 /**
  * secret:rekey-propose / secret:rekey-ack payload → `{ roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature,
  * contextSignature }` | null(모양이 틀림 — 다른 잘못된 payload처럼 조용히 버린다). 임시 공개키·예전 서명은 예전처럼 비어
@@ -54,7 +71,8 @@ export function parseRekeyPayload(payload) {
 
 /**
  * secret:invite 이벤트와 GET /secret-chats/:roomId/invite 응답(앱이 꺼져 있어 이벤트를 놓쳤을 때) — 둘 다 같은 세션 행에서
- * 같은 모양으로 만든다(어느 길로 받든 앱이 같은 값을 검증하게). initiatorContextSignature는 예전 앱이 만든 세션이면 null.
+ * 같은 모양으로 만든다(어느 길로 받든 앱이 같은 값을 검증하게). initiatorContextSignature·initiatorProtocol은 예전 앱이 만든
+ * 세션이면 null.
  */
 export function secretInvitePayload(session) {
   return {
@@ -64,6 +82,7 @@ export function secretInvitePayload(session) {
     initiatorEphemeralPublicKey: session.initiatorEphemeralPublicKey,
     initiatorEphemeralSignature: session.initiatorEphemeralSignature,
     initiatorContextSignature: session.initiatorContextSignature ?? null,
+    initiatorProtocol: session.initiatorProtocol ?? null,
   };
 }
 
@@ -109,7 +128,7 @@ export function rekeyAckRelay(roomId, responderUserId, rekey) {
 /**
  * 방 DTO(rooms.js toRoomDto)의 비밀 대화 칸 — 세션 행이 없으면(지워지는 중 등) 기본값. 상태·키 세대·자동 삭제 타이머·
  * 초대한 사람에 더해 양쪽 사용자·기기 id를 싣는다: 앱이 상대 기기를 따로 기억해 두지 않았던 대화(이 칸이 생기기 전에
- * 만들어진 대화)를 앱이 다시 켜진 뒤에도 그 상대 기기에 묶어 재키잉을 이어 가게. 아직 모르는 값(수락 전의 받는 쪽 기기)은
+ * 만들어진 대화)를 앱이 다시 켜진 뒤에도 그 상대 기기에 묶게(보안 코드·안내에 쓴다). 아직 모르는 값(수락 전의 받는 쪽 기기)은
  * null. 공개키·서명·공유비밀은 여기에 싣지 않는다(공개키·서명은 핸드셰이크 이벤트로만 오간다).
  */
 export function secretRoomFields(session) {

@@ -28,6 +28,7 @@ class SecretDevicePin {
     this.verifiedAt,
     this.verifiedByDeviceId,
     this.disputedAt,
+    this.speaksV3 = false,
   });
 
   /// 지금 처음 고정하는 값 — 고정 시각은 저장 형식(밀리초)에 맞춰 둔다. 고정 시각은 고정 하나를 가리키는 값으로도
@@ -64,6 +65,11 @@ class SecretDevicePin {
   /// 알 수 없으니, 사용자가 이 고정을 지우기 전까지 이 기기와는 핸드셰이크·재키잉을 하지 않는다.
   final DateTime? disputedAt;
 
+  /// 이 기기가 새 규약(v3)으로 말하는 것을 이 기기가 직접 확인했다(v3 수락 서명이 맞음·v3로 보낸 글이 풀림 — 서버가 꾸밀
+  /// 수 없는 증거). 그 뒤 이 기기와 예전 규약으로 맺게 되면 서버가 규약을 내린 것으로 보고 멈춘다(SecretBlockReason
+  /// .downgrade). 한 번 적으면 지우지 않는다 — 고정을 지우면("상대 기기 키 다시 받기") 함께 사라진다.
+  final bool speaksV3;
+
   bool get disputed => disputedAt != null;
 
   /// [myDeviceId]인 이 기기가 보안 코드를 확인한 시각(아니면 null).
@@ -85,6 +91,7 @@ class SecretDevicePin {
     String? verifiedByDeviceId,
     bool clearVerified = false,
     DateTime? disputedAt,
+    bool? speaksV3,
   }) => SecretDevicePin(
     userId: userId,
     signingPublicKey: signingPublicKey,
@@ -94,6 +101,7 @@ class SecretDevicePin {
         ? null
         : (verifiedByDeviceId ?? this.verifiedByDeviceId),
     disputedAt: disputedAt ?? this.disputedAt,
+    speaksV3: speaksV3 ?? this.speaksV3,
   );
 
   SecretDevicePin markVerified(String myDeviceId, DateTime at) =>
@@ -103,6 +111,8 @@ class SecretDevicePin {
 
   SecretDevicePin markDisputed(DateTime at) => _copy(disputedAt: at);
 
+  SecretDevicePin markSpeaksV3() => _copy(speaksV3: true);
+
   String encode() => jsonEncode({
     'u': userId,
     'k': signingPublicKey,
@@ -110,6 +120,7 @@ class SecretDevicePin {
     if (verifiedAt != null) 'v': verifiedAt!.millisecondsSinceEpoch,
     if (verifiedByDeviceId != null) 'vb': verifiedByDeviceId,
     if (disputedAt != null) 'x': disputedAt!.millisecondsSinceEpoch,
+    if (speaksV3) 'v3': true,
   });
 
   /// 깨진 값이면 null.
@@ -140,6 +151,7 @@ class SecretDevicePin {
             : DateTime.fromMillisecondsSinceEpoch(
                 disputed is num ? disputed.toInt() : 0,
               ),
+        speaksV3: json['v3'] == true,
       );
     } on FormatException {
       return null;
@@ -148,8 +160,8 @@ class SecretDevicePin {
 }
 
 /// 비밀 대화방 하나가 묶인 상대(사용자·기기)와, 이 기기가 그 대화에 쓴 기기 id — `secret/<방>/peer`. 비밀 대화는
-/// 방 하나에 기기 한 쌍이 고정이라(여러 기기 동기화 없음), 재키잉 이벤트(사용자 id만 실려 온다)를 받으면 이걸로
-/// 어느 기기의 고정 키로 확인할지 정한다. 앱을 다시 켜도 남는다(예전에는 메모리에만 있어 재시작 뒤 재키잉을 놓쳤다).
+/// 방 하나에 기기 한 쌍이 고정이라(여러 기기 동기화 없음), 보안 코드·신뢰 안내가 어느 기기의 고정 키를 볼지 이걸로
+/// 정한다. 앱을 다시 켜도 남는다.
 class SecretRoomBinding {
   const SecretRoomBinding({
     required this.peerUserId,
@@ -161,8 +173,8 @@ class SecretRoomBinding {
   final String peerDeviceId;
 
   /// 핸드셰이크 때 이 기기가 쓴 기기 id. 그 뒤 이 기기의 id·키가 바뀌었으면(공용 PC에서 계정을 바꿈 등) 상대는
-  /// 예전 키로 고정해 두었으므로 새 키로 서명한 재키잉은 상대 쪽에서 가로채기로 보고 막힌다 — 그래서 재키잉을
-  /// 보내지 않는다. 예전에 성립한 대화를 방 정보로 묶은 것이면 그때의 이 기기 id다.
+  /// 예전 키로 고정해 두었으므로 보안 코드가 서로 맞지 않는다고 알린다. 예전에 성립한 대화를 방 정보로 묶은 것이면
+  /// 그때의 이 기기 id다.
   final String? myDeviceId;
 
   String encode() => jsonEncode({
@@ -219,7 +231,11 @@ enum SecretBlockReason {
   keyMismatch('key', '서버가 상대 기기의 키를 이 기기에 고정해 둔 것과 다르게 알려 왔습니다.'),
 
   /// 사용자가 "상대 기기 키 다시 받기"로 그 기기의 고정을 지웠다 — 그 키를 믿고 맺은 대화는 더 믿을 근거가 없다.
-  keyReset('reset', '상대 기기 키를 다시 받기로 해서, 예전 키로 맺은 이 대화를 멈췄습니다.');
+  keyReset('reset', '상대 기기 키를 다시 받기로 해서, 예전 키로 맺은 이 대화를 멈췄습니다.'),
+
+  /// 새 규약(v3)으로 말하는 것을 확인한 상대 기기와 예전 규약으로 맺게 됐다 — 서버가 초대·수락에서 새 규약 표시나 서명을
+  /// 빼 보호가 약한 예전 방식으로 내리려 한 것이다(상대가 앱을 예전 버전으로 되돌렸을 수도 있다).
+  downgrade('downgrade', '새 방식으로 대화하던 상대 기기와 예전 방식으로 맺게 하려 했습니다(서버가 바꿨을 수 있습니다).');
 
   const SecretBlockReason(this.code, this.description);
   final String code;
@@ -227,7 +243,8 @@ enum SecretBlockReason {
 
   /// 이 이유로 멈춘 방에서 "상대 기기 키 다시 받기"를 권할 수 있는지 — 고정해 둔 키로 확인이 안 됐을 때만이다(상대가
   /// 앱을 다시 설치하는 등으로 같은 기기 id의 키가 바뀌었을 수 있다). 다른 이유는 키를 다시 받아도 풀리지 않는다.
-  bool get allowsKeyReset => this == badSignature || this == keyMismatch;
+  bool get allowsKeyReset =>
+      this == badSignature || this == keyMismatch || this == downgrade;
 
   static SecretBlockReason? fromCode(Object? code) {
     for (final r in values) {
@@ -248,6 +265,7 @@ class SecretRoomSecurity {
     this.legacyPeer = false,
     this.legacyNoticeDismissed = false,
     this.peerDeviceChanged = false,
+    this.protocolNoticeDismissed = false,
   });
 
   static const none = SecretRoomSecurity();
@@ -269,6 +287,9 @@ class SecretRoomSecurity {
   /// "예전 앱" 안내를 닫았는지.
   final bool legacyNoticeDismissed;
 
+  /// "예전 방식으로 맺은 대화" 안내(SecretRoomTrust.showProtocolNotice)를 닫았는지.
+  final bool protocolNoticeDismissed;
+
   /// 상대가, 이 기기가 예전에 보안 코드를 확인한 기기가 아닌 다른 기기로 이 대화를 맺었다 — 보안 코드를 다시
   /// 비교하라고 알린다(그 기기를 확인하거나 안내를 닫으면 꺼진다).
   final bool peerDeviceChanged;
@@ -279,6 +300,7 @@ class SecretRoomSecurity {
     bool? legacyPeer,
     bool? legacyNoticeDismissed,
     bool? peerDeviceChanged,
+    bool? protocolNoticeDismissed,
   }) => SecretRoomSecurity(
     blockedReason: blockedReason,
     blockedAt: blockedAt,
@@ -287,6 +309,8 @@ class SecretRoomSecurity {
     legacyPeer: legacyPeer ?? this.legacyPeer,
     legacyNoticeDismissed: legacyNoticeDismissed ?? this.legacyNoticeDismissed,
     peerDeviceChanged: peerDeviceChanged ?? this.peerDeviceChanged,
+    protocolNoticeDismissed:
+        protocolNoticeDismissed ?? this.protocolNoticeDismissed,
   );
 
   /// [reason]으로 멈춘 값. [deviceId]·[pinSeenAt]은 고정해 둔 키 때문에 멈췄을 때만 준다([blockedDeviceId] 참고).
@@ -303,6 +327,7 @@ class SecretRoomSecurity {
     legacyPeer: legacyPeer,
     legacyNoticeDismissed: legacyNoticeDismissed,
     peerDeviceChanged: peerDeviceChanged,
+    protocolNoticeDismissed: protocolNoticeDismissed,
   );
 
   /// 멈춤은 [other]의 것으로 바꾼 값 — 이미 멈춘 방에 안내 표시만 고쳐 적을 때, 처음 멈춘 이유를 지키려고 쓴다.
@@ -315,6 +340,7 @@ class SecretRoomSecurity {
         legacyPeer: legacyPeer,
         legacyNoticeDismissed: legacyNoticeDismissed,
         peerDeviceChanged: peerDeviceChanged,
+        protocolNoticeDismissed: protocolNoticeDismissed,
       );
 
   /// 멈춤만 남긴 값 — 되돌린 세션에 붙어 있던 안내(예전 앱·상대 기기 바뀜)는 뺀다.
@@ -329,6 +355,7 @@ class SecretRoomSecurity {
     if (legacyPeer) 'l': true,
     if (legacyNoticeDismissed) 'ld': true,
     if (peerDeviceChanged) 'c': true,
+    if (protocolNoticeDismissed) 'pd': true,
   });
 
   /// 깨진 값이면 null. 알 수 없는 차단 사유(새 버전이 쓴 값)도 멈춘 것으로 본다 — 풀어 주는 쪽으로 틀리면 안 된다.
@@ -355,6 +382,7 @@ class SecretRoomSecurity {
         legacyPeer: json['l'] == true,
         legacyNoticeDismissed: json['ld'] == true,
         peerDeviceChanged: json['c'] == true,
+        protocolNoticeDismissed: json['pd'] == true,
       );
     } on FormatException {
       return null;
@@ -370,7 +398,8 @@ class SecretRoomSecurity {
       other.blockedPinSeenAt == blockedPinSeenAt &&
       other.legacyPeer == legacyPeer &&
       other.legacyNoticeDismissed == legacyNoticeDismissed &&
-      other.peerDeviceChanged == peerDeviceChanged;
+      other.peerDeviceChanged == peerDeviceChanged &&
+      other.protocolNoticeDismissed == protocolNoticeDismissed;
 
   @override
   int get hashCode => Object.hash(
@@ -381,6 +410,7 @@ class SecretRoomSecurity {
     legacyPeer,
     legacyNoticeDismissed,
     peerDeviceChanged,
+    protocolNoticeDismissed,
   );
 }
 
@@ -393,6 +423,7 @@ class SecretRoomTrust {
     this.security = SecretRoomSecurity.none,
     this.resetDeviceId,
     this.peerKeyAlreadyReset = false,
+    this.legacyProtocol = false,
   });
 
   /// 이 방이 묶인 상대(아직 핸드셰이크 전이거나 예전 대화를 묶지 못했으면 null).
@@ -410,6 +441,9 @@ class SecretRoomTrust {
   /// 멈춘 원인이던 상대 기기의 고정을 이미 지웠다(또는 그 뒤 새로 받았다) — 이 대화를 끝내고 새로 시작하면 된다.
   final bool peerKeyAlreadyReset;
 
+  /// 이 대화가 예전 규약(v1 — 두 사람이 체인 하나를 함께 씀)으로 맺어졌다(이 업데이트 전에 맺었거나 상대가 예전 앱).
+  final bool legacyProtocol;
+
   bool get bound => peerDeviceId != null;
   bool get verified => verifiedAt != null;
   bool get blocked => security.blocked;
@@ -423,6 +457,14 @@ class SecretRoomTrust {
   bool get showDeviceChangedNotice =>
       !blocked && security.peerDeviceChanged && !verified;
 
+  /// "예전 방식으로 맺은 대화" 안내를 보일지 — 새로 시작하면 새 규약으로 바뀐다고 알린다. 상대가 예전 앱이면 새로
+  /// 시작해도 그대로라 "예전 앱" 안내([showLegacyNotice])만 보인다(그 안내를 닫아도 이 안내로 바뀌지 않는다).
+  bool get showProtocolNotice =>
+      !blocked &&
+      legacyProtocol &&
+      !security.legacyPeer &&
+      !security.protocolNoticeDismissed;
+
   @override
   bool operator ==(Object other) =>
       other is SecretRoomTrust &&
@@ -431,7 +473,8 @@ class SecretRoomTrust {
       other.verifiedAt == verifiedAt &&
       other.security == security &&
       other.resetDeviceId == resetDeviceId &&
-      other.peerKeyAlreadyReset == peerKeyAlreadyReset;
+      other.peerKeyAlreadyReset == peerKeyAlreadyReset &&
+      other.legacyProtocol == legacyProtocol;
 
   @override
   int get hashCode => Object.hash(
@@ -441,6 +484,7 @@ class SecretRoomTrust {
     security,
     resetDeviceId,
     peerKeyAlreadyReset,
+    legacyProtocol,
   );
 }
 

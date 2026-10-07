@@ -165,7 +165,6 @@ class _Env {
     }
     session.secretSessionManager = SecretSessionManager(
       session.api!,
-      session.chatSocket,
       identity,
       keyStore: store,
       userId: 'u-bob',

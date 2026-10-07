@@ -342,6 +342,10 @@ class Session extends ChangeNotifier {
   /// 아직 응답하지 않은 비밀 대화 초대(secret:invite). UI가 이 목록을 보고 수락/거절 다이얼로그를 띄운다.
   final List<SecretInviteEvent> pendingSecretInvites = [];
 
+  /// 수락을 보내 응답을 기다리는 비밀 대화 초대의 방 — 그동안 같은 초대(방 목록을 다시 받으며 서버에서 다시 가져온 것
+  /// 등)를 다시 띄우지 않는다.
+  final Set<String> _secretAcceptsInFlight = {};
+
   /// 화면 어디에 있든(방을 안 보고 있어도) 한 번 스치듯 보여주면 되는 안내 — 비밀 대화
   /// 거절/양쪽 나가기처럼 "방 자체가 사라지는" 이벤트를 토스트(SnackBar)로 알릴 때 쓴다.
   /// main.dart가 이 스트림을 구독해서 navigatorKey의 context로 SnackBar를 띄운다.
@@ -415,8 +419,6 @@ class Session extends ChangeNotifier {
   StreamSubscription? _secretSettingsSub;
   StreamSubscription? _secretMessageReadSub;
   StreamSubscription? _messageExpiredSub;
-  StreamSubscription? _secretRekeyProposeSub;
-  StreamSubscription? _secretRekeyAckSub;
   StreamSubscription<RoomRemovedEvent>? _roomRemovedSub;
   StreamSubscription<String>? _topicFoldersChangedSub;
   StreamSubscription<ScheduledMessageEvent>? _scheduledEventSub;
@@ -1418,7 +1420,6 @@ class Session extends ChangeNotifier {
     await deviceIdentity!.ensureLoaded();
     secretSessionManager = SecretSessionManager(
       api!,
-      chatSocket,
       deviceIdentity!,
       userId: userId,
       // 초대·수락을 보낸 사람이 그 방의 상대인지 보고, 예전에 성립한 대화를 상대 기기에 묶는 데 방 정보를 쓴다.
@@ -1439,8 +1440,9 @@ class Session extends ChangeNotifier {
     // 저장소는 쓸 때마다 파일 하나를 통째로 다시 써서 겹치면 한쪽이 사라질 수 있다.
     unawaited(secretSessionManager!.purgeExpiredTexts());
     unawaited(syncSecretTextCaches());
-    // 이 업데이트 전에 성립한 비밀 대화는 상대 기기를 이 기기에 묶어 둔 기록이 없다 — 재키잉이 오기 전에 방 정보로
-    // 상대 기기를 찾아 고정해 둔다(못 하면 재키잉·보안 코드 화면에서 다시 해 본다). 기기 등록 뒤에 한다(같은 이유).
+    // 이 업데이트 전에 성립한 비밀 대화는 상대 기기를 이 기기에 묶어 둔 기록이 없다 — 방 정보로 상대 기기를 찾아
+    // 고정해 둔다(못 하면 보안 코드 화면에서 다시 해 본다). 내가 건 대화의 수락을 꺼져 있던 사이 놓쳤으면 그것도 다시
+    // 받아 처리한다(secretSessionManager.recoverMissedAcceptance). 기기 등록 뒤에 한다(같은 이유).
     unawaited(
       secretSessionManager!
           .bootstrapBindings([
@@ -1645,7 +1647,8 @@ class Session extends ChangeNotifier {
     _callCardSub?.cancel();
     _callCardSub = chatSocket.callCards.listen(
       // 그 방을 열어 본 적이 있어 메시지가 메모리에 있을 때만 그 자리에서 바꾼다(아니면 나중에 열 때 최신을 받는다).
-      (u) => existingControllerFor(u.roomId)?.applyCallCard(u.messageId, u.card),
+      (u) =>
+          existingControllerFor(u.roomId)?.applyCallCard(u.messageId, u.card),
     );
     _callDeclinedSub?.cancel();
     _callDeclinedSub = chatSocket.callDeclined.listen((e) {
@@ -1718,7 +1721,25 @@ class Session extends ChangeNotifier {
     });
     unawaited(_loadCallsConfig());
     _secretInviteSub?.cancel();
-    _secretInviteSub = chatSocket.secretInvites.listen((e) {
+    _secretInviteSub = chatSocket.secretInvites.listen((e) async {
+      // 같은 방의 초대가 이미 떠 있거나 그 수락을 보내 응답을 기다리는 중이면, 또는 이미 맺은 대화면(서버가 다시 보냄)
+      // 다시 띄우지 않는다 — 다시 수락하면 맺은 대화가 깨진다(SecretSessionManager.acceptInvite).
+      if (_secretAcceptsInFlight.contains(e.roomId) ||
+          pendingSecretInvites.any((i) => i.roomId == e.roomId)) {
+        return;
+      }
+      try {
+        final manager = secretSessionManager;
+        if (manager != null &&
+            (await manager.hasEstablishedSession(e.roomId) ||
+                await manager.isBlocked(e.roomId))) {
+          return;
+        }
+      } catch (_) {}
+      if (_secretAcceptsInFlight.contains(e.roomId) ||
+          pendingSecretInvites.any((i) => i.roomId == e.roomId)) {
+        return;
+      }
       pendingSecretInvites.add(e);
       notifyListeners();
       // 포그라운드면 HomeScreen이 즉시 수락/거절 다이얼로그를 띄우므로(_maybeShowSecretInvite)
@@ -1827,24 +1848,6 @@ class Session extends ChangeNotifier {
         );
       }
       _controllers[e.roomId]?.applyExpire(e.messageId);
-    });
-    _secretRekeyProposeSub?.cancel();
-    _secretRekeyProposeSub = chatSocket.secretRekeyPropose.listen((e) async {
-      final manager = secretSessionManager;
-      if (manager == null) return;
-      try {
-        _announceSecretOutcome(e.roomId, await manager.handleRekeyPropose(e));
-      } catch (_) {
-        // 상대 기기 키를 묻지 못함 등 — 상대가 다시 제안하면 그때 처리한다.
-      }
-    });
-    _secretRekeyAckSub?.cancel();
-    _secretRekeyAckSub = chatSocket.secretRekeyAck.listen((e) async {
-      final manager = secretSessionManager;
-      if (manager == null) return;
-      try {
-        _announceSecretOutcome(e.roomId, await manager.handleRekeyAck(e));
-      } catch (_) {}
     });
     _reconnectSub?.cancel();
     _reconnectSub = chatSocket.reconnected.listen((_) {
@@ -2244,6 +2247,8 @@ class Session extends ChangeNotifier {
           rooms.add(fresh);
         }
       }
+      // 끊긴 동안 내가 건 비밀 대화가 수락됐으면 그 알림(secret:accepted)은 다시 오지 않는다 — 서버에 다시 물어 맺는다.
+      unawaited(_recoverMissedSecretAcceptances());
       // 더 이상 못 보는 방(끊긴 동안 내보내졌거나 삭제된 토픽, 팀에서 빠짐 등)은 나가기와 같은
       // 경로로 정리한다(컨트롤러·활성 방·토픽 폴더까지).
       // 목록을 받는 사이 새로 생긴 방(초대·참여·만들기)은 받은 목록에 없어도 그대로 둔다.
@@ -2362,7 +2367,8 @@ class Session extends ChangeNotifier {
   /// 비밀 대화 초대를 수락한다 — 상대 기기의 보안 확인에 실패하면 대화를 시작하지 않고 그 방을 멈춘다(방 안내가
   /// 이유와 할 일을 알려 준다). 수락을 보내지 못했으면 토스트로 알린다.
   Future<void> acceptSecretInvite(SecretInviteEvent invite) async {
-    pendingSecretInvites.remove(invite);
+    pendingSecretInvites.removeWhere((e) => e.roomId == invite.roomId);
+    _secretAcceptsInFlight.add(invite.roomId);
     final SecretHandshakeOutcome outcome;
     try {
       outcome = await secretSessionManager!.acceptInvite(invite);
@@ -2370,6 +2376,8 @@ class Session extends ChangeNotifier {
       notifyListeners();
       _showToast('비밀 대화를 수락하지 못했습니다: $e');
       return;
+    } finally {
+      _secretAcceptsInFlight.remove(invite.roomId);
     }
     final room = _findRoom(invite.roomId);
     if (room != null &&
@@ -2381,7 +2389,24 @@ class Session extends ChangeNotifier {
     _announceSecretOutcome(invite.roomId, outcome);
   }
 
-  /// 핸드셰이크·재키잉 결과 중 사용자가 알아야 할 것(보안 확인 실패로 멈춤, 상대 기기 바뀜)을 토스트로 알린다 —
+  /// 내가 건 비밀 대화 중 수락됐는데 이 기기가 그 알림을 놓쳐 세션이 없는 방을 서버에 다시 물어 맺는다(재연결 뒤).
+  Future<void> _recoverMissedSecretAcceptances() async {
+    final manager = secretSessionManager;
+    if (manager == null) return;
+    for (final room in rooms.toList()) {
+      if (!room.isSecret ||
+          room.secretStatus != 'active' ||
+          room.secretInitiatorUserId != userId) {
+        continue;
+      }
+      try {
+        final outcome = await manager.recoverMissedAcceptance(room.id);
+        if (outcome != null) _announceSecretOutcome(room.id, outcome);
+      } catch (_) {}
+    }
+  }
+
+  /// 핸드셰이크 결과 중 사용자가 알아야 할 것(보안 확인 실패로 멈춤, 상대 기기 바뀜)을 토스트로 알린다 —
   /// 그 방을 보고 있지 않아도 알게. 자세한 안내와 할 일은 방 안의 안내 줄에 있다.
   void _announceSecretOutcome(String roomId, SecretHandshakeOutcome outcome) {
     final room = _findRoom(roomId);
@@ -2425,6 +2450,10 @@ class Session extends ChangeNotifier {
     await secretSessionManager?.dismissLegacyNotice(roomId);
   }
 
+  Future<void> dismissSecretProtocolNotice(String roomId) async {
+    await secretSessionManager?.dismissProtocolNotice(roomId);
+  }
+
   Future<void> dismissSecretDeviceChangedNotice(String roomId) async {
     await secretSessionManager?.dismissDeviceChangedNotice(roomId);
   }
@@ -2447,7 +2476,7 @@ class Session extends ChangeNotifier {
       false;
 
   Future<void> rejectSecretInvite(SecretInviteEvent invite) async {
-    pendingSecretInvites.remove(invite);
+    pendingSecretInvites.removeWhere((e) => e.roomId == invite.roomId);
     await secretSessionManager!.rejectInvite(invite.roomId);
     notifyListeners();
   }
@@ -2465,11 +2494,21 @@ class Session extends ChangeNotifier {
     }
     if (room.secretInitiatorUserId == userId) return;
     if (pendingSecretInvites.any((e) => e.roomId == roomId)) return;
+    // 이 기기가 수락을 보내 응답을 기다리는 중이면(방 목록에는 아직 pending) 다시 띄우지 않는다 — 두 번 수락하면 먼저
+    // 맺은 세션이 덮어써진다.
+    if (_secretAcceptsInFlight.contains(roomId)) return;
     try {
       // 보안 확인에 실패해 멈춘 초대는 다시 묻지 않는다 — 수락해도 같은 이유로 다시 멈춘다(방 안내가 할 일을 알려 준다).
       if (await secretSessionManager?.isBlocked(roomId) == true) return;
+      // 이미 맺었고 서버도 받았다고 답한 대화(방 목록이 아직 예전 것) — 다시 수락하지 않게.
+      if (await secretSessionManager?.hasEstablishedSession(roomId) == true) {
+        return;
+      }
       final invite = await api!.fetchSecretInvite(roomId);
-      if (pendingSecretInvites.any((e) => e.roomId == invite.roomId)) return;
+      if (pendingSecretInvites.any((e) => e.roomId == invite.roomId) ||
+          _secretAcceptsInFlight.contains(invite.roomId)) {
+        return;
+      }
       pendingSecretInvites.add(invite);
       notifyListeners();
     } catch (_) {
@@ -2484,13 +2523,42 @@ class Session extends ChangeNotifier {
   }
 
   /// 비밀 대화면 평문을 암호문 봉투(JSON 문자열)로 바꾼다. 세션이 아직 성립되지 않았으면(핸드셰이크
-  /// 진행 중) 예외를 던진다 — 호출자가 스낵바 등으로 보여줄 수 있게.
-  Future<String?> encryptOutgoing(Room room, String? plainText) async {
+  /// 진행 중) 예외를 던진다 — 호출자가 스낵바 등으로 보여줄 수 있게. [place]는 이 글이 놓이는 자리(댓글이면 원본
+  /// 메시지, 수정이면 고치는 글 — 새 규약은 암호문 안에 함께 넣어 서버가 다른 자리로 옮겨 붙이지 못하게 한다).
+  Future<String?> encryptOutgoing(
+    Room room,
+    String? plainText, {
+    SecretTextPlace place = const SecretTextPlace.message(),
+  }) async {
     if (!room.isSecret) return plainText;
-    final envelope = await secretSessionManager!.encryptForRoom(
+    return _encryptSecret(room, plainText ?? '', place);
+  }
+
+  /// 비밀 대화 평문을 봉투로 — 세션이 아직 없으면, 내가 건 대화의 수락을 놓쳤을 수 있어(초대해 두고 앱을 끈 사이 상대가
+  /// 수락함) 서버에 한 번 물어 맺은 뒤 다시 해 본다. 그래도 없으면(아직 수락 전 등) 안내 문구로 던진다.
+  Future<String> _encryptSecret(
+    Room room,
+    String plainText,
+    SecretTextPlace place,
+  ) async {
+    final manager = secretSessionManager!;
+    var envelope = await manager.encryptForRoom(
       room.id,
-      plainText ?? '',
+      plainText,
+      place: place,
     );
+    if (envelope == null) {
+      final outcome = await manager.recoverMissedAcceptance(room.id);
+      if (outcome != null) _announceSecretOutcome(room.id, outcome);
+      // 다시 물어 맺었거나, 그 사이 수락 알림(secret:accepted)이 먼저 와서 맺어졌으면 다시 해 본다.
+      if (outcome != null || await manager.hasActiveSession(room.id)) {
+        envelope = await manager.encryptForRoom(
+          room.id,
+          plainText,
+          place: place,
+        );
+      }
+    }
     if (envelope == null) {
       throw ApiException('비밀 대화가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
     }
@@ -2509,6 +2577,7 @@ class Session extends ChangeNotifier {
     required String attachmentNonce,
     String? thumbnailKey,
     String? thumbnailNonce,
+    SecretTextPlace place = const SecretTextPlace.message(),
   }) async {
     final payload = jsonEncode({
       'caption': caption,
@@ -2520,14 +2589,7 @@ class Session extends ChangeNotifier {
       'thumbnailKey': thumbnailKey,
       'thumbnailNonce': thumbnailNonce,
     });
-    final envelope = await secretSessionManager!.encryptForRoom(
-      room.id,
-      payload,
-    );
-    if (envelope == null) {
-      throw ApiException('비밀 대화가 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.');
-    }
-    return envelope;
+    return _encryptSecret(room, payload, place);
   }
 
   /// 수신한 메시지의 text가 비밀 대화 암호문 봉투면 그 자리에서 평문으로 바꾼다(실패하면
@@ -2540,9 +2602,9 @@ class Session extends ChangeNotifier {
   /// 두 번째부터는 그 캐시를 먼저 확인한다(secret_key_store.dart 참고). 캐시에는 방·작성 시각과
   /// (상대가 읽어 서버가 정했으면) 자동 삭제 시각도 같이 적어서, 서버가 지운 메시지의 평문은 그
   /// 알림을 놓쳐도 이 기기에서 지워지게 한다(S34).
-  /// [forceDecrypt]는 message:edited처럼 같은 messageId인데 내용이 바뀐 경우에 쓴다 — 캐시를
-  /// 읽지 않고 새 암호문을 새로 복호화한 뒤, 그 결과로 캐시를 덮어쓴다(안 그러면 수정 전
-  /// 내용이 영구 캐시에 박제되어 계속 그것만 보인다).
+  /// [forceDecrypt]는 message:edited처럼 같은 messageId인데 내용이 바뀌었을 수 있는 경우에 쓴다 — 캐시는 같은
+  /// 암호문을 푼 평문일 때만 쓰고(파일만 지운 수정 알림은 암호문이 그대로다), 아니면 새 암호문을 복호화해 그 결과로
+  /// 캐시를 덮어쓴다(안 그러면 수정 전 내용이 영구 캐시에 박제되어 계속 그것만 보인다).
   Future<void> decryptInPlace(
     Room? room,
     Message m, {
@@ -2560,19 +2622,21 @@ class Session extends ChangeNotifier {
       // readAt이 있으면 서버가 자동 삭제 시각을 이미 정했다(expiresAt — null이면 지워지지 않는다).
       expiryKnown: m.readAt != null,
       expiresAt: m.expiresAt,
+      envelope: m.text,
+      fromMe: m.senderId != null && m.senderId == userId,
+      senderId: m.senderId,
     );
-    final cached = forceDecrypt
-        ? null
-        : await secretSessionManager?.readCachedDecryptedText(ref);
-    final plain =
-        cached ?? await secretSessionManager?.decryptForRoom(room.id, m.text!);
+    final plain = await _secretPlainText(
+      ref,
+      m.text!,
+      m.senderId,
+      SecretTextSlot.message(m.id),
+      forceDecrypt: forceDecrypt,
+    );
     if (plain == null) {
       m.decryptFailed = true;
       m.text = null;
       return;
-    }
-    if (cached == null) {
-      await secretSessionManager?.cacheDecryptedText(ref, plain);
     }
     if (m.type == MessageType.image || m.type == MessageType.file) {
       try {
@@ -2611,19 +2675,21 @@ class Session extends ChangeNotifier {
       createdAt: c.createdAt,
       expiryKnown: parent?.readAt != null,
       expiresAt: parent?.expiresAt,
+      envelope: c.text,
+      fromMe: c.senderId != null && c.senderId == userId,
+      senderId: c.senderId,
     );
-    final cached = forceDecrypt
-        ? null
-        : await secretSessionManager?.readCachedDecryptedText(ref);
-    final plain =
-        cached ?? await secretSessionManager?.decryptForRoom(room.id, c.text!);
+    final plain = await _secretPlainText(
+      ref,
+      c.text!,
+      c.senderId,
+      SecretTextSlot.comment(c.id, c.messageId),
+      forceDecrypt: forceDecrypt,
+    );
     if (plain == null) {
       c.decryptFailed = true;
       c.text = null;
       return;
-    }
-    if (cached == null) {
-      await secretSessionManager?.cacheDecryptedText(ref, plain);
     }
     if (c.type == MessageType.image || c.type == MessageType.file) {
       try {
@@ -2643,6 +2709,43 @@ class Session extends ChangeNotifier {
     } else {
       c.text = plain;
     }
+  }
+
+  /// 비밀 대화 메시지·댓글 하나([ref] — 서버가 보여 준 봉투 [envelope]·보낸 사람 [senderId])의 평문. 이 기기에 저장해
+  /// 둔 평문이 같은 방·같은 보낸 쪽·같은 봉투의 것이면 그것을 쓰고, 아니면 복호화한다 — 푼 평문은 매니저가 키 상태를
+  /// 저장하기 전에 평문 캐시에 적는다(그 사이 꺼져도 잃지 않게). [forceDecrypt]면 같은 봉투를 푼 평문만 쓴다. 평문 캐시를
+  /// 읽다 실패해도(저장소 오류) 복호화는 한다 — 보여 주는 것이 저장에 달려 있지 않게.
+  Future<String?> _secretPlainText(
+    SecretTextRef ref,
+    String envelope,
+    String? senderId,
+    SecretTextSlot slot, {
+    required bool forceDecrypt,
+  }) async {
+    final manager = secretSessionManager;
+    if (manager == null) return null;
+    Future<String?> cached() async {
+      try {
+        return await manager.readCachedDecryptedText(
+          ref,
+          requireEnvelopeMatch: forceDecrypt,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return await cached() ??
+        await manager.decryptForRoom(
+          ref.roomId,
+          envelope,
+          senderUserId: senderId,
+          cacheAs: ref,
+          slot: slot,
+        ) ??
+        // 같은 메시지를 다른 길(소켓·히스토리)로 거의 동시에 받으면 먼저 푼 쪽이 키를 써 버린다 — 그쪽이 적어 둔
+        // 평문(같은 봉투)을 쓴다.
+        await cached();
   }
 
   /// 방을 열 때(REST로 받아온 히스토리) 메시지/댓글을 한꺼번에 복호화한다.
@@ -2681,7 +2784,11 @@ class Session extends ChangeNotifier {
   void _noteServerTimesIn(List<Message> page) {
     DateTime? latest;
     for (final m in page) {
-      for (final t in [m.createdAt, m.readAt, for (final c in m.comments) c.createdAt]) {
+      for (final t in [
+        m.createdAt,
+        m.readAt,
+        for (final c in m.comments) c.createdAt,
+      ]) {
         if (t != null && (latest == null || t.isAfter(latest))) latest = t;
       }
     }
@@ -4721,8 +4828,6 @@ class Session extends ChangeNotifier {
     await _secretSettingsSub?.cancel();
     await _secretMessageReadSub?.cancel();
     await _messageExpiredSub?.cancel();
-    await _secretRekeyProposeSub?.cancel();
-    await _secretRekeyAckSub?.cancel();
     await _roomRemovedSub?.cancel();
     await _topicFoldersChangedSub?.cancel();
     await _scheduledEventSub?.cancel();

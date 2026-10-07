@@ -1458,7 +1458,12 @@ export const secretSessions = pgTable('secret_sessions', {
   // 보낸다. 예전 앱이 만든 세션이면 null.
   initiatorContextSignature: text('initiator_context_signature'),
   responderContextSignature: text('responder_context_signature'),
-  // 재키잉마다 1씩 증가 — 메시지 암호문 봉투의 epoch 필드와 대응(secretRekeys 이력 참고).
+  // 초대한 앱이 아는 비밀 대화 규약 번호(새 규약 v3 — 더블 래칫이면 3). 초대(secret:invite·GET …/invite)에 그대로 실어
+  // 받는 앱이 v3로 수락할지 고르게 한다. 예전 앱이 만든 세션이면 null. 서버는 이 값으로 아무것도 정하지 않는다 —
+  // 받는 앱의 v3 수락 맥락 서명으로 두 앱이 확인한다(client secret_session_manager.dart).
+  initiatorProtocol: integer('initiator_protocol'),
+  // 재키잉마다 1씩 증가 — 예전 규약(v1) 메시지 암호문 봉투의 epoch 필드와 대응(secretRekeys 이력 참고). 새 앱은 재키잉을
+  // 하지 않는다(예전 앱이 보내는 제안만 남아 있다).
   keyEpoch: integer('key_epoch').notNull().default(0),
   // null이면 자동 삭제 꺼짐. 1~604800(1초~1주). 이후 읽는 메시지부터 적용된다.
   selfDestructSeconds: integer('self_destruct_seconds'),
@@ -1466,7 +1471,8 @@ export const secretSessions = pgTable('secret_sessions', {
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
 });
 
-/** 재키잉 제안/수락 이력(append-only) — 재연결 중 재키잉이 겹친 경우를 클라이언트가 따라잡는 용도. */
+/** 예전 앱(예전 규약 v1)의 재키잉 제안/수락 이력 — 새 앱은 재키잉을 하지 않는다. 수락을 못 받은 예전 앱은 메시지마다 다시
+ * 제안해서, 같은 방·같은 epoch·같은 제안자의 수락 안 된 제안은 새 제안으로 바꿔 적는다(replaceSecretRekeyProposal). */
 export const secretRekeys = pgTable(
   'secret_rekeys',
   {

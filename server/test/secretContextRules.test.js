@@ -16,6 +16,8 @@ import {
   isContextSignature,
   parseContextSignature,
   parseRekeyPayload,
+  parseSecretProtocol,
+  SECRET_PROTOCOL_MAX,
   rekeyAckRelay,
   rekeyProposeRelay,
   secretAcceptedPayload,
@@ -31,7 +33,7 @@ for (const method of ['select', 'insert', 'update', 'delete', 'execute', 'transa
   });
 }
 const { secretRekeys, secretSessions } = await import('../src/db/schema.js');
-const { acceptSecretSession, ackSecretRekey, insertSecretRekey, insertSecretSession } = await import(
+const { acceptSecretSession, ackSecretRekey, insertSecretSession, replaceSecretRekeyProposal } = await import(
   '../src/db/queries/secretSessions.js'
 );
 
@@ -60,6 +62,7 @@ const pendingSession = {
   responderEphemeralSignature: null,
   initiatorContextSignature: CTX_A,
   responderContextSignature: null,
+  initiatorProtocol: 3, // 새 앱이 건 초대 — 새 규약(v3)을 안다
   keyEpoch: 0,
   selfDestructSeconds: null,
   createdAt: new Date('2026-10-01T00:00:00Z'),
@@ -76,8 +79,13 @@ const activeSession = {
   selfDestructSeconds: 30,
   acceptedAt: new Date('2026-10-01T00:01:00Z'),
 };
-/** 예전 앱끼리 만든 세션 — 맥락 서명 칸이 비어 있다. */
-const legacySession = { ...activeSession, initiatorContextSignature: null, responderContextSignature: null };
+/** 예전 앱끼리 만든 세션 — 맥락 서명·규약 칸이 비어 있다. */
+const legacySession = {
+  ...activeSession,
+  initiatorContextSignature: null,
+  responderContextSignature: null,
+  initiatorProtocol: null,
+};
 
 /** 선을 한 번 탄 모양(JSON) — undefined인 칸은 여기서 사라지므로 "null로 실려 간다"를 보려면 이걸 거친다. */
 const wire = (value) => JSON.parse(JSON.stringify(value));
@@ -178,7 +186,7 @@ test('parseRekeyPayload: 예전 앱의 재키잉은 그대로, 새 앱은 맥락
   }
 });
 
-test('secretInvitePayload: secret:invite와 GET invite가 같은 모양 — 예전 칸 그대로에 initiatorContextSignature(없으면 null)', () => {
+test('secretInvitePayload: secret:invite와 GET invite가 같은 모양 — 예전 칸 그대로에 initiatorContextSignature·initiatorProtocol(없으면 null)', () => {
   assert.deepEqual(wire(secretInvitePayload(pendingSession)), {
     roomId: ROOM,
     initiatorUserId: ALICE,
@@ -186,14 +194,31 @@ test('secretInvitePayload: secret:invite와 GET invite가 같은 모양 — 예�
     initiatorEphemeralPublicKey: KEY_A,
     initiatorEphemeralSignature: SIG_A,
     initiatorContextSignature: CTX_A,
+    initiatorProtocol: 3,
   });
   // 예전 앱이 만든 세션 — 칸이 null이든, 행에 아예 없든 null로 실려 간다(키가 빠지지 않게).
-  const { initiatorContextSignature: _omitted, ...withoutColumn } = pendingSession;
-  for (const row of [{ ...pendingSession, initiatorContextSignature: null }, withoutColumn]) {
+  const { initiatorContextSignature: _omitted, initiatorProtocol: _omittedProtocol, ...withoutColumn } = pendingSession;
+  for (const row of [{ ...pendingSession, initiatorContextSignature: null, initiatorProtocol: null }, withoutColumn]) {
     const payload = wire(secretInvitePayload(row));
     assert.ok(Object.hasOwn(payload, 'initiatorContextSignature'));
     assert.equal(payload.initiatorContextSignature, null);
+    assert.ok(Object.hasOwn(payload, 'initiatorProtocol'));
+    assert.equal(payload.initiatorProtocol, null);
     assert.equal(payload.initiatorEphemeralSignature, SIG_A);
+  }
+});
+
+test('parseSecretProtocol: 초대한 앱이 아는 규약 번호 — 없으면(예전 앱) null, 1~255 정수만 받는다', () => {
+  assert.equal(SECRET_PROTOCOL_MAX, 255);
+  assert.deepEqual(parseSecretProtocol(undefined), { value: null });
+  assert.deepEqual(parseSecretProtocol(null), { value: null });
+  for (const ok of [1, 3, 4, SECRET_PROTOCOL_MAX]) assert.deepEqual(parseSecretProtocol(ok), { value: ok });
+  for (const bad of [0, -1, 256, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '3', true, [3], { v: 3 }]) {
+    assert.deepEqual(
+      parseSecretProtocol(bad),
+      { error: '비밀 대화 규약 번호(protocol)가 올바르지 않습니다.' },
+      JSON.stringify(bad) ?? String(bad),
+    );
   }
 });
 
@@ -322,15 +347,18 @@ test('insertSecretSession: 맥락 서명을 initiator_context_signature에 저�
     initiatorEphemeralPublicKey: KEY_A,
     initiatorEphemeralSignature: SIG_A,
   };
-  const row = await insertSecretSession({ ...fields, initiatorContextSignature: CTX_A });
+  const row = await insertSecretSession({ ...fields, initiatorContextSignature: CTX_A, initiatorProtocol: 3 });
   assert.match(queries[0].text, /^insert into "secret_sessions"/);
   assert.equal(insertedValue(queries[0], 'initiator_context_signature'), CTX_A);
   assert.equal(insertedValue(queries[0], 'initiator_ephemeral_signature'), SIG_A);
+  assert.equal(insertedValue(queries[0], 'initiator_protocol'), 3);
   // 돌아온 행(칸 이름 → drizzle 속성)을 그대로 secret:invite로 — 속성 이름이 어긋나면 여기서 null이 된다.
   assert.equal(secretInvitePayload(row).initiatorContextSignature, CTX_A);
+  assert.equal(secretInvitePayload(row).initiatorProtocol, 3);
   // 예전 앱 — null로 넣는다.
-  await insertSecretSession({ ...fields, initiatorContextSignature: null });
+  await insertSecretSession({ ...fields, initiatorContextSignature: null, initiatorProtocol: null });
   assert.equal(insertedValue(queries[1], 'initiator_context_signature'), null);
+  assert.equal(insertedValue(queries[1], 'initiator_protocol'), null);
 });
 
 test('acceptSecretSession: 맥락 서명을 responder_context_signature에 저장 — 예전 앱이면 null, 대기 중인 초대만', async (t) => {
@@ -354,7 +382,7 @@ test('acceptSecretSession: 맥락 서명을 responder_context_signature에 저�
   assert.equal(setValue(queries[1], 'responder_context_signature'), null);
 });
 
-test('insertSecretRekey·ackSecretRekey: 재키잉 맥락 서명을 proposer_/responder_context_signature에 저장', async (t) => {
+test('replaceSecretRekeyProposal·ackSecretRekey: 재키잉 맥락 서명을 proposer_/responder_context_signature에 저장 — 같은 epoch의 대기 중인 제안은 바꿔 적는다', async (t) => {
   const rekeyRow = {
     id: '0b0b0b0b-0000-4000-8000-000000000001',
     roomId: ROOM,
@@ -369,7 +397,6 @@ test('insertSecretRekey·ackSecretRekey: 재키잉 맥락 서명을 proposer_/re
     status: 'acked',
     createdAt: new Date('2026-10-01T00:00:00Z'),
   };
-  const inserts = recordQueries(t, 'insert', secretRekeys, rekeyRow);
   const proposal = {
     roomId: ROOM,
     keyEpoch: 3,
@@ -377,11 +404,24 @@ test('insertSecretRekey·ackSecretRekey: 재키잉 맥락 서명을 proposer_/re
     proposerEphemeralPublicKey: KEY_A,
     proposerEphemeralSignature: SIG_A,
   };
-  await insertSecretRekey({ ...proposal, proposerContextSignature: CTX_A });
-  assert.match(inserts[0].text, /^insert into "secret_rekeys"/);
-  assert.equal(insertedValue(inserts[0], 'proposer_context_signature'), CTX_A);
-  await insertSecretRekey({ ...proposal, proposerContextSignature: null });
-  assert.equal(insertedValue(inserts[1], 'proposer_context_signature'), null);
+  // 한 트랜잭션 안에서 — 같은 방·같은 epoch의 아직 수락되지 않은 제안을 지우고 새 제안을 적는다(예전 앱은 수락이 올 때까지
+  // 메시지마다 다시 제안하는데 새 앱은 응하지 않는다 — 그대로 두면 메시지마다 행이 쌓인다).
+  const tx = recordQueries(t, 'transaction', secretRekeys, rekeyRow);
+  await replaceSecretRekeyProposal({ ...proposal, proposerContextSignature: CTX_A });
+  const statements = tx.map((q) => q.text);
+  assert.equal(statements[0], 'begin');
+  assert.match(statements[1], /^delete from "secret_rekeys" where /);
+  // 같은 제안자의 제안만 — 예전 앱 둘이 동시에 낸 상대의 제안은 남긴다.
+  assert.match(
+    statements[1],
+    /"secret_rekeys"\."room_id" = \$1.*"secret_rekeys"\."key_epoch" = \$2.*"secret_rekeys"\."proposer_user_id" = \$3.*"secret_rekeys"\."status" = \$4/,
+  );
+  assert.deepEqual(tx[1].values, [ROOM, 3, ALICE, 'proposed']);
+  assert.match(statements[2], /^insert into "secret_rekeys"/);
+  assert.equal(insertedValue(tx[2], 'proposer_context_signature'), CTX_A);
+  assert.equal(statements[3], 'commit');
+  await replaceSecretRekeyProposal({ ...proposal, proposerContextSignature: null });
+  assert.equal(insertedValue(tx[6], 'proposer_context_signature'), null);
 
   const updates = recordQueries(t, 'update', secretRekeys, rekeyRow);
   const ack = { responderEphemeralPublicKey: KEY_B, responderEphemeralSignature: SIG_B };
@@ -444,10 +484,26 @@ test('secretChats.js: 맥락 서명은 방·세션을 바꾸기 전에 모양부
   }
   assert.match(create, /if \(initiatorContext\.error\) return res\.status\(400\)\.json\(\{ error: initiatorContext\.error \}\);/);
   assert.match(create, /initiatorContextSignature: initiatorContext\.value,/);
+  // 규약 번호도 같은 자리에서 — 모양이 틀리면 400, 맞으면 그대로 저장(서버는 이 값으로 아무것도 정하지 않는다).
+  const protocolParse = create.indexOf('parseSecretProtocol(protocol)');
+  assert.ok(protocolParse > 0);
+  for (const write of ['deleteRoom(', 'insertRoom(', 'addRoomMembers(', 'insertSecretSession(']) {
+    assert.ok(create.indexOf(write) > protocolParse, `${write} 전에 거른다`);
+  }
+  assert.match(create, /if \(initiatorProtocol\.error\) return res\.status\(400\)\.json\(\{ error: initiatorProtocol\.error \}\);/);
+  assert.match(create, /initiatorProtocol: initiatorProtocol\.value,/);
 
   // 앱이 꺼져 있어 secret:invite를 놓쳤을 때 받는 값도 같은 함수로.
-  const invite = section(source, "router.get('/secret-chats/:roomId/invite'", "router.post('/secret-chats/:roomId/accept'");
+  const invite = section(source, "router.get('/secret-chats/:roomId/invite'", "router.get('/secret-chats/:roomId/accepted'");
   assert.match(invite, /res\.json\(secretInvitePayload\(session\)\);/);
+  // 초대한 사람이 앱을 끈 사이 상대가 수락해 secret:accepted를 놓쳤을 때 — 수락된 대화에서, 초대한 사람만, 같은 함수로.
+  const accepted = section(source, "router.get('/secret-chats/:roomId/accepted'", "router.post('/secret-chats/:roomId/accept'");
+  assert.match(accepted, /if \(!session \|\| session\.status !== 'active'\) \{/);
+  assert.match(
+    accepted,
+    /if \(session\.initiatorUserId !== req\.user\.sub \|\| !\(await isRoomMember\(room\.id, req\.user\.sub\)\)\) \{\s*return res\.status\(403\)/,
+  );
+  assert.match(accepted, /res\.json\(secretAcceptedPayload\(session\)\);/);
 
   const accept = section(source, "router.post('/secret-chats/:roomId/accept'", "router.post('/secret-chats/:roomId/reject'");
   const acceptParse = accept.indexOf("parseContextSignature(responderContextSignature, 'responderContextSignature')");
@@ -469,6 +525,9 @@ test('socket.js: 재키잉 제안·수락은 parseRekeyPayload로 먼저 거르�
   }
   assert.match(propose, /proposerContextSignature: rekey\.contextSignature,/);
   assert.match(ack, /responderContextSignature: rekey\.contextSignature,/);
+  // 제안은 같은 epoch의 대기 중인 제안을 바꿔 적는다(행이 메시지마다 쌓이지 않게).
+  assert.match(propose, /await replaceSecretRekeyProposal\(\{/);
+  assert.doesNotMatch(propose, /insertSecretRekey\(/);
 });
 
 test('rooms.js: 방 DTO의 비밀 대화 칸은 secretRoomFields로만 채운다', () => {

@@ -25,7 +25,7 @@ import '../models/text_format.dart';
 import '../models/topic_folder.dart';
 import '../models/uploaded_attachment.dart';
 import '../models/web_certificate_status.dart';
-import 'chat_socket.dart' show SecretInviteEvent;
+import 'chat_socket.dart' show SecretAcceptedEvent, SecretInviteEvent;
 import 'invite_share.dart' show rememberWebAppUrl;
 
 class ApiException implements Exception {
@@ -2974,13 +2974,15 @@ class ApiClient {
   /// (그 팀 멤버인지는 나만 확인받는다 — 상대는 어느 팀 소속이든 상관없다, server/src/secretChats.js).
   /// [initiatorContextSignature]는 맥락 서명(v2 — secret_chat_crypto.dart). 서버는 이 상대와 이미 진행 중인 비밀
   /// 대화가 있으면 새로 만들지 않고 그 방을 돌려준다(200) — [created]가 false면 서버가 이번 임시키를 받지 않은
-  /// 것이라, 이 임시키로 수락을 기다리면 안 된다(서버는 그 방의 원래 임시키로 상대에게 보냈다).
+  /// 것이라, 이 임시키로 수락을 기다리면 안 된다(서버는 그 방의 원래 임시키로 상대에게 보냈다). [protocol]은 이 앱이 아는
+  /// 비밀 대화 규약 번호(새 규약 v3 — 서버가 초대에 initiatorProtocol로 실어 상대에게 넘긴다, 예전 서버는 무시한다).
   Future<({Room room, bool created})> startSecretChat({
     required String targetUserId,
     required String deviceId,
     required String initiatorEphemeralPublicKey,
     required String initiatorEphemeralSignature,
     String? initiatorContextSignature,
+    int? protocol,
     required String teamId,
   }) async {
     final res = await _send(
@@ -2993,6 +2995,7 @@ class ApiClient {
           'initiatorEphemeralPublicKey': initiatorEphemeralPublicKey,
           'initiatorEphemeralSignature': initiatorEphemeralSignature,
           'initiatorContextSignature': ?initiatorContextSignature,
+          'protocol': ?protocol,
           'teamId': teamId,
         }),
       ),
@@ -3053,6 +3056,14 @@ class ApiClient {
   Future<SecretInviteEvent> fetchSecretInvite(String roomId) async {
     return SecretInviteEvent.fromJson(
       await _get('/api/secret-chats/$roomId/invite') as Map<String, dynamic>,
+    );
+  }
+
+  /// 내가 건 비밀 대화의 수락(secret:accepted)을 놓쳤을 때(초대해 두고 앱을 끈 사이 상대가 수락함) 그 수락 정보를 다시
+  /// 받는다 — 소켓 이벤트와 같은 모양. 아직 수락되지 않았거나(404) 내가 건 대화가 아니면(403) 던진다.
+  Future<SecretAcceptedEvent> fetchSecretAccepted(String roomId) async {
+    return SecretAcceptedEvent.fromJson(
+      await _get('/api/secret-chats/$roomId/accepted') as Map<String, dynamic>,
     );
   }
 

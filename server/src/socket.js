@@ -31,7 +31,12 @@ import {
 } from './db/queries/rooms.js';
 import { listCoTeamMemberIds } from './db/queries/teams.js';
 import { markRoomNotificationsRead } from './notifications.js';
-import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
+import {
+  findSecretSessionByRoomId,
+  replaceSecretRekeyProposal,
+  ackSecretRekey,
+  bumpSecretSessionEpoch,
+} from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
 import { parseRekeyPayload, rekeyAckRelay, rekeyProposeRelay } from './secretContextRules.js';
 import { messageRateLimitText, messageSendLimiter, sendCarriesFiles } from './messageLimits.js';
@@ -172,9 +177,10 @@ export function registerSocket(io) {
       });
     });
 
-    // 재키잉 제안/수락 중계 — 서버는 공개키/서명만 보고 그대로 상대에게 전달할 뿐, 공유비밀
-    // 계산은 양쪽 클라이언트가 각자 로컬에서 한다. 맥락 서명(ephemeralContextSignature)도 검증하지 않고 모양만 본 뒤
-    // 저장·전달한다 — 받는 앱이 상대 기기 키로 검증한다(secretContextRules.js). 예전 앱은 안 보내서 null로 넘어간다.
+    // 재키잉 제안/수락 중계(예전 규약 v1을 쓰는 예전 앱만 보낸다 — 새 앱은 재키잉을 하지 않고 응하지도 않는다) — 서버는
+    // 공개키/서명만 보고 그대로 상대에게 전달할 뿐, 공유비밀 계산은 양쪽 클라이언트가 각자 로컬에서 한다. 맥락
+    // 서명(ephemeralContextSignature)도 검증하지 않고 모양만 본 뒤 저장·전달한다 — 받는 앱이 상대 기기 키로 검증한다
+    // (secretContextRules.js). 예전 앱은 안 보내서 null로 넘어간다.
     // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }
     socket.on('secret:rekey-propose', async (payload) => {
       // 모양이 틀린 payload(맥락 서명 모양이 틀린 것 포함)는 DB를 보기 전에 버린다.
@@ -183,7 +189,8 @@ export function registerSocket(io) {
       const room = await findRoomById(rekey.roomId);
       if (!room || !room.isSecret || !(await isRoomMember(room.id, socket.data.userId))) return;
 
-      await insertSecretRekey({
+      // 수락을 못 받은 예전 앱은 메시지마다 다시 제안한다 — 같은 epoch의 대기 중인 제안은 바꿔 적는다(행이 쌓이지 않게).
+      await replaceSecretRekeyProposal({
         roomId: room.id,
         keyEpoch: rekey.keyEpoch,
         proposerUserId: socket.data.userId,

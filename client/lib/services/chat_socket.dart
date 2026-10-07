@@ -204,6 +204,10 @@ class SecretInviteEvent {
 
   /// 맥락 서명(v2 — secret_chat_crypto.dart secretInitContext). 예전 앱이 건 초대면 null.
   final String? initiatorContextSignature;
+
+  /// 초대한 앱이 아는 비밀 대화 규약 번호(새 규약이면 3 — secret_chat_crypto.dart secretProtocolV3). 예전 앱·예전 서버면
+  /// null. 서버가 전하는 값이라 이것만으로 규약을 정하지 않는다 — 받는 쪽이 v3로 수락하면 그 맥락 서명으로 확인된다.
+  final int? initiatorProtocol;
   const SecretInviteEvent({
     required this.roomId,
     required this.initiatorUserId,
@@ -211,6 +215,7 @@ class SecretInviteEvent {
     required this.initiatorEphemeralPublicKey,
     required this.initiatorEphemeralSignature,
     this.initiatorContextSignature,
+    this.initiatorProtocol,
   });
 
   factory SecretInviteEvent.fromJson(
@@ -224,6 +229,10 @@ class SecretInviteEvent {
     initiatorContextSignature: _optionalString(
       json['initiatorContextSignature'],
     ),
+    initiatorProtocol: switch (json['initiatorProtocol']) {
+      final int v => v,
+      _ => null,
+    },
   );
 }
 
@@ -321,47 +330,6 @@ class MessageExpiredEvent {
       MessageExpiredEvent(
         roomId: json['roomId'] as String,
         messageId: json['messageId'] as String,
-      );
-}
-
-/// 재키잉 제안/수락 중계(secret:rekey-propose / secret:rekey-ack) — 서버는 그대로 전달만 한다. 수락은 방 전체에
-/// 가므로 수락한 기기도 자기 수락을 다시 받는다.
-class SecretRekeyEvent {
-  final String roomId;
-  final int keyEpoch;
-  final String userId; // propose면 proposerUserId, ack면 responderUserId.
-  final String ephemeralPublicKey;
-  final String ephemeralSignature;
-
-  /// 맥락 서명(v2 — propose면 proposerContextSignature, ack면 responderContextSignature). 예전 앱이면 null.
-  final String? contextSignature;
-  const SecretRekeyEvent({
-    required this.roomId,
-    required this.keyEpoch,
-    required this.userId,
-    required this.ephemeralPublicKey,
-    required this.ephemeralSignature,
-    this.contextSignature,
-  });
-
-  factory SecretRekeyEvent.fromProposeJson(Map<String, dynamic> json) =>
-      SecretRekeyEvent(
-        roomId: json['roomId'] as String,
-        keyEpoch: (json['keyEpoch'] as num).toInt(),
-        userId: json['proposerUserId'] as String,
-        ephemeralPublicKey: json['proposerEphemeralPublicKey'] as String,
-        ephemeralSignature: json['proposerEphemeralSignature'] as String,
-        contextSignature: _optionalString(json['proposerContextSignature']),
-      );
-
-  factory SecretRekeyEvent.fromAckJson(Map<String, dynamic> json) =>
-      SecretRekeyEvent(
-        roomId: json['roomId'] as String,
-        keyEpoch: (json['keyEpoch'] as num).toInt(),
-        userId: json['responderUserId'] as String,
-        ephemeralPublicKey: json['responderEphemeralPublicKey'] as String,
-        ephemeralSignature: json['responderEphemeralSignature'] as String,
-        contextSignature: _optionalString(json['responderContextSignature']),
       );
 }
 
@@ -595,10 +563,6 @@ class ChatSocket {
       StreamController<SecretMessageReadEvent>.broadcast();
   final _messageExpiredController =
       StreamController<MessageExpiredEvent>.broadcast();
-  final _secretRekeyProposeController =
-      StreamController<SecretRekeyEvent>.broadcast();
-  final _secretRekeyAckController =
-      StreamController<SecretRekeyEvent>.broadcast();
   final _roomRemovedController = StreamController<RoomRemovedEvent>.broadcast();
   final _topicFoldersChangedController = StreamController<String>.broadcast();
   final _calendarChangedController = StreamController<String>.broadcast();
@@ -847,10 +811,6 @@ class ChatSocket {
       _secretMessageReadController.stream;
   Stream<MessageExpiredEvent> get messageExpired =>
       _messageExpiredController.stream;
-  Stream<SecretRekeyEvent> get secretRekeyPropose =>
-      _secretRekeyProposeController.stream;
-  Stream<SecretRekeyEvent> get secretRekeyAck =>
-      _secretRekeyAckController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -1200,18 +1160,6 @@ class ChatSocket {
         MessageExpiredEvent.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
-    socket.on('secret:rekey-propose', (data) {
-      _secretRekeyProposeController.add(
-        SecretRekeyEvent.fromProposeJson(
-          Map<String, dynamic>.from(data as Map),
-        ),
-      );
-    });
-    socket.on('secret:rekey-ack', (data) {
-      _secretRekeyAckController.add(
-        SecretRekeyEvent.fromAckJson(Map<String, dynamic>.from(data as Map)),
-      );
-    });
     socket.onReconnect((_) => _reconnectController.add(null));
     void onFailure(dynamic err) => _looksLikeAuthError(err)
         ? _authErrorController.add(null)
@@ -1430,40 +1378,6 @@ class ChatSocket {
     _socket?.emit('secret:message-read', {
       'roomId': roomId,
       'messageId': messageId,
-    });
-  }
-
-  /// [ephemeralContextSignature]는 맥락 서명(v2) — 키만 서명한 [ephemeralSignature](v1)는 예전 앱이 확인할 수
-  /// 있게 함께 보낸다.
-  void proposeSecretRekey({
-    required String roomId,
-    required int keyEpoch,
-    required String ephemeralPublicKey,
-    required String ephemeralSignature,
-    String? ephemeralContextSignature,
-  }) {
-    _socket?.emit('secret:rekey-propose', {
-      'roomId': roomId,
-      'keyEpoch': keyEpoch,
-      'ephemeralPublicKey': ephemeralPublicKey,
-      'ephemeralSignature': ephemeralSignature,
-      'ephemeralContextSignature': ?ephemeralContextSignature,
-    });
-  }
-
-  void ackSecretRekey({
-    required String roomId,
-    required int keyEpoch,
-    required String ephemeralPublicKey,
-    required String ephemeralSignature,
-    String? ephemeralContextSignature,
-  }) {
-    _socket?.emit('secret:rekey-ack', {
-      'roomId': roomId,
-      'keyEpoch': keyEpoch,
-      'ephemeralPublicKey': ephemeralPublicKey,
-      'ephemeralSignature': ephemeralSignature,
-      'ephemeralContextSignature': ?ephemeralContextSignature,
     });
   }
 

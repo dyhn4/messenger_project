@@ -8,6 +8,7 @@ import 'package:client/services/device_identity.dart';
 import 'package:client/services/secret_chat_crypto.dart' as crypto;
 import 'package:client/services/secret_key_store.dart';
 import 'package:client/services/secret_peer_store.dart';
+import 'package:client/services/secret_ratchet.dart';
 import 'package:client/services/secret_session_manager.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -15,12 +16,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 비밀 대화 상대 기기 고정(S5)의 판단 — 두 기기(앨리스·밥)와 서버 흉내로 핸드셰이크·재키잉을 실제로 돌려,
-/// 서버가 기기 키·사용자를 바꿔치기하면 체인을 만들지 않고 멈추는지, 맥락 서명(v2)이 있으면 v1은 보지 않는지,
-/// 예전 앱(v2 없음)과는 v1로 대화하되 표시하는지, 앱을 다시 켠 뒤에도 저장된 묶음으로 재키잉하는지 본다. 같은 기기를
-/// 두 곳에서 동시에 처음 고정하다 서버가 다른 키를 알려 오면 덮어쓰지 않고 멈추는지, 멈춤이 서버가 보내는 값으로
-/// 풀리지 않는지, 재키잉 제안을 다시 보내도 같은 임시키인지, 확인되지 않은 재키잉은 멈추지 않고 무시하는지,
-/// "상대 기기 키 다시 받기"로 같은 기기와 다시 대화할 수 있는지도 본다.
+/// 비밀 대화 상대 기기 고정(S5)의 판단 — 두 기기(앨리스·밥)와 서버 흉내로 핸드셰이크를 실제로 돌려, 서버가 기기
+/// 키·사용자를 바꿔치기하면 세션 키를 만들지 않고 멈추는지, 맥락 서명(v2)이 있으면 v1은 보지 않는지 본다. 둘 다 새
+/// 앱이면 초대에 실린 규약 번호와 v3 수락 맥락 서명으로 새 규약(v3 — 더블 래칫)을 맺고, 예전 앱(v2 없음)·규약 번호를
+/// 전하지 않는 예전 서버와는 예전 규약(v1)으로 대화하되 표시하며 재키잉 없이 계속 풀리는지, 앱을 다시 켠 뒤에도 저장된
+/// 묶음·세션으로 서버에 묻지 않고 이어 가는지 본다. 같은 기기를 두 곳에서 동시에 처음 고정하다 서버가 다른 키를 알려
+/// 오면 덮어쓰지 않고 멈추는지, 멈춤이 서버가 보내는 값으로 풀리지 않는지, 같은 방의 보내기·받기가 겹쳐도 래칫이
+/// 어긋나지 않는지, "상대 기기 키 다시 받기"로 같은 기기와 다시 대화할 수 있는지도 본다.
 
 class _MemoryStorage extends Fake implements FlutterSecureStorage {
   final Map<String, String> data = {};
@@ -122,42 +124,6 @@ class _TrippingStorage extends _MemoryStorage {
     }
     return value;
   }
-}
-
-/// 재키잉 제안·수락을 실제로 보내지 않고 적어 둔다.
-class _RecordingSocket extends ChatSocket {
-  final proposals = <Map<String, Object?>>[];
-  final acks = <Map<String, Object?>>[];
-
-  @override
-  void proposeSecretRekey({
-    required String roomId,
-    required int keyEpoch,
-    required String ephemeralPublicKey,
-    required String ephemeralSignature,
-    String? ephemeralContextSignature,
-  }) => proposals.add({
-    'roomId': roomId,
-    'keyEpoch': keyEpoch,
-    'ephemeralPublicKey': ephemeralPublicKey,
-    'ephemeralSignature': ephemeralSignature,
-    'ephemeralContextSignature': ephemeralContextSignature,
-  });
-
-  @override
-  void ackSecretRekey({
-    required String roomId,
-    required int keyEpoch,
-    required String ephemeralPublicKey,
-    required String ephemeralSignature,
-    String? ephemeralContextSignature,
-  }) => acks.add({
-    'roomId': roomId,
-    'keyEpoch': keyEpoch,
-    'ephemeralPublicKey': ephemeralPublicKey,
-    'ephemeralSignature': ephemeralSignature,
-    'ephemeralContextSignature': ephemeralContextSignature,
-  });
 }
 
 http.Response _json(Object? body, [int status = 200]) => http.Response.bytes(
@@ -265,7 +231,6 @@ class _Device {
     this.keyStorage,
     this.identity,
     this.store,
-    this.socket,
     this.manager,
     this.rooms,
   );
@@ -276,7 +241,6 @@ class _Device {
   final _MemoryStorage keyStorage;
   final DeviceIdentity identity;
   final SecretKeyStore store;
-  final _RecordingSocket socket;
   final SecretSessionManager manager;
 
   /// 이 기기의 방 목록(Session.rooms 대신) — 매니저가 방 멤버·핸드셰이크 기기 정보를 여기서 찾는다.
@@ -300,7 +264,6 @@ class _Device {
       await publicKeyBase64(identity.signingKeyPair),
     );
     final store = SecretKeyStore(storage: kStorage);
-    final socket = _RecordingSocket();
     final rooms = <String, Room>{};
     final manager = SecretSessionManager(
       ApiClient(
@@ -308,7 +271,6 @@ class _Device {
         token: 't',
         httpClient: server.client,
       ),
-      socket,
       identity,
       keyStore: store,
       userId: userId,
@@ -322,7 +284,6 @@ class _Device {
       kStorage,
       identity,
       store,
-      socket,
       manager,
       rooms,
     );
@@ -339,7 +300,8 @@ class _Device {
   Future<String> get signingKey => publicKeyBase64(identity.signingKeyPair);
 }
 
-/// [from]이 [targetUserId]에게 비밀 대화를 걸고, 서버가 상대에게 보낼 secret:invite를 만든다.
+/// [from]이 [targetUserId]에게 비밀 대화를 걸고, 서버가 상대에게 보낼 secret:invite를 만든다 — 서버는 시작 요청에
+/// 실린 규약 번호(새 앱은 v3)를 초대에 그대로 실어 전한다.
 Future<SecretInviteEvent> _start(
   _Device from,
   String targetUserId, {
@@ -356,6 +318,7 @@ Future<SecretInviteEvent> _start(
     initiatorEphemeralPublicKey: body['initiatorEphemeralPublicKey'] as String,
     initiatorEphemeralSignature: body['initiatorEphemeralSignature'] as String,
     initiatorContextSignature: body['initiatorContextSignature'] as String?,
+    initiatorProtocol: body['protocol'] as int?,
   );
 }
 
@@ -379,40 +342,43 @@ SecretAcceptedEvent _accepted(
   );
 }
 
-SecretRekeyEvent _rekeyEvent(
-  Map<String, Object?> sent,
-  String userId, {
-  bool withContext = true,
-}) => SecretRekeyEvent(
-  roomId: sent['roomId'] as String,
-  keyEpoch: sent['keyEpoch'] as int,
-  userId: userId,
-  ephemeralPublicKey: sent['ephemeralPublicKey'] as String,
-  ephemeralSignature: sent['ephemeralSignature'] as String,
-  contextSignature: withContext
-      ? sent['ephemeralContextSignature'] as String?
-      : null,
-);
+/// 규약 번호를 전하지 않는 예전 서버가 보낸 것 같은 초대 — 맥락 서명(v2)은 그대로라, 새 앱끼리도 예전 규약(v1)으로
+/// 맺는다.
+SecretInviteEvent _withoutProtocol(SecretInviteEvent invite) =>
+    SecretInviteEvent(
+      roomId: invite.roomId,
+      initiatorUserId: invite.initiatorUserId,
+      initiatorDeviceId: invite.initiatorDeviceId,
+      initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
+      initiatorEphemeralSignature: invite.initiatorEphemeralSignature,
+      initiatorContextSignature: invite.initiatorContextSignature,
+    );
 
-/// [alice]가 [bob]에게 걸고 [bob]이 수락해 양쪽 모두 체인키를 만든다.
+/// [alice]가 [bob]에게 걸고 [bob]이 수락해 양쪽 모두 세션 키를 만든다 — 둘 다 새 앱이라 새 규약(v3)으로 맺는다.
+/// [v3]가 false면 서버가 초대의 규약 번호를 전하지 않은 것처럼(예전 서버) 해서 예전 규약(v1)으로 맺는다 — 이
+/// 업데이트 전에 맺은 대화도 v1이다.
 Future<void> _handshake(
   _Device alice,
   _Device bob, {
   String roomId = 'room-1',
+  bool v3 = true,
 }) async {
   final invite = await _start(alice, bob.userId, roomId: roomId);
   bob.rooms[roomId] = Room.fromJson(_roomJson(roomId, status: 'pending'));
   expect(
-    await bob.manager.acceptInvite(invite),
+    await bob.manager.acceptInvite(v3 ? invite : _withoutProtocol(invite)),
     SecretHandshakeOutcome.established,
   );
   expect(
     await alice.manager.handleAccepted(_accepted(bob, roomId)),
     SecretHandshakeOutcome.established,
   );
+  final protocol = v3 ? crypto.secretProtocolV3 : 1;
+  expect(await alice.store.sessionProtocol(roomId), protocol);
+  expect(await bob.store.sessionProtocol(roomId), protocol);
 }
 
-/// [from]이 암호화한 것을 [to]가 풀어 같은 글이 나오는지.
+/// [from]이 암호화한 것을 [to]가 풀어 같은 글이 나오는지 — Session처럼 서버가 알려 준 보낸 사람도 함께 준다.
 Future<void> _expectRoundTrip(
   _Device from,
   _Device to,
@@ -420,20 +386,45 @@ Future<void> _expectRoundTrip(
   String text,
 ) async {
   final envelope = await from.manager.encryptForRoom(roomId, text);
-  expect(envelope, isNotNull, reason: '보내는 쪽 체인이 없다');
-  expect(await to.manager.decryptForRoom(roomId, envelope!), text);
+  expect(envelope, isNotNull, reason: '보내는 쪽 세션이 없다');
+  expect(
+    await to.manager.decryptForRoom(
+      roomId,
+      envelope!,
+      senderUserId: from.userId,
+    ),
+    text,
+  );
 }
 
-/// 서버(또는 공격자)가 [claimedDeviceId] 기기인 척 [signer] 키로 서명해 끼워 넣는 초대.
+/// [device]에 방 [roomId]의 세션 키가 하나도 없는지 — 예전 규약(v1) 체인도, 새 규약(v3) 래칫도.
+Future<void> _expectNoSession(_Device device, String roomId) async {
+  expect(
+    await device.store.readChainState(roomId),
+    isNull,
+    reason: 'v1 체인이 있다',
+  );
+  expect(
+    (await device.store.readRatchetState(roomId)).present,
+    isFalse,
+    reason: 'v3 래칫이 있다',
+  );
+  expect(await device.store.hasSession(roomId), isFalse);
+}
+
+/// 서버(또는 공격자)가 [claimedDeviceId] 기기인 척 [signer] 키로 서명해 끼워 넣는 초대 — 새 앱의 초대처럼 맥락
+/// 서명(v2)과 규약 번호(v3)를 싣는다. [ephemeral]을 주면 그 임시키로 건다(맺어진 대화에 서버가 글을 끼워 넣을 때).
 Future<SecretInviteEvent> _forgedInvite({
   required String roomId,
   required String claimedUserId,
   required String claimedDeviceId,
   required String responderUserId,
   required SimpleKeyPair signer,
+  SimpleKeyPair? ephemeral,
 }) async {
-  final ephemeral = await X25519().newKeyPair();
-  final ephemeralPublicKey = await publicKeyBase64(ephemeral);
+  final ephemeralPublicKey = await publicKeyBase64(
+    ephemeral ?? await X25519().newKeyPair(),
+  );
   return SecretInviteEvent(
     roomId: roomId,
     initiatorUserId: claimedUserId,
@@ -452,9 +443,12 @@ Future<SecretInviteEvent> _forgedInvite({
         initiatorEphemeralPublicKey: ephemeralPublicKey,
       ),
     ),
+    initiatorProtocol: crypto.secretProtocolV3,
   );
 }
 
+/// [invite]의 서명만 바꾼 초대. 맥락 서명(v2)이 없으면 예전 앱의 초대라 규약 번호도 싣지 않는다(예전 앱은 보내지
+/// 않는다).
 SecretInviteEvent _withSignatures(
   SecretInviteEvent invite, {
   required String v1,
@@ -466,6 +460,7 @@ SecretInviteEvent _withSignatures(
   initiatorEphemeralPublicKey: invite.initiatorEphemeralPublicKey,
   initiatorEphemeralSignature: v1,
   initiatorContextSignature: v2,
+  initiatorProtocol: v2 == null ? null : invite.initiatorProtocol,
 );
 
 void main() {
@@ -480,7 +475,7 @@ void main() {
   });
 
   test(
-    '둘 다 새 앱 — 맥락 서명(v2)으로 핸드셰이크하고 상대 기기를 고정해 묶으며, 서로 주고받는 글이 풀린다',
+    '둘 다 새 앱 — 맥락 서명(v2)으로 핸드셰이크해 새 규약(v3)으로 맺고, 상대 기기를 고정해 묶으며, 서로 주고받는 글이 풀린다',
     () async {
       await _handshake(alice, bob);
       expect(server.started.single['initiatorContextSignature'], isA<String>());
@@ -488,10 +483,19 @@ void main() {
         server.started.single['initiatorEphemeralSignature'],
         isA<String>(),
       );
+      expect(server.started.single['protocol'], crypto.secretProtocolV3);
       expect(
         server.accepted['room-1']!['responderContextSignature'],
         isA<String>(),
       );
+      // 새 규약의 래칫만 있고 예전 규약의 체인은 만들지 않았다.
+      for (final device in [alice, bob]) {
+        expect(
+          (await device.store.readRatchetState('room-1')).state,
+          isNotNull,
+        );
+        expect(await device.store.readChainState('room-1'), isNull);
+      }
       await _expectRoundTrip(alice, bob, 'room-1', '안녕하세요');
       await _expectRoundTrip(bob, alice, 'room-1', '반갑습니다');
 
@@ -500,10 +504,13 @@ void main() {
       expect(bobTrust.peerDeviceId, alice.deviceId);
       expect(bobTrust.blocked, isFalse);
       expect(bobTrust.showLegacyNotice, isFalse);
+      expect(bobTrust.legacyProtocol, isFalse);
+      expect(bobTrust.showProtocolNotice, isFalse);
       expect(bobTrust.verified, isFalse);
       final aliceTrust = await alice.manager.loadTrust('room-1');
       expect(aliceTrust.peerDeviceId, bob.deviceId);
       expect(aliceTrust.security.legacyPeer, isFalse);
+      expect(aliceTrust.legacyProtocol, isFalse);
       expect(
         (await bob.store.readDevicePin(alice.deviceId))?.signingPublicKey,
         await alice.signingKey,
@@ -542,7 +549,7 @@ void main() {
         SecretHandshakeOutcome.blocked,
       );
       expect(server.keyLookups, isEmpty, reason: '고정한 기기는 서버에 다시 묻지 않는다');
-      expect(await bob.store.readChainState('room-2'), isNull);
+      await _expectNoSession(bob, 'room-2');
       expect(server.accepted.containsKey('room-2'), isFalse);
       final trust = await bob.manager.loadTrust('room-2');
       expect(trust.blocked, isTrue);
@@ -563,7 +570,7 @@ void main() {
         await bob.manager.acceptInvite(genuine),
         SecretHandshakeOutcome.blocked,
       );
-      expect(await bob.store.readChainState('room-2'), isNull);
+      await _expectNoSession(bob, 'room-2');
     },
   );
 
@@ -580,7 +587,7 @@ void main() {
     final trust = await bob.manager.loadTrust('room-1');
     expect(trust.security.blockedReason, SecretBlockReason.userMismatch);
     expect(await bob.store.readDevicePin(alice.deviceId), isNull);
-    expect(await bob.store.readChainState('room-1'), isNull);
+    await _expectNoSession(bob, 'room-1');
   });
 
   test('초대를 보낸 사람이 이 방의 상대가 아니면(서버가 꾸민 초대) 멈춘다', () async {
@@ -602,6 +609,8 @@ void main() {
       (await bob.manager.loadTrust('room-1')).security.blockedReason,
       SecretBlockReason.peerMismatch,
     );
+    await _expectNoSession(bob, 'room-1');
+    expect(server.accepted.containsKey('room-1'), isFalse);
     expect(invite.initiatorUserId, 'u-alice');
   });
 
@@ -631,6 +640,15 @@ void main() {
         await alice.manager.handleAccepted(_accepted(bob, 'room-1')),
         SecretHandshakeOutcome.established,
       );
+      // 틀린 v1은 규약도 끌어내리지 않는다 — v2가 맞아 새 규약(v3)으로 맺었다.
+      expect(
+        await bob.store.sessionProtocol('room-1'),
+        crypto.secretProtocolV3,
+      );
+      expect(
+        await alice.store.sessionProtocol('room-1'),
+        crypto.secretProtocolV3,
+      );
       await _expectRoundTrip(alice, bob, 'room-1', 'v2만 확인');
 
       // 앨리스가 캐럴에게 낸 초대 서명(v1은 키만 서명해서 그대로 맞다)을 서버가 밥의 방에 다시 끼워 넣는다.
@@ -645,6 +663,7 @@ void main() {
         initiatorEphemeralPublicKey: toCarol.initiatorEphemeralPublicKey,
         initiatorEphemeralSignature: toCarol.initiatorEphemeralSignature,
         initiatorContextSignature: toCarol.initiatorContextSignature,
+        initiatorProtocol: toCarol.initiatorProtocol,
       );
       expect(
         await crypto.verifyEphemeralKey(
@@ -661,12 +680,12 @@ void main() {
         await bob.manager.acceptInvite(replayed),
         SecretHandshakeOutcome.blocked,
       );
-      expect(await bob.store.readChainState('room-2'), isNull);
+      await _expectNoSession(bob, 'room-2');
     },
   );
 
   test(
-    '상대가 예전 앱이라 v2가 없으면 고정한 키로 v1을 확인해 진행하고 "예전 앱"으로 표시한다 — v2를 다시 보내면 표시가 꺼진다',
+    '상대가 예전 앱이라 v2가 없으면 고정한 키로 v1을 확인해 예전 규약(v1)으로 진행하고 "예전 앱"으로 표시한다 — 예전 앱의 v1이라도 고정한 키로 맞지 않으면 멈춘다',
     () async {
       final invite = await _start(alice, 'u-bob');
       bob.rooms['room-1'] = Room.fromJson(
@@ -682,9 +701,13 @@ void main() {
         ),
         SecretHandshakeOutcome.established,
       );
+      expect(await bob.store.sessionProtocol('room-1'), 1);
       final bobTrust = await bob.manager.loadTrust('room-1');
       expect(bobTrust.security.legacyPeer, isTrue);
       expect(bobTrust.showLegacyNotice, isTrue);
+      expect(bobTrust.legacyProtocol, isTrue);
+      // 상대가 예전 앱이면 새로 시작해도 예전 규약이라 "예전 방식" 안내 대신 "예전 앱" 안내만 보인다.
+      expect(bobTrust.showProtocolNotice, isFalse);
 
       // 앨리스 쪽에서도 밥이 예전 앱인 것처럼(수락에 v2 없음).
       expect(
@@ -693,11 +716,13 @@ void main() {
         ),
         SecretHandshakeOutcome.established,
       );
+      expect(await alice.store.sessionProtocol('room-1'), 1);
       expect(
         (await alice.manager.loadTrust('room-1')).security.legacyPeer,
         isTrue,
       );
       await _expectRoundTrip(alice, bob, 'room-1', '예전 앱과도 대화');
+      await _expectRoundTrip(bob, alice, 'room-1', '답장');
 
       // 예전 앱의 v1이라도 고정한 키로 맞지 않으면 멈춘다.
       final mallory = await Ed25519().newKeyPair();
@@ -721,272 +746,78 @@ void main() {
         ),
         SecretHandshakeOutcome.blocked,
       );
-
-      // 밥이 앱을 업데이트해 v2로 재키잉을 제안하면 앨리스의 "예전 앱" 표시가 꺼진다.
-      await bob.manager.proposeRekeyNow('room-1');
-      expect(
-        await alice.manager.handleRekeyPropose(
-          _rekeyEvent(bob.socket.proposals.last, 'u-bob'),
-        ),
-        SecretHandshakeOutcome.established,
-      );
-      expect(
-        (await alice.manager.loadTrust('room-1')).security.legacyPeer,
-        isFalse,
-      );
+      await _expectNoSession(bob, 'room-2');
     },
   );
 
-  test('앱을 다시 켠 뒤에도 저장된 묶음으로 재키잉한다 — 방 정보에 기기 칸이 없어도, 서버에 묻지 않고', () async {
+  test('앱을 다시 켠 뒤에도 저장된 묶음·세션으로 이어 간다 — 방 정보에 기기 칸이 없어도, 서버에 묻지 않고', () async {
     await _handshake(alice, bob);
-    await _expectRoundTrip(alice, bob, 'room-1', '재키잉 전');
+    await _expectRoundTrip(alice, bob, 'room-1', '다시 켜기 전');
+    final codeBefore = (await bob.manager.safetyInfo('room-1'))!.groups;
 
     final bob2 = await bob.restart();
-    // 예전 서버 모양의 방 정보(기기 칸 없음) — 묶음이 저장돼 있지 않으면 재키잉을 처리할 수 없다.
+    // 예전 서버 모양의 방 정보(기기 칸 없음) — 묶음이 저장돼 있지 않으면 상대 기기를 찾을 수 없다.
     bob2.rooms['room-1'] = Room.fromJson(_roomJson('room-1'));
     expect(bob2.deviceId, bob.deviceId);
     server.keyLookups.clear();
 
-    await alice.manager.proposeRekeyNow('room-1');
-    final propose = _rekeyEvent(alice.socket.proposals.single, 'u-alice');
-    expect(propose.keyEpoch, 1);
-    expect(propose.contextSignature, isNotNull);
+    final trust = await bob2.manager.loadTrust('room-1');
+    expect(trust.peerUserId, 'u-alice');
+    expect(trust.peerDeviceId, alice.deviceId);
+    expect(trust.blocked, isFalse);
+    expect(trust.legacyProtocol, isFalse);
+    expect((await bob2.manager.safetyInfo('room-1'))!.groups, codeBefore);
+    expect(server.keyLookups, isEmpty, reason: '저장된 묶음·고정만 쓴다');
+
+    // 대화는 양쪽으로 이어진다(래칫도 저장된 상태에서 이어 간다).
+    await _expectRoundTrip(alice, bob2, 'room-1', '다시 켠 뒤');
+    await _expectRoundTrip(bob2, alice, 'room-1', '답장');
+    await _expectRoundTrip(alice, bob2, 'room-1', '여전히 풀린다');
+    // 보낸 사람도 저장된 묶음으로 확인한다 — 이 방의 상대가 아닌 사람이 보냈다는 글은 풀지 않는다(래칫도 그대로).
+    final envelope = (await alice.manager.encryptForRoom('room-1', '누가 보냈나'))!;
     expect(
-      await bob2.manager.handleRekeyPropose(propose),
-      SecretHandshakeOutcome.established,
+      await bob2.manager.decryptForRoom(
+        'room-1',
+        envelope,
+        senderUserId: 'u-carol',
+      ),
+      isNull,
+    );
+    expect(
+      await bob2.manager.decryptForRoom(
+        'room-1',
+        envelope,
+        senderUserId: 'u-alice',
+      ),
+      '누가 보냈나',
     );
     expect(server.keyLookups, isEmpty);
-    final ack = _rekeyEvent(bob2.socket.acks.single, 'u-bob');
-    expect(ack.contextSignature, isNotNull);
-    expect(
-      await alice.manager.handleRekeyAck(ack),
-      SecretHandshakeOutcome.established,
-    );
-    expect((await alice.store.readChainState('room-1'))!.epoch, 1);
-    expect((await bob2.store.readChainState('room-1'))!.epoch, 1);
-    await _expectRoundTrip(alice, bob2, 'room-1', '재키잉 뒤');
-    await _expectRoundTrip(bob2, alice, 'room-1', '답장');
-
-    // 지난 제안을 다시 보내도(재전송) 체인을 되돌리지 않고, 방 전체로 되돌아온 내 ack도 무시한다.
-    expect(
-      await bob2.manager.handleRekeyPropose(propose),
-      SecretHandshakeOutcome.ignored,
-    );
-    expect(
-      await bob2.manager.handleRekeyAck(ack),
-      SecretHandshakeOutcome.ignored,
-    );
-    expect(bob2.socket.acks, hasLength(1));
-    await _expectRoundTrip(alice, bob2, 'room-1', '여전히 풀린다');
   });
 
-  test(
-    '재키잉이 방에 묶인 상대가 아닌 사람 이름으로 오면 멈추고, 고정한 키로 서명이 맞지 않으면 멈추지 않고 무시한다 — 어느 쪽이든 체인은 그대로다',
-    () async {
-      await _handshake(alice, bob);
-      await alice.manager.proposeRekeyNow('room-1');
-      final genuine = alice.socket.proposals.single;
+  test('예전 규약(v1)으로 맺은 대화는 예전 재키잉 기준(글 100개)을 넘겨도 재키잉하지 않고 계속 주고받는다', () async {
+    // 규약 번호를 전하지 않는 예전 서버 — 둘 다 새 앱이어도 예전 규약으로 맺는다.
+    await _handshake(alice, bob, v3: false);
+    for (var i = 0; i < 105; i++) {
+      await _expectRoundTrip(alice, bob, 'room-1', '글 $i');
+    }
+    await _expectRoundTrip(bob, alice, 'room-1', '답장');
+    await _expectRoundTrip(alice, bob, 'room-1', '그 뒤 글');
+    for (final device in [alice, bob]) {
+      final state = (await device.store.readChainState('room-1'))!;
+      expect(state.epoch, 0, reason: '재키잉하지 않아 처음 체인 그대로다');
+      expect(state.n, 107);
+      expect(
+        device.keyStorage.data.keys.where((k) => k.contains('pendingRekey')),
+        isEmpty,
+        reason: '재키잉을 제안하며 남기던 임시키가 없다',
+      );
+      final trust = await device.manager.loadTrust('room-1');
+      expect(trust.legacyProtocol, isTrue);
+      expect(trust.showProtocolNotice, isTrue);
+    }
+  });
 
-      final asCarol = _rekeyEvent(genuine, 'u-carol');
-      expect(
-        await bob.manager.handleRekeyPropose(asCarol),
-        SecretHandshakeOutcome.blocked,
-      );
-      expect(
-        (await bob.manager.loadTrust('room-1')).security.blockedReason,
-        SecretBlockReason.peerMismatch,
-      );
-      expect((await bob.store.readChainState('room-1'))!.epoch, 0);
-      expect(bob.socket.acks, isEmpty);
-      // 멈춘 방은 진짜 제안도 처리하지 않는다.
-      expect(
-        await bob.manager.handleRekeyPropose(_rekeyEvent(genuine, 'u-alice')),
-        SecretHandshakeOutcome.ignored,
-      );
-      expect((await bob.store.readChainState('room-1'))!.epoch, 0);
-
-      // 다른 방(밥의 다른 기기와 맺은 대화): 서버가 앨리스인 척 자기 키로 서명한 제안을 끼워 넣는다 — 무시한다.
-      final bobTablet = await _Device.open('u-bob', server);
-      await _handshake(alice, bobTablet, roomId: 'room-9');
-      final mallory = await Ed25519().newKeyPair();
-      final ephemeral = await publicKeyBase64(await X25519().newKeyPair());
-      final forged = SecretRekeyEvent(
-        roomId: 'room-9',
-        keyEpoch: 1,
-        userId: 'u-alice',
-        ephemeralPublicKey: ephemeral,
-        ephemeralSignature: await crypto.signEphemeralKey(
-          mallory,
-          base64Decode(ephemeral),
-        ),
-        contextSignature: await crypto.signContext(
-          mallory,
-          crypto.secretRekeyProposeContext(
-            roomId: 'room-9',
-            keyEpoch: 1,
-            proposerUserId: 'u-alice',
-            proposerDeviceId: alice.deviceId,
-            proposerEphemeralPublicKey: ephemeral,
-          ),
-        ),
-      );
-      expect(
-        await bobTablet.manager.handleRekeyPropose(forged),
-        SecretHandshakeOutcome.ignored,
-      );
-      // 모양이 틀린 임시키도 무시한다.
-      expect(
-        await bobTablet.manager.handleRekeyPropose(
-          SecretRekeyEvent(
-            roomId: 'room-9',
-            keyEpoch: 1,
-            userId: 'u-alice',
-            ephemeralPublicKey: 'AAAA',
-            ephemeralSignature: forged.ephemeralSignature,
-            contextSignature: forged.contextSignature,
-          ),
-        ),
-        SecretHandshakeOutcome.ignored,
-      );
-      expect((await bobTablet.manager.loadTrust('room-9')).blocked, isFalse);
-      expect((await bobTablet.store.readChainState('room-9'))!.epoch, 0);
-      expect(bobTablet.socket.acks, isEmpty);
-      // 대화는 그대로 이어지고, 진짜 제안은 처리한다.
-      await _expectRoundTrip(alice, bobTablet, 'room-9', '꾸민 제안 뒤에도 그대로');
-      await alice.manager.proposeRekeyNow('room-9');
-      expect(
-        await bobTablet.manager.handleRekeyPropose(
-          _rekeyEvent(alice.socket.proposals.last, 'u-alice'),
-        ),
-        SecretHandshakeOutcome.established,
-      );
-      expect(
-        await alice.manager.handleRekeyAck(
-          _rekeyEvent(bobTablet.socket.acks.single, 'u-bob'),
-        ),
-        SecretHandshakeOutcome.established,
-      );
-      await _expectRoundTrip(bobTablet, alice, 'room-9', '재키잉 뒤');
-    },
-  );
-
-  test(
-    '상대의 남은 다른 기기가 자기 키로 낸 재키잉 수락이 먼저 와도 멈추지 않고 무시하며, 묶인 기기의 수락으로 넘어간다',
-    () async {
-      await _handshake(alice, bob);
-      await alice.manager.proposeRekeyNow('room-1');
-      final proposal = alice.socket.proposals.single;
-      // 밥이 예전 앱에서 같은 초대를 두 기기로 수락해 남은 태블릿 — 이 방의 묶인 기기가 아니다.
-      final bobTablet = await _Device.open('u-bob', server);
-      final staleEphemeral = await publicKeyBase64(await X25519().newKeyPair());
-      final staleAck = SecretRekeyEvent(
-        roomId: 'room-1',
-        keyEpoch: 1,
-        userId: 'u-bob',
-        ephemeralPublicKey: staleEphemeral,
-        ephemeralSignature: await crypto.signEphemeralKey(
-          bobTablet.identity.signingKeyPair,
-          base64Decode(staleEphemeral),
-        ),
-        contextSignature: await crypto.signContext(
-          bobTablet.identity.signingKeyPair,
-          crypto.secretRekeyAckContext(
-            roomId: 'room-1',
-            keyEpoch: 1,
-            responderUserId: 'u-bob',
-            responderDeviceId: bobTablet.deviceId,
-            proposerEphemeralPublicKey:
-                proposal['ephemeralPublicKey'] as String,
-            responderEphemeralPublicKey: staleEphemeral,
-          ),
-        ),
-      );
-      expect(
-        await alice.manager.handleRekeyAck(staleAck),
-        SecretHandshakeOutcome.ignored,
-      );
-      expect((await alice.manager.loadTrust('room-1')).blocked, isFalse);
-      expect((await alice.store.readChainState('room-1'))!.epoch, 0);
-      expect(await alice.store.readPendingRekeySeed('room-1'), isNotNull);
-
-      expect(
-        await bob.manager.handleRekeyPropose(_rekeyEvent(proposal, 'u-alice')),
-        SecretHandshakeOutcome.established,
-      );
-      expect(
-        await alice.manager.handleRekeyAck(
-          _rekeyEvent(bob.socket.acks.single, 'u-bob'),
-        ),
-        SecretHandshakeOutcome.established,
-      );
-      expect((await alice.store.readChainState('room-1'))!.epoch, 1);
-      await _expectRoundTrip(alice, bob, 'room-1', '진짜 수락으로 넘어감');
-      await _expectRoundTrip(bob, alice, 'room-1', '답장');
-    },
-  );
-
-  test(
-    '재키잉 기준을 넘긴 뒤 수락이 오기 전에 더 보내도 새 임시키로 다시 제안하지 않는다 — 다시 보내는 제안은 처음과 같아서, 먼저 받은 제안의 수락으로 넘어간다',
-    () async {
-      await _handshake(alice, bob);
-      final envelopes = <String>[];
-      for (var i = 0; i <= crypto.rekeyMessageThreshold; i++) {
-        envelopes.add((await alice.manager.encryptForRoom('room-1', '글 $i'))!);
-      }
-      // 기준(100번째)에서 한 번 제안했고, 그 뒤 글(101번째)은 같은 epoch로 새로 제안하지 않는다.
-      expect(alice.socket.proposals, hasLength(1));
-      final first = alice.socket.proposals.single;
-      expect(first['keyEpoch'], 1);
-      final pendingSeed = (await alice.store.readPendingRekeySeed('room-1'))!;
-
-      // 상대가 못 받았을 수 있어 다시 보내는 제안 — 같은 임시키·같은 서명이다.
-      await alice.manager.proposeRekeyNow('room-1');
-      expect(alice.socket.proposals, hasLength(2));
-      final resent = alice.socket.proposals.last;
-      expect(resent['keyEpoch'], 1);
-      expect(resent['ephemeralPublicKey'], first['ephemeralPublicKey']);
-      expect(resent['ephemeralSignature'], first['ephemeralSignature']);
-      expect(
-        resent['ephemeralContextSignature'],
-        first['ephemeralContextSignature'],
-      );
-      expect(
-        (await alice.store.readPendingRekeySeed('room-1'))!.$2,
-        pendingSeed.$2,
-      );
-
-      // 밥은 서버가 전한 순서대로 — 글을 모두 풀고 첫 제안에 수락, 다시 온 제안은 지난 epoch라 무시한다.
-      for (var i = 0; i < envelopes.length; i++) {
-        expect(
-          await bob.manager.decryptForRoom('room-1', envelopes[i]),
-          '글 $i',
-        );
-      }
-      expect(
-        await bob.manager.handleRekeyPropose(_rekeyEvent(first, 'u-alice')),
-        SecretHandshakeOutcome.established,
-      );
-      expect(
-        await bob.manager.handleRekeyPropose(_rekeyEvent(resent, 'u-alice')),
-        SecretHandshakeOutcome.ignored,
-      );
-      expect(bob.socket.acks, hasLength(1));
-
-      // 앨리스가 밥의 수락을 받는다 — 대기 중인 키가 그대로라 맥락 서명이 맞고 멈추지 않는다.
-      expect(
-        await alice.manager.handleRekeyAck(
-          _rekeyEvent(bob.socket.acks.single, 'u-bob'),
-        ),
-        SecretHandshakeOutcome.established,
-      );
-      expect((await alice.manager.loadTrust('room-1')).blocked, isFalse);
-      expect((await alice.store.readChainState('room-1'))!.epoch, 1);
-      await _expectRoundTrip(alice, bob, 'room-1', '재키잉 뒤');
-      await _expectRoundTrip(bob, alice, 'room-1', '답장');
-    },
-  );
-
-  test('수락했다는 사람이 초대한 상대가 아니면(서버가 꾸밈) 초대자는 체인을 만들지 않고 멈춘다', () async {
+  test('수락했다는 사람이 초대한 상대가 아니면(서버가 꾸밈) 초대자는 세션 키를 만들지 않고 멈춘다', () async {
     final invite = await _start(alice, 'u-bob');
     bob.rooms['room-1'] = Room.fromJson(_roomJson('room-1', status: 'pending'));
     await bob.manager.acceptInvite(invite);
@@ -996,7 +827,7 @@ void main() {
       ),
       SecretHandshakeOutcome.blocked,
     );
-    expect(await alice.store.readChainState('room-1'), isNull);
+    await _expectNoSession(alice, 'room-1');
     expect(
       (await alice.manager.loadTrust('room-1')).security.blockedReason,
       SecretBlockReason.peerMismatch,
@@ -1013,7 +844,7 @@ void main() {
       bob.manager.acceptInvite(invite),
       throwsA(isA<SecretChatRefusedException>()),
     );
-    expect(await bob.store.readChainState('room-1'), isNull);
+    await _expectNoSession(bob, 'room-1');
     expect(await bob.store.readRoomBinding('room-1'), isNull);
     // 서명을 확인한 상대 기기 고정은 남는다(사실이므로).
     expect(await bob.store.readDevicePin(alice.deviceId), isNotNull);
@@ -1026,7 +857,6 @@ void main() {
     );
     final manager = SecretSessionManager(
       ApiClient(baseUrl: 'https://test.local', httpClient: existing),
-      ChatSocket(),
       alice.identity,
       keyStore: alice.store,
       userId: 'u-alice',
@@ -1035,53 +865,67 @@ void main() {
     final room = await manager.startSecretChat('u-bob', 't1');
     expect(room.id, 'room-1');
     expect(await alice.store.readPendingEphemeralSeed('room-1'), isNull);
+    expect(
+      await alice.store.sessionProtocol('room-1'),
+      crypto.secretProtocolV3,
+    );
     await _expectRoundTrip(alice, bob, 'room-1', '기존 대화 그대로');
   });
 
-  test('업데이트 전에 성립한 대화 — 방 정보의 양쪽 기기로 상대 기기를 찾아(주인 확인) 묶고 재키잉한다', () async {
-    await _handshake(alice, bob);
-    // 업데이트 전 모양으로 — 밥 쪽에 묶음·고정 기록이 없다(그때는 메모리에만 있었다).
-    bob.keyStorage.data.remove('secret/room-1/peer');
-    bob.keyStorage.data.remove('secret/room-1/security');
-    bob.keyStorage.data.remove('secretpin/${alice.deviceId}');
-    final bob2 = await bob.restart();
-    bob2.rooms['room-1'] = Room.fromJson(
-      _roomJson(
-        'room-1',
-        initiatorDevice: alice.deviceId,
-        responder: 'u-bob',
-        responderDevice: bob.deviceId,
-      ),
-    );
-    server.keyLookups.clear();
+  test(
+    '업데이트 전에 성립한 대화 — 방 정보의 양쪽 기기로 상대 기기를 찾아(주인 확인) 묶고 고정하며, 그 대화를 이어 가고 보안 코드를 보여 준다',
+    () async {
+      // 업데이트 전 대화는 예전 규약(v1)이고, 밥 쪽에 묶음·고정 기록이 없다(그때는 메모리에만 있었다).
+      await _handshake(alice, bob, v3: false);
+      bob.keyStorage.data.remove('secret/room-1/peer');
+      bob.keyStorage.data.remove('secret/room-1/security');
+      bob.keyStorage.data.remove('secretpin/${alice.deviceId}');
+      final bob2 = await bob.restart();
+      bob2.rooms['room-1'] = Room.fromJson(
+        _roomJson(
+          'room-1',
+          initiatorDevice: alice.deviceId,
+          responder: 'u-bob',
+          responderDevice: bob.deviceId,
+        ),
+      );
+      server.keyLookups.clear();
 
-    await alice.manager.proposeRekeyNow('room-1');
-    expect(
-      await bob2.manager.handleRekeyPropose(
-        _rekeyEvent(alice.socket.proposals.single, 'u-alice'),
-      ),
-      SecretHandshakeOutcome.established,
-    );
-    expect(server.keyLookups, [alice.deviceId]);
-    expect(
-      await bob2.store.readRoomBinding('room-1'),
-      SecretRoomBinding(
-        peerUserId: 'u-alice',
-        peerDeviceId: alice.deviceId,
-        myDeviceId: bob.deviceId,
-      ),
-    );
-    expect(
-      await alice.manager.handleRekeyAck(
-        _rekeyEvent(bob2.socket.acks.single, 'u-bob'),
-      ),
-      SecretHandshakeOutcome.established,
-    );
-    await _expectRoundTrip(alice, bob2, 'room-1', '예전 대화도 재키잉');
-  });
+      // 보안 코드를 보려 하면 묶는다 — 처음 보는 기기라 서버에 물어 주인이 앨리스인지 확인하고 고정한다.
+      final fromBob = await bob2.manager.safetyInfo('room-1');
+      expect(server.keyLookups, [alice.deviceId]);
+      expect(
+        await bob2.store.readRoomBinding('room-1'),
+        SecretRoomBinding(
+          peerUserId: 'u-alice',
+          peerDeviceId: alice.deviceId,
+          myDeviceId: bob.deviceId,
+        ),
+      );
+      final pin = await bob2.store.readDevicePin(alice.deviceId);
+      expect(pin?.userId, 'u-alice');
+      expect(pin?.signingPublicKey, await alice.signingKey);
+      // 양쪽 보안 코드가 같다.
+      expect(fromBob, isNotNull);
+      expect(fromBob!.peerDeviceId, alice.deviceId);
+      expect(
+        fromBob.groups,
+        (await alice.manager.safetyInfo('room-1'))!.groups,
+      );
+
+      // 예전 대화도 그대로 이어 가고, 묶은 뒤로는 서버에 다시 묻지 않는다.
+      await _expectRoundTrip(alice, bob2, 'room-1', '예전 대화도 이어 간다');
+      await _expectRoundTrip(bob2, alice, 'room-1', '답장');
+      final trust = await bob2.manager.loadTrust('room-1');
+      expect(trust.peerDeviceId, alice.deviceId);
+      expect(trust.blocked, isFalse);
+      expect(trust.legacyProtocol, isTrue);
+      expect(server.keyLookups, [alice.deviceId]);
+    },
+  );
 
   test('업데이트 전 대화를 묶을 때 서버가 다른 사람의 기기라고 답하면 멈춘다', () async {
-    await _handshake(alice, bob);
+    await _handshake(alice, bob, v3: false);
     bob.keyStorage.data.remove('secret/room-1/peer');
     bob.keyStorage.data.remove('secretpin/${alice.deviceId}');
     final bob2 = await bob.restart();
@@ -1101,6 +945,10 @@ void main() {
     expect(trust.blocked, isTrue);
     expect(trust.security.blockedReason, SecretBlockReason.userMismatch);
     expect(await bob2.store.readRoomBinding('room-1'), isNull);
+    await expectLater(
+      bob2.manager.encryptForRoom('room-1', '보내면 안 된다'),
+      throwsA(isA<SecretChatBlockedException>()),
+    );
   });
 
   test('보안 코드를 확인한 상대가 다른 기기로 대화를 맺으면 "기기가 바뀜"을 알리고, 새 기기를 확인하면 꺼진다', () async {
@@ -1158,7 +1006,10 @@ void main() {
         await bob.manager.handleAccepted(echo),
         SecretHandshakeOutcome.ignored,
       );
-      expect(await bob.store.readChainState('room-1'), isNotNull);
+      expect(
+        await bob.store.sessionProtocol('room-1'),
+        crypto.secretProtocolV3,
+      );
 
       // 밥의 다른 기기가 수락한 것으로 서버가 알려 온다(이 기기의 수락은 응답을 못 받아 키만 남은 경우).
       final otherDevice = SecretAcceptedEvent(
@@ -1172,7 +1023,7 @@ void main() {
         await bob.manager.handleAccepted(otherDevice),
         SecretHandshakeOutcome.ignored,
       );
-      expect(await bob.store.readChainState('room-1'), isNull);
+      await _expectNoSession(bob, 'room-1');
       expect(await bob.store.readRoomBinding('room-1'), isNull);
     },
   );
@@ -1202,9 +1053,9 @@ void main() {
     );
 
     await bob.manager.bootstrapBindings(['room-1', 'room-2']);
-    expect(await bob.store.readChainState('room-1'), isNull);
+    await _expectNoSession(bob, 'room-1');
     expect(await bob.store.readRoomBinding('room-1'), isNull);
-    expect(await bob.store.readChainState('room-2'), isNotNull);
+    expect(await bob.store.sessionProtocol('room-2'), crypto.secretProtocolV3);
     expect(
       (await bob.store.readRoomBinding('room-2'))?.peerDeviceId,
       alice.deviceId,
@@ -1212,39 +1063,77 @@ void main() {
     await _expectRoundTrip(alice, bob, 'room-2', '이 기기의 대화는 그대로');
   });
 
-  test('같은 방의 재키잉과 보내기가 겹쳐도 차례로 처리해 양쪽 체인이 어긋나지 않는다', () async {
+  test('같은 방의 보내기·받기가 겹쳐도 차례로 처리해 양쪽 래칫이 어긋나지 않는다', () async {
     await _handshake(alice, bob);
-    await alice.manager.proposeRekeyNow('room-1');
-    final propose = _rekeyEvent(alice.socket.proposals.single, 'u-alice');
-    // 밥이 제안을 처리하는 것과 동시에 보낸 글 — 재키잉 앞이든 뒤든 한 줄로 처리돼 옛 체인 상태로 새 체인을 덮어쓰지 않는다.
-    final results = await Future.wait([
-      bob.manager.handleRekeyPropose(propose),
-      bob.manager.encryptForRoom('room-1', '동시에 보낸 글'),
+    // 받기는 래칫을 한 걸음 돌려 보내는 체인까지 바꾼다 — 한 줄로 처리하지 않으면 옛 상태를 읽은 쪽이 새 상태를
+    // 덮어써 같은 메시지 키를 다시 쓰거나 양쪽 래칫이 갈라진다. 그래서 모두 하나가 끝나기를 기다리지 않고 한꺼번에
+    // 시작한다.
+    final fromAlice = [
+      for (final e in await Future.wait([
+        for (var i = 0; i < 3; i++)
+          alice.manager.encryptForRoom('room-1', '앨리스 $i'),
+      ]))
+        e!,
+    ];
+    final bobSide = await Future.wait<String?>([
+      for (var i = 0; i < 3; i++) ...[
+        bob.manager.decryptForRoom(
+          'room-1',
+          fromAlice[i],
+          senderUserId: 'u-alice',
+        ),
+        bob.manager.encryptForRoom('room-1', '밥 $i'),
+      ],
     ]);
-    expect(results.first, SecretHandshakeOutcome.established);
-    expect((await bob.store.readChainState('room-1'))!.epoch, 1);
-    // 앨리스는 밥이 만든 순서대로 받는다 — 재키잉 전에 암호화된 글이면 ack보다 먼저 온다(체인 하나를 양쪽이 함께
-    // 감으므로, ack를 처리할 때 두 기기의 체인 위치가 같아야 같은 새 체인이 나온다).
-    final envelope = results.last as String;
-    final beforeRekey = jsonDecode(envelope)['epoch'] == 0;
-    if (beforeRekey) {
-      expect(
-        await alice.manager.decryptForRoom('room-1', envelope),
-        '동시에 보낸 글',
-      );
-    }
     expect(
-      await alice.manager.handleRekeyAck(
-        _rekeyEvent(bob.socket.acks.single, 'u-bob'),
-      ),
-      SecretHandshakeOutcome.established,
+      [for (var i = 0; i < 3; i++) bobSide[2 * i]],
+      ['앨리스 0', '앨리스 1', '앨리스 2'],
     );
-    if (!beforeRekey) {
+    final fromBob = [for (var i = 0; i < 3; i++) bobSide[2 * i + 1]!];
+    // 같은 메시지 키를 두 번 쓰지 않았다 — 한 체인 안의 번호가 모두 다르다.
+    for (final sent in [fromAlice, fromBob]) {
+      expect({for (final e in sent) jsonDecode(e)['n']}, hasLength(3));
+    }
+
+    // 앨리스도 밥의 글을 받는 것과 동시에 답한다.
+    final aliceSide = await Future.wait<String?>([
+      for (var i = 0; i < 3; i++) ...[
+        alice.manager.decryptForRoom(
+          'room-1',
+          fromBob[i],
+          senderUserId: 'u-bob',
+        ),
+        alice.manager.encryptForRoom('room-1', '앨리스 답 $i'),
+      ],
+    ]);
+    expect(
+      [for (var i = 0; i < 3; i++) aliceSide[2 * i]],
+      ['밥 0', '밥 1', '밥 2'],
+    );
+    final replies = [for (var i = 0; i < 3; i++) aliceSide[2 * i + 1]!];
+
+    // 밥이 그 답을 한꺼번에 받아도 모두 풀린다.
+    expect(
+      await Future.wait([
+        for (final e in replies)
+          bob.manager.decryptForRoom('room-1', e, senderUserId: 'u-alice'),
+      ]),
+      ['앨리스 답 0', '앨리스 답 1', '앨리스 답 2'],
+    );
+    // 받은 번호를 잃지 않았다 — 이미 받은 글을 서버가 다시 보내도 다시 풀지 않는다.
+    for (final e in [...fromAlice, ...replies]) {
       expect(
-        await alice.manager.decryptForRoom('room-1', envelope),
-        '동시에 보낸 글',
+        await bob.manager.decryptForRoom('room-1', e, senderUserId: 'u-alice'),
+        isNull,
       );
     }
+    for (final e in fromBob) {
+      expect(
+        await alice.manager.decryptForRoom('room-1', e, senderUserId: 'u-bob'),
+        isNull,
+      );
+    }
+    // 그 뒤에도 양쪽이 이어 간다.
     await _expectRoundTrip(bob, alice, 'room-1', '그 뒤 글');
     await _expectRoundTrip(alice, bob, 'room-1', '답장');
   });
@@ -1252,8 +1141,8 @@ void main() {
   test(
     '앱을 켤 때 예전 대화를 묶으려 물은 답을 서버가 붙잡아 둔 사이 같은 기기를 자기 키로 꾸민 초대를 수락시켜도, 늦게 푼 진짜 키가 고정을 덮어쓰지 않고 그 기기와의 대화를 모두 멈춘다',
     () async {
-      // 업데이트 전에 성립한 대화(room-0) — 밥 쪽에 묶음·고정 기록이 없다.
-      await _handshake(alice, bob, roomId: 'room-0');
+      // 업데이트 전에 성립한 대화(room-0, 예전 규약) — 밥 쪽에 묶음·고정 기록이 없다.
+      await _handshake(alice, bob, roomId: 'room-0', v3: false);
       bob.keyStorage.data.remove('secret/room-0/peer');
       bob.keyStorage.data.remove('secret/room-0/security');
       bob.keyStorage.data.remove('secretpin/${alice.deviceId}');
@@ -1283,12 +1172,14 @@ void main() {
       bob2.rooms['room-1'] = Room.fromJson(
         _roomJson('room-1', status: 'pending'),
       );
+      final malloryEphemeral = await X25519().newKeyPair();
       final forged = await _forgedInvite(
         roomId: 'room-1',
         claimedUserId: 'u-alice',
         claimedDeviceId: alice.deviceId,
         responderUserId: 'u-bob',
         signer: mallory,
+        ephemeral: malloryEphemeral,
       );
       expect(
         await bob2.manager.acceptInvite(forged),
@@ -1298,7 +1189,51 @@ void main() {
         (await bob2.store.readDevicePin(alice.deviceId))!.signingPublicKey,
         malloryKey,
       );
+      // 서버는 이 대화의 상대 쪽 키를 모두 쥐었다(꾸민 초대의 임시키 + 밥이 수락에 실은 임시키) — 상대인 척 보낸 글이
+      // 지금은 풀린다.
+      expect(
+        await bob2.store.sessionProtocol('room-1'),
+        crypto.secretProtocolV3,
+      );
+      final bobEphemeral =
+          server.accepted['room-1']!['responderEphemeralPublicKey'] as String;
+      final rootKey = await crypto.deriveRootKeyV3(
+        myEphemeralKeyPair: malloryEphemeral,
+        theirEphemeralPublicKey: base64Decode(bobEphemeral),
+        roomId: 'room-1',
+        transcript: crypto.secretRootTranscriptV3(
+          roomId: 'room-1',
+          initiatorUserId: 'u-alice',
+          initiatorDeviceId: alice.deviceId,
+          initiatorEphemeralPublicKey: forged.initiatorEphemeralPublicKey,
+          responderUserId: 'u-bob',
+          responderDeviceId: bob.deviceId,
+          responderEphemeralPublicKey: bobEphemeral,
+        ),
+      );
+      final serverSide = await SecretRatchetState.forInitiator(
+        rootKey: rootKey!,
+        responderEphemeralPublicKey: bobEphemeral,
+      );
+      // 새 규약은 글을 놓일 자리와 함께 싸서 암호화한다(SecretTextPlace) — 서버도 그렇게 싸면 된다.
+      final first = await serverSide!.encrypt(
+        roomId: 'room-1',
+        plainText: jsonEncode({'t': '앨리스인 척', 'k': 'm'}),
+      );
+      expect(
+        await bob2.manager.decryptForRoom(
+          'room-1',
+          jsonEncode(first.envelope),
+          senderUserId: 'u-alice',
+        ),
+        '앨리스인 척',
+      );
 
+      // 멈추기 전에 저장된 래칫 상태 — 멈추면 이 기기에서 세션 키를 지우므로 미리 읽어 둔다(아래에서 "멈추지 않았다면
+      // 풀렸을 글"인지 보는 데 쓴다).
+      final storedBeforeBlock = (await bob2.store.readRatchetState(
+        'room-1',
+      )).state!;
       // 붙잡아 둔 진짜 키를 늦게 푼다 — 덮어쓰면 room-1의 보안 코드가 진짜 코드처럼 바뀌어 비교로도 못 잡는다.
       hold.complete();
       expect(await bootstrap, ['room-0']);
@@ -1315,20 +1250,28 @@ void main() {
         bob2.manager.encryptForRoom('room-1', '보내면 안 된다'),
         throwsA(isA<SecretChatBlockedException>()),
       );
-      // 서버가 room-1에 상대인 척 보낸 글도 풀어 보여 주지 않는다.
-      final ratchet = await crypto.ratchetStep(
-        (await bob2.store.readChainState('room-1'))!.chainKey,
+      // 서버가 room-1에 상대인 척 보낸 다음 글도 이제는 풀어 보여 주지 않는다 — 멈추기 전의 래칫으로는 풀리는(멈추지
+      // 않았다면 보였을) 글이다. 멈춘 방의 세션 키는 이 기기에서 지웠다.
+      final next = await first.state.encrypt(
+        roomId: 'room-1',
+        plainText: jsonEncode({'t': '앨리스인 척 2', 'k': 'm'}),
       );
-      final fromServer = jsonEncode(
-        await crypto.encryptEnvelope(
-          msgKey: ratchet.msgKey,
-          plainText: '앨리스인 척',
+      final stored = storedBeforeBlock;
+      expect(
+        await stored.decrypt(
           roomId: 'room-1',
-          epoch: 0,
-          n: 0,
+          envelope: SecretEnvelopeV3.tryParse(next.envelope)!,
         ),
+        isNotNull,
       );
-      expect(await bob2.manager.decryptForRoom('room-1', fromServer), isNull);
+      expect(
+        await bob2.manager.decryptForRoom(
+          'room-1',
+          jsonEncode(next.envelope),
+          senderUserId: 'u-alice',
+        ),
+        isNull,
+      );
       // room-1의 보안 코드는 진짜(밥 ↔ 앨리스 기기의 진짜 키) 코드가 아니다 — 비교하면 다르게 나온다.
       final genuineCode = await crypto.computeSafetyNumber(
         crypto.safetyNumberEntry(
@@ -1349,15 +1292,16 @@ void main() {
 
       // 다툼 중인 기기와는 사용자가 키를 다시 받기 전까지 새 대화도 맺지 않는다(서버에 다시 묻지도 않는다).
       server.keyLookups.clear();
-      final next = await _start(alice, 'u-bob', roomId: 'room-2');
+      final nextInvite = await _start(alice, 'u-bob', roomId: 'room-2');
       bob2.rooms['room-2'] = Room.fromJson(
         _roomJson('room-2', status: 'pending'),
       );
       expect(
-        await bob2.manager.acceptInvite(next),
+        await bob2.manager.acceptInvite(nextInvite),
         SecretHandshakeOutcome.blocked,
       );
       expect(server.keyLookups, isEmpty);
+      await _expectNoSession(bob2, 'room-2');
       expect((await bob2.manager.loadTrust('room-2')).canResetPeerKey, isTrue);
     },
   );
@@ -1400,7 +1344,7 @@ void main() {
       final pin = (await bob.store.readDevicePin(alice.deviceId))!;
       expect(pin.signingPublicKey, await alice.signingKey);
       expect(pin.disputed, isTrue);
-      expect(await bob.store.readChainState('room-1'), isNull);
+      await _expectNoSession(bob, 'room-1');
       expect(server.accepted.containsKey('room-1'), isFalse);
       expect(
         (await bob.manager.loadTrust('room-1')).security.blockedReason,
@@ -1437,7 +1381,7 @@ void main() {
         (await bobT.manager.loadTrust('room-2')).security.blockedReason,
         SecretBlockReason.keyReset,
       );
-      expect(await bobT.store.readChainState('room-2'), isNull);
+      await _expectNoSession(bobT, 'room-2');
       expect(server.accepted.containsKey('room-2'), isFalse);
 
       // 2) 그 사이 다른 방에서 다툼이 드러나 고정에 다툼이 적혔다.
@@ -1462,7 +1406,7 @@ void main() {
         (await bobT.manager.loadTrust('room-3')).security.blockedReason,
         SecretBlockReason.keyMismatch,
       );
-      expect(await bobT.store.readChainState('room-3'), isNull);
+      await _expectNoSession(bobT, 'room-3');
       expect(server.accepted.containsKey('room-3'), isFalse);
     },
   );
@@ -1470,8 +1414,8 @@ void main() {
   test('예전 대화를 묶다가 상대 기기 고정을 적지 못하면 묶음도 거두고, 다음에 다시 묶는다', () async {
     final storage = _TrippingStorage();
     final bobT = await _Device.open('u-bob', server, keyStorage: storage);
-    await _handshake(alice, bobT);
-    // 업데이트 전 모양으로 — 묶음·고정 기록이 없다.
+    // 업데이트 전 대화(예전 규약) 모양으로 — 묶음·고정 기록이 없다.
+    await _handshake(alice, bobT, v3: false);
     storage.data.remove('secret/room-1/peer');
     storage.data.remove('secret/room-1/security');
     storage.data.remove('secretpin/${alice.deviceId}');
@@ -1514,19 +1458,22 @@ void main() {
         await bob.manager.acceptInvite(invite),
         SecretHandshakeOutcome.established,
       );
-      // 서버가 이 방의 상대가 아닌 사람 이름으로 재키잉을 끼워 넣다 들켜 멈췄다.
+      // 서버가 이 방의 상대가 아닌 사람 이름으로 같은 방에 초대를 다시 끼워 넣다 들켜 멈췄다 — 멈춘 방의 세션 키는 이
+      // 기기에서 지운다(되살릴 수 없는 대화라 쓸 일이 없다).
       expect(
-        await bob.manager.handleRekeyPropose(
-          SecretRekeyEvent(
+        await bob.manager.acceptInvite(
+          await _forgedInvite(
             roomId: 'room-1',
-            keyEpoch: 1,
-            userId: 'u-carol',
-            ephemeralPublicKey: base64Encode(List.filled(32, 7)),
-            ephemeralSignature: 'c2ln',
+            claimedUserId: 'u-carol',
+            claimedDeviceId: 'd-carol',
+            responderUserId: 'u-bob',
+            signer: await Ed25519().newKeyPair(),
           ),
         ),
         SecretHandshakeOutcome.blocked,
       );
+      expect(await bob.manager.isBlocked('room-1'), isTrue);
+      expect(await bob.store.hasSession('room-1'), isFalse);
 
       // 1) "밥의 다른 기기가 수락했다"는 꾸민 secret:accepted.
       final echo = _accepted(bob, 'room-1');

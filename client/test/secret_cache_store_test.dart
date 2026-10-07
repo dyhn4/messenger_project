@@ -176,37 +176,40 @@ void main() {
     expect(storage.readAllCalls, 1);
   });
 
-  test('예전 형식(secretmsg/<id>)은 다시 읽을 때 새 형식으로 옮기고, 방을 모르는 동안은 지우지 않는다', () async {
-    storage.data['secretmsg/m1'] = '옛 평문';
-    storage.data['secretmsg/m2'] = '안 열어 본 평문';
-    storage.data['secretmsg/m3'] = '지워진 메시지 평문';
+  test(
+    '예전 형식(secretmsg/<id>)은 다시 읽을 때 새 형식으로 옮기고, 방을 모르는 동안은 지우지 않는다',
+    () async {
+      storage.data['secretmsg/m1'] = '옛 평문';
+      storage.data['secretmsg/m2'] = '안 열어 본 평문';
+      storage.data['secretmsg/m3'] = '지워진 메시지 평문';
 
-    // 어느 방 것인지 모르니 만료·재조정 대상이 아니다.
-    expect(await store.purgeExpiredTexts(now: _at(1 << 50)), isEmpty);
-    await store.reconcileHistoryPage(
-      roomId: 'r1',
-      page: const [],
-      before: null,
-      limit: 50,
-      sinceGeneration: store.textCacheGeneration,
-    );
-    expect(storage.data['secretmsg/m2'], '안 열어 본 평문');
+      // 어느 방 것인지 모르니 만료·재조정 대상이 아니다.
+      expect(await store.purgeExpiredTexts(now: _at(1 << 50)), isEmpty);
+      await store.reconcileHistoryPage(
+        roomId: 'r1',
+        page: const [],
+        before: null,
+        limit: 50,
+        sinceGeneration: store.textCacheGeneration,
+      );
+      expect(storage.data['secretmsg/m2'], '안 열어 본 평문');
 
-    expect(await store.readDecryptedText(_ref('m1', 1000)), '옛 평문');
-    expect(storage.data.containsKey('secretmsg/m1'), isFalse);
-    expect(storage.entry('r1', 'm1'), {'t': '옛 평문', 'c': 1000});
+      expect(await store.readDecryptedText(_ref('m1', 1000)), '옛 평문');
+      expect(storage.data.containsKey('secretmsg/m1'), isFalse);
+      expect(storage.entry('r1', 'm1'), {'t': '옛 평문', 'c': 1000});
 
-    // 이 방 히스토리가 지워진 것으로 표시해 보내면(소프트 삭제) 예전 형식 값도 지운다.
-    await store.reconcileHistoryPage(
-      roomId: 'r1',
-      page: [_msg('m3', 3000, deleted: true)],
-      before: null,
-      limit: 50,
-      sinceGeneration: store.textCacheGeneration,
-    );
-    expect(storage.data.containsKey('secretmsg/m3'), isFalse);
-    expect(storage.data['secretmsg/m2'], '안 열어 본 평문');
-  });
+      // 이 방 히스토리가 지워진 것으로 표시해 보내면(소프트 삭제) 예전 형식 값도 지운다.
+      await store.reconcileHistoryPage(
+        roomId: 'r1',
+        page: [_msg('m3', 3000, deleted: true)],
+        before: null,
+        limit: 50,
+        sinceGeneration: store.textCacheGeneration,
+      );
+      expect(storage.data.containsKey('secretmsg/m3'), isFalse);
+      expect(storage.data['secretmsg/m2'], '안 열어 본 평문');
+    },
+  );
 
   test('서버가 정한 자동 삭제 시각이 지나면(유예 뒤) 알림 없이 지워지고, 댓글도 원본 시각을 따른다', () async {
     // 실제 시계로 도는 정리 타이머가 끼어들지 않게 내일 시각으로 두고, 정리는 그 뒤의 서버 시각을 넘겨 부른다.
@@ -241,22 +244,25 @@ void main() {
     expect(await store.readDecryptedText(_ref('m2', 2000)), '타이머 없는 메시지');
   });
 
-  test('secret:message-read로 알게 된 시각은 이미 저장된 메시지와 그 댓글에 적히고, 다시 켜도 그 시각에 지워진다', () async {
-    await store.saveDecryptedText(_ref('m1', 1000), '내 메시지');
-    await store.saveDecryptedText(_ref('c1', 1500, parentId: 'm1'), '댓글');
-    final expiresAt = DateTime.now().add(const Duration(days: 1));
-    await store.noteMessageRead('m1', expiresAt);
-    expect(storage.entry('r1', 'm1')!['e'], expiresAt.millisecondsSinceEpoch);
-    expect(storage.entry('r1', 'm1')!['f'], isTrue);
-    expect(storage.entry('r1', 'c1')!['e'], expiresAt.millisecondsSinceEpoch);
+  test(
+    'secret:message-read로 알게 된 시각은 이미 저장된 메시지와 그 댓글에 적히고, 다시 켜도 그 시각에 지워진다',
+    () async {
+      await store.saveDecryptedText(_ref('m1', 1000), '내 메시지');
+      await store.saveDecryptedText(_ref('c1', 1500, parentId: 'm1'), '댓글');
+      final expiresAt = DateTime.now().add(const Duration(days: 1));
+      await store.noteMessageRead('m1', expiresAt);
+      expect(storage.entry('r1', 'm1')!['e'], expiresAt.millisecondsSinceEpoch);
+      expect(storage.entry('r1', 'm1')!['f'], isTrue);
+      expect(storage.entry('r1', 'c1')!['e'], expiresAt.millisecondsSinceEpoch);
 
-    final restarted = SecretKeyStore(storage: storage);
-    addTearDown(restarted.dispose);
-    final removed = await restarted.purgeExpiredTexts(
-      serverNow: expiresAt.add(_grace * 2),
-    );
-    expect(removed.map((r) => r.id).toSet(), {'m1', 'c1'});
-  });
+      final restarted = SecretKeyStore(storage: storage);
+      addTearDown(restarted.dispose);
+      final removed = await restarted.purgeExpiredTexts(
+        serverNow: expiresAt.add(_grace * 2),
+      );
+      expect(removed.map((r) => r.id).toSet(), {'m1', 'c1'});
+    },
+  );
 
   test('히스토리가 알려 준(readAt 있는) 시각이 저장된 값과 다르면 읽을 때 맞추고, 댓글에도 맞춘다', () async {
     await store.saveDecryptedText(_ref('m1', 1000), '메시지');
@@ -305,29 +311,32 @@ void main() {
     expect(await store.purgeExpiredTexts(now: _at(1 << 50)), isEmpty);
   });
 
-  test('히스토리 재조정 — 범위 안에서 응답에 없는 항목과 지워진 표시가 온 항목만 지우고, 요청 뒤에 저장된 항목은 남긴다', () async {
-    await store.saveDecryptedText(_ref('m1', 100), '서버에서 만료됨');
-    await store.saveDecryptedText(_ref('m2', 200), '소프트 삭제됨');
-    await store.saveDecryptedText(_ref('m3', 300), '그대로');
-    await store.saveDecryptedText(_ref('x1', 150, roomId: 'r2'), '다른 방');
-    final generation = store.textCacheGeneration;
-    // 요청을 보낸 뒤 실시간으로 도착한 메시지 — 응답(요청 시점의 서버 상태)에는 없을 수 있다.
-    await store.saveDecryptedText(_ref('m4', 400), '요청 뒤 도착');
+  test(
+    '히스토리 재조정 — 범위 안에서 응답에 없는 항목과 지워진 표시가 온 항목만 지우고, 요청 뒤에 저장된 항목은 남긴다',
+    () async {
+      await store.saveDecryptedText(_ref('m1', 100), '서버에서 만료됨');
+      await store.saveDecryptedText(_ref('m2', 200), '소프트 삭제됨');
+      await store.saveDecryptedText(_ref('m3', 300), '그대로');
+      await store.saveDecryptedText(_ref('x1', 150, roomId: 'r2'), '다른 방');
+      final generation = store.textCacheGeneration;
+      // 요청을 보낸 뒤 실시간으로 도착한 메시지 — 응답(요청 시점의 서버 상태)에는 없을 수 있다.
+      await store.saveDecryptedText(_ref('m4', 400), '요청 뒤 도착');
 
-    final removed = await store.reconcileHistoryPage(
-      roomId: 'r1',
-      page: [_msg('m2', 200, deleted: true), _msg('m3', 300)],
-      before: null,
-      limit: 50,
-      sinceGeneration: generation,
-    );
-    expect(removed.map((r) => r.id).toSet(), {'m1', 'm2'});
-    expect(storage.entry('r1', 'm1'), isNull);
-    expect(storage.entry('r1', 'm2'), isNull);
-    expect(storage.entry('r1', 'm3'), isNotNull);
-    expect(storage.entry('r1', 'm4'), isNotNull);
-    expect(storage.entry('r2', 'x1'), isNotNull);
-  });
+      final removed = await store.reconcileHistoryPage(
+        roomId: 'r1',
+        page: [_msg('m2', 200, deleted: true), _msg('m3', 300)],
+        before: null,
+        limit: 50,
+        sinceGeneration: generation,
+      );
+      expect(removed.map((r) => r.id).toSet(), {'m1', 'm2'});
+      expect(storage.entry('r1', 'm1'), isNull);
+      expect(storage.entry('r1', 'm2'), isNull);
+      expect(storage.entry('r1', 'm3'), isNotNull);
+      expect(storage.entry('r1', 'm4'), isNotNull);
+      expect(storage.entry('r2', 'x1'), isNotNull);
+    },
+  );
 
   test('메시지 완전 삭제는 댓글 평문까지, 방이 없어지면(clearRoom) 그 방 평문과 키 상태를 지운다', () async {
     await store.saveChainState(
@@ -358,92 +367,95 @@ void main() {
     expect(storage.entry('r2', 'y1'), isNotNull);
   });
 
-  test('앱을 켤 때 이전 실행에서 저장한 항목 중 시각이 지난 것만 지운다 — 서버 시각을 받기 전에는 서버가 정한 시각을 하루 늦춰 잰다', () async {
-    final past = DateTime.now().subtract(const Duration(hours: 1));
-    final future = DateTime.now().add(const Duration(days: 1));
-    storage.data['secretcache/r1/old'] = jsonEncode({
-      't': '한 시간 전 만료',
-      'c': 100,
-      'e': past.millisecondsSinceEpoch,
-      'f': true,
-    });
-    // 꺼진 채 오프라인으로 켜서 서버 시각을 못 받아도, 이 기기 시계로 하루(secretDeviceClockTolerance)가 넘게 지난 것은 지운다.
-    storage.data['secretcache/r1/ancient'] = jsonEncode({
-      't': '이틀 전 만료',
-      'c': 50,
-      'e': DateTime.now()
-          .subtract(secretDeviceClockTolerance + const Duration(days: 1))
-          .millisecondsSinceEpoch,
-      'f': true,
-    });
-    storage.data['secretcache/r1/later'] = jsonEncode({
-      't': '내일 만료',
-      'c': 200,
-      'e': future.millisecondsSinceEpoch,
-      'f': true,
-    });
-    // 이 기기가 읽음을 보내며 어림한 시각(서버 확정 전) — 이 기기 시계로 잰다.
-    storage.data['secretcache/r1/guessed'] = jsonEncode({
-      't': '어림 만료',
-      'c': 300,
-      'e': past.millisecondsSinceEpoch,
-    });
-    storage.data['secretcache/r1/broken'] = '형식이 깨진 값';
-    storage.data['secret/r1/epoch'] = '0';
+  test(
+    '앱을 켤 때 이전 실행에서 저장한 항목 중 시각이 지난 것만 지운다 — 서버 시각을 받기 전에는 서버가 정한 시각을 하루 늦춰 잰다',
+    () async {
+      final past = DateTime.now().subtract(const Duration(hours: 1));
+      final future = DateTime.now().add(const Duration(days: 1));
+      storage.data['secretcache/r1/old'] = jsonEncode({
+        't': '한 시간 전 만료',
+        'c': 100,
+        'e': past.millisecondsSinceEpoch,
+        'f': true,
+      });
+      // 꺼진 채 오프라인으로 켜서 서버 시각을 못 받아도, 이 기기 시계로 하루(secretDeviceClockTolerance)가 넘게 지난 것은 지운다.
+      storage.data['secretcache/r1/ancient'] = jsonEncode({
+        't': '이틀 전 만료',
+        'c': 50,
+        'e': DateTime.now()
+            .subtract(secretDeviceClockTolerance + const Duration(days: 1))
+            .millisecondsSinceEpoch,
+        'f': true,
+      });
+      storage.data['secretcache/r1/later'] = jsonEncode({
+        't': '내일 만료',
+        'c': 200,
+        'e': future.millisecondsSinceEpoch,
+        'f': true,
+      });
+      // 이 기기가 읽음을 보내며 어림한 시각(서버 확정 전) — 이 기기 시계로 잰다.
+      storage.data['secretcache/r1/guessed'] = jsonEncode({
+        't': '어림 만료',
+        'c': 300,
+        'e': past.millisecondsSinceEpoch,
+      });
+      storage.data['secretcache/r1/broken'] = '형식이 깨진 값';
+      storage.data['secret/r1/epoch'] = '0';
 
-    // 서버 시각을 아직 모른다 — 이 기기 시계만으로는 서버가 정한 시각이 한 시간 전에 지났는지 믿지 않는다.
-    expect(
-      (await store.purgeExpiredTexts()).map((r) => r.id).toSet(),
-      {'guessed', 'ancient'},
-    );
-    expect(storage.data.containsKey('secretcache/r1/old'), isTrue);
+      // 서버 시각을 아직 모른다 — 이 기기 시계만으로는 서버가 정한 시각이 한 시간 전에 지났는지 믿지 않는다.
+      expect((await store.purgeExpiredTexts()).map((r) => r.id).toSet(), {
+        'guessed',
+        'ancient',
+      });
+      expect(storage.data.containsKey('secretcache/r1/old'), isTrue);
 
-    store.noteServerTime(DateTime.now());
-    final removed = await store.purgeExpiredTexts();
-    expect(removed.map((r) => r.id), ['old']);
-    expect(storage.data.containsKey('secretcache/r1/old'), isFalse);
-    expect(storage.data.containsKey('secretcache/r1/broken'), isFalse);
-    expect(storage.data['secret/r1/epoch'], '0');
-    expect(
-      await store.readDecryptedText(_ref('later', 200)),
-      '내일 만료',
-    );
-  });
+      store.noteServerTime(DateTime.now());
+      final removed = await store.purgeExpiredTexts();
+      expect(removed.map((r) => r.id), ['old']);
+      expect(storage.data.containsKey('secretcache/r1/old'), isFalse);
+      expect(storage.data.containsKey('secretcache/r1/broken'), isFalse);
+      expect(storage.data['secret/r1/epoch'], '0');
+      expect(await store.readDecryptedText(_ref('later', 200)), '내일 만료');
+    },
+  );
 
-  test('이 기기 시계가 서버보다 빨라도 서버가 정한 시각은 서버의 지금이 지나야 지운다(어림한 시각은 이 기기 시계로)', () async {
-    // 서버 시각 기준 1시간 타이머 — 상대가 방금 읽었다.
-    final serverNow = DateTime.now().add(const Duration(days: 1));
-    final expiresAt = serverNow.add(const Duration(hours: 1));
-    await store.saveDecryptedText(
-      _ref('m1', 1000, expiryKnown: true, expiresAt: expiresAt),
-      '1시간 뒤 사라질 메시지',
-    );
-    await store.saveDecryptedText(_ref('m2', 2000), '이 기기가 읽은 메시지');
-    await store.noteLocalRead(
-      'm2',
-      const Duration(hours: 1),
-      now: serverNow.add(const Duration(hours: 2)),
-    );
-    // 이 기기 시계가 2시간 빠르다 — 이 기기 시계로는 m1의 시각이 이미 지났지만 서버로는 아직 1시간 남았다.
-    final deviceNow = serverNow.add(const Duration(hours: 2));
-    expect(
-      await store.purgeExpiredTexts(now: deviceNow, serverNow: serverNow),
-      isEmpty,
-    );
-    // 어림한 시각은 이 기기 시계로 쟀으니 이 기기 시계로 1시간이 지나면 지운다(서버 시각과 상관없이).
-    final removed = await store.purgeExpiredTexts(
-      now: deviceNow.add(const Duration(hours: 1)).add(_grace),
-      serverNow: serverNow,
-    );
-    expect(removed.map((r) => r.id), ['m2']);
-    // 서버로 1시간(+유예)이 지나야 m1을 지운다.
-    expect(
-      (await store.purgeExpiredTexts(
-        serverNow: expiresAt.add(_grace + const Duration(seconds: 1)),
-      )).map((r) => r.id),
-      ['m1'],
-    );
-  });
+  test(
+    '이 기기 시계가 서버보다 빨라도 서버가 정한 시각은 서버의 지금이 지나야 지운다(어림한 시각은 이 기기 시계로)',
+    () async {
+      // 서버 시각 기준 1시간 타이머 — 상대가 방금 읽었다.
+      final serverNow = DateTime.now().add(const Duration(days: 1));
+      final expiresAt = serverNow.add(const Duration(hours: 1));
+      await store.saveDecryptedText(
+        _ref('m1', 1000, expiryKnown: true, expiresAt: expiresAt),
+        '1시간 뒤 사라질 메시지',
+      );
+      await store.saveDecryptedText(_ref('m2', 2000), '이 기기가 읽은 메시지');
+      await store.noteLocalRead(
+        'm2',
+        const Duration(hours: 1),
+        now: serverNow.add(const Duration(hours: 2)),
+      );
+      // 이 기기 시계가 2시간 빠르다 — 이 기기 시계로는 m1의 시각이 이미 지났지만 서버로는 아직 1시간 남았다.
+      final deviceNow = serverNow.add(const Duration(hours: 2));
+      expect(
+        await store.purgeExpiredTexts(now: deviceNow, serverNow: serverNow),
+        isEmpty,
+      );
+      // 어림한 시각은 이 기기 시계로 쟀으니 이 기기 시계로 1시간이 지나면 지운다(서버 시각과 상관없이).
+      final removed = await store.purgeExpiredTexts(
+        now: deviceNow.add(const Duration(hours: 1)).add(_grace),
+        serverNow: serverNow,
+      );
+      expect(removed.map((r) => r.id), ['m2']);
+      // 서버로 1시간(+유예)이 지나야 m1을 지운다.
+      expect(
+        (await store.purgeExpiredTexts(
+          serverNow: expiresAt.add(_grace + const Duration(seconds: 1)),
+        )).map((r) => r.id),
+        ['m1'],
+      );
+    },
+  );
 
   test('서버 시각은 받은 값 중 가장 늦은 것에 흐른 시간을 더해 어림하고, 더 이른 값으로 되돌리지 않는다', () async {
     final serverTime = DateTime.now().add(const Duration(days: 2));
@@ -473,45 +485,48 @@ void main() {
     expect(storage.entry('r1', 'later'), isNotNull);
   });
 
-  test('히스토리 정보만 반영(applyHistoryMetadata) — 복호화 없이 서버가 정한 시각을 적고, 예전 형식을 방·시각과 함께 옮긴다', () async {
-    final expiresA = DateTime.now().add(const Duration(days: 1));
-    final expiresB = DateTime.now().add(const Duration(days: 2));
-    storage.data['secretmsg/m1'] = '옛 메시지';
-    storage.data['secretmsg/c1'] = '옛 댓글';
-    storage.data['secretmsg/m3'] = '지워진 옛 메시지';
-    await store.saveDecryptedText(_ref('m2', 2000), '내 메시지');
-    await store.saveDecryptedText(_ref('c2', 2500, parentId: 'm2'), '내 댓글');
+  test(
+    '히스토리 정보만 반영(applyHistoryMetadata) — 복호화 없이 서버가 정한 시각을 적고, 예전 형식을 방·시각과 함께 옮긴다',
+    () async {
+      final expiresA = DateTime.now().add(const Duration(days: 1));
+      final expiresB = DateTime.now().add(const Duration(days: 2));
+      storage.data['secretmsg/m1'] = '옛 메시지';
+      storage.data['secretmsg/c1'] = '옛 댓글';
+      storage.data['secretmsg/m3'] = '지워진 옛 메시지';
+      await store.saveDecryptedText(_ref('m2', 2000), '내 메시지');
+      await store.saveDecryptedText(_ref('c2', 2500, parentId: 'm2'), '내 댓글');
 
-    await store.applyHistoryMetadata('r1', [
-      _msg('m1', 1000, comments: [_comment('c1', 'm1', 1500)])
-        ..readAt = expiresA.subtract(const Duration(hours: 1))
-        ..expiresAt = expiresA,
-      _msg('m2', 2000, comments: [_comment('c2', 'm2', 2500)])
-        ..readAt = expiresB.subtract(const Duration(hours: 1))
-        ..expiresAt = expiresB,
-      _msg('m3', 3000, deleted: true),
-    ]);
-    expect(storage.entry('r1', 'm1'), {
-      't': '옛 메시지',
-      'c': 1000,
-      'e': expiresA.millisecondsSinceEpoch,
-      'f': true,
-    });
-    expect(storage.entry('r1', 'c1'), {
-      't': '옛 댓글',
-      'c': 1500,
-      'p': 'm1',
-      'e': expiresA.millisecondsSinceEpoch,
-      'f': true,
-    });
-    expect(storage.data.containsKey('secretmsg/m1'), isFalse);
-    expect(storage.data.containsKey('secretmsg/c1'), isFalse);
-    expect(storage.entry('r1', 'm2')!['e'], expiresB.millisecondsSinceEpoch);
-    expect(storage.entry('r1', 'c2')!['e'], expiresB.millisecondsSinceEpoch);
-    expect(storage.entry('r1', 'c2')!['f'], isTrue);
-    // 지워진 것으로 온 메시지는 옮기지 않는다(재조정이 지운다).
-    expect(storage.data['secretmsg/m3'], '지워진 옛 메시지');
-  });
+      await store.applyHistoryMetadata('r1', [
+        _msg('m1', 1000, comments: [_comment('c1', 'm1', 1500)])
+          ..readAt = expiresA.subtract(const Duration(hours: 1))
+          ..expiresAt = expiresA,
+        _msg('m2', 2000, comments: [_comment('c2', 'm2', 2500)])
+          ..readAt = expiresB.subtract(const Duration(hours: 1))
+          ..expiresAt = expiresB,
+        _msg('m3', 3000, deleted: true),
+      ]);
+      expect(storage.entry('r1', 'm1'), {
+        't': '옛 메시지',
+        'c': 1000,
+        'e': expiresA.millisecondsSinceEpoch,
+        'f': true,
+      });
+      expect(storage.entry('r1', 'c1'), {
+        't': '옛 댓글',
+        'c': 1500,
+        'p': 'm1',
+        'e': expiresA.millisecondsSinceEpoch,
+        'f': true,
+      });
+      expect(storage.data.containsKey('secretmsg/m1'), isFalse);
+      expect(storage.data.containsKey('secretmsg/c1'), isFalse);
+      expect(storage.entry('r1', 'm2')!['e'], expiresB.millisecondsSinceEpoch);
+      expect(storage.entry('r1', 'c2')!['e'], expiresB.millisecondsSinceEpoch);
+      expect(storage.entry('r1', 'c2')!['f'], isTrue);
+      // 지워진 것으로 온 메시지는 옮기지 않는다(재조정이 지운다).
+      expect(storage.data['secretmsg/m3'], '지워진 옛 메시지');
+    },
+  );
 
   test('삭제 예정 시각만 바꿔도 저장 순번은 그대로라, 그 뒤 재조정이 서버에서 없어진 댓글을 놓치지 않는다', () async {
     await store.saveDecryptedText(_ref('m1', 1000), '메시지');
@@ -550,42 +565,45 @@ void main() {
     expect(restarted.roomOwner('rC'), 'me');
   });
 
-  test('다시 맞춰 볼 방 — 언제 지워질지 모르는 평문이나, 이 기기 시계로는 시각이 지났는데 아직 남은 평문이 있는 방', () async {
-    final now = DateTime.now();
-    await store.saveDecryptedText(
-      _ref(
-        'a',
-        1,
-        roomId: 'fixedFuture',
-        expiryKnown: true,
-        expiresAt: now.add(const Duration(days: 1)),
-      ),
-      '서버가 정한 내일',
-    );
-    await store.saveDecryptedText(_ref('b', 1, roomId: 'unknown'), '모름');
-    await store.saveDecryptedText(_ref('c', 1, roomId: 'guessed'), '어림');
-    await store.noteLocalRead('c', const Duration(days: 1), now: now);
-    await store.saveDecryptedText(
-      _ref(
-        'd',
-        1,
-        roomId: 'fixedPast',
-        expiryKnown: true,
-        expiresAt: now.subtract(const Duration(hours: 1)),
-      ),
-      '서버가 정한 한 시간 전',
-    );
-    await store.saveDecryptedText(
-      _ref('e', 1, roomId: 'neverExpires', expiryKnown: true),
-      '타이머 없이 읽힘',
-    );
-    expect(store.roomsNeedingReconcile(now: now), {
-      'unknown',
-      'guessed',
-      'fixedPast',
-      'neverExpires',
-    });
-  });
+  test(
+    '다시 맞춰 볼 방 — 언제 지워질지 모르는 평문이나, 이 기기 시계로는 시각이 지났는데 아직 남은 평문이 있는 방',
+    () async {
+      final now = DateTime.now();
+      await store.saveDecryptedText(
+        _ref(
+          'a',
+          1,
+          roomId: 'fixedFuture',
+          expiryKnown: true,
+          expiresAt: now.add(const Duration(days: 1)),
+        ),
+        '서버가 정한 내일',
+      );
+      await store.saveDecryptedText(_ref('b', 1, roomId: 'unknown'), '모름');
+      await store.saveDecryptedText(_ref('c', 1, roomId: 'guessed'), '어림');
+      await store.noteLocalRead('c', const Duration(days: 1), now: now);
+      await store.saveDecryptedText(
+        _ref(
+          'd',
+          1,
+          roomId: 'fixedPast',
+          expiryKnown: true,
+          expiresAt: now.subtract(const Duration(hours: 1)),
+        ),
+        '서버가 정한 한 시간 전',
+      );
+      await store.saveDecryptedText(
+        _ref('e', 1, roomId: 'neverExpires', expiryKnown: true),
+        '타이머 없이 읽힘',
+      );
+      expect(store.roomsNeedingReconcile(now: now), {
+        'unknown',
+        'guessed',
+        'fixedPast',
+        'neverExpires',
+      });
+    },
+  );
 
   test('예전 형식 정리 — 다 훑었다는 표시는 다시 켜도 남고, 남은 예전 형식을 지우면 표시도 함께 치운다', () async {
     storage.data['secretmsg/x1'] = '하나';
@@ -603,7 +621,8 @@ void main() {
     expect(restarted.hasLegacyTexts, isFalse);
     expect(
       storage.data.keys.where(
-        (k) => k.startsWith('secretmsg/') || k.startsWith('secretcache-legacy/'),
+        (k) =>
+            k.startsWith('secretmsg/') || k.startsWith('secretcache-legacy/'),
       ),
       isEmpty,
     );
@@ -630,7 +649,7 @@ void main() {
     await Future.wait([
       racyStore.saveChainState(
         'r1',
-        const SecretChainState(epoch: 0, n: 2, chainKey: [9, 9]),
+        SecretChainState(epoch: 0, n: 2, chainKey: List.filled(32, 9)),
       ),
       racyStore.purgeExpiredTexts(),
       racyStore.saveDecryptedText(_ref('m2', 200), '새 평문'),
@@ -638,7 +657,7 @@ void main() {
     ]);
     final state = await racyStore.readChainState('r1');
     expect(state?.n, 2);
-    expect(state?.chainKey, [9, 9]);
+    expect(state?.chainKey, List.filled(32, 9));
     expect(await racyStore.readPendingEphemeralSeed('r1'), [7]);
     expect(racy.entry('r1', 'm1'), isNull);
     expect(racy.entry('r1', 'm2'), isNotNull);

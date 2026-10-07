@@ -167,16 +167,50 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   늘 함께 만들고 함께 버림(키가 사라졌으면 새 기기 id — `client/lib/services/device_identity.dart`) — 같은 기기 id의 키가 바뀌는 정상적인 경우가 없게
 - 요청 → 수락/거절 다이얼로그(오프라인이었어도 다시 로그인 시 놓친 초대 복구), 상대 임시 공개키의 서명을 **이 기기에 고정해 둔 상대 기기 키**로 검증
 - 서버는 암호문·공개키·서명만 보관 — 평문/공유비밀/체인키는 절대 서버에 오지 않음
-- 재키잉(rekey) 제안/수신 — 방마다 묶인 상대 기기(`secret/<방>/peer`)를 이 기기에 저장해 두어 앱을 다시 켠 뒤에도 이어짐(예전에는 메모리에만
-  있어 재시작 뒤 온 재키잉을 무시함)
+- **메시지 암호화 규약**(앱 — `client/lib/services/secret_ratchet.dart`·`secret_session_manager.dart`) — 두 사람 모두 새 앱이면 **새 규약(v3 —
+  시그널의 더블 래칫)**으로 대화합니다. 보내는 쪽마다 키 사슬이 따로 있고, 메시지마다 보낸 쪽의 래칫 공개키가 실려 상대가 새 키를 처음 보면 새
+  X25519 공유비밀로 키를 바꿉니다(한 번 오가면 예전 키가 새어도 그 뒤 메시지는 풀 수 없음). 따로 오가는 키 교체(재키잉) 신호가 없어서 메시지가
+  어떤 순서로 와도, 두 사람이 동시에 보내도 양쪽 키가 어긋나지 않고, 늦게 온 메시지(최신 페이지를 먼저 받는 히스토리 등)는 방마다 2000개까지
+  남겨 둔 키로 풉니다(남긴 지 30일이 지난 키는 버림 — 메시지 하나로 건너뛰는 수도 2000개까지). 풀지 못한 메시지(변조·이미 받은 것)는 키 상태를
+  바꾸지 않습니다. 초대에 `protocol: 3`을 실어 보내면(서버가
+  `initiatorProtocol`로 전달) 받는 쪽이 v3 수락 맥락 서명으로 수락하고, 초대한 쪽은 그 서명이 맞을 때만 v3를 씁니다. v3 암호문 안에는 그 글이
+  놓일 자리(메시지·댓글, 댓글이면 원본 메시지, 수정이면 고치는 글)도 함께 넣어, 서버가 글을 다른 자리로 옮겨 붙이면(댓글을 다른 글 아래로,
+  메시지를 댓글로, 다른 글의 수정으로) 받는 쪽이 풀지 않습니다(새 메시지의 id는 보낼 때 아직 없어 묶지 못함). 상대 기기가 v3로 말하는 것을 한
+  번 확인하면(그 기기의 v3 수락 서명을 확인했거나 그 기기가 v3로 보낸 글이 풀림) 그 기기의 고정에 적어 두고, 그 뒤 그 기기와의 새 대화가 예전
+  규약으로 맺어지려 하면(서버가 규약 표시를 뺌) 맺지 않고 멈춥니다(처음 대화하는 기기는 확인할 것이 없어 예전 규약으로 맺어질 수 있음 — 회색
+  안내가 뜸). 방마다 묶인 상대 기기(`secret/<방>/peer`)는 이 기기에 저장해 두어 앱을 다시 켠 뒤에도 보안 코드·안내에 씁니다. 키 상태는 PC·모바일
+  앱에서는 한 번 읽어 메모리에 들고 쓰고, 웹 앱은 같은 브라우저의 탭들이 저장소를 함께 써서 매번 저장소에서 읽고 방마다 탭 사이 잠금(Web Locks)으로
+  차례를 지킵니다(탭 둘에서 같은 대화를 써도 키가 어긋나지 않음). 이 기기의 보안 저장소 작업 하나가 30초 넘게 끝나지 않으면 그 작업이 끝날
+  때까지 비밀 대화 키를 읽고 쓰지 않습니다(`비밀 대화 저장소가 응답하지 않습니다…` — 뒤늦게 끝난 쓰기와 섞여 키가 되돌아가지 않게)
+- **예전 규약(v1)** — 상대가 예전 앱이거나 이 업데이트 전에 시작한 대화는 예전 규약(두 사람이 키 사슬 하나를 함께 씀)을 그대로 쓰되, 대화가
+  깨지지 않게 고쳤습니다. 재키잉을 하지 않습니다 — 제안하지도, 예전 앱의 제안·수락에 응하지도 않습니다(예전 재키잉은 제안이 메시지보다 먼저
+  도착하는 등 두 기기의 위치가 조금만 어긋나도 그 뒤 모든 메시지가 양쪽 모두 "복호화할 수 없음"이 됐음 — 메시지마다 키를 바꾸는 보호는
+  그대로). 내가 보낸 메시지가 되돌아온 것은 봉투의 nonce로 알아보고(예전엔 번호로 알아봐서 거의 동시에 같은 번호로 온 상대 메시지가 내 글로
+  보였음), 같은 번호로 동시에 온 상대 메시지와 늦게 온 메시지는 남겨 둔 키로 풉니다. 이런 대화방 위에는 회색 안내 `이 비밀 대화는 예전 방식으로
+  맺어져 있습니다…`가 떠서, 두 사람 모두 새 앱이면 대화를 끝내고 새로 시작해 새 규약으로 바꾸라고 권합니다(✕로 닫음 — 상대가 예전 앱이면
+  "예전 버전" 안내만 뜸). 이 규약의 체인 상태는 이제 한 값(`secret/<방>/chain`)으로 한 번에 적어, 칸마다 따로 적다 중간에 끊겨 번호와 키가 섞이는
+  일이 없습니다(이 업데이트 전 형식은 읽은 뒤 다음에 적을 때 옮김)
+- **보낸 사람·평문 캐시 확인** — 서버가 알려 주는 보낸 사람이 나인 메시지는 이 기기가 보낼 때 들고 있던 평문(봉투의 nonce로 찾음)으로만
+  보이고, 그 밖의 메시지(보낸 사람이 비어 있는 것 포함)는 그 방에 묶인 상대의 키로 풀려야 보입니다. 한 번 푼 평문은 그 봉투의 지문(SHA-256 앞
+  16바이트)·보낸 쪽과 함께 저장해, 서버가 메시지 id만 같게 해서 다른 방·다른 보낸 사람·다른 암호문에 붙여도 그 평문을 보여 주지 않습니다(이 기능
+  전에 저장한 평문은 그대로 보임). 같은 암호문으로 다시 온 수정 알림(파일만 지움)은 저장한 평문을 쓰고, 끊긴 동안 수정된 메시지는 새 암호문을
+  다시 풉니다. 푼 평문은 키 상태보다 먼저 저장해 그 사이 꺼져도 잃지 않고, 이 기기에서 풀지 못한 메시지는 읽었다고 알리지 않습니다(자동 삭제
+  타이머가 그때부터 돌지 않게)
+- **놓친 수락·두 번 뜬 초대** — 초대해 두고 앱을 끈 사이 상대가 수락하면 그 알림(`secret:accepted`)은 다시 오지 않아, 예전에는 초대한 기기에서
+  그 대화를 영영 쓰지 못했습니다. 이제 앱을 켤 때·다시 연결될 때·보내려는데 세션이 없을 때 서버에 다시 물어(`GET
+  /api/secret-chats/:roomId/accepted`) 맺고, 받은 값은 소켓으로 받은 것과 똑같이 서명·고정한 키로 확인합니다. 이미 맺어 서버도 받았다고 답한
+  대화에 같은 초대가 다시 오면 무시하고(다시 수락하면 맺은 세션이 덮어써지고 서버의 거절에 지워졌음), 수락을 보내 응답을 기다리는 동안에는 같은
+  초대 창을 다시 띄우지 않습니다. 응답을 못 받은 수락(그 사이 끊김)은 다시 할 수 있습니다
 - **상대 기기 키 고정**(앱 — `client/lib/services/secret_session_manager.dart`·`secret_peer_store.dart`) — 예전에는 상대 기기의 서명 키를
   핸드셰이크마다 서버에 물어 그대로 믿어서, 서버(해킹됐거나 악의적인)가 자기 키·임시키를 끼워 넣으면 양쪽이 서로가 아니라 서버와 키를 맺어 서버가
   모든 비밀 글을 읽을 수 있었습니다. 이제 서버에는 **처음 보는 기기일 때만** 묻고(`GET /api/devices/:deviceId/public-key` — 돌려준 `userId`가
   그 대화의 상대인지 확인) 서명이 맞으면 그 키를 이 기기에 고정합니다(`secretpin/<기기 id>`, 대화를 끝내도 남음 — 처음 본 키를 믿는 TOFU). 그
   뒤로는 그 기기에 대해 서버에 묻지 않습니다. 핸드셰이크 서명이 그 기기 키로 맞지 않거나, 서버가 같은 기기를 다른 키·주인으로 알려 오거나,
-  초대·수락·재키잉이 그 방의 상대가 아닌 사람·기기를 가리키면 체인키를 만들지 않고 그 대화를 **멈춥니다** — 방 위 빨간 안내와 토스트, 보내면
+  초대·수락이 그 방의 상대가 아닌 사람·기기를 가리키거나, 새 규약(v3)으로 말하던 상대 기기와 예전 규약으로 맺게 하려 하면 세션 키를 만들지
+  않고 그 대화를 **멈춥니다** — 방 위 빨간 안내와 토스트, 보내면
   `전송 실패: 보안 확인에 실패해 멈춘 비밀 대화입니다…`, 새로 온 글은 풀지 않음(이미 푼 글은 보임). 멈춤은 서버가 보내는 값으로 풀리지 않아
-  끝내고 새로 시작해야 합니다. 재키잉 서명만 틀리면 멈추지 않고 무시합니다(상대의 남은 다른 기기가 보낸 것일 수 있음). 서명 형식과 서버 쪽 처리는
+  끝내고 새로 시작해야 합니다. 멈춘 대화의 세션 키는 되살릴 일이 없어 이 기기에서 지웁니다(묶인 상대·멈춘 이유는 남김). 서버가 알려 주는 보낸
+  사람이 봉투와 맞지 않으면(내 메시지를 상대가 보낸 것처럼, 또는 그 반대로) 그 메시지는 풀지 않습니다. 서명 형식과 서버 쪽 처리는
   [보안 및 암호화](#보안-및-암호화)
 - **보안 코드 확인**(더보기 메뉴 — `client/lib/widgets/secret_safety_number_dialog.dart`) — 처음 만난 기기를 서버가 처음부터 속이는 것은 서명으로
   알 수 없어서, 두 기기로 만든 60자리 숫자(5자리 12묶음, 4묶음씩 3줄 — 양쪽 화면에 같은 값)를 만나서·전화로 비교하게 합니다. 같으면 "확인함"으로
@@ -1332,9 +1366,13 @@ Node.js 프로세스만 내렸다 올리는 것이라 Postgres 자체에는 손�
 > 그 밖에 새 앱이 있어야 되는 것: **메시지 공유**(예전 앱은 `메시지 공유는 앱을 최신 버전으로 업데이트한 뒤 다시 해 주세요.`로 거절되고,
 > 전달은 "…에서 전달한 메시지입니다" 없이 감), **링크 미리보기 그림**(예전 앱은 그림 없이 보임), **비밀 대화의 기기 저장 글 정리**, **할 일
 > 공유 폴더를 열기 전 확인**, **비밀 대화의 상대 기기 키 고정·보안 코드**(예전 앱도 비밀 대화는 되지만 상대 기기 키를 고정하지 않음 — 새 앱은
-> 상대가 예전 앱이면 회색 "예전 버전" 안내). 그 밖의 기능은 예전 앱도 그대로 됩니다. 비밀 대화의 이 보호는 서버도 새 버전이어야 온전합니다 —
-> 서버가 예전이면 맥락 서명과 방 정보의 기기 id가 오가지 않아 새 앱끼리도 "예전 버전" 안내가 뜨고, 업데이트 전에 시작한 대화는 앱을 다시 켠 뒤
-> 재키잉이 이어지지 않습니다(예전과 같음).
+> 상대가 예전 앱이면 회색 "예전 버전" 안내), **비밀 대화의 새 규약(v3)**(두 사람 모두 새 앱이어야 새 대화가 v3로 맺어짐 — 예전 앱과는 예전
+> 규약으로 대화하되, 새 앱은 재키잉을 하지 않아 예전 앱의 재키잉 제안에도 응하지 않음). 그 밖의 기능은 예전 앱도 그대로 됩니다. 비밀 대화의 이
+> 보호는 서버도 새 버전이어야 온전합니다 — 서버가 예전이면 맥락 서명과 방 정보의 기기 id·초대의 규약 번호가 오가지 않아 새 앱끼리도 "예전 버전"
+> 안내가 뜨고 새 대화도 예전 규약으로 맺어집니다. 서버를 올린 뒤에는 `npm run db:migrate`(마이그레이션 `0098`)가 돌아야 초대의 규약 번호가
+> 저장됩니다(설치 프로그램의 "서버 업데이트"가 함께 함 — 새 서버 코드가 마이그레이션 전에 돌면 비밀 대화가 있는 사람의 방 목록이
+> 열리지 않으므로 순서를 지킨다). 올리는 순서는 **서버(마이그레이션 포함) → 새 앱 배포**다 — 앱만 먼저 올리면 그동안 새 앱끼리 맺은 비밀
+> 대화도 예전 규약으로 맺어진다(끝내고 새로 시작하면 바뀜).
 
 ## PC 앱 실행 방법
 
@@ -1555,8 +1593,9 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | PATCH | `/api/devices/:deviceId/fcm-token` | FCM 토큰 등록/해제. 한 사람당 최근에 쓴 기기 10대의 토큰만 남김(토큰은 공백 없는 ASCII 4096자까지 — `null`·빈 값은 해제) |
 | PATCH | `/api/devices/:deviceId/web-push` | 웹 앱의 웹 푸시 구독 등록/해제(`subscription` — `endpoint`·`keys`(`p256dh`, `auth`), `null`이면 지움). 허용된 브라우저 푸시 서비스 주소가 아니면 400(`server/src/webPushEndpoint.js`), 한 사람당 최근에 쓴 기기 10대의 구독만 남김 |
 | DELETE | `/api/devices/:deviceId` | 기기 폐기 |
-| POST | `/api/secret-chats` | 비밀 대화 요청 `{ targetUserId, teamId, deviceId(내 기기), initiatorEphemeralPublicKey, initiatorEphemeralSignature, initiatorContextSignature? }`. 방은 팀 하나에 걸려야 해서(`rooms.team_id` NOT NULL) `teamId`(요청자가 속한 팀)가 필수이지만, 상대가 그 팀 소속일 필요는 없다 — 나와 팀을 하나라도 같이 쓰면 된다(아니면 403 `같은 팀에 있는 사람과만 비밀 대화를 할 수 있습니다.`). 그 상대와 대기 중이거나 진행 중인 비밀 대화가 있으면 그 방을 200으로 돌려주고(이번 임시키는 저장하지 않음), 새로 만들면 201. `initiatorContextSignature`는 맥락 서명(v2 — [보안 및 암호화](#보안-및-암호화), 예전 앱은 안 보냄)으로, 서버는 검증하지 않고 모양만 본다 — 있는데 64바이트 서명의 base64가 아니면 400 `맥락 서명(initiatorContextSignature)이 올바르지 않습니다.` |
-| GET | `/api/secret-chats/:roomId/invite` | 놓친 초대 다시 조회 — 소켓 `secret:invite`와 같은 모양 `{ roomId, initiatorUserId, initiatorDeviceId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, initiatorContextSignature }`(예전 앱이 건 초대면 `initiatorContextSignature: null`). 초대받은 사람만(403), 대기 중인 초대가 없으면 404 |
+| POST | `/api/secret-chats` | 비밀 대화 요청 `{ targetUserId, teamId, deviceId(내 기기), initiatorEphemeralPublicKey, initiatorEphemeralSignature, initiatorContextSignature?, protocol? }`. 방은 팀 하나에 걸려야 해서(`rooms.team_id` NOT NULL) `teamId`(요청자가 속한 팀)가 필수이지만, 상대가 그 팀 소속일 필요는 없다 — 나와 팀을 하나라도 같이 쓰면 된다(아니면 403 `같은 팀에 있는 사람과만 비밀 대화를 할 수 있습니다.`). 그 상대와 대기 중이거나 진행 중인 비밀 대화가 있으면 그 방을 200으로 돌려주고(이번 임시키는 저장하지 않음), 새로 만들면 201. `initiatorContextSignature`는 맥락 서명(v2 — [보안 및 암호화](#보안-및-암호화), 예전 앱은 안 보냄)으로, 서버는 검증하지 않고 모양만 본다 — 있는데 64바이트 서명의 base64가 아니면 400 `맥락 서명(initiatorContextSignature)이 올바르지 않습니다.` `protocol`은 초대한 앱이 아는 비밀 대화 규약 번호(새 앱은 `3` — 예전 앱은 안 보냄)로, 서버는 저장해 초대(`initiatorProtocol`)에 실을 뿐 아무것도 정하지 않는다 — 1~255 정수가 아니면 400 `비밀 대화 규약 번호(protocol)가 올바르지 않습니다.`(`secret_sessions.initiator_protocol`) |
+| GET | `/api/secret-chats/:roomId/accepted` | 놓친 수락 다시 조회(초대한 사람이 앱을 끈 사이 상대가 수락했을 때) — 소켓 `secret:accepted`와 같은 모양(`responderContextSignature` 포함). 수락된(`active`) 대화에서 초대한 사람만(403), 아니면 404. 받은 앱이 고정한 키로 서명을 확인한다 |
+| GET | `/api/secret-chats/:roomId/invite` | 놓친 초대 다시 조회 — 소켓 `secret:invite`와 같은 모양 `{ roomId, initiatorUserId, initiatorDeviceId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, initiatorContextSignature, initiatorProtocol }`(예전 앱이 건 초대면 `initiatorContextSignature`·`initiatorProtocol`이 `null`). 초대받은 사람만(403), 대기 중인 초대가 없으면 404 |
 | POST | `/api/secret-chats/:roomId/accept` | 수락 `{ deviceId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature? }` — 맥락 서명 모양 규칙은 요청과 같다(400 `맥락 서명(responderContextSignature)이 올바르지 않습니다.`). 초대받은 사람이 대기 중인 초대를 수락할 때만 되고(아니면 409 — 앱은 이 기기에 적어 둔 키를 되돌림), 방에 `secret:accepted` |
 | POST | `/api/secret-chats/:roomId/reject` | 거절 |
 | PATCH | `/api/secret-chats/:roomId/settings` | 자동 삭제 타이머 설정 |
@@ -1685,7 +1724,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 클라이언트→서버 | `message:send` | 메시지 전송 — 응답(ack `{ ok, error? }`)은 서버 오류가 나도 늘 옴. 한 사람이 10초에 40통·10분에 600통(파일을 실은 메시지는 10분 창만), 512KB를 넘는 소켓 메시지는 서버가 받지 않음. 인용·전달은 원본 id(`quotedMessageId`·`quotedAnnouncementId`·`forwardedFromMessageId`)로 — 위 "메시지 인용 공유, 메시지 전달" |
 | 클라이언트→서버 | `room:read` | 읽음 처리 |
 | 클라이언트→서버 | `secret:message-read` | 비밀 대화 메시지 읽음(자동 삭제 타이머 시작) |
-| 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 `{ roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }`(그 비밀 대화방 멤버만). 맥락 서명(v2, 예전 앱은 안 보냄)은 검증하지 않고 모양만 봐서 64바이트 서명의 base64가 아니면 이벤트를 버리고, `secret_rekeys`의 `proposer_context_signature`·`responder_context_signature`에 적는다. 받는 쪽에는 같은 이름의 이벤트로 제안은 `{ roomId, keyEpoch, proposerUserId, proposerEphemeralPublicKey, proposerEphemeralSignature, proposerContextSignature }`(방의 다른 소켓에), 수락은 `{ roomId, keyEpoch, responderUserId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }`(방 전체에 — 수락 때 세션의 `key_epoch`도 올림)로 중계하고, 맥락 서명이 없으면 `null`. 보낸 사람 id는 payload가 아니라 그 소켓의 로그인 사용자 |
+| 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 `{ roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }`(그 비밀 대화방 멤버만) — 예전 규약(v1)을 쓰는 **예전 앱만** 보낸다(새 앱은 재키잉을 하지 않고 이 이벤트를 듣지도 않음). 수락을 못 받은 예전 앱은 메시지마다 다시 제안하므로, 같은 방·같은 epoch의 아직 수락되지 않은 제안 행은 지우고 새로 적는다. 맥락 서명(v2, 예전 앱은 안 보냄)은 검증하지 않고 모양만 봐서 64바이트 서명의 base64가 아니면 이벤트를 버리고, `secret_rekeys`의 `proposer_context_signature`·`responder_context_signature`에 적는다. 받는 쪽에는 같은 이름의 이벤트로 제안은 `{ roomId, keyEpoch, proposerUserId, proposerEphemeralPublicKey, proposerEphemeralSignature, proposerContextSignature }`(방의 다른 소켓에), 수락은 `{ roomId, keyEpoch, responderUserId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }`(방 전체에 — 수락 때 세션의 `key_epoch`도 올림)로 중계하고, 맥락 서명이 없으면 `null`. 보낸 사람 id는 payload가 아니라 그 소켓의 로그인 사용자 |
 | 서버→클라이언트 | `message:new` / `message:edited` / `message:deleted` / `message:expired` | 메시지 변경 브로드캐스트(파일 삭제도 `message:edited` — 첨부에 `deleted: true`) |
 | 서버→클라이언트 | `comment:new` / `comment:edited` / `comment:deleted` | 댓글 변경 브로드캐스트 |
 | 서버→클라이언트 | `notification:new` | `user:<id>`에게 새 알림 한 건 `{ notification, unread: { mention, board, mentionPersonal, mentionAll } }` |
@@ -1705,7 +1744,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 서버→클라이언트 | `call:declined` | 통화 중인 사람들(`user:<id>`)에게 누가 거절했는지 `{ roomId, userId, name }` |
 | 서버→클라이언트 | `call:card` | 화상회의 카드가 바뀜 `{ roomId, messageId, card, text? }`(끝날 때 `text`는 요약 문구) |
 | 서버→클라이언트 | `call:mic` | 진행자가 내 마이크를 끄거나 켜 달라고 요청 `{ roomId, on, byId }` |
-| 서버→클라이언트 | `secret:invite` / `secret:accepted` / `secret:rejected` / `secret:left` | 비밀 대화 생명주기. `secret:invite`(초대받은 사람의 `user:<id>`에)는 `GET /api/secret-chats/:roomId/invite`와 같은 모양(`initiatorContextSignature` 포함), `secret:accepted`(방 전체에)는 `{ roomId, responderUserId, responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }` — 예전 앱이 만든 값이면 맥락 서명은 `null` |
+| 서버→클라이언트 | `secret:invite` / `secret:accepted` / `secret:rejected` / `secret:left` | 비밀 대화 생명주기. `secret:invite`(초대받은 사람의 `user:<id>`에)는 `GET /api/secret-chats/:roomId/invite`와 같은 모양(`initiatorContextSignature`·`initiatorProtocol` 포함), `secret:accepted`(방 전체에)는 `{ roomId, responderUserId, responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }` — 예전 앱이 만든 값이면 맥락 서명은 `null` |
 
 ## DB 구조
 
@@ -1759,8 +1798,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `task_references` | 업무 참조자(`task_id`, `user_id` 복합 PK). "내 업무"에 참조된 업무를 함께 보여주는 데 쓴다 |
 | `task_comments` | 업무 카드에 달린 댓글. `project_id`를 같이 들고 있어(비정규화) 대시보드의 "최근 댓글"을 조인 없이 모은다 |
 | `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `web_push_subscription`(웹 앱의 웹 푸시 구독 JSON), `last_seen_at`, `revoked_at`. 토큰·구독은 한 사람당 최근에 쓴(`last_seen_at`) 기기 10대 것만 남기고, 계정 정지·모든 기기 강제 로그아웃·탈퇴 때는 그 사람의 모든 기기에서 지웁니다(기기 행과 공개키는 지난 비밀 대화 때문에 그대로) |
-| `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 사용자·기기, 양측 임시 공개키+서명(키만 서명한 v1), `initiator_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이 보낸 쪽은 null, 마이그레이션 `0097_secret_context_signatures`), `key_epoch`, `self_destruct_seconds` |
-| `secret_rekeys` | 재키잉 제안/수락 이력(append-only) — 양측 임시 공개키+서명(v1), `proposer_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이면 null, 마이그레이션 `0097`) |
+| `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 사용자·기기, 양측 임시 공개키+서명(키만 서명한 v1), `initiator_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이 보낸 쪽은 null, 마이그레이션 `0097_secret_context_signatures`), `initiator_protocol`(초대한 앱이 아는 규약 번호 — 새 앱은 3, 예전 앱이면 null, 마이그레이션 `0098_secret_initiator_protocol`), `key_epoch`(예전 규약의 재키잉 세대 — 새 앱은 올리지 않음), `self_destruct_seconds` |
+| `secret_rekeys` | 예전 앱의 재키잉 제안/수락 이력(같은 방·epoch의 수락 안 된 제안은 새 제안으로 바뀜) — 양측 임시 공개키+서명(v1), `proposer_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이면 null, 마이그레이션 `0097`) |
 
 ## FCM 푸시 알림 설정
 
@@ -2379,8 +2418,22 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
   그대로이고 `|`가 든 칸은 받지 않습니다 — 서버와 함께 정한 약속이라 한 글자만 달라도 서로 검증이 안 됩니다(`client/lib/services/secret_chat_crypto.dart`):
   - 초대 `tangotalk-secret-v2|init|{초대자 id}|{초대자 기기 id}|{받는 사람 id}|{초대자 임시 공개키}`
   - 수락 `tangotalk-secret-v2|accept|{방 id}|{초대자 id}|{초대자 기기 id}|{초대자 임시 공개키}|{수락자 id}|{수락자 기기 id}|{수락자 임시 공개키}`
-  - 재키잉 제안 `tangotalk-secret-v2|rekey-propose|{방 id}|{keyEpoch}|{제안자 id}|{제안자 기기 id}|{제안자 임시 공개키}`
-  - 재키잉 수락 `tangotalk-secret-v2|rekey-ack|{방 id}|{keyEpoch}|{수락자 id}|{수락자 기기 id}|{제안자 임시 공개키}|{수락자 임시 공개키}`
+  - 재키잉 제안 `tangotalk-secret-v2|rekey-propose|{방 id}|{keyEpoch}|{제안자 id}|{제안자 기기 id}|{제안자 임시 공개키}`(이 업데이트 전 앱만)
+  - 재키잉 수락 `tangotalk-secret-v2|rekey-ack|{방 id}|{keyEpoch}|{수락자 id}|{수락자 기기 id}|{제안자 임시 공개키}|{수락자 임시 공개키}`(이 업데이트 전 앱만)
+- **비밀 대화 새 규약(v3 — 더블 래칫)**: 초대에 `protocol: 3`이 있고 초대 맥락 서명(v2)이 맞으면, 받는 쪽은 수락을 v3 머리로 서명합니다 —
+  `tangotalk-secret-v3|accept|…`(칸은 v2 수락과 같음). 초대한 쪽은 v3를 알렸고 그 서명이 맞을 때만 v3를 쓰고, 아니면 v2·v1로 확인해 예전 규약을
+  씁니다(머리가 달라 한쪽 서명을 다른 쪽으로 쓸 수 없음). 루트키는 두 임시키의 X25519 공유비밀을 HKDF-SHA256(salt =
+  SHA-256(`tangotalk-secret-v3|root-salt|{방 id}`), info = `tangotalk-secret-v3|root|{방 id}|{초대자 id}|{초대자 기기 id}|{초대자 임시 공개키}|{수락자
+  id}|{수락자 기기 id}|{수락자 임시 공개키}`)에 넣어 만들고, 그 뒤 루트 한 걸음은 HKDF(salt = 루트키, info = `tangotalk-secret-v3|root-step`, 64바이트
+  → 새 루트키·체인키), 체인 한 걸음은 HMAC-SHA256(체인키, 0x01) = 메시지 키 · (체인키, 0x02) = 다음 체인키입니다. 수락한 쪽은 자기 임시키를 첫
+  래칫 키로, 루트키에서 바로 만든 "0번 체인"(info `tangotalk-secret-v3|chain0`)으로 보내고, 초대한 쪽은 새 래칫 키로 한 걸음 나아가 보냅니다 — 그래서
+  누가 먼저 보내도 됩니다. 봉투는 `{ v: 3, s: 'i'|'r'(보낸 쪽), dh(보낸 쪽 래칫 공개키), pn(직전 체인에서 보낸 수), n, epoch: 0(예전 앱이 읽다 멈추지
+  않게), nonce, ciphertext }`이고, AES-256-GCM의 AAD는 `tangotalk-secret-v3|msg|{방 id}|{s}|{dh}|{pn}|{n}`입니다(`client/lib/services/secret_ratchet.dart`).
+  암호문 안의 글은 `{ t: 글, k: 'm'(메시지)|'c'(댓글), p?: 원본 메시지 id, e?: 고치는 글 id }` JSON이고, 받는 쪽은 서버가 보여 주는 자리와 맞을
+  때만 보여 줍니다(내가 보낸 글이 되돌아온 것도 보낼 때 놓은 자리와 맞아야 함). 서버가 초대의 규약 번호를 빼면 처음 대화하는 두 새 앱은 예전
+  규약으로 맺어질 수 있습니다(예전 규약도 종단간 암호화이고 메시지마다 키가 바뀌지만, 한 번 새어 나간 키에서 저절로 회복되지는 않음). v3로
+  말하는 것을 확인한 기기(그 기기 고정의 `v3` 표시 — "상대 기기 키 다시 받기"로 고정을 지우면 함께 없어짐)와는 예전 규약으로 맺지 않고
+  멈춥니다(멈춘 이유 `downgrade`).
 - **비밀 대화 자동 삭제**: 만료된 메시지는 DB 행을 지우고(`server/src/secretExpiry.js`, 5초 간격 스윕), 그 메시지의
   첨부 파일 실물(원본·미리보기·여러 장 묶음·댓글 파일)도 **그 파일을 실은 사람(메시지는 보낸 사람, 댓글은 단 사람)이 직접
   올렸고**(`uploads` 표) **다른 곳에서 쓰지 않을 때만** 지웁니다 — 서버가 파일을 실제로 지우는 곳은 여기뿐이라 남의 파일은 지우지 않게 둘 다 봅니다. 기록이 없는 예전
@@ -2469,8 +2522,10 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 | 밖에서 로그인할 때 `지금 사내망 밖에서 로그인 시도가 몰려 차례대로 받고 있습니다…`, 감사 로그에 "로그인 시도 차단 — …줄을 세워 3초에 하나씩…" | 밖에서 비밀번호를 대량으로 넣어 보는 공격이 있다는 뜻이다(밖 로그인을 막지는 않고 처음 보는 곳만 줄을 세움) → 안내된 시간 뒤에 다시 하거나 사내 와이파이에서 로그인한다. 최근 30일 안에 같은 곳에서 로그인한 사람과 이미 로그인해 있는 앱은 그대로 쓰고, 오류가 15분에 150번 아래로 줄면 저절로 풀린다 |
 | 할 일 폴더 경로를 저장하려는데 `…경로의 서버 '…'은(는) 허용된 사내 서버가 아닙니다…`(또는 `…사내망 주소가 아닙니다…`), 또는 예전에 정한 폴더 경로가 할 일에서 사라짐 | 점이 든 이름(`nas.corp.local`)·한글 이름의 서버는 허용 목록에 있어야 하고, 공인 주소·WebDAV·장치 경로는 받지 않아서다(예전 경로는 앱에 보내지 않을 뿐 DB 값은 남음 — 서버 로그 `[todos] 할 일 폴더 경로의 서버 …`) → 점이 든 이름·한글 이름의 회사 서버가 맞으면 `.env`에 `TODO_FOLDER_HOSTS=그이름`을 넣고 "서버 재시작". 사설 IP(`\\192.168.0.5\…`)나 점 없는 컴퓨터 이름(`\\NAS\…`)으로 바꿔도 된다 |
 | "복원"·"DB 데이터 초기화"·"서버 완전 삭제"에서 운영자 비밀번호를 맞게 쳐도 확인이 실패(비밀번호에 한글 등이 있음) | 예전 관리 도구가 그런 글자를 '?'로 바꿔 넘겨서다 → 최신 `tangotalk-server-setup.exe`를 같은 설치 경로로 한 번 다시 실행한다(관리 도구 `*.ps1`은 "서버 업데이트"로 바뀌지 않음) |
-| 비밀 대화방 위에 빨간 `상대 기기의 보안 확인에 실패해 이 비밀 대화를 멈췄습니다.`, 보내면 `전송 실패: 보안 확인에 실패해 멈춘 비밀 대화입니다…` | 상대 기기의 서명이 맞지 않았거나(이 기기에 고정해 둔 키로 확인), 서버가 상대 기기를 다른 키·주인으로 알려 왔거나, 이 대화의 상대가 아닌 사람·기기가 끼어들었다(안내의 "원인" — 서버나 중간의 누군가가 가로채려 했을 수 있음). 멈춘 대화는 되돌릴 수 없다 → 안내의 "비밀 대화 끝내기"로 끝내고 새로 시작한 뒤 두 사람이 더보기 "보안 코드 확인"으로 숫자를 비교한다. 같은 상대 기기와 새로 시작해도 또 멈추면 상대가 앱을 다시 설치하는 등으로 그 기기의 키가 바뀌었을 수 있다 → 상대에게 직접 확인한 뒤 안내의 "상대 기기 키 다시 받기"를 누르고, 다음 새 대화에서 보안 코드를 꼭 비교한다 |
-| 비밀 대화방 위에 회색 `상대가 예전 버전의 앱을 쓰고 있어…` | 상대 앱이 맥락 서명(v2)을 보내지 않았다 → 상대 앱을 업데이트한다(새 앱으로 재키잉을 주고받으면 저절로 꺼지고, ✕로 닫을 수도 있음). 두 사람 다 새 앱인데 새 대화에서도 뜨면 서버가 예전 버전이다 → 서버를 업데이트한다 |
+| 비밀 대화방 위에 빨간 `상대 기기의 보안 확인에 실패해 이 비밀 대화를 멈췄습니다.`, 보내면 `전송 실패: 보안 확인에 실패해 멈춘 비밀 대화입니다…` | 상대 기기의 서명이 맞지 않았거나(이 기기에 고정해 둔 키로 확인), 서버가 상대 기기를 다른 키·주인으로 알려 왔거나, 이 대화의 상대가 아닌 사람·기기가 끼어들었거나, 새 방식(v3)으로 대화하던 상대 기기와 예전 방식으로 맺게 하려 했다(안내의 "원인" — 서버나 중간의 누군가가 가로채려 했을 수 있음). 멈춘 대화는 되돌릴 수 없다 → 안내의 "비밀 대화 끝내기"로 끝내고 새로 시작한 뒤 두 사람이 더보기 "보안 코드 확인"으로 숫자를 비교한다. 같은 상대 기기와 새로 시작해도 또 멈추면 상대가 앱을 다시 설치하는 등으로 그 기기의 키가 바뀌었을 수 있다 → 상대에게 직접 확인한 뒤 안내의 "상대 기기 키 다시 받기"를 누르고, 다음 새 대화에서 보안 코드를 꼭 비교한다 |
+| 비밀 대화방 위에 회색 `상대가 예전 버전의 앱을 쓰고 있어…` | 상대 앱이 맥락 서명(v2)을 보내지 않았다 → 상대 앱을 업데이트한 뒤 이 대화를 끝내고 새로 시작한다(✕로 닫을 수도 있음 — 이미 맺은 대화에서는 상대가 업데이트해도 저절로 꺼지지 않음). 두 사람 다 새 앱인데 새 대화에서도 뜨면 서버가 예전 버전이다 → 서버를 업데이트한다 |
+| 비밀 대화방 위에 회색 `이 비밀 대화는 예전 방식으로 맺어져 있습니다…` | 이 업데이트 전에 시작했거나 예전 앱과 맺은 대화라 예전 규약(v1)을 쓴다 — 대화는 그대로 되지만(재키잉을 하지 않아 깨지지 않음) 새 규약의 보호(한 번 새어 나간 키에서 저절로 회복)는 없다 → 두 사람 모두 새 앱이면 대화를 끝내고 새로 시작한다(그 대화의 메시지는 지워짐). 두 사람 다 새 앱인데 새로 시작해도 또 뜨면 서버가 예전 버전이거나 마이그레이션 `0098`이 안 돌았다 → 서버를 업데이트한다 |
+| 비밀 대화를 보내면 `비밀 대화 저장소가 응답하지 않습니다. 잠시 뒤 다시 시도해 주세요.` | 이 기기의 보안 저장소(PC는 암호화된 파일 하나) 작업 하나가 30초 넘게 끝나지 않았다(백신·백업 프로그램이 그 파일을 잡고 있음 등) — 그 작업이 끝날 때까지 비밀 대화 키를 읽고 쓰지 않는다(뒤늦게 끝난 쓰기와 섞이면 키가 되돌아가 대화가 어긋남) → 잠시 뒤 다시 보낸다. 계속되면 앱을 다시 켠다 |
 | 관리자 콘솔의 "웹 앱 주소(정식 인증서)"가 **발급 실패**이고 이유에 `rateLimited`·"발급 한도" | iptime.org 같은 공용 DDNS 도메인이면 모든 사용자가 나눠 쓰는 주간 한도(7일에 새 인증서 50장)일 가능성이 크다 → 표시된 다음 시도 시각에 서버가 알아서 다시 받으니 기다린다(재시작해도 앞당겨지지 않음). 계속 막히면 직접 산 도메인을 CNAME으로 그 DDNS 이름에 연결해 `WEB_DOMAIN`으로 쓴다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)) |
 | 웹 앱 주소 인증서가 **발급 실패**이고 `[http-01]`/`[tls-alpn-01] Let's Encrypt가 …의 외부 80(443) 포트로 접속해 확인하지 못했습니다` | 공유기 포트포워딩(외부 443 → `WEB_HTTPS_PORT`, 외부 80 → `ACME_HTTP_PORT`)과 Windows 방화벽을 확인한다. 고친 뒤에도 다음 시도 시각까지 기다리므로, 바로 확인하려면 "시험 발급"을 켜고 적용 → 시험용 인증서가 보이면 끄고 다시 적용한다(설정이 바뀌면 바로 시도) |
 | 서버 로그에 `[web-tls] ⚠ 포트 443(웹 앱 HTTPS)를 이미 다른 프로그램이 쓰고 있어 열지 못했습니다…`(또는 80) | IIS·HTTP.sys 예약·다른 웹 서버가 그 포트를 쓴다 → 그 프로그램을 끄면 10분 안에 저절로 붙는다. 끌 수 없으면 다른 번호를 쓰고 공유기에서 외부 443·80을 그 번호로 보낸다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)의 "80이 막혔을 때, 포트가 겹칠 때") |

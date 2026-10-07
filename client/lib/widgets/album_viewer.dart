@@ -41,6 +41,7 @@ Future<void> openAlbumItem(
 }
 
 /// 영상 하나를 받아서 기본 앱으로 연다 — 다운로드 폴더를 정해 뒀으면 거기에(같은 파일은 다시 받지 않는다), 아니면 임시 폴더에.
+/// 이름은 올린 사람이 정하므로 영상이라도 실행될 수 있는 확장자면 열지 않고 폴더에서 보여 준다(openLocalFile).
 Future<void> openAlbumVideo(
   BuildContext context,
   Session session,
@@ -60,7 +61,14 @@ Future<void> openAlbumVideo(
       bytes: bytes,
       reuseIdentical: true,
     );
-    await openLocalFile(path);
+    final notice = await openLocalFile(path);
+    if (notice != null) {
+      showAppToastOnOverlay(
+        overlay,
+        notice,
+        duration: const Duration(seconds: 4),
+      );
+    }
   } catch (e) {
     showAppToastOnOverlay(overlay, '영상을 열지 못했습니다: $e');
   }

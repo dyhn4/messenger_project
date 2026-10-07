@@ -16,6 +16,7 @@ import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
 import 'memory_file.dart';
 import 'secret_chat_crypto.dart' as secret_crypto;
+import 'secret_key_store.dart' show SecretCachedTextInfo;
 import 'session.dart';
 import 'typing_gate.dart';
 
@@ -195,12 +196,19 @@ class RoomChatController extends ChangeNotifier {
 
   Future<void> _load() async {
     try {
+      final generation = _secretCacheGeneration;
       final history = await _session.api!.fetchRoomMessages(
         room.id,
         limit: _pageSize,
       );
       if (_disposed) return;
       await _session.decryptHistory(room, history);
+      await _reconcileSecretPage(
+        history,
+        before: null,
+        limit: _pageSize,
+        sinceGeneration: generation,
+      );
       _mergeHistory(history);
       _advanceHistoryCursor(history);
       // 창 밖 부모(outOfWindow)는 페이지 크기 판정에서도 빼야 "끝에 도달했다"를 놓치지 않는다.
@@ -233,6 +241,7 @@ class RoomChatController extends ChangeNotifier {
     loadingMore = true;
     notifyListeners();
     try {
+      final generation = _secretCacheGeneration;
       final older = await _session.api!.fetchRoomMessages(
         room.id,
         limit: _pageSize,
@@ -241,8 +250,15 @@ class RoomChatController extends ChangeNotifier {
       if (older.where((m) => !m.outOfWindow).length < _pageSize) {
         hasMoreHistory = false;
       }
+      await _session.decryptHistory(room, older);
+      // 빈 페이지여도 맞춘다 — "그보다 오래된 메시지가 하나도 없다"는 것도 서버의 답이다.
+      await _reconcileSecretPage(
+        older,
+        before: cursor,
+        limit: _pageSize,
+        sinceGeneration: generation,
+      );
       if (older.isNotEmpty) {
-        await _session.decryptHistory(room, older);
         _mergeHistory(older);
         _advanceHistoryCursor(older);
       }
@@ -319,6 +335,70 @@ class RoomChatController extends ChangeNotifier {
       ..addAll(newCommentEntries)
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return true;
+  }
+
+  /// 비밀 대화 평문 캐시의 지금 저장 순번 — 히스토리를 요청하기 직전에 잡아서 [_reconcileSecretPage]에 넘긴다.
+  int get _secretCacheGeneration =>
+      _session.secretSessionManager?.textCacheGeneration ?? 0;
+
+  /// 비밀 대화: 방금 받은 히스토리 한 페이지([page] — [before]·[limit]으로 요청한 것)로 이 기기의 평문
+  /// 캐시와 화면을 서버에 맞춘다(S34). 서버가 자동 삭제·삭제한 메시지는 그 순간 연결돼 있지 않았으면
+  /// 알림(message:expired/deleted)이 다시 오지 않아서, 이번 요청이 실제로 훑은 범위 안인데 응답에 없는
+  /// 항목의 평문을 지우고(SecretKeyStore.reconcileHistoryPage) 화면에서도 뺀다. 지운 것으로 표시돼 온
+  /// (소프트 삭제) 메시지·댓글도 화면을 맞춘다. [sinceGeneration]은 요청 직전에 잡은 저장 순번 — 그 뒤에
+  /// 저장된 항목(요청보다 늦게 도착한 메시지일 수 있다)은 이번 응답에 없어도 그대로 둔다.
+  Future<void> _reconcileSecretPage(
+    List<Message> page, {
+    required DateTime? before,
+    required int limit,
+    required int sinceGeneration,
+  }) async {
+    final manager = _session.secretSessionManager;
+    if (!room.isSecret || manager == null) return;
+    final removed = await manager.reconcileHistoryPage(
+      roomId: room.id,
+      page: page,
+      before: before,
+      limit: limit,
+      sinceGeneration: sinceGeneration,
+    );
+    applySecretCacheRemovals(page, removed);
+  }
+
+  /// 비밀 대화: 히스토리 한 페이지([page])로 서버와 맞춰 본 결과 평문 캐시에서 지운 항목([removed])을 화면에도
+  /// 반영한다 — 이 화면이 받은 페이지([_reconcileSecretPage])뿐 아니라, Session의 뒷정리가 이 화면 없이 받은
+  /// 페이지(Session.syncSecretTextCaches)로 맞춘 결과도 여기로 온다.
+  void applySecretCacheRemovals(
+    List<Message> page,
+    List<SecretCachedTextInfo> removed,
+  ) {
+    if (_disposed || !room.isSecret) return;
+    final presentIds = {for (final m in page) m.id};
+    final goneMessageIds = {
+      for (final r in removed)
+        if (!r.isComment && !presentIds.contains(r.id)) r.id,
+    };
+    // 서버에서 완전히 없어진 메시지 — 자동 삭제 만료와 같이 댓글째 화면에서 뺀다.
+    for (final id in goneMessageIds) {
+      applyExpire(id);
+    }
+    // 원본은 남았는데 댓글만 없어졌으면 지워진 댓글로 보인다.
+    for (final r in removed) {
+      final parentId = r.parentId;
+      if (parentId == null || goneMessageIds.contains(parentId)) continue;
+      if (_findComment(r.id)?.deleted == false) applyCommentDelete(r.id);
+    }
+    // 끊긴 동안 놓친 삭제(소프트 삭제) — 이미 화면에 있는 메시지·댓글에도 반영한다(_mergeHistory는 안 바꾼다).
+    for (final m in page) {
+      if (m.deleted && _instancesOf(m.id).any((x) => !x.deleted)) {
+        applyDelete(m.id);
+      }
+      for (final c in m.comments) {
+        if (c.deleted && _findComment(c.id)?.deleted == false) {
+          applyCommentDelete(c.id);
+        }
+      }
+    }
   }
 
   /// Session이 이 방으로 들어온 실시간 메시지를 라우팅할 때 호출한다.
@@ -470,14 +550,12 @@ class RoomChatController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Session이 comment:deleted 브로드캐스트를 라우팅할 때 호출한다.
+  /// Session이 comment:deleted 브로드캐스트를 라우팅할 때 호출한다. 비밀 대화 평문 캐시는 Session이
+  /// 이 방 화면이 없어도 지운다(세션의 comment:deleted 처리) — 여기서는 화면만 맞춘다.
   void applyCommentDelete(String commentId) {
     final target = _findComment(commentId);
     if (target == null) return;
     target.deleted = true;
-    if (room.isSecret) {
-      unawaited(_session.secretSessionManager?.forgetDecryptedText(commentId));
-    }
     notifyListeners();
   }
 
@@ -805,7 +883,7 @@ class RoomChatController extends ChangeNotifier {
 
   /// Session이 message:deleted 브로드캐스트를 라우팅할 때 호출한다. 리스트에서 빼지 않고
   /// deleted만 세운다 — 댓글 스레드가 이 메시지를 계속 참조하고, "삭제된 메시지입니다"로
-  /// 표시만 바뀌어야 하기 때문이다.
+  /// 표시만 바뀌어야 하기 때문이다. 비밀 대화 평문 캐시는 Session이 지운다(이 방 화면이 없어도).
   void applyDelete(String messageId) {
     final targets = _instancesOf(messageId);
     if (targets.isEmpty) return;
@@ -814,22 +892,23 @@ class RoomChatController extends ChangeNotifier {
     }
     // 지워진 게시글은 고정 목록에서도 빠진다(서버 pinned-posts도 삭제된 글은 안 준다).
     pinnedPosts.removeWhere((p) => p.id == messageId);
-    if (room.isSecret) {
-      unawaited(_session.secretSessionManager?.forgetDecryptedText(messageId));
-    }
     notifyListeners();
   }
 
   /// Session이 message:expired(비밀 대화 자동 삭제 타이머 만료)를 라우팅할 때 호출한다.
   /// 소프트 삭제(applyDelete)와 달리 흔적 없이 없어지는 게 취지라 리스트에서 완전히 뺀다 —
   /// 서버가 FK cascade로 댓글도 같이 지웠으므로 그 댓글의 합성 타임라인 항목도 함께 제거한다.
+  /// 그 알림을 놓쳤을 때도 같은 일을 한다(이 기기에서 삭제 예정 시각이 지나 지웠거나, 다시 받은
+  /// 히스토리에 없음 — Session._handleExpiredSecretTexts, [_reconcileSecretPage]). 평문 캐시는 Session·
+  /// SecretKeyStore가 이 방 화면과 상관없이 지운다.
   void applyExpire(String messageId) {
-    final removed = <String>[];
+    var removed = false;
     for (final m in messages) {
       if (m.id == messageId ||
           (m.type == MessageType.comment &&
               m.asComment?.messageId == messageId)) {
-        removed.add(m.type == MessageType.comment ? m.asComment!.id : m.id);
+        removed = true;
+        break;
       }
     }
     // 아무도 안 읽은 게시글을 지우면 서버가 이 경로(완전 삭제)로 알린다 — 고정 목록에서도 빼고,
@@ -848,12 +927,7 @@ class RoomChatController extends ChangeNotifier {
           (m.type == MessageType.comment &&
               m.asComment?.messageId == messageId),
     );
-    if (room.isSecret) {
-      for (final id in removed) {
-        unawaited(_session.secretSessionManager?.forgetDecryptedText(id));
-      }
-    }
-    if (removed.isNotEmpty || posts.isNotEmpty) notifyListeners();
+    if (removed || posts.isNotEmpty) notifyListeners();
   }
 
   /// 연결이 끊겼다가 다시 붙었을 때 Session이 호출한다. 끊긴 동안 놓쳤을 수 있는 메시지/댓글을
@@ -861,8 +935,19 @@ class RoomChatController extends ChangeNotifier {
   Future<void> refresh() async {
     if (pinnedPostsLoaded) unawaited(loadPinnedPosts());
     try {
-      final history = await _session.api!.fetchRoomMessages(room.id);
+      final generation = _secretCacheGeneration;
+      final history = await _session.api!.fetchRoomMessages(
+        room.id,
+        limit: _pageSize,
+      );
       await _session.decryptHistory(room, history);
+      // 비밀 대화: 끊긴 동안 서버가 자동 삭제·삭제한 메시지는 그 알림이 다시 오지 않는다 — 이 응답으로 맞춘다.
+      await _reconcileSecretPage(
+        history,
+        before: null,
+        limit: _pageSize,
+        sinceGeneration: generation,
+      );
       // 처음 불러오기가 실패했던 방이면, 이번에 받은 최근 페이지로 과거 페이지 커서를 잡고 오류를
       // 거둔다 — 안 그러면 목록은 보여도 위(보드는 아래)로 더 불러오기가 영영 안 된다.
       final recovering = error != null && _historyCursor == null;
@@ -894,13 +979,20 @@ class RoomChatController extends ChangeNotifier {
     try {
       var cursor = _historyCursor;
       for (var i = 0; i < maxPages; i++) {
+        final generation = _secretCacheGeneration;
         final history = await _session.api!.fetchRoomMessages(
           room.id,
           limit: pageSize,
           before: cursor,
         );
-        if (history.isEmpty) break;
         await _session.decryptHistory(room, history);
+        await _reconcileSecretPage(
+          history,
+          before: cursor,
+          limit: pageSize,
+          sinceGeneration: generation,
+        );
+        if (history.isEmpty) break;
         if (_mergeHistory(history)) notifyListeners();
         _advanceHistoryCursor(history);
         // 창 밖 부모(outOfWindow)는 페이지의 일부가 아니므로 개수/커서 계산에서 뺀다.
@@ -950,13 +1042,20 @@ class RoomChatController extends ChangeNotifier {
     try {
       var cursor = _historyCursor;
       for (var i = 0; i < maxPages; i++) {
+        final generation = _secretCacheGeneration;
         final history = await _session.api!.fetchRoomMessages(
           room.id,
           limit: pageSize,
           before: cursor,
         );
-        if (history.isEmpty) break;
         await _session.decryptHistory(room, history);
+        await _reconcileSecretPage(
+          history,
+          before: cursor,
+          limit: pageSize,
+          sinceGeneration: generation,
+        );
+        if (history.isEmpty) break;
         if (_mergeHistory(history)) notifyListeners();
         _advanceHistoryCursor(history);
         final inWindow = history.where((m) => !m.outOfWindow).toList();
@@ -988,6 +1087,11 @@ class RoomChatController extends ChangeNotifier {
     // 내가 안 보낸 것들에 대해 읽음 신호를 보낸다(서버가 최초 1회만 처리하므로 중복 호출은
     // 안전하다). 방을 처음 열 때(_load)와 실시간으로 새 메시지를 볼 때(feed) 모두 이 함수를
     // 거치므로 "실제로 화면에 나타난 시점"을 대체로 잘 근사한다.
+    final selfDestruct = room.secretSelfDestructSeconds;
+    final manager = _session.secretSessionManager;
+    // 끊겨 있으면 읽음 신호는 소켓에 쌓였다가 다시 붙을 때 서버에 닿고, 서버의 자동 삭제 카운트도 그때 시작한다 —
+    // 지금 시각으로 어림하면 서버보다 일찍 지우게 되므로, 붙어 있을 때만 어림한다(끊겨 있으면 서버 값을 기다린다).
+    final signalLive = _session.secretReadSignalLive;
     for (final m in messages) {
       if (m.senderId == _session.userId) continue;
       if (m.type != MessageType.text &&
@@ -996,6 +1100,17 @@ class RoomChatController extends ChangeNotifier {
         continue;
       }
       _session.chatSocket.markSecretMessageRead(room.id, m.id);
+      // 타이머가 켜진 방이면 서버는 지금부터 그만큼 뒤에 이 메시지를 지운다. 그 확정 알림
+      // (secret:message-read)을 끊겨서 못 받아도 이 기기에 평문이 남지 않게, 이 기기 기준 예정
+      // 시각을 먼저 캐시에 적어 둔다(서버가 아직 읽음을 확정해 주지 않은 메시지만 — 서버 값이 오면 그걸로 바뀐다).
+      if (selfDestruct != null &&
+          m.readAt == null &&
+          manager != null &&
+          signalLive) {
+        unawaited(
+          manager.noteLocalRead(m.id, Duration(seconds: selfDestruct)),
+        );
+      }
     }
   }
 

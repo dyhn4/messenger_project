@@ -26,7 +26,9 @@ class TeamInviteLink {
   final int? maxUses;
   final DateTime? lastUsedAt;
 
-  /// 지금 실제로 쓸 수 있는지(만료·폐기 안 됐고 인원이 남음) — 서버가 판정해서 내려준다.
+  /// 이 링크로 지금 새로 가입시킬 수 있는지(만료·폐기 안 됐고 인원이 남음) — 서버가 판정해서 내려준다.
+  /// 인원이 다 차도 [isOpen]인 동안은 이미 가입한 사람이 이 링크로 다른 기기를 연결·설치할 수 있다
+  /// (server/src/pairing.js).
   final bool valid;
 
   /// 상대방에게 그대로 보내면 되는 안내 페이지 주소(평문 HTTP, 자체 서명 인증서 경고 없음).
@@ -83,10 +85,19 @@ class TeamInviteLink {
     externalUrl: json['externalUrl'] as String?,
   );
 
-  /// "만료됨" / "취소됨" / "만료까지 3일" 처럼 상태를 한 줄로.
+  /// 아직 취소·만료되지 않았는지 — 인원이 다 찬 링크도 이 동안은 연결·설치에 쓰이므로 취소할 수
+  /// 있어야 한다.
+  bool get isOpen => !revoked && expiresAt.isAfter(DateTime.now());
+
+  /// 정한 가입 인원이 다 찼는지(인원 제한이 없는 예전 링크는 늘 false).
+  bool get isFull => maxUses != null && usedCount >= maxUses!;
+
+  /// "만료됨" / "취소됨" / "인원 마감" / "만료까지 3일" 처럼 상태를 한 줄로. 인원이 다 찬 링크도
+  /// 만료되면 "만료됨"이다 — 그때부터는 연결·설치에도 못 쓴다.
   String get statusLabel {
     if (revoked) return '취소됨';
-    if (maxUses != null && usedCount >= maxUses!) return '인원 마감';
+    if (!isOpen) return '만료됨';
+    if (isFull) return '인원 마감';
     if (!valid) return '만료됨';
     final remaining = expiresAt.difference(DateTime.now());
     if (remaining.inHours < 1) return '곧 만료';

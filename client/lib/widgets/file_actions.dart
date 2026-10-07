@@ -214,6 +214,8 @@ class FileActions {
   /// 기본 이미지 앱)으로 연다. 다운로드 폴더를 아직 안 정했으면 임시 폴더에 받는다.
   /// 브라우저로 URL을 여는 대신 파일로 받아서 여는 이유: 비밀 대화는 서버의 파일이 암호문
   /// 이라 그냥 열면 못 보고, 평문 방도 브라우저가 아니라 기본 앱으로 열리는 게 자연스럽다.
+  /// 즐겨찾기의 파일은 이미지가 아니어도 이걸로 열리니, 실행될 수 있는 형식은 열지 않고 폴더에서
+  /// 보여 준다(openLocalFile).
   Future<void> openOriginal(BuildContext context) async {
     try {
       final bytes = await _bytes();
@@ -224,7 +226,10 @@ class FileActions {
         bytes: bytes,
         reuseIdentical: true,
       );
-      await openLocalFile(path);
+      final notice = await openLocalFile(path);
+      if (notice != null && context.mounted) {
+        showAppToast(context, notice, duration: const Duration(seconds: 4));
+      }
     } catch (e) {
       if (context.mounted) showAppToast(context, '원본을 열지 못했습니다: $e');
     }

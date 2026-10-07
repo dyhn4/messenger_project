@@ -242,10 +242,30 @@ export const inviteLinks = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     // 여러 기기(여러 신입)가 같은 링크로 나눠 받을 수 있어 1회용이 아니다 — 매번 쓸 때마다 갱신.
     usedCount: integer('used_count').notNull().default(0),
+    // 이 링크로 사내망 밖에서 가입할 수 있는 사람 수(다 차면 밖에서는 이 링크로 가입 불가). null은 이 칸이 생기기
+    // 전에 만든 링크(제한 없음)뿐 — 새 링크는 늘 값이 있다(invites.js). 링크 하나가 새도 끝없이 가입되지 않게.
+    maxUses: integer('max_uses'),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('invite_links_created_by_idx').on(t.createdBy)],
+);
+
+/**
+ * 업로드한 파일과 올린 사람 — /api/upload가 한 줄씩 남긴다(upload.js). 파일을 실제로 지우는 유일한 곳인 비밀 대화 자동
+ * 삭제(secretExpiry.js)가 "보낸 사람이 직접 올린 파일"만 지우게 하려는 것이다(예전엔 메시지에 적힌 아무 파일이나 지워서,
+ * 남의 파일 링크를 비밀 대화에 붙여 보내면 그 파일이 지워졌다). 이 표가 생기기 전에 올린 파일은 행이 없다 — 그런 파일은
+ * 누가 올렸는지 모르므로 지우지 않는다.
+ */
+export const uploads = pgTable(
+  'uploads',
+  {
+    // uploads 폴더 안의 저장 이름(<uuid>.<확장자>) — DB의 /uploads/<이름> 경로의 마지막 부분.
+    fileName: text('file_name').primaryKey(),
+    uploaderId: uuid('uploader_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('uploads_uploader_id_idx').on(t.uploaderId)],
 );
 
 /**
@@ -310,10 +330,13 @@ export const rooms = pgTable(
     // 비밀 대화(E2EE) 방인지 — 새 RoomType을 만들지 않고 dm 위에 얹는 플래그로 둔다(isPublic과
     // 같은 방식). true면 messages/messageComments.text는 클라이언트가 만든 암호문 JSON이다.
     isSecret: boolean('is_secret').notNull().default(false),
-    // 비밀 대화에서 "상대방도 나가기"를 체크하지 않고 혼자 나간 경우, 남은 멤버 쪽 화면에서
-    // Room.displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있도록 나간 사람의
-    // 정보를 남겨둔다(비밀 대화 DM은 멤버가 2명뿐이라 한 명이 나가면 members에선 완전히
-    // 빠지므로, 이 컬럼이 없으면 누가 나갔었는지 알 방법이 없다).
+    // 1:1 대화(평문·비밀 — 나와의 대화는 빼고)에서 한 사람이 멤버에서 빠졌을 때 — 비밀 대화를 "상대방도
+    // 나가기" 없이 혼자 나갔거나, 팀에서 제외돼 그 팀의 모든 방에서 빠졌을 때(db/queries/rooms.js
+    // removeMemberFromRoom) — 남은 멤버 쪽 화면에서 Room.displayName()이 "(알 수 없음)" 대신
+    // "OOO (나갔음)"을 보여줄 수 있도록 빠진 사람의 정보를 남겨둔다(1:1 대화는 멤버가 2명뿐이라 한 명이
+    // 빠지면 members에선 완전히 사라지므로, 이 컬럼이 없으면 누가 있었는지 알 방법이 없다). 평문 1:1
+    // 대화의 "나가기"는 멤버십을 그대로 두는 숨기기라 여기 남지 않고, 빠졌던 사람이 다시 들어오면 지운다
+    // (rooms.js의 1:1 대화 시작). 컬럼 이름은 비밀 대화에만 쓰던 시절 그대로다.
     secretDepartedMemberId: uuid('secret_departed_member_id'),
     secretDepartedMemberName: text('secret_departed_member_name'),
     // 그룹채팅 아이콘 — 만들 때만 고를 수 있다(new_chat_screen.dart). 'members'(기본값, null과
@@ -374,7 +397,7 @@ export const roomMembers = pgTable(
     // 멤버에게는 영향이 없다(즐겨찾기/뮤트와 같은 방식). null이면 원래 이름을 쓴다.
     customName: text('custom_name'),
     // 평문 DM의 "채팅방 숨기기"/"채팅방 나가기" — 멤버십은 그대로 두고 이 플래그만 켠다.
-    // 원래는 removeRoomMember로 진짜 멤버를 뺐는데, DM은 멤버가 나+상대 둘뿐이라 그러면
+    // 원래는 진짜로 멤버에서 뺐는데(지금의 removeRoomMembers), DM은 멤버가 나+상대 둘뿐이라 그러면
     // 상대 쪽 화면에서 방 이름이 "(알 수 없음)"이 되고 상대가 보낸 메시지도 안 받게 되는
     // 문제가 있었다(내 소켓이 그 방에서 나가버림) — 상대에게는 아무 영향이 없어야 하므로
     // 이제 순전히 내 개인 설정으로만 다룬다(즐겨찾기/뮤트와 같은 방식). 상대가 새 메시지를

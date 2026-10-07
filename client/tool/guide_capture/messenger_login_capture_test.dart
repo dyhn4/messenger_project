@@ -169,7 +169,7 @@ void main() {
     );
     await tester.tap(find.text('계정이 없으신가요? 회원가입'));
     await settleGuide(tester);
-    final id = find.widgetWithText(TextField, '아이디 입력 (4~20자)');
+    final id = find.widgetWithText(TextField, '아이디 입력 (영문·숫자 4~20자)');
     await tester.enterText(id, 'minji.kim');
     await tester.tap(find.text('중복 확인'));
     await settleGuide(tester);

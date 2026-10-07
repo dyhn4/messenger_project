@@ -19,9 +19,13 @@ import { findUserById } from './db/queries/users.js';
 import { toMessageDto } from './messages.js';
 import { canManageTeam, graphemeLength } from './permissions.js';
 import { formatCursor } from './pageCursor.js';
-import { parsePollListQuery } from './pollListRules.js';
+import { emitPollVoteUpdate, parsePollListQuery, pollIsClosedAt, pollRoomUpdate, toPollDto } from './pollListRules.js';
 import { postSystemMessage, roomDisplayName } from './rooms.js';
 import { sendUserMessage } from './sendMessage.js';
+
+// 투표 DTO 조립은 DB 없이 테스트하려고 pollListRules.js로 옮겼다 — 새 투표 메시지를 만드는 sendMessage.js 등은
+// 지금처럼 여기서 가져다 쓴다.
+export { toPollDto };
 
 // 투표 입력 제한 — 클라이언트 입력창(maxLength)과 같은 단위(글자 = 이모지 한 덩어리 1자)로 센다.
 export const POLL_TITLE_MAX = 100;
@@ -88,46 +92,7 @@ export function parsePollFields(body) {
 
 /** 마감 여부 — 일찍 마감했거나 마감 시각이 지났으면 닫힌 것(서버가 계산해서 내려준다). */
 export function isPollClosed(poll) {
-  return !!poll.closedAt || new Date(poll.closesAt).getTime() <= Date.now();
-}
-
-/**
- * 메시지 DTO에 붙는 `poll` 객체 — 행([poll])·보기([options])·표([votes], 이 투표의 전부)를 받아 조립한다.
- * 익명이면 누가 골랐는지(voters)는 키 자체를 내리지 않고 개수만 낸다. myOptionIds는 [viewerId]가 고른 보기,
- * viewerId가 null이면(소켓 브로드캐스트처럼 모두에게 같은 DTO) 빈 배열이다.
- */
-export function toPollDto(poll, options, votes, { viewerId = null, favorite = false } = {}) {
-  const votesByOption = new Map();
-  for (const v of votes) {
-    const list = votesByOption.get(v.optionId) ?? [];
-    list.push(v);
-    votesByOption.set(v.optionId, list);
-  }
-  return {
-    id: poll.id,
-    title: poll.title,
-    description: poll.description ?? null,
-    anonymous: !!poll.anonymous,
-    multiple: !!poll.multiple,
-    closesAt: new Date(poll.closesAt).getTime(),
-    closedAt: poll.closedAt ? new Date(poll.closedAt).getTime() : null,
-    closed: isPollClosed(poll),
-    creatorId: poll.creatorId ?? null,
-    voterCount: new Set(votes.map((v) => v.userId)).size,
-    options: options.map((o) => {
-      const optionVotes = votesByOption.get(o.id) ?? [];
-      return {
-        id: o.id,
-        text: o.text,
-        voteCount: optionVotes.length,
-        ...(poll.anonymous
-          ? {}
-          : { voters: optionVotes.map((v) => ({ userId: v.userId, name: v.name ?? v.username ?? '알 수 없음' })) }),
-      };
-    }),
-    myOptionIds: viewerId ? votes.filter((v) => v.userId === viewerId).map((v) => v.optionId) : [],
-    favorite: !!favorite,
-  };
+  return pollIsClosedAt(poll);
 }
 
 /** 투표 행들을 보는 사람 기준 DTO로 — `Map<pollId, dto>`. 보기·표·즐겨찾기를 한 번씩만 조회한다. */
@@ -171,7 +136,10 @@ export async function attachPolls(messageRows, viewerId = null) {
   });
 }
 
-/** 방 전체에 뿌리는 poll:updated용 poll — 받는 사람마다 다른 값(myOptionIds/favorite)은 중립값으로 채운다. */
+/**
+ * poll:updated에 싣는 poll — 방 전체와 투표한 사람의 기기에 같은 값이 간다. 받는 사람마다 다른 값(myOptionIds/favorite)은
+ * 중립값(빈 배열·false)으로 채우고, 익명이면 voters 키도 없다(toPollDto).
+ */
 async function neutralPollDto(pollRow) {
   return (await loadPollDtos([pollRow], null)).get(pollRow.id);
 }
@@ -311,13 +279,15 @@ export function createPollsRouter(io) {
     if (outcome.missing) return res.status(404).json({ error: '투표를 찾을 수 없습니다.' });
     if (outcome.closed) return res.status(400).json({ error: '마감된 투표입니다.' });
 
-    io.to(poll.roomId).emit('poll:updated', {
+    // 방에는 집계만, "내가 고른 보기"는 내 기기들(user 룸)에만 — 익명 투표에서 누가 무엇을 골랐는지가
+    // 소켓으로 방 전체에 새지 않게(pollListRules.js의 emitPollVoteUpdate).
+    emitPollVoteUpdate(io, {
       roomId: poll.roomId,
       messageId: message.id,
       pollId: poll.id,
       poll: await neutralPollDto(poll),
-      actorId: req.user.sub,
-      actorOptionIds: chosen,
+      voterId: req.user.sub,
+      optionIds: chosen,
     });
     res.json((await loadPollDtos([poll], req.user.sub)).get(poll.id));
   });
@@ -339,14 +309,10 @@ export function createPollsRouter(io) {
     const closed = await closePollEarly(poll.id, req.user.sub);
     if (!closed) return res.status(400).json({ error: '이미 마감된 투표입니다.' });
 
-    io.to(poll.roomId).emit('poll:updated', {
-      roomId: poll.roomId,
-      messageId: message.id,
-      pollId: poll.id,
-      poll: await neutralPollDto(closed),
-      actorId: null,
-      actorOptionIds: null,
-    });
+    io.to(poll.roomId).emit(
+      'poll:updated',
+      pollRoomUpdate({ roomId: poll.roomId, messageId: message.id, pollId: poll.id, poll: await neutralPollDto(closed) }),
+    );
     const closer = await findUserById(req.user.sub);
     await postSystemMessage(
       io,

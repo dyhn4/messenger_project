@@ -69,6 +69,8 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
 
   Future<void> _load() async {
     try {
+      // 회원 목록(GET /users)은 계정 등급 관리자·서버 운영자에게만 서버 전체를 준다(그 밖에는 팀을 같이 쓰는 사람만) —
+      // 조직도도 같은 사람만 열 수 있어서(GET /org-chart/teams) 여기서는 "미소속" 회원까지 다 받는다.
       final results = await Future.wait([
         widget.session.fetchOrgChartTeams(),
         widget.session.fetchAllUsers(),

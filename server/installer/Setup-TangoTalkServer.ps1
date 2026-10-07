@@ -1,8 +1,9 @@
 ﻿<#
 .SYNOPSIS
   TangoTalk 서버 설치 프로그램의 실제 작업 — messenger-server.iss의 [Run]에서 설치 마지막 단계로
-  실행된다. PostgreSQL 무인 설치, 앱 전용 DB 계정/데이터베이스 생성, .env 작성, 마이그레이션
-  적용, 방화벽 규칙 추가, 서버 실행 방식(백그라운드 서비스/콘솔) 등록까지 전부 처리한다.
+  실행된다. PostgreSQL 무인 설치, 설치 폴더 접근 권한 잠금(SYSTEM/Administrators 전용 —
+  Folder-Acl.ps1), 앱 전용 DB 계정/데이터베이스 생성, .env 작성, 마이그레이션 적용, 방화벽 규칙
+  추가, 서버 실행 방식(백그라운드 서비스/콘솔) 등록까지 전부 처리한다.
 
 .DESCRIPTION
   모든 단계가 "지금 상태를 먼저 확인하고, 이미 되어 있으면 건너뛴다"는 원칙으로 되어 있다 —
@@ -68,7 +69,8 @@ function Fail {
   # 않도록 메시지 박스도 띄운다.
   Add-Type -AssemblyName System.Windows.Forms
   [System.Windows.Forms.MessageBox]::Show(
-    "서버 설치 중 문제가 발생했습니다:`n`n$Message`n`n자세한 내용은 $LogFile 를 확인하세요. " +
+    "서버 설치 중 문제가 발생했습니다:`n`n$Message`n`n자세한 내용은 $LogFile 를 확인하세요(설치 폴더가 " +
+    "관리자 전용으로 잠긴 뒤에는 메모장을 관리자 권한으로 실행해서 여세요). " +
     "이 창을 닫은 뒤 관리자 권한 PowerShell에서 이 스크립트를 다시 실행하면 이어서 진행됩니다.",
     'TangoTalk 서버 설치', 'OK', 'Error'
   ) | Out-Null
@@ -81,21 +83,26 @@ function New-RandomPassword {
   -join ((1..24) | ForEach-Object { [char]($chars | Get-Random) })
 }
 
+# $SecretsDir은 1단계에서 이 함수를 부르기 "전에" 관리자 전용으로 잠가 둔다 — 그래서 새 파일은 만들어지는
+# 순간부터 그 권한을 물려받는다(파일을 먼저 쓰고 나중에 잠그면 그 사이에 다른 계정이 열어둘 수 있다).
 function Get-OrCreateSecret {
   param([string]$FileName)
   $path = Join-Path $SecretsDir $FileName
   if (Test-Path $path) {
     return (Get-Content $path -Raw).Trim()
   }
-  if (-not (Test-Path $SecretsDir)) {
-    New-Item -ItemType Directory -Path $SecretsDir -Force | Out-Null
-  }
   $value = New-RandomPassword
   Set-Content -Path $path -Value $value -NoNewline -Encoding ascii
-  # 관리자(SYSTEM/Administrators)만 읽을 수 있게 ACL을 좁힌다 — server/src/config.js의
-  # resolveSecret이 .jwt-secret 등을 0o600으로 저장하는 것과 같은 취지를 Windows 방식으로.
-  icacls $path /inheritance:r /grant:r 'SYSTEM:(R)' 'Administrators:(R)' | Out-Null
   return $value
+}
+
+# 설치를 멈출 정도는 아니지만 운영자가 꼭 알아야 하는 일(접근 권한을 다 못 잠금 등) — 로그에 남기고, 설치
+# 마지막에 한 번 창으로도 보여준다(Inno의 runhidden이라 로그만 남기면 아무도 못 본다).
+$SetupWarnings = New-Object System.Collections.Generic.List[string]
+function Write-SetupWarning {
+  param([string]$Message)
+  $SetupWarnings.Add($Message)
+  Write-Log "  경고: $Message"
 }
 
 function Invoke-Psql {
@@ -119,6 +126,29 @@ function Test-PortFree {
   return (-not $inUse)
 }
 
+# 서버 서비스(NSSM)의 환경 변수에 NODE_ENV=production을 넣는다 — 되면 $true. Update-Server.ps1에도 똑같이 들어 있다 —
+# 고치면 둘 다 고치고 tests\Service-Env.Tests.ps1을 돌릴 것(둘이 같은지도 본다).
+# - Express는 NODE_ENV가 production이 아니면, 처리하지 못한 오류의 응답에 스택 트레이스(서버의 절대 경로)를 그대로
+#   싣는다 — 서버를 인터넷에 열면 누구나 볼 수 있다. 서버 코드에는 NODE_ENV를 따로 보는 곳이 없다.
+# - 이 스크립트 자신의 환경 변수($env:NODE_ENV)로 넣으면 안 된다 — 같은 프로세스에서 도는 npm install(Update-Server.ps1)이
+#   devDependencies를 빼고 설치해(npm 7+) 마이그레이션에 쓰는 drizzle-kit이 깨진다. 그래서 서비스 설정에만 넣는다.
+# - NSSM은 서비스를 시작할 때 서비스 키의 Parameters\AppEnvironmentExtra(REG_MULTI_SZ, 한 줄에 "이름=값" 하나)를 읽어 환경
+#   변수로 더한다. nssm set으로 여러 줄을 한 번에 넣는 방법은 NSSM 버전마다 달라(번들한 2.24에서는 확인하지 못했다 — 인자를
+#   공백으로 이어 한 줄로 만들면 NODE_ENV가 조용히 안 들어간다) 그 값을 직접 읽고 쓴다. 관리자가 따로 넣어 둔 다른 변수는
+#   그대로 두고 NODE_ENV 줄만 바꾼다(nssm get은 파이프로 받으면 UTF-16으로 출력해 깨져 읽히기도 한다).
+# - 서비스는 시작할 때 이 값을 읽으므로 시작/재시작 "전에" 부른다. 서비스 키가 없으면(NSSM 서비스가 아니면) 만들지 않고 $false.
+function Set-NodeServiceProductionEnv {
+  $paramsKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$NodeServiceName\Parameters"
+  try {
+    $current = (Get-Item -LiteralPath $paramsKey -ErrorAction Stop).GetValue('AppEnvironmentExtra')
+    $entries = [string[]](@(@($current) | Where-Object { $_ -and $_ -notmatch '^NODE_ENV=' }) + 'NODE_ENV=production')
+    Set-ItemProperty -LiteralPath $paramsKey -Name 'AppEnvironmentExtra' -Value $entries -Type MultiString -ErrorAction Stop
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 # 본문 전체를 try/catch로 감싼다 — 이 안 어디서든(Fail을 명시적으로 부르지 않은 예상 밖 오류
 # 포함) 예외가 나면 여기서 잡아서 반드시 로그+오류 창으로 남긴다. 이게 없으면(예전 버전)
 # $ErrorActionPreference='Stop' 때문에 예상 못 한 오류가 스크립트를 그냥 조용히 죽여버리고
@@ -131,7 +161,42 @@ try {
 if (-not (Test-Path $AppDir)) { Fail "설치 경로($AppDir)를 찾을 수 없습니다." }
 Write-Log "=== TangoTalk 서버 설정 시작 (RunMode=$RunMode) ==="
 
+# 폴더 접근 권한 잠금 공용 함수(이 스크립트와 같은 폴더에 함께 설치된다 — 자세한 이유는 Folder-Acl.ps1).
+. (Join-Path $PSScriptRoot 'Folder-Acl.ps1')
+# 설치 경로가 링크(정션/심볼릭 링크)면 서버·DB·LiveKit과 그 비밀값이 링크가 가리키는 "다른" 폴더에서
+# 실행·저장되고, SYSTEM/NetworkService 서비스로 도는 그 코드를 아무나 바꿔치기할 수 있다(일반 사용자도 C:\에
+# 폴더·링크를 만들 수 있어 관리자가 설치하기 전에 심어둘 수 있다). messenger-server.iss의 PrepareToInstall이
+# 설치 전에 막지만, 설치 도중 바꿔치기까지 대비해 여기서도 확인하고 더 진행하지 않는다.
+if (Test-ReparsePoint -Path $AppDir) {
+  Fail "설치 경로($AppDir)가 링크(정션/심볼릭 링크)라 보안을 위해 설치를 중단합니다. 이 폴더(링크)를 지우고 다시 설치하세요."
+}
+# 설치 경로가 드라이브 최상위나 Program Files 자체처럼 다른 것과 함께 쓰는 폴더면, 잠그는 순간 그 안의 다른
+# 프로그램·파일까지 관리자 전용이 돼버리므로 잠그지 않고 경고만 남긴다(네트워크/FAT 드라이브도 마찬가지).
+$aclKind = Get-FolderLockKind -Path $AppDir
+$lockAcl = ($aclKind -eq 'Local')
+if (-not $lockAcl) {
+  Write-SetupWarning ("설치 경로($AppDir)가 $($AclKindText[$aclKind])라서 폴더 접근 권한을 잠그지 않았습니다 — " +
+    '이 PC의 다른 계정이 서버 파일을 바꾸거나 비밀값을 읽을 수 있습니다. 전용 폴더(예: C:\TangoTalk-Server)에 다시 설치하는 것을 권장합니다.')
+}
+
 # ── 1. 비밀값(DB 비밀번호) 확인/생성 — 이미 있으면 재사용, 없으면 새로 생성 ──────
+# 비밀값 파일을 쓰기 "전에" secrets 폴더부터 SYSTEM/Administrators 전용으로 잠근다 — 최초 설치 때는 설치
+# 폴더 전체가 아직 C:\의 넓은 권한을 물려받은 상태다(전체 잠금은 PostgreSQL 설치 직후인 2.5단계). 설치
+# 경로 자체를 잠글 수 없는 경우(위 경고)에도 이 폴더는 우리 전용이라 잠글 수 있으면 잠근다.
+if (-not (Test-Path $SecretsDir)) {
+  New-Item -ItemType Directory -Path $SecretsDir -Force | Out-Null
+}
+# 비밀값 폴더가 링크면 DB 비밀번호가 링크가 가리키는 다른 폴더에 써진다 — 멈춘다(최초 설치라 설치 폴더가 아직
+# 안 잠긴 상태라, 아무나 미리 {app}\secrets를 정션으로 만들어 뒀을 수 있다). 잠글 수 없는 경로면(네트워크/FAT
+# 등) 최소한 경고는 남긴다 — 예전 버전은 Local이 아니면 조용히 건너뛰어 비밀번호가 평문으로 노출됐다.
+$secretsKind = Get-FolderLockKind -Path $SecretsDir
+if ($secretsKind -eq 'Local') {
+  foreach ($warning in @(Set-AdminOnlyAcl -Path $SecretsDir)) { Write-SetupWarning $warning }
+} elseif (Test-ReparsePoint -Path $SecretsDir) {
+  Fail "비밀값 폴더($SecretsDir)가 링크(정션/심볼릭 링크)라 DB 비밀번호가 엉뚱한 폴더에 써질 수 있어 설치를 중단합니다. 이 폴더(링크)를 지우고 다시 설치하세요."
+} else {
+  Write-SetupWarning "비밀값 폴더($SecretsDir)를 관리자 전용으로 잠그지 못했습니다($($AclKindText[$secretsKind])) — 이 PC의 다른 계정이 DB 비밀번호를 읽을 수 있습니다. 전용 폴더(예: C:\TangoTalk-Server)에 설치하는 것을 권장합니다."
+}
 $superPw = Get-OrCreateSecret -FileName 'db-superuser.pw'
 $appPw = Get-OrCreateSecret -FileName 'db-app.pw'
 Write-Log '1/7 DB 비밀번호 준비 완료'
@@ -187,6 +252,19 @@ for ($i = 0; $i -lt 15; $i++) {
 }
 if (-not $ready) { Fail "PostgreSQL이 $PgPort 포트에서 응답하지 않습니다(30초 대기함)." }
 
+# ── 2.5 설치 폴더 접근 권한 잠금 ─────────────────────────────────────────
+# 설치 폴더 전체를 SYSTEM/Administrators 전용으로 잠근다(이유·예외는 Folder-Acl.ps1의 Protect-InstallDir).
+# 이후 단계가 만드는 .env·LiveKit 비밀값·livekit.yaml, 서버가 첫 실행 때 만드는 .jwt-secret·
+# .db-encryption-key·.web-push-vapid.json·certs\key.pem, 첨부파일·로그도 전부 이 권한을 물려받는다.
+# PostgreSQL 설치 "뒤"에 하는 이유: EDB 설치 프로그램은 initdb 등을 제한된 토큰으로 돌리는데, 그 과정이 이
+# 폴더의 원래(넓은) 권한에 기대는지는 검증하지 못했다 — 설치 도중의 환경은 예전 그대로 두고 끝난 직후 잠근다.
+# (재설치·업그레이드는 PostgreSQL 단계를 건너뛰므로 시작하자마자 잠긴다.)
+if ($lockAcl) {
+  Write-Log '2.5/7 설치 폴더 접근 권한을 SYSTEM/Administrators 전용으로 잠그는 중(파일이 많아 1~2분 걸릴 수 있음)...'
+  foreach ($warning in @(Protect-InstallDir -AppDir $AppDir -PgServiceName $PgServiceName)) { Write-SetupWarning $warning }
+  Write-Log '  접근 권한 잠금 완료'
+}
+
 # ── 3. 앱 전용 DB 역할/데이터베이스 생성(없을 때만) ─────────────────────
 Write-Log '3/7 DB 역할/데이터베이스 확인 중...'
 $roleExists = Invoke-Psql -SuperPassword $superPw -ScalarOut -Sql "SELECT 1 FROM pg_roles WHERE rolname='$DbAppUser'"
@@ -219,23 +297,13 @@ if (-not (Test-Path $EnvFile)) {
 } else {
   Write-Log '4/7 .env 이미 존재 — 그대로 둠'
 }
-# .env는 DB 비밀번호(DATABASE_URL)를 평문으로 담고 있어 secrets\db-app.pw와 똑같이 민감한데,
-# Get-OrCreateSecret과 달리 지금까지 ACL을 안 좁혀서 이 PC의 아무 로그인 계정이나 메모장으로
-# 열어볼 수 있었다 — 새로 만든 경우든(위) 이미 있던 경우든(재설치) 항상 적용해서, 예전에
-# 만들어진 .env도 이 스크립트를 다시 돌리면 뒤늦게라도 잠기게 한다.
-icacls $EnvFile /inheritance:r /grant:r 'SYSTEM:(R)' 'Administrators:(R)' | Out-Null
-# server/src/config.js의 resolveSecret이 fs.writeFileSync(..., { mode: 0o600 })으로 만드는
-# .jwt-secret/.db-encryption-key도 같은 문제다 — 0o600은 POSIX 권한 비트라 Windows NTFS에서는
-# 실제로 아무것도 제한하지 않는다. 이 두 파일은 서버가 처음 실행될 때 생기므로 최초 설치
-# 시점엔 아직 없을 수 있지만(다음 재실행 때 이 블록이 마저 잠근다), 업데이트 재설치라면
-# 이미 있을 것이다.
-foreach ($secretName in @('.jwt-secret', '.db-encryption-key')) {
-  $secretPath = Join-Path $ServerDir $secretName
-  if (Test-Path $secretPath) {
-    icacls $secretPath /inheritance:r /grant:r 'SYSTEM:(R)' 'Administrators:(R)' | Out-Null
-  }
-}
-Write-Log '  비밀값 파일 접근 권한을 관리자 전용으로 좁혔습니다(.env 포함)'
+# .env는 DB 비밀번호(DATABASE_URL)를 평문으로 담고 있다 — 따로 잠그지 않고 2.5단계에서 잠근 설치 폴더
+# 권한(SYSTEM/Administrators 전용)을 그대로 물려받는다. server/src/config.js의 resolveSecret이
+# { mode: 0o600 }으로 만드는 .jwt-secret 등도 마찬가지다(0o600은 POSIX 권한 비트라 NTFS에서는 아무것도 막지
+# 않는다). 예전 버전은 여기서 파일마다 'Administrators:(R)'처럼 이름으로 잠갔는데, (1) 이미 있던 두 파일만
+# 잠그고 나중에 생기는 비밀값(.livekit-secret, .web-push-vapid.json, certs\key.pem)은 놓쳤고, (2) 읽기
+# 전용이라 관리자도 "첨부파일 저장소"/"외부 접속 주소"에서 .env를 고쳐 쓰지 못했고, (3) 그룹 이름은 Windows
+# 언어마다 달라 못 찾으면 icacls가 조용히 실패했다. 그 개별 권한은 2.5단계가 상속으로 되돌린다.
 
 # ── 4.5 화상회의(LiveKit) 설정 ───────────────────────────────────────────
 # Node 서버와 LiveKit이 **같은 API 비밀값**을 알아야 한다: 서버는 그 값으로 참가 토큰을
@@ -356,8 +424,16 @@ if (Test-Path $LiveKitExe) {
 }
 
 if ($RunMode -eq 'service') {
+  # 운영 모드(NODE_ENV=production)로 돌게 한다(이유는 Set-NodeServiceProductionEnv). 예전 버전이 등록한 서비스에는 이 값이
+  # 없으므로 기존 서비스도 재시작 전에 맞춘다 — 기존 서버는 이 설치 프로그램을 다시 실행할 때 여기서 처음 들어간다.
+  # 직접 고치는 방법은 nssm edit(설정 창)으로 안내한다 — "nssm set … AppEnvironmentExtra 값"은 그 칸을 통째로 바꿔서 관리자가
+  # 넣어 둔 다른 환경 변수까지 지운다(Set-NodeServiceProductionEnv가 일부러 다른 줄을 남기는 이유).
+  $nodeEnvWarning = "서버 서비스($NodeServiceName)에 NODE_ENV=production을 넣지 못했습니다 — 처리하지 못한 오류가 나면 응답에 " +
+    "서버 내부 경로가 보일 수 있습니다. 관리자 권한 PowerShell에서 & `"$NssmExe`" edit $NodeServiceName 을 실행해 Environment 탭에 " +
+    "NODE_ENV=production 한 줄을 더하고(다른 줄은 그대로 두세요) [Edit service]를 누른 뒤 시작 메뉴 `"서버 재시작`"을 누르세요."
   $existing = Get-Service -Name $NodeServiceName -ErrorAction SilentlyContinue
   if ($existing) {
+    if (-not (Set-NodeServiceProductionEnv)) { Write-SetupWarning $nodeEnvWarning }
     & $NssmExe restart $NodeServiceName | Out-Null
     Write-Log "7/7 기존 서비스($NodeServiceName) 재시작함(새 코드 반영)"
   } else {
@@ -366,14 +442,24 @@ if ($RunMode -eq 'service') {
     & $NssmExe set $NodeServiceName AppStdout (Join-Path $ServerDir 'service-out.log')
     & $NssmExe set $NodeServiceName AppStderr (Join-Path $ServerDir 'service-err.log')
     & $NssmExe set $NodeServiceName Start SERVICE_AUTO_START
+    if (-not (Set-NodeServiceProductionEnv)) { Write-SetupWarning $nodeEnvWarning }
     & $NssmExe start $NodeServiceName | Out-Null
     Write-Log "7/7 백그라운드 서비스($NodeServiceName)로 등록하고 시작함"
   }
 } else {
-  Write-Log '7/7 콘솔 모드 선택됨 — 시작 메뉴의 "서버 콘솔로 실행"으로 직접 실행하세요.'
+  Write-Log '7/7 콘솔 모드 선택됨 — 시작 메뉴의 "서버 콘솔로 실행"으로 직접 실행하세요(관리자 권한 확인 창이 뜹니다).'
 }
 
 Write-Log '=== TangoTalk 서버 설정 완료 ==='
+
+if ($SetupWarnings.Count -gt 0) {
+  Add-Type -AssemblyName System.Windows.Forms
+  [System.Windows.Forms.MessageBox]::Show(
+    "서버 설치는 끝났지만 확인할 것이 있습니다:`n`n- $($SetupWarnings -join "`n- ")`n`n" +
+    "자세한 내용은 $LogFile 를 확인하세요(관리자 전용 파일이라 메모장을 관리자 권한으로 실행해서 여세요).",
+    'TangoTalk 서버 설치', 'OK', 'Warning'
+  ) | Out-Null
+}
 
 } catch {
   # 위 어디서든 Fail()을 거치지 않고 터진 예외는 전부 여기서 받는다 — Fail()과 똑같이
@@ -384,7 +470,8 @@ Write-Log '=== TangoTalk 서버 설정 완료 ==='
   Add-Type -AssemblyName System.Windows.Forms
   [System.Windows.Forms.MessageBox]::Show(
     "서버 설치 중 예상하지 못한 오류가 발생했습니다:`n`n$($_.Exception.Message)`n`n" +
-    "자세한 내용은 $LogFile 를 확인하세요. 이 창을 닫은 뒤 관리자 권한 PowerShell에서 이 " +
+    "자세한 내용은 $LogFile 를 확인하세요(설치 폴더가 관리자 전용으로 잠긴 뒤에는 메모장을 관리자 권한으로 " +
+    "실행해서 여세요). 이 창을 닫은 뒤 관리자 권한 PowerShell에서 이 " +
     "스크립트를 다시 실행하면 이어서 진행됩니다.",
     'TangoTalk 서버 설치', 'OK', 'Error'
   ) | Out-Null

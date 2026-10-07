@@ -1986,7 +1986,8 @@ class _AutomationFlowEditorState extends State<_AutomationFlowEditor> {
         fields.add(
           Text(
             "'자동화'가 보낸 메시지로 올라가 안읽음·알림이 갑니다. "
-            '메시지 앞에 [규칙 이름]과 업무 번호·제목이 붙습니다.',
+            '메시지 앞에 [규칙 이름]과 업무 번호·제목이, 끝에 (실행한 사람: 이름)이 붙습니다. '
+            '이 규칙을 저장한 사람이 그 대화방·프로젝트 권한을 잃으면 규칙이 저절로 꺼집니다.',
             style: TextStyle(fontSize: 11, color: hint),
           ),
         );

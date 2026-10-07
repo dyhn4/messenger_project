@@ -1,11 +1,17 @@
 import { Router } from 'express';
 import { teamAccess } from './access.js';
+import { RateLimiter, tooMany } from './authGuard.js';
 import {
   DAY_MS,
   KST_OFFSET_MS,
+  MAX_EXDATES,
+  OCCURRENCE_MAX_MS,
+  QUERY_MAX_MS,
+  QUERY_MIN_MS,
   alignStartToRecurrence,
   dateStringOf,
   expandOccurrences,
+  fillOccurrenceBudget,
   normalizeExdates,
   occurrenceIndex,
   parseDateString,
@@ -74,6 +80,19 @@ const DESCRIPTION_MAX = 500;
 const LOCATION_MAX = 50;
 const ATTENDEE_MAX = 200;
 const QUERY_SPAN_MAX_MS = 62 * DAY_MS;
+// 조회 구간이 놓일 수 있는 범위(QUERY_MIN_MS·QUERY_MAX_MS)와 회차가 놓일 수 있는 끝(OCCURRENCE_MAX_MS)은
+// calendarRecurrence.js에 있다 — 반복 종료일 상한(MAX_UNTIL)·앱의 달 단위 조회와 맞물린 값이라 그 곁에서 함께 검증한다.
+// 한 번의 일정 조회가 돌려주는 회차 수 상한 — 일정을 대량으로 만들어도 펼치는 계산과 응답 크기가 이 안에서 끝나게 한다
+// (한 화면에 현실적으로 보이는 회차는 수백 개 수준이다). 한 시리즈의 상한은 expandOccurrences가 따로 건다.
+// 상한을 일정들에 어떻게 나눌지(어느 일정이 빠질지)는 fillOccurrenceBudget이 정하고, 상한에 닿으면 응답에
+// X-Calendar-Truncated: 1을 붙인다.
+const QUERY_OCCURRENCE_MAX = 5000;
+// 일정 행을 새로 만드는 요청(새 일정, 반복 일정의 "이 일정만"·"이 일정 및 이후 일정" 수정)은 한 사람이 10분에 60개까지.
+// 조회는 볼 수 있는 반복 일정을 구간과 상관없이 전부 읽어 구간에 회차가 있는지 하나씩 보므로, 스크립트로 일정을 끝없이
+// 찍어내면 그 팀의 캘린더 조회가 점점 무거워진다. 편집 창으로 하나씩 만드는 속도(평균 10초에 하나 미만)로는 닿지 않게
+// 잡았다. 일정 개수 자체에는 아직 상한이 없어서, 이 제한은 늘어나는 속도를 늦출 뿐이다.
+const EVENT_CREATE_MAX = 60;
+const EVENT_CREATE_WINDOW_MS = 10 * 60 * 1000;
 // 일정 길이·날짜 범위 — 터무니없는 값이 반복 계산이나 DB를 흔들지 않게 하는 안전 상한.
 const EVENT_MAX_DURATION_MS = 366 * DAY_MS;
 const EVENT_MIN_START_MS = Date.UTC(2000, 0, 1);
@@ -96,7 +115,8 @@ function paletteColor(seed) {
 /**
  * 이 사람이 이 캘린더에서 무엇을 할 수 있는지 — 규약의 권한 표를 한 곳에 모은 함수.
  * 계정 등급·팀 소유자·팀 멤버십(teamAccess)과 내 멤버 행(calendar_members)을 읽어 permissions.js의
- * calendarPermissions에 넘긴다. 팀에서 나간 사람의 행이 남아 있어도 여기서 팀 멤버십을 보므로 접근이 막힌다.
+ * calendarPermissions에 넘긴다. 팀에서 나간 사람의 행이 남아 있어도 여기서 팀 멤버십을 보므로 접근이 막히고, 준회원으로
+ * 내려간 사람의 공유 캘린더 행(관리자·쓰기·소유자)도 계정 등급과 함께 계산되어 읽기로만 동작한다.
  * 목록처럼 여러 캘린더를 판정할 때는 [prefetched]에 `team`(teamAccess 결과)·`member`(내 행 또는 null)를 미리 넘겨
  * 조회를 줄인다.
  */
@@ -112,6 +132,16 @@ export async function calendarAccess(calendar, userId, prefetched = {}) {
     memberRole: member?.role ?? null,
   });
   return { ...perms, team, member };
+}
+
+// 준회원으로 내려가 행에 남은 권한(관리자·쓰기·소유자)보다 낮게 계산된 사람(calendarPermissions의 limitedAsGuest)에게 주는
+// 거절 문구 — 등급이 바뀐 뒤 캘린더 목록을 다시 받기 전에는 예전 권한의 버튼이 화면에 남아 있을 수 있어서, "관리자만" 같은
+// 문구 대신 왜 안 되는지를 알려 준다.
+const GUEST_READ_ONLY = '준회원은 공유 캘린더에서 읽기만 할 수 있습니다.';
+
+/** 권한이 없어 거절할 때의 문구 — 준회원이라 권한이 낮춰진 사람이면 [fallback] 대신 그 이유를 알려 준다. */
+function deniedText(access, fallback) {
+  return access?.limitedAsGuest ? GUEST_READ_ONLY : fallback;
 }
 
 // ── DTO ─────────────────────────────────────────────────────────────────
@@ -217,6 +247,11 @@ function parseMs(raw) {
   return Number.isSafeInteger(raw) ? raw : null;
 }
 
+/** 일정 시작으로 받을 수 있는 시각인지(EVENT_MIN_START_MS 이상, EVENT_MAX_START_MS 미만). */
+function isEventStartInRange(ms) {
+  return ms >= EVENT_MIN_START_MS && ms < EVENT_MAX_START_MS;
+}
+
 /**
  * 일정 본문 필드를 검사한다. 생성이면 [existing]=null(title·start·end 필수), 수정이면 [existing]에 지금 값
  * ({title, description, location, startMs, endMs, allDay, visibility})을 주고, 안 보낸 필드는 그 값을 쓴다.
@@ -268,7 +303,7 @@ function parseEventFields(body, existing) {
     if (endMs === null) return { error: '종료 시각이 올바르지 않습니다.' };
   }
   if (!(endMs > startMs)) return { error: '종료 시각은 시작 시각보다 뒤여야 합니다.' };
-  if (startMs < EVENT_MIN_START_MS || startMs >= EVENT_MAX_START_MS) return { error: '시작 시각이 허용 범위를 벗어났습니다.' };
+  if (!isEventStartInRange(startMs)) return { error: '시작 시각이 허용 범위를 벗어났습니다.' };
   if (endMs - startMs > EVENT_MAX_DURATION_MS) return { error: '일정 길이는 최대 366일입니다.' };
   if (f.allDay && (startMs % DAY_MS !== 0 || endMs % DAY_MS !== 0)) {
     return { error: '종일 일정의 시작·종료는 날짜(UTC 자정) 단위여야 합니다.' };
@@ -291,14 +326,17 @@ function parseEventFields(body, existing) {
 
 /**
  * recurrence를 검사·정규화하고 시작이 첫 회차가 되도록 맞춘다(매주 반복에서 시작 요일이 목록에 없으면 옮김).
- * 통과하면 { recurrence, startMs, endMs }.
+ * 통과하면 { recurrence, startMs, endMs }. 저장 직전의 시작 시각도 여기서 범위를 다시 본다 — "모든 일정" 수정은
+ * 시작을 "회차가 옮겨진 만큼"으로 다시 계산하므로 parseEventFields의 검사만으로는 1900년 같은 시작이 들어올 수 있다.
  */
 function finalizeRecurrence(rawRecurrence, startMs, endMs, allDay) {
+  if (!isEventStartInRange(startMs)) return { error: '시작 시각이 허용 범위를 벗어났습니다.' };
   const parsed = parseRecurrence(rawRecurrence, { startMs, allDay });
   if (parsed.error) return { error: parsed.error };
   const rec = parsed.value;
   if (!rec) return { recurrence: null, startMs, endMs };
   const aligned = alignStartToRecurrence(startMs, endMs, allDay, rec);
+  if (!isEventStartInRange(aligned.startMs)) return { error: '시작 시각이 허용 범위를 벗어났습니다.' };
   if (rec.until && parseDateString(rec.until) < parseDateString(dateStringOf(aligned.startMs, allDay))) {
     return { error: '반복 종료일은 시작일보다 빠를 수 없습니다.' };
   }
@@ -323,6 +361,22 @@ async function resolveAttendees(teamId, rawIds, { requesterRole, keep = new Set(
     return { error: '초대할 수 없는 사용자가 포함되어 있습니다. (팀 멤버가 아니거나 탈퇴·정지한 사용자)' };
   }
   return { ids };
+}
+
+// ── 일정 추가 횟수 제한 ─────────────────────────────────────────────────
+
+const eventCreateLimiter = new RateLimiter({ max: EVENT_CREATE_MAX, windowMs: EVENT_CREATE_WINDOW_MS });
+setInterval(() => eventCreateLimiter.prune(), EVENT_CREATE_WINDOW_MS).unref();
+
+/**
+ * 일정 행을 새로 만들기 직전에 부른다 — 검사를 다 통과해 정말 행이 생기는 요청만 센다(입력 오류로 다시 보내는 것은
+ * 세지 않는다). 사람 단위라 남이 대신 막을 수 없다. 너무 많으면 429로 응답하고 false.
+ */
+function allowEventCreate(req, res) {
+  const wait = eventCreateLimiter.hit(req.user.sub);
+  if (wait === 0) return true;
+  tooMany(res, wait, '일정 추가');
+  return false;
 }
 
 // ── 라우터 ──────────────────────────────────────────────────────────────
@@ -464,7 +518,9 @@ export function createCalendarsRouter(io) {
     const { calendar, access } = ctx;
     const { name, isPublic } = req.body ?? {};
     if (calendar.kind === 'team') return res.status(403).json({ error: '팀 캘린더는 설정을 바꿀 수 없습니다.' });
-    if (!access.canEditSettings) return res.status(403).json({ error: '캘린더 관리자만 설정을 바꿀 수 있습니다.' });
+    if (!access.canEditSettings) {
+      return res.status(403).json({ error: deniedText(access, '캘린더 관리자만 설정을 바꿀 수 있습니다.') });
+    }
 
     const patch = {};
     if (name !== undefined) {
@@ -516,7 +572,8 @@ export function createCalendarsRouter(io) {
     if (calendar.kind !== 'shared') {
       return res.status(400).json({ error: '기본 캘린더와 팀 캘린더는 삭제할 수 없습니다.' });
     }
-    if (!access.canDelete) return res.status(403).json({ error: '캘린더 소유자만 삭제할 수 있습니다.' });
+    // 준회원이 된 소유자도 여기서 막힌다(calendarPermissions) — 캘린더를 지우면 다른 멤버의 일정까지 모두 사라지기 때문이다.
+    if (!access.canDelete) return res.status(403).json({ error: deniedText(access, '캘린더 소유자만 삭제할 수 있습니다.') });
     // 지운 뒤에는 누가 관련자였는지 알 수 없으니 미리 모은다.
     const attendeeIds = await listAttendeeIdsOfCalendar(calendar.id);
     const peopleIds = await listCalendarPeopleIds(calendar.id);
@@ -537,6 +594,12 @@ export function createCalendarsRouter(io) {
       return res.status(400).json({ error: '팀 캘린더는 삭제할 수 없습니다. 숨김을 사용하세요.' });
     }
     if (calendar.ownerId === userId) {
+      // 소유자는 멤버 행을 지우지 않는다(소유자 행이 없으면 아무도 그 캘린더를 지울 수 없게 된다). 준회원이 된 소유자는
+      // 캘린더 삭제도 못 하므로(calendarPermissions) 막힌 길을 권하지 않고 숨김을 알려 준다 — 앱은 삭제 권한이 없는
+      // 공유 캘린더 멤버에게 "나에게만 삭제"를 보여 주므로 이 문구가 그대로 뜬다.
+      if (calendar.kind === 'shared' && access.limitedAsGuest) {
+        return res.status(400).json({ error: '준회원인 소유자는 캘린더 삭제와 나에게만 삭제를 할 수 없습니다. 숨김을 사용하세요.' });
+      }
       return res.status(400).json({
         error: calendar.kind === 'shared' ? '소유자는 캘린더 삭제를 사용하세요.' : '기본 캘린더는 삭제할 수 없습니다.',
       });
@@ -556,7 +619,7 @@ export function createCalendarsRouter(io) {
       return null;
     }
     if (!ctx.access.canEditSettings) {
-      res.status(403).json({ error: '캘린더 관리자만 멤버를 관리할 수 있습니다.' });
+      res.status(403).json({ error: deniedText(ctx.access, '캘린더 관리자만 멤버를 관리할 수 있습니다.') });
       return null;
     }
     return ctx;
@@ -566,6 +629,10 @@ export function createCalendarsRouter(io) {
     const ctx = await loadManagedSharedCalendar(req, res);
     if (!ctx) return;
     const rows = await listMembersWithUsers(ctx.calendar.id);
+    // 권한은 행에 저장된 값 그대로 보여 준다. 준회원으로 내려간 멤버의 행에는 예전 권한(관리자·쓰기)이 남아 있을 수
+    // 있지만 실제로는 calendarPermissions가 읽기로만 계산하므로 노출돼도 힘이 없다. 반대로 여기서 읽기로 바꿔 보여 주면
+    // 캘린더 관리자가 남은 권한을 알아보고 읽기로 낮출 길이 없어진다 — 앱은 지금 권한과 같은 값을 고르면 요청을
+    // 보내지 않고, 준회원에게는 읽기만 고를 수 있게 한다. 그러면 정회원으로 다시 올라갔을 때 예전 권한이 모르는 새 돌아온다.
     res.json(rows.map((r) => toMemberDto(r, ctx.calendar)));
   });
 
@@ -674,6 +741,7 @@ export function createCalendarsRouter(io) {
       return res.status(400).json({ error: 'from, to(ms)를 올바르게 보내세요.' });
     }
     if (toMs - fromMs > QUERY_SPAN_MAX_MS) return res.status(400).json({ error: '조회 구간은 최대 62일입니다.' });
+    if (fromMs < QUERY_MIN_MS || toMs > QUERY_MAX_MS) return res.status(400).json({ error: '조회 구간이 허용 범위를 벗어났습니다.' });
 
     // 종일 회차(공휴일·생일 포함)는 날짜를 "한국 날짜"로 보고 구간과 겹치는지 잰다. 표현은 UTC 자정 ms라
     // 구간을 9시간 밀어서 비교하면 한국 시간 자정 기준 구간(한 달 격자 등)과 정확히 맞는다.
@@ -714,21 +782,37 @@ export function createCalendarsRouter(io) {
       listEventColorsForUser(eventIds, userId),
     ]);
 
-    const result = [];
+    // 볼 수 있는 일정만 추린다(내가 못 보는 캘린더의 일정이라도 참석자로 초대받았으면 보인다).
+    const visible = [];
     for (const event of events) {
       const info = infoById.get(event.calendarId);
       if (!info) continue;
       const attendees = attendeesByEvent.get(event.id) ?? [];
       const isAttendee = attendees.some((a) => a.userId === userId);
-      if (!info.access.canView && !isAttendee) continue;
-      const startMs = event.startAt.getTime();
-      const endMs = event.endAt.getTime();
-      const occs = expandOccurrences(
-        { startMs, endMs, allDay: event.allDay, recurrence: event.recurrence, exdates: event.exdates },
-        event.allDay ? dayFrom : fromMs,
-        event.allDay ? dayTo : toMs,
-      );
-      for (const occ of occs) {
+      if (info.access.canView || isAttendee) visible.push({ event, info, attendees, isAttendee });
+    }
+
+    // 응답 전체의 회차 상한 — fillOccurrenceBudget이 구간에 회차가 있는 일정에만 차례를 주고(내 일정이 먼저, 나머지는 만든
+    // 사람마다 돌아가며 — 일정을 대량으로 만들어도 남의 일정을 밀어내지 못한다) 그 순서대로 상한까지 펼친다.
+    // 회차는 OCCURRENCE_MAX_MS 앞의 것만 펼친다 — 조회로 받은 회차는 모두 수정·삭제에서 그대로 다시 지정할 수 있어야
+    // 하기 때문이다(parseScope). 종일 회차는 dayTo 쪽을 같은 끝에서 자르므로 날짜가 MAX_UNTIL까지인 것만 나온다.
+    const occurrenceTo = Math.min(toMs, OCCURRENCE_MAX_MS);
+    const occurrenceDayTo = Math.min(dayTo, OCCURRENCE_MAX_MS);
+    const filled = fillOccurrenceBudget(visible, {
+      viewerId: userId,
+      budget: QUERY_OCCURRENCE_MAX,
+      expand: ({ event }, limit) =>
+        expandOccurrences(
+          recurringView(event),
+          event.allDay ? dayFrom : fromMs,
+          event.allDay ? occurrenceDayTo : occurrenceTo,
+          { limit },
+        ),
+    });
+    const result = [];
+    for (const { item, occurrences } of filled) {
+      const { event, info, attendees, isAttendee } = item;
+      for (const occ of occurrences) {
         result.push(
           toOccurrenceDto({
             event,
@@ -742,6 +826,11 @@ export function createCalendarsRouter(io) {
           }),
         );
       }
+    }
+    const truncated = result.length >= QUERY_OCCURRENCE_MAX;
+    if (truncated) {
+      // 정상적인 캘린더로는 닿기 어려운 양이라, 일정 대량 생성 같은 남용을 알아챌 수 있게 남긴다.
+      console.warn(`[calendar] 일정 조회 회차를 상한(${QUERY_OCCURRENCE_MAX}개)까지만 보냈습니다 — 팀 ${teamId}, 사용자 ${userId}`);
     }
 
     // 공휴일 — 모두에게.
@@ -779,6 +868,9 @@ export function createCalendarsRouter(io) {
     // 종일 회차는 "날짜"라서 같은 날의 시간 일정보다 앞에 오도록 시작 시각을 한국 벽시계로 바꿔 비교한다.
     const sortKey = (o) => (o.allDay ? o.start : o.start + KST_OFFSET_MS);
     result.sort((a, b) => sortKey(a) - sortKey(b) || Number(b.allDay) - Number(a.allDay) || a.title.localeCompare(b.title, 'ko'));
+    // 상한에 닿았으면(빠진 회차가 있을 수 있다) 헤더로 알린다. 본문은 배열 그대로라 지금 앱은 그냥 무시하고,
+    // 나중에 앱이 "일부 일정만 표시" 같은 안내를 띄울 수 있다(웹 앱도 같은 주소라 CORS 노출 설정이 필요 없다).
+    if (truncated) res.set('X-Calendar-Truncated', '1');
     res.json(result);
   });
 
@@ -859,7 +951,9 @@ export function createCalendarsRouter(io) {
     const ctx = await loadViewableCalendar(req, res);
     if (!ctx) return;
     const { calendar, access } = ctx;
-    if (!access.canCreateEvents) return res.status(403).json({ error: '이 캘린더에 일정을 만들 권한이 없습니다.' });
+    if (!access.canCreateEvents) {
+      return res.status(403).json({ error: deniedText(access, '이 캘린더에 일정을 만들 권한이 없습니다.') });
+    }
 
     const parsed = parseEventFields(req.body, null);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
@@ -868,6 +962,7 @@ export function createCalendarsRouter(io) {
     if (rec.error) return res.status(400).json({ error: rec.error });
     const attendees = await resolveAttendees(calendar.teamId, f.attendeeIds ?? [], { requesterRole: access.team.role });
     if (attendees.error) return res.status(400).json({ error: attendees.error });
+    if (!allowEventCreate(req, res)) return;
 
     const row = await insertEvent(
       {
@@ -960,11 +1055,20 @@ export function createCalendarsRouter(io) {
       return { scope, occurrenceStart: event.startAt.getTime(), index: 0 };
     }
     const occurrenceStart = Number(rawOccurrence);
-    if (!Number.isSafeInteger(occurrenceStart)) return { error: 'occurrenceStart가 올바르지 않습니다.' };
+    // 조회가 내놓을 수 있는 회차만 받는다(일정 시작은 2000년 뒤이고, 조회는 OCCURRENCE_MAX_MS 앞의 회차만 펼친다) —
+    // 그래서 이 회차에서 반복을 나눠도 원래 시리즈의 종료일(그 회차 전날)이 반복 종료일 상한(MAX_UNTIL) 안에 머문다.
+    if (!Number.isSafeInteger(occurrenceStart) || occurrenceStart < QUERY_MIN_MS || occurrenceStart >= OCCURRENCE_MAX_MS) {
+      return { error: 'occurrenceStart가 올바르지 않습니다.' };
+    }
     const index = occurrenceIndex(recurringView(event), occurrenceStart);
     if (index < 0) return { error: '이 일정의 회차가 아닙니다.' };
-    if (scope === 'this' && normalizeExdates(event.exdates).includes(occurrenceStart)) {
-      return { error: '이미 제외된 회차입니다.' };
+    if (scope === 'this') {
+      const exdates = normalizeExdates(event.exdates);
+      if (exdates.includes(occurrenceStart)) return { error: '이미 제외된 회차입니다.' };
+      // "이 일정만"은 회차 하나를 exdates에 더한다 — 조회마다 훑는 목록이라 끝없이 늘지 않게 막는다.
+      if (exdates.length >= MAX_EXDATES) {
+        return { error: '따로 고치거나 지운 회차가 너무 많은 반복 일정입니다. "이 일정 및 이후 일정"으로 나눠서 바꾸세요.' };
+      }
     }
     return { scope, occurrenceStart, index };
   }
@@ -1008,7 +1112,7 @@ export function createCalendarsRouter(io) {
     if (scope === 'following' && index === 0) scope = 'all';
 
     if (!canModifyCalendarEvent({ access, event, userId })) {
-      return res.status(403).json({ error: '이 일정을 수정할 권한이 없습니다.' });
+      return res.status(403).json({ error: deniedText(access, '이 일정을 수정할 권한이 없습니다.') });
     }
 
     // 캘린더 이동 검사.
@@ -1021,7 +1125,9 @@ export function createCalendarsRouter(io) {
       const target = await findCalendarById(b.calendarId);
       if (!target || target.teamId !== calendar.teamId) return res.status(400).json({ error: '옮길 캘린더를 찾을 수 없습니다.' });
       const targetAccess = await calendarAccess(target, userId);
-      if (!targetAccess.canCreateEvents) return res.status(403).json({ error: '그 캘린더에 일정을 만들 권한이 없습니다.' });
+      if (!targetAccess.canCreateEvents) {
+        return res.status(403).json({ error: deniedText(targetAccess, '그 캘린더에 일정을 만들 권한이 없습니다.') });
+      }
       targetCalendar = target;
     }
 
@@ -1065,6 +1171,7 @@ export function createCalendarsRouter(io) {
 
     if (scope === 'this') {
       // 이 회차만: 원본에서 이 회차를 빼고, 바뀐 내용으로 반복 없는 새 일정을 만든다.
+      if (!allowEventCreate(req, res)) return;
       const created = await splitEvent(
         event.id,
         { exdates: normalizeExdates([...(event.exdates ?? []), occurrenceStart]) },
@@ -1090,6 +1197,7 @@ export function createCalendarsRouter(io) {
       else rawNewRec = followStartWeekday(rawNewRec, occurrenceStart, f.startMs, f.allDay);
       const fin = finalizeRecurrence(rawNewRec, f.startMs, f.endMs, f.allDay);
       if (fin.error) return res.status(400).json({ error: fin.error });
+      if (!allowEventCreate(req, res)) return;
       const sameStart = fin.startMs === occurrenceStart && f.allDay === event.allDay;
       const oldExdates = normalizeExdates(event.exdates);
       const created = await splitEvent(
@@ -1159,7 +1267,7 @@ export function createCalendarsRouter(io) {
     if (!ctx) return;
     const { event, calendar, access, attendeeIds } = ctx;
     if (!canModifyCalendarEvent({ access, event, userId: req.user.sub })) {
-      return res.status(403).json({ error: '이 일정을 삭제할 권한이 없습니다.' });
+      return res.status(403).json({ error: deniedText(access, '이 일정을 삭제할 권한이 없습니다.') });
     }
     const sp = parseScope(req.query.scope, req.query.occurrenceStart, event, { required: false });
     if (sp.error) return res.status(400).json({ error: sp.error });

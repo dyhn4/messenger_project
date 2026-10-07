@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
+import { tooMany } from './authGuard.js';
 import { findCommentById, insertComment, softDeleteComment, updateCommentText } from './db/queries/comments.js';
 import { findMessageById } from './db/queries/messages.js';
 import { findRoomById, getDmHistoryFloor, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { isUuid } from './favoritesRules.js';
+import { checkFileRefs } from './fileRefs.js';
+import { commentCreateLimiter, fileFieldsDenial, messageTextDenial, sanitizeFileSize } from './messageLimits.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { findUserById } from './db/queries/users.js';
@@ -48,7 +51,8 @@ export function createCommentsRouter(io) {
   const router = Router();
 
   router.post('/messages/:messageId/comments', async (req, res) => {
-    const message = await findMessageById(req.params.messageId);
+    // uuid 칸이라 모양이 아닌 id는 DB에 묻지 않는다(DB 오류로 500이 났다).
+    const message = isUuid(req.params.messageId) ? await findMessageById(req.params.messageId) : null;
     if (!message) return res.status(404).json({ error: '메시지를 찾을 수 없습니다.' });
     if (!(await isRoomMember(message.roomId, req.user.sub))) {
       return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
@@ -56,11 +60,32 @@ export function createCommentsRouter(io) {
 
     const type = ['image', 'file', 'sticker'].includes(req.body?.type) ? req.body.type : 'text';
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl : null;
-    if (!text && !fileUrl) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    const rawFileUrl = typeof req.body?.fileUrl === 'string' && req.body.fileUrl ? req.body.fileUrl : null;
+    const rawThumbnailUrl =
+      typeof req.body?.thumbnailUrl === 'string' && req.body.thumbnailUrl ? req.body.thumbnailUrl : null;
+    if (!text && !rawFileUrl) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
+    const fileName = typeof req.body?.fileName === 'string' ? req.body.fileName : null;
+    const mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType : null;
+
+    const room = await findRoomById(message.roomId);
+    // 메시지와 같은 길이 상한(messageLimits.js) — 비밀 대화는 암호문 봉투 길이로, 이모티콘 댓글은 이모티콘 id 길이로 본다.
+    const tooLong =
+      messageTextDenial(text, { secret: !!room?.isSecret, sticker: type === 'sticker', subject: '댓글은' }) ??
+      fileFieldsDenial({ fileName, mimeType });
+    if (tooLong) return res.status(400).json({ error: tooLong });
+    // 첨부는 메시지와 같은 규칙(fileRefs.js) — 예전엔 보낸 값을 되돌리지도 확인하지도 않고 그대로 저장해서, 어디서 알게 된 파일
+    // 이름을 내 댓글에 실으면 그 파일의 새 다운로드 링크를 영영 받을 수 있었다. 비밀 대화는 직접 올린 파일만(자동 삭제가 지운다).
+    const files = await checkFileRefs([rawFileUrl, rawThumbnailUrl], {
+      senderId: req.user.sub,
+      ownedOnly: !!room?.isSecret,
+    });
+    if (!files.ok) return res.status(400).json({ error: files.error });
+    // 검사를 다 통과해 정말 댓글이 생기는 요청만 센다(입력 오류로 다시 보내는 것은 세지 않는다 — calendars.js 일정 추가와 같다).
+    // 첨부를 단 댓글은 10초 창에서 뺀다 — 앱은 고른 첨부마다 댓글 하나씩 쉬지 않고 단다(messageLimits.js MESSAGE_SEND_BURST).
+    const wait = commentCreateLimiter.hit(req.user.sub, { burst: !rawFileUrl });
+    if (wait > 0) return tooMany(res, wait, '댓글 달기');
 
     const sender = await findUserById(req.user.sub);
-    const room = await findRoomById(message.roomId);
     // 멘션은 이 방 멤버만 — 멘션이 없으면 멤버 조회를 건너뛴다(뒤의 푸시에서 어차피 다시 읽는다).
     let memberIds = null;
     let mentions = null;
@@ -85,11 +110,11 @@ export function createCommentsRouter(io) {
       text: text || null,
       textFormat: room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text),
       mentions,
-      fileUrl,
-      fileName: typeof req.body?.fileName === 'string' ? req.body.fileName : null,
-      fileSize: typeof req.body?.fileSize === 'number' ? req.body.fileSize : null,
-      mimeType: typeof req.body?.mimeType === 'string' ? req.body.mimeType : null,
-      thumbnailUrl: typeof req.body?.thumbnailUrl === 'string' ? req.body.thumbnailUrl : null,
+      fileUrl: rawFileUrl ? files.paths.get(rawFileUrl) : null,
+      fileName,
+      fileSize: sanitizeFileSize(req.body?.fileSize),
+      mimeType,
+      thumbnailUrl: rawThumbnailUrl ? files.paths.get(rawThumbnailUrl) : null,
     });
 
     // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 — socket.js의
@@ -153,7 +178,7 @@ export function createCommentsRouter(io) {
   });
 
   router.patch('/comments/:id', async (req, res) => {
-    const comment = await findCommentById(req.params.id);
+    const comment = isUuid(req.params.id) ? await findCommentById(req.params.id) : null;
     if (!comment || comment.deletedAt) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
     if (comment.type !== 'text') return res.status(400).json({ error: '텍스트 댓글만 수정할 수 있습니다.' });
     // 메시지 수정과 완전히 같은 규칙(moderation.js).
@@ -171,6 +196,8 @@ export function createCommentsRouter(io) {
     if (!text) return res.status(400).json({ error: '댓글 내용을 입력하세요.' });
 
     const room = await findRoomById(comment.roomId);
+    const tooLong = messageTextDenial(text, { secret: !!room?.isSecret, subject: '댓글은' });
+    if (tooLong) return res.status(400).json({ error: tooLong });
     const textFormat = room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text);
     // 수정은 멘션 집합을 통째로 바꾼다(안 보내면 없음) — 새로 생긴 멘션에만 알림이 간다.
     let memberIds = null;
@@ -202,7 +229,7 @@ export function createCommentsRouter(io) {
   });
 
   router.delete('/comments/:id', async (req, res) => {
-    const comment = await findCommentById(req.params.id);
+    const comment = isUuid(req.params.id) ? await findCommentById(req.params.id) : null;
     if (!comment || comment.deletedAt) return res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
     // 메시지 삭제와 완전히 같은 규칙(moderation.js) — 팀의 수정/삭제 허용 여부와 가능 시간,
     // 콘텐츠 관리 권한을 한 곳에서 판단한다.

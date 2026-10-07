@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto, { randomUUID } from 'node:crypto';
 import { Router } from 'express';
-import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import { JWT_SECRET, UPLOADS_DIR } from './config.js';
 
@@ -37,23 +36,21 @@ function sealFileToken(payload) {
 }
 
 /**
- * 토큰을 풀어 { file, type, exp, downloadName? }을 돌려준다(위조·형식 오류·만료면 throw). 점(.)이 있으면 이 방식 전에
- * 발급된 JWT 토큰 — 최대 2시간이면 다 만료되지만, 앱이 들고 있던 옛 링크를 새로 받는 경로(knownUploadPath)를 위해
- * 계속 알아본다.
+ * 토큰을 풀어 { file, type, exp, downloadName? }을 돌려준다(위조·형식 오류·만료면 throw).
+ *
+ * 점(.)이 든 토큰 — 이 방식 전에 발급된 JWT 링크 — 은 더는 받지 않는다. 그 링크는 늘 2시간 안에 만료되게 발급됐지만
+ * knownUploadPath(만료 무시)는 서명만 맞으면 영영 알아봤고, 무엇보다 누구나 base64를 풀어 실제 파일 이름을 읽을 수 있다.
+ * 지금 서버는 AES 토큰만 발급하므로 막아도 잃는 것이 없다 — 업데이트 직전에 받아 둔 링크(최대 2시간)를 들고 있던 앱도
+ * 서버가 다시 켜지며 다시 연결할 때 메시지를 새로 받아 새 링크로 바뀐다.
  */
 function openFileToken(token, { ignoreExpiration = false } = {}) {
-  if (typeof token !== 'string') throw new Error('invalid file token');
-  let payload;
-  if (token.includes('.')) {
-    payload = jwt.verify(token, JWT_SECRET, { ignoreExpiration });
-  } else {
-    const buf = Buffer.from(token, 'base64url');
-    if (buf.length < 29) throw new Error('invalid file token');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', FILE_TOKEN_KEY, buf.subarray(0, 12));
-    decipher.setAuthTag(buf.subarray(12, 28));
-    payload = JSON.parse(Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8'));
-    if (!ignoreExpiration && !(payload.exp * 1000 > Date.now())) throw new Error('file token expired');
-  }
+  if (typeof token !== 'string' || token.includes('.')) throw new Error('invalid file token');
+  const buf = Buffer.from(token, 'base64url');
+  if (buf.length < 29) throw new Error('invalid file token');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', FILE_TOKEN_KEY, buf.subarray(0, 12));
+  decipher.setAuthTag(buf.subarray(12, 28));
+  const payload = JSON.parse(Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8'));
+  if (!ignoreExpiration && !(payload.exp * 1000 > Date.now())) throw new Error('file token expired');
   if (payload?.type !== 'file' || typeof payload.file !== 'string') throw new Error('invalid file token');
   return payload;
 }
@@ -76,11 +73,13 @@ export function signFileUrl(relativeUrl, downloadName) {
 }
 
 /**
- * 메시지 전달(forward)용 — 클라이언트는 첨부의 서명된 다운로드 URL(/files/<token>)만 들고
- * 있으므로, 그걸 그대로 새 메시지의 fileUrl로 저장하면 안 된다(토큰이 곧 만료되고, 애초에
- * DB엔 항상 미서명 원본 경로만 남아야 한다 — signFileUrl 주석 참고). 서명된 형태로 오면
- * 검증해서 원본 상대경로(/uploads/xxx)로 되돌리고, 이미 원본 경로면 그대로 돌려준다.
- * 토큰이 무효/만료면 null(호출부가 첨부 없이 진행하거나 실패 처리).
+ * 서명된 다운로드 URL(/files/<token>)을 원본 상대경로(/uploads/xxx)로 되돌린다 — DB엔 항상 미서명 원본 경로만 남아야
+ * 한다(토큰은 곧 만료된다 — signFileUrl 주석 참고). 이미 원본 경로(또는 다른 문자열)면 그대로 돌려준다.
+ * 토큰이 무효/만료면 null.
+ *
+ * 주의: 원본 경로를 그대로 통과시킬 뿐 그 파일을 이 사람이 써도 되는지는 보지 않는다. 클라이언트가 보낸 파일 참조를
+ * 저장할 때는 fileRefs.js checkFileRefs(올린 사람·볼 수 있는 방·원래 있던 값)를 거친다 — 예전엔 어디서 알게 된 파일
+ * 이름(/uploads/<이름>)만 실어 보내면 그 파일의 새 다운로드 링크를 영영 받을 수 있었다.
  */
 export function resolveRawUrl(url) {
   if (!url) return null;
@@ -106,7 +105,8 @@ export function toStoredUploadUrl(url) {
 /**
  * 이미 저장해 둔 파일을 다시 알아볼 때만 쓴다(예약 메시지 수정의 기존 첨부, 그룹 아이콘 그대로 저장) — 서명만
  * 맞으면 만료됐어도 원본 경로를 돌려준다. 화면이 몇 시간 들고 있던 DTO의 링크를 그대로 돌려보내도 같은 파일로
- * 알아보려는 것이라, 호출부는 결과를 반드시 "원래 저장돼 있던 경로"와 비교해서만 쓴다(새 파일은 toStoredUploadUrl).
+ * 알아보려는 것이라, 호출부는 결과를 반드시 "원래 저장돼 있던 경로"와 비교해서만 쓰거나(새 파일은 toStoredUploadUrl),
+ * fileRefs.js처럼 그 파일을 써도 되는지(올린 사람·볼 수 있는 방)를 따로 확인한 뒤에만 쓴다.
  */
 export function knownUploadPath(url) {
   if (typeof url !== 'string') return null;
@@ -120,6 +120,34 @@ export function knownUploadPath(url) {
     }
   }
   return /^\/uploads\/[^/\\]+$/.test(raw) ? raw : null;
+}
+
+/** 미서명 저장 경로(/uploads/<이름>)의 이름 — 그 모양이 아니면(서명 링크·외부 주소·하위 경로·'.'/'..') null. */
+export function uploadFileNameOf(raw) {
+  const match = typeof raw === 'string' ? /^\/uploads\/([^/\\]+)$/.exec(raw) : null;
+  return match && match[1] !== '.' && match[1] !== '..' ? match[1] : null;
+}
+
+/**
+ * 저장 값이 이 서버에 올린 파일(미서명 /uploads/<이름>)일 때만 서명 링크로, 그 밖(외부 주소 등)은 null — 링크 미리보기 그림처럼
+ * 예전엔 외부 주소를 그대로 저장하던 칸을 내려줄 때 쓴다. 외부 주소를 넘기면 보는 사람마다 앱이 그 사이트에 직접 접속해
+ * (IP·읽은 시각이 그 사이트에 남고, 사내망 주소면 사내 기기를 찌른다) 이제는 서버가 한 번 받아 둔 그림만 내려준다.
+ */
+export function signedUploadOrNull(stored) {
+  return uploadFileNameOf(stored) ? signFileUrl(stored) : null;
+}
+
+/**
+ * [claims]([{ path, ownerId, ... }] — 저장 경로와 그 파일을 실은 사람) 가운데 그 사람이 직접 올린 파일만 남긴다. [uploaders]는
+ * uploads 표의 저장 이름 → 올린 사람(db/queries/uploads.js findUploaders). 저장 경로 모양이 아니거나, 기록이 없거나(이 표가 생기기
+ * 전에 올린 파일·이모티콘 그림), 다른 사람이 올렸거나, 실은 사람을 모르면(null) 빠진다. 비밀 대화가 이 기준으로 첨부를 받고
+ * (sendMessage.js), 자동 삭제가 이 기준으로 고른 파일만 실제로 지운다(secretExpiry.js).
+ */
+export function ownedUploadClaims(claims, uploaders) {
+  return claims.filter((c) => {
+    const name = uploadFileNameOf(c.path);
+    return name != null && c.ownerId != null && uploaders.get(name) === c.ownerId;
+  });
 }
 
 /** /files/:token 라우트에서 쓴다. 서명이 유효하고 만료 전이면 실제 파일 경로(+원본 파일명)를 돌려준다. */
@@ -180,6 +208,19 @@ function usageFor(userId) {
   return u;
 }
 
+/**
+ * 업로드 폴더에 [incoming]바이트를 더 써도 여유 공간이 남는지 — 서버가 스스로 받아 두는 파일(링크 미리보기 그림 —
+ * linkPreviewImage.js)도 같은 기준으로 멈춘다. 여유 공간을 못 재는 저장소(일부 네트워크 드라이브)면 true.
+ */
+export async function uploadsDirHasRoom(incoming) {
+  try {
+    const stat = await fs.promises.statfs(uploadsDir);
+    return stat.bavail * stat.bsize - incoming >= UPLOAD_MIN_FREE_BYTES;
+  } catch {
+    return true;
+  }
+}
+
 async function uploadQuotaGuard(req, res, next) {
   const u = usageFor(req.user.sub);
   const incoming = Number(req.headers['content-length']) || 0;
@@ -189,13 +230,8 @@ async function uploadQuotaGuard(req, res, next) {
   if (u.bytes + incoming > UPLOAD_DAILY_LIMIT_BYTES) {
     return res.status(429).json({ error: '오늘 올릴 수 있는 용량을 다 썼습니다. 내일 다시 시도하세요.' });
   }
-  try {
-    const stat = await fs.promises.statfs(uploadsDir);
-    if (stat.bavail * stat.bsize - incoming < UPLOAD_MIN_FREE_BYTES) {
-      return res.status(507).json({ error: '서버 저장 공간이 부족합니다. 관리자에게 알려 주세요.' });
-    }
-  } catch {
-    // 여유 공간을 못 재는 저장소(일부 네트워크 드라이브)면 그냥 받는다.
+  if (!(await uploadsDirHasRoom(incoming))) {
+    return res.status(507).json({ error: '서버 저장 공간이 부족합니다. 관리자에게 알려 주세요.' });
   }
   u.count += 1;
   next();
@@ -206,8 +242,22 @@ export function recordUploadedBytes(userId, bytes) {
   usageFor(userId).bytes += bytes;
 }
 
-uploadRouter.post('/upload', uploadQuotaGuard, upload.single('file'), (req, res) => {
+uploadRouter.post('/upload', uploadQuotaGuard, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: '파일이 없습니다.' });
+
+  // 누가 올렸는지 남긴다(uploads 표) — 비밀 대화에는 자기가 올린 파일만 실을 수 있고(sendMessage.js), 자동 삭제도 보낸 사람이
+  // 직접 올린 파일만 지운다(secretExpiry.js). 기록을 못 남기면 그 파일은 그 둘에 못 쓰므로 실패로 돌려주고, 방금 받은 파일은
+  // 치운다(아직 누구에게도 경로를 준 적 없는 새 파일이라 지워도 된다).
+  try {
+    // DB 모듈은 여기서 불러온다 — 이 파일은 서명·경로 함수 때문에 DB 없이 도는 단위 테스트(todoRules.test.js 등)도 불러가는데,
+    // DB 모듈은 불러오는 순간 DATABASE_URL을 요구한다(db/client.js).
+    const { insertUpload } = await import('./db/queries/uploads.js');
+    await insertUpload({ fileName: req.file.filename, uploaderId: req.user.sub });
+  } catch (err) {
+    console.error('[upload] 올린 사람 기록 실패:', err?.message ?? err);
+    fs.promises.unlink(req.file.path).catch(() => {});
+    return res.status(500).json({ error: '파일을 저장하지 못했습니다. 다시 시도하세요.' });
+  }
   recordUploadedBytes(req.user.sub, req.file.size);
 
   // 응답의 url은 저장된 상대경로일 뿐, 그 자체로는 서빙되지 않는다(직접 공개 URL 금지).

@@ -9,8 +9,11 @@ import {
 } from './db/queries/inquiries.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { isUuid } from './favoritesRules.js';
+import { checkFileRefs } from './fileRefs.js';
+import { fileFieldsDenial, INQUIRY_CATEGORY_MAX, sanitizeFileSize } from './messageLimits.js';
 import { resolvePosition } from './orgInfo.js';
-import { SELF_ROOM_DENIAL } from './permissions.js';
+import { graphemeLength, SELF_ROOM_DENIAL } from './permissions.js';
 import { signFileUrl } from './upload.js';
 
 const STATUSES = ['open', 'in_progress', 'resolved'];
@@ -61,16 +64,26 @@ export function createInquiriesRouter(io) {
     if (!title) return res.status(400).json({ error: '제목을 입력하세요.' });
     if (title.length > 100) return res.status(400).json({ error: '제목은 100자 이내로 작성하세요.' });
     if (!category) return res.status(400).json({ error: '분류를 선택하세요.' });
+    // 분류는 앱이 정해 둔 몇 개 중에서 고른다(client models/inquiry.dart) — 문의함 목록에 그대로 보이므로 길이만큼은 막는다.
+    if (graphemeLength(category) > INQUIRY_CATEGORY_MAX) return res.status(400).json({ error: '분류가 올바르지 않습니다.' });
     if (!content) return res.status(400).json({ error: '내용을 입력하세요.' });
     if (content.length > 2000) return res.status(400).json({ error: '내용은 2000자 이내로 작성하세요.' });
 
     // 첨부(선택) — 클라이언트가 /api/upload로 이미 올린 뒤 그 결과 URL만 여기로 보낸다
-    // (chat_input_bar.dart의 _InquiryDialog 참고).
-    const fileUrl = typeof req.body?.fileUrl === 'string' ? req.body.fileUrl : null;
+    // (chat_input_bar.dart의 _InquiryDialog 참고). 예전엔 보낸 값을 확인도 되돌리기도 없이 저장했다 — 이제 메시지와 같은 규칙으로
+    // 직접 올린 파일(또는 지금 볼 수 있는 방의 파일)만 받는다(fileRefs.js).
+    const rawFileUrl = typeof req.body?.fileUrl === 'string' && req.body.fileUrl ? req.body.fileUrl : null;
+    const rawThumbnailUrl =
+      typeof req.body?.thumbnailUrl === 'string' && req.body.thumbnailUrl ? req.body.thumbnailUrl : null;
     const fileName = typeof req.body?.fileName === 'string' ? req.body.fileName : null;
-    const fileSize = typeof req.body?.fileSize === 'number' ? req.body.fileSize : null;
+    const fileSize = sanitizeFileSize(req.body?.fileSize);
     const mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType : null;
-    const thumbnailUrl = typeof req.body?.thumbnailUrl === 'string' ? req.body.thumbnailUrl : null;
+    const fileDenial = fileFieldsDenial({ fileName, mimeType });
+    if (fileDenial) return res.status(400).json({ error: fileDenial });
+    const files = await checkFileRefs([rawFileUrl, rawThumbnailUrl], { senderId: req.user.sub });
+    if (!files.ok) return res.status(400).json({ error: files.error });
+    const fileUrl = rawFileUrl ? files.paths.get(rawFileUrl) : null;
+    const thumbnailUrl = rawThumbnailUrl ? files.paths.get(rawThumbnailUrl) : null;
 
     const [sender, recipient] = await Promise.all([findUserById(req.user.sub), findUserById(recipientId)]);
     const row = await insertInquiry({
@@ -115,7 +128,7 @@ export function createInquiriesRouter(io) {
 
   /** 상태 변경 — 받는 사람(팀장) 본인만 가능. */
   router.patch('/inquiries/:id', async (req, res) => {
-    const inquiry = await findInquiryById(req.params.id);
+    const inquiry = isUuid(req.params.id) ? await findInquiryById(req.params.id) : null;
     if (!inquiry) return res.status(404).json({ error: '문의를 찾을 수 없습니다.' });
     if (inquiry.recipientId !== req.user.sub) {
       return res.status(403).json({ error: '본인에게 온 문의만 처리할 수 있습니다.' });

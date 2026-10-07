@@ -138,18 +138,36 @@ import {
 import { createProjectNotifier } from './projectNotify.js';
 import {
   AUTOMATION_TRIGGERS,
+  automationEnableDenial,
   runAutomations,
   validateAutomationGraph,
   validateAutomationInput,
 } from './projectAutomation.js';
+import {
+  PROJECT_CREATE_WINDOW_MS,
+  PROJECT_CREATED_NOTIFY_WINDOW_MS,
+  PROJECT_ROUTE_PREFIXES,
+  ProjectCreatedAnnouncer,
+  TASK_TITLE_MAX,
+  createProjectCreateLimiter,
+  isEligibleProjectAccount,
+  noteBodyWithoutExternalImages,
+  parseTaskDescription,
+  parseTaskTitle,
+  projectInviteDenial,
+  projectUseDenial,
+} from './projectNotifications.js';
+import { tooMany } from './authGuard.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { isTeamMember, listTeamMemberIds } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
 import { teamAccess } from './access.js';
-import { accountRole, canCreateProject, canManageProject } from './permissions.js';
+import { canCreateProject, canManageProject } from './permissions.js';
 import { publicUser } from './users.js';
 import { sanitizeTextFormat } from './textFormat.js';
-import { resolveRawUrl, signFileUrl } from './upload.js';
+import { filterNoteFileLinks } from './fileRefs.js';
+import { signNoteFileLinks } from './fileRefRules.js';
+import { signFileUrl } from './upload.js';
 
 const TASK_STATUSES = ['todo', 'doing', 'done'];
 const TASK_PRIORITIES = ['low', 'normal', 'high'];
@@ -236,23 +254,46 @@ const OPTION_FIELD_KINDS = ['select', 'multiSelect'];
 
 const NOTE_TITLE_MAX = 100;
 const NOTE_BODY_MAX = 50000;
+/**
+ * 새 노트로 받는 본문의, 저장할 모양으로 바꾸기 전(보낸 그대로) 상한. 새 노트의 길이 제한(NOTE_BODY_MAX)은 저장할 모양(rawNoteBody
+ * 뒤)으로 잰다 — 앱의 노트 복제는 원본 노트를 내려받은 그대로(서명 링크째) 보내는데, 서명 링크는 저장 경로보다 세 배쯤 길어서 5만 자
+ * 노트의 복사본은 보낸 그대로 재면 5만 자를 넘을 수 있다. 다만 바꾸는 일(rawNoteBody)은 본문을 통째로 몇 번 읽고 링크마다 파일 기록을
+ * 찾아보므로, 정상 본문이 될 수 없을 만큼 긴 것(로그인한 요청의 JSON 상한은 512KiB — bodyLimit.js)은 읽기 전에 거절한다.
+ */
+const NOTE_BODY_RAW_MAX = NOTE_BODY_MAX * 4;
 
 /**
  * 노트 본문에 넣은 그림·파일 링크 — DB에는 만료되지 않는 원본 경로(`](/uploads/…)`)로 두고,
  * 내려줄 때만 지금 시점의 서명된 주소(`/files/<토큰>`)로 바꾼다(서명은 시간이 지나면 만료된다).
+ * 이 서버 파일이 아닌 그림은 내려줄 때도 링크로 바꾼다(noteBodyWithoutExternalImages) — 이 규칙 전에 저장된 노트를 예전 앱이
+ * 열어도 노트를 연 사람의 기기가 바깥 주소로 그림을 받으러 가지 않게.
+ * 서명할 링크를 찾는 모양은 저장할 때의 검사와 한곳에 둔다(fileRefRules.js signNoteFileLinks — 검사가 서명할 링크를 모두 품어야 하고,
+ * 노트를 열 때마다 돌므로 본문 길이에 비례하는 시간에 끝나야 한다).
  */
 function signNoteBody(body) {
   if (typeof body !== 'string') return body;
-  return body.replace(/\]\((\/uploads\/[^)\s]+)\)/g, (_, url) => `](${signFileUrl(url)})`);
+  return signNoteFileLinks(noteBodyWithoutExternalImages(body), (url) => signFileUrl(url));
 }
 
-/** 저장할 때 — 클라이언트가 서명된 주소를 그대로 보내와도 원본 경로로 되돌린다. */
-function rawNoteBody(body) {
+/**
+ * 저장할 때 — 노트 본문을 쓰는 곳(만들기·고치기·이력 되돌리기)이 모두 이 함수를 지난다. 쓰는 사람([writerId])이 써도 되는 이 서버 파일
+ * 링크만 남긴다(fileRefs.js filterNoteFileLinks): 직접 올린 파일, [existingBodies](고치는 노트의 지금 본문·되돌리는 이력의 본문)에 이미
+ * 있던 파일, 서명 링크로 온 지금 볼 수 있는 파일(구성원인 프로젝트의 다른 노트·이력, 들어가 있는 방). 예전엔 본문 속 `](/uploads/…)`를
+ * 보낸 그대로 저장하고 볼 때마다 새로 서명해 줘서, 어디서 알게 된 파일 이름을 노트에 적으면 그 노트를 보는 사람 모두가 그 파일을 영영
+ * 받을 수 있었다(검토 S22). 받은 링크는 클라이언트가 서명된 주소(/files/…)로 보내와도 원본 경로로 되돌린다 — 편집 창이 몇 시간 열려 있어
+ * 서명이 만료됐어도 서명만 맞으면 그 파일로 알아본다(예전엔 만료된 링크가 그대로 저장돼 그림이 깨졌다).
+ *
+ * 받을 수 없는 링크가 있어도 저장을 거절하지 않는다 — 그 링크만 글자로 바꾸고(그림은 이름, 링크는 글이 남는다) 나머지는 그대로 저장한다.
+ * 긴 노트를 쓰다가 그림 하나 때문에 저장을 통째로 잃지 않게 하려는 것이고, 남의 파일 링크가 남지 않는다는 점은 같다.
+ *
+ * 그 다음에 이 서버 파일이 아닌 그림을 링크로 바꾼다(projectNotifications.js noteBodyWithoutExternalImages) — 파일 링크를 글자로 바꾼
+ * 자리가 앞뒤 글자와 이어져 바깥 그림이 새로 생겨도 여기서 걸러진다. '\r'은 맨 먼저 지운다: 앱은 '\r'을 모두 지운 뒤 읽으므로, 나중에
+ * 지우면 `]\r(/uploads/…)` 같은 글이 파일 링크 검사를 비켜 간 뒤 링크로 되살아난다.
+ */
+async function rawNoteBody(body, { writerId, existingBodies = [] }) {
   if (typeof body !== 'string') return body;
-  return body.replace(/\]\((\/files\/[^)\s]+)\)/g, (m, url) => {
-    const raw = resolveRawUrl(url);
-    return raw ? `](${raw})` : m;
-  });
+  const filtered = await filterNoteFileLinks(body.replace(/\r/g, ''), { writerId, existingBodies });
+  return noteBodyWithoutExternalImages(filtered);
 }
 
 /** 노트 수정·삭제 권한 설정 값 — 'all'(구성원 모두) | 'creator_admin'(작성자와 관리자). */
@@ -468,6 +509,22 @@ function parseDate(value) {
   return typeof value === 'number' ? new Date(value) : undefined;
 }
 
+// ── 프로젝트 만들기 횟수 제한 ───────────────────────────────────────────
+
+const projectCreateLimiter = createProjectCreateLimiter();
+setInterval(() => projectCreateLimiter.prune(), PROJECT_CREATE_WINDOW_MS).unref();
+
+/**
+ * 프로젝트 행을 새로 만들기 직전에 부른다 — 검사를 다 통과해 정말 만들어지는 요청만 센다(입력 오류로 다시 보내는 것은
+ * 세지 않는다). 사람 단위라 남이 대신 막을 수 없다. 너무 많으면 429로 응답하고 false(calendars.js allowEventCreate와 같다).
+ */
+function allowProjectCreate(req, res) {
+  const wait = projectCreateLimiter.hit(req.user.sub);
+  if (wait === 0) return true;
+  tooMany(res, wait, '프로젝트 만들기');
+  return false;
+}
+
 /**
  * 프로젝트 — 토픽(대화)과 별개로 "업무를 계획·추적하는 공간"이다. 팀에 속하고, 초대된
  * 구성원(project_members)만 볼 수 있다(공개 프로젝트는 정회원 이상 팀원 모두가 자동으로
@@ -478,6 +535,36 @@ function parseDate(value) {
 export function createProjectsRouter(io) {
   const router = Router();
   const notifier = createProjectNotifier(io);
+
+  /**
+   * 공개 프로젝트 생성 알림 — 몇 분 미뤘다가, 그때도 프로젝트가 있고 공개·진행 중이며 만든 사람이 아직 활동 중인 팀원일
+   * 때만 그 시점의 이름으로 보낸다. 만든 사람·팀마다 시간당 상한이 있다(projectNotifications.js ProjectCreatedAnnouncer —
+   * 만들고 바로 지우기를 되풀이해 팀 전체에 푸시를 쏟아내지 못하게). 미뤄 둔 알림은 메모리에만 있어 그사이 서버가 다시
+   * 시작되면 보내지 않는다.
+   */
+  const projectCreatedAnnouncer = new ProjectCreatedAnnouncer({
+    prepare: async ({ projectId, teamId, creatorId }) => {
+      const project = await findProjectById(projectId);
+      if (!project || project.teamId !== teamId || !project.isPublic || project.archivedAt) return null;
+      const creator = await findUserById(creatorId);
+      if (!isEligibleProjectAccount(creator) || !(await isTeamMember(teamId, creatorId))) return null;
+      return { project, creator };
+    },
+    send: async ({ project, creator }) => {
+      // 그사이 팀에 들어온 정회원 이상도 알림 대상(=구성원)이 되도록 자동 참여 행을 먼저 채운다.
+      emitJoined(project, await ensurePublicProjectMembers(project));
+      await notifier.notify({
+        project,
+        task: null,
+        kind: 'project_created',
+        actorId: creator.id,
+        targetIds: await listPublicEligibleUserIds(project.teamId),
+        title: project.name,
+        body: `${creator.name ?? creator.username ?? '알 수 없음'}님이 공개 프로젝트를 만들었습니다: ${project.name}`,
+      });
+    },
+  });
+  setInterval(() => projectCreatedAnnouncer.prune(), PROJECT_CREATED_NOTIFY_WINDOW_MS).unref();
 
   /** 종료된(보관된) 프로젝트는 읽기만 된다 — 쓰기 요청이면 409로 막고 true를 돌려준다. */
   function rejectIfArchived(res, project) {
@@ -493,13 +580,24 @@ export function createProjectsRouter(io) {
     return true;
   }
 
-  // 프로젝트는 정회원 이상만 쓴다(준회원은 목록·조회·수정 모두 불가). 서버 운영자는 예외.
-  router.use(['/projects', '/project-templates', '/project-folders', '/tasks', '/task-types', '/task-statuses', '/task-priorities', '/task-fields', '/notes', '/project-notifications', '/task-templates', '/automations', '/note-comments', '/note-versions', '/task-comments'], async (req, res, next) => {
+  /**
+   * 프로젝트를 쓸 수 없는 계정이면(준회원 — 서버 운영자는 예외, projectNotifications.js projectUseDenial) 403까지 보내고 true.
+   * 라우터 입구와 requireProjectMember가 함께 쓰고, 계정은 한 요청에서 한 번만 읽는다(판정을 req에 남겨 둔다).
+   */
+  async function rejectProjectGuest(req, res) {
+    if (req.projectUseDenial === undefined) {
+      req.projectUseDenial = projectUseDenial(await findUserById(req.user.sub));
+    }
+    if (!req.projectUseDenial) return false;
+    res.status(403).json({ error: req.projectUseDenial });
+    return true;
+  }
+
+  // 프로젝트는 정회원 이상만 쓴다(준회원은 목록·조회·수정 모두 불가). 서버 운영자는 예외. 이 라우터의 주소 전부가 목록에 있어야
+  // 한다(PROJECT_ROUTE_PREFIXES — 빠진 것이 없는지 test/projectGuardRoutes.test.js가 본다).
+  router.use(PROJECT_ROUTE_PREFIXES, async (req, res, next) => {
     try {
-      const user = await findUserById(req.user.sub);
-      if (accountRole(user) === 'guest' && !user?.isServerAdmin) {
-        return res.status(403).json({ error: '프로젝트는 정회원 이상만 이용할 수 있습니다.' });
-      }
+      if (await rejectProjectGuest(req, res)) return;
       next();
     } catch (e) {
       next(e);
@@ -508,13 +606,16 @@ export function createProjectsRouter(io) {
 
   /** 이 사람이 그 프로젝트를 볼 수 있는지 확인하고, 못 보면 응답까지 보내고 null을 준다. */
   async function requireProjectMember(req, res, projectId) {
+    // 입구 목록에서 주소 하나가 빠져도(예전 /checklist-items처럼) 프로젝트를 여는 라우트는 모두 여기를 지나므로 준회원 막기를 한 번
+    // 더 둔다 — 입구에서 이미 봤으면 다시 읽지 않는다.
+    if (await rejectProjectGuest(req, res)) return null;
     const project = await findProjectById(projectId);
     if (!project) {
       res.status(404).json({ error: '프로젝트를 찾을 수 없습니다.' });
       return null;
     }
-    // isProjectMember는 유효한 행만 본다 — 팀에서 빠진 사람은 초대·자동 참여 행이 남아 있어도, 자동 참여
-    // 행은 정회원 이상 자격을 잃으면 구성원이 아니다(아래 자동 참여도 팀·자격을 다시 보므로 403).
+    // isProjectMember는 유효한 행만 본다 — 팀에서 빠졌거나 정지·탈퇴·준회원 강등으로 자격을 잃은 사람은 초대·자동
+    // 참여 행이 남아 있어도 구성원이 아니다(아래 자동 참여도 팀·자격을 다시 보므로 403).
     if (!(await isProjectMember(project.id, req.user.sub))) {
       // 공개 프로젝트는 정회원 이상 팀원이면 목록을 불러오기 전에(링크·알림으로) 열어도 바로 넣어준다.
       if (!(await joinPublicProjectAutomatically(project, req.user.sub))) {
@@ -611,7 +712,10 @@ export function createProjectsRouter(io) {
     });
   });
 
-  /** 공개 프로젝트 둘러보기 — 내가 아직 안 들어간 공개 프로젝트(정회원 이상만 볼 수 있다). */
+  /**
+   * 공개 프로젝트 둘러보기 — 내가 아직 안 들어간 공개 프로젝트(정회원 이상만 볼 수 있다). 지금 앱은 공개 프로젝트에 자동으로 들어가서
+   * 부르지 않는다(예전 앱의 "공개 프로젝트 둘러보기" 창이 아래 참여와 함께 쓴다 — 읽기만 하므로 그대로 둔다).
+   */
   router.get('/projects/browse', async (req, res) => {
     const teamId = req.query.teamId;
     if (typeof teamId !== 'string') return res.status(400).json({ error: 'teamId가 필요합니다.' });
@@ -624,7 +728,14 @@ export function createProjectsRouter(io) {
     res.json(list.map((p) => toProjectDto(p)));
   });
 
-  /** 공개 프로젝트에 초대 없이 참여한다 — 팀 멤버이면서 정회원 이상만. */
+  /**
+   * 공개 프로젝트에 초대 없이 참여한다 — 예전 앱의 "공개 프로젝트 둘러보기" 창이 부르던 주소다(지금 앱은 부르지 않는다). 예전에는
+   * 초대받은 사람과 같은 행(auto = false)을 넣어서, 이렇게 스스로 들어온 사람은 프로젝트가 비공개로 바뀌어도(removeAutoMembers는
+   * 자동 참여 행만 뺀다) 초대받은 구성원처럼 남았다. 비공개 전환과 동시에 부르면 원래 자동으로 들어와 있던 사람이 전환 도중 초대받은
+   * 행으로 다시 들어가기도 했다. 이제 링크로 열 때의 자동 참여와 똑같이 넣는다(joinPublicProjectAutomatically — 같은 문장 안에서
+   * 공개·종료 여부와 팀·자격을 다시 보고 프로젝트 행을 잠근 채 auto = true로 넣는다). 그래서 비공개로 바뀌면 함께 빠지고, 전환이
+   * 끝난 프로젝트에는 들어가지 않는다.
+   */
   router.post('/projects/:id/join', async (req, res) => {
     const project = await findProjectById(req.params.id);
     if (!project || !project.isPublic) return res.status(404).json({ error: '참여할 수 있는 공개 프로젝트가 아닙니다.' });
@@ -632,14 +743,17 @@ export function createProjectsRouter(io) {
     if (!(await isTeamMember(project.teamId, req.user.sub))) {
       return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
     }
-    const access = await teamAccess(project.teamId, req.user.sub);
-    if (access.role === 'guest' && !access.isServerAdmin) {
+    if (!(await joinPublicProjectAutomatically(project, req.user.sub))) {
+      // 그사이 비공개·종료됐으면 위와 같은 안내를, 아니면 자격(정회원 이상) 안내를 준다.
+      const current = await findProjectById(project.id);
+      if (!current?.isPublic || current.archivedAt) {
+        return res.status(404).json({ error: '참여할 수 있는 공개 프로젝트가 아닙니다.' });
+      }
       return res.status(403).json({ error: '정회원 이상만 공개 프로젝트에 참여할 수 있습니다.' });
     }
-    await addProjectMembers(project.id, [req.user.sub]);
     await notifyProjectMembers(project, null);
-    io.to(`user:${req.user.sub}`).emit('project:changed', { teamId: project.teamId, projectId: project.id });
-    res.json(toProjectDto({ ...project, favorite: false, myRole: 'member' }));
+    const myRole = (await getProjectRole(project.id, req.user.sub)) ?? 'member';
+    res.json(toProjectDto({ ...project, favorite: false, myRole }));
   });
 
   /** 새 프로젝트. 만든 사람이 담당자(owner)가 되고, 고른 구성원이 함께 들어간다. */
@@ -677,6 +791,12 @@ export function createProjectsRouter(io) {
     const memberIds = Array.isArray(req.body?.memberIds)
       ? [...new Set(req.body.memberIds.filter((id) => typeof id === 'string' && teamMemberIdSet.has(id)))]
       : [];
+    // 구성원 초대(POST /projects/:id/members)와 같은 규칙 — 준회원·정지·탈퇴한 사람은 넣지 않는다(예전에는 여기서만
+    // 준회원을 거르지 않아서, 만드는 사람이 준회원을 프로젝트에 넣을 수 있었다). 만든 사람 자신은 위 권한 확인으로 충분하다.
+    for (const user of await listUsersByIds(memberIds.filter((id) => id !== req.user.sub))) {
+      const denial = projectInviteDenial(user);
+      if (denial) return res.status(400).json({ error: denial });
+    }
     // 템플릿을 골랐으면 기본 상태·유형·우선순위 대신 그 구성으로 채운다(같은 팀 것만).
     let template = null;
     if (req.body?.templateId != null) {
@@ -689,6 +809,7 @@ export function createProjectsRouter(io) {
         return res.status(400).json({ error: '템플릿을 찾을 수 없습니다.' });
       }
     }
+    if (!allowProjectCreate(req, res)) return;
     const project = await insertProject({
       color: rawColor ? rawColor.toUpperCase() : '#5B8DEF',
       isPublic: req.body?.isPublic === true,
@@ -722,21 +843,11 @@ export function createProjectsRouter(io) {
     }
     res.status(201).json(toProjectDto({ ...project, favorite: false, myRole: 'owner' }));
 
-    // 공개 프로젝트가 새로 생겼다는 것만 팀에 한 번 알린다(비공개→공개 전환 때는 보내지 않는다).
-    // 이후 업무 알림은 지금처럼 그 업무에 관련된 사람만 받는다. 팀원이 많을 수 있어 응답은 기다리지 않는다.
+    // 공개 프로젝트가 새로 생겼다는 것만 팀에 한 번 알린다(비공개→공개 전환 때는 보내지 않는다). 이후 업무 알림은 지금처럼
+    // 그 업무에 관련된 사람만 받는다. 바로 보내지 않고 몇 분 뒤에, 그때도 공개 프로젝트로 남아 있을 때만 보낸다(위
+    // projectCreatedAnnouncer — 만들고 곧 지우기를 되풀이해 팀 전체에 푸시를 보내지 못하게).
     if (project.isPublic) {
-      (async () => {
-        const [creator, targetIds] = await Promise.all([findUserById(req.user.sub), listPublicEligibleUserIds(teamId)]);
-        await notifier.notify({
-          project,
-          task: null,
-          kind: 'project_created',
-          actorId: req.user.sub,
-          targetIds,
-          title: project.name,
-          body: `${creator?.name ?? '알 수 없음'}님이 공개 프로젝트를 만들었습니다: ${project.name}`,
-        });
-      })().catch((e) => console.error('[projects] 공개 프로젝트 생성 알림 실패:', e?.message ?? e));
+      projectCreatedAnnouncer.schedule({ projectId: project.id, teamId, creatorId: req.user.sub });
     }
   });
 
@@ -1116,6 +1227,8 @@ export function createProjectsRouter(io) {
     if (!project) return;
     const members = await listProjectMemberUsers(project.id);
     await deleteProject(project.id);
+    // 아직 미뤄 둔 생성 알림이 있으면 버린다(시각이 돼도 프로젝트가 없어 건너뛰지만 타이머를 바로 치운다).
+    projectCreatedAnnouncer.cancel(project.id);
     for (const member of members) {
       io.to(`user:${member.id}`).emit('project:changed', { teamId: project.teamId });
     }
@@ -1131,7 +1244,7 @@ export function createProjectsRouter(io) {
     res.json({ ok: true, favorite });
   });
 
-  /** 구성원 초대 — 같은 팀 멤버만 넣을 수 있다. */
+  /** 구성원 초대 — 같은 팀의 정회원 이상(정지·탈퇴하지 않은 사람)만 넣을 수 있다. */
   router.post('/projects/:id/members', async (req, res) => {
     const project = await requireProjectManager(req, res, req.params.id);
     if (!project) return;
@@ -1141,10 +1254,9 @@ export function createProjectsRouter(io) {
       if (!(await isTeamMember(project.teamId, userId))) {
         return res.status(400).json({ error: '같은 팀 멤버만 프로젝트에 추가할 수 있습니다.' });
       }
-      const target = await findUserById(userId);
-      if (accountRole(target) === 'guest') {
-        return res.status(400).json({ error: '프로젝트는 정회원 이상만 참여할 수 있습니다.' });
-      }
+      // 프로젝트를 만들며 고른 구성원(POST /projects)과 같은 규칙(projectNotifications.js projectInviteDenial).
+      const denial = projectInviteDenial(await findUserById(userId));
+      if (denial) return res.status(400).json({ error: denial });
     }
     await addProjectMembers(project.id, userIds);
     for (const userId of userIds) {
@@ -1162,7 +1274,18 @@ export function createProjectsRouter(io) {
     if (role !== 'owner' && role !== 'member') return res.status(400).json({ error: '역할 값이 올바르지 않습니다.' });
     const current = await getProjectRole(project.id, req.params.userId);
     if (!current) return res.status(404).json({ error: '이 프로젝트의 구성원이 아닙니다.' });
-    if (current === 'owner' && role === 'member' && (await countProjectOwners(project.id)) <= 1) {
+    // 담당자로 올리는 것은 지금 유효한 구성원만 — 정지·탈퇴·준회원 강등이나 팀 탈퇴로 남은 행에 담당자 권한을 붙여 두지
+    // 않는다(내리는 것은 정리용이라 그대로 된다).
+    if (role === 'owner' && current !== 'owner' && !(await isProjectMember(project.id, req.params.userId))) {
+      return res.status(400).json({ error: '프로젝트에 참여 중인 정회원 이상만 담당자로 지정할 수 있습니다.' });
+    }
+    // 일할 수 있는 담당자가 한 명은 남아야 한다 — 자격을 잃고 남은 담당자 행을 내리는 건(정리) 그 수를 줄이지 않으므로 막지 않는다.
+    if (
+      current === 'owner' &&
+      role === 'member' &&
+      (await isProjectMember(project.id, req.params.userId)) &&
+      (await countProjectOwners(project.id)) <= 1
+    ) {
       return res.status(400).json({ error: '담당자가 한 명은 있어야 합니다.' });
     }
     await setProjectMemberRole(project.id, req.params.userId, role);
@@ -1406,9 +1529,12 @@ export function createProjectsRouter(io) {
     if (!project) return;
     if (rejectIfArchived(res, project)) return;
     const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-    const body = rawNoteBody(typeof req.body?.body === 'string' ? req.body.body : '');
     if (!title) return res.status(400).json({ error: '노트 제목을 입력하세요.' });
     if (title.length > NOTE_TITLE_MAX) return res.status(400).json({ error: `제목은 ${NOTE_TITLE_MAX}자 이내로 입력하세요.` });
+    const rawBody = typeof req.body?.body === 'string' ? req.body.body : '';
+    if (rawBody.length > NOTE_BODY_RAW_MAX) return res.status(400).json({ error: `내용은 ${NOTE_BODY_MAX}자 이내로 입력하세요.` });
+    // 새 노트라 원래 있던 파일은 없다 — 직접 올린 그림과 지금 볼 수 있는 파일(앱의 "노트 복제"는 원본 노트의 서명 링크를 그대로 보낸다)만.
+    const body = await rawNoteBody(rawBody, { writerId: req.user.sub });
     if (body.length > NOTE_BODY_MAX) return res.status(400).json({ error: `내용은 ${NOTE_BODY_MAX}자 이내로 입력하세요.` });
     const note = await insertNote({
       projectId: project.id,
@@ -1445,7 +1571,8 @@ export function createProjectsRouter(io) {
     if ('body' in (req.body ?? {})) {
       if (typeof req.body.body !== 'string') return res.status(400).json({ error: '내용 형식이 올바르지 않습니다.' });
       if (req.body.body.length > NOTE_BODY_MAX) return res.status(400).json({ error: `내용은 ${NOTE_BODY_MAX}자 이내로 입력하세요.` });
-      fields.body = rawNoteBody(req.body.body);
+      // 지금 본문에 있던 그림·파일은 편집 창이 들고 있던(만료됐을 수 있는) 서명 링크로 돌아와도 그대로 받는다.
+      fields.body = await rawNoteBody(req.body.body, { writerId: req.user.sub, existingBodies: [note.body] });
     }
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     const base = req.body?.baseUpdatedAt;
@@ -1604,8 +1731,11 @@ export function createProjectsRouter(io) {
     if (!access) return;
     const v = typeof req.body?.versionId === 'string' ? await findNoteVersionById(req.body.versionId) : null;
     if (!v || v.noteId !== note.id) return res.status(400).json({ error: '되돌릴 이력을 찾을 수 없습니다.' });
+    // 이력은 그림 주소 규칙(rawNoteBody — 바깥 그림은 링크로) 전에 남은 것일 수 있어서, 되돌릴 때도 저장할 때와 같이 거른다. 그 이력에
+    // 있던 파일은 이 노트에 원래 있던 파일이라 그대로 받는다(existingBodies) — 알아볼 수 없는 링크만 글자로 바뀐다.
+    const body = await rawNoteBody(v.body, { writerId: req.user.sub, existingBodies: [v.body] });
     await snapshotNoteVersion(note);
-    const updated = await updateNote(note.id, { title: v.title, body: v.body, updatedBy: req.user.sub });
+    const updated = await updateNote(note.id, { title: v.title, body, updatedBy: req.user.sub });
     await notifyProjectMembers(project, null);
     res.json(await noteDetailDto(updated, project, req.user.sub, access));
   });
@@ -1976,9 +2106,12 @@ export function createProjectsRouter(io) {
     if (!project) return;
     if (rejectIfArchived(res, project)) return;
 
-    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-    if (!title) return res.status(400).json({ error: '업무 제목을 입력하세요.' });
-    if (title.length > 200) return res.status(400).json({ error: '업무 제목은 200자 이내로 입력하세요.' });
+    // 제목·설명 길이는 PATCH /tasks/:id와 같은 함수로 본다(projectNotifications.js — 알림·채팅방 알림에 그대로 실린다).
+    const parsedTitle = parseTaskTitle(req.body?.title);
+    if (parsedTitle.error) return res.status(400).json({ error: parsedTitle.error });
+    const title = parsedTitle.value;
+    const parsedDescription = parseTaskDescription(req.body?.description);
+    if (parsedDescription.error) return res.status(400).json({ error: parsedDescription.error });
 
     const resolved = await resolveStatus(project, req.body);
     if (resolved.error) return res.status(400).json({ error: resolved.error });
@@ -2031,7 +2164,7 @@ export function createProjectsRouter(io) {
       seq,
       parentTaskId,
       title,
-      description: typeof req.body?.description === 'string' ? req.body.description.trim() || null : null,
+      description: parsedDescription.value,
       assigneeId,
       status,
       statusId,
@@ -2046,7 +2179,14 @@ export function createProjectsRouter(io) {
     });
     if (referenceIds.length > 0) await setTaskReferences(inserted.id, referenceIds);
     // 자동화 규칙 실행 — 결과(자동 배정 등)가 응답과 다른 사람들의 화면 갱신에 이미 반영되도록 먼저 돌린다.
-    const task = await runAutomations({ project, task: inserted, trigger: 'task_created', notifier, io });
+    const task = await runAutomations({
+      project,
+      task: inserted,
+      trigger: 'task_created',
+      notifier,
+      io,
+      actorId: req.user.sub,
+    });
     await notifyProjectMembers(project, task.id);
     await notifyTaskEvents(project, inserted, req.user.sub, {
       assigneeId: inserted.assigneeId,
@@ -2080,7 +2220,8 @@ export function createProjectsRouter(io) {
     const subtasks = await decorateTasks(subtaskRows, req.user.sub);
     res.json({
       ...toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }),
-      comments: comments.map(toTaskCommentDto),
+      // 댓글의 프로젝트는 업무의 지금 프로젝트로 내려준다(예전 이동 때 남은 옛 project_id 대신 — requireOwnTaskComment와 같은 기준).
+      comments: comments.map((c) => toTaskCommentDto({ ...c, projectId: task.projectId })),
       activities: activities.map((a) => ({
         id: a.id,
         actorId: a.actorId ?? null,
@@ -2128,23 +2269,24 @@ export function createProjectsRouter(io) {
     const { result: item, completed } = await mutateChecklist(found.task.id, (tx) =>
       insertChecklistItem(found.task.id, text, tx),
     );
-    await runChecklistAutomations(found.project, found.task.id, completed);
+    await runChecklistAutomations(found.project, found.task.id, completed, req.user.sub);
     await notifyProjectMembers(found.project, found.task.id);
     res.status(201).json(toChecklistItemDto(item));
   });
 
   /** 체크리스트가 방금 "항목 1개 이상, 전부 완료"가 됐으면([completed], mutateChecklist가 업무를
-   * 잠그고 판단한다 — 동시에 체크해도 한 요청만 true) 커밋한 뒤 체크리스트 완료 자동화를 돌린다. */
-  async function runChecklistAutomations(project, taskId, completed) {
+   * 잠그고 판단한다 — 동시에 체크해도 한 요청만 true) 커밋한 뒤 체크리스트 완료 자동화를 돌린다. [actorId]는 체크한
+   * 사람(자동화 채팅방 알림에 "실행한 사람"으로 적힌다). */
+  async function runChecklistAutomations(project, taskId, completed, actorId) {
     if (!completed) return;
     const task = await findTaskById(taskId);
-    if (task) await runAutomations({ project, task, trigger: 'checklist_completed', notifier, io });
+    if (task) await runAutomations({ project, task, trigger: 'checklist_completed', notifier, io, actorId });
   }
 
   router.patch('/checklist-items/:id', async (req, res) => {
     const item = await findChecklistItemById(req.params.id);
-    if (!item) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
-    const task = await findTaskById(item.taskId);
+    const task = item ? await findTaskById(item.taskId) : null;
+    if (!item || !task) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
     const project = await requireProjectMember(req, res, task.projectId);
     if (!project) return;
     if (rejectIfArchived(res, project)) return;
@@ -2161,7 +2303,7 @@ export function createProjectsRouter(io) {
     if ('done' in fields) {
       const { result, completed } = await mutateChecklist(task.id, (tx) => updateChecklistItem(item.id, fields, tx));
       updated = result;
-      await runChecklistAutomations(project, task.id, completed);
+      await runChecklistAutomations(project, task.id, completed, req.user.sub);
     } else {
       updated = await updateChecklistItem(item.id, fields);
     }
@@ -2171,15 +2313,15 @@ export function createProjectsRouter(io) {
 
   router.delete('/checklist-items/:id', async (req, res) => {
     const item = await findChecklistItemById(req.params.id);
-    if (!item) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
-    const task = await findTaskById(item.taskId);
+    const task = item ? await findTaskById(item.taskId) : null;
+    if (!item || !task) return res.status(404).json({ error: '항목을 찾을 수 없습니다.' });
     const project = await requireProjectMember(req, res, task.projectId);
     if (!project) return;
     if (rejectIfArchived(res, project)) return;
     if (rejectIfTaskArchived(res, task)) return;
     // 남은 안 끝난 항목을 지워서 전부 완료가 될 수도 있다.
     const { completed } = await mutateChecklist(task.id, (tx) => deleteChecklistItem(item.id, tx));
-    await runChecklistAutomations(project, task.id, completed);
+    await runChecklistAutomations(project, task.id, completed, req.user.sub);
     await notifyProjectMembers(project, task.id);
     res.json({ ok: true });
   });
@@ -2193,7 +2335,14 @@ export function createProjectsRouter(io) {
     let updated = await setTaskArchived(found.task.id, archived);
     // 보관된 순간에만 — 이미 보관된 업무를 다시 보관하는 요청으로는 돌리지 않는다.
     if (archived && !found.task.archivedAt) {
-      updated = await runAutomations({ project: found.project, task: updated, trigger: 'task_archived', notifier, io });
+      updated = await runAutomations({
+        project: found.project,
+        task: updated,
+        trigger: 'task_archived',
+        notifier,
+        io,
+        actorId: req.user.sub,
+      });
     }
     await notifyProjectMembers(found.project, found.task.id);
     const [decorated] = await decorateTasks([updated], req.user.sub);
@@ -2211,12 +2360,15 @@ export function createProjectsRouter(io) {
     const found = await requireTaskForChecklist(req, res);
     if (!found) return;
     const { task, project } = found;
+    // 사본도 원본의 부모 밑에 두되, 부모가 같은 프로젝트에 있을 때만 — 예전 이동으로 부모가 다른 프로젝트에 가 있는 하위 업무를
+    // 복사하면 사본까지 다른 프로젝트의 부모를 가리키게 된다(그런 행은 0096이 한 번 정리한다).
+    const parent = task.parentTaskId ? await findTaskById(task.parentTaskId) : null;
     const seq = await takeNextTaskSeq(project.id);
     const copy = await insertTask({
       id: randomUUID(),
       projectId: task.projectId,
       seq,
-      parentTaskId: task.parentTaskId,
+      parentTaskId: parent && parent.projectId === task.projectId ? parent.id : null,
       title: `${task.title} (사본)`.slice(0, 200),
       description: task.description,
       assigneeId: task.assigneeId,
@@ -2301,18 +2453,22 @@ export function createProjectsRouter(io) {
     if (rejectIfTaskArchived(res, task)) return;
 
     const fields = {};
+    // 제목·설명 길이는 만들 때(POST /projects/:id/tasks)와 같다 — 예전에는 고칠 때 길이를 안 봐서, 제목을 아주 길게 바꿔
+    // 담당자·참조자 알림과 자동화 채팅방 알림에 긴 글을 밀어 넣을 수 있었다.
     if ('title' in (req.body ?? {})) {
-      const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
-      if (!title) return res.status(400).json({ error: '업무 제목을 입력하세요.' });
-      fields.title = title;
+      const parsed = parseTaskTitle(req.body.title);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      fields.title = parsed.value;
     }
     if ('description' in (req.body ?? {})) {
-      const description = typeof req.body.description === 'string' ? req.body.description.trim() : '';
-      fields.description = description || null;
+      const parsed = parseTaskDescription(req.body.description);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      fields.description = parsed.value;
     }
     if ('assigneeId' in (req.body ?? {})) {
       const assigneeId = typeof req.body.assigneeId === 'string' ? req.body.assigneeId : null;
-      if (assigneeId && !(await isProjectMember(project.id, assigneeId))) {
+      // 지금 담당자를 그대로 다시 보낸 것은 막지 않는다(그 사이 정지 등으로 구성원 자격을 잃었어도 — 새로 고르는 사람만 본다).
+      if (assigneeId && assigneeId !== task.assigneeId && !(await isProjectMember(project.id, assigneeId))) {
         return res.status(400).json({ error: '담당자는 프로젝트 구성원 중에서 고를 수 있습니다.' });
       }
       fields.assigneeId = assigneeId;
@@ -2367,8 +2523,12 @@ export function createProjectsRouter(io) {
       fields.typeId = typeId;
     }
     let newReferenceIds;
+    let oldReferenceIds = [];
     if ('referenceIds' in (req.body ?? {})) {
-      newReferenceIds = await validReferenceIds(project, req.body.referenceIds);
+      oldReferenceIds = (await listReferencesForTasks([task.id]))[task.id] ?? [];
+      // 앱은 참조자를 하나 더하거나 뺄 때 남은 참조자 id를 그대로 다시 보낸다 — 그중 그 사이 팀을 나갔거나 정지·탈퇴·준회원
+      // 강등된 사람이 있어도 막지 않고 새로 넣는 사람만 본다(자격을 잃은 참조자에게는 어차피 알림이 가지 않는다).
+      newReferenceIds = await validReferenceIds(project, req.body.referenceIds, { keep: oldReferenceIds });
       if (newReferenceIds === null) return res.status(400).json({ error: '참조자는 프로젝트 구성원 중에서 고를 수 있습니다.' });
     }
     const startDate = parseDate(req.body?.startDate);
@@ -2379,7 +2539,6 @@ export function createProjectsRouter(io) {
     if (Object.keys(fields).length === 0 && newReferenceIds === undefined) {
       return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     }
-    const oldReferenceIds = newReferenceIds !== undefined ? ((await listReferencesForTasks([task.id]))[task.id] ?? []) : [];
     if ('assigneeId' in fields && fields.assigneeId !== task.assigneeId) fields.dueRemindedFor = null;
     let updated = Object.keys(fields).length > 0 ? await updateTask(task.id, fields) : task;
     if (newReferenceIds !== undefined) await setTaskReferences(task.id, newReferenceIds);
@@ -2411,7 +2570,15 @@ export function createProjectsRouter(io) {
       }
     }
     if (changedFields.length > 0) {
-      updated = await runAutomations({ project, task: updated, trigger: 'field_changed', changedFields, notifier, io });
+      updated = await runAutomations({
+        project,
+        task: updated,
+        trigger: 'field_changed',
+        changedFields,
+        notifier,
+        io,
+        actorId: req.user.sub,
+      });
     }
     await notifyProjectMembers(project, task.id);
     await notifyTaskEvents(project, userUpdated, req.user.sub, {
@@ -2526,7 +2693,7 @@ export function createProjectsRouter(io) {
     // 먼저 지운 요청만 삭제 자동화·알림을 돌린다(같은 업무를 동시에 지워도 한 번만). 자동화는 위에서
     // 읽어 둔 지우기 전 스냅샷으로 돌고, 업무를 고치는 액션은 엔진이 건너뛴다.
     if (!(await deleteTask(task.id))) return res.status(404).json({ error: '업무를 찾을 수 없습니다.' });
-    await runAutomations({ project, task, trigger: 'task_deleted', notifier, io });
+    await runAutomations({ project, task, trigger: 'task_deleted', notifier, io, actorId: req.user.sub });
     await notifyProjectMembers(project, null);
     // project_notifications.task_id는 업무가 지워지면 같이 사라지므로(cascade) 안 붙인다.
     await notifier.notify({
@@ -2576,7 +2743,7 @@ export function createProjectsRouter(io) {
       parentCommentId,
     });
     // 댓글 자동화 — 결과(상태 변경 등)가 아래 화면 갱신 알림에 같이 반영되도록 먼저 돌린다.
-    await runAutomations({ project, task, trigger: 'comment_added', notifier, io });
+    await runAutomations({ project, task, trigger: 'comment_added', notifier, io, actorId: req.user.sub });
     await notifyProjectMembers(project, task.id);
     const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
     await notifier.notify({
@@ -2594,14 +2761,17 @@ export function createProjectsRouter(io) {
   /** 수정·삭제할 댓글을 찾고 권한을 확인한다. 안 되면 응답까지 보내고 null. */
   async function requireOwnTaskComment(req, res, { allowManager }) {
     const comment = await findTaskCommentById(req.params.id);
-    if (!comment) {
+    const task = comment ? await findTaskById(comment.taskId) : null;
+    if (!comment || !task) {
       res.status(404).json({ error: '댓글을 찾을 수 없습니다.' });
       return null;
     }
-    const project = await requireProjectMember(req, res, comment.projectId);
+    // 권한은 그 업무의 지금 프로젝트로 본다 — 댓글 행의 project_id는 예전 업무 이동 때 옛 프로젝트로 남았을 수 있어서(0096이 한 번
+    // 정리한다), 그 값을 믿으면 옛 프로젝트 관리자는 옮겨 간 업무의 댓글을 계속 고치고 지우고, 새 프로젝트 관리자는 못 지웠다.
+    const project = await requireProjectMember(req, res, task.projectId);
     if (!project) return null;
     if (rejectIfArchived(res, project)) return null;
-    if (rejectIfTaskArchived(res, await findTaskById(comment.taskId))) return null;
+    if (rejectIfTaskArchived(res, task)) return null;
     if (comment.senderId !== req.user.sub) {
       let ok = false;
       if (allowManager) {
@@ -2628,7 +2798,7 @@ export function createProjectsRouter(io) {
     if (text.length > 2000) return res.status(400).json({ error: '댓글은 2000자 이내로 작성하세요.' });
     const updated = await updateTaskCommentText(found.comment.id, text, sanitizeTextFormat(req.body?.textFormat, text));
     await notifyProjectMembers(found.project, found.comment.taskId);
-    res.json(toTaskCommentDto(updated));
+    res.json(toTaskCommentDto({ ...updated, projectId: found.project.id }));
   });
 
   /** 댓글 삭제 — 쓴 사람, 프로젝트 담당자, 팀 소유자·관리자만. 답글도 같이 지워진다. */
@@ -2728,8 +2898,8 @@ export function createProjectsRouter(io) {
     };
   }
 
-  /** 본문을 검증해 템플릿 필드로. partial이면 온 것만. */
-  async function parseTemplateFields(project, body, { partial }) {
+  /** 본문을 검증해 템플릿 필드로. partial이면 온 것만. [existing]은 고칠 때의 지금 양식. */
+  async function parseTemplateFields(project, body, { partial, existing = null }) {
     const fields = {};
     if (!partial || 'name' in (body ?? {})) {
       const name = typeof body?.name === 'string' ? body.name.trim() : '';
@@ -2739,12 +2909,14 @@ export function createProjectsRouter(io) {
     }
     if ('title' in (body ?? {})) {
       const title = typeof body.title === 'string' ? body.title.trim() : '';
-      if (title.length > 200) return { error: '업무 제목은 200자 이내로 입력하세요.' };
+      if (title.length > TASK_TITLE_MAX) return { error: `업무 제목은 ${TASK_TITLE_MAX}자 이내로 입력하세요.` };
       fields.title = title;
     }
     if ('description' in (body ?? {})) {
-      const d = typeof body.description === 'string' ? body.description.trim() : '';
-      fields.description = d || null;
+      // 양식의 설명은 그대로 업무 설명이 되므로 업무와 같은 길이 상한을 둔다(넘으면 그 양식으로 업무를 못 만든다).
+      const parsed = parseTaskDescription(body.description);
+      if (parsed.error) return { error: parsed.error };
+      fields.description = parsed.value;
     }
     if ('priority' in (body ?? {})) {
       if (!TASK_PRIORITIES.includes(body.priority)) return { error: '우선순위 값이 올바르지 않습니다.' };
@@ -2758,7 +2930,9 @@ export function createProjectsRouter(io) {
       fields.typeId = body.typeId || null;
     }
     if ('assigneeId' in (body ?? {})) {
-      if (body.assigneeId && !(await isProjectMember(project.id, body.assigneeId))) {
+      // 양식에 이미 저장된 담당자를 그대로 다시 보낸 것은 막지 않는다(그 사이 자격을 잃었어도 — 새로 고르는 사람만 본다).
+      const unchanged = existing && body.assigneeId === existing.assigneeId;
+      if (body.assigneeId && !unchanged && !(await isProjectMember(project.id, body.assigneeId))) {
         return { error: '담당자는 프로젝트 구성원 중에서 고를 수 있습니다.' };
       }
       fields.assigneeId = body.assigneeId || null;
@@ -2798,7 +2972,7 @@ export function createProjectsRouter(io) {
     if (!t) return res.status(404).json({ error: '양식을 찾을 수 없습니다.' });
     const project = await requireProjectManager(req, res, t.projectId);
     if (!project) return;
-    const { fields, error } = await parseTemplateFields(project, req.body, { partial: true });
+    const { fields, error } = await parseTemplateFields(project, req.body, { partial: true, existing: t });
     if (error) return res.status(400).json({ error });
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     try {
@@ -2918,6 +3092,12 @@ export function createProjectsRouter(io) {
     const { fields, error } = await parseAutomationBody(project, req.body, { partial: onlyToggle, userId: req.user.sub });
     if (error) return res.status(400).json({ error });
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    // 꺼진 규칙을 켜기만 할 때는 그래프를 다시 검사하지 않는다 — 채팅방 알림을 저장한 사람이 권한을 잃어 자동으로 꺼진 규칙을
+    // 그대로 켜면 다음 실행에서 또 꺼지므로, 그 사람의 권한을 여기서 다시 보고 다시 저장하라고 알려 준다.
+    if (fields.enabled === true && !a.enabled && fields.graph === undefined) {
+      const denial = await automationEnableDenial(project, a);
+      if (denial) return res.status(400).json({ error: denial });
+    }
     const updated = await updateAutomation(a.id, fields);
     await notifyProjectMembers(project, null);
     res.json(toAutomationDto(updated));
@@ -3045,10 +3225,14 @@ export function createProjectsRouter(io) {
     res.json(toSettingsDto(await upsertNotificationSettings(req.user.sub, project.id, fields)));
   });
 
-  /** 참조자 id 목록을 검증한다 — 프로젝트 구성원이 아닌 사람이 섞여 있으면 null. */
-  async function validReferenceIds(project, raw) {
+  /**
+   * 참조자 id 목록을 검증한다 — 프로젝트 구성원이 아닌 사람이 섞여 있으면 null. [keep]은 이미 그 업무의 참조자인 사람들로,
+   * 지금 구성원이 아니어도 그대로 둘 수 있다(calendars.js 참석자와 같은 방식 — 새로 넣는 사람만 본다).
+   */
+  async function validReferenceIds(project, raw, { keep = [] } = {}) {
     const ids = Array.isArray(raw) ? [...new Set(raw.filter((id) => typeof id === 'string'))] : [];
     for (const id of ids) {
+      if (keep.includes(id)) continue;
       if (!(await isProjectMember(project.id, id))) return null;
     }
     return ids;

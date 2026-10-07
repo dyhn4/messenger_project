@@ -117,7 +117,10 @@ export function createAnnouncementsRouter(io) {
     const team = await findTeamById(room.teamId);
     const isDesignatedTopicCreator =
       team?.topicCreationPolicy === 'designated' ? await isTopicCreator(room.teamId, req.user.sub) : false;
-    // 팀에서 빠진 사람(방 멤버십만 남음)은 쓸 수 없다 — canManage는 이미 팀 멤버만이지만 canCreateTopic은 등급만 본다.
+    // 그 팀 멤버만 쓸 수 있다 — 팀에서 빠지면 그 팀 방에서도 함께 빠지지만(db/queries/rooms.js removeMemberFromTeamRooms),
+    // 팀에서 빠져도 방 멤버십을 남겨 두던 예전 규칙 때 남은 행이 서버를 켤 때 정리되기 전이나(teams.js
+    // sweepLeftoverTeamRoomMembers) 엇갈려 남아 있어도 쓰지 못하게 한 번 더 본다. canManage는 이미 팀 멤버만이지만
+    // canCreateTopic은 등급만 본다.
     if (!access.isMember || (!access.canManage && !canCreateTopic({ ...access, isDesignatedTopicCreator, team }))) {
       return res.status(403).json({ error: '공지를 작성할 권한이 없습니다.' });
     }

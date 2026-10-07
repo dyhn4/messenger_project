@@ -28,11 +28,13 @@ import {
   SCHEDULED_TITLE_MAX,
   topicWriteDenial,
 } from './permissions.js';
+import { checkFileRefs } from './fileRefs.js';
+import { fileFieldsDenial, messageTextDenial, postBytesDenial, sanitizeFileSize } from './messageLimits.js';
 import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
 import { roomDisplayName } from './rooms.js';
 import { sendUserMessage } from './sendMessage.js';
 import { sanitizeTextFormat } from './textFormat.js';
-import { knownUploadPath, signFileUrl, toStoredUploadUrl } from './upload.js';
+import { knownUploadPath, signFileUrl } from './upload.js';
 
 /**
  * 메시지 예약 발송 — 대화방·(보드 뷰면 제목)·메시지·첨부·발송 시각을 저장해 두면 그 시각에 서버가 내 이름으로
@@ -109,6 +111,9 @@ function parseTitle(raw, isBoard) {
     if (graphemeLength(title) > SCHEDULED_TITLE_MAX) {
       return { error: `제목은 ${SCHEDULED_TITLE_MAX}자 이내로 입력하세요.` };
     }
+    // 보낼 때(sendUserMessage) 걸릴 바이트 상한을 미리 본다 — 안 그러면 예약은 되고 발송 때 실패한다.
+    const tooLong = postBytesDenial(title, null);
+    if (tooLong) return { error: tooLong };
     return { value: title };
   }
   if (raw != null && (typeof raw !== 'string' || raw.trim())) {
@@ -126,6 +131,9 @@ function parseMessageText(raw, rawFormat) {
   if (graphemeLength(text) > SCHEDULED_TEXT_MAX) {
     return { error: `메시지는 ${SCHEDULED_TEXT_MAX}자 이내로 입력하세요.` };
   }
+  // 글자 수는 위에서 봤고, 보낼 때 걸릴 바이트 상한(결합 문자로 한 글자를 끝없이 키운 글)을 미리 본다.
+  const tooLong = messageTextDenial(text);
+  if (tooLong) return { error: tooLong };
   const shifted = Array.isArray(rawFormat)
     ? rawFormat.map((r) =>
         r && Number.isInteger(r.s) && Number.isInteger(r.e)
@@ -141,8 +149,10 @@ function parseMessageText(raw, rawFormat) {
  * 경로는 미서명 /uploads/ 로 저장한다. 수정 화면은 받아 둔 첨부(서명 링크)를 그대로 돌려보내므로, 이미 저장된
  * 첨부는 id로, id가 없으면(클라이언트 UploadedAttachment는 id를 안 싣는다) 링크가 가리키는 파일로 찾아 원래
  * 경로를 그대로 쓴다 — 그사이 서명이 만료됐어도 첨부가 빠지지 않는다(이 예약에 원래 있던 파일만 그렇게 받는다).
+ * 새로 붙인 첨부는 [userId]가 직접 올린 파일만 받는다(fileRefs.js) — 예전엔 어디서 알게 된 파일 이름도 그대로 받아, 시각이
+ * 되면 남의 파일이 내 메시지로 나갔다.
  */
-function parseAttachments(raw, existing = []) {
+async function parseAttachments(raw, existing = [], userId = null) {
   if (raw == null) return { value: [] };
   if (!Array.isArray(raw)) return { error: INVALID_ATTACHMENT_ERROR };
   if (raw.length > SCHEDULED_ATTACHMENT_MAX) {
@@ -151,28 +161,46 @@ function parseAttachments(raw, existing = []) {
   const existingList = Array.isArray(existing) ? existing : [];
   const saved = new Map(existingList.map((a) => [a.id, a]));
   const savedByPath = new Map(existingList.map((a) => [a.fileUrl, a]));
-  const value = [];
+  const slots = [];
   for (const a of raw) {
     if (!a || typeof a !== 'object') return { error: INVALID_ATTACHMENT_ERROR };
     const kept = (typeof a.id === 'string' ? saved.get(a.id) : null) ?? savedByPath.get(knownUploadPath(a.fileUrl));
     if (kept) {
-      value.push(kept);
+      slots.push({ kept });
       continue;
     }
-    const fileUrl = toStoredUploadUrl(typeof a.fileUrl === 'string' ? a.fileUrl : null);
-    if (!fileUrl) return { error: INVALID_ATTACHMENT_ERROR };
+    if (typeof a.fileUrl !== 'string' || !a.fileUrl) return { error: INVALID_ATTACHMENT_ERROR };
+    const denial = fileFieldsDenial(a);
+    if (denial) return { error: denial };
+    slots.push({ fresh: a });
+  }
+
+  // 새로 붙인 첨부는 직접 올린 파일만 — 예약 화면은 방금 올린 파일만 붙이고(전달은 없다), 보낼 때도 같은 기준으로 다시 본다
+  // (sendMessage.js 'stored'). 이미 있던 첨부는 위에서 id·경로로 그대로 받았다.
+  const fresh = slots.filter((s) => s.fresh).map((s) => s.fresh);
+  const checked = await checkFileRefs(fresh.flatMap((a) => [a.fileUrl, a.thumbnailUrl]), {
+    senderId: userId,
+    ownedOnly: true,
+    error: INVALID_ATTACHMENT_ERROR,
+  });
+  if (!checked.ok) return { error: checked.error };
+  const pathOf = (ref) => (typeof ref === 'string' && ref ? checked.paths.get(ref) ?? null : null);
+
+  const value = slots.map(({ kept, fresh: a }) => {
+    if (kept) return kept;
     const mimeType = typeof a.mimeType === 'string' ? a.mimeType : null;
-    value.push({
+    return {
       id: randomUUID(),
       // kind를 안 보냈으면 형식으로 가른다(사진은 한 말풍선 격자, 나머지는 파일로 보낸다).
       kind: a.kind === 'image' || a.kind === 'file' ? a.kind : mimeType?.startsWith('image/') ? 'image' : 'file',
-      fileUrl,
+      fileUrl: pathOf(a.fileUrl),
       fileName: typeof a.fileName === 'string' ? a.fileName : null,
-      fileSize: typeof a.fileSize === 'number' && Number.isFinite(a.fileSize) ? a.fileSize : null,
+      // 보낼 때 messages.file_size(정수 칸)에 들어가는 값만 — 소수·너무 큰 수는 발송 때 DB 오류가 났다.
+      fileSize: sanitizeFileSize(a.fileSize),
       mimeType,
-      thumbnailUrl: typeof a.thumbnailUrl === 'string' ? toStoredUploadUrl(a.thumbnailUrl) : null,
-    });
-  }
+      thumbnailUrl: pathOf(a.thumbnailUrl),
+    };
+  });
   return { value };
 }
 
@@ -220,7 +248,7 @@ async function validateScheduled(userId, input, existing = null) {
         }),
       )
     : null;
-  const attachments = parseAttachments(input.attachments, existing?.attachments);
+  const attachments = await parseAttachments(input.attachments, existing?.attachments, userId);
   if (attachments.error) return attachments;
   const sendAt = parseSendAt(input.sendAt);
   if (sendAt.error) return sendAt;
@@ -311,7 +339,16 @@ async function deliver(io, row, { announce }) {
     reason = await sendBlockReason(row, room);
     if (!reason) {
       for (const payload of payloadsFor(row, room)) {
-        const result = await sendUserMessage({ io, senderId: row.userId, payload, room, fallbackName: '알 수 없음' });
+        // 첨부는 예약할 때 확인해 둔 저장 경로다 — 보낼 때는 올린 사람 기록만 다시 본다(이 확인이 생기기 전에 만든 예약의 옛 파일은
+        // 기록이 없어 예전처럼 보낸다 — sendMessage.js resolveSentFiles 'stored').
+        const result = await sendUserMessage({
+          io,
+          senderId: row.userId,
+          payload,
+          room,
+          fallbackName: '알 수 없음',
+          fileSource: 'stored',
+        });
         if (!result.ok) {
           reason = result.error;
           break;

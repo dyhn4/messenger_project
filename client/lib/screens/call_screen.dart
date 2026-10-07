@@ -71,6 +71,9 @@ class _CallScreenState extends State<CallScreen> {
   DateTime? _unreadBaseline;
   int _unread = 0;
 
+  /// 이 화면을 닫는 중인지 — [나가기]와 통화가 밖에서 끝난 것(_onCallChanged)이 화면을 두 번 닫지 않게.
+  bool _closing = false;
+
   @override
   void initState() {
     super.initState();
@@ -81,15 +84,37 @@ class _CallScreenState extends State<CallScreen> {
     _chat = widget.session.controllerFor(widget.room);
     _unreadBaseline = latestMessageTime(_chat.messages) ?? DateTime.now();
     _chat.addListener(_onChatChanged);
+    widget.session.callController.addListener(_onCallChanged);
+    // 화면이 뜨기 직전에 이미 끝났을 수도 있다(참여 직후 서버가 거절 등).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onCallChanged());
   }
 
   @override
   void dispose() {
+    widget.session.callController.removeListener(_onCallChanged);
     _chat.removeListener(_onChatChanged);
     _handSub?.cancel();
     _noticeSub?.cancel();
     _toastTimer?.cancel();
     super.dispose();
+  }
+
+  /// 통화가 이 화면 밖에서 끝났으면(서버가 내보냄·회의방이 닫힘·다른 기기에서 참여·연결이 아주 끊김·방에서 나감) 화면을
+  /// 닫는다 — 안 그러면 빈 통화 화면이 "연결 중..."으로 남는다. 왜 끝났는지는 Session이 앱 전체 알림으로 띄운다.
+  void _onCallChanged() {
+    if (_closing || !mounted) return;
+    if (widget.session.callController.roomId == widget.room.id) return;
+    _closing = true;
+    // 알림 도중(다른 위젯이 그리는 중일 수 있다)에 화면을 빼지 않게 한 박자 뒤에.
+    Future.microtask(() {
+      if (!mounted) return;
+      final route = ModalRoute.of(context);
+      if (route == null || !route.isActive) return;
+      final navigator = Navigator.of(context);
+      // 위에 떠 있는 참가자·채팅 시트나 화면 공유 선택 창까지 같이 닫는다.
+      navigator.popUntil((r) => r == route);
+      navigator.pop();
+    });
   }
 
   void _showToast(String message, {bool hand = false}) {
@@ -182,6 +207,7 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<void> _leave() async {
+    _closing = true;
     await widget.session.leaveCall();
     if (mounted) Navigator.of(context).maybePop();
   }

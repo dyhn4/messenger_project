@@ -9,8 +9,10 @@ import '../widgets/room_picker_field.dart';
 import 'message_forward_screen.dart' show canForwardTo;
 
 /// 메시지 롱프레스 메뉴(모바일)/더보기 메뉴(PC)의 "메시지 공유" — 대화방을 골라 새 텍스트를
-/// 쓰고, 그 아래 원본 메시지를 인용(quotedSenderName/quotedPreview)으로 붙여서 보낸다.
-/// 원본은 공유 당시 내용의 스냅샷이라(server/src/socket.js) 나중에 원본이 수정/삭제돼도
+/// 쓰고, 그 아래 원본 메시지를 인용 카드로 붙여서 보낸다. 앱은 원본 id(quotedMessageId — 댓글이면
+/// 그 댓글 id)만 믿을 값으로 보내고, 카드의 보낸 사람·미리보기는 서버가 그 원본에서 채운다
+/// (server/src/messageAttribution.js — 예전엔 앱이 보낸 이름·미리보기를 그대로 저장해서 아무 이름이나
+/// 붙인 카드를 꾸밀 수 있었다). 카드는 공유 당시 내용의 스냅샷이라 나중에 원본이 수정/삭제돼도
 /// 그대로 남는다. PC(asDialog:true)는 FloatingDialog로, 모바일은 전체화면으로 뜬다
 /// (message_actions.dart의 pushMessageShareScreen이 창 너비로 고른다).
 class MessageShareScreen extends StatefulWidget {
@@ -60,6 +62,8 @@ class _MessageShareScreenState extends State<MessageShareScreen> {
         roomId: room.id,
         type: 'text',
         text: text.isEmpty ? null : text,
+        quotedMessageId: widget.message.id,
+        // 업데이트 전 서버만 이 두 값을 쓴다(지금 서버는 위 id로 원본에서 채운다).
         quotedSenderName: widget.senderDisplayName,
         quotedPreview: _quotedPreview,
       );

@@ -8,6 +8,14 @@ import 'poll.dart';
 import 'text_format.dart';
 import 'todo.dart' show SharedTodo;
 
+/// 이 서버가 내려준 그림 경로(서명된 /files/… 상대 경로)일 때만 그 값, 바깥 사이트 주소(http(s)://…)나 빈 값은 null.
+/// 링크 미리보기 그림은 서버가 한 번 받아 둔 파일만 그린다 — 바깥 주소를 그리면 보는 사람마다 앱이 그 사이트에 직접 접속해
+/// (IP·읽은 시각이 남고, 사내 주소면 사내 기기를 찌른다) 업데이트 전 서버가 그런 값을 주더라도 그림 없이 둔다.
+String? serverHostedImagePath(String? url) {
+  if (url == null || !url.startsWith('/') || url.startsWith('//')) return null;
+  return url;
+}
+
 /// 메시지에 들어있는 링크의 오픈그래프 미리보기(server/src/linkPreview.js) — 메시지 전송
 /// 직후엔 없다가(서버가 백그라운드로 긁어옴) 나중에 message:linkPreview로 채워질 수 있어서
 /// Message.linkPreview 필드 자체가 non-final이다.
@@ -15,8 +23,13 @@ class LinkPreview {
   final String url;
   final String? title;
   final String? description;
+
+  /// 미리보기 그림 — 서버가 받아 둔 그림의 서명된 /files/… 상대 경로([serverHostedImagePath]로 거른 [serverImagePath]를 쓴다).
   final String? imageUrl;
   final String? siteName;
+
+  /// 그릴 수 있는 미리보기 그림(이 서버의 상대 경로) — 없거나 바깥 주소면 null.
+  String? get serverImagePath => serverHostedImagePath(imageUrl);
   const LinkPreview({
     required this.url,
     this.title,
@@ -25,11 +38,13 @@ class LinkPreview {
     this.siteName,
   });
 
+  /// 그림은 imageFileUrl 칸에서 읽는다 — 서버는 예전 앱이 빈 그림 칸을 그리지 않게 imageUrl을 비워 두고 서명 링크를 이 칸으로만
+  /// 준다(server/src/messages.js toMessageDto). 업데이트 전 서버의 imageUrl(바깥 주소)은 [serverImagePath]가 거른다.
   factory LinkPreview.fromJson(Map<String, dynamic> json) => LinkPreview(
     url: json['url'] as String,
     title: json['title'] as String?,
     description: json['description'] as String?,
-    imageUrl: json['imageUrl'] as String?,
+    imageUrl: (json['imageFileUrl'] ?? json['imageUrl']) as String?,
     siteName: json['siteName'] as String?,
   );
 }

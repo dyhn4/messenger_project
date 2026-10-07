@@ -286,7 +286,10 @@ export async function notifyProjectPush({ userId, title, body, projectId, taskId
 export async function notifyIncomingCall({ memberIds, callerId, caller, room, roomTag }) {
   const { messaging } = await getMessagingInstance();
 
-  const targets = memberIds.filter((id) => id !== callerId && !isOnline(id));
+  // 알림을 끈(뮤트) 방은 전화도 울리지 않는다 — 메시지 푸시(notifyOfflineMembers)와 같은 규칙. 안 그러면 뮤트해 둔 큰 토픽에서
+  // 누가 통화를 걸 때마다 전체화면 수신 알림이 뜬다(앱이 켜져 있을 때의 수신 창도 같은 규칙 — client session.dart).
+  const mutedIds = new Set(await listMutedUserIdsForRoom(room.id));
+  const targets = memberIds.filter((id) => id !== callerId && !isOnline(id) && !mutedIds.has(id));
   if (targets.length === 0) return;
 
   const callerName = caller?.name ?? caller?.username ?? '알 수 없음';
@@ -322,7 +325,8 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
                 ...(roomTag
                   ? { conversationTitle: teamName ? `${roomTag} · ${teamName}` : roomTag }
                   : {}),
-                isSecret: 'false',
+                // 비밀 대화는 통화를 걸 수 없지만(callAccess.js callRoomDenial) 방의 실제 값을 보낸다.
+                isSecret: String(!!room.isSecret),
                 avatarType: caller?.avatarType ?? 'initial',
                 ...(caller?.avatarEmoji ? { avatarEmoji: caller.avatarEmoji } : {}),
                 ...(caller?.avatarColor ? { avatarColor: caller.avatarColor } : {}),

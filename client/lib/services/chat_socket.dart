@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:socket_io_client/socket_io_client.dart' as socket_io;
@@ -350,6 +351,10 @@ class CallState {
   /// 서버가 정한 영상 화질 단계('fhd'|'hd'|'sd'|'ld' — call_quality.dart, 예전 서버면 null).
   final String? videoTier;
 
+  /// 서버가 잃었던 통화(서버 재시작 뒤 등)를 참가자의 LiveKit 연결로 되살린 것 — 처음 시작할 때 이미 울렸으니 다시 울리지
+  /// 않는다(Session._applyCallState, server/src/callAccess.js admitCallJoin). 보통 통화와 예전 서버는 false.
+  final bool restored;
+
   const CallState({
     required this.roomId,
     required this.active,
@@ -358,6 +363,7 @@ class CallState {
     this.participantIds = const [],
     this.hostId,
     this.videoTier,
+    this.restored = false,
   });
 
   factory CallState.fromJson(Map<String, dynamic> json) => CallState(
@@ -373,7 +379,15 @@ class CallState {
         (json['participantIds'] as List?)?.cast<String>() ?? const [],
     hostId: json['hostId'] as String?,
     videoTier: json['videoTier'] as String?,
+    restored: json['restored'] == true,
   );
+}
+
+/// call:join 응답(ack) 해석 — 서버가 거절했으면 그 문구(비어 있으면 기본 문구), 받아들였거나 모양을 모르면 null.
+String? callJoinRejection(dynamic response) {
+  if (response is! Map || response['ok'] != false) return null;
+  final error = response['error'];
+  return error is String && error.isNotEmpty ? error : '화상회의에 참여하지 못했습니다.';
 }
 
 /// 진행자가 내 마이크를 켜거나 끄라고 했다(call:mic — 서버가 진행자인지 확인한 뒤 내 기기들에만 보낸다).
@@ -385,13 +399,16 @@ typedef CallDeclined = ({String roomId, String userId, String name});
 /// 화상회의 기록 카드가 바뀌었다(call:card — 서버 callCards.js). 끝났을 때는 메시지 글(요약)도 같이 온다.
 typedef CallCardUpdate = ({String roomId, String messageId, CallCard card, String? text});
 
-/// 토픽에서 내보내졌거나 토픽이 삭제돼서 이 방이 내 목록에서 사라졌다는 알림(room:removed) —
-/// user: 방으로만 온다. Session이 방을 정리한 뒤 같은 모양으로 roomRemovedEvents에 흘려서
-/// 화면이 안내 토스트([toastText])를 띄우고 열려 있던 그 방을 닫게 한다.
+/// 토픽에서 내보내졌거나 토픽이 삭제돼서, 또는 팀에서 제외돼서 이 방이 내 목록에서 사라졌다는
+/// 알림(room:removed) — user: 방으로만 온다. Session이 방을 정리한 뒤 같은 모양으로 roomRemovedEvents에
+/// 흘려서 화면이 안내 토스트([toastText])를 띄우고 열려 있던 그 방을 닫게 한다. 팀에서 제외된 방은
+/// 흘리지 않는다(Session.handleRoomRemoved — team:left가 팀 단위로 한 번 알린다).
 class RoomRemovedEvent {
   final String roomId;
 
-  /// 'deleted'(토픽 삭제) | 'kicked'(내보내짐). 모르는 값이 와도 방 정리는 똑같이 한다.
+  /// 'deleted'(토픽 삭제) | 'kicked'(내보내짐) | 'team'(팀에서 제외돼 그 팀의 모든 방에서 한꺼번에
+  /// 빠짐 — 서버 rooms.js의 notifyRemovedFromTeamRooms, Session.kRoomRemovedReasonTeam). 모르는 값이
+  /// 와도 방 정리는 똑같이 한다.
   final String reason;
 
   /// 토픽 이름(안내 문구용). 서버가 안 보냈으면 Session이 로컬에 있던 이름으로 채운다.
@@ -412,9 +429,15 @@ class RoomRemovedEvent {
 
   bool get isDeleted => reason == 'deleted';
   bool get isKicked => reason == 'kicked';
+  bool get isTeamRemoval => reason == 'team';
 
-  /// 토스트에 그대로 쓰는 안내 문구.
+  /// 토스트에 그대로 쓰는 안내 문구. 팀에서 제외된 방은 Session이 화면에 흘리지 않지만, 혹시 쓰이더라도
+  /// "토픽이 삭제되었습니다"로 잘못 알리지 않게 따로 둔다 — 토픽이 아닌 방(1:1 대화 등)일 수도 있다.
   String get toastText {
+    if (isTeamRemoval) {
+      final room = name == null || name!.isEmpty ? '대화방' : "'$name' 대화방";
+      return '팀에서 제외되어 $room에서 나갔습니다.';
+    }
     final topic = name == null || name!.isEmpty ? '토픽' : "'$name' 토픽";
     return isKicked ? '$topic에서 내보내졌습니다.' : '$topic이 삭제되었습니다.';
   }
@@ -427,6 +450,20 @@ class MessageSendException implements Exception {
   const MessageSendException(this.message);
   @override
   String toString() => message;
+}
+
+/// 서버가 소켓 한 번에 받는 크기(server/src/messageLimits.js SOCKET_MAX_PAYLOAD_BYTES) — 이보다 큰 message:send는 서버가
+/// 받지 않고 연결을 끊는다(앱은 응답을 15초 기다린 뒤 "서버 응답이 없습니다"만 보게 된다). 보내기 전에 같은 값으로 먼저 걸러
+/// "너무 길다"고 바로 알린다. 패킷 머리(이벤트 이름·ack 번호) 몫으로 조금 덜어 둔다.
+const socketMessageMaxBytes = 512 * 1024 - 1024;
+
+/// message:send [payload]가 소켓 한 번에 실릴 수 있는 크기인지(UTF-8 JSON 기준).
+@visibleForTesting
+bool fitsSocketMessage(Map<String, dynamic> payload) {
+  final json = jsonEncode(payload);
+  // UTF-16 한 칸은 UTF-8로 3바이트를 넘지 않으므로, 이만큼 짧으면 세지 않아도 된다(보통 메시지).
+  if (json.length * 3 <= socketMessageMaxBytes) return true;
+  return utf8.encode(json).length <= socketMessageMaxBytes;
 }
 
 /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트(presence:update).
@@ -615,7 +652,8 @@ class ChatSocket {
   Stream<Message> get messageLinkPreview =>
       _messageLinkPreviewController.stream;
 
-  /// 누가 투표했거나 투표가 마감됐다(poll:updated) — 방 전체에 온다.
+  /// 누가 투표했거나 투표가 마감됐다(poll:updated) — 방 전체에는 개수만 온다. 내가 투표한 것이면 내 기기들에만 내
+  /// 선택(actorId·actorOptionIds)까지 따로 온다(익명 투표에서 누가 무엇을 골랐는지 남에게 새지 않게 — server/src/pollListRules.js).
   Stream<PollUpdatedEvent> get pollUpdated => _pollUpdatedController.stream;
 
   /// 내 다른 기기에서 투표 즐겨찾기를 바꿨다(poll:favorite) — 내 user 룸으로만 온다.
@@ -1198,10 +1236,18 @@ class ChatSocket {
     /// 사진 여러 장을 한 말풍선으로 보낼 때 — [{kind, fileUrl, fileName, fileSize,
     /// mimeType, thumbnailUrl}, ...]. 한 장뿐이면 안 보내고 위의 fileUrl만 쓴다.
     List<Map<String, dynamic>>? attachments,
-    // "메시지 공유"(message_share_screen.dart) — 다른 방으로 원본을 인용해서 보낼 때만 채운다.
+    // "메시지 공유"(message_share_screen.dart) — 인용할 원본 메시지(댓글이면 그 댓글) id. 서버가 그 원본을 내가 읽을 수
+    // 있는지 확인하고 인용 카드의 보낸 사람·미리보기를 원본에서 채운다(server/src/messageAttribution.js).
+    String? quotedMessageId,
+    // 공지를 인용해 공유할 때(announcement_detail_screen.dart) — 위와 같고 원본이 공지다.
+    String? quotedAnnouncementId,
+    // 업데이트 전 서버를 위한 예전 값 — 지금 서버는 id가 있으면 이 글을 쓰지 않는다(id 없이 이 글만 오면 공유를 거절한다).
     String? quotedSenderName,
     String? quotedPreview,
-    // "메시지 전달"(message_forward_screen.dart)에서 "포함" 토글을 켰을 때만 채운다.
+    // "메시지 전달"(message_forward_screen.dart)에서 "포함" 토글을 켰을 때 — 원본 메시지(댓글) id. 서버가 원본에서 보낸
+    // 사람·시각을 채운다. 글을 고쳐서 보내면 전달 화면이 보내지 않는다(서버도 원본 그대로일 때만 붙인다).
+    String? forwardedFromMessageId,
+    // 업데이트 전 서버를 위한 예전 값 — 지금 서버는 쓰지 않는다.
     String? forwardedFromSenderName,
     int? forwardedFromCreatedAt,
     // "팀장에게 문의하기"로 보낸 메시지에만 채운다(chat_input_bar.dart의 _showInquiryDialog) —
@@ -1221,12 +1267,18 @@ class ChatSocket {
       'mimeType': ?mimeType,
       'thumbnailUrl': ?thumbnailUrl,
       'attachments': ?attachments,
+      'quotedMessageId': ?quotedMessageId,
+      'quotedAnnouncementId': ?quotedAnnouncementId,
       'quotedSenderName': ?quotedSenderName,
       'quotedPreview': ?quotedPreview,
+      'forwardedFromMessageId': ?forwardedFromMessageId,
       'forwardedFromSenderName': ?forwardedFromSenderName,
       'forwardedFromCreatedAt': ?forwardedFromCreatedAt,
       'inquiryId': ?inquiryId,
     };
+    if (!fitsSocketMessage(payload)) {
+      return Future.error(const MessageSendException('메시지가 너무 깁니다. 나눠서 보내 주세요.'));
+    }
     final override = debugSendOverride;
     if (override != null) return override(payload).then(_messageFromAck);
 
@@ -1293,18 +1345,49 @@ class ChatSocket {
 
   /// LiveKit 연결에 성공한 직후 "나 통화에 들어왔다"고 알린다 — 서버가 방 멤버 전원에게
   /// call:state를 브로드캐스트해서 다른 사람 화면에 수신/참가자 표시가 뜨게 한다.
-  void joinCall(String roomId) =>
-      _socket?.emit('call:join', {'roomId': roomId});
+  /// 서버가 받아들이지 않으면(읽기 전용 토픽에서 시작·너무 잦은 시작·방 멤버 아님 등 — server/src/socket.js)
+  /// [onRejected]에 서버 문구가 온다. 예전 서버는 응답을 안 보내서 불리지 않는다.
+  void joinCall(String roomId, {void Function(String error)? onRejected}) {
+    final socket = _socket;
+    if (socket == null) return;
+    if (onRejected == null) {
+      socket.emit('call:join', {'roomId': roomId});
+      return;
+    }
+    socket.emitWithAck(
+      'call:join',
+      {'roomId': roomId},
+      ack: (dynamic response) {
+        final error = callJoinRejection(response);
+        if (error != null) onRejected(error);
+      },
+    );
+  }
+
+  /// 테스트가 실제 소켓 없이 화상회의 신호(call:leave·call:decline)를 확인할 수 있게 — 설정돼 있으면 보낼 때마다
+  /// 이벤트 이름과 페이로드를 받는다(소켓이 있으면 그대로 보내기도 한다).
+  @visibleForTesting
+  void Function(String event, Map<String, dynamic> payload)? debugCallSignal;
+
+  void _emitCallSignal(String event, Map<String, dynamic> payload) {
+    debugCallSignal?.call(event, payload);
+    _socket?.emit(event, payload);
+  }
 
   /// 통화 종료. 소켓이 그냥 끊겨도 서버가 알아서 정리하지만(socket.js의 disconnect),
   /// 정상 종료는 명시적으로 알려야 남은 사람들 화면이 즉시 갱신된다.
-  void leaveCall(String roomId) =>
-      _socket?.emit('call:leave', {'roomId': roomId});
+  ///
+  /// [handoff]는 같은 계정이 다른 기기에서 이 통화에 들어가 이 기기의 연결이 끊긴 것 — 서버는 그 기기의 참여가 이 자리를
+  /// 대신할 때까지 잠시 기다린다(바로 빼면 진행자가 넘어가고 통화 기록에 나감·참여가 남는다 — server/src/socket.js).
+  void leaveCall(String roomId, {bool handoff = false}) => _emitCallSignal(
+    'call:leave',
+    {'roomId': roomId, if (handoff) 'handoff': true},
+  );
 
   /// 걸려온 통화를 거절했다고 알린다 — 서버가 지금 통화에 들어와 있는 사람들(건 사람 포함)에게
   /// "○○님이 화상회의를 거절했습니다"를 보낸다(call:declined).
   void declineCall(String roomId) =>
-      _socket?.emit('call:decline', {'roomId': roomId});
+      _emitCallSignal('call:decline', {'roomId': roomId});
 
   /// 진행자가 [targetId]의 마이크를 켜거나 끈다 — 서버가 진행자인지 확인하고 그 사람 기기에 전한다.
   void controlCallMic(String roomId, String targetId, bool on) => _socket?.emit(

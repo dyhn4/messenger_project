@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, inArray, isNull, lte, ne, notExists, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, inArray, isNull, ne, notExists, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
   diffAssignees,
@@ -6,6 +6,8 @@ import {
   progressPerspective,
   progressResync,
   progressTarget,
+  schedulesReminders,
+  TODO_PENDING_REMINDERS_ERROR,
   TODO_PROGRESS_DENIED,
 } from '../../todoRules.js';
 import { db } from '../client.js';
@@ -64,8 +66,72 @@ function attachmentValues(todoId, attachments) {
   }));
 }
 
-/** 할 일 한 건을 담당자·첨부·알림까지 한 번에 만든다. [todo]는 todos 행에 넣을 값, [reminderTimes]는 ms 배열. */
-export function insertTodo({ todo, assigneeIds, attachments, reminderTimes }) {
+// ── 아직 보내지 않은 알림의 한 사람 몫 상한(todoRules.TODO_PENDING_REMINDERS_MAX) ──────────────────────
+
+/** 알림을 새로 잡으면 그 사람 몫의 아직 보내지 않은 알림이 상한을 넘을 때 — 할 일 만들기·수정 전체가 되돌려지고 todos.js가 400으로 바꾼다. */
+export class TodoReminderLimitError extends Error {
+  constructor() {
+    super(TODO_PENDING_REMINDERS_ERROR);
+    this.name = 'TodoReminderLimitError';
+  }
+}
+
+/**
+ * [ownerId] 몫으로 세는 할 일 — 그 사람이 만든 할 일, 그리고 만든 사람 계정이 사라진(creator_id null) 할 일 중 그 사람이
+ * 담당자인 것(todoPermissions의 관리 권한과 같은 기준 — 그런 할 일은 담당자가 관리한다). 방을 나간 담당자의 행도 넉넉하게
+ * 같이 센다.
+ */
+function ownedByCondition(executor, ownerId) {
+  return or(
+    eq(todos.creatorId, ownerId),
+    and(
+      isNull(todos.creatorId),
+      exists(
+        executor
+          .select({ one: sql`1` })
+          .from(todoAssignees)
+          .where(and(eq(todoAssignees.todoId, todos.id), eq(todoAssignees.userId, ownerId))),
+      ),
+    ),
+  );
+}
+
+/** [ownerId] 몫(ownedByCondition)의 아직 보내지 않은(sent_at null — 앞으로 울릴 것과 때가 됐는데 아직 못 보낸 것) 알림 개수. */
+async function countPendingReminders(executor, ownerId) {
+  const [row] = await executor
+    .select({ n: sql`count(*)::int` })
+    .from(todoReminders)
+    .innerJoin(todos, eq(todos.id, todoReminders.todoId))
+    .where(and(isNull(todoReminders.sentAt), ownedByCondition(executor, ownerId)));
+  return Number(row?.n ?? 0);
+}
+
+/** 할 일 한 건의 아직 보내지 않은 알림 개수 — updateTodo가 이번 수정으로 늘었는지 보려고 앞뒤로 센다. */
+async function countTodoPendingReminders(executor, todoId) {
+  const [row] = await executor
+    .select({ n: sql`count(*)::int` })
+    .from(todoReminders)
+    .where(and(eq(todoReminders.todoId, todoId), isNull(todoReminders.sentAt)));
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * 알림을 다 써 넣은 뒤(트랜잭션 [tx] 안) [ownerId] 몫이 [max]를 넘으면 TodoReminderLimitError를 던져 전체를 되돌린다. 같은
+ * 사람 몫의 검사를 advisory 잠금으로 줄 세우므로(커밋·롤백 때 저절로 풀린다) 동시에 여러 요청이 와도 상한을 넘지 않는다 —
+ * 뒤에 잠근 쪽의 개수 쿼리는 앞선 쪽이 커밋한 알림까지 본다. 잠금은 트랜잭션의 맨 마지막에 잡고 그 뒤로는 개수만 세므로,
+ * 이 잠금을 쥔 쪽이 다른 행 잠금을 기다리는 일이 없다(교착 없음).
+ */
+async function assertPendingRemindersWithin(tx, ownerId, max) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`todo-reminders:${ownerId}`}))`);
+  if ((await countPendingReminders(tx, ownerId)) > max) throw new TodoReminderLimitError();
+}
+
+/**
+ * 할 일 한 건을 담당자·첨부·알림까지 한 번에 만든다. [todo]는 todos 행에 넣을 값, [reminderTimes]는 ms 배열.
+ * [pendingReminderMax]를 주면 알림을 넣은 뒤 만든 사람 몫의 아직 보내지 않은 알림이 그 수를 넘는지 보고, 넘으면
+ * TodoReminderLimitError(아무것도 만들지 않는다).
+ */
+export function insertTodo({ todo, assigneeIds, attachments, reminderTimes, pendingReminderMax = null }) {
   return db.transaction(async (tx) => {
     const [row] = await tx.insert(todos).values(todo).returning();
     if (assigneeIds.length > 0) {
@@ -74,6 +140,9 @@ export function insertTodo({ todo, assigneeIds, attachments, reminderTimes }) {
     if (attachments.length > 0) await tx.insert(todoAttachments).values(attachmentValues(row.id, attachments));
     if (reminderTimes.length > 0) {
       await tx.insert(todoReminders).values(reminderTimes.map((ms) => ({ todoId: row.id, remindAt: new Date(ms) })));
+      if (pendingReminderMax !== null && row.creatorId) {
+        await assertPendingRemindersWithin(tx, row.creatorId, pendingReminderMax);
+      }
     }
     return row;
   });
@@ -121,8 +190,11 @@ export class TodoProgressDeniedError extends Error {
  * 담당자들로). 맨 먼저 todos 행을 고쳐 잠그고 판단은 모두 잠근 뒤의 값으로 하므로, 같은 할 일을 동시에 고치는 요청(과 방
  * 멤버가 바뀔 때의 resyncTodoProgressForMembers)은 차례로 처리되고, 요청 전에 읽은 담당자 목록이 그새 바뀌었어도 집계가
  * 어긋나지 않는다.
+ * [pendingReminderLimit] `{ actorId, max }`를 주면, 이번 알림 수정으로 이 할 일의 아직 보내지 않은 알림이 늘었을 때만 그
+ * 할 일 주인 몫(만든 사람, 그 계정이 사라졌으면 고치는 사람 — ownedByCondition)이 [max]를 넘는지 보고 넘으면
+ * TodoReminderLimitError를 던져 수정 전체를 되돌린다 — 줄이거나 시각만 옮기는 수정은 상한을 넘은 사람도 할 수 있다.
  */
-export function updateTodo(id, { fields = {}, assigneeIds, attachments, reminderPlan, progressWrite }) {
+export function updateTodo(id, { fields = {}, assigneeIds, attachments, reminderPlan, progressWrite, pendingReminderLimit = null }) {
   return db.transaction(async (tx) => {
     let [row] = await tx
       .update(todos)
@@ -179,6 +251,9 @@ export function updateTodo(id, { fields = {}, assigneeIds, attachments, reminder
       if (attachments.length > 0) await tx.insert(todoAttachments).values(attachmentValues(id, attachments));
     }
     if (reminderPlan) {
+      // 새로 잡는 알림이 있을 때만 앞뒤 개수를 센다 — 지우기만 하는 수정은 상한과 상관없다.
+      const watch = !!pendingReminderLimit && schedulesReminders(reminderPlan);
+      const pendingBefore = watch ? await countTodoPendingReminders(tx, id) : 0;
       if (reminderPlan.deleteIds.length > 0) {
         await tx.delete(todoReminders).where(inArray(todoReminders.id, reminderPlan.deleteIds));
       }
@@ -190,6 +265,11 @@ export function updateTodo(id, { fields = {}, assigneeIds, attachments, reminder
       }
       if (reminderPlan.inserts.length > 0) {
         await tx.insert(todoReminders).values(reminderPlan.inserts.map((ms) => ({ todoId: id, remindAt: new Date(ms) })));
+      }
+      // 맨 마지막 — 이 할 일의 아직 보내지 않은 알림이 늘었으면 주인 몫 전체를 본다(잠금도 여기서 잡는다).
+      if (watch && (await countTodoPendingReminders(tx, id)) > pendingBefore) {
+        const ownerId = row.creatorId ?? pendingReminderLimit.actorId;
+        if (ownerId) await assertPendingRemindersWithin(tx, ownerId, pendingReminderLimit.max);
       }
     }
     return row;
@@ -406,21 +486,35 @@ export async function setTodoFavorite(todoId, userId, favorite) {
 
 /**
  * 보낼 때가 된 알림을 **먼저 찜한다**(sentAt을 찍으면서 돌려받는 UPDATE ... RETURNING) — 서버가 둘 떠 있거나 한 번의
- * 점검이 길어져 겹쳐도 같은 알림이 두 번 나가지 않는다. 한 번에 [limit]건까지.
+ * 점검이 길어져 겹쳐도 같은 알림이 두 번 나가지 않는다. 한 번에 [limit]건까지, 할 일을 만든 사람마다 돌아가며 고른다 —
+ * 사람마다 가장 이른 알림 하나씩, 그다음 둘째 것 하나씩… (같은 차례 안에서는 이른 순, 만든 사람 계정이 사라진 할 일은 한
+ * 사람으로 친다). 예전처럼 서버 전체에서 가장 이른 것부터 고르면, 누군가 알림을 한꺼번에 몰아 둘 때 다른 사람의 알림이 그
+ * 뒤로 밀렸다 — 이제는 남의 알림이 첫 묶음에 들어간다(검토 S19). 돌려주는 값은 `{ reminders(그 차례대로), more(같은 조건에
+ * 더 남았을 수 있음 — 고른 것이 [limit]만큼 찼다) }`. 이미 보낸 알림(sent_at)은 사람마다 차례를 세기 전에 빠진다.
  */
+// [limit]의 기본값은 지우지 않는다 — 빠뜨리면 `limit null`(무제한)로 나가 쌓인 알림을 한 번에 다 찜하게 된다(막으려던 폭주).
 export async function claimDueTodoReminders(now, limit = 200) {
-  const due = await db
-    .select({ id: todoReminders.id })
-    .from(todoReminders)
-    .where(and(isNull(todoReminders.sentAt), lte(todoReminders.remindAt, now)))
-    .orderBy(asc(todoReminders.remindAt))
-    .limit(limit);
-  if (due.length === 0) return [];
-  return db
+  const due = await db.execute(sql`
+    select id from (
+      select r.id, r.remind_at,
+             row_number() over (partition by t.creator_id order by r.remind_at, r.id) as turn
+      from ${todoReminders} r
+      join ${todos} t on t.id = r.todo_id
+      where r.sent_at is null and r.remind_at <= ${now.toISOString()}
+    ) due
+    order by turn, remind_at, id
+    limit ${limit}`);
+  const ids = due.rows.map((r) => r.id);
+  if (ids.length === 0) return { reminders: [], more: false };
+  const claimed = await db
     .update(todoReminders)
     .set({ sentAt: now })
-    .where(and(inArray(todoReminders.id, due.map((d) => d.id)), isNull(todoReminders.sentAt)))
+    .where(and(inArray(todoReminders.id, ids), isNull(todoReminders.sentAt)))
     .returning();
+  // UPDATE ... RETURNING은 순서를 지키지 않으므로 고른 차례대로 다시 늘어놓는다(앞의 것부터 보낸다).
+  const order = new Map(ids.map((id, i) => [id, i]));
+  claimed.sort((a, b) => order.get(a.id) - order.get(b.id));
+  return { reminders: claimed, more: ids.length >= limit };
 }
 
 /** 찜한 알림의 할 일들(한 번에). */

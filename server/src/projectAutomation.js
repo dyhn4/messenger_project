@@ -5,6 +5,7 @@ import {
   findTaskPriorityById,
   findTaskStatusById,
   findTaskTypeById,
+  getProjectRole,
   insertAutomationRun,
   insertTask,
   insertTaskActivities,
@@ -20,13 +21,58 @@ import {
   setTaskArchived,
   setTaskReferences,
   takeNextTaskSeq,
+  updateAutomation,
   updateTask,
 } from './db/queries/projects.js';
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
-import { topicAccess } from './access.js';
-import { topicWriteDenial } from './permissions.js';
+import { teamAccess, topicAccess } from './access.js';
+import { canManageProject, topicWriteDenial } from './permissions.js';
+import {
+  AUTOMATION_CHAT_THROTTLED,
+  AUTOMATION_CHAT_WINDOW_MS,
+  AutomationChatThrottle,
+  automationChatText,
+  automationSaverDenial,
+} from './projectNotifications.js';
 import { postBotMessage } from './rooms.js';
+
+/** 예상한 이유로 액션을 못 한 경우 — 실행 기록에 그 이유(한국어)를 그대로 남긴다. */
+class AutomationActionError extends Error {}
+
+/** 규칙을 저장한 사람이 권한을 잃어 이 규칙을 더 돌리면 안 되는 경우 — 실행 기록에 남기고 규칙을 끈다(runGraphRule). */
+class AutomationAccessLostError extends AutomationActionError {}
+
+// 채팅방 알림 횟수 상한(규칙마다·채팅방마다 10분) — 메모리에만 둔다(서버를 다시 켜면 처음부터 센다).
+const chatThrottle = new AutomationChatThrottle();
+setInterval(() => chatThrottle.prune(), AUTOMATION_CHAT_WINDOW_MS).unref();
+
+/**
+ * 채팅방 알림을 규칙을 저장한 사람([savedBy])의 권한으로 올려도 되는지 — 안 되면 이유(projectNotifications.js
+ * automationSaverDenial), 되면 null. 계정 상태·프로젝트 구성원·자동화 저장 권한·채팅방 멤버를 지금 시점으로 다시 읽는다.
+ */
+async function chatSaverDenial(project, room, savedBy) {
+  if (!savedBy) return automationSaverDenial({ savedBy });
+  const [access, projectRole, projectMember, roomMember] = await Promise.all([
+    teamAccess(project.teamId, savedBy),
+    getProjectRole(project.id, savedBy),
+    isProjectMember(project.id, savedBy),
+    isRoomMember(room.id, savedBy),
+  ]);
+  return automationSaverDenial({
+    savedBy,
+    saver: access.user,
+    isProjectMember: projectMember,
+    // 자동화 규칙 저장(POST·PATCH /automations)과 같은 권한 — 프로젝트 담당자 또는 팀 소유자·관리자.
+    canManageProject: canManageProject({ ...access, isProjectOwner: projectRole === 'owner' }),
+    isRoomMember: roomMember,
+  });
+}
+
+/** 실행 기록에 남길 실패 표시 — 예상한 이유면 그 이유까지(DB 오류 같은 내부 메시지는 남기지 않는다). */
+function failedLabel(label, error) {
+  return error instanceof AutomationActionError ? `${label}(실패: ${error.message})` : `${label}(실패)`;
+}
 
 /**
  * "채팅방 알림"을 이 방에 올릴 수 없는 이유 — 올릴 수 있으면 null. 사람이 보내는 메시지와 같은
@@ -386,6 +432,24 @@ async function normalizeNodeConfig(kind, type, config, { project, userId, defs, 
   }
 }
 
+/**
+ * 꺼진 규칙을 켜기만 할 때(PATCH /automations/:id {enabled: true}) — 그래프를 다시 검사하지 않으므로, 채팅방 알림을 저장한
+ * 사람이 그새 권한을 잃었으면 켜자마자 다시 꺼진다. 그런 규칙은 켜지 못하게 이유를 돌려준다(되면 null). 규칙을 열어 다시
+ * 저장하면 저장하는 관리자가 새 savedBy가 되어 다시 켤 수 있다.
+ */
+export async function automationEnableDenial(project, rule) {
+  for (const node of rule?.graph?.nodes ?? []) {
+    if (node?.kind !== 'action' || node.type !== 'chat_message') continue;
+    const config = node.config ?? {};
+    const room = config.roomId ? await findRoomById(config.roomId) : null;
+    // 채팅방이 없어진 노드는 예전처럼 실행할 때 그 액션만 실패로 남는다(저장한 사람의 권한 문제가 아니라 규칙을 끄지 않는다).
+    if (!room || room.teamId !== project.teamId || room.isSecret) continue;
+    const lost = await chatSaverDenial(project, room, config.savedBy);
+    if (lost) return `${lost} 규칙을 열어 다시 저장한 뒤 켜세요.`;
+  }
+  return null;
+}
+
 // ── 실행 ────────────────────────────────────────────────────────────────
 
 /**
@@ -395,12 +459,21 @@ async function normalizeNodeConfig(kind, type, config, { project, userId, defs, 
  * - trigger: 'task_created' | 'field_changed' | 'task_deleted' | 'task_archived' | 'comment_added'
  *   | 'checklist_completed'
  * - changedFields: field_changed일 때 실제로 바뀐 필드들('status', …, 'field:<id>')
+ * - actorId: 이 트리거를 일으킨 사람(요청한 사람) — 채팅방 알림에 "실행한 사람"으로 적는다. 없으면 '알 수 없음'.
  *
  * 예전 방식 규칙(graph가 없는 것)은 업무 생성, 그리고 상태가 바뀐 필드 변경에서만 돈다.
  * 규칙의 동작은 DB를 직접 고치므로(라우터를 다시 타지 않으므로) 자동화가 또 다른 자동화를
  * 부르지 않는다.
  */
-export async function runAutomations({ project, task, trigger, changedFields = [], notifier = null, io = null }) {
+export async function runAutomations({
+  project,
+  task,
+  trigger,
+  changedFields = [],
+  notifier = null,
+  io = null,
+  actorId = null,
+}) {
   let current = task;
   try {
     const changed = new Set(changedFields);
@@ -410,13 +483,22 @@ export async function runAutomations({ project, task, trigger, changedFields = [
         : trigger === 'status_changed' || (trigger === 'field_changed' && changed.has('status'))
           ? 'status_changed'
           : null;
+    // 실행한 사람 이름은 채팅방 알림을 실제로 올릴 때만 한 번 읽는다(대부분의 규칙은 쓰지 않는다).
+    let actorName;
+    const loadActorName = async () => {
+      if (actorName === undefined) {
+        const actor = actorId ? await findUserById(actorId).catch(() => null) : null;
+        actorName = actor?.name ?? actor?.username ?? null;
+      }
+      return actorName;
+    };
     const rules = await listAutomations(project.id, { onlyEnabled: true });
     for (const rule of rules) {
       try {
         if (rule.graph) {
           const start = matchingTriggerNode(rule.graph, trigger, changed);
           if (!start) continue;
-          current = await runGraphRule({ project, rule, task: current, start, notifier, io });
+          current = await runGraphRule({ project, rule, task: current, start, notifier, io, loadActorName });
         } else {
           if (!legacyTrigger || rule.trigger !== legacyTrigger) continue;
           if (legacyTrigger === 'status_changed' && rule.triggerStatusId && rule.triggerStatusId !== task.statusId) continue;
@@ -438,13 +520,14 @@ async function runLegacyRule({ project, rule, task, trigger, notifier }) {
   const done = [];
   let failed = 0;
   for (const action of rule.actions ?? []) {
+    const label = ACTION_LABELS[action.kind] ?? action.kind;
     try {
       current = await applyAction({ project, task: current, rule, action, notifier });
-      done.push(ACTION_LABELS[action.kind] ?? action.kind);
+      done.push(label);
     } catch (e) {
       failed += 1;
-      console.error(`[automation] "${rule.name}" 동작 실패:`, e?.message ?? e);
-      done.push(`${ACTION_LABELS[action.kind] ?? action.kind}(실패)`);
+      if (!(e instanceof AutomationActionError)) console.error(`[automation] "${rule.name}" 동작 실패:`, e?.message ?? e);
+      done.push(failedLabel(label, e));
     }
   }
   await insertAutomationRun({
@@ -510,7 +593,7 @@ function clip(text, max) {
  * 가고, 여러 갈래로 이어진 노드는 연결 순서대로 모두 실행한다. 같은 노드에 두 번 도착해도
  * 한 번만 실행한다. 액션 뒤에는 업무를 다시 읽어서 다음 조건이 바뀐 값을 보게 한다.
  */
-async function runGraphRule({ project, rule, task, start, notifier, io }) {
+async function runGraphRule({ project, rule, task, start, notifier, io, loadActorName }) {
   const graph = rule.graph;
   const byId = new Map((graph.nodes ?? []).map((n) => [n.id, n]));
   const edges = graph.edges ?? [];
@@ -521,6 +604,8 @@ async function runGraphRule({ project, rule, task, start, notifier, io }) {
   const visited = new Set();
   const done = [];
   let failed = 0;
+  // 채팅방 알림을 저장한 사람이 권한을 잃었으면 이번 실행이 끝난 뒤 규칙을 끈다.
+  let accessLost = false;
   let current = task;
   let defs = null;
   const loadDefs = async () => {
@@ -548,12 +633,13 @@ async function runGraphRule({ project, rule, task, start, notifier, io }) {
     if (deleted && (node.type === 'set_field' || node.type === 'archive_task')) return;
     const label = GRAPH_ACTION_LABELS[node.type] ?? node.type;
     try {
-      await applyGraphAction({ project, rule, task: current, node, notifier, io });
+      await applyGraphAction({ project, rule, task: current, node, notifier, io, loadActorName });
       done.push(label);
     } catch (e) {
       failed += 1;
-      console.error(`[automation] "${rule.name}" 액션 실패:`, e?.message ?? e);
-      done.push(`${label}(실패)`);
+      if (e instanceof AutomationAccessLostError) accessLost = true;
+      if (!(e instanceof AutomationActionError)) console.error(`[automation] "${rule.name}" 액션 실패:`, e?.message ?? e);
+      done.push(failedLabel(label, e));
     }
     if (!deleted) {
       try {
@@ -564,6 +650,17 @@ async function runGraphRule({ project, rule, task, start, notifier, io }) {
     }
   };
   await visit(start);
+
+  // 저장한 사람이 권한을 잃은 규칙은 끈다 — 켜 둔 채로는 그 사람의 권한으로 업무 번호·제목·담당자가 계속 채팅방으로
+  // 나간다. 실행 기록에 이유가 남고, 관리자가 규칙을 열어 다시 저장하면 그 관리자의 권한으로 다시 켤 수 있다.
+  if (accessLost) {
+    try {
+      await updateAutomation(rule.id, { enabled: false });
+      done.push('규칙 꺼짐(다시 저장하면 켤 수 있습니다)');
+    } catch (e) {
+      console.error(`[automation] "${rule.name}" 규칙 끄기 실패:`, e?.message ?? e);
+    }
+  }
 
   // 조건에 막혀 아무 액션도 안 했으면 기록을 남기지 않는다(트리거마다 빈 기록이 쌓이지 않도록).
   if (done.length > 0) {
@@ -639,7 +736,7 @@ function notifyTitle(project, task) {
   return `${project.name} · ${project.identifier}-${task.seq}`;
 }
 
-async function applyGraphAction({ project, rule, task, node, notifier, io }) {
+async function applyGraphAction({ project, rule, task, node, notifier, io, loadActorName = async () => null }) {
   const config = node.config ?? {};
   switch (node.type) {
     case 'set_field': {
@@ -660,7 +757,7 @@ async function applyGraphAction({ project, rule, task, node, notifier, io }) {
         ]);
       if (field === 'status') {
         const st = value ? await findTaskStatusById(value) : null;
-        if (!st || st.projectId !== project.id) throw new Error('상태를 찾을 수 없습니다.');
+        if (!st || st.projectId !== project.id) throw new AutomationActionError('상태를 찾을 수 없습니다.');
         // status(분류)와 완료 시각은 항상 상태와 맞춘다(예전 set_status와 같은 방식).
         await updateTask(task.id, {
           statusId: st.id,
@@ -679,7 +776,7 @@ async function applyGraphAction({ project, rule, task, node, notifier, io }) {
         }
       } else if (field === 'priority') {
         const p = value ? await findTaskPriorityById(value) : null;
-        if (!p || p.projectId !== project.id) throw new Error('우선순위를 찾을 수 없습니다.');
+        if (!p || p.projectId !== project.id) throw new AutomationActionError('우선순위를 찾을 수 없습니다.');
         await updateTask(task.id, { priorityId: p.id, priority: p.level });
         if (p.id !== task.priorityId) await record({ text: `우선순위를 '${p.name}'(으)로 변경했습니다.` });
       } else if (field === 'assignee') {
@@ -688,7 +785,7 @@ async function applyGraphAction({ project, rule, task, node, notifier, io }) {
         if (assigneeId === (task.assigneeId ?? null)) return;
         // 저장한 뒤 프로젝트에서 나간 사람일 수 있다.
         if (assigneeId && !(await isProjectMember(project.id, assigneeId))) {
-          throw new Error('담당자가 프로젝트 구성원이 아닙니다.');
+          throw new AutomationActionError('담당자가 프로젝트 구성원이 아닙니다.');
         }
         await updateTask(task.id, { assigneeId, dueRemindedFor: null });
         const user = assigneeId ? await findUserById(assigneeId) : null;
@@ -708,7 +805,7 @@ async function applyGraphAction({ project, rule, task, node, notifier, io }) {
       } else if (field === 'type') {
         const typeId = value ?? null;
         const type = typeId ? await findTaskTypeById(typeId) : null;
-        if (typeId && (!type || type.projectId !== project.id)) throw new Error('유형을 찾을 수 없습니다.');
+        if (typeId && (!type || type.projectId !== project.id)) throw new AutomationActionError('유형을 찾을 수 없습니다.');
         await updateTask(task.id, { typeId });
         if (typeId !== (task.typeId ?? null)) {
           await record({ text: type ? `유형을 '${type.name}'(으)로 변경했습니다.` : '유형을 지웠습니다.' });
@@ -726,18 +823,27 @@ async function applyGraphAction({ project, rule, task, node, notifier, io }) {
       return;
     case 'chat_message': {
       const room = config.roomId ? await findRoomById(config.roomId) : null;
-      if (!room || room.teamId !== project.teamId || room.isSecret) throw new Error('채팅방을 찾을 수 없습니다.');
-      // 저장한 뒤 방에서 나갔으면 더는 그 방에 올리지 않는다(저장한 사람이 없는 예전 규칙도 막는다).
-      if (!config.savedBy || !(await isRoomMember(room.id, config.savedBy))) {
-        throw new Error('규칙을 저장한 사람이 더 이상 채팅방 멤버가 아닙니다.');
-      }
-      // 저장한 뒤 토픽이 읽기 전용·보관으로 바뀌었을 수 있어 실행할 때 다시 본다.
+      if (!room || room.teamId !== project.teamId || room.isSecret) throw new AutomationActionError('채팅방을 찾을 수 없습니다.');
+      // 이 메시지는 규칙을 저장한 사람의 권한으로 올라간다 — 저장한 뒤 방에서 나갔거나, 프로젝트에서 빠졌거나, 관리 권한을
+      // 잃었거나, 정지·탈퇴·준회원 강등됐으면 더는 올리지 않고 규칙을 끈다(저장한 사람이 없는 예전 규칙도 같다). 안 그러면
+      // 권한을 잃은 사람이 자기 방(나와의 대화 등)을 고른 규칙으로 이 프로젝트의 업무 내용을 계속 받아 볼 수 있었다.
+      const lost = await chatSaverDenial(project, room, config.savedBy);
+      if (lost) throw new AutomationAccessLostError(lost);
+      // 저장한 뒤 토픽이 읽기 전용·보관으로 바뀌었을 수 있어 실행할 때 다시 본다(다시 풀릴 수 있으니 규칙은 끄지 않는다).
       const denial = await chatMessageDenial(room, config.savedBy);
-      if (denial) throw new Error(denial);
-      // 보낸 사람 이름이 이미 '자동화'라 머리말에는 규칙 이름만 둔다. 사람 메시지처럼 안읽음·푸시가 가게
-      // 일반 텍스트로 올린다(시스템 메시지는 알림이 안 울린다).
+      if (denial) throw new AutomationActionError(denial);
+      // 규칙마다·채팅방마다 10분 상한 — 넘치면 이번 알림만 건너뛴다(projectNotifications.js AutomationChatThrottle).
+      if (chatThrottle.take(rule.id, room.id) > 0) throw new AutomationActionError(AUTOMATION_CHAT_THROTTLED);
+      // 보낸 사람 이름이 이미 '자동화'라 머리말에는 규칙 이름만 두고, 누구의 변경으로 올라온 글인지 끝에 적는다. 사람
+      // 메시지처럼 안읽음·푸시가 가게 일반 텍스트로 올린다(시스템 메시지는 알림이 안 울린다).
       const body = clip(await fillTaskTokens(config.text, project, task), 1000);
-      const text = `[${rule.name}] ${project.identifier}-${task.seq} ${task.title}\n${body}`;
+      const text = automationChatText({
+        ruleName: rule.name,
+        taskKey: `${project.identifier}-${task.seq}`,
+        taskTitle: task.title,
+        body,
+        actorName: await loadActorName(),
+      });
       await postBotMessage(io ?? { to: () => ({ emit() {} }) }, room, text, { senderName: '자동화' });
       return;
     }
@@ -822,6 +928,11 @@ async function applyAction({ project, task, rule, action, notifier }) {
   const title = `${project.name} · ${project.identifier}-${task.seq}`;
   switch (action.kind) {
     case 'set_assignee': {
+      // 저장한 뒤 프로젝트에서 빠졌거나 정지·탈퇴·준회원 강등된 사람일 수 있다 — 구성원이 아닌 사람에게 업무를 넘기지
+      // 않는다(넘기면 그 사람이 담당자로 남아 화면에 보이고, 다시 구성원이 되는 순간 알림 없이 담당이 된다).
+      if (!(await isProjectMember(project.id, action.userId))) {
+        throw new AutomationActionError('담당자가 프로젝트 구성원이 아닙니다.');
+      }
       const updated = await updateTask(task.id, { assigneeId: action.userId, dueRemindedFor: null });
       await notifier.notify({
         project,
@@ -847,6 +958,10 @@ async function applyAction({ project, task, rule, action, notifier }) {
     case 'set_priority':
       return (await updateTask(task.id, { priority: action.priority })) ?? task;
     case 'add_reference': {
+      // 담당자 지정과 같은 이유로 지금도 구성원인지 다시 본다.
+      if (!(await isProjectMember(project.id, action.userId))) {
+        throw new AutomationActionError('참조자가 프로젝트 구성원이 아닙니다.');
+      }
       const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
       if (!refs.includes(action.userId)) {
         await setTaskReferences(task.id, [...refs, action.userId]);

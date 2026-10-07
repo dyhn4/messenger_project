@@ -28,6 +28,49 @@ $PgPort = 55432
 $DbName = 'messenger'
 $DbAppUser = 'messenger_app'
 
+# 서버 운영자 아이디/비밀번호 확인(server\scripts\verify-admin.mjs) — 맞으면 $true. Reset-Data.ps1·Restore-Data.ps1·
+# Uninstall-Full.ps1에 똑같이 들어 있다 — 고치면 셋 다 고치고 tests\Admin-Verify.Tests.ps1을 돌릴 것(셋이 같은지도 본다).
+# - 비밀번호는 stdin(파이프)으로만 넘긴다 — 명령줄 인자는 이 PC의 다른 계정도 프로세스 목록에서 볼 수 있고, 환경 변수나
+#   파일로 넘기면 흔적이 남는다.
+# - Windows PowerShell 5.1은 파이프로 외부 프로그램에 넘기는 글자를 $OutputEncoding(기본값 ASCII)으로 바꿔 한글 등 ASCII
+#   밖의 글자를 전부 '?'로 보낸다 — 그런 글자가 든 비밀번호는 맞게 쳐도 늘 실패했다. 그래서 이 함수 안에서만 BOM 없는
+#   UTF-8로 바꾼다(verify-admin.mjs가 UTF-8로 읽는다). New-Object로 만들면 PSObject로 감싸여, 함수 안 지역 변수에서는
+#   인코딩으로 인식되지 않고 조용히 ASCII로 돌아간다(직접 확인) — 그래서 ::new()로 만든다.
+# - node는 서버 폴더에서 실행하고(다른 관리 스크립트와 같은 규칙) 끝나면 원래 위치로 돌아온다 — 뒤에서 띄우는 프로그램이
+#   지울 대상인 server 폴더를 작업 폴더로 물려받지 않게(Uninstall-Full.ps1).
+function Test-ServerAdminPassword {
+    param([string]$NodeExe, [string]$ServerDir, [string]$Username, [securestring]$Password)
+    $ok = $false
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password)
+    try {
+        $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+    $previousOutputEncoding = $OutputEncoding
+    Push-Location -LiteralPath $ServerDir
+    try {
+        $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        # node가 아예 실행되지 못하면 $LASTEXITCODE가 예전 값(0일 수도 있음) 그대로 남아 통과처럼 보이므로 먼저 지워 둔다.
+        $global:LASTEXITCODE = -1
+        # node가 stdout에 무엇을 쓰든 이 함수의 결과($true/$false)에 섞이지 않게 화면으로만 보낸다.
+        $plainPassword | & $NodeExe (Join-Path $ServerDir 'scripts\verify-admin.mjs') $Username | Out-Host
+        $ok = ($LASTEXITCODE -eq 0)
+    } catch {
+        Write-Host "운영자 확인을 실행하지 못했습니다: $($_.Exception.Message)" -ForegroundColor Red
+        $ok = $false
+    } finally {
+        $OutputEncoding = $previousOutputEncoding
+        $plainPassword = $null
+        Pop-Location
+    }
+    return $ok
+}
+
+# node는 서버 폴더에서 실행한다 — verify-admin.mjs는 자기 위치 기준으로 .env를 읽지만, .env를 "현재 폴더"에서 읽는
+# 서버 스크립트(reset-data.mjs 등 dotenv/config)와 같은 규칙으로 맞춰 둔다(승격된 PowerShell은 System32에서 시작한다).
+Set-Location -LiteralPath $ServerDir
+
 Write-Host '================================================================'
 Write-Host ' TangoTalk DB 복원'
 Write-Host '================================================================'
@@ -70,14 +113,8 @@ Write-Host ''
 Write-Host '먼저 서버 운영자 계정으로 본인 확인이 필요합니다.'
 $username = Read-Host '서버 운영자 아이디'
 $securePassword = Read-Host '비밀번호' -AsSecureString
-$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
-$plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-
-$VerifyScript = Join-Path $ServerDir 'scripts\verify-admin.mjs'
-$plainPassword | & $NodeExe $VerifyScript $username
-$verified = ($LASTEXITCODE -eq 0)
-$plainPassword = $null
+$verified = Test-ServerAdminPassword -NodeExe $NodeExe -ServerDir $ServerDir -Username $username -Password $securePassword
+$securePassword.Dispose()
 
 if (-not $verified) {
     Write-Host ''

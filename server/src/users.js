@@ -1,25 +1,39 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { issueTokenPair } from './auth.js';
-import { limits, tooMany } from './authGuard.js';
+import { retryLater, runReauthAttempt } from './authGuard.js';
 import { passwordPolicyError } from './passwordPolicy.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
-import { findOtherUserByEmailLookup, findUserById, listActiveUsers, updateUser } from './db/queries/users.js';
-import { findTeamMember, listTeamIdsForUser, listTeamsForUser } from './db/queries/teams.js';
+import {
+  findOtherUserByEmailLookup,
+  findUserById,
+  listActiveUsers,
+  listActiveUsersByIds,
+  updateUser,
+  updateUserUnlessLastServerAdmin,
+} from './db/queries/users.js';
+import { findTeamMember, listCoTeamMemberIds, listTeamIdsForUser, listTeamsForUser } from './db/queries/teams.js';
 import { clearTopicAdminRoles } from './db/queries/rooms.js';
 import { deleteScheduledMessagesForUser } from './db/queries/scheduledMessages.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
 import { findStickerWithPack } from './db/queries/stickers.js';
+import { findUploaders } from './db/queries/uploads.js';
+import { clearPushTargetsForUser } from './db/queries/devices.js';
 import { isOnline } from './presence.js';
 import { accountRole, canCreateProject, canCreateTeamInviteLink } from './permissions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { broadcastMemberUpdate } from './rooms.js';
 import { notifyBirthdayChanged } from './calendars.js';
-import { signFileUrl } from './upload.js';
+import { endUserCallAccess } from './callAccess.js';
+import { ownedUploadClaims, signFileUrl, uploadFileNameOf } from './upload.js';
+import { AVATAR_PHOTO_ERROR, parseUserName, planAvatarUpdate, safeAvatarColor } from './avatarRules.js';
+import { canSeeUser, directoryUserIds, seesWholeDirectory } from './userDirectory.js';
 
-const VALID_AVATAR_TYPES = new Set(['initial', 'character', 'photo']);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// 이메일 칸 길이 상한 — 가입·아이디 찾기(auth.js EMAIL_MAX_LENGTH)와 같다. 예전엔 바꿀 때만 길이를 안 봐서, 로그인한 사람이 본문
+// 상한(bodyLimit.js)만큼 긴 값을 이메일로 저장할 수 있었다(그러면 아이디 찾기도 그 이메일로는 안 된다).
+const EMAIL_MAX_LENGTH = 200;
 export const DELETED_USER_NAME = '탈퇴한 사용자';
 
 /**
@@ -27,6 +41,10 @@ export const DELETED_USER_NAME = '탈퇴한 사용자';
  * 찾기에 쓰는 값이라 남에게 보이면 계정을 노리는 발판이 되고(전체 회원 목록 GET /users로 서버의 모든
  * 이메일이 새던 문제), 생일은 캘린더가 팀 단위로 따로 받는다(calendars.js의 listTeamBirthdays). 본인 것은
  * [selfUser]로 내려준다.
+ *
+ * 아바타 칸은 내보낼 때 한 번 더 거른다(avatarRules.js) — 배경색은 앱이 그릴 수 있는 '#RRGGBB'만(검사가 생기기 전에 저장된
+ * 이상한 값 하나로 이 사람을 그리는 다른 사람 화면이 깨지지 않게), 사진 링크는 아바타가 사진일 때만(사진이 아닌 아바타에 남은
+ * 경로까지 매번 새 다운로드 링크로 서명해 주지 않게 — 앱도 사진일 때만 그 링크를 쓴다).
  */
 export function publicUser(u) {
   return {
@@ -35,8 +53,8 @@ export function publicUser(u) {
     name: u.name ?? u.username,
     avatarType: u.avatarType ?? 'initial',
     avatarEmoji: u.avatarEmoji ?? null,
-    avatarColor: u.avatarColor ?? null,
-    avatarUrl: signFileUrl(u.avatarUrl) ?? null,
+    avatarColor: safeAvatarColor(u.avatarColor),
+    avatarUrl: u.avatarType === 'photo' ? (signFileUrl(u.avatarUrl) ?? null) : null,
     online: isOnline(u.id),
     // 계정 등급 — 팀 설정의 "팀원 추가"나 조직도에서 등급을 보여주는 데 쓴다.
     // 바꾸는 것은 서버 운영자만 가능하다(admin.js).
@@ -125,21 +143,27 @@ async function myOrgInfo(user, settings) {
 
 /**
  * 로그인한 상태에서 현재 비밀번호를 다시 확인한다(화면 잠금 해제·이메일 변경·비밀번호 변경·탈퇴).
- * 훔친 토큰으로 비밀번호를 맞혀보는 걸 막으려고 틀린 횟수를 센다(authGuard.js — 10번 틀리면
- * 15분). 막혔거나 틀렸으면 응답을 보내고 false.
+ * 훔친 토큰으로 비밀번호를 맞혀보는 걸 막으려고 틀린 횟수를 센다(authGuard.js runReauthAttempt — 10번 틀리면
+ * 15분). 확인(bcrypt)을 시작할 때 "확인 중"으로 함께 세서, 요청을 한꺼번에 보내도 그보다 많이 맞춰 보지 못한다(예전엔
+ * bcrypt가 끝난 뒤에야 세서 동시에 보낸 만큼 맞춰 볼 수 있었다). 막혔거나 틀렸으면 응답을 보내고 false.
  */
 async function checkCurrentPassword(res, user, password, wrongMessage) {
-  const wait = limits.reauthUser.blockedFor(user.id);
-  if (wait > 0) {
-    tooMany(res, wait, '비밀번호 확인 시도');
+  const result = await runReauthAttempt({
+    key: user.id,
+    password,
+    checkPassword: (plain) => bcrypt.compare(plain, user.passwordHash),
+  });
+  if (result.wait) {
+    retryLater(res, result.wait, result.error);
     return false;
   }
-  if (!password || !(await bcrypt.compare(String(password), user.passwordHash))) {
-    limits.reauthUser.fail(user.id);
-    res.status(401).json({ error: wrongMessage });
+  if (!result.ok) {
+    // 401이 아니라 403 — 앱은 401을 "토큰이 만료됐다"로 보고 토큰을 새로 받아 같은 요청을 한 번 더 보내서(api_client.dart _send),
+    // 비밀번호를 한 번 잘못 쳐도 두 번 틀린 것으로 세어져 실제 사용자가 절반만 틀려도 잠겼다. 앱은 상태 코드와 상관없이 이 문구를
+    // 그대로 보여 준다(예전 앱도 같다).
+    res.status(403).json({ error: wrongMessage });
     return false;
   }
-  limits.reauthUser.reset(user.id);
   return true;
 }
 
@@ -150,19 +174,42 @@ export function createUsersRouter(io) {
   const router = Router();
 
   /**
-   * 방 멤버 선택(그룹/DM 생성)·멤버 패널·조직도에 쓸 전체 가입자 목록. 탈퇴한 사용자는
-   * 로그인도 못 하고 새로 대화를 걸 수도 없으니 여기서 뺀다 — 다만 예전에 같이 있던 방의
-   * 멤버 목록/과거 메시지 작성자 표시(publicUser 자체)에서는 계속 "탈퇴한 사용자"로 보여야
-   * 하므로 그쪽(rooms.js의 listRoomMemberUsers 등)은 건드리지 않는다.
+   * [me]가 회원 목록·프로필에서 볼 수 있는 계정 id(Set) — 서버 전체를 보는 사람(계정 등급 관리자·서버 운영자)이면 null(제한 없음),
+   * 그 밖에는 팀을 하나라도 같이 쓰는 사람과 자기 자신(userDirectory.js).
+   */
+  async function visibleUserIds(me) {
+    if (seesWholeDirectory(me)) return null;
+    return directoryUserIds(me.id, await listCoTeamMemberIds(me.id));
+  }
+
+  /**
+   * 회원 목록. 탈퇴한 사용자는 로그인도 못 하고 새로 대화를 걸 수도 없으니 여기서 뺀다 — 다만 예전에
+   * 같이 있던 방의 멤버 목록/과거 메시지 작성자 표시(publicUser 자체)에서는 계속 "탈퇴한 사용자"로
+   * 보여야 하므로 그쪽(rooms.js의 listRoomMemberUsers 등)은 건드리지 않는다.
    *
-   * 직책(position)은 이 목록이 "특정 팀 안"이 아니라 서버 전체를 훑는 목록이라, 팀마다 다를
+   * 누구에게 얼마나 보여 줄지는 userDirectory.js — 계정 등급 관리자와 서버 운영자는 서버 전체(조직도의
+   * "미소속" 회원까지), 그 밖에는 팀을 같이 쓰는 사람과 자기 자신만이다. 예전엔 로그인한 누구에게나
+   * (팀이 없는 준회원에게도) 서버 전체 회원의 아이디·등급·접속 상태를 줬다. 앱은 이 목록을 조직도
+   * (관리자 이상 전용)와 처음 접속 상태 채우기(같은 팀 사람만 의미가 있다)에만 쓴다 — 팀원 추가 후보는
+   * 아직 그 팀에 없는 사람이라 따로 받는다(teams.js GET /teams/:id/member-candidates). 이 변경 전의 앱은 팀원
+   * 추가 후보도 이 목록에서 골랐다 — 그 앱에서는 관리자 이상이 아닌 소유자에게 팀을 같이 쓰는 사람만 후보로
+   * 보이고 팀 밖 사람을 찾을 방법이 없으니, 서버와 함께 앱(웹 앱 포함)도 새 버전으로 올려야 한다.
+   *
+   * 아이디(username)는 준회원에게도 그대로 싣는다: 이 목록이 팀을 같이 쓰는 사람으로 좁혀졌고, 그 사람들의
+   * 아이디는 팀 멤버 목록(GET /teams/:id/members)·방 멤버 목록에도 이미 실려 있어(멘션 자동완성이 아이디로도
+   * 찾는다) 여기서만 빼도 더 막히는 것이 없다 — 앱의 AppUser도 아이디를 꼭 받아야 읽힌다.
+   *
+   * 직책(position)은 이 목록이 "특정 팀 안"이 아니라 여러 팀을 훑는 목록이라, 팀마다 다를
    * 수 있는 값(orgScope='team')은 하나로 못 정해서 뺀다 — 계정 단위로 관리하는 서버
    * (orgScope='account')일 때만, 사람마다 값이 하나뿐이니 그대로 실어준다(조직도 "멤버" 탭이
    * 이 값을 쓴다).
    */
   router.get('/users', async (req, res) => {
+    const me = await findUserById(req.user.sub);
+    if (!me) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
     const settings = await getServerSettings();
-    const users = await listActiveUsers();
+    const visible = await visibleUserIds(me);
+    const users = visible === null ? await listActiveUsers() : await listActiveUsersByIds([...visible]);
     res.json(
       users.map((u) => ({
         ...publicUser(u),
@@ -178,8 +225,10 @@ export function createUsersRouter(io) {
   });
 
   /**
-   * 이 사람이 속한 팀들 — 프로필 카드의 "팀" 항목이 쓴다. 본인이면 전부, 남이면 노출 범위를
-   * 다르게 둔다: 대상이 계정 등급 관리자면 관리자는 보통 여러 팀에 걸쳐 있어서 나와 겹치는
+   * 이 사람이 속한 팀들 — 프로필 카드의 "팀" 항목이 쓴다. 먼저 그 사람을 볼 수 있어야 한다(회원 목록과
+   * 같은 범위 — 본인, 팀을 같이 쓰는 사람, 그리고 계정 등급 관리자·서버 운영자는 누구든). 못 보는 사람이면
+   * 없는 사람과 같게 404로 답한다(예전엔 id만 알면 누구의 소속 팀이든 볼 수 있었다). 볼 수 있으면 남의 것은
+   * 노출 범위를 다르게 둔다: 대상이 계정 등급 관리자면 관리자는 보통 여러 팀에 걸쳐 있어서 나와 겹치는
    * 팀만(내가 이미 알 수 있는 관계로 제한), 정회원·준회원이면 소속이 단순해서 전체를 그대로
    * 보여준다. "조직도"(관리자 이상 전용, GET /org-chart/teams)와 달리 이건 누구나 호출할 수
    * 있는 대신, 위 규칙으로 노출 범위를 스스로 제한한다.
@@ -187,6 +236,12 @@ export function createUsersRouter(io) {
   router.get('/users/:id/teams', async (req, res) => {
     const target = await findUserById(req.params.id);
     if (!target || target.deletedAt) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (target.id !== req.user.sub) {
+      const me = await findUserById(req.user.sub);
+      if (!me || !canSeeUser(await visibleUserIds(me), target.id)) {
+        return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+      }
+    }
 
     const targetRows = await listTeamsForUser(target.id);
     let visibleTeams = targetRows.map((r) => r.team);
@@ -245,30 +300,36 @@ export function createUsersRouter(io) {
    * 내 프로필 갱신. avatarType이 오면 아바타 상태를 통째로 바꾸고(초기화/캐릭터 선택/사진
    * 업로드가 서로 다른 필드 조합을 쓰므로 부분 수정 대신 전체 교체), name/email은 각각
    * 왔을 때만 독립적으로 갱신한다.
+   *
+   * 아바타·이름 값 검사는 avatarRules.js — 예전엔 보낸 그대로 저장해서, 남이 올린 파일 경로를 프로필 사진으로
+   * 걸어 두면 내 프로필이 그 파일의 새 다운로드 링크를 계속 실어 줬다. 이제 새 프로필 사진은 내가 올린 파일
+   * (uploads 표)이어야 하고, 지금 쓰는 사진을 다시 보내는 것만 그대로 둔다.
    */
   router.patch('/users/me', async (req, res) => {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
-    const { avatarType, avatarEmoji, avatarColor, avatarUrl, name, email, currentPassword, birthday } =
-      req.body ?? {};
+    const { avatarType, name, email, currentPassword, birthday } = req.body ?? {};
     const patch = {};
 
     if (avatarType !== undefined) {
-      if (!VALID_AVATAR_TYPES.has(avatarType)) {
-        return res.status(400).json({ error: '잘못된 avatarType입니다.' });
+      const avatar = planAvatarUpdate(req.body, {
+        currentAvatarUrl: user.avatarType === 'photo' ? user.avatarUrl : null,
+      });
+      if (avatar.error) return res.status(400).json({ error: avatar.error });
+      if (avatar.uploadToVerify) {
+        // 새 사진은 내가 POST /upload로 올린 파일이어야 한다(그 기록이 uploads 표에 남는다 — upload.js).
+        const uploaders = await findUploaders([uploadFileNameOf(avatar.uploadToVerify)]);
+        const owned = ownedUploadClaims([{ path: avatar.uploadToVerify, ownerId: user.id }], uploaders);
+        if (owned.length === 0) return res.status(400).json({ error: AVATAR_PHOTO_ERROR });
       }
-      patch.avatarType = avatarType;
-      patch.avatarEmoji = avatarEmoji ?? null;
-      patch.avatarColor = avatarColor ?? null;
-      patch.avatarUrl = avatarUrl ?? null;
+      Object.assign(patch, avatar.patch);
     }
 
     if (name !== undefined) {
-      if (!String(name).trim()) {
-        return res.status(400).json({ error: '이름을 입력하세요.' });
-      }
-      patch.name = String(name).trim();
+      const parsed = parseUserName(name);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      patch.name = parsed.value;
     }
 
     if (birthday !== undefined) {
@@ -281,7 +342,8 @@ export function createUsersRouter(io) {
       // 이메일은 아이디/비밀번호 찾기에 쓰이는 계정 복구 수단이라, 이름/아바타와 달리
       // 현재 비밀번호로 본인 확인을 한 번 더 받는다(비밀번호 변경과 같은 정책).
       if (!(await checkCurrentPassword(res, user, currentPassword, '현재 비밀번호가 올바르지 않습니다.'))) return;
-      if (!EMAIL_PATTERN.test(email)) {
+      // 문자열이 아닌 값도 형식 오류로 — ['a@b.c'] 같은 배열은 정규식을 통과해서, 예전엔 그 글자 모양('a@b.c')으로 저장됐다.
+      if (typeof email !== 'string' || email.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(email)) {
         return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
       }
       const emailLookup = lookupHash(email);
@@ -368,9 +430,12 @@ export function createUsersRouter(io) {
 
   /**
    * 회원 탈퇴. 정책:
+   *  0) 마지막(탈퇴·정지 안 된 운영자가 나 하나뿐인) 서버 운영자는 탈퇴할 수 없다 — 아무도 관리자 콘솔에
+   *     못 들어가게 되고, 예전엔 그 뒤의 첫 가입자가 서버 운영자가 됐다(auth.js). 다른 사람을 운영자로
+   *     지정한 뒤에 탈퇴한다.
    *  1) 로그인 차단 — deletedAt을 기록해두면 /auth/login이 거부한다.
    *  2) 세션/토큰 즉시 폐기 — tokenVersion을 올리고 지금 연결된 소켓도 끊는다
-   *     (비밀번호 변경과 같은 메커니즘).
+   *     (비밀번호 변경과 같은 메커니즘). 기기들의 푸시 토큰·웹 푸시 구독도 지우고, 진행 중인 화상회의에서도 내보낸다.
    *  3) 이메일·이름·프로필 익명화.
    *  4) 메시지는 삭제하지 않고 그대로 둔다(1년 뒤 보존기간 만료 시 retention.js가 처리).
    *  5) 과거 메시지의 작성자 표시도 "탈퇴한 사용자"로 바꾼다 — 방 멤버 목록을 통한 조회에만
@@ -388,7 +453,7 @@ export function createUsersRouter(io) {
     const { password } = req.body ?? {};
     if (!(await checkCurrentPassword(res, user, password, '비밀번호가 올바르지 않습니다.'))) return;
 
-    await updateUser(user.id, {
+    const withdrawn = await updateUserUnlessLastServerAdmin(user.id, {
       deletedAt: new Date(),
       tokenVersion: (user.tokenVersion ?? 0) + 1,
       name: DELETED_USER_NAME,
@@ -399,6 +464,17 @@ export function createUsersRouter(io) {
       avatarColor: null,
       avatarUrl: null,
     });
+    if (!withdrawn) {
+      return res.status(400).json({
+        error: '마지막 서버 운영자는 탈퇴할 수 없습니다. 관리자 콘솔에서 다른 회원을 서버 운영자로 지정한 뒤 탈퇴하세요.',
+      });
+    }
+    // 탈퇴한 계정에는 어떤 알림도 보내지 않는다 — 보내는 쪽은 이미 탈퇴·정지 계정을 거르지만(db/queries/devices.js), 이
+    // 계정 기기들의 푸시 토큰·웹 푸시 구독도 지워서 그 기기(폰·브라우저)로 갈 길 자체를 없앤다. 뒷정리라서 실패해도(드문 DB
+    // 오류) 기록만 남기고 아래 탈퇴 처리는 이어 간다.
+    await clearPushTargetsForUser(user.id).catch((err) =>
+      console.error('[users] 탈퇴 계정 푸시 토큰·구독 지우기 실패:', user.id, err?.message ?? err),
+    );
     await renameSenderMessages(user.id, DELETED_USER_NAME);
     // 탈퇴한 사람은 토픽을 관리할 수 없다 — 토픽 관리자 역할은 거둔다(아래 방 정보 재전송에 같이 반영).
     await clearTopicAdminRoles(user.id);
@@ -406,6 +482,8 @@ export function createUsersRouter(io) {
     await deleteScheduledMessagesForUser(user.id);
 
     io.in(`user:${user.id}`).disconnectSockets(true);
+    // 진행 중인 화상회의에서도 내보낸다 — 소켓을 끊어도 이미 연결된 통화 미디어는 그대로 오가기 때문이다(callAccess.js).
+    await endUserCallAccess(io, user.id);
     await broadcastMemberUpdate(io, user.id);
 
     res.json({ ok: true });

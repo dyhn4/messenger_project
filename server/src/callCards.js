@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { callSummaryText } from './calls.js';
-import { addCallEvent, closeStaleCallCard, endCallCard, newCallCard } from './callEvents.js';
+import { addUserCallEvent, closeStaleCallCard, endCallCard, newCallCard } from './callEvents.js';
 import {
   insertMessage,
   listActiveCallCardMessages,
   updateMessageCallCard,
 } from './db/queries/messages.js';
+import { findRoomById } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
+import { postSystemMessage } from './rooms.js';
 
 /**
  * 화상회의 기록 카드 — 통화 한 통마다 대화방에 시스템 메시지 한 장(messages.call_card)을 두고, 시작·참여·거절·나감을
@@ -64,12 +66,17 @@ export function startCallCard(io, room, userId) {
   });
 }
 
-/** 진행 중인 통화에 사건(참여·나감·거절)을 붙인다. 카드가 없으면(서버 재시작 직후 등) 아무것도 안 한다. */
+/**
+ * 진행 중인 통화에 사건(참여·나감·거절)을 붙인다. 카드가 없으면(서버 재시작 뒤 되살린 통화 등) 아무것도 안 한다. 상한에
+ * 걸려 카드가 그대로면(callEvents.js addUserCallEvent — 한 사람이 나가기·참여를 되풀이) DB도 고치지 않고 알리지도 않는다.
+ */
 export function recordCallEvent(io, roomId, userId, kind) {
   return enqueue(roomId, async () => {
     const live = liveCards.get(roomId);
     if (!live) return;
-    live.card = addCallEvent(live.card, { at: Date.now(), userId, name: await nameOf(userId), kind });
+    const next = addUserCallEvent(live.card, { at: Date.now(), userId, name: await nameOf(userId), kind });
+    if (next === live.card) return;
+    live.card = next;
     await updateMessageCallCard(live.messageId, live.card);
     emitCard(io, roomId, live.messageId, live.card);
   });
@@ -90,6 +97,28 @@ export function finishCallCard(io, roomId, ended) {
     emitCard(io, roomId, live.messageId, live.card, text);
     return true;
   });
+}
+
+/**
+ * 누가 통화에서 빠진 뒤 카드를 고친다 — 그 사람이 통화에서 완전히 빠졌으면(다른 기기로 아직 들어와 있지 않으면) "나감"을
+ * 붙이고, 그걸로 통화가 끝났으면 카드를 닫는다. 카드가 없는 통화(서버 재시작 뒤 되살린 통화)가 끝나면 예전처럼 요약 한
+ * 줄을 시스템 메시지로 남긴다 — 단 되살린 통화에 아무도 함께하지 않았으면 남기지 않는다(혼자 남았다가 끊겼다 다시 붙기를
+ * 되풀이하면 대화에 "부재중" 줄만 쌓인다 — 처음 통화의 카드가 이미 그 통화를 기록했다).
+ * [state]는 callState.js leaveCall/removeUserFromCalls가 돌려준 상태, [wasIn]은 빠지기 전에 통화에 들어와 있었는지.
+ * 나가기·소켓 끊김(socket.js)과 자격을 잃어 내보내기(callAccess.js)가 같이 쓴다.
+ */
+export async function postCallLeft(io, state, userId, wasIn) {
+  if (wasIn && !state.participantIds.includes(userId)) {
+    await recordCallEvent(io, state.roomId, userId, 'leave');
+  }
+  if (!state.ended) return;
+  if (await finishCallCard(io, state.roomId, state.ended)) return;
+  if (state.ended.restored && !state.ended.answered) return;
+  const room = await findRoomById(state.roomId);
+  if (!room) return;
+  const users = await Promise.all(state.ended.participantIds.map(findUserById));
+  const names = users.filter(Boolean).map((u) => u.name ?? u.username ?? '알 수 없음');
+  await postSystemMessage(io, room, callSummaryText(state.ended, names));
 }
 
 /** 서버가 뜰 때 — 지난번 실행 중에 "진행 중"으로 남은 카드를 닫는다(통화 상태는 메모리에만 있어서 재시작하면 사라진다). */

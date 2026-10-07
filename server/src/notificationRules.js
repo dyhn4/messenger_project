@@ -208,13 +208,18 @@ export function boardRecipientsFor({ event, memberIds, actorId, postAuthorId = n
 }
 
 /** 방 이름을 글로 — 클라이언트 Room.displayName()/rooms.js roomDisplayName과 같은 규칙인데, 멤버를 미리 받아 둔 채
- * 받는 사람마다 계산한다(@all 한 번에 수십 명이면 사람마다 DB를 다시 읽지 않도록). */
+ * 받는 사람마다 계산한다(@all 한 번에 수십 명이면 사람마다 DB를 다시 읽지 않도록). 검색 패널의 대화방 이름
+ * (roomSearchRules.js)도 이걸 쓴다. */
 export function roomNameForViewer(room, members, viewerId) {
   if (room.isSelf) return '나와의 대화';
   if (room.name) return room.name;
   if (room.type === 'dm') {
     const other = members.find((m) => m.id !== viewerId);
-    return other?.name ?? '(알 수 없음)';
+    if (other) return other.name ?? '(알 수 없음)';
+    // 상대가 빠진 1:1 대화(비밀 대화 혼자 나가기·팀에서 제외 — db/queries/rooms.js removeMemberFromRoom)는 남겨 둔
+    // 이름으로 — rooms.js roomDisplayName과 같다. 알림 기록은 1:1 대화에 생기지 않으므로(멘션은 토픽·그룹, 보드 알림은
+    // 보드 토픽) 이 줄이 실제로 쓰이는 곳은 검색 패널이다 — 방 목록과 같은 이름으로 보이고 그 이름으로 찾힌다.
+    return room.secretDepartedMemberName ? `${room.secretDepartedMemberName} (나갔음)` : '(알 수 없음)';
   }
   const names = members
     .filter((m) => m.id !== viewerId)

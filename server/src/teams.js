@@ -7,6 +7,7 @@ import {
   getTeamRole,
   insertTeam,
   isTeamMember,
+  listCoTeamMemberIds,
   listTeamMemberIds,
   listTeamMemberIdsByRole,
   listTeamMemberUsers,
@@ -20,17 +21,26 @@ import {
 } from './db/queries/teams.js';
 import {
   addRoomMembers,
-  clearTopicAdminRoles,
-  findRoomById,
   listAutoInviteTopics,
+  listLeftoverTeamRoomMembers,
   listRoomMemberIds,
+  removeLeftoverTeamRoomMembers,
 } from './db/queries/rooms.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
-import { findUserById, updateUser } from './db/queries/users.js';
+import {
+  findUserById,
+  findUserByUsername,
+  listActiveUsers,
+  listActiveUsersByIds,
+  updateUser,
+} from './db/queries/users.js';
+import { eq } from 'drizzle-orm';
 import { db } from './db/client.js';
-import { teams as teamsTable } from './db/schema.js';
+import { rooms as roomsTable, teams as teamsTable } from './db/schema.js';
+import { endRoomCallAccess } from './callAccess.js';
 import { AUDIT, recordAudit } from './audit.js';
+import { RateLimiter, tooMany } from './authGuard.js';
 import {
   accountRole,
   canCreateTeam,
@@ -41,32 +51,54 @@ import {
   TOPIC_CREATION_LEVELS,
 } from './permissions.js';
 import { teamAccess, userAccess } from './access.js';
-import { nameOf, notifyMembership, notifyTodosResynced, postSystemMessage, toRoomDto } from './rooms.js';
+import {
+  nameOf,
+  notifyMembership,
+  notifyRemovedFromTeamRooms,
+  notifyTodosResynced,
+  postSystemMessage,
+} from './rooms.js';
 import { announceTeamJoin, announceTeamRemoval } from './selfRoomNotices.js';
 import { publicUser } from './users.js';
-import { signFileUrl, toStoredUploadUrl } from './upload.js';
+import {
+  MEMBER_LOOKUP_RATE,
+  memberCandidateScope,
+  parseCandidateUsername,
+  teamMemberCandidates,
+} from './userDirectory.js';
+import { checkIconRef } from './fileRefs.js';
+import { signFileUrl } from './upload.js';
 
 const TEAM_ICON_COLORS = ['#9575CD', '#4C6EF5', '#15AABF', '#37B24D', '#FAB005', '#FF6B35', '#E64980', '#8D6E63'];
+// 팀 아이콘 사진을 받을 수 없을 때 — 알아볼 수 없는 링크와 이 사람이 쓸 수 없는 파일을 가리지 않는다(어떤 파일이 있는지 알려 주지 않게).
+const TEAM_ICON_ERROR = '팀 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.';
+
+// 팀원 추가의 "아이디로 찾기" 횟수 제한(사람 단위 — userDirectory.js MEMBER_LOOKUP_RATE).
+const memberLookupLimiter = new RateLimiter(MEMBER_LOOKUP_RATE);
+setInterval(() => memberLookupLimiter.prune(), MEMBER_LOOKUP_RATE.windowMs).unref();
 
 /**
  * 팀 생성(POST)과 팀 설정 변경(PATCH)이 함께 쓰는 아이콘·토픽 생성 권한·메시지 설정 검증 —
  * 본문에 들어 있는 항목만 fields에 담는다. 'designated'의 지정자 목록은 팀 멤버를 확인해야
- * 해서 호출부가 따로 검사한다.
+ * 해서 호출부가 따로 검사한다. [userId]는 요청한 사람, [currentIconUrl]은 고칠 때 지금 저장된
+ * 아이콘 사진(만들 때는 없음) — 아이콘 사진을 이 사람이 써도 되는지 보는 데 쓴다.
  */
-function parseTeamOptionFields(body) {
+async function parseTeamOptionFields(body, { userId, currentIconUrl = null }) {
   const fields = {};
   const text = (v) => (typeof v === 'string' && v ? v : null);
   if ('iconEmoji' in body) fields.iconEmoji = text(body.iconEmoji);
   if ('iconColor' in body) fields.iconColor = text(body.iconColor);
-  // 팀 아이콘 사진 — 빈 값이면 지운다(초기화/이모지로 변경). 업로드 응답의 URL을 그대로
-  // 보내오므로 미서명 경로로 되돌려 저장한다.
+  // 팀 아이콘 사진 — 빈 값이면 지운다(초기화/이모지로 변경). 업로드 응답의 URL(서명 링크든 미서명 경로든)을 그대로
+  // 보내오므로 미서명 경로로 되돌려 저장한다. 받는 것은 이 사람이 올린 사진, 지금 아이콘(설정 창은 저장할 때마다 들고 있던
+  // 링크를 그대로 다시 보낸다 — 창을 오래 열어 둬 만료됐어도), 서명 링크로 온 지금 볼 수 있는 방의 사진뿐이다(fileRefs.js —
+  // 검토 S22). 예전엔 어디서 알게 된 파일 이름(/uploads/<이름>)도 그대로 받아, 팀원 모두가 그 파일의 새 링크를 영영 받았다.
   if ('iconUrl' in body) {
     if (!body.iconUrl) {
       fields.iconUrl = null;
     } else {
-      const stored = toStoredUploadUrl(body.iconUrl);
-      if (!stored) return { error: '팀 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.' };
-      fields.iconUrl = stored;
+      const icon = await checkIconRef(body.iconUrl, { senderId: userId, currentIconUrl, error: TEAM_ICON_ERROR });
+      if (!icon.ok) return { error: icon.error };
+      fields.iconUrl = icon.path;
     }
   }
   if ('topicCreationPolicy' in body) {
@@ -168,8 +200,8 @@ export function createTeamsRouter(io) {
    * 서버 운영자만 볼 수 있다 — 소유자라는 이유만으로는 안 된다(그 팀 하나만 관리할 뿐, 다른
    * 팀 멤버 구성까지 볼 권한은 아니므로).
    *
-   * 멤버 이름/아바타 등 상세 정보는 이미 등급과 무관하게 공개인 GET /users로 따로 받게 하고,
-   * 여기서는 "어느 팀에 누가 속해 있는지"라는 조직도 고유의 정보만 준다. ownerId는 조직도
+   * 멤버 이름/아바타 등 상세 정보는 GET /users로 따로 받게 하고(관리자 이상에게는 서버 전체 회원을
+   * 준다 — userDirectory.js), 여기서는 "어느 팀에 누가 속해 있는지"라는 조직도 고유의 정보만 준다. ownerId는 조직도
    * "멤버" 탭이 등급 배지 옆에 "소유자" 표시를 붙일지 판단하는 데 쓴다.
    */
   router.get('/org-chart/teams', async (req, res) => {
@@ -215,7 +247,7 @@ export function createTeamsRouter(io) {
     // 팀 설정과 같은 항목(아이콘·토픽 생성 권한·메시지 설정)을 만들 때 함께 정할 수 있다.
     // 'designated'(지정한 사람만)는 아직 나 말고 멤버가 없어 고를 수 없다 — 멤버를 넣은 뒤
     // 팀 설정에서 정한다.
-    const options = parseTeamOptionFields(req.body ?? {});
+    const options = await parseTeamOptionFields(req.body ?? {}, { userId: req.user.sub });
     if (options.error) return res.status(400).json({ error: options.error });
     if (options.fields.topicCreationPolicy === 'designated') {
       return res.status(400).json({ error: "'지정' 토픽 생성 권한은 팀을 만든 뒤 팀 설정에서 정할 수 있습니다." });
@@ -261,7 +293,7 @@ export function createTeamsRouter(io) {
       if (name.length > 30) return res.status(400).json({ error: '팀 이름은 30자 이내로 입력하세요.' });
       fields.name = name;
     }
-    const options = parseTeamOptionFields(req.body ?? {});
+    const options = await parseTeamOptionFields(req.body ?? {}, { userId: req.user.sub, currentIconUrl: team.iconUrl });
     if (options.error) return res.status(400).json({ error: options.error });
     Object.assign(fields, options.fields);
     // 'designated'로 정할 때만 topicCreatorIds가 함께 온다 — 다른 값으로 바꿀 때는 안 보내도
@@ -350,6 +382,15 @@ export function createTeamsRouter(io) {
     // 지우기 전에 멤버를 확보해야 한다 — 지운 뒤에는 누구에게 알려야 할지 알 수 없다.
     const memberIds = await listTeamMemberIds(team.id);
     const actorName = await nameOf(req.user.sub);
+    // 이 팀 방들의 진행 중인 화상회의도 끝낸다 — 방이 사라지면 모두가 통화 자격을 잃는데, 이미 붙은 미디어는 LiveKit에서
+    // 따로 오가서 그대로 두면 계속 이어진다. 토픽 삭제와 같은 순서로 방을 지우기 전에 끝내고, 남은 토큰으로 다시 붙는
+    // 연결도 한동안 지켜본다(callAccess.js endRoomCallAccess — 던지지 않는다).
+    const teamRoomIds = await db
+      .select({ id: roomsTable.id })
+      .from(roomsTable)
+      .where(eq(roomsTable.teamId, team.id))
+      .then((rows) => rows.map((r) => r.id));
+    for (const roomId of teamRoomIds) await endRoomCallAccess(io, roomId);
     await deleteTeam(team.id);
     for (const userId of memberIds) {
       io.to(`user:${userId}`).emit('team:left', { teamId: team.id, teamName: team.name, deleted: true });
@@ -379,6 +420,48 @@ export function createTeamsRouter(io) {
   });
 
   /**
+   * 팀원 추가 후보 — 팀 설정 "팀원 추가"가 고를 사람들(아직 이 팀에 없고 정지·탈퇴하지 않은 계정, userDirectory.js
+   * teamMemberCandidates). 팀에 넣을 사람은 아직 그 팀에 없으니 회원 목록(GET /users — 팀을 같이 쓰는 사람만)으로는
+   * 못 찾는다(회원가입만 한 사람은 어느 팀에도 없다). 그래서 이 팀에 멤버를 넣을 수 있는 사람(아래 POST와 같은 권한 —
+   * 그 팀의 소유자 또는 계정 등급 관리자)에게만 준다.
+   *
+   * 어디까지 주는지는 부르는 사람에 따라 다르다(userDirectory.js memberCandidateScope) — 계정 등급 관리자·서버 운영자는
+   * 서버 전체('all'), 그 밖의 소유자는 팀을 같이 쓰는 사람만('coTeam'). 기본 설정에서는 정회원 누구나 팀을 만들어 소유자가
+   * 되므로, 소유자에게 서버 전체를 주면 팀 하나 만드는 것만으로 서버의 모든 아이디를 받아 갈 수 있다. 팀 밖의 사람은
+   * ?username=<아이디>로 한 명씩 찾는다 — 아이디가 정확히 같아야 하고(로그인처럼), 서버 전체를 보는 사람이 아니면 횟수도
+   * 제한한다(MEMBER_LOOKUP_RATE). 찾았어도 이미 팀원이거나 정지·탈퇴한 계정이면 없는 것과 똑같이 빈 목록이다.
+   *
+   * 응답: { scope: 'all' | 'coTeam' | 'username', users } — 앱은 'coTeam'일 때 목록 위에 "아이디로 찾기"를 보여 준다.
+   */
+  router.get('/teams/:id/member-candidates', async (req, res) => {
+    const team = await findTeamById(req.params.id);
+    if (!team) return res.status(404).json({ error: '팀을 찾을 수 없습니다.' });
+    const me = await teamAccess(team.id, req.user.sub);
+    if (!canManageTeam(me)) return res.status(403).json({ error: '멤버를 추가할 권한이 없습니다.' });
+    const scope = memberCandidateScope(me.user);
+
+    if (req.query.username !== undefined) {
+      const username = parseCandidateUsername(req.query.username);
+      if (!username) return res.status(400).json({ error: '찾을 아이디를 정확히 입력하세요(4~20자).' });
+      // DB에 묻기 전에 센다 — 있는 아이디인지 맞혀 보는 횟수를 늦추려는 것이라, 결과(찾음·못 찾음)와 상관없이 센다.
+      if (scope !== 'all') {
+        const wait = memberLookupLimiter.hit(req.user.sub);
+        if (wait > 0) return tooMany(res, wait, '아이디로 찾기');
+      }
+      const [found, memberIds] = await Promise.all([findUserByUsername(username), listTeamMemberIds(team.id)]);
+      return res.json({ scope: 'username', users: found ? teamMemberCandidates([found], memberIds) : [] });
+    }
+
+    const [users, memberIds] = await Promise.all([
+      scope === 'all'
+        ? listActiveUsers()
+        : listCoTeamMemberIds(req.user.sub).then((ids) => listActiveUsersByIds(ids)),
+      listTeamMemberIds(team.id),
+    ]);
+    res.json({ scope, users: teamMemberCandidates(users, memberIds) });
+  });
+
+  /**
    * 팀에 멤버 추가 — 그 팀의 소유자 또는 계정 등급이 관리자인 사람만.
    * **등급은 여기서 정하지 않는다** — 계정 등급은 서버 운영자가 관리자 콘솔에서만 바꾼다.
    * 각자가 이미 가진 계정 등급 그대로 팀에 들어온다.
@@ -389,8 +472,23 @@ export function createTeamsRouter(io) {
     const me = await teamAccess(team.id, req.user.sub);
     if (!canManageTeam(me)) return res.status(403).json({ error: '멤버를 추가할 권한이 없습니다.' });
 
-    const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds.filter((id) => typeof id === 'string') : [];
-    if (userIds.length === 0) return res.status(400).json({ error: '추가할 멤버를 선택하세요.' });
+    const requestedIds = Array.isArray(req.body?.userIds)
+      ? [...new Set(req.body.userIds.filter((id) => typeof id === 'string'))]
+      : [];
+    if (requestedIds.length === 0) return res.status(400).json({ error: '추가할 멤버를 선택하세요.' });
+    // 탈퇴했거나 정지된 계정(과 없는 id)은 넣지 않는다 — 팀원 추가 후보(member-candidates)에도 안 나오는 사람들이고,
+    // 넣으면 정지가 풀리기 전부터 팀 멤버로 잡혀 팀 방 자동 초대 등이 따라온다.
+    const userIds = [];
+    const accountRoles = new Map();
+    for (const id of requestedIds) {
+      const u = await findUserById(id);
+      if (!u || u.deletedAt || u.suspendedAt) continue;
+      userIds.push(id);
+      accountRoles.set(id, accountRole(u));
+    }
+    if (userIds.length === 0) {
+      return res.status(400).json({ error: '추가할 수 있는 멤버가 없습니다. 탈퇴했거나 정지된 계정은 팀에 넣을 수 없습니다.' });
+    }
 
     // 이미 멤버였던 사람은 조용히 건너뛴다 — 실제로 새로 들어온 사람에게만 아래 나와의 대화 안내를 보낸다.
     const joinedIds = await addTeamMembers(team.id, userIds, 'member');
@@ -398,11 +496,7 @@ export function createTeamsRouter(io) {
     // 팀에 들어오면 '정회원 자동 초대'가 켜진 공개 토픽(보관 안 된 것)에 자동으로 참여시킨다 —
     // 나머지 공개 토픽은 "참여 가능한 토픽"에서 스스로 찾아 들어간다. 준회원은 제외 —
     // 초대받은 방에만 들어간다(계정 등급 기준이라 사람마다 따로 판단한다).
-    const autoJoinIds = [];
-    for (const id of userIds) {
-      const u = await findUserById(id);
-      if (accountRole(u) !== 'guest') autoJoinIds.push(id);
-    }
+    const autoJoinIds = userIds.filter((id) => accountRoles.get(id) !== 'guest');
     if (autoJoinIds.length > 0) {
       for (const room of await listAutoInviteTopics(team.id)) {
         const before = await listRoomMemberIds(room.id);
@@ -526,30 +620,41 @@ export function createTeamsRouter(io) {
     res.json(list);
   });
 
-  /** 팀에서 멤버 빼기 — 그 팀의 소유자 또는 계정 등급이 관리자인 사람만. 소유자는 뺄 수 없다. */
+  /**
+   * 팀에서 멤버 빼기 — 그 팀의 소유자 또는 계정 등급이 관리자인 사람만. 소유자는 뺄 수 없다.
+   * 팀에서 빠진 사람은 그 팀의 모든 방(토픽·그룹·1:1 대화·나와의 대화·비밀 대화)에서도 빠진다 — 퇴사·부서 이동처럼
+   * 일부러 빼는 경우가 대부분이라 새 메시지·푸시·통화는 물론 옛 대화도 더는 볼 수 없게 한다. 다시 팀에 넣어도 방에는
+   * 예전처럼 초대·참여로 들어가야 한다(나와의 대화는 저절로, 1:1 대화는 다시 대화를 걸면 예전 내용과 함께 돌아온다).
+   */
   router.delete('/teams/:id/members/:userId', async (req, res) => {
     const team = await findTeamById(req.params.id);
     if (!team) return res.status(404).json({ error: '팀을 찾을 수 없습니다.' });
     const me = await teamAccess(team.id, req.user.sub);
     if (!canManageTeam(me)) return res.status(403).json({ error: '멤버를 뺄 권한이 없습니다.' });
 
-    const targetRole = await getTeamRole(team.id, req.params.userId);
+    const targetId = req.params.userId;
+    const targetRole = await getTeamRole(team.id, targetId);
     if (targetRole === null) return res.status(404).json({ error: '이 팀의 멤버가 아닙니다.' });
     if (targetRole === 'owner') return res.status(400).json({ error: '소유자는 팀에서 뺄 수 없습니다.' });
     // 관리자(계정 등급)는 소유자만 뺄 수 있다 — 관리자끼리 서로 빼는 상황을 막는다.
-    const target = await findUserById(req.params.userId);
+    const target = await findUserById(targetId);
     if (accountRole(target) === 'admin' && !me.isOwner) {
       return res.status(403).json({ error: '관리자는 그 팀의 소유자만 뺄 수 있습니다.' });
     }
 
-    await removeTeamMember(team.id, req.params.userId);
-    // 방 멤버십은 옛 대화 때문에 남겨 두지만, 팀에서 빠진 사람은 그 팀 토픽을 관리할 수 없으므로
-    // (access.js topicAccess) 토픽 관리자 역할은 거두고 남은 멤버들의 관리자 표시를 바로 바꾼다.
-    for (const roomId of await clearTopicAdminRoles(req.params.userId, team.id)) {
-      const room = await findRoomById(roomId);
-      if (room) io.to(room.id).emit('room:created', await toRoomDto(room));
-    }
-    io.to(`user:${req.params.userId}`).emit('team:left', { teamId: team.id, teamName: team.name });
+    const targetName = await nameOf(targetId);
+    // 팀 멤버십과 그 팀 모든 방의 멤버십을 한 트랜잭션에서 지운다(방 종류별 정리는 db/queries/rooms.js
+    // removeMemberFromTeamRooms). 토픽 관리자 역할도 방 멤버십과 함께 사라진다.
+    const roomRemovals = await removeTeamMember(team.id, targetId, { departedName: targetName });
+    // 팀 목록에서 먼저 빼게 한다 — 앱은 team:left를 받으면 그 팀 방을 한꺼번에 정리하므로, 뒤따르는 방별
+    // room:removed는 방마다 "내보내졌습니다" 안내를 띄우지 않고 지나간다.
+    io.to(`user:${targetId}`).emit('team:left', { teamId: team.id, teamName: team.name });
+    await notifyRemovedFromTeamRooms(io, {
+      userId: targetId,
+      userName: targetName,
+      actorId: req.user.sub,
+      removals: roomRemovals,
+    });
     recordAudit({
       actorId: req.user.sub,
       actorName: await nameOf(req.user.sub),
@@ -557,14 +662,43 @@ export function createTeamsRouter(io) {
       teamId: team.id,
       teamName: team.name,
       targetType: 'user',
-      targetId: req.params.userId,
-      targetLabel: await nameOf(req.params.userId),
-      detail: `팀에서 제외(${roleLabel(accountRole(target))})`,
+      targetId,
+      targetLabel: targetName,
+      detail: `팀에서 제외(${roleLabel(accountRole(target))}, 대화방 ${roomRemovals.length}개에서도 나감)`,
     });
     // 팀 관리자들(뺀 본인 제외)에게 나와의 대화로 제외 알림.
-    await announceTeamRemoval(io, { teamId: team.id, userId: req.params.userId, actorId: req.user.sub });
+    await announceTeamRemoval(io, { teamId: team.id, userId: targetId, actorId: req.user.sub });
     res.json(await memberListResponse(team.id));
   });
 
   return router;
+}
+
+/**
+ * 팀 멤버가 아닌데 그 팀 방에 남아 있는 멤버십을 지금 규칙(위 DELETE /teams/:id/members/:userId — 팀에서 빠지면 그 팀
+ * 모든 방에서도 빠진다)대로 정리한다 — 서버가 뜰 때 한 번(index.js). 대부분은 팀에서 빠져도 방 멤버십을 남겨 두던 예전
+ * 규칙 때 팀에서 빠진 사람이다 — 팀 목록에서는 사라졌어도 소켓이 붙을 때마다 그 방들에 다시 들어가(socket.js) 새 메시지·
+ * 푸시·글쓰기·통화가 그대로 됐다. 팀에서 뺄 때와 같은 경로(db/queries/rooms.js removeMemberFromTeamRooms → rooms.js
+ * notifyRemovedFromTeamRooms)로 방 종류마다 같은 뒷정리를 하고 남은 멤버들에게 알린다. 비밀 대화의 받은 쪽은 다른 팀에서
+ * 왔을 수 있어 건드리지 않는다(db/queries/rooms.js isLeftoverTeamRoomMembership). 남은 게 없으면 조회 한 번으로 끝나서
+ * 매번 돌려도 되고, 팀에서 뺄 때와 엇갈려(바로 그 순간의 참여·초대 등) 남은 멤버십도 다음에 켤 때 함께 정리된다.
+ * 한 사람에서 실패해도 나머지는 계속한다.
+ */
+export async function sweepLeftoverTeamRoomMembers(io) {
+  let roomCount = 0;
+  const people = new Set();
+  for (const { teamId, userId } of await listLeftoverTeamRoomMembers()) {
+    try {
+      const userName = await nameOf(userId);
+      const removals = await removeLeftoverTeamRoomMembers(teamId, userId, { departedName: userName });
+      roomCount += removals.length;
+      if (removals.length > 0) people.add(userId);
+      await notifyRemovedFromTeamRooms(io, { userId, userName, actorId: null, removals, leftover: true });
+    } catch (err) {
+      console.error('[teams] 팀 밖 대화방 멤버십 정리 실패:', teamId, userId, err?.message ?? err);
+    }
+  }
+  if (roomCount > 0) {
+    console.log(`[teams] 팀 멤버가 아닌데 남아 있던 대화방 멤버십 ${roomCount}개(${people.size}명)를 정리했습니다.`);
+  }
 }

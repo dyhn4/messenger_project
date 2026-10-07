@@ -14,3 +14,9 @@ test('인증서를 평문으로 주는 /pair, 코드 발급, 그 밖의 경로�
     assert.equal(allowedFromOutside(p), false, p);
   }
 });
+
+test('설치 파일 다운로드는 실제 플랫폼(windows·android)만 — 객체 기본 속성 이름 같은 다른 이름은 밖에서 막힌다', () => {
+  for (const p of ['/invite/a/download/constructor', '/team-invite/a/download/valueof', '/invite/a/download/ios', '/invite/a/download/']) {
+    assert.equal(allowedFromOutside(p), false, p);
+  }
+});

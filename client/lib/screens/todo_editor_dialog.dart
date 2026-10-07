@@ -17,6 +17,7 @@ import '../services/room_chat_controller.dart'
     show UploadedAttachment, uploadPlainFile;
 import '../services/session.dart';
 import '../services/todo_api.dart';
+import '../services/todo_upload.dart' show localFolderOrNull;
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart' show formatFileSize;
 import '../widgets/compact_menu.dart';
@@ -513,7 +514,8 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   /// `파일 첨부(또는 폴더 경로 지정)` — PC는 파일을 고르면 붙이고, 파일을 고르지 않고 [열기]를 누르면 그때 열린 폴더를 받아 갈
   /// 경로로 지정한다(folder_dialog.dart). 모바일은 예전처럼 파일만 고른다.
   Future<void> _pickDownload() async {
-    if (!AppPlatform.isWindows) return _pickFiles();
+    // 폴더 경로는 할 일을 관리하는 사람(만든 사람)만 바꿀 수 있어서(서버도 담당자의 경로 변경을 거절한다) 담당자는 파일만 고른다.
+    if (!AppPlatform.isWindows || !_canManageAssignees) return _pickFiles();
     final picked = await pickFilesOrFolder(
       title: '파일을 고르거나, 폴더를 연 채로 [열기]를 누르면 그 폴더 경로가 지정됩니다',
     );
@@ -530,7 +532,9 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
   Future<void> _pickUploadFolder() async {
     final folder = await FilePicker.getDirectoryPath(
       dialogTitle: '담당자가 파일을 올릴 폴더 선택',
-      initialDirectory: _uploadPath,
+      // Windows 폴더 창은 시작 위치를 받자마자 그 서버에 접속한다(확인 없이 SMB 로그인 정보가 간다) — 저장된 경로가 공유
+      // 폴더(UNC)면 시작 위치로 넘기지 않는다(localFolderOrNull).
+      initialDirectory: localFolderOrNull(_uploadPath),
     );
     if (folder != null && mounted) setUploadPath(folder);
   }
@@ -1315,7 +1319,7 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
           key: const ValueKey('todo-attach'),
           onPressed: _submitting || full ? null : _pickDownload,
           icon: const Icon(Icons.add, size: 18),
-          label: const Text('파일 첨부(또는 폴더 경로 지정)'),
+          label: Text(_canManageAssignees ? '파일 첨부(또는 폴더 경로 지정)' : '파일 첨부'),
           style: buttonStyle,
         ),
         Padding(
@@ -1363,10 +1367,12 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               path: downloadPath,
               onClear: _submitting ? null : () => setDownloadPath(null),
               clearKey: const ValueKey('todo-download-path-clear'),
+              editable: _canManageAssignees,
             ),
           ),
-        // 결과물을 올릴 폴더 — 윈도우 폴더 경로라 PC에서만 고른다(모바일은 이미 지정된 경로만 보이고 지울 수 있다).
-        if (AppPlatform.isWindows) ...[
+        // 결과물을 올릴 폴더 — 윈도우 폴더 경로라 PC에서만 고른다(모바일은 이미 지정된 경로만 보이고 지울 수 있다). 경로는
+        // 할 일을 관리하는 사람만 바꾸므로 담당자에게는 단추와 지우기를 보이지 않는다(경로는 보기만).
+        if (AppPlatform.isWindows && _canManageAssignees) ...[
           const SizedBox(height: 10),
           FilledButton.tonalIcon(
             key: const ValueKey('todo-upload-path-button'),
@@ -1384,9 +1390,10 @@ class TodoEditorState extends State<TodoEditor> implements TodoDraft {
               path: uploadPath,
               onClear: _submitting ? null : () => setUploadPath(null),
               clearKey: const ValueKey('todo-upload-path-clear'),
+              editable: _canManageAssignees,
             ),
           ),
-        if (AppPlatform.isWindows && uploadPath == null)
+        if (AppPlatform.isWindows && uploadPath == null && _canManageAssignees)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
@@ -1750,11 +1757,15 @@ class _FolderPathTile extends StatelessWidget {
   final String path;
   final VoidCallback? onClear;
   final Key clearKey;
+
+  /// false면 지우기(✕)를 아예 보이지 않는다 — 경로를 바꿀 수 없는 담당자(보내는 중에 잠깐 끄는 [onClear] null과 구분).
+  final bool editable;
   const _FolderPathTile({
     super.key,
     required this.path,
     required this.onClear,
     required this.clearKey,
+    this.editable = true,
   });
 
   @override
@@ -1785,12 +1796,15 @@ class _FolderPathTile extends StatelessWidget {
               ),
             ),
           ),
-          IconButton(
-            key: clearKey,
-            tooltip: '경로 지우기',
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: onClear,
-          ),
+          if (editable)
+            IconButton(
+              key: clearKey,
+              tooltip: '경로 지우기',
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: onClear,
+            )
+          else
+            const SizedBox(width: 8),
         ],
       ),
     );

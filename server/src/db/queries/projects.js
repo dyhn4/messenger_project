@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
+import { NOTE_PREVIEW_SOURCE_MAX, notePreview } from '../../projectNotifications.js';
 import {
   projectFolderItems,
   projectFolders,
@@ -45,7 +46,16 @@ export async function updateProject(id, fields) {
   return row ?? null;
 }
 
+/**
+ * 프로젝트를 지운다(업무·노트 등은 FK cascade로 같이 지워진다). 다른 프로젝트에 있는 하위 업무가 이 프로젝트의 업무를 부모로
+ * 가리키면(업무 이동 뒷정리가 생기기 전에 옮긴 업무의 흔적 — 0096이 한 번 정리한다) 부모와 함께 cascade로 지워지므로, 먼저 그
+ * 프로젝트의 독립 업무로 뗀다.
+ */
 export async function deleteProject(id) {
+  await db.execute(sql`
+    update ${tasks} set parent_task_id = null, updated_at = now()
+    where project_id <> ${id}
+      and parent_task_id in (select doomed.id from ${tasks} doomed where doomed.project_id = ${id})`);
   await db.delete(projects).where(eq(projects.id, id));
 }
 
@@ -80,7 +90,8 @@ export function listBrowsablePublicProjects(teamId, userId) {
   return db
     .select({
       project: projects,
-      memberCount: sql`(select count(*)::int from ${projectMembers} pm where pm.project_id = ${projects.id})`,
+      // 구성원 수도 지금 유효한 행만 센다(팀을 나갔거나 정지·탈퇴·준회원 강등된 사람의 남은 행은 빼고).
+      memberCount: sql`(select count(*)::int from ${projectMembers} pm where pm.project_id = ${projects.id} and ${activeMembership(sql.raw('pm.project_id'), sql.raw('pm.user_id'))})`,
     })
     .from(projects)
     .where(
@@ -122,19 +133,34 @@ function eligibleUser(alias) {
 }
 
 /**
- * 지금도 유효한 구성원 행인지 — 그 프로젝트의 팀에 아직 있어야 하고, 자동 참여 행(auto)은 정회원
- * 이상일 때만 유효하다. 팀에서 빠졌거나 자격을 잃은 사람의 남은 행은 없는 것으로 봐서 접근·담당자
- * 선택·알림에서 모두 빠지게 한다(행 자체는 지우지 않으므로 다시 팀에 들어오면 초대받은 자리는 살아난다).
+ * 프로젝트 구성원으로 인정되는 계정 = 탈퇴·정지되지 않았고 정회원 이상이거나 서버 운영자([alias]는 users 별칭) — 라우터
+ * 입구(projects.js)가 준회원은 막고 서버 운영자는 들여보내는 것과 같은 규칙이다. JS 쪽 같은 규칙은 projectNotifications.js의
+ * isEligibleProjectAccount(test/projectMembership.test.js가 둘을 함께 본다).
  */
-function activeMembership(projectIdCol, userIdCol, autoCol) {
+export function projectAccountEligibleSql(alias) {
+  return (
+    `${alias}.deleted_at is null and ${alias}.suspended_at is null and ` +
+    `(${alias}.role in ('member', 'admin') or ${alias}.is_server_admin)`
+  );
+}
+
+/**
+ * 지금도 유효한 구성원 행인지 — 그 프로젝트의 팀에 아직 있어야 하고, 계정이 프로젝트 구성원 자격(위)을 지니고 있어야 한다.
+ * 초대·생성으로 들어온 행도 자동 참여 행과 똑같이 본다: 예전에는 자동 참여 행에만 자격을 걸어서, 정지·탈퇴·준회원 강등(모두
+ * 프로젝트 행을 건드리지 않는다) 뒤에도 초대받은 사람은 구성원으로 남아 업무 알림·푸시를 계속 받고 담당자·참조자로도
+ * 골라졌다. 팀에서 빠졌거나 자격을 잃은 사람의 남은 행은 없는 것으로 봐서 접근·담당자 선택·알림·소켓 갱신에서 모두 빠지게
+ * 한다(행 자체는 지우지 않으므로 다시 팀에 들어오거나 정지가 풀리면 초대받은 자리는 살아난다).
+ */
+function activeMembership(projectIdCol, userIdCol) {
   return sql`exists (
     select 1 from ${projects} amp
     join ${teamMembers} amt on amt.team_id = amp.team_id and amt.user_id = ${userIdCol}
     join ${users} amu on amu.id = amt.user_id
-    where amp.id = ${projectIdCol} and (not ${autoCol} or ${eligibleUser('amu')}))`;
+    where amp.id = ${projectIdCol} and ${sql.raw(projectAccountEligibleSql('amu'))})`;
 }
 
-const ACTIVE_PROJECT_MEMBER = activeMembership(projectMembers.projectId, projectMembers.userId, projectMembers.auto);
+/** project_members 행이 지금도 유효한지(activeMembership) — 구성원 확인·목록·알림 대상 거르기가 모두 이 조건을 쓴다(테스트도 이 모양을 본다). */
+export const ACTIVE_PROJECT_MEMBER = activeMembership(projectMembers.projectId, projectMembers.userId);
 
 export function isProjectMember(projectId, userId) {
   return db
@@ -146,7 +172,8 @@ export function isProjectMember(projectId, userId) {
 
 /**
  * [userIds] 중 지금 이 프로젝트의 (유효한) 구성원만 — 알림 대상 거르기용, 한 번의 쿼리로.
- * 비공개 전환·팀 탈퇴로 빠진 사람이 담당·참조로 남아 있어도 업무 내용이 가지 않게 한다.
+ * 비공개 전환·팀 탈퇴로 빠졌거나 정지·탈퇴·준회원 강등으로 자격을 잃은 사람이 담당·참조로 남아 있어도
+ * 업무 내용(알림함·소켓·푸시)이 가지 않게 한다.
  */
 export async function filterActiveProjectMembers(projectId, userIds) {
   if (userIds.length === 0) return [];
@@ -181,11 +208,13 @@ export async function setProjectMemberRole(projectId, userId, role) {
     .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
 }
 
+/** 지금 일할 수 있는 담당자 수 — 정지·탈퇴·준회원 강등·팀 탈퇴로 남은 담당자 행(ACTIVE_PROJECT_MEMBER가 아님)은 세지 않는다.
+ * 그런 행까지 세면 마지막으로 남은 진짜 담당자가 스스로 내려가도 "담당자가 남아 있다"고 보고 허락해 버린다. */
 export async function countProjectOwners(projectId) {
   const rows = await db
     .select({ userId: projectMembers.userId })
     .from(projectMembers)
-    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.role, 'owner')));
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.role, 'owner'), ACTIVE_PROJECT_MEMBER));
   return rows.length;
 }
 
@@ -491,8 +520,16 @@ export async function detachMovedTask(taskId, newProjectId) {
   await db.update(taskComments).set({ projectId: newProjectId }).where(eq(taskComments.taskId, taskId));
 }
 
-/** 지운 행이 있었는지 돌려준다 — 같은 업무를 동시에 지우는 요청 중 실제로 지운 쪽만 뒤처리를 한다. */
+/**
+ * 지운 행이 있었는지 돌려준다 — 같은 업무를 동시에 지우는 요청 중 실제로 지운 쪽만 뒤처리를 한다. 같은 프로젝트의 하위 업무는
+ * 부모와 함께 지워지지만(FK cascade), 다른 프로젝트에 남은 하위 업무(업무 이동 뒷정리 전의 흔적 — 0096)는 지우기 전에 그 프로젝트의
+ * 독립 업무로 뗀다 — 안 그러면 옮겨 간 쪽 사람이 업무 하나를 지워 옛 프로젝트의 하위 업무까지 지울 수 있었다.
+ */
 export async function deleteTask(id) {
+  await db.execute(sql`
+    update ${tasks} set parent_task_id = null, updated_at = now()
+    where parent_task_id = ${id}
+      and project_id <> (select doomed.project_id from ${tasks} doomed where doomed.id = ${id})`);
   const rows = await db.delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id });
   return rows.length > 0;
 }
@@ -567,13 +604,21 @@ export function listTasksInProjects(projectIds) {
     );
 }
 
+/**
+ * 하위 업무가 부모와 같은 프로젝트에 있는지(바깥 질의의 tasks 행 기준) — 하위 업무는 늘 부모와 같은 프로젝트에 만들고 고친다
+ * (POST·PATCH가 확인한다). 업무 이동 뒷정리(detachMovedTask)가 생기기 전에 옮긴 업무는 하위 업무가 원래 프로젝트에 남은 채 옮겨 간
+ * 부모를 가리켰다(0096이 한 번 정리한다). 그런 행이 남아 있거나 다시 생겨도 옮겨 간 쪽 사람이 부모를 통해 다른 프로젝트의 하위
+ * 업무를 보지 않도록, 하위 업무를 읽는 곳(listSubtasks·countSubtasks)은 모두 이 조건을 붙인다(테스트도 이 모양을 본다).
+ */
+export const SAME_PROJECT_AS_PARENT = sql`exists (select 1 from ${tasks} parent_task where parent_task.id = ${tasks.parentTaskId} and parent_task.project_id = ${tasks.projectId})`;
+
 /** 이 업무들 각각의 하위 업무 개수 {taskId: n} — 목록에서 "하위 업무 2" 같은 표시에 쓴다. */
 export async function countSubtasks(taskIds) {
   if (taskIds.length === 0) return {};
   const rows = await db
     .select({ parentTaskId: tasks.parentTaskId, n: sql`count(*)::int` })
     .from(tasks)
-    .where(and(inArray(tasks.parentTaskId, taskIds), isNull(tasks.archivedAt)))
+    .where(and(inArray(tasks.parentTaskId, taskIds), isNull(tasks.archivedAt), SAME_PROJECT_AS_PARENT))
     .groupBy(tasks.parentTaskId);
   const map = {};
   for (const r of rows) map[r.parentTaskId] = r.n ?? 0;
@@ -659,13 +704,19 @@ export async function countTaskComments(taskIds) {
   return map;
 }
 
-/** 부모의 하위 업무들 — 상세 화면에서 보여준다(보관한 것은 뺀다). */
+/** 부모의 하위 업무들 — 상세 화면에서 보여준다(보관한 것은 뺀다). 부모와 같은 프로젝트의 것만(SAME_PROJECT_AS_PARENT). */
 /** [includeArchived]면 보관한 하위 업무도(업무 상세가 흐리게 보여주고, 삭제 안내 개수에도 넣는다). */
 export function listSubtasks(parentTaskId, { includeArchived = false } = {}) {
   return db
     .select()
     .from(tasks)
-    .where(and(eq(tasks.parentTaskId, parentTaskId), includeArchived ? undefined : isNull(tasks.archivedAt)))
+    .where(
+      and(
+        eq(tasks.parentTaskId, parentTaskId),
+        SAME_PROJECT_AS_PARENT,
+        includeArchived ? undefined : isNull(tasks.archivedAt),
+      ),
+    )
     .orderBy(asc(tasks.createdAt));
 }
 
@@ -901,12 +952,17 @@ export function listTaskActivities(taskId, limit = 200) {
     .limit(limit);
 }
 
-/** 대시보드 "최근 댓글" — 내가 참여 중인 프로젝트들의 업무 댓글을 최신순으로 몇 건만. */
+/**
+ * 대시보드 "최근 댓글" — 내가 참여 중인 프로젝트들의 업무 댓글을 최신순으로 몇 건만. 프로젝트는 업무의 **지금** 프로젝트로 본다 —
+ * 댓글 행의 project_id는 업무 이동 뒷정리가 생기기 전에 옮긴 업무에서 옛 프로젝트로 남았을 수 있어서(0096이 한 번 정리한다), 그
+ * 값으로 모으면 옛 프로젝트 사람들의 홈에 옮겨 간 업무의 댓글과 지금 제목이 계속 보였다.
+ */
 export function listRecentTaskComments(projectIds, limit = 10) {
   if (projectIds.length === 0) return Promise.resolve([]);
   return db
     .select({
       comment: taskComments,
+      taskProjectId: tasks.projectId,
       taskTitle: tasks.title,
       taskSeq: tasks.seq,
       projectName: projects.name,
@@ -914,13 +970,14 @@ export function listRecentTaskComments(projectIds, limit = 10) {
     })
     .from(taskComments)
     .innerJoin(tasks, eq(taskComments.taskId, tasks.id))
-    .innerJoin(projects, eq(taskComments.projectId, projects.id))
-    .where(inArray(taskComments.projectId, projectIds))
+    .innerJoin(projects, eq(tasks.projectId, projects.id))
+    .where(inArray(tasks.projectId, projectIds))
     .orderBy(desc(taskComments.createdAt))
     .limit(limit)
     .then((rows) =>
       rows.map((r) => ({
         ...r.comment,
+        projectId: r.taskProjectId,
         taskTitle: r.taskTitle,
         taskSeq: r.taskSeq,
         projectName: r.projectName,
@@ -1050,7 +1107,11 @@ export async function deleteTaskField(id) {
 
 // ── 프로젝트 노트 ───────────────────────────────────────────────────────
 
-/** 노트 목록(본문 제외) — 프로젝트 이름/색을 같이 붙여서 팀 전체 노트 목록에도 쓴다. */
+/**
+ * 노트 목록(본문 제외) — 프로젝트 이름/색을 같이 붙여서 팀 전체 노트 목록에도 쓴다. 미리보기(preview)는 본문 앞부분에서 링크·그림
+ * 주소를 걷어 낸 뒤에 자른 것이다(projectNotifications.js notePreview) — 앞부분을 그대로 잘라 주면 첫머리 그림의 저장 경로
+ * (/uploads/<이름>)가 서명 없이 목록에 나갔다.
+ */
 export function listNotesInProjects(projectIds) {
   if (projectIds.length === 0) return Promise.resolve([]);
   return db
@@ -1059,7 +1120,7 @@ export function listNotesInProjects(projectIds) {
       projectId: projectNotes.projectId,
       title: projectNotes.title,
       seq: projectNotes.seq,
-      preview: sql`left(${projectNotes.body}, 140)`,
+      previewSource: sql`left(${projectNotes.body}, ${sql.raw(String(NOTE_PREVIEW_SOURCE_MAX))})`,
       createdBy: projectNotes.createdBy,
       updatedBy: projectNotes.updatedBy,
       createdAt: projectNotes.createdAt,
@@ -1071,7 +1132,8 @@ export function listNotesInProjects(projectIds) {
     .from(projectNotes)
     .innerJoin(projects, eq(projectNotes.projectId, projects.id))
     .where(inArray(projectNotes.projectId, projectIds))
-    .orderBy(desc(projectNotes.updatedAt));
+    .orderBy(desc(projectNotes.updatedAt))
+    .then((rows) => rows.map(({ previewSource, ...note }) => ({ ...note, preview: notePreview(previewSource) })));
 }
 
 export function findNoteById(id) {

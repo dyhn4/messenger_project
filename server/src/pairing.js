@@ -2,15 +2,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
-import { findInviteLinkByToken, isInviteLinkValid, markInviteLinkUsed } from './db/queries/inviteLinks.js';
-import {
-  findTeamInviteLinkByToken,
-  isTeamInviteLinkValid,
-} from './db/queries/teamInviteLinks.js';
-import { clientIp, isLanAddress, limits, minutesText } from './authGuard.js';
-import { allowedFromOutside } from './pairingPaths.js';
+import { findInviteLinkByToken, inviteLinkHasSeat } from './db/queries/inviteLinks.js';
+import { findTeamInviteLinkByToken } from './db/queries/teamInviteLinks.js';
+import { clientIp, clientIpKey, isLanAddress, limits, minutesText } from './authGuard.js';
+import { allowedFromOutside, installerFor, pairingErrorHandler } from './pairingPaths.js';
 import { EXTERNAL_ADDRESS } from './config.js';
+import { inviteLinkConnectable } from './invites.js';
 import { roleLabel } from './permissions.js';
+import { teamInviteLinkConnectable } from './teamInvites.js';
 import { guideStatic, releasesDir } from './version.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
@@ -50,6 +49,38 @@ function isLoopback(req) {
 function formatRemaining(ms) {
   const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
   return days <= 1 ? '하루' : `${days}일`;
+}
+
+/**
+ * 아직 열려 있는 초대 링크(설치 초대·팀 초대 공용)의 남은 기간·가입 인원 — "남은 기간: 7일 · 남은 가입 인원: 3명".
+ * 인원 제한이 없는(그 칸이 생기기 전에 만든) 링크는 기간만 적는다.
+ */
+export function inviteRemainingText(link) {
+  const period = `남은 기간: ${formatRemaining(new Date(link.expiresAt).getTime() - Date.now())}`;
+  if (link.maxUses == null) return period;
+  return `${period} · 남은 가입 인원: ${Math.max(0, link.maxUses - link.usedCount)}명`;
+}
+
+/**
+ * 연결할 수 없는 초대 링크의 이유 — "이 링크는 ___. 초대한 사람에게 새 링크를 요청하세요."의 빈칸. 인원 마감은 여기 오지
+ * 않는다(다 찬 링크도 연결·설치는 된다 — 아래 seatFullNotice). 취소·만료가 아닌데도 못 쓰면 만든 사람이 더는 그 링크를
+ * 줄 수 없게 된 것이다(등급 변경·팀 제외·정지·탈퇴 등 — invites.js의 inviteLinkConnectable, teamInvites.js의
+ * teamInviteLinkConnectable).
+ */
+export function inviteUnusableReason(link) {
+  if (link.revokedAt) return '취소되었습니다';
+  if (new Date(link.expiresAt).getTime() <= Date.now()) return '만료되었습니다';
+  return '더 이상 쓸 수 없습니다';
+}
+
+/**
+ * 가입 인원이 다 찼지만 아직 열려 있는 링크의 안내 페이지에 붙이는 문단 — 이 링크로 더 가입할 수는 없어도, 이미 가입한
+ * 사람이 집 PC 등 다른 기기에 설치·연결하는 데는 남은 기간 동안 계속 쓸 수 있다는 걸 알린다. 사내 와이파이에서는 링크 없이도
+ * 가입되므로(auth.js) 그 경우까지 틀리지 않게 [what](무엇이 막혔는지)과 [next](새로 가입할 사람이 할 일)를 페이지마다 받는다.
+ */
+function seatFullNotice({ what, next }) {
+  return `<p class="seat-full"><b>가입 인원 마감</b> — 정해진 인원이 모두 가입했습니다. ${what}
+  이미 가입한 분은 이 링크로 다른 기기에 설치하고 로그인할 수 있습니다. ${next}</p>`;
 }
 
 function escapeHtml(s) {
@@ -152,7 +183,8 @@ const SERVER_CONNECT_DIAGRAM = `
 
 /**
  * 설치 완료 후 회원가입까지 3단계 안내 — 각 단계 바로 아래에 그 단계의 화면 그림을 붙인다.
- * [subText]만 설치 초대/팀 초대 페이지가 다르게 넘긴다(팀 초대는 자동 합류 안내가 붙는다).
+ * [subText]만 설치 초대/팀 초대 페이지가 다르게 넘긴다(팀 초대는 자동 합류 안내가 붙는다). 가입 인원이 다 찬
+ * 링크([join] false — 이미 가입한 사람이 다른 기기를 연결할 때)는 마지막 단계가 회원가입 대신 로그인이다.
  *
  * "TangoTalk 열기" 버튼을 ①과 ② 사이에 둔 이유: 페이지가 다시 보일 때(visibilitychange)
  * 자동으로 딥링크를 재시도하는 스크립트가 있긴 하지만, 브라우저가 사용자의 직접적인 클릭이
@@ -160,14 +192,14 @@ const SERVER_CONNECT_DIAGRAM = `
  * 조용히 무시해버리는 경우가 있다(실사용자 확인됨) — 그래서 자동 재시도는 "되면 좋은" 보조
  * 수단으로 남겨두고, 확실히 동작하는 버튼(진짜 클릭 = user gesture)을 주된 경로로 둔다.
  */
-function renderPostInstallSteps(subText) {
+function renderPostInstallSteps(subText, { join = true } = {}) {
   return `
 <div class="notice">
   <p class="notice-step">① 설치가 끝나면 이 페이지를 새로고침 하세요.</p>
   <button type="button" class="btn" onclick="tryDeepLink()">TangoTalk 열기</button>
   <p class="notice-step">② "TangoTalk 열기"가 나오면 "열기"를 클릭합니다.</p>
   ${BROWSER_OPEN_APP_DIAGRAM}
-  <p class="notice-step">③ "서버 주소 변경" 창에서 "연결"을 클릭하고 회원가입하세요.</p>
+  <p class="notice-step">③ "서버 주소 변경" 창에서 "연결"을 클릭하고 ${join ? '회원가입' : '로그인'}하세요.</p>
   ${SERVER_CONNECT_DIAGRAM}
   <p class="notice-sub">${subText}</p>
 </div>`;
@@ -209,6 +241,9 @@ const INVITE_PAGE_STYLE = `
   .warn { color: #e03131; font-weight: bold; }
   .net-caution { background: #fff4e6; border: 1px solid #f08c00; border-radius: 10px; padding: 10px 14px;
                  color: #7c4a03; font-size: 14px; margin: 12px 0; }
+  /* 인원이 다 찬 링크(seatFullNotice) — 설치 버튼은 그대로 두되, 새로 가입하러 온 사람이 놓치지 않게 눈에 띄게. */
+  .seat-full { background: #fff5f5; border: 1px solid #ffa8a8; border-radius: 10px; padding: 10px 14px;
+               color: #c92a2a; font-size: 14px; margin: 12px 0; }
   details { margin: 12px 0; color: #555; }
   summary { cursor: pointer; }
   /* 가이드를 상시 노출로 바꾸면서(아래 .page-layout 참고) 페이지 폭이 좁으면 오른쪽에
@@ -239,13 +274,13 @@ const INVITE_PAGE_STYLE = `
   .notice-sub { display: block; margin-top: 14px; color: #2b8a3e; font-size: 13px; font-weight: normal; }
 `;
 
-/** <h1>+body(유효성에 따라 달라짐)를 받아 최종 HTML 문서로 조립한다. 유효한 링크(=다운로드
- * 버튼이 있는 경우)일 때만 오른쪽에 다운로드 경고 가이드를 상시 노출하는 2단 레이아웃을
- * 쓰고, 무효한 링크는 다운로드 자체를 안 시키므로 가이드 없이 좁은 1단으로 그린다.
+/** <h1>+body(유효성에 따라 달라짐)를 받아 최종 HTML 문서로 조립한다. 연결할 수 있는 링크(=다운로드
+ * 버튼이 있는 경우 — 가입 인원이 다 찬 링크 포함)일 때만 오른쪽에 다운로드 경고 가이드를 상시 노출하는
+ * 2단 레이아웃을 쓰고, 그렇지 않은 링크는 다운로드 자체를 안 시키므로 가이드 없이 좁은 1단으로 그린다.
  * renderInvitePage/renderTeamInvitePage가 공유한다. */
-function renderInvitePageShell({ title, body, valid, deepLink }) {
+function renderInvitePageShell({ title, body, connectable, deepLink }) {
   const main = `<h1>${title}</h1>${body}`;
-  const page = valid
+  const page = connectable
     ? `<div class="page-wrap with-guide"><div class="page-layout"><div class="page-main">${main}</div>${DOWNLOAD_WARNING_GUIDE}</div></div>`
     : `<div class="page-wrap">${main}</div>`;
   // 페이지를 열 때 한 번 시도하고 끝나는 게 아니라, 설치 프로그램(별도 창) 때문에 이 탭이
@@ -254,7 +289,7 @@ function renderInvitePageShell({ title, body, valid, deepLink }) {
   // 앱이 열린다. focus가 아니라 visibilitychange를 쓰는 이유: 같은 브라우저 창 안에서 다른
   // 탭을 보고 있을 때는 이 탭이 여전히 hidden이라 재시도하지 않는 게 맞고(사용자가 안 보고
   // 있는데 "앱을 열까요?" 확인창이 뜨면 혼란스럽다), window focus만으로는 이 구분이 안 된다.
-  const deepLinkScript = valid
+  const deepLinkScript = connectable
     ? `<script>
 function tryDeepLink() { try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {} }
 tryDeepLink();
@@ -281,89 +316,95 @@ const PUBLIC_WIFI_CAUTION = `<p class="net-caution"><b>⚠ 공용 와이파이(�
   이 페이지와 설치 파일은 암호화되지 않은 연결로 받습니다. LTE/5G나 집 와이파이로 바꾼 뒤 다시 여세요.</p>`;
 
 /** 초대 링크를 열었을 때 보여주는 안내 페이지 — 자체 서명 인증서 경고 없이(평문 HTTP) 누구나
- * 열어볼 수 있어야 해서 인증/세션 없이 정적으로 그린다. */
-function renderInvitePage({ serverAddress, token, link, outside }) {
-  const valid = isInviteLinkValid(link);
+ * 열어볼 수 있어야 해서 인증/세션 없이 정적으로 그린다. [connectable]은 이 링크로 지금 연결·설치할 수
+ * 있는지(invites.js의 inviteLinkConnectable — 만든 사람의 권한까지 DB로 봐야 해서 라우트가 미리 구해 넘긴다).
+ * 가입 인원이 다 찬 링크도 연결·설치는 되므로 설치 안내는 그대로 두고, 가입만 마감됐다고 알린다. */
+export function renderInvitePage({ serverAddress, token, link, connectable, outside }) {
   const title = 'TangoTalk 초대';
   // tangotalk:// 커스텀 스킴 — 앱이 이미 설치돼 있으면 이 링크로 바로 열리면서 서버 주소/코드가
   // 자동입력된다(설치 여부를 서버가 알 방법은 없으니, 그냥 시도해보고 반응이 없으면 — 즉 이
   // 페이지가 그대로 보이고 있으면 — 아래 설치 안내를 그대로 따라가면 되는 구조).
   const deepLink = `tangotalk://pair/?address=${encodeURIComponent(serverAddress)}&code=${encodeURIComponent(token)}`;
+  const join = !!link && inviteLinkHasSeat(link);
   const body = !link
     ? `<p class="warn">유효하지 않은 초대 링크입니다.</p>`
-    : !valid
-      ? `<p class="warn">이 링크는 ${
-          link.revokedAt
-            ? '취소되었습니다'
-            : link.maxUses != null && link.usedCount >= link.maxUses
-              ? '정해진 인원이 모두 가입해 더 쓸 수 없습니다'
-              : '만료되었습니다'
-        }. 초대한 사람에게 새 링크를 요청하세요.</p>`
+    : !connectable
+      ? `<p class="warn">이 링크는 ${inviteUnusableReason(link)}. 초대한 사람에게 새 링크를 요청하세요.</p>`
       : `
-        <p>${escapeHtml(link.createdByName)}님이 TangoTalk에 초대했습니다. 남은 기간: ${formatRemaining(new Date(link.expiresAt).getTime() - Date.now())}</p>
+        <p>${escapeHtml(link.createdByName)}님이 TangoTalk에 초대했습니다. ${inviteRemainingText(link)}</p>
+        ${join ? '' : seatFullNotice({
+          what: '사내 와이파이 밖에서는 이 링크로 더 가입할 수 없습니다.',
+          next: '새로 가입하실 분은 초대한 사람에게 새 링크를 요청하거나 사내 와이파이에서 가입하세요.',
+        })}
         ${outside ? PUBLIC_WIFI_CAUTION : ''}
         <p class="hint">TangoTalk이 이미 설치되어 있다면 잠시 후 앱이 자동으로 열립니다. 반응이 없다면 아직 설치되지 않은 것이니, 아래에서 설치 파일을 받으세요.</p>
         <div class="downloads">
           <a class="btn" href="/invite/${token}/download/windows">Windows용 다운로드</a>
           <a class="btn" href="/invite/${token}/download/android">Android용 다운로드</a>
         </div>
-        ${renderPostInstallSteps('서버 주소와 코드가 자동으로 입력됩니다.')}
+        ${renderPostInstallSteps('서버 주소와 코드가 자동으로 입력됩니다.', { join })}
         <details>
           <summary>자동으로 안 되면 직접 입력하기</summary>
           <div class="field"><span>서버 주소</span><code id="addr">${escapeHtml(serverAddress)}</code></div>
           <div class="field"><span>코드</span><code id="code">${escapeHtml(token)}</code></div>
         </details>
-        <p class="hint">이미 계정이 있다면 바로 로그인하시고, 처음이라면 회원가입 후 팀 소유자·관리자에게 팀 참가를 요청하세요.</p>
+        ${join ? '<p class="hint">이미 계정이 있다면 바로 로그인하시고, 처음이라면 회원가입 후 팀 소유자·관리자에게 팀 참가를 요청하세요.</p>' : ''}
       `;
-  return renderInvitePageShell({ title, body, valid, deepLink });
+  return renderInvitePageShell({ title, body, connectable, deepLink });
 }
 
 /** 팀 초대 링크 안내 페이지 — renderInvitePage와 거의 같지만, 가입하면 어느 팀에 어떤
  * 등급으로 자동 합류하는지 알려준다. link에는 findTeamInviteLinkByToken이 이미 join해서
- * 넣어준 teamName이 들어있다. */
-function renderTeamInvitePage({ serverAddress, token, link, outside }) {
-  const valid = isTeamInviteLinkValid(link);
+ * 넣어준 teamName이 들어있다. [connectable]은 teamInvites.js의 teamInviteLinkConnectable 결과 —
+ * 가입 인원이 다 찬 링크는 연결·설치 안내만 두고 자동 합류 약속은 빼고 마감됐다고 알린다. 그런 링크로 오는 사람은
+ * 대개 이미 이 링크로 가입해 다른 기기를 연결하는 사람이라, "이미 계정이 있다면 팀에 자동 합류되지 않는다"는 안내도
+ * 자리가 남은 링크에만 붙인다(설치 초대 페이지의 계정 안내와 같다). */
+export function renderTeamInvitePage({ serverAddress, token, link, connectable, outside }) {
   const title = 'TangoTalk 팀 초대';
   const deepLink = `tangotalk://pair/?address=${encodeURIComponent(serverAddress)}&code=${encodeURIComponent(token)}`;
+  const join = !!link && inviteLinkHasSeat(link);
   const body = !link
     ? `<p class="warn">유효하지 않은 초대 링크입니다.</p>`
-    : !valid
-      ? `<p class="warn">이 링크는 ${
-          link.revokedAt
-            ? '취소되었습니다'
-            : link.maxUses != null && link.usedCount >= link.maxUses
-              ? '정해진 인원이 모두 가입해 더 쓸 수 없습니다'
-              : '만료되었습니다'
-        }. 초대한 사람에게 새 링크를 요청하세요.</p>`
+    : !connectable
+      ? `<p class="warn">이 링크는 ${inviteUnusableReason(link)}. 초대한 사람에게 새 링크를 요청하세요.</p>`
       : `
-        <p>${escapeHtml(link.createdByName)}님이 <b>${escapeHtml(link.teamName)}</b> 팀에 초대했습니다. 이 링크로 가입하면
-        자동으로 이 팀에 합류하고 <b>${roleLabel(link.assignedRole)}</b> 등급이 부여됩니다.
-        남은 기간: ${formatRemaining(new Date(link.expiresAt).getTime() - Date.now())}</p>
+        <p>${escapeHtml(link.createdByName)}님이 <b>${escapeHtml(link.teamName)}</b> 팀에 초대했습니다.${join ? ` 이 링크로 가입하면
+        자동으로 이 팀에 합류하고 <b>${roleLabel(link.assignedRole)}</b> 등급이 부여됩니다.` : ''}
+        ${inviteRemainingText(link)}</p>
+        ${join ? '' : seatFullNotice({
+          what: '이 링크로 가입해도 팀에 자동으로 들어가지 않고, 사내 와이파이 밖에서는 가입도 할 수 없습니다.',
+          next: '새로 가입하실 분은 초대한 사람에게 새 링크를 요청하세요.',
+        })}
         ${outside ? PUBLIC_WIFI_CAUTION : ''}
         <p class="hint">TangoTalk이 이미 설치되어 있다면 잠시 후 앱이 자동으로 열립니다. 반응이 없다면 아직 설치되지 않은 것이니, 아래에서 설치 파일을 받으세요.</p>
         <div class="downloads">
           <a class="btn" href="/team-invite/${token}/download/windows">Windows용 다운로드</a>
           <a class="btn" href="/team-invite/${token}/download/android">Android용 다운로드</a>
         </div>
-        ${renderPostInstallSteps(`서버 주소와 코드가 자동으로 입력되고, 가입하면 ${escapeHtml(link.teamName)} 팀에 자동으로 들어갑니다.`)}
+        ${renderPostInstallSteps(
+          join
+            ? `서버 주소와 코드가 자동으로 입력되고, 가입하면 ${escapeHtml(link.teamName)} 팀에 자동으로 들어갑니다.`
+            : '서버 주소와 코드가 자동으로 입력됩니다.',
+          { join },
+        )}
         <details>
           <summary>자동으로 안 되면 직접 입력하기</summary>
           <div class="field"><span>서버 주소</span><code id="addr">${escapeHtml(serverAddress)}</code></div>
           <div class="field"><span>코드</span><code id="code">${escapeHtml(token)}</code></div>
         </details>
-        <p class="hint">이미 계정이 있다면 이 링크로는 팀에 자동 합류되지 않습니다 — 팀 소유자·관리자에게 직접 참가를 요청하세요.</p>
+        ${join ? '<p class="hint">이미 계정이 있다면 이 링크로는 팀에 자동 합류되지 않습니다 — 팀 소유자·관리자에게 직접 참가를 요청하세요.</p>' : ''}
       `;
-  return renderInvitePageShell({ title, body, valid, deepLink });
+  return renderInvitePageShell({ title, body, connectable, deepLink });
 }
 
-/** 초대 설치 파일 다운로드 — 설치 초대/팀 초대 페이지가 공유한다(내려주는 파일은 똑같음). */
-function downloadInstaller(req, res) {
-  const files = { windows: ['client-windows-setup.exe', 'TangoTalk-Setup.exe'], android: ['client-android.apk', 'TangoTalk.apk'] };
-  const entry = files[req.params.platform];
-  if (!entry) return res.status(404).send('알 수 없는 플랫폼입니다.');
-  const filePath = path.join(releasesDir, entry[0]);
+/** 초대 설치 파일 다운로드 — 설치 초대/팀 초대 페이지가 공유한다(내려주는 파일은 똑같음). 플랫폼은 정해 둔 것만
+ * (pairingPaths.js installerFor — 'constructor' 같은 이름이 객체의 기본 속성으로 잡히지 않게). */
+export function downloadInstaller(req, res) {
+  const installer = installerFor(req.params.platform);
+  if (!installer) return res.status(404).send('알 수 없는 플랫폼입니다.');
+  const filePath = path.join(releasesDir, installer.file);
   if (!fs.existsSync(filePath)) return res.status(404).send('아직 배포된 빌드가 없습니다.');
-  res.download(filePath, entry[1]);
+  res.download(filePath, installer.downloadName);
 }
 
 /**
@@ -386,19 +427,17 @@ export function createPairHandler(getCertPem) {
 
     // 4자리가 아니면 초대 링크 토큰으로 본다(설치 초대/팀 초대 둘 다 이 방식으로 인증서를
     // 받으므로 둘 다 확인한다 — 길이를 굳이 더 따지지 않는다, 어차피 둘 다 없으면 404).
+    //
+    // 초대 링크는(설치 초대·팀 초대 모두) 인증서를 받을 때는 자리를 쓰지 않고 사용 횟수도 안 센다 —
+    // 가입 인원은 실제 가입(auth.js의 claimInviteSeat)에서만 한 자리씩 쓴다. 여기서 먼저 쓰면 인증서만
+    // 받고 아직 가입 전인 사람이 자리를 차지하거나, 같은 사람이 다시 연결할 때마다 인원이 줄어든다.
+    // 같은 이유로 인원이 다 찬 링크로도 인증서는 받는다(…Connectable) — 이 링크로 가입한 사람이 집 PC 등
+    // 다른 기기를 연결하거나 앱을 다시 설치할 때 같은 링크를 쓰고, 인증서는 원래 공개 정보다. 가입은
+    // auth.js가 인원까지 보고 막는다.
     const link = await findInviteLinkByToken(code);
-    if (isInviteLinkValid(link)) {
-      await markInviteLinkUsed(link.id);
-      return res.json({ cert: getCertPem() });
-    }
+    if (await inviteLinkConnectable(link)) return res.json({ cert: getCertPem() });
     const teamLink = await findTeamInviteLinkByToken(code);
-    if (isTeamInviteLinkValid(teamLink)) {
-      // 팀 초대 링크는 인증서 발급 시점에는 아직 안 지운다 — 실제 팀 합류/등급 부여는
-      // 회원가입(auth.js)에서 일어나고, 거기서 다시 한번 유효성을 확인하고 consumeTeamInviteLink로 한 자리를
-      // 부른다. 여기서 먼저 소진해버리면 인증서만 받고 아직 가입 전인 상태에서 링크가
-      // 무효화돼버릴 수 있다.
-      return res.json({ cert: getCertPem() });
-    }
+    if (await teamInviteLinkConnectable(teamLink)) return res.json({ cert: getCertPem() });
     return res.status(404).json({ error: '코드가 올바르지 않거나 만료되었습니다.' });
   };
 }
@@ -426,15 +465,19 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
   // 사내망 밖(LTE/5G)에서 이 평문 포트에 닿는 건 초대 링크 안내 페이지·설치 파일·도움말을 열 때뿐이어야
   // 한다 — 공유기에서 이 포트를 열어 초대받은 사람이 밖에서도 안내 페이지를 볼 수 있게 하되, 인증서를
   // 평문으로 내려주는 /pair는 막는다(밖에서는 앱이 메인 HTTPS 포트로 페어링한다 — pinned_tls.dart).
-  // 초대 토큰을 맞혀보는 걸 늦추려고 밖에서 온 요청은 IP마다 요청 수도 제한한다.
+  // 초대 토큰을 맞혀보는 걸 늦추려고 밖에서 온 요청은 IP마다(IPv6는 /64마다 — authGuard.js ipKey) 요청 수도 제한한다.
   app.use((req, res, next) => {
     if (isLanAddress(clientIp(req))) return next();
     if (!allowedFromOutside(req.path)) {
       return res.status(403).json({ error: '사내망 밖에서는 이 주소로 연결할 수 없습니다. 앱에 외부 주소(https://)를 넣어 연결하세요.' });
     }
     if (req.path.startsWith('/guide')) return next();
-    const wait = limits.invitePageIp.hit(clientIp(req));
-    if (wait > 0) return res.status(429).send(`요청이 너무 많습니다. ${minutesText(wait)} 후 다시 시도하세요.`);
+    const wait = limits.invitePageIp.hit(clientIpKey(req));
+    if (wait > 0) {
+      // 브라우저로 여는 페이지라 JSON(tooMany) 대신 글로 답하되, 언제 다시 되는지는 같은 머리글로 알린다.
+      res.set('Retry-After', String(Math.ceil(wait / 1000)));
+      return res.status(429).send(`요청이 너무 많습니다. ${minutesText(wait)} 후 다시 시도하세요.`);
+    }
     next();
   });
 
@@ -455,15 +498,22 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
   app.get('/invite/:token', async (req, res) => {
     const link = await findInviteLinkByToken(req.params.token);
     res.type('html').send(
-      renderInvitePage({ serverAddress: mainAddressFor(req), token: req.params.token, link, outside: !isLanAddress(clientIp(req)) }),
+      renderInvitePage({
+        serverAddress: mainAddressFor(req),
+        token: req.params.token,
+        link,
+        connectable: await inviteLinkConnectable(link),
+        outside: !isLanAddress(clientIp(req)),
+      }),
     );
   });
 
-  /** 설치 파일 다운로드 — 평문 HTTP라 브라우저 인증서 경고 없이 그대로 받아진다. 유효한
-   * 초대 링크를 거쳐온 요청만 받는다(링크가 만료·취소됐으면 파일도 안 내려준다). */
+  /** 설치 파일 다운로드 — 평문 HTTP라 브라우저 인증서 경고 없이 그대로 받아진다. 지금 연결할 수 있는
+   * 초대 링크를 거쳐온 요청만 받는다(링크가 만료·취소됐거나 만든 사람이 권한을 잃었으면 파일도 안 내려준다 —
+   * 인원이 다 찬 링크는 이미 가입한 사람이 다른 기기에 설치할 때 쓰므로 내려준다). */
   app.get('/invite/:token/download/:platform', async (req, res) => {
     const link = await findInviteLinkByToken(req.params.token);
-    if (!isInviteLinkValid(link)) return res.status(404).send('만료되었거나 취소된 링크입니다.');
+    if (!(await inviteLinkConnectable(link))) return res.status(404).send('만료되었거나 더 쓸 수 없는 링크입니다.');
     downloadInstaller(req, res);
   });
 
@@ -471,14 +521,20 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
   app.get('/team-invite/:token', async (req, res) => {
     const link = await findTeamInviteLinkByToken(req.params.token);
     res.type('html').send(
-      renderTeamInvitePage({ serverAddress: mainAddressFor(req), token: req.params.token, link, outside: !isLanAddress(clientIp(req)) }),
+      renderTeamInvitePage({
+        serverAddress: mainAddressFor(req),
+        token: req.params.token,
+        link,
+        connectable: await teamInviteLinkConnectable(link),
+        outside: !isLanAddress(clientIp(req)),
+      }),
     );
   });
 
-  /** 팀 초대 링크로 받는 설치 파일 다운로드 — 위 /invite/:token/download와 같은 파일. */
+  /** 팀 초대 링크로 받는 설치 파일 다운로드 — 위 /invite/:token/download와 같은 파일, 같은 기준. */
   app.get('/team-invite/:token/download/:platform', async (req, res) => {
     const link = await findTeamInviteLinkByToken(req.params.token);
-    if (!isTeamInviteLinkValid(link)) return res.status(404).send('만료되었거나 취소된 링크입니다.');
+    if (!(await teamInviteLinkConnectable(link))) return res.status(404).send('만료되었거나 더 쓸 수 없는 링크입니다.');
     downloadInstaller(req, res);
   });
 
@@ -486,6 +542,9 @@ export function startPairingServer({ port, mainPort, getCertPem }) {
    * 자체 서명 인증서 경고 없이 열리도록 이 평문 포트의 /guide/를 먼저 시도한다. 여기에는 이
    * 공개 정적 폴더만 얹고 다른 메인 서버 경로는 노출하지 않는다. */
   app.use('/guide', guideStatic);
+
+  // 맨 마지막 — 위 경로에서 난 예외는 NODE_ENV와 상관없이 스택 추적 없는 짧은 JSON으로만 답한다(pairingPaths.js).
+  app.use(pairingErrorHandler);
 
   const server = app.listen(port, () => {
     console.log(`[pairing] 페어링 부트스트랩 서버 대기 중 (평문 HTTP, 포트 ${port})`);

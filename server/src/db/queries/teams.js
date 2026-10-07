@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { db } from '../client.js';
 import { projectMembers, projects, teamMembers, teams, topicCreators, users } from '../schema.js';
+import { removeMemberFromTeamRooms } from './rooms.js';
 
 export async function insertTeam(fields) {
   const [row] = await db.insert(teams).values(fields).returning();
@@ -47,8 +48,14 @@ export async function addTeamMembers(teamId, userIds, role = 'member') {
   return rows.map((r) => r.userId);
 }
 
-export async function removeTeamMember(teamId, userId) {
-  await db.transaction(async (tx) => {
+/**
+ * 팀에서 뺀다 — 팀 멤버십, 그 팀 공개 프로젝트의 자동 참여 행, 그 팀 모든 방(토픽·그룹·1:1 대화·나와의 대화·비밀
+ * 대화)의 멤버십을 한 트랜잭션에서 지운다(중간에 실패하면 아무것도 안 바뀐다 — 팀에서는 빠졌는데 방에는 남는 일이 없게).
+ * 방마다의 정리는 db/queries/rooms.js removeMemberFromTeamRooms가 맡고, 실제로 빠진 방들을 그대로 돌려준다(호출부가
+ * 소켓·안내를 처리한다). [departedName]은 1:1 대화의 남은 쪽에 "OOO (나갔음)"으로 보여 줄 이름.
+ */
+export async function removeTeamMember(teamId, userId, { departedName = null } = {}) {
+  return db.transaction(async (tx) => {
     await tx.delete(teamMembers).where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     // 공개 프로젝트 자동 참여 행은 '정회원 이상 팀원'이라서 생긴 것 — 팀에서 빠지면 그 팀 프로젝트의
     // 자동 행도 같이 지운다(초대·생성으로 들어온 행은 예전처럼 남긴다).
@@ -61,6 +68,7 @@ export async function removeTeamMember(teamId, userId) {
           inArray(projectMembers.projectId, tx.select({ id: projects.id }).from(projects).where(eq(projects.teamId, teamId))),
         ),
       );
+    return removeMemberFromTeamRooms(tx, teamId, userId, { departedName });
   });
 }
 
@@ -188,6 +196,20 @@ export function listTeamIdsForUser(userId) {
 export function listTeamsByIds(ids) {
   if (ids.length === 0) return Promise.resolve([]);
   return db.select().from(teams).where(inArray(teams.id, ids));
+}
+
+/**
+ * [userId]와 팀을 하나라도 같이 쓰는 사람들의 id(그 팀들의 멤버 전부 — 자기 자신도 팀이 있으면 들어간다). 회원 목록
+ * (GET /api/users)과 접속 상태 알림(presence:update)을 같은 팀 사람에게만 보여 줄 때 쓴다 — 팀이 없는 준회원에게
+ * 서버 전체 회원 명단(로그인 아이디 포함)이 넘어가지 않게. 팀이 하나도 없으면 빈 배열.
+ */
+export function listCoTeamMemberIds(userId) {
+  const myTeams = db.select({ teamId: teamMembers.teamId }).from(teamMembers).where(eq(teamMembers.userId, userId));
+  return db
+    .selectDistinct({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(inArray(teamMembers.teamId, myTeams))
+    .then((rows) => rows.map((r) => r.userId));
 }
 
 /** topicCreationPolicy가 'designated'일 때, 이 사람이 지정된 토픽 생성자인지(permissions.js

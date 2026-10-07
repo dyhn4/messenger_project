@@ -1,16 +1,24 @@
+import { topicAccess } from './access.js';
 import { verifySocketToken } from './auth.js';
+import { accountState } from './authState.js';
+import {
+  admitCallJoin,
+  callJoinProofLimitText,
+  callJoinProofWait,
+  emitVideoTierChanges,
+  isRestrictedTopic,
+} from './callAccess.js';
 import {
   activeCallStatesFor,
   callStateFor,
-  callSummaryText,
   canControlMic,
-  joinCall,
   leaveAllCallsForSocket,
   leaveCall,
-  refreshVideoTiers,
+  livekitHasParticipant,
 } from './calls.js';
-import { finishCallCard, recordCallEvent, startCallCard } from './callCards.js';
-import { CALL_DISCONNECT_GRACE_MS } from './callEvents.js';
+import { postCallLeft, recordCallEvent, startCallCard } from './callCards.js';
+import { CALL_DISCONNECT_GRACE_MS, CALL_HANDOFF_GRACE_MS } from './callEvents.js';
+import { isSocketInCall, markCallDeclined } from './callState.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
 import { markMessageRead } from './db/queries/messages.js';
 import {
@@ -21,38 +29,32 @@ import {
   setMemberLastRead,
   setMemberLastReadAnnouncementAt,
 } from './db/queries/rooms.js';
+import { listCoTeamMemberIds } from './db/queries/teams.js';
 import { markRoomNotificationsRead } from './notifications.js';
-import { postSystemMessage } from './rooms.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
-import { markConnected, markDisconnected } from './presence.js';
+import { messageRateLimitText, messageSendLimiter, sendCarriesFiles } from './messageLimits.js';
+import { broadcastPresence, markConnected, markDisconnected } from './presence.js';
 import { notifyIncomingCall, roomTagFor } from './push.js';
 import { sendUserMessage } from './sendMessage.js';
 
 /**
- * 서버 전체 통화 참가자 수가 바뀌어 화질 단계가 달라진 **다른** 통화들에 새 상태를 다시 알린다(callQuality.js) — 참가·
- * 퇴장한 그 방은 이미 바로 위에서 알렸다.
+ * 이 소켓의 계정을 아직 쓸 수 있는지 — 정지·탈퇴했거나, 전체 로그아웃·비밀번호 변경으로 토큰 버전이 올랐으면 false. 그런
+ * 계정의 소켓은 보통 곧바로 끊기지만, 끊기기 전에 온 통화 신호(참가·거절·마이크 제어)도 받지 않는다. REST의 requireAuth와
+ * 같은 상태를 본다(authState.js — 30초 캐시, 계정 상태가 바뀌면 바로 지워진다).
  */
-function emitVideoTierChanges(io) {
-  for (const state of refreshVideoTiers()) io.to(state.roomId).emit('call:state', state);
+async function socketAccountActive(socket) {
+  const state = await accountState(socket.data.userId);
+  return !state.blocked && state.tokenVersion === socket.data.tokenVersion;
 }
 
-/**
- * 누가 통화에서 빠진 뒤 화상회의 카드(callCards.js)를 고친다 — 그 사람이 통화에서 완전히 빠졌으면(다른 기기로
- * 아직 들어와 있지 않으면) "나감"을 붙이고, 그걸로 통화가 끝났으면 카드를 닫는다. 카드가 없는 통화(서버 재시작
- * 전에 시작된 통화)가 끝나면 예전처럼 요약 한 줄을 시스템 메시지로 남긴다.
- */
-async function postCallLeft(io, state, userId, wasIn) {
-  if (wasIn && !state.participantIds.includes(userId)) {
-    await recordCallEvent(io, state.roomId, userId, 'leave');
-  }
-  if (!state.ended) return;
-  if (await finishCallCard(io, state.roomId, state.ended)) return;
-  const room = await findRoomById(state.roomId);
-  if (!room) return;
-  const users = await Promise.all(state.ended.participantIds.map(findUserById));
-  const names = users.filter(Boolean).map((u) => u.name ?? u.username ?? '알 수 없음');
-  await postSystemMessage(io, room, callSummaryText(state.ended, names));
+const INACTIVE_ACCOUNT_ERROR = '계정을 확인할 수 없습니다. 다시 로그인해 주세요.';
+
+/** 접속 상태가 바뀐 사람을 같은 팀 사람들에게만 알린다(presence.js broadcastPresence). 실패해도 연결 처리는 그대로. */
+function announcePresence(io, userId) {
+  broadcastPresence(io, userId, listCoTeamMemberIds).catch((err) =>
+    console.error('[presence] 접속 상태 알림 실패:', err?.message ?? err),
+  );
 }
 
 /** 소켓 연결 시 JWT를 확인하고, 연결된 이후의 채팅 이벤트를 처리합니다. */
@@ -62,6 +64,8 @@ export function registerSocket(io) {
       const payload = await verifySocketToken(socket.handshake.auth?.token ?? '');
       socket.data.userId = payload.sub;
       socket.data.username = payload.username;
+      // 연결 뒤에 토큰 버전이 오르면(전체 로그아웃·비밀번호 변경) 이 소켓의 통화 신호를 받지 않는다(socketAccountActive).
+      socket.data.tokenVersion = payload.tokenVersion ?? 0;
       // deviceId는 비밀 대화(E2EE) 기능에서만 쓰인다 — 없거나 무효해도 일반 소켓 연결(평문
       // 채팅/알림 등)은 그대로 허용하고, secret:* 이벤트만 이후 개별적으로 막는다.
       const deviceId = socket.handshake.auth?.deviceId;
@@ -80,26 +84,37 @@ export function registerSocket(io) {
 
   io.on('connection', (socket) => {
     // 같은 사람이 여러 기기로 동시에 붙어있을 수 있어서, 이 사람의 "첫" 연결일 때만
-    // 온라인으로 알린다(presence.js가 기기별 연결 수를 센다).
-    if (markConnected(socket.data.userId)) {
-      io.emit('presence:update', { userId: socket.data.userId, online: true });
-    }
+    // 온라인으로 알린다(presence.js가 기기별 연결 수를 센다). 받는 사람은 같은 팀 사람들뿐이다.
+    if (markConnected(socket.data.userId)) announcePresence(io, socket.data.userId);
 
     // 개인용 룸(user:<id>)에 join해두면, REST로 방이 새로 생겼을 때
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
     socket.join(`user:${socket.data.userId}`);
 
-    // payload 모양과 규칙(보드 뷰는 게시글만, 읽기 전용·보관, 첨부, DM 되살리기, 푸시, 링크 미리보기)은
+    // payload 모양과 규칙(보드 뷰는 게시글만, 읽기 전용·보관, 첨부, 길이, 인용·전달 출처, DM 되살리기, 푸시, 링크 미리보기)은
     // sendMessage.js의 sendUserMessage — 메시지 예약 발송(scheduledMessages.js)도 같은 함수로 보낸다.
     socket.on('message:send', async (payload, ack) => {
-      if (!payload || typeof payload !== 'object') return;
-      const result = await sendUserMessage({
-        io,
-        senderId: socket.data.userId,
-        fallbackName: socket.data.username,
-        payload,
-      });
-      ack?.(result);
+      const reply = typeof ack === 'function' ? ack : () => {};
+      if (!payload || typeof payload !== 'object') return reply({ ok: false, error: '메시지를 보내지 못했습니다.' });
+      // 사람마다 보내기 횟수를 DB를 보기 전에 센다(messageLimits.js) — 예전엔 제한 없이 큰 메시지를 계속 보내 큰 토픽의 모든
+      // 멤버에게 뿌릴 수 있었다. 정상 사용으로는 닿지 않는 넉넉한 값이다. 파일을 싣는 메시지는 10초 창에서 뺀다(비밀 대화는 고른
+      // 파일마다 한 통씩 쉬지 않고 보낸다 — messageLimits.js MESSAGE_SEND_BURST).
+      const wait = messageSendLimiter.hit(socket.data.userId, { burst: !sendCarriesFiles(payload) });
+      if (wait > 0) return reply({ ok: false, error: messageRateLimitText(wait) });
+      try {
+        reply(
+          await sendUserMessage({
+            io,
+            senderId: socket.data.userId,
+            fallbackName: socket.data.username,
+            payload,
+          }),
+        );
+      } catch (err) {
+        // DB 오류 등 — 응답을 안 보내면 앱은 15초를 기다린 뒤에야 "서버 응답이 없습니다"를 보여 준다.
+        console.error('[socket] message:send 처리 실패:', err?.message ?? err);
+        reply({ ok: false, error: '메시지를 보내지 못했습니다. 잠시 후 다시 시도하세요.' });
+      }
     });
 
     // payload: { roomId } — 지금 이 방을 보고 있다는 뜻. 다른 멤버들이 안읽음 카운터를 갱신할 수 있도록 브로드캐스트한다.
@@ -208,51 +223,112 @@ export function registerSocket(io) {
     // 띄울지는 클라이언트가 이 상태를 보고 판단한다(참가자 목록에 내가 없고 통화가 막
     // 시작됐으면 수신 화면).
 
-    // payload: { roomId } — LiveKit 연결에 성공한 직후 보낸다.
-    socket.on('call:join', async (payload) => {
-      const room = await findRoomById(payload?.roomId);
-      if (!room || !(await isRoomMember(room.id, socket.data.userId))) return;
+    // 이 소켓이 "다른 기기로 넘어감"으로 나간 통화들 — roomId → 잠시 뒤 이 소켓을 그 통화에서 빼는 타이머(call:leave handoff).
+    const handoffTimers = new Map();
+    const cancelHandoff = (roomId) => {
+      clearTimeout(handoffTimers.get(roomId));
+      handoffTimers.delete(roomId);
+    };
+
+    /**
+     * 이 소켓을 [roomId] 통화에서 뺀다(나가기 버튼·연결이 아주 끊김·다른 기기로 넘어간 뒤 그 기기가 안 옴). 이 소켓이 그 통화에
+     * 없으면(이미 빠졌거나 다른 기기의 참여가 이 자리를 대신했으면) 아무것도 안 한다 — 바뀐 게 없는데 방 전체에 상태를 다시
+     * 보내지 않게.
+     */
+    async function leaveCallFromSocket(roomId) {
+      const userId = socket.data.userId;
+      if (!isSocketInCall(roomId, userId, socket.id)) return;
+      const state = leaveCall(roomId, userId, socket.id);
+      io.to(roomId).emit('call:state', state);
+      emitVideoTierChanges(io);
+      await postCallLeft(io, state, userId, true);
+    }
+
+    // payload: { roomId } — LiveKit 연결에 성공한 직후, 그리고 통화 중에 소켓이 다시 붙을 때마다(client session.dart
+    // _reannounceCall) 보낸다. call:join은 토큰 없이도 보낼 수 있어서 토큰 발급(calls.js)과 같은 규칙을 여기서 다시 건다 —
+    // 예전엔 방 멤버이기만 하면 비밀 대화·읽기 전용 토픽에서도, 미디어 연결 없이도 call:join/call:leave를 되풀이해 대화에
+    // 카드를 쌓고 방 전원에게 전화를 계속 울릴 수 있었다. 규칙은 callAccess.js.
+    // ack(앱이 원하면): { ok: true } 또는 { ok: false, error } — 거절되면 앱이 LiveKit 연결을 끊고 안내한다.
+    socket.on('call:join', async (payload, ack) => {
+      const reply = typeof ack === 'function' ? ack : () => {};
+      const userId = socket.data.userId;
+      const roomId = payload?.roomId;
+      if (typeof roomId !== 'string') return reply({ ok: false, error: '방을 찾을 수 없습니다.' });
+      // LiveKit 연결로 확인해야 하는 시도(통화에 없고 쓸 수 있는 토큰도 없음)는 DB를 보기 전에 센다 — 되풀이해 보내 DB 조회와
+      // LiveKit 요청을 계속 일으키거나, 미디어는 붙여 둔 채 나가기·참여를 되풀이해 카드와 방 전체 알림을 쌓지 못하게.
+      const proofWait = callJoinProofWait(userId, roomId);
+      if (proofWait > 0) return reply({ ok: false, error: callJoinProofLimitText(proofWait) });
+      const room = await findRoomById(roomId);
+      if (!room || !(await isRoomMember(room.id, userId))) {
+        return reply({ ok: false, error: '이 방의 멤버가 아닙니다.' });
+      }
+      if (!(await socketAccountActive(socket))) return reply({ ok: false, error: INACTIVE_ACCOUNT_ERROR });
+      // 읽기 전용·보관된 토픽은 토픽 관리자만 통화를 시작할 수 있다 — "시작"인지는 참가 직전에 보지만(admitCallJoin) 권한
+      // 조회는 DB가 필요해서, 그런 토픽일 때만 미리 해 둔다.
+      const canManage = isRestrictedTopic(room) ? (await topicAccess(room, userId)).canManage : true;
+      // 방 종류·참가 자격(토큰·통화 상태·LiveKit 연결)·시작 규칙(읽기 전용·횟수)을 보고, 받아들이면 통화 상태에 넣는다.
+      const admitted = await admitCallJoin({
+        room,
+        userId,
+        socketId: socket.id,
+        canManage,
+        livekitHas: livekitHasParticipant,
+      });
+      if (!admitted.ok) return reply({ ok: false, error: admitted.error });
+      // 이 기기가 "다른 기기로 넘어감"으로 나갔다가 다시 들어왔으면 잠시 뒤 빼기로 한 것을 거둔다.
+      cancelHandoff(room.id);
       // 이미 통화에 들어와 있던 사람(다른 기기, 또는 연결이 잠깐 끊겼다 다시 붙어 참여를 다시 알린 것)이면
       // 화상회의 카드에 "참여"를 다시 붙이지 않는다.
-      const wasIn = callStateFor(room.id).participantIds.includes(socket.data.userId);
-      const state = joinCall(room.id, socket.data.userId, socket.id);
+      const { state, wasIn, restored } = admitted;
+      reply({ ok: true });
       io.to(room.id).emit('call:state', state);
       emitVideoTierChanges(io);
+      // 서버가 잃었던 통화를 LiveKit 연결로 되살린 것이면(서버 재시작 뒤, 혼자 남아 있다가 오래 끊긴 뒤) 새 카드도 전화도
+      // 없다 — 그 회의는 처음 시작할 때 이미 카드가 올라가고 전화가 울렸다(callAccess.js admitCallJoin). 되살린 통화에는
+      // 카드가 없어 합류도 카드에 남지 않는다.
+      if (wasIn || restored) return;
 
       // 통화를 **막 시작한 경우에만** 앱이 꺼져 있는 멤버들에게 전화를 건다(참가자가 나
       // 혼자고 시작한 사람도 나). 중간에 누가 합류할 때마다 다시 울리면, 이미 안 받기로
       // 한 사람의 폰이 계속 울리게 된다.
-      const isFirstParticipant =
-        state.participantIds.length === 1 && state.startedBy === socket.data.userId;
-      if (!wasIn) {
-        // 통화를 막 시작했으면 대화방에 화상회의 카드를 새로 올리고, 합류면 그 카드에 "참여"를 붙인다.
-        if (isFirstParticipant) await startCallCard(io, room, socket.data.userId);
-        else await recordCallEvent(io, room.id, socket.data.userId, 'join');
+      const isFirstParticipant = state.participantIds.length === 1 && state.startedBy === userId;
+      // 통화를 막 시작했으면 대화방에 화상회의 카드를 새로 올리고, 합류면 그 카드에 "참여"를 붙인다.
+      if (!isFirstParticipant) {
+        await recordCallEvent(io, room.id, userId, 'join');
+        return;
       }
-      if (wasIn || !isFirstParticipant) return;
+      await startCallCard(io, room, userId);
 
-      const [caller, memberIds] = await Promise.all([
-        findUserById(socket.data.userId),
-        listRoomMemberIds(room.id),
-      ]);
+      const [caller, memberIds] = await Promise.all([findUserById(userId), listRoomMemberIds(room.id)]);
       notifyIncomingCall({
         memberIds,
-        callerId: socket.data.userId,
+        callerId: userId,
         caller,
         room,
         roomTag: roomTagFor(room),
       }).catch((err) => console.error('[push] 통화 알림 실패:', err?.message ?? err));
     });
 
-    // payload: { roomId } — 통화 종료 버튼을 눌렀을 때.
+    // payload: { roomId, handoff? } — 통화 종료 버튼을 눌렀을 때, 그리고 LiveKit 연결이 이 기기 밖의 이유로 끝났을 때(client
+    // session.dart). handoff: true는 같은 계정이 다른 기기에서 이 통화에 들어가 LiveKit이 이 기기를 끊은 것(duplicateIdentity)
+    // — 그 기기의 call:join이 곧 와서 이 소켓 자리를 대신하므로(callState.js joinCall) 바로 빼지 않고 잠시 기다린다. 바로
+    // 빼면 그 사이 그 사람이 통화에서 빠진 것으로 정리돼 진행자가 넘어가고, 카드에 나감·참여가 남고, 혼자였으면 통화가
+    // 끝났다가 다시 시작되며 모두에게 전화가 다시 울린다(callEvents.js CALL_HANDOFF_GRACE_MS).
     socket.on('call:leave', async (payload) => {
       const roomId = payload?.roomId;
       if (typeof roomId !== 'string') return;
-      const wasIn = callStateFor(roomId).participantIds.includes(socket.data.userId);
-      const state = leaveCall(roomId, socket.data.userId, socket.id);
-      io.to(roomId).emit('call:state', state);
-      emitVideoTierChanges(io);
-      await postCallLeft(io, state, socket.data.userId, wasIn);
+      cancelHandoff(roomId);
+      if (payload?.handoff === true) {
+        // 이 소켓이 들어가 있는 통화에만 타이머를 건다(아무 방 id나 보내 타이머를 쌓지 못하게).
+        if (!isSocketInCall(roomId, socket.data.userId, socket.id)) return;
+        const timer = setTimeout(() => {
+          handoffTimers.delete(roomId);
+          leaveCallFromSocket(roomId).catch((err) => console.error('[call] 통화 기록 남기기 실패:', err?.message ?? err));
+        }, CALL_HANDOFF_GRACE_MS);
+        handoffTimers.set(roomId, timer.unref());
+        return;
+      }
+      await leaveCallFromSocket(roomId);
     });
 
     // payload: { roomId } — 걸려온 통화의 수신 창에서 [거절]을 눌렀을 때. 통화에 지금 들어와 있는 사람들
@@ -262,10 +338,15 @@ export function registerSocket(io) {
     socket.on('call:decline', async (payload) => {
       const roomId = payload?.roomId;
       if (typeof roomId !== 'string') return;
-      const state = callStateFor(roomId);
       const userId = socket.data.userId;
-      if (!state.active || state.participantIds.includes(userId)) return;
-      if (!(await isRoomMember(roomId, userId))) return;
+      // 거절은 한 통화에 한 번만 알린다 — 같은 계정의 다른 기기에서 또 거절했거나 되풀이해 보내도 건 사람에게 다시 알리지도,
+      // 카드에 다시 쌓지도 않는다(예전엔 되풀이해 보내 카드에 사건을 상한까지 채울 수 있었다). DB를 보기 전에 메모리에서 거른다.
+      const { startedAt } = callStateFor(roomId);
+      if (!markCallDeclined(roomId, userId)) return;
+      if (!(await isRoomMember(roomId, userId)) || !(await socketAccountActive(socket))) return;
+      // 그사이 통화가 끝났거나(다른 통화로 바뀜) 거절한 사람이 다른 기기에서 받았으면 알릴 게 없다.
+      const state = callStateFor(roomId);
+      if (!state.active || state.startedAt !== startedAt || state.participantIds.includes(userId)) return;
       const user = await findUserById(userId);
       const event = { roomId, userId, name: user?.name ?? user?.username ?? '상대방' };
       for (const participantId of state.participantIds) {
@@ -278,12 +359,17 @@ export function registerSocket(io) {
     // 요청한다(on=true — 대상 앱이 [마이크 켜기]/[그대로 두기]를 묻고 본인이 수락해야 켜진다). 진행자인지·대상이 지금
     // 통화에 있는지는 여기서 확인하고(calls.js canControlMic), 대상의 기기들(user:<id>)에 그대로 전한다 — 마이크를
     // 실제로 켜고 끄는 건 대상 앱이 한다(LiveKit 트랙은 그 사람 기기의 것이라).
-    socket.on('call:mic', (payload) => {
+    socket.on('call:mic', async (payload) => {
       const roomId = payload?.roomId;
       const targetId = payload?.targetId;
+      const userId = socket.data.userId;
       if (typeof roomId !== 'string' || typeof targetId !== 'string' || typeof payload?.on !== 'boolean') return;
-      if (!canControlMic(roomId, socket.data.userId, targetId)) return;
-      io.to(`user:${targetId}`).emit('call:mic', { roomId, on: payload.on, byId: socket.data.userId });
+      if (!canControlMic(roomId, userId, targetId)) return;
+      // 진행자 표시는 메모리 상태라, 방에서 내보내졌거나 계정이 정지된 진행자가 끊기기 전 소켓으로 남의 마이크를 계속 끄지
+      // 못하게 멤버십·계정을 다시 본다(보통은 내보낼 때 통화 상태에서도 빠져 진행자가 넘어간다 — callAccess.js).
+      if (!(await isRoomMember(roomId, userId)) || !(await socketAccountActive(socket))) return;
+      if (!canControlMic(roomId, userId, targetId)) return; // 그사이 진행자가 바뀌었을 수 있다.
+      io.to(`user:${targetId}`).emit('call:mic', { roomId, on: payload.on, byId: userId });
     });
 
     socket.on('disconnect', () => {
@@ -292,6 +378,9 @@ export function registerSocket(io) {
       // 잠깐 끊긴 것일 수 있어 조금 기다렸다 뺀다(callEvents.js의 CALL_DISCONNECT_GRACE_MS) — 그 사이 다시 붙어
       // 참여를 다시 알렸으면 새 소켓으로 이미 들어와 있어서, 여기서 옛 소켓만 빠지고 통화·기록은 그대로다.
       const userId = socket.data.userId;
+      // 다른 기기로 넘어가며 잠시 뒤 빼기로 한 통화도 아래 끊김 정리가 같이 뺀다.
+      for (const timer of handoffTimers.values()) clearTimeout(timer);
+      handoffTimers.clear();
       setTimeout(() => {
         for (const state of leaveAllCallsForSocket(userId, socket.id)) {
           io.to(state.roomId).emit('call:state', state);
@@ -301,10 +390,8 @@ export function registerSocket(io) {
         }
         emitVideoTierChanges(io);
       }, CALL_DISCONNECT_GRACE_MS).unref();
-      // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다.
-      if (markDisconnected(socket.data.userId)) {
-        io.emit('presence:update', { userId: socket.data.userId, online: false });
-      }
+      // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다(같은 팀 사람들에게만).
+      if (markDisconnected(socket.data.userId)) announcePresence(io, socket.data.userId);
     });
 
     // 방에 join하는 건 DB 조회가 필요해 비동기다 — 리스너 등록(위)보다 뒤에 둬서, 이

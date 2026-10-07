@@ -43,7 +43,19 @@ if ($svc.Status -eq 'Running') {
     Write-Host '재시작 완료 — 서버가 실행 중입니다.' -ForegroundColor Green
 } else {
     Write-Host "재시작 후 서비스 상태: $($svc.Status)" -ForegroundColor Yellow
-    Write-Host "정상이 아니면 서버 폴더의 service-err.log를 확인하세요." -ForegroundColor Yellow
+    # 설치 폴더가 관리자 전용이라(Folder-Acl.ps1) 이 로그는 일반 권한 메모장으로는 열리지 않는다 — 이 창은 이미 관리자
+    # 권한이라 여기서 띄운 메모장도 관리자 권한을 물려받으므로, 그 자리에서 바로 열어 준다.
+    $errLog = Join-Path $AppDir 'server\service-err.log'
+    if (Test-Path -LiteralPath $errLog) {
+        Write-Host "정상이 아니면 오류 기록을 확인하세요: $errLog" -ForegroundColor Yellow
+        $answer = Read-Host '오류 기록을 지금 메모장으로 열까요? (Y/N)'
+        if ($answer -match '^\s*[Yy]') {
+            Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\notepad.exe') -ArgumentList "`"$errLog`""
+        }
+    } else {
+        Write-Host "오류 기록 파일($errLog)이 아직 없습니다 — 잠시 뒤 다시 확인하세요." -ForegroundColor Yellow
+    }
+    Write-Host '나중에 직접 열 때는 메모장을 "관리자 권한으로 실행"한 뒤 [파일 → 열기]로 여세요(설치 폴더는 관리자 전용).' -ForegroundColor Yellow
 }
 
 Write-Host ''

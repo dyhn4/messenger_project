@@ -26,6 +26,16 @@ const noteImagePrefix = '🖼 ';
 /// 그림 줄에 숨겨 두는 링크 주소의 앞머리.
 const noteImageHref = 'image:';
 
+final _localImageTarget = RegExp(r'^/(?:files|uploads)/[^/\\]+$');
+
+/// 노트 그림으로 내려받아 그려도 되는 주소인지 — 이 서버의 파일 경로(서명 링크 `/files/<토큰>`,
+/// 예전 저장 경로 `/uploads/<이름>`) 한 마디뿐이다. 그림은 노트를 연 사람의 앱이 직접 받으러 가므로,
+/// 다른 서버나 사내 기기 주소면 읽은 사람·시각·IP가 그쪽에 남고 사내 장비로 요청이 간다. 앞에 서버
+/// 주소를 붙여 받으므로 "/"로 시작하는 이 모양이어야 한다(".x.com/a.png"·"@x.com/a.png"는 붙이면
+/// 다른 서버가 되고, "//x.com/a.png"는 웹 앱에서 다른 서버다). 그 밖의 그림은 링크로만 보여 준다 —
+/// 서버도 저장·전달할 때 같은 규칙으로 링크로 바꾼다(server/src/projectNotifications.js).
+bool noteImageIsLocal(String url) => _localImageTarget.hasMatch(url);
+
 final _inlinePattern = RegExp(
   r'<span style="color:#([0-9a-fA-F]{6})">(.+?)</span>' // 1, 2
   r'|\*\*(.+?)\*\*' // 3
@@ -498,7 +508,17 @@ class _NoteBodyState extends State<NoteBody> {
         widgets.add(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),
-            child: resolve == null
+            child: !noteImageIsLocal(url)
+                // 이 서버 파일이 아닌 그림(예전에 저장된 노트 등)은 받지 않고, 눌러서 여는
+                // 링크로만 — 여는 것도 다른 링크와 같은 주소 검사(_open)를 거친다.
+                ? Text.rich(
+                    TextSpan(
+                      text: '🖼 $name',
+                      style: formatStyle(context, base, 0, url),
+                      recognizer: _open(url),
+                    ),
+                  )
+                : resolve == null
                 ? Text('🖼 $name', style: TextStyle(color: hint))
                 : ConstrainedBox(
                     constraints: const BoxConstraints(maxHeight: 420),

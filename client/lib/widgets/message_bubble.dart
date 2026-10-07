@@ -22,7 +22,6 @@ import '../services/mention_logic.dart';
 import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'chat_font_scope.dart';
-import 'external_image.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
 import 'mention_autocomplete.dart';
@@ -403,6 +402,15 @@ class _MessageBubbleState extends State<MessageBubble> {
     mention: mention,
   );
 
+  /// 링크 카드 그림의 서명 링크가 만료됐을 때 새 링크 — 메시지 한 건을 다시 받아(GET /messages/:id — 방 목록과 같은 접근
+  /// 규칙으로 새로 서명한다) 그 미리보기 그림 경로를 쓴다. 첨부의 /files/resign은 링크 미리보기 그림을 찾지 않는다.
+  Future<String?> _freshLinkPreviewImage(String messageId) async {
+    final api = widget.session.api;
+    if (api == null) return null;
+    final fresh = await api.fetchMessage(messageId);
+    return fresh.linkPreview?.serverImagePath;
+  }
+
   Future<void> _openProfile(BuildContext context) async {
     if (_isMine) {
       showDialog(
@@ -629,7 +637,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                             // 참고). 수정 중엔 편집기만 보여주면 되니 숨긴다.
                             if (!_editing && message.linkPreview != null) ...[
                               const SizedBox(height: 6),
-                              _LinkPreviewCard(preview: message.linkPreview!),
+                              LinkPreviewCard(
+                                preview: message.linkPreview!,
+                                resolveUrl: widget.resolveUrl,
+                                refreshImagePath: () =>
+                                    _freshLinkPreviewImage(message.id),
+                              ),
                             ],
                             // 노트 링크(tangotalk://)가 든 메시지 — 앱 안 링크라 서버가 미리보기를
                             // 긁어올 수 없어서, 여기서 카드를 만들어 붙인다. 누르면 그 노트가 열린다.
@@ -1224,10 +1237,23 @@ class _QuotedMessageCard extends StatelessWidget {
 
 /// 메시지 텍스트에 담긴 링크의 오픈그래프 미리보기 카드 — 위에 이미지, 아래 제목/설명 일부/
 /// 출처(사이트 이름) 순으로 세로로 쌓는다(카카오톡/슬랙 링크 카드와 같은 배치). 탭하면 기본
-/// 브라우저로 그 링크를 연다.
-class _LinkPreviewCard extends StatelessWidget {
+/// 브라우저로 그 링크를 연다. 그림은 서버가 받아 둔 파일(서명된 /files 경로)만 우리 서버에서
+/// 받는다 — 바깥 사이트 주소는 그리지 않는다(LinkPreview.serverImagePath, server/src/linkPreviewImage.js).
+class LinkPreviewCard extends StatelessWidget {
   final LinkPreview preview;
-  const _LinkPreviewCard({required this.preview});
+
+  /// 서버 상대 경로를 절대 주소로(Session.resolveUrl).
+  final String Function(String relative) resolveUrl;
+
+  /// 그림의 서명 링크가 만료돼(최대 2시간) 못 받았을 때 새 링크(서버 상대 경로)를 받아 오는 함수 — 앱을 오래 켜 둔 채 예전
+  /// 메시지로 올라가면 그렇게 된다. 없거나 새 링크로도 못 받으면 그림 칸을 접는다(빈 칸이 남지 않게).
+  final Future<String?> Function()? refreshImagePath;
+  const LinkPreviewCard({
+    super.key,
+    required this.preview,
+    required this.resolveUrl,
+    this.refreshImagePath,
+  });
 
   Future<void> _open() async {
     if (AppLinks.open(preview.url)) return;
@@ -1253,6 +1279,7 @@ class _LinkPreviewCard extends StatelessWidget {
   }
 
   Widget _buildCard(BuildContext context) {
+    final image = preview.serverImagePath;
     return Material(
       color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(10),
@@ -1263,10 +1290,11 @@ class _LinkPreviewCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (preview.imageUrl != null)
-              AspectRatio(
-                aspectRatio: 1.9,
-                child: ExternalImage(url: preview.imageUrl!),
+            if (image != null)
+              _LinkPreviewImage(
+                path: image,
+                resolveUrl: resolveUrl,
+                refreshPath: refreshImagePath,
               ),
             Padding(
               padding: const EdgeInsets.all(10),
@@ -1312,6 +1340,101 @@ class _LinkPreviewCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 링크 카드 위의 그림(1.9:1). 서명 링크는 최대 2시간 뒤 만료돼서(server signFileUrl), 앱을 오래 켜 둔 채 예전 메시지로
+/// 올라가 처음 그리면 못 받는다 — 그때 [refreshPath]로 새 링크를 한 번 받아 다시 그리고, 그래도 못 받으면(또는 받을 방법이
+/// 없으면) 칸을 접는다. 예전처럼 빈 1.9:1 칸을 남기지 않는다. 새 링크는 한 번만 받는다 — 파일이 지워진 경우처럼 새 링크도
+/// 계속 실패할 때 끝없이 다시 묻지 않게.
+class _LinkPreviewImage extends StatefulWidget {
+  final String path;
+  final String Function(String relative) resolveUrl;
+  final Future<String?> Function()? refreshPath;
+
+  const _LinkPreviewImage({
+    required this.path,
+    required this.resolveUrl,
+    this.refreshPath,
+  });
+
+  @override
+  State<_LinkPreviewImage> createState() => _LinkPreviewImageState();
+}
+
+class _LinkPreviewImageState extends State<_LinkPreviewImage> {
+  late String _path = widget.path;
+  bool _refreshTried = false;
+  bool _refreshing = false;
+  bool _failed = false;
+
+  @override
+  void didUpdateWidget(covariant _LinkPreviewImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 서버가 미리보기를 새로 보냈거나(message:linkPreview) 방을 다시 불러와 링크가 바뀌면 처음부터 다시 그린다.
+    if (widget.path != oldWidget.path) {
+      _path = widget.path;
+      _refreshTried = false;
+      _refreshing = false;
+      _failed = false;
+    }
+  }
+
+  /// [failedPath]의 그림을 못 받았을 때(Image.errorBuilder — 그리는 중에 불린다) — 새 링크를 한 번 받아 보거나 칸을 접는다.
+  /// 그리는 중에는 setState를 부를 수 없어서 다음 순간으로 미룬다.
+  void _onLoadFailed(String failedPath) {
+    if (_failed || _refreshing || failedPath != _path) return;
+    final refresh = widget.refreshPath;
+    if (_refreshTried || refresh == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_failed && _path == failedPath) setState(() => _failed = true);
+      });
+      return;
+    }
+    _refreshTried = true;
+    _refreshing = true;
+    () async {
+      String? fresh;
+      try {
+        fresh = await refresh();
+      } catch (_) {
+        // 새 링크를 못 받으면(메시지가 지워졌거나 방에서 나감·연결 끊김) 칸을 접는다.
+      }
+      if (!mounted) return;
+      setState(() {
+        _refreshing = false;
+        // 그새 위젯이 다른 링크로 바뀌었으면(didUpdateWidget) 그 링크를 그대로 둔다.
+        if (_path != failedPath) return;
+        if (fresh != null && fresh != failedPath) {
+          _path = fresh;
+        } else {
+          _failed = true;
+        }
+      });
+    }();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) return const SizedBox.shrink();
+    final path = _path;
+    return AspectRatio(
+      aspectRatio: 1.9,
+      // 링크마다 새 Image로 그린다 — 같은 Image에 주소만 바꾸면 앞 주소에서 난 실패가 남아 있어서, 새 그림을 받기도 전에
+      // errorBuilder가 다시 불려 칸을 접어 버린다.
+      child: KeyedSubtree(
+        key: ValueKey(path),
+        child: Image.network(
+          widget.resolveUrl(path),
+          key: const ValueKey('link-preview-image'),
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) {
+            _onLoadFailed(path);
+            return const SizedBox.shrink();
+          },
         ),
       ),
     );

@@ -25,6 +25,7 @@ import { linksRouter } from './links.js';
 import { createStickersRouter } from './stickers.js';
 import { createAuthRouter, hasValidAccessToken, requireAuth } from './auth.js';
 import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
+import { bodyErrorReply, createJsonBodyParser } from './bodyLimit.js';
 import { certPath, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
 import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT, WEB_DIR } from './config.js';
 import { startLivekitNatSync } from './livekitNat.js';
@@ -41,6 +42,7 @@ import { createInvitesRouter } from './invites.js';
 import { createTeamInvitesRouter } from './teamInvites.js';
 import { createMessagesRouter } from './messages.js';
 import { createMessageFilesRouter } from './messageFiles.js';
+import { SOCKET_MAX_PAYLOAD_BYTES } from './messageLimits.js';
 import { createNotificationsRouter } from './notifications.js';
 import { checkPendingMigrations } from './migrationCheck.js';
 import { createPairHandler, generatePairingCode, startPairingServer } from './pairing.js';
@@ -58,7 +60,7 @@ import { startSecretExpiryJob } from './secretExpiry.js';
 import { startAnnouncementAutoUnpinJob } from './announcementAutoUnpin.js';
 import { startProjectDueReminderJob } from './projectNotify.js';
 import { searchRouter } from './search.js';
-import { createTeamsRouter } from './teams.js';
+import { createTeamsRouter, sweepLeftoverTeamRoomMembers } from './teams.js';
 import { createTodosRouter, startTodoReminderJob } from './todos.js';
 import { registerSocket } from './socket.js';
 import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
@@ -100,11 +102,14 @@ const corsOptions = {
 app.use(cors(corsOptions));
 // 화상회의 신호를 같은 PC의 LiveKit으로 넘긴다(livekitProxy.js) — 본문을 그대로 흘려야 해서 json 파서보다 먼저.
 app.use(LIVEKIT_PROXY_PREFIX, livekitHttpProxy(LIVEKIT_PORT));
-app.use(express.json());
+// JSON 본문 — 로그인한 요청은 정상 앱이 보내는 가장 큰 글(비밀 대화 봉투·서식이 붙은 긴 글 수정)이 들어가는 512KiB까지, 토큰 없는
+// 요청(로그인·가입 등 인증 전 경로)은 기본 100KB 그대로(bodyLimit.js). 업로드(multipart — multer)는 이 파서가 건드리지 않는다.
+app.use(createJsonBodyParser({ isSignedIn: hasValidAccessToken }));
 
 const tls = await ensureTlsCredentials({ extraHosts: EXTERNAL_ADDRESS ? [EXTERNAL_ADDRESS.host] : [] });
 const httpServer = createServer(tls, app);
-const io = new Server(httpServer, { cors: corsOptions });
+// 소켓 한 번에 받는 크기 — 기본 1MB 대신 정상 앱이 보내는 가장 큰 메시지(비밀 대화 봉투·최대 길이 글)에 여유를 둔 값(messageLimits.js).
+const io = new Server(httpServer, { cors: corsOptions, maxHttpBufferSize: SOCKET_MAX_PAYLOAD_BYTES });
 attachLivekitUpgradeProxy(httpServer, LIVEKIT_PORT);
 // 사내망 밖(LTE/5G)에서도 재페어링할 수 있게 메인 HTTPS 포트에도 페어링을 연다(pairing.js의 createPairHandler).
 // 밖에서도 닿으므로 IP마다 시도 횟수를 제한한다(authGuard.js — 4자리 코드 맞혀보기 방지).
@@ -187,12 +192,17 @@ app.use(firebaseConfigRouter);
 app.use(webPushRouter);
 // 웹 앱 페이지의 CSP — 스크립트는 이 서버에서 온 파일만(인라인·외부 스크립트 금지) 돌게 해서, 혹시 화면에 남의
 // 글이 HTML로 섞여도 스크립트로 실행되지 않게 한다. Flutter 웹이 쓰는 것만 연다: CanvasKit(WebAssembly 컴파일),
-// 인라인 스타일, 링크 미리보기의 외부 그림, 화면에 없는 글자용 구글 글꼴, 첨부·푸시용 blob:, 화상회의 wss:.
+// 인라인 스타일, 화면에 없는 글자용 구글 글꼴, 첨부·푸시용 blob:, 화상회의 wss:.
+// 그림(img-src)은 이 서버(와 data:·blob:)의 것만 — 서버가 앱에 주는 그림 주소는 모두 이 서버의 서명 링크(/files/…)라서다(링크
+// 미리보기·북마크는 서버가 받아 둔 그림만 주고 예전에 저장된 바깥 주소는 내려주지 않는다 — linkPreviewImage.js; 노트 속 바깥 그림은
+// 앱이 받지 않고 링크로만 보여 준다). 예전엔 그 바깥 그림을 <img>로 그리려고(external_image.dart의 웹 fallback) https:·http:를 열어
+// 둬서, 남이 심은 주소로 보는 사람의 브라우저가 그 사이트에 접속했다(IP·읽은 시각이 남는다). CanvasKit이 그림을 받는 fetch는
+// connect-src를 따르는데 거기엔 처음부터 바깥 주소가 글꼴뿐이라, 이 변경으로 막히는 정상 경로는 없다.
 const WEB_APP_CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval' blob:",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https: http:",
+  "img-src 'self' data: blob:",
   "media-src 'self' data: blob:",
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' data: blob: wss: https://fonts.gstatic.com https://fonts.googleapis.com",
@@ -212,6 +222,14 @@ app.use(express.static(WEB_DIR, { setHeaders: (res) => res.setHeader('Content-Se
 // 그 자리에서 바로 500 + 에러 메시지로 응답한다.
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
+  // 본문을 읽다 난 오류(너무 큼·JSON 형식 오류 등)는 요청 쪽 잘못이라 500 대신 그 상태 코드(413·400 등)와 한국어 문구로 답한다
+  // (bodyLimit.js) — 예전엔 "request entity too large" 같은 영어 문구의 500이라 서버 고장처럼 보였다. 서버 오류가 아니니 한 줄만 남긴다.
+  const bodyError = bodyErrorReply(err, req, { isSignedIn: hasValidAccessToken });
+  if (bodyError) {
+    const size = err.type === 'entity.too.large' ? ` (${err.length ?? err.received ?? '?'}바이트, 한도 ${err.limit}바이트)` : '';
+    console.warn(`[요청 본문 오류] ${req.method} ${req.originalUrl}: ${err.type}${size} → ${bodyError.status}`);
+    return res.status(bodyError.status).json({ error: bodyError.error });
+  }
   console.error(`[요청 처리 오류] ${req.method} ${req.originalUrl}:`, err);
   // drizzle-orm의 DrizzleQueryError는 진짜 원인(예: Postgres의 "릴레이션이 없습니다")을
   // err.message가 아니라 err.cause에 담아둔다 — err.message만 보내면 "Failed query: ..."
@@ -245,6 +263,9 @@ startTodoReminderJob(io);
 await checkPendingMigrations();
 // 지난 실행 중에 "진행 중"으로 남은 화상회의 카드를 닫는다(통화 상태는 메모리에만 있어 재시작하면 사라진다 — callCards.js).
 await closeStaleCallCards().catch((err) => console.error('[call] 화상회의 카드 정리 실패:', err?.message ?? err));
+// 팀에서 빠졌는데 그 팀 대화방에 남아 있는 멤버십을 뺀다(예전 규칙의 흔적 — teams.js sweepLeftoverTeamRoomMembers).
+// 아직 소켓이 붙기 전이라 DB 정리와 안내 메시지만 남는다.
+await sweepLeftoverTeamRoomMembers(io).catch((err) => console.error('[teams] 팀 밖 대화방 멤버십 정리 실패:', err?.message ?? err));
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

@@ -20,9 +20,16 @@ import { isUuid } from './favoritesRules.js';
 import { canModifyContent, recordModerationAudit } from './moderation.js';
 import { mentionsOrEmpty, mentionsToStore, sanitizeMentions } from './notificationRules.js';
 import { notifyBoard, removeNotificationsForMessage, updateMentions } from './notifications.js';
+import {
+  ATTRIBUTION_NAME_MAX,
+  clipGraphemes,
+  messageTextDenial,
+  postBytesDenial,
+  QUOTE_PREVIEW_MAX,
+} from './messageLimits.js';
 import { parsePostFields, topicWriteDenial } from './permissions.js';
 import { attachPolls } from './polls.js';
-import { resolveRawUrl, signFileUrl } from './upload.js';
+import { resolveRawUrl, signedUploadOrNull, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
 import { isFileDeleted, isFileOfMessage } from './db/queries/fileDelete.js';
@@ -71,6 +78,11 @@ function toAttachmentDtos(m) {
 
 /** 방 메시지 조회(rooms.js)와 수정/삭제 브로드캐스트(여기)가 같은 모양의 DTO를 쓰도록 공용화. */
 export function toMessageDto(m) {
+  // 링크 미리보기 그림 — 서버가 받아 둔 업로드 파일만 서명해서 준다. 이 규칙 전에 저장된 바깥 주소는 내려주지 않는다(그림 없이
+  // 제목·설명만) — 넘기면 보는 사람마다 앱이 그 사이트에 직접 접속한다(linkPreviewImage.js).
+  // 서명 링크는 새 칸(imageFileUrl)으로만 주고 예전 칸(imageUrl)은 늘 비운다: 예전 앱은 imageUrl을 바깥 주소로 알고 따로 받아
+  // 오는데(external_image.dart) 서버 상대 경로는 받지 못해, 카드 위에 1.9:1 빈 칸만 남는다. 비워 두면 예전 앱은 그림 없이 그린다.
+  const previewImage = signedUploadOrNull(m.linkPreviewImageUrl);
   return {
     id: m.id,
     roomId: m.roomId,
@@ -101,16 +113,19 @@ export function toMessageDto(m) {
     // 메시지는 항상 둘 다 null이다(읽음 추적 자체를 안 하므로).
     readAt: m.readAt ? new Date(m.readAt).getTime() : null,
     expiresAt: m.expiresAt ? new Date(m.expiresAt).getTime() : null,
-    quotedSenderName: m.quotedSenderName ?? null,
-    quotedPreview: m.quotedPreview ?? null,
-    forwardedFromSenderName: m.forwardedFromSenderName ?? null,
+    // 인용 카드·전달 표시 — 지금은 서버가 원본에서 채운 짧은 값이지만(messageAttribution.js), 이 규칙 전에 저장된 행은 앱이 보낸
+    // 글 그대로라 끝없이 길 수 있어서 내려줄 때도 같은 상한으로 자른다(받는 앱이 그리다 멈추지 않게).
+    quotedSenderName: clipGraphemes(m.quotedSenderName ?? null, ATTRIBUTION_NAME_MAX),
+    quotedPreview: clipGraphemes(m.quotedPreview ?? null, QUOTE_PREVIEW_MAX),
+    forwardedFromSenderName: clipGraphemes(m.forwardedFromSenderName ?? null, ATTRIBUTION_NAME_MAX),
     forwardedFromCreatedAt: m.forwardedFromCreatedAt ? new Date(m.forwardedFromCreatedAt).getTime() : null,
-    linkPreview: m.linkPreviewTitle || m.linkPreviewDescription || m.linkPreviewImageUrl
+    linkPreview: m.linkPreviewTitle || m.linkPreviewDescription || previewImage
       ? {
           url: m.linkPreviewUrl,
           title: m.linkPreviewTitle ?? null,
           description: m.linkPreviewDescription ?? null,
-          imageUrl: m.linkPreviewImageUrl ?? null,
+          imageUrl: null,
+          imageFileUrl: previewImage,
           siteName: m.linkPreviewSiteName ?? null,
         }
       : null,
@@ -296,6 +311,8 @@ export function createMessagesRouter(io) {
     if (isPost) {
       const fields = parsePostFields(req.body?.title, req.body?.text);
       if (fields.error) return res.status(400).json({ error: fields.error });
+      const tooLong = postBytesDenial(fields.title, fields.text);
+      if (tooLong) return res.status(400).json({ error: tooLong });
       const mentions = await cleanMentions(req.body?.mentions, fields.text, room, req.user.sub, trimmedLead(req.body?.text));
       const updated = await updatePost(message.id, {
         title: fields.title,
@@ -312,6 +329,9 @@ export function createMessagesRouter(io) {
 
     const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
     if (!text) return res.status(400).json({ error: '메시지 내용을 입력하세요.' });
+    // 보낼 때와 같은 길이 상한(messageLimits.js) — 비밀 대화는 암호문 봉투 길이로 본다.
+    const tooLong = messageTextDenial(text, { secret: !!room?.isSecret });
+    if (tooLong) return res.status(400).json({ error: tooLong });
 
     const textFormat = room?.isSecret ? null : sanitizeTextFormat(req.body?.textFormat, text);
     const mentions = await cleanMentions(req.body?.mentions, text, room, req.user.sub, trimmedLead(req.body?.text));

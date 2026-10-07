@@ -44,6 +44,7 @@ class MyProfileDialog extends StatelessWidget {
       context,
       title: '이름 변경',
       initialValue: session.name ?? '',
+      maxLength: kProfileNameMaxLength,
     );
     if (value == null || value.isEmpty) return;
     try {
@@ -1099,18 +1100,27 @@ class _WithdrawPanelState extends State<_WithdrawPanel> {
   }
 }
 
+/// 프로필 이름 길이 상한(글자 단위 — 이모지 한 덩어리 = 1자). 서버(server/src/avatarRules.js USER_NAME_MAX)가 이보다
+/// 긴 이름을 거절하므로, 입력칸에서 미리 막아 "저장했더니 실패" 대신 남은 글자 수를 보여 준다.
+const kProfileNameMaxLength = 30;
+
 /// 이름 수정용 간단한 한 줄 입력 다이얼로그.
 Future<String?> _promptEdit(
   BuildContext context, {
   required String title,
   required String initialValue,
+  int? maxLength,
 }) {
   final controller = TextEditingController(text: initialValue);
   return showDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
       title: Text(title),
-      content: TextField(controller: controller, autofocus: true),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        maxLength: maxLength,
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),

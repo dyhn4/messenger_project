@@ -184,8 +184,8 @@ class Team {
 
 /// 조직도 화면의 "팀" 탭용 — GET /api/org-chart/teams. 일반 [Team]과 달리 내가 속하지 않은
 /// 팀도 포함하고(관리자 이상이 회사 전체 구조를 보는 용도), 각 팀의 멤버 id 목록을 담는다.
-/// 이름/아바타 등 사람 정보는 세션이 이미 갖고 있는 전체 회원 목록(fetchAllUsers)과 id로
-/// 대조해서 보여준다 — 여기 실을 필요가 없다.
+/// 이름/아바타 등 사람 정보는 회원 목록(fetchAllUsers — 조직도를 여는 관리자 이상에게는 서버 전체 회원이
+/// 온다)과 id로 대조해서 보여준다 — 여기 실을 필요가 없다.
 class OrgChartTeam {
   final String id;
   final String name;

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { listLinkMessages } from './db/queries/messages.js';
 import { isTeamMember } from './db/queries/teams.js';
 import { extractFirstUrl, extractUrls, linkRowMatchesQuery } from './linkPreview.js';
+import { signedUploadOrNull } from './upload.js';
 
 export const linksRouter = Router();
 
@@ -62,7 +63,8 @@ linksRouter.get('/links', async (req, res) => {
         createdAt: new Date(m.createdAt).getTime(),
         url,
         title: preview?.linkPreviewTitle ?? null,
-        imageUrl: preview?.linkPreviewImageUrl ?? null,
+        // 서버가 받아 둔 미리보기 그림만(서명 링크) — 예전에 저장된 바깥 주소는 내려주지 않는다(messages.js toMessageDto와 같은 이유).
+        imageUrl: signedUploadOrNull(preview?.linkPreviewImageUrl),
         siteName: preview?.linkPreviewSiteName ?? null,
       });
     }

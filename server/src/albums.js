@@ -42,9 +42,11 @@ import {
 import { findRoomById, getDmHistoryFloor, isRoomMember } from './db/queries/rooms.js';
 import { findTeamById, isTeamMember } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
+import { checkFileRefs } from './fileRefs.js';
+import { fileRefPath } from './fileRefRules.js';
 import { roomDisplayName } from './rooms.js';
 import { sendUserMessage } from './sendMessage.js';
-import { resolveRawUrl, signFileUrl } from './upload.js';
+import { signFileUrl } from './upload.js';
 
 /** 항목 한 건의 DTO — 파일·썸네일은 짧게 만료되는 서명 링크로(DB에는 항상 원본 경로). [perms.canDelete]는 보는 사람 기준. */
 export function toAlbumItemDto(item, { uploaderName = null, canDelete = false } = {}) {
@@ -258,8 +260,18 @@ export function createAlbumsRouter(io) {
     const ctx = await requireAlbumMember(req, res);
     if (!ctx) return;
     if (!checkCanWrite(res, ctx.room, ctx.access)) return;
-    const parsed = parseAlbumItems(req.body, resolveRawUrl);
+    // 서명 링크는 원본 경로로 되돌리되(만료돼도 서명만 맞으면), 담아도 되는 파일인지는 메시지 첨부와 같은 규칙으로 따로 본다
+    // (fileRefs.js — 직접 올린 파일이나 지금 볼 수 있는 방의 파일). 예전엔 알아낸 파일 이름만 넣으면 그 파일이 앨범에 담겨,
+    // 그 앨범을 보는 사람 누구나(공유로만 보는 사람까지) 그 파일을 받을 수 있었다.
+    const parsed = parseAlbumItems(req.body, fileRefPath);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+    // 확인은 앱이 보낸 값 그대로(서명 링크인지가 규칙에 들어간다) — parseAlbumItems는 항목을 순서대로 받거나 통째로 거절하므로
+    // 같은 자리끼리 짝이 맞는다. 알아볼 수 없어 빠진 미리보기는 확인할 것도 없다.
+    const files = await checkFileRefs(
+      parsed.items.flatMap((item, i) => [req.body.items[i].fileUrl, item.thumbnailUrl ? req.body.items[i].thumbnailUrl : null]),
+      { senderId: req.user.sub },
+    );
+    if (!files.ok) return res.status(400).json({ error: files.error });
     const rows = await insertAlbumItems(ctx.album.id, req.user.sub, parsed.items);
     notifyChanged(ctx.album, 'items');
     const uploader = await findUserById(req.user.sub);
@@ -394,11 +406,13 @@ export function createAlbumsRouter(io) {
     const ordered = parsed.ids.map((id) => byId.get(id));
 
     // 파일은 복사하지 않고 같은 업로드 경로를 참조한다 — 일반 첨부 메시지와 같은 규칙(읽기 전용·보관 토픽 등)을 그대로 쓴다.
+    // 경로는 이 앨범의 항목에서 읽은 값이고 이 사람은 앨범 방의 멤버라(requireAlbumMember) 파일 확인은 건너뛴다('server').
     const result = await sendUserMessage({
       io,
       senderId: req.user.sub,
       room: target,
       payload: { roomId: target.id, type: shareMessageType(ordered), attachments: ordered.map(toShareAttachment) },
+      fileSource: 'server',
     });
     if (!result.ok) return res.status(result.status ?? 400).json({ error: result.error });
     res.status(201).json(result.message);

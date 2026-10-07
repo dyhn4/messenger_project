@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -7,14 +6,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
 
 import '../models/message.dart' show Message, MessageAttachment, MessageType;
 import '../models/room.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
-import '../services/app_platform.dart';
 import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
@@ -102,12 +99,17 @@ Future<String?> saveAttachment({
     );
   } else {
     savedPath = await FilePicker.saveFile(
-      fileName: fileName,
+      // 저장 창에 미리 채우는 이름도 이 기기에 둘 이름으로 넘긴다(download_storage.dart) — 받은
+      // 이름에 폴더나 못 쓰는 글자가 섞여 있으면 저장 창이 그 폴더로 따라가거나 이름을 받지 못하고,
+      // 바로 가기처럼 탐색기가 속을 읽는 형식은 글 파일로 둔다.
+      fileName: savedFileName(fileName),
       initialDirectory: settings.downloadFolder.isEmpty
           ? null
           : settings.downloadFolder,
       bytes: bytes,
     );
+    // 저장 창으로 받은 파일은 file_picker가 직접 쓴다 — "인터넷에서 받은 파일" 표시는 따로 붙인다.
+    if (savedPath != null) await markFromInternet(savedPath);
   }
 
   if (savedPath != null && settings.openFolderAfterDownload) {
@@ -1109,8 +1111,8 @@ List<Widget> fileActionMenuItems(
 ];
 
 /// 채팅/댓글에 올라온 파일 하나. 누르면 항상 먼저 전체를 다 받은 뒤에 PDF/텍스트는 인앱
-/// 뷰어로, 그 외는 외부 앱으로 열고(_open 참고), 마우스를 올리면 오른쪽 위에 다운로드
-/// 버튼이 뜬다.
+/// 뷰어로, 그 외는 외부 앱으로 열고(실행될 수 있는 형식은 열지 않고 폴더에서 보여 준다 — _open
+/// 참고), 마우스를 올리면 오른쪽 위에 다운로드 버튼이 뜬다.
 class DownloadableFile extends StatefulWidget {
   final Session session;
   final String url;
@@ -1211,24 +1213,24 @@ class _DownloadableFileState extends State<DownloadableFile> {
       // 비밀 대화 파일은 계속 임시 폴더에만 받는다 — 복호화된 평문을 사용자의 영구 다운로드
       // 폴더에 남기지 않기 위한 의도적인 구분이다. 일반 파일은 설정에서 다운로드 폴더를
       // 지정해뒀으면 그 폴더에 실제로 저장해서 열고(다운로드 버튼으로 받은 것과 같은 파일이
-      // 다운로드 폴더에 남아있게), 지정 안 했으면 원래대로 임시 폴더로 폴백한다.
+      // 다운로드 폴더에 남아있게), 지정 안 했으면 원래대로 임시 폴더로 폴백한다. 임시 폴더도
+      // 이 앱만의 폴더이고, 받은 이름은 다듬어서 그 폴더 바로 아래에만 쓴다(downloadTempFolder·
+      // writeDownloadFile). 웹은 폴더 없이 새 탭으로 연다.
       final isSecret = widget.attachmentKey != null;
       final downloadFolder = widget.session.settings.downloadFolder;
-      final String path;
-      if (kIsWeb || (!isSecret && downloadFolder.isNotEmpty)) {
-        // 웹은 폴더 없이 새 탭으로 연다(download_storage.dart).
-        path = await writeDownloadFile(
-          folder: downloadFolder,
-          fileName: widget.fileName,
-          bytes: bytes,
-          reuseIdentical: true,
-        );
-      } else {
-        final temp = (await getTemporaryDirectory()).path;
-        path = '$temp${AppPlatform.pathSeparator}${widget.fileName}';
-        await File(path).writeAsBytes(bytes);
+      final path = await writeDownloadFile(
+        folder: !isSecret && downloadFolder.isNotEmpty
+            ? downloadFolder
+            : await downloadTempFolder(),
+        fileName: widget.fileName,
+        bytes: bytes,
+        reuseIdentical: true,
+      );
+      // 실행될 수 있는 형식은 열지 않고 폴더에서 보여 준다 — 그 까닭을 알린다.
+      final notice = await openLocalFile(path);
+      if (notice != null && mounted) {
+        showAppToast(context, notice, duration: const Duration(seconds: 4));
       }
-      await openLocalFile(path);
     } catch (e) {
       if (!mounted) return;
       showAppToast(context, '열기 실패: $e');

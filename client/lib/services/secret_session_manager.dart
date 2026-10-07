@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 
+import '../models/message.dart';
 import '../models/room.dart';
 import 'api_client.dart';
 import 'chat_socket.dart';
@@ -16,7 +17,7 @@ class SecretSessionManager {
   final ApiClient _api;
   final ChatSocket _socket;
   final DeviceIdentity _identity;
-  final SecretKeyStore _keyStore = SecretKeyStore();
+  final SecretKeyStore _keyStore;
 
   // deviceId -> signingPublicKey 캐시(핸드셰이크마다 서버에 새로 물어보지 않도록).
   final Map<String, String> _signingKeyCache = {};
@@ -41,7 +42,13 @@ class SecretSessionManager {
   String _envelopeCacheKey(String roomId, int epoch, int n) =>
       '$roomId|$epoch|$n';
 
-  SecretSessionManager(this._api, this._socket, this._identity);
+  /// [keyStore]는 테스트가 저장소를 바꿔 끼울 때만 준다.
+  SecretSessionManager(
+    this._api,
+    this._socket,
+    this._identity, {
+    SecretKeyStore? keyStore,
+  }) : _keyStore = keyStore ?? SecretKeyStore();
 
   Future<String> _signingKeyFor(String deviceId) async {
     return _signingKeyCache[deviceId] ??= await _api
@@ -162,16 +169,65 @@ class SecretSessionManager {
   Future<bool> hasActiveSession(String roomId) async =>
       await _keyStore.readChainState(roomId) != null;
 
-  /// 이미 한 번 복호화에 성공한 메시지/댓글의 평문을 messageId로 재사용한다(한 방향 래칫이라
-  /// 두 번째부터는 암호문을 다시 복호화할 수 없기 때문 — secret_key_store.dart 참고).
-  Future<String?> readCachedDecryptedText(String messageId) =>
-      _keyStore.readDecryptedText(messageId);
+  /// 이미 한 번 복호화에 성공한 메시지/댓글의 평문을 재사용한다(한 방향 래칫이라 두 번째부터는
+  /// 암호문을 다시 복호화할 수 없기 때문 — secret_key_store.dart 참고). 서버가 지운 메시지의 평문이
+  /// 이 기기에 남지 않도록 방·작성 시각·삭제 예정 시각을 함께 적어 둔다.
+  Future<String?> readCachedDecryptedText(SecretTextRef ref) =>
+      _keyStore.readDecryptedText(ref);
 
-  Future<void> cacheDecryptedText(String messageId, String text) =>
-      _keyStore.saveDecryptedText(messageId, text);
+  Future<void> cacheDecryptedText(SecretTextRef ref, String text) =>
+      _keyStore.saveDecryptedText(ref, text);
 
-  Future<void> forgetDecryptedText(String messageId) =>
-      _keyStore.deleteDecryptedText(messageId);
+  /// 메시지·댓글이 지워졌을 때(message:deleted / comment:deleted).
+  Future<void> forgetDecryptedText(String roomId, String id) =>
+      _keyStore.deleteDecryptedText(roomId, id);
+
+  /// 서버가 메시지를 완전히 지웠을 때(message:expired) — 그 댓글 평문까지.
+  Future<void> forgetExpiredMessage(String roomId, String messageId) =>
+      _keyStore.deleteMessageTexts(roomId, messageId);
+
+  /// 서버가 메시지 읽음을 확정했을 때(secret:message-read) — 그 자동 삭제 시각을 적어 둔다.
+  Future<void> noteMessageRead(String messageId, DateTime? expiresAt) =>
+      _keyStore.noteMessageRead(messageId, expiresAt);
+
+  /// 이 기기가 타이머가 켜진 방에서 메시지 읽음을 보냈을 때 — 확정 알림을 못 받아도 지워지게 어림한
+  /// 삭제 예정 시각을 먼저 적어 둔다.
+  Future<void> noteLocalRead(String messageId, Duration selfDestruct) =>
+      _keyStore.noteLocalRead(messageId, selfDestruct);
+
+  /// 히스토리를 요청하기 직전에 잡아 두는 평문 캐시 저장 순번([reconcileHistoryPage]에 넘긴다).
+  int get textCacheGeneration => _keyStore.textCacheGeneration;
+
+  /// 히스토리 한 페이지로 서버가 더 이상 주지 않는(지운) 메시지·댓글의 평문을 지운다 — SecretKeyStore 참고.
+  Future<List<SecretCachedTextInfo>> reconcileHistoryPage({
+    required String roomId,
+    required List<Message> page,
+    required DateTime? before,
+    required int limit,
+    required int sinceGeneration,
+  }) => _keyStore.reconcileHistoryPage(
+    roomId: roomId,
+    page: page,
+    before: before,
+    limit: limit,
+    sinceGeneration: sinceGeneration,
+  );
+
+  /// 삭제 예정 시각이 지난 평문을 지운다(앱 시작·방 열기·포그라운드 복귀 때, 그리고 스스로 타이머로).
+  Future<List<SecretCachedTextInfo>> purgeExpiredTexts() =>
+      _keyStore.purgeExpiredTexts();
+
+  /// 삭제 예정 시각이 지나 지운 항목을 알려 줄 곳(열려 있는 방 화면에서도 빼도록).
+  set onExpiredTextsPurged(
+    void Function(List<SecretCachedTextInfo> removed)? callback,
+  ) => _keyStore.onExpiredTextsPurged = callback;
+
+  /// 이 기기의 비밀 대화 평문 캐시 — Session이 방 화면 없이 서버와 맞추는 뒷정리(서버 시각 알려 주기, 히스토리
+  /// 페이지 반영, 남은 방 찾기, 예전 형식 정리)에 쓴다. 방이 없어졌을 때는 키까지 지우는 [forgetRoom]을 쓴다.
+  SecretKeyStore get textCache => _keyStore;
+
+  /// 로그아웃·재로그인으로 이 매니저를 버릴 때 — 평문 정리 타이머를 멈춘다.
+  void dispose() => _keyStore.dispose();
 
   /// 메시지/댓글 전송 직전 — 평문을 암호문 봉투(JSON)로 바꾸고, 필요하면 재키잉을 함께 트리거한다.
   /// 세션이 아직 성립되지 않았으면(핸드셰이크 진행 중) null을 돌려준다 — 호출자는 전송을 보류해야 한다.
@@ -392,6 +448,7 @@ class SecretSessionManager {
     _epochStartedAt[event.roomId] = DateTime.now();
   }
 
+  /// 방이 없어졌을 때(종료·거절·나가기) — 그 방의 키 상태와 이 기기에 저장해 둔 평문까지 지운다.
   Future<void> forgetRoom(String roomId) async {
     await _keyStore.clearRoom(roomId);
     _epochMessageCount.remove(roomId);

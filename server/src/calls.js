@@ -1,25 +1,69 @@
 import { Router } from 'express';
-import { AccessToken } from 'livekit-server-sdk';
-import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL } from './config.js';
+import { AccessToken, ParticipantInfo_State, RoomServiceClient } from 'livekit-server-sdk';
+import { topicAccess } from './access.js';
+import { tooMany } from './authGuard.js';
+import {
+  CALL_TOKEN_TTL_MS,
+  callRoomDenial,
+  callStartDenial,
+  callStartWait,
+  isLivekitNotFound,
+  isRestrictedTopic,
+  recordCallToken,
+} from './callAccess.js';
+import { callStateFor } from './callState.js';
+import { LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_PORT, LIVEKIT_URL } from './config.js';
 import { findRoomById, isRoomMember } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
 import { LIVEKIT_PROXY_PREFIX } from './livekitProxy.js';
-import { SELF_ROOM_DENIAL } from './permissions.js';
 
 /**
  * 화상회의(LiveKit SFU) — 대화방 하나당 회의방 하나를 그대로 대응시킨다(LiveKit room 이름 =
  * 우리 방 id). 1:1이든 그룹이든 같은 경로를 쓴다: LiveKit에서 1:1은 그냥 참가자가 2명인
  * 방이라, P2P 시그널링을 따로 만들 이유가 없다.
  *
- * 서버가 하는 일은 **참가 토큰 발급**뿐이다. 미디어는 클라이언트↔LiveKit이 직접 주고받고,
- * 이 Node 서버는 그 경로에 끼지 않는다. 토큰은 "누가(identity) 어느 방에(roomJoin) 들어갈 수
- * 있는지"를 LiveKit API 비밀키로 서명한 것이라, 클라이언트가 스스로 만들 수 없다 —
- * 방 멤버십 검사를 여기서 한 번 하고 나면 LiveKit이 그 결과를 신뢰하는 구조다.
+ * 서버가 하는 일은 **참가 토큰 발급**과, 자격을 잃은 사람을 LiveKit에서 내보내기(방 관리 API —
+ * callAccess.js)다. 미디어는 클라이언트↔LiveKit이 직접 주고받고, 이 Node 서버는 그 경로에 끼지
+ * 않는다. 토큰은 "누가(identity) 어느 방에(roomJoin) 들어갈 수 있는지"를 LiveKit API 비밀키로
+ * 서명한 것이라, 클라이언트가 스스로 만들 수 없다 — 방 멤버십 검사를 여기서 한 번 하고 나면
+ * LiveKit이 그 결과를 신뢰하는 구조라, 나중에 멤버십을 잃으면 서버가 직접 내보내야 한다.
  */
 
 /** LiveKit 비밀값이 없으면(설치 안 됨/미설정) 화상회의 기능 전체를 끈다. */
 export function callsEnabled() {
   return !!LIVEKIT_API_SECRET;
+}
+
+/**
+ * LiveKit 방 관리 API(참가자 확인·내보내기) — 같은 PC의 LiveKit에 바로 붙는다. 메인 포트의 /livekit 프록시는 앱이 쓰는
+ * 신호 경로만 넘기고 방 관리 API는 넘기지 않으므로(livekitProxy.js) 그쪽으로 가지 않는다. LiveKit을 다른 장비에 띄웠으면
+ * (LIVEKIT_URL) 그 주소의 같은 포트가 API다(SDK가 ws→http로 바꾼다). 화상회의가 설정 안 된 서버면 null.
+ */
+let roomService = null;
+export function livekitRoomService() {
+  if (!callsEnabled()) return null;
+  roomService ??= new RoomServiceClient(LIVEKIT_URL || `http://127.0.0.1:${LIVEKIT_PORT}`, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+    // 같은 PC라 보통 바로 답한다 — LiveKit이 멈춰 있어도 통화 신호·내보내기를 오래 붙잡지 않게.
+    requestTimeout: 5,
+  });
+  return roomService;
+}
+
+/**
+ * [userId]가 지금 이 방의 LiveKit 회의에 실제로 연결돼 있는지(LiveKit room 이름 = 방 id, identity = 사용자 id). call:join이
+ * 토큰 발급 기록도 통화 상태도 없이 왔을 때(오래 끊겼다 다시 알림·서버 재시작 뒤 — callAccess.js) 확인한다. 못 물어보면
+ * (LiveKit이 꺼짐 등) false — 그때는 미디어도 안 될 때다.
+ */
+export async function livekitHasParticipant(roomId, userId) {
+  const livekit = livekitRoomService();
+  if (!livekit) return false;
+  try {
+    const participant = await livekit.getParticipant(roomId, userId);
+    return participant.state !== ParticipantInfo_State.DISCONNECTED;
+  } catch (err) {
+    if (!isLivekitNotFound(err)) console.error('[call] LiveKit 참가자 확인 실패:', err?.message ?? err);
+    return false;
+  }
 }
 
 // 진행 중인 통화의 메모리 상태(참가자·진행자·화질 단계)는 callState.js에 있다 — DB를 몰라 단위 테스트가 그대로 돌린다.
@@ -76,9 +120,10 @@ export function createCallsRouter() {
   /**
    * 이 방의 화상회의에 들어갈 참가 토큰 발급. 방 멤버만 받을 수 있다.
    *
-   * 비밀 대화(E2EE)는 제외한다 — 서버가 내용을 볼 수 없어야 하는 방인데 SFU는 미디어를
-   * 복호화해서 중계하는 구성요소라 그 약속이 깨진다(대화 내보내기를 막아둔 것과 같은 이유).
-   * LiveKit 자체는 E2EE를 지원하므로 나중에 열어줄 수 있다.
+   * 비밀 대화(E2EE)·나와의 대화는 제외한다(callAccess.js callRoomDenial). 진행 중인 통화가 없으면 이 요청은 통화를 "시작"
+   * 하는 것이라, 읽기 전용·보관된 토픽은 토픽 관리자만(callStartDenial), 너무 자주는 안 된다(callStartWait — 세는 건 실제로
+   * 통화가 시작되는 call:join이고 여기서는 미리 알려 줄 뿐이다). 앱은 이 토큰으로 LiveKit에 연결한 뒤 call:join을 보내는데,
+   * call:join은 방금 토큰을 받은 사람인지도 본다(recordCallToken).
    */
   router.post('/rooms/:id/call/token', async (req, res) => {
     if (!callsEnabled()) {
@@ -89,11 +134,17 @@ export function createCallsRouter() {
     if (!(await isRoomMember(room.id, req.user.sub))) {
       return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     }
-    if (room.isSecret) {
-      return res.status(400).json({ error: '비밀 대화에서는 아직 화상회의를 쓸 수 없습니다.' });
+    // 비밀 대화는 SFU가 미디어를 풀어 중계해서 안 되고, 나와의 대화는 회의할 상대가 없다(클라이언트도 버튼을 감춘다).
+    const roomDenial = callRoomDenial(room);
+    if (roomDenial) return res.status(400).json({ error: roomDenial });
+    if (!callStateFor(room.id).active) {
+      if (isRestrictedTopic(room)) {
+        const startDenial = callStartDenial({ room, canManage: (await topicAccess(room, req.user.sub)).canManage });
+        if (startDenial) return res.status(403).json({ error: startDenial });
+      }
+      const wait = callStartWait(req.user.sub, room.id);
+      if (wait > 0) return tooMany(res, wait, '화상회의 시도');
     }
-    // 나와의 대화는 나 혼자라 회의할 상대가 없다(클라이언트도 버튼을 감춘다).
-    if (room.isSelf) return res.status(400).json({ error: SELF_ROOM_DENIAL });
 
     const url = livekitUrlFor(req);
     if (!url) return res.status(500).json({ error: 'LiveKit 주소를 알 수 없습니다.' });
@@ -104,7 +155,7 @@ export function createCallsRouter() {
       name: me?.name ?? me?.username ?? '알 수 없음',
       // 토큰은 "입장권"이라 짧게 — 통화가 이어지는 동안은 LiveKit이 연결을 유지하므로
       // 만료돼도 통화가 끊기지 않는다(다시 들어올 땐 새로 발급받는다).
-      ttl: '10m',
+      ttl: CALL_TOKEN_TTL_MS / 1000,
     });
     token.addGrant({
       roomJoin: true,
@@ -115,7 +166,9 @@ export function createCallsRouter() {
       canPublishData: true,
     });
 
-    res.json({ url, roomName: room.id, token: await token.toJwt() });
+    const jwt = await token.toJwt();
+    recordCallToken(req.user.sub, room.id);
+    res.json({ url, roomName: room.id, token: jwt });
   });
 
   return router;

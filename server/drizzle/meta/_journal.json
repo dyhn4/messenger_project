@@ -666,6 +666,20 @@
       "when": 1791290916661,
       "tag": "0094_team_invite_max_uses",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1791324693285,
+      "tag": "0095_upload_owner_invite_max_uses",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791348655981,
+      "tag": "0096_task_move_backfill",
+      "breakpoints": true
     }
   ]
 }

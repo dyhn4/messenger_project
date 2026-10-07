@@ -22,13 +22,17 @@ class TodoDownloadSummary {
   const TodoDownloadSummary({this.saved = 0, this.failed = 0, this.folder});
 }
 
-/// 파일 이름에 쓸 수 없는 글자(Windows 기준) — 받은 이름에 섞여 있으면 `_`로 바꾼다.
-final _unsafeFileChars = RegExp(r'[\\/:*?"<>|]');
+/// 받은 이름의 폴더 구분자 — 할 일 첨부는 잘라 내지 않고 `_`로 바꿔서 이름이 다 보이게 한다.
+final _folderSeparators = RegExp(r'[\\/]');
 
-/// 저장할 파일 이름 — 첨부 이름 그대로(못 쓰는 글자만 `_`로). 이름이 없으면 종류에 맞는 확장자로 임시 이름을 만든다.
+/// 저장할 파일 이름 — 첨부 이름을 [safeFileName]으로 다듬은 것(폴더 구분자는 `_`로). 다듬고 남는 게 없으면 종류에 맞는
+/// 확장자로 임시 이름을 만든다.
 String todoAttachmentFileName(TodoAttachment attachment, int index) {
-  final name = attachment.fileName?.replaceAll(_unsafeFileChars, '_').trim();
-  if (name != null && name.isNotEmpty) return name;
+  final name = safeFileName(
+    (attachment.fileName ?? '').replaceAll(_folderSeparators, '_'),
+    fallback: '',
+  );
+  if (name.isNotEmpty) return name;
   final mime = (attachment.mimeType ?? '').toLowerCase();
   final sub = mime.contains('/') ? mime.split('/').last : '';
   final ext = RegExp(r'^[a-z0-9]{2,4}$').hasMatch(sub)
@@ -162,7 +166,10 @@ Future<void> downloadTodoAttachments(
 Future<void> _openFolder(String folder) async {
   if (!AppPlatform.isWindows) return;
   try {
-    await Process.start('explorer.exe', [folder]);
+    // 이름만 주면 현재 폴더에 심어 둔 explorer.exe가 대신 실행될 수 있어 전체 경로로 부른다(download_storage.dart와 같은
+    // 방식 — 검토 S32). 받을 폴더는 사용자가 직접 고른 곳이라 UNC여도 따로 묻지 않는다.
+    final root = AppPlatform.environment['SystemRoot'] ?? r'C:\Windows';
+    await Process.start('$root\\explorer.exe', [folder]);
   } catch (_) {
     // 못 열어도 파일은 이미 저장돼 있다.
   }

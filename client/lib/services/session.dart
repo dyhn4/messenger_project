@@ -52,6 +52,7 @@ import 'poll_events.dart';
 import 'todo_actions.dart';
 import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
+import 'secret_key_store.dart' show SecretCachedTextInfo, SecretTextRef;
 import 'secret_session_manager.dart';
 import 'server_endpoints.dart';
 import 'typing_gate.dart';
@@ -70,6 +71,10 @@ export 'poll_actions.dart';
 export 'todo_actions.dart';
 
 enum AuthStage { loadingConfig, needsServer, needsLogin, ready }
+
+/// 비밀 대화방 하나를 서버와 맞춰 본 결과(Session._syncSecretRoomCache) — 다 맞췄음(전체를 훑었으면 처음까지)·
+/// 훑다 말았음·물어보지 못했음(오프라인 등)·방이 없음(404)·내가 멤버가 아님(403).
+enum _SecretRoomCheck { complete, partial, failed, notFound, notMember }
 
 /// 앱 전체 상태: 서버 주소 → 로그인 → 방 목록 순으로 진행됩니다. 인증/방 목록/라우팅만
 /// 책임지고, 방 하나의 메시지/전송은 RoomChatController에 맡깁니다.
@@ -226,7 +231,11 @@ class Session extends ChangeNotifier {
   /// 내가 아직 받지 않은(참가자 목록에 내가 없는) 통화가 걸려온 방. 수신 화면을 띄우는 신호.
   String? incomingCallRoomId;
 
-  late final callController = CallController(() => api!);
+  late final callController = CallController(
+    () => api!,
+    onDisconnected: _handleCallDisconnected,
+    onReconnected: _handleCallReconnected,
+  );
 
   /// 캘린더 화면의 상태(선택한 팀의 캘린더·일정 캐시). 화면이 처음 열릴 때 만들어지고 소켓의
   /// calendar:changed로 알아서 새로고침한다 — 로그아웃하면 [logout]이 비운다.
@@ -304,7 +313,22 @@ class Session extends ChangeNotifier {
   /// api 인스턴스가 바뀌므로 secretSessionManager는 _enterApp에서 매번 새로 만들지만,
   /// deviceIdentity(기기 UUID+키쌍)는 flutter_secure_storage에 영구 저장되므로 인스턴스만 재사용.
   DeviceIdentity? deviceIdentity;
-  SecretSessionManager? secretSessionManager;
+  SecretSessionManager? _secretSessionManager;
+  SecretSessionManager? get secretSessionManager => _secretSessionManager;
+
+  /// 새 매니저로 바꿀 때(로그인·로그아웃) 이전 것의 평문 정리 타이머를 멈추고, 새 것이 삭제 예정 시각이
+  /// 지나 지운 평문을 열려 있는 방 화면에서도 빼도록 잇는다(_handleExpiredSecretTexts).
+  set secretSessionManager(SecretSessionManager? manager) {
+    if (identical(manager, _secretSessionManager)) return;
+    _secretSessionManager?.dispose();
+    _secretSessionManager = manager;
+    manager?.onExpiredTextsPurged = _handleExpiredSecretTexts;
+  }
+
+  /// 지금 보내는 비밀 대화 읽음 신호(secret:message-read)가 바로 서버에 닿는지 — 소켓이 끊겨 있으면 신호는 다시
+  /// 붙을 때까지 쌓여 있다가 그때 처리된다(RoomChatController.markReadNow가 이 기기 기준 삭제 예정 시각을 어림할지
+  /// 정할 때 본다). 테스트가 연결된 상태를 흉내 낼 때 재정의한다.
+  bool get secretReadSignalLive => chatSocket.isConnected;
 
   /// 아직 응답하지 않은 비밀 대화 초대(secret:invite). UI가 이 목록을 보고 수락/거절 다이얼로그를 띄운다.
   final List<SecretInviteEvent> pendingSecretInvites = [];
@@ -408,6 +432,11 @@ class Session extends ChangeNotifier {
     // 방을 여는 순간, 그 방으로 이미 떠있던 알림(백그라운드 FCM 경로에서 놓친 것 포함)을
     // 바로 지운다 — 안 그러면 방을 봐도 알림이 남아있고 앱 아이콘의 안읽음 배지도 안 지워진다.
     notifications.cancelForRoom(roomId);
+    // 비밀 대화방을 열 때 — 서버의 자동 삭제 알림을 놓쳐 삭제 예정 시각이 지난 평문이 이 기기에 남아
+    // 있으면 지금 지운다(S34, SecretKeyStore 참고).
+    if (_findRoom(roomId)?.isSecret == true) {
+      unawaited(secretSessionManager?.purgeExpiredTexts());
+    }
     return ++_activeRoomToken;
   }
 
@@ -461,6 +490,10 @@ class Session extends ChangeNotifier {
     // 백그라운드에 있는 동안 사내 와이파이 ↔ LTE가 바뀌었을 수 있다(특히 모바일) — 돌아올 때
     // 지금 되는 주소를 다시 확인한다. 사내로 돌아왔으면 외부 주소에서 사내 주소로 되돌아간다.
     if (value && wasBackground) unawaited(_reselectServerEndpoint());
+    // 백그라운드에서는 정리 타이머가 늦게 깰 수 있다 — 그사이 삭제 예정 시각이 지난 비밀 대화 평문을 지운다.
+    if (value && wasBackground) {
+      unawaited(secretSessionManager?.purgeExpiredTexts());
+    }
   }
 
   /// FCM 백그라운드 핸들러가 읽을 수 있도록 activeRoomId/appInForeground를
@@ -930,8 +963,9 @@ class Session extends ChangeNotifier {
   }
 
   /// "대화 내보내기" — 방의 대화 내용을 엑셀(.xlsx)로 받아 기기에 저장한다. 다운로드 폴더를
-  /// 설정해뒀으면 거기에, 아니면 임시 폴더에 저장한다(attachment_widgets.dart의 일반 파일
-  /// 저장과 같은 규칙). 비밀 대화는 애초에 호출부(room_options_menu.dart)가 메뉴 자체를
+  /// 설정해뒀으면 거기에, 아니면 이 앱만의 임시 폴더(downloadTempFolder — 임시 폴더 맨 위는 설치
+  /// 프로그램이 풀리는 곳이라 쓰지 않는다)에 저장한다(file_actions.dart의 원본 보기와 같은 규칙).
+  /// 비밀 대화는 애초에 호출부(room_options_menu.dart)가 메뉴 자체를
   /// 감춰서 여기까지 안 오지만, 서버도 다시 막는다(rooms.js). 저장된 파일의 전체 경로를
   /// 돌려준다(호출부가 바로 열 때 씀).
   Future<String> exportRoomChat(
@@ -958,10 +992,16 @@ class Session extends ChangeNotifier {
       throw ApiException(message);
     }
     final bytes = await response.stream.toBytes();
-    final dirPath = settings.downloadFolder.isNotEmpty || kIsWeb
-        ? settings.downloadFolder
-        : (await getTemporaryDirectory()).path;
-    return writeDownloadFile(folder: dirPath, fileName: fileName, bytes: bytes);
+    // 웹은 폴더 없이 브라우저 다운로드로 받는다(downloadTempFolder가 빈 문자열이다).
+    final folder = settings.downloadFolder;
+    return writeDownloadFile(
+      folder: folder.isEmpty ? await downloadTempFolder() : folder,
+      fileName: fileName,
+      bytes: bytes,
+      // 남이 보낸 첨부가 아니라 서버가 이 방 글로 만든 엑셀이다 — "인터넷에서 받은 파일" 표시를 붙이면
+      // 바로 이어서 열 때(export_chat_dialog.dart) 제한된 보기로 열린다.
+      markAsDownloaded: false,
+    );
   }
 
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
@@ -1270,8 +1310,9 @@ class Session extends ChangeNotifier {
   Future<List<AppUser>> fetchMembersOfTeam(String teamId) =>
       api!.fetchTeamMembers(teamId);
 
-  /// 팀에 넣을 수 있는 사람들 = 서버에 가입한 전체 계정. 회원가입만 하면 아직 어느 팀에도
-  /// 속하지 않으므로, 소유자·관리자가 여기서 골라 팀에 가입시켜 준다.
+  /// 회원 목록 — 서버가 범위를 정한다: 관리자 등급·서버 운영자는 서버 전체, 그 밖에는 나와 팀을 같이 쓰는 사람만
+  /// (server/src/users.js GET /users). 조직도와 접속 상태 초기값에 쓴다. 팀에 넣을 사람 고르기는 이 목록이 아니라
+  /// 팀원 추가 후보(ApiClient.fetchTeamMemberCandidates)를 쓴다 — 아직 어느 팀에도 없는 사람은 여기 안 나온다.
   Future<List<AppUser>> fetchAllUsers() => api!.fetchUsers();
 
   /// 조직도(팀 탭)용 — 서버 전체 팀 + 각 팀의 멤버 id 목록.
@@ -1371,6 +1412,8 @@ class Session extends ChangeNotifier {
       chatSocket,
       deviceIdentity!,
     );
+    // 방금 받은 방 목록의 마지막 활동 시각(서버 시계) — 비밀 대화 평문 정리가 서버의 지금을 어림하는 첫 값이다.
+    _noteServerTimesOfRooms(rooms);
     // FCM 토큰 등록(_registerFcmToken)은 서버의 devices 테이블에 이 기기 행이 먼저 있어야
     // UPDATE가 걸린다(server/src/db/queries/devices.js의 setDeviceFcmToken). 여기서
     // registerWithServer를 fire-and-forget으로 두면, 새로 설치한 기기처럼 아직 그 행이 없는
@@ -1378,6 +1421,12 @@ class Session extends ChangeNotifier {
     // 생긴다 — 이때 서버는 404를 돌려주고, _registerFcmToken은 그 실패를 조용히 삼켜서 FCM
     // 토큰이 영영 등록되지 않는다(원인을 알기 어려운 형태로). 기기 등록만 먼저 기다린다.
     await deviceIdentity!.registerWithServer(api!);
+    // 앱을 켤 때 — 꺼져 있던 동안 서버가 자동 삭제·삭제했거나 방째 없앤 비밀 대화의 평문을 이 기기에서도
+    // 지우고(S34 — 그 알림은 다시 오지 않는다), 다음 예정 시각에 스스로 다시 정리하게 한다. 기기 등록 뒤에
+    // 한다 — 공용 PC에서 계정을 바꿔 로그인하면 기기 등록이 같은 저장소에 새 기기 키를 쓰는데, Windows
+    // 저장소는 쓸 때마다 파일 하나를 통째로 다시 써서 겹치면 한쪽이 사라질 수 있다.
+    unawaited(secretSessionManager!.purgeExpiredTexts());
+    unawaited(syncSecretTextCaches());
     unawaited(_registerFcmToken());
     unawaited(_registerWebPush());
 
@@ -1387,7 +1436,11 @@ class Session extends ChangeNotifier {
       deviceId: deviceIdentity!.deviceId,
     );
     _messageSub?.cancel();
-    _messageSub = chatSocket.messages.listen(handleSocketMessage);
+    _messageSub = chatSocket.messages.listen((m) {
+      // 서버가 방금 찍은 작성 시각 — 비밀 대화 평문 정리가 서버의 지금을 어림하는 데 쓴다(_noteServerTime).
+      _noteServerTime(m.createdAt);
+      unawaited(handleSocketMessage(m));
+    });
     _roomSub?.cancel();
     _roomSub = chatSocket.roomEvents.listen(_handleRoomBroadcast);
     _roomRemovedSub?.cancel();
@@ -1471,9 +1524,15 @@ class Session extends ChangeNotifier {
     _teamLeftSub?.cancel();
     _teamLeftSub = chatSocket.teamLeftEvents.listen((e) {
       teams.removeWhere((t) => t.id == e.teamId);
-      // 그 팀 방들도 같이 정리한다(더 이상 볼 수 없다).
+      // 그 팀 방들도 같이 정리한다(더 이상 볼 수 없다) — 그 방 통화 중이었으면 통화도 끝낸다.
       for (final room in rooms.where((r) => r.teamId == e.teamId).toList()) {
+        _endCallInRemovedRoom(room.id);
         _controllers.remove(room.id)?.dispose();
+        // 팀에서 빠지면 서버가 그 팀의 비밀 대화에서도 나를 뺀다(팀이 지워졌으면 방째 없어진다) — 다시 들어갈 수
+        // 없는 방이라 이 기기에 남은 키와 평문도 지운다.
+        if (room.isSecret) {
+          unawaited(secretSessionManager?.forgetRoom(room.id));
+        }
       }
       rooms.removeWhere((r) => r.teamId == e.teamId);
       if (currentTeam?.id == e.teamId) {
@@ -1487,6 +1546,7 @@ class Session extends ChangeNotifier {
     });
     _commentSub?.cancel();
     _commentSub = chatSocket.commentEvents.listen((c) async {
+      _noteServerTime(c.createdAt);
       await decryptCommentInPlace(_findRoom(c.roomId), c);
       _controllers[c.roomId]?.addComment(c);
       _bumpRoomActivity(c.roomId, c.createdAt);
@@ -1514,13 +1574,19 @@ class Session extends ChangeNotifier {
       // 복호화가 필요 없다 — message:edited와 달리 바로 적용한다.
       _controllers[m.roomId]?.applyLinkPreview(m);
     });
-    // 투표: 누가 투표했거나 마감됨(방 전체) / 내 다른 기기에서 즐겨찾기를 바꿈(내 룸) — poll_actions.dart.
+    // 투표: 누가 투표했거나 마감됨(방 전체에는 개수만, 내가 투표했으면 내 기기들에만 내 선택까지 — server/src/pollListRules.js)
+    // / 내 다른 기기에서 즐겨찾기를 바꿈(내 룸) — poll_actions.dart.
     _pollUpdatedSub?.cancel();
     _pollUpdatedSub = chatSocket.pollUpdated.listen(handlePollUpdated);
     _pollFavoriteSub?.cancel();
     _pollFavoriteSub = chatSocket.pollFavorite.listen(handlePollFavorite);
     _messageDeletedSub?.cancel();
     _messageDeletedSub = chatSocket.messageDeleted.listen((e) {
+      // 비밀 대화면 이 기기에 저장해 둔 평문도 지운다 — 그 방을 이번에 열어 보지 않아(화면 컨트롤러가
+      // 없어) 아래가 아무 일도 안 해도 지워져야 한다.
+      if (_maybeSecretRoom(e.roomId)) {
+        unawaited(secretSessionManager?.forgetDecryptedText(e.roomId, e.id));
+      }
       _controllers[e.roomId]?.applyDelete(e.id);
     });
     _commentEditedSub?.cancel();
@@ -1530,6 +1596,9 @@ class Session extends ChangeNotifier {
     });
     _commentDeletedSub?.cancel();
     _commentDeletedSub = chatSocket.commentDeleted.listen((e) {
+      if (_maybeSecretRoom(e.roomId)) {
+        unawaited(secretSessionManager?.forgetDecryptedText(e.roomId, e.id));
+      }
       _controllers[e.roomId]?.applyCommentDelete(e.id);
     });
     _presenceSub?.cancel();
@@ -1702,16 +1771,25 @@ class Session extends ChangeNotifier {
     });
     _secretMessageReadSub?.cancel();
     _secretMessageReadSub = chatSocket.secretMessageRead.listen((e) {
-      _controllers[e.roomId]?.applyMessageRead(
-        e.messageId,
-        DateTime.fromMillisecondsSinceEpoch(e.readAt),
-        e.expiresAt != null
-            ? DateTime.fromMillisecondsSinceEpoch(e.expiresAt!)
-            : null,
-      );
+      final readAt = DateTime.fromMillisecondsSinceEpoch(e.readAt);
+      // 서버가 방금 읽음을 찍은 시각 — 아래 삭제 예정 시각(서버 시계)과 견줄 서버의 지금이 된다.
+      _noteServerTime(readAt);
+      final expiresAt = e.expiresAt != null
+          ? DateTime.fromMillisecondsSinceEpoch(e.expiresAt!)
+          : null;
+      // 이 기기에 저장해 둔 그 메시지(와 댓글) 평문에도 서버가 정한 삭제 예정 시각을 적어 둔다 — 그 시각의
+      // message:expired를 못 받아도(꺼져 있었음 등) 이 기기에서 스스로 지운다(S34).
+      unawaited(secretSessionManager?.noteMessageRead(e.messageId, expiresAt));
+      _controllers[e.roomId]?.applyMessageRead(e.messageId, readAt, expiresAt);
     });
     _messageExpiredSub?.cancel();
     _messageExpiredSub = chatSocket.messageExpired.listen((e) {
+      // 서버가 메시지를 댓글째 완전히 지웠다 — 이 기기 평문도 지운다(그 방 화면이 없어도).
+      if (_maybeSecretRoom(e.roomId)) {
+        unawaited(
+          secretSessionManager?.forgetExpiredMessage(e.roomId, e.messageId),
+        );
+      }
       _controllers[e.roomId]?.applyExpire(e.messageId);
     });
     _secretRekeyProposeSub?.cancel();
@@ -1893,6 +1971,14 @@ class Session extends ChangeNotifier {
   @visibleForTesting
   void debugApplyCallState(CallState state) => _applyCallState(state);
 
+  /// 테스트가 LiveKit 없이 "통화가 밖에서 끝났다"(CallController.onDisconnected)를 흘려 넣을 때.
+  @visibleForTesting
+  void debugCallDisconnected(
+    String roomId,
+    String notice, {
+    bool handoff = false,
+  }) => _handleCallDisconnected(roomId, notice, handoff);
+
   void _applyCallState(CallState state) {
     if (state.active) {
       callStates[state.roomId] = state;
@@ -1907,8 +1993,15 @@ class Session extends ChangeNotifier {
     final iAmIn = state.participantIds.contains(userId);
     // 다른 기기에서 받았어도 이 통화엔 응답한 것이다.
     if (state.active && iAmIn) _markCallAnswered(state.roomId);
+    // 알림을 끈(뮤트) 방은 전화도 울리지 않는다 — 앱이 꺼져 있을 때 서버가 보내는 전화 푸시도 같은 규칙이다
+    // (server/src/push.js notifyIncomingCall). 통화 버튼의 "참여" 표시는 그대로라 직접 들어갈 수는 있다.
+    // 서버가 잃었던 통화를 되살린 것(서버 재시작 뒤 등 — CallState.restored)도 울리지 않는다: 그 회의가 처음 시작될 때 이미
+    // 울렸고, 서버도 전화 푸시를 다시 보내지 않는다.
+    final muted = _findRoom(state.roomId)?.muted ?? false;
     if (state.active &&
         !iAmIn &&
+        !muted &&
+        !state.restored &&
         state.startedBy != userId &&
         callController.roomId == null &&
         !_answeredCalls.contains(_callKey(state.roomId, state))) {
@@ -1936,11 +2029,60 @@ class Session extends ChangeNotifier {
       roomId,
       roomLabel: match.isEmpty ? null : match.first.displayName(userId ?? ''),
     );
+    // 연결 직후 끊겼으면(서버가 바로 내보냄 등 — 안내는 _handleCallDisconnected가 띄웠다) 참여를 알리지 않는다. 같은 방
+    // 참여가 이미 연결 중이라 join()이 바로 돌아온 것이면 그쪽이 연결을 마친 뒤에 알린다 — 연결 전에 알리면 서버가 아직
+    // 토큰·연결을 확인할 수 없어 거절한다(server/src/callAccess.js admitCallJoin).
+    if (callController.roomId != roomId || !callController.connected) {
+      notifyListeners();
+      return;
+    }
     // 이미 진행 중이던 통화면 지금 아는 진행자·화질 단계를 먼저 넘긴다(내 참가로 바뀐 값은 곧 call:state로 온다).
     final known = callStates[roomId];
     if (known != null) _syncCallController(known);
-    chatSocket.joinCall(roomId);
+    _announceCallJoin(roomId);
     notifyListeners();
+  }
+
+  /// 서버에 통화 참여를 알린다(call:join) — 서버가 거절하면(읽기 전용 토픽에서 시작·너무 잦은 시작·멤버 아님·연결 확인
+  /// 실패 등) LiveKit에는 붙었어도 다른 사람들은 이 통화를 모르니, 연결을 끊고 서버 문구를 띄운다.
+  void _announceCallJoin(String roomId) {
+    chatSocket.joinCall(
+      roomId,
+      onRejected: (error) {
+        if (callController.roomId != roomId) return;
+        unawaited(leaveCall());
+        _showToast(error);
+      },
+    );
+  }
+
+  /// 통화가 이 기기 밖의 이유로 끝났다(CallController.onDisconnected — 서버가 내보냄·회의방이 닫힘·다른 기기에서 참여·연결이
+  /// 아주 끊김). LiveKit 연결은 컨트롤러가 이미 정리했다. 서버 통화 상태에서도 이 기기를 빼고(이미 빠졌으면 서버가 무시한다)
+  /// 같은 통화가 다시 울리지 않게 한 뒤 안내를 띄운다 — 통화 화면은 스스로 닫힌다(call_screen.dart). 이 기기에서 그 방을
+  /// 나가는 중이면(서버가 방을 나간 사람을 그 방 통화에서도 내보낸다) 스스로 나간 것이라 안내하지 않는다.
+  ///
+  /// [handoff]는 같은 계정이 다른 기기에서 이 통화에 들어가 이 기기가 끊긴 것(callDisconnectIsHandoff) — 그 사람은 통화를
+  /// 계속하고 있으니 "넘어갔다"고 알린다. 서버는 다른 기기의 참여가 이 자리를 대신할 때까지 기다리고, 끝내 안 오면 그때
+  /// 뺀다(server/src/socket.js call:leave). 바로 나가면 그 참여가 닿기 전에 진행자가 넘어가고, 혼자였으면 통화가 끝났다가
+  /// 다시 시작되며 모두에게 전화가 다시 울린다.
+  void _handleCallDisconnected(
+    String roomId,
+    String notice, [
+    bool handoff = false,
+  ]) {
+    _markCallAnswered(roomId);
+    chatSocket.leaveCall(roomId, handoff: handoff);
+    if (!_leavingRoomIds.contains(roomId)) _showToast(notice);
+    notifyListeners();
+  }
+
+  /// 지금 이 기기에서 나가기 요청 중인 방 — [_handleCallDisconnected]가 그 방 통화가 끊긴 안내를 띄우지 않게.
+  final Set<String> _leavingRoomIds = {};
+
+  /// [roomId] 방이 내 목록에서 사라질 때(나가기·내보내짐·토픽 삭제·팀에서 빠짐) 그 방 통화 중이었으면 끝낸다 — 서버도 그
+  /// 방 통화에서 내보내지만, LiveKit이 끊어 주기를 기다리지 않고 바로 정리한다. 안내는 방이 사라진 쪽 안내가 맡는다.
+  void _endCallInRemovedRoom(String roomId) {
+    if (callController.roomId == roomId) unawaited(leaveCall());
   }
 
   /// 서버가 알려준 통화 상태(진행자·화질 단계)를 지금 통화 중인 컨트롤러에 넘긴다.
@@ -1967,16 +2109,26 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 수신 화면에서 "거절" — 이 기기에서만 벨을 끈다(다른 기기나 통화 자체는 그대로).
   /// 소켓이 다시 붙었을 때(재연결·주소 전환) 통화 중이었으면 서버에 참여를 다시 알린다. 서버는 끊긴
   /// 소켓을 잠깐 기다렸다 통화에서 빼는데(server/src/callEvents.js의 CALL_DISCONNECT_GRACE_MS), 그 안에
   /// 다시 알리면 통화가 그대로 이어지고 대화 기록에 "나갔습니다/참여했습니다"가 남지 않는다. 안 알리면
-  /// 영상은 계속 되는데 서버만 이 사람을 통화에서 빼 버려, 참가자 목록·통화 기록이 어긋난다.
+  /// 영상은 계속 되는데 서버만 이 사람을 통화에서 빼 버려, 참가자 목록·통화 기록이 어긋난다. 그보다 오래
+  /// 끊겼어도 서버는 LiveKit에 실제로 연결돼 있는지 보고 받아 준다(server/src/socket.js call:join).
   void _reannounceCall() {
     final roomId = callController.roomId;
-    if (roomId != null && callController.connected) chatSocket.joinCall(roomId);
+    if (roomId != null && callController.connected) _announceCallJoin(roomId);
   }
 
+  /// LiveKit 연결이 다시 이어졌다(CallController.onReconnected) — 채팅 소켓이 붙어 있으면 참여를 다시 알린다. 서버가
+  /// 재시작되면 LiveKit 신호(서버의 /livekit 프록시)도 함께 끊기는데, 채팅 소켓이 먼저 붙으면 [_reannounceCall]은 통화가 아직
+  /// "연결됨"이 아니라 건너뛴다 — 여기서 알리지 않으면 영상은 이어지는데 서버에는 이 통화가 없다. 이미 통화에 들어가 있는
+  /// 것으로 아는 서버에는 같은 알림이 한 번 더 가도 아무 일도 없다(server/src/callAccess.js admitCallJoin).
+  void _handleCallReconnected(String roomId) {
+    if (!chatSocket.isConnected || callController.roomId != roomId) return;
+    _announceCallJoin(roomId);
+  }
+
+  /// 수신 화면에서 "거절" — 이 기기에서만 벨을 끈다(다른 기기나 통화 자체는 그대로).
   void declineIncomingCall() {
     final roomId = incomingCallRoomId;
     incomingCallRoomId = null;
@@ -2007,6 +2159,8 @@ class Session extends ChangeNotifier {
   /// 방 목록(서버가 계산한 정확한 안읽음 수 포함)과, 지금까지 열어본 적 있어 캐시된 방들의 메시지.
   Future<void> _resyncAfterReconnect() async {
     final changes = _roomChangesDuringResync = <String, bool>{};
+    // 이번에 목록에서 사라진 비밀 대화방 — 정말 없어졌는지(또는 내가 빠졌는지) 아래 뒷정리가 서버에 물어본다.
+    final vanishedSecretRoomIds = <String>{};
     try {
       // 끊겨 있는 동안 팀에 들어가거나 빠졌을 수도 있으니 팀 목록부터 다시 받는다.
       final freshTeams = await api!.fetchTeams();
@@ -2029,6 +2183,7 @@ class Session extends ChangeNotifier {
       for (final team in freshTeams) {
         freshRooms.addAll(await api!.fetchRooms(team.id));
       }
+      _noteServerTimesOfRooms(freshRooms);
       final freshIds = freshRooms.map((r) => r.id).toSet();
       for (final fresh in freshRooms) {
         // 목록을 받는 사이 내보내졌거나 삭제된 방 — 받은 목록이 그보다 먼저 만들어진 것이라
@@ -2050,6 +2205,9 @@ class Session extends ChangeNotifier {
           in rooms
               .where((r) => !freshIds.contains(r.id) && changes[r.id] != true)
               .toList()) {
+        // 비밀 대화의 키·평문은 여기서 지우지 않는다 — 목록에 없다는 것만으로는 없어진 방인지(끊긴 동안
+        // secret:left를 놓침) 목록에만 안 나오는 방인지(다른 팀 소속 비밀 대화) 모른다. 뒷정리가 물어보고 지운다.
+        if (gone.isSecret) vanishedSecretRoomIds.add(gone.id);
         _forgetRoom(gone.id);
       }
       notifyListeners();
@@ -2066,11 +2224,16 @@ class Session extends ChangeNotifier {
     }
 
     // 하나씩 기다리는 사이 다른 방을 열거나(컨트롤러 추가) 방이 사라질 수 있어서 목록을 복사해
-    // 돌고, 그 사이 정리된 컨트롤러는 건너뛴다.
+    // 돌고, 그 사이 정리된 컨트롤러는 건너뛴다. 비밀 대화방은 이때 끊긴 동안 서버가 지운 메시지의
+    // 평문도 정리된다(RoomChatController._reconcileSecretPage).
     for (final controller in _controllers.values.toList()) {
       if (!identical(_controllers[controller.room.id], controller)) continue;
       await controller.refresh();
     }
+    // 끊긴 동안 삭제 예정 시각이 지났는데 그 알림(message:expired)을 못 받은 평문 — 다시 오지 않으므로 지금 지운다.
+    unawaited(secretSessionManager?.purgeExpiredTexts());
+    // 화면을 열지 않은 비밀 대화방과 목록에서 사라진 비밀 대화방도 서버와 맞춘다(syncSecretTextCaches).
+    unawaited(syncSecretTextCaches(vanishedRoomIds: vanishedSecretRoomIds));
   }
 
   /// 재연결 동기화가 방 목록을 받는 동안 생기거나(true) 사라진(false) 방 — 동기화 중일 때만 있다.
@@ -2249,8 +2412,10 @@ class Session extends ChangeNotifier {
   ///
   /// 한 방향 래칫은 지나간 메시지의 키를 다시 계산할 수 없어서, 방을 다시 열거나(재연결/앱
   /// 재시작 포함) 서버 히스토리를 다시 받아올 때마다 매번 암호문을 새로 복호화하려고 하면
-  /// 이미 지나간 옛 메시지는 전부 실패한다 — 그래서 처음 성공한 평문을 messageId로 이 기기에
-  /// 영구 캐싱해두고, 두 번째부터는 그 캐시를 먼저 확인한다(secret_key_store.dart 참고).
+  /// 이미 지나간 옛 메시지는 전부 실패한다 — 그래서 처음 성공한 평문을 이 기기에 캐싱해두고,
+  /// 두 번째부터는 그 캐시를 먼저 확인한다(secret_key_store.dart 참고). 캐시에는 방·작성 시각과
+  /// (상대가 읽어 서버가 정했으면) 자동 삭제 시각도 같이 적어서, 서버가 지운 메시지의 평문은 그
+  /// 알림을 놓쳐도 이 기기에서 지워지게 한다(S34).
   /// [forceDecrypt]는 message:edited처럼 같은 messageId인데 내용이 바뀐 경우에 쓴다 — 캐시를
   /// 읽지 않고 새 암호문을 새로 복호화한 뒤, 그 결과로 캐시를 덮어쓴다(안 그러면 수정 전
   /// 내용이 영구 캐시에 박제되어 계속 그것만 보인다).
@@ -2264,9 +2429,17 @@ class Session extends ChangeNotifier {
     // 평문 그대로 저장한다 — 그걸 암호문으로 착각해 복호화를 시도하면 실패해서
     // "복호화할 수 없습니다"로 잘못 보인다.
     if (m.type == MessageType.system) return;
+    final ref = SecretTextRef(
+      roomId: room.id,
+      id: m.id,
+      createdAt: m.createdAt,
+      // readAt이 있으면 서버가 자동 삭제 시각을 이미 정했다(expiresAt — null이면 지워지지 않는다).
+      expiryKnown: m.readAt != null,
+      expiresAt: m.expiresAt,
+    );
     final cached = forceDecrypt
         ? null
-        : await secretSessionManager?.readCachedDecryptedText(m.id);
+        : await secretSessionManager?.readCachedDecryptedText(ref);
     final plain =
         cached ?? await secretSessionManager?.decryptForRoom(room.id, m.text!);
     if (plain == null) {
@@ -2275,7 +2448,7 @@ class Session extends ChangeNotifier {
       return;
     }
     if (cached == null) {
-      await secretSessionManager?.cacheDecryptedText(m.id, plain);
+      await secretSessionManager?.cacheDecryptedText(ref, plain);
     }
     if (m.type == MessageType.image || m.type == MessageType.file) {
       try {
@@ -2298,15 +2471,26 @@ class Session extends ChangeNotifier {
   }
 
   /// decryptInPlace와 동일한 규칙(+동일한 영구 캐시, forceDecrypt 의미도 동일)을 댓글에 적용한다.
+  /// 댓글은 원본 메시지가 자동 삭제될 때 함께 지워지므로(서버 FK cascade) 캐시의 삭제 예정 시각도 원본
+  /// [parent]의 것을 따른다 — 원본을 모르면(실시간 댓글) 이미 저장해 둔 원본 항목의 값을 물려받는다.
   Future<void> decryptCommentInPlace(
     Room? room,
     Comment c, {
     bool forceDecrypt = false,
+    Message? parent,
   }) async {
     if (room == null || !room.isSecret || c.text == null) return;
+    final ref = SecretTextRef(
+      roomId: room.id,
+      id: c.id,
+      parentId: c.messageId,
+      createdAt: c.createdAt,
+      expiryKnown: parent?.readAt != null,
+      expiresAt: parent?.expiresAt,
+    );
     final cached = forceDecrypt
         ? null
-        : await secretSessionManager?.readCachedDecryptedText(c.id);
+        : await secretSessionManager?.readCachedDecryptedText(ref);
     final plain =
         cached ?? await secretSessionManager?.decryptForRoom(room.id, c.text!);
     if (plain == null) {
@@ -2315,7 +2499,7 @@ class Session extends ChangeNotifier {
       return;
     }
     if (cached == null) {
-      await secretSessionManager?.cacheDecryptedText(c.id, plain);
+      await secretSessionManager?.cacheDecryptedText(ref, plain);
     }
     if (c.type == MessageType.image || c.type == MessageType.file) {
       try {
@@ -2340,12 +2524,264 @@ class Session extends ChangeNotifier {
   /// 방을 열 때(REST로 받아온 히스토리) 메시지/댓글을 한꺼번에 복호화한다.
   Future<void> decryptHistory(Room room, List<Message> history) async {
     if (!room.isSecret) return;
+    // 이 페이지의 작성·읽음 시각(서버 시계) — 아래에서 적는 자동 삭제 시각과 견줄 서버의 지금이 된다.
+    _noteServerTimesIn(history);
     for (final m in history) {
       await decryptInPlace(room, m);
       for (final c in m.comments) {
-        await decryptCommentInPlace(room, c);
+        await decryptCommentInPlace(room, c, parent: m);
       }
     }
+  }
+
+  /// 방 [roomId]가 비밀 대화일 수 있는지 — 목록에 없는 방(다른 팀 소속이라 안 받아 온 비밀 대화 등)도
+  /// 그럴 수 있다고 본다. 지운 메시지의 평문 정리를 평문 방 알림에서까지 돌리지 않으려고 쓴다.
+  bool _maybeSecretRoom(String roomId) => _findRoom(roomId)?.isSecret ?? true;
+
+  /// 삭제 예정 시각이 지나 이 기기에서 지운 비밀 대화 평문(SecretKeyStore.purgeExpiredTexts) — 서버의
+  /// message:expired를 놓쳤을 때(꺼져 있었음 등) 열려 있는 방 화면에서도 서버처럼 그 메시지(댓글이면
+  /// 원본 메시지째 — 서버가 댓글과 함께 지웠다)를 없앤다.
+  void _handleExpiredSecretTexts(List<SecretCachedTextInfo> removed) {
+    for (final info in removed) {
+      _controllers[info.roomId]?.applyExpire(info.parentId ?? info.id);
+    }
+  }
+
+  /// 서버가 찍은 시각 하나(작성·읽음 시각처럼 받은 순간의 서버 시각보다 늦을 수 없는 값)를 비밀 대화 평문 캐시에
+  /// 알려 준다 — 서버가 확정한 자동 삭제 시각을 이 기기 시계가 아니라 서버의 지금과 견주게 한다(이 기기 시계가
+  /// 빠르면 서버보다 일찍 지워 버린다 — SecretKeyStore.noteServerTime). 앞으로의 시각(expiresAt 등)은 넘기지 않는다.
+  void _noteServerTime(DateTime serverTime) =>
+      secretSessionManager?.textCache.noteServerTime(serverTime);
+
+  /// 히스토리 한 페이지의 가장 늦은 작성·읽음 시각을 알려 준다([_noteServerTime]).
+  void _noteServerTimesIn(List<Message> page) {
+    DateTime? latest;
+    for (final m in page) {
+      for (final t in [m.createdAt, m.readAt, for (final c in m.comments) c.createdAt]) {
+        if (t != null && (latest == null || t.isAfter(latest))) latest = t;
+      }
+    }
+    if (latest != null) _noteServerTime(latest);
+  }
+
+  /// 방금 서버에서 받은 방 목록의 가장 늦은 활동 시각을 알려 준다([_noteServerTime]).
+  void _noteServerTimesOfRooms(Iterable<Room> fresh) {
+    DateTime? latest;
+    for (final r in fresh) {
+      if (latest == null || r.lastActivityAt.isAfter(latest)) {
+        latest = r.lastActivityAt;
+      }
+    }
+    if (latest != null) _noteServerTime(latest);
+  }
+
+  // ---- 비밀 대화 평문 캐시 뒷정리(S34) ----
+
+  /// GET /rooms/:id/messages가 방이 없을 때(404)·내가 멤버가 아닐 때(403) 주는 문구(server/src/rooms.js — 처음부터 같은
+  /// 문구라 예전 서버도 같다). ApiException에는 상태 코드가 없어서 문구로 가린다 — 문구가 바뀌면 "없어진 방"을
+  /// 알아보지 못해 정리를 건너뛸 뿐, 있는 방을 지우지는 않는다.
+  static const _roomNotFoundError = '방을 찾을 수 없습니다.';
+  static const _notRoomMemberError = '이 방의 멤버가 아닙니다.';
+
+  /// 방 화면 없이 최근 히스토리만 받아 맞출 때의 쪽 크기 — 방 화면(RoomChatController)이 처음 받는 쪽과 같다.
+  static const _secretSyncPageSize = 50;
+
+  /// 예전 형식 평문을 찾느라 히스토리를 처음부터 끝까지 훑을 때의 쪽 크기(서버가 한 번에 주는 최대)와 한 방의 최대 쪽 수.
+  static const _secretSweepPageSize = 200;
+  static const _secretSweepMaxPages = 1000;
+
+  Future<void>? _secretTextSyncRun;
+  bool _secretTextSyncAgain = false;
+  final Set<String> _secretTextSyncVanished = {};
+
+  /// 비밀 대화 평문 캐시를 서버와 맞추는 뒷정리(S34) — 앱을 켤 때와 재연결 동기화 뒤에 돈다(이미 돌고 있으면 끝난
+  /// 뒤 한 번 더 돈다). 끊겨 있던 동안의 자동 삭제·삭제·방 종료 알림은 다시 오지 않아서, 방 화면을 열지 않아도:
+  ///  - 목록에 있는 비밀 대화방 중 이 기기가 언제 지워질지 모르는 평문(타이머 없이 읽힌·아직 안 읽힌 메시지, 내가 보낸
+  ///    메시지)이 있는 방은 최근 쪽을 받아, 그 범위 안인데 서버가 더 주지 않는(지운) 메시지·댓글의 평문을 지운다.
+  ///    이번 실행에서 화면을 연 방은 그 화면의 refresh가 같은 일을 하므로 건너뛴다.
+  ///  - 이 기기에 키·평문이 남았는데 목록에 없는 방([vanishedRoomIds] — 재연결 때 목록에서 사라진 비밀 대화 포함)은
+  ///    그 방 히스토리를 물어서, 방이 없어졌거나(404) 내가 더는 멤버가 아니면(403) 키와 평문을 지운다. 목록에 없다는
+  ///    것만으로는 지우지 않는다 — 다른 팀 소속이라 목록에 안 나오는 비밀 대화가 있다. 403은 이 계정의 방이라는
+  ///    표시가 있을 때만 믿는다(공용 PC처럼 같은 기기를 쓰는 다른 계정의 방일 수 있다).
+  ///  - 예전 형식(방·시각을 모름) 평문이 남아 있으면, 이 계정으로 처음 한 번은 이 기기에 남은 비밀 대화방 히스토리를
+  ///    처음부터 끝까지 훑어 새 형식으로 옮긴다. 어느 방에도 없던 것(서버가 이미 지운 메시지)은 다른 계정의 방일 수
+  ///    있는 방이 남지 않았을 때 지운다.
+  /// 테스트는 돌려받은 Future로 끝날 때까지 기다린다.
+  @visibleForTesting
+  Future<void> syncSecretTextCaches({
+    Iterable<String> vanishedRoomIds = const [],
+  }) {
+    _secretTextSyncVanished.addAll(vanishedRoomIds);
+    final running = _secretTextSyncRun;
+    if (running != null) {
+      _secretTextSyncAgain = true;
+      return running;
+    }
+    final run = _secretTextSyncLoop();
+    _secretTextSyncRun = run;
+    return run;
+  }
+
+  Future<void> _secretTextSyncLoop() async {
+    try {
+      do {
+        _secretTextSyncAgain = false;
+        final vanished = {..._secretTextSyncVanished};
+        _secretTextSyncVanished.clear();
+        try {
+          await _syncSecretTextCachesOnce(vanished);
+        } catch (_) {
+          // 뒷정리는 다음 재연결·앱 시작 때 다시 돈다.
+        }
+      } while (_secretTextSyncAgain);
+    } finally {
+      _secretTextSyncRun = null;
+    }
+  }
+
+  Future<void> _syncSecretTextCachesOnce(Set<String> vanished) async {
+    final manager = secretSessionManager;
+    final me = userId;
+    if (manager == null || me == null || api == null) return;
+    final cache = manager.textCache;
+    if (!await cache.ensureTextIndex()) return;
+    // 로그아웃·다른 계정으로 바뀌었으면 그 자리에서 멈춘다.
+    bool stillCurrent() =>
+        identical(secretSessionManager, manager) && userId == me;
+    if (!stillCurrent()) return;
+
+    final local = cache.localSecretRoomIds;
+    // 이 계정 목록에 있는 방에 이 계정 표시를 남긴다 — 나중에 목록에서 사라졌을 때 "멤버가 아님"을 받으면 내가
+    // 빠진 방으로 믿고 지울 수 있다.
+    for (final id in local) {
+      if (_findRoom(id)?.isSecret == true) await cache.noteRoomOwner(id, me);
+    }
+    final sweepLegacy = cache.hasLegacyTexts && !cache.legacySweptFor(me);
+    final needsCheck = cache.roomsNeedingReconcile();
+    // 이 계정 것인지 모르거나 확인하지 못한 방이 남았는지 — 남았으면 예전 형식 평문을 지우지 않는다.
+    var unresolved = false;
+    // 이 계정으로 갈 수 있는 방을 모두 처음부터 끝까지 훑었는지.
+    var sweepComplete = true;
+    for (final id in local) {
+      if (!stillCurrent()) return;
+      final listed = _findRoom(id)?.isSecret == true;
+      if (listed &&
+          !sweepLegacy &&
+          (!needsCheck.contains(id) || _controllers.containsKey(id))) {
+        continue;
+      }
+      final result = await _syncSecretRoomCache(
+        manager,
+        id,
+        wholeHistory: sweepLegacy,
+      );
+      if (!stillCurrent()) return;
+      switch (result) {
+        case _SecretRoomCheck.complete:
+          // 히스토리를 받을 수 있으면 이 계정이 멤버인 방이다(목록에는 없어도).
+          if (!listed) await cache.noteRoomOwner(id, me);
+        case _SecretRoomCheck.partial:
+          sweepComplete = false;
+        case _SecretRoomCheck.failed:
+          sweepComplete = false;
+          if (!listed) unresolved = true;
+        case _SecretRoomCheck.notFound:
+        case _SecretRoomCheck.notMember:
+          final owner = cache.roomOwner(id);
+          final mine =
+              listed ||
+              vanished.contains(id) ||
+              owner == me ||
+              // 방이 없어졌으면(404) 누구의 방이었든 이 서버에서는 다시 볼 수 없다 — 다른 계정의 표시가 있는 방만 그
+              // 계정이 직접 정리하게 둔다(다른 서버를 쓰던 계정의 방일 수 있다).
+              (result == _SecretRoomCheck.notFound && owner == null);
+          if (!mine) {
+            unresolved = true;
+            break;
+          }
+          await manager.forgetRoom(id);
+          if (_findRoom(id) != null) {
+            _forgetRoom(id);
+            notifyListeners();
+          }
+      }
+    }
+    if (!stillCurrent()) return;
+    if (sweepLegacy && sweepComplete) await cache.markLegacySwept(me);
+    // 예전 형식 평문 중 이 계정이 갈 수 있는 방 어디에도 없던 것 — 서버가 이미 지운 메시지의 평문이다. 다른 계정의
+    // 방일 수 있는 방이 남아 있으면 그 계정의 평문일 수 있어 그대로 둔다.
+    if (cache.hasLegacyTexts && cache.legacySweptFor(me) && !unresolved) {
+      await cache.deleteLegacyTexts();
+    }
+  }
+
+  /// 방 [roomId]의 히스토리를 받아 평문 캐시를 맞춘다 — 최근 한 쪽만, 또는 [wholeHistory]면 처음까지 전부. 복호화는
+  /// 하지 않는다(래칫을 움직이는 복호화는 방 화면이 한다) — 서버가 확정한 삭제 예정 시각을 적고, 예전 형식 평문을
+  /// 옮기고, 받은 범위 안에서 서버가 더 주지 않는 평문을 지운 뒤 열려 있는 방 화면에도 반영한다.
+  Future<_SecretRoomCheck> _syncSecretRoomCache(
+    SecretSessionManager manager,
+    String roomId, {
+    required bool wholeHistory,
+  }) async {
+    final cache = manager.textCache;
+    final pageSize = wholeHistory ? _secretSweepPageSize : _secretSyncPageSize;
+    DateTime? before;
+    for (var i = 0; i < _secretSweepMaxPages; i++) {
+      final client = api;
+      if (client == null || !identical(secretSessionManager, manager)) {
+        return _SecretRoomCheck.failed;
+      }
+      // 요청 직전의 저장 순번 — 그 뒤에 저장된 평문(요청보다 늦게 온 메시지일 수 있다)은 응답에 없어도 둔다.
+      final generation = cache.textCacheGeneration;
+      final List<Message> page;
+      try {
+        page = await client.fetchRoomMessages(
+          roomId,
+          limit: pageSize,
+          before: before,
+        );
+      } on ApiException catch (e) {
+        if (e.message == _roomNotFoundError) return _SecretRoomCheck.notFound;
+        if (e.message == _notRoomMemberError) {
+          return _SecretRoomCheck.notMember;
+        }
+        return _SecretRoomCheck.failed;
+      } catch (_) {
+        return _SecretRoomCheck.failed;
+      }
+      if (!identical(secretSessionManager, manager)) {
+        return _SecretRoomCheck.failed;
+      }
+      _noteServerTimesIn(page);
+      await cache.applyHistoryMetadata(roomId, page);
+      final removed = await cache.reconcileHistoryPage(
+        roomId: roomId,
+        page: page,
+        before: before,
+        limit: pageSize,
+        sinceGeneration: generation,
+      );
+      _controllers[roomId]?.applySecretCacheRemovals(page, removed);
+      int? oldestMs;
+      var inWindow = 0;
+      for (final m in page) {
+        if (m.outOfWindow) continue;
+        inWindow++;
+        final ms = m.createdAt.millisecondsSinceEpoch;
+        if (oldestMs == null || ms < oldestMs) oldestMs = ms;
+      }
+      if (!wholeHistory || inWindow < pageSize || oldestMs == null) {
+        return _SecretRoomCheck.complete;
+      }
+      // 다음 쪽 — 서버는 before "미만"만 주고 시각은 밀리초 아래까지 있어서, 가장 오래된 메시지와 같은 밀리초에 쓰인
+      // 메시지가 쪽 경계에서 빠지지 않게 1ms 겹쳐 받는다. 같은 밀리초의 메시지가 한 쪽보다 많으면 더 못 나아간다.
+      final next = DateTime.fromMillisecondsSinceEpoch(oldestMs + 1);
+      if (before != null && !next.isBefore(before)) {
+        return _SecretRoomCheck.partial;
+      }
+      before = next;
+    }
+    return _SecretRoomCheck.partial;
   }
 
   /// 이 방에서 방금 활동(메시지/댓글을 보냈거나 받음)이 있었다는 뜻 — 방 목록에서 그 방을
@@ -3215,11 +3651,26 @@ class Session extends ChangeNotifier {
     bool realLeave = false,
   }) async {
     final room = _findRoom(roomId);
-    await api!.leaveRoom(
-      roomId,
-      alsoRemoveOther: alsoRemoveOther,
-      realLeave: realLeave,
-    );
+    // 서버는 방을 나간 사람을 그 방 통화에서도 내보낸다(LiveKit) — 그 끊김은 스스로 나간 것이라 "내보내졌습니다" 안내를
+    // 띄우지 않게, 나가는 동안 표시해 둔다(_handleCallDisconnected). 통화는 방을 목록에서 뺄 때 끝낸다(_forgetRoom).
+    _leavingRoomIds.add(roomId);
+    try {
+      await api!.leaveRoom(
+        roomId,
+        alsoRemoveOther: alsoRemoveOther,
+        realLeave: realLeave,
+      );
+      await _afterLeaveRoom(roomId, room, realLeave: realLeave);
+    } finally {
+      _leavingRoomIds.remove(roomId);
+    }
+  }
+
+  Future<void> _afterLeaveRoom(
+    String roomId,
+    Room? room, {
+    required bool realLeave,
+  }) async {
     // 평문 DM은 서버가 멤버십을 그대로 두고 내 hidden 플래그만 켠다(room_options_menu.dart
     // 참고) — 상대가 새 메시지를 보내면 room:hidden 브로드캐스트로 자동으로 다시 꺼지므로,
     // 방 자체는 목록에서 지우지 않고 hidden만 올려둔다. 그룹/토픽/비밀 대화는 지금까지처럼
@@ -3252,6 +3703,7 @@ class Session extends ChangeNotifier {
   /// 정리 — 목록에서 빼고, 컨트롤러를 닫고, 보고 있던 방이면 활성 방을 풀고, 토픽 폴더에서도
   /// 뺀다. 알림(notifyListeners)은 부르는 쪽이 한 번에 한다.
   void _forgetRoom(String roomId) {
+    _endCallInRemovedRoom(roomId);
     _roomChangesDuringResync?[roomId] = false;
     rooms.removeWhere((r) => r.id == roomId);
     _controllers.remove(roomId)?.dispose();
@@ -3304,16 +3756,26 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 소켓 room:removed(토픽에서 내보내짐/토픽 삭제) — 방을 정리하고 [roomRemovedEvents]로
-  /// 화면에 알린다. 이미 목록에 없는 방(이 기기에서 방금 정리함)이나 내가 이 기기에서 삭제 중인
-  /// 토픽이면 안내 없이 정리만 한다. 테스트가 소켓 없이 부를 수 있게 밖으로 열어 둔다.
+  /// room:removed의 reason — 팀에서 제외돼 그 팀의 모든 방에서 한꺼번에 빠졌다(서버 teams.js의 팀원
+  /// 빼기). 안내는 team:left가 팀 단위로 한 번 띄우므로 방마다 따로 띄우지 않는다.
+  static const kRoomRemovedReasonTeam = 'team';
+
+  /// 소켓 room:removed(토픽에서 내보내짐/토픽 삭제/팀에서 제외) — 방을 정리하고 [roomRemovedEvents]로
+  /// 화면에 알린다. 이미 목록에 없는 방(이 기기에서 방금 정리함), 내가 이 기기에서 삭제 중인
+  /// 토픽, 팀에서 제외돼 빠진 방([kRoomRemovedReasonTeam] — 서버가 team:left를 먼저 보내 대개는 이미
+  /// 정리돼 있다)이면 안내 없이 정리만 한다. 테스트가 소켓 없이 부를 수 있게 밖으로 열어 둔다.
   @visibleForTesting
   void handleRoomRemoved(RoomRemovedEvent event) {
     final room = _findRoom(event.roomId);
     if (room == null) return;
+    // 서버가 나를 뺀 비밀 대화는 다시 들어갈 수 없다 — 이 기기에 남은 키와 평문도 지운다.
+    if (room.isSecret) {
+      unawaited(secretSessionManager?.forgetRoom(event.roomId));
+    }
     _forgetRoom(event.roomId);
     notifyListeners();
     if (event.isDeleted && _deletingTopicIds.contains(event.roomId)) return;
+    if (event.reason == kRoomRemovedReasonTeam) return;
     _roomRemovedController.add(
       RoomRemovedEvent(
         roomId: event.roomId,
@@ -4072,6 +4534,9 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // 통화 중이었으면 먼저 끊는다 — 안 그러면 로그아웃한 뒤에도(정지·전체 로그아웃으로 쫓겨난 경우도) 이 기기의
+    // 카메라·마이크가 그 회의에 계속 나간다. 소켓을 닫기 전이라 서버에도 바로 나감이 간다.
+    if (callController.roomId != null) await leaveCall();
     _stickerRefresh?.cancel();
     serverStickers.clear();
     // 잠긴 채로 로그아웃하면(잠금 화면의 "로그아웃") 다음 로그인 때 다시 잠겨 뜨지 않게 푼다.
@@ -4153,7 +4618,7 @@ class Session extends ChangeNotifier {
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();
-    secretSessionManager = null;
+    secretSessionManager = null; // 평문 정리 타이머도 멈춘다(setter).
     pendingSecretInvites.clear();
     token = null;
     refreshToken = null;

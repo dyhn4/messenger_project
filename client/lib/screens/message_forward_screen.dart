@@ -41,8 +41,11 @@ String _formatFullDateTime(DateTime dt) {
 
 /// 메시지 롱프레스 메뉴(모바일)/더보기 메뉴(PC)의 "메시지 전달" — 대화방을 골라 원본 내용
 /// (텍스트는 편집 가능, 첨부는 그대로) 그 자체를 새 메시지로 보낸다. "포함" 토글을 켜면
-/// 원본 발신자/시각이 같이 실려서 받는 쪽에 "OOO에서 전달한 메시지입니다"로 표시된다
-/// (message_bubble.dart 렌더링 참고). PC(asDialog:true)는 FloatingDialog로, 모바일은
+/// 원본 id(forwardedFromMessageId — 댓글이면 그 댓글 id)가 같이 실리고, 서버가 그 원본에서 보낸 사람·
+/// 시각을 채워 받는 쪽에 "OOO에서 전달한 메시지입니다"로 표시된다(message_bubble.dart 렌더링,
+/// server/src/messageAttribution.js 참고). 글을 고치면 원본 표시는 붙지 않는다 — 그 사람이 쓰지 않은 글이
+/// 그 사람 것으로 보이면 안 되기 때문이다(서버도 원본 그대로일 때만 붙인다). 비밀 대화의 메시지·파일은
+/// 전달하지 않는다(평문이 다른 방으로 샌다). PC(asDialog:true)는 FloatingDialog로, 모바일은
 /// 전체화면으로 뜬다(message_actions.dart의 pushMessageForwardScreen이 창 너비로 고른다).
 class MessageForwardScreen extends StatefulWidget {
   final Session session;
@@ -63,17 +66,33 @@ class MessageForwardScreen extends StatefulWidget {
 
 class _MessageForwardScreenState extends State<MessageForwardScreen> {
   Room? _targetRoom;
-  late final _textController = TextEditingController(
-    text: _initialForwardText(widget.message),
-  );
+  late final _initialText = _initialForwardText(widget.message);
+  late final _textController = TextEditingController(text: _initialText)
+    ..addListener(_onTextChanged);
   bool _includeAttribution = true;
   bool _sending = false;
+  bool _edited = false;
 
   @override
   void dispose() {
     _textController.dispose();
     super.dispose();
   }
+
+  /// 글을 처음 채워 준 그대로 두었는지 — 고치면 원본 표시를 붙이지 않는다(서버 quoteForwardRules.js
+  /// forwardMatchesSource와 같은 기준: 앞뒤 공백만 다른 건 고친 것으로 보지 않는다).
+  void _onTextChanged() {
+    final edited = _textController.text.trim() != _initialText.trim();
+    if (edited != _edited) setState(() => _edited = edited);
+  }
+
+  /// 원본이 비밀 대화의 메시지인지 — 파일 뷰어의 "파일 전달"처럼 메뉴 밖에서 열려도 막는다.
+  bool get _fromSecretRoom => widget.session.rooms.any(
+    (r) => r.id == widget.message.roomId && r.isSecret,
+  );
+
+  /// 이번 전달에 원본 표시를 붙이는지 — "포함"을 켰고 글을 고치지 않았을 때.
+  bool get _attach => _includeAttribution && !_edited;
 
   /// 게시글은 받는 방에 게시글이 아니라 보통 메시지로 간다 — 첨부가 있으면 사진만이면 사진, 아니면
   /// 파일 메시지로.
@@ -89,6 +108,13 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
     final room = _targetRoom;
     if (room == null || !canForwardTo(widget.session, room)) return;
     final message = widget.message;
+    // 비밀 대화의 글·파일은 다른 방으로 보내지 않는다 — 글은 평문으로 새고, 파일은 받는 사람이 풀 수 없는 암호문이다.
+    if (_fromSecretRoom) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀 대화의 메시지·파일은 다른 대화방으로 전달할 수 없습니다.')),
+      );
+      return;
+    }
     // 파일 삭제로 지워진 파일은 전달할 수 없다(메시지 자리와 댓글만 남아 있다).
     final isFileMessage =
         message.type == MessageType.image || message.type == MessageType.file;
@@ -133,10 +159,10 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
                   },
               ]
             : null,
-        forwardedFromSenderName: _includeAttribution
-            ? widget.senderDisplayName
-            : null,
-        forwardedFromCreatedAt: _includeAttribution
+        forwardedFromMessageId: _attach ? message.id : null,
+        // 업데이트 전 서버만 이 두 값을 쓴다(지금 서버는 위 id로 원본에서 채운다).
+        forwardedFromSenderName: _attach ? widget.senderDisplayName : null,
+        forwardedFromCreatedAt: _attach
             ? message.createdAt.millisecondsSinceEpoch
             : null,
       );
@@ -224,6 +250,18 @@ class _MessageForwardScreenState extends State<MessageForwardScreen> {
                     color: Theme.of(context).hintColor,
                   ),
                 ),
+                // 고친 글에는 원본 표시를 붙이지 않는다 — 켜 둔 채 고쳤으면 왜 빠지는지 미리 알려 준다.
+                if (_includeAttribution && _edited) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '내용을 고치면 원본 표시는 붙지 않습니다.',
+                    key: const ValueKey('forward-edited-note'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

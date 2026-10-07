@@ -31,7 +31,7 @@ import {
   listTopicFolderRoomIds,
   listTopicFolders,
   listTopicSummaries,
-  removeRoomMember,
+  removeMemberFromRoom,
   removeRoomMembers,
   reorderTopicFolders,
   setDmHistoryFloor,
@@ -49,6 +49,7 @@ import { countUnreadMentionsInRoom } from './db/queries/notifications.js';
 import { findTeamById, isTeamMember, isTopicCreator, listTeamMemberIds } from './db/queries/teams.js';
 import { teamAccess, topicAccess } from './access.js';
 import { AUDIT, recordAudit } from './audit.js';
+import { endRoomCallAccess, endUserCallAccess } from './callAccess.js';
 import {
   accountRole,
   canBrowseTopics,
@@ -91,7 +92,8 @@ import { toMessageDto } from './messages.js';
 import { attachPolls } from './polls.js';
 import { notifyOfflineMembers, previewFor, roomTagFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
-import { knownUploadPath, signFileUrl, toStoredUploadUrl } from './upload.js';
+import { checkIconRef } from './fileRefs.js';
+import { signFileUrl } from './upload.js';
 import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
 import { listScheduledForRoom } from './db/queries/scheduledMessages.js';
 import { failScheduledForArchivedTopic, failScheduledForDeletedRoom } from './scheduledMessages.js';
@@ -187,17 +189,25 @@ function parseGroupDescription(raw) {
 const GROUP_ICON_TYPES = ['members', 'initial', 'emoji', 'photo'];
 const GROUP_ICON_KEYS = ['iconType', 'iconEmoji', 'iconColor', 'iconUrl'];
 
+// 그룹 아이콘 사진을 받을 수 없을 때 — 알아볼 수 없는 링크와 이 사람이 쓸 수 없는 파일을 가리지 않는다(어떤 파일이 있는지 알려 주지 않게).
+const GROUP_ICON_ERROR = '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.';
+
 /**
  * 그룹채팅 아이콘 — 'members'(기본, null과 같음 — 멤버 아바타를 겹쳐 보여줌) | 'initial'(그룹 이름 앞 2글자) |
  * 'emoji'(iconEmoji 필수) | 'photo'(iconUrl 필수 — 업로드 응답의 URL). iconColor는 initial·emoji의 배경색이다.
  * 만들 때(POST /rooms)와 정보 변경(PATCH)이 같이 쓴다. 통과하면 저장할 네 칸 `{ icon }`, 아니면 `{ error }`.
+ * 사진은 [userId]가 올린 사진, 지금 아이콘([currentIconUrl] — 정보 변경 때. 방 정보를 받은 지 오래돼 서명 링크가 만료된 채
+ * 돌아와도), 서명 링크로 온 지금 볼 수 있는 방의 사진만 받는다(fileRefs.js — 검토 S22). 예전엔 어디서 알게 된 파일
+ * 이름(/uploads/<이름>)도 그대로 받아, 그 그룹 멤버 모두가 그 파일의 새 링크를 영영 받을 수 있었다.
  */
-function parseGroupIcon({ iconType, iconEmoji, iconColor, iconUrl }) {
+async function parseGroupIcon({ iconType, iconEmoji, iconColor, iconUrl }, { userId, currentIconUrl = null }) {
   if (iconType != null && !GROUP_ICON_TYPES.includes(iconType)) return { error: 'iconType이 올바르지 않습니다.' };
   if (iconType === 'emoji' && (typeof iconEmoji !== 'string' || !iconEmoji)) return { error: '이모지를 선택하세요.' };
-  const storedIconUrl = iconType === 'photo' ? toStoredUploadUrl(iconUrl) : null;
-  if (iconType === 'photo' && !storedIconUrl) {
-    return { error: '그룹 아이콘 사진이 올바르지 않습니다. 다시 올려주세요.' };
+  let storedIconUrl = null;
+  if (iconType === 'photo') {
+    const photo = await checkIconRef(iconUrl, { senderId: userId, currentIconUrl, error: GROUP_ICON_ERROR });
+    if (!photo.ok) return { error: photo.error };
+    storedIconUrl = photo.path;
   }
   return {
     icon: {
@@ -229,7 +239,9 @@ export async function roomDisplayName(room, viewerId) {
   const members = await listRoomMemberUsers(room.id);
   if (room.type === 'dm') {
     const other = members.find((m) => m.id !== viewerId);
-    return other?.name ?? '(알 수 없음)';
+    if (other) return other.name ?? '(알 수 없음)';
+    // 상대가 빠진 1:1 대화(비밀 대화 혼자 나가기·팀에서 제외 — removeMemberFromRoom)는 남겨 둔 이름으로.
+    return room.secretDepartedMemberName ? `${room.secretDepartedMemberName} (나갔음)` : '(알 수 없음)';
   }
   const names = members
     .filter((m) => m.id !== viewerId)
@@ -329,8 +341,11 @@ export async function toRoomDto(room, requesterId) {
     dto.secretKeyEpoch = session?.keyEpoch ?? 0;
     dto.secretSelfDestructSeconds = session?.selfDestructSeconds ?? null;
     dto.secretInitiatorUserId = session?.initiatorUserId ?? null;
-    // "상대방도 나가기" 없이 혼자 나간 경우, 남은 멤버 쪽에서 Room.displayName()이
-    // "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있게 나간 사람 이름을 실어 보낸다.
+  }
+  if (room.type === 'dm' && !room.isSelf) {
+    // 1:1 대화에서 한 사람이 빠진 경우(비밀 대화를 "상대방도 나가기" 없이 혼자 나감, 팀에서 제외됨) 남은 멤버 쪽에서
+    // Room.displayName()이 "(알 수 없음)" 대신 "OOO님 (나갔음)"을 보여줄 수 있게 나간 사람 이름을 실어 보낸다
+    // (removeMemberFromRoom 참고 — 필드 이름은 비밀 대화에만 쓰던 시절 그대로다).
     dto.secretDepartedMemberName = room.secretDepartedMemberName ?? null;
   }
   if (requesterId) {
@@ -403,12 +418,13 @@ export async function notifyTodosResynced(io, room, todos, actorId) {
 }
 
 /**
- * 나와의 대화를 찾거나 만든다(db/queries/rooms.js ensureSelfRoom). 이번에 새로 만들었으면 그 사람의 소켓(모든
- * 기기)을 방에 넣고 room:created로 알린다 — 다른 방이 새로 생길 때와 같은 경로(notifyMembership).
+ * 나와의 대화를 찾거나 만든다(db/queries/rooms.js ensureSelfRoom). 이번에 새로 만들었거나 멤버로 다시 넣었으면(팀에서
+ * 빠졌다가 돌아옴) 그 사람의 소켓(모든 기기)을 방에 넣고 room:created로 알린다 — 다른 방이 새로 생길 때와 같은
+ * 경로(notifyMembership).
  */
 export async function openSelfRoom(io, userId, teamId) {
-  const { room, created } = await ensureSelfRoom(userId, teamId);
-  if (created) await notifyMembership(io, room);
+  const { room, joined } = await ensureSelfRoom(userId, teamId);
+  if (joined) await notifyMembership(io, room);
   return room;
 }
 
@@ -527,6 +543,59 @@ export async function postBotMessage(io, room, text, { senderName }) {
     )
     .catch((err) => console.error('[push] 자동 메시지 알림 실패:', err?.message ?? err));
   return dto;
+}
+
+/** 비밀 대화에서 한쪽이 빠졌을 때 남은 쪽에 남기는 안내 — 혼자 나가기와 팀에서 제외될 때가 같은 문구를 쓴다(시스템
+ * 메시지는 평문이고 클라이언트도 복호화를 건너뛰므로 비밀 대화에 그대로 남겨도 된다 — secretChats.js 참고). */
+const SECRET_CHAT_ENDED_NOTICE = '상대방이 비밀대화를 종료했습니다.';
+
+/**
+ * 누가 방에서 빠진 뒤(db/queries/rooms.js removeMemberFromRoom의 결과) 남은 멤버들에게 알린다 — 바뀐 방 정보(멤버 목록·
+ * 토픽 관리자·1:1 대화의 "(나갔음)" 이름), 다시 맞춰진 할 일 진척률, [notice](null이면 안내 없음) 순서로. 방째 지워졌거나
+ * 남은 사람이 없으면 알릴 사람이 없다. 빠진 사람의 소켓은 호출부가 먼저 방에서 빼 둬야 자기 퇴장 안내를 받지 않는다.
+ */
+async function notifyRoomAfterDeparture(io, removal, { actorId, notice }) {
+  const { room, deleted, remainingMemberIds, changedTodos } = removal;
+  if (deleted || remainingMemberIds.length === 0) return;
+  io.to(room.id).emit('room:created', await toRoomDto(room));
+  await notifyTodosResynced(io, room, changedTodos, actorId);
+  if (notice) await postSystemMessage(io, room, notice);
+}
+
+/** 팀에서 제외돼 방에서 빠졌다는 안내 — 비밀 대화는 혼자 나가기와 같은 문구, 나와의 대화는 남는 사람이 없어서, 조용히
+ * 나가기 토픽은 설정대로 안내가 없다. [leftover]는 서버를 켤 때 남은 멤버십을 정리한 경우(teams.js
+ * sweepLeftoverTeamRoomMembers) — 언제 어떻게 팀 밖이 됐는지 모르므로(예전엔 그룹에 팀 밖 사람을 넣을 수도 있었다) 지금
+ * 사실인 "팀 멤버가 아니어서"라고 쓴다. */
+function teamRemovalNotice(room, userName, { leftover = false } = {}) {
+  if (room.isSelf) return null;
+  if (room.isSecret) return SECRET_CHAT_ENDED_NOTICE;
+  if (room.quietLeave) return null;
+  return leftover ? `${userName} 님이 팀 멤버가 아니어서 나갔습니다.` : `${userName} 님이 팀에서 제외되어 나갔습니다.`;
+}
+
+/**
+ * 팀에서 제외된 사람([userId])이 그 팀의 모든 방에서 빠진 뒤(db/queries/teams.js removeTeamMember가 돌려준 [removals])의
+ * 실시간 정리 — 토픽 내보내기와 같은 순서로: 그 사람의 소켓(모든 기기)을 방들에서 빼서 새 메시지·통화 상태가 더는 가지
+ * 않게 하고, room:removed(reason 'team')로 열려 있던 화면을 닫게 하고, 그 방들의 진행 중인 통화에서도 내보낸 뒤(LiveKit
+ * 미디어까지 — callAccess.js), 남은 멤버들에게 방 정보·할 일·안내를 알린다.
+ * DB는 이미 바뀌었으므로 한 방의 알림이 실패해도 나머지 방은 계속 알린다. [leftover]는 teamRemovalNotice 참고.
+ */
+export async function notifyRemovedFromTeamRooms(io, { userId, userName, actorId, removals, leftover = false }) {
+  if (removals.length === 0) return;
+  io.in(`user:${userId}`).socketsLeave(removals.map(({ room }) => room.id));
+  for (const { room } of removals) {
+    io.to(`user:${userId}`).emit('room:removed', { roomId: room.id, reason: 'team', name: room.name });
+  }
+  // 그 방들의 통화(LiveKit 미디어 포함)에서도 내보낸다 — 소켓을 방에서 빼는 것만으로는 이미 붙은 미디어가 끊기지 않는다.
+  await endUserCallAccess(io, userId, { roomIds: removals.map(({ room }) => room.id) });
+  for (const removal of removals) {
+    try {
+      const notice = teamRemovalNotice(removal.room, userName, { leftover });
+      await notifyRoomAfterDeparture(io, removal, { actorId, notice });
+    } catch (err) {
+      console.error('[teams] 팀 제외 후 방 알림 실패:', removal.room.id, err?.message ?? err);
+    }
+  }
 }
 
 export function createRoomsRouter(io) {
@@ -843,13 +912,17 @@ export function createRoomsRouter(io) {
     }
 
     const dmKey = dmKeyFor(req.user.sub, targetUserId);
-    const existing = await findDmRoomByKey(teamId, dmKey);
+    let existing = await findDmRoomByKey(teamId, dmKey);
     if (existing) {
-      // 둘 중 한쪽이 예전에 "채팅방 나가기"를 했을 수 있으니, 다시 대화를 걸면 그 사람을 되살린다.
+      // 둘 중 한쪽이 예전에 "채팅방 나가기"를 했거나 팀에서 제외돼 빠졌을 수 있으니, 다시 대화를 걸면 그 사람을 되살린다.
       const memberIds = await listRoomMemberIds(existing.id);
       const missing = [req.user.sub, targetUserId].filter((id) => !memberIds.includes(id));
       if (missing.length > 0) {
         const changedTodos = await addRoomMembers(existing.id, missing);
+        // 팀에서 제외돼 "(나갔음)"으로 보이던 사람이 다시 들어왔으면 그 표시를 지운다(removeMemberFromRoom 참고).
+        if (existing.secretDepartedMemberId && missing.includes(existing.secretDepartedMemberId)) {
+          existing = (await setSecretDepartedMember(existing.id, { userId: null, name: null })) ?? existing;
+        }
         await notifyMembership(io, existing);
         await notifyTodosResynced(io, existing, changedTodos, req.user.sub);
       }
@@ -890,7 +963,7 @@ export function createRoomsRouter(io) {
     // 토픽은 아이콘 값들을 무시한다(항상 null).
     let group = null;
     if (type === 'group') {
-      const iconCheck = parseGroupIcon({ iconType, iconEmoji, iconColor, iconUrl });
+      const iconCheck = await parseGroupIcon({ iconType, iconEmoji, iconColor, iconUrl }, { userId: req.user.sub });
       if (iconCheck.error) return res.status(400).json({ error: iconCheck.error });
       const nameCheck = parseGroupName(name);
       if (nameCheck.error) return res.status(400).json({ error: nameCheck.error });
@@ -1024,7 +1097,8 @@ export function createRoomsRouter(io) {
     // 이미 있는 방에 멤버를 추가로 초대하는 건 팀 설정과 무관하게 정회원 이상이면 누구나 —
     // 준회원만 불가(canCreateRooms와 같은 기준). 새 토픽을 만드는 것과는 별개 규칙이다.
     const inviter = await teamAccess(room.teamId, req.user.sub);
-    // 팀에서 빠진 사람은 옛 대화를 보려고 방 멤버십만 남아 있는 것이라, 그 방에 사람을 데려올 수는 없다.
+    // 팀에서 빠지면 그 팀 방에서도 빠지지만(removeMemberFromTeamRooms), 팀에서 빠져도 방 멤버십을 남겨 두던 예전에 남은
+    // 행이 있어도 그 팀 방에 사람을 데려올 수는 없게 팀 멤버인지 한 번 더 본다.
     if (!inviter.isMember || !canCreateRooms(inviter.role)) {
       return res.status(403).json({ error: '멤버를 초대할 권한이 없습니다.' });
     }
@@ -1147,33 +1221,26 @@ export function createRoomsRouter(io) {
         return res.json({ ok: true });
       }
 
-      // 체크 안 함 — 나만 나간다.
-      await removeRoomMember(room.id, req.user.sub);
+      // 체크 안 함 — 나만 나간다(팀에서 제외될 때와 같은 정리 — removeMemberFromRoom). 남은 멤버가 없으면(상대가 이미
+      // 먼저 혼자 나가있던 상태였다면) 아무도 못 보는 방이라 완전히 지워지고, 아니면 남은 쪽에 나간 사람 이름이 남는다.
+      // 방 잠금 안에서 해서 두 사람이 동시에 혼자 나가도 한쪽이 지운 방에 이름을 남기려다 실패하지 않는다.
+      const leaverName = await nameOf(req.user.sub);
+      const removal = await withRoomLock(room.id, (tx) =>
+        removeMemberFromRoom(tx, room, req.user.sub, { departedName: leaverName }),
+      );
       io.in(`user:${req.user.sub}`).socketsLeave(room.id); // socketsLeave 이후라 본인은 자기 퇴장 메시지를 안 받음.
-
-      const remainingMemberIds = await listRoomMemberIds(room.id);
-      if (remainingMemberIds.length === 0) {
-        // 남은 멤버가 없으면(상대가 이미 먼저 혼자 나가있던 상태였다면) 아무도 못 보는
-        // 방을 DB에 계속 남겨둘 이유가 없다 — 완전히 지운다.
-        await deleteRoom(room.id);
-        return res.json({ ok: true });
+      // 남은 멤버의 멤버 목록+나간 사람 이름을 갱신시키고 종료 안내를 남긴다(그새 이미 나가 있었으면 할 일이 없다).
+      if (removal.removed) {
+        await notifyRoomAfterDeparture(io, removal, { actorId: req.user.sub, notice: SECRET_CHAT_ENDED_NOTICE });
       }
-
-      const leaver = await findUserById(req.user.sub);
-      const updated = await setSecretDepartedMember(room.id, {
-        userId: req.user.sub,
-        name: leaver?.name ?? leaver?.username ?? '알 수 없음',
-      });
-      io.to(room.id).emit('room:created', await toRoomDto(updated)); // 남은 멤버의 멤버 목록+나간 사람 이름을 갱신시킨다.
-      await postSystemMessage(io, room, '상대방이 비밀대화를 종료했습니다.');
       return res.json({ ok: true });
     }
 
     if (room.type === 'dm') {
       // 평문 DM의 "채팅방 숨기기"/"채팅방 나가기" — 상대방에게는 아무 영향이 없어야 한다는
       // 요구사항에 따라(room_options_menu.dart), 이제 진짜 멤버십을 건드리지 않는다. 예전엔
-      // removeRoomMember로 나를 멤버에서 뺐는데, DM은 멤버가 나+상대 둘뿐이라 그러면 상대
-      // 쪽 화면에서 방 이름이 "(알 수 없음)"이 되고(Room.displayName이 상대를 못 찾음),
+      // 나를 멤버에서 뺐는데, DM은 멤버가 나+상대 둘뿐이라 그러면 상대 쪽 화면에서 방
+      // 이름이 "(알 수 없음)"이 되고(Room.displayName이 상대를 못 찾음),
       // 내 소켓이 그 방에서 나가버려서 상대가 보낸 메시지도 못 받는 문제가 있었다. 그래서
       // 이제 즐겨찾기/뮤트와 동일하게 순전히 내 개인 설정(hidden)으로만 다룬다 — 시스템
       // 메시지도, 상대에게 가는 브로드캐스트도 없다. 체크박스로 고른 "나가기"(진짜 나가기)면
@@ -1218,6 +1285,9 @@ export function createRoomsRouter(io) {
     }
 
     io.in(`user:${req.user.sub}`).socketsLeave(room.id); // 나간 사람은 이후 이 방 메시지를 더 이상 받지 않게.
+    // 이 방 통화에 들어와 있었으면 통화에서도 뺀다 — 앱은 방을 나가며 통화를 먼저 끊지만, 다른 기기의 연결이나 앱이 못 끊은
+    // 미디어가 남아 멤버가 아닌 채로 회의를 계속 듣지 않게(callAccess.js).
+    await endUserCallAccess(io, req.user.sub, { roomIds: [room.id] });
     // 조용히 나가기 토픽은 "나갔습니다" 안내를 남기지 않는다(그룹은 항상 false).
     if (!room.quietLeave) {
       await postSystemMessage(io, room, `${await nameOf(req.user.sub)} 님이 나갔습니다.`); // socketsLeave 이후라 본인은 자기 퇴장 메시지를 안 받음.
@@ -1285,7 +1355,8 @@ export function createRoomsRouter(io) {
     if (!(await isRoomMember(room.id, req.user.sub))) {
       return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
     }
-    // 팀에서 빠진 사람은 옛 대화를 보려고 방 멤버십만 남아 있다 — 그 팀의 방 정보는 못 바꾼다(토픽 관리와 같은 원칙).
+    // 팀에서 빠진 사람은 그 팀 방에서도 빠지지만, 방 멤버십을 남겨 두던 예전에 남은 행이 있어도 그 팀의 방 정보는
+    // 못 바꾼다(토픽 관리와 같은 원칙).
     const access = await teamAccess(room.teamId, req.user.sub);
     if (!access.isMember) return res.status(403).json({ error: '이 팀의 멤버가 아닙니다.' });
     if (access.role === 'guest') {
@@ -1305,14 +1376,17 @@ export function createRoomsRouter(io) {
     }
     if (GROUP_ICON_KEYS.some((key) => key in body)) {
       // 보낸 칸만 바꾸고(색만 바꾸는 등) 나머지는 지금 값을 그대로 합쳐서, 만들 때와 같은 규칙으로 검사한다.
-      // 지금 사진을 그대로 돌려보냈으면(방 정보를 받은 지 오래돼 서명 링크가 만료됐을 수 있다) 지금 값으로 본다.
-      const sentIconUrl = 'iconUrl' in body ? body.iconUrl : room.iconUrl;
-      const { icon, error } = parseGroupIcon({
-        iconType: 'iconType' in body ? body.iconType : room.iconType,
-        iconEmoji: 'iconEmoji' in body ? body.iconEmoji : room.iconEmoji,
-        iconColor: 'iconColor' in body ? body.iconColor : room.iconColor,
-        iconUrl: room.iconUrl && knownUploadPath(sentIconUrl) === room.iconUrl ? room.iconUrl : sentIconUrl,
-      });
+      // 지금 사진을 그대로 돌려보냈으면(방 정보를 받은 지 오래돼 서명 링크가 만료됐을 수 있다) 지금 값으로 본다 —
+      // parseGroupIcon이 지금 아이콘(currentIconUrl)을 "원래 있던 파일"로 받는다.
+      const { icon, error } = await parseGroupIcon(
+        {
+          iconType: 'iconType' in body ? body.iconType : room.iconType,
+          iconEmoji: 'iconEmoji' in body ? body.iconEmoji : room.iconEmoji,
+          iconColor: 'iconColor' in body ? body.iconColor : room.iconColor,
+          iconUrl: 'iconUrl' in body ? body.iconUrl : room.iconUrl,
+        },
+        { userId: req.user.sub, currentIconUrl: room.iconUrl },
+      );
       if (error) return res.status(400).json({ error });
       Object.assign(fields, icon);
     }
@@ -1444,6 +1518,9 @@ export function createRoomsRouter(io) {
     const memberIds = await listRoomMemberIds(room.id);
     const payload = { roomId: room.id, reason: 'deleted', name: room.name };
     for (const userId of memberIds) io.to(`user:${userId}`).emit('room:removed', payload);
+    // 진행 중인 통화가 있으면 끝낸다 — 방이 없어지면 아무도 그 통화에 있을 자격이 없다(LiveKit 방째 닫는다 — callAccess.js).
+    // 소켓을 방에서 빼기 전이라 멤버들이 "통화 끝남"(call:state)도 받아 통화 표시를 지운다.
+    await endRoomCallAccess(io, room.id);
     io.in(room.id).socketsLeave(room.id);
     const [actorName, team] = await Promise.all([nameOf(req.user.sub), findTeamById(room.teamId)]);
     // 지우면 예약의 방 id가 비워지므로(set null) 그 전에 이 방 예약을 골라 두었다가, 지운 뒤 실패로 알린다.
@@ -1498,6 +1575,9 @@ export function createRoomsRouter(io) {
     io.in(targets.map((id) => `user:${id}`)).socketsLeave(room.id);
     const payload = { roomId: room.id, reason: 'kicked', name: room.name };
     for (const userId of targets) io.to(`user:${userId}`).emit('room:removed', payload);
+    // 이 방 통화에 들어와 있었으면 통화(LiveKit 미디어 포함)에서도 내보낸다 — 소켓을 방에서 빼는 것만으로는 이미 붙은 미디어가
+    // 끊기지 않아, 내보낸 사람이 회의를 계속 듣고 진행자였으면 남의 마이크도 계속 끌 수 있었다(callAccess.js).
+    for (const userId of targets) await endUserCallAccess(io, userId, { roomIds: [room.id] });
     io.to(room.id).emit('room:created', await toRoomDto(room)); // 남은 멤버들의 목록을 갱신시킨다.
     await notifyTodosResynced(io, room, changedTodos, req.user.sub);
     if (!room.quietLeave) {

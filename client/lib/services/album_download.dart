@@ -20,10 +20,11 @@ class AlbumDownloadSummary {
   const AlbumDownloadSummary({this.saved = 0, this.failed = 0, this.folder});
 }
 
-/// 저장할 파일 이름 — 이름이 없으면 종류에 맞는 확장자로 임시 이름을 만든다.
+/// 저장할 파일 이름 — 올린 사람이 정한 이름을 [safeFileName]으로 다듬은 것. 이름이 없거나 다듬고 남는 게 없으면 종류에
+/// 맞는 확장자로 임시 이름을 만든다.
 String albumItemFileName(AlbumItem item, int index) {
-  final name = item.fileName?.trim();
-  if (name != null && name.isNotEmpty) return name;
+  final name = safeFileName(item.fileName ?? '', fallback: '');
+  if (name.isNotEmpty) return name;
   final mime = (item.mimeType ?? '').toLowerCase();
   final ext = mime.contains('/') && mime.split('/').last.isNotEmpty
       ? mime.split('/').last.replaceAll('jpeg', 'jpg')

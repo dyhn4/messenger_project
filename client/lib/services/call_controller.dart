@@ -60,6 +60,33 @@ Future<void> _stopCallForegroundService() async {
   await FlutterForegroundTask.stopService();
 }
 
+/// LiveKit 연결이 이 기기 밖의 이유로 끝났을 때 띄울 짧은 안내 — null이면 안내할 것이 없다(내가 나간 것).
+///
+/// 서버는 방에서 내보내졌거나 팀에서 빠졌거나 계정이 정지되는 등 통화에 있을 자격을 잃은 사람을 LiveKit에서 내보내고
+/// ([DisconnectReason.participantRemoved] — server/src/callAccess.js), 토픽을 지우면 회의방째 닫는다([DisconnectReason.roomDeleted]).
+/// 같은 계정으로 다른 기기에서 들어오면 LiveKit이 먼저 들어와 있던 연결을 끊는다([DisconnectReason.duplicateIdentity]).
+/// 그 밖의 이유는 재연결까지 실패해 연결이 아주 끊긴 것이다. 어느 쪽이든 그 연결로는 통화를 이어 갈 수 없다.
+String? callDisconnectNotice(DisconnectReason? reason) {
+  switch (reason) {
+    case DisconnectReason.clientInitiated:
+      return null;
+    case DisconnectReason.participantRemoved:
+      return '화상회의에서 내보내졌습니다';
+    case DisconnectReason.roomDeleted:
+      return '화상회의가 종료되었습니다';
+    case DisconnectReason.duplicateIdentity:
+      return '다른 기기에서 화상회의에 참여해 이 기기의 통화를 끝냈습니다';
+    default:
+      return '화상회의 연결이 끊겼습니다';
+  }
+}
+
+/// 같은 계정이 다른 기기에서 이 통화에 들어가 이 기기의 연결이 끊긴 것인지 — 그 사람은 다른 기기로 통화를 계속하고
+/// 있으니 서버에 "나갔다"고 바로 알리지 않고 넘어갔다고 알린다(Session이 call:leave에 handoff를 붙인다 — 바로 나가면
+/// 다른 기기의 참여가 닿기 전에 진행자가 넘어가고 통화 기록에 나감·참여가 남는다).
+bool callDisconnectIsHandoff(DisconnectReason? reason) =>
+    reason == DisconnectReason.duplicateIdentity;
+
 /// 화상회의 한 통(通)을 들고 있는 컨트롤러 — LiveKit 연결, 마이크/카메라 상태, 참가자 목록.
 ///
 /// 시그널링(누가 통화를 걸었는지, 지금 누가 들어와 있는지)은 우리 소켓(chat_socket.dart의
@@ -72,7 +99,19 @@ class CallController extends ChangeNotifier {
   /// ApiClient를 직접 들고 있지 않고 매번 가져오는 이유: 서버 주소를 바꾸거나 토큰이 갱신되면
   /// Session이 ApiClient를 새로 만드는데, 그때 여기 든 참조가 옛것으로 남으면 안 되기 때문.
   final ApiClient Function() _api;
-  CallController(this._api);
+
+  /// 통화가 이 기기 밖의 이유로 끝났을 때(서버가 내보냄·회의방이 닫힘·다른 기기에서 참여·연결이 아주 끊김) — 연결은 이미
+  /// 정리한 뒤에 그 방 id와 [callDisconnectNotice] 안내, 다른 기기로 넘어간 것인지([callDisconnectIsHandoff])로 부른다.
+  /// Session이 서버 통화 상태를 맞추고 안내를 띄운다.
+  final void Function(String roomId, String notice, bool handoff)?
+  onDisconnected;
+
+  /// LiveKit 연결이 끊겼다가 다시 이어졌을 때(와이파이↔LTE 전환, 서버 재시작 뒤 신호 재연결 등) 그 방 id로 부른다.
+  /// 신호가 메인 서버의 /livekit 프록시를 거쳐서, 서버가 재시작되면 채팅 소켓과 LiveKit 신호가 함께 끊긴다 — 채팅 소켓이
+  /// 먼저 붙으면 그때는 아직 통화가 "연결됨"이 아니라 참여를 다시 알리지 못하므로, Session이 여기서 한 번 더 알린다.
+  final void Function(String roomId)? onReconnected;
+
+  CallController(this._api, {this.onDisconnected, this.onReconnected});
 
   Room? _room;
   Room? get room => _room;
@@ -119,6 +158,10 @@ class CallController extends ChangeNotifier {
         ..on<DataReceivedEvent>(_onData)
         ..on<ParticipantConnectedEvent>(_onParticipantConnected)
         ..on<ParticipantDisconnectedEvent>(_onParticipantDisconnected)
+        // 서버가 내보냈거나 연결이 아주 끊기면 통화를 정리한다 — 안 그러면 빈 통화 화면이 남고 다음 전화도 울리지 않는다.
+        ..on<RoomDisconnectedEvent>((e) => _onRoomDisconnected(room, e))
+        // 끊겼다가 다시 이어지면 서버에 참여를 다시 알릴 기회를 준다(onReconnected).
+        ..on<RoomReconnectedEvent>((_) => _onRoomReconnected(room))
         // 새로 올린 영상(카메라를 켜거나 화면 공유를 시작)에도 지금 화질 단계를 맞춘다.
         ..on<LocalTrackPublishedEvent>((_) => unawaited(_applyVideoCaps()));
       await room.connect(credentials.url, credentials.token);
@@ -130,6 +173,8 @@ class CallController extends ChangeNotifier {
       _updateLocalTier();
       await me?.setMicrophoneEnabled(true);
       await me?.setCameraEnabled(true);
+      // 그사이 끊겼으면(서버가 바로 내보냄 등 — _onRoomDisconnected가 이미 정리했다) "통화 중" 알림을 다시 띄우지 않는다.
+      if (!identical(_room, room)) return;
       // 연결에 성공한 뒤에 띄운다 — 실패한 통화에 알림만 남는 걸 막는다.
       _screenShareLabel = roomLabel ?? '화상회의';
       await _startCallForegroundService(_screenShareLabel);
@@ -146,6 +191,26 @@ class CallController extends ChangeNotifier {
       _connecting = false;
       notifyListeners();
     }
+  }
+
+  /// LiveKit 연결이 끝났다. 연결 중(아직 [_room]이 아닌 Room)에 실패한 것은 join()의 catch가 정리하고, 내가 나간 것은
+  /// leave()가 리스너를 먼저 치워서 여기로 오지 않는다(혹시 와도 clientInitiated라 안내가 없다).
+  void _onRoomDisconnected(Room room, RoomDisconnectedEvent e) {
+    if (!identical(_room, room)) return;
+    final notice = callDisconnectNotice(e.reason);
+    if (notice == null) return;
+    final roomId = _roomId;
+    unawaited(leave());
+    if (roomId != null) {
+      onDisconnected?.call(roomId, notice, callDisconnectIsHandoff(e.reason));
+    }
+  }
+
+  /// LiveKit 연결이 다시 이어졌다 — 지금 통화 중인 Room일 때만 알린다(나간 뒤에 늦게 온 이벤트는 무시).
+  void _onRoomReconnected(Room room) {
+    if (!identical(_room, room)) return;
+    final roomId = _roomId;
+    if (roomId != null) onReconnected?.call(roomId);
   }
 
   Future<void> leave() async {

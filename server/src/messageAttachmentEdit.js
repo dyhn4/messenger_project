@@ -4,6 +4,7 @@
 import { applyMediaEdit } from './db/queries/messageAttachmentEdit.js';
 import { findMessageById, listAttachmentsForMessages } from './db/queries/messages.js';
 import { planAttachmentEdit } from './attachmentEditPlan.js';
+import { messageTextDenial } from './messageLimits.js';
 import { sanitizeTextFormat } from './textFormat.js';
 
 /**
@@ -24,6 +25,9 @@ export async function editMediaMessage({ message, room, body, userId, cleanMenti
 
   const hasText = typeof body?.text === 'string';
   const newText = hasText ? body.text.trim() : (message.text ?? '').trim();
+  // 설명글도 보낼 때와 같은 길이 상한(messageLimits.js) — 비밀 대화의 사진·파일 메시지는 여기까지 오지 않는다(messages.js).
+  const tooLong = hasText ? messageTextDenial(newText, { subject: '설명글은' }) : null;
+  if (tooLong) return { ok: false, status: 400, error: tooLong };
   if (plan.remaining.length === 0 && !newText) {
     return {
       ok: false,

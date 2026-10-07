@@ -98,13 +98,15 @@ function guardedLookup(hostname, options, callback) {
 const PREVIEW_DEADLINE_MS = 8000; // 리다이렉트·본문까지 통틀어 한 번의 미리보기에 쓰는 최대 시간.
 const PREVIEW_MAX_BYTES = 1024 * 1024; // 압축을 푼 본문 기준.
 const PREVIEW_MAX_CONCURRENT = 5; // 동시에 받는 미리보기 수 — 넘으면 이번 것은 건너뛴다(부가 기능이라).
+const HTML_ACCEPT = 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1';
 let activePreviews = 0;
 
 /**
  * GET 한 번 — 리다이렉트는 따라가지 않고 그대로 돌려준다(호출부가 매 홉 다시 검사). 80/443 포트만 허용한다.
- * 본문은 [maxBytes]까지만 읽고(압축 해제 후 기준), [deadline](ms 시각)이 지나면 끊는다.
+ * 본문(Buffer)은 [maxBytes]까지만 읽는다(압축 해제 후 기준): [truncate]면 거기까지 받은 것으로 끝내고(HTML — og 태그는 앞쪽에
+ * 있다), 아니면 너무 큰 응답으로 보고 실패한다(그림 — 잘린 그림은 쓸 수 없다). [deadline](ms 시각)이 지나면 끊는다.
  */
-function requestOnce(url, deadline, maxBytes) {
+function requestOnce(url, deadline, { maxBytes, accept, truncate }) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const isHttps = parsed.protocol === 'https:';
@@ -124,7 +126,7 @@ function requestOnce(url, deadline, maxBytes) {
         lookup: guardedLookup,
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; TangoTalkLinkPreview/1.0)',
-          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
+          Accept: accept,
           'Accept-Encoding': 'gzip, deflate, br',
         },
       },
@@ -133,7 +135,11 @@ function requestOnce(url, deadline, maxBytes) {
         const headers = res.headers;
         if (status >= 300 && status < 400) {
           res.resume();
-          return resolve({ status, headers, body: '' });
+          return resolve({ status, headers, body: Buffer.alloc(0) });
+        }
+        if (!truncate && Number(headers['content-length']) > maxBytes) {
+          req.destroy();
+          return reject(new Error('응답이 너무 큽니다.'));
         }
         const encoding = String(headers['content-encoding'] ?? '').toLowerCase();
         const stream =
@@ -146,16 +152,25 @@ function requestOnce(url, deadline, maxBytes) {
                 : res;
         const chunks = [];
         let received = 0;
+        let settled = false;
         stream.on('data', (chunk) => {
+          if (settled) return;
           received += chunk.length;
           chunks.push(chunk);
-          if (received >= maxBytes) {
-            // 필요한 만큼은 받았다 — 나머지는 버리고 끝낸다(og 태그는 보통 <head>에 있다).
+          // 잘라 써도 되는 응답(HTML)은 상한에 닿는 순간, 아니면(그림) 상한을 넘는 순간 끝낸다 — 그림은 끝('end')까지 받아야 쓴다.
+          if (truncate ? received >= maxBytes : received > maxBytes) {
+            settled = true;
             req.destroy();
-            resolve({ status, headers, body: Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8') });
+            if (!truncate) return reject(new Error('응답이 너무 큽니다.'));
+            // 필요한 만큼은 받았다 — 나머지는 버리고 끝낸다(og 태그는 보통 <head>에 있다).
+            resolve({ status, headers, body: Buffer.concat(chunks).subarray(0, maxBytes) });
           }
         });
-        stream.on('end', () => resolve({ status, headers, body: Buffer.concat(chunks).toString('utf8') }));
+        stream.on('end', () => {
+          if (settled) return;
+          settled = true;
+          resolve({ status, headers, body: Buffer.concat(chunks) });
+        });
         stream.on('error', reject);
       },
     );
@@ -172,14 +187,22 @@ function requestOnce(url, deadline, maxBytes) {
   });
 }
 
-/** 리다이렉트를 직접 따라가며(최대 3번) 매 홉 주소·포트를 다시 검사한다. 응답이 없거나 막히면 null. */
-async function safeFetch(startUrl, maxRedirects = 3) {
-  const deadline = Date.now() + PREVIEW_DEADLINE_MS;
+/**
+ * SSRF를 막는 GET — 리다이렉트를 직접 따라가며(최대 [maxRedirects]번) 매 홉 주소·포트를 다시 검사하고, 접속할 IP는 이름을 푼
+ * 그 자리에서 검사한다(guardedLookup — 사설·루프백·이 서버 자신 등은 막는다). 결과는 { status, headers, body(Buffer), url(마지막
+ * 주소) }, 응답이 없거나 막히면 null(또는 throw). 링크 미리보기(아래 fetchLinkPreview)와 미리보기 그림 받기(linkPreviewImage.js)가
+ * 같이 쓴다 — 서버가 바깥 주소에 요청을 보내는 곳은 모두 이 함수를 거친다.
+ */
+export async function safeFetch(
+  startUrl,
+  { maxRedirects = 3, maxBytes = PREVIEW_MAX_BYTES, accept = HTML_ACCEPT, truncate = true, deadlineMs = PREVIEW_DEADLINE_MS } = {},
+) {
+  const deadline = Date.now() + deadlineMs;
   let url = startUrl;
   for (let i = 0; i <= maxRedirects; i++) {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    const res = await requestOnce(url, deadline, PREVIEW_MAX_BYTES);
+    const res = await requestOnce(url, deadline, { maxBytes, accept, truncate });
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.location;
       if (!location) return null;
@@ -191,8 +214,8 @@ async function safeFetch(startUrl, maxRedirects = 3) {
   return null; // 리다이렉트가 너무 많음 — 포기.
 }
 
-/** 미리보기 그림 주소로 써도 되는지 — http(s)만, 사설 IP를 직접 적은 주소는 뺀다(보는 사람의 앱·브라우저가 그 주소를
- * 불러오게 되므로, 사내 기기를 찌르는 데 쓰이지 않게). 안 되면 null. */
+/** 미리보기 그림 주소 후보로 써도 되는지 — http(s)만, 사설 IP를 직접 적은 주소는 뺀다. 이 주소는 앱에 넘기지 않고 서버가
+ * safeFetch로 한 번 받아 둘 때만 쓴다(linkPreviewImage.js — 이름을 푼 IP 검사도 그때 한다). 안 되면 null. */
 function safeImageUrl(u) {
   try {
     const parsed = new URL(u);
@@ -287,7 +310,9 @@ export function parseOgTags(html, pageUrl) {
 
 /** [url]의 오픈그래프 정보를 가져온다. 뭐든 실패하면(네트워크, SSRF 차단, HTML 아님, 태그
  * 없음 등) 조용히 null을 돌려준다 — 링크 미리보기는 "있으면 좋은" 부가 기능이라 실패해도
- * 메시지 전송 자체에는 전혀 영향이 없어야 한다(socket.js에서 fire-and-forget으로 부른다). */
+ * 메시지 전송 자체에는 전혀 영향이 없어야 한다(sendMessage.js에서 fire-and-forget으로 부른다).
+ * 결과의 imageUrl은 그 페이지가 적어 둔 바깥 주소 "후보"다 — 앱에 그대로 넘기지 말고 linkPreviewImage.js
+ * storePreviewImage로 서버가 받아 둔 업로드 경로로 바꿔 저장한다. */
 export async function fetchLinkPreview(url) {
   if (activePreviews >= PREVIEW_MAX_CONCURRENT) return null;
   activePreviews++;
@@ -296,7 +321,7 @@ export async function fetchLinkPreview(url) {
     if (!res || res.status < 200 || res.status >= 300) return null;
     const contentType = String(res.headers['content-type'] ?? '');
     if (!contentType.includes('text/html')) return null;
-    return parseOgTags(res.body, res.url || url);
+    return parseOgTags(res.body.toString('utf8'), res.url || url);
   } catch {
     return null;
   } finally {

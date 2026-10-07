@@ -296,6 +296,9 @@ class AppSettings extends ChangeNotifier {
   /// 다운로드 완료 후 "폴더 열기"를 골랐을 때 호출(Windows 전용, 그 외 플랫폼은 아무 것도 안 함).
   Future<void> openDownloadFolder() async {
     if (!AppPlatform.isWindows || downloadFolder.isEmpty) return;
-    await Process.start('explorer.exe', [downloadFolder]);
+    // 이름만 주면 현재 폴더에 심어 둔 explorer.exe가 대신 실행될 수 있어 전체 경로로 부른다(download_storage.dart와 같은
+    // 방식 — 검토 S32).
+    final root = AppPlatform.environment['SystemRoot'] ?? r'C:\Windows';
+    await Process.start('$root\\explorer.exe', [downloadFolder]);
   }
 }

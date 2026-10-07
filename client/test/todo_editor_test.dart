@@ -780,6 +780,43 @@ void main() {
       });
     });
 
+    testWidgets('담당자가 고칠 때 — 폴더 경로는 보기만 하고(지우기·업로드 경로 단추 없음) 첨부 단추로는 파일만 고른다', (
+      tester,
+    ) async {
+      // 폴더 경로는 할 일을 관리하는 사람만 바꾼다(서버도 담당자의 경로 변경을 거절한다) — 담당자에게 단추를 보여 주면
+      // 저장할 때 거절당하고, 업로드 경로 고르기 창은 저장된 공유 폴더에 바로 접속했다(검토 S32).
+      final session = _session();
+      final json = todoJson(
+        id: 'p2',
+        title: '맡은 일',
+        creatorId: 'boss',
+        creatorName: '팀장',
+        assignees: const ['me'],
+        downloadPath: r'\\nas\자료',
+        uploadPath: r'\\nas\결과',
+      );
+      final api = FakeTodoApi(me: 'me', todos: [json]);
+      await _open(
+        tester,
+        (c) => showTodoEditor(
+          c,
+          session: session,
+          editing: Todo.fromJson(json),
+          api: api,
+        ),
+      );
+      expect(_key('todo-download-path'), findsOneWidget);
+      expect(_key('todo-upload-path'), findsOneWidget);
+      expect(_key('todo-download-path-clear'), findsNothing);
+      expect(_key('todo-upload-path-clear'), findsNothing);
+      expect(_key('todo-upload-path-button'), findsNothing);
+      expect(_key('todo-upload-path-hint'), findsNothing);
+      expect(
+        find.descendant(of: _key('todo-attach'), matching: find.text('파일 첨부')),
+        findsOneWidget,
+      );
+    });
+
     testWidgets(
       '가로 전체 옅은 단추 "+ 파일 첨부(또는 폴더 경로 지정)", 그 오른쪽 아래 "N / 30"(N 굵게), 붙인 파일은 그 아래 한 줄씩 — x로 빼면 수가 준다',
       (tester) async {

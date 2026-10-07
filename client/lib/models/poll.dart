@@ -173,9 +173,13 @@ class Poll {
   );
 
   /// 소켓 `poll:updated`를 받았을 때의 새 값 — "받는 쪽 규칙"(docs 규약 A)대로 합친다.
-  /// 이벤트의 poll은 모두에게 같은 중립값(myOptionIds 빈 목록, favorite false)이므로, 보는
-  /// 사람별 값은 이벤트로 덮어쓰지 않고 직전 값을 유지하되 내가 투표한 이벤트(actorId가 나)일
+  /// 이벤트의 poll은 모두에게 같은 중립값(myOptionIds 빈 목록, favorite false)이고 표 수는 그때의
+  /// 절대값이라(더하는 값이 아니다) 같은 투표의 알림을 두 번 받아도 표가 두 번 세어지지 않는다.
+  /// 보는 사람별 값은 이벤트로 덮어쓰지 않고 직전 값을 유지하되 내가 투표한 이벤트(actorId가 나)일
   /// 때만 actorOptionIds로 갈아 끼운다(다른 기기에서 투표한 경우도 여기서 따라간다).
+  /// 서버는 actorId·actorOptionIds를 투표한 사람의 기기(user 룸)로 가는 알림에만 싣고 방 전체에는
+  /// null로 보낸다 — 익명 투표에서 누가 무엇을 골랐는지가 새지 않게. 옛 서버처럼 남의 actorId가
+  /// 와도 내 선택에는 쓰지 않는다.
   static Poll applyUpdate(
     Poll? current,
     Poll incoming, {
@@ -193,7 +197,9 @@ class Poll {
   }
 }
 
-/// 소켓 `poll:updated` — 누가 투표했거나 투표가 마감됐다. 마감 이벤트는 [actorId]가 null.
+/// 소켓 `poll:updated` — 누가 투표했거나 투표가 마감됐다. 방 전체로 오는 알림(남의 투표·마감)은
+/// [actorId]·[actorOptionIds]가 null이고(누가 투표했는지는 알리지 않는다), 내가 투표했을 때 내
+/// 기기들로 오는 알림에만 내 id와 내가 고른 보기(취소면 빈 목록)가 들어 있다.
 class PollUpdatedEvent {
   final String roomId;
   final String messageId;

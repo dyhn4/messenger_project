@@ -27,6 +27,26 @@ export async function insertMessageAttachments(messageId, items) {
     .returning();
 }
 
+/**
+ * 메시지와 첨부 목록을 한 트랜잭션으로 넣는다(sendMessage.js — 첨부를 목록으로도 저장하는 메시지). 예전엔 메시지를 먼저 넣고 첨부를
+ * 따로 넣어서, 첨부에서 실패하면(비울 수 없는 칸 등) 방에 알리지도 않은 반쪽짜리 메시지가 남아 방을 다시 불러올 때 나타났다.
+ * 결과: `{ message, attachments }`(첨부는 position 순).
+ */
+export function insertMessageWithAttachments(fields, items) {
+  return db.transaction(async (tx) => {
+    const [message] = await tx.insert(messages).values(fields).returning();
+    const attachments =
+      items.length === 0
+        ? []
+        : await tx
+            .insert(messageAttachments)
+            .values(items.map((a, i) => ({ ...a, messageId: message.id, position: i })))
+            .returning();
+    attachments.sort((a, b) => a.position - b.position);
+    return { message, attachments };
+  });
+}
+
 /** 메시지 id별 첨부 목록 {messageId: [...]} — 목록 조회가 한 번에 붙여 내려준다. */
 export async function listAttachmentsForMessages(messageIds) {
   if (messageIds.length === 0) return {};

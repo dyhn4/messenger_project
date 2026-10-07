@@ -250,6 +250,9 @@ Future<void> _shareAnnouncementToRoom(
     await session.chatSocket.send(
       roomId: room.id,
       type: 'text',
+      // 서버가 이 공지를 내가 읽을 수 있는지 확인하고 인용 카드의 작성자·미리보기를 공지에서 채운다
+      // (server/src/messageAttribution.js). 아래 두 값은 업데이트 전 서버만 쓴다.
+      quotedAnnouncementId: announcement.id,
       quotedSenderName: announcement.authorName,
       quotedPreview: announcement.previewText,
     );

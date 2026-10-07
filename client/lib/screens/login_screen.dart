@@ -9,8 +9,26 @@ import '../widgets/email_address_field.dart';
 import '../widgets/update_dialog.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
+import 'my_profile_dialog.dart' show kProfileNameMaxLength;
 
 const _loginGreen = Color(0xFF6FCF97);
+
+/// 새로 정하는 아이디의 규칙 — 영문·숫자와 . _ - 만, 4~20자. 서버(server/src/authGuard.js의 USERNAME_PATTERN)와 같은
+/// 규칙이라, 보내기 전에 여기서 먼저 알려 준다(최종 판단은 서버가 한다). 아이디는 다른 사람이 "이 사람이 맞는지"
+/// 확인하는 값이라 띄어쓰기·한글·비슷하게 생긴 다른 글자로 기존 아이디를 흉내 내지 못하게 한다. 대소문자만 다른
+/// 아이디도 서버가 같은 아이디로 보고 "이미 사용 중"이라고 답한다.
+final kSignupUsernamePattern = RegExp(r'^[A-Za-z0-9._-]{4,20}$');
+
+/// 아이디 규칙을 어겼을 때의 안내 — 서버 USERNAME_RULE_ERROR와 같은 문구.
+const kSignupUsernameRule =
+    '아이디는 영문·숫자와 . _ - 만 써서 4~20자로 정하세요(한글·띄어쓰기·그 밖의 기호는 쓸 수 없습니다).';
+
+/// 회원가입 아이디 칸 아래에 늘 보이는 안내.
+const kSignupUsernameHelper = '영문, 숫자와 . _ - 만 쓸 수 있습니다 (4~20자)';
+
+/// 회원가입에 쓸 아이디가 규칙에 맞는지 — 맞으면 null, 아니면 [kSignupUsernameRule]. 앞뒤 공백은 보낼 때처럼 떼고 본다.
+String? signupUsernameError(String raw) =>
+    kSignupUsernamePattern.hasMatch(raw.trim()) ? null : kSignupUsernameRule;
 
 // 보안 질문은 문장이 길어서(최대 28자 남짓) 기본 크기로는 드롭다운에서 잘린다 — 목록/선택
 // 표시 양쪽에 같은 크기를 쓴다.
@@ -137,6 +155,15 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _checkUsername() async {
     final username = _username.text.trim();
     if (username.isEmpty) return;
+    // 규칙(영문·숫자·. _ -, 4~20자)에 안 맞으면 서버에 묻지 않고 바로 알려 준다.
+    final ruleError = signupUsernameError(username);
+    if (ruleError != null) {
+      setState(() {
+        _usernameAvailable = false;
+        _usernameCheckMessage = ruleError;
+      });
+      return;
+    }
     setState(() {
       _usernameChecking = true;
       _usernameCheckMessage = null;
@@ -166,6 +193,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submit() async {
     if (_isRegister) {
+      final usernameError = signupUsernameError(_username.text);
+      if (usernameError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(usernameError)));
+        return;
+      }
       if (_usernameAvailable != true) {
         ScaffoldMessenger.of(
           context,
@@ -329,7 +363,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             maxLength: 20,
                             onChanged: _onUsernameChanged,
                             decoration: InputDecoration(
-                              hintText: '아이디 입력 (4~20자)',
+                              hintText: '아이디 입력 (영문·숫자 4~20자)',
+                              // 쓸 수 있는 글자를 미리 보여 준다(서버 규칙과 같다 — kSignupUsernamePattern).
+                              helperText: kSignupUsernameHelper,
                               counterText: '',
                               border: const OutlineInputBorder(),
                               // 버튼을 입력칸 안쪽 오른쪽 끝에 넣는다. 기본 suffixIcon 제약은
@@ -409,6 +445,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           const SizedBox(height: 12),
                           TextField(
                             controller: _name,
+                            // 서버 가입 규칙(이름 30자 이내 — 프로필 이름 변경과 같다)에 맞춰 입력 단계에서 자른다.
+                            maxLength: kProfileNameMaxLength,
                             decoration: const InputDecoration(
                               labelText: '이름',
                               border: OutlineInputBorder(),

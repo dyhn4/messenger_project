@@ -3,9 +3,12 @@ import path from 'node:path';
 import { Router } from 'express';
 import { cert } from 'firebase-admin/app';
 import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
+import { safeAvatarColor } from './avatarRules.js';
+import { endUserCallAccess } from './callAccess.js';
 import { UPLOADS_DIR } from './config.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
+import { clearPushTargetsForUser } from './db/queries/devices.js';
 import { countMessages, countMessagesToday, countRooms, countTeams } from './db/queries/stats.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
 import { invalidateMessagingCache } from './push.js';
@@ -18,7 +21,13 @@ import {
   toggleDefaultPositionOption,
 } from './db/queries/positionOptions.js';
 import { listTeamIdsForUser, listTeamMemberIds, listTeamsForUser } from './db/queries/teams.js';
-import { countActiveUsers, findUserById, listAllUsersForAdmin, updateUser } from './db/queries/users.js';
+import {
+  countActiveUsers,
+  findUserById,
+  listAllUsersForAdmin,
+  updateUser,
+  updateUserUnlessLastServerAdmin,
+} from './db/queries/users.js';
 import { db } from './db/client.js';
 import { teams as teamsTable } from './db/schema.js';
 import { isOnline } from './presence.js';
@@ -47,7 +56,7 @@ export function createAdminRouter(io) {
   // 거치면서 일반 회원이 403을 받는다.
   router.use('/admin', async (req, res, next) => {
     const me = await findUserById(req.user.sub);
-    if (!me || me.deletedAt || !me.isServerAdmin) {
+    if (!me || me.deletedAt || me.suspendedAt || !me.isServerAdmin) {
       return res.status(403).json({ error: '서버 운영자만 접근할 수 있습니다.' });
     }
     req.admin = me;
@@ -390,12 +399,20 @@ export function createAdminRouter(io) {
       return res.status(400).json({ error: '자기 계정은 정지할 수 없습니다.' });
     }
 
-    // 정지하면서 tokenVersion을 올려야 이미 로그인해 있는 기기도 즉시 끊긴다.
-    const updated = await updateUser(target.id, {
-      suspendedAt: suspend ? new Date() : null,
-      ...(suspend ? { tokenVersion: (target.tokenVersion ?? 0) + 1 } : {}),
-    });
-    if (suspend) disconnectUserSockets(io, target.id);
+    // 정지하면서 tokenVersion을 올려야 이미 로그인해 있는 기기도 즉시 끊긴다. 정지된 운영자는 콘솔에
+    // 못 들어오므로, 정지는 활성 서버 운영자가 한 명은 남을 때만 한다(운영자 해제와 같은 규칙).
+    const updated = suspend
+      ? await updateUserUnlessLastServerAdmin(target.id, {
+          suspendedAt: new Date(),
+          tokenVersion: (target.tokenVersion ?? 0) + 1,
+        })
+      : await updateUser(target.id, { suspendedAt: null });
+    if (!updated) {
+      return res.status(400).json({ error: '마지막 서버 운영자는 정지할 수 없습니다. 다른 회원을 서버 운영자로 먼저 지정하세요.' });
+    }
+    // 정지된 계정에는 알림도 가지 않는다 — 보내는 쪽이 정지·탈퇴 계정을 거르고(db/queries/devices.js), 아래 cutOffUser가
+    // 기기들의 푸시 토큰·구독도 지운다(정지를 풀어도 다시 로그인하기 전까지는 그 기기들로 알림이 가지 않게).
+    if (suspend) await cutOffUser(io, target.id);
 
     recordAudit({
       ...actorOf(req),
@@ -413,7 +430,7 @@ export function createAdminRouter(io) {
     const target = await requireTarget(req, res);
     if (!target) return;
     const updated = await updateUser(target.id, { tokenVersion: (target.tokenVersion ?? 0) + 1 });
-    disconnectUserSockets(io, target.id);
+    await cutOffUser(io, target.id);
 
     recordAudit({
       ...actorOf(req),
@@ -431,22 +448,21 @@ export function createAdminRouter(io) {
   // 로그아웃(/admin/users/:id/logout-all)이나 정지로 대응하고, 비밀번호 자체는 본인만
   // 보안 질문(/auth/reset-password)으로 재설정할 수 있다.
 
-  /** 서버 운영자 지정/해제. 마지막 운영자는 스스로 내려올 수 없다(아무도 못 들어가게 되므로). */
+  /**
+   * 서버 운영자 지정/해제. 마지막 운영자는 내려올 수 없다(아무도 못 들어가게 되므로) — 정지된 운영자는 콘솔에
+   * 못 들어오니 남은 사람으로 치지 않는다(updateUserUnlessLastServerAdmin).
+   */
   router.post('/admin/users/:id/server-admin', async (req, res) => {
     const target = await requireTarget(req, res);
     if (!target) return;
     const grant = req.body?.isServerAdmin !== false;
 
-    if (!grant) {
-      const remaining = (await listAllUsersForAdmin()).filter(
-        (u) => u.isServerAdmin && !u.deletedAt && u.id !== target.id,
-      );
-      if (remaining.length === 0) {
-        return res.status(400).json({ error: '마지막 서버 운영자는 해제할 수 없습니다.' });
-      }
+    const updated = grant
+      ? await updateUser(target.id, { isServerAdmin: true })
+      : await updateUserUnlessLastServerAdmin(target.id, { isServerAdmin: false });
+    if (!updated) {
+      return res.status(400).json({ error: '마지막 서버 운영자는 해제할 수 없습니다. 다른 회원을 서버 운영자로 먼저 지정하세요.' });
     }
-
-    const updated = await updateUser(target.id, { isServerAdmin: grant });
     // 등급 변경과 같은 이유로, 로그아웃 없이 바로 반영되도록 알린다.
     io.to(`user:${target.id}`).emit('user:role-updated', { isServerAdmin: grant });
     recordAudit({
@@ -522,7 +538,8 @@ function toAdminUserDto(u, teamRows = []) {
     name: u.name ?? u.username,
     avatarType: u.avatarType ?? 'initial',
     avatarEmoji: u.avatarEmoji ?? null,
-    avatarColor: u.avatarColor ?? null,
+    // 회원 목록은 종류와 상관없이 이 색으로 원을 칠한다 — 앱이 못 읽는 모양이면 목록 전체가 안 그려지므로 거른다(avatarRules.js).
+    avatarColor: safeAvatarColor(u.avatarColor),
     online: isOnline(u.id),
     role: accountRole(u),
     department: u.department ?? null,
@@ -538,9 +555,22 @@ function toAdminUserDto(u, teamRows = []) {
 
 const TEAM_CREATION_LABEL = { member: '정회원 이상', admin: '관리자 이상', serverAdmin: '서버 운영자만' };
 
-/** 정지/강제 로그아웃 직후 이미 붙어있는 소켓을 즉시 끊는다(다음 재연결부터는 토큰이 막힌다). */
-function disconnectUserSockets(io, userId) {
+/**
+ * 정지/강제 로그아웃 직후 — 그 계정의 모든 기기가 로그아웃되는 때다(tokenVersion이 올라갔다).
+ *  - 이미 붙어있는 소켓을 즉시 끊는다(다음 재연결부터는 토큰이 막힌다).
+ *  - 기기들의 푸시 토큰·웹 푸시 구독을 지운다. 앱은 로그아웃할 때 자기 토큰을 서버에서 지우지만 그건 인증이 아직 살아
+ *    있을 때만 되는데, 이렇게 쫓겨난 기기는 이미 인증이 막혀 못 지운다 — 그대로 두면 로그아웃된(잃어버렸을 수도 있는)
+ *    폰·브라우저에 메시지 미리보기 알림이 계속 간다. 다시 로그인하면 앱이 새로 등록한다(client session.dart). 뒷정리라서
+ *    실패해도(드문 DB 오류) 기록만 남기고 정지·로그아웃 처리와 감사 기록은 그대로 이어 간다.
+ *  - 진행 중인 화상회의에서도 내보낸다. 통화 참가 자격은 LiveKit 토큰을 줄 때만 확인해서, 소켓을 끊어도 이미 연결된 통화
+ *    미디어(남의 음성·화면 공유)는 그 사람이 스스로 나갈 때까지 계속 오가기 때문이다(callAccess.js — 실패해도 던지지 않는다).
+ */
+async function cutOffUser(io, userId) {
   io.to(`user:${userId}`).disconnectSockets(true);
+  await clearPushTargetsForUser(userId).catch((err) =>
+    console.error('[admin] 푸시 토큰·구독 지우기 실패:', userId, err?.message ?? err),
+  );
+  await endUserCallAccess(io, userId);
 }
 
 /** uploads 폴더 총 용량(바이트). 파일이 아주 많으면 느릴 수 있어 대시보드에서만 쓴다. */

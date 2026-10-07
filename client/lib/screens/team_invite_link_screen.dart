@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/invite_link.dart' show inviteMaxUsesOptions;
 import '../models/team.dart';
 import '../models/team_invite_link.dart';
 import '../services/api_client.dart' show PositionOption;
@@ -15,7 +16,8 @@ import '../widgets/muted_scrollbar.dart';
 /// 가입과 동시에 지정한 팀에 자동 합류하고 계정 등급도 자동으로 부여된다.
 ///
 /// session.canCreateTeamInviteLink(서버 설정 "팀 초대 링크 생성 권한")가 있을 때만 열린다 —
-/// 서버도 매 요청마다 다시 확인한다(teamInvites.js).
+/// 서버도 만들 때마다 다시 확인한다(teamInvites.js — 목록·취소는 권한을 잃은 뒤에도 내가 만든
+/// 링크라면 된다).
 ///
 /// [initialTeamId]를 주면(팀 설정 화면에서 열 때) "팀 초대 링크 만들기" 다이얼로그의 팀
 /// 선택이 그 팀으로 미리 맞춰진다.
@@ -122,7 +124,7 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
         content: SizedBox(
           width: 320,
           child: Text(
-            '${link.label ?? '이'} 링크를 취소할까요? 이미 보낸 링크로는 더 이상 가입할 수 없게 됩니다.',
+            '${link.label ?? '이'} 링크를 취소할까요? 이미 보낸 링크로는 더 이상 가입하거나 설치·연결할 수 없게 됩니다.',
           ),
         ),
         actions: [
@@ -264,13 +266,15 @@ class _TeamInviteLinkRow extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 복사는 새로 가입시킬 수 있을 때만 — 인원이 다 찬 링크로는 새 사람이 팀에 들어오지 못한다.
           if (link.valid)
             IconButton(
               tooltip: '링크 복사',
               icon: const Icon(Icons.copy_outlined, size: 20),
               onPressed: onCopy,
             ),
-          if (link.valid)
+          // 취소는 만료 전이면 인원이 다 찼어도 둔다 — 그 링크로 아직 연결·설치가 되기 때문이다.
+          if (link.isOpen)
             IconButton(
               tooltip: '링크 취소',
               icon: const Icon(Icons.link_off, size: 20),
@@ -296,9 +300,6 @@ class _CreateTeamInviteLinkResult {
     required this.maxUses,
   });
 }
-
-/// 링크 하나로 가입할 수 있는 사람 수 고르기(서버 최대 100명, teamInvites.js).
-const _maxUsesOptions = [1, 5, 10, 30, 100];
 
 class _CreateTeamInviteLinkDialog extends StatefulWidget {
   final Session session;
@@ -419,7 +420,7 @@ class _CreateTeamInviteLinkDialogState
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final n in _maxUsesOptions)
+                for (final n in inviteMaxUsesOptions)
                   ChoiceChip(
                     label: Text('$n명'),
                     selected: _effectiveMaxUses == n,

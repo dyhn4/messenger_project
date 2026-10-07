@@ -1,5 +1,6 @@
-// 투표 목록(`GET /api/polls`)의 순수 규칙 — 쿼리 검사. DB·서버 없이 단위 테스트한다(test/pollList.test.js).
-// 저장소 조회는 db/queries/polls.js의 listPollPanelRows, 요청 처리는 polls.js.
+// 투표의 순수 규칙 — 투표 목록(`GET /api/polls`) 쿼리 검사·정렬 키, 그리고 투표 DTO(toPollDto)와 소켓 `poll:updated`
+// 모양(누가 무엇을 골랐는지가 방 전체에 새지 않게). DB·서버 없이 단위 테스트한다(test/pollList.test.js,
+// test/pollAnonymousBroadcast.test.js). 저장소 조회는 db/queries/polls.js(목록은 listPollPanelRows), 요청 처리는 polls.js.
 import { isUuid, parseCursor, parseLimit, parseTimeBound } from './pageCursor.js';
 
 export const POLL_STATUSES = ['all', 'open', 'closed'];
@@ -64,7 +65,7 @@ export function parsePollListQuery(query) {
   return { teamId, roomId, status, creatorId, participated, since, until, sort, order, cursor, limit };
 }
 
-/** 마감 여부 — 일찍 마감했거나 마감 시각이 [now]까지 지났으면 마감(polls.js의 isPollClosed와 같은 기준). */
+/** 마감 여부 — 일찍 마감했거나 마감 시각이 [now]까지 지났으면 마감(polls.js의 isPollClosed가 이 함수를 그대로 쓴다). */
 export function pollIsClosedAt(poll, now = Date.now()) {
   return !!poll.closedAt || new Date(poll.closesAt).getTime() <= now;
 }
@@ -114,4 +115,72 @@ export function pollMatchesFilter(poll, q, { votedByMe = false, now = Date.now()
   if (q.since && created < q.since.getTime()) return false;
   if (q.until && created > q.until.getTime()) return false;
   return true;
+}
+
+// ---- 투표 DTO와 소켓 poll:updated — polls.js(조회·라우트)가 쓰고, 여기서는 DB 없이 모양만 정한다. ----
+
+/**
+ * 메시지 DTO에 붙는 `poll` 객체 — 행([poll])·보기([options])·표([votes], 이 투표의 전부)를 받아 조립한다.
+ * 익명이면 누가 골랐는지(voters)는 키 자체를 내리지 않고 개수만 낸다. myOptionIds는 [viewerId]가 고른 보기,
+ * viewerId가 null이면(소켓 브로드캐스트처럼 모두에게 같은 DTO) 빈 배열이다.
+ */
+export function toPollDto(poll, options, votes, { viewerId = null, favorite = false } = {}) {
+  const votesByOption = new Map();
+  for (const v of votes) {
+    const list = votesByOption.get(v.optionId) ?? [];
+    list.push(v);
+    votesByOption.set(v.optionId, list);
+  }
+  return {
+    id: poll.id,
+    title: poll.title,
+    description: poll.description ?? null,
+    anonymous: !!poll.anonymous,
+    multiple: !!poll.multiple,
+    closesAt: new Date(poll.closesAt).getTime(),
+    closedAt: poll.closedAt ? new Date(poll.closedAt).getTime() : null,
+    closed: pollIsClosedAt(poll),
+    creatorId: poll.creatorId ?? null,
+    voterCount: new Set(votes.map((v) => v.userId)).size,
+    options: options.map((o) => {
+      const optionVotes = votesByOption.get(o.id) ?? [];
+      return {
+        id: o.id,
+        text: o.text,
+        voteCount: optionVotes.length,
+        ...(poll.anonymous
+          ? {}
+          : { voters: optionVotes.map((v) => ({ userId: v.userId, name: v.name ?? v.username ?? '알 수 없음' })) }),
+      };
+    }),
+    myOptionIds: viewerId ? votes.filter((v) => v.userId === viewerId).map((v) => v.optionId) : [],
+    favorite: !!favorite,
+  };
+}
+
+/**
+ * 방 전체에 보내는 `poll:updated` — [poll]은 viewerId 없이 만든 중립 DTO(집계만, 익명이면 voters 키도 없음)이고,
+ * "누가 무엇을 골랐는지"(actorId·actorOptionIds)는 늘 null이다. 앱(Poll.applyUpdate)은 actorId가 자기일 때만 그 값을
+ * 쓰므로 다른 사람에게는 필요 없는 값이고, 익명 투표에서는 실으면 익명이 깨진다(S18 — 소켓 프레임만 보면 다 보였다).
+ * 기명 투표도 똑같이 비운다 — 누가 골랐는지는 같은 DTO의 voters에 이미 있어서(REST와 같은 규칙) 따로 실을 까닭이 없다.
+ * 마감 알림도 이 모양이다.
+ */
+export function pollRoomUpdate({ roomId, messageId, pollId, poll }) {
+  return { roomId, messageId, pollId, poll, actorId: null, actorOptionIds: null };
+}
+
+/**
+ * 투표하기(재투표·취소 포함) 뒤의 `poll:updated`를 두 벌로 나눠 보낸다 — 같은 집계(중립 DTO [poll])를 싣되 받는 곳이 다르다.
+ *  - 방 전체(투표한 사람의 기기는 뺀다): [pollRoomUpdate] — 누가 투표했는지 없이 집계만.
+ *  - 투표한 사람의 기기들(`user:<voterId>`): 여기에만 actorId(본인)·actorOptionIds(고른 보기, 취소면 빈 배열)를 더한다 —
+ *    다른 기기(PC·폰·웹)도 "내 선택"을 맞추게. 이벤트 이름·모양이 예전 방 알림과 같아서 옛 앱도 그대로 알아듣는다.
+ * 투표한 사람의 소켓은 연결하자마자 user 룸에 들어가므로(socket.js) 한 소켓은 둘 중 하나만 받는다. 둘 다 받더라도
+ * poll은 그때의 절대값(표 수를 더하는 값이 아니다)이라 표가 두 번 세어지지 않는다. 보낸 두 벌을 돌려준다(테스트용).
+ */
+export function emitPollVoteUpdate(io, { roomId, messageId, pollId, poll, voterId, optionIds }) {
+  const room = pollRoomUpdate({ roomId, messageId, pollId, poll });
+  const voter = { ...room, actorId: voterId, actorOptionIds: [...optionIds] };
+  io.to(roomId).except(`user:${voterId}`).emit('poll:updated', room);
+  io.to(`user:${voterId}`).emit('poll:updated', voter);
+  return { room, voter };
 }

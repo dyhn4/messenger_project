@@ -5,7 +5,11 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-/// 외부 웹사이트 이미지(링크 미리보기 그림 등) — 그냥 Image.network를 쓰면 못 불러온다.
+/// 외부 웹사이트 이미지 — 그냥 Image.network를 쓰면 못 불러온다.
+///
+/// 링크 미리보기 그림(말풍선 카드·링크 모아보기)에는 더 쓰지 않는다 — 서버가 그림을 한 번 받아 서명된 /files 경로로 주고
+/// (server/src/linkPreviewImage.js), 바깥 주소는 그리지 않는다(보는 사람마다 그 사이트에 직접 접속하게 된다). 지금은 업데이트
+/// 전 서버가 준 바깥 북마크 이미지(bookmark_image.dart)에만 남아 있다.
 /// main.dart가 앱 시작 시 PinnedTls.installGlobalHttpOverrides()로 전역 HttpClient를 "우리 서버
 /// 자체 서명 인증서 하나만" 신뢰하도록 가로채놓는데(pinned_tls.dart), 이 override는 앱 전체
 /// HttpClient에 다 걸려서 Image.network(CachedNetworkImage 포함)가 내부적으로 만드는 HttpClient도

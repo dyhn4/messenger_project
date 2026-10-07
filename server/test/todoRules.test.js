@@ -592,8 +592,10 @@ test('newlyAssigned / pushTargets / reminderTargets', () => {
     ),
     [U2, U3],
   );
-  assert.deepEqual(reminderTargets([], U1), [U1]);
-  assert.deepEqual(reminderTargets([], null), []);
+  // 담당자가 없으면 만든 사람에게 넘어가되, 그 사람이 아직 멤버일 때만(검토 S33).
+  assert.deepEqual(reminderTargets([], U1, { creatorIsMember: true }), [U1]);
+  assert.deepEqual(reminderTargets([], U1), []); // 멤버 확인 없이는(기본) 안 보낸다.
+  assert.deepEqual(reminderTargets([], null, { creatorIsMember: true }), []);
 });
 
 test('reminderTargets: 이미 다 한(100) 담당자는 빼고, 담당자가 있으면 만든 사람에게는 안 보낸다', () => {
@@ -696,8 +698,13 @@ test('폴더 경로(파일 다운로드·업로드) — 빈 값은 지정 안 �
   assert.deepEqual(parseTodoPatch({ uploadPath: result }).fields, { uploadPath: result });
   // null로 보내면 지운다.
   assert.deepEqual(parseTodoPatch({ downloadPath: null }).fields, { downloadPath: null });
-  // 담당자도 고칠 수 있다(제목·설명과 같은 편집 권한).
-  assert.equal(patchDenial('assignee', 'u-creator', ['downloadPath', 'uploadPath']), null);
+  // 경로는 만든 사람(또는 관리 권한 담당자)만 바꾼다 — 담당자는 403, 보기만 하는 사람도 403(검토 S32).
+  assert.equal(patchDenial('creator', 'u-creator', ['downloadPath', 'uploadPath']), null);
+  assert.equal(
+    patchDenial('assignee', 'u-creator', ['downloadPath', 'uploadPath']).error,
+    '담당자는 파일 경로를 바꿀 수 없습니다.',
+  );
+  assert.equal(patchDenial('assignee', null, ['uploadPath']), null); // 만든 사람 계정이 사라지면 관리 권한 담당자가 바꾼다.
   assert.ok(patchDenial('viewer', 'u-creator', ['uploadPath']));
 });
 

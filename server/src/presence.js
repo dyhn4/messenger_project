@@ -25,3 +25,20 @@ export function markDisconnected(userId) {
 export function isOnline(userId) {
   return connectionCounts.has(userId);
 }
+
+/**
+ * [userId]의 접속 상태가 바뀌었음을 그 사람과 팀을 같이 쓰는 사람들(user:<id> 방)에게만 알린다(presence:update). 예전엔
+ * io.emit으로 서버에 붙은 모든 소켓에 모든 사람의 접속·해제를 흘려서, 팀이 없는 준회원도 서버 전체 회원의 접속 여부를 볼
+ * 수 있었다. 범위는 회원 목록(GET /api/users)과 같다 — [listCoTeamMemberIds]로 db/queries/teams.js의 같은 이름 함수를
+ * 받는다(이 파일이 DB를 몰라 테스트가 가짜를 넣는다).
+ *
+ * 받는 사람을 찾는 조회가 끝난 시점의 **지금** 상태를 보낸다(바뀐 순간의 값이 아니라) — 붙자마자 끊겨 두 조회가 끝나는
+ * 순서가 뒤바뀌어도 마지막에 도착하는 알림이 실제 상태와 같다. 부르는 건 지금처럼 진짜 온라인↔오프라인 전환 때뿐이다
+ * (markConnected/markDisconnected가 true일 때 — socket.js).
+ */
+export async function broadcastPresence(io, userId, listCoTeamMemberIds) {
+  const ids = await listCoTeamMemberIds(userId);
+  // 빈 목록으로 io.to([])를 부르면 socket.io는 "방 조건 없음 = 모두에게"로 보낸다 — 팀이 없으면 알릴 사람도 없다.
+  if (ids.length === 0) return;
+  io.to(ids.map((id) => `user:${id}`)).emit('presence:update', { userId, online: isOnline(userId) });
+}

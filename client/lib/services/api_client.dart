@@ -106,6 +106,24 @@ class TeamPosition {
   );
 }
 
+/// 팀 설정 "팀원 추가" 후보(GET /api/teams/:id/member-candidates) — 아직 이 팀에 없고 정지·탈퇴하지 않은 계정.
+/// [complete]면(계정 등급 관리자·서버 운영자) 서버의 그런 회원 전부이고, 아니면(그 밖의 팀 소유자) 팀을 같이 쓰는
+/// 사람뿐이라 나머지는 아이디로 한 명씩 찾는다([ApiClient.findTeamMemberCandidate]). 서버 userDirectory.js
+/// memberCandidateScope — 팀만 만들면 누구나 소유자가 되므로 소유자에게 서버 전체 명단을 주지 않는다.
+class TeamMemberCandidates {
+  final List<AppUser> users;
+  final bool complete;
+  const TeamMemberCandidates({required this.users, required this.complete});
+
+  factory TeamMemberCandidates.fromJson(Map<String, dynamic> json) =>
+      TeamMemberCandidates(
+        users: (json['users'] as List)
+            .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        complete: json['scope'] == 'all',
+      );
+}
+
 /// 서버 운영자가 관리하는 "직책 목록"(GET /admin/position-options) 한 항목 — 부서·직책 관리
 /// 범위가 '계정 단위'일 때, 회원 탭의 직책 수정을 자유 입력 대신 이 중에서 고르게 한다.
 class PositionOption {
@@ -812,6 +830,8 @@ class ApiClient {
     throw ArgumentError('지원하지 않는 HTTP 메서드: $method');
   }
 
+  /// 회원 목록 — 계정 등급 관리자·서버 운영자는 서버 전체(조직도), 그 밖에는 팀을 같이 쓰는 사람과 자기
+  /// 자신만 온다(server users.js GET /users). 팀원 추가 후보는 [fetchTeamMemberCandidates].
   Future<List<AppUser>> fetchUsers() async {
     final list = await _get('/api/users') as List;
     return list
@@ -1107,7 +1127,8 @@ class ApiClient {
   }
 
   // ─────────────── 초대 링크(설치→가입, 서버 운영자·팀 소유자·관리자) ───────────────
-  // 서버가 매 요청마다 canCreateInviteLink를 다시 확인하므로, 권한이 없으면 403이 온다.
+  // 만들 때마다 서버가 canCreateInviteLink를 다시 확인하므로, 권한이 없으면 403이 온다. 목록·취소는
+  // 권한을 잃은 뒤에도 내가 만든 링크라면 된다.
 
   /// 내가 만든 초대 링크 목록(최신순).
   Future<List<InviteLink>> fetchInviteLinks() async {
@@ -1117,10 +1138,11 @@ class ApiClient {
         .toList();
   }
 
-  /// 새 초대 링크 발급 — 유효기간은 서버에서 항상 7일로 고정된다.
-  Future<InviteLink> createInviteLink({String? label}) async =>
+  /// 새 초대 링크 발급 — 유효기간은 서버에서 항상 7일로 고정된다. [maxUses]는 이 링크로 가입할
+  /// 수 있는 사람 수(서버가 1~100명으로 맞추고, 안 보내면 1명).
+  Future<InviteLink> createInviteLink({String? label, int? maxUses}) async =>
       InviteLink.fromJson(
-        await _post('/api/invite-links', {'label': ?label})
+        await _post('/api/invite-links', {'label': ?label, 'maxUses': ?maxUses})
             as Map<String, dynamic>,
       );
 
@@ -1130,8 +1152,9 @@ class ApiClient {
   );
 
   // ─────────────── 팀 초대 링크(가입 시 팀 자동 합류 + 등급 자동 부여) ───────────────
-  // 서버가 매 요청마다 canCreateTeamInviteLink(서버 설정)를 다시 확인하므로, 권한이 없으면
-  // 403이 온다. 위 초대 링크와 달리 팀 합류/등급 부여까지 자동으로 한다는 게 핵심 차이.
+  // 만들 때마다 서버가 canCreateTeamInviteLink(서버 설정)를 다시 확인하므로, 권한이 없으면
+  // 403이 온다(목록·취소는 권한을 잃은 뒤에도 내가 만든 링크라면 된다). 위 초대 링크와 달리 팀
+  // 합류/등급 부여까지 자동으로 한다는 게 핵심 차이.
 
   /// 내가 만든 팀 초대 링크 목록(최신순).
   Future<List<TeamInviteLink>> fetchTeamInviteLinks() async {
@@ -1285,6 +1308,34 @@ class ApiClient {
     return list
         .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// 팀 설정 "팀원 추가" 후보 — 아직 이 팀에 없고 정지·탈퇴하지 않은 계정(그 팀을 관리할 수 있는 사람만,
+  /// server teams.js GET /teams/:id/member-candidates). 회원 목록([fetchUsers])은 관리자 이상이 아니면 팀을 같이
+  /// 쓰는 사람만 주므로, 아직 팀에 없는 사람(회원가입만 한 사람 등)은 여기서 받는다. 이름·아바타·아이디·등급만 온다.
+  /// 계정 등급 관리자·서버 운영자가 아니면 팀을 같이 쓰는 사람만 온다([TeamMemberCandidates.complete]가 false).
+  Future<TeamMemberCandidates> fetchTeamMemberCandidates(String teamId) async {
+    final json =
+        await _get('/api/teams/$teamId/member-candidates')
+            as Map<String, dynamic>;
+    return TeamMemberCandidates.fromJson(json);
+  }
+
+  /// 팀 밖 사람을 아이디로 한 명 찾는다(같은 엔드포인트의 ?username=) — 아이디가 정확히 같고(대소문자까지) 이
+  /// 팀에 넣을 수 있는(아직 팀원이 아니고 정지·탈퇴하지 않은) 사람이면 그 사람, 아니면 null. 서버가 횟수를 제한한다
+  /// (관리자 이상이 아니면 10분에 30번 — 넘으면 서버 안내 문구로 [ApiException]).
+  Future<AppUser?> findTeamMemberCandidate(
+    String teamId,
+    String username,
+  ) async {
+    final json =
+        await _get(
+              '/api/teams/$teamId/member-candidates'
+              '?username=${Uri.encodeQueryComponent(username)}',
+            )
+            as Map<String, dynamic>;
+    final users = TeamMemberCandidates.fromJson(json).users;
+    return users.isEmpty ? null : users.first;
   }
 
   /// 팀에 멤버 추가 — 소유자·관리자만. 가입만 한 사람은 어느 팀에도 없으므로 이걸로 넣어준다.

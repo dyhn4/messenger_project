@@ -142,7 +142,10 @@ Future<String?> openFolderInExplorer(String path) async {
     if (!await Directory(path).exists()) {
       return '이 PC에서 폴더를 찾을 수 없습니다: $path';
     }
-    await Process.start('explorer.exe', [path]);
+    // 이름만 주면 Windows가 현재 폴더부터 찾는다 — 같은 이름의 explorer.exe를 심어 두는 수법을 피해 전체 경로로 부른다
+    // (download_storage.dart와 같은 방식 — 검토 S32).
+    final root = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    await Process.start('$root\\explorer.exe', [path]);
     return null;
   } catch (e) {
     return '폴더를 열지 못했습니다: $e';

@@ -269,10 +269,14 @@ export function parsePostFields(rawTitle, rawText) {
  *  'subscriber'|null).
  *
  * 팀에서 나간 사람의 calendar_members·구독 행은 지우지 않고 남겨 두므로, 여기서 팀 멤버십을 먼저 본다 —
- * 팀 멤버가 아니면 어떤 종류든 아무것도 못 한다.
+ * 팀 멤버가 아니면 어떤 종류든 아무것도 못 한다. 마찬가지로 준회원으로 내려간 사람의 공유 캘린더 행도 예전 권한
+ * (관리자·쓰기) 그대로 남아 있을 수 있어서, 공유 캘린더는 계정 등급을 함께 보고 준회원을 읽기 멤버로 계산한다
+ * (effectiveCalendarMemberRole — 그 캘린더의 소유자여도 마찬가지).
  *
- * 반환: canView / canCreateEvents / canEditSettings / canDelete(캘린더 자체) / role(DTO의 role) /
- *  isOwner(캘린더 소유자) / isManager(남의 일정도 고치고 비공개 일정도 볼 수 있는 캘린더 관리자 자격).
+ * 반환: canView / canCreateEvents / canEditSettings / canDelete(캘린더 자체) / role(DTO의 role — 실제로 쓰이는 권한) /
+ *  isOwner(소유자 자격 — 공유 캘린더의 소유자라도 준회원이면 false) / isManager(남의 일정도 고치고 비공개 일정도 볼 수
+ *  있는 캘린더 관리자 자격) / limitedAsGuest(준회원이라 행에 남은 권한·소유자 자격보다 낮게 계산됐는지 — 거절 문구를
+ *  고르는 데만 쓴다).
  * 일정 하나를 고치고 지울 수 있는지는 canModifyCalendarEvent가 이 결과에 "만든 사람이면"을 더해 판정한다.
  */
 export function calendarPermissions({ calendar, userId, isTeamMember, role, isOwner, memberRole }) {
@@ -284,6 +288,7 @@ export function calendarPermissions({ calendar, userId, isTeamMember, role, isOw
     role: null,
     isOwner: false,
     isManager: false,
+    limitedAsGuest: false,
   };
   if (!isTeamMember || !calendar) return none;
   const guest = role === 'guest';
@@ -304,16 +309,22 @@ export function calendarPermissions({ calendar, userId, isTeamMember, role, isOw
       return { ...none, canView: true, canCreateEvents: manager, role: manager ? 'admin' : 'read', isManager: manager };
     }
     case 'shared': {
-      if (memberRole === 'admin' || memberRole === 'write' || memberRole === 'read') {
+      // 준회원은 공유 캘린더에서 읽기까지만이다 — 관리자·쓰기 멤버나 소유자였다가 내려간 사람은 행이 그대로라서, 여기서
+      // 다시 낮춰 설정·멤버 관리·일정 만들기·남의 일정 고치기를 막고, 소유자 자격(캘린더 삭제, 남의 비공개 일정 보기)도
+      // 거둔다. 토픽 관리자였다가 준회원이 된 사람을 관리자로 치지 않는 것(canManageTopic)과 같은 원칙이다.
+      const effective = effectiveCalendarMemberRole({ memberRole, role });
+      if (effective === 'admin' || effective === 'write' || effective === 'read') {
+        const owner = isCalendarOwner && !guest;
         return {
           ...none,
           canView: true,
-          canCreateEvents: memberRole !== 'read',
-          canEditSettings: memberRole === 'admin',
-          canDelete: isCalendarOwner,
-          role: memberRole,
-          isOwner: isCalendarOwner,
-          isManager: memberRole === 'admin',
+          canCreateEvents: effective !== 'read',
+          canEditSettings: effective === 'admin',
+          canDelete: owner,
+          role: effective,
+          isOwner: owner,
+          isManager: effective === 'admin',
+          limitedAsGuest: effective !== memberRole || owner !== isCalendarOwner,
         };
       }
       return subscribed ? { ...none, canView: true, role: 'subscriber' } : none;
@@ -321,6 +332,19 @@ export function calendarPermissions({ calendar, userId, isTeamMember, role, isOw
     default:
       return none;
   }
+}
+
+/**
+ * 공유 캘린더 멤버 행(calendar_members.role)이 실제로 갖는 권한 — 준회원은 읽기(read)까지만이다. 준회원에게는 처음부터
+ * 읽기만 줄 수 있지만(calendars.js 멤버 추가·권한 변경), 관리자·쓰기 멤버였다가 준회원으로 내려간 사람의 행에는 예전
+ * 권한이 남아 있을 수 있어서 권한 계산(calendarPermissions)이 행 대신 이 값을 쓴다. 행은 고치지 않으므로 정회원 이상으로
+ * 다시 올라가면 행에 남은 권한이 돌아온다 — 그래서 멤버 목록(calendars.js GET /calendars/:id/members)은 이 값이 아니라
+ * 행의 권한을 그대로 보여 줘서, 캘린더 관리자가 남은 권한을 보고 읽기로 낮춰 둘 수 있게 한다.
+ * 'subscriber'·null은 그대로 돌려준다.
+ */
+export function effectiveCalendarMemberRole({ memberRole, role }) {
+  if (role === 'guest' && (memberRole === 'admin' || memberRole === 'write')) return 'read';
+  return memberRole ?? null;
 }
 
 /**

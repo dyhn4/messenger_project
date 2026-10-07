@@ -323,9 +323,14 @@ class _TeamSettingsDialogState extends State<TeamSettingsDialog> {
   }
 
   Future<void> _removeMember(AppUser user) async {
+    // 서버는 팀에서 뺀 사람을 그 팀의 모든 방에서도 뺀다(teams.js의 팀원 빼기) — 지난 대화까지 못 보게
+    // 되는 줄 모르고 누르지 않게 미리 알린다.
     final ok = await _confirm(
       title: '팀에서 빼기',
-      message: '${user.name} 님을 ${widget.team.name} 팀에서 뺄까요?',
+      message:
+          '${user.name} 님을 ${widget.team.name} 팀에서 뺄까요?\n'
+          '이 팀의 모든 대화방(토픽·그룹채팅·1:1 대화·비밀 대화)에서도 함께 빠지고, '
+          '지난 대화도 더 이상 볼 수 없습니다.',
       confirmLabel: '빼기',
     );
     if (ok != true || !mounted) return;
@@ -1046,7 +1051,15 @@ class _DeleteTeamDialogState extends State<_DeleteTeamDialog> {
   }
 }
 
-/// 새 팀원 고르기 — 서버에 가입한 사람 중 아직 이 팀에 없는 사람만 보여준다.
+/// 새 팀원 고르기 — 서버에 가입한 사람 중 아직 이 팀에 없는(정지·탈퇴하지 않은) 사람만 보여준다. 후보는 이 팀을
+/// 관리할 수 있는 사람만 받는 전용 목록(GET /teams/:id/member-candidates)에서 온다 — 회원 목록(GET /users)은 관리자
+/// 이상이 아니면 팀을 같이 쓰는 사람만 주는데, 넣을 사람은 아직 이 팀에 없어서(회원가입만 한 사람은 어느 팀에도
+/// 없다) 거기서는 못 찾는다.
+///
+/// 계정 등급 관리자·서버 운영자가 아니면(팀을 만들어 소유자가 된 정회원 등) 그 목록도 팀을 같이 쓰는 사람뿐이다 —
+/// 팀만 만들면 누구나 소유자가 되므로 서버가 소유자에게 서버 전체 명단(아이디 포함)을 주지 않는다(server
+/// userDirectory.js memberCandidateScope). 그때는 검색 칸에 아이디를 정확히 넣고 "아이디로 찾기"로 한 명씩 찾는다.
+/// 검색 칸은 받은 목록을 이름·아이디로 거르는 데도 쓴다.
 class _AddTeamMembersDialog extends StatefulWidget {
   final Session session;
   final Team team;
@@ -1063,9 +1076,18 @@ class _AddTeamMembersDialog extends StatefulWidget {
 
 class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
   List<AppUser>? _candidates;
+
+  /// 받은 후보가 넣을 수 있는 사람 전부인지(관리자 이상) — false면 팀을 같이 쓰는 사람뿐이라 "아이디로 찾기"를 보여 준다.
+  bool _complete = true;
   String? _error;
   final _selected = <String>{};
   bool _submitting = false;
+  final _search = TextEditingController();
+  bool _lookingUp = false;
+
+  /// "아이디로 찾기" 결과 안내(찾음·못 찾음·오류) — [_noticeIsError]면 오류 색으로 보여 준다. 검색 칸을 고치면 지운다.
+  String? _notice;
+  bool _noticeIsError = false;
 
   @override
   void initState() {
@@ -1073,15 +1095,92 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     try {
-      final users = await widget.session.fetchAllUsers();
-      users.removeWhere((u) => widget.existingIds.contains(u.id));
+      final result = await widget.session.api!.fetchTeamMemberCandidates(
+        widget.team.id,
+      );
+      // 서버가 이미 이 팀 멤버를 빼고 주지만, 지금 화면의 팀원 목록과도 한 번 더 맞춘다(두 목록을 받은 때가 달라서).
+      final users = result.users
+        ..removeWhere((u) => widget.existingIds.contains(u.id));
       if (!mounted) return;
-      setState(() => _candidates = users);
+      setState(() {
+        _candidates = users;
+        _complete = result.complete;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
+    }
+  }
+
+  /// 검색 칸 글자로 거른 후보 — 이름이나 아이디에 그 글자가 들어 있는 사람(대소문자 무시).
+  List<AppUser> get _visibleCandidates {
+    final all = _candidates ?? const <AppUser>[];
+    final query = _search.text.trim().toLowerCase();
+    if (query.isEmpty) return all;
+    return all
+        .where(
+          (u) =>
+              u.name.toLowerCase().contains(query) ||
+              u.username.toLowerCase().contains(query),
+        )
+        .toList();
+  }
+
+  /// 검색 칸의 아이디로 팀 밖 사람을 찾는다(서버가 아이디가 정확히 같은 사람만 준다) — 찾으면 목록 맨 위에 넣고
+  /// 바로 골라 둔다.
+  Future<void> _lookup() async {
+    if (_lookingUp) return;
+    final username = _search.text.trim();
+    // 가입 규칙(4~20자)에 안 맞는 값은 서버에 묻지 않는다 — 그런 아이디는 없고, 찾기 횟수만 깎인다.
+    if (username.length < 4 || username.length > 20) {
+      setState(() {
+        _notice = '찾을 사람의 아이디를 정확히 입력하세요(4~20자).';
+        _noticeIsError = true;
+      });
+      return;
+    }
+    setState(() {
+      _lookingUp = true;
+      _notice = null;
+    });
+    try {
+      final found = await widget.session.api!.findTeamMemberCandidate(
+        widget.team.id,
+        username,
+      );
+      if (!mounted) return;
+      if (found == null || widget.existingIds.contains(found.id)) {
+        setState(() {
+          _notice =
+              "'$username' 아이디로 추가할 수 있는 사람이 없습니다. "
+              '아이디가 정확한지(대소문자까지), 이미 팀원은 아닌지 확인하세요.';
+          _noticeIsError = true;
+        });
+        return;
+      }
+      setState(() {
+        final list = _candidates!;
+        if (!list.any((u) => u.id == found.id)) list.insert(0, found);
+        _selected.add(found.id);
+        _notice = '${found.name} 님을 찾아 선택했습니다.';
+        _noticeIsError = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _notice = e.toString();
+        _noticeIsError = true;
+      });
+    } finally {
+      if (mounted) setState(() => _lookingUp = false);
     }
   }
 
@@ -1105,21 +1204,75 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
     }
   }
 
+  /// 목록 위 검색 칸 — 받은 후보를 이름·아이디로 거른다. 팀을 같이 쓰는 사람만 받았으면(관리자 이상이 아님) 옆에
+  /// "아이디로 찾기"를 붙인다(Enter로도 찾는다).
+  Widget _buildSearch(BuildContext context) {
+    final field = TextField(
+      key: const ValueKey('add-team-members-search'),
+      controller: _search,
+      decoration: const InputDecoration(
+        hintText: '이름 또는 아이디',
+        isDense: true,
+        prefixIcon: Icon(Icons.search, size: 18),
+        border: OutlineInputBorder(),
+      ),
+      textInputAction: _complete
+          ? TextInputAction.done
+          : TextInputAction.search,
+      onChanged: (_) => setState(() => _notice = null),
+      onSubmitted: _complete ? null : (_) => _lookup(),
+    );
+    if (_complete) return field;
+    return Row(
+      children: [
+        Expanded(child: field),
+        const SizedBox(width: 8),
+        OutlinedButton(
+          onPressed: _lookingUp ? null : _lookup,
+          child: _lookingUp
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('아이디로 찾기'),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final candidates = _candidates;
+    final visible = _visibleCandidates;
     final list = _error != null
         ? Center(child: Text(_error!))
-        : _candidates == null
+        : candidates == null
         ? const Center(child: CircularProgressIndicator())
-        : _candidates!.isEmpty
-        ? const Center(child: Text('추가할 수 있는 사람이 없습니다.'))
+        : visible.isEmpty
+        ? Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Center(
+              child: Text(
+                _search.text.trim().isEmpty
+                    ? (_complete
+                          ? '추가할 수 있는 사람이 없습니다.'
+                          : '팀을 같이 쓰는 사람 중에는 추가할 수 있는 사람이 없습니다.')
+                    : (_complete
+                          ? '검색 결과가 없습니다.'
+                          : "목록에 없는 사람입니다. 아이디를 정확히 입력했다면 '아이디로 찾기'를 누르세요."),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          )
         : ListView(
             shrinkWrap: true,
             children: [
               // 체크박스 없이 눌러서 선택/해제하고, 선택된 항목은 배경색으로 표시한다(아래
               // "토픽 생성 권한 지정"과 같은 방식). 등급은 계정에 붙어 있는 값이라 여기서
               // 고르는 게 아니라 보여주기만 한다.
-              for (final user in _candidates!)
+              for (final user in visible)
                 ListTile(
                   leading: UserAvatar(
                     user: user,
@@ -1144,6 +1297,7 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
             ],
           );
 
+    final small = theme.textTheme.bodySmall;
     return FloatingDialog(
       title: '팀원 추가',
       maxWidth: 420,
@@ -1151,6 +1305,30 @@ class _AddTeamMembersDialogState extends State<_AddTeamMembersDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (candidates != null) ...[
+            _buildSearch(context),
+            if (!_complete) ...[
+              const SizedBox(height: 6),
+              Text(
+                '팀을 같이 쓰는 사람만 목록에 나옵니다. 다른 사람은 아이디를 정확히 '
+                "입력하고 '아이디로 찾기'를 누르세요."
+                '${widget.session.canCreateTeamInviteLink ? " 새로 가입할 사람은 '팀 정보' 탭의 팀 초대 링크로 이 팀에 바로 들어오게 할 수 있습니다." : ''}',
+                style: small?.copyWith(color: theme.hintColor),
+              ),
+            ],
+            if (_notice != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _notice!,
+                style: small?.copyWith(
+                  color: _noticeIsError
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.primary,
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
           Flexible(child: list),
           const Divider(height: 24),
           Row(

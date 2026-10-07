@@ -35,8 +35,9 @@ export async function topicAccess(room, userId) {
     ...access,
     isRoomMember,
     isTopicAdmin,
-    // 팀에서 빠진 사람은 방 멤버십이 남아 있어도(옛 대화를 보려고 남겨 둔다) 그 팀의 토픽을 관리할 수
-    // 없다 — 토픽 관리자였어도, 다른 팀의 관리자 등급이어도 마찬가지.
+    // 그 팀 멤버만 토픽을 관리할 수 있다 — 팀에서 빠지면 그 팀 방에서도 함께 빠지고 예전 규칙 때 남은 멤버십도 서버를
+    // 켤 때 정리되지만(db/queries/rooms.js removeMemberFromTeamRooms, teams.js sweepLeftoverTeamRoomMembers), 그 전이나
+    // 엇갈려 남은 행이 있어도 관리는 못 하게 한 번 더 막는다(토픽 관리자였어도, 다른 팀의 관리자 등급이어도 마찬가지).
     canManage: room.type === 'topic' && isRoomMember && access.isMember && canManageTopic({ ...access, isTopicAdmin }),
   };
 }

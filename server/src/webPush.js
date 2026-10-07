@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import webpush from 'web-push';
 import { listWebPushSubscriptionsForUser, setDeviceWebPushSubscription } from './db/queries/devices.js';
+import { parseWebPushSubscription } from './webPushEndpoint.js';
 
 // 웹 앱(아이폰 등 앱이 없는 기기)용 웹 푸시 — 표준 Web Push(VAPID)라 Firebase 설정이 필요 없다. 앱(탭)을
 // 닫아도 알림이 오게 하는 안드로이드 FCM의 웹판이고, push.js가 FCM과 같은 때(소켓이 안 붙어 있을 때)에
@@ -47,10 +48,15 @@ webPushRouter.get('/web-push/public-key', (req, res) => {
   res.json({ publicKey: vapidKeys.publicKey });
 });
 
+// 푸시 서비스가 이 시간(ms) 동안 아무 응답이 없으면 끊는다. 정상이면 1초 안에 끝나는데, 시간 제한이 없으면 응답을
+// 안 주는 상대 하나가 연결을 계속 붙잡고, push.js는 이 발송을 기다린 뒤에 FCM을 보내므로 그 알림까지 늦어진다.
+const SEND_TIMEOUT_MS = 10_000;
+
 /**
  * [userId]의 웹 앱들에 알림 하나를 보낸다. [payload]는 client/web/sw.js가 읽는 모양
  * ({ kind, roomId?, projectId?, title, body }). [ttl]은 초 — 화상회의처럼 늦으면 의미 없는 알림은 짧게.
  * 구독이 사라졌으면(브라우저에서 알림을 끔·앱 삭제 등 — 404/410) 지워서 다음부터 헛발송하지 않는다.
+ * 받는 기기 수는 queries/devices.js의 PUSH_DEVICES_PER_USER까지다.
  */
 export async function sendWebPushToUser(userId, payload, { ttl = 24 * 60 * 60, urgency = 'high' } = {}) {
   let subscriptions;
@@ -64,14 +70,24 @@ export async function sendWebPushToUser(userId, payload, { ttl = 24 * 60 * 60, u
   if (subscriptions.length === 0) return;
   const body = JSON.stringify(payload);
   await Promise.all(
-    subscriptions.map(({ deviceId, subscription }) =>
-      webpush.sendNotification(subscription, body, { TTL: ttl, urgency }).catch(async (err) => {
-        if (err?.statusCode === 404 || err?.statusCode === 410) {
-          await setDeviceWebPushSubscription(deviceId, userId, null).catch(() => {});
-          return;
-        }
-        console.error('[web-push] 발송 실패:', err?.statusCode ?? '', err?.body ?? err?.message ?? err);
-      }),
-    ),
+    subscriptions.map(async ({ deviceId, subscription }) => {
+      // 등록할 때(devices.js)와 같은 검사를 보내기 직전에 다시 한다 — 주소 검사가 생기기 전에 저장된 구독이나
+      // 망가진 값이면 보내지 않고 지운다. 보낼 때도 검사를 통과한 정규화된 endpoint를 쓴다(webPushEndpoint.js).
+      const parsed = parseWebPushSubscription(subscription);
+      if (parsed.error) {
+        console.warn(`[web-push] 허용되지 않는 구독이라 지웁니다: ${parsed.error}${parsed.host ? ` (${parsed.host})` : ''}`);
+        await setDeviceWebPushSubscription(deviceId, userId, null).catch(() => {});
+        return;
+      }
+      await webpush
+        .sendNotification(parsed.subscription, body, { TTL: ttl, urgency, timeout: SEND_TIMEOUT_MS })
+        .catch(async (err) => {
+          if (err?.statusCode === 404 || err?.statusCode === 410) {
+            await setDeviceWebPushSubscription(deviceId, userId, null).catch(() => {});
+            return;
+          }
+          console.error('[web-push] 발송 실패:', err?.statusCode ?? '', err?.body ?? err?.message ?? err);
+        });
+    }),
   );
 }

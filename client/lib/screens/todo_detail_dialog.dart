@@ -452,7 +452,18 @@ class _TodoDetailState extends State<TodoDetail> {
   }
 
   /// 폴더 경로를 윈도우 탐색기로 연다. 못 열면(폴더가 없음·PC가 아님) 까닭을 알리고, PC가 아니면 경로를 복사해 둔다.
+  /// PC에서는 공유 폴더(UNC)를 건드리기 전에 열면 안 되는 서버(공인 IP·숫자로 꾸민 IP·WebDAV·장치 경로)면 거절하고,
+  /// 나머지는 서버 이름을 보여 주며 한 번 물어본다(이 검사 전에 저장된 경로까지 막는다 — 검토 S32).
   Future<void> _openFolder(String path) async {
+    if (AppPlatform.isWindows) {
+      final unsafe = remoteFolderError(path);
+      if (unsafe != null) {
+        _toast(unsafe);
+        return;
+      }
+      if (!await confirmRemoteFolderAccess(context, path)) return;
+      if (!mounted) return;
+    }
     final error = await openFolderInExplorer(path);
     if (error == null || !mounted) return;
     if (!AppPlatform.isWindows) {

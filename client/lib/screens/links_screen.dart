@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/message.dart' show serverHostedImagePath;
 import '../models/room.dart';
 import '../models/shared_link.dart';
 import '../services/app_links.dart';
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
-import '../widgets/external_image.dart';
 import '../widgets/hover_toolbar.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/pagination.dart';
@@ -276,6 +276,7 @@ class _LinksScreenState extends State<LinksScreen> {
                   roomName:
                       _roomOf(link)?.displayName(widget.session.userId ?? '') ??
                       '',
+                  resolveUrl: widget.session.resolveUrl,
                   onOpenLink: () => _openLink(link),
                   onOpenInRoom: () => _openInRoom(link),
                   onCopy: () => _copyLink(link),
@@ -303,6 +304,9 @@ class _LinksScreenState extends State<LinksScreen> {
 class _LinkRow extends StatefulWidget {
   final SharedLink link;
   final String roomName;
+
+  /// 서버 상대 경로(미리보기 그림의 서명 링크)를 절대 주소로(Session.resolveUrl).
+  final String Function(String relative) resolveUrl;
   final VoidCallback onOpenLink;
   final VoidCallback onOpenInRoom;
   final VoidCallback onCopy;
@@ -311,6 +315,7 @@ class _LinkRow extends StatefulWidget {
   const _LinkRow({
     required this.link,
     required this.roomName,
+    required this.resolveUrl,
     required this.onOpenLink,
     required this.onOpenInRoom,
     required this.onCopy,
@@ -345,16 +350,20 @@ class _LinkRowState extends State<_LinkRow> {
       color: theme.colorScheme.surfaceContainerHighest,
       child: Icon(Icons.link, size: 22, color: theme.hintColor),
     );
+    // 미리보기 그림은 서버가 받아 둔 파일(서명된 /files 경로)만 우리 서버에서 받는다 — 바깥 사이트 주소는 그리지 않는다
+    // (보는 사람마다 그 사이트에 직접 접속하게 된다 — server/src/linkPreviewImage.js).
+    final image = serverHostedImagePath(link.imageUrl);
     final thumbnail = ClipRRect(
       borderRadius: BorderRadius.circular(6),
-      child: link.imageUrl == null
+      child: image == null
           ? placeholder
-          // 외부 사이트 그림이라 앱의 인증서 고정(우리 서버만 신뢰)을 피해서 받아야 한다.
-          : ExternalImage(
-              url: link.imageUrl!,
+          : Image.network(
+              widget.resolveUrl(image),
+              key: const ValueKey('link-row-image'),
               width: 48,
               height: 48,
-              placeholder: placeholder,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => placeholder,
             ),
     );
 

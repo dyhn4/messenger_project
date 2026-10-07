@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, notExists, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { dmHistoryFloors, roomMembers, rooms, teamMembers, topicFolderItems, topicFolders, users } from '../schema.js';
 import { resyncTodoProgressForMembers } from './todos.js';
@@ -116,7 +116,7 @@ export async function insertRoom(fields) {
 /**
  * 나와의 대화 — 그 팀에서 이 사람의 것을 찾고, 없으면 만든다. 여러 요청이 동시에 불러도 (team_id, dm_key)
  * 유일 인덱스에 ON CONFLICT로 기대서 하나만 생긴다. 멤버 행도 없으면 넣는다(이미 있으면 그대로).
- * 이번에 새로 만들었으면 created가 true — 호출부가 그 사람의 소켓을 새 방에 넣는다.
+ * 이번에 새로 만들었거나 멤버로 다시 넣었으면 joined가 true — 호출부가 그 사람의 소켓을 방에 넣는다.
  */
 export async function ensureSelfRoom(userId, teamId) {
   const dmKey = `${userId}:${userId}`;
@@ -132,8 +132,11 @@ export async function ensureSelfRoom(userId, teamId) {
   }
   // 같은 키를 쓰는 옛 DM이 있었다면(자기 자신과의 DM) 그게 곧 나와의 대화다 — 표시만 맞춘다.
   if (room && !room.isSelf) room = await updateRoom(room.id, { isSelf: true });
-  await addRoomMembers(room.id, [userId]);
-  return { room, created: !!inserted };
+  // 팀에서 빠지면 나와의 대화에서도 빠지므로(removeMemberFromTeamRooms) 다시 들어온 사람은 멤버 행부터 되살린다 —
+  // 예전 메모는 그대로 돌아오고, 새로 만든 방처럼 joined로 알려야 그 사람의 소켓이 방에 다시 들어간다.
+  const joined = !!inserted || !(await isRoomMember(room.id, userId));
+  if (joined) await addRoomMembers(room.id, [userId]);
+  return { room, joined };
 }
 
 /** 토픽 정보·설정 변경/보관(rooms.js) — 넘긴 필드만 바꾸고 바뀐 행을 돌려준다. */
@@ -181,15 +184,17 @@ export function convertGroupToTopic(roomId, actorId, { name, description }) {
 }
 
 /** 방을 완전히 지운다(멤버/메시지/비밀 대화 세션은 전부 onDelete:'cascade'로 함께 지워짐).
- * 비밀 대화를 거절했을 때처럼, 다시 대화를 걸 수 있도록 dmKey 자체를 비워줘야 하는 경우에 쓴다. */
-export async function deleteRoom(id) {
-  await db.delete(rooms).where(eq(rooms.id, id));
+ * 비밀 대화를 거절했을 때처럼, 다시 대화를 걸 수 있도록 dmKey 자체를 비워줘야 하는 경우에 쓴다.
+ * [executor]는 트랜잭션 안에서 부를 때(removeMemberFromRoom). */
+export async function deleteRoom(id, executor = db) {
+  await executor.delete(rooms).where(eq(rooms.id, id));
 }
 
-/** 비밀 대화에서 "상대방도 나가기" 없이 혼자 나갔을 때, 남은 멤버 쪽에 보여줄 이름을 남겨둔다
- * (rooms.js의 /rooms/:id/leave 참고). */
-export async function setSecretDepartedMember(roomId, { userId, name }) {
-  const [row] = await db
+/** 1:1 대화(비밀 대화 혼자 나가기·팀에서 제외)에서 빠진 사람을 남은 멤버 쪽에 보여줄 이름으로 남겨둔다
+ * (removeMemberFromRoom 참고). userId·name을 null로 주면 지운다(그 사람이 다시 들어왔을 때). 컬럼 이름은
+ * 비밀 대화에만 쓰던 시절 그대로다. [executor]는 트랜잭션 안에서 부를 때. */
+export async function setSecretDepartedMember(roomId, { userId, name }, executor = db) {
+  const [row] = await executor
     .update(rooms)
     .set({ secretDepartedMemberId: userId, secretDepartedMemberName: name })
     .where(eq(rooms.id, roomId))
@@ -235,24 +240,15 @@ export async function addRoomMembers(roomId, userIds, role = 'member') {
   });
 }
 
-/**
- * 멤버에서 뺀다 — 그 사람의 토픽 폴더 배치(topic_folder_items)도 같이 지운다(나갔다가 다시
- * 들어오면 폴더 밖 목록에서 시작). 폴더 배치가 실제로 지워졌으면 true — 호출부가 그 사람의
- * 다른 기기에 폴더 목록을 다시 불러오라고 알릴지 정한다. 할 일 집계도 removeRoomMembers가 맞추지만
- * 바뀐 할 일은 돌려주지 않으므로, 할 일이 있을 수 있는 방(그룹·토픽)은 removeRoomMembers를 직접 쓴다.
- */
-export async function removeRoomMember(roomId, userId) {
-  const { folderItemRemoved } = await removeRoomMembers(roomId, [userId]);
-  return folderItemRemoved;
-}
-
-/** 여러 명을 한 번에 멤버에서 뺀다(나가기·토픽 "내보내기") — removeRoomMember와 같은 규칙. [tx]를 주면
- * (withRoomLock 안) 그 트랜잭션에서 지운다. 실제로 빠진 사람이 담당자인 이 방 할 일들의 전체 진척률도 같은 트랜잭션에서
- * 다시 맞춘다(방을 나간 담당자는 집계에서 빠진다 — 담당 행은 남겨 두어 다시 들어오면 그대로 이어지고, 담당자가 하나도
- * 남지 않게 된 할 일은 S3 규칙의 값을 이어받는다). 돌려주는 값은 `{ folderItemRemoved, changedTodos }` — changedTodos는
- * 전체 진척률이 실제로 바뀐 할 일 행(호출부가 rooms.js notifyTodosResynced로 알린다). */
+/** 여러 명을 한 번에 멤버에서 뺀다(나가기·토픽 "내보내기"·팀에서 제외) — 그 사람들의 토픽 폴더 배치(topic_folder_items)도
+ * 같이 지운다(나갔다가 다시 들어오면 폴더 밖 목록에서 시작). [tx]를 주면 (withRoomLock 안) 그 트랜잭션에서 지운다. 실제로
+ * 빠진 사람이 담당자인 이 방 할 일들의 전체 진척률도 같은 트랜잭션에서 다시 맞춘다(방을 나간 담당자는 집계에서 빠진다 —
+ * 담당 행은 남겨 두어 다시 들어오면 그대로 이어지고, 담당자가 하나도 남지 않게 된 할 일은 S3 규칙의 값을 이어받는다).
+ * 돌려주는 값은 `{ folderItemRemoved, changedTodos, removedUserIds }` — folderItemRemoved는 폴더 배치가 실제로 지워졌는지
+ * (호출부가 그 사람의 다른 기기에 폴더 목록을 다시 불러오라고 알릴지 정한다), changedTodos는 전체 진척률이 실제로 바뀐 할 일
+ * 행(호출부가 rooms.js notifyTodosResynced로 알린다), removedUserIds는 이번에 실제로 빠진 사람(그새 스스로 나간 사람은 없다). */
 export async function removeRoomMembers(roomId, userIds, tx) {
-  if (userIds.length === 0) return { folderItemRemoved: false, changedTodos: [] };
+  if (userIds.length === 0) return { folderItemRemoved: false, changedTodos: [], removedUserIds: [] };
   const run = async (t) => {
     const left = await t
       .delete(roomMembers)
@@ -262,9 +258,10 @@ export async function removeRoomMembers(roomId, userIds, tx) {
       .delete(topicFolderItems)
       .where(and(eq(topicFolderItems.roomId, roomId), inArray(topicFolderItems.userId, userIds)))
       .returning({ userId: topicFolderItems.userId });
+    const removedUserIds = left.map((r) => r.userId);
     // 바로 전까지 멤버였던 사람만 — 그래야 "바로 전까지 그 방에 있던 담당자"(S3 규칙의 기준)가 맞다.
-    const changedTodos = await resyncTodoProgressForMembers(t, roomId, left.map((r) => r.userId), { left: true });
-    return { folderItemRemoved: removed.length > 0, changedTodos };
+    const changedTodos = await resyncTodoProgressForMembers(t, roomId, removedUserIds, { left: true });
+    return { folderItemRemoved: removed.length > 0, changedTodos, removedUserIds };
   };
   return tx ? run(tx) : db.transaction(run);
 }
@@ -279,6 +276,91 @@ export function withRoomLock(roomId, fn) {
     await tx.select({ id: rooms.id }).from(rooms).where(eq(rooms.id, roomId)).for('no key update');
     return fn(tx);
   });
+}
+
+/**
+ * [userId]를 방 하나에서 뺀다 — 방 종류마다 다른 뒷정리를 한곳에 모았다(비밀 대화 혼자 나가기와 팀에서 제외될 때가 같이
+ * 쓴다). 토픽·그룹·나와의 대화는 멤버에서만 뺀다(토픽 폴더 배치·할 일 진척률은 removeRoomMembers가 같이 맞춘다). 1:1
+ * 대화(평문·비밀)는 멤버가 둘뿐이라 빠진 사람이 남은 쪽 화면에서 "(알 수 없음)"이 되지 않게 이름을 남겨 두고(클라이언트
+ * Room.displayName이 "OOO (나갔음)"으로 보여 준다), 비밀 대화에 아무도 안 남으면 방째 지운다(볼 사람이 없다 — 평문 대화는
+ * 토픽·그룹처럼 기록을 남겨 둔다). [tx]는 이 방을 잠근 트랜잭션이어야 한다(withRoomLock·removeMemberFromTeamRooms).
+ * 돌려주는 값: `{ room(바뀐 행 — 지웠으면 원래 행), removed(이번에 실제로 빠졌는지), deleted, remainingMemberIds,
+ * folderItemRemoved, changedTodos }`. 그새 스스로 나가 이미 멤버가 아니었으면 아무것도 바꾸지 않는다(removed false).
+ */
+export async function removeMemberFromRoom(tx, room, userId, { departedName = null } = {}) {
+  const { removedUserIds, folderItemRemoved, changedTodos } = await removeRoomMembers(room.id, [userId], tx);
+  const removed = removedUserIds.length > 0;
+  const remainingMemberIds = await listRoomMemberIds(room.id, tx);
+  let current = room;
+  let deleted = false;
+  if (removed && room.type === 'dm' && !room.isSelf) {
+    if (room.isSecret && remainingMemberIds.length === 0) {
+      await deleteRoom(room.id, tx);
+      deleted = true;
+    } else {
+      current = (await setSecretDepartedMember(room.id, { userId, name: departedName }, tx)) ?? room;
+    }
+  }
+  return { room: current, removed, deleted, remainingMemberIds, folderItemRemoved, changedTodos };
+}
+
+/**
+ * 방이 걸린 팀의 멤버가 아닌데 남아 있는 멤버십(room_members 행) — 팀에서 빠져도 방 멤버십은 남겨 두던 예전 규칙의 흔적이다
+ * (지금은 팀에서 빠지면 그 팀 방에서도 함께 빠진다 — removeMemberFromTeamRooms). 비밀 대화는 만든 사람(rooms.created_by)의
+ * 멤버십만 따진다 — 만든 사람은 그 팀 멤버여야 만들 수 있었지만, 받은 사람은 다른 팀에서 함께 있는 사람일 수 있어서
+ * (secretChats.js) 이 팀에 없다고 팀에서 빠진 사람이라고 할 수 없다. listLeftoverTeamRoomMembers와 잠금 조회가 같은 조건을
+ * 쓴다 — 고른 뒤 그새 팀에 다시 들어온 사람은 잠그면서 다시 걸러진다. 서버를 켤 때마다 이 조건에 걸리는 멤버십을 빼므로
+ * (teams.js sweepLeftoverTeamRoomMembers), 팀 밖 사람을 팀 방에 넣는 기능을 새로 만들면 여기도 함께 맞춰야 한다. 하위 쿼리를
+ * db.select()가 아니라 sql로 쓰는 건 모듈을 불러오기만 해도 db를 건드리지 않게 하려는 것이다(db를 막아 둔 테스트들도 이
+ * 파일을 불러온다).
+ */
+const isLeftoverTeamRoomMembership = and(
+  notExists(
+    sql`(select 1 from ${teamMembers} where ${teamMembers.teamId} = ${rooms.teamId} and ${teamMembers.userId} = ${roomMembers.userId})`,
+  ),
+  or(eq(rooms.isSecret, false), sql`${rooms.createdBy} = ${roomMembers.userId}::text`),
+);
+
+/**
+ * 팀에서 빠지는 사람([userId])을 그 팀([teamId])의 모든 방 — 토픽·그룹·1:1 대화·나와의 대화·비밀 대화 — 에서 한 번에
+ * 뺀다(db/queries/teams.js removeTeamMember가 팀 멤버십을 지우는 같은 트랜잭션에서 부른다 — 팀에서 빠진 사람은 옛 대화도
+ * 더는 볼 수 없다). 방 종류별 정리는 removeMemberFromRoom이 맡는다. 그 사람이 멤버인 방들을 id 순서로 한꺼번에 잠가서
+ * (withRoomLock과 같은 잠금) 같은 때 들어온 나가기·내보내기·토픽 관리자 지정과 엇갈리지 않게 한다. 실제로 빠진 방만
+ * removeMemberFromRoom의 결과 모양으로 돌려준다(호출부가 rooms.js notifyRemovedFromTeamRooms로 알린다).
+ * [leftoverOnly]면 이미 팀 멤버십이 없는 사람의 남은 멤버십만 뺀다(isLeftoverTeamRoomMembership — 서버를 켤 때의 정리,
+ * removeLeftoverTeamRoomMembers).
+ */
+export async function removeMemberFromTeamRooms(tx, teamId, userId, { departedName = null, leftoverOnly = false } = {}) {
+  const memberRooms = await tx
+    .select({ room: rooms })
+    .from(rooms)
+    .innerJoin(roomMembers, and(eq(roomMembers.roomId, rooms.id), eq(roomMembers.userId, userId)))
+    .where(and(eq(rooms.teamId, teamId), leftoverOnly ? isLeftoverTeamRoomMembership : undefined))
+    .orderBy(asc(rooms.id))
+    .for('no key update', { of: rooms });
+  const removals = [];
+  for (const { room } of memberRooms) {
+    const removal = await removeMemberFromRoom(tx, room, userId, { departedName });
+    if (removal.removed) removals.push(removal);
+  }
+  return removals;
+}
+
+/** 팀 멤버가 아닌데 그 팀 방에 남아 있는 사람 — `[{ teamId, userId }]`(isLeftoverTeamRoomMembership). 서버를 켤 때의
+ * 정리(teams.js sweepLeftoverTeamRoomMembers)가 이 쌍마다 removeLeftoverTeamRoomMembers를 부른다. [executor]는 테스트용. */
+export function listLeftoverTeamRoomMembers(executor = db) {
+  return executor
+    .selectDistinct({ teamId: rooms.teamId, userId: roomMembers.userId })
+    .from(roomMembers)
+    .innerJoin(rooms, eq(rooms.id, roomMembers.roomId))
+    .where(isLeftoverTeamRoomMembership)
+    .orderBy(asc(rooms.teamId), asc(roomMembers.userId));
+}
+
+/** 이미 팀에서 빠진 사람([userId])을 그 팀([teamId]) 방에 남은 멤버십에서 뺀다 — removeTeamMember의 방 정리와 같은 일을
+ * 팀 멤버십 없이 한 트랜잭션에서 한다. 돌려주는 값도 같다(removeMemberFromTeamRooms). */
+export function removeLeftoverTeamRoomMembers(teamId, userId, { departedName = null } = {}) {
+  return db.transaction((tx) => removeMemberFromTeamRooms(tx, teamId, userId, { departedName, leftoverOnly: true }));
 }
 
 /** 이 방에서의 역할 — 멤버가 아니면 null, 멤버면 'admin'(토픽 관리자) 또는 'member'. */
@@ -301,18 +383,15 @@ export function listRoomMemberRoles(roomId, executor = db) {
 }
 
 /**
- * 토픽을 더 이상 관리할 수 없게 된 사람(준회원으로 내려감·팀에서 빠짐·탈퇴)의 토픽 관리자 역할을 거둔다 —
- * [teamId]를 주면 그 팀 토픽에서만. 역할이 바뀐 방 id들을 돌려준다(호출부가 방 정보를 다시 보낸다).
+ * 토픽을 더 이상 관리할 수 없게 된 사람(준회원으로 내려감·탈퇴)의 토픽 관리자 역할을 거둔다 — 모든 팀의 토픽에서.
+ * 역할이 바뀐 방 id들을 돌려준다(호출부가 방 정보를 다시 보낸다). 팀에서 빠진 사람은 그 팀 방에서 아예 빠지므로
+ * (removeMemberFromTeamRooms) 여기서 따로 거둘 것이 없다.
  */
-export async function clearTopicAdminRoles(userId, teamId = null) {
-  const conditions = [eq(roomMembers.userId, userId), eq(roomMembers.role, 'admin')];
-  if (teamId) {
-    conditions.push(inArray(roomMembers.roomId, db.select({ id: rooms.id }).from(rooms).where(eq(rooms.teamId, teamId))));
-  }
+export async function clearTopicAdminRoles(userId) {
   const rows = await db
     .update(roomMembers)
     .set({ role: 'member' })
-    .where(and(...conditions))
+    .where(and(eq(roomMembers.userId, userId), eq(roomMembers.role, 'admin')))
     .returning({ roomId: roomMembers.roomId });
   return rows.map((r) => r.roomId);
 }
@@ -333,9 +412,9 @@ export async function isRoomMember(roomId, userId) {
   return !!row;
 }
 
-/** 방 멤버 id만(소켓 join 등 사용자 정보가 필요 없는 곳에서 가볍게). */
-export function listRoomMemberIds(roomId) {
-  return db
+/** 방 멤버 id만(소켓 join 등 사용자 정보가 필요 없는 곳에서 가볍게). [executor]는 트랜잭션 안에서 부를 때. */
+export function listRoomMemberIds(roomId, executor = db) {
+  return executor
     .select({ userId: roomMembers.userId })
     .from(roomMembers)
     .where(eq(roomMembers.roomId, roomId))
@@ -361,9 +440,10 @@ export function listRoomMemberUsers(roomId) {
 /** listRoomMemberUsers와 같지만, [teamId]의 team_members.department/position(teamDepartment/
  * teamPosition으로)도 같이 얹는다 — rooms.js의 resolveMembers가 서버 설정(orgScope)에 따라
  * 계정 값(users.department/position)과 이 팀 값 중 하나를 골라 방 DTO의 member.position에
- * 싣는다(teams.js의 memberListResponse와 같은 방식). LEFT JOIN인 이유는
- * listRoomMemberUsers와 동일 — 팀에서 나간 사람의 옛 대화도 계속 보여야 하므로 팀 멤버십이
- * 없어도(teamMembers 행이 없어도) 방 멤버 자체는 빠지면 안 된다.
+ * 싣는다(teams.js의 memberListResponse와 같은 방식). LEFT JOIN인 이유는 그 팀 멤버가 아닌 방 멤버도
+ * 목록에서 빠지면 안 되어서다 — 비밀 대화는 어느 팀이든 함께 있는 사람과 시작할 수 있어서 상대가 방이 걸린
+ * 팀의 멤버가 아닐 수 있다(팀에서 빠져도 방 멤버십을 남겨 두던 예전에 남은 행은 서버를 켤 때 정리된다 —
+ * teams.js sweepLeftoverTeamRoomMembers).
  * 같은 조회에서 팀 소유자 여부(isTeamOwner)와 이 방의 역할(roomRole — 토픽 관리자면 'admin')도
  * 얹는다 — 방 DTO의 member.isOwner/adminIds를 멤버마다 따로 조회하지 않고 만들려고. */
 export function listRoomMemberUsersWithOrg(roomId, teamId) {

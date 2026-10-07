@@ -116,4 +116,6 @@ export function lanAddressesInCert(certPem) {
     .sort((a, b) => rank(a) - rank(b));
 }
 
-export { certPath };
+// certsDir: 웹 앱 전용 포트의 공인 인증서·Let's Encrypt 계정 키도 같은 폴더에 둔다(webTls.js) — 설치 프로그램이 거는 관리자 전용
+// 권한(Folder-Acl.ps1)이 그대로 적용되게.
+export { certPath, certsDir };

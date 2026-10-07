@@ -14,6 +14,7 @@ import { findUserById } from './db/queries/users.js';
 import { notifySecretChatInvite } from './push.js';
 import { SELF_ROOM_DENIAL } from './permissions.js';
 import { dmKeyFor, notifyMembership, postSystemMessage, toRoomDto } from './rooms.js';
+import { parseContextSignature, secretAcceptedPayload, secretInvitePayload } from './secretContextRules.js';
 
 const MIN_SELF_DESTRUCT_SECONDS = 1;
 const MAX_SELF_DESTRUCT_SECONDS = 7 * 24 * 60 * 60; // 1주.
@@ -55,7 +56,14 @@ export function createSecretChatsRouter(io) {
   const router = Router();
 
   router.post('/secret-chats', async (req, res) => {
-    const { targetUserId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, deviceId, teamId } = req.body ?? {};
+    const {
+      targetUserId,
+      initiatorEphemeralPublicKey,
+      initiatorEphemeralSignature,
+      initiatorContextSignature,
+      deviceId,
+      teamId,
+    } = req.body ?? {};
     // 나 자신과의 비밀 대화는 없다(나와의 대화에서 비밀 대화 시작 등) — 기기 확인보다 먼저 이유를 알려준다.
     if (targetUserId === req.user.sub) return res.status(400).json({ error: SELF_ROOM_DENIAL });
     const device = await requireOwnDevice(req, res, deviceId);
@@ -66,6 +74,10 @@ export function createSecretChatsRouter(io) {
     if (!initiatorEphemeralPublicKey || !initiatorEphemeralSignature) {
       return res.status(400).json({ error: '임시 공개키/서명이 필요합니다.' });
     }
+    // 맥락 서명은 새 앱만 보낸다 — 없으면(예전 앱) 그대로 받고, 있으면 모양만 본다. 서명이 맞는지는 서버가 보지 않는다
+    // (받는 앱이 상대 기기 키로 검증한다 — secretContextRules.js). 낡은 방을 지우거나 새 방을 만들기 전에 거른다.
+    const initiatorContext = parseContextSignature(initiatorContextSignature, 'initiatorContextSignature');
+    if (initiatorContext.error) return res.status(400).json({ error: initiatorContext.error });
     // rooms.teamId는 DB에서 NOT NULL이라(팀 도입 전에는 없던 제약) 비밀 대화 방도 어느 팀인가
     // 하나를 걸어야 한다 — 다만 평문 DM(rooms.js)과 달리 "상대가 그 팀 멤버인지"는 확인하지
     // 않는다: 비밀 대화는 팀 소속과 무관하게 아무 회원과나 시작할 수 있는 개인 채널이고, 여기
@@ -111,22 +123,18 @@ export function createSecretChatsRouter(io) {
       isSecret: true,
     });
     await addRoomMembers(room.id, [req.user.sub, targetUserId]);
-    await insertSecretSession({
+    const secretSession = await insertSecretSession({
       roomId: room.id,
       initiatorUserId: req.user.sub,
       initiatorDeviceId: device.id,
       responderUserId: targetUserId,
       initiatorEphemeralPublicKey,
       initiatorEphemeralSignature,
+      initiatorContextSignature: initiatorContext.value,
     });
     await notifyMembership(io, room);
-    io.to(`user:${targetUserId}`).emit('secret:invite', {
-      roomId: room.id,
-      initiatorUserId: req.user.sub,
-      initiatorDeviceId: device.id,
-      initiatorEphemeralPublicKey,
-      initiatorEphemeralSignature,
-    });
+    // 저장한 세션 행으로 만든다 — 앱이 꺼져 있다가 GET /secret-chats/:roomId/invite로 받는 값과 똑같게.
+    io.to(`user:${targetUserId}`).emit('secret:invite', secretInvitePayload(secretSession));
     // system 타입은 클라이언트가 복호화를 아예 안 건드리므로(decryptInPlace 참고) 비밀
     // 대화에도 평문 시스템 메시지를 그대로 써도 된다 — 아래 세 System 메시지(요청/수락/
     // 상대만 나가기) 전부 같은 이유로 안전하다.
@@ -140,7 +148,7 @@ export function createSecretChatsRouter(io) {
 
   /**
    * 응답자가 초대를 받았을 때 앱이 꺼져있어서(FCM만 받음) secret:invite 소켓 이벤트를
-   * 놓친 경우, 수락/거절에 필요한 정보(초대자의 임시 공개키+서명)를 다시 가져온다.
+   * 놓친 경우, 수락/거절에 필요한 정보(초대자의 임시 공개키+서명, 맥락 서명)를 다시 가져온다.
    * client/lib/services/session.dart의 ensurePendingSecretInvite 참고.
    */
   router.get('/secret-chats/:roomId/invite', async (req, res) => {
@@ -153,17 +161,13 @@ export function createSecretChatsRouter(io) {
     if (session.responderUserId !== req.user.sub) {
       return res.status(403).json({ error: '이 요청을 볼 수 없습니다.' });
     }
-    res.json({
-      roomId: room.id,
-      initiatorUserId: session.initiatorUserId,
-      initiatorDeviceId: session.initiatorDeviceId,
-      initiatorEphemeralPublicKey: session.initiatorEphemeralPublicKey,
-      initiatorEphemeralSignature: session.initiatorEphemeralSignature,
-    });
+    // secret:invite 이벤트와 같은 모양(맥락 서명 포함) — secretContextRules.js의 secretInvitePayload.
+    res.json(secretInvitePayload(session));
   });
 
   router.post('/secret-chats/:roomId/accept', async (req, res) => {
-    const { responderEphemeralPublicKey, responderEphemeralSignature, deviceId } = req.body ?? {};
+    const { responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature, deviceId } =
+      req.body ?? {};
     const device = await requireOwnDevice(req, res, deviceId);
     if (!device) return;
     const room = await findRoomById(req.params.roomId);
@@ -172,21 +176,21 @@ export function createSecretChatsRouter(io) {
     if (!responderEphemeralPublicKey || !responderEphemeralSignature) {
       return res.status(400).json({ error: '임시 공개키/서명이 필요합니다.' });
     }
+    // 시작할 때와 같다 — 없으면 예전 앱, 있으면 모양만 보고 수락(세션을 바꾸기) 전에 거른다.
+    const responderContext = parseContextSignature(responderContextSignature, 'responderContextSignature');
+    if (responderContext.error) return res.status(400).json({ error: responderContext.error });
 
     const session = await acceptSecretSession(room.id, {
       responderUserId: req.user.sub,
       responderDeviceId: device.id,
       responderEphemeralPublicKey,
       responderEphemeralSignature,
+      responderContextSignature: responderContext.value,
     });
     // 초대받은 사람이 대기 중인 초대를 수락할 때만(acceptSecretSession 참고).
     if (!session) return res.status(409).json({ error: '수락할 수 있는 비밀 대화 요청이 없습니다.' });
-    io.to(room.id).emit('secret:accepted', {
-      roomId: room.id,
-      responderDeviceId: device.id,
-      responderEphemeralPublicKey,
-      responderEphemeralSignature,
-    });
+    // 수락으로 바뀐 세션 행으로 만든다 — 예전 칸에 더해 responderUserId·맥락 서명(secretContextRules.js).
+    io.to(room.id).emit('secret:accepted', secretAcceptedPayload(session));
     await postSystemMessage(io, room, '비밀대화가 시작되었습니다');
     res.json({ ok: true, session: { status: session.status, keyEpoch: session.keyEpoch } });
   });

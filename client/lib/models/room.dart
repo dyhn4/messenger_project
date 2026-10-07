@@ -138,6 +138,13 @@ class Room {
   /// 놓친 초대"를 판별해서 서버에서 다시 가져온다(ensurePendingSecretInvite 참고).
   final String? secretInitiatorUserId;
 
+  /// 비밀 대화를 건 기기, 받은 사람, 수락한 기기(모르면 null — 수락 전이거나 예전 서버). 이 업데이트 전에 성립한
+  /// 대화는 상대 기기를 이 기기에 묶어 둔 기록이 없어서, 이 값으로 상대 기기를 찾아 고정한다(SecretSessionManager —
+  /// 서버의 말이라 상대 기기의 주인이 대화 상대인지 함께 확인한다). 수락하면 바뀌므로 non-final.
+  String? secretInitiatorDeviceId;
+  String? secretResponderUserId;
+  String? secretResponderDeviceId;
+
   /// 채팅방 상단 배너용 "지금 고정된 공지"(토픽방만, 없으면 null). 서버가 방 DTO에 얹어서
   /// 보내고(rooms.js), 실시간으로는 announcement:new 소켓 이벤트로 Session이 직접 갱신한다
   /// (message.dart의 lastMessagePreview와 같은 방식) — 그래서 non-final.
@@ -220,6 +227,9 @@ class Room {
     this.secretSelfDestructSeconds,
     this.secretDepartedMemberName,
     this.secretInitiatorUserId,
+    this.secretInitiatorDeviceId,
+    this.secretResponderUserId,
+    this.secretResponderDeviceId,
     this.latestAnnouncement,
     this.hasUnreadAnnouncement = false,
     this.unreadAnnouncementCount = 0,
@@ -276,6 +286,9 @@ class Room {
           ?.toInt(),
       secretDepartedMemberName: json['secretDepartedMemberName'] as String?,
       secretInitiatorUserId: json['secretInitiatorUserId'] as String?,
+      secretInitiatorDeviceId: json['secretInitiatorDeviceId'] as String?,
+      secretResponderUserId: json['secretResponderUserId'] as String?,
+      secretResponderDeviceId: json['secretResponderDeviceId'] as String?,
       latestAnnouncement: json['latestAnnouncement'] == null
           ? null
           : Announcement.fromJson(
@@ -337,6 +350,13 @@ class Room {
     secretStatus = incoming.secretStatus;
     secretSelfDestructSeconds = incoming.secretSelfDestructSeconds;
     secretDepartedMemberName = incoming.secretDepartedMemberName;
+    // 예전 서버가 보낸 값(칸 없음)으로 이미 아는 기기 id를 지우지 않는다.
+    secretInitiatorDeviceId =
+        incoming.secretInitiatorDeviceId ?? secretInitiatorDeviceId;
+    secretResponderUserId =
+        incoming.secretResponderUserId ?? secretResponderUserId;
+    secretResponderDeviceId =
+        incoming.secretResponderDeviceId ?? secretResponderDeviceId;
     latestAnnouncement = incoming.latestAnnouncement;
     iconType = incoming.iconType;
     iconEmoji = incoming.iconEmoji;

@@ -24,7 +24,9 @@ import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/topic_folder.dart';
 import '../models/uploaded_attachment.dart';
+import '../models/web_certificate_status.dart';
 import 'chat_socket.dart' show SecretInviteEvent;
+import 'invite_share.dart' show rememberWebAppUrl;
 
 class ApiException implements Exception {
   final String message;
@@ -77,6 +79,13 @@ class UploadCancelToken {
 /// DeviceIdentity가 이걸 받으면 새 기기 id·키를 만들어 다시 등록한다(server/src/devices.js).
 class DeviceOwnedByOtherException implements Exception {
   const DeviceOwnedByOtherException();
+}
+
+/// 서버가 비밀 대화 수락을 받지 않았다(4xx — 내 다른 기기가 먼저 수락했거나, 이미 끝났거나 거절된 요청 등). 수락을
+/// 보내기 전에 적어 둔 이 기기의 키는 이 대화의 것이 아니므로 되돌린다(SecretSessionManager.acceptInvite). 응답이 없거나
+/// 서버 오류(5xx)면 처리됐는지 몰라서 이 예외가 아니라 보통 ApiException이다.
+class SecretChatRefusedException extends ApiException {
+  const SecretChatRefusedException(super.message);
 }
 
 class UploadCancelledException implements Exception {
@@ -469,23 +478,54 @@ class ApiClient {
 
   /// 서버에 설정된 외부(LTE/5G) 접속 주소(서버 .env의 EXTERNAL_ADDRESS — 없으면 null)와 서버 PC의
   /// 사내 주소들(GET /server-info). 물어보지 못했으면(오프라인·예전 서버 등) 예외 — "외부 주소
-  /// 없음"과 구분해야 Session이 저장해둔 주소를 잘못 지우지 않는다.
+  /// 없음"과 구분해야 Session이 저장해둔 주소를 잘못 지우지 않는다. 같은 응답의 아이폰용 웹 앱 주소는
+  /// [fetchServerInfoWithWebUrl] — Session이 이 반환 모양을 그대로 받아 쓰고 있어서 따로 뒀다(이걸 불러도
+  /// 웹 앱 주소는 초대 링크 복사 글에 쓰이도록 기억된다).
   Future<({String? externalUrl, List<String> internalUrls})>
   fetchServerInfo() async {
-    // 로그인했으면 토큰을 붙인다 — 사내망 밖에서는 토큰이 있어야 서버가 사내 주소를 알려준다.
-    final res = await _client
-        .get(_uri('/server-info'), headers: _authHeaders)
-        .timeout(const Duration(seconds: 5));
-    if (res.statusCode != 200) {
-      throw ApiException('서버 정보를 가져오지 못했습니다(${res.statusCode}).');
+    final info = await fetchServerInfoWithWebUrl();
+    return (externalUrl: info.externalUrl, internalUrls: info.internalUrls);
+  }
+
+  /// [fetchServerInfo]에 아이폰용 웹 앱 주소(webUrl)까지 — 서버에 공인 인증서가 실제로 걸려 있을 때만
+  /// `https://도메인[:포트]`이고, 기능이 꺼져 있거나 이 값을 모르는 예전 서버면 null. 받은 값은 초대 링크를 복사하는
+  /// 글(invite_share.dart)이 쓰도록 기억해 두고, 물어보지 못했으면 지운다 — 다른 서버로 바꾼 직후 예전 서버의 주소를
+  /// 안내하지 않게.
+  Future<({String? externalUrl, List<String> internalUrls, String? webUrl})>
+  fetchServerInfoWithWebUrl() async {
+    try {
+      // 로그인했으면 토큰을 붙인다 — 사내망 밖에서는 토큰이 있어야 서버가 사내 주소를 알려준다.
+      final res = await _client
+          .get(_uri('/server-info'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) {
+        throw ApiException('서버 정보를 가져오지 못했습니다(${res.statusCode}).');
+      }
+      final body =
+          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      final info = (
+        externalUrl: body['externalUrl'] as String?,
+        internalUrls: (body['internalUrls'] as List? ?? const [])
+            .whereType<String>()
+            .toList(),
+        webUrl: _webAppUrlFrom(body['webUrl']),
+      );
+      rememberWebAppUrl(info.webUrl);
+      return info;
+    } catch (_) {
+      rememberWebAppUrl(null);
+      rethrow;
     }
-    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-    return (
-      externalUrl: body['externalUrl'] as String?,
-      internalUrls: (body['internalUrls'] as List? ?? const [])
-          .whereType<String>()
-          .toList(),
-    );
+  }
+
+  /// /server-info의 webUrl을 쓸 모양으로 — 아이폰 사용자에게 그대로 안내할 주소라 https 주소만 받고 끝 슬래시는
+  /// 뗀다. 없거나(예전 서버·기능 꺼짐) 모양이 이상하면 null.
+  static String? _webAppUrlFrom(Object? value) {
+    if (value is! String) return null;
+    final trimmed = value.trim().replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) return null;
+    return trimmed;
   }
 
   /// 서버에 배포된 최신 클라이언트 버전(version.js 참고). 아직 배포된 빌드가 없으면 null.
@@ -974,6 +1014,31 @@ class ApiClient {
       roomName: body['roomName'] as String,
       token: body['token'] as String,
     );
+  }
+
+  /// 관리자 콘솔 "운영 현황"의 웹 앱 주소(정식 인증서) 카드 — 아이폰용 웹 앱 포트의 Let's Encrypt 인증서 상태(GET
+  /// /api/admin/web-certificate). 이 기능이 없는 예전 서버에는 이 경로가 없어 404(Express 기본 HTML 페이지라 JSON도
+  /// 아니다)라 null — 화면이 카드를 숨긴다. 그 밖의 실패는 ApiException.
+  Future<WebCertificateStatus?> fetchWebCertificateStatus() async {
+    final res = await _send(
+      () => _client.get(
+        _uri('/api/admin/web-certificate'),
+        headers: _authHeaders,
+      ),
+    );
+    if (res.statusCode == 404) return null;
+    final fallback = '웹 인증서 상태를 가져오지 못했습니다(${res.statusCode}).';
+    final Object? body;
+    try {
+      body = jsonDecode(utf8.decode(res.bodyBytes));
+    } on FormatException {
+      throw ApiException(fallback);
+    }
+    if (res.statusCode >= 400 || body is! Map<String, dynamic>) {
+      final error = body is Map ? body['error'] : null;
+      throw ApiException(error is String ? error : fallback);
+    }
+    return WebCertificateStatus.fromJson(body);
   }
 
   /// 관리자 콘솔의 "FCM 설정" — 지금 저장된 값(서비스 계정의 private_key는 빼고).
@@ -2842,15 +2907,25 @@ class ApiClient {
     return ids is List ? ids.whereType<String>().toList() : const [];
   }
 
-  /// 비밀 대화(E2EE)용 기기 신원 등록(멱등 — 같은 deviceId면 공개키만 갱신). 개인키는 절대 여기
-  /// 담기지 않는다(device_identity.dart 참고).
-  /// 상대 기기의 서명 검증키(비밀 대화 핸드셰이크의 임시 공개키 서명을 확인하는 데 씀) 조회.
-  Future<String> fetchDeviceSigningPublicKey(String deviceId) async {
-    final body =
-        await _get('/api/devices/$deviceId/public-key') as Map<String, dynamic>;
-    return body['signingPublicKey'] as String;
+  /// 상대 기기의 서명 검증키(비밀 대화 핸드셰이크의 임시 공개키 서명을 확인하는 데 씀)와 그 기기의 주인. 서버의 말이라
+  /// 그대로 믿지 않는다 — 호출하는 쪽(SecretSessionManager)이 주인이 대화 상대와 같은지 보고, 처음 본 기기일 때만
+  /// 묻고 그 뒤로는 고정해 둔 키를 쓴다(secret_peer_store.dart). 모양이 틀린 응답은 ApiException.
+  Future<({String userId, String signingPublicKey})> fetchDeviceSigningPublicKey(
+    String deviceId,
+  ) async {
+    final body = await _get(
+      '/api/devices/${Uri.encodeComponent(deviceId)}/public-key',
+    );
+    final userId = body is Map ? body['userId'] : null;
+    final key = body is Map ? body['signingPublicKey'] : null;
+    if (userId is! String || key is! String) {
+      throw const ApiException('상대 기기 정보를 확인할 수 없습니다.');
+    }
+    return (userId: userId, signingPublicKey: key);
   }
 
+  /// 비밀 대화(E2EE)용 기기 신원 등록(멱등 — 같은 deviceId면 공개키만 갱신). 개인키는 절대 여기
+  /// 담기지 않는다(device_identity.dart 참고).
   Future<void> registerDevice({
     required String deviceId,
     String? name,
@@ -2897,37 +2972,76 @@ class ApiClient {
 
   /// rooms.teamId는 서버에서 NOT NULL이라 비밀 대화 방도 어느 팀인가 하나를 걸어야 한다
   /// (그 팀 멤버인지는 나만 확인받는다 — 상대는 어느 팀 소속이든 상관없다, server/src/secretChats.js).
-  Future<Room> startSecretChat({
+  /// [initiatorContextSignature]는 맥락 서명(v2 — secret_chat_crypto.dart). 서버는 이 상대와 이미 진행 중인 비밀
+  /// 대화가 있으면 새로 만들지 않고 그 방을 돌려준다(200) — [created]가 false면 서버가 이번 임시키를 받지 않은
+  /// 것이라, 이 임시키로 수락을 기다리면 안 된다(서버는 그 방의 원래 임시키로 상대에게 보냈다).
+  Future<({Room room, bool created})> startSecretChat({
     required String targetUserId,
     required String deviceId,
     required String initiatorEphemeralPublicKey,
     required String initiatorEphemeralSignature,
+    String? initiatorContextSignature,
     required String teamId,
   }) async {
-    return Room.fromJson(
-      await _post('/api/secret-chats', {
-            'targetUserId': targetUserId,
-            'deviceId': deviceId,
-            'initiatorEphemeralPublicKey': initiatorEphemeralPublicKey,
-            'initiatorEphemeralSignature': initiatorEphemeralSignature,
-            'teamId': teamId,
-          })
-          as Map<String, dynamic>,
+    final res = await _send(
+      () => _client.post(
+        _uri('/api/secret-chats'),
+        headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'targetUserId': targetUserId,
+          'deviceId': deviceId,
+          'initiatorEphemeralPublicKey': initiatorEphemeralPublicKey,
+          'initiatorEphemeralSignature': initiatorEphemeralSignature,
+          'initiatorContextSignature': ?initiatorContextSignature,
+          'teamId': teamId,
+        }),
+      ),
     );
+    final decoded = _decodeSecretChatBody(res);
+    if (res.statusCode >= 400) throw ApiException(_secretChatError(decoded));
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiException('요청이 실패했습니다.');
+    }
+    return (room: Room.fromJson(decoded), created: res.statusCode == 201);
   }
 
+  /// 수락 — 서버가 받지 않으면(4xx) [SecretChatRefusedException]. [responderContextSignature]는 맥락 서명(v2).
   Future<void> acceptSecretChat({
     required String roomId,
     required String deviceId,
     required String responderEphemeralPublicKey,
     required String responderEphemeralSignature,
+    String? responderContextSignature,
   }) async {
-    await _post('/api/secret-chats/$roomId/accept', {
-      'deviceId': deviceId,
-      'responderEphemeralPublicKey': responderEphemeralPublicKey,
-      'responderEphemeralSignature': responderEphemeralSignature,
-    });
+    final res = await _send(
+      () => _client.post(
+        _uri('/api/secret-chats/$roomId/accept'),
+        headers: {..._authHeaders, 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'deviceId': deviceId,
+          'responderEphemeralPublicKey': responderEphemeralPublicKey,
+          'responderEphemeralSignature': responderEphemeralSignature,
+          'responderContextSignature': ?responderContextSignature,
+        }),
+      ),
+    );
+    if (res.statusCode < 400) return;
+    final message = _secretChatError(_decodeSecretChatBody(res));
+    if (res.statusCode < 500) throw SecretChatRefusedException(message);
+    throw ApiException(message);
   }
+
+  /// 비밀 대화 응답 본문(JSON이 아니면 null — 프록시 오류 화면 등).
+  static Object? _decodeSecretChatBody(http.Response res) {
+    try {
+      return jsonDecode(utf8.decode(res.bodyBytes));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _secretChatError(Object? body) =>
+      (body is Map ? body['error'] as String? : null) ?? '요청이 실패했습니다.';
 
   Future<void> rejectSecretChat(String roomId) async {
     await _post('/api/secret-chats/$roomId/reject', const {});

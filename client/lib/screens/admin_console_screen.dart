@@ -18,6 +18,7 @@ import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
+import '../widgets/web_certificate_status_card.dart';
 import 'admin_stickers_tab.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
@@ -163,6 +164,11 @@ class _StatsTabState extends State<_StatsTab> {
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+          // 아이폰용 웹 앱의 정식 인증서(Let's Encrypt) 상태 — 운영 현황이라 여기 둔다. 이 기능이 없는 예전 서버면
+          // 카드가 스스로 숨는다(fetchWebCertificateStatus가 404를 null로 준다). "다시 확인" 때마다 그때의 api로 묻는다.
+          WebCertificateStatusCard(
+            load: () => widget.session.api!.fetchWebCertificateStatus(),
           ),
           const _SectionDivider(),
           Align(

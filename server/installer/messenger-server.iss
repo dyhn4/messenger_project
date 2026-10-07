@@ -84,6 +84,7 @@ Source: "Update-Server.ps1"; DestDir: "{app}"
 Source: "Restart-Server.ps1"; DestDir: "{app}"
 Source: "Storage-Path.ps1"; DestDir: "{app}"
 Source: "External-Address.ps1"; DestDir: "{app}"
+Source: "Web-Domain.ps1"; DestDir: "{app}"
 Source: "Backup-Data.ps1"; DestDir: "{app}"
 Source: "Restore-Data.ps1"; DestDir: "{app}"
 Source: "Reset-Data.ps1"; DestDir: "{app}"
@@ -125,6 +126,9 @@ Name: "{group}\서버 재시작"; Filename: "powershell.exe"; Parameters: "-NoLo
 Name: "{group}\첨부파일 저장소"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Storage-Path.ps1"""
 ; 사내망 밖(LTE/5G) 접속 주소(DDNS·공인 IP) 확인/변경 — .env의 EXTERNAL_ADDRESS. 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\외부 접속 주소"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\External-Address.ps1"""
+; 아이폰(사파리 웹 앱)용 정식 인증서 — 도메인(WEB_DOMAIN)·웹 HTTPS 포트·인증용 HTTP 포트를 .env에 쓰고 방화벽 규칙과 서비스 재시작까지
+; 한다(인증서 발급·갱신은 서버가 Let's Encrypt로 직접 — 메인 포트와 그 인증서는 그대로). 관리자 권한이 필요해 스스로 승격한다.
+Name: "{group}\웹 앱 주소(정식 인증서)"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Web-Domain.ps1"""
 ; DB를 파일 하나로 백업한다({app}\backups\에 저장, 관리자 전용 폴더, 최근 10개만 보관) — pg_dump
 ; 경로/포트/비밀번호를 몰라도 콘솔 명령어 없이 바로 된다. 관리자 권한이 필요해 스스로 승격한다.
 Name: "{group}\백업"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Backup-Data.ps1"""
@@ -155,6 +159,10 @@ Filename: "{app}\tools\nssm.exe"; Parameters: "stop TangoTalkServer"; Flags: run
 Filename: "{app}\tools\nssm.exe"; Parameters: "remove TangoTalkServer confirm"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveSvc"
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (main)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw1"
 Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (pairing)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFw2"
+; 웹 앱 주소(정식 인증서 — Web-Domain.ps1)용 규칙. .env는 남으므로, 켜 둔 채 제거했다가 같은 경로에 다시 설치하면
+; Setup-TangoTalkServer.ps1 6단계가 WEB_DOMAIN을 보고 되살린다. "서버 완전 삭제"도 마지막에 이 제거 프로그램을 돌려 함께 지운다.
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (web)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFwWeb"
+Filename: "netsh.exe"; Parameters: "advfirewall firewall delete rule name=""TangoTalk Server (web-acme)"""; Flags: runhidden waituntilterminated; RunOnceId: "DelFwWebAcme"
 
 [UninstallDelete]
 ; 프로그램 파일만 지정한다 — .env / certs / uploads / secrets / pgsql / pgsql-data / releases는

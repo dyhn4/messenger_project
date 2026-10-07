@@ -27,6 +27,7 @@ import 'services/fcm_config_cache.dart';
 import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
+import 'services/web_launch_invite.dart';
 import 'widgets/app_lock_overlay.dart';
 import 'widgets/esc_to_minimize.dart';
 import 'widgets/update_banner.dart';
@@ -255,6 +256,10 @@ class _MyAppState extends State<MyApp>
     deepLinks.getInitialPairRequest().then((req) {
       if (req != null) _onPairRequest(req);
     });
+    // 웹 앱을 초대 링크의 웹 주소(?invite=<코드>)로 열었으면 그 코드를 가입할 때 같이 보낸다 — 아이폰은 설치형 앱이 없어
+    // 딥링크 대신 이 주소로 들어오고, 사내 와이파이 밖에서는 초대 코드가 있어야 가입된다(server/src/auth.js).
+    final launchInvite = takeLaunchInviteToken();
+    if (launchInvite != null) session.rememberInviteCode(launchInvite);
     _pairRequestSub = deepLinks.pairRequestStream.listen(_onPairRequest);
     // session.toasts는 HomeScreen이 자기 자신의 context로 구독해서 보여준다(main.dart의
     // navigatorKey.currentContext는 Navigator 위젯 자체의 context라 SnackBar/Overlay가

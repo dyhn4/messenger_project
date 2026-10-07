@@ -1453,6 +1453,11 @@ export const secretSessions = pgTable('secret_sessions', {
   initiatorEphemeralSignature: text('initiator_ephemeral_signature').notNull(),
   responderEphemeralPublicKey: text('responder_ephemeral_public_key'),
   responderEphemeralSignature: text('responder_ephemeral_signature'),
+  // 맥락 서명(v2) — 임시 공개키만이 아니라 누가(사용자·기기) 누구와 어떤 핸드셰이크에서 낸 키인지까지 묶어 서명한 값
+  // (client secret_chat_crypto.dart). 위의 ...Signature는 키만 서명한 예전 형식(v1)으로, 예전 앱과도 대화가 되게 함께
+  // 보낸다. 예전 앱이 만든 세션이면 null.
+  initiatorContextSignature: text('initiator_context_signature'),
+  responderContextSignature: text('responder_context_signature'),
   // 재키잉마다 1씩 증가 — 메시지 암호문 봉투의 epoch 필드와 대응(secretRekeys 이력 참고).
   keyEpoch: integer('key_epoch').notNull().default(0),
   // null이면 자동 삭제 꺼짐. 1~604800(1초~1주). 이후 읽는 메시지부터 적용된다.
@@ -1477,6 +1482,9 @@ export const secretRekeys = pgTable(
     proposerEphemeralSignature: text('proposer_ephemeral_signature').notNull(),
     responderEphemeralPublicKey: text('responder_ephemeral_public_key'),
     responderEphemeralSignature: text('responder_ephemeral_signature'),
+    // 맥락 서명(v2 — secretSessions의 같은 칸 참고). 예전 앱이 낸 재키잉이면 null.
+    proposerContextSignature: text('proposer_context_signature'),
+    responderContextSignature: text('responder_context_signature'),
     status: text('status').notNull().default('proposed'), // 'proposed' | 'acked'
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

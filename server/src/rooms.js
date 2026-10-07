@@ -84,6 +84,7 @@ import {
   listCommentsInRoomBetween,
 } from './db/queries/comments.js';
 import { findSecretSessionByRoomId } from './db/queries/secretSessions.js';
+import { secretRoomFields } from './secretContextRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { findUserById } from './db/queries/users.js';
 import { publicUser } from './users.js';
@@ -335,12 +336,10 @@ export async function toRoomDto(room, requesterId) {
   if (room.isSecret) {
     // 비밀 대화 상태(핸드셰이크 진행 여부/자동 삭제 타이머)도 방 목록에 실어 보낸다 —
     // 클라이언트가 매번 별도 조회 없이 RoomOptionsMenu의 타이머 표시나 초대 대기 UI에 바로
-    // 쓸 수 있게. 공개키/서명만 포함되고 공유비밀/체인키는 여기 절대 없다.
+    // 쓸 수 있게. 양쪽 사용자·기기 id도 싣는다(앱이 상대 기기를 기억해 두지 않았던 예전 대화를 그 기기에 묶는 데 쓴다).
+    // 공개키·서명·공유비밀/체인키는 여기 절대 없다 — 칸 목록은 secretContextRules.js의 secretRoomFields.
     const session = await findSecretSessionByRoomId(room.id);
-    dto.secretStatus = session?.status ?? null;
-    dto.secretKeyEpoch = session?.keyEpoch ?? 0;
-    dto.secretSelfDestructSeconds = session?.selfDestructSeconds ?? null;
-    dto.secretInitiatorUserId = session?.initiatorUserId ?? null;
+    Object.assign(dto, secretRoomFields(session));
   }
   if (room.type === 'dm' && !room.isSelf) {
     // 1:1 대화에서 한 사람이 빠진 경우(비밀 대화를 "상대방도 나가기" 없이 혼자 나감, 팀에서 제외됨) 남은 멤버 쪽에서

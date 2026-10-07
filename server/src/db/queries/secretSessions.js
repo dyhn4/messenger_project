@@ -18,14 +18,19 @@ export function findSecretSessionByRoomId(roomId) {
 /**
  * 초대받은 사람([responderUserId])이 아직 대기 중인 초대를 수락할 때만 바뀐다(아니면 null). 예전엔 방 멤버면 누구나,
  * 이미 시작된 대화에도 응답자 키를 덮어써서 상대의 비밀 대화를 깨거나 키를 바꿔치기할 수 있었다.
+ * [responderContextSignature]는 맥락 서명(secretContextRules.js) — 예전 앱이 수락하면 없어서 null로 둔다.
  */
-export async function acceptSecretSession(roomId, { responderUserId, responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature }) {
+export async function acceptSecretSession(
+  roomId,
+  { responderUserId, responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature },
+) {
   const [row] = await db
     .update(secretSessions)
     .set({
       responderDeviceId,
       responderEphemeralPublicKey,
       responderEphemeralSignature,
+      responderContextSignature: responderContextSignature ?? null,
       status: 'active',
       acceptedAt: new Date(),
     })
@@ -70,10 +75,20 @@ export function findSecretRekey(roomId, keyEpoch) {
     .then((rows) => rows[0] ?? null);
 }
 
-export async function ackSecretRekey(roomId, keyEpoch, { responderEphemeralPublicKey, responderEphemeralSignature }) {
+/** 재키잉 수락을 그 제안 행에 적는다. [responderContextSignature]는 맥락 서명 — 예전 앱의 수락이면 null. */
+export async function ackSecretRekey(
+  roomId,
+  keyEpoch,
+  { responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature },
+) {
   const [row] = await db
     .update(secretRekeys)
-    .set({ responderEphemeralPublicKey, responderEphemeralSignature, status: 'acked' })
+    .set({
+      responderEphemeralPublicKey,
+      responderEphemeralSignature,
+      responderContextSignature: responderContextSignature ?? null,
+      status: 'acked',
+    })
     .where(and(eq(secretRekeys.roomId, roomId), eq(secretRekeys.keyEpoch, keyEpoch)))
     .returning();
   return row;

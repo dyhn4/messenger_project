@@ -20,6 +20,7 @@ import 'app_toast.dart';
 import 'compact_menu.dart';
 import 'export_chat_dialog.dart';
 import 'floating_dialog.dart';
+import 'secret_safety_number_dialog.dart';
 import 'self_destruct_picker_dialog.dart';
 import 'user_avatar.dart';
 
@@ -564,6 +565,7 @@ class RoomOptionsMenu extends StatelessWidget {
                   SelfDestructPickerDialog(session: session, room: room),
             ),
           ),
+        if (room.isSecret) _safetyNumberItem(context, room),
       ],
       [
         // 비밀 대화는 서버가 평문을 몰라서(종단간 암호화) 지원하지 않는다 — export_chat_dialog.dart 참고.
@@ -655,6 +657,43 @@ class RoomOptionsMenu extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+
+  /// 비밀 대화 "보안 코드 확인" — 상대와 보안 코드를 비교해 확인했으면 초록 방패와 "확인함"을 붙인다(방을 열 때
+  /// 비밀 대화 안내 줄이 읽어 둔 상태 — Session.secretTrustOf).
+  PopupMenuItem<void> _safetyNumberItem(BuildContext context, Room room) {
+    final verified = session.secretTrustOf(room.id)?.verified ?? false;
+    return PopupMenuItem<void>(
+      key: const ValueKey('room-menu-safety-number'),
+      height: CompactMenu.itemHeight,
+      padding: CompactMenu.itemPadding,
+      onTap: () => showSecretSafetyNumberDialog(context, session, room),
+      child: Row(
+        children: [
+          Icon(
+            verified ? Icons.verified_user : Icons.shield_outlined,
+            size: 16,
+            color: verified ? Colors.green : Theme.of(context).hintColor,
+          ),
+          const SizedBox(width: 8),
+          const Flexible(
+            child: Text(
+              '보안 코드 확인',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: CompactMenu.textStyle,
+            ),
+          ),
+          if (verified) ...[
+            const SizedBox(width: 6),
+            const Text(
+              '확인함',
+              style: TextStyle(fontSize: 12, color: Colors.green),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

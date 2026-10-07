@@ -30,6 +30,11 @@
 프로그램을 아직 다시 실행하지 않은 서버에서도 관리자 권한 PowerShell에서
 `cd <설치 경로>\server; ..\node\node.exe scripts\grant-server-admin.mjs <아이디>`로 직접 돌릴 수 있다.
 
+아이폰 웹 앱용 정식 인증서(아래 "웹 앱 주소(정식 인증서)")도 같다 — 발급·갱신하는 서버 코드(`server/src/webTlsConfig.js`·`acme.js`·
+`acmeRenewal.js` 등)는 zip으로 들어가지만, 시작 메뉴 "웹 앱 주소(정식 인증서)"(`Web-Domain.ps1`), 그 방화벽 규칙을 일반 제거가 지우는
+`[UninstallRun]` 줄, 재설치 때 규칙을 되살리는 `Setup-TangoTalkServer.ps1` 6단계는 설치 프로그램을 다시 실행해야 들어간다. 그 전에는
+관리자가 `.env`(`WEB_DOMAIN` 등)와 방화벽 인바운드 규칙(TCP 443·80)을 손으로 맞춰야 한다.
+
 ## 빌드
 
 저장소 루트에서:
@@ -48,18 +53,20 @@
 | 파일 | 역할 |
 |---|---|
 | `messenger-server.iss` | Inno Setup 스크립트. `PrivilegesRequired=admin`, 설치 경로 선택 가능(기본값 `C:\TangoTalk-Server`) |
-| `Setup-TangoTalkServer.ps1` | 설치 마지막 단계에서 실행 — PostgreSQL 무인 설치, 설치 폴더 접근 권한 잠금(2.5단계), DB 계정/생성, `.env` 작성, 마이그레이션, 방화벽, 서비스 등록(서버 서비스는 `NODE_ENV=production` — 이미 있던 서비스도 재시작 전에 맞춤). 재실행해도 안전(idempotent) |
+| `Setup-TangoTalkServer.ps1` | 설치 마지막 단계에서 실행 — PostgreSQL 무인 설치, 설치 폴더 접근 권한 잠금(2.5단계), DB 계정/생성, `.env` 작성, 마이그레이션, 방화벽(`.env`에 `WEB_DOMAIN`이 있으면 웹 앱 주소용 규칙도 되살림 — 없으면 남은 규칙을 지움, 실패해도 경고만), 서비스 등록(서버 서비스는 `NODE_ENV=production` — 이미 있던 서비스도 재시작 전에 맞춤). 재실행해도 안전(idempotent) |
 | `Folder-Acl.ps1` | 폴더 접근 권한 잠금 공용 함수(dot-source 전용, 직접 실행하면 함수만 정의) — `Protect-InstallDir`(설치 폴더 전체), `Set-AdminOnlyAcl`(비밀값·백업·바깥 첨부파일 폴더), `Get-FolderLockKind`(잠가도 되는 폴더인지 판단). 아래 "설치 폴더는 SYSTEM/Administrators 전용" 참고 |
 | `Start-ServerConsole.ps1` | 시작 메뉴 "서버 콘솔로 실행"(콘솔 모드 설치 시) — 스스로 관리자 권한으로 승격한 뒤 서버 폴더에서 `node src\index.js`를 이 창에서 실행(설치 폴더가 잠겨 있어 일반 권한으로는 `node.exe`를 못 읽음). 서비스 모드처럼 `NODE_ENV=production`으로 띄운다 |
 | `tests/Folder-Acl.Tests.ps1`(개발 PC 전용, 설치 프로그램에 안 들어감) | `Folder-Acl.ps1`의 판단 규칙·정션 처리·잠금 결과를 관리자 권한 없이 `%TEMP%` 안의 가짜 설치 폴더로 확인한다(실제 설치 폴더·서비스는 안 건드림). `Folder-Acl.ps1`을 고쳤으면 돌려볼 것 — 아래 체크리스트 첫 줄 |
 | `tests/Install-Guard.Tests.ps1`(개발 PC 전용, 설치 프로그램에 안 들어감) | ISCC 없이 `messenger-server.iss`를 확인한다 — `PrepareToInstall`의 기존 폴더 검사 명령(`AppDirCheckParams`: 소유자 + 그 폴더 자신의 권한)을 그대로 꺼내 Inno의 `Exec`와 같은 명령줄로 실제 실행(작은따옴표·굽은 따옴표가 든 폴더 이름, 다른 계정의 쓰기류 권한·상속 전용 항목·일반 권한 비트·거부 항목을 정해 둔 임시 폴더, 잠금 전 모양의 설치 폴더가 `Protect-InstallDir`로 잠근 뒤 통과하는지, 이 PC의 시스템 폴더·`C:\` 바로 아래 폴더), 결과 코드 상수·쓰기류 권한 마스크가 맞는지, 끊어진 정션을 `GetFileAttributesW`가 링크로 보는지, 루트 `*.ps1`이 전부 `[Files]`에 있는지, 관리 스크립트가 맨 처음 스스로 승격하고 node를 서버 폴더에서 부르는지. `messenger-server.iss`나 루트 스크립트를 고쳤으면 돌려볼 것 |
 | `tests/Admin-Verify.Tests.ps1`(개발 PC 전용, 설치 프로그램에 안 들어감) | 운영자 인증 `Test-ServerAdminPassword`(`Reset-Data.ps1`·`Restore-Data.ps1`·`Uninstall-Full.ps1`)가 세 곳에서 같은지, 그 함수로만 `verify-admin.mjs`를 부르는지, Windows PowerShell 5.1 기본 `$OutputEncoding`(ASCII)에서도 한글·이모지·앞뒤 공백·따옴표가 든 비밀번호와 한글 아이디를 글자 그대로 넘기는지 — 진짜 `verify-admin.mjs`를 `%TEMP%`의 가짜 서버 폴더(가짜 pg·dotenv·bcryptjs)에서 돌려 본다(DB·`.env`는 안 건드림, node 필요). 예전 방식(그냥 파이프)이 '?'로 실패하는 것도 재현한다. 세 스크립트나 `verify-admin.mjs`를 고쳤으면 돌려볼 것 — `verify-admin.mjs`의 stdin 규칙(BOM·끝 줄바꿈·잘못된 UTF-8)은 `server/test/verifyAdminStdin.test.js` |
+| `tests/Web-Domain.Tests.ps1`(개발 PC 전용, 설치 프로그램에 안 들어감) | `Web-Domain.ps1`의 함수만 꺼내(창·승격은 안 돌림) 도메인·포트·이메일 검증, 서버가 이미 쓰는 포트와의 겹침, `.env` 고치기(BOM 있는/없는 UTF-8·ANSI(CP949)·LF·중복 키·`export`·따옴표·주석 → BOM 없는 UTF-8 + CRLF, 다른 줄은 글자 그대로), **서버의 `dotenv` + `server/src/webTlsConfig.js`가 그 `.env`를 같은 뜻으로 읽는지**(node 필요 — 서버 쪽 규칙이 바뀌면 여기서 걸림), 방화벽 규칙(가짜 netsh — 이름으로 지우고 node.exe 전용으로 다시 만듦), 포트 사용 확인, 127.0.0.1의 임시 TLS 서버(메모리에서 만든 자체 서명·"(STAGING)" 인증서, 인증서 저장소엔 안 넣음)로 [인증서 확인], 안내 문구, 적용 전 경고(DNS·포트는 가짜 함수)를 본다. 구성도 본다 — `Setup-TangoTalkServer.ps1`의 `Set-WebFirewallRules`가 같은지, Setup이 그 함수를 경고만 남기는 try 안에서 부르는지와 `.env`의 `WEB_DOMAIN` 줄을 읽는 규칙, `[UninstallRun]`이 두 규칙을 지우는지, 시작 메뉴 바로가기, 문자열 안 `$이름` 뒤에 한글이 붙어 빈 값이 되는 곳(이 기능의 두 스크립트는 실패, 다른 설치 스크립트는 "메모:"). DNS·실제 방화벽·서비스·`.env`는 안 건드림. `Web-Domain.ps1`·Setup 6단계의 웹 규칙·`[UninstallRun]`이나 서버의 `webTlsConfig.js`를 고쳤으면 돌려볼 것 |
 | `tests/Service-Env.Tests.ps1`(개발 PC 전용, 설치 프로그램에 안 들어감) | 설치된 서버가 모든 시작 경로에서 `NODE_ENV=production`인지 — `Setup-TangoTalkServer.ps1`·`Update-Server.ps1`의 `Set-NodeServiceProductionEnv`가 같은지, 서버 서비스를 nssm으로 start/restart하기 전마다 부르는지, `$env:NODE_ENV`는 `Start-ServerConsole.ps1`만 node 실행 전에 넣는지, 레지스트리에 쓰는 목록(REG_MULTI_SZ, 다른 변수 유지)을 가짜 `Get-Item`/`Set-ItemProperty`로 본다(진짜 레지스트리·서비스는 안 건드림). 두 스크립트의 서비스 부분을 고쳤으면 돌려볼 것 |
 | `Get-PairingCode.ps1` | 시작 메뉴 "새 기기 페어링 코드 발급"이 호출 — `server/scripts/pair.mjs`와 같은 일을 Node 없이 순수 PowerShell로. `.env`의 `PORT`/`PAIRING_PORT`를 읽어야 해서(설치 폴더가 관리자 전용) 스스로 승격 — 승격을 거절하면 이유를 창으로 알림 |
 | `Restart-Server.ps1` | "서버 재시작" — `TangoTalkServer` 서비스만 재시작(코드/DB 안 건드림). 재시작 뒤 Running이 아니면 `server\service-err.log`를 그 자리에서 메모장으로 열지 물어봄(이 창이 관리자 권한이라 메모장도 관리자 권한으로 열림). 스스로 승격 |
 | `Update-Server.ps1` | "서버 업데이트" — 업데이트 zip을 파일 선택 창에서 골라 적용(WinForms GUI). 먼저 설치 폴더 접근 권한을 다시 잠그고(1/5), DB는 안 건드림, npm install+마이그레이션+서비스 재시작 자동(재시작 전에 서버 서비스의 `NODE_ENV=production`을 다시 맞춤 — 5/5). 관리자 권한 필요해 스스로 승격 |
 | `Storage-Path.ps1` | "첨부파일 저장소" — 첨부파일 저장 위치(`UPLOADS_DIR`)를 보여주고 NAS/다른 PC 공유 폴더 등으로 바꿈(WinForms GUI). 설치 폴더 밖의 로컬 폴더는 관리자 전용으로 잠근 뒤 기존 파일 이동 여부를 물어보고 `.env` 갱신 + 서비스 재시작. 관리자 권한 필요해 스스로 승격 |
 | `External-Address.ps1` | "외부 접속 주소" — 사내망 밖(LTE/5G)에서 접속할 DDNS 도메인/공인 IP(`EXTERNAL_ADDRESS`)를 보여주고 바꾸거나 끔(WinForms GUI). 그 주소가 지금 인증서에 없으면(서버가 인증서를 새로 만들어 모든 클라이언트 재페어링 필요) 적용 전에 경고. `.env` 갱신 + 서비스 재시작(화상회의 공인 IP는 서버가 `livekit.yaml`에 넣고 LiveKit 서비스를 재시작 — `server/src/livekitNat.js`). 공유기 포트포워딩(메인 포트, 화상회의 UDP 범위·TCP, 초대 안내 페이지를 밖에서 열려면 페어링 포트)은 직접 해야 함. 관리자 권한 필요해 스스로 승격 |
+| `Web-Domain.ps1` | "웹 앱 주소(정식 인증서)" — 아이폰(사파리 웹 앱)용 공인 인증서 설정(WinForms GUI). 도메인(`WEB_DOMAIN`)·웹 HTTPS 포트(`WEB_HTTPS_PORT`, 기본 443)·인증용 HTTP 포트(`ACME_HTTP_PORT`, 기본 80, 0이면 HTTP-01 안 씀)·이메일(`ACME_EMAIL`, 선택)·시험 발급(`ACME_STAGING=1`, 기본 끔)을 `.env`에 쓰고, 방화벽 규칙 `TangoTalk Server (web)`·`(web-acme)`(이 서버의 `node.exe` 전용)을 맞추고 서비스를 재시작. 적용 전에 포트 겹침(서버 포트·LiveKit·PostgreSQL)은 거절하고, 다른 프로그램(IIS/HTTP.sys 등)이 쓰는 포트·DNS에서 못 찾거나 사설 IP만 가리키는 도메인은 경고. 공유기 포트포워딩(외부 443 → 웹 포트, 외부 80 → 인증용 포트, 웹 포트가 443이 아니면 그 번호도)·iptime.org 주간 한도·아이폰 사용법을 복사할 수 있는 글로 안내. [인증서 확인]은 127.0.0.1의 웹 포트에 SNI로 붙어 지금 걸린 인증서(정식/시험용/그 밖)를 보여 줌. "끄기"(또는 도메인을 비우고 적용)는 `WEB_DOMAIN`만 비우고 규칙을 지움. 발급·갱신·상태(관리자 콘솔)는 서버 몫. 관리자 권한 필요해 스스로 승격 |
 | `Backup-Data.ps1` | "백업" — DB를 `{app}\backups\messenger_<날짜시각>.dump`로 저장(`pg_dump -F c`). 쓰기 전에 `backups\`를 관리자 전용으로 잠그고, 최근 10개(`$KeepBackups`)만 남기고 오래된 백업은 지움. 서버는 멈추지 않음. 관리자 권한 필요해 스스로 승격 |
 | `Restore-Data.ps1` | "복원" — 파일 선택 창(WinForms)에서 `.dump`를 골라 `pg_restore --clean --if-exists`로 되돌림. `Reset-Data.ps1`과 같은 안전장치(서버 운영자 계정 인증 + `RESTORE` 입력 확인) 필수, 복원 중엔 서비스 정지 후 재시작. 관리자 권한 필요해 스스로 승격 |
 | `Reset-Data.ps1` | "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움. 서버 운영자 계정 인증 + `RESET` 입력 확인 둘 다 필수. 스스로 승격하고 서버 폴더로 이동한 뒤 node 실행(`reset-data.mjs`는 `.env`를 현재 폴더에서 읽음 — 예전엔 승격도 이동도 없어 잠긴 폴더의 `node.exe`를 못 읽었다) |
@@ -255,7 +262,7 @@
   지웠으니 다 지워졌겠지"라고 착각하기 쉬운 지점이라 README에도 명시해뒀다(위 "운영 서버
   업데이트"/설치 섹션 참고) — 새 문서를 쓸 때도 이 구분을 흐리지 않게 주의할 것.
 - **설치 폴더 루트의 관리 스크립트는 전부 맨 처음에 스스로 관리자 권한으로 승격한다** — `Update-Server.ps1`/
-  `Restart-Server.ps1`/`Storage-Path.ps1`/`External-Address.ps1`/`Backup-Data.ps1`/`Restore-Data.ps1`/`Reset-Data.ps1`/
+  `Restart-Server.ps1`/`Storage-Path.ps1`/`External-Address.ps1`/`Web-Domain.ps1`/`Backup-Data.ps1`/`Restore-Data.ps1`/`Reset-Data.ps1`/
   `Uninstall-Full.ps1`/`Start-ServerConsole.ps1`/`Get-PairingCode.ps1`/`Grant-ServerAdmin.ps1`(빠지는 것은 dot-source용
   `Folder-Acl.ps1`과 설치 프로그램이 관리자 권한으로 부르는 `Setup-TangoTalkServer.ps1`뿐). NSSM 서비스 정지/재시작,
   PostgreSQL 제거, 일반 제거 프로그램 실행, 잠긴 설치 폴더 안의 파일(`node.exe`·서버 코드·`.env`·비밀값) 읽기/쓰기 전부
@@ -300,6 +307,46 @@
   계정과 맞지 않아 서버(LocalSystem = 이 PC의 컴퓨터 계정으로 접속)까지 못 쓰게 될 수 있어서, NAS 쪽에서
   직접 제한하라고 안내만 한다. FAT32/exFAT 드라이브는 권한을 저장하지 못하므로 경고 후 사용자가 고르게 한다.
   같은 경로로 다시 "적용"하면 권한만 다시 맞출 수 있다(이 잠금이 생기기 전에 옮겨 둔 저장소용).
+- **웹 앱 주소(정식 인증서 — `Web-Domain.ps1`)는 메인 포트를 건드리지 않고, 인증서 발급은 서버가 한다.** 아이폰은 앱 대신 사파리 웹
+  앱(`server/web`)을 쓰는데, 사파리(경고 없는 접속·"홈 화면에 추가"·웹 푸시)는 공인 인증서가 있어야 한다. PC·안드로이드 앱은 메인
+  포트(`PORT`)의 자체 서명 인증서를 핀닝하므로(`server/src/certs.js`, `client/lib/services/pinned_tls.dart`) 그 인증서를 바꾸면 모든
+  기기를 재페어링해야 한다 — 그래서 서버가 같은 Express 앱을 별도의 웹 HTTPS 포트(`WEB_HTTPS_PORT`)로 한 번 더 열고 그 포트에만
+  Let's Encrypt 인증서를 받아 건다(`server/src/webTlsConfig.js`·`acme.js`·`acmeRenewal.js`). 이 스크립트는 `External-Address.ps1`처럼
+  `.env`를 쓰고 방화벽을 맞추고 서비스를 재시작하는 GUI일 뿐이다.
+  - Let's Encrypt의 확인은 **밖의 443(TLS-ALPN-01)과 밖의 80(HTTP-01)**으로만 온다. 통신사가 80을 막는 경우가 있어 서버는 둘 다 쓰고,
+    `ACME_HTTP_PORT=0`이면 443만 쓴다. 그래서 공유기 포워딩은 외부 443 → 웹 포트, 외부 80 → 인증용 포트다. 웹 포트가 443이 아니면(이
+    PC의 443·80을 IIS/HTTP.sys가 쓰는 경우) 서버가 알려 주는 주소(`webAddress.js` — `https://도메인:포트`)에 그 번호가 붙으므로
+    외부의 같은 번호도 그 포트로 연다.
+  - **iptime.org는 공개 접미사 목록(PSL)에 없다** — Let's Encrypt의 "등록 도메인당 7일에 새 인증서 50개" 한도를 모든 iptime DDNS
+    사용자가 함께 써서 첫 발급이 `rateLimited`로 실패할 수 있다(같은 이름의 갱신은 예외). 서버는 실패하면 간격을 두고(1시간부터 최대
+    하루, 한도면 `Retry-After`까지) 다시 시도하고 그 일정을 `certs\acme-state.json`에 남겨 **재시작해도 그 전에는 다시 묻지 않는다**
+    (도메인이나 시험 발급 설정이 바뀔 때만 새로 시작). 그래서 도구·안내문은 "기다리거나, 회사 도메인의 하위 이름을 CNAME으로 DDNS
+    이름에 연결해 그 이름을 쓰라"고 하고, 같은 값으로 다시 적용할 때도 재시작이 곧 재시도는 아니라고 알린다. 시험 발급
+    (`ACME_STAGING=1` — 스테이징 디렉터리)은 정식 한도를 쓰지 않고 포트포워딩만 확인하는 용도다.
+  - 입력은 서버(`webTlsConfig.js`)보다 좁게 받는다 — 도메인은 점이 있는 공개 이름만(IP·`.local` 같은 사내 전용 이름·포트·와일드카드는
+    거절, 주소창에서 복사한 `https://`·경로는 떼고, 한글은 퓨니코드로 바꿔 씀), 포트는 서버가 이미 쓰는 번호(PORT·PAIRING_PORT·
+    LiveKit 신호/미디어 TCP·PostgreSQL 55432)와 겹치면 거절 — 서버는 그런 값이면 기능을 끄거나 그 값만 빼고 진행해서 운영자가 놓치기
+    쉽다. 이 PC의 다른 프로그램이 그 포트를 쓰는지(PID 4면 HTTP.sys), 도메인이 DNS에서 공인 IP로 풀리는지는 막지 않고 경고만 한다(사내
+    DNS가 따로 있는 회사 등 오판할 수 있어서).
+  - **방화벽 규칙은 이름(`TangoTalk Server (web)`·`(web-acme)`)으로 지우고 다시 만들고, 이 서버의 `{app}\node\node.exe`로만 좁힌다** —
+    메인·페어링 규칙은 포트만 보지만 443·80은 IIS 같은 다른 프로그램도 흔히 쓰는 포트라, 나중에 이 PC에 웹 서버가 깔려도 이 규칙
+    때문에 밖에 열리지 않게. 이 함수(`Set-WebFirewallRules`)는 `Setup-TangoTalkServer.ps1`에도 똑같이 들어 있다(테스트가 같은지 본다).
+    일반 제거(`[UninstallRun]`)가 두 규칙을 지우고("서버 완전 삭제"도 마지막에 일반 제거를 돌린다), `.env`는 남으므로 같은 경로에 다시
+    설치하면 Setup 6단계가 `WEB_DOMAIN`을 보고 되살린다(꺼져 있으면 남은 규칙을 지우고, 실패해도 설치는 경고만). "끄기"는 `WEB_DOMAIN`만
+    비운다 — 포트·이메일은 남겨 다시 켤 때 쓰고(서버는 `WEB_DOMAIN`이 비면 나머지를 보지 않는다), 받아 둔 인증서는 서버 몫이라 건드리지
+    않는다.
+  - `.env`는 BOM 없는 UTF-8로 쓴다(`External-Address.ps1`과 같게 — 지금 서버의 dotenv 17은 첫 줄 앞의 BOM을 건너뛰지만, BOM을 키 이름의
+    글자로 읽는 도구도 있어서). 읽을 때는 `Get-Content`를 쓰지 않는다 — Windows PowerShell 5.1은
+    BOM이 없으면 ANSI로 읽어서, BOM 없는 UTF-8의 한글 주석을 깨진 채로 다시 쓰게 된다. BOM이 있으면 그 인코딩, 없으면 엄격한 UTF-8,
+    그것도 아니면(예전 메모장의 ANSI) 시스템 코드 페이지로 읽으므로 ANSI였던 파일은 한글이 살아 있는 UTF-8이 되고 dotenv도 한글 값을
+    바로 읽는다.
+  - [인증서 확인]은 공유기·DNS를 거치지 않고 127.0.0.1의 웹 포트에 SNI(도메인)로 붙어, 지금 걸린 인증서를 Windows가 믿는지(정식),
+    발급자에 "(STAGING)"이 있는지(시험용), 그 밖(자체 서명 등)인지 보여 준다. 밖에서 열리는지는 공유기에 달려 있어 여기서 알 수 없고,
+    실패 이유·다음 시도 시각은 서버가 관리자 콘솔에 보여 준다.
+- **문자열 안의 `$이름` 바로 뒤에 한글을 붙이지 말 것.** PowerShell은 한글도 변수 이름 글자로 읽어서 `"$name와"`를 `$name와`라는
+  (없는) 변수로 보고 빈 값을 넣는다 — `$($name)와`나 `${name}와`로 쓴다. `tests/Web-Domain.Tests.ps1`이 `Web-Domain.ps1`·
+  `Setup-TangoTalkServer.ps1`은 실패로, 다른 설치 스크립트는 "메모:"로 알린다(지금 `External-Address.ps1` 138·139줄의 포워딩 안내에서
+  `$MediaUdp와`·`$PairingPort도`가 이 때문에 빈 값으로 보인다).
 - **마이그레이션은 번들된 `drizzle-kit`으로 실행한다** (`server/node_modules/drizzle-kit/bin.cjs
   migrate`) — 그래서 빌드 스크립트는 `npm install --omit=dev`가 아니라 devDependencies까지
   포함해서 설치해야 한다(`drizzle-kit`이 `package.json`에서 devDependency이기 때문). 이 부분을
@@ -333,6 +380,8 @@
       → "실패 0"("메모:" 줄이 있으면 그 PC에서 확인하지 못한 경우가 있다는 뜻 — 관리자 권한 불필요, `%TEMP%` 안에서만 돎)
 - [ ] 개발 PC에서 같은 방법으로 `tests\Admin-Verify.Tests.ps1`(node 필요)·`tests\Service-Env.Tests.ps1` → 둘 다 "실패 0"
       (관리자 권한 불필요, 앞의 것은 `%TEMP%` 안에서만 돌고 뒤의 것은 아무것도 바꾸지 않음)
+- [ ] 개발 PC에서 같은 방법으로 `tests\Web-Domain.Tests.ps1`(node 필요) → "실패 0"(관리자 권한 불필요, `%TEMP%`와 127.0.0.1의 임시
+      포트만 씀 — "메모:" 줄은 다른 설치 스크립트에서 찾은 것)
 - [ ] 서비스 모드로 설치한 뒤(기존 서버면 새 설치 프로그램을 다시 실행한 뒤), 그리고 "서버 업데이트" 뒤에 관리자 PowerShell에서
       `& "C:\TangoTalk-Server\tools\nssm.exe" get TangoTalkServer AppEnvironmentExtra` → `NODE_ENV=production`(관리자가 따로
       넣어 둔 줄이 있었다면 그것도 그대로)이고 서버가 정상 동작. `install.log`·업데이트 창에 NODE_ENV 경고가 없음
@@ -378,8 +427,20 @@
       고치거나 지우지 못함. 그래도 시작 메뉴 "설치 후 안내"·"메신저 설명서"는 열림. "새 기기 페어링 코드 발급"은
       관리자 자격 증명을 묻고, 거절하면 "관리자 권한이 필요합니다" 창이 뜸
 - [ ] 관리자 계정(UAC 일반 권한)으로 시작 메뉴 관리 항목(새 기기 페어링 코드 발급/서버 업데이트/재시작/첨부파일 저장소/
-      외부 접속 주소/백업/복원/DB 데이터 초기화/완전 삭제)을 누르면 UAC 확인 뒤 정상 동작하고, "첨부파일 저장소"·"외부
+      외부 접속 주소/웹 앱 주소(정식 인증서)/백업/복원/DB 데이터 초기화/완전 삭제)을 누르면 UAC 확인 뒤 정상 동작하고, "첨부파일 저장소"·"외부
       접속 주소"로 `.env`를 실제로 고칠 수 있음(예전 `Administrators:(R)` 읽기 전용 잠금이 풀렸는지)
+- [ ] (웹 앱 주소) 시작 메뉴 "웹 앱 주소(정식 인증서)" → UAC 확인 뒤 창이 뜨고 "지금: 꺼짐", "외부 접속 주소"에 DDNS 도메인이 있으면
+      도메인 칸에 미리 채워져 있음. 적용 → `.env`에 `WEB_DOMAIN`·`WEB_HTTPS_PORT`·`ACME_HTTP_PORT`·`ACME_EMAIL`이 생기고(다른 줄·한글
+      주석 그대로, BOM 없음), 관리자 PowerShell에서 `netsh advfirewall firewall show rule name="TangoTalk Server (web)" verbose` → TCP 443,
+      프로그램 `{app}\node\node.exe`(`(web-acme)`는 TCP 80). 서비스가 재시작되고 안내 글에 포워딩·iptime.org 주의·아이폰 사용법이 나옴
+- [ ] (웹 앱 주소) IIS를 켜 둔 PC에서 443으로 적용 → "다른 프로그램이 쓰고 있습니다: Windows HTTP 서비스" 경고. 8443/8080으로 바꾸면
+      경고 없이 적용되고 안내에 "외부 TCP 8443 → 이 PC TCP 8443"이 더해짐. 도메인 오타(DNS에서 못 찾음)도 적용 전에 경고
+- [ ] (웹 앱 주소) 공유기 포워딩 뒤 1~2분 → [인증서 확인]이 "정식 인증서가 걸려 있습니다"(발급자 Let's Encrypt), 관리자 콘솔 상태도
+      정상. 아이폰 사파리(LTE)에서 `https://도메인`이 경고 없이 열리고 "홈 화면에 추가" 뒤 알림을 켤 수 있음. PC·안드로이드 앱은
+      재페어링 없이 그대로 접속. "시험 발급"으로 적용하면 [인증서 확인]이 "시험용(스테이징)", 끄고 다시 적용하면 정식
+- [ ] (웹 앱 주소) "끄기" → `WEB_DOMAIN=`(빈 값)이고 두 방화벽 규칙이 사라지고 서비스 재시작. 켜 둔 채 "TangoTalk 서버 제거" → 두 규칙이
+      사라짐; 같은 경로에 다시 설치 → 규칙이 되살아나고 `install.log`에 "웹 앱 주소(...) 방화벽 규칙 적용됨". 콘솔 모드 설치에서 적용하면
+      "그 창을 닫았다가 '서버 콘솔로 실행'으로 다시 여세요" 안내
 - [ ] `.env`의 `PORT`를 기본값이 아닌 값(예: 3100)으로 바꾸고 "서버 재시작" → "새 기기 페어링 코드 발급"이 UAC 확인 뒤
       코드를 띄움(바뀐 페어링 포트 3101로 요청하는지 — 예전엔 3001로 가서 실패했음)
 - [ ] 서비스가 못 뜨게 해 둔 상태(예: `.env`의 `DATABASE_URL`을 일부러 틀리게)에서 "서버 재시작" → 상태 경고 뒤

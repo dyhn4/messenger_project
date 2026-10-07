@@ -572,6 +572,22 @@ class _LoginScreenState extends State<LoginScreen> {
                               : Text(_isRegister ? '가입하기' : '로그인'),
                         ),
                         const SizedBox(height: 16),
+                        // 웹 앱을 초대 링크의 웹 주소로 열었으면(아이폰 — main.dart의 takeLaunchInviteToken) 처음 온 사람이 가입으로
+                        // 가면 된다는 걸 알린다 — 그 초대 코드로 가입해야 사내 와이파이 밖에서도 가입되고, 팀 초대면 팀에도 들어간다.
+                        if (kIsWeb &&
+                            !_isRegister &&
+                            widget.session.pendingTeamInviteToken != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text(
+                              '초대 링크로 들어왔습니다. 처음이라면 아래 회원가입으로 가입하세요.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                            ),
+                          ),
                         Center(
                           child: TextButton(
                             onPressed: _toggleMode,

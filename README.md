@@ -30,6 +30,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [DB 구조](#db-구조)
 - [FCM 푸시 알림 설정](#fcm-푸시-알림-설정)
 - [화상회의(LiveKit)](#화상회의livekit)
+- [아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)
 - [Android 릴리즈 서명](#android-릴리즈-서명)
 - [서버 배포 및 업데이트](#서버-배포-및-업데이트)
 - [서버/DB 백업 · 이전 · 초기화](#서버db-백업--이전--초기화)
@@ -45,7 +46,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 | | 역할 |
 |---|---|
-| `client/` | Flutter 앱 — Windows 데스크톱 + Android. PC는 넓은 화면에서 사이드바+채팅 분할 레이아웃, 좁은 화면(모바일)은 목록→채팅 전환 레이아웃(`client/lib/screens/home_screen.dart`의 `wideBreakpoint = 700`) |
+| `client/` | Flutter 앱 — Windows 데스크톱 + Android + 웹(아이폰처럼 설치형 앱이 없는 기기용 — 빌드 결과 `server/web`을 서버가 내려줌, [아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)). PC는 넓은 화면에서 사이드바+채팅 분할 레이아웃, 좁은 화면(모바일)은 목록→채팅 전환 레이아웃(`client/lib/screens/home_screen.dart`의 `wideBreakpoint = 700`) |
 | `server/` | Node.js(Express + Socket.io) 백엔드 — 인증(JWT), 실시간 메시지/이벤트, 파일 업로드, PostgreSQL 저장, FCM 발송 |
 
 ## 주요 기능
@@ -162,10 +163,30 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 전체 채팅방 통합 검색(`/search` — 내가 속한 방으로 결과 범위 강제, 비밀 대화는 제외). 기본은 지금 팀(`teamId`로 가입한 다른 팀 하나를 골라 찾을 수도 있음 — 멤버인지 확인)이고 `scope=all`이면 내가 속한 모든 팀(결과에 `teamId`·`teamName`). **대화방** 탭(과 전체 탭 맨 위 대화방 묶음)은 `/search/rooms`로 내가 멤버인 토픽·그룹채팅·채팅·나와의 대화의 이름을 찾습니다(가입 안 한 공개 토픽·비밀 대화 제외, 보관된 토픽 포함)
 
 **비밀 대화 (종단간 암호화 E2EE, 1:1 전용)**
-- 기기별 신원키(X25519 교환용 + Ed25519 서명용) 생성/등록, 개인키는 기기 밖으로 나가지 않음(`flutter_secure_storage`)
-- 요청 → 수락/거절 다이얼로그(오프라인이었어도 다시 로그인 시 놓친 초대 복구), 임시 공개키 서명 검증(중간자 공격 방지)
+- 기기별 신원키(X25519 교환용 + Ed25519 서명용) 생성/등록, 개인키는 기기 밖으로 나가지 않음(`flutter_secure_storage`). 기기 id와 키는
+  늘 함께 만들고 함께 버림(키가 사라졌으면 새 기기 id — `client/lib/services/device_identity.dart`) — 같은 기기 id의 키가 바뀌는 정상적인 경우가 없게
+- 요청 → 수락/거절 다이얼로그(오프라인이었어도 다시 로그인 시 놓친 초대 복구), 상대 임시 공개키의 서명을 **이 기기에 고정해 둔 상대 기기 키**로 검증
 - 서버는 암호문·공개키·서명만 보관 — 평문/공유비밀/체인키는 절대 서버에 오지 않음
-- 재키잉(rekey) 제안/수신
+- 재키잉(rekey) 제안/수신 — 방마다 묶인 상대 기기(`secret/<방>/peer`)를 이 기기에 저장해 두어 앱을 다시 켠 뒤에도 이어짐(예전에는 메모리에만
+  있어 재시작 뒤 온 재키잉을 무시함)
+- **상대 기기 키 고정**(앱 — `client/lib/services/secret_session_manager.dart`·`secret_peer_store.dart`) — 예전에는 상대 기기의 서명 키를
+  핸드셰이크마다 서버에 물어 그대로 믿어서, 서버(해킹됐거나 악의적인)가 자기 키·임시키를 끼워 넣으면 양쪽이 서로가 아니라 서버와 키를 맺어 서버가
+  모든 비밀 글을 읽을 수 있었습니다. 이제 서버에는 **처음 보는 기기일 때만** 묻고(`GET /api/devices/:deviceId/public-key` — 돌려준 `userId`가
+  그 대화의 상대인지 확인) 서명이 맞으면 그 키를 이 기기에 고정합니다(`secretpin/<기기 id>`, 대화를 끝내도 남음 — 처음 본 키를 믿는 TOFU). 그
+  뒤로는 그 기기에 대해 서버에 묻지 않습니다. 핸드셰이크 서명이 그 기기 키로 맞지 않거나, 서버가 같은 기기를 다른 키·주인으로 알려 오거나,
+  초대·수락·재키잉이 그 방의 상대가 아닌 사람·기기를 가리키면 체인키를 만들지 않고 그 대화를 **멈춥니다** — 방 위 빨간 안내와 토스트, 보내면
+  `전송 실패: 보안 확인에 실패해 멈춘 비밀 대화입니다…`, 새로 온 글은 풀지 않음(이미 푼 글은 보임). 멈춤은 서버가 보내는 값으로 풀리지 않아
+  끝내고 새로 시작해야 합니다. 재키잉 서명만 틀리면 멈추지 않고 무시합니다(상대의 남은 다른 기기가 보낸 것일 수 있음). 서명 형식과 서버 쪽 처리는
+  [보안 및 암호화](#보안-및-암호화)
+- **보안 코드 확인**(더보기 메뉴 — `client/lib/widgets/secret_safety_number_dialog.dart`) — 처음 만난 기기를 서버가 처음부터 속이는 것은 서명으로
+  알 수 없어서, 두 기기로 만든 60자리 숫자(5자리 12묶음, 4묶음씩 3줄 — 양쪽 화면에 같은 값)를 만나서·전화로 비교하게 합니다. 같으면 "확인함"으로
+  표시(그 상대 기기 단위로 이 기기에만 — 메뉴에 초록 방패와 `확인함`), 다르면 "코드가 다릅니다" → 그 기기의 고정을 지우고 그 키로 맺은 대화를
+  모두 멈춥니다. 고정한 키 때문에 멈춘 방의 안내에는 "상대 기기 키 다시 받기"(상대가 앱을 다시 설치해 같은 기기 id의 키가 바뀐 경우 등 — 상대에게
+  직접 확인한 뒤에만, 다음 새 대화는 서버가 알려 주는 키를 다시 처음 믿음)가 있습니다. 보안 코드를 확인해 둔 사람이 확인하지 않은 다른 기기로
+  대화를 맺으면 초대 창·방 안내(노랑)·토스트로 "상대의 기기가 바뀌었습니다"를 알립니다(방 안내 — `widgets/secret_security_banner.dart`)
+- **예전 앱·예전 대화** — 예전 앱도 그대로 대화할 수 있지만 예전 앱 쪽은 상대 기기 키를 고정하지 않고 보안 코드도 없습니다(새 앱은 상대가 맥락
+  서명을 보내지 않으면 회색 "예전 버전" 안내로 업데이트를 권함). 이 업데이트 전에 시작한 대화는 방 정보의 양쪽 기기 id(`secretInitiatorDeviceId`
+  등)로 상대 기기에 묶고 그 키를 처음 믿어 고정합니다(확인할 서명이 없어 보안 코드로 확인)
 - 메시지별 자동 삭제 타이머(1초~1주, 상대가 읽은 시점부터 카운트). 만료되면 메시지와 함께 그 첨부 파일(원본·미리보기·여러 장
   묶음, 거기 달린 댓글의 파일)도 서버 디스크에서 지웁니다 — 단 그 파일을 실은 사람이 직접 올렸고 다른 곳(전달된 메시지·공지·앨범 등)에서
   쓰지 않는 파일만이고, 이 기능이 생기기 전에 올린 파일은 누가 올렸는지 기록이 없어 남깁니다
@@ -248,6 +269,9 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 페어링 코드(4자리, 5분 유효, 1회용)로 앱 재빌드 없이 새 인증서 발급/서버 이전
 - **사내망 밖(LTE/5G) 접속** — 서버에 외부 주소(DDNS·공인 IP)를 설정하면 앱이 사내 주소 ↔ 외부 주소를 자동 전환하고,
   밖에서도 재페어링·화상회의가 됩니다([환경 변수 설정](#환경-변수-설정)의 "외부(LTE/5G)에서 접속하기")
+- **아이폰용 웹 앱 주소(정식 인증서)** — 도메인(예: 공유기 DDNS `xxx.iptime.org`)을 정하면 서버가 같은 앱을 웹 전용 HTTPS
+  포트(기본 443)에서 한 번 더 열고, 그 포트의 Let's Encrypt 인증서를 스스로 받고 갱신합니다 — 아이폰은 Safari로 웹 앱을 열어 홈
+  화면에 추가하고 알림(웹 푸시)까지 받습니다. PC·안드로이드 앱의 핀닝은 그대로입니다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서))
 - **초대 링크**(설치→가입, 서버 운영자·계정 관리자·팀 소유자가 발급, 링크마다 가입 인원 지정) — [초대 링크](#초대-링크설치가입) 참고
 - **팀 초대 링크**(설치+가입+팀 자동 합류+등급 자동 부여, 서버 설정이 정한 등급 이상만 발급, 링크마다 가입 인원 지정) —
   [팀 초대 링크](#팀-초대-링크자동-합류등급-부여) 참고
@@ -505,6 +529,16 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
    소유자·관리자에게 팀 참가를 요청합니다. 인원이 다 찬 링크의 안내 페이지는 맨 위에 "가입 인원 마감"을 알리고 이
    단계를 회원가입 대신 로그인으로 안내합니다.
 
+**아이폰 사용자**: 아이폰·아이패드에는 설치형 앱이 없어서 안내 페이지가 `tangotalk://`를 열어 보지 않습니다(Safari가 "주소가
+유효하지 않음" 경고를 띄우지 않게). 서버에 웹 앱 정식 주소가 있으면(공인 인증서가 실제로 걸려 있을 때만 —
+[아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)) 다운로드 버튼 아래에 아이폰 안내 상자가 붙습니다 — 웹 앱
+주소, Safari 공유 → "홈 화면에 추가" 안내입니다(`pairing.js`의 `iphoneWebSection`). 자리가 남은 링크면 웹 앱 주소에 **이 링크의
+초대 코드를 붙여**(`https://도메인/?invite=<코드>`) 알려 줍니다 — 그 주소로 연 웹 앱이 코드를 꺼내 가입할 때 보내므로
+(`web_launch_invite.dart` → `session.dart`의 `rememberInviteCode`, 꺼낸 뒤 주소창에서는 지움) **사내 와이파이 밖에서도 가입되고 팀
+초대면 팀 자동 합류·등급도 앱과 똑같이** 받습니다. 그 주소로 연 로그인 화면에는 "초대 링크로 들어왔습니다. 처음이라면 아래
+회원가입으로 가입하세요."가 뜹니다. 인원이 다 찬 링크는 코드 없이 로그인 주소로만 안내합니다. 앱의 링크 복사 글에도 같은 내용의
+두 줄이 맨 끝에 붙습니다(`invite_share.dart` — 앱이 `/server-info`의 `webUrl`을 받았을 때만, 웹 앱 주소에 그 링크의 코드를 붙여).
+
 **딥링크 등록**(`tangotalk://` 커스텀 스킴 — 고정 도메인이 없는 LAN 자체 호스팅 구조라 도메인
 소유 검증이 필요한 HTTPS App Links 대신 이 방식을 씁니다):
 - **Android**: `AndroidManifest.xml`의 `MainActivity`에 `tangotalk` 스킴 `intent-filter`를 선언.
@@ -560,7 +594,9 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 인원이 남은 유효한 초대 링크(설치 초대·팀 초대)의 코드가 있어야만 가입됩니다**(코드가 있어도 쓸 수 없으면 "초대
 링크가 만료·취소되었거나 정해진 인원이 모두 가입해 더는 쓸 수 없습니다…") — 앱은 초대 링크로 열렸거나 "서버
 주소 변경"에 초대 코드를 넣어 페어링했을 때 그 코드를 가입 요청에 같이 보냅니다
-(`session.dart`의 `rememberInviteCode`).
+(`session.dart`의 `rememberInviteCode`). 아이폰의 웹 앱은 초대 안내 페이지(또는 링크 복사 글)의 웹 앱 주소
+`https://도메인/?invite=<코드>`로 열었을 때 그 코드를 같이 보내므로, 밖에서도 가입되고 팀 자동 합류·등급도 받습니다(코드 없이 연
+웹 앱으로 가입하면 팀에 자동으로 들어가지 않고, 밖에서는 가입도 안 됩니다).
 
 ## 서버 운영자와 관리자 콘솔
 
@@ -602,6 +638,12 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 팀 생성 권한 | 정회원(기본) / 관리자 / 서버 운영자 | 팀을 새로 만들 수 있는 최소 계정 등급. 준회원은 어느 값이든 불가하고, 서버 운영자는 설정과 무관하게 항상 가능합니다. |
 | 팀 초대 링크 생성 권한 | 정회원 / 관리자(기본) / 서버 운영자 | [팀 초대 링크](#팀-초대-링크자동-합류등급-부여)를 만들 수 있는 최소 계정 등급. 팀 합류+등급 부여를 함께 하는 기능이라 팀 생성 권한보다 기본값이 더 보수적입니다. |
 | 팀·직책 관리 | 팀 단위(기본) / 계정 단위 | [부서 / 직책](#부서--직책) 참고. 계정 단위면 바로 아래 "직책 목록"도 여기서 관리합니다. |
+
+**웹 앱 주소(정식 인증서) 카드** — 아이폰용 웹 앱 포트의 Let's Encrypt 인증서 상태를 보여 줍니다(보기만 함 — 발급·갱신은 서버가
+알아서 하고, 켜고 끄는 것은 서버 PC의 시작 메뉴 "웹 앱 주소(정식 인증서)"나 `.env`). 꺼짐(켜는 방법) · 발급 중 · 사용 중(도메인,
+만료일, 아이폰 사용자에게 알려 줄 주소) · 곧 만료(갱신 시도 중) · 발급 실패(이유와 다음 시도 시각)와 시험용 인증서 표시, 확인
+방식별 준비 여부를 쉬운 말로 보여 주고, 카드 오른쪽 위 새로고침 단추(다시 확인)로 다시 불러옵니다. 이 기능이 없는 예전 서버면
+카드가 보이지 않습니다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)의 "관리자 콘솔 상태").
 
 ### 회원 관리
 
@@ -775,6 +817,8 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 평문 HTTP(PORT+1) 포트는 브라우저에서도 인증서 경고 없이 열리므로, 새 기기 페어링뿐 아니라
   [초대 링크](#초대-링크설치가입)의 안내 페이지·설치 파일 다운로드도 여기서 함께 서빙합니다.
 - 첨부파일은 고정 공개 URL이 아니라 짧게 만료되는 서명 링크(`/files/<token>`)로만 내려갑니다.
+- `.env`에 `WEB_DOMAIN`을 넣으면 같은 Express 앱이 `WEB_HTTPS_PORT`(기본 443)에서 Let's Encrypt 공인 인증서로 한 번 더 열립니다 —
+  브라우저(아이폰 Safari의 웹 앱)용이고 앱의 핀닝과는 별개입니다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)).
 - FCM은 Android 클라이언트 → Firebase → 서버(발송) → 다시 FCM → Android 기기 순으로만 쓰이고,
   Windows 클라이언트는 관여하지 않습니다.
 
@@ -791,7 +835,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 인증 | jsonwebtoken, bcryptjs |
 | 파일 업로드 | multer |
 | 푸시 | firebase-admin ^14 (FCM 발송) |
-| TLS | selfsigned(자체 서명 인증서 생성) + Node 내장 `https` |
+| TLS | selfsigned(자체 서명 인증서 생성) + Node 내장 `https`, acme-client ^5.4(웹 앱 전용 포트의 Let's Encrypt 인증서 — `WEB_DOMAIN`을 켰을 때만 읽음) |
 | 기타 | dotenv, cors |
 | 운영 | pm2(선택, 개발 PC/수동 운영) 또는 nssm(설치 프로그램이 등록하는 Windows 서비스) |
 | 설치 프로그램 | Inno Setup(`server/installer/messenger-server.iss`), PostgreSQL 공식 설치 프로그램(무인 모드로 같이 실행) |
@@ -800,7 +844,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 | 분류 | 사용 라이브러리 |
 |---|---|
-| 프레임워크 | Flutter (Dart SDK `^3.12.2`, Windows + Android 타깃) |
+| 프레임워크 | Flutter (Dart SDK `^3.12.2`, Windows + Android + 웹(아이폰 등) 타깃) |
 | 실시간 통신 | socket_io_client, web_socket(웹소켓 커넥터 커스터마이징용) |
 | HTTP | http |
 | 로컬 저장 | shared_preferences(+ android 전용 백엔드), flutter_secure_storage(E2EE 키) |
@@ -850,6 +894,7 @@ messenger_project/
 │  │  ├─ notifications.js         알림 기록(멘션·보드 알림)·읽음·알림 설정 API, createNotifications(유일한 생성 지점)
 │  │  ├─ notificationRules.js     멘션 정리·푸시 대상·보드 수신자 순수 규칙(단위 테스트 대상)
 │  │  ├─ secretChats.js / secretExpiry.js  비밀 대화 성립/자동 삭제
+│  │  ├─ secretContextRules.js    비밀 대화 맥락 서명 모양 검사·이벤트 payload·방 DTO 칸(서명은 검증하지 않음 — 단위 테스트 대상)
 │  │  ├─ devices.js               E2EE 기기 신원 등록/조회/폐기
 │  │  ├─ search.js                통합 검색
 │  │  ├─ albums.js / albumRules.js  앨범(만들기·항목 추가/삭제·공유, 입력 검사·권한은 albumRules.js 순수 규칙 — 단위 테스트 대상)
@@ -863,6 +908,10 @@ messenger_project/
 │  │  ├─ pairing.js               새 기기 인증서 페어링 부트스트랩 서버(평문 HTTP) + 초대 링크/
 │  │  │                            팀 초대 링크 안내 페이지/설치 파일 다운로드(자체 서명 인증서 경고 없음)
 │  │  ├─ certs.js                 자체 서명 TLS 인증서 생성/재사용
+│  │  ├─ webTls.js / webTlsConfig.js  웹 앱 전용 HTTPS 포트(WEB_DOMAIN) — 같은 앱을 Let's Encrypt 인증서로 한 번 더 엶, HTTP-01 포트, 상태
+│  │  ├─ acme.js / acmeRenewal.js  Let's Encrypt 발급(acme-client)과 갱신 일정(백오프·발급 한도·재시작 보호)
+│  │  ├─ clientHello.js           웹 포트에서 TLS-ALPN-01 확인 접속을 가려내는 ClientHello(SNI·ALPN) 파서
+│  │  ├─ webAddress.js            지금 알려 줄 수 있는 웹 앱 정식 주소(초대 안내 페이지·/server-info가 읽음)
 │  │  ├─ crypto.js                DB 저장용 필드 암호화(AES-256-GCM) + 조회용 해시
 │  │  ├─ retention.js             탈퇴 계정 메시지 1년 보존 후 파기 잡
 │  │  ├─ config.js                환경변수/자동 생성 비밀값 로딩
@@ -886,13 +935,15 @@ messenger_project/
 │  │  ├─ Restart-Server.ps1       "서버 재시작" — 코드/DB는 그대로 두고 TangoTalkServer 서비스만 다시 시작
 │  │  ├─ Storage-Path.ps1         "첨부파일 저장소" — 저장 위치 확인/변경(NAS·다른 PC 공유 폴더도 가능, 기존 파일 이동 여부 확인 후 서비스 재시작)
 │  │  ├─ External-Address.ps1     "외부 접속 주소" — LTE/5G 접속용 DDNS·공인 IP 확인/변경(인증서가 바뀌면 재페어링 경고 후 서비스 재시작, 포워딩할 포트 안내)
+│  │  ├─ Web-Domain.ps1           "웹 앱 주소(정식 인증서)" — 아이폰 웹 앱용 도메인·포트 설정/끄기, 방화벽 규칙, 인증서 확인, 서비스 재시작
 │  │  ├─ Uninstall-Full.ps1       "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — 일반 제거까지 자동 실행(서버 운영자 인증 + DELETE 입력 필요)
 │  │  ├─ build-readme-html.mjs    빌드 시 저장소 루트 README.md → README.html 변환기(자체 구현, 새 의존성 없음)
 │  │  ├─ README.md                이 installer 폴더 자체 문서(개발자용 — 설치된 서버의 "메신저 설명서"는 루트 README.md를 보여줌)
 │  │  └─ bin/ · stage/ · output/ · README.html  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
 │  ├─ guide/                     초보자용 도움말 웹페이지(앱 삼선 메뉴 "도움말" — 서버가 인증 없이 /guide/로 서빙)
+│  ├─ web/                       웹 앱 빌드 결과물(gitignore — publish_release.ps1이 client/build/web을 복사, config.js의 WEB_DIR)
 │  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
-│  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성)
+│  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성) + WEB_DOMAIN을 켜면 웹 앱 정식 인증서·Let's Encrypt 계정 키
 │  ├─ uploads/                   업로드된 첨부파일(gitignore)
 │  ├─ releases/                  배포용 빌드 산출물 + version.json(gitignore)
 │  ├─ ecosystem.config.cjs       pm2 설정
@@ -1065,6 +1116,11 @@ notepad .env
 | `PORT` | 선택 | 서버 HTTPS 포트. 기본 `3000`. |
 | `PAIRING_PORT` | 선택 | 새 기기 페어링용 평문 HTTP 부트스트랩 포트. 기본 `PORT+1`. |
 | `EXTERNAL_ADDRESS` | 선택 | 사내망 밖(LTE/5G)에서 접속할 주소 — DDNS 도메인(`xxx.iptime.org`) 또는 고정 공인 IP. 공유기 포트가 `PORT`와 다르면 `주소:포트`. 비우면 사내망 전용. 아래 "외부(LTE/5G)에서 접속하기" 참고. |
+| `WEB_DOMAIN` | 선택 | 아이폰용 웹 앱 주소의 **도메인 이름만**(예: `xxx.iptime.org` — `https://`·포트·경로 없이. IP 주소·와일드카드·점 없는 이름은 안 되고 한글 도메인은 퓨니코드로 바꿈). 넣으면 서버가 같은 앱을 `WEB_HTTPS_PORT`에서 한 번 더 열고 그 도메인의 Let's Encrypt 인증서를 스스로 받고 갱신합니다. 비우면 이 기능 전체가 꺼지고 지금과 똑같이 동작합니다. 도메인 형식이나 `WEB_HTTPS_PORT` 값이 틀리거나 웹 포트가 `PORT`·`PAIRING_PORT`와 겹치면 이 기능만 끄고 콘솔에 `[config]` 오류를 남깁니다(서버는 그대로 뜸). 값을 넣으면 Let's Encrypt 가입자 약관에 동의한 것으로 보고 계정을 만듭니다. [아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서) 참고 |
+| `WEB_HTTPS_PORT` | 선택 | 웹 앱 전용 HTTPS 포트. 기본 `443`. 443이 아니면 웹 앱 주소가 `https://도메인:포트`가 되고, TLS-ALPN-01 확인에는 공유기에서 외부 443 → 이 포트 포워딩이 따로 필요합니다(HTTP-01로 받으면 없어도 됨). |
+| `ACME_HTTP_PORT` | 선택 | 인증서 확인(HTTP-01)용 평문 HTTP 포트. 기본 `80`(공유기에서 외부 80 → 이 포트). 확인 요청이 아닌 `http://` 요청은 `https://WEB_DOMAIN`으로 보냅니다. `0`이면 열지 않고 TLS-ALPN-01(외부 443)로만 확인합니다. 값이 틀리거나 다른 포트와 겹치면 경고하고 `0`으로 봅니다. |
+| `ACME_EMAIL` | 선택 | Let's Encrypt 계정 연락처 이메일. 비워도 됩니다(형식이 틀리면 경고하고 빼고, Let's Encrypt가 받지 않으면 이메일 없이 다시 시도). |
+| `ACME_STAGING` | 선택 | `1`이면 Let's Encrypt 시험용(staging) 인증서를 받습니다 — 브라우저가 믿지 않지만 정식 발급 한도를 쓰지 않고 포트포워딩을 확인할 수 있습니다. 확인되면 지우고(또는 `0`) 서버를 다시 시작합니다. |
 | `UPLOADS_DIR` | 선택 | 첨부파일 저장 위치. 기본은 `server/uploads/`. UNC 경로나 매핑된 네트워크 드라이브도 가능(예: `\\192.168.0.10\share\messenger_uploads`, `Z:\messenger_uploads`) — 항상 접근 가능해야 업로드/다운로드가 됩니다. |
 | `TODO_FOLDER_HOSTS` | 선택 | 할 일의 폴더 경로(파일 다운로드·업로드)에 더 허용할 사내 서버 이름, 쉼표로 구분(예: `nas.corp.local,corp.example.com`). 점이 든 이름(AD/DFS 도메인)이나 한글 이름의 사내 NAS를 쓸 때만 넣습니다 — 정식 표기의 사설 IP(`\\192.168.0.5\…`)와 점 없는 영문·숫자 컴퓨터 이름(`\\NAS\…`)은 없어도 됩니다. IP 주소는 이 목록과 상관없이 사내망 대역만 받으므로 공인 IP나 `@`가 든 이름은 넣어도 무시합니다(서버가 켜질 때 콘솔에 경고). 바꾼 뒤에는 서버를 다시 시작합니다([주요 기능](#주요-기능)의 "할 일") |
 | `NODE_ENV` | 선택 | `production`이면 Express 기본 오류 처리기까지 간 오류의 응답에 스택 추적(서버 파일 경로) 대신 짧은 상태 문구만 보냅니다(자세한 내용은 그대로 로그에). 설치형 서버(서비스·"서버 콘솔로 실행" — 기존 설치는 새 설치 프로그램을 한 번 다시 실행한 뒤부터)와 pm2(`ecosystem.config.cjs`)는 이미 `production`으로 돌고, 개발용 `npm start`는 그대로입니다 |
@@ -1076,7 +1132,7 @@ DB에 암호화 저장된 이메일을 읽을 수 없게 됩니다.
 **서버 IP/도메인은 환경 변수가 아니라 클라이언트 쪽에서 관리합니다** — 서버는 자기 자신의 LAN IP를
 자동으로 찾아 콘솔에 출력할 뿐, 특정 도메인/`API_BASE_URL`을 설정 파일에 못박아두지 않습니다.
 클라이언트가 로그인 화면의 "서버 주소 변경"에서 주소(IP 또는 도메인 모두 가능)를 직접 입력해
-`shared_preferences`에 저장하고, 이후 모든 요청이 그 주소를 씁니다.
+`shared_preferences`에 저장하고, 이후 모든 요청이 그 주소를 씁니다(웹 앱은 예외 — 페이지를 내려준 주소가 곧 서버 주소입니다).
 
 **외부(LTE/5G)에서 접속하기** — 공유기에 포트포워딩 + DDNS(또는 고정 공인 IP)를 해두고 `.env`의
 `EXTERNAL_ADDRESS`에 그 주소를 넣습니다(설치형 서버는 시작 메뉴 "외부 접속 주소"). 그러면:
@@ -1094,7 +1150,9 @@ DB에 암호화 저장된 이메일을 읽을 수 없게 됩니다.
   `createPairHandler`), 앱은 "서버 주소 변경"에 외부 주소와 페어링 코드(또는 초대 토큰)를 넣으면
   그 포트로 인증서를 받습니다. 아직 인증서를 모르는 상태라 인증서 검증 없이 연결하되, 받은
   인증서가 그 TLS 연결에 실제로 쓰인 인증서와 같은지 대조합니다(`pinned_tls.dart`의
-  `_pairOverHttps`). 예전 서버(이 경로 없음)면 평문 페어링 포트로 넘어갑니다.
+  `_pairOverHttps`). 예전 서버(이 경로 없음)면 평문 페어링 포트로 넘어갑니다. 서버 주소가 도메인 이름이고 그 이름으로 웹 앱
+  주소를 켜 둔 서버라면 그보다 먼저 그 이름의 443에서 공인 인증서로 검증하며 받습니다 —
+  [아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)의 "도메인 주소로 하는 첫 페어링".
 - **화상회의도 밖에서 됩니다.** 신호(LiveKit WebSocket)는 메인 HTTPS 포트의 `/livekit/`으로 받아
   같은 PC의 LiveKit으로 넘기고(`livekitProxy.js` — 앱이 핀닝한 인증서로 암호화, 7880은 안 엶),
   미디어는 서버가 `livekit.yaml`의 rtc에 공인 IP(`node_ip`)와 `advertise_internal_ip: true`를
@@ -1103,6 +1161,7 @@ DB에 암호화 저장된 이메일을 읽을 수 없게 됩니다.
   재시작하고, 개발 환경은 콘솔에 재시작하라고 알립니다.
 - 공유기에서 이 PC로 열 포트: **TCP `PORT`**(메신저·재페어링·화상회의 신호), 화상회의 미디어용
   **UDP 50000-60000과 TCP 7881**(`livekit.yaml`의 `port_range_*`/`tcp_port`, 같은 번호로).
+  아이폰용 웹 앱 주소를 켰다면 외부 TCP 443·80도 이 PC로 보냅니다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)).
   초대 링크 안내 페이지를 밖에서도 열려면 **TCP `PAIRING_PORT`**(기본 3001)도 같은 번호로 엽니다 —
   평문 HTTP라 사내망 밖에서 온 요청에는 안내 페이지(`/invite/*`, `/team-invite/*`)·설치 파일
   다운로드·도움말(`/guide/`)만 열어주고, 인증서를 내려주는 `/pair`는 막습니다(`pairing.js`). 밖에서의
@@ -1195,6 +1254,8 @@ npm run dev         # 개발용 — 파일 변경 시 자동 재시작(node --wa
 - 첨부파일 저장 위치/용량 제한은 [환경 변수 설정](#환경-변수-설정)과 아래 [보안 및 암호화](#보안-및-암호화)를 참고하세요. 파일 업로드 용량 제한은 **1GB**입니다(`server/src/upload.js`의 `limits.fileSize`).
 - 새 기기를 페어링하려면(인증서 발급) 서버 콘솔에 `pair`를 입력하고 Enter — 4자리 코드(5분간
   유효, 1회용)가 나오면 클라이언트의 "서버 주소 변경" 화면에 같이 입력합니다.
+- `.env`에 `WEB_DOMAIN`을 넣었으면 `[web-tls] 웹 앱 전용 주소: https://…`와 공유기에서 포워딩할 포트, 인증서 발급·갱신 결과가
+  이어서 찍힙니다 — [아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서).
 
 ### pm2로 서버 운영하기
 
@@ -1270,7 +1331,10 @@ Node.js 프로세스만 내렸다 올리는 것이라 Postgres 자체에는 손�
 > 함께 `publish_release.ps1`로 새 앱을 배포하고 웹 앱도 다시 빌드하세요([클라이언트 버전 배포](#클라이언트-버전-배포)).
 > 그 밖에 새 앱이 있어야 되는 것: **메시지 공유**(예전 앱은 `메시지 공유는 앱을 최신 버전으로 업데이트한 뒤 다시 해 주세요.`로 거절되고,
 > 전달은 "…에서 전달한 메시지입니다" 없이 감), **링크 미리보기 그림**(예전 앱은 그림 없이 보임), **비밀 대화의 기기 저장 글 정리**, **할 일
-> 공유 폴더를 열기 전 확인**. 그 밖의 기능은 예전 앱도 그대로 됩니다.
+> 공유 폴더를 열기 전 확인**, **비밀 대화의 상대 기기 키 고정·보안 코드**(예전 앱도 비밀 대화는 되지만 상대 기기 키를 고정하지 않음 — 새 앱은
+> 상대가 예전 앱이면 회색 "예전 버전" 안내). 그 밖의 기능은 예전 앱도 그대로 됩니다. 비밀 대화의 이 보호는 서버도 새 버전이어야 온전합니다 —
+> 서버가 예전이면 맥락 서명과 방 정보의 기기 id가 오가지 않아 새 앱끼리도 "예전 버전" 안내가 뜨고, 업데이트 전에 시작한 대화는 앱을 다시 켠 뒤
+> 재키잉이 이어지지 않습니다(예전과 같음).
 
 ## PC 앱 실행 방법
 
@@ -1356,6 +1420,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/api/admin/stats` | 회원·팀·방·메시지 수, 첨부 용량, 서버 시작 시각, 팀 생성 권한, 팀 초대 링크 생성 권한 |
+| GET | `/api/admin/web-certificate` | 아이폰용 웹 앱 포트의 정식 인증서 상태(보기만 함 — 발급·갱신은 서버가 알아서) `{ enabled, domain, status, staging, expiresAt, lastAttemptAt, lastError, nextAttemptAt, challenges: { http01, tlsAlpn01 }, webUrl, ports, hsts, attempting, certificateStaging, httpPortError }`. `status`는 `off`·`pending`·`valid`·`expiring`·`error`, 시각은 epoch ms, `lastError`는 한국어. `challenges`는 이 PC에서 그 확인 방식의 포트를 열었는지(공유기 포워딩까지 본 것은 아님). 웹 포트를 못 열었으면 `error`와 그 이유 |
 | PATCH | `/api/admin/settings` | 서버 설정 변경(`teamCreation`\|`teamInviteLinkCreation`: `member`\|`admin`\|`serverAdmin`, `orgScope`: `team`\|`account`) |
 | GET | `/api/admin/users` | 전체 회원(탈퇴 포함) + 상태 + 소속 팀 |
 | POST | `/api/admin/users/:id/role` | 계정 등급 변경(`role`: `guest`\|`member`\|`admin`) |
@@ -1486,15 +1551,20 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 |---|---|---|
 | POST | `/api/devices` | 기기 신원(공개키) 등록 — `deviceId`는 영문·숫자와 `. _ : -`로 128자까지, 공개키는 base64 128자까지(어기면 400), 기기 이름은 제어·글자 방향 문자를 빼고 100자로 자름(거절하지 않음). 아래 `:deviceId` 경로들도 모양이 틀리면 DB를 보지 않고 404 |
 | GET | `/api/devices` | 내 기기 목록 |
-| GET | `/api/devices/:deviceId/public-key` | 상대 기기 공개키 조회(핸드셰이크용) |
+| GET | `/api/devices/:deviceId/public-key` | 상대 기기 공개키 조회(핸드셰이크용) → `{ userId, identityPublicKey, signingPublicKey }`(폐기된 기기는 404). 앱은 처음 보는 기기일 때만 묻고, `userId`가 그 대화의 상대인지 확인한 뒤 서명 키를 이 기기에 고정한다(그 뒤로는 묻지 않음 — [주요 기능](#주요-기능)의 "상대 기기 키 고정") |
 | PATCH | `/api/devices/:deviceId/fcm-token` | FCM 토큰 등록/해제. 한 사람당 최근에 쓴 기기 10대의 토큰만 남김(토큰은 공백 없는 ASCII 4096자까지 — `null`·빈 값은 해제) |
 | PATCH | `/api/devices/:deviceId/web-push` | 웹 앱의 웹 푸시 구독 등록/해제(`subscription` — `endpoint`·`keys`(`p256dh`, `auth`), `null`이면 지움). 허용된 브라우저 푸시 서비스 주소가 아니면 400(`server/src/webPushEndpoint.js`), 한 사람당 최근에 쓴 기기 10대의 구독만 남김 |
 | DELETE | `/api/devices/:deviceId` | 기기 폐기 |
-| POST | `/api/secret-chats` | 비밀 대화 요청. 방은 팀 하나에 걸려야 해서(`rooms.team_id` NOT NULL) `teamId`(요청자가 속한 팀)가 필수이지만, 상대가 그 팀 소속일 필요는 없다 — 평문 DM과 달리 팀 소속과 무관하게 아무 회원과나 시작할 수 있는 개인 채널 |
-| GET | `/api/secret-chats/:roomId/invite` | 놓친 초대 다시 조회 |
-| POST | `/api/secret-chats/:roomId/accept` | 수락 |
+| POST | `/api/secret-chats` | 비밀 대화 요청 `{ targetUserId, teamId, deviceId(내 기기), initiatorEphemeralPublicKey, initiatorEphemeralSignature, initiatorContextSignature? }`. 방은 팀 하나에 걸려야 해서(`rooms.team_id` NOT NULL) `teamId`(요청자가 속한 팀)가 필수이지만, 상대가 그 팀 소속일 필요는 없다 — 나와 팀을 하나라도 같이 쓰면 된다(아니면 403 `같은 팀에 있는 사람과만 비밀 대화를 할 수 있습니다.`). 그 상대와 대기 중이거나 진행 중인 비밀 대화가 있으면 그 방을 200으로 돌려주고(이번 임시키는 저장하지 않음), 새로 만들면 201. `initiatorContextSignature`는 맥락 서명(v2 — [보안 및 암호화](#보안-및-암호화), 예전 앱은 안 보냄)으로, 서버는 검증하지 않고 모양만 본다 — 있는데 64바이트 서명의 base64가 아니면 400 `맥락 서명(initiatorContextSignature)이 올바르지 않습니다.` |
+| GET | `/api/secret-chats/:roomId/invite` | 놓친 초대 다시 조회 — 소켓 `secret:invite`와 같은 모양 `{ roomId, initiatorUserId, initiatorDeviceId, initiatorEphemeralPublicKey, initiatorEphemeralSignature, initiatorContextSignature }`(예전 앱이 건 초대면 `initiatorContextSignature: null`). 초대받은 사람만(403), 대기 중인 초대가 없으면 404 |
+| POST | `/api/secret-chats/:roomId/accept` | 수락 `{ deviceId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature? }` — 맥락 서명 모양 규칙은 요청과 같다(400 `맥락 서명(responderContextSignature)이 올바르지 않습니다.`). 초대받은 사람이 대기 중인 초대를 수락할 때만 되고(아니면 409 — 앱은 이 기기에 적어 둔 키를 되돌림), 방에 `secret:accepted` |
 | POST | `/api/secret-chats/:roomId/reject` | 거절 |
 | PATCH | `/api/secret-chats/:roomId/settings` | 자동 삭제 타이머 설정 |
+
+비밀 대화방의 방 DTO(방 목록·방 조회·`room:created`·`POST /api/secret-chats` 응답 등)에는 상태·키 세대·자동 삭제 타이머·초대한
+사람(`secretStatus`·`secretKeyEpoch`·`secretSelfDestructSeconds`·`secretInitiatorUserId`)과 함께 양쪽 사용자·기기
+`secretInitiatorDeviceId`·`secretResponderUserId`·`secretResponderDeviceId`(받는 쪽 기기는 수락 전에는 `null`)가 실립니다 — 앱이 이 업데이트
+전에 시작한 대화를 상대 기기에 묶는 데 씁니다. 공개키·서명은 싣지 않습니다(`server/src/secretContextRules.js`의 `secretRoomFields`).
 
 **프로젝트 / 업무** (`server/src/projects.js` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고)
 
@@ -1582,7 +1652,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/upload` | 필요 | 파일 업로드(최대 1GB, 초과 시 413). 응답의 `url`은 미서명 경로, `signedUrl`은 올린 사람이 저장 전에 바로 미리보기를 그릴 수 있는 서명된 링크(팀·그룹 아이콘 사진). 올린 사람을 `uploads` 표에 남기고(비밀 대화 첨부 검사·자동 삭제·새 프로필 사진 확인이 씀), 남기지 못하면 받은 파일을 지우고 500 |
 | GET | `/files/:token` | 불필요(토큰 자체가 자격증명) | 서명된 다운로드 링크(이 방식 전에 발급된 JWT 모양 토큰은 받지 않음) |
 | GET | `/health` | 불필요 | 헬스체크 |
-| GET | `/server-info` | 불필요 | 접속 주소들 `{ externalUrl, internalUrls }` — 외부(LTE/5G) 주소(`.env`의 `EXTERNAL_ADDRESS`, 없으면 `null`)와 인증서가 담고 있는 서버 PC의 사내 주소들 |
+| GET | `/server-info` | 불필요 | 접속 주소들 `{ externalUrl, webUrl, internalUrls }` — 외부(LTE/5G) 주소(`.env`의 `EXTERNAL_ADDRESS`, 없으면 `null`), 아이폰에 안내할 웹 앱 정식 주소(`https://WEB_DOMAIN[:WEB_HTTPS_PORT]` — 웹 포트가 열려 있고 브라우저가 믿는 정식 인증서가 걸려 있을 때만, 시험용 인증서·발급 전·기능 꺼짐이면 `null`), 인증서가 담고 있는 서버 PC의 사내 주소들 |
 | GET | `/pair/:code` | 불필요(코드·초대 토큰이 자격증명) | 페어링 — 평문 페어링 서버의 같은 경로와 동일. 사내망 밖에서 재페어링할 때 쓴다 |
 | GET·WS | `/livekit/*` | 불필요(LiveKit 참가 토큰) | 화상회의 신호를 같은 PC의 LiveKit으로 넘김(`livekitProxy.js`) |
 | GET | `/version` | 불필요 | 최신 클라이언트 버전 조회 |
@@ -1600,6 +1670,14 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/team-invite/:token` | 팀 초대 링크 안내 페이지(HTML) — 팀 이름·부여될 등급을 함께 보여줌(인원이 다 찼으면 자동 합류 안내 대신 "가입 인원 마감") |
 | GET | `/team-invite/:token/download/:platform` | 설치 파일 다운로드(`windows`\|`android`, 그 밖의 이름은 404) — `/pair`와 같은 기준 |
 
+**웹 앱 전용 포트** (`server/src/webTls.js`, `.env`의 `WEB_DOMAIN`을 켰을 때만 — [아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서))
+
+| 포트 | 경로 | 설명 |
+|---|---|---|
+| `WEB_HTTPS_PORT`(기본 443, HTTPS) | 전부 | 메인 포트와 **같은 Express 앱**(웹 앱, 위의 모든 API, socket.io, `/livekit`, `/pair`)을 Let's Encrypt 인증서로(받기 전에는 메인 포트의 자체 서명 인증서로) 엽니다. TLS-ALPN-01 확인 접속(ALPN `acme-tls/1` + 그 도메인)만 확인을 기다리는 동안 따로 받습니다. 느린 요청 감시를 켜려고 127.0.0.1의 임시 포트에서도 듣습니다(밖에서는 안 보임) |
+| `ACME_HTTP_PORT`(기본 80, 평문 HTTP) | GET·HEAD `/.well-known/acme-challenge/:token` | 지금 기다리는 확인 토큰과 정확히 같을 때만 key authorization을 `text/plain`으로, 아니면 404 |
+| `ACME_HTTP_PORT` | 그 밖의 모든 요청 | 302 → `https://WEB_DOMAIN[:WEB_HTTPS_PORT]<같은 경로>` — 요청의 Host가 아니라 설정한 도메인으로만 보냅니다(열린 리디렉션 방지) |
+
 **Socket.io 이벤트** (`server/src/socket.js`, 연결 시 `auth: { token, deviceId? }`)
 
 | 방향 | 이벤트 | 설명 |
@@ -1607,7 +1685,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 클라이언트→서버 | `message:send` | 메시지 전송 — 응답(ack `{ ok, error? }`)은 서버 오류가 나도 늘 옴. 한 사람이 10초에 40통·10분에 600통(파일을 실은 메시지는 10분 창만), 512KB를 넘는 소켓 메시지는 서버가 받지 않음. 인용·전달은 원본 id(`quotedMessageId`·`quotedAnnouncementId`·`forwardedFromMessageId`)로 — 위 "메시지 인용 공유, 메시지 전달" |
 | 클라이언트→서버 | `room:read` | 읽음 처리 |
 | 클라이언트→서버 | `secret:message-read` | 비밀 대화 메시지 읽음(자동 삭제 타이머 시작) |
-| 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 |
+| 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 `{ roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }`(그 비밀 대화방 멤버만). 맥락 서명(v2, 예전 앱은 안 보냄)은 검증하지 않고 모양만 봐서 64바이트 서명의 base64가 아니면 이벤트를 버리고, `secret_rekeys`의 `proposer_context_signature`·`responder_context_signature`에 적는다. 받는 쪽에는 같은 이름의 이벤트로 제안은 `{ roomId, keyEpoch, proposerUserId, proposerEphemeralPublicKey, proposerEphemeralSignature, proposerContextSignature }`(방의 다른 소켓에), 수락은 `{ roomId, keyEpoch, responderUserId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }`(방 전체에 — 수락 때 세션의 `key_epoch`도 올림)로 중계하고, 맥락 서명이 없으면 `null`. 보낸 사람 id는 payload가 아니라 그 소켓의 로그인 사용자 |
 | 서버→클라이언트 | `message:new` / `message:edited` / `message:deleted` / `message:expired` | 메시지 변경 브로드캐스트(파일 삭제도 `message:edited` — 첨부에 `deleted: true`) |
 | 서버→클라이언트 | `comment:new` / `comment:edited` / `comment:deleted` | 댓글 변경 브로드캐스트 |
 | 서버→클라이언트 | `notification:new` | `user:<id>`에게 새 알림 한 건 `{ notification, unread: { mention, board, mentionPersonal, mentionAll } }` |
@@ -1627,7 +1705,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 서버→클라이언트 | `call:declined` | 통화 중인 사람들(`user:<id>`)에게 누가 거절했는지 `{ roomId, userId, name }` |
 | 서버→클라이언트 | `call:card` | 화상회의 카드가 바뀜 `{ roomId, messageId, card, text? }`(끝날 때 `text`는 요약 문구) |
 | 서버→클라이언트 | `call:mic` | 진행자가 내 마이크를 끄거나 켜 달라고 요청 `{ roomId, on, byId }` |
-| 서버→클라이언트 | `secret:invite` / `secret:accepted` / `secret:rejected` / `secret:left` | 비밀 대화 생명주기 |
+| 서버→클라이언트 | `secret:invite` / `secret:accepted` / `secret:rejected` / `secret:left` | 비밀 대화 생명주기. `secret:invite`(초대받은 사람의 `user:<id>`에)는 `GET /api/secret-chats/:roomId/invite`와 같은 모양(`initiatorContextSignature` 포함), `secret:accepted`(방 전체에)는 `{ roomId, responderUserId, responderDeviceId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }` — 예전 앱이 만든 값이면 맥락 서명은 `null` |
 
 ## DB 구조
 
@@ -1681,8 +1759,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `task_references` | 업무 참조자(`task_id`, `user_id` 복합 PK). "내 업무"에 참조된 업무를 함께 보여주는 데 쓴다 |
 | `task_comments` | 업무 카드에 달린 댓글. `project_id`를 같이 들고 있어(비정규화) 대시보드의 "최근 댓글"을 조인 없이 모은다 |
 | `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `web_push_subscription`(웹 앱의 웹 푸시 구독 JSON), `last_seen_at`, `revoked_at`. 토큰·구독은 한 사람당 최근에 쓴(`last_seen_at`) 기기 10대 것만 남기고, 계정 정지·모든 기기 강제 로그아웃·탈퇴 때는 그 사람의 모든 기기에서 지웁니다(기기 행과 공개키는 지난 비밀 대화 때문에 그대로) |
-| `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 임시 공개키+서명, `key_epoch`, `self_destruct_seconds` |
-| `secret_rekeys` | 재키잉 제안/수락 이력(append-only) |
+| `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 사용자·기기, 양측 임시 공개키+서명(키만 서명한 v1), `initiator_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이 보낸 쪽은 null, 마이그레이션 `0097_secret_context_signatures`), `key_epoch`, `self_destruct_seconds` |
+| `secret_rekeys` | 재키잉 제안/수락 이력(append-only) — 양측 임시 공개키+서명(v1), `proposer_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이면 null, 마이그레이션 `0097`) |
 
 ## FCM 푸시 알림 설정
 
@@ -1841,6 +1919,117 @@ LiveKit 데이터 채널(reliable, topic `call`)로 `{"type":"hand","raised":tru
 넘깁니다 — 진행자·카드·통화가 그대로이고 아무도 다시 울리지 않습니다(30초 안에 새 기기가 안 오면 그때 나감으로 처리). 통화 상태는
 사람마다 가장 최근에 참여를 알린 기기 하나만 들고 있어서, 옮겨 간 기기에서 나가면 실제로 참가자 목록에서 빠집니다.
 
+## 아이폰용 웹 앱 주소(정식 인증서)
+
+아이폰에는 설치형 앱이 없어서 웹 앱(`server/web` — `publish_release.ps1`이 만들어 넣음)을 Safari로 씁니다. 웹 앱은 메인 포트로도
+열리지만, 그 포트의 자체 서명 인증서는 Safari가 믿지 않아 경고가 뜨고 "홈 화면에 추가"한 앱·웹 푸시도 제대로 쓸 수 없습니다. 그렇다고
+그 인증서를 바꿀 수는 없습니다 — PC·안드로이드 앱이 핀닝하고 있어서 바꾸면 모든 기기를 다시 페어링해야 합니다. 그래서 `.env`에
+`WEB_DOMAIN`을 넣으면 서버가 **같은 Express 앱**(웹 앱·API·socket.io·화상회의 신호 `/livekit`·`/pair`)을 웹 전용 HTTPS 포트
+(`WEB_HTTPS_PORT`, 기본 443)에서 한 번 더 열고, 그 포트에만 Let's Encrypt 인증서를 스스로 받아 걸고 재시작 없이 갱신합니다
+(`server/src/webTls.js` — 발급은 `acme.js`, 일정은 `acmeRenewal.js`). 메인 포트·핀닝·페어링 포트는 그대로이고, `WEB_DOMAIN`이
+비어 있으면 포트·파일·타이머를 하나도 만들지 않습니다(acme-client도 읽지 않음). 설정 값은 [환경 변수 설정](#환경-변수-설정)의 표.
+
+**켜는 순서**
+
+1. 공유기에서 DDNS를 켜 둡니다(예: `xxx.iptime.org` — "외부 접속 주소"와 같은 이름이어도 됨). 그 이름이 사무실 공유기의 공인 IP를
+   가리켜야 Let's Encrypt가 확인하러 올 수 있습니다.
+2. 설치형 서버는 시작 메뉴 **"웹 앱 주소(정식 인증서)"**(`Web-Domain.ps1` — 이미 설치한 서버는 이 도구가 든 설치 프로그램을 같은
+   경로로 한 번 다시 실행해야 생김)에서 도메인, 웹 HTTPS 포트(기본 443), 인증용 HTTP 포트(기본 80, 0 = 안 씀), 이메일(선택)을
+   넣고 **적용**합니다 — `.env` 저장, 이 PC의 방화벽 규칙(`TangoTalk Server (web)`·`TangoTalk Server (web-acme)`, 이 서버의
+   `node.exe`에만 허용), 서버 재시작까지 합니다. 그 포트를 이 PC의 다른 프로그램(IIS 등)이 쓰고 있거나 도메인을 DNS에서 못 찾거나 사설 IP만 가리키면 적용 전에
+   경고합니다. 개발 환경은 `.env`에 직접 넣고 서버를 다시 시작합니다.
+3. 공유기 포트포워딩(TCP): **외부 443 → 이 PC의 `WEB_HTTPS_PORT`**(웹 앱 + TLS-ALPN-01 확인), **외부 80 → 이 PC의
+   `ACME_HTTP_PORT`**(HTTP-01 확인 + `http://` 주소를 https로 이동). Let's Encrypt는 늘 외부 443(TLS-ALPN-01)과 외부 80(HTTP-01)으로만
+   확인하러 오므로, 웹 포트를 다른 번호(예: 8443)로 했어도 외부 443은 그 번호로 보내고, 아이폰이 여는 주소가 `https://도메인:8443`이
+   되므로 외부 8443도 같은 번호로 엽니다. 도구는 적용한 뒤 이 PC의 사내 IP와 함께 포워딩할 포트를 보여 주고, 서버 콘솔에도
+   `[web-tls]`로 찍힙니다.
+4. 1~2분 뒤 관리자 콘솔의 "웹 앱 주소(정식 인증서)" 카드(아래)나 도구의 **인증서 확인**으로 확인합니다 — 인증서 확인은 이 PC의
+   웹 포트에 지금 걸린 인증서가 정식·시험용·그 밖 중 무엇인지 봅니다(밖에서 열리는지까지는 보지 않음).
+5. 아이폰 사용자에게 웹 앱 주소(`https://도메인`)를 알려 줍니다. 정식 인증서가 걸려 있는 동안에는 초대·팀 초대 안내 페이지와 앱의
+   초대 링크 복사 글에 아이폰 안내가 저절로 붙습니다([초대 링크](#초대-링크설치가입)의 "아이폰 사용자"). 사용자용 설명은 도움말
+   "메신저 이용법 › 아이폰에서는 웹 앱으로"(`server/guide/messenger.html#start-iphone`)에 있습니다.
+
+끄려면 도구의 **끄기**(또는 도메인을 비우고 적용) — `WEB_DOMAIN`만 비우고 두 방화벽 규칙을 지운 뒤 재시작합니다. 공유기의 443·80
+포워딩도 지우세요. 받아 둔 인증서는 남아서 같은 도메인으로 다시 켜면 그대로 씁니다. 일반 제거는 두 방화벽 규칙도 지우고, 같은
+경로에 다시 설치하면 `.env`에 `WEB_DOMAIN`이 남아 있을 때 다시 만듭니다.
+
+**서버가 알아서 하는 것**
+
+- 인증서를 받기 전에는 웹 포트를 메인 포트의 자체 서명 인증서로 열어 둡니다(TLS-ALPN-01 확인에 포트가 떠 있어야 해서 — 그동안
+  브라우저는 경고를 띄우고 아이폰에 알려 줄 주소도 없음). 받거나 갱신하면 그 자리에서 바꿔 겁니다(`setSecureContext`).
+- **확인 방식**: 지금 열린 포트의 방식만 씁니다 — 웹 포트가 443이면 TLS-ALPN-01, 아니면 HTTP-01을 먼저 하고, 지난번에 성공한
+  방식을 다음에 먼저 씁니다. 한 방식이 확인 접속 실패(포트포워딩 등)로 끝나면 같은 시도 안에서 다른 방식으로 넘어갑니다.
+- **파일**(`certs/` — 설치형은 설치 폴더 잠금이 그대로 적용됨): `web.crt`(체인)·`web.key`(발급마다 새 ECDSA P-256 키),
+  `acme-account.key`(Let's Encrypt 계정 키 — 처음 한 번 만들어 계속 씀, 공유·삭제 금지), `acme-state.json`(시도 기록). 저장된
+  인증서는 그 도메인용이고 키 짝이 맞고 만료 전일 때만 씁니다(시험용 인증서는 `ACME_STAGING=1`일 때만). 계정은 Let's Encrypt
+  가입자 약관에 동의한 것으로 만듭니다(`WEB_DOMAIN`을 넣는 것이 곧 동의 — 처음 만들 때 콘솔에도 알림).
+- **갱신**: 켤 때와 12시간마다 확인해서 만료 30일 전(수명이 90일보다 짧은 인증서면 수명의 1/3이 남았을 때)부터 다시 받습니다.
+- **실패하면** 1시간 → 2시간 → 4시간 … 최대 24시간 간격으로 다시 시도합니다. Let's Encrypt가 한도(`rateLimited`)로 거절하면 알려 준
+  시각(`Retry-After` 머리글이나 오류 문구의 "retry after" — 없으면 24시간, 길어도 8일) 전에는 다시 묻지 않습니다. 시도하기 **전에**
+  "실패하면 이때 다시"를 `acme-state.json`에 적어 두므로 **서버를 다시 시작해도 그 시각 전에는 다시 묻지 않습니다**(적어 둘 수
+  없으면 아예 묻지 않음 — 재시작이 되풀이돼도 한도를 태우지 않게). 그래서 포트포워딩을 고친 뒤에도 다음 시도 시각까지 기다립니다.
+  도메인이나 시험 발급 설정을 바꾸면 기록을 새로 시작해 바로 시도합니다. 한 번의 발급이 30분 넘게 안 끝나면 실패로 칩니다.
+- **실패 이유**는 한국어로 서버 로그(`[web-tls]` — Let's Encrypt가 준 원문도 함께)와 관리자 콘솔에 남습니다: 어느 외부 포트(80·443)로
+  확인하지 못했는지(포트포워딩·방화벽), 받은 확인 응답이 이 서버의 것이 아님(DDNS가 다른 IP를 가리키거나 외부 포트가 공유기의 원격
+  관리 페이지 같은 다른 기기로 감), DNS, CAA, 한도의 종류(아래 iptime.org 주간 한도, 확인 실패가 너무 잦음 — 도메인당 1시간에
+  5번, 같은 이름 인증서 7일에 5장, 확인 실패가 오래 계속돼 걸린 발급 일시 중지), Let's Encrypt에 연결하지 못함(이 PC의
+  인터넷·방화벽·프록시).
+- **서버 PC 시계가 틀리면**(받은 인증서가 이 PC 시계로 이미 만료이거나 받자마자 갱신할 때로 보임) 날짜·시간·시간대를 확인하라고
+  알리고 이틀에 한 번만 다시 받습니다. 시계를 고치면 앞서 가던 시계로 적힌 먼 미래의 시도 시각을 알아채고 버립니다(재시작할 때,
+  12시간마다 확인할 때, 관리자 콘솔에서 상태를 볼 때).
+
+**관리자 콘솔 상태** — 서버 관리 → 운영 현황의 **"웹 앱 주소(정식 인증서)"** 카드(`GET /api/admin/web-certificate`)에 꺼짐(켜는
+방법) · 발급 중 · 사용 중(도메인, 만료일, 아이폰 사용자에게 알려 줄 주소) · 곧 만료(갱신 시도 중, 마지막 갱신 실패) · 발급 실패(이유,
+마지막·다음 시도 시각, 지금 인증서를 언제까지 쓸 수 있는지, 한도면 iptime.org 안내·아니면 포트포워딩·IIS 안내)와 시험용 인증서
+표시가 나옵니다. "인증서 확인 방식: HTTP-01(외부 80번 포트) 준비됨 · TLS-ALPN-01(외부 443번 포트) 준비됨"은 이 PC에서 그 포트를
+열었다는 뜻이고 공유기 포워딩까지 확인한 것은 아닙니다. 웹 포트를 열지 못하면 그 이유가 발급 실패로 나오고 인증서를 요청하지
+않습니다.
+
+**시험 발급(스테이징)** — 처음 켤 때는 도구의 "시험 발급"(`ACME_STAGING=1`)으로 정식 발급 한도를 쓰지 않고 포트포워딩만 먼저 확인할
+수 있습니다. 시험용 인증서는 브라우저가 믿지 않으므로 그동안에는 웹 앱 주소를 어디에도 알려 주지 않습니다(`/server-info`의
+`webUrl`이 `null`, 초대 페이지의 아이폰 안내도 없음). 인증서 확인·관리자 콘솔에 시험용 인증서가 보이면 시험 발급을 끄고 다시
+적용(개발 환경은 `.env`에서 지우고 재시작)하세요 — 설정이 바뀌었으므로 바로 정식 인증서를 받으러 갑니다.
+
+**iptime.org의 공유 주간 한도** — `iptime.org`는 공개 접미사 목록(PSL)에 없어서 Let's Encrypt가 그 아래 이름을 모두 등록 도메인
+하나로 셉니다. 그래서 "등록 도메인당 7일에 새 인증서 50장" 한도를 **모든 iptime DDNS 사용자가 함께** 쓰고, 다른 사용자들이 그 주
+몫을 다 쓰면 첫 발급이 `rateLimited`로 실패할 수 있습니다(한 번 받은 뒤 같은 이름의 갱신은 이 한도에 걸리지 않음). 서버가 알려 준
+시각에 알아서 다시 시도하니 기다리면 됩니다. 계속 막히면 직접 산 도메인의 하위 이름(예: `chat.회사도메인.com`)을 DNS의 **CNAME**
+레코드로 `xxx.iptime.org`에 연결하고 그 이름을 `WEB_DOMAIN`으로 넣습니다 — 그 도메인의 한도는 회사 혼자 쓰고, 같은 공유기로 오므로
+포워딩은 그대로입니다(도메인이 바뀌면 바로 다시 시도하고, 아이폰에 알려 줄 주소도 그 이름이 됨).
+
+**80이 막혔을 때, 포트가 겹칠 때**
+
+- 통신사가 외부 80을 막아도 외부 443(TLS-ALPN-01)으로 받습니다 — 443 포워딩만 있으면 됩니다. 80을 아예 안 쓰려면 `ACME_HTTP_PORT=0`.
+- 이 PC의 443·80을 IIS("World Wide Web Publishing Service")·HTTP.sys 예약·다른 웹 서버가 쓰고 있으면 서버는 그 포트를 열지 못한
+  이유를 로그에 한 번 남기고 10분마다 다시 열어 봅니다(그 프로그램을 끄면 재시작 없이 붙음). 누가 쓰는지는 관리자 명령 프롬프트의
+  `netstat -ano | findstr :443`으로 보고(PID 4면 HTTP.sys — IIS 등), 권한 오류면 Windows가 예약해 둔 포트 범위일 수 있습니다
+  (`netsh interface ipv4 show excludedportrange protocol=tcp`). 그 프로그램을 끌 수 없으면 다른 번호(예: 웹 8443, 인증용 8080)를 쓰고
+  공유기에서 외부 443·80을 그 번호로 보냅니다.
+- 80만 못 열면 TLS-ALPN-01로 계속하고, 웹 포트를 못 열면 인증서를 요청하지 않습니다(쓸 곳 없이 한도만 쓰지 않게). 어느 경우든 메인
+  서버(앱 접속)는 그대로 돕니다.
+
+**사내 와이파이와 가입** — 웹 앱은 페이지 주소가 곧 서버 주소라(`session.dart`의 `webServerUrl`) 회사 안의 아이폰도 `https://도메인`으로
+붙습니다. 그래서 공유기가 NAT 루프백(안에서 자기 공인 주소로 되돌아오는 접속)을 지원해야 사내 와이파이에서도 열립니다(PC·안드로이드
+앱은 사내 주소로 자동 전환하므로 상관없음). 밖에서의 가입에는 초대 링크의 코드가 필요한데(`auth.js`의 `/register`), 웹 앱은 초대
+안내 페이지·링크 복사 글의 웹 앱 주소(`https://도메인/?invite=<코드>`)로 열면 그 코드를 같이 보내서 **밖에서도 가입되고 팀 초대의
+자동 합류도** 받습니다(코드 없이 연 웹 앱으로는 밖에서 가입이 안 됨). 웹 포트도 접속한 실제 IP를 보므로, NAT 루프백으로 들어온
+접속은 사설 IP(아이폰이나 공유기의 사내 주소)로 보여 보통 사내로 칩니다.
+
+**밖에서 웹 앱으로 화상회의** — 신호는 웹 앱 포트의 `/livekit`으로 받지만, 미디어는 LiveKit과 직접 주고받으므로 "외부(LTE/5G)에서
+접속하기"처럼 `EXTERNAL_ADDRESS`를 설정하고 화상회의 미디어 포트를 포워딩해야 합니다(LiveKit이 공인 IP를 알리는 것은
+`EXTERNAL_ADDRESS`를 따름 — `livekitNat.js`).
+
+**도메인 주소로 하는 첫 페어링** — PC·안드로이드 앱의 "서버 주소 변경"에 도메인 이름 주소(예: `https://xxx.iptime.org:3000`)와 코드를
+넣으면(그 주소로 연 초대 안내 페이지의 딥링크도 같음), 앱은 먼저 `https://xxx.iptime.org/pair/<코드>`(443 — 이 웹 앱 포트)에서
+**보통의 인증서 검증**(운영체제가 믿는 공인 인증 기관과 이름 확인)을 거쳐 메인 포트의 자체 서명 인증서를 받아 핀닝합니다
+(`pinned_tls.dart`의 `pairOverPublicTls`). 기존 경로(메인 포트에서 검증 없이 받고 그 TLS 연결에 쓰인 인증서와 대조)는 중간에서 TLS를
+대신 맺은 쪽이 자기 인증서를 본문에도 실으면 막을 수 없지만, 이 경로는 바꿔치기할 수 없습니다. 앱의 서버 주소가 `WEB_DOMAIN`과 같은
+이름이고 외부 443이 웹 포트로 포워딩돼 정식 인증서가 걸려 있을 때 효과가 있고, 아니면(기능을 안 켬·예전 서버·443을 안 엶·발급 전)
+기존 경로로 넘어갑니다 — 443이 응답 없이 막혀 있으면 5초쯤 더 걸립니다. 코드가 틀렸거나 만료(404)·시도가 너무 많음(429)이면 그
+문구를 그대로 보여 줍니다. IP 주소와 점 없는 이름은 기존 경로 그대로입니다.
+
+웹 앱 포트는 HSTS를 보내지 않습니다 — 이유는 [보안 및 암호화](#보안-및-암호화)의 "웹 앱 전용 포트".
+
 ## Android 릴리즈 서명
 
 release 빌드에는 서명이 필요합니다 — 서명 없이는 배포는커녕 기존 설치본 위에 업데이트 설치도
@@ -1898,8 +2087,8 @@ cd client\android
 .\publish_release.ps1 -Version "1.0.7" -Notes "이번 업데이트 내용"
 ```
 
-Android/Windows 릴리즈 빌드, 설치 프로그램 컴파일, `server/releases/`로 복사, `version.json` 작성까지
-전부 자동으로 처리합니다. 서버는 재시작 없이 바로 새 버전을 알려주기 시작합니다.
+Android/Windows 릴리즈 빌드, 설치 프로그램 컴파일, 웹 앱 빌드(`server/web`에 넣음 — 운영 서버에는 서버 업데이트 zip이 실어 감),
+`server/releases/`로 복사, `version.json` 작성까지 전부 자동으로 처리합니다. 서버는 재시작 없이 바로 새 버전을 알려주기 시작합니다.
 
 켜져 있는 앱에 알약이 뜨는 경로는 세 가지이고, 어느 하나가 빠져도 나머지가 메웁니다:
 `version.json`이 바뀌는 순간의 브로드캐스트(`/updates` 네임스페이스), 그 소켓에 **붙을 때마다**
@@ -1988,7 +2177,7 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
   "메신저 설명서"(예전 이름 "도움말" — **이 README.md 전체**를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환해서
   기본 브라우저로 보여줌 — `build_server_installer.ps1`이 빌드 시 `build-readme-html.mjs`로
   매번 새로 만들므로 설치할 때마다 최신 버전으로 덮어써짐), "서버 업데이트", "서버 재시작",
-  "첨부파일 저장소", "외부 접속 주소", "백업"·"복원"(아래 [백업](#백업)), "DB 데이터 초기화",
+  "첨부파일 저장소", "외부 접속 주소", "웹 앱 주소(정식 인증서)", "백업"·"복원"(아래 [백업](#백업)), "DB 데이터 초기화",
   "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"도 같이 설치됩니다. 백업·복원을 뺀 관리 도구는
   목적이 다릅니다:
   - **서버 업데이트**(`Update-Server.ps1`) — 개발 PC에서 `package_server_update.ps1`로 만든
@@ -2011,6 +2200,12 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
     적용 전에 경고합니다(재페어링은 밖에서도 외부 주소로 됩니다). 공유기에 포워딩할 포트(메인
     포트, 화상회의 UDP 범위·TCP)를 안내하지만 포워딩 자체는 직접 해야 합니다 — **직원들이 사내
     와이파이 밖에서도 메신저·화상회의를 쓰게 하고 싶을 때** 씁니다.
+  - **웹 앱 주소(정식 인증서)**(`Web-Domain.ps1`) — 아이폰 사용자가 Safari로 여는 웹 앱의 도메인(`.env`의 `WEB_DOMAIN`)과 웹
+    HTTPS 포트·인증용 HTTP 포트·이메일·"시험 발급"을 보여주고 바꾸거나 끕니다. 적용하면 `.env`를 고치고 이 PC의 방화벽 규칙
+    (`TangoTalk Server (web)`·`(web-acme)`)을 맞춘 뒤 서비스를 재시작하고, 공유기 포워딩·iptime.org 발급 한도·아이폰에서 여는 법을
+    복사할 수 있는 글로 안내합니다. **인증서 확인**은 이 PC의 웹 포트에 지금 걸린 인증서를 봅니다. 인증서 발급·갱신은 서버가 하고
+    포워딩은 직접 해야 합니다 — **아이폰을 쓰는 직원도 메신저를 쓰게 하고 싶을 때** 씁니다
+    ([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)).
   - **DB 데이터 초기화**(`Reset-Data.ps1`) — 서버는 그대로 두고 회원/팀/메시지/댓글/첨부파일
     등 데이터만 비웁니다. `.env`/인증서/설치는 안 건드리고, 끝나면 서버가 다시 시작되어 바로
     빈 상태로 쓸 수 있습니다(처음 가입하는 계정이 새 운영자가 됨) — **서버를 계속 쓰면서
@@ -2066,9 +2261,9 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 폴더 잠금이 생기기 전 버전으로 설치한 서버는 이 버전의 `tangotalk-server-setup.exe`를 **같은 설치 경로로 한 번 다시
 실행**해야 설치 폴더가 잠기고 새 관리 도구(`Grant-ServerAdmin.ps1` 등)가 들어갑니다 — 설치 폴더에 `Folder-Acl.ps1`이
 없으면 아직 잠금 전 버전입니다. 그 뒤로는 "서버 업데이트"가 업데이트할 때마다 잠금을 다시 맞추고, 앞으로도 설치
-프로그램 쪽(관리 도구·설치 과정)이 바뀐 버전이 나오면 설치 프로그램을 다시 실행합니다 — 이번 버전도 그렇습니다(한글 등이 든
-운영자 비밀번호의 본인 확인, 서버 서비스의 `NODE_ENV=production`. 그 뒤로는 "서버 업데이트"가 재시작 전마다 `NODE_ENV`를 다시 맞추고,
-못 맞추면 업데이트 창과 완료 창에 경고와 고치는 명령을 보여 줌). 설치 프로그램
+프로그램 쪽(관리 도구·설치 과정)이 바뀐 버전이 나오면 설치 프로그램을 다시 실행합니다 — 이번 버전도 그렇습니다(시작 메뉴
+"웹 앱 주소(정식 인증서)", 한글 등이 든 운영자 비밀번호의 본인 확인, 서버 서비스의 `NODE_ENV=production`. 그 뒤로는
+"서버 업데이트"가 재시작 전마다 `NODE_ENV`를 다시 맞추고, 못 맞추면 업데이트 창과 완료 창에 경고와 고치는 명령을 보여 줌). 설치 프로그램
 (`build_server_installer.ps1`로 만든 최신 `tangotalk-server-setup.exe`)을 같은 PC에서 다시 실행하면 이미 설치돼 있는
 걸 감지해서 PostgreSQL 재설치나 DB 비밀번호 재생성 없이, 프로그램 파일만 새로 덮어쓰고 새로 추가된 마이그레이션만
 적용한 뒤 서비스를 재시작합니다(기존 `.env`/DB/업로드/인증서는 그대로 보존).
@@ -2129,7 +2324,8 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
    ```
 4. 백업해둔 `.env`, `certs/`, `uploads/`, `firebase-service-account.json`, `releases/`를 그대로
    복사해 넣기 — **특히 `certs/`를 그대로 옮기면 클라이언트를 재빌드하지 않아도 됩니다**(인증서가
-   바뀌지 않으므로). 새로 생성하게 두면(=옮기지 않으면) 클라이언트가 페어링을 다시 받아야 합니다.
+   바뀌지 않으므로). 새로 생성하게 두면(=옮기지 않으면) 클라이언트가 페어링을 다시 받아야 합니다. 웹 앱 주소를 켜 둔 서버면
+   `certs/`의 웹 앱 정식 인증서·Let's Encrypt 계정 키도 같이 옮겨져 새 PC에서 다시 받지 않습니다(공유기 포워딩은 새 PC로 바꿈).
 5. `npm install` → `npm run db:migrate`(복원한 덤프가 이미 최신 스키마라면 변경 없음으로 끝남) →
    서버 시작
 
@@ -2147,6 +2343,13 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
   클라이언트는 공인 CA 목록이 아니라 **그 인증서 하나만** 신뢰하도록 고정(핀닝)합니다
   (`client/lib/services/pinned_tls.dart`). 인증서는 앱 빌드에 내장되거나(`assets/server_cert.pem`),
   페어링 코드로 나중에 동적으로 받아 로컬에 저장됩니다.
+- **웹 앱 전용 포트**(`WEB_DOMAIN`을 켰을 때만): 브라우저(아이폰 Safari의 웹 앱)용으로 같은 앱을 Let's Encrypt 공인 인증서로 한 번 더
+  엽니다 — 앱의 핀닝과는 별개이고, 그 개인키(`certs/web.key`)와 Let's Encrypt 계정 키(`certs/acme-account.key`)는 `certs/`의 다른 키와
+  같이 관리자 전용입니다. 이 포트는 **HSTS를 보내지 않습니다**(`index.js`의 `sendHsts: false`) — HSTS는 포트를 가리지 않고 이름 전체에
+  걸리는데, 초대·팀 초대 링크는 요청받은 이름의 평문 페어링 포트(`http://도메인:PAIRING_PORT/invite/…`)로 만들어지고 앱의 도움말도
+  그 포트로 엽니다. HSTS를 기억한 브라우저는 그 주소를 https로 바꿔 평문 포트에 붙어 페이지가 열리지 않게 됩니다. 도메인 이름 주소로
+  하는 첫 페어링은 이 포트의 공인 인증서로 검증된 연결로 앱의 인증서를 받아, 중간에서 바꿔치기할 수 없습니다
+  ([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)).
 - **비밀번호**: bcrypt로 해시 저장(원문 저장 안 함).
 - **인증 토큰**: JWT AccessToken(1시간)/RefreshToken(30일). 비밀번호 변경/탈퇴/로그아웃 시
   `tokenVersion`을 올려 기존에 발급된 모든 토큰을 무효화합니다.
@@ -2159,9 +2362,25 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
   수 있었음), 앱이 보낸 파일 경로는 보내는 사람이 직접 올린 파일이나 지금 들어가 있는 방에서 볼 수 있는 파일만 저장합니다(`fileRefs.js` —
   알아낸 파일 이름을 실어 그 파일의 새 링크를 계속 받아 가지 못하게, [주요 기능](#주요-기능)의 "실을 수 있는 파일").
 - **비밀 대화(E2EE)**: 기기별 X25519(키 교환)/Ed25519(서명) 키쌍을 클라이언트에서 생성하고 개인키는
-  `flutter_secure_storage`에만 저장 — 서버에는 절대 오지 않습니다. 임시 공개키는 기기 장기 신원키로
-  서명해서 서버가 키를 바꿔치기하는 중간자 공격을 막습니다. 서버 DB(`secret_sessions`/`secret_rekeys`)에는
-  공개키·서명·상태값만 저장되고, 실제 대화 내용/공유비밀/체인키는 전혀 저장되지 않습니다.
+  `flutter_secure_storage`에만 저장 — 서버에는 절대 오지 않습니다. 임시 공개키는 기기 장기 서명 키로 서명하고,
+  서버 DB(`secret_sessions`/`secret_rekeys`)에는 공개키·서명·상태값만 저장되며 실제 대화 내용/공유비밀/체인키는 전혀 저장되지 않습니다.
+- **비밀 대화의 상대 기기 확인(서버를 믿지 않음)**: 서명이 있어도 상대 기기의 서명 키를 서버에 물어 그대로 믿으면, 서버가 자기 키로 답하고 자기
+  임시키를 끼워 넣어 중간에서 모든 글을 읽을 수 있습니다. 그래서 받는 앱이 상대 기기 서명 키를 처음 볼 때 고정하고 그 뒤로는 그 키만
+  쓰며([주요 기능](#주요-기능)의 "상대 기기 키 고정"), 처음부터 속였는지는 사람이 **보안 코드**로 확인합니다 — 두 기기의
+  `{사용자 id}:{기기 id}:{서명 공개키 base64}`를 정렬해 `|`로 잇고 앞에 `tangotalk-safety-v1|`을 붙인 UTF-8의 SHA-512에서 앞 60바이트를 5바이트씩
+  빅엔디언 정수로 읽어 100000으로 나눈 나머지(0을 채운 5자리) 12묶음이라 어느 쪽에서 계산해도 같습니다(`computeSafetyNumber`). 서버는 서명을
+  검증하지 않습니다 — 막으려는 상대가 서버라 서버의 확인은 아무것도 보장하지 못하므로, 맥락 서명은 모양(64바이트 Ed25519 서명의 base64)만 보고
+  저장·전달하며 틀리면 REST는 400, 소켓 재키잉은 버립니다(`server/src/secretContextRules.js`).
+- **비밀 대화 맥락 서명(v2)**: 키 바이트만 서명한 예전 서명(v1, `…EphemeralSignature`)은 서버가 한 대화에서 본 서명된 키를 다른 대화·상대·epoch에
+  그대로 다시 끼워 넣어도 맞았습니다. 새 앱은 v1과 함께, 아래 문자열(UTF-8)을 기기 서명 키로 서명한 맥락 서명
+  `initiatorContextSignature`·`responderContextSignature`·재키잉 `ephemeralContextSignature`를 보내고, 받는 쪽은 서버가 준 값이 아니라 자기가
+  아는 값(자기 id, 고정한 상대 기기, 방 id, epoch, 자기 임시키)으로 문자열을 다시 만들어 확인합니다. v2가 있으면 v2만 보고, 없으면(예전 앱 —
+  서버가 v2를 빼고 보낸 경우도) v1을 고정한 키로 확인한 뒤 "예전 버전" 안내를 띄웁니다. 공개키는 보낸 base64 그대로, id는 서버가 쓰는 문자열
+  그대로이고 `|`가 든 칸은 받지 않습니다 — 서버와 함께 정한 약속이라 한 글자만 달라도 서로 검증이 안 됩니다(`client/lib/services/secret_chat_crypto.dart`):
+  - 초대 `tangotalk-secret-v2|init|{초대자 id}|{초대자 기기 id}|{받는 사람 id}|{초대자 임시 공개키}`
+  - 수락 `tangotalk-secret-v2|accept|{방 id}|{초대자 id}|{초대자 기기 id}|{초대자 임시 공개키}|{수락자 id}|{수락자 기기 id}|{수락자 임시 공개키}`
+  - 재키잉 제안 `tangotalk-secret-v2|rekey-propose|{방 id}|{keyEpoch}|{제안자 id}|{제안자 기기 id}|{제안자 임시 공개키}`
+  - 재키잉 수락 `tangotalk-secret-v2|rekey-ack|{방 id}|{keyEpoch}|{수락자 id}|{수락자 기기 id}|{제안자 임시 공개키}|{수락자 임시 공개키}`
 - **비밀 대화 자동 삭제**: 만료된 메시지는 DB 행을 지우고(`server/src/secretExpiry.js`, 5초 간격 스윕), 그 메시지의
   첨부 파일 실물(원본·미리보기·여러 장 묶음·댓글 파일)도 **그 파일을 실은 사람(메시지는 보낸 사람, 댓글은 단 사람)이 직접
   올렸고**(`uploads` 표) **다른 곳에서 쓰지 않을 때만** 지웁니다 — 서버가 파일을 실제로 지우는 곳은 여기뿐이라 남의 파일은 지우지 않게 둘 다 봅니다. 기록이 없는 예전
@@ -2207,7 +2426,7 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 **절대 GitHub 등 원격에 올리면 안 되는 파일들**입니다:
 
 - `server/.env`, `server/.jwt-secret`, `server/.db-encryption-key`
-- `server/certs/`(TLS 개인키 포함)
+- `server/certs/`(TLS 개인키 포함 — 웹 앱 정식 인증서의 `web.key`와 Let's Encrypt 계정 키 `acme-account.key`도 여기)
 - `server/firebase-service-account.json`(FCM 발송용 Firebase 관리자 키 — 예전 방식의 폴백 파일.
   새 설치는 관리자 콘솔에서 입력해 DB에 저장하므로 이 파일 자체가 없어도 됩니다)
 - `server/uploads/`, `server/releases/`, `server/db.json`
@@ -2250,3 +2469,11 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 | 밖에서 로그인할 때 `지금 사내망 밖에서 로그인 시도가 몰려 차례대로 받고 있습니다…`, 감사 로그에 "로그인 시도 차단 — …줄을 세워 3초에 하나씩…" | 밖에서 비밀번호를 대량으로 넣어 보는 공격이 있다는 뜻이다(밖 로그인을 막지는 않고 처음 보는 곳만 줄을 세움) → 안내된 시간 뒤에 다시 하거나 사내 와이파이에서 로그인한다. 최근 30일 안에 같은 곳에서 로그인한 사람과 이미 로그인해 있는 앱은 그대로 쓰고, 오류가 15분에 150번 아래로 줄면 저절로 풀린다 |
 | 할 일 폴더 경로를 저장하려는데 `…경로의 서버 '…'은(는) 허용된 사내 서버가 아닙니다…`(또는 `…사내망 주소가 아닙니다…`), 또는 예전에 정한 폴더 경로가 할 일에서 사라짐 | 점이 든 이름(`nas.corp.local`)·한글 이름의 서버는 허용 목록에 있어야 하고, 공인 주소·WebDAV·장치 경로는 받지 않아서다(예전 경로는 앱에 보내지 않을 뿐 DB 값은 남음 — 서버 로그 `[todos] 할 일 폴더 경로의 서버 …`) → 점이 든 이름·한글 이름의 회사 서버가 맞으면 `.env`에 `TODO_FOLDER_HOSTS=그이름`을 넣고 "서버 재시작". 사설 IP(`\\192.168.0.5\…`)나 점 없는 컴퓨터 이름(`\\NAS\…`)으로 바꿔도 된다 |
 | "복원"·"DB 데이터 초기화"·"서버 완전 삭제"에서 운영자 비밀번호를 맞게 쳐도 확인이 실패(비밀번호에 한글 등이 있음) | 예전 관리 도구가 그런 글자를 '?'로 바꿔 넘겨서다 → 최신 `tangotalk-server-setup.exe`를 같은 설치 경로로 한 번 다시 실행한다(관리 도구 `*.ps1`은 "서버 업데이트"로 바뀌지 않음) |
+| 비밀 대화방 위에 빨간 `상대 기기의 보안 확인에 실패해 이 비밀 대화를 멈췄습니다.`, 보내면 `전송 실패: 보안 확인에 실패해 멈춘 비밀 대화입니다…` | 상대 기기의 서명이 맞지 않았거나(이 기기에 고정해 둔 키로 확인), 서버가 상대 기기를 다른 키·주인으로 알려 왔거나, 이 대화의 상대가 아닌 사람·기기가 끼어들었다(안내의 "원인" — 서버나 중간의 누군가가 가로채려 했을 수 있음). 멈춘 대화는 되돌릴 수 없다 → 안내의 "비밀 대화 끝내기"로 끝내고 새로 시작한 뒤 두 사람이 더보기 "보안 코드 확인"으로 숫자를 비교한다. 같은 상대 기기와 새로 시작해도 또 멈추면 상대가 앱을 다시 설치하는 등으로 그 기기의 키가 바뀌었을 수 있다 → 상대에게 직접 확인한 뒤 안내의 "상대 기기 키 다시 받기"를 누르고, 다음 새 대화에서 보안 코드를 꼭 비교한다 |
+| 비밀 대화방 위에 회색 `상대가 예전 버전의 앱을 쓰고 있어…` | 상대 앱이 맥락 서명(v2)을 보내지 않았다 → 상대 앱을 업데이트한다(새 앱으로 재키잉을 주고받으면 저절로 꺼지고, ✕로 닫을 수도 있음). 두 사람 다 새 앱인데 새 대화에서도 뜨면 서버가 예전 버전이다 → 서버를 업데이트한다 |
+| 관리자 콘솔의 "웹 앱 주소(정식 인증서)"가 **발급 실패**이고 이유에 `rateLimited`·"발급 한도" | iptime.org 같은 공용 DDNS 도메인이면 모든 사용자가 나눠 쓰는 주간 한도(7일에 새 인증서 50장)일 가능성이 크다 → 표시된 다음 시도 시각에 서버가 알아서 다시 받으니 기다린다(재시작해도 앞당겨지지 않음). 계속 막히면 직접 산 도메인을 CNAME으로 그 DDNS 이름에 연결해 `WEB_DOMAIN`으로 쓴다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)) |
+| 웹 앱 주소 인증서가 **발급 실패**이고 `[http-01]`/`[tls-alpn-01] Let's Encrypt가 …의 외부 80(443) 포트로 접속해 확인하지 못했습니다` | 공유기 포트포워딩(외부 443 → `WEB_HTTPS_PORT`, 외부 80 → `ACME_HTTP_PORT`)과 Windows 방화벽을 확인한다. 고친 뒤에도 다음 시도 시각까지 기다리므로, 바로 확인하려면 "시험 발급"을 켜고 적용 → 시험용 인증서가 보이면 끄고 다시 적용한다(설정이 바뀌면 바로 시도) |
+| 서버 로그에 `[web-tls] ⚠ 포트 443(웹 앱 HTTPS)를 이미 다른 프로그램이 쓰고 있어 열지 못했습니다…`(또는 80) | IIS·HTTP.sys 예약·다른 웹 서버가 그 포트를 쓴다 → 그 프로그램을 끄면 10분 안에 저절로 붙는다. 끌 수 없으면 다른 번호를 쓰고 공유기에서 외부 443·80을 그 번호로 보낸다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)의 "80이 막혔을 때, 포트가 겹칠 때") |
+| 아이폰 Safari에서 웹 앱 주소가 "안전하지 않음"·인증서 경고로 열림 | 아직 정식 인증서를 받기 전이거나(그동안 웹 포트는 자체 서명 인증서) 시험 발급 중이다 → 관리자 콘솔 카드에서 상태를 보고, 시험 발급이면 끄고 다시 적용한다 |
+| 아이폰에서 웹 앱 주소가 밖(LTE/5G)에서는 열리는데 사내 와이파이에서는 안 열림 | 공유기가 NAT 루프백을 지원하지 않아서다(웹 앱은 도메인 주소로만 붙음) → 공유기 설정을 확인하거나 회사 안에서도 LTE/5G로 쓴다. 웹 앱 가입은 사내 와이파이에서만 되므로, 그동안 아이폰 사용자는 PC·안드로이드 앱에서 초대 링크로 가입한 뒤 웹 앱에서 로그인한다 |
+| 아이폰 웹 앱에서 가입하려니 `사내 와이파이 밖에서는 초대 링크로만 가입할 수 있습니다…` | 웹 앱은 초대 링크의 코드를 보낼 수 없어 밖에서는 가입할 수 없다(정상) → 사내 와이파이에서 가입하거나 PC·안드로이드 앱에서 초대 링크로 가입한 뒤 웹 앱에서 로그인한다(로그인은 어디서든 됨) |

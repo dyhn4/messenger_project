@@ -16,6 +16,7 @@ import '../services/app_platform.dart';
 import '../services/room_chat_controller.dart' show RoomChatController;
 import '../services/session.dart';
 import 'announcement_banner.dart';
+import 'secret_security_banner.dart';
 import 'attachment_widgets.dart';
 import 'board_view.dart';
 import 'call_message_card.dart';
@@ -653,6 +654,9 @@ class _ChatPanelState extends State<ChatPanel> {
       children: [
         if (widget.room.type == RoomType.topic)
           AnnouncementBanner(session: widget.session, room: widget.room),
+        // 비밀 대화의 보안 안내(보안 확인 실패로 멈춤·상대 기기 바뀜·상대가 예전 앱) — 필요할 때만 보인다.
+        if (widget.room.isSecret)
+          SecretSecurityBanner(session: widget.session, room: widget.room),
         Expanded(
           // 호버 툴바(FloatingHoverToolbar)는 Overlay에 그려지는데, 앱 전체 Overlay를 쓰면
           // 메시지 목록 밖 — 특히 아래 입력창 위 — 까지 삐져나온다. 목록 영역만의 Overlay를

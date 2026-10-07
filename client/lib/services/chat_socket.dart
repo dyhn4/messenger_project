@@ -191,6 +191,9 @@ class AnnouncementRemovedEvent {
       );
 }
 
+/// 맥락 서명(v2)·새로 생긴 칸처럼 없어도 되는 문자열 칸 — 예전 서버는 보내지 않고, 문자열이 아닌 값은 없는 것으로 본다.
+String? _optionalString(Object? value) => value is String ? value : null;
+
 /// 비밀 대화 초대(secret:invite) — 상대가 나에게 비밀 대화를 걸었다는 신호.
 class SecretInviteEvent {
   final String roomId;
@@ -198,12 +201,16 @@ class SecretInviteEvent {
   final String initiatorDeviceId;
   final String initiatorEphemeralPublicKey;
   final String initiatorEphemeralSignature;
+
+  /// 맥락 서명(v2 — secret_chat_crypto.dart secretInitContext). 예전 앱이 건 초대면 null.
+  final String? initiatorContextSignature;
   const SecretInviteEvent({
     required this.roomId,
     required this.initiatorUserId,
     required this.initiatorDeviceId,
     required this.initiatorEphemeralPublicKey,
     required this.initiatorEphemeralSignature,
+    this.initiatorContextSignature,
   });
 
   factory SecretInviteEvent.fromJson(
@@ -214,20 +221,32 @@ class SecretInviteEvent {
     initiatorDeviceId: json['initiatorDeviceId'] as String,
     initiatorEphemeralPublicKey: json['initiatorEphemeralPublicKey'] as String,
     initiatorEphemeralSignature: json['initiatorEphemeralSignature'] as String,
+    initiatorContextSignature: _optionalString(
+      json['initiatorContextSignature'],
+    ),
   );
 }
 
-/// 상대가 내 비밀 대화 초대를 수락했다는 브로드캐스트(secret:accepted).
+/// 상대가 내 비밀 대화 초대를 수락했다는 브로드캐스트(secret:accepted). 방 전체에 가므로 수락한 사람 자신과 그
+/// 사람의 다른 기기도 받는다.
 class SecretAcceptedEvent {
   final String roomId;
   final String responderDeviceId;
   final String responderEphemeralPublicKey;
   final String responderEphemeralSignature;
+
+  /// 맥락 서명(v2 — secretAcceptContext). 예전 앱이 수락했으면 null.
+  final String? responderContextSignature;
+
+  /// 수락한 사람(예전 서버는 보내지 않아 null).
+  final String? responderUserId;
   const SecretAcceptedEvent({
     required this.roomId,
     required this.responderDeviceId,
     required this.responderEphemeralPublicKey,
     required this.responderEphemeralSignature,
+    this.responderContextSignature,
+    this.responderUserId,
   });
 
   factory SecretAcceptedEvent.fromJson(
@@ -237,6 +256,10 @@ class SecretAcceptedEvent {
     responderDeviceId: json['responderDeviceId'] as String,
     responderEphemeralPublicKey: json['responderEphemeralPublicKey'] as String,
     responderEphemeralSignature: json['responderEphemeralSignature'] as String,
+    responderContextSignature: _optionalString(
+      json['responderContextSignature'],
+    ),
+    responderUserId: _optionalString(json['responderUserId']),
   );
 }
 
@@ -301,19 +324,24 @@ class MessageExpiredEvent {
       );
 }
 
-/// 재키잉 제안/수락 중계(secret:rekey-propose / secret:rekey-ack) — 서버는 그대로 전달만 한다.
+/// 재키잉 제안/수락 중계(secret:rekey-propose / secret:rekey-ack) — 서버는 그대로 전달만 한다. 수락은 방 전체에
+/// 가므로 수락한 기기도 자기 수락을 다시 받는다.
 class SecretRekeyEvent {
   final String roomId;
   final int keyEpoch;
   final String userId; // propose면 proposerUserId, ack면 responderUserId.
   final String ephemeralPublicKey;
   final String ephemeralSignature;
+
+  /// 맥락 서명(v2 — propose면 proposerContextSignature, ack면 responderContextSignature). 예전 앱이면 null.
+  final String? contextSignature;
   const SecretRekeyEvent({
     required this.roomId,
     required this.keyEpoch,
     required this.userId,
     required this.ephemeralPublicKey,
     required this.ephemeralSignature,
+    this.contextSignature,
   });
 
   factory SecretRekeyEvent.fromProposeJson(Map<String, dynamic> json) =>
@@ -323,6 +351,7 @@ class SecretRekeyEvent {
         userId: json['proposerUserId'] as String,
         ephemeralPublicKey: json['proposerEphemeralPublicKey'] as String,
         ephemeralSignature: json['proposerEphemeralSignature'] as String,
+        contextSignature: _optionalString(json['proposerContextSignature']),
       );
 
   factory SecretRekeyEvent.fromAckJson(Map<String, dynamic> json) =>
@@ -332,6 +361,7 @@ class SecretRekeyEvent {
         userId: json['responderUserId'] as String,
         ephemeralPublicKey: json['responderEphemeralPublicKey'] as String,
         ephemeralSignature: json['responderEphemeralSignature'] as String,
+        contextSignature: _optionalString(json['responderContextSignature']),
       );
 }
 
@@ -1403,17 +1433,21 @@ class ChatSocket {
     });
   }
 
+  /// [ephemeralContextSignature]는 맥락 서명(v2) — 키만 서명한 [ephemeralSignature](v1)는 예전 앱이 확인할 수
+  /// 있게 함께 보낸다.
   void proposeSecretRekey({
     required String roomId,
     required int keyEpoch,
     required String ephemeralPublicKey,
     required String ephemeralSignature,
+    String? ephemeralContextSignature,
   }) {
     _socket?.emit('secret:rekey-propose', {
       'roomId': roomId,
       'keyEpoch': keyEpoch,
       'ephemeralPublicKey': ephemeralPublicKey,
       'ephemeralSignature': ephemeralSignature,
+      'ephemeralContextSignature': ?ephemeralContextSignature,
     });
   }
 
@@ -1422,12 +1456,14 @@ class ChatSocket {
     required int keyEpoch,
     required String ephemeralPublicKey,
     required String ephemeralSignature,
+    String? ephemeralContextSignature,
   }) {
     _socket?.emit('secret:rekey-ack', {
       'roomId': roomId,
       'keyEpoch': keyEpoch,
       'ephemeralPublicKey': ephemeralPublicKey,
       'ephemeralSignature': ephemeralSignature,
+      'ephemeralContextSignature': ?ephemeralContextSignature,
     });
   }
 

@@ -26,8 +26,21 @@ import { createStickersRouter } from './stickers.js';
 import { createAuthRouter, hasValidAccessToken, requireAuth } from './auth.js';
 import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
 import { bodyErrorReply, createJsonBodyParser } from './bodyLimit.js';
-import { certPath, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
-import { EXTERNAL_ADDRESS, LIVEKIT_PORT, LIVEKIT_URL, PAIRING_PORT, PORT, WEB_DIR } from './config.js';
+import { certPath, certsDir, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
+import {
+  ACME_EMAIL,
+  ACME_HTTP_PORT,
+  ACME_STAGING,
+  EXTERNAL_ADDRESS,
+  LIVEKIT_PORT,
+  LIVEKIT_URL,
+  PAIRING_PORT,
+  PORT,
+  WEB_DIR,
+  WEB_DOMAIN,
+  WEB_HTTPS_PORT,
+  WEB_TLS_CONFIG_ERROR,
+} from './config.js';
 import { startLivekitNatSync } from './livekitNat.js';
 import { LIVEKIT_PROXY_PREFIX, attachLivekitUpgradeProxy, livekitHttpProxy } from './livekitProxy.js';
 import { createBookmarksRouter } from './bookmarks.js';
@@ -69,6 +82,8 @@ import { createUsersRouter } from './users.js';
 import { guideStatic, helpApiRouter, versionRouter, watchForVersionChanges } from './version.js';
 import { firebaseConfigRouter } from './push.js';
 import { webPushRouter } from './webPush.js';
+import { getWebPublicUrl } from './webAddress.js';
+import { startWebTls } from './webTls.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
 // 미들웨어로 잡힌다. 이건 그 바깥(소켓 이벤트 핸들러, 백그라운드 작업 등 요청/응답 주기
@@ -173,9 +188,11 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // 열어둔다 — 인증서 핀닝으로 이 서버가 맞는지는 이미 확인된 연결이다.
 // 사내 주소(사설 IP)는 사내에서 묻거나 로그인한 앱이 물을 때만 알려준다 — 인터넷의 아무에게나 사내망 구성을 알려줄
 // 필요는 없다(밖에서 로그인한 앱은 토큰을 붙여 묻는다).
+// webUrl은 아이폰 등에 안내할 웹 앱 주소(https://WEB_DOMAIN) — 공인 인증서가 실제로 걸려 있을 때만 값이 있다(webTls.js, webAddress.js).
 app.get('/server-info', (req, res) =>
   res.json({
     externalUrl: EXTERNAL_ADDRESS?.url ?? null,
+    webUrl: getWebPublicUrl(),
     internalUrls:
       isLanAddress(clientIp(req)) || hasValidAccessToken(req)
         ? lanAddressesInCert(tls.cert).map((ip) => `https://${ip}:${PORT}`)
@@ -291,6 +308,30 @@ httpServer.listen(PORT, () => {
 });
 
 startPairingServer({ port: PAIRING_PORT, mainPort: PORT, getCertPem: () => tls.cert });
+
+// 아이폰 등 앱이 없는 기기용 웹 앱 전용 HTTPS 포트(.env의 WEB_DOMAIN — 비어 있으면 아무것도 하지 않는다). 같은 app·socket.io·화상회의
+// 신호 중계를 WEB_HTTPS_PORT에서 Let's Encrypt 인증서로 한 번 더 열고, 인증서를 자동으로 받고 갱신한다(webTls.js). 메인 포트(앱이
+// 핀닝한 자체 서명 인증서)는 그대로이고, 이 기능의 문제(포트 충돌·발급 실패)는 로그·관리자 콘솔 상태로만 알린다 — 메인 서버는 계속 돈다.
+startWebTls({
+  app,
+  io,
+  fallbackTls: tls,
+  attachUpgrade: (server) => attachLivekitUpgradeProxy(server, LIVEKIT_PORT),
+  config: {
+    domain: WEB_DOMAIN,
+    httpsPort: WEB_HTTPS_PORT,
+    httpPort: ACME_HTTP_PORT,
+    email: ACME_EMAIL,
+    staging: ACME_STAGING,
+    error: WEB_TLS_CONFIG_ERROR,
+  },
+  // HSTS는 끈다 — 초대·팀 초대 링크가 요청 호스트로 만든 평문 주소(http://WEB_DOMAIN:PAIRING_PORT/invite/…)라, 켜면 웹 앱을 한 번
+  // 연 브라우저에서 그 안내 페이지가 열리지 않는다. 그 링크들을 https 웹 주소로 옮긴 뒤에 true로 바꾼다(webTls.js startEnabled 참고).
+  sendHsts: false,
+  externalHost: EXTERNAL_ADDRESS?.host ?? null,
+  mainPort: PORT,
+  certsDir,
+}).catch((err) => console.error('[web-tls] 웹 앱 전용 포트를 시작하지 못했습니다:', err));
 
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => {

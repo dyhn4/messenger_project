@@ -11,6 +11,7 @@ import { inviteLinkConnectable } from './invites.js';
 import { roleLabel } from './permissions.js';
 import { teamInviteLinkConnectable } from './teamInvites.js';
 import { guideStatic, releasesDir } from './version.js';
+import { getWebPublicUrl } from './webAddress.js';
 
 const CODE_TTL_MS = 5 * 60 * 1000;
 const MAX_ATTEMPTS = 10; // 이 횟수만큼 틀리면 코드를 무효화한다(무작위 대입 방지).
@@ -272,7 +273,44 @@ const INVITE_PAGE_STYLE = `
   .notice-step:first-child { margin-top: 0; }
   .notice svg { display: block; max-width: 100%; height: auto; margin: 6px 0 4px; }
   .notice-sub { display: block; margin-top: 14px; color: #2b8a3e; font-size: 13px; font-weight: normal; }
+  /* 아이폰 안내(iphoneWebSection) — 설치 버튼 바로 아래에 "어느 기기로 쓰나" 묶음으로 보이게 옅은 상자로. 주소가 길어도
+     좁은 화면(아이폰)에서 가로로 넘치지 않게 아무 데서나 줄을 바꾼다. */
+  .ios-web { background: #f1f3f5; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
+  .ios-web p { margin: 4px 0; }
+  .ios-web a { word-break: break-all; }
 `;
+
+/**
+ * 아이폰 사용자용 안내 — 아이폰에는 설치형 앱이 없어서 웹 앱(server/web)을 Safari로 쓴다. Safari에서 웹 앱을 쓰고 홈 화면에
+ * 추가해 알림까지 받으려면 브라우저가 믿는 공인 인증서가 있어야 해서, 그 인증서가 실제로 걸려 있을 때(webAddress.js의
+ * getWebPublicUrl — 없으면 null)만 주소를 알려 준다. 없을 때 알려 주면 "안전하지 않음" 경고가 뜨는 주소를 안내하게 된다.
+ * 서버가 정하는 값이지만 https 주소가 아니면(설정 실수) 안내하지 않고, 페이지에 넣을 때도 이스케이프한다.
+ *
+ * 자리가 남은 링크([join])면 웹 앱 주소에 이 초대 코드를 붙여(`?invite=<코드>`) 알려 준다 — 사내 와이파이 밖에서는 초대 코드를
+ * 함께 보내야 가입되는데(auth.js /register), 웹 앱은 그 코드를 주소에서 꺼내 가입할 때 보낸다(client web_launch_invite.dart).
+ * 초대받은 아이폰 사용자는 대개 밖에서 이 페이지를 열기 때문이다. 팀 초대면 그 코드로 팀 자동 합류·등급도 앱과 똑같이 받는다.
+ * 인원이 다 찬 링크는 가입에 못 쓰니 코드 없이 로그인 주소로만 알려 준다.
+ */
+function iphoneWebSection(webUrl, { join = true, token = null } = {}) {
+  if (typeof webUrl !== 'string' || !/^https:\/\/[^\s/]+/.test(webUrl)) return '';
+  const withInvite =
+    join && typeof token === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(token)
+      ? `${webUrl.endsWith('/') ? webUrl : `${webUrl}/`}?invite=${encodeURIComponent(token)}`
+      : webUrl;
+  const url = escapeHtml(withInvite);
+  const how = withInvite !== webUrl
+    ? '을 Safari로 열어 가입하고 홈 화면에 추가하세요.'
+    : '을 Safari로 열어 로그인하고 홈 화면에 추가하세요.';
+  const signupNote = withInvite !== webUrl
+    ? `
+          <p class="hint">처음 가입할 때는 꼭 이 주소로 여세요 — 초대 코드가 들어 있어 사내 와이파이 밖에서도 가입됩니다. 가입한 뒤에는 홈 화면의 웹 앱으로 로그인합니다.</p>`
+    : '';
+  return `
+        <div class="ios-web">
+          <p><b>아이폰은 앱 대신 웹 앱을 씁니다:</b> <a href="${url}">${url}</a> ${how}</p>
+          <p class="hint">Safari의 공유 버튼 → "홈 화면에 추가". 홈 화면에서 열어야 새 메시지 알림도 받을 수 있습니다.</p>${signupNote}
+        </div>`;
+}
 
 /** <h1>+body(유효성에 따라 달라짐)를 받아 최종 HTML 문서로 조립한다. 연결할 수 있는 링크(=다운로드
  * 버튼이 있는 경우 — 가입 인원이 다 찬 링크 포함)일 때만 오른쪽에 다운로드 경고 가이드를 상시 노출하는
@@ -289,9 +327,14 @@ function renderInvitePageShell({ title, body, connectable, deepLink }) {
   // 앱이 열린다. focus가 아니라 visibilitychange를 쓰는 이유: 같은 브라우저 창 안에서 다른
   // 탭을 보고 있을 때는 이 탭이 여전히 hidden이라 재시도하지 않는 게 맞고(사용자가 안 보고
   // 있는데 "앱을 열까요?" 확인창이 뜨면 혼란스럽다), window focus만으로는 이 구분이 안 된다.
+  //
+  // 아이폰·아이패드에서는 시도하지 않는다 — 설치형 앱이 없어서(웹 앱을 쓴다 — iphoneWebSection) tangotalk:// 주소를 열려고 하면
+  // Safari가 "주소가 유효하지 않음" 경고창을 띄우고, 이 탭이 다시 보일 때마다 또 띄운다. 아이패드는 Safari가 Mac이라고
+  // 알려 오는 경우가 있어 터치 지점 수로 가린다(Mac은 0).
   const deepLinkScript = connectable
     ? `<script>
-function tryDeepLink() { try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {} }
+var noInstalledApp = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function tryDeepLink() { if (noInstalledApp) return; try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {} }
 tryDeepLink();
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState === 'visible') tryDeepLink();
@@ -318,8 +361,9 @@ const PUBLIC_WIFI_CAUTION = `<p class="net-caution"><b>⚠ 공용 와이파이(�
 /** 초대 링크를 열었을 때 보여주는 안내 페이지 — 자체 서명 인증서 경고 없이(평문 HTTP) 누구나
  * 열어볼 수 있어야 해서 인증/세션 없이 정적으로 그린다. [connectable]은 이 링크로 지금 연결·설치할 수
  * 있는지(invites.js의 inviteLinkConnectable — 만든 사람의 권한까지 DB로 봐야 해서 라우트가 미리 구해 넘긴다).
- * 가입 인원이 다 찬 링크도 연결·설치는 되므로 설치 안내는 그대로 두고, 가입만 마감됐다고 알린다. */
-export function renderInvitePage({ serverAddress, token, link, connectable, outside }) {
+ * 가입 인원이 다 찬 링크도 연결·설치는 되므로 설치 안내는 그대로 두고, 가입만 마감됐다고 알린다. [webUrl]은 아이폰
+ * 사용자에게 알려 줄 웹 앱 주소(iphoneWebSection) — 안 넘기면 지금 걸려 있는 공인 인증서 기준의 주소(없으면 null). */
+export function renderInvitePage({ serverAddress, token, link, connectable, outside, webUrl = getWebPublicUrl() }) {
   const title = 'TangoTalk 초대';
   // tangotalk:// 커스텀 스킴 — 앱이 이미 설치돼 있으면 이 링크로 바로 열리면서 서버 주소/코드가
   // 자동입력된다(설치 여부를 서버가 알 방법은 없으니, 그냥 시도해보고 반응이 없으면 — 즉 이
@@ -342,6 +386,7 @@ export function renderInvitePage({ serverAddress, token, link, connectable, outs
           <a class="btn" href="/invite/${token}/download/windows">Windows용 다운로드</a>
           <a class="btn" href="/invite/${token}/download/android">Android용 다운로드</a>
         </div>
+        ${iphoneWebSection(webUrl, { join, token })}
         ${renderPostInstallSteps('서버 주소와 코드가 자동으로 입력됩니다.', { join })}
         <details>
           <summary>자동으로 안 되면 직접 입력하기</summary>
@@ -358,8 +403,9 @@ export function renderInvitePage({ serverAddress, token, link, connectable, outs
  * 넣어준 teamName이 들어있다. [connectable]은 teamInvites.js의 teamInviteLinkConnectable 결과 —
  * 가입 인원이 다 찬 링크는 연결·설치 안내만 두고 자동 합류 약속은 빼고 마감됐다고 알린다. 그런 링크로 오는 사람은
  * 대개 이미 이 링크로 가입해 다른 기기를 연결하는 사람이라, "이미 계정이 있다면 팀에 자동 합류되지 않는다"는 안내도
- * 자리가 남은 링크에만 붙인다(설치 초대 페이지의 계정 안내와 같다). */
-export function renderTeamInvitePage({ serverAddress, token, link, connectable, outside }) {
+ * 자리가 남은 링크에만 붙인다(설치 초대 페이지의 계정 안내와 같다). 아이폰 안내([webUrl])도 설치 초대 페이지와 같고, 웹 앱으로
+ * 가입하면 팀에 자동으로 들어가지 않는다는 줄만 더한다(iphoneWebSection). */
+export function renderTeamInvitePage({ serverAddress, token, link, connectable, outside, webUrl = getWebPublicUrl() }) {
   const title = 'TangoTalk 팀 초대';
   const deepLink = `tangotalk://pair/?address=${encodeURIComponent(serverAddress)}&code=${encodeURIComponent(token)}`;
   const join = !!link && inviteLinkHasSeat(link);
@@ -381,6 +427,7 @@ export function renderTeamInvitePage({ serverAddress, token, link, connectable, 
           <a class="btn" href="/team-invite/${token}/download/windows">Windows용 다운로드</a>
           <a class="btn" href="/team-invite/${token}/download/android">Android용 다운로드</a>
         </div>
+        ${iphoneWebSection(webUrl, { join, token })}
         ${renderPostInstallSteps(
           join
             ? `서버 주소와 코드가 자동으로 입력되고, 가입하면 ${escapeHtml(link.teamName)} 팀에 자동으로 들어갑니다.`
@@ -412,8 +459,11 @@ export function downloadInstaller(req, res) {
  * 돌려준다. 사내망의 평문 페어링 서버(아래 startPairingServer)와, 사내망 밖(LTE/5G)에서도
  * 재페어링할 수 있게 메인 HTTPS 서버(index.js — 공유기에는 이 포트만 열려 있다) 양쪽에 붙인다.
  * HTTPS 쪽은 앱이 아직 이 인증서를 모르는 상태라 인증서 확인 없이 붙되, 응답에 실린 인증서가
- * 실제 TLS 연결의 인증서와 같은지 대조한다(client pinned_tls.dart). 코드 상태(5분·1회용·10번
- * 틀리면 무효)는 두 경로가 함께 쓴다.
+ * 실제 TLS 연결의 인증서와 같은지 대조한다(client pinned_tls.dart). 다만 중간에서 TLS를 대신 맺은 쪽이 자기 인증서를
+ * 본문에도 실어 보내면 이 대조로는 못 막는다 — 그래서 도메인(웹 앱 주소)을 설정한 서버는 같은 Express 앱을 공인
+ * 인증서(Let's Encrypt)로 웹 전용 HTTPS 포트에도 여는데, 서버 주소가 도메인 이름이면 앱이 그 이름의 443 포트에서 이
+ * 경로를 **보통의 인증서 검증**으로 먼저 물어본다. 거기서 받은 인증서는 공인 인증 기관이 확인한 연결로 온 것이라
+ * 바꿔치기될 수 없다. 코드 상태(5분·1회용·10번 틀리면 무효)는 모든 경로가 함께 쓴다.
  */
 export function createPairHandler(getCertPem) {
   return async (req, res) => {

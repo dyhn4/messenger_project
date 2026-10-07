@@ -66,7 +66,15 @@ export async function upsertDevice({ id, userId, name, identityPublicKey, signin
       // 상대에게 보이는 기기 id만 알면 그 기기를 가로채 상대의 비밀 대화를 깨고 푸시를 엉뚱하게 보낼 수
       // 있었다. 공용 PC에서 계정을 바꿔 로그인하면 여기서 null이 되고, 앱이 새 기기 id를 만들어 다시
       // 등록한다(client device_identity.dart).
-      setWhere: eq(devices.userId, userId),
+      // 키도 같아야 한다 — 앱은 기기 id와 키를 늘 함께 만들어서(키를 잃으면 새 id) 같은 id의 키가 바뀔 일이 없다.
+      // 상대 앱들은 이 기기의 서명 키를 처음 본 값으로 고정해 두므로(비밀 대화 키 고정), 로그인을 훔친 사람이 같은
+      // id에 다른 키를 올려 두면 그 기기와의 비밀 대화가 모두 멈춘다. 그래서 바뀐 키는 받지 않는다(같은 409라 앱은
+      // 위와 같이 새 기기 id로 다시 등록한다).
+      setWhere: and(
+        eq(devices.userId, userId),
+        eq(devices.identityPublicKey, identityPublicKey),
+        eq(devices.signingPublicKey, signingPublicKey),
+      ),
     })
     .returning();
   return row ?? null;

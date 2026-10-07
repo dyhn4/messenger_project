@@ -39,6 +39,17 @@ class DeviceIdentity {
     if (_deviceId != null) return;
 
     var deviceId = await _storage.read(key: _kDeviceId);
+    if (deviceId != null &&
+        (await _storage.read(key: _kIdentitySeed) == null ||
+            await _storage.read(key: _kSigningSeed) == null)) {
+      // 기기 id와 키는 늘 함께 만들고 함께 버린다 — 상대 앱은 기기 id 하나에 서명 키 하나를 고정해 두어서
+      // (secret_peer_store.dart), 키만 사라진 채 같은 id로 새 키를 등록하면 상대 쪽에서는 "같은 기기의 키가
+      // 바뀌었다"(가로채기 의심)가 되어 그 기기와의 비밀 대화가 영영 막힌다. 새 id로 새로 시작한다.
+      await _storage.delete(key: _kIdentitySeed);
+      await _storage.delete(key: _kSigningSeed);
+      await _storage.delete(key: _kDeviceId);
+      deviceId = null;
+    }
     if (deviceId == null) {
       deviceId = const Uuid().v4();
       await _storage.write(key: _kDeviceId, value: deviceId);

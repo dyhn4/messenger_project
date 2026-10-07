@@ -16,6 +16,7 @@
     "pair": "node scripts/pair.mjs"
   },
   "dependencies": {
+    "acme-client": "^5.4.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",

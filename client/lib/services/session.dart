@@ -53,6 +53,7 @@ import 'todo_actions.dart';
 import 'fcm_config_cache.dart';
 import 'room_chat_controller.dart';
 import 'secret_key_store.dart' show SecretCachedTextInfo, SecretTextRef;
+import 'secret_peer_store.dart' show SecretRoomTrust, SecretSafetyInfo;
 import 'secret_session_manager.dart';
 import 'server_endpoints.dart';
 import 'typing_gate.dart';
@@ -323,6 +324,14 @@ class Session extends ChangeNotifier {
     _secretSessionManager?.dispose();
     _secretSessionManager = manager;
     manager?.onExpiredTextsPurged = _handleExpiredSecretTexts;
+    // 방의 보안 상태(멈춤·예전 앱·상대 기기 바뀜·보안 코드 확인)가 바뀌면 방 안내와 더보기 메뉴를 다시 그린다.
+    manager?.onTrustChanged = (_) => notifyListeners();
+    // 서버가 같은 상대 기기를 다른 키로 알려 와 그 기기와의 다른 비밀 대화까지 함께 멈췄을 때 — 그 방들도 알린다.
+    manager?.onRoomsBlocked = (roomIds) {
+      for (final roomId in roomIds) {
+        _announceSecretOutcome(roomId, SecretHandshakeOutcome.blocked);
+      }
+    };
   }
 
   /// 지금 보내는 비밀 대화 읽음 신호(secret:message-read)가 바로 서버에 닿는지 — 소켓이 끊겨 있으면 신호는 다시
@@ -1411,6 +1420,9 @@ class Session extends ChangeNotifier {
       api!,
       chatSocket,
       deviceIdentity!,
+      userId: userId,
+      // 초대·수락을 보낸 사람이 그 방의 상대인지 보고, 예전에 성립한 대화를 상대 기기에 묶는 데 방 정보를 쓴다.
+      roomLookup: _findRoom,
     );
     // 방금 받은 방 목록의 마지막 활동 시각(서버 시계) — 비밀 대화 평문 정리가 서버의 지금을 어림하는 첫 값이다.
     _noteServerTimesOfRooms(rooms);
@@ -1427,6 +1439,20 @@ class Session extends ChangeNotifier {
     // 저장소는 쓸 때마다 파일 하나를 통째로 다시 써서 겹치면 한쪽이 사라질 수 있다.
     unawaited(secretSessionManager!.purgeExpiredTexts());
     unawaited(syncSecretTextCaches());
+    // 이 업데이트 전에 성립한 비밀 대화는 상대 기기를 이 기기에 묶어 둔 기록이 없다 — 재키잉이 오기 전에 방 정보로
+    // 상대 기기를 찾아 고정해 둔다(못 하면 재키잉·보안 코드 화면에서 다시 해 본다). 기기 등록 뒤에 한다(같은 이유).
+    unawaited(
+      secretSessionManager!
+          .bootstrapBindings([
+            for (final r in rooms)
+              if (r.isSecret && r.secretStatus == 'active') r.id,
+          ])
+          .then((blocked) {
+            for (final roomId in blocked) {
+              _announceSecretOutcome(roomId, SecretHandshakeOutcome.blocked);
+            }
+          }),
+    );
     unawaited(_registerFcmToken());
     unawaited(_registerWebPush());
 
@@ -1732,12 +1758,22 @@ class Session extends ChangeNotifier {
     });
     _secretAcceptedSub?.cancel();
     _secretAcceptedSub = chatSocket.secretAccepted.listen((e) async {
-      await secretSessionManager?.handleAccepted(e);
+      // 내가(다른 기기에서라도) 이 초대에 응답했다 — 이 기기에 남은 수락/거절 요청은 더 띄우지 않는다.
+      if (e.responderUserId != null && e.responderUserId == userId) {
+        pendingSecretInvites.removeWhere((i) => i.roomId == e.roomId);
+      }
+      SecretHandshakeOutcome? outcome;
+      try {
+        outcome = await secretSessionManager?.handleAccepted(e);
+      } catch (_) {
+        // 상대 기기 키를 묻지 못함(오프라인 등) — 이 기기에서는 대화가 준비되지 않은 채로 남는다.
+      }
       final room = _findRoom(e.roomId);
       if (room != null) {
         room.secretStatus = 'active';
         notifyListeners();
       }
+      if (outcome != null) _announceSecretOutcome(e.roomId, outcome);
     });
     _secretRejectedSub?.cancel();
     _secretRejectedSub = chatSocket.secretRejected.listen((e) async {
@@ -1793,12 +1829,22 @@ class Session extends ChangeNotifier {
       _controllers[e.roomId]?.applyExpire(e.messageId);
     });
     _secretRekeyProposeSub?.cancel();
-    _secretRekeyProposeSub = chatSocket.secretRekeyPropose.listen((e) {
-      secretSessionManager?.handleRekeyPropose(e);
+    _secretRekeyProposeSub = chatSocket.secretRekeyPropose.listen((e) async {
+      final manager = secretSessionManager;
+      if (manager == null) return;
+      try {
+        _announceSecretOutcome(e.roomId, await manager.handleRekeyPropose(e));
+      } catch (_) {
+        // 상대 기기 키를 묻지 못함 등 — 상대가 다시 제안하면 그때 처리한다.
+      }
     });
     _secretRekeyAckSub?.cancel();
-    _secretRekeyAckSub = chatSocket.secretRekeyAck.listen((e) {
-      secretSessionManager?.handleRekeyAck(e);
+    _secretRekeyAckSub = chatSocket.secretRekeyAck.listen((e) async {
+      final manager = secretSessionManager;
+      if (manager == null) return;
+      try {
+        _announceSecretOutcome(e.roomId, await manager.handleRekeyAck(e));
+      } catch (_) {}
     });
     _reconnectSub?.cancel();
     _reconnectSub = chatSocket.reconnected.listen((_) {
@@ -2313,16 +2359,92 @@ class Session extends ChangeNotifier {
     return room;
   }
 
+  /// 비밀 대화 초대를 수락한다 — 상대 기기의 보안 확인에 실패하면 대화를 시작하지 않고 그 방을 멈춘다(방 안내가
+  /// 이유와 할 일을 알려 준다). 수락을 보내지 못했으면 토스트로 알린다.
   Future<void> acceptSecretInvite(SecretInviteEvent invite) async {
     pendingSecretInvites.remove(invite);
-    final ok = await secretSessionManager!.acceptInvite(invite);
-    if (!ok) {
-      error = '상대 기기의 서명을 확인할 수 없어 비밀 대화를 시작할 수 없습니다.';
+    final SecretHandshakeOutcome outcome;
+    try {
+      outcome = await secretSessionManager!.acceptInvite(invite);
+    } catch (e) {
+      notifyListeners();
+      _showToast('비밀 대화를 수락하지 못했습니다: $e');
+      return;
     }
     final room = _findRoom(invite.roomId);
-    if (room != null && ok) room.secretStatus = 'active';
+    if (room != null &&
+        (outcome == SecretHandshakeOutcome.established ||
+            outcome == SecretHandshakeOutcome.establishedOnChangedDevice)) {
+      room.secretStatus = 'active';
+    }
     notifyListeners();
+    _announceSecretOutcome(invite.roomId, outcome);
   }
+
+  /// 핸드셰이크·재키잉 결과 중 사용자가 알아야 할 것(보안 확인 실패로 멈춤, 상대 기기 바뀜)을 토스트로 알린다 —
+  /// 그 방을 보고 있지 않아도 알게. 자세한 안내와 할 일은 방 안의 안내 줄에 있다.
+  void _announceSecretOutcome(String roomId, SecretHandshakeOutcome outcome) {
+    final room = _findRoom(roomId);
+    final who = room == null ? '' : "'${room.displayName(userId ?? '')}' ";
+    switch (outcome) {
+      case SecretHandshakeOutcome.blocked:
+        _showToast('$who비밀 대화: 상대 기기의 보안 확인에 실패해 대화를 멈췄습니다. 대화방의 안내를 확인해 주세요.');
+      case SecretHandshakeOutcome.establishedOnChangedDevice:
+        _showToast(
+          '$who비밀 대화: 상대의 기기가 바뀌었습니다. 더보기의 "보안 코드 확인"에서 보안 코드를 다시 비교해 주세요.',
+        );
+      case SecretHandshakeOutcome.established:
+      case SecretHandshakeOutcome.ignored:
+        break;
+    }
+  }
+
+  /// 비밀 대화방의 신뢰 상태(멈춤·예전 앱·상대 기기 바뀜·보안 코드 확인) — [loadSecretTrust]로 읽어 둔 값.
+  SecretRoomTrust? secretTrustOf(String roomId) =>
+      secretSessionManager?.trustOf(roomId);
+
+  /// 비밀 대화방의 신뢰 상태를 읽어 둔다(방을 열 때) — 바뀌면 다시 그리도록 알린다.
+  Future<void> loadSecretTrust(String roomId) async {
+    try {
+      await secretSessionManager?.loadTrust(roomId);
+    } catch (_) {
+      // 저장소를 못 읽으면 안내 없이 둔다 — 보내기는 매니저가 저장소에서 다시 확인한다.
+    }
+  }
+
+  /// 비밀 대화방의 보안 코드(상대 기기가 아직 묶이지 않았으면 null).
+  Future<SecretSafetyInfo?> secretSafetyInfo(String roomId) async =>
+      secretSessionManager?.safetyInfo(roomId);
+
+  /// 보안 코드를 비교해 확인했다고 표시하거나 지운다.
+  Future<void> setSecretPeerVerified(String roomId, bool verified) async {
+    await secretSessionManager?.setPeerVerified(roomId, verified);
+  }
+
+  Future<void> dismissSecretLegacyNotice(String roomId) async {
+    await secretSessionManager?.dismissLegacyNotice(roomId);
+  }
+
+  Future<void> dismissSecretDeviceChangedNotice(String roomId) async {
+    await secretSessionManager?.dismissDeviceChangedNotice(roomId);
+  }
+
+  /// "상대 기기 키 다시 받기" — 이 비밀 대화방의 상대 기기를 이 기기에 고정해 둔 키를 지우고, 그 키로 맺은 비밀 대화를
+  /// 모두 멈춘다(확인 창은 화면이 띄운다). 다음 새 비밀 대화에서 그 기기의 키를 새로 받는다. 지웠으면 true.
+  Future<bool> resetSecretPeerKey(String roomId) async {
+    final deviceId = await secretSessionManager?.resetPeerDevicePin(roomId);
+    notifyListeners();
+    return deviceId != null;
+  }
+
+  /// 이 초대를 보낸 기기가, 이 기기가 보안 코드를 확인하지 않은 기기인데 같은 사람의 다른 기기는 확인한 적이
+  /// 있는지 — 초대 대화상자가 "상대의 기기가 바뀌었다"고 미리 알린다.
+  Future<bool> secretInviteFromChangedDevice(SecretInviteEvent invite) async =>
+      await secretSessionManager?.isUnverifiedDeviceOfVerifiedPeer(
+        invite.initiatorUserId,
+        invite.initiatorDeviceId,
+      ) ??
+      false;
 
   Future<void> rejectSecretInvite(SecretInviteEvent invite) async {
     pendingSecretInvites.remove(invite);
@@ -2344,6 +2466,8 @@ class Session extends ChangeNotifier {
     if (room.secretInitiatorUserId == userId) return;
     if (pendingSecretInvites.any((e) => e.roomId == roomId)) return;
     try {
+      // 보안 확인에 실패해 멈춘 초대는 다시 묻지 않는다 — 수락해도 같은 이유로 다시 멈춘다(방 안내가 할 일을 알려 준다).
+      if (await secretSessionManager?.isBlocked(roomId) == true) return;
       final invite = await api!.fetchSecretInvite(roomId);
       if (pendingSecretInvites.any((e) => e.roomId == invite.roomId)) return;
       pendingSecretInvites.add(invite);

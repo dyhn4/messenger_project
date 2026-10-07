@@ -110,7 +110,13 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
   Future<void> _copyAndNotify(TeamInviteLink link) async {
     if (link.url == null) return;
     await Clipboard.setData(
-      ClipboardData(text: inviteShareText(link.url!, link.externalUrl)),
+      ClipboardData(
+        text: inviteShareText(
+          link.url!,
+          link.externalUrl,
+          inviteToken: link.token,
+        ),
+      ),
     );
     if (!mounted) return;
     showAppToast(context, '링크를 복사했습니다. 원하는 곳에 붙여넣어 보내세요.');

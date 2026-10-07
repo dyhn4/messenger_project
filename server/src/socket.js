@@ -33,6 +33,7 @@ import { listCoTeamMemberIds } from './db/queries/teams.js';
 import { markRoomNotificationsRead } from './notifications.js';
 import { findSecretSessionByRoomId, insertSecretRekey, ackSecretRekey, bumpSecretSessionEpoch } from './db/queries/secretSessions.js';
 import { findUserById } from './db/queries/users.js';
+import { parseRekeyPayload, rekeyAckRelay, rekeyProposeRelay } from './secretContextRules.js';
 import { messageRateLimitText, messageSendLimiter, sendCarriesFiles } from './messageLimits.js';
 import { broadcastPresence, markConnected, markDisconnected } from './presence.js';
 import { notifyIncomingCall, roomTagFor } from './push.js';
@@ -172,49 +173,41 @@ export function registerSocket(io) {
     });
 
     // 재키잉 제안/수락 중계 — 서버는 공개키/서명만 보고 그대로 상대에게 전달할 뿐, 공유비밀
-    // 계산은 양쪽 클라이언트가 각자 로컬에서 한다.
-    // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature }
+    // 계산은 양쪽 클라이언트가 각자 로컬에서 한다. 맥락 서명(ephemeralContextSignature)도 검증하지 않고 모양만 본 뒤
+    // 저장·전달한다 — 받는 앱이 상대 기기 키로 검증한다(secretContextRules.js). 예전 앱은 안 보내서 null로 넘어간다.
+    // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }
     socket.on('secret:rekey-propose', async (payload) => {
-      const room = await findRoomById(payload?.roomId);
+      // 모양이 틀린 payload(맥락 서명 모양이 틀린 것 포함)는 DB를 보기 전에 버린다.
+      const rekey = parseRekeyPayload(payload);
+      if (!rekey) return;
+      const room = await findRoomById(rekey.roomId);
       if (!room || !room.isSecret || !(await isRoomMember(room.id, socket.data.userId))) return;
-      const { keyEpoch, ephemeralPublicKey, ephemeralSignature } = payload ?? {};
-      if (!Number.isInteger(keyEpoch) || !ephemeralPublicKey || !ephemeralSignature) return;
 
       await insertSecretRekey({
         roomId: room.id,
-        keyEpoch,
+        keyEpoch: rekey.keyEpoch,
         proposerUserId: socket.data.userId,
-        proposerEphemeralPublicKey: ephemeralPublicKey,
-        proposerEphemeralSignature: ephemeralSignature,
+        proposerEphemeralPublicKey: rekey.ephemeralPublicKey,
+        proposerEphemeralSignature: rekey.ephemeralSignature,
+        proposerContextSignature: rekey.contextSignature,
       });
-      socket.to(room.id).emit('secret:rekey-propose', {
-        roomId: room.id,
-        keyEpoch,
-        proposerUserId: socket.data.userId,
-        proposerEphemeralPublicKey: ephemeralPublicKey,
-        proposerEphemeralSignature: ephemeralSignature,
-      });
+      socket.to(room.id).emit('secret:rekey-propose', rekeyProposeRelay(room.id, socket.data.userId, rekey));
     });
 
-    // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature }
+    // payload: { roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }
     socket.on('secret:rekey-ack', async (payload) => {
-      const room = await findRoomById(payload?.roomId);
+      const rekey = parseRekeyPayload(payload);
+      if (!rekey) return;
+      const room = await findRoomById(rekey.roomId);
       if (!room || !room.isSecret || !(await isRoomMember(room.id, socket.data.userId))) return;
-      const { keyEpoch, ephemeralPublicKey, ephemeralSignature } = payload ?? {};
-      if (!Number.isInteger(keyEpoch) || !ephemeralPublicKey || !ephemeralSignature) return;
 
-      await ackSecretRekey(room.id, keyEpoch, {
-        responderEphemeralPublicKey: ephemeralPublicKey,
-        responderEphemeralSignature: ephemeralSignature,
+      await ackSecretRekey(room.id, rekey.keyEpoch, {
+        responderEphemeralPublicKey: rekey.ephemeralPublicKey,
+        responderEphemeralSignature: rekey.ephemeralSignature,
+        responderContextSignature: rekey.contextSignature,
       });
-      await bumpSecretSessionEpoch(room.id, keyEpoch);
-      io.to(room.id).emit('secret:rekey-ack', {
-        roomId: room.id,
-        keyEpoch,
-        responderUserId: socket.data.userId,
-        responderEphemeralPublicKey: ephemeralPublicKey,
-        responderEphemeralSignature: ephemeralSignature,
-      });
+      await bumpSecretSessionEpoch(room.id, rekey.keyEpoch);
+      io.to(room.id).emit('secret:rekey-ack', rekeyAckRelay(room.id, socket.data.userId, rekey));
     });
 
     // ── 화상회의 신호 ──────────────────────────────────────────────────────

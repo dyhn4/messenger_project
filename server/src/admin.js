@@ -12,6 +12,7 @@ import { clearPushTargetsForUser } from './db/queries/devices.js';
 import { countMessages, countMessagesToday, countRooms, countTeams } from './db/queries/stats.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
 import { invalidateMessagingCache } from './push.js';
+import { getWebCertificateStatus } from './webTls.js';
 import {
   deletePositionOption,
   findPositionOptionByLabel,
@@ -91,6 +92,15 @@ export function createAdminRouter(io) {
       orgScope: settings.orgScope,
       projectCreation: settings.projectCreation,
     });
+  });
+
+  /**
+   * 웹 앱 전용 주소(.env WEB_DOMAIN)의 공인 인증서(Let's Encrypt) 상태 — 발급·갱신은 서버가 알아서 하고 여기서는 보기만 한다.
+   * { enabled, domain, status: 'off'|'pending'|'valid'|'expiring'|'error', staging, expiresAt, lastAttemptAt, lastError,
+   *   nextAttemptAt, challenges: { http01, tlsAlpn01 }, webUrl, … }(시각은 ms) — 자세한 뜻은 webTls.js getWebCertificateStatus.
+   */
+  router.get('/admin/web-certificate', (req, res) => {
+    res.json(getWebCertificateStatus());
   });
 
   /** 서버 설정 변경(팀 생성 권한 / 팀 초대 링크 생성 권한 / 프로젝트 생성 권한 / 팀·직책 관리 범위). */

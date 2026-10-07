@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseExternalAddress } from './externalAddress.js';
+import { readWebTlsConfig } from './webTlsConfig.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.join(__dirname, '..');
@@ -64,8 +65,25 @@ export const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(rootDir, 'upload
 
 // 웹 앱(아이폰 등 앱이 없는 기기용) 빌드 결과물 폴더 — client에서 `flutter build web`으로 만든
 // build/web의 내용을 여기에 넣으면 서버 주소(https://서버:3000/)로 바로 열린다. 폴더가 없으면 웹
-// 앱만 꺼진다. 웹 앱은 브라우저가 TLS를 검증하므로 서버에 공인 인증서가 있어야 제대로 쓸 수 있다.
+// 앱만 꺼진다. 웹 앱은 브라우저가 TLS를 검증하므로 공인 인증서가 있어야 제대로 쓸 수 있다 — 아래
+// WEB_DOMAIN을 정하면 그 도메인으로 공인 인증서(Let's Encrypt)가 걸린 웹 전용 포트가 따로 열린다.
 export const WEB_DIR = process.env.WEB_DIR || path.join(rootDir, 'web');
+
+// 웹 앱 전용 HTTPS 포트(webTls.js) — WEB_DOMAIN(예: xxx.iptime.org)을 정하면 같은 앱을 WEB_HTTPS_PORT(기본 443)에서 Let's
+// Encrypt 인증서로 한 번 더 열고, 인증서를 자동으로 받고 갱신한다(확인용 HTTP 포트 ACME_HTTP_PORT, 기본 80 — 0이면 끔). 비워 두면
+// 이 기능 전체가 꺼지고 아무것도 달라지지 않는다. 메인 포트(PORT — 앱이 핀닝한 자체 서명 인증서)는 그대로다. 값이 잘못됐으면
+// 서버를 못 뜨게 하는 대신 이 기능만 끄거나(도메인·웹 포트) 그 값만 빼고(나머지) 콘솔에 크게 알린다.
+const webTlsConfig = readWebTlsConfig(process.env, { port: PORT, pairingPort: PAIRING_PORT });
+for (const warning of webTlsConfig.warnings) console.warn(`[config] ⚠ ${warning}`);
+if (webTlsConfig.error) console.error(`[config] ⚠ ${webTlsConfig.error} — 웹 앱 전용 포트(WEB_DOMAIN) 없이 실행합니다.`);
+export const WEB_DOMAIN = webTlsConfig.domain;
+export const WEB_HTTPS_PORT = webTlsConfig.httpsPort;
+export const ACME_HTTP_PORT = webTlsConfig.httpPort;
+export const ACME_EMAIL = webTlsConfig.email;
+// 1이면 Let's Encrypt 시험용(staging) 디렉터리 — 브라우저가 신뢰하지 않는 인증서지만 발급 한도 걱정 없이 포트포워딩을 확인할 수 있다.
+export const ACME_STAGING = webTlsConfig.staging;
+// WEB_DOMAIN을 적었는데 잘못돼서 꺼졌을 때의 이유(관리자 콘솔 상태에 보여 준다). 정상이거나 안 적었으면 null.
+export const WEB_TLS_CONFIG_ERROR = webTlsConfig.error;
 
 // JWT 서명용 비밀키.
 export const JWT_SECRET = resolveSecret('JWT_SECRET', '.jwt-secret', 48);

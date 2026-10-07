@@ -135,8 +135,8 @@ $form.Controls.Add($addressBox)
 
 $hintLabel = New-Object System.Windows.Forms.Label
 $hintLabel.Text = "공유기에서 이 PC로 포워딩할 포트: TCP $ServerPort(메신저·재페어링·화상회의 접속), " +
-    "화상회의 영상·음성용 UDP $MediaUdp와 TCP $MediaTcp(같은 번호로).`n" +
-    "초대 링크 안내 페이지도 밖에서 열려면 TCP $PairingPort도(밖에서는 안내 페이지·설치 파일만 열리고 페어링은 막힘)."
+    "화상회의 영상·음성용 UDP $($MediaUdp)와 TCP $MediaTcp(같은 번호로).`n" +
+    "초대 링크 안내 페이지도 밖에서 열려면 TCP $($PairingPort)도(밖에서는 안내 페이지·설치 파일만 열리고 페어링은 막힘)."
 $hintLabel.ForeColor = [System.Drawing.Color]::Gray
 $hintLabel.Location = New-Object System.Drawing.Point(15, 108)
 $hintLabel.Size = New-Object System.Drawing.Size(470, 64)

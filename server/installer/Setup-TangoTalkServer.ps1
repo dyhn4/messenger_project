@@ -149,6 +149,26 @@ function Set-NodeServiceProductionEnv {
   }
 }
 
+# 웹 앱 주소(정식 인증서)용 방화벽 규칙을 이름으로 지우고, 포트가 0이 아니면 다시 만든다. Web-Domain.ps1에도 똑같이 들어 있다 —
+# 고치면 둘 다 고치고 tests\Web-Domain.Tests.ps1을 돌릴 것(둘이 같은지도 본다). 이 규칙 이름은 messenger-server.iss의
+# [UninstallRun](일반 제거)도 지운다.
+# - 지운 뒤 다시 만든다 — netsh는 같은 이름의 규칙을 여러 개 만들 수 있어서, 포트를 바꿔 다시 실행해도 규칙이 하나만 남게.
+# - 메인·페어링 규칙은 포트만 보지만, 이 둘은 IIS 같은 다른 프로그램도 흔히 쓰는 443·80이라 이 서버의 node.exe로만 좁힌다 — 나중에
+#   이 PC에 웹 서버가 깔려도 이 규칙 때문에 그 서버가 밖에 열리지 않게.
+function Set-WebFirewallRules {
+  param([int]$WebPort, [int]$AcmePort)
+  foreach ($rule in @(
+      @{ Name = 'TangoTalk Server (web)'; Port = $WebPort },
+      @{ Name = 'TangoTalk Server (web-acme)'; Port = $AcmePort }
+    )) {
+    netsh advfirewall firewall delete rule name="$($rule.Name)" | Out-Null
+    if ($rule.Port -gt 0) {
+      netsh advfirewall firewall add rule name="$($rule.Name)" dir=in action=allow protocol=TCP localport=$($rule.Port) program="$NodeExe" | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "방화벽 규칙($($rule.Name), TCP $($rule.Port))을 만들지 못했습니다(netsh 종료 코드 $LASTEXITCODE)." }
+    }
+  }
+}
+
 # 본문 전체를 try/catch로 감싼다 — 이 안 어디서든(Fail을 명시적으로 부르지 않은 예상 밖 오류
 # 포함) 예외가 나면 여기서 잡아서 반드시 로그+오류 창으로 남긴다. 이게 없으면(예전 버전)
 # $ErrorActionPreference='Stop' 때문에 예상 못 한 오류가 스크립트를 그냥 조용히 죽여버리고
@@ -401,6 +421,27 @@ netsh advfirewall firewall delete rule name="TangoTalk LiveKit (turn)" | Out-Nul
 netsh advfirewall firewall add rule name="TangoTalk LiveKit (turn)" dir=in action=allow protocol=UDP localport="$LiveKitTurnPort,30000-40000" | Out-Null
 
 Write-Log "6/7 방화벽 규칙 적용됨 (앱 $appPort/$pairingPort, 화상회의 $LiveKitPort/$LiveKitTcpPort + UDP)"
+
+# 웹 앱 주소(정식 인증서 — Web-Domain.ps1)를 켜 둔 서버면 그 포트 규칙도 다시 맞춘다. 일반 제거([UninstallRun])는 이 규칙을 지우지만
+# .env는 남기므로, 제거 뒤 같은 경로에 다시 설치하면 여기서 되살려야 인증서 발급과 아이폰 접속이 다시 된다. 꺼져 있으면(WEB_DOMAIN이
+# 비었으면) 남은 규칙을 지운다. 포트 기본값은 서버와 같다(웹 443, 인증용 HTTP 80 — 0이면 그 규칙 없음). 선택 기능이라 실패해도 설치는
+# 멈추지 않고 경고만 남긴다(관리자는 시작 메뉴 "웹 앱 주소(정식 인증서)"에서 다시 적용할 수 있다).
+$webDomain = ''
+$webDomainLine = @(Get-Content $EnvFile | Where-Object { $_ -match '^\s*(export\s+)?WEB_DOMAIN\s*=' }) | Select-Object -Last 1
+if ($webDomainLine -match '=\s*["'']?([^"''#\s]*)') { $webDomain = $Matches[1] }
+$webHttpsPort = 0
+$acmeHttpPort = 0
+if ($webDomain) {
+  $webHttpsPort = Get-EnvIntValue -Name 'WEB_HTTPS_PORT' -Default 443
+  $acmeHttpPort = Get-EnvIntValue -Name 'ACME_HTTP_PORT' -Default 80
+}
+try {
+  Set-WebFirewallRules -WebPort $webHttpsPort -AcmePort $acmeHttpPort
+  if ($webDomain) { Write-Log "  웹 앱 주소($webDomain) 방화벽 규칙 적용됨 (웹 $webHttpsPort, 인증용 HTTP $acmeHttpPort — 0이면 안 씀)" }
+} catch {
+  Write-SetupWarning ("웹 앱 주소(정식 인증서)용 방화벽 규칙을 맞추지 못했습니다: $($_.Exception.Message) — " +
+    '시작 메뉴 "웹 앱 주소(정식 인증서)"에서 [적용]을 다시 누르세요.')
+}
 
 # ── 7. 실행 방식 등록 ────────────────────────────────────────────────────
 # LiveKit은 콘솔 모드/서비스 모드와 무관하게 항상 백그라운드 서비스로 돌린다 — 화상회의는

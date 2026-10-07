@@ -169,10 +169,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _secretInviteDialogShowing = false;
         return;
       }
+      // 예전에 보안 코드를 확인한 상대가 그때와 다른 기기로 요청했으면 미리 알린다(수락하면 방 안에도 안내가 뜬다).
+      final changedDevice = await widget.session.secretInviteFromChangedDevice(
+        invite,
+      );
+      if (!mounted) {
+        _secretInviteDialogShowing = false;
+        return;
+      }
+      // 확인하는 사이 다른 기기에서 응답했으면(secret:accepted) 이 요청은 띄우지 않고 다음 것을 본다.
+      if (!widget.session.pendingSecretInvites.contains(invite)) {
+        _secretInviteDialogShowing = false;
+        _maybeShowSecretInvite();
+        return;
+      }
       final accept = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
+          // "상대 기기가 바뀜" 안내가 붙으면 길어진다 — 낮은 화면에서도 넘치지 않게.
+          scrollable: true,
           title: const Row(
             children: [
               Icon(Icons.lock_outline, color: Colors.green),
@@ -180,8 +196,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Text('비밀 대화 요청'),
             ],
           ),
-          content: const Text(
-            '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
+              ),
+              if (changedDevice) ...[
+                const SizedBox(height: 12),
+                Row(
+                  key: const ValueKey('secret-invite-device-changed'),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.phonelink_lock_outlined,
+                      size: 18,
+                      color: Colors.amber.shade800,
+                    ),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        '상대의 기기가 바뀌었습니다 — 예전에 보안 코드를 확인한 기기가 아닌 다른 기기에서 보낸 요청입니다. '
+                        '수락한 뒤 더보기의 "보안 코드 확인"에서 상대와 보안 코드를 다시 비교해 주세요.',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
           ),
           actions: [
             TextButton(

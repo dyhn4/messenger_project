@@ -20,6 +20,7 @@ final _ed25519 = Ed25519();
 final _hkdf32 = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
 final _aesGcm = AesGcm.with256bits();
 final _sha256 = Sha256();
+final _sha512 = Sha512();
 
 Future<List<int>> _saltFor(String roomId) async =>
     (await _sha256.hash(utf8.encode('secretchat-v1|$roomId'))).bytes;
@@ -196,8 +197,11 @@ Future<Uint8List?> decryptAttachment({
 }
 
 /// 핸드셰이크/재키잉의 임시 공개키를 기기 장기 신원키(Ed25519)로 서명 — 서버가 (해킹되거나
-/// 악의적으로) 임시 공개키를 바꿔치기하는 중간자 공격을 막는다. 안전번호 비교 UI 없이 이
-/// 서명 검증만 자동으로 한다(사용자가 확정한 절충).
+/// 악의적으로) 임시 공개키를 바꿔치기하는 중간자 공격을 막는다.
+///
+/// 이것은 키 바이트만 서명하는 예전 형식(v1)이다 — 어느 방·누구·몇 번째 재키잉의 키인지는 서명에 들어가지
+/// 않아서, 서버가 서명된 키를 다른 세션에 다시 끼워 넣어도 서명은 맞는다. 그래서 지금은 아래 맥락 서명(v2)을
+/// 함께 보내고 상대가 v2를 보냈으면 v2만 확인한다. v1은 예전 앱이 계속 확인할 수 있게 함께 보낸다.
 Future<String> signEphemeralKey(
   SimpleKeyPair signingKeyPair,
   List<int> ephemeralPublicKeyBytes,
@@ -227,4 +231,174 @@ Future<bool> verifyEphemeralKey({
   } catch (_) {
     return false;
   }
+}
+
+// ---- 맥락 서명(v2) ----
+//
+// 임시 공개키만이 아니라 "어느 방에서, 누가(사용자·기기), 누구에게, 몇 번째 키로" 낸 키인지까지 한 줄로 이어
+// 서명한다 — 서버가 서명된 키를 다른 방·다른 epoch·다른 상대에게 다시 끼워 넣으면 받는 쪽이 만든 맥락과 달라
+// 검증이 실패한다. 받는 쪽은 서버가 준 값이 아니라 자기가 아는(자기 id, 고정해 둔 상대 기기, 방 id, epoch,
+// 자기 임시키) 값으로 맥락을 다시 만들어 확인한다. 형식은 서버와 함께 정한 약속이라 글자 하나도 바꾸면 안
+// 된다(공개키는 전송한 base64 문자열 그대로, id는 서버가 쓰는 문자열 그대로, '|'로 잇는다).
+
+/// 맥락 서명 문자열의 머리 — 이 앱 비밀 대화의 v2 서명이라는 표시(다른 용도의 서명과 섞이지 않게).
+const secretContextPrefix = 'tangotalk-secret-v2';
+
+/// 맥락의 칸 하나 — '|'가 들어 있으면 칸 경계가 흐려져(서로 다른 값 묶음이 같은 문자열이 될 수 있다) 받지 않는다.
+/// 실제 id(uuid)·base64 키·epoch에는 '|'가 없다. 서명 확인 쪽은 이 예외를 "검증 실패"로 다룬다.
+String _contextField(String value) {
+  if (value.contains('|')) {
+    throw ArgumentError.value(value, 'value', "맥락 서명 칸에는 '|'를 쓸 수 없습니다");
+  }
+  return value;
+}
+
+String _context(List<String> fields) =>
+    [secretContextPrefix, for (final f in fields) _contextField(f)].join('|');
+
+/// 초대(비밀 대화 시작) — 방이 아직 없을 때 서명하므로 방 id 대신 받는 사람을 넣는다.
+String secretInitContext({
+  required String initiatorUserId,
+  required String initiatorDeviceId,
+  required String responderUserId,
+  required String initiatorEphemeralPublicKey,
+}) => _context([
+  'init',
+  initiatorUserId,
+  initiatorDeviceId,
+  responderUserId,
+  initiatorEphemeralPublicKey,
+]);
+
+/// 수락 — 방 id와 양쪽 사용자·기기·임시키를 모두 묶는다(초대자는 자기 임시키가 들어 있어야 믿는다).
+String secretAcceptContext({
+  required String roomId,
+  required String initiatorUserId,
+  required String initiatorDeviceId,
+  required String initiatorEphemeralPublicKey,
+  required String responderUserId,
+  required String responderDeviceId,
+  required String responderEphemeralPublicKey,
+}) => _context([
+  'accept',
+  roomId,
+  initiatorUserId,
+  initiatorDeviceId,
+  initiatorEphemeralPublicKey,
+  responderUserId,
+  responderDeviceId,
+  responderEphemeralPublicKey,
+]);
+
+/// 재키잉 제안 — 방 id와 새 epoch를 묶어 지난 제안을 다시 보내도(재전송) 다른 epoch로는 통하지 않게 한다.
+String secretRekeyProposeContext({
+  required String roomId,
+  required int keyEpoch,
+  required String proposerUserId,
+  required String proposerDeviceId,
+  required String proposerEphemeralPublicKey,
+}) => _context([
+  'rekey-propose',
+  roomId,
+  '$keyEpoch',
+  proposerUserId,
+  proposerDeviceId,
+  proposerEphemeralPublicKey,
+]);
+
+/// 재키잉 수락 — 제안자의 임시키까지 묶어, 이 응답이 바로 그 제안에 대한 것임을 보인다.
+String secretRekeyAckContext({
+  required String roomId,
+  required int keyEpoch,
+  required String responderUserId,
+  required String responderDeviceId,
+  required String proposerEphemeralPublicKey,
+  required String responderEphemeralPublicKey,
+}) => _context([
+  'rekey-ack',
+  roomId,
+  '$keyEpoch',
+  responderUserId,
+  responderDeviceId,
+  proposerEphemeralPublicKey,
+  responderEphemeralPublicKey,
+]);
+
+/// 맥락 문자열(UTF-8)을 기기 장기 서명키(Ed25519)로 서명한다(base64, 64바이트).
+Future<String> signContext(SimpleKeyPair signingKeyPair, String context) async {
+  final signature = await _ed25519.sign(
+    utf8.encode(context),
+    keyPair: signingKeyPair,
+  );
+  return base64Encode(signature.bytes);
+}
+
+/// 맥락 서명을 확인한다 — 키·서명 모양이 틀리거나(길이·base64) 맞지 않으면 false.
+Future<bool> verifyContext({
+  required String signingPublicKeyBase64,
+  required String context,
+  required String signatureBase64,
+}) async {
+  try {
+    final publicKeyBytes = base64Decode(signingPublicKeyBase64);
+    final signatureBytes = base64Decode(signatureBase64);
+    if (publicKeyBytes.length != 32 || signatureBytes.length != 64) {
+      return false;
+    }
+    return await _ed25519.verify(
+      utf8.encode(context),
+      signature: Signature(
+        signatureBytes,
+        publicKey: SimplePublicKey(publicKeyBytes, type: KeyPairType.ed25519),
+      ),
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+// ---- 보안 코드(안전 번호) ----
+//
+// 서명은 "서버가 알려 준 그 기기 키"가 맞는지까지만 보장한다 — 처음 만난 기기의 키를 서버가 처음부터 자기
+// 키로 알려 주면 서명만으로는 알 수 없다. 그래서 두 기기의 (사용자, 기기, 서명 공개키)를 한 숫자로 줄여 양쪽
+// 화면에 보여 주고, 사람이 만나서·전화로 같은지 비교하게 한다. 같은 두 기기면 어느 쪽에서 계산해도 같은
+// 숫자가 나온다(두 항목을 정렬해서 잇는다).
+
+/// 보안 코드 묶음 수와 한 묶음의 자릿수 — 12묶음 × 5자리 = 60자리(4묶음씩 3줄로 보여 준다).
+const safetyNumberGroupCount = 12;
+const safetyNumberGroupDigits = 5;
+
+/// 한 묶음을 만드는 데 쓰는 해시 바이트 수(40비트) — 12묶음이면 SHA-512 64바이트 중 앞 60바이트.
+const _safetyGroupBytes = 5;
+
+/// 보안 코드의 한 기기 항목 — "사용자 id:기기 id:서명 공개키(base64)".
+String safetyNumberEntry({
+  required String userId,
+  required String deviceId,
+  required String signingPublicKey,
+}) => '$userId:$deviceId:$signingPublicKey';
+
+/// 두 기기 항목([entryA]·[entryB] — [safetyNumberEntry])의 보안 코드 12묶음(각 5자리 숫자 문자열).
+/// 항목 순서와 상관없이 같은 값이 나온다.
+///
+/// SHA-512("tangotalk-safety-v1|" + 정렬한 두 항목을 '|'로 이은 것)의 앞 60바이트를 5바이트씩 끊어, 각각을
+/// 빅엔디언 40비트 정수로 읽고 100000으로 나눈 나머지를 5자리로 채운다. 40비트를 비트 이동이 아니라 곱셈으로
+/// 쌓는다 — 웹(자바스크립트)에서는 비트 연산이 32비트로 잘린다(2^40은 곱셈으로는 정확히 담긴다).
+Future<List<String>> computeSafetyNumber(String entryA, String entryB) async {
+  final entries = [entryA, entryB]..sort();
+  final digest = (await _sha512.hash(
+    utf8.encode('tangotalk-safety-v1|${entries.join('|')}'),
+  )).bytes;
+  return [
+    for (var i = 0; i < safetyNumberGroupCount; i++)
+      _safetyGroup(digest, i * _safetyGroupBytes),
+  ];
+}
+
+String _safetyGroup(List<int> digest, int offset) {
+  var value = 0;
+  for (var j = offset; j < offset + _safetyGroupBytes; j++) {
+    value = value * 256 + digest[j];
+  }
+  return (value % 100000).toString().padLeft(safetyNumberGroupDigits, '0');
 }

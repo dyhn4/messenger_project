@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/message.dart';
+import 'secret_peer_store.dart';
 
 /// 비밀 대화 방 하나의 현재 래칫 상태. chainKey는 항상 "다음 메시지에 쓸" 체인키를 가리킨다
 /// (secret_chat_crypto.dart의 ratchet 함수가 매 메시지 후 이 자리를 갱신한다).
@@ -116,6 +117,34 @@ const _ownerField = 'owner';
 /// 이 계정으로 갈 수 있는 비밀 대화방 히스토리를 한 번 처음부터 다 훑어 예전 형식 평문을 옮겼다는
 /// 표시(secretcache-legacy/<계정 id>) — 다시 켤 때마다 전체 히스토리를 받지 않게 한다.
 const _legacySweptKeyPrefix = 'secretcache-legacy/';
+
+/// 상대 기기 고정(secretpin/<기기 id> — secret_peer_store.dart SecretDevicePin). 방별 키([_roomKeyPrefix])로 읽히면
+/// 안 된다 — 그러면 "목록에 없는 방"으로 보여 뒷정리가 지울 수 있다. 'secret/'·'secretcache/'·'secretmsg/'로 시작하지
+/// 않으므로 평문 캐시 색인·정리는 이 값을 건드리지 않고, 방이 없어져도(forgetRoom) 남는다.
+const _pinKeyPrefix = 'secretpin/';
+
+/// 방이 묶인 상대 기기(SecretRoomBinding)와 그 방의 보안 상태(SecretRoomSecurity) — 방별 키라 방이 없어지면 함께 지운다.
+const _peerField = 'peer';
+const _securityField = 'security';
+
+/// 내가 건 초대가 응답을 기다리는 동안 대기 중인 임시키와 함께 들고 있는 것 — 초대한 상대와 그때 쓴 이 기기 id.
+/// 상대가 수락하면 이걸로 수락 맥락 서명을 확인한다(서버가 알려 주는 "수락한 사람"을 그대로 믿지 않으려고).
+const _pendingInitField = 'pendingInit';
+
+/// 이 기기에 남은 방의 세션 키 상태(평문 캐시·계정 표시·보안 상태는 빼고) — 핸드셰이크를 되돌릴 때 지운다. 보안
+/// 상태([_securityField])는 멈춤을 지키며 따로 정리한다(clearSessionKeys).
+const _sessionKeyFields = [
+  'epoch',
+  'n',
+  'chainKey',
+  'prevEpoch',
+  'prevChainKeySnapshot',
+  'pendingEphemeralSeed',
+  _pendingInitField,
+  'pendingRekeyEpoch',
+  'pendingRekeySeed',
+  _peerField,
+];
 
 /// GET /rooms/:id/messages가 한 번에 주는 최대 개수(server/src/rooms.js — 더 달라고 해도 이만큼만 준다).
 const _serverHistoryPageMax = 200;
@@ -268,15 +297,26 @@ class SecretKeyStore {
   });
 
   /// 핸드셰이크/재키잉 중에는 REST 왕복 사이 이 기기의 임시 개인키(시드)를 잠깐 들고 있어야
-  /// 한다 — 상대가 응답하면 그때 공유비밀을 계산하고 즉시 지운다.
-  Future<void> savePendingEphemeralSeed(String roomId, List<int> seed) =>
-      _serial(() {
-        _keyedRoomIds.add(roomId);
-        return _storage.write(
-          key: _k(roomId, 'pendingEphemeralSeed'),
-          value: base64Encode(seed),
-        );
-      });
+  /// 한다 — 상대가 응답하면 그때 공유비밀을 계산하고 즉시 지운다. [targetUserId]·[myDeviceId]는 초대한 상대와
+  /// 그때의 이 기기 id — 수락이 오면 그 맥락 서명을 이 값으로 다시 만들어 확인한다.
+  Future<void> savePendingEphemeralSeed(
+    String roomId,
+    List<int> seed, {
+    String? targetUserId,
+    String? myDeviceId,
+  }) => _serial(() async {
+    _keyedRoomIds.add(roomId);
+    await _storage.write(
+      key: _k(roomId, 'pendingEphemeralSeed'),
+      value: base64Encode(seed),
+    );
+    if (targetUserId != null || myDeviceId != null) {
+      await _storage.write(
+        key: _k(roomId, _pendingInitField),
+        value: jsonEncode({'t': ?targetUserId, 'd': ?myDeviceId}),
+      );
+    }
+  });
 
   Future<List<int>?> readPendingEphemeralSeed(String roomId) =>
       _serial(() async {
@@ -284,9 +324,34 @@ class SecretKeyStore {
         return v == null ? null : base64Decode(v);
       });
 
-  Future<void> clearPendingEphemeralSeed(String roomId) => _serial(
-    () => _storage.delete(key: _k(roomId, 'pendingEphemeralSeed')),
-  );
+  /// 대기 중인 초대의 상대·이 기기 id([savePendingEphemeralSeed]). 이 값을 남기기 전(업데이트 전)에 건 초대거나 깨진
+  /// 값이면 둘 다 null.
+  Future<({String? targetUserId, String? myDeviceId})> readPendingInit(
+    String roomId,
+  ) => _serial(() async {
+    final raw = await _storage.read(key: _k(roomId, _pendingInitField));
+    if (raw != null) {
+      try {
+        final json = jsonDecode(raw);
+        if (json is Map) {
+          final target = json['t'];
+          final device = json['d'];
+          return (
+            targetUserId: target is String ? target : null,
+            myDeviceId: device is String ? device : null,
+          );
+        }
+      } on FormatException {
+        // 깨진 값 — 모르는 것으로 둔다(방 멤버로 상대를 정한다).
+      }
+    }
+    return (targetUserId: null, myDeviceId: null);
+  });
+
+  Future<void> clearPendingEphemeralSeed(String roomId) => _serial(() async {
+    await _storage.delete(key: _k(roomId, 'pendingEphemeralSeed'));
+    await _storage.delete(key: _k(roomId, _pendingInitField));
+  });
 
   Future<void> savePendingRekeySeed(String roomId, int epoch, List<int> seed) =>
       _serial(() async {
@@ -315,20 +380,11 @@ class SecretKeyStore {
   });
 
   /// 방 나가기/비밀 대화 거절 시 이 방의 모든 로컬 키 상태를 흔적 없이 지운다 — 이 기기에 저장해 둔
-  /// 그 방의 평문 캐시와 계정 표시도 함께(서버는 방을 통째로 지웠거나 나를 뺐다).
+  /// 그 방의 평문 캐시와 계정 표시, 묶인 상대 기기·보안 상태도 함께(서버는 방을 통째로 지웠거나 나를 뺐다).
+  /// 상대 기기 고정([readDevicePin])은 방과 상관없는 값이라 남긴다 — 같은 기기와 새로 대화해도 그 키만 믿는다.
   Future<void> clearRoom(String roomId) async {
     await _serial(() async {
-      for (final field in [
-        'epoch',
-        'n',
-        'chainKey',
-        'prevEpoch',
-        'prevChainKeySnapshot',
-        'pendingEphemeralSeed',
-        'pendingRekeyEpoch',
-        'pendingRekeySeed',
-        _ownerField,
-      ]) {
+      for (final field in [..._sessionKeyFields, _securityField, _ownerField]) {
         await _storage.delete(key: _k(roomId, field));
       }
       _keyedRoomIds.remove(roomId);
@@ -336,6 +392,221 @@ class SecretKeyStore {
     });
     await clearRoomTexts(roomId);
   }
+
+  /// 이 기기가 맺은 줄 알았던 핸드셰이크를 되돌린다 — 체인키·대기 중인 임시키·묶인 상대를 지우고 평문 캐시와 계정
+  /// 표시는 둔다(서버가 이 기기의 수락을 받지 않았거나, 내 다른 기기가 먼저 수락했을 때). 보안 상태는 그 세션에 붙은
+  /// 안내(예전 앱·상대 기기 바뀜)만 지우고 멈춤은 남긴다 — 이 되돌리기는 서버가 보내는 값(수락 알림·방 정보)을 보고
+  /// 일어나서, 멈춤까지 지우면 가로채려다 들킨 서버가 그 멈춤을 스스로 풀 수 있다(멈춘 대화는 끝내고 새로 시작하는
+  /// 것 말고는 되돌릴 수 없어야 한다). 깨진 보안 상태 값은 멈춘 것으로 읽히므로 그대로 둔다.
+  Future<void> clearSessionKeys(String roomId) => _serial(() async {
+    for (final field in _sessionKeyFields) {
+      await _storage.delete(key: _k(roomId, field));
+    }
+    final securityKey = _k(roomId, _securityField);
+    final raw = await _storage.read(key: securityKey);
+    if (raw == null) return;
+    final security = SecretRoomSecurity.decode(raw);
+    if (security == null) return;
+    if (security.blocked) {
+      await _storage.write(
+        key: securityKey,
+        value: security.blockOnly().encode(),
+      );
+    } else {
+      await _storage.delete(key: securityKey);
+    }
+  });
+
+  // ---- 상대 기기 고정(S5 — secret_peer_store.dart) ----
+  //
+  // 한 번 고정한 기기의 키·주인은 바꾸지 않는다. 처음 고정은 "없을 때만 적기"([pinDeviceIfAbsent]), "확인함" 표시는
+  // 같은 고정일 때만 고치기([setDevicePinVerified]) — 둘 다 읽고 쓰기를 저장소 줄 안에서 한 번에 한다. 고정을
+  // 없애는 것은 사용자가 고른 [deleteDevicePin]뿐이다.
+
+  String _pinKey(String deviceId) => '$_pinKeyPrefix$deviceId';
+
+  /// 기기 [deviceId]를 고정해 둔 값(없거나 깨졌으면 null — 둘을 가려야 하면 [readDevicePinEntry]).
+  Future<SecretDevicePin?> readDevicePin(String deviceId) => _serial(() async {
+    final raw = await _storage.read(key: _pinKey(deviceId));
+    return raw == null ? null : SecretDevicePin.decode(raw);
+  });
+
+  /// 기기 [deviceId]의 고정 기록이 있는지([present])와 읽은 값([pin] — 깨졌으면 null). 깨진 고정을 없는 것으로 보면
+  /// 서버가 알려 주는 키를 처음 보는 기기처럼 다시 믿게 되므로, 확인할 수 없는 것으로 다루려고 가린다.
+  Future<({bool present, SecretDevicePin? pin})> readDevicePinEntry(
+    String deviceId,
+  ) => _serial(() async {
+    final raw = await _storage.read(key: _pinKey(deviceId));
+    return (
+      present: raw != null,
+      pin: raw == null ? null : SecretDevicePin.decode(raw),
+    );
+  });
+
+  /// 테스트가 고정 상태를 미리 만들어 둘 때만 쓴다 — 앱은 이미 있는 고정을 덮어쓰지 않는 [pinDeviceIfAbsent]·
+  /// [setDevicePinVerified]만 쓴다.
+  @visibleForTesting
+  Future<void> saveDevicePin(String deviceId, SecretDevicePin pin) => _serial(
+    () => _storage.write(key: _pinKey(deviceId), value: pin.encode()),
+  );
+
+  /// 처음 본 기기 [deviceId]를 [candidate]로 고정한다 — 고정해 둔 값이 없을 때만 적고, 있으면 그대로 둔다. 읽고 쓰기를
+  /// 저장소 줄 안에서 한 번에 해서, 같은 기기를 두 곳(다른 방의 핸드셰이크·예전 대화 묶기)에서 동시에 처음 고정해도
+  /// 나중 것이 먼저 적은 값을 덮어쓰지 않는다 — 서버가 한쪽 답을 붙잡아 두었다가 늦게 풀면, 덮어쓴 값이 이미 다른
+  /// 키로 맺은 대화의 보안 코드를 진짜처럼 바꿔 놓는다. 이미 다른 키·주인으로 고정돼 있으면(서버가 같은 기기를 두
+  /// 가지로 알려 왔다 — 정상 기기는 기기 id 하나에 키 하나다) 그 고정에 다툼을 적는다.
+  /// 지금 고정된 값을 돌려준다(새로 적었으면 [candidate]). 고정 값이 깨져 있으면 덮어쓰지 않고 null.
+  Future<SecretDevicePin?> pinDeviceIfAbsent(
+    String deviceId,
+    SecretDevicePin candidate,
+  ) => _serial(() async {
+    final key = _pinKey(deviceId);
+    final raw = await _storage.read(key: key);
+    if (raw == null) {
+      await _storage.write(key: key, value: candidate.encode());
+      return candidate;
+    }
+    final existing = SecretDevicePin.decode(raw);
+    if (existing == null ||
+        existing.disputed ||
+        existing.sameKeyAs(candidate)) {
+      return existing;
+    }
+    final disputed = existing.markDisputed(DateTime.now());
+    await _storage.write(key: key, value: disputed.encode());
+    return disputed;
+  });
+
+  /// 기기 [deviceId]의 "확인함" 표시만 바꾼다([verifiedAt]이 null이면 지운다) — 지금 고정이 [expected]와 같은 고정이고
+  /// 다툼이 없을 때만, 저장소 줄 안에서 한 번에. 그 사이 고정이 지워졌거나 다시 받은 것이면 아무것도 하지 않고 false.
+  Future<bool> setDevicePinVerified(
+    String deviceId,
+    SecretDevicePin expected, {
+    required String myDeviceId,
+    required DateTime? verifiedAt,
+  }) => _serial(() async {
+    final key = _pinKey(deviceId);
+    final raw = await _storage.read(key: key);
+    final current = raw == null ? null : SecretDevicePin.decode(raw);
+    if (current == null || current.disputed || !current.isSamePinAs(expected)) {
+      return false;
+    }
+    await _storage.write(
+      key: key,
+      value:
+          (verifiedAt == null
+                  ? current.clearVerified()
+                  : current.markVerified(myDeviceId, verifiedAt))
+              .encode(),
+    );
+    return true;
+  });
+
+  /// 기기 [deviceId]의 고정을 지운다 — 사용자가 "상대 기기 키 다시 받기"를 골랐을 때만(SecretSessionManager.
+  /// resetPeerDevicePin). 다음에 그 기기를 만나면 처음 보는 기기처럼 서버에 다시 묻는다.
+  Future<void> deleteDevicePin(String deviceId) =>
+      _serial(() => _storage.delete(key: _pinKey(deviceId)));
+
+  /// 상대 기기 [deviceId]에 묶인 방 id 전부(저장된 묶음 — [saveRoomBinding]) — 그 기기의 고정을 믿을 수 없게 됐을 때
+  /// (다툼·사용자가 지움) 그 키로 맺은 대화를 모두 멈추려고 쓴다. 드문 일이라 저장소 전체 읽기를 감수한다. 못 읽으면
+  /// 빈 목록.
+  Future<List<String>> roomIdsBoundToDevice(String deviceId) async {
+    const suffix = '/$_peerField';
+    try {
+      return await _serial(() async {
+        final all = await _storage.readAll();
+        return [
+          for (final entry in all.entries)
+            if (entry.key.startsWith(_roomKeyPrefix) &&
+                entry.key.endsWith(suffix) &&
+                entry.key.length > _roomKeyPrefix.length + suffix.length)
+              if (SecretRoomBinding.decode(entry.value) case final binding?
+                  when binding.peerDeviceId == deviceId)
+                entry.key.substring(
+                  _roomKeyPrefix.length,
+                  entry.key.length - suffix.length,
+                ),
+        ];
+      });
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 사용자 [userId]의 기기로 고정해 둔 것 전부 — 상대가 예전에 보안 코드를 확인한 기기가 아닌 다른 기기로 대화를
+  /// 맺었는지 볼 때만 쓴다(핸드셰이크 때 한 번이라 저장소 전체 읽기를 감수한다). 못 읽으면 빈 목록.
+  Future<List<(String, SecretDevicePin)>> devicePinsOfUser(
+    String userId,
+  ) async {
+    try {
+      return await _serial(() async {
+        final all = await _storage.readAll();
+        return [
+          for (final entry in all.entries)
+            if (entry.key.startsWith(_pinKeyPrefix))
+              if (SecretDevicePin.decode(entry.value) case final pin?)
+                if (pin.userId == userId)
+                  (entry.key.substring(_pinKeyPrefix.length), pin),
+        ];
+      });
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 방 [roomId]가 묶인 상대 기기(아직 없거나 깨졌으면 null).
+  Future<SecretRoomBinding?> readRoomBinding(String roomId) =>
+      _serial(() async {
+        final raw = await _storage.read(key: _k(roomId, _peerField));
+        return raw == null ? null : SecretRoomBinding.decode(raw);
+      });
+
+  Future<void> saveRoomBinding(String roomId, SecretRoomBinding binding) =>
+      _serial(() {
+        _keyedRoomIds.add(roomId);
+        return _storage.write(
+          key: _k(roomId, _peerField),
+          value: binding.encode(),
+        );
+      });
+
+  /// 방 [roomId]의 묶음만 거둔다 — 예전 대화를 묶다가 그 기기의 고정을 적지 못했을 때(다음에 다시 묶게).
+  Future<void> deleteRoomBinding(String roomId) =>
+      _serial(() => _storage.delete(key: _k(roomId, _peerField)));
+
+  /// 방 [roomId]의 보안 상태(없으면 [SecretRoomSecurity.none]). 깨진 값은 멈춘 것으로 본다 — 가로채기로 멈춘 방이
+  /// 저장소 오류로 다시 풀리면 안 된다.
+  Future<SecretRoomSecurity> readRoomSecurity(String roomId) =>
+      _serial(() async {
+        final raw = await _storage.read(key: _k(roomId, _securityField));
+        if (raw == null) return SecretRoomSecurity.none;
+        return SecretRoomSecurity.decode(raw) ?? _unreadableSecurity();
+      });
+
+  /// 방 [roomId]의 보안 상태를 적고, 실제로 적힌 값을 돌려준다. 이미 멈춘 방이면 처음 멈춘 이유를 그대로 두고 안내
+  /// 표시만 바꾼다 — 멈춤은 방이 없어질 때([clearRoom])만 풀린다. 같은 상대 기기의 키 다툼처럼 다른 방의 일로 이 방이
+  /// 멈추는 순간 이 방의 핸드셰이크가 안내 표시를 고쳐 적어도 멈춤이 지워지지 않게, 읽고 쓰기를 저장소 줄 안에서 한
+  /// 번에 한다. 깨진 값(멈춘 것으로 읽힌다)은 덮어쓰지 않는다.
+  Future<SecretRoomSecurity> saveRoomSecurity(
+    String roomId,
+    SecretRoomSecurity security,
+  ) => _serial(() async {
+    _keyedRoomIds.add(roomId);
+    final key = _k(roomId, _securityField);
+    final raw = await _storage.read(key: key);
+    var next = security;
+    if (raw != null) {
+      final stored = SecretRoomSecurity.decode(raw);
+      if (stored == null) return _unreadableSecurity();
+      if (stored.blocked) next = security.withBlockOf(stored);
+    }
+    await _storage.write(key: key, value: next.encode());
+    return next;
+  });
+
+  /// 깨진 보안 상태 값을 읽은 값 — 멈춘 것으로 본다(가로채기로 멈춘 방이 저장소 오류로 다시 풀리면 안 된다).
+  static SecretRoomSecurity _unreadableSecurity() => SecretRoomSecurity.none
+      .blockedWith(SecretBlockReason.badSignature, DateTime.now());
 
   // ---- 방별 계정 표시 ----
 

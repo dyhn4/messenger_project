@@ -7,16 +7,29 @@ export const MY_POSTS_DEFAULT_LIMIT = 30;
 export const MY_POSTS_MAX_LIMIT = 100;
 export const MY_POST_TEXT_PREVIEW = 200;
 export const MY_POST_PARENT_PREVIEW = 80;
+export const MY_POSTS_QUERY_MAX = 200;
 
 /**
- * 쿼리 검사 — 통과하면 `{ teamId, roomId|null, kind, since|null, until|null, order, cursor|null, limit }`, 아니면 `{ error }`.
- * kind는 all|message|comment(기본 all — 화면의 전체/메시지/댓글 탭), since/until은 글을 쓴 시각(밀리초), order는 desc|asc(기본 desc),
- * limit은 1..100(기본 30).
+ * 쿼리 검사 — 통과하면 `{ teamId|null, allTeams, text, roomId|null, kind, since|null, until|null, order, cursor|null, limit }`,
+ * 아니면 `{ error }`. kind는 all|message|comment(기본 all — 화면의 전체/메시지/댓글 탭), since/until은 글을 쓴 시각(밀리초),
+ * order는 desc|asc(기본 desc), limit은 1..100(기본 30).
+ * scope는 team(기본 — teamId 한 팀, teamId 필수)|all(내가 속한 모든 팀 — teamId는 보지 않는다), q는 본문·제목 부분 일치 검색어
+ * (앞뒤 공백을 떼고 소문자로 — 비면 검색하지 않는다, 최대 200자).
  */
 export function parseMyPostsQuery(query) {
   const q = query ?? {};
-  const teamId = typeof q.teamId === 'string' ? q.teamId : '';
-  if (!isUuid(teamId)) return { error: 'teamId가 필요합니다.' };
+  if (q.scope !== undefined && q.scope !== '' && q.scope !== 'team' && q.scope !== 'all') {
+    return { error: 'scope는 team|all 중 하나여야 합니다.' };
+  }
+  const allTeams = q.scope === 'all';
+  let teamId = null;
+  if (!allTeams) {
+    teamId = typeof q.teamId === 'string' ? q.teamId : '';
+    if (!isUuid(teamId)) return { error: 'teamId가 필요합니다.' };
+  }
+  if (q.q !== undefined && typeof q.q !== 'string') return { error: 'q가 올바르지 않습니다.' };
+  const text = (q.q ?? '').trim().toLowerCase();
+  if ([...text].length > MY_POSTS_QUERY_MAX) return { error: `검색어는 ${MY_POSTS_QUERY_MAX}자까지입니다.` };
   const kind = typeof q.kind === 'string' && q.kind ? q.kind : 'all';
   if (!MY_POST_KINDS.includes(kind)) return { error: `kind는 ${MY_POST_KINDS.join('|')} 중 하나여야 합니다.` };
   if (q.order !== undefined && q.order !== '' && q.order !== 'asc' && q.order !== 'desc') {
@@ -37,7 +50,7 @@ export function parseMyPostsQuery(query) {
   if (cursor?.error) return { error: cursor.error };
   const limit = parseLimit(q.limit, { fallback: MY_POSTS_DEFAULT_LIMIT, max: MY_POSTS_MAX_LIMIT });
   if (limit === null) return { error: 'limit은 1 이상의 숫자여야 합니다.' };
-  return { teamId, roomId, kind, since, until, order, cursor, limit };
+  return { teamId, allTeams, text, roomId, kind, since, until, order, cursor, limit };
 }
 
 const hasText = (v) => typeof v === 'string' && v.trim() !== '';

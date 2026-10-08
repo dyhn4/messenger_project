@@ -767,14 +767,14 @@ void main() {
       expect(badge('u2', '토픽 소유자'), findsOneWidget);
       expect(badge('u2', '토픽 관리자'), findsOneWidget);
       // u3는 팀 소유자이면서 계정 관리자 — 지정된 토픽 관리자가 아니므로 '토픽 관리자'는 없다.
-      expect(badge('u3', '팀 소유자'), findsOneWidget);
+      expect(badge('u3', '소유자'), findsOneWidget);
       expect(badge('u3', '관리자'), findsOneWidget);
       expect(badge('u3', '토픽 관리자'), findsNothing);
       expect(badge('u4', '관리자'), findsOneWidget);
       expect(badge('u4', '토픽 관리자'), findsNothing);
       expect(badge('u5', '사원'), findsOneWidget); // 직책
       expect(badge('u7', '준회원'), findsOneWidget);
-      for (final label in ['토픽 관리자', '토픽 소유자', '팀 소유자', '관리자', '준회원']) {
+      for (final label in ['토픽 관리자', '토픽 소유자', '소유자', '관리자', '준회원']) {
         expect(badge('u6', label), findsNothing, reason: label);
       }
 

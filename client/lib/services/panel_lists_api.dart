@@ -44,9 +44,12 @@ extension PanelListsApi on ApiClient {
   }
 
   /// `GET /api/my-posts` — 내가 쓴 메시지·댓글을 쓴 시각순으로. [kind]로 종류(전체/메시지/댓글)를, [roomId]·[since]·[until]로
-  /// 참여 대화방·기간을 서버에서 걸러 온다. [before]는 이전 쪽 응답의 `nextBefore`.
+  /// 참여 대화방·기간을, [query]로 본문·제목 검색어를 서버에서 걸러 온다. [allTeams]면 [teamId] 대신 내가 속한 모든 팀에서
+  /// 찾는다(항목의 teamName으로 팀을 알 수 있다). [before]는 이전 쪽 응답의 `nextBefore`.
   Future<MyPostsPage> fetchMyPosts({
     required String teamId,
+    bool allTeams = false,
+    String query = '',
     String? roomId,
     MyPostKind kind = MyPostKind.all,
     DateTime? since,
@@ -55,8 +58,9 @@ extension PanelListsApi on ApiClient {
     String? before,
     int limit = 30,
   }) async {
-    final query = <String, String>{
-      'teamId': teamId,
+    final params = <String, String>{
+      if (allTeams) 'scope': 'all' else 'teamId': teamId,
+      if (query.isNotEmpty) 'q': query,
       'roomId': ?roomId,
       if (kind != MyPostKind.all) 'kind': kind.name,
       'since': ?since?.millisecondsSinceEpoch.toString(),
@@ -65,7 +69,7 @@ extension PanelListsApi on ApiClient {
       'before': ?before,
       'limit': '$limit',
     };
-    final path = Uri(path: '/api/my-posts', queryParameters: query);
+    final path = Uri(path: '/api/my-posts', queryParameters: params);
     return MyPostsPage.fromJson(
       Map<String, dynamic>.from(
         await requestJson('GET', path.toString()) as Map,

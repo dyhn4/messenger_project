@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   MY_POSTS_DEFAULT_LIMIT,
   MY_POSTS_MAX_LIMIT,
+  MY_POSTS_QUERY_MAX,
   isMyPostComment,
   isMyPostMessage,
   mergeMyPosts,
@@ -50,6 +51,30 @@ test('parseMyPostsQuery: 기간·방·정렬·limit·커서', () => {
   assert.ok(parseMyPostsQuery({ teamId: TEAM, since: 'x' }).error);
   assert.ok(parseMyPostsQuery({ teamId: TEAM, limit: '0' }).error);
   assert.ok(parseMyPostsQuery({ teamId: TEAM, before: 'zzz' }).error);
+});
+
+test('parseMyPostsQuery: 검색어(q)와 팀 범위(scope)', () => {
+  const base = parseMyPostsQuery({ teamId: TEAM });
+  assert.equal(base.allTeams, false);
+  assert.equal(base.teamId, TEAM);
+  assert.equal(base.text, '');
+
+  // 검색어는 앞뒤 공백을 떼고 소문자로, 공백뿐이면 검색하지 않는다.
+  assert.equal(parseMyPostsQuery({ teamId: TEAM, q: '  Hello 회의 ' }).text, 'hello 회의');
+  assert.equal(parseMyPostsQuery({ teamId: TEAM, q: '   ' }).text, '');
+  assert.ok(parseMyPostsQuery({ teamId: TEAM, q: ['a', 'b'] }).error);
+  assert.equal(parseMyPostsQuery({ teamId: TEAM, q: '가'.repeat(MY_POSTS_QUERY_MAX) }).error, undefined);
+  assert.ok(parseMyPostsQuery({ teamId: TEAM, q: '가'.repeat(MY_POSTS_QUERY_MAX + 1) }).error);
+
+  // 모든 팀은 teamId가 없어도 되고, 있어도 보지 않는다. 한 팀(기본·team)은 teamId가 필수다.
+  const all = parseMyPostsQuery({ scope: 'all' });
+  assert.equal(all.error, undefined);
+  assert.equal(all.allTeams, true);
+  assert.equal(all.teamId, null);
+  assert.equal(parseMyPostsQuery({ scope: 'all', teamId: TEAM }).teamId, null);
+  assert.equal(parseMyPostsQuery({ scope: 'team', teamId: TEAM }).allTeams, false);
+  assert.ok(parseMyPostsQuery({ scope: 'team' }).error);
+  assert.ok(parseMyPostsQuery({ scope: 'everyone', teamId: TEAM }).error);
 });
 
 test('isMyPostMessage: 본문이나 제목이 있는 text·post만, 파일·이미지·이모티콘·시스템·투표·삭제는 제외', () => {

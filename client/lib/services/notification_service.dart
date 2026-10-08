@@ -15,6 +15,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/avatar_utils.dart' show parseHexColor;
 import 'app_platform.dart';
 import 'avatar_thumbnail.dart';
+import 'notification_popup.dart'
+    if (dart.library.js_interop) 'notification_popup_stub.dart';
+import 'notification_popup_style.dart';
 import 'web_notifications.dart';
 import 'win32_window.dart'
     if (dart.library.js_interop) 'win32_window_stub.dart';
@@ -31,6 +34,9 @@ class NotificationService {
   static const callPayloadPrefix = 'call:';
 
   final _plugin = FlutterLocalNotificationsPlugin();
+
+  /// PC 알림 창(notification_popup.dart)의 모양 — 앱 테마와 환경설정의 카드 크기·최대 개수(Session이 채운다).
+  NotificationPopupStyle Function()? popupStyle;
 
   /// [requestPermission]을 false로 주면 권한 요청을 건너뛴다 — main.dart의 FCM 백그라운드
   /// 핸들러(앱이 완전히 꺼진 상태에서 별도의 헤드리스 isolate로 실행됨)에서 쓰는 경로다.
@@ -66,6 +72,13 @@ class NotificationService {
         if (roomId != null) onTap(roomId);
       },
     );
+    // PC 알림 창의 카드를 눌렀을 때도 Windows 알림을 눌렀을 때와 똑같이.
+    if (AppPlatform.isWindows) {
+      setNotificationPopupTapHandler((payload) {
+        _bringWindowToFront();
+        onTap(payload);
+      });
+    }
 
     if (!requestPermission) return;
     await _plugin
@@ -104,8 +117,19 @@ class NotificationService {
         payload: '$projectPayloadPrefix$projectId',
       );
     }
+    final key = 'project:${DateTime.now().microsecondsSinceEpoch}';
+    if (AppPlatform.isWindows &&
+        await showNotificationPopup(
+          key: key,
+          title: title,
+          body: body,
+          payload: '$projectPayloadPrefix$projectId',
+          style: popupStyle?.call() ?? const NotificationPopupStyle(),
+        )) {
+      return;
+    }
     await _plugin.show(
-      id: 'project:${DateTime.now().microsecondsSinceEpoch}'.hashCode,
+      id: key.hashCode,
       title: title,
       body: body,
       notificationDetails: NotificationDetails(
@@ -381,18 +405,32 @@ class NotificationService {
     // Windows 토스트는 아바타 이미지와 달리 제목 글자에 임의의 색을 입힐 방법이 OS API
     // 자체에 없다(라이트/다크 테마 일관성을 위해 텍스트 색은 시스템이 강제로 정한다) —
     // 그래서 "녹색 자물쇠"를 색으로는 못 넣고, 대신 이름 왼쪽에 자물쇠 이모지를 붙여서
-    // 비밀 대화라는 표시를 준다. 안드로이드는 MessagingStyle이 title을 그대로 안 쓰고
-    // 자체 레이아웃(Person 이름)으로 그리므로 안 건드린다.
+    // 비밀 대화라는 표시를 준다(PC 알림 창도 같은 제목을 쓴다). 안드로이드는 MessagingStyle이
+    // title을 그대로 안 쓰고 자체 레이아웃(Person 이름)으로 그리므로 안 건드린다.
     final windowsTitle = (isSecret && AppPlatform.isWindows)
         ? '🔒 $title'
         : title;
-    await _plugin.show(
-      id: roomId.hashCode,
-      title: windowsTitle,
-      body: body,
-      notificationDetails: details,
-      payload: roomId,
-    );
+    // PC는 Windows 기본 알림 대신 앱이 그린 한 줄짜리 알림 창(notification_popup.dart)에 띄운다 — 못 띄웠을
+    // 때만 Windows 기본 알림으로.
+    final popped =
+        AppPlatform.isWindows &&
+        await showNotificationPopup(
+          key: roomId,
+          title: windowsTitle,
+          body: body,
+          payload: roomId,
+          imagePath: windowsImageUri?.toFilePath(windows: true),
+          style: popupStyle?.call() ?? const NotificationPopupStyle(),
+        );
+    if (!popped) {
+      await _plugin.show(
+        id: roomId.hashCode,
+        title: windowsTitle,
+        body: body,
+        notificationDetails: details,
+        payload: roomId,
+      );
+    }
     if (AppPlatform.isAndroid) {
       await _syncMessageSummary(include: roomId.hashCode);
     }
@@ -413,6 +451,7 @@ class NotificationService {
   Future<void> cancelForRoom(String roomId) async {
     if (kIsWeb) return closeWebNotifications(roomId);
     await _plugin.cancel(id: roomId.hashCode);
+    if (AppPlatform.isWindows) await cancelNotificationPopup(roomId);
     if (AppPlatform.isAndroid) {
       await _historyPrefs.remove('$_historyKeyPrefix$roomId');
       await _syncMessageSummary(exclude: roomId.hashCode);

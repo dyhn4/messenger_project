@@ -24,6 +24,8 @@ import 'services/app_platform.dart';
 import 'services/app_settings.dart';
 import 'services/deep_link_service.dart';
 import 'services/fcm_config_cache.dart';
+import 'services/notification_popup.dart'
+    if (dart.library.js_interop) 'services/notification_popup_stub.dart';
 import 'services/notification_service.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
@@ -161,6 +163,8 @@ Future<void> main() async {
       } catch (_) {}
       if (windowArgs['type'] == kCaptureWindowType) {
         await runCaptureWindow(windowController, windowArgs);
+      } else if (windowArgs['type'] == kNotificationPopupWindowType) {
+        await runNotificationPopupWindow(windowController, windowArgs);
       } else {
         await runProjectWindow(windowController);
       }

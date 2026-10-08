@@ -89,6 +89,8 @@ class Session extends ChangeNotifier {
     // 알림 아이콘용 프로필 사진 링크가 만료됐을 때 새로 받는다(notification_service.dart).
     notifications.resignFileUrl = (path) async =>
         resolveUrl(await api!.resignFileUrl(path));
+    // PC 알림 창은 앱 테마와 환경설정의 카드 크기·최대 개수를 따른다.
+    notifications.popupStyle = () => settings.notificationPopupStyle;
   }
 
   /// 세션이 바뀌면 앱 전체(방 목록·대화 목록 등)가 다시 그려진다 — 입력칸에서 한글을 조합하며

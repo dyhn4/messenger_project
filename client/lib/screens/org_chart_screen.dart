@@ -38,6 +38,12 @@ class _OrgChartScreen extends StatefulWidget {
 class _OrgChartScreenState extends State<_OrgChartScreen>
     with SingleTickerProviderStateMixin {
   late final _tabController = TabController(length: 2, vsync: this);
+
+  /// 두 탭 목록의 스크롤 — 스크롤바(MutedScrollbar)와 목록이 같은 컨트롤러를 써야 한다. 안 주면 스크롤바가 기본
+  /// 컨트롤러를 찾는데, PC에서는 목록이 거기 붙지 않아 "스크롤 위치가 없다"는 오류가 나고, 휴대폰에서는 두 탭
+  /// 목록이 한 컨트롤러에 같이 붙어 오류가 났다.
+  final _teamsScroll = ScrollController();
+  final _membersScroll = ScrollController();
   List<OrgChartTeam>? _teams;
   List<AppUser>? _users;
   String? _error;
@@ -64,6 +70,8 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _teamsScroll.dispose();
+    _membersScroll.dispose();
     super.dispose();
   }
 
@@ -202,7 +210,9 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
     }
 
     return MutedScrollbar(
+      controller: _teamsScroll,
       child: ListView(
+        controller: _teamsScroll,
         children: [
           for (final team in teamRows)
             _TeamGroup(
@@ -311,7 +321,9 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
         const Divider(height: 1),
         Expanded(
           child: MutedScrollbar(
+            controller: _membersScroll,
             child: ListView.separated(
+              controller: _membersScroll,
               itemCount: list.length,
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) => _OrgMemberTableRow(
@@ -575,7 +587,7 @@ class _OrgMemberTableRow extends StatelessWidget {
                   ),
                   if (isOwner)
                     RoleBadge(
-                      label: '팀 소유자',
+                      label: '소유자',
                       bg: ownerColors.bg,
                       fg: ownerColors.fg,
                     ),
@@ -596,6 +608,9 @@ class _OrgMemberTableRow extends StatelessWidget {
                 ),
               ),
             ),
+            // 제목 줄 맨 오른쪽의 정렬 단추 자리 — 비워 두지 않으면 이 줄의 칼럼들이 그만큼 더 넓어져서
+            // 제목(등급·직책)과 가로 위치가 어긋난다.
+            const SizedBox(width: sortMenuButtonWidth),
           ],
         ),
       ),

@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:win32/win32.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../services/main_window_methods.dart';
 import '../../services/screen_capture.dart';
 
 /// 창 생성 인자(JSON)의 "type" 값(main.dart가 이걸 보고 어느 서브 창 진입점을 탈지 정한다).
@@ -67,6 +68,7 @@ Future<CaptureOutcome?> startScreenCapture({
 
   if (hideMessenger) await windowManager.hide();
   WindowController? me;
+  MainWindowMethodHandler? resultHandler;
   StreamSubscription<void>? windowsSub;
   try {
     final rawPath =
@@ -76,8 +78,9 @@ Future<CaptureOutcome?> startScreenCapture({
     me = await WindowController.fromCurrentEngine();
     final completer = Completer<CaptureOutcome?>();
 
-    await me.setWindowMethodHandler((call) async {
-      if (call.method == _kResultMethod && !completer.isCompleted) {
+    // 메인 창의 메서드 핸들러는 알림 창 등과 같이 쓴다(main_window_methods.dart) — 이 이름만 등록한다.
+    resultHandler = (call) async {
+      if (!completer.isCompleted) {
         final args = Map<String, dynamic>.from(call.arguments as Map);
         final path = args['path'] as String?;
         completer.complete(
@@ -89,7 +92,8 @@ Future<CaptureOutcome?> startScreenCapture({
         );
       }
       return null;
-    });
+    };
+    await registerMainWindowMethod(_kResultMethod, resultHandler);
 
     // 메신저 창이 화면에서 사라지고 그 뒤가 다시 그려질 짧은 시간만 두고 찍는다.
     unawaited(
@@ -140,9 +144,8 @@ Future<CaptureOutcome?> startScreenCapture({
     );
   } finally {
     await windowsSub?.cancel();
-    try {
-      await me?.setWindowMethodHandler(null);
-    } catch (_) {}
+    final handler = resultHandler;
+    if (handler != null) unregisterMainWindowMethod(_kResultMethod, handler);
     if (hideMessenger) {
       await windowManager.show();
       await windowManager.focus();

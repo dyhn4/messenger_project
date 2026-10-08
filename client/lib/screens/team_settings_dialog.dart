@@ -922,55 +922,62 @@ class _MemberRow extends StatelessWidget {
               ),
             ),
           ),
-          PopupMenuButton<_MemberAction>(
-            tooltip: '팀원 관리',
-            position: PopupMenuPosition.under,
-            onSelected: (action) => switch (action) {
-              _MemberAction.editOrg => onEditOrg(),
-              _MemberAction.transferOwnership => onTransferOwnership(),
-              _MemberAction.remove => onRemove(),
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: _MemberAction.editOrg,
-                child: Row(
-                  children: [
-                    Icon(Icons.badge_outlined, size: 20),
-                    SizedBox(width: 8),
-                    Text('직책 수정'),
-                  ],
-                ),
-              ),
-              // 소유권 이양은 그 팀의 소유자만, 자기 자신 말고 다른 사람에게.
-              if (isTeamOwner && !isMe && !user.isOwner)
+          // 제목 줄 맨 오른쪽의 정렬 단추와 같은 폭 — 폭이 다르면 칼럼들이 그 차이만큼 어긋난다.
+          SizedBox(
+            width: sortMenuButtonWidth,
+            child: PopupMenuButton<_MemberAction>(
+              tooltip: '팀원 관리',
+              position: PopupMenuPosition.under,
+              onSelected: (action) => switch (action) {
+                _MemberAction.editOrg => onEditOrg(),
+                _MemberAction.transferOwnership => onTransferOwnership(),
+                _MemberAction.remove => onRemove(),
+              },
+              itemBuilder: (context) => [
                 const PopupMenuItem(
-                  value: _MemberAction.transferOwnership,
+                  value: _MemberAction.editOrg,
                   child: Row(
                     children: [
-                      Icon(Icons.workspace_premium_outlined, size: 20),
+                      Icon(Icons.badge_outlined, size: 20),
                       SizedBox(width: 8),
-                      Text('소유권 넘기기'),
+                      Text('직책 수정'),
                     ],
                   ),
                 ),
-              if (canRemove) ...[
-                const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: _MemberAction.remove,
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.person_remove_alt_1_outlined,
-                        size: 20,
-                        color: Colors.redAccent,
-                      ),
-                      SizedBox(width: 8),
-                      Text('팀에서 빼기', style: TextStyle(color: Colors.redAccent)),
-                    ],
+                // 소유권 이양은 그 팀의 소유자만, 자기 자신 말고 다른 사람에게.
+                if (isTeamOwner && !isMe && !user.isOwner)
+                  const PopupMenuItem(
+                    value: _MemberAction.transferOwnership,
+                    child: Row(
+                      children: [
+                        Icon(Icons.workspace_premium_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Text('소유권 넘기기'),
+                      ],
+                    ),
                   ),
-                ),
+                if (canRemove) ...[
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
+                    value: _MemberAction.remove,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.person_remove_alt_1_outlined,
+                          size: 20,
+                          color: Colors.redAccent,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          '팀에서 빼기',
+                          style: TextStyle(color: Colors.redAccent),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ),

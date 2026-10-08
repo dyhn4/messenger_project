@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_platform.dart';
 import 'download_storage.dart';
+import 'notification_popup_style.dart';
 import 'startup_registry.dart'
     if (dart.library.js_interop) 'startup_registry_stub.dart';
 
@@ -30,6 +31,9 @@ const _kGatherGroupChats = 'settings_gather_group_chats_across_teams';
 const _kGatherDms = 'settings_gather_dms_across_teams';
 const _kTextScale = 'settings_text_scale';
 const _kFontFamily = 'settings_font_family';
+const _kNotifyPopupWidth = 'settings_notify_popup_width';
+const _kNotifyPopupHeight = 'settings_notify_popup_height';
+const _kNotifyPopupMaxCards = 'settings_notify_popup_max_cards';
 
 /// "글꼴"(화면 설정, Windows 전용) 값 — PC에 깔려 있는 시스템 글꼴 이름을 그대로 쓴다(새
 /// 글꼴 파일을 번들하지 않음, 고를 수 있는 전체 목록은 services/system_fonts.dart가 그때그때
@@ -90,6 +94,20 @@ class AppSettings extends ChangeNotifier {
 
   /// 글꼴(화면 설정, Windows 전용) — 시스템 글꼴 이름, 빈 문자열이면 시스템 기본.
   String fontFamily = '';
+
+  /// PC 알림 창의 카드 가로·세로(논리 픽셀)와 한꺼번에 쌓이는 최대 개수(메신저 설정, Windows 전용) — 범위는
+  /// NotificationPopupStyle.
+  int notifyPopupWidth = NotificationPopupStyle.defaultWidth;
+  int notifyPopupHeight = NotificationPopupStyle.defaultHeight;
+  int notifyPopupMaxCards = NotificationPopupStyle.defaultMaxCards;
+
+  /// 지금 설정으로 그릴 알림 창 모양(테마 포함).
+  NotificationPopupStyle get notificationPopupStyle => NotificationPopupStyle(
+    themeMode: themeMode,
+    width: notifyPopupWidth,
+    height: notifyPopupHeight,
+    maxCards: notifyPopupMaxCards,
+  );
 
   /// 메시지 전송 키 — false(기본)면 Enter로 전송·Shift+Enter로 줄바꿈, true면 그 반대.
   bool sendWithShiftEnter = false;
@@ -242,6 +260,17 @@ class AppSettings extends ChangeNotifier {
       maxTextScale,
     );
     fontFamily = _prefs.getString(_kFontFamily) ?? '';
+    notifyPopupWidth = NotificationPopupStyle.snapWidth(
+      _prefs.getInt(_kNotifyPopupWidth) ?? NotificationPopupStyle.defaultWidth,
+    );
+    notifyPopupHeight = NotificationPopupStyle.snapHeight(
+      _prefs.getInt(_kNotifyPopupHeight) ??
+          NotificationPopupStyle.defaultHeight,
+    );
+    notifyPopupMaxCards = NotificationPopupStyle.snapMaxCards(
+      _prefs.getInt(_kNotifyPopupMaxCards) ??
+          NotificationPopupStyle.defaultMaxCards,
+    );
     if (AppPlatform.isWindows) {
       launchAtStartup = readStartupPath() != null;
       // 창 자체의 실제 속성(항상 위로/불투명도)이라 위젯 재빌드만으론 반영이 안 되고, 매번
@@ -354,6 +383,21 @@ class AppSettings extends ChangeNotifier {
   Future<void> setTextScale(double value) async {
     textScale = value.clamp(minTextScale, maxTextScale);
     await _prefs.setDouble(_kTextScale, textScale);
+    notifyListeners();
+  }
+
+  /// PC 알림 창 크기·최대 개수 — 범위·간격 밖의 값은 NotificationPopupStyle이 가까운 값으로 고친다.
+  Future<void> setNotificationPopupSize({
+    required int width,
+    required int height,
+    required int maxCards,
+  }) async {
+    notifyPopupWidth = NotificationPopupStyle.snapWidth(width);
+    notifyPopupHeight = NotificationPopupStyle.snapHeight(height);
+    notifyPopupMaxCards = NotificationPopupStyle.snapMaxCards(maxCards);
+    await _prefs.setInt(_kNotifyPopupWidth, notifyPopupWidth);
+    await _prefs.setInt(_kNotifyPopupHeight, notifyPopupHeight);
+    await _prefs.setInt(_kNotifyPopupMaxCards, notifyPopupMaxCards);
     notifyListeners();
   }
 

@@ -73,7 +73,7 @@ bool topicMemberMatches(AppUser m, String query) {
 
 /// 멤버 이름 옆 배지 — 배지마다 서로 다른 사실 하나만 나타내고, 여러 개에 해당하면 다 붙인다:
 /// '토픽 소유자'(이 토픽을 만든 사람 — room.createdBy), '토픽 관리자'(이 토픽의 관리자로 지정된 사람),
-/// '팀 소유자'(그 팀의 소유자), '관리자'(계정 등급 관리자), '준회원'. 정회원은 배지가 없다.
+/// '소유자'(그 팀의 소유자 — 조직도 멤버 탭과 같은 이름), '관리자'(계정 등급 관리자), '준회원'. 정회원은 배지가 없다.
 /// 팀 소유자·관리자는 지정되지 않아도 그 팀의 모든 토픽을 관리할 수 있지만(room_permissions.dart의 canManage),
 /// '토픽 관리자'는 실제로 지정된 사람에게만 붙여서 "토픽 관리자 지정" 목록의 체크와 숫자가 맞게 한다.
 /// [withTopicAdmin]이 false면 '토픽 관리자' 배지를 뺀다(토픽 관리자 지정 목록처럼 체크로 이미 보이는 곳).
@@ -100,7 +100,7 @@ List<Widget> topicMemberBadges(
         bg: scheme.primary.withValues(alpha: 0.16),
         fg: scheme.primary,
       ),
-    if (m.isOwner) RoleBadge(label: '팀 소유자', bg: owner.bg, fg: owner.fg),
+    if (m.isOwner) RoleBadge(label: '소유자', bg: owner.bg, fg: owner.fg),
     if (m.role == 'admin') RoleBadge(label: '관리자', bg: admin.bg, fg: admin.fg),
     if (m.role == 'guest') RoleBadge(label: '준회원', bg: guest.bg, fg: guest.fg),
   ];

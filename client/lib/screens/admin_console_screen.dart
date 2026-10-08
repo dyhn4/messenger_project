@@ -1365,13 +1365,10 @@ class _UsersTabState extends State<_UsersTab> {
                       const SizedBox(width: 20),
                       Expanded(
                         flex: 5,
-                        child: Transform.translate(
-                          offset: const Offset(-50, 0),
-                          child: Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: _statusBadges(context, user),
-                          ),
+                        child: Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: _statusBadges(context, user),
                         ),
                       ),
                       const SizedBox(width: 20),
@@ -1410,8 +1407,9 @@ class _UsersTabState extends State<_UsersTab> {
                           ),
                         ),
                       ),
-                      Transform.translate(
-                        offset: const Offset(-10, 0),
+                      // 제목 줄 맨 오른쪽의 정렬 단추와 같은 폭 — 폭이 다르면 칼럼들이 그 차이만큼 어긋난다.
+                      SizedBox(
+                        width: sortMenuButtonWidth,
                         child: PopupMenuButton<void>(
                           tooltip: '회원 관리',
                           position: PopupMenuPosition.under,
@@ -1542,15 +1540,7 @@ class _UsersTableHead extends StatelessWidget {
         children: [
           Expanded(flex: 9, child: Text('회원', style: style)),
           const SizedBox(width: 20),
-          Expanded(
-            flex: 5,
-            // 아래 실제 행(등급 뱃지)과 같은 만큼(-50px) 왼쪽으로 옮겨서 계속 같은 위치에
-            // 오도록 맞춘다.
-            child: Transform.translate(
-              offset: const Offset(-50, 0),
-              child: Text('등급', style: style),
-            ),
-          ),
+          Expanded(flex: 5, child: Text('등급', style: style)),
           const SizedBox(width: 20),
           Expanded(flex: 9, child: Text('팀', style: style)),
           const SizedBox(width: 20),

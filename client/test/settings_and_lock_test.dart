@@ -5,6 +5,7 @@ import 'package:client/models/team.dart';
 import 'package:client/screens/settings_screen.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
+import 'package:client/services/notification_popup_style.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/app_lock_overlay.dart';
@@ -277,6 +278,123 @@ void main() {
 
     await settings.setTextScale(0.1); // 범위 밖 — 최솟값으로 붙는다.
     expect(settings.textScale, minTextScale);
+  });
+
+  testWidgets(
+    'AppSettings.setNotificationPopupSize: 저장되고, 범위·간격 밖 값은 가까운 값으로 고친다',
+    (tester) async {
+      mockWindowManager(tester);
+      final settings = AppSettings();
+      await settings.init();
+      expect(settings.notifyPopupWidth, NotificationPopupStyle.defaultWidth);
+      expect(settings.notifyPopupHeight, NotificationPopupStyle.defaultHeight);
+      expect(
+        settings.notifyPopupMaxCards,
+        NotificationPopupStyle.defaultMaxCards,
+      );
+
+      await settings.setNotificationPopupSize(
+        width: 400,
+        height: 60,
+        maxCards: 5,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getInt('settings_notify_popup_width'), 400);
+      expect(prefs.getInt('settings_notify_popup_height'), 60);
+      expect(prefs.getInt('settings_notify_popup_max_cards'), 5);
+      final style = settings.notificationPopupStyle;
+      expect((style.width, style.height, style.maxCards), (400, 60, 5));
+
+      // 범위 밖은 끝으로, 간격(가로 10 · 세로 5)에 안 맞으면 가까운 칸으로.
+      await settings.setNotificationPopupSize(
+        width: 999,
+        height: 10,
+        maxCards: 9,
+      );
+      expect(settings.notifyPopupWidth, NotificationPopupStyle.maxWidth);
+      expect(settings.notifyPopupHeight, NotificationPopupStyle.minHeight);
+      expect(
+        settings.notifyPopupMaxCards,
+        NotificationPopupStyle.maxCardsLimit,
+      );
+      await settings.setNotificationPopupSize(
+        width: 373,
+        height: 53,
+        maxCards: 0,
+      );
+      expect(settings.notifyPopupWidth, 370);
+      expect(settings.notifyPopupHeight, 55);
+      expect(settings.notifyPopupMaxCards, NotificationPopupStyle.minCards);
+    },
+  );
+
+  testWidgets('PC 알림 창: 메시지 내용 미리보기 아래 가로·세로·최대 개수 스텝퍼 — 끝에서 막히고, 저장하면 저장된다', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1100, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    mockWindowManager(tester);
+    final s = _session();
+    await s.settings.init();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SettingsScreen(session: s)),
+      ),
+    );
+    await tester.pump();
+
+    final section = find.byKey(const ValueKey('settings-notify-popup'));
+    expect(section, findsOneWidget);
+    // "메시지 내용 미리보기" 항목 안 — 미리보기 선택 줄 아래에 있다.
+    expect(
+      tester.getTopLeft(section).dy,
+      greaterThan(tester.getBottomLeft(find.text('미리보기 안함')).dy),
+    );
+    expect(
+      tester.getTopLeft(section).dy,
+      lessThan(tester.getTopLeft(find.text('메시지 전송 옵션 설정')).dy),
+    );
+    Finder stepper(String name) =>
+        find.byKey(ValueKey('settings-notify-popup-$name'));
+    Finder inStepper(String name, Finder f) =>
+        find.descendant(of: stepper(name), matching: f);
+    expect(inStepper('width', find.text('270px (기본)')), findsOneWidget);
+    expect(inStepper('height', find.text('50px (기본)')), findsOneWidget);
+    expect(inStepper('count', find.text('3개 (기본)')), findsOneWidget);
+    expect(inStepper('width', find.text('150~480px')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-notify-popup-preview')),
+      findsOneWidget,
+    );
+
+    Future<void> tapStep(String name, IconData icon, [int times = 1]) async {
+      await tester.ensureVisible(stepper(name));
+      for (var i = 0; i < times; i++) {
+        await tester.tap(inStepper(name, find.byIcon(icon)));
+        await tester.pump();
+      }
+    }
+
+    await tapStep('width', Icons.add, 2); // 270 → 290
+    expect(inStepper('width', find.text('290px')), findsOneWidget);
+    await tapStep('height', Icons.remove, 5); // 50 → 40에서 멈춘다
+    expect(inStepper('height', find.text('40px')), findsOneWidget);
+    await tapStep('count', Icons.add, 4); // 3 → 5에서 멈춘다
+    expect(inStepper('count', find.text('5개')), findsOneWidget);
+    // 가운데 값을 누르면 기본값으로.
+    await tester.tap(inStepper('count', find.text('5개')));
+    await tester.pump();
+    expect(inStepper('count', find.text('3개 (기본)')), findsOneWidget);
+    await tapStep('count', Icons.remove); // 3 → 2
+    expect(s.settings.notifyPopupWidth, 270); // 저장 전에는 그대로
+
+    await tester.tap(find.text('저장하기'));
+    await tester.pumpAndSettle();
+    expect(s.settings.notifyPopupWidth, 290);
+    expect(s.settings.notifyPopupHeight, 40);
+    expect(s.settings.notifyPopupMaxCards, 2);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('창 깜빡임: 기본은 깜빡임, 화면 설정에서 "깜빡이지 않음"을 골라 저장하면 저장된다', (

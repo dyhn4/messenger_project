@@ -1100,6 +1100,10 @@ class _TaskTableRowState extends State<_TaskTableRow> {
       onExit: (_) => setState(() => _hovering = false),
       child: InkWell(
         onTap: _editing == null ? onTap : null,
+        // InkWell은 자기 안의 무엇이든 포커스를 가지면 줄 전체를 포커스 색(회색)으로 칠한다. 배지 메뉴는
+        // 이 줄 안에서 펼쳐져(MenuAnchor — OverlayPortal) 메뉴 항목이 마우스만 올려도 포커스를 가져가고, 닫힌
+        // 뒤에도 포커스가 줄 안에 남아 다른 탭에 다녀올 때까지 회색이 지워지지 않았다. 제목 고치기 입력칸도 같다.
+        focusColor: Colors.transparent,
         child: Padding(
           // 줄 높이 — 프로젝트 이름 줄이 있으면 위아래를 좁혀 두 줄이 한 칸에 촘촘히, 없으면 한
           // 줄을 가운데에 둔다(어느 쪽이든 약 46px).

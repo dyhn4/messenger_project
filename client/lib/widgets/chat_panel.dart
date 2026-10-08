@@ -75,7 +75,6 @@ class ChatPanel extends StatefulWidget {
 
 class _ChatPanelState extends State<ChatPanel> {
   final _listKey = GlobalKey();
-  final _dividerKeys = <String, GlobalKey>{};
   final _itemScrollController = ItemScrollController();
   final _itemPositionsListener = ItemPositionsListener.create();
   DateTime? _floatingDate;
@@ -447,9 +446,6 @@ class _ChatPanelState extends State<ChatPanel> {
     }
     return null;
   }
-
-  String _dateKey(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   bool _sameMinute(DateTime a, DateTime b) =>
       a.year == b.year &&
@@ -831,13 +827,11 @@ class _ChatPanelState extends State<ChatPanel> {
                             }
 
                             Widget? divider;
+                            // 날짜별 GlobalKey를 주지 않는다 — 예전 구분선 히트테스트(_onScrollUpdate 위 주석)의
+                            // 흔적이었는데, 더 오래된 메시지를 불러오는 등으로 같은 날짜 구분선이 잠깐 두 항목에
+                            // 함께 그려지면 "Multiple widgets used the same GlobalKey" assert가 났다.
                             if (showDate) {
-                              final key = _dividerKeys.putIfAbsent(
-                                _dateKey(m.createdAt),
-                                () => GlobalKey(),
-                              );
                               divider = DateDivider(
-                                key: key,
                                 date: m.createdAt,
                                 onPickDate: () =>
                                     _openDatePickerFor(m.createdAt),

@@ -15,8 +15,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 내가 쓴 글 패널(MyPostsScreen) — 헤더 · 필터 줄(멤버 필터 없음) · 종류 드롭다운 · 정렬 · 로딩 줄 · 목록(방 이름·시각·본문 2줄·
-/// 게시글 제목·댓글 원본·편집됨), 서버로 가는 요청 파라미터, 눌러서 이동, 무한 스크롤, 빈 상태, 폭 360.
+/// 내가 쓴 글 패널(MyPostsScreen) — 헤더 · 검색칸 · 필터 줄(멤버 필터 없음) · 종류 탭(전체/메시지/댓글) · 범위(현재 팀/모든 팀) ·
+/// 정렬 · 로딩 줄 · 목록(검색 결과와 같은 줄: 방 이름·내 이름·시각·본문 2줄·게시글 제목·댓글 원본·편집됨·팀 칩·형광펜), 서버로 가는
+/// 요청 파라미터, 눌러서 이동, 무한 스크롤, 빈 상태, 폭 360.
 
 class _QuietNotifications extends NotificationService {
   @override
@@ -176,12 +177,22 @@ Future<void> _finish(WidgetTester tester) async {
 
 Finder _key(String k) => find.byKey(ValueKey(k));
 
-/// 정렬 줄 왼쪽 끝의 종류 드롭다운을 열고 [name] 종류를 고른다.
+/// 탭 줄에서 [name] 종류 탭을 누른다.
 Future<void> _pickKind(WidgetTester tester, String name) async {
-  await tester.tap(_key('my-posts-kind'));
-  await tester.pumpAndSettle();
   await tester.tap(_key('my-posts-tab-$name'));
   await tester.pumpAndSettle();
+}
+
+/// 검색칸에 [text]를 입력하고 디바운스(350ms)가 지나기를 기다린다.
+Future<void> _type(WidgetTester tester, String text) async {
+  await tester.enterText(_key('my-posts-search-field'), text);
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pumpAndSettle();
+}
+
+/// 팀을 하나 더 가입시킨다 — 범위 단추(현재 팀 ⌄)는 팀이 둘 이상일 때만 있다.
+void _addTeam(Session session) {
+  session.teams.add(Team(id: 't2', name: '개발팀', createdAt: DateTime(2026)));
 }
 
 void main() {
@@ -208,7 +219,7 @@ void main() {
     );
   });
 
-  testWidgets('헤더 · 필터 줄(멤버 필터 없음) · 종류 드롭다운 · 로딩 줄 · 목록과 기본 요청(최신순 1년)', (
+  testWidgets('헤더 · 검색칸 · 필터 줄(멤버 필터 없음) · 종류 탭 · 로딩 줄 · 목록과 기본 요청(최신 순 1년)', (
     tester,
   ) async {
     final session = _session(server);
@@ -220,62 +231,72 @@ void main() {
     expect(q['limit'], '30');
     expect(q.containsKey('kind'), isFalse);
     expect(q.containsKey('roomId'), isFalse);
+    expect(q.containsKey('q'), isFalse); // 검색칸이 비어 있으면 전부.
+    expect(q.containsKey('scope'), isFalse);
     final since = DateTime.fromMillisecondsSinceEpoch(int.parse(q['since']!));
     expect(DateTime.now().difference(since).inDays, inInclusiveRange(364, 366));
 
     expect(find.text('내가 쓴 글'), findsOneWidget); // 헤더
     expect(find.byTooltip('닫기'), findsOneWidget);
+    expect(_key('my-posts-search-field'), findsOneWidget);
+    expect(find.text('내가 쓴 글 검색'), findsOneWidget); // 검색칸 안내 글
     expect(find.text('참여 대화방'), findsOneWidget);
     expect(find.text('1년 (기본)'), findsOneWidget);
     expect(find.text('모든 멤버'), findsNothing); // 글쓴이는 늘 나라 멤버 필터가 없다.
-    expect(_key('panel-search-field'), findsNothing);
-    // 종류는 정렬 줄 왼쪽 끝의 드롭다운 하나(처음엔 '전체') — 정렬 단추와 같은 줄, 같은 글자 크기·색.
-    final kind = _key('my-posts-kind');
+    // 팀이 하나뿐이면 범위 단추가 없다(검색 패널과 같다).
+    expect(_key('panel-scope'), findsNothing);
+
+    // 종류는 탭 셋(전체 | 메시지 | 댓글) — 검색칸 아래, 정렬 단추와 같은 줄. 처음엔 '전체'가 굵게.
     final sort = _key('panel-sort');
-    final kindText = tester.widget<Text>(
-      find.descendant(of: kind, matching: find.text('전체')),
-    );
-    final sortText = tester.widget<Text>(
-      find.descendant(of: sort, matching: find.text('최신순')),
-    );
-    expect(kindText.style?.fontSize, sortText.style?.fontSize);
-    expect(kindText.style?.color, sortText.style?.color);
-    expect(tester.getCenter(kind).dy, tester.getCenter(sort).dy);
-    expect(tester.getTopLeft(kind).dx, 16);
-    expect(tester.getTopLeft(kind).dx, lessThan(tester.getTopLeft(sort).dx));
-    expect(find.text('메시지'), findsNothing); // 메뉴를 열기 전에는 다른 종류가 안 보인다.
-    await tester.tap(kind);
-    await tester.pumpAndSettle();
     for (final (name, label) in [
       ('all', '전체'),
       ('message', '메시지'),
       ('comment', '댓글'),
     ]) {
-      final item = _key('my-posts-tab-$name');
-      expect(
-        find.descendant(of: item, matching: find.text(label)),
-        findsOneWidget,
-        reason: label,
+      final tab = _key('my-posts-tab-$name');
+      final text = tester.widget<Text>(
+        find.descendant(of: tab, matching: find.text(label)),
       );
       expect(
-        find.descendant(of: item, matching: find.byIcon(Icons.check)),
-        name == 'all' ? findsOneWidget : findsNothing,
+        text.style?.fontWeight,
+        name == 'all' ? FontWeight.bold : FontWeight.normal,
         reason: label,
+      );
+      expect(tester.getCenter(tab).dy, tester.getCenter(sort).dy);
+      expect(
+        tester.getTopLeft(tab).dy,
+        greaterThan(tester.getBottomLeft(_key('my-posts-search-field')).dy),
       );
     }
-    await tester.tap(_key('my-posts-tab-comment'));
-    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(_key('my-posts-tab-all')).dx, 16);
+    expect(
+      tester.getTopLeft(_key('my-posts-tab-comment')).dx,
+      lessThan(tester.getTopLeft(sort).dx),
+    );
+    await _pickKind(tester, 'comment');
     expect(server.lastQuery['kind'], 'comment');
     expect(
-      find.descendant(of: kind, matching: find.text('댓글')),
-      findsOneWidget,
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: _key('my-posts-tab-comment'),
+              matching: find.text('댓글'),
+            ),
+          )
+          .style
+          ?.fontWeight,
+      FontWeight.bold,
     );
     await _pickKind(tester, 'all');
-    expect(find.text('최신순'), findsOneWidget);
+    expect(find.text('최신 순'), findsOneWidget);
     expect(find.text('"4"개가 로딩되었습니다.'), findsOneWidget);
 
-    // 행: 방 이름 · 시각(yyyy/MM/dd AM h:mm) · 본문, 편집됨.
+    // 행(검색 결과와 같은 모양): 방 이름 · 내 이름 · 시각(yyyy/MM/dd AM h:mm) · 본문, 편집됨.
     final row1 = _key('my-post-m:m1');
+    expect(
+      find.descendant(of: row1, matching: find.text('나')),
+      findsWidgets, // 아바타 글자와 이름
+    );
     expect(
       find.descendant(of: row1, matching: find.text('공지방')),
       findsOneWidget,
@@ -300,7 +321,11 @@ void main() {
     expect(_key('my-post-edited-m:m1'), findsOneWidget);
     expect(_key('my-post-edited-m:m2'), findsNothing);
 
-    // 게시글은 제목이 굵게 + 본문.
+    // 게시글은 '게시글' 표시와 굵은 제목 + 본문.
+    expect(
+      find.descendant(of: _key('my-post-m:m2'), matching: find.text('게시글')),
+      findsOneWidget,
+    );
     final row2 = _key('my-post-m:m2');
     final title = tester.widget<Text>(
       find.descendant(of: row2, matching: find.text('10월 영업 계획')),
@@ -315,12 +340,14 @@ void main() {
       findsOneWidget,
     );
 
-    // 댓글은 "댓글 · 원본: …" 보조줄.
+    // 댓글은 '댓글' 표시와 "원본: …" 한 줄 + 댓글 본문.
+    final row3 = _key('my-post-c:c3');
     expect(
-      find.descendant(
-        of: _key('my-post-c:c3'),
-        matching: find.text('댓글 · 원본: 점심 메뉴 공유드립니다'),
-      ),
+      find.descendant(of: row3, matching: find.text('댓글')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: row3, matching: find.text('원본: 점심 메뉴 공유드립니다')),
       findsOneWidget,
     );
     expect(find.text('내 댓글 3'), findsOneWidget);
@@ -374,7 +401,7 @@ void main() {
 
     await tester.tap(_key('panel-sort'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('과거순').last);
+    await tester.tap(find.text('과거 순').last);
     await tester.pumpAndSettle();
     expect(server.lastQuery['order'], 'asc');
     expect(server.lastQuery['roomId'], 'r2');
@@ -468,8 +495,9 @@ void main() {
     for (final f in [
       find.text('참여 대화방'),
       find.text('1년 (기본)'),
-      _key('my-posts-kind'),
-      find.text('최신순'),
+      _key('my-posts-search-field'),
+      _key('my-posts-tab-comment'),
+      find.text('최신 순'),
       _key('my-post-m:m1'),
       _key('my-post-c:c3'),
     ]) {
@@ -481,6 +509,180 @@ void main() {
     final room = tester.getRect(find.text('참여 대화방'));
     final period = tester.getRect(find.text('1년 (기본)'));
     expect(room.right, lessThan(period.left));
+    await _finish(tester);
+  });
+
+  testWidgets('검색칸 — 입력을 멈추면 q로 서버에서 찾고, 검색어를 형광펜으로 칠하고, 지우면 전부로 돌아온다', (
+    tester,
+  ) async {
+    final session = _session(server);
+    await _pump(tester, session);
+    final before = server.calls.length;
+
+    await _pickKind(tester, 'message');
+    await tester.enterText(_key('my-posts-search-field'), '회의');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(server.calls.length, before + 1); // 아직 디바운스 중 — 종류 탭 요청만.
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(server.calls.length, before + 2);
+    expect(server.lastQuery['q'], '회의');
+    expect(server.lastQuery['kind'], 'message'); // 조합 유지
+
+    // 같은 검색어로 엔터를 쳐도 다시 받지 않는다.
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    expect(server.calls.length, before + 2);
+
+    // 검색어가 있으면 본문은 형광펜(RichText) — 맞는 글자만 노란 바탕.
+    final rich = tester
+        .widgetList<RichText>(
+          find.descendant(
+            of: _key('my-post-m:m1'),
+            matching: find.byType(RichText),
+          ),
+        )
+        .firstWhere((r) => r.text.toPlainText().contains('회의 자료'));
+    final marked = <String>[];
+    rich.text.visitChildren((span) {
+      if (span is TextSpan &&
+          span.style?.backgroundColor == const Color(0xFFFFF59D)) {
+        marked.add(span.text ?? '');
+      }
+      return true;
+    });
+    expect(marked, ['회의']);
+
+    // 지우기(X) — 바로 검색어 없이 다시 받는다.
+    await tester.tap(find.byTooltip('지우기'));
+    await tester.pumpAndSettle();
+    expect(server.lastQuery.containsKey('q'), isFalse);
+    expect(find.byTooltip('지우기'), findsNothing);
+    await _finish(tester);
+  });
+
+  testWidgets('검색 결과가 없으면 "검색 결과가 없습니다."', (tester) async {
+    final session = _session(server);
+    await _pump(tester, session);
+    server.on('GET', '/api/my-posts', (_) => _json(_page([])));
+    await _type(tester, '없는말');
+    expect(find.text('검색 결과가 없습니다.'), findsOneWidget);
+    expect(find.text('작성한 글이 없습니다.'), findsNothing);
+    await _finish(tester);
+  });
+
+  testWidgets(
+    '범위 — 팀이 둘 이상이면 "현재 팀" 단추가 정렬 왼쪽에, 모든 팀이면 scope=all과 팀 칩, 특정 팀이면 그 팀 id',
+    (tester) async {
+      server.on('GET', '/api/my-posts', (r) {
+        final all = r.url.queryParameters['scope'] == 'all';
+        return _json(
+          _page([
+            {..._msg('1'), 'teamName': '영업팀'},
+            {
+              ..._msg('2', roomId: 'x9', roomName: '개발 공지'),
+              'teamId': 't2',
+              'teamName': all ? '개발팀' : null,
+            },
+          ]),
+        );
+      });
+      final session = _session(server);
+      _addTeam(session);
+      await _pump(tester, session);
+
+      final scope = _key('panel-scope');
+      expect(scope, findsOneWidget);
+      expect(
+        find.descendant(of: scope, matching: find.text('현재 팀')),
+        findsOneWidget,
+      );
+      expect(
+        tester.getCenter(scope).dy,
+        tester.getCenter(_key('panel-sort')).dy,
+      );
+      expect(
+        tester.getTopLeft(scope).dx,
+        lessThan(tester.getTopLeft(_key('panel-sort')).dx),
+      );
+      expect(_key('my-post-team-m:m1'), findsNothing); // 현재 팀이면 팀 칩이 없다.
+
+      // 모든 팀 — teamId 대신 scope=all, 줄마다 팀 칩. 다른 팀(목록에 없는 방)은 서버가 준 방 이름.
+      await tester.tap(scope);
+      await tester.pumpAndSettle();
+      await tester.tap(_key('panel-scope-all'));
+      await tester.pumpAndSettle();
+      expect(server.lastQuery['scope'], 'all');
+      expect(server.lastQuery.containsKey('teamId'), isFalse);
+      expect(
+        find.descendant(of: scope, matching: find.text('모든 팀')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: _key('my-post-team-m:m1'),
+          matching: find.text('영업팀'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: _key('my-post-team-m:m2'),
+          matching: find.text('개발팀'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: _key('my-post-m:m2'), matching: find.text('개발 공지')),
+        findsOneWidget,
+      );
+
+      // 이름으로 고른 팀 — 그 팀 id 하나로, 팀 칩은 없다.
+      await tester.tap(scope);
+      await tester.pumpAndSettle();
+      await tester.tap(_key('panel-scope-team-t2'));
+      await tester.pumpAndSettle();
+      expect(server.lastQuery['teamId'], 't2');
+      expect(server.lastQuery.containsKey('scope'), isFalse);
+      expect(
+        find.descendant(of: scope, matching: find.text('개발팀')),
+        findsOneWidget,
+      );
+      expect(_key('my-post-team-m:m1'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    },
+  );
+
+  testWidgets('범위 — 고른 팀이 바뀌면 다른 팀 방으로 걸어 둔 대화방 필터를 푼다', (tester) async {
+    final session = _session(server);
+    _addTeam(session);
+    await _pump(tester, session);
+    await tester.tap(find.text('참여 대화방'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('영업방').last);
+    await tester.pumpAndSettle();
+    expect(server.lastQuery['roomId'], 'r2');
+
+    await tester.tap(_key('panel-scope'));
+    await tester.pumpAndSettle();
+    await tester.tap(_key('panel-scope-team-t2'));
+    await tester.pumpAndSettle();
+    expect(server.lastQuery['teamId'], 't2');
+    expect(server.lastQuery.containsKey('roomId'), isFalse);
+    expect(find.text('참여 대화방'), findsOneWidget);
+    await _finish(tester);
+  });
+
+  testWidgets('폭 360 + 팀 둘 — 범위 단추는 로딩 줄 오른쪽으로 내려가고 넘치지 않는다', (tester) async {
+    final session = _session(server);
+    _addTeam(session);
+    await _pump(tester, session, size: const Size(330, 780));
+    expect(tester.takeException(), isNull);
+    final scope = tester.getRect(_key('panel-scope'));
+    final count = tester.getRect(_key('panel-loaded-count'));
+    expect(scope.center.dy, closeTo(count.center.dy, 12));
+    expect(scope.right, lessThanOrEqualTo(330));
     await _finish(tester);
   });
 

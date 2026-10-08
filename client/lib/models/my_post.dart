@@ -20,6 +20,9 @@ class MyPost {
   final String? roomType;
   final String? teamId;
 
+  /// 그 글이 있는 팀의 이름 — "모든 팀"으로 받았을 때 줄마다 팀 칩으로 보인다.
+  final String? teamName;
+
   /// 미리보기용 앞 200자. 게시글은 본문 없이 제목만 있을 수 있어 null일 수 있다.
   final String? text;
 
@@ -39,6 +42,7 @@ class MyPost {
     this.roomName,
     this.roomType,
     this.teamId,
+    this.teamName,
     this.text,
     this.title,
     required this.createdAt,
@@ -59,6 +63,7 @@ class MyPost {
     roomName: json['roomName'] as String?,
     roomType: json['roomType'] as String?,
     teamId: json['teamId'] as String?,
+    teamName: json['teamName'] as String?,
     text: json['text'] as String?,
     title: json['title'] as String?,
     createdAt: DateTime.fromMillisecondsSinceEpoch(

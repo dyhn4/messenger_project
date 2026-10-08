@@ -637,12 +637,6 @@ class PanelFilterBar extends StatefulWidget {
   final bool newestFirst;
   final ValueChanged<bool> onSortChanged;
 
-  /// false면 맨 위 검색칸을 그리지 않는다(검색어 없이 필터만 쓰는 투표 목록·내가 쓴 글 패널).
-  final bool showSearch;
-
-  /// false면 필터 줄에서 "모든 멤버" 칸을 뺀다(보낸 사람이 늘 나인 내가 쓴 글 패널).
-  final bool showMember;
-
   const PanelFilterBar({
     super.key,
     required this.searchHint,
@@ -663,8 +657,6 @@ class PanelFilterBar extends StatefulWidget {
     this.periodEnabled = true,
     required this.newestFirst,
     required this.onSortChanged,
-    this.showSearch = true,
-    this.showMember = true,
   });
 
   @override
@@ -700,37 +692,35 @@ class _PanelFilterBarState extends State<PanelFilterBar> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, widget.showSearch ? 16 : 12, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.showSearch) ...[
-            TextField(
-              key: const ValueKey('panel-search-field'),
-              controller: _controller,
-              decoration: InputDecoration(
-                hintText: widget.searchHint,
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: _controller.text.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        tooltip: '지우기',
-                        onPressed: () {
-                          _controller.clear();
-                          setState(() {});
-                          _emit();
-                        },
-                      ),
-                border: const OutlineInputBorder(),
-              ),
-              textInputAction: TextInputAction.search,
-              onChanged: _onChanged,
-              onSubmitted: (_) => _emit(),
+          TextField(
+            key: const ValueKey('panel-search-field'),
+            controller: _controller,
+            decoration: InputDecoration(
+              hintText: widget.searchHint,
+              isDense: true,
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: _controller.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      tooltip: '지우기',
+                      onPressed: () {
+                        _controller.clear();
+                        setState(() {});
+                        _emit();
+                      },
+                    ),
+              border: const OutlineInputBorder(),
             ),
-            const SizedBox(height: 12),
-          ],
+            textInputAction: TextInputAction.search,
+            onChanged: _onChanged,
+            onSubmitted: (_) => _emit(),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -744,19 +734,17 @@ class _PanelFilterBarState extends State<PanelFilterBar> {
                   ),
                 ),
               ),
-              if (widget.showMember) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _Disableable(
-                    enabled: widget.memberEnabled,
-                    child: MemberFilterButton(
-                      users: widget.members,
-                      selectedSenderId: widget.senderId,
-                      onSelected: widget.onSenderChanged,
-                    ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _Disableable(
+                  enabled: widget.memberEnabled,
+                  child: MemberFilterButton(
+                    users: widget.members,
+                    selectedSenderId: widget.senderId,
+                    onSelected: widget.onSenderChanged,
                   ),
                 ),
-              ],
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: _Disableable(
@@ -862,7 +850,7 @@ class PanelResultLine extends StatelessWidget {
 
 // ── 종류 ────────────────────────────────────────────────────────────
 
-/// 종류(전체 / 메시지 / 댓글 …) 고르기 단추 — 즐겨찾기·내가 쓴 글 패널이 정렬 단추 줄 왼쪽 끝에 둔다. [PanelSortButton]과
+/// 종류(전체 / 메시지 / 댓글 …) 고르기 단추 — 즐겨찾기 패널이 정렬 단추 줄 왼쪽 끝에 둔다. [PanelSortButton]과
 /// 같은 폰트·크기(라벨 12px, 흐린 색)에 글자 오른쪽 꺽쇠, 누르면 같은 모양의 드롭다운(설정 메뉴 모양, 지금 종류에 체크)이
 /// 뜬다. [values]에 null(전체)이 들어 있어도 되게 메뉴 값은 순번으로 다룬다.
 class PanelKindButton<T> extends StatelessWidget {

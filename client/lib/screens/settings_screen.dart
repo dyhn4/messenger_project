@@ -9,9 +9,13 @@ import 'package:window_manager/window_manager.dart';
 import '../services/app_platform.dart';
 import '../services/app_settings.dart';
 import '../services/download_storage.dart' show kAndroidDownloadSubfolder;
+import '../services/notification_popup.dart'
+    if (dart.library.js_interop) '../services/notification_popup_stub.dart';
+import '../services/notification_popup_style.dart';
 import '../services/session.dart';
 import '../services/system_fonts.dart'
     if (dart.library.js_interop) '../services/system_fonts_stub.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/filter_dropdown.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
@@ -69,6 +73,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late MessagePreviewMode _messagePreviewMode =
       widget.session.settings.messagePreviewMode;
   late bool _sendWithShiftEnter = widget.session.settings.sendWithShiftEnter;
+  late int _popupWidth = widget.session.settings.notifyPopupWidth;
+  late int _popupHeight = widget.session.settings.notifyPopupHeight;
+  late int _popupMaxCards = widget.session.settings.notifyPopupMaxCards;
   late bool _alwaysOnTop = widget.session.settings.alwaysOnTop;
   late double _windowOpacity = widget.session.settings.windowOpacity;
   late bool _autoLockOnSleep = widget.session.settings.autoLockOnSleep;
@@ -134,6 +141,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       dms: _gatherDms,
     );
     await settings.setSendWithShiftEnter(_sendWithShiftEnter);
+    await settings.setNotificationPopupSize(
+      width: _popupWidth,
+      height: _popupHeight,
+      maxCards: _popupMaxCards,
+    );
     await settings.setAlwaysOnTop(_alwaysOnTop);
     await settings.setWindowOpacity(_windowOpacity);
     await settings.setAutoLockOnSleep(_autoLockOnSleep);
@@ -381,29 +393,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
     _Item(
       label: '메시지 내용 미리보기',
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _PillOption(
-            selected: _messagePreviewMode == MessagePreviewMode.all,
-            label: '모든 메시지',
-            onTap: () =>
-                setState(() => _messagePreviewMode = MessagePreviewMode.all),
+          Row(
+            children: [
+              _PillOption(
+                selected: _messagePreviewMode == MessagePreviewMode.all,
+                label: '모든 메시지',
+                onTap: () => setState(
+                  () => _messagePreviewMode = MessagePreviewMode.all,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _PillOption(
+                selected:
+                    _messagePreviewMode == MessagePreviewMode.publicTopicOnly,
+                label: '공개 토픽만',
+                onTap: () => setState(
+                  () =>
+                      _messagePreviewMode = MessagePreviewMode.publicTopicOnly,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _PillOption(
+                selected: _messagePreviewMode == MessagePreviewMode.none,
+                label: '미리보기 안함',
+                onTap: () => setState(
+                  () => _messagePreviewMode = MessagePreviewMode.none,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          _PillOption(
-            selected: _messagePreviewMode == MessagePreviewMode.publicTopicOnly,
-            label: '공개 토픽만',
-            onTap: () => setState(
-              () => _messagePreviewMode = MessagePreviewMode.publicTopicOnly,
-            ),
-          ),
-          const SizedBox(width: 8),
-          _PillOption(
-            selected: _messagePreviewMode == MessagePreviewMode.none,
-            label: '미리보기 안함',
-            onTap: () =>
-                setState(() => _messagePreviewMode = MessagePreviewMode.none),
-          ),
+          // 새 메시지가 오면 화면 오른쪽 아래에 뜨는 알림 창(notification_popup.dart)의 카드 크기와 한꺼번에 쌓이는
+          // 개수 — 그 창은 PC에만 있다.
+          if (AppPlatform.isWindows) ...[
+            const SizedBox(height: 16),
+            _popupSizeSection(context),
+          ],
         ],
       ),
     ),
@@ -434,6 +461,99 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
   ];
+
+  /// "PC 알림 창" — 카드 가로·세로·최대 개수 스텝퍼와 미리 보기 단추. 값은 "저장하기"를 눌러야 반영된다.
+  Widget _popupSizeSection(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      key: const ValueKey('settings-notify-popup'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'PC 알림 창',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '새 메시지가 오면 화면 오른쪽 아래에 뜨는 알림 창의 크기와, 한꺼번에 쌓여 보이는 최대 개수입니다.',
+          style: TextStyle(fontSize: 12, color: theme.hintColor),
+        ),
+        const SizedBox(height: 10),
+        _NumberStepper(
+          key: const ValueKey('settings-notify-popup-width'),
+          label: '가로',
+          value: _popupWidth,
+          min: NotificationPopupStyle.minWidth,
+          max: NotificationPopupStyle.maxWidth,
+          step: NotificationPopupStyle.widthStep,
+          defaultValue: NotificationPopupStyle.defaultWidth,
+          unit: 'px',
+          onChanged: (v) => setState(() => _popupWidth = v),
+        ),
+        const SizedBox(height: 8),
+        _NumberStepper(
+          key: const ValueKey('settings-notify-popup-height'),
+          label: '세로',
+          value: _popupHeight,
+          min: NotificationPopupStyle.minHeight,
+          max: NotificationPopupStyle.maxHeight,
+          step: NotificationPopupStyle.heightStep,
+          defaultValue: NotificationPopupStyle.defaultHeight,
+          unit: 'px',
+          onChanged: (v) => setState(() => _popupHeight = v),
+        ),
+        const SizedBox(height: 8),
+        _NumberStepper(
+          key: const ValueKey('settings-notify-popup-count'),
+          label: '최대 개수',
+          value: _popupMaxCards,
+          min: NotificationPopupStyle.minCards,
+          max: NotificationPopupStyle.maxCardsLimit,
+          step: 1,
+          defaultValue: NotificationPopupStyle.defaultMaxCards,
+          unit: '개',
+          onChanged: (v) => setState(() => _popupMaxCards = v),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          key: const ValueKey('settings-notify-popup-preview'),
+          onPressed: _previewPopup,
+          icon: const Icon(Icons.visibility_outlined, size: 18),
+          label: const Text('알림 창 미리 보기'),
+        ),
+      ],
+    );
+  }
+
+  /// 아직 저장하지 않은 값으로 알림 창을 최대 개수만큼 띄워 본다(눌러도 아무 방도 열리지 않는다). 처음 한 번은 알림
+  /// 창을 새로 만드느라 1초쯤 걸린다.
+  Future<void> _previewPopup() async {
+    final style = NotificationPopupStyle(
+      themeMode: _themeMode,
+      width: _popupWidth,
+      height: _popupHeight,
+      maxCards: _popupMaxCards,
+    );
+    for (var i = 1; i <= _popupMaxCards; i++) {
+      final last = i == _popupMaxCards;
+      final shown = await showNotificationPopup(
+        key: 'settings-preview-$i',
+        title: last ? '알림 창 미리 보기' : '미리 보기 $i',
+        body:
+            '가로 ${_popupWidth}px · 세로 ${_popupHeight}px · 최대 $_popupMaxCards개 — 새 메시지가 오면 이렇게 보입니다.',
+        payload: '',
+        style: style,
+        force: true,
+        sound: last,
+      );
+      if (!shown) {
+        if (mounted) showAppToast(context, '알림 창을 띄우지 못했습니다.');
+        return;
+      }
+    }
+  }
 
   // ── 화면 설정 ──
 
@@ -1016,6 +1136,89 @@ class _TextSizeStepper extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text('크게', style: TextStyle(color: theme.hintColor, fontSize: 12)),
+      ],
+    );
+  }
+}
+
+/// 정해진 범위·간격으로 숫자 하나를 고르는 줄 — 왼쪽 이름, [−] 값 [+], 오른쪽 범위. 가운데 값을 누르면 기본값으로.
+class _NumberStepper extends StatelessWidget {
+  final String label;
+  final int value;
+  final int min;
+  final int max;
+  final int step;
+  final int defaultValue;
+  final String unit;
+  final ValueChanged<int> onChanged;
+  const _NumberStepper({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.defaultValue,
+    required this.unit,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDefault = value == defaultValue;
+    return Row(
+      children: [
+        SizedBox(width: 72, child: Text(label)),
+        _StepButton(
+          icon: Icons.remove,
+          onPressed: value > min
+              ? () => onChanged((value - step).clamp(min, max))
+              : null,
+        ),
+        const SizedBox(width: 8),
+        Tooltip(
+          message: '기본값($defaultValue$unit)으로',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => onChanged(defaultValue),
+            child: Container(
+              width: 110,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDefault ? _accentGreen : theme.dividerColor,
+                  width: isDefault ? 1.5 : 1,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  '$value$unit${isDefault ? ' (기본)' : ''}',
+                  style: TextStyle(
+                    fontWeight: isDefault ? FontWeight.w600 : null,
+                    color: isDefault ? _accentGreen : null,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        _StepButton(
+          icon: Icons.add,
+          onPressed: value < max
+              ? () => onChanged((value + step).clamp(min, max))
+              : null,
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            '$min~$max$unit',
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: theme.hintColor),
+          ),
+        ),
       ],
     );
   }

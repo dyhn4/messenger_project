@@ -18,6 +18,7 @@ import '../widgets/panel_filters.dart';
 import '../widgets/private_topic_lock.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show TopicBadge;
+import '../widgets/search_result_parts.dart';
 import 'chat_screen.dart';
 
 /// 검색 패널의 종류 탭 — 전체 / 메시지 / 투표 / 파일(꺽쇠로 파일 형식) / 대화방(내가 멤버인 방의 이름).
@@ -541,25 +542,25 @@ class _SearchScreenState extends State<SearchScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _SearchTab(
+                  PanelTab(
                     key: const ValueKey('search-tab-all'),
                     label: '전체',
                     selected: _type == SearchType.all,
                     onTap: () => _selectType(SearchType.all),
                   ),
-                  _SearchTab(
+                  PanelTab(
                     key: const ValueKey('search-tab-message'),
                     label: '메시지',
                     selected: _type == SearchType.message,
                     onTap: () => _selectType(SearchType.message),
                   ),
-                  _SearchTab(
+                  PanelTab(
                     key: const ValueKey('search-tab-poll'),
                     label: '투표',
                     selected: _type == SearchType.poll,
                     onTap: () => _selectType(SearchType.poll),
                   ),
-                  _SearchTab(
+                  PanelTab(
                     key: const ValueKey('search-tab-file'),
                     label: _fileKind.buttonLabel,
                     selected: _type == SearchType.file,
@@ -571,7 +572,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       child: chevron,
                     ),
                   ),
-                  _SearchTab(
+                  PanelTab(
                     key: const ValueKey('search-tab-room'),
                     label: '대화방',
                     selected: _type == SearchType.room,
@@ -792,76 +793,6 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 }
 
-/// 종류 탭 하나 — 고른 탭은 굵은 글씨 + 밑줄. [menuBuilder]를 주면 글자 오른쪽에 꺽쇠가 붙고,
-/// 꺽쇠를 누르면 그 메뉴가 열린다(글자를 누르면 탭만 고른다).
-class _SearchTab extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final Widget Function(Widget chevron)? menuBuilder;
-  const _SearchTab({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.menuBuilder,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = selected ? theme.colorScheme.onSurface : theme.hintColor;
-    final text = InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 6,
-          right: menuBuilder == null ? 6 : 0,
-          top: 10,
-          bottom: 10,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-            color: color,
-          ),
-        ),
-      ),
-    );
-    final builder = menuBuilder;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            width: 2,
-            color: selected ? theme.colorScheme.onSurface : Colors.transparent,
-          ),
-        ),
-      ),
-      child: builder == null
-          ? text
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                text,
-                builder(
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 10, 8, 10),
-                    child: Icon(
-                      Icons.keyboard_arrow_down,
-                      size: 18,
-                      color: color,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-}
-
 /// 검색 결과 한 건: 방 이름(라벨) + (아바타 + 보낸사람 · 시간) + 내용. 카드 테두리 없이
 /// ListView.separated의 Divider로만 결과끼리 구분한다. 내용 중 검색어는 형광펜으로
 /// 칠한 것처럼 하이라이트한다.
@@ -905,7 +836,7 @@ class _SearchResultRow extends StatelessWidget {
                     result.teamName != null &&
                     result.teamName!.isNotEmpty) ...[
                   const SizedBox(width: 6),
-                  _TeamChip(
+                  TeamNameChip(
                     key: const ValueKey('search-team-chip'),
                     name: result.teamName!,
                   ),
@@ -966,26 +897,11 @@ class _SearchResultRow extends StatelessWidget {
   /// 보드 게시글 — "게시글" 표시와 굵은 제목 한 줄, 그 아래 본문 두 줄(검색어는 양쪽 다 칠한다 —
   /// 서버가 제목으로도 찾아준다).
   List<Widget> _postLines(BuildContext context) {
-    final theme = Theme.of(context);
     final body = result.text?.trim() ?? '';
     return [
       Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              '게시글',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          ),
+          const ResultKindBadge('게시글'),
           const SizedBox(width: 6),
           Expanded(
             child: _highlighted(
@@ -1011,76 +927,7 @@ class _SearchResultRow extends StatelessWidget {
     String query, {
     int? maxLines,
     TextStyle? style,
-  }) =>
-      _highlightedText(context, text, query, maxLines: maxLines, style: style);
-}
-
-/// [text] 안의 [query]를 형광펜으로 칠한 것처럼 보여준다(대소문자 무시).
-Widget _highlightedText(
-  BuildContext context,
-  String text,
-  String query, {
-  int? maxLines,
-  TextStyle? style,
-}) {
-  final overflow = maxLines == null ? null : TextOverflow.ellipsis;
-  if (query.isEmpty) {
-    return Text(text, maxLines: maxLines, overflow: overflow, style: style);
-  }
-  final lowerText = text.toLowerCase();
-  final lowerQuery = query.toLowerCase();
-  final spans = <TextSpan>[];
-  var start = 0;
-  while (true) {
-    final idx = lowerText.indexOf(lowerQuery, start);
-    if (idx < 0) {
-      spans.add(TextSpan(text: text.substring(start)));
-      break;
-    }
-    if (idx > start) spans.add(TextSpan(text: text.substring(start, idx)));
-    spans.add(
-      TextSpan(
-        text: text.substring(idx, idx + query.length),
-        style: const TextStyle(
-          backgroundColor: Color(0xFFFFF59D),
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-    start = idx + query.length;
-  }
-  return RichText(
-    maxLines: maxLines,
-    overflow: overflow ?? TextOverflow.clip,
-    text: TextSpan(
-      style: DefaultTextStyle.of(context).style.merge(style),
-      children: spans,
-    ),
-  );
-}
-
-/// 모든 팀 검색에서 결과가 어느 팀 것인지 알려 주는 작은 칩.
-class _TeamChip extends StatelessWidget {
-  final String name;
-  const _TeamChip({super.key, required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-      ),
-    );
-  }
+  }) => highlightedText(context, text, query, maxLines: maxLines, style: style);
 }
 
 /// 전체 탭 결과 목록의 묶음 머리줄 — `대화방 5 … 더 보기 ›` / `메시지 383`. 옅은 바탕으로 묶음을 나눈다.
@@ -1242,7 +1089,7 @@ class _RoomResultRow extends StatelessWidget {
                   Row(
                     children: [
                       Flexible(
-                        child: _highlightedText(
+                        child: highlightedText(
                           context,
                           result.name,
                           query,
@@ -1271,7 +1118,7 @@ class _RoomResultRow extends StatelessWidget {
                       if (!result.isSelf && result.memberCount > 0)
                         Text('· 멤버 ${result.memberCount}명', style: small),
                       if (showTeam && result.teamName.isNotEmpty)
-                        _TeamChip(
+                        TeamNameChip(
                           key: const ValueKey('search-team-chip'),
                           name: result.teamName,
                         ),

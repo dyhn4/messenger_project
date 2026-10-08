@@ -169,10 +169,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _secretInviteDialogShowing = false;
         return;
       }
+      // 새 규약을 알리지 않은 요청(예전 앱이 걸었거나 서버가 바꿈)은 수락할 수 없다 — 이유를 알리고 거절만 하게 한다.
+      final outdated = widget.session.secretInviteIsOutdated(invite);
       // 예전에 보안 코드를 확인한 상대가 그때와 다른 기기로 요청했으면 미리 알린다(수락하면 방 안에도 안내가 뜬다).
-      final changedDevice = await widget.session.secretInviteFromChangedDevice(
-        invite,
-      );
+      final changedDevice =
+          !outdated &&
+          await widget.session.secretInviteFromChangedDevice(invite);
       if (!mounted) {
         _secretInviteDialogShowing = false;
         return;
@@ -200,9 +202,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
-              ),
+              if (outdated)
+                const Text(
+                  '상대가 예전 버전의 앱으로 보낸 비밀 대화 요청이라 이 기기에서는 수락할 수 없습니다. 거절한 뒤 상대에게 앱을 최신 '
+                  '버전으로 업데이트하고 다시 요청해 달라고 해 주세요(내 다른 기기에서 받으려면 닫기).\n\n두 사람 모두 최신 앱인데 이 '
+                  '안내가 뜨면 서버가 예전 버전이거나 요청을 바꿨을 수 있습니다 — 관리자에게 알려 주세요.',
+                  key: ValueKey('secret-invite-outdated'),
+                )
+              else
+                const Text(
+                  '상대방이 비밀 대화(종단간 암호화)를 시작하려고 합니다. 이 대화는 이 기기에서만 열람할 수 있고, 다른 기기와 동기화되지 않습니다.',
+                ),
               if (changedDevice) ...[
                 const SizedBox(height: 12),
                 Row(
@@ -227,14 +237,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           actions: [
+            // 수락할 수 없는 요청은 이 기기에서만 닫을 수도 있다 — 내 다른 기기(예전 앱)에서는 그대로 수락할 수 있게.
+            if (outdated)
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(null),
+                child: const Text('닫기'),
+              ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
               child: const Text('거절'),
             ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('수락'),
-            ),
+            if (!outdated)
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('수락'),
+              ),
           ],
         ),
       );
@@ -258,8 +275,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             );
           }
         }
+      } else if (accept == false) {
+        try {
+          await widget.session.rejectSecretInvite(invite);
+        } catch (e) {
+          // 그 사이 다른 기기에서 응답했거나 방이 없어졌다 — 다음 요청은 그대로 띄운다.
+          if (mounted) showAppToast(context, '비밀 대화 요청을 거절하지 못했습니다: $e');
+        }
       } else {
-        await widget.session.rejectSecretInvite(invite);
+        widget.session.dismissSecretInvite(invite);
       }
       if (mounted) _maybeShowSecretInvite();
     });

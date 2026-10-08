@@ -241,12 +241,49 @@ class _Device {
   final _MemoryStorage keyStorage;
   final DeviceIdentity identity;
   final SecretKeyStore store;
-  final SecretSessionManager manager;
+  SecretSessionManager manager;
 
   /// 이 기기의 방 목록(Session.rooms 대신) — 매니저가 방 멤버·핸드셰이크 기기 정보를 여기서 찾는다.
   final Map<String, Room> rooms;
 
   String get deviceId => identity.deviceId;
+
+  /// 이 업데이트 전의 앱처럼 새 규약을 알리지 않은 초대도 받는 매니저로 바꾼다(같은 저장소·방 목록) — 이 업데이트 전에 맺은
+  /// 예전 규약(v1) 대화를 흉내 낼 때만 쓴다(새 앱은 그런 초대를 받지 않는다).
+  void acceptOldInvites() {
+    manager = _newManager(
+      server,
+      identity,
+      store,
+      userId,
+      rooms,
+      acceptLegacyInvites: true,
+    );
+  }
+
+  static SecretSessionManager _newManager(
+    _Server server,
+    DeviceIdentity identity,
+    SecretKeyStore store,
+    String userId,
+    Map<String, Room> rooms, {
+    bool acceptLegacyInvites = false,
+  }) {
+    final manager = SecretSessionManager(
+      ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: server.client,
+      ),
+      identity,
+      keyStore: store,
+      userId: userId,
+      roomLookup: (id) => rooms[id],
+      acceptLegacyInvites: acceptLegacyInvites,
+    );
+    addTearDown(manager.dispose);
+    return manager;
+  }
 
   static Future<_Device> open(
     String userId,
@@ -265,18 +302,7 @@ class _Device {
     );
     final store = SecretKeyStore(storage: kStorage);
     final rooms = <String, Room>{};
-    final manager = SecretSessionManager(
-      ApiClient(
-        baseUrl: 'https://test.local',
-        token: 't',
-        httpClient: server.client,
-      ),
-      identity,
-      keyStore: store,
-      userId: userId,
-      roomLookup: (id) => rooms[id],
-    );
-    addTearDown(manager.dispose);
+    final manager = _newManager(server, identity, store, userId, rooms);
     return _Device._(
       userId,
       server,
@@ -355,14 +381,15 @@ SecretInviteEvent _withoutProtocol(SecretInviteEvent invite) =>
     );
 
 /// [alice]가 [bob]에게 걸고 [bob]이 수락해 양쪽 모두 세션 키를 만든다 — 둘 다 새 앱이라 새 규약(v3)으로 맺는다.
-/// [v3]가 false면 서버가 초대의 규약 번호를 전하지 않은 것처럼(예전 서버) 해서 예전 규약(v1)으로 맺는다 — 이
-/// 업데이트 전에 맺은 대화도 v1이다.
+/// [v3]가 false면 이 업데이트 전에 맺은 대화(예전 규약 v1)를 흉내 낸다 — 서버가 초대의 규약 번호를 전하지 않고, 밥은
+/// 그때의 앱처럼 그런 초대도 받는다([_Device.acceptOldInvites] — 새 앱은 받지 않는다).
 Future<void> _handshake(
   _Device alice,
   _Device bob, {
   String roomId = 'room-1',
   bool v3 = true,
 }) async {
+  if (!v3) bob.acceptOldInvites();
   final invite = await _start(alice, bob.userId, roomId: roomId);
   bob.rooms[roomId] = Room.fromJson(_roomJson(roomId, status: 'pending'));
   expect(
@@ -685,8 +712,34 @@ void main() {
   );
 
   test(
-    '상대가 예전 앱이라 v2가 없으면 고정한 키로 v1을 확인해 예전 규약(v1)으로 진행하고 "예전 앱"으로 표시한다 — 예전 앱의 v1이라도 고정한 키로 맞지 않으면 멈춘다',
+    '맥락 서명(v2)이 없는 초대(예전 앱)는 받지 않는다 — 상대 기기 키를 서버에 묻지도, 아무것도 적지도 않는다',
     () async {
+      final invite = await _start(alice, 'u-bob');
+      bob.rooms['room-1'] = Room.fromJson(
+        _roomJson('room-1', status: 'pending'),
+      );
+      final lookups = server.keyLookups.length;
+      final before = Map.of(bob.keyStorage.data);
+      await expectLater(
+        bob.manager.acceptInvite(
+          _withSignatures(
+            invite,
+            v1: invite.initiatorEphemeralSignature,
+            v2: null,
+          ),
+        ),
+        throwsA(isA<SecretInviteOutdatedException>()),
+      );
+      expect(server.keyLookups.length, lookups);
+      expect(bob.keyStorage.data, before);
+      expect(server.accepted['room-1'], isNull);
+    },
+  );
+
+  test(
+    '이 업데이트 전에 예전 앱과 맺은 대화(그때 밥의 앱은 v2가 없는 초대도 받았다) — 고정한 키로 v1을 확인해 예전 규약(v1)으로 진행하고 "예전 앱"으로 표시한다 — 예전 앱의 v1이라도 고정한 키로 맞지 않으면 멈춘다',
+    () async {
+      bob.acceptOldInvites();
       final invite = await _start(alice, 'u-bob');
       bob.rooms['room-1'] = Room.fromJson(
         _roomJson('room-1', status: 'pending'),

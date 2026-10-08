@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 
 import '../models/message.dart';
 import '../models/room.dart';
@@ -20,6 +20,15 @@ class SecretChatBlockedException extends ApiException {
   const SecretChatBlockedException()
     : super(
         '보안 확인에 실패해 멈춘 비밀 대화입니다. 이 비밀 대화를 끝내고 상대와 보안 코드를 비교한 뒤 새로 시작해 주세요.',
+      );
+}
+
+/// 새 규약을 알리지 않은 초대(예전 앱이 걸었거나, 서버가 새 앱의 초대에서 새 규약 표시를 뺌)를 수락하려 할 때 — 이 기기는
+/// 그런 초대를 받지 않는다([SecretSessionManager.offersCurrentProtocol]).
+class SecretInviteOutdatedException extends ApiException {
+  const SecretInviteOutdatedException()
+    : super(
+        '상대가 예전 버전의 앱으로 보낸 비밀 대화 요청이라 수락할 수 없습니다. 상대에게 앱을 업데이트한 뒤 다시 요청해 달라고 해 주세요.',
       );
 }
 
@@ -158,8 +167,10 @@ class _PeerKey {
 /// 매니저의 encryptForRoom/decryptForRoom을 호출하는 얇은 통합만 한다.
 ///
 /// 규약(secret_chat_crypto.dart 머리말): 초대할 때 새 규약(v3 — 더블 래칫, secret_ratchet.dart)을 안다고 알리고,
-/// 받는 쪽도 새 앱이면 v3 맥락 서명으로 수락해 두 기기가 v3로 대화한다. 어느 한쪽이 예전 앱이거나 이 업데이트 전에
-/// 맺은 대화는 예전 규약(v1 — 체인 하나를 함께 씀)을 그대로 쓰되, 대화가 깨지지 않게 이렇게만 고쳤다:
+/// 받는 쪽은 v3 맥락 서명으로 수락해 두 기기가 v3로 대화한다. 새 규약을 알리지 않은 초대는 받지 않는다 — 예전 앱의
+/// 초대와 서버가 새 규약 표시를 뺀 초대를 가릴 수 없어서, 받으면 서버가 새 앱끼리의 대화도 예전 규약으로 낮출 수 있다
+/// ([offersCurrentProtocol]). 그래서 새 앱끼리는 늘 v3다. 새 앱이 예전 앱에 건 대화(예전 앱이 예전 방식으로 수락)와 이
+/// 업데이트 전에 맺은 대화는 예전 규약(v1 — 체인 하나를 함께 씀)을 그대로 쓰되, 대화가 깨지지 않게 이렇게만 고쳤다:
 ///  - 재키잉을 하지 않는다 — 제안하지도, 상대의 제안·수락에 응하지도 않는다. 예전 재키잉은 두 기기의 체인 위치가
 ///    조금만 어긋나도(제안이 메시지보다 먼저 도착 등) 양쪽 체인이 갈라져 대화가 영영 풀리지 않았다. 재키잉 없이도
 ///    메시지마다 체인키를 바꾸는 순방향 비밀성은 그대로다.
@@ -267,16 +278,28 @@ class SecretSessionManager {
   }
 
   /// [keyStore]는 테스트가 저장소를 바꿔 끼울 때만 준다. [userId]는 로그인한 내 id, [roomLookup]은 Session의 방
-  /// 목록 — 핸드셰이크에 꼭 필요하다(평문 캐시만 다루는 곳에서는 없어도 된다).
+  /// 목록 — 핸드셰이크에 꼭 필요하다(평문 캐시만 다루는 곳에서는 없어도 된다). [acceptLegacyInvites]는 테스트가 이
+  /// 업데이트 전에 맺은 예전 규약 대화를 두 매니저로 흉내 낼 때만 켠다(앱은 새 규약을 알리지 않은 초대를 받지 않는다).
   SecretSessionManager(
     this._api,
     this._identity, {
     SecretKeyStore? keyStore,
     String? userId,
     Room? Function(String roomId)? roomLookup,
+    @visibleForTesting this._acceptLegacyInvites = false,
   }) : _keyStore = keyStore ?? SecretKeyStore(),
        _myUserId = userId,
        _lookupRoom = roomLookup;
+
+  final bool _acceptLegacyInvites;
+
+  /// [invite]가 새 규약(v3)을 알렸는지 — 초대한 앱의 맥락 서명(v2)과 규약 번호 3 이상이 함께 있어야 한다. 아니면 예전 앱이
+  /// 건 초대거나 서버가 새 규약 표시를 뺀 초대다. 둘을 가릴 수 없어(규약 번호는 서명되지 않는다 — 예전 앱이 확인하는 초대
+  /// 서명에 그 칸이 없다) 받지 않는다. 그래서 서버가 표시를 빼도 대화를 못 맺을 뿐 예전 규약으로 낮추지는 못하고, 새 앱은
+  /// 예전 규약으로 수락하지 않으니 서버가 새 앱의 예전 방식 수락을 꾸며 초대한 쪽을 낮출 수도 없다.
+  static bool offersCurrentProtocol(SecretInviteEvent invite) =>
+      invite.initiatorContextSignature != null &&
+      (invite.initiatorProtocol ?? 0) >= crypto.secretProtocolV3;
 
   String get _me {
     final me = _myUserId;
@@ -991,6 +1014,10 @@ class SecretSessionManager {
   /// 세션까지 지워진다. 응답을 못 받은 수락(그 사이 끊김·꺼짐)은 다시 할 수 있다.
   Future<SecretHandshakeOutcome> acceptInvite(SecretInviteEvent invite) =>
       _inRoom(invite.roomId, () async {
+        // 새 규약을 알리지 않은 초대는 받지 않는다([offersCurrentProtocol]) — 아무것도 적지 않고 묻지도 않는다.
+        if (!_acceptLegacyInvites && !offersCurrentProtocol(invite)) {
+          throw const SecretInviteOutdatedException();
+        }
         final roomId = invite.roomId;
         final me = _me;
         final myDeviceId = _identity.deviceId;

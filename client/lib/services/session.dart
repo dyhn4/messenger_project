@@ -346,6 +346,10 @@ class Session extends ChangeNotifier {
   /// 등)를 다시 띄우지 않는다.
   final Set<String> _secretAcceptsInFlight = {};
 
+  /// 이 기기에서 닫아 둔(거절하지 않고) 수락할 수 없는 초대의 방 — 이번 실행 동안 다시 띄우지 않는다
+  /// ([dismissSecretInvite]).
+  final Set<String> _dismissedSecretInvites = {};
+
   /// 화면 어디에 있든(방을 안 보고 있어도) 한 번 스치듯 보여주면 되는 안내 — 비밀 대화
   /// 거절/양쪽 나가기처럼 "방 자체가 사라지는" 이벤트를 토스트(SnackBar)로 알릴 때 쓴다.
   /// main.dart가 이 스트림을 구독해서 navigatorKey의 context로 SnackBar를 띄운다.
@@ -1725,6 +1729,7 @@ class Session extends ChangeNotifier {
       // 같은 방의 초대가 이미 떠 있거나 그 수락을 보내 응답을 기다리는 중이면, 또는 이미 맺은 대화면(서버가 다시 보냄)
       // 다시 띄우지 않는다 — 다시 수락하면 맺은 대화가 깨진다(SecretSessionManager.acceptInvite).
       if (_secretAcceptsInFlight.contains(e.roomId) ||
+          _dismissedSecretInvites.contains(e.roomId) ||
           pendingSecretInvites.any((i) => i.roomId == e.roomId)) {
         return;
       }
@@ -2466,6 +2471,11 @@ class Session extends ChangeNotifier {
     return deviceId != null;
   }
 
+  /// 새 규약을 알리지 않은 초대라 수락할 수 없는지(예전 앱이 걸었거나 서버가 새 규약 표시를 뺌 —
+  /// SecretSessionManager.offersCurrentProtocol) — 초대 대화상자가 이유를 알리고 거절만 하게 한다.
+  bool secretInviteIsOutdated(SecretInviteEvent invite) =>
+      !SecretSessionManager.offersCurrentProtocol(invite);
+
   /// 이 초대를 보낸 기기가, 이 기기가 보안 코드를 확인하지 않은 기기인데 같은 사람의 다른 기기는 확인한 적이
   /// 있는지 — 초대 대화상자가 "상대의 기기가 바뀌었다"고 미리 알린다.
   Future<bool> secretInviteFromChangedDevice(SecretInviteEvent invite) async =>
@@ -2474,6 +2484,14 @@ class Session extends ChangeNotifier {
         invite.initiatorDeviceId,
       ) ??
       false;
+
+  /// 수락할 수 없는 초대(예전 앱의 요청)를 거절하지 않고 이 기기에서만 닫는다 — 내 다른 기기(예전 앱)에서는 그대로
+  /// 수락할 수 있다. 이번 실행 동안은 다시 띄우지 않는다.
+  void dismissSecretInvite(SecretInviteEvent invite) {
+    pendingSecretInvites.removeWhere((e) => e.roomId == invite.roomId);
+    _dismissedSecretInvites.add(invite.roomId);
+    notifyListeners();
+  }
 
   Future<void> rejectSecretInvite(SecretInviteEvent invite) async {
     pendingSecretInvites.removeWhere((e) => e.roomId == invite.roomId);
@@ -2494,6 +2512,7 @@ class Session extends ChangeNotifier {
     }
     if (room.secretInitiatorUserId == userId) return;
     if (pendingSecretInvites.any((e) => e.roomId == roomId)) return;
+    if (_dismissedSecretInvites.contains(roomId)) return;
     // 이 기기가 수락을 보내 응답을 기다리는 중이면(방 목록에는 아직 pending) 다시 띄우지 않는다 — 두 번 수락하면 먼저
     // 맺은 세션이 덮어써진다.
     if (_secretAcceptsInFlight.contains(roomId)) return;

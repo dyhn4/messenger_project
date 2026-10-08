@@ -56,7 +56,10 @@ dependencies:
   package_info_plus: ^9.0.1
   scrollable_positioned_list: ^0.3.8
   cryptography: ^2.7.0
-  flutter_secure_storage: ^9.2.4
+  # 보안 저장소(기기 신원키·비밀 대화 키) — 키가 날아가거나 되돌아가지 않게 고친 사본(9.2.4 기준, Android는 저장을
+  # 바로 디스크에 씀 — packages/flutter_secure_storage/TANGOTALK_PATCHES.md). Windows 구현은 아래 dependency_overrides.
+  flutter_secure_storage:
+    path: packages/flutter_secure_storage
   uuid: ^4.5.1
   image: ^4.5.4
   open_file: ^3.5.10
@@ -87,6 +90,14 @@ dependencies:
   cross_file: ^0.3.5
   # 웹 빌드 전용 브라우저 API(파일 내려받기·새 탭으로 열기 — browser_files_web.dart).
   web: ^1.1.1
+
+# Windows 보안 저장소 구현(flutter_secure_storage_windows 3.1.2)을 고친 사본으로 — 파일을 통째로 바꿔 끼워 쓰다
+# 끊겨도 깨지지 않고, 읽지 못한 파일은 지우지 않고 남기며, 작업을 한 번에 하나씩 한다
+# (packages/flutter_secure_storage_windows/TANGOTALK_PATCHES.md).
+dependency_overrides:
+  flutter_secure_storage_windows:
+    path: packages/flutter_secure_storage_windows
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

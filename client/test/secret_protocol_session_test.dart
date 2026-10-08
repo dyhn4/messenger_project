@@ -223,10 +223,13 @@ class _Device {
   final _MemoryStorage keyStorage;
   final DeviceIdentity identity;
   final SecretKeyStore store;
-  final SecretSessionManager manager;
+  SecretSessionManager manager;
 
   /// 이 기기의 방 목록(Session.rooms 대신) — 매니저가 방 멤버·핸드셰이크 기기 정보를 여기서 찾는다.
   final Map<String, Room> rooms;
+
+  /// 새 규약을 알리지 않은 초대도 받는 매니저인지([acceptOldInvites]).
+  bool acceptsOldInvites = false;
 
   String get deviceId => identity.deviceId;
 
@@ -238,6 +241,7 @@ class _Device {
     _MemoryStorage? identityStorage,
     _MemoryStorage? keyStorage,
     Map<String, Room>? rooms,
+    bool acceptOldInvites = false,
   }) async {
     final idStorage = identityStorage ?? _MemoryStorage();
     final kStorage = keyStorage ?? _MemoryStorage();
@@ -250,18 +254,14 @@ class _Device {
     );
     final store = SecretKeyStore(storage: kStorage);
     final roomMap = rooms ?? <String, Room>{};
-    final manager = SecretSessionManager(
-      ApiClient(
-        baseUrl: 'https://test.local',
-        token: 't',
-        httpClient: server.client,
-      ),
+    final manager = _newManager(
+      server,
       identity,
-      keyStore: store,
-      userId: userId,
-      roomLookup: (id) => roomMap[id],
+      store,
+      userId,
+      roomMap,
+      acceptLegacyInvites: acceptOldInvites,
     );
-    addTearDown(manager.dispose);
     return _Device._(
       userId,
       server,
@@ -271,7 +271,46 @@ class _Device {
       store,
       manager,
       roomMap,
+    )..acceptsOldInvites = acceptOldInvites;
+  }
+
+  static SecretSessionManager _newManager(
+    _Server server,
+    DeviceIdentity identity,
+    SecretKeyStore store,
+    String userId,
+    Map<String, Room> rooms, {
+    required bool acceptLegacyInvites,
+  }) {
+    final manager = SecretSessionManager(
+      ApiClient(
+        baseUrl: 'https://test.local',
+        token: 't',
+        httpClient: server.client,
+      ),
+      identity,
+      keyStore: store,
+      userId: userId,
+      roomLookup: (id) => rooms[id],
+      acceptLegacyInvites: acceptLegacyInvites,
     );
+    addTearDown(manager.dispose);
+    return manager;
+  }
+
+  /// 이 업데이트 전의 앱처럼 새 규약을 알리지 않은 초대도 받는 매니저로 바꾼다(같은 저장소·방 목록) — 이 업데이트 전에 맺은
+  /// 예전 규약(v1) 대화를 두 매니저로 흉내 낼 때만 쓴다(새 앱은 그런 초대를 받지 않는다).
+  void acceptOldInvites() {
+    if (acceptsOldInvites) return;
+    manager = _newManager(
+      server,
+      identity,
+      store,
+      userId,
+      rooms,
+      acceptLegacyInvites: true,
+    );
+    acceptsOldInvites = true;
   }
 
   Future<_Device> restart() => _Device.open(
@@ -280,6 +319,7 @@ class _Device {
     identityStorage: identityStorage,
     keyStorage: keyStorage,
     rooms: Map.of(rooms),
+    acceptOldInvites: acceptsOldInvites,
   );
 
   /// [text]를 암호화한 봉투 — 보낼 세션이 없으면(null) 실패로 본다.
@@ -389,13 +429,15 @@ Future<SecretInviteEvent> _handshake(
   return invite;
 }
 
-/// [protocol] 규약으로 맺는다 — 1이면 서버가 초대의 규약 표시를 빼고 전한 것(예전 서버)이다.
+/// [protocol] 규약으로 맺는다 — 1이면 이 업데이트 전에 맺은 대화(예전 규약)를 흉내 낸다: 서버가 초대의 규약 표시를 빼고
+/// 전하고, 받는 쪽은 그때의 앱처럼 그런 초대도 받는다([_Device.acceptOldInvites] — 새 앱은 받지 않는다).
 Future<void> _establish(
   _Device alice,
   _Device bob,
   int protocol, {
   String roomId = 'room-1',
 }) async {
+  if (protocol == 1) bob.acceptOldInvites();
   await _handshake(
     alice,
     bob,
@@ -677,6 +719,21 @@ Future<bool> _acceptSignedWith(
     ),
     signatureBase64: signature,
   );
+}
+
+/// [device]가 [invite]를 받지 않는지 — 새 규약을 알리지 않은 초대라 아무것도 적지 않고(저장소 그대로) 서버에 수락도
+/// 보내지 않으며, 방을 멈추지도 않는다(예전 앱의 초대일 수도, 서버가 바꾼 것일 수도 있다).
+Future<void> _expectRefused(_Device device, SecretInviteEvent invite) async {
+  final calls = device.server.acceptCalls;
+  final before = Map.of(device.keyStorage.data);
+  await expectLater(
+    device.manager.acceptInvite(invite),
+    throwsA(isA<SecretInviteOutdatedException>()),
+  );
+  expect(device.server.acceptCalls, calls, reason: '서버에 수락을 보냈다');
+  expect(device.keyStorage.data, before, reason: '저장소에 무언가 적었다');
+  expect(await device.manager.isBlocked(invite.roomId), isFalse);
+  expect(await device.protocol(invite.roomId), isNull);
 }
 
 /// 저장된 v3 래칫 상태.
@@ -1360,75 +1417,60 @@ void main() {
   });
 
   group('규약 협상 — 예전 서버·예전 앱·서버가 바꾼 값', () {
-    test(
-      '서버가 초대의 규약 표시를 빼고 전하면(예전 서버) 양쪽 모두 v1로 맺고 서로 풀리며, 두 기기 모두 "예전 방식" 안내를 '
-      '띄운다(상대가 예전 앱은 아니다)',
-      () async {
-        final invite = await _handshake(
-          alice,
-          bob,
-          inviteRelay: _without('initiatorProtocol'),
-        );
-        expect(server.started.single['protocol'], 3);
-        expect(invite.initiatorProtocol, isNull);
-        expect(
-          await _acceptSignedWith(crypto.secretAcceptContext, invite, bob),
-          isTrue,
-        );
-        expect(
-          await _acceptSignedWith(crypto.secretAcceptContextV3, invite, bob),
-          isFalse,
-        );
-        for (final device in [alice, bob]) {
-          expect(await device.protocol(), 1, reason: device.userId);
-          expect(device.stored('ratchet'), isNull, reason: device.userId);
-          expect(device.stored('chain'), isNotNull, reason: device.userId);
-          expect(device.stored('chainKey'), isNull, reason: device.userId);
-          final trust = await device.manager.loadTrust('room-1');
-          expect(trust.legacyProtocol, isTrue, reason: device.userId);
-          expect(trust.security.legacyPeer, isFalse, reason: device.userId);
-          expect(trust.showProtocolNotice, isTrue, reason: device.userId);
-          expect(trust.showLegacyNotice, isFalse, reason: device.userId);
-        }
-        for (var i = 0; i < 5; i++) {
-          await _roundTrip(alice, bob, '예전 방식 $i');
-          await _roundTrip(bob, alice, '예전 방식 답장 $i');
-        }
-      },
-    );
+    test('서버가 초대의 규약 표시를 빼고 전하면(예전 서버·서버가 뺌) 밥은 수락하지 않는다 — 아무것도 적지 않고 서버에 수락도 '
+        '보내지 않아, 새 앱끼리의 대화를 예전 규약으로 낮출 수 없다(앨리스는 수락을 기다린 채다)', () async {
+      final invite = await _start(
+        alice,
+        bob.userId,
+        relay: _without('initiatorProtocol'),
+      );
+      expect(server.started.single['protocol'], 3);
+      expect(invite.initiatorProtocol, isNull);
+      expect(SecretSessionManager.offersCurrentProtocol(invite), isFalse);
+      bob.rooms['room-1'] = Room.fromJson(
+        _roomJson('room-1', status: 'pending'),
+      );
+      await _expectRefused(bob, invite);
+      expect(alice.stored('pendingEphemeralSeed'), isNotNull);
+      expect(await alice.protocol(), isNull);
+    });
 
     test(
-      '서버가 전한 규약 번호가 3 이상의 정수일 때만 v3 — 빠졌거나 숫자가 아니거나 3보다 작으면 v1이고, 어느 쪽이든 두 기기가 '
-      '같은 규약으로 맺어 서로 풀린다',
+      '서버가 전한 규약 번호가 3 이상의 정수일 때만 받아 v3로 맺는다 — 빠졌거나 숫자가 아니거나 3보다 작으면 받지 않는다',
       () async {
-        final cases = <(Object?, int)>[
-          (null, 1),
-          ('3', 1),
-          (2, 1),
-          (1, 1),
-          (0, 1),
-          (3, 3),
-          (4, 3),
+        final cases = <(Object?, bool)>[
+          (null, false),
+          ('3', false),
+          (2, false),
+          (1, false),
+          (0, false),
+          (3, true),
+          (4, true),
         ];
         for (var i = 0; i < cases.length; i++) {
-          final (relayed, expected) = cases[i];
+          final (relayed, accepts) = cases[i];
           final roomId = 'room-p$i';
+          if (!accepts) {
+            final invite = await _start(
+              alice,
+              bob.userId,
+              roomId: roomId,
+              relay: _with('initiatorProtocol', relayed),
+            );
+            bob.rooms[roomId] = Room.fromJson(
+              _roomJson(roomId, status: 'pending'),
+            );
+            await _expectRefused(bob, invite);
+            continue;
+          }
           await _handshake(
             alice,
             bob,
             roomId: roomId,
             inviteRelay: _with('initiatorProtocol', relayed),
           );
-          expect(
-            await alice.protocol(roomId),
-            expected,
-            reason: '서버가 $relayed를 전함 — 앨리스',
-          );
-          expect(
-            await bob.protocol(roomId),
-            expected,
-            reason: '서버가 $relayed를 전함 — 밥',
-          );
+          expect(await alice.protocol(roomId), 3, reason: '서버가 $relayed를 전함');
+          expect(await bob.protocol(roomId), 3, reason: '서버가 $relayed를 전함');
           await _roundTrip(alice, bob, '$relayed 앨리스', roomId: roomId);
           await _roundTrip(bob, alice, '$relayed 밥', roomId: roomId);
         }
@@ -1436,9 +1478,33 @@ void main() {
     );
 
     test(
-      '예전 앱(맥락 서명·규약 표시 없음)이 건 초대 — 밥은 v1로 맺고 "예전 앱"으로 표시하며(예전 방식 안내는 아님), 그 앱과 '
-      '글이 오간다',
+      '예전 앱(맥락 서명·규약 표시 없음)이나 이 업데이트 전 앱(맥락 서명만 있음)이 건 초대는 받지 않는다 — 상대가 업데이트한 뒤 '
+      '새로 요청해야 한다',
       () async {
+        for (final (roomId, withContext) in [
+          ('room-o1', false),
+          ('room-o2', true),
+        ]) {
+          final (invite, _) = await _oldAppInvite(
+            alice,
+            'u-bob',
+            roomId: roomId,
+            withContext: withContext,
+          );
+          bob.rooms[roomId] = Room.fromJson(
+            _roomJson(roomId, status: 'pending'),
+          );
+          await _expectRefused(bob, invite);
+        }
+      },
+    );
+
+    test(
+      '이 업데이트 전에 예전 앱(맥락 서명·규약 표시 없음)과 맺은 대화 — 밥은 v1로 이어 가고 "예전 앱"으로 표시하며(예전 방식 '
+      '안내는 아님), 그 앱과 글이 오간다',
+      () async {
+        // 그때 밥의 앱은 예전 초대도 받았다.
+        bob.acceptOldInvites();
         final (invite, aliceEphemeral) = await _oldAppInvite(alice, 'u-bob');
         expect(invite.initiatorContextSignature, isNull);
         expect(invite.initiatorProtocol, isNull);
@@ -1502,45 +1568,34 @@ void main() {
     );
 
     test(
-      '서버가 예전 앱의 초대(맥락 서명 없음)에 규약 3을 붙여도 밥은 v3로 맺지 않는다(v1) — 예전 앱과 그대로 대화한다',
+      '서버가 예전 앱의 초대(맥락 서명 없음)에 규약 3을 붙이거나 새 앱의 초대에서 맥락 서명을 빼도 받지 않는다 — 새 규약은 '
+      '맥락 서명과 함께여야 한다',
       () async {
-        final (invite, aliceEphemeral) = await _oldAppInvite(
-          alice,
-          'u-bob',
-          protocol: 3,
-        );
-        expect(invite.initiatorProtocol, 3);
-        expect(invite.initiatorContextSignature, isNull);
+        final (oldInvite, _) = await _oldAppInvite(alice, 'u-bob', protocol: 3);
+        expect(oldInvite.initiatorProtocol, 3);
+        expect(oldInvite.initiatorContextSignature, isNull);
         bob.rooms['room-1'] = Room.fromJson(
           _roomJson('room-1', status: 'pending'),
         );
-        expect(
-          await bob.manager.acceptInvite(invite),
-          SecretHandshakeOutcome.established,
-        );
-        expect(await bob.protocol(), 1);
-        expect(bob.stored('ratchet'), isNull);
-        expect(
-          await _acceptSignedWith(crypto.secretAcceptContext, invite, bob),
-          isTrue,
-        );
-        expect(
-          await _acceptSignedWith(crypto.secretAcceptContextV3, invite, bob),
-          isFalse,
-        );
-        expect(
-          (await bob.manager.loadTrust('room-1')).security.legacyPeer,
-          isTrue,
-        );
-        final oldAlice = await _oldAppChain(
-          aliceEphemeral,
-          server.accepted['room-1']!['responderEphemeralPublicKey'] as String,
-          'room-1',
-        );
-        final a = await oldAlice.encrypt('예전 앱');
-        expect(await bob.receive(a, from: 'u-alice'), '예전 앱');
-        final b = await bob.send('새 앱');
-        expect(await oldAlice.decrypt(b), '새 앱');
+        await _expectRefused(bob, oldInvite);
+        final relays = <String, _Relay>{
+          'room-c1': _without('initiatorContextSignature'),
+          'room-c2': (payload) => Map.of(payload)
+            ..remove('initiatorContextSignature')
+            ..remove('initiatorProtocol'),
+        };
+        for (final MapEntry(key: roomId, value: relay) in relays.entries) {
+          final invite = await _start(
+            alice,
+            bob.userId,
+            roomId: roomId,
+            relay: relay,
+          );
+          bob.rooms[roomId] = Room.fromJson(
+            _roomJson(roomId, status: 'pending'),
+          );
+          await _expectRefused(bob, invite);
+        }
       },
     );
 
@@ -1575,8 +1630,10 @@ void main() {
     );
 
     test(
-      'v3를 제안했는데 밥이 v2 맥락으로 수락하면(규약 표시가 빠진 초대를 받음) 앨리스도 v1로 맺어 서로 맞는다 — 동시에 보내도',
+      'v3를 제안했는데 밥이 v2 맥락으로 수락하면(그때 밥의 앱은 규약 표시가 빠진 초대도 받았다 — 이 업데이트 전) 앨리스도 v1로 '
+      '맺어 서로 맞는다 — 동시에 보내도',
       () async {
+        bob.acceptOldInvites();
         final invite = await _start(
           alice,
           'u-bob',
@@ -1725,7 +1782,7 @@ void main() {
       expect((await alice.manager.loadTrust('room-1')).blocked, isTrue);
     });
 
-    test('업데이트 전에 건 초대(규약 표시 없음)를 서버가 그대로 전하면 업데이트한 앨리스와 밥은 v1로 맺는다', () async {
+    test('업데이트 전에 건 초대(규약 표시 없음)는 업데이트한 밥이 받지 않는다 — 새로 요청하면 v3로 맺는다', () async {
       final invite = await _start(
         alice,
         'u-bob',
@@ -1738,45 +1795,12 @@ void main() {
       bob.rooms['room-1'] = Room.fromJson(
         _roomJson('room-1', status: 'pending'),
       );
-      expect(
-        await bob.manager.acceptInvite(invite),
-        SecretHandshakeOutcome.established,
-      );
-      expect(
-        await alice.manager.handleAccepted(_accepted(bob, 'room-1')),
-        SecretHandshakeOutcome.established,
-      );
-      expect(await alice.protocol(), 1);
-      expect(await bob.protocol(), 1);
-      await _roundTrip(alice, bob, '업데이트 전 초대');
-      await _roundTrip(bob, alice, '업데이트 전 초대 답장');
+      await _expectRefused(bob, invite);
+      await _handshake(alice, bob, roomId: 'room-2');
+      expect(await alice.protocol('room-2'), 3);
+      expect(await bob.protocol('room-2'), 3);
+      await _roundTrip(alice, bob, '새로 요청', roomId: 'room-2');
     });
-
-    test(
-      '서버가 새 앱의 초대에서 맥락 서명을 빼면(규약 표시는 남기든 빼든) 밥은 예전 앱의 초대로 보고 v1로 맺고, 앨리스도 v1로 '
-      '맞춰 서로 풀린다 — 밥에게는 "예전 앱" 안내가 보인다',
-      () async {
-        final relays = <String, _Relay>{
-          'room-c1': _without('initiatorContextSignature'),
-          'room-c2': (payload) => Map.of(payload)
-            ..remove('initiatorContextSignature')
-            ..remove('initiatorProtocol'),
-        };
-        for (final MapEntry(key: roomId, value: relay) in relays.entries) {
-          await _handshake(alice, bob, roomId: roomId, inviteRelay: relay);
-          expect(await alice.protocol(roomId), 1, reason: roomId);
-          expect(await bob.protocol(roomId), 1, reason: roomId);
-          final bobTrust = await bob.manager.loadTrust(roomId);
-          expect(bobTrust.security.legacyPeer, isTrue, reason: roomId);
-          expect(bobTrust.showLegacyNotice, isTrue, reason: roomId);
-          final aliceTrust = await alice.manager.loadTrust(roomId);
-          expect(aliceTrust.security.legacyPeer, isFalse, reason: roomId);
-          expect(aliceTrust.showProtocolNotice, isTrue, reason: roomId);
-          await _roundTrip(alice, bob, '$roomId 앨리스', roomId: roomId);
-          await _roundTrip(bob, alice, '$roomId 밥', roomId: roomId);
-        }
-      },
-    );
 
     test(
       '서버가 secret:accepted의 맥락 서명을 다른 값으로 바꾸면(서명 모양은 맞음) 앨리스는 v3로도 v2로도 확인하지 못해 맺지 않고 '
@@ -2369,8 +2393,8 @@ void main() {
     // 수락이면 다시 수락하지 않는다(지금 세션을 덮어쓰고, 서버의 409에 세션까지 지워진다).
 
     test(
-      '이미 v3로 맺은 방에 규약 표시가 빠진 같은 초대를 다시 수락해도 아무것도 하지 않는다 — v1 체인이 생기지 않고, 다시 켜도 v3 '
-      '그대로 이어진다',
+      '이미 v3로 맺은 방에 규약 표시가 빠진 같은 초대가 다시 와도 받지 않는다 — v1 체인이 생기지 않고, 다시 켜도 v3 그대로 '
+      '이어진다',
       () async {
         final invite = await _handshake(alice, bob);
         await _roundTrip(alice, bob, '처음');
@@ -2383,9 +2407,9 @@ void main() {
           initiatorContextSignature: invite.initiatorContextSignature,
         );
         final acceptsBefore = server.acceptCalls;
-        expect(
-          await bob.manager.acceptInvite(replay),
-          SecretHandshakeOutcome.ignored,
+        await expectLater(
+          bob.manager.acceptInvite(replay),
+          throwsA(isA<SecretInviteOutdatedException>()),
         );
         expect(server.acceptCalls, acceptsBefore, reason: '서버에 다시 수락하지 않는다');
         expect(bob.stored('chain'), isNull);
@@ -2420,7 +2444,8 @@ void main() {
     );
 
     test(
-      '서버의 답을 못 받은 수락(그 사이 끊김)은 같은 초대로 다시 수락할 수 있다 — 예전 키(다른 규약 칸까지)를 비우고 새로 맺는다',
+      '서버의 답을 못 받은 수락(그 사이 끊김)은 같은 초대로 다시 수락할 수 있다 — 예전 키를 비우고 새로 맺는다(규약 표시가 '
+      '빠진 채 다시 온 초대는 받지 않고 그대로 둔다)',
       () async {
         final invite = await _start(alice, bob.userId);
         bob.rooms['room-1'] = Room.fromJson(
@@ -2435,8 +2460,9 @@ void main() {
         expect(await bob.manager.hasEstablishedSession('room-1'), isFalse);
         expect(bob.stored('acceptPending'), isNotNull);
         final firstRatchet = bob.stored('ratchet');
-        // 다시 수락 — 이번에는 서버가 받는다. 규약 표시가 빠진 초대여도 예전 v3 칸을 비우고 v1로 새로 맺는다.
+        expect(firstRatchet, isNotNull);
         server.acceptStatus = 200;
+        // 서버가 규약 표시를 빼고 다시 보낸 같은 초대는 받지 않는다 — 응답을 기다리던 수락은 그대로 남는다.
         final replay = SecretInviteEvent(
           roomId: invite.roomId,
           initiatorUserId: invite.initiatorUserId,
@@ -2445,20 +2471,28 @@ void main() {
           initiatorEphemeralSignature: invite.initiatorEphemeralSignature,
           initiatorContextSignature: invite.initiatorContextSignature,
         );
+        final callsBefore = server.acceptCalls;
+        await expectLater(
+          bob.manager.acceptInvite(replay),
+          throwsA(isA<SecretInviteOutdatedException>()),
+        );
+        expect(server.acceptCalls, callsBefore);
+        expect(bob.stored('ratchet'), firstRatchet);
+        expect(bob.stored('acceptPending'), isNotNull);
+        // 다시 수락 — 이번에는 서버가 받는다. 응답을 못 받은 지난 수락의 키는 비우고 새로 맺는다.
         expect(
-          await bob.manager.acceptInvite(replay),
+          await bob.manager.acceptInvite(invite),
           SecretHandshakeOutcome.established,
         );
         expect(bob.stored('acceptPending'), isNull);
-        expect(bob.stored('ratchet'), isNull, reason: '예전 v3 칸이 남았다');
-        expect(firstRatchet, isNotNull);
-        expect(await bob.protocol(), 1);
+        expect(bob.stored('ratchet'), isNot(firstRatchet));
+        expect(await bob.protocol(), 3);
         expect(await bob.manager.hasEstablishedSession('room-1'), isTrue);
         expect(
           await alice.manager.handleAccepted(_accepted(bob, 'room-1')),
           SecretHandshakeOutcome.established,
         );
-        expect(await alice.protocol(), 1);
+        expect(await alice.protocol(), 3);
         await _roundTrip(alice, bob, '다시 수락한 뒤');
         await _roundTrip(bob, alice, '다시 수락한 뒤 답장');
       },
@@ -2802,10 +2836,9 @@ void main() {
       },
     );
 
-    test('규약 낮추기 — 새 규약으로 말하는 것을 확인한 상대 기기가 예전 규약 초대를 보냈다고 오면(서버가 규약 표시를 뺌) 밥은 '
-        '수락하지 않고 멈춘다 — "상대 기기 키 다시 받기"로 풀 수 있고, 원래 대화는 그대로다', () async {
+    test('규약 낮추기 — 새 규약으로 대화하던 상대 기기의 초대에서 서버가 규약 표시를 빼도 밥은 받지 않을 뿐이다(멈추지 않는다) '
+        '— 원래 대화는 그대로다', () async {
       await _establish(alice, bob, 3);
-      // 밥이 앨리스의 v3 글을 풀어 그 기기가 새 규약으로 말하는 것을 확인했다.
       await _roundTrip(alice, bob, 'v3 글');
       expect((await bob.store.readDevicePin(alice.deviceId))!.speaksV3, isTrue);
       final invite = await _start(
@@ -2817,76 +2850,59 @@ void main() {
       bob.rooms['room-2'] = Room.fromJson(
         _roomJson('room-2', status: 'pending'),
       );
-      expect(
-        await bob.manager.acceptInvite(invite),
-        SecretHandshakeOutcome.blocked,
-      );
-      final trust = await bob.manager.loadTrust('room-2');
-      expect(trust.security.blockedReason, SecretBlockReason.downgrade);
-      expect(trust.resetDeviceId, alice.deviceId);
-      expect(await bob.protocol('room-2'), isNull);
+      await _expectRefused(bob, invite);
       expect(server.accepted['room-2'], isNull, reason: '수락을 보내지 않았다');
       await _roundTrip(alice, bob, '원래 대화');
       await _roundTrip(bob, alice, '원래 대화 답장');
     });
 
-    test('규약 낮추기 — 앨리스가 v3를 제안했는데 새 규약으로 수락했던 밥의 기기가 예전 규약으로 수락했다고 오면 앨리스는 맺지 '
-        '않고 멈춘다 — 상대 기기 키를 다시 받으면 그 표시도 지워져 예전 방식 대화를 다시 맺을 수 있다', () async {
-      await _establish(alice, bob, 3);
-      // 앨리스는 밥 기기의 v3 수락 서명을 확인했다.
-      expect((await alice.store.readDevicePin(bob.deviceId))!.speaksV3, isTrue);
-      // 밥은 아직 앨리스의 v3 글을 받지 않아 낮춘 초대를 알아채지 못하고 v2로 수락한다.
-      final invite = await _start(
-        alice,
-        bob.userId,
-        roomId: 'room-2',
-        relay: _without('initiatorProtocol'),
-      );
-      bob.rooms['room-2'] = Room.fromJson(
-        _roomJson('room-2', status: 'pending'),
-      );
-      expect(
-        await bob.manager.acceptInvite(invite),
-        SecretHandshakeOutcome.established,
-      );
-      expect(
-        await alice.manager.handleAccepted(_accepted(bob, 'room-2')),
-        SecretHandshakeOutcome.blocked,
-      );
-      final trust = await alice.manager.loadTrust('room-2');
-      expect(trust.security.blockedReason, SecretBlockReason.downgrade);
-      expect(await alice.protocol('room-2'), isNull);
-      expect(alice.stored('pendingEphemeralSeed', roomId: 'room-2'), isNull);
+    test(
+      '규약 낮추기 — 앨리스가 v3를 제안했는데 새 규약으로 수락했던 밥의 기기가 예전 방식(v2 맥락)으로 수락했다고 오면(그 기기의 '
+      '앱을 예전 버전으로 되돌림 등) 앨리스는 맺지 않고 멈춘다 — 상대 기기 키를 다시 받으면 그 표시도 지워져 예전 방식 대화를 '
+      '다시 맺을 수 있다',
+      () async {
+        await _establish(alice, bob, 3);
+        // 앨리스는 밥 기기의 v3 수락 서명을 확인했다.
+        expect(
+          (await alice.store.readDevicePin(bob.deviceId))!.speaksV3,
+          isTrue,
+        );
+        final invite = await _start(alice, bob.userId, roomId: 'room-2');
+        final (accepted, _) = await _previousAppAccept(bob, invite);
+        expect(
+          await alice.manager.handleAccepted(accepted),
+          SecretHandshakeOutcome.blocked,
+        );
+        final trust = await alice.manager.loadTrust('room-2');
+        expect(trust.security.blockedReason, SecretBlockReason.downgrade);
+        expect(await alice.protocol('room-2'), isNull);
+        expect(alice.stored('pendingEphemeralSeed', roomId: 'room-2'), isNull);
 
-      expect(await alice.manager.resetPeerDevicePin('room-2'), bob.deviceId);
-      await _handshake(
-        alice,
-        bob,
-        roomId: 'room-3',
-        inviteRelay: _without('initiatorProtocol'),
-      );
-      expect(await alice.protocol('room-3'), 1);
-      expect(
-        (await alice.store.readDevicePin(bob.deviceId))!.speaksV3,
-        isFalse,
-      );
-      await _roundTrip(alice, bob, '다시 받은 뒤', roomId: 'room-3');
-    });
+        expect(await alice.manager.resetPeerDevicePin('room-2'), bob.deviceId);
+        final again = await _start(alice, bob.userId, roomId: 'room-3');
+        final (acceptedAgain, _) = await _previousAppAccept(bob, again);
+        expect(
+          await alice.manager.handleAccepted(acceptedAgain),
+          SecretHandshakeOutcome.established,
+        );
+        expect(await alice.protocol('room-3'), 1);
+        expect(
+          (await alice.store.readDevicePin(bob.deviceId))!.speaksV3,
+          isFalse,
+        );
+      },
+    );
 
     test(
-      '업데이트 전에 걸어 둔 초대(새 규약을 알리지 않음)는 상대 기기가 새 규약으로 말해도 예전 규약으로 맺는다 — 낮춘 것이 아니다',
+      '업데이트 전에 걸어 둔 초대(새 규약을 알리지 않음)에 예전 방식 수락이 오면, 상대 기기가 새 규약으로 말해도 예전 규약으로 '
+      '맺는다 — 낮춘 것이 아니다',
       () async {
         await _establish(alice, bob, 3);
         expect(
           (await alice.store.readDevicePin(bob.deviceId))!.speaksV3,
           isTrue,
         );
-        final invite = await _start(
-          alice,
-          bob.userId,
-          roomId: 'room-2',
-          relay: _without('initiatorProtocol'),
-        );
+        final invite = await _start(alice, bob.userId, roomId: 'room-2');
         // 업데이트 전 앱이 남긴 대기 정보에는 실어 보낸 규약 번호가 없다.
         final pendingKey = 'secret/room-2/pendingInit';
         final pending =
@@ -2896,19 +2912,14 @@ void main() {
           Map.of(pending)..remove('p'),
         );
         alice = await alice.restart();
-        bob.rooms['room-2'] = Room.fromJson(
-          _roomJson('room-2', status: 'pending'),
-        );
+        // 그때 밥의 앱은 v2 맥락으로 수락했다.
+        final (accepted, _) = await _previousAppAccept(bob, invite);
         expect(
-          await bob.manager.acceptInvite(invite),
-          SecretHandshakeOutcome.established,
-        );
-        expect(
-          await alice.manager.handleAccepted(_accepted(bob, 'room-2')),
+          await alice.manager.handleAccepted(accepted),
           SecretHandshakeOutcome.established,
         );
         expect(await alice.protocol('room-2'), 1);
-        await _roundTrip(alice, bob, '업데이트 전 초대', roomId: 'room-2');
+        expect(await alice.manager.isBlocked('room-2'), isFalse);
       },
     );
 

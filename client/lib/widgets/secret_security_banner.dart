@@ -247,7 +247,7 @@ class _SecretSecurityBannerState extends State<SecretSecurityBanner> {
         Text(
           '이 비밀 대화는 예전 방식으로 맺어져 있습니다. 상대도 최신 앱으로 업데이트했다면, 이 대화를 끝내고 새로 시작해 '
           '더 안전하고 메시지가 더 안정적으로 오가는 새 방식으로 바꿀 수 있습니다(대화를 끝내면 이 대화의 메시지는 '
-          '지워집니다). 둘 다 최신 앱인데 새로 시작해도 이 안내가 다시 뜨면 관리자에게 서버 업데이트를 요청해 주세요.',
+          '지워집니다).',
         ),
       ],
       onClose: () => widget.session.dismissSecretProtocolNotice(widget.room.id),

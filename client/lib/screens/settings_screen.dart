@@ -62,6 +62,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late ThemeMode _themeMode = widget.session.settings.themeMode;
   late TeamSwitchStyle _teamSwitchStyle =
       widget.session.settings.teamSwitchStyle;
+  late bool _gatherTopics = widget.session.settings.gatherTopicsAcrossTeams;
+  late bool _gatherGroupChats =
+      widget.session.settings.gatherGroupChatsAcrossTeams;
+  late bool _gatherDms = widget.session.settings.gatherDmsAcrossTeams;
   late MessagePreviewMode _messagePreviewMode =
       widget.session.settings.messagePreviewMode;
   late bool _sendWithShiftEnter = widget.session.settings.sendWithShiftEnter;
@@ -124,6 +128,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await settings.setThemeMode(_themeMode);
     await settings.setMessagePreviewMode(_messagePreviewMode);
     await settings.setTeamSwitchStyle(_teamSwitchStyle);
+    await settings.setGatherAcrossTeams(
+      topics: _gatherTopics,
+      groupChats: _gatherGroupChats,
+      dms: _gatherDms,
+    );
     await settings.setSendWithShiftEnter(_sendWithShiftEnter);
     await settings.setAlwaysOnTop(_alwaysOnTop);
     await settings.setWindowOpacity(_windowOpacity);
@@ -335,6 +344,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
             label: '탭(전체 보기)',
             onTap: () =>
                 setState(() => _teamSwitchStyle = TeamSwitchStyle.tabs),
+          ),
+        ],
+      ),
+    ),
+    // 여러 팀에 속해 있으면 팀마다 들어가야 그 팀의 방이 보인다 — 종류별로 골라 지금 팀의 방 목록에 함께 모아 본다
+    // (Session.showsInRoomList). 다른 팀의 방에는 팀 이름이 붙고, 누르면 그 팀으로 바뀌며 열린다.
+    _Item(
+      label: '여러 팀 방 모아보기',
+      caption:
+          '켠 종류는 내가 속한 다른 팀의 방도 지금 팀의 방 목록에 함께 보입니다. 다른 팀의 방에는 팀 이름이 붙고, '
+          '누르면 그 팀으로 바뀌며 열립니다.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _CheckRow(
+            key: const ValueKey('settings-gather-topics'),
+            value: _gatherTopics,
+            label: '내가 속한 팀의 토픽방 모아보기',
+            onChanged: (v) => setState(() => _gatherTopics = v),
+          ),
+          _CheckRow(
+            key: const ValueKey('settings-gather-groups'),
+            value: _gatherGroupChats,
+            label: '내가 속한 팀의 그룹채팅방 모아보기',
+            onChanged: (v) => setState(() => _gatherGroupChats = v),
+          ),
+          _CheckRow(
+            key: const ValueKey('settings-gather-dms'),
+            value: _gatherDms,
+            label: '내가 속한 팀의 채팅방 모아보기',
+            onChanged: (v) => setState(() => _gatherDms = v),
           ),
         ],
       ),
@@ -794,6 +834,7 @@ class _CheckRow extends StatelessWidget {
   final String label;
   final ValueChanged<bool> onChanged;
   const _CheckRow({
+    super.key,
     required this.value,
     required this.label,
     required this.onChanged,

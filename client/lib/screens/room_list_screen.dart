@@ -23,6 +23,7 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/notifications_panel.dart';
 import '../widgets/team_switcher.dart';
 import '../widgets/topic_folder_widgets.dart';
+import '../widgets/team_name_badge.dart';
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
@@ -182,8 +183,12 @@ class _RoomListScreenState extends State<RoomListScreen> {
     RoomType.dm => 2,
   };
 
+  /// 방을 연다 — "여러 팀 방 모아보기"로 보이는 다른 팀의 방이면 그 팀으로 먼저 바꾼다(Session.enterTeamOf —
+  /// 멤버·파일·검색 등이 그 팀 기준이 되게). 화면은 바로 띄운다(팀을 바꿔 이 목록이 다시 그려져도 대화 화면은 그대로다).
   void _openRoom(Room room) {
-    if (mounted) _pushChat(room);
+    if (!mounted) return;
+    widget.session.enterTeamOf(room);
+    _pushChat(room);
   }
 
   /// 채팅 탭 맨 위 "나와의 대화" 줄 — 목록에 아직 없으면(방 목록을 받기 전 등) 서버에서 받아 연다.
@@ -425,21 +430,23 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
         _SearchBox(session: widget.session),
         Expanded(
           child: ListenableBuilder(
-            listenable: widget.session,
+            // 환경설정의 "여러 팀 방 모아보기"를 바꾸면 목록도 바로 다시 그린다.
+            listenable: Listenable.merge([
+              widget.session,
+              widget.session.settings,
+            ]),
             builder: (context, _) {
               // 평문 DM 숨기기/나가기는 멤버십을 안 건드리고 내 hidden 플래그만 켠다
               // (room_options_menu.dart 참고) — session.rooms엔 그대로 남으므로 목록
               // 화면에서만 걸러낸다.
-              // session.rooms에는 다른 팀 방까지 들어있으므로 지금 팀 것만 걸러낸다
-              // (Session.rooms 주석 참고).
-              final teamId = widget.session.currentTeam?.id;
+              // session.rooms에는 다른 팀 방까지 들어있으므로 지금 팀 것만 걸러내되, 환경설정 > 메신저 설정의
+              // "여러 팀 방 모아보기"에서 켠 종류는 내가 속한 다른 팀의 방도 함께 보인다(Session.showsInRoomList).
               // 나와의 대화는 채팅 탭 맨 위 고정 줄로 따로 그린다(목록 정렬에서 뺀다).
               final rooms = widget.session.rooms
                   .where(
                     (r) =>
                         r.type == widget.type &&
-                        r.teamId == teamId &&
-                        !r.hidden &&
+                        widget.session.showsInRoomList(r) &&
                         !r.isSelf,
                   )
                   .toList();
@@ -522,8 +529,9 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
           showActivityTime: widget.showActivityTime,
           positionOptions: widget.positionOptions,
           indent: inFolder || archived,
-          // 보관된 토픽은 "보관된 토픽"에만 보여서 폴더로 옮겨도 달라 보이는 게 없다.
-          folderActions: archived
+          // 보관된 토픽은 "보관된 토픽"에만 보여서 폴더로 옮겨도 달라 보이는 게 없다. 모아보기로 보이는 다른 팀의
+          // 토픽도 폴더(지금 팀의 것)에 넣고 빼지 않는다.
+          folderActions: archived || room.teamId != session.currentTeam?.id
               ? null
               : _RowFolderActions(
                   inFolder: session.topicFolderOf(room.id) != null,
@@ -680,6 +688,10 @@ class _RoomRow extends StatelessWidget {
           if (showPositionBadge) ...[
             const SizedBox(width: 6),
             PositionBadge(label: otherMember.position!),
+          ],
+          if (session.otherTeamNameOf(room) case final team?) ...[
+            const SizedBox(width: 6),
+            TeamNameBadge(name: team),
           ],
           if (room.favorite && !pinnedSelf) ...[
             const SizedBox(width: 4),

@@ -306,6 +306,42 @@ class Session extends ChangeNotifier {
   List<Room> get unreadRooms =>
       rooms.where((r) => r.unreadCount > 0 || r.hasUnreadAnnouncement).toList();
 
+  /// 방 목록(PC 사이드바·모바일 방 목록)에 [room]을 보일지 — 숨긴 방은 빼고, 지금 팀의 방이거나 "여러 팀 방 모아보기"
+  /// (환경설정 > 메신저 설정)에서 그 종류를 켰으면 내가 속한 다른 팀의 방도 보인다(AppSettings.gather…AcrossTeams).
+  bool showsInRoomList(Room room) {
+    if (room.hidden) return false;
+    final teamId = currentTeam?.id;
+    if (room.teamId == teamId) return true;
+    if (teamId == null || !teams.any((t) => t.id == room.teamId)) return false;
+    return switch (room.type) {
+      RoomType.topic => settings.gatherTopicsAcrossTeams,
+      RoomType.group => settings.gatherGroupChatsAcrossTeams,
+      RoomType.dm => settings.gatherDmsAcrossTeams,
+    };
+  }
+
+  /// [room]이 지금 팀이 아닌, 내가 속한 다른 팀의 방이면 그 팀 이름 — 모아보기 목록에서 방 이름 옆에 붙인다.
+  String? otherTeamNameOf(Room room) {
+    if (room.teamId == currentTeam?.id) return null;
+    for (final team in teams) {
+      if (team.id == room.teamId) return team.name;
+    }
+    return null;
+  }
+
+  /// 모아보기 목록에서 다른 팀의 방을 열 때 — 그 팀으로 먼저 바꾼다(멤버·파일·검색 등이 그 팀 기준이 되게). 바꿨으면
+  /// true(지금 팀의 방이거나 모르는 팀이면 false).
+  bool enterTeamOf(Room room) {
+    if (room.teamId == currentTeam?.id) return false;
+    for (final team in teams) {
+      if (team.id == room.teamId) {
+        enterTeam(team);
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// 지금 들어가 있는 팀. null이면 아직 팀을 안 골랐다는 뜻이라 팀 선택 화면이 뜬다
   /// (home_screen.dart) — 로그아웃 후 로그인하거나 앱을 새로 켰을 때가 그 경우다.
   Team? currentTeam;

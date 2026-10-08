@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,6 +24,10 @@ const _kAppLocked = 'settings_app_locked';
 const _kFlashTaskbarWhenFocused = 'settings_flash_taskbar_when_focused';
 const _kFlashWindowFrame = 'settings_flash_window_frame';
 const _kStickerCategoryOrder = 'settings_sticker_category_order';
+const _kStickerUsage = 'settings_sticker_usage';
+const _kGatherTopics = 'settings_gather_topics_across_teams';
+const _kGatherGroupChats = 'settings_gather_group_chats_across_teams';
+const _kGatherDms = 'settings_gather_dms_across_teams';
 const _kTextScale = 'settings_text_scale';
 const _kFontFamily = 'settings_font_family';
 
@@ -111,6 +116,98 @@ class AppSettings extends ChangeNotifier {
   /// 기본 순서 자리에 그대로 끼어 보인다.
   List<String> stickerCategoryOrder = const [];
 
+  /// "메신저 설정 > 여러 팀 방 모아보기" — 켜면 그 종류(토픽·그룹채팅·1:1 채팅)는 내가 속한 다른 팀의 방도 지금 팀의
+  /// 방 목록에 함께 보인다(Session.showsInRoomList — 다른 팀 방에는 팀 이름이 붙고, 누르면 그 팀으로 바뀌며 열린다).
+  /// 이 기기에만 저장한다. 기본은 모두 꺼짐(지금 팀 방만).
+  bool gatherTopicsAcrossTeams = false;
+  bool gatherGroupChatsAcrossTeams = false;
+  bool gatherDmsAcrossTeams = false;
+
+  Future<void> setGatherAcrossTeams({
+    required bool topics,
+    required bool groupChats,
+    required bool dms,
+  }) async {
+    gatherTopicsAcrossTeams = topics;
+    gatherGroupChatsAcrossTeams = groupChats;
+    gatherDmsAcrossTeams = dms;
+    await _prefs.setBool(_kGatherTopics, topics);
+    await _prefs.setBool(_kGatherGroupChats, groupChats);
+    await _prefs.setBool(_kGatherDms, dms);
+    notifyListeners();
+  }
+
+  /// 이모티콘을 고른 횟수와 마지막으로 고른 시각(이모티콘 id → 값) — 이모티콘 패널 맨 앞 "자주 쓰는" 탭이 쓴다
+  /// (sticker_picker.dart, [frequentStickerIds]). 이 기기에만 남고, [maxStickerUsageEntries]개를 넘으면 가장 오래
+  /// 안 쓴 것부터 버린다.
+  Map<String, ({int count, int lastUsedMs})> stickerUsage = const {};
+
+  static const maxStickerUsageEntries = 60;
+
+  /// "자주 쓰는" 탭에 보일 이모티콘 id — 많이 고른 순, 같으면 최근에 고른 순으로 [limit]개.
+  List<String> frequentStickerIds({int limit = 24}) {
+    final entries = stickerUsage.entries.toList()
+      ..sort((a, b) {
+        final byCount = b.value.count.compareTo(a.value.count);
+        return byCount != 0
+            ? byCount
+            : b.value.lastUsedMs.compareTo(a.value.lastUsedMs);
+      });
+    return [for (final e in entries.take(limit)) e.key];
+  }
+
+  /// 이모티콘 [id]를 한 번 골랐다고 적는다(이모티콘 패널에서 고를 때).
+  Future<void> recordStickerUse(String id, {DateTime? now}) async {
+    final at = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    final next = Map.of(stickerUsage);
+    final before = next[id];
+    next[id] = (count: (before?.count ?? 0) + 1, lastUsedMs: at);
+    if (next.length > maxStickerUsageEntries) {
+      final oldest = next.entries.toList()
+        ..sort((a, b) => a.value.lastUsedMs.compareTo(b.value.lastUsedMs));
+      for (final e in oldest.take(next.length - maxStickerUsageEntries)) {
+        next.remove(e.key);
+      }
+    }
+    stickerUsage = next;
+    notifyListeners();
+    try {
+      await _prefs.setString(
+        _kStickerUsage,
+        jsonEncode({
+          for (final e in next.entries)
+            e.key: [e.value.count, e.value.lastUsedMs],
+        }),
+      );
+    } catch (_) {
+      // 저장하지 못해도(설정을 아직 못 읽음 등) 이번 실행에서는 그대로 쓴다.
+    }
+  }
+
+  static Map<String, ({int count, int lastUsedMs})> _decodeStickerUsage(
+    String? raw,
+  ) {
+    if (raw == null) return const {};
+    try {
+      final json = jsonDecode(raw);
+      if (json is! Map) return const {};
+      return {
+        for (final e in json.entries)
+          if (e.key is String &&
+              e.value is List &&
+              (e.value as List).length == 2 &&
+              (e.value as List)[0] is int &&
+              (e.value as List)[1] is int)
+            e.key as String: (
+              count: (e.value as List)[0] as int,
+              lastUsedMs: (e.value as List)[1] as int,
+            ),
+      };
+    } on FormatException {
+      return const {};
+    }
+  }
+
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     downloadWithoutAsking = _prefs.getBool(_kDownloadWithoutAsking) ?? false;
@@ -136,6 +233,10 @@ class AppSettings extends ChangeNotifier {
     flashWindowFrame = _prefs.getBool(_kFlashWindowFrame) ?? true;
     stickerCategoryOrder =
         _prefs.getStringList(_kStickerCategoryOrder) ?? const [];
+    stickerUsage = _decodeStickerUsage(_prefs.getString(_kStickerUsage));
+    gatherTopicsAcrossTeams = _prefs.getBool(_kGatherTopics) ?? false;
+    gatherGroupChatsAcrossTeams = _prefs.getBool(_kGatherGroupChats) ?? false;
+    gatherDmsAcrossTeams = _prefs.getBool(_kGatherDms) ?? false;
     textScale = (_prefs.getDouble(_kTextScale) ?? 1.0).clamp(
       minTextScale,
       maxTextScale,

@@ -355,4 +355,37 @@ void main() {
     // 목록을 못 받았으면 검색 칸도 없다.
     expect(find.byKey(const ValueKey('add-team-members-search')), findsNothing);
   });
+
+  testWidgets('멤버 탭: 팀 소유자 배지는 "소유자"로 보인다', (tester) async {
+    final me = {..._user('me', '나'), 'isOwner': true};
+    final kim = _user('kim', '김철수');
+    final session = _session(<http.Request>[], (request) async {
+      if ('${request.method} ${request.url.path}' ==
+          'GET /api/teams/t1/members') {
+        return _json([me, kim]);
+      }
+      return null;
+    });
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showTeamSettingsDialog(context, session, _team),
+              child: const Text('열기'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('멤버'));
+    await tester.pumpAndSettle();
+    expect(find.text('소유자'), findsOneWidget);
+    expect(find.text('팀 소유자'), findsNothing);
+  });
 }

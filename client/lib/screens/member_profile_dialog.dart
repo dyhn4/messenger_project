@@ -256,11 +256,11 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
                   ),
                   alignment: Alignment.bottomCenter,
                   child: Transform.translate(
-                    offset: const Offset(0, 30),
+                    offset: const Offset(0, 40),
                     child: UserAvatar(
                       user: user,
                       resolveUrl: widget.session.resolveUrl,
-                      radius: 32,
+                      radius: 42,
                     ),
                   ),
                 ),
@@ -277,7 +277,7 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
                   ),
               ],
             ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 50),
             Text(
               user.name,
               textAlign: TextAlign.center,

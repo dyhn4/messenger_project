@@ -10,7 +10,12 @@ import 'sticker_view.dart';
 /// 가진 카드 모양이다. 하나를 탭하면 [onSelected]만 호출하고 스스로 닫히지 않는다 — 실제로
 /// 보낼지/취소할지, 패널을 닫을지는 호출부(채팅/댓글 화면)가 정한다.
 ///
-/// 탭은 기본으로 서버에 올린 그림 이모티콘 세트(예: "리마인")가 먼저, 그 뒤에 기본 이모지
+/// 맨 앞 탭은 "자주 쓰는" — 이 기기에서 많이 고른 이모티콘(같으면 최근에 고른 것부터, [AppSettings.
+/// frequentStickerIds])이다. 고른 적이 있을 때만 보이고, 패널을 열면 그 탭부터 보여 준다. 패널을 연
+/// 동안에는 순서를 바꾸지 않는다(누르는 사이 칸이 움직이지 않게) — 다음에 열 때 반영된다. 이 탭은 끌어서
+/// 옮기지 않고 늘 맨 앞이다.
+///
+/// 그 뒤 탭은 기본으로 서버에 올린 그림 이모티콘 세트(예: "리마인")가 먼저, 그 뒤에 기본 이모지
 /// 세트가 온다 — 단, [settings]에 저장해 둔 순서(탭을 꾹 눌러서 끌어 바꾼 적이 있으면)가
 /// 있으면 그 순서를 따른다(category_tab_row.dart). 그림 세트가 새로 올라오면(서버 목록을
 /// 다시 받으면) 스스로 탭을 다시 그린다.
@@ -30,9 +35,16 @@ class StickerPicker extends StatefulWidget {
   State<StickerPicker> createState() => _StickerPickerState();
 }
 
+/// "자주 쓰는" 탭의 이름(세트 이름과 겹치지 않게 보이지 않는 글자로 시작) — 화면에는 [_frequentLabel].
+const _frequentName = '\u0000frequent';
+const _frequentLabel = '자주 쓰는';
+
 class _StickerPickerState extends State<StickerPicker> {
   /// 탭은 이름으로 기억한다 — 서버 세트가 늘거나 줄어도 보던 탭이 그대로 남게.
   String? _categoryName;
+
+  /// 패널을 열 때 읽어 둔 "자주 쓰는" 이모티콘 id(순서 그대로).
+  late final List<String> _frequentIds = widget.settings.frequentStickerIds();
 
   /// [natural](기본 순서) 중 [order]에 있는 이름은 그 순서대로, 없는 이름(아직 안 끌어서
   /// 넣어본 새 세트)은 기본 순서 그대로 뒤에 남는다.
@@ -51,15 +63,31 @@ class _StickerPickerState extends State<StickerPicker> {
     return result;
   }
 
+  /// 지금 고를 수 있는 이모티콘 중 [_frequentIds]에 있는 것(숨기거나 지운 세트의 것은 뺀다).
+  StickerCategory? _frequent(List<StickerCategory> categories) {
+    if (_frequentIds.isEmpty) return null;
+    final byId = {
+      for (final c in categories)
+        for (final s in c.stickers) s.id: s,
+    };
+    final stickers = [
+      for (final id in _frequentIds)
+        if (byId[id] != null) byId[id]!,
+    ];
+    return stickers.isEmpty ? null : StickerCategory(_frequentName, stickers);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: serverStickers,
       builder: (context, _) {
-        final categories = _ordered([
+        final sets = _ordered([
           ...serverStickers.visibleCategories,
           ...stickerCategories,
         ], widget.settings.stickerCategoryOrder);
+        final frequent = _frequent(sets);
+        final categories = [?frequent, ...sets];
         final category = categories.firstWhere(
           (c) => c.name == _categoryName,
           orElse: () => categories.first,
@@ -80,11 +108,14 @@ class _StickerPickerState extends State<StickerPicker> {
                 CategoryTabRow<StickerCategory>(
                   items: categories,
                   selected: category,
-                  labelOf: (c) => c.name,
+                  labelOf: (c) =>
+                      c.name == _frequentName ? _frequentLabel : c.name,
                   onSelected: (c) => setState(() => _categoryName = c.name),
+                  // "자주 쓰는" 탭은 순서에 넣지 않는다 — 늘 맨 앞이다.
                   onReorder: (newOrder) =>
                       widget.settings.setStickerCategoryOrder([
-                        for (final c in newOrder) c.name,
+                        for (final c in newOrder)
+                          if (c.name != _frequentName) c.name,
                       ]),
                 ),
                 const Divider(height: 1),
@@ -106,7 +137,10 @@ class _StickerPickerState extends State<StickerPicker> {
                         message: sticker.label,
                         child: InkWell(
                           borderRadius: BorderRadius.circular(8),
-                          onTap: () => widget.onSelected(sticker),
+                          onTap: () {
+                            widget.settings.recordStickerUse(sticker.id);
+                            widget.onSelected(sticker);
+                          },
                           child: Center(
                             child: StickerView(
                               stickerId: sticker.id,

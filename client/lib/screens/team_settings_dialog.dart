@@ -901,7 +901,7 @@ class _MemberRow extends StatelessWidget {
                 ),
                 if (user.isOwner)
                   RoleBadge(
-                    label: '팀 소유자',
+                    label: '소유자',
                     bg: ownerColors.bg,
                     fg: ownerColors.fg,
                   ),

@@ -91,8 +91,9 @@ void main() {
     expect(find.text('화면 설정'), findsOneWidget);
     expect(find.text('시스템 설정'), findsOneWidget);
 
-    // 메신저 설정 — 팀 전환 방식 · 메시지 내용 미리보기 · 메시지 전송 옵션 설정.
+    // 메신저 설정 — 팀 전환 방식 · 여러 팀 방 모아보기 · 메시지 내용 미리보기 · 메시지 전송 옵션 설정.
     expect(find.text('팀 전환 방식'), findsOneWidget);
+    expect(find.text('여러 팀 방 모아보기'), findsOneWidget);
     expect(find.text('메시지 내용 미리보기'), findsOneWidget);
     expect(find.text('메시지 전송 옵션 설정'), findsOneWidget);
     expect(find.text('Enter로 전송'), findsOneWidget);
@@ -105,6 +106,8 @@ void main() {
       ),
     );
     expect(checkOf('Enter로 전송').icon, Icons.check_circle);
+    await tester.ensureVisible(find.text('Shift + Enter로 전송'));
+    await tester.pump();
     await tester.tap(find.text('Shift + Enter로 전송'));
     await tester.pump();
     expect(checkOf('Shift + Enter로 전송').icon, Icons.check_circle);

@@ -21,6 +21,7 @@ import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
 import '../widgets/side_panels.dart';
 import '../widgets/team_avatar.dart';
+import '../widgets/team_name_badge.dart';
 import '../services/app_settings.dart' show TeamSwitchStyle;
 import '../widgets/team_switcher.dart';
 import '../widgets/topic_folder_widgets.dart';
@@ -30,6 +31,7 @@ import 'calendar/calendar_screen.dart';
 import 'create_topic_screen.dart';
 import 'message_thread_screen.dart';
 import 'new_group_dialog.dart';
+import 'org_chart_screen.dart' show showOrgChartScreen;
 import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
 
@@ -235,6 +237,24 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   /// 경로로 방을 열 때 예전 검색 하이라이트가 남아있으면, 나중에(예: 알림을 눌러) 이 방을
   /// 다시 열 때 맨 아래 대신 그 옛 메시지 위치로 스크롤되는 문제가 있었다. 사이드바가 겹침
   /// 오버레이로 펼쳐진 채로 방을 골랐으면(좁은 창) 그 오버레이도 같이 접는다.
+  /// 사이드바에서 방을 골랐을 때 — "여러 팀 방 모아보기"로 보이는 다른 팀의 방이면 그 팀으로 바꾸며 연다
+  /// (Session.requestOpenRoom — 멤버·파일·검색 등이 그 팀 기준이 되게). 분할 패널로 열려 할 때도 같다.
+  void _selectRoomFromList(Room room) {
+    if (room.teamId != widget.session.currentTeam?.id) {
+      widget.session.requestOpenRoom(room);
+      return;
+    }
+    _selectRoom(room);
+  }
+
+  void _openSplitRoomFromList(Room room) {
+    if (room.teamId != widget.session.currentTeam?.id) {
+      widget.session.requestOpenRoom(room);
+      return;
+    }
+    _openSplitRoom(room);
+  }
+
   void _selectRoom(Room room) {
     setState(() {
       _selectedRoom = room;
@@ -506,8 +526,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
       hostContext: context,
       selectedRoomId: _selectedRoom?.id,
       positionOptions: _positionOptions,
-      onSelectRoom: _selectRoom,
-      onSplitRoom: _openSplitRoom,
+      onSelectRoom: _selectRoomFromList,
+      onSplitRoom: _openSplitRoomFromList,
       onCreateTopic: _createTopic,
       onBrowseTopics: _browseTopics,
       onNewGroupChat: _newGroupChat,
@@ -826,9 +846,9 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 환경설정 "팀 전환 방식" — 드롭다운(기본)이거나 팀을 전부 보여주는 탭.
+    // 환경설정 "팀 전환 방식" — 드롭다운(기본)이거나 팀을 전부 보여주는 탭. 계정 등급이 바뀌면 조직도 버튼도 다시 본다.
     return ListenableBuilder(
-      listenable: session.settings,
+      listenable: Listenable.merge([session.settings, session]),
       builder: (context, _) {
         final tabs = session.settings.teamSwitchStyle == TeamSwitchStyle.tabs;
         // 탭 모드에서는 탭이 아래 구분선에 딱 닿아야 브라우저 탭처럼 보이므로, 바 자체의
@@ -856,6 +876,21 @@ class _TopBar extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 서버 전체 팀/회원 구조를 보는 기능이라 볼 수 있는 등급(계정 관리자·서버 운영자 —
+                    // session.canViewOrgChart, 서버의 GET /org-chart/teams와 같은 규칙)에게만 보인다.
+                    if (session.canViewOrgChart) ...[
+                      // 이름은 글자 대신 마우스를 올렸을 때의 안내(툴팁)로만 보인다.
+                      IconButton(
+                        key: const ValueKey('topbar-org-chart'),
+                        tooltip: '조직도',
+                        icon: const Icon(Icons.account_tree_outlined),
+                        onPressed: () => showOrgChartScreen(context, session),
+                      ),
+                      const SizedBox(
+                        height: 20,
+                        child: VerticalDivider(width: 17, thickness: 1),
+                      ),
+                    ],
                     NotificationBellButton(
                       session: session,
                       onPressed: onToggleNotifications,
@@ -933,6 +968,8 @@ class _Sidebar extends StatelessWidget {
   /// 토픽 줄 하나. [inFolder]면 폴더(또는 "보관된 토픽") 아래로 들여 쓴다. 보관된 토픽은 그
   /// 묶음에만 보여서 폴더로 옮겨도 달라 보이는 게 없으므로 끌기·폴더 메뉴를 뺀다.
   Widget _topicTile(Room room, {bool inFolder = false, bool archived = false}) {
+    // 모아보기로 보이는 다른 팀의 토픽 — 폴더는 지금 팀의 것이라 그 토픽을 넣고 빼지 않는다.
+    final otherTeam = room.teamId != session.currentTeam?.id;
     return _RoomTile(
       key: ValueKey('topic-row-${room.id}'),
       room: room,
@@ -951,8 +988,8 @@ class _Sidebar extends StatelessWidget {
       favorite: room.favorite,
       muted: room.muted,
       indent: inFolder || archived,
-      draggable: !archived,
-      folderMenu: archived
+      draggable: !archived && !otherTeam,
+      folderMenu: archived || otherTeam
           ? null
           : _TopicFolderMenu(
               folders: session.topicFolders,
@@ -1050,16 +1087,17 @@ class _Sidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: session,
+      // 환경설정의 "여러 팀 방 모아보기"를 바꾸면 목록도 바로 다시 그린다.
+      listenable: Listenable.merge([session, session.settings]),
       builder: (context, _) {
         // 평문 DM의 "채팅방 숨기기"/"채팅방 나가기"는 멤버십을 안 건드리고 내 hidden
         // 플래그만 켠다(room_options_menu.dart 참고) — 그래서 session.rooms에는 그대로
         // 남아있고, 여기(목록 UI)에서만 걸러낸다. 상대가 새 메시지를 보내면 서버가 자동으로
         // hidden을 다시 꺼줘서 이 필터를 통과해 목록에 돌아온다.
         // session.rooms에는 다른 팀 방까지 전부 들어있다(다른 팀 메시지도 실시간으로 받아야
-        // 하므로 — Session.rooms 주석 참고). 화면에는 지금 보고 있는 팀 것만 보여준다.
-        final teamId = session.currentTeam?.id;
-        bool visible(Room r) => r.teamId == teamId && !r.hidden;
+        // 하므로 — Session.rooms 주석 참고). 화면에는 지금 보고 있는 팀 것만 보여주되, 환경설정 > 메신저 설정의
+        // "여러 팀 방 모아보기"에서 켠 종류는 내가 속한 다른 팀의 방도 함께 보인다(팀 이름이 붙는다).
+        bool visible(Room r) => session.showsInRoomList(r);
         // 즐겨찾기한 방을 묶음 위쪽에 모으고, 그 안에서는 최근 활동(채팅/댓글을 보냈거나 받음,
         // Room.lastActivityAt) 순이다 — 채팅 중이거나 알림이 온 방이 자기 묶음의 맨 위로 올라온다
         // (Session._bumpRoomActivity 참고). 토픽은 폴더마다 같은 규칙으로 따로 정렬한다.
@@ -1880,6 +1918,11 @@ class _RoomTileState extends State<_RoomTile> {
               if (showPositionBadge) ...[
                 const SizedBox(width: 6),
                 PositionBadge(label: otherMember.position!),
+              ],
+              if (widget.session.otherTeamNameOf(widget.room)
+                  case final team?) ...[
+                const SizedBox(width: 6),
+                TeamNameBadge(name: team),
               ],
               if (widget.muted) ...[
                 const SizedBox(width: 4),

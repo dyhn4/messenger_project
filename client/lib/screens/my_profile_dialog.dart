@@ -142,7 +142,7 @@ class MyProfileDialog extends StatelessWidget {
                 // (신고된 "아래쪽 반원 클릭 안 됨" 버그 — 1차 수정에서 놓친 부분). SizedBox로
                 // Stack 자체의 크기를 아바타 전체를 포함하는 높이로 명시해야 한다.
                 SizedBox(
-                  height: 124, // 배너 90 + 아바타가 튀어나온 만큼(56~120) + 여유
+                  height: 134, // 배너 90 + 아바타가 튀어나온 만큼(46~130, 지름 84) + 여유
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
@@ -165,14 +165,14 @@ class MyProfileDialog extends StatelessWidget {
                       Positioned(
                         left: 0,
                         right: 0,
-                        top: 56,
+                        top: 46,
                         child: Center(
                           child: GestureDetector(
                             onTap: () => _editAvatar(context),
                             child: Stack(
                               clipBehavior: Clip.none,
                               children: [
-                                MyAvatar(session: session, radius: 32),
+                                MyAvatar(session: session, radius: 42),
                                 Positioned(
                                   right: -2,
                                   bottom: -2,
@@ -1259,9 +1259,7 @@ class _AvatarEditDialogState extends State<AvatarEditDialog> {
       // 모양도 같다.
       final bytes = await makeAvatarThumbnail(await picked.readAsBytes());
       if (mounted) {
-        setState(
-          () => _draft = AvatarDraft(type: 'photo', photoBytes: bytes),
-        );
+        setState(() => _draft = AvatarDraft(type: 'photo', photoBytes: bytes));
       }
     } catch (e) {
       if (mounted) {

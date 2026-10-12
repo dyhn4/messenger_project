@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../models/message.dart';
+import '../services/clipboard_image.dart';
 import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
@@ -78,6 +79,8 @@ Future<void> showFileActionSheet(
               favorited ? '즐겨찾기 빼기' : '즐겨찾기',
               onToggleFavorite ?? () => actions.toggleFavorite(context),
             ),
+            if (isImage && canCopyImageToClipboard)
+              tile(Icons.copy_outlined, '복사', () => actions.copyImage(context)),
             if (isImage)
               tile(
                 Icons.image_outlined,
@@ -189,6 +192,17 @@ class FileActions {
       showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
     } catch (e) {
       if (context.mounted) showAppToast(context, '다운로드 실패: $e');
+    }
+  }
+
+  /// 이미지 복사 — 원본을 받아(비밀 대화면 복호화해서) 시스템 클립보드에 이미지로 올린다. 다른 프로그램이나
+  /// 대화 입력칸에 그대로 붙여넣을 수 있다.
+  Future<void> copyImage(BuildContext context) async {
+    try {
+      await copyImageToClipboard(_bytes());
+      if (context.mounted) showAppToast(context, '이미지를 복사했습니다.');
+    } catch (e) {
+      if (context.mounted) showAppToast(context, '이미지를 복사하지 못했습니다: $e');
     }
   }
 

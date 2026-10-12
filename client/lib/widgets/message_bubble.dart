@@ -1006,6 +1006,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           session: widget.session,
           attachments: items,
           message: message,
+          onOpenThread: widget.onOpenThread,
           // 뷰어의 댓글 패널이 이 방의 컨트롤러를 쓴다 — 버블은 방을 따로 안 받으므로
           // 세션의 방 목록에서 찾는다(못 찾으면 댓글 버튼만 안 보인다).
           room: widget.session.rooms
@@ -1150,6 +1151,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             session: widget.session,
             attachments: images,
             message: message,
+            onOpenThread: widget.onOpenThread,
             room: widget.session.rooms
                 .where((r) => r.id == message.roomId)
                 .firstOrNull,

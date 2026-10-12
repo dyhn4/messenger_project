@@ -8,7 +8,9 @@ import 'package:photo_view/photo_view.dart';
 
 import '../models/message.dart';
 import '../services/session.dart';
+import '../widgets/attachment_widgets.dart' show imageActionMenuItems;
 import '../widgets/file_actions.dart';
+import '../widgets/hover_toolbar.dart' show hoverMenuStyle;
 import '../models/room.dart';
 import 'message_thread_screen.dart';
 
@@ -632,27 +634,22 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
                         setState(() => _commentsOpen = !_commentsOpen),
                   ),
                 IconButton(
-                  icon: const Icon(Icons.print_outlined),
-                  tooltip: '인쇄',
-                  onPressed: () => actions.printImage(context),
-                ),
-                IconButton(
                   icon: const Icon(Icons.download_outlined),
                   tooltip: '다운로드',
                   onPressed: () => actions.download(context),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.more_horiz),
-                  tooltip: '파일 전달',
-                  onPressed: () => actions.forward(context),
-                ),
-                // 올린 본인과 팀 관리자에게만 — 파일만 지우고 메시지와 댓글은 남는다.
-                if (actions.canDelete)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline),
-                    tooltip: '삭제',
-                    onPressed: () => actions.deleteFile(context),
+                // 채팅 썸네일의 도구모음과 같은 더보기(파일 전달·인쇄·즐겨찾기·복사·원본 파일 보기·삭제).
+                MenuAnchor(
+                  style: hoverMenuStyle(context),
+                  menuChildren: imageActionMenuItems(context, actions),
+                  builder: (context, controller, _) => IconButton(
+                    icon: const Icon(Icons.more_vert),
+                    tooltip: '더보기',
+                    onPressed: () => controller.isOpen
+                        ? controller.close()
+                        : controller.open(),
                   ),
+                ),
               ],
             ],
           ),

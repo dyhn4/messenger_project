@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:client/models/message.dart';
 import 'package:client/screens/image_viewer_screen.dart';
 import 'package:client/services/app_settings.dart';
+import 'package:client/services/clipboard_image.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/attachment_widgets.dart';
@@ -39,6 +40,20 @@ Future<Uint8List> _png(int width, int height) async {
   return data!.buffer.asUint8List();
 }
 
+/// 이미지 도구모음의 더보기 — 썸네일과 뷰어가 같다. 다운로드는 도구모음 버튼이라 메뉴엔 없다.
+void _expectImageMenu() {
+  for (final label in [
+    '파일 전달',
+    '인쇄',
+    '즐겨찾기',
+    if (canCopyImageToClipboard) '복사',
+    '원본 파일 보기',
+  ]) {
+    expect(find.text(label), findsOneWidget, reason: label);
+  }
+  expect(find.text('다운로드'), findsNothing);
+}
+
 void main() {
   Session session() {
     final s = Session(
@@ -64,6 +79,7 @@ void main() {
     List<MessageAttachment> attachments, {
     double width = 900,
     bool withMessage = false,
+    void Function(Message message)? onOpenThread,
   }) async {
     tester.view.physicalSize = Size(width, 800);
     tester.view.devicePixelRatio = 1.0;
@@ -77,6 +93,7 @@ void main() {
               session: session(),
               attachments: attachments,
               message: withMessage ? message() : null,
+              onOpenThread: onOpenThread,
             ),
           ),
         ),
@@ -145,8 +162,14 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('썸네일에 마우스를 올리면 더보기 메뉴가 나온다', (tester) async {
-    await pump(tester, [_image('a')], withMessage: true);
+  testWidgets('썸네일에 마우스를 올리면 댓글·다운로드·더보기 도구모음이 나온다', (tester) async {
+    Message? opened;
+    await pump(
+      tester,
+      [_image('a')],
+      withMessage: true,
+      onOpenThread: (m) => opened = m,
+    );
 
     // 올리기 전에는 없다(메시지 도구모음과 같은 ⋮ 더보기 버튼).
     expect(find.byIcon(Icons.more_vert), findsNothing);
@@ -157,12 +180,15 @@ void main() {
     await mouse.moveTo(tester.getCenter(find.byType(ChatImageAttachments)));
     await tester.pump();
     expect(find.byIcon(Icons.more_vert), findsOneWidget);
+    expect(find.byTooltip('댓글'), findsOneWidget);
+    expect(find.byTooltip('다운로드'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('댓글'));
+    expect(opened?.id, 'm1');
 
     await tester.tap(find.byIcon(Icons.more_vert));
     await tester.pump();
-    for (final label in ['파일 전달', '다운로드', '즐겨찾기', '원본 파일 보기']) {
-      expect(find.text(label), findsOneWidget, reason: label);
-    }
+    _expectImageMenu();
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
@@ -193,10 +219,18 @@ void main() {
     expect(find.text('송병근'), findsOneWidget);
     expect(find.text('2026/09/23 PM 02:00'), findsOneWidget);
     expect(find.text('a.png · 344bytes'), findsOneWidget);
-    expect(find.byTooltip('인쇄'), findsOneWidget);
+    // 썸네일과 같은 도구모음 — 다운로드 · 더보기(댓글은 방을 알 때만).
     expect(find.byTooltip('다운로드'), findsOneWidget);
-    expect(find.byTooltip('파일 전달'), findsOneWidget);
+    expect(find.byTooltip('더보기'), findsOneWidget);
+    expect(find.byTooltip('인쇄'), findsNothing);
+    expect(find.byTooltip('파일 전달'), findsNothing);
     expect(find.text('1 / 2'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('더보기'));
+    await tester.pump();
+    _expectImageMenu();
+    await tester.tapAt(const Offset(600, 400)); // 메뉴 닫기
+    await tester.pump();
 
     // 열리자마자 도구모음이 보이고, 3초 뒤에 사라진다.
     AnimatedOpacity bar() =>

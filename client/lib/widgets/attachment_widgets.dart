@@ -12,6 +12,7 @@ import '../models/room.dart';
 import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
+import '../services/clipboard_image.dart' show canCopyImageToClipboard;
 import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
@@ -637,6 +638,9 @@ class ChatImageAttachments extends StatelessWidget {
   /// (••• → 파일 다운로드)이 맡는 화면은 끈다.
   final bool showDownloadAll;
 
+  /// 썸네일 도구모음의 "댓글" — 주면 그 메시지의 댓글을 연다(메시지 말풍선의 댓글 버튼과 같다). 안 주면 버튼이 없다.
+  final void Function(Message message)? onOpenThread;
+
   const ChatImageAttachments({
     super.key,
     required this.session,
@@ -648,7 +652,14 @@ class ChatImageAttachments extends StatelessWidget {
     this.thumbnailKey,
     this.thumbnailNonce,
     this.showDownloadAll = true,
+    this.onOpenThread,
   });
+
+  VoidCallback? get _onComment {
+    final message = this.message, onOpenThread = this.onOpenThread;
+    if (message == null || onOpenThread == null) return null;
+    return () => onOpenThread(message);
+  }
 
   /// 이 말풍선의 사진만 넘겨볼 때의 목록 — 비밀 대화면 그 장을 볼 때 원본을 받아 복호화한다.
   List<ViewerImage> _viewerImages() => [
@@ -748,6 +759,7 @@ class ChatImageAttachments extends StatelessWidget {
             thumbnailKey: thumbnailKey,
             thumbnailNonce: thumbnailNonce,
             onTap: () => _open(context, 0),
+            onComment: _onComment,
           );
         }
         const gap = 4.0;
@@ -790,6 +802,7 @@ class ChatImageAttachments extends StatelessWidget {
                         width: cell,
                         fixedHeight: tileHeight,
                         onTap: () => _open(context, i),
+                        onComment: _onComment,
                       ),
                 ],
               ),
@@ -835,12 +848,16 @@ class _ChatImageTile extends StatefulWidget {
   final String? thumbnailNonce;
   final VoidCallback onTap;
 
+  /// 도구모음의 "댓글" — null이면 버튼이 없다.
+  final VoidCallback? onComment;
+
   const _ChatImageTile({
     required this.session,
     required this.attachment,
     this.message,
     required this.width,
     required this.onTap,
+    this.onComment,
     this.fixedHeight,
     this.maxHeight = 420,
     this.attachmentKey,
@@ -1036,9 +1053,16 @@ class _ChatImageTileState extends State<_ChatImageTile> {
               Positioned(
                 right: 6,
                 top: 6,
-                // 다운로드·더보기를 말풍선 호버 툴바와 같은 상자 하나에 담는다.
+                // 이미지 뷰어 오른쪽 위와 같은 도구모음(댓글·다운로드·더보기)을 말풍선 호버 툴바와 같은
+                // 상자 하나에 담는다.
                 child: HoverToolbar(
                   children: [
+                    if (widget.onComment != null)
+                      HoverToolbarButton(
+                        icon: Icons.mode_comment_outlined,
+                        tooltip: '댓글',
+                        onPressed: widget.onComment,
+                      ),
                     HoverToolbarButton(
                       icon: Icons.download_outlined,
                       tooltip: '다운로드',
@@ -1050,10 +1074,9 @@ class _ChatImageTileState extends State<_ChatImageTile> {
                         icon: Icons.more_vert,
                         tooltip: '더보기',
                         onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
-                        menuChildren: fileActionMenuItems(
+                        menuChildren: imageActionMenuItems(
                           context,
                           _actions()!,
-                          isImage: true,
                         ),
                       ),
                   ],
@@ -1066,8 +1089,51 @@ class _ChatImageTileState extends State<_ChatImageTile> {
   }
 }
 
+/// 이미지 도구모음(채팅 썸네일과 이미지 뷰어 오른쪽 위 — 댓글 · 다운로드 · 더보기)의 "더보기" 항목들 — 파일 전달 ·
+/// 인쇄 · 즐겨찾기 · 복사 · 원본 파일 보기 (+올린 본인·팀 관리자에게는 "삭제"). 댓글·다운로드는 도구모음에 버튼으로
+/// 따로 있어서 여기엔 없다.
+List<Widget> imageActionMenuItems(BuildContext context, FileActions actions) =>
+    [
+      hoverMenuItem(
+        icon: Icons.send_outlined,
+        label: '파일 전달',
+        onPressed: () => actions.forward(context),
+      ),
+      hoverMenuItem(
+        icon: Icons.print_outlined,
+        label: '인쇄',
+        onPressed: () => actions.printImage(context),
+      ),
+      hoverMenuItem(
+        icon: Icons.star_border,
+        label: '즐겨찾기',
+        onPressed: () => actions.toggleFavorite(context),
+      ),
+      if (canCopyImageToClipboard)
+        hoverMenuItem(
+          icon: Icons.copy_outlined,
+          label: '복사',
+          onPressed: () => actions.copyImage(context),
+        ),
+      hoverMenuItem(
+        icon: Icons.image_outlined,
+        label: '원본 파일 보기',
+        onPressed: () => actions.openOriginal(context),
+      ),
+      // 올린 본인과 팀 관리자에게만 — 파일만 지우고 메시지와 댓글은 남는다.
+      if (actions.canDelete) ...[
+        hoverMenuDivider(),
+        hoverMenuItem(
+          icon: Icons.delete_outline,
+          label: '삭제',
+          color: Theme.of(context).colorScheme.error,
+          onPressed: () => actions.deleteFile(context),
+        ),
+      ],
+    ];
+
 /// 첨부(이미지/파일) "더보기" 메뉴의 항목들 — 파일 전달 · 다운로드 · 즐겨찾기 (+이미지는
-/// "원본 파일 보기"까지, 올린 본인·팀 관리자에게는 "삭제"까지). 파일은 누르면 어차피 원본을 받아서 여는 동작이라 그 항목이 없다.
+/// "복사"(클립보드에 이미지로)·"원본 파일 보기"까지, 올린 본인·팀 관리자에게는 "삭제"까지). 파일은 누르면 어차피 원본을 받아서 여는 동작이라 그 항목이 없다.
 /// 별 표시를 따로 들고 있는 화면(파일 패널)은 [favorited]·[onToggleFavorite]를 줘서 메뉴의
 /// 즐겨찾기도 그 별과 같이 바뀌게 한다(안 주면 서버에만 토글하고 알약으로 알린다).
 List<Widget> fileActionMenuItems(
@@ -1092,6 +1158,12 @@ List<Widget> fileActionMenuItems(
     label: favorited ? '즐겨찾기 빼기' : '즐겨찾기',
     onPressed: onToggleFavorite ?? () => actions.toggleFavorite(context),
   ),
+  if (isImage && canCopyImageToClipboard)
+    hoverMenuItem(
+      icon: Icons.copy_outlined,
+      label: '복사',
+      onPressed: () => actions.copyImage(context),
+    ),
   if (isImage)
     hoverMenuItem(
       icon: Icons.image_outlined,

@@ -80,24 +80,6 @@ class AccountMenuButton extends StatelessWidget {
     }
   }
 
-  /// "메신저 설명서"(서버 설치 프로그램이 같이 까는 README.html — 서버 설치·운영까지 담은
-  /// 문서)를 기본 브라우저로 연다. 관리자 이상만 볼 수 있어서, 서버에서 5분짜리 서명 링크를
-  /// 받아 연다(version.js의 POST /api/help/manual-link — 파일이 서버 PC에만 있어서 앱이 다른
-  /// PC에서 실행 중이어도 서버를 거쳐 받는다).
-  Future<void> _openMessengerManual(BuildContext context) async {
-    final api = session.api;
-    if (api == null) return;
-    try {
-      final url = await api.fetchMessengerManualLink();
-      final ok = await openExternal(Uri.parse(url));
-      if (!ok && context.mounted) {
-        showAppToast(context, '메신저 설명서를 열 수 없습니다.');
-      }
-    } catch (e) {
-      if (context.mounted) showAppToast(context, '$e');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     // 메뉴가 닫힌 뒤에도(비동기로 링크를 받는 동안) 토스트를 띄울 수 있도록, 팝업 안의
@@ -177,15 +159,6 @@ class AccountMenuButton extends StatelessWidget {
           label: '도움말',
           onTap: () => _openGuide(buttonContext),
         ),
-        // 예전 "도움말"(README 기반, 서버 설치·운영 내용 포함)은 "메신저 설명서"로 이름을 바꿔
-        // 관리자 이상에게만 보인다 — 서버도 링크를 줄 때 같은 조건을 다시 확인한다.
-        if (session.canViewMessengerManual)
-          CompactMenu.item<void>(
-            context,
-            icon: Icons.menu_book_outlined,
-            label: '메신저 설명서',
-            onTap: () => _openMessengerManual(buttonContext),
-          ),
         CompactMenu.item<void>(
           context,
           icon: Icons.description_outlined,

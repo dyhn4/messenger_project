@@ -423,8 +423,10 @@ export const limits = {
   usernameCheckIp: new RateLimiter({ max: 60, windowMs: MIN }),
   // 회원가입: 한 IP에서 한 시간에 10개까지.
   registerIp: new RateLimiter({ max: 10, windowMs: HOUR }),
-  // 페어링 코드(메인 HTTPS 포트 — 밖에서도 닿는다): 4자리 코드를 맞혀보는 걸 막는다.
-  pairIp: new RateLimiter({ max: 10, windowMs: 15 * MIN }),
+  // 페어링 코드(메인 HTTPS 포트 — 밖에서도 닿는다): 4자리 코드를 맞혀보는 걸 막는다. 성공한 요청도 세고, 사무실 안에서 외부
+  // 주소로 붙으면 공유기 헤어핀 NAT 때문에 여러 기기가 한 IP로 보여서 10번으로는 기기 몇 대 재페어링에도 막혔다 — 100번으로
+  // 늘렸다(코드는 5분 1회용이라, 한 IP가 코드 하나의 유효 시간 동안 맞힐 확률은 1만 개 중 100개 남짓 = 약 1%).
+  pairIp: new RateLimiter({ max: 100, windowMs: 15 * MIN }),
   // 초대 링크 안내 페이지·설치 파일(평문 페어링 포트, 사내망 밖에서 온 요청만): 초대 토큰 맞혀보기를 늦춘다.
   invitePageIp: new RateLimiter({ max: 60, windowMs: 15 * MIN }),
 };

@@ -10,9 +10,7 @@
 #      비밀값 전부 제외) server/installer/stage/에 복사하고, 그 안에서 npm install(전체 —
 #      drizzle-kit이 devDependency지만 설치 시점 마이그레이션 실행에 실제로 필요하다).
 #      앱의 "도움말"이 여는 초보자용 안내 웹페이지(server/guide/)도 여기서 같이 담긴다.
-#   3) 저장소 루트 README.md를 server/installer/README.html로 변환한다(설치된 서버의
-#      "메신저 설명서" 바로가기가 보여줌 — build-readme-html.mjs 참고).
-#   4) ISCC.exe로 messenger-server.iss를 컴파일해서 server/installer/output/에 exe를 만든다.
+#   3) ISCC.exe로 messenger-server.iss를 컴파일해서 server/installer/output/에 exe를 만든다.
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest 진행률 표시를 끄면 훨씬 빠르다.
@@ -133,19 +131,8 @@ try {
   Pop-Location
 }
 
-# ── 5) 메신저 설명서(README.html) 생성 ───────────────────────────────────
-# 저장소 루트 README.md(전체 프로젝트 문서, 목차 포함)를 정적 HTML로 변환해서 설치된 서버의
-# "메신저 설명서" 바로가기(와 앱의 관리자용 "메신저 설명서" 메뉴 — version.js의 GET /help)가
-# 기본 브라우저로 보여줄 수 있게 한다 — build-readme-html.mjs는 이 파일들에서 실제 쓰는
-# 마크다운 구성만 처리하는 작은 자체 변환기다(별도 npm 의존성 없음).
-Write-Host '5) 메신저 설명서(README.html) 만드는 중...'
-$readmeHtml = Join-Path $Installer 'README.html'
-$converter = Join-Path $Installer 'build-readme-html.mjs'
-& (Join-Path $nodeDestDir 'node.exe') $converter (Join-Path $Root 'README.md') $readmeHtml
-if ($LASTEXITCODE -ne 0) { throw 'README.html 생성 실패' }
-
-# ── 6) Inno Setup 컴파일 ─────────────────────────────────────────────────
-Write-Host '6) 설치 프로그램 컴파일 중...'
+# ── 5) Inno Setup 컴파일 ─────────────────────────────────────────────────
+Write-Host '5) 설치 프로그램 컴파일 중...'
 $iscc = Get-ChildItem "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue
 if (-not $iscc) { $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue }
 if (-not $iscc) { throw "ISCC.exe를 찾을 수 없습니다. Inno Setup이 설치되어 있는지 확인하세요 (winget install JRSoftware.InnoSetup)." }

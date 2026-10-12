@@ -158,7 +158,7 @@ try {
     foreach ($d in @('server\src', 'server\node_modules\pkg', 'server\uploads', 'secrets', 'pgsql\bin', 'pgsql-data\base', 'node', 'backups')) {
       New-Item -ItemType Directory -Path (Join-Path $app $d) -Force | Out-Null
     }
-    foreach ($f in @('Setup-TangoTalkServer.ps1', 'Folder-Acl.ps1', 'README-설치후.txt', 'README.html', 'unins000.exe', 'unins000.dat', 'install.log',
+    foreach ($f in @('Setup-TangoTalkServer.ps1', 'Folder-Acl.ps1', 'README-설치후.txt', 'unins000.exe', 'unins000.dat', 'install.log',
         'server\.env', 'server\src\index.js', 'server\node_modules\pkg\index.js', 'server\uploads\a.png', 'secrets\db-app.pw',
         'pgsql\bin\postgres.exe', 'pgsql-data\base\1', 'pgsql-data\postgresql.conf', 'node\node.exe', 'backups\messenger_20260101_000000.dump')) {
       Set-Content -LiteralPath (Join-Path $app $f) -Value 'x'
@@ -196,15 +196,15 @@ try {
       Check "$tag 데이터 파일을 PG 계정이 씀"    (InheritedSids "$app\pgsql-data\base\1") (SidSet @('S-1-5-18', $me, $pg))
     }
     Check "$tag pgsql-data의 Everyone 제거" ([bool]((Explicit "$app\pgsql-data") -like '*S-1-1-0*')) $false
-    foreach ($f in @('Setup-TangoTalkServer.ps1', 'Folder-Acl.ps1', 'README-설치후.txt', 'README.html', 'unins000.exe', 'unins000.dat')) {
+    foreach ($f in @('Setup-TangoTalkServer.ps1', 'Folder-Acl.ps1', 'README-설치후.txt', 'unins000.exe', 'unins000.dat')) {
       Check "$tag Users 읽기: $f" (Explicit (Join-Path $app $f)) 'S-1-5-32-545:ReadAndExecute:None'
     }
     Check "$tag install.log는 Users 못 읽음" (Explicit "$app\install.log") ''
     Check "$tag 정션 너머 그대로"           (Explicit "$app-outside\target.txt") 'S-1-1-0:Read:None'
     Check "$tag 경고는 정션 하나뿐"         (@($warnings).Count) 1
-    $before = (Explicit $app), (Explicit "$app\pgsql-data"), (Explicit "$app\README.html")
+    $before = (Explicit $app), (Explicit "$app\pgsql-data"), (Explicit "$app\README-설치후.txt")
     $null = Protect-InstallDir -AppDir $app -PgServiceName $case.Service
-    Check "$tag 다시 실행해도 같음" (((Explicit $app), (Explicit "$app\pgsql-data"), (Explicit "$app\README.html")) -join ' / ') ($before -join ' / ')
+    Check "$tag 다시 실행해도 같음" (((Explicit $app), (Explicit "$app\pgsql-data"), (Explicit "$app\README-설치후.txt")) -join ' / ') ($before -join ' / ')
   }
 
   # 서비스 계정을 SID로 못 바꾸면: PostgreSQL 두 폴더는 지금 권한 그대로 고정, 나머지는 잠그고 경고.

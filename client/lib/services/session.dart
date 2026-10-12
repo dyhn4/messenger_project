@@ -1252,12 +1252,6 @@ class Session extends ChangeNotifier {
   /// (server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
   bool get canViewOrgChart => isServerAdmin || accountRole == AccountRole.admin;
 
-  /// 삼선 메뉴의 "메신저 설명서"(README 기반 운영 문서)를 보여줄지 — 관리자 이상(서버 운영자
-  /// 또는 계정 등급 관리자). 서버(version.js의 POST /api/help/manual-link)도 같은 규칙으로
-  /// 다시 확인한다.
-  bool get canViewMessengerManual =>
-      isServerAdmin || accountRole == AccountRole.admin;
-
   /// 팀 선택 화면으로 되돌아간다(전환 팝업의 "팀 목록").
   void leaveTeam() {
     if (currentTeam == null) return;

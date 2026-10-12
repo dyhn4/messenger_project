@@ -981,9 +981,8 @@ messenger_project/
 │  │  ├─ External-Address.ps1     "외부 접속 주소" — LTE/5G 접속용 DDNS·공인 IP 확인/변경(인증서가 바뀌면 재페어링 경고 후 서비스 재시작, 포워딩할 포트 안내)
 │  │  ├─ Web-Domain.ps1           "웹 앱 주소(정식 인증서)" — 아이폰 웹 앱용 도메인·포트 설정/끄기, 방화벽 규칙, 인증서 확인, 서비스 재시작
 │  │  ├─ Uninstall-Full.ps1       "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — 일반 제거까지 자동 실행(서버 운영자 인증 + DELETE 입력 필요)
-│  │  ├─ build-readme-html.mjs    빌드 시 저장소 루트 README.md → README.html 변환기(자체 구현, 새 의존성 없음)
-│  │  ├─ README.md                이 installer 폴더 자체 문서(개발자용 — 설치된 서버의 "메신저 설명서"는 루트 README.md를 보여줌)
-│  │  └─ bin/ · stage/ · output/ · README.html  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
+│  │  ├─ README.md                이 installer 폴더 자체 문서(개발자용)
+│  │  └─ bin/ · stage/ · output/  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
 │  ├─ guide/                     초보자용 도움말 웹페이지(앱 삼선 메뉴 "도움말" — 서버가 인증 없이 /guide/로 서빙)
 │  ├─ web/                       웹 앱 빌드 결과물(gitignore — publish_release.ps1이 client/build/web을 복사, config.js의 WEB_DIR)
 │  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
@@ -2224,9 +2223,7 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
   문구만 가고, 자세한 내용은 그대로 `server\service-err.log`나 콘솔 창에 남습니다(서비스는 NSSM의 `AppEnvironmentExtra`에 넣고, 관리자가
   넣어 둔 다른 변수는 그대로 둠).
 - 시작 메뉴에 "새 기기 페어링 코드 발급"(콘솔이 없는 서비스 모드에서 `pair` 입력을 대신함),
-  "메신저 설명서"(예전 이름 "도움말" — **이 README.md 전체**를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환해서
-  기본 브라우저로 보여줌 — `build_server_installer.ps1`이 빌드 시 `build-readme-html.mjs`로
-  매번 새로 만들므로 설치할 때마다 최신 버전으로 덮어써짐), "서버 업데이트", "서버 재시작",
+  "서버 업데이트", "서버 재시작",
   "첨부파일 저장소", "외부 접속 주소", "웹 앱 주소(정식 인증서)", "백업"·"복원"(아래 [백업](#백업)), "DB 데이터 초기화",
   "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)"도 같이 설치됩니다. 백업·복원을 뺀 관리 도구는
   목적이 다릅니다:

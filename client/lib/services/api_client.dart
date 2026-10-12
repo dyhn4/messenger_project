@@ -3655,12 +3655,4 @@ class ApiClient {
   /// 서버가 내려준 상대 경로(/uploads/xxx)를 절대 주소로 바꿉니다.
   String resolve(String relativeUrl) =>
       relativeUrl.startsWith('http') ? relativeUrl : '$baseUrl$relativeUrl';
-
-  /// "메신저 설명서"(관리자 이상)를 기본 브라우저로 열 주소 — 브라우저는 토큰 헤더를 못
-  /// 싣기 때문에 서버가 5분짜리 서명 토큰을 붙인 /help 주소를 만들어 준다(version.js).
-  Future<String> fetchMessengerManualLink() async {
-    final body =
-        await _post('/api/help/manual-link', const {}) as Map<String, dynamic>;
-    return resolve(body['url'] as String);
-  }
 }

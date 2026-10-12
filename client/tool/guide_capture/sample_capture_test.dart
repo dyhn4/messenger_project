@@ -30,9 +30,8 @@ void main() {
   guideCapture('예시: 오른쪽 위 ☰ 메뉴의 도움말', GuideSurface.desktopSmall, (
     tester,
   ) async {
-    final api = GuideFakeApi()
-      // 메뉴를 여는 동안 부르는 API는 없지만, 필요하면 이렇게 응답을 정해 둔다.
-      ..post('/api/help/manual-link', {'url': '/help?t=demo'});
+    // 메뉴를 여는 동안 부르는 API는 없다 — 필요하면 GuideFakeApi()..post(경로, 응답)처럼 정해 둔다.
+    final api = GuideFakeApi();
     final session = guideSession(api: api, role: AccountRole.admin);
 
     await pumpGuideApp(

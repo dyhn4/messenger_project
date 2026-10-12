@@ -79,7 +79,7 @@ import { registerSocket } from './socket.js';
 import { filesRouter, uploadErrorHandler, uploadRouter } from './upload.js';
 import { createFileResignRouter } from './fileResign.js';
 import { createUsersRouter } from './users.js';
-import { guideStatic, helpApiRouter, versionRouter, watchForVersionChanges } from './version.js';
+import { guideStatic, versionRouter, watchForVersionChanges } from './version.js';
 import { firebaseConfigRouter } from './push.js';
 import { webPushRouter } from './webPush.js';
 import { getWebPublicUrl } from './webAddress.js';
@@ -175,8 +175,6 @@ app.use('/api', requireAuth, searchRouter);
 app.use('/api', requireAuth, attachmentsRouter);
 app.use('/api', requireAuth, linksRouter);
 app.use('/api', requireAuth, createStickersRouter());
-// "메신저 설명서"(관리자 이상) 열람용 5분짜리 링크 발급 — 권한은 라우터 안에서 확인(version.js).
-app.use('/api', requireAuth, helpApiRouter);
 // 업로드 파일은 고정된 공개 경로로 서빙하지 않는다 — filesRouter가 짧게 만료되는
 // 서명 링크(/files/<token>)로만 내려준다(upload.js의 signFileUrl 참고).
 app.use(filesRouter);

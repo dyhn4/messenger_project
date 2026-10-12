@@ -28,9 +28,6 @@ firebase-service-account.json
 installer/bin/
 installer/stage/
 installer/output/
-# "메신저 설명서" 바로가기용으로 build_server_installer.ps1이 루트 README.md에서 매번 새로 만드는
-# 정적 HTML — build-readme-html.mjs(소스)는 커밋하지만 결과물은 안 한다.
-installer/README.html
 
 # 운영 중인 서버를 git 없이 업데이트하기 위한 코드 패키지(zip) 산출물 —
 # package_server_update.ps1이 매번 새로 만든다.

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:client/models/team.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
@@ -11,19 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 삼선 메뉴의 "도움말"(초보자용, 모든 회원)과 "메신저 설명서"(관리자 이상) 표시/동작.
+/// 삼선 메뉴의 "도움말"(초보자용, 모든 회원) 표시/동작.
 void main() {
   const serverUrl = 'https://192.168.0.10:3000';
   const json = {'content-type': 'application/json'};
 
   late List<Uri> opened;
-  late List<http.Request> requests;
-  var manualStatus = 200;
 
   setUp(() {
     opened = [];
-    requests = [];
-    manualStatus = 200;
     AccountMenuButton.openExternal = (uri) async {
       opened.add(uri);
       return true;
@@ -35,25 +29,9 @@ void main() {
     AccountRole role = AccountRole.member,
     bool serverAdmin = false,
   }) {
-    final client = MockClient((request) async {
-      requests.add(request);
-      if (request.method == 'POST' &&
-          request.url.path == '/api/help/manual-link') {
-        if (manualStatus != 200) {
-          return http.Response(
-            jsonEncode({'error': '메신저 설명서는 관리자만 볼 수 있습니다.'}),
-            manualStatus,
-            headers: json,
-          );
-        }
-        return http.Response(
-          jsonEncode({'url': '/help?t=signed-token', 'expiresInSeconds': 300}),
-          200,
-          headers: json,
-        );
-      }
-      return http.Response('[]', 200, headers: json);
-    });
+    final client = MockClient(
+      (request) async => http.Response('[]', 200, headers: json),
+    );
     final session = Session(
       notifications: NotificationService(),
       settings: AppSettings(),
@@ -80,37 +58,30 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  final cases = <String, (AccountRole, bool, bool)>{
-    '준회원': (AccountRole.guest, false, false),
-    '정회원': (AccountRole.member, false, false),
-    '계정 관리자': (AccountRole.admin, false, true),
-    '서버 운영자': (AccountRole.member, true, true),
+  final cases = <String, (AccountRole, bool)>{
+    '준회원': (AccountRole.guest, false),
+    '정회원': (AccountRole.member, false),
+    '계정 관리자': (AccountRole.admin, false),
+    '서버 운영자': (AccountRole.member, true),
   };
   for (final entry in cases.entries) {
-    final (role, serverAdmin, seesManual) = entry.value;
-    testWidgets('${entry.key}: 도움말은 보이고 메신저 설명서는 '
-        '${seesManual ? '보인다' : '안 보인다'}', (tester) async {
+    final (role, serverAdmin) = entry.value;
+    testWidgets('${entry.key}: 도움말이 오픈소스 라이선스 바로 위에 보이고, 메신저 설명서는 없다', (
+      tester,
+    ) async {
       await openMenu(
         tester,
         buildSession(role: role, serverAdmin: serverAdmin),
       );
       expect(find.text('도움말'), findsOneWidget);
-      expect(find.text('메신저 설명서'), seesManual ? findsOneWidget : findsNothing);
-      // 도움말은 예전 자리(오픈소스 라이선스 바로 위), 메신저 설명서는 그 바로 아래.
+      expect(find.text('메신저 설명서'), findsNothing);
       final help = tester.getRect(find.text('도움말'));
       final license = tester.getRect(find.text('오픈소스 라이선스'));
       expect(help.top, lessThan(license.top));
-      if (seesManual) {
-        final manual = tester.getRect(find.text('메신저 설명서'));
-        expect(manual.top, greaterThan(help.top));
-        expect(manual.top, lessThan(license.top));
-      }
     });
   }
 
-  testWidgets('도움말: 평문 페어링 서버가 응답하면 인증서 경고 없는 http 주소를 연다', (
-    tester,
-  ) async {
+  testWidgets('도움말: 평문 페어링 서버가 응답하면 인증서 경고 없는 http 주소를 연다', (tester) async {
     final probed = <Uri>[];
     AccountMenuButton.probePlainGuide = (uri) async {
       probed.add(uri);
@@ -128,29 +99,6 @@ void main() {
     await tester.tap(find.text('도움말'));
     await tester.pumpAndSettle();
     expect(opened.single.toString(), '$serverUrl/guide/');
-  });
-
-  testWidgets('메신저 설명서: 서버가 준 서명 링크를 절대 주소로 연다', (tester) async {
-    await openMenu(tester, buildSession(role: AccountRole.admin));
-    await tester.tap(find.text('메신저 설명서'));
-    await tester.pumpAndSettle();
-    final post = requests.singleWhere(
-      (r) => r.url.path == '/api/help/manual-link',
-    );
-    expect(post.method, 'POST');
-    expect(post.headers['Authorization'], 'Bearer t');
-    expect(opened.single.toString(), '$serverUrl/help?t=signed-token');
-  });
-
-  testWidgets('메신저 설명서: 서버가 거절하면 그 메시지를 토스트로 보여준다', (tester) async {
-    manualStatus = 403;
-    await openMenu(tester, buildSession(serverAdmin: true));
-    await tester.tap(find.text('메신저 설명서'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('메신저 설명서는 관리자만 볼 수 있습니다.'), findsOneWidget);
-    expect(opened, isEmpty);
-    await tester.pumpAndSettle(const Duration(seconds: 3));
   });
 
   test('plainGuideUri: 메인 포트+1의 http 주소(포트 없으면 443+1)', () {

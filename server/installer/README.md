@@ -25,7 +25,7 @@
 은 **기존 서버의 관리자가 새 `tangotalk-server-setup.exe`를 같은 설치 경로로 한 번 다시 실행해야** 그 서버에 들어간다
 (데이터·`.env`·DB 비밀번호는 그대로 — 제거 키가 맞으므로 `PrepareToInstall`도 통과한다). 그 뒤로는 "서버 업데이트"가 매
 업데이트의 1단계에서 잠금을 다시 맞춘다. 운영자용 안내는 `README-설치후.txt` 맨 위 "이미 쓰던 서버에 새 버전을 적용할
-때"에 있고(설치 폴더에 `Folder-Acl.ps1`이 없으면 잠금 전 버전), 릴리스 안내와 루트 `README.md`(메신저 설명서)에도 같은
+때"에 있고(설치 폴더에 `Folder-Acl.ps1`이 없으면 잠금 전 버전), 릴리스 안내와 루트 `README.md`에도 같은
 내용이 있어야 한다. 반대로 `server/` 안 파일(예: `server/scripts/grant-server-admin.mjs`)은 zip으로도 들어가므로, 설치
 프로그램을 아직 다시 실행하지 않은 서버에서도 관리자 권한 PowerShell에서
 `cd <설치 경로>\server; ..\node\node.exe scripts\grant-server-admin.mjs <아이디>`로 직접 돌릴 수 있다.
@@ -44,9 +44,8 @@
 ```
 
 `installer/bin/`(Node 포터블 런타임 zip, PostgreSQL 설치 프로그램, `nssm.exe`)와 `installer/stage/`
-(정리된 `server/` 소스 + `npm install`로 새로 만든 `node_modules`)를 채우고, 저장소 루트
-`README.md`를 `installer/README.html`로 변환한 뒤 ISCC.exe로 `messenger-server.iss`를
-컴파일한다. 셋 다 git에는 안 올라간다(`server/.gitignore`) — 매 빌드마다 새로 받고 새로 만든다.
+(정리된 `server/` 소스 + `npm install`로 새로 만든 `node_modules`)를 채운 뒤 ISCC.exe로
+`messenger-server.iss`를 컴파일한다. 셋 다 git에는 안 올라간다(`server/.gitignore`) — 매 빌드마다 새로 받고 새로 만든다.
 
 ## 파일 구성
 
@@ -73,8 +72,6 @@
 | `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `Grant-ServerAdmin.ps1` | 서버 운영자 복구(시작 메뉴 없음 — 설치 폴더에서 오른쪽 클릭 → "PowerShell에서 실행") — 아이디를 물어 `server/scripts/grant-server-admin.mjs <아이디>`를 번들 node로 서버 폴더에서 실행하고 결과를 보여 준 뒤 멈춤. 그 스크립트가 **활성(탈퇴·정지 아닌) 서버 운영자가 한 명도 없을 때만** 기존 계정을 운영자로 지정·정지 해제하고, 운영자가 있으면 거절(종료 코드 1). `.env`가 관리자 전용이라 스스로 승격 |
 | `README-설치후.txt` | 설치되는 사람이 보는 안내문(`[Files]`로 설치됨) |
-| `build-readme-html.mjs` | 빌드 시에만 쓰는 변환기 — 저장소 루트 `README.md`를 `installer/README.html`로 만든다(설치 프로그램에는 포함 안 됨, 결과물인 README.html만 포함됨). 이 프로젝트 README들이 실제 쓰는 마크다운 구성(제목·굵게·인라인 코드·링크·코드펜스·표·순서/비순서 목록(중첩 포함)·체크박스·인용문)만 처리하는 자체 변환기 — 범용 마크다운 라이브러리(marked 등)를 새 의존성으로 추가하지 않으려고 직접 짰다 |
-| `README.html`(빌드 산출물, git 미포함) | 시작 메뉴 "메신저 설명서"(예전 이름 "도움말")가 그대로 여는 파일 — 저장소 루트 `README.md` 전체를 목차 링크가 실제로 동작하는 정적 웹페이지로 변환한 것. 기본 브라우저로 열림. 앱의 삼선 메뉴 "메신저 설명서"(관리자 이상)도 서버의 `/help`(5분짜리 서명 링크 필요 — `server/src/version.js`)로 같은 파일을 연다 |
 | `../guide/`(server/guide, 설치 시 `{app}\server\guide`) | 앱의 삼선 메뉴 "도움말"(모든 회원)이 여는 초보자용 안내 웹페이지(메신저·프로젝트 이용법 + 스크린샷). 스테이징에 같이 담기고 서버가 인증 없이 `/guide/`로 서빙한다. 업데이트 zip을 적용할 때 `Update-Server.ps1`이 이 폴더를 통째로 맞춘다(/MIR) |
 
 ## 설계상 중요한 결정들 (바꾸기 전에 이유를 먼저 읽을 것)
@@ -203,7 +200,7 @@
     `{app}\*.ps1`(이 잠금 코드 포함)은 zip 업데이트로 바뀌지 않는다 — **기존 서버는 새 설치 프로그램을 한 번
     다시 실행해야** 잠긴다(그 뒤로는 "서버 업데이트"가 매번 다시 맞춘다). 맨 위 "기존 서버에는 새 설치 프로그램을
     한 번 다시 실행해야 한다" 참고 — 운영자가 꼭 알아야 하므로 `README-설치후.txt` 맨 위에 넣었고, 릴리스 노트/루트
-    `README.md`(메신저 설명서)에도 **"기존 서버는 새 `tangotalk-server-setup.exe`를 한 번 다시 실행"**이 있어야 한다.
+    `README.md`에도 **"기존 서버는 새 `tangotalk-server-setup.exe`를 한 번 다시 실행"**이 있어야 한다.
     선택적으로 `package_server_update.ps1`이 zip에 `installer/*.ps1`을 담고 "다음" `Update-Server.ps1`이 그걸
     `{app}`에 복사하게 하면 이후 수정은 전파되지만, **지금 깔려 있는 옛 `Update-Server.ps1`은 루트 스크립트를
     복사하지 않으므로 첫 전파는 반드시 설치 프로그램 재실행**이어야 한다. (3) 이미 누가 손대 둔 PC(심어 둔 파일 등)는 권한을 잠가도 원래대로 돌아가지 않는다 —
@@ -389,9 +386,8 @@
       (그다음 `RESET`/`RESTORE`/`DELETE` 대신 다른 글자를 치면 아무것도 바뀌지 않고 끝남), 한 글자라도 틀리면 실패. 콘솔의
       비밀번호 입력(`Read-Host -AsSecureString`)에서 한글 입력기가 제대로 들어가는지도 이때 본다(개발 PC에서는 확인하지 못함)
 - [ ] `build_server_installer.ps1` 실행 → `installer/output/tangotalk-server-setup.exe` 생성 확인
-- [ ] "메신저 설명서"를 열면 기본 브라우저로 `README.html`이 뜨고, 목차의 아무 링크나 눌러보면 해당
-      섹션으로 실제로 이동함(표/코드블록/중첩 목록/인용문이 깨지지 않고 보이는지도 확인)
-- [ ] 이전 버전 위에 덮어 설치했을 때 시작 메뉴에 옛 "도움말" 바로가기가 남아 있지 않음
+- [ ] 이전 버전 위에 덮어 설치했을 때 시작 메뉴에 옛 "도움말"·"메신저 설명서" 바로가기와 설치 폴더의 `README.html`이
+      남아 있지 않음
 - [ ] 브라우저로 `https://<서버>:3000/guide/`를 열면 초보자용 도움말 첫 페이지가 뜸
 - [ ] 설치 경로에 공백이 있는 폴더(예: `C:\My Server\TangoTalk`)를 직접 골라서 설치 →
       PostgreSQL 설치까지 정상적으로 끝남(`pg_ctl.exe`가 그 경로에 실제로 생김)
@@ -424,7 +420,7 @@
       로그인·메시지 전송·첨부파일·화상회의가 정상(PostgreSQL이 NetworkService로 실행 파일·데이터를 읽는지)
 - [ ] 관리자가 아닌 일반 계정으로 로그인해서 `server\.env`, `secrets\db-app.pw`, `server\certs\key.pem`,
       `backups\*.dump`, `pgsql-data\`를 못 열고, `node\node.exe`·`server\src\index.js`·`tools\nssm.exe`를
-      고치거나 지우지 못함. 그래도 시작 메뉴 "설치 후 안내"·"메신저 설명서"는 열림. "새 기기 페어링 코드 발급"은
+      고치거나 지우지 못함. 그래도 시작 메뉴 "설치 후 안내"는 열림. "새 기기 페어링 코드 발급"은
       관리자 자격 증명을 묻고, 거절하면 "관리자 권한이 필요합니다" 창이 뜸
 - [ ] 관리자 계정(UAC 일반 권한)으로 시작 메뉴 관리 항목(새 기기 페어링 코드 발급/서버 업데이트/재시작/첨부파일 저장소/
       외부 접속 주소/웹 앱 주소(정식 인증서)/백업/복원/DB 데이터 초기화/완전 삭제)을 누르면 UAC 확인 뒤 정상 동작하고, "첨부파일 저장소"·"외부

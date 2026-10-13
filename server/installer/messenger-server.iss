@@ -104,6 +104,13 @@ Source: "README-설치후.txt"; DestDir: "{app}"
 Type: files; Name: "{app}\README.html"
 Type: files; Name: "{group}\메신저 설명서.lnk"
 Type: files; Name: "{group}\도움말.lnk"
+; Node.js(번들한 npm 포함)와 서버 패키지(server\node_modules)는 덮어쓰지 않고 통째로 바꾼다 — 덮어쓰기만 하면 새 버전에 없는
+; 예전 파일이 남아 섞인다. 실제로 예전 npm이 남긴 minipass-flush\node_modules\minipass(3.x)가 새 npm의 minipass 7을 가려서
+; "서버 업데이트"의 npm install이 "Class extends value undefined is not a constructor or null"로 아무 기록 없이 실패했다
+; (2026-10-13). 두 폴더에는 프로그램 파일만 있고 데이터는 없다(DB는 pgsql-data, 비밀값은 secrets·server\.env). 서비스는
+; PrepareToInstall이 이미 멈춰 둬서 node.exe가 잠겨 있지 않다([InstallDelete]는 그 뒤, 파일 복사 직전에 처리된다).
+Type: filesandordirs; Name: "{app}\node"
+Type: filesandordirs; Name: "{app}\server\node_modules"
 
 [Icons]
 Name: "{group}\새 기기 페어링 코드 발급"; Filename: "powershell.exe"; Parameters: "-NoLogo -ExecutionPolicy Bypass -File ""{app}\Get-PairingCode.ps1"""

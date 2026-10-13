@@ -10,8 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// 관리자 콘솔 "운영 현황" 탭의 웹 앱 주소(정식 인증서) 카드 — 서버가 상태를 주면 운영 현황 아래에 보이고, 이 기능이
-/// 없는 예전 서버(404)면 카드만 빠지고 나머지 운영 현황은 그대로다.
+/// 관리자 콘솔의 웹 앱 주소(정식 인증서) 카드 — "DDNS" 탭에 있고(운영 현황에는 없다), 서버가 상태를 주면 보이고, 이
+/// 기능이 없는 예전 서버(404)면 카드만 빠진다.
 void main() {
   const serverUrl = 'https://192.168.0.10:3000';
   const jsonHeaders = {'content-type': 'application/json; charset=utf-8'};
@@ -45,6 +45,17 @@ void main() {
           );
         case '/api/admin/position-options':
           return http.Response('[]', 200, headers: jsonHeaders);
+        case '/api/admin/ddns':
+          return http.Response(
+            jsonEncode({
+              'enabled': false,
+              'domains': <String>[],
+              'tokenConfigured': false,
+              'status': <String, dynamic>{},
+            }),
+            200,
+            headers: jsonHeaders,
+          );
         case '/api/admin/web-certificate':
           return webCertificate();
       }
@@ -81,28 +92,33 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('서버가 상태를 주면 운영 현황에 카드가 보인다', (tester) async {
-    await openConsole(
-      tester,
-      buildSession(
-        () => http.Response(
-          jsonEncode({
-            'enabled': true,
-            'domain': 'xxx.iptime.org',
-            'status': 'valid',
-            'staging': false,
-            'expiresAt': expires.millisecondsSinceEpoch,
-            'lastAttemptAt': null,
-            'lastError': null,
-            'nextAttemptAt': null,
-            'challenges': {'http01': true, 'tlsAlpn01': true},
-          }),
-          200,
-          headers: jsonHeaders,
-        ),
-      ),
-    );
+  Future<void> openDdnsTab(WidgetTester tester) async {
+    await tester.tap(find.widgetWithText(Tab, 'DDNS'));
+    await tester.pumpAndSettle();
+  }
+
+  http.Response valid() => http.Response(
+    jsonEncode({
+      'enabled': true,
+      'domain': 'xxx.iptime.org',
+      'status': 'valid',
+      'staging': false,
+      'expiresAt': expires.millisecondsSinceEpoch,
+      'lastAttemptAt': null,
+      'lastError': null,
+      'nextAttemptAt': null,
+      'challenges': {'http01': true, 'tlsAlpn01': true},
+    }),
+    200,
+    headers: jsonHeaders,
+  );
+
+  testWidgets('운영 현황에는 카드가 없고 DDNS 탭에 있다', (tester) async {
+    await openConsole(tester, buildSession(valid));
     expect(find.text('12명'), findsOneWidget); // 운영 현황은 그대로
+    expect(find.textContaining('웹 앱 주소(정식 인증서)'), findsNothing);
+
+    await openDdnsTab(tester);
     expect(find.textContaining('웹 앱 주소(정식 인증서)'), findsOneWidget);
     expect(
       find.text('xxx.iptime.org · 2026/12/30 14:05까지 유효 · 만료 전에 자동 갱신합니다.'),
@@ -121,10 +137,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('12명'), findsOneWidget);
-    expect(find.textContaining('서버 시작:'), findsOneWidget);
+    await openDdnsTab(tester);
     expect(find.textContaining('웹 앱 주소(정식 인증서)'), findsNothing);
-    expect(find.textContaining('팀 생성 권한'), findsOneWidget);
+    expect(find.textContaining('DuckDNS 자동 갱신'), findsOneWidget);
   });
 
   testWidgets('꺼져 있으면 켜는 방법을 알려 준다', (tester) async {
@@ -148,7 +163,7 @@ void main() {
         ),
       ),
     );
-    expect(find.textContaining('꺼짐'), findsOneWidget);
+    await openDdnsTab(tester);
     expect(find.textContaining('"웹 앱 주소(정식 인증서)"'), findsOneWidget);
   });
 }

@@ -60,6 +60,7 @@ import { createNotificationsRouter } from './notifications.js';
 import { checkPendingMigrations } from './migrationCheck.js';
 import { createPairHandler, generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
+import { ddnsUpdater } from './ddnsService.js';
 import { createAdminRouter } from './admin.js';
 import { createAlbumsRouter } from './albums.js';
 import { createAnnouncementsRouter } from './announcements.js';
@@ -267,6 +268,8 @@ app.use((err, req, res, next) => {
 registerSocket(io);
 watchForVersionChanges(io);
 startRetentionJob();
+// DDNS(DuckDNS) 자동 갱신 — 관리자 콘솔 "DDNS" 탭에서 켰을 때만 5분마다 공인 IP를 알린다(ddns.js).
+ddnsUpdater.start().catch(() => {});
 startSecretExpiryJob(io);
 startAnnouncementAutoUnpinJob(io);
 startProjectDueReminderJob(io);

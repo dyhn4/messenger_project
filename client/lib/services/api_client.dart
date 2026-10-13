@@ -8,6 +8,7 @@ import '../models/admin.dart';
 import '../models/announcement.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/ddns_settings.dart';
 import '../models/inquiry.dart';
 import '../models/invite_link.dart';
 import '../models/invite_result.dart';
@@ -1016,7 +1017,7 @@ class ApiClient {
     );
   }
 
-  /// 관리자 콘솔 "운영 현황"의 웹 앱 주소(정식 인증서) 카드 — 아이폰용 웹 앱 포트의 Let's Encrypt 인증서 상태(GET
+  /// 관리자 콘솔 "DDNS" 탭의 웹 앱 주소(정식 인증서) 카드 — 아이폰용 웹 앱 포트의 Let's Encrypt 인증서 상태(GET
   /// /api/admin/web-certificate). 이 기능이 없는 예전 서버에는 이 경로가 없어 404(Express 기본 HTML 페이지라 JSON도
   /// 아니다)라 null — 화면이 카드를 숨긴다. 그 밖의 실패는 ApiException.
   Future<WebCertificateStatus?> fetchWebCertificateStatus() async {
@@ -1039,6 +1040,51 @@ class ApiClient {
       throw ApiException(error is String ? error : fallback);
     }
     return WebCertificateStatus.fromJson(body);
+  }
+
+  /// 관리자 콘솔 "DDNS" 탭 — DuckDNS 자동 갱신 설정과 상태(GET /api/admin/ddns). 이 기능이 없는 예전 서버는 404라
+  /// null — 화면이 "서버를 업데이트하세요"로 안내한다.
+  Future<DdnsSettings?> fetchDdnsSettings() async {
+    final res = await _send(
+      () => _client.get(_uri('/api/admin/ddns'), headers: _authHeaders),
+    );
+    if (res.statusCode == 404) return null;
+    return DdnsSettings.fromJson(_decodeDdns(res));
+  }
+
+  /// DDNS 설정 변경 — 넘긴 항목만 바뀐다. [domains]는 "tangotalk, tangotalk-dev.duckdns.org"처럼, [token]에 빈
+  /// 문자열을 넘기면 토큰을 지운다(그러면 꺼진다). 서버가 저장한 뒤 바로 한 번 갱신해 보고 그 결과를 돌려준다.
+  Future<DdnsSettings> updateDdnsSettings({
+    bool? enabled,
+    String? domains,
+    String? token,
+  }) async => DdnsSettings.fromJson(
+    await _patch('/api/admin/ddns', {
+          'enabled': ?enabled,
+          'domains': ?domains,
+          'token': ?token,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// "지금 갱신" — 설정은 그대로 두고 바로 한 번 갱신한다.
+  Future<DdnsSettings> runDdnsUpdate() async => DdnsSettings.fromJson(
+    await _post('/api/admin/ddns/update', const {}) as Map<String, dynamic>,
+  );
+
+  Map<String, dynamic> _decodeDdns(http.Response res) {
+    final fallback = 'DDNS 설정을 가져오지 못했습니다(${res.statusCode}).';
+    final Object? body;
+    try {
+      body = jsonDecode(utf8.decode(res.bodyBytes));
+    } on FormatException {
+      throw ApiException(fallback);
+    }
+    if (res.statusCode >= 400 || body is! Map<String, dynamic>) {
+      final error = body is Map ? body['error'] : null;
+      throw ApiException(error is String ? error : fallback);
+    }
+    return body;
   }
 
   /// 관리자 콘솔의 "FCM 설정" — 지금 저장된 값(서비스 계정의 private_key는 빼고).

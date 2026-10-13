@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/web_certificate_status.dart';
 import '../services/time_format.dart';
 
-/// 관리자 콘솔 "운영 현황"의 웹 앱 주소(정식 인증서) 카드 — 아이폰 사용자가 쓰는 웹 앱의 공인 인증서(Let's Encrypt)가
+/// 관리자 콘솔 "DDNS" 탭의 웹 앱 주소(정식 인증서) 카드(admin_ddns_tab.dart) — 아이폰 사용자가 쓰는 웹 앱의 공인 인증서(Let's Encrypt)가
 /// 지금 어떤지, 운영자가 다음에 무엇을 하면 되는지까지 쉬운 말로 보여 준다(서버 GET /api/admin/web-certificate).
 ///
 /// [load]가 null을 주면(이 기능이 없는 예전 서버 — 404) 아무것도 그리지 않는다. 처음 불러오는 동안에도 자리를

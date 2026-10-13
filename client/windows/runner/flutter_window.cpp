@@ -1,8 +1,10 @@
 #include "flutter_window.h"
 
 #include <flutter/standard_method_codec.h>
+#include <imm.h>
 
 #include <optional>
+#include <variant>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "desktop_multi_window/desktop_multi_window_plugin.h"
@@ -61,6 +63,23 @@ bool FlutterWindow::OnCreate() {
   display_notify_ = RegisterPowerSettingNotification(
       GetHandle(), &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
 
+  ime_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "tangotalk/ime",
+          &flutter::StandardMethodCodec::GetInstance());
+  ime_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto* latin_only = std::get_if<bool>(call.arguments());
+        if (call.method_name() != "setLatinOnly" || !latin_only) {
+          result->NotImplemented();
+          return;
+        }
+        SetLatinOnly(*latin_only);
+        result->Success();
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -79,6 +98,7 @@ void FlutterWindow::OnDestroy() {
     display_notify_ = nullptr;
   }
   power_channel_ = nullptr;
+  ime_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -125,4 +145,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
 void FlutterWindow::NotifyPower(const char* event) {
   if (power_channel_) power_channel_->InvokeMethod(event, nullptr);
+}
+
+// 키 입력은 Flutter 뷰(자식 창)가 받으므로 그 창의 입력기 연결을 바꾼다. 연결을 끊으면(NULL, 0) 일반
+// Windows 비밀번호 칸(ES_PASSWORD)처럼 입력기가 꺼져 자판 그대로 영문이 들어가고, IACE_DEFAULT로 원래
+// 입력기를 다시 붙이면 사용자가 쓰던 한/영 상태로 돌아간다.
+void FlutterWindow::SetLatinOnly(bool latin_only) {
+  if (!flutter_controller_ || !flutter_controller_->view()) return;
+  HWND view = flutter_controller_->view()->GetNativeWindow();
+  ImmAssociateContextEx(view, nullptr, latin_only ? 0 : IACE_DEFAULT);
 }

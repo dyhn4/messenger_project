@@ -12,7 +12,7 @@ import 'package:web_socket/web_socket.dart' as ws;
 
 import 'app_platform.dart';
 
-/// 서버가 자체 서명 인증서를 쓰기 때문에, 공인 CA 목록이 아니라 이 인증서 하나만
+/// 서버가 자체 서명 인증서를 쓰기 때문에, 공인 CA 목록이 아니라 이 서버의 **공개키** 하나만
 /// 신뢰하도록 설정한다(핀닝). 인증서 검증을 통째로 꺼버리는 방식(아무 인증서나 허용)은
 /// 절대 쓰지 않는다 — 그러면 TLS를 붙이는 의미가 없다.
 ///
@@ -21,10 +21,16 @@ import 'app_platform.dart';
 /// 인증서(우선순위가 더 높음 — [saveDynamicCert] 참고). 서버를 다른 PC로 옮겨 인증서가
 /// 바뀌었을 때 앱을 재빌드하지 않고도 페어링으로 새 인증서를 받을 수 있게 하기 위함이다.
 ///
+/// 그 인증서를 신뢰 목록에 넣는 것에 더해, 검증에 실패한 인증서라도 **저장한 인증서와 공개키가 같으면** 받는다
+/// ([pinnedCertificateCallback]). 서버는 외부 주소를 더할 때 같은 키로 인증서만 다시 만들어서(server certs.js) 주소
+/// 목록이나 발급 시각이 달라져도 공개키는 그대로다 — 그래서 외부 주소 추가·사내 IP 변경 뒤에도 다시 페어링할
+/// 필요가 없다. 공개키가 같다는 건 그 개인키를 가진 서버라는 뜻이라(TLS 연결 과정에서 서버가 그 개인키로 서명한다)
+/// 주소 검사를 건너뛰어도 바꿔치기를 막는 힘은 같다 — 대신 서버마다 키가 달라야 한다(키 파일을 다른 서버로 복사하지 않기).
+///
 /// 웹 빌드는 TLS를 브라우저가 맡아서 앱이 인증서를 고를 수 없다 — 그래서 웹에서는 핀닝 없이
 /// 브라우저 기본 연결을 쓰고, 서버는 브라우저가 신뢰하는 공인 인증서를 써야 한다.
 class PinnedTls {
-  static SecurityContext? _context;
+  static _Pin? _pin;
   static http.Client? _httpClient;
 
   static Future<File> _dynamicCertFile() async {
@@ -34,8 +40,8 @@ class PinnedTls {
     );
   }
 
-  static Future<SecurityContext> _loadContext() async {
-    final cached = _context;
+  static Future<_Pin> _loadPin() async {
+    final cached = _pin;
     if (cached != null) return cached;
     final dynamicFile = await _dynamicCertFile();
     final bytes = await dynamicFile.exists()
@@ -43,20 +49,62 @@ class PinnedTls {
         : (await rootBundle.load(
             'assets/server_cert.pem',
           )).buffer.asUint8List();
-    final context = SecurityContext(withTrustedRoots: false)
-      ..setTrustedCertificatesBytes(bytes);
-    _context = context;
-    return context;
+    return _pin = _Pin.fromPem(bytes);
   }
 
-  /// 페어링 코드로 서버에서 새로 받아온 인증서를 저장하고, 캐시된 SecurityContext/httpClient를
+  /// 페어링 코드로 서버에서 새로 받아온 인증서를 저장하고, 캐시된 핀/httpClient를
   /// 전부 초기화해서 이후 모든 연결(REST/소켓/이미지 로딩 포함)이 새 인증서를 즉시 쓰게 한다.
   static Future<void> saveDynamicCert(String pemContent) async {
     final file = await _dynamicCertFile();
     await file.writeAsString(pemContent);
-    _context = null;
+    _pin = null;
     _httpClient = null;
-    HttpOverrides.global = _PinnedHttpOverrides(await _loadContext());
+    HttpOverrides.global = _PinnedHttpOverrides(await _loadPin());
+  }
+
+  /// [pinnedPem](PEM 인증서 하나 이상)의 공개키로만 연결하는 HttpClient — 앱 전체가 쓰는 것과 같은 설정이다(시험용).
+  @visibleForTesting
+  static HttpClient pinnedHttpClientFor(List<int> pinnedPem) =>
+      _Pin.fromPem(pinnedPem).httpClient();
+
+  /// 검증에 실패한 서버 인증서를 받을지 정하는 badCertificateCallback — [cert]의 공개키(SPKI)가 [pinnedSpkis] 중
+  /// 하나와 같을 때만 받는다. BoringSSL은 검증 오류마다 그 오류가 난 인증서로 이 콜백을 부르고 하나라도 거절하면
+  /// 연결을 끊는다. 서버가 내민 인증서(체인의 첫 장)는 그 공개키에 맞는 개인키로 연결을 서명해야 하니, 다른 키의
+  /// 인증서로 우리 인증서의 신뢰를 빌리려 하면(체인 뒤에 우리 인증서를 붙여도) 첫 장에서 난 오류가 거절된다.
+  @visibleForTesting
+  static bool Function(X509Certificate cert, String host, int port)
+  pinnedCertificateCallback(List<List<int>> pinnedSpkis) {
+    return (cert, _, _) {
+      final spki = subjectPublicKeyInfo(cert.der);
+      return spki != null && pinnedSpkis.any((p) => _bytesEqual(p, spki));
+    };
+  }
+
+  /// 인증서(DER)에서 공개키 부분(SubjectPublicKeyInfo — 태그·길이 포함 DER)을 꺼낸다. 형식이 이상하면 null.
+  /// Certificate ::= SEQUENCE { tbsCertificate SEQUENCE { [0] version(생략 가능), serialNumber, signature,
+  /// issuer, validity, subject, subjectPublicKeyInfo, ... }, ... } (RFC 5280).
+  @visibleForTesting
+  static List<int>? subjectPublicKeyInfo(List<int> der) {
+    final cert = _DerElement.read(der, 0);
+    if (cert == null || cert.tag != 0x30) return null;
+    final tbs = _DerElement.read(der, cert.contentStart);
+    if (tbs == null || tbs.tag != 0x30) return null;
+    var offset = tbs.contentStart;
+    var element = _DerElement.read(der, offset);
+    if (element != null && element.tag == 0xA0) {
+      offset = element.end;
+      element = _DerElement.read(der, offset);
+    }
+    // serialNumber, signature, issuer, validity, subject를 건너뛴다.
+    for (var i = 0; i < 5; i++) {
+      if (element == null || element.end > tbs.end) return null;
+      offset = element.end;
+      element = _DerElement.read(der, offset);
+    }
+    if (element == null || element.tag != 0x30 || element.end > tbs.end) {
+      return null;
+    }
+    return der.sublist(offset, element.end);
   }
 
   /// 서버 콘솔에 "pair"를 입력하면 나오는 4자리 코드(또는 초대 토큰)로, 인증서를 빌드에 내장하지
@@ -247,27 +295,21 @@ class PinnedTls {
     }
   }
 
+  /// 페어링 응답에 실린 인증서가 그 TLS 연결에 실제로 쓰인 인증서와 똑같은지 — 서버는 같은 파일을 둘 다에 쓰므로
+  /// 공개키만이 아니라 인증서 전체를 비교한다(더 엄격한 쪽).
   static bool _sameCertificate(String pem, List<int> der) {
-    final base64Body = pem
-        .split(RegExp(r'\r?\n'))
-        .where((l) => l.isNotEmpty && !l.startsWith('-----'))
-        .join();
-    final pemDer = base64Decode(base64Body);
-    if (pemDer.length != der.length) return false;
-    for (var i = 0; i < der.length; i++) {
-      if (pemDer[i] != der[i]) return false;
-    }
-    return true;
+    final ders = _pemCertificates(utf8.encode(pem));
+    return ders.length == 1 && _bytesEqual(ders.single, der);
   }
 
-  /// REST 호출(ApiClient)에 쓸, 이 인증서만 신뢰하는 http.Client. 앱 전체에서 하나만
+  /// REST 호출(ApiClient)에 쓸, 이 서버의 공개키만 신뢰하는 http.Client. 앱 전체에서 하나만
   /// 만들어 재사용한다(로그인/재로그인마다 새로 만들면 연결 풀이 계속 새로 생겨 낭비된다).
   static Future<http.Client> httpClient() async {
     final cached = _httpClient;
     if (cached != null) return cached;
     if (kIsWeb) return _httpClient = http.Client();
-    final context = await _loadContext();
-    final client = http_io.IOClient(HttpClient(context: context));
+    final pin = await _loadPin();
+    final client = http_io.IOClient(pin.httpClient());
     _httpClient = client;
     return client;
   }
@@ -289,7 +331,7 @@ class PinnedTls {
         Map<String, String>? headers,
       }) => ws.WebSocket.connect(uri, protocols: protocols);
     }
-    final context = await _loadContext();
+    final pin = await _loadPin();
     return (
       Uri uri, {
       Iterable<String>? protocols,
@@ -299,7 +341,7 @@ class PinnedTls {
         uri.toString(),
         protocols: protocols,
         headers: headers,
-        customClient: HttpClient(context: context),
+        customClient: pin.httpClient(),
       );
       return IOWebSocket.fromWebSocket(ioSocket);
     };
@@ -308,22 +350,100 @@ class PinnedTls {
   /// `NetworkImage`/`CachedNetworkImage`처럼 우리가 직접 만들지 않는 `HttpClient`를
   /// 내부적으로 새로 만들어 쓰는 코드들이 있다(둘 다 우리 ApiClient/ChatSocket과 무관하게
   /// 자기 나름의 dart:io HttpClient()를 새로 만든다) — 그런 곳까지 일일이 고쳐줄 수 없으니,
-  /// 앱 전체의 `HttpClient()` 생성 자체를 가로채서 전부 이 인증서를 신뢰하도록 만든다.
+  /// 앱 전체의 `HttpClient()` 생성 자체를 가로채서 전부 이 서버의 공개키만 신뢰하도록 만든다.
   /// main()에서 runApp() 전에 반드시 await로 호출해야 한다.
   static Future<void> installGlobalHttpOverrides() async {
     if (kIsWeb) return;
-    final context = await _loadContext();
-    HttpOverrides.global = _PinnedHttpOverrides(context);
+    HttpOverrides.global = _PinnedHttpOverrides(await _loadPin());
   }
 }
 
-class _PinnedHttpOverrides extends HttpOverrides {
+/// 핀닝할 인증서들 — 신뢰 목록에 넣을 SecurityContext와, 검증에 실패한 인증서를 받을지 볼 공개키들.
+class _Pin {
   final SecurityContext context;
-  _PinnedHttpOverrides(this.context);
+  final List<List<int>> spkis;
+  _Pin(this.context, this.spkis);
+
+  factory _Pin.fromPem(List<int> pem) {
+    final spkis = _pemCertificates(pem)
+        .map(PinnedTls.subjectPublicKeyInfo)
+        .whereType<List<int>>()
+        .toList();
+    if (spkis.isEmpty) throw const FormatException('핀닝할 서버 인증서를 읽지 못했습니다.');
+    final context = SecurityContext(withTrustedRoots: false)
+      ..setTrustedCertificatesBytes(pem);
+    return _Pin(context, spkis);
+  }
+
+  late final bool Function(X509Certificate, String, int) callback =
+      PinnedTls.pinnedCertificateCallback(spkis);
+
+  /// 이 핀으로 연결하는 HttpClient. 앱 전체 설정([_PinnedHttpOverrides])을 거치지 않고 만든 뒤 콜백을 단다.
+  HttpClient httpClient() => HttpOverrides.runWithHttpOverrides(
+    () => HttpClient(context: context),
+    _SystemTrustHttpOverrides(),
+  )..badCertificateCallback = callback;
+}
+
+class _PinnedHttpOverrides extends HttpOverrides {
+  final _Pin pin;
+  _PinnedHttpOverrides(this.pin);
 
   @override
   HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(this.context);
+    return super.createHttpClient(pin.context)
+      ..badCertificateCallback = pin.callback;
+  }
+}
+
+/// PEM 글에 든 인증서들(DER). BEGIN/END CERTIFICATE 사이만 읽는다.
+List<List<int>> _pemCertificates(List<int> pem) {
+  final text = utf8.decode(pem, allowMalformed: true);
+  return RegExp(
+    r'-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----',
+  ).allMatches(text).map((m) {
+    try {
+      return base64Decode(m.group(1)!.replaceAll(RegExp(r'\s'), ''));
+    } on FormatException {
+      return null;
+    }
+  }).whereType<List<int>>().toList();
+}
+
+bool _bytesEqual(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+/// DER 요소 하나의 위치 — 태그 한 바이트, 길이(짧은·긴 형식), 내용. 인증서에서 공개키를 꺼내는 데만 쓴다.
+class _DerElement {
+  final int tag;
+  final int contentStart;
+  final int end;
+  _DerElement(this.tag, this.contentStart, this.end);
+
+  static _DerElement? read(List<int> der, int offset) {
+    if (offset + 2 > der.length) return null;
+    final tag = der[offset];
+    final lengthByte = der[offset + 1];
+    var pos = offset + 2;
+    int length;
+    if (lengthByte < 0x80) {
+      length = lengthByte;
+    } else {
+      final count = lengthByte & 0x7f;
+      if (count == 0 || count > 4 || pos + count > der.length) return null;
+      length = 0;
+      for (var i = 0; i < count; i++) {
+        length = (length << 8) | der[pos++];
+      }
+    }
+    final end = pos + length;
+    if (end > der.length) return null;
+    return _DerElement(tag, pos, end);
   }
 }
 

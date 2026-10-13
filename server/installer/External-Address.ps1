@@ -5,9 +5,10 @@
 
 .DESCRIPTION
   server/src/config.js의 EXTERNAL_ADDRESS를 .env에 쓰고 서비스를 재시작해주는 GUI일 뿐이다
-  (Storage-Path.ps1과 같은 방식). 서버는 뜰 때 이 주소가 TLS 인증서에 없으면 인증서를 새로
-  만든다(certs.js) — 그러면 이미 연결해둔 모든 클라이언트가 페어링 코드로 다시 연결해야
-  하므로, 적용 전에 지금 인증서를 읽어서 그런 경우인지 미리 알려준다. 공유기 포트포워딩은
+  (Storage-Path.ps1과 같은 방식). 서버는 뜰 때 이 주소가 TLS 인증서에 없으면 같은 키로 인증서를
+  새로 만든다(certs.js) — 공개키를 핀닝하는 최신 앱은 그대로 붙지만, 인증서 파일을 고정하던 예전
+  버전의 앱은 페어링 코드로 다시 연결해야 하므로, 적용 전에 지금 인증서를 읽어서 그런 경우인지
+  미리 알려준다. 공유기 포트포워딩은
   이 스크립트가 해줄 수 없어서 안내만 한다. 화상회의 공인 IP 설정(livekit.yaml)과 LiveKit 재시작은
   서버가 뜰 때 알아서 한다(server/src/livekitNat.js). 서비스 재시작에 관리자 권한이 필요해서, 관리자가
   아니면 스스로 관리자 권한으로 다시 실행한다.
@@ -183,9 +184,9 @@ $applyButton.Add_Click({
         $covered = Test-CertCoversHost -HostName $parsed.Host -IsIP $parsed.IsIP
         if ($covered -ne $true) {
             $result = [System.Windows.Forms.MessageBox]::Show(
-                "서버 인증서에 이 주소가 없어서, 서버가 재시작할 때 인증서를 새로 만듭니다.`n`n" +
-                "그러면 이미 연결해둔 모든 클라이언트(PC·모바일)가 로그인 화면의 '서버 주소 변경'에서 " +
-                "페어링 코드('새 기기 페어링 코드 발급')로 다시 연결해야 접속됩니다(사내 와이파이 밖에서는 외부 주소로 재페어링).`n`n계속할까요?",
+                "서버 인증서에 이 주소가 없어서, 서버가 재시작할 때 같은 키로 인증서를 새로 만듭니다.`n`n" +
+                "최신 앱은 그대로 접속됩니다. 공개키 핀닝 전의 예전 버전 앱만 로그인 화면의 '서버 주소 변경'에서 " +
+                "페어링 코드('새 기기 페어링 코드 발급')로 다시 연결해야 합니다(사내 와이파이 밖에서는 외부 주소로 재페어링).`n`n계속할까요?",
                 $Title, 'YesNo', 'Warning'
             )
             if ($result -ne [System.Windows.Forms.DialogResult]::Yes) {

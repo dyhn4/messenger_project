@@ -7,6 +7,7 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/floating_dialog.dart';
+import '../widgets/invite_link_detail.dart';
 import '../widgets/muted_scrollbar.dart';
 
 /// "설치→가입" 초대 링크 관리 화면. 서버 운영자·계정 등급 관리자·팀 소유자에게만
@@ -34,6 +35,12 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
   List<InviteLink>? _links;
   String? _error;
   bool _creating = false;
+
+  /// 목록에서 눌러 내용을 보고 있는 링크 — null이면 목록. id로 들고 있어서 취소 등으로 목록이 바뀌어도 최신 값을 보여준다.
+  String? _openedId;
+
+  InviteLink? get _opened =>
+      _links?.where((l) => l.id == _openedId).firstOrNull;
 
   @override
   void initState() {
@@ -166,9 +173,27 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
           ),
           const SizedBox(height: 16),
           const Divider(height: 1),
-          Flexible(child: _buildList(context)),
+          Flexible(child: _buildDetail() ?? _buildList(context)),
         ],
       ),
+    );
+  }
+
+  Widget? _buildDetail() {
+    final link = _opened;
+    if (link == null) return null;
+    return InviteLinkDetail(
+      title: link.label?.isNotEmpty == true ? link.label! : '초대 링크',
+      infoLines: [
+        '${link.statusLabel} · ${link.usageLabel}',
+        '${link.createdByName} · ${formatDateTime(link.createdAt)} 생성',
+        '${formatDateTime(link.expiresAt)} 만료',
+      ],
+      url: link.url,
+      externalUrl: link.externalUrl,
+      isOpen: link.isOpen,
+      isFull: link.isFull,
+      onBack: () => setState(() => _openedId = null),
     );
   }
 
@@ -204,6 +229,7 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
         separatorBuilder: (_, _) => const Divider(height: 1),
         itemBuilder: (context, i) => _InviteLinkRow(
           link: links[i],
+          onOpen: () => setState(() => _openedId = links[i].id),
           onCopy: () => _copyAndNotify(links[i]),
           onRevoke: () => _revoke(links[i]),
         ),
@@ -214,10 +240,12 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
 
 class _InviteLinkRow extends StatelessWidget {
   final InviteLink link;
+  final VoidCallback onOpen;
   final VoidCallback onCopy;
   final VoidCallback onRevoke;
   const _InviteLinkRow({
     required this.link,
+    required this.onOpen,
     required this.onCopy,
     required this.onRevoke,
   });
@@ -228,6 +256,7 @@ class _InviteLinkRow extends StatelessWidget {
     final inactive = !link.valid;
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      onTap: onOpen,
       title: Text(
         link.label?.isNotEmpty == true ? link.label! : '초대 링크',
         style: TextStyle(color: inactive ? hint : null),

@@ -18,11 +18,12 @@ import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
-import '../widgets/web_certificate_status_card.dart';
+import 'admin_ddns_tab.dart';
 import 'admin_stickers_tab.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
-/// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 / 이모티콘 여섯 탭.
+/// 운영 현황 / 회원 / 팀 / 감사 로그 / FCM 설정 / DDNS / 이모티콘 일곱 탭. DDNS 탭에는 DuckDNS 자동 갱신과
+/// 아이폰용 웹 앱 주소(정식 인증서) 상태가 함께 있다(admin_ddns_tab.dart).
 ///
 /// 여기 있는 모든 동작은 서버 src/admin.js가 매 요청마다 isServerAdmin을 다시 확인하므로,
 /// 이 화면이 열려 있다는 것만으로 권한이 생기지는 않는다.
@@ -40,7 +41,7 @@ class AdminConsoleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 6,
+      length: 7,
       child: FloatingDialog(
         title: '서버 관리',
         maxWidth: 820,
@@ -58,6 +59,7 @@ class AdminConsoleScreen extends StatelessWidget {
                 Tab(text: '팀'),
                 Tab(text: '감사 로그'),
                 Tab(text: 'FCM 설정'),
+                Tab(text: 'DDNS'),
                 Tab(text: '이모티콘'),
               ],
             ),
@@ -70,6 +72,7 @@ class AdminConsoleScreen extends StatelessWidget {
                   _TeamsTab(session: session),
                   _AuditTab(session: session),
                   _FcmTab(session: session),
+                  AdminDdnsTab(session: session),
                   AdminStickersTab(session: session),
                 ],
               ),
@@ -164,11 +167,6 @@ class _StatsTabState extends State<_StatsTab> {
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
-          ),
-          // 아이폰용 웹 앱의 정식 인증서(Let's Encrypt) 상태 — 운영 현황이라 여기 둔다. 이 기능이 없는 예전 서버면
-          // 카드가 스스로 숨는다(fetchWebCertificateStatus가 404를 null로 준다). "다시 확인" 때마다 그때의 api로 묻는다.
-          WebCertificateStatusCard(
-            load: () => widget.session.api!.fetchWebCertificateStatus(),
           ),
           const _SectionDivider(),
           Align(

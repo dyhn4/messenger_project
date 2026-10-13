@@ -27,6 +27,7 @@ import 'services/fcm_config_cache.dart';
 import 'services/notification_popup.dart'
     if (dart.library.js_interop) 'services/notification_popup_stub.dart';
 import 'services/notification_service.dart';
+import 'services/password_ime.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'services/web_launch_invite.dart';
@@ -198,6 +199,8 @@ Future<void> main() async {
     await windowManager.ensureInitialized();
     await windowManager.setPreventClose(true);
   }
+  // 비밀번호 칸에 포커스가 가면 한글 입력기를 끄고, 벗어나면 되돌린다(Windows만 — password_ime.dart).
+  PasswordIme.install();
   runApp(const MyApp());
 }
 

@@ -6,6 +6,9 @@ import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
 import { safeAvatarColor } from './avatarRules.js';
 import { endUserCallAccess } from './callAccess.js';
 import { UPLOADS_DIR } from './config.js';
+import { encryptField } from './crypto.js';
+import { isDuckDnsToken, parseDuckDnsDomains } from './ddns.js';
+import { ddnsUpdater } from './ddnsService.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
 import { clearPushTargetsForUser } from './db/queries/devices.js';
@@ -151,7 +154,13 @@ export function createAdminRouter(io) {
       detail.push(`팀·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
     }
     recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
-    res.json(updated);
+    // 설정 행 전체를 돌려주지 않는다 — FCM 서비스 계정 키(개인키)·DDNS 토큰 같은 비밀값도 같은 행에 있다.
+    res.json({
+      teamCreation: updated.teamCreation,
+      teamInviteLinkCreation: updated.teamInviteLinkCreation,
+      orgScope: updated.orgScope,
+      projectCreation: updated.projectCreation,
+    });
   });
 
   /** 클라이언트 Firebase 초기화용 4개 값은 그대로 보여준다(비밀값 아님 — Android 클라이언트
@@ -223,6 +232,76 @@ export function createAdminRouter(io) {
     invalidateMessagingCache();
     recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: 'FCM 설정 변경' });
     res.json({ ok: true });
+  });
+
+  // ─────────────────────────────── DDNS ───────────────────────────────
+
+  /** 관리자 콘솔 "DDNS" 탭에 보일 내용 — 토큰은 다시 내려보내지 않고 설정 여부만. status는 ddns.js의 갱신기 상태. */
+  async function ddnsView() {
+    const settings = await getServerSettings();
+    return {
+      enabled: !!settings.ddnsEnabled,
+      domains: parseDuckDnsDomains(settings.ddnsDomains ?? '').names ?? [],
+      tokenConfigured: !!settings.ddnsToken,
+      status: ddnsUpdater.status(),
+    };
+  }
+
+  router.get('/admin/ddns', async (req, res) => {
+    res.json(await ddnsView());
+  });
+
+  /**
+   * DDNS 설정 변경 — 넘긴 항목만 바뀐다. domains는 "tangotalk, tangotalk-dev.duckdns.org"처럼(ddns.js
+   * parseDuckDnsDomains), token은 DuckDNS 토큰(빈 문자열이면 지운다 — 그러면 꺼진다). 켜려면 도메인과 토큰이 있어야
+   * 한다. 저장하면 바로 한 번 갱신해 보고 그 결과까지 돌려준다. 감사 로그에는 토큰을 남기지 않는다.
+   */
+  router.patch('/admin/ddns', async (req, res) => {
+    const body = req.body ?? {};
+    const current = await getServerSettings();
+    const fields = {};
+    if ('domains' in body) {
+      const parsed = parseDuckDnsDomains(body.domains);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      fields.ddnsDomains = parsed.names.length ? parsed.names.join(',') : null;
+    }
+    if ('token' in body) {
+      const token = typeof body.token === 'string' ? body.token.trim() : null;
+      if (token === null) return res.status(400).json({ error: '토큰은 글자로 넣어야 합니다.' });
+      if (token && !isDuckDnsToken(token)) {
+        return res.status(400).json({ error: 'DuckDNS 토큰 모양이 아닙니다 — DuckDNS 첫 화면의 token 값을 그대로 붙여 넣으세요.' });
+      }
+      fields.ddnsToken = token ? encryptField(token) : null;
+    }
+    if ('enabled' in body) {
+      if (typeof body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled는 참/거짓이어야 합니다.' });
+      fields.ddnsEnabled = body.enabled;
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+
+    const next = { ...current, ...fields };
+    // 토큰이나 도메인을 지우면 갱신할 수 없으니 꺼 둔다(켠 채로 두면 매번 실패만 쌓인다).
+    if (!next.ddnsToken || !next.ddnsDomains) {
+      if (fields.ddnsEnabled === true) {
+        return res.status(400).json({ error: '켜려면 도메인과 토큰을 먼저 넣으세요.' });
+      }
+      fields.ddnsEnabled = false;
+    }
+
+    const updated = await updateServerSettings(fields);
+    const detail = [`DDNS: ${updated.ddnsEnabled ? '켜짐' : '꺼짐'}`];
+    if ('ddnsDomains' in fields) detail.push(`도메인 ${updated.ddnsDomains ?? '없음'}`);
+    if ('ddnsToken' in fields) detail.push(fields.ddnsToken ? '토큰 변경' : '토큰 지움');
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
+
+    await ddnsUpdater.runNow();
+    res.json(await ddnsView());
+  });
+
+  /** "지금 갱신" — 설정은 그대로 두고 바로 한 번 갱신한다(이미 갱신 중이면 그 결과를 기다린다). */
+  router.post('/admin/ddns/update', async (req, res) => {
+    await ddnsUpdater.runNow();
+    res.json(await ddnsView());
   });
 
   /** 직책 목록 — '부서·직책 관리 범위'가 '계정 단위'일 때, 회원 탭의 직책 수정이 자유 입력

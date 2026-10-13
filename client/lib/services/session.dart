@@ -915,6 +915,8 @@ class Session extends ChangeNotifier {
   /// 모달을 연다), 아무 처리도 안 하면 대화 중에도 모달이 불쑥 뜬다. 이 경로에서는 처음부터
   /// "이미 보여준 것"으로 표시해서 모달은 건너뛰고 UpdateBanner(알약)만 뜨게 한다.
   void _listenForLiveUpdates() {
+    // 웹은 설치 파일이 없다(_checkForUpdate와 같다) — 소켓도 붙지 않는다(update_socket.dart).
+    if (kIsWeb) return;
     // init()과 restoreFromCredentials()가 둘 다 부르므로 중복 구독을 막는다.
     _updateSub?.cancel();
     _updateSub = _updateSocket.updates.listen((e) async {
@@ -955,7 +957,8 @@ class Session extends ChangeNotifier {
   /// Windows는 받은 설치 프로그램(.exe)을 여는 것 자체가 설치 실행이고, Android는 apk를
   /// 여는 것으로 시스템 패키지 설치 화면(REQUEST_INSTALL_PACKAGES 권한 필요)이 뜬다.
   Future<void> installUpdate() async {
-    if (api == null || updateDownloading) return;
+    // 웹에는 받을 설치 파일도, 저장해 실행할 곳도 없다(웹에서는 업데이트 안내 자체가 뜨지 않는다).
+    if (kIsWeb || api == null || updateDownloading) return;
     updateDownloading = true;
     updateDownloadProgress = null;
     updateError = null;

@@ -56,6 +56,8 @@ test('웹 앱 주소가 없으면(공인 인증서 없음·기능 꺼짐) 아이
     const html = render({ ...base, link: link(), connectable: true });
     assert.doesNotMatch(html, new RegExp(IPHONE), name);
     assert.doesNotMatch(html, /class="ios-web"/, name);
+    // 브라우저가 믿지 않는 인증서로 여는 주소를 알려 주게 되므로 버튼도 없다.
+    assert.ok(!html.includes('class="btn btn-web"'), name);
     assert.ok(!html.includes('?invite='), name);
     assert.match(html, /Windows용 다운로드/, name); // 나머지 안내는 그대로다.
   }
@@ -69,6 +71,11 @@ test('공인 인증서가 걸려 있으면 설치 버튼 아래에 초대 코드
     assert.match(html, new RegExp(`${IPHONE}:</b> <a href="${url}">${url}</a> 을 Safari로 열어 가입하고 홈 화면에 추가하세요`), name);
     assert.match(html, /홈 화면에서 열어야 새 메시지 알림도 받을 수 있습니다/, name);
     assert.ok(iphoneBox(html).includes(SIGNUP_NOTE), name);
+    // 상자 맨 위에 같은 주소(초대 코드 포함)로 여는 "웹 앱 열기" 버튼 — PC·안드로이드 브라우저에서도 쓸 수 있다고 알린다.
+    const box = iphoneBox(html);
+    assert.ok(box.includes(`<a class="btn btn-web" href="https://xxx.iptime.org/?invite=${TOKEN}">웹 앱 열기</a>`), name);
+    assert.ok(box.indexOf('웹 앱 열기') < box.indexOf(IPHONE), name);
+    assert.match(box, /PC·안드로이드도 됩니다/, name);
     // 설치 버튼(Windows·Android) 다음, 설치 후 안내 앞 — "어느 기기로 쓰나"를 한 묶음으로 본다.
     const downloads = html.indexOf('Android용 다운로드');
     const iphone = html.indexOf(IPHONE);
@@ -101,6 +108,7 @@ test('인원이 다 찬 링크(이미 가입한 사람이 다른 기기를 연�
     const box = iphoneBox(html);
     assert.ok(box.includes(IPHONE), name);
     assert.ok(box.includes('<a href="https://xxx.iptime.org">https://xxx.iptime.org</a> 을 Safari로 열어 로그인하고'), name);
+    assert.ok(box.includes('<a class="btn btn-web" href="https://xxx.iptime.org">웹 앱 열기</a>'), name);
     assert.ok(!box.includes('?invite='), name);
     assert.ok(!box.includes(SIGNUP_NOTE), name);
   }

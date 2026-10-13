@@ -278,6 +278,8 @@ const INVITE_PAGE_STYLE = `
   .ios-web { background: #f1f3f5; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
   .ios-web p { margin: 4px 0; }
   .ios-web a { word-break: break-all; }
+  /* 웹 앱 버튼(iphoneWebSection) — 위의 설치 버튼(파란 바탕)과 구별되게 테두리 버튼으로. */
+  .ios-web .btn-web { margin: 4px 0 6px; background: #fff; color: #4c6ef5; border: 2px solid #4c6ef5; }
 `;
 
 /**
@@ -305,8 +307,11 @@ function iphoneWebSection(webUrl, { join = true, token = null } = {}) {
     ? `
           <p class="hint">처음 가입할 때는 꼭 이 주소로 여세요 — 초대 코드가 들어 있어 사내 와이파이 밖에서도 가입됩니다. 가입한 뒤에는 홈 화면의 웹 앱으로 로그인합니다.</p>`
     : '';
+  // 버튼은 아이폰만이 아니라 설치 없이 브라우저로 쓰려는 사람(PC·안드로이드)도 누를 수 있다 — 같은 주소다.
   return `
         <div class="ios-web">
+          <a class="btn btn-web" href="${url}">웹 앱 열기</a>
+          <p class="hint">설치하지 않고 이 브라우저에서 바로 쓸 수도 있습니다(PC·안드로이드도 됩니다).</p>
           <p><b>아이폰은 앱 대신 웹 앱을 씁니다:</b> <a href="${url}">${url}</a> ${how}</p>
           <p class="hint">Safari의 공유 버튼 → "홈 화면에 추가". 홈 화면에서 열어야 새 메시지 알림도 받을 수 있습니다.</p>${signupNote}
         </div>`;

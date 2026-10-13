@@ -8,7 +8,7 @@ import { listFcmTokensForUser, setDeviceFcmToken } from './db/queries/devices.js
 import { listMutedUserIdsForRoom } from './db/queries/rooms.js';
 import { findTeamById } from './db/queries/teams.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
-import { isOnline } from './presence.js';
+import { isDeviceConnected, skipsPush } from './presence.js';
 import { signFileUrl } from './upload.js';
 import { sendWebPushToUser } from './webPush.js';
 
@@ -30,6 +30,14 @@ const legacyKeyPath = path.join(__dirname, '..', 'firebase-service-account.json'
  * 채로 캐싱되고, 발송 함수들은 이때 조용히 아무것도 안 한다. */
 let messagingCache; // undefined = 아직 로드 전; 로드 후엔 항상 { messaging } 형태.
 let currentApp = null;
+
+/**
+ * 이 사람의 FCM 토큰 중 지금 보낼 것 — 소켓이 붙어 있는 기기는 뺀다(소켓으로 알림을 받는다). 그래서 PC 앱이 켜져 있어도
+ * 접속해 있지 않은 휴대폰에는 간다("다른 기기 접속 중에도 푸시" — 끈 사람은 호출부가 skipsPush로 이미 뺐다).
+ */
+async function pushableFcmTokens(userId) {
+  return (await listFcmTokensForUser(userId)).filter(({ deviceId }) => !isDeviceConnected(deviceId));
+}
 
 export function invalidateMessagingCache() {
   messagingCache = undefined;
@@ -151,7 +159,7 @@ export async function notifyOfflineMembers({
   const mutedIds = new Set(await listMutedUserIdsForRoom(room.id));
   const excluded = new Set(excludeUserIds);
   const targets = memberIds.filter(
-    (id) => id !== senderId && !isOnline(id) && !mutedIds.has(id) && !excluded.has(id),
+    (id) => id !== senderId && !skipsPush(id) && !mutedIds.has(id) && !excluded.has(id),
   );
   if (targets.length === 0) return;
 
@@ -201,7 +209,7 @@ async function sendChatDataPush({ targets, room, sender, senderName, kind, conve
     targets.map(async (userId) => {
       await sendWebPushToUser(userId, webPayload);
       if (!messaging) return;
-      const tokens = await listFcmTokensForUser(userId);
+      const tokens = await pushableFcmTokens(userId);
       await Promise.all(
         tokens.map(({ deviceId, fcmToken }) =>
           messaging
@@ -247,11 +255,11 @@ async function sendChatDataPush({ targets, room, sender, senderName, kind, conve
  * 채팅 푸시와 달리 알림 payload(notification)를 넣어서, 앱이 꺼져 있어도 OS가 바로 그려준다.
  */
 export async function notifyProjectPush({ userId, title, body, projectId, taskId }) {
-  if (isOnline(userId)) return;
+  if (skipsPush(userId)) return;
   await sendWebPushToUser(userId, { kind: 'project', projectId, title, body });
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
-  const tokens = await listFcmTokensForUser(userId);
+  const tokens = await pushableFcmTokens(userId);
   await Promise.all(
     tokens.map(({ deviceId, fcmToken }) =>
       messaging
@@ -289,7 +297,7 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
   // 알림을 끈(뮤트) 방은 전화도 울리지 않는다 — 메시지 푸시(notifyOfflineMembers)와 같은 규칙. 안 그러면 뮤트해 둔 큰 토픽에서
   // 누가 통화를 걸 때마다 전체화면 수신 알림이 뜬다(앱이 켜져 있을 때의 수신 창도 같은 규칙 — client session.dart).
   const mutedIds = new Set(await listMutedUserIdsForRoom(room.id));
-  const targets = memberIds.filter((id) => id !== callerId && !isOnline(id) && !mutedIds.has(id));
+  const targets = memberIds.filter((id) => id !== callerId && !skipsPush(id) && !mutedIds.has(id));
   if (targets.length === 0) return;
 
   const callerName = caller?.name ?? caller?.username ?? '알 수 없음';
@@ -310,7 +318,7 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
         { ttl: 45 },
       );
       if (!messaging) return;
-      const tokens = await listFcmTokensForUser(userId);
+      const tokens = await pushableFcmTokens(userId);
       await Promise.all(
         tokens.map(({ deviceId, fcmToken }) =>
           messaging
@@ -352,7 +360,7 @@ export async function notifyIncomingCall({ memberIds, callerId, caller, room, ro
  * 두 번 뜨지 않게) 여기서는 건너뛴다. notifyOfflineMembers와 같은 분리 방식.
  * [teamId]는 제목 끝의 팀 이름 배지에만 쓴다(방이 속한 팀). */
 export async function notifySecretChatInvite({ targetUserId, initiator, roomId, teamId }) {
-  if (isOnline(targetUserId)) return;
+  if (skipsPush(targetUserId)) return;
 
   const senderName = initiator?.name ?? initiator?.username ?? '알 수 없음';
   const { name: teamName, badge: teamBadge } = await teamBadgeFor(teamId);
@@ -365,7 +373,7 @@ export async function notifySecretChatInvite({ targetUserId, initiator, roomId, 
 
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;
-  const tokens = await listFcmTokensForUser(targetUserId);
+  const tokens = await pushableFcmTokens(targetUserId);
   if (tokens.length === 0) return;
   const avatarUrl = initiator?.avatarUrl ? signFileUrl(initiator.avatarUrl) : null;
 

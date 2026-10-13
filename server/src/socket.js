@@ -20,6 +20,8 @@ import { postCallLeft, recordCallEvent, startCallCard } from './callCards.js';
 import { CALL_DISCONNECT_GRACE_MS, CALL_HANDOFF_GRACE_MS } from './callEvents.js';
 import { isSocketInCall, markCallDeclined } from './callState.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
+import { getNotificationSettingsMap } from './db/queries/notifications.js';
+import { DEFAULT_NOTIFICATION_SETTINGS } from './notificationRules.js';
 import { markMessageRead } from './db/queries/messages.js';
 import {
   findRoomById,
@@ -82,6 +84,11 @@ export function registerSocket(io) {
           touchDeviceLastSeen(device.id).catch(() => {});
         }
       }
+      // "다른 기기 접속 중에도 푸시" 설정 — 접속해 있는 동안 푸시 대상을 고를 때 쓴다(presence.js skipsPush). 못 읽으면
+      // 기본값(켬)으로 둔다 — 연결 자체를 막을 일은 아니다.
+      socket.data.pushWhileOnline = await getNotificationSettingsMap([payload.sub])
+        .then((m) => m.get(payload.sub)?.pushWhileOnline ?? DEFAULT_NOTIFICATION_SETTINGS.pushWhileOnline)
+        .catch(() => DEFAULT_NOTIFICATION_SETTINGS.pushWhileOnline);
       next();
     } catch {
       next(new Error('unauthorized'));
@@ -91,7 +98,11 @@ export function registerSocket(io) {
   io.on('connection', (socket) => {
     // 같은 사람이 여러 기기로 동시에 붙어있을 수 있어서, 이 사람의 "첫" 연결일 때만
     // 온라인으로 알린다(presence.js가 기기별 연결 수를 센다). 받는 사람은 같은 팀 사람들뿐이다.
-    if (markConnected(socket.data.userId)) announcePresence(io, socket.data.userId);
+    const connected = markConnected(socket.data.userId, {
+      deviceId: socket.data.deviceId ?? null,
+      pushWhileOnline: socket.data.pushWhileOnline,
+    });
+    if (connected) announcePresence(io, socket.data.userId);
 
     // 개인용 룸(user:<id>)에 join해두면, REST로 방이 새로 생겼을 때
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
@@ -391,7 +402,7 @@ export function registerSocket(io) {
         emitVideoTierChanges(io);
       }, CALL_DISCONNECT_GRACE_MS).unref();
       // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다(같은 팀 사람들에게만).
-      if (markDisconnected(socket.data.userId)) announcePresence(io, socket.data.userId);
+      if (markDisconnected(socket.data.userId, socket.data.deviceId ?? null)) announcePresence(io, socket.data.userId);
     });
 
     // 방에 join하는 건 DB 조회가 필요해 비동기다 — 리스너 등록(위)보다 뒤에 둬서, 이

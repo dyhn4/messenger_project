@@ -1405,6 +1405,9 @@ export const notificationSettings = pgTable('notification_settings', {
   mentionAll: boolean('mention_all').notNull().default(true),
   // 보드 알림 수준: 'all'(새 글·수정·댓글) | 'important'(새 글 + 내 글의 댓글) | 'new'(새 글만)
   boardLevel: text('board_level').notNull().default('important'),
+  // 다른 기기(PC 앱 등)로 접속해 있어도, 접속해 있지 않은 기기(휴대폰)에는 푸시를 보낼지 — 켜면(기본) 기기마다 따로
+  // 보고, 끄면 어느 기기로든 접속해 있는 동안은 푸시를 보내지 않는다(presence.js의 skipsPush).
+  pushWhileOnline: boolean('push_while_online').notNull().default(true),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

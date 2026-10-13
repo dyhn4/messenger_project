@@ -8,7 +8,7 @@ import 'muted_scrollbar.dart';
 
 /// 알림 센터 톱니 — 내 알림 설정: 탭별 "안 읽은 알림만 표시"(이 기기에만 저장), `@all 알림 받기` 스위치와
 /// 보드 알림 수준(전체 / 중요 알림 / 새 글 알림 — 서버에 저장). 고르는 즉시 저장하고(서버 값은 실패하면
-/// 되돌리고 알린다) 닫기만 누르면 된다.
+/// 되돌리고 알린다) 닫기만 누르면 된다. "다른 기기 접속 중에도 휴대폰 알림 받기"는 환경설정 > 메신저 설정에 있다.
 Future<void> showNotificationSettingsDialog(
   BuildContext context,
   Session session,

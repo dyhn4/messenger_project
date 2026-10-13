@@ -819,6 +819,31 @@ void main() {
       await c.updateSettings(boardLevel: BoardNotifyLevel.newPosts);
       expect(api.calls.last, 'update mentionAll=null boardLevel=new');
       expect(c.settings!.boardLevel, BoardNotifyLevel.newPosts);
+      // 다른 기기 접속 중에도 푸시 — 기본은 켬이고, 바꾼 것만 보낸다.
+      expect(c.settings!.pushWhileOnline, isTrue);
+      await c.updateSettings(pushWhileOnline: false);
+      expect(
+        api.calls.last,
+        'update mentionAll=null boardLevel=null pushWhileOnline=false',
+      );
+      expect(c.settings!.pushWhileOnline, isFalse);
+      expect(c.settings!.mentionAll, isFalse); // 다른 값은 그대로
+    });
+
+    test('설정 JSON: pushWhileOnline이 없으면(예전 서버) 켬으로 읽는다', () {
+      expect(
+        NotificationSettings.fromJson({
+          'mentionAll': true,
+          'boardLevel': 'important',
+        }).pushWhileOnline,
+        isTrue,
+      );
+      expect(
+        NotificationSettings.fromJson({
+          'pushWhileOnline': false,
+        }).pushWhileOnline,
+        isFalse,
+      );
     });
 
     test('서버가 거절하면 되돌리고 예외를 다시 던진다', () async {

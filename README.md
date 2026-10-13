@@ -287,6 +287,12 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 **알림**
 - FCM 푸시(Android 전용 — Windows는 미지원, 코드에서 `Platform.isAndroid`로 분기): 소켓이 붙어 있지 않은(=완전히 종료된) 기기에만 발송, data-only 페이로드를 클라이언트가 직접 렌더링
+- **다른 기기 접속 중에도 휴대폰 알림** — 접속 여부는 기기마다 따로 봅니다(`server/src/presence.js`의 `isDeviceConnected` — 소켓 인증에서
+  확인된 기기 기준). 환경설정 > 메신저 설정 > 휴대폰 알림의 "다른 기기 접속 중에도 휴대폰 알림 받기"(`notification_settings.pushWhileOnline`,
+  **기본 켬** — 다른 항목처럼 "저장하기"를 눌러야 서버에 저장)가 켜져 있으면
+  PC 앱이 켜져 있어도 접속해 있지 않은 휴대폰(과 닫힌 웹 앱)으로 FCM·웹 푸시가 갑니다(소켓이 붙어 있는 기기로는 안 보냄). 끄면 예전처럼
+  어느 기기로든 접속해 있는 동안은 푸시를 보내지 않습니다(`skipsPush`). 채팅·멘션·할 일·프로젝트·화상회의·비밀 대화 푸시 모두 같은
+  규칙이고, 설정은 계정에 저장돼 내 모든 기기에 같이 적용됩니다(접속 중에 바꿔도 바로 반영)
 - 안드로이드 "대화" 스타일 알림(발신자 아바타 아이콘 포함), 뮤트한 방은 발송 안 함
 - **웹 푸시(웹 앱)** — 브라우저로 쓰는 웹 앱은 FCM 대신 표준 Web Push(VAPID — Firebase 설정 불필요, 키는 `server/.web-push-vapid.json`에
   자동 생성)로 FCM과 같은 때(소켓이 안 붙어 있을 때) 알림을 받습니다(`server/src/webPush.js`). 서버가 구독 주소로 직접 요청을
@@ -1616,7 +1622,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/notifications` | 알림 기록(`kind`=`mention`(개인 멘션+`@all`)\|`mention_personal`(개인 멘션만)\|`mention_all`(`@all`만)\|`board`\|`all`, `before`(ms 커서), `limit`(기본 30·최대 100), `unreadOnly`) → `{ items, hasMore }`. 항목: `id`,`kind`,`teamId`,`teamName`,`roomId`,`roomName`,`messageId`,`commentId`,`actorId`,`actorName`,`preview`,`createdAt`,`readAt`,`roomType`. 없어진 방·메시지나 내가 나간 방의 알림은 안 내려줌 |
 | GET | `/api/notifications/unread-counts` | 읽지 않은 알림 수 `{ mention, board, mentionPersonal, mentionAll }`(내 모든 팀 합계, `mention` = `mentionPersonal`+`mentionAll`) |
 | POST | `/api/notifications/read` | 읽음 처리 — `{ ids }` \| `{ kind: 'mention'\|'mention_personal'\|'mention_all'\|'board' }` \| `{ messageId }`. 내 다른 기기에 소켓 `notification:sync` |
-| GET/PATCH | `/api/notification-settings` | 내 알림 설정 `{ mentionAll(기본 true), boardLevel('all'\|'important'\|'new', 기본 'important') }` — PATCH는 일부 필드만 보내도 됨 |
+| GET/PATCH | `/api/notification-settings` | 내 알림 설정 `{ mentionAll(기본 true), boardLevel('all'\|'important'\|'new', 기본 'important'), pushWhileOnline(다른 기기 접속 중에도 휴대폰 푸시, 기본 true) }` — PATCH는 일부 필드만 보내도 됨 |
 
 **기기 / 비밀 대화(E2EE)** (`/api`)
 

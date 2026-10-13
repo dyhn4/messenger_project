@@ -12,7 +12,7 @@ export const PREVIEW_MAX = 120; // 알림 미리보기 길이
 export const BOARD_LEVELS = ['all', 'important', 'new'];
 // 보드 알림 기본은 'important'(새 글 + 내가 쓴 글에 달린 댓글) — 글 수정·남의 글 댓글까지 받고 싶은 사람은 알림 설정에서
 // '전체'로 바꾼다. 큰 토픽에서 수정·댓글마다 멤버 전원에게 알림 행이 생기는 걸 기본으로 두지 않으려는 선택이다.
-export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({ mentionAll: true, boardLevel: 'important' });
+export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({ mentionAll: true, boardLevel: 'important', pushWhileOnline: true });
 
 export const MENTION_KINDS = ['mention', 'mention_all'];
 export const BOARD_KINDS = ['board_post', 'board_edit', 'board_comment'];
@@ -164,7 +164,9 @@ export function pushTagSuffix(kind) {
  *  - @all(mention_all): 방 뮤트를 존중하고, 사용자 설정 mentionAll=false면 푸시만 생략(기록은 남는다).
  *  - 게시글 수정(board_edit): 뮤트한 사람은 기록만.
  *  - board_post·board_comment: 글·댓글 자체의 일반 채팅 푸시(push.js notifyOfflineMembers)가 이미 간다 — 두 번 울리지 않는다.
- * [isOnline]이 참인 사람은 뺀다(소켓이 붙어 있으면 notification:new·message:new로 실시간으로 받는다).
+ * [isOnline]이 참인 사람은 뺀다(소켓이 붙어 있으면 notification:new·message:new로 실시간으로 받는다) — 실제로는
+ * presence.js의 skipsPush를 넘긴다: "다른 기기 접속 중에도 푸시"를 끈 사람만 접속 중일 때 빠지고, 켠 사람은 남아서
+ * 접속해 있지 않은 기기로만 간다(기기별로 거르는 건 push.js).
  * [settingsOf]는 userId → { mentionAll } (없으면 기본값).
  */
 export function pushTargetsFor({ kind, recipientIds, mutedIds = new Set(), settingsOf = () => null, isOnline = () => false }) {

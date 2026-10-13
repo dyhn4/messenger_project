@@ -84,6 +84,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _flashWindowFrame = widget.session.settings.flashWindowFrame;
   late double _textScale = widget.session.settings.textScale;
   late String _fontFamily = widget.session.settings.fontFamily;
+
+  /// "다른 기기 접속 중에도 휴대폰 알림 받기" — 다른 항목과 달리 서버(계정)에 저장되는 알림 설정이라 내 모든 기기에 같이
+  /// 적용된다(server notification_settings.pushWhileOnline). 서버 값을 아직 못 받았으면 null(받는 중 표시).
+  late bool? _pushWhileOnline =
+      widget.session.notificationCenter.settings?.pushWhileOnline;
   bool _saving = false;
 
   /// "저장하기"를 눌러 실제로 반영됐는지 — false인 채로 화면이 닫히면(취소/X/바깥 클릭)
@@ -104,6 +109,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PackageInfo.fromPlatform().then((info) {
       if (mounted) setState(() => _packageInfo = info);
     });
+    final center = widget.session.notificationCenter;
+    if (_pushWhileOnline == null) {
+      // 알림 센터를 아직 안 열었으면 서버 알림 설정을 받아 온다(실패하면 그 항목만 안내 문구로 남는다).
+      center.loadSettings().whenComplete(() {
+        if (mounted && _pushWhileOnline == null) {
+          setState(() => _pushWhileOnline = center.settings?.pushWhileOnline);
+        }
+      });
+    }
   }
 
   @override
@@ -126,6 +140,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
+    // 서버에 저장하는 값부터 — 실패하면 창을 닫지 않고 알린다(이 기기 설정은 아래에서 그대로 저장된다).
+    final center = widget.session.notificationCenter;
+    final push = _pushWhileOnline;
+    if (push != null && push != center.settings?.pushWhileOnline) {
+      try {
+        await center.updateSettings(pushWhileOnline: push);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => _saving = false);
+        showAppToast(context, '휴대폰 알림 설정을 저장하지 못했습니다: $e');
+        return;
+      }
+    }
     _saved = true; // dispose()가 반투명 미리보기를 되돌리지 않도록 먼저 표시해둔다.
     final settings = widget.session.settings;
     await settings.setLaunchAtStartup(_launchAtStartup);
@@ -390,6 +417,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    ),
+    _Item(
+      label: '휴대폰 알림',
+      caption:
+          '켜 두면 PC 앱이 켜져 있어도, 접속해 있지 않은 휴대폰으로 푸시 알림이 갑니다. 끄면 어느 기기로든 접속해 있는 '
+          '동안은 휴대폰 푸시를 보내지 않습니다. 이 설정은 계정에 저장돼 내 모든 기기에 같이 적용됩니다.',
+      child: _pushWhileOnline == null
+          ? Text(
+              widget.session.notificationCenter.settingsError != null
+                  ? '알림 설정을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.'
+                  : '알림 설정을 불러오는 중…',
+              style: TextStyle(color: Theme.of(context).hintColor),
+            )
+          : _CheckRow(
+              key: const ValueKey('settings-push-while-online'),
+              value: _pushWhileOnline!,
+              label: '다른 기기 접속 중에도 휴대폰 알림 받기',
+              onChanged: (v) => setState(() => _pushWhileOnline = v),
+            ),
     ),
     _Item(
       label: '메시지 내용 미리보기',

@@ -123,12 +123,17 @@ class FakeNotificationApi implements NotificationApi {
   Future<NotificationSettings> updateSettings({
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
+    bool? pushWhileOnline,
   }) async {
-    calls.add('update mentionAll=$mentionAll boardLevel=${boardLevel?.wire}');
+    calls.add(
+      'update mentionAll=$mentionAll boardLevel=${boardLevel?.wire}'
+      '${pushWhileOnline == null ? '' : ' pushWhileOnline=$pushWhileOnline'}',
+    );
     _maybeFail();
     settings = settings.copyWith(
       mentionAll: mentionAll,
       boardLevel: boardLevel,
+      pushWhileOnline: pushWhileOnline,
     );
     return settings;
   }

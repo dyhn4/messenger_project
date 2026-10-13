@@ -579,14 +579,20 @@ class NotificationController extends ChangeNotifier {
   Future<void> updateSettings({
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
+    bool? pushWhileOnline,
   }) async {
     final before = settings ?? const NotificationSettings();
-    settings = before.copyWith(mentionAll: mentionAll, boardLevel: boardLevel);
+    settings = before.copyWith(
+      mentionAll: mentionAll,
+      boardLevel: boardLevel,
+      pushWhileOnline: pushWhileOnline,
+    );
     _notify();
     try {
       final saved = await apiProvider().updateSettings(
         mentionAll: mentionAll,
         boardLevel: boardLevel,
+        pushWhileOnline: pushWhileOnline,
       );
       settings = saved;
       _notify();

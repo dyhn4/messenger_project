@@ -144,7 +144,7 @@ export async function deleteNotificationsOlderThan(cutoff) {
 
 // ── 설정 ────────────────────────────────────────────────────────────────
 
-/** 여러 사람의 알림 설정을 한 번에 {userId: {mentionAll, boardLevel}} — 행이 없는 사람은 들어 있지 않다(기본값은 호출부). */
+/** 여러 사람의 알림 설정을 한 번에 {userId: {mentionAll, boardLevel, pushWhileOnline}} — 행이 없는 사람은 들어 있지 않다(기본값은 호출부). */
 export async function getNotificationSettingsMap(userIds) {
   const map = new Map();
   if (userIds.length === 0) return map;
@@ -153,7 +153,9 @@ export async function getNotificationSettingsMap(userIds) {
       .select()
       .from(notificationSettings)
       .where(inArray(notificationSettings.userId, userIds.slice(i, i + 1000)));
-    for (const r of rows) map.set(r.userId, { mentionAll: r.mentionAll, boardLevel: r.boardLevel });
+    for (const r of rows) {
+      map.set(r.userId, { mentionAll: r.mentionAll, boardLevel: r.boardLevel, pushWhileOnline: r.pushWhileOnline });
+    }
   }
   return map;
 }
@@ -164,5 +166,5 @@ export async function upsertNotificationSettings(userId, patch) {
     .values({ userId, ...patch })
     .onConflictDoUpdate({ target: notificationSettings.userId, set: { ...patch, updatedAt: new Date() } })
     .returning();
-  return { mentionAll: row.mentionAll, boardLevel: row.boardLevel };
+  return { mentionAll: row.mentionAll, boardLevel: row.boardLevel, pushWhileOnline: row.pushWhileOnline };
 }

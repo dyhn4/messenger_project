@@ -212,22 +212,30 @@ extension BoardNotifyLevelInfo on BoardNotifyLevel {
 class NotificationSettings {
   final bool mentionAll;
   final BoardNotifyLevel boardLevel;
+
+  /// 다른 기기(PC 앱 등)로 접속해 있어도 접속해 있지 않은 기기(휴대폰)로 푸시를 받을지 — 끄면 어느 기기로든 접속해 있는
+  /// 동안은 푸시가 오지 않는다(server/src/presence.js의 skipsPush). 이 값이 없는 예전 서버는 늘 "끔"처럼 동작한다.
+  final bool pushWhileOnline;
   const NotificationSettings({
     this.mentionAll = true,
     this.boardLevel = BoardNotifyLevel.important,
+    this.pushWhileOnline = true,
   });
 
   factory NotificationSettings.fromJson(Map<String, dynamic> json) =>
       NotificationSettings(
         mentionAll: json['mentionAll'] as bool? ?? true,
         boardLevel: boardLevelFromWire(json['boardLevel'] as String?),
+        pushWhileOnline: json['pushWhileOnline'] as bool? ?? true,
       );
 
   NotificationSettings copyWith({
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
+    bool? pushWhileOnline,
   }) => NotificationSettings(
     mentionAll: mentionAll ?? this.mentionAll,
     boardLevel: boardLevel ?? this.boardLevel,
+    pushWhileOnline: pushWhileOnline ?? this.pushWhileOnline,
   );
 }

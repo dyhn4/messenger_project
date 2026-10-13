@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { isOnline } from './presence.js';
+import { setPushWhileOnline, skipsPush } from './presence.js';
 import {
   deleteMentionNotifications,
   deleteNotificationsForComment,
@@ -134,7 +134,7 @@ async function pushFor({ kind, ids, room, actor, preview }) {
     recipientIds: ids,
     mutedIds,
     settingsOf: (id) => settings.get(id),
-    isOnline,
+    isOnline: skipsPush,
   });
   await notifyRecordPush({
     targets,
@@ -346,8 +346,17 @@ export function createNotificationsRouter(io) {
       }
       patch.boardLevel = body.boardLevel;
     }
+    if ('pushWhileOnline' in body) {
+      if (typeof body.pushWhileOnline !== 'boolean') {
+        return res.status(400).json({ error: 'pushWhileOnline은 true/false여야 합니다.' });
+      }
+      patch.pushWhileOnline = body.pushWhileOnline;
+    }
     if (Object.keys(patch).length === 0) return res.json(await settingsFor(req.user.sub));
-    res.json(await upsertNotificationSettings(req.user.sub, patch));
+    const saved = await upsertNotificationSettings(req.user.sub, patch);
+    // 접속해 있는 동안 바꿔도 다음 푸시부터 바로 따르게(presence.js는 접속할 때 이 값을 읽어 둔다).
+    setPushWhileOnline(req.user.sub, saved.pushWhileOnline);
+    res.json(saved);
   });
 
   return router;

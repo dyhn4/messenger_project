@@ -29,6 +29,7 @@ abstract class NotificationApi {
   Future<NotificationSettings> updateSettings({
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
+    bool? pushWhileOnline,
   });
 
   /// 기존 프로젝트 알림함(`/api/project-notifications`) — 최근 50개와 안 읽은 개수.
@@ -101,12 +102,17 @@ class RemoteNotificationApi implements NotificationApi {
   Future<NotificationSettings> updateSettings({
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
+    bool? pushWhileOnline,
   }) async => NotificationSettings.fromJson(
     Map<String, dynamic>.from(
       await _api.requestJson(
             'PATCH',
             '/api/notification-settings',
-            body: {'mentionAll': ?mentionAll, 'boardLevel': ?boardLevel?.wire},
+            body: {
+              'mentionAll': ?mentionAll,
+              'boardLevel': ?boardLevel?.wire,
+              'pushWhileOnline': ?pushWhileOnline,
+            },
           )
           as Map,
     ),

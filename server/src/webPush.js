@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import webpush from 'web-push';
 import { listWebPushSubscriptionsForUser, setDeviceWebPushSubscription } from './db/queries/devices.js';
+import { isDeviceConnected } from './presence.js';
 import { parseWebPushSubscription } from './webPushEndpoint.js';
 
 // 웹 앱(아이폰 등 앱이 없는 기기)용 웹 푸시 — 표준 Web Push(VAPID)라 Firebase 설정이 필요 없다. 앱(탭)을
@@ -67,6 +68,8 @@ export async function sendWebPushToUser(userId, payload, { ttl = 24 * 60 * 60, u
     console.error('[web-push] 구독 조회 실패:', err?.message ?? err);
     return;
   }
+  // 웹 앱 탭이 열려 소켓이 붙어 있는 기기는 소켓으로 알림을 받는다 — 그 기기로는 보내지 않는다(push.js의 FCM과 같다).
+  subscriptions = subscriptions.filter(({ deviceId }) => !isDeviceConnected(deviceId));
   if (subscriptions.length === 0) return;
   const body = JSON.stringify(payload);
   await Promise.all(

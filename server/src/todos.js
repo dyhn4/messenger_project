@@ -36,7 +36,7 @@ import { checkFileRefs } from './fileRefs.js';
 import { canMention } from './notificationRules.js';
 import { canModifyContent } from './moderation.js';
 import { topicWriteDenial } from './permissions.js';
-import { isOnline } from './presence.js';
+import { skipsPush } from './presence.js';
 import { notifyRecordPush, roomTagFor } from './push.js';
 import { roomDisplayName } from './rooms.js';
 import {
@@ -255,12 +255,13 @@ export function createTodosRouter(io) {
     for (const id of memberIds) io.to(`user:${id}`).emit('todo:changed', payload);
   }
 
-  /** 담당자로 지정된 사람에게 푸시 — 소켓이 붙어 있는 사람은 todo:changed로 앱이 토스트를 띄우므로 뺀다. */
+  /** 담당자로 지정된 사람에게 푸시 — 소켓이 붙어 있는 기기는 todo:changed로 앱이 토스트를 띄우므로 그 기기로는 안 보낸다
+   * (push.js). "다른 기기 접속 중에도 푸시"를 끈 사람은 접속해 있으면 아예 뺀다(presence.js skipsPush). */
   async function pushAssigned({ todo, room, actor, userIds }) {
     if (userIds.length === 0) return;
     const targets = pushTargets(userIds, {
       actorId: actor.id,
-      onlineIds: new Set(userIds.filter((id) => isOnline(id))),
+      onlineIds: new Set(userIds.filter((id) => skipsPush(id))),
       mutedIds: new Set(await listMutedUserIdsForRoom(room.id)),
     });
     if (targets.length === 0) return;
@@ -794,7 +795,7 @@ async function deliverTodoReminders(io, claimed, uptime) {
         remindAt,
       };
       for (const id of targets) io.to(`user:${id}`).emit('todo:reminder', payload);
-      const pushIds = pushTargets(targets, { onlineIds: new Set(targets.filter((id) => isOnline(id))), mutedIds });
+      const pushIds = pushTargets(targets, { onlineIds: new Set(targets.filter((id) => skipsPush(id))), mutedIds });
       if (pushIds.length > 0) {
         pushes.push(
           notifyRecordPush({

@@ -1,0 +1,1 @@
+ALTER TABLE "notification_settings" ADD COLUMN "push_while_online" boolean DEFAULT true NOT NULL;

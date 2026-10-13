@@ -1086,6 +1086,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(NotificationSettingsDialog), findsNothing);
     });
+
+    testWidgets('"다른 기기 접속 중에도 휴대폰 알림 받기"는 여기 없다(환경설정 > 메신저 설정)', (
+      tester,
+    ) async {
+      final server = _Server();
+      final session = _session(server);
+      await openSettings(tester, session);
+      expect(find.text('다른 기기 접속 중에도 휴대폰 알림 받기'), findsNothing);
+    });
   });
 
   group('종 모양 버튼 · 프로젝트 알림함 연결', () {

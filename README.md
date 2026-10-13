@@ -1010,7 +1010,7 @@ messenger_project/
 │  │  ├─ Uninstall-Full.ps1       "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — 일반 제거까지 자동 실행(서버 운영자 인증 + DELETE 입력 필요)
 │  │  ├─ README.md                이 installer 폴더 자체 문서(개발자용)
 │  │  └─ bin/ · stage/ · output/  빌드 산출물(gitignore — build_server_installer.ps1이 매번 새로 만듦)
-│  ├─ guide/                     초보자용 도움말 웹페이지(앱 삼선 메뉴 "도움말" — 서버가 인증 없이 /guide/로 서빙)
+│  ├─ guide/                     초보자용 도움말 웹페이지(앱 삼선 메뉴 "도움말" — 서버가 인증 없이 /guide/로 서빙). 메신저·프로젝트 이용법과 서버 운영자용 server.html(설치·관리 도구·외부 접속·DuckDNS·웹 앱 주소·관리자 콘솔)
 │  ├─ web/                       웹 앱 빌드 결과물(gitignore — publish_release.ps1이 client/build/web을 복사, config.js의 WEB_DIR)
 │  ├─ deploy/                    운영 서버 git-free 업데이트용 zip 산출물(gitignore — package_server_update.ps1이 매번 새로 만듦)
 │  ├─ certs/                     자체 서명 TLS 인증서(gitignore, 자동 생성) + WEB_DOMAIN을 켜면 웹 앱 정식 인증서·Let's Encrypt 계정 키

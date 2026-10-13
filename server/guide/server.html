@@ -1,0 +1,638 @@
+<!doctype html>
+<!--
+  서버 관리 도움말 — 서버를 설치하고 운영하는 사람(서버 운영자)용. 작성 규칙은 messenger.html 맨 위 주석과 같다.
+  이 폴더는 로그인 없이 누구나(사내망 밖 포함) 여는 공개 페이지라, 실제 도메인·토큰·비밀번호 같은 이 서버 고유 값은 쓰지 않고
+  xxx.duckdns.org 같은 예시만 쓴다. 내용은 server/installer/*.ps1, server/src/*.js, 관리자 콘솔 화면과 맞아야 한다.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>서버 관리 — TangoTalk 도움말</title>
+  <meta name="description" content="TangoTalk 서버 운영자를 위한 안내: 서버 프로그램 설치, 시작 메뉴 관리 도구, 서버 업데이트, 외부 접속 주소, DuckDNS, 웹 앱 주소(Let's Encrypt 정식 인증서), 관리자 콘솔(서버 관리), 백업과 문제 해결">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233f51b5'/%3E%3Ctext x='16' y='22' font-size='17' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'%3E%3F%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="guide.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="index.html"><span class="brand-logo" aria-hidden="true">T</span><span>TangoTalk <span class="brand-text-long">도움말</span></span></a>
+      <nav class="site-nav" aria-label="도움말 페이지">
+        <a href="index.html">처음</a>
+        <a href="messenger.html">메신저<span class="nav-long"> 이용법</span></a>
+        <a href="project.html">프로젝트<span class="nav-long"> 이용법</span></a>
+        <a href="server.html" aria-current="page">서버<span class="nav-long"> 관리</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="이 페이지 목차">
+      <details open>
+        <summary>목차</summary>
+        <ol>
+          <li><a href="#install">서버 프로그램 설치</a>
+            <ol>
+              <li><a href="#install-before">설치 전에 준비할 것</a></li>
+              <li><a href="#install-steps">설치하기</a></li>
+              <li><a href="#install-check">설치 확인과 첫 운영자 계정</a></li>
+              <li><a href="#install-folder">설치 폴더는 관리자 전용</a></li>
+              <li><a href="#install-again">다시 설치 · 제거할 때</a></li>
+            </ol>
+          </li>
+          <li><a href="#menu">시작 메뉴 관리 도구</a>
+            <ol>
+              <li><a href="#menu-list">바로가기 한눈에 보기</a></li>
+              <li><a href="#menu-pair">새 기기 페어링 코드 발급</a></li>
+              <li><a href="#menu-restart">서버 재시작 · 서버 콘솔로 실행</a></li>
+              <li><a href="#menu-storage">첨부파일 저장소</a></li>
+              <li><a href="#menu-backup">백업 · 복원</a></li>
+              <li><a href="#menu-reset">초기화 · 완전 삭제 · 제거</a></li>
+            </ol>
+          </li>
+          <li><a href="#update">서버 업데이트</a>
+            <ol>
+              <li><a href="#update-zip">업데이트 파일 적용</a></li>
+              <li><a href="#update-installer">설치 프로그램을 다시 실행할 때</a></li>
+              <li><a href="#update-apps">앱 설치 파일 올리기</a></li>
+            </ol>
+          </li>
+          <li><a href="#external">사내 와이파이 밖에서 접속하게 하기</a>
+            <ol>
+              <li><a href="#external-overview">무엇을 준비하나요</a></li>
+              <li><a href="#external-ports">공유기 포트포워딩</a></li>
+              <li><a href="#external-address">외부 접속 주소 넣기</a></li>
+              <li><a href="#external-after">설정한 뒤 확인할 것</a></li>
+            </ol>
+          </li>
+          <li><a href="#duckdns">DuckDNS 도메인</a>
+            <ol>
+              <li><a href="#duckdns-create">도메인 만들기</a></li>
+              <li><a href="#duckdns-console">서버가 자동으로 갱신하게 하기</a></li>
+              <li><a href="#duckdns-task">예전 갱신 작업 끄기</a></li>
+            </ol>
+          </li>
+          <li><a href="#webapp">웹 앱 주소(정식 인증서)</a>
+            <ol>
+              <li><a href="#webapp-why">왜 필요한가요</a></li>
+              <li><a href="#webapp-setup">설정하기</a></li>
+              <li><a href="#webapp-check">발급 확인하기</a></li>
+              <li><a href="#webapp-fail">발급이 안 될 때</a></li>
+            </ol>
+          </li>
+          <li><a href="#console">서버 관리(관리자 콘솔)</a>
+            <ol>
+              <li><a href="#console-open">여는 곳</a></li>
+              <li><a href="#console-stats">운영 현황</a></li>
+              <li><a href="#console-users">회원 · 팀 · 감사 로그</a></li>
+              <li><a href="#console-fcm">FCM 설정(휴대폰 알림)</a></li>
+              <li><a href="#console-ddns">DDNS</a></li>
+              <li><a href="#console-stickers">이모티콘</a></li>
+              <li><a href="#console-recover">운영자를 모두 잃었을 때</a></li>
+            </ol>
+          </li>
+          <li><a href="#trouble">문제가 생겼을 때</a></li>
+        </ol>
+      </details>
+    </nav>
+
+    <main class="content" id="main">
+      <section class="hero">
+        <p class="eyebrow">TangoTalk 도움말</p>
+        <h1>서버 관리</h1>
+        <p class="lead">TangoTalk 서버를 설치하고 운영하는 <b>서버 운영자</b>를 위한 안내입니다. 서버 PC에 프로그램을 설치하는 방법,
+          시작 메뉴에 생기는 관리 도구, 회사 밖에서 접속하게 하는 방법(외부 접속 주소 · DuckDNS · 웹 앱 주소),
+          앱의 <span class="ui">서버 관리</span> 화면을 차례로 설명합니다. 메신저를 쓰기만 한다면 이 페이지는 몰라도 됩니다.</p>
+      </section>
+
+      <!-- ─────────────────────────── 1. 설치 ─────────────────────────── -->
+      <section class="chapter" id="install">
+        <h2><span class="chapter-no">1</span>서버 프로그램 설치</h2>
+        <p>설치 프로그램 하나(<code>tangotalk-server-setup.exe</code>)가 서버 프로그램, 데이터베이스(PostgreSQL), 화상회의 서버까지 한 번에 설치합니다.
+          데이터베이스 비밀번호나 암호화 키는 설치 프로그램이 스스로 만들어 안에서만 씁니다. 따로 정하거나 적어 둘 필요가 없습니다.</p>
+
+        <h3 id="install-before">설치 전에 준비할 것</h3>
+        <ul>
+          <li><p><b>늘 켜 둘 Windows PC</b> 한 대 — 서버가 꺼지면 아무도 메신저를 쓸 수 없습니다. 절전 모드로 들어가지 않게 해 두세요.</p></li>
+          <li><p>그 PC의 <b>관리자 계정</b> — 설치와 모든 관리 도구가 관리자 권한을 씁니다.</p></li>
+          <li><p>공유기에서 이 PC의 <b>사내 IP를 고정</b>해 두기(권장) — 나중에 회사 밖 접속을 위해 포트포워딩을 하면 이 IP로 보내기 때문입니다.</p></li>
+          <li><p>설치 파일 <code>tangotalk-server-setup.exe</code> — USB나 사내 공유 폴더로 서버 PC에 옮겨 둡니다.</p></li>
+        </ul>
+
+        <h3 id="install-steps">설치하기</h3>
+        <ol class="steps">
+          <li><p><code>tangotalk-server-setup.exe</code>를 실행하고, 관리자 권한 확인 창에서 <span class="ui">예</span>를 누릅니다.
+            "Windows의 PC 보호" 창이 뜨면 <span class="ui">추가 정보</span> › <span class="ui">실행</span>을 누릅니다.</p></li>
+          <li><p><b>설치 경로</b>를 고릅니다. 기본값 <code>C:\TangoTalk-Server</code>를 그대로 써도 되고, 다른 드라이브라면 그 아래
+            전용 폴더(예: <code>E:\TangoTalk-Server</code>)를 고르세요. 드라이브 맨 위나 Program Files 같은 공용 폴더는 피합니다.</p></li>
+          <li><p><b>서버 실행 방식</b>을 고릅니다.</p>
+            <div class="table-wrap">
+              <table class="simple">
+                <thead><tr><th>방식</th><th>설명</th></tr></thead>
+                <tbody>
+                  <tr><td><b>백그라운드 Windows 서비스로 등록</b>(권장)</td><td>PC를 켜면 서버가 저절로 시작하고 창이 없습니다. 로그아웃해도 계속 돕니다.</td></tr>
+                  <tr><td>콘솔 창으로 실행</td><td>시작 메뉴 <span class="ui">서버 콘솔로 실행</span>으로 띄운 창에서 서버가 돕니다. 창을 닫으면 서버도 꺼집니다.</td></tr>
+                </tbody>
+              </table>
+            </div></li>
+          <li><p><span class="ui">설치</span>를 누릅니다. 데이터베이스를 처음 설치하느라 몇 분 걸릴 수 있습니다.
+            중간에 검은 창이 잠깐 떴다 사라져도 그대로 기다리세요.</p></li>
+          <li><p><span class="ui">마침</span>을 누르면 끝입니다. 설치 프로그램이 이 PC의 방화벽 규칙도 만들어 두므로,
+            같은 사내망의 PC · 휴대폰은 바로 접속할 수 있습니다.</p></li>
+        </ol>
+        <aside class="box note">
+          <p class="box-title">설치되는 것</p>
+          <p>서버 프로그램(Node.js), 이 서버 전용 PostgreSQL(이 PC의 다른 PostgreSQL과 겹치지 않게 전용 포트 55432), 화상회의 서버(LiveKit),
+            시작 메뉴의 <b>TangoTalk Server</b> 관리 도구(<a href="#menu">2장</a>)입니다. 메신저는 기본으로 <b>3000번 포트</b>(HTTPS), 새 기기 연결과
+            초대 안내 페이지는 <b>3001번 포트</b>를 씁니다.</p>
+        </aside>
+
+        <h3 id="install-check">설치 확인과 첫 운영자 계정</h3>
+        <ol class="steps">
+          <li><p>서버 PC의 브라우저에서 <code>https://localhost:3000/health</code>를 엽니다. <code>{"ok":true}</code>가 보이면 서버가 정상입니다.
+            "안전하지 않음" 경고가 뜨면 <span class="ui">고급</span> › <span class="ui">계속</span>으로 넘어가면 됩니다(서버가 직접 만든 인증서라서 뜨는 경고입니다).</p></li>
+          <li><p>내 PC나 휴대폰에 앱을 설치하고 연결합니다. 시작 메뉴 <span class="ui">새 기기 페어링 코드 발급</span>(<a href="#menu-pair">아래</a>)으로
+            4자리 코드를 받아, 앱의 서버 연결 화면에 서버 PC의 주소(예: <code>https://192.168.0.10:3000</code>)와 함께 넣습니다.</p></li>
+          <li><p>앱에서 <span class="ui">회원가입</span>을 합니다. <b>계정이 하나도 없는 서버의 첫 가입자</b>는 저절로 <b>관리자 등급 + 서버 운영자</b>가 됩니다.
+            그래서 서버를 설치한 사람이 가장 먼저 가입하세요.</p></li>
+          <li><p>가입한 뒤 <span class="ui">☰</span> 메뉴에 <span class="ui">서버 관리</span>가 보이면 준비가 끝났습니다(<a href="#console">7장</a>).
+            팀을 만들고, 직원들에게 초대 링크를 보내세요(<a href="messenger.html#layout-invite">메신저 이용법 › 초대 링크 보내기</a>).</p></li>
+        </ol>
+
+        <h3 id="install-folder">설치 폴더는 관리자 전용</h3>
+        <p>설치 폴더에는 데이터베이스, 비밀값, 인증서, 백업, 첨부파일이 들어 있습니다. 그래서 설치 프로그램이 이 폴더를
+          <b>SYSTEM과 관리자(Administrators)만</b> 열고 고칠 수 있게 잠급니다. 다른 Windows 계정은 시작 메뉴 바로가기와 안내문만 열 수 있습니다.</p>
+        <ul>
+          <li><p>설정 파일(<code>server\.env</code>)이나 로그(<code>server\service-err.log</code>)를 보려면 메모장을 <b>관리자 권한으로 실행</b>한 뒤
+            <span class="ui">파일</span> › <span class="ui">열기</span>로 엽니다.</p></li>
+          <li><p>탐색기로 이 폴더에 파일을 넣을 때 "관리자 권한이 필요합니다" 창이 뜨면 <span class="ui">계속</span>을 누릅니다.</p></li>
+          <li><p>시작 메뉴의 관리 도구는 실행할 때마다 관리자 권한 확인 창을 띄웁니다. <span class="ui">예</span>를 누르세요
+            (관리자가 아닌 계정이면 관리자 계정 암호가 필요합니다).</p></li>
+        </ul>
+
+        <h3 id="install-again">다시 설치 · 제거할 때</h3>
+        <ul>
+          <li><p><b>같은 경로로 다시 설치</b>하면 데이터베이스 · 설정 · 첨부파일 · 인증서는 그대로 두고 프로그램 파일만 새로 바꿉니다.
+            새 설치 프로그램이 나왔을 때나 프로그램 파일이 망가졌을 때 씁니다.</p></li>
+          <li><p>설치 프로그램이 "이전 TangoTalk 서버 설치나 이 PC의 관리자 권한으로 만든 폴더인지 확인되지 않았습니다"라며 멈추면
+            <b>그 폴더를 바로 지우지 마세요.</b> 예전 서버의 데이터가 들어 있을 수 있습니다. 내용을 확인하고 필요한 것을 옮긴 뒤 새 폴더를 고르세요.</p></li>
+          <li><p>서버를 걷어내는 방법은 <a href="#menu-reset">초기화 · 완전 삭제 · 제거</a>에서 고릅니다. 셋이 지우는 범위가 다릅니다.</p></li>
+        </ul>
+      </section>
+
+      <!-- ─────────────────────────── 2. 시작 메뉴 ─────────────────────────── -->
+      <section class="chapter" id="menu">
+        <h2><span class="chapter-no">2</span>시작 메뉴 관리 도구</h2>
+        <p>설치가 끝나면 시작 메뉴에 <b>TangoTalk Server</b> 그룹이 생깁니다. 서버 운영에 필요한 일은 대부분 여기서 합니다.</p>
+
+        <h3 id="menu-list">바로가기 한눈에 보기</h3>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>바로가기</th><th>언제 쓰나요</th></tr></thead>
+            <tbody>
+              <tr><td><span class="ui">새 기기 페어링 코드 발급</span></td><td>새 PC · 휴대폰을 서버에 처음 연결할 때 쓸 4자리 코드를 받습니다(<a href="#menu-pair">아래</a>).</td></tr>
+              <tr><td><span class="ui">서버 콘솔로 실행</span></td><td>콘솔 창 방식으로 설치했을 때만 있습니다. 서버를 창으로 띄웁니다.</td></tr>
+              <tr><td><span class="ui">설치 후 안내</span></td><td>설치 직후 알아 둘 내용을 담은 안내문을 엽니다.</td></tr>
+              <tr><td><span class="ui">서버 업데이트</span></td><td>새 버전 업데이트 파일(zip)을 적용합니다(<a href="#update">3장</a>).</td></tr>
+              <tr><td><span class="ui">서버 재시작</span></td><td>서버만 껐다 켭니다. 설정 파일을 고쳤거나 서버가 이상할 때 씁니다(<a href="#menu-restart">아래</a>).</td></tr>
+              <tr><td><span class="ui">첨부파일 저장소</span></td><td>첨부파일 저장 위치를 NAS 등으로 바꿉니다(<a href="#menu-storage">아래</a>).</td></tr>
+              <tr><td><span class="ui">외부 접속 주소</span></td><td>회사 밖(LTE/5G)에서 접속할 주소를 넣습니다(<a href="#external">4장</a>).</td></tr>
+              <tr><td><span class="ui">웹 앱 주소(정식 인증서)</span></td><td>아이폰 · 브라우저로 쓰는 웹 앱의 정식 인증서를 켭니다(<a href="#webapp">6장</a>).</td></tr>
+              <tr><td><span class="ui">백업</span> · <span class="ui">복원</span></td><td>데이터베이스를 파일로 저장하거나 그 파일로 되돌립니다(<a href="#menu-backup">아래</a>).</td></tr>
+              <tr><td><span class="ui">DB 데이터 초기화</span></td><td>서버는 그대로 두고 회원 · 대화 등 데이터만 비웁니다.</td></tr>
+              <tr><td><span class="ui">서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)</span></td><td>데이터까지 모두 지우고 서버를 걷어냅니다.</td></tr>
+              <tr><td><span class="ui">TangoTalk 서버 제거</span></td><td>프로그램 파일만 지웁니다. 데이터는 남습니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="menu-pair">새 기기 페어링 코드 발급</h3>
+        <p>앱은 처음 연결할 때 이 서버가 진짜 우리 서버인지 코드로 확인합니다. 초대 링크로 연결하면 코드가 저절로 들어가지만,
+          직접 연결할 때는 이 코드가 필요합니다.</p>
+        <ol class="steps">
+          <li><p>시작 메뉴 <span class="ui">새 기기 페어링 코드 발급</span>을 누르고 관리자 권한 확인 창에서 <span class="ui">예</span>를 누릅니다.</p></li>
+          <li><p><b>새 기기 연결 코드: 1234</b>처럼 4자리 코드가 뜹니다. <b>5분 동안 한 번만</b> 쓸 수 있습니다.</p></li>
+          <li><p>앱의 <span class="ui">서버 주소 변경</span>(처음 켰다면 <b>서버 연결</b>) 화면에 서버 주소와 이 코드를 넣고 <span class="ui">연결</span>을 누릅니다.</p></li>
+        </ol>
+        <aside class="box caution">
+          <p class="box-title">"페어링 시도가 너무 많습니다"가 나오면</p>
+          <p>코드 맞혀 보기를 막으려고, 같은 곳에서 15분 동안 연결 시도를 너무 많이 하면 잠시 막습니다. 안내된 시간만큼 기다리거나,
+            급하면 <span class="ui">서버 재시작</span>을 하면 바로 풀립니다. 코드는 5분짜리 1회용이니, 실패했으면 새 코드를 받아 한 번에 입력하세요.</p>
+        </aside>
+
+        <h3 id="menu-restart">서버 재시작 · 서버 콘솔로 실행</h3>
+        <ul>
+          <li><p><span class="ui">서버 재시작</span>은 프로그램이나 데이터는 건드리지 않고 서버만 다시 시작합니다. 다시 켜진 뒤 서버가 정상이 아니면
+            <b>오류 기록을 지금 메모장으로 열까요?</b>라고 묻습니다. <kbd>Y</kbd>를 누르면 오류 내용(<code>service-err.log</code>)을 바로 볼 수 있습니다.</p></li>
+          <li><p><span class="ui">서버 콘솔로 실행</span>은 콘솔 창 방식으로 설치했을 때만 있습니다. 창을 닫으면 서버도 꺼지니, 쓰는 동안은 창을 열어 두세요.</p></li>
+        </ul>
+
+        <h3 id="menu-storage">첨부파일 저장소</h3>
+        <p>대화방에 올린 사진 · 파일은 기본으로 설치 폴더 안(<code>server\uploads</code>)에 저장됩니다. 서버 PC의 디스크가 부족하면 다른 곳으로 옮길 수 있습니다.</p>
+        <ol class="steps">
+          <li><p>시작 메뉴 <span class="ui">첨부파일 저장소</span>를 엽니다. 지금 저장 위치가 보입니다.</p></li>
+          <li><p><span class="ui">찾아보기...</span>로 새 폴더를 고르거나, NAS · 다른 PC의 공유 폴더라면 <code>\\서버\공유\폴더</code> 형식으로 직접 입력합니다.
+            드라이브 맨 위나 Windows · 사용자 폴더처럼 다른 것과 함께 쓰는 폴더는 받지 않으니, 전용 폴더를 새로 만들어 고르세요.</p></li>
+          <li><p><span class="ui">적용</span>을 누릅니다. 이미 있는 파일을 새 위치로 옮길지 묻고, 설정을 바꾼 뒤 서버를 다시 시작합니다.</p></li>
+        </ol>
+        <aside class="box caution">
+          <p class="box-title">NAS는 접근 권한을 직접 막으세요</p>
+          <p>이 PC의 로컬 폴더는 관리자 전용으로 잠가 주지만, NAS나 공유 폴더는 이 PC가 잠글 수 없습니다. NAS 설정에서 이 서버 PC만 접근하게 제한하세요.</p>
+        </aside>
+
+        <h3 id="menu-backup">백업 · 복원</h3>
+        <ul>
+          <li><p><span class="ui">백업</span>은 데이터베이스(회원 · 팀 · 대화 등)를 <code>설치 폴더\backups\messenger_날짜시각.dump</code> 파일로 저장합니다.
+            서버를 멈추지 않으니 언제든 눌러도 됩니다. 가장 최근 10개만 남기고 더 오래된 백업은 자동으로 지웁니다.</p></li>
+          <li><p><span class="ui">복원</span>은 백업 파일을 골라 그 시점으로 되돌립니다. 지금 데이터는 백업 내용으로 바뀌므로,
+            서버 운영자 아이디 · 비밀번호를 확인한 뒤 <code>RESTORE</code>를 정확히 입력해야 진행됩니다. 복원하는 동안은 서버가 잠시 멈춥니다.</p></li>
+        </ul>
+        <aside class="box caution">
+          <p class="box-title">백업 파일은 안전한 곳에 두세요</p>
+          <p>백업에는 회원 정보를 포함한 모든 데이터가 들어 있습니다. 외장 드라이브 · NAS에 복사해 둘 때도 아무나 열 수 없는 곳에 두세요.
+            첨부파일(사진 · 파일)은 데이터베이스 백업에 들어 있지 않으니, 첨부파일 폴더도 따로 복사해 두세요.</p>
+        </aside>
+
+        <h3 id="menu-reset">초기화 · 완전 삭제 · 제거</h3>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>바로가기</th><th>지우는 것</th><th>남는 것</th></tr></thead>
+            <tbody>
+              <tr><td><span class="ui">DB 데이터 초기화</span></td><td>회원 · 팀 · 메시지 · 댓글 · 첨부파일 등 데이터</td><td>서버 프로그램 · 설정 · 인증서(바로 빈 서버로 다시 쓸 수 있고, 처음 가입하는 사람이 새 운영자가 됩니다)</td></tr>
+              <tr><td><span class="ui">서버 완전 삭제</span></td><td>데이터베이스와 PostgreSQL 자체 · 첨부파일 · 인증서 · 설정 · 비밀값 · 서버 프로그램</td><td>백업 폴더 · 로그 등 일부(창에 남는 것을 보여 줍니다)</td></tr>
+              <tr><td><span class="ui">TangoTalk 서버 제거</span><br>(= Windows 설정의 "설치된 앱"에서 제거)</td><td>서버 프로그램 파일만</td><td>데이터베이스 · 설정 · 첨부파일 · 인증서 · 백업 전부(같은 경로로 다시 설치하면 그대로 이어서 씁니다)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>초기화와 완전 삭제는 되돌릴 수 없어서, 먼저 <b>서버 운영자 아이디 · 비밀번호</b>를 확인한 뒤 각각 <code>RESET</code> · <code>DELETE</code>를
+          정확히 입력해야 진행됩니다. 이 PC 앞에 앉을 수 있다는 것만으로는 데이터를 지울 수 없게 한 것입니다.</p>
+        <aside class="box caution">
+          <p class="box-title">완전 삭제한 뒤 예전 백업을 복원하려면</p>
+          <p>완전 삭제 <b>전에</b> <code>server\.db-encryption-key</code> 파일을 안전한 곳에 복사해 두세요. 이 키가 없으면 복원한 데이터 속
+            암호화된 이메일 등을 읽을 수 없습니다.</p>
+        </aside>
+      </section>
+
+      <!-- ─────────────────────────── 3. 업데이트 ─────────────────────────── -->
+      <section class="chapter" id="update">
+        <h2><span class="chapter-no">3</span>서버 업데이트</h2>
+        <p>새 버전이 나오면 업데이트 파일(zip)을 받아 적용합니다. 데이터베이스의 기존 데이터는 그대로 두고, 프로그램과 데이터베이스 구조만 바꿉니다.</p>
+
+        <h3 id="update-zip">업데이트 파일 적용</h3>
+        <ol class="steps">
+          <li><p>받은 업데이트 zip 파일을 서버 PC에 둡니다(압축은 풀지 않습니다).</p></li>
+          <li><p>시작 메뉴 <span class="ui">서버 업데이트</span>를 열고 <span class="ui">찾아보기...</span>로 zip 파일을 고릅니다.</p></li>
+          <li><p><span class="ui">업데이트 시작</span>을 누릅니다. 아래 다섯 단계가 차례로 진행되고 창에 기록이 나옵니다.</p>
+            <div class="table-wrap">
+              <table class="simple">
+                <thead><tr><th>단계</th><th>하는 일</th></tr></thead>
+                <tbody>
+                  <tr><td>1/5</td><td>설치 폴더 접근 권한 점검(파일이 많아 1~2분 걸릴 수 있습니다)</td></tr>
+                  <tr><td>2/5</td><td>새 프로그램 파일 적용</td></tr>
+                  <tr><td>3/5</td><td>필요한 부품(패키지) 설치</td></tr>
+                  <tr><td>4/5</td><td>데이터베이스 구조 반영 — 기존 데이터는 그대로 두고 새로 생긴 구조만 더합니다</td></tr>
+                  <tr><td>5/5</td><td>서버 재시작</td></tr>
+                </tbody>
+              </table>
+            </div></li>
+          <li><p>완료 창이 뜨면 끝입니다. 앱을 쓰던 사람들은 잠시 끊겼다가 저절로 다시 연결됩니다.</p></li>
+        </ol>
+        <aside class="box caution">
+          <p class="box-title">중간에 실패했다면 끝까지 다시 하세요</p>
+          <p>3/5 이후에 실패하면 새 프로그램 파일만 들어가고 데이터베이스 구조가 반영되지 않은 상태로 남습니다. 이대로 서버가 다시 켜지면
+            관리자 콘솔 일부나 알림이 동작하지 않을 수 있습니다. 원인을 해결한 뒤(<a href="#trouble">문제가 생겼을 때</a>) 같은 zip으로
+            <span class="ui">서버 업데이트</span>를 다시 실행하세요. 같은 파일로 여러 번 적용해도 괜찮습니다.</p>
+        </aside>
+
+        <h3 id="update-installer">설치 프로그램을 다시 실행할 때</h3>
+        <p>업데이트 zip은 서버 프로그램만 바꿉니다. <b>시작 메뉴의 관리 도구와 설치 과정</b>이 바뀐 버전이 나오면, 새
+          <code>tangotalk-server-setup.exe</code>를 <b>같은 설치 경로로</b> 한 번 다시 실행해야 새 관리 도구가 들어갑니다.
+          데이터베이스 · 설정 · 첨부파일 · 인증서는 그대로 이어집니다. 다시 설치한 뒤에는 그 버전의 업데이트 zip을 이어서 적용하세요.</p>
+
+        <h3 id="update-apps">앱 설치 파일 올리기</h3>
+        <p>초대 안내 페이지의 <span class="ui">Windows용 다운로드</span> · <span class="ui">Android용 다운로드</span>와 앱의 업데이트 알림은
+          서버의 <code>설치 폴더\server\releases</code> 폴더에 있는 파일을 씁니다.</p>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>파일</th><th>쓰이는 곳</th></tr></thead>
+            <tbody>
+              <tr><td><code>client-windows-setup.exe</code></td><td>PC 앱 설치 파일 — 초대 페이지 다운로드, PC 앱 업데이트</td></tr>
+              <tr><td><code>client-android.apk</code></td><td>안드로이드 앱 설치 파일 — 초대 페이지 다운로드, 안드로이드 앱 업데이트</td></tr>
+              <tr><td><code>version.json</code></td><td>지금 배포한 앱 버전 — 이 값이 앱보다 높으면 앱에 업데이트 알림이 뜹니다</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>새 앱 버전을 받았다면 이 세 파일을 그 폴더에 넣습니다(관리자 권한 필요). 서버를 다시 시작하지 않아도, 켜져 있는 앱에 바로 업데이트 알림이 갑니다.
+          이 폴더가 비어 있으면 초대 페이지에서 다운로드를 눌렀을 때 <b>아직 배포된 빌드가 없습니다.</b>가 나옵니다.</p>
+      </section>
+
+      <!-- ─────────────────────────── 4. 외부 접속 ─────────────────────────── -->
+      <section class="chapter" id="external">
+        <h2><span class="chapter-no">4</span>사내 와이파이 밖에서 접속하게 하기</h2>
+        <p>처음 설치한 서버는 회사 안(같은 공유기)에서만 접속됩니다. 직원들이 집이나 외근지에서 LTE/5G로도 메신저를 쓰게 하려면
+          아래 세 가지를 준비합니다. 사용하는 사람 쪽에서 할 일은 거의 없습니다(<a href="messenger.html#outside">메신저 이용법 › 사내 와이파이 밖에서 쓰기</a>).</p>
+
+        <h3 id="external-overview">무엇을 준비하나요</h3>
+        <ol class="steps">
+          <li><p><b>밖에서 부를 이름(도메인)</b> — 회사 인터넷의 공인 IP는 바뀔 수 있어서, 그 IP를 따라다니는 이름을 만듭니다.
+            공유기의 DDNS(예: <code>xxx.iptime.org</code>)를 켜거나, 무료 <a href="#duckdns">DuckDNS</a>(예: <code>xxx.duckdns.org</code>)를 씁니다.
+            고정 공인 IP가 있다면 IP를 그대로 써도 됩니다.</p></li>
+          <li><p><b>공유기 포트포워딩</b> — 밖에서 들어온 연결을 서버 PC로 보내도록 공유기에 적어 둡니다(<a href="#external-ports">아래</a>).</p></li>
+          <li><p><b>외부 접속 주소</b> — 그 이름(과 포트)을 서버에 알려 줍니다(<a href="#external-address">아래</a>).</p></li>
+        </ol>
+
+        <h3 id="external-ports">공유기 포트포워딩</h3>
+        <p>공유기 관리 화면(예: iptime은 <span class="ui">고급 설정</span> › <span class="ui">NAT/라우터 관리</span> › <span class="ui">포트포워드 설정</span>)에서
+          아래 포트를 서버 PC의 사내 IP로 보냅니다. 표의 포트는 기본값입니다.</p>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>용도</th><th>외부 포트 → 서버 PC 포트</th><th>꼭 필요한가요</th></tr></thead>
+            <tbody>
+              <tr><td>메신저 · 새 기기 연결 · 화상회의 신호</td><td>TCP 3000 → 3000</td><td>필수</td></tr>
+              <tr><td>화상회의 영상 · 음성</td><td>UDP 50000~60000 → 같은 번호, TCP 7881 → 7881</td><td>밖에서 화상회의를 쓰려면</td></tr>
+              <tr><td>초대 안내 페이지 · 설치 파일 받기</td><td>TCP 3001 → 3001(<b>같은 번호</b>로)</td><td>밖에서 초대 링크를 열게 하려면</td></tr>
+              <tr><td>웹 앱 주소(정식 인증서)</td><td>TCP 443 → 443, TCP 80 → 80</td><td><a href="#webapp">6장</a>을 켤 때만</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <aside class="box note">
+          <p class="box-title">외부 3000번을 이미 다른 프로그램이 쓰고 있다면</p>
+          <p>외부 포트와 서버 PC 포트는 달라도 됩니다. 예를 들어 <b>외부 TCP 3010 → 서버 PC 3000</b>으로 포워딩하고, 외부 접속 주소에
+            <code>xxx.duckdns.org:3010</code>처럼 <b>외부 포트를 붙여</b> 넣으면 됩니다.
+            다만 초대 안내 페이지 주소는 서버 PC의 3001번을 그대로 쓰므로, 그 포트는 외부도 같은 번호(3001 → 3001)로 열어야 합니다.</p>
+        </aside>
+
+        <h3 id="external-address">외부 접속 주소 넣기</h3>
+        <ol class="steps">
+          <li><p>시작 메뉴 <span class="ui">외부 접속 주소</span>를 엽니다.</p></li>
+          <li><p>칸에 밖에서 부를 이름을 넣습니다. 예: <code>xxx.duckdns.org</code>.
+            공유기의 외부 포트가 서버 포트(3000)와 다르면 <code>xxx.duckdns.org:3010</code>처럼 <b>"주소:포트"</b>로 넣습니다.
+            창 아래쪽에 공유기에 포워딩할 포트가 안내됩니다.</p></li>
+          <li><p><span class="ui">적용</span>을 누릅니다. 서버 인증서에 이 주소가 없으면 인증서를 새로 만든다는 확인 창이 뜹니다.
+            <span class="ui">예</span>를 누르면 설정을 저장하고 서버를 다시 시작합니다. <b>적용됐습니다. 외부 접속 주소: https://…</b>가 나오면 끝입니다.</p></li>
+        </ol>
+        <aside class="box tip">
+          <p class="box-title">이미 연결해 둔 앱은 어떻게 되나요</p>
+          <p>서버는 같은 키로 인증서를 다시 만들기 때문에, <b>최신 버전 앱</b>은 다시 연결하지 않아도 그대로 접속됩니다.
+            그보다 예전 버전의 앱만 한 번 다시 연결해야 하니, 외부 접속 주소를 넣기 <b>전에</b> 모든 기기의 앱을 최신으로 업데이트해 두세요.</p>
+        </aside>
+        <p>외부 접속을 끄려면 칸을 비우고 <span class="ui">적용</span>을 누릅니다. 공유기의 포트포워딩도 함께 지우세요.</p>
+
+        <h3 id="external-after">설정한 뒤 확인할 것</h3>
+        <ul>
+          <li><p>회사 와이파이에서 앱을 한 번 켜 두면 앱이 외부 주소를 받아 저장하고, 그 뒤로는 밖에서 저절로 외부 주소로 연결합니다.</p></li>
+          <li><p>휴대폰의 와이파이를 끄고 LTE/5G로 앱을 켜서 연결되는지 확인해 보세요.</p></li>
+          <li><p>초대 링크를 새로 만들면 <b>사내 와이파이 밖(LTE/5G)에서</b> 주소가 함께 복사됩니다
+            (<a href="messenger.html#layout-invite">메신저 이용법 › 초대 링크 보내기</a>).</p></li>
+          <li><p>공인 IP가 바뀌어도 이름이 서버를 가리키도록 DDNS 갱신을 켜 두세요(<a href="#duckdns">5장</a>).</p></li>
+        </ul>
+      </section>
+
+      <!-- ─────────────────────────── 5. DuckDNS ─────────────────────────── -->
+      <section class="chapter" id="duckdns">
+        <h2><span class="chapter-no">5</span>DuckDNS 도메인</h2>
+        <p>DuckDNS(<code>duckdns.org</code>)는 <code>xxx.duckdns.org</code> 같은 이름을 무료로 주고, 회사의 공인 IP가 바뀌면 그 이름도 따라 바꿔 주는 서비스입니다.
+          공유기의 DDNS(iptime 등)를 쓴다면 이 장은 건너뛰어도 됩니다.</p>
+
+        <h3 id="duckdns-create">도메인 만들기</h3>
+        <ol class="steps">
+          <li><p>브라우저에서 <code>https://www.duckdns.org</code>에 들어가 구글 등 계정으로 로그인합니다.</p></li>
+          <li><p>화면의 <b>token</b> 값을 확인해 둡니다. 이 값은 그 DuckDNS 계정의 모든 도메인을 바꿀 수 있는 <b>비밀값</b>이니 다른 사람에게 보내지 마세요.</p></li>
+          <li><p><b>sub domain</b> 칸에 원하는 이름(예: <code>mycompany-chat</code>)을 넣고 <span class="ui">add domain</span>을 누릅니다.
+            이제 <code>mycompany-chat.duckdns.org</code>가 지금 접속한 곳의 공인 IP를 가리킵니다.
+            회사 공유기 뒤에서 만들었다면 이미 회사 공인 IP로 맞춰져 있습니다.</p></li>
+        </ol>
+        <aside class="box note">
+          <p class="box-title">도메인은 계정당 여러 개 만들 수 있어요</p>
+          <p>개발용 서버처럼 서버가 둘이면 이름을 따로 만들어 각자 쓰세요. 같은 이름을 두 서버가 함께 쓰면 연결이 엉뚱한 서버로 갈 수 있습니다.</p>
+        </aside>
+
+        <h3 id="duckdns-console">서버가 자동으로 갱신하게 하기</h3>
+        <p>공인 IP가 바뀌면 DuckDNS에 새 IP를 알려야 합니다. 서버가 켜져 있는 동안 <b>5분마다</b> 대신 알려 주도록 설정합니다.</p>
+        <ol class="steps">
+          <li><p>앱에서 <span class="ui">☰</span> › <span class="ui">서버 관리</span> › <span class="ui">DDNS</span> 탭을 엽니다.</p></li>
+          <li><p><b>DuckDNS 도메인</b> 칸에 이름을 넣습니다(예: <code>mycompany-chat.duckdns.org</code> 또는 <code>mycompany-chat</code>, 여러 개는 쉼표로, 5개까지).</p></li>
+          <li><p><b>토큰</b> 칸에 DuckDNS의 token을 붙여 넣습니다.</p></li>
+          <li><p><span class="ui">자동 갱신 사용</span>을 켜고 <span class="ui">저장</span>을 누릅니다. 바로 한 번 갱신해 보고 결과를 알려 줍니다.</p></li>
+          <li><p>위쪽 <b>DuckDNS 자동 갱신</b> 카드가 <b>정상</b>이고 <code>mycompany-chat.duckdns.org → 공인 IP</code>, 마지막 성공 · 다음 갱신 시각이 보이면 끝입니다.
+            카드 오른쪽 위 새로고침 단추(<span class="ui">지금 갱신</span>)로 언제든 바로 갱신할 수 있습니다.</p></li>
+        </ol>
+        <aside class="box note">
+          <p class="box-title">토큰은 다시 보이지 않아요</p>
+          <p>저장한 토큰은 암호화해 두고 화면에는 <b>토큰: 설정됨</b>으로만 보여 줍니다. 바꿀 때만 새로 넣고, 칸을 비워 두고 저장하면 저장된 토큰이 그대로입니다.
+            <span class="ui">토큰 지우기</span>를 하거나 도메인을 비우면 자동 갱신이 꺼집니다.</p>
+        </aside>
+        <aside class="box caution">
+          <p class="box-title">"실패"로 나오면</p>
+          <p><b>DuckDNS가 갱신을 거절했습니다</b>는 도메인 이름이 그 토큰의 계정 것이 아니거나 토큰이 틀렸다는 뜻입니다. duckdns.org에서 이름과 token을 다시 확인하세요.
+            <b>DuckDNS에 연결하지 못했습니다</b>는 서버 PC의 인터넷 연결 문제입니다. 서버가 꺼져 있는 동안은 갱신하지 않습니다.</p>
+        </aside>
+
+        <h3 id="duckdns-task">예전 갱신 작업 끄기</h3>
+        <p>예전에 서버 PC의 <b>작업 스케줄러</b>(PowerShell 등)로 DuckDNS를 갱신하고 있었다면, DDNS 탭이 <b>정상</b>으로 바뀐 것을 확인한 뒤 그 작업은 꺼도 됩니다.
+          그 도메인을 메신저 말고 다른 서비스도 쓴다면 작업을 남겨 두세요(둘이 함께 돌아도 같은 IP를 알릴 뿐이라 문제없습니다).</p>
+        <ol class="steps">
+          <li><p>시작 메뉴에서 <b>작업 스케줄러</b>를 엽니다.</p></li>
+          <li><p>왼쪽 <span class="ui">작업 스케줄러 라이브러리</span>에서 DuckDNS를 갱신하던 작업을 찾습니다(작업을 고르고 아래 <span class="ui">동작</span> 탭에서 실행하는 파일을 확인할 수 있습니다).</p></li>
+          <li><p>작업을 오른쪽 클릭하고 <span class="ui">사용 안 함</span>을 누릅니다. 그 작업이 실행하던 스크립트 파일에 토큰이 적혀 있다면 그 파일도 지우세요.</p></li>
+        </ol>
+      </section>
+
+      <!-- ─────────────────────────── 6. 웹 앱 주소 ─────────────────────────── -->
+      <section class="chapter" id="webapp">
+        <h2><span class="chapter-no">6</span>웹 앱 주소(정식 인증서)</h2>
+        <p>아이폰에는 설치형 앱이 없어서 Safari로 <b>웹 앱</b>을 씁니다. 웹 앱을 경고 없이 열고, 홈 화면에 추가해 알림까지 받으려면
+          브라우저가 믿는 <b>정식 인증서</b>가 필요합니다. 서버가 Let's Encrypt(무료 공인 인증 기관)에서 인증서를 스스로 받고 갱신합니다.</p>
+
+        <h3 id="webapp-why">왜 필요한가요</h3>
+        <ul>
+          <li><p>PC · 안드로이드 앱은 서버가 직접 만든 인증서를 그대로 씁니다. 그래서 이 설정이 없어도 잘 동작하고, 켜도 다시 연결할 필요가 없습니다.</p></li>
+          <li><p>브라우저는 직접 만든 인증서에 "안전하지 않음" 경고를 띄우고, 아이폰은 그런 사이트에서 웹 앱 알림을 쓸 수 없습니다.</p></li>
+          <li><p>켜면 같은 메신저가 <b>웹 전용 포트(기본 443)</b>에서 정식 인증서로 한 번 더 열립니다. 아이폰뿐 아니라 PC · 안드로이드 브라우저에서도
+            <code>https://도메인</code>으로 설치 없이 쓸 수 있습니다.</p></li>
+        </ul>
+
+        <h3 id="webapp-setup">설정하기</h3>
+        <ol class="steps">
+          <li><p><b>도메인 준비</b> — 공유기 DDNS나 <a href="#duckdns">DuckDNS</a> 이름을 준비합니다. <a href="#external">외부 접속 주소</a>에 쓴 이름과 같아도 됩니다.</p></li>
+          <li><p>시작 메뉴 <span class="ui">웹 앱 주소(정식 인증서)</span>를 열고 칸을 채웁니다.</p>
+            <div class="table-wrap">
+              <table class="simple">
+                <thead><tr><th>칸</th><th>넣을 값</th></tr></thead>
+                <tbody>
+                  <tr><td>도메인</td><td>예: <code>xxx.duckdns.org</code> — <code>https://</code>나 포트 없이 이름만. IP 주소는 안 됩니다.</td></tr>
+                  <tr><td>웹 HTTPS 포트</td><td>기본 443. 이 PC에서 IIS 등이 443을 쓰고 있으면 다른 번호(예: 8443)</td></tr>
+                  <tr><td>인증용 HTTP 포트</td><td>기본 80. 0으로 두면 쓰지 않고 443으로만 확인합니다.</td></tr>
+                  <tr><td>이메일(선택)</td><td>Let's Encrypt 연락처 — 비워도 됩니다.</td></tr>
+                  <tr><td>시험 발급</td><td>처음에는 켜 두기를 권합니다(아래 <a href="#webapp-check">발급 확인하기</a>).</td></tr>
+                </tbody>
+              </table>
+            </div></li>
+          <li><p><span class="ui">적용</span>을 누릅니다. 설정 저장, 이 PC의 방화벽 규칙, 서버 재시작까지 해 줍니다.
+            이 PC의 다른 프로그램이 그 포트를 쓰고 있거나 도메인을 찾을 수 없으면 적용 전에 알려 줍니다.</p></li>
+          <li><p><b>공유기 포트포워딩</b> — 외부 TCP 443 → 이 PC의 웹 HTTPS 포트, 외부 TCP 80 → 이 PC의 인증용 HTTP 포트를 엽니다.
+            웹 HTTPS 포트를 443이 아닌 번호로 했다면 외부도 그 번호로 열고, 아이폰 사용자가 여는 주소에 그 번호가 붙습니다(예: <code>https://xxx.duckdns.org:8443</code>).</p></li>
+        </ol>
+
+        <h3 id="webapp-check">발급 확인하기</h3>
+        <ol class="steps">
+          <li><p><b>시험 발급</b>을 켜고 적용했다면 1~2분 뒤 <span class="ui">인증서 확인</span>을 누릅니다. 시험용 인증서가 보이면 포트포워딩이 맞다는 뜻입니다.
+            (시험용 인증서는 정식 발급 한도를 쓰지 않는 대신 아이폰에서는 쓸 수 없습니다.)</p></li>
+          <li><p><b>시험 발급</b>을 끄고 다시 <span class="ui">적용</span>합니다. 이번에는 바로 정식 인증서를 받으러 갑니다.</p></li>
+          <li><p>1~2분 뒤 <span class="ui">인증서 확인</span>이나 앱의 <span class="ui">서버 관리</span> › <span class="ui">DDNS</span> 탭 아래쪽
+            <b>웹 앱 주소(정식 인증서)</b> 카드에서 <b>사용 중</b>과 만료일을 확인합니다. 만료 전에 서버가 알아서 갱신합니다.</p></li>
+          <li><p>아이폰 사용자에게 Safari로 <code>https://도메인</code>을 열어 로그인하고, 공유 단추 › <span class="ui">홈 화면에 추가</span> 한 뒤
+            홈 화면 아이콘에서 알림을 켜라고 안내합니다(<a href="messenger.html#start-iphone">메신저 이용법 › 아이폰에서는 웹 앱으로</a>).
+            초대 링크 안내 페이지에도 <span class="ui">웹 앱 열기</span> 버튼이 저절로 생깁니다.</p></li>
+        </ol>
+        <p>끄려면 같은 창의 <span class="ui">끄기</span>를 누릅니다(이 PC의 방화벽 규칙도 지웁니다). 공유기의 443 · 80 포트포워딩도 지우세요.</p>
+
+        <h3 id="webapp-fail">발급이 안 될 때</h3>
+        <ul>
+          <li><p><b>발급 실패</b>가 나오면 카드에 이유와 다음 시도 시각이 나옵니다. 서버는 1시간부터 점점 간격을 늘려(최대 하루) 알아서 다시 시도하고,
+            서버를 다시 시작해도 그 시각 전에는 다시 묻지 않습니다.</p></li>
+          <li><p><b>포트포워딩</b> — 외부 443(또는 80)이 이 PC로 오지 않으면 실패합니다. 시험 발급으로 먼저 확인하세요. 통신사가 80을 막아도 443으로 받을 수 있습니다.</p></li>
+          <li><p><b>iptime.org 이름</b> — Let's Encrypt는 iptime.org 아래 이름을 모두 도메인 하나로 세서, 모든 iptime DDNS 사용자가 "7일에 새 인증서 50개" 한도를
+            함께 씁니다. 한도 초과로 실패하면 안내된 시각까지 기다리거나 DuckDNS · 회사 도메인 이름을 쓰세요. 한 번 받은 인증서의 갱신은 이 한도에 걸리지 않습니다.</p></li>
+          <li><p><b>포트를 다른 프로그램이 쓰는 경우</b> — 이 PC의 IIS 등이 443 · 80을 쓰고 있으면 다른 번호로 바꾸고, 공유기 포워딩도 그 번호로 맞추세요.</p></li>
+        </ul>
+      </section>
+
+      <!-- ─────────────────────────── 7. 관리자 콘솔 ─────────────────────────── -->
+      <section class="chapter" id="console">
+        <h2><span class="chapter-no">7</span>서버 관리(관리자 콘솔) <span class="badge role">서버 운영자</span></h2>
+        <p>서버 전체를 다루는 화면입니다. 팀 소유자 · 관리자 같은 팀 등급과는 별개로, <b>서버 운영자</b>에게만 보입니다.</p>
+
+        <h3 id="console-open">여는 곳</h3>
+        <p>앱 오른쪽 위 <span class="ui">☰</span> › <span class="ui">서버 관리</span>(휴대폰은 <span class="ui">더보기</span> 탭)를 누릅니다.
+          탭은 <span class="ui">운영 현황</span> · <span class="ui">회원</span> · <span class="ui">팀</span> · <span class="ui">감사 로그</span> ·
+          <span class="ui">FCM 설정</span> · <span class="ui">DDNS</span> · <span class="ui">이모티콘</span>입니다.</p>
+
+        <h3 id="console-stats">운영 현황</h3>
+        <p>회원 · 팀 · 대화방 · 전체 메시지 수, 오늘 올라온 메시지와 댓글, 첨부파일 용량, 서버 시작 시각을 보여 줍니다. 서버 전체 설정도 여기서 정합니다.</p>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>설정</th><th>설명</th></tr></thead>
+            <tbody>
+              <tr><td>팀 생성 권한</td><td>팀을 새로 만들 수 있는 최소 등급(정회원 · 관리자 · 서버 운영자). 준회원은 어느 경우에도 만들 수 없습니다.</td></tr>
+              <tr><td>팀 초대 링크 생성 권한</td><td>팀 초대 링크(가입하면 팀에 자동으로 들어가고 등급도 받는 링크)를 만들 수 있는 최소 등급. 처음 설정은 관리자 이상입니다.</td></tr>
+              <tr><td>프로젝트 생성 권한</td><td>프로젝트를 만들 수 있는 최소 등급.</td></tr>
+              <tr><td>팀 · 직책 관리</td><td>부서 · 직책을 팀마다 따로 둘지(팀 단위), 계정 하나로 둘지(계정 단위) 정합니다. 계정 단위면 아래에서 직책 목록도 관리합니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="console-users">회원 · 팀 · 감사 로그</h3>
+        <div class="table-wrap">
+          <table class="simple">
+            <thead><tr><th>탭</th><th>할 수 있는 일</th></tr></thead>
+            <tbody>
+              <tr><td>회원</td><td>전체 회원을 이름 · 아이디로 찾고 상태와 소속 팀을 봅니다. <b>계정 등급 변경</b>(준회원 · 정회원 · 관리자 — 등급은 여기서만 바꿉니다),
+                직책 수정, <b>계정 정지 · 해제</b>, <b>모든 기기에서 로그아웃</b>(휴대폰을 잃어버렸을 때), <b>서버 운영자 지정 · 해제</b>를 합니다.
+                마지막 남은 서버 운영자는 해제 · 정지할 수 없으니 다른 사람을 먼저 운영자로 지정하세요.</td></tr>
+              <tr><td>팀</td><td>서버의 모든 팀(내가 속하지 않은 팀 포함)의 이름 · 인원 · 만든 사람 · 만든 날을 봅니다. 팀 설정 변경과 삭제는 그 팀의 소유자가 합니다.</td></tr>
+              <tr><td>감사 로그</td><td>관리자 권한으로 한 일(남의 메시지 삭제, 팀원 추가 · 제외, 등급 변경, 계정 정지, 서버 설정 변경 등)의 기록입니다. 종류로 걸러 볼 수 있습니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <aside class="box note">
+          <p class="box-title">비밀번호를 대신 바꿔 주는 기능은 없어요</p>
+          <p>운영자가 남의 비밀번호를 정할 수 있으면 그 계정을 마음대로 쓸 수 있게 되므로 일부러 넣지 않았습니다. 비밀번호를 잊은 사람은 로그인 화면의
+            <span class="ui">비밀번호 찾기</span>로 직접 바꿉니다. 계정이 걱정되면 계정 정지나 모든 기기에서 로그아웃으로 대응하세요.</p>
+        </aside>
+
+        <h3 id="console-fcm">FCM 설정(휴대폰 알림)</h3>
+        <p>안드로이드 앱의 푸시 알림(앱이 꺼져 있을 때 오는 알림)은 구글 Firebase(FCM)를 씁니다. 설정하지 않아도 메신저는 정상 동작하고, 앱이 켜져 있는 동안의 알림도 옵니다.</p>
+        <ol class="steps">
+          <li><p>Firebase 콘솔(<code>console.firebase.google.com</code>)에서 프로젝트를 만들고 안드로이드 앱을 추가합니다. 패키지 이름에 정확히
+            <code>com.teamtalk.messenger</code>를 넣습니다(다르면 알림이 오지 않습니다).</p></li>
+          <li><p><span class="ui">프로젝트 설정</span> › <span class="ui">일반</span>에서 <code>google-services.json</code>을 받고, FCM 설정 탭의
+            <span class="ui">google-services.json 열기</span>로 고릅니다.</p></li>
+          <li><p><span class="ui">프로젝트 설정</span> › <span class="ui">서비스 계정</span> › <span class="ui">새 비공개 키 생성</span>으로 받은 JSON 파일을
+            <span class="ui">서비스 계정 JSON 열기</span>로 고릅니다.</p></li>
+          <li><p><span class="ui">저장</span>을 누릅니다. <b>서비스 계정: 설정됨</b>이 보이면 끝이고, 서버를 다시 시작할 필요 없이 바로 반영됩니다.
+            받은 JSON 파일은 <b>반드시 지우세요</b>(서비스 계정 키는 비밀값입니다).</p></li>
+        </ol>
+        <aside class="box tip">
+          <p class="box-title">PC 앱을 켜 두면 휴대폰 알림이 안 온다면</p>
+          <p>환경설정 › 메신저 설정의 <b>다른 기기 접속 중에도 휴대폰 알림 받기</b>가 꺼져 있으면, PC 앱이 켜져 있는 동안 휴대폰 푸시를 보내지 않습니다.
+            처음 설정은 켜져 있습니다(<a href="messenger.html#settings-messenger">메신저 이용법 › 메신저 설정</a>). 아이폰 웹 앱은 FCM 없이 따로 설정할 것이 없습니다.</p>
+        </aside>
+
+        <h3 id="console-ddns">DDNS</h3>
+        <p>위쪽은 <b>DuckDNS 자동 갱신</b> 설정과 상태(<a href="#duckdns-console">5장</a>), 아래쪽은 <b>웹 앱 주소(정식 인증서)</b> 카드입니다.
+          인증서 카드는 보기만 하는 곳으로, 꺼짐(켜는 방법) · 발급 중 · 사용 중(도메인 · 만료일 · 아이폰 사용자에게 알려 줄 주소) · 곧 만료 · 발급 실패(이유와 다음 시도 시각)를
+          보여 줍니다. 켜고 끄는 것은 서버 PC의 시작 메뉴에서 합니다(<a href="#webapp">6장</a>).</p>
+
+        <h3 id="console-stickers">이모티콘</h3>
+        <p>모든 사람이 쓸 수 있는 <b>그림 이모티콘 세트</b>와, 프로필 사진으로 고르는 <b>캐릭터 세트</b>를 만듭니다. 위쪽에서 <span class="ui">이모티콘</span> ·
+          <span class="ui">캐릭터</span>를 고르고 <span class="ui">새 세트</span>로 세트를 만든 뒤 그림을 올립니다. 세트의 대표 그림에 마우스를 올리면 그림 올리기 ·
+          이름 바꾸기 · 세트 숨기기 · 세트 삭제가 나옵니다. 올린 그림은 앱을 다시 배포하지 않아도 모든 사람에게 바로 보입니다.
+          이미 보낸 메시지가 그 그림을 쓰고 있을 수 있어서, 그림은 지우지 않고 숨기기만 합니다.</p>
+
+        <h3 id="console-recover">운영자를 모두 잃었을 때</h3>
+        <p>서버 운영자가 모두 탈퇴 · 정지되어 아무도 <span class="ui">서버 관리</span>에 들어갈 수 없다면, 서버 PC에서 이미 가입한 계정 하나를 운영자로 되돌립니다.</p>
+        <ol class="steps">
+          <li><p>탐색기로 설치 폴더(기본 <code>C:\TangoTalk-Server</code>)를 엽니다.</p></li>
+          <li><p><code>Grant-ServerAdmin.ps1</code>을 오른쪽 클릭 › <span class="ui">PowerShell에서 실행</span>을 누릅니다(Windows 11은 <span class="ui">더 많은 옵션 표시</span> 안에 있습니다).
+            관리자 권한 확인 창에서 <span class="ui">예</span>를 누릅니다.</p></li>
+          <li><p>운영자로 지정할 계정의 <b>아이디</b>를 넣습니다. 정지되어 있던 계정이면 정지도 풀립니다.</p></li>
+          <li><p>그 사람이 앱을 다시 시작하면 <span class="ui">서버 관리</span>가 보입니다.</p></li>
+        </ol>
+        <p>활성 서버 운영자가 한 명이라도 있으면 아무것도 바꾸지 않습니다. 그때는 그 운영자가 관리자 콘솔에서 지정하세요.</p>
+      </section>
+
+      <!-- ─────────────────────────── 8. 문제 해결 ─────────────────────────── -->
+      <section class="chapter faq" id="trouble">
+        <h2><span class="chapter-no">8</span>문제가 생겼을 때</h2>
+        <details>
+          <summary>서버 오류 기록(로그)은 어디서 보나요?</summary>
+          <p>서비스로 설치했다면 <code>설치 폴더\server\service-err.log</code>(오류)와 <code>service-out.log</code>(일반 기록)입니다. 메모장을 관리자 권한으로 실행해 엽니다.
+            이 파일은 계속 이어서 쌓이므로 <b>맨 아래쪽</b>이 가장 최근 기록입니다. <span class="ui">서버 재시작</span> 뒤 서버가 뜨지 않으면 그 창에서 바로 열 수도 있습니다.</p>
+        </details>
+        <details>
+          <summary>서버 업데이트 중 "npm install 실패"가 나와요.</summary>
+          <p>같은 폴더에 서버 프로그램을 다시 설치하면서 예전 부품 파일이 섞였을 수 있습니다. 관리자 권한 PowerShell에서 서버를 멈추고
+            <code>설치 폴더\node</code>와 <code>설치 폴더\server\node_modules</code> 두 폴더만 지운 뒤(데이터는 다른 폴더에 있습니다), 설치 프로그램을 같은 경로로 다시 실행하고
+            <span class="ui">서버 업데이트</span>를 같은 zip으로 다시 하세요. 최신 설치 프로그램은 다시 설치할 때 이 두 폴더를 스스로 새로 바꿉니다.</p>
+        </details>
+        <details>
+          <summary>초대 링크를 밖에서 열면 "유효하지 않은 초대 링크입니다"가 나와요.</summary>
+          <p>링크를 만든 서버가 아닌 다른 PC가 응답하고 있다는 뜻입니다. 공유기에서 초대 안내 페이지 포트(기본 3001)가 이 서버 PC로 가는지 확인하세요.
+            서버가 둘(개발용 · 운영용)이면 포트가 엇갈리기 쉽습니다. 연결 자체가 안 되면 그 포트가 아예 열려 있지 않은 것입니다.</p>
+        </details>
+        <details>
+          <summary>밖에서 앱이 연결되지 않아요.</summary>
+          <p>① 외부 접속 주소가 들어가 있는지(<a href="#external-address">4장</a>), ② 공유기 포트포워딩이 서버 PC의 지금 사내 IP로 가는지, ③ 외부 포트가 서버 포트와 다른데
+            주소에 <code>:포트</code>를 빠뜨리지 않았는지, ④ DDNS 이름이 지금 공인 IP를 가리키는지(<a href="#duckdns-console">DDNS 탭</a>)를 차례로 보세요.
+            사용하는 사람은 회사 와이파이에서 앱을 한 번 켜 두어야 외부 주소를 받아 둡니다.</p>
+        </details>
+        <details>
+          <summary>안드로이드에 푸시 알림이 오지 않아요.</summary>
+          <p>① FCM 설정 탭에 서비스 계정이 <b>설정됨</b>인지, ② 받는 사람이 PC 앱도 켜 두었다면 <b>다른 기기 접속 중에도 휴대폰 알림 받기</b>가 켜져 있는지,
+            ③ 앱을 열어 둔 채 시험하지 않았는지(앱이 연결돼 있으면 푸시 대신 앱 안의 알림으로 받습니다), ④ 휴대폰에서 앱을 "강제 중지"하지 않았는지
+            (강제 중지한 앱에는 다시 열 때까지 알림이 오지 않습니다), ⑤ 앱의 알림 권한과 배터리 설정("제한 없음")을 확인하세요.</p>
+        </details>
+        <details>
+          <summary>아이폰 웹 앱이 "안전하지 않음"으로 열려요.</summary>
+          <p>정식 인증서가 아직 없거나 시험용 인증서인 상태입니다. DDNS 탭의 웹 앱 주소 카드에서 상태를 보고, 시험 발급이 켜져 있으면 끄고 다시 적용하세요(<a href="#webapp-check">6장</a>).</p>
+        </details>
+      </section>
+
+      <nav class="pager" aria-label="다른 도움말">
+        <a class="prev" href="project.html"><small>← 이전</small>프로젝트 이용법</a>
+        <a class="next" href="index.html"><small>처음으로 →</small>도움말 첫 페이지</a>
+      </nav>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    TangoTalk 도움말 · 프로그램을 업데이트하면 화면 문구가 조금 다를 수 있습니다.
+  </footer>
+
+  <script src="guide.js"></script>
+</body>
+</html>

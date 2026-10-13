@@ -72,7 +72,7 @@
 | `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `Grant-ServerAdmin.ps1` | 서버 운영자 복구(시작 메뉴 없음 — 설치 폴더에서 오른쪽 클릭 → "PowerShell에서 실행") — 아이디를 물어 `server/scripts/grant-server-admin.mjs <아이디>`를 번들 node로 서버 폴더에서 실행하고 결과를 보여 준 뒤 멈춤. 그 스크립트가 **활성(탈퇴·정지 아닌) 서버 운영자가 한 명도 없을 때만** 기존 계정을 운영자로 지정·정지 해제하고, 운영자가 있으면 거절(종료 코드 1). `.env`가 관리자 전용이라 스스로 승격 |
 | `README-설치후.txt` | 설치되는 사람이 보는 안내문(`[Files]`로 설치됨) |
-| `../guide/`(server/guide, 설치 시 `{app}\server\guide`) | 앱의 삼선 메뉴 "도움말"(모든 회원)이 여는 초보자용 안내 웹페이지(메신저·프로젝트 이용법 + 스크린샷). 스테이징에 같이 담기고 서버가 인증 없이 `/guide/`로 서빙한다. 업데이트 zip을 적용할 때 `Update-Server.ps1`이 이 폴더를 통째로 맞춘다(/MIR) |
+| `../guide/`(server/guide, 설치 시 `{app}\server\guide`) | 앱의 삼선 메뉴 "도움말"(모든 회원)이 여는 초보자용 안내 웹페이지(메신저·프로젝트 이용법 + 스크린샷, 서버 운영자용 "서버 관리" — `server.html`: 설치·시작 메뉴 관리 도구·업데이트·외부 접속 주소·DuckDNS·웹 앱 주소·관리자 콘솔. 누구나 여는 공개 페이지라 실제 도메인·토큰 같은 이 서버 고유 값은 쓰지 않는다). 스테이징에 같이 담기고 서버가 인증 없이 `/guide/`로 서빙한다. 업데이트 zip을 적용할 때 `Update-Server.ps1`이 이 폴더를 통째로 맞춘다(/MIR) |
 
 ## 설계상 중요한 결정들 (바꾸기 전에 이유를 먼저 읽을 것)
 

@@ -793,6 +793,11 @@ table.simple th {
   margin: 32px 0;
 }
 
+/* 한 줄을 혼자 다 쓰는 카드(첫 페이지의 "서버 관리" — 두 칸 배치에서 홀로 남는 카드). */
+.card.wide {
+  grid-column: 1 / -1;
+}
+
 .card {
   display: flex;
   flex-direction: column;

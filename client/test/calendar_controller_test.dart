@@ -470,7 +470,13 @@ void main() {
 
 class _FailingApi extends FakeCalendarApi {
   @override
-  Future<({List<CalendarInfo> mine, List<CalendarInfo> subscribed})>
+  Future<
+    ({
+      List<CalendarInfo> mine,
+      List<CalendarInfo> subscribed,
+      List<CalendarInfo> external,
+    })
+  >
   fetchCalendars(String teamId) async {
     throw const ApiException('팀 멤버가 아닙니다.');
   }

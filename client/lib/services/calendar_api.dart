@@ -7,8 +7,15 @@ import 'api_client.dart';
 /// 캘린더 관리 화면(새 캘린더·설정·멤버·구독 검색·삭제)도 이 메서드들을 그대로 쓰면 된다 —
 /// 보통은 목록을 다시 받아야 하니 [CalendarController]의 같은 이름 메서드를 거치는 편이 낫다.
 abstract class CalendarApi {
-  /// 1. 내 캘린더(mine)와 구독 캘린더(subscribed). 처음 부르면 서버가 기본·팀 캘린더를 만든다.
-  Future<({List<CalendarInfo> mine, List<CalendarInfo> subscribed})>
+  /// 1. 내 캘린더(mine)와 구독 캘린더(subscribed), 내가 구독한 외부 ICS 캘린더(external). 처음 부르면 서버가
+  /// 기본·팀 캘린더를 만든다.
+  Future<
+    ({
+      List<CalendarInfo> mine,
+      List<CalendarInfo> subscribed,
+      List<CalendarInfo> external,
+    })
+  >
   fetchCalendars(String teamId);
 
   /// 2. 새 캘린더(정회원 이상).
@@ -94,6 +101,27 @@ abstract class CalendarApi {
     String? before,
     int limit = 50,
   });
+
+  // ---- 외부 캘린더 연동(서버 externalCalendars.js·calendarFeeds.js) ----
+
+  /// 외부 ICS 주소(Google·Outlook 등의 비공개 주소, webcal:// 도 된다)를 구독한다 — 서버가 그 자리에서 받아 보고 안 되면
+  /// 이유를 담은 [ApiException]을 던진다.
+  Future<CalendarInfo> addExternalCalendar(
+    String teamId, {
+    required String url,
+    String? name,
+  });
+
+  /// 외부 캘린더를 지금 다시 받는다(1분에 한 번까지).
+  Future<CalendarInfo> refreshExternalCalendar(String calendarId);
+
+  /// 외부 캘린더 구독을 끊는다.
+  Future<void> deleteExternalCalendar(String calendarId);
+
+  /// 내 일정 내보내기(ICS 구독 주소) — 지금 주소, 새로 만들기(예전 주소는 끊긴다), 끄기.
+  Future<CalendarFeed> fetchCalendarFeed(String teamId);
+  Future<CalendarFeed> createCalendarFeed(String teamId);
+  Future<CalendarFeed> deleteCalendarFeed(String teamId);
 }
 
 /// [ApiClient.requestJson]으로 서버를 부르는 실제 구현.
@@ -108,7 +136,13 @@ class RemoteCalendarApi implements CalendarApi {
   ];
 
   @override
-  Future<({List<CalendarInfo> mine, List<CalendarInfo> subscribed})>
+  Future<
+    ({
+      List<CalendarInfo> mine,
+      List<CalendarInfo> subscribed,
+      List<CalendarInfo> external,
+    })
+  >
   fetchCalendars(String teamId) async {
     final body = _map(
       await _api.requestJson('GET', '/api/teams/$teamId/calendars'),
@@ -120,6 +154,10 @@ class RemoteCalendarApi implements CalendarApi {
       ],
       subscribed: [
         for (final j in _maps(body['subscribed'] ?? const []))
+          CalendarInfo.fromJson(j),
+      ],
+      external: [
+        for (final j in _maps(body['external'] ?? const []))
           CalendarInfo.fromJson(j),
       ],
     );
@@ -165,7 +203,10 @@ class RemoteCalendarApi implements CalendarApi {
     _map(
       await _api.requestJson(
         'PATCH',
-        '/api/calendars/$calendarId/me',
+        // 외부 캘린더(ext:<id>)의 색·숨김은 그 구독 행에 둔다.
+        isExternalCalendarId(calendarId)
+            ? '/api/external-calendars/${externalCalendarKey(calendarId)}'
+            : '/api/calendars/$calendarId/me',
         body: {'color': ?color, 'hidden': ?hidden},
       ),
     ),
@@ -347,4 +388,61 @@ class RemoteCalendarApi implements CalendarApi {
       nextBefore: body['nextBefore'] as String?,
     );
   }
+
+  @override
+  Future<CalendarInfo> addExternalCalendar(
+    String teamId, {
+    required String url,
+    String? name,
+  }) async => CalendarInfo.fromJson(
+    _map(
+      await _api.requestJson(
+        'POST',
+        '/api/teams/$teamId/external-calendars',
+        body: {'url': url, 'name': ?name},
+      ),
+    ),
+  );
+
+  @override
+  Future<CalendarInfo> refreshExternalCalendar(
+    String calendarId,
+  ) async => CalendarInfo.fromJson(
+    _map(
+      await _api.requestJson(
+        'POST',
+        '/api/external-calendars/${externalCalendarKey(calendarId)}/refresh',
+      ),
+    ),
+  );
+
+  @override
+  Future<void> deleteExternalCalendar(String calendarId) async {
+    await _api.requestJson(
+      'DELETE',
+      '/api/external-calendars/${externalCalendarKey(calendarId)}',
+    );
+  }
+
+  @override
+  Future<CalendarFeed> fetchCalendarFeed(String teamId) async =>
+      CalendarFeed.fromJson(
+        _map(await _api.requestJson('GET', '/api/teams/$teamId/calendar-feed')),
+      );
+
+  @override
+  Future<CalendarFeed> createCalendarFeed(String teamId) async =>
+      CalendarFeed.fromJson(
+        _map(
+          await _api.requestJson('POST', '/api/teams/$teamId/calendar-feed'),
+        ),
+      );
+
+  @override
+  Future<CalendarFeed> deleteCalendarFeed(String teamId) async =>
+      CalendarFeed.fromJson(
+        _map(
+          await _api.requestJson('DELETE', '/api/teams/$teamId/calendar-feed'),
+        ),
+      );
 }

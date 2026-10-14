@@ -55,6 +55,16 @@ export const users = pgTable('users', {
   // 생일(연도 없이 월-일 'MM-DD') — 캘린더의 "멤버 생일" 구독 캘린더에 쓰인다. 비워 두면(null)
   // 생일 캘린더에 나오지 않는다. 본인이 프로필에서 고친다.
   birthday: text('birthday'),
+  // 상태 메시지("🗓️ 회의 중" — statusRules.js). 이모지는 정해 둔 목록에서만, 글은 40자까지. status_until이 지나면 없는 것으로
+  // 본다(행을 지우러 다니지 않고 내려줄 때 거른다 — statusDto). null이면 직접 지울 때까지.
+  statusEmoji: text('status_emoji'),
+  statusText: text('status_text'),
+  statusUntil: timestamp('status_until', { withTimezone: true }),
+  // 방해 금지 — 이 시각까지 알림(푸시·앱 알림)을 보내지 않는다("지금부터 1시간"). null이면 꺼짐.
+  dndUntil: timestamp('dnd_until', { withTimezone: true }),
+  // 방해 금지 일정 — { enabled, start, end(하루 중 분), days([0=일 … 6=토]), offsetMinutes(그 사람 기기의 UTC 차이) }. 매일
+  // 정한 시간 동안 알림을 보내지 않는다(statusRules.js isDndActive). null이면 일정 없음.
+  dndSchedule: jsonb('dnd_schedule'),
 });
 
 /**
@@ -575,6 +585,9 @@ export const messages = pgTable(
     // (todoRules.js todoCardMessage). 앱은 스냅샷을 먼저 그리고 할 일을 다시 받아 최신으로 바꾼다.
     todoId: uuid('todo_id').references(() => todos.id, { onDelete: 'set null' }),
     todoCard: jsonb('todo_card'),
+    // 메시지 리마인더가 울릴 때 "나와의 대화"에 올리는 카드(reminders.js) — { messageId, roomId, roomName, senderName, preview,
+    // sentAt }(원본 메시지의 스냅샷). 앱은 카드의 "메시지로 이동"으로 원본을 연다. 그 밖의 메시지는 null.
+    reminderCard: jsonb('reminder_card'),
     // 화상회의 한 통의 기록 카드(type='system' 메시지에만, callCards.js) — 통화가 시작될 때 한 장 만들고 참여·거절·
     // 나감마다 고친다: { status: 'active'|'ended', startedAt, endedAt, durationMs, answered, events: [{ at, userId,
     // name, kind: 'start'|'join'|'leave'|'decline' }] }. 대화에 시스템 메시지를 여러 줄 남기는 대신 이 한 장으로 본다.
@@ -1446,6 +1459,10 @@ export const devices = pgTable(
     // 웹 푸시 구독(웹 앱 전용 — FCM 토큰의 웹판). 브라우저가 준 PushSubscription JSON(endpoint·keys)
     // 그대로이고, FCM과 같이 소켓 연결이 없을 때만 쓴다(webPush.js).
     webPushSubscription: text('web_push_subscription'),
+    // 기기 종류 — 'windows'(PC 앱) | 'android' | 'web-desktop'(PC 브라우저의 웹 앱) | 'web-mobile'(휴대폰·태블릿 브라우저).
+    // 앱이 등록할 때 알려 준다(예전 앱은 null — 모름). PC 앱이 접속해 있는 동안 PC 브라우저로는 웹 푸시를 보내지 않는 데
+    // 쓴다(presence.js webPushTargets) — 같은 PC에서 PC 앱 알림과 크롬 알림이 두 번 뜨지 않게.
+    kind: text('kind'),
   },
   (t) => [index('devices_user_id_idx').on(t.userId)],
 );
@@ -1609,6 +1626,54 @@ export const pollOptions = pgTable(
   (t) => [index('poll_options_poll_id_idx').on(t.pollId, t.position)],
 );
 
+/**
+ * 메시지 리마인더("나중에 알림" — reminders.js). 정한 시각([remindAt])이 되면 서버가 그 사람의 "나와의 대화"에 원본 메시지 카드를
+ * 올리고 [firedAt]을 찍는다(안 읽음·푸시는 봇 메시지와 같이). 나만 보는 것이라 다른 사람에게는 알리지 않는다. 메시지·방·사람이
+ * 지워지면 같이 지워진다.
+ */
+export const messageReminders = pgTable(
+  'message_reminders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    remindAt: timestamp('remind_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    firedAt: timestamp('fired_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('message_reminders_due_idx').on(t.remindAt).where(sql`${t.firedAt} is null`),
+    index('message_reminders_user_idx').on(t.userId, t.remindAt),
+  ],
+);
+
+/**
+ * 메시지 공감(이모지 반응 — reactions.js). 카카오톡 공감처럼 한 사람이 한 메시지에 하나만 고른다(기본 키가 메시지+사람) —
+ * 다른 것을 고르면 바뀌고, 같은 것을 다시 누르면 빠진다. 고를 수 있는 이모지는 reactions.js의 REACTION_EMOJIS로만 받는다.
+ * 비밀 대화에는 달 수 없다(누가 무엇에 반응했는지도 서버가 모르게). 메시지가 하드 삭제되면 같이 지워진다.
+ */
+export const messageReactions = pgTable(
+  'message_reactions',
+  {
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    emoji: text('emoji').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.userId] })],
+);
+
 export const pollVotes = pgTable(
   'poll_votes',
   {
@@ -1760,6 +1825,77 @@ export const calendarEventColors = pgTable(
     color: text('color').notNull(),
   },
   (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
+);
+
+/**
+ * 외부 캘린더 구독(ICS 주소 — Google·Outlook·iCloud 등의 "비공개 주소"). 사람마다·팀마다 따로이고 나에게만 보인다(읽기 전용).
+ * 주소에는 비밀 토큰이 들어 있어 암호화해 둔다(encryptField). 서버가 주기적으로 받아(externalCalendars.js) 펼친 회차를
+ * external_calendar_events에 통째로 바꿔 넣는다 — 받은 내용이 지난번과 같으면(contentHash) 아무것도 하지 않는다.
+ */
+export const externalCalendars = pgTable(
+  'external_calendars',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    urlEnc: text('url_enc').notNull(),
+    /** 화면에 보여 줄 주소의 호스트(예: calendar.google.com) — 비밀 토큰이 든 경로는 내려 주지 않는다. */
+    host: text('host').notNull(),
+    color: text('color').notNull(),
+    hidden: boolean('hidden').notNull().default(false),
+    contentHash: text('content_hash'),
+    lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
+    lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('external_calendars_user_team_idx').on(t.userId, t.teamId), index('external_calendars_fetched_idx').on(t.lastFetchedAt)],
+);
+
+/** 외부 캘린더에서 받아 펼쳐 둔 회차(반복은 받을 때 정해진 구간만큼 펼친다 — icsImport.js). */
+export const externalCalendarEvents = pgTable(
+  'external_calendar_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    externalCalendarId: uuid('external_calendar_id')
+      .notNull()
+      .references(() => externalCalendars.id, { onDelete: 'cascade' }),
+    uid: text('uid').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    location: text('location'),
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+    allDay: boolean('all_day').notNull().default(false),
+  },
+  (t) => [index('external_calendar_events_cal_start_idx').on(t.externalCalendarId, t.startAt)],
+);
+
+/**
+ * 내 일정 내보내기(ICS 구독 주소) — 사람마다·팀마다 하나. 주소의 토큰은 조회용 해시(tokenHash)와, 앱에서 주소를 다시
+ * 보여 주기 위한 암호문(tokenEnc)으로만 둔다. 새로 만들면 예전 주소는 바로 끊긴다.
+ */
+export const calendarFeeds = pgTable(
+  'calendar_feeds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    tokenEnc: text('token_enc').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastAccessAt: timestamp('last_access_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('calendar_feeds_user_team_idx').on(t.userId, t.teamId), uniqueIndex('calendar_feeds_token_idx').on(t.tokenHash)],
 );
 
 // ── 통합 즐겨찾기 ───────────────────────────────────────────────────────

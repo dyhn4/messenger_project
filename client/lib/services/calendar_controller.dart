@@ -44,6 +44,9 @@ class CalendarController extends ChangeNotifier {
 
   List<CalendarInfo> mine = const [];
   List<CalendarInfo> subscribed = const [];
+
+  /// 내가 구독한 외부 ICS 캘린더(Google·Outlook 등 — 나에게만 보이고 읽기 전용). 목록의 "외부 캘린더" 묶음.
+  List<CalendarInfo> external = const [];
   bool calendarsLoaded = false;
   bool loadingCalendars = false;
 
@@ -95,7 +98,11 @@ class CalendarController extends ChangeNotifier {
     ...subscribed,
   ];
 
-  List<CalendarInfo> get allCalendars => [...mine, ...subscribedGroup];
+  List<CalendarInfo> get allCalendars => [
+    ...mine,
+    ...subscribedGroup,
+    ...external,
+  ];
 
   CalendarInfo? calendarById(String id) {
     for (final c in allCalendars) {
@@ -140,6 +147,7 @@ class CalendarController extends ChangeNotifier {
     _eventsEpoch++;
     mine = const [];
     subscribed = const [];
+    external = const [];
     calendarsLoaded = false;
     loadingCalendars = false;
     error = null;
@@ -169,6 +177,7 @@ class CalendarController extends ChangeNotifier {
       if (epoch != _epoch) return;
       mine = result.mine;
       subscribed = result.subscribed;
+      external = result.external;
       calendarsLoaded = true;
       error = null;
     } catch (e) {
@@ -338,7 +347,7 @@ class CalendarController extends ChangeNotifier {
       }
       return;
     }
-    final before = (mine, subscribed);
+    final before = (mine, subscribed, external);
     _replaceCalendar(calendar.copyWith(hidden: hidden));
     notifyListeners();
     try {
@@ -350,6 +359,7 @@ class CalendarController extends ChangeNotifier {
       // 서버가 거절하면 체크박스를 되돌린다.
       mine = before.$1;
       subscribed = before.$2;
+      external = before.$3;
       notifyListeners();
       rethrow;
     }
@@ -369,6 +379,7 @@ class CalendarController extends ChangeNotifier {
   void _replaceCalendar(CalendarInfo updated) {
     mine = [for (final c in mine) c.id == updated.id ? updated : c];
     subscribed = [for (final c in subscribed) c.id == updated.id ? updated : c];
+    external = [for (final c in external) c.id == updated.id ? updated : c];
   }
 
   Future<void> _reloadEventsOnly() async {
@@ -522,6 +533,41 @@ class CalendarController extends ChangeNotifier {
     await loadCalendars();
     await _reloadEventsOnly();
   }
+
+  // ---- 외부 캘린더 연동 ----
+
+  /// 외부 ICS 주소를 구독한다 — 서버가 그 자리에서 받아 보고, 안 되면 이유를 담은 ApiException을 던진다.
+  Future<CalendarInfo> addExternalCalendar(String url, {String? name}) async {
+    final calendar = await apiProvider().addExternalCalendar(
+      teamId!,
+      url: url,
+      name: name,
+    );
+    await _afterCalendarChange();
+    return calendar;
+  }
+
+  /// 외부 캘린더를 지금 다시 받는다. 받은 결과(마지막 업데이트·실패 이유)를 목록에 반영하고 일정도 다시 받는다.
+  Future<CalendarInfo> refreshExternalCalendar(CalendarInfo calendar) async {
+    final updated = await apiProvider().refreshExternalCalendar(calendar.id);
+    _replaceCalendar(updated);
+    notifyListeners();
+    unawaited(_reloadEventsOnly());
+    return updated;
+  }
+
+  /// 외부 캘린더 구독을 끊는다.
+  Future<void> removeExternalCalendar(CalendarInfo calendar) async {
+    await apiProvider().deleteExternalCalendar(calendar.id);
+    await _afterCalendarChange();
+  }
+
+  Future<CalendarFeed> fetchCalendarFeed() =>
+      apiProvider().fetchCalendarFeed(teamId!);
+  Future<CalendarFeed> createCalendarFeed() =>
+      apiProvider().createCalendarFeed(teamId!);
+  Future<CalendarFeed> deleteCalendarFeed() =>
+      apiProvider().deleteCalendarFeed(teamId!);
 
   Future<List<CalendarSearchResult>> searchCalendars(String q) =>
       apiProvider().searchCalendars(teamId!, q);

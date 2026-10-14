@@ -59,6 +59,9 @@ import {
 import { canSearchEventTitle, parseCalendarSearchQuery, searchCursorOf, toSearchItem } from './calendarSearchRules.js';
 import { listTeamIdsForUser } from './db/queries/teams.js';
 import { findUserById } from './db/queries/users.js';
+import { listExternalCalendars } from './db/queries/externalCalendars.js';
+import { toExternalCalendarDto } from './externalCalendarRules.js';
+import { externalOccurrencesFor } from './externalCalendars.js';
 import { holidaysInRange } from './holidays.js';
 import { calendarPermissions, canModifyCalendarEvent, graphemeLength } from './permissions.js';
 
@@ -484,7 +487,9 @@ export function createCalendarsRouter(io) {
       else shared.push(dto);
     }
     subscribed.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-    res.json({ mine: [personal, teamCalendar, ...shared].filter(Boolean), subscribed });
+    // 내가 구독한 외부 캘린더(ICS 주소 — 나에게만 보인다). 앱은 "구독 캘린더" 묶음 끝에 붙인다.
+    const external = (await listExternalCalendars(userId, teamId)).map(toExternalCalendarDto);
+    res.json({ mine: [personal, teamCalendar, ...shared].filter(Boolean), subscribed, external });
   });
 
   // ── 2. 새 캘린더 ──
@@ -743,131 +748,11 @@ export function createCalendarsRouter(io) {
     if (toMs - fromMs > QUERY_SPAN_MAX_MS) return res.status(400).json({ error: '조회 구간은 최대 62일입니다.' });
     if (fromMs < QUERY_MIN_MS || toMs > QUERY_MAX_MS) return res.status(400).json({ error: '조회 구간이 허용 범위를 벗어났습니다.' });
 
-    // 종일 회차(공휴일·생일 포함)는 날짜를 "한국 날짜"로 보고 구간과 겹치는지 잰다. 표현은 UTC 자정 ms라
-    // 구간을 9시간 밀어서 비교하면 한국 시간 자정 기준 구간(한 달 격자 등)과 정확히 맞는다.
-    const dayFrom = fromMs + KST_OFFSET_MS;
-    const dayTo = toMs + KST_OFFSET_MS;
+    const { result, truncated } = await collectOccurrences({ team, teamId, userId, fromMs, toMs });
+    // 내가 구독한 외부 캘린더(ICS — 나에게만 보인다, 읽기 전용). 받아 둔 회차를 그대로 붙인다(externalCalendars.js).
+    for (const occ of await externalOccurrencesFor({ teamId, userId, fromMs, toMs })) result.push(occ);
 
-    const candidates = await listCalendarCandidates(teamId, userId);
-    const infoById = new Map();
-    for (const { calendar, member } of candidates) {
-      const access = await calendarAccess(calendar, userId, { team, member });
-      infoById.set(calendar.id, { calendar, access });
-    }
-    const viewableIds = [...infoById.values()].filter((i) => i.access.canView).map((i) => i.calendar.id);
-
-    const events = await listEventsForWindow({
-      teamId,
-      calendarIds: viewableIds,
-      attendeeUserId: userId,
-      fromMs,
-      toMs,
-      slackMs: KST_OFFSET_MS,
-    });
-
-    // 참석자로만 초대받은 일정의 캘린더(내가 못 보는 캘린더) 정보도 채운다.
-    const missing = [...new Set(events.map((e) => e.calendarId))].filter((id) => !infoById.has(id));
-    if (missing.length > 0) {
-      const cals = await findCalendarsByIds(missing);
-      const rows = await listMemberRowsForUser(userId, missing);
-      for (const calendar of cals) {
-        const access = await calendarAccess(calendar, userId, { team, member: rows.get(calendar.id) ?? null });
-        infoById.set(calendar.id, { calendar, access });
-      }
-    }
-
-    const eventIds = events.map((e) => e.id);
-    const [attendeesByEvent, colors] = await Promise.all([
-      listAttendeesForEvents(eventIds),
-      listEventColorsForUser(eventIds, userId),
-    ]);
-
-    // 볼 수 있는 일정만 추린다(내가 못 보는 캘린더의 일정이라도 참석자로 초대받았으면 보인다).
-    const visible = [];
-    for (const event of events) {
-      const info = infoById.get(event.calendarId);
-      if (!info) continue;
-      const attendees = attendeesByEvent.get(event.id) ?? [];
-      const isAttendee = attendees.some((a) => a.userId === userId);
-      if (info.access.canView || isAttendee) visible.push({ event, info, attendees, isAttendee });
-    }
-
-    // 응답 전체의 회차 상한 — fillOccurrenceBudget이 구간에 회차가 있는 일정에만 차례를 주고(내 일정이 먼저, 나머지는 만든
-    // 사람마다 돌아가며 — 일정을 대량으로 만들어도 남의 일정을 밀어내지 못한다) 그 순서대로 상한까지 펼친다.
-    // 회차는 OCCURRENCE_MAX_MS 앞의 것만 펼친다 — 조회로 받은 회차는 모두 수정·삭제에서 그대로 다시 지정할 수 있어야
-    // 하기 때문이다(parseScope). 종일 회차는 dayTo 쪽을 같은 끝에서 자르므로 날짜가 MAX_UNTIL까지인 것만 나온다.
-    const occurrenceTo = Math.min(toMs, OCCURRENCE_MAX_MS);
-    const occurrenceDayTo = Math.min(dayTo, OCCURRENCE_MAX_MS);
-    const filled = fillOccurrenceBudget(visible, {
-      viewerId: userId,
-      budget: QUERY_OCCURRENCE_MAX,
-      expand: ({ event }, limit) =>
-        expandOccurrences(
-          recurringView(event),
-          event.allDay ? dayFrom : fromMs,
-          event.allDay ? occurrenceDayTo : occurrenceTo,
-          { limit },
-        ),
-    });
-    const result = [];
-    for (const { item, occurrences } of filled) {
-      const { event, info, attendees, isAttendee } = item;
-      for (const occ of occurrences) {
-        result.push(
-          toOccurrenceDto({
-            event,
-            start: occ.start,
-            end: occ.end,
-            info,
-            viewerId: userId,
-            attendees,
-            isAttendee,
-            myColor: colors.get(event.id),
-          }),
-        );
-      }
-    }
-    const truncated = result.length >= QUERY_OCCURRENCE_MAX;
-    if (truncated) {
-      // 정상적인 캘린더로는 닿기 어려운 양이라, 일정 대량 생성 같은 남용을 알아챌 수 있게 남긴다.
-      console.warn(`[calendar] 일정 조회 회차를 상한(${QUERY_OCCURRENCE_MAX}개)까지만 보냈습니다 — 팀 ${teamId}, 사용자 ${userId}`);
-    }
-
-    // 공휴일 — 모두에게.
-    for (const h of holidaysInRange(dayFrom, dayTo)) {
-      result.push(builtInOccurrence({ key: `holiday:${h.date}`, calendarId: 'holidays', source: 'holiday', title: h.name, start: h.startMs, end: h.endMs, color: HOLIDAY_COLOR }));
-    }
-    // 생일 — 정회원 이상만.
-    if (team.role !== 'guest') {
-      const birthdays = await listTeamBirthdays(teamId);
-      const firstYear = new Date(dayFrom).getUTCFullYear();
-      const lastYear = new Date(dayTo).getUTCFullYear();
-      for (const person of birthdays) {
-        const match = /^(\d{2})-(\d{2})$/.exec(person.birthday ?? '');
-        if (!match) continue;
-        for (let year = firstYear; year <= lastYear; year++) {
-          const startMs = birthdayStart(year, Number(match[1]), Number(match[2]));
-          if (startMs === null) continue;
-          if (startMs < dayTo && startMs + DAY_MS > dayFrom) {
-            result.push(
-              builtInOccurrence({
-                key: `birthday:${person.id}:${new Date(startMs).toISOString().slice(0, 10)}`,
-                calendarId: 'birthdays',
-                source: 'birthday',
-                title: `${person.name ?? person.username} 님의 생일`,
-                start: startMs,
-                end: startMs + DAY_MS,
-                color: BIRTHDAY_COLOR,
-              }),
-            );
-          }
-        }
-      }
-    }
-
-    // 종일 회차는 "날짜"라서 같은 날의 시간 일정보다 앞에 오도록 시작 시각을 한국 벽시계로 바꿔 비교한다.
-    const sortKey = (o) => (o.allDay ? o.start : o.start + KST_OFFSET_MS);
-    result.sort((a, b) => sortKey(a) - sortKey(b) || Number(b.allDay) - Number(a.allDay) || a.title.localeCompare(b.title, 'ko'));
+    sortOccurrences(result);
     // 상한에 닿았으면(빠진 회차가 있을 수 있다) 헤더로 알린다. 본문은 배열 그대로라 지금 앱은 그냥 무시하고,
     // 나중에 앱이 "일부 일정만 표시" 같은 안내를 띄울 수 있다(웹 앱도 같은 주소라 CORS 노출 설정이 필요 없다).
     if (truncated) res.set('X-Calendar-Truncated', '1');
@@ -1289,6 +1174,149 @@ export function createCalendarsRouter(io) {
   });
 
   return router;
+}
+
+// ── 일정 회차 모으기 ──────────────────────────────────────────────────────
+
+/**
+ * [teamId]에서 [userId]가 볼 수 있는 일정(볼 수 있는 캘린더 + 참석자로 초대받은 일정)의 [fromMs, toMs) 회차 — 일정 조회(GET
+ * /teams/:teamId/calendar/events)와 내 일정 내보내기(ICS 피드 — calendarFeeds.js)가 같이 쓴다. [builtIns]면 공휴일·생일도 넣고,
+ * [skipHidden]이면 내가 숨긴 캘린더의 일정을 뺀다. 정렬은 하지 않는다(sortOccurrences). { result, truncated }.
+ */
+export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, builtIns = true, skipHidden = false }) {
+  // 종일 회차(공휴일·생일 포함)는 날짜를 "한국 날짜"로 보고 구간과 겹치는지 잰다. 표현은 UTC 자정 ms라
+  // 구간을 9시간 밀어서 비교하면 한국 시간 자정 기준 구간(한 달 격자 등)과 정확히 맞는다.
+  const dayFrom = fromMs + KST_OFFSET_MS;
+  const dayTo = toMs + KST_OFFSET_MS;
+
+  const candidates = await listCalendarCandidates(teamId, userId);
+  const infoById = new Map();
+  for (const { calendar, member } of candidates) {
+    const access = await calendarAccess(calendar, userId, { team, member });
+    infoById.set(calendar.id, { calendar, access });
+  }
+  const viewableIds = [...infoById.values()].filter((i) => i.access.canView).map((i) => i.calendar.id);
+
+  const events = await listEventsForWindow({
+    teamId,
+    calendarIds: viewableIds,
+    attendeeUserId: userId,
+    fromMs,
+    toMs,
+    slackMs: KST_OFFSET_MS,
+  });
+
+  // 참석자로만 초대받은 일정의 캘린더(내가 못 보는 캘린더) 정보도 채운다.
+  const missing = [...new Set(events.map((e) => e.calendarId))].filter((id) => !infoById.has(id));
+  if (missing.length > 0) {
+    const cals = await findCalendarsByIds(missing);
+    const rows = await listMemberRowsForUser(userId, missing);
+    for (const calendar of cals) {
+      const access = await calendarAccess(calendar, userId, { team, member: rows.get(calendar.id) ?? null });
+      infoById.set(calendar.id, { calendar, access });
+    }
+  }
+
+  const eventIds = events.map((e) => e.id);
+  const [attendeesByEvent, colors] = await Promise.all([
+    listAttendeesForEvents(eventIds),
+    listEventColorsForUser(eventIds, userId),
+  ]);
+
+  // 볼 수 있는 일정만 추린다(내가 못 보는 캘린더의 일정이라도 참석자로 초대받았으면 보인다).
+  const visible = [];
+  for (const event of events) {
+    const info = infoById.get(event.calendarId);
+    if (!info) continue;
+    const attendees = attendeesByEvent.get(event.id) ?? [];
+    const isAttendee = attendees.some((a) => a.userId === userId);
+    if (!(info.access.canView || isAttendee)) continue;
+    // 내보내기는 앱에서 숨긴 캘린더의 일정을 빼고 보낸다(참석자로 초대받은 일정은 숨김과 상관없이 나간다).
+    if (skipHidden && !isAttendee && info.access.member?.hidden === true) continue;
+    visible.push({ event, info, attendees, isAttendee });
+  }
+
+  // 응답 전체의 회차 상한 — fillOccurrenceBudget이 구간에 회차가 있는 일정에만 차례를 주고(내 일정이 먼저, 나머지는 만든
+  // 사람마다 돌아가며 — 일정을 대량으로 만들어도 남의 일정을 밀어내지 못한다) 그 순서대로 상한까지 펼친다.
+  // 회차는 OCCURRENCE_MAX_MS 앞의 것만 펼친다 — 조회로 받은 회차는 모두 수정·삭제에서 그대로 다시 지정할 수 있어야
+  // 하기 때문이다(parseScope). 종일 회차는 dayTo 쪽을 같은 끝에서 자르므로 날짜가 MAX_UNTIL까지인 것만 나온다.
+  const occurrenceTo = Math.min(toMs, OCCURRENCE_MAX_MS);
+  const occurrenceDayTo = Math.min(dayTo, OCCURRENCE_MAX_MS);
+  const filled = fillOccurrenceBudget(visible, {
+    viewerId: userId,
+    budget: QUERY_OCCURRENCE_MAX,
+    expand: ({ event }, limit) =>
+      expandOccurrences(
+        recurringView(event),
+        event.allDay ? dayFrom : fromMs,
+        event.allDay ? occurrenceDayTo : occurrenceTo,
+        { limit },
+      ),
+  });
+  const result = [];
+  for (const { item, occurrences } of filled) {
+    const { event, info, attendees, isAttendee } = item;
+    for (const occ of occurrences) {
+      result.push(
+        toOccurrenceDto({
+          event,
+          start: occ.start,
+          end: occ.end,
+          info,
+          viewerId: userId,
+          attendees,
+          isAttendee,
+          myColor: colors.get(event.id),
+        }),
+      );
+    }
+  }
+  const truncated = result.length >= QUERY_OCCURRENCE_MAX;
+  if (truncated) {
+    // 정상적인 캘린더로는 닿기 어려운 양이라, 일정 대량 생성 같은 남용을 알아챌 수 있게 남긴다.
+    console.warn(`[calendar] 일정 조회 회차를 상한(${QUERY_OCCURRENCE_MAX}개)까지만 보냈습니다 — 팀 ${teamId}, 사용자 ${userId}`);
+  }
+
+  if (!builtIns) return { result, truncated };
+  // 공휴일 — 모두에게.
+  for (const h of holidaysInRange(dayFrom, dayTo)) {
+    result.push(builtInOccurrence({ key: `holiday:${h.date}`, calendarId: 'holidays', source: 'holiday', title: h.name, start: h.startMs, end: h.endMs, color: HOLIDAY_COLOR }));
+  }
+  // 생일 — 정회원 이상만.
+  if (team.role !== 'guest') {
+    const birthdays = await listTeamBirthdays(teamId);
+    const firstYear = new Date(dayFrom).getUTCFullYear();
+    const lastYear = new Date(dayTo).getUTCFullYear();
+    for (const person of birthdays) {
+      const match = /^(\d{2})-(\d{2})$/.exec(person.birthday ?? '');
+      if (!match) continue;
+      for (let year = firstYear; year <= lastYear; year++) {
+        const startMs = birthdayStart(year, Number(match[1]), Number(match[2]));
+        if (startMs === null) continue;
+        if (startMs < dayTo && startMs + DAY_MS > dayFrom) {
+          result.push(
+            builtInOccurrence({
+              key: `birthday:${person.id}:${new Date(startMs).toISOString().slice(0, 10)}`,
+              calendarId: 'birthdays',
+              source: 'birthday',
+              title: `${person.name ?? person.username} 님의 생일`,
+              start: startMs,
+              end: startMs + DAY_MS,
+              color: BIRTHDAY_COLOR,
+            }),
+          );
+        }
+      }
+    }
+  }
+
+  return { result, truncated };
+}
+
+/** 종일 회차는 "날짜"라서 같은 날의 시간 일정보다 앞에 오도록 시작 시각을 한국 벽시계로 바꿔 비교한다. */
+export function sortOccurrences(list) {
+  const sortKey = (o) => (o.allDay ? o.start : o.start + KST_OFFSET_MS);
+  return list.sort((a, b) => sortKey(a) - sortKey(b) || Number(b.allDay) - Number(a.allDay) || a.title.localeCompare(b.title, 'ko'));
 }
 
 // ── 내장 캘린더 회차 ────────────────────────────────────────────────────

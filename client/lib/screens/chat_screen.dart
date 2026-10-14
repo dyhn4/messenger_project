@@ -7,6 +7,7 @@ import '../widgets/private_topic_lock.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart';
 import 'message_thread_screen.dart';
+import '../widgets/user_status_dialogs.dart';
 
 /// 모바일(좁은 화면)에서 방을 열 때 전체화면으로 띄우는 화면.
 /// 넓은 화면(PC)에서는 DesktopHomeScreen이 이 화면을 쓰지 않고
@@ -114,6 +115,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ],
+            // 1:1 대화면 상대의 상태 이모지·방해 금지 달(마우스를 올리면 상태 글).
+            if (otherMember != null)
+              UserStatusBadge(session: session, userId: otherMember.id),
           ],
         );
         final badgeBelow = compact ? stateBadge : null;

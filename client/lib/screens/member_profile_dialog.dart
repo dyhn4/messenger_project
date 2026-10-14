@@ -6,6 +6,7 @@ import '../services/session.dart';
 import '../widgets/favorite_actions.dart';
 import '../widgets/org_section.dart';
 import '../widgets/user_avatar.dart';
+import '../widgets/user_status_dialogs.dart';
 
 /// 다른 사용자의 프로필 플로팅 카드: 프로필 사진 + 이름 + 1:1 메시지 시작.
 /// 아이디/이메일은 아이디·비밀번호 찾기에 쓰이는 개인정보라 다른 사람에게는 보여주지 않는다.
@@ -284,6 +285,17 @@ class _MemberProfileDialogState extends State<MemberProfileDialog> {
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            // 상태 메시지("🗓️ 회의 중 · 13:00까지")와 방해 금지 — 없으면 아무것도 안 그린다.
+            ListenableBuilder(
+              listenable: widget.session,
+              builder: (context, _) => Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: UserStatusLines(
+                  session: widget.session,
+                  userId: user.id,
+                ),
+              ),
             ),
             if (role != null) ...[
               const SizedBox(height: 4),

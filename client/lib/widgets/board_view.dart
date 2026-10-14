@@ -23,6 +23,7 @@ import 'avatar_utils.dart';
 import 'favorite_actions.dart';
 import 'hover_toolbar.dart';
 import 'mention_profile.dart';
+import 'message_reactions.dart';
 import 'muted_scrollbar.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
@@ -853,6 +854,16 @@ class PostCard extends StatelessWidget {
                               color: commentColor,
                             ),
                           ),
+                          // 공감(이모지 반응) — 목록에서도 바로 누르거나 뺄 수 있다.
+                          if (post.reactions.isNotEmpty) ...[
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: MessageReactionBar(
+                                session: session,
+                                message: post,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ],
@@ -1630,6 +1641,17 @@ class PostDetailHead extends StatelessWidget {
               message: post,
             ),
           ],
+          // 공감(이모지 반응) — 고르는 버튼과 지금 공감 줄.
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ReactionAddButton(session: session, message: post),
+              Expanded(
+                child: MessageReactionBar(session: session, message: post),
+              ),
+            ],
+          ),
         ],
       ],
     );

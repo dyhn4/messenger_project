@@ -29,6 +29,7 @@ import {
 } from './messageLimits.js';
 import { parsePostFields, topicWriteDenial } from './permissions.js';
 import { attachPolls } from './polls.js';
+import { attachReactions } from './reactions.js';
 import { resolveRawUrl, signedUploadOrNull, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
@@ -135,10 +136,17 @@ export function toMessageDto(m) {
     // 행에 붙여 둔 m.poll(polls.js의 attachPolls / 새 투표는 sendMessage.js)을 그대로 옮긴다. 지워진
     // 메시지나 투표가 아닌 메시지는 항상 null.
     poll: m.type === 'poll' && !m.deletedAt ? (m.poll ?? null) : null,
+    // 공감 [{ emoji, userIds }] — 목록을 내려주는 쪽이 미리 붙여 둔 m.reactions(reactions.js의 attachReactions)를 옮긴다.
+    // 붙이지 않은 DTO(수정·링크 미리보기 브로드캐스트 등)는 키 자체가 빠진다(undefined는 JSON에 안 실림) — 앱은 그때 가진
+    // 공감을 그대로 둔다. 지워진 메시지는 늘 빈 목록.
+    reactions: m.deletedAt ? [] : m.reactions,
     // "앨범 공유" 메시지의 앨범 카드 { id(앨범이 지워졌으면 null), title, teamName } — 아니면 null(albumRules.js).
     sharedAlbum: toSharedAlbumDto(m),
     // 할 일을 만들 때 올린 할 일 카드 { id(할 일이 지워졌으면 null), title, … 스냅샷 } — 아니면 null(todoRules.js).
     sharedTodo: toSharedTodoDto(m),
+    // 메시지 리마인더 카드 { messageId, roomId, roomName, senderName, preview, sentAt, secret } — 리마인더가 "나와의 대화"에 올린
+    // 봇 메시지에만(reminders.js). 그 밖에는 null.
+    reminderCard: m.deletedAt ? null : (m.reminderCard ?? null),
     // 화상회의 기록 카드(시스템 메시지 — callCards.js) — 아니면 null.
     callCard: m.callCard ?? null,
   };
@@ -248,7 +256,7 @@ export function createMessagesRouter(io) {
     if (room.isSecret) return notFound();
     const floor = room.type === 'dm' ? await getDmHistoryFloor(room.id, req.user.sub) : null;
     if (floor && message.createdAt < floor) return notFound();
-    const [withPoll] = await attachPolls([message], req.user.sub);
+    const [withPoll] = await attachReactions(await attachPolls([message], req.user.sub));
     const byMessage = await listAttachmentsForMessages([message.id]);
     res.json(toMessageDto({ ...withPoll, attachments: byMessage[message.id] }));
   });

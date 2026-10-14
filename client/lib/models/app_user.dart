@@ -1,3 +1,5 @@
+import 'user_status.dart';
+
 class AppUser {
   final String id;
   final String username;
@@ -27,6 +29,10 @@ class AppUser {
   /// 생일('MM-DD', 연도 없음). 안 정했으면 null. 서버 사용자 DTO가 항상 내려주고, 캘린더의 "멤버 생일"이 쓴다.
   final String? birthday;
 
+  /// 상태 메시지·방해 금지 — 이 목록을 받은 순간의 값. 실시간 값은 Session.statusOf/dndOf를 본다(user:status로 바뀐다).
+  final UserStatus? status;
+  final DndState? dnd;
+
   AppUser({
     required this.id,
     required this.username,
@@ -42,6 +48,8 @@ class AppUser {
     this.department,
     this.position,
     this.birthday,
+    this.status,
+    this.dnd,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
@@ -61,6 +69,8 @@ class AppUser {
       department: json['department'] as String?,
       position: json['position'] as String?,
       birthday: json['birthday'] as String?,
+      status: UserStatus.fromJson(json['status']),
+      dnd: DndState.fromJson(json['dnd']),
     );
   }
 

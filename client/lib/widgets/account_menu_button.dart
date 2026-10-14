@@ -9,7 +9,9 @@ import '../screens/settings_screen.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'compact_menu.dart';
+import 'message_reminders.dart';
 import 'my_avatar.dart';
+import 'user_status_dialogs.dart';
 
 const _appVersion = '1.0.0';
 
@@ -118,8 +120,32 @@ class AccountMenuButton extends StatelessWidget {
                   ),
                 ),
               ),
+              if (session.userId != null)
+                UserStatusBadge(session: session, userId: session.userId!),
             ],
           ),
+        ),
+        // 상태 메시지("🗓️ 회의 중")와 방해 금지 — 같은 팀 사람들에게 보이고, 방해 금지 중에는 알림이 오지 않는다.
+        CompactMenu.item<void>(
+          context,
+          icon: Icons.emoji_emotions_outlined,
+          label: myStatusMenuLabel(session),
+          onTap: () => showStatusDialog(buttonContext, session),
+        ),
+        CompactMenu.item<void>(
+          context,
+          icon: session.notificationsPaused
+              ? Icons.notifications_paused
+              : Icons.notifications_paused_outlined,
+          label: myDndMenuLabel(session),
+          onTap: () => showDndDialog(buttonContext, session),
+        ),
+        // 걸어 둔 메시지 리마인더("나중에 알림") — 보고 취소한다.
+        CompactMenu.item<void>(
+          context,
+          icon: Icons.alarm_outlined,
+          label: '리마인더',
+          onTap: () => showRemindersDialog(buttonContext, session),
         ),
         CompactMenu.divider,
         CompactMenu.item<void>(

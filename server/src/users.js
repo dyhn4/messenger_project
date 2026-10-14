@@ -29,6 +29,7 @@ import { endUserCallAccess } from './callAccess.js';
 import { ownedUploadClaims, signFileUrl, uploadFileNameOf } from './upload.js';
 import { AVATAR_PHOTO_ERROR, parseUserName, planAvatarUpdate, safeAvatarColor } from './avatarRules.js';
 import { canSeeUser, directoryUserIds, seesWholeDirectory } from './userDirectory.js';
+import { dndDto, parseDndInput, parseStatusInput, statusDto } from './statusRules.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // 이메일 칸 길이 상한 — 가입·아이디 찾기(auth.js EMAIL_MAX_LENGTH)와 같다. 예전엔 바꿀 때만 길이를 안 봐서, 로그인한 사람이 본문
@@ -59,7 +60,27 @@ export function publicUser(u) {
     // 계정 등급 — 팀 설정의 "팀원 추가"나 조직도에서 등급을 보여주는 데 쓴다.
     // 바꾸는 것은 서버 운영자만 가능하다(admin.js).
     role: accountRole(u),
+    // 상태 메시지 { emoji, text, until } — 없거나 지울 시각이 지났으면 null(statusRules.js).
+    status: statusDto(u, Date.now()),
+    // 방해 금지 { until, schedule } — 꺼져 있으면 null. 앱이 지금 방해 금지 중인지를 같은 규칙으로 계산해 🌙로 보인다.
+    dnd: dndDto(u, Date.now()),
   };
+}
+
+/**
+ * 상태 메시지·방해 금지가 바뀌었음을 그 사람과 팀을 같이 쓰는 사람들(접속 표시와 같은 범위 — presence.js)과 내 다른 기기에
+ * 알린다(user:status). 프로필 변경처럼 방 목록을 통째로 다시 보내지 않고(broadcastMemberUpdate) 이 두 값만 보낸다 — 상태는
+ * 하루에도 여러 번 바뀐다.
+ */
+async function broadcastStatus(io, user) {
+  const ids = new Set(await listCoTeamMemberIds(user.id));
+  ids.add(user.id);
+  const now = Date.now();
+  io.to([...ids].map((id) => `user:${id}`)).emit('user:status', {
+    userId: user.id,
+    status: statusDto(user, now),
+    dnd: dndDto(user, now),
+  });
 }
 
 /** 본인 프로필(GET/PATCH /users/me 등) — [publicUser]에 본인만 보는 이메일과 생일('MM-DD', 없으면 null)을 더한다. */
@@ -408,6 +429,32 @@ export function createUsersRouter(io) {
    * tokenVersion을 올려서 즉시 끊는다(reset-password와 같은 정책) — 단, 지금 이 요청을
    * 보낸 기기는 로그아웃시키지 않고 새 토큰 쌍을 바로 응답에 실어줘서 매끄럽게 이어지게 한다.
    */
+  /**
+   * 내 상태 메시지 — `{ emoji, text, until }`(until은 지울 시각 ms, null이면 직접 지울 때까지). 이모지와 글이 둘 다 없으면
+   * 지운다. 같은 팀 사람들에게 user:status로 알린다.
+   */
+  router.put('/users/me/status', async (req, res) => {
+    const parsed = parseStatusInput(req.body ?? {}, Date.now());
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const updated = await updateUser(req.user.sub, parsed.value);
+    if (!updated) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    await broadcastStatus(io, updated);
+    res.json(selfUser(updated));
+  });
+
+  /**
+   * 내 방해 금지 — `{ until }`(이 시각까지 — null이면 끔)과 `{ schedule }`(매일 정한 시간 — null이면 지움) 중 넘긴 것만 바꾼다.
+   * 방해 금지 중에는 푸시를 보내지 않고(push.js) 앱도 알림을 띄우지 않는다. 같은 팀 사람들에게 user:status로 알린다.
+   */
+  router.put('/users/me/dnd', async (req, res) => {
+    const parsed = parseDndInput(req.body ?? {}, Date.now());
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const updated = await updateUser(req.user.sub, parsed.value);
+    if (!updated) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    await broadcastStatus(io, updated);
+    res.json(selfUser(updated));
+  });
+
   router.post('/users/me/change-password', async (req, res) => {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });

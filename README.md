@@ -139,6 +139,9 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **파일 삭제** — 잔디처럼 **파일을 올린 본인 또는 팀 관리자**(그 방의 멤버여야 하고, 비밀 대화는 관리자도 못 지움)가 첨부 파일을 지웁니다. PC는 파일 패널 줄에 마우스를 올렸을 때 나오는 ⋯ 더보기(채팅 말풍선의 사진·파일 ⋯, 파일 패널의 "메시지" 화면, 이미지 뷰어 위쪽의 휴지통 단추에도 있음)의 **삭제**, 모바일은 파일 패널 줄을 **길게 눌러** 뜨는 시트의 삭제입니다. "이 파일을 삭제할까요? 파일에 달린 댓글은 남아 있습니다."라고 확인한 뒤 지우면, 메시지와 그 **댓글은 그대로 남고** 말풍선의 그 첨부 자리만 흐린 **"삭제된 파일입니다"** 카드로 바뀌며(사진 한 장·파일·여러 장 묶음 모두, 묶음에서는 지운 칸만) 파일 패널·검색(파일 탭과 파일명 검색)·즐겨찾기 목록에서는 사라지고 그 파일의 즐겨찾기 항목도 정리됩니다. 첨부가 하나뿐이던 본문 없는 메시지도 지우지 않고 자리 표시로 남깁니다. **소프트 삭제**라 `message_attachments.deleted_at/deleted_by`(첨부 하나짜리 옛 메시지는 `messages.file_deleted_at`)만 찍고 **디스크 파일은 지우지 않으며**(전달·공지·즐겨찾기가 같은 파일을 가리킬 수 있음) "(수정됨)"도 붙지 않습니다. 읽기 전용·보관된 토픽에서도 지울 수 있고(메시지 삭제와 같은 규칙), 팀이 메시지 수정/삭제를 끈 경우에는 파일도 못 지우며, **수정/삭제 가능 시간 제한은 없습니다**. 남의 파일을 관리자가 지우면 감사 로그에 남고, 삭제 결과는 `message:edited`(첨부에 `deleted: true`, 경로는 비우고 파일 이름만 유지)로 방에 퍼집니다. 지운 파일은 전달·즐겨찾기·공지로 쓸 수 없습니다. 서버는 `server/src/messageFiles.js`(규칙은 `fileDeletePlan.js`, 저장은 `db/queries/fileDelete.js`), 화면은 `client/lib/widgets/file_actions.dart`(`FileActions.deleteFile`)·`deleted_file_card.dart`입니다
 - **토픽 공지** — 토픽 채팅 상단에 공지 하나가 고정됩니다(이전 공지는 공지 목록의 기록으로 남고, 고정은 토픽마다 최대 1개). 메시지 더보기(PC ⋯ / 모바일 길게 누르기 시트)의 **공지 등록**으로 그 메시지를 바로 공지로 올리며(등록 전 확인 없이 토스트, 이미 고정 공지가 있으면 "기존 공지를 이 메시지로 바꿀까요?"만 한 번 확인), 대상은 **일반 텍스트 메시지와 이미지 메시지**뿐입니다(파일·이모티콘·시스템·보드 게시글·투표·댓글·삭제된 메시지 제외, 그룹·1:1·비밀 대화에는 공지가 없음). 이미지 메시지는 **첫 사진 한 장**과 설명글이 공지가 되고(글 서식은 그대로 옮겨 오고 멘션은 빠짐), 사진은 원본 메시지가 나중에 지워져도 남도록 공지 쪽에 경로를 복사해 둡니다. 공지를 **등록할 수 있는 사람**은 새 공지를 쓸 수 있는 사람과 같습니다 — 잔디는 누구나지만 이 앱은 팀의 토픽 생성 권한 + 그 토픽의 관리자 규칙을 그대로 쓰고, 권한이 없으면 메뉴 항목을 숨깁니다. 고정된 메시지의 말풍선에는 작은 "공지" 표시가 붙습니다. 채팅(보드 뷰 토픽은 보드) 위의 **공지바**는 잔디처럼 **한 줄**입니다 — 왼쪽에 보드 "고정된 게시글"의 "고정" 표시와 같은 모양의 **"공지" 표시**(`widgets/pill_tag.dart`), 공지 글 한 줄(줄바꿈은 띄어 붙이고 넘치면 말줄임, 사진 공지는 작은 축소본 + 글 없으면 "[사진]"), 오른쪽에 **시각**(`2026/10/01 AM 3:44`) · **댓글 수**(댓글이 있을 때만 — 0이면 아이콘·숫자 모두 없고, 새 댓글이 오면 바로 나타나거나 늘어남) · **작성자 사진과 이름**(지금 방 멤버 정보, 나간 사람은 공지에 남은 이름) · **X**. 폭이 좁으면(460 미만 — 폰 세로 화면) 작성자 이름을 먼저 빼고(사진은 남고 길게 누르면 이름) 시각을 `27분 전`·`2026/09/30`처럼 짧게, 300 미만이면 시각도 빼서 넘치지 않습니다. 공지바는 **몸통을 누르면 공지 패널이 열리며 그 안에 그 공지의 상세보기가 바로 뜨고**(PC는 오른쪽 패널 안 화면 — ←로 공지 목록, 그 토픽의 공지 패널이 이미 열려 있으면 닫지 않고 그 안에 상세만 띄움 / 모바일은 전체 화면 공지 목록 위에 상세 — ←로 목록, 패널을 연 것이라 안 읽은 공지 표시도 지워짐), 오른쪽 끝의 **X(숨기기)** 하나만 있습니다 — 나에게만 이 공지를 치우며(공지 자체와 다른 사람 화면은 그대로, 새 공지가 오면 다시 보임), 숨김은 이 기기에 저장됩니다(`SharedPreferences`, 사람×토픽별 — 여러 기기 동기화는 하지 않음). **상세보기**는 잔디의 게시글 상세처럼 카드 하나에 작성자 아바타·이름·시각, 본문, 사진 공지의 사진(누르면 뷰어), `댓글 N`과 댓글 목록을 담고 맨 아래에 고정된 댓글 입력칸이 있으며, 오른쪽 위 ⋯(작성자만 — 토픽 머리의 ⋯ 메뉴와 같은 작은 아이콘+글자 메뉴, 묶음 사이 구분선)에서 **수정하기·공지 내리기 / 현재 채팅방에 공유하기 / 삭제하기**를 합니다(알림 센터에서 열면 PC는 대화상자, 모바일은 머리 `← 공지`의 전체 화면). 토픽 머리 ⋯의 **공지**는 **공지 패널**을 엽니다 — PC는 오른쪽 패널(다른 패널과 서로 교체, 같은 토픽에서 한 번 더 누르면 닫힘, 다른 토픽에서 누르면 그 토픽으로 바뀜), 모바일은 전체 화면이며, 알림 센터에서 안 읽은 공지가 여럿인 토픽을 열 때도 같은 패널이 열립니다(팀 리스트 화면처럼 오른쪽 칸이 없는 넓은 화면은 같은 패널을 가운데 대화상자로). 투표 패널과 같은 틀로 위에서부터 머리(`공지` + 그 아래 작은 회색 토픽 이름, ✕) → 가로 전체 옅은 회색 **`+ 공지 쓰기`**(공지를 쓸 수 있는 사람에게만) → 왼쪽 **`내린 공지 제외`** 스위치(글자를 눌러도 켜고 끔 — 켜면 채팅방에 고정된 공지만 남김)와 오른쪽 작은 회색 **`최신 순 / 과거 순`** 정렬(투표·할 일 패널의 정렬과 같은 바로 뜨는 메뉴, 기본 최신 순 — 받아 둔 목록을 작성 시각으로만 다시 줄 세우며 고정된 공지를 따로 맨 위로 올리지 않음) → 옅은 회색 바탕에 **`N개의 공지`**(N은 굵게, 지금 보이는 개수)와 흰 둥근 카드 목록(작성자 아바타·본문 앞부분 3줄·`작성자 · 시각`·사진 썸네일·댓글 수, 고정된 공지에는 "고정", 안 읽은 공지에는 "안 읽음" — 패널을 열 때 그 토픽에 안 읽은 공지가 있으면 최근 것부터 그 수만큼 붙고 알림 센터의 안 읽음 표시는 지워짐) 순이며, 카드 오른쪽 위 **⋯**는 상세의 ⋯와 같은 메뉴·권한(할 수 있는 게 없으면 ⋯ 자체가 없고, 눌러도 카드는 열리지 않음)이고, 카드에 마우스를 올리면 바탕은 흰색 그대로 두고 둥근 테두리만 옅은 강조색으로 그려 목록 바탕과 구분됩니다(할 일 카드와 같은 규칙). 목록에는 열어 둔 동안 새로 쓰거나 고치거나 내리거나 지운 공지가 바로 반영됩니다. 카드를 누르면 상세보기가 PC는 **패널 안 화면**(할 일 패널처럼 머리 `← 공지 … ✕` — ←는 목록으로, ✕는 패널 닫기), 모바일은 전체 화면(`← 공지`)으로 열리고, 상세에서 지우면 목록으로 돌아와 그 카드가 빠집니다. **글쓰기·수정 창**은 보드의 게시글 작성창과 같은 틀(제목 입력칸만 없음)이며, 본문 칸 위에는 프로젝트 "새 노트" 편집기와 같은 **서식 도구모음**(글자색·제목 1~3 | 굵게·기울임·밑줄·취소선 | 링크·코드·인용 | 번호·글머리 목록 | 구분선, Ctrl+B/I/U)이 늘 붙어 있습니다. 고른 서식은 본문과 따로 `textFormat` 구간으로 저장되고(채팅 서식과 같은 모양에 제목·글자색까지 — 서버 `textFormat.js`의 `rich` 정리), 글을 고치면서 서식을 안 보내면 서버가 서식을 지웁니다. 새 공지에는 "공지 자동 내리기" 선택(없음·1시간·4시간·9시간·1일·7일·30일·**지정**)이 붙고, **지정**을 고르면 칩 아래에 투표 마감 시각과 같은 날짜+시각 한 칸(`10월 5일 (월) 오후 3:30` — 누르면 달력과 그 밑 시간 드롭다운, 목록은 위로 펼쳐짐)이 펼쳐져 지금 이후~1년 안에서 15분 단위로 고르며(서버는 366일까지 받음) 옆에 "n일 n시간 뒤에 자동으로 내려갑니다"가 보입니다. 보드 뷰 토픽의 게시글 카드·게시글 상세·댓글과 공지의 시각은 모두 `yyyy/MM/dd AM h:mm`(12시간제, 시는 0 없이)로 표시합니다(`formatPostDateTime`). 보드 맨 위 "고정된 게시글" 줄은 시각 없이 한 줄로 고정 표시 · 제목 · 오른쪽에 댓글 수(댓글이 있을 때만 — 0이면 아이콘·숫자 모두 없음)와 작성자 아바타·이름만 보여 줍니다(좁으면 제목부터 말줄임). 화면은 `client/lib/widgets/announcement_banner.dart`·`message_announce.dart`, `screens/announcement_list_screen.dart`(공지 패널 — `side_panels.dart`의 `announcements`, 방을 가리키는 패널은 `openSidePanel(..., room:)`)·`announcement_detail_screen.dart`·`announcement_editor_dialog.dart`, 서버는 `server/src/announcements.js`·`announcementFromMessage.js`·`announcementText.js`(본문·서식 정리)·`announcementDto.js`(응답 모양)입니다
 - 메시지별 댓글(스레드) — PC는 옆 패널, 모바일은 전체화면
+- **상태 메시지·방해 금지** — 삼선 메뉴(☰)의 **상태 설정**에서 "🗓️ 회의 중"처럼 상태를 알리고(이모지는 정해 둔 12개 중에서, 글은 40자까지, 자주 쓰는 상태 6개 — 회의 중·외근 중·식사 중·재택 근무·휴가 중·병가), 지우는 시점(30분·1시간·4시간 뒤·오늘·이번 주·지우지 않음)이 지나면 저절로 사라집니다. **방해 금지**는 "지금부터 30분·1시간·2시간·내일 오전 9시까지"와 **매일 일정**(시작~끝 시각과 요일 — 끝이 시작보다 이르면 밤을 넘겨 다음 날까지, 시작한 요일 기준. 정할 때 그 기기의 UTC 차이를 함께 저장해 서버도 같은 시각으로 계산)이 있습니다. 방해 금지 중에는 **메시지·댓글·공지·멘션·업무 알림이 오지 않습니다** — 서버가 FCM·웹 푸시를 보내지 않고(`push.js`의 `withoutDndUsers`), 켜져 있는 앱도 로컬 알림(PC 팝업·작업 표시줄 깜빡임·휴대폰 알림)을 띄우지 않습니다(`Session.notificationsPaused`). 메시지와 안 읽은 수는 그대로 쌓이고, **화상회의 호출은 막지 않습니다**. 다른 사람의 상태는 이름 옆 이모지(방해 금지면 🌙, 마우스를 올리면 상태 글)로 말풍선 보낸 사람 이름·팀 멤버 목록(상태 글 한 줄도)·1:1 대화방 헤더(PC는 상태 글도)에 보이고, 프로필 창에는 "상태 · 13:00까지"와 "🌙 방해 금지 중"이 줄로 보입니다. 회원 DTO(`publicUser`)에 `status: { emoji, text, until }`·`dnd: { until, schedule }`가 실리고(지난 것은 `null`), 바뀌면 같은 팀 사람들과 내 기기들에 `user:status`가 갑니다(방 목록을 통째로 다시 보내는 프로필 변경과 달리 이 두 값만). 계산 규칙은 서버 `server/src/statusRules.js`와 앱 `client/lib/models/user_status.dart`가 같고, 화면은 `client/lib/widgets/user_status_dialogs.dart`입니다
+- **공감(이모지 반응)** — 카카오톡 공감처럼 메시지에 👍 ❤️ 😂 😮 😢 ✅ 중 하나를 남깁니다(한 사람이 메시지마다 하나 — 같은 것을 다시 누르면 빠지고, 다른 것을 고르면 바뀜). PC는 말풍선 툴바의 **공감**(웃는 얼굴) 메뉴, 모바일은 메시지를 길게 눌러 뜨는 시트 맨 위의 이모지 줄에서 고르고, 말풍선 아래에 이모지와 수가 붙습니다(내 공감은 테두리 — 눌러서 같이 남기거나 빼고, PC는 마우스를 올리면·모바일은 길게 누르면 누가 남겼는지). 보드 뷰 게시글은 목록 카드의 댓글 수 옆에 보이고 상세 화면 본문 아래 단추로 남깁니다. **비밀 대화·시스템 메시지에는 남길 수 없고**(누가 무엇에 반응했는지도 서버가 모르게), 알림은 보내지 않습니다. 앱이 서버 답을 기다리지 않고 먼저 그리고, 실패하면 되돌립니다. 바뀌면 방 전체에 `message:reactions`(바뀐 뒤 전체 목록)가 가고, 메시지 목록 응답의 각 메시지에 `reactions: [{ emoji, userIds }]`가 실립니다(이모지는 정해 둔 순서, 사람은 누른 순서). 고를 수 있는 이모지는 서버 `server/src/reactionRules.js`의 `REACTION_EMOJIS`와 앱 `client/lib/models/message_reaction.dart`의 `reactionEmojis`를 같이 맞춥니다. 서버는 `server/src/reactions.js`, 화면은 `client/lib/widgets/message_reactions.dart`입니다
+- **메시지 리마인더(나중에 알림)** — 메시지 메뉴(PC는 말풍선 ⋯·우클릭, 모바일은 길게 누르기)의 **나중에 알림**에서 20분·1시간·3시간 뒤, 내일 오전 9시, 다음 주 월요일 오전 9시 또는 날짜·시간을 직접 골라(1분 뒤 ~ 1년 안) 겁니다. 그 시각이 되면 **나와의 대화**에 탱고톡 봇이 "⏰ 리마인더" 카드(방 이름·보낸 사람·보낸 때·미리보기 200자와 **메시지로 이동** 단추)를 올려 보통 메시지처럼 알림이 옵니다(방해 금지면 알림만 쉼). 걸어 둔 것은 삼선 메뉴(☰)의 **리마인더**에서 울릴 시각 순으로 보고 취소합니다(다른 기기와 바로 맞춰짐 — 소켓 `reminder:changed`). 할 일로 만드는 것보다 가벼운 "나중에 처리" 수단이라 나에게만 보이고 상대에게 알리지 않습니다. 한 사람이 울리기 전의 리마인더를 100개까지 걸 수 있고, 지운 메시지·시스템 메시지·댓글에는 걸 수 없으며, 울릴 때 원본이 지워졌거나 그 방에서 나갔으면 조용히 건너뜁니다. **비밀 대화** 메시지도 걸 수 있지만 서버는 내용을 모르므로 카드에 "🔒 비밀 대화 메시지"로만 보입니다. 서버는 30초마다 울릴 때가 된 것을 가져가며(`for update skip locked` — 겹쳐 돌아도 한 번만), 규칙은 `server/src/reminderRules.js`, 라우트·작업은 `server/src/reminders.js`, 화면은 `client/lib/widgets/message_reminders.dart`입니다
 - **투표** — 토픽·그룹·1:1·나와의 대화(비밀 대화 제외)에 제목·보기(2~20개)·마감 시각(최대 90일 뒤 — 칸 하나를 누르면 달력이 펼쳐지고, 그 아래 시간 드롭다운에서 15분 단위 시각까지 고릅니다)을 정해 올리고, 익명/복수 선택 여부를 고릅니다. 만든 뒤에는 수정할 수 없고, 다시 투표할 수 있으며, 만든 사람이나 방 관리자가 일찍 마감할 수 있습니다. 투표는 방 멤버마다 즐겨찾기할 수 있고, 게시글처럼 시간 제한 없이 삭제할 수 있으며(관리자도 가능) 댓글도 달 수 있습니다. 앱에서는 입력칸의 투표 단추(보드 뷰 토픽은 오른쪽 아래 작은 단추, 파일도 30개까지 붙일 수 있음)나 [메뉴] → 투표 → 투표 목록 패널의 **투표 만들기** 단추로 만들고(투표 만들기 창 맨 위 "대화방" 칸에서 방을 고르며, 입력칸에서 열면 그 방이 미리 채워져 있고 바꿀 수도 있음 — 비밀 대화와 읽기 전용·보관된 토픽은 목록에서 빠짐), 카드의 ⋯ 메뉴에서 댓글·즐겨찾기·투표 마감·삭제를 하며, 기명 투표는 득표 수를 눌러 투표자를 봅니다(즐겨찾기한 투표는 [메뉴] → 즐겨찾기의 **투표** 탭에서 카드째 모아 봅니다). **익명 투표는 실시간 알림으로도 누가 무엇을 골랐는지 새지 않습니다** — 투표·다시 투표·취소 때 방에는 표 수만 담은 `poll:updated`가 가고, 누가 무엇을 골랐는지(`actorId`·`actorOptionIds`)는 투표한 사람 자신의 기기들(`user:<id>`)에만 갑니다(기명 투표도 같은 방식 — 투표자는 투표 DTO의 `voters`로 봄, `server/src/pollListRules.js`의 `emitPollVoteUpdate`). 앱 화면은 그대로이고 예전 앱도 그대로 동작합니다
 - **투표 목록 패널** — 잔디의 투표 필터처럼 **방과 진행 상황별로 투표를 모아 봅니다**. [메뉴] → 생성 → **투표**를 누르면 PC는 오른쪽 패널, 모바일은 전체 화면으로 열리고, **할 일 패널과 같은 틀**로 위에서부터 헤더(`투표` + 닫기) → 가로 전체 옅은 회색 둥근 **`+ 투표 만들기`** 단추(`+ 할 일 생성`과 같은 모양 — 기존 투표 만들기 창을 엽니다, 맨 위 "대화방" 칸에서 방을 고름) → 드롭다운 필터 줄(**참여한 대화방 ▾ / 참여 여부 ▾**(전체 · 참여함 · 참여 안 함 — 전체일 때 단추 글자는 `참여 여부`, 고르면 그 글자) — 할 일 패널의 두 필터처럼 두 단추가 같은 폭, 넘치는 글자는 말줄임표) → 작은 글씨 줄(왼쪽 **`마감된 투표 제외` 스위치**(할 일 패널의 `완료된 할 일 제외`처럼 글자를 눌러도 켜고 끔 — 켜면 진행 중인 투표만), 오른쪽 끝 **생성 순 / 기한 순** 정렬 — 생성 순은 최근에 만든 것부터, 기한 순은 진행 중인 투표를 마감이 가까운 것부터 보이고 그 뒤에 마감된 투표를 최근에 끝난 것부터) → 옅은 회색 바탕에 **`N개의 투표`**(N은 굵게, 조건에 맞는 전체 개수)와 흰 둥근 투표 카드 목록(무한 스크롤) 순입니다. 참여 여부·정렬의 펼침 메뉴는 메시지 예약 패널의 정렬과 같은 작은 메뉴(애니메이션 없이 바로 뜸)입니다. 작성자·상태·기간 필터는 없고, **기간 제한 없이** 만든 지 오래된 투표까지 모두 나옵니다. 카드는 위 줄(대화방 종류 아이콘 + 이름, 오른쪽 **방으로 이동** — 그 방의 그 투표로)과 채팅 말풍선과 같은 투표 카드라 **패널 안에서 바로 투표·다시 투표·마감**할 수 있습니다. 목록이 비면 할 일 패널처럼 아이콘과 안내(필터를 걸었으면 "조건에 맞는 투표가 없습니다.")가 나옵니다. 내가 멤버인 방(비밀 대화 제외)의 지워지지 않은 투표만 나오고, 마감은 일찍 마감했거나 마감 시각이 지난 것, 참여는 내가 투표한 것이며 DM "진짜 나가기" 이전 투표는 빠집니다. 필터·정렬은 전부 서버가 걸러서(`GET /api/polls`) 바꿀 때마다 처음부터 다시 받습니다. 열려 있는 동안 누가 투표하거나 마감하면(`poll:updated`) 그 카드가 바로 바뀌고, 새 투표가 올라오면 맨 위에 끼우지 않고 **"새 투표가 있습니다 · 새로고침"** 줄만 뜹니다(내가 만든 투표는 바로 다시 받음). 입력칸의 투표 단추(그 방으로 고정된 만들기 창)는 그대로입니다. 화면은 `client/lib/screens/polls_screen.dart`, 서버는 `server/src/polls.js`(규칙은 `pollListRules.js`, 저장은 `db/queries/polls.js`의 `listPollPanelRows`)입니다
 - **메시지 예약 패널** — 지금 팀에서 **내가 예약한 메시지**(예약됨 + 발송 실패, 한 사람이 한 팀에 30건까지)를 모아 보고 관리합니다. [메뉴] → 생성 → **메시지 예약**을 누르면 PC는 오른쪽 패널, 모바일은 전체 화면으로 열리고, **할 일 패널과 같은 틀**로 위에서부터 머리(`메시지 예약` + ✕) → 가로 전체 옅은 회색 **`+ 메시지 예약`**(기존 예약 만들기 창 — PC는 대화상자, 모바일은 전체 화면. 대화방 필터로 고른 방, 아니면 PC에서 지금 열어 둔 방을 예약할 수 있으면 미리 골라 둠. 30건이 차면 막힘) → 필터 줄(**참여한 대화방 ▾** / 상태 **`모든 예약` · `예약됨` · `발송 실패` ▾** — 펼침 목록에 상태별 개수) → 왼쪽 작은 회색 정렬(**발송 시간 순**(기본) / **생성 순**(최근에 만든 순) — 어느 쪽이든 발송 실패가 맨 위)과 오른쪽 `예약 N/30` → 옅은 회색 바탕에 **`N개의 예약 메시지`**(숫자 굵게)와 흰 둥근 카드 목록입니다. 카드는 첫 줄 `발송 예정 : 10월 5일 (월) 오전 9:00`(발송 실패면 그 자리에 빨간 **발송 실패** 표, 빨간 테두리와 아래에 사유) · 대화방(종류 아이콘 + 지금 이름, 나갔거나 삭제된 방은 예약 때 이름) · 📎 첨부 수 · 두 줄 미리보기(보드 게시글 예약은 `게시글` 표 + 제목)이고, 누르면 수정 창이 열리며 오른쪽 위 ⋯에서 **수정 · 지금 보내기 · 예약 취소**(발송 실패면 **수정해서 다시 예약 · 삭제**)를 합니다. 열 때 서버에서 새로 받고, 그 뒤로는 예약이 보내지거나(`scheduled:sent` — 카드가 사라짐) 실패하거나(`scheduled:failed` — 사유와 함께 발송 실패로) 다른 기기에서 바뀌면(`scheduled:changed`) 그 자리에서 바뀝니다. 입력칸의 시계 단추(예약 만들기)와 입력칸·보드 위의 "예약된 메시지 N개 · 보기"(그 대화방만 거른 예약 목록 창)는 그대로입니다. 화면은 `client/lib/widgets/scheduled_panel.dart`(목록 창은 `screens/scheduled_messages_screen.dart`, 만들기·수정 창은 `screens/schedule_message_dialog.dart`), 서버는 `server/src/scheduledMessages.js`입니다
@@ -255,6 +258,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 공휴일은 `server/src/holidays.js`의 정적 표(2025~2027년, 범위 밖은 비어 있음 — 임시공휴일이 새로 지정되면 직접 추가), 생일은 프로필의 `birthday`(`MM-DD`)를 씁니다. 바뀌면 소켓 `calendar:changed`로 알립니다
 - 앱 화면(`client/lib/screens/calendar/`, 상태는 `services/calendar_controller.dart`): PC는 메뉴(격자 아이콘) → 툴 → **캘린더**를 누르면 사이드바+채팅 자리가 캘린더로 바뀌고(한 번 더 누르거나 방을 고르면 돌아옴), 안드로이드는 같은 메뉴의 캘린더로 전체 화면을 엽니다. 보기는 **월간**(여러 날·종일 일정은 가로 막대, 넘치면 "+N개", 공휴일은 날짜 빨강+이름)·**주간**(일~토 7일)·**일간**(시간대별)·**목록** 4가지이고, 모바일 월간은 격자 아래에 고른 날의 일정 목록이 붙습니다. 왼쪽(모바일은 오른쪽 서랍)의 "나의 캘린더"/"구독 캘린더" 체크박스로 내 화면에서 숨기며(공휴일·생일의 숨김은 이 기기에만 저장), ⋯ 메뉴에서 색을 바꿉니다. 일정 만들기·수정은 종일, 10분 단위 시간, 참석자(이름 검색·조직도), 반복(사용자 정의 포함), 공개/비공개를 고르고, 반복 일정의 수정·삭제는 "이 일정만 / 이 일정 및 이후 일정 / 모든 일정"을 먼저 묻습니다. **검색**은 일정 **제목**의 일부로만 찾고(참석자·내용은 안 봄) PC는 툴바 검색창(입력을 멈추면 조회, 결과 패널), 모바일은 앱바 돋보기(전체 화면)이며, 결과에 캘린더 이름·반복·참석자를 보여 주고 **이동**은 현재 보기를 유지한 채 그 일정의 날짜로 옮기고 항목을 누르면 상세가 열립니다(숨긴 캘린더의 결과는 뺌). **드래그 이동**은 월간에서 일정 막대를 다른 날짜 칸에, 주간·일간 시간표에서 블록을 다른 날/시간대(10분 단위, 길이 유지)로 끌어 놓는 것이고(종일 막대는 날짜만, 놓일 자리 고스트·칸 하이라이트, 실패하면 원위치+토스트) 반복 일정·수정 권한이 없는 일정·공휴일·생일은 끌 수 없습니다(반복 일정에 올리면 "반복 일정은 상세에서 수정하세요"). 모바일 터치는 주간·일간 시간표에서 길게 눌러 끕니다
 - 캘린더 관리(`client/lib/screens/calendar/management/`, PC는 가운데 뜨는 창·모바일은 전체 화면): "나의 캘린더" 옆 +는 이름(1~30자)과 색을 골라 새 캘린더를 만들고 곧바로 그 캘린더의 설정으로 이어지며, ⋯ 메뉴 "캘린더 설정"은 관리자에게 이름·공개/비공개(비공개는 구독 불가)·멤버(이름 검색 또는 조직도로 추가, 관리자/쓰기/읽기 권한 변경, 내보내기 — 소유자는 못 바꾸고 못 뺌, 준회원은 읽기만)를, 그 밖의 멤버·구독자에게는 읽기 전용 화면과 색 변경(나에게만 적용)을 보여 주고 소유자만 삭제할 수 있습니다(모든 일정도 함께 삭제된다는 확인 창). "구독 캘린더" 옆 +는 캘린더 이름을 검색(입력을 멈추면 조회)해 "구독하기"로 구독하고, 공유 캘린더 멤버는 "나에게만 삭제", 구독자는 "구독 취소"로 내 목록에서만 뺍니다. 프로필 카드의 "생일"은 월/일만 고르고(2월 29일 가능, "삭제"로 비움) `PATCH /users/me`의 `birthday`로 저장하며, 준회원에게는 정회원부터 생일 캘린더에 표시된다고 안내합니다
+- **외부 캘린더 연동** — 회사 일정을 Google·Outlook 등에서 관리하는 팀이 일정을 두 번 넣지 않게 두 방향을 지원합니다(준회원 포함, 팀마다 따로). **가져오기**: 캘린더 목록의 "외부 캘린더" 옆 +에 Google 캘린더의 "iCal 형식의 비공개 주소"·Outlook의 "캘린더 게시" ICS 링크 같은 구독 주소(`https://`·`webcal://`)를 넣으면 서버가 그 자리에서 받아 보고(안 되면 이유를 알려 주고 저장하지 않음) 그 일정을 내 달력에 함께 보여 줍니다. **나에게만 보이고 읽기 전용**이며(상세에 "외부 캘린더에서 가져온 일정"), 서버가 30분마다 다시 받고 ⋯ 메뉴의 **지금 새로고침**(1분에 한 번)·**구독 해지**·색 변경·체크박스 숨김이 됩니다. 목록 줄 아래에 받는 곳·마지막 업데이트(실패하면 그 이유)가 보입니다. 사람마다 팀마다 10개까지, ICS는 5MB까지이고, 반복 일정은 지금부터 과거 1년·미래 2년 구간만 펼쳐 저장합니다(그 밖의 달에는 안 보임 — 파일 안 VTIMEZONE·서머타임, 빠진 회차·옮긴 회차·취소 반영, 시간대 없는 시각은 한국 시간). 주소에는 비밀 토큰이 들어 있어 DB에 암호화해 두고 앱에는 호스트만 내려 줍니다. 서버가 바깥 주소로 나가는 요청이라 링크 미리보기와 같은 `safeFetch`(80·443 포트만, 사설·루프백 IP 차단 — 사내망 안의 캘린더 서버는 구독할 수 없음)만 씁니다. **내보내기**: 목록 아래 **내 일정 내보내기 (ICS 주소)**에서 비밀 주소(`/calendar-feed/<토큰>.ics`)를 만들어 Google 캘린더 "URL로 추가"·Outlook "웹에서 구독"에 넣으면, 내가 앱에서 보는 일정(숨긴 캘린더·공휴일·생일·외부 캘린더 제외, 비공개라 내용을 못 보는 일정은 "비공개 일정")이 지난 60일부터 앞으로 1년까지 회차마다 따로 나갑니다. 로그인 없이 열리는 주소라 토큰(192비트)이 곧 열쇠이고 — **새 주소로 바꾸기**를 누르면 예전 주소는 바로 끊기고, 팀을 떠나거나 계정이 정지되면 404가 됩니다. Google·Outlook 같은 인터넷 서비스가 받아 가려면 공인 인증서가 걸린 웹 주소(아래 "아이폰용 웹 앱 주소" — `WEB_DOMAIN`)가 있어야 하고, 없으면 창에 그 안내가 뜹니다(자체 서명 인증서인 메인 주소는 바깥 서비스가 받지 않음). 서버는 `server/src/externalCalendars.js`(가져오기·30분 작업)·`icsImport.js`(ICS 읽기 — `ical.js` 사용)·`calendarFeeds.js`·`icsFeed.js`(내보내기)·`externalCalendarRules.js`, 화면은 `client/lib/screens/calendar/external_calendar_dialogs.dart`입니다
 
 **서버 운영(관리자 콘솔)**
 - 서버 운영자 개념(팀 등급과 별개) — 계정이 하나도 없는 서버의 첫 가입자만 운영자가 되고, 이후 운영자가 지정. 마지막
@@ -292,7 +296,17 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   **기본 켬** — 다른 항목처럼 "저장하기"를 눌러야 서버에 저장)가 켜져 있으면
   PC 앱이 켜져 있어도 접속해 있지 않은 휴대폰(과 닫힌 웹 앱)으로 FCM·웹 푸시가 갑니다(소켓이 붙어 있는 기기로는 안 보냄). 끄면 예전처럼
   어느 기기로든 접속해 있는 동안은 푸시를 보내지 않습니다(`skipsPush`). 채팅·멘션·할 일·프로젝트·화상회의·비밀 대화 푸시 모두 같은
-  규칙이고, 설정은 계정에 저장돼 내 모든 기기에 같이 적용됩니다(접속 중에 바꿔도 바로 반영)
+  규칙이고, 설정은 계정에 저장돼 내 모든 기기에 같이 적용됩니다(접속 중에 바꿔도 바로 반영). 단 **PC 앱이 접속해 있는 동안 PC
+  브라우저(크롬 등)의 웹 앱으로는, 안드로이드 앱이 접속해 있는 동안 안드로이드 브라우저(모바일 크롬 등)의 웹 앱으로는 웹 푸시를 보내지
+  않습니다** — 앱을 켜 둔 기기에서 웹 앱 탭을 닫으면 브라우저 서비스 워커가 웹 푸시를 받아 앱 알림과 브라우저 알림이 둘 다 떴기
+  때문입니다. 앱이 기기를 등록할 때 종류(`devices.kind` — `windows`·`android`·`web-desktop`·`web-android`·`web-mobile`, 안드로이드의
+  브라우저는 `web-android`, 아이폰·아이패드(데스크톱 모드 포함 — 터치 화면으로 가름)는 `web-mobile`)를 알리고, 웹 푸시는 그 사람의
+  `windows` 기기가 접속해 있으면 `web-desktop`을, `android` 기기가 접속해 있으면 `web-android`를 건너뜁니다(`presence.js`의
+  `webPushTargets`). 아이폰·아이패드 브라우저와 종류를 알리지 않는 예전 앱의 기기는 그대로 받습니다(다른 PC·다른 안드로이드 기기의
+  브라우저도 함께 조용해지지만 그때는 접속해 있는 앱으로 받음). 안드로이드 앱을 **꺼 둔** 동안에는 FCM(앱)과 웹 푸시(브라우저)가
+  둘 다 갈 수 있어서, 웹 앱 환경설정의 **"앱을 닫아도 알림 받기(푸시)"**(이 브라우저에만 저장, 기본 켬)로 그 브라우저의 웹 푸시를
+  끌 수 있습니다 — 끄면 서버와 브라우저의 구독을 지우고 다음에 열어도 다시 구독하지 않으며, 웹 앱이 열려 있는 동안의 알림은 그대로
+  뜹니다(`Session.setWebPushEnabled`)
 - 안드로이드 "대화" 스타일 알림(발신자 아바타 아이콘 포함), 뮤트한 방은 발송 안 함
 - **웹 푸시(웹 앱)** — 브라우저로 쓰는 웹 앱은 FCM 대신 표준 Web Push(VAPID — Firebase 설정 불필요, 키는 `server/.web-push-vapid.json`에
   자동 생성)로 FCM과 같은 때(소켓이 안 붙어 있을 때) 알림을 받습니다(`server/src/webPush.js`). 서버가 구독 주소로 직접 요청을
@@ -864,6 +878,54 @@ token을 넣고 "자동 갱신 사용"을 켠 뒤 저장하면, 바로 한 번 �
   다시 실행해주는 건 됩니다(위 "새 서비스 PC에 네이티브 설치 프로그램으로 설치/업데이트" 참고),
   다만 그 배포/실행을 서버가 스스로 감지해서 알아서 받아 설치하는 건 아직 없습니다(관리자 권한
   작업이라 무인 자동 적용은 위험 부담이 있어 일부러 범위 밖으로 뒀습니다).
+
+### 메신저·협업 도구로서 보강할 기능
+
+이미 있는 기능(토픽·스레드·댓글, 공감(이모지 반응), 상태 메시지·방해 금지, 메시지 리마인더, 외부 캘린더 연동(ICS 구독·내보내기), 비밀 대화(E2EE), 화상회의·화이트보드, 프로젝트·간트·자동화, 할 일, 캘린더, 투표, 앨범,
+북마크, 공지, 예약 메시지, 감사 로그, 보존 정책, 게스트 계정, 웹 푸시, 앱 잠금, 서버 전체 백업 등)은 빼고, 코드에서 흔적을
+찾지 못한 것만 우선순위별로 정리했습니다. 키워드 검색으로 판단했으므로 다른 이름으로 이미 만든 기능이 섞여 있을 수 있습니다.
+
+**1순위 — 없으면 도입을 망설이게 되는 것**
+
+- **iOS 앱**(또는 아이폰 웹 앱 보완) — `client/ios/`가 없어 아이폰은 웹 앱만 쓸 수 있습니다. 웹 앱은 홈 화면에 추가해야 푸시가
+  오고, 화면 공유가 안 되며, 데이터 사용 경고(연결 종류를 알 수 없음)도 동작하지 않습니다. 국내는 아이폰 비중이 커서 팀 단위
+  도입 때 가장 먼저 걸리는 부분입니다.
+- **로그인 보안 강화**
+  - **2단계 인증(OTP)** — Google Authenticator 같은 앱의 6자리 코드를 비밀번호와 함께 확인합니다. 외부 서비스가 필요 없어 셋 중
+    가장 먼저, 쉽게 만들 수 있습니다.
+  - **SSO(Google·Microsoft 통합 로그인)** — 회사가 이미 쓰는 Google Workspace·Microsoft 365 계정으로 로그인합니다(OAuth 2.0 /
+    OpenID Connect). TangoTalk 전용 비밀번호가 필요 없고, 회사 계정만 막으면 퇴사자도 자동으로 못 들어오며, 회사 계정의 2단계
+    인증이 그대로 적용됩니다. 로그인 때 인터넷이 필요하고, 고객사가 Google Cloud·Microsoft Entra에 앱을 등록해 받은 값(Client
+    ID 등)을 관리자 콘솔에 넣어야 합니다(FCM 설정과 비슷). 웹 앱은 정식 인증서가 걸린 웹 앱 주소(`WEB_DOMAIN`)가 있어야 하고,
+    이미 아이디로 가입한 사람은 이메일 확인을 거쳐 SSO와 연결해야 남의 계정을 가로채지 못합니다.
+  - **LDAP/Active Directory 연동** — 사내 Windows 도메인 서버와 직접 연결해 회사 PC 로그인 계정 그대로 로그인합니다. 인터넷 없이
+    사내망에서 동작해 설치형인 TangoTalk에는 SSO보다 맞는 고객사가 많습니다.
+
+**2순위 — 협업 도구로서의 경쟁력**
+
+- **외부 연동(들어오는 웹훅·봇·API 토큰)** — 서버 모니터링 알림, CI/배포 결과, 설문 응답 같은 외부 이벤트를 대화방으로 받습니다.
+  지금은 외부와 연결할 통로가 없습니다.
+- **외부 캘린더 양방향 동기화** — 지금은 ICS 구독(읽기 전용 가져오기)과 ICS 주소 내보내기까지입니다. Google Calendar API·Microsoft
+  Graph로 로그인해 서로 고친 내용을 주고받는 양방향 동기화는 고객사의 클라우드 앱 등록(OAuth)이 필요해 범위 밖으로 뒀습니다.
+- **메시지 수정 이력** — 수정된 메시지의 이전 내용 보기(관리자만 봐도 충분). 업무 지시·합의 내용이 바뀌었을 때 근거가 됩니다.
+- **이메일 알림(SMTP)** — 오래 접속하지 않은 사람에게 안 읽은 멘션 요약, 비밀번호 재설정, 초대 메일. 지금 비밀번호 찾기는 보안
+  질문에 의존합니다.
+
+**3순위 — 있으면 차별점이 되는 것**
+
+- **음성 메시지** — 녹음해서 보내기(현장직·운전 중 사용자).
+- **AI 기능** — 긴 대화방·스레드 요약, 회의(통화) 내용 정리, 번역. 설치형이라 "내부 서버에서 AI를 돌린다"는 점이 장점이 됩니다.
+- **정보 유출 방지** — 모바일 화면 캡처 방지, 이미지·문서에 사용자 이름 워터마크, 파일 다운로드 금지 권한.
+- **팀 위키 / 문서 공간** — 프로젝트 노트와 별개로 팀 전체가 공유하는 규정·매뉴얼 공간.
+- **그룹웨어 확장** — 전자결재(휴가·지출 승인), 출퇴근 기록. 문의함에 "근태/휴가" 분류가 있어 수요는 보이지만 범위가 커서
+  메신저 핵심 기능을 갖춘 뒤에 검토할 일입니다.
+- **위치 공유** — 외근·현장 업무가 많은 팀용.
+
+**모바일 데이터 사용 관련 후속**(첨부 다운로드 데이터 사용 경고 — `client/lib/widgets/data_usage_warning.dart`에 이어서)
+
+- 경고 기준(지금 10MB 고정 — `kCellularDownloadWarnBytes`)과 경고 켜기/끄기를 환경설정에서 바꾸기
+- 모바일 데이터일 때 사진을 원본 대신 일반 화질로 보내기, 동영상 자동 재생은 Wi-Fi에서만
+- 큰 파일 다운로드 진행률과 취소 — 지금은 파일 전체를 메모리로 받은 뒤 저장해서, 받는 동안 진행률이 안 보이고 취소할 수 없습니다
 
 ## 구성도
 
@@ -1488,6 +1550,8 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/users` | 회원 목록(조직도·접속 상태 채우기용, 계정 등급 `role` 포함) — 계정 등급 관리자·서버 운영자에게는 탈퇴하지 않은 서버 전체 회원, 그 밖에는 팀을 하나라도 같이 쓰는 사람과 자기 자신만(`userDirectory.js`). 팀원 추가 후보는 아래 `/api/teams/:id/member-candidates`. `position`은 부서·직책 관리 범위가 '계정 단위'일 때만 채워지고, '팀 단위'면 항상 `null`(팀마다 다를 수 있어 이 서버 전체 목록 하나로는 못 정한다) |
 | GET | `/api/users/:id/teams` | 프로필 카드 "팀" 항목 — 그 사람이 속한 팀 목록. 그 사람을 볼 수 없으면(본인도, 팀을 같이 쓰는 사람도 아니고 내가 계정 등급 관리자·서버 운영자도 아니면) 404. 대상이 관리자면 나와 겹치는 팀만, 정회원·준회원이면 전체(본인 조회는 항상 전체) |
 | GET | `/api/users/me` | 내 프로필 조회. `orgScope`\|`department`\|`position`\|`teamPositions`로 "팀"/"직책" 표시값도 함께 내려준다 |
+| PUT | `/api/users/me/status` | 내 상태 메시지 `{ emoji, text, until }` — `emoji`는 정해 둔 12개 중 하나 또는 `null`, `text`는 40자까지(줄바꿈·제어·방향 문자는 400), `until`은 지울 시각(ms, 한 달 안 — `null`이면 직접 지울 때까지). 이모지·글이 둘 다 없으면 지움. 응답은 내 프로필, 소켓 `user:status` |
+| PUT | `/api/users/me/dnd` | 내 방해 금지 — `{ until }`(이 시각까지, `null`이면 끔)과 `{ schedule: { enabled, start, end, days, offsetMinutes } \| null }`(매일 일정 — `start`/`end`는 하루 중 분, 같으면 400, `days`는 0=일~6=토 하나 이상) 중 넘긴 것만 바꿈. 응답은 내 프로필, 소켓 `user:status` |
 | PATCH | `/api/users/me` | 이름/이메일/아바타/생일(`birthday` — `MM-DD`, `null`·빈 문자열이면 삭제) 수정(이메일 변경은 `currentPassword` 필요). `name`은 앞뒤 공백을 빼고 1~30자(이모지 한 덩어리 = 1자), 제어 문자·글자 방향 문자는 400. `avatarType`을 보내면 아바타를 통째로 바꿉니다 — `initial`은 나머지 칸을 비우고, `character`는 `avatarEmoji`(이모지 하나)+`avatarColor`(`#RRGGBB`)가 필요하며, `photo`는 지금 프로필 사진을 그대로 다시 보내거나(만료된 서명 링크도 알아봄) 내가 `/api/upload`로 올린 파일만 받습니다(아니면 400 `프로필 사진을 확인할 수 없습니다. 사진을 다시 올려 주세요.`). 응답·회원 DTO의 `avatarColor`는 `#RRGGBB`가 아니면 `null`, `avatarUrl`은 아바타가 사진일 때만 실림 |
 | POST | `/api/users/me/verify-password` | 현재 비밀번호가 맞는지만 확인(다른 부수효과 없음) — "이메일 변경" 1단계(비밀번호 확인) 다이얼로그가 쓴다 |
 | POST | `/api/users/me/change-password` | 비밀번호 변경 |
@@ -1578,6 +1642,10 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/messages/:id` | **메시지 한 건** — 알림 미리보기(한 줄로 줄이고 120자에서 자른 스냅샷) 대신 지금의 원본이 필요할 때. 방 메시지 목록과 같은 접근 규칙: 그 방 멤버만(아니면 403), 1:1 "진짜 나가기" 이전 메시지는 404. 지운 메시지·비밀 대화·없는 id(uuid 아님 포함)도 404. 응답은 목록 항목과 같은 메시지 DTO(`text` 원문, 서명된 `attachments`, 투표면 `poll` — `comments`는 없음) |
 | PATCH | `/api/messages/:id` | 메시지 수정(팀 설정의 수정/삭제 가능 시간 안에서, **본인만**). 글 메시지는 `{ text, textFormat?, mentions? }`. **사진·파일 메시지**는 `{ text?(설명글, 빈 문자열이면 지움), textFormat?, mentions?, removeAttachmentIds?(지울 첨부 id) }` — 첨부는 지우기만 되고(더하기 불가), 전부 지우면 설명글이 있을 때만 글 메시지로 바뀌며 없으면 400. 비밀 대화의 사진·파일은 400. 응답·`message:edited`에 갱신된 `attachments`가 들어 있음 |
 | DELETE | `/api/messages/:id` | 메시지 삭제(소프트 삭제 — 같은 시간 안에서, 본인 또는 참여 중인 방의 소유자·관리자). 게시글·투표는 시간 제한 없음 |
+| PUT | `/api/messages/:id/reaction` | 내 공감(이모지 반응) 정하기 — `{ emoji }`(👍 ❤️ 😂 😮 😢 ✅ 중 하나 — 이미 다른 것이면 바꿈) 또는 `{ emoji: null }`(빼기). 방 멤버만(403), 지운 메시지·DM "진짜 나가기" 이전 메시지는 404, 비밀 대화·시스템 메시지는 400. 응답 `{ messageId, reactions }`, 방에 소켓 `message:reactions` |
+| POST | `/api/messages/:id/reminders` | 메시지 리마인더 걸기 `{ remindAt }`(epoch ms — 1분 뒤 ~ 1년 안, 아니면 400). 방 멤버만(403), 지운 메시지·DM "진짜 나가기" 이전 메시지는 404, 시스템 메시지는 400, 울리기 전의 내 리마인더가 100개면 400. 비밀 대화도 됨(카드에 내용 없이). 응답 `{ id, messageId, roomId, remindAt, createdAt }`(201), 내 기기들에 소켓 `reminder:changed` |
+| GET | `/api/reminders` | 울리기 전의 내 리마인더 — 울릴 시각 순 `[{ id, messageId, roomId, remindAt, createdAt, senderName, preview }]`(원본이 지워진 것은 빠지고, 비밀 대화는 `preview: null`) |
+| DELETE | `/api/reminders/:id` | 리마인더 취소(내 것만, 아니면 404). 내 기기들에 `reminder:changed` |
 | POST | `/api/messages/:messageId/comments` | 댓글 작성 — 20,000자, 첨부는 메시지와 같은 규칙(직접 올린 파일이나 지금 볼 수 있는 방의 파일 — `fileRefs.js`), 한 사람이 10초에 20개·10분에 300개(첨부를 단 댓글은 10분 창만, 넘으면 429) |
 | POST | `/api/rooms/:roomId/polls` | **투표 만들기** — `{ title, description?, options[2~20], anonymous?, multiple?, closesAt(epoch ms, 최대 90일 뒤), attachments? }`. 방에 `type:'poll'` 메시지(`poll` 필드 포함)로 올라간다. 비밀 대화는 400, 첨부는 보드 뷰 토픽만. 소켓 `message:send`로는 못 만든다 |
 | PUT | `/api/polls/:pollId/vote` | 투표하기·다시 투표하기·취소(`{ optionIds }`, 빈 배열이면 취소). 응답은 `poll`. 방에는 표 수만 담은 소켓 `poll:updated`(`actorId`·`actorOptionIds`는 `null`), 투표한 사람의 기기들(`user:<id>`)에는 같은 이벤트에 `actorId`(나)·`actorOptionIds`(내 선택, 취소면 빈 배열)를 실어 보냄 — 아래 소켓 이벤트 표 |
@@ -1705,7 +1773,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/teams/:teamId/calendars` | 내 캘린더 `{ mine, subscribed }` — 처음 열 때 기본·팀 캘린더를 자동 생성. 팀 멤버가 아니면 403 |
+| GET | `/api/teams/:teamId/calendars` | 내 캘린더 `{ mine, subscribed, external }` — 처음 열 때 기본·팀 캘린더를 자동 생성. `external`은 내가 구독한 외부 ICS 캘린더(`id`는 `ext:<id>`, `kind: 'external'`, 주소 대신 `host`, `lastSuccessAt`, `lastError`). 팀 멤버가 아니면 403 |
 | POST | `/api/teams/:teamId/calendars` | 새 공유 캘린더 `{ name(1~30자), color, isPublic? }`(정회원 이상) |
 | PATCH/DELETE | `/api/calendars/:id` | 이름·공개 여부 수정(캘린더 관리자, 기본 캘린더는 공개 여부만) / 삭제(공유 캘린더의 소유자만, 일정도 함께) |
 | PATCH/DELETE | `/api/calendars/:id/me` | 내 개인 설정 `{ color?, hidden? }` / 나에게만 삭제·구독 취소 |
@@ -1713,9 +1781,13 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | PATCH/DELETE | `/api/calendars/:id/members/:userId` | 멤버 권한 변경 / 내보내기(소유자는 불가) |
 | GET | `/api/teams/:teamId/calendars/search?q=` | 구독 가능한 공개 캘린더 검색(정회원 이상) |
 | POST | `/api/calendars/:id/subscribe` | 공개 캘린더 구독 |
-| GET | `/api/teams/:teamId/calendar/events?from=&to=` | 구간(최대 62일, `from`·`to`는 1899-11-01 ~ 2300-03-01(UTC) 안 — 밖이면 400)의 일정 회차 + 공휴일 + 생일(정회원 이상). 회차는 2300-01-01 전의 것만, 응답 하나에 5,000개까지 — 넘치면 내가 만든 일정 먼저, 나머지는 만든 사람마다 하나씩 돌아가며 채우고 `X-Calendar-Truncated: 1` 헤더를 붙임(`calendarRecurrence.js`의 `fillOccurrenceBudget`) |
+| GET | `/api/teams/:teamId/calendar/events?from=&to=` | 구간(최대 62일, `from`·`to`는 1899-11-01 ~ 2300-03-01(UTC) 안 — 밖이면 400)의 일정 회차 + 공휴일 + 생일(정회원 이상) + 내가 구독한 외부 캘린더의 회차(`source: 'external'`, `calendarId: 'ext:<id>'`, 읽기 전용 — 3,000개까지). 회차는 2300-01-01 전의 것만, 응답 하나에 5,000개까지 — 넘치면 내가 만든 일정 먼저, 나머지는 만든 사람마다 하나씩 돌아가며 채우고 `X-Calendar-Truncated: 1` 헤더를 붙임(`calendarRecurrence.js`의 `fillOccurrenceBudget`) |
 | GET | `/api/teams/:teamId/calendar/search?q=&limit=&before=` | 일정 **제목** 검색(부분 일치·대소문자 무시, 공휴일·생일 제외) → `{ items:[{ eventId, calendarId, calendarName, color, title, start, end, allDay, recurring, recurrence, attendees, creatorName, canEdit }], nextBefore }` — 볼 수 있는 캘린더와 참석자로 초대된 일정만, 비공개 일정은 작성자·참석자·캘린더 소유자/관리자만, 시작 시각 최신순(`limit` 기본 50·최대 100, `before`=`nextBefore`로 이어 받기) |
 | POST | `/api/calendars/:id/events` | 일정 만들기 `{ title, description?, location?, start, end, allDay?, visibility?, attendeeIds?, recurrence?, color? }` — 반복 `until`은 2299-12-31까지. 일정 행을 새로 만드는 요청(이것과 아래 `this`·`following` 수정)은 한 사람이 10분에 60번까지(넘으면 429) |
+| POST | `/api/teams/:teamId/external-calendars` | 외부 캘린더 구독 `{ url(https:// 또는 webcal://), name?(1~30자, 없으면 ICS의 캘린더 이름), color? }` — 그 자리에서 받아 보고 안 되면 400과 이유(ICS가 아님·권한 없음·너무 큼 등). 사람마다 팀마다 10개, 한 사람이 10분에 20번까지(429). 응답은 목록의 `external` 항목(201) |
+| PATCH/DELETE | `/api/external-calendars/:id` | 외부 캘린더 `{ name?, color?, hidden? }` 수정 / 구독 해지(내 것만, 아니면 404 — `:id`는 `ext:` 없이). 내 기기들에 `calendar:changed` |
+| POST | `/api/external-calendars/:id/refresh` | 지금 다시 받기(1분에 한 번, 아니면 429). 실패해도 200이고 `lastError`에 이유 |
+| GET/POST/DELETE | `/api/teams/:teamId/calendar-feed` | 내 일정 내보내기 주소 `{ url, publicAddress, createdAt, lastAccessAt }` 보기 / 새로 만들기(있으면 바꿈 — 예전 주소는 바로 끊김, 201) / 끄기. `url`은 공인 인증서가 걸린 웹 주소가 있으면 그 주소, 없으면 앱이 접속한 주소(`publicAddress: false`) |
 | GET/PATCH/DELETE | `/api/events/:id` | 일정 상세 / 수정 / 삭제 — 반복 일정은 `scope`(`this`\|`following`\|`all`)와 `occurrenceStart`(원래 회차 시작 ms — 2300-01-01 전의 회차만). `this`는 이미 따로 고치거나 지운 회차(`exdates`)가 1,000개인 시리즈면 400(`following`으로 나눠 바꿀 것) |
 
 **검색 / 업로드 / 기타**
@@ -1724,6 +1796,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 |---|---|---|---|
 | GET | `/api/search` | 필요 | 내가 속한 방 통합 검색(`teamId` 필수, `q`, `roomId`, `senderId`, `since`, `until`, `limit`, 탭 `type`=message/poll/file + `fileKind`, 정렬 `order`=desc/asc, `withTotal=1`이면 `{items, total}`; `scope=all`이면 `teamId` 없이 내 모든 팀 + 항목에 `teamId`·`teamName`) |
 | GET | `/api/search/rooms` | 필요 | 대화방 이름 검색(`q`, `teamId` 또는 `scope=all`, `order`, `limit`) → `{items:[{roomId, teamId, teamName, type, name, memberCount, archived, lastActivityAt, isSelf, isPublic}], total}` — 내가 멤버인 방만, 비밀 대화 제외 |
+| GET | `/calendar-feed/:token.ics` | 불필요(주소의 토큰) | 내 일정 ICS 피드(`text/calendar`) — 지난 60일 ~ 앞으로 1년, 회차마다 VEVENT, `REFRESH-INTERVAL` 30분. 모르는 토큰·팀을 떠났거나 정지된 사람은 404, IP마다 15분에 120번(429) |
 | GET | `/api/attachments` | 필요 | 첨부 이미지/파일 모아보기(지운 파일은 빠지고, 줄마다 그 첨부의 `attachmentId`가 붙음 — 파일 삭제용; `teamId` 필수, `roomId`, `senderId`, `category`=image/document/pdf/excel/powerpoint/video/audio/archive/other, 파일명 `q`, `since`, `until`, `order`=desc/asc) |
 | GET | `/api/links` | 필요 | 대화에서 주고받은 링크 모아보기(`teamId` 필수, `roomId`, `senderId`, `q`, `since`, `until`, `order`=desc/asc) — 링크마다 한 줄, 미리보기 제목·그림 포함(`imageUrl`은 서버가 받아 둔 미리보기 그림의 서명 링크만 — 예전에 저장된 바깥 주소는 null) |
 | GET | `/api/stickers` | 필요 | 그림 이모티콘 세트와 그림 목록(숨긴 것 포함 — `hidden` 표시, 그림은 서명 링크) |
@@ -1776,7 +1849,10 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | 서버→클라이언트 | `room:created` | 방 생성/멤버 변경 시 최신 방 정보 |
 | 서버→클라이언트 | `team:updated` / `team:joined` / `team:left` | 팀 정보 변경 / 팀에 추가됨 / 팀에서 빠짐(그 팀의 모든 방에서도 빠져, 방마다 `room:removed`가 `reason: 'team'`으로 뒤따름 — 앱은 팀 단위로 한 번만 안내) |
 | 서버→클라이언트 | `room:removed` | 방이 내 목록에서 사라짐 `{ roomId, reason: deleted｜kicked｜team, name }` — 토픽 삭제·내보내기·팀에서 제외. 받으면 앱이 그 방을 정리하고 열려 있던 화면을 닫음 |
+| 서버→클라이언트 | `user:status` | 상태 메시지·방해 금지가 바뀜 `{ userId, status, dnd }` — 그 사람과 팀을 같이 쓰는 사람들과 그 사람의 기기들(`user:<id>`)에게. 처음 값은 `GET /api/users`·`GET /api/users/me`의 `status`·`dnd` |
 | 서버→클라이언트 | `presence:update` | 온라인/오프라인 `{ userId, online }` — 그 사람과 팀을 하나라도 같이 쓰는 사람들의 `user:<id>`에게만(팀이 없으면 아무에게도 안 감 — `presence.js`의 `broadcastPresence`). 처음 접속 상태는 `GET /api/users`의 `online`으로 채움 |
+| 서버→클라이언트 | `message:reactions` | 메시지 공감이 바뀜 `{ roomId, messageId, reactions }` — `reactions`는 바뀐 뒤의 전체 목록 `[{ emoji, userIds }]`(방 전체에 같은 값 — "내 공감"은 앱이 `userIds`로 판단) |
+| 서버→클라이언트 | `reminder:changed` | 내 메시지 리마인더를 걸거나 취소했거나 울림 `{}` — 내 기기들(`user:<id>`)에게. 열려 있는 리마인더 창이 다시 불러온다 |
 | 서버→클라이언트 | `poll:updated` | 투표·다시 투표·취소·마감 `{ roomId, messageId, pollId, poll, actorId, actorOptionIds }` — `poll`은 그때의 표 수(더하는 값이 아님, 익명이면 `voters` 없음). 방에는 `actorId`·`actorOptionIds`를 `null`로, 투표한 사람의 기기들(`user:<id>`)에만 내 id와 내 선택(취소면 빈 배열)을 실어 보냄 — 익명 투표의 선택이 새지 않게 |
 | 서버→클라이언트 | `project:changed` | 내가 참여 중인 프로젝트에서 뭔가 바뀜(프로젝트/업무/댓글) — 열려 있는 프로젝트 창이 다시 불러온다 |
 | 서버→클라이언트 | `bookmark:changed` | 북마크가 만들어짐·수정됨·삭제됨·순서가 바뀜 `{ teamId, kind: team｜personal }` — 팀 북마크는 그 팀 멤버 모두에게, 개인 북마크는 본인(`user:<id>`)에게. 받으면 열려 있는 북마크 패널이 조용히 다시 불러옵니다 |
@@ -1798,7 +1874,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb) |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급) |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |
@@ -1809,11 +1885,15 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(1:1 대화에서 한 사람이 빠졌을 때 — 비밀 대화를 혼자 나갔거나 팀에서 제외됐을 때 — 남은 쪽에 "OOO (나갔음)"으로 보여 줄 사람. 그 사람이 다시 들어오면 지움. 이름은 비밀 대화에만 쓰던 시절 그대로), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
-| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`) |
+| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷) |
+| `message_reminders` | 메시지 리마인더("나중에 알림"). 사람·메시지·방(모두 cascade), `remind_at`, 울린 때 `fired_at`(울린 지 30일 지나면 지움). 인덱스: 울리기 전 것만의 `remind_at`(partial)·`(user_id, remind_at)` |
+| `message_reactions` | 메시지 공감(이모지 반응). 메시지+사람 복합 PK라 한 사람이 메시지마다 하나(`emoji`, 바꾸면 `created_at`도 새로). 메시지·사람을 하드 삭제하면 cascade |
 | `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다. 목록 필터용 인덱스: `polls (room_id, created_at desc)`·`polls (creator_id, created_at desc)`·`poll_votes (user_id, poll_id)` |
 | `albums` / `album_items` | 앨범. `albums`는 방(`room_id`)에 딸린 앨범 한 건(제목·설명·대표 항목 `cover_item_id` — FK 없이 두어 항목이 지워져 가리킬 곳이 없으면 API가 가장 최근 사진으로 대신 보여 줌), `album_items`는 그 안의 이미지·영상(`kind` image\|video, `file_url`/`thumbnail_url`은 업로드 원본 경로, 크기·`mime_type`·`width`/`height`·`duration_ms`)입니다. 대화방 파일(`message_attachments`)과는 독립이고, 앨범을 지우면 항목이 cascade로 지워집니다. 인덱스: `albums (room_id, created_at desc)`·`albums (team_id)`·`album_items (album_id, created_at)` |
 | `message_favorites` / `comment_favorites` / `member_favorites` | 통합 즐겨찾기(사람별). 메시지(`user_id`+`message_id` 복합 PK)·댓글(`user_id`+`comment_id`)·멤버(`user_id`+`team_id`+`favorite_user_id`) 즐겨찾기를 `created_at`(담은 시각, 목록 정렬·`before` 커서)과 함께 보관하고, 대상·사람·팀이 지워지면 cascade로 같이 지워집니다. 파일(`favorite_files`)·투표(`poll_favorites`)·대화방(`room_members.favorite`)은 예전 표를 그대로 씁니다 |
 | `calendars` / `calendar_members` / `calendar_events` / `calendar_event_attendees` / `calendar_event_colors` | 캘린더. 팀 단위 `calendars`(`kind`: `personal`\|`team`\|`shared`, 팀당 팀 캘린더 1개·사람당 기본 캘린더 1개는 partial unique index), 멤버·구독·개인 색/숨김(`calendar_members` — `role`: `admin`\|`write`\|`read`\|`subscriber`), 일정(`calendar_events` — `recurrence` jsonb, 빠진 회차 `exdates`), 참석자, 사람별 일정 색. `users.birthday`(`MM-DD`)는 생일 캘린더에 쓰인다 |
+| `external_calendars` / `external_calendar_events` | 외부 캘린더 구독(사람·팀마다). `url_enc`(구독 주소 — 비밀 토큰이 들어 있어 암호화)·`host`·`color`·`hidden`·`content_hash`(받은 내용+주 번호 — 같으면 다시 펼치지 않음)·`last_fetched_at`/`last_success_at`/`last_error`. 받은 회차는 `external_calendar_events`(`uid`·제목·설명·장소·`start_at`/`end_at`·`all_day`)에 통째로 바꿔 넣는다(과거 1년~미래 2년, 5,000개까지). 팀을 떠나면 다음 새로고침 때 지움 |
+| `calendar_feeds` | 내 일정 내보내기 주소(사람·팀마다 하나 — unique). 토큰은 조회용 HMAC(`token_hash`, unique)과 앱에 다시 보여 줄 암호문(`token_enc`)으로만, `last_access_at`(10분에 한 번 기록) |
 | `dm_history_floors` | 1:1 대화를 "나가기"로 떠난 사람의 기준 시각 — 다시 대화가 시작돼도 그 이전 메시지는 보이지 않게 함 |
 | `message_attachments` | 메시지 하나에 딸린 첨부들(`kind` image\|file, `file_url`/`thumbnail_url`, `position`). 첨부가 둘 이상일 때(보드 게시글은 하나여도) 저장하고, 첨부 하나뿐인 예전 방식 메시지는 `messages`의 파일 칸이 곧 첨부 하나입니다. 메시지 수정의 첨부 삭제는 이 행을 지우고 파일 칸을 남은 첫 첨부로 맞춥니다. **파일 소프트 삭제**(업로드한 본인·팀 관리자)는 행을 남기고 `deleted_at`/`deleted_by`만 찍으며(옛 단일 파일 칸은 `messages.file_deleted_at`), 파일 패널·검색·즐겨찾기가 이 값으로 거릅니다 |
 | `uploads` | 업로드한 파일과 올린 사람 — `file_name`(PK, 업로드 폴더 안의 저장 이름 `<uuid>.<확장자>`), `uploader_id`(탈퇴 등으로 계정이 지워지면 null), `created_at`. `/api/upload`가 한 줄씩 남기고, 비밀 대화가 "보낸 사람이 직접 올린 파일"만 받는 검사와 자동 삭제가 파일을 실제로 지울지 정할 때 씁니다(`server/src/db/queries/uploads.js`). 이 표가 생기기 전에 올린 파일은 행이 없어 지우지 않습니다 |
@@ -1841,7 +1921,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `project_notification_policies` | 프로젝트 알림 정책(종류별 on/off, 프로젝트당 한 줄) |
 | `task_references` | 업무 참조자(`task_id`, `user_id` 복합 PK). "내 업무"에 참조된 업무를 함께 보여주는 데 쓴다 |
 | `task_comments` | 업무 카드에 달린 댓글. `project_id`를 같이 들고 있어(비정규화) 대시보드의 "최근 댓글"을 조인 없이 모은다 |
-| `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `web_push_subscription`(웹 앱의 웹 푸시 구독 JSON), `last_seen_at`, `revoked_at`. 토큰·구독은 한 사람당 최근에 쓴(`last_seen_at`) 기기 10대 것만 남기고, 계정 정지·모든 기기 강제 로그아웃·탈퇴 때는 그 사람의 모든 기기에서 지웁니다(기기 행과 공개키는 지난 비밀 대화 때문에 그대로) |
+| `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `web_push_subscription`(웹 앱의 웹 푸시 구독 JSON), `kind`(기기 종류 `windows`\|`android`\|`web-desktop`\|`web-android`\|`web-mobile` — 예전 앱은 null), `last_seen_at`, `revoked_at`. 토큰·구독은 한 사람당 최근에 쓴(`last_seen_at`) 기기 10대 것만 남기고, 계정 정지·모든 기기 강제 로그아웃·탈퇴 때는 그 사람의 모든 기기에서 지웁니다(기기 행과 공개키는 지난 비밀 대화 때문에 그대로) |
 | `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 사용자·기기, 양측 임시 공개키+서명(키만 서명한 v1), `initiator_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이 보낸 쪽은 null, 마이그레이션 `0097_secret_context_signatures`), `initiator_protocol`(초대한 앱이 아는 규약 번호 — 새 앱은 3, 예전 앱이면 null, 마이그레이션 `0098_secret_initiator_protocol`), `key_epoch`(예전 규약의 재키잉 세대 — 새 앱은 올리지 않음), `self_destruct_seconds` |
 | `secret_rekeys` | 예전 앱의 재키잉 제안/수락 이력(같은 방·epoch의 수락 안 된 제안은 새 제안으로 바뀜) — 양측 임시 공개키+서명(v1), `proposer_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이면 null, 마이그레이션 `0097`) |
 

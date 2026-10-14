@@ -715,6 +715,41 @@
       "when": 1791934693946,
       "tag": "0101_server_backup",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1791940082570,
+      "tag": "0102_message_reactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1791941256666,
+      "tag": "0103_user_status_dnd",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1791942977358,
+      "tag": "0104_device_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1791944354795,
+      "tag": "0105_message_reminders",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1791944875983,
+      "tag": "0106_external_calendars",
+      "breakpoints": true
     }
   ]
 }

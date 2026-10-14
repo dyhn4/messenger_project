@@ -64,18 +64,20 @@ test('listWebPushSubscriptionsForUser: 같은 계정 상태 조건으로 고르�
   const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'p', auth: 'a' } };
   const queries = recordQueries(t, {
     rows: [
-      ['browser', JSON.stringify(subscription)],
-      ['broken', '{not json'],
+      ['browser', 'web-desktop', JSON.stringify(subscription)],
+      ['broken', null, '{not json'],
     ],
   });
   assert.deepEqual(await listWebPushSubscriptionsForUser(USER), [
-    { deviceId: 'browser', subscription },
-    { deviceId: 'broken', subscription: null }, // webPush.js가 보내기 전에 지운다.
+    { deviceId: 'browser', kind: 'web-desktop', subscription },
+    { deviceId: 'broken', kind: null, subscription: null }, // webPush.js가 보내기 전에 지운다.
   ]);
   assert.equal(queries.length, 1);
   const [{ text, values }] = queries;
   assert.ok(
-    text.startsWith(`select "devices"."id", "devices"."web_push_subscription" from "devices" ${ACCOUNT_JOIN} where (`),
+    text.startsWith(
+      `select "devices"."id", "devices"."kind", "devices"."web_push_subscription" from "devices" ${ACCOUNT_JOIN} where (`,
+    ),
     text,
   );
   assert.ok(

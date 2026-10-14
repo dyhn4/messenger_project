@@ -7,6 +7,7 @@ import '../models/call_card.dart';
 import '../models/comment.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
+import '../models/message_reaction.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/text_format.dart';
@@ -319,6 +320,11 @@ class RoomChatController extends ChangeNotifier {
       }
       // 투표도 끊긴 동안 놓친 표·마감·삭제를 따라잡는다(REST는 내 기준 값을 준다).
       if (incoming.isPoll && _syncPollState(existing, incoming)) changed = true;
+      // 공감도 끊긴 동안 놓친 것을 따라잡는다(목록 응답에는 늘 전체 공감이 실려 온다).
+      if (!sameReactions(existing.reactions, incoming.reactions)) {
+        existing.reactions = incoming.reactions;
+        changed = true;
+      }
       final existingCommentIds = existing.comments.map((c) => c.id).toSet();
       for (final c in incoming.comments) {
         if (existingCommentIds.add(c.id)) {
@@ -827,6 +833,17 @@ class RoomChatController extends ChangeNotifier {
       changed = true;
     }
     return changed;
+  }
+
+  /// 공감(이모지 반응)이 바뀌었을 때(message:reactions, 또는 내가 누른 직후 서버 답을 기다리지 않고) — 그 메시지(고정 게시글
+  /// 목록에 같이 있으면 그것도)의 공감을 바꾼다. 아직 안 불러온 메시지면 아무것도 안 한다(나중에 받을 때 최신이 온다).
+  void applyReactions(String messageId, List<MessageReaction> reactions) {
+    final targets = _instancesOf(messageId);
+    if (targets.isEmpty) return;
+    for (final m in targets) {
+      m.reactions = reactions;
+    }
+    notifyListeners();
   }
 
   /// 화상회의 기록 카드가 바뀌었을 때(call:card) — 그 메시지의 카드를 바꾼다. 목록에 없으면 false.

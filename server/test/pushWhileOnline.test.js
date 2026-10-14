@@ -98,7 +98,8 @@ test('push.js: 사람 단위로는 skipsPush로만 빼고, FCM 토큰은 접속�
 });
 
 test('webPush.js: 소켓이 붙어 있는 기기(열린 웹 앱 탭)로는 웹 푸시를 보내지 않는다', () => {
-  assert.match(read('webPush.js'), /subscriptions = subscriptions\.filter\(\(\{ deviceId \}\) => !isDeviceConnected\(deviceId\)\);/);
+  // 붙어 있는 기기를 빼는 규칙은 presence.js의 webPushTargets로 옮겼다(test/webPushDesktopDuplicate.test.js가 직접 돌려 본다).
+  assert.match(read('webPush.js'), /subscriptions = webPushTargets\(subscriptions, appDeviceIds\);/);
 });
 
 test('멘션·할 일 푸시도 같은 규칙(skipsPush)', () => {

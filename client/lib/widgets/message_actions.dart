@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../data/stickers.dart';
 import '../models/comment.dart';
 import '../models/message.dart';
+import '../models/message_reaction.dart' show myReaction;
 import '../models/project.dart' show Project;
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/message_forward_screen.dart';
@@ -14,6 +15,8 @@ import 'app_toast.dart';
 import 'favorite_actions.dart';
 import 'hover_toolbar.dart' show hoverMenuItem;
 import 'message_announce.dart';
+import 'message_reactions.dart';
+import 'message_reminders.dart';
 import 'todo_from_message.dart';
 
 /// message_bubble.dart(실제 메시지)와 message_comments_card.dart(댓글)가 공용으로 쓰는
@@ -262,6 +265,9 @@ void showMessageActionSheet(
   final cannotShare = isSecretRoom || message.isPoll;
   final favoriteOn = isEntryFavorite(session, message.id, isComment: isComment);
 
+  // 공감(이모지 반응) — 진짜 메시지(댓글 아님)이고 공감할 수 있는 방이면 시트 맨 위에 고르는 줄을 둔다(카카오톡처럼).
+  final canReact = !isComment && canReactToMessage(session, message);
+
   showModalBottomSheet(
     context: context,
     // 항목이 늘어 작은 화면에서는 시트 높이(화면의 9/16)를 넘을 수 있어서 스크롤되게 한다.
@@ -270,6 +276,32 @@ void showMessageActionSheet(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (canReact) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: ReactionPicker(
+                    key: const ValueKey('sheet-reaction-picker'),
+                    selected: myReaction(message.reactions, session.userId),
+                    onPicked: (emoji) {
+                      Navigator.of(sheetContext).pop();
+                      reactToMessage(context, session, message, emoji);
+                    },
+                  ),
+                ),
+              ),
+              if (message.reactions.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.people_outline),
+                  title: const Text('공감한 사람'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    showReactorsSheet(context, session, message);
+                  },
+                ),
+              const Divider(height: 1),
+            ],
             if (!cannotShare)
               ListTile(
                 leading: const Icon(Icons.share_outlined),
@@ -339,6 +371,16 @@ void showMessageActionSheet(
                     message: message,
                     senderDisplayName: senderDisplayName,
                   );
+                },
+              ),
+            if (!isComment && canRemindMessage(message))
+              ListTile(
+                key: const ValueKey('action-reminder'),
+                leading: const Icon(Icons.alarm_add_outlined),
+                title: const Text('나중에 알림'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showReminderPicker(context, session, message);
                 },
               ),
             if (canRegisterAsTodo(session, message))
@@ -452,6 +494,12 @@ List<Widget> messageActionMenuItems(
           message: message,
           senderDisplayName: senderDisplayName,
         ),
+      ),
+    if (!isComment && canRemindMessage(message))
+      hoverMenuItem(
+        icon: Icons.alarm_add_outlined,
+        label: '나중에 알림',
+        onPressed: () => showReminderPicker(context, session, message),
       ),
     if (canRegisterAsTodo(session, message))
       hoverMenuItem(

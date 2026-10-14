@@ -44,6 +44,27 @@ export function isDeviceConnected(deviceId) {
   return deviceConnectionCounts.has(deviceId);
 }
 
+/**
+ * 웹 푸시를 실제로 보낼 구독들 — [subscriptions]는 [{ deviceId, kind, subscription }], [appDeviceIds]는 이 사람의 앱 기기 id들
+ * `{ windows, android }`(queries/devices.js listAppDeviceIds). 소켓이 붙어 있는 기기(웹 앱 탭이 열려 있음)는 소켓으로 알림을
+ * 받으니 뺀다. 그리고 같은 종류의 앱이 접속해 있으면 그 종류의 브라우저도 뺀다 — PC 앱이 접속해 있으면 PC 브라우저
+ * (kind='web-desktop'), 안드로이드 앱이 접속해 있으면 안드로이드 브라우저(kind='web-android'). 앱을 켜 둔 기기에서 웹 앱 탭을
+ * 닫으면 브라우저 서비스 워커가 웹 푸시를 받아, 앱 알림과 브라우저 알림이 둘 다 떴다. 아이폰·아이패드 브라우저(web-mobile)와
+ * 종류를 모르는 예전 기기(null)는 그대로 보낸다. (다른 PC·다른 안드로이드 기기의 브라우저도 함께 조용해지지만, 그때는 접속해
+ * 있는 앱으로 받는다.)
+ */
+export function webPushTargets(subscriptions, appDeviceIds = {}) {
+  const online = (ids) => (ids ?? []).some((id) => isDeviceConnected(id));
+  const desktopAppOnline = online(appDeviceIds.windows);
+  const androidAppOnline = online(appDeviceIds.android);
+  return subscriptions.filter(
+    ({ deviceId, kind }) =>
+      !isDeviceConnected(deviceId) &&
+      !(desktopAppOnline && kind === 'web-desktop') &&
+      !(androidAppOnline && kind === 'web-android'),
+  );
+}
+
 /** 접속 중에 설정을 바꿨을 때(notifications.js PATCH) — 접속해 있지 않으면 다음 접속 때 읽으니 둘 필요가 없다. */
 export function setPushWhileOnline(userId, value) {
   if (connectionCounts.has(userId)) pushWhileOnlineByUser.set(userId, !!value);

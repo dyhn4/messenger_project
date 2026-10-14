@@ -148,6 +148,8 @@ class EventDetailBody extends StatelessWidget {
             ? '국가 공휴일'
             : event.isBirthday
             ? '멤버 생일'
+            : event.isExternal
+            ? '외부 캘린더'
             : '캘린더');
     final recurrence = event.recurrence;
     final canEdit = event.isUserEvent && event.canEdit && !event.restricted;
@@ -280,6 +282,16 @@ class EventDetailBody extends StatelessWidget {
                       Text(
                         event.isPrivate ? '비공개 (초대된 사람만 자세히 볼 수 있음)' : '공개',
                         key: const ValueKey('event-detail-visibility'),
+                      ),
+                    ),
+                  // 외부 캘린더(ICS 구독)에서 받아 온 일정 — 여기서는 고칠 수 없다.
+                  if (event.isExternal)
+                    row(
+                      Icons.cloud_download_outlined,
+                      Text(
+                        '외부 캘린더에서 가져온 일정입니다. 고치려면 원래 캘린더(Google·Outlook 등)에서 고치세요.',
+                        key: const ValueKey('event-detail-external'),
+                        style: TextStyle(color: theme.hintColor),
                       ),
                     ),
                   if ((event.creatorName ?? '').isNotEmpty && event.isUserEvent)

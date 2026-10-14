@@ -54,6 +54,10 @@ import { createDevicesRouter } from './devices.js';
 import { createInvitesRouter } from './invites.js';
 import { createTeamInvitesRouter } from './teamInvites.js';
 import { createMessagesRouter } from './messages.js';
+import { createReactionsRouter } from './reactions.js';
+import { createRemindersRouter, startReminderJob } from './reminders.js';
+import { createExternalCalendarsRouter, startExternalCalendarJob } from './externalCalendars.js';
+import { calendarFeedHandler, createCalendarFeedsRouter } from './calendarFeeds.js';
 import { createMessageFilesRouter } from './messageFiles.js';
 import { SOCKET_MAX_PAYLOAD_BYTES } from './messageLimits.js';
 import { createNotificationsRouter } from './notifications.js';
@@ -149,6 +153,10 @@ app.use('/api', requireAuth, createAnnouncementsRouter(io));
 app.use('/api', requireAuth, createInquiriesRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
+// 메시지 공감(이모지 반응) — PUT /messages/:id/reaction(reactions.js).
+app.use('/api', requireAuth, createReactionsRouter(io));
+// 메시지 리마인더("나중에 알림") — POST /messages/:id/reminders, GET/DELETE /reminders(reminders.js).
+app.use('/api', requireAuth, createRemindersRouter(io));
 // 파일 삭제(업로드한 본인·팀 관리자) — 소프트 삭제라 댓글은 남는다(messageFiles.js).
 app.use('/api', requireAuth, createMessageFilesRouter(io));
 // 투표 — 만들기(방 메시지)·투표하기·마감·즐겨찾기. 소켓 message:send로는 못 만든다(polls.js).
@@ -167,6 +175,9 @@ app.use('/api', requireAuth, createBookmarksRouter(io));
 app.use('/api', requireAuth, createNotificationsRouter(io));
 // 캘린더(기본/팀/공유 캘린더, 일정, 반복, 공휴일·생일) — 권한은 calendars.js의 calendarAccess 한 곳에서 계산한다.
 app.use('/api', requireAuth, createCalendarsRouter(io));
+// 외부 캘린더 연동 — ICS 주소 구독(가져오기, externalCalendars.js)과 내 일정 ICS 구독 주소(내보내기, calendarFeeds.js).
+app.use('/api', requireAuth, createExternalCalendarsRouter(io));
+app.use('/api', requireAuth, createCalendarFeedsRouter());
 // 할 일(To-Do) — 대화방에 딸린 가벼운 할 일(담당자·기한·첨부·알림 일정). 프로젝트 업무와는 별개(todos.js).
 app.use('/api', requireAuth, createTodosRouter(io));
 app.use('/api', requireAuth, createDevicesRouter());
@@ -203,6 +214,8 @@ app.get('/server-info', (req, res) =>
 app.use(versionRouter);
 // 초보자용 도움말(server/guide/ 정적 페이지) — 모든 회원이 보는 공개 문서라 인증 없이(version.js).
 app.use('/guide', guideStatic);
+// 내 일정 ICS 구독 주소 — Google·Outlook 캘린더가 로그인 없이 받아 가므로 인증 대신 주소의 긴 비밀 토큰으로 연다(calendarFeeds.js).
+app.get('/calendar-feed/:token', rateLimit(limits.calendarFeedIp, '캘린더 피드 요청'), calendarFeedHandler);
 // FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
 app.use(firebaseConfigRouter);
 // 웹 앱의 웹 푸시 공개키(VAPID) — 브라우저가 구독할 때 쓰는 공개값이라 인증 없이(webPush.js).
@@ -276,6 +289,10 @@ startAnnouncementAutoUnpinJob(io);
 startProjectDueReminderJob(io);
 startScheduledMessageJob(io);
 startTodoReminderJob(io);
+// 메시지 리마인더 — 30초마다 울릴 때가 된 것을 "나와의 대화"에 올린다(reminders.js).
+startReminderJob(io);
+// 외부 캘린더(ICS 구독) — 5분마다 30분이 지난 구독을 다시 받는다(externalCalendars.js).
+startExternalCalendarJob(io);
 
 // 코드가 기대하는 스키마와 DB가 어긋난 채로 뜨면, 서버는 멀쩡해 보이는데 새 컬럼을 읽는
 // 화면만 조용히 비어 보인다 — 뜨기 전에 확인해서 콘솔에 크게 알린다(막지는 않는다).

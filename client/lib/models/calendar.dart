@@ -76,7 +76,8 @@ class CalendarInfo {
   final String id;
   final String teamId;
 
-  /// 'personal'(기본) | 'team' | 'shared' | 'holidays' | 'birthdays'(내장, 클라이언트가 만든 것).
+  /// 'personal'(기본) | 'team' | 'shared' | 'holidays' | 'birthdays'(내장, 클라이언트가 만든 것)
+  /// | 'external'(외부 ICS 구독 — id가 `ext:`로 시작하고 나에게만 보인다, 읽기 전용).
   final String kind;
   final String name;
 
@@ -96,6 +97,11 @@ class CalendarInfo {
   final bool canDelete;
   final bool canEditSettings;
 
+  /// 외부 캘린더(kind 'external')만: 구독 주소의 호스트(calendar.google.com 등), 마지막으로 받아 온 때, 마지막 실패 이유.
+  final String? host;
+  final DateTime? lastSuccessAt;
+  final String? lastError;
+
   const CalendarInfo({
     required this.id,
     this.teamId = '',
@@ -111,6 +117,9 @@ class CalendarInfo {
     this.canCreateEvents = false,
     this.canDelete = false,
     this.canEditSettings = false,
+    this.host,
+    this.lastSuccessAt,
+    this.lastError,
   }) : defaultColor = defaultColor ?? color;
 
   factory CalendarInfo.fromJson(Map<String, dynamic> json) {
@@ -130,6 +139,13 @@ class CalendarInfo {
       canCreateEvents: json['canCreateEvents'] as bool? ?? false,
       canDelete: json['canDelete'] as bool? ?? false,
       canEditSettings: json['canEditSettings'] as bool? ?? false,
+      host: json['host'] as String?,
+      lastSuccessAt: json['lastSuccessAt'] is num
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (json['lastSuccessAt'] as num).toInt(),
+            )
+          : null,
+      lastError: json['lastError'] as String?,
     );
   }
 
@@ -171,16 +187,59 @@ class CalendarInfo {
     canCreateEvents: canCreateEvents,
     canDelete: canDelete,
     canEditSettings: canEditSettings,
+    host: host,
+    lastSuccessAt: lastSuccessAt,
+    lastError: lastError,
   );
 
   /// 국가 공휴일·멤버 생일 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
   bool get isBuiltin => id == kHolidaysCalendarId || id == kBirthdaysCalendarId;
 
   /// 다른 사람의 캘린더를 구독 중인지(구독 취소로 없앨 수 있다).
-  bool get isSubscriber => role == 'subscriber' && !isBuiltin;
+  bool get isSubscriber => role == 'subscriber' && !isBuiltin && !isExternal;
+
+  /// 외부 ICS 주소를 구독한 캘린더(Google·Outlook 등) — 나에게만 보이고 일정은 고칠 수 없다.
+  bool get isExternal => kind == 'external';
 
   /// 내가 멤버로 들어 있는 shared 캘린더(소유자가 아니면 "나에게만 삭제"로 나갈 수 있다).
   bool get isSharedMember => kind == 'shared' && role != 'subscriber';
+}
+
+/// 외부 캘린더의 id 머리 — 서버가 외부 ICS 구독을 `ext:<id>`로 내려 준다(일정 회차의 calendarId도 같다).
+const kExternalCalendarPrefix = 'ext:';
+
+bool isExternalCalendarId(String id) => id.startsWith(kExternalCalendarPrefix);
+
+/// `ext:<id>` → 서버 경로에 넣는 `<id>`.
+String externalCalendarKey(String id) => isExternalCalendarId(id)
+    ? id.substring(kExternalCalendarPrefix.length)
+    : id;
+
+/// 내 일정 내보내기(GET /teams/:teamId/calendar-feed) — [url]이 null이면 아직 만들지 않았다.
+/// [publicAddress]는 서버에 공인 인증서가 걸린 웹 주소가 있는지(없으면 Google·Outlook 같은 바깥 서비스가 이 주소를 받지 못할 수 있다).
+class CalendarFeed {
+  final String? url;
+  final bool publicAddress;
+  final DateTime? createdAt;
+  final DateTime? lastAccessAt;
+
+  const CalendarFeed({
+    this.url,
+    this.publicAddress = false,
+    this.createdAt,
+    this.lastAccessAt,
+  });
+
+  factory CalendarFeed.fromJson(Map<String, dynamic> json) {
+    DateTime? at(Object? v) =>
+        v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
+    return CalendarFeed(
+      url: json['url'] as String?,
+      publicAddress: json['publicAddress'] as bool? ?? false,
+      createdAt: at(json['createdAt']),
+      lastAccessAt: at(json['lastAccessAt']),
+    );
+  }
 }
 
 /// 캘린더 멤버 한 명(GET /calendars/:id/members).
@@ -336,7 +395,7 @@ class EventOccurrence {
   final String? eventId;
   final String calendarId;
 
-  /// 'event' | 'holiday' | 'birthday'
+  /// 'event' | 'holiday' | 'birthday' | 'external'(외부 ICS 캘린더에서 받아 온 일정 — 읽기 전용)
   final String source;
   final String title;
   final String? description;
@@ -423,6 +482,7 @@ class EventOccurrence {
 
   bool get isHoliday => source == 'holiday';
   bool get isBirthday => source == 'birthday';
+  bool get isExternal => source == 'external';
 
   /// 사용자가 만든 일정(수정·삭제·참석자가 있을 수 있는 것) — 공휴일·생일이 아니다.
   bool get isUserEvent => source == 'event';

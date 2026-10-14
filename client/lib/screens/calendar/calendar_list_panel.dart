@@ -5,11 +5,13 @@ import '../../services/api_client.dart' show ApiException;
 import '../../services/calendar_controller.dart';
 import '../../widgets/app_toast.dart';
 import 'calendar_common.dart';
+import 'external_calendar_dialogs.dart';
 
 /// 캘린더 목록 — 데스크톱은 왼쪽 열, 모바일은 서랍. "나의 캘린더"(기본·팀·내가 만든/속한 shared)와
 /// "구독 캘린더"(국가 공휴일·멤버 생일·구독한 캘린더) 두 묶음이고, 각 항목의 체크박스로 내 화면에서
 /// 보이기/숨기기를 토글한다. ⋯ 메뉴의 색 변경은 여기서 처리하고, 설정·구독 취소·삭제와 두 "+"는
-/// [CalendarManagementHooks]로 넘긴다.
+/// [CalendarManagementHooks]로 넘긴다. 그 아래 "외부 캘린더"(Google·Outlook 등의 ICS 구독 — 나에게만 보인다)와
+/// "내 일정 내보내기"(ICS 구독 주소)는 external_calendar_dialogs.dart가 처리한다.
 class CalendarListPanel extends StatelessWidget {
   final CalendarController controller;
   final CalendarManagementHooks hooks;
@@ -84,6 +86,28 @@ class CalendarListPanel extends StatelessWidget {
             ),
             for (final c in controller.subscribedGroup)
               _CalendarTile(calendar: c, controller: controller, hooks: hooks),
+            const SizedBox(height: 8),
+            Divider(height: 1, color: theme.dividerColor),
+            // 외부 캘린더 구독은 나에게만 보이는 개인 설정이라 준회원도 쓸 수 있다.
+            _SectionHeader(
+              title: '외부 캘린더',
+              showAdd: controller.teamId != null,
+              addKey: const ValueKey('cal-add-external'),
+              addTooltip: '외부 캘린더 추가 (Google·Outlook 등)',
+              onAdd: () => showAddExternalCalendarDialog(context, controller),
+            ),
+            for (final c in controller.external)
+              _CalendarTile(calendar: c, controller: controller, hooks: hooks),
+            ListTile(
+              key: const ValueKey('cal-export-feed'),
+              dense: true,
+              contentPadding: const EdgeInsets.only(left: 20, right: 16),
+              leading: Icon(Icons.ios_share, size: 18, color: theme.hintColor),
+              minLeadingWidth: 20,
+              title: const Text('내 일정 내보내기 (ICS 주소)'),
+              enabled: controller.teamId != null,
+              onTap: () => showCalendarFeedDialog(context, controller),
+            ),
           ],
         );
       },
@@ -159,7 +183,7 @@ class _LoadError extends StatelessWidget {
   }
 }
 
-enum _CalAction { color, settings, leave, delete }
+enum _CalAction { color, settings, leave, delete, refresh, unsubscribe }
 
 class _CalendarTile extends StatelessWidget {
   final CalendarInfo calendar;
@@ -220,6 +244,10 @@ class _CalendarTile extends StatelessWidget {
         hook == null
             ? CalendarManagementHooks.notConnected(context, '캘린더 삭제')
             : hook(context, controller, calendar);
+      case _CalAction.refresh:
+        refreshExternalCalendarNow(context, controller, calendar);
+      case _CalAction.unsubscribe:
+        confirmRemoveExternalCalendar(context, controller, calendar);
     }
   }
 
@@ -233,8 +261,11 @@ class _CalendarTile extends StatelessWidget {
             (calendar.isSharedMember && !calendar.canDelete));
     // 관리자가 아닌 멤버·구독자도 설정 화면을 열어 읽기 전용으로 볼 수 있다(색 변경만 활성).
     // 팀 캘린더는 설정이 없어 색 변경만 있다.
-    final hasSettings = !calendar.isBuiltin && calendar.kind != 'team';
-    final hasDelete = !calendar.isBuiltin && calendar.canDelete;
+    final external = calendar.isExternal;
+    final hasSettings =
+        !calendar.isBuiltin && !external && calendar.kind != 'team';
+    final hasDelete = !calendar.isBuiltin && !external && calendar.canDelete;
+    final status = external ? externalStatusLabel(calendar) : '';
     final hasMenu = !calendar.isBuiltin;
     return InkWell(
       onTap: () => _toggle(context, calendar.hidden),
@@ -251,13 +282,32 @@ class _CalendarTile extends StatelessWidget {
               onChanged: (v) => _toggle(context, v ?? false),
             ),
             Expanded(
-              child: Text(
-                calendar.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: calendar.hidden ? theme.hintColor : null,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    calendar.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: calendar.hidden ? theme.hintColor : null,
+                    ),
+                  ),
+                  // 외부 캘린더: 어디서 받는지·언제 받았는지, 실패했으면 그 이유.
+                  if (status.isNotEmpty)
+                    Text(
+                      status,
+                      key: ValueKey('cal-status-${calendar.id}'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: calendar.lastError != null
+                            ? theme.colorScheme.error
+                            : theme.hintColor,
+                      ),
+                    ),
+                ],
               ),
             ),
             if (hasMenu)
@@ -287,6 +337,16 @@ class _CalendarTile extends StatelessWidget {
                       value: _CalAction.delete,
                       child: Text('삭제'),
                     ),
+                  if (external) ...[
+                    const PopupMenuItem(
+                      value: _CalAction.refresh,
+                      child: Text('지금 새로고침'),
+                    ),
+                    const PopupMenuItem(
+                      value: _CalAction.unsubscribe,
+                      child: Text('구독 해지'),
+                    ),
+                  ],
                 ],
               )
             else

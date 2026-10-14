@@ -12,6 +12,8 @@ import '../models/inquiry.dart';
 import '../models/comment.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
+import '../models/message_reaction.dart';
+import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/scheduled_message.dart';
@@ -397,6 +399,16 @@ typedef CallDeclined = ({String roomId, String userId, String name});
 /// 화상회의 기록 카드가 바뀌었다(call:card — 서버 callCards.js). 끝났을 때는 메시지 글(요약)도 같이 온다.
 typedef CallCardUpdate = ({String roomId, String messageId, CallCard card, String? text});
 
+/// 메시지의 공감(이모지 반응)이 바뀌었다(message:reactions — 서버 reactions.js). [reactions]는 바뀐 뒤의 전체 목록.
+typedef MessageReactionsUpdate = ({
+  String roomId,
+  String messageId,
+  List<MessageReaction> reactions,
+});
+
+/// 누군가(나 포함)의 상태 메시지·방해 금지가 바뀌었다(user:status — 서버 users.js). 같은 팀 사람과 내 기기들에 온다.
+typedef UserStatusUpdate = ({String userId, UserStatus? status, DndState? dnd});
+
 /// 토픽에서 내보내졌거나 토픽이 삭제돼서, 또는 팀에서 제외돼서 이 방이 내 목록에서 사라졌다는
 /// 알림(room:removed) — user: 방으로만 온다. Session이 방을 정리한 뒤 같은 모양으로 roomRemovedEvents에
 /// 흘려서 화면이 안내 토스트([toastText])를 띄우고 열려 있던 그 방을 닫게 한다. 팀에서 제외된 방은
@@ -516,10 +528,14 @@ class ChatSocket {
   final _commentDeletedController =
       StreamController<CommentDeletedEvent>.broadcast();
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
+  final _userStatusController = StreamController<UserStatusUpdate>.broadcast();
+  final _reminderChangedController = StreamController<void>.broadcast();
   final _callStateController = StreamController<CallState>.broadcast();
   final _callMicController = StreamController<CallMicRequest>.broadcast();
   final _callDeclinedController = StreamController<CallDeclined>.broadcast();
   final _callCardController = StreamController<CallCardUpdate>.broadcast();
+  final _messageReactionsController =
+      StreamController<MessageReactionsUpdate>.broadcast();
   final _announcementController = StreamController<Announcement>.broadcast();
   final _announcementUpdatedController =
       StreamController<Announcement>.broadcast();
@@ -701,6 +717,12 @@ class ChatSocket {
   /// 누군가 온라인/오프라인으로 바뀌었다는 브로드캐스트. 멤버 목록의 초록 점 갱신에 쓴다.
   Stream<PresenceUpdate> get presenceEvents => _presenceController.stream;
 
+  /// 상태 메시지·방해 금지가 바뀌었다(user:status).
+  Stream<UserStatusUpdate> get userStatusEvents => _userStatusController.stream;
+
+  /// 내 리마인더 목록이 바뀌었다(reminder:changed — 걸기·취소·울림, 내 기기들로만 온다).
+  Stream<void> get reminderChanges => _reminderChangedController.stream;
+
   /// 화상회의 상태가 바뀔 때마다(누가 들어오고 나갈 때) 그 방의 멤버 전원에게 온다.
   Stream<CallState> get callStates => _callStateController.stream;
 
@@ -712,6 +734,10 @@ class ChatSocket {
 
   /// 대화방의 화상회의 기록 카드가 바뀌었다(call:card) — 참여·거절·나감·종료.
   Stream<CallCardUpdate> get callCards => _callCardController.stream;
+
+  /// 메시지의 공감(이모지 반응)이 바뀌었다(message:reactions) — 내가 바꾼 것도 온다(다른 기기·다른 사람과 같이 맞춘다).
+  Stream<MessageReactionsUpdate> get messageReactions =>
+      _messageReactionsController.stream;
 
   /// 토픽방 공지가 새로 올라올 때마다(announcement:new) — 방 상단 배너와 공지 목록 화면이
   /// 이걸로 즉시 갱신된다.
@@ -1111,6 +1137,18 @@ class ChatSocket {
         ));
       }
     });
+    socket.on('message:reactions', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      final roomId = m['roomId'];
+      final messageId = m['messageId'];
+      if (roomId is String && messageId is String) {
+        _messageReactionsController.add((
+          roomId: roomId,
+          messageId: messageId,
+          reactions: parseReactions(m['reactions']),
+        ));
+      }
+    });
     socket.on('call:declined', (data) {
       final m = Map<String, dynamic>.from(data as Map);
       final roomId = m['roomId'];
@@ -1124,6 +1162,21 @@ class ChatSocket {
       _presenceController.add(
         PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
       );
+    });
+    socket.on(
+      'reminder:changed',
+      (_) => _reminderChangedController.add(null),
+    );
+    socket.on('user:status', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      final userId = m['userId'];
+      if (userId is String) {
+        _userStatusController.add((
+          userId: userId,
+          status: UserStatus.fromJson(m['status']),
+          dnd: DndState.fromJson(m['dnd']),
+        ));
+      }
     });
     socket.on('secret:invite', (data) {
       _secretInviteController.add(

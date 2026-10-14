@@ -18,6 +18,8 @@ import '../models/comment.dart';
 import '../models/invite_result.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
+import '../models/message_reaction.dart';
+import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/room_permissions.dart';
@@ -112,6 +114,9 @@ class Session extends ChangeNotifier {
   /// 막는다 — 로컬 알림만 끄고 나머지(방 목록 갱신 등)는 그대로 동작한다.
   final bool suppressNotifications;
 
+  /// 로컬 알림을 띄우지 않을 때 — 둘째 창이거나([suppressNotifications]) 방해 금지 중이거나([notificationsPaused]).
+  bool get _quietNotifications => suppressNotifications || notificationsPaused;
+
   static const _kServerUrl = 'server_base_url';
   static const _kExternalServerUrl = 'server_external_url';
   static const _kInternalServerUrls = 'server_internal_urls';
@@ -121,6 +126,7 @@ class Session extends ChangeNotifier {
   static const _kUsername = 'auth_username';
   static const _kRememberedUsername = 'remembered_username';
   static const _kKeepSignedInPref = 'keep_signed_in_pref';
+  static const _kWebPushEnabled = 'web_push_enabled';
   static const _secretPreviewPlaceholder = '새 메시지가 있습니다';
 
   // FCM 백그라운드 핸들러(main.dart)는 이 Session과 완전히 별개의 격리된 isolate에서
@@ -173,6 +179,10 @@ class Session extends ChangeNotifier {
   /// 여부)와는 별개로, 체크박스 자체의 화면 표시값을 다음에 로그인 화면을 열 때도 그대로
   /// 보여주기 위한 값이다. 저장된 적이 없으면(첫 실행 등) 기본값 true.
   bool keepSignedInPref = true;
+
+  /// 웹 앱 환경설정의 "앱을 닫아도 알림 받기"(이 브라우저의 웹 푸시) — 이 브라우저에만 저장되고 기본은 켬. 끄면 서버·브라우저의
+  /// 구독을 지우고, 다음에 앱을 열어도 다시 구독하지 않는다([setWebPushEnabled]). 앱이 열려 있는 동안의 알림은 그대로 뜬다.
+  bool webPushEnabled = true;
 
   String? name;
   String? email;
@@ -438,10 +448,12 @@ class Session extends ChangeNotifier {
   StreamSubscription? _commentEditedSub;
   StreamSubscription? _commentDeletedSub;
   StreamSubscription? _presenceSub;
+  StreamSubscription<UserStatusUpdate>? _userStatusSub;
   StreamSubscription<CallState>? _callStateSub;
   StreamSubscription<CallMicRequest>? _callMicSub;
   StreamSubscription<CallDeclined>? _callDeclinedSub;
   StreamSubscription<CallCardUpdate>? _callCardSub;
+  StreamSubscription<MessageReactionsUpdate>? _messageReactionsSub;
   StreamSubscription<Announcement>? _announcementSub;
   StreamSubscription<Announcement>? _announcementUpdatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _announcementDeletedSub;
@@ -667,6 +679,7 @@ class Session extends ChangeNotifier {
     username = _prefs.getString(_kUsername);
     rememberedUsername = _prefs.getString(_kRememberedUsername);
     keepSignedInPref = _prefs.getBool(_kKeepSignedInPref) ?? true;
+    webPushEnabled = _prefs.getBool(_kWebPushEnabled) ?? true;
 
     if (serverUrl == null) {
       stage = AuthStage.needsServer;
@@ -716,6 +729,7 @@ class Session extends ChangeNotifier {
     this.userId = userId;
     this.username = username;
     keepSignedInPref = _prefs.getBool(_kKeepSignedInPref) ?? true;
+    webPushEnabled = _prefs.getBool(_kWebPushEnabled) ?? true;
     api = ApiClient(
       baseUrl: serverUrl,
       token: token,
@@ -1430,6 +1444,7 @@ class Session extends ChangeNotifier {
       name = me.name;
       email = me.email;
       birthday = me.birthday;
+      if (userId != null) _applyUserStatus(userId!, me.status, me.dnd);
       avatarType = me.avatarType;
       avatarEmoji = me.avatarEmoji;
       avatarColor = me.avatarColor;
@@ -1549,7 +1564,7 @@ class Session extends ChangeNotifier {
     _projectNotifSub = chatSocket.projectNotifications.listen((data) {
       projectUnread =
           (data['unreadCount'] as num?)?.toInt() ?? projectUnread + 1;
-      if (!suppressNotifications) {
+      if (!_quietNotifications) {
         notifications.showProjectNotification(
           title: data['title'] as String? ?? '프로젝트',
           body: data['body'] as String? ?? '',
@@ -1668,6 +1683,10 @@ class Session extends ChangeNotifier {
       }
       _controllers[e.roomId]?.applyCommentDelete(e.id);
     });
+    _userStatusSub?.cancel();
+    _userStatusSub = chatSocket.userStatusEvents.listen(
+      (e) => _applyUserStatus(e.userId, e.status, e.dnd),
+    );
     _presenceSub?.cancel();
     _presenceSub = chatSocket.presenceEvents.listen((e) {
       if (e.online) {
@@ -1688,6 +1707,13 @@ class Session extends ChangeNotifier {
       // 그 방을 열어 본 적이 있어 메시지가 메모리에 있을 때만 그 자리에서 바꾼다(아니면 나중에 열 때 최신을 받는다).
       (u) =>
           existingControllerFor(u.roomId)?.applyCallCard(u.messageId, u.card),
+    );
+    _messageReactionsSub?.cancel();
+    _messageReactionsSub = chatSocket.messageReactions.listen(
+      // 공감 — 그 방의 메시지가 메모리에 있을 때만 그 자리에서 바꾼다(아니면 나중에 열 때 최신을 받는다).
+      (u) => existingControllerFor(
+        u.roomId,
+      )?.applyReactions(u.messageId, u.reactions),
     );
     _callDeclinedSub?.cancel();
     _callDeclinedSub = chatSocket.callDeclined.listen((e) {
@@ -1795,7 +1821,7 @@ class Session extends ChangeNotifier {
           }
         }
       }
-      if (suppressNotifications) return;
+      if (_quietNotifications) return;
       final teamTag = _teamTagFor(room);
       final teamBadge = teamTag == null ? '' : ' [$teamTag]';
       notifications.showMessage(
@@ -1975,7 +2001,9 @@ class Session extends ChangeNotifier {
   /// 사용자가 단추를 누를 때만 할 수 있어서 [enableWebNotifications]가 맡는다. 실패해도(구독 불가 브라우저,
   /// 예전 서버 등) 앱이 켜져 있는 동안의 알림은 그대로 뜬다.
   Future<void> _registerWebPush() async {
-    if (!kIsWeb || webNotificationPermission != 'granted') return;
+    if (!kIsWeb || !webPushEnabled || webNotificationPermission != 'granted') {
+      return;
+    }
     try {
       final key = await api?.fetchWebPushPublicKey();
       if (key == null) return;
@@ -1988,6 +2016,37 @@ class Session extends ChangeNotifier {
     } catch (e) {
       debugPrint('[web-push] 구독 등록 실패: $e');
     }
+  }
+
+  /// 웹 앱 환경설정의 "앱을 닫아도 알림 받기" — 켜면 이 브라우저를 웹 푸시로 등록하고(알림 권한이 아직이면 묻는다 — 단추의
+  /// onChanged에서 곧바로 불러야 한다, 아이폰 규칙), 끄면 서버에서 이 기기의 구독을 지우고 브라우저 구독도 끊는다. 선택은 이
+  /// 브라우저에 저장돼 다음에 앱을 열 때 다시 구독하지 않는다. 서버에서 지우지 못하면 던진다(설정은 바꾸지 않는다).
+  Future<void> setWebPushEnabled(bool enabled) async {
+    if (!kIsWeb) return;
+    if (!enabled) {
+      final id = deviceIdentity?.deviceId;
+      if (id != null && api != null) {
+        await api!.registerWebPushSubscription(id, null);
+      }
+      try {
+        await unsubscribeWebPush();
+      } catch (_) {
+        // 브라우저 구독을 못 끊어도 서버에서 지웠으니 더는 오지 않는다.
+      }
+    }
+    webPushEnabled = enabled;
+    await (await SharedPreferences.getInstance()).setBool(
+      _kWebPushEnabled,
+      enabled,
+    );
+    if (enabled) {
+      if (webNotificationPermission == 'granted') {
+        await _registerWebPush();
+      } else {
+        await enableWebNotifications();
+      }
+    }
+    notifyListeners();
   }
 
   /// "알림 켜기" 단추(웹) — 알림 권한을 묻고, 허용하면 웹 푸시까지 등록한다. 결과 권한('granted' |
@@ -2238,6 +2297,10 @@ class Session extends ChangeNotifier {
       onlineUserIds
         ..clear()
         ..addAll(users.where((u) => u.online).map((u) => u.id));
+      // 상태 메시지·방해 금지도 같은 목록으로 처음 채운다(이후는 user:status로).
+      for (final u in users) {
+        _applyUserStatus(u.id, u.status, u.dnd, notify: false);
+      }
       notifyListeners();
     } catch (_) {
       // 부가 정보라 실패해도 조용히 무시 — 이후 presence:update로 점차 채워짐.
@@ -3214,7 +3277,7 @@ class Session extends ChangeNotifier {
     // 자동화 메시지는 사람 아바타가 없어서, 채팅 말풍선의 번개 아바타와 비슷하게 그린다.
     final bot = m.isAutomation;
 
-    if (suppressNotifications) return;
+    if (_quietNotifications) return;
     notifications.showMessage(
       title: roomTag != null
           ? '${m.senderName} [$roomTag]${teamTag == null ? '' : ' [$teamTag]'}'
@@ -3292,7 +3355,7 @@ class Session extends ChangeNotifier {
 
     final tag = roomTag != null ? '$roomTag·댓글' : '댓글';
     final teamTag = _teamTagFor(room);
-    if (suppressNotifications) return;
+    if (_quietNotifications) return;
     notifications.showMessage(
       title: '${c.senderName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: preview,
@@ -3358,7 +3421,7 @@ class Session extends ChangeNotifier {
     final roomTag = room.displayName(userId ?? '');
     final tag = '$roomTag·공지';
     final teamTag = _teamTagFor(room);
-    if (suppressNotifications) return;
+    if (_quietNotifications) return;
     notifications.showMessage(
       title: '${a.authorName} [$tag]${teamTag == null ? '' : ' [$teamTag]'}',
       body: a.previewText,
@@ -3496,7 +3559,7 @@ class Session extends ChangeNotifier {
       notifyListeners();
     }
     if (viewing ||
-        suppressNotifications ||
+        _quietNotifications ||
         room.muted != true ||
         n.kind != NotificationKind.mention) {
       return;
@@ -3587,6 +3650,33 @@ class Session extends ChangeNotifier {
       room.id,
       () => RoomChatController(this, _findRoom(room.id) ?? room),
     );
+  }
+
+  /// 메시지 공감(이모지 반응) — 고른 [emoji]가 이미 내 공감이면 빼고, 아니면 그것으로 바꾼다(한 사람 하나 — 서버
+  /// reactionRules.js). 서버 답을 기다리지 않고 화면에 먼저 보이고, 서버가 확정한 목록으로 다시 맞춘다. 실패하면 원래대로
+  /// 되돌리고 던진다(호출부가 알림을 띄운다). 다른 사람·내 다른 기기에는 서버가 message:reactions로 알린다.
+  Future<void> toggleMessageReaction(Message message, String emoji) async {
+    final me = userId;
+    final api = this.api;
+    if (me == null || api == null) return;
+    final before = message.reactions;
+    final next = myReaction(before, me) == emoji ? null : emoji;
+    void apply(List<MessageReaction> reactions) {
+      final controller = existingControllerFor(message.roomId);
+      if (controller != null) {
+        controller.applyReactions(message.id, reactions);
+      }
+      // 컨트롤러 목록 밖의 사본(스레드 화면이 들고 있는 메시지 등)도 같이 바꾼다.
+      message.reactions = reactions;
+    }
+
+    apply(reactionsWith(before, me, next));
+    try {
+      apply(await api.setMessageReaction(message.id, next));
+    } catch (_) {
+      apply(before);
+      rethrow;
+    }
   }
 
   /// 이미 만들어 둔 컨트롤러만 돌려준다(없으면 null) — 화면을 닫거나 정리할 때는 이것을 쓴다.
@@ -3885,6 +3975,85 @@ class Session extends ChangeNotifier {
     this.email = me.email;
     notifyListeners();
     if (email != null) _showToast('이메일이 변경되었습니다.');
+  }
+
+  // ───────────── 상태 메시지 · 방해 금지(server/src/statusRules.js, models/user_status.dart) ─────────────
+
+  final Map<String, UserStatus> _statuses = {};
+  final Map<String, DndState> _dnds = {};
+
+  /// [id]의 상태 메시지 — 없거나 지울 시각이 지났으면 null.
+  UserStatus? statusOf(String? id) {
+    final s = id == null ? null : _statuses[id];
+    return s != null && s.isLiveAt(DateTime.now()) ? s : null;
+  }
+
+  /// [id]의 방해 금지 설정(꺼져 있으면 null) — 지금 켜져 있는지는 [isInDnd].
+  DndState? dndOf(String? id) => id == null ? null : _dnds[id];
+
+  /// [id]가 지금 방해 금지 중인지(그 사람에게 알림이 가지 않는다).
+  bool isInDnd(String? id) =>
+      dndOf(id)?.isActiveAt(DateTime.now()) ?? false;
+
+  UserStatus? get myStatus => statusOf(userId);
+  DndState? get myDnd => dndOf(userId);
+
+  /// 지금 내 알림을 멈춰야 하는지 — 방해 금지 중이면 앱 알림(PC 팝업·휴대폰 알림·작업 표시줄 깜빡임)을 띄우지 않는다.
+  /// 메시지·안 읽은 수는 그대로 쌓인다. 푸시는 서버가 따로 막는다(push.js).
+  bool get notificationsPaused => isInDnd(userId);
+
+  void _applyUserStatus(
+    String id,
+    UserStatus? status,
+    DndState? dnd, {
+    bool notify = true,
+  }) {
+    if (status == null) {
+      _statuses.remove(id);
+    } else {
+      _statuses[id] = status;
+    }
+    if (dnd == null) {
+      _dnds.remove(id);
+    } else {
+      _dnds[id] = dnd;
+    }
+    if (notify) notifyListeners();
+  }
+
+  /// 시험이 남의 상태를 채우는 자리(실제로는 회원 목록·user:status로 채워진다).
+  @visibleForTesting
+  void debugApplyUserStatus(String id, UserStatus? status, DndState? dnd) =>
+      _applyUserStatus(id, status, dnd);
+
+  /// 내 상태 메시지를 정한다 — [emoji]·[text]가 둘 다 비면 지운다. 같은 팀 사람들에게는 서버가 user:status로 알린다.
+  Future<void> setMyStatus({
+    String? emoji,
+    String? text,
+    DateTime? until,
+  }) async {
+    final me = await api!.updateMyStatus(
+      emoji: emoji,
+      text: text,
+      until: until,
+    );
+    if (userId != null) _applyUserStatus(userId!, me.status, me.dnd);
+  }
+
+  /// 내 방해 금지 — [setUntil]이면 "이 시각까지"(null이면 끔), [setSchedule]이면 매일 일정(null이면 지움)을 바꾼다.
+  Future<void> setMyDnd({
+    bool setUntil = false,
+    DateTime? until,
+    bool setSchedule = false,
+    DndSchedule? schedule,
+  }) async {
+    final me = await api!.updateMyDnd(
+      setUntil: setUntil,
+      until: until,
+      setSchedule: setSchedule,
+      schedule: schedule,
+    );
+    if (userId != null) _applyUserStatus(userId!, me.status, me.dnd);
   }
 
   /// 생일 저장/삭제('MM-DD' 또는 null). 서버가 거절하면(없는 날짜 등) 예외가 그대로 나간다.
@@ -4863,6 +5032,7 @@ class Session extends ChangeNotifier {
     await _teamLeftSub?.cancel();
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
+    await _messageReactionsSub?.cancel();
     await _messageLinkPreviewSub?.cancel();
     await _pollUpdatedSub?.cancel();
     await _pollFavoriteSub?.cancel();
@@ -4870,6 +5040,7 @@ class Session extends ChangeNotifier {
     await _commentEditedSub?.cancel();
     await _commentDeletedSub?.cancel();
     await _presenceSub?.cancel();
+    await _userStatusSub?.cancel();
     await _reconnectSub?.cancel();
     await _authErrorSub?.cancel();
     await _connectFailureSub?.cancel();
@@ -4901,6 +5072,8 @@ class Session extends ChangeNotifier {
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();
     onlineUserIds.clear();
+    _statuses.clear();
+    _dnds.clear();
     secretSessionManager = null; // 평문 정리 타이머도 멈춘다(setter).
     pendingSecretInvites.clear();
     token = null;

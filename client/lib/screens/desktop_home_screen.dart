@@ -34,6 +34,7 @@ import 'new_group_dialog.dart';
 import 'org_chart_screen.dart' show showOrgChartScreen;
 import 'start_chat_dialog.dart';
 import 'topic_browse_screen.dart';
+import '../widgets/user_status_dialogs.dart';
 
 /// 이 폭 이하로 창이 좁아지면 왼쪽 사이드바(고정 280px)를 항상 펼쳐두는 대신 얇은 화살표
 /// 스트립으로 접는다 — HomeScreen이 데스크톱/모바일 레이아웃을 가르는 wideBreakpoint(700)와는
@@ -734,6 +735,24 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
               context,
             ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
           ),
+        ],
+        // 1:1 대화면 상대의 상태(이모지·글)와 방해 금지 달 — PC 헤더는 자리가 넉넉해 글까지 보인다.
+        if (otherMember != null) ...[
+          UserStatusBadge(session: widget.session, userId: otherMember.id),
+          if (widget.session.statusOf(otherMember.id)?.text case final text?)
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).hintColor,
+                  ),
+                ),
+              ),
+            ),
         ],
       ],
     );

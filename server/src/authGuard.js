@@ -429,6 +429,8 @@ export const limits = {
   pairIp: new RateLimiter({ max: 100, windowMs: 15 * MIN }),
   // 초대 링크 안내 페이지·설치 파일(평문 페어링 포트, 사내망 밖에서 온 요청만): 초대 토큰 맞혀보기를 늦춘다.
   invitePageIp: new RateLimiter({ max: 60, windowMs: 15 * MIN }),
+  // 내 일정 ICS 구독 주소(로그인 없이 열린다 — calendarFeeds.js): 토큰은 맞힐 수 없는 길이라, 피드 계산을 반복시키는 것만 늦춘다.
+  calendarFeedIp: new RateLimiter({ max: 120, windowMs: 15 * MIN }),
 };
 
 setInterval(() => {

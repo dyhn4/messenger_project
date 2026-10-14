@@ -9,6 +9,7 @@ import 'sticker_view.dart';
 import '../models/app_user.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
+import '../models/message_reaction.dart' show myReaction;
 import '../models/room.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
@@ -29,11 +30,14 @@ import 'mention_profile.dart';
 import 'message_actions.dart';
 import 'message_announce.dart';
 import 'message_edit_attachments.dart';
+import 'message_reactions.dart';
+import 'message_reminders.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
 import 'self_destruct_countdown.dart';
 import 'shared_album_card.dart';
 import 'todo_message_card.dart';
+import 'user_status_dialogs.dart';
 
 final _timeFormat = DateFormat('a h:mm');
 
@@ -821,6 +825,12 @@ class _MessageBubbleState extends State<MessageBubble> {
                     ),
                   ),
                 ),
+                // 보낸 사람의 상태 이모지·방해 금지 달(마우스를 올리면 상태 글).
+                if (message.senderId != null)
+                  UserStatusBadge(
+                    session: widget.session,
+                    userId: message.senderId!,
+                  ),
               ],
             ),
             const SizedBox(height: 4),
@@ -832,6 +842,8 @@ class _MessageBubbleState extends State<MessageBubble> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 bubbleRow,
+                // 공감(이모지 반응) 줄 — 없으면 아무것도 그리지 않는다.
+                MessageReactionBar(session: widget.session, message: message),
                 // 말풍선 왼쪽 아래를 가리키는 0크기 앵커 — 툴바는 여기 기준으로 Overlay에
                 // 떠서, 아래 메시지들을 밀지 않고 그 위에 겹쳐 보인다.
                 FloatingHoverToolbar(
@@ -858,6 +870,33 @@ class _MessageBubbleState extends State<MessageBubble> {
     final isMine = _isMine;
     return HoverToolbar(
       children: [
+        // 공감(이모지 반응) — 고르는 줄을 메뉴로 띄운다. 비밀 대화 등 공감할 수 없는 메시지는 자리만 비워 둔다(툴바 폭이
+        // 메시지마다 달라지지 않게).
+        HoverToolbarButton(
+          key: const ValueKey('toolbar-reaction'),
+          icon: Icons.add_reaction_outlined,
+          tooltip: '공감',
+          visible: canReactToMessage(widget.session, message),
+          onMenuOpenChanged: _setMenuOpen,
+          menuChildren: [
+            Builder(
+              builder: (menuContext) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ReactionPicker(
+                  selected: myReaction(
+                    message.reactions,
+                    widget.session.userId,
+                  ),
+                  emojiSize: 20,
+                  onPicked: (emoji) {
+                    MenuController.maybeOf(menuContext)?.close();
+                    reactToMessage(context, widget.session, message, emoji);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
         HoverToolbarButton(
           icon: Icons.mode_comment_outlined,
           tooltip: '댓글',
@@ -1050,6 +1089,13 @@ class _MessageBubbleState extends State<MessageBubble> {
             message: message,
             onOpenThread: widget.onOpenThread,
             onDelete: widget.onDelete,
+          );
+        }
+        // 메시지 리마인더가 "나와의 대화"에 올린 원본 카드 — 글 대신 카드(메시지로 이동 단추)를 그린다.
+        if (message.reminderCard != null) {
+          return ReminderCardView(
+            session: widget.session,
+            card: message.reminderCard!,
           );
         }
         // 할 일을 만들 때 올라간 할 일 카드 — 글(`[할 일] 제목` + 담당자 멘션) 대신 카드를 그린다.

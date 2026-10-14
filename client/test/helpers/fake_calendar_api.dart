@@ -7,7 +7,12 @@ import 'package:client/services/calendar_api.dart';
 class FakeCalendarApi implements CalendarApi {
   List<CalendarInfo> mine;
   List<CalendarInfo> subscribed;
+  List<CalendarInfo> external = [];
   List<EventOccurrence> events;
+
+  /// 내 일정 내보내기 주소(없으면 아직 안 만듦).
+  String? feedUrl;
+  int _feedSeq = 0;
 
   /// 호출 기록 — "메서드명 인자…" 문자열.
   final calls = <String>[];
@@ -62,10 +67,20 @@ class FakeCalendarApi implements CalendarApi {
   }
 
   @override
-  Future<({List<CalendarInfo> mine, List<CalendarInfo> subscribed})>
+  Future<
+    ({
+      List<CalendarInfo> mine,
+      List<CalendarInfo> subscribed,
+      List<CalendarInfo> external,
+    })
+  >
   fetchCalendars(String teamId) async {
     calls.add('fetchCalendars $teamId');
-    return (mine: [...mine], subscribed: [...subscribed]);
+    return (
+      mine: [...mine],
+      subscribed: [...subscribed],
+      external: [...external],
+    );
   }
 
   @override
@@ -126,7 +141,12 @@ class FakeCalendarApi implements CalendarApi {
         c.id == calendarId ? c.copyWith(color: color, hidden: hidden) : c;
     mine = [for (final c in mine) apply(c)];
     subscribed = [for (final c in subscribed) apply(c)];
-    return [...mine, ...subscribed].firstWhere((c) => c.id == calendarId);
+    external = [for (final c in external) apply(c)];
+    return [
+      ...mine,
+      ...subscribed,
+      ...external,
+    ].firstWhere((c) => c.id == calendarId);
   }
 
   @override
@@ -368,6 +388,71 @@ class FakeCalendarApi implements CalendarApi {
       for (final e in events)
         if (e.eventId != eventId) e,
     ];
+  }
+
+  @override
+  Future<CalendarInfo> addExternalCalendar(
+    String teamId, {
+    required String url,
+    String? name,
+  }) async {
+    calls.add('addExternalCalendar $url name=$name');
+    _maybeFail();
+    final c = CalendarInfo(
+      id: 'ext:x${external.length + 1}',
+      teamId: teamId,
+      kind: 'external',
+      name: name ?? '외부 캘린더',
+      color: '#039BE5',
+      role: 'subscriber',
+      canDelete: true,
+      host: Uri.tryParse(url)?.host,
+      lastSuccessAt: DateTime(2026, 10, 14, 9),
+    );
+    external = [...external, c];
+    return c;
+  }
+
+  @override
+  Future<CalendarInfo> refreshExternalCalendar(String calendarId) async {
+    calls.add('refreshExternalCalendar $calendarId');
+    _maybeFail();
+    return external.firstWhere((c) => c.id == calendarId);
+  }
+
+  @override
+  Future<void> deleteExternalCalendar(String calendarId) async {
+    calls.add('deleteExternalCalendar $calendarId');
+    _maybeFail();
+    external = [
+      for (final c in external)
+        if (c.id != calendarId) c,
+    ];
+  }
+
+  @override
+  Future<CalendarFeed> fetchCalendarFeed(String teamId) async {
+    calls.add('fetchCalendarFeed $teamId');
+    return CalendarFeed(url: feedUrl, publicAddress: true);
+  }
+
+  @override
+  Future<CalendarFeed> createCalendarFeed(String teamId) async {
+    calls.add('createCalendarFeed $teamId');
+    _maybeFail();
+    feedUrl = 'https://chat.example.com/calendar-feed/token${++_feedSeq}.ics';
+    return CalendarFeed(
+      url: feedUrl,
+      publicAddress: true,
+      createdAt: DateTime(2026, 10, 14),
+    );
+  }
+
+  @override
+  Future<CalendarFeed> deleteCalendarFeed(String teamId) async {
+    calls.add('deleteCalendarFeed $teamId');
+    feedUrl = null;
+    return const CalendarFeed(publicAddress: true);
   }
 }
 

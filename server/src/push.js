@@ -7,6 +7,8 @@ import { getMessaging } from 'firebase-admin/messaging';
 import { listFcmTokensForUser, setDeviceFcmToken } from './db/queries/devices.js';
 import { listMutedUserIdsForRoom } from './db/queries/rooms.js';
 import { findTeamById } from './db/queries/teams.js';
+import { listActiveUsersByIds } from './db/queries/users.js';
+import { isUserInDnd } from './statusRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { isDeviceConnected, skipsPush } from './presence.js';
 import { signFileUrl } from './upload.js';
@@ -185,8 +187,22 @@ export async function notifyRecordPush({ targets, room, sender, senderName, kind
   await sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body });
 }
 
+/**
+ * [userIds] 중 지금 방해 금지 중이 아닌 사람만(statusRules.js isUserInDnd — "지금부터 n시간"과 매일 일정). 방해 금지 중인
+ * 사람에게는 푸시를 보내지 않는다 — 메시지·안 읽은 수는 그대로 쌓이고, 앱을 열면 보인다. 화상회의 호출(notifyIncomingCall)은
+ * 이것을 거치지 않는다(급한 일이라 방해 금지여도 울린다).
+ */
+async function withoutDndUsers(userIds) {
+  if (userIds.length === 0) return userIds;
+  const now = Date.now();
+  const inDnd = new Set((await listActiveUsersByIds(userIds)).filter((u) => isUserInDnd(u, now)).map((u) => u.id));
+  return inDnd.size === 0 ? userIds : userIds.filter((id) => !inDnd.has(id));
+}
+
 /** 채팅 푸시 본체 — notifyOfflineMembers(메시지·댓글·공지)와 notifyRecordPush(멘션 등)가 같은 모양으로 보낸다. */
-async function sendChatDataPush({ targets, room, sender, senderName, kind, conversationTitle, body: preview }) {
+async function sendChatDataPush({ targets: requested, room, sender, senderName, kind, conversationTitle, body: preview }) {
+  const targets = await withoutDndUsers(requested);
+  if (targets.length === 0) return;
   const { messaging } = await getMessagingInstance();
   // 여러 팀 알림이 섞여 오므로 제목 끝에 팀 이름을 배지처럼 붙인다(앱이 켜져 있을 때 뜨는
   // 로컬 알림과 같은 모양 — client/lib/services/session.dart 참고).
@@ -256,6 +272,7 @@ async function sendChatDataPush({ targets, room, sender, senderName, kind, conve
  */
 export async function notifyProjectPush({ userId, title, body, projectId, taskId }) {
   if (skipsPush(userId)) return;
+  if ((await withoutDndUsers([userId])).length === 0) return;
   await sendWebPushToUser(userId, { kind: 'project', projectId, title, body });
   const { messaging } = await getMessagingInstance();
   if (!messaging) return;

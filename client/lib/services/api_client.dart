@@ -16,6 +16,9 @@ import '../models/invite_result.dart';
 import '../models/team_invite_link.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
+import '../models/message_reaction.dart';
+import '../models/message_reminder.dart';
+import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/project.dart';
 import '../models/room.dart';
@@ -28,6 +31,7 @@ import '../models/topic_folder.dart';
 import '../models/uploaded_attachment.dart';
 import '../models/web_certificate_status.dart';
 import 'chat_socket.dart' show SecretAcceptedEvent, SecretInviteEvent;
+import 'device_kind.dart';
 import 'invite_share.dart' show rememberWebAppUrl;
 
 class ApiException implements Exception {
@@ -193,6 +197,10 @@ class MyProfile {
   final String? position;
   final List<TeamPosition> teamPositions;
 
+  /// 내 상태 메시지·방해 금지(server/src/statusRules.js) — 없으면 null.
+  final UserStatus? status;
+  final DndState? dnd;
+
   const MyProfile({
     required this.username,
     required this.name,
@@ -210,9 +218,13 @@ class MyProfile {
     this.department,
     this.position,
     this.teamPositions = const [],
+    this.status,
+    this.dnd,
   });
 
   factory MyProfile.fromJson(Map<String, dynamic> json) => MyProfile(
+    status: UserStatus.fromJson(json['status']),
+    dnd: DndState.fromJson(json['dnd']),
     username: json['username'] as String,
     name: (json['name'] as String?) ?? json['username'] as String,
     email: json['email'] as String?,
@@ -886,6 +898,35 @@ class ApiClient {
       await _get('/api/users/me') as Map<String, dynamic>,
     );
   }
+
+  /// 내 상태 메시지 — [emoji]·[text]가 둘 다 없으면 지운다. [until]이 null이면 직접 지울 때까지.
+  Future<MyProfile> updateMyStatus({
+    String? emoji,
+    String? text,
+    DateTime? until,
+  }) async => MyProfile.fromJson(
+    await _put('/api/users/me/status', {
+          'emoji': emoji,
+          'text': text,
+          'until': until?.millisecondsSinceEpoch,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 내 방해 금지 — [setUntil]이면 "이 시각까지"를 [until]로(null이면 끔), [setSchedule]이면 매일 일정을 [schedule]로(null이면
+  /// 지움). 넘긴 것만 바뀐다.
+  Future<MyProfile> updateMyDnd({
+    bool setUntil = false,
+    DateTime? until,
+    bool setSchedule = false,
+    DndSchedule? schedule,
+  }) async => MyProfile.fromJson(
+    await _put('/api/users/me/dnd', {
+          if (setUntil) 'until': until?.millisecondsSinceEpoch,
+          if (setSchedule) 'schedule': schedule?.toJson(),
+        })
+        as Map<String, dynamic>,
+  );
 
   /// 매번 아바타 상태 전체를 통째로 바꾼다("초기화"는 전부 null, "캐릭터"는
   /// emoji+color, "사진"은 url만 채워서 호출).
@@ -3026,6 +3067,8 @@ class ApiClient {
           'name': ?name,
           'identityPublicKey': identityPublicKey,
           'signingPublicKey': signingPublicKey,
+          // 기기 종류 — PC 앱이 켜져 있으면 PC 브라우저로는 웹 푸시를 보내지 않는 데 쓴다(device_kind.dart).
+          'kind': ?deviceKind(),
         }),
       ),
     );
@@ -3399,6 +3442,39 @@ class ApiClient {
       await _put('/api/polls/$pollId/vote', {'optionIds': optionIds})
           as Map<String, dynamic>,
     );
+  }
+
+  /// 메시지 공감(이모지 반응) — 내 공감을 [emoji]로(이미 다른 것이면 바꿈), null이면 뺀다. 바뀐 뒤의 전체 공감 목록을 돌려준다.
+  Future<List<MessageReaction>> setMessageReaction(
+    String messageId,
+    String? emoji,
+  ) async {
+    final body =
+        await _put('/api/messages/$messageId/reaction', {'emoji': emoji})
+            as Map<String, dynamic>;
+    return parseReactions(body['reactions']);
+  }
+
+  /// 메시지 리마인더 걸기("나중에 알림") — [remindAt]에 "나와의 대화"로 알려 준다.
+  Future<MessageReminder> createMessageReminder(
+    String messageId,
+    DateTime remindAt,
+  ) async => MessageReminder.fromJson(
+    await _post('/api/messages/$messageId/reminders', {
+          'remindAt': remindAt.millisecondsSinceEpoch,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 아직 울리지 않은 내 리마인더 — 울릴 시각 순.
+  Future<List<MessageReminder>> fetchReminders() async => [
+    for (final e in await _get('/api/reminders') as List)
+      MessageReminder.fromJson(e as Map<String, dynamic>),
+  ];
+
+  /// 리마인더 취소.
+  Future<void> deleteReminder(String id) async {
+    await _delete('/api/reminders/$id');
   }
 
   /// 투표 일찍 마감(만든 사람·관리자) — 응답은 내 기준의 poll 객체다.

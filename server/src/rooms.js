@@ -91,6 +91,7 @@ import { publicUser } from './users.js';
 import { toCommentDto } from './comments.js';
 import { toMessageDto } from './messages.js';
 import { attachPolls } from './polls.js';
+import { attachReactions } from './reactions.js';
 import { notifyOfflineMembers, previewFor, roomTagFor, SECRET_PREVIEW_PLACEHOLDER } from './push.js';
 import { latestAnnouncementDtoFor } from './announcements.js';
 import { checkIconRef } from './fileRefs.js';
@@ -514,7 +515,7 @@ export async function postSystemMessage(io, room, text) {
  * socket.js의 message:send와 같은 순서(숨긴 DM 되살리기 → message:new → 푸시)로 보낸다.
  * senderId가 null이라 누구의 "내 메시지"도 아니고, 푸시에서 보낸 사람으로 빠지는 멤버도 없다.
  */
-export async function postBotMessage(io, room, text, { senderName }) {
+export async function postBotMessage(io, room, text, { senderName, reminderCard = null }) {
   const message = await insertMessage({
     id: randomUUID(),
     roomId: room.id,
@@ -522,6 +523,8 @@ export async function postBotMessage(io, room, text, { senderName }) {
     senderName,
     type: 'text',
     text,
+    // 메시지 리마인더가 울릴 때 붙는 원본 메시지 카드(reminders.js) — 그 밖에는 null.
+    reminderCard,
   });
   await unhideDmForOtherMembers(io, room, null);
   const dto = toMessageDto(message);
@@ -1652,7 +1655,7 @@ export function createRoomsRouter(io) {
     if (!(await isRoomMember(room.id, req.user.sub))) return res.status(403).json({ error: '이 방의 멤버가 아닙니다.' });
 
     // 고정은 게시글만 되지만(messages.js) 같은 모양을 지키려고 투표도 붙일 수 있게 attachPolls를 거친다.
-    const rows = await attachPolls(await listPinnedPosts(room.id), req.user.sub);
+    const rows = await attachReactions(await attachPolls(await listPinnedPosts(room.id), req.user.sub));
     const ids = rows.map((m) => m.id);
     const [attachmentsByMessageId, comments] = await Promise.all([
       listAttachmentsForMessages(ids),
@@ -1726,7 +1729,8 @@ export function createRoomsRouter(io) {
     // 사진 여러 장짜리 메시지의 첨부 목록을 한 번에 붙인다(없으면 toMessageDto가 예전 방식으로
     // messages의 파일 칸을 첨부 하나로 본다).
     // 투표 메시지에는 보기·집계와 "내가 고른 보기/즐겨찾기"(요청자 기준)를 붙인다(polls.js).
-    const all = await attachPolls([...extraParents, ...rows], req.user.sub);
+    // 공감(이모지 반응)도 붙인다(reactions.js) — 비밀 대화는 공감을 받지 않아 늘 빈 목록이다.
+    const all = await attachReactions(await attachPolls([...extraParents, ...rows], req.user.sub));
     const attachmentsByMessageId = await listAttachmentsForMessages(all.map((m) => m.id));
     res.json(
       all.map((m) => ({

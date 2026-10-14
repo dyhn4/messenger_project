@@ -29,7 +29,7 @@ test('parseDeviceRegistration: 앱이 보내는 값은 그대로 받는다', () 
   assert.equal(KEY_A.length, 44);
   assert.deepEqual(
     parseDeviceRegistration({ deviceId: DEVICE_ID, name: 'windows', identityPublicKey: KEY_A, signingPublicKey: KEY_B }),
-    { fields: { id: DEVICE_ID, name: 'windows', identityPublicKey: KEY_A, signingPublicKey: KEY_B } },
+    { fields: { id: DEVICE_ID, name: 'windows', identityPublicKey: KEY_A, signingPublicKey: KEY_B, kind: null } },
   );
   // 이름이 없거나 문자열이 아니면 이름 없이 등록한다(등록 자체는 막지 않는다). 모르는 칸은 저장하지 않는다.
   const noName = parseDeviceRegistration({
@@ -40,7 +40,7 @@ test('parseDeviceRegistration: 앱이 보내는 값은 그대로 받는다', () 
     model: { huge: true },
     appVersion: 1,
   });
-  assert.deepEqual(noName.fields, { id: DEVICE_ID, name: null, identityPublicKey: KEY_A, signingPublicKey: KEY_B });
+  assert.deepEqual(noName.fields, { id: DEVICE_ID, name: null, identityPublicKey: KEY_A, signingPublicKey: KEY_B, kind: null });
   assert.equal(parseDeviceRegistration({ deviceId: DEVICE_ID, name: 42, identityPublicKey: KEY_A, signingPublicKey: KEY_B }).fields.name, null);
   // URL 안전 base64·패딩 없는 키도 받는다.
   const urlSafe = KEY_A.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');

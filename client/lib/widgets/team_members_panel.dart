@@ -5,6 +5,7 @@ import '../services/session.dart';
 import 'muted_scrollbar.dart';
 import 'pagination.dart';
 import 'user_avatar.dart';
+import 'user_status_dialogs.dart';
 
 /// 상단 "팀 멤버" 버튼으로 여는 우측 패널(side_panels.dart의 'members'). 검색 패널과 같은 틀(헤더+검색창+목록)을 쓰고,
 /// 각 멤버를 카드로 보여준다. 카드를 누르면 프로필 플로팅 다이얼로그가 뜬다.
@@ -140,6 +141,7 @@ class _TeamMembersPanelState extends State<TeamMembersPanel> {
                               child: Divider(height: 1),
                             ),
                             itemBuilder: (context, i) => TeamMemberRow(
+                              session: widget.session,
                               user: pageItems[i],
                               resolveUrl: widget.session.resolveUrl,
                               online: widget.session.onlineUserIds.contains(
@@ -168,12 +170,15 @@ class _TeamMembersPanelState extends State<TeamMembersPanel> {
 /// 멤버 목록 한 줄: 아바타 + 이름. 카드 테두리 없이 ListView.separated의 Divider로만
 /// 서로 구분한다(검색 결과 화면과 같은 스타일).
 class TeamMemberRow extends StatelessWidget {
+  /// 상태 메시지·방해 금지를 보여 주는 데 쓴다(없으면 안 보인다).
+  final Session? session;
   final AppUser user;
   final String Function(String relative) resolveUrl;
   final bool online;
   final VoidCallback onTap;
   const TeamMemberRow({
     super.key,
+    this.session,
     required this.user,
     required this.resolveUrl,
     required this.online,
@@ -199,9 +204,20 @@ class TeamMemberRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    user.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      // 상태 이모지·방해 금지 달(마우스를 올리면 상태 글).
+                      if (session != null)
+                        UserStatusBadge(session: session!, userId: user.id),
+                    ],
                   ),
                   // 부서·직책이 등록돼 있으면 조직도답게 이름 아래 같이 보여준다.
                   if (user.orgLine != null)
@@ -210,6 +226,14 @@ class TeamMemberRow extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).hintColor,
                       ),
+                    ),
+                  // 상태 글이 있으면 한 줄로(이름 옆 이모지만으로는 무슨 상태인지 모른다).
+                  if (session?.statusOf(user.id)?.text case final text?)
+                    Text(
+                      text,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                 ],
               ),

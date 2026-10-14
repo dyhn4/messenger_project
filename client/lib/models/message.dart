@@ -4,6 +4,8 @@ import 'album.dart' show SharedAlbum;
 import 'call_card.dart';
 import 'comment.dart';
 import 'mention.dart';
+import 'message_reaction.dart';
+import 'message_reminder.dart' show ReminderCard;
 import 'poll.dart';
 import 'text_format.dart';
 import 'todo.dart' show SharedTodo;
@@ -215,9 +217,16 @@ class Message {
   /// 할 일을 만들 때 올라간 할 일 카드(todo_message_card.dart) — 아니면 null. 메시지 자체는 일반 글(`[할 일] 제목`)이다.
   final SharedTodo? sharedTodo;
 
+  /// 메시지 리마인더가 "나와의 대화"에 올린 원본 메시지 카드(reminder_card_view.dart) — 아니면 null.
+  final ReminderCard? reminderCard;
+
   /// 화상회의 기록 카드(시스템 메시지 — call_message_card.dart) — 아니면 null. 통화가 진행되는 동안
   /// call:card로 그 자리에서 바뀐다(RoomChatController.applyCallCard) — non-final.
   CallCard? callCard;
+
+  /// 공감(이모지 반응) — message:reactions로 그 자리에서 바뀐다(RoomChatController.applyReactions) — non-final.
+  /// 비밀 대화와 시스템 메시지는 늘 빈 목록.
+  List<MessageReaction> reactions;
 
   /// 막 도착한 메시지(message:new)의 알림을 받을 사람만 — 있으면 이 사람들 말고는 알림을 띄우지 않는다(메시지는 보이고
   /// 안읽음도 는다). 할 일 생성 창에서 "대화방에 알리기"를 끄고 올린 할 일 카드가 담당자만 적어 보낸다. 보통은 null.
@@ -265,7 +274,9 @@ class Message {
     this.poll,
     this.sharedAlbum,
     this.sharedTodo,
+    this.reminderCard,
     this.callCard,
+    this.reactions = const [],
     this.notifyOnly,
     List<Comment>? comments,
   }) : comments = comments ?? [],
@@ -366,7 +377,9 @@ class Message {
           : Poll.fromJson(Map<String, dynamic>.from(json['poll'] as Map)),
       sharedAlbum: SharedAlbum.fromJson(json['sharedAlbum']),
       sharedTodo: SharedTodo.fromJson(json['sharedTodo']),
+      reminderCard: ReminderCard.fromJson(json['reminderCard']),
       callCard: CallCard.fromJson(json['callCard']),
+      reactions: parseReactions(json['reactions']),
       notifyOnly: (json['notifyOnly'] as List?)?.whereType<String>().toList(),
     );
   }

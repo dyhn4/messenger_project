@@ -3,8 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import webpush from 'web-push';
-import { listWebPushSubscriptionsForUser, setDeviceWebPushSubscription } from './db/queries/devices.js';
-import { isDeviceConnected } from './presence.js';
+import { listAppDeviceIds, listWebPushSubscriptionsForUser, setDeviceWebPushSubscription } from './db/queries/devices.js';
+import { webPushTargets } from './presence.js';
 import { parseWebPushSubscription } from './webPushEndpoint.js';
 
 // 웹 앱(아이폰 등 앱이 없는 기기)용 웹 푸시 — 표준 Web Push(VAPID)라 Firebase 설정이 필요 없다. 앱(탭)을
@@ -68,8 +68,13 @@ export async function sendWebPushToUser(userId, payload, { ttl = 24 * 60 * 60, u
     console.error('[web-push] 구독 조회 실패:', err?.message ?? err);
     return;
   }
-  // 웹 앱 탭이 열려 소켓이 붙어 있는 기기는 소켓으로 알림을 받는다 — 그 기기로는 보내지 않는다(push.js의 FCM과 같다).
-  subscriptions = subscriptions.filter(({ deviceId }) => !isDeviceConnected(deviceId));
+  // 웹 앱 탭이 열려 소켓이 붙어 있는 기기는 소켓으로 알림을 받는다 — 그 기기로는 보내지 않는다(push.js의 FCM과 같다). PC·안드로이드
+  // 앱이 접속해 있으면 같은 종류의 브라우저로도 보내지 않는다(presence.js webPushTargets — 같은 기기에서 알림이 두 번 뜨지 않게).
+  // PC·안드로이드 브라우저 구독이 있을 때만 앱 기기를 묻는다.
+  const appDeviceIds = subscriptions.some((s) => s.kind === 'web-desktop' || s.kind === 'web-android')
+    ? await listAppDeviceIds(userId).catch(() => ({}))
+    : {};
+  subscriptions = webPushTargets(subscriptions, appDeviceIds);
   if (subscriptions.length === 0) return;
   const body = JSON.stringify(payload);
   await Promise.all(

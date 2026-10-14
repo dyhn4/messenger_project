@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { devices, users } from '../schema.js';
 
@@ -55,13 +55,14 @@ async function settlePushTarget(field, deviceId, userId, value) {
 /** 기기 등록은 멱등 — 같은 deviceId로 다시 등록하면 공개키/이름만 갱신한다(재설치 등으로
  * 키가 바뀐 경우도 이걸로 자연스럽게 갱신됨 — 다만 그러면 기존 비밀 대화 세션은 더 이상
  * 복호화할 수 없다, 이는 E2EE의 당연한 결과). */
-export async function upsertDevice({ id, userId, name, identityPublicKey, signingPublicKey }) {
+export async function upsertDevice({ id, userId, name, identityPublicKey, signingPublicKey, kind = null }) {
   const [row] = await db
     .insert(devices)
-    .values({ id, userId, name, identityPublicKey, signingPublicKey, lastSeenAt: new Date() })
+    .values({ id, userId, name, identityPublicKey, signingPublicKey, kind, lastSeenAt: new Date() })
     .onConflictDoUpdate({
       target: devices.id,
-      set: { name, identityPublicKey, signingPublicKey, revokedAt: null, lastSeenAt: new Date() },
+      // 종류는 알려 줬을 때만 바꾼다(예전 앱이 다시 등록해도 이미 아는 종류를 지우지 않게).
+      set: { name, identityPublicKey, signingPublicKey, revokedAt: null, lastSeenAt: new Date(), ...(kind ? { kind } : {}) },
       // 같은 사람의 기기일 때만 갱신한다. 예전엔 다른 사람 것도 덮어써서(소유자까지 바꿔서), 비밀 대화
       // 상대에게 보이는 기기 id만 알면 그 기기를 가로채 상대의 비밀 대화를 깨고 푸시를 엉뚱하게 보낼 수
       // 있었다. 공용 PC에서 계정을 바꿔 로그인하면 여기서 null이 되고, 앱이 새 기기 id를 만들어 다시
@@ -164,7 +165,7 @@ export async function setDeviceWebPushSubscription(id, userId, subscriptionJson)
  * 망가진 값은 subscription을 null로 준다 — 검사·정리는 발송하는 쪽(webPush.js)이 한 곳에서 한다. */
 export async function listWebPushSubscriptionsForUser(userId) {
   const rows = await db
-    .select({ deviceId: devices.id, webPushSubscription: devices.webPushSubscription })
+    .select({ deviceId: devices.id, kind: devices.kind, webPushSubscription: devices.webPushSubscription })
     .from(devices)
     .innerJoin(users, eq(users.id, devices.userId))
     .where(
@@ -184,8 +185,23 @@ export async function listWebPushSubscriptionsForUser(userId) {
     } catch {
       // 망가진 값 — null로 넘기면 webPush.js가 지운다.
     }
-    return { deviceId: r.deviceId, subscription };
+    return { deviceId: r.deviceId, kind: r.kind ?? null, subscription };
   });
+}
+
+/**
+ * 이 사람의 앱 기기 id들 — `{ windows: [PC 앱], android: [안드로이드 앱] }`(폐기된 것은 빼고). 웹 푸시를 같은 종류 기기의
+ * 브라우저로 보낼지 정할 때 쓴다(webPush.js — presence.js webPushTargets).
+ */
+export async function listAppDeviceIds(userId) {
+  const rows = await db
+    .select({ id: devices.id, kind: devices.kind })
+    .from(devices)
+    .where(and(eq(devices.userId, userId), inArray(devices.kind, ['windows', 'android']), isNull(devices.revokedAt)));
+  return {
+    windows: rows.filter((r) => r.kind === 'windows').map((r) => r.id),
+    android: rows.filter((r) => r.kind === 'android').map((r) => r.id),
+  };
 }
 
 /**

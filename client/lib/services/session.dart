@@ -28,6 +28,8 @@ import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/topic_folder.dart';
 import '../widgets/avatar_utils.dart' show automationAvatarColor, colorToHex;
+import '../widgets/retrying_network_image.dart'
+    show fileUrlResigner, imageRetrySignal;
 import 'api_client.dart';
 import 'app_platform.dart';
 import 'app_settings.dart';
@@ -91,6 +93,9 @@ class Session extends ChangeNotifier {
     // 알림 아이콘용 프로필 사진 링크가 만료됐을 때 새로 받는다(notification_service.dart).
     notifications.resignFileUrl = (path) async =>
         resolveUrl(await api!.resignFileUrl(path));
+    // 첨부 그림·그림 이모티콘이 만료된 링크로 못 불러왔을 때 새 링크를 받는다(retrying_network_image.dart).
+    fileUrlResigner = (url) async =>
+        resolveUrl(await api!.resignFileUrl(Uri.parse(url).path));
     // PC 알림 창은 앱 테마와 환경설정의 카드 크기·최대 개수를 따른다.
     notifications.popupStyle = () => settings.notificationPopupStyle;
   }
@@ -2310,6 +2315,8 @@ class Session extends ChangeNotifier {
   /// 연결이 끊겼다가 재연결됐을 때 놓쳤을 수 있는 것들을 다시 받아온다:
   /// 방 목록(서버가 계산한 정확한 안읽음 수 포함)과, 지금까지 열어본 적 있어 캐시된 방들의 메시지.
   Future<void> _resyncAfterReconnect() async {
+    // 끊긴 동안(PC를 막 켰을 때 등) 못 불러온 그림을 곧바로 다시 받게 한다(retrying_network_image.dart).
+    imageRetrySignal.value++;
     final changes = _roomChangesDuringResync = <String, bool>{};
     // 이번에 목록에서 사라진 비밀 대화방 — 정말 없어졌는지(또는 내가 빠졌는지) 아래 뒷정리가 서버에 물어본다.
     final vanishedSecretRoomIds = <String>{};

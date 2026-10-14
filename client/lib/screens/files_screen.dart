@@ -496,6 +496,8 @@ class _FilesScreenState extends State<FilesScreen> {
               message: m,
               attachmentId: m.attachmentId,
               onDeleted: _onFileDeleted,
+              // 다운로드·더보기 단추는 카드와 겹치지 않게 카드 바깥 오른쪽에(할 일 상세와 같다).
+              actionsBeside: true,
             ),
         ],
       ),

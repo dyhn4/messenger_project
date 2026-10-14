@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 
@@ -27,6 +26,7 @@ import 'message_reactions.dart';
 import 'muted_scrollbar.dart';
 import 'poll_card.dart';
 import 'rich_text_format.dart';
+import 'retrying_network_image.dart';
 
 /// 보드 목록 한 줄(카드)의 최대 폭 — 넓은 창에서 카드가 한없이 늘어나지 않게 가운데에 모은다.
 const _boardMaxWidth = 820.0;
@@ -1067,7 +1067,7 @@ class _Thumbnail extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             ColoredBox(color: scheme.surfaceContainerHighest),
-            CachedNetworkImage(
+            RetryingNetworkImage(
               imageUrl: session.resolveUrl(
                 attachment.thumbnailUrl ?? attachment.fileUrl,
               ),

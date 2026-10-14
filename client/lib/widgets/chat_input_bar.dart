@@ -113,6 +113,10 @@ class ChatInputBar extends StatefulWidget {
 class ChatInputBarState extends State<ChatInputBar> {
   final _controller = RichTextEditingController();
   final _focusNode = FocusNode();
+
+  /// 첨부 목록(가로) — 넘치면([_attachmentsOverflow]) 아래에 스크롤바를 단다.
+  final _attachmentScroll = ScrollController();
+  bool _attachmentsOverflow = false;
   final _mentionKey = GlobalKey<MentionAutocompleteState>();
   final _attachments = <_PendingAttachment>[];
   bool _sending = false;
@@ -265,6 +269,7 @@ class ChatInputBarState extends State<ChatInputBar> {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
     _focusNode.dispose();
+    _attachmentScroll.dispose();
     super.dispose();
   }
 
@@ -844,25 +849,44 @@ class ChatInputBarState extends State<ChatInputBar> {
                 child: SizedBox(
                   // 이미지 카드(200x64)와 파일 카드가 들어갈 수 있는 고정 높이 — 업로드
                   // 중이든 끝났든 같은 카드(UploadingAttachment)를 그대로 쓰므로(완료돼도
-                  // 다른 위젯으로 안 바뀜) 높이를 상태에 따라 바꿀 필요가 없다.
-                  height: 80,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _attachments.length,
-                    itemBuilder: (context, i) {
-                      final a = _attachments[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 10, top: 6),
-                        child: UploadingAttachment(
-                          thumbnailBytes: a.thumbnailBytes,
-                          displayName: a.displayName,
-                          totalBytes: a.totalBytes,
-                          sentBytes: a.sentBytes,
-                          completed: a.result != null,
-                          onCancel: () => _cancelAttachment(a),
-                        ),
-                      );
+                  // 다른 위젯으로 안 바뀜) 높이를 상태에 따라 바꿀 필요가 없다. 넘쳐서 안 보이는
+                  // 첨부가 있으면 그 아래에 가로 스크롤바(채팅방과 같은 10px, 늘 보임) 자리를 더한다.
+                  height: 80 + (_attachmentsOverflow ? 14 : 0),
+                  child: NotificationListener<ScrollMetricsNotification>(
+                    onNotification: (n) {
+                      final overflow = n.metrics.maxScrollExtent > 0;
+                      if (overflow != _attachmentsOverflow) {
+                        setState(() => _attachmentsOverflow = overflow);
+                      }
+                      return false;
                     },
+                    child: MutedScrollbar(
+                      key: const ValueKey('chat-attachments-scrollbar'),
+                      controller: _attachmentScroll,
+                      child: ListView.builder(
+                        key: const ValueKey('chat-attachments'),
+                        controller: _attachmentScroll,
+                        scrollDirection: Axis.horizontal,
+                        padding: EdgeInsets.only(
+                          bottom: _attachmentsOverflow ? 14 : 0,
+                        ),
+                        itemCount: _attachments.length,
+                        itemBuilder: (context, i) {
+                          final a = _attachments[i];
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 10, top: 6),
+                            child: UploadingAttachment(
+                              thumbnailBytes: a.thumbnailBytes,
+                              displayName: a.displayName,
+                              totalBytes: a.totalBytes,
+                              sentBytes: a.sentBytes,
+                              completed: a.result != null,
+                              onCancel: () => _cancelAttachment(a),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ),
                 ),
               ),

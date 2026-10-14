@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/announcement.dart';
@@ -10,6 +9,7 @@ import '../services/session.dart';
 import '../services/time_format.dart';
 import 'pill_tag.dart';
 import 'user_avatar.dart';
+import 'retrying_network_image.dart';
 
 /// 공지바 폭이 이보다 좁으면(폰 세로 화면 등) 작성자 이름을 빼고 시각을 짧게("27분 전"/"2026/09/30") 쓴다.
 const double _compactWidth = 460;
@@ -284,7 +284,7 @@ class _Thumbnail extends StatelessWidget {
         child: SizedBox(
           width: 22,
           height: 22,
-          child: CachedNetworkImage(
+          child: RetryingNetworkImage(
             imageUrl: url,
             fit: BoxFit.cover,
             placeholder: (_, _) => placeholder,

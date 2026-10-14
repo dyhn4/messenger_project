@@ -231,14 +231,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reminder-time-end')));
     await tester.pumpAndSettle();
     final option = find.byKey(const ValueKey('reminder-time-option-1080'));
-    await tester.scrollUntilVisible(
-      option,
-      72,
-      scrollable: find.descendant(
-        of: find.byKey(const ValueKey('reminder-time-list')),
-        matching: find.byType(Scrollable),
-      ),
+    final timeList = find.descendant(
+      of: find.byKey(const ValueKey('reminder-time-list')),
+      matching: find.byType(Scrollable),
     );
+    // 목록은 지금 값(1시간 뒤) 자리로 스크롤해 열린다 — 오후 5시 넘어 돌리면 6:00이 그보다 위라 먼저 맨 위로 올린다.
+    await tester.drag(timeList, const Offset(0, 10000));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(option, 72, scrollable: timeList);
     await tester.ensureVisible(option);
     await tester.pumpAndSettle();
     await tester.tap(option);

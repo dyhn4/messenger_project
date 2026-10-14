@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 
 import '../models/message.dart';
 import '../services/clipboard_image.dart';
+import '../services/download_progress.dart' show DownloadCancelled;
 import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
@@ -197,6 +198,9 @@ class FileActions {
       );
       if (!context.mounted || savedPath == null) return;
       showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
+    } on DownloadCancelled catch (e) {
+      // 진행 카드의 X로 멈췄다.
+      if (context.mounted) showAppToast(context, '$e');
     } catch (e) {
       if (context.mounted) showAppToast(context, '다운로드 실패: $e');
     }

@@ -395,14 +395,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('시간 없음'), findsNothing, reason: '시각은 꼭 있어야 한다');
     final option = find.byKey(const ValueKey('dnd-time-option-1080'));
-    await tester.scrollUntilVisible(
-      option,
-      72,
-      scrollable: find.descendant(
-        of: find.byKey(const ValueKey('dnd-time-list')),
-        matching: find.byType(Scrollable),
-      ),
+    final timeList = find.descendant(
+      of: find.byKey(const ValueKey('dnd-time-list')),
+      matching: find.byType(Scrollable),
     );
+    // 목록은 지금 값 자리로 스크롤해 열린다 — 오후에 돌리면 6:00이 그보다 위일 수 있어 먼저 맨 위로 올린다.
+    await tester.drag(timeList, const Offset(0, 10000));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(option, 72, scrollable: timeList);
     // 목록 안에 만들어졌어도 보이는 칸 밖일 수 있어 화면에 보이게 맞춘다.
     await tester.ensureVisible(option);
     await tester.pumpAndSettle();

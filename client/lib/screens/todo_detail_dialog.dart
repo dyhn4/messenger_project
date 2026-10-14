@@ -740,6 +740,8 @@ class _TodoDetailState extends State<TodoDetail> {
               session: widget.session,
               url: widget.session.resolveUrl(f.fileUrl),
               fileName: f.fileName ?? '파일',
+              // 다운로드 단추는 카드와 겹치지 않게 카드 바깥 오른쪽에.
+              actionsBeside: true,
             ),
           ),
         ],

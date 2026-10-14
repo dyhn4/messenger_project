@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
@@ -36,6 +35,7 @@ import '../widgets/room_picker_field.dart';
 import '../widgets/xfile_image.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'post_editor_dialog.dart' show fileIconFor;
+import '../widgets/retrying_network_image.dart';
 
 /// 예약할 수 있는 대화방인지 — 지금 팀의 방이고, 비밀 대화가 아니고, 내가 글을 쓸 수 있어야 한다(읽기
 /// 전용·보관된 토픽은 토픽 관리자만). 서버 /scheduled-messages와 같은 규칙 — 대화방 고르기와 입력칸의
@@ -1869,7 +1869,7 @@ class _AttachmentTile extends StatelessWidget {
     }
     final url = item.networkThumb;
     if (url != null) {
-      return CachedNetworkImage(
+      return RetryingNetworkImage(
         imageUrl: url,
         width: _tile,
         height: _tile,

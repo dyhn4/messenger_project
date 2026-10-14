@@ -433,6 +433,24 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(env.uploadedPng, isTrue);
     });
+
+    testWidgets('첨부가 많아 안 보이는 것이 있으면 첨부 목록 아래에 가로 스크롤바 자리가 생긴다', (tester) async {
+      await env.pump(tester, ClipboardSnapshot(image: excelPng), width: 360);
+      final list = find.byKey(const ValueKey('chat-attachments'));
+      await pressPaste(tester);
+      expect(tester.getSize(list).height, 80, reason: '하나뿐이면 다 보여서 스크롤바가 없다');
+
+      // 사진 카드(64 + 간격 10)가 다섯이면 360 폭에 다 들어가지 않는다.
+      for (var i = 0; i < 4; i++) {
+        await pressPaste(tester);
+      }
+      expect(tester.getSize(list).height, 94, reason: '아래에 스크롤바(10px) 자리');
+      final scroll = tester.state<ScrollableState>(
+        find.descendant(of: list, matching: find.byType(Scrollable)),
+      );
+      expect(scroll.position.maxScrollExtent, greaterThan(0));
+      expect(tester.takeException(), isNull);
+    });
   });
 }
 

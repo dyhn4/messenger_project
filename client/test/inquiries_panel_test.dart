@@ -7,7 +7,9 @@ import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
+import 'package:client/widgets/attachment_widgets.dart' show DownloadableFile;
 import 'package:client/widgets/inquiries_panel.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -41,7 +43,7 @@ Map<String, dynamic> _inquiry(
       .millisecondsSinceEpoch,
 };
 
-Session _session({bool withLeader = true}) {
+Session _session({bool withLeader = true, bool withFile = false}) {
   _requests = [];
   final client = MockClient((request) async {
     _requests.add(request);
@@ -51,7 +53,13 @@ Session _session({bool withLeader = true}) {
     switch ((request.method, path)) {
       case ('GET', '/api/inquiries/received'):
         return ok([
-          _inquiry('r1', title: '연차 사용 문의'),
+          {
+            ..._inquiry('r1', title: '연차 사용 문의'),
+            if (withFile) ...{
+              'fileUrl': 'https://test.local/files/r1',
+              'fileName': '근거자료.pdf',
+            },
+          },
           _inquiry('r2', status: 'resolved', title: '모니터 교체 요청', daysAgo: 3),
         ]);
       case ('GET', '/api/inquiries/sent'):
@@ -201,6 +209,35 @@ void main() {
       _requests.where((r) => r.url.path.startsWith('/api/rooms/dm-boss')),
       isEmpty,
     );
+  });
+
+  testWidgets('상세의 첨부 파일 — 마우스를 올리면 다운로드 단추가 카드와 겹치지 않고 카드 바깥 오른쪽에 붙어 뜬다', (
+    tester,
+  ) async {
+    await _pump(tester, _session(withFile: true));
+    await tester.tap(find.byKey(const ValueKey('inquiry-r1')));
+    await tester.pumpAndSettle();
+    final name = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.text('근거자료.pdf'),
+    );
+    expect(name, findsOneWidget);
+    final file = find.ancestor(
+      of: name,
+      matching: find.byType(DownloadableFile),
+    );
+    final card = tester.getRect(
+      find.descendant(of: file, matching: find.byType(Container)).first,
+    );
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: tester.getCenter(name));
+    await tester.pump();
+    final button = find.descendant(of: file, matching: find.byTooltip('다운로드'));
+    expect(button, findsOneWidget);
+    final rect = tester.getRect(button);
+    expect(rect.left, greaterThanOrEqualTo(card.right), reason: '카드와 겹치지 않는다');
+    expect(rect.left - card.right, lessThan(10), reason: '카드 바로 오른쪽');
   });
 
   testWidgets('지금 팀에 팀장이 없으면 문의하기 단추가 없다', (tester) async {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show mergeSort;
 import 'package:flutter/material.dart';
 
@@ -22,6 +21,7 @@ import '../widgets/todo_widgets.dart' show todoPanelRoute;
 import 'announcement_detail_screen.dart';
 import 'announcement_editor_dialog.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import '../widgets/retrying_network_image.dart';
 
 /// 공지 패널의 키(side_panels.dart의 [SidePanelSpec.key]).
 const announcementPanelKey = 'announcements';
@@ -1010,7 +1010,7 @@ class _AnnouncementCard extends StatelessWidget {
                       if (announcement.hasImage)
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: CachedNetworkImage(
+                          child: RetryingNetworkImage(
                             key: const ValueKey('announcement-tile-thumb'),
                             imageUrl: session.resolveUrl(
                               announcement.imageThumbnailUrl ??

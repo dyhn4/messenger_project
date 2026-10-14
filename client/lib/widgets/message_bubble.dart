@@ -1084,6 +1084,10 @@ class _MessageBubbleState extends State<MessageBubble> {
               : message.attachments.first.id,
           attachmentKey: message.attachmentKey,
           attachmentNonce: message.attachmentNonce,
+          // 파일 말풍선의 가로 최대 크기는 사진 말풍선과 같다. 카드 오른쪽에 진행 표시 자리와 다운로드·더보기
+          // 단추를 나란히 둔다.
+          maxWidth: kChatImageMaxWidth,
+          inlineActions: chatFileInlineActions,
         );
       case MessageType.text:
         if (message.isPost) return _buildPostContent(context);

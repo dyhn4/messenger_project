@@ -8,6 +8,7 @@ import '../widgets/attachment_widgets.dart'
 import '../widgets/app_toast.dart';
 import '../widgets/data_usage_warning.dart';
 import 'app_platform.dart';
+import 'download_progress.dart';
 import 'download_storage.dart';
 import 'session.dart';
 
@@ -54,6 +55,8 @@ Future<AlbumDownloadSummary> saveAlbumItemsToFolder({
         bytes: bytes,
       );
       saved++;
+    } on DownloadCancelled {
+      break;
     } catch (_) {
       failed++;
     }
@@ -85,6 +88,9 @@ Future<void> downloadAlbumItems(
   );
   if (!ok || !context.mounted) return;
 
+  // 진행 카드에 "파일 N개"로 보이고, 그 X로 멈추면 [task].cancelled.
+  final task = DownloadTask('파일 ${items.length}개', fileCount: items.length);
+
   Future<List<int>> fetch(AlbumItem item) => fetchAttachmentBytes(
     session: session,
     url: session.resolveUrl(item.fileUrl),
@@ -96,19 +102,27 @@ Future<void> downloadAlbumItems(
     var saved = 0;
     var failed = 0;
     onProgress?.call(0, items.length);
-    for (var i = 0; i < items.length; i++) {
-      try {
-        final path = await saveAttachment(
-          session: session,
-          url: session.resolveUrl(items[i].fileUrl),
-          fileName: albumItemFileName(items[i], i),
-        );
-        path == null ? failed++ : saved++;
-      } catch (_) {
-        failed++;
-      }
-      onProgress?.call(i + 1, items.length);
-    }
+    // 받는 동안 진행 카드에 "파일 N개"와 몇 번째·받은 양이 보인다(파일마다의 저장은 이 안에서 이어 센다).
+    await trackDownload(
+      task: task,
+      body: () async {
+        for (var i = 0; i < items.length; i++) {
+          try {
+            final path = await saveAttachment(
+              session: session,
+              url: session.resolveUrl(items[i].fileUrl),
+              fileName: albumItemFileName(items[i], i),
+            );
+            path == null ? failed++ : saved++;
+          } on DownloadCancelled {
+            break;
+          } catch (_) {
+            failed++;
+          }
+          onProgress?.call(i + 1, items.length);
+        }
+      },
+    );
     summary = AlbumDownloadSummary(
       saved: saved,
       failed: failed,
@@ -121,18 +135,25 @@ Future<void> downloadAlbumItems(
       initialDirectory: initial.isEmpty ? null : initial,
     );
     if (folder == null) return;
-    summary = await saveAlbumItemsToFolder(
-      items: items,
-      folder: folder,
-      fetch: fetch,
-      onProgress: onProgress,
+    summary = await trackDownload(
+      task: task,
+      body: () => saveAlbumItemsToFolder(
+        items: items,
+        folder: folder,
+        fetch: fetch,
+        onProgress: onProgress,
+      ),
     );
   }
 
   final where = summary.folder == null
       ? ''
       : ' (${displayDownloadPath(summary.folder!)})';
-  final message = summary.failed == 0
+  final message = task.cancelled
+      ? summary.saved == 0
+            ? '다운로드를 취소했습니다.'
+            : '다운로드를 취소했습니다. (${summary.saved}개는 받았습니다)$where'
+      : summary.failed == 0
       ? '${summary.saved}개를 다운로드했습니다.$where'
       : summary.saved == 0
       ? '다운로드하지 못했습니다.'

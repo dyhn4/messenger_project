@@ -84,6 +84,46 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   }
 
+  testWidgets('파일 패널 "메시지" 화면: 파일 카드에 마우스를 올리면 다운로드 · 더보기가 카드와 겹치지 않고 카드 바깥 오른쪽에 붙어 뜬다', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: FilesScreen(session: session())),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('doc.pdf'));
+    await tester.pump();
+    final file = find.byType(DownloadableFile);
+    expect(file, findsOneWidget);
+    final card = tester.getRect(
+      find.descendant(of: file, matching: find.byType(Container)).first,
+    );
+    expect(find.byIcon(Icons.download_outlined), findsNothing);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(card.center);
+    await tester.pump();
+    final download = tester.getRect(
+      find.descendant(of: file, matching: find.byTooltip('다운로드')),
+    );
+    final more = tester.getRect(
+      find.descendant(of: file, matching: find.byIcon(Icons.more_vert)),
+    );
+    expect(download.left, greaterThanOrEqualTo(card.right), reason: '카드와 겹치지 않는다');
+    expect(download.left - card.right, lessThan(10), reason: '카드 바로 오른쪽');
+    expect(more.left, greaterThan(download.left), reason: '다운로드 오른쪽에 더보기');
+    await close(tester);
+  });
+
   testWidgets('파일 패널 "메시지" 화면: 사진에 마우스를 올리면 즐겨찾기 · 더보기, 누르면 앞뒤 사진까지 넘기는 뷰어', (
     tester,
   ) async {

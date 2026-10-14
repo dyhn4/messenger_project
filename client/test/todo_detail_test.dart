@@ -14,9 +14,10 @@ import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/services/todo_download.dart';
 import 'package:client/widgets/attachment_widgets.dart'
-    show AllDownloadBar, ChatImageAttachments;
+    show AllDownloadBar, ChatImageAttachments, DownloadableFile;
 import 'package:client/widgets/todo_menu.dart';
 import 'package:client/widgets/todo_widgets.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1154,6 +1155,35 @@ void main() {
         tester.widget<Text>(_key('todo-detail-title')).style?.decoration,
         isNot(TextDecoration.lineThrough),
       );
+    });
+
+    testWidgets('첨부 파일에 마우스를 올리면 다운로드 단추가 카드와 겹치지 않고 카드 바깥 오른쪽에 붙어 뜬다', (
+      tester,
+    ) async {
+      await _open(tester, json: todoJson(attachmentCount: 1));
+      final file = find.ancestor(
+        of: find.text('자료0.pdf'),
+        matching: find.byType(DownloadableFile),
+      );
+      final card = tester.getRect(
+        find.descendant(of: file, matching: find.byType(Container)).first,
+      );
+      final button = find.descendant(of: file, matching: find.byTooltip('다운로드'));
+      expect(button, findsNothing, reason: '마우스를 올리기 전에는 없다');
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: tester.getCenter(find.text('자료0.pdf')));
+      await tester.pump();
+      expect(button, findsOneWidget);
+      final rect = tester.getRect(button);
+      expect(rect.left, greaterThanOrEqualTo(card.right), reason: '카드와 겹치지 않는다');
+      expect(rect.left - card.right, lessThan(10), reason: '카드 바로 오른쪽에 붙어 있다');
+
+      // 카드에서 단추로 마우스를 옮겨도 단추가 사라지지 않는다.
+      await mouse.moveTo(rect.center);
+      await tester.pump();
+      expect(button, findsOneWidget);
     });
 
     testWidgets(

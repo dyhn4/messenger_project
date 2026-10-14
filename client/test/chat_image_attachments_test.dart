@@ -7,6 +7,7 @@ import 'package:client/services/clipboard_image.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/attachment_widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -284,6 +285,155 @@ void main() {
       bar.right,
       closeTo(tester.getRect(find.byType(ChatFileAttachments)).right, 1),
     );
+  });
+
+  /// 파일 말풍선을 그리고 각 파일 줄의 카드·진행 표시 자리 위치를 돌려준다.
+  Future<List<({Rect card, Rect slot})>> pumpFiles(
+    WidgetTester tester,
+    Widget files,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(alignment: Alignment.topLeft, child: files),
+        ),
+      ),
+    );
+    final tiles = find.byType(DownloadableFile);
+    return [
+      for (var i = 0; i < tiles.evaluate().length; i++)
+        (
+          card: tester.getRect(
+            find
+                .descendant(of: tiles.at(i), matching: find.byType(Container))
+                .first,
+          ),
+          slot: tester.getRect(
+            find.descendant(
+              of: tiles.at(i),
+              matching: find.byKey(const ValueKey('file-progress-slot')),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  MessageAttachment named(String id, String name) => MessageAttachment(
+    id: id,
+    kind: 'file',
+    fileUrl: '/uploads/$id.pdf',
+    fileName: name,
+  );
+
+  testWidgets('파일 하나 — 카드 오른쪽에 진행 표시 자리를 비워 두고 그 오른쪽에 단추 자리, 합쳐서 최대 650', (
+    tester,
+  ) async {
+    final rows = await pumpFiles(
+      tester,
+      DownloadableFile(
+        session: session(),
+        url: 'https://test.local/uploads/a.pdf',
+        fileName: 'a.pdf',
+        maxWidth: kChatImageMaxWidth,
+        inlineActions: true,
+      ),
+    );
+    final (:card, :slot) = rows.single;
+    expect(slot.left, greaterThanOrEqualTo(card.right), reason: '카드 오른쪽');
+    expect(slot.width, kFileProgressSlotWidth, reason: '받지 않을 때도 자리를 비워 둔다');
+    final whole = tester.getRect(find.byType(DownloadableFile));
+    expect(whole.right, greaterThan(slot.right), reason: '그 오른쪽에 단추 자리');
+    expect(
+      whole.width,
+      lessThan(kChatImageMaxWidth),
+      reason: '짧은 이름이면 650까지 늘이지 않는다',
+    );
+
+    // 아주 긴 이름이어도 합쳐서 650을 넘지 않고, 이름이 잘린다.
+    final long = await pumpFiles(
+      tester,
+      DownloadableFile(
+        session: session(),
+        url: 'https://test.local/uploads/b.pdf',
+        fileName: '${'아주 긴 파일 이름 ' * 20}.pdf',
+        maxWidth: kChatImageMaxWidth,
+        inlineActions: true,
+      ),
+    );
+    expect(
+      tester.getSize(find.byType(DownloadableFile)).width,
+      kChatImageMaxWidth,
+    );
+    expect(long.single.slot.width, kFileProgressSlotWidth);
+  });
+
+  testWidgets('파일 여러 개 — 가장 긴 카드에 폭을 맞춰 카드·진행 표시 자리가 가지런하고, 최대 650', (
+    tester,
+  ) async {
+    // 마우스를 올려 단추를 띄우는 PC 화면.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final rows = await pumpFiles(
+      tester,
+      ChatFileAttachments(
+        session: session(),
+        attachments: [
+          named('a', 'a.pdf'),
+          named('b', '분기별 영업 실적 보고서 최종본.xlsx'),
+        ],
+      ),
+    );
+    expect(rows[0].card.width, rows[1].card.width, reason: '가장 긴 카드 폭에 맞춘다');
+    expect(
+      rows[0].slot.left,
+      rows[1].slot.left,
+      reason: '진행 표시 자리가 위아래로 가지런하다',
+    );
+    expect(rows[0].slot.left, greaterThanOrEqualTo(rows[0].card.right));
+    expect(
+      tester.getSize(find.byType(ChatFileAttachments)).width,
+      lessThan(kChatImageMaxWidth),
+      reason: '이름이 짧으면 650까지 늘이지 않는다',
+    );
+
+    await pumpFiles(
+      tester,
+      ChatFileAttachments(
+        session: session(),
+        attachments: [
+          named('a', 'a.pdf'),
+          named('b', '${'아주 긴 파일 이름 ' * 20}.pdf'),
+        ],
+      ),
+    );
+    expect(
+      tester.getSize(find.byType(ChatFileAttachments)).width,
+      kChatImageMaxWidth,
+      reason: '아주 길면 650에서 멈춘다',
+    );
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('휴대폰(길게 눌러 메뉴)에서는 진행 표시·단추 자리를 비워 두지 않는다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: ChatFileAttachments(
+              session: session(),
+              attachments: [named('a', 'a.pdf'), named('b', 'b.pdf')],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(const ValueKey('file-progress-slot')), findsNothing);
+    expect(find.text('a.pdf'), findsOneWidget);
   });
 
   testWidgets('"전체 다운로드" 바탕색은 마우스를 올렸을 때보다 연하다', (tester) async {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
@@ -28,6 +27,7 @@ import '../widgets/rich_text_format.dart';
 import '../widgets/xfile_image.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'schedule_message_dialog.dart';
+import '../widgets/retrying_network_image.dart';
 
 /// 게시글 작성·수정 창이 지금 몇 개 떠 있는지. 떠 있는 동안은 뒤에 깔린 채팅방·댓글 패널의 파일
 /// 드롭 영역을 꺼서(chat_panel.dart, message_thread_screen.dart) 편집기에 끌어다 놓은 파일이 뒤
@@ -1445,7 +1445,7 @@ class _ExistingImageTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: ColoredBox(
         color: scheme.surfaceContainerHighest,
-        child: CachedNetworkImage(
+        child: RetryingNetworkImage(
           imageUrl: session.resolveUrl(
             attachment.thumbnailUrl ?? attachment.fileUrl,
           ),

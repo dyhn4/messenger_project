@@ -1,8 +1,8 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../models/message.dart';
 import '../services/session.dart';
+import 'retrying_network_image.dart';
 
 /// 사진·파일 메시지 "수정" 모드의 첨부 목록 — 잔디처럼 잘못 붙인 첨부를 **지우기만** 한다(더하지는 못 한다).
 /// 첨부마다 오른쪽 위 X 버튼이 있고, 누르면 그 첨부가 "삭제 예정"(흐리게)으로 바뀐다 — 실제로 지워지는 건 [저장]을
@@ -117,7 +117,7 @@ class _ImageTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             child: Opacity(
               opacity: removed ? 0.3 : 1,
-              child: CachedNetworkImage(
+              child: RetryingNetworkImage(
                 imageUrl: url,
                 width: size,
                 height: size,

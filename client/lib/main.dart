@@ -34,6 +34,7 @@ import 'services/web_launch_invite.dart';
 import 'services/web_page_color.dart';
 import 'services/web_safe_area.dart';
 import 'widgets/app_lock_overlay.dart';
+import 'widgets/download_progress_card.dart';
 import 'widgets/esc_to_minimize.dart';
 import 'widgets/update_banner.dart';
 import 'widgets/web_push_prompt.dart';
@@ -539,6 +540,8 @@ class _MyAppState extends State<MyApp>
                         session: session,
                         navigatorKey: navigatorKey,
                       ),
+                      // 첨부를 내려받는 동안의 진행 카드(download_progress_card.dart) — 어느 화면·대화상자 위에서도 보인다.
+                      const DownloadProgressCard(),
                     ],
                   ),
                 ),

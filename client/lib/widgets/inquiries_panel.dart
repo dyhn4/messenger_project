@@ -776,6 +776,8 @@ class _InquiryDetailDialogState extends State<InquiryDetailDialog> {
                     session: widget.session,
                     url: inquiry.fileUrl!,
                     fileName: inquiry.fileName ?? '첨부 파일',
+                    // 다운로드 단추는 카드와 겹치지 않게 카드 바깥 오른쪽에(할 일 상세와 같다).
+                    actionsBeside: true,
                   ),
               ],
               const SizedBox(height: 20),

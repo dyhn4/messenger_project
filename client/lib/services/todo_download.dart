@@ -1,4 +1,3 @@
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
@@ -9,6 +8,7 @@ import '../widgets/attachment_widgets.dart'
     show fetchAttachmentBytes, saveAttachment;
 import '../widgets/data_usage_warning.dart';
 import 'app_platform.dart';
+import 'download_progress.dart';
 import 'download_storage.dart';
 import 'session.dart';
 
@@ -62,6 +62,8 @@ Future<TodoDownloadSummary> saveTodoAttachmentsToFolder({
         bytes: bytes,
       );
       saved++;
+    } on DownloadCancelled {
+      break;
     } catch (_) {
       failed++;
     }
@@ -71,10 +73,19 @@ Future<TodoDownloadSummary> saveTodoAttachmentsToFolder({
 }
 
 /// 다 받은 뒤 토스트 문구 — `N개를 다운로드했습니다. (폴더)`, 실패가 있으면 그 수도, 하나도 못 받았으면 실패 안내.
-String todoDownloadResultText(TodoDownloadSummary summary) {
+/// 진행 카드의 X로 멈췄으면([cancelled]) 취소했다고(그 전까지 받은 수와 함께).
+String todoDownloadResultText(
+  TodoDownloadSummary summary, {
+  bool cancelled = false,
+}) {
   final where = summary.folder == null
       ? ''
       : ' (${displayDownloadPath(summary.folder!)})';
+  if (cancelled) {
+    return summary.saved == 0
+        ? '다운로드를 취소했습니다.'
+        : '다운로드를 취소했습니다. (${summary.saved}개는 받았습니다)$where';
+  }
   if (summary.failed == 0) return '${summary.saved}개를 다운로드했습니다.$where';
   if (summary.saved == 0) return '다운로드하지 못했습니다.';
   return '${summary.saved}개를 다운로드했습니다. ${summary.failed}개는 실패했습니다.$where';
@@ -112,25 +123,38 @@ Future<void> downloadTodoAttachments(
   );
   if (!ok) return;
 
+  // 진행 카드에 "파일 N개"로 보이고, 그 X로 멈추면 [task].cancelled.
+  final task = DownloadTask(
+    '파일 ${attachments.length}개',
+    fileCount: attachments.length,
+  );
   TodoDownloadSummary summary;
   // 웹은 폴더를 고를 수 없어 모바일처럼 하나씩 받는다(브라우저 다운로드).
   if (_isMobile || kIsWeb) {
     var saved = 0;
     var failed = 0;
     onProgress?.call(0, attachments.length);
-    for (var i = 0; i < attachments.length; i++) {
-      try {
-        final path = await saveAttachment(
-          session: session,
-          url: session.resolveUrl(attachments[i].fileUrl),
-          fileName: todoAttachmentFileName(attachments[i], i),
-        );
-        path == null ? failed++ : saved++;
-      } catch (_) {
-        failed++;
-      }
-      onProgress?.call(i + 1, attachments.length);
-    }
+    // 받는 동안 진행 카드에 "파일 N개"와 몇 번째·받은 양이 보인다(파일마다의 저장은 이 안에서 이어 센다).
+    await trackDownload(
+      task: task,
+      body: () async {
+        for (var i = 0; i < attachments.length; i++) {
+          try {
+            final path = await saveAttachment(
+              session: session,
+              url: session.resolveUrl(attachments[i].fileUrl),
+              fileName: todoAttachmentFileName(attachments[i], i),
+            );
+            path == null ? failed++ : saved++;
+          } on DownloadCancelled {
+            break;
+          } catch (_) {
+            failed++;
+          }
+          onProgress?.call(i + 1, attachments.length);
+        }
+      },
+    );
     summary = TodoDownloadSummary(
       saved: saved,
       failed: failed,
@@ -146,22 +170,25 @@ Future<void> downloadTodoAttachments(
                 initialDirectory: initial.isEmpty ? null : initial,
               ))();
     if (folder == null) return;
-    summary = await saveTodoAttachmentsToFolder(
-      attachments: attachments,
-      folder: folder,
-      fetch:
-          fetch ??
-          (a) => fetchAttachmentBytes(
-            session: session,
-            url: session.resolveUrl(a.fileUrl),
-          ),
-      onProgress: onProgress,
+    summary = await trackDownload(
+      task: task,
+      body: () => saveTodoAttachmentsToFolder(
+        attachments: attachments,
+        folder: folder,
+        fetch:
+            fetch ??
+            (a) => fetchAttachmentBytes(
+              session: session,
+              url: session.resolveUrl(a.fileUrl),
+            ),
+        onProgress: onProgress,
+      ),
     );
   }
 
   showAppToastOnOverlay(
     overlay,
-    todoDownloadResultText(summary),
+    todoDownloadResultText(summary, cancelled: task.cancelled),
     duration: const Duration(seconds: 4),
   );
   final folder = summary.folder;

@@ -1,7 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../data/stickers.dart';
+import 'retrying_network_image.dart';
 
 /// 이모티콘 하나를 그린다 — 기본 이모티콘은 큰 이모지 글자, 서버에 올린 그림 이모티콘은 그림.
 /// 그림 주소는 짧게 만료되는 서명 링크라 매번 바뀌므로, 스티커 id로 캐시해서 한 번 받은 그림은
@@ -44,7 +44,7 @@ class StickerView extends StatelessWidget {
         if (!s.isImage) {
           return Text(s.emoji, style: TextStyle(fontSize: emojiSize));
         }
-        return CachedNetworkImage(
+        return RetryingNetworkImage(
           imageUrl: s.imageUrl!,
           cacheKey: 'sticker-${s.id}',
           width: imageSize,

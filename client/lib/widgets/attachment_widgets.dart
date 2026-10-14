@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -13,14 +13,17 @@ import '../screens/image_viewer_screen.dart';
 import '../screens/pdf_viewer_screen.dart';
 import '../screens/text_viewer_screen.dart';
 import '../services/clipboard_image.dart' show canCopyImageToClipboard;
+import '../services/download_progress.dart';
 import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'data_usage_warning.dart';
 import 'deleted_file_card.dart';
+import 'download_progress_card.dart' show DownloadProgressPill;
 import 'file_actions.dart';
 import 'hover_toolbar.dart';
+import 'retrying_network_image.dart';
 
 /// 파일명을 눌렀을 때 메신저 창 안에서 바로 열어 보여줄 수 있는 확장자인지 — 그 외(워드/엑셀/
 /// 파워포인트 등)는 지금처럼 OS 기본 프로그램으로 연다. Flutter 생태계에 오피스 문서를 원본
@@ -37,34 +40,80 @@ bool _isInAppViewable(String fileName) {
 ///
 /// 메시지에 실려 온 링크는 최대 2시간 뒤에 만료돼서(서버 signFileUrl) 앱을 오래 켜 둔 채 받으면
 /// 401이 난다. [session]을 주면 그때 서버에서 새 링크를 받아 한 번 더 시도한다.
+///
+/// [trackDownload] 안에서 불리면(다운로드 단추) 조금씩 받으며 받은 양을 진행 표시에 알리고, 끝나면(실패해도) 파일 한
+/// 개를 센다. 그 작업을 X로 멈추면 받던 요청을 끊고 [DownloadCancelled]를 던진다. 미리보기·뷰어처럼 그 밖에서 불리면
+/// 예전처럼 한 번에 받는다.
 Future<Uint8List> fetchAttachmentBytes({
   required String url,
   String? attachmentKey,
   String? attachmentNonce,
   Session? session,
 }) async {
-  var res = await http.get(Uri.parse(url));
-  final api = session?.api;
-  if (res.statusCode == 401 && api != null) {
-    try {
-      final fresh = await api.resignFileUrl(Uri.parse(url).path);
-      res = await http.get(Uri.parse(session!.resolveUrl(fresh)));
-    } catch (_) {
-      // 새 링크를 못 받으면 아래에서 처음 응답 그대로 실패로 처리한다.
+  final task = DownloadTask.current;
+  task?.throwIfCancelled();
+  try {
+    var res = await _getBytes(Uri.parse(url), task);
+    final api = session?.api;
+    if (res.statusCode == 401 && api != null) {
+      try {
+        final fresh = await api.resignFileUrl(Uri.parse(url).path);
+        res = await _getBytes(Uri.parse(session!.resolveUrl(fresh)), task);
+      } on DownloadCancelled {
+        rethrow;
+      } catch (_) {
+        // 새 링크를 못 받으면 아래에서 처음 응답 그대로 실패로 처리한다.
+      }
     }
-  }
-  if (res.statusCode >= 400) {
-    throw Exception('다운로드에 실패했습니다. (HTTP ${res.statusCode})');
-  }
-  if (attachmentKey == null || attachmentNonce == null) return res.bodyBytes;
+    if (res.statusCode >= 400) {
+      throw Exception('다운로드에 실패했습니다. (HTTP ${res.statusCode})');
+    }
+    if (attachmentKey == null || attachmentNonce == null) return res.bodyBytes;
 
-  final plain = await secret_crypto.decryptAttachment(
-    cipherBytes: res.bodyBytes,
-    keyBase64: attachmentKey,
-    nonceBase64: attachmentNonce,
-  );
-  if (plain == null) throw Exception('첨부를 복호화할 수 없습니다.');
-  return plain;
+    final plain = await secret_crypto.decryptAttachment(
+      cipherBytes: res.bodyBytes,
+      keyBase64: attachmentKey,
+      nonceBase64: attachmentNonce,
+    );
+    if (plain == null) throw Exception('첨부를 복호화할 수 없습니다.');
+    return plain;
+  } finally {
+    task?.fileFinished();
+  }
+}
+
+/// GET — [task]가 있으면 응답을 조각조각 받으며 받은 바이트와 전체 크기(Content-Length)를 알리고, X로 멈추면 요청을
+/// 끊는다([DownloadCancelled]).
+Future<http.Response> _getBytes(Uri uri, DownloadTask? task) async {
+  if (task == null) return http.get(uri);
+  final client = http.Client();
+  try {
+    final streamed = await client.send(
+      http.AbortableRequest('GET', uri, abortTrigger: task.whenCancelled),
+    );
+    final total = streamed.contentLength;
+    final bytes = BytesBuilder(copy: false);
+    var received = 0;
+    task.reportBytes(0, total);
+    await for (final chunk in streamed.stream) {
+      // 끊긴 요청을 알아채지 못하는 클라이언트도 있어 조각마다 확인한다.
+      task.throwIfCancelled();
+      bytes.add(chunk);
+      received += chunk.length;
+      task.reportBytes(received, total);
+    }
+    task.throwIfCancelled();
+    return http.Response.bytes(
+      bytes.takeBytes(),
+      streamed.statusCode,
+      headers: streamed.headers,
+      request: streamed.request,
+    );
+  } on http.RequestAbortedException {
+    throw const DownloadCancelled();
+  } finally {
+    client.close();
+  }
 }
 
 /// 첨부 하나를 다운로드해서 저장한다. 환경설정에서 "저장 위치 안 물어보기"가 켜져 있으면
@@ -72,18 +121,26 @@ Future<Uint8List> fetchAttachmentBytes({
 /// 덮어쓰지 않고 번호를 붙인다), 꺼져 있으면 저장 위치를 물어본다. 저장 후 "다운로드 완료 시
 /// 폴더 열기"가 켜져 있으면 그 폴더를 연다. 저장된 경로를 반환한다(취소되면 null).
 /// MessageBubble의 이미지/파일 첨부와 댓글의 이미지/파일 첨부가 같이 쓴다.
+///
+/// [task]를 주면 그 작업으로 진행을 알린다(말풍선의 다운로드 단추 옆에 그리는 곳). X로 멈추면 [DownloadCancelled].
 Future<String?> saveAttachment({
   required Session session,
   required String url,
   required String fileName,
   String? attachmentKey,
   String? attachmentNonce,
+  DownloadTask? task,
 }) async {
-  final bytes = await fetchAttachmentBytes(
-    session: session,
-    url: url,
-    attachmentKey: attachmentKey,
-    attachmentNonce: attachmentNonce,
+  // 받는 동안 진행이 보인다(여러 개 받기 안이면 그쪽에 이어 센다). 저장 창은 다 받은 뒤에 뜬다.
+  final bytes = await trackDownload(
+    label: fileName,
+    task: task,
+    body: () => fetchAttachmentBytes(
+      session: session,
+      url: url,
+      attachmentKey: attachmentKey,
+      attachmentNonce: attachmentNonce,
+    ),
   );
 
   // 웹은 저장 위치를 고를 수 없다 — 브라우저 다운로드로 받는다(download_storage.dart).
@@ -179,12 +236,15 @@ List<ViewerImage> roomViewerImages(Session session, List<Message> messages) {
 /// 한 메시지의 첨부를 전부 한 폴더에 저장한다(말풍선 아래 "전체 다운로드").
 /// "저장 위치 안 물어보기"가 켜져 있으면 설정된 폴더에 바로, 아니면 **폴더를 한 번만** 물어본다
 /// (파일마다 저장 창이 뜨면 여러 장일 때 번거롭다). 같은 이름이 이미 있으면 "이름 (1).png"처럼
-/// 번호를 붙여 덮어쓰지 않는다. 저장한 개수와 폴더를 돌려준다(취소되면 null).
+/// 번호를 붙여 덮어쓰지 않는다. 저장한 개수와 폴더를 돌려준다(폴더 고르기를 취소하면 null).
+/// [task]를 주면 그 작업으로 진행을 알린다(말풍선의 "전체 다운로드" 옆에 그린다). X로 멈추면 그때까지 받은 파일은 두고
+/// [DownloadCancelled]를 던진다.
 Future<({int count, String folder})?> saveAllAttachments({
   required Session session,
   required List<({String url, String fileName})> items,
   String? attachmentKey,
   String? attachmentNonce,
+  DownloadTask? task,
 }) async {
   final settings = session.settings;
   // 웹은 폴더가 없다 — 파일마다 브라우저 다운로드로 받는다(download_storage.dart).
@@ -199,21 +259,30 @@ Future<({int count, String folder})?> saveAllAttachments({
         );
   if (folder == null) return null;
 
-  var count = 0;
-  for (final item in items) {
-    final bytes = await fetchAttachmentBytes(
-      session: session,
-      url: item.url,
-      attachmentKey: attachmentKey,
-      attachmentNonce: attachmentNonce,
-    );
-    await writeDownloadFile(
-      folder: folder,
-      fileName: item.fileName,
-      bytes: bytes,
-    );
-    count++;
-  }
+  // 받는 동안 진행 카드에 "파일 N개"와 몇 번째·받은 양이 보인다.
+  final count = await trackDownload(
+    label: '파일 ${items.length}개',
+    fileCount: items.length,
+    task: task,
+    body: () async {
+      var count = 0;
+      for (final item in items) {
+        final bytes = await fetchAttachmentBytes(
+          session: session,
+          url: item.url,
+          attachmentKey: attachmentKey,
+          attachmentNonce: attachmentNonce,
+        );
+        await writeDownloadFile(
+          folder: folder,
+          fileName: item.fileName,
+          bytes: bytes,
+        );
+        count++;
+      }
+      return count;
+    },
+  );
   if (settings.openFolderAfterDownload) {
     await settings.openDownloadFolder(folder);
   }
@@ -242,6 +311,9 @@ class AllDownloadBar extends StatefulWidget {
 class _AllDownloadBarState extends State<AllDownloadBar> {
   bool _busy = false;
 
+  /// 받는 중인 작업 — 단추 왼쪽에 진행 표시와 X가 보인다.
+  DownloadTask? _task;
+
   Future<void> _downloadAll() async {
     setState(() => _busy = true);
     try {
@@ -250,12 +322,19 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
         session: widget.session,
         items: [for (final i in widget.items) (url: i.url, size: null)],
       );
-      if (!ok) return;
+      if (!ok || !mounted) return;
+      final task = DownloadTask(
+        '파일 ${widget.items.length}개',
+        fileCount: widget.items.length,
+        inline: true,
+      );
+      setState(() => _task = task);
       final result = await saveAllAttachments(
         session: widget.session,
         items: widget.items,
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,
+        task: task,
       );
       if (!mounted || result == null) return;
       showAppToast(
@@ -264,10 +343,24 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
             ? '${result.count}개를 다운로드했습니다.'
             : '${result.count}개를 다운로드했습니다: ${displayDownloadPath(result.folder)}',
       );
+    } on DownloadCancelled {
+      // 그 전까지 받은 파일은 폴더에 남는다.
+      final done = _task?.filesDone ?? 0;
+      if (mounted) {
+        showAppToast(
+          context,
+          done > 0 ? '다운로드를 취소했습니다. ($done개는 받았습니다)' : '다운로드를 취소했습니다.',
+        );
+      }
     } catch (e) {
       if (mounted) showAppToast(context, '다운로드 실패: $e');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _task = null;
+        });
+      }
     }
   }
 
@@ -278,28 +371,45 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
       padding: const EdgeInsets.only(top: 6),
       child: Align(
         alignment: Alignment.centerRight,
-        child: TextButton.icon(
-          onPressed: _busy ? null : _downloadAll,
-          style: TextButton.styleFrom(
-            foregroundColor: hint,
-            // 바탕은 마우스를 올렸을 때(글자색 8%가 위에 겹친다)보다 연하게 깔아 둔다.
-            backgroundColor: hint.withValues(alpha: 0.05),
-            visualDensity: VisualDensity.compact,
-            // 테마 글꼴(한글 대체 글꼴 포함)에서 크기·굵기만 바꾼다 — 맨 TextStyle을 주면 버튼 글자가
-            // 테마의 대체 글꼴을 잃어 한글이 네모(□)로 나올 수 있다.
-            textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+        // 받는 동안은 단추 왼쪽에 진행 표시("2/5개 · 40%")와 X.
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_task case final task?)
+              // 말풍선이 좁으면 진행 막대가 줄어든다(숫자와 X는 남긴다).
+              Flexible(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: DownloadProgressPill(task: task, barWidth: 72),
+                ),
+              ),
+            // 말풍선이 좁으면(수정 중인 휴대폰 화면 등) 단추 글자가 줄어들게 — 예전처럼 넘치지 않는다.
+            Flexible(
+              child: TextButton.icon(
+                onPressed: _busy ? null : _downloadAll,
+                style: TextButton.styleFrom(
+                  foregroundColor: hint,
+                  // 바탕은 마우스를 올렸을 때(글자색 8%가 위에 겹친다)보다 연하게 깔아 둔다.
+                  backgroundColor: hint.withValues(alpha: 0.05),
+                  visualDensity: VisualDensity.compact,
+                  // 테마 글꼴(한글 대체 글꼴 포함)에서 크기·굵기만 바꾼다 — 맨 TextStyle을 주면 버튼 글자가
+                  // 테마의 대체 글꼴을 잃어 한글이 네모(□)로 나올 수 있다.
+                  textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                icon: _busy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download_outlined, size: 16),
+                label: Text('전체 다운로드 (${widget.items.length})'),
+              ),
             ),
-          ),
-          icon: _busy
-              ? const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.download_outlined, size: 16),
-          label: Text('전체 다운로드 (${widget.items.length})'),
+          ],
         ),
       ),
     );
@@ -325,46 +435,57 @@ class ChatFileAttachments extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < attachments.length; i++) ...[
-          if (i > 0) const SizedBox(height: 6),
-          if (attachments[i].deleted)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: DeletedFileCard(
-                fileName: attachments[i].fileName,
-                isImage: attachments[i].isImage,
-              ),
-            )
-          else
-            DownloadableFile(
-              session: session,
-              url: session.resolveUrl(attachments[i].fileUrl),
-              fileName: attachments[i].fileName ?? '파일',
-              message: message,
-              attachmentId: attachments[i].id,
-              attachmentKey: attachmentKey,
-              attachmentNonce: attachmentNonce,
-            ),
-        ],
-        if (attachments.where((a) => !a.deleted).length > 1)
-          AllDownloadBar(
-            session: session,
-            items: [
-              for (final a in attachments)
-                if (!a.deleted)
-                  (
-                    url: session.resolveUrl(a.fileUrl),
-                    fileName: a.fileName ?? '파일',
+    // 말풍선 폭 = 가장 긴 파일 카드 + 진행 표시 자리 + 단추 자리(최대 [kChatImageMaxWidth]) — 모든 줄이 그 폭을 써서
+    // 카드·진행 표시·단추가 위아래로 가지런하다(IntrinsicWidth가 가장 넓은 줄의 폭을 잰다).
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: kChatImageMaxWidth),
+      child: IntrinsicWidth(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < attachments.length; i++) ...[
+              if (i > 0) const SizedBox(height: 6),
+              if (attachments[i].deleted)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: DeletedFileCard(
+                    fileName: attachments[i].fileName,
+                    isImage: attachments[i].isImage,
                   ),
+                )
+              else
+                DownloadableFile(
+                  session: session,
+                  url: session.resolveUrl(attachments[i].fileUrl),
+                  fileName: attachments[i].fileName ?? '파일',
+                  message: message,
+                  attachmentId: attachments[i].id,
+                  attachmentKey: attachmentKey,
+                  attachmentNonce: attachmentNonce,
+                  // 사진 말풍선과 같은 가로 최대 크기. 카드는 줄 폭(가장 긴 카드)을 채운다.
+                  maxWidth: kChatImageMaxWidth,
+                  inlineActions: chatFileInlineActions,
+                  fillWidth: true,
+                ),
             ],
-            attachmentKey: attachmentKey,
-            attachmentNonce: attachmentNonce,
-          ),
-      ],
+            if (attachments.where((a) => !a.deleted).length > 1)
+              AllDownloadBar(
+                session: session,
+                items: [
+                  for (final a in attachments)
+                    if (!a.deleted)
+                      (
+                        url: session.resolveUrl(a.fileUrl),
+                        fileName: a.fileName ?? '파일',
+                      ),
+                ],
+                attachmentKey: attachmentKey,
+                attachmentNonce: attachmentNonce,
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -422,6 +543,9 @@ class _DownloadableImageState extends State<DownloadableImage> {
   /// 더보기 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다(파일 목록 줄과 같은 이유).
   bool _menuOpen = false;
   bool _downloading = false;
+
+  /// 받는 중인 작업 — 다운로드 단추 왼쪽에 진행 표시와 X가 보인다.
+  DownloadTask? _task;
   Future<Uint8List>? _previewBytes;
 
   bool get _hasThumbnail => widget.thumbnailUrl != null;
@@ -432,16 +556,43 @@ class _DownloadableImageState extends State<DownloadableImage> {
       _hasThumbnail ? widget.thumbnailNonce : widget.attachmentNonce;
   bool get _previewIsSecret => _previewKey != null;
 
+  /// 비밀 대화 미리보기를 못 받았는지 — 서버에 다시 연결되면([imageRetrySignal]) 다시 받는다(그림 미리보기는
+  /// [RetryingNetworkImage]가 스스로 다시 받는다).
+  bool _previewFailed = false;
+
   @override
   void initState() {
     super.initState();
-    if (_previewIsSecret) {
-      _previewBytes = fetchAttachmentBytes(
-        session: widget.session,
-        url: _previewUrl,
-        attachmentKey: _previewKey,
-        attachmentNonce: _previewNonce,
-      );
+    if (_previewIsSecret) _loadSecretPreview();
+    imageRetrySignal.addListener(_onReconnect);
+  }
+
+  @override
+  void dispose() {
+    imageRetrySignal.removeListener(_onReconnect);
+    super.dispose();
+  }
+
+  void _loadSecretPreview() {
+    _previewFailed = false;
+    final future = fetchAttachmentBytes(
+      session: widget.session,
+      url: _previewUrl,
+      attachmentKey: _previewKey,
+      attachmentNonce: _previewNonce,
+    );
+    future.then(
+      (_) {},
+      onError: (_) {
+        _previewFailed = true;
+      },
+    );
+    _previewBytes = future;
+  }
+
+  void _onReconnect() {
+    if (mounted && _previewIsSecret && _previewFailed) {
+      setState(_loadSecretPreview);
     }
   }
 
@@ -453,23 +604,33 @@ class _DownloadableImageState extends State<DownloadableImage> {
         session: widget.session,
         items: [(url: widget.url, size: null)],
       );
-      if (!ok) return;
+      if (!ok || !mounted) return;
+      final task = DownloadTask(widget.fileName, inline: true);
+      setState(() => _task = task);
       final savedPath = await saveAttachment(
         session: widget.session,
         url: widget.url,
         fileName: widget.fileName,
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,
+        task: task,
       );
       if (!mounted) return;
       if (savedPath != null) {
         showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
       }
+    } on DownloadCancelled catch (e) {
+      if (mounted) showAppToast(context, '$e');
     } catch (e) {
       if (!mounted) return;
       showAppToast(context, '다운로드 실패: $e');
     } finally {
-      if (mounted) setState(() => _downloading = false);
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _task = null;
+        });
+      }
     }
   }
 
@@ -559,7 +720,7 @@ class _DownloadableImageState extends State<DownloadableImage> {
               );
             },
           )
-        : CachedNetworkImage(
+        : RetryingNetworkImage(
             imageUrl: _previewUrl,
             width: 200,
             // placeholder/errorWidget과 높이를 맞춰서(150) 고정한다 — 안 그러면 이미지가
@@ -595,17 +756,28 @@ class _DownloadableImageState extends State<DownloadableImage> {
             ),
             if (widget.actions != null)
               _fileToolbar(context, widget.actions!)
-            else if (_hovering)
+            else if (_hovering || _task != null)
               Positioned(
                 right: 6,
                 top: 6,
-                child: HoverToolbar(
+                // 받는 동안은 단추 왼쪽에 진행 표시와 X(마우스를 치워도 보인다).
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    HoverToolbarButton(
-                      icon: Icons.download_outlined,
-                      tooltip: '다운로드',
-                      busy: _downloading,
-                      onPressed: _download,
+                    if (_task case final task?)
+                      DownloadProgressPill(
+                        task: task,
+                        maxWidth: 200 - 12 - HoverToolbar.widthFor(1),
+                      ),
+                    HoverToolbar(
+                      children: [
+                        HoverToolbarButton(
+                          icon: Icons.download_outlined,
+                          tooltip: '다운로드',
+                          busy: _downloading,
+                          onPressed: _download,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -890,6 +1062,9 @@ class _ChatImageTileState extends State<_ChatImageTile> {
   bool _hovering = false;
   bool _menuOpen = false;
   bool _downloading = false;
+
+  /// 받는 중인 작업 — 다운로드 단추 왼쪽에 진행 표시와 X가 보인다.
+  DownloadTask? _task;
   Future<Uint8List>? _previewBytes;
 
   /// 미리보기 이미지(썸네일이 있으면 썸네일, 없으면 원본)의 가로/세로 비 — 한 장짜리 칸의
@@ -908,26 +1083,57 @@ class _ChatImageTileState extends State<_ChatImageTile> {
       _hasThumbnail ? widget.thumbnailNonce : widget.attachmentNonce;
   bool get _previewIsSecret => _previewKey != null;
 
+  /// 비밀 대화 미리보기를 못 받았는지 — 서버에 다시 연결되면([imageRetrySignal]) 다시 받는다.
+  bool _previewFailed = false;
+
   @override
   void initState() {
     super.initState();
     if (_previewIsSecret) {
-      _previewBytes = fetchAttachmentBytes(
-        session: widget.session,
-        url: _previewUrl,
-        attachmentKey: _previewKey,
-        attachmentNonce: _previewNonce,
-      );
+      _loadSecretPreview();
     } else if (widget.fixedHeight == null) {
       // 한 장짜리만 칸 세로를 원본 비율로 잡으므로 미리 크기를 알아본다(격자는 모든 칸이
       // 같은 고정 높이라 원본 크기를 몰라도 된다).
-      _listenForRatio();
+      _listenForRatio(_previewUrl);
+    }
+    imageRetrySignal.addListener(_onReconnect);
+  }
+
+  void _loadSecretPreview() {
+    _previewFailed = false;
+    final future = fetchAttachmentBytes(
+      session: widget.session,
+      url: _previewUrl,
+      attachmentKey: _previewKey,
+      attachmentNonce: _previewNonce,
+    );
+    future.then(
+      (_) {},
+      onError: (_) {
+        _previewFailed = true;
+      },
+    );
+    _previewBytes = future;
+  }
+
+  void _onReconnect() {
+    if (mounted && _previewIsSecret && _previewFailed) {
+      setState(_loadSecretPreview);
     }
   }
 
-  void _listenForRatio() {
+  /// 그림을 다시 받기 시작하면(RetryingNetworkImage.onRetry — 새 링크일 수도 있다) 비율도 아직 몰랐으면 다시 잰다.
+  void _relistenForRatio(String url) {
+    if (_ratio != null || widget.fixedHeight != null) return;
+    if (_stream != null && _listener != null) {
+      _stream!.removeListener(_listener!);
+    }
+    _listenForRatio(url);
+  }
+
+  void _listenForRatio(String url) {
     final stream = CachedNetworkImageProvider(
-      _previewUrl,
+      url,
     ).resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
       if (!mounted) return;
@@ -941,6 +1147,7 @@ class _ChatImageTileState extends State<_ChatImageTile> {
 
   @override
   void dispose() {
+    imageRetrySignal.removeListener(_onReconnect);
     if (_stream != null && _listener != null) {
       _stream!.removeListener(_listener!);
     }
@@ -971,23 +1178,34 @@ class _ChatImageTileState extends State<_ChatImageTile> {
         session: widget.session,
         items: [(url: url, size: widget.attachment.fileSize)],
       );
-      if (!ok) return;
+      if (!ok || !mounted) return;
+      final fileName = widget.attachment.fileName ?? 'image.png';
+      final task = DownloadTask(fileName, inline: true);
+      setState(() => _task = task);
       final savedPath = await saveAttachment(
         session: widget.session,
         url: url,
-        fileName: widget.attachment.fileName ?? 'image.png',
+        fileName: fileName,
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,
+        task: task,
       );
       if (!mounted) return;
       if (savedPath != null) {
         showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
       }
+    } on DownloadCancelled catch (e) {
+      if (mounted) showAppToast(context, '$e');
     } catch (e) {
       if (!mounted) return;
       showAppToast(context, '다운로드 실패: $e');
     } finally {
-      if (mounted) setState(() => _downloading = false);
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _task = null;
+        });
+      }
     }
   }
 
@@ -1039,8 +1257,9 @@ class _ChatImageTileState extends State<_ChatImageTile> {
               );
             },
           )
-        : CachedNetworkImage(
+        : RetryingNetworkImage(
             imageUrl: _previewUrl,
+            onRetry: _relistenForRatio,
             width: width,
             height: height,
             fit: fit,
@@ -1072,36 +1291,55 @@ class _ChatImageTileState extends State<_ChatImageTile> {
             ),
             // 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다 — 마우스를 메뉴로 옮기면 썸네일
             // 밖으로 나간 것으로 잡혀서, 안 붙잡으면 툴바가 사라지며 메뉴까지 닫힌다.
-            if (_hovering || _menuOpen)
+            if (_hovering || _menuOpen || _task != null)
               Positioned(
                 right: 6,
                 top: 6,
                 // 이미지 뷰어 오른쪽 위와 같은 도구모음(댓글·다운로드·더보기)을 말풍선 호버 툴바와 같은
-                // 상자 하나에 담는다.
-                child: HoverToolbar(
+                // 상자 하나에 담는다. 받는 동안은 그 왼쪽에 진행 표시와 X(마우스를 치워도 보인다) — 칸이 좁으면
+                // 막대를 줄인다.
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (widget.onComment != null)
-                      HoverToolbarButton(
-                        icon: Icons.mode_comment_outlined,
-                        tooltip: '댓글',
-                        onPressed: widget.onComment,
+                    if (_task case final task?)
+                      DownloadProgressPill(
+                        task: task,
+                        maxWidth:
+                            width -
+                            12 -
+                            HoverToolbar.widthFor(
+                              1 +
+                                  (widget.onComment != null ? 1 : 0) +
+                                  (widget.message != null ? 1 : 0),
+                            ),
                       ),
-                    HoverToolbarButton(
-                      icon: Icons.download_outlined,
-                      tooltip: '다운로드',
-                      busy: _downloading,
-                      onPressed: _download,
-                    ),
-                    if (widget.message != null)
-                      HoverToolbarButton(
-                        icon: Icons.more_vert,
-                        tooltip: '더보기',
-                        onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
-                        menuChildren: imageActionMenuItems(
-                          context,
-                          _actions()!,
+                    HoverToolbar(
+                      children: [
+                        if (widget.onComment != null)
+                          HoverToolbarButton(
+                            icon: Icons.mode_comment_outlined,
+                            tooltip: '댓글',
+                            onPressed: widget.onComment,
+                          ),
+                        HoverToolbarButton(
+                          icon: Icons.download_outlined,
+                          tooltip: '다운로드',
+                          busy: _downloading,
+                          onPressed: _download,
                         ),
-                      ),
+                        if (widget.message != null)
+                          HoverToolbarButton(
+                            icon: Icons.more_vert,
+                            tooltip: '더보기',
+                            onMenuOpenChanged: (v) =>
+                                setState(() => _menuOpen = v),
+                            menuChildren: imageActionMenuItems(
+                              context,
+                              _actions()!,
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1227,6 +1465,21 @@ class DownloadableFile extends StatefulWidget {
   /// 실제 내용을 볼 수 있다.
   final String? attachmentKey;
   final String? attachmentNonce;
+
+  /// 카드의 가로 최대 크기 — 채팅 말풍선은 사진 말풍선과 같은 [kChatImageMaxWidth](긴 파일 이름이 그만큼까지 보인다),
+  /// 그 밖(파일 패널·할 일 등)은 작은 카드. [inlineActions]면 카드·진행 표시 자리·단추를 합친 폭의 최대 크기.
+  final double maxWidth;
+
+  /// 채팅 말풍선 — 다운로드·더보기 단추를 카드 위에 띄우지 않고 카드 오른쪽에 나란히 두고, 그 사이에 진행 표시 자리
+  /// ([kFileProgressSlotWidth])를 늘 비워 둔다(받기 시작해도 말풍선 폭이 바뀌지 않게). 단추는 마우스를 올렸을 때·받는 동안만.
+  final bool inlineActions;
+
+  /// [inlineActions]일 때 카드가 받은 폭을 다 채울지 — 여러 파일 말풍선에서 모든 카드를 가장 긴 카드 폭에 맞춘다.
+  final bool fillWidth;
+
+  /// 단추를 카드 위에 겹쳐 띄우지 않고 카드 바깥 오른쪽에 붙여 띄운다(할 일 상세) — 단추 자리는 비어 있어도 폭을
+  /// 차지해서, 마우스가 카드에서 단추로 옮겨 가도 단추가 사라지지 않는다. 받는 동안의 진행 표시는 단추 오른쪽에.
+  final bool actionsBeside;
   const DownloadableFile({
     super.key,
     required this.session,
@@ -1237,6 +1490,10 @@ class DownloadableFile extends StatefulWidget {
     this.onDeleted,
     this.attachmentKey,
     this.attachmentNonce,
+    this.maxWidth = 220,
+    this.inlineActions = false,
+    this.fillWidth = false,
+    this.actionsBeside = false,
   });
 
   @override
@@ -1247,6 +1504,9 @@ class _DownloadableFileState extends State<DownloadableFile> {
   bool _hovering = false;
   bool _menuOpen = false;
   bool _downloading = false;
+
+  /// 받는 중인 작업 — 다운로드 단추 왼쪽에 진행 표시와 X가 보인다.
+  DownloadTask? _task;
   bool _opening = false;
 
   Future<void> _download() async {
@@ -1257,23 +1517,33 @@ class _DownloadableFileState extends State<DownloadableFile> {
         session: widget.session,
         items: [(url: widget.url, size: null)],
       );
-      if (!ok) return;
+      if (!ok || !mounted) return;
+      final task = DownloadTask(widget.fileName, inline: true);
+      setState(() => _task = task);
       final savedPath = await saveAttachment(
         session: widget.session,
         url: widget.url,
         fileName: widget.fileName,
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,
+        task: task,
       );
       if (!mounted) return;
       if (savedPath != null) {
         showAppToast(context, '다운로드 완료: ${displayDownloadPath(savedPath)}');
       }
+    } on DownloadCancelled catch (e) {
+      if (mounted) showAppToast(context, '$e');
     } catch (e) {
       if (!mounted) return;
       showAppToast(context, '다운로드 실패: $e');
     } finally {
-      if (mounted) setState(() => _downloading = false);
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _task = null;
+        });
+      }
     }
   }
 
@@ -1346,8 +1616,140 @@ class _DownloadableFileState extends State<DownloadableFile> {
     }
   }
 
+  /// 다운로드 + (메시지를 알면) 더보기 — 이미지 썸네일과 같은 툴바.
+  Widget _toolbar(BuildContext context) => HoverToolbar(
+    children: [
+      HoverToolbarButton(
+        icon: Icons.download_outlined,
+        tooltip: '다운로드',
+        busy: _downloading,
+        onPressed: _download,
+      ),
+      if (widget.message != null)
+        HoverToolbarButton(
+          icon: Icons.more_vert,
+          tooltip: '더보기',
+          onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
+          menuChildren: fileActionMenuItems(
+            context,
+            FileActions(
+              session: widget.session,
+              message: widget.message!,
+              url: widget.url,
+              fileName: widget.fileName,
+              attachmentId: widget.attachmentId,
+              onDeleted: widget.onDeleted,
+              attachmentKey: widget.attachmentKey,
+              attachmentNonce: widget.attachmentNonce,
+            ),
+            isImage: false,
+          ),
+        ),
+    ],
+  );
+
+  /// 할 일 상세 — [파일 카드][단추 자리][(받는 동안) 진행 표시]. 단추 자리는 비어 있어도 폭을 차지한다.
+  Widget _besideLayout(BuildContext context, Widget card) {
+    final buttons = widget.message != null ? 2 : 1;
+    final showToolbar = _hovering || _menuOpen || _task != null;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: GestureDetector(
+              onTap: _opening ? null : _open,
+              child: card,
+            ),
+          ),
+          const SizedBox(width: 4),
+          SizedBox(
+            key: const ValueKey('file-actions-slot'),
+            width: HoverToolbar.widthFor(buttons),
+            height: HoverToolbarButton.dimension + 2,
+            child: showToolbar ? _toolbar(context) : null,
+          ),
+          if (_task case final task?) ...[
+            const SizedBox(width: 4),
+            DownloadProgressPill(task: task),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 채팅 말풍선 — [파일 카드][진행 표시 자리][단추 자리]를 한 줄에. 진행 표시·단추 자리는 비어 있어도 폭을 차지한다.
+  Widget _inlineLayout(BuildContext context, Widget card) {
+    final buttons = widget.message != null ? 2 : 1;
+    // 메뉴가 떠 있는 동안·받는 동안에는 단추를 계속 보여준다(이미지 썸네일과 같은 이유).
+    final showToolbar = _hovering || _menuOpen || _task != null;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: widget.maxWidth),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              fit: widget.fillWidth ? FlexFit.tight : FlexFit.loose,
+              child: GestureDetector(
+                onTap: _opening ? null : _open,
+                child: card,
+              ),
+            ),
+            const SizedBox(width: 6),
+            SizedBox(
+              key: const ValueKey('file-progress-slot'),
+              width: kFileProgressSlotWidth,
+              height: HoverToolbarButton.dimension + 2,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: switch (_task) {
+                  final task? => DownloadProgressPill(task: task),
+                  null => null,
+                },
+              ),
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: HoverToolbar.widthFor(buttons),
+              height: HoverToolbarButton.dimension + 2,
+              child: showToolbar ? _toolbar(context) : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final card = Container(
+      constraints: widget.inlineActions
+          ? null
+          : BoxConstraints(maxWidth: widget.maxWidth),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.insert_drive_file_outlined),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(widget.fileName, overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+    );
+    if (widget.inlineActions) return _inlineLayout(context, card);
+    if (widget.actionsBeside) return _besideLayout(context, card);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -1356,62 +1758,19 @@ class _DownloadableFileState extends State<DownloadableFile> {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            Container(
-              constraints: const BoxConstraints(maxWidth: 220),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.insert_drive_file_outlined),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      widget.fileName,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            card,
             // 메뉴가 떠 있는 동안에는 툴바를 계속 보여준다(이미지 썸네일과 같은 이유).
-            if (_hovering || _menuOpen)
+            if (_hovering || _menuOpen || _task != null)
               Positioned(
                 right: -6,
                 top: -6,
-                // 이미지 썸네일과 같은 툴바 — 다운로드 + (메시지를 알면) 더보기.
-                child: HoverToolbar(
+                // 받는 동안은 툴바 왼쪽에 진행 표시와 X(마우스를 치워도 보인다).
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    HoverToolbarButton(
-                      icon: Icons.download_outlined,
-                      tooltip: '다운로드',
-                      busy: _downloading,
-                      onPressed: _download,
-                    ),
-                    if (widget.message != null)
-                      HoverToolbarButton(
-                        icon: Icons.more_vert,
-                        tooltip: '더보기',
-                        onMenuOpenChanged: (v) => setState(() => _menuOpen = v),
-                        menuChildren: fileActionMenuItems(
-                          context,
-                          FileActions(
-                            session: widget.session,
-                            message: widget.message!,
-                            url: widget.url,
-                            fileName: widget.fileName,
-                            attachmentId: widget.attachmentId,
-                            onDeleted: widget.onDeleted,
-                            attachmentKey: widget.attachmentKey,
-                            attachmentNonce: widget.attachmentNonce,
-                          ),
-                          isImage: false,
-                        ),
-                      ),
+                    if (_task case final task?)
+                      DownloadProgressPill(task: task),
+                    _toolbar(context),
                   ],
                 ),
               ),
@@ -1421,6 +1780,16 @@ class _DownloadableFileState extends State<DownloadableFile> {
     );
   }
 }
+
+/// 채팅 파일 말풍선에서 파일 카드와 단추 사이에 비워 두는 진행 표시 자리의 폭 — 진행 막대·"100%"·X가 들어간다.
+const kFileProgressSlotWidth = 132.0;
+
+/// 채팅 파일 말풍선에 다운로드·더보기 단추와 진행 표시 자리를 카드 옆에 나란히 둘지 — 마우스를 올려 단추를 띄우는
+/// PC(와 PC 브라우저)만. 휴대폰은 길게 눌러 메뉴로 받으므로 그 자리를 비워 두면 좁은 화면에서 파일 이름만 잘린다.
+bool get chatFileInlineActions => switch (defaultTargetPlatform) {
+  TargetPlatform.android || TargetPlatform.iOS => false,
+  _ => true,
+};
 
 /// "42.3MB" 같은 사람이 읽기 좋은 용량 표기.
 String formatFileSize(int bytes) {

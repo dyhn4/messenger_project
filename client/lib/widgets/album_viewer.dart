@@ -7,6 +7,7 @@ import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart' show fetchAttachmentBytes;
+import 'data_usage_warning.dart';
 
 /// 앨범 항목을 연다 — 이미지는 같은 앨범의 (불러온) 이미지들을 좌우로 넘겨 보는 뷰어로, 영상은 기존 파일 열기와 같이
 /// 받아서 기본 동영상 앱으로 연다(인앱 재생 라이브러리가 없다).
@@ -48,6 +49,12 @@ Future<void> openAlbumVideo(
   AlbumItem item,
 ) async {
   final overlay = Overlay.of(context);
+  final ok = await confirmCellularDownload(
+    context,
+    session: session,
+    items: [(url: session.resolveUrl(item.fileUrl), size: item.fileSize)],
+  );
+  if (!ok) return;
   showAppToastOnOverlay(overlay, '영상을 여는 중입니다…');
   try {
     final bytes = await fetchAttachmentBytes(

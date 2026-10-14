@@ -1,8 +1,13 @@
 ﻿<#
 .SYNOPSIS
-  "백업" 시작 메뉴 항목 — DB(회원/팀/메시지 등 모든 데이터)를 파일 하나로 저장한다.
+  "백업" 시작 메뉴 항목 — 관리자 콘솔 "백업" 탭과 같은 전체 백업을 지금 한 번 한다.
 
 .DESCRIPTION
+  관리자 콘솔 "백업" 탭에서 백업 암호를 정해 두었으면 server\scripts\backup-now.mjs로 전체 백업(DB·서버 설정·인증서를 백업
+  암호로 암호화 — 외부 백업 위치를 정했으면 그곳에 복사하고 첨부파일까지 맞춤)을 한다. 서버도 매일 정한 시각에 같은 백업을
+  스스로 하므로 이 메뉴는 "지금 한 번 더"가 필요할 때 쓴다. 백업 암호를 아직 정하지 않았거나 전체 백업이 실패하면 아래 예전
+  방식(DB만)으로 백업한다 — 그 설명:
+
   pg_dump를 직접 콘솔에서 치는 건 경로(전용 설치라 C:\Program Files\PostgreSQL이 아님)·포트
   (전용 포트 55432)·비밀번호(secrets\db-app.pw에 저장돼 있어 따로 기억할 필요 없음)를 전부
   알아야 해서 번거롭다 — 이 스크립트가 전부 대신 채워서 실행한다.
@@ -91,6 +96,48 @@ try {
     exit 1
 }
 foreach ($warning in $aclWarnings) { Write-Host "경고: $warning" -ForegroundColor Yellow }
+
+# ── 전체 백업(관리자 콘솔 "백업" 탭과 같은 것) ─────────────────────────────
+# 관리자 콘솔에서 백업 암호를 정해 두었으면 server\scripts\backup-now.mjs로 DB·서버 설정·인증서를 암호화해 백업하고, 외부 백업
+# 위치를 정했으면 그곳에 복사하고 첨부파일까지 맞춘다(server\src\backup.js). 백업 암호를 아직 정하지 않았으면(종료 코드 3) 아래의
+# 예전 방식(DB만, 암호화 없음)으로 백업한다. node가 이 창에 바로 쓰게 파이프 없이 부른다(한글이 그대로 보인다).
+$ServerDir = Join-Path $AppDir 'server'
+$NodeExe = Join-Path $AppDir 'node\node.exe'
+$BackupNowScript = Join-Path $ServerDir 'scripts\backup-now.mjs'
+if ((Test-Path -LiteralPath $NodeExe) -and (Test-Path -LiteralPath $BackupNowScript)) {
+    Write-Host '전체 백업(DB·서버 설정·인증서, 외부 위치를 정했으면 첨부파일까지)을 합니다...'
+    Write-Host ''
+    Push-Location -LiteralPath $ServerDir
+    try {
+        $global:LASTEXITCODE = -1
+        & $NodeExe $BackupNowScript
+        $fullBackupCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    Write-Host ''
+    if ($fullBackupCode -eq 0) {
+        Write-Host '백업 파일은 백업 암호로 암호화돼 있습니다 — 복원할 때 백업 암호가 필요합니다.' -ForegroundColor Yellow
+        Read-Host '엔터를 누르면 창이 닫힙니다'
+        exit 0
+    }
+    if ($fullBackupCode -eq 2) {
+        Write-Host '이 PC에는 백업했지만 외부 위치 복사에 실패했습니다 — 외장 드라이브·NAS 연결을 확인하세요.' -ForegroundColor Yellow
+        Read-Host '엔터를 누르면 창이 닫힙니다'
+        exit 2
+    }
+    if ($fullBackupCode -eq 4) {
+        Read-Host '엔터를 누르면 창이 닫힙니다'
+        exit 1
+    }
+    if ($fullBackupCode -eq 3) {
+        Write-Host '관리자 콘솔 "백업" 탭에서 백업 암호를 정하면 매일 자동으로 전체 백업합니다.' -ForegroundColor Yellow
+        Write-Host '지금은 예전 방식으로 DB만 백업합니다.' -ForegroundColor Yellow
+    } else {
+        Write-Host '전체 백업에 실패해 DB만이라도 예전 방식으로 백업합니다.' -ForegroundColor Yellow
+    }
+    Write-Host ''
+}
 
 $fileName = "messenger_{0}.dump" -f (Get-Date -Format 'yyyyMMdd_HHmmss')
 $outPath = Join-Path $BackupsDir $fileName

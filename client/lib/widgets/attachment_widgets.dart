@@ -17,6 +17,7 @@ import '../services/download_storage.dart';
 import '../services/secret_chat_crypto.dart' as secret_crypto;
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'data_usage_warning.dart';
 import 'deleted_file_card.dart';
 import 'file_actions.dart';
 import 'hover_toolbar.dart';
@@ -241,6 +242,12 @@ class _AllDownloadBarState extends State<AllDownloadBar> {
   Future<void> _downloadAll() async {
     setState(() => _busy = true);
     try {
+      final ok = await confirmCellularDownload(
+        context,
+        session: widget.session,
+        items: [for (final i in widget.items) (url: i.url, size: null)],
+      );
+      if (!ok) return;
       final result = await saveAllAttachments(
         session: widget.session,
         items: widget.items,
@@ -438,6 +445,12 @@ class _DownloadableImageState extends State<DownloadableImage> {
   Future<void> _download() async {
     setState(() => _downloading = true);
     try {
+      final ok = await confirmCellularDownload(
+        context,
+        session: widget.session,
+        items: [(url: widget.url, size: null)],
+      );
+      if (!ok) return;
       final savedPath = await saveAttachment(
         session: widget.session,
         url: widget.url,
@@ -949,9 +962,16 @@ class _ChatImageTileState extends State<_ChatImageTile> {
   Future<void> _download() async {
     setState(() => _downloading = true);
     try {
+      final url = widget.session.resolveUrl(widget.attachment.fileUrl);
+      final ok = await confirmCellularDownload(
+        context,
+        session: widget.session,
+        items: [(url: url, size: widget.attachment.fileSize)],
+      );
+      if (!ok) return;
       final savedPath = await saveAttachment(
         session: widget.session,
-        url: widget.session.resolveUrl(widget.attachment.fileUrl),
+        url: url,
         fileName: widget.attachment.fileName ?? 'image.png',
         attachmentKey: widget.attachmentKey,
         attachmentNonce: widget.attachmentNonce,
@@ -1229,6 +1249,12 @@ class _DownloadableFileState extends State<DownloadableFile> {
   Future<void> _download() async {
     setState(() => _downloading = true);
     try {
+      final ok = await confirmCellularDownload(
+        context,
+        session: widget.session,
+        items: [(url: widget.url, size: null)],
+      );
+      if (!ok) return;
       final savedPath = await saveAttachment(
         session: widget.session,
         url: widget.url,
@@ -1255,6 +1281,12 @@ class _DownloadableFileState extends State<DownloadableFile> {
   Future<void> _open() async {
     setState(() => _opening = true);
     try {
+      final ok = await confirmCellularDownload(
+        context,
+        session: widget.session,
+        items: [(url: widget.url, size: null)],
+      );
+      if (!ok) return;
       final bytes = await fetchAttachmentBytes(
         session: widget.session,
         url: widget.url,

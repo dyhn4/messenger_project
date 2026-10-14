@@ -219,6 +219,7 @@ String auditActionLabel(String action) => switch (action) {
   'user.org' => '부서·직책 변경',
   'user.serverAdmin' => '서버 운영자 지정·해제',
   'server.settings' => '서버 설정 변경',
+  'server.backup' => '백업 설정·실행',
   'invite.create' => '초대 링크 생성',
   'invite.revoke' => '초대 링크 폐기',
   'teamInvite.create' => '팀 초대 링크 생성',
@@ -244,6 +245,7 @@ const auditActionFilters = [
   'invite.create',
   'teamInvite.create',
   'auth.lockout',
+  'server.backup',
 ];
 
 /// 계정 등급 코드 → 한국어 이름(관리자 콘솔 목록용).

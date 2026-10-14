@@ -193,6 +193,16 @@ export const serverSettings = pgTable('server_settings', {
   ddnsEnabled: boolean('ddns_enabled').notNull().default(false),
   ddnsDomains: text('ddns_domains'),
   ddnsToken: text('ddns_token'),
+  // 서버 전체 백업(backup.js·backupService.js) — 매일 [backupHour]시에 DB·비밀값·인증서를 백업하고, 외부 위치(NAS·외장
+  // 드라이브 — backupDestination)를 정하면 그곳에 복사하고 첨부파일까지 맞춰 둔다. 백업은 관리자가 정한 백업 암호로
+  // 암호화한다 — 암호와 첨부파일 미러 키(무작위 32바이트)는 서버가 예약 백업에 써야 해서 DB 암호화 키로 잠가 둔다
+  // (crypto.js encryptField). 관리자 콘솔에도 다시 내려보내지 않는다(admin.js /admin/backup).
+  backupEnabled: boolean('backup_enabled').notNull().default(true),
+  backupHour: integer('backup_hour').notNull().default(3),
+  backupKeep: integer('backup_keep').notNull().default(14),
+  backupDestination: text('backup_destination'),
+  backupPassword: text('backup_password'),
+  backupMirrorKey: text('backup_mirror_key'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

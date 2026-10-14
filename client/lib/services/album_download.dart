@@ -6,6 +6,7 @@ import '../models/album.dart';
 import '../widgets/attachment_widgets.dart'
     show fetchAttachmentBytes, saveAttachment;
 import '../widgets/app_toast.dart';
+import '../widgets/data_usage_warning.dart';
 import 'app_platform.dart';
 import 'download_storage.dart';
 import 'session.dart';
@@ -74,6 +75,15 @@ Future<void> downloadAlbumItems(
 }) async {
   if (items.isEmpty) return;
   final overlay = Overlay.of(context);
+  final ok = await confirmCellularDownload(
+    context,
+    session: session,
+    items: [
+      for (final i in items)
+        (url: session.resolveUrl(i.fileUrl), size: i.fileSize),
+    ],
+  );
+  if (!ok || !context.mounted) return;
 
   Future<List<int>> fetch(AlbumItem item) => fetchAttachmentBytes(
     session: session,

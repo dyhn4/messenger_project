@@ -7,8 +7,29 @@ import { safeAvatarColor } from './avatarRules.js';
 import { endUserCallAccess } from './callAccess.js';
 import { UPLOADS_DIR } from './config.js';
 import { encryptField } from './crypto.js';
+import {
+  backupLockHolder,
+  backupWarnings,
+  checkBackupDestination,
+  isRequestFromThisPc,
+  KEEP_MAX,
+  KEEP_MIN,
+  PASSWORD_MAX,
+  PASSWORD_MIN,
+  readBackupStatus,
+} from './backup.js';
+import {
+  backupPaths,
+  backupRunState,
+  backupScheduler,
+  loadBackupSettings,
+  localBackupList,
+  probeDestination,
+  startBackup,
+} from './backupService.js';
 import { isDuckDnsToken, parseDuckDnsDomains } from './ddns.js';
 import { ddnsUpdater } from './ddnsService.js';
+import { checkCurrentPassword } from './users.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
 import { clearPushTargetsForUser } from './db/queries/devices.js';
@@ -302,6 +323,136 @@ export function createAdminRouter(io) {
   router.post('/admin/ddns/update', async (req, res) => {
     await ddnsUpdater.runNow();
     res.json(await ddnsView());
+  });
+
+  // ─────────────────────────────── 백업 ───────────────────────────────
+
+  /**
+   * 관리자 콘솔 "백업" 탭에 보일 내용 — 백업 암호는 내려보내지 않고 정했는지만. status는 백업 폴더의 backup-status.json
+   * (시작 메뉴 "백업"이 한 것도 들어 있다), run은 이 서버에서 지금 돌고 있는 백업의 진행 상황.
+   */
+  async function backupView(req) {
+    const settings = await loadBackupSettings();
+    const root = backupPaths.localRoot;
+    const status = readBackupStatus(root);
+    const run = backupRunState();
+    return {
+      enabled: settings.enabled,
+      hour: settings.hour,
+      keep: settings.keep,
+      keepMin: KEEP_MIN,
+      keepMax: KEEP_MAX,
+      passwordMin: PASSWORD_MIN,
+      destination: settings.destination,
+      passwordConfigured: settings.ready,
+      passwordError: settings.passwordError,
+      localDir: root,
+      fromServerPc: isRequestFromThisPc(req),
+      run: { ...run, elsewhere: !run.running && backupLockHolder(root) === 'script' },
+      status: {
+        lastAttemptAt: status.lastAttemptAt ?? null,
+        lastFinishedAt: status.lastFinishedAt ?? null,
+        lastSuccessAt: status.lastSuccessAt ?? null,
+        result: status.result ?? null,
+        error: status.error ?? null,
+        lastBackup: status.lastBackup ?? null,
+        external: status.external ?? null,
+      },
+      nextRunAt: backupScheduler.nextRunAt(),
+      warnings: backupWarnings(settings, status, { localRoot: root }),
+      backups: (await localBackupList()).slice(0, KEEP_MAX),
+    };
+  }
+
+  router.get('/admin/backup', async (req, res) => {
+    res.json(await backupView(req));
+  });
+
+  /**
+   * 백업 설정 변경 — 넘긴 항목만 바뀐다(enabled, hour 0~23, keep, destination, password). 백업 암호와 외부 위치는
+   * 백업을 빼 가거나 못 쓰게 만들 수 있는 값이라 운영자 비밀번호(accountPassword)를 다시 확인한다. 외부 위치는 저장하기
+   * 전에 실제로 쓸 수 있는지 확인한다. 감사 로그에 암호는 남기지 않는다.
+   */
+  router.patch('/admin/backup', async (req, res) => {
+    const body = req.body ?? {};
+    const current = await getServerSettings();
+    const fields = {};
+    const detail = [];
+    if ('enabled' in body) {
+      if (typeof body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled는 참/거짓이어야 합니다.' });
+      fields.backupEnabled = body.enabled;
+      detail.push(`자동 백업 ${body.enabled ? '켜짐' : '꺼짐'}`);
+    }
+    if ('hour' in body) {
+      if (!Number.isInteger(body.hour) || body.hour < 0 || body.hour > 23) {
+        return res.status(400).json({ error: '백업 시각은 0~23시 중에서 고르세요.' });
+      }
+      fields.backupHour = body.hour;
+      detail.push(`매일 ${body.hour}시`);
+    }
+    if ('keep' in body) {
+      if (!Number.isInteger(body.keep) || body.keep < KEEP_MIN || body.keep > KEEP_MAX) {
+        return res.status(400).json({ error: `보관 개수는 ${KEEP_MIN}~${KEEP_MAX}개 중에서 고르세요.` });
+      }
+      fields.backupKeep = body.keep;
+      detail.push(`최근 ${body.keep}개 보관`);
+    }
+    let destination;
+    if ('destination' in body) {
+      const checked = checkBackupDestination(body.destination, {
+        isLocalRequest: isRequestFromThisPc(req),
+        protectedDirs: [backupPaths.installDir, backupPaths.uploadsDir, backupPaths.localRoot, process.env.SystemRoot],
+      });
+      if (checked.error) return res.status(400).json({ error: checked.error });
+      if (checked.path !== (current.backupDestination || null)) destination = checked.path;
+    }
+    if ('password' in body) {
+      const pw = body.password;
+      if (typeof pw !== 'string' || pw.trim().length < PASSWORD_MIN || pw.length > PASSWORD_MAX) {
+        return res.status(400).json({ error: `백업 암호는 ${PASSWORD_MIN}자 이상으로 정하세요.` });
+      }
+    }
+    const sensitive = 'password' in body || destination !== undefined;
+    if (Object.keys(fields).length === 0 && !sensitive) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    if (sensitive) {
+      if (!(await checkCurrentPassword(res, req.admin, body.accountPassword, '운영자 계정 비밀번호가 올바르지 않습니다.'))) return;
+    }
+    if (destination !== undefined) {
+      if (destination) {
+        try {
+          await probeDestination(destination);
+        } catch (e) {
+          return res.status(400).json({ error: e.message });
+        }
+      }
+      fields.backupDestination = destination;
+      detail.push(destination ? `외부 위치 ${destination}` : '외부 위치 지움');
+    }
+    if ('password' in body) {
+      fields.backupPassword = encryptField(body.password);
+      detail.push(current.backupPassword ? '백업 암호 변경' : '백업 암호 설정');
+    }
+
+    await updateServerSettings(fields);
+    recordAudit({ ...actorOf(req), action: AUDIT.serverBackup, detail: `백업 설정: ${detail.join(', ')}` });
+    await backupScheduler.reschedule();
+    res.json(await backupView(req));
+  });
+
+  /** "지금 백업" — 끝까지 기다리지 않고 시작만 한다(첨부파일이 많으면 오래 걸린다). 화면은 GET으로 진행 상황을 본다. */
+  router.post('/admin/backup/run', async (req, res) => {
+    const settings = await loadBackupSettings();
+    if (!settings.ready) {
+      return res.status(400).json({ error: settings.passwordError ?? '백업 암호를 먼저 정하세요.' });
+    }
+    if (!backupRunState().running) {
+      if (backupLockHolder(backupPaths.localRoot)) {
+        return res.status(409).json({ error: '시작 메뉴 "백업"이 이미 백업하고 있습니다. 끝난 뒤 다시 시도하세요.' });
+      }
+      startBackup('manual').catch(() => {});
+      recordAudit({ ...actorOf(req), action: AUDIT.serverBackup, detail: '지금 백업' });
+    }
+    res.json(await backupView(req));
   });
 
   /** 직책 목록 — '부서·직책 관리 범위'가 '계정 단위'일 때, 회원 탭의 직책 수정이 자유 입력

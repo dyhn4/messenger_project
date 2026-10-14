@@ -953,6 +953,8 @@ messenger_project/
 │  │  ├─ users.js                 프로필 조회/수정/비밀번호 변경/탈퇴
 │  │  ├─ admin.js                 관리자 콘솔 API(회원·팀·감사 로그·운영 현황·DDNS, 서버 운영자 전용)
 │  │  ├─ ddns.js                  DuckDNS 자동 갱신(5분마다, DB를 모르는 갱신기) — ddnsService.js가 DB 설정과 잇는다
+│  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
+│  │  │                           backupCrypto.js(백업 암호 암호화)·backupRestore.js(복원 조각)
 │  │  ├─ audit.js                 감사 로그 기록 헬퍼(실패해도 원래 동작을 막지 않음)
 │  │  ├─ teams.js                 팀 생성/설정/팀원 관리/소유권 이양/팀 삭제
 │  │  ├─ invites.js                초대 링크 발급/목록/폐기 API(서버 운영자·관리자·팀 소유자)
@@ -993,13 +995,14 @@ messenger_project/
 │  ├─ drizzle/                   drizzle-kit이 생성한 SQL 마이그레이션 파일들
 │  ├─ scripts/pair.mjs           pm2 등으로 띄웠을 때 콘솔 입력 없이 페어링 코드 발급
 │  ├─ scripts/grant-server-admin.mjs  서버 운영자 복구 — 활성 운영자가 한 명도 없을 때만 기존 계정 하나를 운영자로 지정
+│  ├─ scripts/backup-now.mjs / restore-backup.mjs  서버 전체 백업 지금 한 번 / 전체 백업 복원(시작 메뉴 "백업"·"복원"이 부름)
 │  ├─ installer/                 서버+PostgreSQL 네이티브 Windows 설치 프로그램(관리자 권한)
 │  │  ├─ messenger-server.iss     Inno Setup 스크립트(파일 복사 전에 기존 설치 폴더가 안전한지 검사)
 │  │  ├─ Setup-TangoTalkServer.ps1 설치 후 실제 작업(PostgreSQL 설치, 설치 폴더 잠금, DB 생성, 마이그레이션, 서비스 등록)
 │  │  ├─ Folder-Acl.ps1           설치 폴더·백업·바깥 첨부파일 폴더를 SYSTEM/Administrators 전용으로 잠그는 공용 함수
 │  │  ├─ Start-ServerConsole.ps1  "서버 콘솔로 실행"(콘솔 모드) — 스스로 관리자 권한으로 승격한 뒤 이 창에서 서버 실행
 │  │  ├─ Get-PairingCode.ps1      "새 기기 페어링 코드 발급" 시작메뉴 항목
-│  │  ├─ Backup-Data.ps1 / Restore-Data.ps1  "백업"/"복원" — 백업 폴더는 관리자 전용, 최근 10개만 보관
+│  │  ├─ Backup-Data.ps1 / Restore-Data.ps1  "백업"/"복원" — 전체 백업(scripts/backup-now.mjs·restore-backup.mjs), 암호 전엔 DB만(.dump)
 │  │  ├─ Grant-ServerAdmin.ps1    서버 운영자 복구(시작 메뉴 없음 — 설치 폴더에서 오른쪽 클릭 → PowerShell에서 실행)
 │  │  ├─ Reset-Data.ps1           "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움(운영자 인증 + RESET 입력 필요)
 │  │  ├─ Update-Server.ps1        "서버 업데이트" — 업데이트 zip을 골라 적용(DB는 안 건드림, npm install+마이그레이션+재시작 자동)
@@ -2369,10 +2372,18 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 
 ### 백업
 
-**설치 프로그램으로 설치한 서버**는 시작 메뉴의 **"백업"**을 누르면 됩니다 — 경로/포트/비밀번호를
-몰라도 콘솔 명령어 없이 바로 `<설치 경로>\backups\messenger_<날짜시각>.dump`로 저장됩니다
-(`server/installer/Backup-Data.ps1`). 되돌릴 땐 **"복원"**을 눌러 그 파일을 고르면 됩니다 — DB
-데이터 초기화와 같은 수준의 안전장치(운영자 본인 확인 + `RESTORE` 입력)가 있습니다.
+**서버 전체 백업(권장)** — 앱의 **서버 관리 › 백업** 탭에서 **백업 암호**를 정하면 서버가 매일(기본 새벽 3시) DB·서버
+설정(`.env`)·비밀값(`.db-encryption-key`·`.jwt-secret`·웹 푸시 키)·인증서(`certs/`)를 백업 암호로 암호화해
+`<설치 경로>\backups\tangotalk_<날짜>_<시각>\`(개발 PC는 `server/backups/`, `BACKUP_DIR`로 변경)에 백업하고 최근 N개(기본 14)만
+남깁니다. 같은 탭에서 **외부 백업 위치**(외장 드라이브·NAS)를 정하면 그 아래 `TangoTalk-Backup\`에 복사하고 첨부파일까지
+파일마다 암호화해 맞춰 둡니다(바뀐 것만 보냄) — 서버 PC가 고장 나도 새 PC에 서버를 설치한 뒤 시작 메뉴 **"복원"**에서 그 폴더의
+`manifest.json`을 고르면 회원·대화·설정·인증서·첨부파일이 그대로 돌아옵니다(앱 재페어링 불필요). 시작 메뉴 **"백업"**은 같은
+전체 백업을 지금 한 번 더 합니다. 백업 암호를 잃어버리면 복원할 수 없습니다. 설계는 `server/src/backup.js`와
+`server/installer/README.md`의 "서버 전체 백업" 참고.
+
+백업 암호를 아직 정하지 않았으면 시작 메뉴 **"백업"**은 예전처럼 DB만 `<설치 경로>\backups\messenger_<날짜시각>.dump`로
+저장합니다(`server/installer/Backup-Data.ps1`). 되돌릴 땐 **"복원"**에서 그 파일을 고르면 됩니다 — DB
+데이터 초기화와 같은 수준의 안전장치(운영자 본인 확인 + `RESTORE` 입력)가 있습니다. 아래는 이 예전 방식(.dump)의 설명입니다.
 
 - 백업 파일에는 회원 비밀번호 해시·암호화된 이메일·초대 토큰 등 DB 전체가 들어 있어서, 백업 폴더(`backups`)를 먼저
   관리자 전용으로 잠근 뒤에 쓰고 **가장 최근 10개만 남깁니다**(더 오래된 것은 다음 백업 때 자동으로 지워짐 — 개수는
@@ -2389,8 +2400,8 @@ Node.js 포터블 런타임, PostgreSQL 공식 설치 프로그램, `nssm.exe`�
 ```
 
 `server/certs/`, `server/uploads/`, `server/.env`, `server/firebase-service-account.json`,
-`server/releases/`도 Git에 없는 실데이터이므로 함께 백업하세요(예: 압축해서 통째로) — 위 "백업"
-바로가기는 DB만 백업합니다.
+`server/releases/`도 Git에 없는 실데이터이므로 함께 백업하세요(예: 압축해서 통째로) — 이 수동 명령은
+DB만 백업합니다(서버 전체 백업은 개발 PC에서도 관리자 콘솔 "백업" 탭으로 할 수 있습니다 — PATH의 `pg_dump`, `PG_BIN`으로 변경).
 
 ### 다른 PC로 이전
 

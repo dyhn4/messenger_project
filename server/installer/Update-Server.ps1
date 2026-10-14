@@ -157,7 +157,7 @@ $startButton.Add_Click({
         # 대상에서 제외해 절대 건드리지 않는다.
         $robocopyArgs = @(
             $tmp, $ServerDir, '/E',
-            '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', 'deploy',
+            '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', 'deploy', 'backups',
             '/NFL', '/NDL', '/NJH', '/NJS'
         )
         robocopy @robocopyArgs | Out-Null

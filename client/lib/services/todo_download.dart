@@ -8,6 +8,7 @@ import '../models/todo.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/attachment_widgets.dart'
     show fetchAttachmentBytes, saveAttachment;
+import '../widgets/data_usage_warning.dart';
 import 'app_platform.dart';
 import 'download_storage.dart';
 import 'session.dart';
@@ -102,6 +103,15 @@ Future<void> downloadTodoAttachments(
   // Navigator 것(폭 420)이라 창 폭으로 자리를 잡는 토스트가 맞지 않는다.
   final overlay = Overlay.of(context, rootOverlay: true);
   final settings = session.settings;
+  final ok = await confirmCellularDownload(
+    context,
+    session: session,
+    items: [
+      for (final a in attachments)
+        (url: session.resolveUrl(a.fileUrl), size: a.fileSize),
+    ],
+  );
+  if (!ok) return;
 
   TodoDownloadSummary summary;
   // 웹은 폴더를 고를 수 없어 모바일처럼 하나씩 받는다(브라우저 다운로드).

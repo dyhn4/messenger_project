@@ -61,6 +61,7 @@ import { checkPendingMigrations } from './migrationCheck.js';
 import { createPairHandler, generatePairingCode, startPairingServer } from './pairing.js';
 import { startRetentionJob } from './retention.js';
 import { ddnsUpdater } from './ddnsService.js';
+import { backupScheduler } from './backupService.js';
 import { createAdminRouter } from './admin.js';
 import { createAlbumsRouter } from './albums.js';
 import { createAnnouncementsRouter } from './announcements.js';
@@ -284,6 +285,9 @@ await closeStaleCallCards().catch((err) => console.error('[call] 화상회의 �
 // 팀에서 빠졌는데 그 팀 대화방에 남아 있는 멤버십을 뺀다(예전 규칙의 흔적 — teams.js sweepLeftoverTeamRoomMembers).
 // 아직 소켓이 붙기 전이라 DB 정리와 안내 메시지만 남는다.
 await sweepLeftoverTeamRoomMembers(io).catch((err) => console.error('[teams] 팀 밖 대화방 멤버십 정리 실패:', err?.message ?? err));
+// 서버 전체 백업 — 관리자 콘솔 "백업" 탭에서 백업 암호를 정하면 매일 정한 시각에 백업한다(backup.js). 서버가 꺼져 있어 하루
+// 넘게 놓쳤으면 조금 뒤 한 번 한다. 마이그레이션 확인 뒤에 둔다(설정 칼럼이 있어야 읽힌다).
+backupScheduler.start().catch((err) => console.error('[backup] 예약 백업을 시작하지 못했습니다:', err?.message ?? err));
 
 httpServer.listen(PORT, () => {
   const lanAddresses = Object.values(os.networkInterfaces())

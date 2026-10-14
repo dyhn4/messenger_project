@@ -8,6 +8,7 @@ import '../models/admin.dart';
 import '../models/announcement.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/backup_settings.dart';
 import '../models/ddns_settings.dart';
 import '../models/inquiry.dart';
 import '../models/invite_link.dart';
@@ -1072,8 +1073,47 @@ class ApiClient {
     await _post('/api/admin/ddns/update', const {}) as Map<String, dynamic>,
   );
 
-  Map<String, dynamic> _decodeDdns(http.Response res) {
-    final fallback = 'DDNS 설정을 가져오지 못했습니다(${res.statusCode}).';
+  /// 관리자 콘솔 "백업" 탭 — 서버 전체 백업 설정·상태·목록(GET /api/admin/backup). 이 기능이 없는 예전 서버는 404라
+  /// null — 화면이 "서버를 업데이트하세요"로 안내한다.
+  Future<BackupSettings?> fetchBackupSettings() async {
+    final res = await _send(
+      () => _client.get(_uri('/api/admin/backup'), headers: _authHeaders),
+    );
+    if (res.statusCode == 404) return null;
+    return BackupSettings.fromJson(_decodeDdns(res, what: '백업 설정'));
+  }
+
+  /// 백업 설정 변경 — 넘긴 항목만 바뀐다. [destination]에 빈 문자열을 넘기면 외부 위치를 지운다. 백업 암호([password])나
+  /// 외부 위치를 바꿀 때는 운영자 계정 비밀번호([accountPassword])를 같이 보내야 한다(서버가 다시 확인한다).
+  Future<BackupSettings> updateBackupSettings({
+    bool? enabled,
+    int? hour,
+    int? keep,
+    String? destination,
+    String? password,
+    String? accountPassword,
+  }) async => BackupSettings.fromJson(
+    await _patch('/api/admin/backup', {
+          'enabled': ?enabled,
+          'hour': ?hour,
+          'keep': ?keep,
+          'destination': ?destination,
+          'password': ?password,
+          'accountPassword': ?accountPassword,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// "지금 백업" — 서버가 백업을 시작만 하고 바로 답한다(진행 상황은 [fetchBackupSettings]로 본다).
+  Future<BackupSettings> runBackupNow() async => BackupSettings.fromJson(
+    await _post('/api/admin/backup/run', const {}) as Map<String, dynamic>,
+  );
+
+  Map<String, dynamic> _decodeDdns(
+    http.Response res, {
+    String what = 'DDNS 설정',
+  }) {
+    final fallback = '$what을 가져오지 못했습니다(${res.statusCode}).';
     final Object? body;
     try {
       body = jsonDecode(utf8.decode(res.bodyBytes));
@@ -2956,9 +2996,8 @@ class ApiClient {
   /// 상대 기기의 서명 검증키(비밀 대화 핸드셰이크의 임시 공개키 서명을 확인하는 데 씀)와 그 기기의 주인. 서버의 말이라
   /// 그대로 믿지 않는다 — 호출하는 쪽(SecretSessionManager)이 주인이 대화 상대와 같은지 보고, 처음 본 기기일 때만
   /// 묻고 그 뒤로는 고정해 둔 키를 쓴다(secret_peer_store.dart). 모양이 틀린 응답은 ApiException.
-  Future<({String userId, String signingPublicKey})> fetchDeviceSigningPublicKey(
-    String deviceId,
-  ) async {
+  Future<({String userId, String signingPublicKey})>
+  fetchDeviceSigningPublicKey(String deviceId) async {
     final body = await _get(
       '/api/devices/${Uri.encodeComponent(deviceId)}/public-key',
     );

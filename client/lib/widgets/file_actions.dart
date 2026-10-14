@@ -10,6 +10,7 @@ import '../services/download_storage.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'attachment_widgets.dart';
+import 'data_usage_warning.dart';
 import 'message_actions.dart' show pushMessageForwardScreen;
 
 /// "이 파일을 삭제할까요?" 확인 대화상자 — 삭제하겠다고 하면 true. 파일을 지워도 그 파일에 달린 댓글은 남는다.
@@ -181,6 +182,12 @@ class FileActions {
 
   Future<void> download(BuildContext context) async {
     try {
+      final ok = await confirmCellularDownload(
+        context,
+        session: session,
+        items: [(url: url, size: null)],
+      );
+      if (!ok || !context.mounted) return;
       final savedPath = await saveAttachment(
         session: session,
         url: url,
@@ -232,6 +239,12 @@ class FileActions {
   /// 보여 준다(openLocalFile).
   Future<void> openOriginal(BuildContext context) async {
     try {
+      final ok = await confirmCellularDownload(
+        context,
+        session: session,
+        items: [(url: url, size: null)],
+      );
+      if (!ok) return;
       final bytes = await _bytes();
       final folder = session.settings.downloadFolder;
       final path = await writeDownloadFile(

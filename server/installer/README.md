@@ -66,8 +66,8 @@
 | `Storage-Path.ps1` | "첨부파일 저장소" — 첨부파일 저장 위치(`UPLOADS_DIR`)를 보여주고 NAS/다른 PC 공유 폴더 등으로 바꿈(WinForms GUI). 설치 폴더 밖의 로컬 폴더는 관리자 전용으로 잠근 뒤 기존 파일 이동 여부를 물어보고 `.env` 갱신 + 서비스 재시작. 관리자 권한 필요해 스스로 승격 |
 | `External-Address.ps1` | "외부 접속 주소" — 사내망 밖(LTE/5G)에서 접속할 DDNS 도메인/공인 IP(`EXTERNAL_ADDRESS`)를 보여주고 바꾸거나 끔(WinForms GUI). 그 주소가 지금 인증서에 없으면(서버가 같은 키로 인증서를 새로 만듦 — 최신 앱은 그대로, 공개키 핀닝 전의 예전 앱만 재페어링 필요) 적용 전에 경고. `.env` 갱신 + 서비스 재시작(화상회의 공인 IP는 서버가 `livekit.yaml`에 넣고 LiveKit 서비스를 재시작 — `server/src/livekitNat.js`). 공유기 포트포워딩(메인 포트, 화상회의 UDP 범위·TCP, 초대 안내 페이지를 밖에서 열려면 페어링 포트)은 직접 해야 함. 관리자 권한 필요해 스스로 승격 |
 | `Web-Domain.ps1` | "웹 앱 주소(정식 인증서)" — 아이폰(사파리 웹 앱)용 공인 인증서 설정(WinForms GUI). 도메인(`WEB_DOMAIN`)·웹 HTTPS 포트(`WEB_HTTPS_PORT`, 기본 443)·인증용 HTTP 포트(`ACME_HTTP_PORT`, 기본 80, 0이면 HTTP-01 안 씀)·이메일(`ACME_EMAIL`, 선택)·시험 발급(`ACME_STAGING=1`, 기본 끔)을 `.env`에 쓰고, 방화벽 규칙 `TangoTalk Server (web)`·`(web-acme)`(이 서버의 `node.exe` 전용)을 맞추고 서비스를 재시작. 적용 전에 포트 겹침(서버 포트·LiveKit·PostgreSQL)은 거절하고, 다른 프로그램(IIS/HTTP.sys 등)이 쓰는 포트·DNS에서 못 찾거나 사설 IP만 가리키는 도메인은 경고. 공유기 포트포워딩(외부 443 → 웹 포트, 외부 80 → 인증용 포트, 웹 포트가 443이 아니면 그 번호도)·iptime.org 주간 한도·아이폰 사용법을 복사할 수 있는 글로 안내. [인증서 확인]은 127.0.0.1의 웹 포트에 SNI로 붙어 지금 걸린 인증서(정식/시험용/그 밖)를 보여 줌. "끄기"(또는 도메인을 비우고 적용)는 `WEB_DOMAIN`만 비우고 규칙을 지움. 발급·갱신·상태(관리자 콘솔)는 서버 몫. 관리자 권한 필요해 스스로 승격 |
-| `Backup-Data.ps1` | "백업" — DB를 `{app}\backups\messenger_<날짜시각>.dump`로 저장(`pg_dump -F c`). 쓰기 전에 `backups\`를 관리자 전용으로 잠그고, 최근 10개(`$KeepBackups`)만 남기고 오래된 백업은 지움. 서버는 멈추지 않음. 관리자 권한 필요해 스스로 승격 |
-| `Restore-Data.ps1` | "복원" — 파일 선택 창(WinForms)에서 `.dump`를 골라 `pg_restore --clean --if-exists`로 되돌림. `Reset-Data.ps1`과 같은 안전장치(서버 운영자 계정 인증 + `RESTORE` 입력 확인) 필수, 복원 중엔 서비스 정지 후 재시작. 관리자 권한 필요해 스스로 승격 |
+| `Backup-Data.ps1` | "백업" — 쓰기 전에 `backups\`를 관리자 전용으로 잠근 뒤, 관리자 콘솔에서 백업 암호를 정해 두었으면 `server\scripts\backup-now.mjs`로 **전체 백업**(관리자 콘솔 "지금 백업"과 같음 — `{app}\backups\tangotalk_<날짜>_<시각>\`, 아래 "서버 전체 백업"). 암호를 아직 안 정했거나(종료 코드 3) 전체 백업이 실패하면 예전처럼 DB만 `messenger_<날짜시각>.dump`로 저장(`pg_dump -F c`, 최근 10개 — `$KeepBackups`). 서버는 멈추지 않음. 관리자 권한 필요해 스스로 승격 |
+| `Restore-Data.ps1` | "복원" — 파일 선택 창(WinForms)에서 전체 백업 폴더의 `manifest.json`이나 예전 `.dump`를 고름. 전체 백업은 `server\scripts\restore-backup.mjs`(check → 백업 암호 verify → restore)로 DB·설정·인증서·첨부파일을 되돌리고 마이그레이션(`drizzle-kit migrate`), `.dump`는 예전처럼 `pg_restore --clean --if-exists`. `Reset-Data.ps1`과 같은 안전장치(서버 운영자 계정 인증 + `RESTORE` 입력 확인) — 단 회원이 없는 새 설치에 전체 백업을 복원할 때는 확인할 운영자가 없어 백업 암호로만 확인. 복원 중엔 서비스 정지 후 재시작. 관리자 권한 필요해 스스로 승격 |
 | `Reset-Data.ps1` | "DB 데이터 초기화" — 서버는 그대로 두고 데이터만 비움. 서버 운영자 계정 인증 + `RESET` 입력 확인 둘 다 필수. 스스로 승격하고 서버 폴더로 이동한 뒤 node 실행(`reset-data.mjs`는 `.env`를 현재 폴더에서 읽음 — 예전엔 승격도 이동도 없어 잠긴 폴더의 `node.exe`를 못 읽었다) |
 | `Uninstall-Full.ps1` | "서버 완전 삭제(PostgreSQL·Node 앱·DB 데이터 모두)" — PostgreSQL 자체(`uninstall-postgresql.exe`)와 DB 데이터를 정식 제거한 뒤, 마지막 단계로 일반 제거 프로그램(`unins000.exe /VERYSILENT`)까지 자동 실행해서 Node 앱 프로그램 파일도 지움. 서버 운영자 계정 인증(`server/scripts/verify-admin.mjs`) + `DELETE` 입력 확인 둘 다 필수 |
 | `Grant-ServerAdmin.ps1` | 서버 운영자 복구(시작 메뉴 없음 — 설치 폴더에서 오른쪽 클릭 → "PowerShell에서 실행") — 아이디를 물어 `server/scripts/grant-server-admin.mjs <아이디>`를 번들 node로 서버 폴더에서 실행하고 결과를 보여 준 뒤 멈춤. 그 스크립트가 **활성(탈퇴·정지 아닌) 서버 운영자가 한 명도 없을 때만** 기존 계정을 운영자로 지정·정지 해제하고, 운영자가 있으면 거절(종료 코드 1). `.env`가 관리자 전용이라 스스로 승격 |
@@ -292,6 +292,39 @@
   거리만 늘어나서. 정렬은 파일 이름의 날짜·시각 기준(복사하면 바뀌는 수정 시각보다 정확)이고, 이 스크립트가
   만든 이름 형식(`messenger_<yyyyMMdd>_<HHmmss>.dump`)의 파일만 지운다 — 사용자가 직접 넣어둔 다른 파일과
   방금 만든 파일은 안 건드린다. 더 오래 보관할 백업은 다른 안전한 곳에 복사해 두는 것이 전제다.
+- **서버 전체 백업은 서버(Node)가 하고, 시작 메뉴 "백업"은 그것을 부를 뿐이다.** (`server/src/backup.js`·`backupCrypto.js`·
+  `backupService.js`·`backupRestore.js`, 관리자 콘솔 "백업" 탭) 예전 "백업"은 DB만 떠서, PC가 고장 나면 DB 암호화 키
+  (`server\.db-encryption-key` — 없으면 암호화된 이메일 등을 못 읽음)·서버 인증서(앱이 핀닝 — 바뀌면 모든 기기 재페어링)·
+  첨부파일이 없어 완전히 되살릴 수 없었고, 사람이 눌러야만 돌았고, 같은 디스크에만 쌓였다. 이제:
+  - **무엇을**: 백업 하나 = `tangotalk_<날짜>_<시각>\` 폴더(`manifest.json` + `db.dump.enc`(pg_dump -F c를 스트림째 암호화 — 평문
+    덤프는 디스크에 안 씀) + `secrets.enc`(`.env`·`.jwt-secret`·`.db-encryption-key`·웹 푸시 키·`firebase-service-account.json`·
+    `certs\*`·첨부파일 미러 키)). 다 쓰기 전엔 `.partial`로 두고 마지막에 이름을 바꾼다. 최근 N개(기본 14, 3~60) 보관.
+  - **왜 서버 안에서**: 업데이트 zip은 `server\`만 바꾸고 `{app}`의 `.ps1`은 안 바꿔서(위 "남은 틈 (2)"), PowerShell로
+    만들면 이미 설치된 서버에 들어가지 않는다. 예약(매일 정한 시각, 놓쳤으면 켠 뒤 10분)·관리자 콘솔 상태도 서버가 해야 자연스럽다.
+    시작 메뉴 "백업"은 `scripts\backup-now.mjs`로 같은 함수를 부르고, 둘은 `backups\.backup.lock`(pid·시각 — 죽은 잠금은
+    치움)으로 겹치지 않는다. 결과는 `backups\backup-status.json`에 남아 콘솔이 둘 다 보여 준다.
+  - **백업 암호로 암호화(AES-256-GCM, 1MiB 조각 + 끝 표시 — `backupCrypto.js`)**: 백업에 DB 키·JWT 비밀값·인증서 개인키가
+    들어가서, NAS·외장 드라이브에 두어도 암호 없이는 못 열게. 키는 scrypt(백업마다 새 salt). 파일마다 용도(`db`·`secrets`·
+    `upload:<이름>`)를 인증 데이터로 묶어 바꿔치기·잘림·덧붙임이 모두 실패한다. 암호는 예약 백업에 써야 해서 DB에 DB 암호화
+    키로 잠가 두고(`server_settings.backup_password`), 콘솔에 다시 내려보내지 않는다. 잃으면 복원 불가 — 콘솔·도움말에 크게 적었다.
+  - **외부 위치(NAS·외장 드라이브)**: 고른 폴더 아래 `TangoTalk-Backup\`(표시 파일 `tangotalk-backup-root.json`)에만 쓰고 지운다
+    — 남의 파일이 든 폴더는 쓰지 않는다. 고른 폴더가 없으면(드라이브 빠짐) 만들지 않고 실패. 백업 폴더를 복사하고, 첨부파일은
+    `uploads\`에 파일마다 미러 키로 암호화해 늘 지금 상태로 맞춘다(크기·수정 시각 색인으로 바뀐 것만 — 한꺼번에 많이(50개 이상이면서
+    20% 넘게) 사라졌으면 지우지 않고 경고: 사고로 빈 저장소를 백업까지 따라가지 않게). 외부 위치에서만 실패하면 결과는 "일부 실패".
+    외부 위치는 꺼진 NAS일 수 있어 **비동기 fs만** 쓴다(동기 호출은 기다리는 동안 채팅 서버 전체를 멈춘다).
+  - **NAS 경로(`\\…`)는 서버 PC에서 연 콘솔에서만 받는다**: 서버(SYSTEM)가 그 주소로 접속하며 컴퓨터 계정 NTLM을 넘기므로, 밖에서
+    운영자 계정만 훔친 사람이 자기 주소를 넣어 받아 가지 못하게(`isRequestFromThisPc` — 127.0.0.1·이 PC의 인터페이스 주소). 백업
+    암호·외부 위치를 바꿀 때는 운영자 비밀번호를 다시 확인한다(`users.js checkCurrentPassword`). 서버 폴더·첨부파일 폴더·이 PC
+    백업 폴더·Windows 폴더 안은 외부 위치로 안 받는다. NAS는 컴퓨터 계정(`DOMAIN\PC$`)에 쓰기 권한이 있어야 해서 워크그룹 NAS는
+    안 될 수 있다 — 저장 전에 실제로 써 보고 안 되면 이유를 보여 주고, 외장 드라이브를 권한다.
+  - **복원(`scripts\restore-backup.mjs`, 서비스 정지 상태)**: DB는 `DROP OWNED BY current_user`(앱 계정 — PG15+의 public은
+    pg_database_owner 것이라 남음) + `pg_restore -f -`의 SQL을 **psql 한 트랜잭션**(`-1`, `ON_ERROR_STOP`)으로 넣는다 — 실패하면
+    그대로, 옛 백업이어도 그 뒤 마이그레이션이 만든 표가 남지 않아 이어서 `drizzle-kit migrate`가 깨끗이 올린다(예전 `--clean`은
+    둘 다 안 됐다). 복원 전 지금 DB는 `before-restore_<시각>.dump`(최근 3개)·설정 파일은 `before-restore_<시각>-config\`로 남긴다.
+    비밀값은 정해 둔 이름만 정해 둔 자리에 쓰고, `.env`는 이 PC 값(`DATABASE_URL`·`UPLOADS_DIR`·LiveKit 등)을 두고 나머지를
+    합친다(포트가 바뀌면 방화벽·포워딩 안내). 백업이 더 새 서버의 것(적용된 마이그레이션 수가 코드보다 많음)이면 막는다. 회원이
+    없는 새 설치면 운영자 확인 대신 백업 암호로만 확인한다(확인할 운영자가 없다). 백업 암호는 stdin(UTF-8 바이트 직접 —
+    `Invoke-RestoreScript`)으로만 넘기고, node에 PowerShell 파이프로 넘기는 곳은 여전히 `Test-ServerAdminPassword` 하나다.
 - **`Storage-Path.ps1`은 새 메커니즘을 만들지 않는다.** `server/src/config.js`의
   `UPLOADS_DIR`은 원래부터 환경변수로 바꿀 수 있었다(`process.env.UPLOADS_DIR || 기본값
   server/uploads`) — 이 스크립트는 그 값을 `.env`에 써주고 서비스를 재시작해주는 GUI일
@@ -408,10 +441,22 @@
 - [ ] "DB 데이터 초기화"도 같은 방식으로 운영자 인증 + `RESET` 입력이 필요; 통과하면 회원/팀/
       메시지 등은 비워지지만 `.env`/인증서는 남고 서버가 재시작되어 바로 다시 가입 가능(시작 메뉴에서 열면 UAC 확인
       뒤 진행되고, 운영자 인증·초기화가 `.env`를 실제로 읽음 — 예전처럼 "인증에 실패"로만 끝나지 않는지)
-- [ ] "백업"을 누르면 `{app}\backups\`에 `messenger_<날짜시각>.dump` 파일이 생기고, 서버는
-      멈추지 않고 계속 쓸 수 있음
-- [ ] "복원"은 파일 선택 창이 뜨고, 운영자 인증 + `RESTORE` 입력이 필요; 방금 만든 백업 파일로
+- [ ] 백업 암호를 정하기 전 "백업"을 누르면 "백업 암호를 아직 정하지 않았습니다" 뒤 예전처럼 `{app}\backups\`에
+      `messenger_<날짜시각>.dump` 파일이 생기고, 서버는 멈추지 않고 계속 쓸 수 있음
+- [ ] "복원"은 파일 선택 창이 뜨고, 운영자 인증 + `RESTORE` 입력이 필요; 방금 만든 `.dump`로
       복원하면 회원/팀/메시지가 그 시점 내용으로 돌아오고 서버가 재시작되어 바로 로그인 가능
+- [ ] 관리자 콘솔 "백업" 탭: 백업 암호를 정하면(내 비밀번호 재확인) "다음 자동 백업"이 보이고, "지금 백업" → 진행 표시 →
+      "정상", `{app}\backups\tangotalk_<날짜>_<시각>\`에 `manifest.json`·`db.dump.enc`·`secrets.enc`(열어 봐도 평문 없음)
+- [ ] 외장 드라이브(E:\…)를 외부 위치로 저장 → 다음 백업에 `E:\…\TangoTalk-Backup\`에 백업 폴더와 `uploads\*.enc`가 생김; 두 번째
+      백업은 바뀐 첨부파일만 보냄. 드라이브를 뺀 채 백업하면 "일부 실패"(이 PC 백업은 남음). 다른 PC에서 연 콘솔로는 `\\NAS\…`를
+      저장할 수 없고, 서버 PC에서 연 콘솔로는 저장됨(NAS가 이 PC 컴퓨터 계정에 쓰기를 허용한 경우)
+- [ ] 백업 암호를 정한 뒤 시작 메뉴 "백업" → 전체 백업이 생기고 콘솔 상태에도 보임; 서버의 백업이 도는 중에 누르면 "이미 백업하고 있습니다"
+- [ ] 서버 서비스를 하루 넘게 멈췄다가 켜면 10분쯤 뒤 자동 백업 한 번
+- [ ] "복원"에서 전체 백업의 `manifest.json` 선택 → 운영자 확인 → 백업 암호(틀리면 3번까지) → 첨부파일 복원 여부 → `RESTORE` →
+      DB·설정이 돌아오고 마이그레이션 뒤 서버 재시작. `backups\before-restore_<시각>.dump`·`-config\`가 생김
+- [ ] **새 PC 되살리기**: 다른 VM에 새로 설치(가입 안 함) → 외장 드라이브의 `TangoTalk-Backup\…\manifest.json`으로 복원 → 운영자
+      확인 없이 백업 암호만 묻고, 끝나면 예전 계정으로 로그인·예전 대화·첨부파일이 보이고, 앱을 다시 페어링하지 않아도 같은
+      주소로 붙음(인증서가 같음). 이메일(암호화 저장)도 그대로 보임
 - [ ] 일반 "TangoTalk 서버 제거"는 위 데이터를 안 건드림
 - [ ] 설치 후 관리자 PowerShell에서 `icacls C:\TangoTalk-Server` → SYSTEM·Administrators `(OI)(CI)(F)`, Users
       `(RX)`(이 폴더만), NETWORK SERVICE `(RX)`만 보이고 상속(`(I)`) 항목이 없음. `pgsql`에는 NETWORK SERVICE

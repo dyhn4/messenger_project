@@ -146,8 +146,9 @@ async function myOrgInfo(user, settings) {
  * 훔친 토큰으로 비밀번호를 맞혀보는 걸 막으려고 틀린 횟수를 센다(authGuard.js runReauthAttempt — 10번 틀리면
  * 15분). 확인(bcrypt)을 시작할 때 "확인 중"으로 함께 세서, 요청을 한꺼번에 보내도 그보다 많이 맞춰 보지 못한다(예전엔
  * bcrypt가 끝난 뒤에야 세서 동시에 보낸 만큼 맞춰 볼 수 있었다). 막혔거나 틀렸으면 응답을 보내고 false.
+ * 관리자 콘솔의 백업 암호·외부 백업 위치 변경도 이것으로 운영자 비밀번호를 다시 확인한다(admin.js).
  */
-async function checkCurrentPassword(res, user, password, wrongMessage) {
+export async function checkCurrentPassword(res, user, password, wrongMessage) {
   const result = await runReauthAttempt({
     key: user.id,
     password,

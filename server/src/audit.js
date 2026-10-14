@@ -21,6 +21,8 @@ export const AUDIT = {
   userOrg: 'user.org',
   userServerAdmin: 'user.serverAdmin',
   serverSettings: 'server.settings',
+  // 서버 백업 설정 변경·"지금 백업"(admin.js /admin/backup) — 백업 암호는 남기지 않는다.
+  serverBackup: 'server.backup',
   inviteLinkCreate: 'invite.create',
   inviteLinkRevoke: 'invite.revoke',
   teamInviteLinkCreate: 'teamInvite.create',

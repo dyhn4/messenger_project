@@ -1,8 +1,11 @@
 package com.teamtalk.messenger
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Environment
 import io.flutter.embedding.android.FlutterActivity
@@ -38,6 +41,35 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        // 큰 첨부를 받기 전에 휴대폰 데이터인지 묻는 채널(network_type.dart — 데이터 사용 경고).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tangotalk/network")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isCellular" -> result.success(isOnCellular())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    /**
+     * 지금 기본 망이 휴대폰 데이터(LTE·5G 등)인지 — Wi-Fi·유선이면 false. VPN을 켜 두면 안드로이드
+     * 버전에 따라 실제 망(셀룰러/Wi-Fi)이 안 보일 수 있어서, 그때는 요금이 붙는 망인지로 판단한다.
+     */
+    private fun isOnCellular(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            @Suppress("DEPRECATION")
+            return cm.activeNetworkInfo?.type == ConnectivityManager.TYPE_MOBILE
+        }
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        ) {
+            return false
+        }
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return true
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && cm.isActiveNetworkMetered
     }
 
     /**

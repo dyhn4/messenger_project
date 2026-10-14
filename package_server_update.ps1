@@ -28,7 +28,7 @@ Write-Host '1) server/ 소스 정리 중(실데이터/비밀값 제외)...' -For
 # pm2 운영 서버는 이 파일이 실제로 필요하다).
 $robocopyArgs = @(
     $Server, $Stage, '/E',
-    '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', 'deploy',
+    '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', 'deploy', 'backups',
     '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', '.web-push-vapid.json', 'firebase-service-account.json', 'db.json.bak',
     '/NFL', '/NDL', '/NJH', '/NJS'
 )

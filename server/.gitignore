@@ -39,3 +39,7 @@ web/
 
 # 웹 푸시(VAPID) 키 — webPush.js가 처음 실행될 때 만든다. 바뀌면 브라우저 구독이 전부 무효가 된다.
 .web-push-vapid.json
+
+# 서버 전체 백업(src/backup.js) — 개발 PC에서는 server/backups에 쌓인다(설치본은 설치 폴더의 backups). 암호화돼 있어도
+# DB 전체가 들어 있으니 커밋·배포하지 않는다(build_server_installer.ps1·package_server_update.ps1도 뺀다).
+backups/

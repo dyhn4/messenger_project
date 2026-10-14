@@ -21,7 +21,9 @@ import '../services/session.dart';
 import 'albums_panel.dart';
 import 'bookmarks_panel.dart';
 import 'home_shell_scope.dart';
+import 'inquiries_panel.dart';
 import 'notifications_panel.dart';
+import 'reminders_panel.dart';
 import 'scheduled_panel.dart';
 import 'side_panel_header.dart';
 import 'team_members_panel.dart';
@@ -166,6 +168,23 @@ final sidePanelSpecs = <SidePanelSpec>[
     ownHeader: true,
     builder: (context, session, onClose) =>
         ScheduledPanel(session: session, onClose: onClose),
+  ),
+  SidePanelSpec(
+    key: 'reminders',
+    title: '리마인더',
+    ownHeader: true,
+    builder: (context, session, onClose) =>
+        RemindersPanel(session: session, onClose: onClose),
+  ),
+  SidePanelSpec(
+    key: 'inquiries',
+    title: '문의함',
+    ownHeader: true,
+    builder: (context, session, onClose) => InquiriesPanel(
+      session: session,
+      onClose: onClose,
+      initialBox: takeInitialInquiryBox(),
+    ),
   ),
   SidePanelSpec(
     key: 'favorites',

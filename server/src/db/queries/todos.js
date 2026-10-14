@@ -352,9 +352,16 @@ function roomAssigneeExists({ userId, exceptUserId } = {}) {
  * `query(selection, join?)`은 그 select에 보는 사람의 멤버십·기준 진척률 담당 행 조인(+ [join]이 더 붙이는 것)과 조건까지
  * 붙인 쿼리, `refProgress`는 정렬에 쓰는 기준 진척률 식이다.
  */
-function todoListBase({ userId, teamId, scope, includeDone, roomId, assigneeId, from, to }) {
+function todoListBase({ userId, teamId, scope, includeDone, roomId, assigneeId, from, to, q = null }) {
   const conditions = [eq(todos.teamId, teamId)];
   if (roomId) conditions.push(eq(todos.roomId, roomId));
+  if (q) {
+    // 검색 패널의 "할 일" 탭 — 제목·설명에 든 글(q는 이미 소문자). %·_·\는 와일드카드가 아니라 글자 그대로(메시지 검색과 같다).
+    const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+    conditions.push(
+      or(sql`lower(${todos.title}) like ${pattern}`, sql`lower(coalesce(${todos.description}, '')) like ${pattern}`),
+    );
+  }
   if (scope === 'mine') {
     conditions.push(
       or(exists(roomAssigneeExists({ userId })), and(eq(todos.creatorId, userId), notExists(roomAssigneeExists()))),

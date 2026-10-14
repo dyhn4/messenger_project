@@ -1627,9 +1627,13 @@ export const pollOptions = pgTable(
 );
 
 /**
- * 메시지 리마인더("나중에 알림" — reminders.js). 정한 시각([remindAt])이 되면 서버가 그 사람의 "나와의 대화"에 원본 메시지 카드를
- * 올리고 [firedAt]을 찍는다(안 읽음·푸시는 봇 메시지와 같이). 나만 보는 것이라 다른 사람에게는 알리지 않는다. 메시지·방·사람이
- * 지워지면 같이 지워진다.
+ * 리마인더(reminders.js) — 두 가지다.
+ * - 메시지 리마인더("나중에 알림"): [messageId]·[roomId]가 있다. 정한 시각([remindAt])이 되면 그 사람의 "나와의 대화"에 원본
+ *   메시지 카드를 올린다. 메시지·방이 지워지면 같이 지워진다.
+ * - 직접 만든 리마인더(메뉴의 "리마인더"): 메시지 없이 글([text])과 그 글을 올릴 "나와의 대화"의 팀([teamId])만 있다. 팀이
+ *   지워지면 같이 지워진다.
+ * 울리면 [firedAt]을 찍는다(안 읽음·푸시는 봇 메시지와 같이). 나만 보는 것이라 다른 사람에게는 알리지 않는다. 사람이 지워지면
+ * 같이 지워진다.
  */
 export const messageReminders = pgTable(
   'message_reminders',
@@ -1638,12 +1642,10 @@ export const messageReminders = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    messageId: uuid('message_id')
-      .notNull()
-      .references(() => messages.id, { onDelete: 'cascade' }),
-    roomId: text('room_id')
-      .notNull()
-      .references(() => rooms.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+    roomId: text('room_id').references(() => rooms.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    text: text('text'),
     remindAt: timestamp('remind_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     firedAt: timestamp('fired_at', { withTimezone: true }),

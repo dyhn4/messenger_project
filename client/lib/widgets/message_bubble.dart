@@ -13,7 +13,6 @@ import '../models/message_reaction.dart' show myReaction;
 import '../models/room.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
-import '../screens/inquiry_inbox_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
 import '../services/edit_policy.dart';
@@ -25,6 +24,7 @@ import 'attachment_widgets.dart';
 import 'chat_font_scope.dart';
 import 'avatar_utils.dart';
 import 'hover_toolbar.dart';
+import 'inquiries_panel.dart' show InquiryBox, openInquiriesPanel;
 import 'mention_autocomplete.dart';
 import 'mention_profile.dart';
 import 'message_actions.dart';
@@ -659,9 +659,13 @@ class _MessageBubbleState extends State<MessageBubble> {
                             if (!_editing && message.isInquiryNotice) ...[
                               const SizedBox(height: 6),
                               InkWell(
-                                onTap: () => showInquiryInboxScreen(
+                                // 내가 보낸 문의면 보낸 문의, 받은 것이면 받은 문의 목록으로.
+                                onTap: () => openInquiriesPanel(
                                   context,
                                   widget.session,
+                                  box: message.senderId == widget.session.userId
+                                      ? InquiryBox.sent
+                                      : InquiryBox.received,
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,

@@ -1424,7 +1424,6 @@ class _DateField extends StatefulWidget {
 
 class _DateFieldState extends State<_DateField> with WidgetsBindingObserver {
   final _overlay = OverlayPortalController();
-  final _link = LayerLink();
 
   /// 달력을 열 때 포커스를 이 칸으로 옮긴다 — 메시지를 쓰던 중이면 휴대폰 화상 키보드가 내려가서
   /// 칸 아래로 펼친 달력을 가리지 않는다.
@@ -1489,13 +1488,12 @@ class _DateFieldState extends State<_DateField> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return OverlayPortal(
+    return OverlayPortal.overlayChildLayoutBuilder(
       controller: _overlay,
-      overlayChildBuilder: (context) => CompositedTransformFollower(
-        link: _link,
-        targetAnchor: _above ? Alignment.topLeft : Alignment.bottomLeft,
-        followerAnchor: _above ? Alignment.bottomLeft : Alignment.topLeft,
-        offset: Offset(_dx, _above ? -6 : 6),
+      overlayChildBuilder: (context, info) => _FieldPopupPosition(
+        info: info,
+        above: _above,
+        dx: _dx,
         child: Align(
           alignment: _above ? Alignment.bottomLeft : Alignment.topLeft,
           child: TapRegion(
@@ -1518,42 +1516,39 @@ class _DateFieldState extends State<_DateField> with WidgetsBindingObserver {
           ),
         ),
       ),
-      child: CompositedTransformTarget(
-        link: _link,
-        child: TapRegion(
-          groupId: _tapGroup,
-          child: InkWell(
-            key: const ValueKey('schedule-date'),
-            focusNode: _focus,
-            borderRadius: BorderRadius.circular(4),
-            onTap: widget.enabled ? _toggle : null,
-            child: _PickerBox(
-              icon: Icons.calendar_today_outlined,
-              active: _overlay.isShowing,
-              enabled: widget.enabled,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      formatScheduleDate(widget.value),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: widget.enabled
-                            ? theme.colorScheme.onSurface
-                            : theme.disabledColor,
-                      ),
+      child: TapRegion(
+        groupId: _tapGroup,
+        child: InkWell(
+          key: const ValueKey('schedule-date'),
+          focusNode: _focus,
+          borderRadius: BorderRadius.circular(4),
+          onTap: widget.enabled ? _toggle : null,
+          child: _PickerBox(
+            icon: Icons.calendar_today_outlined,
+            active: _overlay.isShowing,
+            enabled: widget.enabled,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    formatScheduleDate(widget.value),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: widget.enabled
+                          ? theme.colorScheme.onSurface
+                          : theme.disabledColor,
                     ),
                   ),
-                  Icon(
-                    _overlay.isShowing
-                        ? Icons.arrow_drop_up
-                        : Icons.arrow_drop_down,
-                    size: 24,
-                    color: theme.hintColor,
-                  ),
-                ],
-              ),
+                ),
+                Icon(
+                  _overlay.isShowing
+                      ? Icons.arrow_drop_up
+                      : Icons.arrow_drop_down,
+                  size: 24,
+                  color: theme.hintColor,
+                ),
+              ],
             ),
           ),
         ),
@@ -2170,7 +2165,6 @@ class ScheduleDateTimeField extends StatefulWidget {
 class _ScheduleDateTimeFieldState extends State<ScheduleDateTimeField>
     with WidgetsBindingObserver {
   final _overlay = OverlayPortalController();
-  final _link = LayerLink();
 
   /// 판을 열 때 포커스를 이 칸으로 옮긴다 — 글을 쓰던 중이면 휴대폰 화상 키보드가 내려가서 펼친 판을
   /// 가리지 않는다(_DateField와 같다).
@@ -2250,13 +2244,12 @@ class _ScheduleDateTimeFieldState extends State<ScheduleDateTimeField>
     final value = widget.value;
     final day = _dayOf(value);
     final minutes = value.hour * 60 + value.minute;
-    return OverlayPortal(
+    return OverlayPortal.overlayChildLayoutBuilder(
       controller: _overlay,
-      overlayChildBuilder: (context) => CompositedTransformFollower(
-        link: _link,
-        targetAnchor: _above ? Alignment.topLeft : Alignment.bottomLeft,
-        followerAnchor: _above ? Alignment.bottomLeft : Alignment.topLeft,
-        offset: Offset(_dx, _above ? -6 : 6),
+      overlayChildBuilder: (context, info) => _FieldPopupPosition(
+        info: info,
+        above: _above,
+        dx: _dx,
         child: Align(
           alignment: _above ? Alignment.bottomLeft : Alignment.topLeft,
           child: TapRegion(
@@ -2319,42 +2312,39 @@ class _ScheduleDateTimeFieldState extends State<ScheduleDateTimeField>
           ),
         ),
       ),
-      child: CompositedTransformTarget(
-        link: _link,
-        child: TapRegion(
-          groupId: _tapGroup,
-          child: InkWell(
-            key: const ValueKey('schedule-datetime'),
-            focusNode: _focus,
-            borderRadius: BorderRadius.circular(4),
-            onTap: widget.enabled ? _toggle : null,
-            child: _PickerBox(
-              icon: Icons.event_outlined,
-              active: _overlay.isShowing,
-              enabled: widget.enabled,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      formatScheduleTime(value),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: widget.enabled
-                            ? theme.colorScheme.onSurface
-                            : theme.disabledColor,
-                      ),
+      child: TapRegion(
+        groupId: _tapGroup,
+        child: InkWell(
+          key: const ValueKey('schedule-datetime'),
+          focusNode: _focus,
+          borderRadius: BorderRadius.circular(4),
+          onTap: widget.enabled ? _toggle : null,
+          child: _PickerBox(
+            icon: Icons.event_outlined,
+            active: _overlay.isShowing,
+            enabled: widget.enabled,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    formatScheduleTime(value),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: widget.enabled
+                          ? theme.colorScheme.onSurface
+                          : theme.disabledColor,
                     ),
                   ),
-                  Icon(
-                    _overlay.isShowing
-                        ? Icons.arrow_drop_up
-                        : Icons.arrow_drop_down,
-                    size: 24,
-                    color: theme.hintColor,
-                  ),
-                ],
-              ),
+                ),
+                Icon(
+                  _overlay.isShowing
+                      ? Icons.arrow_drop_up
+                      : Icons.arrow_drop_down,
+                  size: 24,
+                  color: theme.hintColor,
+                ),
+              ],
             ),
           ),
         ),
@@ -2540,6 +2530,40 @@ class _ScheduleTimeListState extends State<_ScheduleTimeList> {
           },
         ),
       ),
+    );
+  }
+}
+
+/// 칸에 붙여 띄우는 판의 자리 — 칸 아래 6(위로 펼치면 칸 위 6)에 왼쪽 끝을 맞추고 [dx]만큼 옮긴다. 레이아웃 때 칸의 자리
+/// ([info])로 정한다 — CompositedTransformFollower(그릴 때 자리가 정해짐)로 따라붙이면 판 안의 툴팁(‹ 이전 달 등)이 자리를
+/// 못 재서 마우스를 올렸다 떼면 "'debugNeedsLayout': is not true" 오류가 났다(DateTimeRangeField와 같다).
+class _FieldPopupPosition extends StatelessWidget {
+  final OverlayChildLayoutInfo info;
+  final bool above;
+  final double dx;
+  final Widget child;
+  const _FieldPopupPosition({
+    required this.info,
+    required this.above,
+    required this.dx,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final field = MatrixUtils.transformRect(
+      info.childPaintTransform,
+      Offset.zero & info.childSize,
+    );
+    return Stack(
+      children: [
+        Positioned(
+          left: field.left + dx,
+          top: above ? null : field.bottom + 6,
+          bottom: above ? info.overlaySize.height - field.top + 6 : null,
+          child: child,
+        ),
+      ],
     );
   }
 }

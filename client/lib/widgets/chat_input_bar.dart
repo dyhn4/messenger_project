@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/stickers.dart';
-import '../models/inquiry.dart';
 import '../models/mention.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
@@ -32,6 +30,7 @@ import 'app_toast.dart';
 import 'attachment_widgets.dart';
 import 'call_button.dart';
 import 'capture_upload_dialog.dart';
+import 'inquiry_compose.dart';
 import 'mention_autocomplete.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
@@ -199,7 +198,24 @@ class ChatInputBarState extends State<ChatInputBar> {
     // 포커스를 얻으면(클릭/터치) 안내 문구(hintText)를 바로 감추고 커서만 보이게 한다 —
     // hintText는 build() 시점 값이라 포커스가 바뀔 때 다시 그려줘야 반영된다.
     _focusNode.addListener(_onFocusChange);
+    _restoreDraft();
     _controller.addListener(_onTextChanged);
+  }
+
+  /// 이 방에서 쓰다 만 글이 있으면 입력칸에 되살린다(다른 방에 갔다 온 경우 — [_saveDraft]).
+  /// 멘션은 [MentionAutocomplete]가 나중에 켜는 mentionsEnabled가 켜져 있어야 남으므로 먼저 같은 값으로 켠다.
+  void _restoreDraft() {
+    final draft = widget.controller.draft;
+    if (draft == null) return;
+    _controller.mentionsEnabled = roomAllowsMention(_liveRoom);
+    _controller.load(draft.text, draft.format, mentions: draft.mentions);
+  }
+
+  /// 입력칸이 사라지거나 다른 방으로 바뀔 때 쓰던 글을 그 방의 컨트롤러에 맡긴다(보내고 비웠으면 지운다).
+  void _saveDraft(RoomChatController controller) {
+    controller.draft = _controller.text.trim().isEmpty
+        ? null
+        : _controller.snapshot();
   }
 
   /// 한글 등을 IME로 조합하는 중이면, 그동안 앱 전체를 다시 그리는 알림을 잠깐 미룬다 — 빠르게
@@ -232,10 +248,17 @@ class ChatInputBarState extends State<ChatInputBar> {
       _restricted = _isRestricted(room);
       _archived = room.isArchived;
     }
+    // 다른 방의 컨트롤러로 바뀌면 쓰던 글은 원래 방에 맡기고 새 방의 글을 꺼낸다.
+    if (!identical(oldWidget.controller, widget.controller)) {
+      _saveDraft(oldWidget.controller);
+      _controller.clear();
+      _restoreDraft();
+    }
   }
 
   @override
   void dispose() {
+    _saveDraft(widget.controller);
     widget.session.removeListener(_onSessionChanged);
     HardwareKeyboard.instance.removeHandler(_handleKey);
     _focusNode.removeListener(_onFocusChange);
@@ -424,48 +447,9 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
-  /// "문의하기" — 분류/제목/내용(+선택 첨부)을 입력받아 서버에 문의(티켓)를 만들고, 팀장이
-  /// 대화 목록에서도 바로 볼 수 있도록 같은 내용을 일반 메시지로도 그 방에 보낸다. 티켓 생성이
-  /// 실패하면 메시지도 안 보낸다(팀장이 못 찾는 "고아" 메시지가 남는 걸 막는다).
-  Future<void> _showInquiryDialog() async {
-    final result =
-        await showDialog<(String, String, String, UploadedAttachment?)>(
-          context: context,
-          builder: (_) => _InquiryDialog(controller: widget.controller),
-        );
-    if (result == null || !mounted) return;
-    final (category, title, content, attachment) = result;
-    final text = '📩 문의 [$category] $title\n\n$content';
-    try {
-      final inquiry = await widget.session.api!.createInquiry(
-        widget.room.id,
-        category: category,
-        title: title,
-        content: content,
-        fileUrl: attachment?.url,
-        fileName: attachment?.fileName,
-        fileSize: attachment?.size,
-        mimeType: attachment?.mimeType,
-        thumbnailUrl: attachment?.thumbnailUrl,
-      );
-      await widget.session.chatSocket.send(
-        roomId: widget.room.id,
-        type: attachment == null
-            ? 'text'
-            : (attachment.isImage ? 'image' : 'file'),
-        text: text,
-        fileUrl: attachment?.url,
-        fileName: attachment?.fileName,
-        fileSize: attachment?.size,
-        mimeType: attachment?.mimeType,
-        thumbnailUrl: attachment?.thumbnailUrl,
-        inquiryId: inquiry.id,
-      );
-      if (mounted) showAppToast(context, '문의를 보냈습니다.');
-    } catch (e) {
-      if (mounted) showAppToast(context, '문의를 보내지 못했습니다: $e');
-    }
-  }
+  /// "문의하기" — 팀장과의 1:1 대화방에서 문의(티켓)를 만들고 같은 내용을 메시지로도 보낸다(inquiry_compose.dart).
+  Future<void> _showInquiryDialog() =>
+      sendInquiryTo(context, widget.session, widget.room);
 
   /// 파일 탐색기에서 채팅 입력칸(또는 chat_panel.dart 전체)으로 끌어다 놓은 파일들을 추가한다
   /// (chat_panel.dart의 DropTarget.onDragDone에서 호출). 클릭으로 고를 때(_pickFile)와
@@ -1126,241 +1110,6 @@ class _SendKeyHint extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-/// "문의하기" 작성 대화상자 — 분류(고정 목록)/제목/내용을 입력받는다. 완료를 누르면
-/// (분류, 제목, 내용) 튜플을 돌려준다.
-class _InquiryDialog extends StatefulWidget {
-  final RoomChatController controller;
-  const _InquiryDialog({required this.controller});
-
-  @override
-  State<_InquiryDialog> createState() => _InquiryDialogState();
-}
-
-class _InquiryDialogState extends State<_InquiryDialog> {
-  String _category = inquiryCategories.first;
-  final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-
-  /// 첨부 하나(선택) — 고르는 즉시 업로드가 시작된다(_ChatInputBarState._stageAndUpload와
-  /// 같은 방식). [result]가 채워지기 전엔 "보내기"를 못 누른다.
-  _PendingAttachment? _attachment;
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _contentController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickImage() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
-    if (picked == null) return;
-    unawaited(_stageAndUpload(picked, true, picked.name));
-  }
-
-  Future<void> _pickFile() async {
-    final result = await FilePicker.pickFiles();
-    final picked = result?.files.single;
-    if (picked == null || (picked.path == null && picked.bytes == null)) {
-      return;
-    }
-    unawaited(_stageAndUpload(picked.xFile, false, picked.name));
-  }
-
-  Future<void> _stageAndUpload(
-    XFile file,
-    bool isImage,
-    String displayName,
-  ) async {
-    final bytes = await file.readAsBytes();
-    final thumbBytes = isImage ? await generateThumbnail(bytes) : null;
-    if (!mounted) return;
-
-    final attachment = _PendingAttachment(
-      file: file,
-      isImage: isImage,
-      displayName: displayName,
-      totalBytes: bytes.length,
-      thumbnailBytes: thumbBytes,
-      cancelToken: UploadCancelToken(),
-    );
-    setState(() => _attachment = attachment);
-
-    try {
-      final uploaded = await widget.controller.uploadAttachment(
-        file,
-        isImage: isImage,
-        originalBytes: bytes,
-        thumbBytes: thumbBytes,
-        onProgress: (sent, total) {
-          if (!mounted) return;
-          setState(() => attachment.sentBytes = sent);
-        },
-        cancelToken: attachment.cancelToken,
-      );
-      if (!mounted || _attachment != attachment) return;
-      setState(() => attachment.result = uploaded);
-    } on UploadCancelledException {
-      // 조용히 무시 — X 버튼으로 이미 비워짐(_removeAttachment 참고).
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _attachment = null);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('첨부 업로드 실패: $e')));
-    }
-  }
-
-  void _removeAttachment() {
-    final attachment = _attachment;
-    if (attachment == null) return;
-    if (attachment.result == null) attachment.cancelToken.cancel();
-    setState(() => _attachment = null);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final attachment = _attachment;
-    final uploading = attachment != null && attachment.result == null;
-    // 420은 PC 기준 값 — 좁은 화면(안드로이드)에서는 그대로 두면 대화상자 가용 폭을 넘어서
-    // 자식(특히 첨부 미리보기 줄)이 밀려나거나 겹쳐 보일 수 있어 화면 폭에 맞춰 줄인다.
-    final dialogWidth = math.min(420.0, MediaQuery.sizeOf(context).width - 64);
-    return AlertDialog(
-      title: const Text('팀장에게 문의하기'),
-      content: SizedBox(
-        width: dialogWidth,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: _category,
-              decoration: const InputDecoration(
-                labelText: '분류',
-                border: OutlineInputBorder(),
-              ),
-              items: [
-                for (final c in inquiryCategories)
-                  DropdownMenuItem(value: c, child: Text(c)),
-              ],
-              onChanged: (v) {
-                if (v != null) setState(() => _category = v);
-              },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _titleController,
-              autofocus: true,
-              maxLength: 100,
-              decoration: const InputDecoration(
-                labelText: '제목',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            TextField(
-              controller: _contentController,
-              maxLines: 6,
-              minLines: 3,
-              maxLength: 2000,
-              decoration: const InputDecoration(
-                labelText: '내용',
-                hintText: '문의 내용을 입력하세요',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 4),
-            // 첨부는 하나만 붙일 수 있어서, 이미 하나 있으면 이 버튼들은 숨기지 않고
-            // 그냥 비활성화만 한다 — 버튼이 통째로 사라지면(예전엔 if/else로 바꿔치기했다)
-            // 미리보기 칸과 자리가 겹쳐서 파일명이 버튼을 가리는 것처럼 보였다.
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: attachment == null ? _pickImage : null,
-                  icon: const Icon(Icons.image_outlined, size: 18),
-                  label: const Text('이미지'),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: attachment == null ? _pickFile : null,
-                  icon: const Icon(Icons.attach_file, size: 18),
-                  label: const Text('파일'),
-                ),
-              ],
-            ),
-            if (attachment != null) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      attachment.isImage
-                          ? Icons.image_outlined
-                          : Icons.insert_drive_file_outlined,
-                      size: 18,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        attachment.displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                    if (uploading) ...[
-                      const SizedBox(width: 8),
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ],
-                    IconButton(
-                      iconSize: 18,
-                      icon: const Icon(Icons.close),
-                      onPressed: _removeAttachment,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          onPressed: uploading
-              ? null
-              : () {
-                  final title = _titleController.text.trim();
-                  final content = _contentController.text.trim();
-                  if (title.isEmpty || content.isEmpty) return;
-                  Navigator.of(
-                    context,
-                  ).pop((_category, title, content, attachment?.result));
-                },
-          child: const Text('보내기'),
-        ),
-      ],
     );
   }
 }

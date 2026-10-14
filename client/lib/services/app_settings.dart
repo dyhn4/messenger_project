@@ -438,12 +438,23 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 다운로드 완료 후 "폴더 열기"를 골랐을 때 호출(Windows 전용, 그 외 플랫폼은 아무 것도 안 함).
-  Future<void> openDownloadFolder() async {
-    if (!AppPlatform.isWindows || downloadFolder.isEmpty) return;
-    // 이름만 주면 현재 폴더에 심어 둔 explorer.exe가 대신 실행될 수 있어 전체 경로로 부른다(download_storage.dart와 같은
-    // 방식 — 검토 S32).
-    final root = AppPlatform.environment['SystemRoot'] ?? r'C:\Windows';
-    await Process.start('$root\\explorer.exe', [downloadFolder]);
+  /// 다운로드 완료 후 "폴더 열기"를 골랐을 때 호출(Windows 전용, 그 외 플랫폼은 아무 것도 안 함). [folder]는 실제로
+  /// 저장한 폴더 — "저장 위치 물어보기"면 저장 창에서 설정 폴더가 아닌 곳을 고를 수 있어서 받은 파일이 있는 곳을 연다.
+  /// 안 주면(또는 비어 있으면) 설정 폴더.
+  Future<void> openDownloadFolder([String? folder]) async {
+    final target = folder == null || folder.isEmpty ? downloadFolder : folder;
+    if (!AppPlatform.isWindows || target.isEmpty) return;
+    try {
+      // 이름만 주면 현재 폴더에 심어 둔 explorer.exe가 대신 실행될 수 있어 전체 경로로 부른다(download_storage.dart와 같은
+      // 방식 — 검토 S32). 받을 폴더는 사용자가 직접 고른 곳이라 UNC여도 따로 묻지 않는다.
+      final root = AppPlatform.environment['SystemRoot'] ?? r'C:\Windows';
+      await Process.start('$root\\explorer.exe', [target]);
+    } catch (_) {
+      // 못 열어도 파일은 이미 저장돼 있다.
+    }
   }
+
+  /// 저장한 파일 [filePath]가 든 폴더를 연다([openDownloadFolder]).
+  Future<void> openFolderOf(String filePath) =>
+      openDownloadFolder(File(filePath).parent.path);
 }

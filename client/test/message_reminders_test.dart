@@ -4,11 +4,13 @@ import 'package:client/models/app_user.dart';
 import 'package:client/models/message.dart';
 import 'package:client/models/message_reminder.dart';
 import 'package:client/models/room.dart';
+import 'package:client/models/team.dart';
 import 'package:client/services/api_client.dart';
 import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/message_reminders.dart';
+import 'package:client/widgets/reminders_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -46,6 +48,20 @@ void main() {
             headers: jsonHeaders,
           );
         }
+        if (request.method == 'POST' && path == '/api/reminders') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final created = {
+            'id': 'memo-new',
+            'messageId': null,
+            'roomId': null,
+            'teamId': body['teamId'],
+            'text': body['text'],
+            'remindAt': body['remindAt'],
+            'createdAt': 0,
+          };
+          pending = [...pending, created];
+          return http.Response(jsonEncode(created), 201, headers: jsonHeaders);
+        }
         if (request.method == 'GET' && path == '/api/reminders') {
           return http.Response(jsonEncode(pending), 200, headers: jsonHeaders);
         }
@@ -56,6 +72,9 @@ void main() {
       }),
     );
     session.userId = 'u1';
+    final team = Team(id: 't1', name: '영업팀', createdAt: DateTime(2026));
+    session.teams.add(team);
+    session.currentTeam = team;
     session.rooms.add(
       Room(
         id: 'r1',
@@ -156,6 +175,88 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
+  testWidgets('"나중에 알림": 날짜·시간 직접 고르기는 방해 금지 "지정"과 같은 달력·시간 칸을 펼쳐 고른 시각으로 건다', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final session = buildSession();
+    final message = Message(
+      id: 'm1',
+      roomId: 'r1',
+      senderId: 'u2',
+      senderName: 'Sam',
+      type: MessageType.text,
+      text: '배너 시안 확인 부탁드려요',
+      createdAt: DateTime(2026, 10, 14, 9),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showReminderPicker(context, session, message),
+              child: const Text('열기'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reminder-custom-panel')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('reminder-custom')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('reminder-custom-panel')), findsOneWidget);
+    expect(find.text('언제 다시 알려 드릴까요?'), findsOneWidget);
+    expect(requests, isEmpty, reason: '펼치기만 해서는 걸지 않는다');
+
+    // 내일(다음 달이면 › 로 넘겨서) → 알림 시간 오후 6:00.
+    final now = DateTime.now();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    if (tomorrow.month != now.month) {
+      await tester.tap(find.byKey(const ValueKey('reminder-period-next')));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(
+      find.byKey(
+        ValueKey(
+          'reminder-period-day-${tomorrow.year}-${tomorrow.month}-${tomorrow.day}',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('reminder-time-end')));
+    await tester.pumpAndSettle();
+    final option = find.byKey(const ValueKey('reminder-time-option-1080'));
+    await tester.scrollUntilVisible(
+      option,
+      72,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('reminder-time-list')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.ensureVisible(option);
+    await tester.pumpAndSettle();
+    await tester.tap(option);
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+
+    final expected = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 18);
+    await tester.tap(find.byKey(const ValueKey('reminder-custom-confirm')));
+    await tester.pumpAndSettle();
+    final body = jsonDecode(requests.single.body) as Map<String, dynamic>;
+    expect(
+      DateTime.fromMillisecondsSinceEpoch(body['remindAt'] as int),
+      expected,
+    );
+    expect(find.text('나중에 알림'), findsNothing, reason: '창이 닫힌다');
+    await tester.pump(const Duration(seconds: 3));
+  });
+
   testWidgets('울렸을 때의 카드: 방 이름·보낸 사람·미리보기와 메시지로 이동, 비밀 대화는 내용 없이', (
     tester,
   ) async {
@@ -198,9 +299,33 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('리마인더 목록: 울릴 시각 순으로 보이고, 취소하면 지운다', (tester) async {
+  /// 리마인더 패널을 화면에 띄운다(모바일처럼 홈 셸 없이).
+  Future<void> pumpPanel(WidgetTester tester, Session session) async {
+    tester.view.physicalSize = const Size(600, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: RemindersPanel(session: session)),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('리마인더 패널: 직접 만든 것과 메시지 리마인더가 울릴 시각 순으로 카드로 보이고, ✕로 취소한다', (
+    tester,
+  ) async {
     final session = buildSession();
     pending = [
+      {
+        'id': 'memo-1',
+        'messageId': null,
+        'roomId': null,
+        'teamId': 't1',
+        'text': '15시 회의 자료 보내기',
+        'remindAt': DateTime(2026, 10, 15, 8).millisecondsSinceEpoch,
+        'createdAt': 0,
+      },
       {
         'id': 'rem-1',
         'messageId': 'm1',
@@ -211,27 +336,131 @@ void main() {
         'preview': '배너 시안 확인 부탁드려요',
       },
     ];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showRemindersDialog(context, session),
-              child: const Text('열기'),
-            ),
-          ),
-        ),
-      ),
+    await pumpPanel(tester, session);
+    expect(find.text('리마인더'), findsOneWidget);
+    expect(find.byKey(const ValueKey('reminder-create')), findsOneWidget);
+    expect(find.textContaining('2개의 리마인더', findRichText: true), findsOneWidget);
+
+    final memo = find.byKey(const ValueKey('reminder-memo-1'));
+    final message = find.byKey(const ValueKey('reminder-rem-1'));
+    expect(
+      tester.getTopLeft(memo).dy,
+      lessThan(tester.getTopLeft(message).dy),
+      reason: '울릴 시각 순',
     );
-    await tester.tap(find.text('열기'));
-    await tester.pumpAndSettle();
-    expect(find.text('배너 시안 확인 부탁드려요'), findsOneWidget);
-    expect(find.textContaining('10/15(목) 09:00 · 마케팅 팀 · Sam'), findsOneWidget);
-    await tester.tap(find.byTooltip('취소'));
+    expect(
+      find.descendant(of: memo, matching: find.text('15시 회의 자료 보내기')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: memo, matching: find.text('직접 만든 리마인더')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: memo, matching: find.text('10/15(목) 08:00')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: message, matching: find.text('배너 시안 확인 부탁드려요')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: message, matching: find.text('마케팅 팀')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: message, matching: find.text(' · Sam')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('reminder-cancel-rem-1')));
     await tester.pumpAndSettle();
     expect(requests.last.method, 'DELETE');
     expect(requests.last.url.path, '/api/reminders/rem-1');
-    expect(find.text('배너 시안 확인 부탁드려요'), findsNothing);
+    expect(message, findsNothing);
+    expect(memo, findsOneWidget);
     await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('리마인더 패널: 걸어 둔 것이 없으면 안내를 보인다', (tester) async {
+    await pumpPanel(tester, buildSession());
+    expect(find.byKey(const ValueKey('reminder-empty')), findsOneWidget);
+  });
+
+  testWidgets(
+    '리마인더 생성: 글과 언제(기본 1시간 뒤)를 고르고 [생성]하면 지금 팀의 나와의 대화로 거는 리마인더를 만든다',
+    (tester) async {
+      final session = buildSession();
+      await pumpPanel(tester, session);
+      await tester.tap(find.byKey(const ValueKey('reminder-create')));
+      await tester.pumpAndSettle();
+
+      FilledButton save() => tester.widget<FilledButton>(
+        find.byKey(const ValueKey('reminder-new-save')),
+      );
+      expect(save().onPressed, isNull, reason: '글이 없으면 만들 수 없다');
+      expect(
+        tester
+            .widget<ChoiceChip>(
+              find.byKey(const ValueKey('reminder-new-preset-1시간 뒤')),
+            )
+            .selected,
+        isTrue,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('reminder-new-text')),
+        '  15시 회의 자료 보내기  ',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('reminder-new-preset-내일 오전 9시')),
+      );
+      await tester.pump();
+      final now = DateTime.now();
+      final tomorrow9 = DateTime(now.year, now.month, now.day + 1, 9);
+      expect(
+        find.text('${reminderTimeLabel(tomorrow9)}에 "나와의 대화"로 알려 드립니다.'),
+        findsOneWidget,
+      );
+      expect(save().onPressed, isNotNull);
+      await tester.tap(find.byKey(const ValueKey('reminder-new-save')));
+      await tester.pumpAndSettle();
+
+      final post = requests.firstWhere((r) => r.method == 'POST');
+      expect(post.url.path, '/api/reminders');
+      final body = jsonDecode(post.body) as Map<String, dynamic>;
+      expect(body['text'], '15시 회의 자료 보내기');
+      expect(body['teamId'], 't1');
+      expect(
+        DateTime.fromMillisecondsSinceEpoch(body['remindAt'] as int),
+        tomorrow9,
+      );
+      expect(
+        find.byKey(const ValueKey('reminder-new-save')),
+        findsNothing,
+        reason: '창이 닫힌다',
+      );
+      // 만든 뒤 목록을 다시 받아 새 카드가 보인다.
+      expect(find.byKey(const ValueKey('reminder-memo-new')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+    },
+  );
+
+  testWidgets('리마인더 생성: 지정을 고르면 달력·시간 칸이 펼쳐진다', (tester) async {
+    final session = buildSession();
+    await pumpPanel(tester, session);
+    await tester.tap(find.byKey(const ValueKey('reminder-create')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reminder-new-custom-panel')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const ValueKey('reminder-new-custom')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('reminder-new-custom-panel')),
+      findsOneWidget,
+    );
+    expect(find.text('알림 시간'), findsOneWidget);
   });
 }

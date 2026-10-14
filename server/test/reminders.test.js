@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
 import {
+  memoReminderBotText,
+  parseReminderText,
   parseRemindAt,
   REMIND_MAX_AHEAD_MS,
   REMIND_MIN_AHEAD_MS,
@@ -10,6 +12,7 @@ import {
   reminderCardFor,
   reminderDenial,
   REMINDER_PREVIEW_MAX,
+  REMINDER_TEXT_MAX,
 } from '../src/reminderRules.js';
 
 const NOW = Date.UTC(2026, 9, 14, 3, 0);
@@ -74,4 +77,33 @@ test('연결: 라우터·예약 작업이 붙어 있고, 울리면 나와의 대
   assert.match(messages, /reminderCard: m\.deletedAt \? null : \(m\.reminderCard \?\? null\),/);
   const queries = fs.readFileSync(new URL('../src/db/queries/reminders.js', import.meta.url), 'utf8');
   assert.match(queries, /for update skip locked/, '같은 리마인더를 두 번 울리지 않는다');
+});
+
+test('직접 만든 리마인더의 글: 앞뒤 공백을 떼고 1~200자, 줄바꿈은 되고 그 밖의 제어 문자는 안 된다', () => {
+  assert.equal(parseReminderText('  15시 회의 자료 보내기  ').value, '15시 회의 자료 보내기');
+  assert.equal(parseReminderText('첫 줄\r\n둘째 줄').value, '첫 줄\n둘째 줄');
+  assert.equal(parseReminderText('가'.repeat(REMINDER_TEXT_MAX)).value.length, REMINDER_TEXT_MAX);
+  assert.match(parseReminderText('가'.repeat(REMINDER_TEXT_MAX + 1)).error, /200자/);
+  // 화면에 보이는 글자 단위로 센다 — 여러 코드 포인트로 된 이모지도 한 자.
+  assert.ok(parseReminderText('👨‍👩‍👧'.repeat(REMINDER_TEXT_MAX)).value);
+  for (const bad of ['', '   ', null, 3, undefined]) {
+    assert.match(parseReminderText(bad).error, /내용을 입력/, String(bad));
+  }
+  assert.match(parseReminderText('a\u0007b').error, /쓸 수 없는 문자/);
+  assert.match(parseReminderText('a\tb').error, /쓸 수 없는 문자/);
+  assert.equal(memoReminderBotText('15시 회의 자료 보내기'), '⏰ 리마인더 — 15시 회의 자료 보내기');
+});
+
+test('연결: 직접 만든 리마인더는 팀 멤버만 걸고, 울리면 그 팀의 나와의 대화에 글로 올린다(팀에서 빠졌으면 안 올린다)', () => {
+  const reminders = fs.readFileSync(new URL('../src/reminders.js', import.meta.url), 'utf8');
+  assert.match(reminders, /router\.post\('\/reminders'/);
+  assert.match(reminders, /isTeamMember\(teamId, req\.user\.sub\)/);
+  assert.match(reminders, /isTeamMember\(reminder\.teamId, reminder\.userId\)/);
+  assert.match(reminders, /openSelfRoom\(io, reminder\.userId, reminder\.teamId\)/);
+  assert.match(reminders, /postBotMessage\(io, selfRoom, memoReminderBotText\(reminder\.text\), \{ senderName: SELF_ROOM_BOT_NAME \}\)/);
+  const queries = fs.readFileSync(new URL('../src/db/queries/reminders.js', import.meta.url), 'utf8');
+  assert.match(queries, /\.leftJoin\(messages, eq\(messages\.id, messageReminders\.messageId\)\)/, '메시지 없는 리마인더도 목록에 나온다');
+  const migration = fs.readFileSync(new URL('../drizzle/0107_memo_reminders.sql', import.meta.url), 'utf8');
+  assert.match(migration, /ALTER COLUMN "message_id" DROP NOT NULL/);
+  assert.match(migration, /ADD COLUMN "text" text/);
 });

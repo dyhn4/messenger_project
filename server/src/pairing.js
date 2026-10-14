@@ -183,7 +183,8 @@ const SERVER_CONNECT_DIAGRAM = `
 </svg>`;
 
 /**
- * 설치 완료 후 회원가입까지 3단계 안내 — 각 단계 바로 아래에 그 단계의 화면 그림을 붙인다.
+ * 설치 완료 후 회원가입까지 3단계 안내(Windows 칸 — 그림이 PC 브라우저 화면이다. Android 칸은 androidSection) — 각 단계
+ * 바로 아래에 그 단계의 화면 그림을 붙인다.
  * [subText]만 설치 초대/팀 초대 페이지가 다르게 넘긴다(팀 초대는 자동 합류 안내가 붙는다). 가입 인원이 다 찬
  * 링크([join] false — 이미 가입한 사람이 다른 기기를 연결할 때)는 마지막 단계가 회원가입 대신 로그인이다.
  *
@@ -207,8 +208,8 @@ function renderPostInstallSteps(subText, { join = true } = {}) {
 }
 
 /** 예전엔 접이식(<details>)으로 기본 접혀 있었는데, 안 펼쳐보고 그냥 "삭제"를 눌러버리는
- * 사람들이 있어서 페이지 오른쪽에 항상 펼쳐진 채로 보이도록 뺐다(renderInvitePage/
- * renderTeamInvitePage의 2단 레이아웃 참고) — 그래서 <details>가 아니라 그냥 <div>다. */
+ * 사람들이 있어서 항상 펼쳐진 채로 Windows 칸(platformColumns) 다운로드 버튼 바로 아래에 둔다 —
+ * 그래서 <details>가 아니라 그냥 <div>다. */
 const DOWNLOAD_WARNING_GUIDE = `
 <div class="warn-guide">
   <p class="guide-title">다운로드·설치 중 경고 화면이 뜬다면?</p>
@@ -223,8 +224,100 @@ const DOWNLOAD_WARNING_GUIDE = `
   <p class="hint">화면 아래 다운로드 알림에서 <b>"삭제" 버튼 옆 화살표(▾)</b>를 누르고 <b>"그래도 계속"</b>을 선택하세요.</p>
   <p class="guide-step"><b>② 설치 파일 실행 시 "Windows에서 PC를 보호했습니다"가 뜨면</b></p>
   ${SMARTSCREEN_DIAGRAM}
-  <p class="hint"><b>"추가 정보"</b>를 누르면 <b>"실행"</b> 버튼이 나타납니다 — 눌러서 설치를 계속하세요. (안드로이드는 설치 전 "출처를 알 수 없는 앱" 허용을 한 번 물어봅니다 — "허용"을 누르면 됩니다.)</p>
+  <p class="hint"><b>"추가 정보"</b>를 누르면 <b>"실행"</b> 버튼이 나타납니다 — 눌러서 설치를 계속하세요.</p>
 </div>`;
+
+/**
+ * Android 칸 — 설치 순서(Chrome 다운로드 경고 → 출처를 알 수 없는 앱 허용 → Play 프로텍트)와 설치 뒤 앱 열기, 그리고
+ * 앱이 쓰는 권한(AndroidManifest.xml — 알림·카메라/마이크·전체 화면 알림·업데이트 설치)을 어디서 허용하는지 안내한다.
+ * Windows 칸의 그림 안내(renderPostInstallSteps)는 PC 브라우저 화면이라 여기서는 글로만 적는다.
+ */
+function androidSection(downloadHref, subText, { join = true } = {}) {
+  return `
+            <a class="btn" href="${downloadHref}">Android용 다운로드</a>
+            <div class="warn-guide">
+              <p class="guide-title">설치 순서</p>
+              <ol class="guide-list">
+                <li>Chrome이 <b>"이 유형의 파일은 기기에 손상을 줄 수 있습니다"</b>라고 물으면 <b>"다운로드"</b>(또는 "무시하고 다운로드")를 누릅니다.</li>
+                <li>다운로드가 끝나면 알림이나 Chrome의 다운로드 목록에서 <b>설치 파일(.apk)</b>을 눌러 엽니다.</li>
+                <li><b>"출처를 알 수 없는 앱"</b>을 설치할 수 없다고 나오면 <b>"설정"</b>을 눌러 <b>"이 출처 허용"</b>을 켜고, 뒤로 돌아와 <b>"설치"</b>를 누릅니다.</li>
+                <li><b>Play 프로텍트</b> 경고("안전하지 않은 앱 차단됨" 등)가 뜨면 <b>"세부정보 더보기"</b> → <b>"무시하고 설치"</b>를 누릅니다.</li>
+              </ol>
+              <p class="hint">스토어를 거치지 않고 배포하는 앱이라 나오는 확인 절차입니다. 그대로 진행해도 안전합니다.</p>
+            </div>
+            <div class="notice">
+              <p class="notice-step">설치가 끝나면 이 페이지로 돌아와 아래 버튼을 누르세요.</p>
+              <button type="button" class="btn" onclick="tryDeepLink()">TangoTalk 열기</button>
+              <p class="notice-sub">"서버 주소 변경" 창이 뜨면 "연결"을 누르고 ${join ? '회원가입' : '로그인'}하세요. ${subText}</p>
+            </div>
+            <div class="perm-guide">
+              <p class="guide-title">권한 설정</p>
+              <ul class="guide-list">
+                <li><b>알림</b> — 처음 실행할 때 알림 허용을 물으면 <b>"허용"</b>을 누릅니다. 놓쳤다면 휴대폰 <b>설정 → 애플리케이션 → TangoTalk → 알림</b>에서 켭니다.</li>
+                <li><b>카메라·마이크</b> — 화상회의에 처음 들어갈 때 묻습니다. <b>"앱 사용 중에만 허용"</b>을 고르세요.</li>
+                <li><b>배터리</b> — 앱을 닫았을 때 알림이 늦거나 안 오면 <b>설정 → 애플리케이션 → TangoTalk → 배터리</b>를 <b>"제한 없음"</b>으로 바꿉니다(삼성은 설정 → 배터리 → 백그라운드 사용 한도의 "절전 예외 앱"에도 추가).</li>
+                <li><b>전체 화면 알림</b> — 잠금 화면에서 걸려 온 화상회의를 전체 화면으로 받으려면(Android 14 이상) 앱 정보에서 TangoTalk의 <b>"전체 화면 알림"</b>을 허용합니다.</li>
+                <li><b>앱 업데이트</b> — 앱 안에서 새 버전을 설치할 때 TangoTalk에도 "출처를 알 수 없는 앱" 허용을 한 번 묻습니다. <b>"이 출처 허용"</b>을 켜세요.</li>
+              </ul>
+            </div>`;
+}
+
+/**
+ * 아이폰 칸 아래의 "앱을 닫아도 알림 받기" 조건 — 웹 푸시(webPush.js → client/web/sw.js)는 iOS 16.4 이상에서 홈 화면에
+ * 추가한 웹 앱이 알림을 허용해 구독했을 때만 온다(web_push_prompt.dart의 환경설정 > 알림 상태 문구와 맞춘다).
+ * 마지막 줄: 서버는 소켓이 붙어 있는 기기로는 푸시를 보내지 않는데(push.js), 홈으로만 나간 직후에는 끊긴 걸 알기까지 시간이 걸린다.
+ */
+const IOS_PUSH_GUIDE = `
+            <div class="perm-guide">
+              <p class="guide-title">앱을 닫아도 알림을 받으려면</p>
+              <ul class="guide-list">
+                <li><b>iOS 16.4 이상</b>이어야 합니다.</li>
+                <li>Safari 탭이 아니라 <b>홈 화면의 TangoTalk 아이콘</b>으로 열어 로그인한 뒤 <b>"알림 켜기"</b> → <b>"허용"</b>을 누릅니다. 홈 화면에 추가만 해서는 알림이 오지 않습니다.</li>
+                <li>앱의 <b>환경설정 → 알림</b>이 "앱을 닫아도 새 메시지 알림이 옵니다"인지 확인합니다. 아니면 <b>"앱을 닫아도 알림 받기(푸시)"</b>를 켭니다.</li>
+                <li>아이폰 <b>설정 → 알림 → TangoTalk</b>이 허용되어 있고, 집중 모드에서 막혀 있지 않아야 합니다.</li>
+                <li>TangoTalk의 <b>방해 금지</b>가 켜져 있는 동안에는 알림이 오지 않습니다.</li>
+                <li>홈 화면 아이콘을 지웠다가 다시 추가했다면 <b>"알림 켜기"</b>를 다시 해야 합니다.</li>
+              </ul>
+              <p class="hint">앱을 완전히 닫지 않고 홈으로만 나간 직후 잠깐(수십 초) 동안 온 메시지는 알림이 오지 않을 수 있습니다.</p>
+            </div>`;
+
+/** 아이폰 칸 — 웹 앱 주소가 있으면(iphoneWebSection) 주소와 알림 조건을, 없으면 쓸 수 없다는 안내만. */
+function iosSection(webUrl, opts) {
+  const web = iphoneWebSection(webUrl, opts);
+  if (!web) {
+    return `
+            <p class="hint">이 서버에는 아직 웹 앱 주소(공인 인증서)가 설정되어 있지 않아 아이폰·아이패드에서는 쓸 수 없습니다. 서버 관리자에게 문의하세요.</p>`;
+  }
+  return `${web}${IOS_PUSH_GUIDE}`;
+}
+
+/**
+ * 연결할 수 있는 초대 페이지의 기기별 안내 — 왼쪽부터 Windows·Android·iPhone 세 칸에 각자의 다운로드(웹 앱) 버튼과 설명을
+ * 나눠 담는다. 좁은 화면에서는 세로로 쌓이고, 페이지 스크립트(renderInvitePageShell)가 지금 기기의 칸을 표시해 맨 위로 올린다.
+ * [basePath]는 다운로드 주소의 앞부분('/invite' 또는 '/team-invite'), [subText]는 설치 뒤 안내의 마지막 줄이다.
+ */
+function platformColumns({ basePath, token, webUrl, join, subText }) {
+  return `
+        <div class="platforms">
+          <section class="platform" id="pf-windows">
+            <h2>Windows <span class="mine-badge">지금 기기</span></h2>
+            <p class="platform-sub">PC용 설치 프로그램</p>
+            <a class="btn" href="${basePath}/${token}/download/windows">Windows용 다운로드</a>
+            ${DOWNLOAD_WARNING_GUIDE}
+            ${renderPostInstallSteps(subText, { join })}
+          </section>
+          <section class="platform" id="pf-android">
+            <h2>Android <span class="mine-badge">지금 기기</span></h2>
+            <p class="platform-sub">휴대폰·태블릿 앱(APK)</p>
+            ${androidSection(`${basePath}/${token}/download/android`, subText, { join })}
+          </section>
+          <section class="platform" id="pf-ios">
+            <h2>iPhone · iPad <span class="mine-badge">지금 기기</span></h2>
+            <p class="platform-sub">설치 없이 웹 앱으로 사용</p>
+            ${iosSection(webUrl, { join, token })}
+          </section>
+        </div>`;
+}
 
 /** 초대 페이지(설치 초대 / 팀 초대 공용) 스타일 — 두 페이지가 완전히 같은 톤을 쓰도록 뺐다. */
 const INVITE_PAGE_STYLE = `
@@ -247,23 +340,30 @@ const INVITE_PAGE_STYLE = `
                color: #c92a2a; font-size: 14px; margin: 12px 0; }
   details { margin: 12px 0; color: #555; }
   summary { cursor: pointer; }
-  /* 가이드를 상시 노출로 바꾸면서(아래 .page-layout 참고) 페이지 폭이 좁으면 오른쪽에
-     나란히 둘 자리가 없어서, 넓은 화면에서만 2단으로 붙이고 좁은 화면에서는 본문 아래에
-     세로로 이어붙인다. */
+  /* 연결할 수 있는 링크는 기기별 세 칸(platformColumns)을 나란히 놓으려고 넓게 쓴다. 칸 하나가 그림(320px)이 들어갈
+     만큼은 돼야 해서, 그보다 좁아지는 화면에서는 세로로 쌓고 지금 기기의 칸(.mine — 페이지 스크립트가 붙인다)을 맨 위로 올린다. */
   .page-wrap { max-width: 480px; margin: 0 auto; }
-  .page-wrap.with-guide { max-width: 840px; }
-  .page-layout { display: flex; gap: 28px; align-items: flex-start; }
-  .page-main { flex: 1 1 420px; min-width: 0; max-width: 480px; }
-  .warn-guide { flex: 0 0 320px; background: #fff9db; border-radius: 10px; padding: 4px 16px 16px;
-                position: sticky; top: 24px; }
+  .page-wrap.wide { max-width: 1140px; }
+  .platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start; margin: 18px 0; }
+  .platform { border: 1px solid #dee2e6; border-radius: 12px; padding: 16px; min-width: 0; }
+  .platform.mine { border: 2px solid #4c6ef5; padding: 15px; }
+  .platform h2 { font-size: 19px; margin: 0; }
+  .platform-sub { color: #888; font-size: 13px; margin: 2px 0 6px; }
+  .mine-badge { display: none; font-size: 12px; font-weight: bold; color: #fff; background: #4c6ef5;
+                border-radius: 999px; padding: 2px 8px; vertical-align: middle; }
+  .platform.mine .mine-badge { display: inline-block; }
+  @media (max-width: 960px) {
+    .platforms { grid-template-columns: 1fr; }
+    .platform.mine { order: -1; }
+  }
+  /* 칸 안의 안내 상자 — 노랑(warn-guide)은 설치 중 경고 화면, 파랑(perm-guide)은 권한·알림 설정. */
+  .warn-guide { background: #fff9db; border-radius: 10px; padding: 4px 14px 14px; margin: 12px 0; }
+  .perm-guide { background: #e7f5ff; border-radius: 10px; padding: 4px 14px 14px; margin: 12px 0; }
   .guide-title { font-weight: bold; padding: 8px 0; margin: 0; }
   .guide-step { margin: 14px 0 6px; }
+  .guide-list { margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.5; }
+  .guide-list li { margin: 6px 0; }
   .warn-guide svg { display: block; max-width: 100%; height: auto; margin: 4px 0; }
-  @media (max-width: 760px) {
-    .page-layout { flex-direction: column; }
-    .page-main { max-width: 100%; }
-    .warn-guide { flex: 1 1 auto; width: 100%; box-sizing: border-box; position: static; }
-  }
   /* 예전엔 한 줄짜리 완료 메시지였는데, 회원가입까지 3단계(딥링크 확인창 → 서버 주소 변경
      창)를 그림과 함께 보여주도록 늘어나서 가운데 정렬 큰 글씨 대신 왼쪽 정렬 단계별 문단으로
      바꿨다(renderPostInstallSteps 참고). 배경/테두리 색은 "설치가 끝났다"는 완료 톤 그대로. */
@@ -273,8 +373,8 @@ const INVITE_PAGE_STYLE = `
   .notice-step:first-child { margin-top: 0; }
   .notice svg { display: block; max-width: 100%; height: auto; margin: 6px 0 4px; }
   .notice-sub { display: block; margin-top: 14px; color: #2b8a3e; font-size: 13px; font-weight: normal; }
-  /* 아이폰 안내(iphoneWebSection) — 설치 버튼 바로 아래에 "어느 기기로 쓰나" 묶음으로 보이게 옅은 상자로. 주소가 길어도
-     좁은 화면(아이폰)에서 가로로 넘치지 않게 아무 데서나 줄을 바꾼다. */
+  /* 아이폰 안내(iphoneWebSection) — 아이폰 칸 맨 위에 옅은 상자로. 주소가 길어도 좁은 화면(아이폰)에서 가로로 넘치지
+     않게 아무 데서나 줄을 바꾼다. */
   .ios-web { background: #f1f3f5; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 14px; }
   .ios-web p { margin: 4px 0; }
   .ios-web a { word-break: break-all; }
@@ -318,14 +418,12 @@ function iphoneWebSection(webUrl, { join = true, token = null } = {}) {
 }
 
 /** <h1>+body(유효성에 따라 달라짐)를 받아 최종 HTML 문서로 조립한다. 연결할 수 있는 링크(=다운로드
- * 버튼이 있는 경우 — 가입 인원이 다 찬 링크 포함)일 때만 오른쪽에 다운로드 경고 가이드를 상시 노출하는
- * 2단 레이아웃을 쓰고, 그렇지 않은 링크는 다운로드 자체를 안 시키므로 가이드 없이 좁은 1단으로 그린다.
+ * 버튼이 있는 경우 — 가입 인원이 다 찬 링크 포함)일 때만 기기별 세 칸(platformColumns)이 들어갈 넓은 폭을 쓰고,
+ * 그렇지 않은 링크는 다운로드 자체를 안 시키므로 좁은 1단으로 그린다.
  * renderInvitePage/renderTeamInvitePage가 공유한다. */
 function renderInvitePageShell({ title, body, connectable, deepLink }) {
   const main = `<h1>${title}</h1>${body}`;
-  const page = connectable
-    ? `<div class="page-wrap with-guide"><div class="page-layout"><div class="page-main">${main}</div>${DOWNLOAD_WARNING_GUIDE}</div></div>`
-    : `<div class="page-wrap">${main}</div>`;
+  const page = `<div class="page-wrap${connectable ? ' wide' : ''}">${main}</div>`;
   // 페이지를 열 때 한 번 시도하고 끝나는 게 아니라, 설치 프로그램(별도 창) 때문에 이 탭이
   // 잠깐 가려졌다가 다시 보일 때마다("설치 마침"을 누르고 브라우저로 돌아왔을 때 포함) 다시
   // 시도한다 — 그래야 설치가 막 끝난 뒤 이 탭으로 돌아오기만 해도 새로고침 없이 자동으로
@@ -336,9 +434,14 @@ function renderInvitePageShell({ title, body, connectable, deepLink }) {
   // 아이폰·아이패드에서는 시도하지 않는다 — 설치형 앱이 없어서(웹 앱을 쓴다 — iphoneWebSection) tangotalk:// 주소를 열려고 하면
   // Safari가 "주소가 유효하지 않음" 경고창을 띄우고, 이 탭이 다시 보일 때마다 또 띄운다. 아이패드는 Safari가 Mac이라고
   // 알려 오는 경우가 있어 터치 지점 수로 가린다(Mac은 0).
+  //
+  // 지금 기기의 칸(platformColumns)에 .mine을 붙여 "지금 기기"로 표시한다 — 좁은 화면에서는 그 칸이 맨 위로 온다(CSS).
   const deepLinkScript = connectable
     ? `<script>
 var noInstalledApp = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+var myPlatform = noInstalledApp ? 'ios' : /Android/i.test(navigator.userAgent) ? 'android' : /Windows/i.test(navigator.userAgent) ? 'windows' : '';
+var myColumn = myPlatform && document.getElementById('pf-' + myPlatform);
+if (myColumn) myColumn.className += ' mine';
 function tryDeepLink() { if (noInstalledApp) return; try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {} }
 tryDeepLink();
 document.addEventListener('visibilitychange', function () {
@@ -387,12 +490,7 @@ export function renderInvitePage({ serverAddress, token, link, connectable, outs
         })}
         ${outside ? PUBLIC_WIFI_CAUTION : ''}
         <p class="hint">TangoTalk이 이미 설치되어 있다면 잠시 후 앱이 자동으로 열립니다. 반응이 없다면 아직 설치되지 않은 것이니, 아래에서 설치 파일을 받으세요.</p>
-        <div class="downloads">
-          <a class="btn" href="/invite/${token}/download/windows">Windows용 다운로드</a>
-          <a class="btn" href="/invite/${token}/download/android">Android용 다운로드</a>
-        </div>
-        ${iphoneWebSection(webUrl, { join, token })}
-        ${renderPostInstallSteps('서버 주소와 코드가 자동으로 입력됩니다.', { join })}
+        ${platformColumns({ basePath: '/invite', token, webUrl, join, subText: '서버 주소와 코드가 자동으로 입력됩니다.' })}
         <details>
           <summary>자동으로 안 되면 직접 입력하기</summary>
           <div class="field"><span>서버 주소</span><code id="addr">${escapeHtml(serverAddress)}</code></div>
@@ -428,17 +526,15 @@ export function renderTeamInvitePage({ serverAddress, token, link, connectable, 
         })}
         ${outside ? PUBLIC_WIFI_CAUTION : ''}
         <p class="hint">TangoTalk이 이미 설치되어 있다면 잠시 후 앱이 자동으로 열립니다. 반응이 없다면 아직 설치되지 않은 것이니, 아래에서 설치 파일을 받으세요.</p>
-        <div class="downloads">
-          <a class="btn" href="/team-invite/${token}/download/windows">Windows용 다운로드</a>
-          <a class="btn" href="/team-invite/${token}/download/android">Android용 다운로드</a>
-        </div>
-        ${iphoneWebSection(webUrl, { join, token })}
-        ${renderPostInstallSteps(
-          join
+        ${platformColumns({
+          basePath: '/team-invite',
+          token,
+          webUrl,
+          join,
+          subText: join
             ? `서버 주소와 코드가 자동으로 입력되고, 가입하면 ${escapeHtml(link.teamName)} 팀에 자동으로 들어갑니다.`
             : '서버 주소와 코드가 자동으로 입력됩니다.',
-          { join },
-        )}
+        })}
         <details>
           <summary>자동으로 안 되면 직접 입력하기</summary>
           <div class="field"><span>서버 주소</span><code id="addr">${escapeHtml(serverAddress)}</code></div>

@@ -73,6 +73,15 @@ void main() {
     expect(isRoomGoneFrom(session, 'r1'), isTrue);
   });
 
+  test('분할 패널(anyTeam)은 다른 팀으로 옮겨도 남고, 방이 사라지거나 숨겨질 때만 내려간다', () {
+    final session = buildSession();
+    session.enterTeam(session.teams.last);
+    expect(isRoomGoneFrom(session, 'r1', anyTeam: true), isFalse);
+    expect(isRoomGoneFrom(session, '없는방', anyTeam: true), isTrue);
+    session.rooms.first.hidden = true;
+    expect(isRoomGoneFrom(session, 'r1', anyTeam: true), isTrue);
+  });
+
   testWidgets('팀 전환 탭: 다른 팀 탭을 누르면 그 팀으로 바뀐다', (tester) async {
     final session = buildSession();
     await tester.pumpWidget(

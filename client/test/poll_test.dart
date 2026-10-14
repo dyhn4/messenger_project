@@ -1216,6 +1216,9 @@ void main() {
         expect(field('schedule-time-list'), findsOneWidget);
         expect(popup, findsOneWidget);
         final slot = field('schedule-slot-${15 * 60 + 30}');
+        // 목록은 지금 값 자리로 스크롤해 열린다 — 오후에 돌리면 3:30이 그보다 위라 먼저 맨 위로 올린다.
+        await tester.drag(field('schedule-time-list'), const Offset(0, 10000));
+        await tester.pumpAndSettle();
         await tester.scrollUntilVisible(
           slot,
           150,

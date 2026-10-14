@@ -76,11 +76,43 @@ test('공인 인증서가 걸려 있으면 설치 버튼 아래에 초대 코드
     assert.ok(box.includes(`<a class="btn btn-web" href="https://xxx.iptime.org/?invite=${TOKEN}">웹 앱 열기</a>`), name);
     assert.ok(box.indexOf('웹 앱 열기') < box.indexOf(IPHONE), name);
     assert.match(box, /PC·안드로이드도 됩니다/, name);
-    // 설치 버튼(Windows·Android) 다음, 설치 후 안내 앞 — "어느 기기로 쓰나"를 한 묶음으로 본다.
-    const downloads = html.indexOf('Android용 다운로드');
+    // 기기별 세 칸 — 왼쪽부터 Windows(다운로드·설치 후 안내), Android, 아이폰 순서다.
+    const windows = html.indexOf('id="pf-windows"');
+    const windowsSteps = html.indexOf('설치가 끝나면 이 페이지를 새로고침 하세요');
+    const android = html.indexOf('id="pf-android"');
+    const ios = html.indexOf('id="pf-ios"');
     const iphone = html.indexOf(IPHONE);
-    const steps = html.indexOf('설치가 끝나면 이 페이지를 새로고침 하세요');
-    assert.ok(downloads >= 0 && downloads < iphone && iphone < steps, name);
+    assert.ok(windows >= 0 && windows < html.indexOf('Windows용 다운로드') && windows < windowsSteps, name);
+    assert.ok(windowsSteps < android && android < html.indexOf('Android용 다운로드') && android < ios && ios < iphone, name);
+    // 아이폰 칸에는 앱을 닫아도 알림을 받는 조건도 같이 적는다.
+    const pushGuide = html.indexOf('앱을 닫아도 알림을 받으려면');
+    assert.ok(iphone < pushGuide, name);
+    assert.match(html.slice(pushGuide), /iOS 16\.4 이상/, name);
+    assert.match(html.slice(pushGuide), /앱을 닫아도 알림 받기\(푸시\)/, name);
+  }
+});
+
+test('Android 칸에는 설치 순서와 권한 설정 안내가 있다', () => {
+  setWebPublicUrl(null);
+  for (const [name, render] of pages) {
+    const html = render({ ...base, link: link(), connectable: true });
+    const android = html.slice(html.indexOf('id="pf-android"'), html.indexOf('id="pf-ios"'));
+    assert.match(android, /이 출처 허용/, name);
+    assert.match(android, /Play 프로텍트/, name);
+    assert.match(android, /onclick="tryDeepLink\(\)">TangoTalk 열기/, name);
+    for (const perm of ['알림', '카메라·마이크', '배터리', '전체 화면 알림', '앱 업데이트']) {
+      assert.ok(android.includes(`<li><b>${perm}</b>`), `${name} · ${perm}`);
+    }
+  }
+});
+
+test('웹 앱 주소가 없으면 아이폰 칸에 쓸 수 없다는 안내만 넣는다', () => {
+  setWebPublicUrl(null);
+  for (const [name, render] of pages) {
+    const html = render({ ...base, link: link(), connectable: true });
+    const ios = html.slice(html.indexOf('id="pf-ios"'));
+    assert.match(ios, /아이폰·아이패드에서는 쓸 수 없습니다/, name);
+    assert.ok(!ios.includes('앱을 닫아도 알림을 받으려면'), name);
   }
 });
 

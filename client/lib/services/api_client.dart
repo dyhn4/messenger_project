@@ -18,6 +18,7 @@ import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/message_reaction.dart';
 import '../models/message_reminder.dart';
+import '../models/todo.dart' show TodoPage;
 import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/project.dart';
@@ -3462,6 +3463,49 @@ class ApiClient {
   ) async => MessageReminder.fromJson(
     await _post('/api/messages/$messageId/reminders', {
           'remindAt': remindAt.millisecondsSinceEpoch,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 검색 패널의 "할 일" 탭 — [teamId] 팀에서 내가 참여한 대화방의 할 일 중 제목·설명에 [q]가 든 것(최근 만든 순, 완료 포함).
+  /// [roomId]·[assigneeId](담당자)로 좁힐 수 있다. 한 번에 [limit]건까지(서버 한도 100).
+  Future<TodoPage> searchTodos({
+    required String teamId,
+    required String q,
+    String? roomId,
+    String? assigneeId,
+    int limit = 100,
+  }) async {
+    final query = <String, String>{
+      'teamId': teamId,
+      'scope': 'team',
+      'includeDone': 'true',
+      'sort': 'created',
+      'limit': '$limit',
+      'q': q,
+      'roomId': ?roomId,
+      'assigneeId': ?assigneeId,
+    };
+    final qs = query.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    return TodoPage.fromJson(
+      Map<String, dynamic>.from(
+        await requestJson('GET', '/api/todos?$qs') as Map,
+      ),
+    );
+  }
+
+  /// 직접 만든 리마인더 걸기(메뉴의 "리마인더") — [remindAt]에 [teamId] 팀의 "나와의 대화"로 [text]를 알려 준다.
+  Future<MessageReminder> createReminder({
+    required String text,
+    required DateTime remindAt,
+    required String teamId,
+  }) async => MessageReminder.fromJson(
+    await _post('/api/reminders', {
+          'text': text,
+          'remindAt': remindAt.millisecondsSinceEpoch,
+          'teamId': teamId,
         })
         as Map<String, dynamic>,
   );

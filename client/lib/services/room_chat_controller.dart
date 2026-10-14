@@ -151,6 +151,11 @@ class RoomChatController extends ChangeNotifier {
   Session get session => _session;
   final Room room;
   final List<Message> messages = [];
+
+  /// 입력칸에 쓰다 만 글(서식·멘션 포함) — 다른 방에 갔다 와도 남아 있게, 입력칸(ChatInputBar)이
+  /// 사라질 때 여기에 맡겨 두고 다시 열 때 꺼낸다. 이 컨트롤러는 Session이 방마다 들고 있어서
+  /// 방을 옮겨도 남는다(앱을 껐다 켜면 사라진다). 비어 있으면 null.
+  ({String text, List<TextFormatRun>? format, List<Mention> mentions})? draft;
   bool loading = true;
   String? error;
   StreamSubscription? _readSub;
@@ -1148,9 +1153,7 @@ class RoomChatController extends ChangeNotifier {
           m.readAt == null &&
           manager != null &&
           signalLive) {
-        unawaited(
-          manager.noteLocalRead(m.id, Duration(seconds: selfDestruct)),
-        );
+        unawaited(manager.noteLocalRead(m.id, Duration(seconds: selfDestruct)));
       }
     }
   }

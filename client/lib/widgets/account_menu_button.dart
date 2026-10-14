@@ -9,7 +9,6 @@ import '../screens/settings_screen.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
 import 'compact_menu.dart';
-import 'message_reminders.dart';
 import 'my_avatar.dart';
 import 'user_status_dialogs.dart';
 
@@ -139,13 +138,6 @@ class AccountMenuButton extends StatelessWidget {
               : Icons.notifications_paused_outlined,
           label: myDndMenuLabel(session),
           onTap: () => showDndDialog(buttonContext, session),
-        ),
-        // 걸어 둔 메시지 리마인더("나중에 알림") — 보고 취소한다.
-        CompactMenu.item<void>(
-          context,
-          icon: Icons.alarm_outlined,
-          label: '리마인더',
-          onTap: () => showRemindersDialog(buttonContext, session),
         ),
         CompactMenu.divider,
         CompactMenu.item<void>(

@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../screens/calendar/calendar_screen.dart' show openCalendarScreen;
-import '../screens/inquiry_inbox_screen.dart';
 import '../screens/project/project_dialog.dart' show showProjectDialog;
 import '../screens/project/project_window.dart' show openProjectWindow;
 import '../services/app_platform.dart';
@@ -144,6 +143,17 @@ final menuEntries = <MenuEntry>[
     // 투표 목록 패널(상단의 "투표 만들기"로 만들기 창이 열린다) — PC는 오른쪽 패널, 모바일은 전체 화면.
     onOpen: (context, session) => openSidePanel(context, session, 'polls'),
   ),
+  MenuEntry(
+    key: 'reminder',
+    section: MenuSection.create,
+    label: '리마인더',
+    icon: const Icon(Icons.alarm_rounded),
+    color: const Color(0xFFE8590C),
+    background: const Color(0xFFFFE8D6),
+    order: 40,
+    // 내 리마인더 목록 패널(상단의 "+ 리마인더 생성"으로 만들기 창이 열린다) — PC는 오른쪽 패널, 모바일은 전체 화면.
+    onOpen: (context, session) => openSidePanel(context, session, 'reminders'),
+  ),
 
   // ── 리스트 ──
   MenuEntry(
@@ -253,6 +263,7 @@ final menuEntries = <MenuEntry>[
     color: const Color(0xFFB86A00),
     background: const Color(0xFFFFE7C2),
     order: 30,
-    onOpen: (context, session) => showInquiryInboxScreen(context, session),
+    // 받은 문의·보낸 문의 패널(상단의 "+ 팀장에게 문의하기"로 문의를 보낸다) — PC는 오른쪽 패널, 모바일은 전체 화면.
+    onOpen: (context, session) => openSidePanel(context, session, 'inquiries'),
   ),
 ];

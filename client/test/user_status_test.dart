@@ -9,6 +9,7 @@ import 'package:client/services/app_settings.dart';
 import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/team_members_panel.dart';
+import 'package:client/screens/my_profile_dialog.dart';
 import 'package:client/widgets/user_status_dialogs.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -270,13 +271,11 @@ void main() {
     expect(find.text('상태 설정'), findsNothing, reason: '저장하면 창이 닫힌다');
   });
 
-  testWidgets('방해 금지 창: 1시간 멈추기, 매일 일정 저장(기본 평일 19:00~08:00, 이 기기 시간대)', (
-    tester,
-  ) async {
+  /// 방해 금지 창을 여는 버튼 화면.
+  Future<void> pumpDndOpener(WidgetTester tester, Session session) async {
     tester.view.physicalSize = const Size(900, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    final session = buildSession(_FakeNotifications());
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -289,35 +288,310 @@ void main() {
         ),
       ),
     );
+  }
+
+  Future<void> openDnd(WidgetTester tester) async {
     await tester.tap(find.text('열기'));
     await tester.pumpAndSettle();
-    expect(find.text('지금은 알림을 받고 있습니다.'), findsOneWidget);
+  }
 
-    await tester.tap(find.byKey(const ValueKey('dnd-for-1시간')));
+  Future<void> saveDnd(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('dnd-save')));
     await tester.pumpAndSettle();
-    final first = jsonDecode(requests.last.body) as Map<String, dynamic>;
-    expect(first.keys, ['until']);
-    expect(
-      find.textContaining('🌙 방해 금지 중'),
-      findsOneWidget,
-      reason: '창이 바로 바뀐 상태를 보인다',
+    expect(find.text('방해 금지'), findsNothing, reason: '저장하면 창이 닫힌다');
+    await tester.pump(const Duration(seconds: 3)); // 알림 토스트가 사라질 때까지
+  }
+
+  testWidgets(
+    '방해 금지 창: 고르기만 해서는 바뀌지 않고 [저장]을 눌러야 적용된다 — 1시간 멈추기, 매일 일정(기본 평일 19:00~08:00, 이 기기 시간대)',
+    (tester) async {
+      final session = buildSession(_FakeNotifications());
+      await pumpDndOpener(tester, session);
+      await openDnd(tester);
+      expect(find.text('지금은 알림을 받고 있습니다.'), findsOneWidget);
+
+      // 고르기만 하면 아무것도 보내지 않고, 취소하면 그대로다.
+      await tester.tap(find.byKey(const ValueKey('dnd-for-1시간')));
+      await tester.pumpAndSettle();
+      expect(requests, isEmpty);
+      expect(find.text('[저장]을 누르면 적용됩니다.'), findsOneWidget);
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(requests, isEmpty);
+      expect(session.myDnd?.until, isNull);
+
+      await openDnd(tester);
+      await tester.tap(find.byKey(const ValueKey('dnd-for-1시간')));
+      await tester.pump();
+      final before = DateTime.now();
+      await saveDnd(tester);
+      final first = jsonDecode(requests.last.body) as Map<String, dynamic>;
+      expect(first.keys, ['until'], reason: '일정은 안 바꿨으니 보내지 않는다');
+      final until = DateTime.fromMillisecondsSinceEpoch(first['until'] as int);
+      expect(until.difference(before).inMinutes, inInclusiveRange(59, 60));
+
+      await openDnd(tester);
+      expect(find.textContaining('🌙 방해 금지 중'), findsOneWidget);
+      expect(find.byKey(const ValueKey('dnd-resume')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('dnd-schedule-switch')));
+      await tester.pump();
+      await saveDnd(tester);
+      final second = jsonDecode(requests.last.body) as Map<String, dynamic>;
+      expect(second.keys, ['schedule']);
+      expect(second['schedule'], {
+        'enabled': true,
+        'start': 19 * 60,
+        'end': 8 * 60,
+        'days': [1, 2, 3, 4, 5],
+        'offsetMinutes': DateTime.now().timeZoneOffset.inMinutes,
+      });
+    },
+  );
+
+  testWidgets('방해 금지 창: "지정"을 누르면 할 일 기간과 같은 달력·시간 칸이 펼쳐지고, 고른 날짜·시각까지 멈춘다', (
+    tester,
+  ) async {
+    final session = buildSession(_FakeNotifications());
+    await pumpDndOpener(tester, session);
+    await openDnd(tester);
+    expect(find.text('지정'), findsOneWidget);
+    expect(find.byKey(const ValueKey('dnd-custom-panel')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('dnd-custom')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('dnd-custom-panel')), findsOneWidget);
+    expect(find.text('언제까지 알림을 멈출까요?'), findsOneWidget);
+    expect(find.text('종료 시간'), findsOneWidget);
+
+    // 어제는 고를 수 없다(지난 날은 흐리고 눌리지 않는다).
+    final now = DateTime.now();
+    final yesterday = DateTime(now.year, now.month, now.day - 1);
+    if (yesterday.month == now.month) {
+      final cell = tester.widget<InkWell>(
+        find.byKey(
+          ValueKey(
+            'dnd-period-day-${yesterday.year}-${yesterday.month}-${yesterday.day}',
+          ),
+        ),
+      );
+      expect(cell.onTap, isNull);
+    }
+
+    // 내일(다음 달이면 › 로 넘겨서) → 시간 칸에서 오후 6:00.
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    if (tomorrow.month != now.month) {
+      await tester.tap(find.byKey(const ValueKey('dnd-period-next')));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(
+      find.byKey(
+        ValueKey(
+          'dnd-period-day-${tomorrow.year}-${tomorrow.month}-${tomorrow.day}',
+        ),
+      ),
     );
-    expect(find.byKey(const ValueKey('dnd-resume')), findsOneWidget);
-    await tester.pump(const Duration(seconds: 3));
-
-    await tester.tap(find.byKey(const ValueKey('dnd-schedule-switch')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('dnd-save-schedule')));
     await tester.pumpAndSettle();
-    final second = jsonDecode(requests.last.body) as Map<String, dynamic>;
-    expect(second.keys, ['schedule']);
-    expect(second['schedule'], {
-      'enabled': true,
-      'start': 19 * 60,
-      'end': 8 * 60,
-      'days': [1, 2, 3, 4, 5],
-      'offsetMinutes': DateTime.now().timeZoneOffset.inMinutes,
-    });
+    await tester.tap(find.byKey(const ValueKey('dnd-time-end')));
+    await tester.pumpAndSettle();
+    expect(find.text('시간 없음'), findsNothing, reason: '시각은 꼭 있어야 한다');
+    final option = find.byKey(const ValueKey('dnd-time-option-1080'));
+    await tester.scrollUntilVisible(
+      option,
+      72,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('dnd-time-list')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    // 목록 안에 만들어졌어도 보이는 칸 밖일 수 있어 화면에 보이게 맞춘다.
+    await tester.ensureVisible(option);
+    await tester.pumpAndSettle();
+    await tester.tap(option);
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty, reason: '고르기만 해서는 보내지 않는다');
+
+    final expected = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 18);
+    expect(find.text(untilLabel(expected)), findsOneWidget, reason: '칩에 고른 시각');
+    await saveDnd(tester);
+    final body = jsonDecode(requests.single.body) as Map<String, dynamic>;
+    expect(body.keys, ['until']);
+    expect(DateTime.fromMillisecondsSinceEpoch(body['until'] as int), expected);
+  });
+
+  testWidgets('방해 금지 창: 내용이 창보다 길면 스크롤바가 늘 보이고 창 오른쪽 끝에 붙는다', (tester) async {
+    final session = buildSession(_FakeNotifications());
+    await pumpDndOpener(tester, session);
+    tester.view.physicalSize = const Size(900, 500); // 내용이 다 안 들어가는 낮은 창
+    await tester.pump();
+    await openDnd(tester);
+
+    // 보이는 창(Dialog 안의 Material) — Dialog 위젯 자체는 화면 전체를 차지한다.
+    final dialog = tester.getRect(
+      find
+          .descendant(of: find.byType(Dialog), matching: find.byType(Material))
+          .first,
+    );
+    final bar = find.descendant(
+      of: find.byType(Dialog),
+      matching: find.byType(Scrollbar),
+    );
+    expect(bar, findsOneWidget);
+    final scrollbar = tester.widget<Scrollbar>(bar);
+    expect(scrollbar.thumbVisibility, isTrue);
+    expect(tester.getRect(bar).right, dialog.right, reason: '창 오른쪽 끝에 붙는다');
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(of: bar, matching: find.byType(Scrollable)),
+        )
+        .position;
+    expect(position.maxScrollExtent, greaterThan(0), reason: '스크롤할 내용이 있다');
+    // 맨 아래(매일 일정 요일)까지 스크롤해서 볼 수 있다.
+    await tester.drag(find.text('지금부터 알림 멈추기'), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(position.pixels, position.maxScrollExtent);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('상태 설정 창: [상태 지우기]는 비우기만 하고 [저장]을 눌러야 지워진다(취소하면 그대로)', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final session = buildSession(_FakeNotifications());
+    await session.setMyStatus(emoji: '🗓️', text: '회의 중', until: null);
+    requests.clear();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showStatusDialog(context, session),
+              child: const Text('열기'),
+            ),
+          ),
+        ),
+      ),
+    );
+    Future<void> open() async {
+      await tester.tap(find.text('열기'));
+      await tester.pumpAndSettle();
+    }
+
+    TextField field() => tester.widget<TextField>(find.byType(TextField));
+
+    await open();
+    expect(field().controller!.text, '회의 중');
+    expect(find.byKey(const ValueKey('status-clear-hint')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('status-clear')));
+    await tester.pump();
+    expect(requests, isEmpty, reason: '누르기만 해서는 지우지 않는다');
+    expect(field().controller!.text, isEmpty);
+    expect(find.byKey(const ValueKey('status-clear-hint')), findsOneWidget);
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const ValueKey('status-clear')))
+          .onPressed,
+      isNull,
+      reason: '이미 비웠다',
+    );
+    expect(find.text('상태 설정'), findsOneWidget, reason: '창은 열린 채');
+
+    // 취소하면 상태는 그대로다.
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(requests, isEmpty);
+    expect(session.myStatus?.label, '🗓️ 회의 중');
+
+    // 다시 열어 지우고 저장하면 지운다.
+    await open();
+    await tester.tap(find.byKey(const ValueKey('status-clear')));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '저장'));
+    await tester.pumpAndSettle();
+    final body = jsonDecode(requests.single.body) as Map<String, dynamic>;
+    expect(body['emoji'], isNull);
+    expect(body['text'], isNull);
+    expect(body['until'], isNull);
+    expect(session.myStatus, isNull);
+    expect(find.text('상태 설정'), findsNothing, reason: '저장하면 창이 닫힌다');
+  });
+
+  testWidgets('내 프로필 카드: 상태와 방해 금지 줄이 보이고, 누르면 그 창이 떠서 바꾸면 카드에 바로 보인다', (
+    tester,
+  ) async {
+    final session = buildSession(_FakeNotifications());
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => MyProfileDialog(session: session),
+              ),
+              child: const Text('열기'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+    final statusRow = find.byKey(const ValueKey('my-profile-status'));
+    final dndRow = find.byKey(const ValueKey('my-profile-dnd'));
+    expect(
+      find.descendant(of: statusRow, matching: find.text('상태 설정')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dndRow, matching: find.text('방해 금지')),
+      findsOneWidget,
+    );
+
+    // 상태 — 자주 쓰는 "회의 중"을 고르고 저장하면 카드에 이모지·글·지울 시각이 보인다.
+    await tester.tap(statusRow);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('status-preset-회의 중')));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '저장'));
+    await tester.pumpAndSettle();
+    expect(find.text('상태 설정'), findsNothing, reason: '상태 창은 닫히고');
+    expect(find.byType(MyProfileDialog), findsOneWidget, reason: '카드는 열린 채');
+    expect(
+      find.descendant(of: statusRow, matching: find.text('회의 중')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: statusRow, matching: find.text('🗓️')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: statusRow,
+        matching: find.text(untilLabel(session.myStatus!.until!)),
+      ),
+      findsOneWidget,
+    );
+
+    // 방해 금지 — 1시간 멈추기를 저장하면 카드 줄이 "방해 금지 · …까지"로 바뀐다.
+    await tester.tap(dndRow);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('dnd-for-1시간')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('dnd-save')));
+    await tester.pumpAndSettle();
+    expect(find.byType(MyProfileDialog), findsOneWidget);
+    expect(
+      find.descendant(
+        of: dndRow,
+        matching: find.text('방해 금지 · ${untilLabel(session.myDnd!.until!)}'),
+      ),
+      findsOneWidget,
+    );
     await tester.pump(const Duration(seconds: 3));
   });
 

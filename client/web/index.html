@@ -20,7 +20,14 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="TangoTalk 메신저">
-  <meta name="theme-color" content="#3F51B5">
+  <!-- 상태바(아이폰 홈 화면 웹 앱은 시계·배터리 줄 뒤)와 페이지 바탕은 앱 바탕색(테마 surface)과 같게 — 앱 바와 색이 다르면
+       iOS가 경계를 흐리게 섞어 뿌옇게 보인다. 뜬 뒤에는 앱이 지금 테마(라이트/다크)에 맞춰 바꾼다(lib/services/web_page_color.dart). -->
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FBF8FF">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121318">
+  <style>
+    html, body { background-color: #FBF8FF; }
+    @media (prefers-color-scheme: dark) { html, body { background-color: #121318; } }
+  </style>
 
   <!-- 아이폰 홈 화면에 추가했을 때 — 주소창 없는 독립 창으로 열리고(그래야 웹 푸시도 받는다), 이 이름·아이콘을 쓴다. -->
   <meta name="mobile-web-app-capable" content="yes">

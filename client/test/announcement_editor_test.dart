@@ -450,6 +450,9 @@ void main() {
         lessThanOrEqualTo(tester.getTopLeft(_key('schedule-time-box')).dy),
       );
       final slot = _key('schedule-slot-${15 * 60 + 30}');
+      // 목록은 지금 값 자리로 스크롤해 열린다 — 오후에 돌리면 3:30이 그보다 위라 먼저 맨 위로 올린다.
+      await tester.drag(list, const Offset(0, 10000));
+      await _settle(tester);
       await tester.scrollUntilVisible(
         slot,
         150,

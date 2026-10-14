@@ -2,8 +2,12 @@ import { and, asc, count, eq, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { messageReminders, messages } from '../schema.js';
 
-export async function insertReminder({ userId, messageId, roomId, remindAt }) {
-  const [row] = await db.insert(messageReminders).values({ userId, messageId, roomId, remindAt }).returning();
+/** 리마인더를 건다 — 메시지 리마인더는 [messageId]·[roomId], 직접 만든 리마인더는 [teamId]·[text]를 준다. */
+export async function insertReminder({ userId, messageId = null, roomId = null, teamId = null, text = null, remindAt }) {
+  const [row] = await db
+    .insert(messageReminders)
+    .values({ userId, messageId, roomId, teamId, text, remindAt })
+    .returning();
   return row;
 }
 
@@ -16,12 +20,15 @@ export async function countPendingReminders(userId) {
   return Number(row?.n ?? 0);
 }
 
-/** 아직 울리지 않은 내 리마인더 — 울릴 시각 순, 원본 메시지와 함께(목록 화면의 미리보기). */
+/**
+ * 아직 울리지 않은 내 리마인더 — 울릴 시각 순, 메시지 리마인더는 원본 메시지와 함께(목록 화면의 미리보기). 직접 만든 리마인더는
+ * [message]가 null이다.
+ */
 export function listPendingReminders(userId) {
   return db
     .select({ reminder: messageReminders, message: messages })
     .from(messageReminders)
-    .innerJoin(messages, eq(messages.id, messageReminders.messageId))
+    .leftJoin(messages, eq(messages.id, messageReminders.messageId))
     .where(and(eq(messageReminders.userId, userId), isNull(messageReminders.firedAt)))
     .orderBy(asc(messageReminders.remindAt));
 }

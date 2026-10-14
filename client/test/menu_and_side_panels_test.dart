@@ -23,6 +23,7 @@ import 'package:client/widgets/app_menu_button.dart';
 import 'package:client/widgets/chat_panel.dart';
 import 'package:client/widgets/menu_entries.dart';
 import 'package:client/widgets/notifications_panel.dart';
+import 'package:client/widgets/reminders_panel.dart';
 import 'package:client/widgets/side_panels.dart';
 import 'package:client/widgets/team_members_panel.dart';
 import 'package:client/widgets/todo_widgets.dart' show TodoViewMode;
@@ -173,8 +174,8 @@ void main() {
       for (final title in ['생성', '리스트', '툴']) {
         expect(find.text(title), findsOneWidget);
       }
-      // 묶음 안의 순서(order): 생성 10·30, 리스트 10·20·30·40·50, 툴 10·20·30.
-      final create = ['메시지 예약', '투표'];
+      // 묶음 안의 순서(order): 생성 10·30·40, 리스트 10·20·30·40·50, 툴 10·20·30.
+      final create = ['메시지 예약', '투표', '리마인더'];
       final list = ['파일', '즐겨찾기', '북마크', '링크', '내가 쓴 글'];
       final tools = ['캘린더', '프로젝트', '문의함'];
       expect(_readingOrder(tester, [...create].reversed.toList()), create);
@@ -183,13 +184,14 @@ void main() {
 
       // 묶음이 아래로 이어진다 — 생성 < 리스트 < 툴.
       double y(String text) => tester.getTopLeft(find.text(text)).dy;
-      expect(y('투표'), lessThan(y('리스트')));
+      expect(y('리마인더'), lessThan(y('리스트')));
       expect(y('링크'), lessThan(y('툴')));
 
       // 기존 키는 그대로다.
       for (final key in [
         'schedule',
         'poll',
+        'reminder',
         'files',
         'favorites',
         'bookmarks',
@@ -376,7 +378,7 @@ void main() {
     });
 
     test(
-      '기본으로 검색·파일·링크·앨범·할 일·메시지 예약·즐겨찾기·투표·내가 쓴 글·북마크·알림 센터·멤버·공지가 등록돼 있다',
+      '기본으로 검색·파일·링크·앨범·할 일·메시지 예약·리마인더·문의함·즐겨찾기·투표·내가 쓴 글·북마크·알림 센터·멤버·공지가 등록돼 있다',
       () {
         expect(sidePanelSpecs.map((s) => s.key), [
           'search',
@@ -385,6 +387,8 @@ void main() {
           'albums',
           'todos',
           'scheduled',
+          'reminders',
+          'inquiries',
           'favorites',
           'polls',
           'myposts',
@@ -503,6 +507,69 @@ void main() {
   });
 
   group('PC 홈 화면', () {
+    testWidgets('메뉴 생성의 리마인더는 오른쪽 리마인더 패널을 열고, 다시 누르면 닫는다', (tester) async {
+      final session = _session();
+      await _pumpDesktop(tester, session);
+      await _openMenuTile(tester, 'reminder');
+      expect(find.byType(RemindersPanel), findsOneWidget);
+      expect(find.byKey(const ValueKey('reminder-create')), findsOneWidget);
+      expect(find.byKey(const ValueKey('reminder-empty')), findsOneWidget);
+      await _openMenuTile(tester, 'reminder');
+      expect(find.byType(RemindersPanel), findsNothing);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+
+    testWidgets('대화창 분할은 패널을 여는 동안만 가려졌다가 닫으면 돌아오고, 다른 팀으로 옮겨도 남는다', (
+      tester,
+    ) async {
+      final session = _session(
+        rooms: [_topic('r1', '공지방'), _topic('r2', '개발방')],
+      );
+      session.teams.add(Team(id: 't2', name: '개발팀', createdAt: DateTime(2026)));
+      await _pumpDesktop(tester, session);
+      session.requestOpenRoom(session.roomById('r1')!);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('topic-row-r2')),
+          matching: find.text('개발방'),
+        ),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('대화창 분할하기'));
+      await tester.pumpAndSettle();
+      final split = find.byKey(const ValueKey('split-r2'));
+      expect(split, findsOneWidget);
+
+      // 알림 센터 — 분할 자리를 쓰다가 닫으면 분할이 돌아온다.
+      await tester.tap(find.byTooltip('알림 센터'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NotificationsPanel), findsOneWidget);
+      expect(split, findsNothing);
+      await tester.tap(find.byTooltip('알림 센터'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NotificationsPanel), findsNothing);
+      expect(split, findsOneWidget);
+
+      // 메뉴로 여는 패널도 같다.
+      await _openMenuTile(tester, 'favorites');
+      expect(find.byType(FavoritesScreen), findsOneWidget);
+      expect(split, findsNothing);
+      await _openMenuTile(tester, 'favorites');
+      expect(split, findsOneWidget);
+
+      // 다른 팀으로 옮기면 메인은 비지만 분할한 방은 남고, 어느 팀 방인지 헤더에 적힌다.
+      session.enterTeam(session.teams.last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('main-r1')), findsNothing);
+      expect(split, findsOneWidget);
+      expect(find.text('영업팀'), findsWidgets);
+      expect(tester.takeException(), isNull);
+      await _finish(tester);
+    });
+
     testWidgets('상단 툴바에는 캘린더·프로젝트 버튼이 없고 메뉴의 "툴"에 있다', (tester) async {
       final session = _session();
       await _pumpDesktop(tester, session);

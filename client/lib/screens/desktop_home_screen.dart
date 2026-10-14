@@ -52,11 +52,12 @@ const _sidePanelWidth = 420.0;
 /// 이 방을 채팅 패널에 계속 띄워둘 수 있는지 — 목록에서 사라졌거나(나가기), 숨겨졌거나
 /// (DM 숨기기), **다른 팀으로 전환**했으면 더는 보여줄 대상이 아니다. session.rooms는 모든
 /// 팀의 방을 다 들고 있어서 "사라졌는지"만 봐서는 팀 전환을 걸러내지 못한다.
+/// [anyTeam]이면 팀 전환은 보지 않는다 — "대화창 분할하기"로 열어 둔 방은 다른 팀으로 옮겨도 계속 띄워 둔다.
 @visibleForTesting
-bool isRoomGoneFrom(Session session, String roomId) {
+bool isRoomGoneFrom(Session session, String roomId, {bool anyTeam = false}) {
   final match = session.rooms.where((r) => r.id == roomId);
   if (match.isEmpty || match.first.hidden) return true;
-  return match.first.teamId != session.currentTeam?.id;
+  return !anyTeam && match.first.teamId != session.currentTeam?.id;
 }
 
 class DesktopHomeScreen extends StatefulWidget {
@@ -82,6 +83,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
 
   // "대화창 분할하기"(방 목록 우클릭 메뉴)로 연 두 번째 채팅 패널 — 오른쪽에 나란히 뜬다.
   // _selectedRoom과 같은 방이면 분할할 의미가 없으므로 _effectiveSplitRoom에서 걸러진다.
+  // 사용자가 닫거나(✕) 방이 사라질 때까지 남는다 — 다른 팀으로 옮겨도, 오른쪽 패널·캘린더를 여는
+  // 동안 잠깐 가려졌다가 닫으면 다시 보인다.
   Room? _splitRoom;
 
   /// 오른쪽에 열려 있는 패널의 키(side_panels.dart의 SidePanelSpec.key — 검색·파일·링크·즐겨찾기·알림 센터·멤버 …).
@@ -126,7 +129,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     );
   }
 
-  /// [key] 패널을 연다(이미 열려 있는 패널은 새로 시작). 다른 오른쪽 패널과 댓글 스레드·분할 패널은 닫는다.
+  /// [key] 패널을 연다(이미 열려 있는 패널은 새로 시작). 다른 오른쪽 패널과 댓글 스레드는 닫는다. 분할 패널은
+  /// 닫지 않고 패널이 열려 있는 동안만 가려 둔다([_effectiveSplitRoom]) — 패널을 닫으면 다시 보인다.
   void _showPanel(String key, {Room? room}) {
     _leavePanelThen(
       () => setState(() {
@@ -135,7 +139,6 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
         _panelGeneration++;
         _threadMessage = null;
         _threadRoom = null;
-        _splitRoom = null;
       }),
     );
   }
@@ -195,13 +198,12 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     });
   }
 
-  /// 캘린더 — 사이드바+채팅 자리를 캘린더로 바꾼다. 한 번 더 누르거나 방을 고르면 돌아온다.
+  /// 캘린더 — 사이드바+채팅 자리를 캘린더로 바꾼다. 한 번 더 누르거나 방을 고르면 돌아온다(분할 패널도 같이 돌아온다).
   void _toggleCalendar() => setState(() {
     _calendarOpen = !_calendarOpen;
     if (_calendarOpen) {
       _threadMessage = null;
       _threadRoom = null;
-      _splitRoom = null;
     }
   });
 
@@ -214,9 +216,12 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
   List<PositionOption>? _positionOptions;
 
   /// _splitRoom이 메인과 같은 방을 가리키면(예: 분할해둔 방을 방금 메인으로도 선택함) 굳이
-  /// 같은 방을 두 번 그리지 않는다.
+  /// 같은 방을 두 번 그리지 않는다. 오른쪽 패널(검색/멤버/파일/링크/즐겨찾기/알림 센터 …)이 열려 있는 동안도
+  /// 가린다 — 한 화면에 다 욱여넣으면 너무 좁아져서 패널이 그 자리를 잠깐 쓰고, 닫으면 다시 보인다.
   Room? get _effectiveSplitRoom =>
-      _splitRoom != null && _splitRoom!.id != _selectedRoom?.id
+      _splitRoom != null &&
+          _splitRoom!.id != _selectedRoom?.id &&
+          _panelKey == null
       ? _splitRoom
       : null;
 
@@ -268,8 +273,8 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
 
   /// 방 목록 우클릭 메뉴의 "대화창 분할하기" — 이미 메인에 열려 있는 방이면 아무 것도 안 한다
   /// (같은 방을 두 번 그릴 이유가 없다). 오른쪽 패널(검색/멤버/파일/링크/즐겨찾기/알림 센터)과는 서로 자리를
-  /// 다투므로(한 화면에 다 욱여넣으면 너무 좁아짐) 서로 배타적으로 만든다 —
-  /// 분할 패널을 열면 오른쪽 패널을 닫고, 오른쪽 패널을 열면(_showPanel) 분할 패널을 닫는다.
+  /// 다투므로(한 화면에 다 욱여넣으면 너무 좁아짐) 한 번에 하나만 보인다 —
+  /// 분할 패널을 열면 오른쪽 패널을 닫고, 오른쪽 패널을 열면(_showPanel) 그동안 분할 패널을 가린다.
   void _openSplitRoom(Room room) {
     if (room.id == _selectedRoom?.id) return;
     _leavePanelThen(
@@ -360,12 +365,17 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
     // 메인/분할/스레드가 가리키던 방이 목록에서 사라졌거나(예: 그룹/토픽 나가기) 숨겨졌으면
     // (평문 DM 숨기기/나가기 — 멤버십은 그대로 두고 hidden만 켜므로 rooms 목록엔 남아있다)
     // 그 패널을 비운다. 셋은 서로 다른 방일 수 있어(분할 패널 도입) 각자 따로 확인한다.
+    // 분할 패널(과 거기서 연 댓글)은 다른 팀으로 옮겨도 남긴다 — 방이 사라지거나 숨겨질 때만 닫는다.
     final selected = _selectedRoom;
     final split = _splitRoom;
     final thread = _threadRoom;
     final selectedGone = selected != null && _isRoomGone(selected.id);
-    final splitGone = split != null && _isRoomGone(split.id);
-    final threadGone = thread != null && _isRoomGone(thread.id);
+    final splitGone =
+        split != null &&
+        isRoomGoneFrom(widget.session, split.id, anyTeam: true);
+    final threadGone =
+        thread != null &&
+        (thread.id == split?.id ? splitGone : _isRoomGone(thread.id));
     if (selectedGone || splitGone || threadGone) {
       setState(() {
         if (selectedGone) _selectedRoom = null;
@@ -696,6 +706,13 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
         : null;
     final chips = topicStatusChips(room);
     final description = roomHeaderDescription(room);
+    // 분할 패널은 다른 팀으로 옮겨도 남아 있어서(_splitRoom) 지금 팀의 방이 아니면 어느 팀 방인지 적어 둔다.
+    final otherTeamName = room.teamId == widget.session.currentTeam?.id
+        ? null
+        : widget.session.teams
+              .where((t) => t.id == room.teamId)
+              .firstOrNull
+              ?.name;
     final nameRow = Row(
       children: [
         Flexible(
@@ -709,6 +726,20 @@ class _DesktopHomeScreenState extends State<DesktopHomeScreen> {
           ),
         ),
         if (room.isPrivateTopic) const PrivateTopicLock(size: 16),
+        if (otherTeamName != null)
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text(
+                otherTeamName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).hintColor,
+                ),
+              ),
+            ),
+          ),
         // 칩은 한 줄로만 — 대화 칸이 좁으면(오른쪽 패널을 연 좁은 창 등) 안 들어가는 칩은
         // 다음 줄로 넘어가서 잘려 안 보인다(이름을 밀어내거나 넘치지 않게).
         if (chips.isNotEmpty)

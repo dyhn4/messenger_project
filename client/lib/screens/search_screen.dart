@@ -7,6 +7,7 @@ import '../models/app_user.dart';
 import '../models/file_category.dart';
 import '../models/poll.dart' show pollPreviewText;
 import '../models/room.dart';
+import '../models/todo.dart';
 import '../services/api_client.dart';
 import '../services/session.dart';
 import '../widgets/filter_dropdown.dart';
@@ -19,21 +20,29 @@ import '../widgets/private_topic_lock.dart';
 import '../widgets/room_avatar.dart';
 import '../widgets/room_options_menu.dart' show TopicBadge;
 import '../widgets/search_result_parts.dart';
+import '../widgets/todo_widgets.dart' show todoProgressColor;
+import '../widgets/todos_panel.dart' show openTodoInPanel;
 import 'chat_screen.dart';
 
-/// 검색 패널의 종류 탭 — 전체 / 메시지 / 투표 / 파일(꺽쇠로 파일 형식) / 대화방(내가 멤버인 방의 이름).
-/// 전체 탭은 메시지·투표·파일에 더해 이름이 맞는 대화방 몇 개를 맨 위 묶음으로 보여 준다.
-enum SearchType { all, message, poll, file, room }
+/// 검색 패널의 종류 탭 — 전체 / 메시지 / 투표 / 할 일 / 파일(꺽쇠로 파일 형식) / 대화방(내가 멤버인 방의 이름).
+/// 전체 탭은 메시지·투표·파일에 더해 이름이 맞는 대화방 몇 개를 맨 위 묶음으로 보여 준다. 할 일 탭은 메시지가 아니라
+/// 할 일 자체(제목·설명 — 대화방에 알리지 않은 할 일도)를 찾는다.
+enum SearchType { all, message, poll, todo, file, room }
 
 extension on SearchType {
-  /// 서버 `type` 값 — 전체는 안 보낸다. 대화방은 메시지 검색이 아니라 따로(/api/search/rooms) 찾는다.
+  /// 서버 `type` 값 — 전체는 안 보낸다. 대화방(/api/search/rooms)과 할 일(/api/todos?q=)은 메시지 검색이 아니라 따로 찾는다.
   String? get apiValue =>
-      this == SearchType.all || this == SearchType.room ? null : name;
+      this == SearchType.all ||
+          this == SearchType.room ||
+          this == SearchType.todo
+      ? null
+      : name;
 }
 
 /// 탭 줄에 검색 범위 단추(현재 팀 ⌄)까지 한 줄로 두려면 필요한 최소 폭 — 이보다 좁으면(휴대폰 등) 단추를
-/// `결과 N건` 줄 오른쪽으로 옮긴다. 5개 탭(대화방 포함) + 범위 단추 + 정렬 단추가 가로 스크롤 없이 들어가는 폭.
-const _scopeInlineMinWidth = 388.0;
+/// `결과 N건` 줄 오른쪽으로 옮긴다. 6개 탭(할 일·대화방 포함) + 범위 단추 + 정렬 단추가 가로 스크롤 없이 들어가는 폭
+/// — 모자라면 탭 줄이 가로로 밀려 끝의 "대화방"이 범위 단추에 가린다.
+const _scopeInlineMinWidth = 440.0;
 
 /// 한 번에 받아 오는 결과 수 — 넘치면 "결과 N건"의 N은 전체 건수이고 목록은 앞의 이만큼만 보인다.
 const searchFetchLimit = 500;
@@ -66,6 +75,7 @@ class _SearchScreenState extends State<SearchScreen> {
   final _listScrollController = ScrollController();
   List<SearchResult>? _results;
   List<RoomSearchResult>? _roomResults; // 대화방 탭의 결과(메시지 결과와 둘 중 하나만 있다).
+  List<Todo>? _todoResults; // 할 일 탭의 결과(위 둘과 셋 중 하나만 있다).
   // 전체 탭 맨 위 "대화방" 묶음 — 이름이 맞는 방 몇 개와 전체 건수(더 보기 → 대화방 탭). 못 받아 오면 비운다.
   List<RoomSearchResult> _roomPreview = const [];
   int _roomPreviewTotal = 0;
@@ -150,6 +160,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _results = null;
         _roomResults = null;
+        _todoResults = null;
         _roomPreview = const [];
         _roomPreviewTotal = 0;
         _loading = false;
@@ -179,12 +190,17 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() {
           _roomResults = page.items;
           _results = null;
+          _todoResults = null;
           _roomPreview = const [];
           _roomPreviewTotal = 0;
           _resultAllTeams = allTeams;
           _total = page.total;
           _page = 0;
         });
+        return;
+      }
+      if (_type == SearchType.todo) {
+        await _searchTodos(q, seq, teamId: teamId, allTeams: allTeams);
         return;
       }
       // 전체 탭은 이름이 맞는 대화방도 맨 위에 몇 개 보여 준다 — 메시지 검색과 함께(동시에) 받는다. 방·멤버로
@@ -211,6 +227,7 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() {
         _results = page.items;
         _roomResults = null;
+        _todoResults = null;
         _roomPreview = rooms?.items ?? const [];
         _roomPreviewTotal = rooms?.total ?? 0;
         _resultAllTeams = allTeams;
@@ -223,6 +240,59 @@ class _SearchScreenState extends State<SearchScreen> {
     } finally {
       if (mounted && seq == _requestSeq) setState(() => _loading = false);
     }
+  }
+
+  /// 할 일 탭 — 고른 팀(모든 팀이면 가입한 팀마다)에서 제목·설명에 [q]가 든 할 일을 찾는다. 참여 대화방 필터는 그 방,
+  /// 멤버 필터는 담당자로 좁히고, 기간 필터는 만든 날로 거른다. 정렬은 만든 날 순(최신/과거).
+  Future<void> _searchTodos(
+    String q,
+    int seq, {
+    required String teamId,
+    required bool allTeams,
+  }) async {
+    final api = widget.session.api!;
+    final teamIds = allTeams
+        ? [for (final t in widget.session.teams) t.id]
+        : [teamId];
+    final pages = await Future.wait([
+      for (final id in teamIds)
+        api.searchTodos(
+          teamId: id,
+          q: q,
+          roomId: _roomId,
+          assigneeId: _senderId,
+        ),
+    ]);
+    if (!mounted || seq != _requestSeq) return;
+    final since = _period.since();
+    final until = _period.until;
+    final items = [
+      for (final page in pages)
+        for (final t in page.items)
+          if ((since == null || !t.createdAt.isBefore(since)) &&
+              (until == null || !t.createdAt.isAfter(until)))
+            t,
+    ];
+    items.sort(
+      (a, b) => _newestFirst
+          ? b.createdAt.compareTo(a.createdAt)
+          : a.createdAt.compareTo(b.createdAt),
+    );
+    // 기간으로 거르지 않았으면 서버가 센 전체 개수(한 번에 받는 100건을 넘어도), 걸렀으면 남은 수.
+    final filtered = since != null || until != null;
+    final total = filtered
+        ? items.length
+        : pages.fold<int>(0, (n, p) => n + (p.total ?? p.items.length));
+    setState(() {
+      _todoResults = items;
+      _results = null;
+      _roomResults = null;
+      _roomPreview = const [];
+      _roomPreviewTotal = 0;
+      _resultAllTeams = allTeams;
+      _total = total;
+      _page = 0;
+    });
   }
 
   /// 가입한 팀이 둘 이상일 때만 검색 범위 단추가 있다.
@@ -530,7 +600,7 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  /// 필터 줄 아래 — `전체 | 메시지 | 투표 | 파일 ⌄ | 대화방` 탭과 맨 오른쪽 정렬 단추. 검색 전에도 늘 보인다.
+  /// 필터 줄 아래 — `전체 | 메시지 | 투표 | 할 일 | 파일 ⌄ | 대화방` 탭과 맨 오른쪽 정렬 단추. 검색 전에도 늘 보인다.
   /// [scope]는 정렬 단추 왼쪽에 둘 검색 범위 단추(자리가 모자라거나 팀이 하나면 null).
   Widget _buildTypeBar(BuildContext context, Widget? scope) {
     return Padding(
@@ -559,6 +629,12 @@ class _SearchScreenState extends State<SearchScreen> {
                     label: '투표',
                     selected: _type == SearchType.poll,
                     onTap: () => _selectType(SearchType.poll),
+                  ),
+                  PanelTab(
+                    key: const ValueKey('search-tab-todo'),
+                    label: '할 일',
+                    selected: _type == SearchType.todo,
+                    onTap: () => _selectType(SearchType.todo),
                   ),
                   PanelTab(
                     key: const ValueKey('search-tab-file'),
@@ -599,8 +675,12 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget _buildResults(BuildContext context, Widget? scope) {
     final roomResults = _roomResults;
     final messageResults = _results;
+    final todoResults = _todoResults;
     final isRooms = roomResults != null;
-    if (_loading || _error != null || (messageResults == null && !isRooms)) {
+    final isTodos = todoResults != null;
+    if (_loading ||
+        _error != null ||
+        (messageResults == null && !isRooms && !isTodos)) {
       // 결과가 아직 없을 때(검색 전·검색 중·오류)는 탭 줄 아래를 옅은 회색으로 칠해 위의 검색 도구와 나눈다 — 메시지 예약·
       // 할 일 패널의 목록 바탕과 같은 색.
       final theme = Theme.of(context);
@@ -616,6 +696,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Text(switch (_type) {
                   SearchType.room => '내가 참여 중인 토픽·그룹채팅·채팅의 이름을 검색합니다.',
+                  SearchType.todo => '참여한 대화방의 할 일을 제목·설명으로 검색합니다.',
                   SearchType.all => '대화방 이름과 메시지·파일을 검색합니다.',
                   _ => '내가 속한 모든 방을 대상으로 검색합니다.',
                 }, textAlign: TextAlign.center),
@@ -636,9 +717,15 @@ class _SearchScreenState extends State<SearchScreen> {
         ],
       );
     }
-    final count = isRooms ? roomResults.length : messageResults!.length;
+    final count = isRooms
+        ? roomResults.length
+        : isTodos
+        ? todoResults.length
+        : messageResults!.length;
     // 전체 탭 맨 위의 대화방 묶음 — 결과 N건에도 더한다(더 보기로 대화방 탭에서 다 볼 수 있어 "표시"에도 넣는다).
-    final preview = isRooms ? const <RoomSearchResult>[] : _roomPreview;
+    final preview = isRooms || isTodos
+        ? const <RoomSearchResult>[]
+        : _roomPreview;
     final roomTotal = preview.isEmpty ? 0 : _roomPreviewTotal;
     final total = _total + roomTotal;
     final shown = count + roomTotal;
@@ -767,6 +854,17 @@ class _SearchScreenState extends State<SearchScreen> {
                     query: query,
                     showTeam: _resultAllTeams,
                     onTap: () => _openRoomResult(item),
+                  );
+                }
+                if (isTodos) {
+                  final todo = todoResults[start + i];
+                  return _TodoResultRow(
+                    key: ValueKey('search-todo-${todo.id}'),
+                    todo: todo,
+                    session: widget.session,
+                    query: query,
+                    showTeam: _resultAllTeams,
+                    onTap: () => openTodoInPanel(context, widget.session, todo),
                   );
                 }
                 final item = messageResults![start + i];
@@ -928,6 +1026,107 @@ class _SearchResultRow extends StatelessWidget {
     int? maxLines,
     TextStyle? style,
   }) => highlightedText(context, text, query, maxLines: maxLines, style: style);
+}
+
+/// 할 일 검색 결과 한 건 — 대화방 이름(+모든 팀이면 팀 칩), "할 일" 표시와 굵은 제목, 설명 두 줄(검색어는 칠한다), 그 아래
+/// 작은 글씨로 진행률 · 일정 · 만든 사람. 누르면 그 할 일의 상세(PC는 할 일 패널 안).
+class _TodoResultRow extends StatelessWidget {
+  final Todo todo;
+  final Session session;
+  final String query;
+  final bool showTeam;
+  final VoidCallback onTap;
+  const _TodoResultRow({
+    super.key,
+    required this.todo,
+    required this.session,
+    required this.query,
+    required this.showTeam,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final room = session.roomById(todo.roomId);
+    final roomName =
+        room?.displayName(session.userId ?? '') ?? todo.roomName ?? '';
+    final teamName = showTeam
+        ? session.teams.where((t) => t.id == todo.teamId).firstOrNull?.name
+        : null;
+    final description = todo.description?.trim() ?? '';
+    final small = theme.textTheme.labelSmall?.copyWith(color: hint);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    roomName,
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                if (teamName != null && teamName.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  TeamNameChip(name: teamName),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const ResultKindBadge('할 일'),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: highlightedText(
+                    context,
+                    todo.title,
+                    query,
+                    maxLines: 1,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              highlightedText(context, description, query, maxLines: 2),
+            ],
+            const SizedBox(height: 4),
+            Text.rich(
+              TextSpan(
+                style: small,
+                children: [
+                  const TextSpan(text: '진행률 '),
+                  TextSpan(
+                    text: '${todo.progress}%',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: todoProgressColor(context, todo.progress),
+                    ),
+                  ),
+                  TextSpan(text: ' · 일정: ${todo.periodText ?? '없음'}'),
+                  if (todo.creator != null)
+                    TextSpan(text: ' · ${todo.creator!.name}'),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// 전체 탭 결과 목록의 묶음 머리줄 — `대화방 5 … 더 보기 ›` / `메시지 383`. 옅은 바탕으로 묶음을 나눈다.

@@ -1,4 +1,3 @@
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -166,21 +165,8 @@ Future<void> downloadTodoAttachments(
     duration: const Duration(seconds: 4),
   );
   final folder = summary.folder;
+  // 저장한 폴더(다른 폴더를 골랐으면 그 폴더)를 연다 — 안드로이드는 열지 않는다(토스트에 경로가 있다).
   if (summary.saved > 0 && settings.openFolderAfterDownload && folder != null) {
-    await _openFolder(folder);
-  }
-}
-
-/// 저장한 폴더를 탐색기로 연다(Windows만) — 설정의 openDownloadFolder는 설정 폴더만 열어서, 다른 폴더를 골랐을 때도
-/// 받은 파일이 있는 곳이 열리게 직접 연다. 안드로이드는 폴더를 열지 않는다(토스트에 경로가 있다).
-Future<void> _openFolder(String folder) async {
-  if (!AppPlatform.isWindows) return;
-  try {
-    // 이름만 주면 현재 폴더에 심어 둔 explorer.exe가 대신 실행될 수 있어 전체 경로로 부른다(download_storage.dart와 같은
-    // 방식 — 검토 S32). 받을 폴더는 사용자가 직접 고른 곳이라 UNC여도 따로 묻지 않는다.
-    final root = AppPlatform.environment['SystemRoot'] ?? r'C:\Windows';
-    await Process.start('$root\\explorer.exe', [folder]);
-  } catch (_) {
-    // 못 열어도 파일은 이미 저장돼 있다.
+    await settings.openDownloadFolder(folder);
   }
 }

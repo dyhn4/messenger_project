@@ -750,6 +750,13 @@
       "when": 1791944875983,
       "tag": "0106_external_calendars",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1791960696379,
+      "tag": "0107_memo_reminders",
+      "breakpoints": true
     }
   ]
 }

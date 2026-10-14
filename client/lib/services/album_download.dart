@@ -138,7 +138,8 @@ Future<void> downloadAlbumItems(
       ? '다운로드하지 못했습니다.'
       : '${summary.saved}개를 다운로드했습니다. ${summary.failed}개는 실패했습니다.$where';
   showAppToastOnOverlay(overlay, message, duration: const Duration(seconds: 4));
+  // 폴더 선택 창에서 고른 곳(설정 폴더가 아닐 수 있다)을 연다.
   if (summary.saved > 0 && session.settings.openFolderAfterDownload) {
-    await session.settings.openDownloadFolder();
+    await session.settings.openDownloadFolder(summary.folder);
   }
 }

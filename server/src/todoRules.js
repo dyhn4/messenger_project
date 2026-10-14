@@ -11,6 +11,8 @@ export const TODO_ATTACHMENTS_MAX = 30;
 export const TODO_REMINDERS_MAX = 5;
 export const TODO_LIST_DEFAULT_LIMIT = 30;
 export const TODO_LIST_MAX_LIMIT = 100;
+/** 목록 검색어(q — 검색 패널의 "할 일" 탭) 길이 상한. */
+export const TODO_SEARCH_MAX = 100;
 // 기간(from~to)으로 받을 때(달력 보기) — 한 번에 최대 100일(양 끝 포함), 그 대신 limit을 500까지 올려 한 번에 받는다.
 export const TODO_RANGE_MAX_DAYS = 100;
 export const TODO_RANGE_MAX_LIMIT = 500;
@@ -951,10 +953,19 @@ export function progressPerspective({ scope, assigneeId, userId }) {
  * 아니면 `{ error }`. assigneeId(선택)는 그 사람이 담당자인 것만 — 어떤 scope에도 걸 수 있다. from/to(선택)는 기간이
  * 겹치는 것만(parseTodoRange) — 이때는 limit을 500까지 받는다(없으면 100까지). 정렬이 "즐겨찾기 먼저·미완료 먼저·
  * 마감 임박순·생성순"의 복합 키라 커서 대신 offset으로 이어 받는다(다른 목록의 before와 다른 점).
+ * q(선택 — 검색 패널의 "할 일" 탭)는 제목·설명에 그 글이 든 것만(대소문자 무시) — 앞뒤 공백을 떼고 소문자로, 비면 null,
+ * [TODO_SEARCH_MAX]자가 넘으면 오류.
  */
 export function parseTodoListQuery(query) {
   const teamId = typeof query?.teamId === 'string' ? query.teamId : '';
   if (!isUuid(teamId)) return { error: 'teamId가 필요합니다.' };
+  let q = null;
+  if (query?.q !== undefined && query.q !== '') {
+    if (typeof query.q !== 'string') return { error: 'q가 올바르지 않습니다.' };
+    const trimmed = query.q.trim().toLowerCase();
+    if (graphemeLength(trimmed) > TODO_SEARCH_MAX) return { error: `검색어는 ${TODO_SEARCH_MAX}자 이내로 입력하세요.` };
+    q = trimmed || null;
+  }
   const scope = typeof query?.scope === 'string' && query.scope ? query.scope : 'mine';
   if (!TODO_SCOPES.includes(scope)) return { error: `scope는 ${TODO_SCOPES.join('|')} 중 하나여야 합니다.` };
   const sort = typeof query?.sort === 'string' && query.sort ? query.sort : 'due';
@@ -995,6 +1006,7 @@ export function parseTodoListQuery(query) {
     includeDone,
     roomId,
     assigneeId,
+    q,
     from: range.value?.from ?? null,
     to: range.value?.to ?? null,
     sort,

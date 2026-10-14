@@ -12,6 +12,8 @@ export const REMINDER_MAX_PENDING = 100;
 export const REMINDER_PREVIEW_MAX = 200;
 /** "나와의 대화"에 올리는 리마인더 글 — 방 목록 미리보기·푸시에도 이 글이 보인다. */
 export const REMINDER_BOT_TEXT_PREFIX = '⏰ 리마인더';
+/** 직접 만든 리마인더 글 길이(화면에 보이는 글자). */
+export const REMINDER_TEXT_MAX = 200;
 
 /** 울릴 시각 입력(ms) — `{ value: Date }` 또는 `{ error }`. */
 export function parseRemindAt(raw, nowMs) {
@@ -19,6 +21,25 @@ export function parseRemindAt(raw, nowMs) {
   if (raw < nowMs + REMIND_MIN_AHEAD_MS) return { error: '알림 시각은 1분 뒤부터 정할 수 있습니다.' };
   if (raw > nowMs + REMIND_MAX_AHEAD_MS) return { error: '알림 시각은 1년 안으로만 정할 수 있습니다.' };
   return { value: new Date(raw) };
+}
+
+/**
+ * 직접 만든 리마인더의 글 — 앞뒤 공백을 떼고 1~[REMINDER_TEXT_MAX]자. 줄바꿈은 받되(여러 줄 메모) 그 밖의 제어 문자는 받지
+ * 않는다. `{ value }` 또는 `{ error }`.
+ */
+export function parseReminderText(raw) {
+  if (typeof raw !== 'string') return { error: '알려 드릴 내용을 입력하세요.' };
+  const text = raw.replace(/\r\n?/g, '\n').trim();
+  if (!text) return { error: '알려 드릴 내용을 입력하세요.' };
+  if (/[\u0000-\u0009\u000b-\u001f\u007f]/.test(text)) return { error: '내용에 쓸 수 없는 문자가 있습니다.' };
+  const length = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(text)].length;
+  if (length > REMINDER_TEXT_MAX) return { error: `내용은 ${REMINDER_TEXT_MAX}자까지 쓸 수 있습니다.` };
+  return { value: text };
+}
+
+/** 직접 만든 리마인더가 울릴 때 "나와의 대화"에 올리는 글 — "⏰ 리마인더 — 15시 회의 자료 보내기". */
+export function memoReminderBotText(text) {
+  return `${REMINDER_BOT_TEXT_PREFIX} — ${text}`;
 }
 
 /**

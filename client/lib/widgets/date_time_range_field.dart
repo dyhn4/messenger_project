@@ -139,7 +139,6 @@ enum _TimeSide { start, end }
 class DateTimeRangeFieldState extends State<DateTimeRangeField>
     with WidgetsBindingObserver {
   final _overlay = OverlayPortalController();
-  final _link = LayerLink();
 
   /// 판을 열 때 포커스를 이 칸으로 옮긴다 — 글을 쓰던 중이면 휴대폰 화상 키보드가 내려가서 펼친 판을 가리지 않고, Esc가
   /// 이 칸으로 온다.
@@ -294,14 +293,14 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
       canRequestFocus: false,
       skipTraversal: true,
       onKeyEvent: _onKey,
-      child: OverlayPortal(
+      // 판 자리는 레이아웃 때 칸의 자리(info)로 정한다 — CompositedTransformFollower(그릴 때 자리가 정해짐)로 따라붙이면
+      // 판 안의 툴팁(‹ 이전 달 등 — 툴팁도 레이아웃 때 자리를 잰다)이 자리를 못 재서, 마우스를 올렸다 떼면
+      // "'debugNeedsLayout': is not true" 오류가 났다.
+      child: OverlayPortal.overlayChildLayoutBuilder(
         controller: _overlay,
         overlayLocation: OverlayChildLocation.rootOverlay,
         overlayChildBuilder: _buildPopupLayer,
-        child: CompositedTransformTarget(
-          link: _link,
-          child: _buildField(context),
-        ),
+        child: _buildField(context),
       ),
     );
   }
@@ -389,8 +388,13 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
     );
   }
 
-  /// 창 전체를 덮는 투명한 막(누르면 닫힘 — 그 누름은 아래로 가지 않는다)과 칸에 붙어 따라다니는 판.
-  Widget _buildPopupLayer(BuildContext context) {
+  /// 창 전체를 덮는 투명한 막(누르면 닫힘 — 그 누름은 아래로 가지 않는다)과 칸에 붙어 따라다니는 판. 판은 칸 아래(위로
+  /// 펼치면 칸 위)에 왼쪽 끝을 맞추고, [_place]가 정한 만큼 옮긴다.
+  Widget _buildPopupLayer(BuildContext context, OverlayChildLayoutInfo info) {
+    final field = MatrixUtils.transformRect(
+      info.childPaintTransform,
+      Offset.zero & info.childSize,
+    );
     return Stack(
       children: [
         Positioned.fill(
@@ -400,16 +404,11 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
             onTap: hidePopup,
           ),
         ),
-        CompositedTransformFollower(
-          link: _link,
-          showWhenUnlinked: false,
-          targetAnchor: _above ? Alignment.topLeft : Alignment.bottomLeft,
-          followerAnchor: _above ? Alignment.bottomLeft : Alignment.topLeft,
-          offset: Offset(_dx, _dy),
-          child: Align(
-            alignment: _above ? Alignment.bottomLeft : Alignment.topLeft,
-            child: _buildPopup(context),
-          ),
+        Positioned(
+          left: field.left + _dx,
+          top: _above ? null : field.bottom + _dy,
+          bottom: _above ? info.overlaySize.height - field.top - _dy : null,
+          child: _buildPopup(context),
         ),
       ],
     );
@@ -490,6 +489,123 @@ class DateTimeRangeFieldState extends State<DateTimeRangeField>
   }
 }
 
+/// 날짜 하나와 그 시각을 고르는 판 — [DateTimeRangeField]의 판과 같은 모양(위에 안내 · `‹ 2026년 10월 ›` 달력, 밑에
+/// 시간 칸 한 줄 — 누르면 15분 단위 시간 목록이 칸 위로 판 안에서 펼쳐진다)을 칸 없이 그 자리에 바로 그린다. 고른 날은
+/// 채운 원이고, [firstDay]~[lastDay] 밖의 날은 흐리게 두고 누를 수 없다. 시각은 꼭 있어서 `시간 없음`은 없다. 날짜를
+/// 바꾸면 시각은 그대로, 시각을 바꾸면 날짜는 그대로 [onChanged]로 알린다. 키는 [keyPrefix]를 앞에 붙인
+/// `-period-day-<년>-<월>-<일>` · `-period-prev`/`-period-next` · `-time-end`(시간 칸) · `-time-list` · `-time-option-<분>`.
+/// 방해 금지의 "지정"이 쓴다.
+class DateTimePointPanel extends StatefulWidget {
+  final DateTime value;
+  final ValueChanged<DateTime> onChanged;
+  final DateTime? firstDay;
+  final DateTime? lastDay;
+  final String caption;
+  final String timeLabel;
+  final String keyPrefix;
+  final String Function(int minutes) formatClock;
+
+  const DateTimePointPanel({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.firstDay,
+    this.lastDay,
+    this.caption = '날짜를 선택하세요',
+    this.timeLabel = '시간',
+    this.keyPrefix = 'point',
+    this.formatClock = formatRangeClock,
+  });
+
+  /// 판 높이 — 달력이 가장 길 때(6주)와 시간 칸 한 줄.
+  static const maxHeight =
+      _RangeCalendar.maxHeight + 1 + _TimeBoxes.singleHeight;
+
+  @override
+  State<DateTimePointPanel> createState() => _DateTimePointPanelState();
+}
+
+class _DateTimePointPanelState extends State<DateTimePointPanel> {
+  /// 시간 목록을 펼쳤는지.
+  bool _timeOpen = false;
+
+  int get _minutes => widget.value.hour * 60 + widget.value.minute;
+
+  void _pickDay(DateTime day) =>
+      widget.onChanged(DateTime(day.year, day.month, day.day, 0, _minutes));
+
+  void _pickTime(int? minutes) {
+    setState(() => _timeOpen = false);
+    if (minutes == null) return;
+    final v = widget.value;
+    widget.onChanged(DateTime(v.year, v.month, v.day, 0, minutes));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final day = _dayOf(widget.value);
+    // 폭은 기간 판과 같되, 그보다 좁은 자리(휴대폰의 대화상자 등)에서는 자리만큼 줄어든다.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        maxWidth: DateTimeRangeFieldState._width,
+      ),
+      child: Stack(
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _RangeCalendar(
+                keyPrefix: widget.keyPrefix,
+                start: day,
+                end: null,
+                caption: widget.caption,
+                onPicked: _pickDay,
+                firstDay: widget.firstDay,
+                lastDay: widget.lastDay,
+              ),
+              Divider(height: 1, color: theme.dividerColor),
+              _TimeBoxes(
+                keyPrefix: widget.keyPrefix,
+                startMinutes: null,
+                endMinutes: _minutes,
+                startEnabled: false,
+                endEnabled: true,
+                open: _timeOpen ? _TimeSide.end : null,
+                formatClock: widget.formatClock,
+                singleLabel: widget.timeLabel,
+                onTap: (_) => setState(() => _timeOpen = !_timeOpen),
+              ),
+            ],
+          ),
+          // 목록이 열려 있으면 판 안의 다른 곳을 눌러도 목록만 닫는다(DateTimeRangeField와 같다).
+          if (_timeOpen)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _timeOpen = false),
+              ),
+            ),
+          if (_timeOpen)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: _TimeBoxes.endBoxBottom + 4,
+              child: _TimeList(
+                key: ValueKey('${widget.keyPrefix}-time-list'),
+                keyPrefix: widget.keyPrefix,
+                minutes: _minutes,
+                formatClock: widget.formatClock,
+                allowNone: false,
+                onPicked: _pickTime,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 칸 안의 기간 글자 — 한 줄(`시작 ~ 종료`)에 들어가면 한 줄, 좁으면 `~` 뒤에서 두 줄로 나눈다(날짜가 잘리지 않게).
 /// 한쪽만 있으면 `2026/10/13 ~` · `~ 2026/10/14`.
 class _RangeText extends StatelessWidget {
@@ -558,12 +674,18 @@ class _RangeCalendar extends StatefulWidget {
   final DateTime? end;
   final String caption;
   final ValueChanged<DateTime> onPicked;
+
+  /// 고를 수 있는 첫날·마지막 날(날짜만) — 밖의 날은 흐리게 두고 누를 수 없다. null이면 막지 않는다.
+  final DateTime? firstDay;
+  final DateTime? lastDay;
   const _RangeCalendar({
     required this.keyPrefix,
     required this.start,
     required this.end,
     required this.caption,
     required this.onPicked,
+    this.firstDay,
+    this.lastDay,
   });
 
   @override
@@ -615,11 +737,15 @@ class _RangeCalendarState extends State<_RangeCalendar> {
       final bandLeft = hasRange && (inRange || isEnd);
       final bandRight = hasRange && (inRange || isStart);
       final isToday = day == today;
+      final first = widget.firstDay, last = widget.lastDay;
+      final selectable =
+          (first == null || !day.isBefore(_dayOf(first))) &&
+          (last == null || !day.isAfter(_dayOf(last)));
       return InkWell(
         key: ValueKey(
           '${widget.keyPrefix}-period-day-${day.year}-${day.month}-${day.day}',
         ),
-        onTap: () => widget.onPicked(day),
+        onTap: selectable ? () => widget.onPicked(day) : null,
         borderRadius: BorderRadius.circular(999),
         child: SizedBox(
           height: 36,
@@ -672,7 +798,11 @@ class _RangeCalendarState extends State<_RangeCalendar> {
                     fontWeight: endpoint || isToday
                         ? FontWeight.w700
                         : FontWeight.normal,
-                    color: endpoint ? scheme.onPrimary : null,
+                    color: endpoint
+                        ? scheme.onPrimary
+                        : selectable
+                        ? null
+                        : theme.disabledColor,
                   ),
                 ),
               ),
@@ -792,6 +922,9 @@ class _TimeBoxes extends StatelessWidget {
   static const startBoxBottom =
       endBoxBottom + _labelHeight + _rowGap + _boxHeight;
 
+  /// 한 줄([singleLabel])만 둘 때의 높이 — 그 칸은 `종료 시간` 칸 자리라 목록은 [endBoxBottom] 위로 편다.
+  static const singleHeight = _top + _labelHeight + _boxHeight + _bottom;
+
   final String keyPrefix;
   final int? startMinutes;
   final int? endMinutes;
@@ -800,6 +933,9 @@ class _TimeBoxes extends StatelessWidget {
   final _TimeSide? open;
   final String Function(int minutes) formatClock;
   final ValueChanged<_TimeSide> onTap;
+
+  /// 있으면 시간 칸을 이 이름표로 한 줄만 둔다(값은 [endMinutes]/[endEnabled] — [DateTimePointPanel]).
+  final String? singleLabel;
   const _TimeBoxes({
     required this.keyPrefix,
     required this.startMinutes,
@@ -809,6 +945,7 @@ class _TimeBoxes extends StatelessWidget {
     required this.open,
     required this.formatClock,
     required this.onTap,
+    this.singleLabel,
   });
 
   @override
@@ -898,23 +1035,26 @@ class _TimeBoxes extends StatelessWidget {
       ];
     }
 
+    final single = singleLabel;
     return SizedBox(
-      height: height,
+      height: single == null ? height : singleHeight,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, _top, 12, _bottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ...one(
-              _TimeSide.start,
-              'start',
-              '시작 시간',
-              startMinutes,
-              startEnabled,
-            ),
-            const SizedBox(height: _rowGap),
-            ...one(_TimeSide.end, 'end', '종료 시간', endMinutes, endEnabled),
-          ],
+          children: single != null
+              ? one(_TimeSide.end, 'end', single, endMinutes, endEnabled)
+              : [
+                  ...one(
+                    _TimeSide.start,
+                    'start',
+                    '시작 시간',
+                    startMinutes,
+                    startEnabled,
+                  ),
+                  const SizedBox(height: _rowGap),
+                  ...one(_TimeSide.end, 'end', '종료 시간', endMinutes, endEnabled),
+                ],
         ),
       ),
     );
@@ -933,12 +1073,16 @@ class _TimeList extends StatefulWidget {
   final int? minutes;
   final String Function(int minutes) formatClock;
   final ValueChanged<int?> onPicked;
+
+  /// 첫 줄 `시간 없음`을 둘지 — 시각이 꼭 있어야 하는 곳([DateTimePointPanel])은 뺀다.
+  final bool allowNone;
   const _TimeList({
     super.key,
     required this.keyPrefix,
     required this.minutes,
     required this.formatClock,
     required this.onPicked,
+    this.allowNone = true,
   });
 
   @override
@@ -949,7 +1093,7 @@ class _TimeListState extends State<_TimeList> {
   late final List<int?> _items = () {
     final current = widget.minutes;
     return <int?>[
-      null,
+      if (widget.allowNone) null,
       ...[
         for (var m = 0; m < 24 * 60; m += dateTimeRangeSlotMinutes) m,
         if (current != null && current % dateTimeRangeSlotMinutes != 0) current,

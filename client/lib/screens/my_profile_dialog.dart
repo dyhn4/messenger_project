@@ -20,6 +20,8 @@ import '../widgets/muted_scrollbar.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/org_section.dart';
 import '../widgets/sticker_view.dart';
+import '../widgets/user_status_dialogs.dart'
+    show myDndMenuLabel, showDndDialog, showStatusDialog, untilLabel;
 import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
@@ -105,6 +107,61 @@ class MyProfileDialog extends StatelessWidget {
         );
       }
     }
+  }
+
+  /// 상태 메시지 줄 — 정해 두었으면 "🗓️ 회의 중"과 지울 시각, 없으면 흐린 "상태 설정". 누르면 상태 설정 창.
+  Widget _statusRow(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final status = session.myStatus;
+    final until = status?.until;
+    return _CardRow(
+      key: const ValueKey('my-profile-status'),
+      // 이모지와 글이 다 있으면 이모지를 아이콘 자리에, 하나만 있으면 그대로 글 자리에.
+      leading: status?.emoji != null && status?.text != null
+          ? SizedBox(
+              width: 18,
+              child: Text(
+                status!.emoji!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 15),
+              ),
+            )
+          : Icon(Icons.emoji_emotions_outlined, size: 18, color: hint),
+      label: Text(
+        status == null
+            ? '상태 설정'
+            : status.emoji != null && status.text != null
+            ? status.text!
+            : status.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: status == null ? TextStyle(color: hint) : null,
+      ),
+      trailing: until == null ? null : untilLabel(until),
+      onTap: () => showStatusDialog(context, session),
+    );
+  }
+
+  /// 방해 금지 줄 — 켜져 있으면 "방해 금지 · 13:00까지"처럼(아이콘도 채운 것으로), 아니면 흐린 "방해 금지". 누르면
+  /// 방해 금지 창.
+  Widget _dndRow(BuildContext context) {
+    final theme = Theme.of(context);
+    final on = session.notificationsPaused;
+    return _CardRow(
+      key: const ValueKey('my-profile-dnd'),
+      leading: Icon(
+        on ? Icons.notifications_paused : Icons.notifications_paused_outlined,
+        size: 18,
+        color: on ? theme.colorScheme.primary : theme.hintColor,
+      ),
+      label: Text(
+        myDndMenuLabel(session),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: on ? null : TextStyle(color: theme.hintColor),
+      ),
+      onTap: () => showDndDialog(context, session),
+    );
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -228,7 +285,12 @@ class MyProfileDialog extends StatelessWidget {
                     context,
                   ).textTheme.bodySmall?.copyWith(color: hint),
                 ),
-                const SizedBox(height: 12),
+                // 상태 메시지와 방해 금지 — 다른 사람의 카드에 그 사람의 상태가 보이듯 내가 남들에게 어떻게 보이는지
+                // 보여 주고, 누르면 그 자리에서 바꾼다(계정 메뉴의 같은 항목과 같은 창). 카드는 열린 채 바로 바뀐다.
+                const SizedBox(height: 8),
+                _statusRow(context),
+                _dndRow(context),
+                const SizedBox(height: 4),
                 OrgSection(
                   teamNames: session.teams.map((t) => t.name).toList(),
                   position: _currentPosition(),
@@ -237,26 +299,15 @@ class MyProfileDialog extends StatelessWidget {
                   onEdit: null,
                 ),
                 const SizedBox(height: 12),
-                InkWell(
-                  onTap: () => _openPersonalInfo(context),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.manage_accounts_outlined,
-                          size: 18,
-                          color: hint,
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(child: Text('개인정보 설정')),
-                        Icon(Icons.chevron_right, color: hint),
-                      ],
-                    ),
+                _CardRow(
+                  key: const ValueKey('my-profile-personal-info'),
+                  leading: Icon(
+                    Icons.manage_accounts_outlined,
+                    size: 18,
+                    color: hint,
                   ),
+                  label: const Text('개인정보 설정'),
+                  onTap: () => _openPersonalInfo(context),
                 ),
                 // 나와의 대화는 팀마다 하나라, 팀을 고르기 전(팀 목록 화면)에는 뺀다.
                 if (session.currentTeam != null) ...[
@@ -296,6 +347,49 @@ class MyProfileDialog extends StatelessWidget {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// 프로필 카드의 누르는 한 줄 — 아이콘 · 글 · (있으면 오른쪽 작은 글) · ›. 상태·방해 금지·개인정보 설정이 쓴다.
+class _CardRow extends StatelessWidget {
+  final Widget leading;
+  final Widget label;
+  final String? trailing;
+  final VoidCallback onTap;
+  const _CardRow({
+    super.key,
+    required this.leading,
+    required this.label,
+    this.trailing,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: 10),
+            Expanded(child: label),
+            if (trailing != null) ...[
+              const SizedBox(width: 6),
+              Text(
+                trailing!,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: hint),
+              ),
+            ],
+            Icon(Icons.chevron_right, color: hint),
+          ],
         ),
       ),
     );

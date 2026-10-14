@@ -47,12 +47,19 @@ class ReminderCard {
   }
 }
 
-/// 아직 울리지 않은 내 리마인더(GET /api/reminders).
+/// 아직 울리지 않은 내 리마인더(GET /api/reminders) — 두 가지다.
+/// - 메시지 리마인더("나중에 알림"): [messageId]·[roomId]가 있고, 원본의 [senderName]·[preview]·[sentAt]이 붙는다.
+/// - 직접 만든 리마인더(메뉴의 "리마인더" — [isMemo]): 메시지 없이 [text]와 울릴 "나와의 대화"의 팀([teamId])만 있다.
 class MessageReminder {
   final String id;
-  final String messageId;
-  final String roomId;
+  final String? messageId;
+  final String? roomId;
+  final String? teamId;
+
+  /// 직접 만든 리마인더의 글.
+  final String? text;
   final DateTime remindAt;
+  final DateTime? createdAt;
   final String? senderName;
 
   /// 한 줄 미리보기 — 비밀 대화면 null.
@@ -61,20 +68,32 @@ class MessageReminder {
 
   const MessageReminder({
     required this.id,
-    required this.messageId,
-    required this.roomId,
+    this.messageId,
+    this.roomId,
+    this.teamId,
+    this.text,
     required this.remindAt,
+    this.createdAt,
     this.senderName,
     this.preview,
     this.sentAt,
   });
 
+  /// 메시지 없이 직접 만든 리마인더인지.
+  bool get isMemo => messageId == null;
+
   factory MessageReminder.fromJson(Map<String, dynamic> json) {
     final sentAt = json['sentAt'];
+    final createdAt = json['createdAt'];
     return MessageReminder(
       id: json['id'] as String,
-      messageId: json['messageId'] as String,
-      roomId: json['roomId'] as String,
+      messageId: json['messageId'] as String?,
+      roomId: json['roomId'] as String?,
+      teamId: json['teamId'] as String?,
+      text: json['text'] as String?,
+      createdAt: createdAt is num
+          ? DateTime.fromMillisecondsSinceEpoch(createdAt.toInt())
+          : null,
       remindAt: DateTime.fromMillisecondsSinceEpoch(
         (json['remindAt'] as num).toInt(),
       ),

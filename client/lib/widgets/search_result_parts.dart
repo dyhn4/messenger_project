@@ -32,6 +32,13 @@ class PanelTab extends StatelessWidget {
         ),
         child: Text(
           label,
+          // 줄 높이·기준선을 글꼴과 상관없이 고정한다 — "할 일"처럼 띄어쓰기가 든 글자는 띄어쓰기만 기본 글꼴(한글은
+          // 대체 글꼴)로 그려져 줄 기준선이 내려가, 옆 탭보다 글자가 살짝 아래로 처졌다.
+          strutStyle: const StrutStyle(
+            fontSize: 14,
+            height: 1.35,
+            forceStrutHeight: true,
+          ),
           style: TextStyle(
             fontSize: 14,
             fontWeight: selected ? FontWeight.bold : FontWeight.normal,

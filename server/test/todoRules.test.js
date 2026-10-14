@@ -1,5 +1,6 @@
 // 할 일(To-Do) 순수 규칙 단위 테스트 — `node --test test/*.test.js` (DB·서버 없이 돈다).
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { mock, test } from 'node:test';
 import jwt from 'jsonwebtoken';
 import {
@@ -756,4 +757,21 @@ test('메시지 DTO의 할 일 카드 — 할 일이 지워지면 id가 null, �
   assert.deepEqual(toSharedTodoDto({ todoId: null, todoCard: card }), { title: '보고서', id: null });
   assert.equal(toSharedTodoDto({ todoId: 't1', todoCard: card, deletedAt: new Date() }), null);
   assert.equal(toSharedTodoDto({ text: 'hi' }), null);
+});
+
+test('parseTodoListQuery: q(검색 패널의 할 일 탭)는 앞뒤 공백을 떼고 소문자로, 비면 null, 100자를 넘으면 오류', () => {
+  assert.equal(parseTodoListQuery({ teamId: U1 }).q, null);
+  assert.equal(parseTodoListQuery({ teamId: U1, q: '' }).q, null);
+  assert.equal(parseTodoListQuery({ teamId: U1, q: '   ' }).q, null);
+  assert.equal(parseTodoListQuery({ teamId: U1, q: '  Banner 시안 ' }).q, 'banner 시안');
+  assert.equal(parseTodoListQuery({ teamId: U1, q: '가'.repeat(100) }).q.length, 100);
+  assert.match(parseTodoListQuery({ teamId: U1, q: '가'.repeat(101) }).error, /100자/);
+  assert.equal(parseTodoListQuery({ teamId: U1, q: ['a', 'b'] }).error, 'q가 올바르지 않습니다.');
+});
+
+test('할 일 목록 검색: 제목·설명을 대소문자 무시로, 와일드카드는 글자 그대로 찾는다', () => {
+  const src = fs.readFileSync(new URL('../src/db/queries/todos.js', import.meta.url), 'utf8');
+  assert.match(src, /lower\(\$\{todos\.title\}\) like \$\{pattern\}/);
+  assert.match(src, /lower\(coalesce\(\$\{todos\.description\}, ''\)\) like \$\{pattern\}/);
+  assert.ok(src.includes(String.raw`q.replace(/[\\%_]/g, '\\$&')`), '%·_·\는 글자 그대로');
 });

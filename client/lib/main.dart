@@ -31,6 +31,8 @@ import 'services/password_ime.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'services/web_launch_invite.dart';
+import 'services/web_page_color.dart';
+import 'services/web_safe_area.dart';
 import 'widgets/app_lock_overlay.dart';
 import 'widgets/esc_to_minimize.dart';
 import 'widgets/update_banner.dart';
@@ -201,6 +203,8 @@ Future<void> main() async {
   }
   // 비밀번호 칸에 포커스가 가면 한글 입력기를 끄고, 벗어나면 되돌린다(Windows만 — password_ime.dart).
   PasswordIme.install();
+  // 웹 앱이 아이폰 상태바·홈 막대 자리를 피하게 안전 영역을 읽어 둔다(web_safe_area.dart — 웹이 아니면 아무것도 안 함).
+  enableWebSafeArea();
   runApp(const MyApp());
 }
 
@@ -514,20 +518,33 @@ class _MyAppState extends State<MyApp>
           // (글자 크기 설정은 여기서 앱 전체에 걸지 않는다 — 글꼴과 같은 곳, 곧 채팅 내용(메시지·댓글 본문)과
           // 방 이름에만 ChatFont(widgets/chat_font_scope.dart)가 적용한다.)
           // ESC — 대화상자 등이 안 받은 ESC는 카카오톡처럼 창을 최소화한다(Windows, esc_to_minimize.dart).
-          builder: (context, child) => EscToMinimize(
-            navigatorKey: navigatorKey,
-            child: AppLockGate(
-              session: session,
-              child: Stack(
-                children: [
-                  ?child,
-                  UpdateBanner(session: session, navigatorKey: navigatorKey),
-                  // 웹 앱에서 알림을 켜자고 권하는 알약(웹 전용 — 네이티브에서는 아무것도 안 그린다).
-                  WebPushPrompt(session: session, navigatorKey: navigatorKey),
-                ],
+          // 웹 앱은 페이지 바탕·상태바 색(theme-color)을 앱 바탕색에 맞춘다(web_page_color.dart — 다크 모드로 바꾸면 따라 바뀜).
+          builder: (context, child) {
+            syncWebPageColor(Theme.of(context).colorScheme.surface);
+            // 웹 앱은 아이폰 상태바·홈 막대 자리를 MediaQuery 여백으로 얹는다(web_safe_area.dart).
+            return WebSafeArea(
+              child: EscToMinimize(
+                navigatorKey: navigatorKey,
+                child: AppLockGate(
+                  session: session,
+                  child: Stack(
+                    children: [
+                      ?child,
+                      UpdateBanner(
+                        session: session,
+                        navigatorKey: navigatorKey,
+                      ),
+                      // 웹 앱에서 알림을 켜자고 권하는 알약(웹 전용 — 네이티브에서는 아무것도 안 그린다).
+                      WebPushPrompt(
+                        session: session,
+                        navigatorKey: navigatorKey,
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );

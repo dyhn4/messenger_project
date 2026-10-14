@@ -587,6 +587,21 @@ class RichTextEditingController extends TextEditingController {
     return (text: body, format: runs.isEmpty ? null : runs);
   }
 
+  /// 입력칸의 글을 앞뒤 공백까지 그대로(서식·멘션 포함) 꺼낸다 — [load]로 그대로 되돌릴 수 있다.
+  /// 보낼 때 쓰는 [formatted]와 달리 다듬지 않는다(쓰다 만 글을 잠시 맡겨 둘 때 쓴다).
+  ({String text, List<TextFormatRun>? format, List<Mention> mentions})
+  snapshot() {
+    final t = text;
+    final runs = formattingEnabled && _chars.flags.length == t.length
+        ? _chars.toRuns()
+        : const <TextFormatRun>[];
+    return (
+      text: t,
+      format: runs.isEmpty ? null : runs,
+      mentions: List.of(_mentions),
+    );
+  }
+
   /// 앞뒤 공백을 뗀 [시작, 끝) — formatted()와 [formattedMentions]가 같은 기준을 쓴다.
   (int, int) _trimRange(String t) {
     var start = 0, end = t.length;

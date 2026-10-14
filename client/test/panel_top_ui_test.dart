@@ -16,6 +16,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'helpers/fake_todo_api.dart' show todoJson;
+
 /// 검색·파일·링크 패널의 상단 UI — 탭/파일 형식 메뉴/정렬 드롭다운/기간(직접 설정 달력)/결과 줄.
 /// 서버는 요청 주소를 기록하는 가짜 HTTP 클라이언트로 대신한다.
 
@@ -55,6 +57,36 @@ Session _session() {
             ],
             // 받아 온 것(3건)보다 전체가 더 많다 — "결과 N건"은 전체 건수.
             'total': 383,
+          }),
+          200,
+          headers: _json,
+        );
+      case '/api/todos':
+        final now = DateTime.now();
+        return http.Response(
+          jsonEncode({
+            'items': [
+              todoJson(
+                id: 'td-old',
+                title: '배너 시안 1차 정리',
+                description: '지난주 회의 결과',
+                progress: 100,
+                createdAt: now
+                    .subtract(const Duration(days: 3))
+                    .millisecondsSinceEpoch,
+              ),
+              todoJson(
+                id: 'td-new',
+                title: '견적서 보내기',
+                description: '배너 시안 단가 포함',
+                progress: 40,
+                createdAt: now
+                    .subtract(const Duration(days: 1))
+                    .millisecondsSinceEpoch,
+              ),
+            ],
+            'hasMore': false,
+            'total': 2,
           }),
           200,
           headers: _json,
@@ -200,30 +232,35 @@ void main() {
   });
 
   group('검색 패널', () {
-    testWidgets('필터 아래에 전체 · 메시지 · 투표 · 파일 ⌄ · 대화방 탭과 최신 순 단추가 검색 전에도 보인다', (
-      tester,
-    ) async {
-      await _mount(tester, SearchScreen(session: _session()));
-      for (final label in ['전체', '메시지', '투표', '파일', '대화방']) {
-        expect(find.text(label), findsOneWidget, reason: label);
-      }
-      // 대화방 탭은 파일 탭의 오른쪽.
-      expect(
-        tester.getTopLeft(find.text('대화방')).dx,
-        greaterThan(tester.getTopLeft(find.text('파일')).dx),
-      );
-      // 가입한 팀이 하나뿐이면(이 테스트 세션) 검색 범위 단추가 없다.
-      expect(find.byKey(const ValueKey('panel-scope')), findsNothing);
-      expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
-      expect(find.text('최신 순'), findsOneWidget);
-      // 필터 줄: 참여 대화방 / 모든 멤버 / 1년 (기본).
-      expect(find.text('참여 대화방'), findsOneWidget);
-      expect(find.text('모든 멤버'), findsOneWidget);
-      expect(find.text('1년 (기본)'), findsOneWidget);
-      // 검색 전에는 결과 줄이 없다.
-      expect(find.byKey(const ValueKey('search-result-count')), findsNothing);
-      await _close(tester);
-    });
+    testWidgets(
+      '필터 아래에 전체 · 메시지 · 투표 · 할 일 · 파일 ⌄ · 대화방 탭과 최신 순 단추가 검색 전에도 보인다',
+      (tester) async {
+        await _mount(tester, SearchScreen(session: _session()));
+        for (final label in ['전체', '메시지', '투표', '할 일', '파일', '대화방']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+        // 할 일 탭은 투표 탭의 바로 오른쪽.
+        final todoX = tester.getTopLeft(find.text('할 일')).dx;
+        expect(todoX, greaterThan(tester.getTopLeft(find.text('투표')).dx));
+        expect(todoX, lessThan(tester.getTopLeft(find.text('파일')).dx));
+        // 대화방 탭은 파일 탭의 오른쪽.
+        expect(
+          tester.getTopLeft(find.text('대화방')).dx,
+          greaterThan(tester.getTopLeft(find.text('파일')).dx),
+        );
+        // 가입한 팀이 하나뿐이면(이 테스트 세션) 검색 범위 단추가 없다.
+        expect(find.byKey(const ValueKey('panel-scope')), findsNothing);
+        expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
+        expect(find.text('최신 순'), findsOneWidget);
+        // 필터 줄: 참여 대화방 / 모든 멤버 / 1년 (기본).
+        expect(find.text('참여 대화방'), findsOneWidget);
+        expect(find.text('모든 멤버'), findsOneWidget);
+        expect(find.text('1년 (기본)'), findsOneWidget);
+        // 검색 전에는 결과 줄이 없다.
+        expect(find.byKey(const ValueKey('search-result-count')), findsNothing);
+        await _close(tester);
+      },
+    );
 
     testWidgets('검색칸이 파일 패널 "파일명 검색"칸과 같다 — 입력을 멈추면(엔터 없이) 찾고, 지우기(X)로 비운다', (
       tester,
@@ -253,6 +290,63 @@ void main() {
       await tester.tap(find.byIcon(Icons.close));
       await tester.pump();
       expect(find.text('대화방 이름과 메시지·파일을 검색합니다.'), findsOneWidget);
+      await _close(tester);
+    });
+
+    testWidgets('할 일 탭은 메시지가 아니라 할 일(제목·설명)을 찾아 카드처럼 보이고, 정렬을 따른다', (
+      tester,
+    ) async {
+      await _mount(tester, SearchScreen(session: _session()));
+      await tester.tap(find.byKey(const ValueKey('search-tab-todo')));
+      await tester.pump();
+      expect(find.text('참여한 대화방의 할 일을 제목·설명으로 검색합니다.'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, '배너 시안');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      await tester.pump();
+
+      final req = _last('/api/todos');
+      expect(req.queryParameters['q'], '배너 시안');
+      expect(req.queryParameters['teamId'], 't1');
+      expect(req.queryParameters['scope'], 'team');
+      expect(req.queryParameters['sort'], 'created');
+      expect(req.queryParameters['includeDone'], 'true');
+      expect(
+        _requests.where((u) => u.path == '/api/search'),
+        isEmpty,
+        reason: '메시지 검색은 하지 않는다',
+      );
+      expect(find.text('결과 2건', findRichText: true), findsOneWidget);
+      final newer = find.byKey(const ValueKey('search-todo-td-new'));
+      final older = find.byKey(const ValueKey('search-todo-td-old'));
+      expect(newer, findsOneWidget);
+      expect(older, findsOneWidget);
+      expect(
+        tester.getTopLeft(newer).dy,
+        lessThan(tester.getTopLeft(older).dy),
+        reason: '최신 순',
+      );
+      expect(
+        find.descendant(of: newer, matching: find.text('할 일')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: newer,
+          matching: find.textContaining('진행률', findRichText: true),
+        ),
+        findsOneWidget,
+      );
+
+      // 과거 순이면 거꾸로.
+      await tester.tap(find.byKey(const ValueKey('panel-sort')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(MenuItemButton, '과거 순'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getTopLeft(older).dy,
+        lessThan(tester.getTopLeft(newer).dy),
+      );
       await _close(tester);
     });
 

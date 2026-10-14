@@ -114,8 +114,9 @@ Future<String?> saveAttachment({
     if (savedPath != null) await markFromInternet(savedPath);
   }
 
+  // 저장 창에서 다른 폴더를 골랐을 수 있으니 설정 폴더가 아니라 실제로 저장한 곳을 연다.
   if (savedPath != null && settings.openFolderAfterDownload) {
-    await settings.openDownloadFolder();
+    await settings.openFolderOf(savedPath);
   }
   return savedPath;
 }
@@ -213,7 +214,9 @@ Future<({int count, String folder})?> saveAllAttachments({
     );
     count++;
   }
-  if (settings.openFolderAfterDownload) await settings.openDownloadFolder();
+  if (settings.openFolderAfterDownload) {
+    await settings.openDownloadFolder(folder);
+  }
   return (count: count, folder: folder);
 }
 

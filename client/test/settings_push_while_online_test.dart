@@ -108,10 +108,12 @@ void main() {
       )
       .toList();
 
+  /// 저장해도 창은 닫히지 않고 "저장했습니다." 알약만 뜬다 — 그 알약이 사라질 때까지 기다린다.
   Future<void> save(WidgetTester tester) async {
     await tester.ensureVisible(find.text('저장하기'));
     await tester.tap(find.text('저장하기'));
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 3));
   }
 
   testWidgets('메신저 설정에 있고, 서버 값을 받아 와서 기본은 켬이다', (tester) async {
@@ -148,8 +150,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('다른 기기 접속 중에도 휴대폰 알림 받기'));
     await tester.pump();
-    await save(tester);
+    await tester.ensureVisible(find.text('저장하기'));
+    await tester.tap(find.text('저장하기'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('휴대폰 알림 설정을 저장하지 못했습니다'), findsOneWidget);
+    expect(find.text('저장했습니다.'), findsNothing);
     expect(find.text('저장하기'), findsOneWidget);
     await tester.pump(const Duration(seconds: 5)); // 알림(토스트)이 사라질 때까지.
   });

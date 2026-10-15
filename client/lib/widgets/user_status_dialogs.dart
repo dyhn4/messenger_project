@@ -122,8 +122,9 @@ class _StatusDialogState extends State<_StatusDialog> {
   Future<void> _save() async {
     final text = _text.text.trim();
     final clear = _empty;
+    // 저장해도 창은 닫지 않는다 — 알약으로만 알린다(닫기는 [취소]).
     if (clear && widget.session.myStatus == null) {
-      Navigator.of(context).pop();
+      showAppToast(context, '저장했습니다.');
       return;
     }
     if (!clear && text.characters.length > statusTextMax) {
@@ -137,7 +138,7 @@ class _StatusDialogState extends State<_StatusDialog> {
         text: clear || text.isEmpty ? null : text,
         until: clear ? null : _clear.untilFrom(DateTime.now()),
       );
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) showAppToast(context, '저장했습니다.');
     } catch (e) {
       if (mounted) showAppToast(context, '상태를 저장하지 못했습니다: $e');
     } finally {
@@ -376,11 +377,12 @@ class _DndDialogState extends State<_DndDialog> {
                     _days.containsAll(s.days))));
   }
 
-  /// [저장] — 고른 "지금부터 알림 멈추기"와 바뀐 매일 일정을 한 번에 적용하고 창을 닫는다. 바뀐 게 없으면 그냥 닫는다.
+  /// [저장] — 고른 "지금부터 알림 멈추기"와 바뀐 매일 일정을 한 번에 적용한다. 창은 닫지 않고 "저장했습니다." 알약만
+  /// 띄운다(창 위쪽 지금 상태가 새 값으로 바뀌고, 고른 칩은 풀린다). 바뀐 게 없어도 같은 알약.
   Future<void> _save() async {
     final scheduleChanged = _scheduleChanged;
     if (_pauseKey == null && !scheduleChanged) {
-      Navigator.of(context).pop();
+      showAppToast(context, '저장했습니다.');
       return;
     }
     if (scheduleChanged && _scheduleOn && _days.isEmpty) {
@@ -400,16 +402,6 @@ class _DndDialogState extends State<_DndDialog> {
         return;
       }
     }
-    final done = [
-      if (_pauseKey == 'resume')
-        '방해 금지를 껐습니다.'
-      else if (until != null)
-        '${untilLabel(until, now: now)} 알림을 멈춥니다.',
-      if (scheduleChanged)
-        _scheduleOn ? '방해 금지 일정을 저장했습니다.' : '방해 금지 일정을 껐습니다.',
-    ].join(' ');
-    // 창을 닫은 뒤에 알리므로 미리 잡아 둔다.
-    final overlay = Overlay.of(context, rootOverlay: true);
     setState(() => _saving = true);
     try {
       await widget.session.setMyDnd(
@@ -427,8 +419,9 @@ class _DndDialogState extends State<_DndDialog> {
             : null,
       );
       if (!mounted) return;
-      Navigator.of(context).pop();
-      showAppToastOnOverlay(overlay, done);
+      // 적용했으니 고른 칩은 푼다 — 위쪽의 지금 상태("13:00까지 알림을 멈춥니다" 등)가 새 값을 보여 준다.
+      setState(() => _pauseKey = null);
+      showAppToast(context, '저장했습니다.');
     } catch (e) {
       if (mounted) showAppToast(context, '방해 금지를 바꾸지 못했습니다: $e');
     } finally {

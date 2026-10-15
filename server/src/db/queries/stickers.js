@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, max } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, max } from 'drizzle-orm';
 import { db } from '../client.js';
 import { stickerPacks, stickers } from '../schema.js';
 
@@ -62,6 +62,17 @@ export async function addStickers(packId, items) {
 export async function updateSticker(id, fields) {
   const [row] = await db.update(stickers).set(fields).where(eq(stickers.id, id)).returning();
   return row ?? null;
+}
+
+/** [packId] 세트의 [ids]를 지운 것으로 표시한다(이미 지운 것·다른 세트의 것은 건너뛴다) — 지운 id 목록. */
+export async function deleteStickers(packId, ids) {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .update(stickers)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(stickers.packId, packId), inArray(stickers.id, ids), isNull(stickers.deletedAt)))
+    .returning({ id: stickers.id });
+  return rows.map((r) => r.id);
 }
 
 export async function findSticker(packId, id) {

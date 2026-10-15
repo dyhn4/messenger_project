@@ -136,12 +136,26 @@ void main() {
     late List<String> deletes;
     late bool hiddenSecond;
 
+    /// "개별 삭제"로 지운 그림 id(서버가 다음 목록부터 deleted로 내려준다).
+    late List<String> deletedStickers;
+
     Session session({int packCount = 1}) {
       patches = {};
       deletes = [];
       hiddenSecond = false;
+      deletedStickers = [];
       final client = MockClient((request) async {
         final path = request.url.path;
+        if (request.method == 'POST' &&
+            path == '/api/stickers/packs/p1/stickers/delete') {
+          final ids = (jsonDecode(request.body)['ids'] as List).cast<String>();
+          deletedStickers.addAll(ids);
+          return http.Response(
+            jsonEncode({'deleted': ids.length}),
+            200,
+            headers: _json,
+          );
+        }
         if (request.method == 'PATCH') {
           patches[path] = jsonDecode(request.body);
           hiddenSecond = true;
@@ -157,6 +171,19 @@ void main() {
               for (var n = 0; n < packCount; n++)
                 {
                   ..._packJson(hideSecond: hiddenSecond),
+                  // 지운 그림은 서버가 숨김 + deleted로 내려준다.
+                  'stickers': [
+                    for (final st
+                        in _packJson(hideSecond: hiddenSecond)['stickers']
+                            as List)
+                      {
+                        ...st as Map<String, dynamic>,
+                        if (deletedStickers.contains(st['id'])) ...{
+                          'hidden': true,
+                          'deleted': true,
+                        },
+                      },
+                  ],
                   'id': n == 0 ? 'p1' : 'p${n + 1}',
                   'name': n == 0 ? '리마인' : '세트 ${n + 1}',
                   'deleted': deletes.contains(
@@ -249,6 +276,93 @@ void main() {
       expect(find.text('리마인'), findsNothing); // 삭제한 세트는 목록에서 빠진다
       s.dispose();
       await tester.pump(const Duration(seconds: 3)); // 알약 알림 정리
+    });
+
+    testWidgets('더보기 — 개별 삭제: 그림을 여러 장 골라 한 번에 지우고, 지운 그림은 목록에서 빠진다', (
+      tester,
+    ) async {
+      final s = session();
+      await pumpTab(tester, s);
+      // 목록 카드의 더보기에서 "개별 삭제"를 고르면 그 세트 모음이 고르기 상태로 열린다.
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(find.byType(StickerView)));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pump();
+      await tester.tap(find.text('개별 삭제'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('세트 목록'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('sticker-selection-bar')),
+        findsOneWidget,
+      );
+      expect(find.text('지울 그림을 누르세요.'), findsOneWidget);
+      final delete = find.byKey(const ValueKey('sticker-delete-selected'));
+      expect(
+        tester.widget<FilledButton>(delete).onPressed,
+        isNull,
+        reason: '고르기 전에는 지울 수 없다',
+      );
+
+      // 그림을 누르면 숨기지 않고 고른다(다시 누르면 푼다).
+      await tester.tap(find.byKey(const ValueKey('sticker-tile-s1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('sticker-tile-s3')));
+      await tester.pump();
+      expect(patches, isEmpty, reason: '고르는 중에는 숨기지 않는다');
+      expect(find.text('2개 선택됨'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sticker-tile-s3')));
+      await tester.pump();
+      expect(find.text('1개 선택됨'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sticker-tile-s3')));
+      await tester.pump();
+
+      await tester.tap(delete);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sticker-delete-confirm')));
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(deletedStickers, ['s1', 's3']);
+      expect(find.text('이모티콘 2개를 삭제했습니다.'), findsOneWidget);
+      // 고르기는 끝나고, 지운 두 장은 모음에서 빠진다.
+      expect(find.byKey(const ValueKey('sticker-selection-bar')), findsNothing);
+      expect(find.byKey(const ValueKey('sticker-tile-s1')), findsNothing);
+      expect(find.byKey(const ValueKey('sticker-tile-s3')), findsNothing);
+      expect(find.byKey(const ValueKey('sticker-tile-s2')), findsOneWidget);
+      expect(find.text('1개'), findsOneWidget);
+      s.dispose();
+      await tester.pump(const Duration(seconds: 3)); // 알약 알림 정리
+    });
+
+    testWidgets('개별 삭제 — 전체 선택/해제, 취소하면 아무것도 지우지 않는다', (tester) async {
+      final s = session();
+      await pumpTab(tester, s);
+      await tester.tap(find.byType(StickerView));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pump();
+      await tester.tap(find.text('개별 삭제'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sticker-select-all')));
+      await tester.pump();
+      expect(find.text('3개 선택됨'), findsOneWidget);
+      expect(find.text('전체 해제'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sticker-select-all')));
+      await tester.pump();
+      expect(find.text('지울 그림을 누르세요.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sticker-select-cancel')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('sticker-selection-bar')), findsNothing);
+      // 고르기를 끝냈으니 그림을 누르면 다시 숨기기다.
+      await tester.tap(find.byKey(const ValueKey('sticker-tile-s2')));
+      await tester.pump();
+      await tester.pump();
+      expect(patches['/api/stickers/packs/p1/stickers/s2'], {'hidden': true});
+      expect(deletedStickers, isEmpty);
+      s.dispose();
     });
 
     testWidgets('세트가 많으면 아래에 페이지 넘김', (tester) async {

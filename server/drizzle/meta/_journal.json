@@ -757,6 +757,13 @@
       "when": 1791960696379,
       "tag": "0107_memo_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1791993786341,
+      "tag": "0108_sticker_deleted",
+      "breakpoints": true
     }
   ]
 }

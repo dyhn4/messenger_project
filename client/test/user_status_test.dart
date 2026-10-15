@@ -268,7 +268,9 @@ void main() {
       reason: '회의 중은 1시간 뒤 지움',
     );
     expect(session.myStatus?.label, '🗓️ 회의 중');
-    expect(find.text('상태 설정'), findsNothing, reason: '저장하면 창이 닫힌다');
+    expect(find.text('저장했습니다.'), findsOneWidget, reason: '저장해도 창은 닫지 않고 알약만');
+    expect(find.text('상태 설정'), findsOneWidget, reason: '창은 열린 채');
+    await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
   });
 
   /// 방해 금지 창을 여는 버튼 화면.
@@ -298,8 +300,16 @@ void main() {
   Future<void> saveDnd(WidgetTester tester) async {
     await tester.tap(find.byKey(const ValueKey('dnd-save')));
     await tester.pumpAndSettle();
-    expect(find.text('방해 금지'), findsNothing, reason: '저장하면 창이 닫힌다');
-    await tester.pump(const Duration(seconds: 3)); // 알림 토스트가 사라질 때까지
+    expect(find.text('저장했습니다.'), findsOneWidget, reason: '저장해도 창은 닫지 않고 알약만');
+    expect(find.text('방해 금지'), findsOneWidget, reason: '창은 열린 채');
+    expect(
+      find.text('[저장]을 누르면 적용됩니다.'),
+      findsNothing,
+      reason: '적용했으니 고른 칩은 풀린다',
+    );
+    await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pumpAndSettle();
   }
 
   testWidgets(
@@ -514,7 +524,14 @@ void main() {
     expect(body['text'], isNull);
     expect(body['until'], isNull);
     expect(session.myStatus, isNull);
-    expect(find.text('상태 설정'), findsNothing, reason: '저장하면 창이 닫힌다');
+    expect(find.text('저장했습니다.'), findsOneWidget, reason: '저장해도 창은 닫지 않고 알약만');
+    expect(find.text('상태 설정'), findsOneWidget, reason: '창은 열린 채');
+    expect(
+      find.byKey(const ValueKey('status-clear')),
+      findsNothing,
+      reason: '지웠으니 [상태 지우기]도 없다',
+    );
+    await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
   });
 
   testWidgets('내 프로필 카드: 상태와 방해 금지 줄이 보이고, 누르면 그 창이 떠서 바꾸면 카드에 바로 보인다', (
@@ -559,7 +576,11 @@ void main() {
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, '저장'));
     await tester.pumpAndSettle();
-    expect(find.text('상태 설정'), findsNothing, reason: '상태 창은 닫히고');
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
+    // 저장해도 상태 창은 열린 채 — [취소]로 닫는다.
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pumpAndSettle();
     expect(find.byType(MyProfileDialog), findsOneWidget, reason: '카드는 열린 채');
     expect(
       find.descendant(of: statusRow, matching: find.text('회의 중')),
@@ -583,6 +604,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('dnd-for-1시간')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('dnd-save')));
+    await tester.pumpAndSettle();
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
     await tester.pumpAndSettle();
     expect(find.byType(MyProfileDialog), findsOneWidget);
     expect(

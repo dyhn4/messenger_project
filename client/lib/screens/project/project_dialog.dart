@@ -263,6 +263,16 @@ class _ProjectDialogState extends State<ProjectDialog> {
         _openTaskId = null;
         _taskExpanded = false;
       }
+      // 업무를 크게 보던 중에 홈·내 업무·캘린더·간트차트를 누르면 업무는 작게 보기(오른쪽 패널)로 돌려
+      // 고른 화면이 보이게 한다 — 업무 패널은 닫지 않는다.
+      if (const {
+        ProjectView.home,
+        ProjectView.myTasks,
+        ProjectView.calendar,
+        ProjectView.gantt,
+      }.contains(view)) {
+        _taskExpanded = false;
+      }
       _view = view;
       _projectId = projectId;
     });

@@ -395,6 +395,11 @@ void main() {
     expect(s.settings.notifyPopupHeight, 40);
     expect(s.settings.notifyPopupMaxCards, 2);
     expect(tester.takeException(), isNull);
+    // 저장해도 창은 닫히지 않고 "저장했습니다." 알약만 뜬다.
+    await tester.pumpAndSettle();
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    expect(find.text('저장하기'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('창 깜빡임: 기본은 깜빡임, 화면 설정에서 "깜빡이지 않음"을 골라 저장하면 저장된다', (
@@ -420,6 +425,11 @@ void main() {
     expect(s.settings.flashWindowFrame, isFalse);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getBool('settings_flash_window_frame'), isFalse);
+    // 저장해도 창은 닫히지 않고 "저장했습니다." 알약만 뜬다.
+    await tester.pumpAndSettle();
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    expect(find.text('저장하기'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('글꼴: 화면 설정 > 글꼴에서 검색해서 고르고 저장하면 저장된다', (tester) async {
@@ -456,6 +466,11 @@ void main() {
     expect(s.settings.fontFamily, '맑은 고딕');
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('settings_font_family'), '맑은 고딕');
+    // 저장해도 창은 닫히지 않고 "저장했습니다." 알약만 뜬다.
+    await tester.pumpAndSettle();
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    expect(find.text('저장하기'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
   });
 
   testWidgets('글꼴 초기화: 드롭다운 목록의 "시스템 기본"을 고르면 되돌아가고 저장도 된다', (tester) async {
@@ -487,6 +502,11 @@ void main() {
     expect(s.settings.fontFamily, '');
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('settings_font_family'), '');
+    // 저장해도 창은 닫히지 않고 "저장했습니다." 알약만 뜬다.
+    await tester.pumpAndSettle();
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    expect(find.text('저장하기'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
   });
 
   group('메시지 전송 옵션', () {

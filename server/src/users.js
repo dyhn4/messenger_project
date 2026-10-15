@@ -408,7 +408,8 @@ export function createUsersRouter(io) {
       found.pack.kind !== 'character' ||
       found.pack.deletedAt ||
       found.pack.hidden ||
-      found.hidden
+      found.hidden ||
+      found.deletedAt
     ) {
       return res.status(404).json({ error: '캐릭터를 찾을 수 없습니다.' });
     }

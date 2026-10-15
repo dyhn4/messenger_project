@@ -92,7 +92,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _saving = false;
 
   /// "저장하기"를 눌러 실제로 반영됐는지 — false인 채로 화면이 닫히면(취소/X/바깥 클릭)
-  /// 반투명 슬라이더로 미리 봤던 값을 원래 저장된 값으로 되돌려야 한다(dispose 참고).
+  /// 반투명 슬라이더로 미리 봤던 값을 원래 저장된 값으로 되돌려야 한다(dispose 참고). 저장해도 창은
+  /// 열려 있으니, 저장한 뒤에 슬라이더를 또 움직였으면 그 값도 되돌린다.
   bool _saved = false;
   final _scrollController = ScrollController();
   PackageInfo? _packageInfo;
@@ -123,7 +124,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
-    if (!_saved && AppPlatform.isWindows) {
+    if (AppPlatform.isWindows &&
+        (!_saved || _windowOpacity != widget.session.settings.windowOpacity)) {
       // 저장하지 않고 닫힌 경우 — 슬라이더로 미리보기만 하던 불투명도를 원래 저장된
       // 값으로 되돌린다. dispose는 async를 기다릴 수 없어 그냥 던져둔다(fire-and-forget).
       windowManager.setOpacity(widget.session.settings.windowOpacity);
@@ -183,7 +185,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     // "프로젝트" 창이 열려있으면 완전히 다른 엔진이라 위 setThemeMode만으론 안 바뀐다 —
     // 따로 알려준다(project_window.dart, Windows 전용이라 함수 안에서 자체적으로 걸러냄).
     if (AppPlatform.isWindows) unawaited(broadcastThemeChange(_themeMode));
-    if (mounted) Navigator.of(context).pop();
+    // 저장해도 창은 닫지 않는다 — 알약으로만 알린다(닫기는 [닫기]).
+    if (!mounted) return;
+    setState(() => _saving = false);
+    showAppToast(context, '저장했습니다.');
   }
 
   void _select(_Section s) {

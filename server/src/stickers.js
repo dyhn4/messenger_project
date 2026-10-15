@@ -7,6 +7,7 @@ import { findUserById } from './db/queries/users.js';
 import {
   addStickers,
   createStickerPack,
+  deleteStickers,
   findSticker,
   findStickerPack,
   listStickerPacks,
@@ -15,6 +16,7 @@ import {
 } from './db/queries/stickers.js';
 import { UPLOAD_FILENAME_CHARSET, signFileUrl, uploadsDir } from './upload.js';
 import { makeStickerThumbnail } from './stickerThumbnail.js';
+import { parseStickerIds, stickerVisibility } from './stickerRules.js';
 
 /** 이모티콘으로 올릴 수 있는 그림 형식(움직이는 GIF 포함) — 확장자로 본다(앱의 업로드는 형식을
  * application/octet-stream으로 보내서, 보내온 형식 값은 믿을 수 없다). */
@@ -52,7 +54,8 @@ function stickerDto(s) {
     thumbnailUrl: s.thumbnailUrl ? signFileUrl(s.thumbnailUrl) : null,
     fileName: s.fileName ?? null,
     mimeType: s.mimeType ?? null,
-    hidden: s.hidden,
+    // 지운 그림도 숨긴 것으로 보낸다(stickerRules.js stickerVisibility).
+    ...stickerVisibility(s),
   };
 }
 
@@ -142,10 +145,21 @@ export function createStickersRouter() {
     res.status(201).json(rows.map(stickerDto));
   });
 
+  /** 개별 삭제(여러 장 한 번에) — 관리 화면과 선택창에서 없어진다. 세트 삭제처럼 행과 그림 파일은 남기고 표시만
+   * 한다(이미 보낸 메시지·고른 프로필 사진의 그림은 계속 보인다). { deleted: 지운 수 }. */
+  router.post('/stickers/packs/:packId/stickers/delete', requireServerAdmin, async (req, res) => {
+    const parsed = parseStickerIds(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const pack = await findStickerPack(req.params.packId);
+    if (!pack || pack.deletedAt) return res.status(404).json({ error: '세트를 찾을 수 없습니다.' });
+    const deleted = await deleteStickers(pack.id, parsed.ids);
+    res.json({ deleted: deleted.length });
+  });
+
   /** 한 장 숨기기/다시 보이기. */
   router.patch('/stickers/packs/:packId/stickers/:id', requireServerAdmin, async (req, res) => {
     const existing = await findSticker(req.params.packId, req.params.id);
-    if (!existing) return res.status(404).json({ error: '이모티콘을 찾을 수 없습니다.' });
+    if (!existing || existing.deletedAt) return res.status(404).json({ error: '이모티콘을 찾을 수 없습니다.' });
     if (typeof req.body?.hidden !== 'boolean') return res.status(400).json({ error: 'hidden 값이 필요합니다.' });
     res.json(stickerDto(await updateSticker(existing.id, { hidden: req.body.hidden })));
   });

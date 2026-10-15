@@ -16,6 +16,10 @@ class ServerSticker {
   /// 이모티콘 선택창에서만 빠진다 — 예전 메시지는 계속 그림이 보여야 해서 목록에는 온다.
   final bool hidden;
 
+  /// 관리 화면에서 "개별 삭제"한 그림 — 관리 화면에서도 빠진다. 예전 메시지에 그리려고 목록에는 계속 오고,
+  /// 서버가 [hidden]도 같이 켜서 보내서 선택창에서는 빠진다.
+  final bool deleted;
+
   const ServerSticker({
     required this.id,
     required this.packId,
@@ -24,6 +28,7 @@ class ServerSticker {
     this.fileName,
     this.mimeType,
     this.hidden = false,
+    this.deleted = false,
   });
 
   factory ServerSticker.fromJson(Map<String, dynamic> json) => ServerSticker(
@@ -34,6 +39,7 @@ class ServerSticker {
     fileName: json['fileName'] as String?,
     mimeType: json['mimeType'] as String?,
     hidden: json['hidden'] as bool? ?? false,
+    deleted: json['deleted'] as bool? ?? false,
   );
 }
 

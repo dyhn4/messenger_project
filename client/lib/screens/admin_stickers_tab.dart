@@ -55,6 +55,13 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
 
   /// 그림을 올리는 중인 세트 id.
   String? _uploadingPackId;
+
+  /// "개별 삭제" 중인지 — 세트 모음의 그림을 누르면 숨기기 대신 고르기가 된다.
+  bool _selecting = false;
+
+  /// 개별 삭제로 고른 그림 id.
+  final _selected = <String>{};
+  bool _deleting = false;
   final _scroll = ScrollController();
 
   @override
@@ -76,6 +83,7 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       _packs = null;
       _openPackId = null;
       _page = 0;
+      _endSelecting();
     });
     _load();
   }
@@ -87,8 +95,26 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
         setState(() {
           _packs = [
             for (final p in packs)
-              if (!p.deleted) p,
+              if (!p.deleted)
+                ServerStickerPack(
+                  id: p.id,
+                  name: p.name,
+                  kind: p.kind,
+                  hidden: p.hidden,
+                  deleted: p.deleted,
+                  // "개별 삭제"한 그림은 관리 화면에서도 뺀다(예전 메시지용으로 목록에는 온다).
+                  stickers: [
+                    for (final s in p.stickers)
+                      if (!s.deleted) s,
+                  ],
+                ),
           ];
+          // 고른 것 중 이미 없어진 것은 뺀다.
+          final alive = {
+            for (final p in _packs!)
+              for (final s in p.stickers) s.id,
+          };
+          _selected.retainAll(alive);
           _error = null;
         });
       }
@@ -254,6 +280,69 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     }
   }
 
+  /// "개별 삭제" — 그 세트의 모음을 열고 고르기를 시작한다(카드의 더보기에서 골랐어도).
+  void _startSelecting(ServerStickerPack pack) => setState(() {
+    _openPackId = pack.id;
+    _selecting = true;
+    _selected.clear();
+  });
+
+  void _endSelecting() {
+    _selecting = false;
+    _selected.clear();
+  }
+
+  void _toggleSelected(ServerSticker s) => setState(() {
+    if (!_selected.remove(s.id)) _selected.add(s.id);
+  });
+
+  Future<void> _deleteSelected(ServerStickerPack pack) async {
+    final ids = [
+      for (final s in pack.stickers)
+        if (_selected.contains(s.id)) s.id,
+    ];
+    if (ids.isEmpty) return;
+    final what = _isCharacter ? '캐릭터' : '이모티콘';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('$what ${ids.length}개 삭제'),
+        content: Text(
+          _isCharacter
+              ? '고른 캐릭터 ${ids.length}개를 삭제할까요?\n'
+                    '"캐릭터 선택하기"와 이 목록에서 사라집니다. 이미 프로필 사진으로 고른 사람은 그대로 유지됩니다.'
+              : '고른 이모티콘 ${ids.length}개를 삭제할까요?\n'
+                    '이모티콘 선택창과 이 목록에서 사라집니다. 이미 보낸 메시지의 이모티콘은 그대로 보입니다.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(c).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            key: const ValueKey('sticker-delete-confirm'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.of(c).pop(true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _deleting = true);
+    try {
+      final n = await widget.session.api!.deleteStickers(pack.id, ids);
+      if (!mounted) return;
+      setState(_endSelecting);
+      showAppToast(context, '$what $n개를 삭제했습니다.');
+      await _changed();
+    } catch (e) {
+      if (mounted) showAppToast(context, '삭제하지 못했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
   Future<void> _toggleSticker(ServerSticker sticker) async {
     try {
       await widget.session.api!.setStickerHidden(
@@ -286,6 +375,14 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
       label: pack.hidden ? '세트 다시 보이기' : '세트 숨기기',
       onPressed: () => _togglePack(pack),
     ),
+    // 세트 안의 그림을 여러 장 골라 지운다 — 그림이 있을 때만.
+    if (pack.stickers.isNotEmpty)
+      hoverMenuItem(
+        icon: Icons.checklist_rounded,
+        label: '개별 삭제',
+        color: Colors.redAccent,
+        onPressed: () => _startSelecting(pack),
+      ),
     hoverMenuItem(
       icon: Icons.delete_outline,
       label: '세트 삭제',
@@ -464,7 +561,10 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
             IconButton(
               icon: const Icon(Icons.arrow_back),
               tooltip: '세트 목록',
-              onPressed: () => setState(() => _openPackId = null),
+              onPressed: () => setState(() {
+                _openPackId = null;
+                _endSelecting();
+              }),
             ),
             const SizedBox(width: 4),
             // 이름·개수 칸이 남는 폭을 전부 차지해서 "더보기"가 오른쪽 끝에 붙는다(예전엔 이름의
@@ -518,17 +618,22 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
             ),
           ],
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          child: Text(
-            _isCharacter
-                ? '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 "캐릭터 선택하기"에서만 '
-                      '빠지고, 이미 프로필 사진으로 고른 사람에게는 그대로 보입니다).'
-                : '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 선택창에서만 빠지고, 이미 보낸 '
-                      '메시지에서는 그대로 보입니다).',
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+        if (_selecting)
+          _selectionBar(context, pack)
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Text(
+              _isCharacter
+                  ? '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 "캐릭터 선택하기"에서만 '
+                        '빠지고, 이미 프로필 사진으로 고른 사람에게는 그대로 보입니다).'
+                  : '그림을 누르면 숨기거나 다시 보이게 합니다(숨긴 그림은 선택창에서만 빠지고, 이미 보낸 '
+                        '메시지에서는 그대로 보입니다).',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.hintColor,
+              ),
+            ),
           ),
-        ),
         Expanded(
           child: pack.stickers.isEmpty
               ? Center(
@@ -556,28 +661,118 @@ class _AdminStickersTabState extends State<AdminStickersTab> {
     );
   }
 
-  Widget _stickerTile(BuildContext context, ServerSticker s) {
-    final sticker = _asSticker(s);
-    return Tooltip(
-      message: '${s.fileName ?? ''}\n${s.hidden ? '눌러서 다시 보이기' : '눌러서 숨기기'}',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () => _toggleSticker(s),
-        child: Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Opacity(
-            opacity: s.hidden ? 0.3 : 1,
-            child: StickerView(
-              stickerId: sticker.id,
-              sticker: sticker,
-              emojiSize: 28,
-              imageSize: 84,
+  /// 개별 삭제 중 — "N개 선택됨", 전체 선택/해제, 취소, 삭제.
+  Widget _selectionBar(BuildContext context, ServerStickerPack pack) {
+    final theme = Theme.of(context);
+    final allSelected =
+        pack.stickers.isNotEmpty &&
+        pack.stickers.every((s) => _selected.contains(s.id));
+    return Padding(
+      key: const ValueKey('sticker-selection-bar'),
+      padding: const EdgeInsets.fromLTRB(12, 0, 4, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _selected.isEmpty ? '지울 그림을 누르세요.' : '${_selected.length}개 선택됨',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
+          TextButton(
+            key: const ValueKey('sticker-select-all'),
+            onPressed: _deleting
+                ? null
+                : () => setState(() {
+                    if (allSelected) {
+                      _selected.clear();
+                    } else {
+                      _selected.addAll(pack.stickers.map((s) => s.id));
+                    }
+                  }),
+            child: Text(allSelected ? '전체 해제' : '전체 선택'),
+          ),
+          TextButton(
+            key: const ValueKey('sticker-select-cancel'),
+            onPressed: _deleting ? null : () => setState(_endSelecting),
+            child: const Text('취소'),
+          ),
+          const SizedBox(width: 4),
+          FilledButton.icon(
+            key: const ValueKey('sticker-delete-selected'),
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: _selected.isEmpty || _deleting
+                ? null
+                : () => _deleteSelected(pack),
+            icon: _deleting
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.delete_outline, size: 18),
+            label: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stickerTile(BuildContext context, ServerSticker s) {
+    final sticker = _asSticker(s);
+    final scheme = Theme.of(context).colorScheme;
+    final selected = _selecting && _selected.contains(s.id);
+    return Tooltip(
+      message: _selecting
+          ? (s.fileName ?? '')
+          : '${s.fileName ?? ''}\n${s.hidden ? '눌러서 다시 보이기' : '눌러서 숨기기'}',
+      child: InkWell(
+        key: ValueKey('sticker-tile-${s.id}'),
+        borderRadius: BorderRadius.circular(10),
+        // 개별 삭제 중에는 누르면 고르기/풀기, 아니면 숨기기/다시 보이기.
+        onTap: () => _selecting ? _toggleSelected(s) : _toggleSticker(s),
+        child: Stack(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: selected
+                    ? scheme.errorContainer
+                    : scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected ? Colors.redAccent : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: Opacity(
+                opacity: s.hidden ? 0.3 : 1,
+                child: StickerView(
+                  stickerId: sticker.id,
+                  sticker: sticker,
+                  emojiSize: 28,
+                  imageSize: 84,
+                ),
+              ),
+            ),
+            if (_selecting)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.radio_button_unchecked,
+                  key: ValueKey('sticker-check-${s.id}'),
+                  size: 22,
+                  color: selected ? Colors.redAccent : scheme.outline,
+                ),
+              ),
+          ],
         ),
       ),
     );

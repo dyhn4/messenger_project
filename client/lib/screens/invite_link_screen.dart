@@ -78,7 +78,8 @@ class _InviteLinkScreenState extends State<InviteLinkScreen> {
         maxUses: result.maxUses,
       );
       if (mounted) setState(() => _links = [link, ...?_links]);
-      if (mounted) await _copyAndNotify(link);
+      // 만들기만 하고 클립보드에는 넣지 않는다 — 보낼 때는 목록 줄의 복사 단추로.
+      _toast('초대링크를 생성했습니다.');
     } catch (e) {
       _toast('초대 링크 생성 실패: $e');
     } finally {

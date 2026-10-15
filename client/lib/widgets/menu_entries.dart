@@ -217,6 +217,17 @@ final menuEntries = <MenuEntry>[
     order: 60,
     onOpen: (context, session) => openSidePanel(context, session, 'albums'),
   ),
+  MenuEntry(
+    key: 'inquiries',
+    section: MenuSection.list,
+    label: '문의함',
+    icon: const Icon(Icons.contact_support_rounded),
+    color: const Color(0xFFB86A00),
+    background: const Color(0xFFFFE7C2),
+    order: 70,
+    // 받은 문의·보낸 문의 패널(상단의 "+ 팀장에게 문의하기"로 문의를 보낸다) — PC는 오른쪽 패널, 모바일은 전체 화면.
+    onOpen: (context, session) => openSidePanel(context, session, 'inquiries'),
+  ),
 
   // ── 툴 ──
   MenuEntry(
@@ -254,16 +265,5 @@ final menuEntries = <MenuEntry>[
     onOpen: (context, session) => AppPlatform.isWindows
         ? openProjectWindow(session)
         : showProjectDialog(context, session),
-  ),
-  MenuEntry(
-    key: 'inquiries',
-    section: MenuSection.tools,
-    label: '문의함',
-    icon: const Icon(Icons.contact_support_rounded),
-    color: const Color(0xFFB86A00),
-    background: const Color(0xFFFFE7C2),
-    order: 30,
-    // 받은 문의·보낸 문의 패널(상단의 "+ 팀장에게 문의하기"로 문의를 보낸다) — PC는 오른쪽 패널, 모바일은 전체 화면.
-    onOpen: (context, session) => openSidePanel(context, session, 'inquiries'),
   ),
 ];

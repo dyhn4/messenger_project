@@ -230,6 +230,9 @@ void main() {
       // 새 링크가 목록 맨 위에 붙는다.
       expect(find.text('10월 신입'), findsOneWidget);
       expect(find.textContaining('가입 0/10명'), findsOneWidget);
+      // 만들면 알약만 뜨고 클립보드에는 넣지 않는다(보낼 때는 목록 줄의 복사 단추로).
+      expect(find.text('초대링크를 생성했습니다.'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
     });
   });
 }

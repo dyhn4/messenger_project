@@ -522,6 +522,46 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
   });
 
+  testWidgets('크게 보기 중에 왼쪽 메뉴의 홈·내 업무·캘린더·간트차트를 누르면 업무는 작게 보기로(패널은 열린 채)', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProjectDialog(session: buildSession(), embedInWindow: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+    tester.widget<TaskPanelScope>(find.byType(TaskPanelScope)).openTask('1001');
+    await tester.pumpAndSettle();
+
+    for (final menu in ['홈', '내 업무', '캘린더', '간트차트']) {
+      await tester.tap(find.byTooltip('크게 보기'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TaskDetailPanel>(find.byType(TaskDetailPanel)).expanded,
+        isTrue,
+      );
+
+      await tester.tap(find.text(menu).first);
+      await tester.pumpAndSettle();
+      final panel = find.byType(TaskDetailPanel);
+      expect(panel, findsOneWidget, reason: '$menu — 업무 패널은 닫지 않는다');
+      expect(tester.widget<TaskDetailPanel>(panel).expanded, isFalse, reason: menu);
+      expect(
+        tester.getRect(panel).width,
+        closeTo(kTaskPanelWidth, 1),
+        reason: '$menu — 오른쪽 작은 패널로',
+      );
+      expect(find.byTooltip('크게 보기'), findsOneWidget);
+    }
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
   testWidgets('패널: 참조자를 드롭다운에서 고르고 칩으로 뺀다', (tester) async {
     await pumpPanel(tester);
 

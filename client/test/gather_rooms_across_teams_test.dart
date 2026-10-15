@@ -205,6 +205,11 @@ void main() {
     expect(reopened.gatherTopicsAcrossTeams, isTrue);
     expect(reopened.gatherGroupChatsAcrossTeams, isFalse);
     expect(reopened.gatherDmsAcrossTeams, isTrue);
+
+    // 저장해도 창은 닫히지 않고 "저장했습니다." 알약만 뜬다.
+    expect(find.text('저장했습니다.'), findsOneWidget);
+    expect(find.text('저장하기'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3)); // 알약이 사라질 때까지
   });
 
   testWidgets('PC 사이드바: 켠 종류는 다른 팀 방도 팀 이름과 함께 보이고, 누르면 그 팀으로 바뀌며 열린다', (

@@ -1573,6 +1573,9 @@ export const stickers = pgTable(
     mimeType: text('mime_type'),
     position: integer('position').notNull().default(0),
     hidden: boolean('hidden').notNull().default(false),
+    // "개별 삭제" — 관리 화면·선택창에서 사라지지만 행과 그림 파일은 남겨서 이미 보낸 메시지(캐릭터는
+    // 이미 고른 프로필 사진)의 그림은 계속 보인다(세트 삭제와 같은 방식).
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('stickers_pack_id_idx').on(t.packId, t.position)],

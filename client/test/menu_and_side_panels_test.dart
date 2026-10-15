@@ -174,10 +174,10 @@ void main() {
       for (final title in ['생성', '리스트', '툴']) {
         expect(find.text(title), findsOneWidget);
       }
-      // 묶음 안의 순서(order): 생성 10·30·40, 리스트 10·20·30·40·50, 툴 10·20·30.
+      // 묶음 안의 순서(order): 생성 10·30·40, 리스트 10·20·30·40·50·70(문의함), 툴 10·20.
       final create = ['메시지 예약', '투표', '리마인더'];
-      final list = ['파일', '즐겨찾기', '북마크', '링크', '내가 쓴 글'];
-      final tools = ['캘린더', '프로젝트', '문의함'];
+      final list = ['파일', '즐겨찾기', '북마크', '링크', '내가 쓴 글', '문의함'];
+      final tools = ['캘린더', '프로젝트'];
       expect(_readingOrder(tester, [...create].reversed.toList()), create);
       expect(_readingOrder(tester, [...list].reversed.toList()), list);
       expect(_readingOrder(tester, [...tools].reversed.toList()), tools);
@@ -186,6 +186,8 @@ void main() {
       double y(String text) => tester.getTopLeft(find.text(text)).dy;
       expect(y('리마인더'), lessThan(y('리스트')));
       expect(y('링크'), lessThan(y('툴')));
+      // 문의함은 리스트 묶음에 있다(툴 제목보다 위).
+      expect(y('문의함'), lessThan(y('툴')));
 
       // 기존 키는 그대로다.
       for (final key in [
@@ -365,7 +367,7 @@ void main() {
           MenuSection.tools,
           _session(),
         ).map((e) => e.key).toList();
-        expect(keys, ['calendar', 'zz-1', 'zz-2', 'project', 'inquiries']);
+        expect(keys, ['calendar', 'zz-1', 'zz-2', 'project']);
       });
     });
   });

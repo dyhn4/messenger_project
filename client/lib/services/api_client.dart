@@ -3758,6 +3758,17 @@ class ApiClient {
   }
 
   /// 한 장 숨기기/다시 보이기(서버 운영자만).
+  /// [packId] 세트의 그림 [stickerIds]를 지운다("개별 삭제") — 지운 수를 돌려준다. 서버는 행과 파일을 남기고
+  /// 표시만 해서 이미 보낸 메시지의 그림은 계속 보인다.
+  Future<int> deleteStickers(String packId, List<String> stickerIds) async {
+    final res =
+        await _post('/api/stickers/packs/$packId/stickers/delete', {
+              'ids': stickerIds,
+            })
+            as Map<String, dynamic>;
+    return (res['deleted'] as num?)?.toInt() ?? 0;
+  }
+
   Future<void> setStickerHidden(
     String packId,
     String stickerId,

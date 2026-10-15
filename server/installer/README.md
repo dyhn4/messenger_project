@@ -47,6 +47,12 @@
 (정리된 `server/` 소스 + `npm install`로 새로 만든 `node_modules`)를 채운 뒤 ISCC.exe로
 `messenger-server.iss`를 컴파일한다. 셋 다 git에는 안 올라간다(`server/.gitignore`) — 매 빌드마다 새로 받고 새로 만든다.
 
+**웹 앱은 여기서 빌드하지 않는다.** stage에는 그 순간의 `server/web/`(아이폰용 웹 앱 — `publish_release.ps1`이 빌드해
+넣음)이 그대로 들어간다. 앱·웹을 새로 냈다면 `publish_release.ps1`이 **끝난 뒤에** 이 스크립트를 돌린다 — 동시에 돌리면
+stage 복사가 웹 빌드보다 먼저 끝나 예전 웹 앱이 설치 파일에 실리고, 오류도 나지 않는다. 확인은
+`installer/stage/web/main.dart.js`와 `server/web/main.dart.js`의 수정 시각 비교(루트 README "빌드·배포 스크립트 한눈에 보기").
+`server/releases/`(클라이언트 apk·설치 파일)는 설치 파일에 들어가지 않는다.
+
 ## 파일 구성
 
 | 파일 | 역할 |

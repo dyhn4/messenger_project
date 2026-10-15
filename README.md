@@ -2242,6 +2242,43 @@ cd client\android
 
 ## 서버 배포 및 업데이트
 
+### 빌드·배포 스크립트 한눈에 보기 (실행 순서 주의)
+
+저장소 루트의 스크립트 네 개는 서로 **앞 스크립트의 결과물을 그대로 담아 가는** 관계입니다. 웹 앱을
+빌드하는 건 `publish_release.ps1` 하나뿐이고, 나머지는 그 순간의 `server/` 폴더를 복사해 갈 뿐입니다.
+
+| 스크립트 | 직접 빌드하는 것 | 담아 가는 것 / 결과물 |
+|---|---|---|
+| `publish_release.ps1` | Android apk, Windows exe·설치 파일, **웹 앱**(`flutter build web`) | 웹 → `server/web/`, apk·설치 파일·`version.json` → `server/releases/` |
+| `build_server_installer.ps1` | 없음(Node·PostgreSQL·NSSM·LiveKit은 받아만 둠) | 그 순간의 `server/`(**`server/web/` 포함**, `releases/` 제외) → `server/installer/output/tangotalk-server-setup.exe` |
+| `package_server_update.ps1` | 없음 | 그 순간의 `server/`(**`server/web/` 포함**, `releases/` 제외) → `server/deploy/output/server-update.zip` |
+| `update_server.ps1` | 없음 | (운영 서버 PC에서) 위 zip 적용 + 마이그레이션 + pm2 재시작 |
+
+**앱·웹을 새로 낸 뒤 서버 쪽 산출물을 만들 때는 반드시 이 순서로, 앞 스크립트가 끝난 뒤에 실행합니다:**
+
+```powershell
+.\publish_release.ps1 -Notes "이번 업데이트 내용"   # 1) 앱 + 웹 빌드(끝날 때까지 기다림)
+.\build_server_installer.ps1                       # 2-a) 새 서비스 PC용 설치 파일이 필요할 때
+.\package_server_update.ps1                        # 2-b) 이미 운영 중인 pm2 서버를 올릴 때
+```
+
+- **두 스크립트를 동시에(터미널 두 개로) 돌리거나 순서를 바꾸면 서버 쪽 산출물에 예전 웹 앱이 들어갑니다.**
+  `build_server_installer.ps1`은 시작하자마자(npm install·컴파일 전에) `server/`를 stage로 복사하는데, 그때
+  `publish_release.ps1`이 아직 4단계(웹 빌드)에 오지 않았으면 이전 빌드의 `server/web`이 그대로 실립니다. 오류는
+  나지 않고 설치 파일도 정상으로 만들어지므로 알아채기 어렵습니다(실제로 1.2.4 배포 때 서버 설치 파일에 이틀 전
+  웹 앱이 들어간 적이 있음). `package_server_update.ps1`도 같습니다.
+- **확인 방법**: 설치 파일을 만든 뒤 `server/installer/stage/web/main.dart.js`와 `server/web/main.dart.js`의
+  수정 시각(robocopy가 원본 시각을 그대로 옮김)이 같은지 봅니다. 다르면 `build_server_installer.ps1`만 다시
+  돌리면 됩니다(받아 둔 런타임은 재사용하므로 오래 걸리지 않음).
+- 서버 코드만 고치고 앱·웹은 그대로라면 1)은 건너뛰어도 됩니다. 반대로 `client/` 코드를 고쳤다면 Windows·Android만
+  쓰는 기능이라도 웹 앱도 같은 코드로 빌드되므로 1)부터 다시 합니다.
+- **`server/releases/`(새 apk·설치 파일·`version.json`)는 설치 파일에도 업데이트 zip에도 들어가지 않습니다**
+  (서버마다 고유한 실데이터로 취급). 개발 PC가 아닌 다른 PC에서 서버를 돌린다면 `server/releases/`의
+  `client-windows-setup.exe`·`client-android.apk`를 그 서버의 `server/releases/`(설치형 기본 경로
+  `C:\TangoTalk-Server\server\releases` — 관리자 전용 폴더)에 먼저 복사하고, **`version.json`은 맨 마지막에**
+  복사합니다. 서버는 `version.json`이 바뀌는 순간 켜져 있는 앱에 새 버전을 알리므로(`server/src/version.js`의
+  `fs.watch`), 먼저 복사하면 그 사이에 업데이트를 누른 사람이 예전 설치 파일을 받습니다.
+
 ### 클라이언트 버전 배포
 
 클라이언트는 앱을 시작할 때마다 서버의 `/version`을 확인해서, 서버에 더 최신 버전이 올라와 있으면
@@ -2249,11 +2286,27 @@ cd client\android
 저장소 루트에서 한 번에:
 
 ```powershell
-.\publish_release.ps1 -Version "1.0.7" -Notes "이번 업데이트 내용"
+.\publish_release.ps1 -Notes "이번 업데이트 내용"
 ```
 
-Android/Windows 릴리즈 빌드, 설치 프로그램 컴파일, 웹 앱 빌드(`server/web`에 넣음 — 운영 서버에는 서버 업데이트 zip이 실어 감),
-`server/releases/`로 복사, `version.json` 작성까지 전부 자동으로 처리합니다. 서버는 재시작 없이 바로 새 버전을 알려주기 시작합니다.
+버전 번호는 인자로 받지 않고 `client/pubspec.yaml`의 `version:`을 그대로 씁니다(`1.2.4+5`면 `+` 뒤 빌드 번호는
+빼고 `1.2.4`). 예전에는 `-Version` 인자를 따로 받았는데, pubspec과 인자 중 하나만 올리는 실수로 서버가 알리는
+버전과 exe에 새겨진 버전이 어긋나 업데이트를 설치해도 계속 "새 버전이 있습니다"가 뜨는 사고가 있어서 없앴습니다.
+
+순서대로 Android 릴리즈 빌드 → Windows 릴리즈 빌드 → Windows 설치 프로그램 컴파일 → 웹 앱 빌드(`server/web`에 넣음 —
+운영 서버에는 서버 업데이트 zip이나 서버 설치 파일이 실어 감, 위 "실행 순서 주의" 참고) → `server/releases/`로 복사 →
+`version.json` 작성까지 전부 자동으로 처리합니다. 서버는 재시작 없이 바로 새 버전을 알려주기 시작하고, 웹 앱도
+재시작 없이 다음 새로고침부터 새 버전이 뜹니다. 어느 단계든 실패하면 `server/releases/`·`server/web`을 바꾸기 전에 멈춥니다.
+
+스크립트가 알아서 막아 주는 것들:
+
+- **빌드 폴더에서 띄워 둔 앱 종료** — `client\build\windows\x64\runner\Release\client.exe`가 실행 중이면 링커가
+  덮어쓰지 못해 `LNK1104`로 실패하므로, 그 경로에서 실행 중인 것만 골라 끕니다(설치된 앱은 건드리지 않음).
+- **exe 버전 확인** — 버전만 올리면 `client.exe`가 다시 링크되지 않아 예전 버전 번호가 남는 문제가 있어
+  `Runner.rc`를 매번 건드리고, 빌드 뒤 exe의 파일 버전이 pubspec과 다르면 멈춥니다.
+- **설치 프로그램 컴파일 재시도** — 백신(Windows Defender 실시간 검사)이 막 만든 설치 파일을 잠가
+  `EndUpdateResource failed ... (110)`로 실패하는 경우가 있어 5초 간격으로 세 번까지 다시 해 봅니다. 세 번 다
+  실패하면 `client\windows\installer\output` 폴더를 검사 제외에 넣고 다시 실행하세요.
 
 켜져 있는 앱에 알약이 뜨는 경로는 세 가지이고, 어느 하나가 빠져도 나머지가 메웁니다:
 `version.json`이 바뀌는 순간의 브로드캐스트(`/updates` 네임스페이스), 그 소켓에 **붙을 때마다**
@@ -2670,4 +2723,5 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 | 서버 로그에 `[web-tls] ⚠ 포트 443(웹 앱 HTTPS)를 이미 다른 프로그램이 쓰고 있어 열지 못했습니다…`(또는 80) | IIS·HTTP.sys 예약·다른 웹 서버가 그 포트를 쓴다 → 그 프로그램을 끄면 10분 안에 저절로 붙는다. 끌 수 없으면 다른 번호를 쓰고 공유기에서 외부 443·80을 그 번호로 보낸다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)의 "80이 막혔을 때, 포트가 겹칠 때") |
 | 아이폰 Safari에서 웹 앱 주소가 "안전하지 않음"·인증서 경고로 열림 | 아직 정식 인증서를 받기 전이거나(그동안 웹 포트는 자체 서명 인증서) 시험 발급 중이다 → 관리자 콘솔 카드에서 상태를 보고, 시험 발급이면 끄고 다시 적용한다 |
 | 아이폰에서 웹 앱 주소가 밖(LTE/5G)에서는 열리는데 사내 와이파이에서는 안 열림 | 공유기가 NAT 루프백을 지원하지 않아서다(웹 앱은 도메인 주소로만 붙음) → 공유기 설정을 확인하거나 회사 안에서도 LTE/5G로 쓴다. 웹 앱 가입은 사내 와이파이에서만 되므로, 그동안 아이폰 사용자는 PC·안드로이드 앱에서 초대 링크로 가입한 뒤 웹 앱에서 로그인한다 |
+| 서버 설치 파일(또는 업데이트 zip)로 올렸는데 웹 앱만 예전 버전 | `publish_release.ps1`이 웹 빌드를 끝내기 전에 `build_server_installer.ps1`/`package_server_update.ps1`이 `server/`를 복사해 갔다(동시에 실행했거나 순서가 바뀜) → `publish_release.ps1`이 끝난 뒤 그 스크립트만 다시 돌린다([빌드·배포 스크립트 한눈에 보기](#빌드배포-스크립트-한눈에-보기-실행-순서-주의)) |
 | 아이폰 웹 앱에서 가입하려니 `사내 와이파이 밖에서는 초대 링크로만 가입할 수 있습니다…` | 웹 앱은 초대 링크의 코드를 보낼 수 없어 밖에서는 가입할 수 없다(정상) → 사내 와이파이에서 가입하거나 PC·안드로이드 앱에서 초대 링크로 가입한 뒤 웹 앱에서 로그인한다(로그인은 어디서든 됨) |

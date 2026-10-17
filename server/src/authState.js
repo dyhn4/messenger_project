@@ -1,3 +1,4 @@
+import { findActiveDeviceForUser } from './db/queries/devices.js';
 import { findUserById } from './db/queries/users.js';
 
 /**
@@ -27,4 +28,26 @@ export async function accountState(userId) {
 /** 계정 상태(토큰 버전·정지·탈퇴)가 바뀌었을 때 — 다음 요청부터 바로 다시 읽게 한다. */
 export function invalidateAccountState(userId) {
   cache.delete(userId);
+}
+
+const deviceCache = new Map(); // `${userId}|${deviceId}` → { at, active }
+
+/**
+ * 기기에 묶인 토큰(`did` — auth.js issueTokenPair)의 그 기기가 아직 로그인돼 있는지 — 이 사람의 기기이고 "내 기기"에서
+ * 로그아웃(revoked)되지 않았으면 true. 계정 상태와 같은 30초 캐시이고, 로그아웃시키면 그 자리에서 지운다
+ * ([invalidateDeviceState]).
+ */
+export async function deviceActive(deviceId, userId) {
+  const key = `${userId}|${deviceId}`;
+  const hit = deviceCache.get(key);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.active;
+  const active = !!(await findActiveDeviceForUser(deviceId, userId));
+  deviceCache.set(key, { at: Date.now(), active });
+  if (deviceCache.size > 10_000) deviceCache.delete(deviceCache.keys().next().value);
+  return active;
+}
+
+/** 기기를 로그아웃시켰거나 다시 등록했을 때 — 다음 요청부터 바로 다시 읽게 한다. */
+export function invalidateDeviceState(deviceId, userId) {
+  deviceCache.delete(`${userId}|${deviceId}`);
 }

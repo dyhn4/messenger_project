@@ -705,6 +705,10 @@ class _RoomRow extends StatelessWidget {
               color: Theme.of(context).hintColor,
             ),
           ],
+          if (session.chatDrafts.has(room.id)) ...[
+            const SizedBox(width: 4),
+            const DraftMarker(),
+          ],
         ],
       ),
       subtitle: _buildSubtitle(context),

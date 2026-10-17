@@ -21,7 +21,8 @@ import { announcementFieldsFromMessage } from './announcementFromMessage.js';
 import { toAnnouncementDto } from './announcementDto.js';
 import { parseAnnouncementText } from './announcementText.js';
 import { findMessageById } from './db/queries/messages.js';
-import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
+import { findRoomById, isRoomMember, listMembersAnnouncementRead, listRoomMemberIds } from './db/queries/rooms.js';
+import { splitAnnouncementReaders } from './announcementReadRules.js';
 import { findTeamById, isTopicCreator } from './db/queries/teams.js';
 import { canModifyContent } from './moderation.js';
 import { canCreateTopic, topicWriteDenial } from './permissions.js';
@@ -239,6 +240,21 @@ export function createAnnouncementsRouter(io) {
     await unpinAnnouncement(announcement.id);
     io.to(room.id).emit('announcement:unpinned', { id: announcement.id, roomId: room.id });
     res.json({ ok: true });
+  });
+
+  /**
+   * 공지 읽음 확인 — 이 방 멤버 중 누가 읽었고(공지를 연 시각) 누가 아직인지 `{ read: [{ userId, name, readAt }], unread: [{ userId,
+   * name }] }`(announcementReadRules.js). 방 멤버라면 누구나 본다(메시지의 안 읽은 사람 수처럼).
+   */
+  router.get('/rooms/:id/announcements/:announcementId/readers', async (req, res) => {
+    const room = await requireTopicMember(req, res);
+    if (!room) return;
+    const announcement = await findAnnouncementById(req.params.announcementId);
+    if (!announcement || announcement.roomId !== room.id || announcement.deletedAt) {
+      return res.status(404).json({ error: '공지를 찾을 수 없습니다.' });
+    }
+    const { read, unread } = splitAnnouncementReaders({ announcement, members: await listMembersAnnouncementRead(room.id) });
+    res.json({ read: read.map((r) => ({ ...r, readAt: new Date(r.readAt).getTime() })), unread });
   });
 
   router.get('/rooms/:id/announcements/:announcementId/comments', async (req, res) => {

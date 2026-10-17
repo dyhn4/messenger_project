@@ -185,7 +185,7 @@ app.use('/api', requireAuth, createExternalCalendarsRouter(io));
 app.use('/api', requireAuth, createCalendarFeedsRouter());
 // 할 일(To-Do) — 대화방에 딸린 가벼운 할 일(담당자·기한·첨부·알림 일정). 프로젝트 업무와는 별개(todos.js).
 app.use('/api', requireAuth, createTodosRouter(io));
-app.use('/api', requireAuth, createDevicesRouter());
+app.use('/api', requireAuth, createDevicesRouter(io));
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
 app.use('/api', requireAuth, createCallsRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));

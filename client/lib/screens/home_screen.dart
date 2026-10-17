@@ -135,7 +135,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _incomingCallDialogShowing = false;
         return;
       }
-      final accept = await showDialog<bool>(
+      // 'video'(참여) | 'voice'(음성으로 참여 — 카메라 끔) | 'decline'(거절).
+      final answer = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
@@ -151,11 +152,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+              key: const ValueKey('incoming-call-decline'),
+              onPressed: () => Navigator.of(dialogContext).pop('decline'),
               child: const Text('거절'),
             ),
+            OutlinedButton.icon(
+              key: const ValueKey('incoming-call-voice'),
+              onPressed: () => Navigator.of(dialogContext).pop('voice'),
+              icon: const Icon(Icons.mic_none, size: 18),
+              label: const Text('음성으로 참여'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+              key: const ValueKey('incoming-call-accept'),
+              onPressed: () => Navigator.of(dialogContext).pop('video'),
               child: const Text('참여'),
             ),
           ],
@@ -163,9 +172,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
       _incomingCallDialogShowing = false;
       if (!mounted) return;
-      if (accept == true) {
+      if (answer == 'video' || answer == 'voice') {
         try {
-          await widget.session.joinCall(room.id);
+          await widget.session.joinCall(room.id, camera: answer == 'video');
           if (mounted) await showCallScreen(context, widget.session, room);
         } catch (e) {
           if (mounted) showAppToast(context, '통화에 참여하지 못했습니다: $e');

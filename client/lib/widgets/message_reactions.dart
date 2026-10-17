@@ -162,9 +162,10 @@ class _ReactionChip extends StatelessWidget {
   }
 }
 
-/// 공감을 고르는 줄 — 정해 둔 이모지를 한 줄로, 내가 고른 것은 동그라미로 표시한다. 휴대폰 롱프레스 시트 맨 위와 PC
-/// 말풍선 툴바의 공감 메뉴가 같이 쓴다.
-class ReactionPicker extends StatelessWidget {
+/// 공감을 고르는 줄 — 자주 쓰는 여섯 개([quickReactionCount])를 한 줄로 두고, 끝의 "+"를 누르면 나머지까지 격자로 펼친다. 내가 고른
+/// 것은 동그라미로 표시하고, 고른 게 펼친 쪽에 있으면 처음부터 펼쳐 둔다. 휴대폰 롱프레스 시트 맨 위와 PC 말풍선 툴바의 공감 메뉴가
+/// 같이 쓴다.
+class ReactionPicker extends StatefulWidget {
   /// 지금 내 공감 — 없으면 null.
   final String? selected;
   final ValueChanged<String> onPicked;
@@ -178,28 +179,81 @@ class ReactionPicker extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  State<ReactionPicker> createState() => _ReactionPickerState();
+}
+
+class _ReactionPickerState extends State<ReactionPicker> {
+  /// 펼친 격자의 한 줄 칸 수.
+  static const _columns = 8;
+
+  late bool _expanded =
+      widget.selected != null &&
+      reactionEmojis.indexOf(widget.selected!) >= quickReactionCount;
+
+  /// 이모지 한 칸의 폭 — 글자 + 동그라미 안쪽 여백(6×2) + 칸 사이(2×2).
+  double get _cell => widget.emojiSize * 1.2 + 16;
+
+  Widget _emoji(String emoji) {
     final scheme = Theme.of(context).colorScheme;
-    return Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: InkResponse(
+        key: ValueKey('pick-reaction-$emoji'),
+        radius: widget.emojiSize,
+        onTap: () => widget.onPicked(emoji),
+        child: Container(
+          width: _cell - 4,
+          padding: const EdgeInsets.all(6),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: emoji == widget.selected ? scheme.primaryContainer : null,
+          ),
+          child: Text(emoji, style: TextStyle(fontSize: widget.emojiSize)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final quick = reactionEmojis.take(quickReactionCount);
+    final more = reactionEmojis.skip(quickReactionCount).toList();
+    final row = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (final emoji in reactionEmojis)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: InkResponse(
-              key: ValueKey('pick-reaction-$emoji'),
-              radius: emojiSize,
-              onTap: () => onPicked(emoji),
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: emoji == selected ? scheme.primaryContainer : null,
-                ),
-                child: Text(emoji, style: TextStyle(fontSize: emojiSize)),
-              ),
+        for (final emoji in quick) _emoji(emoji),
+        SizedBox(
+          width: _cell,
+          child: IconButton(
+            key: const ValueKey('pick-reaction-more'),
+            tooltip: _expanded ? '접기' : '공감 더 보기',
+            icon: Icon(
+              _expanded ? Icons.expand_less : Icons.add,
+              size: widget.emojiSize,
             ),
+            onPressed: () => setState(() => _expanded = !_expanded),
           ),
+        ),
+      ],
+    );
+    if (!_expanded) return row;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        row,
+        const Divider(height: 8),
+        SizedBox(
+          key: const ValueKey('reaction-picker-grid'),
+          width: _cell * _columns,
+          child: Wrap(
+            children: [
+              for (final emoji in more)
+                SizedBox(width: _cell, child: _emoji(emoji)),
+            ],
+          ),
+        ),
       ],
     );
   }

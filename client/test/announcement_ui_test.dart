@@ -87,10 +87,17 @@ Room _room({Announcement? announcement}) => Room(
 );
 
 class _Server {
-  _Server({this.announcements = const [], this.comments = const []});
+  _Server({
+    this.announcements = const [],
+    this.comments = const [],
+    this.readers,
+  });
 
   final List<Map<String, dynamic>> announcements;
   final List<Map<String, dynamic>> comments;
+
+  /// 공지 읽음 확인(GET …/readers) 응답 — null이면 예전 서버처럼 그 경로가 없다.
+  final Map<String, dynamic>? readers;
   final requests = <http.Request>[];
 
   late final client = MockClient((request) async {
@@ -101,6 +108,10 @@ class _Server {
     }
     if (request.method == 'GET' && path.endsWith('/comments')) {
       return _json(comments);
+    }
+    if (request.method == 'GET' && path.endsWith('/readers')) {
+      final r = readers;
+      return r == null ? _json({'error': '없는 경로'}, 404) : _json(r);
     }
     if (request.method == 'POST' && path.endsWith('/comments')) {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
@@ -234,7 +245,7 @@ void main() {
     }
 
     testWidgets(
-      '작성자 아바타·이름·시각, 본문(줄바꿈 유지), 구분선, 댓글 N, 댓글 목록, 입력칸 — 읽음/좋아요/★는 없다',
+      '작성자 아바타·이름·시각, 본문(줄바꿈 유지), 구분선, 댓글 N, 댓글 목록, 입력칸 — 좋아요/★는 없고, 읽음 확인은 서버가 줄 때만',
       (tester) async {
         final server = _Server(comments: [_comment('c1', '확인했습니다.\n참석할게요')]);
         await openDetail(
@@ -896,6 +907,57 @@ void main() {
       );
       await tester.pump();
       expect(find.text('2000/2000'), findsOneWidget); // 한도에서 더 못 쓴다.
+      await _finish(tester);
+    });
+  });
+
+  group('공지 읽음 확인', () {
+    final readers = {
+      'read': [
+        {
+          'userId': 'u2',
+          'name': '김철수',
+          'readAt': DateTime(2026, 9, 30, 17).millisecondsSinceEpoch,
+        },
+      ],
+      'unread': [
+        {'userId': 'me', 'name': '나'},
+        {'userId': 'u3', 'name': '박영희'},
+      ],
+    };
+
+    test('모델 — 서버 모양을 읽고, 지금 보고 있는 나는 읽은 쪽으로 옮긴다', () {
+      final r = AnnouncementReaders.fromJson(readers);
+      expect(r.read.single.name, '김철수');
+      expect(r.unread.map((x) => x.name), ['나', '박영희']);
+      final mine = r.markRead('me', DateTime(2026, 10, 1));
+      expect(mine.read.map((x) => x.userId), ['u2', 'me']);
+      expect(mine.unread.map((x) => x.userId), ['u3']);
+      expect(identical(r.markRead('nobody', DateTime(2026)), r), isTrue);
+    });
+
+    testWidgets('상세에 "읽음 N · 안 읽음 M" — 누르면 두 탭으로 이름을 보여 준다', (tester) async {
+      final server = _Server(readers: readers);
+      final a = Announcement.fromJson(_a('a1'));
+      final room = _room(announcement: a);
+      final session = _session(server, room);
+      await _pumpHost(
+        tester,
+        (context) => showAnnouncementDetailScreen(context, session, room, a),
+        size: const Size(420, 800),
+      );
+      // 나는 지금 보고 있으니 읽은 쪽.
+      expect(find.text('읽음 2 · 안 읽음 1'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('announcement-readers')));
+      await _settle(tester);
+      expect(find.text('공지 읽음 확인'), findsOneWidget);
+      expect(find.text('김철수'), findsWidgets);
+      await tester.tap(
+        find.byKey(const ValueKey('announcement-readers-unread-tab')),
+      );
+      await _settle(tester);
+      expect(find.text('박영희'), findsOneWidget);
+      expect(server.called('GET', '/readers').length, greaterThanOrEqualTo(1));
       await _finish(tester);
     });
   });

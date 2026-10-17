@@ -216,6 +216,17 @@ export async function clearPushTargetsForUser(userId) {
     .where(eq(devices.userId, userId));
 }
 
+/** 이 사람의 기기 중 [keepId] 말고 아직 로그인된 것을 전부 로그아웃(revoked)시킨다 — "다른 모든 기기에서 로그아웃". 바뀐 행들. */
+export async function revokeOtherDevices(userId, keepId) {
+  const conds = [eq(devices.userId, userId), isNull(devices.revokedAt)];
+  if (keepId) conds.push(ne(devices.id, keepId));
+  return db
+    .update(devices)
+    .set({ revokedAt: new Date() })
+    .where(and(...conds))
+    .returning();
+}
+
 export async function revokeDevice(id, userId) {
   const [row] = await db
     .update(devices)

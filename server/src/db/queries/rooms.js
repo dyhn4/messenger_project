@@ -508,6 +508,19 @@ export async function getMemberLastReadAnnouncementAt(roomId, userId) {
   return row?.lastReadAnnouncementAt ? new Date(row.lastReadAnnouncementAt).getTime() : 0;
 }
 
+/** 공지 읽음 확인(announcements.js readers)용 — 방 멤버(탈퇴한 사람 빼고)의 이름과 공지를 마지막으로 연 시각. */
+export function listMembersAnnouncementRead(roomId) {
+  return db
+    .select({
+      userId: users.id,
+      name: sql`coalesce(${users.name}, ${users.username})`,
+      lastReadAnnouncementAt: roomMembers.lastReadAnnouncementAt,
+    })
+    .from(roomMembers)
+    .innerJoin(users, eq(users.id, roomMembers.userId))
+    .where(and(eq(roomMembers.roomId, roomId), isNull(users.deletedAt)));
+}
+
 export async function setMemberLastReadAnnouncementAt(roomId, userId, whenMs) {
   await db
     .update(roomMembers)

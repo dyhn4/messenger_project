@@ -128,8 +128,13 @@ class CallController extends ChangeNotifier {
 
   bool get connected => _room?.connectionState == ConnectionState.connected;
 
-  /// 통화에 들어간다. 이미 다른 방에서 통화 중이면 먼저 끊고 새로 연결한다.
-  Future<void> join(String chatRoomId, {String? roomLabel}) async {
+  /// 통화에 들어간다. 이미 다른 방에서 통화 중이면 먼저 끊고 새로 연결한다. [camera]가 false면 카메라를 끈 채(음성으로)
+  /// 들어간다 — 마이크는 켜고, 카메라는 통화 화면에서 나중에 켤 수 있다.
+  Future<void> join(
+    String chatRoomId, {
+    String? roomLabel,
+    bool camera = true,
+  }) async {
     if (_roomId == chatRoomId && (connected || _connecting)) return;
     await leave();
 
@@ -172,7 +177,7 @@ class CallController extends ChangeNotifier {
       }
       _updateLocalTier();
       await me?.setMicrophoneEnabled(true);
-      await me?.setCameraEnabled(true);
+      if (camera) await me?.setCameraEnabled(true);
       // 그사이 끊겼으면(서버가 바로 내보냄 등 — _onRoomDisconnected가 이미 정리했다) "통화 중" 알림을 다시 띄우지 않는다.
       if (!identical(_room, room)) return;
       // 연결에 성공한 뒤에 띄운다 — 실패한 통화에 알림만 남는 걸 막는다.

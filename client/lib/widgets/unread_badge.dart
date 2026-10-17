@@ -55,3 +55,21 @@ class MentionMarker extends StatelessWidget {
     );
   }
 }
+
+/// 방 목록에서 쓰다 만 글(임시 저장 — chat_draft_store.dart)이 있다는 표시 — 방 이름 옆의 작은 연필.
+class DraftMarker extends StatelessWidget {
+  const DraftMarker({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '임시 저장된 글',
+      child: Icon(
+        Icons.edit_outlined,
+        key: const ValueKey('draft-marker'),
+        size: 14,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+    );
+  }
+}

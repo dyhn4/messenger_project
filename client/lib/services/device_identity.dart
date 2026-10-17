@@ -79,25 +79,32 @@ class DeviceIdentity {
   }
 
   /// 이 기기를 서버에 등록(멱등)하고, 실패해도(오프라인 등) 앱 시작을 막지 않도록 조용히 무시한다
-  /// — 실제 비밀 대화를 시작/수락하려는 시점에 다시 시도되면 된다.
-  Future<void> registerWithServer(ApiClient api, {String? name}) async {
-    Future<void> register() async => api.registerDevice(
-      deviceId: deviceId,
-      name: name ?? AppPlatform.operatingSystem,
-      identityPublicKey: await publicKeyBase64(identityKeyPair),
-      signingPublicKey: await publicKeyBase64(signingKeyPair),
-    );
+  /// — 실제 비밀 대화를 시작/수락하려는 시점에 다시 시도되면 된다. 서버가 이 기기에 묶은 새 토큰 쌍을 주면 돌려준다(못 받으면 null).
+  Future<({String accessToken, String refreshToken})?> registerWithServer(
+    ApiClient api, {
+    String? name,
+  }) async {
+    Future<({String accessToken, String refreshToken})?> register() async =>
+        api.registerDevice(
+          deviceId: deviceId,
+          name: name ?? AppPlatform.operatingSystem,
+          identityPublicKey: await publicKeyBase64(identityKeyPair),
+          signingPublicKey: await publicKeyBase64(signingKeyPair),
+        );
     try {
-      await register();
+      return await register();
     } on DeviceOwnedByOtherException {
       // 이 기기 id는 다른 계정 것으로 서버에 있다(공용 PC에서 계정을 바꿔 로그인) — 서버는 남의 기기를
       // 덮어쓰지 않으니, 이 계정용으로 새 기기 id·키를 만들어 다시 등록한다.
       try {
         await _resetIdentity();
-        await register();
-      } catch (_) {}
+        return await register();
+      } catch (_) {
+        return null;
+      }
     } catch (_) {
       // 오프라인 등으로 실패해도 앱 사용 자체는 계속돼야 한다.
+      return null;
     }
   }
 

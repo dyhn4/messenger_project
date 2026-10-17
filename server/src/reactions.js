@@ -3,7 +3,7 @@ import { findMessageById } from './db/queries/messages.js';
 import { listReactionsForMessages, removeReaction, setReaction } from './db/queries/reactions.js';
 import { findRoomById, getDmHistoryFloor, isRoomMember } from './db/queries/rooms.js';
 import { isUuid } from './favoritesRules.js';
-import { isReactionEmoji, reactionDenial, REACTION_EMOJIS, summarizeReactions } from './reactionRules.js';
+import { isReactionEmoji, reactionDenial, summarizeReactions } from './reactionRules.js';
 
 /**
  * 메시지 공감(이모지 반응) — 규칙은 reactionRules.js. 공감 목록은 사람마다 다르지 않은 값([{ emoji, userIds }])이라 메시지
@@ -38,7 +38,7 @@ export function createReactionsRouter(io) {
   router.put('/messages/:id/reaction', async (req, res) => {
     const emoji = req.body?.emoji ?? null;
     if (emoji !== null && !isReactionEmoji(emoji)) {
-      return res.status(400).json({ error: `공감은 ${REACTION_EMOJIS.join(' ')} 중에서 고르세요.` });
+      return res.status(400).json({ error: '고를 수 없는 공감입니다. 앱을 최신 버전으로 업데이트해 주세요.' });
     }
     const message = isUuid(req.params.id) ? await findMessageById(req.params.id) : null;
     const room = message ? await findRoomById(message.roomId) : null;

@@ -13,6 +13,7 @@ import '../models/room.dart';
 import '../models/text_format.dart';
 import '../models/uploaded_attachment.dart';
 import 'api_client.dart' show ApiClient, ApiException, UploadCancelToken;
+import 'chat_draft_store.dart' show ChatDraft;
 import 'file_type_utils.dart';
 import 'image_thumbnail.dart';
 import 'memory_file.dart';
@@ -152,10 +153,12 @@ class RoomChatController extends ChangeNotifier {
   final Room room;
   final List<Message> messages = [];
 
-  /// 입력칸에 쓰다 만 글(서식·멘션 포함) — 다른 방에 갔다 와도 남아 있게, 입력칸(ChatInputBar)이
-  /// 사라질 때 여기에 맡겨 두고 다시 열 때 꺼낸다. 이 컨트롤러는 Session이 방마다 들고 있어서
-  /// 방을 옮겨도 남는다(앱을 껐다 켜면 사라진다). 비어 있으면 null.
-  ({String text, List<TextFormatRun>? format, List<Mention> mentions})? draft;
+  /// 입력칸에 쓰다 만 글(서식·멘션 포함, 임시 저장) — 입력칸(ChatInputBar)이 쓰는 동안·사라질 때 맡겨 두고 다시 열 때 꺼낸다.
+  /// 실제로는 Session의 [ChatDraftStore]에 방마다 들어 있어서 다른 방에 갔다 와도, 앱을 껐다 켜도 남는다(비밀 대화는 메모리에만).
+  /// 비어 있으면 null.
+  ChatDraft? get draft => _session.chatDrafts.get(room.id);
+  set draft(ChatDraft? value) =>
+      _session.chatDrafts.put(room.id, value, persist: !room.isSecret);
   bool loading = true;
   String? error;
   StreamSubscription? _readSub;

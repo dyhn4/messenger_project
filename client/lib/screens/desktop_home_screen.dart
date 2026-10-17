@@ -1982,6 +1982,12 @@ class _RoomTileState extends State<_RoomTile> {
                   color: Theme.of(context).hintColor,
                 ),
               ],
+              // 쓰다 만 글이 있는 방 — 지금 열어 둔 방은 입력칸에 보이니 표시하지 않는다.
+              if (widget.session.chatDrafts.has(widget.room.id) &&
+                  widget.session.activeRoomId != widget.room.id) ...[
+                const SizedBox(width: 4),
+                const DraftMarker(),
+              ],
             ],
           ),
           trailing: Row(

@@ -231,7 +231,15 @@ class ChatInputBarState extends State<ChatInputBar> {
     } else {
       TypingGate.instance.committed();
     }
+    // 쓰는 동안에도 잠깐 멈추면 임시 저장한다 — 앱이 갑자기 꺼져도 남게(보내고 비우면 지워진다).
+    _draftTimer?.cancel();
+    _draftTimer = Timer(_draftSaveDelay, () {
+      if (mounted) _saveDraft(widget.controller);
+    });
   }
+
+  Timer? _draftTimer;
+  static const _draftSaveDelay = Duration(milliseconds: 600);
 
   void _onFocusChange() {
     if (mounted) setState(() {});
@@ -254,6 +262,7 @@ class ChatInputBarState extends State<ChatInputBar> {
     }
     // 다른 방의 컨트롤러로 바뀌면 쓰던 글은 원래 방에 맡기고 새 방의 글을 꺼낸다.
     if (!identical(oldWidget.controller, widget.controller)) {
+      _draftTimer?.cancel();
       _saveDraft(oldWidget.controller);
       _controller.clear();
       _restoreDraft();
@@ -262,6 +271,7 @@ class ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
+    _draftTimer?.cancel();
     _saveDraft(widget.controller);
     widget.session.removeListener(_onSessionChanged);
     HardwareKeyboard.instance.removeHandler(_handleKey);

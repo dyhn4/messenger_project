@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:client/models/app_user.dart';
 import 'package:client/models/message.dart';
@@ -10,6 +11,7 @@ import 'package:client/services/notification_service.dart';
 import 'package:client/services/session.dart';
 import 'package:client/widgets/message_actions.dart';
 import 'package:client/widgets/message_bubble.dart';
+import 'package:client/widgets/message_reactions.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -332,5 +334,74 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('sheet-reaction-picker')), findsNothing);
     expect(requests, isEmpty);
+  });
+
+  group('고를 수 있는 공감(48개)', () {
+    test('서버 reactionRules.js의 목록과 글자 하나까지·순서까지 같다', () {
+      final source = File('../server/src/reactionRules.js').readAsStringSync();
+      final block = RegExp(
+        r'REACTION_EMOJIS = Object\.freeze\(\[([\s\S]*?)\]\)',
+      ).firstMatch(source)!.group(1)!;
+      final server = [
+        for (final m in RegExp(r"'([^']+)'").allMatches(block)) m.group(1)!,
+      ];
+      expect(reactionEmojis, server);
+      expect(reactionEmojis.toSet(), hasLength(48));
+      final quick = RegExp(
+        r'QUICK_REACTION_COUNT = (\d+)',
+      ).firstMatch(source)!.group(1);
+      expect(quickReactionCount, int.parse(quick!));
+    });
+
+    testWidgets('고르는 줄은 자주 쓰는 여섯 개 + "+", 누르면 나머지가 펼쳐진다', (tester) async {
+      final picked = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: ReactionPicker(selected: null, onPicked: picked.add),
+            ),
+          ),
+        ),
+      );
+      expect(find.byKey(const ValueKey('pick-reaction-👍')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pick-reaction-🔥')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('pick-reaction-more')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('reaction-picker-grid')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('pick-reaction-🔥')));
+      expect(picked, ['🔥']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('내 공감이 펼친 쪽에 있으면 처음부터 펼쳐 둔다', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: ReactionPicker(selected: '🚀', onPicked: (_) {}),
+            ),
+          ),
+        ),
+      );
+      expect(
+        find.byKey(const ValueKey('reaction-picker-grid')),
+        findsOneWidget,
+      );
+    });
+
+    test('펼친 쪽 이모지도 정해 둔 순서로 놓인다', () {
+      final next = reactionsWith(
+        [
+          const MessageReaction(emoji: '🚀', userIds: ['u2']),
+        ],
+        'u1',
+        '👍',
+      );
+      expect(next.map((r) => r.emoji), ['👍', '🚀']);
+    });
   });
 }

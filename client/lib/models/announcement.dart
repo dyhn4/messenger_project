@@ -157,3 +157,46 @@ class AnnouncementComment {
               ),
       );
 }
+
+/// 공지 읽음 확인 — 이 방 멤버 중 읽은 사람(먼저 읽은 순)과 아직 안 읽은 사람(이름순). 서버 GET
+/// /rooms/:id/announcements/:announcementId/readers(server/src/announcementReadRules.js — 공지가 올라온 뒤 공지 목록·상세를 연 사람이
+/// 읽은 쪽, 쓴 사람은 늘 읽은 쪽).
+class AnnouncementReaders {
+  final List<({String userId, String name, DateTime readAt})> read;
+  final List<({String userId, String name})> unread;
+
+  const AnnouncementReaders({required this.read, required this.unread});
+
+  /// [userId]를 읽은 쪽으로 옮긴 것 — 지금 이 공지를 열어 보고 있는 나(서버에 읽음이 닿기 전에 받은 목록이어도).
+  AnnouncementReaders markRead(String? userId, DateTime at) {
+    final me = unread.where((r) => r.userId == userId).firstOrNull;
+    if (me == null) return this;
+    return AnnouncementReaders(
+      read: [...read, (userId: me.userId, name: me.name, readAt: at)],
+      unread: [
+        for (final r in unread)
+          if (r.userId != userId) r,
+      ],
+    );
+  }
+
+  factory AnnouncementReaders.fromJson(Map<String, dynamic> j) =>
+      AnnouncementReaders(
+        read: [
+          for (final r in (j['read'] as List? ?? const []))
+            if (r is Map && r['userId'] is String)
+              (
+                userId: r['userId'] as String,
+                name: r['name'] as String? ?? '',
+                readAt: DateTime.fromMillisecondsSinceEpoch(
+                  (r['readAt'] as num?)?.toInt() ?? 0,
+                ),
+              ),
+        ],
+        unread: [
+          for (final r in (j['unread'] as List? ?? const []))
+            if (r is Map && r['userId'] is String)
+              (userId: r['userId'] as String, name: r['name'] as String? ?? ''),
+        ],
+      );
+}

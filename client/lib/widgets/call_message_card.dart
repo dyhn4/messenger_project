@@ -66,11 +66,12 @@ class _CallMessageCardState extends State<CallMessageCard> {
     }
   }
 
-  Future<void> _join() async {
+  /// [camera]가 false면 카메라를 끈 채(음성으로) 들어간다.
+  Future<void> _join({bool camera = true}) async {
     final session = widget.session;
     if (session.callController.roomId != widget.room.id) {
       try {
-        await session.joinCall(widget.room.id);
+        await session.joinCall(widget.room.id, camera: camera);
       } catch (e) {
         if (mounted) showAppToast(context, '통화에 참여하지 못했습니다: $e');
         return;
@@ -88,11 +89,7 @@ class _CallMessageCardState extends State<CallMessageCard> {
     final missed = !card.active && !card.answered;
 
     final (IconData icon, Color color, String title) = card.active
-        ? (
-            Icons.videocam,
-            Colors.green,
-            '화상회의 진행 중 · ${_elapsedText(card)}',
-          )
+        ? (Icons.videocam, Colors.green, '화상회의 진행 중 · ${_elapsedText(card)}')
         : missed
         ? (Icons.missed_video_call, scheme.error, '부재중 화상회의')
         : (
@@ -197,15 +194,29 @@ class _CallMessageCardState extends State<CallMessageCard> {
         final joined = widget.session.callController.roomId == widget.room.id;
         return Padding(
           padding: const EdgeInsets.only(left: 6),
-          child: FilledButton(
-            key: const ValueKey('call-card-join'),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.green,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-            ),
-            onPressed: _join,
-            child: Text(joined ? '통화 화면' : '참여'),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 음성으로 참여(카메라 끔) — 이미 들어와 있으면 필요 없다.
+              if (!joined)
+                IconButton(
+                  key: const ValueKey('call-card-join-voice'),
+                  tooltip: '음성으로 참여(카메라 끔)',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.mic_none, color: Colors.green),
+                  onPressed: () => _join(camera: false),
+                ),
+              FilledButton(
+                key: const ValueKey('call-card-join'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+                onPressed: _join,
+                child: Text(joined ? '통화 화면' : '참여'),
+              ),
+            ],
           ),
         );
       },

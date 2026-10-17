@@ -27,6 +27,7 @@ import '../widgets/user_status_dialogs.dart'
 import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import 'my_devices_dialog.dart';
 
 /// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 이름 + 등급 + 팀/직책
 /// (member_profile_dialog.dart의 다른 사람 프로필 카드와 같은 모양) + 나와의 대화 + 개인정보 설정 +
@@ -682,6 +683,34 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                         child: _PasswordChangePanel(
                           session: widget.session,
                           onDone: () => _toggle(_InfoSection.password),
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      // 로그인한 기기 — 기기마다 로그아웃·다른 모든 기기에서 로그아웃(my_devices_dialog.dart).
+                      InkWell(
+                        key: const ValueKey('profile-devices'),
+                        onTap: () =>
+                            showMyDevicesDialog(context, widget.session),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 14,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.devices_outlined,
+                                size: 18,
+                                color: Theme.of(context).hintColor,
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(child: Text('로그인한 기기')),
+                              Icon(
+                                Icons.chevron_right,
+                                color: Theme.of(context).hintColor,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       const Divider(height: 1),

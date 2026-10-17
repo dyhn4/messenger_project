@@ -565,7 +565,8 @@ export function createUsersRouter(io) {
     // 다시 붙을 수 있도록 응답에 새 토큰 쌍을 실어 보낸다. 다른 기기는 여기서 끊고 끝.
     io.in(`user:${user.id}`).disconnectSockets(true);
 
-    res.json({ ...issueTokenPair(updated), userId: updated.id, username: updated.username });
+    // 이 기기에 묶인 토큰이었으면 새 토큰도 그 기기에 묶는다("내 기기"에서 이 기기만 로그아웃할 수 있게).
+    res.json({ ...issueTokenPair(updated, { deviceId: req.user.did }), userId: updated.id, username: updated.username });
   });
 
   /**

@@ -474,6 +474,7 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
   }
 
   Future<void> _load() async {
+    unawaited(_loadReaders());
     try {
       final comments = await widget.session.api!.fetchAnnouncementComments(
         widget.room.id,
@@ -482,6 +483,23 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
       if (mounted) setState(() => _comments = comments);
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  /// 읽음 확인(읽은 사람·안 읽은 사람) — 못 받으면(예전 서버 등) 표시만 하지 않는다.
+  AnnouncementReaders? _readers;
+
+  Future<void> _loadReaders() async {
+    try {
+      final readers = await widget.session.api!.fetchAnnouncementReaders(
+        widget.room.id,
+        _announcement.id,
+      );
+      // 지금 보고 있는 나는 읽은 쪽이다(열면서 보낸 읽음이 서버에 닿기 전에 받은 목록일 수 있다).
+      final mine = readers.markRead(widget.session.userId, DateTime.now());
+      if (mounted) setState(() => _readers = mine);
+    } catch (_) {
+      // 부가 표시라 조용히 넘어간다.
     }
   }
 
@@ -691,9 +709,30 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
                 Divider(height: 1, color: colors.border),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(0, 12, 8, 4),
-                  child: PostCommentCount(
-                    count,
-                    textKey: const ValueKey('announcement-comment-count'),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: PostCommentCount(
+                          count,
+                          textKey: const ValueKey('announcement-comment-count'),
+                        ),
+                      ),
+                      if (_readers case final readers?)
+                        TextButton.icon(
+                          key: const ValueKey('announcement-readers'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          icon: const Icon(Icons.done_all, size: 16),
+                          label: Text(
+                            '읽음 ${readers.read.length} · 안 읽음 ${readers.unread.length}',
+                          ),
+                          onPressed: () {
+                            unawaited(_loadReaders());
+                            showAnnouncementReadersDialog(context, readers);
+                          },
+                        ),
+                    ],
                   ),
                 ),
                 PostCommentList<AnnouncementComment>(
@@ -861,3 +900,91 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
     sendKey: const ValueKey('announcement-comment-send'),
   );
 }
+
+/// 공지 읽음 확인 대화상자 — "읽음 N"·"안 읽음 M" 두 탭에 이름(읽은 쪽은 읽은 시각도)을 늘어놓는다.
+Future<void> showAnnouncementReadersDialog(
+  BuildContext context,
+  AnnouncementReaders readers,
+) => showDialog<void>(
+  context: context,
+  builder: (dialogContext) {
+    final hint = Theme.of(dialogContext).hintColor;
+    Widget empty(String text) => Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(text, style: TextStyle(color: hint)),
+      ),
+    );
+    return AlertDialog(
+      title: const Text('공지 읽음 확인'),
+      contentPadding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+      content: SizedBox(
+        width: 360,
+        height: 420,
+        child: DefaultTabController(
+          length: 2,
+          child: Column(
+            children: [
+              TabBar(
+                tabs: [
+                  Tab(
+                    key: const ValueKey('announcement-readers-read-tab'),
+                    text: '읽음 ${readers.read.length}',
+                  ),
+                  Tab(
+                    key: const ValueKey('announcement-readers-unread-tab'),
+                    text: '안 읽음 ${readers.unread.length}',
+                  ),
+                ],
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    readers.read.isEmpty
+                        ? empty('아직 읽은 사람이 없습니다.')
+                        : ListView(
+                            children: [
+                              for (final r in readers.read)
+                                ListTile(
+                                  dense: true,
+                                  leading: const Icon(Icons.done, size: 18),
+                                  title: Text(r.name),
+                                  trailing: Text(
+                                    formatPostDateTime(r.readAt),
+                                    style: TextStyle(fontSize: 11, color: hint),
+                                  ),
+                                ),
+                            ],
+                          ),
+                    readers.unread.isEmpty
+                        ? empty('모두 읽었습니다.')
+                        : ListView(
+                            children: [
+                              for (final r in readers.unread)
+                                ListTile(
+                                  dense: true,
+                                  leading: Icon(
+                                    Icons.schedule,
+                                    size: 18,
+                                    color: hint,
+                                  ),
+                                  title: Text(r.name),
+                                ),
+                            ],
+                          ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('닫기'),
+        ),
+      ],
+    );
+  },
+);

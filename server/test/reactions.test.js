@@ -3,11 +3,23 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
-import { isReactionEmoji, reactionDenial, REACTION_EMOJIS, summarizeReactions } from '../src/reactionRules.js';
+import {
+  isReactionEmoji,
+  QUICK_REACTION_COUNT,
+  reactionDenial,
+  REACTION_EMOJIS,
+  summarizeReactions,
+} from '../src/reactionRules.js';
 
-test('고를 수 있는 이모지는 정해 둔 6개뿐', () => {
-  assert.deepEqual([...REACTION_EMOJIS], ['👍', '❤️', '😂', '😮', '😢', '✅']);
-  for (const e of REACTION_EMOJIS) assert.equal(isReactionEmoji(e), true);
+test('고를 수 있는 이모지는 정해 둔 48개뿐 — 앞의 여섯은 예전부터 있던 것, 겹치는 것·조합(ZWJ) 이모지 없음', () => {
+  assert.equal(REACTION_EMOJIS.length, 48);
+  assert.equal(new Set(REACTION_EMOJIS).size, REACTION_EMOJIS.length);
+  assert.deepEqual(REACTION_EMOJIS.slice(0, QUICK_REACTION_COUNT), ['👍', '❤️', '😂', '😮', '😢', '✅']);
+  for (const e of REACTION_EMOJIS) {
+    assert.equal(isReactionEmoji(e), true);
+    assert.equal(e.includes('\u200d'), false, `${e}는 조합 이모지`);
+    assert.ok([...e].length <= 2, `${e}는 글자 하나(+ 변형 선택자)`);
+  }
   assert.equal(isReactionEmoji('❤'), false, '변형 선택자(VS16) 없는 하트는 다른 글자');
   assert.equal(isReactionEmoji('👍🏽'), false);
   assert.equal(isReactionEmoji('👍 '), false);
@@ -23,10 +35,12 @@ test('요약: 메시지별로, 이모지는 정해 둔 순서·사람은 누른 
     { messageId: 'm2', userId: 'a', emoji: '😂' },
     { messageId: 'm1', userId: 'c', emoji: '✅' },
     { messageId: 'm1', userId: 'd', emoji: '🔥' },
+    { messageId: 'm1', userId: 'e', emoji: '🦄' },
   ]);
   assert.deepEqual(summary.get('m1'), [
     { emoji: '👍', userIds: ['b'] },
     { emoji: '✅', userIds: ['a', 'c'] },
+    { emoji: '🔥', userIds: ['d'] },
   ]);
   assert.deepEqual(summary.get('m2'), [{ emoji: '😂', userIds: ['a'] }]);
   assert.equal(summary.has('m3'), false);

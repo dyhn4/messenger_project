@@ -26,7 +26,7 @@ import { sendMail } from "./mailer.js";
 import { maskEmail, mailReady } from "./mailRules.js";
 import { findIdMail } from "./mailTemplates.js";
 import { passwordPolicyError } from "./passwordPolicy.js";
-import { accountState } from "./authState.js";
+import { accountState, deviceActive } from "./authState.js";
 import { parseUserName } from "./avatarRules.js";
 import { endUserCallAccess } from "./callAccess.js";
 import { clearPushTargetsForUser } from "./db/queries/devices.js";
@@ -242,15 +242,21 @@ const usesEmailRecovery = (user, settings) => mailReady(settings) && !!user?.ema
 const UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR =
   "이 계정은 이메일로 받은 코드로 비밀번호를 찾습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도하세요.";
 
-export function issueTokenPair(user) {
+/**
+ * AccessToken·RefreshToken 한 쌍. [deviceId]를 주면 그 기기에 묶인 토큰(`did`)이 된다 — 그 기기를 "내 기기"에서 로그아웃시키면
+ * (devices.js DELETE /devices/:id) 그 기기의 토큰만 REST·갱신·소켓에서 막힌다(authState.js deviceActive). 기기 등록 전에 받은
+ * 토큰(로그인 직후·예전 앱)은 묶이지 않아서, 그런 토큰까지 끊으려면 "다른 모든 기기에서 로그아웃"(tokenVersion)을 쓴다.
+ */
+export function issueTokenPair(user, { deviceId = null } = {}) {
   const tokenVersion = user.tokenVersion ?? 0;
+  const did = deviceId ? { did: deviceId } : {};
   const accessToken = jwt.sign(
-    { sub: user.id, username: user.username, tokenVersion, type: "access" },
+    { sub: user.id, username: user.username, tokenVersion, ...did, type: "access" },
     JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_TTL },
   );
   const refreshToken = jwt.sign(
-    { sub: user.id, tokenVersion, type: "refresh" },
+    { sub: user.id, tokenVersion, ...did, type: "refresh" },
     JWT_SECRET,
     { expiresIn: REFRESH_TOKEN_TTL },
   );
@@ -801,8 +807,14 @@ export function createAuthRouter(io) {
         .status(401)
         .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
     }
+    // "내 기기"에서 로그아웃시킨 기기의 RefreshToken — 그 기기만 다시 로그인해야 한다.
+    if (payload.did && !(await deviceActive(payload.did, user.id))) {
+      return res
+        .status(401)
+        .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
+    }
 
-    res.json({ accessToken: issueTokenPair(user).accessToken });
+    res.json({ accessToken: issueTokenPair(user, { deviceId: payload.did }).accessToken });
   });
 
   return router;
@@ -830,6 +842,10 @@ export async function requireAuth(req, res, next) {
   // 거절되면 로그아웃된다.
   const state = await accountState(payload.sub);
   if (state.blocked || state.tokenVersion !== (payload.tokenVersion ?? 0)) {
+    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+  }
+  // 기기에 묶인 토큰이면 그 기기가 아직 로그인돼 있는지도 본다("내 기기"에서 로그아웃 — 같은 30초 캐시, 로그아웃하면 바로 지워진다).
+  if (payload.did && !(await deviceActive(payload.did, payload.sub))) {
     return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
   }
   req.user = payload;
@@ -864,6 +880,10 @@ export async function verifySocketToken(token) {
   }
   // 정지/탈퇴한 계정은 실시간 연결도 막는다.
   if (user.suspendedAt || user.deletedAt) {
+    throw new Error("unauthorized");
+  }
+  // "내 기기"에서 로그아웃시킨 기기의 토큰.
+  if (payload.did && !(await deviceActive(payload.did, user.id))) {
     throw new Error("unauthorized");
   }
   return payload;

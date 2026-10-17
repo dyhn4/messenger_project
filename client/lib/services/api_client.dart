@@ -16,6 +16,7 @@ import '../models/invite_result.dart';
 import '../models/mail_settings.dart';
 import '../models/team_invite_link.dart';
 import '../models/mention.dart';
+import '../models/my_device.dart';
 import '../models/message.dart';
 import '../models/message_reaction.dart';
 import '../models/message_reminder.dart';
@@ -1918,6 +1919,16 @@ class ApiClient {
     );
   }
 
+  /// 공지 읽음 확인 — 읽은 사람·안 읽은 사람(server/src/announcements.js readers).
+  Future<AnnouncementReaders> fetchAnnouncementReaders(
+    String roomId,
+    String announcementId,
+  ) async => AnnouncementReaders.fromJson(
+    (await _get('/api/rooms/$roomId/announcements/$announcementId/readers')
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
   /// 공지에 달린 댓글 목록(오래된 순).
   Future<List<AnnouncementComment>> fetchAnnouncementComments(
     String roomId,
@@ -3295,8 +3306,9 @@ class ApiClient {
   }
 
   /// 비밀 대화(E2EE)용 기기 신원 등록(멱등 — 같은 deviceId면 공개키만 갱신). 개인키는 절대 여기
-  /// 담기지 않는다(device_identity.dart 참고).
-  Future<void> registerDevice({
+  /// 담기지 않는다(device_identity.dart 참고). 서버가 이 기기에 묶은 새 토큰 쌍을 주면 돌려준다("내 기기"에서 이 기기만
+  /// 로그아웃시킬 수 있게 — server/src/devices.js). 예전 서버면 null.
+  Future<({String accessToken, String refreshToken})?> registerDevice({
     required String deviceId,
     String? name,
     required String identityPublicKey,
@@ -3317,12 +3329,48 @@ class ApiClient {
       ),
     );
     if (res.statusCode == 409) throw const DeviceOwnedByOtherException();
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
     if (res.statusCode >= 400) {
-      final decoded = jsonDecode(utf8.decode(res.bodyBytes));
       throw ApiException(
         (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
       );
     }
+    final tokens = decoded is Map ? decoded['tokens'] : null;
+    if (tokens is! Map) return null;
+    final access = tokens['accessToken'];
+    final refresh = tokens['refreshToken'];
+    if (access is! String || refresh is! String) return null;
+    return (accessToken: access, refreshToken: refresh);
+  }
+
+  /// 내 기기 목록("로그인한 기기") — 로그아웃시킨 기기도 `revoked`로 같이 온다. [currentDeviceId]는 이 앱의 기기 id.
+  Future<List<MyDevice>> fetchMyDevices({String? currentDeviceId}) async {
+    final list = await _get('/api/devices') as List;
+    return [
+      for (final d in list)
+        MyDevice.fromJson(
+          (d as Map).cast<String, dynamic>(),
+          currentId: currentDeviceId,
+        ),
+    ];
+  }
+
+  /// 기기 하나를 로그아웃시킨다 — 그 기기의 토큰·소켓·푸시가 끊긴다.
+  Future<void> logoutDevice(String deviceId) async {
+    await _delete('/api/devices/${Uri.encodeComponent(deviceId)}');
+  }
+
+  /// 이 기기 말고 모든 기기에서 로그아웃 — 이 기기에 묶인 새 토큰 쌍과 로그아웃시킨 기기 수.
+  Future<({String accessToken, String refreshToken, int revokedCount})>
+  logoutOtherDevices({String? deviceId}) async {
+    final body =
+        await _post('/api/devices/logout-others', {'deviceId': ?deviceId})
+            as Map;
+    return (
+      accessToken: body['accessToken'] as String,
+      refreshToken: body['refreshToken'] as String,
+      revokedCount: (body['revokedCount'] as num?)?.toInt() ?? 0,
+    );
   }
 
   /// FCM 토큰을 등록/갱신한다(안드로이드 전용). null을 보내면(로그아웃 등) 서버가 토큰을

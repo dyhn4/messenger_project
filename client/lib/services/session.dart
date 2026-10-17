@@ -19,6 +19,7 @@ import '../models/invite_result.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/message_reaction.dart';
+import '../models/my_device.dart';
 import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
@@ -38,6 +39,7 @@ import 'calendar_api.dart';
 import 'calendar_controller.dart';
 import 'call_controller.dart';
 import 'call_quality.dart' show callVideoTierFromWire;
+import 'chat_draft_store.dart';
 import 'chat_socket.dart';
 import 'groupware_api.dart';
 import 'notification_api.dart';
@@ -297,6 +299,9 @@ class Session extends ChangeNotifier {
 
   /// 통합 즐겨찾기(메시지·파일·댓글·투표·대화방·멤버) — 내가 담은 id와 탭별 목록, 소켓 favorite:changed
   /// (favorites_controller.dart). 로그인하면 [_enterApp]이 id를 받아 두고, 로그아웃하면 [logout]이 비운다.
+  /// 대화방마다 쓰다 만 글(임시 저장 — chat_draft_store.dart). 어느 방에 글이 생기거나 없어지면 방 목록의 ✏️를 다시 그린다.
+  late final chatDrafts = ChatDraftStore(onChanged: notifyListeners);
+
   late final favorites = FavoritesController(
     apiProvider: () => RemoteFavoritesApi(api!),
     teamIdProvider: () => currentTeam?.id,
@@ -579,6 +584,8 @@ class Session extends ChangeNotifier {
     final wasBackground = !appInForeground;
     appInForeground = value;
     _persistForegroundState();
+    // 뒤로 가면(휴대폰에서 앱 전환) 곧 꺼질 수 있으니 쓰던 글을 바로 저장한다.
+    if (!value) unawaited(chatDrafts.flush());
     if (value && wasBackground && _activeRoomId != null) {
       _controllers[_activeRoomId]?.markReadNow();
       clearUnreadCount(_activeRoomId!);
@@ -1347,6 +1354,49 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ───────────── 로그인한 기기("내 기기" — server/src/devices.js) ─────────────
+
+  /// 새 토큰 쌍으로 바꿔 끼운다 — "로그인 상태 유지"로 저장해 둔 경우에만 저장소에도 쓴다(비밀번호 변경과 같은 규칙).
+  Future<void> _adoptTokens(String access, String refresh) async {
+    token = access;
+    refreshToken = refresh;
+    api?.token = access;
+    if (_prefs.containsKey(_kToken)) {
+      await _prefs.setString(_kToken, access);
+      await _prefs.setString(_kRefreshToken, refresh);
+    }
+  }
+
+  /// 내 계정으로 로그인한 기기(로그아웃시킨 것 빼고 — 이 기기가 맨 위).
+  Future<List<MyDevice>> fetchMyDevices() async => activeDevicesFirstCurrent(
+    await api!.fetchMyDevices(currentDeviceId: deviceIdentity?.deviceId),
+  );
+
+  /// 기기 하나를 로그아웃시킨다. 이 기기면 서버에 알린 뒤 여기서도 로그아웃한다.
+  Future<void> logoutDevice(MyDevice device) async {
+    await api!.logoutDevice(device.id);
+    if (device.current || device.id == deviceIdentity?.deviceId) {
+      await logout();
+    }
+  }
+
+  /// 이 기기 말고 모든 기기에서 로그아웃 — 기기에 묶이지 않은 예전 토큰까지 전부 끊긴다(토큰 버전). 이 기기는 새 토큰으로
+  /// 바꾸고 소켓을 다시 붙인다(서버가 이 사람의 소켓을 모두 끊었다). 로그아웃시킨 기기 수.
+  Future<int> logoutOtherDevices() async {
+    final result = await api!.logoutOtherDevices(
+      deviceId: deviceIdentity?.deviceId,
+    );
+    await _adoptTokens(result.accessToken, result.refreshToken);
+    if (serverUrl != null) {
+      await chatSocket.connect(
+        baseUrl: serverUrl!,
+        token: token!,
+        deviceId: deviceIdentity?.deviceId,
+      );
+    }
+    return result.revokedCount;
+  }
+
   /// 프로젝트는 정회원 이상만(server/src/projects.js의 게이트와 동일 규칙).
   bool get canUseProjects => isServerAdmin || accountRole != AccountRole.guest;
 
@@ -1551,6 +1601,7 @@ class Session extends ChangeNotifier {
     if (canUseProjects) unawaited(refreshProjectUnread());
     unawaited(notificationCenter.refreshCounts());
     unawaited(notificationCenter.loadViewPrefs());
+    if (userId != null) unawaited(chatDrafts.load(_prefs, userId!));
     unawaited(favorites.loadIds());
 
     // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
@@ -1575,7 +1626,11 @@ class Session extends ChangeNotifier {
     // 상태에서 두 요청이 거의 동시에 나가 _registerFcmToken이 먼저 도착해버리는 경쟁 상태가
     // 생긴다 — 이때 서버는 404를 돌려주고, _registerFcmToken은 그 실패를 조용히 삼켜서 FCM
     // 토큰이 영영 등록되지 않는다(원인을 알기 어려운 형태로). 기기 등록만 먼저 기다린다.
-    await deviceIdentity!.registerWithServer(api!);
+    // 서버가 이 기기에 묶은 새 토큰을 주면 바꿔 끼운다 — "로그인한 기기"에서 이 기기만 따로 로그아웃시킬 수 있게(예전 서버는 안 준다).
+    final bound = await deviceIdentity!.registerWithServer(api!);
+    if (bound != null) {
+      await _adoptTokens(bound.accessToken, bound.refreshToken);
+    }
     // 앱을 켤 때 — 꺼져 있던 동안 서버가 자동 삭제·삭제했거나 방째 없앤 비밀 대화의 평문을 이 기기에서도
     // 지우고(S34 — 그 알림은 다시 오지 않는다), 다음 예정 시각에 스스로 다시 정리하게 한다. 기기 등록 뒤에
     // 한다 — 공용 PC에서 계정을 바꿔 로그인하면 기기 등록이 같은 저장소에 새 기기 키를 쓰는데, Windows
@@ -2271,7 +2326,7 @@ class Session extends ChangeNotifier {
 
   /// 통화를 걸거나(아무도 없으면) 진행 중인 통화에 합류한다. LiveKit 연결에 성공한 뒤에야
   /// 소켓으로 알려서, 연결 실패한 사람이 참가자 목록에 남지 않게 한다.
-  Future<void> joinCall(String roomId) async {
+  Future<void> joinCall(String roomId, {bool camera = true}) async {
     incomingCallRoomId = null;
     _markCallAnswered(roomId);
     notifyListeners();
@@ -2279,6 +2334,7 @@ class Session extends ChangeNotifier {
     await callController.join(
       roomId,
       roomLabel: match.isEmpty ? null : match.first.displayName(userId ?? ''),
+      camera: camera,
     );
     // 연결 직후 끊겼으면(서버가 바로 내보냄 등 — 안내는 _handleCallDisconnected가 띄웠다) 참여를 알리지 않는다. 같은 방
     // 참여가 이미 연결 중이라 join()이 바로 돌아온 것이면 그쪽이 연결을 마친 뒤에 알린다 — 연결 전에 알리면 서버가 아직
@@ -5263,6 +5319,9 @@ class Session extends ChangeNotifier {
     calendar.reset(); // 캘린더 캐시도 — 다음에 로그인하는 사람에게 남지 않게.
     notificationCenter.reset(); // 알림 센터 목록·개수도 같은 이유로.
     favorites.reset(); // 즐겨찾기 id·목록도.
+    unawaited(
+      chatDrafts.reset(),
+    ); // 임시 저장 글도 메모리에서는(이 기기 저장분은 같은 사람이 다시 로그인하면 돌아온다).
     albums.reset(); // 앨범 목록·올리는 중인 파일도.
     _selfRoomRequests.clear();
     _deletingTopicIds.clear();

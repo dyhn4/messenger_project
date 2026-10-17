@@ -930,242 +930,249 @@ class RichFormatToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        Widget button(
-          IconData icon,
-          String tooltip,
-          VoidCallback run, {
-          bool active = false,
-        }) => IconButton(
-          icon: Icon(icon, size: 18),
-          tooltip: tooltip,
-          isSelected: active,
-          color: theme.hintColor,
-          selectedIcon: Icon(icon, size: 18, color: richFormatActiveColor),
-          style: IconButton.styleFrom(
-            backgroundColor: active
-                ? richFormatActiveColor.withValues(alpha: 0.14)
-                : null,
-          ),
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-          padding: EdgeInsets.zero,
-          onPressed: () {
-            run();
-            focusNode.requestFocus();
-          },
-        );
-        Widget gap() => Container(
-          width: 1,
-          height: 16,
-          margin: const EdgeInsets.symmetric(horizontal: 6),
-          color: theme.dividerColor,
-        );
-        final c = controller;
-        Widget heading(int level) {
-          final flag = switch (level) {
-            1 => Fmt.h1,
-            2 => Fmt.h2,
-            _ => Fmt.h3,
-          };
-          final on = c.isActive(flag);
-          return Tooltip(
-            message: '제목 $level',
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: () {
-                c.toggleHeading(level);
-                focusNode.requestFocus();
-              },
-              child: Container(
-                width: 30,
-                height: 30,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: on
-                      ? richFormatActiveColor.withValues(alpha: 0.14)
-                      : null,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  'H$level',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: on ? richFormatActiveColor : theme.hintColor,
-                  ),
-                ),
-              ),
+    // 단추를 눌러도 입력칸 "바깥"을 누른 것으로 치지 않는다 — 웹에서 터치하면 포커스를 놓았다가 곧 다시 잡는 사이에
+    // 안드로이드 웹 앱 화면 아래에 키보드만큼 빈 공간이 남는다(chat_input_bar.dart의 build 참고).
+    return TextFieldTapRegion(
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          Widget button(
+            IconData icon,
+            String tooltip,
+            VoidCallback run, {
+            bool active = false,
+          }) => IconButton(
+            icon: Icon(icon, size: 18),
+            tooltip: tooltip,
+            isSelected: active,
+            color: theme.hintColor,
+            selectedIcon: Icon(icon, size: 18, color: richFormatActiveColor),
+            style: IconButton.styleFrom(
+              backgroundColor: active
+                  ? richFormatActiveColor.withValues(alpha: 0.14)
+                  : null,
             ),
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            padding: EdgeInsets.zero,
+            onPressed: () {
+              run();
+              focusNode.requestFocus();
+            },
           );
-        }
-
-        Widget colorButton() {
-          final current = c.currentColor;
-          final shown = current == null
-              ? Colors.redAccent
-              : Color(0xFF000000 | current);
-          return MenuAnchor(
-            alignmentOffset: const Offset(0, 4),
-            menuChildren: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final rgb in palette)
-                      Padding(
-                        padding: const EdgeInsets.all(3),
-                        child: Tooltip(
-                          message: rgb == null ? '기본색' : '',
-                          child: InkWell(
-                            customBorder: const CircleBorder(),
-                            onTap: () {
-                              c.applyColor(rgb);
-                              focusNode.requestFocus();
-                            },
-                            child: Container(
-                              width: 22,
-                              height: 22,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: rgb == null
-                                    ? theme.colorScheme.surface
-                                    : Color(0xFF000000 | rgb),
-                                border: Border.all(
-                                  color: rgb == current
-                                      ? richFormatActiveColor
-                                      : theme.dividerColor,
-                                  width: rgb == current ? 2 : 1,
-                                ),
-                              ),
-                              child: rgb == null
-                                  ? Icon(
-                                      Icons.format_color_reset,
-                                      size: 14,
-                                      color: theme.hintColor,
-                                    )
-                                  : null,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-            builder: (context, menu, _) => Tooltip(
-              message: '글자색',
+          Widget gap() => Container(
+            width: 1,
+            height: 16,
+            margin: const EdgeInsets.symmetric(horizontal: 6),
+            color: theme.dividerColor,
+          );
+          final c = controller;
+          Widget heading(int level) {
+            final flag = switch (level) {
+              1 => Fmt.h1,
+              2 => Fmt.h2,
+              _ => Fmt.h3,
+            };
+            final on = c.isActive(flag);
+            return Tooltip(
+              message: '제목 $level',
               child: InkWell(
                 borderRadius: BorderRadius.circular(6),
-                onTap: () => menu.isOpen ? menu.close() : menu.open(),
-                child: SizedBox(
+                onTap: () {
+                  c.toggleHeading(level);
+                  focusNode.requestFocus();
+                },
+                child: Container(
                   width: 30,
                   height: 30,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'A',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.onSurface,
-                          height: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Container(width: 14, height: 3, color: shown),
-                    ],
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: on
+                        ? richFormatActiveColor.withValues(alpha: 0.14)
+                        : null,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'H$level',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: on ? richFormatActiveColor : theme.hintColor,
+                    ),
                   ),
                 ),
               ),
+            );
+          }
+
+          Widget colorButton() {
+            final current = c.currentColor;
+            final shown = current == null
+                ? Colors.redAccent
+                : Color(0xFF000000 | current);
+            return MenuAnchor(
+              alignmentOffset: const Offset(0, 4),
+              menuChildren: [
+                // 색 고르기 판은 오버레이에 따로 뜬다 — 도구모음처럼 입력칸 바깥으로 치지 않는다.
+                TextFieldTapRegion(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final rgb in palette)
+                          Padding(
+                            padding: const EdgeInsets.all(3),
+                            child: Tooltip(
+                              message: rgb == null ? '기본색' : '',
+                              child: InkWell(
+                                customBorder: const CircleBorder(),
+                                onTap: () {
+                                  c.applyColor(rgb);
+                                  focusNode.requestFocus();
+                                },
+                                child: Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: rgb == null
+                                        ? theme.colorScheme.surface
+                                        : Color(0xFF000000 | rgb),
+                                    border: Border.all(
+                                      color: rgb == current
+                                          ? richFormatActiveColor
+                                          : theme.dividerColor,
+                                      width: rgb == current ? 2 : 1,
+                                    ),
+                                  ),
+                                  child: rgb == null
+                                      ? Icon(
+                                          Icons.format_color_reset,
+                                          size: 14,
+                                          color: theme.hintColor,
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              builder: (context, menu, _) => Tooltip(
+                message: '글자색',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () => menu.isOpen ? menu.close() : menu.open(),
+                  child: SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          'A',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: theme.colorScheme.onSurface,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Container(width: 14, height: 3, color: shown),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+
+          // 도구모음을 눌러도 입력칸 밖을 누른 것으로 치지 않게(데스크톱은 밖을 누르면 포커스가
+          // 빠지면서 고른 글자 선택이 사라진다).
+          return TextFieldTapRegion(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 2,
+                children: [
+                  if (showColor) ...[colorButton(), gap()],
+                  if (showHeadings) ...[
+                    heading(1),
+                    heading(2),
+                    heading(3),
+                    gap(),
+                  ],
+                  button(
+                    Icons.format_bold,
+                    '굵게 (Ctrl+B)',
+                    () => c.toggle(Fmt.bold),
+                    active: c.isActive(Fmt.bold),
+                  ),
+                  button(
+                    Icons.format_italic,
+                    '기울임 (Ctrl+I)',
+                    () => c.toggle(Fmt.italic),
+                    active: c.isActive(Fmt.italic),
+                  ),
+                  button(
+                    Icons.format_underlined,
+                    '밑줄 (Ctrl+U)',
+                    () => c.toggle(Fmt.underline),
+                    active: c.isActive(Fmt.underline),
+                  ),
+                  button(
+                    Icons.format_strikethrough,
+                    '취소선',
+                    () => c.toggle(Fmt.strike),
+                    active: c.isActive(Fmt.strike),
+                  ),
+                  gap(),
+                  button(
+                    Icons.link,
+                    '링크',
+                    () => _link(context),
+                    active: c.currentHref != null,
+                  ),
+                  button(
+                    Icons.code,
+                    '코드',
+                    () => c.toggle(Fmt.code),
+                    active: c.isActive(Fmt.code),
+                  ),
+                  button(
+                    Icons.format_quote,
+                    '인용',
+                    c.toggleQuote,
+                    active: c.isActive(Fmt.quote),
+                  ),
+                  gap(),
+                  button(
+                    Icons.format_list_numbered,
+                    '번호 목록',
+                    () => c.toggleList(ordered: true),
+                  ),
+                  button(
+                    Icons.format_list_bulleted,
+                    '글머리 목록',
+                    () => c.toggleList(ordered: false),
+                  ),
+                  if (showRule) ...[
+                    gap(),
+                    button(Icons.horizontal_rule, '구분선', c.insertRule),
+                  ],
+                  if (trailing.isNotEmpty) ...[gap(), ...trailing],
+                ],
+              ),
             ),
           );
-        }
-
-        // 도구모음을 눌러도 입력칸 밖을 누른 것으로 치지 않게(데스크톱은 밖을 누르면 포커스가
-        // 빠지면서 고른 글자 선택이 사라진다).
-        return TextFieldTapRegion(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            child: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 2,
-              children: [
-                if (showColor) ...[colorButton(), gap()],
-                if (showHeadings) ...[
-                  heading(1),
-                  heading(2),
-                  heading(3),
-                  gap(),
-                ],
-                button(
-                  Icons.format_bold,
-                  '굵게 (Ctrl+B)',
-                  () => c.toggle(Fmt.bold),
-                  active: c.isActive(Fmt.bold),
-                ),
-                button(
-                  Icons.format_italic,
-                  '기울임 (Ctrl+I)',
-                  () => c.toggle(Fmt.italic),
-                  active: c.isActive(Fmt.italic),
-                ),
-                button(
-                  Icons.format_underlined,
-                  '밑줄 (Ctrl+U)',
-                  () => c.toggle(Fmt.underline),
-                  active: c.isActive(Fmt.underline),
-                ),
-                button(
-                  Icons.format_strikethrough,
-                  '취소선',
-                  () => c.toggle(Fmt.strike),
-                  active: c.isActive(Fmt.strike),
-                ),
-                gap(),
-                button(
-                  Icons.link,
-                  '링크',
-                  () => _link(context),
-                  active: c.currentHref != null,
-                ),
-                button(
-                  Icons.code,
-                  '코드',
-                  () => c.toggle(Fmt.code),
-                  active: c.isActive(Fmt.code),
-                ),
-                button(
-                  Icons.format_quote,
-                  '인용',
-                  c.toggleQuote,
-                  active: c.isActive(Fmt.quote),
-                ),
-                gap(),
-                button(
-                  Icons.format_list_numbered,
-                  '번호 목록',
-                  () => c.toggleList(ordered: true),
-                ),
-                button(
-                  Icons.format_list_bulleted,
-                  '글머리 목록',
-                  () => c.toggleList(ordered: false),
-                ),
-                if (showRule) ...[
-                  gap(),
-                  button(Icons.horizontal_rule, '구분선', c.insertRule),
-                ],
-                if (trailing.isNotEmpty) ...[gap(), ...trailing],
-              ],
-            ),
-          ),
-        );
-      },
+        },
+      ),
     );
   }
 }
@@ -1383,10 +1390,16 @@ class RichFormatToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      icon: Icon(Icons.text_format, color: open ? richFormatActiveColor : null),
-      tooltip: open ? '서식 도구 닫기' : '서식 도구',
-      onPressed: onPressed,
+    // 누르면 쓰는 쪽이 입력칸 포커스를 다시 잡는다 — 도구모음과 같은 이유로 입력칸 바깥으로 치지 않는다.
+    return TextFieldTapRegion(
+      child: IconButton(
+        icon: Icon(
+          Icons.text_format,
+          color: open ? richFormatActiveColor : null,
+        ),
+        tooltip: open ? '서식 도구 닫기' : '서식 도구',
+        onPressed: onPressed,
+      ),
     );
   }
 }

@@ -623,9 +623,13 @@ class _ChatPanelState extends State<ChatPanel> {
         child: TapRegion(
           groupId: this,
           onTapOutside: (_) => _closeStickerPicker(),
-          child: StickerPicker(
-            onSelected: _selectSticker,
-            settings: widget.session.settings,
+          // 이모티콘을 고르면 입력칸 포커스를 다시 잡는다(_selectSticker) — 패널을 입력칸 바깥으로 치면 웹에서 터치할 때
+          // 포커스를 놓았다 다시 잡는 사이에 안드로이드 웹 앱 아래에 키보드만큼 빈 공간이 남는다(chat_input_bar.dart의 build).
+          child: TextFieldTapRegion(
+            child: StickerPicker(
+              onSelected: _selectSticker,
+              settings: widget.session.settings,
+            ),
           ),
         ),
       )

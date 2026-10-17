@@ -30,6 +30,7 @@ abstract class NotificationApi {
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
     bool? pushWhileOnline,
+    bool? emailDigest,
   });
 
   /// 기존 프로젝트 알림함(`/api/project-notifications`) — 최근 50개와 안 읽은 개수.
@@ -103,6 +104,7 @@ class RemoteNotificationApi implements NotificationApi {
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
     bool? pushWhileOnline,
+    bool? emailDigest,
   }) async => NotificationSettings.fromJson(
     Map<String, dynamic>.from(
       await _api.requestJson(
@@ -112,6 +114,7 @@ class RemoteNotificationApi implements NotificationApi {
               'mentionAll': ?mentionAll,
               'boardLevel': ?boardLevel?.wire,
               'pushWhileOnline': ?pushWhileOnline,
+              'emailDigest': ?emailDigest,
             },
           )
           as Map,

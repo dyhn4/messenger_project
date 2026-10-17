@@ -56,10 +56,16 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 **계정**
 - 회원가입/로그인, JWT AccessToken(1시간)+RefreshToken(30일) 발급/재발급
-- 회원가입 시 보안 질문(프리셋 5종 중 선택 또는 직접 작성)+답변 **필수** 등록
-- 아이디 찾기(이메일로 조회) → 그 자리에서 바로 비밀번호 찾기로 이어가기
-- 비밀번호 찾기: 아이디+이메일 확인 → 보안 질문 답변 확인(계정에 질문이 없으면 생략) → 새 비밀번호 설정, 단계별 플로팅 다이얼로그
-  (보안 질문이 없는 예전 계정은 사내망에서만 재설정 가능)
+- 회원가입 시 보안 질문(프리셋 5종 중 선택 또는 직접 작성)+답변 **필수** 등록 — 서버에 **메일 기능**([메일(SMTP)](#메일smtp))이
+  켜져 있으면 보안 질문 대신 **이메일 인증 코드**(6자리, 10분)로 가입하고 그 이메일은 "확인됨"이 됩니다
+- 아이디 찾기(이메일로 조회) → 그 자리에서 바로 비밀번호 찾기로 이어가기. 메일이 켜진 서버에서 이메일을 확인한 계정은 아이디를
+  화면에 보이지 않고 **그 이메일로 보냅니다**(이메일만 아는 사람이 아이디를 알아내지 못하게)
+- 비밀번호 찾기: 아이디+이메일 확인 → 본인 확인 → 새 비밀번호 설정, 단계별 플로팅 다이얼로그. 본인 확인은 메일이 켜진 서버에서
+  이메일을 확인한 계정이면 **그 이메일로 받은 재설정 코드**(보안 질문은 받지 않음), 그 밖에는 보안 질문 답변(계정에 질문이 없으면
+  생략 — 보안 질문이 없는 예전 계정은 사내망에서만 재설정 가능)
+- 이메일 확인(메일이 켜진 서버) — 이메일을 확인하지 않은 계정은 로그인하면 한 번 "이메일 확인" 창이 뜹니다("나중에"로 닫으면
+  다음 실행까지 다시 안 뜸). 개인정보 설정 → 이메일 관리에서도 "확인하기". 이메일을 바꿀 때는 새 주소로 받은 코드가 맞아야 바뀌고,
+  확인됐던 예전 주소로 "이메일이 바뀌었습니다" 알림을 보냅니다
 - 새 비밀번호는 **8~20자**(가입·비밀번호 찾기·비밀번호 변경 공통 — `server/src/passwordPolicy.js`, 앱 `password_policy.dart`).
   이미 쓰던 짧은 비밀번호로 로그인하는 건 사내망에서는 그대로 됩니다. 사내망 밖에서는 8자보다 짧은 비밀번호를 맞는지 보지도 않고
   늘 같은 문구(`사내망 밖에서는 8자 이상인 비밀번호로만 로그인할 수 있습니다. …`)로 거절하고 실패 횟수로 셉니다(맞았을 때만 다른
@@ -729,6 +735,46 @@ token을 넣고 "자동 갱신 사용"을 켠 뒤 저장하면, 바로 한 번 �
 표시, 확인 방식별 준비 여부를 쉬운 말로 보여 주고, 카드 오른쪽 위 새로고침 단추(다시 확인)로 다시 불러옵니다. 이 기능이 없는
 예전 서버면 카드가 보이지 않습니다([아이폰용 웹 앱 주소(정식 인증서)](#아이폰용-웹-앱-주소정식-인증서)의 "관리자 콘솔 상태").
 
+### 메일(SMTP)
+
+서버가 메일을 보낼 계정을 정하는 탭입니다(`server/src/mailer.js`, 관리자 콘솔 `screens/admin_mail_tab.dart`). **메일을 켜면** 가입할 때
+이메일 인증 코드를 받고(보안 질문 대신), 아이디·비밀번호를 이메일로 찾고, 초대 링크를 메일로 보내고(초대 링크 목록의 ✉ 단추),
+오래 접속하지 않은 사람에게 안 읽은 멘션을 메일로 알립니다. **꺼져 있으면 지금처럼**(보안 질문) 동작합니다 — 그래서 도메인이 없을 때는
+꺼 둔 채로 쓰고, 언제든 켤 수 있습니다.
+
+**도메인이 없어도 됩니다.** 네이버·Gmail·다음 같은 메일 계정의 SMTP로 보낼 수 있습니다(탭의 "○○ 값 채우기" 단추가 서버·포트·보안을
+채워 줍니다). 그 서비스에서 SMTP 사용을 켜고 **앱 비밀번호**를 만들어 넣으세요(계정 비밀번호로는 안 되는 곳이 많습니다). 이때 보내는
+사람은 그 개인 메일 주소로 보이고, 서비스마다 하루 발송 한도가 있습니다(소규모 팀이면 충분합니다). **도메인이 생기면** 회사 메일
+(네이버웍스·Google Workspace·사내 메일 서버)이나 발송 서비스의 SMTP 값으로 **바꾸기만 하면** 됩니다 — 스팸함에 덜 빠지게 도메인에
+SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것이 없습니다).
+
+**켜는 순서** — ① SMTP 서버·연결 보안(SSL 465 / STARTTLS 587 / 없음)·포트·계정·비밀번호(·보내는 주소·이름)를 넣고 저장 → ② 받을
+주소를 넣고 "시험 메일 보내기" → 성공하면 ③ "메일 기능 사용"을 켭니다. 연결 값을 바꾸면 서버가 시험 결과를 지우고 메일을 끕니다(바뀐
+값으로 다시 시험해야 켤 수 있음). 시험이 실패하면 고칠 수 있는 말로 이유를 보여 줍니다(앱 비밀번호·포트·방화벽 등 — `mailRules.js`의
+`describeSmtpError`). 비밀번호는 DB에 암호화해 두고(`encryptField`) 화면에 다시 보여 주지 않습니다("설정됨"). 감사 로그에는 켜짐/꺼짐·
+연결 설정 변경·"비밀번호 변경"만 남습니다.
+
+**멘션 요약 메일** — 정한 날수(기본 3일, 1~30일) 넘게 앱이 서버에 붙지 않은 사람에게, 그 사이 쌓인 안 읽은 멘션을 매일 아침 9시(서버 PC
+시각)에 한 통으로 모아 보냅니다(최근 10개 + "외 N개", 같은 사람에게는 그 날수에 한 번까지, 지난 요약 뒤에 온 멘션만 — `mentionDigest.js`,
+규칙은 `mentionDigestRules.js`). 이메일을 확인했고 알림 설정(알림 센터 톱니)의 "멘션 요약 메일 받기"를 끄지 않은 사람만 받고, @all을
+꺼 둔 사람에게는 @all을 빼고, 비밀 대화는 넣지 않습니다. 마지막 접속은 소켓이 붙을 때·마지막 연결이 끊길 때 적는 `users.last_seen_at`
+(그 전 기록이 없으면 기기의 마지막 접속이나 가입 시각)입니다. **메시지 미리보기는 기본으로 넣지 않습니다**(방 이름·보낸 사람·시각만) —
+켜면 메시지 앞부분이 메일 서비스로 나간다는 뜻이라 관리자가 고릅니다.
+
+**확인 코드 규칙** — 6자리 숫자, 10분 동안 유효, 코드 하나로 5번까지만 맞혀 볼 수 있고(맞혀 보기 전에 먼저 한 칸 세어서 한꺼번에 보내도
+그 이상 못 맞힘), 같은 목적·주소로는 1분에 한 번만 다시 보내고, 새 코드를 보내면 앞의 코드는 못 씁니다. DB에는 코드 대신 서버 비밀값으로 만든
+해시만 둡니다(`email_codes` — `emailCodeRules.js`). 메일 보내기는 한 IP에서 15분에 10통, 한 주소로 한 시간에 5통, 로그인한 계정의 확인 코드는
+한 시간에 10통, 초대 메일은 한 시간에 50통까지입니다(`authGuard.js`). 로그인 없이 부르는 가입 코드는 사내 와이파이 밖에서는 지금 쓸 수 있는
+초대 링크가 있어야 보냅니다(인터넷의 아무나 서버 메일 계정으로 남에게 메일을 보내지 못하게). 비밀번호 재설정 코드를 틀리면 보안 질문 답과
+같은 무차별 대입 제한에 셉니다.
+
+- 링크 대신 **코드**를 쓰는 이유: 메일을 연 기기가 서버 주소에 닿아야 링크가 열리는데, 공인 주소가 없는 사내 서버는 그게 보장되지 않습니다.
+- 초대 메일 본문은 서버가 링크 값으로 만듭니다(앱이 보낸 글을 싣지 않음 — `inviteMail.js`). 사내 주소·외부 주소(`EXTERNAL_ADDRESS`가
+  있을 때)·아이폰 웹 앱 주소(정식 인증서가 있을 때, 초대 코드 포함)가 들어가고, 지금 그 링크로 가입할 수 있을 때만 보냅니다.
+- 메일을 켰다가 끄면 다시 보안 질문으로 찾습니다. 메일이 켜진 동안 보안 질문 없이 가입한 계정은 그때 사내 와이파이에서만 재설정할 수
+  있습니다(보안 질문이 없는 예전 계정과 같은 규칙).
+- 이 기능이 없는 예전 서버면 "서버를 업데이트하세요"라고 나오고, 앱은 예전 서버에서 늘 보안 질문 방식으로 동작합니다.
+
 ### 회원 관리
 
 전체 회원(탈퇴 포함)을 이름·아이디로 검색하고, 각자의 상태와 소속 팀을 봅니다.
@@ -744,7 +790,8 @@ token을 넣고 "자동 갱신 사용"을 켠 뒤 저장하면, 바로 한 번 �
 > **비밀번호 초기화 대행은 의도적으로 없습니다.** 운영자가 남의 평문 비밀번호를 직접 정할 수
 > 있게 하면 그 계정을 완전히 탈취할 수 있는 힘을 갖게 되므로, 이 기능은 제공하지 않습니다.
 > 계정에 문제가 있으면 계정 정지나 강제 로그아웃으로 대응하고, 비밀번호 자체는 본인만
-> 회원가입 때 등록한 보안 질문으로 재설정할 수 있습니다(`POST /auth/reset-password`).
+> 회원가입 때 등록한 보안 질문(메일이 켜진 서버에서 이메일을 확인한 계정은 이메일로 받은 코드)으로
+> 재설정할 수 있습니다(`POST /auth/reset-password`).
 
 ### 팀 관리
 
@@ -908,8 +955,6 @@ token을 넣고 "자동 갱신 사용"을 켠 뒤 저장하면, 바로 한 번 �
 - **외부 캘린더 양방향 동기화** — 지금은 ICS 구독(읽기 전용 가져오기)과 ICS 주소 내보내기까지입니다. Google Calendar API·Microsoft
   Graph로 로그인해 서로 고친 내용을 주고받는 양방향 동기화는 고객사의 클라우드 앱 등록(OAuth)이 필요해 범위 밖으로 뒀습니다.
 - **메시지 수정 이력** — 수정된 메시지의 이전 내용 보기(관리자만 봐도 충분). 업무 지시·합의 내용이 바뀌었을 때 근거가 됩니다.
-- **이메일 알림(SMTP)** — 오래 접속하지 않은 사람에게 안 읽은 멘션 요약, 비밀번호 재설정, 초대 메일. 지금 비밀번호 찾기는 보안
-  질문에 의존합니다.
 
 **3순위 — 있으면 차별점이 되는 것**
 
@@ -925,7 +970,8 @@ token을 넣고 "자동 갱신 사용"을 켠 뒤 저장하면, 바로 한 번 �
 
 - 경고 기준(지금 10MB 고정 — `kCellularDownloadWarnBytes`)과 경고 켜기/끄기를 환경설정에서 바꾸기
 - 모바일 데이터일 때 사진을 원본 대신 일반 화질로 보내기, 동영상 자동 재생은 Wi-Fi에서만
-- 큰 파일 다운로드 진행률과 취소 — 지금은 파일 전체를 메모리로 받은 뒤 저장해서, 받는 동안 진행률이 안 보이고 취소할 수 없습니다
+- 큰 파일을 디스크로 바로 받기 — 진행률과 취소(X)는 됩니다(`client/lib/services/download_progress.dart`). 다만 받은 내용을
+  메모리에 다 모은 뒤 저장해서(`attachment_widgets.dart`의 `fetchAttachmentBytes`), 수백 MB짜리 파일은 휴대폰 메모리가 부족할 수 있습니다
 
 ## 구성도
 
@@ -1013,8 +1059,12 @@ messenger_project/
 │  │  ├─ index.js                 앱 진입점 — 라우터 마운트, HTTPS 서버, 소켓/백그라운드 잡 시작
 │  │  ├─ auth.js                  회원가입/로그인/토큰 재발급/아이디·비밀번호 찾기
 │  │  ├─ users.js                 프로필 조회/수정/비밀번호 변경/탈퇴
-│  │  ├─ admin.js                 관리자 콘솔 API(회원·팀·감사 로그·운영 현황·DDNS, 서버 운영자 전용)
+│  │  ├─ admin.js                 관리자 콘솔 API(회원·팀·감사 로그·운영 현황·DDNS·메일, 서버 운영자 전용)
 │  │  ├─ ddns.js                  DuckDNS 자동 갱신(5분마다, DB를 모르는 갱신기) — ddnsService.js가 DB 설정과 잇는다
+│  │  ├─ mailer.js                메일 보내기(SMTP — nodemailer, 설정은 DB) / mailRules.js(설정 검사·오류 문구)·mailTemplates.js(본문)
+│  │  ├─ emailCodes.js            메일 확인 코드 보내기·확인(가입·이메일 확인·변경·비밀번호 재설정) / emailCodeRules.js(순수 규칙)
+│  │  ├─ inviteMail.js            초대 링크를 메일로 보내기(설치 초대·팀 초대 공용)
+│  │  ├─ mentionDigest.js         오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일(매일 9시) / mentionDigestRules.js(순수 규칙)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
 │  │  │                           backupCrypto.js(백업 암호 암호화)·backupRestore.js(복원 조각)
 │  │  ├─ audit.js                 감사 로그 기록 헬퍼(실패해도 원래 동작을 막지 않음)
@@ -1535,11 +1585,14 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/auth/username-available` | 아이디 중복 확인 — 새 아이디 규칙(영문·숫자와 `. _ -`, 4~20자)에 안 맞으면 `available: false`와 규칙 안내, 대소문자만 다른 아이디(탈퇴한 계정 포함)도 사용 중으로 봄 |
-| POST | `/auth/register` | 회원가입(보안 질문/답변 필수) — 같은 아이디 규칙과 대소문자를 무시한 중복 확인(동시에 가입해도 한쪽은 409 `이미 사용 중인 아이디입니다.`), 이메일·보안 질문은 200자·답은 100자까지 |
-| POST | `/auth/find-id` | 이메일로 아이디 찾기 |
-| POST | `/auth/security-question` | 아이디+이메일 일치 확인 후 보안 질문 반환 |
+| POST | `/auth/register` | 회원가입(보안 질문/답변 필수 — 메일이 켜진 서버는 대신 `emailCode` 필수, 보안 질문은 선택) — 같은 아이디 규칙과 대소문자를 무시한 중복 확인(동시에 가입해도 한쪽은 409 `이미 사용 중인 아이디입니다.`), 이메일·보안 질문은 200자·답은 100자까지 |
+| POST | `/auth/email-code/signup` | 가입 전 이메일 인증 코드 보내기 `{ email, teamInviteToken? }` → `{ ok, expiresInSeconds, resendInSeconds }`(메일이 꺼져 있으면 409, 이미 가입된 이메일 409, 사내 와이파이 밖은 쓸 수 있는 초대 링크 필요, 다시 보내기 1분 간격·제한은 429) |
+| POST | `/auth/find-id` | 이메일로 아이디 찾기 `{ username }` — 메일이 켜진 서버에서 이메일을 확인한 계정은 그 이메일로 보내고 `{ sent: true, email(일부만) }` |
+| POST | `/auth/password-reset/start` | 비밀번호 찾기 첫 단계 — 메일로 찾는 계정이면 재설정 코드를 보내고 `{ method: 'email', email, expiresInSeconds, resendInSeconds }`, 아니면 `{ method: 'question', question }` |
+| POST | `/auth/password-reset/verify-code` | 메일로 받은 재설정 코드만 확인(비밀번호는 안 바꿈) — 틀리면 보안 질문 답과 같은 제한에 셈 |
+| POST | `/auth/security-question` | 아이디+이메일 일치 확인 후 보안 질문 반환(예전 앱용 — 메일로 찾는 계정이면 409 "앱을 업데이트") |
 | POST | `/auth/verify-security-answer` | 보안 질문 답변만 검증(비밀번호는 안 바꿈) |
-| POST | `/auth/reset-password` | 비밀번호 재설정(이메일+보안 질문 답변 확인) |
+| POST | `/auth/reset-password` | 비밀번호 재설정(이메일+보안 질문 답변 확인 — 메일로 찾는 계정은 `emailCode`) |
 | POST | `/auth/login` | 로그인 — 아이디는 앞뒤 공백을 떼고, 대소문자만 다른 계정이 하나면 그 계정(비밀번호 찾기 세 단계도 같은 규칙에 이메일로 고름). 사내망 밖에서 8자보다 짧은 비밀번호는 401(늘 같은 문구), 막혔거나 차례를 못 받으면 429 + `Retry-After`([환경 변수 설정](#환경-변수-설정)의 "무차별 대입 방어") |
 | POST | `/auth/refresh` | AccessToken 재발급 |
 
@@ -1554,6 +1607,8 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | PUT | `/api/users/me/dnd` | 내 방해 금지 — `{ until }`(이 시각까지, `null`이면 끔)과 `{ schedule: { enabled, start, end, days, offsetMinutes } \| null }`(매일 일정 — `start`/`end`는 하루 중 분, 같으면 400, `days`는 0=일~6=토 하나 이상) 중 넘긴 것만 바꿈. 응답은 내 프로필, 소켓 `user:status` |
 | PATCH | `/api/users/me` | 이름/이메일/아바타/생일(`birthday` — `MM-DD`, `null`·빈 문자열이면 삭제) 수정(이메일 변경은 `currentPassword` 필요). `name`은 앞뒤 공백을 빼고 1~30자(이모지 한 덩어리 = 1자), 제어 문자·글자 방향 문자는 400. `avatarType`을 보내면 아바타를 통째로 바꿉니다 — `initial`은 나머지 칸을 비우고, `character`는 `avatarEmoji`(이모지 하나)+`avatarColor`(`#RRGGBB`)가 필요하며, `photo`는 지금 프로필 사진을 그대로 다시 보내거나(만료된 서명 링크도 알아봄) 내가 `/api/upload`로 올린 파일만 받습니다(아니면 400 `프로필 사진을 확인할 수 없습니다. 사진을 다시 올려 주세요.`). 응답·회원 DTO의 `avatarColor`는 `#RRGGBB`가 아니면 `null`, `avatarUrl`은 아바타가 사진일 때만 실림 |
 | POST | `/api/users/me/verify-password` | 현재 비밀번호가 맞는지만 확인(다른 부수효과 없음) — "이메일 변경" 1단계(비밀번호 확인) 다이얼로그가 쓴다 |
+| POST | `/api/users/me/email/send-code` | 이메일 인증 코드 보내기(메일이 켜진 서버) — `email` 없이 부르면 지금 이메일 확인용 코드를 지금 주소로, `{ email, currentPassword }`면 이메일 변경용 코드를 새 주소로. 응답 `{ ok, email(일부만), expiresInSeconds, resendInSeconds }` |
+| POST | `/api/users/me/email/verify` | `{ code }` 지금 이메일 확인 → 내 프로필(`emailVerified: true`). 메일이 켜진 서버의 이메일 변경은 `PATCH /api/users/me`에 `emailCode`(새 주소로 받은 코드)를 함께 보낸다 |
 | POST | `/api/users/me/change-password` | 비밀번호 변경 |
 | POST | `/api/users/me/withdraw` | 회원 탈퇴. 마지막 활성 서버 운영자는 400(다른 회원을 먼저 운영자로 지정) |
 | GET | `/api/position-options` | 직책 목록 조회(서열순) — 위 관리자 콘솔 전용 버전과 달리 서버 운영자가 아니어도 누구나 호출 가능. "팀 초대 링크 만들기"의 "부여할 직책"이 쓴다 |
@@ -1566,6 +1621,9 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/admin/ddns` | DuckDNS 자동 갱신 설정과 상태 `{ enabled, domains, tokenConfigured, status: { lastAttemptAt, lastSuccessAt, ok, ip, changed, error, nextAttemptAt, intervalMinutes } }` — 토큰은 내려주지 않음 |
 | PATCH | `/api/admin/ddns` | `{ enabled?, domains?, token? }` 넘긴 것만 바꿈(`domains`는 "tangotalk, tangotalk-dev.duckdns.org"처럼, `token` 빈 문자열은 지움 — 토큰·도메인이 없으면 꺼짐). 저장 뒤 바로 한 번 갱신하고 GET과 같은 모양으로 답함 |
 | POST | `/api/admin/ddns/update` | 지금 갱신(설정은 그대로) — GET과 같은 모양으로 답함 |
+| GET | `/api/admin/mail` | 메일(SMTP)·멘션 요약 설정 `{ enabled, ready, host, port, security, username, passwordConfigured, fromAddress, fromName, effectiveFrom, complete, testedAt, digest: { enabled, days, preview } }` — 비밀번호는 내려주지 않음 |
+| PATCH | `/api/admin/mail` | `{ enabled?, host?, port?, security?('ssl'\|'starttls'\|'none'), username?, password?, fromAddress?, fromName?, digestEnabled?, digestDays?(1~30), digestPreview? }` 넘긴 것만. 연결 값을 바꾸면 시험 결과를 지우고 끔, 켜려면 지금 값으로 시험 메일이 성공했어야 함 |
+| POST | `/api/admin/mail/test` | `{ to }` 저장된 값으로 시험 메일 한 통(꺼져 있어도) — 성공하면 켤 수 있게 됨, 실패하면 400 + 고칠 수 있는 이유 |
 | GET | `/api/admin/web-certificate` | 아이폰용 웹 앱 포트의 정식 인증서 상태(보기만 함 — 발급·갱신은 서버가 알아서) `{ enabled, domain, status, staging, expiresAt, lastAttemptAt, lastError, nextAttemptAt, challenges: { http01, tlsAlpn01 }, webUrl, ports, hsts, attempting, certificateStaging, httpPortError }`. `status`는 `off`·`pending`·`valid`·`expiring`·`error`, 시각은 epoch ms, `lastError`는 한국어. `challenges`는 이 PC에서 그 확인 방식의 포트를 열었는지(공유기 포워딩까지 본 것은 아님). 웹 포트를 못 열었으면 `error`와 그 이유 |
 | PATCH | `/api/admin/settings` | 서버 설정 변경(`teamCreation`\|`teamInviteLinkCreation`: `member`\|`admin`\|`serverAdmin`, `orgScope`: `team`\|`account`) |
 | GET | `/api/admin/users` | 전체 회원(탈퇴 포함) + 상태 + 소속 팀 |
@@ -1590,6 +1648,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/invite-links` | 내가 만든 초대 링크 목록(최신순). 항목의 `usedCount`는 이 링크로 가입한 사람 수(페어링은 세지 않음), `maxUses`는 가입 인원(`null`이면 인원 제한이 생기기 전의 링크), `valid`는 지금 새로 가입시킬 수 있는지 |
 | POST | `/api/invite-links` | 새 링크 발급(`maxUses`: 가입 인원 1~100, 기본 1 · `label` 선택 — 유효기간은 7일 고정) |
 | DELETE | `/api/invite-links/:id` | 폐기(내가 만든 링크만) |
+| POST | `/api/invite-links/:id/email` | `{ emails: [...] }`(최대 20명) 초대 링크를 메일로 — 메일이 켜진 서버, 내가 만든 링크이고 지금 가입할 수 있을 때만. 본문은 서버가 만듦. 응답 `{ sent, failed: [{ email, error }] }` |
 
 **팀 초대 링크** (`/api` — 발급은 서버 설정 "팀 초대 링크 생성 권한"이 정한 등급 이상만, 목록·폐기는 내가 만든 링크라면
 그 권한을 잃은 뒤에도 됨 — [팀 초대 링크](#팀-초대-링크자동-합류등급-부여) 참고)
@@ -1599,6 +1658,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/team-invite-links` | 내가 만든 팀 초대 링크 목록(최신순) |
 | POST | `/api/team-invite-links` | 새 링크 발급(`teamId`, `assignedRole`: `guest`\|`member`\|`admin`, `assignedPosition` 선택(직책 목록의 `label`), `maxUses`(가입 인원 1~100, 기본 1 — `assignedRole`이 `admin`이면 늘 1), `label` 선택) — 내가 그 팀의 멤버여야 하고, `assignedRole`/`assignedPosition` 모두 내 것보다 높을 수 없음(등급은 서버 운영자만 예외) |
 | DELETE | `/api/team-invite-links/:id` | 폐기(내가 만든 링크만) |
+| POST | `/api/team-invite-links/:id/email` | `{ emails }` 팀 초대 링크를 메일로 — 설치 초대 메일과 같고 본문에 팀 이름이 들어감 |
 
 **팀** (`/api`)
 
@@ -1694,7 +1754,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/notifications` | 알림 기록(`kind`=`mention`(개인 멘션+`@all`)\|`mention_personal`(개인 멘션만)\|`mention_all`(`@all`만)\|`board`\|`all`, `before`(ms 커서), `limit`(기본 30·최대 100), `unreadOnly`) → `{ items, hasMore }`. 항목: `id`,`kind`,`teamId`,`teamName`,`roomId`,`roomName`,`messageId`,`commentId`,`actorId`,`actorName`,`preview`,`createdAt`,`readAt`,`roomType`. 없어진 방·메시지나 내가 나간 방의 알림은 안 내려줌 |
 | GET | `/api/notifications/unread-counts` | 읽지 않은 알림 수 `{ mention, board, mentionPersonal, mentionAll }`(내 모든 팀 합계, `mention` = `mentionPersonal`+`mentionAll`) |
 | POST | `/api/notifications/read` | 읽음 처리 — `{ ids }` \| `{ kind: 'mention'\|'mention_personal'\|'mention_all'\|'board' }` \| `{ messageId }`. 내 다른 기기에 소켓 `notification:sync` |
-| GET/PATCH | `/api/notification-settings` | 내 알림 설정 `{ mentionAll(기본 true), boardLevel('all'\|'important'\|'new', 기본 'important'), pushWhileOnline(다른 기기 접속 중에도 휴대폰 푸시, 기본 true) }` — PATCH는 일부 필드만 보내도 됨 |
+| GET/PATCH | `/api/notification-settings` | 내 알림 설정 `{ mentionAll(기본 true), boardLevel('all'\|'important'\|'new', 기본 'important'), pushWhileOnline(다른 기기 접속 중에도 휴대폰 푸시, 기본 true), emailDigest(오래 접속하지 않았을 때 멘션 요약 메일, 기본 true) }` — PATCH는 일부 필드만 보내도 됨 |
 
 **기기 / 비밀 대화(E2EE)** (`/api`)
 
@@ -1810,7 +1870,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/upload` | 필요 | 파일 업로드(최대 1GB, 초과 시 413). 응답의 `url`은 미서명 경로, `signedUrl`은 올린 사람이 저장 전에 바로 미리보기를 그릴 수 있는 서명된 링크(팀·그룹 아이콘 사진). 올린 사람을 `uploads` 표에 남기고(비밀 대화 첨부 검사·자동 삭제·새 프로필 사진 확인이 씀), 남기지 못하면 받은 파일을 지우고 500 |
 | GET | `/files/:token` | 불필요(토큰 자체가 자격증명) | 서명된 다운로드 링크(이 방식 전에 발급된 JWT 모양 토큰은 받지 않음) |
 | GET | `/health` | 불필요 | 헬스체크 |
-| GET | `/server-info` | 불필요 | 접속 주소들 `{ externalUrl, webUrl, internalUrls }` — 외부(LTE/5G) 주소(`.env`의 `EXTERNAL_ADDRESS`, 없으면 `null`), 아이폰에 안내할 웹 앱 정식 주소(`https://WEB_DOMAIN[:WEB_HTTPS_PORT]` — 웹 포트가 열려 있고 브라우저가 믿는 정식 인증서가 걸려 있을 때만, 시험용 인증서·발급 전·기능 꺼짐이면 `null`), 인증서가 담고 있는 서버 PC의 사내 주소들 |
+| GET | `/server-info` | 불필요 | 접속 주소들 `{ externalUrl, webUrl, internalUrls, mailEnabled }`(`mailEnabled`는 메일 기능이 켜졌는지 — 앱이 가입·찾기 화면을 고른다) — 외부(LTE/5G) 주소(`.env`의 `EXTERNAL_ADDRESS`, 없으면 `null`), 아이폰에 안내할 웹 앱 정식 주소(`https://WEB_DOMAIN[:WEB_HTTPS_PORT]` — 웹 포트가 열려 있고 브라우저가 믿는 정식 인증서가 걸려 있을 때만, 시험용 인증서·발급 전·기능 꺼짐이면 `null`), 인증서가 담고 있는 서버 PC의 사내 주소들 |
 | GET | `/pair/:code` | 불필요(코드·초대 토큰이 자격증명) | 페어링 — 평문 페어링 서버의 같은 경로와 동일. 사내망 밖에서 재페어링할 때 쓴다 |
 | GET·WS | `/livekit/*` | 불필요(LiveKit 참가 토큰) | 화상회의 신호를 같은 PC의 LiveKit으로 넘김(`livekitProxy.js`) |
 | GET | `/version` | 불필요 | 최신 클라이언트 버전 조회 |
@@ -1876,8 +1936,9 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb) |
-| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각) |
+| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기) |
+| `email_codes` | 메일로 보낸 확인 코드(가입 전 `signup`·이메일 확인 `verify`·이메일 변경 `change`·비밀번호 재설정 `reset`). 코드 대신 서버 비밀값으로 만든 해시, 틀린 횟수(`attempts`), 만료(10분 — 만료된 행은 하루 한 번 지움). 같은 목적·주소로 새 코드를 보내면 앞의 행은 지움 |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |
 | `invite_links` | 초대 링크. `token`(무작위 문자열, unique), `expires_at`/`revoked_at`, `max_uses`(가입 인원 — `null`은 이 칸이 생기기 전에 만든 링크뿐이고 제한 없음), `used_count`(이 링크로 가입한 사람 수 — 페어링·설치는 세지 않음, 가입할 때 `max_uses`를 넘지 않게 한 문장으로 확인하며 올림)/`last_used_at`, `created_by_name`(만든 사람 스냅샷) — [초대 링크(설치→가입)](#초대-링크설치가입) 참고 |
@@ -1905,7 +1966,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `announcements` / `announcement_comments` | 토픽 공지와 공지 댓글. 공지는 여러 개(기록)지만 `pinned`는 토픽마다 최대 1개, `text_format`(글자 서식 구간 — 제목·글자색 포함), `auto_unpin_at`(자동 내리기), 작성자만 수정/삭제. **메시지로 등록한 공지**는 `source_message_id`(원본 메시지, 원본이 지워지면 null)와 사진 스냅샷 `image_url`/`image_thumbnail_url`/`image_name`(미서명 `/uploads/` 경로)을 가집니다 |
 | `message_comments` | 메시지별 댓글. `messages`와 거의 동일한 구조(첨부/소프트삭제/5분 수정 윈도우). `(sender_id, created_at desc)` 인덱스는 "내가 쓴 글 모아보기"용(`messages`에도 같은 모양의 `messages_sender_created_idx`) |
 | `notifications` | 알림 기록(받는 사람마다 한 줄 — 멘션·보드 알림). `kind`(`mention`\|`mention_all`\|`board_post`\|`board_edit`\|`board_comment`), `team_id`, `room_id`/`message_id`/`comment_id`(cascade), `actor_id`/`actor_name`, `preview`(본문 앞 120자·게시글은 제목), `room_name`(알림 당시 이름), `read_at`. 90일 지난 것은 `retention.js`가 정리. 멘션 구간은 `messages`·`message_comments`·`scheduled_messages`의 `mentions`(jsonb)에 저장 |
-| `notification_settings` | 사람별 알림 설정(`user_id` PK). `mention_all`(@all 푸시, 기본 true), `board_level`(`all`\|`important`\|`new`, 기본 `important`) — 행이 없으면 기본값 |
+| `notification_settings` | 사람별 알림 설정(`user_id` PK). `mention_all`(@all 푸시, 기본 true), `board_level`(`all`\|`important`\|`new`, 기본 `important`), `email_digest`(멘션 요약 메일, 기본 true) — 행이 없으면 기본값 |
 | `projects` | 프로젝트(업무 관리 공간). 팀에 속하고, `identifier`(업무 번호 앞에 붙는 식별자 — 팀 안에서 unique), `next_task_seq`(다음 업무 번호 — 업무를 지워도 번호를 재사용하지 않도록 프로젝트가 직접 들고 있음), `color`(대표 색 `#RRGGBB`), `is_public`(공개 프로젝트 여부), `archived_at` — [프로젝트(업무 관리)](#프로젝트업무-관리) 참고 |
 | `project_members` | 프로젝트 구성원. `role`(`owner`=담당자 / `member`), `favorite`(사이드바 즐겨찾기 — 사람마다 다른 개인 설정) |
 | `tasks` | 업무. `seq`(프로젝트 안 번호 → 화면에는 `MKT-1001`로 표시), `status`(`todo` / `doing` / `done`), `priority`, `assignee_id`, `type_id`(→ `task_types`, 삭제 시 null), `start_date`/`due_date`, `completed_at` |

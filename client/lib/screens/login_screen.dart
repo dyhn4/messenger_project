@@ -6,6 +6,7 @@ import '../services/pinned_tls.dart';
 import '../services/security_questions.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
+import '../widgets/email_code_input.dart';
 import '../widgets/update_dialog.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
@@ -51,6 +52,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final _confirmPassword = TextEditingController();
   final _customSecurityQuestion = TextEditingController();
   final _securityAnswer = TextEditingController();
+
+  /// 메일이 켜진 서버의 가입 — 이메일로 받은 인증 코드. [_codeSentFor]는 코드를 보낸 주소(그 뒤 이메일을 바꿨으면 다시 받게).
+  final _emailCode = TextEditingController();
+  String? _codeSentFor;
   String? _securityQuestionChoice;
   bool _securityQuestionCustomMode = false;
   bool _isRegister = false;
@@ -75,6 +80,8 @@ class _LoginScreenState extends State<LoginScreen> {
     _confirmPassword.addListener(_refresh);
     _maybeShowPairDialog();
     _maybeShowUpdateBanner();
+    // 관리자가 그사이 메일 기능을 켜거나 껐을 수 있다 — 가입 폼(인증 코드/보안 질문)을 그에 맞춘다(바뀌면 세션이 알려 다시 그린다).
+    widget.session.refreshMailEnabled();
   }
 
   @override
@@ -219,14 +226,32 @@ class _LoginScreenState extends State<LoginScreen> {
         ).showSnackBar(const SnackBar(content: Text('비밀번호가 서로 다릅니다.')));
         return;
       }
-      final question = _resolvedSecurityQuestion();
-      if (question == null || _securityAnswer.text.trim().isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('보안 질문과 답변을 입력하세요.')));
-        return;
+      if (widget.session.mailEnabled) {
+        // 메일이 켜진 서버는 보안 질문 대신 이메일로 받은 코드로 본인을 확인한다.
+        final codeError = _codeSentFor == null
+            ? '이메일 인증 코드를 받아 넣어 주세요.'
+            : _codeSentFor != _email
+            ? '이메일을 바꿨다면 인증 코드를 다시 받으세요.'
+            : !isEmailCodeShape(_emailCode.text)
+            ? '메일로 받은 6자리 인증 코드를 넣어 주세요.'
+            : null;
+        if (codeError != null) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(codeError)));
+          return;
+        }
+      } else {
+        final question = _resolvedSecurityQuestion();
+        if (question == null || _securityAnswer.text.trim().isEmpty) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('보안 질문과 답변을 입력하세요.')));
+          return;
+        }
       }
     }
+    final byMail = widget.session.mailEnabled;
     // login()이 성공하면 그 안에서 stage=ready로 바뀌며 곧장 HomeScreen으로 전환되어
     // 이 화면(LoginScreen)이 언마운트된다 — 그 뒤에 컨트롤러를 읽으면(이미 dispose된 뒤라)
     // 죽은 컨트롤러 접근 크래시가 나고, mounted 체크로 건너뛰면 "아이디 기억하기"가 아예
@@ -241,8 +266,9 @@ class _LoginScreenState extends State<LoginScreen> {
             _password.text,
             _email,
             _name.text.trim(),
-            securityQuestion: _resolvedSecurityQuestion()!,
-            securityAnswer: _securityAnswer.text.trim(),
+            securityQuestion: byMail ? null : _resolvedSecurityQuestion()!,
+            securityAnswer: byMail ? null : _securityAnswer.text.trim(),
+            emailCode: byMail ? _emailCode.text.trim() : null,
             keepSignedIn: true,
           )
         : await widget.session.login(
@@ -287,6 +313,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _confirmPassword.dispose();
     _customSecurityQuestion.dispose();
     _securityAnswer.dispose();
+    _emailCode.dispose();
     super.dispose();
   }
 
@@ -468,17 +495,31 @@ class _LoginScreenState extends State<LoginScreen> {
                             style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                           const SizedBox(height: 16),
-                          _SecurityQuestionSection(
-                            customMode: _securityQuestionCustomMode,
-                            onModeChanged: (custom) => setState(
-                              () => _securityQuestionCustomMode = custom,
+                          // 메일이 켜진 서버는 이메일 인증 코드가 보안 질문을 대신한다(server auth.js /register).
+                          if (widget.session.mailEnabled)
+                            EmailCodeInput(
+                              key: const ValueKey('signup-email-code'),
+                              controller: _emailCode,
+                              onSend: () {
+                                final email = _email.trim();
+                                return widget.session.sendSignupEmailCode(
+                                  email,
+                                );
+                              },
+                              onSent: (_) => _codeSentFor = _email,
+                            )
+                          else
+                            _SecurityQuestionSection(
+                              customMode: _securityQuestionCustomMode,
+                              onModeChanged: (custom) => setState(
+                                () => _securityQuestionCustomMode = custom,
+                              ),
+                              presetChoice: _securityQuestionChoice,
+                              onPresetChanged: (v) =>
+                                  setState(() => _securityQuestionChoice = v),
+                              customQuestionController: _customSecurityQuestion,
+                              answerController: _securityAnswer,
                             ),
-                            presetChoice: _securityQuestionChoice,
-                            onPresetChanged: (v) =>
-                                setState(() => _securityQuestionChoice = v),
-                            customQuestionController: _customSecurityQuestion,
-                            answerController: _securityAnswer,
-                          ),
                         ],
                         if (!_isRegister) ...[
                           const SizedBox(height: 8),

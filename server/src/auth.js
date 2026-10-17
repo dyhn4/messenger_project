@@ -19,7 +19,12 @@ import {
   waitText,
 } from "./authGuard.js";
 import { JWT_SECRET } from "./config.js";
-import { encryptField, lookupHash } from "./crypto.js";
+import { decryptField, encryptField, lookupHash } from "./crypto.js";
+import { getServerSettings } from "./db/queries/serverSettings.js";
+import { checkEmailCode, consumeEmailCode, issueEmailCode, mailFailureText } from "./emailCodes.js";
+import { sendMail } from "./mailer.js";
+import { maskEmail, mailReady } from "./mailRules.js";
+import { findIdMail } from "./mailTemplates.js";
 import { passwordPolicyError } from "./passwordPolicy.js";
 import { accountState } from "./authState.js";
 import { parseUserName } from "./avatarRules.js";
@@ -227,6 +232,16 @@ async function findAccountForRecovery(usernameInput, email) {
 const usableRecoveryInput = (username, email) =>
   usableUsernameInput(username) && typeof email === "string" && email.length <= EMAIL_MAX_LENGTH;
 
+/**
+ * 이 계정은 비밀번호·아이디를 메일로 찾는지 — 서버에 메일이 켜져 있고 이메일을 확인한 계정만. 그런 계정은 보안 질문을 받지
+ * 않는다(메일 코드가 보안 질문을 대신한다). 확인하지 않은 계정과 메일이 꺼진 서버는 예전처럼 보안 질문으로 찾는다.
+ */
+const usesEmailRecovery = (user, settings) => mailReady(settings) && !!user?.emailVerifiedAt && !!user?.emailEnc;
+
+/** 업데이트 전 앱(메일 코드 단계를 모르는 앱)이 메일로 찾는 계정에 보안 질문 단계를 부를 때. */
+const UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR =
+  "이 계정은 이메일로 받은 코드로 비밀번호를 찾습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도하세요.";
+
 export function issueTokenPair(user) {
   const tokenVersion = user.tokenVersion ?? 0;
   const accessToken = jwt.sign(
@@ -273,6 +288,30 @@ export function createAuthRouter(io) {
     res.json({ available: true });
   });
 
+  /**
+   * 가입 전 이메일 확인 코드 보내기 — 메일이 켜진 서버에서만. 가입(register)은 이 코드를 함께 받아야 된다. 사내망 밖에서는
+   * 가입처럼 지금 쓸 수 있는 초대 링크가 있어야 보낸다(인터넷의 아무나 서버 메일 계정으로 남에게 메일을 보내게 하지 않게).
+   * 이미 가입된 이메일이면 보내지 않고 알린다 — 가입 화면도 같은 경우 "이미 사용 중인 이메일"이라고 알려 준다.
+   */
+  router.post("/email-code/signup", rateLimit(limits.mailSendIp, "메일 보내기 시도"), async (req, res) => {
+    const { email, teamInviteToken } = req.body ?? {};
+    if (!mailReady(await getServerSettings())) {
+      return res.status(409).json({ error: "이 서버는 메일 기능이 꺼져 있습니다." });
+    }
+    if (!isLanAddress(clientIp(req)) && !(await inviteJoinable(await findInviteByToken(teamInviteToken)))) {
+      const sentCode = typeof teamInviteToken === "string" && teamInviteToken;
+      return res.status(403).json({ error: sentCode ? INVITE_UNUSABLE_ERROR : OUTSIDE_NEEDS_INVITE_ERROR });
+    }
+    if (typeof email !== "string" || email.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(email)) {
+      return res.status(400).json({ error: "이메일 형식이 올바르지 않습니다." });
+    }
+    if (await findUserByEmailLookup(lookupHash(email))) {
+      return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
+    }
+    const sent = await issueEmailCode(res, { purpose: "signup", email });
+    if (sent) res.json(sent);
+  });
+
   router.post("/register", rateLimit(limits.registerIp, "가입 시도"), async (req, res) => {
     const {
       username,
@@ -282,6 +321,7 @@ export function createAuthRouter(io) {
       securityQuestion,
       securityAnswer,
       teamInviteToken,
+      emailCode,
     } = req.body ?? {};
     // 사내망 밖(LTE/5G)에서는 지금 가입할 수 있는 초대 링크(설치 초대·팀 초대 — 인원까지 남은 것)를 받은
     // 사람만 가입할 수 있다 — 공유기 포트를 열면 인터넷 누구나 가입 화면에 닿기 때문이다. 앱은 초대 링크로
@@ -321,18 +361,23 @@ export function createAuthRouter(io) {
         .status(400)
         .json({ error: "이메일 형식이 올바르지 않습니다." });
     }
-    if (!filled(securityQuestion) || !filled(securityAnswer)) {
-      return res.status(400).json({ error: "보안 질문과 답변을 입력하세요." });
-    }
-    // 답이 한 글자면 몇 번 만에 맞혀서 비밀번호를 바꿀 수 있다(사내망 밖에서도 재설정할 수 있어서).
-    if (securityAnswer.trim().length < 2) {
-      return res.status(400).json({ error: "보안 질문 답변은 2자 이상 입력하세요." });
-    }
-    if (securityQuestion.trim().length > SECURITY_QUESTION_MAX_LENGTH) {
-      return res.status(400).json({ error: `보안 질문은 ${SECURITY_QUESTION_MAX_LENGTH}자 이내로 입력하세요.` });
-    }
-    if (securityAnswer.trim().length > SECURITY_ANSWER_MAX_LENGTH) {
-      return res.status(400).json({ error: `보안 질문 답변은 ${SECURITY_ANSWER_MAX_LENGTH}자 이내로 입력하세요.` });
+    // 메일이 켜진 서버에서는 이메일 확인 코드가 보안 질문을 대신한다 — 질문은 넣지 않아도 되고, 넣었으면 같은 규칙으로 본다.
+    const mailOn = mailReady(await getServerSettings());
+    const withQuestion = !mailOn || filled(securityQuestion) || filled(securityAnswer);
+    if (withQuestion) {
+      if (!filled(securityQuestion) || !filled(securityAnswer)) {
+        return res.status(400).json({ error: "보안 질문과 답변을 입력하세요." });
+      }
+      // 답이 한 글자면 몇 번 만에 맞혀서 비밀번호를 바꿀 수 있다(사내망 밖에서도 재설정할 수 있어서).
+      if (securityAnswer.trim().length < 2) {
+        return res.status(400).json({ error: "보안 질문 답변은 2자 이상 입력하세요." });
+      }
+      if (securityQuestion.trim().length > SECURITY_QUESTION_MAX_LENGTH) {
+        return res.status(400).json({ error: `보안 질문은 ${SECURITY_QUESTION_MAX_LENGTH}자 이내로 입력하세요.` });
+      }
+      if (securityAnswer.trim().length > SECURITY_ANSWER_MAX_LENGTH) {
+        return res.status(400).json({ error: `보안 질문 답변은 ${SECURITY_ANSWER_MAX_LENGTH}자 이내로 입력하세요.` });
+      }
     }
 
     // 대소문자만 다른 아이디(Kim·kim)도 이미 있는 아이디로 본다 — 계정을 넣을 때(insertRegisteredUser) 한 번 더 본다.
@@ -343,6 +388,17 @@ export function createAuthRouter(io) {
     const emailTaken = await findUserByEmailLookup(emailLookup);
     if (emailTaken) {
       return res.status(409).json({ error: "이미 사용 중인 이메일입니다." });
+    }
+    // 메일이 켜진 서버는 이 이메일로 받은 코드가 맞아야 가입된다(/email-code/signup). 코드는 계정이 들어간 뒤에 지운다 — 그 사이
+    // 같은 코드로 두 번 가입해도 이메일이 같아 두 번째는 위의 중복 검사·unique에 걸린다.
+    let signupCode = null;
+    if (mailOn) {
+      if (!filled(emailCode)) {
+        return res.status(400).json({ error: "이메일로 받은 확인 코드를 넣으세요." });
+      }
+      const checked = await checkEmailCode({ purpose: "signup", email, code: emailCode });
+      if (!checked.ok) return res.status(400).json({ error: checked.error });
+      signupCode = checked.row;
     }
 
     // 직책 목록(관리자 콘솔 "운영 현황")에 "기본값"으로 지정된 직책이 있으면 가입과 동시에
@@ -361,12 +417,10 @@ export function createAuthRouter(io) {
       position: defaultPosition?.label ?? null,
       emailEnc: encryptField(email),
       emailLookup,
+      emailVerifiedAt: signupCode ? new Date() : null,
       passwordHash: await bcrypt.hash(password, 10),
-      securityQuestion: securityQuestion.trim(),
-      securityAnswerHash: await bcrypt.hash(
-        normalizeAnswer(securityAnswer),
-        10,
-      ),
+      securityQuestion: withQuestion ? securityQuestion.trim() : null,
+      securityAnswerHash: withQuestion ? await bcrypt.hash(normalizeAnswer(securityAnswer), 10) : null,
       avatarType: "character",
       avatarEmoji: randomOf(CHARACTER_EMOJIS),
       avatarColor: randomOf(CHARACTER_COLORS),
@@ -395,6 +449,7 @@ export function createAuthRouter(io) {
     if (usernameTaken) {
       return res.status(409).json({ error: "이미 사용 중인 아이디입니다." });
     }
+    if (signupCode) await consumeEmailCode(signupCode);
 
     // 가입만으로는 어느 팀에도 들어가지 않는다 — 팀은 본인이 직접 만들거나(만든 사람이 그
     // 팀의 소유자가 된다), 소유자/관리자가 팀에 넣어줘야 들어간다(teams.js의 멤버 추가).
@@ -449,6 +504,23 @@ export function createAuthRouter(io) {
     if (!user) {
       return res.status(404).json({ error: "일치하는 계정이 없습니다." });
     }
+    // 메일로 찾는 계정(메일이 켜졌고 이메일을 확인한 계정)은 화면에 보이지 않고 그 이메일로 아이디를 보낸다 — 이메일만 아는
+    // 사람이 아이디를 알아내지 못한다. 앱은 sent를 보고 "메일을 보냈습니다"를 띄운다.
+    if (usesEmailRecovery(user, await getServerSettings())) {
+      const ipWait = limits.mailSendIp.hit(clientIpKey(req));
+      if (ipWait > 0) return retryLater(res, ipWait, `메일 요청이 너무 많습니다. ${waitText(ipWait)} 후 다시 시도하세요.`);
+      const addressWait = limits.mailSendAddress.hit(user.emailLookup);
+      if (addressWait > 0) {
+        return retryLater(res, addressWait, `이 주소로 메일을 너무 많이 보냈습니다. ${waitText(addressWait)} 뒤에 다시 시도하세요.`);
+      }
+      const address = decryptField(user.emailEnc);
+      try {
+        await sendMail(address, findIdMail(user.username));
+      } catch (err) {
+        return res.status(503).json({ error: mailFailureText(err) });
+      }
+      return res.json({ sent: true, email: maskEmail(address) });
+    }
     // 사내망 밖에서는 앞 두 글자만 보여준다 — 이메일만 알면 아이디를 통째로 알아내 로그인·재설정 공격에 쓰는 걸
     // 막는다(본인은 앞부분만 봐도 대개 기억난다). 사내에서는 지금처럼 전부 보인다.
     const name = user.username;
@@ -469,10 +541,69 @@ export function createAuthRouter(io) {
         .status(404)
         .json({ error: RECOVERY_NO_MATCH_ERROR });
     }
+    if (usesEmailRecovery(user, await getServerSettings())) {
+      return res.status(409).json({ error: UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR });
+    }
     if (!user.securityAnswerHash && !isLanAddress(clientIp(req))) {
       return res.status(403).json({ error: NO_QUESTION_EXTERNAL_ERROR });
     }
     res.json({ question: user.securityQuestion ?? null });
+  });
+
+  /**
+   * 비밀번호 찾기 첫 단계(새 앱) — 아이디+이메일이 맞는 계정이 어떻게 재설정하는지 알려 준다. 메일로 찾는 계정이면 그 이메일로
+   * 재설정 코드를 보내고 `{ method: 'email', email(일부만), expiresInSeconds, resendInSeconds }`, 아니면 예전처럼
+   * `{ method: 'question', question }`(질문이 없는 옛 계정은 null — 사내망에서만). 다시 부르면 코드를 다시 보낸다(1분 간격).
+   */
+  router.post("/password-reset/start", rateLimit(limits.lookupIp, "조회 시도"), async (req, res) => {
+    const { username, email } = req.body ?? {};
+    const user = usableRecoveryInput(username, email) ? await findAccountForRecovery(username, email) : null;
+    if (!user) {
+      return res.status(404).json({ error: RECOVERY_NO_MATCH_ERROR });
+    }
+    if (usesEmailRecovery(user, await getServerSettings())) {
+      const ipWait = limits.mailSendIp.hit(clientIpKey(req));
+      if (ipWait > 0) return retryLater(res, ipWait, `메일 요청이 너무 많습니다. ${waitText(ipWait)} 후 다시 시도하세요.`);
+      const address = decryptField(user.emailEnc);
+      const sent = await issueEmailCode(res, { purpose: "reset", email: address, userId: user.id });
+      if (!sent) return;
+      return res.json({ method: "email", email: maskEmail(address), ...sent });
+    }
+    if (!user.securityAnswerHash && !isLanAddress(clientIp(req))) {
+      return res.status(403).json({ error: NO_QUESTION_EXTERNAL_ERROR });
+    }
+    res.json({ method: "question", question: user.securityQuestion ?? null });
+  });
+
+  /**
+   * 메일로 받은 재설정 코드가 맞는지만 본다(비밀번호는 바꾸지 않음) — 맞을 때만 새 비밀번호 입력칸을 보여 주려고. 틀리면 보안
+   * 질문 답과 같은 무차별 대입 제한(recoveryGuard)에 센다. 코드는 아직 쓰지 않는다 — 재설정(/reset-password)에서 다시 보고 쓴다.
+   */
+  router.post("/password-reset/verify-code", async (req, res) => {
+    const { username, email, code } = req.body ?? {};
+    if (!usableRecoveryInput(username, email)) {
+      return res.status(400).json({ error: RECOVERY_NO_MATCH_ERROR });
+    }
+    const guard = recoveryGuard(req, res, username);
+    if (!guard) return;
+    try {
+      const user = await findAccountForRecovery(username, email);
+      if (!user) {
+        guard.fail(null);
+        return res.status(400).json({ error: RECOVERY_NO_MATCH_ERROR });
+      }
+      if (!usesEmailRecovery(user, await getServerSettings())) {
+        return res.status(400).json({ error: "이 계정은 이메일 코드로 재설정하지 않습니다. 비밀번호 찾기를 처음부터 다시 하세요." });
+      }
+      const checked = await checkEmailCode({ purpose: "reset", email: decryptField(user.emailEnc), userId: user.id, code });
+      if (!checked.ok) {
+        if (checked.counted) guard.fail(user);
+        return res.status(400).json({ error: checked.error });
+      }
+      res.json({ ok: true });
+    } finally {
+      guard.release();
+    }
   });
 
   /**
@@ -494,6 +625,10 @@ export function createAuthRouter(io) {
         return res
           .status(400)
           .json({ error: RECOVERY_NO_MATCH_ERROR });
+      }
+      // 메일로 찾는 계정은 보안 질문으로 재설정하지 않는다(메일 코드가 대신한다).
+      if (usesEmailRecovery(user, await getServerSettings())) {
+        return res.status(409).json({ error: UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR });
       }
       if (user.securityAnswerHash) {
         const matches =
@@ -519,12 +654,11 @@ export function createAuthRouter(io) {
   });
 
   /**
-   * 이메일 인증 없이 앱 안에서 바로 비밀번호를 재설정한다 (서버에 메일 발송 기능이 없음).
-   * 아이디와 이메일이 둘 다 일치해야 통과하고, 계정에 보안 질문이 설정돼 있으면 그 답변까지
-   * 맞아야 한다(이 컬럼이 생기기 전 가입한 계정은 답변 확인을 건너뛴다).
+   * 비밀번호 재설정. 아이디와 이메일이 둘 다 일치해야 하고, 메일로 찾는 계정(usesEmailRecovery)은 그 이메일로 받은 코드
+   * (emailCode)가, 그 밖의 계정은 보안 질문 답이 맞아야 한다(질문 컬럼이 생기기 전 가입한 계정은 사내망에서만 답 없이).
    */
   router.post("/reset-password", async (req, res) => {
-    const { username, email, securityAnswer, newPassword } = req.body ?? {};
+    const { username, email, securityAnswer, emailCode, newPassword } = req.body ?? {};
     if (!usableRecoveryInput(username, email)) {
       return res.status(400).json({ error: RECOVERY_NO_MATCH_ERROR });
     }
@@ -544,7 +678,20 @@ export function createAuthRouter(io) {
           .status(400)
           .json({ error: RECOVERY_NO_MATCH_ERROR });
       }
-      if (user.securityAnswerHash) {
+      if (usesEmailRecovery(user, await getServerSettings())) {
+        if (typeof emailCode !== "string" || !emailCode) {
+          return res.status(409).json({ error: UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR });
+        }
+        const checked = await checkEmailCode({ purpose: "reset", email: decryptField(user.emailEnc), userId: user.id, code: emailCode });
+        if (!checked.ok) {
+          if (checked.counted) guard.fail(user);
+          return res.status(400).json({ error: checked.error });
+        }
+        // 바꾸기 전에 코드를 쓴다 — 같은 코드로 두 번 재설정하지 못하게(먼저 쓴 요청만 통과).
+        if (!(await consumeEmailCode(checked.row))) {
+          return res.status(400).json({ error: "확인 코드가 없거나 만료되었습니다. 코드를 다시 받으세요." });
+        }
+      } else if (user.securityAnswerHash) {
         const matches =
           typeof securityAnswer === "string" &&
           !!securityAnswer &&

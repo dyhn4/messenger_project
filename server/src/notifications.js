@@ -352,6 +352,11 @@ export function createNotificationsRouter(io) {
       }
       patch.pushWhileOnline = body.pushWhileOnline;
     }
+    // 오래 접속하지 않았을 때 멘션 요약 메일을 받을지(mentionDigest.js).
+    if ('emailDigest' in body) {
+      if (typeof body.emailDigest !== 'boolean') return res.status(400).json({ error: 'emailDigest는 true/false여야 합니다.' });
+      patch.emailDigest = body.emailDigest;
+    }
     if (Object.keys(patch).length === 0) return res.json(await settingsFor(req.user.sub));
     const saved = await upsertNotificationSettings(req.user.sub, patch);
     // 접속해 있는 동안 바꿔도 다음 푸시부터 바로 따르게(presence.js는 접속할 때 이 값을 읽어 둔다).

@@ -13,6 +13,7 @@ import '../models/ddns_settings.dart';
 import '../models/inquiry.dart';
 import '../models/invite_link.dart';
 import '../models/invite_result.dart';
+import '../models/mail_settings.dart';
 import '../models/team_invite_link.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
@@ -37,9 +38,53 @@ import 'invite_share.dart' show rememberWebAppUrl;
 
 class ApiException implements Exception {
   final String message;
-  const ApiException(this.message);
+
+  /// 서버가 준 HTTP 상태 코드 — 알 때만(예전 서버에 없는 경로인지 404로 가려 예전 방식으로 되돌아갈 때 쓴다).
+  final int? statusCode;
+  const ApiException(this.message, {this.statusCode});
   @override
   String toString() => message;
+}
+
+/// 메일로 확인 코드를 보냈다는 서버 답 — [email]은 일부만 보이는 받는 주소(모르면 null), 코드는 [expiresIn] 동안 쓸 수 있고
+/// [resendIn]이 지나야 다시 받을 수 있다(server/src/emailCodes.js).
+class EmailCodeSent {
+  final String? email;
+  final Duration expiresIn;
+  final Duration resendIn;
+  const EmailCodeSent({
+    this.email,
+    this.expiresIn = const Duration(minutes: 10),
+    this.resendIn = const Duration(seconds: 60),
+  });
+
+  factory EmailCodeSent.fromJson(Map<String, dynamic> json) => EmailCodeSent(
+    email: json['email'] as String?,
+    expiresIn: Duration(
+      seconds: (json['expiresInSeconds'] as num?)?.toInt() ?? 600,
+    ),
+    resendIn: Duration(
+      seconds: (json['resendInSeconds'] as num?)?.toInt() ?? 60,
+    ),
+  );
+}
+
+/// 아이디 찾기 결과 — 화면에 보일 아이디([username]), 또는 메일로 보냈다는 표시([sentTo] — 일부만 보이는 주소).
+/// 메일이 켜진 서버에서 이메일을 확인한 계정은 아이디를 화면에 보이지 않고 메일로 보낸다(server auth.js /find-id).
+class FindIdResult {
+  final String? username;
+  final String? sentTo;
+  const FindIdResult({this.username, this.sentTo});
+  bool get sentByMail => username == null;
+}
+
+/// 비밀번호 찾기 첫 단계 결과 — 메일로 코드를 보냈으면 [emailCode], 아니면 보안 질문([question], 질문이 없는 옛 계정은
+/// null)으로 찾는다(server auth.js /password-reset/start).
+class PasswordResetStart {
+  final EmailCodeSent? emailCode;
+  final String? question;
+  const PasswordResetStart({this.emailCode, this.question});
+  bool get byEmail => emailCode != null;
 }
 
 class AuthResult {
@@ -202,10 +247,14 @@ class MyProfile {
   final UserStatus? status;
   final DndState? dnd;
 
+  /// 이메일을 본인이 받는다고 메일 코드로 확인했는지 — 메일이 켜진 서버에서 확인하지 않았으면 앱이 확인을 권한다.
+  final bool emailVerified;
+
   const MyProfile({
     required this.username,
     required this.name,
     this.email,
+    this.emailVerified = false,
     this.avatarType = 'initial',
     this.avatarEmoji,
     this.avatarColor,
@@ -229,6 +278,7 @@ class MyProfile {
     username: json['username'] as String,
     name: (json['name'] as String?) ?? json['username'] as String,
     email: json['email'] as String?,
+    emailVerified: json['emailVerified'] as bool? ?? false,
     avatarType: json['avatarType'] as String? ?? 'initial',
     avatarEmoji: json['avatarEmoji'] as String?,
     avatarColor: json['avatarColor'] as String?,
@@ -645,23 +695,83 @@ class ApiClient {
     return (body['available'] as bool) ? null : body['error'] as String?;
   }
 
+  /// 회원가입. 메일이 켜진 서버는 [emailCode](이 이메일로 받은 확인 코드 — [sendSignupEmailCode])가 있어야 되고, 그때는
+  /// 보안 질문을 넣지 않아도 된다([securityQuestion]·[securityAnswer]가 null). 메일이 꺼진 서버는 보안 질문이 필요하다.
   Future<AuthResult> register(
     String username,
     String password,
     String email,
     String name, {
-    required String securityQuestion,
-    required String securityAnswer,
+    String? securityQuestion,
+    String? securityAnswer,
+    String? emailCode,
     String? teamInviteToken,
   }) => _authRequest('/auth/register', {
     'username': username,
     'password': password,
     'email': email,
     'name': name,
-    'securityQuestion': securityQuestion,
-    'securityAnswer': securityAnswer,
+    'securityQuestion': ?securityQuestion,
+    'securityAnswer': ?securityAnswer,
+    'emailCode': ?emailCode,
     'teamInviteToken': ?teamInviteToken,
   });
+
+  /// 서버에 메일(SMTP) 기능이 켜져 있는지(GET /server-info의 mailEnabled) — 켜져 있으면 가입할 때 이메일 확인 코드를 받고,
+  /// 아이디·비밀번호를 메일로 찾는다. 못 물어봤거나 이 값을 모르는 예전 서버면 false(지금처럼 보안 질문).
+  Future<bool> fetchMailEnabled() async {
+    try {
+      final res = await _client
+          .get(_uri('/server-info'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return false;
+      final body = jsonDecode(utf8.decode(res.bodyBytes));
+      return body is Map && body['mailEnabled'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 로그인 없이 부르는 POST — 실패하면 서버 문구(없으면 기본 문구)와 상태 코드로 ApiException. JSON이 아닌 답(예전 서버의
+  /// "Cannot POST" 페이지 등)은 빈 내용으로 본다.
+  Future<Map<String, dynamic>> _publicPost(
+    String path,
+    Map<String, dynamic> payload,
+  ) async {
+    final res = await _client.post(
+      _uri(path),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+    Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    } on FormatException {
+      decoded = null;
+    }
+    final body = decoded is Map<String, dynamic>
+        ? decoded
+        : const <String, dynamic>{};
+    if (res.statusCode >= 400) {
+      throw ApiException(
+        (body['error'] as String?) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
+      );
+    }
+    return body;
+  }
+
+  /// 가입 전 이메일 확인 코드를 [email]로 보낸다(메일이 켜진 서버에서만). 사내 와이파이 밖에서는 [teamInviteToken](초대
+  /// 링크의 코드)이 있어야 서버가 보낸다.
+  Future<EmailCodeSent> sendSignupEmailCode(
+    String email, {
+    String? teamInviteToken,
+  }) async => EmailCodeSent.fromJson(
+    await _publicPost('/auth/email-code/signup', {
+      'email': email,
+      'teamInviteToken': ?teamInviteToken,
+    }),
+  );
 
   Future<AuthResult> login(String username, String password) =>
       _authRequest('/auth/login', {'username': username, 'password': password});
@@ -701,17 +811,50 @@ class ApiClient {
     return body['accessToken'] as String;
   }
 
-  Future<String> findId(String email) async {
-    final res = await _client.post(
-      _uri('/auth/find-id'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email}),
-    );
-    final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-    if (res.statusCode >= 400) {
-      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+  /// 아이디 찾기 — 화면에 보일 아이디, 또는 메일로 보냈다는 결과(메일이 켜진 서버에서 이메일을 확인한 계정).
+  Future<FindIdResult> findId(String email) async {
+    final body = await _publicPost('/auth/find-id', {'email': email});
+    if (body['sent'] == true) {
+      return FindIdResult(sentTo: body['email'] as String? ?? '');
     }
-    return body['username'] as String;
+    return FindIdResult(username: body['username'] as String);
+  }
+
+  /// 비밀번호 찾기 첫 단계 — 메일로 찾는 계정이면 서버가 재설정 코드를 보내고, 아니면 보안 질문을 알려 준다. 다시 부르면 코드를
+  /// 다시 보낸다(1분 간격). 이 단계가 없는 예전 서버면 보안 질문 조회(/auth/security-question)로 대신한다.
+  Future<PasswordResetStart> startPasswordReset({
+    required String username,
+    required String email,
+  }) async {
+    try {
+      final body = await _publicPost('/auth/password-reset/start', {
+        'username': username,
+        'email': email,
+      });
+      if (body['method'] == 'email') {
+        return PasswordResetStart(emailCode: EmailCodeSent.fromJson(body));
+      }
+      return PasswordResetStart(question: body['question'] as String?);
+    } on ApiException catch (e) {
+      if (e.statusCode != 404 || e.message != '요청이 실패했습니다.') rethrow;
+      // 예전 서버(경로 없음 — 서버 문구 없이 404).
+      return PasswordResetStart(
+        question: await fetchSecurityQuestion(username: username, email: email),
+      );
+    }
+  }
+
+  /// 메일로 받은 재설정 코드가 맞는지만 본다(비밀번호는 안 바꿈) — 맞을 때만 새 비밀번호 입력칸을 보여 주려고.
+  Future<void> verifyPasswordResetCode({
+    required String username,
+    required String email,
+    required String code,
+  }) async {
+    await _publicPost('/auth/password-reset/verify-code', {
+      'username': username,
+      'email': email,
+      'code': code,
+    });
   }
 
   /// 아이디+이메일이 일치하는 계정의 보안 질문을 가져온다. 그 컬럼이 생기기 전에 가입한
@@ -755,10 +898,12 @@ class ApiClient {
     }
   }
 
+  /// 비밀번호 재설정 — 메일로 찾는 계정은 [emailCode], 그 밖에는 [securityAnswer](질문이 없는 옛 계정은 null).
   Future<void> resetPassword({
     required String username,
     required String email,
     String? securityAnswer,
+    String? emailCode,
     required String newPassword,
   }) async {
     final res = await _client.post(
@@ -768,6 +913,7 @@ class ApiClient {
         'username': username,
         'email': email,
         'securityAnswer': ?securityAnswer,
+        'emailCode': ?emailCode,
         'newPassword': newPassword,
       }),
     );
@@ -957,21 +1103,43 @@ class ApiClient {
   /// 제공한 필드만 바꾼다(이름만, 이메일만, 또는 둘 다).
   /// [email]을 바꿀 때는 서버가 [currentPassword]로 본인 확인을 한다(비밀번호 변경과
   /// 같은 정책 — 이메일은 계정 복구 수단이라 이름/아바타보다 한 단계 더 확인한다).
+  /// 메일이 켜진 서버에서 이메일을 바꿀 때는 새 주소로 받은 확인 코드([emailCode] — [sendEmailCode])도 함께 보낸다.
   Future<MyProfile> updateProfile({
     String? name,
     String? email,
     String? currentPassword,
+    String? emailCode,
   }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (email != null) {
       body['email'] = email;
       body['currentPassword'] = currentPassword;
+      if (emailCode != null) body['emailCode'] = emailCode;
     }
     return MyProfile.fromJson(
       await _patch('/api/users/me', body) as Map<String, dynamic>,
     );
   }
+
+  /// 이메일 확인 코드 보내기(메일이 켜진 서버에서만) — [email]이 없으면 지금 이메일을 확인하는 코드를 지금 주소로, 있으면 그
+  /// 주소로 바꾸려는 코드를 새 주소로 보낸다(그때는 [currentPassword]가 필요하다).
+  Future<EmailCodeSent> sendEmailCode({
+    String? email,
+    String? currentPassword,
+  }) async => EmailCodeSent.fromJson(
+    await _post('/api/users/me/email/send-code', {
+          'email': ?email,
+          'currentPassword': ?currentPassword,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 지금 이메일로 받은 확인 코드를 넣어 이메일을 확인한다.
+  Future<MyProfile> verifyEmail(String code) async => MyProfile.fromJson(
+    await _post('/api/users/me/email/verify', {'code': code})
+        as Map<String, dynamic>,
+  );
 
   /// 생일만 바꾼다 — [birthday]는 'MM-DD'(연도 없음), null이면 삭제. null도 body에 그대로 실어야
   /// 서버가 "지우기"로 읽는다(빠지면 "바꾸지 않음").
@@ -1169,6 +1337,54 @@ class ApiClient {
     return body;
   }
 
+  /// 관리자 콘솔 "메일" 탭 — 메일(SMTP)·멘션 요약 메일 설정(GET /api/admin/mail). 이 기능이 없는 예전 서버는 404라 null —
+  /// 화면이 "서버를 업데이트하세요"로 안내한다.
+  Future<MailSettings?> fetchMailSettings() async {
+    final res = await _send(
+      () => _client.get(_uri('/api/admin/mail'), headers: _authHeaders),
+    );
+    if (res.statusCode == 404) return null;
+    return MailSettings.fromJson(_decodeDdns(res, what: '메일 설정'));
+  }
+
+  /// 메일 설정 변경 — 넘긴 항목만 바뀐다. [password]에 빈 문자열을 넘기면 지우고, null이면 그대로 둔다. [port]를 지우려면
+  /// [clearPort]. 연결 값을 바꾸면 서버가 시험 결과를 지우고 메일 기능을 끈다(다시 시험 메일을 보내 성공해야 켤 수 있다).
+  Future<MailSettings> updateMailSettings({
+    bool? enabled,
+    String? host,
+    int? port,
+    bool clearPort = false,
+    String? security,
+    String? username,
+    String? password,
+    String? fromAddress,
+    String? fromName,
+    bool? digestEnabled,
+    int? digestDays,
+    bool? digestPreview,
+  }) async => MailSettings.fromJson(
+    await _patch('/api/admin/mail', {
+          'enabled': ?enabled,
+          'host': ?host,
+          if (clearPort) 'port': null else 'port': ?port,
+          'security': ?security,
+          'username': ?username,
+          'password': ?password,
+          'fromAddress': ?fromAddress,
+          'fromName': ?fromName,
+          'digestEnabled': ?digestEnabled,
+          'digestDays': ?digestDays,
+          'digestPreview': ?digestPreview,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 시험 메일 — 지금 저장된 값으로 [to]에 한 통 보낸다. 성공하면 메일 기능을 켤 수 있게 된다. 실패하면 고칠 수 있는 이유로
+  /// ApiException.
+  Future<MailSettings> sendTestMail(String to) async => MailSettings.fromJson(
+    await _post('/api/admin/mail/test', {'to': to}) as Map<String, dynamic>,
+  );
+
   /// 관리자 콘솔의 "FCM 설정" — 지금 저장된 값(서비스 계정의 private_key는 빼고).
   Future<FcmSettings> fetchFcmSettings() async => FcmSettings.fromJson(
     await _get('/api/admin/fcm-settings') as Map<String, dynamic>,
@@ -1344,6 +1560,15 @@ class ApiClient {
     await _delete('/api/invite-links/$id') as Map<String, dynamic>,
   );
 
+  /// 초대 링크를 메일로 보낸다(메일이 켜진 서버에서만) — 본문은 서버가 만든다. 결과는 보낸 수와 못 보낸 주소들.
+  Future<InviteMailResult> sendInviteLinkEmails(
+    String id,
+    List<String> emails,
+  ) async => InviteMailResult.fromJson(
+    await _post('/api/invite-links/$id/email', {'emails': emails})
+        as Map<String, dynamic>,
+  );
+
   // ─────────────── 팀 초대 링크(가입 시 팀 자동 합류 + 등급 자동 부여) ───────────────
   // 만들 때마다 서버가 canCreateTeamInviteLink(서버 설정)를 다시 확인하므로, 권한이 없으면
   // 403이 온다(목록·취소는 권한을 잃은 뒤에도 내가 만든 링크라면 된다). 위 초대 링크와 달리 팀
@@ -1381,6 +1606,15 @@ class ApiClient {
       TeamInviteLink.fromJson(
         await _delete('/api/team-invite-links/$id') as Map<String, dynamic>,
       );
+
+  /// 팀 초대 링크를 메일로 보낸다 — [sendInviteLinkEmails]와 같고 본문에 팀 이름이 들어간다.
+  Future<InviteMailResult> sendTeamInviteLinkEmails(
+    String id,
+    List<String> emails,
+  ) async => InviteMailResult.fromJson(
+    await _post('/api/team-invite-links/$id/email', {'emails': emails})
+        as Map<String, dynamic>,
+  );
 
   /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함) — 로그인/앱 시작 직후 팀 선택 화면이 쓴다.
   Future<List<Team>> fetchTeams() async {

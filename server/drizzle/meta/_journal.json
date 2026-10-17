@@ -764,6 +764,13 @@
       "when": 1791993786341,
       "tag": "0108_sticker_deleted",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1792206653857,
+      "tag": "0109_email_features",
+      "breakpoints": true
     }
   ]
 }

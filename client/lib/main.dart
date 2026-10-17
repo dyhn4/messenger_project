@@ -32,6 +32,7 @@ import 'services/pinned_tls.dart';
 import 'services/session.dart';
 import 'services/web_launch_invite.dart';
 import 'services/web_page_color.dart';
+import 'services/web_keyboard_fix.dart';
 import 'services/web_safe_area.dart';
 import 'widgets/app_lock_overlay.dart';
 import 'widgets/download_progress_card.dart';
@@ -206,6 +207,8 @@ Future<void> main() async {
   PasswordIme.install();
   // 웹 앱이 아이폰 상태바·홈 막대 자리를 피하게 안전 영역을 읽어 둔다(web_safe_area.dart — 웹이 아니면 아무것도 안 함).
   enableWebSafeArea();
+  // 안드로이드 웹 앱에서 키보드를 닫은 뒤 화면 아래에 빈 공간이 남으면 되돌린다(web_keyboard_fix.dart — 그 밖에는 아무것도 안 함).
+  enableWebKeyboardFix();
   runApp(const MyApp());
 }
 

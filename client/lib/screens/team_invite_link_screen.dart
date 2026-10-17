@@ -11,6 +11,7 @@ import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/invite_link_detail.dart';
+import '../widgets/invite_mail_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 
 /// "팀 초대 링크" 관리 화면. 위의 InviteLinkScreen(설치→가입)과 달리, 이 링크로 가입하면
@@ -264,6 +265,17 @@ class _TeamInviteLinkScreenState extends State<TeamInviteLinkScreen> {
           link: links[i],
           onOpen: () => setState(() => _openedId = links[i].id),
           onCopy: () => _copyAndNotify(links[i]),
+          // 메일로 보내기는 서버에 메일이 켜져 있을 때만(server/src/inviteMail.js).
+          onMail: widget.session.mailEnabled
+              ? () => showInviteMailDialog(
+                  context,
+                  linkTitle: links[i].label?.isNotEmpty == true
+                      ? links[i].label!
+                      : '${links[i].teamName} 팀 초대 링크',
+                  send: (emails) => widget.session.api!
+                      .sendTeamInviteLinkEmails(links[i].id, emails),
+                )
+              : null,
           onRevoke: () => _revoke(links[i]),
         ),
       ),
@@ -275,11 +287,15 @@ class _TeamInviteLinkRow extends StatelessWidget {
   final TeamInviteLink link;
   final VoidCallback onOpen;
   final VoidCallback onCopy;
+
+  /// 메일로 보내기 — 서버에 메일이 꺼져 있으면 null(단추를 그리지 않는다).
+  final VoidCallback? onMail;
   final VoidCallback onRevoke;
   const _TeamInviteLinkRow({
     required this.link,
     required this.onOpen,
     required this.onCopy,
+    this.onMail,
     required this.onRevoke,
   });
 
@@ -312,6 +328,13 @@ class _TeamInviteLinkRow extends StatelessWidget {
               tooltip: '링크 복사',
               icon: const Icon(Icons.copy_outlined, size: 20),
               onPressed: onCopy,
+            ),
+          if (link.valid && onMail != null)
+            IconButton(
+              key: ValueKey('team-invite-mail-${link.id}'),
+              tooltip: '메일로 보내기',
+              icon: const Icon(Icons.forward_to_inbox_outlined, size: 20),
+              onPressed: onMail,
             ),
           // 취소는 만료 전이면 인원이 다 찼어도 둔다 — 그 링크로 아직 연결·설치가 되기 때문이다.
           if (link.isOpen)

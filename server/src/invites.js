@@ -12,6 +12,7 @@ import {
 } from './db/queries/inviteLinks.js';
 import { findUserById } from './db/queries/users.js';
 import { EXTERNAL_ADDRESS, PAIRING_PORT } from './config.js';
+import { sendInviteMails } from './inviteMail.js';
 import { canCreateInviteLink } from './permissions.js';
 
 /** 초대 링크는 발급되면 항상 이 기간(일)만큼만 유효하다 — 굳이 고를 필요 없게 고정. */
@@ -145,6 +146,37 @@ export function createInvitesRouter() {
     });
 
     res.status(201).json(toInviteLinkDto(link, { serverAddress: serverAddressFrom(req) }));
+  });
+
+  /**
+   * 초대 링크를 메일로 보낸다(메일이 켜진 서버에서만) — 내가 만든 링크이고 지금 그 링크로 가입할 수 있을 때만(인원이 찼거나
+   * 만료·취소된 링크를 새 사람에게 보내면 밖에서 가입이 안 된다). 본문은 서버가 만든다(inviteMail.js).
+   */
+  router.post('/invite-links/:id/email', async (req, res) => {
+    const mine = await findInviteLinkById(req.params.id);
+    if (!mine || mine.createdBy !== req.user.sub) {
+      return res.status(404).json({ error: '초대 링크를 찾을 수 없습니다.' });
+    }
+    if (!(await inviteLinkJoinable(mine))) {
+      return res.status(409).json({ error: '이 링크로는 더 이상 가입할 수 없습니다. 새 링크를 만들어 보내세요.' });
+    }
+    const me = await findUserById(req.user.sub);
+    const actorName = me?.name ?? me?.username ?? '(알 수 없음)';
+    await sendInviteMails(req, res, {
+      link: mine,
+      pathKind: 'invite',
+      inviterName: me?.name ?? me?.username,
+      onSent: (count) =>
+        recordAudit({
+          actorId: req.user.sub,
+          actorName,
+          action: AUDIT.inviteLinkEmail,
+          targetType: 'invite',
+          targetId: mine.id,
+          targetLabel: mine.label ?? undefined,
+          detail: `초대 메일 ${count}통 보냄`,
+        }),
+    });
   });
 
   /** 폐기 — 아직 안 쓴 만료 전 링크도 즉시 못 쓰게 막는다. 내가 만든 링크만 지울 수 있다. */

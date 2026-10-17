@@ -20,6 +20,7 @@ import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
 import 'admin_backup_tab.dart';
 import 'admin_ddns_tab.dart';
+import 'admin_mail_tab.dart';
 import 'admin_stickers_tab.dart';
 
 /// 서버 운영자 전용 관리자 콘솔. 팀 설정(팀 안의 관리)과 달리 **서버 전체**를 다룬다 —
@@ -42,7 +43,7 @@ class AdminConsoleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 8,
+      length: 9,
       child: FloatingDialog(
         title: '서버 관리',
         maxWidth: 820,
@@ -61,6 +62,7 @@ class AdminConsoleScreen extends StatelessWidget {
                 Tab(text: '감사 로그'),
                 Tab(text: 'FCM 설정'),
                 Tab(text: 'DDNS'),
+                Tab(text: '메일'),
                 Tab(text: '백업'),
                 Tab(text: '이모티콘'),
               ],
@@ -75,6 +77,7 @@ class AdminConsoleScreen extends StatelessWidget {
                   _AuditTab(session: session),
                   _FcmTab(session: session),
                   AdminDdnsTab(session: session),
+                  AdminMailTab(session: session),
                   AdminBackupTab(session: session),
                   AdminStickersTab(session: session),
                 ],

@@ -804,297 +804,309 @@ class ChatInputBarState extends State<ChatInputBar> {
     if (!_canWrite) return _buildReadOnlyNotice(context);
     final uploading = _uploading;
     final hintColor = Theme.of(context).hintColor;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          // 입력칸(TextField)이 이 칸 전체 폭을 채우도록(예전엔 Row 안 Expanded로
-          // 채웠지만, 이제는 입력칸이 직접 자식이라 stretch로 채운다).
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildScheduledBar(),
-            // 읽기 전용·보관된 토픽인데 토픽 관리자라 쓸 수 있는 경우 — 다른 멤버는 못 쓴다는 걸
-            // 잊지 않게 얇게 알려 준다.
-            if (_restricted)
-              Padding(
-                key: const ValueKey('chat-input-read-only-hint'),
-                padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-                child: Row(
-                  children: [
-                    Icon(
-                      _archived
-                          ? Icons.inventory_2_outlined
-                          : Icons.edit_off_outlined,
-                      size: 14,
-                      color: hintColor,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
+    // 입력칸 둘레(보내기·첨부·서식 단추 등)를 눌러도 입력칸 "바깥"을 누른 것으로 치지 않는다. 웹에서 터치하면 Flutter는
+    // 입력칸 바깥을 누르는 순간 포커스를 놓았다가(_send가 곧 다시 잡는다) 그 사이 그린 프레임에서 키보드가 떠 있는 높이를
+    // 화면 높이로 몰래 다시 잰다(엔진 handleFrameworkResize — 입력 중이 아닐 때만). 그 뒤 뒤로가기로 키보드를 닫으면
+    // 다시 입력 중이라 그 줄어든 높이에 묶여서, 안드로이드 웹 앱 아래에 키보드만큼 빈 공간이 남았다.
+    return TextFieldTapRegion(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            // 입력칸(TextField)이 이 칸 전체 폭을 채우도록(예전엔 Row 안 Expanded로
+            // 채웠지만, 이제는 입력칸이 직접 자식이라 stretch로 채운다).
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildScheduledBar(),
+              // 읽기 전용·보관된 토픽인데 토픽 관리자라 쓸 수 있는 경우 — 다른 멤버는 못 쓴다는 걸
+              // 잊지 않게 얇게 알려 준다.
+              if (_restricted)
+                Padding(
+                  key: const ValueKey('chat-input-read-only-hint'),
+                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                  child: Row(
+                    children: [
+                      Icon(
                         _archived
-                            ? '보관된 토픽 — 토픽 관리자만 글을 쓸 수 있어요'
-                            : '읽기 전용 토픽 — 토픽 관리자만 글을 쓸 수 있어요',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: hintColor),
+                            ? Icons.inventory_2_outlined
+                            : Icons.edit_off_outlined,
+                        size: 14,
+                        color: hintColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          _archived
+                              ? '보관된 토픽 — 토픽 관리자만 글을 쓸 수 있어요'
+                              : '읽기 전용 토픽 — 토픽 관리자만 글을 쓸 수 있어요',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: hintColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_attachments.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SizedBox(
+                    // 이미지 카드(200x64)와 파일 카드가 들어갈 수 있는 고정 높이 — 업로드
+                    // 중이든 끝났든 같은 카드(UploadingAttachment)를 그대로 쓰므로(완료돼도
+                    // 다른 위젯으로 안 바뀜) 높이를 상태에 따라 바꿀 필요가 없다. 넘쳐서 안 보이는
+                    // 첨부가 있으면 그 아래에 가로 스크롤바(채팅방과 같은 10px, 늘 보임) 자리를 더한다.
+                    height: 80 + (_attachmentsOverflow ? 14 : 0),
+                    child: NotificationListener<ScrollMetricsNotification>(
+                      onNotification: (n) {
+                        final overflow = n.metrics.maxScrollExtent > 0;
+                        if (overflow != _attachmentsOverflow) {
+                          setState(() => _attachmentsOverflow = overflow);
+                        }
+                        return false;
+                      },
+                      child: MutedScrollbar(
+                        key: const ValueKey('chat-attachments-scrollbar'),
+                        controller: _attachmentScroll,
+                        child: ListView.builder(
+                          key: const ValueKey('chat-attachments'),
+                          controller: _attachmentScroll,
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.only(
+                            bottom: _attachmentsOverflow ? 14 : 0,
+                          ),
+                          itemCount: _attachments.length,
+                          itemBuilder: (context, i) {
+                            final a = _attachments[i];
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 10, top: 6),
+                              child: UploadingAttachment(
+                                thumbnailBytes: a.thumbnailBytes,
+                                displayName: a.displayName,
+                                totalBytes: a.totalBytes,
+                                sentBytes: a.sentBytes,
+                                completed: a.result != null,
+                                onCancel: () => _cancelAttachment(a),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ),
+                  ),
+                ),
+              // 입력칸을 위에 두고, 첨부 아이콘+보내기 버튼은 그 아래 별도 줄에 둔다(첨부
+              // 이미지 참고 — 예전엔 입력칸과 같은 줄 왼쪽/오른쪽에 있었다).
+              // TextField(EditableText)는 여러 줄일 때 조상 ScrollConfiguration과 무관하게
+              // 항상 자체 스크롤바를 강제로 붙인다(TextField에 그 동작을 끌 방법도 없다) —
+              // 그래서 따로 Scrollbar를 얹지 않고, 그 자동 스크롤바가 이 테마를 그대로
+              // 입도록(채팅방과 같은 두께 10px, 항상 보임) ScrollbarTheme만 씌운다.
+              // 서식 도구모음을 펼치면 입력칸 테두리 안쪽 맨 위에 도구모음 줄을 얹는다. 펼치든
+              // 접든 TextField는 같은 자리(Column의 마지막)에 두어서 입력 중인 상태·포커스가
+              // 그대로 이어지게 한다.
+              RichFormatFrame(
+                open: _formatOpen,
+                focused: _focusNode.hasFocus,
+                toolbar: RichFormatToolbar(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                ),
+                child: ScrollbarTheme(
+                  data: mutedScrollbarThemeData,
+                  child: MentionAutocomplete(
+                    key: _mentionKey,
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    room: _liveRoom,
+                    myUserId: widget.session.userId,
+                    resolveUrl: widget.session.resolveUrl,
+                    child: RichFieldWrapper(
+                      controller: _controller,
+                      // 붙여넣기: Ctrl+V는 클립보드의 이미지·표를 보고(_paste), Ctrl+Shift+V는 언제나 글자만(_pasteAsPlainText).
+                      child: Shortcuts(
+                        shortcuts: const <ShortcutActivator, Intent>{
+                          SingleActivator(
+                            LogicalKeyboardKey.keyV,
+                            control: true,
+                            shift: true,
+                          ): _PlainPasteIntent(),
+                        },
+                        child: Actions(
+                          actions: <Type, Action<Intent>>{
+                            PasteTextIntent: _pasteAction,
+                            _PlainPasteIntent:
+                                CallbackAction<_PlainPasteIntent>(
+                                  onInvoke: (_) {
+                                    unawaited(_pasteAsPlainText());
+                                    return null;
+                                  },
+                                ),
+                          },
+                          child: TextField(
+                            key: const ValueKey('chat-input'),
+                            controller: _controller,
+                            focusNode: _focusNode,
+                            decoration: InputDecoration(
+                              // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                              // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                              hintText: _focusNode.hasFocus ? null : '메시지 입력',
+                              border: _formatOpen
+                                  ? InputBorder.none
+                                  : const OutlineInputBorder(),
+                              // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
+                              // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
+                              contentPadding: const EdgeInsets.fromLTRB(
+                                12,
+                                12,
+                                2,
+                                12,
+                              ),
+                            ),
+                            minLines: 1,
+                            maxLines: 6,
+                            // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
+                            // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
+                            // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
+                            // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
+                            // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
+                            // 그대로 둔다.
+                            textInputAction: AppPlatform.isWindows
+                                ? TextInputAction.newline
+                                : TextInputAction.send,
+                            onSubmitted: (_) => _send(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              // 검색/멤버/스레드 패널이 열려 있거나 창이 좁으면 이 줄의 폭이 꽤 좁아진다 — 버튼
+              // 개수(캡처·화상회의·문의)와 글꼴에 따라 필요한 폭이 달라서, 예전처럼 고정 폭(320)
+              // 기준으로 안내 문구를 두면 360px 안팎에서 넘쳐 보내기 버튼이 밀려났다. 이제 버튼을
+              // 다 놓고 남은 자리에 안내 문구가 통째로 들어갈 때만 보인다(_SendKeyHint).
+              LayoutBuilder(
+                builder: (context, constraints) => Row(
+                  children: [
+                    TapRegion(
+                      groupId: widget.stickerPickerGroupId,
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.emoji_emotions_outlined,
+                          color: widget.stickerPickerOpen
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                        onPressed: _sending
+                            ? null
+                            : widget.onToggleStickerPicker,
+                        tooltip: '이모티콘',
+                      ),
+                    ),
+                    // 멘션 — 입력칸에 @를 넣어 대화 멤버 자동완성을 연다(비밀 대화는 지원하지 않는다).
+                    // 좁아서 자리가 없으면 아래 파일 단추의 메뉴에 "멘션"으로 들어간다.
+                    if (_standaloneButtons(constraints.maxWidth).mention)
+                      MentionButton(
+                        onPressed: _sending
+                            ? null
+                            : () => _mentionKey.currentState?.insertTrigger(),
+                      ),
+                    // 멘션·투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가
+                    // 같은 자리의 메뉴(파일 보내기 · 투표 · 멘션)가 된다.
+                    if (_needsAttachMenu(constraints.maxWidth))
+                      _buildAttachMenu(constraints.maxWidth)
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.attach_file),
+                        onPressed: _sending ? null : _pickFile,
+                        tooltip: '파일 보내기',
+                      ),
+                    // 투표 만들기 — 비밀 대화에서는 서버가 막으니 단추 자체를 숨긴다.
+                    if (_standaloneButtons(constraints.maxWidth).poll)
+                      IconButton(
+                        key: const ValueKey('chat-poll'),
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.poll_outlined),
+                        onPressed: _sending ? null : _openPollCreator,
+                        tooltip: '투표',
+                      ),
+                    if (!widget.room.isSecret)
+                      RichFormatToggleButton(
+                        open: _formatOpen,
+                        onPressed: () {
+                          setState(() => _formatOpen = !_formatOpen);
+                          _focusNode.requestFocus();
+                        },
+                      ),
+                    // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
+                    // 찍을지 먼저 고른다.
+                    if (AppPlatform.isWindows)
+                      PopupMenuButton<bool>(
+                        icon: const Icon(Icons.filter_center_focus),
+                        tooltip: '화면 캡처',
+                        enabled: !_sending && !_capturing,
+                        onSelected: _startCapture,
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: true,
+                            child: Text('메신저 창 숨기고 캡처'),
+                          ),
+                          PopupMenuItem(
+                            value: false,
+                            child: Text('메신저 창 포함하여 캡처'),
+                          ),
+                        ],
+                      ),
+                    if (_showCallButton)
+                      CallButton(session: widget.session, room: widget.room),
+                    // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
+                    if (widget.session.canSendInquiryIn(widget.room))
+                      IconButton(
+                        icon: const Icon(Icons.contact_support_outlined),
+                        onPressed: _sending ? null : _showInquiryDialog,
+                        tooltip: '팀장에게 문의하기',
+                      ),
+                    // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
+                    Expanded(
+                      child: AppPlatform.isWindows
+                          ? _SendKeyHint(
+                              widget.session.settings.sendWithShiftEnter
+                                  ? 'Shift + Enter 로 전송'
+                                  : 'Shift + Enter 로 줄바꿈',
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    // 메시지 예약 — 보내기 바로 옆에 둔다(비밀 대화는 서버가 예약을 받지 않는다).
+                    if (canScheduleIn(widget.session, _liveRoom))
+                      IconButton(
+                        key: const ValueKey('chat-schedule'),
+                        icon: const Icon(Icons.schedule_send_outlined),
+                        onPressed: _sending || uploading
+                            ? null
+                            : _openScheduleEditor,
+                        tooltip: uploading ? '업로드가 끝나면 예약할 수 있어요' : '메시지 예약',
+                      ),
+                    if (_sending)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      IconButton(
+                        icon: const Icon(Icons.send),
+                        onPressed: uploading ? null : _send,
+                        tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
+                      ),
                   ],
                 ),
               ),
-            if (_attachments.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: SizedBox(
-                  // 이미지 카드(200x64)와 파일 카드가 들어갈 수 있는 고정 높이 — 업로드
-                  // 중이든 끝났든 같은 카드(UploadingAttachment)를 그대로 쓰므로(완료돼도
-                  // 다른 위젯으로 안 바뀜) 높이를 상태에 따라 바꿀 필요가 없다. 넘쳐서 안 보이는
-                  // 첨부가 있으면 그 아래에 가로 스크롤바(채팅방과 같은 10px, 늘 보임) 자리를 더한다.
-                  height: 80 + (_attachmentsOverflow ? 14 : 0),
-                  child: NotificationListener<ScrollMetricsNotification>(
-                    onNotification: (n) {
-                      final overflow = n.metrics.maxScrollExtent > 0;
-                      if (overflow != _attachmentsOverflow) {
-                        setState(() => _attachmentsOverflow = overflow);
-                      }
-                      return false;
-                    },
-                    child: MutedScrollbar(
-                      key: const ValueKey('chat-attachments-scrollbar'),
-                      controller: _attachmentScroll,
-                      child: ListView.builder(
-                        key: const ValueKey('chat-attachments'),
-                        controller: _attachmentScroll,
-                        scrollDirection: Axis.horizontal,
-                        padding: EdgeInsets.only(
-                          bottom: _attachmentsOverflow ? 14 : 0,
-                        ),
-                        itemCount: _attachments.length,
-                        itemBuilder: (context, i) {
-                          final a = _attachments[i];
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 10, top: 6),
-                            child: UploadingAttachment(
-                              thumbnailBytes: a.thumbnailBytes,
-                              displayName: a.displayName,
-                              totalBytes: a.totalBytes,
-                              sentBytes: a.sentBytes,
-                              completed: a.result != null,
-                              onCancel: () => _cancelAttachment(a),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            // 입력칸을 위에 두고, 첨부 아이콘+보내기 버튼은 그 아래 별도 줄에 둔다(첨부
-            // 이미지 참고 — 예전엔 입력칸과 같은 줄 왼쪽/오른쪽에 있었다).
-            // TextField(EditableText)는 여러 줄일 때 조상 ScrollConfiguration과 무관하게
-            // 항상 자체 스크롤바를 강제로 붙인다(TextField에 그 동작을 끌 방법도 없다) —
-            // 그래서 따로 Scrollbar를 얹지 않고, 그 자동 스크롤바가 이 테마를 그대로
-            // 입도록(채팅방과 같은 두께 10px, 항상 보임) ScrollbarTheme만 씌운다.
-            // 서식 도구모음을 펼치면 입력칸 테두리 안쪽 맨 위에 도구모음 줄을 얹는다. 펼치든
-            // 접든 TextField는 같은 자리(Column의 마지막)에 두어서 입력 중인 상태·포커스가
-            // 그대로 이어지게 한다.
-            RichFormatFrame(
-              open: _formatOpen,
-              focused: _focusNode.hasFocus,
-              toolbar: RichFormatToolbar(
-                controller: _controller,
-                focusNode: _focusNode,
-              ),
-              child: ScrollbarTheme(
-                data: mutedScrollbarThemeData,
-                child: MentionAutocomplete(
-                  key: _mentionKey,
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  room: _liveRoom,
-                  myUserId: widget.session.userId,
-                  resolveUrl: widget.session.resolveUrl,
-                  child: RichFieldWrapper(
-                    controller: _controller,
-                    // 붙여넣기: Ctrl+V는 클립보드의 이미지·표를 보고(_paste), Ctrl+Shift+V는 언제나 글자만(_pasteAsPlainText).
-                    child: Shortcuts(
-                      shortcuts: const <ShortcutActivator, Intent>{
-                        SingleActivator(
-                          LogicalKeyboardKey.keyV,
-                          control: true,
-                          shift: true,
-                        ): _PlainPasteIntent(),
-                      },
-                      child: Actions(
-                        actions: <Type, Action<Intent>>{
-                          PasteTextIntent: _pasteAction,
-                          _PlainPasteIntent: CallbackAction<_PlainPasteIntent>(
-                            onInvoke: (_) {
-                              unawaited(_pasteAsPlainText());
-                              return null;
-                            },
-                          ),
-                        },
-                        child: TextField(
-                          key: const ValueKey('chat-input'),
-                          controller: _controller,
-                          focusNode: _focusNode,
-                          decoration: InputDecoration(
-                            // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                            // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                            hintText: _focusNode.hasFocus ? null : '메시지 입력',
-                            border: _formatOpen
-                                ? InputBorder.none
-                                : const OutlineInputBorder(),
-                            // 기본 오른쪽 여백(12)이면 스크롤바가 테두리에서 너무 떨어져
-                            // 보인다 — 오른쪽만 줄여서 스크롤바를 테두리에 가깝게 붙인다.
-                            contentPadding: const EdgeInsets.fromLTRB(
-                              12,
-                              12,
-                              2,
-                              12,
-                            ),
-                          ),
-                          minLines: 1,
-                          maxLines: 6,
-                          // Windows(물리 키보드)에서는 textInputAction이 .send면 Flutter가
-                          // Shift 여부와 무관하게 Enter를 전부 "제출"로 처리해버려서(줄바꿈이
-                          // 아예 안 먹힘) .newline으로 둬서 기본 동작은 항상 줄바꿈으로 만들고,
-                          // 대신 순수 Enter(=Shift 안 눌림)는 _handleKey가 가로채 직접 보낸다.
-                          // 모바일은 소프트 키보드의 "전송" 액션 버튼이 주 전송 수단이라 .send를
-                          // 그대로 둔다.
-                          textInputAction: AppPlatform.isWindows
-                              ? TextInputAction.newline
-                              : TextInputAction.send,
-                          onSubmitted: (_) => _send(),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            // 검색/멤버/스레드 패널이 열려 있거나 창이 좁으면 이 줄의 폭이 꽤 좁아진다 — 버튼
-            // 개수(캡처·화상회의·문의)와 글꼴에 따라 필요한 폭이 달라서, 예전처럼 고정 폭(320)
-            // 기준으로 안내 문구를 두면 360px 안팎에서 넘쳐 보내기 버튼이 밀려났다. 이제 버튼을
-            // 다 놓고 남은 자리에 안내 문구가 통째로 들어갈 때만 보인다(_SendKeyHint).
-            LayoutBuilder(
-              builder: (context, constraints) => Row(
-                children: [
-                  TapRegion(
-                    groupId: widget.stickerPickerGroupId,
-                    child: IconButton(
-                      icon: Icon(
-                        Icons.emoji_emotions_outlined,
-                        color: widget.stickerPickerOpen
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
-                      onPressed: _sending ? null : widget.onToggleStickerPicker,
-                      tooltip: '이모티콘',
-                    ),
-                  ),
-                  // 멘션 — 입력칸에 @를 넣어 대화 멤버 자동완성을 연다(비밀 대화는 지원하지 않는다).
-                  // 좁아서 자리가 없으면 아래 파일 단추의 메뉴에 "멘션"으로 들어간다.
-                  if (_standaloneButtons(constraints.maxWidth).mention)
-                    MentionButton(
-                      onPressed: _sending
-                          ? null
-                          : () => _mentionKey.currentState?.insertTrigger(),
-                    ),
-                  // 멘션·투표를 만들 수 있는 방인데 별도 단추를 놓을 자리가 없으면(좁은 화면) 파일 단추가
-                  // 같은 자리의 메뉴(파일 보내기 · 투표 · 멘션)가 된다.
-                  if (_needsAttachMenu(constraints.maxWidth))
-                    _buildAttachMenu(constraints.maxWidth)
-                  else
-                    IconButton(
-                      icon: const Icon(Icons.attach_file),
-                      onPressed: _sending ? null : _pickFile,
-                      tooltip: '파일 보내기',
-                    ),
-                  // 투표 만들기 — 비밀 대화에서는 서버가 막으니 단추 자체를 숨긴다.
-                  if (_standaloneButtons(constraints.maxWidth).poll)
-                    IconButton(
-                      key: const ValueKey('chat-poll'),
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.poll_outlined),
-                      onPressed: _sending ? null : _openPollCreator,
-                      tooltip: '투표',
-                    ),
-                  if (!widget.room.isSecret)
-                    RichFormatToggleButton(
-                      open: _formatOpen,
-                      onPressed: () {
-                        setState(() => _formatOpen = !_formatOpen);
-                        _focusNode.requestFocus();
-                      },
-                    ),
-                  // 화면 캡처는 Windows 전용 — 누르면 메신저 창을 숨기고 찍을지 포함해서
-                  // 찍을지 먼저 고른다.
-                  if (AppPlatform.isWindows)
-                    PopupMenuButton<bool>(
-                      icon: const Icon(Icons.filter_center_focus),
-                      tooltip: '화면 캡처',
-                      enabled: !_sending && !_capturing,
-                      onSelected: _startCapture,
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: true, child: Text('메신저 창 숨기고 캡처')),
-                        PopupMenuItem(
-                          value: false,
-                          child: Text('메신저 창 포함하여 캡처'),
-                        ),
-                      ],
-                    ),
-                  if (_showCallButton)
-                    CallButton(session: widget.session, room: widget.room),
-                  // 이 DM 상대가 내 팀의 "팀장"일 때만 보인다(session.canSendInquiryIn).
-                  if (widget.session.canSendInquiryIn(widget.room))
-                    IconButton(
-                      icon: const Icon(Icons.contact_support_outlined),
-                      onPressed: _sending ? null : _showInquiryDialog,
-                      tooltip: '팀장에게 문의하기',
-                    ),
-                  // 줄바꿈/전송 키 안내는 PC(물리 키보드)에서만.
-                  Expanded(
-                    child: AppPlatform.isWindows
-                        ? _SendKeyHint(
-                            widget.session.settings.sendWithShiftEnter
-                                ? 'Shift + Enter 로 전송'
-                                : 'Shift + Enter 로 줄바꿈',
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                  // 메시지 예약 — 보내기 바로 옆에 둔다(비밀 대화는 서버가 예약을 받지 않는다).
-                  if (canScheduleIn(widget.session, _liveRoom))
-                    IconButton(
-                      key: const ValueKey('chat-schedule'),
-                      icon: const Icon(Icons.schedule_send_outlined),
-                      onPressed: _sending || uploading
-                          ? null
-                          : _openScheduleEditor,
-                      tooltip: uploading ? '업로드가 끝나면 예약할 수 있어요' : '메시지 예약',
-                    ),
-                  if (_sending)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12),
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  else
-                    IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: uploading ? null : _send,
-                      tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '보내기',
-                    ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

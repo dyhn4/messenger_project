@@ -15,14 +15,26 @@ Future<void> showNotificationSettingsDialog(
 ) {
   return showDialog<void>(
     context: context,
-    builder: (_) =>
-        NotificationSettingsDialog(center: session.notificationCenter),
+    builder: (_) => NotificationSettingsDialog(
+      center: session.notificationCenter,
+      mailEnabled: session.mailEnabled,
+      emailVerified: session.emailVerified,
+    ),
   );
 }
 
 class NotificationSettingsDialog extends StatefulWidget {
   final NotificationController center;
-  const NotificationSettingsDialog({super.key, required this.center});
+
+  /// 서버에 메일이 켜져 있으면 "멘션 요약 메일 받기"를 보인다 — 실제로 받으려면 이메일을 확인해야 한다([emailVerified]).
+  final bool mailEnabled;
+  final bool emailVerified;
+  const NotificationSettingsDialog({
+    super.key,
+    required this.center,
+    this.mailEnabled = false,
+    this.emailVerified = false,
+  });
 
   @override
   State<NotificationSettingsDialog> createState() =>
@@ -51,11 +63,16 @@ class _NotificationSettingsDialogState
     });
   }
 
-  Future<void> _save({bool? mentionAll, BoardNotifyLevel? boardLevel}) async {
+  Future<void> _save({
+    bool? mentionAll,
+    BoardNotifyLevel? boardLevel,
+    bool? emailDigest,
+  }) async {
     try {
       await widget.center.updateSettings(
         mentionAll: mentionAll,
         boardLevel: boardLevel,
+        emailDigest: emailDigest,
       );
     } catch (e) {
       if (mounted) showAppToast(context, '알림 설정을 저장하지 못했습니다: $e');
@@ -139,6 +156,22 @@ class _NotificationSettingsDialogState
                 value: settings.mentionAll,
                 onChanged: (v) => _save(mentionAll: v),
               ),
+              // 오래 접속하지 않았을 때 안 읽은 멘션을 메일로(server/src/mentionDigest.js) — 서버에 메일이 켜져 있을 때만 보인다.
+              if (widget.mailEnabled)
+                SwitchListTile(
+                  key: const ValueKey('notif-setting-email-digest'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('멘션 요약 메일 받기'),
+                  subtitle: Text(
+                    widget.emailVerified
+                        ? '며칠 동안 접속하지 않으면 그 사이 쌓인 안 읽은 멘션을 이메일로 모아 보내 드립니다.'
+                        : '며칠 동안 접속하지 않으면 안 읽은 멘션을 이메일로 모아 보내 드립니다. 이메일을 확인해야 받을 수 있어요'
+                              '(내 프로필 → 개인정보 설정 → 이메일 관리).',
+                    style: TextStyle(fontSize: 12, color: hint),
+                  ),
+                  value: settings.emailDigest,
+                  onChanged: (v) => _save(emailDigest: v),
+                ),
               const Divider(height: 24),
               Text('보드 알림', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 4),

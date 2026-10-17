@@ -580,12 +580,14 @@ class NotificationController extends ChangeNotifier {
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
     bool? pushWhileOnline,
+    bool? emailDigest,
   }) async {
     final before = settings ?? const NotificationSettings();
     settings = before.copyWith(
       mentionAll: mentionAll,
       boardLevel: boardLevel,
       pushWhileOnline: pushWhileOnline,
+      emailDigest: emailDigest,
     );
     _notify();
     try {
@@ -593,6 +595,7 @@ class NotificationController extends ChangeNotifier {
         mentionAll: mentionAll,
         boardLevel: boardLevel,
         pushWhileOnline: pushWhileOnline,
+        emailDigest: emailDigest,
       );
       settings = saved;
       _notify();

@@ -1,3 +1,4 @@
+import { deleteExpiredEmailCodes } from './db/queries/emailCodes.js';
 import { deleteMessagesBySender } from './db/queries/messages.js';
 import { deleteNotificationsOlderThan } from './db/queries/notifications.js';
 import { listUsersEligibleForMessagePurge, updateUser } from './db/queries/users.js';
@@ -32,6 +33,8 @@ export function startRetentionJob() {
   const run = () => {
     purgeExpiredMessages().catch((e) => console.error('[retention] 파기 작업 실패:', e));
     purgeOldNotifications().catch((e) => console.error('[retention] 알림 정리 실패:', e));
+    // 만료된 메일 확인 코드(10분짜리)는 쓸 일이 없다 — 표가 쌓이지 않게 지운다.
+    deleteExpiredEmailCodes().catch((e) => console.error('[retention] 확인 코드 정리 실패:', e));
   };
   run();
   setInterval(run, CHECK_INTERVAL_MS);

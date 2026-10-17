@@ -216,10 +216,15 @@ class NotificationSettings {
   /// 다른 기기(PC 앱 등)로 접속해 있어도 접속해 있지 않은 기기(휴대폰)로 푸시를 받을지 — 끄면 어느 기기로든 접속해 있는
   /// 동안은 푸시가 오지 않는다(server/src/presence.js의 skipsPush). 이 값이 없는 예전 서버는 늘 "끔"처럼 동작한다.
   final bool pushWhileOnline;
+
+  /// 오래 접속하지 않았을 때 안 읽은 멘션을 메일로 요약해 받을지(server/src/mentionDigest.js) — 서버에 메일이 켜져 있고
+  /// 이메일을 확인한 사람만 실제로 받는다. 이 값이 없는 예전 서버는 켬으로 읽는다(그 서버는 요약 메일을 보내지 않는다).
+  final bool emailDigest;
   const NotificationSettings({
     this.mentionAll = true,
     this.boardLevel = BoardNotifyLevel.important,
     this.pushWhileOnline = true,
+    this.emailDigest = true,
   });
 
   factory NotificationSettings.fromJson(Map<String, dynamic> json) =>
@@ -227,15 +232,18 @@ class NotificationSettings {
         mentionAll: json['mentionAll'] as bool? ?? true,
         boardLevel: boardLevelFromWire(json['boardLevel'] as String?),
         pushWhileOnline: json['pushWhileOnline'] as bool? ?? true,
+        emailDigest: json['emailDigest'] as bool? ?? true,
       );
 
   NotificationSettings copyWith({
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
     bool? pushWhileOnline,
+    bool? emailDigest,
   }) => NotificationSettings(
     mentionAll: mentionAll ?? this.mentionAll,
     boardLevel: boardLevel ?? this.boardLevel,
     pushWhileOnline: pushWhileOnline ?? this.pushWhileOnline,
+    emailDigest: emailDigest ?? this.emailDigest,
   );
 }

@@ -29,6 +29,19 @@ import {
 } from './backupService.js';
 import { isDuckDnsToken, parseDuckDnsDomains } from './ddns.js';
 import { ddnsUpdater } from './ddnsService.js';
+import { MailError, sendMail } from './mailer.js';
+import {
+  MENTION_DIGEST_DAYS_MAX,
+  MENTION_DIGEST_DAYS_MIN,
+  SMTP_DEFAULT_PORT,
+  isEmailAddress,
+  mailConfigComplete,
+  mailFromAddress,
+  mailReady,
+  parseSmtpInput,
+  smtpConnectionChanged,
+} from './mailRules.js';
+import { testMail } from './mailTemplates.js';
 import { checkCurrentPassword } from './users.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
@@ -323,6 +336,117 @@ export function createAdminRouter(io) {
   router.post('/admin/ddns/update', async (req, res) => {
     await ddnsUpdater.runNow();
     res.json(await ddnsView());
+  });
+
+  // ─────────────────────────────── 메일(SMTP) ───────────────────────────────
+
+  /**
+   * 관리자 콘솔 "메일" 탭에 보일 내용 — 비밀번호는 다시 내려보내지 않고 정했는지만. tested는 지금 값으로 시험 메일을 보내
+   * 성공했는지(켜려면 참이어야 한다), ready는 지금 메일 기능이 실제로 동작하는지(mailer.js와 같은 기준).
+   */
+  async function mailView() {
+    const s = await getServerSettings();
+    return {
+      enabled: !!s.smtpEnabled,
+      ready: mailReady(s),
+      host: s.smtpHost ?? '',
+      port: s.smtpPort ?? null,
+      security: s.smtpSecurity ?? 'starttls',
+      defaultPorts: SMTP_DEFAULT_PORT,
+      username: s.smtpUsername ?? '',
+      passwordConfigured: !!s.smtpPassword,
+      fromAddress: s.smtpFromAddress ?? '',
+      fromName: s.smtpFromName ?? '',
+      effectiveFrom: mailFromAddress(s),
+      complete: mailConfigComplete(s),
+      testedAt: s.smtpTestedAt ? new Date(s.smtpTestedAt).getTime() : null,
+      digest: {
+        enabled: s.mentionDigestEnabled ?? true,
+        days: s.mentionDigestDays ?? 3,
+        preview: !!s.mentionDigestPreview,
+        daysMin: MENTION_DIGEST_DAYS_MIN,
+        daysMax: MENTION_DIGEST_DAYS_MAX,
+      },
+    };
+  }
+
+  router.get('/admin/mail', async (req, res) => {
+    res.json(await mailView());
+  });
+
+  /**
+   * 메일 설정 변경 — 넘긴 항목만 바뀐다(mailRules.js parseSmtpInput). 연결 값(서버·포트·보안·계정·비밀번호·보내는 주소)을 바꾸면
+   * 시험 결과를 지우고 메일 기능을 끈다 — 바뀐 값으로 시험 메일을 다시 보내 성공해야 켤 수 있다. 포트를 비우면 보안 방식의
+   * 흔한 포트를 쓴다. 비밀번호는 암호화해 두고 감사 로그에도 남기지 않는다.
+   */
+  router.patch('/admin/mail', async (req, res) => {
+    const body = req.body ?? {};
+    const parsed = parseSmtpInput(body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const fields = { ...parsed.fields };
+    if ('enabled' in body && typeof body.enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled는 참/거짓이어야 합니다.' });
+    }
+    const current = await getServerSettings();
+    const connectionChanged = smtpConnectionChanged(current, fields);
+    if ('smtpPassword' in fields && fields.smtpPassword) fields.smtpPassword = encryptField(fields.smtpPassword);
+    // 포트를 비웠으면(또는 처음 정하면서 안 넣었으면) 보안 방식의 흔한 포트로.
+    const nextSecurity = fields.smtpSecurity ?? current.smtpSecurity ?? 'starttls';
+    if (('smtpPort' in fields && fields.smtpPort === null) || (!current.smtpPort && !('smtpPort' in fields) && fields.smtpHost)) {
+      fields.smtpPort = SMTP_DEFAULT_PORT[nextSecurity];
+    }
+    if (connectionChanged) {
+      if (body.enabled === true) {
+        return res.status(400).json({ error: '바뀐 값으로 시험 메일을 먼저 보내 보세요. 성공하면 켤 수 있습니다.' });
+      }
+      fields.smtpTestedAt = null;
+      fields.smtpEnabled = false;
+    } else if ('enabled' in body) {
+      if (body.enabled && !current.smtpTestedAt) {
+        return res.status(400).json({ error: '시험 메일을 먼저 보내 보세요. 성공하면 켤 수 있습니다.' });
+      }
+      if (body.enabled && !mailConfigComplete(current)) {
+        return res.status(400).json({ error: '서버 주소·포트·보내는 주소를 먼저 넣으세요.' });
+      }
+      fields.smtpEnabled = body.enabled;
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+
+    const updated = await updateServerSettings(fields);
+    const detail = [`메일: ${updated.smtpEnabled ? '켜짐' : '꺼짐'}`];
+    if (connectionChanged) detail.push(`연결 설정 변경(${updated.smtpHost ?? '서버 없음'}:${updated.smtpPort ?? '-'})`);
+    if ('smtpPassword' in fields) detail.push(fields.smtpPassword ? '비밀번호 변경' : '비밀번호 지움');
+    if ('mentionDigestEnabled' in fields || 'mentionDigestDays' in fields || 'mentionDigestPreview' in fields) {
+      detail.push(
+        `멘션 요약 ${updated.mentionDigestEnabled ? `${updated.mentionDigestDays}일` : '끔'}${updated.mentionDigestPreview ? '·미리보기' : ''}`,
+      );
+    }
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
+    res.json(await mailView());
+  });
+
+  /**
+   * 시험 메일 — 지금 저장된 값으로 [to]에 한 통 보낸다(메일 기능이 꺼져 있어도). 성공하면 그 값이 "시험 통과"로 남아 켤 수 있다.
+   * 실패하면 고칠 수 있는 말로 이유를 돌려준다(mailRules.js describeSmtpError).
+   */
+  router.post('/admin/mail/test', async (req, res) => {
+    const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
+    if (!isEmailAddress(to)) return res.status(400).json({ error: '받을 이메일 주소를 넣으세요.' });
+    const settings = await getServerSettings();
+    if (!mailConfigComplete(settings)) {
+      return res.status(400).json({ error: '서버 주소·포트·보내는 주소(또는 이메일 모양의 계정)를 먼저 넣고 저장하세요.' });
+    }
+    try {
+      await sendMail(to, testMail(), { settings });
+    } catch (err) {
+      return res.status(400).json({ error: err instanceof MailError ? err.message : '메일을 보내지 못했습니다.' });
+    }
+    // 보내는 사이 설정이 바뀌었으면(다른 운영자) 그 값은 시험한 게 아니라 통과로 적지 않는다.
+    const latest = await getServerSettings();
+    if (new Date(latest.updatedAt).getTime() === new Date(settings.updatedAt).getTime()) {
+      await updateServerSettings({ smtpTestedAt: new Date() });
+    }
+    res.json(await mailView());
   });
 
   // ─────────────────────────────── 백업 ───────────────────────────────

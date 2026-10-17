@@ -89,6 +89,8 @@ import { guideStatic, versionRouter, watchForVersionChanges } from './version.js
 import { firebaseConfigRouter } from './push.js';
 import { webPushRouter } from './webPush.js';
 import { getWebPublicUrl } from './webAddress.js';
+import { isMailEnabled } from './mailer.js';
+import { startMentionDigestJob } from './mentionDigest.js';
 import { startWebTls } from './webTls.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
@@ -200,7 +202,8 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 // 사내 주소(사설 IP)는 사내에서 묻거나 로그인한 앱이 물을 때만 알려준다 — 인터넷의 아무에게나 사내망 구성을 알려줄
 // 필요는 없다(밖에서 로그인한 앱은 토큰을 붙여 묻는다).
 // webUrl은 아이폰 등에 안내할 웹 앱 주소(https://WEB_DOMAIN) — 공인 인증서가 실제로 걸려 있을 때만 값이 있다(webTls.js, webAddress.js).
-app.get('/server-info', (req, res) =>
+// mailEnabled는 메일(SMTP) 기능이 켜졌는지 — 앱이 가입(이메일 확인 코드)·아이디/비밀번호 찾기 화면을 고르는 데 쓴다(mailer.js).
+app.get('/server-info', async (req, res) =>
   res.json({
     externalUrl: EXTERNAL_ADDRESS?.url ?? null,
     webUrl: getWebPublicUrl(),
@@ -208,6 +211,7 @@ app.get('/server-info', (req, res) =>
       isLanAddress(clientIp(req)) || hasValidAccessToken(req)
         ? lanAddressesInCert(tls.cert).map((ip) => `https://${ip}:${PORT}`)
         : [],
+    mailEnabled: await isMailEnabled().catch(() => false),
   }),
 );
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).
@@ -282,6 +286,8 @@ app.use((err, req, res, next) => {
 registerSocket(io);
 watchForVersionChanges(io);
 startRetentionJob();
+// 오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일 — 메일이 켜져 있을 때만 실제로 보낸다(mentionDigest.js).
+startMentionDigestJob();
 // DDNS(DuckDNS) 자동 갱신 — 관리자 콘솔 "DDNS" 탭에서 켰을 때만 5분마다 공인 IP를 알린다(ddns.js).
 ddnsUpdater.start().catch(() => {});
 startSecretExpiryJob(io);

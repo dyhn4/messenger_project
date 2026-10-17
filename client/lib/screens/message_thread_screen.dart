@@ -344,9 +344,12 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                         child: TapRegion(
                           groupId: this,
                           onTapOutside: (_) => _closeStickerPicker(),
-                          child: StickerPicker(
-                            onSelected: _selectSticker,
-                            settings: widget.session.settings,
+                          // chat_panel.dart와 같은 이유로 패널을 입력칸 바깥으로 치지 않는다.
+                          child: TextFieldTapRegion(
+                            child: StickerPicker(
+                              onSelected: _selectSticker,
+                              settings: widget.session.settings,
+                            ),
                           ),
                         ),
                       )

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/session.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/email_verify_dialog.dart';
 import '../widgets/update_dialog.dart';
 import 'call_screen.dart';
 import 'chat_screen.dart';
@@ -74,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     widget.session.addListener(_onSessionChanged);
     _maybeShowUpdateBanner();
     _maybeShowSecretInvite();
+    _maybeShowEmailVerifyPrompt();
     // navigatorKey.currentContext(Navigator 위젯 자체의 context)로는 SnackBar/Overlay가
     // 화면에 안 그려진다 — 이 화면(HomeScreen) 자신의, 실제로 마운트된 context를 써야 한다.
     // HomeScreen은 항상 최상위(main.dart의 루트 라우트)에 떠 있으므로 어느 화면에 있든
@@ -96,6 +98,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _maybeShowUpdateBanner();
     _maybeShowSecretInvite();
     _maybeShowIncomingCall();
+    _maybeShowEmailVerifyPrompt();
+  }
+
+  /// 메일이 켜진 서버인데 이메일을 아직 확인하지 않았으면 한 번 "이메일 확인"을 띄운다(session.shouldPromptEmailVerification) —
+  /// "나중에"로 닫으면 다음에 앱을 켤 때까지 다시 띄우지 않는다. 업데이트 안내가 같이 뜨면 그쪽이 먼저다.
+  void _maybeShowEmailVerifyPrompt() {
+    final session = widget.session;
+    if (!session.shouldPromptEmailVerification) return;
+    final updatePending =
+        session.updateAvailableVersion != null && !session.updateBannerShown;
+    if (updatePending) return;
+    session.emailVerifyPromptShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showEmailVerifyDialog(context, session, prompted: true);
+    });
   }
 
   /// 걸려온 화상회의(session.incomingCallRoomId)가 있으면 수신 화면을 띄운다. 비밀 대화

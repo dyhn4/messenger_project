@@ -124,16 +124,19 @@ class FakeNotificationApi implements NotificationApi {
     bool? mentionAll,
     BoardNotifyLevel? boardLevel,
     bool? pushWhileOnline,
+    bool? emailDigest,
   }) async {
     calls.add(
       'update mentionAll=$mentionAll boardLevel=${boardLevel?.wire}'
-      '${pushWhileOnline == null ? '' : ' pushWhileOnline=$pushWhileOnline'}',
+      '${pushWhileOnline == null ? '' : ' pushWhileOnline=$pushWhileOnline'}'
+      '${emailDigest == null ? '' : ' emailDigest=$emailDigest'}',
     );
     _maybeFail();
     settings = settings.copyWith(
       mentionAll: mentionAll,
       boardLevel: boardLevel,
       pushWhileOnline: pushWhileOnline,
+      emailDigest: emailDigest,
     );
     return settings;
   }

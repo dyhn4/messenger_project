@@ -20,6 +20,7 @@ import { postCallLeft, recordCallEvent, startCallCard } from './callCards.js';
 import { CALL_DISCONNECT_GRACE_MS, CALL_HANDOFF_GRACE_MS } from './callEvents.js';
 import { isSocketInCall, markCallDeclined } from './callState.js';
 import { findActiveDeviceForUser, touchDeviceLastSeen } from './db/queries/devices.js';
+import { touchUserLastSeen } from './db/queries/mentionDigest.js';
 import { getNotificationSettingsMap } from './db/queries/notifications.js';
 import { DEFAULT_NOTIFICATION_SETTINGS } from './notificationRules.js';
 import { markMessageRead } from './db/queries/messages.js';
@@ -103,6 +104,8 @@ export function registerSocket(io) {
       pushWhileOnline: socket.data.pushWhileOnline,
     });
     if (connected) announcePresence(io, socket.data.userId);
+    // 마지막으로 앱이 붙어 있던 시각 — 오래 접속하지 않은 사람에게 멘션 요약 메일을 보내는 데 쓴다(mentionDigest.js).
+    touchUserLastSeen(socket.data.userId).catch(() => {});
 
     // 개인용 룸(user:<id>)에 join해두면, REST로 방이 새로 생겼을 때
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
@@ -401,8 +404,12 @@ export function registerSocket(io) {
         }
         emitVideoTierChanges(io);
       }, CALL_DISCONNECT_GRACE_MS).unref();
-      // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다(같은 팀 사람들에게만).
-      if (markDisconnected(socket.data.userId, socket.data.deviceId ?? null)) announcePresence(io, socket.data.userId);
+      // 이 사람의 "마지막" 연결이 끊겼을 때만 오프라인으로 알린다(같은 팀 사람들에게만). 그때 마지막 접속 시각도 적는다 —
+      // 며칠씩 붙어 있다 끊긴 경우에도 끊긴 때부터 센다.
+      if (markDisconnected(socket.data.userId, socket.data.deviceId ?? null)) {
+        announcePresence(io, socket.data.userId);
+        touchUserLastSeen(socket.data.userId).catch(() => {});
+      }
     });
 
     // 방에 join하는 건 DB 조회가 필요해 비동기다 — 리스너 등록(위)보다 뒤에 둬서, 이

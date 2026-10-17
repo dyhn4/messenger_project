@@ -16,6 +16,8 @@ import '../widgets/app_toast.dart';
 import '../widgets/avatar_utils.dart' show AvatarView;
 import '../widgets/category_tab_row.dart';
 import '../widgets/email_address_field.dart';
+import '../widgets/email_code_input.dart';
+import '../widgets/email_verify_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/my_avatar.dart';
 import '../widgets/org_section.dart';
@@ -846,16 +848,42 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
   bool _submitting = false;
   String? _error;
 
+  /// 메일이 켜진 서버 — 새 주소로 받은 인증 코드와, 그 코드를 보낸 주소(그 뒤 주소를 바꿨으면 다시 받게).
+  final _code = TextEditingController();
+  String? _codeSentFor;
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
   Future<void> _submit() async {
-    if (_email.trim().isEmpty) return;
+    final email = _email.trim();
+    if (email.isEmpty) return;
+    final byMail = widget.session.mailEnabled;
+    if (byMail) {
+      final codeError = _codeSentFor == null
+          ? '새 이메일로 인증 코드를 받아 넣어 주세요.'
+          : _codeSentFor != email
+          ? '이메일을 바꿨다면 인증 코드를 다시 받으세요.'
+          : !isEmailCodeShape(_code.text)
+          ? '메일로 받은 6자리 인증 코드를 넣어 주세요.'
+          : null;
+      if (codeError != null) {
+        setState(() => _error = codeError);
+        return;
+      }
+    }
     setState(() {
       _submitting = true;
       _error = null;
     });
     try {
       await widget.session.updateProfile(
-        email: _email.trim(),
+        email: email,
         currentPassword: widget.verifiedPassword,
+        emailCode: byMail ? _code.text.trim() : null,
       );
       if (mounted) widget.onDone();
     } catch (e) {
@@ -883,10 +911,35 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Text(
-            widget.session.email?.isNotEmpty == true
-                ? widget.session.email!
-                : '등록된 이메일이 없습니다',
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.session.email?.isNotEmpty == true
+                      ? widget.session.email!
+                      : '등록된 이메일이 없습니다',
+                ),
+              ),
+              // 메일이 켜진 서버에서만 확인 여부를 보인다 — 확인된 이메일이 있어야 비밀번호·아이디를 메일로 찾는다.
+              if (widget.session.mailEnabled &&
+                  widget.session.email?.isNotEmpty == true)
+                widget.session.emailVerified
+                    ? Text(
+                        '확인됨',
+                        style: TextStyle(
+                          color: Colors.green.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    : TextButton(
+                        key: const ValueKey('profile-verify-email'),
+                        onPressed: () async {
+                          await showEmailVerifyDialog(context, widget.session);
+                          if (mounted) setState(() {});
+                        },
+                        child: const Text('확인하기'),
+                      ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
@@ -896,6 +949,22 @@ class _EmailEditPanelState extends State<_EmailEditPanel> {
         ),
         const SizedBox(height: 4),
         EmailAddressField(onChanged: (v) => _email = v),
+        if (widget.session.mailEnabled) ...[
+          const SizedBox(height: 8),
+          EmailCodeInput(
+            key: const ValueKey('profile-email-change-code'),
+            controller: _code,
+            onSend: () {
+              final email = _email.trim();
+              return widget.session.api!.sendEmailCode(
+                email: email,
+                currentPassword: widget.verifiedPassword,
+              );
+            },
+            onSent: (_) => _codeSentFor = _email.trim(),
+            onSubmitted: _submit,
+          ),
+        ],
         if (_error != null) ...[
           const SizedBox(height: 8),
           Text(_error!, style: const TextStyle(color: Colors.redAccent)),

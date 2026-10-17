@@ -1,7 +1,11 @@
 import bcrypt from 'bcryptjs';
 import { Router } from 'express';
 import { issueTokenPair } from './auth.js';
-import { retryLater, runReauthAttempt } from './authGuard.js';
+import { limits, retryLater, runReauthAttempt, waitText } from './authGuard.js';
+import { checkEmailCode, consumeEmailCode, issueEmailCode } from './emailCodes.js';
+import { sendMail } from './mailer.js';
+import { mailReady, maskEmail } from './mailRules.js';
+import { emailChangedMail } from './mailTemplates.js';
 import { passwordPolicyError } from './passwordPolicy.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { renameSenderMessages } from './db/queries/messages.js';
@@ -83,13 +87,25 @@ async function broadcastStatus(io, user) {
   });
 }
 
-/** 본인 프로필(GET/PATCH /users/me 등) — [publicUser]에 본인만 보는 이메일과 생일('MM-DD', 없으면 null)을 더한다. */
+/**
+ * 본인 프로필(GET/PATCH /users/me 등) — [publicUser]에 본인만 보는 이메일·이메일 확인 여부와 생일('MM-DD', 없으면 null)을
+ * 더한다. emailVerified는 메일이 켜진 서버에서 앱이 "이메일을 확인하세요"를 띄울지 정하는 데 쓴다.
+ */
 export function selfUser(u) {
   return {
     ...publicUser(u),
     email: u.emailEnc ? decryptField(u.emailEnc) : null,
+    emailVerified: !!u.emailEnc && !!u.emailVerifiedAt,
     birthday: u.birthday ?? null,
   };
+}
+
+/** 로그인한 사람이 메일(확인 코드)을 요청할 때의 계정 단위 제한 — 막혔으면 429를 보내고 true. */
+function mailUserLimited(res, userId) {
+  const wait = limits.mailSendUser.hit(userId);
+  if (wait <= 0) return false;
+  retryLater(res, wait, `메일을 너무 많이 요청했습니다. ${waitText(wait)} 뒤에 다시 시도하세요.`);
+  return true;
 }
 
 /**
@@ -319,6 +335,55 @@ export function createUsersRouter(io) {
   });
 
   /**
+   * 이메일 확인 코드 보내기(메일이 켜진 서버에서만). [email]이 없으면 지금 이메일을 확인하는 코드('verify')를 지금 주소로,
+   * 있으면 그 주소로 바꾸려는 코드('change')를 새 주소로 보낸다 — 바꾸는 쪽은 현재 비밀번호를 같이 받는다(이메일 변경과 같은
+   * 정책). 실제 확인은 POST /users/me/email/verify, 변경은 PATCH /users/me(emailCode).
+   */
+  router.post('/users/me/email/send-code', async (req, res) => {
+    const user = await findUserById(req.user.sub);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (!mailReady(await getServerSettings())) return res.status(409).json({ error: '이 서버는 메일 기능이 꺼져 있습니다.' });
+    const { email, currentPassword } = req.body ?? {};
+    if (email === undefined || email === null) {
+      if (!user.emailEnc) return res.status(400).json({ error: '등록된 이메일이 없습니다. 먼저 이메일을 등록하세요.' });
+      if (user.emailVerifiedAt) return res.status(409).json({ error: '이미 확인된 이메일입니다.' });
+      if (mailUserLimited(res, user.id)) return;
+      const address = decryptField(user.emailEnc);
+      const sent = await issueEmailCode(res, { purpose: 'verify', email: address, userId: user.id });
+      if (sent) res.json({ ...sent, email: maskEmail(address) });
+      return;
+    }
+    if (!(await checkCurrentPassword(res, user, currentPassword, '현재 비밀번호가 올바르지 않습니다.'))) return;
+    if (typeof email !== 'string' || email.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(email)) {
+      return res.status(400).json({ error: '이메일 형식이 올바르지 않습니다.' });
+    }
+    const emailLookup = lookupHash(email);
+    if (await findOtherUserByEmailLookup(emailLookup, user.id)) {
+      return res.status(409).json({ error: '이미 사용 중인 이메일입니다.' });
+    }
+    if (mailUserLimited(res, user.id)) return;
+    const sent = await issueEmailCode(res, { purpose: 'change', email, userId: user.id, emailEnc: encryptField(email) });
+    if (sent) res.json({ ...sent, email: maskEmail(email) });
+  });
+
+  /** 지금 이메일로 받은 확인 코드('verify')를 넣어 이메일을 확인한다 — 확인되면 비밀번호·아이디를 메일로 찾는다. */
+  router.post('/users/me/email/verify', async (req, res) => {
+    const user = await findUserById(req.user.sub);
+    if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+    if (!user.emailEnc) return res.status(400).json({ error: '등록된 이메일이 없습니다.' });
+    if (user.emailVerifiedAt) return res.json(selfUser(user));
+    const checked = await checkEmailCode({
+      purpose: 'verify',
+      email: decryptField(user.emailEnc),
+      userId: user.id,
+      code: req.body?.code,
+    });
+    if (!checked.ok) return res.status(400).json({ error: checked.error });
+    await consumeEmailCode(checked.row);
+    res.json(selfUser(await updateUser(user.id, { emailVerifiedAt: new Date() })));
+  });
+
+  /**
    * 내 프로필 갱신. avatarType이 오면 아바타 상태를 통째로 바꾸고(초기화/캐릭터 선택/사진
    * 업로드가 서로 다른 필드 조합을 쓰므로 부분 수정 대신 전체 교체), name/email은 각각
    * 왔을 때만 독립적으로 갱신한다.
@@ -331,8 +396,11 @@ export function createUsersRouter(io) {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
-    const { avatarType, name, email, currentPassword, birthday } = req.body ?? {};
+    const { avatarType, name, email, currentPassword, birthday, emailCode } = req.body ?? {};
     const patch = {};
+    // 이메일을 바꿀 때 메일이 켜진 서버면 새 주소로 받은 코드가 맞아야 한다(POST /users/me/email/send-code) — 바꾼 뒤에 쓴다.
+    let changeCode = null;
+    let previousVerifiedEmail = null;
 
     if (avatarType !== undefined) {
       const avatar = planAvatarUpdate(req.body, {
@@ -375,9 +443,32 @@ export function createUsersRouter(io) {
       }
       patch.emailEnc = encryptField(email);
       patch.emailLookup = emailLookup;
+      // 메일이 켜진 서버는 새 주소로 받은 코드로 확인된 주소만 받는다(그러면 바로 "확인됨"). 꺼진 서버는 예전처럼 바로 바꾸고,
+      // 새 주소는 아직 확인 전이다 — 나중에 메일이 켜지면 확인을 권한다.
+      if (mailReady(await getServerSettings())) {
+        if (typeof emailCode !== 'string' || !emailCode) {
+          return res.status(400).json({ error: '새 이메일로 받은 확인 코드를 넣으세요.' });
+        }
+        const checked = await checkEmailCode({ purpose: 'change', email, userId: user.id, code: emailCode });
+        if (!checked.ok) return res.status(400).json({ error: checked.error });
+        changeCode = checked.row;
+        patch.emailVerifiedAt = new Date();
+        if (user.emailVerifiedAt && user.emailEnc && user.emailLookup !== emailLookup) {
+          previousVerifiedEmail = decryptField(user.emailEnc);
+        }
+      } else {
+        patch.emailVerifiedAt = user.emailLookup === emailLookup ? user.emailVerifiedAt : null;
+      }
     }
 
+    if (changeCode && !(await consumeEmailCode(changeCode))) {
+      return res.status(400).json({ error: '확인 코드가 없거나 만료되었습니다. 코드를 다시 받으세요.' });
+    }
     const updated = await updateUser(user.id, patch);
+    // 확인된 예전 주소로 "이메일이 바뀌었다"고 알린다 — 남이 바꿨을 때 알아챌 수 있게. 못 보내도 변경은 그대로다.
+    if (previousVerifiedEmail) {
+      sendMail(previousVerifiedEmail, emailChangedMail(maskEmail(email))).catch(() => {});
+    }
 
     // 생일이 바뀌면 팀원들의 캘린더(멤버 생일)를 새로 고치게 알린다.
     if (patch.birthday !== undefined && patch.birthday !== (user.birthday ?? null)) {
@@ -508,6 +599,7 @@ export function createUsersRouter(io) {
       name: DELETED_USER_NAME,
       emailEnc: null,
       emailLookup: null,
+      emailVerifiedAt: null,
       avatarType: 'initial',
       avatarEmoji: null,
       avatarColor: null,

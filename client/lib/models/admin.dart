@@ -224,6 +224,8 @@ String auditActionLabel(String action) => switch (action) {
   'invite.revoke' => '초대 링크 폐기',
   'teamInvite.create' => '팀 초대 링크 생성',
   'teamInvite.revoke' => '팀 초대 링크 폐기',
+  'invite.email' => '초대 메일 보냄',
+  'teamInvite.email' => '팀 초대 메일 보냄',
   'auth.lockout' => '로그인 시도 차단',
   _ => action,
 };

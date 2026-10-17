@@ -192,6 +192,17 @@ class Session extends ChangeNotifier {
   String? name;
   String? email;
 
+  /// 내 이메일을 메일 코드로 확인했는지(server users.js selfUser의 emailVerified). 메일이 켜진 서버에서 확인하지 않았으면
+  /// 로그인한 뒤 확인을 권한다(email_verify_dialog.dart) — 확인된 이메일이 있어야 비밀번호·아이디를 메일로 찾는다.
+  bool emailVerified = false;
+
+  /// 서버에 메일(SMTP) 기능이 켜져 있는지(GET /server-info의 mailEnabled — [refreshMailEnabled]). 켜져 있으면 가입할 때 이메일
+  /// 확인 코드를 받고, 아이디·비밀번호를 메일로 찾고, 초대 링크를 메일로 보낼 수 있다. 꺼져 있으면 예전처럼 보안 질문.
+  bool mailEnabled = false;
+
+  /// 이번 실행에서 "이메일을 확인하세요"를 이미 띄웠는지 — 닫으면 다음에 앱을 켤 때까지 다시 띄우지 않는다.
+  bool emailVerifyPromptShown = false;
+
   /// 내 생일('MM-DD', 연도 없음) — 프로필의 "생일" 항목. 안 정했으면 null.
   String? birthday;
   String avatarType = 'initial'; // 'initial' | 'character' | 'photo'
@@ -697,6 +708,7 @@ class Session extends ChangeNotifier {
       );
       unawaited(_checkForUpdate());
       unawaited(_refreshServerAddresses());
+      unawaited(refreshMailEnabled());
       unawaited(_updateSocket.connect(serverUrl!));
       if (token == null) {
         stage = AuthStage.needsLogin;
@@ -774,6 +786,9 @@ class Session extends ChangeNotifier {
     );
     unawaited(_checkForUpdate());
     unawaited(_refreshServerAddresses());
+    // 다른 서버로 바꿨을 수 있으니 메일 기능 여부도 새 서버에 다시 묻는다(못 물으면 꺼짐).
+    mailEnabled = false;
+    unawaited(refreshMailEnabled());
     unawaited(_updateSocket.connect(serverUrl!));
     error = null;
     stage = AuthStage.needsLogin;
@@ -1082,13 +1097,16 @@ class Session extends ChangeNotifier {
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
       _auth(() => api!.login(u, p), keepSignedIn: keepSignedIn);
 
+  /// 메일이 켜진 서버는 [emailCode](이메일로 받은 확인 코드)로 가입하고 보안 질문은 넣지 않아도 된다(null). 꺼진 서버는
+  /// 보안 질문이 필요하다.
   Future<bool> register(
     String u,
     String p,
     String email,
     String name, {
-    required String securityQuestion,
-    required String securityAnswer,
+    String? securityQuestion,
+    String? securityAnswer,
+    String? emailCode,
     required bool keepSignedIn,
   }) async {
     // 실패하면(아이디 중복 등) 고쳐서 다시 시도할 수 있어야 하므로, 성공했을 때만 지운다 —
@@ -1103,6 +1121,7 @@ class Session extends ChangeNotifier {
         name,
         securityQuestion: securityQuestion,
         securityAnswer: securityAnswer,
+        emailCode: emailCode,
         teamInviteToken: teamInviteToken,
       ),
       keepSignedIn: keepSignedIn,
@@ -1110,6 +1129,10 @@ class Session extends ChangeNotifier {
     if (ok) pendingTeamInviteToken = null;
     return ok;
   }
+
+  /// 가입 전 이메일 확인 코드를 보낸다 — 초대 링크로 열린 앱이면 그 코드도 함께(사내 와이파이 밖에서는 있어야 보낸다).
+  Future<EmailCodeSent> sendSignupEmailCode(String email) =>
+      api!.sendSignupEmailCode(email, teamInviteToken: pendingTeamInviteToken);
 
   Future<bool> _auth(
     Future<AuthResult> Function() call, {
@@ -1448,6 +1471,7 @@ class Session extends ChangeNotifier {
       final me = await api!.fetchMe();
       name = me.name;
       email = me.email;
+      emailVerified = me.emailVerified;
       birthday = me.birthday;
       if (userId != null) _applyUserStatus(userId!, me.status, me.dnd);
       avatarType = me.avatarType;
@@ -1465,6 +1489,8 @@ class Session extends ChangeNotifier {
     } catch (_) {
       // 프로필/아바타는 부가 정보라 실패해도 조용히 무시한다.
     }
+    // 들어가자마자 "이메일을 확인하세요"를 띄울지 정하려면 메일 기능 여부를 알아야 한다(못 물으면 꺼짐 — 띄우지 않는다).
+    await refreshMailEnabled();
     if (canUseProjects) unawaited(refreshProjectUnread());
     unawaited(notificationCenter.refreshCounts());
     unawaited(notificationCenter.loadViewPrefs());
@@ -3972,17 +3998,50 @@ class Session extends ChangeNotifier {
     String? name,
     String? email,
     String? currentPassword,
+    String? emailCode,
   }) async {
     final me = await api!.updateProfile(
       name: name,
       email: email,
       currentPassword: currentPassword,
+      emailCode: emailCode,
     );
     this.name = me.name;
     this.email = me.email;
+    emailVerified = me.emailVerified;
     notifyListeners();
     if (email != null) _showToast('이메일이 변경되었습니다.');
   }
+
+  /// 서버에 메일 기능이 켜졌는지 다시 묻는다 — 앱을 켤 때, 서버 주소를 바꿀 때, 로그인 화면을 열 때(관리자가 그사이 켜거나 껐을
+  /// 수 있다). 못 물어보면 꺼짐으로 본다.
+  Future<void> refreshMailEnabled() async {
+    final client = api;
+    if (client == null) return;
+    final enabled = await client.fetchMailEnabled();
+    if (enabled == mailEnabled) return;
+    mailEnabled = enabled;
+    notifyListeners();
+  }
+
+  /// 지금 이메일을 확인하는 코드를 지금 주소로 보낸다.
+  Future<EmailCodeSent> sendEmailVerificationCode() => api!.sendEmailCode();
+
+  /// 지금 이메일로 받은 코드를 넣어 확인한다.
+  Future<void> verifyEmail(String code) async {
+    final me = await api!.verifyEmail(code);
+    email = me.email;
+    emailVerified = me.emailVerified;
+    notifyListeners();
+  }
+
+  /// 로그인한 뒤 "이메일을 확인하세요"를 띄울지 — 메일이 켜졌고 이메일이 있는데 아직 확인하지 않았고, 이번 실행에서 아직 안
+  /// 띄웠을 때.
+  bool get shouldPromptEmailVerification =>
+      mailEnabled &&
+      !emailVerified &&
+      (email?.isNotEmpty ?? false) &&
+      !emailVerifyPromptShown;
 
   // ───────────── 상태 메시지 · 방해 금지(server/src/statusRules.js, models/user_status.dart) ─────────────
 
@@ -3999,8 +4058,7 @@ class Session extends ChangeNotifier {
   DndState? dndOf(String? id) => id == null ? null : _dnds[id];
 
   /// [id]가 지금 방해 금지 중인지(그 사람에게 알림이 가지 않는다).
-  bool isInDnd(String? id) =>
-      dndOf(id)?.isActiveAt(DateTime.now()) ?? false;
+  bool isInDnd(String? id) => dndOf(id)?.isActiveAt(DateTime.now()) ?? false;
 
   UserStatus? get myStatus => statusOf(userId);
   DndState? get myDnd => dndOf(userId);
@@ -5090,6 +5148,9 @@ class Session extends ChangeNotifier {
     username = null;
     name = null;
     email = null;
+    emailVerified = false;
+    // 다른 계정으로 다시 로그인하면 그 계정에 맞춰 이메일 확인을 다시 권한다.
+    emailVerifyPromptShown = false;
     birthday = null;
     avatarType = 'initial';
     avatarEmoji = null;

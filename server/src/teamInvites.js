@@ -15,6 +15,7 @@ import { findPositionOptionByLabel } from './db/queries/positionOptions.js';
 import { findUserById } from './db/queries/users.js';
 import { EXTERNAL_ADDRESS, PAIRING_PORT } from './config.js';
 import { inviteMaxUses } from './invites.js';
+import { sendInviteMails } from './inviteMail.js';
 import { ACCOUNT_ROLES, canCreateTeamInviteLink, canManageTeam, roleLabel, ROLE_RANK } from './permissions.js';
 
 /** 팀 초대 링크도 설치→가입 초대 링크와 같은 기간만큼만 유효하다 — 고를 필요 없게 고정. */
@@ -197,6 +198,40 @@ export function createTeamInvitesRouter() {
     });
 
     res.status(201).json(toTeamInviteLinkDto(link, { serverAddress: serverAddressFrom(req) }));
+  });
+
+  /**
+   * 팀 초대 링크를 메일로 보낸다(메일이 켜진 서버에서만) — 내가 만든 링크이고 지금 그 링크로 가입할 수 있을 때만. 설치 초대
+   * 메일과 같고(inviteMail.js), 본문에 팀 이름이 들어간다.
+   */
+  router.post('/team-invite-links/:id/email', async (req, res) => {
+    const mine = await findTeamInviteLinkById(req.params.id);
+    if (!mine || mine.createdBy !== req.user.sub) {
+      return res.status(404).json({ error: '팀 초대 링크를 찾을 수 없습니다.' });
+    }
+    if (!(await teamInviteLinkJoinable(mine))) {
+      return res.status(409).json({ error: '이 링크로는 더 이상 가입할 수 없습니다. 새 링크를 만들어 보내세요.' });
+    }
+    const me = await findUserById(req.user.sub);
+    const actorName = me?.name ?? me?.username ?? '(알 수 없음)';
+    await sendInviteMails(req, res, {
+      link: mine,
+      pathKind: 'team-invite',
+      inviterName: me?.name ?? me?.username,
+      teamName: mine.teamName,
+      onSent: (count) =>
+        recordAudit({
+          actorId: req.user.sub,
+          actorName,
+          action: AUDIT.teamInviteLinkEmail,
+          teamId: mine.teamId,
+          teamName: mine.teamName,
+          targetType: 'teamInvite',
+          targetId: mine.id,
+          targetLabel: mine.label ?? undefined,
+          detail: `팀 초대 메일 ${count}통 보냄`,
+        }),
+    });
   });
 
   /** 폐기 — 내가 만든 링크만 지울 수 있다. */

@@ -12,7 +12,7 @@ export const PREVIEW_MAX = 120; // 알림 미리보기 길이
 export const BOARD_LEVELS = ['all', 'important', 'new'];
 // 보드 알림 기본은 'important'(새 글 + 내가 쓴 글에 달린 댓글) — 글 수정·남의 글 댓글까지 받고 싶은 사람은 알림 설정에서
 // '전체'로 바꾼다. 큰 토픽에서 수정·댓글마다 멤버 전원에게 알림 행이 생기는 걸 기본으로 두지 않으려는 선택이다.
-export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({ mentionAll: true, boardLevel: 'important', pushWhileOnline: true });
+export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({ mentionAll: true, boardLevel: 'important', pushWhileOnline: true, emailDigest: true });
 
 export const MENTION_KINDS = ['mention', 'mention_all'];
 export const BOARD_KINDS = ['board_post', 'board_edit', 'board_comment'];

@@ -14,6 +14,10 @@ export const users = pgTable('users', {
   // 이메일은 암호화 저장(emailEnc) + 조회용 해시(emailLookup)로 나뉜다 — crypto.js 참고.
   emailEnc: text('email_enc'),
   emailLookup: text('email_lookup').unique(),
+  // 이 이메일을 본인이 받는다는 걸 메일로 보낸 코드로 확인한 시각(mailAuth.js). 메일 기능이 켜진 서버에서만 확인하고,
+  // 확인된 이메일이 있는 계정만 비밀번호·아이디 찾기를 메일로 한다(그 밖에는 예전처럼 보안 질문). 이메일을 바꾸면
+  // 새 주소로 다시 확인하기 전까지 null이다. 이 컬럼 전에 가입한 계정도 null — 메일이 켜지면 로그인할 때 확인을 권한다.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   passwordHash: text('password_hash').notNull(),
   // 비밀번호 찾기 시 이메일 일치 확인에 더해 한 번 더 확인하는 보안 질문. 이 컬럼이 도입되기
   // 전에 가입한 계정은 null로 남아있고, reset-password에서는 null이면 답변 확인을 건너뛴다.
@@ -65,7 +69,40 @@ export const users = pgTable('users', {
   // 방해 금지 일정 — { enabled, start, end(하루 중 분), days([0=일 … 6=토]), offsetMinutes(그 사람 기기의 UTC 차이) }. 매일
   // 정한 시간 동안 알림을 보내지 않는다(statusRules.js isDndActive). null이면 일정 없음.
   dndSchedule: jsonb('dnd_schedule'),
+  // 마지막으로 앱이 서버에 붙어 있던 시각 — 소켓이 붙을 때와 마지막 연결이 끊길 때 적는다(socket.js). 오래 접속하지
+  // 않은 사람에게 안 읽은 멘션을 메일로 요약해 보내는 데 쓴다(mentionDigest.js). 이 컬럼 전 기록은 없어서(null)
+  // 그때는 기기의 마지막 접속(devices.last_seen_at)이나 가입 시각으로 어림한다.
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  // 멘션 요약 메일을 마지막으로 보낸 시각 — 같은 멘션을 또 보내지 않고, 정한 간격보다 자주 보내지 않게(mentionDigest.js).
+  mentionDigestSentAt: timestamp('mention_digest_sent_at', { withTimezone: true }),
 });
+
+/**
+ * 메일로 보낸 확인 코드(6자리) — 가입 전 이메일 확인('signup'), 로그인한 사람의 이메일 확인('verify'), 이메일 변경
+ * ('change' — 새 주소로 보낸다), 비밀번호 재설정('reset'). 코드는 그대로 두지 않고 서버 비밀값으로 만든 해시만 둔다
+ * (emailCodes.js). 같은 목적·같은 주소로 새 코드를 보내면 앞의 코드는 지운다 — 늘 마지막 하나만 쓸 수 있다.
+ *
+ * attempts는 틀린(맞혀 보려고 쓴) 횟수 — 정한 수(emailCodes.js CODE_MAX_ATTEMPTS)를 넘으면 그 코드는 못 쓴다. 맞히는
+ * 시도는 확인 전에 먼저 한 칸 세어서, 한꺼번에 여러 요청을 보내도 정한 수보다 많이 맞혀 보지 못한다.
+ */
+export const emailCodes = pgTable(
+  'email_codes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    purpose: text('purpose').notNull(),
+    // 가입 전 확인('signup')은 아직 계정이 없어 null.
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    // 코드를 보낸 주소의 조회용 해시(crypto.js lookupHash) — 확인할 때 "이 주소로 받은 코드인지"를 본다.
+    emailLookup: text('email_lookup').notNull(),
+    // 이메일 변경('change')에서 확인되면 바꿔 넣을 새 주소(crypto.js encryptField). 그 밖에는 null.
+    emailEnc: text('email_enc'),
+    codeHash: text('code_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('email_codes_purpose_lookup_idx').on(t.purpose, t.emailLookup)],
+);
 
 /**
  * 팀(워크스페이스). 사내 메신저라 한 서버 안에 여러 팀이 있을 수 있고, 방/조직도/검색/파일이
@@ -213,6 +250,28 @@ export const serverSettings = pgTable('server_settings', {
   backupDestination: text('backup_destination'),
   backupPassword: text('backup_password'),
   backupMirrorKey: text('backup_mirror_key'),
+  // 메일 보내기(SMTP — mailer.js). 도메인이 없어도 네이버·Gmail 같은 메일 계정의 SMTP(앱 비밀번호)로 보낼 수 있고, 도메인이
+  // 생기면 회사 메일·발송 서비스의 값으로 바꾸기만 하면 된다. 켜져 있어야(smtpEnabled) 이메일 확인·메일로 비밀번호/아이디
+  // 찾기·초대 메일·멘션 요약 메일이 동작하고, 꺼져 있으면 예전처럼(보안 질문) 동작한다. 켜려면 지금 값으로 시험 메일을
+  // 보내 성공해야 한다(smtpTestedAt — 연결 값을 바꾸면 지워지고 꺼진다). 비밀번호는 암호화해 두고(crypto.js encryptField)
+  // 관리자 콘솔에도 다시 내려보내지 않는다(admin.js /admin/mail).
+  smtpEnabled: boolean('smtp_enabled').notNull().default(false),
+  smtpHost: text('smtp_host'),
+  smtpPort: integer('smtp_port'),
+  // 연결 보안 — 'ssl'(처음부터 TLS, 보통 465) | 'starttls'(평문으로 붙어 TLS로 올림, 보통 587) | 'none'(사내 메일 서버 등).
+  smtpSecurity: text('smtp_security').notNull().default('starttls'),
+  smtpUsername: text('smtp_username'),
+  smtpPassword: text('smtp_password'),
+  // 보내는 사람 주소·이름 — 주소를 비우면 SMTP 계정(smtpUsername)을 쓴다. Gmail·네이버는 계정 주소로만 보낼 수 있다.
+  smtpFromAddress: text('smtp_from_address'),
+  smtpFromName: text('smtp_from_name'),
+  smtpTestedAt: timestamp('smtp_tested_at', { withTimezone: true }),
+  // 오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일(mentionDigest.js) — 메일이 켜져 있을 때만. [mentionDigestDays]일
+  // 넘게 접속하지 않은 사람에게, 그 사이 쌓인 멘션을 하루 한 번(아침) 모아 보낸다. 메시지 내용은 서버 밖(메일 서비스)으로
+  // 나가므로 미리보기는 기본으로 넣지 않는다(방 이름·보낸 사람·시각만).
+  mentionDigestEnabled: boolean('mention_digest_enabled').notNull().default(true),
+  mentionDigestDays: integer('mention_digest_days').notNull().default(3),
+  mentionDigestPreview: boolean('mention_digest_preview').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -1431,6 +1490,9 @@ export const notificationSettings = pgTable('notification_settings', {
   // 다른 기기(PC 앱 등)로 접속해 있어도, 접속해 있지 않은 기기(휴대폰)에는 푸시를 보낼지 — 켜면(기본) 기기마다 따로
   // 보고, 끄면 어느 기기로든 접속해 있는 동안은 푸시를 보내지 않는다(presence.js의 skipsPush).
   pushWhileOnline: boolean('push_while_online').notNull().default(true),
+  // 오래 접속하지 않았을 때 안 읽은 멘션을 메일로 요약해 받을지(mentionDigest.js) — 서버에 메일이 켜져 있고 이메일을 확인한
+  // 사람만 실제로 받는다.
+  emailDigest: boolean('email_digest').notNull().default(true),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

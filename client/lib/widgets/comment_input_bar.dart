@@ -318,175 +318,179 @@ class CommentInputBarState extends State<CommentInputBar> {
   @override
   Widget build(BuildContext context) {
     final uploading = _uploading;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          // ChatInputBarState와 동일 — 입력칸이 이 칸 전체 폭을 채우도록 stretch로 둔다.
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (_attachments.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: SizedBox(
-                  // ChatInputBarState와 동일 — 업로드 중이든 끝났든 같은 카드를 그대로
-                  // 쓰므로(UploadingAttachment.completed) 높이를 바꿀 필요가 없다.
-                  height: 80,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _attachments.length,
-                    itemBuilder: (context, i) {
-                      final a = _attachments[i];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 10, top: 6),
-                        child: UploadingAttachment(
-                          thumbnailBytes: a.thumbnailBytes,
-                          displayName: a.displayName,
-                          totalBytes: a.totalBytes,
-                          sentBytes: a.sentBytes,
-                          completed: a.result != null,
-                          onCancel: () => _cancelAttachment(a),
-                        ),
-                      );
-                    },
+    // 보내기·첨부·서식 단추를 눌러도 입력칸 바깥으로 치지 않는다(chat_input_bar.dart의 build와 같은 이유 — 웹에서
+    // 터치하면 포커스를 놓았다 다시 잡는 사이에 안드로이드 웹 앱 아래에 키보드만큼 빈 공간이 남았다).
+    return TextFieldTapRegion(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            // ChatInputBarState와 동일 — 입력칸이 이 칸 전체 폭을 채우도록 stretch로 둔다.
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_attachments.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: SizedBox(
+                    // ChatInputBarState와 동일 — 업로드 중이든 끝났든 같은 카드를 그대로
+                    // 쓰므로(UploadingAttachment.completed) 높이를 바꿀 필요가 없다.
+                    height: 80,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _attachments.length,
+                      itemBuilder: (context, i) {
+                        final a = _attachments[i];
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 10, top: 6),
+                          child: UploadingAttachment(
+                            thumbnailBytes: a.thumbnailBytes,
+                            displayName: a.displayName,
+                            totalBytes: a.totalBytes,
+                            sentBytes: a.sentBytes,
+                            completed: a.result != null,
+                            onCancel: () => _cancelAttachment(a),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
-              ),
-            // ChatInputBarState와 동일 — 입력칸을 위에 두고, 첨부 아이콘+보내기 버튼은
-            // 그 아래 별도 줄에 둔다. TextField(EditableText)는 여러 줄일 때 조상
-            // ScrollConfiguration과 무관하게 항상 자체 스크롤바를 강제로 붙이므로, 따로
-            // Scrollbar를 얹지 않고 그 자동 스크롤바에 이 테마만 씌운다.
-            RichFormatFrame(
-              open: _formatOpen,
-              focused: _focusNode.hasFocus,
-              toolbar: RichFormatToolbar(
-                controller: _controller,
-                focusNode: _focusNode,
-              ),
-              child: ScrollbarTheme(
-                data: mutedScrollbarThemeData,
-                child: MentionAutocomplete(
-                  key: _mentionKey,
+              // ChatInputBarState와 동일 — 입력칸을 위에 두고, 첨부 아이콘+보내기 버튼은
+              // 그 아래 별도 줄에 둔다. TextField(EditableText)는 여러 줄일 때 조상
+              // ScrollConfiguration과 무관하게 항상 자체 스크롤바를 강제로 붙이므로, 따로
+              // Scrollbar를 얹지 않고 그 자동 스크롤바에 이 테마만 씌운다.
+              RichFormatFrame(
+                open: _formatOpen,
+                focused: _focusNode.hasFocus,
+                toolbar: RichFormatToolbar(
                   controller: _controller,
                   focusNode: _focusNode,
-                  room: widget.controller.room,
-                  myUserId: widget.controller.session.userId,
-                  resolveUrl: widget.controller.session.resolveUrl,
-                  child: RichFieldWrapper(
+                ),
+                child: ScrollbarTheme(
+                  data: mutedScrollbarThemeData,
+                  child: MentionAutocomplete(
+                    key: _mentionKey,
                     controller: _controller,
-                    child: TextField(
-                      key: const ValueKey('comment-input'),
+                    focusNode: _focusNode,
+                    room: widget.controller.room,
+                    myUserId: widget.controller.session.userId,
+                    resolveUrl: widget.controller.session.resolveUrl,
+                    child: RichFieldWrapper(
                       controller: _controller,
-                      focusNode: _focusNode,
-                      autofocus: true,
-                      decoration: InputDecoration(
-                        // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
-                        // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
-                        hintText: _focusNode.hasFocus ? null : '댓글 입력',
-                        border: _formatOpen
-                            ? InputBorder.none
-                            : const OutlineInputBorder(),
-                        // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
-                        // 가깝게 붙인다.
-                        contentPadding: const EdgeInsets.fromLTRB(
-                          12,
-                          12,
-                          2,
-                          12,
+                      child: TextField(
+                        key: const ValueKey('comment-input'),
+                        controller: _controller,
+                        focusNode: _focusNode,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          // 포커스를 얻으면(클릭/터치) 안내 문구 자체를 감춰서 커서만 보이게
+                          // 한다(_onFocusChange가 포커스 변화 시 다시 그림).
+                          hintText: _focusNode.hasFocus ? null : '댓글 입력',
+                          border: _formatOpen
+                              ? InputBorder.none
+                              : const OutlineInputBorder(),
+                          // ChatInputBarState와 동일 — 오른쪽만 줄여서 스크롤바를 테두리에
+                          // 가깝게 붙인다.
+                          contentPadding: const EdgeInsets.fromLTRB(
+                            12,
+                            12,
+                            2,
+                            12,
+                          ),
                         ),
+                        minLines: 1,
+                        maxLines: 6,
+                        // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
+                        // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
+                        // _handleKey가 순수 Enter만 직접 가로채 보낸다.
+                        textInputAction: AppPlatform.isWindows
+                            ? TextInputAction.newline
+                            : TextInputAction.send,
+                        onSubmitted: (_) => _send(),
                       ),
-                      minLines: 1,
-                      maxLines: 6,
-                      // ChatInputBarState와 동일 — Windows에서 .send는 Shift 여부와
-                      // 무관하게 Enter를 전부 제출로 처리해버려서 .newline으로 두고
-                      // _handleKey가 순수 Enter만 직접 가로채 보낸다.
-                      textInputAction: AppPlatform.isWindows
-                          ? TextInputAction.newline
-                          : TextInputAction.send,
-                      onSubmitted: (_) => _send(),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 4),
-            // ChatInputBarState와 동일 — 검색/멤버/스레드 패널이 열려 있으면 이 입력칸 폭이
-            // 좁아질 수 있어서, 남는 폭이 안내 문구까지 담기엔 부족하면 그 문구부터 먼저
-            // 숨긴다(오버플로 방지).
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final showHint =
-                    AppPlatform.isWindows && constraints.maxWidth > 320;
-                return Row(
-                  children: [
-                    TapRegion(
-                      groupId: widget.stickerPickerGroupId,
-                      child: IconButton(
-                        icon: Icon(
-                          Icons.emoji_emotions_outlined,
-                          color: widget.stickerPickerOpen
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                        ),
-                        onPressed: _sending
-                            ? null
-                            : widget.onToggleStickerPicker,
-                        tooltip: '이모티콘',
-                      ),
-                    ),
-                    if (roomAllowsMention(widget.controller.room))
-                      MentionButton(
-                        onPressed: _sending
-                            ? null
-                            : () => _mentionKey.currentState?.insertTrigger(),
-                      ),
-                    IconButton(
-                      icon: const Icon(Icons.attach_file),
-                      onPressed: _sending ? null : _pickFile,
-                      tooltip: '파일 첨부',
-                    ),
-                    if (!widget.controller.room.isSecret)
-                      RichFormatToggleButton(
-                        open: _formatOpen,
-                        onPressed: () {
-                          setState(() => _formatOpen = !_formatOpen);
-                          _focusNode.requestFocus();
-                        },
-                      ),
-                    const Spacer(),
-                    if (showHint) ...[
-                      Text(
-                        widget.controller.session.settings.sendWithShiftEnter
-                            ? 'Shift + Enter 로 전송'
-                            : 'Shift + Enter 로 줄바꿈',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context).hintColor,
+              const SizedBox(height: 4),
+              // ChatInputBarState와 동일 — 검색/멤버/스레드 패널이 열려 있으면 이 입력칸 폭이
+              // 좁아질 수 있어서, 남는 폭이 안내 문구까지 담기엔 부족하면 그 문구부터 먼저
+              // 숨긴다(오버플로 방지).
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final showHint =
+                      AppPlatform.isWindows && constraints.maxWidth > 320;
+                  return Row(
+                    children: [
+                      TapRegion(
+                        groupId: widget.stickerPickerGroupId,
+                        child: IconButton(
+                          icon: Icon(
+                            Icons.emoji_emotions_outlined,
+                            color: widget.stickerPickerOpen
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                          ),
+                          onPressed: _sending
+                              ? null
+                              : widget.onToggleStickerPicker,
+                          tooltip: '이모티콘',
                         ),
                       ),
-                      const SizedBox(width: 8),
-                    ],
-                    if (_sending)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                      if (roomAllowsMention(widget.controller.room))
+                        MentionButton(
+                          onPressed: _sending
+                              ? null
+                              : () => _mentionKey.currentState?.insertTrigger(),
                         ),
-                      )
-                    else
                       IconButton(
-                        icon: const Icon(Icons.send),
-                        onPressed: uploading ? null : _send,
-                        tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '댓글 보내기',
+                        icon: const Icon(Icons.attach_file),
+                        onPressed: _sending ? null : _pickFile,
+                        tooltip: '파일 첨부',
                       ),
-                  ],
-                );
-              },
-            ),
-          ],
+                      if (!widget.controller.room.isSecret)
+                        RichFormatToggleButton(
+                          open: _formatOpen,
+                          onPressed: () {
+                            setState(() => _formatOpen = !_formatOpen);
+                            _focusNode.requestFocus();
+                          },
+                        ),
+                      const Spacer(),
+                      if (showHint) ...[
+                        Text(
+                          widget.controller.session.settings.sendWithShiftEnter
+                              ? 'Shift + Enter 로 전송'
+                              : 'Shift + Enter 로 줄바꿈',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).hintColor,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (_sending)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      else
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          onPressed: uploading ? null : _send,
+                          tooltip: uploading ? '업로드가 끝나면 보낼 수 있어요' : '댓글 보내기',
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
 
+import '../services/api_client.dart' show ApiException, EmailCodeSent;
 import '../services/password_policy.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
+import '../widgets/email_code_input.dart';
 
-enum _Step { credentials, question, newPassword }
+enum _Step { credentials, question, emailCode, newPassword }
 
 /// showDialog로 띄우는 플로팅 창 — 로그인 화면 전체를 덮는 새 페이지 대신 로그인 화면
-/// 위에 뜬다. 아이디/이메일 확인 → (보안 질문이 있으면) 질문 답변 확인 → 새 비밀번호
-/// 입력, 이렇게 단계별로 한 화면에 필요한 입력칸만 보여준다.
+/// 위에 뜬다. 아이디/이메일 확인 → 본인 확인 → 새 비밀번호 입력, 이렇게 단계별로 한 화면에
+/// 필요한 입력칸만 보여준다.
+///
+/// 본인 확인은 계정마다 다르다(server auth.js /password-reset/start): 메일이 켜진 서버에서 이메일을 확인한 계정은 그 이메일로
+/// 받은 코드, 그 밖에는 보안 질문 답(질문이 없는 옛 계정은 사내 와이파이에서 답 없이).
 class FindPasswordScreen extends StatefulWidget {
   final Session session;
 
   /// 아이디 찾기에서 바로 넘어온 경우: 아이디/이메일을 이미 알고 있으니 그 입력 단계를
-  /// 건너뛰고 곧장 보안 질문(또는 질문이 없는 계정이면 새 비밀번호) 단계로 이어간다.
+  /// 건너뛰고 곧장 본인 확인(또는 질문이 없는 계정이면 새 비밀번호) 단계로 이어간다.
   final String? initialUsername;
   final String? initialEmail;
 
@@ -32,6 +37,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
   final _username = TextEditingController();
   String _email = '';
   final _securityAnswer = TextEditingController();
+  final _emailCode = TextEditingController();
   final _newPassword = TextEditingController();
   final _confirmPassword = TextEditingController();
   bool _loading = false;
@@ -39,6 +45,9 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
 
   _Step _step = _Step.credentials;
   String? _securityQuestion;
+
+  /// 서버가 재설정 코드를 메일로 보냈을 때 그 결과(받은 주소 일부·다시 보내기 대기 시간).
+  EmailCodeSent? _codeSent;
 
   // 아이디 찾기에서 넘어와 아이디/이메일 입력 단계를 건너뛰고 자동으로 다음 단계를 조회하는
   // 중인지 — 이 동안은 credentials 단계의 입력칸 대신 로딩 표시만 보여준다.
@@ -62,23 +71,45 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
       _error = null;
     });
     try {
-      final question = await widget.session.api!.fetchSecurityQuestion(
+      final start = await widget.session.api!.startPasswordReset(
         username: _username.text.trim(),
         email: _email.trim(),
       );
       if (!mounted) return;
       setState(() {
-        _securityQuestion = question;
-        _step = (question?.isNotEmpty ?? false)
-            ? _Step.question
-            : _Step.newPassword;
+        if (start.byEmail) {
+          _codeSent = start.emailCode;
+          _step = _Step.emailCode;
+        } else {
+          _securityQuestion = start.question;
+          _step = (start.question?.isNotEmpty ?? false)
+              ? _Step.question
+              : _Step.newPassword;
+        }
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() {
+        _error = e.toString();
+        _autoVerifying = false;
+      });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// 코드 다시 받기 — 첫 단계를 다시 부르면 서버가 새 코드를 보낸다(1분 간격).
+  Future<EmailCodeSent> _resendCode() async {
+    final start = await widget.session.api!.startPasswordReset(
+      username: _username.text.trim(),
+      email: _email.trim(),
+    );
+    final sent = start.emailCode;
+    if (sent == null) {
+      throw const ApiException('이 계정은 이메일 코드로 재설정하지 않습니다. 처음부터 다시 하세요.');
+    }
+    _emailCode.clear();
+    return sent;
   }
 
   Future<void> _verifyAnswer() async {
@@ -91,6 +122,31 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
         username: _username.text.trim(),
         email: _email.trim(),
         securityAnswer: _securityAnswer.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => _step = _Step.newPassword);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _verifyCode() async {
+    if (!isEmailCodeShape(_emailCode.text)) {
+      setState(() => _error = '메일로 받은 6자리 인증 코드를 넣으세요.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.session.api!.verifyPasswordResetCode(
+        username: _username.text.trim(),
+        email: _email.trim(),
+        code: _emailCode.text.trim(),
       );
       if (!mounted) return;
       setState(() => _step = _Step.newPassword);
@@ -123,6 +179,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
         securityAnswer: (_securityQuestion?.isNotEmpty ?? false)
             ? _securityAnswer.text.trim()
             : null,
+        emailCode: _codeSent != null ? _emailCode.text.trim() : null,
         newPassword: _newPassword.text,
       );
       if (!mounted) return;
@@ -142,6 +199,7 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
   void dispose() {
     _username.dispose();
     _securityAnswer.dispose();
+    _emailCode.dispose();
     _newPassword.dispose();
     _confirmPassword.dispose();
     super.dispose();
@@ -174,12 +232,13 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
   VoidCallback get _primaryAction => switch (_step) {
     _Step.credentials => _verifyAccount,
     _Step.question => _verifyAnswer,
+    _Step.emailCode => _verifyCode,
     _Step.newPassword => _resetPassword,
   };
 
   String get _primaryLabel => switch (_step) {
     _Step.credentials => '다음',
-    _Step.question => '확인',
+    _Step.question || _Step.emailCode => '확인',
     _Step.newPassword => '비밀번호 재설정',
   };
 
@@ -237,6 +296,19 @@ class _FindPasswordScreenState extends State<FindPasswordScreen> {
               border: const OutlineInputBorder(),
             ),
             onSubmitted: (_) => _verifyAnswer(),
+          ),
+        ];
+      case _Step.emailCode:
+        return [
+          const Text('가입한 이메일로 비밀번호 재설정 코드를 보냈습니다. 받은 코드를 넣어 주세요.'),
+          const SizedBox(height: 16),
+          EmailCodeInput(
+            key: const ValueKey('find-password-email-code'),
+            controller: _emailCode,
+            sent: _codeSent,
+            onSend: _resendCode,
+            onSent: (sent) => _codeSent = sent,
+            onSubmitted: _verifyCode,
           ),
         ];
       case _Step.newPassword:

@@ -431,6 +431,15 @@ export const limits = {
   invitePageIp: new RateLimiter({ max: 60, windowMs: 15 * MIN }),
   // 내 일정 ICS 구독 주소(로그인 없이 열린다 — calendarFeeds.js): 토큰은 맞힐 수 없는 길이라, 피드 계산을 반복시키는 것만 늦춘다.
   calendarFeedIp: new RateLimiter({ max: 120, windowMs: 15 * MIN }),
+  // 메일 보내기(확인 코드·아이디 찾기) — 서버의 메일 계정으로 아무 주소에나 메일을 쏟아붓지 못하게(그 계정이 스팸 발송으로
+  // 막힌다). 로그인 없이 부르는 길은 한 IP에서 15분에 10통.
+  mailSendIp: new RateLimiter({ max: 10, windowMs: 15 * MIN }),
+  // 한 주소로는 어느 목적이든 한 시간에 5통(emailCodes.js — 키는 주소의 조회용 해시).
+  mailSendAddress: new RateLimiter({ max: 5, windowMs: HOUR }),
+  // 로그인한 사람의 이메일 확인·변경 코드 — 한 계정에서 한 시간에 10통.
+  mailSendUser: new RateLimiter({ max: 10, windowMs: HOUR }),
+  // 초대 메일 — 한 계정에서 한 시간에 50통(한 번에 최대 20명 — mailRules.js INVITE_MAIL_MAX_RECIPIENTS).
+  inviteMailUser: new RateLimiter({ max: 50, windowMs: HOUR }),
 };
 
 setInterval(() => {

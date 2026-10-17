@@ -1041,7 +1041,9 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 
 메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 출퇴근 · 관리**(관리자만). 서버는
 `server/src/groupware.js`, 규칙은 `approvalRules.js`(결재)·`approvalForms.js`(결재 양식)·`annualLeave.js`(휴가·법정 연차)·
-`attendanceRules.js`(출퇴근)·`groupwareScope.js`(범위), 앱은 `client/lib/screens/groupware/`(양식은 `approval_form_widgets.dart`).
+`attendanceRules.js`(출퇴근)·`workRules.js`(근로시간·유연근무·출근 알림)·`leavePromotion.js`(연차 촉진)·`groupwareOptions.js`(휴가 종류·지출 분류)·
+`groupwareScope.js`(범위), 근태·휴가 관리 API는 `groupwareWork.js`, 앱은 `client/lib/screens/groupware/`(양식은 `approval_form_widgets.dart`, 관리 탭의 근태·휴가
+관리는 `groupware_work_admin.dart`).
 
 **범위** — 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". **팀마다**면 결재선 후보·연차·출퇴근·근무 시간·관리자가 모두 그 팀 안이고(앱이 지금
 고른 팀으로), **회사 전체**면 팀과 상관없이 하나입니다. 기본 "팀·직책 설정을 따름"은 부서·직책이 계정 단위면 회사 전체, 팀 단위면 팀마다입니다.
@@ -1094,13 +1096,14 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 **휴가·법정 연차**(입사일 기준, 근로기준법 제60조) — 관리 탭에서 구성원의 입사일을 정하면 앱이 연차를 계산합니다.
 - 입사 1년 미만: 한 달 채울 때마다 1일, 최대 11일. 1년 이상: 15일, 3년차부터 2년마다 1일씩 늘어 최대 25일(`15 + ⌊(근속연수 − 1) / 2⌋`).
 - 연차 기간은 입사 기념일마다 바뀝니다(회계연도 방식은 쓰지 않음). 기간을 걸친 휴가는 시작일 쪽 기간에 셉니다.
-- 휴가 종류: 연차·오전 반차·오후 반차(연차에서 뺌), 병가·경조사·공가·기타(빼지 않음 — 기록과 결재만). 일수는 **주말·공휴일을 뺀 근무일**로
+- 휴가 종류: 기본은 연차·오전 반차·오후 반차(연차에서 뺌), 병가·경조사·공가·기타(빼지 않음 — 기록과 결재만). 관리자가 이름을 바꾸고 끄고
+  종류를 더할 수 있습니다([근로시간·유연근무·연차 촉진](#근로시간유연근무연차-촉진)). 일수는 **주말·공휴일을 뺀 근무일**로
   셉니다(공휴일 표는 `holidays.js` — 2025~2027). 한 번에 60일까지, 같은 기간에 휴가를 두 번 낼 수 없습니다.
 - 남은 연차(결재 중인 것까지 뺀)보다 많이 신청하면 막습니다. 입사일이 없으면 남은 양을 모르니 막지 않습니다.
 - 출근율 80% 미만인 해의 감액, 이월, 회사가 더 주는 휴가는 계산하지 않습니다 — 관리자가 **연차 조정**(0.5일 단위 ±, 사유 필수, 감사 로그)으로 맞춥니다.
 - 승인된 휴가는 캘린더의 내장 구독 캘린더 **"팀 휴가"**에 보입니다(정회원 이상, 숨길 수 있음).
 
-**지출** — 금액(원), 분류(교통비·식대·비품·소모품·출장비·교육비·접대비·기타), 쓴 날, 영수증(직접 올린 파일만, 5개까지), 내용.
+**지출** — 금액(원), 분류(기본 교통비·식대·비품·소모품·출장비·교육비·접대비·기타 — 관리자가 바꿈), 쓴 날, 영수증(직접 올린 파일만, 5개까지), 내용.
 
 #### 결재 양식
 
@@ -1126,6 +1129,39 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 조퇴·퇴근 누락·결근·휴가·출장·연장근무)을 보여 줍니다. 빠뜨렸거나 잘못 누른 기록은 날마다 **수정 요청**(근태 수정 결재 — 지난 60일 안)으로 고치고,
 승인되면 기록이 바뀌되 **처음 값을 함께 남깁니다**(기록을 지우지 않음 — 근태는 임금·근로시간의 근거라 수정 이력이 남아야 함). 관리 탭에서
 구성원별 한 달 요약과 **엑셀 내보내기**(요약·일별 기록 두 시트, 처음 값 포함)를 합니다. 근태 기록의 보존 기간 등 법적 의무는 노무 담당과 확인하세요.
+
+#### 근로시간·유연근무·연차 촉진
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0117`)가 돌아야 아래 기능이 켜집니다.
+
+- **외근·재택 출근** — 출근할 때 **사무실 / 외근 / 재택**을 고릅니다. 외근은 장소를 적어야 하고(200자), 날마다의 기록·엑셀에 형태와 장소가
+  남습니다. 위치 정보는 여전히 받지 않습니다.
+- **근로시간 나누기**(퇴근을 눌러야 계산, `workRules.js`) — 머문 시간에서 **휴게시간**(4시간 30분 넘게 일하면 30분, 8시간 30분 넘으면 1시간 —
+  제54조)을 뺀 것이 **실근로**입니다. 평일은 하루 8시간을 넘은 만큼이 **연장**, 주말·공휴일은 모두 **휴일근무**, 22:00~06:00 안의 시간은
+  **야간**입니다(연장·휴일과 겹쳐 셈 — 가산 수당 계산 근거). 날마다 표시·한 달 요약·엑셀(요약 시트에 실근로·연장·야간·휴일, 일별 시트에 형태·
+  실근로·연장·야간·휴일)에 나옵니다. 연장근무 신청 결재로 승인된 시간은 "연장근무 신청"으로 따로 셉니다.
+- **주 52시간** — 월~일 한 주의 실근로(휴일근무 포함)를 셉니다. 출퇴근 탭 위에 이번 주 막대(48시간부터 주의 색, 52시간을 넘으면 빨강)와
+  달력 아래 주마다의 합이 있고, 관리 탭 **주 52시간**은 구성원별 한 주(앞뒤로 넘김)를 보여 주며 52시간·48시간을 넘은 사람을 표시합니다.
+  막지는 않습니다(기록은 사실대로 남아야 하므로) — 넘지 않게 관리하는 것은 관리자 몫입니다.
+- **유연근무** — 관리 탭 **유연근무**에서 사람마다 근무 형태를 정합니다: **시차출퇴근**(그 사람의 출근·퇴근 시각으로 지각·조퇴),
+  **선택근무**(핵심 시간대만 지각·조퇴), **자율 출퇴근**(지각·조퇴를 세지 않음). 정하지 않으면 범위의 근무 시간이고, "기본으로"로 되돌립니다.
+  근로시간·주 52시간은 형태와 상관없이 똑같이 셉니다. 본인의 출퇴근 탭에 근무 형태가 보입니다.
+- **출근·퇴근 알림** — 관리 탭 **출근·퇴근 알림**에서 켭니다(기본 꺼짐). 출근은 근무 시작(유연근무면 그 사람의 시작 — 선택근무는 핵심 시간대
+  시작) 뒤 0~60분(기본 10분)에, 퇴근은 근무 끝 1시간 뒤에 아직 안 눌렀으면 하루 한 번 알립니다(그 뒤 3시간 안에만 — 서버가 5분마다 확인).
+  최근 30일 안에 출퇴근을 쓴 사람에게만, 주말·공휴일·하루 휴가·출장인 날은 빼고 보냅니다. 앱이 켜져 있으면 토스트와 기기 알림(소켓
+  `attendance:reminder`), 꺼져 있으면 푸시이고 누르면 그룹웨어 화면이 열립니다.
+- **연차 사용 촉진**(근로기준법 제61조 — 회사가 절차를 지키면 못 쓴 연차의 수당 의무가 없어짐) — 관리 탭 **연차 사용 촉진**에서 입사일이 있는
+  구성원마다 단계를 보여 줍니다(아직 이름 · 1차 촉진 기간 · 계획 기다리는 중 · 2차 촉진 필요 · 끝남 · 기간을 놓침 · 남은 연차 없음).
+  - **1차** — 연차 기간 만료 6개월 전(입사 첫해의 1년 미만 연차는 3개월 전)부터 10일 안에, 고른 사람들에게 남은 연차(결재 중인 휴가는 뺀)를
+    알리고 10일 안에 쓸 날을 내라고 요구합니다. 받은 사람의 휴가 탭 위에 안내 카드가 뜨고(보면 **확인** 시각이 남음) **쓸 날 내기**로 남은
+    연차만큼까지 날짜를 골라 냅니다(그날 휴가 신청은 따로 올림).
+  - **2차** — 10일 안에 내지 않은 사람에게 만료 2개월 전(첫해는 1개월 전)까지 회사가 쓸 날을 정해 통보합니다.
+  - 보낸 사람·보낸 시각·확인 시각·낸 날이 기록에 남고 지우지 않습니다(감사 로그 `groupware.settings`). 전자 통지를 서면 통지로 인정받는지는 노무
+    담당과 확인하세요. 회계연도 방식, 1차 기간을 지난 뒤의 늦은 촉진은 다루지 않습니다.
+- **휴가 종류·지출 분류** — 관리 탭 **휴가 종류·지출 분류**에서 범위마다 바꿉니다. 기본 휴가 종류는 이름을 바꾸거나 끌 수 있고(연차는 끌 수 없음,
+  반차·연차 차감 여부는 그대로), 종류를 더하면 하루 단위이고 연차에서 뺄지 고릅니다. 끈 종류는 새로 신청할 수 없고, **이미 올린 신청은 그때의
+  이름·차감 여부를 문서에 적어 두어**(payload `leaveLabel`·`deducts`) 이름을 바꾸거나 꺼도 그대로 보이고 연차 계산도 바뀌지 않습니다.
+  지출 분류는 목록을 그대로 바꿉니다(1~30개, 이미 올린 지출은 그때 분류 그대로). 바꾼 내용은 감사 로그에 남고 그 범위의 화면이 바로 다시 받습니다.
 
 > 범위 설정을 바꾸면 이전 범위의 결재·근태·연차 조정 기록은 그 범위 키로 남아 새 범위에서는 보이지 않습니다(지우지는 않음 — 되돌리면 다시 보임).
 
@@ -1154,12 +1190,14 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   맞추기, 조직도 그림(가로 트리) 보기.
 - **결재 양식 후속** — 일반 기안서·출장·구매·연장근무 양식과 관리자가 만드는 양식은 들어갔습니다([결재 양식](#결재-양식)). 남은 것: 양식마다의
   기본 결재선·참조자, 칸 순서 끌어 옮기기·칸 설명, 사람 고르기·표(임의 열) 칸, 승인된 지출성 결재(구매·출장 경비)의 정산 연결, 출장의
-  캘린더 표시, 연장근무의 주 52시간 계산(근태 항목 참고), 휴가 종류·지출 분류를 관리자가 바꾸기.
+  캘린더 표시.
 - **결재 기능 후속** — 합의·전결·대결·문서 번호·서명·도장·인쇄·PDF·결재 통계는 들어갔습니다([합의·전결·대결](#합의전결대결)). 남은 것:
   전결 규정(종류·금액에 따라 전결권자를 저절로 — 지금은 올리는 사람이 결재선에서 정함), 합의의 "반대 의견으로 진행", 후결(사후 결재),
   결재 문서 보관·검색(기간·문서 번호), 통계 엑셀 내보내기, 서명 그림의 위변조 방지(전자서명).
-- **근태** — 출퇴근·지각/조퇴/결근 집계·사내 와이파이 여부·엑셀 내보내기는 있고, **주 52시간 관리**, 연장·야간·휴일근무 집계,
-  유연근무, 외근 출근, 출근 알림, **연차 촉진 안내**(법정 절차)는 없습니다. 휴가 종류·지출 분류도 코드에 고정이라 관리자가 못 바꿉니다.
+- **근태 후속** — 주 52시간·연장·야간·휴일 집계·유연근무·외근·출근 알림·연차 촉진·휴가 종류·지출 분류 바꾸기는 들어갔습니다
+  ([근로시간·유연근무·연차 촉진](#근로시간유연근무연차-촉진)). 남은 것: 52시간을 넘기 전에 막거나 결재를 받게 하기, 탄력적 근로시간제(2주·3개월
+  단위 평균)와 선택근무의 정산 기간, 휴게시간을 직접 누르기, 외근 위치 확인(GPS — 지금은 적은 장소뿐), 회계연도 기준 연차·연차 이월, 수당
+  계산(가산율), 연차 촉진의 서면(PDF) 통지서, 시간 단위 연차(반반차).
 - **회의실·자원 예약** — 없습니다(캘린더 종류는 개인·팀·공유뿐). 캘린더와 붙이면 자연스럽습니다.
 - **휴가 달력** — 지금은 그룹웨어 휴가 탭의 "앞으로 30일 팀 휴가" 목록과 캘린더의 "팀 휴가"입니다. 그룹웨어 안의 달력 모양 보기는
   없습니다.
@@ -2200,6 +2238,20 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/attendance/month` | `?month=YYYY-MM&userId=`(남의 것은 관리자) 날마다 기록·휴가·공휴일과 요약 |
 | GET | `/api/groupware/attendance/summary` \| `export` | (관리자) 구성원별 한 달 요약 / 같은 내용의 엑셀(.xlsx — 요약·일별 기록) |
 
+**근태·휴가 관리** (`server/src/groupwareWork.js` — 모두 `teamId`로 범위, 관리자는 결재·근태 관리자)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET / PATCH | `/api/groupware/options` | (관리자) 범위 설정 `{ leaveTypes: [{ key, label, deducts, half, enabled, builtin }], expenseCategories, clockInReminder, clockOutReminder, reminderDelayMinutes }` / 보낸 것만 바꾸기 — `leaveTypes`는 `[{ key?(새 종류는 비움), label, enabled, deducts?(더한 종류만) }]`(빠진 종류는 꺼짐, 연차는 끌 수 없음 — 400), `expenseCategories` 1~30개, `reminderDelayMinutes` 0~120. 소켓 `groupware:changed`(`options: true`) |
+| GET | `/api/groupware/schedules` | (관리자) 구성원과 근무 형태 `[{ userId, name, schedule: { mode, label, start, end, coreStart, coreEnd } \| null }]`(시각은 자정부터 분) |
+| PUT / DELETE | `/api/groupware/schedules/:userId` | (관리자) 근무 형태 `{ mode: 'staggered'\|'core'\|'free', start?, end?, coreStart?, coreEnd? }`('HH:MM' — 시차는 start·end, 선택근무는 coreStart·coreEnd) / 범위의 근무 시간으로 되돌리기 |
+| GET | `/api/groupware/attendance/weekly` | (관리자) `?week=YYYY-MM-DD`(그날이 든 월~일) → `{ weekStart, weekEnd, members: [{ userId, name, netMinutes, overtimeMinutes, holidayMinutes, nightMinutes, status: 'ok'\|'warn'\|'over' }] }` |
+| GET | `/api/groupware/leave/promotions` | (관리자) 연차 촉진 현황 `{ today, members: [{ userId, name, expiry, firstYear, firstStart, firstEnd, secondDeadline, remainingHalfDays, stage, notices }] }` — 입사일이 있는 사람만 |
+| POST | `/api/groupware/leave/promotions` | (관리자) 1차 촉진 `{ userIds, message? }` → `{ sent, skipped: [{ userId, reason }] }`(보냈으면 201) — 입사일 없음·이번 기간에 이미 보냄·남은 연차 없음은 건너뜀. 마감은 10일 뒤 |
+| POST | `/api/groupware/leave/promotions/second` | (관리자) 2차 촉진 `{ userId, dates, message? }` → 201 — 1차를 받고 쓸 날을 내지 않은 사람, 남은 연차만큼까지·만료 전의 날 |
+| GET | `/api/groupware/leave/promotions/mine` | 내가 받은 촉진 통지 |
+| POST | `/api/groupware/leave/promotions/:id/read` \| `plan` | 받은 사람이 확인 / 1차에 쓸 날 내기 `{ dates }`(마감 안, 한 번만 — 아니면 409) |
+
 **외부 연동** (`server/src/integrations.js`, 공개 API는 `publicApi.js`)
 
 | Method | Path | 인증 | 설명 |
@@ -2315,7 +2367,11 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb, `line`(결재자마다의 역할 `[{ userId, role }]`, null이면 모두 결재) |
 | `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |
 | `leave_adjustments` | 연차 조정(반일 단위 ±, 사유, 그 연차 기간의 시작일) |
-| `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`). 지우지 않음 |
+| `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, `clock_in_mode`(`office`\|`field`\|`remote` — 외근이면 장소는 `note`), 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`). 지우지 않음 |
+| `groupware_options` | 그룹웨어 범위(`scope_key`)마다의 설정 — `leave_types` jsonb(기본 종류의 이름·켜고 끄기와 더한 종류 `c_…`, null이면 기본), `expense_categories` jsonb(null이면 기본), `clock_in_reminder`·`clock_out_reminder`·`reminder_delay_minutes`(기본 10) |
+| `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무) |
+| `attendance_reminders` | 보낸 출근·퇴근 알림(PK `scope_key`, `user_id`, `work_date`, `kind` — 하루 한 번만 보내려고 먼저 넣고 보냄) |
+| `leave_promotions` | 연차 사용 촉진 통지 — `scope_key`, `user_id`, 그 연차 기간(`period_start`·`period_end`), `stage`(1 \| 2), 보낼 때 남은 연차 `remaining_half_days`, `deadline`, `message`, 2차의 `designated_dates`, 받은 사람이 낸 `plan_dates`·`planned_at`, `sent_by_id`·`sent_by_name`·`sent_at`, `read_at`. 지우지 않음 |
 | `email_codes` | 메일로 보낸 확인 코드(가입 전 `signup`·이메일 확인 `verify`·이메일 변경 `change`·비밀번호 재설정 `reset`). 코드 대신 서버 비밀값으로 만든 해시, 틀린 횟수(`attempts`), 만료(10분 — 만료된 행은 하루 한 번 지움). 같은 목적·주소로 새 코드를 보내면 앞의 행은 지움 |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |

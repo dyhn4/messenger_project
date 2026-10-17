@@ -8,6 +8,7 @@ import '../../widgets/app_toast.dart';
 import 'approval_form_widgets.dart' show ApprovalFormsAdminSection;
 import 'approval_forms.dart' show isHmText;
 import 'approval_settings.dart' show ApprovalStatsSection;
+import 'groupware_work_admin.dart';
 import 'groupware_screen.dart';
 
 /// 관리 탭(결재·근태 관리자만) — 근무 시간(지각·조퇴 기준), 구성원 입사일·연차 현황·연차 조정, 한 달 근태 요약과 엑셀.
@@ -231,8 +232,20 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
             ],
           ),
         ),
+        WorkSchedulesSection(api: widget.api, ctx: widget.ctx),
+        WeeklyHoursSection(api: widget.api, ctx: widget.ctx),
+        GroupwareOptionsSection(
+          api: widget.api,
+          changes: widget.changes,
+          onChanged: widget.onContextChanged,
+        ),
         ApprovalFormsAdminSection(api: widget.api, changes: widget.changes),
         ApprovalStatsSection(api: widget.api, ctx: widget.ctx),
+        LeavePromotionSection(
+          api: widget.api,
+          ctx: widget.ctx,
+          changes: widget.changes,
+        ),
         const GroupwareSectionHeader('구성원 연차'),
         if (members == null)
           const Padding(

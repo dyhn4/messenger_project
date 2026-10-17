@@ -93,8 +93,8 @@ export const LEAVE_MAX_SPAN_DAYS = 60;
  * 휴가 신청 { leaveType, startDate, endDate }의 양 — 통과하면 `{ halfDays, workdays }`, 아니면 `{ error }`. 근무일만 센다(주말·공휴일은
  * 빼고). 반차는 근무일 하루의 반.
  */
-export function leaveRequestAmount({ leaveType, startDate, endDate }, holidays = new Set()) {
-  const type = leaveTypeOf(leaveType);
+export function leaveRequestAmount({ leaveType, startDate, endDate }, holidays = new Set(), typeOf = leaveTypeOf) {
+  const type = typeOf(leaveType);
   if (!type) return { error: '휴가 종류를 고르세요.' };
   if (!isDateKey(startDate) || !isDateKey(endDate)) return { error: '휴가 날짜를 확인하세요.' };
   if (endDate < startDate) return { error: '끝나는 날이 시작하는 날보다 앞입니다.' };

@@ -599,7 +599,7 @@ void main() {
       expect(team.teamId, 'T1');
       final server = NotificationService.parseApprovalPayload('approval:D1:')!;
       expect(server.teamId, isNull);
-      // 옛 서버의 푸시(문서 id 없음)는 빈 문서 id — 앱은 알림 센터 결재 탭을 연다.
+      // 문서 없는 그룹웨어 알림(출근 알림·연차 촉진)은 빈 문서 id — 앱은 그룹웨어 화면을 연다.
       expect(
         NotificationService.parseApprovalPayload('approval::')!.documentId,
         '',

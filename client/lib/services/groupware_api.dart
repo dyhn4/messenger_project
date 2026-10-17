@@ -1,4 +1,5 @@
 import '../models/groupware.dart';
+import '../models/groupware_work.dart';
 import 'api_client.dart';
 
 /// 그룹웨어 API 묶음(server/src/groupware.js) — ApiClient의 인증·401 재시도·오류 처리를 그대로 쓴다(requestJson). 모든 호출에
@@ -318,11 +319,174 @@ class GroupwareApi {
     await _getMap('/api/groupware/attendance/today${_query()}'),
   );
 
-  Future<AttendanceRecord> clockIn() async => AttendanceRecord.fromJson(
+  /// 출근 — [mode] 'office'(사무실) | 'field'(외근 — [note]에 장소, 꼭) | 'remote'(재택).
+  Future<AttendanceRecord> clockIn({
+    String mode = 'office',
+    String? note,
+  }) async => AttendanceRecord.fromJson(
     (await _api.requestJson(
               'POST',
               '/api/groupware/attendance/clock-in',
-              body: _body(),
+              body: _body({'mode': mode, 'note': ?note}),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  // ── 범위 설정·유연근무·주 52시간·연차 촉진(서버 groupwareWork.js) ──
+
+  Future<GroupwareOptions> options() async => GroupwareOptions.fromJson(
+    await _getMap('/api/groupware/options${_query()}'),
+  );
+
+  /// 범위 설정 바꾸기(관리자) — 보낸 것만 바뀐다.
+  Future<GroupwareOptions> updateOptions({
+    List<LeaveTypeInfo>? leaveTypes,
+    List<String>? expenseCategories,
+    bool? clockInReminder,
+    bool? clockOutReminder,
+    int? reminderDelayMinutes,
+  }) async => GroupwareOptions.fromJson(
+    (await _api.requestJson(
+              'PATCH',
+              '/api/groupware/options',
+              body: _body({
+                if (leaveTypes != null)
+                  'leaveTypes': [for (final t in leaveTypes) t.toJson()],
+                'expenseCategories': ?expenseCategories,
+                'clockInReminder': ?clockInReminder,
+                'clockOutReminder': ?clockOutReminder,
+                'reminderDelayMinutes': ?reminderDelayMinutes,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<List<MemberSchedule>> schedules() async => [
+    for (final m in await _getList('/api/groupware/schedules${_query()}'))
+      MemberSchedule.fromJson(m),
+  ];
+
+  /// 근무 형태 정하기(관리자) — [mode] 'staggered'(start·end) | 'core'(coreStart·coreEnd) | 'free'. 시각은 'HH:MM'.
+  Future<MemberSchedule> setSchedule(
+    String userId, {
+    required String mode,
+    String? start,
+    String? end,
+    String? coreStart,
+    String? coreEnd,
+  }) async => MemberSchedule.fromJson(
+    (await _api.requestJson(
+              'PUT',
+              '/api/groupware/schedules/$userId',
+              body: _body({
+                'mode': mode,
+                'start': ?start,
+                'end': ?end,
+                'coreStart': ?coreStart,
+                'coreEnd': ?coreEnd,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<void> clearSchedule(String userId) =>
+      _api.requestJson('DELETE', '/api/groupware/schedules/$userId${_query()}');
+
+  /// 한 주(그 날이 든 월~일) 구성원별 근로시간(관리자).
+  Future<({String weekStart, String weekEnd, List<WeeklyMember> members})>
+  weekly(String day) async {
+    final j = await _getMap(
+      '/api/groupware/attendance/weekly${_query({'week': day})}',
+    );
+    return (
+      weekStart: j['weekStart'] as String? ?? day,
+      weekEnd: j['weekEnd'] as String? ?? day,
+      members: [
+        for (final m in j['members'] as List? ?? const [])
+          WeeklyMember.fromJson((m as Map).cast<String, dynamic>()),
+      ],
+    );
+  }
+
+  /// 연차 촉진 현황(관리자).
+  Future<List<PromotionMember>> promotions() async {
+    final j = await _getMap('/api/groupware/leave/promotions${_query()}');
+    return [
+      for (final m in j['members'] as List? ?? const [])
+        PromotionMember.fromJson((m as Map).cast<String, dynamic>()),
+    ];
+  }
+
+  /// 1차 촉진 보내기(관리자) → 보낸 수와 건너뛴 이유들.
+  Future<({int sent, List<String> skipped})> sendPromotion(
+    List<String> userIds, {
+    String? message,
+  }) async {
+    final j =
+        (await _api.requestJson(
+                  'POST',
+                  '/api/groupware/leave/promotions',
+                  body: _body({'userIds': userIds, 'message': ?message}),
+                )
+                as Map)
+            .cast<String, dynamic>();
+    return (
+      sent: (j['sent'] as List? ?? const []).length,
+      skipped: [
+        for (final s in j['skipped'] as List? ?? const [])
+          '${(s as Map)['reason']}',
+      ],
+    );
+  }
+
+  /// 2차 촉진(관리자) — 회사가 정한 날.
+  Future<LeavePromotion> sendSecondPromotion(
+    String userId,
+    List<String> dates, {
+    String? message,
+  }) async => LeavePromotion.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/leave/promotions/second',
+              body: _body({
+                'userId': userId,
+                'dates': dates,
+                'message': ?message,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<List<LeavePromotion>> myPromotions() async => [
+    for (final p in await _getList(
+      '/api/groupware/leave/promotions/mine${_query()}',
+    ))
+      LeavePromotion.fromJson(p),
+  ];
+
+  Future<LeavePromotion> readPromotion(String id) async =>
+      LeavePromotion.fromJson(
+        (await _api.requestJson(
+                  'POST',
+                  '/api/groupware/leave/promotions/$id/read',
+                  body: const {},
+                )
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<LeavePromotion> submitPromotionPlan(
+    String id,
+    List<String> dates,
+  ) async => LeavePromotion.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/leave/promotions/$id/plan',
+              body: {'dates': dates},
             )
             as Map)
         .cast<String, dynamic>(),

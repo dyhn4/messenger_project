@@ -473,6 +473,7 @@ class Session extends ChangeNotifier {
   /// 할 일 소켓 이벤트(todo:changed의 담당 지정, todo:reminder 알림)를 토스트로 알린다 — todo_actions.dart.
   StreamSubscription? _todoToastSub;
   StreamSubscription? _todoReminderSub;
+  StreamSubscription? _attendanceReminderSub;
 
   /// 프로젝트 알림함의 안 읽은 개수 — 툴바 "프로젝트" 버튼의 배지와 프로젝트 창 사이드바가 쓴다.
   int projectUnread = 0;
@@ -1385,6 +1386,21 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 소켓 `attendance:reminder` — 출근(또는 퇴근)을 아직 안 눌렀다는 알림. 앱이 켜져 있으면 서버 푸시가 오지 않으니 여기서 띄운다
+  /// (토스트 + 기기 알림 — 문서 id가 빈 결재 알림이라 누르면 그룹웨어 화면, main.dart).
+  void handleAttendanceReminder(Map<String, dynamic> data) {
+    final title = data['title'] as String? ?? '출퇴근';
+    final body = data['body'] as String? ?? '';
+    _showToast(body.isEmpty ? title : '$title — $body');
+    if (_quietNotifications) return;
+    notifications.showApprovalNotification(
+      title: title,
+      body: body,
+      documentId: '',
+      teamId: data['teamId'] as String?,
+    );
+  }
+
   /// 소켓 `approval:notification-sync` — 다른 기기에서 읽었거나 결재를 처리해 요청 알림이 읽음이 됨.
   void handleApprovalNotificationSync(int count) {
     _setApprovalUnread(count);
@@ -1834,6 +1850,10 @@ class Session extends ChangeNotifier {
     _todoReminderSub?.cancel();
     _todoReminderSub = chatSocket.todoReminder.listen(
       (e) => _showToast(todoReminderToast(e)),
+    );
+    _attendanceReminderSub?.cancel();
+    _attendanceReminderSub = chatSocket.attendanceReminders.listen(
+      handleAttendanceReminder,
     );
     _renamedSub?.cancel();
     _renamedSub = chatSocket.renamedEvents.listen((e) {
@@ -5365,6 +5385,7 @@ class Session extends ChangeNotifier {
     await _approvalNotifSyncSub?.cancel();
     await _todoToastSub?.cancel();
     await _todoReminderSub?.cancel();
+    await _attendanceReminderSub?.cancel();
     projectUnread = 0;
     approvalUnread = 0;
     await _hiddenSub?.cancel();

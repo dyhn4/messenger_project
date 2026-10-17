@@ -161,7 +161,7 @@ class NotificationService {
   static String approvalPayload(String documentId, String? teamId) =>
       '$approvalPayloadPrefix$documentId:${teamId ?? ''}';
 
-  /// [approvalPayload]를 되돌린다 — 결재 알림이 아니면 null, 문서 id가 비었으면(옛 서버의 푸시) documentId가 빈 글자.
+  /// [approvalPayload]를 되돌린다 — 결재 알림이 아니면 null, 문서 id가 비었으면(출근·퇴근 알림·연차 사용 촉진) documentId가 빈 글자.
   static ({String documentId, String? teamId})? parseApprovalPayload(
     String payload,
   ) {

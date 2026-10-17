@@ -10,6 +10,10 @@ import {
   approvalSteps,
   approvalTemplates,
   attendanceRecords,
+  attendanceReminders,
+  groupwareOptions,
+  leavePromotions,
+  workSchedules,
   leaveAdjustments,
   teamMembers,
   teams,
@@ -302,7 +306,11 @@ export async function sumDeductedLeave({ scopeKey, userId, from, to }) {
         eq(approvalDocuments.authorId, userId),
         eq(approvalDocuments.kind, 'leave'),
         inArray(approvalDocuments.status, ['approved', 'pending']),
-        inArray(sql`${approvalDocuments.payload}->>'leaveType'`, DEDUCTING),
+        // 신청할 때 적어 둔 연차 차감 여부(이 기능 전 신청은 기본 종류로 판단).
+        sql`coalesce((${approvalDocuments.payload}->>'deducts')::boolean, ${approvalDocuments.payload}->>'leaveType' in (${sql.join(
+          DEDUCTING.map((k) => sql`${k}`),
+          sql`, `,
+        )}))`,
         gte(sql`${approvalDocuments.payload}->>'startDate'`, from),
         lt(sql`${approvalDocuments.payload}->>'startDate'`, to),
       ),
@@ -631,4 +639,108 @@ export async function upsertBuiltinTemplate(scopeKey, builtinKey, { name, enable
     })
     .returning();
   return row;
+}
+
+// ── 범위 설정·유연근무·알림·연차 촉진(groupwareWork.js) ──
+
+/** 범위의 그룹웨어 설정 줄(없으면 null — 기본값). */
+export async function findGroupwareOptions(scopeKey) {
+  const [row] = await db.select().from(groupwareOptions).where(eq(groupwareOptions.scopeKey, scopeKey)).limit(1);
+  return row ?? null;
+}
+
+export async function upsertGroupwareOptions(scopeKey, patch) {
+  const [row] = await db
+    .insert(groupwareOptions)
+    .values({ scopeKey, ...patch })
+    .onConflictDoUpdate({ target: groupwareOptions.scopeKey, set: { ...patch, updatedAt: new Date() } })
+    .returning();
+  return row;
+}
+
+/** 출근·퇴근 알림을 켠 범위들. */
+export function listReminderScopes() {
+  return db
+    .select()
+    .from(groupwareOptions)
+    .where(sql`${groupwareOptions.clockInReminder} or ${groupwareOptions.clockOutReminder}`);
+}
+
+export function listWorkSchedules(scopeKey) {
+  return db.select().from(workSchedules).where(eq(workSchedules.scopeKey, scopeKey));
+}
+
+export async function findWorkSchedule(scopeKey, userId) {
+  const [row] = await db
+    .select()
+    .from(workSchedules)
+    .where(and(eq(workSchedules.scopeKey, scopeKey), eq(workSchedules.userId, userId)))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function upsertWorkSchedule(scopeKey, userId, schedule) {
+  const [row] = await db
+    .insert(workSchedules)
+    .values({ scopeKey, userId, ...schedule })
+    .onConflictDoUpdate({ target: [workSchedules.scopeKey, workSchedules.userId], set: { ...schedule, updatedAt: new Date() } })
+    .returning();
+  return row;
+}
+
+export async function deleteWorkSchedule(scopeKey, userId) {
+  await db.delete(workSchedules).where(and(eq(workSchedules.scopeKey, scopeKey), eq(workSchedules.userId, userId)));
+}
+
+/** 알림을 보냈다고 적는다 — 이미 있으면 false(그날 그 종류는 한 번만). */
+export async function claimAttendanceReminder({ scopeKey, userId, workDate, kind }) {
+  const rows = await db
+    .insert(attendanceReminders)
+    .values({ scopeKey, userId, workDate, kind })
+    .onConflictDoNothing()
+    .returning({ userId: attendanceReminders.userId });
+  return rows.length > 0;
+}
+
+export async function listAttendanceRemindersOn(scopeKey, workDate) {
+  return db
+    .select()
+    .from(attendanceReminders)
+    .where(and(eq(attendanceReminders.scopeKey, scopeKey), eq(attendanceReminders.workDate, workDate)));
+}
+
+/** 최근 [sinceDate]부터 출퇴근을 한 번이라도 누른 사람들 — 출근 알림은 출퇴근을 쓰는 사람에게만. */
+export async function listRecentAttendanceUsers(scopeKey, sinceDate) {
+  const rows = await db
+    .selectDistinct({ userId: attendanceRecords.userId })
+    .from(attendanceRecords)
+    .where(and(eq(attendanceRecords.scopeKey, scopeKey), gte(attendanceRecords.workDate, sinceDate)));
+  return rows.map((r) => r.userId);
+}
+
+export async function insertLeavePromotion(fields) {
+  const [row] = await db.insert(leavePromotions).values(fields).returning();
+  return row;
+}
+
+export async function findLeavePromotion(id) {
+  const [row] = await db.select().from(leavePromotions).where(eq(leavePromotions.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function updateLeavePromotion(id, patch) {
+  const [row] = await db.update(leavePromotions).set(patch).where(eq(leavePromotions.id, id)).returning();
+  return row ?? null;
+}
+
+/** 범위의 촉진 통지 — [userId]를 주면 그 사람 것만, [periodStart]를 주면 그 연차 기간 것만. 최근 것부터. */
+export function listLeavePromotions(scopeKey, { userId = null, periodStart = null } = {}) {
+  const conditions = [eq(leavePromotions.scopeKey, scopeKey)];
+  if (userId) conditions.push(eq(leavePromotions.userId, userId));
+  if (periodStart) conditions.push(eq(leavePromotions.periodStart, periodStart));
+  return db
+    .select()
+    .from(leavePromotions)
+    .where(and(...conditions))
+    .orderBy(desc(leavePromotions.sentAt));
 }

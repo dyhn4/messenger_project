@@ -178,7 +178,12 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
   final p = doc.payload;
   switch (doc.kind) {
     case ApprovalKind.leave:
-      rows.add(('종류', ctx.leaveType(p['leaveType'] as String?)?.label ?? '휴가'));
+      rows.add((
+        '종류',
+        p['leaveLabel'] as String? ??
+            ctx.leaveType(p['leaveType'] as String?)?.label ??
+            '휴가',
+      ));
       rows.add((
         '기간',
         p['startDate'] == p['endDate']

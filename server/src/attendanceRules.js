@@ -103,6 +103,9 @@ export function summarizeMonth({
   workStart,
   workEnd,
   today,
+  // 유연근무(workRules.js effectiveHours) — 자율 출퇴근이면 지각·조퇴를 세지 않는다.
+  checkLate = true,
+  checkEarly = true,
 }) {
   const days = monthDays(monthKey) ?? [];
   const byDate = new Map(records.map((r) => [r.workDate, r]));
@@ -127,8 +130,8 @@ export function summarizeMonth({
     if (record?.clockInAt) {
       summary.daysWorked += 1;
       const flags = recordFlags(record, { workStart, workEnd, halfType: leave?.halfType ?? null, fullLeave: leave?.halfDays === 2 });
-      if (flags.late) summary.late += 1;
-      if (flags.earlyLeave) summary.earlyLeave += 1;
+      if (flags.late && checkLate) summary.late += 1;
+      if (flags.earlyLeave && checkEarly) summary.earlyLeave += 1;
       if (flags.missingClockOut && day < today) summary.missingClockOut += 1;
       if (flags.workedMinutes) summary.workedMinutes += flags.workedMinutes;
     } else if (day < today && isWorkday(day, holidays) && !leave && !trip) {

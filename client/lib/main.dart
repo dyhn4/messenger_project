@@ -16,6 +16,7 @@ import 'screens/capture/capture_window.dart'
 import 'screens/chat_screen.dart';
 import 'screens/groupware/approval_notifications.dart'
     show openApprovalDocument;
+import 'screens/groupware/groupware_screen.dart' show openGroupwareScreen;
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/project/project_window.dart';
@@ -511,24 +512,26 @@ class _MyAppState extends State<MyApp>
     }
   }
 
-  /// 결재 알림(푸시·PC 알림 창·웹 알림)을 눌렀을 때 — 쌓인 화면을 첫 화면까지 되돌린 뒤 그 문서 상세를 연다. 문서 id가 없거나(옛
-  /// 서버) 열지 못하면 알림 센터의 결재 탭을 연다.
+  /// 결재 알림(푸시·PC 알림 창·웹 알림)을 눌렀을 때 — 쌓인 화면을 첫 화면까지 되돌린 뒤 그 문서 상세를 연다. 문서 id가 없으면
+  /// (출근·퇴근 알림, 연차 사용 촉진 — groupwareWork.js) 그룹웨어 화면을, 문서를 열지 못하면 알림 센터의 결재 탭을 연다.
   Future<void> _openApprovalFromNotification(
     ({String documentId, String? teamId}) target,
   ) async {
     navigatorKey.currentState?.popUntil((route) => route.isFirst);
     final context = navigatorKey.currentContext;
     if (context == null) return;
-    final opened =
-        target.documentId.isNotEmpty &&
-        await openApprovalDocument(
-          context,
-          session,
-          documentId: target.documentId,
-          teamId: target.teamId,
-          markRead: true,
-          onError: session.showToast,
-        );
+    if (target.documentId.isEmpty) {
+      await openGroupwareScreen(context, session);
+      return;
+    }
+    final opened = await openApprovalDocument(
+      context,
+      session,
+      documentId: target.documentId,
+      teamId: target.teamId,
+      markRead: true,
+      onError: session.showToast,
+    );
     if (opened || !context.mounted) return;
     await showNotificationsCenterDialog(
       context,

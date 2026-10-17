@@ -592,6 +592,8 @@ class ChatSocket {
   final _approvalNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _approvalNotificationSyncController = StreamController<int>.broadcast();
+  final _attendanceReminderController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _scheduledMessageEventController =
       StreamController<ScheduledMessageEvent>.broadcast();
   final _scheduledChangedController = StreamController<String>.broadcast();
@@ -645,6 +647,10 @@ class ChatSocket {
   /// 결재 알림의 안 읽은 개수가 바뀜(다른 기기에서 읽음, 결재를 처리해 그 요청 알림이 읽음이 됨) — 새 개수.
   Stream<int> get approvalNotificationSync =>
       _approvalNotificationSyncController.stream;
+
+  /// 출근·퇴근 알림(서버 groupwareWork.js runAttendanceReminders — attendance:reminder) — `{kind: 'in'|'out', title, body, teamId}`.
+  Stream<Map<String, dynamic>> get attendanceReminders =>
+      _attendanceReminderController.stream;
 
   /// 내(다른 기기 포함) 토픽 폴더가 바뀌었을 때(topic-folders:changed) — 그 팀 id가 흐른다.
   Stream<String> get topicFoldersChanged =>
@@ -964,6 +970,11 @@ class ChatSocket {
     socket.on('approval:notification', (data) {
       if (data is Map) {
         _approvalNotificationController.add(Map<String, dynamic>.from(data));
+      }
+    });
+    socket.on('attendance:reminder', (data) {
+      if (data is Map) {
+        _attendanceReminderController.add(Map<String, dynamic>.from(data));
       }
     });
     socket.on(

@@ -1,5 +1,6 @@
 import { addDaysKey, halfDaysText, isDateKey, leaveRequestAmount, leaveTypeOf } from './annualLeave.js';
 import { defaultFormTitle, FORM_KINDS, MONEY_MAX } from './approvalForms.js';
+import { DEFAULT_EXPENSE_CATEGORIES } from './groupwareOptions.js';
 import { parseHm } from './attendanceRules.js';
 
 /**
@@ -39,7 +40,7 @@ export const ATTACHMENTS_MAX = 5;
 /** 근태 수정은 지난 이 날수 안의 날만(오래된 기록을 고쳐 임금 근거를 흔들지 못하게 — 그보다 오래된 건 관리자가 판단). */
 export const ATTENDANCE_FIX_DAYS = 60;
 
-export const EXPENSE_CATEGORIES = Object.freeze(['교통비', '식대', '비품·소모품', '출장비', '교육비', '접대비', '기타']);
+export const EXPENSE_CATEGORIES = DEFAULT_EXPENSE_CATEGORIES;
 export const EXPENSE_AMOUNT_MAX = MONEY_MAX;
 
 const isIdList = (v) => Array.isArray(v) && v.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 64);
@@ -81,22 +82,28 @@ export function validateApprovalLine({ authorId, approverIds, ccIds = [], roles 
   return { approverIds: [...approverIds], ccIds: [...ccIds], line };
 }
 
-/** 휴가 신청 내용 → `{ payload }` — 양(halfDays)은 서버가 계산한다(앱이 보낸 값을 믿지 않는다). */
-export function parseLeavePayload(body, holidays = new Set()) {
+/**
+ * 휴가 신청 내용 → `{ payload }` — 양(halfDays)은 서버가 계산한다(앱이 보낸 값을 믿지 않는다). [types]는 이 범위의 휴가 종류
+ * (groupwareOptions.js mergeLeaveTypes — 켜진 것만 신청할 수 있다). 그 종류의 이름(leaveLabel)·연차 차감 여부(deducts)를 같이 적어
+ * 두어, 나중에 종류 이름을 바꾸거나 꺼도 이 신청은 그대로다.
+ */
+export function parseLeavePayload(body, holidays = new Set(), types = null) {
   const leaveType = body?.leaveType;
   const startDate = body?.startDate;
   const endDate = body?.endDate ?? startDate;
-  const amount = leaveRequestAmount({ leaveType, startDate, endDate }, holidays);
+  const typeOf = types ? (key) => types.find((t) => t.key === key && t.enabled) ?? null : leaveTypeOf;
+  const amount = leaveRequestAmount({ leaveType, startDate, endDate }, holidays, typeOf);
   if (amount.error) return { error: amount.error };
-  return { payload: { leaveType, startDate, endDate, halfDays: amount.halfDays } };
+  const type = typeOf(leaveType);
+  return { payload: { leaveType, leaveLabel: type.label, deducts: type.deducts, startDate, endDate, halfDays: amount.halfDays } };
 }
 
 /** 지출 내용 → `{ payload }` — 금액(원, 정수), 분류, 쓴 날. */
-export function parseExpensePayload(body) {
+export function parseExpensePayload(body, categories = EXPENSE_CATEGORIES) {
   const amount = Number(body?.amount);
   if (!Number.isInteger(amount) || amount <= 0) return { error: '금액을 원 단위 숫자로 넣으세요.' };
   if (amount > EXPENSE_AMOUNT_MAX) return { error: '금액이 너무 큽니다.' };
-  if (!EXPENSE_CATEGORIES.includes(body?.category)) return { error: '지출 분류를 고르세요.' };
+  if (!categories.includes(body?.category)) return { error: '지출 분류를 고르세요.' };
   if (!isDateKey(body?.spentOn)) return { error: '쓴 날짜를 확인하세요.' };
   return { payload: { amount, category: body.category, spentOn: body.spentOn } };
 }
@@ -126,7 +133,7 @@ const shortDate = (key) => `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10)
 /** 제목을 비워 두면 쓸 이름. */
 export function defaultApprovalTitle(kind, payload) {
   if (kind === 'leave') {
-    const label = leaveTypeOf(payload.leaveType)?.label ?? '휴가';
+    const label = payload.leaveLabel ?? leaveTypeOf(payload.leaveType)?.label ?? '휴가';
     const range = payload.startDate === payload.endDate ? shortDate(payload.startDate) : `${shortDate(payload.startDate)}~${shortDate(payload.endDate)}`;
     return `${label} 신청 (${range}, ${halfDaysText(payload.halfDays)})`;
   }

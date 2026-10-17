@@ -705,7 +705,9 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
   required GroupwareContext ctx,
   LeaveBalance? balance,
 }) {
-  var type = ctx.leaveTypes.isNotEmpty ? ctx.leaveTypes.first.key : 'annual';
+  // 관리자가 끈 종류는 고르지 못한다(groupwareOptions.js — 예전 신청의 이름을 보이려고 목록에는 남는다).
+  final types = ctx.enabledLeaveTypes;
+  var type = types.isNotEmpty ? types.first.key : 'annual';
   String? start;
   String? end;
   return showDialog<ApprovalDocument>(
@@ -737,7 +739,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
               border: OutlineInputBorder(),
             ),
             items: [
-              for (final t in ctx.leaveTypes)
+              for (final t in types)
                 DropdownMenuItem(
                   value: t.key,
                   child: Text(t.deducts ? t.label : '${t.label} (연차 차감 없음)'),

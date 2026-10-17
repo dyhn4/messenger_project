@@ -460,7 +460,9 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
         if (doc.kind == ApprovalKind.leave) ...[
           row(
             '종류',
-            widget.ctx.leaveType(p['leaveType'] as String?)?.label ?? '휴가',
+            p['leaveLabel'] as String? ??
+                widget.ctx.leaveType(p['leaveType'] as String?)?.label ??
+                '휴가',
           ),
           row(
             '기간',

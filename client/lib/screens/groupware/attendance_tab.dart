@@ -35,6 +35,10 @@ class _AttendanceTabState extends State<AttendanceTab> {
   bool _busy = false;
   String? _error;
 
+  /// 출근 형태 — 'office' | 'field'(외근 — 장소를 적는다) | 'remote'(재택).
+  String _mode = 'office';
+  final _place = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +49,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
   @override
   void dispose() {
     widget.changes.removeListener(_load);
+    _place.dispose();
     super.dispose();
   }
 
@@ -66,10 +71,17 @@ class _AttendanceTabState extends State<AttendanceTab> {
   }
 
   Future<void> _clock(bool clockIn) async {
+    if (clockIn && _mode == 'field' && _place.text.trim().isEmpty) {
+      showAppToast(context, '외근 장소(어디서 일하는지)를 적으세요.');
+      return;
+    }
     setState(() => _busy = true);
     try {
       final record = clockIn
-          ? await widget.api.clockIn()
+          ? await widget.api.clockIn(
+              mode: _mode,
+              note: _mode == 'field' ? _place.text.trim() : null,
+            )
           : await widget.api.clockOut();
       if (!mounted) return;
       showAppToast(
@@ -128,7 +140,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
         children: [
           _TodayCard(
             today: today,
+            ctx: widget.ctx,
             busy: _busy,
+            mode: _mode,
+            place: _place,
+            onMode: (m) => setState(() => _mode = m),
             onClockIn: () => _clock(true),
             onClockOut: () => _clock(false),
           ),
@@ -160,6 +176,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
             )
           else ...[
             _SummaryRow(summary: month.summary),
+            if (month.weeks.isNotEmpty)
+              _WeeksCard(weeks: month.weeks, ctx: widget.ctx),
             for (final day in month.days.reversed)
               if (!day.date.startsWith(today.today.substring(0, 7)) ||
                   day.date.compareTo(today.today) <= 0)
@@ -178,12 +196,20 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
 class _TodayCard extends StatelessWidget {
   final AttendanceToday today;
+  final GroupwareContext ctx;
   final bool busy;
+  final String mode;
+  final TextEditingController place;
+  final ValueChanged<String> onMode;
   final VoidCallback onClockIn;
   final VoidCallback onClockOut;
   const _TodayCard({
     required this.today,
+    required this.ctx,
     required this.busy,
+    required this.mode,
+    required this.place,
+    required this.onMode,
     required this.onClockIn,
     required this.onClockOut,
   });
@@ -227,6 +253,48 @@ class _TodayCard extends StatelessWidget {
               '${today.openRecord != null ? ' (어제 출근)' : ''}',
               style: TextStyle(color: hint),
             ),
+            if (ctx.schedule != null)
+              Text(
+                '근무 형태: ${ctx.schedule!.description}',
+                key: const ValueKey('attendance-schedule'),
+                style: TextStyle(fontSize: 12, color: hint),
+              ),
+            if (record != null && record.clockInMode != 'office')
+              Text(
+                '${clockInModeLabels[record.clockInMode] ?? ''}${record.note == null ? '' : ': ${record.note}'}',
+                style: TextStyle(fontSize: 12, color: hint),
+              ),
+            if (today.week case final week?) ...[
+              const SizedBox(height: 10),
+              _WeekBar(week: week, ctx: ctx),
+            ],
+            if (today.canClockIn) ...[
+              const SizedBox(height: 12),
+              SegmentedButton<String>(
+                key: const ValueKey('attendance-mode'),
+                segments: [
+                  for (final e in clockInModeLabels.entries)
+                    ButtonSegment(value: e.key, label: Text(e.value)),
+                ],
+                selected: {mode},
+                onSelectionChanged: (s) => onMode(s.first),
+              ),
+              if (mode == 'field')
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: TextField(
+                    key: const ValueKey('attendance-place'),
+                    controller: place,
+                    maxLength: 200,
+                    decoration: const InputDecoration(
+                      labelText: '외근 장소',
+                      hintText: '예: 고객사(판교)',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [
@@ -272,7 +340,13 @@ class _SummaryRow extends StatelessWidget {
       if (summary.leaveHalfDays > 0)
         '휴가 ${halfDaysText(summary.leaveHalfDays)}',
       if (summary.tripDays > 0) '출장 ${summary.tripDays}일',
-      if (summary.overtimeMinutes > 0) '연장근무 ${summary.overtimeText}',
+      if (summary.overtimeMinutes > 0) '연장근무 신청 ${summary.overtimeText}',
+      if (summary.netMinutes > 0) '실근로 ${durationText(summary.netMinutes)}',
+      if (summary.actualOvertimeMinutes > 0)
+        '연장 ${durationText(summary.actualOvertimeMinutes)}',
+      if (summary.nightMinutes > 0) '야간 ${durationText(summary.nightMinutes)}',
+      if (summary.holidayWorkMinutes > 0)
+        '휴일 ${durationText(summary.holidayWorkMinutes)}',
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -305,6 +379,14 @@ class _DayTile extends StatelessWidget {
       if (day.holiday != null) day.holiday!,
       if (day.leaveType != null) ctx.leaveType(day.leaveType)?.label ?? '휴가',
       if (day.trip) '출장',
+      if (record != null && record.clockInMode != 'office')
+        '${clockInModeLabels[record.clockInMode] ?? ''}${record.note == null ? '' : '(${record.note})'}',
+      if (record != null && record.breakdown.overtimeMinutes > 0)
+        '연장 ${durationText(record.breakdown.overtimeMinutes)}',
+      if (record != null && record.breakdown.nightMinutes > 0)
+        '야간 ${durationText(record.breakdown.nightMinutes)}',
+      if (record != null && record.breakdown.holidayMinutes > 0)
+        '휴일 ${durationText(record.breakdown.holidayMinutes)}',
       if (day.overtimeMinutes > 0)
         '연장근무 ${AttendanceSummary(overtimeMinutes: day.overtimeMinutes).overtimeText}',
       if (record?.late ?? false) '지각',
@@ -337,6 +419,118 @@ class _DayTile extends StatelessWidget {
       trailing: onFix == null
           ? null
           : TextButton(onPressed: onFix, child: const Text('수정 요청')),
+    );
+  }
+}
+
+/// 이번 주 근로시간 막대 — 주 52시간(48시간부터 주의 색, 넘으면 빨강).
+class _WeekBar extends StatelessWidget {
+  final WeeklyHours week;
+  final GroupwareContext ctx;
+  const _WeekBar({required this.week, required this.ctx});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = switch (week.status) {
+      'over' => theme.colorScheme.error,
+      'warn' => Colors.orange.shade700,
+      _ => theme.colorScheme.primary,
+    };
+    final ratio = (week.netMinutes / ctx.weeklyLimitMinutes).clamp(0.0, 1.0);
+    return Column(
+      key: const ValueKey('attendance-week'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '이번 주 ${durationText(week.netMinutes)} / ${ctx.weeklyLimitMinutes ~/ 60}시간',
+                style: TextStyle(fontSize: 12, color: color),
+              ),
+            ),
+            if (week.status != 'ok')
+              Text(
+                week.status == 'over' ? '주 52시간 넘음' : '52시간에 가까움',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        LinearProgressIndicator(
+          value: ratio,
+          color: color,
+          backgroundColor: color.withValues(alpha: 0.15),
+        ),
+      ],
+    );
+  }
+}
+
+/// 이 달에 걸친 주마다의 근로시간.
+class _WeeksCard extends StatelessWidget {
+  final List<WeeklyHours> weeks;
+  final GroupwareContext ctx;
+  const _WeeksCard({required this.weeks, required this.ctx});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('주마다(주 52시간)', style: TextStyle(fontSize: 12, color: hint)),
+          for (final w in weeks)
+            Padding(
+              key: ValueKey('attendance-week-${w.weekStart}'),
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 96,
+                    child: Text(
+                      '${shortDateText(w.weekStart)}~${shortDateText(w.weekEnd)}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      [
+                        durationText(w.netMinutes),
+                        if (w.overtimeMinutes > 0)
+                          '연장 ${durationText(w.overtimeMinutes)}',
+                        if (w.holidayMinutes > 0)
+                          '휴일 ${durationText(w.holidayMinutes)}',
+                      ].join(' · '),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: w.status == 'over'
+                            ? theme.colorScheme.error
+                            : (w.status == 'warn'
+                                  ? Colors.orange.shade800
+                                  : null),
+                      ),
+                    ),
+                  ),
+                  if (w.status == 'over')
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: theme.colorScheme.error,
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

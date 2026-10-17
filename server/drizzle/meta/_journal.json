@@ -820,6 +820,13 @@
       "when": 1792235901417,
       "tag": "0116_approval_advanced",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1792237973982,
+      "tag": "0117_work_rules",
+      "breakpoints": true
     }
   ]
 }

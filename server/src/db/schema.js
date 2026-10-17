@@ -2481,6 +2481,89 @@ export const approvalDocuments = pgTable(
   ],
 );
 
+/**
+ * 그룹웨어 범위([scopeKey])마다의 설정(groupwareWork.js) — 휴가 종류·지출 분류(null이면 기본값 — groupwareOptions.js), 출근·퇴근 알림.
+ * 근무 시간은 예전처럼 팀(teams.work_*)·서버 설정에 있다.
+ */
+export const groupwareOptions = pgTable('groupware_options', {
+  scopeKey: text('scope_key').primaryKey(),
+  // [{ key, label, enabled, deducts?, custom? }] — 기본 종류의 이름·켜고 끄기와 관리자가 더한 종류.
+  leaveTypes: jsonb('leave_types'),
+  expenseCategories: jsonb('expense_categories'),
+  clockInReminder: boolean('clock_in_reminder').notNull().default(false),
+  clockOutReminder: boolean('clock_out_reminder').notNull().default(false),
+  // 근무 시작 몇 분 뒤에 출근 알림을 보낼지.
+  reminderDelayMinutes: integer('reminder_delay_minutes').notNull().default(10),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * 유연근무 — 사람마다의 근무 형태(없으면 범위의 근무 시간). [mode]: 'staggered'(시차출퇴근 — 자기 시작·끝 시각으로 지각·조퇴) |
+ * 'core'(선택근무 — 핵심 시간대 [coreStart]~[coreEnd]만 확인) | 'free'(자율 출퇴근 — 지각·조퇴를 세지 않음). 분은 하루 중 분.
+ */
+export const workSchedules = pgTable(
+  'work_schedules',
+  {
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    mode: text('mode').notNull(),
+    startMinutes: integer('start_minutes'),
+    endMinutes: integer('end_minutes'),
+    coreStartMinutes: integer('core_start_minutes'),
+    coreEndMinutes: integer('core_end_minutes'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.scopeKey, t.userId] })],
+);
+
+/** 출근·퇴근 알림을 보낸 기록 — 하루에 종류([kind] 'in' | 'out')마다 한 번만. */
+export const attendanceReminders = pgTable(
+  'attendance_reminders',
+  {
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workDate: text('work_date').notNull(),
+    kind: text('kind').notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.scopeKey, t.userId, t.workDate, t.kind] })],
+);
+
+/**
+ * 연차 사용 촉진(근로기준법 제61조) 통지 — [stage] 1(1차: 남은 연차를 알리고 사용 시기를 정해 내라고 요구 — 받은 사람은 10일 안에
+ * [planDates]를 낸다) | 2(2차: 시기를 내지 않은 사람에게 회사가 정한 날 [designatedDates]를 알림). 보낸·읽은·낸 시각을 남겨 촉진을
+ * 했다는 근거로 쓴다(지우지 않는다). [periodStart]~[periodEnd]는 그 연차 기간(끝은 다음 기간 시작일).
+ */
+export const leavePromotions = pgTable(
+  'leave_promotions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    periodStart: text('period_start').notNull(),
+    periodEnd: text('period_end').notNull(),
+    stage: integer('stage').notNull(),
+    remainingHalfDays: integer('remaining_half_days').notNull(),
+    // 1차: 사용 계획을 낼 마감, 2차: 연차 기간 만료일.
+    deadline: text('deadline').notNull(),
+    message: text('message'),
+    designatedDates: jsonb('designated_dates'),
+    planDates: jsonb('plan_dates'),
+    plannedAt: timestamp('planned_at', { withTimezone: true }),
+    sentById: uuid('sent_by_id').references(() => users.id, { onDelete: 'set null' }),
+    sentByName: text('sent_by_name'),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  (t) => [index('leave_promotions_user_idx').on(t.scopeKey, t.userId, t.periodStart)],
+);
+
 /** 문서 번호 매기기 — 범위·해마다 마지막 번호(groupware 문서를 올리는 트랜잭션 안에서 하나씩 올린다). */
 export const approvalCounters = pgTable(
   'approval_counters',
@@ -2679,6 +2762,8 @@ export const attendanceRecords = pgTable(
     clockOutAt: timestamp('clock_out_at', { withTimezone: true }),
     clockInLan: boolean('clock_in_lan'),
     clockOutLan: boolean('clock_out_lan'),
+    // 출근 형태 — 'office'(사무실) | 'field'(외근 — note에 장소) | 'remote'(재택). 이 기능 전 기록은 'office'.
+    clockInMode: text('clock_in_mode').notNull().default('office'),
     note: text('note'),
     correctedDocId: uuid('corrected_doc_id').references(() => approvalDocuments.id, { onDelete: 'set null' }),
     originalClockInAt: timestamp('original_clock_in_at', { withTimezone: true }),

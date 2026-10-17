@@ -1333,7 +1333,7 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
           key: `leave:${leave.id}`,
           calendarId: 'leaves',
           source: 'leave',
-          title: `${leave.authorName} ${leaveTypeOf(leaveType)?.label ?? '휴가'}`,
+          title: `${leave.authorName} ${leave.payload?.leaveLabel ?? leaveTypeOf(leaveType)?.label ?? '휴가'}`,
           start: startMs,
           end: endMs,
           color: LEAVE_COLOR,

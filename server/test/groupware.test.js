@@ -108,7 +108,14 @@ test('휴가 양 — 근무일만, 반차는 반일, 잘못된 기간은 거절'
 
 test('휴가 내용 — 양은 서버가 계산하고 끝 날짜가 없으면 시작 날짜', () => {
   const parsed = parseLeavePayload({ leaveType: 'annual', startDate: '2026-10-19', halfDays: 999 });
-  assert.deepEqual(parsed.payload, { leaveType: 'annual', startDate: '2026-10-19', endDate: '2026-10-19', halfDays: 2 });
+  assert.deepEqual(parsed.payload, {
+    leaveType: 'annual',
+    leaveLabel: '연차',
+    deducts: true,
+    startDate: '2026-10-19',
+    endDate: '2026-10-19',
+    halfDays: 2,
+  });
 });
 
 // ── 법정 연차 ──────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ void main() {
       'holidays',
       'birthdays',
       'leaves',
+      'bookings',
       'sub',
     ]);
     expect(api.callCount('fetchCalendars'), 1);

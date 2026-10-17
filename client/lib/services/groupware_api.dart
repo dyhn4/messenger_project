@@ -1,4 +1,5 @@
 import '../models/groupware.dart';
+import '../models/groupware_resources.dart';
 import '../models/groupware_work.dart';
 import 'api_client.dart';
 
@@ -554,4 +555,80 @@ class GroupwareApi {
             .cast<String, dynamic>();
     return (map['unreadCount'] as num?)?.toInt() ?? 0;
   }
+
+  // ── 회의실·자원 예약(서버 groupwareResources.js) ──
+
+  /// 자원 목록(관리자는 끈 것도). [from]·[to](ms)를 주면 그 시간에 잡힌 예약을 `busy`로 — [eventId]의 예약은 빼고(일정 편집 중).
+  Future<List<GroupwareResource>> resources({
+    int? from,
+    int? to,
+    String? eventId,
+  }) async => [
+    for (final r in await _getList(
+      '/api/groupware/resources${_query({'from': from?.toString(), 'to': to?.toString(), 'eventId': eventId})}',
+    ))
+      GroupwareResource.fromJson(r),
+  ];
+
+  /// 자원 만들기([id]가 null)·고치기(관리자) — [fields]는 `{ kind, name, location, capacity, description, enabled, sortOrder }` 중 보낼 것.
+  Future<GroupwareResource> saveResource(
+    String? id,
+    Map<String, dynamic> fields,
+  ) async => GroupwareResource.fromJson(
+    (await _api.requestJson(
+              id == null ? 'POST' : 'PATCH',
+              id == null
+                  ? '/api/groupware/resources'
+                  : '/api/groupware/resources/$id',
+              body: _body(fields),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<void> deleteResource(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/resources/$id${_query()}');
+
+  /// [from]~[to](ms, 31일 안)에 걸친 범위의 모든 예약.
+  Future<List<ResourceBooking>> bookings(int from, int to) async => [
+    for (final b in await _getList(
+      '/api/groupware/bookings${_query({'from': '$from', 'to': '$to'})}',
+    ))
+      ResourceBooking.fromJson(b),
+  ];
+
+  /// 내가 잡은 앞으로의 예약.
+  Future<List<ResourceBooking>> myBookings() async => [
+    for (final b in await _getList('/api/groupware/bookings/mine${_query()}'))
+      ResourceBooking.fromJson(b),
+  ];
+
+  /// 예약하기 — 겹치면 409(ApiException 글에 누구 예약인지).
+  Future<ResourceBooking> book({
+    required String resourceId,
+    required int start,
+    required int end,
+    String? title,
+  }) async => ResourceBooking.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/bookings',
+              body: _body({
+                'resourceId': resourceId,
+                'start': start,
+                'end': end,
+                'title': ?title,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<void> cancelBooking(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/bookings/$id${_query()}');
+
+  /// 한 달 휴가 달력 — [month] 'YYYY-MM'.
+  Future<LeaveMonth> leaveMonth(String month) async => LeaveMonth.fromJson(
+    await _getMap('/api/groupware/leave/month${_query({'month': month})}'),
+  );
 }

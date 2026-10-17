@@ -827,6 +827,13 @@
       "when": 1792237973982,
       "tag": "0117_work_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792241023384,
+      "tag": "0118_resources",
+      "breakpoints": true
     }
   ]
 }

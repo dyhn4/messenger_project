@@ -91,6 +91,9 @@ class CalendarController extends ChangeNotifier {
         hidden: _hiddenBuiltin.contains(kBirthdaysCalendarId),
       ),
       CalendarInfo.leaves(hidden: _hiddenBuiltin.contains(kLeavesCalendarId)),
+      CalendarInfo.bookings(
+        hidden: _hiddenBuiltin.contains(kBookingsCalendarId),
+      ),
     ],
   ];
 

@@ -9,6 +9,7 @@ import 'approval_form_widgets.dart' show ApprovalFormsAdminSection;
 import 'approval_forms.dart' show isHmText;
 import 'approval_settings.dart' show ApprovalStatsSection;
 import 'groupware_work_admin.dart';
+import 'resource_tab.dart' show ResourcesAdminSection;
 import 'groupware_screen.dart';
 
 /// 관리 탭(결재·근태 관리자만) — 근무 시간(지각·조퇴 기준), 구성원 입사일·연차 현황·연차 조정, 한 달 근태 요약과 엑셀.
@@ -234,6 +235,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
         ),
         WorkSchedulesSection(api: widget.api, ctx: widget.ctx),
         WeeklyHoursSection(api: widget.api, ctx: widget.ctx),
+        ResourcesAdminSection(api: widget.api, changes: widget.changes),
         GroupwareOptionsSection(
           api: widget.api,
           changes: widget.changes,

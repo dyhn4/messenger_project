@@ -67,6 +67,15 @@ import { listExternalCalendars } from './db/queries/externalCalendars.js';
 import { toExternalCalendarDto } from './externalCalendarRules.js';
 import { externalOccurrencesFor } from './externalCalendars.js';
 import { holidaysInRange } from './holidays.js';
+import { deleteBooking, listBookingsForEvents, listStandaloneBookingsForCalendar } from './db/queries/resources.js';
+import {
+  attachEventBooking,
+  broadcastResources,
+  moveEventBooking,
+  prepareEventResource,
+  resourceScopeKeyForTeam,
+} from './groupwareResources.js';
+import { eventBookingRange, eventResourceDto, parseBookingTimes } from './resourceRules.js';
 import { calendarPermissions, canModifyCalendarEvent, graphemeLength } from './permissions.js';
 
 /**
@@ -109,6 +118,8 @@ export const HOLIDAY_COLOR = '#E53935';
 export const BIRTHDAY_COLOR = '#F06292';
 // 내장 캘린더 "팀 휴가" — 그룹웨어에서 승인된 휴가(groupware.js).
 export const LEAVE_COLOR = '#12B886';
+// 내장 캘린더 "회의실 예약" — 그룹웨어에서 바로 잡은 내 예약(일정에 붙인 예약은 그 일정으로 보인다 — groupwareResources.js).
+export const BOOKING_COLOR = '#7950F2';
 const TEAM_CALENDAR_COLOR = '#5B8DEF';
 // 기본 캘린더 색 팔레트 — 사람 id로 골라서 사람마다 다르게 보이게 한다.
 const PALETTE = ['#5B8DEF', '#F4A261', '#2A9D8F', '#E76F51', '#9B5DE5', '#00B4D8', '#8AB17D', '#EF476F', '#FFB703', '#6C757D'];
@@ -191,8 +202,8 @@ function toMemberDto(row, calendar) {
   };
 }
 
-/** 한 일정의 한 회차를 EventOccurrence로. [info]={calendar, access}, [attendees]=[{userId,name}]. */
-function toOccurrenceDto({ event, start, end, info, viewerId, attendees, isAttendee, myColor }) {
+/** 한 일정의 한 회차를 EventOccurrence로. [info]={calendar, access}, [attendees]=[{userId,name}], [booking]=붙은 자원 예약(없으면 null). */
+function toOccurrenceDto({ event, start, end, info, viewerId, attendees, isAttendee, myColor, booking = null }) {
   const access = info.access;
   const detailVisible =
     event.visibility !== 'private' ||
@@ -219,6 +230,7 @@ function toOccurrenceDto({ event, start, end, info, viewerId, attendees, isAtten
     creatorId: event.creatorId ?? null,
     creatorName: event.creatorName ?? null,
     attendees: detailVisible ? attendees : [],
+    resource: detailVisible ? eventResourceDto(booking) : null,
     color: myColor ?? info.access.member?.color ?? info.calendar.color,
     canEdit: editable,
     canDelete: editable,
@@ -370,6 +382,20 @@ async function resolveAttendees(teamId, rawIds, { requesterRole, keep = new Set(
     return { error: '초대할 수 없는 사용자가 포함되어 있습니다. (팀 멤버가 아니거나 탈퇴·정지한 사용자)' };
   }
   return { ids };
+}
+
+/**
+ * 일정 행 → 반복 계산(calendarRecurrence.js)이 받는 모양. 라우터 밖의 collectOccurrences(조회·ICS 내보내기)도 쓰므로 모듈 맨 위에 둔다
+ * (라우터 안에 있으면 collectOccurrences에서 ReferenceError — 일정이 하나라도 있는 구간의 조회가 500이 됐다).
+ */
+function recurringView(event) {
+  return {
+    startMs: event.startAt.getTime(),
+    endMs: event.endAt.getTime(),
+    allDay: event.allDay,
+    recurrence: event.recurrence,
+    exdates: event.exdates,
+  };
 }
 
 // ── 일정 추가 횟수 제한 ─────────────────────────────────────────────────
@@ -853,6 +879,17 @@ export function createCalendarsRouter(io) {
     if (rec.error) return res.status(400).json({ error: rec.error });
     const attendees = await resolveAttendees(calendar.teamId, f.attendeeIds ?? [], { requesterRole: access.team.role });
     if (attendees.error) return res.status(400).json({ error: attendees.error });
+    // 회의실·자원(그룹웨어) — 반복 없는 일정에만. 시간 검사를 먼저 해 두고, 겹침은 일정을 넣은 뒤 잠금 안에서 본다(겹치면 일정을 지운다).
+    let resource = null;
+    const bookingRange = eventBookingRange({ startMs: rec.startMs, endMs: rec.endMs, allDay: f.allDay });
+    if (req.body?.resourceId !== undefined && req.body?.resourceId !== null) {
+      if (rec.recurrence) return res.status(400).json({ error: '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.' });
+      const prepared = await prepareEventResource({ teamId: calendar.teamId, resourceId: req.body.resourceId, role: access.team.role });
+      if (prepared.error) return res.status(prepared.status).json({ error: prepared.error });
+      const times = parseBookingTimes(bookingRange.startMs, bookingRange.endMs);
+      if (times.error) return res.status(400).json({ error: `회의실·자원 — ${times.error}` });
+      resource = prepared.resource;
+    }
     if (!allowEventCreate(req, res)) return;
 
     const row = await insertEvent(
@@ -871,6 +908,21 @@ export function createCalendarsRouter(io) {
       },
       { attendeeIds: attendees.ids, colors: f.color ? [{ userId: req.user.sub, color: f.color }] : [] },
     );
+    if (resource) {
+      const booked = await attachEventBooking({
+        eventId: row.id,
+        title: f.title,
+        resource,
+        range: bookingRange,
+        user: access.team.user,
+        teamId: calendar.teamId,
+      });
+      if (booked.error) {
+        await deleteEvent(row.id);
+        return res.status(booked.status).json({ error: booked.error });
+      }
+      await broadcastResources(io, resource.scopeKey);
+    }
     await notifyChanged(calendar, attendees.ids);
     const dto = await describeEvent(row.id, req.user.sub);
     res.status(201).json(dto);
@@ -899,7 +951,7 @@ export function createCalendarsRouter(io) {
     const attendees = attendeesByEvent.get(event.id) ?? [];
     const isAttendee = attendees.some((a) => a.userId === viewerId);
     if (!access.canView && !isAttendee) return null;
-    const colors = await listEventColorsForUser([event.id], viewerId);
+    const [colors, bookings] = await Promise.all([listEventColorsForUser([event.id], viewerId), listBookingsForEvents([event.id])]);
     const startMs = occurrenceStart ?? event.startAt.getTime();
     return toOccurrenceDto({
       event,
@@ -910,6 +962,7 @@ export function createCalendarsRouter(io) {
       attendees,
       isAttendee,
       myColor: colors.get(event.id),
+      booking: bookings.get(event.id) ?? null,
     });
   }
 
@@ -964,16 +1017,6 @@ export function createCalendarsRouter(io) {
     return { scope, occurrenceStart, index };
   }
 
-  function recurringView(event) {
-    return {
-      startMs: event.startAt.getTime(),
-      endMs: event.endAt.getTime(),
-      allDay: event.allDay,
-      recurrence: event.recurrence,
-      exdates: event.exdates,
-    };
-  }
-
   // ── 12. 일정 수정 ──
   router.patch('/events/:id', async (req, res) => {
     const ctx = await loadEvent(req, res);
@@ -999,6 +1042,13 @@ export function createCalendarsRouter(io) {
     const sp = parseScope(b.scope, b.occurrenceStart, event, { required: true });
     if (sp.error) return res.status(400).json({ error: sp.error });
     let { scope, occurrenceStart, index } = sp;
+    // 회의실·자원 — undefined면 그대로, null이면 빼기, id면 그 자원으로(반복 없는 일정만 — 반복 일정은 애초에 자원이 없다).
+    if (b.resourceId !== undefined && b.resourceId !== null && !isUuid(b.resourceId)) {
+      return res.status(400).json({ error: '회의실·자원을 확인하세요.' });
+    }
+    if (b.resourceId && isRecurring && scope !== 'all') {
+      return res.status(400).json({ error: '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.' });
+    }
     // 첫 회차부터 이후 모두 = 전체.
     if (scope === 'following' && index === 0) scope = 'all';
 
@@ -1125,6 +1175,42 @@ export function createCalendarsRouter(io) {
 
       // exdates는 원래 회차 시작 ms 목록이라 시리즈가 옮겨지면 뜻이 달라진다 — 시각만 바뀐 경우는 같이 옮기고,
       // 날짜가 바뀌었거나 종일 여부가 바뀌었거나 반복이 없어졌으면 비운다.
+      // 회의실·자원 — 일정을 고치기 전에 잡거나 옮겨 둔다(겹치면 일정도 안 바뀐다).
+      const booking = (await listBookingsForEvents([event.id])).get(event.id) ?? null;
+      const nextResourceId = b.resourceId === undefined ? (booking?.resourceId ?? null) : b.resourceId;
+      if (nextResourceId && fin.recurrence) {
+        return res.status(400).json({
+          error: booking
+            ? '회의실·자원을 잡은 일정은 반복할 수 없습니다. 먼저 회의실·자원을 빼세요.'
+            : '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.',
+        });
+      }
+      const range = eventBookingRange({ startMs: fin.startMs, endMs: fin.endMs, allDay: f.allDay });
+      let bookingScope = null;
+      if (!nextResourceId && booking) {
+        await deleteBooking(booking.id);
+        bookingScope = booking.scopeKey;
+      } else if (nextResourceId && (!booking || booking.resourceId !== nextResourceId)) {
+        const prepared = await prepareEventResource({ teamId: calendar.teamId, resourceId: nextResourceId, role: access.team.role });
+        if (prepared.error) return res.status(prepared.status).json({ error: prepared.error });
+        const booked = await attachEventBooking({
+          eventId: event.id,
+          title: f.title,
+          resource: prepared.resource,
+          range,
+          user: access.team.user,
+          teamId: calendar.teamId,
+          existing: booking,
+        });
+        if (booked.error) return res.status(booked.status).json({ error: booked.error });
+        bookingScope = prepared.resource.scopeKey;
+      } else if (booking && (booking.startAt.getTime() !== range.startMs || booking.endAt.getTime() !== range.endMs)) {
+        const moved = await moveEventBooking({ booking, range });
+        if (moved.error) return res.status(moved.status).json({ error: moved.error });
+        bookingScope = booking.scopeKey;
+      }
+      if (bookingScope) await broadcastResources(io, bookingScope);
+
       let exdates = normalizeExdates(event.exdates);
       const delta = fin.startMs - masterStart;
       const dateChanged = dateStringOf(fin.startMs, f.allDay) !== dateStringOf(masterStart, event.allDay);
@@ -1165,7 +1251,10 @@ export function createCalendarsRouter(io) {
     const { scope, occurrenceStart, index } = sp;
 
     if (!event.recurrence || scope === 'all' || (scope === 'following' && index === 0)) {
+      // 붙은 회의실·자원 예약은 일정과 같이 지워진다(FK cascade) — 예약 현황을 새로 받게 알린다.
+      const booking = (await listBookingsForEvents([event.id])).get(event.id) ?? null;
       await deleteEvent(event.id);
+      if (booking) await broadcastResources(io, booking.scopeKey);
     } else if (scope === 'this') {
       await updateEvent(event.id, { exdates: normalizeExdates([...(event.exdates ?? []), occurrenceStart]) });
     } else {
@@ -1224,9 +1313,10 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
   }
 
   const eventIds = events.map((e) => e.id);
-  const [attendeesByEvent, colors] = await Promise.all([
+  const [attendeesByEvent, colors, bookings] = await Promise.all([
     listAttendeesForEvents(eventIds),
     listEventColorsForUser(eventIds, userId),
+    listBookingsForEvents(eventIds),
   ]);
 
   // 볼 수 있는 일정만 추린다(내가 못 보는 캘린더의 일정이라도 참석자로 초대받았으면 보인다).
@@ -1273,6 +1363,7 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
           attendees,
           isAttendee,
           myColor: colors.get(event.id),
+          booking: bookings.get(event.id) ?? null,
         }),
       );
     }
@@ -1340,6 +1431,24 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
         }),
       );
     }
+    // 회의실 예약 — 그룹웨어에서 바로 잡은 내 예약(일정에 붙인 것은 그 일정으로 이미 보인다).
+    const scopeKey = await resourceScopeKeyForTeam(teamId);
+    for (const b of await listStandaloneBookingsForCalendar({ scopeKey, userId, fromMs, toMs })) {
+      result.push(
+        builtInOccurrence({
+          key: `booking:${b.id}`,
+          calendarId: 'bookings',
+          source: 'booking',
+          title: b.title,
+          start: b.startAt.getTime(),
+          end: b.endAt.getTime(),
+          color: BOOKING_COLOR,
+          allDay: false,
+          location: b.resourceName,
+          resource: eventResourceDto(b),
+        }),
+      );
+    }
   }
 
   return { result, truncated };
@@ -1353,8 +1462,8 @@ export function sortOccurrences(list) {
 
 // ── 내장 캘린더 회차 ────────────────────────────────────────────────────
 
-/** 공휴일·생일 회차 — 일정이 아니라서 eventId·작성자·참석자가 없고 고칠 수 없다. */
-function builtInOccurrence({ key, calendarId, source, title, start, end, color }) {
+/** 공휴일·생일·휴가·회의실 예약 회차 — 일정이 아니라서 eventId·작성자·참석자가 없고 고칠 수 없다(예약만 시간 회차). */
+function builtInOccurrence({ key, calendarId, source, title, start, end, color, allDay = true, location = null, resource = null }) {
   return {
     key,
     eventId: null,
@@ -1362,10 +1471,11 @@ function builtInOccurrence({ key, calendarId, source, title, start, end, color }
     source,
     title,
     description: null,
-    location: null,
+    location,
+    resource,
     start,
     end,
-    allDay: true,
+    allDay,
     visibility: 'public',
     restricted: false,
     recurring: false,

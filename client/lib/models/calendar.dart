@@ -11,16 +11,21 @@ const kBirthdaysCalendarId = 'birthdays';
 /// 그룹웨어에서 승인된 휴가(server/src/calendars.js — 팀 범위면 이 팀의 결재, 회사 전체면 이 팀 사람들의 휴가).
 const kLeavesCalendarId = 'leaves';
 
+/// 그룹웨어에서 바로 잡은 내 회의실·자원 예약(일정에 붙인 예약은 그 일정으로 보인다 — server/src/groupwareResources.js).
+const kBookingsCalendarId = 'bookings';
+
 /// 내장 캘린더의 고정 색(서버도 같은 값을 EventOccurrence.color로 내려 준다).
 const kHolidayColor = '#E53935';
 const kBirthdayColor = '#F06292';
 const kLeaveColor = '#12B886';
+const kBookingColor = '#7950F2';
 
 /// 내장 캘린더 id들 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
 const kBuiltinCalendarIds = {
   kHolidaysCalendarId,
   kBirthdaysCalendarId,
   kLeavesCalendarId,
+  kBookingsCalendarId,
 };
 
 /// 시각을 뺀 날짜(기기 시간대 기준 자정). 달력 격자·날짜 비교는 전부 이 값으로 한다.
@@ -187,6 +192,15 @@ class CalendarInfo {
     hidden: hidden,
   );
 
+  factory CalendarInfo.bookings({bool hidden = false}) => CalendarInfo(
+    id: kBookingsCalendarId,
+    kind: kBookingsCalendarId,
+    name: '회의실 예약',
+    color: kBookingColor,
+    role: 'subscriber',
+    hidden: hidden,
+  );
+
   CalendarInfo copyWith({
     String? name,
     String? color,
@@ -212,7 +226,7 @@ class CalendarInfo {
     lastError: lastError,
   );
 
-  /// 국가 공휴일·멤버 생일·팀 휴가 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
+  /// 국가 공휴일·멤버 생일·팀 휴가·회의실 예약 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
   bool get isBuiltin => kBuiltinCalendarIds.contains(id);
 
   /// 다른 사람의 캘린더를 구독 중인지(구독 취소로 없앨 수 있다).
@@ -407,6 +421,30 @@ class Recurrence {
   }
 }
 
+/// 일정에 붙은 회의실·자원 예약(그룹웨어 — 일정 하나에 하나). [kind] 'room' | 'equipment' | 'vehicle'.
+class EventResource {
+  final String bookingId;
+  final String resourceId;
+  final String name;
+  final String kind;
+  const EventResource({
+    required this.bookingId,
+    required this.resourceId,
+    required this.name,
+    this.kind = 'room',
+  });
+
+  static EventResource? fromJson(Object? json) {
+    if (json is! Map) return null;
+    return EventResource(
+      bookingId: json['bookingId'] as String? ?? '',
+      resourceId: json['resourceId'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      kind: json['kind'] as String? ?? 'room',
+    );
+  }
+}
+
 /// 조회 구간의 일정 한 회차(GET .../calendar/events 의 항목, GET /events/:id 도 같은 모양).
 /// 공휴일·생일도 같은 모양으로 오며 [source]로 구분한다.
 class EventOccurrence {
@@ -415,11 +453,14 @@ class EventOccurrence {
   final String? eventId;
   final String calendarId;
 
-  /// 'event' | 'holiday' | 'birthday' | 'external'(외부 ICS 캘린더에서 받아 온 일정 — 읽기 전용)
+  /// 'event' | 'holiday' | 'birthday' | 'leave' | 'booking'(그룹웨어에서 잡은 회의실 예약) | 'external'(외부 ICS — 읽기 전용)
   final String source;
   final String title;
   final String? description;
   final String? location;
+
+  /// 붙은 회의실·자원(일정) 또는 그 예약의 자원(회의실 예약). 없으면 null.
+  final EventResource? resource;
 
   /// 원본 epoch ms. 종일이면 UTC 자정 기준 날짜이므로 직접 쓰지 말고 [firstDay]/[lastDay]를 쓴다.
   final int start;
@@ -448,6 +489,7 @@ class EventOccurrence {
     required this.title,
     this.description,
     this.location,
+    this.resource,
     required this.start,
     required this.end,
     this.allDay = false,
@@ -475,6 +517,7 @@ class EventOccurrence {
       title: (json['title'] as String?) ?? '',
       description: json['description'] as String?,
       location: json['location'] as String?,
+      resource: EventResource.fromJson(json['resource']),
       start: start,
       end: (json['end'] as num).toInt(),
       allDay: allDay,
@@ -503,6 +546,7 @@ class EventOccurrence {
   bool get isHoliday => source == 'holiday';
   bool get isBirthday => source == 'birthday';
   bool get isExternal => source == 'external';
+  bool get isBooking => source == 'booking';
 
   /// 사용자가 만든 일정(수정·삭제·참석자가 있을 수 있는 것) — 공휴일·생일이 아니다.
   bool get isUserEvent => source == 'event';
@@ -554,6 +598,7 @@ class EventOccurrence {
         title: title,
         description: description,
         location: location,
+        resource: resource,
         start: start ?? this.start,
         end: end ?? this.end,
         allDay: allDay,
@@ -676,6 +721,9 @@ class EventInput {
   /// 내 개인 색('#RRGGBB'). null이면 보내지 않아 캘린더 색을 그대로 따른다.
   final String? color;
 
+  /// 함께 잡을 회의실·자원(그룹웨어) — 반복 없는 일정만. null이면 보내지 않는다.
+  final String? resourceId;
+
   const EventInput({
     required this.title,
     this.description = '',
@@ -687,6 +735,7 @@ class EventInput {
     this.attendeeIds = const [],
     this.recurrence,
     this.color,
+    this.resourceId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -703,6 +752,7 @@ class EventInput {
       weekdayShift: allDay ? 0 : kstWeekdayShift(start),
     ),
     'color': ?color,
+    'resourceId': ?resourceId,
   };
 }
 

@@ -8,8 +8,10 @@ import '../../services/session.dart';
 import 'approval_forms.dart';
 import 'approval_tab.dart';
 import 'groupware_screen.dart';
+import 'leave_calendar.dart';
 
-/// 휴가 탭 — 내 연차 현황(입사일 기준 법정 연차 — server annualLeave.js), 휴가 신청, 앞으로 30일의 팀 휴가, 내 휴가 결재.
+/// 휴가 탭 — 내 연차 현황(입사일 기준 법정 연차 — server annualLeave.js), 휴가 신청, 팀 휴가(달력 — leave_calendar.dart, 또는 앞으로 30일
+/// 목록), 내 휴가 결재.
 class LeaveTab extends StatefulWidget {
   final GroupwareApi api;
   final GroupwareContext ctx;
@@ -35,6 +37,9 @@ class _LeaveTabState extends State<LeaveTab> {
   /// 내가 받은 연차 사용 촉진 통지(근로기준법 제61조) — 이번 연차 기간 것만 위에 보인다.
   List<LeavePromotion> _promotions = const [];
   String? _error;
+
+  /// 팀 휴가를 달력으로 볼지(기본) 앞으로 30일 목록으로 볼지.
+  bool _calendarView = true;
 
   @override
   void initState() {
@@ -133,8 +138,27 @@ class _LeaveTabState extends State<LeaveTab> {
               onPlan: () => _submitPlan(p),
             ),
           _BalanceCard(balance: balance, onRequest: _request),
-          GroupwareSectionHeader('앞으로 30일 팀 휴가'),
-          if (_teamLeaves.isEmpty)
+          GroupwareSectionHeader(
+            '팀 휴가',
+            trailing: SegmentedButton<bool>(
+              key: const ValueKey('leave-view'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: true, label: Text('달력')),
+                ButtonSegment(value: false, label: Text('앞으로 30일')),
+              ],
+              selected: {_calendarView},
+              onSelectionChanged: (s) =>
+                  setState(() => _calendarView = s.first),
+            ),
+          ),
+          if (_calendarView)
+            LeaveMonthCalendar(
+              api: widget.api,
+              ctx: widget.ctx,
+              changes: widget.changes,
+            )
+          else if (_teamLeaves.isEmpty)
             const GroupwareEmpty('예정된 휴가가 없습니다.')
           else
             for (final l in _teamLeaves)

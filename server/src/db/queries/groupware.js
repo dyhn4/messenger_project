@@ -361,9 +361,36 @@ export async function listApprovedTrips({ scopeKey, from, to, userIds = null }) 
     conditions.push(inArray(approvalDocuments.authorId, userIds));
   }
   return db
-    .select({ id: approvalDocuments.id, authorId: approvalDocuments.authorId, payload: approvalDocuments.payload })
+    .select({
+      id: approvalDocuments.id,
+      authorId: approvalDocuments.authorId,
+      authorName: approvalDocuments.authorName,
+      payload: approvalDocuments.payload,
+    })
     .from(approvalDocuments)
     .where(and(...conditions));
+}
+
+/** [authorId]가 올려 결재 중인 휴가 중 [from]~[to]와 겹치는 것(휴가 달력에 내 것만 "결재 중"으로). */
+export function listPendingLeavesOf({ scopeKey, authorId, from, to }) {
+  return db
+    .select({
+      id: approvalDocuments.id,
+      authorId: approvalDocuments.authorId,
+      authorName: approvalDocuments.authorName,
+      payload: approvalDocuments.payload,
+    })
+    .from(approvalDocuments)
+    .where(
+      and(
+        eq(approvalDocuments.scopeKey, scopeKey),
+        eq(approvalDocuments.kind, 'leave'),
+        eq(approvalDocuments.status, 'pending'),
+        eq(approvalDocuments.authorId, authorId),
+        lte(sql`${approvalDocuments.payload}->>'startDate'`, to),
+        gte(sql`${approvalDocuments.payload}->>'endDate'`, from),
+      ),
+    );
 }
 
 /** [from]~[to] 사이 승인된 연장근무(양식 'overtime' — payload.workDate·minutes)들. */

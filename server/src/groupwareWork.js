@@ -14,6 +14,7 @@ import {
   listAttendanceRemindersOn,
   listGroupwareMembers,
   listLeavePromotions,
+  listPendingLeavesOf,
   listRecentAttendanceUsers,
   listReminderScopes,
   listWorkSchedules,
@@ -237,6 +238,60 @@ export function createGroupwareWorkRouter(io) {
       },
       { managerOnly: true },
     ),
+  );
+
+  // ── 휴가 달력 ──
+
+  /**
+   * 한 달 휴가 달력 `?month=YYYY-MM`(기본 이번 달) — 승인된 휴가·출장(범위 사람 모두)과 내가 올려 결재 중인 휴가, 공휴일.
+   * 휴가 이름은 신청할 때의 이름(payload.leaveLabel), 없으면 지금 범위의 휴가 종류 이름.
+   */
+  router.get(
+    '/groupware/leave/month',
+    withContext(async (req, res, ctx) => {
+      const month = typeof req.query.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(req.query.month) ? req.query.month : localDateKey(new Date()).slice(0, 7);
+      const from = `${month}-01`;
+      const to = addDaysKey(addDaysKey(from, 31).slice(0, 7) + '-01', -1);
+      const [approved, pending, trips] = await Promise.all([
+        listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to }),
+        listPendingLeavesOf({ scopeKey: ctx.scopeKey, authorId: ctx.user.id, from, to }),
+        listApprovedTrips({ scopeKey: ctx.scopeKey, from, to }),
+      ]);
+      const labelOf = (p) => p?.leaveLabel ?? ctx.options.leaveTypes.find((t) => t.key === p?.leaveType)?.label ?? '휴가';
+      const leaveRow = (l, status) => ({
+        documentId: l.id,
+        userId: l.authorId,
+        name: l.authorName,
+        leaveType: l.payload?.leaveType ?? null,
+        label: labelOf(l.payload),
+        startDate: l.payload?.startDate,
+        endDate: l.payload?.endDate,
+        halfDays: l.payload?.halfDays ?? null,
+        status,
+        mine: l.authorId === ctx.user.id,
+      });
+      const byStart = (a, b) => a.startDate.localeCompare(b.startDate) || a.name.localeCompare(b.name, 'ko');
+      res.json({
+        month,
+        from,
+        to,
+        holidays: HOLIDAYS.filter((h) => h.date >= from && h.date <= to),
+        leaves: [...approved.map((l) => leaveRow(l, 'approved')), ...pending.map((l) => leaveRow(l, 'pending'))]
+          .filter((l) => l.startDate && l.endDate)
+          .sort(byStart),
+        trips: trips
+          .map((t) => ({
+            documentId: t.id,
+            userId: t.authorId,
+            name: t.authorName,
+            destination: t.payload?.destination ?? null,
+            startDate: t.payload?.startDate,
+            endDate: t.payload?.endDate,
+          }))
+          .filter((t) => t.startDate && t.endDate)
+          .sort(byStart),
+      });
+    }),
   );
 
   // ── 연차 사용 촉진(근로기준법 제61조) ──

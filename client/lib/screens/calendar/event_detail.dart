@@ -257,8 +257,27 @@ class EventDetailBody extends StatelessWidget {
                     ),
                   ),
                 if (!event.restricted) ...[
-                  if ((event.location ?? '').isNotEmpty)
+                  if (event.resource case final resource?)
+                    row(
+                      Icons.meeting_room_outlined,
+                      Text(
+                        resource.name,
+                        key: const ValueKey('event-detail-resource'),
+                      ),
+                    ),
+                  if ((event.location ?? '').isNotEmpty &&
+                      event.location != event.resource?.name)
                     row(Icons.place_outlined, Text(event.location!)),
+                  // 그룹웨어에서 바로 잡은 회의실 예약 — 바꾸기·취소는 그룹웨어 "예약" 탭에서.
+                  if (event.isBooking)
+                    row(
+                      Icons.info_outline,
+                      Text(
+                        '그룹웨어 → 예약에서 잡은 예약입니다. 바꾸거나 취소하려면 그곳에서 하세요.',
+                        key: const ValueKey('event-detail-booking'),
+                        style: TextStyle(color: theme.hintColor),
+                      ),
+                    ),
                   if ((event.description ?? '').isNotEmpty)
                     row(Icons.notes, SelectableText(event.description!)),
                   if (event.attendees.isNotEmpty)

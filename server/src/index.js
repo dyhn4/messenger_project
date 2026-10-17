@@ -100,6 +100,7 @@ import { isMailEnabled } from './mailer.js';
 import { createGroupwareRouter } from './groupware.js';
 import { startMentionDigestJob } from './mentionDigest.js';
 import { createGroupwareWorkRouter, startAttendanceReminderJob } from './groupwareWork.js';
+import { createGroupwareResourcesRouter } from './groupwareResources.js';
 import { startWebTls } from './webTls.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
@@ -171,6 +172,7 @@ app.use('/api', requireAuth, createInquiriesRouter(io));
 app.use('/api', requireAuth, createGroupwareRouter(io));
 // 그룹웨어 근태·휴가 관리 — 범위 설정(휴가 종류·지출 분류·출근 알림)·유연근무·주 52시간·연차 사용 촉진(groupwareWork.js).
 app.use('/api', requireAuth, createGroupwareWorkRouter(io));
+app.use('/api', requireAuth, createGroupwareResourcesRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 // 메시지 공감(이모지 반응) — PUT /messages/:id/reaction(reactions.js).

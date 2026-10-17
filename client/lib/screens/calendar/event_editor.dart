@@ -16,6 +16,7 @@ import '../../widgets/floating_dialog.dart';
 import '../home_screen.dart' show wideBreakpoint;
 import '../invite_members_screen.dart' show showPickMembers;
 import 'calendar_common.dart';
+import 'event_resource_picker.dart';
 
 /// 일정 만들기 화면 항목의 글자 수 한도 — 서버 규약과 같다.
 const kEventTitleMax = 50;
@@ -124,6 +125,12 @@ class EventEditorState extends State<EventEditor> {
   List<AppUser>? _members;
   bool _membersLoading = false;
 
+  /// 함께 잡을 회의실·자원(그룹웨어 — 반복 없는 일정만). [_hasResources]가 false면(자원이 없거나 그룹웨어가 없는 서버) 칸을 숨긴다.
+  String? _resourceId;
+  String? _resourceName;
+  String? _initResourceId;
+  bool _hasResources = false;
+
   _Repeat _repeat = _Repeat.none;
   String _customFreq = 'daily';
   final Set<int> _weekdays = {};
@@ -177,6 +184,8 @@ class EventEditorState extends State<EventEditor> {
       for (final a in e.attendees) {
         _attendees[a.userId] = a.name;
       }
+      _resourceId = e.resource?.resourceId;
+      _resourceName = e.resource?.name;
       _initRecurrenceFrom(e.recurrence);
     } else {
       final base = widget.initialStart;
@@ -206,6 +215,9 @@ class EventEditorState extends State<EventEditor> {
     _initCalendarId = _calendarId;
     _initColor = _colorHex;
     _initAttendeeIds = _attendees.keys.toSet();
+    _initResourceId = _resourceId;
+    _hasResources = _resourceId != null;
+    if (!_isGuest && !(e?.recurring ?? false)) _checkResources();
     // 서버로 보내는 모양(시간 일정의 반복 요일은 한국 달력 기준 — kstWeekdayShift)으로 맞춰 둬야 안 바꿨을 때 같다고 본다.
     _initRecurrenceJson = jsonEncode(
       _editing?.recurrence?.toJson(
@@ -365,6 +377,84 @@ class EventEditorState extends State<EventEditor> {
     });
   }
 
+  // ---- 회의실·자원 ----
+
+  /// 고를 자원이 있는지만 본다 — 없거나 못 받으면(그룹웨어가 없는 서버) 칸을 숨긴 채로 둔다.
+  Future<void> _checkResources() async {
+    if (widget.session.api == null) return;
+    try {
+      final list = await widget.session.groupwareApi.resources();
+      if (mounted && list.any((r) => r.enabled)) {
+        setState(() => _hasResources = true);
+      }
+    } catch (_) {}
+  }
+
+  /// 예약이 잡을 시간(ms) — 종일이면 첫날 자정부터 마지막 날 다음 날 자정까지(기기 시간대).
+  ({int from, int to}) get _bookingRange => _allDay
+      ? (
+          from: dateOnly(_start).millisecondsSinceEpoch,
+          to: addDays(dateOnly(_end), 1).millisecondsSinceEpoch,
+        )
+      : (from: _start.millisecondsSinceEpoch, to: _end.millisecondsSinceEpoch);
+
+  Future<void> _pickResource() async {
+    final range = _bookingRange;
+    final picked = await showEventResourcePicker(
+      context,
+      api: widget.session.groupwareApi,
+      from: range.from,
+      to: range.to,
+      eventId: _editing?.eventId,
+      selectedId: _resourceId,
+    );
+    if (picked == null || !mounted) return;
+    _change(() {
+      _resourceId = picked.id;
+      _resourceName = picked.name;
+      // 장소를 비워 뒀으면 자원 이름으로 채운다.
+      if (_location.text.trim().isEmpty) _location.text = picked.name;
+    });
+  }
+
+  Widget _buildResource(ThemeData theme) {
+    final repeating = _repeat != _Repeat.none || (_editing?.recurring ?? false);
+    if (repeating && _resourceId == null) {
+      return Text(
+        '반복 일정에는 회의실·자원을 잡을 수 없습니다 — 회차마다 따로 잡으세요.',
+        key: const ValueKey('event-resource-repeat'),
+        style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+      );
+    }
+    if (_resourceId == null) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          key: const ValueKey('event-resource-pick'),
+          onPressed: _pickResource,
+          icon: const Icon(Icons.meeting_room_outlined, size: 18),
+          label: const Text('회의실·자원 잡기'),
+        ),
+      );
+    }
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      children: [
+        InputChip(
+          key: const ValueKey('event-resource-chip'),
+          avatar: const Icon(Icons.meeting_room_outlined, size: 18),
+          label: Text(_resourceName ?? '회의실'),
+          onDeleted: () => _change(() {
+            _resourceId = null;
+            _resourceName = null;
+          }),
+        ),
+        TextButton(onPressed: _pickResource, child: const Text('바꾸기')),
+      ],
+    );
+  }
+
   // ---- 반복 ----
 
   /// 폼의 반복 설정을 Recurrence로. 잘못된 값이면 error에 사유.
@@ -462,6 +552,9 @@ class EventEditorState extends State<EventEditor> {
     if (!_thisOnly) {
       final r = _buildRecurrence();
       if (r.error != null) return r.error;
+      if (_resourceId != null && r.value != null) {
+        return '회의실·자원을 잡은 일정은 반복할 수 없습니다. 회의실·자원을 빼거나 반복을 끄세요.';
+      }
     }
     return null;
   }
@@ -494,6 +587,7 @@ class EventEditorState extends State<EventEditor> {
             attendeeIds: _isGuest ? const [] : _attendees.keys.toList(),
             recurrence: _buildRecurrence().value,
             color: _colorTouched ? _colorHex : null,
+            resourceId: _resourceId,
           ),
         );
       }
@@ -534,6 +628,8 @@ class EventEditorState extends State<EventEditor> {
       }
     }
     if (_calendarId != _initCalendarId) fields['calendarId'] = _calendarId;
+    // 회의실·자원 — 바뀌었을 때만(null이면 빼기). 시간만 바뀌면 서버가 붙은 예약을 같이 옮긴다.
+    if (_resourceId != _initResourceId) fields['resourceId'] = _resourceId;
     if (_colorTouched && _colorHex != _initColor) fields['color'] = _colorHex;
 
     // 시간은 바뀌었을 때만 보낸다. 반복 일정이면 서버가 start/end를 "고친 회차의 값"으로 읽는다
@@ -784,6 +880,11 @@ class EventEditorState extends State<EventEditor> {
             border: OutlineInputBorder(),
           ),
         ),
+        if (_hasResources && !_isGuest) ...[
+          _label('회의실·자원'),
+          _buildResource(theme),
+          const SizedBox(height: 8),
+        ],
         if (!_thisOnly) ...[
           const SizedBox(height: 4),
           _label('반복'),

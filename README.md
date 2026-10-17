@@ -301,12 +301,12 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 채팅 목록·채팅방 제목에 초록 자물쇠 아이콘 + 초록 이름, 알림 미리보기는 항상 고정 문구, 통합 검색에서 제외
 
 **캘린더** (팀 단위 — `server/src/calendars.js`)
-- 캘린더 종류: 사람마다 자동으로 생기는 **기본 캘린더**(공개면 다른 사람이 검색해서 구독), 팀마다 하나인 **팀 캘린더**(정회원 이상이 보고, 일정은 팀 소유자·관리자만 편집), 정회원이 만드는 **공유 캘린더**(멤버별 관리자/쓰기/읽기 권한, 삭제는 소유자만), 그리고 항상 켜져 있는 **공휴일**·**멤버 생일** 캘린더(숨기기만 가능)
+- 캘린더 종류: 사람마다 자동으로 생기는 **기본 캘린더**(공개면 다른 사람이 검색해서 구독), 팀마다 하나인 **팀 캘린더**(정회원 이상이 보고, 일정은 팀 소유자·관리자만 편집), 정회원이 만드는 **공유 캘린더**(멤버별 관리자/쓰기/읽기 권한, 삭제는 소유자만), 그리고 항상 켜져 있는 **공휴일**·**멤버 생일**·**팀 휴가**·**회의실 예약** 캘린더(숨기기만 가능 — 팀 휴가·회의실 예약은 [그룹웨어](#그룹웨어전자결재연차출퇴근)에서 온다)
 - 일정: 제목·설명·장소·종일/시간·공개 범위(비공개는 만든 사람·참석자·캘린더 관리자만 자세히, 나머지에게는 "비공개 일정")·참석자·내 개인 색. **반복**(매일/매주 요일 지정/매월/매년, 간격, 종료일 또는 횟수)은 시간 일정이면 한국 시간 기준으로 펼치고, "이 일정만/이후 모두/전체" 단위로 수정·삭제합니다
 - 반복 일정 한도(남용 방지 — `server/src/calendarRecurrence.js`): 반복 종료일은 2299-12-31까지이고, 달력은 1900년 1월 ~ 2299년 12월 사이만 불러옵니다. "이 일정만"으로 따로 고치거나 지운 회차는 반복 일정 하나에 1,000개까지이고(넘으면 "이 일정 및 이후 일정"으로 나눠 바꾸라고 안내), 새 일정 만들기와 반복 일정의 "이 일정만"·"이 일정 및 이후 일정" 수정은 한 사람이 10분에 60번까지입니다. 한 번에 불러오는 회차는 5,000개까지라, 누가 일정을 대량으로 만들어 넘치면 내가 만든 일정부터 넣고 나머지는 만든 사람마다 하나씩 돌아가며 채웁니다
 - 준회원은 팀 캘린더·생일 캘린더를 볼 수 없고, 새 캘린더 만들기·구독·참석자 초대를 할 수 없습니다(자기 기본 캘린더에 일정은 만들 수 있음). 팀에서 나간 사람은 멤버 행이 남아 있어도 접근이 막힙니다. **준회원으로 내려간 사람은 공유 캘린더에서 읽기만** 합니다 — 예전에 관리자·쓰기였거나 소유자여도 이름·공개 설정·멤버·일정을 바꾸거나 일정을 그 캘린더로 옮기거나 캘린더를 지우지 못하고, 남의 비공개 일정 내용(달력·상세·검색)도 못 봅니다(자기 일정과 참석자로 초대된 일정은 봄 — `permissions.js`의 `effectiveCalendarMemberRole`, 거절 문구는 `준회원은 공유 캘린더에서 읽기만 할 수 있습니다.`, 소유자가 "나에게만 삭제"를 고르면 `…숨김을 사용하세요.`). 행은 고치지 않아서 멤버 목록에는 저장된 권한이 그대로 보이고(캘린더 관리자가 읽기로 낮춰 둘 수 있음), 정회원 이상으로 돌아오면 저장된 권한이 다시 살아납니다. 앱 업데이트는 필요 없습니다
 - 공휴일은 `server/src/holidays.js`의 정적 표(2025~2027년, 범위 밖은 비어 있음 — 임시공휴일이 새로 지정되면 직접 추가), 생일은 프로필의 `birthday`(`MM-DD`)를 씁니다. 바뀌면 소켓 `calendar:changed`로 알립니다
-- 앱 화면(`client/lib/screens/calendar/`, 상태는 `services/calendar_controller.dart`): PC는 메뉴(격자 아이콘) → 툴 → **캘린더**를 누르면 사이드바+채팅 자리가 캘린더로 바뀌고(한 번 더 누르거나 방을 고르면 돌아옴), 안드로이드는 같은 메뉴의 캘린더로 전체 화면을 엽니다. 보기는 **월간**(여러 날·종일 일정은 가로 막대, 넘치면 "+N개", 공휴일은 날짜 빨강+이름)·**주간**(일~토 7일)·**일간**(시간대별)·**목록** 4가지이고, 모바일 월간은 격자 아래에 고른 날의 일정 목록이 붙습니다. 왼쪽(모바일은 오른쪽 서랍)의 "나의 캘린더"/"구독 캘린더" 체크박스로 내 화면에서 숨기며(공휴일·생일의 숨김은 이 기기에만 저장), ⋯ 메뉴에서 색을 바꿉니다. 일정 만들기·수정은 종일, 10분 단위 시간, 참석자(이름 검색·조직도), 반복(사용자 정의 포함), 공개/비공개를 고르고, 반복 일정의 수정·삭제는 "이 일정만 / 이 일정 및 이후 일정 / 모든 일정"을 먼저 묻습니다. **검색**은 일정 **제목**의 일부로만 찾고(참석자·내용은 안 봄) PC는 툴바 검색창(입력을 멈추면 조회, 결과 패널), 모바일은 앱바 돋보기(전체 화면)이며, 결과에 캘린더 이름·반복·참석자를 보여 주고 **이동**은 현재 보기를 유지한 채 그 일정의 날짜로 옮기고 항목을 누르면 상세가 열립니다(숨긴 캘린더의 결과는 뺌). **드래그 이동**은 월간에서 일정 막대를 다른 날짜 칸에, 주간·일간 시간표에서 블록을 다른 날/시간대(10분 단위, 길이 유지)로 끌어 놓는 것이고(종일 막대는 날짜만, 놓일 자리 고스트·칸 하이라이트, 실패하면 원위치+토스트) 반복 일정·수정 권한이 없는 일정·공휴일·생일은 끌 수 없습니다(반복 일정에 올리면 "반복 일정은 상세에서 수정하세요"). 모바일 터치는 주간·일간 시간표에서 길게 눌러 끕니다
+- 앱 화면(`client/lib/screens/calendar/`, 상태는 `services/calendar_controller.dart`): PC는 메뉴(격자 아이콘) → 툴 → **캘린더**를 누르면 사이드바+채팅 자리가 캘린더로 바뀌고(한 번 더 누르거나 방을 고르면 돌아옴), 안드로이드는 같은 메뉴의 캘린더로 전체 화면을 엽니다. 보기는 **월간**(여러 날·종일 일정은 가로 막대, 넘치면 "+N개", 공휴일은 날짜 빨강+이름)·**주간**(일~토 7일)·**일간**(시간대별)·**목록** 4가지이고, 모바일 월간은 격자 아래에 고른 날의 일정 목록이 붙습니다. 왼쪽(모바일은 오른쪽 서랍)의 "나의 캘린더"/"구독 캘린더" 체크박스로 내 화면에서 숨기며(공휴일·생일의 숨김은 이 기기에만 저장), ⋯ 메뉴에서 색을 바꿉니다. 일정 만들기·수정은 종일, 10분 단위 시간, 참석자(이름 검색·조직도), **회의실·자원**(그룹웨어에 자원이 있을 때 — [회의실·자원 예약](#회의실자원-예약)), 반복(사용자 정의 포함), 공개/비공개를 고르고, 반복 일정의 수정·삭제는 "이 일정만 / 이 일정 및 이후 일정 / 모든 일정"을 먼저 묻습니다. **검색**은 일정 **제목**의 일부로만 찾고(참석자·내용은 안 봄) PC는 툴바 검색창(입력을 멈추면 조회, 결과 패널), 모바일은 앱바 돋보기(전체 화면)이며, 결과에 캘린더 이름·반복·참석자를 보여 주고 **이동**은 현재 보기를 유지한 채 그 일정의 날짜로 옮기고 항목을 누르면 상세가 열립니다(숨긴 캘린더의 결과는 뺌). **드래그 이동**은 월간에서 일정 막대를 다른 날짜 칸에, 주간·일간 시간표에서 블록을 다른 날/시간대(10분 단위, 길이 유지)로 끌어 놓는 것이고(종일 막대는 날짜만, 놓일 자리 고스트·칸 하이라이트, 실패하면 원위치+토스트) 반복 일정·수정 권한이 없는 일정·공휴일·생일은 끌 수 없습니다(반복 일정에 올리면 "반복 일정은 상세에서 수정하세요"). 모바일 터치는 주간·일간 시간표에서 길게 눌러 끕니다
 - 캘린더 관리(`client/lib/screens/calendar/management/`, PC는 가운데 뜨는 창·모바일은 전체 화면): "나의 캘린더" 옆 +는 이름(1~30자)과 색을 골라 새 캘린더를 만들고 곧바로 그 캘린더의 설정으로 이어지며, ⋯ 메뉴 "캘린더 설정"은 관리자에게 이름·공개/비공개(비공개는 구독 불가)·멤버(이름 검색 또는 조직도로 추가, 관리자/쓰기/읽기 권한 변경, 내보내기 — 소유자는 못 바꾸고 못 뺌, 준회원은 읽기만)를, 그 밖의 멤버·구독자에게는 읽기 전용 화면과 색 변경(나에게만 적용)을 보여 주고 소유자만 삭제할 수 있습니다(모든 일정도 함께 삭제된다는 확인 창). "구독 캘린더" 옆 +는 캘린더 이름을 검색(입력을 멈추면 조회)해 "구독하기"로 구독하고, 공유 캘린더 멤버는 "나에게만 삭제", 구독자는 "구독 취소"로 내 목록에서만 뺍니다. 프로필 카드의 "생일"은 월/일만 고르고(2월 29일 가능, "삭제"로 비움) `PATCH /users/me`의 `birthday`로 저장하며, 준회원에게는 정회원부터 생일 캘린더에 표시된다고 안내합니다
 - **외부 캘린더 연동** — 회사 일정을 Google·Outlook 등에서 관리하는 팀이 일정을 두 번 넣지 않게 두 방향을 지원합니다(준회원 포함, 팀마다 따로). **가져오기**: 캘린더 목록의 "외부 캘린더" 옆 +에 Google 캘린더의 "iCal 형식의 비공개 주소"·Outlook의 "캘린더 게시" ICS 링크 같은 구독 주소(`https://`·`webcal://`)를 넣으면 서버가 그 자리에서 받아 보고(안 되면 이유를 알려 주고 저장하지 않음) 그 일정을 내 달력에 함께 보여 줍니다. **나에게만 보이고 읽기 전용**이며(상세에 "외부 캘린더에서 가져온 일정"), 서버가 30분마다 다시 받고 ⋯ 메뉴의 **지금 새로고침**(1분에 한 번)·**구독 해지**·색 변경·체크박스 숨김이 됩니다. 목록 줄 아래에 받는 곳·마지막 업데이트(실패하면 그 이유)가 보입니다. 사람마다 팀마다 10개까지, ICS는 5MB까지이고, 반복 일정은 지금부터 과거 1년·미래 2년 구간만 펼쳐 저장합니다(그 밖의 달에는 안 보임 — 파일 안 VTIMEZONE·서머타임, 빠진 회차·옮긴 회차·취소 반영, 시간대 없는 시각은 한국 시간). 주소에는 비밀 토큰이 들어 있어 DB에 암호화해 두고 앱에는 호스트만 내려 줍니다. 서버가 바깥 주소로 나가는 요청이라 링크 미리보기와 같은 `safeFetch`(80·443 포트만, 사설·루프백 IP 차단 — 사내망 안의 캘린더 서버는 구독할 수 없음)만 씁니다. **내보내기**: 목록 아래 **내 일정 내보내기 (ICS 주소)**에서 비밀 주소(`/calendar-feed/<토큰>.ics`)를 만들어 Google 캘린더 "URL로 추가"·Outlook "웹에서 구독"에 넣으면, 내가 앱에서 보는 일정(숨긴 캘린더·공휴일·생일·외부 캘린더 제외, 비공개라 내용을 못 보는 일정은 "비공개 일정")이 지난 60일부터 앞으로 1년까지 회차마다 따로 나갑니다. 로그인 없이 열리는 주소라 토큰(192비트)이 곧 열쇠이고 — **새 주소로 바꾸기**를 누르면 예전 주소는 바로 끊기고, 팀을 떠나거나 계정이 정지되면 404가 됩니다. Google·Outlook 같은 인터넷 서비스가 받아 가려면 공인 인증서가 걸린 웹 주소(아래 "아이폰용 웹 앱 주소" — `WEB_DOMAIN`)가 있어야 하고, 없으면 창에 그 안내가 뜹니다(자체 서명 인증서인 메인 주소는 바깥 서비스가 받지 않음). 서버는 `server/src/externalCalendars.js`(가져오기·30분 작업)·`icsImport.js`(ICS 읽기 — `ical.js` 사용)·`calendarFeeds.js`·`icsFeed.js`(내보내기)·`externalCalendarRules.js`, 화면은 `client/lib/screens/calendar/external_calendar_dialogs.dart`입니다
 
@@ -1039,11 +1039,12 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 
 ## 그룹웨어(전자결재·연차·출퇴근)
 
-메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 출퇴근 · 관리**(관리자만). 서버는
+메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 출퇴근 · 예약 · 관리**(관리자만). 서버는
 `server/src/groupware.js`, 규칙은 `approvalRules.js`(결재)·`approvalForms.js`(결재 양식)·`annualLeave.js`(휴가·법정 연차)·
 `attendanceRules.js`(출퇴근)·`workRules.js`(근로시간·유연근무·출근 알림)·`leavePromotion.js`(연차 촉진)·`groupwareOptions.js`(휴가 종류·지출 분류)·
-`groupwareScope.js`(범위), 근태·휴가 관리 API는 `groupwareWork.js`, 앱은 `client/lib/screens/groupware/`(양식은 `approval_form_widgets.dart`, 관리 탭의 근태·휴가
-관리는 `groupware_work_admin.dart`).
+`resourceRules.js`(회의실·자원 예약)·`groupwareScope.js`(범위), 근태·휴가 관리 API는 `groupwareWork.js`, 회의실·자원 예약 API는 `groupwareResources.js`, 앱은
+`client/lib/screens/groupware/`(양식은 `approval_form_widgets.dart`, 관리 탭의 근태·휴가 관리는 `groupware_work_admin.dart`, 예약은 `resource_tab.dart`, 휴가
+달력은 `leave_calendar.dart`).
 
 **범위** — 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". **팀마다**면 결재선 후보·연차·출퇴근·근무 시간·관리자가 모두 그 팀 안이고(앱이 지금
 고른 팀으로), **회사 전체**면 팀과 상관없이 하나입니다. 기본 "팀·직책 설정을 따름"은 부서·직책이 계정 단위면 회사 전체, 팀 단위면 팀마다입니다.
@@ -1102,6 +1103,9 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 - 남은 연차(결재 중인 것까지 뺀)보다 많이 신청하면 막습니다. 입사일이 없으면 남은 양을 모르니 막지 않습니다.
 - 출근율 80% 미만인 해의 감액, 이월, 회사가 더 주는 휴가는 계산하지 않습니다 — 관리자가 **연차 조정**(0.5일 단위 ±, 사유 필수, 감사 로그)으로 맞춥니다.
 - 승인된 휴가는 캘린더의 내장 구독 캘린더 **"팀 휴가"**에 보입니다(정회원 이상, 숨길 수 있음).
+- **휴가 달력** — 휴가 탭의 "팀 휴가"는 기본이 한 달 **달력**(일요일부터 — 캘린더와 같음, 앞뒤 달로 넘김)이고 "앞으로 30일" 목록으로 바꿀 수 있습니다.
+  칸마다 승인된 휴가(초록)·출장(파랑) 이름을 두 명까지(넘치면 +n), 내가 올려 결재 중인 휴가는 테두리만, 공휴일은 빨간 날짜와 이름으로 보이고,
+  날을 누르면 그날 누가 무슨 휴가·어디로 출장인지 아래에 펼칩니다(`GET /api/groupware/leave/month` — 남의 결재 중 휴가는 보내지 않음).
 
 **지출** — 금액(원), 분류(기본 교통비·식대·비품·소모품·출장비·교육비·접대비·기타 — 관리자가 바꿈), 쓴 날, 영수증(직접 올린 파일만, 5개까지), 내용.
 
@@ -1163,7 +1167,30 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   이름·차감 여부를 문서에 적어 두어**(payload `leaveLabel`·`deducts`) 이름을 바꾸거나 꺼도 그대로 보이고 연차 계산도 바뀌지 않습니다.
   지출 분류는 목록을 그대로 바꿉니다(1~30개, 이미 올린 지출은 그때 분류 그대로). 바꾼 내용은 감사 로그에 남고 그 범위의 화면이 바로 다시 받습니다.
 
+#### 회의실·자원 예약
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0118`)가 돌아야 켜집니다.
+
+- **자원** — 관리 탭 **회의실·자원**에서 결재·근태 관리자가 **회의실·장비·차량**을 더합니다(이름 30자·위치·수용 인원·설명, 범위마다 100개, 같은 이름 안 됨).
+  끈 자원은 새로 잡을 수 없고 잡혀 있던 예약은 남습니다. 지우면 예약도 지워지고 앞으로의 예약을 잡은 사람에게 알림이 갑니다.
+- **예약 탭** — 날마다(앞뒤로 넘김·날짜 고르기) 자원마다 07:00~22:00 시간표에 예약을 칠해 보여 줍니다(내 것은 진한 색). 빈 곳을 누르면 그 자원·그
+  30분부터 예약 창이 열리고, **예약하기**로 자원·날짜·시간(30분 단위)·제목(비우면 "<자원> 예약")을 정해 잡습니다. 차량·장비는 **여러 날**(7일까지)도
+  됩니다. 예약을 누르면 누가 잡았는지 보이고, 잡은 사람은 취소, 관리자는 남의 예약도 취소할 수 있습니다(잡은 사람에게 알림, 감사 로그). 아래에 **내
+  예약**(앞으로의 것)이 있습니다. 준회원은 현황만 봅니다.
+- **겹침** — 같은 자원의 예약은 서버가 **자원 행을 잠그고** 겹침을 본 뒤 넣어서, 동시에 눌러도 하나만 잡힙니다. 겹치면 409와 함께 "이미 예약된 시간입니다
+  (10/20 10:00~11:00 홍길동)"이 창에 보입니다. 끝과 시작이 맞닿는 것(10~11시, 11~12시)은 겹침이 아닙니다. 지난 시간·180일 넘게 앞은 잡을 수 없고,
+  한 사람이 범위에 잡아 둘 수 있는 앞으로의 예약은 100건입니다.
+- **캘린더와 붙이기** — 일정 편집 창의 **회의실·자원 잡기**가 그 일정 시간의 빈 여부와 함께 자원을 보여 주고(잡힌 자원은 누가 잡았는지와 함께 못 고름),
+  고르면 장소가 비어 있을 때 자원 이름으로 채웁니다. 저장하면 일정과 예약이 함께 생기고(겹치면 일정도 만들지 않음), 일정 시간을 옮기면 예약도 옮겨지며
+  (겹치면 409 — 일정도 그대로), 칩의 ✕로 빼거나 다른 자원으로 바꾸고, 일정을 지우면 예약도 지워집니다. 종일 일정은 그날 0시부터 다음 날 0시까지를
+  잡습니다. **반복 일정에는 붙일 수 없습니다**(회차마다 따로 — 자원을 잡은 일정을 반복으로 바꾸려면 먼저 뺌). 예약 탭에서 일정 예약은 일정 제목으로
+  보이고 비공개 일정이면 잡은 사람·만든 사람이 아닌 사람에게 "비공개 일정"으로 보이며, 거기서 취소하면 일정은 남고 회의실만 빠집니다. 일정 상세에
+  회의실 줄이 있습니다.
+- **캘린더의 "회의실 예약"** — 예약 탭에서 바로 잡은 내 예약(일정에 안 붙은 것)은 캘린더의 내장 구독 캘린더 **"회의실 예약"**(보라)에 시간 일정으로
+  보입니다(정회원 이상, 숨길 수 있음 — 바꾸기·취소는 예약 탭에서). 일정에 붙인 예약은 그 일정으로 이미 보이므로 따로 나오지 않습니다.
+
 > 범위 설정을 바꾸면 이전 범위의 결재·근태·연차 조정 기록은 그 범위 키로 남아 새 범위에서는 보이지 않습니다(지우지는 않음 — 되돌리면 다시 보임).
+> 자원·예약도 범위마다 따로입니다.
 
 ## 향후 계획 / 미구현 기능
 
@@ -1198,9 +1225,11 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   ([근로시간·유연근무·연차 촉진](#근로시간유연근무연차-촉진)). 남은 것: 52시간을 넘기 전에 막거나 결재를 받게 하기, 탄력적 근로시간제(2주·3개월
   단위 평균)와 선택근무의 정산 기간, 휴게시간을 직접 누르기, 외근 위치 확인(GPS — 지금은 적은 장소뿐), 회계연도 기준 연차·연차 이월, 수당
   계산(가산율), 연차 촉진의 서면(PDF) 통지서, 시간 단위 연차(반반차).
-- **회의실·자원 예약** — 없습니다(캘린더 종류는 개인·팀·공유뿐). 캘린더와 붙이면 자연스럽습니다.
-- **휴가 달력** — 지금은 그룹웨어 휴가 탭의 "앞으로 30일 팀 휴가" 목록과 캘린더의 "팀 휴가"입니다. 그룹웨어 안의 달력 모양 보기는
-  없습니다.
+- **회의실·자원 예약 후속** — 자원 관리·시간표·겹침 막기·캘린더 일정에 붙이기·내장 "회의실 예약" 캘린더는 들어갔습니다([회의실·자원 예약](#회의실자원-예약)).
+  남은 것: 반복 예약(매주 같은 시간 — 지금은 회차마다), 관리자 승인이 필요한 자원, 자원마다 예약할 수 있는 사람·시간대 제한, 사용 통계, 참석자
+  수에 맞는 회의실 추천, 일정 하나에 여러 자원(회의실+장비), 예약 시작 전 알림, 회의실 앞 태블릿 화면.
+- **휴가 달력 후속** — 휴가 탭의 달력 보기는 들어갔습니다. 남은 것: 부서별로 거르기, 캘린더의 "팀 휴가"에 출장도 보이기, 달력에서 날을 끌어
+  바로 휴가 신청하기.
 - **범위가 큰 것** — 사내 웹메일(지금 메일은 알림 발송용 SMTP뿐), 급여명세서, 법인카드 연동·영수증 OCR.
 
 ### 3순위 — 메신저 편의
@@ -2198,12 +2227,12 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/calendars/:id/subscribe` | 공개 캘린더 구독 |
 | GET | `/api/teams/:teamId/calendar/events?from=&to=` | 구간(최대 62일, `from`·`to`는 1899-11-01 ~ 2300-03-01(UTC) 안 — 밖이면 400)의 일정 회차 + 공휴일 + 생일(정회원 이상) + 내가 구독한 외부 캘린더의 회차(`source: 'external'`, `calendarId: 'ext:<id>'`, 읽기 전용 — 3,000개까지). 회차는 2300-01-01 전의 것만, 응답 하나에 5,000개까지 — 넘치면 내가 만든 일정 먼저, 나머지는 만든 사람마다 하나씩 돌아가며 채우고 `X-Calendar-Truncated: 1` 헤더를 붙임(`calendarRecurrence.js`의 `fillOccurrenceBudget`) |
 | GET | `/api/teams/:teamId/calendar/search?q=&limit=&before=` | 일정 **제목** 검색(부분 일치·대소문자 무시, 공휴일·생일 제외) → `{ items:[{ eventId, calendarId, calendarName, color, title, start, end, allDay, recurring, recurrence, attendees, creatorName, canEdit }], nextBefore }` — 볼 수 있는 캘린더와 참석자로 초대된 일정만, 비공개 일정은 작성자·참석자·캘린더 소유자/관리자만, 시작 시각 최신순(`limit` 기본 50·최대 100, `before`=`nextBefore`로 이어 받기) |
-| POST | `/api/calendars/:id/events` | 일정 만들기 `{ title, description?, location?, start, end, allDay?, visibility?, attendeeIds?, recurrence?, color? }` — 반복 `until`은 2299-12-31까지. 일정 행을 새로 만드는 요청(이것과 아래 `this`·`following` 수정)은 한 사람이 10분에 60번까지(넘으면 429) |
+| POST | `/api/calendars/:id/events` | 일정 만들기 `{ title, description?, location?, start, end, allDay?, visibility?, attendeeIds?, recurrence?, color?, resourceId? }` — `resourceId`(그룹웨어 회의실·자원)는 반복 없는 일정만, 겹치면 409(일정도 안 생김). 반복 `until`은 2299-12-31까지. 일정 행을 새로 만드는 요청(이것과 아래 `this`·`following` 수정)은 한 사람이 10분에 60번까지(넘으면 429) |
 | POST | `/api/teams/:teamId/external-calendars` | 외부 캘린더 구독 `{ url(https:// 또는 webcal://), name?(1~30자, 없으면 ICS의 캘린더 이름), color? }` — 그 자리에서 받아 보고 안 되면 400과 이유(ICS가 아님·권한 없음·너무 큼 등). 사람마다 팀마다 10개, 한 사람이 10분에 20번까지(429). 응답은 목록의 `external` 항목(201) |
 | PATCH/DELETE | `/api/external-calendars/:id` | 외부 캘린더 `{ name?, color?, hidden? }` 수정 / 구독 해지(내 것만, 아니면 404 — `:id`는 `ext:` 없이). 내 기기들에 `calendar:changed` |
 | POST | `/api/external-calendars/:id/refresh` | 지금 다시 받기(1분에 한 번, 아니면 429). 실패해도 200이고 `lastError`에 이유 |
 | GET/POST/DELETE | `/api/teams/:teamId/calendar-feed` | 내 일정 내보내기 주소 `{ url, publicAddress, createdAt, lastAccessAt }` 보기 / 새로 만들기(있으면 바꿈 — 예전 주소는 바로 끊김, 201) / 끄기. `url`은 공인 인증서가 걸린 웹 주소가 있으면 그 주소, 없으면 앱이 접속한 주소(`publicAddress: false`) |
-| GET/PATCH/DELETE | `/api/events/:id` | 일정 상세 / 수정 / 삭제 — 반복 일정은 `scope`(`this`\|`following`\|`all`)와 `occurrenceStart`(원래 회차 시작 ms — 2300-01-01 전의 회차만). `this`는 이미 따로 고치거나 지운 회차(`exdates`)가 1,000개인 시리즈면 400(`following`으로 나눠 바꿀 것) |
+| GET/PATCH/DELETE | `/api/events/:id` | 일정 상세(붙은 자원 `resource: { bookingId, resourceId, name, kind }`) / 수정(`resourceId` — id면 그 자원으로, null이면 빼기, 시간을 옮기면 예약도 — 겹치면 409이고 일정도 그대로) / 삭제(예약도) — 반복 일정은 `scope`(`this`\|`following`\|`all`)와 `occurrenceStart`(원래 회차 시작 ms — 2300-01-01 전의 회차만). `this`는 이미 따로 고치거나 지운 회차(`exdates`)가 1,000개인 시리즈면 400(`following`으로 나눠 바꿀 것) |
 
 **그룹웨어** (`server/src/groupware.js` — [그룹웨어](#그룹웨어전자결재연차출퇴근) 참고. 모든 호출에 `teamId`(쿼리나 본문 — 지금 고른 팀)를 싣는다.
 팀 범위면 그 팀 멤버만, 회사 전체면 팀과 무관. "관리자"는 결재·근태 관리자)
@@ -2246,11 +2275,23 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/schedules` | (관리자) 구성원과 근무 형태 `[{ userId, name, schedule: { mode, label, start, end, coreStart, coreEnd } \| null }]`(시각은 자정부터 분) |
 | PUT / DELETE | `/api/groupware/schedules/:userId` | (관리자) 근무 형태 `{ mode: 'staggered'\|'core'\|'free', start?, end?, coreStart?, coreEnd? }`('HH:MM' — 시차는 start·end, 선택근무는 coreStart·coreEnd) / 범위의 근무 시간으로 되돌리기 |
 | GET | `/api/groupware/attendance/weekly` | (관리자) `?week=YYYY-MM-DD`(그날이 든 월~일) → `{ weekStart, weekEnd, members: [{ userId, name, netMinutes, overtimeMinutes, holidayMinutes, nightMinutes, status: 'ok'\|'warn'\|'over' }] }` |
+| GET | `/api/groupware/leave/month` | 휴가 달력 `?month=YYYY-MM`(기본 이번 달) → `{ month, from, to, holidays: [{ date, name }], leaves: [{ documentId, userId, name, leaveType, label, startDate, endDate, halfDays, status: 'approved'\|'pending', mine }], trips: [{ documentId, userId, name, destination, startDate, endDate }] }` — 승인된 휴가·출장은 범위 사람 모두, 결재 중인 휴가는 내 것만 |
 | GET | `/api/groupware/leave/promotions` | (관리자) 연차 촉진 현황 `{ today, members: [{ userId, name, expiry, firstYear, firstStart, firstEnd, secondDeadline, remainingHalfDays, stage, notices }] }` — 입사일이 있는 사람만 |
 | POST | `/api/groupware/leave/promotions` | (관리자) 1차 촉진 `{ userIds, message? }` → `{ sent, skipped: [{ userId, reason }] }`(보냈으면 201) — 입사일 없음·이번 기간에 이미 보냄·남은 연차 없음은 건너뜀. 마감은 10일 뒤 |
 | POST | `/api/groupware/leave/promotions/second` | (관리자) 2차 촉진 `{ userId, dates, message? }` → 201 — 1차를 받고 쓸 날을 내지 않은 사람, 남은 연차만큼까지·만료 전의 날 |
 | GET | `/api/groupware/leave/promotions/mine` | 내가 받은 촉진 통지 |
 | POST | `/api/groupware/leave/promotions/:id/read` \| `plan` | 받은 사람이 확인 / 1차에 쓸 날 내기 `{ dates }`(마감 안, 한 번만 — 아니면 409) |
+
+**회의실·자원 예약** (`server/src/groupwareResources.js` — 모두 `teamId`로 범위)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/api/groupware/resources` | 자원 목록 `[{ id, kind: 'room'\|'equipment'\|'vehicle', kindLabel, name, location, capacity, description, enabled, sortOrder }]`(관리자가 아니면 켜진 것만). `?from=&to=`(ms, 31일 안)를 주면 자원마다 그 시간에 잡힌 첫 예약 `busy`(없으면 null — `eventId`를 주면 그 일정의 예약은 뺌) |
+| POST / PATCH / DELETE | `/api/groupware/resources` · `/:id` | (관리자) 자원 만들기 `{ kind?, name, location?, capacity?, description? }` → 201(같은 이름 409, 범위마다 100개) / 고치기(보낸 칸만, `enabled`·`sortOrder` 포함) / 지우기(예약도 지움 — 앞으로의 예약을 잡은 사람에게 알림). 바뀌면 소켓 `groupware:changed`(`resources: true`) |
+| GET | `/api/groupware/bookings` | 예약 현황 `?from=&to=`(ms, 31일 안) `[{ id, resourceId, resourceName, resourceKind, title, userId, userName, teamId, start, end, eventId, mine, canCancel }]` — 일정 예약은 일정 제목(비공개 일정이면 잡은 사람·만든 사람 말고는 "비공개 일정") |
+| GET | `/api/groupware/bookings/mine` | 내가 잡은 앞으로의 예약(50개) |
+| POST | `/api/groupware/bookings` | 예약하기 `{ resourceId, start, end, title? }`(ms) → 201. 겹치면 409("이미 예약된 시간입니다 (… 이름)"), 지난 시간·7일 넘음·180일 넘게 앞은 400, 끈 자원 409, 준회원 403, 앞으로의 예약 100건 넘음 429 |
+| DELETE | `/api/groupware/bookings/:id` | 취소 — 잡은 사람이나 관리자(남의 것이면 잡은 사람에게 알림·감사 로그). 일정 예약이면 일정은 남고 회의실만 빠짐 |
 
 **외부 연동** (`server/src/integrations.js`, 공개 API는 `publicApi.js`)
 
@@ -2371,6 +2412,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `groupware_options` | 그룹웨어 범위(`scope_key`)마다의 설정 — `leave_types` jsonb(기본 종류의 이름·켜고 끄기와 더한 종류 `c_…`, null이면 기본), `expense_categories` jsonb(null이면 기본), `clock_in_reminder`·`clock_out_reminder`·`reminder_delay_minutes`(기본 10) |
 | `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무) |
 | `attendance_reminders` | 보낸 출근·퇴근 알림(PK `scope_key`, `user_id`, `work_date`, `kind` — 하루 한 번만 보내려고 먼저 넣고 보냄) |
+| `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order` |
+| `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — unique, 일정을 지우면 cascade). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`) |
 | `leave_promotions` | 연차 사용 촉진 통지 — `scope_key`, `user_id`, 그 연차 기간(`period_start`·`period_end`), `stage`(1 \| 2), 보낼 때 남은 연차 `remaining_half_days`, `deadline`, `message`, 2차의 `designated_dates`, 받은 사람이 낸 `plan_dates`·`planned_at`, `sent_by_id`·`sent_by_name`·`sent_at`, `read_at`. 지우지 않음 |
 | `email_codes` | 메일로 보낸 확인 코드(가입 전 `signup`·이메일 확인 `verify`·이메일 변경 `change`·비밀번호 재설정 `reset`). 코드 대신 서버 비밀값으로 만든 해시, 틀린 횟수(`attempts`), 만료(10분 — 만료된 행은 하루 한 번 지움). 같은 목적·주소로 새 코드를 보내면 앞의 행은 지움 |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |

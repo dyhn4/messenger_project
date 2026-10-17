@@ -2564,6 +2564,56 @@ export const leavePromotions = pgTable(
   (t) => [index('leave_promotions_user_idx').on(t.scopeKey, t.userId, t.periodStart)],
 );
 
+/**
+ * 회의실·자원(그룹웨어 범위마다) — kind: 'room'(회의실) | 'equipment'(장비) | 'vehicle'(차량). 끈 자원(enabled=false)은 새로 예약할 수 없고
+ * 이미 잡힌 예약은 남는다. 지우면 예약도 지운다(groupwareResources.js).
+ */
+export const resources = pgTable(
+  'resources',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    kind: text('kind').notNull().default('room'),
+    name: text('name').notNull(),
+    location: text('location'),
+    capacity: integer('capacity'),
+    description: text('description'),
+    enabled: boolean('enabled').notNull().default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('resources_scope_name_idx').on(t.scopeKey, t.name)],
+);
+
+/**
+ * 자원 예약 — [startAt, endAt) 동안 자원 하나를 잡는다(같은 자원의 예약은 겹치지 않는다 — 자원 행을 잠그고 검사해서 넣는다).
+ * 캘린더 일정에 붙인 예약은 [eventId](일정 하나에 하나 — 일정을 지우면 같이 지움, 제목·공개 범위는 일정을 따른다), 그룹웨어에서
+ * 바로 잡은 예약은 eventId가 없고 [title]을 쓴다. [teamId]는 예약한 팀(캘린더의 내장 "회의실 예약"에 보일 팀 — 회사 전체 범위면 그때의 팀).
+ */
+export const resourceBookings = pgTable(
+  'resource_bookings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    resourceId: uuid('resource_id')
+      .notNull()
+      .references(() => resources.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    userName: text('user_name').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    startAt: timestamp('start_at', { withTimezone: true }).notNull(),
+    endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+    eventId: uuid('event_id').references(() => calendarEvents.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('resource_bookings_resource_start_idx').on(t.resourceId, t.startAt),
+    index('resource_bookings_scope_start_idx').on(t.scopeKey, t.startAt),
+    uniqueIndex('resource_bookings_event_idx').on(t.eventId),
+  ],
+);
+
 /** 문서 번호 매기기 — 범위·해마다 마지막 번호(groupware 문서를 올리는 트랜잭션 안에서 하나씩 올린다). */
 export const approvalCounters = pgTable(
   'approval_counters',

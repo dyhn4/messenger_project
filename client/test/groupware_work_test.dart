@@ -434,7 +434,12 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('leave-dates-add')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('20'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DatePickerDialog),
+          matching: find.text('20'),
+        ),
+      );
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
       expect(find.text('2026-10-20'), findsOneWidget);
@@ -773,7 +778,12 @@ void main() {
       expect(find.text('2027-01-31까지, 2일까지 고를 수 있습니다.'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('leave-dates-add')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('20'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(DatePickerDialog),
+          matching: find.text('20'),
+        ),
+      );
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('leave-dates-save')));

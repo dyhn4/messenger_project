@@ -271,6 +271,8 @@ class _SummaryRow extends StatelessWidget {
       if (summary.absent > 0) '결근 ${summary.absent}',
       if (summary.leaveHalfDays > 0)
         '휴가 ${halfDaysText(summary.leaveHalfDays)}',
+      if (summary.tripDays > 0) '출장 ${summary.tripDays}일',
+      if (summary.overtimeMinutes > 0) '연장근무 ${summary.overtimeText}',
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -302,6 +304,9 @@ class _DayTile extends StatelessWidget {
     final marks = [
       if (day.holiday != null) day.holiday!,
       if (day.leaveType != null) ctx.leaveType(day.leaveType)?.label ?? '휴가',
+      if (day.trip) '출장',
+      if (day.overtimeMinutes > 0)
+        '연장근무 ${AttendanceSummary(overtimeMinutes: day.overtimeMinutes).overtimeText}',
       if (record?.late ?? false) '지각',
       if (record?.earlyLeave ?? false) '조퇴',
       if (record?.missingClockOut ?? false) '퇴근 누락',
@@ -323,7 +328,7 @@ class _DayTile extends StatelessWidget {
       ),
       title: Text(
         record == null
-            ? (off || day.leaveType != null ? '' : '기록 없음')
+            ? (off || day.leaveType != null || day.trip ? '' : '기록 없음')
             : '${clockText(record.clockInAt)} ~ ${clockText(record.clockOutAt)}',
       ),
       subtitle: marks.isEmpty

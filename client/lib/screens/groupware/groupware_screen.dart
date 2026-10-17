@@ -207,6 +207,18 @@ class ApprovalStatusChip extends StatelessWidget {
   }
 }
 
+/// 결재 종류의 아이콘(목록·새 결재 고르기).
+IconData approvalKindIcon(ApprovalKind kind) => switch (kind) {
+  ApprovalKind.leave => Icons.beach_access_outlined,
+  ApprovalKind.expense => Icons.receipt_long_outlined,
+  ApprovalKind.attendance => Icons.schedule_outlined,
+  ApprovalKind.draft => Icons.description_outlined,
+  ApprovalKind.trip => Icons.flight_takeoff_outlined,
+  ApprovalKind.purchase => Icons.shopping_cart_outlined,
+  ApprovalKind.overtime => Icons.more_time_outlined,
+  ApprovalKind.form => Icons.dynamic_form_outlined,
+};
+
 /// 결재 문서 목록 한 줄.
 class ApprovalDocumentTile extends StatelessWidget {
   final ApprovalDocument doc;
@@ -223,11 +235,7 @@ class ApprovalDocumentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final hint = Theme.of(context).hintColor;
     final current = doc.currentStep;
-    final icon = switch (doc.kind) {
-      ApprovalKind.leave => Icons.beach_access_outlined,
-      ApprovalKind.expense => Icons.receipt_long_outlined,
-      ApprovalKind.attendance => Icons.schedule_outlined,
-    };
+    final icon = approvalKindIcon(doc.kind);
     return ListTile(
       key: ValueKey('approval-doc-${doc.id}'),
       onTap: onTap,

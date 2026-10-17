@@ -5,6 +5,7 @@ import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
+import 'approval_form_widgets.dart' show ApprovalFormsAdminSection;
 import 'approval_forms.dart' show isHmText;
 import 'groupware_screen.dart';
 
@@ -229,6 +230,7 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
             ],
           ),
         ),
+        ApprovalFormsAdminSection(api: widget.api, changes: widget.changes),
         const GroupwareSectionHeader('구성원 연차'),
         if (members == null)
           const Padding(
@@ -318,6 +320,9 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
                   if (row.summary.absent > 0) '결근 ${row.summary.absent}',
                   if (row.summary.leaveHalfDays > 0)
                     '휴가 ${halfDaysText(row.summary.leaveHalfDays)}',
+                  if (row.summary.tripDays > 0) '출장 ${row.summary.tripDays}일',
+                  if (row.summary.overtimeMinutes > 0)
+                    '연장 ${row.summary.overtimeText}',
                 ].join(' · '),
                 style: TextStyle(color: hint),
               ),

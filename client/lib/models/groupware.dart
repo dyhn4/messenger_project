@@ -2,18 +2,146 @@
 //
 // 휴가 양은 서버처럼 반일 단위 정수(halfDays — 하루 = 2, 반차 = 1)로 다루고, 날짜는 'YYYY-MM-DD' 글자, 시각은 epoch ms다.
 
-/// 결재 종류 — 서버 approvalRules.js APPROVAL_KINDS.
+/// 결재 종류 — 서버 approvalRules.js APPROVAL_KINDS. 휴가·지출·근태 수정은 전용 화면이 있고, 그 밖은 양식으로 올린다(서버
+/// approvalForms.js — 기본 양식 넷과 관리자가 만든 양식 'form').
 enum ApprovalKind {
   leave('leave', '휴가'),
   expense('expense', '지출'),
-  attendance('attendance', '근태 수정');
+  attendance('attendance', '근태 수정'),
+  draft('draft', '기안'),
+  trip('trip', '출장'),
+  purchase('purchase', '구매'),
+  overtime('overtime', '연장근무'),
+  form('form', '양식');
 
   final String wire;
   final String label;
   const ApprovalKind(this.wire, this.label);
 
+  /// 양식으로 올리는 종류인지(문서의 칸 정의·값을 payload의 fields·values로 그린다).
+  bool get isForm => index >= ApprovalKind.draft.index;
+
   static ApprovalKind fromWire(String? value) =>
-      values.firstWhere((k) => k.wire == value, orElse: () => leave);
+      values.firstWhere((k) => k.wire == value, orElse: () => form);
+}
+
+/// 양식 칸 종류 — 서버 approvalForms.js FORM_FIELD_TYPES.
+enum FormFieldType {
+  text('text', '한 줄 글'),
+  textarea('textarea', '여러 줄 글'),
+  number('number', '숫자'),
+  money('money', '금액(원)'),
+  date('date', '날짜'),
+  dateRange('dateRange', '기간'),
+  timeRange('timeRange', '시간대'),
+  select('select', '고르기'),
+  items('items', '품목 표');
+
+  final String wire;
+  final String label;
+  const FormFieldType(this.wire, this.label);
+
+  static FormFieldType fromWire(String? value) =>
+      values.firstWhere((t) => t.wire == value, orElse: () => text);
+}
+
+/// 양식의 칸 하나.
+class FormFieldDef {
+  final String key;
+  final String label;
+  final FormFieldType type;
+  final bool required;
+  final List<String> options;
+  const FormFieldDef({
+    required this.key,
+    required this.label,
+    required this.type,
+    this.required = false,
+    this.options = const [],
+  });
+
+  factory FormFieldDef.fromJson(Map<String, dynamic> json) => FormFieldDef(
+    key: json['key'] as String? ?? '',
+    label: json['label'] as String? ?? '',
+    type: FormFieldType.fromWire(json['type'] as String?),
+    required: json['required'] == true,
+    options: (json['options'] as List? ?? const [])
+        .whereType<String>()
+        .toList(),
+  );
+
+  /// 관리자 양식 만들기에 보낼 모양(key는 서버가 매긴다).
+  Map<String, dynamic> toDefinitionJson() => {
+    'label': label,
+    'type': type.wire,
+    'required': required,
+    if (type == FormFieldType.select) 'options': options,
+  };
+}
+
+/// 결재 양식 — 기본 양식(id 'builtin:종류')과 관리자가 만든 양식. 서버 GET /groupware/forms.
+class ApprovalForm {
+  final String id;
+  final ApprovalKind kind;
+  final bool builtin;
+  final String name;
+  final String? description;
+  final List<FormFieldDef> fields;
+  final bool allowAttachments;
+  final bool enabled;
+  const ApprovalForm({
+    required this.id,
+    required this.kind,
+    required this.builtin,
+    required this.name,
+    this.description,
+    this.fields = const [],
+    this.allowAttachments = false,
+    this.enabled = true,
+  });
+
+  factory ApprovalForm.fromJson(Map<String, dynamic> json) => ApprovalForm(
+    id: json['id'] as String,
+    kind: ApprovalKind.fromWire(json['kind'] as String?),
+    builtin: json['builtin'] == true,
+    name: json['name'] as String? ?? '',
+    description: json['description'] as String?,
+    fields: [
+      for (final f in json['fields'] as List? ?? const [])
+        FormFieldDef.fromJson((f as Map).cast<String, dynamic>()),
+    ],
+    allowAttachments: json['allowAttachments'] == true,
+    enabled: json['enabled'] != false,
+  );
+}
+
+/// 양식 칸 값을 한 줄 글로(상세·목록) — 비었으면 null.
+String? formValueText(FormFieldDef field, Object? value) {
+  if (value == null) return null;
+  switch (field.type) {
+    case FormFieldType.money:
+      return wonText((value as num).toInt());
+    case FormFieldType.number:
+      final n = value as num;
+      return n == n.roundToDouble() ? n.toInt().toString() : n.toString();
+    case FormFieldType.dateRange:
+      final m = (value as Map).cast<String, dynamic>();
+      final start = m['start'] as String? ?? '';
+      final end = m['end'] as String? ?? start;
+      return start == end ? start : '$start ~ $end';
+    case FormFieldType.timeRange:
+      final m = (value as Map).cast<String, dynamic>();
+      final minutes = (m['minutes'] as num?)?.toInt() ?? 0;
+      final h = minutes ~/ 60;
+      final mm = minutes % 60;
+      final length = mm == 0 ? '$h시간' : (h == 0 ? '$mm분' : '$h시간 $mm분');
+      return '${m['start']} ~ ${m['end']}${m['overnight'] == true ? '(다음 날)' : ''} ($length)';
+    case FormFieldType.items:
+      final m = (value as Map).cast<String, dynamic>();
+      return '${(m['rows'] as List? ?? const []).length}건 · 합계 ${wonText((m['total'] as num?)?.toInt() ?? 0)}';
+    default:
+      return value.toString();
+  }
 }
 
 /// 결재 상태 — 서버 approvalRules.js APPROVAL_STATUSES.
@@ -407,9 +535,44 @@ class ApprovalDocument {
     return null;
   }
 
-  /// 목록 한 줄의 요약 — 휴가 기간·양, 지출 금액, 근태 수정 날짜·시각.
+  /// 양식으로 올린 문서의 칸 정의(그때의 것 — 양식을 고쳐도 그대로).
+  List<FormFieldDef> get formFields => [
+    for (final f in payload['fields'] as List? ?? const [])
+      if (f is Map) FormFieldDef.fromJson(f.cast<String, dynamic>()),
+  ];
+
+  /// 양식으로 올린 문서의 값(칸 key → 값).
+  Map<String, dynamic> get formValues =>
+      (payload['values'] as Map?)?.cast<String, dynamic>() ?? const {};
+
+  /// 문서의 종류 이름 — 관리자가 만든 양식이면 그 양식 이름.
+  String get kindLabel => kind == ApprovalKind.form
+      ? (payload['templateName'] as String? ?? '결재')
+      : kind.label;
+
+  /// 목록 한 줄의 요약 — 휴가 기간·양, 지출 금액, 근태 수정 날짜·시각, 양식은 종류별 요점.
   String summary(GroupwareContext? ctx) {
     switch (kind) {
+      case ApprovalKind.draft:
+        final budget = (payload['values'] as Map?)?['budget'] as num?;
+        return budget == null
+            ? '일반 기안서'
+            : '일반 기안서 · 예산 ${wonText(budget.toInt())}';
+      case ApprovalKind.trip:
+        final start = payload['startDate'] as String? ?? '';
+        final end = payload['endDate'] as String? ?? start;
+        final range = start == end
+            ? shortDateText(start)
+            : '${shortDateText(start)}~${shortDateText(end)}';
+        return '${payload['destination'] ?? ''} · $range · ${payload['days'] ?? 1}일';
+      case ApprovalKind.purchase:
+        return '품목 ${payload['itemCount'] ?? 0}건 · ${wonText((payload['total'] as num?)?.toInt() ?? 0)}';
+      case ApprovalKind.overtime:
+        final minutes = (payload['minutes'] as num?)?.toInt() ?? 0;
+        return '${payload['overtimeType'] ?? ''} · ${shortDateText(payload['workDate'] as String? ?? '')} '
+            '${payload['startTime'] ?? ''}~${payload['endTime'] ?? ''} · ${(minutes / 60).toStringAsFixed(minutes % 60 == 0 ? 0 : 1)}시간';
+      case ApprovalKind.form:
+        return kindLabel;
       case ApprovalKind.leave:
         final label =
             ctx?.leaveType(payload['leaveType'] as String?)?.label ?? '휴가';
@@ -639,6 +802,10 @@ class AttendanceSummary {
   final int missingClockOut;
   final int absent;
   final int leaveHalfDays;
+
+  /// 승인된 출장 날 수와 승인된 연장근무(분) — 출장·연장근무 신청(양식).
+  final int tripDays;
+  final int overtimeMinutes;
   const AttendanceSummary({
     this.daysWorked = 0,
     this.workedMinutes = 0,
@@ -647,6 +814,8 @@ class AttendanceSummary {
     this.missingClockOut = 0,
     this.absent = 0,
     this.leaveHalfDays = 0,
+    this.tripDays = 0,
+    this.overtimeMinutes = 0,
   });
 
   factory AttendanceSummary.fromJson(Map<String, dynamic> json) {
@@ -659,7 +828,15 @@ class AttendanceSummary {
       missingClockOut: n('missingClockOut'),
       absent: n('absent'),
       leaveHalfDays: n('leaveHalfDays'),
+      tripDays: n('tripDays'),
+      overtimeMinutes: n('overtimeMinutes'),
     );
+  }
+
+  /// 연장근무 "3시간" / "1.5시간".
+  String get overtimeText {
+    final hours = overtimeMinutes / 60;
+    return '${hours == hours.roundToDouble() ? hours.toInt() : hours.toStringAsFixed(1)}시간';
   }
 
   /// "152.5시간".
@@ -675,12 +852,18 @@ class AttendanceDay {
   final String? holiday;
   final String? leaveType;
   final int leaveHalfDays;
+
+  /// 승인된 출장 날인지, 승인된 연장근무(분).
+  final bool trip;
+  final int overtimeMinutes;
   final AttendanceRecord? record;
   const AttendanceDay({
     required this.date,
     this.holiday,
     this.leaveType,
     this.leaveHalfDays = 0,
+    this.trip = false,
+    this.overtimeMinutes = 0,
     this.record,
   });
 
@@ -691,6 +874,8 @@ class AttendanceDay {
       holiday: json['holiday'] as String?,
       leaveType: leave?['type'] as String?,
       leaveHalfDays: (leave?['halfDays'] as num?)?.toInt() ?? 0,
+      trip: json['trip'] == true,
+      overtimeMinutes: (json['overtimeMinutes'] as num?)?.toInt() ?? 0,
       record: AttendanceRecord.maybe(json['record']),
     );
   }

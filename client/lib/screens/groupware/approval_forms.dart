@@ -458,13 +458,16 @@ class _NameDialogState extends State<_NameDialog> {
 // ── 신청 창 ─────────────────────────────────────────────────────────────
 
 /// 신청 창의 공통 틀 — 내용 칸들([fields]) 아래에 사유·결재선, 아래에 올리기 단추. [submit]이 서버에 올리고 문서를 돌려준다.
-class _RequestDialog extends StatefulWidget {
+class ApprovalRequestDialog extends StatefulWidget {
   final String title;
   final GroupwareApi api;
   final GroupwareContext ctx;
   final List<Widget> Function(void Function(VoidCallback) setDialogState)
   fields;
   final String bodyLabel;
+
+  /// 사유 칸을 보일지 — 양식(approval_form_widgets.dart)은 내용을 칸으로 받아 이 칸을 숨긴다.
+  final bool showBody;
 
   /// 칸이 덜 찼으면 문구(올리지 않는다), 다 찼으면 null.
   final String? Function() validate;
@@ -474,7 +477,8 @@ class _RequestDialog extends StatefulWidget {
     required List<String> ccIds,
   })
   submit;
-  const _RequestDialog({
+  const ApprovalRequestDialog({
+    super.key,
     required this.title,
     required this.api,
     required this.ctx,
@@ -482,13 +486,14 @@ class _RequestDialog extends StatefulWidget {
     required this.validate,
     required this.submit,
     this.bodyLabel = '사유',
+    this.showBody = true,
   });
 
   @override
-  State<_RequestDialog> createState() => _RequestDialogState();
+  State<ApprovalRequestDialog> createState() => _ApprovalRequestDialogState();
 }
 
-class _RequestDialogState extends State<_RequestDialog> {
+class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
   final _line = ApprovalLineController();
   final _body = TextEditingController();
   bool _submitting = false;
@@ -543,17 +548,18 @@ class _RequestDialogState extends State<_RequestDialog> {
             children: [
               ...widget.fields(setState),
               const SizedBox(height: 12),
-              TextField(
-                key: const ValueKey('approval-request-body'),
-                controller: _body,
-                minLines: 2,
-                maxLines: 5,
-                maxLength: 2000,
-                decoration: InputDecoration(
-                  labelText: widget.bodyLabel,
-                  border: const OutlineInputBorder(),
+              if (widget.showBody)
+                TextField(
+                  key: const ValueKey('approval-request-body'),
+                  controller: _body,
+                  minLines: 2,
+                  maxLines: 5,
+                  maxLength: 2000,
+                  decoration: InputDecoration(
+                    labelText: widget.bodyLabel,
+                    border: const OutlineInputBorder(),
+                  ),
                 ),
-              ),
               const SizedBox(height: 8),
               ApprovalLinePicker(
                 api: widget.api,
@@ -590,12 +596,13 @@ class _RequestDialogState extends State<_RequestDialog> {
 }
 
 /// 날짜 고르기 단추.
-class _DateField extends StatelessWidget {
+class ApprovalDateField extends StatelessWidget {
   final String label;
   final String? value;
   final ValueChanged<String> onChanged;
   final DateTime? lastDate;
-  const _DateField({
+  const ApprovalDateField({
+    super.key,
     required this.label,
     required this.value,
     required this.onChanged,
@@ -634,7 +641,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
   String? end;
   return showDialog<ApprovalDocument>(
     context: context,
-    builder: (_) => _RequestDialog(
+    builder: (_) => ApprovalRequestDialog(
       title: '휴가 신청',
       api: api,
       ctx: ctx,
@@ -676,7 +683,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
           Wrap(
             spacing: 8,
             children: [
-              _DateField(
+              ApprovalDateField(
                 label: info?.half ?? false ? '날짜' : '시작',
                 value: start,
                 onChanged: (v) => setState(() {
@@ -689,7 +696,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
                 }),
               ),
               if (!(info?.half ?? false))
-                _DateField(
+                ApprovalDateField(
                   label: '끝',
                   value: end,
                   onChanged: (v) => setState(() => end = v),
@@ -743,7 +750,7 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
   var uploading = false;
   return showDialog<ApprovalDocument>(
     context: context,
-    builder: (dialogContext) => _RequestDialog(
+    builder: (dialogContext) => ApprovalRequestDialog(
       title: '지출 결재',
       api: api,
       ctx: ctx,
@@ -786,7 +793,7 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
               ),
             ),
             const SizedBox(width: 8),
-            _DateField(
+            ApprovalDateField(
               label: '쓴 날',
               value: spentOn,
               lastDate: DateTime.now(),
@@ -913,7 +920,7 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
   );
   return showDialog<ApprovalDocument>(
     context: context,
-    builder: (_) => _RequestDialog(
+    builder: (_) => ApprovalRequestDialog(
       title: '근태 수정 (${shortDateText(workDate)})',
       api: api,
       ctx: ctx,

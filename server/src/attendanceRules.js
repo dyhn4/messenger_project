@@ -90,15 +90,39 @@ export function monthDays(monthKey) {
 
 /**
  * 한 사람의 한 달 근태 요약. [records]는 그 달 기록, [leaveByDate]는 날짜 → { halfDays, halfType }(승인된 휴가), [today]보다 뒤의 날은
- * 결근으로 세지 않는다. `{ daysWorked, workedMinutes, late, earlyLeave, missingClockOut, absent, leaveHalfDays }`.
+ * 결근으로 세지 않는다. 승인된 출장 날([tripDates])도 결근이 아니고(tripDays로 센다), 승인된 연장근무([overtimeByDate] 날짜 → 분)는
+ * overtimeMinutes로 합친다. `{ daysWorked, workedMinutes, late, earlyLeave, missingClockOut, absent, leaveHalfDays, tripDays, overtimeMinutes }`.
  */
-export function summarizeMonth({ monthKey, records, leaveByDate = new Map(), holidays = new Set(), workStart, workEnd, today }) {
+export function summarizeMonth({
+  monthKey,
+  records,
+  leaveByDate = new Map(),
+  tripDates = new Set(),
+  overtimeByDate = new Map(),
+  holidays = new Set(),
+  workStart,
+  workEnd,
+  today,
+}) {
   const days = monthDays(monthKey) ?? [];
   const byDate = new Map(records.map((r) => [r.workDate, r]));
-  const summary = { daysWorked: 0, workedMinutes: 0, late: 0, earlyLeave: 0, missingClockOut: 0, absent: 0, leaveHalfDays: 0 };
+  const summary = {
+    daysWorked: 0,
+    workedMinutes: 0,
+    late: 0,
+    earlyLeave: 0,
+    missingClockOut: 0,
+    absent: 0,
+    leaveHalfDays: 0,
+    tripDays: 0,
+    overtimeMinutes: 0,
+  };
   for (const day of days) {
     const leave = leaveByDate.get(day);
     if (leave) summary.leaveHalfDays += leave.halfDays;
+    const trip = tripDates.has(day);
+    if (trip) summary.tripDays += 1;
+    summary.overtimeMinutes += overtimeByDate.get(day) ?? 0;
     const record = byDate.get(day);
     if (record?.clockInAt) {
       summary.daysWorked += 1;
@@ -107,7 +131,7 @@ export function summarizeMonth({ monthKey, records, leaveByDate = new Map(), hol
       if (flags.earlyLeave) summary.earlyLeave += 1;
       if (flags.missingClockOut && day < today) summary.missingClockOut += 1;
       if (flags.workedMinutes) summary.workedMinutes += flags.workedMinutes;
-    } else if (day < today && isWorkday(day, holidays) && !leave) {
+    } else if (day < today && isWorkday(day, holidays) && !leave && !trip) {
       summary.absent += 1;
     }
   }

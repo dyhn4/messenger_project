@@ -5,7 +5,7 @@ import { teamAccess, userAccess } from './access.js';
 import { addDaysKey, halfDaysText, isDateKey, LEAVE_TYPES, leaveBalance, leaveShortage, leaveTypeOf } from './annualLeave.js';
 import {
   APPROVAL_KINDS,
-  APPROVAL_KIND_LABEL,
+  approvalLabelOf,
   APPROVAL_STATUSES,
   APPROVERS_MAX,
   approvalNotificationOf,
@@ -37,6 +37,15 @@ import {
   summarizeMonth,
   validWorkHours,
 } from './attendanceRules.js';
+import {
+  buildFormPayload,
+  builtinKindOfId,
+  BUILTIN_FORMS,
+  CUSTOM_FORMS_MAX,
+  FORM_KINDS,
+  mergeForms,
+  parseFormDefinition,
+} from './approvalForms.js';
 import { clientIp, isLanAddress, limits, retryLater, waitText } from './authGuard.js';
 import {
   applyApprovalDecision,
@@ -55,6 +64,14 @@ import {
   listApprovalDocuments,
   listApprovalLines,
   listApprovedLeaves,
+  listApprovedOvertime,
+  listApprovedTrips,
+  listApprovalTemplates,
+  findApprovalTemplate,
+  insertApprovalTemplate,
+  updateApprovalTemplate,
+  deleteApprovalTemplate,
+  upsertBuiltinTemplate,
   listAttendanceInRange,
   listGroupwareMembers,
   listApprovalNotifications,
@@ -209,6 +226,44 @@ function leaveDaysOf(leave, into = new Map()) {
   }
   return into;
 }
+
+/** 승인된 출장 하나 → 그 기간의 날짜들을 [into]에(근태에서 결근으로 세지 않는다). */
+function tripDaysOf(trip, into = new Set()) {
+  const { startDate, endDate } = trip.payload ?? {};
+  if (!isDateKey(startDate) || !isDateKey(endDate) || endDate < startDate) return into;
+  for (let day = startDate; day <= endDate; day = addDaysKey(day, 1)) into.add(day);
+  return into;
+}
+
+/** 승인된 연장근무들 → 날짜 → 분. */
+function overtimeByDateOf(list, into = new Map()) {
+  for (const o of list) {
+    const day = o.payload?.workDate;
+    const minutes = Number(o.payload?.minutes) || 0;
+    if (isDateKey(day) && minutes > 0) into.set(day, (into.get(day) ?? 0) + minutes);
+  }
+  return into;
+}
+
+/** 이 범위에서 올릴 양식 — 기본 양식이면 켜져 있어야, 관리자가 만든 양식이면 이 범위의 켜진 양식이어야. */
+async function formForSubmission(ctx, kind, formId) {
+  const forms = mergeForms(await listApprovalTemplates(ctx.scopeKey));
+  const form = kind === 'form' ? forms.find((f) => !f.builtin && f.id === formId) : forms.find((f) => f.id === `builtin:${kind}`);
+  if (!form) return { error: '결재 양식을 찾을 수 없습니다.', status: 404 };
+  if (!form.enabled) return { error: '지금은 쓰지 않는 양식입니다. 관리자에게 문의하세요.', status: 409 };
+  return { id: form.builtin ? null : form.id, name: form.name, fields: form.fields, allowAttachments: form.allowAttachments };
+}
+
+const formDto = (f) => ({
+  id: f.id,
+  kind: f.kind,
+  builtin: f.builtin,
+  name: f.name,
+  description: f.description ?? null,
+  fields: f.fields,
+  allowAttachments: f.allowAttachments,
+  enabled: f.enabled,
+});
 
 /** 한 사람의 이번 연차 현황(annualLeave.js leaveBalance + 조정 목록). */
 async function balanceFor(ctx, userId) {
@@ -365,6 +420,29 @@ async function parseAttachments(input, senderId) {
 
 export function createGroupwareRouter(io) {
   const router = Router();
+
+  /** 결재 양식을 바꾼 기록(감사 로그). */
+  function auditForm(ctx, detail) {
+    recordAudit({
+      actorId: ctx.user.id,
+      actorName: ctx.user.name ?? ctx.user.username,
+      action: AUDIT.groupwareForm,
+      teamId: ctx.teamId,
+      teamName: ctx.team?.name ?? null,
+      targetType: 'approvalForm',
+      detail,
+    });
+  }
+
+  /** 양식이 바뀌면 그 범위 사람들의 그룹웨어 화면이 양식 목록을 다시 받게(groupware:changed — forms). */
+  async function broadcastFormsChanged(ctx) {
+    const payload = { forms: true, scopeKey: ctx.scopeKey };
+    if (ctx.scope === 'team') {
+      for (const id of await listTeamMemberIds(ctx.teamId)) io.to(`user:${id}`).emit('groupware:changed', payload);
+    } else {
+      io.emit('groupware:changed', payload);
+    }
+  }
 
   /** 범위를 정해 [handler](req, res, ctx)를 부른다 — 팀은 쿼리나 본문의 teamId. [managerOnly]면 관리자만. */
   const withContext =
@@ -528,7 +606,109 @@ export function createGroupwareRouter(io) {
     res.json(documentDto(found, req.user.sub, { isManager, cc }));
   });
 
-  /** 결재 올리기 — kind: leave | expense | attendance, 결재선(approverIds 순서대로)·참조자(ccIds). */
+  // ── 결재 양식 ──
+
+  /**
+   * 이 범위의 결재 양식 — 기본 양식(일반 기안서·출장 신청·구매 요청·연장근무 신청)과 관리자가 만든 양식. 관리자가 아니면 켜진 것만,
+   * 관리자는 꺼진 것까지(관리 탭). 휴가·지출·근태 수정은 전용 화면이 있어 여기 없다.
+   */
+  router.get(
+    '/groupware/forms',
+    withContext(async (req, res, ctx) => {
+      const forms = mergeForms(await listApprovalTemplates(ctx.scopeKey));
+      res.json(forms.filter((f) => f.enabled || ctx.isManager).map(formDto));
+    }),
+  );
+
+  /** 양식 만들기(관리자) `{ name, description?, fields: [{ label, type, required?, options? }], allowAttachments? }`. */
+  router.post(
+    '/groupware/forms',
+    withContext(
+      async (req, res, ctx) => {
+        const parsed = parseFormDefinition(req.body);
+        if (parsed.error) return fail(res, parsed);
+        const rows = await listApprovalTemplates(ctx.scopeKey);
+        const custom = rows.filter((r) => !r.builtinKey);
+        if (custom.length >= CUSTOM_FORMS_MAX) return fail(res, { error: `양식은 ${CUSTOM_FORMS_MAX}개까지 만들 수 있습니다.` });
+        if (mergeForms(rows).some((f) => f.name === parsed.form.name)) return fail(res, { error: '같은 이름의 양식이 있습니다.', status: 409 });
+        const row = await insertApprovalTemplate({
+          scopeKey: ctx.scopeKey,
+          ...parsed.form,
+          sortOrder: 100 + custom.reduce((max, r) => Math.max(max, (r.sortOrder ?? 100) - 100), -1) + 1,
+          createdBy: ctx.user.id,
+          createdByName: ctx.user.name ?? ctx.user.username,
+        });
+        auditForm(ctx, `양식 만들기 — ${row.name}`);
+        broadcastFormsChanged(ctx);
+        res.status(201).json(formDto(mergeForms([row]).find((f) => f.id === row.id)));
+      },
+      { managerOnly: true },
+    ),
+  );
+
+  /** 양식 바꾸기(관리자) — 기본 양식은 `{ enabled }`만, 관리자가 만든 양식은 `{ name?, description?, fields?, allowAttachments?, enabled? }`. */
+  router.patch(
+    '/groupware/forms/:id',
+    withContext(
+      async (req, res, ctx) => {
+        const body = req.body ?? {};
+        const builtin = builtinKindOfId(req.params.id);
+        if (builtin) {
+          if (typeof body.enabled !== 'boolean') return fail(res, { error: '기본 양식은 켜고 끄기만 할 수 있습니다.' });
+          const current = mergeForms(await listApprovalTemplates(ctx.scopeKey)).find((f) => f.id === req.params.id);
+          await upsertBuiltinTemplate(ctx.scopeKey, builtin, {
+            name: BUILTIN_FORMS[builtin].name,
+            enabled: body.enabled,
+            sortOrder: current.sortOrder,
+          });
+          auditForm(ctx, `기본 양식 ${body.enabled ? '켜기' : '끄기'} — ${BUILTIN_FORMS[builtin].name}`);
+          broadcastFormsChanged(ctx);
+          return res.json(formDto({ ...current, enabled: body.enabled }));
+        }
+        const row = isUuid(req.params.id) ? await findApprovalTemplate(req.params.id) : null;
+        if (!row || row.builtinKey || row.scopeKey !== ctx.scopeKey) return fail(res, { error: '결재 양식을 찾을 수 없습니다.', status: 404 });
+        const patch = {};
+        if (['name', 'description', 'fields', 'allowAttachments'].some((k) => k in body)) {
+          const parsed = parseFormDefinition({
+            name: body.name ?? row.name,
+            description: 'description' in body ? body.description : row.description,
+            fields: body.fields ?? row.fields,
+            allowAttachments: 'allowAttachments' in body ? body.allowAttachments : row.allowAttachments,
+          });
+          if (parsed.error) return fail(res, parsed);
+          const others = mergeForms(await listApprovalTemplates(ctx.scopeKey)).filter((f) => f.id !== row.id);
+          if (others.some((f) => f.name === parsed.form.name)) return fail(res, { error: '같은 이름의 양식이 있습니다.', status: 409 });
+          Object.assign(patch, parsed.form);
+        }
+        if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+        if (Object.keys(patch).length === 0) return fail(res, { error: '바꿀 내용이 없습니다.' });
+        const updated = await updateApprovalTemplate(row.id, patch);
+        auditForm(ctx, `양식 바꾸기 — ${updated.name}`);
+        broadcastFormsChanged(ctx);
+        res.json(formDto(mergeForms([updated]).find((f) => f.id === updated.id)));
+      },
+      { managerOnly: true },
+    ),
+  );
+
+  /** 양식 지우기(관리자, 관리자가 만든 양식만) — 이미 올린 문서는 칸 정의를 적어 두어 그대로 보인다. */
+  router.delete(
+    '/groupware/forms/:id',
+    withContext(
+      async (req, res, ctx) => {
+        if (builtinKindOfId(req.params.id)) return fail(res, { error: '기본 양식은 지울 수 없습니다(끌 수는 있습니다).' });
+        const row = isUuid(req.params.id) ? await findApprovalTemplate(req.params.id) : null;
+        if (!row || row.builtinKey || row.scopeKey !== ctx.scopeKey) return fail(res, { error: '결재 양식을 찾을 수 없습니다.', status: 404 });
+        await deleteApprovalTemplate(row.id);
+        auditForm(ctx, `양식 지우기 — ${row.name}`);
+        broadcastFormsChanged(ctx);
+        res.json({ ok: true });
+      },
+      { managerOnly: true },
+    ),
+  );
+
+  /** 결재 올리기 — kind: leave | expense | attendance, 또는 양식(draft | trip | purchase | overtime | form — values, form은 formId), 결재선(approverIds 순서대로)·참조자(ccIds). */
   router.post(
     '/groupware/documents',
     withContext(async (req, res, ctx) => {
@@ -539,7 +719,13 @@ export function createGroupwareRouter(io) {
 
       const today = localDateKey(new Date());
       let parsed;
-      if (body.kind === 'leave') parsed = parseLeavePayload(body, HOLIDAY_DATES);
+      // 양식으로 올리는 종류(일반 기안서·출장·구매·연장근무·관리자가 만든 양식) — 칸 정의대로 검사하고 칸 정의를 문서에 같이 적는다.
+      let form = null;
+      if (FORM_KINDS.includes(body.kind)) {
+        form = await formForSubmission(ctx, body.kind, body.formId);
+        if (form.error) return fail(res, form);
+        parsed = buildFormPayload({ kind: body.kind, template: form, values: body.values, today });
+      } else if (body.kind === 'leave') parsed = parseLeavePayload(body, HOLIDAY_DATES);
       else if (body.kind === 'expense') parsed = parseExpensePayload(body);
       else parsed = parseAttendancePayload(body, { today });
       if (parsed.error) return fail(res, parsed);
@@ -557,7 +743,8 @@ export function createGroupwareRouter(io) {
 
       const text = parseDocumentText(body, defaultApprovalTitle(body.kind, payload));
       if (text.error) return fail(res, text);
-      const files = body.kind === 'expense' ? await parseAttachments(body.attachments, ctx.user.id) : { attachments: [] };
+      const files =
+        body.kind === 'expense' || form?.allowAttachments ? await parseAttachments(body.attachments, ctx.user.id) : { attachments: [] };
       if (files.error) return fail(res, files);
 
       const candidates = await approverCandidates(ctx);
@@ -643,7 +830,7 @@ export function createGroupwareRouter(io) {
           targetType: 'approval',
           targetId: outcome.document.id,
           targetLabel: outcome.document.title,
-          detail: `${APPROVAL_KIND_LABEL[outcome.document.kind]} 결재 취소 — ${outcome.document.cancelReason}`,
+          detail: `${approvalLabelOf(outcome.document)} 결재 취소 — ${outcome.document.cancelReason}`,
         });
       }
       const fresh = await findApprovalDocument(req.params.id);
@@ -882,12 +1069,17 @@ export function createGroupwareRouter(io) {
       if (target !== ctx.user.id && !ctx.isManager) return fail(res, { error: '관리자만 남의 근태를 볼 수 있습니다.', status: 403 });
       const from = days[0];
       const to = days[days.length - 1];
-      const [records, leaves] = await Promise.all([
+      const [records, leaves, trips, overtime] = await Promise.all([
         listAttendanceInRange({ scopeKey: ctx.scopeKey, from, to, userId: target }),
         listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds: [target] }),
+        listApprovedTrips({ scopeKey: ctx.scopeKey, from, to, userIds: [target] }),
+        listApprovedOvertime({ scopeKey: ctx.scopeKey, from, to, userIds: [target] }),
       ]);
       const leaveByDate = new Map();
       for (const l of leaves) leaveDaysOf(l, leaveByDate);
+      const tripDates = new Set();
+      for (const t of trips) tripDaysOf(t, tripDates);
+      const overtimeByDate = overtimeByDateOf(overtime);
       const byDate = new Map(records.map((r) => [r.workDate, r]));
       const today = localDateKey(new Date());
       res.json({
@@ -898,10 +1090,22 @@ export function createGroupwareRouter(io) {
             date: day,
             holiday: HOLIDAYS.find((h) => h.date === day)?.name ?? null,
             leave: leave ? { type: leave.type, halfDays: leave.halfDays } : null,
+            trip: tripDates.has(day),
+            overtimeMinutes: overtimeByDate.get(day) ?? 0,
             record: attendanceDto(byDate.get(day) ?? null, ctx, leave),
           };
         }),
-        summary: summarizeMonth({ monthKey: month, records, leaveByDate, holidays: HOLIDAY_DATES, workStart: ctx.workStart, workEnd: ctx.workEnd, today }),
+        summary: summarizeMonth({
+          monthKey: month,
+          records,
+          leaveByDate,
+          tripDates,
+          overtimeByDate,
+          holidays: HOLIDAY_DATES,
+          workStart: ctx.workStart,
+          workEnd: ctx.workEnd,
+          today,
+        }),
       });
     }),
   );
@@ -913,9 +1117,11 @@ export function createGroupwareRouter(io) {
     const to = days[days.length - 1];
     const members = (await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).filter((m) => !m.suspendedAt);
     const memberIds = members.map((m) => m.id);
-    const [records, leaves] = await Promise.all([
+    const [records, leaves, trips, overtime] = await Promise.all([
       listAttendanceInRange({ scopeKey: ctx.scopeKey, from, to }),
       listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
+      listApprovedTrips({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
+      listApprovedOvertime({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
     ]);
     const today = localDateKey(new Date());
     return members
@@ -923,13 +1129,26 @@ export function createGroupwareRouter(io) {
         const leaveByDate = new Map();
         for (const l of leaves.filter((x) => x.authorId === m.id)) leaveDaysOf(l, leaveByDate);
         const mine = records.filter((r) => r.userId === m.id);
+        const tripDates = new Set();
+        for (const t of trips.filter((x) => x.authorId === m.id)) tripDaysOf(t, tripDates);
+        const overtimeByDate = overtimeByDateOf(overtime.filter((x) => x.authorId === m.id));
         return {
           userId: m.id,
           name: m.name,
           username: m.username,
           records: mine,
           leaveByDate,
-          summary: summarizeMonth({ monthKey: month, records: mine, leaveByDate, holidays: HOLIDAY_DATES, workStart: ctx.workStart, workEnd: ctx.workEnd, today }),
+          summary: summarizeMonth({
+            monthKey: month,
+            records: mine,
+            leaveByDate,
+            tripDates,
+            overtimeByDate,
+            holidays: HOLIDAY_DATES,
+            workStart: ctx.workStart,
+            workEnd: ctx.workEnd,
+            today,
+          }),
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
@@ -968,6 +1187,8 @@ export function createGroupwareRouter(io) {
           { header: '퇴근 누락', key: 'missingClockOut', width: 9 },
           { header: '결근', key: 'absent', width: 6 },
           { header: '휴가(일)', key: 'leaveDays', width: 9 },
+          { header: '출장(일)', key: 'tripDays', width: 9 },
+          { header: '연장근무(시간)', key: 'overtimeHours', width: 13 },
         ];
         for (const r of rows) {
           summary.addRow({
@@ -976,6 +1197,7 @@ export function createGroupwareRouter(io) {
             ...r.summary,
             hours: Math.round((r.summary.workedMinutes / 60) * 10) / 10,
             leaveDays: r.summary.leaveHalfDays / 2,
+            overtimeHours: Math.round((r.summary.overtimeMinutes / 60) * 10) / 10,
           });
         }
         const daily = workbook.addWorksheet('일별 기록');

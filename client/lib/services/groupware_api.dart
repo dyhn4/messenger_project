@@ -59,6 +59,85 @@ class GroupwareApi {
         .cast<String, dynamic>(),
   );
 
+  // ── 결재 양식(서버 approvalForms.js) ──
+
+  /// 이 범위의 결재 양식 — 관리자에게는 꺼진 것까지.
+  Future<List<ApprovalForm>> forms() async => [
+    for (final f in await _getList('/api/groupware/forms${_query()}'))
+      ApprovalForm.fromJson(f),
+  ];
+
+  /// 양식 만들기(관리자) — [fields]의 key는 서버가 매긴다.
+  Future<ApprovalForm> createForm({
+    required String name,
+    String? description,
+    required List<FormFieldDef> fields,
+    bool allowAttachments = false,
+  }) async => ApprovalForm.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/forms',
+              body: _body({
+                'name': name,
+                'description': ?description,
+                'fields': [for (final f in fields) f.toDefinitionJson()],
+                'allowAttachments': allowAttachments,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  /// 양식 바꾸기(관리자) — 기본 양식은 enabled만.
+  Future<ApprovalForm> updateForm(
+    String id, {
+    String? name,
+    String? description,
+    List<FormFieldDef>? fields,
+    bool? allowAttachments,
+    bool? enabled,
+  }) async => ApprovalForm.fromJson(
+    (await _api.requestJson(
+              'PATCH',
+              '/api/groupware/forms/$id',
+              body: _body({
+                'name': ?name,
+                'description': ?description,
+                if (fields != null)
+                  'fields': [for (final f in fields) f.toDefinitionJson()],
+                'allowAttachments': ?allowAttachments,
+                'enabled': ?enabled,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<void> deleteForm(String id) => _api.requestJson(
+    'DELETE',
+    '/api/groupware/forms/$id${_query()}',
+  );
+
+  /// 양식으로 결재 올리기 — [values]는 칸 key → 값(기간·시간대는 {start, end}, 품목 표는 [{name, qty, unitPrice}]).
+  Future<ApprovalDocument> submitForm({
+    required ApprovalForm form,
+    required Map<String, dynamic> values,
+    String? title,
+    List<Map<String, dynamic>> attachments = const [],
+    required List<String> approverIds,
+    List<String> ccIds = const [],
+  }) => submit(
+    kind: form.kind,
+    fields: {
+      if (!form.builtin) 'formId': form.id,
+      'values': values,
+      if (attachments.isNotEmpty) 'attachments': attachments,
+    },
+    title: title,
+    approverIds: approverIds,
+    ccIds: ccIds,
+  );
+
   Future<void> deleteApprovalLine(String id) =>
       _api.requestJson('DELETE', '/api/groupware/approval-lines/$id');
 

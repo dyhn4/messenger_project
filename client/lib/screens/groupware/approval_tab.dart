@@ -6,6 +6,8 @@ import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
+import 'approval_form_widgets.dart';
+import 'approval_forms.dart' show toastSubmitted;
 import 'groupware_screen.dart';
 
 /// 결재 탭 — 결재함(결재할 문서 · 내가 올린 문서 · 결재한 문서 · 참조 문서 · 관리자는 전체 문서). 줄을 누르면 문서 상세.
@@ -57,6 +59,20 @@ class _ApprovalTabState extends State<ApprovalTab> {
     }
   }
 
+  /// "새 결재" — 휴가·지출과 켜진 양식 중에서 골라 올린다. 올렸으면 "내가 올린 문서"로 옮겨 보여 준다.
+  Future<void> _newApproval() async {
+    final doc = await showNewApprovalChooser(
+      context,
+      api: widget.api,
+      ctx: widget.ctx,
+      session: widget.session,
+    );
+    if (doc == null || !mounted) return;
+    toastSubmitted(context, doc);
+    widget.changes.bump();
+    if (_box != ApprovalBox.mine) _select(ApprovalBox.mine);
+  }
+
   void _select(ApprovalBox box) {
     setState(() {
       _box = box;
@@ -95,6 +111,13 @@ class _ApprovalTabState extends State<ApprovalTab> {
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
           child: Row(
             children: [
+              FilledButton.icon(
+                key: const ValueKey('approval-new'),
+                onPressed: _newApproval,
+                icon: const Icon(Icons.edit_document, size: 18),
+                label: const Text('새 결재'),
+              ),
+              const SizedBox(width: 10),
               for (final box in boxes)
                 Padding(
                   padding: const EdgeInsets.only(right: 6),
@@ -360,7 +383,7 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '${doc.kind.label} · ${doc.authorName}',
+                '${doc.kindLabel} · ${doc.authorName}',
                 style: TextStyle(color: hint),
               ),
             ),
@@ -390,6 +413,7 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
           row('분류', '${p['category'] ?? ''}'),
           row('쓴 날', '${p['spentOn'] ?? ''}'),
         ],
+        if (doc.kind.isForm) FormValuesView(doc: doc),
         if (doc.kind == ApprovalKind.attendance) ...[
           row('날짜', '${p['workDate'] ?? ''}'),
           row('출근', '${p['clockIn'] ?? ''}'),

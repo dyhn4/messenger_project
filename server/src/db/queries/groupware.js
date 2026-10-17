@@ -6,6 +6,7 @@ import {
   approvalLines,
   approvalNotifications,
   approvalSteps,
+  approvalTemplates,
   attendanceRecords,
   leaveAdjustments,
   teamMembers,
@@ -250,6 +251,44 @@ export async function listApprovedLeaves({ scopeKey, from, to, userIds = null })
     .where(and(...conditions));
 }
 
+/** [from]~[to]와 겹치는 승인된 출장(양식 'trip' — payload.startDate·endDate)들 — 출장 날은 근태에서 결근으로 세지 않는다. */
+export async function listApprovedTrips({ scopeKey, from, to, userIds = null }) {
+  const conditions = [
+    eq(approvalDocuments.scopeKey, scopeKey),
+    eq(approvalDocuments.kind, 'trip'),
+    eq(approvalDocuments.status, 'approved'),
+    lte(sql`${approvalDocuments.payload}->>'startDate'`, to),
+    gte(sql`${approvalDocuments.payload}->>'endDate'`, from),
+  ];
+  if (userIds) {
+    if (userIds.length === 0) return [];
+    conditions.push(inArray(approvalDocuments.authorId, userIds));
+  }
+  return db
+    .select({ id: approvalDocuments.id, authorId: approvalDocuments.authorId, payload: approvalDocuments.payload })
+    .from(approvalDocuments)
+    .where(and(...conditions));
+}
+
+/** [from]~[to] 사이 승인된 연장근무(양식 'overtime' — payload.workDate·minutes)들. */
+export async function listApprovedOvertime({ scopeKey, from, to, userIds = null }) {
+  const conditions = [
+    eq(approvalDocuments.scopeKey, scopeKey),
+    eq(approvalDocuments.kind, 'overtime'),
+    eq(approvalDocuments.status, 'approved'),
+    gte(sql`${approvalDocuments.payload}->>'workDate'`, from),
+    lte(sql`${approvalDocuments.payload}->>'workDate'`, to),
+  ];
+  if (userIds) {
+    if (userIds.length === 0) return [];
+    conditions.push(inArray(approvalDocuments.authorId, userIds));
+  }
+  return db
+    .select({ id: approvalDocuments.id, authorId: approvalDocuments.authorId, payload: approvalDocuments.payload })
+    .from(approvalDocuments)
+    .where(and(...conditions));
+}
+
 /** 이 사람의 결재 중·승인된 휴가 가운데 [from]~[to](둘 다 포함)와 겹치는 것 하나(없으면 null) — 같은 날 휴가를 두 번 내지 못하게. */
 export async function findOverlappingLeave({ scopeKey, userId, from, to }) {
   const [row] = await db
@@ -457,4 +496,51 @@ export async function revertAttendanceCorrection(tx, docId) {
       updatedAt: new Date(),
     })
     .where(eq(attendanceRecords.id, record.id));
+}
+
+// ── 결재 양식(approvalForms.js) ──
+
+/** 범위의 양식 줄들 — 관리자가 만든 양식과 기본 양식을 켜고 끈 기록. */
+export function listApprovalTemplates(scopeKey) {
+  return db
+    .select()
+    .from(approvalTemplates)
+    .where(eq(approvalTemplates.scopeKey, scopeKey))
+    .orderBy(asc(approvalTemplates.sortOrder), asc(approvalTemplates.createdAt));
+}
+
+export async function findApprovalTemplate(id) {
+  const [row] = await db.select().from(approvalTemplates).where(eq(approvalTemplates.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function insertApprovalTemplate(fields) {
+  const [row] = await db.insert(approvalTemplates).values(fields).returning();
+  return row;
+}
+
+export async function updateApprovalTemplate(id, patch) {
+  const [row] = await db
+    .update(approvalTemplates)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(approvalTemplates.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteApprovalTemplate(id) {
+  await db.delete(approvalTemplates).where(eq(approvalTemplates.id, id));
+}
+
+/** 기본 양식을 이 범위에서 켜고 끈 기록 — 없으면 만들고 있으면 바꾼다. */
+export async function upsertBuiltinTemplate(scopeKey, builtinKey, { name, enabled, sortOrder }) {
+  const [row] = await db
+    .insert(approvalTemplates)
+    .values({ scopeKey, builtinKey, name, fields: [], enabled, sortOrder })
+    .onConflictDoUpdate({
+      target: [approvalTemplates.scopeKey, approvalTemplates.builtinKey],
+      set: { enabled, sortOrder, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
 }

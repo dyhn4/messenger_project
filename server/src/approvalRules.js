@@ -1,4 +1,5 @@
 import { addDaysKey, halfDaysText, isDateKey, leaveRequestAmount, leaveTypeOf } from './annualLeave.js';
+import { defaultFormTitle, FORM_KINDS, MONEY_MAX } from './approvalForms.js';
 import { parseHm } from './attendanceRules.js';
 
 /**
@@ -6,8 +7,22 @@ import { parseHm } from './attendanceRules.js';
  * 쓴다). 결재는 결재선 순서대로 한 사람씩 하고(순차 결재), 누구든 반려하면 그 자리에서 끝난다.
  */
 
-export const APPROVAL_KINDS = Object.freeze(['leave', 'expense', 'attendance']);
-export const APPROVAL_KIND_LABEL = Object.freeze({ leave: '휴가', expense: '지출', attendance: '근태 수정' });
+// 휴가·지출·근태 수정은 전용 화면이 있는 종류, 그 밖은 양식으로 올리는 종류(approvalForms.js — 기본 양식 + 관리자가 만든 'form').
+export const APPROVAL_KINDS = Object.freeze(['leave', 'expense', 'attendance', ...FORM_KINDS]);
+export const APPROVAL_KIND_LABEL = Object.freeze({
+  leave: '휴가',
+  expense: '지출',
+  attendance: '근태 수정',
+  draft: '기안',
+  trip: '출장',
+  purchase: '구매',
+  overtime: '연장근무',
+  form: '양식',
+});
+
+/** 문서의 종류 이름 — 관리자가 만든 양식이면 그 양식 이름(알림·감사 로그). */
+export const approvalLabelOf = (doc) =>
+  doc.kind === 'form' ? (doc.payload?.templateName ?? '결재') : (APPROVAL_KIND_LABEL[doc.kind] ?? '결재');
 export const APPROVAL_STATUSES = Object.freeze(['pending', 'approved', 'rejected', 'withdrawn', 'canceled']);
 
 export const APPROVERS_MAX = 5;
@@ -22,7 +37,7 @@ export const ATTACHMENTS_MAX = 5;
 export const ATTENDANCE_FIX_DAYS = 60;
 
 export const EXPENSE_CATEGORIES = Object.freeze(['교통비', '식대', '비품·소모품', '출장비', '교육비', '접대비', '기타']);
-export const EXPENSE_AMOUNT_MAX = 10_000_000_000;
+export const EXPENSE_AMOUNT_MAX = MONEY_MAX;
 
 const isIdList = (v) => Array.isArray(v) && v.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 64);
 
@@ -95,7 +110,8 @@ export function defaultApprovalTitle(kind, payload) {
     return `${label} 신청 (${range}, ${halfDaysText(payload.halfDays)})`;
   }
   if (kind === 'expense') return `지출 결재 — ${payload.category} ${payload.amount.toLocaleString('ko-KR')}원`;
-  return `근태 수정 (${shortDate(payload.workDate)})`;
+  if (kind === 'attendance') return `근태 수정 (${shortDate(payload.workDate)})`;
+  return defaultFormTitle(kind, payload);
 }
 
 /** 제목·내용 → `{ title, body }`. 제목이 비면 [fallback]. */
@@ -203,7 +219,7 @@ export const APPROVAL_NOTIFICATION_KINDS = Object.freeze(['request', 'approved',
  * 같은 글을 쓴다. 모르는 사건이면 null.
  */
 export function approvalNotificationOf(event, doc) {
-  const label = APPROVAL_KIND_LABEL[doc.kind] ?? '결재';
+  const label = approvalLabelOf(doc);
   switch (event) {
     case 'created':
     case 'next':

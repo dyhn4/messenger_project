@@ -35,6 +35,8 @@ export const AUDIT = {
   groupwareLeaveAdjust: 'groupware.leaveAdjust',
   groupwareSettings: 'groupware.settings',
   groupwareCancel: 'groupware.cancel',
+  // 결재 양식 만들기·바꾸기·지우기, 기본 양식 켜고 끄기(groupware.js /groupware/forms).
+  groupwareForm: 'groupware.form',
   // 토픽 삭제(rooms.js DELETE /rooms/:id) — 메시지·파일이 전부 사라지는 되돌릴 수 없는 일이라 남긴다.
   topicDelete: 'topic.delete',
   // 그룹채팅 → 토픽 전환(rooms.js POST /rooms/:id/convert-to-topic) — 되돌릴 수 없는 일이라 남긴다.

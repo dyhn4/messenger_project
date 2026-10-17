@@ -2542,6 +2542,32 @@ export const approvalNotifications = pgTable(
 );
 
 /**
+ * 결재 양식(approvalForms.js) — 관리자가 만든 양식([builtinKey] null)과, 코드에 정해 둔 기본 양식(일반 기안서·출장 신청·구매 요청·
+ * 연장근무 신청 — [builtinKey]가 그 종류)을 이 범위에서 켜고 끈 기록. 범위([scopeKey])는 그룹웨어 범위('server' 또는 팀 id).
+ * [fields]는 칸 정의 [{ key, label, type, required, options? }] — 문서를 올릴 때 그때의 칸 정의를 문서에 같이 적어 두므로(payload) 양식을
+ * 고치거나 지워도 이미 올린 문서는 그대로 보인다. 기본 양식의 줄은 [enabled]·[sortOrder]만 쓴다.
+ */
+export const approvalTemplates = pgTable(
+  'approval_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    builtinKey: text('builtin_key'),
+    name: text('name').notNull(),
+    description: text('description'),
+    fields: jsonb('fields').notNull(),
+    allowAttachments: boolean('allow_attachments').notNull().default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdByName: text('created_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('approval_templates_scope_idx').on(t.scopeKey), uniqueIndex('approval_templates_builtin_idx').on(t.scopeKey, t.builtinKey)],
+);
+
+/**
  * 저장해 둔 결재선 — 신청할 때 골라 쓰는 "자주 쓰는 결재선"(올린 사람 것). 결재자·참조자 id 목록(jsonb 배열). 나중에 조직도에
  * 상위자를 정하면 그것으로 기본 결재선을 만들 수도 있다(approvalRules.js suggestApprovalLine).
  */

@@ -18,6 +18,7 @@ import 'screens/groupware/approval_notifications.dart'
     show openApprovalDocument;
 import 'screens/groupware/groupware_screen.dart' show openGroupwareScreen;
 import 'screens/mail/mail_screen.dart' show openMailScreen;
+import 'screens/share_target_screen.dart' show showShareTargetScreen;
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/project/project_window.dart';
@@ -28,6 +29,7 @@ import 'services/app_platform.dart';
 import 'services/app_settings.dart';
 import 'services/deep_link_service.dart';
 import 'services/fcm_config_cache.dart';
+import 'services/home_widget_bridge.dart';
 import 'services/notification_popup.dart'
     if (dart.library.js_interop) 'services/notification_popup_stub.dart';
 import 'services/notification_controller.dart' show NotificationTab;
@@ -35,6 +37,7 @@ import 'services/notification_service.dart';
 import 'services/password_ime.dart';
 import 'services/pinned_tls.dart';
 import 'services/session.dart';
+import 'services/share_intake.dart';
 import 'services/web_launch_invite.dart';
 import 'services/web_page_color.dart';
 import 'services/web_keyboard_fix.dart';
@@ -259,6 +262,45 @@ class _MyAppState extends State<MyApp>
   // session이 바뀔 때마다(=_tryOpenPendingLaunchRoom) 다시 시도한다.
   String? _pendingLaunchRoomId;
 
+  /// 다른 앱에서 "공유 → TangoTalk"으로 받은 것 — 로그인·방 목록이 준비되면 보낼 방을 고르는 화면을 연다(share_intake.dart).
+  final _shareIntake = ShareIntake();
+  SharedPayload? _pendingShare;
+  bool _shareScreenOpen = false;
+
+  /// 홈 화면 위젯 "안 읽은 대화"에 내용을 넘긴다(안드로이드).
+  late final _homeWidget = HomeWidgetBridge(session);
+
+  void _onShareReceived(SharedPayload payload) {
+    _pendingShare = payload;
+    _tryOpenPendingShare();
+  }
+
+  /// 위젯에서 방을 눌렀다 — 알림을 눌렀을 때와 같은 길로 연다(방 목록이 올 때까지 기다린다).
+  void _onWidgetRoom(String roomId) {
+    _pendingLaunchRoomId = roomId;
+    _tryOpenPendingLaunchRoom();
+  }
+
+  Future<void> _tryOpenPendingShare() async {
+    final payload = _pendingShare;
+    if (payload == null || _shareScreenOpen) return;
+    if (session.stage != AuthStage.ready || session.rooms.isEmpty) return;
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+    _pendingShare = null;
+    _shareScreenOpen = true;
+    try {
+      final room = await showShareTargetScreen(
+        context,
+        session: session,
+        payload: payload,
+      );
+      if (room != null) await _openRoomFromNotification(room.id);
+    } finally {
+      _shareScreenOpen = false;
+    }
+  }
+
   /// 안드로이드 — OS가 그린 FCM 알림(결재처럼 서버가 notification을 실어 보내는 것)을 눌러 앱이 열렸을 때를 듣고 있는지.
   /// Firebase는 캐시된 설정이 있으면 main()에서, 처음 로그인이면 그 뒤 Session이 초기화하므로 [_hookFcmTaps]가 늦게도 건다.
   bool _fcmTapsHooked = false;
@@ -277,7 +319,12 @@ class _MyAppState extends State<MyApp>
         .init(onTap: _openRoomFromNotification)
         .then((_) => _checkNotificationLaunch());
     session.addListener(_tryOpenPendingLaunchRoom);
+    session.addListener(_tryOpenPendingShare);
     session.init();
+    unawaited(
+      _shareIntake.start(onShare: _onShareReceived, onOpenRoom: _onWidgetRoom),
+    );
+    _homeWidget.start();
     AppLock.install(session);
     deepLinks.getInitialPairRequest().then((req) {
       if (req != null) _onPairRequest(req);

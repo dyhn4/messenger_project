@@ -13,6 +13,15 @@ import {
 } from '../schema.js';
 import { fileKindSql } from '../../fileKinds.js';
 
+/** 같은 사람이 같은 임시 id(client_id)로 보낸 메시지 — 보내기 대기열이 다시 보냈을 때(sendMessage.js). 없으면 null. */
+export async function findMessageByClientId(senderId, clientId) {
+  const [row] = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.senderId, senderId), eq(messages.clientId, clientId)));
+  return row ?? null;
+}
+
 export async function insertMessage(fields) {
   const [row] = await db.insert(messages).values(fields).returning();
   return row;

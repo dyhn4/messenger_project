@@ -68,7 +68,30 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="tangotalk"/>
             </intent-filter>
+            <!-- 다른 앱(갤러리·파일·브라우저 등)의 "공유 → TangoTalk" — 글·파일 하나/여러 개. 받은 것은 MainActivity.kt가
+                 앱으로 넘기고, 앱이 보낼 대화방을 고르게 한다(share_intake.dart). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
         </activity>
+        <!-- 홈 화면 위젯 "안 읽은 대화"(UnreadWidgetProvider.kt — 내용은 앱이 넘긴다). -->
+        <receiver
+            android:name=".UnreadWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/unread_widget_info"/>
+        </receiver>
         <!-- flutter_foreground_task의 서비스(이름은 바꾸면 안 됨). stopWithTask=true라
              최근 앱에서 앱을 밀어 없애면 통화 서비스도 같이 끝난다. -->
         <service

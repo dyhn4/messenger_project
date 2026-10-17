@@ -24,6 +24,7 @@ import '../widgets/notifications_panel.dart';
 import '../widgets/team_switcher.dart';
 import '../widgets/topic_folder_widgets.dart';
 import '../widgets/team_name_badge.dart';
+import '../widgets/outbox_strip.dart' show ConnectionLostBanner;
 import '../widgets/unread_badge.dart';
 import '../widgets/user_avatar.dart';
 import 'admin_console_screen.dart';
@@ -427,6 +428,7 @@ class _RoomTypeTabState extends State<_RoomTypeTab> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        ConnectionLostBanner(session: widget.session),
         _SearchBox(session: widget.session),
         Expanded(
           child: ListenableBuilder(

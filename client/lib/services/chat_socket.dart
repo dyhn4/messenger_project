@@ -462,7 +462,10 @@ class RoomRemovedEvent {
 /// 있게 toString이 "Exception: " 없이 문구만 돌려준다(읽기 전용 토픽 안내 등).
 class MessageSendException implements Exception {
   final String message;
-  const MessageSendException(this.message);
+
+  /// 연결 문제(끊김·응답 없음)라 다시 보내면 될 수 있는지 — 서버가 거절한 것(권한·길이 등)은 false. 보내기 대기열이 다시 보낼지 정한다.
+  final bool transient;
+  const MessageSendException(this.message, {this.transient = false});
   @override
   String toString() => message;
 }
@@ -559,6 +562,14 @@ class ChatSocket {
   final _inquiryNewController = StreamController<Inquiry>.broadcast();
   final _inquiryStatusChangedController = StreamController<Inquiry>.broadcast();
   final _reconnectController = StreamController<void>.broadcast();
+
+  /// message:new를 서버가 준 모양 그대로 — 오프라인 보기 저장(offline_cache.dart)이 쓴다.
+  final _rawMessageController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get rawMessages => _rawMessageController.stream;
+
+  /// 붙었다(true)·끊겼다(false) — 처음 붙을 때도 온다. 보내기 대기열·"연결 끊김" 표시가 듣는다.
+  final _connectionController = StreamController<bool>.broadcast();
   final _authErrorController = StreamController<void>.broadcast();
   final _connectFailedController = StreamController<void>.broadcast();
   final _roleUpdatedController = StreamController<void>.broadcast();
@@ -596,6 +607,8 @@ class ChatSocket {
       StreamController<Map<String, dynamic>>.broadcast();
   final _mailNewController = StreamController<Map<String, dynamic>>.broadcast();
   final _mailChangedController = StreamController<void>.broadcast();
+  final _draftChangedController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _scheduledMessageEventController =
       StreamController<ScheduledMessageEvent>.broadcast();
   final _scheduledChangedController = StreamController<String>.broadcast();
@@ -659,6 +672,10 @@ class ChatSocket {
 
   /// 메일 계정을 연결·해제했다(mail:changed — 내 다른 기기).
   Stream<void> get mailChanged => _mailChangedController.stream;
+
+  /// 내 다른 기기에서 임시 저장을 고쳤다(draft:changed — 서버 drafts.js) — `{ roomId, text(지웠으면 null), format, mentions, updatedAt, deviceId }`.
+  Stream<Map<String, dynamic>> get draftChanged =>
+      _draftChangedController.stream;
 
   /// 내(다른 기기 포함) 토픽 폴더가 바뀌었을 때(topic-folders:changed) — 그 팀 id가 흐른다.
   Stream<String> get topicFoldersChanged =>
@@ -822,6 +839,9 @@ class ChatSocket {
   /// 끊긴 동안 놓친 메시지/방 상태를 다시 받아오는 용도.
   Stream<void> get reconnected => _reconnectController.stream;
 
+  /// 붙었다(true)·끊겼다(false).
+  Stream<bool> get connectionChanges => _connectionController.stream;
+
   /// 서버 운영자가 관리자 콘솔에서 내 계정 등급/서버 운영자 여부를 바꿨을 때 — 로그아웃
   /// 없이 바로 반영하려고, 이 이벤트를 받으면 Session이 /users/me를 다시 불러온다.
   Stream<void> get roleUpdated => _roleUpdatedController.stream;
@@ -926,9 +946,9 @@ class ChatSocket {
     );
 
     socket.on('message:new', (data) {
-      _messageController.add(
-        Message.fromJson(Map<String, dynamic>.from(data as Map)),
-      );
+      final raw = Map<String, dynamic>.from(data as Map);
+      _messageController.add(Message.fromJson(raw));
+      _rawMessageController.add(raw);
     });
     socket.on('room:created', (data) {
       _roomController.add(
@@ -984,6 +1004,11 @@ class ChatSocket {
       if (data is Map) _mailNewController.add(Map<String, dynamic>.from(data));
     });
     socket.on('mail:changed', (_) => _mailChangedController.add(null));
+    socket.on('draft:changed', (data) {
+      if (data is Map) {
+        _draftChangedController.add(Map<String, dynamic>.from(data));
+      }
+    });
     socket.on('attendance:reminder', (data) {
       if (data is Map) {
         _attendanceReminderController.add(Map<String, dynamic>.from(data));
@@ -1285,6 +1310,8 @@ class ChatSocket {
       );
     });
     socket.onReconnect((_) => _reconnectController.add(null));
+    socket.onConnect((_) => _connectionController.add(true));
+    socket.onDisconnect((_) => _connectionController.add(false));
     void onFailure(dynamic err) => _looksLikeAuthError(err)
         ? _authErrorController.add(null)
         : _connectFailedController.add(null);
@@ -1378,6 +1405,16 @@ class ChatSocket {
       'forwardedFromCreatedAt': ?forwardedFromCreatedAt,
       'inquiryId': ?inquiryId,
     };
+    return sendPayload(payload);
+  }
+
+  /// 만들어 둔 message:send 본문을 보낸다 — 보내기 대기열(message_outbox.dart)이 임시 id(clientId)를 실어 다시 보낼 때도 쓴다.
+  /// [requireConnection]이면 끊겨 있을 때 소켓에 쌓아 두지 않고 바로 연결 문제로 실패한다(대기열이 붙은 뒤 다시 보낸다 — 쌓아 둔 것과
+  /// 대기열이 둘 다 보내면 서버가 임시 id로 하나만 남기지만, 기다리는 15초 동안 화면이 멈춘 듯 보인다).
+  Future<Message?> sendPayload(
+    Map<String, dynamic> payload, {
+    bool requireConnection = false,
+  }) {
     if (!fitsSocketMessage(payload)) {
       return Future.error(
         const MessageSendException('메시지가 너무 깁니다. 나눠서 보내 주세요.'),
@@ -1387,8 +1424,10 @@ class ChatSocket {
     if (override != null) return override(payload).then(_messageFromAck);
 
     final socket = _socket;
-    if (socket == null) {
-      return Future.error(const MessageSendException('서버와 연결되어 있지 않습니다.'));
+    if (socket == null || (requireConnection && !socket.connected)) {
+      return Future.error(
+        const MessageSendException('서버와 연결되어 있지 않습니다.', transient: true),
+      );
     }
 
     final completer = Completer<Message?>();
@@ -1409,8 +1448,10 @@ class ChatSocket {
     );
     return completer.future.timeout(
       const Duration(seconds: 15),
-      onTimeout: () =>
-          throw const MessageSendException('서버 응답이 없습니다. 연결 상태를 확인해주세요.'),
+      onTimeout: () => throw const MessageSendException(
+        '서버 응답이 없습니다. 연결 상태를 확인해주세요.',
+        transient: true,
+      ),
     );
   }
 

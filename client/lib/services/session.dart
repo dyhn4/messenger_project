@@ -49,6 +49,9 @@ import 'notification_api.dart';
 import 'notification_controller.dart';
 import 'deep_link_service.dart';
 import 'device_identity.dart';
+import 'draft_sync.dart';
+import 'message_outbox.dart';
+import 'offline_cache.dart';
 import 'download_storage.dart';
 import 'favorites_api.dart';
 import 'favorites_controller.dart';
@@ -314,6 +317,117 @@ class Session extends ChangeNotifier {
   /// (favorites_controller.dart). 로그인하면 [_enterApp]이 id를 받아 두고, 로그아웃하면 [logout]이 비운다.
   /// 대화방마다 쓰다 만 글(임시 저장 — chat_draft_store.dart). 어느 방에 글이 생기거나 없어지면 방 목록의 ✏️를 다시 그린다.
   late final chatDrafts = ChatDraftStore(onChanged: notifyListeners);
+
+  /// 임시 저장을 내 다른 기기와 맞춘다(draft_sync.dart — 서버 drafts.js). 로그인·다시 연결될 때 서버와 맞추고, 소켓으로 받는다.
+  late final draftSync = DraftSync(
+    store: chatDrafts,
+    push: (roomId, draft, deviceId) async {
+      final client = api;
+      if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+      return client.putDraft(roomId, DraftSync.draftToJson(draft, deviceId));
+    },
+    fetchAll: () async {
+      final client = api;
+      if (client == null) throw const ApiException('연결되어 있지 않습니다.');
+      return client.fetchDrafts();
+    },
+    deviceId: () => deviceIdentity?.deviceId,
+  );
+  StreamSubscription? _draftChangedSub;
+
+  /// 보내기 대기열(message_outbox.dart) — 비밀 대화가 아닌 방의 글·이모티콘·첨부 메시지. 연결되면 기다리던 것을 보낸다.
+  late final outbox = MessageOutbox(
+    send: (payload) => chatSocket.sendPayload(payload, requireConnection: true),
+  );
+
+  /// 오프라인 보기 저장소(offline_cache.dart) — 팀·방 목록·방마다 최근 메시지. 서버에 닿지 않으면 이걸로 보여 준다.
+  late final offlineCache = OfflineCache();
+  StreamSubscription? _rawMessageSub;
+
+  /// 지금 목록이 서버가 아니라 이 기기에 저장해 둔 것인지(앱을 켤 때 서버에 닿지 않았다) — 다시 연결되면 서버 것으로 바뀐다.
+  bool showingCachedData = false;
+
+  /// 받은 응답을 오프라인 보기로 저장한다 — 비밀 대화의 메시지는 넣지 않는다.
+  void _cacheRaw(String key, List<Object?> raw) {
+    if (key == 'teams') {
+      offlineCache.saveTeams(raw);
+    } else if (key.startsWith('rooms:')) {
+      offlineCache.saveRooms(key.substring(6), [
+        for (final r in raw)
+          if (r is! Map || r['isSecret'] != true) r,
+      ]);
+    } else if (key.startsWith('messages:')) {
+      final roomId = key.substring(9);
+      final room = _findRoom(roomId);
+      if (room == null || room.isSecret) return;
+      offlineCache.saveMessages(roomId, raw);
+    }
+  }
+
+  /// 서버에 닿지 않을 때 — 저장해 둔 팀·방 목록을 꺼낸다. 꺼냈으면 true.
+  Future<bool> _loadTeamsAndRoomsFromCache() async {
+    if (!offlineCache.enabled) return false;
+    final rawTeams = await offlineCache.teams();
+    if (rawTeams.isEmpty) return false;
+    final cachedTeams = <Team>[];
+    final cachedRooms = <Room>[];
+    try {
+      for (final t in rawTeams) {
+        final team = Team.fromJson(t);
+        cachedTeams.add(team);
+        for (final r in await offlineCache.rooms(team.id)) {
+          final room = Room.fromJson(r);
+          if (!room.isSecret) cachedRooms.add(room);
+        }
+      }
+    } catch (_) {
+      return false;
+    }
+    teams
+      ..clear()
+      ..addAll(cachedTeams);
+    rooms
+      ..clear()
+      ..addAll(cachedRooms);
+    showingCachedData = true;
+    notifyListeners();
+    return true;
+  }
+
+  /// 방을 열었는데 서버에 닿지 않을 때 — 이 기기에 저장해 둔 그 방의 최근 메시지(비밀 대화는 없다).
+  Future<List<Message>> cachedMessages(Room room) async {
+    if (room.isSecret) return const [];
+    try {
+      return [
+        for (final m in await offlineCache.messages(room.id))
+          Message.fromJson(m),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// 서버와의 실시간 연결이 끊긴 지 잠깐(3초) 지났는지 — 화면 위 "연결이 끊겼습니다" 띠(잠깐 끊겼다 붙는 것은 보이지 않게).
+  bool connectionLost = false;
+  Timer? _connectionLostTimer;
+  StreamSubscription? _connectionSub;
+
+  void _onConnectionChanged(bool connected) {
+    _connectionLostTimer?.cancel();
+    if (connected) {
+      unawaited(outbox.drain());
+      if (connectionLost) {
+        connectionLost = false;
+        notifyListeners();
+      }
+      return;
+    }
+    _connectionLostTimer = Timer(const Duration(seconds: 3), () {
+      if (connectionLost || token == null) return;
+      connectionLost = true;
+      notifyListeners();
+    });
+  }
 
   late final favorites = FavoritesController(
     apiProvider: () => RemoteFavoritesApi(api!),
@@ -1716,14 +1830,21 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> _enterApp() async {
+    // 받은 목록·메시지를 오프라인 보기로 저장한다(서버·사람마다 — offline_cache.dart).
+    if (serverUrl != null && userId != null) {
+      await offlineCache.configure(serverUrl!, userId!);
+    }
+    api?.onCacheable = _cacheRaw;
     try {
       // 팀 먼저 — 방은 팀 안에만 있으므로, 내가 속한 팀들을 받아온 뒤 그 팀들의 방을 전부
       // 불러온다(다른 팀 메시지도 실시간으로 받아야 해서 화면에 보이는 팀 것만 들고 있으면
       // 안 된다, rooms 필드 주석 참고). 어느 팀에 들어갈지는 사용자가 팀 선택 화면에서
       // 고르므로 여기서 currentTeam을 정하지는 않는다.
       await _loadTeamsAndRooms();
+      showingCachedData = false;
     } catch (e) {
-      error = e.toString();
+      // 서버에 닿지 않으면 저장해 둔 목록으로 들어간다(다시 연결되면 _resyncAfterReconnect가 서버 것으로 맞춘다).
+      if (!await _loadTeamsAndRoomsFromCache()) error = e.toString();
     }
 
     try {
@@ -1755,7 +1876,14 @@ class Session extends ChangeNotifier {
     if (canUseProjects) unawaited(refreshProjectUnread());
     unawaited(notificationCenter.refreshCounts());
     unawaited(notificationCenter.loadViewPrefs());
-    if (userId != null) unawaited(chatDrafts.load(_prefs, userId!));
+    if (userId != null) {
+      // 지난번에 못 보낸 메시지 — 연결되면(아래 소켓) 보낸다.
+      unawaited(outbox.load(_prefs, userId!));
+      // 이 기기의 글을 먼저 불러온 뒤 서버와 맞춘다(나중에 고친 쪽이 남는다).
+      unawaited(
+        chatDrafts.load(_prefs, userId!).then((_) => draftSync.start()),
+      );
+    }
     unawaited(favorites.loadIds());
 
     // 위 fetchRooms/fetchMe 도중 401 → 리프레시 시도 → refreshToken마저 무효라 강제
@@ -2243,7 +2371,22 @@ class Session extends ChangeNotifier {
     _reconnectSub = chatSocket.reconnected.listen((_) {
       _reannounceCall();
       unawaited(_resyncAfterReconnect());
+      // 끊긴 동안 다른 기기에서 고친 임시 저장을 받고, 못 보낸 것을 보낸다.
+      unawaited(draftSync.start());
     });
+    _draftChangedSub?.cancel();
+    _draftChangedSub = chatSocket.draftChanged.listen(draftSync.handleRemote);
+    _connectionSub?.cancel();
+    _connectionSub = chatSocket.connectionChanges.listen(_onConnectionChanged);
+    _rawMessageSub?.cancel();
+    _rawMessageSub = chatSocket.rawMessages.listen((raw) {
+      final roomId = raw['roomId'];
+      if (roomId is! String) return;
+      final room = _findRoom(roomId);
+      if (room == null || room.isSecret) return;
+      unawaited(offlineCache.appendMessage(roomId, raw));
+    });
+    if (chatSocket.isConnected) unawaited(outbox.drain());
     _connectFailureSub?.cancel();
     _connectFailureSub = chatSocket.connectFailures.listen(
       (_) => unawaited(_reselectServerEndpoint()),
@@ -2663,6 +2806,8 @@ class Session extends ChangeNotifier {
         freshRooms.addAll(await api!.fetchRooms(team.id));
       }
       _noteServerTimesOfRooms(freshRooms);
+      // 저장해 둔 목록으로 켰다면 이제 서버 것이다.
+      showingCachedData = false;
       final freshIds = freshRooms.map((r) => r.id).toSet();
       for (final fresh in freshRooms) {
         // 목록을 받는 사이 내보내졌거나 삭제된 방 — 받은 목록이 그보다 먼저 만들어진 것이라
@@ -3511,6 +3656,8 @@ class Session extends ChangeNotifier {
   /// 안읽음·알림. 테스트가 소켓 없이 같은 경로를 태울 수 있게 밖으로 열어 둔다.
   @visibleForTesting
   Future<void> handleSocketMessage(Message m) async {
+    // 대기열에서 보낸 내 메시지가 되돌아왔다 — 대기 말풍선을 지운다.
+    if (m.senderId != null && m.senderId == userId) outbox.handleIncoming(m);
     await decryptInPlace(_findRoom(m.roomId), m);
     _controllers[m.roomId]?.feed(m);
     if (m.isPoll) pollEvents.emitCreated(m); // 투표 목록 패널의 "새 투표" 알림줄.
@@ -4581,6 +4728,8 @@ class Session extends ChangeNotifier {
   void handleRoomRemoved(RoomRemovedEvent event) {
     final room = _findRoom(event.roomId);
     if (room == null) return;
+    // 더 이상 보낼 수 없는 방 — 기다리던 메시지를 버린다.
+    outbox.dropRoom(event.roomId);
     // 서버가 나를 뺀 비밀 대화는 다시 들어갈 수 없다 — 이 기기에 남은 키와 평문도 지운다.
     if (room.isSecret) {
       unawaited(secretSessionManager?.forgetRoom(event.roomId));
@@ -5475,6 +5624,9 @@ class Session extends ChangeNotifier {
     await _messageExpiredSub?.cancel();
     await _roomRemovedSub?.cancel();
     await _topicFoldersChangedSub?.cancel();
+    await _draftChangedSub?.cancel();
+    await _connectionSub?.cancel();
+    await _rawMessageSub?.cancel();
     await _scheduledEventSub?.cancel();
     await _scheduledChangedSub?.cancel();
     await _groupwareChangedSub?.cancel();
@@ -5490,6 +5642,12 @@ class Session extends ChangeNotifier {
     calendar.reset(); // 캘린더 캐시도 — 다음에 로그인하는 사람에게 남지 않게.
     notificationCenter.reset(); // 알림 센터 목록·개수도 같은 이유로.
     favorites.reset(); // 즐겨찾기 id·목록도.
+    draftSync.reset(); // 서버로 보내려던 임시 저장도 버린다.
+    outbox.reset(); // 보내기 대기열도 메모리에서는(이 기기 저장분은 같은 사람이 다시 로그인하면 보낸다).
+    unawaited(offlineCache.clear()); // 오프라인 보기 저장분은 지운다(공용 PC에 대화가 남지 않게).
+    showingCachedData = false;
+    _connectionLostTimer?.cancel();
+    connectionLost = false;
     unawaited(
       chatDrafts.reset(),
     ); // 임시 저장 글도 메모리에서는(이 기기 저장분은 같은 사람이 다시 로그인하면 돌아온다).

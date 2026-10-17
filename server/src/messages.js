@@ -90,6 +90,8 @@ export function toMessageDto(m) {
     senderId: m.senderId,
     senderName: m.senderName,
     type: m.type,
+    // 앱이 보낼 때 붙인 임시 id(보내기 대기열 — 보낸 사람의 앱이 대기 중인 말풍선을 이 값으로 지운다). 없으면 null.
+    clientId: m.clientId ?? null,
     // 보드 뷰 게시글('post')의 제목과 고정 시각 — 다른 메시지는 둘 다 null.
     title: m.deletedAt ? null : (m.title ?? null),
     pinnedAt: m.pinnedAt && !m.deletedAt ? new Date(m.pinnedAt).getTime() : null,

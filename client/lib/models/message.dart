@@ -193,6 +193,9 @@ class Message {
   final bool isInquiryNotice;
   final String? inquiryId;
 
+  /// 보낼 때 붙인 임시 id(보내기 대기열 — message_outbox.dart). 내가 보낸 메시지가 되돌아오면 이 값으로 대기 중인 말풍선을 지운다.
+  final String? clientId;
+
   /// 보드 뷰 게시글(서버 type 'post')인지 — [type]은 text로 두고(본문은 [text]) 이 값으로만
   /// 구분한다(_typeFromString 참고).
   final bool isPost;
@@ -271,6 +274,7 @@ class Message {
     this.linkPreview,
     this.isInquiryNotice = false,
     this.inquiryId,
+    this.clientId,
     this.isPost = false,
     this.title,
     this.pinnedAt,
@@ -372,6 +376,7 @@ class Message {
           : LinkPreview.fromJson(json['linkPreview'] as Map<String, dynamic>),
       isInquiryNotice: json['isInquiryNotice'] as bool? ?? false,
       inquiryId: json['inquiryId'] as String?,
+      clientId: json['clientId'] as String?,
       isPost: json['type'] == 'post',
       title: json['title'] as String?,
       pinnedAt: (json['pinnedAt'] as num?) != null

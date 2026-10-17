@@ -13,9 +13,10 @@ typedef ChatDraft = ({
   List<Mention> mentions,
 });
 
-/// 대화방마다 쓰다 만 글(임시 저장) — 다른 방에 갔다 와도, 앱을 껐다 켜도 남는다. 이 기기에만 사람별로 저장하고(다른 기기와
-/// 맞추지는 않는다), 오래된 것(30일)·너무 많은 것(200개)은 버린다. 비밀 대화의 글은 화면 밖에 평문으로 남기지 않으려고 메모리에만
-/// 둔다(앱을 끄면 사라진다).
+/// 대화방마다 쓰다 만 글(임시 저장) — 다른 방에 갔다 와도, 앱을 껐다 켜도 남는다. 이 기기에 사람별로 저장하고, 내 다른 기기와는
+/// [DraftSync](draft_sync.dart — 서버 drafts.js)가 맞춘다: 여기서 고친 글은 [onLocalEdit]로 알리고, 다른 기기에서 고친 글은
+/// [applyRemote]로 받는다(더 나중에 고친 것이 이긴다). 오래된 것(30일)·너무 많은 것(200개)은 버린다. 비밀 대화의 글은 화면 밖에
+/// 평문으로 남기지 않으려고 메모리에만 두고 서버에도 보내지 않는다(앱을 끄면 사라진다).
 ///
 /// 방 목록의 ✏️ 표시는 [has]로 그리고, 어느 방에 글이 생기거나 없어질 때만 [onChanged]를 부른다(글자마다 앱 전체를 다시 그리지
 /// 않게). Session이 하나만 들고 있고(session.chatDrafts) 로그인하면 [load], 로그아웃하면 [reset].
@@ -24,6 +25,16 @@ class ChatDraftStore {
 
   /// 어느 방에 임시 저장 글이 생기거나 없어졌을 때.
   final void Function()? onChanged;
+
+  /// 이 기기에서 글을 고쳤을 때(저장하는 글만 — 비밀 대화는 아님). [DraftSync]가 서버로 보낸다. 지웠으면 draft가 null.
+  void Function(String roomId, ChatDraft? draft)? onLocalEdit;
+
+  /// 다른 기기에서 고친 글을 받아 바뀐 방 — 열려 있는 입력칸이 손대지 않은 채면 새 글로 바꾼다(chat_input_bar.dart).
+  final _remoteChanges = StreamController<String>.broadcast();
+  Stream<String> get remoteChanges => _remoteChanges.stream;
+
+  /// 이 기기에서 지운 시각(앱을 켜 둔 동안만) — 그보다 오래된 다른 기기의 글이 되살아나지 않게.
+  final Map<String, DateTime> _deletedAt = {};
 
   static const maxDrafts = 200;
   static const maxAge = Duration(days: 30);
@@ -76,6 +87,45 @@ class ChatDraftStore {
 
   ChatDraft? get(String roomId) => _drafts[roomId]?.draft;
 
+  /// 이 방의 글을 마지막으로 고친 시각(없으면 null).
+  DateTime? savedAt(String roomId) => _drafts[roomId]?.savedAt;
+
+  /// 저장하는(서버와 맞추는) 글들 — 비밀 대화는 빠진다.
+  List<({String roomId, ChatDraft draft, DateTime savedAt})>
+  get persistedEntries => [
+    for (final e in _drafts.entries)
+      if (e.value.persist)
+        (roomId: e.key, draft: e.value.draft, savedAt: e.value.savedAt),
+  ];
+
+  /// 다른 기기에서 고친 글([draft]가 null이면 지움) — [at](서버가 받은 시각)이 이 기기에서 고치거나 지운 시각보다 나중일 때만 바꾼다.
+  /// 바꿨으면 true. 비밀 대화의 방(메모리에만 둔 글)은 건드리지 않는다.
+  bool applyRemote(String roomId, ChatDraft? draft, DateTime at) {
+    final local = _drafts[roomId];
+    if (local != null && !local.persist) return false;
+    if (local != null && !local.savedAt.isBefore(at)) return false;
+    final deleted = _deletedAt[roomId];
+    if (local == null && deleted != null && !deleted.isBefore(at)) return false;
+    final empty = draft == null || draft.text.trim().isEmpty;
+    if (empty) {
+      if (local == null) return false;
+      _drafts.remove(roomId);
+      _deletedAt[roomId] = at;
+    } else {
+      if (local != null &&
+          local.draft.text == draft.text &&
+          _sameFormat(local.draft, draft)) {
+        _drafts[roomId] = (draft: local.draft, savedAt: at, persist: true);
+        return false;
+      }
+      _drafts[roomId] = (draft: draft, savedAt: at, persist: true);
+    }
+    _notifyLater();
+    _scheduleSave();
+    _remoteChanges.add(roomId);
+    return true;
+  }
+
   /// 이 방에 쓰다 만 글이 있는지(방 목록의 ✏️).
   bool has(String roomId) => _drafts.containsKey(roomId);
 
@@ -85,7 +135,12 @@ class ChatDraftStore {
     final empty = draft == null || draft.text.trim().isEmpty;
     if (empty) {
       if (!had) return;
+      final wasPersisted = _drafts[roomId]!.persist;
       _drafts.remove(roomId);
+      if (wasPersisted) {
+        _deletedAt[roomId] = DateTime.now();
+        onLocalEdit?.call(roomId, null);
+      }
     } else {
       final old = _drafts[roomId];
       if (old != null &&
@@ -99,6 +154,7 @@ class ChatDraftStore {
         savedAt: DateTime.now(),
         persist: persist,
       );
+      if (persist) onLocalEdit?.call(roomId, draft);
     }
     if (had != _drafts.containsKey(roomId)) _notifyLater();
     _scheduleSave();
@@ -164,6 +220,7 @@ class ChatDraftStore {
   Future<void> reset() async {
     if (_saveTimer != null) await flush();
     _drafts.clear();
+    _deletedAt.clear();
     _prefs = null;
     _userId = null;
     onChanged?.call();

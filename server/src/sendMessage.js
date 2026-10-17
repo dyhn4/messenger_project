@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { findInquiryById } from './db/queries/inquiries.js';
-import { insertMessage, insertMessageWithAttachments, updateMessageLinkPreview } from './db/queries/messages.js';
+import {
+  findMessageByClientId,
+  insertMessage,
+  insertMessageWithAttachments,
+  listAttachmentsForMessages,
+  updateMessageLinkPreview,
+} from './db/queries/messages.js';
 import { insertPollMessage } from './db/queries/polls.js';
 import { findRoomById, isRoomMember, listRoomMemberIds } from './db/queries/rooms.js';
 import { findUserById } from './db/queries/users.js';
@@ -19,6 +25,7 @@ import {
   TEXT_TOO_LONG_ERROR,
 } from './messageLimits.js';
 import { MESSAGE_ATTACHMENT_MAX, parsePostFields, POST_ATTACHMENT_MAX, topicWriteDenial } from './permissions.js';
+import { isClientIdConflict, parseClientId } from './outboxRules.js';
 import { EMPTY_ATTRIBUTION } from './quoteForwardRules.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { toMessageDto } from './messages.js';
@@ -27,6 +34,15 @@ import { notifyBoard, notifyMentions } from './notifications.js';
 import { toPollDto } from './polls.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { sanitizeTextFormat } from './textFormat.js';
+
+/** 같은 임시 id로 이미 만든 메시지가 있으면 그 응답(다시 방송하지 않는다 — 처음 보낼 때 이미 갔다). 없으면 null. */
+async function duplicateReply(senderId, clientId, roomId) {
+  const existing = await findMessageByClientId(senderId, clientId);
+  if (!existing) return null;
+  if (existing.roomId !== roomId) return { ok: false, error: '메시지를 보내지 못했습니다. 다시 시도하세요.' };
+  const byMessage = await listAttachmentsForMessages([existing.id]);
+  return { ok: true, duplicate: true, message: toMessageDto({ ...existing, attachments: byMessage[existing.id] }) };
+}
 
 /** 예약 메시지에 저장해 둔 첨부를 보낼 수 없을 때(발송 실패 이유로 목록에 보인다). */
 const STORED_ATTACHMENT_ERROR = '첨부 파일을 확인할 수 없어 보내지 못했습니다. 파일을 다시 올려 예약하세요.';
@@ -143,6 +159,12 @@ export async function sendUserMessage({
   const room = knownRoom ?? (typeof payload.roomId === 'string' ? await findRoomById(payload.roomId) : null);
   if (!room || !(await isRoomMember(room.id, senderId))) {
     return { ok: false, error: '이 방의 멤버가 아닙니다.', status: 403 };
+  }
+  // 보내기 대기열이 다시 보낸 메시지(응답을 못 받았을 뿐 처음 것이 이미 들어갔을 수 있다) — 앱이 보낸 것만 본다.
+  const clientId = fileSource === 'client' ? parseClientId(payload.clientId) : null;
+  if (clientId) {
+    const duplicate = await duplicateReply(senderId, clientId, room.id);
+    if (duplicate) return duplicate;
   }
 
   const isPost = payload.type === 'post';
@@ -298,39 +320,49 @@ export async function sendUserMessage({
       ? { albumId: albumShare.albumId, albumShare: { title: albumShare.title, teamName: albumShare.teamName ?? null } }
       : {}),
     ...(todoShare && !isRich ? { todoId: todoShare.todoId, todoCard: todoShare.card } : {}),
+    clientId,
   };
 
   let message;
   let pollDto = null;
-  if (isPoll) {
-    // 메시지·첨부·투표·보기를 한 트랜잭션으로 — 중간에 실패해도 반쪽짜리 투표가 남지 않는다.
-    const created = await insertPollMessage({
-      message: messageFields,
-      attachments,
-      poll: {
-        creatorId: senderId,
-        title: poll.title,
-        description: poll.description,
-        anonymous: poll.anonymous,
-        multiple: poll.multiple,
-        closesAt: poll.closesAt,
-      },
-      optionTexts: poll.optionTexts,
-    });
-    message = created.message;
-    if (created.attachments.length > 0) message.attachments = created.attachments;
-    // 막 만든 투표라 표가 없다 — 모두에게 같은 DTO라 myOptionIds/favorite은 중립값이다.
-    pollDto = toPollDto(created.poll, created.options, []);
-  } else if (attachments.length > 1 || (post && attachments.length > 0)) {
-    // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분). 게시글은
-    // 하나여도 목록으로 저장한다 — toMessageDto의 예전 방식(파일 칸 하나 = 첨부 하나)은
-    // 'image'/'file' 메시지에만 적용되기 때문이다. 메시지와 첨부는 한 트랜잭션으로 — 첨부에서 실패해도
-    // 반쪽짜리 메시지가 남지 않는다(투표와 같다).
-    const created = await insertMessageWithAttachments(messageFields, attachments);
-    message = created.message;
-    message.attachments = created.attachments;
-  } else {
-    message = await insertMessage(messageFields);
+  try {
+    if (isPoll) {
+      // 메시지·첨부·투표·보기를 한 트랜잭션으로 — 중간에 실패해도 반쪽짜리 투표가 남지 않는다.
+      const created = await insertPollMessage({
+        message: messageFields,
+        attachments,
+        poll: {
+          creatorId: senderId,
+          title: poll.title,
+          description: poll.description,
+          anonymous: poll.anonymous,
+          multiple: poll.multiple,
+          closesAt: poll.closesAt,
+        },
+        optionTexts: poll.optionTexts,
+      });
+      message = created.message;
+      if (created.attachments.length > 0) message.attachments = created.attachments;
+      // 막 만든 투표라 표가 없다 — 모두에게 같은 DTO라 myOptionIds/favorite은 중립값이다.
+      pollDto = toPollDto(created.poll, created.options, []);
+    } else if (attachments.length > 1 || (post && attachments.length > 0)) {
+      // 첨부가 둘 이상이면 목록으로도 저장한다(하나뿐이면 예전처럼 messages 칸만으로 충분). 게시글은
+      // 하나여도 목록으로 저장한다 — toMessageDto의 예전 방식(파일 칸 하나 = 첨부 하나)은
+      // 'image'/'file' 메시지에만 적용되기 때문이다. 메시지와 첨부는 한 트랜잭션으로 — 첨부에서 실패해도
+      // 반쪽짜리 메시지가 남지 않는다(투표와 같다).
+      const created = await insertMessageWithAttachments(messageFields, attachments);
+      message = created.message;
+      message.attachments = created.attachments;
+    } else {
+      message = await insertMessage(messageFields);
+    }
+  } catch (err) {
+    // 같은 임시 id가 거의 동시에 두 번 왔다(재연결 직후 소켓이 쌓아 둔 것과 대기열이 다시 보낸 것) — 먼저 들어간 것을 돌려준다.
+    if (clientId && isClientIdConflict(err)) {
+      const duplicate = await duplicateReply(senderId, clientId, room.id);
+      if (duplicate) return duplicate;
+    }
+    throw err;
   }
 
   // 평문 DM에서 상대가 이 방을 숨겨뒀으면(hidden) 자동으로 다시 보이게 한다 —

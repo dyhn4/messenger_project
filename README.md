@@ -200,8 +200,32 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **표 이미지 붙여넣기** — 엑셀·웹의 표를 복사해 입력칸에 **Ctrl+V** 하면 잔디처럼 글자가 아니라 **이미지로 업로드 미리보기**에 올라가 그대로 보낼 수 있습니다. 엑셀처럼 클립보드에 표 글자(탭)·HTML·비트맵이 함께 오면 그 **비트맵을 올리고 글자는 붙이지 않으며**, 이미지 없이 **탭 텍스트나 HTML `<table>`만** 있으면 앱이 표를 직접 PNG로 그려(흰 바탕·얇은 테두리·한글 글꼴, 머리글 `<th>`는 굵게, 긴 칸은 줄바꿈, 최대 **100행 × 30열** — 넘으면 일반 텍스트로 붙입니다) 같은 미리보기에 올립니다. **Ctrl+Shift+V**는 언제나 글자만 붙이고(서식·표 변환 없음), 한 줄·한 열이거나 탭이 없는 글, 표가 아닌 이미지+글자(웹에서 복사한 이미지와 설명 등)는 예전 그대로 동작합니다. 클립보드의 이미지·HTML은 `pasteboard` 플러그인으로 읽습니다(HTML은 Windows만 — 안드로이드는 글자만 읽어 그대로 붙입니다). 표 파싱은 `client/lib/services/table_paste.dart`, 그리기는 `table_image.dart`, 붙여넣기 분기는 `clipboard_paste.dart`·`chat_input_bar.dart`입니다(글 작성·댓글·예약 입력칸의 붙여넣기는 이미지만 지원하는 기존 동작 그대로)
 - **임시 저장(쓰다 만 글)** — 입력칸에 쓰다 만 글(서식·멘션 포함)이 방마다 남아서, 다른 방에 갔다 와도 **앱을 껐다 켜도** 그대로
   돌아옵니다(쓰다가 잠깐 멈추면 저장, 보내고 비우면 지움, 앱이 뒤로 가면 바로 저장). 방 목록에는 쓰다 만 글이 있는 방 이름 옆에 ✏️가
-  붙습니다(지금 열어 둔 방은 빼고). 이 기기에만 사람별로 저장하고(다른 기기와 맞추지는 않음 — 30일 지난 글과 200개 넘는 글은 버림),
-  **비밀 대화의 글은 화면 밖에 평문으로 남기지 않으려고 메모리에만** 둡니다(앱을 끄면 사라짐). `client/lib/services/chat_draft_store.dart`
+  붙습니다(지금 열어 둔 방은 빼고). 이 기기에 사람별로 저장하고(30일 지난 글과 200개 넘는 글은 버림) **내 다른 기기와 맞춥니다** —
+  쓰다 잠깐 멈추면(1.5초) 서버로 보내고, 로그인·다시 연결될 때 서버의 글과 견줘 **나중에 고친 쪽**을 남기며(지운 것도 지운 시각과 함께
+  맞춤 — 꺼져 있던 기기가 옛 글을 되살리지 않음), 다른 기기에서 고치면 소켓 `draft:changed`로 바로 받습니다. 열어 둔 입력칸은 손대지 않았고
+  지금 쓰고 있지 않을 때만 새 글로 바뀌고(쓰는 중인 글이 이김), 손대지 않은 입력칸이 닫힐 때는 다시 저장하지 않아 다른 기기의 더 새 글을 옛 글로
+  덮지 않습니다. 끊겨서 못 보낸 것은 다시 연결될 때 보냅니다. **비밀 대화의 글은 화면 밖에 평문으로 남기지 않으려고 메모리에만** 두고 서버에도
+  보내지 않습니다(앱을 끄면 사라짐 — 서버도 받지 않음). 서버는 `server/src/drafts.js`(규칙 `draftRules.js`), 앱은
+  `client/lib/services/chat_draft_store.dart`·`draft_sync.dart`
+- **보내기 대기열·오프라인 보기** — 연결이 끊겨 있거나 응답이 없어도 **쓴 메시지를 잃지 않습니다**. 비밀 대화가 아닌 방의 글·이모티콘·
+  (이미 올라간) 사진·파일 메시지는 보낼 때 임시 id(`clientId`)를 붙여 대기열에 넣고, 연결이 없으면 입력칸 위 **대기 말풍선**(오른쪽,
+  "연결되면 보냅니다" — 취소 가능)으로 기다렸다가 다시 붙으면 쓴 순서대로 보냅니다. 응답을 못 받고 다시 보내도 서버가 같은 사람·같은 임시 id면
+  새로 만들지 않고 처음 것을 돌려주므로(동시에 두 번 와도 하나만 — unique 인덱스) **두 번 올라가지 않습니다**. 서버가 거절한 것(읽기 전용·길이 등)은
+  빨간 테두리에 이유와 **다시 보내기·지우기**가 붙습니다. 대기열은 이 기기에 사람별로 저장돼 앱을 다시 켜도 남고, 방에서 나가면 그 방 것은
+  버립니다. 비밀 대화는 대기열을 쓰지 않습니다(암호화 상태가 보낼 때마다 바뀌어 나중에 같은 본문을 다시 보낼 수 없음 — 예전처럼 바로 실패를 알림).
+  서버와 연결이 3초 넘게 끊기면 대화 목록·대화방 위에 **"서버와 연결이 끊겼습니다"** 띠가 뜹니다. 받은 팀·방 목록과 **방마다 최근 메시지
+  50개**는 이 기기에 저장해 두어(받은 JSON 그대로, 실시간으로 온 메시지도 덧붙임) **서버에 닿지 않으면 그걸로 목록과 대화를 보여 주고**(앱을
+  오프라인으로 켜도), 다시 연결되면 서버 것으로 맞춥니다. 비밀 대화는 저장하지 않고, **로그아웃하면 그 사람의 저장분을 지웁니다**(공용 PC).
+  웹 앱은 저장하지 않습니다. 앱은 `client/lib/services/message_outbox.dart`·`offline_cache.dart`·`widgets/outbox_strip.dart`, 서버는
+  `server/src/sendMessage.js`(규칙 `outboxRules.js`). 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0120`)가 필요합니다
+- **다른 앱에서 공유하기·홈 화면 위젯(안드로이드)** — 갤러리·파일·브라우저 등의 **"공유 → TangoTalk"**으로 글(링크)·파일(여러 개, 20개까지)을
+  받으면 **공유하기** 화면이 떠서 보낼 대화방을 고르고(메시지 전달과 같은 목록 — 비밀 대화·보드 뷰·쓸 수 없는 토픽은 빠짐) 글을 고치거나 파일을
+  빼고 보냅니다(사진은 한 말풍선에, 그 밖의 파일은 따로 — 보낸 뒤 그 방이 열림). 앱이 꺼져 있었으면 로그인·방 목록이 준비된 뒤 뜹니다. 파일은
+  받자마자 앱의 캐시 폴더로 복사했다가 올린 뒤 지웁니다. **홈 화면 위젯 "안 읽은 대화"**(크기 조절 가능)는 안 읽은 메시지 합계와 안 읽은 방 세
+  개(최근 활동순, 알림을 끈 방은 빼고)를 보여 주고, 방을 누르면 그 방이, 나머지를 누르면 앱이 열립니다. 비밀 대화는 이름 대신 "비밀 대화",
+  **앱 잠금 중이면 방 이름 없이 합계만**, 로그아웃하면 안내만 보입니다(홈 화면은 누구나 봄). 위젯 내용은 앱이 목록이 바뀔 때마다 넘깁니다(앱을
+  완전히 끈 동안은 마지막 내용 — 푸시만 오는 동안은 바뀌지 않음). `android/app/src/main/kotlin/…/ShareIntake.kt`·`UnreadWidgetProvider.kt`,
+  앱은 `client/lib/services/share_intake.dart`·`home_widget_bridge.dart`·`screens/share_target_screen.dart`
 - 메시지 인용 공유(다른 방으로), 메시지 전달 — 인용 카드의 보낸 사람·미리보기와 "OOO에서 전달한 메시지입니다" 표시는 **서버가 원본에서
   채웁니다**(`server/src/messageAttribution.js`, 규칙은 `quoteForwardRules.js`). 앱은 원본 id(`quotedMessageId` — 댓글이면 댓글 id, 공지
   공유는 `quotedAnnouncementId`, 전달은 `forwardedFromMessageId`)를 보내고, 서버는 보내는 사람이 그 원본을 지금 읽을 수 있는지(지워지지
@@ -1274,10 +1298,12 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 - **일반 메시지 고정** — 고정은 토픽 공지 하나와 보드 게시글만 됩니다.
 - **음성 메시지** — 녹음해서 보내기(현장직·운전 중 사용자). 영상은 파일로만 보냅니다.
 - **메시지 수정 이력** — "(수정됨)" 표시만 있습니다(관리자만 이전 내용을 봐도 업무 지시가 바뀌었을 때 근거가 됨).
-- **다른 앱에서 공유하기** — 안드로이드 갤러리 등의 "공유 → TangoTalk"가 안 됩니다(`AndroidManifest.xml`에 SEND 인텐트 없음).
-  홈 화면 위젯도 없습니다.
-- **오프라인 대응** — 휴대폰에 메시지를 저장하지 않아(로컬 DB 없음) 연결이 끊기면 목록이 안 보이고, 보내기 대기열도 없습니다.
-- **임시 저장 기기 간 동기화** — 임시 저장은 이 기기에만 남습니다(위 "임시 저장").
+- **공유·위젯 후속** — 안드로이드의 "공유 → TangoTalk"과 홈 화면 위젯 "안 읽은 대화"는 들어갔습니다(위 "다른 앱에서 공유하기·홈 화면 위젯").
+  남은 것: 아이폰 공유 확장·위젯(Apple 개발자 등록 뒤), Windows "보내기" 메뉴, 공유 화면에서 여러 방에 한꺼번에 보내기, 비밀 대화로 공유,
+  앱이 꺼져 있는 동안 푸시로 위젯 숫자 바꾸기, 바로 답장할 수 있는 알림.
+- **오프라인 후속** — 보내기 대기열·최근 메시지 50개 저장·끊김 띠는 들어갔습니다(위 "보내기 대기열·오프라인 보기"). 남은 것: 진짜 로컬 DB(전체
+  기록·검색을 오프라인으로), 올리지 못한 사진·파일을 대기열에 넣기(지금은 첨부할 때 올라가야 함), 오프라인 중 수정·삭제·공감, 저장한 사진 미리보기
+  보관, 비밀 대화의 대기열.
 - **자동 자리 비움** — 접속 상태가 접속/미접속뿐이라 한동안 손대지 않으면 "자리 비움"으로 바뀌는 것이 없습니다.
 - **통화 녹화·회의록** — 화상회의 녹화(LiveKit egress)와 자동 회의록이 없고, 화이트보드는 통화 중에만 쓰고 저장되지 않습니다.
 
@@ -2108,6 +2134,8 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/rooms/:id/muted` | 알림 끄기 토글 |
 | GET | `/api/rooms/:id` | 방 정보 조회 |
 | GET | `/api/rooms/:id/messages` | 메시지 목록(`limit`, `before` 커서 페이지네이션) |
+| GET | `/api/drafts` | 내 임시 저장(입력칸에 쓰다 만 글 — 30일 안, 지금 멤버이고 비밀 대화가 아닌 방) `[{ roomId, text(지운 것은 null), format, mentions, updatedAt }]` |
+| PUT | `/api/rooms/:roomId/draft` | 임시 저장 넣기·바꾸기 `{ text(비우면 지움 — 지운 시각과 함께 남김), format?, mentions?, deviceId? }` → `{ updatedAt }`, 내 다른 기기에 소켓 `draft:changed`. 비밀 대화 400, 멤버가 아니면 404, 1분에 240번 |
 | GET | `/api/rooms/:id/export` | **대화 내보내기** — 그 방의 대화 내용을 엑셀(.xlsx)로 스트리밍 응답(`since`/`until` epoch ms로 기간 제한, 둘 다 생략하면 전체). 비밀 대화는 서버가 평문을 몰라 400 |
 
 **메시지/댓글** (`/api`)
@@ -2407,11 +2435,12 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | 방향 | 이벤트 | 설명 |
 |---|---|---|
-| 클라이언트→서버 | `message:send` | 메시지 전송 — 응답(ack `{ ok, error? }`)은 서버 오류가 나도 늘 옴. 한 사람이 10초에 40통·10분에 600통(파일을 실은 메시지는 10분 창만), 512KB를 넘는 소켓 메시지는 서버가 받지 않음. 인용·전달은 원본 id(`quotedMessageId`·`quotedAnnouncementId`·`forwardedFromMessageId`)로 — 위 "메시지 인용 공유, 메시지 전달" |
+| 클라이언트→서버 | `message:send` | 메시지 전송 — 응답(ack `{ ok, error? }`)은 서버 오류가 나도 늘 옴. `clientId`(글자·숫자·_- 8~64자, 보내기 대기열)를 실으면 같은 사람이 같은 값으로 다시 보낼 때 새로 만들지 않고 처음 메시지를 돌려줌(`duplicate: true`, 다시 방송하지 않음). 한 사람이 10초에 40통·10분에 600통(파일을 실은 메시지는 10분 창만), 512KB를 넘는 소켓 메시지는 서버가 받지 않음. 인용·전달은 원본 id(`quotedMessageId`·`quotedAnnouncementId`·`forwardedFromMessageId`)로 — 위 "메시지 인용 공유, 메시지 전달" |
 | 클라이언트→서버 | `room:read` | 읽음 처리 |
 | 클라이언트→서버 | `secret:message-read` | 비밀 대화 메시지 읽음(자동 삭제 타이머 시작) |
 | 클라이언트→서버 | `secret:rekey-propose` / `secret:rekey-ack` | 비밀 대화 재키잉 `{ roomId, keyEpoch, ephemeralPublicKey, ephemeralSignature, ephemeralContextSignature? }`(그 비밀 대화방 멤버만) — 예전 규약(v1)을 쓰는 **예전 앱만** 보낸다(새 앱은 재키잉을 하지 않고 이 이벤트를 듣지도 않음). 수락을 못 받은 예전 앱은 메시지마다 다시 제안하므로, 같은 방·같은 epoch의 아직 수락되지 않은 제안 행은 지우고 새로 적는다. 맥락 서명(v2, 예전 앱은 안 보냄)은 검증하지 않고 모양만 봐서 64바이트 서명의 base64가 아니면 이벤트를 버리고, `secret_rekeys`의 `proposer_context_signature`·`responder_context_signature`에 적는다. 받는 쪽에는 같은 이름의 이벤트로 제안은 `{ roomId, keyEpoch, proposerUserId, proposerEphemeralPublicKey, proposerEphemeralSignature, proposerContextSignature }`(방의 다른 소켓에), 수락은 `{ roomId, keyEpoch, responderUserId, responderEphemeralPublicKey, responderEphemeralSignature, responderContextSignature }`(방 전체에 — 수락 때 세션의 `key_epoch`도 올림)로 중계하고, 맥락 서명이 없으면 `null`. 보낸 사람 id는 payload가 아니라 그 소켓의 로그인 사용자 |
-| 서버→클라이언트 | `message:new` / `message:edited` / `message:deleted` / `message:expired` | 메시지 변경 브로드캐스트(파일 삭제도 `message:edited` — 첨부에 `deleted: true`) |
+| 서버→클라이언트 | `message:new` / `message:edited` / `message:deleted` / `message:expired` | 메시지 변경 브로드캐스트(파일 삭제도 `message:edited` — 첨부에 `deleted: true`). 앱이 보낸 메시지에는 보낼 때 붙인 `clientId`가 실려 보낸 기기가 대기 말풍선을 지운다 |
+| 서버→클라이언트 | `draft:changed` | 내 다른 기기에서 임시 저장을 고쳤다 `{ roomId, text(지웠으면 null), format, mentions, updatedAt, deviceId }` — 보낸 기기는 `deviceId`로 알아보고 무시 |
 | 서버→클라이언트 | `comment:new` / `comment:edited` / `comment:deleted` | 댓글 변경 브로드캐스트 |
 | 서버→클라이언트 | `notification:new` | `user:<id>`에게 새 알림 한 건 `{ notification, unread: { mention, board, mentionPersonal, mentionAll } }` |
 | 서버→클라이언트 | `notification:sync` | `user:<id>`에게 읽음·삭제로 바뀐 안 읽음 수 `{ mention, board, mentionPersonal, mentionAll }`(다른 기기 동기화) |
@@ -2476,7 +2505,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(1:1 대화에서 한 사람이 빠졌을 때 — 비밀 대화를 혼자 나갔거나 팀에서 제외됐을 때 — 남은 쪽에 "OOO (나갔음)"으로 보여 줄 사람. 그 사람이 다시 들어오면 지움. 이름은 비밀 대화에만 쓰던 시절 그대로), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
-| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷), `integration_id`·`bot_emoji`(웹훅·슬래시 명령이 올린 봇 메시지의 연동과 아이콘 — 연동을 지우면 `integration_id`만 null, 봇 이름은 `sender_name`) |
+| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷), `integration_id`·`bot_emoji`(웹훅·슬래시 명령이 올린 봇 메시지의 연동과 아이콘 — 연동을 지우면 `integration_id`만 null, 봇 이름은 `sender_name`), `client_id`(앱이 보낼 때 붙인 임시 id — 보내기 대기열, unique (`sender_id`, `client_id`) partial) |
+| `chat_drafts` | 임시 저장 동기화 — (`user_id`, `room_id`)마다 `text`(지운 것은 빈 글로 남김 — 꺼져 있던 기기가 알게)·`text_format`·`mentions`·`updated_at`(서버가 받은 시각 — 나중 것이 이김). 사람·방을 지우면 cascade, 30일 지난 것은 하루 한 번 지움. 비밀 대화의 글은 받지 않는다 |
 | `message_reminders` | 리마인더. 메시지 리마인더("나중에 알림")는 메시지·방(`message_id`·`room_id`), 직접 만든 리마인더는 글과 울릴 나와의 대화의 팀(`text`·`team_id`)만 둔다(마이그레이션 0107에서 `message_id`·`room_id`를 null 허용으로). 사람·메시지·방·팀 모두 cascade, `remind_at`, 울린 때 `fired_at`(울린 지 30일 지나면 지움). 인덱스: 울리기 전 것만의 `remind_at`(partial)·`(user_id, remind_at)` |
 | `message_reactions` | 메시지 공감(이모지 반응). 메시지+사람 복합 PK라 한 사람이 메시지마다 하나(`emoji`, 바꾸면 `created_at`도 새로). 메시지·사람을 하드 삭제하면 cascade |
 | `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다. 목록 필터용 인덱스: `polls (room_id, created_at desc)`·`polls (creator_id, created_at desc)`·`poll_votes (user_id, poll_id)` |

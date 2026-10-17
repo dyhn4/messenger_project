@@ -31,6 +31,7 @@ import 'message_comments_card.dart';
 import 'read_up_to_here_divider.dart';
 import 'sticker_picker.dart';
 import 'sticker_preview_card.dart';
+import 'outbox_strip.dart';
 import 'system_message_row.dart';
 
 /// 목록 맨 아래(가장 최근 메시지 밑) 여백 — 호버 툴바(FloatingHoverToolbar)가 입력창을
@@ -550,6 +551,7 @@ class _ChatPanelState extends State<ChatPanel> {
   Widget _buildBoard(BuildContext context) {
     final column = Column(
       children: [
+        ConnectionLostBanner(session: widget.session),
         AnnouncementBanner(session: widget.session, room: widget.room),
         Expanded(
           child: BoardView(
@@ -652,6 +654,7 @@ class _ChatPanelState extends State<ChatPanel> {
     final controller = _controller;
     final column = Column(
       children: [
+        ConnectionLostBanner(session: widget.session),
         if (widget.room.type == RoomType.topic)
           AnnouncementBanner(session: widget.session, room: widget.room),
         // 비밀 대화의 보안 안내(보안 확인 실패로 멈춤·상대 기기 바뀜·상대가 예전 앱) — 필요할 때만 보인다.
@@ -1047,6 +1050,8 @@ class _ChatPanelState extends State<ChatPanel> {
             ),
           ),
         ),
+        // 아직 서버에 닿지 않은 내 메시지(보내기 대기열) — 연결되면 보내고, 실패하면 다시 보내기·지우기.
+        OutboxStrip(session: widget.session, roomId: widget.room.id),
         const Divider(height: 1),
         ChatInputBar(
           key: _chatInputBarKey,

@@ -161,6 +161,9 @@ class RoomChatController extends ChangeNotifier {
       _session.chatDrafts.put(room.id, value, persist: !room.isSecret);
   bool loading = true;
   String? error;
+
+  /// 서버에 닿지 않아 이 기기에 저장해 둔 최근 메시지를 보여 주는 중인지(offline_cache.dart) — 다시 연결되면 [refresh]가 서버 것으로 맞춘다.
+  bool fromCache = false;
   StreamSubscription? _readSub;
   bool _disposed = false;
 
@@ -226,7 +229,15 @@ class RoomChatController extends ChangeNotifier {
         hasMoreHistory = false;
       }
     } catch (e) {
-      error = e.toString();
+      // 서버에 닿지 않으면 저장해 둔 최근 메시지로(비밀 대화는 저장하지 않는다).
+      final cached = await _session.cachedMessages(room);
+      if (_disposed) return;
+      if (cached.isEmpty) {
+        error = e.toString();
+      } else {
+        _mergeHistory(cached);
+        fromCache = true;
+      }
     }
     loading = false;
     notifyListeners();
@@ -996,9 +1007,10 @@ class RoomChatController extends ChangeNotifier {
       );
       // 처음 불러오기가 실패했던 방이면, 이번에 받은 최근 페이지로 과거 페이지 커서를 잡고 오류를
       // 거둔다 — 안 그러면 목록은 보여도 위(보드는 아래)로 더 불러오기가 영영 안 된다.
-      final recovering = error != null && _historyCursor == null;
+      final recovering = (error != null || fromCache) && _historyCursor == null;
       if (recovering) {
         error = null;
+        fromCache = false;
         _advanceHistoryCursor(history);
         if (history.where((m) => !m.outOfWindow).length < _pageSize) {
           hasMoreHistory = false;
@@ -1163,6 +1175,9 @@ class RoomChatController extends ChangeNotifier {
 
   /// [format]은 [text]의 글자 서식 — [text]는 이미 앞뒤 공백을 뗀 것이어야 위치가 맞는다
   /// (RichTextEditingController.formatted). 비밀 대화는 서식 없이 보낸다.
+  ///
+  /// 비밀 대화가 아니면 보내기 대기열(message_outbox.dart)에 넣고 바로 돌아온다 — 연결이 끊겨 있으면 붙을 때 보내고, 서버가 거절하면
+  /// 대화방 아래 대기 말풍선에 실패로 남는다(입력한 글을 잃지 않는다). 비밀 대화는 예전처럼 보내고 실패하면 던진다.
   Future<void> sendText(
     String text, {
     List<TextFormatRun>? format,
@@ -1170,6 +1185,21 @@ class RoomChatController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
+    if (!room.isSecret) {
+      final sameText = trimmed == text;
+      final formatJson = sameText ? textFormatToJson(format) : null;
+      final mentionsJson = sameText ? mentionsToJson(mentions) : null;
+      _session.outbox.submit(
+        roomId: room.id,
+        payload: {
+          'type': 'text',
+          'text': trimmed,
+          'textFormat': ?formatJson,
+          'mentions': ?mentionsJson,
+        },
+      );
+      return;
+    }
     final payload = await _session.encryptOutgoing(room, trimmed);
     await _session.chatSocket.send(
       roomId: room.id,
@@ -1183,6 +1213,13 @@ class RoomChatController extends ChangeNotifier {
   /// 이모티콘 전송 — text 필드에 스티커 id만 실어 보낸다(client/lib/data/stickers.dart 참고).
   /// 파일 업로드가 없어서 sendText와 거의 동일하고, type만 다르다.
   Future<void> sendSticker(String stickerId) async {
+    if (!room.isSecret) {
+      _session.outbox.submit(
+        roomId: room.id,
+        payload: {'type': 'sticker', 'text': stickerId},
+      );
+      return;
+    }
     final payload = await _session.encryptOutgoing(room, stickerId);
     await _session.chatSocket.send(
       roomId: room.id,
@@ -1390,17 +1427,29 @@ class RoomChatController extends ChangeNotifier {
       return;
     }
 
-    await _session.chatSocket.send(
+    // 첨부는 이미 올라가 있어서 본문만 대기열로 보낸다(끊겨 있으면 붙을 때).
+    final captionText = trimmedCaption?.isNotEmpty == true
+        ? trimmedCaption
+        : null;
+    final formatJson = trimmedCaption == caption
+        ? textFormatToJson(captionFormat)
+        : null;
+    final mentionsJson = trimmedCaption == caption
+        ? mentionsToJson(captionMentions)
+        : null;
+    _session.outbox.submit(
       roomId: room.id,
-      type: u.isImage ? 'image' : 'file',
-      text: trimmedCaption?.isNotEmpty == true ? trimmedCaption : null,
-      textFormat: trimmedCaption == caption ? captionFormat : null,
-      mentions: trimmedCaption == caption ? captionMentions : null,
-      fileUrl: u.url,
-      fileName: u.fileName,
-      fileSize: u.size,
-      mimeType: u.mimeType,
-      thumbnailUrl: u.thumbnailUrl,
+      payload: {
+        'type': u.isImage ? 'image' : 'file',
+        'text': ?captionText,
+        'textFormat': ?formatJson,
+        'mentions': ?mentionsJson,
+        'fileUrl': u.url,
+        'fileName': u.fileName,
+        'fileSize': u.size,
+        'mimeType': ?u.mimeType,
+        'thumbnailUrl': ?u.thumbnailUrl,
+      },
     );
   }
 
@@ -1426,14 +1475,23 @@ class RoomChatController extends ChangeNotifier {
       return;
     }
     final trimmed = caption?.trim();
-    await _session.chatSocket.send(
+    final captionText = trimmed?.isNotEmpty == true ? trimmed : null;
+    final formatJson = trimmed == caption
+        ? textFormatToJson(captionFormat)
+        : null;
+    final mentionsJson = trimmed == caption
+        ? mentionsToJson(captionMentions)
+        : null;
+    _session.outbox.submit(
       roomId: room.id,
-      // 사진만 모였으면 격자(image), 하나라도 파일이면 파일 목록(file) 말풍선이 된다.
-      type: items.every((u) => u.isImage) ? 'image' : 'file',
-      text: trimmed?.isNotEmpty == true ? trimmed : null,
-      textFormat: trimmed == caption ? captionFormat : null,
-      mentions: trimmed == caption ? captionMentions : null,
-      attachments: [for (final u in items) u.toPayload()],
+      payload: {
+        // 사진만 모였으면 격자(image), 하나라도 파일이면 파일 목록(file) 말풍선이 된다.
+        'type': items.every((u) => u.isImage) ? 'image' : 'file',
+        'text': ?captionText,
+        'textFormat': ?formatJson,
+        'mentions': ?mentionsJson,
+        'attachments': [for (final u in items) u.toPayload()],
+      },
     );
   }
 

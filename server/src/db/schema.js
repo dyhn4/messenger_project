@@ -840,9 +840,14 @@ export const messages = pgTable(
     // 나감마다 고친다: { status: 'active'|'ended', startedAt, endedAt, durationMs, answered, events: [{ at, userId,
     // name, kind: 'start'|'join'|'leave'|'decline' }] }. 대화에 시스템 메시지를 여러 줄 남기는 대신 이 한 장으로 본다.
     callCard: jsonb('call_card'),
+    // 앱이 보낼 때 붙이는 임시 id(보내기 대기열 — 앱이 메시지마다 하나 만든다). 연결이 끊겨 응답을 못 받고 같은 메시지를 다시
+    // 보내도 같은 사람·같은 id면 새로 만들지 않고 처음 것을 돌려준다(sendMessage.js). 앱은 받은 message:new의 이 값으로 대기 중인
+    // 말풍선을 지운다. 예약·서버가 만든 메시지는 null.
+    clientId: text('client_id'),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
+    uniqueIndex('messages_sender_client_id_idx').on(t.senderId, t.clientId).where(sql`client_id is not null`),
     index('messages_album_id_idx').on(t.albumId),
     index('messages_todo_id_idx').on(t.todoId),
     index('messages_sender_id_idx').on(t.senderId),
@@ -2612,6 +2617,27 @@ export const resourceBookings = pgTable(
     index('resource_bookings_scope_start_idx').on(t.scopeKey, t.startAt),
     uniqueIndex('resource_bookings_event_idx').on(t.eventId),
   ],
+);
+
+/**
+ * 대화방 임시 저장(입력칸에 쓰다 만 글) — 사람·방마다 하나, 내 다른 기기와 맞춘다(drafts.js). 비밀 대화의 글은 서버에 두지 않는다
+ * (앱이 보내지 않고 서버도 받지 않음). 방이 지워지면 같이 지우고, 30일이 지난 글은 내려주지 않고 지운다.
+ */
+export const chatDrafts = pgTable(
+  'chat_drafts',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    text: text('text').notNull(),
+    textFormat: jsonb('text_format'),
+    mentions: jsonb('mentions'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.roomId] })],
 );
 
 /**

@@ -527,6 +527,10 @@ class ApiClient {
   /// [token]을 새로 채워넣으면) true를 반환해서 원래 요청을 한 번 더 재시도하게 한다.
   Future<bool> Function()? onUnauthorized;
 
+  /// 오프라인 보기로 저장할 응답을 받았을 때(offline_cache.dart) — [key]는 'teams' | 'rooms:<팀 id>' | 'messages:<방 id>'(방의 최근
+  /// 페이지만), [raw]는 서버가 준 JSON 그대로. Session이 비밀 대화를 걸러 저장한다.
+  void Function(String key, List<Object?> raw)? onCacheable;
+
   /// 서버가 자체 서명 인증서(HTTPS)를 쓰므로, PinnedTls.httpClient()로 만든(그 인증서만
   /// 신뢰하는) 클라이언트를 주입받는다. 안 주면 플랫폼 기본 클라이언트를 쓴다(테스트 등).
   final http.Client _client;
@@ -2021,6 +2025,7 @@ class ApiClient {
   /// 내가 속한 팀 목록(각 팀에서의 내 등급 포함) — 로그인/앱 시작 직후 팀 선택 화면이 쓴다.
   Future<List<Team>> fetchTeams() async {
     final list = await _get('/api/teams') as List;
+    onCacheable?.call('teams', list);
     return list.map((e) => Team.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -2190,6 +2195,7 @@ class ApiClient {
     final list =
         await _get('/api/rooms?teamId=${Uri.encodeQueryComponent(teamId)}')
             as List;
+    onCacheable?.call('rooms:$teamId', list);
     return list.map((e) => Room.fromJson(e as Map<String, dynamic>)).toList();
   }
 
@@ -2223,9 +2229,28 @@ class ApiClient {
     final list =
         await _get('/api/rooms/$roomId/messages?limit=$limit$beforeParam')
             as List;
+    if (before == null) onCacheable?.call('messages:$roomId', list);
     return list
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// 내 임시 저장(입력칸에 쓰다 만 글 — 서버 drafts.js) — `[{ roomId, text(지웠으면 null), format, mentions, updatedAt }]`.
+  Future<List<Map<String, dynamic>>> fetchDrafts() async => [
+    for (final e in await _get('/api/drafts') as List)
+      (e as Map).cast<String, dynamic>(),
+  ];
+
+  /// 임시 저장 보내기 — [body]는 `{ text(비우면 지움), format?, mentions?, deviceId? }`. 서버가 받은 시각(ms).
+  Future<int?> putDraft(String roomId, Map<String, dynamic> body) async {
+    final res =
+        await requestJson(
+              'PUT',
+              '/api/rooms/${Uri.encodeComponent(roomId)}/draft',
+              body: body,
+            )
+            as Map;
+    return (res['updatedAt'] as num?)?.toInt();
   }
 
   /// 메시지 한 건(GET /api/messages/:id) — 방 메시지 목록의 항목과 같은 모양(본문 원문·서명된 첨부·투표, 댓글은

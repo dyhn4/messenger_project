@@ -841,6 +841,13 @@
       "when": 1792245057171,
       "tag": "0119_webmail",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792247954114,
+      "tag": "0120_offline_drafts",
+      "breakpoints": true
     }
   ]
 }

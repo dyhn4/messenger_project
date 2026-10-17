@@ -207,6 +207,23 @@ class ChatInputBarState extends State<ChatInputBar> {
     _restoreDraft();
     _controller.addListener(_onTextChanged);
     _loadSlashCommands();
+    _remoteDraftSub = widget.session.chatDrafts.remoteChanges.listen(
+      _onRemoteDraft,
+    );
+  }
+
+  /// 입력칸에 마지막으로 꺼내 둔(또는 맡긴) 글 — 이것과 같으면 손대지 않은 것이라 닫을 때 다시 맡기지 않는다. 그래야 다른 기기에서
+  /// 고친 더 새 글을 이 기기의 옛 글로 덮지 않는다(draft_sync.dart).
+  String _loadedText = '';
+  StreamSubscription<String>? _remoteDraftSub;
+
+  /// 다른 기기에서 이 방의 임시 저장을 고쳤다 — 입력칸에 손대지 않았고 지금 쓰고 있지 않으면(포커스 없음) 새 글로 바꾼다.
+  void _onRemoteDraft(String roomId) {
+    if (!mounted || roomId != widget.room.id) return;
+    if (_focusNode.hasFocus || _controller.text != _loadedText) return;
+    _controller.clear();
+    _loadedText = '';
+    _restoreDraft();
   }
 
   /// 이 팀의 슬래시 명령을 미리 받아 둔다(자동 완성 — 연동을 쓸 수 있는 방에서만).
@@ -296,13 +313,16 @@ class ChatInputBarState extends State<ChatInputBar> {
     if (draft == null) return;
     _controller.mentionsEnabled = roomAllowsMention(_liveRoom);
     _controller.load(draft.text, draft.format, mentions: draft.mentions);
+    _loadedText = _controller.text;
   }
 
   /// 입력칸이 사라지거나 다른 방으로 바뀔 때 쓰던 글을 그 방의 컨트롤러에 맡긴다(보내고 비웠으면 지운다).
   void _saveDraft(RoomChatController controller) {
+    if (_controller.text == _loadedText) return;
     controller.draft = _controller.text.trim().isEmpty
         ? null
         : _controller.snapshot();
+    _loadedText = _controller.text;
   }
 
   /// 한글 등을 IME로 조합하는 중이면, 그동안 앱 전체를 다시 그리는 알림을 잠깐 미룬다 — 빠르게
@@ -354,6 +374,7 @@ class ChatInputBarState extends State<ChatInputBar> {
       _draftTimer?.cancel();
       _saveDraft(oldWidget.controller);
       _controller.clear();
+      _loadedText = '';
       _restoreDraft();
     }
   }
@@ -362,6 +383,7 @@ class ChatInputBarState extends State<ChatInputBar> {
   void dispose() {
     _draftTimer?.cancel();
     _saveDraft(widget.controller);
+    _remoteDraftSub?.cancel();
     widget.session.removeListener(_onSessionChanged);
     HardwareKeyboard.instance.removeHandler(_handleKey);
     _focusNode.removeListener(_onFocusChange);

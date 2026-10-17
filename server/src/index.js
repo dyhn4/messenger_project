@@ -102,6 +102,7 @@ import { startMentionDigestJob } from './mentionDigest.js';
 import { createGroupwareWorkRouter, startAttendanceReminderJob } from './groupwareWork.js';
 import { createGroupwareResourcesRouter } from './groupwareResources.js';
 import { createWebmailRouter, startMailCheckJob } from './webmail.js';
+import { createDraftsRouter, startDraftCleanupJob } from './drafts.js';
 import { startWebTls } from './webTls.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
@@ -175,6 +176,7 @@ app.use('/api', requireAuth, createGroupwareRouter(io));
 app.use('/api', requireAuth, createGroupwareWorkRouter(io));
 app.use('/api', requireAuth, createGroupwareResourcesRouter(io));
 app.use('/api', requireAuth, createWebmailRouter(io));
+app.use('/api', requireAuth, createDraftsRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 // 메시지 공감(이모지 반응) — PUT /messages/:id/reaction(reactions.js).
@@ -329,6 +331,7 @@ startMentionDigestJob();
 // 출근·퇴근 알림 — 알림을 켠 그룹웨어 범위에서 5분마다(groupwareWork.js).
 startAttendanceReminderJob(io);
 startMailCheckJob(io);
+startDraftCleanupJob();
 // DDNS(DuckDNS) 자동 갱신 — 관리자 콘솔 "DDNS" 탭에서 켰을 때만 5분마다 공인 IP를 알린다(ddns.js).
 ddnsUpdater.start().catch(() => {});
 startSecretExpiryJob(io);

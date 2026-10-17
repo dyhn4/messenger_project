@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 홈 화면 위젯 "안 읽은 대화"(UnreadWidgetProvider.kt) — 제목·합계, 방 세 줄, 빈 안내. RemoteViews라 LinearLayout·TextView만 쓴다. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/widget_title"
+            android:textColor="@color/widget_text"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_total"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_badge"
+            android:minWidth="22dp"
+            android:gravity="center"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textColor="@color/widget_hint"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:id="@+id/widget_row1"
+        style="@style/WidgetRow">
+        <TextView android:id="@+id/widget_row1_name" style="@style/WidgetRowName" />
+        <TextView android:id="@+id/widget_row1_count" style="@style/WidgetRowCount" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row2"
+        style="@style/WidgetRow">
+        <TextView android:id="@+id/widget_row2_name" style="@style/WidgetRowName" />
+        <TextView android:id="@+id/widget_row2_count" style="@style/WidgetRowCount" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/widget_row3"
+        style="@style/WidgetRow">
+        <TextView android:id="@+id/widget_row3_name" style="@style/WidgetRowName" />
+        <TextView android:id="@+id/widget_row3_count" style="@style/WidgetRowCount" />
+    </LinearLayout>
+</LinearLayout>

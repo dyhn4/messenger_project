@@ -2,11 +2,13 @@ package com.teamtalk.messenger
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -15,6 +17,44 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     /** 저장 권한 요청 창이 떠 있는 동안 기다리는 Dart 쪽 호출(응답은 onRequestPermissionsResult에서). */
     private var pendingPermission: MethodChannel.Result? = null
+
+    /**
+     * "공유 → TangoTalk"으로 받은 것·위젯에서 누른 방(share_intake.dart). Dart가 받을 준비를 마치기 전(앱이 막 켜짐)에 온 것은
+     * 여기 두었다가 Dart가 takeInitial로 가져가고, 준비된 뒤에 온 것은 바로 넘긴다.
+     */
+    private var shareChannel: MethodChannel? = null
+    private var dartReady = false
+    private var pendingShare: Map<String, Any?>? = null
+    private var pendingOpenRoom: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 화면이 다시 만들어진 경우(savedInstanceState가 있음)는 같은 공유를 두 번 받지 않게 건너뛴다.
+        if (savedInstanceState == null) handleIncoming(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncoming(intent)
+    }
+
+    private fun handleIncoming(intent: Intent?) {
+        if (intent == null) return
+        if (intent.action == UnreadWidgetProvider.ACTION_OPEN_ROOM) {
+            val roomId = intent.getStringExtra(UnreadWidgetProvider.EXTRA_ROOM_ID) ?: return
+            if (dartReady) shareChannel?.invokeMethod("openRoom", roomId) else pendingOpenRoom = roomId
+            return
+        }
+        if (!ShareIntake.isShare(intent)) return
+        // 파일 복사는 오래 걸릴 수 있어 메인 스레드 밖에서.
+        Thread {
+            val data = ShareIntake.read(applicationContext, intent)
+            runOnUiThread {
+                if (dartReady) shareChannel?.invokeMethod("shareReceived", data) else pendingShare = data
+            }
+        }.start()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -36,6 +76,32 @@ class MainActivity : FlutterActivity() {
                         if (path != null) {
                             MediaScannerConnection.scanFile(this, arrayOf(path), null, null)
                         }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        // 다른 앱에서 공유받은 것·위젯에서 누른 방(share_intake.dart). takeInitial을 부르면 그때부터 바로 넘긴다.
+        shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tangotalk/share").apply {
+            setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "takeInitial" -> {
+                        dartReady = true
+                        result.success(mapOf("share" to pendingShare, "openRoomId" to pendingOpenRoom))
+                        pendingShare = null
+                        pendingOpenRoom = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+        // 홈 화면 위젯 내용(home_widget_bridge.dart) — 받은 JSON을 저장하고 위젯을 다시 그린다.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "tangotalk/widget")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "update" -> {
+                        val json = call.argument<String>("json")
+                        if (json != null) UnreadWidgetProvider.save(applicationContext, json)
                         result.success(null)
                     }
                     else -> result.notImplemented()

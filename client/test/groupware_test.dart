@@ -367,7 +367,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('approval-doc-D1')));
     await tester.pumpAndSettle();
     expect(find.text('가족 여행'), findsOneWidget);
-    expect(find.text('팀장 · 결재 차례'), findsOneWidget);
+    expect(find.text('팀장 · 결재 · 결재 차례'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('approval-approve')));
     await tester.pumpAndSettle();
@@ -380,7 +380,7 @@ void main() {
     expect(h.lastBody('/api/groupware/documents/D1/approve'), {
       'comment': '좋습니다',
     });
-    expect(find.text('팀장 · 승인'), findsOneWidget);
+    expect(find.text('팀장 · 결재 · 승인'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('approval-approve')),
       findsNothing,

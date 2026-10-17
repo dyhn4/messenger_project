@@ -77,6 +77,9 @@ export const users = pgTable('users', {
   // 입사일('YYYY-MM-DD') — 그룹웨어가 회사 전체 범위일 때(groupwareScope.js) 법정 연차를 계산하는 기준(annualLeave.js). 팀
   // 범위면 team_members.hire_date를 쓴다(부서·직책의 계정/팀 값과 같은 방식). 결재·근태 관리자가 정한다.
   hireDate: text('hire_date'),
+  // 전자결재 서명·도장 그림(본인이 올린 업로드 경로 — groupware.js /groupware/signature). 승인할 때 그때의 그림을 결재 칸에 따로 적어 두므로
+  // (approval_steps.signature_path) 바꿔도 이미 한 결재는 그대로다.
+  signaturePath: text('signature_path'),
   // 마지막으로 앱이 서버에 붙어 있던 시각 — 소켓이 붙을 때와 마지막 연결이 끊길 때 적는다(socket.js). 오래 접속하지
   // 않은 사람에게 안 읽은 멘션을 메일로 요약해 보내는 데 쓴다(mentionDigest.js). 이 컬럼 전 기록은 없어서(null)
   // 그때는 기기의 마지막 접속(devices.last_seen_at)이나 가입 시각으로 어림한다.
@@ -2466,13 +2469,51 @@ export const approvalDocuments = pgTable(
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     cancelReason: text('cancel_reason'),
     canceledByName: text('canceled_by_name'),
+    // 문서 번호 — 올릴 때 매긴다("휴가-2026-0012" — 범위·해마다 1부터, approval_counters). 이 기능 전 문서는 null.
+    docNumber: text('doc_number'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('approval_documents_scope_author_idx').on(t.scopeKey, t.authorId, t.createdAt),
     index('approval_documents_scope_status_idx').on(t.scopeKey, t.status),
+    uniqueIndex('approval_documents_number_idx').on(t.scopeKey, t.docNumber),
   ],
+);
+
+/** 문서 번호 매기기 — 범위·해마다 마지막 번호(groupware 문서를 올리는 트랜잭션 안에서 하나씩 올린다). */
+export const approvalCounters = pgTable(
+  'approval_counters',
+  {
+    scopeKey: text('scope_key').notNull(),
+    year: integer('year').notNull(),
+    lastSeq: integer('last_seq').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.scopeKey, t.year] })],
+);
+
+/**
+ * 대결(부재 중 대신 결재) — [userId]가 [startDate]~[endDate](둘 다 포함, 'YYYY-MM-DD') 동안 자리를 비우면 [delegateId]가 그 사람 차례의
+ * 결재를 대신 승인·반려한다(approval_steps.acted_by_*에 누가 했는지 남는다). 범위([scopeKey])는 그룹웨어 범위.
+ */
+export const approvalDelegations = pgTable(
+  'approval_delegations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    delegateId: uuid('delegate_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    startDate: text('start_date').notNull(),
+    endDate: text('end_date').notNull(),
+    reason: text('reason'),
+    createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('approval_delegations_user_idx').on(t.scopeKey, t.userId), index('approval_delegations_delegate_idx').on(t.delegateId)],
 );
 
 /** 결재선의 한 칸 — step_order 순서대로 결재한다. 상태: 'waiting'(차례 전) | 'pending'(지금 차례) | 'approved' | 'rejected'. */
@@ -2489,6 +2530,15 @@ export const approvalSteps = pgTable(
     status: text('status').notNull().default('waiting'),
     comment: text('comment'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
+    // 결재 단계 — 같은 단계의 칸은 동시에 차례가 된다(합의). null이면 step_order가 곧 단계(이 기능 전 문서).
+    stage: integer('stage'),
+    // 'approve'(결재) | 'agree'(합의 — 같은 단계 사람이 모두 동의해야 넘어감) | 'final'(전결 — 승인하면 남은 칸은 생략)
+    role: text('role').notNull().default('approve'),
+    // 대결 — 자리를 비운 결재자 대신 결정한 사람(본인이 했으면 null).
+    actedById: uuid('acted_by_id').references(() => users.id, { onDelete: 'set null' }),
+    actedByName: text('acted_by_name'),
+    // 승인할 때의 서명·도장 그림(결정한 사람 것 — 업로드 경로).
+    signaturePath: text('signature_path'),
   },
   (t) => [
     index('approval_steps_document_idx').on(t.documentId, t.stepOrder),
@@ -2582,6 +2632,8 @@ export const approvalLines = pgTable(
     name: text('name').notNull(),
     approverIds: jsonb('approver_ids').notNull(),
     ccIds: jsonb('cc_ids').notNull(),
+    // 결재자마다의 역할 [{ userId, role }] — 합의·전결을 저장한 결재선. null이면 모두 결재(이 기능 전 결재선).
+    line: jsonb('line'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('approval_lines_owner_idx').on(t.ownerId, t.scopeKey)],

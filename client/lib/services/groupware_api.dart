@@ -45,6 +45,7 @@ class GroupwareApi {
     required String name,
     required List<String> approverIds,
     required List<String> ccIds,
+    Map<String, LineRole> roles = const {},
   }) async => ApprovalLine.fromJson(
     (await _api.requestJson(
               'POST',
@@ -53,6 +54,7 @@ class GroupwareApi {
                 'name': name,
                 'approverIds': approverIds,
                 'ccIds': ccIds,
+                if (rolesToJson(roles).isNotEmpty) 'roles': rolesToJson(roles),
               }),
             )
             as Map)
@@ -113,10 +115,8 @@ class GroupwareApi {
         .cast<String, dynamic>(),
   );
 
-  Future<void> deleteForm(String id) => _api.requestJson(
-    'DELETE',
-    '/api/groupware/forms/$id${_query()}',
-  );
+  Future<void> deleteForm(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/forms/$id${_query()}');
 
   /// 양식으로 결재 올리기 — [values]는 칸 key → 값(기간·시간대는 {start, end}, 품목 표는 [{name, qty, unitPrice}]).
   Future<ApprovalDocument> submitForm({
@@ -126,7 +126,9 @@ class GroupwareApi {
     List<Map<String, dynamic>> attachments = const [],
     required List<String> approverIds,
     List<String> ccIds = const [],
+    Map<String, LineRole> roles = const {},
   }) => submit(
+    roles: roles,
     kind: form.kind,
     fields: {
       if (!form.builtin) 'formId': form.id,
@@ -136,6 +138,62 @@ class GroupwareApi {
     title: title,
     approverIds: approverIds,
     ccIds: ccIds,
+  );
+
+  // ── 대결·서명·통계 ──
+
+  /// 대결 설정 — 내가 맡긴 것과 맡은 것([all]이면 관리자가 이 범위 전부).
+  Future<List<ApprovalDelegation>> delegations({bool all = false}) async => [
+    for (final d in await _getList(
+      '/api/groupware/delegations${_query({'all': all ? '1' : null})}',
+    ))
+      ApprovalDelegation.fromJson(d),
+  ];
+
+  Future<ApprovalDelegation> createDelegation({
+    required String delegateId,
+    required String startDate,
+    required String endDate,
+    String? reason,
+    String? userId,
+  }) async => ApprovalDelegation.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/delegations',
+              body: _body({
+                'delegateId': delegateId,
+                'startDate': startDate,
+                'endDate': endDate,
+                'reason': ?reason,
+                'userId': ?userId,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<void> deleteDelegation(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/delegations/$id');
+
+  /// 내 서명·도장을 올린 그림으로 — 서명 링크를 돌려준다.
+  Future<String?> setSignature(String fileUrl) async =>
+      ((await _api.requestJson(
+                'PUT',
+                '/api/groupware/signature',
+                body: {'fileUrl': fileUrl},
+              ))
+              as Map)['signatureUrl']
+          as String?;
+
+  Future<void> deleteSignature() =>
+      _api.requestJson('DELETE', '/api/groupware/signature');
+
+  /// 결재 통계(관리자) — [from]~[to] 'YYYY-MM-DD'.
+  Future<ApprovalStats> stats({
+    required String from,
+    required String to,
+  }) async => ApprovalStats.fromJson(
+    await _getMap('/api/groupware/stats${_query({'from': from, 'to': to})}'),
   );
 
   Future<void> deleteApprovalLine(String id) =>
@@ -165,6 +223,7 @@ class GroupwareApi {
     String? body,
     required List<String> approverIds,
     List<String> ccIds = const [],
+    Map<String, LineRole> roles = const {},
   }) async => ApprovalDocument.fromJson(
     (await _api.requestJson(
               'POST',
@@ -176,6 +235,7 @@ class GroupwareApi {
                 'body': ?body,
                 'approverIds': approverIds,
                 'ccIds': ccIds,
+                if (rolesToJson(roles).isNotEmpty) 'roles': rolesToJson(roles),
               }),
             )
             as Map)

@@ -155,10 +155,17 @@ test('연차 현황과 부족 — 결재 중인 것까지 빼고 본다, 입사�
 
 // ── 결재선·내용 ────────────────────────────────────────────────────────
 
-test('결재선 — 1~5명, 중복·자기 자신·결재자 겸 참조자·범위 밖은 거절', () => {
+test('결재선 — 1~10명, 중복·자기 자신·결재자 겸 참조자·범위 밖은 거절', () => {
   const isCandidate = (id) => id !== 'outsider';
   const ok = validateApprovalLine({ authorId: 'me', approverIds: ['a', 'b'], ccIds: ['c'], isCandidate });
-  assert.deepEqual(ok, { approverIds: ['a', 'b'], ccIds: ['c'] });
+  assert.deepEqual(ok, {
+    approverIds: ['a', 'b'],
+    ccIds: ['c'],
+    line: [
+      { userId: 'a', role: 'approve', stage: 0 },
+      { userId: 'b', role: 'approve', stage: 1 },
+    ],
+  });
   assert.match(validateApprovalLine({ authorId: 'me', approverIds: [], isCandidate }).error, /한 명 이상/);
   assert.match(
     validateApprovalLine({ authorId: 'me', approverIds: Array.from({ length: APPROVERS_MAX + 1 }, (_, i) => `u${i}`), isCandidate }).error,

@@ -1,7 +1,9 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import {
   approvalCc,
+  approvalCounters,
+  approvalDelegations,
   approvalDocuments,
   approvalLines,
   approvalNotifications,
@@ -16,20 +18,40 @@ import {
 
 // ── 결재 문서 ───────────────────────────────────────────────────────────
 
-/** 문서·결재선·참조자를 한 번에 넣는다. 첫 결재자가 바로 차례(pending)다. 넣은 문서 행. */
-export async function insertApprovalDocument({ doc, approvers, ccIds }) {
+/**
+ * 문서·결재선·참조자를 한 번에 넣는다. 첫 단계(합의면 여럿)가 바로 차례(pending)다. [approvers]는 `[{ id, name, role?, stage? }]`
+ * (단계가 없으면 순서대로 한 사람씩). [numberOf](year, seq)를 주면 같은 트랜잭션에서 범위·해마다 번호를 하나 올려 문서 번호를 매긴다.
+ * 넣은 문서 행.
+ */
+export async function insertApprovalDocument({ doc, approvers, ccIds, numberOf = null, year = new Date().getFullYear() }) {
   return db.transaction(async (tx) => {
+    let docNumber = null;
+    if (numberOf) {
+      const [counter] = await tx
+        .insert(approvalCounters)
+        .values({ scopeKey: doc.scopeKey, year, lastSeq: 1 })
+        .onConflictDoUpdate({
+          target: [approvalCounters.scopeKey, approvalCounters.year],
+          set: { lastSeq: sql`${approvalCounters.lastSeq} + 1` },
+        })
+        .returning();
+      docNumber = numberOf(year, counter.lastSeq);
+    }
     const [row] = await tx
       .insert(approvalDocuments)
-      .values({ ...doc, status: 'pending', currentStep: 0 })
+      .values({ ...doc, docNumber, status: 'pending', currentStep: 0 })
       .returning();
+    const stageOf = (a, i) => a.stage ?? i;
+    const firstStage = Math.min(...approvers.map(stageOf));
     await tx.insert(approvalSteps).values(
       approvers.map((a, i) => ({
         documentId: row.id,
         stepOrder: i,
         approverId: a.id,
         approverName: a.name,
-        status: i === 0 ? 'pending' : 'waiting',
+        stage: stageOf(a, i),
+        role: a.role ?? 'approve',
+        status: stageOf(a, i) === firstStage ? 'pending' : 'waiting',
       })),
     );
     if (ccIds.length > 0) await tx.insert(approvalCc).values(ccIds.map((userId) => ({ documentId: row.id, userId })));
@@ -73,20 +95,25 @@ export async function applyApprovalDecision(id, plan, afterApply = null) {
 /**
  * 문서 목록(최신순) — [box]: 'inbox'(내가 지금 결재할 것) | 'mine'(내가 올린 것) | 'cc'(참조) | 'done'(내가 결재한 것) | 'all'(관리자 —
  * 이 범위 전부). [kind]·[status]로 좁히고 [before](만든 시각 ms)로 다음 쪽을 받는다. 결재선은 따로 붙인다(attachSteps).
+ * [proxyFor]는 오늘 나에게 대결을 맡긴 사람들 — 'inbox'에 그 사람 차례인 문서도 넣는다(내가 올렸거나 이미 결재선에 있는 문서는 빼고).
  */
-export async function listApprovalDocuments({ scopeKey, box, userId, kind = null, status = null, before = null, limit = 50 }) {
+export async function listApprovalDocuments({ scopeKey, box, userId, kind = null, status = null, before = null, limit = 50, proxyFor = [] }) {
   const conditions = [eq(approvalDocuments.scopeKey, scopeKey)];
   if (kind) conditions.push(eq(approvalDocuments.kind, kind));
   if (status) conditions.push(eq(approvalDocuments.status, status));
   if (before) conditions.push(lt(approvalDocuments.createdAt, new Date(before)));
   if (box === 'mine') conditions.push(eq(approvalDocuments.authorId, userId));
-  if (box === 'inbox' || box === 'done') {
-    const stepStatus = box === 'inbox' ? eq(approvalSteps.status, 'pending') : inArray(approvalSteps.status, ['approved', 'rejected']);
+  if (box === 'inbox') {
+    conditions.push(or(myPendingStep(userId), proxyPendingStep(userId, proxyFor)));
+    conditions.push(eq(approvalDocuments.status, 'pending'));
+  }
+  if (box === 'done') {
+    // 내가 결정한 칸 — 내 칸이거나 대결로 내가 처리한 칸.
     conditions.push(
       sql`exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
-        and ${approvalSteps.approverId} = ${userId} and ${stepStatus})`,
+        and (${approvalSteps.approverId} = ${userId} or ${approvalSteps.actedById} = ${userId})
+        and ${inArray(approvalSteps.status, ['approved', 'rejected'])})`,
     );
-    if (box === 'inbox') conditions.push(eq(approvalDocuments.status, 'pending'));
   }
   if (box === 'cc') {
     conditions.push(
@@ -115,21 +142,82 @@ async function attachSteps(docs) {
   return docs.map((doc) => ({ doc, steps: byDoc.get(doc.id) ?? [] }));
 }
 
-/** 이 범위에서 내가 지금 결재할 문서 수(메뉴의 숫자 뱃지). */
-export async function countPendingApprovals(scopeKey, userId) {
+/** 문서에 내 차례인 칸이 있다. */
+const myPendingStep = (userId) =>
+  sql`exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
+    and ${approvalSteps.approverId} = ${userId} and ${approvalSteps.status} = 'pending')`;
+
+/** 문서에 나에게 대결을 맡긴 사람의 차례인 칸이 있다 — 내가 올렸거나 이미 결재선에 있는 문서는 뺀다(approvalRules.js proxyForOf). */
+function proxyPendingStep(userId, proxyFor) {
+  if (!proxyFor.length) return sql`false`;
+  return and(
+    sql`exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
+      and ${inArray(approvalSteps.approverId, proxyFor)} and ${approvalSteps.status} = 'pending')`,
+    sql`not exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
+      and ${approvalSteps.approverId} = ${userId})`,
+    sql`${approvalDocuments.authorId} is distinct from ${userId}`,
+  );
+}
+
+/** 이 범위에서 내가 지금 결재할 문서 수(메뉴의 숫자 뱃지) — 대결을 맡은 문서 포함. */
+export async function countPendingApprovals(scopeKey, userId, proxyFor = []) {
   const [row] = await db
     .select({ count: sql`count(*)`.mapWith(Number) })
-    .from(approvalSteps)
-    .innerJoin(approvalDocuments, eq(approvalDocuments.id, approvalSteps.documentId))
+    .from(approvalDocuments)
     .where(
       and(
         eq(approvalDocuments.scopeKey, scopeKey),
         eq(approvalDocuments.status, 'pending'),
-        eq(approvalSteps.status, 'pending'),
-        eq(approvalSteps.approverId, userId),
+        or(myPendingStep(userId), proxyPendingStep(userId, proxyFor)),
       ),
     );
   return row?.count ?? 0;
+}
+
+// ── 대결(부재 중 대신 결재) ──
+
+/** 범위의 대결 설정 중 [today] 이후로 끝나는 것(지난 것은 뺌). [userIds]를 주면 그 사람들이 맡긴 것만. */
+export function listCurrentDelegations(scopeKey, today, { userId = null } = {}) {
+  const conditions = [eq(approvalDelegations.scopeKey, scopeKey), gte(approvalDelegations.endDate, today)];
+  if (userId) conditions.push(eq(approvalDelegations.userId, userId));
+  return db
+    .select()
+    .from(approvalDelegations)
+    .where(and(...conditions))
+    .orderBy(asc(approvalDelegations.startDate));
+}
+
+export async function insertDelegation(fields) {
+  const [row] = await db.insert(approvalDelegations).values(fields).returning();
+  return row;
+}
+
+export async function findDelegation(id) {
+  const [row] = await db.select().from(approvalDelegations).where(eq(approvalDelegations.id, id)).limit(1);
+  return row ?? null;
+}
+
+export async function deleteDelegation(id) {
+  await db.delete(approvalDelegations).where(eq(approvalDelegations.id, id));
+}
+
+// ── 결재 통계 ──
+
+/** [from]~[to](둘 다 포함, 'YYYY-MM-DD' — 서버 시각 기준) 사이에 올린 문서와 결재선 `[{ doc, steps }]`(통계용, 최대 5000건). */
+export async function listDocumentsCreatedBetween({ scopeKey, from, to }) {
+  const docs = await db
+    .select()
+    .from(approvalDocuments)
+    .where(
+      and(
+        eq(approvalDocuments.scopeKey, scopeKey),
+        gte(approvalDocuments.createdAt, new Date(`${from}T00:00:00`)),
+        lt(approvalDocuments.createdAt, new Date(new Date(`${to}T00:00:00`).getTime() + 86_400_000)),
+      ),
+    )
+    .orderBy(desc(approvalDocuments.createdAt))
+    .limit(5000);
+  return attachSteps(docs);
 }
 
 // ── 결재 알림함(알림 센터 "결재" 탭) ──────────────────────────────────────

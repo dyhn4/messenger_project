@@ -8,6 +8,8 @@ import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_form_widgets.dart';
 import 'approval_forms.dart' show toastSubmitted;
+import 'approval_print.dart';
+import 'approval_settings.dart';
 import 'groupware_screen.dart';
 
 /// 결재 탭 — 결재함(결재할 문서 · 내가 올린 문서 · 결재한 문서 · 참조 문서 · 관리자는 전체 문서). 줄을 누르면 문서 상세.
@@ -117,7 +119,30 @@ class _ApprovalTabState extends State<ApprovalTab> {
                 icon: const Icon(Icons.edit_document, size: 18),
                 label: const Text('새 결재'),
               ),
-              const SizedBox(width: 10),
+              // 내 결재 설정 — 서명·도장, 대결(부재 중 대신 결재).
+              PopupMenuButton<String>(
+                key: const ValueKey('approval-settings'),
+                tooltip: '결재 설정',
+                icon: const Icon(Icons.manage_accounts_outlined),
+                onSelected: (v) => v == 'signature'
+                    ? showSignatureDialog(
+                        context,
+                        api: widget.api,
+                        session: widget.session,
+                      )
+                    : showDelegationsDialog(
+                        context,
+                        api: widget.api,
+                        ctx: widget.ctx,
+                        session: widget.session,
+                        changes: widget.changes,
+                      ),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'signature', child: Text('내 서명·도장')),
+                  PopupMenuItem(value: 'delegation', child: Text('대결(부재) 설정')),
+                ],
+              ),
+              const SizedBox(width: 4),
               for (final box in boxes)
                 Padding(
                   padding: const EdgeInsets.only(right: 6),
@@ -230,10 +255,16 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
         context: context,
         builder: (_) => _CommentDialog(
           title: switch (action) {
-            'approve' => '승인',
+            'approve' => _doc?.finalForMe == true ? '전결 승인' : '승인',
             'reject' => '반려',
             _ => '결재 취소',
           },
+          note: [
+            if (action == 'approve' && _doc?.finalForMe == true)
+              '전결 — 승인하면 남은 결재는 생략되고 바로 결재가 끝납니다.',
+            if (action != 'cancel' && _doc?.actingFor != null)
+              '${_doc!.actingFor}님 대신(대결) 결정합니다. 대결한 사람으로 함께 남습니다.',
+          ].join('\n'),
           label: switch (action) {
             'approve' => '의견 (선택)',
             'reject' => '반려 사유',
@@ -280,7 +311,7 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
         'approve' =>
           doc.status == ApprovalStatus.approved
               ? '승인했습니다. 결재가 끝났습니다.'
-              : '승인했습니다. 다음 결재자에게 넘어갔습니다.',
+              : '승인했습니다. ${doc.steps.where((s) => s.status == ApprovalStepStatus.pending).map((s) => s.approverName).join(', ')}님 차례입니다.',
         'reject' => '반려했습니다.',
         'withdraw' => '회수했습니다.',
         _ => '취소했습니다.',
@@ -328,6 +359,19 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
           onPressed: () => Navigator.of(context).pop(_changed),
           child: const Text('닫기'),
         ),
+        if (doc != null)
+          PopupMenuButton<String>(
+            key: const ValueKey('approval-print'),
+            tooltip: '인쇄·PDF',
+            icon: const Icon(Icons.print_outlined),
+            onSelected: (v) => v == 'print'
+                ? printApproval(context, doc, widget.ctx, widget.session)
+                : saveApprovalPdf(context, doc, widget.ctx, widget.session),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'print', child: Text('인쇄')),
+              PopupMenuItem(value: 'pdf', child: Text('PDF로 저장')),
+            ],
+          ),
         if (doc != null && doc.canWithdraw)
           TextButton(
             key: const ValueKey('approval-withdraw'),
@@ -383,7 +427,12 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '${doc.kindLabel} · ${doc.authorName}',
+                [
+                  doc.kindLabel,
+                  doc.authorName,
+                  if (doc.docNumber != null) doc.docNumber!,
+                ].join(' · '),
+                key: const ValueKey('approval-doc-header'),
                 style: TextStyle(color: hint),
               ),
             ),
@@ -394,6 +443,19 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
               ),
           ],
         ),
+        if (doc.actingFor != null && doc.myTurn)
+          Container(
+            key: const ValueKey('approval-acting-for'),
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text('${doc.actingFor}님이 자리를 비워 대신(대결) 결재할 차례입니다.'),
+          ),
+        const SizedBox(height: 12),
+        ApprovalStampBox(doc: doc, resolveUrl: widget.session.resolveUrl),
         const SizedBox(height: 12),
         if (doc.kind == ApprovalKind.leave) ...[
           row(
@@ -460,19 +522,25 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
                 ApprovalStepStatus.rejected => theme.colorScheme.errorContainer,
                 ApprovalStepStatus.pending =>
                   theme.colorScheme.primaryContainer,
-                ApprovalStepStatus.waiting =>
+                ApprovalStepStatus.waiting || ApprovalStepStatus.skipped =>
                   theme.colorScheme.surfaceContainerHighest,
               },
               child: Text(
-                '${s.order + 1}',
+                '${s.stage + 1}',
                 style: const TextStyle(fontSize: 12),
               ),
             ),
-            title: Text('${s.approverName} · ${s.status.label}'),
-            subtitle: s.comment == null && s.decidedAt == null
+            title: Text(
+              '${s.approverName} · ${s.role.label} · ${s.status.label}',
+            ),
+            subtitle:
+                s.comment == null &&
+                    s.decidedAt == null &&
+                    s.actedByName == null
                 ? null
                 : Text(
                     [
+                      if (s.actedByName != null) '대결 ${s.actedByName}',
                       if (s.decidedAt != null) formatDateTime(s.decidedAt!),
                       if (s.comment != null) '"${s.comment}"',
                     ].join(' · '),
@@ -496,10 +564,14 @@ class _CommentDialog extends StatefulWidget {
   final String title;
   final String label;
   final bool required;
+
+  /// 입력칸 위의 안내(전결·대결) — 비면 없음.
+  final String note;
   const _CommentDialog({
     required this.title,
     required this.label,
     required this.required,
+    this.note = '',
   });
 
   @override
@@ -529,18 +601,36 @@ class _CommentDialogState extends State<_CommentDialog> {
     title: Text(widget.title),
     content: SizedBox(
       width: 360,
-      child: TextField(
-        key: const ValueKey('approval-comment'),
-        controller: _text,
-        autofocus: true,
-        minLines: 2,
-        maxLines: 4,
-        maxLength: 500,
-        decoration: InputDecoration(
-          labelText: widget.label,
-          errorText: _error,
-          border: const OutlineInputBorder(),
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.note.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                widget.note,
+                key: const ValueKey('approval-comment-note'),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+          TextField(
+            key: const ValueKey('approval-comment'),
+            controller: _text,
+            autofocus: true,
+            minLines: 2,
+            maxLines: 4,
+            maxLength: 500,
+            decoration: InputDecoration(
+              labelText: widget.label,
+              errorText: _error,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ],
       ),
     ),
     actions: [

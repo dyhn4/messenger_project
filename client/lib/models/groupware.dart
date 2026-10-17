@@ -165,7 +165,10 @@ enum ApprovalStepStatus {
   waiting('waiting', '대기'),
   pending('pending', '결재 차례'),
   approved('approved', '승인'),
-  rejected('rejected', '반려');
+  rejected('rejected', '반려'),
+
+  /// 전결로 생략된 칸.
+  skipped('skipped', '생략');
 
   final String wire;
   final String label;
@@ -173,6 +176,187 @@ enum ApprovalStepStatus {
 
   static ApprovalStepStatus fromWire(String? value) =>
       values.firstWhere((s) => s.wire == value, orElse: () => waiting);
+}
+
+/// 결재선 칸의 역할 — 서버 approvalRules.js LINE_ROLES. 이어진 합의 칸은 한 단계(동시에 차례), 전결은 승인하면 남은 칸을 생략한다.
+enum LineRole {
+  approve('approve', '결재'),
+  agree('agree', '합의'),
+  finalApprove('final', '전결');
+
+  final String wire;
+  final String label;
+  const LineRole(this.wire, this.label);
+
+  static LineRole fromWire(String? value) =>
+      values.firstWhere((r) => r.wire == value, orElse: () => approve);
+
+  /// 결재선에서 눌러 바꿀 때의 다음 역할(결재 → 합의 → 전결 → 결재).
+  LineRole get next => values[(index + 1) % values.length];
+}
+
+/// 서버에 보낼 역할 묶음 — 결재가 아닌 칸만 { userId: 'agree' | 'final' }.
+Map<String, String> rolesToJson(Map<String, LineRole> roles) => {
+  for (final e in roles.entries)
+    if (e.value != LineRole.approve) e.key: e.value.wire,
+};
+
+Map<String, LineRole> rolesFromJson(Object? json) => {
+  if (json is Map)
+    for (final e in json.entries)
+      e.key as String: LineRole.fromWire(e.value as String?),
+};
+
+/// 대결(부재 중 대신 결재) 설정 — 서버 GET /groupware/delegations.
+class ApprovalDelegation {
+  final String id;
+  final String userId;
+  final String userName;
+  final String delegateId;
+  final String delegateName;
+  final String startDate;
+  final String endDate;
+  final String? reason;
+  const ApprovalDelegation({
+    required this.id,
+    required this.userId,
+    required this.userName,
+    required this.delegateId,
+    required this.delegateName,
+    required this.startDate,
+    required this.endDate,
+    this.reason,
+  });
+
+  factory ApprovalDelegation.fromJson(Map<String, dynamic> json) =>
+      ApprovalDelegation(
+        id: json['id'] as String,
+        userId: json['userId'] as String? ?? '',
+        userName: json['userName'] as String? ?? '',
+        delegateId: json['delegateId'] as String? ?? '',
+        delegateName: json['delegateName'] as String? ?? '',
+        startDate: json['startDate'] as String? ?? '',
+        endDate: json['endDate'] as String? ?? '',
+        reason: json['reason'] as String?,
+      );
+
+  /// [today]에 효력이 있는지.
+  bool activeOn(String today) =>
+      startDate.compareTo(today) <= 0 && today.compareTo(endDate) <= 0;
+}
+
+/// 결재 통계의 한 줄(종류별·전체) — 서버 approvalRules.js approvalStats.
+class ApprovalStatsRow {
+  final String label;
+  final int total;
+  final int pending;
+  final int approved;
+  final int rejected;
+  final int withdrawn;
+  final int canceled;
+  final double? avgHours;
+  const ApprovalStatsRow({
+    this.label = '',
+    this.total = 0,
+    this.pending = 0,
+    this.approved = 0,
+    this.rejected = 0,
+    this.withdrawn = 0,
+    this.canceled = 0,
+    this.avgHours,
+  });
+
+  factory ApprovalStatsRow.fromJson(Map<String, dynamic> j) {
+    int n(String k) => (j[k] as num?)?.toInt() ?? 0;
+    return ApprovalStatsRow(
+      label: j['label'] as String? ?? '',
+      total: n('total'),
+      pending: n('pending'),
+      approved: n('approved'),
+      rejected: n('rejected'),
+      withdrawn: n('withdrawn'),
+      canceled: n('canceled'),
+      avgHours: (j['avgHours'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// 결재자별 통계.
+class ApproverStatsRow {
+  final String userId;
+  final String name;
+  final int decided;
+  final int approved;
+  final int rejected;
+  final int proxied;
+  final int waiting;
+  final double? avgHours;
+  const ApproverStatsRow({
+    required this.userId,
+    required this.name,
+    this.decided = 0,
+    this.approved = 0,
+    this.rejected = 0,
+    this.proxied = 0,
+    this.waiting = 0,
+    this.avgHours,
+  });
+
+  factory ApproverStatsRow.fromJson(Map<String, dynamic> j) {
+    int n(String k) => (j[k] as num?)?.toInt() ?? 0;
+    return ApproverStatsRow(
+      userId: j['userId'] as String? ?? '',
+      name: j['name'] as String? ?? '',
+      decided: n('decided'),
+      approved: n('approved'),
+      rejected: n('rejected'),
+      proxied: n('proxied'),
+      waiting: n('waiting'),
+      avgHours: (j['avgHours'] as num?)?.toDouble(),
+    );
+  }
+}
+
+class ApprovalStats {
+  final String from;
+  final String to;
+  final ApprovalStatsRow totals;
+  final List<ApprovalStatsRow> byKind;
+  final List<ApproverStatsRow> byApprover;
+  const ApprovalStats({
+    required this.from,
+    required this.to,
+    required this.totals,
+    this.byKind = const [],
+    this.byApprover = const [],
+  });
+
+  factory ApprovalStats.fromJson(Map<String, dynamic> j) => ApprovalStats(
+    from: j['from'] as String? ?? '',
+    to: j['to'] as String? ?? '',
+    totals: ApprovalStatsRow.fromJson(
+      (j['totals'] as Map?)?.cast<String, dynamic>() ?? const {},
+    ),
+    byKind: [
+      for (final r in j['byKind'] as List? ?? const [])
+        ApprovalStatsRow.fromJson((r as Map).cast<String, dynamic>()),
+    ],
+    byApprover: [
+      for (final r in j['byApprover'] as List? ?? const [])
+        ApproverStatsRow.fromJson((r as Map).cast<String, dynamic>()),
+    ],
+  );
+}
+
+/// "3.5시간" / "2일 4시간" — 평균 처리 시간 글자(없으면 '—').
+String hoursText(double? hours) {
+  if (hours == null) return '—';
+  if (hours < 24) {
+    return '${hours == hours.roundToDouble() ? hours.toInt() : hours.toStringAsFixed(1)}시간';
+  }
+  final days = hours ~/ 24;
+  final rest = (hours - days * 24).round();
+  return rest == 0 ? '$days일' : '$days일 $rest시간';
 }
 
 /// 결재함 — 서버 GET /groupware/documents?box=.
@@ -272,6 +456,9 @@ class GroupwareContext {
   /// 지금 사내 와이파이인지(서버가 본 내 접속 주소).
   final bool inLan;
 
+  /// 내 서명·도장(서명 링크) — 없으면 null.
+  final String? signatureUrl;
+
   const GroupwareContext({
     required this.scope,
     required this.scopeSetting,
@@ -289,6 +476,7 @@ class GroupwareContext {
     this.ccMax = 10,
     this.attachmentsMax = 5,
     this.inLan = false,
+    this.signatureUrl,
   });
 
   factory GroupwareContext.fromJson(Map<String, dynamic> json) {
@@ -315,6 +503,7 @@ class GroupwareContext {
       ccMax: (limits['ccMax'] as num?)?.toInt() ?? 10,
       attachmentsMax: (limits['attachmentsMax'] as num?)?.toInt() ?? 5,
       inLan: json['inLan'] as bool? ?? false,
+      signatureUrl: json['signatureUrl'] as String?,
     );
   }
 
@@ -353,11 +542,15 @@ class ApprovalLine {
   final String name;
   final List<String> approverIds;
   final List<String> ccIds;
+
+  /// 결재가 아닌 칸의 역할(합의·전결).
+  final Map<String, LineRole> roles;
   const ApprovalLine({
     required this.id,
     required this.name,
     required this.approverIds,
     required this.ccIds,
+    this.roles = const {},
   });
 
   factory ApprovalLine.fromJson(Map<String, dynamic> json) => ApprovalLine(
@@ -365,6 +558,7 @@ class ApprovalLine {
     name: json['name'] as String? ?? '',
     approverIds: (json['approverIds'] as List? ?? const []).cast<String>(),
     ccIds: (json['ccIds'] as List? ?? const []).cast<String>(),
+    roles: rolesFromJson(json['roles']),
   );
 }
 
@@ -376,11 +570,15 @@ class ApprovalLines {
 
   /// 추천이 어디서 왔는지 — 'org'(조직도의 상위자 사슬) | 'saved'(가장 최근에 저장한 결재선) | null(추천 없음).
   final String? suggestedSource;
+
+  /// 추천 결재선의 역할(저장한 결재선에서 온 경우).
+  final Map<String, LineRole> suggestedRoles;
   const ApprovalLines({
     this.lines = const [],
     this.suggestedApproverIds = const [],
     this.suggestedCcIds = const [],
     this.suggestedSource,
+    this.suggestedRoles = const {},
   });
 
   factory ApprovalLines.fromJson(Map<String, dynamic> json) {
@@ -394,6 +592,7 @@ class ApprovalLines {
           .cast<String>(),
       suggestedCcIds: (suggested?['ccIds'] as List? ?? const []).cast<String>(),
       suggestedSource: suggested?['source'] as String?,
+      suggestedRoles: rolesFromJson(suggested?['roles']),
     );
   }
 }
@@ -401,29 +600,47 @@ class ApprovalLines {
 class ApprovalStep {
   final String id;
   final int order;
+
+  /// 단계 — 같은 단계의 칸(합의)은 함께 차례가 된다.
+  final int stage;
+  final LineRole role;
   final String? approverId;
   final String approverName;
   final ApprovalStepStatus status;
   final String? comment;
   final DateTime? decidedAt;
+
+  /// 대결로 대신 결정한 사람(본인이 했으면 null).
+  final String? actedByName;
+
+  /// 승인할 때의 서명·도장(서명 링크).
+  final String? signatureUrl;
   const ApprovalStep({
     required this.id,
     required this.order,
+    int? stage,
+    this.role = LineRole.approve,
     this.approverId,
     required this.approverName,
     required this.status,
     this.comment,
     this.decidedAt,
-  });
+    this.actedByName,
+    this.signatureUrl,
+  }) : stage = stage ?? order;
 
   factory ApprovalStep.fromJson(Map<String, dynamic> json) => ApprovalStep(
     id: json['id'] as String,
     order: (json['order'] as num?)?.toInt() ?? 0,
+    stage: (json['stage'] as num?)?.toInt(),
+    role: LineRole.fromWire(json['role'] as String?),
     approverId: json['approverId'] as String?,
     approverName: json['approverName'] as String? ?? '(알 수 없음)',
     status: ApprovalStepStatus.fromWire(json['status'] as String?),
     comment: json['comment'] as String?,
     decidedAt: _time(json['decidedAt']),
+    actedByName: json['actedByName'] as String?,
+    signatureUrl: json['signatureUrl'] as String?,
   );
 }
 
@@ -452,6 +669,9 @@ class ApprovalAttachment {
 class ApprovalDocument {
   final String id;
   final ApprovalKind kind;
+
+  /// 문서 번호("휴가-2026-0012") — 이 기능 전 문서는 null.
+  final String? docNumber;
   final String title;
   final String? body;
 
@@ -474,9 +694,18 @@ class ApprovalDocument {
   final bool canWithdraw;
   final bool canCancel;
 
+  /// 대결로 내 차례면 누구 대신인지.
+  final String? actingFor;
+
+  /// 내 칸이 전결이면 승인하는 순간 결재가 끝난다.
+  final bool finalForMe;
+
   const ApprovalDocument({
     required this.id,
     required this.kind,
+    this.docNumber,
+    this.actingFor,
+    this.finalForMe = false,
     required this.title,
     this.body,
     this.payload = const {},
@@ -499,6 +728,9 @@ class ApprovalDocument {
       ApprovalDocument(
         id: json['id'] as String,
         kind: ApprovalKind.fromWire(json['kind'] as String?),
+        docNumber: json['docNumber'] as String?,
+        actingFor: json['actingFor'] as String?,
+        finalForMe: json['finalForMe'] == true,
         title: json['title'] as String? ?? '',
         body: json['body'] as String?,
         payload: (json['payload'] as Map?)?.cast<String, dynamic>() ?? const {},

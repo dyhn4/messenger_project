@@ -7,19 +7,63 @@ import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 
-/// 결재선 — 결재자(순서대로)와 참조자. 신청 창과 결재선 선택기([ApprovalLinePicker])가 같이 본다.
+/// 결재선 — 결재자(순서대로)·결재자마다의 역할(결재·합의·전결)과 참조자. 신청 창과 결재선 선택기([ApprovalLinePicker])가 같이 본다.
 class ApprovalLineController extends ChangeNotifier {
   final List<String> approverIds = [];
   final List<String> ccIds = [];
 
-  void setLine(List<String> approvers, List<String> cc) {
+  /// 결재가 아닌 칸의 역할 — 이어진 합의는 한 단계(동시에 차례), 전결은 한 명.
+  final Map<String, LineRole> roles = {};
+
+  void setLine(
+    List<String> approvers,
+    List<String> cc, [
+    Map<String, LineRole> lineRoles = const {},
+  ]) {
     approverIds
       ..clear()
       ..addAll(approvers);
     ccIds
       ..clear()
       ..addAll(cc.where((id) => !approvers.contains(id)));
+    roles
+      ..clear()
+      ..addAll({
+        for (final e in lineRoles.entries)
+          if (approvers.contains(e.key) && e.value != LineRole.approve)
+            e.key: e.value,
+      });
     notifyListeners();
+  }
+
+  LineRole roleOf(String id) => roles[id] ?? LineRole.approve;
+
+  /// 역할을 다음 것으로(결재 → 합의 → 전결 → 결재). 전결은 한 명만이라 다른 사람의 전결은 결재로 돌린다.
+  void cycleRole(String id) {
+    final next = roleOf(id).next;
+    if (next == LineRole.finalApprove) {
+      roles.removeWhere((_, r) => r == LineRole.finalApprove);
+    }
+    if (next == LineRole.approve) {
+      roles.remove(id);
+    } else {
+      roles[id] = next;
+    }
+    notifyListeners();
+  }
+
+  /// 결재자마다의 단계 번호(1부터) — 이어진 합의 칸은 같은 번호(서버 approvalRules.js validateApprovalLine과 같은 규칙).
+  List<int> get stageNumbers {
+    final out = <int>[];
+    var stage = 0;
+    for (final (i, id) in approverIds.indexed) {
+      final agree = roleOf(id) == LineRole.agree;
+      if (!(agree && i > 0 && roleOf(approverIds[i - 1]) == LineRole.agree)) {
+        stage += 1;
+      }
+      out.add(stage);
+    }
+    return out;
   }
 
   void addApprover(String id) {
@@ -31,6 +75,7 @@ class ApprovalLineController extends ChangeNotifier {
 
   void removeApprover(String id) {
     approverIds.remove(id);
+    roles.remove(id);
     notifyListeners();
   }
 
@@ -111,6 +156,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
         widget.controller.setLine(
           approvers,
           lines.suggestedCcIds.where(known.contains).toList(),
+          lines.suggestedRoles,
         );
         // 조직도 상위자로 채웠으면 그 사실을 알려 준다 — 결재선을 손으로 바꾸면 안내는 사라진다.
         if (lines.suggestedSource == 'org' && approvers.isNotEmpty) {
@@ -161,6 +207,7 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
         name: name.trim(),
         approverIds: c.approverIds,
         ccIds: c.ccIds,
+        roles: c.roles,
       );
       if (!mounted) return;
       setState(() => _lines = [line, ..._lines]);
@@ -214,7 +261,8 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
               PopupMenuButton<ApprovalLine>(
                 key: const ValueKey('approval-line-load'),
                 tooltip: '저장한 결재선',
-                onSelected: (line) => c.setLine(line.approverIds, line.ccIds),
+                onSelected: (line) =>
+                    c.setLine(line.approverIds, line.ccIds, line.roles),
                 itemBuilder: (_) => [
                   for (final line in _lines)
                     PopupMenuItem(
@@ -255,7 +303,8 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Text(
-              '결재자를 순서대로 고르세요. 앞사람이 승인해야 다음 사람에게 넘어갑니다.',
+              '결재자를 순서대로 고르세요. 앞사람이 승인해야 다음 사람에게 넘어갑니다. 이름 옆 역할을 눌러 합의(이어진 합의는 동시에)·'
+              '전결(승인하면 남은 결재 생략)로 바꿀 수 있습니다.',
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
@@ -265,10 +314,28 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
             children: [
               CircleAvatar(
                 radius: 11,
-                child: Text('${i + 1}', style: const TextStyle(fontSize: 11)),
+                child: Text(
+                  '${c.stageNumbers[i]}',
+                  style: const TextStyle(fontSize: 11),
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(child: Text(_nameOf(id))),
+              ActionChip(
+                key: ValueKey('approval-line-role-$id'),
+                visualDensity: VisualDensity.compact,
+                tooltip: '역할 바꾸기(결재 → 합의 → 전결)',
+                label: Text(
+                  c.roleOf(id).label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: c.roleOf(id) == LineRole.approve
+                        ? hint
+                        : theme.colorScheme.primary,
+                  ),
+                ),
+                onPressed: () => c.cycleRole(id),
+              ),
               IconButton(
                 tooltip: '위로',
                 visualDensity: VisualDensity.compact,
@@ -475,6 +542,7 @@ class ApprovalRequestDialog extends StatefulWidget {
     required String? body,
     required List<String> approverIds,
     required List<String> ccIds,
+    required Map<String, LineRole> roles,
   })
   submit;
   const ApprovalRequestDialog({
@@ -525,6 +593,7 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
         body: _body.text.trim().isEmpty ? null : _body.text.trim(),
         approverIds: List.of(_line.approverIds),
         ccIds: List.of(_line.ccIds),
+        roles: Map.of(_line.roles),
       );
       if (mounted) Navigator.of(context).pop(doc);
     } catch (e) {
@@ -717,8 +786,13 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
         }
         return null;
       },
-      submit: ({required body, required approverIds, required ccIds}) =>
-          api.submit(
+      submit:
+          ({
+            required body,
+            required approverIds,
+            required ccIds,
+            required roles,
+          }) => api.submit(
             kind: ApprovalKind.leave,
             fields: {
               'leaveType': type,
@@ -728,6 +802,7 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
             body: body,
             approverIds: approverIds,
             ccIds: ccIds,
+            roles: roles,
           ),
     ),
   );
@@ -863,8 +938,13 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
         if (uploading) return '영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.';
         return null;
       },
-      submit: ({required body, required approverIds, required ccIds}) =>
-          api.submit(
+      submit:
+          ({
+            required body,
+            required approverIds,
+            required ccIds,
+            required roles,
+          }) => api.submit(
             kind: ApprovalKind.expense,
             fields: {
               'amount': int.parse(amount.text.replaceAll(',', '').trim()),
@@ -884,6 +964,7 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
             body: body,
             approverIds: approverIds,
             ccIds: ccIds,
+            roles: roles,
           ),
     ),
   ).whenComplete(() {
@@ -965,8 +1046,13 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
         }
         return null;
       },
-      submit: ({required body, required approverIds, required ccIds}) =>
-          api.submit(
+      submit:
+          ({
+            required body,
+            required approverIds,
+            required ccIds,
+            required roles,
+          }) => api.submit(
             kind: ApprovalKind.attendance,
             fields: {
               'workDate': workDate,
@@ -978,6 +1064,7 @@ Future<ApprovalDocument?> showAttendanceCorrectionDialog(
             body: body,
             approverIds: approverIds,
             ccIds: ccIds,
+            roles: roles,
           ),
     ),
   ).whenComplete(() {

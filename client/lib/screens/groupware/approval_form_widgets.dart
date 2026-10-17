@@ -163,8 +163,13 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
         if (_titleRequired && _title.text.trim().isEmpty) return '제목을 넣으세요.';
         return _values.validate();
       },
-      submit: ({required body, required approverIds, required ccIds}) =>
-          widget.api.submitForm(
+      submit:
+          ({
+            required body,
+            required approverIds,
+            required ccIds,
+            required roles,
+          }) => widget.api.submitForm(
             form: form,
             values: _values.toJson(),
             title: _title.text.trim().isEmpty ? null : _title.text.trim(),
@@ -179,6 +184,7 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
             ],
             approverIds: approverIds,
             ccIds: ccIds,
+            roles: roles,
           ),
     );
   }

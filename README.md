@@ -1054,8 +1054,8 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 | 근무 시간 | 팀마다(정하지 않으면 회사 값) | 회사 하나(기본 09:00~18:00) |
 
 **전자결재** — 휴가·지출·근태 수정과 [결재 양식](#결재-양식)(일반 기안서·출장 신청·구매 요청·연장근무 신청·관리자가 만든 양식)이 같은 결재선 엔진을 씁니다.
-결재 탭 맨 앞의 **새 결재**로 휴가·지출·켜진 양식 중에서 골라 올립니다(근태 수정은 출퇴근 탭에서 그날의 "수정 요청"). 결재자 1~5명이 **순서대로** 결재하고(앞사람이 승인해야 다음
-사람 차례), 참조자는 0~10명(보기만 하고 결과를 받음). 승인할 때 의견(선택), **반려는 사유 필수**이고 반려하면 그 자리에서 끝납니다. 올린
+결재 탭 맨 앞의 **새 결재**로 휴가·지출·켜진 양식 중에서 골라 올립니다(근태 수정은 출퇴근 탭에서 그날의 "수정 요청"). 결재자 1~10명이 **순서대로** 결재하고(앞사람이 승인해야 다음
+사람 차례 — 아래 [합의·전결·대결](#합의전결대결)), 참조자는 0~10명(보기만 하고 결과를 받음). 올린 결재에는 **문서 번호**("휴가-2026-0012" — 범위·해마다 1부터, 종류별 앞머리)가 붙습니다. 승인할 때 의견(선택), **반려는 사유 필수**이고 반려하면 그 자리에서 끝납니다. 올린
 사람은 진행 중인 결재를 **회수**할 수 있고, 관리자는 승인된 결재를 **취소**할 수 있습니다(사유 필수 — 휴가면 연차가 돌아가고, 근태 수정이면
 기록이 처음 값으로 되돌아감, 감사 로그에 남음). 동시에 두 사람이 눌러도 문서 행을 잠그고 다시 계산해서 꼬이지 않습니다. 결재가 올라오거나
 진행되면 다음 결재자·올린 사람·참조자에게 푸시(방해 금지 존중)와 소켓 알림이 가고, **알림 센터 `결재` 탭**에 쌓입니다(결재 요청·승인·반려·회수·취소 — 내가 결재를 처리하면 그 문서의 요청 알림은 저절로 읽음, 90일 보존). 앱이 켜져 있으면 앱이 직접 알림(PC는 알림 창)을 띄우고, 푸시·PC 알림·웹 알림 어느 것을 눌러도 **그 문서 상세**가 열리며 그 문서의 결재 알림은 읽음이 됩니다(문서를 열 수 없으면 알림 센터 `결재` 탭). 결재함: 결재할 문서 · 내가 올린 문서 · 결재한 문서 ·
@@ -1065,7 +1065,31 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 **상위자 사슬**(바로 위 상위자부터 위로, 결재자로 고를 수 없는 사람 — 준회원·정지·그룹웨어 범위 밖 — 은 건너뜀, 5명까지)이 결재자로 미리
 채워지고 "조직도의 상위자 순서로 결재자를 채웠습니다" 안내가 붙습니다(결재자를 바꾸면 사라짐). 상위자가 없으면 가장 최근에 저장한 결재선이
 채워집니다(`groupware.js` → `orgTree.js` `managerChainFor` → `approvalRules.js` `suggestApprovalLine`). 조직도는 부서·직책 설정을 따르므로
-그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 씁니다.
+그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 씁니다. 결재선을 저장하면 결재자마다의 역할(합의·전결)도 함께 저장됩니다.
+
+#### 합의·전결·대결
+
+- **합의**(동시 결재) — 결재선에서 이름 옆 역할 칩을 누르면 **결재 → 합의 → 전결**로 바뀝니다. 이어진 합의 칸은 한 단계(번호가 같음)로 **함께
+  차례**가 되어 각자 결재함에 들어가고, 그 단계 사람이 **모두 동의해야** 다음 단계로 넘어갑니다. 합의 중 한 사람이라도 반려하면 그 자리에서
+  반려됩니다(같은 단계의 다른 차례는 거둠).
+- **전결** — 결재선에 한 명만 정할 수 있고, 그 사람이 승인하면 **남은 칸은 "생략"**되고 결재가 바로 끝납니다(승인 창에 "남은 결재는 생략" 안내).
+- **대결**(부재 중 대신 결재) — 결재 탭의 결재 설정(사람 아이콘) → **대결(부재) 설정**에서 자리를 비우는 기간(90일까지, 겹치면 안 됨)과
+  대신할 사람(이 범위의 정회원 이상)을 정합니다(관리자는 남의 것도). 그 기간에 내 차례가 된 결재는 맡은 사람의 **결재함·숫자 뱃지·결재 요청
+  알림**에도 들어가고, 맡은 사람이 승인·반려하면 결재란·이력에 "**대결 ○○**"으로 남습니다. 맡은 사람이 그 문서를 올린 사람이거나 이미 결재선에
+  있으면 대신하지 못합니다(한 사람이 두 칸을 채우지 않게). 맡긴 사람도 그대로 직접 결재할 수 있습니다.
+
+#### 서명·도장, 인쇄·PDF, 결재 통계
+
+- **서명·도장** — 결재 설정 → **내 서명·도장**에서 그리기(마우스·손가락), **이름 도장 만들기**(붉은 원 안에 이름 + '인' — 전통 도장 배치), 그림
+  올리기(png·jpg·webp, 직접 올린 파일만) 중 하나로 정합니다. 승인할 때 **그때의 서명**이 결재 칸에 따로 적혀(`approval_steps.signature_path`)
+  나중에 바꾸거나 지워도 지난 결재는 그대로입니다(대결이면 대신한 사람의 서명). 서명이 없으면 붉은 원 도장 글자("승인"·"합의"·"전결"·"반려")로
+  보입니다.
+- **결재란** — 문서 상세 위쪽에 칸마다 역할·단계, 서명/도장, 이름, 날짜, 대결한 사람이 들어간 결재란이 있습니다.
+- **인쇄·PDF** — 문서 상세의 프린터 단추 → **인쇄**(인쇄 미리보기 — 프린터를 고르거나 시스템의 PDF로 저장) 또는 **PDF로 저장**(다운로드 폴더).
+  A4에 문서 번호·종류·기안자·날짜·상태, 결재란(서명 그림 포함), 내용(양식 칸·품목 표·여러 줄 글), 첨부 이름, 결재 이력이 한글 글꼴(나눔바른고딕
+  옛한글)로 들어갑니다(앱이 만든다 — `client/lib/screens/groupware/approval_print.dart`).
+- **결재 통계**(관리 탭, 결재·근태 관리자) — 달마다(앞뒤로 넘김) 그달 올린 결재의 건수·승인·반려·진행 중과 **끝날 때까지 평균 시간**, 종류별 표,
+  **결재자별**(결정 건수·반려·대결로 처리된 건·지금 기다리는 건·차례가 된 뒤 결정까지 평균 응답 시간 — 앞 단계가 끝난 때부터 셈).
 
 **휴가·법정 연차**(입사일 기준, 근로기준법 제60조) — 관리 탭에서 구성원의 입사일을 정하면 앱이 연차를 계산합니다.
 - 입사 1년 미만: 한 달 채울 때마다 1일, 최대 11일. 1년 이상: 15일, 3년차부터 2년마다 1일씩 늘어 최대 25일(`15 + ⌊(근속연수 − 1) / 2⌋`).
@@ -1131,8 +1155,9 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 - **결재 양식 후속** — 일반 기안서·출장·구매·연장근무 양식과 관리자가 만드는 양식은 들어갔습니다([결재 양식](#결재-양식)). 남은 것: 양식마다의
   기본 결재선·참조자, 칸 순서 끌어 옮기기·칸 설명, 사람 고르기·표(임의 열) 칸, 승인된 지출성 결재(구매·출장 경비)의 정산 연결, 출장의
   캘린더 표시, 연장근무의 주 52시간 계산(근태 항목 참고), 휴가 종류·지출 분류를 관리자가 바꾸기.
-- **결재 기능** — 결재자 순서대로(최대 5명)·참조·결재선 저장·회수·관리자 취소·알림 센터 결재 탭까지는 있고, **합의**(동시 결재),
-  **대결·전결**(부재 시 대신 결재), **문서 번호**, **PDF·인쇄**, 서명·도장, 결재 통계는 없습니다.
+- **결재 기능 후속** — 합의·전결·대결·문서 번호·서명·도장·인쇄·PDF·결재 통계는 들어갔습니다([합의·전결·대결](#합의전결대결)). 남은 것:
+  전결 규정(종류·금액에 따라 전결권자를 저절로 — 지금은 올리는 사람이 결재선에서 정함), 합의의 "반대 의견으로 진행", 후결(사후 결재),
+  결재 문서 보관·검색(기간·문서 번호), 통계 엑셀 내보내기, 서명 그림의 위변조 방지(전자서명).
 - **근태** — 출퇴근·지각/조퇴/결근 집계·사내 와이파이 여부·엑셀 내보내기는 있고, **주 52시간 관리**, 연장·야간·휴일근무 집계,
   유연근무, 외근 출근, 출근 알림, **연차 촉진 안내**(법정 절차)는 없습니다. 휴가 종류·지출 분류도 코드에 고정이라 관리자가 못 바꿉니다.
 - **회의실·자원 예약** — 없습니다(캘린더 종류는 개인·팀·공유뿐). 캘린더와 붙이면 자연스럽습니다.
@@ -2147,17 +2172,21 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/groupware/context` | 범위(`scope`·`scopeSetting`), `isManager`, 근무 시간(`workStart`·`workEnd` — 하루 중 분), `today`, 내 `hireDate`, `pendingForMe`(내가 결재할 수), `leaveTypes`, `expenseCategories`, `limits`, `inLan` |
+| GET | `/api/groupware/context` | 범위(`scope`·`scopeSetting`), `isManager`, 근무 시간(`workStart`·`workEnd` — 하루 중 분), `today`, 내 `hireDate`, `pendingForMe`(내가 결재할 수 — 대결을 맡은 것 포함), `leaveTypes`, `expenseCategories`, `limits`, `inLan`, `signatureUrl`(내 서명·도장) |
 | GET | `/api/groupware/candidates` | 결재자·참조자 후보(이 범위의 정회원 이상, 나 빼고) |
-| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }` / 저장 `{ name, approverIds, ccIds }`(20개까지) |
+| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }`(줄마다·추천에 `roles`) / 저장 `{ name, approverIds, ccIds, roles? }`(20개까지) |
 | DELETE | `/api/groupware/approval-lines/:id` | 내 결재선 지우기 |
 | GET | `/api/groupware/documents` | 결재함 `?box=inbox\|mine\|done\|cc\|all`(all은 관리자) `&kind=&status=&before=`(만든 시각 ms) |
-| GET | `/api/groupware/documents/:id` | 문서 상세(결재선·참조자 `cc`, `myTurn`·`canWithdraw`·`canCancel`) — 올린 사람·결재자·참조자·관리자만 |
+| GET | `/api/groupware/documents/:id` | 문서 상세(`docNumber`, 결재선 — 칸마다 `stage`·`role`·`actedByName`(대결)·`signatureUrl`, 참조자 `cc`, `myTurn`·`actingFor`(대결로 누구 대신인지)·`finalForMe`(내 칸이 전결)·`canWithdraw`·`canCancel`) — 올린 사람·결재자·참조자·관리자·대결한 사람, 지금 차례인 결재자의 대결을 맡은 사람만 |
 | POST | `/api/groupware/documents` | 결재 올리기 `{ kind: 'leave'\|'expense'\|'attendance'\|'draft'\|'trip'\|'purchase'\|'overtime'\|'form', title?, body?, approverIds, ccIds?, …내용 }` — 휴가 `leaveType, startDate, endDate`(양은 서버가 계산), 지출 `amount, category, spentOn, attachments?`, 근태 수정 `workDate, clockIn, clockOut?`, 양식 `values`(칸 key → 값 — 기간·시간대 `{ start, end }`, 품목 표 `[{ name, qty, unitPrice }]`)·`formId`(관리자가 만든 양식)·`attachments?`(첨부 받는 양식만). 연차 부족·겹치는 휴가·꺼진 양식은 409, 없는 양식 404, 한 시간에 30건 |
 | GET | `/api/groupware/forms` | 이 범위의 결재 양식 `[{ id('builtin:종류' \| uuid), kind, builtin, name, description, fields: [{ key, label, type, required, options? }], allowAttachments, enabled }]` — 관리자가 아니면 켜진 것만 |
 | POST | `/api/groupware/forms` | (관리자) 양식 만들기 `{ name, description?, fields: [{ label, type, required?, options? }], allowAttachments? }` → 201(칸 key는 f1, f2 …). 같은 이름 409, 50개·칸 20개까지 |
 | PATCH / DELETE | `/api/groupware/forms/:id` | (관리자) 기본 양식은 `{ enabled }`만, 만든 양식은 `{ name?, description?, fields?, allowAttachments?, enabled? }` / 지우기(만든 양식만 — 이미 올린 문서는 남음). 바뀌면 소켓 `groupware:changed`(`forms: true`) |
-| POST | `/api/groupware/documents/:id/approve` \| `reject` \| `withdraw` \| `cancel` | `{ comment }` — 승인(의견 선택)·반려(사유 필수)는 지금 차례인 결재자, 회수는 올린 사람(진행 중), 취소는 관리자(승인된 것, 사유 필수) |
+| POST | `/api/groupware/documents/:id/approve` \| `reject` \| `withdraw` \| `cancel` | `{ comment }` — 승인(의견 선택)·반려(사유 필수)는 지금 차례인 결재자(합의 단계면 그 단계 누구든 — 모두 동의해야 넘어감, 전결이면 남은 칸 생략)나 그 사람의 대결을 맡은 사람, 회수는 올린 사람(진행 중), 취소는 관리자(승인된 것, 사유 필수) |
+| GET / POST | `/api/groupware/delegations` | 대결 설정 — 내가 맡긴 것·맡은 것(관리자는 `?all=1`, 지난 것은 뺌) / 맡기기 `{ delegateId, startDate, endDate, reason?, userId?(관리자만) }` — 자기 자신·고를 수 없는 사람·지난 기간·90일 넘음·겹침은 400 |
+| DELETE | `/api/groupware/delegations/:id` | 대결 거두기(맡긴 사람·관리자) |
+| PUT / DELETE | `/api/groupware/signature` | 내 서명·도장 `{ fileUrl }`(직접 올린 png·jpg·webp) → `{ signatureUrl }` / 지우기 |
+| GET | `/api/groupware/stats` | (관리자) 결재 통계 `?from=&to=`(기본 이번 달, 366일까지) → `{ from, to, totals, byKind: [{ label, total, pending, approved, rejected, withdrawn, canceled, avgHours }], byApprover: [{ userId, name, decided, approved, rejected, proxied, waiting, avgHours }] }` |
 | GET | `/api/groupware/notifications` | 결재 알림함(알림 센터 `결재` 탭 — `teamId` 없이, 범위와 상관없이 내 것) 최근 50개 `{ items, unreadCount }` — 줄마다 `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `documentId`, `teamId`·`teamName`(회사 전체 범위면 null), `docKind`·`docStatus`, `actionable`(지금 내 결재 차례인지), `readAt`. 새 알림은 소켓 `approval:notification` `{ notification, unreadCount }` |
 | POST | `/api/groupware/notifications/read` | `{ ids? }` 또는 `{ documentId }`(그 문서의 내 알림 — 푸시를 눌러 문서를 열 때), 둘 다 없으면 전부 읽음 → `{ unreadCount }`, 내 다른 기기에 `approval:notification-sync` |
 | GET | `/api/groupware/leave/balance` | 연차 현황(`?userId=`는 관리자) — `hireDate`, `period`, `statutoryHalfDays`, `adjustmentHalfDays`, `grantedHalfDays`, `usedHalfDays`, `pendingHalfDays`, `remainingHalfDays`(반일 단위, 입사일이 없으면 null), `adjustments` |
@@ -2271,17 +2300,19 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `department_id`·`manager_id`(계정 단위 조직도의 부서와 따로 정한 상위자 — [부서 트리와 상위자](#부서-트리와-상위자조직도)), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `department_id`·`manager_id`(계정 단위 조직도의 부서와 따로 정한 상위자 — [부서 트리와 상위자](#부서-트리와-상위자조직도)), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `signature_path`(전자결재 서명·도장 그림), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
 | `integrations` | 외부 연동 — `kind`(`webhook` 들어오는 웹훅 \| `command` 슬래시 명령), `team_id`(팀이 지워지면 같이), `room_id`(웹훅의 방 — 방이 지워지면 같이), `name`·`emoji`(봇 이름·아이콘), `token_hash`(웹훅 주소 토큰의 열쇠 해시 — unique)·`token_prefix`(화면용 앞 8자), `command`·`description`·`url`·`secret_enc`(명령 이름 — 팀 안에서 unique, 보낼 주소, 서명 비밀 암호화), `created_by`·`created_by_name`, `last_used_at`·`use_count` |
 | `api_tokens` | 개인 API 토큰 — `user_id`, `name`, `token_hash`(열쇠 해시 — unique)·`token_prefix`, `scopes`(jsonb `["read"]` \| `["read","write"]`), `expires_at`(null이면 만료 없음), `revoked_at`(지운 시각 — 지우면 바로 못 씀), `last_used_at`(1분에 한 번만 적음) |
 | `user_identities` | 연결된 외부 로그인 — `provider`(`google`|`microsoft`|`ldap`)·`subject`(그쪽이 바꾸지 않는 값 — Google sub, Microsoft 테넌트+oid, LDAP objectGUID; 같은 외부 계정은 한 사람에게만 — unique), `email_enc`(연결할 때의 그쪽 이메일, 암호화), `last_login_at` |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각) |
-| `approval_documents` | 결재 문서(휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
-| `approval_steps` | 결재선 한 칸 — `step_order` 순서, `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`), `comment`, `decided_at` |
+| `approval_documents` | 결재 문서(`doc_number` 문서 번호 — 범위마다 unique, 휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
+| `approval_steps` | 결재선 한 칸 — `step_order` 순서, `stage`(같은 단계 = 합의로 동시에 차례, null이면 순서가 곧 단계 — 이 기능 전 문서), `role`(`approve`\|`agree`\|`final`), `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`\|`skipped` — 전결로 생략), `comment`, `decided_at`, `acted_by_id`·`acted_by_name`(대결로 대신 결정한 사람), `signature_path`(승인할 때의 서명 그림) |
+| `approval_delegations` | 대결(부재 중 대신 결재) — `scope_key`, `user_id`(자리를 비우는 사람)·`delegate_id`(대신할 사람), `start_date`·`end_date`('YYYY-MM-DD', 둘 다 포함), `reason`, `created_by_id` |
+| `approval_counters` | 문서 번호 — (`scope_key`, `year`)마다 `last_seq`(올리는 트랜잭션에서 하나씩 올림) |
 | `approval_cc` | 참조자(문서 × 사람) |
 | `departments` | 조직도 부서 트리 — `scope_key`(`server` 회사 하나 \| 팀 id — 부서·직책 설정을 따름), `parent_id`(위 부서, 지우면 하위 부서는 위로), `name`, `head_id`(부서장 — 그 부서 사람의 기본 상위자), `sort_order`(같은 위 부서 안 순서). 팀을 지우면 그 팀의 부서도 지운다 |
 | `approval_templates` | 결재 양식 — `scope_key`(그룹웨어 범위), `builtin_key`(기본 양식을 켜고 끈 줄이면 그 종류 — 이때는 `enabled`·`sort_order`만 씀, 관리자가 만든 양식이면 null), `name`·`description`, `fields` jsonb(칸 정의), `allow_attachments`, `enabled`, `created_by_name`. unique(`scope_key`, `builtin_key`) |
-| `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb |
+| `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb, `line`(결재자마다의 역할 `[{ userId, role }]`, null이면 모두 결재) |
 | `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |
 | `leave_adjustments` | 연차 조정(반일 단위 ±, 사유, 그 연차 기간의 시작일) |
 | `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`). 지우지 않음 |

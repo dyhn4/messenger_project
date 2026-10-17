@@ -4,7 +4,15 @@ import { AUDIT, recordAudit } from './audit.js';
 import { teamAccess, userAccess } from './access.js';
 import { addDaysKey, halfDaysText, isDateKey, LEAVE_TYPES, leaveBalance, leaveShortage, leaveTypeOf } from './annualLeave.js';
 import {
+  activeDelegationMap,
   APPROVAL_KINDS,
+  approvalStats,
+  docNumberOf,
+  ORG_CHAIN_MAX,
+  parseDelegation,
+  proxyForOf,
+  rolesOfLine,
+  stageOf,
   approvalLabelOf,
   APPROVAL_STATUSES,
   APPROVERS_MAX,
@@ -64,6 +72,11 @@ import {
   listApprovalDocuments,
   listApprovalLines,
   listApprovedLeaves,
+  listCurrentDelegations,
+  insertDelegation,
+  findDelegation,
+  deleteDelegation,
+  listDocumentsCreatedBetween,
   listApprovedOvertime,
   listApprovedTrips,
   listApprovalTemplates,
@@ -95,6 +108,7 @@ import {
 } from './groupwareScope.js';
 import { HOLIDAYS } from './holidays.js';
 import { fileFieldsDenial, sanitizeFileSize } from './messageLimits.js';
+import { updateUser } from './db/queries/users.js';
 import { managerChainFor } from './orgTree.js';
 import { notifyGroupwarePush } from './push.js';
 import { signFileUrl } from './upload.js';
@@ -173,12 +187,31 @@ function stepDto(s) {
   return {
     id: s.id,
     order: s.stepOrder,
+    // 단계(같은 단계 = 합의로 동시에 차례)와 역할('approve' 결재 | 'agree' 합의 | 'final' 전결).
+    stage: stageOf(s),
+    role: s.role ?? 'approve',
     approverId: s.approverId,
     approverName: s.approverName,
     status: s.status,
     comment: s.comment ?? null,
     decidedAt: ms(s.decidedAt),
+    // 대결 — 자리를 비운 결재자 대신 결정한 사람.
+    actedByName: s.actedByName ?? null,
+    // 승인할 때의 서명·도장(서명 링크).
+    signatureUrl: s.signaturePath ? (signFileUrl(s.signaturePath) ?? null) : null,
   };
+}
+
+/** 오늘 이 범위에서 효력이 있는 대결 — 맡긴 사람 id → 맡은 사람 id. */
+async function delegationMapOf(scopeKey) {
+  const today = localDateKey(new Date());
+  return activeDelegationMap(await listCurrentDelegations(scopeKey, today), today);
+}
+
+/** 오늘 [userId]에게 대결을 맡긴 사람들(이 범위). */
+async function proxySourcesOf(scopeKey, userId) {
+  const map = await delegationMapOf(scopeKey);
+  return [...map].filter(([, delegate]) => delegate === userId).map(([absent]) => absent);
 }
 
 function attachmentDtos(list) {
@@ -192,11 +225,16 @@ function attachmentDtos(list) {
 }
 
 /** 앱에 내려줄 문서 모양 — [viewerId] 기준으로 지금 내 차례인지·회수·취소할 수 있는지를 함께. */
-function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null } = {}) {
-  const current = steps.find((s) => s.status === 'pending') ?? null;
+function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, proxySources = [] } = {}) {
+  const pending = doc.status === 'pending' ? steps.filter((s) => s.status === 'pending') : [];
+  const own = pending.find((s) => s.approverId === viewerId) ?? null;
+  // 대결 — 내가 올렸거나 이미 결재선에 있으면 대신 결재하지 않는다(approvalRules.js proxyForOf).
+  const proxyFor = proxyForOf({ actorId: viewerId, doc, steps, delegationMap: new Map(proxySources.map((id) => [id, viewerId])) });
+  const proxied = own ? null : (pending.find((s) => s.approverId && proxyFor.has(s.approverId)) ?? null);
   return {
     id: doc.id,
     kind: doc.kind,
+    docNumber: doc.docNumber ?? null,
     title: doc.title,
     body: doc.body ?? null,
     payload: doc.payload,
@@ -211,7 +249,11 @@ function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null } 
     canceledByName: doc.canceledByName ?? null,
     steps: steps.map(stepDto),
     ...(cc ? { cc } : {}),
-    myTurn: doc.status === 'pending' && !!current && current.approverId === viewerId,
+    myTurn: !!(own || proxied),
+    // 대결로 내 차례면 누구 대신인지.
+    actingFor: proxied ? proxied.approverName : null,
+    // 내 칸이 전결이면 승인하는 순간 결재가 끝난다(남은 칸은 생략).
+    finalForMe: (own ?? proxied)?.role === 'final',
     canWithdraw: doc.status === 'pending' && doc.authorId === viewerId,
     canCancel: doc.status === 'approved' && isManager,
   };
@@ -338,7 +380,11 @@ function approvalNotificationDto(n) {
  * 문서의 알림(결재 요청 등)은 처리했으니 읽은 것으로 바꾼다. 휴가가 승인·취소되면 캘린더 "팀 휴가"도 새로 고치게 한다.
  */
 async function announce(io, { doc, steps, ccIds, event, notifyIds, actorId, actorName }) {
-  const involved = new Set([doc.authorId, ...steps.map((s) => s.approverId), ...ccIds].filter(Boolean));
+  // 결재 차례가 된 사람이 대결을 맡겨 두었으면 맡은 사람에게도 알린다.
+  const delegationMap = await delegationMapOf(doc.scopeKey).catch(() => new Map());
+  const delegates = (event === 'created' || event === 'next' ? notifyIds : []).map((id) => delegationMap.get(id)).filter(Boolean);
+  notifyIds = [...notifyIds, ...delegates];
+  const involved = new Set([doc.authorId, ...steps.map((s) => s.approverId), ...ccIds, ...delegates].filter(Boolean));
   for (const id of involved) io.to(`user:${id}`).emit('groupware:changed', { documentId: doc.id, scopeKey: doc.scopeKey });
   // 결재는 이미 저장됐다 — 알림함·푸시가 실패해도(예: 마이그레이션 전) 응답은 성공으로 두고 기록만 남긴다.
   await announceNotifications(io, { doc, event, notifyIds, actorId, actorName }).catch((err) =>
@@ -458,8 +504,9 @@ export function createGroupwareRouter(io) {
   router.get(
     '/groupware/context',
     withContext(async (req, res, ctx) => {
+      const proxySources = await proxySourcesOf(ctx.scopeKey, ctx.user.id);
       const [pendingForMe, hireDate] = await Promise.all([
-        countPendingApprovals(ctx.scopeKey, ctx.user.id),
+        countPendingApprovals(ctx.scopeKey, ctx.user.id, proxySources),
         findHireDate({ scope: ctx.scope, teamId: ctx.teamId, userId: ctx.user.id }),
       ]);
       res.json({
@@ -477,6 +524,8 @@ export function createGroupwareRouter(io) {
         expenseCategories: EXPENSE_CATEGORIES,
         limits: { approversMax: APPROVERS_MAX, ccMax: CC_MAX, attachmentsMax: ATTACHMENTS_MAX, titleMax: TITLE_MAX, bodyMax: BODY_MAX },
         inLan: isLanAddress(clientIp(req)),
+        // 내 서명·도장(서명 링크) — 결재할 때 결재 칸에 들어간다.
+        signatureUrl: ctx.user.signaturePath ? (signFileUrl(ctx.user.signaturePath) ?? null) : null,
       });
     }),
   );
@@ -508,10 +557,17 @@ export function createGroupwareRouter(io) {
         teamId: ctx.teamId ?? (isUuid(req.query.teamId) ? req.query.teamId : null),
         userId: ctx.user.id,
         isEligible: (id) => candidates.has(id),
-        max: APPROVERS_MAX,
+        max: ORG_CHAIN_MAX,
       }).catch(() => []);
       res.json({
-        lines: lines.map((l) => ({ id: l.id, name: l.name, approverIds: l.approverIds, ccIds: l.ccIds, createdAt: ms(l.createdAt) })),
+        lines: lines.map((l) => ({
+          id: l.id,
+          name: l.name,
+          approverIds: l.approverIds,
+          ccIds: l.ccIds,
+          roles: rolesOfLine(l.line),
+          createdAt: ms(l.createdAt),
+        })),
         // 새 결재를 올릴 때 미리 채울 결재선 — 조직도 상위자 사슬, 없으면 가장 최근에 저장한 결재선(approvalRules.js suggestApprovalLine).
         suggested: suggestApprovalLine({ savedLines: lines, managerChain }),
       });
@@ -530,11 +586,26 @@ export function createGroupwareRouter(io) {
         authorId: ctx.user.id,
         approverIds: req.body?.approverIds,
         ccIds: req.body?.ccIds ?? [],
+        roles: req.body?.roles,
         isCandidate: (id) => candidates.has(id),
       });
       if (line.error) return fail(res, line);
-      const row = await insertApprovalLine({ ownerId: ctx.user.id, scopeKey: ctx.scopeKey, name, ...line });
-      res.status(201).json({ id: row.id, name: row.name, approverIds: row.approverIds, ccIds: row.ccIds, createdAt: ms(row.createdAt) });
+      const row = await insertApprovalLine({
+        ownerId: ctx.user.id,
+        scopeKey: ctx.scopeKey,
+        name,
+        approverIds: line.approverIds,
+        ccIds: line.ccIds,
+        line: line.line.map(({ userId, role }) => ({ userId, role })),
+      });
+      res.status(201).json({
+        id: row.id,
+        name: row.name,
+        approverIds: row.approverIds,
+        ccIds: row.ccIds,
+        roles: rolesOfLine(row.line),
+        createdAt: ms(row.createdAt),
+      });
     }),
   );
 
@@ -585,8 +656,9 @@ export function createGroupwareRouter(io) {
       const kind = APPROVAL_KINDS.includes(req.query.kind) ? req.query.kind : null;
       const status = APPROVAL_STATUSES.includes(req.query.status) ? req.query.status : null;
       const before = Number(req.query.before) > 0 ? Number(req.query.before) : null;
-      const rows = await listApprovalDocuments({ scopeKey: ctx.scopeKey, box, userId: ctx.user.id, kind, status, before });
-      res.json(rows.map((r) => documentDto(r, ctx.user.id, { isManager: ctx.isManager })));
+      const proxySources = await proxySourcesOf(ctx.scopeKey, ctx.user.id);
+      const rows = await listApprovalDocuments({ scopeKey: ctx.scopeKey, box, userId: ctx.user.id, kind, status, before, proxyFor: proxySources });
+      res.json(rows.map((r) => documentDto(r, ctx.user.id, { isManager: ctx.isManager, proxySources })));
     }),
   );
 
@@ -595,7 +667,9 @@ export function createGroupwareRouter(io) {
     const found = await findApprovalDocument(req.params.id);
     if (!found) return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
     const isManager = await isManagerOfDocument(found.doc, req.user.sub);
-    if (!canViewDocument({ ...found, userId: req.user.sub, isManager })) {
+    const proxySources = await proxySourcesOf(found.doc.scopeKey, req.user.sub);
+    const proxyFor = proxyForOf({ actorId: req.user.sub, ...found, delegationMap: new Map(proxySources.map((id) => [id, req.user.sub])) });
+    if (!canViewDocument({ ...found, userId: req.user.sub, isManager, proxyFor })) {
       return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
     }
     const members = found.ccIds.length
@@ -603,7 +677,7 @@ export function createGroupwareRouter(io) {
       : [];
     const names = new Map(members.map((m) => [m.id, m.name]));
     const cc = found.ccIds.map((id) => ({ id, name: names.get(id) ?? '(알 수 없음)' }));
-    res.json(documentDto(found, req.user.sub, { isManager, cc }));
+    res.json(documentDto(found, req.user.sub, { isManager, cc, proxySources }));
   });
 
   // ── 결재 양식 ──
@@ -752,11 +826,13 @@ export function createGroupwareRouter(io) {
         authorId: ctx.user.id,
         approverIds: body.approverIds,
         ccIds: body.ccIds ?? [],
+        roles: body.roles,
         isCandidate: (id) => candidates.has(id),
       });
       if (line.error) return fail(res, line);
 
       const doc = await insertApprovalDocument({
+        numberOf: (year, seq) => docNumberOf(body.kind, year, seq),
         doc: {
           scopeKey: ctx.scopeKey,
           teamId: ctx.teamId,
@@ -768,14 +844,14 @@ export function createGroupwareRouter(io) {
           payload,
           attachments: files.attachments.length ? files.attachments : null,
         },
-        approvers: line.approverIds.map((id) => ({ id, name: candidates.get(id).name })),
+        approvers: line.line.map(({ userId, role, stage }) => ({ id: userId, name: candidates.get(userId).name, role, stage })),
         ccIds: line.ccIds,
       });
       const found = await findApprovalDocument(doc.id);
       await announce(io, {
         ...found,
         event: 'created',
-        notifyIds: [line.approverIds[0]],
+        notifyIds: found.steps.filter((s) => s.status === 'pending').map((s) => s.approverId),
         actorId: ctx.user.id,
         actorName: ctx.user.name ?? ctx.user.username,
       });
@@ -791,13 +867,27 @@ export function createGroupwareRouter(io) {
       if (!found) return fail(res, { error: '결재 문서를 찾을 수 없습니다.', status: 404 });
       const isManager = action === 'cancel' ? await isManagerOfDocument(found.doc, req.user.sub) : false;
       const actor = (await userAccess(req.user.sub)).user;
+      const delegationMap = await delegationMapOf(found.doc.scopeKey);
       const outcome = await applyApprovalDecision(
         req.params.id,
         async ({ doc, steps, ccIds }) => {
-          if (!canViewDocument({ doc, steps, ccIds, userId: req.user.sub, isManager })) {
+          // 대결 — 오늘 나에게 맡긴 결재자의 차례면 대신 결정한다(내가 올렸거나 이미 결재선에 있으면 안 됨).
+          const proxyFor = proxyForOf({ actorId: req.user.sub, doc, steps, delegationMap });
+          if (!canViewDocument({ doc, steps, ccIds, userId: req.user.sub, isManager, proxyFor })) {
             return { error: '결재 문서를 찾을 수 없습니다.', status: 404 };
           }
-          const plan = planDecision({ doc, steps, ccIds, actorId: req.user.sub, action, comment: req.body?.comment, isManager });
+          const plan = planDecision({
+            doc,
+            steps,
+            ccIds,
+            actorId: req.user.sub,
+            actorName: actor?.name ?? actor?.username ?? null,
+            action,
+            comment: req.body?.comment,
+            isManager,
+            proxyFor,
+            signaturePath: actor?.signaturePath ?? null,
+          });
           if (plan.error || action !== 'cancel') return plan;
           return { ...plan, doc: { ...plan.doc, canceledByName: actor?.name ?? actor?.username ?? '관리자' } };
         },
@@ -841,9 +931,118 @@ export function createGroupwareRouter(io) {
         actorId: req.user.sub,
         actorName: actor?.name ?? actor?.username ?? null,
       });
-      res.json(documentDto(fresh, req.user.sub, { isManager: isManager || (await isManagerOfDocument(fresh.doc, req.user.sub)) }));
+      res.json(
+        documentDto(fresh, req.user.sub, {
+          isManager: isManager || (await isManagerOfDocument(fresh.doc, req.user.sub)),
+          proxySources: [...delegationMap].filter(([, d]) => d === req.user.sub).map(([absent]) => absent),
+        }),
+      );
     });
   }
+
+  // ── 대결(부재 중 대신 결재) ──
+
+  const delegationDto = (d, names) => ({
+    id: d.id,
+    userId: d.userId,
+    userName: names.get(d.userId) ?? '(알 수 없음)',
+    delegateId: d.delegateId,
+    delegateName: names.get(d.delegateId) ?? '(알 수 없음)',
+    startDate: d.startDate,
+    endDate: d.endDate,
+    reason: d.reason ?? null,
+  });
+
+  /** 대결 설정 — 내가 맡긴 것과 내가 맡은 것(관리자는 ?all=1로 이 범위 전부). 지난 것은 뺀다. */
+  router.get(
+    '/groupware/delegations',
+    withContext(async (req, res, ctx) => {
+      const today = localDateKey(new Date());
+      const all = await listCurrentDelegations(ctx.scopeKey, today);
+      const shown = req.query.all === '1' && ctx.isManager ? all : all.filter((d) => d.userId === ctx.user.id || d.delegateId === ctx.user.id);
+      const names = new Map((await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).map((m) => [m.id, m.name]));
+      res.json(shown.map((d) => delegationDto(d, names)));
+    }),
+  );
+
+  /** 대결 맡기기 `{ delegateId, startDate, endDate, reason?, userId? }` — userId(남의 것)는 관리자만. */
+  router.post(
+    '/groupware/delegations',
+    withContext(async (req, res, ctx) => {
+      const body = req.body ?? {};
+      const userId = isUuid(body.userId) ? body.userId : ctx.user.id;
+      if (userId !== ctx.user.id && !ctx.isManager) return fail(res, { error: '관리자만 남의 대결을 정할 수 있습니다.', status: 403 });
+      const candidates = await approverCandidates(ctx);
+      if (!candidates.has(userId)) return fail(res, { error: '결재자가 아닌 사람입니다.' });
+      const today = localDateKey(new Date());
+      const parsed = parseDelegation({
+        userId,
+        delegateId: body.delegateId,
+        startDate: body.startDate,
+        endDate: body.endDate,
+        reason: body.reason,
+        today,
+        isCandidate: (id) => candidates.has(id),
+        existing: await listCurrentDelegations(ctx.scopeKey, today, { userId }),
+      });
+      if (parsed.error) return fail(res, parsed);
+      const row = await insertDelegation({ scopeKey: ctx.scopeKey, userId, ...parsed.delegation, createdById: ctx.user.id });
+      const names = new Map([...candidates.values()].map((m) => [m.id, m.name]));
+      // 맡은 사람의 결재함·뱃지가 바로 바뀌게.
+      for (const id of [userId, row.delegateId]) io.to(`user:${id}`).emit('groupware:changed', { delegation: true, scopeKey: ctx.scopeKey });
+      res.status(201).json(delegationDto(row, names));
+    }),
+  );
+
+  /** 대결 거두기 — 맡긴 사람·관리자. */
+  router.delete('/groupware/delegations/:id', async (req, res) => {
+    const row = isUuid(req.params.id) ? await findDelegation(req.params.id) : null;
+    if (!row) return fail(res, { error: '대결 설정을 찾을 수 없습니다.', status: 404 });
+    if (row.userId !== req.user.sub) {
+      const isManager = await isManagerOfDocument({ scopeKey: row.scopeKey, teamId: row.scopeKey === 'server' ? null : row.scopeKey }, req.user.sub);
+      if (!isManager) return fail(res, { error: '맡긴 사람이나 관리자만 거둘 수 있습니다.', status: 403 });
+    }
+    await deleteDelegation(row.id);
+    for (const id of [row.userId, row.delegateId]) io.to(`user:${id}`).emit('groupware:changed', { delegation: true, scopeKey: row.scopeKey });
+    res.json({ ok: true });
+  });
+
+  // ── 서명·도장 ──
+
+  /** 내 서명·도장 그림 정하기 `{ fileUrl }` — 직접 올린 그림(png·jpg·webp)만. 이미 한 결재의 서명은 그대로다. */
+  router.put('/groupware/signature', async (req, res) => {
+    const raw = req.body?.fileUrl;
+    if (typeof raw !== 'string' || !raw) return fail(res, { error: '서명 그림을 올리세요.' });
+    const checked = await checkFileRefs([raw], { senderId: req.user.sub });
+    if (!checked.ok) return fail(res, { error: checked.error });
+    const path = checked.paths.get(raw);
+    if (!/\.(png|jpe?g|webp)$/i.test(path ?? '')) return fail(res, { error: '서명은 그림 파일(png·jpg·webp)로 올리세요.' });
+    await updateUser(req.user.sub, { signaturePath: path });
+    res.json({ signatureUrl: signFileUrl(path) ?? null });
+  });
+
+  router.delete('/groupware/signature', async (req, res) => {
+    await updateUser(req.user.sub, { signaturePath: null });
+    res.json({ ok: true });
+  });
+
+  // ── 결재 통계 ──
+
+  /** 결재 통계(관리자) `?from=&to=`('YYYY-MM-DD', 기본 이번 달, 366일까지) — 그 사이에 올린 문서의 종류별·결재자별 건수와 평균 처리 시간. */
+  router.get(
+    '/groupware/stats',
+    withContext(
+      async (req, res, ctx) => {
+        const today = localDateKey(new Date());
+        const from = isDateKey(req.query.from) ? req.query.from : `${today.slice(0, 7)}-01`;
+        const to = isDateKey(req.query.to) ? req.query.to : today;
+        if (to < from || addDaysKey(from, 365) < to) return fail(res, { error: '기간은 366일 안으로 고르세요.' });
+        const docs = await listDocumentsCreatedBetween({ scopeKey: ctx.scopeKey, from, to });
+        res.json({ from, to, truncated: docs.length >= 5000, ...approvalStats(docs, { labelOf: approvalLabelOf }) });
+      },
+      { managerOnly: true },
+    ),
+  );
 
   // ── 연차 ──
 

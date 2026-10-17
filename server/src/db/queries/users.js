@@ -178,3 +178,26 @@ export function countActiveUsers() {
     .where(isNull(users.deletedAt))
     .then((rows) => rows[0]?.value ?? 0);
 }
+
+/**
+ * 2단계 인증 코드의 30초 칸 번호를 "썼다"고 적는다 — 이미 그 칸(또는 더 뒤 칸)을 쓴 적이 있으면 바꾸지 않고 false. 같은 코드를
+ * 동시에 두 번 보내도 하나만 통과한다(loginSecurity.js).
+ */
+export async function claimTotpStep(userId, step) {
+  const rows = await db
+    .update(users)
+    .set({ totpLastStep: step })
+    .where(and(eq(users.id, userId), sql`(${users.totpLastStep} is null or ${users.totpLastStep} < ${step})`))
+    .returning({ id: users.id });
+  return rows.length > 0;
+}
+
+/** 복구 코드 목록을 바꾼다 — 그 사이 다른 요청이 먼저 바꿨으면(같은 복구 코드를 동시에 씀) 바꾸지 않고 false. */
+export async function replaceRecoveryHashes(userId, before, after) {
+  const rows = await db
+    .update(users)
+    .set({ totpRecoveryHashes: after })
+    .where(and(eq(users.id, userId), sql`${users.totpRecoveryHashes}::jsonb = ${JSON.stringify(before)}::jsonb`))
+    .returning({ id: users.id });
+  return rows.length > 0;
+}

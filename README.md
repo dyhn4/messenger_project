@@ -82,6 +82,29 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   이름은 30자까지이고 줄바꿈 같은 제어 문자·글자 방향을 뒤집는 문자는 쓸 수 없습니다(`이름에 쓸 수 없는 문자가 들어 있습니다.`).
   새 프로필 사진은 본인이 앱에서 올린 사진만 저장되고, 기본 캐릭터는 이모지 하나와 `#RRGGBB` 배경색만 받습니다(`server/src/avatarRules.js` —
   서버 캐릭터 세트의 그림은 예전처럼 따로 고름)
+- **2단계 인증(OTP)** — 내 프로필의 **2단계 인증**에서 켜면 로그인할 때 비밀번호(또는 회사 디렉터리 비밀번호)와 함께 휴대폰 인증 앱
+  (Google Authenticator·Microsoft Authenticator 등)의 6자리 코드를 넣습니다(TOTP — RFC 6238, 외부 서비스 없이 서버가 직접 확인 —
+  `server/src/totp.js`). 켤 때 QR 코드(또는 손으로 넣는 키)를 찍고 코드로 확인하면 **복구 코드 10개**를 한 번만 보여 줍니다(휴대폰을
+  잃었을 때 하나씩 — 열쇠 해시로만 저장). 같은 30초 칸의 코드는 두 번 못 쓰고(동시에 보내도 하나만 통과), 5번 틀리면 15분 막힙니다.
+  관리자는 **로그인 보안** 탭에서 "각자 선택 / 관리자는 필수 / 모두 필수"를 고르고, 꼭 써야 하는데 안 켠 사람은 다음 로그인 때 그
+  자리에서 켜야 들어옵니다. 휴대폰을 잃은 회원은 관리자가 **회원** 탭 메뉴에서 해제합니다. 업데이트 전 앱은 이 단계를 몰라 "앱을
+  업데이트하세요"가 나옵니다(`server/src/loginSecurity.js`, 앱 `client/lib/widgets/otp_dialogs.dart`)
+- **회사 계정 로그인(SSO — Google·Microsoft)** — 로그인 화면의 **Google/Microsoft 회사 계정으로 로그인** 단추(서버가 켠 것만)를 누르면
+  브라우저에서 회사 계정으로 로그인하고, 끝나면 앱이 저절로 이어서 들어갑니다(OAuth 2.0 / OpenID Connect + PKCE — PC·안드로이드·
+  아이폰·웹 모두 같은 방식: 앱이 결과를 2초마다 묻는다, `server/src/sso.js`·`ssoRules.js`, 앱 `client/lib/services/sso_flow.dart`).
+  회사 계정의 2단계 인증이 그대로 적용되어 이 앱의 2단계 인증은 묻지 않습니다. Google은 **허용한 회사 도메인**(Workspace의 `hd`)만,
+  Microsoft는 **지정한 테넌트**만 받습니다(개인 Gmail·다른 회사 계정은 거절). 계정 고르기 — 이미 연결된 회사 계정이면 그 사람, 회사
+  계정 이메일과 **같은 이메일의 계정이 있으면 그 이메일로 받은 확인 코드를 넣어야 연결**(남의 계정 가로채기 막기 — 메일이 꺼진 서버면
+  아이디로 로그인한 뒤 내 프로필의 **연결된 회사 계정**에서 연결), 둘 다 아니면 관리자가 켰을 때만 계정을 새로 만듭니다. 회사 계정으로만
+  들어오는 계정은 정한 날수(기본 7일)마다 다시 회사 계정으로 확인해 퇴사로 막힌 사람이 오래 남지 않습니다. 서버의 웹 앱 주소(정식 인증서
+  — `WEB_DOMAIN`)가 있어야 켤 수 있습니다(Google·Microsoft가 돌아올 주소로 https만 받음)
+- **사내 디렉터리 로그인(LDAP/Active Directory)** — 사내 Windows 도메인 계정의 아이디·비밀번호를 로그인 화면의 같은 칸에 넣으면 됩니다
+  (인터넷 없이 사내망에서 — `server/src/ldapAuth.js`·`ldapRules.js`, ldapts). 서비스 계정으로 그 사람을 찾고(검색 조건의 아이디는
+  이스케이프 — 조건을 바꿔 남의 계정을 고르지 못하게) 그 사람의 DN과 입력한 비밀번호로 다시 붙어 확인합니다(디렉터리 비밀번호는 이
+  서버에 남지 않고, 빈 비밀번호는 묻지도 않음 — LDAP은 빈 비밀번호면 "익명"으로 성공해 버린다). 처음 들어온 사람은 디렉터리의
+  이름·이메일·부서·직책으로 계정이 만들어지고(관리자가 끌 수 있음), 같은 아이디의 기존 계정은 **이메일이 디렉터리와 같을 때만** 연결되어
+  그다음부터 디렉터리 비밀번호로만 들어옵니다. 디렉터리에서 계정을 막거나(사용 안 함) 지우면 토큰 갱신 때(10분 안) 앱에서도 끊깁니다.
+  디렉터리 계정은 이 앱에서 비밀번호를 바꾸거나 찾을 수 없고(회사 계정에서), 이메일 변경·탈퇴 같은 확인은 디렉터리 비밀번호로 합니다
 - **로그인한 기기** — 내 프로필의 **로그인한 기기**에서 내 계정으로 로그인한 기기(Windows PC·Android 앱·웹 브라우저)를 이 기기 맨
   위·최근에 쓴 순으로 보고(지금 사용 중이면 초록 점), 기기마다 **로그아웃**시키거나 **다른 모든 기기에서 로그아웃**합니다(공용 PC에서
   로그아웃을 잊었거나 휴대폰을 잃어버렸을 때). 앱이 로그인할 때 기기를 등록하면 서버가 **그 기기에 묶인 토큰**(`did`)을 새로 내주고
@@ -799,9 +822,24 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
   있습니다(보안 질문이 없는 예전 계정과 같은 규칙).
 - 이 기능이 없는 예전 서버면 "서버를 업데이트하세요"라고 나오고, 앱은 예전 서버에서 늘 보안 질문 방식으로 동작합니다.
 
+### 로그인 보안
+
+관리자 콘솔 → **로그인 보안**(`client/lib/screens/admin_login_security_tab.dart`, 서버 `admin.js` `/admin/login-security`). 기존
+아이디·비밀번호 로그인은 그대로 두고 그 위에 더합니다. 비밀값(클라이언트 보안 비밀·서비스 계정 비밀번호)은 암호화해 두고 다시 내려보내지
+않으며("설정됨"), 바꾼 내용은 감사 로그에 남습니다(비밀값 자체는 남기지 않음).
+
+| 항목 | 설명 |
+|---|---|
+| 2단계 인증 | 각자 선택(기본) / 관리자는 필수(계정 등급 관리자·서버 운영자) / 모두 필수. 꼭 써야 하는 사람은 다음 로그인 때 그 자리에서 켭니다 |
+| 회사 계정 — Google | Google Cloud 콘솔 → API 및 서비스 → 사용자 인증 정보 → **OAuth 클라이언트 ID(웹 애플리케이션)** 를 만들고, 화면에 보이는 **돌아올 주소**(`https://웹앱주소/auth/sso/callback`)를 승인된 리디렉션 URI에 넣은 뒤 클라이언트 ID·보안 비밀과 **받아들일 회사 도메인**을 넣습니다(도메인이 없으면 켤 수 없음) |
+| 회사 계정 — Microsoft | Microsoft Entra 관리 센터 → 앱 등록 → 새 등록(리디렉션 URI: 웹, 돌아올 주소) → **인증서 및 암호**에서 클라이언트 암호를 만들고, 개요의 **디렉터리(테넌트) ID**·애플리케이션 ID와 암호를 넣습니다(그 회사 사람만 들어옴) |
+| 처음 들어온 회사 계정 | 계정을 저절로 만들지(기본 끔)와 그 등급(정회원/준회원), 회사 계정 전용 계정의 다시 확인 주기(기본 7일) |
+| 사내 디렉터리(LDAP) | 서버 주소(`ldaps://dc01.company.local:636` — `ldap://`는 비밀번호가 암호화되지 않으니 되도록 ldaps), 서비스 계정 DN·비밀번호(비우면 익명 검색), 검색 위치(Base DN), 사용자 검색 조건(기본 `(&(objectClass=user)(sAMAccountName={username}))`), 이름·이메일·부서·직책 속성, ldaps 인증서 확인(사내 인증 기관이라 안 되면 끔), 처음 들어온 사람 자동 생성(기본 켬)·등급. 값을 저장 → **연결 시험**(아이디를 넣으면 그 사람을 찾고, 비밀번호까지 넣으면 로그인도 해 봄 — 남기지 않음) 통과 → 켜기 순서이고, 연결 값을 바꾸면 다시 꺼집니다 |
+
 ### 회원 관리
 
-전체 회원(탈퇴 포함)을 이름·아이디로 검색하고, 각자의 상태와 소속 팀을 봅니다.
+전체 회원(탈퇴 포함)을 이름·아이디로 검색하고, 각자의 상태와 소속 팀을 봅니다. 로그인 방법(회사 디렉터리·회사 계정)과 2단계 인증을
+켰는지도 보이고, 켠 사람은 메뉴의 **2단계 인증 해제**로 끌 수 있습니다(휴대폰을 잃었을 때 — 감사 로그에 남음).
 
 | 동작 | 효과 |
 |---|---|
@@ -989,15 +1027,8 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 - **아이폰 앱 마무리** — 앱 프로젝트(`client/ios`)와 맥 없는 클라우드 빌드는 만들어 두었습니다([아이폰 앱(iOS)](#아이폰-앱ios)).
   **Apple 개발자 등록 뒤에** 남은 일: 서명(TestFlight·App Store 배포), **앱이 꺼져 있을 때의 푸시**(APNs — 그 전에는 앱이 앞에 있거나 막
   뒤로 갔을 때만 알림이 옴), 화면 공유(방송 확장). macOS·Linux 데스크톱 앱은 없습니다.
-- **로그인 보안 강화**
-  - **2단계 인증(OTP)** — Google Authenticator 같은 앱의 6자리 코드를 비밀번호와 함께 확인합니다. 외부 서비스가 필요 없어 셋 중
-    가장 먼저, 쉽게 만들 수 있습니다.
-  - **SSO(Google·Microsoft 통합 로그인)** — 회사 계정(OAuth 2.0 / OpenID Connect)으로 로그인합니다. 퇴사자는 회사 계정만 막으면
-    되고 회사 계정의 2단계 인증이 그대로 적용됩니다. 고객사가 Google Cloud·Microsoft Entra에 앱을 등록해 받은 값을 관리자 콘솔에
-    넣어야 하고, 웹 앱은 정식 인증서 주소(`WEB_DOMAIN`)가 있어야 합니다. 이미 아이디로 가입한 사람은 이메일 확인을 거쳐 연결해야
-    남의 계정을 가로채지 못합니다.
-  - **LDAP/Active Directory 연동** — 사내 Windows 도메인 계정 그대로 로그인합니다. 인터넷 없이 사내망에서 동작해 설치형인
-    TangoTalk에는 SSO보다 맞는 고객사가 많습니다.
+- **로그인 보안 후속** — 2단계 인증·회사 계정(SSO)·사내 디렉터리(LDAP)는 들어갔습니다([주요 기능](#주요-기능)의 "계정"). 남은 것:
+  SAML(OIDC를 못 쓰는 IdP), 디렉터리 그룹으로 팀·등급 자동 지정, 하드웨어 보안 키(패스키·WebAuthn), 회사 계정 쪽 로그아웃 연동.
 - **외부 연동(들어오는 웹훅·봇·API 토큰)** — 서버 모니터링 알림, CI/배포 결과, 설문 응답 같은 외부 이벤트를 대화방으로 받습니다.
   지금 외부에 열린 통로는 캘린더 ICS 구독 주소뿐이고, 슬래시 명령·봇·웹훅·개인 API 토큰은 없습니다.
 
@@ -1156,6 +1187,9 @@ messenger_project/
 │  ├─ src/
 │  │  ├─ index.js                 앱 진입점 — 라우터 마운트, HTTPS 서버, 소켓/백그라운드 잡 시작
 │  │  ├─ auth.js                  회원가입/로그인/토큰 재발급/아이디·비밀번호 찾기
+│  │  ├─ loginSecurity.js         2단계 인증(OTP)·로그인 마무리·사내 디렉터리 계정 연결 — 규칙은 totp.js·loginSecurityRules.js
+│  │  ├─ sso.js                   회사 계정 로그인(Google·Microsoft OIDC) — 규칙은 ssoRules.js
+│  │  ├─ ldapAuth.js              사내 디렉터리(LDAP/AD) 확인 — 규칙은 ldapRules.js
 │  │  ├─ users.js                 프로필 조회/수정/비밀번호 변경/탈퇴
 │  │  ├─ admin.js                 관리자 콘솔 API(회원·팀·감사 로그·운영 현황·DDNS·메일, 서버 운영자 전용)
 │  │  ├─ ddns.js                  DuckDNS 자동 갱신(5분마다, DB를 모르는 갱신기) — ddnsService.js가 DB 설정과 잇는다
@@ -1738,7 +1772,16 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/auth/verify-security-answer` | 보안 질문 답변만 검증(비밀번호는 안 바꿈) |
 | POST | `/auth/reset-password` | 비밀번호 재설정(이메일+보안 질문 답변 확인 — 메일로 찾는 계정은 `emailCode`) |
 | POST | `/auth/login` | 로그인 — 아이디는 앞뒤 공백을 떼고, 대소문자만 다른 계정이 하나면 그 계정(비밀번호 찾기 세 단계도 같은 규칙에 이메일로 고름). 사내망 밖에서 8자보다 짧은 비밀번호는 401(늘 같은 문구), 막혔거나 차례를 못 받으면 429 + `Retry-After`([환경 변수 설정](#환경-변수-설정)의 "무차별 대입 방어") |
-| POST | `/auth/refresh` | AccessToken 재발급 |
+| POST | `/auth/refresh` | AccessToken 재발급 — 사내 디렉터리 계정은 디렉터리에서 막혔으면(10분마다 확인) 401, 회사 계정 전용 계정은 처음 로그인(`aat`)에서 정한 날수가 지났으면 401(회사 계정으로 다시 로그인) |
+| POST | `/auth/login/otp` | 로그인 둘째 단계 `{ ticket, code \| recoveryCode }` → 토큰(복구 코드를 썼으면 `recoveryCodesLeft`). 로그인이 2단계 인증을 요구하면 `/auth/login`은 403 `{ code: 'otp_required' \| 'otp_setup_required', otpTicket, error }`(확인 표는 10분 — 예전 앱은 `error`의 "업데이트하세요"를 보여 줌). 5번 틀리면 15분 429 |
+| GET | `/auth/otp/status` | 내 2단계 인증 `{ enabled, required, policy, recoveryCodesLeft }` |
+| POST | `/auth/otp/setup` · `/auth/otp/enable` | 켜기 — setup은 `{ secret, uri }`(otpauth:// — QR), enable `{ code }`는 복구 코드 10개(`recoveryCodes`). 토큰 대신 `ticket`(로그인 중 `otp_setup_required`)을 주면 enable이 토큰도 준다 |
+| POST | `/auth/otp/disable` · `/auth/otp/recovery-codes` | 끄기 `{ code \| recoveryCode, password }`(이 앱의 비밀번호를 쓰는 계정만 password, 정책상 필수면 403) / 복구 코드 새로 받기 `{ code }` |
+| POST | `/auth/sso/start` | 회사 계정 로그인 시작 `{ provider: 'google' \| 'microsoft', challenge(PKCE S256), mode?: 'login' \| 'link' }` → `{ state, authUrl }`(link는 토큰 필요). 웹 앱 주소가 없으면 503 |
+| GET | `/auth/sso/callback` | 회사 계정이 돌려보내는 곳(브라우저) — 코드를 ID 토큰으로 바꿔 확인하고 "앱으로 돌아가세요" 쪽지 |
+| POST | `/auth/sso/poll` | 결과 묻기 `{ state, verifier }` → `{ status: 'pending' \| 'done'(+토큰) \| 'linked' \| 'link_required'(email 일부, canEmail) \| 'error' }` — 토큰은 한 번만, 진행 중인 로그인은 서버 메모리에 10분 |
+| POST | `/auth/sso/link/send` · `/auth/sso/link/verify` | 같은 이메일의 계정에 잇기 — 그 이메일로 확인 코드(purpose `link`) / `{ code }`가 맞으면 연결하고 토큰 |
+| GET / DELETE | `/auth/identities` · `/auth/identities/:provider` | 내 연결된 로그인(회사 계정·디렉터리)과 연결할 수 있는 회사 계정 / 회사 계정 연결 끊기(회사 계정 전용 계정의 마지막 연결은 400) |
 
 **사용자/프로필** (`/api`, 인증 필요)
 
@@ -2109,8 +2152,9 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`) |
-| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
+| `user_identities` | 연결된 외부 로그인 — `provider`(`google`|`microsoft`|`ldap`)·`subject`(그쪽이 바꾸지 않는 값 — Google sub, Microsoft 테넌트+oid, LDAP objectGUID; 같은 외부 계정은 한 사람에게만 — unique), `email_enc`(연결할 때의 그쪽 이메일, 암호화), `last_login_at` |
+| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각) |
 | `approval_documents` | 결재 문서(휴가·지출·근태 수정). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
 | `approval_steps` | 결재선 한 칸 — `step_order` 순서, `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`), `comment`, `decided_at` |
 | `approval_cc` | 참조자(문서 × 사람) |
@@ -2822,7 +2866,11 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 - **비밀번호**: bcrypt로 해시 저장(원문 저장 안 함).
 - **인증 토큰**: JWT AccessToken(1시간)/RefreshToken(30일). 비밀번호 변경/탈퇴/로그아웃 시
   `tokenVersion`을 올려 기존에 발급된 모든 토큰을 무효화합니다. 앱이 기기를 등록한 뒤의 토큰은 그 기기에 묶여(`did`) "로그인한 기기"에서
-  그 기기만 따로 끊을 수 있습니다([주요 기능](#주요-기능)의 "로그인한 기기").
+  그 기기만 따로 끊을 수 있습니다([주요 기능](#주요-기능)의 "로그인한 기기"). 토큰에는 처음 로그인한 시각(`aat`)이 실려 다시 내줘도
+  이어지고, 회사 계정 전용 계정은 그 시각에서 정한 날수가 지나면 다시 회사 계정으로 확인합니다.
+- **2단계 인증·회사 계정·디렉터리**: OTP 비밀 키는 암호화(`encryptField`), 복구 코드는 열쇠 해시(`lookupHash`)로만 저장합니다. 회사 계정
+  로그인은 서버가 그쪽 토큰 주소에서 TLS로 직접 받은 ID 토큰의 발급자·대상·만료·nonce·회사(도메인/테넌트)를 확인하고(OIDC Core 3.1.3.7),
+  앱↔서버·서버↔회사 계정 모두 PKCE를 씁니다. 디렉터리 검색 조건의 입력값은 RFC 4515로 이스케이프하고 빈 비밀번호는 거절합니다.
 - **DB 저장 민감 필드**: 이메일은 AES-256-GCM으로 암호화 저장(`emailEnc`)하고, "정확히 일치하는지"
   조회할 때는 별도의 HMAC-SHA256 해시(`emailLookup`)를 씁니다 — 이 해시만으로는 원문을 복원할 수
   없습니다(`server/src/crypto.js`).

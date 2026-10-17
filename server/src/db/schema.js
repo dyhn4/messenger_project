@@ -78,7 +78,43 @@ export const users = pgTable('users', {
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   // 멘션 요약 메일을 마지막으로 보낸 시각 — 같은 멘션을 또 보내지 않고, 정한 간격보다 자주 보내지 않게(mentionDigest.js).
   mentionDigestSentAt: timestamp('mention_digest_sent_at', { withTimezone: true }),
+  // 로그인 방법 — 'local'(아이디·비밀번호, 기본) | 'ldap'(사내 Windows 도메인 계정 — 비밀번호는 디렉터리가 확인하고 이 앱의
+  // 비밀번호로는 들어올 수 없다) | 'sso'(Google·Microsoft 회사 계정으로만 들어오는 계정 — 비밀번호 없음). 아이디 계정도
+  // 회사 계정을 연결해(user_identities) 그것으로 들어올 수 있지만 그래도 'local'이다(loginSecurity.js).
+  authSource: text('auth_source').notNull().default('local'),
+  // 2단계 인증(OTP — totp.js). 비밀값은 암호화해 두고(crypto.js), 켜기 전(QR을 찍는 중)에는 pending에만 있다. 같은 30초 칸의
+  // 코드를 두 번 쓰지 못하게 마지막으로 받은 칸 번호를 적고, 복구 코드는 열쇠 해시로만 둔다(쓰면 빠진다).
+  totpSecretEnc: text('totp_secret_enc'),
+  totpPendingEnc: text('totp_pending_enc'),
+  totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+  totpLastStep: integer('totp_last_step'),
+  totpRecoveryHashes: jsonb('totp_recovery_hashes'),
 });
+
+/**
+ * 연결된 외부 로그인 — Google·Microsoft 회사 계정(SSO — sso.js)과 사내 디렉터리(LDAP — ldapAuth.js)의 "그 계정"을 이 앱
+ * 계정에 잇는다. [subject]는 그쪽이 바꾸지 않는 고유 값(Google sub, Microsoft 테넌트+oid, LDAP objectGUID — 없으면 DN).
+ * 같은 외부 계정은 한 사람에게만 이어진다(unique). 이메일은 연결할 때의 그쪽 주소(보여 주기용 — 암호화).
+ */
+export const userIdentities = pgTable(
+  'user_identities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // 'google' | 'microsoft' | 'ldap'
+    provider: text('provider').notNull(),
+    subject: text('subject').notNull(),
+    emailEnc: text('email_enc'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('user_identities_provider_subject_idx').on(t.provider, t.subject),
+    index('user_identities_user_idx').on(t.userId),
+  ],
+);
 
 /**
  * 메일로 보낸 확인 코드(6자리) — 가입 전 이메일 확인('signup'), 로그인한 사람의 이메일 확인('verify'), 이메일 변경
@@ -287,6 +323,46 @@ export const serverSettings = pgTable('server_settings', {
   // 회사 전체 범위의 근무 시간(하루 중 분) — 팀 범위에서 팀이 정하지 않았을 때도 이 값.
   workStartMinutes: integer('work_start_minutes').notNull().default(540),
   workEndMinutes: integer('work_end_minutes').notNull().default(1080),
+  // ── 로그인 보안(관리자 콘솔 "로그인 보안" — loginSecurity.js) ──
+  // 2단계 인증을 누구에게 꼭 받을지 — 'optional'(각자 켬, 기본) | 'admins'(관리자·서버 운영자는 꼭) | 'all'(모두 꼭). 꼭 받아야
+  // 하는데 아직 안 켠 사람은 로그인할 때 그 자리에서 켜야 들어온다. 회사 계정(SSO)으로 들어오면 그쪽 2단계 인증을 쓰므로 묻지 않는다.
+  otpPolicy: text('otp_policy').notNull().default('optional'),
+  // Google 회사 계정 로그인 — Google Cloud에서 만든 OAuth 클라이언트(웹 애플리케이션)의 ID·보안 비밀(암호화), 받아들일 회사
+  // 도메인(Workspace의 hd — 쉼표로 여럿, 없으면 켤 수 없다: 아무 Gmail로나 들어오지 못하게).
+  ssoGoogleEnabled: boolean('sso_google_enabled').notNull().default(false),
+  ssoGoogleClientId: text('sso_google_client_id'),
+  ssoGoogleClientSecretEnc: text('sso_google_client_secret_enc'),
+  ssoGoogleDomains: text('sso_google_domains'),
+  // Microsoft(Entra ID) 회사 계정 로그인 — 앱 등록의 디렉터리(테넌트) ID(GUID — 그 회사 사람만), 애플리케이션 ID, 클라이언트 암호(암호화).
+  ssoMicrosoftEnabled: boolean('sso_microsoft_enabled').notNull().default(false),
+  ssoMicrosoftTenantId: text('sso_microsoft_tenant_id'),
+  ssoMicrosoftClientId: text('sso_microsoft_client_id'),
+  ssoMicrosoftClientSecretEnc: text('sso_microsoft_client_secret_enc'),
+  // 회사 계정으로 처음 들어온 사람의 계정을 저절로 만들지와 그 등급. 끄면 이미 있는 계정에 연결한 사람만 들어온다.
+  ssoAutoCreate: boolean('sso_auto_create').notNull().default(false),
+  ssoDefaultRole: text('sso_default_role').notNull().default('member'),
+  // 회사 계정으로만 들어오는 계정(auth_source 'sso')의 로그인은 이 날수가 지나면 다시 회사 계정으로 확인한다 — 퇴사로 회사
+  // 계정이 막히면 늦어도 이만큼 뒤에는 못 들어온다.
+  ssoSessionDays: integer('sso_session_days').notNull().default(7),
+  // 사내 디렉터리(LDAP/Active Directory) 로그인 — 주소(ldap:// · ldaps://), 사람을 찾을 때 쓰는 서비스 계정(DN·비밀번호 —
+  // 암호화, 비우면 익명 검색), 찾을 위치(Base DN)와 조건({username} 자리에 입력한 아이디), 이름·이메일·부서·직책 속성.
+  ldapEnabled: boolean('ldap_enabled').notNull().default(false),
+  ldapUrl: text('ldap_url'),
+  ldapBindDn: text('ldap_bind_dn'),
+  ldapBindPasswordEnc: text('ldap_bind_password_enc'),
+  ldapBaseDn: text('ldap_base_dn'),
+  ldapUserFilter: text('ldap_user_filter').notNull().default('(&(objectClass=user)(sAMAccountName={username}))'),
+  ldapNameAttr: text('ldap_name_attr').notNull().default('displayName'),
+  ldapEmailAttr: text('ldap_email_attr').notNull().default('mail'),
+  ldapDepartmentAttr: text('ldap_department_attr').notNull().default('department'),
+  ldapTitleAttr: text('ldap_title_attr').notNull().default('title'),
+  // ldaps:// 인증서를 확인할지 — 사내 인증 기관(AD CS) 인증서라 확인이 안 되면 끈다(사내망 안에서만).
+  ldapTlsVerify: boolean('ldap_tls_verify').notNull().default(true),
+  // 디렉터리로 처음 들어온 사람의 계정을 저절로 만들지와 그 등급.
+  ldapAutoCreate: boolean('ldap_auto_create').notNull().default(true),
+  ldapDefaultRole: text('ldap_default_role').notNull().default('member'),
+  // 연결 시험을 통과한 시각 — 연결 값을 바꾸면 지워지고 꺼진다(메일 설정과 같은 규칙).
+  ldapTestedAt: timestamp('ldap_tested_at', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

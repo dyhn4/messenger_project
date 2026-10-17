@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
  */
 
 /** 'signup'(가입 전 이메일 확인) | 'verify'(로그인한 사람의 이메일 확인) | 'change'(새 이메일 확인) | 'reset'(비밀번호 재설정). */
-export const EMAIL_CODE_PURPOSES = Object.freeze(['signup', 'verify', 'change', 'reset']);
+export const EMAIL_CODE_PURPOSES = Object.freeze(['signup', 'verify', 'change', 'reset', 'link']);
 
 export const CODE_LENGTH = 6;
 /** 코드가 살아 있는 시간. 메일이 늦게 오는 경우를 생각해 10분. */

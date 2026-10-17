@@ -24,6 +24,10 @@ import { attachmentsRouter } from './attachments.js';
 import { linksRouter } from './links.js';
 import { createStickersRouter } from './stickers.js';
 import { createAuthRouter, hasValidAccessToken, requireAuth } from './auth.js';
+import { createLoginSecurityRouter } from './loginSecurity.js';
+import { loginMethodsView } from './loginSecurityRules.js';
+import { getServerSettings } from './db/queries/serverSettings.js';
+import { createSsoRouter, ssoRedirectUri } from './sso.js';
 import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
 import { bodyErrorReply, createJsonBodyParser } from './bodyLimit.js';
 import { certPath, certsDir, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
@@ -142,6 +146,9 @@ app.get('/pair/:code', rateLimit(limits.pairIp, '페어링 시도'), createPairH
 const livekitMediaPorts = await startLivekitNatSync({ externalAddress: EXTERNAL_ADDRESS, enabled: callsEnabled() && !LIVEKIT_URL });
 
 app.use('/auth', createAuthRouter(io));
+// 2단계 인증(OTP)과 회사 계정 로그인(SSO) — 로그인 전에도 부르는 경로라 /auth 아래(각 경로가 필요하면 토큰을 직접 본다).
+app.use('/auth', createLoginSecurityRouter());
+app.use('/auth', createSsoRouter());
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', uploadErrorHandler);
 app.use('/api', requireAuth, createFileResignRouter());
@@ -215,6 +222,10 @@ app.get('/server-info', async (req, res) =>
         ? lanAddressesInCert(tls.cert).map((ip) => `https://${ip}:${PORT}`)
         : [],
     mailEnabled: await isMailEnabled().catch(() => false),
+    // 로그인 화면에 보일 로그인 방법 — 회사 계정(SSO) 단추·회사 디렉터리(LDAP) 안내. 못 읽으면 아이디 로그인만.
+    loginMethods: await getServerSettings()
+      .then((s) => loginMethodsView(s, { redirectReady: !!ssoRedirectUri() }))
+      .catch(() => ({ sso: [], ldap: false, otpPolicy: 'optional' })),
   }),
 );
 // 로그인 여부와 무관하게 앱 시작 직후 확인해야 하므로 인증 없이 공개(version.js 참고).

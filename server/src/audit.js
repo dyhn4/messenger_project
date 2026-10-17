@@ -41,6 +41,10 @@ export const AUDIT = {
   roomConvert: 'room.convert',
   // 비밀번호·보안 질문 답을 계속 틀려 로그인/재설정이 막히기 시작함(authGuard.js) — 행위자는 그 IP.
   authLockout: 'auth.lockout',
+  // 로그인 보안 설정(2단계 인증 정책·회사 계정·사내 디렉터리 — admin.js /admin/login-security). 비밀값은 남기지 않는다.
+  loginSecurity: 'auth.loginSecurity',
+  // 관리자가 회원의 2단계 인증을 해제함(휴대폰을 잃어버렸을 때).
+  userOtpReset: 'user.otpReset',
 };
 
 /**

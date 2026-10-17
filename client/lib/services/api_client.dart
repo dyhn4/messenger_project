@@ -17,6 +17,7 @@ import '../models/mail_settings.dart';
 import '../models/team_invite_link.dart';
 import '../models/mention.dart';
 import '../models/my_device.dart';
+import '../models/login_security.dart';
 import '../models/message.dart';
 import '../models/message_reaction.dart';
 import '../models/message_reminder.dart';
@@ -99,6 +100,30 @@ class AuthResult {
     required this.userId,
     required this.username,
   });
+}
+
+/// 로그인 응답 → 토큰.
+AuthResult authResultOf(Map<String, dynamic> body) => AuthResult(
+  accessToken: body['accessToken'] as String,
+  refreshToken: body['refreshToken'] as String,
+  userId: body['userId'] as String,
+  username: body['username'] as String,
+);
+
+/// 로그인 응답이 "2단계 인증이 남았다"(403 + otp_required/otp_setup_required)면 그 확인 표 — 아니면 null.
+OtpChallenge? otpChallengeOf(int status, Map<String, dynamic> body) {
+  if (status != 403) return null;
+  final code = body['code'];
+  final ticket = body['otpTicket'];
+  if (ticket is! String ||
+      (code != 'otp_required' && code != 'otp_setup_required')) {
+    return null;
+  }
+  return OtpChallenge(
+    ticket: ticket,
+    setupRequired: code == 'otp_setup_required',
+    username: body['username'] as String? ?? '',
+  );
 }
 
 class UploadResult {
@@ -251,11 +276,20 @@ class MyProfile {
   /// 이메일을 본인이 받는다고 메일 코드로 확인했는지 — 메일이 켜진 서버에서 확인하지 않았으면 앱이 확인을 권한다.
   final bool emailVerified;
 
+  /// 로그인 방법 — 'local'(아이디·비밀번호) | 'ldap'(회사 Windows 도메인 계정) | 'sso'(회사 계정 Google·Microsoft로만). 내 프로필이
+  /// 비밀번호 변경 칸을 보일지 정한다.
+  final String authSource;
+
+  /// 2단계 인증(OTP)을 켰는지.
+  final bool otpEnabled;
+
   const MyProfile({
     required this.username,
     required this.name,
     this.email,
     this.emailVerified = false,
+    this.authSource = 'local',
+    this.otpEnabled = false,
     this.avatarType = 'initial',
     this.avatarEmoji,
     this.avatarColor,
@@ -280,6 +314,8 @@ class MyProfile {
     name: (json['name'] as String?) ?? json['username'] as String,
     email: json['email'] as String?,
     emailVerified: json['emailVerified'] as bool? ?? false,
+    authSource: json['authSource'] as String? ?? 'local',
+    otpEnabled: json['otpEnabled'] == true,
     avatarType: json['avatarType'] as String? ?? 'initial',
     avatarEmoji: json['avatarEmoji'] as String?,
     avatarColor: json['avatarColor'] as String?,
@@ -781,6 +817,7 @@ class ApiClient {
     }),
   );
 
+  /// 로그인 — 2단계 인증이 남았으면 토큰 대신 [OtpChallenge]를 던진다(화면이 코드를 묻는다).
   Future<AuthResult> login(String username, String password) =>
       _authRequest('/auth/login', {'username': username, 'password': password});
 
@@ -794,16 +831,212 @@ class ApiClient {
       body: jsonEncode(payload),
     );
     final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final challenge = otpChallengeOf(res.statusCode, body);
+    if (challenge != null) throw challenge;
     if (res.statusCode >= 400) {
-      throw ApiException((body['error'] as String?) ?? '요청이 실패했습니다.');
+      throw ApiException(
+        (body['error'] as String?) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
+      );
     }
-    return AuthResult(
-      accessToken: body['accessToken'] as String,
-      refreshToken: body['refreshToken'] as String,
-      userId: body['userId'] as String,
-      username: body['username'] as String,
+    return authResultOf(body);
+  }
+
+  // ───────────── 로그인 보안(2단계 인증·회사 계정 — server/src/loginSecurity.js·sso.js) ─────────────
+
+  /// 로그인 화면에 보일 로그인 방법(GET /server-info의 loginMethods). 못 물어보면 아이디 로그인만.
+  Future<LoginMethods> fetchLoginMethods() async {
+    try {
+      final res = await _client
+          .get(_uri('/server-info'), headers: _authHeaders)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return LoginMethods.none;
+      final body = jsonDecode(utf8.decode(res.bodyBytes));
+      return body is Map
+          ? LoginMethods.fromJson(body['loginMethods'])
+          : LoginMethods.none;
+    } catch (_) {
+      return LoginMethods.none;
+    }
+  }
+
+  /// 로그인 둘째 단계 — 확인 표와 6자리 코드(또는 복구 코드).
+  Future<AuthResult> loginWithOtp(
+    String ticket, {
+    String? code,
+    String? recoveryCode,
+  }) => _authRequest('/auth/login/otp', {
+    'ticket': ticket,
+    'code': ?code,
+    'recoveryCode': ?recoveryCode,
+  });
+
+  /// 로그인 중(확인 표 [ticket]) 또는 로그인한 뒤(토큰) 부르는 2단계 인증 경로.
+  Future<Map<String, dynamic>> _otpPost(
+    String path,
+    Map<String, dynamic> payload, {
+    String? ticket,
+  }) async => ticket != null
+      ? await _publicPost(path, {...payload, 'ticket': ticket})
+      : (await _post(path, payload) as Map).cast<String, dynamic>();
+
+  /// 2단계 인증 켜기 1단계 — 비밀 키와 QR 주소.
+  Future<OtpSetupInfo> otpSetup({String? ticket}) async {
+    final body = await _otpPost('/auth/otp/setup', const {}, ticket: ticket);
+    return OtpSetupInfo(
+      secret: body['secret'] as String,
+      uri: body['uri'] as String,
     );
   }
+
+  /// 2단계 인증 켜기 2단계 — 코드로 확인하면 복구 코드 10개. 로그인 중([ticket])이었으면 토큰도.
+  Future<({List<String> recoveryCodes, AuthResult? auth})> otpEnable(
+    String code, {
+    String? ticket,
+  }) async {
+    final body = await _otpPost('/auth/otp/enable', {
+      'code': code,
+    }, ticket: ticket);
+    return (
+      recoveryCodes: [
+        for (final c in (body['recoveryCodes'] as List? ?? const []))
+          c as String,
+      ],
+      auth: body['accessToken'] is String ? authResultOf(body) : null,
+    );
+  }
+
+  Future<OtpStatus> otpStatus() async => OtpStatus.fromJson(
+    (await _get('/auth/otp/status') as Map).cast<String, dynamic>(),
+  );
+
+  /// 2단계 인증 끄기 — 코드(또는 복구 코드)와, 이 앱의 비밀번호를 쓰는 계정이면 비밀번호.
+  Future<void> otpDisable({
+    String? password,
+    String? code,
+    String? recoveryCode,
+  }) async {
+    await _post('/auth/otp/disable', {
+      'password': ?password,
+      'code': ?code,
+      'recoveryCode': ?recoveryCode,
+    });
+  }
+
+  /// 복구 코드 새로 받기(예전 것은 못 쓰게 된다).
+  Future<List<String>> otpRegenerateRecoveryCodes(String code) async {
+    final body = await _post('/auth/otp/recovery-codes', {'code': code}) as Map;
+    return [
+      for (final c in (body['recoveryCodes'] as List? ?? const [])) c as String,
+    ];
+  }
+
+  /// 회사 계정 로그인 시작 — 브라우저로 열 주소. [link]면 로그인한 내 계정에 연결하기(토큰을 싣는다).
+  Future<({String state, String authUrl})> ssoStart(
+    String provider,
+    String challenge, {
+    bool link = false,
+  }) async {
+    final payload = {
+      'provider': provider,
+      'challenge': challenge,
+      'mode': link ? 'link' : 'login',
+    };
+    final body = link
+        ? (await _post('/auth/sso/start', payload) as Map)
+              .cast<String, dynamic>()
+        : await _publicPost('/auth/sso/start', payload);
+    return (state: body['state'] as String, authUrl: body['authUrl'] as String);
+  }
+
+  /// 회사 계정 로그인 결과 묻기.
+  Future<SsoPollResult> ssoPoll(String state, String verifier) async {
+    try {
+      return ssoPollResultFromJson(
+        await _publicPost('/auth/sso/poll', {
+          'state': state,
+          'verifier': verifier,
+        }),
+      );
+    } on ApiException catch (e) {
+      // 400 — 시간이 지났거나 서버가 다시 켜져 진행 중인 로그인을 잃었다.
+      if (e.statusCode == 400) return SsoFailed(e.message);
+      rethrow;
+    }
+  }
+
+  /// 같은 이메일의 계정에 연결하려고 그 이메일로 확인 코드를 보낸다.
+  Future<EmailCodeSent> ssoLinkSend(String state, String verifier) async =>
+      EmailCodeSent.fromJson(
+        await _publicPost('/auth/sso/link/send', {
+          'state': state,
+          'verifier': verifier,
+        }),
+      );
+
+  /// 확인 코드를 넣어 연결하고 로그인한다.
+  Future<AuthResult> ssoLinkVerify(
+    String state,
+    String verifier,
+    String code,
+  ) async => authResultOf(
+    await _publicPost('/auth/sso/link/verify', {
+      'state': state,
+      'verifier': verifier,
+      'code': code,
+    }),
+  );
+
+  Future<IdentitiesInfo> fetchIdentities() async => IdentitiesInfo.fromJson(
+    (await _get('/auth/identities') as Map).cast<String, dynamic>(),
+  );
+
+  Future<void> unlinkIdentity(String provider) async {
+    await _delete('/auth/identities/${Uri.encodeComponent(provider)}');
+  }
+
+  // 관리자 콘솔 "로그인 보안"
+  Future<LoginSecuritySettings> fetchLoginSecurity() async =>
+      LoginSecuritySettings.fromJson(
+        (await _get('/api/admin/login-security') as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<LoginSecuritySettings> updateLoginSecurity(
+    Map<String, dynamic> patch,
+  ) async => LoginSecuritySettings.fromJson(
+    (await _patch('/api/admin/login-security', patch) as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<LdapTestResult> testLdap({String? username, String? password}) async {
+    final body =
+        (await _post('/api/admin/login-security/ldap-test', {
+                  'username': ?username,
+                  'password': ?password,
+                })
+                as Map)
+            .cast<String, dynamic>();
+    final profile = body['profile'];
+    return LdapTestResult(
+      ok: body['ok'] == true,
+      message: body['message'] as String? ?? '',
+      profile: profile is Map
+          ? {
+              for (final e in profile.entries)
+                e.key as String: e.value as String?,
+            }
+          : null,
+      view: LoginSecuritySettings.fromJson(
+        (body['view'] as Map).cast<String, dynamic>(),
+      ),
+    );
+  }
+
+  Future<AdminUser> resetUserOtp(String userId) async => AdminUser.fromJson(
+    await _post('/api/admin/users/$userId/otp-reset', {})
+        as Map<String, dynamic>,
+  );
 
   /// refreshToken으로 새 accessToken을 받아온다. 실패하면(만료/비밀번호 변경 등) 던진다.
   Future<String> refreshAccessToken(String refreshToken) async {

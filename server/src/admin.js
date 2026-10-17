@@ -44,6 +44,11 @@ import {
 import { testMail } from './mailTemplates.js';
 import { groupwareScopeLabel, isGroupwareScopeSetting } from './groupwareScope.js';
 import { checkCurrentPassword } from './users.js';
+import { ldapTest } from './ldapAuth.js';
+import { ldapConfigProblem } from './ldapRules.js';
+import { ldapConnectionChanged, loginSecurityView, parseLoginSecurityInput } from './loginSecurityRules.js';
+import { ssoRedirectUri } from './sso.js';
+import { SSO_PROVIDER_LABEL, ssoConfigProblem } from './ssoRules.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
 import { clearPushTargetsForUser } from './db/queries/devices.js';
@@ -459,6 +464,129 @@ export function createAdminRouter(io) {
       await updateServerSettings({ smtpTestedAt: new Date() });
     }
     res.json(await mailView());
+  });
+
+  // ─────────────────────────────── 로그인 보안 ───────────────────────────────
+
+  const securityView = async () => loginSecurityView(await getServerSettings(), { redirectUri: ssoRedirectUri() });
+
+  /** 관리자 콘솔 "로그인 보안" — 2단계 인증 정책, 회사 계정(Google·Microsoft), 사내 디렉터리(LDAP). 비밀값은 정했는지만. */
+  router.get('/admin/login-security', async (req, res) => {
+    res.json(await securityView());
+  });
+
+  /**
+   * 바꾸기 — 넘긴 것만(loginSecurityRules.js parseLoginSecurityInput). 비밀값은 암호화해 둔다(빈 값이면 지움). 회사 계정은 값이 다
+   * 있고 웹 앱 주소가 있어야 켜지고, 디렉터리는 연결 값을 바꾸면 시험 결과를 지우고 끈다 — 바뀐 값으로 "연결 시험"을 통과해야 켤
+   * 수 있다(메일 설정과 같은 규칙).
+   */
+  router.patch('/admin/login-security', async (req, res) => {
+    const parsed = parseLoginSecurityInput(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const fields = { ...parsed.fields };
+    for (const [plain, enc] of [
+      ['ssoGoogleClientSecret', 'ssoGoogleClientSecretEnc'],
+      ['ssoMicrosoftClientSecret', 'ssoMicrosoftClientSecretEnc'],
+      ['ldapBindPassword', 'ldapBindPasswordEnc'],
+    ]) {
+      if (plain in fields) {
+        fields[enc] = fields[plain] ? encryptField(fields[plain]) : null;
+        delete fields[plain];
+      }
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    const current = await getServerSettings();
+    const next = { ...current, ...fields };
+    for (const provider of ['google', 'microsoft']) {
+      const key = provider === 'google' ? 'ssoGoogleEnabled' : 'ssoMicrosoftEnabled';
+      if (!next[key]) continue;
+      const problem = ssoConfigProblem(provider, next);
+      if (problem) {
+        if (fields[key]) return res.status(400).json({ error: `${SSO_PROVIDER_LABEL[provider]}: ${problem}` });
+        fields[key] = false; // 값을 지워 더는 쓸 수 없게 됐으면 끈다.
+      } else if (fields[key] && !ssoRedirectUri()) {
+        return res.status(400).json({ error: '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 있어야 회사 계정 로그인을 켤 수 있습니다.' });
+      }
+    }
+    if (ldapConnectionChanged(current, fields)) {
+      if (fields.ldapEnabled === true) {
+        return res.status(400).json({ error: '바뀐 값으로 "연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.' });
+      }
+      fields.ldapTestedAt = null;
+      fields.ldapEnabled = false;
+    } else if (fields.ldapEnabled === true) {
+      const problem = ldapConfigProblem(next);
+      if (problem) return res.status(400).json({ error: problem });
+      if (!current.ldapTestedAt) return res.status(400).json({ error: '"연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.' });
+    }
+    const updated = await updateServerSettings(fields);
+    const detail = [
+      `2단계 인증: ${{ optional: '각자', admins: '관리자 필수', all: '모두 필수' }[updated.otpPolicy] ?? updated.otpPolicy}`,
+      `Google ${updated.ssoGoogleEnabled ? '켜짐' : '꺼짐'}`,
+      `Microsoft ${updated.ssoMicrosoftEnabled ? '켜짐' : '꺼짐'}`,
+      `LDAP ${updated.ldapEnabled ? '켜짐' : '꺼짐'}`,
+    ];
+    for (const enc of ['ssoGoogleClientSecretEnc', 'ssoMicrosoftClientSecretEnc', 'ldapBindPasswordEnc']) {
+      if (enc in fields) detail.push(`${enc.replace(/Enc$/, '')} ${fields[enc] ? '변경' : '지움'}`);
+    }
+    recordAudit({
+      ...actorOf(req),
+      action: AUDIT.loginSecurity,
+      targetType: 'server',
+      targetId: null,
+      targetLabel: '로그인 보안',
+      detail: detail.join(' · '),
+    });
+    res.json(await securityView());
+  });
+
+  /**
+   * 디렉터리 연결 시험 — 서비스 계정으로 붙어 보고, `{ username }`이면 그 사람을 찾아 보고, `{ username, password }`면 로그인도 해 본다
+   * (그 비밀번호는 남기지 않는다). 서비스 계정 연결이 되면 시험 통과로 적는다(그 사이 설정이 바뀌었으면 적지 않는다).
+   */
+  router.post('/admin/login-security/ldap-test', async (req, res) => {
+    const username = typeof req.body?.username === 'string' ? req.body.username.trim().slice(0, 64) : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password.slice(0, 200) : '';
+    const settings = await getServerSettings();
+    const problem = ldapConfigProblem(settings);
+    if (problem) return res.status(400).json({ error: problem });
+    const result = await ldapTest({ settings, username, password });
+    if (result.connected) {
+      const latest = await getServerSettings();
+      if (new Date(latest.updatedAt).getTime() === new Date(settings.updatedAt).getTime()) {
+        await updateServerSettings({ ldapTestedAt: new Date() });
+      }
+    }
+    res.json({
+      ok: result.ok,
+      message: result.message,
+      profile: result.profile
+        ? { name: result.profile.name, email: result.profile.email, department: result.profile.department, title: result.profile.title }
+        : null,
+      view: await securityView(),
+    });
+  });
+
+  /** 회원의 2단계 인증 해제 — 휴대폰을 잃어버려 복구 코드도 없을 때. 다음 로그인부터는 비밀번호만(정책상 꼭 써야 하면 다시 켜게 된다). */
+  router.post('/admin/users/:id/otp-reset', async (req, res) => {
+    const target = await requireTarget(req, res);
+    if (!target) return;
+    const updated = await updateUser(target.id, {
+      totpSecretEnc: null,
+      totpPendingEnc: null,
+      totpEnabledAt: null,
+      totpLastStep: null,
+      totpRecoveryHashes: null,
+    });
+    recordAudit({
+      ...actorOf(req),
+      action: AUDIT.userOtpReset,
+      targetType: 'user',
+      targetId: target.id,
+      targetLabel: target.name ?? target.username,
+      detail: '2단계 인증 해제',
+    });
+    res.json(toAdminUserDto(updated, await listTeamsForUser(target.id)));
   });
 
   // ─────────────────────────────── 백업 ───────────────────────────────
@@ -923,6 +1051,9 @@ function toAdminUserDto(u, teamRows = []) {
     isServerAdmin: !!u.isServerAdmin,
     suspended: !!u.suspendedAt,
     suspendedAt: u.suspendedAt ? new Date(u.suspendedAt).getTime() : null,
+    // 로그인 방법('local' | 'ldap' | 'sso')과 2단계 인증 — 회원 목록에 보이고, 켜져 있으면 "2단계 인증 해제"를 할 수 있다.
+    authSource: u.authSource ?? 'local',
+    otpEnabled: !!u.totpEnabledAt,
     deleted: !!u.deletedAt,
     createdAt: new Date(u.createdAt).getTime(),
     teams: teamRows.map(({ team, role }) => ({ id: team.id, name: team.name, role })),

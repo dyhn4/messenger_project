@@ -442,6 +442,12 @@ export const limits = {
   inviteMailUser: new RateLimiter({ max: 50, windowMs: HOUR }),
   // 결재 올리기(groupware.js) — 한 계정에서 한 시간에 30건(결재자에게 알림이 가서 남발하면 그대로 괴롭힘이 된다).
   approvalCreateUser: new RateLimiter({ max: 30, windowMs: HOUR }),
+  // 2단계 인증 코드 — 한 계정에서 5번 틀리면 15분(6자리라 마구 넣어 보면 맞힐 수 있다 — 비밀번호를 이미 넘은 뒤라 계정 단위로).
+  otpUser: new FailureLimiter({ max: 5, windowMs: 15 * MIN, blockMs: 15 * MIN }),
+  // 회사 계정 로그인 시작 — 한 IP에서 10분에 30번(그쪽 로그인 창을 여는 일이라 사람 손으로는 넘지 않는다).
+  ssoStartIp: new RateLimiter({ max: 30, windowMs: 10 * MIN }),
+  // 회사 계정 로그인 결과 묻기 — 앱이 2초마다 묻는다. 한 IP에서 10분에 1200번.
+  ssoPollIp: new RateLimiter({ max: 1200, windowMs: 10 * MIN }),
 };
 
 setInterval(() => {

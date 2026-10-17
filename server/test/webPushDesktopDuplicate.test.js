@@ -74,10 +74,10 @@ test('웹 앱 탭이 열려 소켓이 붙은 기기는 종류와 상관없이 �
 });
 
 test('기기 등록: 아는 종류만 받고 모르는 값은 null(예전 앱과 같게)', () => {
-  for (const kind of ['windows', 'android', 'web-desktop', 'web-android', 'web-mobile']) {
+  for (const kind of ['windows', 'android', 'ios', 'web-desktop', 'web-android', 'web-mobile']) {
     assert.equal(parseDeviceKind(kind), kind);
   }
-  assert.equal(parseDeviceKind('ios'), null);
+  assert.equal(parseDeviceKind('linux'), null);
   assert.equal(parseDeviceKind(undefined), null);
   assert.equal(parseDeviceKind(3), null);
   const base = { deviceId: 'dev-1', identityPublicKey: 'a'.repeat(44), signingPublicKey: 'b'.repeat(44) };

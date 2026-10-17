@@ -92,6 +92,8 @@ dependencies:
   cross_file: ^0.3.5
   # 웹 빌드 전용 브라우저 API(파일 내려받기·새 탭으로 열기 — browser_files_web.dart).
   web: ^1.1.1
+  # 2단계 인증(OTP)을 켤 때 인증 앱이 찍을 QR 코드(otpauth:// 주소 — otp_dialogs.dart).
+  qr_flutter: ^4.1.0
 
 # Windows 보안 저장소 구현(flutter_secure_storage_windows 3.1.2)을 고친 사본으로 — 파일을 통째로 바꿔 끼워 쓰다
 # 끊겨도 깨지지 않고, 읽지 못한 파일은 지우지 않고 남기며, 작업을 한 번에 하나씩 한다

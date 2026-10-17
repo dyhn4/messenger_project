@@ -34,6 +34,9 @@ import { ownedUploadClaims, signFileUrl, uploadFileNameOf } from './upload.js';
 import { AVATAR_PHOTO_ERROR, parseUserName, planAvatarUpdate, safeAvatarColor } from './avatarRules.js';
 import { canSeeUser, directoryUserIds, seesWholeDirectory } from './userDirectory.js';
 import { dndDto, parseDndInput, parseStatusInput, statusDto } from './statusRules.js';
+import { ldapCheckPasswordBySubject } from './ldapAuth.js';
+import { localPasswordBlockedText, usesLocalPassword } from './loginSecurityRules.js';
+import { findIdentityForUser } from './db/queries/userIdentities.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // 이메일 칸 길이 상한 — 가입·아이디 찾기(auth.js EMAIL_MAX_LENGTH)와 같다. 예전엔 바꿀 때만 길이를 안 봐서, 로그인한 사람이 본문
@@ -97,6 +100,9 @@ export function selfUser(u) {
     email: u.emailEnc ? decryptField(u.emailEnc) : null,
     emailVerified: !!u.emailEnc && !!u.emailVerifiedAt,
     birthday: u.birthday ?? null,
+    // 로그인 방법('local' | 'ldap' | 'sso')과 2단계 인증 — 내 프로필이 비밀번호 변경·2단계 인증 칸을 어떻게 보일지 정한다.
+    authSource: u.authSource ?? 'local',
+    otpEnabled: !!u.totpEnabledAt,
   };
 }
 
@@ -186,10 +192,27 @@ async function myOrgInfo(user, settings) {
  * 관리자 콘솔의 백업 암호·외부 백업 위치 변경도 이것으로 운영자 비밀번호를 다시 확인한다(admin.js).
  */
 export async function checkCurrentPassword(res, user, password, wrongMessage) {
+  // 회사 계정 전용 계정은 확인할 비밀번호가 없다 — 이메일 변경·탈퇴 같은 일은 관리자에게 맡긴다.
+  if (user.authSource === 'sso') {
+    res.status(403).json({
+      error: '회사 계정(Google·Microsoft)으로만 로그인하는 계정이라 비밀번호로 확인할 수 없습니다. 관리자에게 요청하세요.',
+    });
+    return false;
+  }
+  // 디렉터리 계정은 회사(Windows 도메인) 비밀번호로 확인한다(연결해 둔 그 디렉터리 계정으로).
+  const checkPassword =
+    user.authSource === 'ldap'
+      ? async (plain) => {
+          const identity = await findIdentityForUser(user.id, 'ldap');
+          if (!identity) return false;
+          const settings = await getServerSettings();
+          return ldapCheckPasswordBySubject({ settings, subject: identity.subject, password: plain });
+        }
+      : (plain) => bcrypt.compare(plain, user.passwordHash);
   const result = await runReauthAttempt({
     key: user.id,
     password,
-    checkPassword: (plain) => bcrypt.compare(plain, user.passwordHash),
+    checkPassword,
   });
   if (result.wait) {
     retryLater(res, result.wait, result.error);
@@ -551,6 +574,7 @@ export function createUsersRouter(io) {
     const user = await findUserById(req.user.sub);
     if (!user) return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
 
+    if (!usesLocalPassword(user)) return res.status(400).json({ error: localPasswordBlockedText(user) });
     const { currentPassword, newPassword } = req.body ?? {};
     const passwordError = passwordPolicyError(newPassword, { username: user.username });
     if (passwordError) return res.status(400).json({ error: `새 ${passwordError}` });
@@ -566,7 +590,11 @@ export function createUsersRouter(io) {
     io.in(`user:${user.id}`).disconnectSockets(true);
 
     // 이 기기에 묶인 토큰이었으면 새 토큰도 그 기기에 묶는다("내 기기"에서 이 기기만 로그아웃할 수 있게).
-    res.json({ ...issueTokenPair(updated, { deviceId: req.user.did }), userId: updated.id, username: updated.username });
+    res.json({
+      ...issueTokenPair(updated, { deviceId: req.user.did, authAt: req.user.aat ?? req.user.iat }),
+      userId: updated.id,
+      username: updated.username,
+    });
   });
 
   /**

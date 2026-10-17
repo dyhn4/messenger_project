@@ -20,6 +20,7 @@ import '../models/mention.dart';
 import '../models/message.dart';
 import '../models/message_reaction.dart';
 import '../models/my_device.dart';
+import '../models/login_security.dart';
 import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
@@ -199,6 +200,16 @@ class Session extends ChangeNotifier {
   /// 내 이메일을 메일 코드로 확인했는지(server users.js selfUser의 emailVerified). 메일이 켜진 서버에서 확인하지 않았으면
   /// 로그인한 뒤 확인을 권한다(email_verify_dialog.dart) — 확인된 이메일이 있어야 비밀번호·아이디를 메일로 찾는다.
   bool emailVerified = false;
+
+  /// 로그인 방법 — 'local'(아이디·비밀번호) | 'ldap'(회사 Windows 도메인 계정) | 'sso'(회사 계정으로만). 내 프로필이 비밀번호 변경
+  /// 칸을 보일지 정한다(/users/me).
+  String authSource = 'local';
+
+  /// 2단계 인증(OTP)을 켰는지(/users/me).
+  bool otpEnabled = false;
+
+  /// 로그인 화면에 보일 로그인 방법 — 회사 계정 단추·회사 디렉터리 안내(/server-info — [refreshLoginMethods]).
+  LoginMethods loginMethods = LoginMethods.none;
 
   /// 서버에 메일(SMTP) 기능이 켜져 있는지(GET /server-info의 mailEnabled — [refreshMailEnabled]). 켜져 있으면 가입할 때 이메일
   /// 확인 코드를 받고, 아이디·비밀번호를 메일로 찾고, 초대 링크를 메일로 보낼 수 있다. 꺼져 있으면 예전처럼 보안 질문.
@@ -732,6 +743,8 @@ class Session extends ChangeNotifier {
       unawaited(_checkForUpdate());
       unawaited(_refreshServerAddresses());
       unawaited(refreshMailEnabled());
+
+      unawaited(refreshLoginMethods());
       unawaited(_updateSocket.connect(serverUrl!));
       if (token == null) {
         stage = AuthStage.needsLogin;
@@ -812,6 +825,8 @@ class Session extends ChangeNotifier {
     // 다른 서버로 바꿨을 수 있으니 메일 기능 여부도 새 서버에 다시 묻는다(못 물으면 꺼짐).
     mailEnabled = false;
     unawaited(refreshMailEnabled());
+
+    unawaited(refreshLoginMethods());
     unawaited(_updateSocket.connect(serverUrl!));
     error = null;
     stage = AuthStage.needsLogin;
@@ -1118,8 +1133,31 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 아이디·비밀번호(또는 회사 디렉터리) 로그인 — 2단계 인증이 남았으면 [OtpChallenge]를 던진다(로그인 화면이 코드를 묻고
+  /// [signInWith]로 마친다).
   Future<bool> login(String u, String p, {required bool keepSignedIn}) =>
       _auth(() => api!.login(u, p), keepSignedIn: keepSignedIn);
+
+  /// 이미 받은 토큰으로 로그인을 마친다 — 2단계 인증 코드 확인·회사 계정 로그인이 끝났을 때.
+  Future<bool> signInWith(AuthResult auth, {required bool keepSignedIn}) =>
+      _auth(() async => auth, keepSignedIn: keepSignedIn);
+
+  /// 로그인 방법을 다시 묻는다 — 로그인 화면을 열 때·서버 주소를 바꿀 때(관리자가 그사이 바꿨을 수 있다).
+  Future<void> refreshLoginMethods() async {
+    final client = api;
+    if (client == null) return;
+    final methods = await client.fetchLoginMethods();
+    if (methods == loginMethods) return;
+    loginMethods = methods;
+    notifyListeners();
+  }
+
+  /// 2단계 인증을 켜거나 끈 뒤 — 내 프로필 표시를 맞춘다.
+  void setOtpEnabled(bool value) {
+    if (otpEnabled == value) return;
+    otpEnabled = value;
+    notifyListeners();
+  }
 
   /// 메일이 켜진 서버는 [emailCode](이메일로 받은 확인 코드)로 가입하고 보안 질문은 넣지 않아도 된다(null). 꺼진 서버는
   /// 보안 질문이 필요하다.
@@ -1191,6 +1229,9 @@ class Session extends ChangeNotifier {
       notifyListeners();
       await _enterApp();
       return true;
+    } on OtpChallenge {
+      // 2단계 인증이 남았다 — 실패가 아니라 다음 단계라 화면이 받아서 코드를 묻는다.
+      rethrow;
     } catch (e) {
       error = e.toString();
       notifyListeners();
@@ -1580,6 +1621,8 @@ class Session extends ChangeNotifier {
       name = me.name;
       email = me.email;
       emailVerified = me.emailVerified;
+      authSource = me.authSource;
+      otpEnabled = me.otpEnabled;
       birthday = me.birthday;
       if (userId != null) _applyUserStatus(userId!, me.status, me.dnd);
       avatarType = me.avatarType;
@@ -5339,6 +5382,8 @@ class Session extends ChangeNotifier {
     name = null;
     email = null;
     emailVerified = false;
+    authSource = 'local';
+    otpEnabled = false;
     // 다른 계정으로 다시 로그인하면 그 계정에 맞춰 이메일 확인을 다시 권한다.
     emailVerifyPromptShown = false;
     birthday = null;

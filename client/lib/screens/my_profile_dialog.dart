@@ -28,6 +28,8 @@ import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'my_devices_dialog.dart';
+import 'linked_accounts_dialog.dart';
+import '../widgets/otp_dialogs.dart' show showOtpManageDialog;
 
 /// 삼선(햄버거) 메뉴의 프로필 행을 누르면 뜨는 플로팅 카드: 아바타 + 이름 + 등급 + 팀/직책
 /// (member_profile_dialog.dart의 다른 사람 프로필 카드와 같은 모양) + 나와의 대화 + 개인정보 설정 +
@@ -674,16 +676,42 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                         ),
                       ),
                       const Divider(height: 1),
-                      _ExpandableEntry(
-                        icon: Icons.lock_outline,
-                        label: '비밀번호 변경',
-                        collapsedValue: null,
-                        expanded: _expanded == _InfoSection.password,
-                        onToggle: () => _toggle(_InfoSection.password),
-                        child: _PasswordChangePanel(
-                          session: widget.session,
-                          onDone: () => _toggle(_InfoSection.password),
+                      // 비밀번호 변경 — 이 앱의 비밀번호를 쓰는 계정만(회사 디렉터리·회사 계정 계정은 그쪽에서 바꾼다).
+                      if (widget.session.authSource == 'local') ...[
+                        _ExpandableEntry(
+                          icon: Icons.lock_outline,
+                          label: '비밀번호 변경',
+                          collapsedValue: null,
+                          expanded: _expanded == _InfoSection.password,
+                          onToggle: () => _toggle(_InfoSection.password),
+                          child: _PasswordChangePanel(
+                            session: widget.session,
+                            onDone: () => _toggle(_InfoSection.password),
+                          ),
                         ),
+                        const Divider(height: 1),
+                      ],
+                      // 2단계 인증(OTP) — 회사 계정으로만 들어오는 계정은 그쪽의 2단계 인증을 쓴다.
+                      if (widget.session.authSource != 'sso') ...[
+                        _ProfileLinkRow(
+                          rowKey: const ValueKey('profile-otp'),
+                          icon: Icons.phonelink_lock_outlined,
+                          label: '2단계 인증',
+                          value: widget.session.otpEnabled ? '켜짐' : '꺼짐',
+                          onTap: () async {
+                            await showOtpManageDialog(context, widget.session);
+                            if (mounted) setState(() {});
+                          },
+                        ),
+                        const Divider(height: 1),
+                      ],
+                      // 연결된 회사 계정(Google·Microsoft) — 연결하면 로그인 화면의 회사 계정 단추로 들어온다.
+                      _ProfileLinkRow(
+                        rowKey: const ValueKey('profile-linked-accounts'),
+                        icon: Icons.business_center_outlined,
+                        label: '연결된 회사 계정',
+                        onTap: () =>
+                            showLinkedAccountsDialog(context, widget.session),
                       ),
                       const Divider(height: 1),
                       // 로그인한 기기 — 기기마다 로그아웃·다른 모든 기기에서 로그아웃(my_devices_dialog.dart).
@@ -735,6 +763,46 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 누르면 다른 창이 열리는 항목 한 줄(아이콘+라벨+[value]+오른쪽 화살표).
+class _ProfileLinkRow extends StatelessWidget {
+  final Key rowKey;
+  final IconData icon;
+  final String label;
+  final String? value;
+  final VoidCallback onTap;
+  const _ProfileLinkRow({
+    required this.rowKey,
+    required this.icon,
+    required this.label,
+    this.value,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return InkWell(
+      key: rowKey,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: hint),
+            const SizedBox(width: 10),
+            Expanded(child: Text(label)),
+            if (value != null) ...[
+              Text(value!, style: TextStyle(color: hint)),
+              const SizedBox(width: 4),
+            ],
+            Icon(Icons.chevron_right, color: hint),
+          ],
         ),
       ),
     );

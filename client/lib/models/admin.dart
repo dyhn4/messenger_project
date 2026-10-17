@@ -25,6 +25,12 @@ class AdminUser {
   final DateTime createdAt;
   final List<AdminUserTeam> teams;
 
+  /// 로그인 방법 — 'local' | 'ldap'(회사 디렉터리) | 'sso'(회사 계정).
+  final String authSource;
+
+  /// 2단계 인증을 켰는지 — 켜져 있으면 관리자가 해제할 수 있다(휴대폰 분실).
+  final bool otpEnabled;
+
   const AdminUser({
     required this.id,
     required this.username,
@@ -42,9 +48,13 @@ class AdminUser {
     this.deleted = false,
     required this.createdAt,
     this.teams = const [],
+    this.authSource = 'local',
+    this.otpEnabled = false,
   });
 
   factory AdminUser.fromJson(Map<String, dynamic> json) => AdminUser(
+    authSource: json['authSource'] as String? ?? 'local',
+    otpEnabled: json['otpEnabled'] == true,
     id: json['id'] as String,
     username: json['username'] as String,
     name: (json['name'] as String?) ?? json['username'] as String,
@@ -78,6 +88,9 @@ class AdminUser {
       accountRoleLabel(role),
       if (suspended) '정지됨',
       if (isServerAdmin) '서버 운영자',
+      if (authSource == 'ldap') '회사 디렉터리',
+      if (authSource == 'sso') '회사 계정',
+      if (otpEnabled) '2단계 인증',
     ];
     return parts.join(' · ');
   }

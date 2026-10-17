@@ -20,6 +20,7 @@ import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
 import 'admin_backup_tab.dart';
 import 'admin_ddns_tab.dart';
+import 'admin_login_security_tab.dart';
 import 'admin_mail_tab.dart';
 import 'admin_stickers_tab.dart';
 
@@ -43,7 +44,7 @@ class AdminConsoleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 9,
+      length: 10,
       child: FloatingDialog(
         title: '서버 관리',
         maxWidth: 820,
@@ -63,6 +64,7 @@ class AdminConsoleScreen extends StatelessWidget {
                 Tab(text: 'FCM 설정'),
                 Tab(text: 'DDNS'),
                 Tab(text: '메일'),
+                Tab(text: '로그인 보안'),
                 Tab(text: '백업'),
                 Tab(text: '이모티콘'),
               ],
@@ -78,6 +80,7 @@ class AdminConsoleScreen extends StatelessWidget {
                   _FcmTab(session: session),
                   AdminDdnsTab(session: session),
                   AdminMailTab(session: session),
+                  AdminLoginSecurityTab(session: session),
                   AdminBackupTab(session: session),
                   AdminStickersTab(session: session),
                 ],
@@ -1169,6 +1172,22 @@ class _UsersTabState extends State<_UsersTab> {
     });
   }
 
+  /// 2단계 인증 해제 — 휴대폰을 잃어버려 복구 코드도 없는 사람(다음 로그인부터 비밀번호만, 정책상 꼭 써야 하면 다시 켜게 된다).
+  Future<void> _resetOtp(AdminUser user) async {
+    final ok = await _confirm(
+      title: '2단계 인증 해제',
+      message:
+          '${user.name} 님의 2단계 인증을 해제할까요? 휴대폰을 잃어버렸을 때만 하세요. 다음 로그인부터는 비밀번호만으로 들어오고, '
+          '관리자가 2단계 인증을 꼭 쓰게 정했으면 그때 다시 켜게 됩니다.',
+      confirmLabel: '해제',
+    );
+    if (ok != true) return;
+    await _run(() async {
+      _replace(await widget.session.api!.resetUserOtp(user.id));
+      _toast('${user.name} 님의 2단계 인증을 해제했습니다.');
+    });
+  }
+
   Future<void> _changeRole(AdminUser user, String role) async {
     await _run(() async {
       _replace(await widget.session.api!.setUserRole(user.id, role));
@@ -1499,6 +1518,21 @@ class _UsersTabState extends State<_UsersTab> {
                                 ],
                               ),
                             ),
+                            if (user.otpEnabled)
+                              PopupMenuItem<void>(
+                                key: const ValueKey('admin-user-otp-reset'),
+                                onTap: () => _resetOtp(user),
+                                child: const Row(
+                                  children: [
+                                    Icon(
+                                      Icons.phonelink_lock_outlined,
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('2단계 인증 해제'),
+                                  ],
+                                ),
+                              ),
                             PopupMenuItem<void>(
                               onTap: () => _toggleServerAdmin(user),
                               child: Row(

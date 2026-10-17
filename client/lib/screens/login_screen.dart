@@ -1,12 +1,16 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../models/login_security.dart';
+import '../services/api_client.dart' show AuthResult;
 import '../services/password_policy.dart';
 import '../services/pinned_tls.dart';
 import '../services/security_questions.dart';
 import '../services/session.dart';
 import '../widgets/email_address_field.dart';
 import '../widgets/email_code_input.dart';
+import '../widgets/otp_dialogs.dart';
+import '../widgets/sso_dialogs.dart';
 import '../widgets/update_dialog.dart';
 import 'find_id_screen.dart';
 import 'find_password_screen.dart';
@@ -82,6 +86,8 @@ class _LoginScreenState extends State<LoginScreen> {
     _maybeShowUpdateBanner();
     // 관리자가 그사이 메일 기능을 켜거나 껐을 수 있다 — 가입 폼(인증 코드/보안 질문)을 그에 맞춘다(바뀌면 세션이 알려 다시 그린다).
     widget.session.refreshMailEnabled();
+    // 회사 계정(SSO) 단추·회사 디렉터리 안내도 관리자가 그사이 켜거나 껐을 수 있다.
+    widget.session.refreshLoginMethods();
   }
 
   @override
@@ -260,22 +266,33 @@ class _LoginScreenState extends State<LoginScreen> {
     final keepSignedIn = _keepSignedIn;
     final usernameText = _username.text.trim();
     setState(() => _loading = true);
-    final ok = _isRegister
-        ? await widget.session.register(
-            usernameText,
-            _password.text,
-            _email,
-            _name.text.trim(),
-            securityQuestion: byMail ? null : _resolvedSecurityQuestion()!,
-            securityAnswer: byMail ? null : _securityAnswer.text.trim(),
-            emailCode: byMail ? _emailCode.text.trim() : null,
-            keepSignedIn: true,
-          )
-        : await widget.session.login(
-            usernameText,
-            _password.text,
-            keepSignedIn: keepSignedIn,
-          );
+    bool ok;
+    try {
+      ok = _isRegister
+          ? await widget.session.register(
+              usernameText,
+              _password.text,
+              _email,
+              _name.text.trim(),
+              securityQuestion: byMail ? null : _resolvedSecurityQuestion()!,
+              securityAnswer: byMail ? null : _securityAnswer.text.trim(),
+              emailCode: byMail ? _emailCode.text.trim() : null,
+              keepSignedIn: true,
+            )
+          : await widget.session.login(
+              usernameText,
+              _password.text,
+              keepSignedIn: keepSignedIn,
+            );
+    } on OtpChallenge catch (challenge) {
+      // 비밀번호는 맞았고 2단계 인증이 남았다 — 코드를 묻거나(켠 사람) 그 자리에서 켜게 한다(관리자가 꼭 쓰게 정한 사람).
+      if (!mounted) return;
+      setState(() => _loading = false);
+      final auth = await _secondFactor(challenge);
+      if (auth == null || !mounted) return;
+      setState(() => _loading = true);
+      ok = await widget.session.signInWith(auth, keepSignedIn: keepSignedIn);
+    }
     if (ok && !_isRegister) {
       await widget.session.setRememberedUsername(
         rememberUsername ? usernameText : null,
@@ -292,6 +309,83 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     }
+  }
+
+  /// 2단계 인증 — 확인 표로 코드를 넣거나(켠 사람) 켜기(정책상 꼭 써야 하는데 아직 안 켠 사람)를 마쳐 토큰을 받는다. 취소하면 null.
+  Future<AuthResult?> _secondFactor(OtpChallenge challenge) async {
+    final api = widget.session.api!;
+    if (!challenge.setupRequired) {
+      return showOtpLoginDialog(context, api: api, ticket: challenge.ticket);
+    }
+    final done = await showOtpSetupDialog(
+      context,
+      api: api,
+      ticket: challenge.ticket,
+    );
+    return done?.auth;
+  }
+
+  /// 회사 계정(Google·Microsoft)으로 로그인 — 브라우저에서 로그인하고 돌아오면 이어서 들어간다(sso_dialogs.dart).
+  Future<void> _loginWithSso(String provider) async {
+    final keepSignedIn = _keepSignedIn;
+    final auth = await showSsoLoginDialog(
+      context,
+      api: widget.session.api!,
+      provider: provider,
+    );
+    if (auth == null || !mounted) return;
+    setState(() => _loading = true);
+    final ok = await widget.session.signInWith(
+      auth,
+      keepSignedIn: keepSignedIn,
+    );
+    if (ok) await widget.session.setKeepSignedInPref(keepSignedIn);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.session.error ?? '실패했습니다.')),
+      );
+    }
+  }
+
+  /// 로그인 단추 아래 — 회사 계정 로그인 단추들(서버가 켠 것만).
+  List<Widget> _ssoButtons() {
+    final providers = widget.session.loginMethods.sso;
+    if (_isRegister || providers.isEmpty) return const [];
+    return [
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              '또는',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).hintColor,
+              ),
+            ),
+          ),
+          const Expanded(child: Divider()),
+        ],
+      ),
+      const SizedBox(height: 12),
+      for (final p in providers)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: OutlinedButton.icon(
+            key: ValueKey('login-sso-$p'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            onPressed: _loading ? null : () => _loginWithSso(p),
+            icon: const Icon(Icons.business_center_outlined),
+            label: Text('${ssoProviderLabel(p)} 회사 계정으로 로그인'),
+          ),
+        ),
+    ];
   }
 
   /// "직접 작성"/"목록에서 선택" 토글 결과를 실제로 서버에 보낼 질문 문자열로 바꾼다.
@@ -435,9 +529,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         ] else ...[
                           TextField(
                             controller: _username,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: '아이디',
-                              border: OutlineInputBorder(),
+                              // 회사 디렉터리(LDAP)가 켜진 서버 — 같은 칸에 회사(Windows) 계정을 넣어도 된다.
+                              helperText: widget.session.loginMethods.ldap
+                                  ? '회사(Windows) 계정 아이디·비밀번호로도 로그인할 수 있습니다.'
+                                  : null,
+                              border: const OutlineInputBorder(),
                             ),
                           ),
                         ],
@@ -612,6 +710,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 )
                               : Text(_isRegister ? '가입하기' : '로그인'),
                         ),
+                        ..._ssoButtons(),
                         const SizedBox(height: 16),
                         // 웹 앱을 초대 링크의 웹 주소로 열었으면(아이폰 — main.dart의 takeLaunchInviteToken) 처음 온 사람이 가입으로
                         // 가면 된다는 걸 알린다 — 그 초대 코드로 가입해야 사내 와이파이 밖에서도 가입되고, 팀 초대면 팀에도 들어간다.

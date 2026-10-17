@@ -27,6 +27,9 @@ import { maskEmail, mailReady } from "./mailRules.js";
 import { findIdMail } from "./mailTemplates.js";
 import { passwordPolicyError } from "./passwordPolicy.js";
 import { accountState, deviceActive } from "./authState.js";
+import { LDAP_REASON_TEXT, ldapAuthenticate } from "./ldapAuth.js";
+import { completeLogin, directoryAccountActive, ldapUsable, resolveDirectoryLogin } from "./loginSecurity.js";
+import { localPasswordBlockedText, usesLocalPassword } from "./loginSecurityRules.js";
 import { parseUserName } from "./avatarRules.js";
 import { endUserCallAccess } from "./callAccess.js";
 import { clearPushTargetsForUser } from "./db/queries/devices.js";
@@ -247,16 +250,19 @@ const UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR =
  * (devices.js DELETE /devices/:id) 그 기기의 토큰만 REST·갱신·소켓에서 막힌다(authState.js deviceActive). 기기 등록 전에 받은
  * 토큰(로그인 직후·예전 앱)은 묶이지 않아서, 그런 토큰까지 끊으려면 "다른 모든 기기에서 로그아웃"(tokenVersion)을 쓴다.
  */
-export function issueTokenPair(user, { deviceId = null } = {}) {
+export function issueTokenPair(user, { deviceId = null, authAt = null } = {}) {
   const tokenVersion = user.tokenVersion ?? 0;
   const did = deviceId ? { did: deviceId } : {};
+  // aat — 처음 로그인(비밀번호·디렉터리·회사 계정)한 시각(초). 토큰을 다시 내줘도(갱신·기기 등록·비밀번호 변경) 그대로 이어서,
+  // 회사 계정으로만 들어오는 계정은 이 시각에서 정한 날수가 지나면 다시 회사 계정으로 확인하게 한다(/refresh).
+  const aat = Number.isInteger(authAt) ? authAt : Math.floor(Date.now() / 1000);
   const accessToken = jwt.sign(
-    { sub: user.id, username: user.username, tokenVersion, ...did, type: "access" },
+    { sub: user.id, username: user.username, tokenVersion, ...did, aat, type: "access" },
     JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_TTL },
   );
   const refreshToken = jwt.sign(
-    { sub: user.id, tokenVersion, ...did, type: "refresh" },
+    { sub: user.id, tokenVersion, ...did, aat, type: "refresh" },
     JWT_SECRET,
     { expiresIn: REFRESH_TOKEN_TTL },
   );
@@ -547,6 +553,8 @@ export function createAuthRouter(io) {
         .status(404)
         .json({ error: RECOVERY_NO_MATCH_ERROR });
     }
+    // 회사 계정·디렉터리로 로그인하는 계정은 이 앱의 비밀번호가 없다.
+    if (!usesLocalPassword(user)) return res.status(400).json({ error: localPasswordBlockedText(user) });
     if (usesEmailRecovery(user, await getServerSettings())) {
       return res.status(409).json({ error: UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR });
     }
@@ -567,6 +575,8 @@ export function createAuthRouter(io) {
     if (!user) {
       return res.status(404).json({ error: RECOVERY_NO_MATCH_ERROR });
     }
+    // 회사 계정·디렉터리로 로그인하는 계정은 이 앱의 비밀번호가 없다(찾을 것도 바꿀 것도 없다).
+    if (!usesLocalPassword(user)) return res.status(400).json({ error: localPasswordBlockedText(user) });
     if (usesEmailRecovery(user, await getServerSettings())) {
       const ipWait = limits.mailSendIp.hit(clientIpKey(req));
       if (ipWait > 0) return retryLater(res, ipWait, `메일 요청이 너무 많습니다. ${waitText(ipWait)} 후 다시 시도하세요.`);
@@ -684,6 +694,7 @@ export function createAuthRouter(io) {
           .status(400)
           .json({ error: RECOVERY_NO_MATCH_ERROR });
       }
+      if (!usesLocalPassword(user)) return res.status(400).json({ error: localPasswordBlockedText(user) });
       if (usesEmailRecovery(user, await getServerSettings())) {
         if (typeof emailCode !== "string" || !emailCode) {
           return res.status(409).json({ error: UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR });
@@ -753,23 +764,62 @@ export function createAuthRouter(io) {
     // 밖에서 한 아이디로 세서 막고(확인 중인 시도까지 세서 한꺼번에 보내도 정한 횟수를 넘지 못한다), 사내망 밖 전체의 오류가
     // 많으면 처음 보는 곳은 줄을 세워 정해진 간격으로만 확인한다. 밖에서 최소 길이(8자)보다 짧은 비밀번호는 맞는지 보지도 않고
     // 늘 같은 문구로 거절한다(최소 길이를 올리기 전의 짧은 비밀번호는 사내에서만 받는다).
+    //
+    // 사내 디렉터리(LDAP) 로그인이 켜져 있으면 같은 자리에서 디렉터리로도 확인한다(loginSecurity.js):
+    //  - 디렉터리 계정(authSource 'ldap')은 디렉터리 비밀번호로만, 이 앱의 아이디 계정은 이 앱의 비밀번호로 — 틀리면 디렉터리로도
+    //    본다(같은 사람이면 이메일이 같을 때 연결된다).
+    //  - 이 앱에 없는 아이디는 디렉터리에서 찾아(자동 생성이 켜져 있으면) 계정을 만든다.
+    // 회사 계정 전용 계정(authSource 'sso')은 비밀번호가 없어 여기서는 늘 틀린다. 비밀번호(또는 디렉터리)가 맞으면 2단계 인증을
+    // 물을지 본다(completeLogin).
+    const settings = await getServerSettings();
+    const ldapOn = ldapUsable(settings);
+    const directory = { profile: null, reason: null };
     const result = await runLoginAttempt({
       ip: clientIp(req),
       username,
       password,
-      findAccount: findAccountByUsername,
-      checkPassword: (pw, user) => bcrypt.compare(pw, user?.passwordHash ?? DUMMY_PASSWORD_HASH),
+      findAccount: async (name) => {
+        const local = await findAccountByUsername(name);
+        if (local || !ldapOn) return local;
+        // 이 앱에 없는 아이디 — 디렉터리에서 찾아볼 자리(제한·차례 규칙은 있는 계정과 같게 탄다).
+        return name.trim() ? { id: null, username: name.trim(), directoryCandidate: true } : null;
+      },
+      checkPassword: async (pw, user) => {
+        if (user && !user.directoryCandidate && user.authSource !== "ldap") {
+          const localOk = usesLocalPassword(user) && (await bcrypt.compare(pw, user.passwordHash));
+          if (localOk || !ldapOn) return localOk;
+        } else if (!user || !ldapOn) {
+          await bcrypt.compare(pw, DUMMY_PASSWORD_HASH);
+          return false;
+        }
+        const r = await ldapAuthenticate({ settings, username: username.trim(), password: pw });
+        directory.reason = r.reason ?? null;
+        if (r.ok) directory.profile = r.profile;
+        return r.ok;
+      },
       report: reportLockout,
     });
     if (result.wait) return retryLater(res, result.wait, result.error);
-    if (!result.user) return res.status(result.status).json({ error: result.error });
+    if (!result.user) {
+      // 디렉터리 서버에 못 붙었으면 "비밀번호가 틀렸다"가 아니라 그 이유를 알린다.
+      if (directory.reason === "unavailable") return res.status(503).json({ error: LDAP_REASON_TEXT.unavailable });
+      return res.status(result.status).json({ error: result.error });
+    }
 
-    const { user } = result;
-    res.json({
-      ...issueTokenPair(user),
-      userId: user.id,
-      username: user.username,
-    });
+    let user = result.user;
+    if (directory.profile) {
+      const resolved = await resolveDirectoryLogin({
+        localUser: user.directoryCandidate ? null : user,
+        typedUsername: username.trim(),
+        profile: directory.profile,
+        settings,
+      });
+      if (resolved.error) return res.status(resolved.status).json({ error: resolved.error });
+      user = resolved.user;
+      if (user.deletedAt) return res.status(403).json({ error: "탈퇴한 계정입니다." });
+      if (user.suspendedAt) return res.status(403).json({ error: "정지된 계정입니다. 서버 운영자에게 문의하세요." });
+    }
+    return completeLogin(res, user, { method: directory.profile ? "ldap" : "password" });
   });
 
   /** AccessToken이 만료됐을 때 RefreshToken으로 새 AccessToken을 받아온다. */
@@ -813,8 +863,24 @@ export function createAuthRouter(io) {
         .status(401)
         .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
     }
+    const authAt = Number.isInteger(payload.aat) ? payload.aat : payload.iat;
+    // 사내 디렉터리 계정 — 퇴사 등으로 디렉터리에서 막혔거나 없어졌으면 여기서 끊는다(10분마다 한 번 확인).
+    if (user.authSource === "ldap" && !(await directoryAccountActive(user))) {
+      return res
+        .status(401)
+        .json({ error: "회사 계정을 쓸 수 없습니다. 다시 로그인하거나 관리자에게 문의하세요." });
+    }
+    // 회사 계정 전용 계정 — 정한 날수가 지나면 회사 계정으로 다시 확인한다(그쪽에서 막힌 퇴사자가 오래 남지 않게).
+    if (user.authSource === "sso") {
+      const days = (await getServerSettings()).ssoSessionDays ?? 7;
+      if (Math.floor(Date.now() / 1000) - authAt > days * 86400) {
+        return res
+          .status(401)
+          .json({ error: "회사 계정으로 다시 로그인해 주세요." });
+      }
+    }
 
-    res.json({ accessToken: issueTokenPair(user, { deviceId: payload.did }).accessToken });
+    res.json({ accessToken: issueTokenPair(user, { deviceId: payload.did, authAt }).accessToken });
   });
 
   return router;
@@ -827,29 +893,34 @@ export function createAuthRouter(io) {
  */
 export async function requireAuth(req, res, next) {
   const header = req.headers.authorization ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token) return res.status(401).json({ error: "토큰이 없습니다." });
+  if (!header.startsWith("Bearer ")) return res.status(401).json({ error: "토큰이 없습니다." });
+  const payload = await accessPayload(req);
+  if (!payload) return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+  req.user = payload;
+  next();
+}
 
+/**
+ * 요청의 AccessToken이 지금 쓸 수 있으면 그 내용, 아니면 null — requireAuth와 같은 확인을 미들웨어 없이(로그인 중에도 부르는
+ * 경로 — 2단계 인증 켜기 등). 정지·탈퇴·강제 로그아웃·비밀번호 변경(토큰 버전이 오른 것) 뒤의 토큰은 만료 전이라도 바로 막는다
+ * (authState.js — 30초 캐시라 요청마다 DB를 읽지는 않는다). 401이면 앱은 RefreshToken으로 갱신을 시도하고, 그것도 같은 이유로
+ * 거절되면 로그아웃된다. 기기에 묶인 토큰이면 그 기기가 아직 로그인돼 있는지도 본다("내 기기"에서 로그아웃 — 같은 30초 캐시).
+ */
+export async function accessPayload(req) {
+  const header = req.headers.authorization ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return null;
   let payload;
   try {
     payload = jwt.verify(token, JWT_SECRET);
-    if (payload.type !== "access") throw new Error("invalid token type");
+    if (payload.type !== "access") return null;
   } catch {
-    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
+    return null;
   }
-  // 정지·탈퇴·강제 로그아웃·비밀번호 변경(토큰 버전이 오른 것) 뒤의 토큰은 만료 전이라도 바로 막는다(authState.js —
-  // 30초 캐시라 요청마다 DB를 읽지는 않는다). 401이면 앱은 RefreshToken으로 갱신을 시도하고, 그것도 같은 이유로
-  // 거절되면 로그아웃된다.
   const state = await accountState(payload.sub);
-  if (state.blocked || state.tokenVersion !== (payload.tokenVersion ?? 0)) {
-    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
-  }
-  // 기기에 묶인 토큰이면 그 기기가 아직 로그인돼 있는지도 본다("내 기기"에서 로그아웃 — 같은 30초 캐시, 로그아웃하면 바로 지워진다).
-  if (payload.did && !(await deviceActive(payload.did, payload.sub))) {
-    return res.status(401).json({ error: "토큰이 유효하지 않습니다." });
-  }
-  req.user = payload;
-  next();
+  if (state.blocked || state.tokenVersion !== (payload.tokenVersion ?? 0)) return null;
+  if (payload.did && !(await deviceActive(payload.did, payload.sub))) return null;
+  return payload;
 }
 
 /** 요청에 유효한 AccessToken이 붙어 있는지만 본다(없거나 틀려도 거절하지 않는 공개 경로용 — /server-info 등). */

@@ -97,6 +97,8 @@ import { latestAnnouncementDtoFor } from './announcements.js';
 import { checkIconRef } from './fileRefs.js';
 import { signFileUrl } from './upload.js';
 import { countUnreadAnnouncementsForUser } from './db/queries/announcements.js';
+import { readPostIdsOf } from './db/queries/board.js';
+import { boardCategoriesOf, parseBoardCategories } from './boardRules.js';
 import { listScheduledForRoom } from './db/queries/scheduledMessages.js';
 import { failScheduledForArchivedTopic, failScheduledForDeletedRoom } from './scheduledMessages.js';
 import {
@@ -332,6 +334,8 @@ export async function toRoomDto(room, requesterId) {
     archived: isTopic && !!room.archivedAt,
     archivedAt: isTopic && room.archivedAt ? new Date(room.archivedAt).getTime() : null,
     adminIds: isTopic ? adminIds : [],
+    // 보드 뷰 토픽의 말머리 목록(boardRules.js) — 다른 방은 [].
+    boardCategories: boardCategoriesOf(room),
     createdBy: room.createdBy ?? null,
   };
   if (room.isSecret) {
@@ -1443,6 +1447,13 @@ export function createRoomsRouter(io) {
       if (error) return res.status(400).json({ error });
       fields.description = value;
     }
+    // 보드 뷰 토픽의 말머리 목록 — 통째로 바꾼다(지운 말머리의 게시글은 말머리 없이 보인다).
+    if ('boardCategories' in body) {
+      if (room.viewMode !== 'board') return res.status(400).json({ error: '말머리는 보드 뷰 토픽에만 둘 수 있습니다.' });
+      const parsed = parseBoardCategories(body.boardCategories);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      fields.boardCategories = parsed.categories;
+    }
     for (const key of ['isPublic', 'readOnly', 'autoInvite', 'quietLeave']) {
       if (!(key in body)) continue;
       if (typeof body[key] !== 'boolean') return res.status(400).json({ error: `${key}는 true/false여야 합니다.` });
@@ -1735,11 +1746,15 @@ export function createRoomsRouter(io) {
     // 공감(이모지 반응)도 붙인다(reactions.js) — 비밀 대화는 공감을 받지 않아 늘 빈 목록이다.
     const all = await attachReactions(await attachPolls([...extraParents, ...rows], req.user.sub));
     const attachmentsByMessageId = await listAttachmentsForMessages(all.map((m) => m.id));
+    // 보드 게시글은 "내가 읽었는지"(boardExtras.js — 게시글 상세를 연 적이 있는지, 쓴 사람은 늘 읽음)를 붙인다.
+    const isBoard = room.type === 'topic' && room.viewMode === 'board';
+    const readIds = isBoard ? await readPostIdsOf(req.user.sub, all.filter((m) => m.type === 'post').map((m) => m.id)) : null;
     res.json(
       all.map((m) => ({
         ...toMessageDto({ ...m, attachments: attachmentsByMessageId[m.id] }),
         comments: commentsByMessageId.get(m.id) ?? [],
         outOfWindow: extraParentIds.has(m.id),
+        ...(readIds && m.type === 'post' ? { readByMe: m.senderId === req.user.sub || readIds.has(m.id) } : {}),
       })),
     );
   });

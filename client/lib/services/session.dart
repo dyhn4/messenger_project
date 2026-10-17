@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/stickers.dart';
 import '../models/app_notification.dart';
 import '../models/app_user.dart';
+import '../models/board_category.dart';
 import '../models/comment.dart';
 import '../models/integration.dart';
 import '../models/invite_result.dart';
@@ -627,6 +628,7 @@ class Session extends ChangeNotifier {
   StreamSubscription<CallDeclined>? _callDeclinedSub;
   StreamSubscription<CallCardUpdate>? _callCardSub;
   StreamSubscription<MessageReactionsUpdate>? _messageReactionsSub;
+  StreamSubscription<PostReadUpdate>? _postReadSub;
   StreamSubscription<Announcement>? _announcementSub;
   StreamSubscription<Announcement>? _announcementUpdatedSub;
   StreamSubscription<AnnouncementRemovedEvent>? _announcementDeletedSub;
@@ -2166,6 +2168,12 @@ class Session extends ChangeNotifier {
       (u) => existingControllerFor(
         u.roomId,
       )?.applyReactions(u.messageId, u.reactions),
+    );
+    _postReadSub?.cancel();
+    _postReadSub = chatSocket.postReads.listen(
+      // 보드 게시글 읽음 — 그 방 컨트롤러가 있을 때만(열려 있는 상세가 "읽음 N"을 다시 받는다).
+      (u) =>
+          existingControllerFor(u.roomId)?.applyPostRead(u.messageId, u.userId),
     );
     _callDeclinedSub?.cancel();
     _callDeclinedSub = chatSocket.callDeclined.listen((e) {
@@ -5479,6 +5487,8 @@ class Session extends ChangeNotifier {
     List<TextFormatRun>? textFormat,
     List<Mention>? mentions,
     List<UploadedAttachment> attachments = const [],
+    String? categoryId,
+    bool mustRead = false,
   }) async {
     return (await _postControllerFor(room)).sendPost(
       title: title,
@@ -5486,7 +5496,17 @@ class Session extends ChangeNotifier {
       textFormat: textFormat,
       mentions: mentions,
       attachments: attachments,
+      categoryId: categoryId,
+      mustRead: mustRead,
     );
+  }
+
+  /// 보드 뷰 토픽의 말머리 목록을 바꾼다(토픽을 관리할 수 있는 사람만) — 돌려받은 방을 목록의 그 인스턴스에 반영한다.
+  Future<Room> updateBoardCategories(
+    String roomId,
+    List<BoardCategory> categories,
+  ) async {
+    return _upsertRoom(await api!.updateBoardCategories(roomId, categories));
   }
 
   /// 게시글 수정 — RoomChatController.editPost와 같다.
@@ -5497,6 +5517,8 @@ class Session extends ChangeNotifier {
     required String text,
     List<TextFormatRun>? textFormat,
     List<Mention>? mentions,
+    bool setCategory = false,
+    String? categoryId,
   }) async {
     return (await _postControllerFor(room)).editPost(
       messageId,
@@ -5504,8 +5526,18 @@ class Session extends ChangeNotifier {
       text: text,
       textFormat: textFormat,
       mentions: mentions,
+      setCategory: setCategory,
+      categoryId: categoryId,
     );
   }
+
+  /// 게시글 필독 지정/해제 — RoomChatController.setPostMustRead와 같다.
+  Future<Message> setPostMustRead(
+    Room room,
+    String messageId,
+    bool mustRead,
+  ) async =>
+      (await _postControllerFor(room)).setPostMustRead(messageId, mustRead);
 
   /// 게시글 고정/해제 — RoomChatController.setPostPinned와 같다.
   Future<Message> setPostPinned(
@@ -5602,6 +5634,7 @@ class Session extends ChangeNotifier {
     await _commentSub?.cancel();
     await _messageEditedSub?.cancel();
     await _messageReactionsSub?.cancel();
+    await _postReadSub?.cancel();
     await _messageLinkPreviewSub?.cancel();
     await _pollUpdatedSub?.cancel();
     await _pollFavoriteSub?.cancel();

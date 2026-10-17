@@ -1,5 +1,6 @@
 import 'announcement.dart';
 import 'app_user.dart';
+import 'board_category.dart';
 import 'message.dart';
 
 enum RoomType { topic, group, dm }
@@ -203,6 +204,9 @@ class Room {
   /// 토픽을 만든 사람 id(예전 방이거나 서버가 안 보내면 null).
   String? createdBy;
 
+  /// 보드 뷰 토픽의 말머리 목록(토픽 관리자가 정한 순서) — 다른 방·예전 서버는 빈 목록.
+  List<BoardCategory> boardCategories;
+
   Room({
     required this.id,
     required this.teamId,
@@ -245,8 +249,10 @@ class Room {
     this.archivedAt,
     List<String>? adminIds,
     this.createdBy,
+    List<BoardCategory>? boardCategories,
   }) : lastActivityAt = lastActivityAt ?? createdAt,
-       adminIds = adminIds ?? [];
+       adminIds = adminIds ?? [],
+       boardCategories = boardCategories ?? [];
 
   /// 새 토픽 필드(viewMode~createdBy)가 없는 예전 서버 응답이면 전부 기본값(챗 뷰, 설정 꺼짐,
   /// 보관 안 됨, 토픽 관리자 없음)으로 읽는다. isSelf가 없으면 나와의 대화가 아니다.
@@ -309,7 +315,17 @@ class Room {
       archivedAt: _archivedAtFromJson(json),
       adminIds: (json['adminIds'] as List?)?.whereType<String>().toList(),
       createdBy: json['createdBy'] as String?,
+      boardCategories: BoardCategory.listFromJson(json['boardCategories']),
     );
+  }
+
+  /// [id]의 말머리 — 없거나 지운 말머리면 null(게시글은 말머리 없이 보인다).
+  BoardCategory? boardCategoryById(String? id) {
+    if (id == null) return null;
+    for (final c in boardCategories) {
+      if (c.id == id) return c;
+    }
+    return null;
   }
 
   /// 보드 뷰 토픽 — 채팅 목록 대신 게시글 보드(board_view.dart)를 보여준다.
@@ -368,6 +384,7 @@ class Room {
     archivedAt = incoming.archivedAt;
     adminIds = incoming.adminIds;
     createdBy = incoming.createdBy;
+    boardCategories = incoming.boardCategories;
     if (!includePersonal) return;
     unreadCount = incoming.unreadCount;
     favorite = incoming.favorite;

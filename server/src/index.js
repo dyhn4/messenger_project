@@ -101,8 +101,13 @@ import { createGroupwareRouter } from './groupware.js';
 import { startMentionDigestJob } from './mentionDigest.js';
 import { createGroupwareWorkRouter, startAttendanceReminderJob } from './groupwareWork.js';
 import { createGroupwareResourcesRouter } from './groupwareResources.js';
+import { createGroupwareSurveysRouter } from './groupwareSurveys.js';
+import { createGroupwareReportsRouter } from './groupwareReports.js';
+import { createDriveRouter } from './drive.js';
+import { createWikiRouter, wikiDocs } from './wiki.js';
 import { createWebmailRouter, startMailCheckJob } from './webmail.js';
 import { createDraftsRouter, startDraftCleanupJob } from './drafts.js';
+import { createBoardExtrasRouter } from './boardExtras.js';
 import { startWebTls } from './webTls.js';
 
 // 위 express-async-errors 덕에 라우트 안에서 난 에러는 이제 거의 다 아래 에러 처리
@@ -117,6 +122,17 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err);
 });
+// 위키 동시 편집 문서는 마지막 연산 뒤 몇 초 지나 저장한다(wikiDocs.js) — 서버를 끌 때(pm2 restart·Ctrl+C) 그 몇 초를 잃지 않게
+// 열린 문서를 저장하고 끈다. 저장이 오래 걸려도 3초 뒤에는 끈다.
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, () => {
+    setTimeout(() => process.exit(0), 3000).unref();
+    wikiDocs
+      .flushAll()
+      .catch((err) => console.error('[wiki] 끌 때 저장 실패:', err?.message ?? err))
+      .finally(() => process.exit(0));
+  });
+}
 
 const app = express();
 // 기본 보안 헤더 — 인터넷에 열리면서 붙였다. Express 이름을 숨기고, 형식 추측을 막고, 다른 사이트가 이 서버의
@@ -175,8 +191,16 @@ app.use('/api', requireAuth, createGroupwareRouter(io));
 // 그룹웨어 근태·휴가 관리 — 범위 설정(휴가 종류·지출 분류·출근 알림)·유연근무·주 52시간·연차 사용 촉진(groupwareWork.js).
 app.use('/api', requireAuth, createGroupwareWorkRouter(io));
 app.use('/api', requireAuth, createGroupwareResourcesRouter(io));
+// 그룹웨어 설문(여러 문항)과 업무일지(일일·주간 업무보고 — 상위자가 읽고 댓글).
+app.use('/api', requireAuth, createGroupwareSurveysRouter(io));
+app.use('/api', requireAuth, createGroupwareReportsRouter(io));
+// 팀 공유 드라이브 — 폴더·파일 판·휴지통(drive.js).
+app.use('/api', requireAuth, createDriveRouter(io));
+// 팀 위키 — 페이지 나무·판·휴지통(wiki.js). 동시 편집은 소켓(wiki:* — socket.js가 registerWikiSocket을 붙인다).
+app.use('/api', requireAuth, createWikiRouter(io));
 app.use('/api', requireAuth, createWebmailRouter(io));
 app.use('/api', requireAuth, createDraftsRouter(io));
+app.use('/api', requireAuth, createBoardExtrasRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 // 메시지 공감(이모지 반응) — PUT /messages/:id/reaction(reactions.js).

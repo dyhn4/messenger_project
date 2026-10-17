@@ -15,6 +15,9 @@ IconData projectNotificationIcon(String kind) => switch (kind) {
   'due' => Icons.alarm,
   'created' => Icons.add_task,
   'deleted' => Icons.delete_outline,
+  // 선행 업무가 모두 끝남·반복 업무의 다음 회차(taskExtras.js).
+  'dependency' => Icons.account_tree_outlined,
+  'recurring' => Icons.repeat,
   // 공개 프로젝트가 새로 생겼다는 알림 — 업무가 아니라 프로젝트 자체를 가리킨다.
   'project_created' => Icons.rocket_launch_outlined,
   _ => Icons.notifications_none,

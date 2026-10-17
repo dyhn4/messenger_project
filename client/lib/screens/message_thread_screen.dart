@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../data/stickers.dart';
+import '../models/announcement.dart' show AnnouncementReaders;
 import '../models/app_user.dart';
 import '../models/message.dart';
 import '../models/room.dart';
@@ -19,6 +22,7 @@ import '../widgets/message_comments_card.dart';
 import '../widgets/muted_scrollbar.dart';
 import '../widgets/sticker_picker.dart';
 import '../widgets/sticker_preview_card.dart';
+import 'announcement_detail_screen.dart' show showAnnouncementReadersDialog;
 import 'post_editor_dialog.dart' show postEditorsOpen;
 
 /// 메시지 하나의 댓글 스레드. 데스크톱은 우측 패널(asPanel: true), 모바일은 전체화면으로 쓴다
@@ -61,6 +65,12 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
   GlobalKey<CommentInputBarState> _commentInputBarKey =
       GlobalKey<CommentInputBarState>();
   bool _dragHovering = false;
+
+  /// 보드 게시글의 읽음 확인(읽음 N · 안 읽음 M) — 공지 읽음 확인과 같은 모양. 받기 전·게시글이 아니면 null.
+  AnnouncementReaders? _readers;
+
+  /// 이 방 게시글을 누가 처음 읽었다(post:read) — 지금 보는 게시글이면 읽음 확인을 다시 받는다.
+  StreamSubscription<String>? _postReadSub;
 
   /// chat_panel.dart와 동일 — 댓글 목록 위에 떠 있는 오버레이로 그려서 입력창을 밀어내지 않는다.
   Sticker? _pendingSticker;
@@ -144,6 +154,46 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     // 채팅방에서 "N개 댓글 모두 보기"를 눌러 스레드를 열면, 최신 댓글이 바로 보이도록 맨
     // 아래로 스크롤한다. 게시글은 본문부터 읽어야 하니 맨 위에서 시작한다.
     if (!widget.message.isPost) _scrollToBottom();
+    _listenPostReads();
+    _openedPost();
+  }
+
+  bool get _isBoardPost => widget.message.isPost && widget.room.isBoard;
+
+  void _listenPostReads() {
+    _postReadSub?.cancel();
+    _postReadSub = widget.controller.postReads.listen((id) {
+      if (id == widget.message.id) unawaited(_loadReaders());
+    });
+  }
+
+  /// 보드 게시글을 열었다 — 읽음으로 남기고(카드의 안 읽음 표시·"필독 안 읽음"에서 빠진다) 읽음 확인을 받는다.
+  void _openedPost() {
+    _readers = null;
+    if (!_isBoardPost) return;
+    final post = widget.message;
+    // initState·didUpdateWidget(그리는 중)에서 불리므로 목록 알림은 이 프레임이 끝난 뒤에.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.message.id == post.id) {
+        widget.controller.markPostRead(post);
+      }
+    });
+    unawaited(_loadReaders());
+  }
+
+  Future<void> _loadReaders() async {
+    final id = widget.message.id;
+    try {
+      final readers = await widget.session.api!.fetchPostReaders(id);
+      if (!mounted || widget.message.id != id) return;
+      // 읽음 기록이 서버에 닿기 전에 받은 목록이어도 지금 보고 있는 나는 읽은 쪽에 둔다.
+      setState(
+        () =>
+            _readers = readers.markRead(widget.session.userId, DateTime.now()),
+      );
+    } catch (_) {
+      // 읽음 확인은 부가 정보라 못 받으면 단추를 숨긴 채로 둔다.
+    }
   }
 
   @override
@@ -152,6 +202,7 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_maybeScrollToNewComment);
       widget.controller.addListener(_maybeScrollToNewComment);
+      _listenPostReads();
     }
     if (oldWidget.message.id != widget.message.id) {
       // 패널을 안 닫고 다른 메시지의 댓글 아이콘/모두 보기를 연달아 눌러 스레드를 바로 넘긴
@@ -166,11 +217,13 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
       }
       // CommentInputBar를 새로 만들어서 autofocus가 다시 걸리게 한다(예전 key: ValueKey와 동일한 효과).
       _commentInputBarKey = GlobalKey<CommentInputBarState>();
+      _openedPost();
     }
   }
 
   @override
   void dispose() {
+    _postReadSub?.cancel();
     widget.controller.removeListener(_maybeScrollToNewComment);
     widget.session.openStickerPickerOwner.removeListener(
       _onStickerPickerOwnerChanged,
@@ -307,10 +360,37 @@ class _MessageThreadScreenState extends State<MessageThreadScreen> {
                             padding: EdgeInsets.symmetric(vertical: 12),
                             child: Divider(height: 1),
                           ),
-                          Text(
-                            // 게시글은 보드 카드의 "댓글 N"과 같게 지운 댓글은 세지 않는다.
-                            '댓글 ${widget.message.isPost ? comments.where((c) => !c.deleted).length : comments.length}',
-                            style: Theme.of(context).textTheme.labelLarge,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  // 게시글은 보드 카드의 "댓글 N"과 같게 지운 댓글은 세지 않는다.
+                                  '댓글 ${widget.message.isPost ? comments.where((c) => !c.deleted).length : comments.length}',
+                                  style: Theme.of(context).textTheme.labelLarge,
+                                ),
+                              ),
+                              // 보드 게시글의 읽음 확인 — 공지와 같은 대화상자(읽음 N·안 읽음 M 두 탭).
+                              if (_readers case final readers?
+                                  when !widget.message.deleted)
+                                TextButton.icon(
+                                  key: const ValueKey('post-readers'),
+                                  style: TextButton.styleFrom(
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                  icon: const Icon(Icons.done_all, size: 16),
+                                  label: Text(
+                                    '읽음 ${readers.read.length} · 안 읽음 ${readers.unread.length}',
+                                  ),
+                                  onPressed: () {
+                                    unawaited(_loadReaders());
+                                    showAnnouncementReadersDialog(
+                                      context,
+                                      readers,
+                                      title: '게시글 읽음 확인',
+                                    );
+                                  },
+                                ),
+                            ],
                           ),
                           // 채팅과 동일하게, 같은 사람이 연달아 단 댓글은 첫 댓글에만 프로필 사진을 보여준다.
                           for (var i = 0; i < comments.length; i++)

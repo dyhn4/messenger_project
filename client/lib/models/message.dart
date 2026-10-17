@@ -207,6 +207,16 @@ class Message {
   /// 바뀐다 — non-final.
   DateTime? pinnedAt;
 
+  /// 게시글의 말머리(Room.boardCategories의 id — 없으면 null). 수정하면 message:edited로 바뀐다 — non-final.
+  String? categoryId;
+
+  /// 토픽 관리자가 필독으로 정한 시각(null이면 필독 아님) — 지정/해제가 message:edited로 온다. non-final.
+  DateTime? mustReadAt;
+
+  /// 보드 게시글을 내가 읽었는지(상세를 연 적이 있는지 — 쓴 사람은 늘 true). 서버 목록(GET /rooms/:id/messages)에만
+  /// 실려 오고 실시간 새 글(message:new)엔 없어서 null — 그때는 컨트롤러가 남의 글이면 false로 채운다. non-final.
+  bool? readByMe;
+
   /// 투표 메시지(서버 type 'poll')인지 — 게시글처럼 [type]은 text로 두고(제목이 [text]에 들어 있어
   /// 예전 화면에서도 글로 보인다) 이 값으로만 구분한다. 삭제된 투표도 true지만 [poll]은 null이다.
   final bool isPoll;
@@ -278,6 +288,9 @@ class Message {
     this.isPost = false,
     this.title,
     this.pinnedAt,
+    this.categoryId,
+    this.mustReadAt,
+    this.readByMe,
     this.isPoll = false,
     this.poll,
     this.sharedAlbum,
@@ -300,6 +313,12 @@ class Message {
 
   /// 고정된 게시글인지(보드 상단 "고정된 게시글").
   bool get isPinned => pinnedAt != null;
+
+  /// 필독 게시글인지(카드의 "필독" 표시·보드 위 "필독 안 읽음").
+  bool get isMustRead => mustReadAt != null;
+
+  /// 내가 아직 안 읽은 보드 게시글인지 — 모르는(null) 건 읽은 것으로 친다(예전 서버·고정 목록에만 있는 글).
+  bool get isUnreadPost => isPost && !deleted && readByMe == false;
 
   /// 프로젝트 자동화(채팅방 알림)나 외부 연동 봇([bot] — 웹훅·슬래시 명령)이 보낸 메시지 — 사람이 아니라서 senderId가
   /// null인 일반 글 메시지다. 안읽음·알림은 일반 메시지처럼 가지만, 누구의 "내 메시지"도 아니고 프로필도 없다. 탈퇴한
@@ -384,6 +403,13 @@ class Message {
               (json['pinnedAt'] as num).toInt(),
             )
           : null,
+      categoryId: json['categoryId'] as String?,
+      mustReadAt: (json['mustReadAt'] as num?) != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (json['mustReadAt'] as num).toInt(),
+            )
+          : null,
+      readByMe: json['readByMe'] as bool?,
       isPoll: json['type'] == 'poll',
       poll: json['poll'] == null
           ? null

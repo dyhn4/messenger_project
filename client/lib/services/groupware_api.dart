@@ -1,4 +1,5 @@
 import '../models/groupware.dart';
+import '../models/groupware_forms.dart';
 import '../models/groupware_resources.dart';
 import '../models/groupware_work.dart';
 import 'api_client.dart';
@@ -631,4 +632,159 @@ class GroupwareApi {
   Future<LeaveMonth> leaveMonth(String month) async => LeaveMonth.fromJson(
     await _getMap('/api/groupware/leave/month${_query({'month': month})}'),
   );
+
+  // ── 설문(server/src/groupwareSurveys.js) ──
+
+  /// 내가 볼 수 있는 설문(응답할 것이 앞)과 응답할 설문 수.
+  Future<({List<SurveySummary> items, int pendingCount})> surveys() async {
+    final j = await _getMap('/api/groupware/surveys${_query()}');
+    return (
+      items: [
+        for (final s in (j['items'] as List? ?? const []))
+          SurveySummary.fromJson((s as Map).cast<String, dynamic>()),
+      ],
+      pendingCount: (j['pendingCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// 설문 만들기 — [targetIds]가 있으면 그 사람들에게만, 없으면 범위 모두.
+  Future<SurveySummary> createSurvey({
+    required String title,
+    String? description,
+    required List<SurveyQuestion> questions,
+    bool anonymous = false,
+    SurveyResultVisibility resultVisibility = SurveyResultVisibility.creator,
+    List<String>? targetIds,
+    DateTime? closesAt,
+  }) async => SurveySummary.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/surveys',
+              body: _body({
+                'title': title,
+                if (description != null && description.trim().isNotEmpty)
+                  'description': description,
+                'questions': [for (final q in questions) q.toJson()],
+                'anonymous': anonymous,
+                'resultVisibility': resultVisibility.wire,
+                'audience': targetIds == null ? 'all' : 'users',
+                'targetIds': ?targetIds,
+                'closesAt': ?closesAt?.millisecondsSinceEpoch,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<SurveyDetail> survey(String id) async => SurveyDetail.fromJson(
+    await _getMap('/api/groupware/surveys/$id${_query()}'),
+  );
+
+  /// 응답하기·고치기 — 처음 낸 것이면 true.
+  Future<bool> respondSurvey(String id, Map<String, dynamic> answers) async {
+    final j =
+        await _api.requestJson(
+              'PUT',
+              '/api/groupware/surveys/$id/response',
+              body: _body({'answers': answers}),
+            )
+            as Map;
+    return j['first'] == true;
+  }
+
+  Future<SurveyResults> surveyResults(String id) async =>
+      SurveyResults.fromJson(
+        await _getMap('/api/groupware/surveys/$id/results${_query()}'),
+      );
+
+  Future<void> closeSurvey(String id) => _api.requestJson(
+    'POST',
+    '/api/groupware/surveys/$id/close',
+    body: _body(),
+  );
+
+  /// 안 한 사람에게 독촉 — 보낸 사람 수(1시간에 한 번 — 아니면 서버가 429).
+  Future<int> remindSurvey(String id) async {
+    final j =
+        await _api.requestJson(
+              'POST',
+              '/api/groupware/surveys/$id/remind',
+              body: _body(),
+            )
+            as Map;
+    return (j['notified'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> deleteSurvey(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/surveys/$id${_query()}');
+
+  // ── 업무일지(server/src/groupwareReports.js) ──
+
+  /// 내 업무일지 — [periodStart]를 비우면 오늘·이번 주.
+  Future<MyWorkReportPage> myWorkReport(
+    WorkReportKind kind, {
+    String? periodStart,
+  }) async => MyWorkReportPage.fromJson(
+    await _getMap(
+      '/api/groupware/work-reports${_query({'kind': kind.wire, 'periodStart': periodStart})}',
+    ),
+  );
+
+  /// 내 일일 보고([from]~[to]) — 주간 보고에 그 주 일일 보고를 불러올 때.
+  Future<List<WorkReport>> myDailyReports(String from, String to) async => [
+    for (final r in await _getList(
+      '/api/groupware/work-reports/mine${_query({'kind': 'daily', 'from': from, 'to': to})}',
+    ))
+      WorkReport.fromJson(r),
+  ];
+
+  Future<WorkReport> saveWorkReport({
+    required WorkReportKind kind,
+    required String periodStart,
+    required String done,
+    required String plan,
+    required String issues,
+  }) async => WorkReport.fromJson(
+    (await _api.requestJson(
+              'PUT',
+              '/api/groupware/work-reports',
+              body: _body({
+                'kind': kind.wire,
+                'periodStart': periodStart,
+                'done': done,
+                'plan': plan,
+                'issues': issues,
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<WorkReportTeam> teamWorkReports(
+    WorkReportKind kind, {
+    String? periodStart,
+  }) async => WorkReportTeam.fromJson(
+    await _getMap(
+      '/api/groupware/work-reports/team${_query({'kind': kind.wire, 'periodStart': periodStart})}',
+    ),
+  );
+
+  /// 보고 하나(댓글 포함) — 검토자가 열면 서버가 읽음을 남긴다.
+  Future<WorkReport> workReport(String id) async => WorkReport.fromJson(
+    await _getMap('/api/groupware/work-reports/$id${_query()}'),
+  );
+
+  Future<WorkReportComment> commentWorkReport(String id, String text) async =>
+      WorkReportComment.fromJson(
+        (await _api.requestJson(
+                  'POST',
+                  '/api/groupware/work-reports/$id/comments',
+                  body: _body({'text': text}),
+                )
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<void> deleteWorkReport(String id) =>
+      _api.requestJson('DELETE', '/api/groupware/work-reports/$id${_query()}');
 }

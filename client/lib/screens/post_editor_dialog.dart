@@ -146,6 +146,14 @@ class PostEditorState extends State<PostEditor> {
   String? _titleError;
   String? _bodyError;
 
+  /// 고른 말머리 id(없으면 null) — 고치는 글이면 지금 말머리로 시작한다(지워진 말머리면 고르지 않은 것으로).
+  late String? _categoryId = widget.room
+      .boardCategoryById(widget.post?.categoryId)
+      ?.id;
+
+  /// 새 글을 필독으로 올릴지 — 토픽을 관리할 수 있는 사람에게만 보인다(서버도 다시 확인한다).
+  bool _mustRead = false;
+
   /// 입력칸은 커서만 옮겨도(포커스를 받을 때 등) 알림이 오므로, 글자가 실제로 바뀔 때만 칸 아래
   /// 오류를 지우려고 마지막 글을 기억해 둔다.
   String _lastTitle = '';
@@ -170,6 +178,20 @@ class PostEditorState extends State<PostEditor> {
   _Draft? _uploading;
 
   bool get _editing => widget.post != null;
+
+  /// 말머리를 고를 수 있는지(이 보드에 말머리가 있을 때).
+  bool get _hasCategories => widget.room.boardCategories.isNotEmpty;
+
+  /// 필독 체크 — 새 글이고 토픽을 관리할 수 있을 때.
+  bool get _canMarkMustRead =>
+      !_editing && widget.room.canManage(widget.session);
+
+  /// 고치는 글의 말머리가 바뀌었는지(지워진 말머리를 들고 있던 글은 고르지 않으면 그대로 둔다).
+  bool get _categoryChanged {
+    final post = widget.post;
+    if (post == null) return false;
+    return _categoryId != widget.room.boardCategoryById(post.categoryId)?.id;
+  }
 
   /// 이 보드의 컨트롤러 — 편집기를 열 때 한 번 받아 둔다. 방이 사라진 뒤(내보내짐·삭제) 다시 찾으면
   /// 목록에 없는 방의 컨트롤러가 새로 만들어진다.
@@ -429,6 +451,8 @@ class PostEditorState extends State<PostEditor> {
           text: body.text,
           textFormat: body.format,
           mentions: mentions,
+          setCategory: _categoryChanged,
+          categoryId: _categoryId,
         );
       } else {
         // 아직 올라가는 첨부가 있으면 끝날 때까지 기다렸다가 이어서 게시한다.
@@ -446,6 +470,8 @@ class PostEditorState extends State<PostEditor> {
           textFormat: body.format,
           mentions: mentions,
           attachments: [for (final d in _drafts) d.result!],
+          categoryId: _categoryId,
+          mustRead: _mustRead,
         );
       }
       if (mounted) Navigator.of(context).pop(true);
@@ -518,7 +544,8 @@ class PostEditorState extends State<PostEditor> {
     final post = widget.post;
     if (post != null) {
       return _title.text != (post.title ?? '') ||
-          _body.text != (post.text ?? '');
+          _body.text != (post.text ?? '') ||
+          _categoryChanged;
     }
     return _title.text.trim().isNotEmpty ||
         _body.text.trim().isNotEmpty ||
@@ -695,6 +722,10 @@ class PostEditorState extends State<PostEditor> {
                   child: TopicChip(session: widget.session, room: widget.room),
                 ),
                 const SizedBox(height: 12),
+                if (_hasCategories || _canMarkMustRead) ...[
+                  _buildPostOptions(context),
+                  const SizedBox(height: 10),
+                ],
                 _buildTitleField(context),
                 const SizedBox(height: 6),
                 _buildBodyField(context, expand: false),
@@ -757,6 +788,10 @@ class PostEditorState extends State<PostEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (_hasCategories || _canMarkMustRead) ...[
+          _buildPostOptions(context),
+          const SizedBox(height: 10),
+        ],
         _buildTitleField(context),
         const SizedBox(height: 6),
         Expanded(child: _buildBodyField(context)),
@@ -765,6 +800,68 @@ class PostEditorState extends State<PostEditor> {
         _editing
             ? _buildExistingAttachments(context, attachmentsMaxHeight)
             : _buildDrafts(context, attachmentsMaxHeight),
+      ],
+    );
+  }
+
+  /// 제목 위 한 줄 — 말머리 고르기(보드에 말머리가 있을 때)와 "필독으로 올리기"(새 글·토픽 관리자).
+  Widget _buildPostOptions(BuildContext context) {
+    final categories = widget.room.boardCategories;
+    return Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (_hasCategories)
+          DropdownMenu<String?>(
+            key: const ValueKey('post-category'),
+            initialSelection: _categoryId,
+            enabled: !_submitting,
+            width: 200,
+            label: const Text('말머리'),
+            inputDecorationTheme: const InputDecorationTheme(
+              isDense: true,
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12),
+            ),
+            onSelected: (id) => setState(() => _categoryId = id),
+            dropdownMenuEntries: [
+              const DropdownMenuEntry<String?>(value: null, label: '말머리 없음'),
+              for (final c in categories)
+                DropdownMenuEntry<String?>(
+                  value: c.id,
+                  label: c.name,
+                  leadingIcon: CircleAvatar(
+                    radius: 6,
+                    backgroundColor: c.swatch,
+                  ),
+                ),
+            ],
+          ),
+        if (_canMarkMustRead)
+          Tooltip(
+            message: '멤버에게 "[필독]" 알림이 가고, 읽은 사람·안 읽은 사람을 확인할 수 있습니다.',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _submitting
+                  ? null
+                  : () => setState(() => _mustRead = !_mustRead),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Checkbox(
+                    key: const ValueKey('post-must-read'),
+                    value: _mustRead,
+                    onChanged: _submitting
+                        ? null
+                        : (v) => setState(() => _mustRead = v ?? false),
+                  ),
+                  const Text('필독으로 올리기'),
+                  const SizedBox(width: 8),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }

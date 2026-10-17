@@ -46,6 +46,7 @@ import { messageRateLimitText, messageSendLimiter, sendCarriesFiles } from './me
 import { broadcastPresence, markConnected, markDisconnected } from './presence.js';
 import { notifyIncomingCall, roomTagFor } from './push.js';
 import { sendUserMessage } from './sendMessage.js';
+import { registerWikiSocket } from './wiki.js';
 
 /**
  * 이 소켓의 계정을 아직 쓸 수 있는지 — 정지·탈퇴했거나, 전체 로그아웃·비밀번호 변경으로 토큰 버전이 올랐으면 false. 그런
@@ -110,6 +111,9 @@ export function registerSocket(io) {
     // 개인용 룸(user:<id>)에 join해두면, REST로 방이 새로 생겼을 때
     // 이 소켓에 곧바로 join시켜줄 수 있습니다 (rooms.js의 notifyMembership 참고).
     socket.join(`user:${socket.data.userId}`);
+
+    // 위키 동시 편집(wiki:join·wiki:op·wiki:cursor·wiki:leave — wiki.js).
+    registerWikiSocket(io, socket);
 
     // payload 모양과 규칙(보드 뷰는 게시글만, 읽기 전용·보관, 첨부, 길이, 인용·전달 출처, DM 되살리기, 푸시, 링크 미리보기)은
     // sendMessage.js의 sendUserMessage — 메시지 예약 발송(scheduledMessages.js)도 같은 함수로 보낸다.

@@ -6,6 +6,9 @@ import 'package:http/http.dart' as http;
 
 import '../models/admin.dart';
 import '../models/announcement.dart';
+import '../models/drive.dart';
+import '../models/wiki.dart';
+import '../models/board_category.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
 import '../models/backup_settings.dart';
@@ -27,6 +30,7 @@ import '../models/todo.dart' show TodoPage;
 import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/project.dart';
+import '../models/task_extras.dart';
 import '../models/room.dart';
 import '../models/scheduled_message.dart';
 import '../models/shared_link.dart';
@@ -1353,6 +1357,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       throw ApiException(
         (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
       );
     }
     return decoded;
@@ -1370,6 +1375,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       throw ApiException(
         (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
       );
     }
     return decoded;
@@ -1387,6 +1393,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       throw ApiException(
         (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
       );
     }
     return decoded;
@@ -1407,6 +1414,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       throw ApiException(
         (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
       );
     }
     return decoded;
@@ -3235,9 +3243,22 @@ class ApiClient {
     bool clearStartDate = false,
     DateTime? dueDate,
     bool clearDueDate = false,
+    // 반복 규칙·예상 소요 시간(분) — clear…면 끄기·지우기.
+    TaskRecurrence? recurrence,
+    bool clearRecurrence = false,
+    int? estimateMinutes,
+    bool clearEstimate = false,
   }) async {
     return Task.fromJson(
       await _patch('/api/tasks/$taskId', {
+            if (clearRecurrence)
+              'recurrence': null
+            else
+              'recurrence': ?recurrence?.toJson(),
+            if (clearEstimate)
+              'estimateMinutes': null
+            else
+              'estimateMinutes': ?estimateMinutes,
             'title': ?title,
             'description': ?description,
             if (clearAssignee)
@@ -3266,6 +3287,306 @@ class ApiClient {
             else
               'dueDate': ?dueDate?.millisecondsSinceEpoch,
           })
+          as Map<String, dynamic>,
+    );
+  }
+
+  // ── 팀 공유 드라이브(서버 drive.js) ─────────────────────────────────
+
+  String _driveQuery(String teamId, [Map<String, String?> extra = const {}]) {
+    final params = {'teamId': teamId, ...extra}
+      ..removeWhere((_, v) => v == null || v.isEmpty);
+    return '?${params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value!)}').join('&')}';
+  }
+
+  /// 폴더 내용([folderId]가 null이면 맨 위).
+  Future<DriveListing> fetchDrive(String teamId, {String? folderId}) async =>
+      DriveListing.fromJson(
+        await _get('/api/drive${_driveQuery(teamId, {'folderId': folderId})}')
+            as Map<String, dynamic>,
+      );
+
+  Future<({List<DriveFolder> folders, List<DriveFile> files})> searchDrive(
+    String teamId,
+    String query,
+  ) async {
+    final j =
+        await _get('/api/drive/search${_driveQuery(teamId, {'q': query})}')
+            as Map;
+    return (
+      folders: [
+        for (final f in (j['folders'] as List? ?? const []))
+          DriveFolder.fromJson((f as Map).cast<String, dynamic>()),
+      ],
+      files: [
+        for (final f in (j['files'] as List? ?? const []))
+          DriveFile.fromJson((f as Map).cast<String, dynamic>()),
+      ],
+    );
+  }
+
+  Future<DriveFolder> createDriveFolder(
+    String teamId,
+    String name, {
+    String? parentId,
+  }) async => DriveFolder.fromJson(
+    await _post('/api/drive/folders', {
+          'teamId': teamId,
+          'name': name,
+          'parentId': ?parentId,
+        })
+        as Map<String, dynamic>,
+  );
+
+  /// 폴더 이름 바꾸기·옮기기 — [move]면 [parentId](null = 맨 위)로 옮긴다.
+  Future<DriveFolder> updateDriveFolder(
+    String folderId, {
+    String? name,
+    bool move = false,
+    String? parentId,
+  }) async => DriveFolder.fromJson(
+    await _patch('/api/drive/folders/$folderId', {
+          'name': ?name,
+          if (move) 'parentId': parentId,
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<void> deleteDriveFolder(String teamId, String folderId) =>
+      _delete('/api/drive/folders/$folderId${_driveQuery(teamId)}');
+
+  /// 올린 파일([upload])을 드라이브에 넣는다 — 같은 이름이 있으면 서버가 409(앱이 "새 판으로 올리기"를 묻는다).
+  Future<DriveFile> addDriveFile(
+    String teamId,
+    UploadResult upload, {
+    String? folderId,
+    String? note,
+  }) async => DriveFile.fromJson(
+    await _post('/api/drive/files', {
+          'teamId': teamId,
+          'folderId': ?folderId,
+          'file': upload.url,
+          'fileName': upload.fileName,
+          'mimeType': ?upload.mimeType,
+          if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<DriveFile> addDriveFileVersion(
+    String fileId,
+    UploadResult upload, {
+    String? note,
+  }) async => DriveFile.fromJson(
+    await _post('/api/drive/files/$fileId/versions', {
+          'file': upload.url,
+          'fileName': upload.fileName,
+          'mimeType': ?upload.mimeType,
+          if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<DriveFileDetail> fetchDriveFile(String teamId, String fileId) async =>
+      DriveFileDetail.fromJson(
+        await _get('/api/drive/files/$fileId${_driveQuery(teamId)}')
+            as Map<String, dynamic>,
+      );
+
+  Future<DriveFile> restoreDriveFileVersion(String fileId, int version) async =>
+      DriveFile.fromJson(
+        await _post(
+              '/api/drive/files/$fileId/versions/$version/restore',
+              const {},
+            )
+            as Map<String, dynamic>,
+      );
+
+  /// 파일 이름 바꾸기·옮기기 — [move]면 [folderId](null = 맨 위)로 옮긴다.
+  Future<DriveFile> updateDriveFile(
+    String fileId, {
+    String? name,
+    bool move = false,
+    String? folderId,
+  }) async => DriveFile.fromJson(
+    await _patch('/api/drive/files/$fileId', {
+          'name': ?name,
+          if (move) 'folderId': folderId,
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<void> deleteDriveFile(String teamId, String fileId) =>
+      _delete('/api/drive/files/$fileId${_driveQuery(teamId)}');
+
+  Future<DriveTrash> fetchDriveTrash(String teamId) async =>
+      DriveTrash.fromJson(
+        await _get('/api/drive/trash${_driveQuery(teamId)}')
+            as Map<String, dynamic>,
+      );
+
+  Future<void> restoreDriveItem({
+    required bool folder,
+    required String id,
+  }) async {
+    await _post('/api/drive/trash/restore', {
+      'kind': folder ? 'folder' : 'file',
+      'id': id,
+    });
+  }
+
+  Future<void> purgeDriveItem(
+    String teamId, {
+    required bool folder,
+    required String id,
+  }) => _delete(
+    '/api/drive/trash/${folder ? 'folder' : 'file'}/$id${_driveQuery(teamId)}',
+  );
+
+  // ── 팀 위키(서버 wiki.js — 본문 동시 편집은 소켓, services/wiki_doc.dart) ──
+
+  Future<WikiTree> fetchWikiTree(String teamId) async => WikiTree.fromJson(
+    await _get('/api/wiki${_driveQuery(teamId)}') as Map<String, dynamic>,
+  );
+
+  Future<WikiPageRow> createWikiPage(
+    String teamId,
+    String title, {
+    String? parentId,
+    String? body,
+  }) async => WikiPageRow.fromJson(
+    await _post('/api/wiki', {
+          'teamId': teamId,
+          'title': title,
+          'parentId': ?parentId,
+          'body': ?body,
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<WikiPage> fetchWikiPage(String pageId) async => WikiPage.fromJson(
+    await _get('/api/wiki/$pageId') as Map<String, dynamic>,
+  );
+
+  /// 제목 바꾸기·옮기기 — [move]면 [parentId](null = 맨 위)로.
+  Future<WikiPageRow> updateWikiPage(
+    String pageId, {
+    String? title,
+    bool move = false,
+    String? parentId,
+  }) async => WikiPageRow.fromJson(
+    await _patch('/api/wiki/$pageId', {
+          'title': ?title,
+          if (move) 'parentId': parentId,
+        })
+        as Map<String, dynamic>,
+  );
+
+  Future<void> deleteWikiPage(String pageId) => _delete('/api/wiki/$pageId');
+
+  Future<void> restoreWikiPage(String pageId) =>
+      _post('/api/wiki/$pageId/restore', const {});
+
+  Future<List<WikiPageRow>> fetchWikiTrash(String teamId) async => [
+    for (final p
+        in (await _get('/api/wiki/trash${_driveQuery(teamId)}') as List))
+      WikiPageRow.fromJson((p as Map).cast<String, dynamic>()),
+  ];
+
+  Future<List<WikiSearchHit>> searchWiki(String teamId, String query) async => [
+    for (final h
+        in (await _get('/api/wiki/search${_driveQuery(teamId, {'q': query})}')
+            as List))
+      WikiSearchHit.fromJson((h as Map).cast<String, dynamic>()),
+  ];
+
+  Future<List<WikiVersion>> fetchWikiVersions(String pageId) async => [
+    for (final v in (await _get('/api/wiki/$pageId/versions') as List))
+      WikiVersion.fromJson((v as Map).cast<String, dynamic>()),
+  ];
+
+  Future<WikiVersion> fetchWikiVersion(String pageId, String versionId) async =>
+      WikiVersion.fromJson(
+        await _get('/api/wiki/$pageId/versions/$versionId')
+            as Map<String, dynamic>,
+      );
+
+  Future<void> restoreWikiVersion(String pageId, String versionId) =>
+      _post('/api/wiki/$pageId/versions/$versionId/restore', const {});
+
+  // ── 업무 선후행·소요 시간(서버 taskExtras.js) ─────────────────────────
+
+  /// [taskId]의 선행 업무로 [predecessorId]를 넣는다 — 같은 프로젝트, 순환이면 서버가 400. → (선행, 후행).
+  Future<({List<TaskLink> predecessors, List<TaskLink> successors})>
+  addTaskDependency(String taskId, String predecessorId) async {
+    final j =
+        await _post('/api/tasks/$taskId/dependencies', {
+              'taskId': predecessorId,
+            })
+            as Map;
+    return (
+      predecessors: TaskLink.listFromJson(j['predecessors']),
+      successors: TaskLink.listFromJson(j['successors']),
+    );
+  }
+
+  Future<void> removeTaskDependency(String taskId, String predecessorId) async {
+    await _delete('/api/tasks/$taskId/dependencies/$predecessorId');
+  }
+
+  /// 소요 시간 남기기 — [workDate]를 비우면 오늘(한국 날짜).
+  Future<TaskTimeEntry> addTimeEntry(
+    String taskId, {
+    required int minutes,
+    String? workDate,
+    String? note,
+  }) async {
+    return TaskTimeEntry.fromJson(
+      await _post('/api/tasks/$taskId/time-entries', {
+            'minutes': minutes,
+            'workDate': ?workDate,
+            if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> deleteTimeEntry(String taskId, String entryId) async {
+    await _delete('/api/tasks/$taskId/time-entries/$entryId');
+  }
+
+  /// 내 타이머(없으면 null).
+  Future<TaskTimer?> fetchTaskTimer() async =>
+      TaskTimer.fromJson((await _get('/api/tasks/timer') as Map)['timer']);
+
+  /// [taskId]에서 타이머를 켠다 — 다른 업무에서 돌던 것은 서버가 멈춰 기록한다.
+  Future<TaskTimer?> startTaskTimer(String taskId) async => TaskTimer.fromJson(
+    (await _post('/api/tasks/$taskId/timer/start', const {}) as Map)['timer'],
+  );
+
+  /// 타이머를 멈춘다 — 남긴 기록(1분이 안 되면 null).
+  Future<TaskTimeEntry?> stopTaskTimer() async {
+    final entry =
+        (await _post('/api/tasks/timer/stop', const {}) as Map)['entry'];
+    return entry is Map
+        ? TaskTimeEntry.fromJson(Map<String, dynamic>.from(entry))
+        : null;
+  }
+
+  /// 프로젝트 소요 시간 보고 — [from]·[to]는 'YYYY-MM-DD'(안 주면 이번 달).
+  Future<ProjectTimeReport> fetchTimeReport(
+    String projectId, {
+    String? from,
+    String? to,
+  }) async {
+    final query = [
+      if (from != null) 'from=$from',
+      if (to != null) 'to=$to',
+    ].join('&');
+    return ProjectTimeReport.fromJson(
+      await _get(
+            '/api/projects/$projectId/time-report${query.isEmpty ? '' : '?$query'}',
+          )
           as Map<String, dynamic>,
     );
   }
@@ -3750,6 +4071,7 @@ class ApiClient {
     if (res.statusCode >= 400) {
       throw ApiException(
         (decoded is Map ? decoded['error'] as String? : null) ?? '요청이 실패했습니다.',
+        statusCode: res.statusCode,
       );
     }
     final tokens = decoded is Map ? decoded['tokens'] : null;
@@ -4087,6 +4409,9 @@ class ApiClient {
     required String text,
     List<TextFormatRun>? textFormat,
     List<Mention>? mentions,
+    // 말머리 — 바꿀 때만 [setCategory]를 켜고 [categoryId](null이면 빼기)를 보낸다.
+    bool setCategory = false,
+    String? categoryId,
   }) async {
     return Message.fromJson(
       await _patch('/api/messages/$messageId', {
@@ -4094,6 +4419,7 @@ class ApiClient {
             'text': text,
             'textFormat': ?textFormatToJson(textFormat),
             if (mentions != null) 'mentions': mentionsToJson(mentions) ?? [],
+            if (setCategory) 'categoryId': categoryId,
           })
           as Map<String, dynamic>,
     );
@@ -4103,6 +4429,49 @@ class ApiClient {
   Future<Message> setPostPinned(String messageId, bool pinned) async {
     return Message.fromJson(
       await _post('/api/messages/$messageId/pin', {'pinned': pinned})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 보드 게시글 필독 지정/해제(토픽을 관리할 수 있는 사람만) — 지정하면 멤버에게 "[필독] 제목" 알림, 결과는 message:edited로도 퍼진다.
+  Future<Message> setPostMustRead(String messageId, bool mustRead) async {
+    return Message.fromJson(
+      await _post('/api/messages/$messageId/must-read', {'mustRead': mustRead})
+          as Map<String, dynamic>,
+    );
+  }
+
+  /// 보드 게시글을 열었다 — 서버가 처음 연 시각만 남긴다(쓴 사람은 남기지 않음).
+  Future<void> markPostRead(String messageId) async {
+    await _post('/api/messages/$messageId/post-read', const {});
+  }
+
+  /// 보드 게시글 읽음 확인 — 공지 읽음 확인과 같은 모양(읽은 사람은 먼저 읽은 순, 쓴 사람은 늘 읽음).
+  Future<AnnouncementReaders> fetchPostReaders(String messageId) async =>
+      AnnouncementReaders.fromJson(
+        (await _get('/api/messages/$messageId/readers') as Map)
+            .cast<String, dynamic>(),
+      );
+
+  /// 이 보드에서 내가 아직 안 읽은 필독 게시글 — 최근 지정순(보드 위 "필독 안 읽음 N").
+  Future<List<UnreadMustRead>> fetchUnreadMustRead(String roomId) async {
+    final list = await _get('/api/rooms/$roomId/must-read') as List;
+    return [
+      for (final e in list)
+        if (e is Map && e['id'] is String)
+          (id: e['id'] as String, title: e['title'] as String? ?? ''),
+    ];
+  }
+
+  /// 보드 뷰 토픽의 말머리 목록을 통째로 바꾼다(토픽을 관리할 수 있는 사람만) — 새 말머리는 id 없이 보낸다.
+  Future<Room> updateBoardCategories(
+    String roomId,
+    List<BoardCategory> categories,
+  ) async {
+    return Room.fromJson(
+      await _patch('/api/rooms/$roomId', {
+            'boardCategories': [for (final c in categories) c.toJson()],
+          })
           as Map<String, dynamic>,
     );
   }

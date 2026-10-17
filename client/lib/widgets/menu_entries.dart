@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../screens/calendar/calendar_screen.dart' show openCalendarScreen;
+import '../screens/drive/drive_screen.dart' show openDriveScreen;
+import '../screens/wiki/wiki_screen.dart' show openWikiScreen;
 import '../screens/groupware/groupware_screen.dart' show openGroupwareScreen;
 import '../screens/mail/mail_screen.dart' show openMailScreen;
 import '../screens/project/project_dialog.dart' show showProjectDialog;
@@ -261,6 +263,28 @@ final menuEntries = <MenuEntry>[
     // 전자결재(휴가·지출·근태 수정)·연차·출퇴근 — 숫자는 내가 지금 결재할 문서 수(session.groupwarePending).
     badge: (session) => session.groupwarePending,
     onOpen: (context, session) => openGroupwareScreen(context, session),
+  ),
+  MenuEntry(
+    key: 'drive',
+    section: MenuSection.tools,
+    label: '드라이브',
+    icon: const Icon(Icons.folder_shared_rounded),
+    color: const Color(0xFFE8590C),
+    background: const Color(0xFFFFE8CC),
+    order: 16,
+    // 지금 팀의 공유 드라이브 — 폴더·파일 판·휴지통(server/src/drive.js).
+    onOpen: (context, session) => openDriveScreen(context, session),
+  ),
+  MenuEntry(
+    key: 'wiki',
+    section: MenuSection.tools,
+    label: '위키',
+    icon: const Icon(Icons.menu_book_rounded),
+    color: const Color(0xFF2B8A3E),
+    background: const Color(0xFFD3F9D8),
+    order: 16,
+    // 지금 팀의 위키 — 페이지 나무, 여럿이 동시에 편집(server/src/wiki.js).
+    onOpen: (context, session) => openWikiScreen(context, session),
   ),
   MenuEntry(
     key: 'mail',

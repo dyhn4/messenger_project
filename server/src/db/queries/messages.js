@@ -172,10 +172,10 @@ export async function softDeleteMessage(id) {
 }
 
 /** 게시글 수정(messages.js) — 제목·본문·서식을 한 번에 바꾸고 "(수정됨)" 시각을 찍는다. */
-export async function updatePost(id, { title, text, textFormat = null, mentions = null }) {
+export async function updatePost(id, { title, text, textFormat = null, mentions = null, ...extra }) {
   const [row] = await db
     .update(messages)
-    .set({ title, text, textFormat, mentions, editedAt: new Date() })
+    .set({ title, text, textFormat, mentions, ...extra, editedAt: new Date() })
     .where(eq(messages.id, id))
     .returning();
   return row;

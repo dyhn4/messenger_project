@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/room.dart';
 import '../screens/announcement_list_screen.dart' show openAnnouncementPanel;
+import '../screens/board_categories_dialog.dart';
 import '../screens/chat_screen.dart';
 import '../screens/files_screen.dart';
 import '../screens/group_settings_dialog.dart';
@@ -586,6 +587,14 @@ class RoomOptionsMenu extends StatelessWidget {
             icon: Icons.edit_outlined,
             label: '정보 변경하기',
             onTap: () => showTopicSettingsDialog(context, session, room),
+          ),
+        // 보드 뷰 토픽의 말머리(분류) — 게시글을 쓸 때 고르고, 보드 위에서 말머리별로 모아 본다.
+        if (room.isBoard && room.canManage(session))
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.label_outline,
+            label: '말머리 관리',
+            onTap: () => showBoardCategoriesDialog(context, session, room),
           ),
         // 들어오는 웹훅 — 바깥 서비스의 알림을 봇 메시지로 받는다(room_webhooks_dialog.dart).
         if (canManageRoomWebhooks(session, room))

@@ -9,6 +9,7 @@ import 'project_forms.dart';
 import 'project_views.dart';
 import 'project_widgets.dart';
 import 'task_detail_panel.dart' show TaskPanelScope;
+import 'task_extras_sections.dart' show showProjectTimeReportDialog;
 import 'task_views.dart';
 import 'task_filter.dart';
 import 'gantt_chart_view.dart';
@@ -365,6 +366,17 @@ class _ProjectDetailViewState extends State<ProjectDetailView> {
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('새 업무'),
                 ),
+              // 소요 시간 보고 — 사람별·업무별로 기록한 시간(구성원 누구나).
+              IconButton(
+                key: const ValueKey('project-time-report'),
+                icon: const Icon(Icons.timer_outlined),
+                tooltip: '소요 시간',
+                onPressed: () => showProjectTimeReportDialog(
+                  context,
+                  widget.session,
+                  project,
+                ),
+              ),
               // 프로젝트 설정은 전부 "프로젝트 설정" 한 창에 모여 있다(기본 정보 / 필드·상태 /
               // 멤버 / 알림 / 자동화 / 노트 / 삭제). 사이드바 프로젝트 ⋯ 메뉴에서도 연다.
               IconButton(

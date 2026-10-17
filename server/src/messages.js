@@ -32,6 +32,7 @@ import { attachPolls } from './polls.js';
 import { attachReactions } from './reactions.js';
 import { resolveRawUrl, signedUploadOrNull, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
+import { parsePostCategory } from './boardRules.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
 import { isFileDeleted, isFileOfMessage } from './db/queries/fileDelete.js';
 
@@ -92,6 +93,9 @@ export function toMessageDto(m) {
     type: m.type,
     // 앱이 보낼 때 붙인 임시 id(보내기 대기열 — 보낸 사람의 앱이 대기 중인 말풍선을 이 값으로 지운다). 없으면 null.
     clientId: m.clientId ?? null,
+    // 보드 게시글의 말머리(방의 boardCategories id)와 필독 지정 시각(boardRules.js·boardExtras.js) — 다른 메시지는 null.
+    categoryId: m.type === 'post' ? (m.postCategoryId ?? null) : null,
+    mustReadAt: m.type === 'post' && m.mustReadAt && !m.deletedAt ? new Date(m.mustReadAt).getTime() : null,
     // 보드 뷰 게시글('post')의 제목과 고정 시각 — 다른 메시지는 둘 다 null.
     title: m.deletedAt ? null : (m.title ?? null),
     pinnedAt: m.pinnedAt && !m.deletedAt ? new Date(m.pinnedAt).getTime() : null,
@@ -326,11 +330,15 @@ export function createMessagesRouter(io) {
       const tooLong = postBytesDenial(fields.title, fields.text);
       if (tooLong) return res.status(400).json({ error: tooLong });
       const mentions = await cleanMentions(req.body?.mentions, fields.text, room, req.user.sub, trimmedLead(req.body?.text));
+      // 말머리 — 보내지 않으면 그대로, null이면 빼기.
+      const category = parsePostCategory(req.body?.categoryId, room);
+      if (category.error) return res.status(400).json({ error: category.error });
       const updated = await updatePost(message.id, {
         title: fields.title,
         text: fields.text,
         textFormat: sanitizeTextFormat(req.body?.textFormat, fields.text),
         mentions,
+        ...(category.keep ? {} : { postCategoryId: category.categoryId }),
       });
       const dto = await postDto(updated);
       io.to(message.roomId).emit('message:edited', dto);

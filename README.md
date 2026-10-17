@@ -17,6 +17,8 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [서버 운영자와 관리자 콘솔](#서버-운영자와-관리자-콘솔)
 - [프로젝트(업무 관리)](#프로젝트업무-관리)
 - [그룹웨어(전자결재·연차·출퇴근)](#그룹웨어전자결재연차출퇴근)
+- [팀 위키](#팀-위키)
+- [공유 드라이브](#공유-드라이브)
 - [웹메일](#웹메일)
 - [향후 계획 / 미구현 기능](#향후-계획--미구현-기능)
 - [구성도](#구성도)
@@ -184,6 +186,13 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   공지가 올라온 시각 이후면 읽은 것으로 보고, 쓴 사람은 늘 읽은 쪽입니다(`server/src/announcementReadRules.js`). 탈퇴한 사람은 세지
   않습니다
 - 메시지별 댓글(스레드) — PC는 옆 패널, 모바일은 전체화면
+- **게시판 보강(말머리·필독·읽음 확인)** — 보드 뷰 토픽의 게시글에 세 가지가 붙습니다(`server/src/boardExtras.js`·`boardRules.js`, 앱 `widgets/board_view.dart`).
+  **말머리(분류)**는 토픽 관리자·팀 관리자가 토픽 ⋯ → **말머리 관리**(또는 보드 위 말머리 줄 끝의 조절 단추)에서 이름·색(8가지)을 정하고 끌어서 순서를 바꿉니다(토픽마다 20개, 이름 20자, 같은 이름 불가).
+  글쓴이는 편집기 제목 위에서 하나를 고르고(수정에서 바꾸거나 뺄 수 있음), 카드·상세 제목 앞에 색 알약으로 보이며, 보드 맨 위 **전체 / 말머리** 칩으로 그 말머리 글만 모아 봅니다(투표는 말머리가 없어 빠짐). 말머리를 지우면 그 글은 말머리 없이 보입니다.
+  **필독**은 토픽을 관리할 수 있는 사람이 게시글 ⋯ → **필독으로 지정**(새 글은 편집기의 **필독으로 올리기**)으로 정합니다 — 이름 옆에 빨간 "필독" 표시가 붙고, 멤버에게 `[필독] 제목` 보드 알림(`board_post`, 보드 알림 수준의 "새 글"과 같은 대상)이 갑니다.
+  보드 맨 위 **읽지 않은 필독 N**에는 내가 아직 열지 않은 필독 글(최근 지정순, 세 개까지 + 모두 보기)이 모이고, 누르면 그 글이 열립니다(아직 안 불러온 옛 글이면 찾아서 엶).
+  **읽음 확인**은 게시글 상세를 처음 연 시각을 남기고(`post_reads`, 쓴 사람은 늘 읽음), 상세의 **읽음 N · 안 읽음 M**을 누르면 공지 읽음 확인과 같은 두 탭 창이 뜹니다(그 방 멤버 누구나, 누가 새로 읽으면 `post:read`로 바로 늘어남).
+  안 읽은 남의 게시글은 카드 제목 앞에 파란 점이 붙고, 열면(내 다른 기기에서 열어도) 사라집니다. 예약 게시글은 말머리·필독 없이 올라갑니다.
 - **상태 메시지·방해 금지** — 삼선 메뉴(☰)의 **상태 설정**에서 "🗓️ 회의 중"처럼 상태를 알리고(이모지는 정해 둔 12개 중에서, 글은 40자까지, 자주 쓰는 상태 6개 — 회의 중·외근 중·식사 중·재택 근무·휴가 중·병가), 지우는 시점(30분·1시간·4시간 뒤·오늘·이번 주·지우지 않음)이 지나면 저절로 사라집니다. **방해 금지**는 "지금부터 30분·1시간·2시간·내일 오전 9시까지"와 **매일 일정**(시작~끝 시각과 요일 — 끝이 시작보다 이르면 밤을 넘겨 다음 날까지, 시작한 요일 기준. 정할 때 그 기기의 UTC 차이를 함께 저장해 서버도 같은 시각으로 계산)이 있습니다. 방해 금지 중에는 **메시지·댓글·공지·멘션·업무 알림이 오지 않습니다** — 서버가 FCM·웹 푸시를 보내지 않고(`push.js`의 `withoutDndUsers`), 켜져 있는 앱도 로컬 알림(PC 팝업·작업 표시줄 깜빡임·휴대폰 알림)을 띄우지 않습니다(`Session.notificationsPaused`). 메시지와 안 읽은 수는 그대로 쌓이고, **화상회의 호출은 막지 않습니다**. 다른 사람의 상태는 이름 옆 이모지(방해 금지면 🌙, 마우스를 올리면 상태 글)로 말풍선 보낸 사람 이름·팀 멤버 목록(상태 글 한 줄도)·1:1 대화방 헤더(PC는 상태 글도)에 보이고, 프로필 창에는 "상태 · 13:00까지"와 "🌙 방해 금지 중"이 줄로 보입니다. 회원 DTO(`publicUser`)에 `status: { emoji, text, until }`·`dnd: { until, schedule }`가 실리고(지난 것은 `null`), 바뀌면 같은 팀 사람들과 내 기기들에 `user:status`가 갑니다(방 목록을 통째로 다시 보내는 프로필 변경과 달리 이 두 값만). 계산 규칙은 서버 `server/src/statusRules.js`와 앱 `client/lib/models/user_status.dart`가 같고, 화면은 `client/lib/widgets/user_status_dialogs.dart`입니다
 - **공감(이모지 반응)** — 카카오톡 공감처럼 메시지에 정해 둔 **48개** 이모지 중 하나를 남깁니다(고르는 줄에는 자주 쓰는 👍 ❤️ 😂 😮 😢 ✅가 바로 보이고
   끝의 **+**를 누르면 나머지 42개가 격자로 펼쳐짐 — 내 공감이 펼친 쪽에 있으면 처음부터 펼쳐 둠. 조합(ZWJ) 이모지 없이 목록으로만
@@ -1036,6 +1045,15 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   들고 있어서(`projects.next_task_seq`) 업무를 지워도 번호를 재사용하지 않습니다.
 - 마감일이 있으면 `D-2` / `D-DAY` / `D+1` 뱃지가 붙고, 지났는데 완료가 아니면 "지연"으로 셉니다.
 - 업무 카드에 댓글을 달 수 있고, 최근 댓글은 홈 대시보드에 모입니다.
+- **반복 업무** — 업무 상세의 **반복** 칸에서 매일·매주(요일 여러 개)·매월·매년, 간격(N일·주·개월·년마다), 종료일을 정합니다(`server/src/taskExtras.js`·`taskExtrasRules.js`).
+  정해진 날에 저절로 생기지 않고 **완료하면 다음 회차 업무가 생기는** 방식입니다 — 제목·설명·담당자·참조자·유형·우선순위·필드·예상 시간을 그대로, 체크리스트는 모두 안 한 것으로 옮기고,
+  시작일·마감일은 규칙대로 같은 날 수만큼 옮깁니다(날짜는 한국 날짜로 셈, 매월 31일은 그 달 마지막 날, 늦게 끝내 다음 회차가 이미 지났으면 오늘 이후 첫 회차 — 밀린 회차를 한꺼번에 만들지 않음, 날짜가 없던 업무는 다음 날 18시 마감).
+  규칙은 새 업무로 옮겨 가므로 끝낸 업무를 다시 열었다 닫아도 또 만들지 않고, 종료일을 넘으면 반복을 마칩니다. 사람이 바꾸든 자동화(체크리스트 완료·댓글)가 완료로 옮기든 같고, 담당자에게 "다음 회차" 알림(`recurring`)이 갑니다. 칸반 카드에는 반복 표시가 붙습니다.
+- **선후행 관계** — 상세의 **선후행 업무**에서 "이 업무 전에 끝나야 하는" 선행 업무를 같은 프로젝트에서 골라 넣습니다(업무마다 30개, 서로 기다리는 순환은 간접까지 막음). 후행 업무(이 업무를 기다리는 것)도 같이 보입니다.
+  막지는 않고 알립니다 — 선행이 안 끝났으면 상세 위에 "선행 업무 N개가 아직 끝나지 않았습니다", 칸반 카드에 모래시계와 개수가 붙고, 선행이 모두 끝나면 후행 업무에 기록이 남고 담당자에게 알림(`dependency`)이 갑니다. 업무를 다른 프로젝트로 옮기면 그 업무가 낀 관계는 지워집니다.
+- **소요 시간** — 상세의 **소요 시간**에 기록 합과 **예상 시간**(누르면 고침, 넘으면 빨갛게)이 막대로 보입니다. **+ 시간 기록**(시간·분, 오늘까지의 날짜, 메모 200자, 한 번에 24시간까지)이나 **타이머**로 남깁니다.
+  타이머는 사람마다 하나이고 기기 사이에 같이 보이며(`task:timer`), 다른 업무에서 켜면 돌던 것을 멈춰 기록하고 넘어옵니다(1분이 안 되면 버리고, 하루를 넘으면 하루로 자름). 기록은 남긴 사람이, 남의 것은 프로젝트 관리자가 지웁니다.
+  프로젝트 머리의 **소요 시간**(타이머 아이콘)은 이번 주·이번 달·지난달·올해의 사람별·업무별 합(업무는 예상 대비)을 보여 줍니다.
 
 ### 권한
 
@@ -1214,8 +1232,46 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 - **캘린더의 "회의실 예약"** — 예약 탭에서 바로 잡은 내 예약(일정에 안 붙은 것)은 캘린더의 내장 구독 캘린더 **"회의실 예약"**(보라)에 시간 일정으로
   보입니다(정회원 이상, 숨길 수 있음 — 바꾸기·취소는 예약 탭에서). 일정에 붙인 예약은 그 일정으로 이미 보이므로 따로 나오지 않습니다.
 
+#### 설문
+
+- 그룹웨어 **설문** 탭에서 여러 문항짜리 설문을 만듭니다(`server/src/groupwareSurveys.js`·`surveyRules.js` — 채팅방 투표는 한 문항). 문항은 **하나 고르기 / 여러 개 고르기**(보기 2~20개) · **글**(2000자) · **별점**(1~5)이고 문항마다 필수 여부를 정합니다(30문항까지).
+- **받는 사람**은 범위의 정회원 이상 모두이거나 고른 사람(500명까지)입니다. **익명**이면 결과에 누가 답했는지·누가 무엇을 썼는지가 나오지 않습니다(글 답은 글 순서로 늘어놓음 — 중복 응답을 막으려고 응답 행에는 사람을 남김). **결과 공개**는 만든 사람만 / 응답한 사람도 / 대상 모두, **마감**은 고른 날 18시(1년 안)입니다.
+- 대상에게는 그룹웨어 푸시(누르면 그룹웨어 화면)가 가고, 목록에는 **응답할 설문**이 위에 굵게 옵니다. 응답은 마감 전까지 고칠 수 있습니다.
+- 만든 사람과 결재·근태 관리자는 **결과 보기**(보기별 막대·비율, 별점 평균과 점수별 막대, 글 답, 응답한 사람·아직 안 한 사람)를 보고, ⋯에서 **안 한 사람에게 요청**(1시간에 한 번 푸시), **마감**, **삭제**를 합니다.
+
+#### 업무일지
+
+- 그룹웨어 **업무일지** 탭에서 **일일 / 주간** 업무보고를 씁니다(`server/src/groupwareReports.js`·`workReportRules.js`). 한 일·할 일·이슈·건의(각 5000자, 한 일이나 할 일 중 하나는 필수)이고, 사람·종류·기간(일일은 그 날, 주간은 그 주 월요일)마다 하나이며 언제든 고칠 수 있습니다(◀ ▶로 지난 기간도 씀, 아직 오지 않은 기간은 막음).
+  주간 보고는 **이번 주 일일 보고 불러오기**로 그 주 일일 보고의 "한 일"을 날짜를 붙여 가져옵니다.
+- **받는 사람**은 조직도의 상위자(가까운 두 명 — 따로 정한 상위자, 없으면 부서장)와 결재·근태 관리자입니다. 처음 올리면 상위자에게 그룹웨어 푸시가 가고, 상위자가 열면 내 화면에 **확인: 이름**이 붙습니다.
+- **팀 현황**은 나를 상위자로 둔 사람(관리자는 범위 모두)의 그 기간 보고를 **안 쓴 사람이 위로** 보여 주고(제출 N/M), 누르면 본문을 읽고 **댓글**을 답니다(1000자 — 쓴 사람과 다른 상위자에게 푸시). 보고는 쓴 사람만 지웁니다.
+
 > 범위 설정을 바꾸면 이전 범위의 결재·근태·연차 조정 기록은 그 범위 키로 남아 새 범위에서는 보이지 않습니다(지우지는 않음 — 되돌리면 다시 보임).
 > 자원·예약도 범위마다 따로입니다.
+
+## 팀 위키
+
+팀마다 하나의 **위키**가 있습니다(메뉴 → 툴 → **위키**, `server/src/wiki.js`·`wikiDocs.js`·`otText.js`, 앱 `screens/wiki/wiki_screen.dart`·`services/wiki_doc.dart`·`services/ot_text.dart`). 프로젝트 노트와 달리 프로젝트 밖에서 팀 전체가 쓰는 문서 공간이고, **여럿이 같은 페이지를 동시에 고칩니다**.
+
+- **페이지 나무** — 왼쪽에 위·아래 페이지(10단계까지)가 들여 써 보이고, 오른쪽에 고른 페이지(좁은 화면은 나무 → 페이지, ← 로 돌아감). ⋯에서 하위 페이지 만들기·제목 바꾸기(100자)·옮기기(자기 아래로는 못 옮김)·판 기록·휴지통으로. 본문은 마크다운이고 **보기**는 노트와 같은 서식으로 그립니다.
+- **동시 편집** — 페이지를 열면 서버의 동시 편집 문서에 들어가(`wiki:join`) 보기 화면에서도 다른 사람의 변경이 바로 보이고, **편집**에서 같은 글을 함께 고칩니다. 입력칸의 한 번 변경을 연산(그대로 n / 넣기 / 지우기 n — UTF-16 글자 단위)으로 보내고(`wiki:op`),
+  서버가 기준입니다 — 늦게 온 연산은 그 사이 적용된 연산들에 맞춰(OT transform, 같은 자리 동시 넣기는 늦게 온 쪽이 앞) 적용하고 판 번호를 올려 다른 사람에게 퍼뜨립니다. 앱은 확인받지 못한 내 연산이 있으면 다음 변경을 모아 두었다 하나로 보내고, 그 사이 온 남의 연산은 내 연산에 맞춰 적용합니다(ot.js의 클라이언트와 같은 세 상태).
+  남의 변경이 들어와도 내 커서·한글 조합 중인 글자 범위는 그만큼 옮겨집니다. 위에 **함께 보는 중**인 사람(사람마다 색)과 그 사람 커서가 몇 번째 줄인지가 보이고, 확인을 기다리는 동안은 "저장 중…".
+- **끊김** — 다시 붙으면 아는 판 번호로 다시 들어가 그 뒤 연산을 받습니다(끊기기 전에 보낸 내 연산은 연산 id로 알아보고, 서버는 같은 연산을 두 번 적용하지 않음). 서버는 최근 연산 1000개를 기억하고, 그보다 오래 끊겼으면 본문을 통째로 다시 받습니다(확인 못 받은 내 수정이 있었으면 알림).
+- **저장·판** — 열려 있는 동안은 서버 메모리의 문서가 기준이고 마지막 연산 2초 뒤에 저장합니다(서버를 끌 때도 저장). 편집하는 동안 10분마다, 마지막 사람이 나갈 때, 판을 되돌리기 전에 **판**(그 사이 고친 사람 이름과 함께)을 남기고, **판 기록**에서 판을 열어 보고 **이 판으로 되돌리기**를 하면 편집 중인 사람에게도 보통 변경처럼 퍼집니다.
+- **휴지통·찾기** — 지우면(만든 사람이나 팀 관리자) 그 아래 페이지와 함께 휴지통으로 가고 열려 있던 편집 화면은 닫힙니다. 되살리면 원래 자리로(위 페이지도 휴지통이면 맨 위로). **찾기**는 제목·본문(편집 중이면 최신 본문)에서 찾아 앞뒤 글을 보여 줍니다.
+- 팀 멤버는 읽고, 준회원이 아니면 만들고 고칩니다(준회원도 문서에 들어가 실시간으로 보지만 연산은 서버가 막음). 본문은 200,000자, 한 번 붙여넣기는 50,000자까지. 나무가 바뀌면 팀 멤버에게 `wiki:tree`.
+
+## 공유 드라이브
+
+팀마다 하나의 **공유 드라이브**가 있습니다(메뉴 → 툴 → **드라이브**, `server/src/drive.js`·`driveRules.js`, 앱 `screens/drive/drive_screen.dart`). 방별 파일 목록(파일 보기)과 달리 대화와 상관없이 폴더로 정리해 두는 공용 저장 공간입니다.
+
+- **폴더** — 10단계까지 만들고, 위의 빵부스러기(드라이브 / 기획 / 2026)로 오갑니다. 이름은 120자(`\ / : * ? " < > |` 불가), 같은 폴더 안에서는 폴더·파일 이름이 대소문자를 가리지 않고 겹칠 수 없으며, 한 폴더에 1000개까지 둡니다. 폴더를 자기 아래 폴더로는 옮길 수 없습니다.
+- **파일** — **올리기**(여러 개)나 PC에서 화면에 끌어다 놓아 올립니다(앱이 `/api/upload`로 올린 뒤 그 경로를 넘김 — 자기가 올린 파일만 받고, 크기는 서버가 디스크에서 잽니다). 목록은 폴더 먼저, 이름순(숫자는 숫자대로)이고 판 번호·크기·마지막으로 올린 사람·날짜가 보입니다.
+- **판(버전)** — 같은 이름으로 올리면 "새 판(판 N)으로 올릴까요?"를 묻고, 파일 창의 **새 판 올리기**로도 올립니다. 판 기록(올린 사람·날짜·크기·메모)에서 판마다 내려받고(지난 판은 `이름 (판 N).확장자`), **이 판으로 되돌리기**는 그 판을 새 판으로 다시 올립니다(기록은 그대로). 판은 파일마다 50개까지 남고 넘으면 오래된 기록부터 지웁니다.
+- **휴지통** — 지우면(만든 사람이나 팀 관리자 — 소유자·관리자 등급·서버 운영자) 휴지통으로 가고, 폴더를 지우면 그 아래도 함께 숨습니다. **되살리기**는 원래 자리로(위 폴더도 휴지통이면 맨 위로, 같은 이름이 생겼으면 `이름 (2)`), **영구 삭제**는 폴더면 그 아래 폴더·파일·판 기록까지 지웁니다(디스크의 파일은 업로드 보존 정책대로 남김).
+- **찾기** — 파일·폴더 이름으로 찾고(어느 폴더에 있는지 함께), 누르면 그 폴더로 가서 파일을 엽니다. 아래에 드라이브가 쓰는 양(판 기록 포함)이 보입니다.
+- 팀 멤버는 보고 내려받고, 준회원이 아니면 올리고·폴더를 만들고·새 판을 올리고·이름을 바꾸고·옮깁니다. 바뀌면 팀 멤버에게 `drive:changed`가 가서 열려 있는 드라이브가 바로 다시 받습니다.
 
 ## 웹메일
 
@@ -1309,12 +1365,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 4순위 — 협업 도구로서 부족한 것
 
-- **팀 위키·문서 공간** — 노트는 프로젝트 안에만 있고(버전 기록·댓글 있음), 여럿이 동시에 편집하지 못합니다(바뀐 사이 저장하면
-  충돌 안내).
-- **공유 드라이브** — 폴더·파일 버전이 있는 공용 저장 공간이 없습니다(지금은 방별 파일 목록).
-- **업무 기능** — 반복 업무, 소요 시간 기록, 선후행 관계(지금은 하위 업무만)가 없습니다.
-- **설문·업무일지** — 설문(지금 투표는 한 문항짜리)과 일일·주간 업무보고가 없습니다.
-- **게시판 보강** — 보드 뷰 토픽에 말머리(분류)·필독·읽음 확인이 없습니다.
 - **AI 기능** — 긴 대화방·스레드 요약, 회의 내용 정리, 번역. 설치형이라 "내부 서버에서 AI를 돌린다"는 점이 장점이 됩니다.
 - **위치 공유** — 외근·현장 업무가 많은 팀용.
 
@@ -2192,6 +2242,10 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/rooms/:id/announcements/:announcementId/unpin` | 공지 내리기(작성자만, 기록엔 남음) → `announcement:unpinned` |
 | GET | `/api/rooms/:id/announcements/:announcementId/readers` | 공지 읽음 확인 `{ read: [{ userId, name, readAt }], unread: [{ userId, name }] }` — 토픽 멤버면 누구나 |
 | GET / POST | `/api/rooms/:id/announcements/:announcementId/comments` | 공지 댓글 목록 / 작성 |
+| POST | `/api/messages/:id/must-read` | **보드 게시글 필독 지정/해제** `{ mustRead: boolean }`(토픽 관리자·팀 관리자만, 아니면 403) → 게시글(`mustReadAt`) + `message:edited`. 새로 지정하면 멤버에게 `[필독] 제목` 보드 알림 |
+| POST | `/api/messages/:id/post-read` | **보드 게시글을 열었다** — 처음 연 시각만 남기고 `{ ok, first }`, 새로 읽었으면 그 방에 `post:read { roomId, messageId, userId }`(쓴 사람은 남기지 않음) |
+| GET | `/api/messages/:id/readers` | **보드 게시글 읽음 확인** — 공지 읽음 확인과 같은 `{ read: [{ userId, name, readAt }], unread: [{ userId, name }] }`(지금 멤버만, 쓴 사람은 늘 읽음 — 쓴 시각). 그 방 멤버만 |
+| GET | `/api/rooms/:id/must-read` | 이 보드에서 **내가 아직 안 읽은 필독** `[{ id, title, createdAt, mustReadAt }]`(최근 지정순, 100개까지, 내 글 제외) |
 | GET | `/api/comments/:id` | **댓글 한 건**(`GET /api/messages/:id`와 같은 용도·규칙 — 그 방 멤버만 403, 지운 댓글·비밀 대화·1:1 "진짜 나가기" 이전 글에 달린 댓글은 404). 응답은 댓글 DTO(`messageId`, `text`, 파일 댓글이면 서명된 `fileUrl`·`fileName`…) |
 | PATCH | `/api/comments/:id` | 댓글 수정 |
 | DELETE | `/api/comments/:id` | 댓글 삭제(메시지 삭제와 동일한 규칙) |
@@ -2273,6 +2327,12 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | PATCH / DELETE | `/api/task-types/:id` | 유형 수정 / 삭제(삭제해도 업무는 유지) |
 | GET | `/api/tasks/:id` | 업무 상세(댓글 포함 — 하위 업무는 같은 프로젝트에 있는 것만) |
 | PATCH | `/api/tasks/:id` | 업무 수정(상태·담당자·마감일 등 — 제목 1~200자·설명 10,000자는 등록과 같음. 담당자·참조자는 새로 고르는 사람만 지금 구성원인지 보고, 그대로 다시 보낸 기존 값은 받음) |
+| POST / DELETE | `/api/tasks/:id/dependencies` · `/api/tasks/:id/dependencies/:otherId` | **선행 업무 넣기/빼기** `{ taskId }` — 같은 프로젝트 업무만, 순환이면 400, 업무마다 30개 → `{ predecessors, successors }`. 업무 수정(PATCH)은 `recurrence`(`{ freq, interval, byWeekday?, until? }`, null이면 끄기)·`estimateMinutes`(분, null이면 지우기)도 받고, 완료로 바꿔 다음 회차를 만들었으면 응답에 `nextRecurrence { id, key }` |
+| GET / POST | `/api/tasks/:id/time-entries` | **소요 시간 기록** 목록 / 남기기 `{ minutes(1~1440), workDate?(YYYY-MM-DD, 오늘까지), note?(200자) }` |
+| DELETE | `/api/tasks/:id/time-entries/:entryId` | 시간 기록 지우기 — 남긴 사람 또는 프로젝트 관리자 |
+| GET | `/api/tasks/timer` | 내 타이머 `{ timer: { taskId, key, title, projectId, projectName, startedAt } \| null }` |
+| POST | `/api/tasks/:id/timer/start` · `/api/tasks/timer/stop` | 타이머 켜기(다른 업무에서 돌던 것은 멈춰 기록 → `stopped`) / 멈추기 `{ note? }` → `{ entry }`(1분 미만이면 null). 바뀌면 내 기기들에 `task:timer` |
+| GET | `/api/projects/:id/time-report` | **프로젝트 소요 시간 보고** `?from&to`(YYYY-MM-DD, 기본 이번 달, 1년까지) → `{ from, to, totalMinutes, byMember: [{ userId, name, minutes }], byTask: [{ taskId, key, title, minutes, estimateMinutes }] }` |
 | DELETE | `/api/tasks/:id` | 업무 삭제(같은 프로젝트의 하위 업무도 함께 — 다른 프로젝트에 남은 하위 업무는 떼어 남김) |
 | POST | `/api/tasks/:id/comments` | 업무에 댓글 남기기 |
 
@@ -2355,6 +2415,26 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/bookings/mine` | 내가 잡은 앞으로의 예약(50개) |
 | POST | `/api/groupware/bookings` | 예약하기 `{ resourceId, start, end, title? }`(ms) → 201. 겹치면 409("이미 예약된 시간입니다 (… 이름)"), 지난 시간·7일 넘음·180일 넘게 앞은 400, 끈 자원 409, 준회원 403, 앞으로의 예약 100건 넘음 429 |
 | DELETE | `/api/groupware/bookings/:id` | 취소 — 잡은 사람이나 관리자(남의 것이면 잡은 사람에게 알림·감사 로그). 일정 예약이면 일정은 남고 회의실만 빠짐 |
+| GET / POST | `/api/groupware/surveys` | **설문** 목록 `{ items: [{ id, title, creatorName, anonymous, resultVisibility, audience, questionCount, closesAt, closed, responseCount, targetCount, responded, pending }], pendingCount }`(응답할 것이 앞) / 만들기 `{ title, description?, questions: [{ kind: single\|multiple\|text\|rating, title, required, options? }], anonymous?, resultVisibility?: creator\|respondents\|all, audience?: all\|users, targetIds?, closesAt? }` — 정회원 이상, 대상에게 푸시 |
+| GET / DELETE | `/api/groupware/surveys/:id` | 설문 하나(`questions`·`myAnswers`·`canRespond`·`canManage`·`canViewResults`) / 지우기(만든 사람·관리자) |
+| PUT | `/api/groupware/surveys/:id/response` | 응답하기·고치기 `{ answers: { 문항 id: 보기 id \| [보기 id] \| 글 \| 1~5 } }` → `{ first }` — 대상·마감 전, 필수 문항 검사 |
+| GET | `/api/groupware/surveys/:id/results` | 결과 `{ responseCount, targetCount, questions: [{ options?: [{ count }], average?, distribution?, texts? }], respondents(익명이면 null), nonRespondents(관리하는 사람만) }` |
+| POST | `/api/groupware/surveys/:id/close` · `/api/groupware/surveys/:id/remind` | 마감 / 안 한 사람에게 푸시(1시간에 한 번, 아니면 429) → `{ notified }` — 만든 사람·관리자 |
+| GET / PUT | `/api/groupware/work-reports` | **내 업무일지** `?kind=daily\|weekly&periodStart=`(기본 오늘·이번 주) → `{ periodStart, periodEnd, currentPeriodStart, report, reviewers }` / 쓰기·고치기 `{ kind, periodStart, done, plan, issues }`(처음이면 상위자에게 푸시) |
+| GET | `/api/groupware/work-reports/mine` · `/api/groupware/work-reports/team` | 내 보고 `?kind&from&to`(주간에 일일 불러오기) / **팀 현황** `?kind&periodStart` → `{ canReview, submittedCount, roster: [{ userId, name, report(readByMe) }] }`(안 쓴 사람이 위) |
+| GET / DELETE | `/api/groupware/work-reports/:id` | 보고 하나(댓글·읽은 사람 — 검토자가 열면 읽음을 남김) / 지우기(쓴 사람만) |
+| POST | `/api/groupware/work-reports/:id/comments` | 업무일지 댓글 `{ text(1000자) }` — 쓴 사람·상위자에게 푸시 |
+| GET | `/api/drive` · `/api/drive/search` | **공유 드라이브** 폴더 내용 `?teamId&folderId=` → `{ folder, path, folders, files: [{ id, name, version, size, updatedByName, url }], canWrite, isManager, usageBytes }` / 이름 찾기 `?teamId&q=` |
+| POST / PATCH / DELETE | `/api/drive/folders` · `/api/drive/folders/:id` | 폴더 만들기 `{ teamId, name, parentId? }` / 이름 바꾸기·옮기기 `{ name?, parentId? }`(자기 아래로 못 옮김, 10단계) / 휴지통으로(만든 사람·팀 관리자) |
+| POST | `/api/drive/files` | 파일 넣기 `{ teamId, folderId?, file(올린 경로), fileName, mimeType?, note? }` — 같은 이름이면 409(`existingId`) |
+| GET / PATCH / DELETE | `/api/drive/files/:id` | 파일과 판 기록(판마다 내려받기 링크) / 이름 바꾸기·옮기기 `{ name?, folderId? }` / 휴지통으로 |
+| POST | `/api/drive/files/:id/versions` · `/api/drive/files/:id/versions/:version/restore` | 새 판 올리기 `{ file, fileName, note? }` / 지난 판을 새 판으로 되돌리기 |
+| GET / POST / DELETE | `/api/drive/trash` · `/api/drive/trash/restore` · `/api/drive/trash/:kind/:id` | 휴지통 목록 / 되살리기 `{ kind: folder\|file, id }` / 영구 삭제(폴더면 그 아래까지) |
+| GET / POST | `/api/wiki` | **팀 위키** 페이지 나무 `?teamId` → `{ pages: [{ id, parentId, title, depth, updatedAt, updatedByName }], canEdit, isManager }`(위에서 아래로 펼친 차례) / 새 페이지 `{ teamId, title, parentId?, body? }` |
+| GET / PATCH / DELETE | `/api/wiki/:id` | 페이지(본문은 편집 중이면 메모리의 최신 것, `revision`·`path`·`editors`) / 제목 바꾸기·옮기기 `{ title?, parentId?, position? }`(편집 화면에 `wiki:title`) / 휴지통으로(그 아래까지, 편집 화면에 `wiki:removed`) |
+| GET / POST | `/api/wiki/search` · `/api/wiki/trash` · `/api/wiki/:id/restore` | 제목·본문 찾기 `?teamId&q`(앞뒤 글) / 휴지통 / 되살리기 |
+| GET / POST | `/api/wiki/:id/versions` · `/api/wiki/:id/versions/:versionId` · `…/restore` | 판 목록 / 판 하나(본문) / 그 판으로 되돌리기(지금 것을 먼저 판으로 — 편집 중인 사람에게 `wiki:op`) |
+| 소켓 | `wiki:join` · `wiki:op` · `wiki:cursor` · `wiki:leave` | 동시 편집 — join `{ pageId, sinceRevision? }` → ack `{ revision, title, canEdit, body \| ops, editors }`, op `{ pageId, revision, op, opId }` → ack `{ ok, revision }`(다른 사람에게 `wiki:op { revision, op, opId, userId }`), 사람이 바뀌면 `wiki:presence` |
 
 **웹메일** (`server/src/webmail.js` — 사람마다 연결한 계정 하나, 팀과 상관없음. 메일 서버 오류는 502이고 `error`에 고칠 방법)
 
@@ -2494,6 +2574,10 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order` |
 | `mail_accounts` | 웹메일 계정(사람마다 하나 — `user_id` unique, 탈퇴하면 cascade). `email`·`display_name`·`provider`(미리 정한 서비스 키 또는 `custom`), IMAP·SMTP `*_host`·`*_port`·`*_security`(`ssl`\|`starttls`), `username`, `password_enc`(암호화 — 내보내지 않음), `notify`(새 메일 알림), 새 메일 기준 `last_uid_next`·`last_uid_validity`(받은편지함 UIDNEXT·UIDVALIDITY — 연결 값이 바뀌면 지움), `last_checked_at`, 로그인 실패 `last_error`·`last_error_at`(30분 동안 다시 확인 안 함). 메일 본문은 두지 않는다 |
 | `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — unique, 일정을 지우면 cascade). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`) |
+| `surveys` / `survey_responses` | 그룹웨어 설문 — `scope_key`, `questions`(jsonb), `anonymous`, `result_visibility`, `audience`·`target_ids`, `closes_at`·`closed_at`, `reminded_at`(독촉 1시간 제한) / 응답(`survey_id`, `user_id` PK, `answers` jsonb) |
+| `work_reports` / `work_report_comments` / `work_report_reads` | 업무일지 — (`scope_key`, `user_id`, `kind`, `period_start`) 유일, `done`·`plan`·`issues` / 댓글 / 검토자가 처음 읽은 시각 |
+| `drive_folders` / `drive_files` / `drive_file_versions` | 팀 공유 드라이브 — 폴더(`parent_id`, 휴지통 `deleted_at`) / 파일(지금 판 `version`·`file_path`·`size`·`mime_type`, 휴지통 `deleted_at`) / 판 기록(`file_id`, `version` 유일, 올린 사람·메모) |
+| `wiki_pages` / `wiki_page_versions` | 팀 위키 — 페이지(`parent_id`, `title`, 마크다운 `body`, `revision` = 적용한 연산 수, `position`, 휴지통 `deleted_at`) / 판(그때의 제목·본문·`revision`, 그 사이 고친 사람 `editor_names`) |
 | `leave_promotions` | 연차 사용 촉진 통지 — `scope_key`, `user_id`, 그 연차 기간(`period_start`·`period_end`), `stage`(1 \| 2), 보낼 때 남은 연차 `remaining_half_days`, `deadline`, `message`, 2차의 `designated_dates`, 받은 사람이 낸 `plan_dates`·`planned_at`, `sent_by_id`·`sent_by_name`·`sent_at`, `read_at`. 지우지 않음 |
 | `email_codes` | 메일로 보낸 확인 코드(가입 전 `signup`·이메일 확인 `verify`·이메일 변경 `change`·비밀번호 재설정 `reset`). 코드 대신 서버 비밀값으로 만든 해시, 틀린 횟수(`attempts`), 만료(10분 — 만료된 행은 하루 한 번 지움). 같은 목적·주소로 새 코드를 보내면 앞의 행은 지움 |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
@@ -2506,6 +2590,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(1:1 대화에서 한 사람이 빠졌을 때 — 비밀 대화를 혼자 나갔거나 팀에서 제외됐을 때 — 남은 쪽에 "OOO (나갔음)"으로 보여 줄 사람. 그 사람이 다시 들어오면 지움. 이름은 비밀 대화에만 쓰던 시절 그대로), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
 | `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷), `integration_id`·`bot_emoji`(웹훅·슬래시 명령이 올린 봇 메시지의 연동과 아이콘 — 연동을 지우면 `integration_id`만 null, 봇 이름은 `sender_name`), `client_id`(앱이 보낼 때 붙인 임시 id — 보내기 대기열, unique (`sender_id`, `client_id`) partial) |
+| `post_reads` | 보드 게시글 읽음 기록 — (`message_id`, `user_id`) PK에 처음 연 시각(`read_at`). 게시글의 말머리는 `messages.post_category_id`(방의 `rooms.board_categories` jsonb `[{ id, name, color }]` 중 하나), 필독은 `messages.must_read_at` |
 | `chat_drafts` | 임시 저장 동기화 — (`user_id`, `room_id`)마다 `text`(지운 것은 빈 글로 남김 — 꺼져 있던 기기가 알게)·`text_format`·`mentions`·`updated_at`(서버가 받은 시각 — 나중 것이 이김). 사람·방을 지우면 cascade, 30일 지난 것은 하루 한 번 지움. 비밀 대화의 글은 받지 않는다 |
 | `message_reminders` | 리마인더. 메시지 리마인더("나중에 알림")는 메시지·방(`message_id`·`room_id`), 직접 만든 리마인더는 글과 울릴 나와의 대화의 팀(`text`·`team_id`)만 둔다(마이그레이션 0107에서 `message_id`·`room_id`를 null 허용으로). 사람·메시지·방·팀 모두 cascade, `remind_at`, 울린 때 `fired_at`(울린 지 30일 지나면 지움). 인덱스: 울리기 전 것만의 `remind_at`(partial)·`(user_id, remind_at)` |
 | `message_reactions` | 메시지 공감(이모지 반응). 메시지+사람 복합 PK라 한 사람이 메시지마다 하나(`emoji`, 바꾸면 `created_at`도 새로). 메시지·사람을 하드 삭제하면 cascade |
@@ -2541,6 +2626,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `project_notification_settings` | 사람 × 프로젝트별 개인 설정(지금은 "이 프로젝트 알림 끄기" 하나) |
 | `project_notification_policies` | 프로젝트 알림 정책(종류별 on/off, 프로젝트당 한 줄) |
 | `task_references` | 업무 참조자(`task_id`, `user_id` 복합 PK). "내 업무"에 참조된 업무를 함께 보여주는 데 쓴다 |
+| `task_dependencies` / `task_time_entries` / `task_timers` | 업무 선후행(`task_id`가 `depends_on_task_id`를 기다림, 복합 PK), 소요 시간 기록(`user_id`·`minutes`·`work_date`·`note`), 사람마다 하나인 타이머(`user_id` PK·`task_id`·`started_at`). 반복 규칙은 `tasks.recurrence`(jsonb), 예상 시간은 `tasks.estimate_minutes` |
 | `task_comments` | 업무 카드에 달린 댓글. `project_id`를 같이 들고 있어(비정규화) 대시보드의 "최근 댓글"을 조인 없이 모은다 |
 | `devices` | 비밀 대화용 기기 신원(X25519/Ed25519 공개키), `fcm_token`(Android 전용), `web_push_subscription`(웹 앱의 웹 푸시 구독 JSON), `kind`(기기 종류 `windows`\|`android`\|`web-desktop`\|`web-android`\|`web-mobile` — 예전 앱은 null), `last_seen_at`, `revoked_at`("로그인한 기기"에서 로그아웃시킨 시각 — 그 기기에 묶인 토큰이 막힘, 다시 로그인하면 지워짐). 토큰·구독은 한 사람당 최근에 쓴(`last_seen_at`) 기기 10대 것만 남기고, 계정 정지·모든 기기 강제 로그아웃·탈퇴 때는 그 사람의 모든 기기에서 지웁니다(기기 행과 공개키는 지난 비밀 대화 때문에 그대로) |
 | `secret_sessions` | 비밀 대화 방 1개당 1행 — 상태(`pending`\|`active`\|`rejected`\|`terminated`), 양측 사용자·기기, 양측 임시 공개키+서명(키만 서명한 v1), `initiator_context_signature`/`responder_context_signature`(맥락 서명 v2 — 예전 앱이 보낸 쪽은 null, 마이그레이션 `0097_secret_context_signatures`), `initiator_protocol`(초대한 앱이 아는 규약 번호 — 새 앱은 3, 예전 앱이면 null, 마이그레이션 `0098_secret_initiator_protocol`), `key_epoch`(예전 규약의 재키잉 세대 — 새 앱은 올리지 않음), `self_destruct_seconds` |

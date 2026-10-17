@@ -373,6 +373,8 @@ void main() {
           'groupware',
           'zz-1',
           'zz-2',
+          'drive',
+          'wiki',
           'mail',
           'project',
         ]);

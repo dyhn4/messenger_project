@@ -5,8 +5,10 @@ import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
+import '../models/board_category.dart';
 import '../models/message.dart';
 import '../models/room.dart';
+import '../screens/board_categories_dialog.dart';
 import '../screens/message_thread_screen.dart';
 import '../screens/poll_create_dialog.dart';
 import '../screens/post_editor_dialog.dart';
@@ -33,6 +35,9 @@ const _boardMaxWidth = 820.0;
 
 /// 고정된 게시글을 접어 둘 때 보여줄 개수.
 const _pinnedPreviewCount = 3;
+
+/// "필독 안 읽음"을 접어 둘 때 보여줄 개수.
+const _mustReadPreviewCount = 3;
 
 /// 보드 뷰 토픽(Room.isBoard)의 본문 — 채팅 목록 대신 제목이 있는 게시글(Message.isPost)을 최신 글이
 /// 위로 오게 카드로 보여준다. 맨 위에는 고정된 게시글, 오른쪽 아래에는 글쓰기(연필) 버튼. 과거 글은
@@ -72,6 +77,10 @@ class BoardViewState extends State<BoardView> {
   late final Listenable _changes = Listenable.merge([_c, widget.session]);
   final _scroll = ScrollController();
   bool _pinnedExpanded = false;
+  bool _mustReadExpanded = false;
+
+  /// 말머리로 모아 보기 — 고른 말머리 id(null이면 전체). 지워진 말머리면 전체로 본다([_activeFilter]).
+  String? _categoryFilter;
   String? _highlightedId;
   Timer? _highlightTimer;
 
@@ -91,6 +100,8 @@ class BoardViewState extends State<BoardView> {
     super.initState();
     // 고정 목록은 보드를 열 때마다 새로 받는다 — 그 뒤로는 컨트롤러가 실시간으로 맞춘다.
     unawaited(_c.loadPinnedPosts());
+    // "필독 안 읽음"도 보드를 열 때마다 새로 받는다(다른 기기에서 읽었을 수 있다).
+    unawaited(_c.loadUnreadMustRead());
     _newestSeen = _newestPost()?.createdAt;
     _c.addListener(_onPostsChanged);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
@@ -119,14 +130,39 @@ class BoardViewState extends State<BoardView> {
     super.dispose();
   }
 
-  /// 보드에 보일 게시글 — 최신 글이 위, 지운 글·시스템 메시지·댓글 항목은 뺀다.
-  List<Message> _posts() {
+  /// 보드에 보일 게시글 — 최신 글이 위, 지운 글·시스템 메시지·댓글 항목은 뺀다. 말머리로 모아 보는 중이면
+  /// 그 말머리의 게시글만(투표는 말머리가 없어 빠진다).
+  List<Message> _posts({String? category}) {
     final seen = <String>{};
     final posts = [
       for (final m in _c.messages)
-        if ((m.isPost || m.isPoll) && !m.deleted && seen.add(m.id)) m,
+        if ((m.isPost || m.isPoll) &&
+            !m.deleted &&
+            (category == null || m.categoryId == category) &&
+            seen.add(m.id))
+          m,
     ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return posts;
+  }
+
+  /// 지금 고른 말머리 — 그 사이 관리자가 지웠으면 전체.
+  String? get _activeFilter =>
+      widget.room.boardCategoryById(_categoryFilter)?.id;
+
+  /// "필독 안 읽음"에서 누른 게시글 — 아직 안 불러온 옛 글이면 찾을 때까지 더 불러온 뒤 연다.
+  Future<void> _openPostById(String id) async {
+    var post = _findPost(id);
+    if (post == null) {
+      await _c.ensureMessageLoaded(id);
+      if (!mounted) return;
+      post = _findPost(id);
+    }
+    if (post == null) {
+      showAppToast(context, '게시글을 찾을 수 없습니다.');
+      unawaited(_c.loadUnreadMustRead());
+      return;
+    }
+    _openPost(post);
   }
 
   Message? _newestPost() {
@@ -351,13 +387,16 @@ class BoardViewState extends State<BoardView> {
     if (_c.error != null && _c.messages.isEmpty) {
       return _BoardLoadError(onRetry: () => unawaited(_refresh()));
     }
-    final posts = _posts();
+    final filter = _activeFilter;
+    final allPosts = _posts();
+    final posts = filter == null ? allPosts : _posts(category: filter);
     final pinned = [
       for (final p in _c.pinnedPosts)
         if (!p.deleted) p,
     ];
+    final mustRead = _c.unreadMustRead ?? const <UnreadMustRead>[];
     _scheduleAutoLoad();
-    if (posts.isEmpty && pinned.isEmpty) {
+    if (allPosts.isEmpty && pinned.isEmpty && mustRead.isEmpty) {
       final stillLoading =
           _c.loadingMore ||
           (_c.hasMoreHistory && _autoLoadedAt != _c.messages.length);
@@ -365,8 +404,37 @@ class BoardViewState extends State<BoardView> {
       return _EmptyBoard(canWrite: canWrite);
     }
 
-    final hasPinned = pinned.isNotEmpty;
-    final itemCount = (hasPinned ? 1 : 0) + posts.length + 1;
+    // 목록 위쪽 — 말머리 고르기, 필독 안 읽음, 고정된 게시글(말머리로 모아 볼 때는 고정 목록을 접어 둔다).
+    final headers = <Widget>[
+      if (widget.room.boardCategories.isNotEmpty)
+        _CategoryFilterBar(
+          session: widget.session,
+          room: widget.room,
+          selected: filter,
+          onSelected: (id) => setState(() => _categoryFilter = id),
+        ),
+      if (mustRead.isNotEmpty)
+        _MustReadSection(
+          items: mustRead,
+          expanded: _mustReadExpanded,
+          onToggle: () =>
+              setState(() => _mustReadExpanded = !_mustReadExpanded),
+          onOpen: (id) => unawaited(_openPostById(id)),
+        ),
+      if (pinned.isNotEmpty && filter == null)
+        _PinnedSection(
+          session: widget.session,
+          room: widget.room,
+          posts: pinned,
+          expanded: _pinnedExpanded,
+          onToggle: () => setState(() => _pinnedExpanded = !_pinnedExpanded),
+          onOpen: _openPost,
+        ),
+      // 고른 말머리의 글이 (불러온 범위에) 없을 때 — 더 불러오는 중이면 아래 로딩 표시가 대신한다.
+      if (filter != null && posts.isEmpty && !_c.loadingMore)
+        const _EmptyCategory(),
+    ];
+    final itemCount = headers.length + posts.length + 1;
     final list = ListView.builder(
       key: const ValueKey('board-list'),
       controller: _scroll,
@@ -376,15 +444,8 @@ class BoardViewState extends State<BoardView> {
       itemCount: itemCount,
       itemBuilder: (context, i) {
         final Widget item;
-        if (hasPinned && i == 0) {
-          item = _PinnedSection(
-            session: widget.session,
-            room: widget.room,
-            posts: pinned,
-            expanded: _pinnedExpanded,
-            onToggle: () => setState(() => _pinnedExpanded = !_pinnedExpanded),
-            onOpen: _openPost,
-          );
+        if (i < headers.length) {
+          item = headers[i];
         } else if (i == itemCount - 1) {
           return _c.loadingMore
               ? const Padding(
@@ -399,7 +460,7 @@ class BoardViewState extends State<BoardView> {
                 )
               : const SizedBox.shrink();
         } else {
-          final post = posts[i - (hasPinned ? 1 : 0)];
+          final post = posts[i - headers.length];
           item = post.isPoll
               ? PollBoardCard(
                   key: ValueKey('poll-${post.id}'),
@@ -542,6 +603,30 @@ bool canDeletePost(Session session, Room room, Message post) =>
 bool canPinPost(Session session, Room room, Message post) =>
     !post.deleted && room.canManage(session);
 
+/// 필독 지정/해제 — 고정처럼 토픽을 관리할 수 있는 사람만(보드 게시글만).
+bool canMarkMustRead(Session session, Room room, Message post) =>
+    post.isPost && room.isBoard && canPinPost(session, room, post);
+
+Future<void> togglePostMustRead(
+  BuildContext context,
+  Session session,
+  Room room,
+  Message post,
+) async {
+  final on = !post.isMustRead;
+  try {
+    await session.setPostMustRead(room, post.id, on);
+    if (context.mounted) {
+      showAppToast(
+        context,
+        on ? '필독으로 지정했습니다. 멤버에게 알림이 갑니다.' : '필독 지정을 해제했습니다.',
+      );
+    }
+  } catch (e) {
+    if (context.mounted) showAppToast(context, '$e');
+  }
+}
+
 Future<void> togglePostPin(
   BuildContext context,
   Session session,
@@ -623,6 +708,7 @@ class PostMoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canPin = canPinPost(session, room, post);
+    final canMustRead = canMarkMustRead(session, room, post);
     final canEdit = canEditPost(session, room, post);
     final canDelete = canDeletePost(session, room, post);
     // 즐겨찾기는 누구나 켤 수 있어 이 단추는 이제 항상 보인다(favorite_actions.dart).
@@ -651,6 +737,14 @@ class PostMoreButton extends StatelessWidget {
             icon: post.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
             label: post.isPinned ? '게시글 고정 해제' : '게시글 고정',
             onPressed: () => togglePostPin(context, session, room, post),
+          ),
+        if (canMustRead)
+          hoverMenuItem(
+            icon: post.isMustRead
+                ? Icons.notification_important
+                : Icons.notification_important_outlined,
+            label: post.isMustRead ? '필독 해제' : '필독으로 지정',
+            onPressed: () => togglePostMustRead(context, session, room, post),
           ),
         if (canEdit)
           hoverMenuItem(
@@ -786,6 +880,10 @@ class PostCard extends StatelessWidget {
                                 const SizedBox(width: 6),
                                 const PinnedPostTag(),
                               ],
+                              if (post.isMustRead) ...[
+                                const SizedBox(width: 6),
+                                const MustReadTag(),
+                              ],
                             ],
                           ),
                           const SizedBox(height: 1),
@@ -808,10 +906,11 @@ class PostCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 10),
-                      Text(
-                        post.title ?? '',
+                      PostTitleText(
+                        room: room,
+                        post: post,
                         maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        showUnread: true,
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
@@ -1134,6 +1233,333 @@ class PinnedPostTag extends StatelessWidget {
   }
 }
 
+/// 이름 옆의 작은 "필독" 표시 — 토픽 관리자가 필독으로 정한 게시글.
+class MustReadTag extends StatelessWidget {
+  const MustReadTag({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.error;
+    return Tooltip(
+      message: '필독 게시글',
+      child: Container(
+        key: const ValueKey('must-read-tag'),
+        padding: const EdgeInsets.fromLTRB(5, 1, 7, 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.notification_important, size: 11, color: color),
+            const SizedBox(width: 2),
+            Text(
+              '필독',
+              style: TextStyle(
+                fontSize: 11,
+                height: 1.3,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 말머리 알약 — 말머리 색의 옅은 바탕에 그 색 글자.
+class BoardCategoryPill extends StatelessWidget {
+  final BoardCategory category;
+  final double fontSize;
+
+  const BoardCategoryPill({
+    super.key,
+    required this.category,
+    this.fontSize = 12,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = category.swatch;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: dark ? 0.25 : 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        category.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: fontSize,
+          height: 1.35,
+          fontWeight: FontWeight.w700,
+          color: dark ? Color.lerp(color, Colors.white, 0.35) : color,
+        ),
+      ),
+    );
+  }
+}
+
+/// 게시글 제목 — 앞에 안 읽음 점([showUnread]이고 내가 아직 안 읽었으면)과 말머리 알약을 붙인다.
+class PostTitleText extends StatelessWidget {
+  final Room room;
+  final Message post;
+  final TextStyle style;
+  final int? maxLines;
+  final bool showUnread;
+
+  const PostTitleText({
+    super.key,
+    required this.room,
+    required this.post,
+    required this.style,
+    this.maxLines,
+    this.showUnread = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final category = room.boardCategoryById(post.categoryId);
+    final unread = showUnread && post.isUnreadPost;
+    if (category == null && !unread) {
+      return Text(
+        post.title ?? '',
+        maxLines: maxLines,
+        overflow: maxLines == null ? null : TextOverflow.ellipsis,
+        style: style,
+      );
+    }
+    final primary = Theme.of(context).colorScheme.primary;
+    final fontSize = style.fontSize ?? 14;
+    // 점·알약은 제목 첫 줄 높이의 가운데에 — 제목이 두 줄로 넘어가도 첫 줄 옆에 남는다. 제목은 따로 된 글(Text)이라
+    // 찾기·접근성 읽기에서 제목 글자 그대로 잡힌다.
+    final lineHeight = fontSize * (style.height ?? 1.3);
+    Widget lead(Widget child) => SizedBox(
+      height: lineHeight,
+      child: Center(child: child),
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (unread)
+          lead(
+            Tooltip(
+              message: '안 읽은 게시글',
+              child: Container(
+                key: const ValueKey('post-unread-dot'),
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: primary,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+        if (category != null)
+          lead(
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ConstrainedBox(
+                // 말머리 이름이 길어도(20자) 제목 자리를 다 빼앗지 않게.
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: BoardCategoryPill(
+                  category: category,
+                  fontSize: (fontSize - 3).clamp(11, 14),
+                ),
+              ),
+            ),
+          ),
+        Expanded(
+          child: Text(
+            post.title ?? '',
+            maxLines: maxLines,
+            overflow: maxLines == null ? null : TextOverflow.ellipsis,
+            style: style,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 맨 위 말머리 고르기 — "전체"와 말머리들(가로로 밀어 본다). 토픽을 관리할 수 있는 사람에겐 끝에 "관리" 단추.
+class _CategoryFilterBar extends StatelessWidget {
+  final Session session;
+  final Room room;
+  final String? selected;
+  final void Function(String? id) onSelected;
+
+  const _CategoryFilterBar({
+    required this.session,
+    required this.room,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget chip(String label, String? id, {Color? color}) {
+      final on = selected == id;
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: ChoiceChip(
+          key: ValueKey('board-filter-${id ?? 'all'}'),
+          label: Text(label),
+          selected: on,
+          showCheckmark: false,
+          visualDensity: VisualDensity.compact,
+          avatar: color == null
+              ? null
+              : CircleAvatar(radius: 5, backgroundColor: color),
+          onSelected: (_) => onSelected(on ? null : id),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      key: const ValueKey('board-category-filter'),
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          chip('전체', null),
+          for (final c in room.boardCategories)
+            chip(c.name, c.id, color: c.swatch),
+          if (room.canManage(session))
+            IconButton(
+              tooltip: '말머리 관리',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.tune, size: 18),
+              onPressed: () =>
+                  showBoardCategoriesDialog(context, session, room),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 고른 말머리의 게시글이 없을 때.
+class _EmptyCategory extends StatelessWidget {
+  const _EmptyCategory();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Text(
+        '이 말머리의 게시글이 없습니다.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: Theme.of(context).hintColor),
+      ),
+    );
+  }
+}
+
+/// "필독 안 읽음 N" — 토픽 관리자가 필독으로 정했는데 내가 아직 안 연 게시글(최근 지정순). 세 개까지 보이고 더
+/// 있으면 펼친다. 열면 목록에서 빠진다(RoomChatController.markPostRead).
+class _MustReadSection extends StatelessWidget {
+  final List<UnreadMustRead> items;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final void Function(String id) onOpen;
+
+  const _MustReadSection({
+    required this.items,
+    required this.expanded,
+    required this.onToggle,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = BoardColors.of(theme);
+    final accent = theme.colorScheme.error;
+    final shown = expanded ? items : items.take(_mustReadPreviewCount).toList();
+    final hidden = items.length - _mustReadPreviewCount;
+    return DecoratedBox(
+      key: const ValueKey('board-must-read'),
+      decoration: _cardDecoration(
+        colors,
+        border: accent.withValues(alpha: 0.35),
+        color: Color.alphaBlend(accent.withValues(alpha: 0.04), colors.card),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.notification_important, size: 16, color: accent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '읽지 않은 필독 ${items.length}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: accent,
+                    ),
+                  ),
+                ),
+                if (hidden > 0)
+                  TextButton(
+                    onPressed: onToggle,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text(expanded ? '접기' : '모두 보기'),
+                  ),
+              ],
+            ),
+            for (final item in shown)
+              InkWell(
+                key: ValueKey('must-read-${item.id}'),
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => onOpen(item.id),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 7,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 18,
+                        color: theme.hintColor,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 맨 위 "고정된 게시글 N" — 세 개까지 작은 카드로, 더 있으면 "더 보기"로 펼친다(게시글 작성 시각
 /// 최신순, 서버 GET /rooms/:id/pinned-posts 순서 그대로).
 class _PinnedSection extends StatelessWidget {
@@ -1262,10 +1688,11 @@ class _PinnedPostTile extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        post.title ?? '',
+                      child: PostTitleText(
+                        room: room,
+                        post: post,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        showUnread: true,
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -1585,6 +2012,10 @@ class PostDetailHead extends StatelessWidget {
                 ],
               ),
             ),
+            if (post.isMustRead) ...[
+              const MustReadTag(),
+              const SizedBox(width: 4),
+            ],
             if (post.isPinned) ...[
               const PinnedPostTag(),
               const SizedBox(width: 2),
@@ -1605,6 +2036,14 @@ class PostDetailHead extends StatelessWidget {
           )
         else ...[
           // Windows(마우스)에서는 제목·본문을 끌어서 바로 고를 수 있게(말풍선과 같은 규칙).
+          if (room.boardCategoryById(post.categoryId) case final category?)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: BoardCategoryPill(category: category, fontSize: 12.5),
+              ),
+            ),
           AppPlatform.isWindows
               ? SelectableText(post.title ?? '', style: _titleStyle(theme))
               : Text(post.title ?? '', style: _titleStyle(theme)),

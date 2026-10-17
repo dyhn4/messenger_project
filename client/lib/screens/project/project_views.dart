@@ -577,6 +577,38 @@ class _KanbanCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                // 반복 업무·안 끝난 선행 업무(task_extras_sections.dart) — 카드 오른쪽 위 작은 표시.
+                if (task.recurring) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: '반복 업무',
+                    child: Icon(Icons.repeat, size: 14, color: hint),
+                  ),
+                ],
+                if (task.openPredecessorCount > 0 &&
+                    task.status != TaskStatus.done) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: '아직 안 끝난 선행 업무 ${task.openPredecessorCount}개',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.hourglass_top,
+                          size: 14,
+                          color: Colors.orange,
+                        ),
+                        Text(
+                          '${task.openPredecessorCount}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (task.commentCount > 0) ...[
                   const SizedBox(width: 8),
                   Icon(Icons.chat_bubble_outline, size: 14, color: hint),

@@ -11,6 +11,7 @@ import '../../widgets/date_drop_calendar.dart';
 import '../../widgets/muted_scrollbar.dart';
 import '../../widgets/user_avatar.dart';
 import 'task_comments_section.dart';
+import 'task_extras_sections.dart';
 import 'task_views.dart' show formatYmd;
 
 /// 미니 모드일 때의 패널 폭 — 목록과 나란히 두기에 답답하지 않은 선.
@@ -656,9 +657,17 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
               for (final s in _statuses)
                 (id: s.id, name: s.name, color: parseTypeColor(s.color)),
             ],
-            onPick: (id) => _apply(
-              () => widget.session.api!.updateTask(task.id, statusId: id),
-            ),
+            onPick: (id) => _apply(() async {
+              final updated = await widget.session.api!.updateTask(
+                task.id,
+                statusId: id,
+              );
+              // 반복 업무를 끝냈으면 서버가 다음 회차를 만들었다.
+              final next = updated.nextRecurrenceKey;
+              if (next != null && mounted) {
+                showAppToast(context, '반복 업무 — 다음 회차 $next를 만들었습니다.');
+              }
+            }),
           ),
         ),
         _row(
@@ -701,12 +710,98 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             ),
           ),
         ),
+        // 반복 — 완료하면 다음 회차 업무가 생긴다(task_extras_sections.dart).
+        _row('반복', _recurrenceButton(task)),
         // 상위 업무 칸은 하위 업무일 때만 보여준다 — 일반 업무는 부모의 "새 하위 업무"로
         // 하위가 되고, 여기서는 어느 업무에 딸려 있는지 확인하고 바꾸는 용도다.
         if (task.parentTaskId != null) _row('상위 업무', _parentRow(task)),
       ],
     );
   }
+
+  /// 반복 규칙 — "매주 월·수"처럼 보이고, 누르면 고르기 창.
+  Widget _recurrenceButton(Task task) {
+    final hint = Theme.of(context).hintColor;
+    final rule = task.recurrence;
+    final label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.repeat, size: 14, color: rule == null ? hint : null),
+        const SizedBox(width: 6),
+        Text(
+          rule?.label ?? '반복 안 함',
+          key: const ValueKey('task-recurrence-label'),
+          style: TextStyle(fontSize: 13, color: rule == null ? hint : null),
+        ),
+      ],
+    );
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: InkWell(
+        key: const ValueKey('task-recurrence'),
+        borderRadius: BorderRadius.circular(6),
+        onTap: _readOnly
+            ? null
+            : () async {
+                final picked = await showTaskRecurrenceDialog(
+                  context,
+                  initial: rule,
+                );
+                if (picked == null) return;
+                await _apply(
+                  () => widget.session.api!.updateTask(
+                    task.id,
+                    recurrence: picked.rule,
+                    clearRecurrence: picked.rule == null,
+                  ),
+                );
+              },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: label,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editEstimate(Task task) async {
+    final picked = await showEstimateDialog(
+      context,
+      initial: task.estimateMinutes,
+    );
+    if (picked == null) return;
+    await _apply(
+      () => widget.session.api!.updateTask(
+        task.id,
+        estimateMinutes: picked.minutes,
+        clearEstimate: picked.minutes == null,
+      ),
+    );
+  }
+
+  /// 선후행 업무와 소요 시간 칸.
+  Widget _extras(Task task) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TaskDependenciesSection(
+        session: widget.session,
+        task: task,
+        readOnly: _readOnly,
+        apply: _apply,
+        onOpenTask: widget.onOpenTask,
+      ),
+      const SizedBox(height: 16),
+      TaskTimeSection(
+        key: ValueKey('time-${task.id}'),
+        session: widget.session,
+        task: task,
+        readOnly: _readOnly,
+        canManage: _project?.myRole == 'owner',
+        apply: _apply,
+        onEditEstimate: () => _editEstimate(task),
+      ),
+    ],
+  );
 
   /// 참조자 — 칩으로 보이고 "+ 추가"로 구성원 중에서 고른다. ×로 한 명씩 뺀다.
   Widget _referenceRow(Task task) {
@@ -1334,6 +1429,8 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
       _checklist(task),
       const SizedBox(height: 16),
       _subtasks(task),
+      const SizedBox(height: 16),
+      _extras(task),
       const SizedBox(height: 20),
       _comments(task),
     ],
@@ -1357,6 +1454,8 @@ class _TaskDetailPanelState extends State<TaskDetailPanel> {
             _checklist(task),
             const SizedBox(height: 16),
             _subtasks(task),
+            const SizedBox(height: 16),
+            _extras(task),
             const SizedBox(height: 20),
             _comments(task),
           ],

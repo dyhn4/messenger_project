@@ -326,6 +326,9 @@ void main() {
       find.widgetWithText(TextField, '+ 새 하위 업무 (Enter)'),
       '규격 재확인',
     );
+    // 패널 칸이 늘어 화면 아래로 밀렸을 수 있다 — 보이게 내린 뒤 누른다.
+    await tester.ensureVisible(find.widgetWithText(FilledButton, '추가').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '추가').last);
     await tester.pumpAndSettle();
     final made = calls.firstWhere((c) => c.path == '/api/projects/p1/tasks');

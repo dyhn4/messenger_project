@@ -633,6 +633,9 @@ export const rooms = pgTable(
     quietLeave: boolean('quiet_leave').notNull().default(false),
     // 토픽 보관 — 찍혀 있으면 목록의 '보관된 토픽'으로 옮겨지고 읽기 전용처럼 동작한다(내용은 그대로).
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    // 보드 뷰 토픽의 말머리(분류) 목록 `[{ id, name, color }]` — 토픽 관리자가 정한다(boardRules.js). 게시글은 그중 하나를
+    // messages.post_category_id로 고른다. 지운 말머리의 게시글은 말머리 없이 보인다. 다른 방은 늘 빈 목록.
+    boardCategories: jsonb('board_categories').notNull().default([]),
     // 나와의 대화 — 팀마다 사람마다 하나씩 있는, 나 혼자만 멤버인 DM(type 'dm', dmKey '{나}:{나}').
     // 메모·파일 보관용이라 초대·나가기·숨기기 등은 막고(rooms.js), 팀 관리자 알림도 여기로 온다.
     isSelf: boolean('is_self').notNull().default(false),
@@ -844,6 +847,9 @@ export const messages = pgTable(
     // 보내도 같은 사람·같은 id면 새로 만들지 않고 처음 것을 돌려준다(sendMessage.js). 앱은 받은 message:new의 이 값으로 대기 중인
     // 말풍선을 지운다. 예약·서버가 만든 메시지는 null.
     clientId: text('client_id'),
+    // 보드 게시글의 말머리(rooms.board_categories의 id — 없으면 null)와 필독(토픽 관리자가 지정 — 그 시각).
+    postCategoryId: text('post_category_id'),
+    mustReadAt: timestamp('must_read_at', { withTimezone: true }),
   },
   (t) => [
     index('messages_room_id_created_at_idx').on(t.roomId, t.createdAt),
@@ -1286,6 +1292,11 @@ export const tasks = pgTable(
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     // 칸반 열 안에서의 순서(0부터, 작을수록 위). 아직 한 번도 옮기지 않은 업무는 null(열 맨 아래).
     boardPosition: integer('board_position'),
+    // 반복 업무 규칙 { freq, interval, byWeekday?, until? }(taskExtrasRules.js) — 완료하면 다음 회차 업무를 만들고 규칙은
+    // 새 업무로 옮겨 간다(이 업무는 null이 된다). 반복이 아니면 null.
+    recurrence: jsonb('recurrence'),
+    // 예상 소요 시간(분) — 없으면 null. 실제로 쓴 시간은 task_time_entries의 합.
+    estimateMinutes: integer('estimate_minutes'),
   },
   (t) => [
     index('tasks_project_id_idx').on(t.projectId, t.status),
@@ -1326,6 +1337,62 @@ export const taskReferences = pgTable(
   },
   (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index('task_references_user_idx').on(t.userId)],
 );
+
+/**
+ * 업무 선후행 관계 — [taskId](후행)는 [dependsOnTaskId](선행)가 끝나야 시작할 수 있다. 같은 프로젝트의 업무끼리만,
+ * 순환 없이(taskExtrasRules.js wouldCreateCycle). 막지는 않고 알리기만 한다. 업무를 다른 프로젝트로 옮기면 지운다.
+ */
+export const taskDependencies = pgTable(
+  'task_dependencies',
+  {
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    dependsOnTaskId: uuid('depends_on_task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.dependsOnTaskId] }),
+    index('task_dependencies_depends_on_idx').on(t.dependsOnTaskId),
+  ],
+);
+
+/** 업무 소요 시간 기록 — 누가 어느 날 몇 분 썼는지(직접 남기거나 타이머로). 프로젝트 보고는 업무를 거쳐 묶는다. */
+export const taskTimeEntries = pgTable(
+  'task_time_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    minutes: integer('minutes').notNull(),
+    // 일한 날(한국 날짜).
+    workDate: date('work_date', { mode: 'string' }).notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('task_time_entries_task_idx').on(t.taskId, t.workDate),
+    index('task_time_entries_user_idx').on(t.userId, t.workDate),
+  ],
+);
+
+/** 업무 타이머 — 사람마다 하나만 돈다(다른 업무에서 켜면 앞의 것을 멈춰 기록한다). 기기 사이에 같이 보인다. */
+export const taskTimers = pgTable('task_timers', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  taskId: uuid('task_id')
+    .notNull()
+    .references(() => tasks.id, { onDelete: 'cascade' }),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** 프로젝트 노트 — 프로젝트 구성원이 같이 쓰고 고치는 문서(회의록·가이드 등). */
 export const projectNotes = pgTable(
@@ -2620,6 +2687,24 @@ export const resourceBookings = pgTable(
 );
 
 /**
+ * 보드 게시글 읽음 기록 — 게시글 상세를 처음 연 시각(사람마다 한 번). 게시글 읽음 확인(읽음 N · 안 읽음 M)과 필독 안 읽음에 쓴다.
+ * 게시글·사람을 지우면 같이 지운다. 쓴 사람은 기록 없이 늘 읽은 쪽이다(boardRules.js).
+ */
+export const postReads = pgTable(
+  'post_reads',
+  {
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    readAt: timestamp('read_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.userId] }), index('post_reads_user_idx').on(t.userId)],
+);
+
+/**
  * 대화방 임시 저장(입력칸에 쓰다 만 글) — 사람·방마다 하나, 내 다른 기기와 맞춘다(drafts.js). 비밀 대화의 글은 서버에 두지 않는다
  * (앱이 보내지 않고 서버도 받지 않음). 방이 지워지면 같이 지우고, 30일이 지난 글은 내려주지 않고 지운다.
  */
@@ -2884,4 +2969,225 @@ export const attendanceRecords = pgTable(
     uniqueIndex('attendance_records_scope_user_date_uq').on(t.scopeKey, t.userId, t.workDate),
     index('attendance_records_scope_date_idx').on(t.scopeKey, t.workDate),
   ],
+);
+
+/**
+ * 그룹웨어 설문(surveyRules.js) — 여러 문항(하나 고르기·여러 개 고르기·글·별점)을 범위 사람 모두(audience 'all') 또는 고른 사람
+ * (target_ids)에게 묻는다. 익명이면 결과에 이름이 안 나온다(응답 행에는 중복 응답을 막으려고 사람을 남긴다).
+ */
+export const surveys = pgTable(
+  'surveys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // 그룹웨어 범위 키 — 팀 범위면 팀 id, 회사 전체면 'server'.
+    scopeKey: text('scope_key').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    creatorName: text('creator_name').notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    // [{ id, kind, title, required, options?: [{ id, text }] }]
+    questions: jsonb('questions').notNull(),
+    anonymous: boolean('anonymous').notNull().default(false),
+    // 'creator' | 'respondents' | 'all'
+    resultVisibility: text('result_visibility').notNull().default('creator'),
+    // 'all'(범위의 정회원 이상 모두) | 'users'(target_ids)
+    audience: text('audience').notNull().default('all'),
+    targetIds: jsonb('target_ids').notNull().default([]),
+    closesAt: timestamp('closes_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    // 마지막으로 응답을 독촉한 시각(1시간에 한 번).
+    remindedAt: timestamp('reminded_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('surveys_scope_idx').on(t.scopeKey, t.createdAt)],
+);
+
+export const surveyResponses = pgTable(
+  'survey_responses',
+  {
+    surveyId: uuid('survey_id')
+      .notNull()
+      .references(() => surveys.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // { [문항 id]: 보기 id | [보기 id] | 글 | 1~5 }
+    answers: jsonb('answers').notNull(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.surveyId, t.userId] }), index('survey_responses_user_idx').on(t.userId)],
+);
+
+/**
+ * 그룹웨어 업무일지(workReportRules.js) — 사람·범위·종류(daily|weekly)·기간 시작일(주간은 월요일)마다 하나. 한 일·할 일·이슈를 쓰고,
+ * 상위자(조직도)와 그룹웨어 관리자가 읽고 댓글을 단다.
+ */
+export const workReports = pgTable(
+  'work_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    userName: text('user_name').notNull(),
+    kind: text('kind').notNull(),
+    periodStart: date('period_start', { mode: 'string' }).notNull(),
+    done: text('done'),
+    plan: text('plan'),
+    issues: text('issues'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('work_reports_scope_user_kind_period_uq').on(t.scopeKey, t.userId, t.kind, t.periodStart),
+    index('work_reports_scope_kind_period_idx').on(t.scopeKey, t.kind, t.periodStart),
+  ],
+);
+
+export const workReportComments = pgTable(
+  'work_report_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    reportId: uuid('report_id')
+      .notNull()
+      .references(() => workReports.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    userName: text('user_name').notNull(),
+    text: text('text').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('work_report_comments_report_idx').on(t.reportId, t.createdAt)],
+);
+
+/** 업무일지를 검토자가 읽은 기록(처음 연 시각) — 쓴 사람에게 "확인함"으로 보인다. */
+export const workReportReads = pgTable(
+  'work_report_reads',
+  {
+    reportId: uuid('report_id')
+      .notNull()
+      .references(() => workReports.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    readAt: timestamp('read_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.reportId, t.userId] })],
+);
+
+/**
+ * 팀 공유 드라이브(driveRules.js·drive.js) — 폴더. parent_id가 null이면 맨 위. 휴지통에 넣으면 deleted_at(그 아래는 따로 표시하지
+ * 않아도 함께 숨는다), 영구 삭제하면 아래 폴더·파일이 같이 지워진다(cascade).
+ */
+export const driveFolders = pgTable(
+  'drive_folders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    parentId: uuid('parent_id').references(() => driveFolders.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: uuid('deleted_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (t) => [index('drive_folders_team_parent_idx').on(t.teamId, t.parentId)],
+);
+
+/** 드라이브 파일 — 지금 판의 저장 경로·크기·형식을 같이 둔다(목록용). 판 기록은 drive_file_versions. */
+export const driveFiles = pgTable(
+  'drive_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    folderId: uuid('folder_id').references(() => driveFolders.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    // 지금 판 — 번호와 저장 경로(미서명 /uploads/…)·크기·형식.
+    version: integer('version').notNull().default(1),
+    filePath: text('file_path').notNull(),
+    size: integer('size'),
+    mimeType: text('mime_type'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+    updatedByName: text('updated_by_name'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: uuid('deleted_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (t) => [index('drive_files_team_folder_idx').on(t.teamId, t.folderId)],
+);
+
+export const driveFileVersions = pgTable(
+  'drive_file_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => driveFiles.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    filePath: text('file_path').notNull(),
+    // 올린 파일 이름(판마다 다를 수 있다 — 내려받을 때 이 이름 대신 드라이브의 파일 이름을 쓴다).
+    originalName: text('original_name'),
+    size: integer('size'),
+    mimeType: text('mime_type'),
+    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+    uploaderName: text('uploader_name').notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('drive_file_versions_file_version_uq').on(t.fileId, t.version)],
+);
+
+/**
+ * 팀 위키(wiki.js·wikiDocs.js) — 팀마다 페이지 나무(parent_id). 본문은 마크다운 글이고 여럿이 동시에 고친다(OT — otText.js):
+ * 열려 있는 동안은 서버 메모리의 문서가 기준이고(revision = 지금까지 적용한 연산 수), 몇 초마다 여기에 저장한다. 지우면 deleted_at
+ * (그 아래 페이지도 함께 숨는다).
+ */
+export const wikiPages = pgTable(
+  'wiki_pages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    parentId: uuid('parent_id').references(() => wikiPages.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    revision: integer('revision').notNull().default(0),
+    // 같은 위 페이지 안에서의 순서(작을수록 위).
+    position: integer('position').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+    updatedByName: text('updated_by_name'),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: uuid('deleted_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (t) => [index('wiki_pages_team_parent_idx').on(t.teamId, t.parentId)],
+);
+
+/** 위키 페이지의 판(스냅숏) — 편집하는 동안 10분마다, 마지막 사람이 나갈 때, 되돌리기 전에 남긴다. */
+export const wikiPageVersions = pgTable(
+  'wiki_page_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pageId: uuid('page_id')
+      .notNull()
+      .references(() => wikiPages.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    // 이 판까지 고친 사람들 이름(쉼표로) — 지난 판 이후.
+    editorNames: text('editor_names'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('wiki_page_versions_page_idx').on(t.pageId, t.createdAt)],
 );

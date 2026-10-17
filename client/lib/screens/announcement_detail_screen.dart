@@ -902,10 +902,12 @@ class _AnnouncementDetailScreenState extends State<AnnouncementDetailScreen> {
 }
 
 /// 공지 읽음 확인 대화상자 — "읽음 N"·"안 읽음 M" 두 탭에 이름(읽은 쪽은 읽은 시각도)을 늘어놓는다.
+/// 보드 게시글의 읽음 확인(message_thread_screen.dart)도 같은 모양이라 [title]만 바꿔 쓴다.
 Future<void> showAnnouncementReadersDialog(
   BuildContext context,
-  AnnouncementReaders readers,
-) => showDialog<void>(
+  AnnouncementReaders readers, {
+  String title = '공지 읽음 확인',
+}) => showDialog<void>(
   context: context,
   builder: (dialogContext) {
     final hint = Theme.of(dialogContext).hintColor;
@@ -916,7 +918,7 @@ Future<void> showAnnouncementReadersDialog(
       ),
     );
     return AlertDialog(
-      title: const Text('공지 읽음 확인'),
+      title: Text(title),
       contentPadding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
       content: SizedBox(
         width: 360,

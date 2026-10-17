@@ -232,17 +232,20 @@ async function boardLevels(userIds) {
 export async function notifyBoard({ io, event, room, post, comment = null, actor, memberIds, excludeIds = [] }) {
   if (!isBoardRoom(room)) return { created: 0 };
   const levelOf = await boardLevels(memberIds);
+  // 필독 지정은 새 글처럼 모두에게(쓴 사람 포함 — 지정한 사람만 뺀다) "[필독] 제목"으로 알린다.
   const recipients = boardRecipientsFor({
-    event,
+    event: event === 'mustRead' ? 'post' : event,
     memberIds,
     actorId: actor.id,
     postAuthorId: post.senderId ?? null,
     levelOf,
     excludeIds,
   });
-  const kind = event === 'post' ? 'board_post' : event === 'edit' ? 'board_edit' : 'board_comment';
+  const kind = event === 'post' || event === 'mustRead' ? 'board_post' : event === 'edit' ? 'board_edit' : 'board_comment';
   const entry = comment ?? post;
-  const preview = event === 'comment' ? previewSource(entry) : (post.title ?? '');
+  const title = post.title ?? '';
+  const preview =
+    event === 'comment' ? previewSource(entry) : event === 'mustRead' || (event === 'post' && post.mustReadAt) ? `[필독] ${title}` : title;
   return createNotifications({
     io,
     kind,

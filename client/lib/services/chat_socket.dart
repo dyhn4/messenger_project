@@ -17,6 +17,7 @@ import '../models/user_status.dart';
 import '../models/poll.dart';
 import '../models/room.dart';
 import '../models/scheduled_message.dart';
+import '../models/task_extras.dart' show TaskTimer;
 import '../models/team.dart';
 import '../models/text_format.dart';
 import '../models/todo.dart' show TodoComment;
@@ -411,6 +412,9 @@ typedef MessageReactionsUpdate = ({
   List<MessageReaction> reactions,
 });
 
+/// 보드 게시글을 누가 처음 읽었다(post:read — 서버 boardExtras.js). 게시글 상세의 "읽음 N"을 다시 받는다.
+typedef PostReadUpdate = ({String roomId, String messageId, String userId});
+
 /// 누군가(나 포함)의 상태 메시지·방해 금지가 바뀌었다(user:status — 서버 users.js). 같은 팀 사람과 내 기기들에 온다.
 typedef UserStatusUpdate = ({String userId, UserStatus? status, DndState? dnd});
 
@@ -544,6 +548,7 @@ class ChatSocket {
   final _callCardController = StreamController<CallCardUpdate>.broadcast();
   final _messageReactionsController =
       StreamController<MessageReactionsUpdate>.broadcast();
+  final _postReadController = StreamController<PostReadUpdate>.broadcast();
   final _announcementController = StreamController<Announcement>.broadcast();
   final _announcementUpdatedController =
       StreamController<Announcement>.broadcast();
@@ -576,6 +581,13 @@ class ChatSocket {
   final _orgUpdatedController = StreamController<OrgUpdate>.broadcast();
   final _orgTreeChangedController = StreamController<String?>.broadcast();
   final _projectChangedController = StreamController<void>.broadcast();
+  final _taskTimerController = StreamController<TaskTimer?>.broadcast();
+  final _driveChangedController = StreamController<String>.broadcast();
+  // 위키 이벤트는 동기로 흘린다 — 연산 확인(ack)은 소켓 콜백에서 곧바로 처리되므로, 이벤트도 같은 차례로 처리돼야
+  // 다른 사람의 연산과 내 연산 확인의 순서가 서버와 같다(wiki_doc.dart).
+  final _wikiController = StreamController<Map<String, dynamic>>.broadcast(
+    sync: true,
+  );
   final _projectNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _projectNotificationSyncController = StreamController<int>.broadcast();
@@ -792,6 +804,9 @@ class ChatSocket {
   Stream<MessageReactionsUpdate> get messageReactions =>
       _messageReactionsController.stream;
 
+  /// 보드 게시글을 누가 처음 읽었다(post:read).
+  Stream<PostReadUpdate> get postReads => _postReadController.stream;
+
   /// 토픽방 공지가 새로 올라올 때마다(announcement:new) — 방 상단 배너와 공지 목록 화면이
   /// 이걸로 즉시 갱신된다.
   Stream<Announcement> get announcements => _announcementController.stream;
@@ -858,6 +873,42 @@ class ChatSocket {
   /// 열려 있는 "프로젝트" 창이 지금 보고 있는 화면을 다시 불러오는 신호로만 쓴다(무엇이
   /// 바뀌었는지는 굳이 구분하지 않는다 — 화면 하나가 통째로 새로고침되는 편이 단순하다).
   Stream<void> get projectChanged => _projectChangedController.stream;
+
+  /// 내 업무 타이머가 바뀌었다(task:timer — 다른 기기에서 켜고 끈 것도 온다). null이면 멈춤.
+  Stream<TaskTimer?> get taskTimerChanged => _taskTimerController.stream;
+
+  /// 팀 드라이브가 바뀌었다(drive:changed — 그 팀 id). 열려 있는 드라이브 화면이 다시 받는다.
+  Stream<String> get driveChanged => _driveChangedController.stream;
+
+  /// 위키 이벤트(server/src/wiki.js) — `{ type: 'op'|'presence'|'cursor'|'title'|'removed'|'tree', ...데이터 }`.
+  Stream<Map<String, dynamic>> get wikiEvents => _wikiController.stream;
+
+  /// 위키 동시 편집 요청 — 응답은 소켓의 다른 이벤트와 같은 차례로 [onAck]에 곧바로 온다(wiki_doc.dart가 순서에 기댄다).
+  /// 연결이 없으면 바로 실패로 답한다.
+  void wikiRequest(
+    String event,
+    Map<String, dynamic> payload,
+    void Function(Map<String, dynamic> ack) onAck,
+  ) {
+    final socket = _socket;
+    if (socket == null || !socket.connected) {
+      onAck(const {'ok': false, 'error': '서버와 연결되어 있지 않습니다.'});
+      return;
+    }
+    socket.emitWithAck(
+      event,
+      payload,
+      ack: (dynamic response) => onAck(
+        response is Map
+            ? Map<String, dynamic>.from(response)
+            : const {'ok': false, 'error': '서버 응답이 없습니다.'},
+      ),
+    );
+  }
+
+  /// 위키 — 응답 없이 보내기(커서·나가기).
+  void wikiEmit(String event, Map<String, dynamic> payload) =>
+      _socket?.emit(event, payload);
 
   /// 프로젝트 알림(업무 배정/댓글/마감 임박 등) 한 건 — 서버 project:notification.
   Stream<Map<String, dynamic>> get projectNotifications =>
@@ -1041,6 +1092,33 @@ class ChatSocket {
     });
     socket.on('user:role-updated', (_) => _roleUpdatedController.add(null));
     socket.on('project:changed', (_) => _projectChangedController.add(null));
+    for (final type in [
+      'op',
+      'presence',
+      'cursor',
+      'title',
+      'removed',
+      'tree',
+    ]) {
+      socket.on('wiki:$type', (data) {
+        if (data is Map) {
+          _wikiController.add({
+            ...Map<String, dynamic>.from(data),
+            'type': type,
+          });
+        }
+      });
+    }
+    socket.on('drive:changed', (data) {
+      final teamId = data is Map ? data['teamId'] : null;
+      if (teamId is String) _driveChangedController.add(teamId);
+    });
+    socket.on(
+      'task:timer',
+      (data) => _taskTimerController.add(
+        TaskTimer.fromJson(data is Map ? data['timer'] : null),
+      ),
+    );
     socket.on(
       'project:notification',
       (data) => _projectNotificationController.add(
@@ -1244,6 +1322,19 @@ class ChatSocket {
         ));
       }
     });
+    socket.on('post:read', (data) {
+      final m = Map<String, dynamic>.from(data as Map);
+      final roomId = m['roomId'];
+      final messageId = m['messageId'];
+      final userId = m['userId'];
+      if (roomId is String && messageId is String && userId is String) {
+        _postReadController.add((
+          roomId: roomId,
+          messageId: messageId,
+          userId: userId,
+        ));
+      }
+    });
     socket.on('call:declined', (data) {
       final m = Map<String, dynamic>.from(data as Map);
       final roomId = m['roomId'];
@@ -1351,6 +1442,10 @@ class ChatSocket {
     /// 보드 게시글(type 'post')의 제목 — 다른 타입은 안 보낸다.
     String? title,
 
+    /// 보드 게시글의 말머리 id와 필독(토픽 관리자만 — 아니면 서버가 조용히 뺀다).
+    String? categoryId,
+    bool mustRead = false,
+
     /// [text]의 글자 서식(rich_text_format.dart) — 비밀 대화는 서버가 받지 않는다.
     List<TextFormatRun>? textFormat,
 
@@ -1387,6 +1482,8 @@ class ChatSocket {
       'roomId': roomId,
       'type': type,
       'title': ?title,
+      'categoryId': ?categoryId,
+      if (mustRead) 'mustRead': true,
       'text': ?text,
       'textFormat': ?textFormatToJson(textFormat),
       'mentions': ?mentionsToJson(mentions),

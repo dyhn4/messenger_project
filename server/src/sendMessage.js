@@ -26,6 +26,7 @@ import {
 } from './messageLimits.js';
 import { MESSAGE_ATTACHMENT_MAX, parsePostFields, POST_ATTACHMENT_MAX, topicWriteDenial } from './permissions.js';
 import { isClientIdConflict, parseClientId } from './outboxRules.js';
+import { parsePostCategory } from './boardRules.js';
 import { EMPTY_ATTRIBUTION } from './quoteForwardRules.js';
 import { unhideDmForOtherMembers } from './rooms.js';
 import { toMessageDto } from './messages.js';
@@ -193,11 +194,18 @@ export async function sendUserMessage({
     }
   }
   let post = null;
+  // 게시글의 말머리(방의 목록 중 하나)와 필독(토픽 관리자만 — 아니면 조용히 뺀다).
+  let postCategoryId = null;
+  let mustReadAt = null;
   if (isPost) {
     post = parsePostFields(payload.title, payload.text);
     if (post.error) {
       return { ok: false, error: post.error };
     }
+    const category = parsePostCategory(payload.categoryId ?? null, room);
+    if (category.error) return { ok: false, error: category.error };
+    postCategoryId = category.categoryId ?? null;
+    if (payload.mustRead === true && (await topicAccess(room, senderId)).canManage) mustReadAt = new Date();
   }
 
   // 사진 여러 장을 한 말풍선으로 보낼 때 — 첫 장은 messages의 파일 칸에도 그대로 넣는다
@@ -321,6 +329,7 @@ export async function sendUserMessage({
       : {}),
     ...(todoShare && !isRich ? { todoId: todoShare.todoId, todoCard: todoShare.card } : {}),
     clientId,
+    ...(isPost ? { postCategoryId, mustReadAt } : {}),
   };
 
   let message;

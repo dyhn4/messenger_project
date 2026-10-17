@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/foundation.dart';
 
+import '../models/board_category.dart';
 import '../models/call_card.dart';
 import '../models/comment.dart';
 import '../models/mention.dart';
@@ -174,6 +175,15 @@ class RoomChatController extends ChangeNotifier {
 
   /// [pinnedPosts]를 한 번이라도 받아왔는지 — 받기 전엔 실시간 고정 이벤트로 목록을 만들지 않는다.
   bool pinnedPostsLoaded = false;
+
+  /// 보드 위 "필독 안 읽음" — 이 보드에서 내가 아직 안 읽은 필독 게시글(최근 지정순). [loadUnreadMustRead]로 채우고,
+  /// 게시글을 열거나([markPostRead]) 필독이 바뀌면(applyEdit) 맞춘다. 받기 전엔 null.
+  List<UnreadMustRead>? unreadMustRead;
+
+  final _postReads = StreamController<String>.broadcast();
+
+  /// 이 방의 게시글을 누가 처음 읽었다(post:read) — 게시글 id. 열려 있는 상세가 읽음 확인을 다시 받는다.
+  Stream<String> get postReads => _postReads.stream;
 
   static const _pageSize = 50;
 
@@ -429,6 +439,13 @@ class RoomChatController extends ChangeNotifier {
 
   /// Session이 이 방으로 들어온 실시간 메시지를 라우팅할 때 호출한다.
   void feed(Message m) {
+    // 실시간 새 글엔 "내가 읽었는지"가 없다 — 남의 보드 게시글이면 안 읽은 것, 내 글이면 읽은 것.
+    if (m.isPost && m.readByMe == null && room.isBoard) {
+      m.readByMe = m.senderId != null && m.senderId == _session.userId;
+      if (m.isMustRead && m.readByMe == false && unreadMustRead != null) {
+        unreadMustRead = [(id: m.id, title: m.title ?? ''), ...unreadMustRead!];
+      }
+    }
     messages.add(m);
     notifyListeners();
     // 지금 이 방을 실제로 보고 있을 때만 읽음 처리한다 (백그라운드/다른 방을 보는 중이면 안읽음으로 남겨야 함).
@@ -692,6 +709,8 @@ class RoomChatController extends ChangeNotifier {
       m.editedAt = edited.editedAt;
       m.title = edited.title;
       m.pinnedAt = edited.pinnedAt;
+      m.categoryId = edited.categoryId;
+      m.mustReadAt = edited.mustReadAt;
       // 사진·파일 메시지의 첨부 삭제 — 글 메시지끼리의 수정(비밀 대화 포함)에서는 파일 칸을 건드리지 않는다
       // (비밀 대화는 복호화한 파일 이름 등을 제자리에 덮어쓰고 있어서 서버 값으로 되돌리면 안 된다).
       if (m.type != MessageType.text || edited.type != MessageType.text) {
@@ -707,8 +726,93 @@ class RoomChatController extends ChangeNotifier {
         m.attachments = edited.attachments;
       }
     }
-    if (edited.isPost) _syncPinned(targets.first);
+    if (edited.isPost) {
+      _syncPinned(targets.first);
+      _syncUnreadMustRead(targets.first);
+    }
     notifyListeners();
+  }
+
+  /// [post]의 필독·읽음에 맞춰 "필독 안 읽음"을 고친다(받아 둔 적 있을 때만).
+  void _syncUnreadMustRead(Message post) {
+    final list = unreadMustRead;
+    if (list == null) return;
+    final mine = post.senderId != null && post.senderId == _session.userId;
+    final should =
+        post.isMustRead && !post.deleted && !mine && post.readByMe != true;
+    final idx = list.indexWhere((e) => e.id == post.id);
+    if (should && idx == -1) {
+      unreadMustRead = [(id: post.id, title: post.title ?? ''), ...list];
+    } else if (!should && idx != -1) {
+      unreadMustRead = [...list]..removeAt(idx);
+    } else if (should && list[idx].title != (post.title ?? '')) {
+      unreadMustRead = [...list]
+        ..[idx] = (id: post.id, title: post.title ?? '');
+    }
+  }
+
+  /// 보드 위 "필독 안 읽음"을 서버에서 다시 받는다(보드를 열 때·재연결 뒤). 실패하면 이전 목록 그대로.
+  Future<void> loadUnreadMustRead() async {
+    try {
+      final list = await _session.api!.fetchUnreadMustRead(room.id);
+      if (_disposed) return;
+      unreadMustRead = list;
+      notifyListeners();
+    } catch (_) {
+      // 보드 위 부가 정보라 실패해도 조용히 넘어간다(다음에 열 때 다시).
+    }
+  }
+
+  /// 보드 게시글을 열었다 — 바로 읽음으로 바꾸고(카드의 안 읽음 표시·"필독 안 읽음"에서 빠진다) 서버에 남긴다.
+  /// 서버에 닿지 않아도 화면은 읽음으로 둔다(다음 목록에서 서버 값으로 맞춰진다).
+  void markPostRead(Message post) {
+    if (!post.isPost || post.deleted || !room.isBoard) return;
+    final mine = post.senderId != null && post.senderId == _session.userId;
+    final wasUnread = post.readByMe != true;
+    final listed = unreadMustRead?.any((e) => e.id == post.id) ?? false;
+    post.readByMe = true;
+    for (final m in _instancesOf(post.id)) {
+      m.readByMe = true;
+    }
+    if (listed) {
+      unreadMustRead = [
+        for (final e in unreadMustRead!)
+          if (e.id != post.id) e,
+      ];
+    }
+    if (wasUnread || listed) notifyListeners();
+    // 쓴 사람은 늘 읽음이라 남길 게 없다. 다른 기기에서 이미 읽었어도 서버가 처음 시각만 남긴다.
+    if (!mine) {
+      unawaited(_session.api!.markPostRead(post.id).catchError((_) {}));
+    }
+  }
+
+  /// Session이 post:read(누가 이 방 게시글을 처음 읽음)를 라우팅할 때 — 내 다른 기기에서 읽었으면 여기서도 읽음으로.
+  void applyPostRead(String messageId, String userId) {
+    if (userId == _session.userId) {
+      final targets = _instancesOf(messageId);
+      final listed = unreadMustRead?.any((e) => e.id == messageId) ?? false;
+      if (targets.any((m) => m.readByMe != true) || listed) {
+        for (final m in targets) {
+          m.readByMe = true;
+        }
+        if (listed) {
+          unreadMustRead = [
+            for (final e in unreadMustRead!)
+              if (e.id != messageId) e,
+          ];
+        }
+        notifyListeners();
+      }
+    }
+    if (!_postReads.isClosed) _postReads.add(messageId);
+  }
+
+  /// 게시글 필독 지정/해제(토픽을 관리할 수 있는 사람만). 응답을 곧바로 목록에 반영한다.
+  Future<Message> setPostMustRead(String messageId, bool mustRead) async {
+    final updated = await _session.api!.setPostMustRead(messageId, mustRead);
+    applyEdit(updated);
+    return updated;
   }
 
   /// 같은 id의 인스턴스들 — 타임라인([messages])의 것과, 아직 로드되지 않은 옛 게시글이라
@@ -736,6 +840,9 @@ class RoomChatController extends ChangeNotifier {
         existing.text == incoming.text &&
         existing.editedAt == incoming.editedAt &&
         existing.pinnedAt == incoming.pinnedAt &&
+        existing.categoryId == incoming.categoryId &&
+        existing.mustReadAt == incoming.mustReadAt &&
+        (incoming.readByMe == null || existing.readByMe == incoming.readByMe) &&
         existing.deleted == incoming.deleted) {
       return false;
     }
@@ -745,6 +852,10 @@ class RoomChatController extends ChangeNotifier {
     existing.mentions = incoming.mentions;
     existing.editedAt = incoming.editedAt;
     existing.pinnedAt = incoming.pinnedAt;
+    existing.categoryId = incoming.categoryId;
+    existing.mustReadAt = incoming.mustReadAt;
+    // 고정 목록 응답처럼 읽음을 모르는 값으로는 덮지 않는다.
+    existing.readByMe = incoming.readByMe ?? existing.readByMe;
     existing.deleted = incoming.deleted;
     return true;
   }
@@ -991,6 +1102,7 @@ class RoomChatController extends ChangeNotifier {
   /// 다시 받아와 합친다(보드의 고정 목록을 받아둔 적 있으면 그것도 다시 받는다).
   Future<void> refresh() async {
     if (pinnedPostsLoaded) unawaited(loadPinnedPosts());
+    if (unreadMustRead != null) unawaited(loadUnreadMustRead());
     try {
       final generation = _secretCacheGeneration;
       final history = await _session.api!.fetchRoomMessages(
@@ -1239,6 +1351,8 @@ class RoomChatController extends ChangeNotifier {
     List<TextFormatRun>? textFormat,
     List<Mention>? mentions,
     List<UploadedAttachment> attachments = const [],
+    String? categoryId,
+    bool mustRead = false,
   }) async {
     final trimmedTitle = title.trim();
     final trimmedText = text.trim();
@@ -1250,6 +1364,8 @@ class RoomChatController extends ChangeNotifier {
       roomId: room.id,
       type: 'post',
       title: trimmedTitle,
+      categoryId: categoryId,
+      mustRead: mustRead,
       text: trimmedText,
       textFormat: trimmedText == text ? textFormat : null,
       mentions: trimmedText == text ? mentions : null,
@@ -1267,6 +1383,8 @@ class RoomChatController extends ChangeNotifier {
     required String text,
     List<TextFormatRun>? textFormat,
     List<Mention>? mentions,
+    bool setCategory = false,
+    String? categoryId,
   }) async {
     final trimmedTitle = title.trim();
     final trimmedText = text.trim();
@@ -1277,6 +1395,8 @@ class RoomChatController extends ChangeNotifier {
       text: trimmedText,
       textFormat: trimmedText == text ? textFormat : null,
       mentions: trimmedText == text ? mentions : const [],
+      setCategory: setCategory,
+      categoryId: categoryId,
     );
     applyEdit(updated);
     return updated;
@@ -1513,6 +1633,7 @@ class RoomChatController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _readSub?.cancel();
+    _postReads.close();
     TypingGate.instance.cancel(this);
     super.dispose();
   }

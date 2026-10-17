@@ -12,6 +12,8 @@ import 'expense_tab.dart';
 import 'groupware_admin_tab.dart';
 import 'leave_tab.dart';
 import 'resource_tab.dart';
+import 'survey_tab.dart';
+import 'work_report_tab.dart';
 
 /// 그룹웨어 화면을 연다 — PC·모바일 모두 전체 화면.
 Future<void> openGroupwareScreen(BuildContext context, Session session) {
@@ -141,6 +143,25 @@ class _GroupwareScreenState extends State<GroupwareScreen> {
       (
         '예약',
         ResourceTab(
+          api: _api,
+          ctx: ctx,
+          changes: _changes,
+          session: widget.session,
+        ),
+      ),
+      // 설문(여러 문항)과 업무일지(일일·주간 업무보고) — survey_tab.dart·work_report_tab.dart.
+      (
+        '설문',
+        SurveyTab(
+          api: _api,
+          ctx: ctx,
+          changes: _changes,
+          session: widget.session,
+        ),
+      ),
+      (
+        '업무일지',
+        WorkReportTab(
           api: _api,
           ctx: ctx,
           changes: _changes,

@@ -1,6 +1,7 @@
 import 'package:flutter/painting.dart' show Color;
 
 import 'app_user.dart';
+import 'task_extras.dart';
 import 'text_format.dart';
 
 /// 업무 상태 — server/src/projects.js의 TASK_STATUSES와 1:1로 대응한다(칸반보드의 열이 될 값).
@@ -392,6 +393,25 @@ class Task {
   final List<TaskChecklistItem> checklist;
   final List<Task> subtasks;
 
+  /// 반복 업무인지(목록 배지) — 규칙([recurrence])은 상세에만 온다. 완료하면 다음 회차가 생기고 규칙은 새 업무로 옮겨 간다.
+  final bool recurring;
+  final TaskRecurrence? recurrence;
+
+  /// 예상 소요 시간(분, 없으면 null)과 지금까지 기록한 시간 합(분).
+  final int? estimateMinutes;
+  final int spentMinutes;
+
+  /// 아직 안 끝난 선행 업무 수 — 목록·칸반 카드의 "선행 N" 표시.
+  final int openPredecessorCount;
+
+  /// 선행 업무(이 업무가 기다리는 것)·후행 업무(이 업무를 기다리는 것), 시간 기록 — 상세에서만 채워진다.
+  final List<TaskLink> predecessors;
+  final List<TaskLink> successors;
+  final List<TaskTimeEntry> timeEntries;
+
+  /// 고치기(PATCH) 응답에만 — 이번에 완료해서 만든 반복 업무 다음 회차의 번호(안내 토스트).
+  final String? nextRecurrenceKey;
+
   Task({
     required this.id,
     required this.projectId,
@@ -439,6 +459,15 @@ class Task {
     this.boardPosition,
     this.checklist = const [],
     this.subtasks = const [],
+    this.recurring = false,
+    this.recurrence,
+    this.estimateMinutes,
+    this.spentMinutes = 0,
+    this.openPredecessorCount = 0,
+    this.predecessors = const [],
+    this.successors = const [],
+    this.timeEntries = const [],
+    this.nextRecurrenceKey,
   });
 
   /// 화면에 보이는 상태 이름 — 프로젝트가 정한 이름, 없으면 분류 이름.
@@ -537,6 +566,15 @@ class Task {
             ?.map((e) => Task.fromJson(e as Map<String, dynamic>))
             .toList() ??
         const [],
+    recurring: json['recurring'] as bool? ?? false,
+    recurrence: TaskRecurrence.fromJson(json['recurrence']),
+    estimateMinutes: (json['estimateMinutes'] as num?)?.toInt(),
+    spentMinutes: (json['spentMinutes'] as num?)?.toInt() ?? 0,
+    openPredecessorCount: (json['openPredecessorCount'] as num?)?.toInt() ?? 0,
+    predecessors: TaskLink.listFromJson(json['predecessors']),
+    successors: TaskLink.listFromJson(json['successors']),
+    timeEntries: TaskTimeEntry.listFromJson(json['timeEntries']),
+    nextRecurrenceKey: (json['nextRecurrence'] as Map?)?['key'] as String?,
   );
 }
 

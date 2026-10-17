@@ -168,6 +168,9 @@ import { sanitizeTextFormat } from './textFormat.js';
 import { filterNoteFileLinks } from './fileRefs.js';
 import { signNoteFileLinks } from './fileRefRules.js';
 import { signFileUrl } from './upload.js';
+import { createTaskExtras, taskExtrasCounts } from './taskExtras.js';
+import { minutesLabel, parseEstimate, parseRecurrence, recurrenceLabel } from './taskExtrasRules.js';
+import { deleteDependenciesOf } from './db/queries/taskExtras.js';
 
 const TASK_STATUSES = ['todo', 'doing', 'done'];
 const TASK_PRIORITIES = ['low', 'normal', 'high'];
@@ -377,7 +380,7 @@ async function decorateTasks(tasks, myUserId = null) {
   const statusIds = [...new Set(tasks.map((t) => t.statusId).filter(Boolean))];
   const priorityIds = [...new Set(tasks.map((t) => t.priorityId).filter(Boolean))];
   const ids = tasks.map((t) => t.id);
-  const [types, statuses, priorities, refs, creators, checklist, subtasks, comments] = await Promise.all([
+  const [types, statuses, priorities, refs, creators, checklist, subtasks, comments, extras] = await Promise.all([
     listTaskTypesByIds(typeIds),
     listTaskStatusesByIds(statusIds),
     listTaskPrioritiesByIds(priorityIds),
@@ -387,6 +390,7 @@ async function decorateTasks(tasks, myUserId = null) {
     countChecklistItems(ids),
     countSubtasks(ids),
     countTaskComments(ids),
+    taskExtrasCounts(ids),
   ]);
   const typeById = new Map(types.map((t) => [t.id, t]));
   const statusById = new Map(statuses.map((s) => [s.id, s]));
@@ -416,6 +420,8 @@ async function decorateTasks(tasks, myUserId = null) {
       checklist: checklist[t.id] ?? null,
       subtaskCount: subtasks[t.id] ?? 0,
       commentCount: comments[t.id] ?? 0,
+      spentMinutes: extras.spent[t.id] ?? 0,
+      openPredecessorCount: extras.openPredecessors[t.id] ?? 0,
     };
   });
 }
@@ -467,6 +473,11 @@ function toTaskDto(task, { identifier, projectName } = {}) {
     subtaskCount: task.subtaskCount ?? 0,
     commentCount: task.commentCount ?? 0,
     boardPosition: task.boardPosition ?? null,
+    // 업무 기능 보강(taskExtras.js) — 반복 여부(규칙은 상세에만), 예상·기록 시간(분), 아직 안 끝난 선행 업무 수.
+    recurring: !!task.recurrence,
+    estimateMinutes: task.estimateMinutes ?? null,
+    spentMinutes: task.spentMinutes ?? 0,
+    openPredecessorCount: task.openPredecessorCount ?? 0,
   };
 }
 
@@ -603,6 +614,20 @@ export function createProjectsRouter(io) {
       next(e);
     }
   });
+
+  // 업무 기능 보강(반복·선후행·소요 시간) — 같은 입구와 권한 도우미를 쓰는 하위 라우터(taskExtras.js). /tasks/:id보다 먼저 붙여
+  // GET /tasks/timer 같은 주소가 업무 id로 읽히지 않게 한다. 주소는 모두 위 입구 목록 아래다(test/taskExtrasRules.test.js).
+  const taskExtras = createTaskExtras({
+    io,
+    notifier,
+    requireProjectMember,
+    isProjectManager,
+    rejectIfArchived,
+    rejectIfTaskArchived,
+    recordTaskActivity,
+    notifyProjectMembers,
+  });
+  router.use(taskExtras.router);
 
   /** 이 사람이 그 프로젝트를 볼 수 있는지 확인하고, 못 보면 응답까지 보내고 null을 준다. */
   async function requireProjectMember(req, res, projectId) {
@@ -2142,6 +2167,11 @@ export function createProjectsRouter(io) {
     }
     const referenceIds = await validReferenceIds(project, req.body?.referenceIds);
     if (referenceIds === null) return res.status(400).json({ error: '참조자는 프로젝트 구성원 중에서 고를 수 있습니다.' });
+    // 반복 규칙·예상 소요 시간(taskExtrasRules.js) — 안 보내면 없음.
+    const recurrence = req.body?.recurrence == null ? { recurrence: null } : parseRecurrence(req.body.recurrence);
+    if (recurrence.error) return res.status(400).json({ error: recurrence.error });
+    const estimate = req.body?.estimateMinutes == null ? { value: null } : parseEstimate(req.body.estimateMinutes);
+    if (estimate.error) return res.status(400).json({ error: estimate.error });
 
     // 하위 업무로 만들 때 — 부모는 같은 프로젝트의 업무여야 하고, 두 단계까지만 허용한다
     // (하위 업무의 하위 업무는 만들지 않는다 — 목록 들여쓰기가 끝없이 깊어진다).
@@ -2176,6 +2206,8 @@ export function createProjectsRouter(io) {
       dueDate: parseDate(req.body?.dueDate) ?? null,
       createdBy: req.user.sub,
       completedAt: status === 'done' ? new Date() : null,
+      recurrence: recurrence.recurrence,
+      estimateMinutes: estimate.value,
     });
     if (referenceIds.length > 0) await setTaskReferences(inserted.id, referenceIds);
     // 자동화 규칙 실행 — 결과(자동 배정 등)가 응답과 다른 사람들의 화면 갱신에 이미 반영되도록 먼저 돌린다.
@@ -2237,6 +2269,7 @@ export function createProjectsRouter(io) {
       subtasks: subtasks.map((t) =>
         toTaskDto(t, { identifier: project.identifier, projectName: project.name }),
       ),
+      ...(await taskExtras.detailExtras(task, project)),
     });
   });
 
@@ -2280,7 +2313,10 @@ export function createProjectsRouter(io) {
   async function runChecklistAutomations(project, taskId, completed, actorId) {
     if (!completed) return;
     const task = await findTaskById(taskId);
-    if (task) await runAutomations({ project, task, trigger: 'checklist_completed', notifier, io, actorId });
+    if (!task) return;
+    const after = await runAutomations({ project, task, trigger: 'checklist_completed', notifier, io, actorId });
+    // 자동화가 완료로 옮겼으면 사람이 바꾼 것과 같게 — 반복 업무의 다음 회차, 후행 업무 풀기(taskExtras.js).
+    await taskExtras.afterStatusChange(project, task, after, actorId);
   }
 
   router.patch('/checklist-items/:id', async (req, res) => {
@@ -2370,6 +2406,8 @@ export function createProjectsRouter(io) {
       seq,
       parentTaskId: parent && parent.projectId === task.projectId ? parent.id : null,
       title: `${task.title} (사본)`.slice(0, 200),
+      recurrence: task.recurrence ?? null,
+      estimateMinutes: task.estimateMinutes ?? null,
       description: task.description,
       assigneeId: task.assigneeId,
       status: task.status,
@@ -2426,6 +2464,8 @@ export function createProjectsRouter(io) {
       parentTaskId: null,
     });
     await detachMovedTask(task.id, target.id);
+    // 선후행은 같은 프로젝트 업무끼리만 — 옮긴 업무가 낀 관계는 모두 지운다.
+    await deleteDependenciesOf(task.id);
     // 참조자·담당자는 새 프로젝트 구성원이 아닐 수 있다 — 구성원이 아닌 사람은 뗀다.
     const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
     const keep = [];
@@ -2535,6 +2575,17 @@ export function createProjectsRouter(io) {
     if (startDate !== undefined) fields.startDate = startDate;
     const dueDate = parseDate(req.body?.dueDate);
     if (dueDate !== undefined) fields.dueDate = dueDate;
+    // 반복 규칙(null이면 끄기)·예상 소요 시간(null이면 지우기) — taskExtrasRules.js.
+    if ('recurrence' in (req.body ?? {})) {
+      const parsed = parseRecurrence(req.body.recurrence);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      fields.recurrence = parsed.recurrence;
+    }
+    if ('estimateMinutes' in (req.body ?? {})) {
+      const parsed = parseEstimate(req.body.estimateMinutes);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      fields.estimateMinutes = parsed.value;
+    }
 
     if (Object.keys(fields).length === 0 && newReferenceIds === undefined) {
       return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
@@ -2580,6 +2631,9 @@ export function createProjectsRouter(io) {
         actorId: req.user.sub,
       });
     }
+    // 완료로 바뀌었으면 — 반복 업무의 다음 회차를 만들고, 이 업무를 기다리던 후행 업무를 풀어 준다(taskExtras.js).
+    const next = await taskExtras.afterStatusChange(project, task, updated, req.user.sub);
+    if (next) updated = (await findTaskById(updated.id)) ?? updated;
     await notifyProjectMembers(project, task.id);
     await notifyTaskEvents(project, userUpdated, req.user.sub, {
       assigneeId: 'assigneeId' in fields && fields.assigneeId !== task.assigneeId ? fields.assigneeId : null,
@@ -2594,9 +2648,13 @@ export function createProjectsRouter(io) {
         'customValues' in fields &&
         JSON.stringify(fields.customValues) !== JSON.stringify(task.customValues ?? {}),
     });
-    // 응답은 자동화까지 끝난 최종 상태를 돌려준다.
-    const [decorated] = changedFields.length > 0 ? await decorateTasks([updated], req.user.sub) : [userDecorated];
-    res.json(toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }));
+    // 응답은 자동화까지 끝난 최종 상태를 돌려준다(다음 회차를 만들었으면 반복 규칙이 빠진 값과, 만든 업무의 번호).
+    const [decorated] =
+      changedFields.length > 0 || next ? await decorateTasks([updated], req.user.sub) : [userDecorated];
+    res.json({
+      ...toTaskDto(decorated, { identifier: project.identifier, projectName: project.name }),
+      ...(next ? { nextRecurrence: { id: next.id, key: taskKey(project.identifier, next.seq) } } : {}),
+    });
   });
 
   /** 업무 기록에 한 줄씩 남긴다(행동한 사람 이름은 그때 이름으로 박아 둔다).
@@ -2668,6 +2726,14 @@ export function createProjectsRouter(io) {
     }
     if ('customValues' in fields && JSON.stringify(fields.customValues) !== JSON.stringify(before.customValues ?? {})) {
       lines.push('필드 값을 변경했습니다.');
+    }
+    if ('recurrence' in fields && JSON.stringify(fields.recurrence) !== JSON.stringify(before.recurrence ?? null)) {
+      lines.push(fields.recurrence ? `반복을 '${recurrenceLabel(fields.recurrence)}'(으)로 설정했습니다.` : '반복을 해제했습니다.');
+    }
+    if ('estimateMinutes' in fields && fields.estimateMinutes !== (before.estimateMinutes ?? null)) {
+      lines.push(
+        fields.estimateMinutes ? `예상 시간을 ${minutesLabel(fields.estimateMinutes)}(으)로 정했습니다.` : '예상 시간을 지웠습니다.',
+      );
     }
     if (newReferenceIds !== undefined) {
       const same =
@@ -2743,7 +2809,8 @@ export function createProjectsRouter(io) {
       parentCommentId,
     });
     // 댓글 자동화 — 결과(상태 변경 등)가 아래 화면 갱신 알림에 같이 반영되도록 먼저 돌린다.
-    await runAutomations({ project, task, trigger: 'comment_added', notifier, io, actorId: req.user.sub });
+    const afterComment = await runAutomations({ project, task, trigger: 'comment_added', notifier, io, actorId: req.user.sub });
+    await taskExtras.afterStatusChange(project, task, afterComment, req.user.sub);
     await notifyProjectMembers(project, task.id);
     const refs = (await listReferencesForTasks([task.id]))[task.id] ?? [];
     await notifier.notify({

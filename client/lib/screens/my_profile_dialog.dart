@@ -27,6 +27,7 @@ import '../widgets/user_status_dialogs.dart'
 import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
+import 'api_tokens_dialog.dart';
 import 'my_devices_dialog.dart';
 import 'linked_accounts_dialog.dart';
 import '../widgets/otp_dialogs.dart' show showOtpManageDialog;
@@ -742,6 +743,17 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                         ),
                       ),
                       const Divider(height: 1),
+                      // 개인 API 토큰 — 스크립트·자동화가 내 이름으로 공개 API를 부를 때(api_tokens_dialog.dart). 정회원 이상.
+                      if (widget.session.accountRole != AccountRole.guest) ...[
+                        _ProfileLinkRow(
+                          rowKey: const ValueKey('profile-api-tokens'),
+                          icon: Icons.key_outlined,
+                          label: 'API 토큰',
+                          onTap: () =>
+                              showApiTokensDialog(context, widget.session),
+                        ),
+                        const Divider(height: 1),
+                      ],
                       _ExpandableEntry(
                         icon: Icons.person_remove_outlined,
                         iconColor: Colors.redAccent,

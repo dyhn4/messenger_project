@@ -3,6 +3,7 @@ import 'package:flutter/widgets.dart' show StringCharacters;
 import 'album.dart' show SharedAlbum;
 import 'call_card.dart';
 import 'comment.dart';
+import 'integration.dart' show MessageBot;
 import 'mention.dart';
 import 'message_reaction.dart';
 import 'message_reminder.dart' show ReminderCard;
@@ -220,6 +221,9 @@ class Message {
   /// 메시지 리마인더가 "나와의 대화"에 올린 원본 메시지 카드(reminder_card_view.dart) — 아니면 null.
   final ReminderCard? reminderCard;
 
+  /// 외부 연동(들어오는 웹훅·슬래시 명령)이 올린 봇 메시지의 아이콘 — 아니면 null(message_bubble.dart가 봇 아이콘·"봇" 표시로 그린다).
+  final MessageBot? bot;
+
   /// 화상회의 기록 카드(시스템 메시지 — call_message_card.dart) — 아니면 null. 통화가 진행되는 동안
   /// call:card로 그 자리에서 바뀐다(RoomChatController.applyCallCard) — non-final.
   CallCard? callCard;
@@ -275,6 +279,7 @@ class Message {
     this.sharedAlbum,
     this.sharedTodo,
     this.reminderCard,
+    this.bot,
     this.callCard,
     this.reactions = const [],
     this.notifyOnly,
@@ -292,13 +297,16 @@ class Message {
   /// 고정된 게시글인지(보드 상단 "고정된 게시글").
   bool get isPinned => pinnedAt != null;
 
-  /// 프로젝트 자동화(채팅방 알림)가 보낸 메시지 — 사람이 아니라서 senderId가 null인 일반 글 메시지다.
-  /// 안읽음·알림은 일반 메시지처럼 가지만, 누구의 "내 메시지"도 아니고 프로필도 없다. 탈퇴한
-  /// 사람의 메시지도 senderId가 null이라 보낸 사람 이름까지 같이 본다.
+  /// 프로젝트 자동화(채팅방 알림)나 외부 연동 봇([bot] — 웹훅·슬래시 명령)이 보낸 메시지 — 사람이 아니라서 senderId가
+  /// null인 일반 글 메시지다. 안읽음·알림은 일반 메시지처럼 가지만, 누구의 "내 메시지"도 아니고 프로필도 없다. 탈퇴한
+  /// 사람의 메시지도 senderId가 null이라 보낸 사람 이름(또는 봇 표시)까지 같이 본다.
   bool get isAutomation =>
       senderId == null &&
       type == MessageType.text &&
-      senderName == automationSenderName;
+      (senderName == automationSenderName || bot != null);
+
+  /// 외부 연동 봇이 보낸 메시지인지 — 이름 옆에 "봇" 표시를 붙인다.
+  bool get isBot => senderId == null && bot != null;
 
   /// 채팅 목록에서 [other]와 "같은 사람이 연달아 보낸" 메시지로 묶을지(프로필·시간을 한 번만
   /// 보여줄지). senderId가 null인 메시지는 자동화·탈퇴한 사람 등 여럿일 수 있어서 보낸 사람
@@ -378,6 +386,7 @@ class Message {
       sharedAlbum: SharedAlbum.fromJson(json['sharedAlbum']),
       sharedTodo: SharedTodo.fromJson(json['sharedTodo']),
       reminderCard: ReminderCard.fromJson(json['reminderCard']),
+      bot: MessageBot.fromJson(json['bot']),
       callCard: CallCard.fromJson(json['callCard']),
       reactions: parseReactions(json['reactions']),
       notifyOnly: (json['notifyOnly'] as List?)?.whereType<String>().toList(),

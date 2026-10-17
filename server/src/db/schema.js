@@ -96,6 +96,68 @@ export const users = pgTable('users', {
  * 계정에 잇는다. [subject]는 그쪽이 바꾸지 않는 고유 값(Google sub, Microsoft 테넌트+oid, LDAP objectGUID — 없으면 DN).
  * 같은 외부 계정은 한 사람에게만 이어진다(unique). 이메일은 연결할 때의 그쪽 주소(보여 주기용 — 암호화).
  */
+/**
+ * 외부 연동(integrations.js) — 바깥 서비스가 대화방에 글을 올리는 통로.
+ *  - 'webhook'(들어오는 웹훅): 대화방 하나에 묶인 비밀 주소(/hooks/<토큰>). 바깥 서비스(모니터링·CI·설문 등)가 그 주소로 JSON을 보내면
+ *    [name]·[emoji]의 봇 메시지로 올라간다. 토큰은 열쇠 해시로만 두고(만들 때 한 번만 보여 줌), 앞 몇 글자([tokenPrefix])만 화면에.
+ *  - 'command'(슬래시 명령): 팀에 묶인 `/[command]`. 대화방에서 `/명령 내용`을 치면 서버가 [url]로 서명한 요청을 보내고 받은 답을
+ *    봇 메시지로 올린다. 서명 비밀은 암호화해 둔다. 서버가 사내 다른 주소로 요청을 보내는 일이라 서버 운영자만 만든다.
+ * 팀·방이 지워지면 같이 지워진다.
+ */
+export const integrations = pgTable(
+  'integrations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // 'webhook' | 'command'
+    kind: text('kind').notNull(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    roomId: text('room_id').references(() => rooms.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    emoji: text('emoji'),
+    tokenHash: text('token_hash'),
+    tokenPrefix: text('token_prefix'),
+    command: text('command'),
+    description: text('description'),
+    url: text('url'),
+    secretEnc: text('secret_enc'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdByName: text('created_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    useCount: integer('use_count').notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex('integrations_token_hash_idx').on(t.tokenHash),
+    uniqueIndex('integrations_team_command_idx').on(t.teamId, t.command),
+    index('integrations_room_idx').on(t.roomId),
+  ],
+);
+
+/**
+ * 개인 API 토큰 — 내 이름으로 공개 API(/api/v1 — publicApi.js)를 부르는 열쇠(스크립트·자동화용). 토큰은 열쇠 해시로만 두고(만들 때 한
+ * 번만 보여 줌), 권한([scopes] — 'read' 읽기, 'write' 메시지 보내기)과 만료를 정한다. 지우면(revoked) 바로 못 쓴다.
+ */
+export const apiTokens = pgTable(
+  'api_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    tokenPrefix: text('token_prefix').notNull(),
+    scopes: jsonb('scopes').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('api_tokens_token_hash_idx').on(t.tokenHash), index('api_tokens_user_idx').on(t.userId)],
+);
+
 export const userIdentities = pgTable(
   'user_identities',
   {
@@ -738,6 +800,10 @@ export const messages = pgTable(
     // 메시지 리마인더가 울릴 때 "나와의 대화"에 올리는 카드(reminders.js) — { messageId, roomId, roomName, senderName, preview,
     // sentAt }(원본 메시지의 스냅샷). 앱은 카드의 "메시지로 이동"으로 원본을 연다. 그 밖의 메시지는 null.
     reminderCard: jsonb('reminder_card'),
+    // 외부 연동이 올린 봇 메시지(들어오는 웹훅·슬래시 명령 — integrations.js) — 어느 연동인지와 그때의 봇 이모지. 봇 이름은
+    // sender_name에 그대로 둔다(연동을 지워도 메시지의 이름·이모지는 남는다). 사람 메시지·다른 자동 메시지는 null.
+    integrationId: uuid('integration_id').references(() => integrations.id, { onDelete: 'set null' }),
+    botEmoji: text('bot_emoji'),
     // 화상회의 한 통의 기록 카드(type='system' 메시지에만, callCards.js) — 통화가 시작될 때 한 장 만들고 참여·거절·
     // 나감마다 고친다: { status: 'active'|'ended', startedAt, endedAt, durationMs, answered, events: [{ at, userId,
     // name, kind: 'start'|'join'|'leave'|'decline' }] }. 대화에 시스템 메시지를 여러 줄 남기는 대신 이 한 장으로 본다.

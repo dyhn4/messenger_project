@@ -448,6 +448,13 @@ export const limits = {
   ssoStartIp: new RateLimiter({ max: 30, windowMs: 10 * MIN }),
   // 회사 계정 로그인 결과 묻기 — 앱이 2초마다 묻는다. 한 IP에서 10분에 1200번.
   ssoPollIp: new RateLimiter({ max: 1200, windowMs: 10 * MIN }),
+  // 들어오는 웹훅 — 웹훅 하나에 1분 60건(모니터링 알림이 한꺼번에 쏟아져도 방이 묻히지 않게), 한 IP에서 1분 300건(틀린 주소 포함).
+  webhookHook: new RateLimiter({ max: 60, windowMs: MIN }),
+  webhookIp: new RateLimiter({ max: 300, windowMs: MIN }),
+  // 슬래시 명령 — 한 사람이 1분에 30번(바깥 서버로 요청이 나간다).
+  commandUser: new RateLimiter({ max: 30, windowMs: MIN }),
+  // 공개 API(개인 API 토큰) — 토큰 하나에 1분 120번.
+  apiToken: new RateLimiter({ max: 120, windowMs: MIN }),
 };
 
 setInterval(() => {

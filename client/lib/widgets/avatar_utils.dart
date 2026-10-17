@@ -54,14 +54,45 @@ const automationAvatarColor = Color(0xFF6366F1);
 /// 자동화가 보낸 메시지의 아바타 — 사람이 아니라서 프로필 사진·이니셜 대신 번개 아이콘을 그린다.
 class AutomationAvatar extends StatelessWidget {
   final double radius;
-  const AutomationAvatar({super.key, this.radius = 16});
+
+  /// 외부 연동 봇의 아이콘(웹훅·슬래시 명령을 만들 때 고른 이모지) — 없으면 번개.
+  final String? emoji;
+  const AutomationAvatar({super.key, this.radius = 16, this.emoji});
 
   @override
   Widget build(BuildContext context) {
+    final e = emoji;
     return CircleAvatar(
       radius: radius,
       backgroundColor: automationAvatarColor.withValues(alpha: 0.16),
-      child: Icon(Icons.bolt, size: radius * 1.2, color: automationAvatarColor),
+      child: e == null || e.isEmpty
+          ? Icon(Icons.bolt, size: radius * 1.2, color: automationAvatarColor)
+          : Text(e, style: TextStyle(fontSize: radius * 1.1, height: 1)),
+    );
+  }
+}
+
+/// 봇 메시지 이름 옆의 작은 "봇" 표시 — 사람이 보낸 글과 헷갈리지 않게.
+class BotBadge extends StatelessWidget {
+  const BotBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('bot-badge'),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: automationAvatarColor.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Text(
+        '봇',
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: automationAvatarColor,
+        ),
+      ),
     );
   }
 }

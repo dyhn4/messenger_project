@@ -20,6 +20,7 @@ import '../widgets/team_avatar.dart';
 import '../widgets/grab_cursors.dart';
 import 'admin_backup_tab.dart';
 import 'admin_ddns_tab.dart';
+import 'admin_commands_tab.dart';
 import 'admin_login_security_tab.dart';
 import 'admin_mail_tab.dart';
 import 'admin_stickers_tab.dart';
@@ -44,7 +45,7 @@ class AdminConsoleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 10,
+      length: 11,
       child: FloatingDialog(
         title: '서버 관리',
         maxWidth: 820,
@@ -65,6 +66,7 @@ class AdminConsoleScreen extends StatelessWidget {
                 Tab(text: 'DDNS'),
                 Tab(text: '메일'),
                 Tab(text: '로그인 보안'),
+                Tab(text: '슬래시 명령'),
                 Tab(text: '백업'),
                 Tab(text: '이모티콘'),
               ],
@@ -81,6 +83,7 @@ class AdminConsoleScreen extends StatelessWidget {
                   AdminDdnsTab(session: session),
                   AdminMailTab(session: session),
                   AdminLoginSecurityTab(session: session),
+                  AdminCommandsTab(session: session),
                   AdminBackupTab(session: session),
                   AdminStickersTab(session: session),
                 ],

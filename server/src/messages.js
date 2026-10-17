@@ -131,6 +131,8 @@ export function toMessageDto(m) {
         }
       : null,
     isInquiryNotice: !!m.isInquiryNotice,
+    // 외부 연동(웹훅·슬래시 명령)이 올린 봇 메시지 — 앱이 봇 아이콘과 "봇" 표시로 그린다. 그 밖에는 null.
+    bot: m.integrationId || m.botEmoji ? { integrationId: m.integrationId ?? null, emoji: m.botEmoji ?? null } : null,
     inquiryId: m.inquiryId ?? null,
     // 투표(type='poll')의 제목·보기·집계 — 동기 함수라 여기서 조회하지 않고, 목록을 내려주는 쪽이 미리
     // 행에 붙여 둔 m.poll(polls.js의 attachPolls / 새 투표는 sendMessage.js)을 그대로 옮긴다. 지워진

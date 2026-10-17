@@ -15,6 +15,7 @@ import '../data/stickers.dart';
 import '../models/app_notification.dart';
 import '../models/app_user.dart';
 import '../models/comment.dart';
+import '../models/integration.dart';
 import '../models/invite_result.dart';
 import '../models/mention.dart';
 import '../models/message.dart';
@@ -1408,6 +1409,43 @@ class Session extends ChangeNotifier {
       await _prefs.setString(_kRefreshToken, refresh);
     }
   }
+
+  // ── 슬래시 명령(외부 연동 — server/src/integrations.js) ──
+
+  /// 팀마다 받아 둔 슬래시 명령 — 입력칸 자동 완성과 "이 글이 명령인지" 판단에 쓴다. 서버 운영자가 바꿔도 5분 안에 따라간다.
+  final _teamCommands = <String, ({DateTime at, List<Integration> list})>{};
+  static const _teamCommandsTtl = Duration(minutes: 5);
+
+  /// 받아 둔 명령(없으면 빈 목록) — 기다리지 않는 화면 그리기용.
+  List<Integration> cachedTeamCommands(String teamId) =>
+      _teamCommands[teamId]?.list ?? const [];
+
+  /// 이 팀의 슬래시 명령 — 받아 둔 지 5분이 안 됐으면 그대로. 못 받으면 받아 둔 것(없으면 빈 목록).
+  Future<List<Integration>> teamCommands(
+    String teamId, {
+    bool refresh = false,
+  }) async {
+    final hit = _teamCommands[teamId];
+    if (!refresh &&
+        hit != null &&
+        DateTime.now().difference(hit.at) < _teamCommandsTtl) {
+      return hit.list;
+    }
+    try {
+      final list = await api!.fetchTeamCommands(teamId);
+      _teamCommands[teamId] = (at: DateTime.now(), list: list);
+      return list;
+    } catch (_) {
+      return hit?.list ?? const [];
+    }
+  }
+
+  /// 슬래시 명령 실행 — 방에 올리는 답은 봇 메시지로 소켓을 타고 오고, 나에게만 보일 답은 결과로 돌아온다.
+  Future<CommandRunResult> runSlashCommand(
+    Room room, {
+    required String command,
+    required String text,
+  }) => api!.runSlashCommand(room.id, command: command, text: text);
 
   /// 내 계정으로 로그인한 기기(로그아웃시킨 것 빼고 — 이 기기가 맨 위).
   Future<List<MyDevice>> fetchMyDevices() async => activeDevicesFirstCurrent(
@@ -5283,6 +5321,7 @@ class Session extends ChangeNotifier {
     if (callController.roomId != null) await leaveCall();
     _stickerRefresh?.cancel();
     serverStickers.clear();
+    _teamCommands.clear();
     // 잠긴 채로 로그아웃하면(잠금 화면의 "로그아웃") 다음 로그인 때 다시 잠겨 뜨지 않게 푼다.
     if (settings.appLocked) await settings.setAppLocked(false);
     // 인증이 아직 유효한 동안(아래에서 token을 지우기 전) 이 기기의 FCM 토큰을 서버에서

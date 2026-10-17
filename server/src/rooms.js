@@ -515,7 +515,7 @@ export async function postSystemMessage(io, room, text) {
  * socket.js의 message:send와 같은 순서(숨긴 DM 되살리기 → message:new → 푸시)로 보낸다.
  * senderId가 null이라 누구의 "내 메시지"도 아니고, 푸시에서 보낸 사람으로 빠지는 멤버도 없다.
  */
-export async function postBotMessage(io, room, text, { senderName, reminderCard = null }) {
+export async function postBotMessage(io, room, text, { senderName, reminderCard = null, integrationId = null, botEmoji = null }) {
   const message = await insertMessage({
     id: randomUUID(),
     roomId: room.id,
@@ -525,6 +525,9 @@ export async function postBotMessage(io, room, text, { senderName, reminderCard 
     text,
     // 메시지 리마인더가 울릴 때 붙는 원본 메시지 카드(reminders.js) — 그 밖에는 null.
     reminderCard,
+    // 외부 연동(웹훅·슬래시 명령 — integrations.js)이 올린 봇 메시지의 연동과 아이콘 — 그 밖에는 null.
+    integrationId,
+    botEmoji,
   });
   await unhideDmForOtherMembers(io, room, null);
   const dto = toMessageDto(message);

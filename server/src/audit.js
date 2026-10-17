@@ -45,6 +45,9 @@ export const AUDIT = {
   loginSecurity: 'auth.loginSecurity',
   // 관리자가 회원의 2단계 인증을 해제함(휴대폰을 잃어버렸을 때).
   userOtpReset: 'user.otpReset',
+  // 외부 연동(integrations.js) — 들어오는 웹훅·슬래시 명령을 만들고 지움. 바깥에서 대화방에 글을 올리는 통로라 남긴다.
+  integrationCreate: 'integration.create',
+  integrationDelete: 'integration.delete',
 };
 
 /**

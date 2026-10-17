@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../data/stickers.dart';
+import '../models/integration.dart';
 import '../models/mention.dart';
 import '../models/room.dart';
 import '../services/api_client.dart'
@@ -31,6 +32,7 @@ import 'attachment_widgets.dart';
 import 'call_button.dart';
 import 'capture_upload_dialog.dart';
 import 'inquiry_compose.dart';
+import 'integration_widgets.dart';
 import 'mention_autocomplete.dart';
 import 'muted_scrollbar.dart';
 import 'rich_text_format.dart';
@@ -204,6 +206,87 @@ class ChatInputBarState extends State<ChatInputBar> {
     _focusNode.addListener(_onFocusChange);
     _restoreDraft();
     _controller.addListener(_onTextChanged);
+    _loadSlashCommands();
+  }
+
+  /// 이 팀의 슬래시 명령을 미리 받아 둔다(자동 완성 — 연동을 쓸 수 있는 방에서만).
+  void _loadSlashCommands() {
+    final room = _liveRoom;
+    if (!roomAcceptsIntegrations(room)) return;
+    unawaited(
+      widget.session.teamCommands(room.teamId).then((_) {
+        if (mounted) setState(() {});
+      }),
+    );
+  }
+
+  /// 입력칸이 `/명령`을 치는 중이면 고를 수 있는 슬래시 명령(앞부분이 맞는 것) — 아니면 빈 목록.
+  List<Integration> get _slashSuggestions {
+    final query = slashCommandQuery(_controller.text);
+    final room = _liveRoom;
+    if (query == null || !roomAcceptsIntegrations(room)) return const [];
+    return [
+      for (final c in widget.session.cachedTeamCommands(room.teamId))
+        if ((c.command ?? '').startsWith(query)) c,
+    ];
+  }
+
+  String? _lastSlashQuery;
+
+  void _pickSlashCommand(Integration c) {
+    final text = '/${c.command} ';
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+    _focusNode.requestFocus();
+  }
+
+  /// 보내려는 글이 이 팀의 슬래시 명령이면 실행하고 true — 아니면(그냥 `/`로 시작하는 글 포함) false로 보통 메시지처럼 보낸다.
+  Future<bool> _trySlashCommand() async {
+    final raw = _controller.text;
+    final invocation = parseSlashInvocation(raw);
+    final room = _liveRoom;
+    if (invocation == null || !roomAcceptsIntegrations(room)) return false;
+    final commands = await widget.session.teamCommands(room.teamId);
+    Integration? command;
+    for (final c in commands) {
+      if (c.command == invocation.command) command = c;
+    }
+    if (command == null || !mounted) return false;
+    setState(() => _sending = true);
+    _controller.clear();
+    String? reply;
+    try {
+      final result = await widget.session.runSlashCommand(
+        room,
+        command: invocation.command,
+        text: invocation.text,
+      );
+      reply = result.ephemeral;
+    } catch (e) {
+      // 실패하면 친 글을 되돌려 고쳐서 다시 보낼 수 있게.
+      if (_controller.text.isEmpty) _controller.text = raw;
+      if (mounted) showAppToast(context, '/${invocation.command} 실행 실패: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _sending = false);
+        _focusNode.requestFocus();
+      }
+    }
+    // 답 창은 보내기 상태를 푼 뒤에 띄운다(창이 떠 있는 동안 입력 줄이 계속 "보내는 중"으로 남지 않게).
+    if (reply != null && mounted) {
+      unawaited(
+        showSlashReplyDialog(
+          context,
+          command: invocation.command,
+          botName: command.name,
+          emoji: command.emoji,
+          text: reply,
+        ),
+      );
+    }
+    return true;
   }
 
   /// 이 방에서 쓰다 만 글이 있으면 입력칸에 되살린다(다른 방에 갔다 온 경우 — [_saveDraft]).
@@ -230,6 +313,12 @@ class ChatInputBarState extends State<ChatInputBar> {
       TypingGate.instance.composing();
     } else {
       TypingGate.instance.committed();
+    }
+    // 슬래시 명령 고르기 목록은 `/…`를 칠 때만 다시 그린다(글자마다 입력 줄 전체를 다시 그리지 않게).
+    final slashQuery = slashCommandQuery(_controller.text);
+    if (slashQuery != _lastSlashQuery) {
+      _lastSlashQuery = slashQuery;
+      if (mounted) setState(() {});
     }
     // 쓰는 동안에도 잠깐 멈추면 임시 저장한다 — 앱이 갑자기 꺼져도 남게(보내고 비우면 지워진다).
     _draftTimer?.cancel();
@@ -551,6 +640,14 @@ class ChatInputBarState extends State<ChatInputBar> {
     final sticker = widget.pendingSticker;
     if (_attachments.isEmpty && text.isEmpty && sticker == null) return;
     if (_uploading) return; // 버튼 자체도 막지만, 이중 방어.
+    // `/명령 내용` — 이 팀의 슬래시 명령이면 메시지 대신 명령을 실행한다(첨부·이모티콘이 없을 때만).
+    if (_attachments.isEmpty &&
+        sticker == null &&
+        !_sending &&
+        await _trySlashCommand()) {
+      return;
+    }
+    if (!mounted) return;
 
     final toSend = List<_PendingAttachment>.from(_attachments);
     setState(() {
@@ -914,6 +1011,12 @@ class ChatInputBarState extends State<ChatInputBar> {
               // 서식 도구모음을 펼치면 입력칸 테두리 안쪽 맨 위에 도구모음 줄을 얹는다. 펼치든
               // 접든 TextField는 같은 자리(Column의 마지막)에 두어서 입력 중인 상태·포커스가
               // 그대로 이어지게 한다.
+              if (_slashSuggestions case final suggestions
+                  when suggestions.isNotEmpty)
+                SlashCommandSuggestions(
+                  commands: suggestions,
+                  onPick: _pickSlashCommand,
+                ),
               RichFormatFrame(
                 open: _formatOpen,
                 focused: _focusNode.hasFocus,

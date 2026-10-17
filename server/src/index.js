@@ -28,6 +28,8 @@ import { createLoginSecurityRouter } from './loginSecurity.js';
 import { loginMethodsView } from './loginSecurityRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { createSsoRouter, ssoRedirectUri } from './sso.js';
+import { createIntegrationsRouter, webhookReceiveHandler } from './integrations.js';
+import { createPublicApiRouter } from './publicApi.js';
 import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
 import { bodyErrorReply, createJsonBodyParser } from './bodyLimit.js';
 import { certPath, certsDir, ensureTlsCredentials, lanAddressesInCert } from './certs.js';
@@ -149,6 +151,8 @@ app.use('/auth', createAuthRouter(io));
 // 2단계 인증(OTP)과 회사 계정 로그인(SSO) — 로그인 전에도 부르는 경로라 /auth 아래(각 경로가 필요하면 토큰을 직접 본다).
 app.use('/auth', createLoginSecurityRouter());
 app.use('/auth', createSsoRouter());
+// 공개 API(개인 API 토큰 — publicApi.js) — 앱 토큰(requireAuth)이 아니라 API 토큰으로 열어서 아래 /api 묶음보다 먼저 건다.
+app.use('/api/v1', createPublicApiRouter(io));
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', uploadErrorHandler);
 app.use('/api', requireAuth, createFileResignRouter());
@@ -193,6 +197,8 @@ app.use('/api', requireAuth, createCalendarFeedsRouter());
 // 할 일(To-Do) — 대화방에 딸린 가벼운 할 일(담당자·기한·첨부·알림 일정). 프로젝트 업무와는 별개(todos.js).
 app.use('/api', requireAuth, createTodosRouter(io));
 app.use('/api', requireAuth, createDevicesRouter(io));
+// 외부 연동 — 웹훅·슬래시 명령·개인 API 토큰 관리(integrations.js).
+app.use('/api', requireAuth, createIntegrationsRouter(io));
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
 app.use('/api', requireAuth, createCallsRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));
@@ -234,6 +240,14 @@ app.use(versionRouter);
 app.use('/guide', guideStatic);
 // 내 일정 ICS 구독 주소 — Google·Outlook 캘린더가 로그인 없이 받아 가므로 인증 대신 주소의 긴 비밀 토큰으로 연다(calendarFeeds.js).
 app.get('/calendar-feed/:token', rateLimit(limits.calendarFeedIp, '캘린더 피드 요청'), calendarFeedHandler);
+// 들어오는 웹훅 — 바깥 서비스(모니터링·CI·설문)가 로그인 없이 보내므로 주소의 비밀 토큰으로 연다(integrations.js). JSON은 위 공통
+// 파서가 읽고, 그냥 글(text/plain)과 Slack 옛 방식(form의 payload=)도 받는다.
+app.post(
+  '/hooks/:token',
+  express.text({ type: 'text/*', limit: '100kb' }),
+  express.urlencoded({ extended: false, limit: '100kb' }),
+  (req, res) => webhookReceiveHandler(io, req, res),
+);
 // FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
 app.use(firebaseConfigRouter);
 // 웹 앱의 웹 푸시 공개키(VAPID) — 브라우저가 구독할 때 쓰는 공개값이라 인증 없이(webPush.js).

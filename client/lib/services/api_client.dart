@@ -11,6 +11,7 @@ import '../models/comment.dart';
 import '../models/backup_settings.dart';
 import '../models/ddns_settings.dart';
 import '../models/inquiry.dart';
+import '../models/integration.dart';
 import '../models/invite_link.dart';
 import '../models/invite_result.dart';
 import '../models/mail_settings.dart';
@@ -1037,6 +1038,113 @@ class ApiClient {
     await _post('/api/admin/users/$userId/otp-reset', {})
         as Map<String, dynamic>,
   );
+
+  // ── 외부 연동(웹훅·슬래시 명령·개인 API 토큰 — 서버 integrations.js) ──
+
+  Map<String, dynamic> _map(Object? json) =>
+      (json as Map).cast<String, dynamic>();
+
+  Future<List<Integration>> fetchRoomWebhooks(String roomId) async => [
+    for (final j in await _get('/api/rooms/$roomId/webhooks') as List)
+      Integration.fromJson(_map(j)),
+  ];
+
+  Future<WebhookSecret> createWebhook(
+    String roomId, {
+    required String name,
+    String? emoji,
+  }) async => WebhookSecret.fromJson(
+    _map(
+      await _post('/api/rooms/$roomId/webhooks', {
+        'name': name,
+        'emoji': ?emoji,
+      }),
+    ),
+  );
+
+  Future<Integration> updateIntegration(
+    String id,
+    Map<String, dynamic> patch,
+  ) async =>
+      Integration.fromJson(_map(await _patch('/api/integrations/$id', patch)));
+
+  /// 웹훅이면 새 주소(WebhookSecret), 슬래시 명령이면 새 서명 비밀(String).
+  Future<Object> regenerateIntegration(Integration integration) async {
+    final body = _map(
+      await _post('/api/integrations/${integration.id}/regenerate', {}),
+    );
+    return integration.isCommand
+        ? body['secret'] as String
+        : WebhookSecret.fromJson(body);
+  }
+
+  Future<void> deleteIntegration(String id) async {
+    await _delete('/api/integrations/$id');
+  }
+
+  Future<List<Integration>> fetchTeamCommands(String teamId) async => [
+    for (final j in await _get('/api/teams/$teamId/commands') as List)
+      Integration.fromJson(_map(j)),
+  ];
+
+  /// 슬래시 명령 만들기(서버 운영자) → (명령, 서명 비밀 — 이번에만).
+  Future<(Integration, String)> createTeamCommand(
+    String teamId, {
+    required String command,
+    required String name,
+    required String url,
+    String? emoji,
+    String? description,
+  }) async {
+    final body = _map(
+      await _post('/api/teams/$teamId/commands', {
+        'command': command,
+        'name': name,
+        'url': url,
+        'emoji': ?emoji,
+        'description': ?description,
+      }),
+    );
+    return (Integration.fromJson(body), body['secret'] as String);
+  }
+
+  Future<CommandRunResult> runSlashCommand(
+    String roomId, {
+    required String command,
+    required String text,
+  }) async => CommandRunResult.fromJson(
+    _map(
+      await _post('/api/rooms/$roomId/commands/run', {
+        'command': command,
+        'text': text,
+      }),
+    ),
+  );
+
+  Future<List<ApiToken>> fetchApiTokens() async => [
+    for (final j in await _get('/api/users/me/api-tokens') as List)
+      ApiToken.fromJson(_map(j)),
+  ];
+
+  /// 개인 API 토큰 만들기 → (토큰, 토큰 글 — 이번에만).
+  Future<(ApiToken, String)> createApiToken({
+    required String name,
+    required bool write,
+    int? expiresInDays,
+  }) async {
+    final body = _map(
+      await _post('/api/users/me/api-tokens', {
+        'name': name,
+        'scopes': write ? ['read', 'write'] : ['read'],
+        'expiresInDays': ?expiresInDays,
+      }),
+    );
+    return (ApiToken.fromJson(body), body['token'] as String);
+  }
+
+  Future<void> revokeApiToken(String id) async {
+    await _delete('/api/users/me/api-tokens/$id');
+  }
 
   /// refreshToken으로 새 accessToken을 받아온다. 실패하면(만료/비밀번호 변경 등) 던진다.
   Future<String> refreshAccessToken(String refreshToken) async {

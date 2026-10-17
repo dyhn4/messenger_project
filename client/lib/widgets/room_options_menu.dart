@@ -11,6 +11,7 @@ import '../screens/invite_members_screen.dart';
 import '../screens/links_screen.dart';
 import '../screens/member_profile_dialog.dart';
 import '../screens/my_profile_dialog.dart';
+import '../screens/room_webhooks_dialog.dart';
 import '../screens/topic_members_dialog.dart';
 import '../screens/topic_settings_dialog.dart';
 import '../services/api_client.dart' show ApiException;
@@ -585,6 +586,14 @@ class RoomOptionsMenu extends StatelessWidget {
             icon: Icons.edit_outlined,
             label: '정보 변경하기',
             onTap: () => showTopicSettingsDialog(context, session, room),
+          ),
+        // 들어오는 웹훅 — 바깥 서비스의 알림을 봇 메시지로 받는다(room_webhooks_dialog.dart).
+        if (canManageRoomWebhooks(session, room))
+          CompactMenu.item<void>(
+            context,
+            icon: Icons.webhook_outlined,
+            label: '웹훅',
+            onTap: () => showRoomWebhooksDialog(context, session, room),
           ),
         if (room.type == RoomType.group) ...[
           _groupInfoItem(context, room),

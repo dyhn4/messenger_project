@@ -244,6 +244,10 @@ String auditActionLabel(String action) => switch (action) {
   'groupware.settings' => '근무 시간 변경',
   'groupware.cancel' => '승인된 결재 취소',
   'auth.lockout' => '로그인 시도 차단',
+  'auth.loginSecurity' => '로그인 보안 설정 변경',
+  'user.otpReset' => '2단계 인증 해제',
+  'integration.create' => '외부 연동 만들기',
+  'integration.delete' => '외부 연동 지우기',
   _ => action,
 };
 
@@ -264,6 +268,8 @@ const auditActionFilters = [
   'invite.create',
   'teamInvite.create',
   'auth.lockout',
+  'auth.loginSecurity',
+  'integration.create',
   'server.backup',
 ];
 

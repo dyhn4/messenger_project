@@ -787,15 +787,23 @@ class _MessageBubbleState extends State<MessageBubble> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const AutomationAvatar(
-                  key: ValueKey('automation-avatar'),
+                AutomationAvatar(
+                  key: const ValueKey('automation-avatar'),
                   radius: avatarDiameter / 2,
+                  emoji: message.bot?.emoji,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  displayName,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                Flexible(
+                  child: Text(
+                    displayName,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+                if (message.isBot) ...[
+                  const SizedBox(width: 6),
+                  const BotBadge(),
+                ],
               ],
             ),
             const SizedBox(height: 4),

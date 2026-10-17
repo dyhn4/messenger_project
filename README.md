@@ -319,6 +319,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 감사 로그: 관리자 권한으로 한 일(메시지 삭제, 등급 변경, 계정 정지 등)을 전부 기록
 - 운영 현황: 회원·팀·방·메시지 수, 오늘 활동량, 업로드 용량
 - DDNS: DuckDNS 자동 갱신(서버가 5분마다 공인 IP를 알림)과 아이폰용 웹 앱 주소(정식 인증서) 상태
+- 슬래시 명령: 팀마다 `/명령`을 등록(보낼 주소·봇 이름·아이콘·설명, 서명 비밀 새로 만들기) — [슬래시 명령](#슬래시-명령)
 
 **화상회의** (LiveKit SFU — 자세한 구조는 [화상회의(LiveKit)](#화상회의livekit))
 - 1:1·그룹·토픽 대화방 위쪽 캠코더 버튼으로 시작/참여(진행 중이면 초록색 + 인원 배지). 누르면 **화상으로 / 음성으로(카메라 끔)** 중
@@ -380,6 +381,29 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **멘션 푸시 규칙** — 개인 멘션은 방을 뮤트한 사람에게도 푸시합니다(`"{이름}님이 회원님을 멘션했습니다: {미리보기}"`). `@all`은 방 뮤트를 존중하고 알림 설정 `mentionAll=false`면 푸시만 생략합니다(기록은 남음, `"{이름}님이 모두를 멘션했습니다: …"`). 같은 글로 멘션 푸시를 받는 사람은 일반 채팅 푸시에서 빠져 두 번 울리지 않습니다. 누구에게 푸시할지는 FCM과 분리된 순수 함수(`server/src/notificationRules.js`의 `pushTargetsFor`)로 계산하며 `node --test`로 검증합니다
 - **보드 알림** — 보드 뷰 토픽에서 새 게시글(`board_post`)·게시글 수정(`board_edit`)·게시글 댓글(`board_comment`)이 알림 기록으로 남습니다. 받는 사람은 그 방 멤버에서 행위자를 뺀 사람 중 **보드 알림 수준**(`boardLevel`)에 맞는 사람입니다 — `all`(새 글·수정·댓글), `important`(새 글 + 내가 쓴 글에 달린 댓글, **기본값**), `new`(새 글만). 방을 뮤트한 멤버도 기록은 남고 푸시만 생략하며, 같은 글로 멘션 알림을 받은 사람에게는 보드 알림을 따로 만들지 않습니다. 큰 토픽도 수신자 설정을 한 번에 조회하고 행을 한 번의 bulk insert로 넣습니다
 - **알림 센터(앱)** — 상단 종 모양 버튼(모바일은 앱바)으로 열고 탭이 여섯 개입니다: **전체 · 멘션 · 메시지 · 보드·공지 · 프로젝트 · 결재**. 탭마다 안 읽음 배지가 붙고, 안 읽은 멘션이 있으면 `멘션` 탭, 없으면 `전체` 탭으로 열립니다. 제목과 탭 사이에는 구분선이 있고, 탭 아래에는 **모두 읽음**(현재 탭 기준 — 안 읽은 대화를 읽음으로 돌릴 때는 확인을 받습니다)이 있습니다. 톱니(알림 설정)에서 **탭별 "안 읽은 알림만 표시"**(전체·멘션·보드·프로젝트·결재, 이 기기에 사용자별로 저장 — 켠 탭은 읽은 알림을 목록에서 숨기고 끄면 다시 보입니다), **`@all` 알림 받기** 스위치, **보드 알림 수준**(전체 / 중요 알림 / 새 글 알림)을 고릅니다. `메시지` 탭(예전 "안 읽은 대화")은 안 읽은 메시지·공지가 있는 방을 여러 팀에 걸쳐 마지막 활동순으로 보여 줍니다(그룹채팅·토픽 줄은 "보낸 사람: 미리보기". **보드 뷰 토픽의 새 글·수정·댓글은 보드 알림으로 따로 오므로 이 탭에 안 뜨고**, 안 읽은 메시지가 전부 나를 멘션한 방도 멘션 탭에 이미 있어서 뺍니다), `보드·공지`는 보드 알림과 안 읽은 공지를 시간순으로, `프로젝트`는 기존 프로젝트 알림함(`/api/project-notifications`)을 같은 줄 모양으로 보여 주며(프로젝트 창 안의 종 모양 알림함도 그대로 있고, 대화상자로 열린 프로젝트는 거기서 "알림 센터에서 보기"로 이 탭을 엽니다), `결재`는 [그룹웨어](#그룹웨어전자결재연차출퇴근) 전자결재의 결재 요청(내 차례)·승인·반려·회수·취소 알림(`/api/groupware/notifications` — 여러 팀·회사 전체 범위를 함께, 팀 단위 결재는 줄 앞에 `[팀 이름]`, 지금 내 차례면 "결재 차례" 꼬리표 — 누르면 그 문서 상세가 열려 바로 승인·반려), `전체`는 다섯을 시간순으로 섞습니다. `멘션` 탭 이름 오른쪽의 **꺾쇠(⌄)**를 누르면 탭 아래에 **전체 멘션 / @나를 멘션 / @all 멘션** 드롭다운이 열려(다른 탭을 보고 있었으면 멘션 탭으로 옮겨 가며 열림) 고른 종류만 보여 주고, 탭 이름이 `멘션` / `@나` / `@all`로 바뀌며 탭 배지·`모두 읽음`·`안 읽은 알림만 표시`도 고른 종류를 따릅니다(선택은 이 기기에 사용자별로 저장, `전체` 탭은 늘 두 종류를 모두 섞음). 멘션·보드 탭은 `before` 커서로 이어 받는 무한 스크롤이고, 항목을 누르면 그 방(다른 팀이면 팀 전환 후)의 그 메시지로 이동·강조하면서 읽음 처리합니다(없어진 대화는 토스트). 모바일은 탭줄이 가로로 스크롤되는 전체 화면입니다. 목록·개수·설정과 소켓(`notification:new`/`notification:sync`) 반영은 `client/lib/services/notification_controller.dart`, 서버 호출은 `notification_api.dart`, 화면은 `widgets/notifications_panel.dart`입니다
+
+**외부 연동** (`server/src/integrations.js`·`publicApi.js`, 규칙은 `integrationRules.js`)
+- **들어오는 웹훅** — 서버 모니터링 알림, CI/배포 결과, 설문 응답 같은 바깥 소식을 대화방에 **봇 메시지**로 받습니다. 토픽(챗 뷰)·그룹
+  대화방의 더보기 → **웹훅**에서 이름·아이콘(이모지)을 정해 만들면 비밀 주소(`/hooks/ttw_…`)가 **한 번만** 보입니다(토큰은 열쇠 해시로만
+  저장 — 새어 나가면 "새 주소 만들기"). 그 주소로 POST JSON `{"text": "…"}`를 보내면 되고, **Slack 형식**(`text`·`attachments`·`blocks`·
+  `username`, 옛 방식 form `payload=`)과 **Discord 형식**(`content`·`embeds`), 그냥 글(`text/plain`)도 그대로 받아 Grafana·Uptime Kuma·
+  Jenkins·GitHub Actions의 Slack/Discord 알림을 주소만 바꿔 붙일 수 있습니다. 올라온 글은 사람 메시지처럼 안읽음·알림이 가고 읽기 전용
+  토픽에도 올라가서 "알림 전용 토픽"을 만들기 좋습니다(보관된 토픽은 410). 만들 수 있는 사람은 토픽을 관리할 수 있는 사람(토픽
+  관리자·팀 관리자), 그룹은 그 방의 정회원 이상이고, 1:1·나와의 대화·비밀 대화·보드 뷰에는 붙일 수 없습니다. 웹훅마다 1분에 60건, 방마다
+  20개까지. 바깥 서비스는 공인 인증서 주소가 필요해서 [웹 앱 주소](#아이폰용-웹-앱-주소정식-인증서)(`WEB_DOMAIN`)가 있으면 그 주소로
+  안내하고, 없으면 사내 주소(자체 서명 — curl은 `-k`)를 안내합니다(`client/lib/screens/room_webhooks_dialog.dart`)
+- **봇 메시지** — 웹훅·슬래시 명령이 올린 글은 보낸 사람 자리에 고른 이모지 아이콘·봇 이름·**"봇"** 표시가 붙고(프로필 없음), 연동을
+  지워도 이미 올라온 메시지의 이름·아이콘은 남습니다
+- **슬래시 명령** — 대화방 입력칸에서 `/`를 치면 그 팀의 명령이 설명과 함께 뜨고(`/de`처럼 앞부분으로 거름), `/deploy web`을 보내면
+  서버가 등록된 주소로 **서명한 요청**(`X-TangoTalk-Signature: v1=HMAC-SHA256(서명 비밀, "시각.본문")`, `X-TangoTalk-Timestamp`)을 보냅니다.
+  5초 안에 받은 답이 Slack처럼 `response_type: "in_channel"`이면 "○○님이 /deploy web 실행" 줄과 함께 봇 메시지로 방에 올리고, 아니면
+  **부른 사람에게만** 창으로 보여 줍니다(그냥 글 답도 됨, 빈 답은 아무것도 안 함). 팀에 없는 명령(`/usr/bin …` 같은 글)은 보통 메시지로
+  보냅니다. 서버가 사내 다른 주소로 요청을 보내는 일이라 **서버 운영자만** 관리자 콘솔 → **슬래시 명령**에서 만들고(서명 비밀은 한 번만
+  보임 — 암호화해 저장), 리디렉트는 따라가지 않으며 답은 64KB까지 읽습니다. 사람마다 1분에 30번, 팀마다 50개까지
+- **개인 API 토큰** — 내 프로필 → **API 토큰**에서 이름·권한(읽기 / 읽기·쓰기)·만료(30일·90일·1년·없음)를 정해 만들면 `ttk_…` 토큰이
+  한 번만 보입니다(정회원 이상, 20개까지). 스크립트가 `Authorization: Bearer ttk_…`로 **공개 API**(`/api/v1` — 내 정보·팀·대화방·메시지
+  읽기, 쓰기 권한이면 내 이름으로 메시지 보내기)를 부릅니다. 앱 API(`/api/*`)와 따로라 앱이 바뀌어도 모양이 그대로이고, 비밀 대화는
+  열 수 없으며, 지우거나 계정이 정지되면 바로 못 씁니다. 토큰마다 1분에 120번(`client/lib/screens/api_tokens_dialog.dart`)
 
 **서버 연결 / 배포**
 - 자체 서명 TLS 인증서 + 클라이언트 인증서 핀닝(공인 CA 미사용)
@@ -836,6 +860,27 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 | 처음 들어온 회사 계정 | 계정을 저절로 만들지(기본 끔)와 그 등급(정회원/준회원), 회사 계정 전용 계정의 다시 확인 주기(기본 7일) |
 | 사내 디렉터리(LDAP) | 서버 주소(`ldaps://dc01.company.local:636` — `ldap://`는 비밀번호가 암호화되지 않으니 되도록 ldaps), 서비스 계정 DN·비밀번호(비우면 익명 검색), 검색 위치(Base DN), 사용자 검색 조건(기본 `(&(objectClass=user)(sAMAccountName={username}))`), 이름·이메일·부서·직책 속성, ldaps 인증서 확인(사내 인증 기관이라 안 되면 끔), 처음 들어온 사람 자동 생성(기본 켬)·등급. 값을 저장 → **연결 시험**(아이디를 넣으면 그 사람을 찾고, 비밀번호까지 넣으면 로그인도 해 봄 — 남기지 않음) 통과 → 켜기 순서이고, 연결 값을 바꾸면 다시 꺼집니다 |
 
+### 슬래시 명령
+
+관리자 콘솔 → **슬래시 명령**(`client/lib/screens/admin_commands_tab.dart`, 서버 `integrations.js` `/api/teams/:teamId/commands`). 팀을
+고르고 **명령 만들기**에 명령 이름(영문 소문자·숫자·`_`·`-`, 32자), 요청을 보낼 주소(http/https), 봇 이름·아이콘, 설명(입력칸 자동
+완성에 보임)을 넣으면 **서명 비밀**이 한 번만 보입니다 — 명령을 받는 서버에 넣어 두고 요청을 확인하세요. 만들기·지우기는 감사 로그에
+남습니다. 받는 서버가 할 일:
+
+| 단계 | 내용 |
+|---|---|
+| 요청 | `POST` JSON `{ command, text, teamId, teamName, roomId, roomName, userId, username, userName, timestamp }` |
+| 확인 | `X-TangoTalk-Signature`가 `"v1=" + hex(HMAC-SHA256(서명 비밀, "<X-TangoTalk-Timestamp>.<본문 그대로>"))`와 같은지, 시각이 5분 안인지 |
+| 답 | 5초 안에 `{ "text": "…" }` — 기본은 부른 사람에게만, `"response_type": "in_channel"`이면 방에 봇 메시지로. Slack의 `attachments`·`blocks`도 글로 바꿔 보여 주고, 그냥 글이나 빈 답(204)도 됩니다. 2xx가 아니거나 리디렉트(3xx)면 실패로 알립니다 |
+
+예(Node.js):
+
+```js
+const sig = 'v1=' + crypto.createHmac('sha256', SECRET).update(`${req.headers['x-tangotalk-timestamp']}.${rawBody}`).digest('hex');
+if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(req.headers['x-tangotalk-signature'] ?? ''))) return res.sendStatus(401);
+res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON.parse(rawBody).text}` });
+```
+
 ### 회원 관리
 
 전체 회원(탈퇴 포함)을 이름·아이디로 검색하고, 각자의 상태와 소속 팀을 봅니다. 로그인 방법(회사 디렉터리·회사 계정)과 2단계 인증을
@@ -1029,8 +1074,9 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
   뒤로 갔을 때만 알림이 옴), 화면 공유(방송 확장). macOS·Linux 데스크톱 앱은 없습니다.
 - **로그인 보안 후속** — 2단계 인증·회사 계정(SSO)·사내 디렉터리(LDAP)는 들어갔습니다([주요 기능](#주요-기능)의 "계정"). 남은 것:
   SAML(OIDC를 못 쓰는 IdP), 디렉터리 그룹으로 팀·등급 자동 지정, 하드웨어 보안 키(패스키·WebAuthn), 회사 계정 쪽 로그아웃 연동.
-- **외부 연동(들어오는 웹훅·봇·API 토큰)** — 서버 모니터링 알림, CI/배포 결과, 설문 응답 같은 외부 이벤트를 대화방으로 받습니다.
-  지금 외부에 열린 통로는 캘린더 ICS 구독 주소뿐이고, 슬래시 명령·봇·웹훅·개인 API 토큰은 없습니다.
+- **외부 연동 후속** — 들어오는 웹훅·봇 메시지·슬래시 명령·개인 API 토큰은 들어갔습니다([주요 기능](#주요-기능)의 "외부 연동"). 남은 것:
+  나가는 웹훅(새 메시지·멘션 같은 이벤트를 바깥으로 알리기), 버튼·선택지가 있는 대화형 봇 메시지(Slack 블록을 지금은 글로만 보여 줌),
+  웹훅으로 그림·파일 올리기, 봇 전용 계정과 OAuth 앱(사람 토큰 대신), 공개 API 확장(댓글·할 일·일정, 웹훅으로 실시간 받기).
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
@@ -1190,6 +1236,8 @@ messenger_project/
 │  │  ├─ loginSecurity.js         2단계 인증(OTP)·로그인 마무리·사내 디렉터리 계정 연결 — 규칙은 totp.js·loginSecurityRules.js
 │  │  ├─ sso.js                   회사 계정 로그인(Google·Microsoft OIDC) — 규칙은 ssoRules.js
 │  │  ├─ ldapAuth.js              사내 디렉터리(LDAP/AD) 확인 — 규칙은 ldapRules.js
+│  │  ├─ integrations.js          외부 연동 — 들어오는 웹훅(/hooks)·슬래시 명령·API 토큰 관리, 규칙은 integrationRules.js
+│  │  ├─ publicApi.js             공개 API(/api/v1 — 개인 API 토큰)
 │  │  ├─ users.js                 프로필 조회/수정/비밀번호 변경/탈퇴
 │  │  ├─ admin.js                 관리자 콘솔 API(회원·팀·감사 로그·운영 현황·DDNS·메일, 서버 운영자 전용)
 │  │  ├─ ddns.js                  DuckDNS 자동 갱신(5분마다, DB를 모르는 갱신기) — ddnsService.js가 DB 설정과 잇는다
@@ -1756,7 +1804,8 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 모든 `/api/*`, `/auth/refresh` 이후 요청은 `Authorization: Bearer <AccessToken>` 헤더가
 필요합니다(`server/src/auth.js`의 `requireAuth`). `/auth/*`(회원가입/로그인/찾기류), `/health`,
-`/server-info`, `/version`, `/downloads/*`, `/files/:token`은 인증 없이 호출 가능합니다.
+`/server-info`, `/version`, `/downloads/*`, `/files/:token`은 인증 없이 호출 가능합니다. 들어오는 웹훅(`/hooks/:token`)과
+캘린더 피드(`/calendar-feed/:token`)는 주소의 비밀 토큰이 열쇠이고, 공개 API(`/api/v1/*`)는 앱 토큰 대신 개인 API 토큰을 씁니다.
 
 **인증** (`/auth`, 인증 불필요)
 
@@ -2067,6 +2116,21 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/attendance/month` | `?month=YYYY-MM&userId=`(남의 것은 관리자) 날마다 기록·휴가·공휴일과 요약 |
 | GET | `/api/groupware/attendance/summary` \| `export` | (관리자) 구성원별 한 달 요약 / 같은 내용의 엑셀(.xlsx — 요약·일별 기록) |
 
+**외부 연동** (`server/src/integrations.js`, 공개 API는 `publicApi.js`)
+
+| Method | Path | 인증 | 설명 |
+|---|---|---|---|
+| GET / POST | `/api/rooms/:roomId/webhooks` | 그 방을 관리할 수 있는 사람(토픽) / 정회원 이상 멤버(그룹) | 방의 웹훅 목록 / 만들기 `{ name, emoji? }` → 201 `{ …, token, urls: { path, web, direct } }`(토큰은 이번에만, `web`은 웹 앱 주소가 있을 때). 1:1·비밀 대화·보드 뷰는 400, 방마다 20개 |
+| GET / POST | `/api/teams/:teamId/commands` | 팀 멤버 / 서버 운영자 | 팀의 슬래시 명령(보낼 주소는 서버 운영자에게만) / 만들기 `{ command, url, name?, emoji?, description? }` → 201 `{ …, secret }`(이번에만). 같은 이름 409, 팀마다 50개 |
+| POST | `/api/rooms/:roomId/commands/run` | 방 멤버 | 슬래시 명령 실행 `{ command, text }` → `{ posted: true }`(방에 올림) \| `{ ephemeral: 글 }`(부른 사람에게만) \| `{ ok: true }`(할 말 없음). 받는 서버가 5초 안에 2xx로 답하지 않으면 502, 사람마다 1분에 30번 |
+| PATCH / DELETE | `/api/integrations/:id` | 웹훅은 그 방 관리자, 명령은 서버 운영자 | 이름·아이콘(명령은 `url`·`description`도) 바꾸기 / 지우기(이미 올라온 메시지는 남음) |
+| POST | `/api/integrations/:id/regenerate` | 위와 같음 | 웹훅은 새 주소 `{ token, urls }`, 명령은 새 서명 비밀 `{ secret }` — 예전 값은 바로 못 씀 |
+| GET / POST / DELETE | `/api/users/me/api-tokens` · `/:id` | 필요(만들기는 정회원 이상) | 내 API 토큰 목록 / 만들기 `{ name, scopes: ["read"] \| ["write"], expiresInDays?(1~365) }` → 201 `{ …, token }`(이번에만, 20개까지) / 지우기 |
+| POST | `/hooks/:token` | 불필요(주소의 토큰) | 들어오는 웹훅 받기 — JSON(일반 `text`·`message`·`content`·`body`·`title`·`url`, Slack `attachments`·`blocks`·`username`, Discord `embeds`), `text/plain`, form `payload=JSON` → `{ ok: true }`. 모르는 주소 404, 보낼 글 없음 400, 보관된 토픽 410, 웹훅마다 1분에 60건·IP마다 300건(429) |
+| GET | `/api/v1/me` · `/api/v1/teams` | API 토큰(`read`) | 공개 API — 내 정보 `{ id, username, name, email }` / 내 팀 `[{ id, name }]` |
+| GET | `/api/v1/rooms?teamId=` | API 토큰(`read`) | 내 대화방 `[{ id, teamId, type, name, archived }]`(비밀 대화 제외) |
+| GET / POST | `/api/v1/rooms/:id/messages` | API 토큰(`read` / `write`) | 메시지 `?limit=(≤100)&before=(epoch ms)` → 오래된 것부터 `[{ id, type, senderId, senderName, bot, title, text, fileName, createdAt, editedAt, deleted }]` / 내 이름으로 보내기 `{ text }` → 201 `{ id, createdAt }`(멘션·안읽음·알림은 앱에서 보낸 것과 같음). 앱 토큰으로는 401, 토큰마다 1분에 120번 |
+
 **검색 / 업로드 / 기타**
 
 | Method | Path | 인증 | 설명 |
@@ -2153,6 +2217,8 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | 테이블 | 요약 |
 |---|---|
 | `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
+| `integrations` | 외부 연동 — `kind`(`webhook` 들어오는 웹훅 \| `command` 슬래시 명령), `team_id`(팀이 지워지면 같이), `room_id`(웹훅의 방 — 방이 지워지면 같이), `name`·`emoji`(봇 이름·아이콘), `token_hash`(웹훅 주소 토큰의 열쇠 해시 — unique)·`token_prefix`(화면용 앞 8자), `command`·`description`·`url`·`secret_enc`(명령 이름 — 팀 안에서 unique, 보낼 주소, 서명 비밀 암호화), `created_by`·`created_by_name`, `last_used_at`·`use_count` |
+| `api_tokens` | 개인 API 토큰 — `user_id`, `name`, `token_hash`(열쇠 해시 — unique)·`token_prefix`, `scopes`(jsonb `["read"]` \| `["read","write"]`), `expires_at`(null이면 만료 없음), `revoked_at`(지운 시각 — 지우면 바로 못 씀), `last_used_at`(1분에 한 번만 적음) |
 | `user_identities` | 연결된 외부 로그인 — `provider`(`google`|`microsoft`|`ldap`)·`subject`(그쪽이 바꾸지 않는 값 — Google sub, Microsoft 테넌트+oid, LDAP objectGUID; 같은 외부 계정은 한 사람에게만 — unique), `email_enc`(연결할 때의 그쪽 이메일, 암호화), `last_login_at` |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각) |
 | `approval_documents` | 결재 문서(휴가·지출·근태 수정). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
@@ -2172,7 +2238,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(1:1 대화에서 한 사람이 빠졌을 때 — 비밀 대화를 혼자 나갔거나 팀에서 제외됐을 때 — 남은 쪽에 "OOO (나갔음)"으로 보여 줄 사람. 그 사람이 다시 들어오면 지움. 이름은 비밀 대화에만 쓰던 시절 그대로), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |
-| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷) |
+| `messages` | 메시지. `type`은 `text`\|`image`\|`file`\|`system`, 소프트 삭제(`deleted_at`), 5분 수정 윈도우, `thumbnail_url`(이미지 축소본), `read_at`/`expires_at`(비밀 대화 자동 삭제), `quoted_*`(인용 공유 스냅샷), `forwarded_from_*`(전달 스냅샷), `album_id`/`album_share`(앨범 공유 메시지의 앨범 — 앨범을 지우면 `album_id`만 null, `album_share`는 `{ title, teamName }` 스냅샷. 인덱스 `messages (album_id)`), `call_card`(화상회의 카드 — 시스템 메시지에만, `{ status, startedAt, endedAt, durationMs, answered, events: [{ at, userId, name, kind }] }`), `reminder_card`(리마인더가 울릴 때 나와의 대화에 올리는 봇 메시지에만 — `{ messageId, roomId, roomName, senderName, preview, sentAt, secret }` 스냅샷), `integration_id`·`bot_emoji`(웹훅·슬래시 명령이 올린 봇 메시지의 연동과 아이콘 — 연동을 지우면 `integration_id`만 null, 봇 이름은 `sender_name`) |
 | `message_reminders` | 리마인더. 메시지 리마인더("나중에 알림")는 메시지·방(`message_id`·`room_id`), 직접 만든 리마인더는 글과 울릴 나와의 대화의 팀(`text`·`team_id`)만 둔다(마이그레이션 0107에서 `message_id`·`room_id`를 null 허용으로). 사람·메시지·방·팀 모두 cascade, `remind_at`, 울린 때 `fired_at`(울린 지 30일 지나면 지움). 인덱스: 울리기 전 것만의 `remind_at`(partial)·`(user_id, remind_at)` |
 | `message_reactions` | 메시지 공감(이모지 반응). 메시지+사람 복합 PK라 한 사람이 메시지마다 하나(`emoji`, 바꾸면 `created_at`도 새로). 메시지·사람을 하드 삭제하면 cascade |
 | `polls` / `poll_options` / `poll_votes` / `poll_favorites` | 투표. `messages.type='poll'` 메시지 1개당 `polls` 1행(제목·설명·`anonymous`·`multiple`·`closes_at`·일찍 마감한 `closed_at`), 보기(`poll_options`), 표(`poll_votes` — 보기+사람 복합 PK), 사람별 즐겨찾기(`poll_favorites`). 메시지를 하드 삭제하면 cascade로 함께 지워진다. 목록 필터용 인덱스: `polls (room_id, created_at desc)`·`polls (creator_id, created_at desc)`·`poll_votes (user_id, poll_id)` |
@@ -2871,6 +2937,9 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
 - **2단계 인증·회사 계정·디렉터리**: OTP 비밀 키는 암호화(`encryptField`), 복구 코드는 열쇠 해시(`lookupHash`)로만 저장합니다. 회사 계정
   로그인은 서버가 그쪽 토큰 주소에서 TLS로 직접 받은 ID 토큰의 발급자·대상·만료·nonce·회사(도메인/테넌트)를 확인하고(OIDC Core 3.1.3.7),
   앱↔서버·서버↔회사 계정 모두 PKCE를 씁니다. 디렉터리 검색 조건의 입력값은 RFC 4515로 이스케이프하고 빈 비밀번호는 거절합니다.
+- **외부 연동**: 웹훅 주소의 토큰과 개인 API 토큰(영문·숫자 40자, 약 238비트)은 열쇠 해시(`lookupHash`)로만 저장하고 앞 8자만 화면에
+  보입니다. 슬래시 명령의 서명 비밀은 암호화(`encryptField`)해 두고, 나가는 요청은 리디렉트를 따라가지 않으며(5초·64KB), 보낼 주소는
+  서버 운영자만 정합니다(사내 주소로 요청을 보내는 일이라 일반 회원에게 열지 않음). 공개 API는 비밀 대화를 열지 않습니다.
 - **DB 저장 민감 필드**: 이메일은 AES-256-GCM으로 암호화 저장(`emailEnc`)하고, "정확히 일치하는지"
   조회할 때는 별도의 HMAC-SHA256 해시(`emailLookup`)를 씁니다 — 이 해시만으로는 원문을 복원할 수
   없습니다(`server/src/crypto.js`).
@@ -2951,7 +3020,8 @@ psql -U messenger_app -d messenger -c "TRUNCATE TABLE secret_rekeys, secret_sess
   채팅방 알림은 10분에 규칙마다 20번·대화방마다 30번, 공개 프로젝트 생성 알림은 1시간에 사람마다 팀당 3번·팀마다 10번까지만
   보내고 넘친 것은 건너뜁니다. 아직 울리지 않은 할 일 알림은 할 일을 만든 사람마다 1,000개까지입니다(DB로 셈 — 400). 메시지 보내기는
   10초에 40통·10분에 600통(429 대신 소켓 응답 `메시지를 너무 빠르게 보내고 있습니다. N초 후 다시 시도하세요.`), 댓글 달기는 10초에 20개·10분에
-  300개(파일을 실은 메시지·댓글은 10분 창만), 링크 미리보기 그림 받기는 10분에 60번(넘으면 그림 없이)입니다.
+  300개(파일을 실은 메시지·댓글은 10분 창만), 링크 미리보기 그림 받기는 10분에 60번(넘으면 그림 없이)입니다. 들어오는 웹훅은 웹훅마다
+  1분에 60건·IP마다 1분에 300건, 슬래시 명령은 사람마다 1분에 30번, 공개 API는 토큰마다 1분에 120번입니다.
 
 ## Git 관리 규칙
 

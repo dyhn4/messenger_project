@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../models/app_user.dart';
+import '../models/org_tree.dart';
 import '../models/room.dart';
 import '../models/team.dart';
 import '../services/api_client.dart' show PositionOption;
 import '../services/session.dart';
 import '../widgets/floating_dialog.dart';
 import '../widgets/muted_scrollbar.dart';
+import '../widgets/org_tree_view.dart';
 import '../widgets/role_badge.dart';
 import '../widgets/sort_menu_button.dart';
 import '../widgets/team_avatar.dart';
@@ -16,9 +18,9 @@ import 'home_screen.dart' show wideBreakpoint;
 import 'member_profile_dialog.dart';
 import 'my_profile_dialog.dart';
 
-/// "조직도" — 관리자 이상만 볼 수 있는, 서버 전체 팀/회원 목록(팀 목록 화면의 AppBar에서 연다).
-/// "팀" 탭(기본값)은 팀별로 묶어서 보여주고, 팀을 누르면 그 자리에 멤버가 펼쳐진다. "멤버"
-/// 탭은 서버 전체 회원을 한 번에 검색할 수 있는 목록이다. 둘 다 회원을 누르면 기존 멤버
+/// "조직도" — 첫 탭 "부서"는 부서 트리와 부서장·상위자(org_tree_view.dart — 회사 하나면 정회원 이상, 팀마다면 그 팀 멤버가 본다).
+/// 계정 등급 관리자·서버 운영자에게는 서버 전체 팀/회원 목록 탭이 더 붙는다 — "팀" 탭은 팀별로 묶어서 보여주고 팀을 누르면 그
+/// 자리에 멤버가 펼쳐지며, "멤버" 탭은 서버 전체 회원을 한 번에 검색할 수 있는 목록이다. 어느 탭이든 회원을 누르면 기존 멤버
 /// 패널과 같은 프로필 카드(사진+1:1/비밀 대화)가 뜬다.
 Future<void> showOrgChartScreen(BuildContext context, Session session) {
   return showDialog<void>(
@@ -37,7 +39,12 @@ class _OrgChartScreen extends StatefulWidget {
 
 class _OrgChartScreenState extends State<_OrgChartScreen>
     with SingleTickerProviderStateMixin {
-  late final _tabController = TabController(length: 2, vsync: this);
+  /// 서버 전체 팀/회원 탭(관리자 이상)까지 보이는지 — 아니면 "부서" 탭 하나.
+  late final bool _admin = widget.session.canViewOrgChart;
+  late final _tabController = TabController(
+    length: _admin ? 3 : 1,
+    vsync: this,
+  );
 
   /// 두 탭 목록의 스크롤 — 스크롤바(MutedScrollbar)와 목록이 같은 컨트롤러를 써야 한다. 안 주면 스크롤바가 기본
   /// 컨트롤러를 찾는데, PC에서는 목록이 거기 붙지 않아 "스크롤 위치가 없다"는 오류가 나고, 휴대폰에서는 두 탭
@@ -61,7 +68,8 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
   @override
   void initState() {
     super.initState();
-    _load();
+    // 서버 전체 팀·회원 목록은 관리자 이상만 받는다(GET /org-chart/teams — 그 밖에는 403).
+    if (_admin) _load();
     widget.session.fetchPublicPositionOptions().then((list) {
       if (mounted) setState(() => _positionOptions = list);
     });
@@ -102,12 +110,37 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
     return match.isEmpty ? null : match.first;
   }
 
-  Future<void> _openMember(AppUser user) async {
+  Future<void> _openMember(AppUser user, {OrgTree? tree}) async {
     if (user.id == widget.session.userId) {
       await showDialog(
         context: context,
         builder: (_) => MyProfileDialog(session: widget.session),
       );
+      return;
+    }
+    // "부서" 탭을 관리자가 아닌 사람이 연 경우 — 서버 전체 팀 목록이 없으니, 팀 조직도면 그 팀(조직도 사람은 모두 그 팀 멤버)으로
+    // 대화를 시작하고, 회사 조직도면 보통 프로필 카드처럼 지금 팀 기준으로 연다.
+    if (_teams == null) {
+      final teamId = tree?.scope == 'team' ? tree?.teamId : null;
+      final team = teamId == null
+          ? null
+          : OrgChartTeam(
+              id: teamId,
+              name: tree!.teamName ?? '',
+              memberIds: [for (final m in tree.members) m.id],
+            );
+      final room = await showDialog<Room>(
+        context: context,
+        builder: (_) => MemberProfileDialog(
+          session: widget.session,
+          user: user,
+          fromOrgChart: team != null,
+          orgChartDmTeamCandidates: team == null ? const [] : [team],
+          orgChartSecretTeamCandidates: team == null ? const [] : [team],
+        ),
+      );
+      if (room == null || !mounted) return;
+      _openRoom(room);
       return;
     }
     // 평문 DM은 나와 상대가 "함께" 속한 팀이 있어야 만들 수 있고, 비밀 대화는 내가 속한
@@ -130,6 +163,10 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
       ),
     );
     if (room == null || !mounted) return;
+    _openRoom(room);
+  }
+
+  void _openRoom(Room room) {
     // session.startDmInTeam/startSecretChatInTeam이 이미 그 팀으로 전환하고(requestOpenRoom)
     // "펼쳐서 보여줄 방"까지 정해뒀지만, 그걸 실제로 화면에 띄우는 건 넓은 화면(DesktopHomeScreen)
     // 쪽 코드뿐이다 — 좁은 화면(RoomListScreen)은 방 목록만 보여줄 뿐 새로 생긴 방을 알아서
@@ -150,46 +187,63 @@ class _OrgChartScreenState extends State<_OrgChartScreen>
   Widget build(BuildContext context) {
     return FloatingDialog(
       title: '조직도',
-      maxWidth: 480,
-      maxHeight: 640,
+      maxWidth: 520,
+      maxHeight: 680,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TabBar(
-            controller: _tabController,
-            tabs: const [
-              Tab(text: '팀'),
-              Tab(text: '멤버'),
-            ],
-          ),
-          const SizedBox(height: 12),
+          if (_admin) ...[
+            TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: '부서'),
+                Tab(text: '팀'),
+                Tab(text: '멤버'),
+              ],
+              onTap: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+          ],
           TextField(
-            decoration: const InputDecoration(
-              hintText: '팀/멤버 검색',
+            key: const ValueKey('org-chart-search'),
+            decoration: InputDecoration(
+              hintText: _admin ? '부서/팀/멤버 검색' : '부서/이름 검색',
               isDense: true,
-              prefixIcon: Icon(Icons.search, size: 18),
-              border: OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.search, size: 18),
+              border: const OutlineInputBorder(),
             ),
             onChanged: (v) => setState(() => _filter = v),
           ),
           const SizedBox(height: 12),
           Flexible(
-            child: _error != null
-                ? Center(child: Text(_error!))
-                : (_teams == null || _users == null)
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildTeamsTab(context),
-                      _buildMembersTab(context),
-                    ],
-                  ),
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                OrgTreeView(
+                  session: widget.session,
+                  filter: _filter,
+                  onOpenMember: (user, tree) => _openMember(user, tree: tree),
+                ),
+                if (_admin) ...[
+                  _adminTab(() => _buildTeamsTab(context)),
+                  _adminTab(() => _buildMembersTab(context)),
+                ],
+              ],
+            ),
           ),
         ],
       ),
     );
+  }
+
+  /// 관리자 탭 — 서버 전체 팀·회원을 다 받기 전에는 불러오는 중.
+  Widget _adminTab(Widget Function() build) {
+    if (_error != null) return Center(child: Text(_error!));
+    if (_teams == null || _users == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return build();
   }
 
   Widget _buildTeamsTab(BuildContext context) {

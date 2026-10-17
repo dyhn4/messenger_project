@@ -470,6 +470,43 @@ void main() {
     expect(controller.ccIds, isEmpty, reason: '결재자는 참조자로 넣지 않는다');
   });
 
+  testWidgets('결재선 — 조직도 상위자로 채웠으면 안내, 결재자를 바꾸면 안내가 사라진다', (tester) async {
+    final h = _Harness();
+    h.routes['GET /api/groupware/approval-lines'] = (_) => _json({
+      'lines': [],
+      'suggested': {
+        'approverIds': [_lead, _boss],
+        'ccIds': [],
+        'source': 'org',
+      },
+    });
+    final controller = ApprovalLineController();
+    addTearDown(controller.dispose);
+    tester.view.physicalSize = const Size(900, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ApprovalLinePicker(
+            api: h.api,
+            ctx: GroupwareContext.fromJson(_context()),
+            controller: controller,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.approverIds, [_lead, _boss]);
+    expect(
+      find.byKey(const ValueKey('approval-line-org-hint')),
+      findsOneWidget,
+    );
+    controller.removeApprover(_boss);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('approval-line-org-hint')), findsNothing);
+  });
+
   testWidgets('출퇴근 — 출근 단추로 기록한다', (tester) async {
     final h = _Harness();
     h.routes['POST /api/groupware/attendance/clock-in'] = (_) => _json({

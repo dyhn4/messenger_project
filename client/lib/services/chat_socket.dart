@@ -563,6 +563,7 @@ class ChatSocket {
   final _connectFailedController = StreamController<void>.broadcast();
   final _roleUpdatedController = StreamController<void>.broadcast();
   final _orgUpdatedController = StreamController<OrgUpdate>.broadcast();
+  final _orgTreeChangedController = StreamController<String?>.broadcast();
   final _projectChangedController = StreamController<void>.broadcast();
   final _projectNotificationController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -815,6 +816,10 @@ class ChatSocket {
   /// 없이 바로 반영하려고, Session이 이 이벤트로 room.members에 캐싱된 값을 직접 덮어쓴다.
   Stream<OrgUpdate> get orgUpdated => _orgUpdatedController.stream;
 
+  /// 조직도(부서 트리·상위자)가 바뀌었을 때(org:tree-changed) — 그 범위 키('server' 또는 팀 id, 설정이 바뀌었으면 null). 열려 있는
+  /// 조직도가 다시 받는다(org_tree_view.dart).
+  Stream<String?> get orgTreeChanged => _orgTreeChangedController.stream;
+
   /// 내가 참여 중인 프로젝트에서 뭔가 바뀌었을 때(프로젝트/업무/댓글 생성·수정·삭제) —
   /// 열려 있는 "프로젝트" 창이 지금 보고 있는 화면을 다시 불러오는 신호로만 쓴다(무엇이
   /// 바뀌었는지는 굳이 구분하지 않는다 — 화면 하나가 통째로 새로고침되는 편이 단순하다).
@@ -1010,6 +1015,11 @@ class ChatSocket {
       (data) =>
           _notificationSyncController.add(NotificationCounts.fromJson(data)),
     );
+    socket.on('org:tree-changed', (data) {
+      _orgTreeChangedController.add(
+        data is Map ? data['scopeKey'] as String? : null,
+      );
+    });
     socket.on('org:updated', (data) {
       _orgUpdatedController.add(
         OrgUpdate.fromJson(Map<String, dynamic>.from(data as Map)),

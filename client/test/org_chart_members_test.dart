@@ -27,7 +27,14 @@ Map<String, dynamic> _user(String id, String name, {String? position}) => {
 
 Session _session() {
   final client = MockClient((request) async {
-    final body = switch (request.url.path) {
+    final Object body = switch (request.url.path) {
+      '/api/org-tree' => {
+        'scope': 'team',
+        'scopeKey': 't1',
+        'teamId': 't1',
+        'departments': <Object>[],
+        'members': <Object>[],
+      },
       '/api/org-chart/teams' => [
         {
           'id': 't1',
@@ -59,6 +66,8 @@ Session _session() {
     httpClient: client,
   );
   s.userId = 'me';
+  // 서버 전체 팀/회원 탭("팀"·"멤버")은 계정 등급 관리자 이상에게만 붙는다.
+  s.accountRole = AccountRole.admin;
   s.currentTeam = Team(id: 't1', name: '영업팀', createdAt: DateTime(2026));
   return s;
 }

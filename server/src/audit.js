@@ -48,6 +48,8 @@ export const AUDIT = {
   // 외부 연동(integrations.js) — 들어오는 웹훅·슬래시 명령을 만들고 지움. 바깥에서 대화방에 글을 올리는 통로라 남긴다.
   integrationCreate: 'integration.create',
   integrationDelete: 'integration.delete',
+  // 조직도(orgTree.js) — 부서 만들기·바꾸기·지우기, 사람의 부서·상위자 지정. 결재선 추천이 이것을 따르므로 남긴다.
+  orgTree: 'org.tree',
 };
 
 /**

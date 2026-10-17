@@ -11,8 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-/// PC 앱 팀 화면 상단 바의 "조직도" 버튼 — 알림 종 왼쪽(구분선 너머)에 있고, 조직도를 볼 수 있는 등급(계정 관리자·서버 운영자 —
-/// Session.canViewOrgChart)에게만 보인다.
+/// PC 앱 팀 화면 상단 바의 "조직도" 버튼 — 알림 종 왼쪽(구분선 너머)에 있고, 조직도의 "부서" 탭을 볼 수 있는 사람(Session.canViewOrgTree —
+/// 팀 단위 조직도면 팀 멤버 누구나, 회사 하나면 정회원 이상)에게 보인다. 서버 전체 팀/회원 탭은 관리자 이상에게만 붙는다.
 class _Quiet extends NotificationService {
   @override
   Future<void> cancelForRoom(String roomId) async {}
@@ -23,6 +23,7 @@ const _serverUrl = 'https://192.168.0.10:3000';
 Session _session({
   AccountRole role = AccountRole.member,
   bool serverAdmin = false,
+  String orgScope = 'team',
 }) {
   final client = MockClient(
     (request) async => http.Response.bytes(
@@ -38,6 +39,7 @@ Session _session({
   session.name = '김하나';
   session.accountRole = role;
   session.isServerAdmin = serverAdmin;
+  session.orgScope = orgScope;
   final team = Team(id: 't1', name: '팀', createdAt: DateTime(2026));
   session.teams.add(team);
   session.currentTeam = team;
@@ -83,10 +85,32 @@ void main() {
   }
 
   for (final role in [AccountRole.member, AccountRole.guest]) {
-    testWidgets('${role.name}에게는 "조직도" 버튼이 없다', (tester) async {
+    testWidgets('팀 단위 조직도면 ${role.name}에게도 "조직도" 버튼이 보이고, 열면 "부서" 탭 하나뿐이다', (
+      tester,
+    ) async {
       await _pump(tester, _session(role: role));
-      expect(_orgChart, findsNothing);
+      expect(_orgChart, findsOneWidget);
+      await tester.tap(_orgChart);
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(
+        find.widgetWithText(Tab, '팀'),
+        findsNothing,
+        reason: '서버 전체 팀/회원 탭은 관리자 이상만',
+      );
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets('회사 하나(계정 단위) 조직도는 준회원에게 버튼이 없고 정회원에게는 있다', (tester) async {
+    await _pump(tester, _session(role: AccountRole.guest, orgScope: 'account'));
+    expect(_orgChart, findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await _pump(
+      tester,
+      _session(role: AccountRole.member, orgScope: 'account'),
+    );
+    expect(_orgChart, findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

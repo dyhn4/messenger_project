@@ -8,6 +8,7 @@ import { JWT_SECRET } from './config.js';
 import { decryptField, encryptField, lookupHash } from './crypto.js';
 import { findDefaultPositionOption } from './db/queries/positionOptions.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
+import { departmentForText } from './orgTree.js';
 import { findIdentity, findIdentityForUser, linkIdentity, touchIdentity } from './db/queries/userIdentities.js';
 import {
   claimTotpStep,
@@ -268,6 +269,16 @@ const pick = (list) => list[crypto.randomInt(list.length)];
  * 다른 계정이 쓰고 있으면 비워 둔다(이메일은 계정마다 하나). [usernameHint]가 아이디 규칙에 맞고 비어 있으면 그것, 아니면
  * 이메일 앞부분으로 만든다. `{ user }` | `{ error }`.
  */
+/**
+ * 디렉터리가 알려 준 부서 글자 → 계정 칸 `{ department, departmentId }` — 계정 단위 조직도면 같은 이름 부서에 잇는다(없으면 맨 위에
+ * 만든다 — orgTree.js departmentForText). 디렉터리가 부서의 기준이라 로그인할 때마다 맞춘다.
+ */
+async function directoryDepartmentFields(department) {
+  const settings = await getServerSettings();
+  const dept = settings.orgScope === 'account' && department ? await departmentForText('server', department) : null;
+  return { department: dept?.name ?? department ?? null, departmentId: dept?.id ?? null };
+}
+
 export async function provisionExternalUser({ usernameHint, email, name, role, authSource, department = null, position = null }) {
   const isTaken = (u) => isUsernameTakenIgnoringCase(u);
   let username = null;
@@ -282,7 +293,7 @@ export async function provisionExternalUser({ usernameHint, email, name, role, a
     role,
     isServerAdmin: false,
     authSource,
-    department: department ? department.slice(0, 60) : null,
+    ...(await directoryDepartmentFields(department ? department.slice(0, 60) : null)),
     position: position ? position.slice(0, 40) : (defaultPosition?.label ?? null),
     emailEnc: emailFree ? encryptField(email) : null,
     emailLookup: emailFree ? lookupHash(email) : null,
@@ -315,6 +326,7 @@ export async function resolveDirectoryLogin({ localUser, typedUsername, profile,
     if (profile.department && profile.department !== user.department) patch.department = profile.department.slice(0, 60);
     if (profile.title && profile.title !== user.position) patch.position = profile.title.slice(0, 40);
     if (user.authSource !== 'ldap') patch.authSource = 'ldap';
+    if ('department' in patch) Object.assign(patch, await directoryDepartmentFields(patch.department));
     return { user: Object.keys(patch).length ? await updateUser(user.id, patch) : user };
   }
   if (localUser?.id) {

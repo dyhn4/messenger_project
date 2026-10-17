@@ -427,10 +427,10 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 사내 메신저이므로 모든 대화는 **팀(워크스페이스)** 단위로 나뉩니다. 한 계정이 여러 팀에 속할 수
 있고, 채팅방·멤버·검색·파일은 지금 보고 있는 팀 안에서만 보입니다(서버가 모든 요청에서
-`teamId`로 범위를 강제합니다 — `server/src/teams.js`, `server/src/rooms.js`). 예외로 **조직도**
-(팀 목록 화면의 아이콘, 계정 등급 관리자 이상만 보임)는 팀과 무관하게 서버 전체 팀/회원을
-보여줍니다 — "팀" 탭은 팀별로 묶어서(누르면 그 자리에 멤버가 펼쳐짐), "멤버" 탭은 서버 전체
-회원을 검색합니다. 멤버를 눌러 1:1 메시지를 시작할 수도 있지만, 평문 DM은 팀 안에서만 만들 수
+`teamId`로 범위를 강제합니다 — `server/src/teams.js`, `server/src/rooms.js`). **조직도**(팀 화면 상단·팀 목록 화면의 아이콘)의
+첫 탭 **부서**는 [부서 트리와 상위자](#부서-트리와-상위자조직도)이고 회사 조직도면 정회원 이상, 팀 조직도면 그 팀 멤버가 봅니다.
+계정 등급 관리자 이상에게는 팀과 무관하게 서버 전체 팀/회원을 보는 탭이 더 붙습니다 — "팀" 탭은 팀별로 묶어서(누르면 그 자리에
+멤버가 펼쳐짐), "멤버" 탭은 서버 전체 회원을 검색합니다. 멤버를 눌러 1:1 메시지를 시작할 수도 있지만, 평문 DM은 팀 안에서만 만들 수
 있어서 나와 그 사람이 함께 속한 팀이 있을 때만 버튼이 활성화됩니다(비밀 대화는 그 제약이 없음).
 
 **회원 목록이 보이는 범위** — 앱이 받는 회원 목록(`GET /api/users` — 아이디·이름·등급·접속 상태)은 계정 등급 **관리자**와
@@ -562,11 +562,34 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 
 | 설정 | 저장 위치 | 정하는 곳 |
 |---|---|---|
-| 팀 단위(기본) | `team_members.department`/`position` | 각 팀의 팀 설정 → 멤버(그 팀을 관리할 수 있는 사람) → "직책 수정". 아래 "직책 목록" 중에서 자신의 직책과 같거나 그 아래만 칩으로 골라 부여할 수 있습니다 — 부서는 이 화면에 입력칸이 없습니다(자유 입력 칸을 없앴습니다, 기존 값은 컬럼에 남아있을 뿐 이 흐름으로는 더 이상 바뀌지 않습니다) |
+| 팀 단위(기본) | `team_members.department`/`position` | 각 팀의 팀 설정 → 멤버(그 팀을 관리할 수 있는 사람) → "직책 수정". 아래 "직책 목록" 중에서 자신의 직책과 같거나 그 아래만 칩으로 골라 부여할 수 있습니다 — 부서는 이 화면에 입력칸이 없고 조직도 → **부서** 탭에서 정합니다([부서 트리와 상위자](#부서-트리와-상위자조직도) — 예전 자유 글자 값은 같은 이름의 부서로 이어 둡니다) |
 | 계정 단위 | `users.department`/`position` | 관리자 콘솔 → 회원(서버 운영자 — 목록 전체에서 제한 없이 선택) 또는 각 팀의 팀 설정 → 멤버(그 팀을 관리할 수 있는 사람 — 위와 같이 자신의 직책 이하만) |
 
 팀 단위면 한 사람이 팀마다 다른 직책을 가질 수 있고(예: PST에서는 팀장, 개발1팀에서는 팀원),
 계정 단위면 회사 조직도가 하나로 통일됩니다.
+
+#### 부서 트리와 상위자(조직도)
+
+부서는 자유 글자가 아니라 **트리**입니다(`departments` — 위 부서·부서장·순서, 서버 `server/src/orgTree.js`, 규칙은 `orgTreeRules.js`,
+앱은 `client/lib/widgets/org_tree_view.dart`). 범위는 위 설정을 따라 계정 단위면 회사 하나, 팀 단위면 팀마다 따로이고, 사람마다의
+부서·상위자도 같은 칸(`users` 또는 `team_members`의 `department_id`·`manager_id`)에 둡니다. 사람의 부서 글자(`department`)는 고른
+부서 이름을 그대로 따라 적어 두어 멤버 목록·프로필 카드·예전 앱의 부서 표시는 그대로입니다.
+
+- **보기** — 조직도 → **부서** 탭. 맨 위 부서가 펼쳐진 트리로 부서마다 부서장과 인원(아래 부서 포함), 펼치면 부서장(배지)이 먼저인
+  구성원과 각자의 **상위자**("상위자 ○○", 따로 정했으면 "(지정)"), 맨 아래 "부서 없음". 검색칸에 넣으면 이름이 맞는 부서(경로·인원)와
+  사람(부서 경로)이 목록으로 나옵니다. 회사 조직도는 **정회원 이상**이 보고(준회원 403 — 서버 전체 명단이라), 아이디는 서버 전체를 보는
+  사람·팀을 같이 쓰는 사람에게만 실립니다([회원 목록이 보이는 범위](#팀과-권한-등급)와 같은 뜻). 팀 조직도는 그 팀 멤버가 보고, 팀이
+  여럿이면 위에서 팀을 고릅니다. 다른 사람이 고치면 소켓 `org:tree-changed`로 열려 있는 조직도가 다시 받습니다.
+- **고치기** — 회사 조직도는 서버 운영자·계정 등급 관리자, 팀 조직도는 그 팀 소유자도. **부서 만들기**, 부서 ⋯ 메뉴의 하위 부서
+  만들기·이름 바꾸기(구성원의 부서 글자도 따라 바뀜)·**부서장 정하기**(부서가 없던 사람이면 그 부서 사람이 됨)·위로/아래로·다른 부서
+  아래로 옮기기(자기 아래로는 못 옮김, 10단계까지)·지우기(하위 부서와 구성원은 위 부서로 올라감 — 맨 위면 구성원은 부서 없음), 사람
+  ⋯ 메뉴의 **부서 옮기기**·**상위자 정하기**. 한 범위에 부서는 500개까지이고, 바꾼 내용은 감사 로그(`org.tree`)에 남습니다.
+- **상위자** — 따로 정한 사람이 있으면 그 사람, 없으면 **부서장**(본인이 부서장이거나 부서장이 비었으면 위 부서로 올라가며 첫 부서장)입니다.
+  서로가 서로의 상위자가 되게는 정할 수 없습니다. 상위자의 상위자 … 로 이어진 **상위자 사슬**이 결재선 추천이 됩니다([그룹웨어](#그룹웨어전자결재연차출퇴근)의 "결재선").
+- **예전 글자 부서** — 서버를 켤 때(그리고 팀·직책 관리 범위를 바꿀 때) 글자로만 적혀 있던 부서를 같은 이름의 맨 위 부서에 잇습니다(없으면
+  만듦 — 여러 번 돌아도 같음). 팀 설정·관리자 콘솔이 글자로 부서를 보내거나 사내 디렉터리(LDAP)가 부서 속성을 알려 줘도 같은 방식으로
+  트리에 이어지고, 지우면 부서도 비웁니다. 팀에서 빠진 사람을 상위자·부서장으로 정해 둔 칸은 그 팀 조직도에서 비우고, 팀을 지우면 그
+  팀의 부서도 지웁니다.
 
 **직책 목록** — 서버 운영자가 관리하는 직책 후보 목록(`position_options` 테이블, 설치 직후
 사원/주임/대리/과장/차장/부장/이사/대표가 이 순서로 기본 들어있습니다 — `sort_order`는
@@ -1037,9 +1060,11 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 진행되면 다음 결재자·올린 사람·참조자에게 푸시(방해 금지 존중)와 소켓 알림이 가고, **알림 센터 `결재` 탭**에 쌓입니다(결재 요청·승인·반려·회수·취소 — 내가 결재를 처리하면 그 문서의 요청 알림은 저절로 읽음, 90일 보존). 앱이 켜져 있으면 앱이 직접 알림(PC는 알림 창)을 띄우고, 푸시·PC 알림·웹 알림 어느 것을 눌러도 **그 문서 상세**가 열리며 그 문서의 결재 알림은 읽음이 됩니다(문서를 열 수 없으면 알림 센터 `결재` 탭). 결재함: 결재할 문서 · 내가 올린 문서 · 결재한 문서 ·
 참조 문서 · 전체 문서(관리자).
 
-**결재선** — 신청할 때 직접 고르고, 자주 쓰는 결재선은 이름을 붙여 저장해 둡니다(20개까지). 새 결재를 열면 가장 최근에 저장한 결재선이
-미리 채워집니다. 나중에 조직도에 "상위자"를 넣으면 그것으로 기본 결재선을 만들 수 있게 자리를 만들어 두었습니다(`approvalRules.js`
-`suggestApprovalLine`의 `managerChain`).
+**결재선** — 신청할 때 직접 고르고, 자주 쓰는 결재선은 이름을 붙여 저장해 둡니다(20개까지). 새 결재를 열면 [조직도](#부서-트리와-상위자조직도)의
+**상위자 사슬**(바로 위 상위자부터 위로, 결재자로 고를 수 없는 사람 — 준회원·정지·그룹웨어 범위 밖 — 은 건너뜀, 5명까지)이 결재자로 미리
+채워지고 "조직도의 상위자 순서로 결재자를 채웠습니다" 안내가 붙습니다(결재자를 바꾸면 사라짐). 상위자가 없으면 가장 최근에 저장한 결재선이
+채워집니다(`groupware.js` → `orgTree.js` `managerChainFor` → `approvalRules.js` `suggestApprovalLine`). 조직도는 부서·직책 설정을 따르므로
+그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 씁니다.
 
 **휴가·법정 연차**(입사일 기준, 근로기준법 제60조) — 관리 탭에서 구성원의 입사일을 정하면 앱이 연차를 계산합니다.
 - 입사 1년 미만: 한 달 채울 때마다 1일, 최대 11일. 1년 이상: 15일, 3년차부터 2년마다 1일씩 늘어 최대 25일(`15 + ⌊(근속연수 − 1) / 2⌋`).
@@ -1080,9 +1105,10 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **조직도 — 부서 트리와 상위자** — 부서가 자유 글자(`users.department`·`team_members.department`)라 상하 관계가 없고, 상위자(결재권자)
-  칸도 없습니다. 조직도 화면(`org_chart_screen.dart`)도 관리자만 봅니다. 아래 결재선 자동 채우기·합의·대결이 모두 이것에 기대므로
-  그룹웨어 후속 중 가장 먼저 할 일입니다(결재선 추천 자리는 `approvalRules.js`의 `suggestApprovalLine` — `managerChain`을 넘기면 됨).
+- **조직도 후속** — 부서 트리·부서장·상위자와 그것으로 채우는 결재선은 들어갔습니다([부서 트리와 상위자](#부서-트리와-상위자조직도)). 남은 것:
+  **겸직**(한 사람이 두 부서), 결재 종류마다 다른 결재선 규칙(예: 휴가는 팀장까지, 지출은 금액에 따라 본부장까지 — 지금은 상위자 사슬 전체를
+  5명까지 채우고 사람이 뺌), 끌어다 놓아 부서 옮기기, 조직도 엑셀 가져오기·내보내기, 사내 디렉터리(LDAP)의 OU·관리자(manager) 속성으로 트리·상위자
+  맞추기, 조직도 그림(가로 트리) 보기.
 - **결재 양식** — 휴가·지출·근태 수정 3종뿐입니다. 국내 그룹웨어의 기본인 **일반 기안서(품의서)**, 출장 신청, 구매 요청, 연장근무
   신청이 없고, 관리자가 양식을 만드는 기능도 없습니다.
 - **결재 기능** — 결재자 순서대로(최대 5명)·참조·결재선 저장·회수·관리자 취소·알림 센터 결재 탭까지는 있고, **합의**(동시 결재),
@@ -1245,6 +1271,7 @@ messenger_project/
 │  │  ├─ emailCodes.js            메일 확인 코드 보내기·확인(가입·이메일 확인·변경·비밀번호 재설정) / emailCodeRules.js(순수 규칙)
 │  │  ├─ inviteMail.js            초대 링크를 메일로 보내기(설치 초대·팀 초대 공용)
 │  │  ├─ mentionDigest.js         오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일(매일 9시) / mentionDigestRules.js(순수 규칙)
+│  │  ├─ orgTree.js               조직도 — 부서 트리·부서장·상위자, 결재선 추천의 상위자 사슬(규칙은 orgTreeRules.js)
 │  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
 │  │  │                           groupwareScope.js(팀마다/회사 전체)가 순수 규칙(단위 테스트 대상)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
@@ -1901,6 +1928,11 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/api/teams` | 내가 속한 팀 목록(각 팀에서의 내 등급 포함) |
+| GET | `/api/org-tree` | **조직도 부서 트리** `?teamId=`(팀 단위면 필수) → `{ scope('server'\|'team'), scopeKey, teamId, teamName, canEdit, departments: [{ id, parentId, name, headId, sortOrder }], members: [{ id, name, username(볼 수 있을 때만), role, 아바타, position, departmentId, managerId(따로 정한 상위자), effectiveManagerId(실제 상위자) }] }`. 회사 조직도는 정회원 이상, 팀 조직도는 그 팀 멤버(403) — 정지된 계정은 뺀다 |
+| POST | `/api/org-tree/departments` | 부서 만들기 `{ teamId?, name(30자), parentId? }` → 201. 같은 위치 같은 이름 409, 500개·10단계까지. 고칠 수 있는 사람(회사: 서버 운영자·계정 등급 관리자, 팀: 그 팀 소유자도) |
+| PATCH / DELETE | `/api/org-tree/departments/:id` | 바꾸기 `{ name?, parentId?(null이면 맨 위), headId?(null이면 없음) }` — 이름을 바꾸면 구성원 부서 글자도, 자기 아래로 옮기기 400 / 지우기(하위 부서·구성원은 위 부서로). 지금 쓰지 않는 범위(설정이 바뀜)의 부서는 409 |
+| POST | `/api/org-tree/departments/:id/move` | 같은 위 부서 안에서 순서 `{ direction: 'up' \| 'down' }` |
+| PUT | `/api/org-tree/members/:userId` | 사람의 부서·상위자 `{ teamId?, departmentId?, managerId? }`(null이면 비움 — 상위자는 부서장으로). 자기 자신·서로가 서로의 상위자 400. 바뀌면 `org:updated`(부서 글자)·`org:tree-changed` |
 | GET | `/api/org-chart/teams` | **조직도** — 서버 전체 팀 + 각 팀의 멤버 id 목록·소유자 id(`ownerId`, 조직도 "멤버" 탭의 "소유자" 배지가 쓴다)(내가 속하지 않은 팀도 포함). 계정 등급 관리자 이상 또는 서버 운영자만(403) |
 | POST | `/api/teams` | 팀 생성(만든 사람이 소유자) |
 | PATCH | `/api/teams/:id` | 팀 이름/아이콘/토픽 생성 권한/메시지 설정 변경(소유자·관리자). `topicCreationPolicy`를 `designated`로 정할 때는 `topicCreatorIds`(정회원 이상인 팀원 id 배열, 1개 이상)를 함께 보낸다 |
@@ -2216,7 +2248,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `department_id`·`manager_id`(계정 단위 조직도의 부서와 따로 정한 상위자 — [부서 트리와 상위자](#부서-트리와-상위자조직도)), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
 | `integrations` | 외부 연동 — `kind`(`webhook` 들어오는 웹훅 \| `command` 슬래시 명령), `team_id`(팀이 지워지면 같이), `room_id`(웹훅의 방 — 방이 지워지면 같이), `name`·`emoji`(봇 이름·아이콘), `token_hash`(웹훅 주소 토큰의 열쇠 해시 — unique)·`token_prefix`(화면용 앞 8자), `command`·`description`·`url`·`secret_enc`(명령 이름 — 팀 안에서 unique, 보낼 주소, 서명 비밀 암호화), `created_by`·`created_by_name`, `last_used_at`·`use_count` |
 | `api_tokens` | 개인 API 토큰 — `user_id`, `name`, `token_hash`(열쇠 해시 — unique)·`token_prefix`, `scopes`(jsonb `["read"]` \| `["read","write"]`), `expires_at`(null이면 만료 없음), `revoked_at`(지운 시각 — 지우면 바로 못 씀), `last_used_at`(1분에 한 번만 적음) |
 | `user_identities` | 연결된 외부 로그인 — `provider`(`google`|`microsoft`|`ldap`)·`subject`(그쪽이 바꾸지 않는 값 — Google sub, Microsoft 테넌트+oid, LDAP objectGUID; 같은 외부 계정은 한 사람에게만 — unique), `email_enc`(연결할 때의 그쪽 이메일, 암호화), `last_login_at` |
@@ -2224,6 +2256,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `approval_documents` | 결재 문서(휴가·지출·근태 수정). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
 | `approval_steps` | 결재선 한 칸 — `step_order` 순서, `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`), `comment`, `decided_at` |
 | `approval_cc` | 참조자(문서 × 사람) |
+| `departments` | 조직도 부서 트리 — `scope_key`(`server` 회사 하나 \| 팀 id — 부서·직책 설정을 따름), `parent_id`(위 부서, 지우면 하위 부서는 위로), `name`, `head_id`(부서장 — 그 부서 사람의 기본 상위자), `sort_order`(같은 위 부서 안 순서). 팀을 지우면 그 팀의 부서도 지운다 |
 | `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb |
 | `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |
 | `leave_adjustments` | 연차 조정(반일 단위 ±, 사유, 그 연차 기간의 시작일) |
@@ -2234,7 +2267,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `invite_links` | 초대 링크. `token`(무작위 문자열, unique), `expires_at`/`revoked_at`, `max_uses`(가입 인원 — `null`은 이 칸이 생기기 전에 만든 링크뿐이고 제한 없음), `used_count`(이 링크로 가입한 사람 수 — 페어링·설치는 세지 않음, 가입할 때 `max_uses`를 넘지 않게 한 문장으로 확인하며 올림)/`last_used_at`, `created_by_name`(만든 사람 스냅샷) — [초대 링크(설치→가입)](#초대-링크설치가입) 참고 |
 | `team_invite_links` | 팀 초대 링크. `invite_links`와 같은 구조(`max_uses`·`used_count` 포함 — 관리자 등급을 주는 링크는 `max_uses`가 늘 1) + `team_id`(자동 합류시킬 팀, 팀 삭제 시 cascade), `assigned_role`(가입 즉시 부여할 등급), `assigned_position`(선택, 가입 즉시 부여할 직책 — 직책 목록의 `label`) — [팀 초대 링크](#팀-초대-링크자동-합류등급-부여) 참고 |
 | `teams` | 팀(워크스페이스). `name`, `icon_url`/`icon_emoji`/`icon_color`(팀 아이콘 — `icon_url`(업로드한 사진, 미서명 `/uploads/` 경로 — 응답 때마다 서명)이 있으면 사진, 없으면 이모지, 둘 다 없으면 팀 이름 앞 2글자 이니셜. `icon_color`는 배경색이고 팀을 만들 때 지정하지 않으면 서버가 팔레트에서 무작위로 정한다. 팀 설정에서 아이콘의 사진기 배지를 눌러 초기화/아이콘 선택/사진 올리기), `topic_creation_policy`(`member`\|`admin`\|`owner`\|`designated` — 새 토픽을 만들 수 있는 최소 등급, 그룹채팅은 이 설정과 무관), `message_edit_delete_enabled`/`message_edit_delete_window_seconds`([메시지 설정](#메시지-설정)), `created_by`(만든 사람 = 소유자) |
-| `team_members` | 팀 멤버십(복합 PK). `role`은 `owner`(팀을 만든 사람) 또는 `member` — 등급은 계정 단위로 올라갔다([권한 등급](#권한-등급) 참고), `department`/`position`(팀 단위 부서·직책) |
+| `team_members` | 팀 멤버십(복합 PK). `role`은 `owner`(팀을 만든 사람) 또는 `member` — 등급은 계정 단위로 올라갔다([권한 등급](#권한-등급) 참고), `department`/`position`(팀 단위 부서·직책), `department_id`·`manager_id`(팀 단위 조직도의 부서와 따로 정한 상위자) |
 | `topic_creators` | `topic_creation_policy`가 `designated`일 때만 의미가 있는, 콕 집어 지정된 토픽 생성자 목록(복합 PK: `team_id`+`user_id`). 정책을 다른 값으로 바꿔도 이 목록 자체는 지우지 않는다 — 나중에 다시 `designated`로 돌아오면 그대로 남아있다 |
 | `rooms` | 채팅방. `team_id`(어느 팀의 방인지, 필수), `type`은 `topic`\|`group`\|`dm`, `dm_key`(DM 중복 생성 방지 — `(team_id, dm_key)` 복합 unique), `is_secret`(비밀 대화 플래그), `secret_departed_member_*`(1:1 대화에서 한 사람이 빠졌을 때 — 비밀 대화를 혼자 나갔거나 팀에서 제외됐을 때 — 남은 쪽에 "OOO (나갔음)"으로 보여 줄 사람. 그 사람이 다시 들어오면 지움. 이름은 비밀 대화에만 쓰던 시절 그대로), `icon_type`/`icon_emoji`/`icon_color`/`icon_url`(그룹채팅 아이콘 — `initial`(그룹 이름 앞 2글자)\|`emoji`\|`photo`(`icon_url`, 미서명 `/uploads/` 경로), `null`이면 멤버 사진 겹침. `icon_color`는 이니셜·이모지의 배경색으로, 새 대화 창을 열 때 무작위로 정해진다) |
 | `room_members` | 방 멤버십(복합 PK). `last_read_at`, `favorite`, `muted`, `hidden`(1:1 대화 숨기기)를 멤버별로 보관 |

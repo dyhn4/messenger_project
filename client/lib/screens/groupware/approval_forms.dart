@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../../models/groupware.dart';
@@ -69,6 +70,9 @@ class ApprovalLinePicker extends StatefulWidget {
 class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
   List<ApprovalCandidate>? _candidates;
   List<ApprovalLine> _lines = const [];
+
+  /// 조직도의 상위자 사슬로 미리 채운 결재자(서버 suggestApprovalLine의 source 'org') — 지금 결재자가 그대로일 때만 안내를 보인다.
+  List<String>? _orgPrefill;
   String? _error;
 
   @override
@@ -101,10 +105,17 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
         _lines = lines.lines;
       });
       if (widget.controller.approverIds.isEmpty) {
+        final approvers = lines.suggestedApproverIds
+            .where(known.contains)
+            .toList();
         widget.controller.setLine(
-          lines.suggestedApproverIds.where(known.contains).toList(),
+          approvers,
           lines.suggestedCcIds.where(known.contains).toList(),
         );
+        // 조직도 상위자로 채웠으면 그 사실을 알려 준다 — 결재선을 손으로 바꾸면 안내는 사라진다.
+        if (lines.suggestedSource == 'org' && approvers.isNotEmpty) {
+          setState(() => _orgPrefill = List.of(approvers));
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -231,6 +242,15 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
             TextButton(onPressed: _saveLine, child: const Text('저장')),
           ],
         ),
+        if (_orgPrefill != null && listEquals(_orgPrefill, c.approverIds))
+          Padding(
+            key: const ValueKey('approval-line-org-hint'),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              '조직도의 상위자 순서로 결재자를 채웠습니다. 필요하면 빼거나 바꾸세요.',
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ),
         if (c.approverIds.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),

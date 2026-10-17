@@ -78,6 +78,7 @@ import {
 } from './groupwareScope.js';
 import { HOLIDAYS } from './holidays.js';
 import { fileFieldsDenial, sanitizeFileSize } from './messageLimits.js';
+import { managerChainFor } from './orgTree.js';
 import { notifyGroupwarePush } from './push.js';
 import { signFileUrl } from './upload.js';
 
@@ -421,11 +422,20 @@ export function createGroupwareRouter(io) {
   router.get(
     '/groupware/approval-lines',
     withContext(async (req, res, ctx) => {
-      const lines = await listApprovalLines(ctx.user.id, ctx.scopeKey);
+      const [lines, candidates] = await Promise.all([listApprovalLines(ctx.user.id, ctx.scopeKey), approverCandidates(ctx)]);
+      // 조직도의 상위자 사슬(orgTree.js) — 결재자로 고를 수 있는 사람만, 가까운 상위자부터. 조직도는 부서·직책 설정을 따르므로
+      // 그룹웨어가 회사 전체여도 팀 단위 조직도면 지금 고른 팀의 조직도를 쓴다.
+      const managerChain = await managerChainFor({
+        settings: ctx.settings,
+        teamId: ctx.teamId ?? (isUuid(req.query.teamId) ? req.query.teamId : null),
+        userId: ctx.user.id,
+        isEligible: (id) => candidates.has(id),
+        max: APPROVERS_MAX,
+      }).catch(() => []);
       res.json({
         lines: lines.map((l) => ({ id: l.id, name: l.name, approverIds: l.approverIds, ccIds: l.ccIds, createdAt: ms(l.createdAt) })),
-        // 새 결재를 올릴 때 미리 채울 결재선(approvalRules.js suggestApprovalLine — 나중에 조직도 상위자도 여기서).
-        suggested: suggestApprovalLine({ savedLines: lines }),
+        // 새 결재를 올릴 때 미리 채울 결재선 — 조직도 상위자 사슬, 없으면 가장 최근에 저장한 결재선(approvalRules.js suggestApprovalLine).
+        suggested: suggestApprovalLine({ savedLines: lines, managerChain }),
       });
     }),
   );

@@ -67,6 +67,9 @@ import {
   teamMemberCandidates,
 } from './userDirectory.js';
 import { checkIconRef } from './fileRefs.js';
+import { deleteDepartmentsOfScope } from './db/queries/orgTree.js';
+import { departmentForText, forgetTeamManager } from './orgTree.js';
+import { orgScopeKey } from './orgTreeRules.js';
 import { signFileUrl } from './upload.js';
 
 const TEAM_ICON_COLORS = ['#9575CD', '#4C6EF5', '#15AABF', '#37B24D', '#FAB005', '#FF6B35', '#E64980', '#8D6E63'];
@@ -392,6 +395,8 @@ export function createTeamsRouter(io) {
       .then((rows) => rows.map((r) => r.id));
     for (const roomId of teamRoomIds) await endRoomCallAccess(io, roomId);
     await deleteTeam(team.id);
+    // 팀 범위 조직도의 부서는 범위 키가 팀 id라(외래 키 없음) 따로 지운다.
+    await deleteDepartmentsOfScope(team.id).catch((err) => console.error('[orgTree] 팀 부서 정리 실패:', err?.message ?? err));
     for (const userId of memberIds) {
       io.to(`user:${userId}`).emit('team:left', { teamId: team.id, teamName: team.name, deleted: true });
     }
@@ -589,6 +594,12 @@ export function createTeamsRouter(io) {
       }
     }
 
+    // 부서 글자는 조직도의 같은 이름 부서에 잇는다(없으면 맨 위에 만든다 — orgTree.js departmentForText). 지우면 부서도 비운다.
+    if ('department' in fields) {
+      const dept = await departmentForText(orgScopeKey(settings, team.id), fields.department);
+      fields.departmentId = dept?.id ?? null;
+      if (dept) fields.department = dept.name;
+    }
     if (settings.orgScope === 'account') {
       await updateUser(targetId, fields); // 계정 하나로 관리하는 서버
     } else {
@@ -646,6 +657,8 @@ export function createTeamsRouter(io) {
     // 팀 멤버십과 그 팀 모든 방의 멤버십을 한 트랜잭션에서 지운다(방 종류별 정리는 db/queries/rooms.js
     // removeMemberFromTeamRooms). 토픽 관리자 역할도 방 멤버십과 함께 사라진다.
     const roomRemovals = await removeTeamMember(team.id, targetId, { departedName: targetName });
+    // 이 팀 조직도에서 그 사람을 상위자·부서장으로 정해 둔 칸을 비운다(orgTree.js).
+    await forgetTeamManager(team.id, targetId).catch((err) => console.error('[orgTree] 상위자 정리 실패:', err?.message ?? err));
     // 팀 목록에서 먼저 빼게 한다 — 앱은 team:left를 받으면 그 팀 방을 한꺼번에 정리하므로, 뒤따르는 방별
     // room:removed는 방마다 "내보내졌습니다" 안내를 띄우지 않고 지나간다.
     io.to(`user:${targetId}`).emit('team:left', { teamId: team.id, teamName: team.name });

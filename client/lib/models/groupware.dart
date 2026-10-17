@@ -245,10 +245,14 @@ class ApprovalLines {
   final List<ApprovalLine> lines;
   final List<String> suggestedApproverIds;
   final List<String> suggestedCcIds;
+
+  /// 추천이 어디서 왔는지 — 'org'(조직도의 상위자 사슬) | 'saved'(가장 최근에 저장한 결재선) | null(추천 없음).
+  final String? suggestedSource;
   const ApprovalLines({
     this.lines = const [],
     this.suggestedApproverIds = const [],
     this.suggestedCcIds = const [],
+    this.suggestedSource,
   });
 
   factory ApprovalLines.fromJson(Map<String, dynamic> json) {
@@ -261,6 +265,7 @@ class ApprovalLines {
       suggestedApproverIds: (suggested?['approverIds'] as List? ?? const [])
           .cast<String>(),
       suggestedCcIds: (suggested?['ccIds'] as List? ?? const []).cast<String>(),
+      suggestedSource: suggested?['source'] as String?,
     );
   }
 }

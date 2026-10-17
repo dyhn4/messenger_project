@@ -29,6 +29,7 @@ import { loginMethodsView } from './loginSecurityRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { createSsoRouter, ssoRedirectUri } from './sso.js';
 import { createIntegrationsRouter, webhookReceiveHandler } from './integrations.js';
+import { backfillOrgTrees, createOrgTreeRouter } from './orgTree.js';
 import { createPublicApiRouter } from './publicApi.js';
 import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
 import { bodyErrorReply, createJsonBodyParser } from './bodyLimit.js';
@@ -199,6 +200,8 @@ app.use('/api', requireAuth, createTodosRouter(io));
 app.use('/api', requireAuth, createDevicesRouter(io));
 // 외부 연동 — 웹훅·슬래시 명령·개인 API 토큰 관리(integrations.js).
 app.use('/api', requireAuth, createIntegrationsRouter(io));
+// 조직도 — 부서 트리·상위자(orgTree.js).
+app.use('/api', requireAuth, createOrgTreeRouter(io));
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
 app.use('/api', requireAuth, createCallsRouter());
 app.use('/api', requireAuth, createSecretChatsRouter(io));
@@ -336,6 +339,10 @@ await closeStaleCallCards().catch((err) => console.error('[call] 화상회의 �
 // 팀에서 빠졌는데 그 팀 대화방에 남아 있는 멤버십을 뺀다(예전 규칙의 흔적 — teams.js sweepLeftoverTeamRoomMembers).
 // 아직 소켓이 붙기 전이라 DB 정리와 안내 메시지만 남는다.
 await sweepLeftoverTeamRoomMembers(io).catch((err) => console.error('[teams] 팀 밖 대화방 멤버십 정리 실패:', err?.message ?? err));
+// 예전에 글자로만 적어 둔 부서를 조직도의 같은 이름 부서에 잇는다(없으면 맨 위에 만든다 — orgTree.js). 여러 번 돌아도 같다.
+await backfillOrgTrees()
+  .then((n) => n > 0 && console.log(`[orgTree] 예전 부서 글자 ${n}건을 조직도에 이었습니다.`))
+  .catch((err) => console.error('[orgTree] 예전 부서 잇기 실패:', err?.message ?? err));
 // 서버 전체 백업 — 관리자 콘솔 "백업" 탭에서 백업 암호를 정하면 매일 정한 시각에 백업한다(backup.js). 서버가 꺼져 있어 하루
 // 넘게 놓쳤으면 조금 뒤 한 번 한다. 마이그레이션 확인 뒤에 둔다(설정 칼럼이 있어야 읽힌다).
 backupScheduler.start().catch((err) => console.error('[backup] 예약 백업을 시작하지 못했습니다:', err?.message ?? err));

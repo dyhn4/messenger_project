@@ -42,9 +42,8 @@ class _TeamSelectScreenState extends State<TeamSelectScreen> {
             onPressed: () =>
                 showNotificationsCenterDialog(context, widget.session),
           ),
-          // 서버 전체 팀/회원 구조를 보는 기능이라, 계정 등급이 관리자이거나 서버 운영자인
-          // 사람에게만 보인다(server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
-          if (widget.session.canViewOrgChart)
+          // 조직도 — 부서 트리는 볼 수 있는 사람(session.canViewOrgTree)에게, 서버 전체 팀/회원 탭은 그중 관리자 이상에게만.
+          if (widget.session.canViewOrgTree)
             IconButton(
               tooltip: '조직도',
               icon: const Icon(Icons.account_tree_outlined),

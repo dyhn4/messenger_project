@@ -54,6 +54,7 @@ import { listAuditLogs } from './db/queries/audit.js';
 import { clearPushTargetsForUser } from './db/queries/devices.js';
 import { countMessages, countMessagesToday, countRooms, countTeams } from './db/queries/stats.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
+import { backfillOrgTrees, departmentForText } from './orgTree.js';
 import { invalidateMessagingCache } from './push.js';
 import { getWebCertificateStatus } from './webTls.js';
 import {
@@ -201,6 +202,10 @@ export function createAdminRouter(io) {
     }
     if (fields.orgScope) {
       detail.push(`팀·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
+      // 새 범위의 조직도에 그 범위의 부서 글자를 잇고(orgTree.js), 열려 있는 조직도가 새로 받게 알린다.
+      backfillOrgTrees()
+        .then(() => io.emit('org:tree-changed', { scopeKey: null }))
+        .catch((err) => console.error('[orgTree] 예전 부서 잇기 실패:', err?.message ?? err));
     }
     if (fields.groupwareScope) detail.push(`그룹웨어 범위: ${groupwareScopeLabel(updated.groupwareScope)}`);
     recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
@@ -867,6 +872,13 @@ export function createAdminRouter(io) {
       }
     }
 
+    // 부서 글자는 회사 조직도의 같은 이름 부서에 잇는다(계정 단위로 관리할 때만 — 팀 단위면 계정 칸의 부서는 조직도가 아니다).
+    if ('department' in fields) {
+      const settings = await getServerSettings();
+      const dept = settings.orgScope === 'account' ? await departmentForText('server', fields.department) : null;
+      fields.departmentId = dept?.id ?? null;
+      if (dept) fields.department = dept.name;
+    }
     const updated = await updateUser(target.id, fields);
     recordAudit({
       ...actorOf(req),

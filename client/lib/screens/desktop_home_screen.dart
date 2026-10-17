@@ -926,9 +926,9 @@ class _TopBar extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 서버 전체 팀/회원 구조를 보는 기능이라 볼 수 있는 등급(계정 관리자·서버 운영자 —
-                    // session.canViewOrgChart, 서버의 GET /org-chart/teams와 같은 규칙)에게만 보인다.
-                    if (session.canViewOrgChart) ...[
+                    // 조직도 — "부서" 탭(부서 트리·상위자)은 볼 수 있는 사람(session.canViewOrgTree — 회사 조직도는 정회원 이상,
+                    // 팀 조직도는 팀 멤버)에게, 서버 전체 팀/회원 탭은 그중 계정 관리자·서버 운영자에게만 붙는다.
+                    if (session.canViewOrgTree) ...[
                       // 이름은 글자 대신 마우스를 올렸을 때의 안내(툴팁)로만 보인다.
                       IconButton(
                         key: const ValueKey('topbar-org-chart'),

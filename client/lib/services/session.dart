@@ -1484,6 +1484,14 @@ class Session extends ChangeNotifier {
   /// (server/src/teams.js의 GET /org-chart/teams와 같은 규칙).
   bool get canViewOrgChart => isServerAdmin || accountRole == AccountRole.admin;
 
+  /// 조직도의 "부서"(부서 트리·상위자) 탭을 볼 수 있는지 — 서버 orgTreeRules.js canViewOrgTree와 같은 규칙: 회사 하나(계정 단위)면
+  /// 정회원 이상, 팀마다면 그 팀 멤버(팀에 들어와 있으면 누구나). 조직도 버튼도 이 값으로 보인다.
+  bool get canViewOrgTree =>
+      canViewOrgChart ||
+      (orgScope == 'account'
+          ? accountRole != AccountRole.guest
+          : teams.isNotEmpty);
+
   /// 팀 선택 화면으로 되돌아간다(전환 팝업의 "팀 목록").
   void leaveTeam() {
     if (currentTeam == null) return;

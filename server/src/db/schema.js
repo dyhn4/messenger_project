@@ -45,6 +45,11 @@ export const users = pgTable('users', {
   // 'team'이면 team_members 쪽 값을 쓰고 여기는 안 쓴다.
   department: text('department'),
   position: text('position'),
+  // 조직도(부서 트리 — orgTree.js)에서 이 사람이 속한 부서와 따로 정한 상위자 — orgScope='account'일 때 쓴다('team'이면
+  // team_members 쪽). department(글자)는 그 부서 이름을 그대로 따라 적어 두어 예전 화면·앱이 그대로 보인다. 상위자를 따로
+  // 정하지 않으면 부서장(departments.head_id)이 상위자다(orgTreeRules.js directManagerOf).
+  departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
+  managerId: uuid('manager_id').references(() => users.id, { onDelete: 'set null' }),
   // 서버 전체 운영자(관리자 콘솔 접근 권한). 계정 등급(role)과도 별개로,
   // 회원 관리·팀 관리·감사 로그·운영 현황을 볼 수 있는 사람이다. 마이그레이션에서 가장 먼저
   // 가입한 계정에 표시되고, 이후에는 운영자가 다른 사람을 지정한다(admin.js 참고).
@@ -257,6 +262,9 @@ export const teamMembers = pgTable(
     // 있다). 'account'면 users.department/position을 쓰고 여기는 안 쓴다.
     department: text('department'),
     position: text('position'),
+    // 조직도의 부서·상위자 — orgScope='team'일 때 쓰는 값(users.department_id·manager_id 참고).
+    departmentId: uuid('department_id').references(() => departments.id, { onDelete: 'set null' }),
+    managerId: uuid('manager_id').references(() => users.id, { onDelete: 'set null' }),
     // 입사일('YYYY-MM-DD') — 그룹웨어가 팀 범위일 때 이 팀에서의 법정 연차 기준(annualLeave.js). 회사 전체 범위면 users.hire_date.
     hireDate: text('hire_date'),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
@@ -282,6 +290,27 @@ export const topicCreators = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('topic_creators_user_id_idx').on(t.userId)],
+);
+
+/**
+ * 조직도의 부서(orgTree.js, 규칙은 orgTreeRules.js) — 상위 부서([parentId])로 이어진 트리. 범위([scopeKey])는 부서·직책 설정
+ * (server_settings.org_scope)을 따른다 — 계정 단위면 회사 하나('server'), 팀 단위면 팀마다(팀 id). [headId]는 부서장 — 그 부서
+ * 사람의 기본 상위자이고(본인이 부서장이면 위 부서의 부서장), 결재선 추천의 상위자 사슬이 된다(approvalRules.js
+ * suggestApprovalLine). 부서를 지우면 하위 부서와 구성원은 위 부서로 올라간다(orgTree.js).
+ */
+export const departments = pgTable(
+  'departments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    parentId: uuid('parent_id').references(() => departments.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    headId: uuid('head_id').references(() => users.id, { onDelete: 'set null' }),
+    // 같은 상위 부서 안에서의 순서(작을수록 위).
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('departments_scope_idx').on(t.scopeKey), index('departments_parent_idx').on(t.parentId)],
 );
 
 /**

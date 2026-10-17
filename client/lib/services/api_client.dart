@@ -17,6 +17,7 @@ import '../models/invite_result.dart';
 import '../models/mail_settings.dart';
 import '../models/team_invite_link.dart';
 import '../models/mention.dart';
+import '../models/org_tree.dart';
 import '../models/my_device.dart';
 import '../models/login_security.dart';
 import '../models/message.dart';
@@ -1038,6 +1039,56 @@ class ApiClient {
     await _post('/api/admin/users/$userId/otp-reset', {})
         as Map<String, dynamic>,
   );
+
+  // ── 조직도(부서 트리·상위자 — 서버 orgTree.js) ──
+
+  Future<OrgTree> fetchOrgTree({String? teamId}) async => OrgTree.fromJson(
+    (await _get(
+              teamId == null
+                  ? '/api/org-tree'
+                  : '/api/org-tree?teamId=${Uri.encodeQueryComponent(teamId)}',
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<OrgDepartment> createDepartment({
+    String? teamId,
+    required String name,
+    String? parentId,
+  }) async => OrgDepartment.fromJson(
+    (await _post('/api/org-tree/departments', {
+              'teamId': ?teamId,
+              'name': name,
+              'parentId': parentId,
+            })
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  /// [patch]: name · parentId(null이면 맨 위로) · headId(null이면 부서장 없음).
+  Future<void> updateDepartment(String id, Map<String, dynamic> patch) async {
+    await _patch('/api/org-tree/departments/$id', patch);
+  }
+
+  Future<void> moveDepartment(String id, {required bool up}) async {
+    await _post('/api/org-tree/departments/$id/move', {
+      'direction': up ? 'up' : 'down',
+    });
+  }
+
+  Future<void> deleteDepartment(String id) async {
+    await _delete('/api/org-tree/departments/$id');
+  }
+
+  /// 사람의 부서·상위자 — [patch]: departmentId · managerId(null이면 비움 — 상위자는 부서장으로).
+  Future<void> setMemberOrg(
+    String userId, {
+    String? teamId,
+    required Map<String, dynamic> patch,
+  }) async {
+    await _put('/api/org-tree/members/$userId', {'teamId': ?teamId, ...patch});
+  }
 
   // ── 외부 연동(웹훅·슬래시 명령·개인 API 토큰 — 서버 integrations.js) ──
 

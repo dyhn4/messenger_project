@@ -6,7 +6,7 @@
 //   아이폰은 홈 화면에 추가한 웹 앱에서만 받는다.
 // - 알림을 누르면 열린 창이 있으면 그 창을 앞으로 가져와 payload를 알리고, 없으면 새 창으로 연다.
 //
-// payload는 네이티브 앱 알림과 같은 규칙이다: 방 id, 'call:<방 id>'(화상회의), 'project:<프로젝트 id>'.
+// payload는 네이티브 앱 알림과 같은 규칙이다: 방 id, 'call:<방 id>'(화상회의), 'project:<프로젝트 id>', 'approval:<문서 id>:<팀 id>'(결재).
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
@@ -14,6 +14,8 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 function payloadOf(data) {
   if (data.kind === 'call') return `call:${data.roomId}`;
   if (data.kind === 'project') return `project:${data.projectId}`;
+  // 결재 알림 — NotificationService.approvalPayload와 같은 모양(회사 전체 범위면 팀 id가 빈 글자).
+  if (data.kind === 'groupware') return `approval:${data.documentId ?? ''}:${data.teamId ?? ''}`;
   return data.roomId ?? '';
 }
 
@@ -26,7 +28,7 @@ self.addEventListener('push', (event) => {
   }
   const payload = payloadOf(data);
   // 같은 방 알림은 하나로 바뀌게(앱이 띄우는 알림과 같은 tag).
-  const tag = data.kind === 'call' || data.kind === 'project' ? payload : data.roomId || 'tangotalk';
+  const tag = data.kind === 'call' || data.kind === 'project' || data.kind === 'groupware' ? payload : data.roomId || 'tangotalk';
   event.waitUntil(
     self.registration.showNotification(data.title || 'TangoTalk', {
       body: data.body || '',

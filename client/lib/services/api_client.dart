@@ -675,6 +675,13 @@ class ApiClient {
     return _client.send(req);
   }
 
+  /// 인증이 필요한 파일 내려받기(그룹웨어 근태 엑셀 등) — [path]는 쿼리까지 붙은 서버 경로. [exportRoomChat]처럼 스트림으로 받고,
+  /// 401이어도 토큰을 갱신해 다시 시도하지 않는다(가끔 누르는 내려받기라 실패하면 다시 누르면 된다).
+  Future<http.StreamedResponse> downloadAuthed(String path) {
+    final req = http.Request('GET', _uri(path))..headers.addAll(_authHeaders);
+    return _client.send(req);
+  }
+
   /// 회원가입 폼의 "중복 확인" 버튼용. 사용 가능하면 null, 아니면(형식 오류/중복) 사유
   /// 문구를 돌려준다.
   /// [inviteToken]은 초대 링크로 열린 앱이 받은 코드 — 사내망 밖에서는 이게 있어야 서버가 실제로 확인해 준다
@@ -1195,12 +1202,14 @@ class ApiClient {
     String? projectCreation,
     String? teamInviteLinkCreation,
     String? orgScope,
+    String? groupwareScope,
   }) async {
     await _patch('/api/admin/settings', {
       'teamCreation': ?teamCreation,
       'projectCreation': ?projectCreation,
       'teamInviteLinkCreation': ?teamInviteLinkCreation,
       'orgScope': ?orgScope,
+      'groupwareScope': ?groupwareScope,
     });
   }
 

@@ -8,9 +8,20 @@
 const kHolidaysCalendarId = 'holidays';
 const kBirthdaysCalendarId = 'birthdays';
 
+/// 그룹웨어에서 승인된 휴가(server/src/calendars.js — 팀 범위면 이 팀의 결재, 회사 전체면 이 팀 사람들의 휴가).
+const kLeavesCalendarId = 'leaves';
+
 /// 내장 캘린더의 고정 색(서버도 같은 값을 EventOccurrence.color로 내려 준다).
 const kHolidayColor = '#E53935';
 const kBirthdayColor = '#F06292';
+const kLeaveColor = '#12B886';
+
+/// 내장 캘린더 id들 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
+const kBuiltinCalendarIds = {
+  kHolidaysCalendarId,
+  kBirthdaysCalendarId,
+  kLeavesCalendarId,
+};
 
 /// 시각을 뺀 날짜(기기 시간대 기준 자정). 달력 격자·날짜 비교는 전부 이 값으로 한다.
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -167,6 +178,15 @@ class CalendarInfo {
     hidden: hidden,
   );
 
+  factory CalendarInfo.leaves({bool hidden = false}) => CalendarInfo(
+    id: kLeavesCalendarId,
+    kind: kLeavesCalendarId,
+    name: '팀 휴가',
+    color: kLeaveColor,
+    role: 'subscriber',
+    hidden: hidden,
+  );
+
   CalendarInfo copyWith({
     String? name,
     String? color,
@@ -192,8 +212,8 @@ class CalendarInfo {
     lastError: lastError,
   );
 
-  /// 국가 공휴일·멤버 생일 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
-  bool get isBuiltin => id == kHolidaysCalendarId || id == kBirthdaysCalendarId;
+  /// 국가 공휴일·멤버 생일·팀 휴가 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
+  bool get isBuiltin => kBuiltinCalendarIds.contains(id);
 
   /// 다른 사람의 캘린더를 구독 중인지(구독 취소로 없앨 수 있다).
   bool get isSubscriber => role == 'subscriber' && !isBuiltin && !isExternal;

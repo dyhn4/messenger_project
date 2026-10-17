@@ -57,7 +57,11 @@ import {
   upsertMemberPreferences,
 } from './db/queries/calendars.js';
 import { canSearchEventTitle, parseCalendarSearchQuery, searchCursorOf, toSearchItem } from './calendarSearchRules.js';
-import { listTeamIdsForUser } from './db/queries/teams.js';
+import { listTeamIdsForUser, listTeamMemberIds } from './db/queries/teams.js';
+import { leaveTypeOf } from './annualLeave.js';
+import { listApprovedLeaves } from './db/queries/groupware.js';
+import { getServerSettings } from './db/queries/serverSettings.js';
+import { effectiveGroupwareScope, groupwareScopeKey } from './groupwareScope.js';
 import { findUserById } from './db/queries/users.js';
 import { listExternalCalendars } from './db/queries/externalCalendars.js';
 import { toExternalCalendarDto } from './externalCalendarRules.js';
@@ -103,6 +107,8 @@ const EVENT_MAX_START_MS = Date.UTC(2100, 0, 1);
 
 export const HOLIDAY_COLOR = '#E53935';
 export const BIRTHDAY_COLOR = '#F06292';
+// 내장 캘린더 "팀 휴가" — 그룹웨어에서 승인된 휴가(groupware.js).
+export const LEAVE_COLOR = '#12B886';
 const TEAM_CALENDAR_COLOR = '#5B8DEF';
 // 기본 캘린더 색 팔레트 — 사람 id로 골라서 사람마다 다르게 보이게 한다.
 const PALETTE = ['#5B8DEF', '#F4A261', '#2A9D8F', '#E76F51', '#9B5DE5', '#00B4D8', '#8AB17D', '#EF476F', '#FFB703', '#6C757D'];
@@ -1307,6 +1313,32 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
           );
         }
       }
+    }
+    // 팀 휴가 — 그룹웨어에서 승인된 휴가. 팀 범위면 이 팀의 결재, 회사 전체 범위면 이 팀 사람들의 휴가(정회원 이상만 — 생일과 같다).
+    const settings = await getServerSettings();
+    const scope = effectiveGroupwareScope(settings);
+    const leaves = await listApprovedLeaves({
+      scopeKey: groupwareScopeKey(scope, teamId),
+      from: new Date(dayFrom).toISOString().slice(0, 10),
+      to: new Date(dayTo - 1).toISOString().slice(0, 10),
+      userIds: scope === 'server' ? await listTeamMemberIds(teamId) : null,
+    });
+    for (const leave of leaves) {
+      const { leaveType, startDate, endDate } = leave.payload ?? {};
+      const startMs = Date.parse(`${startDate}T00:00:00Z`);
+      const endMs = Date.parse(`${endDate}T00:00:00Z`) + DAY_MS;
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
+      result.push(
+        builtInOccurrence({
+          key: `leave:${leave.id}`,
+          calendarId: 'leaves',
+          source: 'leave',
+          title: `${leave.authorName} ${leaveTypeOf(leaveType)?.label ?? '휴가'}`,
+          start: startMs,
+          end: endMs,
+          color: LEAVE_COLOR,
+        }),
+      );
     }
   }
 

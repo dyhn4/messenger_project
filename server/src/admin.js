@@ -42,6 +42,7 @@ import {
   smtpConnectionChanged,
 } from './mailRules.js';
 import { testMail } from './mailTemplates.js';
+import { groupwareScopeLabel, isGroupwareScopeSetting } from './groupwareScope.js';
 import { checkCurrentPassword } from './users.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
@@ -128,6 +129,7 @@ export function createAdminRouter(io) {
       teamInviteLinkCreation: settings.teamInviteLinkCreation,
       orgScope: settings.orgScope,
       projectCreation: settings.projectCreation,
+      groupwareScope: settings.groupwareScope ?? 'org',
     });
   });
 
@@ -171,6 +173,14 @@ export function createAdminRouter(io) {
       }
       fields.orgScope = value;
     }
+    // 그룹웨어(전자결재·연차·출퇴근) 범위 — 'org'(부서·직책 설정을 따름) | 'team' | 'server'(groupwareScope.js).
+    if ('groupwareScope' in (req.body ?? {})) {
+      const value = req.body.groupwareScope;
+      if (!isGroupwareScopeSetting(value)) {
+        return res.status(400).json({ error: "groupwareScope는 'org', 'team', 'server' 중 하나여야 합니다." });
+      }
+      fields.groupwareScope = value;
+    }
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
 
     const updated = await updateServerSettings(fields);
@@ -187,6 +197,7 @@ export function createAdminRouter(io) {
     if (fields.orgScope) {
       detail.push(`팀·직책 관리: ${updated.orgScope === 'account' ? '계정 단위' : '팀 단위'}`);
     }
+    if (fields.groupwareScope) detail.push(`그룹웨어 범위: ${groupwareScopeLabel(updated.groupwareScope)}`);
     recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
     // 설정 행 전체를 돌려주지 않는다 — FCM 서비스 계정 키(개인키)·DDNS 토큰 같은 비밀값도 같은 행에 있다.
     res.json({
@@ -194,6 +205,7 @@ export function createAdminRouter(io) {
       teamInviteLinkCreation: updated.teamInviteLinkCreation,
       orgScope: updated.orgScope,
       projectCreation: updated.projectCreation,
+      groupwareScope: updated.groupwareScope ?? 'org',
     });
   });
 

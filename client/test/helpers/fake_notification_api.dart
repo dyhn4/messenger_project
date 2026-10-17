@@ -1,4 +1,5 @@
 import 'package:client/models/app_notification.dart';
+import 'package:client/models/groupware.dart';
 import 'package:client/models/project.dart' show ProjectNotification;
 import 'package:client/services/api_client.dart' show ApiException;
 import 'package:client/services/notification_api.dart';
@@ -10,6 +11,7 @@ class FakeNotificationApi implements NotificationApi {
   List<AppNotification> items;
   NotificationSettings settings;
   List<ProjectNotification> project;
+  List<ApprovalNotification> approval;
 
   /// 호출 기록 — "메서드명 인자…" 문자열.
   final calls = <String>[];
@@ -28,9 +30,11 @@ class FakeNotificationApi implements NotificationApi {
     List<AppNotification>? items,
     NotificationSettings? settings,
     List<ProjectNotification>? project,
+    List<ApprovalNotification>? approval,
   }) : items = items ?? [],
        settings = settings ?? const NotificationSettings(),
-       project = project ?? [];
+       project = project ?? [],
+       approval = approval ?? [];
 
   int callCount(String prefix) =>
       calls.where((c) => c.startsWith(prefix)).length;
@@ -176,6 +180,59 @@ class FakeNotificationApi implements NotificationApi {
     ];
     return project.where((n) => !n.read).length;
   }
+
+  @override
+  Future<({List<ApprovalNotification> items, int unread})>
+  fetchApprovalNotifications() async {
+    calls.add('approval');
+    _maybeFail();
+    return (
+      items: List.of(approval),
+      unread: approval.where((n) => !n.read).length,
+    );
+  }
+
+  @override
+  Future<int> markApprovalRead({List<String>? ids}) async {
+    calls.add('approval-read ids=$ids');
+    _maybeFail();
+    approval = [
+      for (final n in approval)
+        if (ids == null || ids.contains(n.id)) n.asRead() else n,
+    ];
+    return approval.where((n) => !n.read).length;
+  }
+}
+
+/// 테스트용 결재 알림 한 건 — [minutesAgo]분 전에 만들어진 것.
+ApprovalNotification approvalNotif(
+  String id, {
+  ApprovalNotificationKind kind = ApprovalNotificationKind.request,
+  int minutesAgo = 0,
+  bool read = false,
+  bool actionable = false,
+  String documentId = 'doc1',
+  String? teamId = 't1',
+  String title = '결재 요청',
+  String body = '김철수 — 연차 신청',
+  DateTime? now,
+}) {
+  final base = now ?? DateTime(2026, 9, 30, 12);
+  return ApprovalNotification(
+    id: id,
+    documentId: documentId,
+    teamId: teamId,
+    teamName: teamId == null ? null : '본사',
+    kind: kind,
+    title: title,
+    body: body,
+    actorName: '김철수',
+    docKind: ApprovalKind.leave,
+    docStatus: ApprovalStatus.pending,
+    actionable: actionable,
+    createdAt: base.subtract(Duration(minutes: minutesAgo)),
+    read: read,
+  );
 }
 
 /// 테스트용 알림 한 건 — [minutesAgo]분 전에 만들어진 것.

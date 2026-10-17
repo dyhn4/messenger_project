@@ -367,7 +367,8 @@ void main() {
           MenuSection.tools,
           _session(),
         ).map((e) => e.key).toList();
-        expect(keys, ['calendar', 'zz-1', 'zz-2', 'project']);
+        // 그룹웨어도 order 15라 먼저 등록된 그것이 앞이다.
+        expect(keys, ['calendar', 'groupware', 'zz-1', 'zz-2', 'project']);
       });
     });
   });

@@ -1,6 +1,8 @@
 import '../models/app_notification.dart';
+import '../models/groupware.dart' show ApprovalNotification;
 import '../models/project.dart' show ProjectNotification;
 import 'api_client.dart';
+import 'groupware_api.dart';
 
 /// 알림 센터의 REST 호출 전부(규약 CONTRACT_NOTIF.md의 REST 3~6번 + 기존 프로젝트 알림함). 컨트롤러는 이
 /// 추상 클래스만 알아서, 테스트는 가짜 구현을 끼우고 실제 앱은 [RemoteNotificationApi]가 [ApiClient]로
@@ -39,6 +41,13 @@ abstract class NotificationApi {
 
   /// 프로젝트 알림 읽음 — [ids]가 없으면 전부. 남은 안 읽은 개수.
   Future<int> markProjectRead({List<String>? ids});
+
+  /// 결재 알림함(`/api/groupware/notifications`) — 최근 50개와 안 읽은 개수. 알림 센터 "결재" 탭.
+  Future<({List<ApprovalNotification> items, int unread})>
+  fetchApprovalNotifications();
+
+  /// 결재 알림 읽음 — [ids]가 없으면 전부. 남은 안 읽은 개수.
+  Future<int> markApprovalRead({List<String>? ids});
 }
 
 /// [ApiClient]로 서버를 부르는 실제 구현.
@@ -131,4 +140,12 @@ class RemoteNotificationApi implements NotificationApi {
   @override
   Future<int> markProjectRead({List<String>? ids}) =>
       _api.markProjectNotificationsRead(ids: ids);
+
+  @override
+  Future<({List<ApprovalNotification> items, int unread})>
+  fetchApprovalNotifications() => GroupwareApi(_api).notifications();
+
+  @override
+  Future<int> markApprovalRead({List<String>? ids}) =>
+      GroupwareApi(_api).markNotificationsRead(ids: ids);
 }

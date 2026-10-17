@@ -440,6 +440,8 @@ export const limits = {
   mailSendUser: new RateLimiter({ max: 10, windowMs: HOUR }),
   // 초대 메일 — 한 계정에서 한 시간에 50통(한 번에 최대 20명 — mailRules.js INVITE_MAIL_MAX_RECIPIENTS).
   inviteMailUser: new RateLimiter({ max: 50, windowMs: HOUR }),
+  // 결재 올리기(groupware.js) — 한 계정에서 한 시간에 30건(결재자에게 알림이 가서 남발하면 그대로 괴롭힘이 된다).
+  approvalCreateUser: new RateLimiter({ max: 30, windowMs: HOUR }),
 };
 
 setInterval(() => {

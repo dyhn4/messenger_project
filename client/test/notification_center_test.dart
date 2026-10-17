@@ -80,6 +80,7 @@ Map<String, dynamic> _p(String id, {int minutesAgo = 0, bool read = false}) => {
 class _Server {
   final items = <Map<String, dynamic>>[];
   final projectItems = <Map<String, dynamic>>[];
+  final approvalItems = <Map<String, dynamic>>[];
   var settings = <String, dynamic>{
     'mentionAll': true,
     'boardLevel': 'important',
@@ -163,6 +164,25 @@ class _Server {
         };
       }
       return _ok(settings);
+    }
+    if (request.method == 'GET' && path == '/api/groupware/notifications') {
+      return _ok({
+        'items': approvalItems,
+        'unreadCount': approvalItems.where((n) => n['readAt'] == null).length,
+      });
+    }
+    if (request.method == 'POST' &&
+        path == '/api/groupware/notifications/read') {
+      final body = jsonDecode(request.body) as Map;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final n in approvalItems) {
+        if (body['ids'] == null || (body['ids'] as List).contains(n['id'])) {
+          n['readAt'] ??= now;
+        }
+      }
+      return _ok({
+        'unreadCount': approvalItems.where((n) => n['readAt'] == null).length,
+      });
     }
     if (request.method == 'GET' && path == '/api/project-notifications') {
       return _ok({
@@ -1065,6 +1085,11 @@ void main() {
         ),
         {'mentionAll': false},
       );
+      // 설정 대화상자가 길어 아래쪽 항목은 굴려서 보이게 한 뒤 누른다.
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('notif-setting-board-new')),
+      );
+      await _settle(tester);
       await tester.tap(find.byKey(const ValueKey('notif-setting-board-new')));
       await _settle(tester);
       expect(
@@ -1460,7 +1485,7 @@ void main() {
   });
 
   group('모바일(폭 360)', () {
-    testWidgets('전체 화면으로 열리고 탭줄은 가로로 스크롤되어 다섯 탭 모두 닿으며 넘치지 않는다', (
+    testWidgets('전체 화면으로 열리고 탭줄은 가로로 스크롤되어 여섯 탭 모두 닿으며 넘치지 않는다', (
       tester,
     ) async {
       final server = _Server()
@@ -1518,10 +1543,23 @@ void main() {
       await tester.tap(_tab(NotificationTab.project));
       await _settle(tester);
       expect(find.text('업무를 배정했습니다 p1'), findsOneWidget);
+      // 맨 끝(여섯 번째) 결재 탭도 닿는다.
+      await tester.drag(
+        find.byKey(const ValueKey('notif-tabs')),
+        const Offset(-400, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(_tab(NotificationTab.approval)).right,
+        lessThanOrEqualTo(barRect.right + 0.5),
+      );
+      await tester.tap(_tab(NotificationTab.approval));
+      await _settle(tester);
+      expect(find.text('결재 알림이 없습니다.'), findsOneWidget);
       // 앞쪽 탭도 다시 닿는다.
       await tester.drag(
         find.byKey(const ValueKey('notif-tabs')),
-        const Offset(500, 0),
+        const Offset(900, 0),
       );
       await tester.pumpAndSettle();
       await tester.tap(_tab(NotificationTab.unreadChats));
@@ -1577,6 +1615,129 @@ void main() {
       // 메시지 없이 열면 이전 요청의 메시지가 남지 않는다.
       session.requestOpenRoom(room);
       expect(session.consumePendingOpenMessageId(), isNull);
+    });
+  });
+
+  group('결재 탭 — 결재 알림함', () {
+    Map<String, dynamic> approval(
+      String id, {
+      String kind = 'request',
+      bool actionable = false,
+      bool read = false,
+      String? teamName = '영업팀',
+      int minutesAgo = 0,
+    }) => {
+      'id': id,
+      'documentId': 'doc-$id',
+      'teamId': teamName == null ? null : 't1',
+      'teamName': teamName,
+      'kind': kind,
+      'title': kind == 'request' ? '결재 요청' : '휴가 결재 승인',
+      'body': '본문 $id',
+      'actorName': '김철수',
+      'docKind': 'leave',
+      'docStatus': 'pending',
+      'actionable': actionable,
+      'createdAt': _now
+          .subtract(Duration(minutes: minutesAgo))
+          .millisecondsSinceEpoch,
+      'readAt': read ? _now.millisecondsSinceEpoch : null,
+    };
+
+    testWidgets('목록 — 팀 이름, 내 차례면 "결재 차례", 배지는 Session.approvalUnread', (
+      tester,
+    ) async {
+      final server = _Server()
+        ..approvalItems.addAll([
+          approval('a1', actionable: true),
+          approval('a2', kind: 'approved', teamName: null, minutesAgo: 5),
+        ]);
+      final session = _session(server)..approvalUnread = 2;
+      await _pump(tester, session, initialTab: NotificationTab.approval);
+      await _settle(tester);
+      expect(find.text('[영업팀] 본문 a1'), findsOneWidget);
+      // 회사 전체 범위(팀 없음)는 팀 이름 없이.
+      expect(find.text('본문 a2'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('approval-notif-turn-a1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('approval-notif-turn-a2')),
+        findsNothing,
+      );
+      Text badgeText(String label) => tester.widget<Text>(
+        find.descendant(of: _badge(label), matching: find.byType(Text)),
+      );
+      expect(badgeText('결재').data, '2');
+      expect(badgeText('전체').data, '2');
+    });
+
+    testWidgets('누르면 읽음으로 보내고(그 한 건만) 안 읽은 수가 줄어든다', (tester) async {
+      final server = _Server()
+        ..approvalItems.addAll([approval('a1'), approval('a2', minutesAgo: 3)]);
+      final session = _session(server)..approvalUnread = 2;
+      await _pump(tester, session, initialTab: NotificationTab.approval);
+      await _settle(tester);
+      await tester.tap(find.text('[영업팀] 본문 a1'));
+      await _settle(tester);
+      final read = server.called('POST', '/api/groupware/notifications/read');
+      expect(jsonDecode(read.single.body), {
+        'ids': ['a1'],
+      });
+      expect(session.approvalUnread, 1);
+      // 문서 상세를 열려다 실패한 안내 토스트가 사라지도록.
+      await tester.pump(const Duration(seconds: 5));
+    });
+
+    testWidgets('모두 읽음 — 결재 탭에서는 결재 알림 전부를 읽음으로', (tester) async {
+      final server = _Server()
+        ..approvalItems.addAll([approval('a1'), approval('a2', minutesAgo: 3)]);
+      final session = _session(server)..approvalUnread = 2;
+      await _pump(tester, session, initialTab: NotificationTab.approval);
+      await _settle(tester);
+      await tester.tap(find.byKey(const ValueKey('notif-read-all')));
+      await _settle(tester);
+      final read = server.called('POST', '/api/groupware/notifications/read');
+      expect(jsonDecode(read.single.body), <String, dynamic>{});
+      expect(session.approvalUnread, 0);
+      expect(
+        tester
+            .widget<TextButton>(find.byKey(const ValueKey('notif-read-all')))
+            .onPressed,
+        isNull,
+      );
+    });
+
+    testWidgets('비어 있으면 안내 문구, 전체 탭에도 결재 알림이 섞인다', (tester) async {
+      final server = _Server();
+      final session = _session(server);
+      await _pump(tester, session, initialTab: NotificationTab.approval);
+      await _settle(tester);
+      expect(find.text('결재 알림이 없습니다.'), findsOneWidget);
+      server.approvalItems.add(approval('a1'));
+      await tester.runAsync(
+        () => session.notificationCenter.refresh(NotificationTab.approval),
+      );
+      await tester.tap(_tab(NotificationTab.all));
+      await _settle(tester);
+      expect(find.text('[영업팀] 본문 a1'), findsOneWidget);
+    });
+
+    testWidgets('종 점 — 결재 알림만 안 읽어도 뜬다', (tester) async {
+      final session = _session(_Server())..approvalUnread = 1;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: NotificationBellButton(session: session, onPressed: () {}),
+          ),
+        ),
+      );
+      expect(tester.widget<Badge>(find.byType(Badge)).isLabelVisible, isTrue);
+      session.approvalUnread = 0;
+      session.notifyListeners();
+      await tester.pump();
+      expect(tester.widget<Badge>(find.byType(Badge)).isLabelVisible, isFalse);
     });
   });
 }

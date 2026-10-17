@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:client/models/announcement.dart';
 import 'package:client/models/app_notification.dart';
+import 'package:client/models/groupware.dart';
 import 'package:client/models/room.dart';
 import 'package:client/services/notification_controller.dart';
 import 'package:client/services/notification_entries.dart';
@@ -11,14 +12,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'helpers/fake_notification_api.dart';
 
 /// 알림 센터 컨트롤러 — 탭별 목록 로딩, 무한 스크롤(before 커서), 읽음 처리, 소켓 갱신, 안 읽음 개수, 설정,
-/// 프로젝트 알림함, 그리고 탭별로 줄을 섞는 buildCenterEntries.
+/// 프로젝트 알림함, 결재 알림함, 그리고 탭별로 줄을 섞는 buildCenterEntries.
 
 class _Harness {
   final FakeNotificationApi api;
   final newEvents = StreamController<NotificationNewEvent>.broadcast();
   final syncEvents = StreamController<NotificationCounts>.broadcast();
   final projectEvents = StreamController<Map<String, dynamic>>.broadcast();
+  final approvalEvents = StreamController<void>.broadcast();
   final reconnected = StreamController<void>.broadcast();
+  final approvalUnreadSeen = <int>[];
   final newSeen = <AppNotification>[];
   final readSeen = <List<AppNotification>>[];
   final syncSeen = <NotificationCounts>[];
@@ -30,10 +33,12 @@ class _Harness {
       newEvents: newEvents.stream,
       syncEvents: syncEvents.stream,
       projectEvents: projectEvents.stream,
+      approvalEvents: approvalEvents.stream,
       reconnected: reconnected.stream,
       onNew: newSeen.add,
       onRead: readSeen.add,
       onSync: syncSeen.add,
+      onApprovalUnread: approvalUnreadSeen.add,
     );
   }
 
@@ -42,6 +47,7 @@ class _Harness {
     newEvents.close();
     syncEvents.close();
     projectEvents.close();
+    approvalEvents.close();
     reconnected.close();
   }
 }
@@ -800,6 +806,102 @@ void main() {
     });
   });
 
+  group('결재 알림함', () {
+    test('불러오기 — 안 읽은 수를 넘기고, 하나 읽음·전체 읽음', () async {
+      final api = FakeNotificationApi(
+        approval: [
+          approvalNotif('a1', actionable: true),
+          approvalNotif('a2', kind: ApprovalNotificationKind.approved),
+          approvalNotif('a3', read: true),
+        ],
+      );
+      final h = _make(api);
+      final c = h.controller;
+      expect(c.isLoaded(NotificationTab.approval), isFalse);
+      await c.ensureLoaded(NotificationTab.approval);
+      expect(c.isLoaded(NotificationTab.approval), isTrue);
+      expect(c.approval.map((n) => n.id), ['a1', 'a2', 'a3']);
+      expect(h.approvalUnreadSeen.last, 2);
+      await c.markApprovalRead(ids: ['a1']);
+      expect(c.approval.first.read, isTrue);
+      expect(c.approval[1].read, isFalse);
+      expect(api.calls.last, 'approval-read ids=[a1]');
+      expect(h.approvalUnreadSeen.last, 1);
+      await c.markApprovalRead();
+      expect(c.approval.every((n) => n.read), isTrue);
+      expect(h.approvalUnreadSeen.last, 0);
+    });
+
+    test('결재 소켓 신호가 오면(이미 열어 둔 탭만) 다시 받는다', () async {
+      final api = FakeNotificationApi(approval: [approvalNotif('a1')]);
+      final h = _make(api);
+      h.approvalEvents.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(api.callCount('approval'), 0);
+      await h.controller.ensureLoaded(NotificationTab.approval);
+      api.approval.insert(0, approvalNotif('a2'));
+      h.approvalEvents.add(null);
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(h.controller.approval.map((n) => n.id), ['a2', 'a1']);
+    });
+
+    test('읽음 처리가 실패하면 예외를 다시 던지고 읽음 표시를 되돌린다', () async {
+      final api = FakeNotificationApi(approval: [approvalNotif('a1')]);
+      final h = _make(api);
+      await h.controller.ensureLoaded(NotificationTab.approval);
+      api.failWith = '서버 오류';
+      await expectLater(
+        h.controller.markApprovalRead(ids: ['a1']),
+        throwsA(anything),
+      );
+      expect(h.controller.approval.single.read, isFalse);
+    });
+
+    test('불러오지 못하면 오류를 보여 주고, 로그아웃하면 비운다', () async {
+      final api = FakeNotificationApi(approval: [approvalNotif('a1')])
+        ..failWith = '그룹웨어를 쓸 수 없습니다.';
+      final c = _make(api).controller;
+      await c.ensureLoaded(NotificationTab.approval);
+      expect(c.errorFor(NotificationTab.approval), '그룹웨어를 쓸 수 없습니다.');
+      api.failWith = null;
+      await c.refresh(NotificationTab.approval);
+      expect(c.errorFor(NotificationTab.approval), isNull);
+      expect(c.approval, hasLength(1));
+      c.reset();
+      expect(c.approval, isEmpty);
+      expect(c.isLoaded(NotificationTab.approval), isFalse);
+    });
+
+    test('알림 JSON — 종류·문서 상태·차례 여부, 모르는 종류는 other', () {
+      final n = ApprovalNotification.fromJson({
+        'id': 'n1',
+        'documentId': 'd1',
+        'teamId': null,
+        'teamName': null,
+        'kind': 'rejected',
+        'title': '지출 결재 반려',
+        'body': '반려되었습니다: 식대',
+        'actorName': '팀장',
+        'docKind': 'expense',
+        'docStatus': 'rejected',
+        'actionable': false,
+        'createdAt': DateTime(2026, 10, 1).millisecondsSinceEpoch,
+        'readAt': null,
+      });
+      expect(n.kind, ApprovalNotificationKind.rejected);
+      expect(n.docKind, ApprovalKind.expense);
+      expect(n.docStatus, ApprovalStatus.rejected);
+      expect(n.teamId, isNull);
+      expect(n.read, isFalse);
+      expect(n.createdAt, DateTime(2026, 10, 1));
+      expect(n.asRead().read, isTrue);
+      expect(
+        ApprovalNotificationKind.fromWire('someday'),
+        ApprovalNotificationKind.other,
+      );
+    });
+  });
+
   group('설정', () {
     test('불러오고, 바꾸면 서버에 일부 필드만 보낸다', () async {
       final api = FakeNotificationApi(
@@ -996,11 +1098,13 @@ void main() {
           notif('b-new', kind: NotificationKind.boardPost, minutesAgo: 5),
         ],
         project: [projectNotif('p-mid', minutesAgo: 30)],
+        approval: [approvalNotif('ap-mid', minutesAgo: 20)],
       );
       final h = _make(api);
       await h.controller.refreshCounts();
       await h.controller.ensureLoaded(NotificationTab.all);
       await h.controller.ensureLoaded(NotificationTab.project);
+      await h.controller.ensureLoaded(NotificationTab.approval);
       return h;
     }
 
@@ -1073,7 +1177,25 @@ void main() {
       expect(entries, isEmpty);
     });
 
-    test('전체 탭은 넷을 시간순으로 — 공지만 안 읽은 방은 대화 줄 없이 공지 줄로만', () async {
+    test('결재 탭은 결재 알림함 — 안 읽은 것만 필터를 따른다', () async {
+      final h = await loaded();
+      var entries = buildCenterEntries(
+        tab: NotificationTab.approval,
+        center: h.controller,
+        unreadRooms: rooms,
+      );
+      expect(entries.single, isA<ApprovalEntry>());
+      await h.controller.markApprovalRead();
+      await h.controller.setUnreadOnly(NotificationTab.approval, true);
+      entries = buildCenterEntries(
+        tab: NotificationTab.approval,
+        center: h.controller,
+        unreadRooms: rooms,
+      );
+      expect(entries, isEmpty);
+    });
+
+    test('전체 탭은 다섯을 시간순으로 — 공지만 안 읽은 방은 대화 줄 없이 공지 줄로만', () async {
       final h = await loaded();
       final entries = buildCenterEntries(
         tab: NotificationTab.all,
@@ -1085,14 +1207,16 @@ void main() {
         RoomEntry(:final room) => 'chat:${room.id}',
         AnnouncementEntry(:final room) => 'ann:${room.id}',
         ProjectEntry(:final notification) => notification.id,
+        ApprovalEntry(:final notification) => notification.id,
       };
-      // chat-new 2분 전, b-new 5분 전, both의 공지 16분 전, both 대화 15분 전, p-mid 30분 전, chat-old 40분 전,
+      // chat-new 2분 전, b-new 5분 전, both의 공지 16분 전, both 대화 15분 전, ap-mid 20분 전, p-mid 30분 전, chat-old 40분 전,
       // m-old 60분 전, ann-only 공지 91분 전.
       expect(entries.map(label), [
         'chat:chat-new',
         'b-new',
         'chat:both',
         'ann:both',
+        'ap-mid',
         'p-mid',
         'chat:chat-old',
         'm-old',
@@ -1104,13 +1228,14 @@ void main() {
       );
     });
 
-    test('탭 배지 — 멘션·보드(+공지)·안 읽은 대화·프로젝트·전체', () async {
+    test('탭 배지 — 멘션·보드(+공지)·안 읽은 대화·프로젝트·결재·전체', () async {
       final h = await loaded();
       int badge(NotificationTab t) => notificationTabBadge(
         t,
         center: h.controller,
         unreadRooms: rooms,
         projectUnread: 4,
+        approvalUnread: 2,
       );
       expect(badge(NotificationTab.mention), 1);
       // 보드 1 + 공지 2곳(각 1).
@@ -1118,8 +1243,9 @@ void main() {
       // 메시지가 있는 방 3곳 — 공지만 안 읽은 방은 세지 않는다(보드에 센다).
       expect(badge(NotificationTab.unreadChats), 3);
       expect(badge(NotificationTab.project), 4);
-      // 멘션 1 + 보드 3 + 메시지가 있는 방 3 + 프로젝트 4.
-      expect(badge(NotificationTab.all), 1 + 3 + 3 + 4);
+      expect(badge(NotificationTab.approval), 2);
+      // 멘션 1 + 보드 3 + 메시지가 있는 방 3 + 프로젝트 4 + 결재 2.
+      expect(badge(NotificationTab.all), 1 + 3 + 3 + 4 + 2);
     });
   });
 }

@@ -397,7 +397,12 @@ typedef CallMicRequest = ({String roomId, bool on});
 typedef CallDeclined = ({String roomId, String userId, String name});
 
 /// 화상회의 기록 카드가 바뀌었다(call:card — 서버 callCards.js). 끝났을 때는 메시지 글(요약)도 같이 온다.
-typedef CallCardUpdate = ({String roomId, String messageId, CallCard card, String? text});
+typedef CallCardUpdate = ({
+  String roomId,
+  String messageId,
+  CallCard card,
+  String? text,
+});
 
 /// 메시지의 공감(이모지 반응)이 바뀌었다(message:reactions — 서버 reactions.js). [reactions]는 바뀐 뒤의 전체 목록.
 typedef MessageReactionsUpdate = ({
@@ -582,6 +587,10 @@ class ChatSocket {
   final _roomRemovedController = StreamController<RoomRemovedEvent>.broadcast();
   final _topicFoldersChangedController = StreamController<String>.broadcast();
   final _calendarChangedController = StreamController<String>.broadcast();
+  final _groupwareChangedController = StreamController<String>.broadcast();
+  final _approvalNotificationController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  final _approvalNotificationSyncController = StreamController<int>.broadcast();
   final _scheduledMessageEventController =
       StreamController<ScheduledMessageEvent>.broadcast();
   final _scheduledChangedController = StreamController<String>.broadcast();
@@ -623,6 +632,18 @@ class ChatSocket {
 
   /// 캘린더·일정이 바뀌었을 때(calendar:changed) — 그 팀 id가 흐른다. 열려 있는 캘린더 화면이 다시 받는다.
   Stream<String> get calendarChanged => _calendarChangedController.stream;
+
+  /// 결재가 올라오거나 진행됐을 때(groupware:changed) — 그 문서 id가 흐른다. 메뉴의 결재 뱃지와 열려 있는 그룹웨어 화면이 다시
+  /// 받는다(server/src/groupware.js announce).
+  Stream<String> get groupwareChanged => _groupwareChangedController.stream;
+
+  /// 결재 알림 한 건(결재 요청·승인·반려·회수·취소 — 서버 approval:notification) — `{notification, unreadCount}`. 알림 센터 "결재" 탭.
+  Stream<Map<String, dynamic>> get approvalNotifications =>
+      _approvalNotificationController.stream;
+
+  /// 결재 알림의 안 읽은 개수가 바뀜(다른 기기에서 읽음, 결재를 처리해 그 요청 알림이 읽음이 됨) — 새 개수.
+  Stream<int> get approvalNotificationSync =>
+      _approvalNotificationSyncController.stream;
 
   /// 내(다른 기기 포함) 토픽 폴더가 바뀌었을 때(topic-folders:changed) — 그 팀 id가 흐른다.
   Stream<String> get topicFoldersChanged =>
@@ -930,6 +951,22 @@ class ChatSocket {
         data is Map ? (data['teamId'] as String? ?? '') : '',
       );
     });
+    socket.on('groupware:changed', (data) {
+      _groupwareChangedController.add(
+        data is Map ? (data['documentId'] as String? ?? '') : '',
+      );
+    });
+    socket.on('approval:notification', (data) {
+      if (data is Map) {
+        _approvalNotificationController.add(Map<String, dynamic>.from(data));
+      }
+    });
+    socket.on(
+      'approval:notification-sync',
+      (data) => _approvalNotificationSyncController.add(
+        data is Map ? ((data['unreadCount'] as num?)?.toInt() ?? 0) : 0,
+      ),
+    );
     socket.on('topic-folders:changed', (data) {
       _topicFoldersChangedController.add(
         data is Map ? (data['teamId'] as String? ?? '') : '',
@@ -1155,7 +1192,11 @@ class ChatSocket {
       final userId = m['userId'];
       final name = m['name'];
       if (roomId is String && userId is String && name is String) {
-        _callDeclinedController.add((roomId: roomId, userId: userId, name: name));
+        _callDeclinedController.add((
+          roomId: roomId,
+          userId: userId,
+          name: name,
+        ));
       }
     });
     socket.on('presence:update', (data) {
@@ -1163,10 +1204,7 @@ class ChatSocket {
         PresenceUpdate.fromJson(Map<String, dynamic>.from(data as Map)),
       );
     });
-    socket.on(
-      'reminder:changed',
-      (_) => _reminderChangedController.add(null),
-    );
+    socket.on('reminder:changed', (_) => _reminderChangedController.add(null));
     socket.on('user:status', (data) {
       final m = Map<String, dynamic>.from(data as Map);
       final userId = m['userId'];
@@ -1308,7 +1346,9 @@ class ChatSocket {
       'inquiryId': ?inquiryId,
     };
     if (!fitsSocketMessage(payload)) {
-      return Future.error(const MessageSendException('메시지가 너무 깁니다. 나눠서 보내 주세요.'));
+      return Future.error(
+        const MessageSendException('메시지가 너무 깁니다. 나눠서 보내 주세요.'),
+      );
     }
     final override = debugSendOverride;
     if (override != null) return override(payload).then(_messageFromAck);

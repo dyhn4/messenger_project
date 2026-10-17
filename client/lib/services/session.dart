@@ -39,6 +39,7 @@ import 'calendar_controller.dart';
 import 'call_controller.dart';
 import 'call_quality.dart' show callVideoTierFromWire;
 import 'chat_socket.dart';
+import 'groupware_api.dart';
 import 'notification_api.dart';
 import 'notification_controller.dart';
 import 'deep_link_service.dart';
@@ -111,6 +112,7 @@ class Session extends ChangeNotifier {
     _stickerRefresh?.cancel();
     TypingGate.instance.cancel(this);
     pollEvents.dispose();
+    unawaited(_approvalNotificationEvents.close());
     super.dispose();
   }
 
@@ -284,11 +286,13 @@ class Session extends ChangeNotifier {
     newEvents: chatSocket.notificationNew,
     syncEvents: chatSocket.notificationSync,
     projectEvents: chatSocket.projectNotifications,
+    approvalEvents: _approvalNotificationEvents.stream,
     reconnected: chatSocket.reconnected,
     userId: () => userId,
     onNew: _onNotificationNew,
     onRead: _onNotificationsRead,
     onSync: _onNotificationSync,
+    onApprovalUnread: _setApprovalUnread,
   );
 
   /// 통합 즐겨찾기(메시지·파일·댓글·투표·대화방·멤버) — 내가 담은 id와 탭별 목록, 소켓 favorite:changed
@@ -421,6 +425,9 @@ class Session extends ChangeNotifier {
   Stream<String> get toasts => _toastController.stream;
   void _showToast(String message) => _toastController.add(message);
 
+  /// 화면 밖(앱 최상단 — 알림을 눌러 온 경로 등)에서 토스트를 띄울 때. 화면이 있는 곳은 showAppToast를 쓴다.
+  void showToast(String message) => _showToast(message);
+
   /// 토픽에서 내보내졌거나 토픽이 삭제돼 방이 내 목록에서 사라졌을 때 — 방 정리(목록·컨트롤러·
   /// 활성 방·토픽 폴더)는 이미 끝난 뒤에 흐른다. 홈 화면이 구독해서 event.toastText로 안내하고,
   /// 그 방을 보고 있었으면 목록으로 돌아가거나 대화 패널을 비운다. 내가 직접 삭제한 토픽은
@@ -452,6 +459,14 @@ class Session extends ChangeNotifier {
 
   /// 프로젝트 알림함의 안 읽은 개수 — 툴바 "프로젝트" 버튼의 배지와 프로젝트 창 사이드바가 쓴다.
   int projectUnread = 0;
+
+  /// 결재 알림함의 안 읽은 개수 — 알림 센터 "결재" 탭 배지와 종 모양 버튼의 빨간 점.
+  int approvalUnread = 0;
+  StreamSubscription? _approvalNotifSub;
+  StreamSubscription? _approvalNotifSyncSub;
+
+  /// 결재 알림이 새로 왔거나 안 읽은 수가 바뀌었을 때 — 알림 센터가 받아 둔 결재 목록을 다시 받는 신호.
+  final _approvalNotificationEvents = StreamController<void>.broadcast();
   StreamSubscription? _hiddenSub;
   StreamSubscription? _teamSub;
   StreamSubscription? _teamLeftSub;
@@ -493,6 +508,7 @@ class Session extends ChangeNotifier {
   StreamSubscription<String>? _topicFoldersChangedSub;
   StreamSubscription<ScheduledMessageEvent>? _scheduledEventSub;
   StreamSubscription<String>? _scheduledChangedSub;
+  StreamSubscription<String>? _groupwareChangedSub;
   StreamSubscription<String>? _fcmTokenRefreshSub;
 
   /// 지금 소켓으로 연결되어 있는(온라인) 사용자 id 집합. 멤버 목록의 초록 점 표시에 쓴다.
@@ -1290,6 +1306,47 @@ class Session extends ChangeNotifier {
     }
   }
 
+  /// 결재 알림함의 안 읽은 개수를 서버에서 다시 받아온다. 그룹웨어가 없는 예전 서버면 0으로 둔다(부가 표시라 조용히).
+  Future<void> refreshApprovalUnread() async {
+    if (api == null || token == null) return;
+    try {
+      _setApprovalUnread((await groupwareApi.notifications()).unread);
+    } catch (_) {
+      _setApprovalUnread(0);
+    }
+  }
+
+  /// 소켓 `approval:notification` `{notification, unreadCount}` — 배지를 맞추고 알림 센터가 받아 둔 결재 목록을 다시 받게 한다. 앱이
+  /// 켜져 있으면 서버 푸시가 오지 않으니(접속 중인 기기는 건너뜀) 여기서 알림을 띄운다 — 누르면 그 문서 상세(main.dart).
+  void handleApprovalNotification(Map<String, dynamic> data) {
+    _setApprovalUnread(
+      (data['unreadCount'] as num?)?.toInt() ?? approvalUnread + 1,
+    );
+    _approvalNotificationEvents.add(null);
+    final n = data['notification'];
+    if (n is! Map || _quietNotifications) return;
+    final documentId = n['documentId'] as String?;
+    if (documentId == null) return;
+    notifications.showApprovalNotification(
+      title: n['title'] as String? ?? '결재',
+      body: n['body'] as String? ?? '',
+      documentId: documentId,
+      teamId: n['teamId'] as String?,
+    );
+  }
+
+  /// 소켓 `approval:notification-sync` — 다른 기기에서 읽었거나 결재를 처리해 요청 알림이 읽음이 됨.
+  void handleApprovalNotificationSync(int count) {
+    _setApprovalUnread(count);
+    _approvalNotificationEvents.add(null);
+  }
+
+  void _setApprovalUnread(int count) {
+    if (count == approvalUnread) return;
+    approvalUnread = count;
+    notifyListeners();
+  }
+
   /// 프로젝트는 정회원 이상만(server/src/projects.js의 게이트와 동일 규칙).
   bool get canUseProjects => isServerAdmin || accountRole != AccountRole.guest;
 
@@ -1570,6 +1627,12 @@ class Session extends ChangeNotifier {
     _scheduledChangedSub = chatSocket.scheduledChanged.listen(
       handleScheduledChanged,
     );
+    // 결재가 올라오거나 진행되면 메뉴의 결재 뱃지를 다시 센다(열린 그룹웨어 화면은 같은 스트림을 따로 듣는다).
+    _groupwareChangedSub?.cancel();
+    _groupwareChangedSub = chatSocket.groupwareChanged.listen(
+      (_) => unawaited(refreshGroupwarePending()),
+    );
+    unawaited(refreshGroupwarePending());
     _readSub?.cancel();
     _readSub = chatSocket.readEvents.listen((e) {
       final match = rooms.where((r) => r.id == e.roomId);
@@ -1609,6 +1672,15 @@ class Session extends ChangeNotifier {
       projectUnread = count;
       notifyListeners();
     });
+    _approvalNotifSub?.cancel();
+    _approvalNotifSub = chatSocket.approvalNotifications.listen(
+      handleApprovalNotification,
+    );
+    _approvalNotifSyncSub?.cancel();
+    _approvalNotifSyncSub = chatSocket.approvalNotificationSync.listen(
+      handleApprovalNotificationSync,
+    );
+    unawaited(refreshApprovalUnread());
     _todoToastSub?.cancel();
     _todoToastSub = chatSocket.todoChanged.listen((e) {
       final text = todoAssignedToast(e, myUserId: userId);
@@ -4343,6 +4415,59 @@ class Session extends ChangeNotifier {
     unawaited(loadTopicFolders());
     _resetScheduledMessages();
     unawaited(_refreshScheduledMessages());
+    // 그룹웨어가 팀 범위면 팀마다 결재함이 다르다.
+    unawaited(refreshGroupwarePending());
+  }
+
+  // ───────────── 그룹웨어(전자결재·연차·출퇴근 — server/src/groupware.js) ─────────────
+
+  /// 지금 팀(또는 회사 전체) 범위에서 내가 결재할 문서 수 — 메뉴 "결재" 타일의 숫자 뱃지.
+  int groupwarePending = 0;
+
+  /// 지금 고른 팀으로 묶은 그룹웨어 API.
+  GroupwareApi get groupwareApi => GroupwareApi(api!, teamId: currentTeam?.id);
+
+  /// 결재 뱃지 수를 다시 받는다. 그룹웨어가 없는 예전 서버이거나 못 받으면 0으로 둔다(부가 표시라 조용히).
+  Future<void> refreshGroupwarePending() async {
+    if (api == null || token == null) return;
+    var next = 0;
+    try {
+      next = (await groupwareApi.context()).pendingForMe;
+    } catch (_) {
+      next = 0;
+    }
+    if (next == groupwarePending) return;
+    groupwarePending = next;
+    notifyListeners();
+  }
+
+  /// 인증이 필요한 파일(그룹웨어 근태 엑셀 등)을 받아 기기에 저장하고 그 경로를 돌려준다 — 저장 위치 규칙은 [exportRoomChat]과
+  /// 같다(다운로드 폴더를 정했으면 거기, 아니면 이 앱의 임시 폴더, 웹은 브라우저 다운로드).
+  Future<String> downloadAuthedFile(
+    String path, {
+    required String fileName,
+  }) async {
+    if (api == null) throw const ApiException('연결되어 있지 않습니다.');
+    final response = await api!.downloadAuthed(path);
+    if (response.statusCode != 200) {
+      final body = await response.stream.bytesToString();
+      var message = '내려받기에 실패했습니다.';
+      try {
+        final decoded = jsonDecode(body) as Map<String, dynamic>;
+        message = decoded['error'] as String? ?? message;
+      } catch (_) {
+        // JSON이 아닌 응답(프록시 오류 페이지 등)이면 기본 문구.
+      }
+      throw ApiException(message);
+    }
+    final bytes = await response.stream.toBytes();
+    final folder = settings.downloadFolder;
+    return writeDownloadFile(
+      folder: folder.isEmpty ? await downloadTempFolder() : folder,
+      fileName: fileName,
+      bytes: bytes,
+      markAsDownloaded: false,
+    );
   }
 
   /// 지금 팀의 내 토픽 폴더를 서버에서 다시 받는다. 폴더는 목록을 묶어 보여주는 부가 정보라
@@ -5089,9 +5214,12 @@ class Session extends ChangeNotifier {
     await _renamedSub?.cancel();
     await _projectNotifSub?.cancel();
     await _projectNotifSyncSub?.cancel();
+    await _approvalNotifSub?.cancel();
+    await _approvalNotifSyncSub?.cancel();
     await _todoToastSub?.cancel();
     await _todoReminderSub?.cancel();
     projectUnread = 0;
+    approvalUnread = 0;
     await _hiddenSub?.cancel();
     await _teamSub?.cancel();
     await _teamLeftSub?.cancel();
@@ -5122,6 +5250,8 @@ class Session extends ChangeNotifier {
     await _topicFoldersChangedSub?.cancel();
     await _scheduledEventSub?.cancel();
     await _scheduledChangedSub?.cancel();
+    await _groupwareChangedSub?.cancel();
+    groupwarePending = 0;
     chatSocket.dispose();
     for (final c in _controllers.values) {
       c.dispose();

@@ -69,6 +69,9 @@ export const users = pgTable('users', {
   // 방해 금지 일정 — { enabled, start, end(하루 중 분), days([0=일 … 6=토]), offsetMinutes(그 사람 기기의 UTC 차이) }. 매일
   // 정한 시간 동안 알림을 보내지 않는다(statusRules.js isDndActive). null이면 일정 없음.
   dndSchedule: jsonb('dnd_schedule'),
+  // 입사일('YYYY-MM-DD') — 그룹웨어가 회사 전체 범위일 때(groupwareScope.js) 법정 연차를 계산하는 기준(annualLeave.js). 팀
+  // 범위면 team_members.hire_date를 쓴다(부서·직책의 계정/팀 값과 같은 방식). 결재·근태 관리자가 정한다.
+  hireDate: text('hire_date'),
   // 마지막으로 앱이 서버에 붙어 있던 시각 — 소켓이 붙을 때와 마지막 연결이 끊길 때 적는다(socket.js). 오래 접속하지
   // 않은 사람에게 안 읽은 멘션을 메일로 요약해 보내는 데 쓴다(mentionDigest.js). 이 컬럼 전 기록은 없어서(null)
   // 그때는 기기의 마지막 접속(devices.last_seen_at)이나 가입 시각으로 어림한다.
@@ -128,6 +131,10 @@ export const teams = pgTable('teams', {
   // 박혀 있던 값과 같아서 설정을 안 건드리면 동작이 그대로다. 고를 수 있는 값은
   // permissions.js의 EDIT_DELETE_WINDOW_OPTIONS 참고.
   messageEditDeleteWindowSeconds: integer('message_edit_delete_window_seconds').notNull().default(300),
+  // [그룹웨어] 이 팀의 근무 시간(하루 중 분 — 09:00 = 540). 그룹웨어가 팀 범위일 때 출퇴근 지각·조퇴 표시에 쓴다(attendanceRules.js).
+  // 비어 있으면 서버 설정의 값(server_settings.work_start_minutes)을 쓴다.
+  workStartMinutes: integer('work_start_minutes'),
+  workEndMinutes: integer('work_end_minutes'),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -152,6 +159,8 @@ export const teamMembers = pgTable(
     // 있다). 'account'면 users.department/position을 쓰고 여기는 안 쓴다.
     department: text('department'),
     position: text('position'),
+    // 입사일('YYYY-MM-DD') — 그룹웨어가 팀 범위일 때 이 팀에서의 법정 연차 기준(annualLeave.js). 회사 전체 범위면 users.hire_date.
+    hireDate: text('hire_date'),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.userId] }), index('team_members_user_id_idx').on(t.userId)],
@@ -272,6 +281,12 @@ export const serverSettings = pgTable('server_settings', {
   mentionDigestEnabled: boolean('mention_digest_enabled').notNull().default(true),
   mentionDigestDays: integer('mention_digest_days').notNull().default(3),
   mentionDigestPreview: boolean('mention_digest_preview').notNull().default(false),
+  // 그룹웨어(전자결재·연차·출퇴근 — groupware.js)를 어떤 범위로 둘지 — 'org'(부서·직책 설정 orgScope를 따름: 계정 단위면 회사 전체,
+  // 팀 단위면 팀마다, 기본) | 'team'(팀마다 따로) | 'server'(서버 전체 하나). 바꾸면 이전 범위의 결재·근태 기록은 그 범위에 남는다.
+  groupwareScope: text('groupware_scope').notNull().default('org'),
+  // 회사 전체 범위의 근무 시간(하루 중 분) — 팀 범위에서 팀이 정하지 않았을 때도 이 값.
+  workStartMinutes: integer('work_start_minutes').notNull().default(540),
+  workEndMinutes: integer('work_end_minutes').notNull().default(1080),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -2246,4 +2261,185 @@ export const albumItems = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('album_items_album_created_idx').on(t.albumId, t.createdAt)],
+);
+
+// ── 그룹웨어(전자결재·연차·출퇴근 — groupware.js) ─────────────────────────────
+//
+// 모든 표에 범위 키(scope_key)가 있다 — 팀 범위면 팀 id, 회사 전체 범위면 'server'(groupwareScope.js). 팀 범위의 행은 team_id도
+// 채워서 팀이 지워지면 함께 지워진다. 범위 설정을 바꾸면 예전 범위의 행은 그 범위 키로 남는다(새 범위에서는 보이지 않는다).
+
+/**
+ * 결재 문서 하나 — 휴가('leave')·지출('expense')·근태 수정('attendance'). 종류별 내용은 payload(jsonb — approvalRules.js가 검사):
+ * 휴가 { leaveType, startDate, endDate, halfDays }, 지출 { amount, category, spentOn }, 근태 수정 { workDate, clockIn, clockOut }.
+ * 결재자는 approval_steps에 순서대로 있고, current_step은 지금 결재할 차례(진행 중일 때만).
+ *
+ * 상태: 'pending'(진행 중) → 'approved'(마지막 결재자까지 승인) | 'rejected'(누군가 반려) | 'withdrawn'(올린 사람이 회수) |
+ * 'canceled'(승인된 뒤 관리자가 취소 — 사유를 남긴다). 올린 사람·결재자가 지워져도 기록은 남아야 해서 이름을 함께 둔다.
+ */
+export const approvalDocuments = pgTable(
+  'approval_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    authorId: uuid('author_id').references(() => users.id, { onDelete: 'set null' }),
+    authorName: text('author_name').notNull(),
+    title: text('title').notNull(),
+    body: text('body'),
+    payload: jsonb('payload').notNull(),
+    // 지출 영수증 등 첨부 [{ fileUrl(미서명 경로), fileName, fileSize, mimeType }].
+    attachments: jsonb('attachments'),
+    status: text('status').notNull().default('pending'),
+    currentStep: integer('current_step'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    cancelReason: text('cancel_reason'),
+    canceledByName: text('canceled_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('approval_documents_scope_author_idx').on(t.scopeKey, t.authorId, t.createdAt),
+    index('approval_documents_scope_status_idx').on(t.scopeKey, t.status),
+  ],
+);
+
+/** 결재선의 한 칸 — step_order 순서대로 결재한다. 상태: 'waiting'(차례 전) | 'pending'(지금 차례) | 'approved' | 'rejected'. */
+export const approvalSteps = pgTable(
+  'approval_steps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => approvalDocuments.id, { onDelete: 'cascade' }),
+    stepOrder: integer('step_order').notNull(),
+    approverId: uuid('approver_id').references(() => users.id, { onDelete: 'set null' }),
+    approverName: text('approver_name').notNull(),
+    status: text('status').notNull().default('waiting'),
+    comment: text('comment'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('approval_steps_document_idx').on(t.documentId, t.stepOrder),
+    index('approval_steps_approver_status_idx').on(t.approverId, t.status),
+  ],
+);
+
+/** 참조자 — 문서를 볼 수 있고 결과(승인·반려)를 알림으로 받는다. 결재는 하지 않는다. */
+export const approvalCc = pgTable(
+  'approval_cc',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => approvalDocuments.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.documentId, t.userId] }), index('approval_cc_user_idx').on(t.userId)],
+);
+
+/**
+ * 결재 알림함 — 알림 센터 "결재" 탭(받는 사람마다 한 줄). 결재 요청(내 차례)·승인·반려·회수·취소를 알린다. 범용 notifications 표는
+ * team_id가 필수라(회사 전체 범위 결재는 팀이 없다) 프로젝트 알림처럼 따로 둔다. 90일 지나면 지운다(retention.js).
+ */
+export const approvalNotifications = pgTable(
+  'approval_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => approvalDocuments.id, { onDelete: 'cascade' }),
+    // 문서의 팀(팀 단위 범위) — 회사 전체 범위면 null. 눌렀을 때 그 팀으로 문서를 연다.
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    // 'request'(내 결재 차례) | 'approved' | 'rejected' | 'withdrawn' | 'canceled' — approvalRules.js APPROVAL_NOTIFICATION_KINDS
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'set null' }),
+    actorName: text('actor_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('approval_notifications_user_idx').on(t.userId, t.createdAt),
+    index('approval_notifications_document_idx').on(t.documentId),
+  ],
+);
+
+/**
+ * 저장해 둔 결재선 — 신청할 때 골라 쓰는 "자주 쓰는 결재선"(올린 사람 것). 결재자·참조자 id 목록(jsonb 배열). 나중에 조직도에
+ * 상위자를 정하면 그것으로 기본 결재선을 만들 수도 있다(approvalRules.js suggestApprovalLine).
+ */
+export const approvalLines = pgTable(
+  'approval_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerId: uuid('owner_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    scopeKey: text('scope_key').notNull(),
+    name: text('name').notNull(),
+    approverIds: jsonb('approver_ids').notNull(),
+    ccIds: jsonb('cc_ids').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('approval_lines_owner_idx').on(t.ownerId, t.scopeKey)],
+);
+
+/**
+ * 연차 조정 — 관리자가 법정 계산(annualLeave.js)에 더하거나 빼는 반일 단위 값(+면 더 줌, -면 뺌). 이월, 출근율 80% 미만으로 줄어든
+ * 연차, 회사가 더 주는 휴가 등. period_start는 그 조정이 속한 연차 기간의 시작일('YYYY-MM-DD' — 입사일 기준 해마다 바뀐다).
+ */
+export const leaveAdjustments = pgTable(
+  'leave_adjustments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    periodStart: text('period_start').notNull(),
+    halfDays: integer('half_days').notNull(),
+    reason: text('reason').notNull(),
+    createdByName: text('created_by_name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('leave_adjustments_user_idx').on(t.scopeKey, t.userId, t.periodStart)],
+);
+
+/**
+ * 출퇴근 기록 — 사람·날짜('YYYY-MM-DD', 서버 PC 기준)마다 한 줄. 사내 와이파이에서 눌렀는지(…_lan)를 함께 남긴다(위치 정보는 받지
+ * 않는다). 근태 수정 결재가 승인되면 시각을 바꾸고 corrected_doc_id에 그 문서를, original_…에 처음 값을 남긴다(한 번 바뀐 뒤에도
+ * 처음 값은 그대로) — 기록을 지우지 않는다(근태는 임금·근로시간의 근거라 수정 이력이 남아야 한다).
+ */
+export const attendanceRecords = pgTable(
+  'attendance_records',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scopeKey: text('scope_key').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workDate: text('work_date').notNull(),
+    clockInAt: timestamp('clock_in_at', { withTimezone: true }),
+    clockOutAt: timestamp('clock_out_at', { withTimezone: true }),
+    clockInLan: boolean('clock_in_lan'),
+    clockOutLan: boolean('clock_out_lan'),
+    note: text('note'),
+    correctedDocId: uuid('corrected_doc_id').references(() => approvalDocuments.id, { onDelete: 'set null' }),
+    originalClockInAt: timestamp('original_clock_in_at', { withTimezone: true }),
+    originalClockOutAt: timestamp('original_clock_out_at', { withTimezone: true }),
+    // 이 기록이 결재로 고쳐진 적이 있는지 — 처음 값이 비어 있던 경우(기록이 없던 날을 결재로 만든 경우)도 구분하려고 둔다.
+    corrected: boolean('corrected').notNull().default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('attendance_records_scope_user_date_uq').on(t.scopeKey, t.userId, t.workDate),
+    index('attendance_records_scope_date_idx').on(t.scopeKey, t.workDate),
+  ],
 );

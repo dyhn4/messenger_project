@@ -83,13 +83,15 @@ class CalendarController extends ChangeNotifier {
   /// 준회원인지 — 새 캘린더 만들기·구독은 정회원 이상만 할 수 있다(서버도 막는다).
   bool get isGuest => _isGuest();
 
-  /// 국가 공휴일·멤버 생일(서버 목록에 없는 내장 구독 캘린더). 생일은 정회원 이상만.
+  /// 국가 공휴일·멤버 생일·팀 휴가(서버 목록에 없는 내장 구독 캘린더). 생일·팀 휴가는 정회원 이상만(서버도 그렇게 보낸다).
   List<CalendarInfo> get builtinCalendars => [
     CalendarInfo.holidays(hidden: _hiddenBuiltin.contains(kHolidaysCalendarId)),
-    if (!_isGuest())
+    if (!_isGuest()) ...[
       CalendarInfo.birthdays(
         hidden: _hiddenBuiltin.contains(kBirthdaysCalendarId),
       ),
+      CalendarInfo.leaves(hidden: _hiddenBuiltin.contains(kLeavesCalendarId)),
+    ],
   ];
 
   /// 화면 왼쪽 "구독 캘린더" 묶음 — 내장 캘린더가 먼저, 그다음 내가 구독한 캘린더.
@@ -118,8 +120,7 @@ class CalendarController extends ChangeNotifier {
   ];
 
   bool isHidden(String calendarId) {
-    if (calendarId == kHolidaysCalendarId ||
-        calendarId == kBirthdaysCalendarId) {
+    if (kBuiltinCalendarIds.contains(calendarId)) {
       return _hiddenBuiltin.contains(calendarId);
     }
     return calendarById(calendarId)?.hidden ?? false;

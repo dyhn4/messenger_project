@@ -1,0 +1,460 @@
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
+import { db } from '../client.js';
+import {
+  approvalCc,
+  approvalDocuments,
+  approvalLines,
+  approvalNotifications,
+  approvalSteps,
+  attendanceRecords,
+  leaveAdjustments,
+  teamMembers,
+  teams,
+  users,
+} from '../schema.js';
+
+// ── 결재 문서 ───────────────────────────────────────────────────────────
+
+/** 문서·결재선·참조자를 한 번에 넣는다. 첫 결재자가 바로 차례(pending)다. 넣은 문서 행. */
+export async function insertApprovalDocument({ doc, approvers, ccIds }) {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(approvalDocuments)
+      .values({ ...doc, status: 'pending', currentStep: 0 })
+      .returning();
+    await tx.insert(approvalSteps).values(
+      approvers.map((a, i) => ({
+        documentId: row.id,
+        stepOrder: i,
+        approverId: a.id,
+        approverName: a.name,
+        status: i === 0 ? 'pending' : 'waiting',
+      })),
+    );
+    if (ccIds.length > 0) await tx.insert(approvalCc).values(ccIds.map((userId) => ({ documentId: row.id, userId })));
+    return row;
+  });
+}
+
+/** 문서 하나와 그 결재선(순서대로)·참조자 id. 없으면 null. */
+export async function findApprovalDocument(id) {
+  const [doc] = await db.select().from(approvalDocuments).where(eq(approvalDocuments.id, id));
+  if (!doc) return null;
+  const [steps, cc] = await Promise.all([
+    db.select().from(approvalSteps).where(eq(approvalSteps.documentId, id)).orderBy(asc(approvalSteps.stepOrder)),
+    db.select({ userId: approvalCc.userId }).from(approvalCc).where(eq(approvalCc.documentId, id)),
+  ]);
+  return { doc, steps, ccIds: cc.map((c) => c.userId) };
+}
+
+/**
+ * 결재 진행 — 문서 행을 잠근 채(FOR UPDATE) 다시 읽어 [plan](approvalRules.js planDecision을 감싼 함수)에 넘기고, 돌려받은 값을 한
+ * 트랜잭션으로 쓴다. 두 사람이 동시에 눌러도 한쪽은 바뀐 상태를 보고 거절된다. plan이 `{ error }`면 그대로 돌려준다.
+ * [afterApply](tx, { doc, steps, ccIds, result })는 같은 트랜잭션에서 더 할 일(근태 수정 반영 등).
+ */
+export async function applyApprovalDecision(id, plan, afterApply = null) {
+  return db.transaction(async (tx) => {
+    const [doc] = await tx.select().from(approvalDocuments).where(eq(approvalDocuments.id, id)).for('update');
+    if (!doc) return { error: '결재 문서를 찾을 수 없습니다.', status: 404 };
+    const steps = await tx.select().from(approvalSteps).where(eq(approvalSteps.documentId, id)).orderBy(asc(approvalSteps.stepOrder));
+    const ccIds = (await tx.select({ userId: approvalCc.userId }).from(approvalCc).where(eq(approvalCc.documentId, id))).map((c) => c.userId);
+    const result = await plan({ doc, steps, ccIds });
+    if (result.error) return result;
+    const [updated] = await tx.update(approvalDocuments).set(result.doc).where(eq(approvalDocuments.id, id)).returning();
+    for (const { id: stepId, patch } of result.steps) {
+      await tx.update(approvalSteps).set(patch).where(eq(approvalSteps.id, stepId));
+    }
+    if (afterApply) await afterApply(tx, { doc: updated, steps, ccIds, result });
+    return { ...result, before: doc, document: updated };
+  });
+}
+
+/**
+ * 문서 목록(최신순) — [box]: 'inbox'(내가 지금 결재할 것) | 'mine'(내가 올린 것) | 'cc'(참조) | 'done'(내가 결재한 것) | 'all'(관리자 —
+ * 이 범위 전부). [kind]·[status]로 좁히고 [before](만든 시각 ms)로 다음 쪽을 받는다. 결재선은 따로 붙인다(attachSteps).
+ */
+export async function listApprovalDocuments({ scopeKey, box, userId, kind = null, status = null, before = null, limit = 50 }) {
+  const conditions = [eq(approvalDocuments.scopeKey, scopeKey)];
+  if (kind) conditions.push(eq(approvalDocuments.kind, kind));
+  if (status) conditions.push(eq(approvalDocuments.status, status));
+  if (before) conditions.push(lt(approvalDocuments.createdAt, new Date(before)));
+  if (box === 'mine') conditions.push(eq(approvalDocuments.authorId, userId));
+  if (box === 'inbox' || box === 'done') {
+    const stepStatus = box === 'inbox' ? eq(approvalSteps.status, 'pending') : inArray(approvalSteps.status, ['approved', 'rejected']);
+    conditions.push(
+      sql`exists (select 1 from ${approvalSteps} where ${approvalSteps.documentId} = ${approvalDocuments.id}
+        and ${approvalSteps.approverId} = ${userId} and ${stepStatus})`,
+    );
+    if (box === 'inbox') conditions.push(eq(approvalDocuments.status, 'pending'));
+  }
+  if (box === 'cc') {
+    conditions.push(
+      sql`exists (select 1 from ${approvalCc} where ${approvalCc.documentId} = ${approvalDocuments.id} and ${approvalCc.userId} = ${userId})`,
+    );
+  }
+  const docs = await db
+    .select()
+    .from(approvalDocuments)
+    .where(and(...conditions))
+    .orderBy(desc(approvalDocuments.createdAt))
+    .limit(limit);
+  return attachSteps(docs);
+}
+
+/** 문서들에 결재선을 붙인다 `[{ doc, steps }]`. */
+async function attachSteps(docs) {
+  if (docs.length === 0) return [];
+  const steps = await db
+    .select()
+    .from(approvalSteps)
+    .where(inArray(approvalSteps.documentId, docs.map((d) => d.id)))
+    .orderBy(asc(approvalSteps.stepOrder));
+  const byDoc = new Map(docs.map((d) => [d.id, []]));
+  for (const s of steps) byDoc.get(s.documentId)?.push(s);
+  return docs.map((doc) => ({ doc, steps: byDoc.get(doc.id) ?? [] }));
+}
+
+/** 이 범위에서 내가 지금 결재할 문서 수(메뉴의 숫자 뱃지). */
+export async function countPendingApprovals(scopeKey, userId) {
+  const [row] = await db
+    .select({ count: sql`count(*)`.mapWith(Number) })
+    .from(approvalSteps)
+    .innerJoin(approvalDocuments, eq(approvalDocuments.id, approvalSteps.documentId))
+    .where(
+      and(
+        eq(approvalDocuments.scopeKey, scopeKey),
+        eq(approvalDocuments.status, 'pending'),
+        eq(approvalSteps.status, 'pending'),
+        eq(approvalSteps.approverId, userId),
+      ),
+    );
+  return row?.count ?? 0;
+}
+
+// ── 결재 알림함(알림 센터 "결재" 탭) ──────────────────────────────────────
+
+/** 받는 사람마다 한 줄씩 넣는다 — [rows]: `[{ userId, documentId, teamId, kind, title, body, actorId, actorName }]`. 넣은 행들. */
+export async function insertApprovalNotifications(rows) {
+  if (rows.length === 0) return [];
+  return db.insert(approvalNotifications).values(rows).returning();
+}
+
+/**
+ * 내 결재 알림 최신순 — 팀 이름, 문서 종류·상태, 그리고 `actionable`(지금 내가 결재할 차례인지 — 요청 알림을 받은 뒤 이미 처리했거나
+ * 회수됐으면 false)을 붙인다.
+ */
+export async function listApprovalNotifications(userId, limit = 50) {
+  const rows = await db
+    .select({
+      n: approvalNotifications,
+      teamName: teams.name,
+      docKind: approvalDocuments.kind,
+      docStatus: approvalDocuments.status,
+      actionable: sql`(${approvalDocuments.status} = 'pending' and exists (select 1 from ${approvalSteps}
+        where ${approvalSteps.documentId} = ${approvalDocuments.id} and ${approvalSteps.approverId} = ${userId}
+        and ${approvalSteps.status} = 'pending'))`.mapWith(Boolean),
+    })
+    .from(approvalNotifications)
+    .innerJoin(approvalDocuments, eq(approvalDocuments.id, approvalNotifications.documentId))
+    .leftJoin(teams, eq(teams.id, approvalNotifications.teamId))
+    .where(eq(approvalNotifications.userId, userId))
+    .orderBy(desc(approvalNotifications.createdAt))
+    .limit(limit);
+  return rows.map((r) => ({ ...r.n, teamName: r.teamName, docKind: r.docKind, docStatus: r.docStatus, actionable: !!r.actionable }));
+}
+
+export async function countUnreadApprovalNotifications(userId) {
+  const [row] = await db
+    .select({ n: sql`count(*)::int` })
+    .from(approvalNotifications)
+    .where(and(eq(approvalNotifications.userId, userId), isNull(approvalNotifications.readAt)));
+  return row?.n ?? 0;
+}
+
+/** 읽음 — [ids]도 [documentId]도 없으면 내 결재 알림 전부, [documentId]면 그 문서의 알림만(결재를 처리하면 그 요청 알림도 읽은 것으로). 바뀐 수. */
+export async function markApprovalNotificationsRead(userId, { ids = null, documentId = null } = {}) {
+  const conds = [eq(approvalNotifications.userId, userId), isNull(approvalNotifications.readAt)];
+  if (ids && ids.length > 0) conds.push(inArray(approvalNotifications.id, ids));
+  if (documentId) conds.push(eq(approvalNotifications.documentId, documentId));
+  const rows = await db
+    .update(approvalNotifications)
+    .set({ readAt: new Date() })
+    .where(and(...conds))
+    .returning({ id: approvalNotifications.id });
+  return rows.length;
+}
+
+export async function deleteApprovalNotificationsOlderThan(cutoff) {
+  const rows = await db
+    .delete(approvalNotifications)
+    .where(lt(approvalNotifications.createdAt, cutoff))
+    .returning({ id: approvalNotifications.id });
+  return rows.length;
+}
+
+// ── 휴가 ───────────────────────────────────────────────────────────────
+
+const DEDUCTING = ['annual', 'half_am', 'half_pm'];
+
+/**
+ * 연차에서 빠지는 휴가 합(반일 단위) — [statuses] 문서 중 시작일이 [from] 이상 [to] 미만인 것(기간을 걸친 휴가는 시작일 쪽 기간에 센다).
+ * `{ approved, pending }`.
+ */
+export async function sumDeductedLeave({ scopeKey, userId, from, to }) {
+  const rows = await db
+    .select({
+      status: approvalDocuments.status,
+      halfDays: sql`coalesce(sum((${approvalDocuments.payload}->>'halfDays')::int), 0)`.mapWith(Number),
+    })
+    .from(approvalDocuments)
+    .where(
+      and(
+        eq(approvalDocuments.scopeKey, scopeKey),
+        eq(approvalDocuments.authorId, userId),
+        eq(approvalDocuments.kind, 'leave'),
+        inArray(approvalDocuments.status, ['approved', 'pending']),
+        inArray(sql`${approvalDocuments.payload}->>'leaveType'`, DEDUCTING),
+        gte(sql`${approvalDocuments.payload}->>'startDate'`, from),
+        lt(sql`${approvalDocuments.payload}->>'startDate'`, to),
+      ),
+    )
+    .groupBy(approvalDocuments.status);
+  const of = (s) => rows.find((r) => r.status === s)?.halfDays ?? 0;
+  return { approved: of('approved'), pending: of('pending') };
+}
+
+/**
+ * 승인된 휴가 중 [from]~[to](둘 다 포함)와 겹치는 것 — 캘린더 "팀 휴가"와 근태 요약이 쓴다. [userIds]를 주면 그 사람들 것만.
+ * `[{ id, authorId, authorName, payload }]`.
+ */
+export async function listApprovedLeaves({ scopeKey, from, to, userIds = null }) {
+  const conditions = [
+    eq(approvalDocuments.scopeKey, scopeKey),
+    eq(approvalDocuments.kind, 'leave'),
+    eq(approvalDocuments.status, 'approved'),
+    lte(sql`${approvalDocuments.payload}->>'startDate'`, to),
+    gte(sql`${approvalDocuments.payload}->>'endDate'`, from),
+  ];
+  if (userIds) {
+    if (userIds.length === 0) return [];
+    conditions.push(inArray(approvalDocuments.authorId, userIds));
+  }
+  return db
+    .select({
+      id: approvalDocuments.id,
+      authorId: approvalDocuments.authorId,
+      authorName: approvalDocuments.authorName,
+      payload: approvalDocuments.payload,
+    })
+    .from(approvalDocuments)
+    .where(and(...conditions));
+}
+
+/** 이 사람의 결재 중·승인된 휴가 가운데 [from]~[to](둘 다 포함)와 겹치는 것 하나(없으면 null) — 같은 날 휴가를 두 번 내지 못하게. */
+export async function findOverlappingLeave({ scopeKey, userId, from, to }) {
+  const [row] = await db
+    .select({ id: approvalDocuments.id, title: approvalDocuments.title, payload: approvalDocuments.payload })
+    .from(approvalDocuments)
+    .where(
+      and(
+        eq(approvalDocuments.scopeKey, scopeKey),
+        eq(approvalDocuments.authorId, userId),
+        eq(approvalDocuments.kind, 'leave'),
+        inArray(approvalDocuments.status, ['approved', 'pending']),
+        lte(sql`${approvalDocuments.payload}->>'startDate'`, to),
+        gte(sql`${approvalDocuments.payload}->>'endDate'`, from),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
+/** 연차 조정 합(반일 단위)과 목록 — 그 연차 기간([periodStart]) 것. */
+export async function listLeaveAdjustments({ scopeKey, userId, periodStart }) {
+  return db
+    .select()
+    .from(leaveAdjustments)
+    .where(and(eq(leaveAdjustments.scopeKey, scopeKey), eq(leaveAdjustments.userId, userId), eq(leaveAdjustments.periodStart, periodStart)))
+    .orderBy(asc(leaveAdjustments.createdAt));
+}
+
+export async function insertLeaveAdjustment(fields) {
+  const [row] = await db.insert(leaveAdjustments).values(fields).returning();
+  return row;
+}
+
+// ── 입사일·구성원 ──────────────────────────────────────────────────────
+
+/**
+ * 이 범위의 구성원(탈퇴 제외) — 팀 범위면 그 팀 멤버와 팀의 입사일, 회사 전체면 모든 계정과 계정의 입사일.
+ * `[{ id, name, username, role, suspendedAt, deletedAt, isOwner, hireDate }]`.
+ */
+export async function listGroupwareMembers({ scope, teamId }) {
+  if (scope === 'team') {
+    const rows = await db
+      .select({ user: users, teamRole: teamMembers.role, hireDate: teamMembers.hireDate })
+      .from(teamMembers)
+      .innerJoin(users, eq(users.id, teamMembers.userId))
+      .where(and(eq(teamMembers.teamId, teamId), isNull(users.deletedAt)));
+    return rows.map((r) => ({ ...memberOf(r.user), isOwner: r.teamRole === 'owner', hireDate: r.hireDate ?? null }));
+  }
+  const rows = await db.select().from(users).where(isNull(users.deletedAt));
+  return rows.map((u) => ({ ...memberOf(u), isOwner: false, hireDate: u.hireDate ?? null }));
+}
+
+const memberOf = (u) => ({
+  id: u.id,
+  name: u.name ?? u.username,
+  username: u.username,
+  role: u.role ?? 'guest',
+  suspendedAt: u.suspendedAt ?? null,
+  deletedAt: u.deletedAt ?? null,
+});
+
+/** 한 사람의 입사일(범위에 맞는 쪽). */
+export async function findHireDate({ scope, teamId, userId }) {
+  if (scope === 'team') {
+    const [row] = await db
+      .select({ hireDate: teamMembers.hireDate })
+      .from(teamMembers)
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    return row?.hireDate ?? null;
+  }
+  const [row] = await db.select({ hireDate: users.hireDate }).from(users).where(eq(users.id, userId));
+  return row?.hireDate ?? null;
+}
+
+/** 입사일을 정한다(null이면 지움). 바꿨으면 true(팀 범위인데 그 팀 멤버가 아니면 false). */
+export async function setHireDate({ scope, teamId, userId, hireDate }) {
+  const rows =
+    scope === 'team'
+      ? await db
+          .update(teamMembers)
+          .set({ hireDate })
+          .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)))
+          .returning({ userId: teamMembers.userId })
+      : await db.update(users).set({ hireDate }).where(eq(users.id, userId)).returning({ userId: users.id });
+  return rows.length > 0;
+}
+
+// ── 저장한 결재선 ──────────────────────────────────────────────────────
+
+export function listApprovalLines(ownerId, scopeKey) {
+  return db
+    .select()
+    .from(approvalLines)
+    .where(and(eq(approvalLines.ownerId, ownerId), eq(approvalLines.scopeKey, scopeKey)))
+    .orderBy(desc(approvalLines.createdAt));
+}
+
+export async function insertApprovalLine(fields) {
+  const [row] = await db.insert(approvalLines).values(fields).returning();
+  return row;
+}
+
+/** 내 결재선을 지운다 — 지웠으면 true. */
+export async function deleteApprovalLine(id, ownerId) {
+  const rows = await db
+    .delete(approvalLines)
+    .where(and(eq(approvalLines.id, id), eq(approvalLines.ownerId, ownerId)))
+    .returning({ id: approvalLines.id });
+  return rows.length > 0;
+}
+
+// ── 출퇴근 ─────────────────────────────────────────────────────────────
+
+/** 이 사람의 [fromDate] 이후 기록(최신 날짜 먼저). */
+export function listRecentAttendance({ scopeKey, userId, fromDate }) {
+  return db
+    .select()
+    .from(attendanceRecords)
+    .where(and(eq(attendanceRecords.scopeKey, scopeKey), eq(attendanceRecords.userId, userId), gte(attendanceRecords.workDate, fromDate)))
+    .orderBy(desc(attendanceRecords.workDate));
+}
+
+/** [from]~[to](둘 다 포함) 기록 — [userId]를 주면 그 사람 것만. */
+export function listAttendanceInRange({ scopeKey, from, to, userId = null }) {
+  const conditions = [eq(attendanceRecords.scopeKey, scopeKey), gte(attendanceRecords.workDate, from), lte(attendanceRecords.workDate, to)];
+  if (userId) conditions.push(eq(attendanceRecords.userId, userId));
+  return db.select().from(attendanceRecords).where(and(...conditions)).orderBy(asc(attendanceRecords.workDate));
+}
+
+/** 출근 — 그날 기록이 없을 때만 넣는다(이미 있으면 null — 한 번만 출근을 누른다). */
+export async function insertClockIn(fields) {
+  const [row] = await db.insert(attendanceRecords).values(fields).onConflictDoNothing().returning();
+  return row ?? null;
+}
+
+/** 퇴근 — 아직 안 닫힌 기록만 닫는다(이미 퇴근했으면 null). */
+export async function updateClockOut(id, { clockOutAt, clockOutLan }) {
+  const [row] = await db
+    .update(attendanceRecords)
+    .set({ clockOutAt, clockOutLan, updatedAt: new Date() })
+    .where(and(eq(attendanceRecords.id, id), isNull(attendanceRecords.clockOutAt)))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * 근태 수정 결재가 승인됐을 때(같은 트랜잭션 [tx]) — 그날 기록의 시각을 바꾸고 처음 값을 남긴다(이미 고쳐진 적이 있으면 처음 값은 그대로).
+ * 기록이 없던 날이면 새로 만든다.
+ */
+export async function applyAttendanceCorrection(tx, { scopeKey, teamId, userId, workDate, clockInAt, clockOutAt, docId }) {
+  const [existing] = await tx
+    .select()
+    .from(attendanceRecords)
+    .where(and(eq(attendanceRecords.scopeKey, scopeKey), eq(attendanceRecords.userId, userId), eq(attendanceRecords.workDate, workDate)))
+    .for('update');
+  if (!existing) {
+    await tx.insert(attendanceRecords).values({
+      scopeKey,
+      teamId,
+      userId,
+      workDate,
+      clockInAt,
+      clockOutAt,
+      correctedDocId: docId,
+      corrected: true,
+    });
+    return;
+  }
+  await tx
+    .update(attendanceRecords)
+    .set({
+      clockInAt,
+      clockOutAt: clockOutAt ?? existing.clockOutAt,
+      correctedDocId: docId,
+      originalClockInAt: existing.corrected ? existing.originalClockInAt : existing.clockInAt,
+      originalClockOutAt: existing.corrected ? existing.originalClockOutAt : existing.clockOutAt,
+      corrected: true,
+      updatedAt: new Date(),
+    })
+    .where(eq(attendanceRecords.id, existing.id));
+}
+
+/**
+ * 승인된 근태 수정을 관리자가 취소했을 때(같은 트랜잭션) — 그 결재로 고친 기록이면 처음 값으로 되돌린다. 처음 값이 없던 날(결재로 새로
+ * 만든 기록)은 지운다. 그 뒤에 다른 결재로 또 고쳤으면(corrected_doc_id가 다르면) 손대지 않는다.
+ */
+export async function revertAttendanceCorrection(tx, docId) {
+  const [record] = await tx.select().from(attendanceRecords).where(eq(attendanceRecords.correctedDocId, docId)).for('update');
+  if (!record) return;
+  // 출근 단추로 만든 기록은 사내 와이파이 여부(clock_in_lan)가 참·거짓으로 남는다 — null이면 결재로 새로 만든 기록이다.
+  const createdByCorrection = record.clockInLan === null && !record.originalClockInAt && !record.originalClockOutAt;
+  if (createdByCorrection) {
+    await tx.delete(attendanceRecords).where(eq(attendanceRecords.id, record.id));
+    return;
+  }
+  await tx
+    .update(attendanceRecords)
+    .set({
+      clockInAt: record.originalClockInAt,
+      clockOutAt: record.originalClockOutAt,
+      correctedDocId: null,
+      corrected: false,
+      originalClockInAt: null,
+      originalClockOutAt: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(attendanceRecords.id, record.id));
+}

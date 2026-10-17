@@ -125,6 +125,7 @@ class _StatsTabState extends State<_StatsTab> {
     String? orgScope,
     String? teamInviteLinkCreation,
     String? projectCreation,
+    String? groupwareScope,
   }) async {
     setState(() => _saving = true);
     try {
@@ -133,8 +134,13 @@ class _StatsTabState extends State<_StatsTab> {
         orgScope: orgScope,
         teamInviteLinkCreation: teamInviteLinkCreation,
         projectCreation: projectCreation,
+        groupwareScope: groupwareScope,
       );
       if (orgScope != null) await widget.session.refreshOrgInfo();
+      // 범위가 바뀌면 결재함도 달라진다 — 메뉴의 결재 뱃지를 새로 센다.
+      if (orgScope != null || groupwareScope != null) {
+        await widget.session.refreshGroupwarePending();
+      }
       await _load();
     } catch (e) {
       if (mounted) showAppToast(context, '실패: $e');
@@ -303,6 +309,39 @@ class _StatsTabState extends State<_StatsTab> {
               onSelectionChanged: _saving
                   ? null
                   : (s) => _save(orgScope: s.first),
+            ),
+          ),
+          const _SectionDivider(),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '그룹웨어 범위',
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '전자결재·연차·출퇴근을 팀마다 따로 둘지, 회사 전체 하나로 둘지 정합니다. "팀·직책 설정을 따름"이면 위 설정이 '
+            '계정 단위일 때 회사 전체, 팀 단위일 때 팀마다입니다. 바꾸면 이전 범위의 결재·근태 기록은 그 범위에 남아 새 범위에서는 '
+            '보이지 않으니, 운영을 시작하기 전에 정하세요.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<String>(
+              key: const ValueKey('admin-groupware-scope'),
+              segments: const [
+                ButtonSegment(value: 'org', label: Text('팀·직책 설정을 따름')),
+                ButtonSegment(value: 'team', label: Text('팀마다')),
+                ButtonSegment(value: 'server', label: Text('회사 전체')),
+              ],
+              selected: {stats.groupwareScope},
+              onSelectionChanged: _saving
+                  ? null
+                  : (s) => _save(groupwareScope: s.first),
             ),
           ),
           const _SectionDivider(),

@@ -90,6 +90,7 @@ import { firebaseConfigRouter } from './push.js';
 import { webPushRouter } from './webPush.js';
 import { getWebPublicUrl } from './webAddress.js';
 import { isMailEnabled } from './mailer.js';
+import { createGroupwareRouter } from './groupware.js';
 import { startMentionDigestJob } from './mentionDigest.js';
 import { startWebTls } from './webTls.js';
 
@@ -153,6 +154,8 @@ app.use('/api', requireAuth, createTeamInvitesRouter());
 app.use('/api', requireAuth, createRoomsRouter(io));
 app.use('/api', requireAuth, createAnnouncementsRouter(io));
 app.use('/api', requireAuth, createInquiriesRouter(io));
+// 그룹웨어 — 전자결재(휴가·지출·근태 수정)·법정 연차·출퇴근 기록(groupware.js).
+app.use('/api', requireAuth, createGroupwareRouter(io));
 app.use('/api', requireAuth, createProjectsRouter(io));
 app.use('/api', requireAuth, createMessagesRouter(io));
 // 메시지 공감(이모지 반응) — PUT /messages/:id/reaction(reactions.js).

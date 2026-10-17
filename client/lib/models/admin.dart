@@ -226,6 +226,10 @@ String auditActionLabel(String action) => switch (action) {
   'teamInvite.revoke' => '팀 초대 링크 폐기',
   'invite.email' => '초대 메일 보냄',
   'teamInvite.email' => '팀 초대 메일 보냄',
+  'groupware.hireDate' => '입사일 변경',
+  'groupware.leaveAdjust' => '연차 조정',
+  'groupware.settings' => '근무 시간 변경',
+  'groupware.cancel' => '승인된 결재 취소',
   'auth.lockout' => '로그인 시도 차단',
   _ => action,
 };
@@ -289,6 +293,9 @@ class ServerStats {
   /// 프로젝트를 만들 수 있는 최소 등급 — teamCreation과 같은 값 집합.
   final String projectCreation;
 
+  /// 그룹웨어(전자결재·연차·출퇴근) 범위 — 'org'(부서·직책 설정을 따름) | 'team'(팀마다) | 'server'(회사 전체).
+  final String groupwareScope;
+
   const ServerStats({
     required this.users,
     required this.teams,
@@ -301,6 +308,7 @@ class ServerStats {
     required this.teamInviteLinkCreation,
     required this.orgScope,
     required this.projectCreation,
+    this.groupwareScope = 'org',
   });
 
   factory ServerStats.fromJson(Map<String, dynamic> json) => ServerStats(
@@ -318,6 +326,7 @@ class ServerStats {
         json['teamInviteLinkCreation'] as String? ?? 'admin',
     orgScope: json['orgScope'] as String? ?? 'team',
     projectCreation: json['projectCreation'] as String? ?? 'member',
+    groupwareScope: json['groupwareScope'] as String? ?? 'org',
   );
 }
 

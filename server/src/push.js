@@ -298,6 +298,38 @@ export async function notifyProjectPush({ userId, title, body, projectId, taskId
 }
 
 /**
+ * 전자결재 알림(결재 요청·승인·반려 등 — groupware.js)을 프로젝트 알림과 같은 방식으로 보낸다 — 접속해 있지 않은 기기로, 알림
+ * payload를 넣어 앱이 꺼져 있어도 OS가 그린다. 방해 금지 중인 사람에게는 보내지 않는다. 알림을 누르면 앱이 그 문서를 열 수 있게
+ * 문서 id와 문서의 팀 id(회사 전체 범위면 빈 글자 — FCM data 값은 글자만 된다)를 싣는다.
+ */
+export async function notifyGroupwarePush({ userId, title, body, documentId, teamId = null }) {
+  if (skipsPush(userId)) return;
+  if ((await withoutDndUsers([userId])).length === 0) return;
+  await sendWebPushToUser(userId, { kind: 'groupware', documentId, teamId: teamId ?? '', title, body });
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+  const tokens = await pushableFcmTokens(userId);
+  await Promise.all(
+    tokens.map(({ deviceId, fcmToken }) =>
+      messaging
+        .send({
+          token: fcmToken,
+          notification: { title, body },
+          data: { kind: 'groupware', documentId, teamId: teamId ?? '' },
+          android: { priority: 'high' },
+        })
+        .catch(async (err) => {
+          if (err?.code === 'messaging/registration-token-not-registered') {
+            await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
+            return;
+          }
+          console.error('[push] 결재 알림 발송 실패:', err?.message ?? err);
+        }),
+    ),
+  );
+}
+
+/**
  * 화상회의가 시작됐을 때, 소켓이 안 붙어있는(=앱이 꺼져 있을 가능성이 높은) 멤버들에게
  * "전화가 왔다"고 FCM으로 알린다. 온라인인 사람은 이미 call:state 소켓 이벤트로 수신
  * 화면을 보고 있으므로 중복으로 보내지 않는다(메시지 푸시와 같은 분리 방식).

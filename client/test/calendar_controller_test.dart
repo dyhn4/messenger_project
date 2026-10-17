@@ -48,6 +48,7 @@ void main() {
     expect(c.subscribedGroup.map((e) => e.id), [
       'holidays',
       'birthdays',
+      'leaves',
       'sub',
     ]);
     expect(api.callCount('fetchCalendars'), 1);

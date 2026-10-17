@@ -30,6 +30,11 @@ export const AUDIT = {
   // 초대 링크를 메일로 보냄(inviteMail.js) — 받는 주소는 남기지 않고 통 수만.
   inviteLinkEmail: 'invite.email',
   teamInviteLinkEmail: 'teamInvite.email',
+  // 그룹웨어(groupware.js) — 관리자가 한 일만: 입사일·연차 조정·근무 시간, 승인된 결재 취소.
+  groupwareHireDate: 'groupware.hireDate',
+  groupwareLeaveAdjust: 'groupware.leaveAdjust',
+  groupwareSettings: 'groupware.settings',
+  groupwareCancel: 'groupware.cancel',
   // 토픽 삭제(rooms.js DELETE /rooms/:id) — 메시지·파일이 전부 사라지는 되돌릴 수 없는 일이라 남긴다.
   topicDelete: 'topic.delete',
   // 그룹채팅 → 토픽 전환(rooms.js POST /rooms/:id/convert-to-topic) — 되돌릴 수 없는 일이라 남긴다.

@@ -16,6 +16,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [팀 초대 링크(자동 합류+등급 부여)](#팀-초대-링크자동-합류등급-부여)
 - [서버 운영자와 관리자 콘솔](#서버-운영자와-관리자-콘솔)
 - [프로젝트(업무 관리)](#프로젝트업무-관리)
+- [그룹웨어(전자결재·연차·출퇴근)](#그룹웨어전자결재연차출퇴근)
 - [향후 계획 / 미구현 기능](#향후-계획--미구현-기능)
 - [구성도](#구성도)
 - [기술 스택](#기술-스택)
@@ -333,7 +334,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - **알림 기록(알림 센터)** — 멘션과 보드 알림을 범용 `notifications` 표에 받는 사람마다 한 줄씩 남깁니다(`server/src/notifications.js`의 `createNotifications`가 유일한 생성 지점 — 행 bulk insert + 소켓 `notification:new` + 푸시). 종류는 `mention`(개인 멘션)·`mention_all`(@all)·`board_post`·`board_edit`·`board_comment`이고, 알림 센터는 팀을 가로질러 보여줍니다. 메시지·댓글이 삭제되면 그 알림도 지워지고, 90일이 지난 기록은 하루 한 번 정리됩니다. 방에서 `room:read`를 보내면 그 방의 멘션·보드 알림이 자동으로 읽음 처리되어 내 다른 기기에 `notification:sync`가 갑니다. 방 목록 DTO에 그 방의 읽지 않은 멘션 수 `unreadMentionCount`가 붙습니다
 - **멘션 푸시 규칙** — 개인 멘션은 방을 뮤트한 사람에게도 푸시합니다(`"{이름}님이 회원님을 멘션했습니다: {미리보기}"`). `@all`은 방 뮤트를 존중하고 알림 설정 `mentionAll=false`면 푸시만 생략합니다(기록은 남음, `"{이름}님이 모두를 멘션했습니다: …"`). 같은 글로 멘션 푸시를 받는 사람은 일반 채팅 푸시에서 빠져 두 번 울리지 않습니다. 누구에게 푸시할지는 FCM과 분리된 순수 함수(`server/src/notificationRules.js`의 `pushTargetsFor`)로 계산하며 `node --test`로 검증합니다
 - **보드 알림** — 보드 뷰 토픽에서 새 게시글(`board_post`)·게시글 수정(`board_edit`)·게시글 댓글(`board_comment`)이 알림 기록으로 남습니다. 받는 사람은 그 방 멤버에서 행위자를 뺀 사람 중 **보드 알림 수준**(`boardLevel`)에 맞는 사람입니다 — `all`(새 글·수정·댓글), `important`(새 글 + 내가 쓴 글에 달린 댓글, **기본값**), `new`(새 글만). 방을 뮤트한 멤버도 기록은 남고 푸시만 생략하며, 같은 글로 멘션 알림을 받은 사람에게는 보드 알림을 따로 만들지 않습니다. 큰 토픽도 수신자 설정을 한 번에 조회하고 행을 한 번의 bulk insert로 넣습니다
-- **알림 센터(앱)** — 상단 종 모양 버튼(모바일은 앱바)으로 열고 탭이 다섯 개입니다: **전체 · 멘션 · 메시지 · 보드·공지 · 프로젝트**. 탭마다 안 읽음 배지가 붙고, 안 읽은 멘션이 있으면 `멘션` 탭, 없으면 `전체` 탭으로 열립니다. 제목과 탭 사이에는 구분선이 있고, 탭 아래에는 **모두 읽음**(현재 탭 기준 — 안 읽은 대화를 읽음으로 돌릴 때는 확인을 받습니다)이 있습니다. 톱니(알림 설정)에서 **탭별 "안 읽은 알림만 표시"**(전체·멘션·보드·프로젝트, 이 기기에 사용자별로 저장 — 켠 탭은 읽은 알림을 목록에서 숨기고 끄면 다시 보입니다), **`@all` 알림 받기** 스위치, **보드 알림 수준**(전체 / 중요 알림 / 새 글 알림)을 고릅니다. `메시지` 탭(예전 "안 읽은 대화")은 안 읽은 메시지·공지가 있는 방을 여러 팀에 걸쳐 마지막 활동순으로 보여 줍니다(그룹채팅·토픽 줄은 "보낸 사람: 미리보기". **보드 뷰 토픽의 새 글·수정·댓글은 보드 알림으로 따로 오므로 이 탭에 안 뜨고**, 안 읽은 메시지가 전부 나를 멘션한 방도 멘션 탭에 이미 있어서 뺍니다), `보드·공지`는 보드 알림과 안 읽은 공지를 시간순으로, `프로젝트`는 기존 프로젝트 알림함(`/api/project-notifications`)을 같은 줄 모양으로 보여 주며(프로젝트 창 안의 종 모양 알림함도 그대로 있고, 대화상자로 열린 프로젝트는 거기서 "알림 센터에서 보기"로 이 탭을 엽니다), `전체`는 넷을 시간순으로 섞습니다. `멘션` 탭 이름 오른쪽의 **꺾쇠(⌄)**를 누르면 탭 아래에 **전체 멘션 / @나를 멘션 / @all 멘션** 드롭다운이 열려(다른 탭을 보고 있었으면 멘션 탭으로 옮겨 가며 열림) 고른 종류만 보여 주고, 탭 이름이 `멘션` / `@나` / `@all`로 바뀌며 탭 배지·`모두 읽음`·`안 읽은 알림만 표시`도 고른 종류를 따릅니다(선택은 이 기기에 사용자별로 저장, `전체` 탭은 늘 두 종류를 모두 섞음). 멘션·보드 탭은 `before` 커서로 이어 받는 무한 스크롤이고, 항목을 누르면 그 방(다른 팀이면 팀 전환 후)의 그 메시지로 이동·강조하면서 읽음 처리합니다(없어진 대화는 토스트). 모바일은 탭줄이 가로로 스크롤되는 전체 화면입니다. 목록·개수·설정과 소켓(`notification:new`/`notification:sync`) 반영은 `client/lib/services/notification_controller.dart`, 서버 호출은 `notification_api.dart`, 화면은 `widgets/notifications_panel.dart`입니다
+- **알림 센터(앱)** — 상단 종 모양 버튼(모바일은 앱바)으로 열고 탭이 여섯 개입니다: **전체 · 멘션 · 메시지 · 보드·공지 · 프로젝트 · 결재**. 탭마다 안 읽음 배지가 붙고, 안 읽은 멘션이 있으면 `멘션` 탭, 없으면 `전체` 탭으로 열립니다. 제목과 탭 사이에는 구분선이 있고, 탭 아래에는 **모두 읽음**(현재 탭 기준 — 안 읽은 대화를 읽음으로 돌릴 때는 확인을 받습니다)이 있습니다. 톱니(알림 설정)에서 **탭별 "안 읽은 알림만 표시"**(전체·멘션·보드·프로젝트·결재, 이 기기에 사용자별로 저장 — 켠 탭은 읽은 알림을 목록에서 숨기고 끄면 다시 보입니다), **`@all` 알림 받기** 스위치, **보드 알림 수준**(전체 / 중요 알림 / 새 글 알림)을 고릅니다. `메시지` 탭(예전 "안 읽은 대화")은 안 읽은 메시지·공지가 있는 방을 여러 팀에 걸쳐 마지막 활동순으로 보여 줍니다(그룹채팅·토픽 줄은 "보낸 사람: 미리보기". **보드 뷰 토픽의 새 글·수정·댓글은 보드 알림으로 따로 오므로 이 탭에 안 뜨고**, 안 읽은 메시지가 전부 나를 멘션한 방도 멘션 탭에 이미 있어서 뺍니다), `보드·공지`는 보드 알림과 안 읽은 공지를 시간순으로, `프로젝트`는 기존 프로젝트 알림함(`/api/project-notifications`)을 같은 줄 모양으로 보여 주며(프로젝트 창 안의 종 모양 알림함도 그대로 있고, 대화상자로 열린 프로젝트는 거기서 "알림 센터에서 보기"로 이 탭을 엽니다), `결재`는 [그룹웨어](#그룹웨어전자결재연차출퇴근) 전자결재의 결재 요청(내 차례)·승인·반려·회수·취소 알림(`/api/groupware/notifications` — 여러 팀·회사 전체 범위를 함께, 팀 단위 결재는 줄 앞에 `[팀 이름]`, 지금 내 차례면 "결재 차례" 꼬리표 — 누르면 그 문서 상세가 열려 바로 승인·반려), `전체`는 다섯을 시간순으로 섞습니다. `멘션` 탭 이름 오른쪽의 **꺾쇠(⌄)**를 누르면 탭 아래에 **전체 멘션 / @나를 멘션 / @all 멘션** 드롭다운이 열려(다른 탭을 보고 있었으면 멘션 탭으로 옮겨 가며 열림) 고른 종류만 보여 주고, 탭 이름이 `멘션` / `@나` / `@all`로 바뀌며 탭 배지·`모두 읽음`·`안 읽은 알림만 표시`도 고른 종류를 따릅니다(선택은 이 기기에 사용자별로 저장, `전체` 탭은 늘 두 종류를 모두 섞음). 멘션·보드 탭은 `before` 커서로 이어 받는 무한 스크롤이고, 항목을 누르면 그 방(다른 팀이면 팀 전환 후)의 그 메시지로 이동·강조하면서 읽음 처리합니다(없어진 대화는 토스트). 모바일은 탭줄이 가로로 스크롤되는 전체 화면입니다. 목록·개수·설정과 소켓(`notification:new`/`notification:sync`) 반영은 `client/lib/services/notification_controller.dart`, 서버 호출은 `notification_api.dart`, 화면은 `widgets/notifications_panel.dart`입니다
 
 **서버 연결 / 배포**
 - 자체 서명 TLS 인증서 + 클라이언트 인증서 핀닝(공인 CA 미사용)
@@ -710,6 +711,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 | 팀 생성 권한 | 정회원(기본) / 관리자 / 서버 운영자 | 팀을 새로 만들 수 있는 최소 계정 등급. 준회원은 어느 값이든 불가하고, 서버 운영자는 설정과 무관하게 항상 가능합니다. |
 | 팀 초대 링크 생성 권한 | 정회원 / 관리자(기본) / 서버 운영자 | [팀 초대 링크](#팀-초대-링크자동-합류등급-부여)를 만들 수 있는 최소 계정 등급. 팀 합류+등급 부여를 함께 하는 기능이라 팀 생성 권한보다 기본값이 더 보수적입니다. |
 | 팀·직책 관리 | 팀 단위(기본) / 계정 단위 | [부서 / 직책](#부서--직책) 참고. 계정 단위면 바로 아래 "직책 목록"도 여기서 관리합니다. |
+| 그룹웨어 범위 | 팀·직책 설정을 따름(기본) / 팀마다 / 회사 전체 | [그룹웨어](#그룹웨어전자결재연차출퇴근)의 결재·연차·출퇴근을 어떤 단위로 둘지. "따름"이면 위 설정이 계정 단위일 때 회사 전체, 팀 단위일 때 팀마다. 바꾸면 이전 범위의 기록은 그 범위에 남아 새 범위에서는 보이지 않으니 운영 전에 정하세요. |
 
 ### DDNS
 
@@ -907,6 +909,53 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 > 안드로이드 앱에는 아직 프로젝트 화면이 없습니다(PC 먼저). 칸반보드·간트차트·캘린더·위키(노트),
 > 메시지를 업무로 전환하는 기능도 다음 단계입니다.
 
+## 그룹웨어(전자결재·연차·출퇴근)
+
+메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 출퇴근 · 관리**(관리자만). 서버는
+`server/src/groupware.js`, 규칙은 `approvalRules.js`(결재)·`annualLeave.js`(휴가·법정 연차)·`attendanceRules.js`(출퇴근)·
+`groupwareScope.js`(범위), 앱은 `client/lib/screens/groupware/`.
+
+**범위** — 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". **팀마다**면 결재선 후보·연차·출퇴근·근무 시간·관리자가 모두 그 팀 안이고(앱이 지금
+고른 팀으로), **회사 전체**면 팀과 상관없이 하나입니다. 기본 "팀·직책 설정을 따름"은 부서·직책이 계정 단위면 회사 전체, 팀 단위면 팀마다입니다.
+
+| | 팀마다 | 회사 전체 |
+|---|---|---|
+| 결재·근태 관리자(관리 탭) | 그 팀 소유자, 계정 등급 관리자, 서버 운영자 | 계정 등급 관리자, 서버 운영자 |
+| 결재선에 넣을 수 있는 사람 | 그 팀의 정회원 이상 | 서버의 정회원 이상 |
+| 입사일 | 팀원마다(`team_members.hire_date`) | 계정마다(`users.hire_date`) |
+| 근무 시간 | 팀마다(정하지 않으면 회사 값) | 회사 하나(기본 09:00~18:00) |
+
+**전자결재** — 휴가·지출·근태 수정 세 종류가 같은 결재선 엔진을 씁니다. 결재자 1~5명이 **순서대로** 결재하고(앞사람이 승인해야 다음
+사람 차례), 참조자는 0~10명(보기만 하고 결과를 받음). 승인할 때 의견(선택), **반려는 사유 필수**이고 반려하면 그 자리에서 끝납니다. 올린
+사람은 진행 중인 결재를 **회수**할 수 있고, 관리자는 승인된 결재를 **취소**할 수 있습니다(사유 필수 — 휴가면 연차가 돌아가고, 근태 수정이면
+기록이 처음 값으로 되돌아감, 감사 로그에 남음). 동시에 두 사람이 눌러도 문서 행을 잠그고 다시 계산해서 꼬이지 않습니다. 결재가 올라오거나
+진행되면 다음 결재자·올린 사람·참조자에게 푸시(방해 금지 존중)와 소켓 알림이 가고, **알림 센터 `결재` 탭**에 쌓입니다(결재 요청·승인·반려·회수·취소 — 내가 결재를 처리하면 그 문서의 요청 알림은 저절로 읽음, 90일 보존). 앱이 켜져 있으면 앱이 직접 알림(PC는 알림 창)을 띄우고, 푸시·PC 알림·웹 알림 어느 것을 눌러도 **그 문서 상세**가 열리며 그 문서의 결재 알림은 읽음이 됩니다(문서를 열 수 없으면 알림 센터 `결재` 탭). 결재함: 결재할 문서 · 내가 올린 문서 · 결재한 문서 ·
+참조 문서 · 전체 문서(관리자).
+
+**결재선** — 신청할 때 직접 고르고, 자주 쓰는 결재선은 이름을 붙여 저장해 둡니다(20개까지). 새 결재를 열면 가장 최근에 저장한 결재선이
+미리 채워집니다. 나중에 조직도에 "상위자"를 넣으면 그것으로 기본 결재선을 만들 수 있게 자리를 만들어 두었습니다(`approvalRules.js`
+`suggestApprovalLine`의 `managerChain`).
+
+**휴가·법정 연차**(입사일 기준, 근로기준법 제60조) — 관리 탭에서 구성원의 입사일을 정하면 앱이 연차를 계산합니다.
+- 입사 1년 미만: 한 달 채울 때마다 1일, 최대 11일. 1년 이상: 15일, 3년차부터 2년마다 1일씩 늘어 최대 25일(`15 + ⌊(근속연수 − 1) / 2⌋`).
+- 연차 기간은 입사 기념일마다 바뀝니다(회계연도 방식은 쓰지 않음). 기간을 걸친 휴가는 시작일 쪽 기간에 셉니다.
+- 휴가 종류: 연차·오전 반차·오후 반차(연차에서 뺌), 병가·경조사·공가·기타(빼지 않음 — 기록과 결재만). 일수는 **주말·공휴일을 뺀 근무일**로
+  셉니다(공휴일 표는 `holidays.js` — 2025~2027). 한 번에 60일까지, 같은 기간에 휴가를 두 번 낼 수 없습니다.
+- 남은 연차(결재 중인 것까지 뺀)보다 많이 신청하면 막습니다. 입사일이 없으면 남은 양을 모르니 막지 않습니다.
+- 출근율 80% 미만인 해의 감액, 이월, 회사가 더 주는 휴가는 계산하지 않습니다 — 관리자가 **연차 조정**(0.5일 단위 ±, 사유 필수, 감사 로그)으로 맞춥니다.
+- 승인된 휴가는 캘린더의 내장 구독 캘린더 **"팀 휴가"**에 보입니다(정회원 이상, 숨길 수 있음).
+
+**지출** — 금액(원), 분류(교통비·식대·비품·소모품·출장비·교육비·접대비·기타), 쓴 날, 영수증(직접 올린 파일만, 5개까지), 내용.
+
+**출퇴근** — 출근·퇴근 단추(하루 한 번씩). **위치 정보는 받지 않고**, 사내 와이파이에서 눌렀는지만 함께 남깁니다(서버가 보는 접속 주소가
+사설망인지 — 로그인·가입의 사내망 판정과 같다). 날짜·시각은 서버 PC의 시각입니다. 전날 출근하고 안 닫힌 기록은 출근한 지 20시간 안이면 다음
+날 퇴근으로 닫힙니다(야간 근무). 근무 시간 기준으로 지각·조퇴를 표시하고(반차·휴가인 날은 그만큼 빼고), 한 달 요약(출근일·근무 시간·지각·
+조퇴·퇴근 누락·결근·휴가)을 보여 줍니다. 빠뜨렸거나 잘못 누른 기록은 날마다 **수정 요청**(근태 수정 결재 — 지난 60일 안)으로 고치고,
+승인되면 기록이 바뀌되 **처음 값을 함께 남깁니다**(기록을 지우지 않음 — 근태는 임금·근로시간의 근거라 수정 이력이 남아야 함). 관리 탭에서
+구성원별 한 달 요약과 **엑셀 내보내기**(요약·일별 기록 두 시트, 처음 값 포함)를 합니다. 근태 기록의 보존 기간 등 법적 의무는 노무 담당과 확인하세요.
+
+> 범위 설정을 바꾸면 이전 범위의 결재·근태·연차 조정 기록은 그 범위 키로 남아 새 범위에서는 보이지 않습니다(지우지는 않음 — 되돌리면 다시 보임).
+
 ## 향후 계획 / 미구현 기능
 
 코드베이스를 확인한 결과, 아래 기능은 **아직 구현되어 있지 않습니다**(추측 없이, 실제로 코드/이벤트가
@@ -962,8 +1011,8 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 - **AI 기능** — 긴 대화방·스레드 요약, 회의(통화) 내용 정리, 번역. 설치형이라 "내부 서버에서 AI를 돌린다"는 점이 장점이 됩니다.
 - **정보 유출 방지** — 모바일 화면 캡처 방지, 이미지·문서에 사용자 이름 워터마크, 파일 다운로드 금지 권한.
 - **팀 위키 / 문서 공간** — 프로젝트 노트와 별개로 팀 전체가 공유하는 규정·매뉴얼 공간.
-- **그룹웨어 확장** — 전자결재(휴가·지출 승인), 출퇴근 기록. 문의함에 "근태/휴가" 분류가 있어 수요는 보이지만 범위가 커서
-  메신저 핵심 기능을 갖춘 뒤에 검토할 일입니다.
+- **그룹웨어 후속** — 조직도에 상위자를 지정해 결재선을 자동으로 채우기(자리는 만들어 둠 — [그룹웨어](#그룹웨어전자결재연차출퇴근)의
+  "결재선"), 휴가 종류·지출 분류를 관리자가 바꾸기, 연차 촉진 안내.
 - **위치 공유** — 외근·현장 업무가 많은 팀용.
 
 **모바일 데이터 사용 관련 후속**(첨부 다운로드 데이터 사용 경고 — `client/lib/widgets/data_usage_warning.dart`에 이어서)
@@ -1065,6 +1114,8 @@ messenger_project/
 │  │  ├─ emailCodes.js            메일 확인 코드 보내기·확인(가입·이메일 확인·변경·비밀번호 재설정) / emailCodeRules.js(순수 규칙)
 │  │  ├─ inviteMail.js            초대 링크를 메일로 보내기(설치 초대·팀 초대 공용)
 │  │  ├─ mentionDigest.js         오래 접속하지 않은 사람에게 안 읽은 멘션 요약 메일(매일 9시) / mentionDigestRules.js(순수 규칙)
+│  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
+│  │  │                           groupwareScope.js(팀마다/회사 전체)가 순수 규칙(단위 테스트 대상)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
 │  │  │                           backupCrypto.js(백업 암호 암호화)·backupRestore.js(복원 조각)
 │  │  ├─ audit.js                 감사 로그 기록 헬퍼(실패해도 원래 동작을 막지 않음)
@@ -1851,6 +1902,32 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET/POST/DELETE | `/api/teams/:teamId/calendar-feed` | 내 일정 내보내기 주소 `{ url, publicAddress, createdAt, lastAccessAt }` 보기 / 새로 만들기(있으면 바꿈 — 예전 주소는 바로 끊김, 201) / 끄기. `url`은 공인 인증서가 걸린 웹 주소가 있으면 그 주소, 없으면 앱이 접속한 주소(`publicAddress: false`) |
 | GET/PATCH/DELETE | `/api/events/:id` | 일정 상세 / 수정 / 삭제 — 반복 일정은 `scope`(`this`\|`following`\|`all`)와 `occurrenceStart`(원래 회차 시작 ms — 2300-01-01 전의 회차만). `this`는 이미 따로 고치거나 지운 회차(`exdates`)가 1,000개인 시리즈면 400(`following`으로 나눠 바꿀 것) |
 
+**그룹웨어** (`server/src/groupware.js` — [그룹웨어](#그룹웨어전자결재연차출퇴근) 참고. 모든 호출에 `teamId`(쿼리나 본문 — 지금 고른 팀)를 싣는다.
+팀 범위면 그 팀 멤버만, 회사 전체면 팀과 무관. "관리자"는 결재·근태 관리자)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/api/groupware/context` | 범위(`scope`·`scopeSetting`), `isManager`, 근무 시간(`workStart`·`workEnd` — 하루 중 분), `today`, 내 `hireDate`, `pendingForMe`(내가 결재할 수), `leaveTypes`, `expenseCategories`, `limits`, `inLan` |
+| GET | `/api/groupware/candidates` | 결재자·참조자 후보(이 범위의 정회원 이상, 나 빼고) |
+| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }` / 저장 `{ name, approverIds, ccIds }`(20개까지) |
+| DELETE | `/api/groupware/approval-lines/:id` | 내 결재선 지우기 |
+| GET | `/api/groupware/documents` | 결재함 `?box=inbox\|mine\|done\|cc\|all`(all은 관리자) `&kind=&status=&before=`(만든 시각 ms) |
+| GET | `/api/groupware/documents/:id` | 문서 상세(결재선·참조자 `cc`, `myTurn`·`canWithdraw`·`canCancel`) — 올린 사람·결재자·참조자·관리자만 |
+| POST | `/api/groupware/documents` | 결재 올리기 `{ kind: 'leave'\|'expense'\|'attendance', title?, body?, approverIds, ccIds?, …내용 }` — 휴가 `leaveType, startDate, endDate`(양은 서버가 계산), 지출 `amount, category, spentOn, attachments?`, 근태 수정 `workDate, clockIn, clockOut?`. 연차 부족·겹치는 휴가는 409, 한 시간에 30건 |
+| POST | `/api/groupware/documents/:id/approve` \| `reject` \| `withdraw` \| `cancel` | `{ comment }` — 승인(의견 선택)·반려(사유 필수)는 지금 차례인 결재자, 회수는 올린 사람(진행 중), 취소는 관리자(승인된 것, 사유 필수) |
+| GET | `/api/groupware/notifications` | 결재 알림함(알림 센터 `결재` 탭 — `teamId` 없이, 범위와 상관없이 내 것) 최근 50개 `{ items, unreadCount }` — 줄마다 `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `documentId`, `teamId`·`teamName`(회사 전체 범위면 null), `docKind`·`docStatus`, `actionable`(지금 내 결재 차례인지), `readAt`. 새 알림은 소켓 `approval:notification` `{ notification, unreadCount }` |
+| POST | `/api/groupware/notifications/read` | `{ ids? }` 또는 `{ documentId }`(그 문서의 내 알림 — 푸시를 눌러 문서를 열 때), 둘 다 없으면 전부 읽음 → `{ unreadCount }`, 내 다른 기기에 `approval:notification-sync` |
+| GET | `/api/groupware/leave/balance` | 연차 현황(`?userId=`는 관리자) — `hireDate`, `period`, `statutoryHalfDays`, `adjustmentHalfDays`, `grantedHalfDays`, `usedHalfDays`, `pendingHalfDays`, `remainingHalfDays`(반일 단위, 입사일이 없으면 null), `adjustments` |
+| GET | `/api/groupware/leave/calendar` | `?from=&to=`(92일 안) 승인된 휴가 목록 |
+| GET | `/api/groupware/members` | (관리자) 구성원·입사일·연차 현황 |
+| PATCH | `/api/groupware/members/:userId` | (관리자) `{ hireDate }`('YYYY-MM-DD', null은 지움) |
+| POST | `/api/groupware/members/:userId/leave-adjustments` | (관리자) `{ halfDays(±, 0 제외, 최대 ±120), reason }` — 이번 연차 기간에, 입사일이 있어야 함 |
+| PATCH | `/api/groupware/settings` | (관리자) `{ workStart, workEnd }`('HH:MM') — 팀 범위는 그 팀, 회사 전체는 서버 설정 |
+| GET | `/api/groupware/attendance/today` | 오늘 기록·어제 열린 기록(`openRecord`)·`canClockIn`·`canClockOut`·`inLan` |
+| POST | `/api/groupware/attendance/clock-in` \| `clock-out` | 출근(하루 한 번 — 또 누르면 409)·퇴근(오늘 기록, 없으면 20시간 안의 어제 열린 기록) |
+| GET | `/api/groupware/attendance/month` | `?month=YYYY-MM&userId=`(남의 것은 관리자) 날마다 기록·휴가·공휴일과 요약 |
+| GET | `/api/groupware/attendance/summary` \| `export` | (관리자) 구성원별 한 달 요약 / 같은 내용의 엑셀(.xlsx — 요약·일별 기록) |
+
 **검색 / 업로드 / 기타**
 
 | Method | Path | 인증 | 설명 |
@@ -1936,8 +2013,15 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`) |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기) |
+| `approval_documents` | 결재 문서(휴가·지출·근태 수정). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
+| `approval_steps` | 결재선 한 칸 — `step_order` 순서, `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`), `comment`, `decided_at` |
+| `approval_cc` | 참조자(문서 × 사람) |
+| `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb |
+| `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |
+| `leave_adjustments` | 연차 조정(반일 단위 ±, 사유, 그 연차 기간의 시작일) |
+| `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`). 지우지 않음 |
 | `email_codes` | 메일로 보낸 확인 코드(가입 전 `signup`·이메일 확인 `verify`·이메일 변경 `change`·비밀번호 재설정 `reset`). 코드 대신 서버 비밀값으로 만든 해시, 틀린 횟수(`attempts`), 만료(10분 — 만료된 행은 하루 한 번 지움). 같은 목적·주소로 새 코드를 보내면 앞의 행은 지움 |
 | `position_options` | `org_scope`가 `account`일 때 쓰는 직책 후보 목록(`label` unique). `sort_order`(서열, 끌어다 놓아 변경)로 정렬해서 보여준다. `is_default`(최대 1개만 true)로 지정한 직책은 회원가입 시 자동으로 부여된다(`auth.js`). 서버 운영자가 관리자 콘솔에서 추가·삭제·서열/기본값 변경 — [부서 / 직책](#부서--직책) 참고 |
 | `audit_logs` | 감사 로그(추가 전용). 행위자·행위·대상·팀을 이름 스냅샷과 함께 기록 — [감사 로그](#감사-로그) 참고 |

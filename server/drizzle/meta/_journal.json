@@ -771,6 +771,20 @@
       "when": 1792206653857,
       "tag": "0109_email_features",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1792213002220,
+      "tag": "0110_groupware",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1792216379671,
+      "tag": "0111_approval_notifications",
+      "breakpoints": true
     }
   ]
 }

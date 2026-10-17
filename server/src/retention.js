@@ -1,4 +1,5 @@
 import { deleteExpiredEmailCodes } from './db/queries/emailCodes.js';
+import { deleteApprovalNotificationsOlderThan } from './db/queries/groupware.js';
 import { deleteMessagesBySender } from './db/queries/messages.js';
 import { deleteNotificationsOlderThan } from './db/queries/notifications.js';
 import { listUsersEligibleForMessagePurge, updateUser } from './db/queries/users.js';
@@ -24,8 +25,12 @@ async function purgeExpiredMessages() {
 
 /** 90일 지난 알림 기록을 지운다 — 알림 센터는 최근 것만 보여주면 되고, 표가 끝없이 커지지 않게 한다. */
 async function purgeOldNotifications() {
-  const deleted = await deleteNotificationsOlderThan(new Date(Date.now() - NOTIFICATION_RETENTION_MS));
+  const cutoff = new Date(Date.now() - NOTIFICATION_RETENTION_MS);
+  const deleted = await deleteNotificationsOlderThan(cutoff);
   if (deleted > 0) console.log(`[retention] 90일 지난 알림 기록 ${deleted}건 삭제`);
+  // 결재 알림함(알림 센터 "결재" 탭)도 같은 기간 — 결재 문서 자체는 지우지 않는다.
+  const approvals = await deleteApprovalNotificationsOlderThan(cutoff);
+  if (approvals > 0) console.log(`[retention] 90일 지난 결재 알림 ${approvals}건 삭제`);
 }
 
 /** 서버 시작 시 한 번(그동안 꺼져있던 사이 놓친 것들도 처리), 이후 하루 간격으로 검사한다. */

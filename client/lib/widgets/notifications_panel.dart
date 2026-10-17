@@ -4,11 +4,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/app_notification.dart';
+import '../models/groupware.dart' show ApprovalNotification;
 import '../models/project.dart' show ProjectNotification;
 import '../models/room.dart';
 import '../screens/announcement_detail_screen.dart';
 import '../screens/announcement_list_screen.dart' show openAnnouncementPanel;
 import '../screens/chat_screen.dart';
+import '../screens/groupware/approval_notifications.dart';
 import '../screens/home_screen.dart' show wideBreakpoint;
 import '../screens/project/project_dialog.dart' show showProjectDialog;
 import '../screens/project/project_notifications.dart'
@@ -51,7 +53,7 @@ void showUnreadAnnouncementPopup(
   openAnnouncementPanel(context, session, room);
 }
 
-/// 상단 툴바의 종 모양 "알림 센터" 버튼 — 볼 알림이 하나라도 있으면(안 읽은 대화·멘션·보드·프로젝트 알림)
+/// 상단 툴바의 종 모양 "알림 센터" 버튼 — 볼 알림이 하나라도 있으면(안 읽은 대화·멘션·보드·프로젝트·결재 알림)
 /// 오른쪽 위에 작은 빨간 점을 얹는다. desktop_home_screen.dart의 넓은 화면 툴바와
 /// team_select_screen.dart의 "팀 리스트" 화면이 같이 쓴다.
 class NotificationBellButton extends StatelessWidget {
@@ -75,7 +77,8 @@ class NotificationBellButton extends StatelessWidget {
           isLabelVisible:
               session.unreadRooms.isNotEmpty ||
               session.notificationCenter.totalUnread > 0 ||
-              session.projectUnread > 0,
+              session.projectUnread > 0 ||
+              session.approvalUnread > 0,
           // 방 목록의 안읽음 숫자 뱃지(UnreadBadge)와 같은 빨강으로 맞춘다.
           backgroundColor: Colors.redAccent,
           smallSize: 7,
@@ -126,8 +129,8 @@ void openProjectFromNotification(
   );
 }
 
-/// "알림 센터" 패널 — 검색/멤버 패널과 같은 틀(헤더+목록)에 탭 다섯 개를 얹었다:
-/// `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트`. 여러 팀에 걸쳐(지금 보고 있는 팀 포함) 모아 보여 준다.
+/// "알림 센터" 패널 — 검색/멤버 패널과 같은 틀(헤더+목록)에 탭 여섯 개를 얹었다:
+/// `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트 | 결재`. 여러 팀에 걸쳐(지금 보고 있는 팀 포함) 모아 보여 준다.
 /// 탭마다 안 읽음 배지, 상단에 "안 읽은 것만" 필터와 "모두 읽음", 헤더 톱니에 알림 설정이 있다.
 /// desktop_home_screen.dart는 이걸 우측 사이드 패널로, team_select_screen.dart·모바일은
 /// [showNotificationsCenterDialog]로 띄운다 — 헤더/닫기 버튼을 이 위젯이 스스로 그리므로 둘 다 그대로 쓴다.
@@ -283,6 +286,19 @@ class _NotificationsPanelState extends State<NotificationsPanel>
     }
   }
 
+  /// 결재 알림 — 읽음으로 바꾸고 그 문서 상세를 연다(승인·반려는 상세에서).
+  Future<void> _openApproval(ApprovalNotification n) async {
+    if (!n.read) {
+      try {
+        await _center.markApprovalRead(ids: [n.id]);
+      } catch (_) {
+        // 읽음 표시가 실패해도 문서는 연다.
+      }
+    }
+    if (!mounted) return;
+    await openApprovalFromNotification(context, widget.session, n);
+  }
+
   Future<void> _markAllRead() async {
     final session = widget.session;
     final tab = _tab;
@@ -315,13 +331,18 @@ class _NotificationsPanelState extends State<NotificationsPanel>
       if (ok != true || !mounted) return;
     }
     try {
-      // 서버 알림(멘션·보드)과 프로젝트 알림.
+      // 서버 알림(멘션·보드)과 프로젝트·결재 알림.
       await _center.markAllRead(tab);
       if (tab == NotificationTab.all || tab == NotificationTab.project) {
         if (session.canUseProjects) {
           await _center.markProjectRead();
           await session.refreshProjectUnread();
         }
+      }
+      if ((tab == NotificationTab.all || tab == NotificationTab.approval) &&
+          (session.approvalUnread > 0 ||
+              _center.approval.any((n) => !n.read))) {
+        await _center.markApprovalRead();
       }
     } catch (e) {
       if (mounted) showAppToast(context, '읽음 처리하지 못했습니다: $e');
@@ -362,6 +383,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
             center: _center,
             unreadRooms: unreadRooms,
             projectUnread: session.projectUnread,
+            approvalUnread: session.approvalUnread,
           );
           _fillIfShort();
           return Column(
@@ -393,7 +415,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
               ),
               // 제목 줄과 탭 사이의 구분선.
               const Divider(key: ValueKey('notif-title-divider'), height: 1),
-              // 탭 다섯 개는 좁은 폭(360dp)에 다 안 들어가서 가로로 스크롤된다 — 고른 탭은 자동으로 보이는 쪽으로.
+              // 탭 여섯 개는 좁은 폭(360dp)에 다 안 들어가서 가로로 스크롤된다 — 고른 탭은 자동으로 보이는 쪽으로.
               TabBar(
                 key: const ValueKey('notif-tabs'),
                 controller: _tabs,
@@ -437,7 +459,9 @@ class _NotificationsPanelState extends State<NotificationsPanel>
         ? unread > 0
         : unread > 0 ||
               (tab == NotificationTab.project &&
-                  _center.project.any((n) => !n.read));
+                  _center.project.any((n) => !n.read)) ||
+              (tab == NotificationTab.approval &&
+                  _center.approval.any((n) => !n.read));
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
       child: Row(
@@ -465,6 +489,7 @@ class _NotificationsPanelState extends State<NotificationsPanel>
       NotificationTab.unreadChats => '안 읽은 메시지가 없습니다.',
       NotificationTab.board => '보드·공지 알림이 없습니다.',
       NotificationTab.project => '프로젝트 알림이 없습니다.',
+      NotificationTab.approval => '결재 알림이 없습니다.',
     };
   }
 
@@ -561,6 +586,11 @@ class _NotificationsPanelState extends State<NotificationsPanel>
         key: ValueKey('notif-project-${notification.id}'),
         notification: notification,
         onTap: () => _openProject(notification),
+      ),
+      ApprovalEntry(:final notification) => ApprovalNotificationTile(
+        key: ValueKey('notif-approval-${notification.id}'),
+        notification: notification,
+        onTap: () => _openApproval(notification),
       ),
     };
   }

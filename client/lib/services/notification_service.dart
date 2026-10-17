@@ -146,6 +146,69 @@ class NotificationService {
     );
   }
 
+  /// 결재 알림 payload 앞에 붙는 표시 — `approval:<문서 id>:<팀 id>`(회사 전체 범위면 팀 id가 빈 글자). 누르면 방이 아니라
+  /// 그 결재 문서 상세를 연다(main.dart의 _openRoomFromNotification). 웹 서비스 워커(web/sw.js)도 같은 모양으로 만든다.
+  static const approvalPayloadPrefix = 'approval:';
+
+  static String approvalPayload(String documentId, String? teamId) =>
+      '$approvalPayloadPrefix$documentId:${teamId ?? ''}';
+
+  /// [approvalPayload]를 되돌린다 — 결재 알림이 아니면 null, 문서 id가 비었으면(옛 서버의 푸시) documentId가 빈 글자.
+  static ({String documentId, String? teamId})? parseApprovalPayload(
+    String payload,
+  ) {
+    if (!payload.startsWith(approvalPayloadPrefix)) return null;
+    final parts = payload.substring(approvalPayloadPrefix.length).split(':');
+    final teamId = parts.length > 1 ? parts[1] : '';
+    return (documentId: parts[0], teamId: teamId.isEmpty ? null : teamId);
+  }
+
+  /// 결재 알림(결재 요청·승인·반려·회수·취소) 한 건 — 앱이 켜져 있을 때 소켓으로 받은 것을 띄운다(꺼져 있을 때는 서버 푸시).
+  /// 채널을 따로 둬서 OS 설정에서 채팅 알림과 따로 끄고 켤 수 있다.
+  Future<void> showApprovalNotification({
+    required String title,
+    required String body,
+    required String documentId,
+    String? teamId,
+  }) async {
+    final payload = approvalPayload(documentId, teamId);
+    if (kIsWeb) {
+      return showWebNotification(
+        title: title,
+        body: body,
+        tag: payload,
+        payload: payload,
+      );
+    }
+    final key = 'approval:${DateTime.now().microsecondsSinceEpoch}';
+    if (AppPlatform.isWindows &&
+        await showNotificationPopup(
+          key: key,
+          title: title,
+          body: body,
+          payload: payload,
+          style: popupStyle?.call() ?? const NotificationPopupStyle(),
+        )) {
+      return;
+    }
+    await _plugin.show(
+      id: key.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: const AndroidNotificationDetails(
+          'approval_updates',
+          '결재 알림',
+          channelDescription: '결재 요청·승인·반려 등 전자결재 알림',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        windows: const WindowsNotificationDetails(),
+      ),
+      payload: payload,
+    );
+  }
+
   /// 걸려온 화상회의를 "전화처럼" 알린다 — 잠금화면에서도 바로 뜨도록 전체화면 인텐트를
   /// 쓰고(fullScreenIntent), 카테고리를 call로 줘서 OS가 통화 알림으로 취급하게 한다.
   /// 화면이 켜져 있으면 OS가 전체화면 대신 헤드업 알림으로 보여준다(안드로이드 규칙).

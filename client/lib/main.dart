@@ -14,6 +14,8 @@ import 'screens/call_screen.dart';
 import 'screens/capture/capture_window.dart'
     if (dart.library.js_interop) 'screens/capture/capture_window_stub.dart';
 import 'screens/chat_screen.dart';
+import 'screens/groupware/approval_notifications.dart'
+    show openApprovalDocument;
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/project/project_window.dart';
@@ -26,6 +28,7 @@ import 'services/deep_link_service.dart';
 import 'services/fcm_config_cache.dart';
 import 'services/notification_popup.dart'
     if (dart.library.js_interop) 'services/notification_popup_stub.dart';
+import 'services/notification_controller.dart' show NotificationTab;
 import 'services/notification_service.dart';
 import 'services/password_ime.dart';
 import 'services/pinned_tls.dart';
@@ -37,6 +40,7 @@ import 'services/web_safe_area.dart';
 import 'widgets/app_lock_overlay.dart';
 import 'widgets/download_progress_card.dart';
 import 'widgets/esc_to_minimize.dart';
+import 'widgets/notifications_panel.dart' show showNotificationsCenterDialog;
 import 'widgets/update_banner.dart';
 import 'widgets/web_push_prompt.dart';
 import 'services/app_links.dart';
@@ -253,6 +257,11 @@ class _MyAppState extends State<MyApp>
   // session이 바뀔 때마다(=_tryOpenPendingLaunchRoom) 다시 시도한다.
   String? _pendingLaunchRoomId;
 
+  /// 안드로이드 — OS가 그린 FCM 알림(결재처럼 서버가 notification을 실어 보내는 것)을 눌러 앱이 열렸을 때를 듣고 있는지.
+  /// Firebase는 캐시된 설정이 있으면 main()에서, 처음 로그인이면 그 뒤 Session이 초기화하므로 [_hookFcmTaps]가 늦게도 건다.
+  bool _fcmTapsHooked = false;
+  StreamSubscription<RemoteMessage>? _fcmOpenedSub;
+
   @override
   void initState() {
     super.initState();
@@ -302,6 +311,7 @@ class _MyAppState extends State<MyApp>
     WidgetsBinding.instance.removeObserver(this);
     session.removeListener(_tryOpenPendingLaunchRoom);
     _pairRequestSub?.cancel();
+    _fcmOpenedSub?.cancel();
     session.chatSocket.dispose();
     if (AppPlatform.isWindows) {
       windowManager.removeListener(this);
@@ -370,13 +380,42 @@ class _MyAppState extends State<MyApp>
     _tryOpenPendingLaunchRoom();
   }
 
+  /// FCM 알림을 눌러 앱이 열린 경우(꺼져 있다 켜짐 · 뒤에 있다 앞으로 옴)를 듣는다 — 대화 알림은 앱이 직접 그려
+  /// flutter_local_notifications의 payload로 오지만, 결재 알림은 OS가 그려서 FCM의 data로만 알 수 있다.
+  void _hookFcmTaps() {
+    if (_fcmTapsHooked || !AppPlatform.isAndroid || Firebase.apps.isEmpty) {
+      return;
+    }
+    _fcmTapsHooked = true;
+    unawaited(
+      FirebaseMessaging.instance
+          .getInitialMessage()
+          .then((m) {
+            if (m != null) _onFcmOpened(m);
+          })
+          .catchError((_) {}),
+    );
+    _fcmOpenedSub = FirebaseMessaging.onMessageOpenedApp.listen(_onFcmOpened);
+  }
+
+  void _onFcmOpened(RemoteMessage message) {
+    final data = message.data;
+    if (data['kind'] != 'groupware') return;
+    _pendingLaunchRoomId = NotificationService.approvalPayload(
+      data['documentId'] as String? ?? '',
+      data['teamId'] as String?,
+    );
+    _tryOpenPendingLaunchRoom();
+  }
+
   void _tryOpenPendingLaunchRoom() {
+    _hookFcmTaps();
     final payload = _pendingLaunchRoomId;
     if (payload == null || session.stage != AuthStage.ready) return;
-    // payload는 방 id거나 'call:<방 id>'·'project:<id>'다 — 방이 로딩될 때까지 기다리는 건 방 쪽만.
-    final isProject = payload.startsWith(
-      NotificationService.projectPayloadPrefix,
-    );
+    // payload는 방 id거나 'call:<방 id>'·'project:<id>'·'approval:<문서 id>:<팀 id>'다 — 방이 로딩될 때까지 기다리는 건 방 쪽만.
+    final isProject =
+        payload.startsWith(NotificationService.projectPayloadPrefix) ||
+        payload.startsWith(NotificationService.approvalPayloadPrefix);
     final roomId = payload.startsWith(NotificationService.callPayloadPrefix)
         ? payload.substring(NotificationService.callPayloadPrefix.length)
         : payload;
@@ -394,6 +433,16 @@ class _MyAppState extends State<MyApp>
     // 프로젝트 알림을 누르면 프로젝트 창을 연다(안드로이드에는 별도 창이 없어 앱만 앞으로 온다).
     if (payload.startsWith(NotificationService.projectPayloadPrefix)) {
       if (AppPlatform.isWindows) openProjectWindow(session);
+      return;
+    }
+    // 결재 알림을 누르면 그 문서 상세를 연다. 로그인 전이면(앱이 막 켜짐) 로그인·방 목록이 끝날 때까지 미뤄 둔다.
+    final approval = NotificationService.parseApprovalPayload(payload);
+    if (approval != null) {
+      if (session.stage != AuthStage.ready) {
+        _pendingLaunchRoomId = payload;
+        return;
+      }
+      await _openApprovalFromNotification(approval);
       return;
     }
     // 통화 수신 알림을 누른 경우엔 방만 여는 게 아니라 통화에 바로 참여한다
@@ -460,6 +509,32 @@ class _MyAppState extends State<MyApp>
         ),
       );
     }
+  }
+
+  /// 결재 알림(푸시·PC 알림 창·웹 알림)을 눌렀을 때 — 쌓인 화면을 첫 화면까지 되돌린 뒤 그 문서 상세를 연다. 문서 id가 없거나(옛
+  /// 서버) 열지 못하면 알림 센터의 결재 탭을 연다.
+  Future<void> _openApprovalFromNotification(
+    ({String documentId, String? teamId}) target,
+  ) async {
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+    final opened =
+        target.documentId.isNotEmpty &&
+        await openApprovalDocument(
+          context,
+          session,
+          documentId: target.documentId,
+          teamId: target.teamId,
+          markRead: true,
+          onError: session.showToast,
+        );
+    if (opened || !context.mounted) return;
+    await showNotificationsCenterDialog(
+      context,
+      session,
+      initialTab: NotificationTab.approval,
+    );
   }
 
   @override

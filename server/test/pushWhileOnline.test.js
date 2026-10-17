@@ -93,8 +93,8 @@ test('push.js: 사람 단위로는 skipsPush로만 빼고, FCM 토큰은 접속�
   const listCalls = push.match(/listFcmTokensForUser\(/g) ?? [];
   assert.equal(listCalls.length, 1, 'FCM 토큰은 pushableFcmTokens 한 곳에서만 읽는다');
   assert.match(push, /async function pushableFcmTokens\(userId\) \{\s*return \(await listFcmTokensForUser\(userId\)\)\.filter\(\(\{ deviceId \}\) => !isDeviceConnected\(deviceId\)\);/);
-  assert.equal((push.match(/await pushableFcmTokens\(/g) ?? []).length, 4); // 채팅·프로젝트·통화·비밀 대화
-  assert.equal((push.match(/skipsPush\(/g) ?? []).length, 4);
+  assert.equal((push.match(/await pushableFcmTokens\(/g) ?? []).length, 5); // 채팅·프로젝트·결재·통화·비밀 대화
+  assert.equal((push.match(/skipsPush\(/g) ?? []).length, 5);
 });
 
 test('webPush.js: 소켓이 붙어 있는 기기(열린 웹 앱 탭)로는 웹 푸시를 보내지 않는다', () => {

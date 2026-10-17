@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/app_notification.dart';
+import '../models/groupware.dart' show ApprovalNotification;
 import '../models/project.dart' show ProjectNotification;
 import 'notification_api.dart';
 import 'notification_view_prefs.dart';
 
-/// 알림 센터의 탭 — `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트`. 메시지 탭이 예전의 "안 읽은 대화"(안 읽은 메시지가 있는 방 목록)다.
-enum NotificationTab { all, mention, unreadChats, board, project }
+/// 알림 센터의 탭 — `전체 | 멘션 | 메시지 | 보드·공지 | 프로젝트 | 결재`. 메시지 탭이 예전의 "안 읽은 대화"(안 읽은 메시지가 있는 방 목록)다.
+/// 결재 탭은 전자결재의 결재 요청(내 차례)·승인·반려·회수·취소 알림이다(그룹웨어 결재 알림함).
+enum NotificationTab { all, mention, unreadChats, board, project, approval }
 
 extension NotificationTabLabel on NotificationTab {
   String get label => switch (this) {
@@ -17,6 +19,7 @@ extension NotificationTabLabel on NotificationTab {
     NotificationTab.unreadChats => '메시지',
     NotificationTab.board => '보드·공지',
     NotificationTab.project => '프로젝트',
+    NotificationTab.approval => '결재',
   };
 }
 
@@ -82,16 +85,21 @@ class NotificationController extends ChangeNotifier {
     Stream<NotificationNewEvent>? newEvents,
     Stream<NotificationCounts>? syncEvents,
     Stream<Map<String, dynamic>>? projectEvents,
+    Stream<void>? approvalEvents,
     Stream<void>? reconnected,
     String? Function()? userId,
     this.onNew,
     this.onRead,
     this.onSync,
+    this.onApprovalUnread,
   }) : _userId = userId ?? (() => null) {
     _newSub = newEvents?.listen(handleNew);
     _syncSub = syncEvents?.listen(handleSync);
     _projectSub = projectEvents?.listen((_) {
       if (_projectLoaded) unawaited(loadProject());
+    });
+    _approvalSub = approvalEvents?.listen((_) {
+      if (_approvalLoaded) unawaited(loadApproval());
     });
     _reconnectSub = reconnected?.listen((_) => unawaited(_resync()));
   }
@@ -106,9 +114,13 @@ class NotificationController extends ChangeNotifier {
   final void Function(List<AppNotification> read)? onRead;
   final void Function(NotificationCounts counts)? onSync;
 
+  /// 결재 알림함의 안 읽은 수를 새로 알았을 때(받거나 읽음 처리한 뒤) — Session.approvalUnread가 듣는다.
+  final void Function(int unread)? onApprovalUnread;
+
   StreamSubscription<NotificationNewEvent>? _newSub;
   StreamSubscription<NotificationCounts>? _syncSub;
   StreamSubscription<Map<String, dynamic>>? _projectSub;
+  StreamSubscription<void>? _approvalSub;
   StreamSubscription<void>? _reconnectSub;
   bool _disposed = false;
 
@@ -301,6 +313,7 @@ class NotificationController extends ChangeNotifier {
 
   bool isLoading(NotificationTab tab) {
     if (tab == NotificationTab.project) return _projectLoading;
+    if (tab == NotificationTab.approval) return _approvalLoading;
     return _feedsFor(tab).any((f) => f.loading);
   }
 
@@ -308,12 +321,14 @@ class NotificationController extends ChangeNotifier {
 
   bool isLoaded(NotificationTab tab) {
     if (tab == NotificationTab.project) return _projectLoaded;
+    if (tab == NotificationTab.approval) return _approvalLoaded;
     final feeds = _feedsFor(tab);
     return feeds.isEmpty || feeds.every((f) => f.loaded);
   }
 
   String? errorFor(NotificationTab tab) {
     if (tab == NotificationTab.project) return _projectError;
+    if (tab == NotificationTab.approval) return _approvalError;
     for (final f in _feedsFor(tab)) {
       if (f.error != null) return f.error;
     }
@@ -326,6 +341,10 @@ class NotificationController extends ChangeNotifier {
       if (!_projectLoaded && !_projectLoading) await loadProject();
       return;
     }
+    if (tab == NotificationTab.approval) {
+      if (!_approvalLoaded && !_approvalLoading) await loadApproval();
+      return;
+    }
     await Future.wait([
       for (final f in _feedsFor(tab))
         if (!f.loaded && !f.loading) _loadFirst(f),
@@ -336,6 +355,10 @@ class NotificationController extends ChangeNotifier {
   Future<void> refresh(NotificationTab tab) async {
     if (tab == NotificationTab.project) {
       await loadProject();
+      return;
+    }
+    if (tab == NotificationTab.approval) {
+      await loadApproval();
       return;
     }
     await Future.wait([for (final f in _feedsFor(tab)) _loadFirst(f)]);
@@ -549,6 +572,56 @@ class NotificationController extends ChangeNotifier {
           read: true,
         );
 
+  // ---- 결재 알림함 ----
+
+  List<ApprovalNotification> approval = const [];
+  bool _approvalLoaded = false;
+  bool _approvalLoading = false;
+  String? _approvalError;
+
+  /// 결재 알림함을 받는다 — 결재 탭을 처음 열 때와, 받아 둔 뒤 새 결재 알림·다른 기기 읽음이 오면([approvalEvents]). 받은 안 읽은
+  /// 수를 [onApprovalUnread]로 넘긴다(Session.approvalUnread).
+  Future<void> loadApproval() async {
+    final epoch = _epoch;
+    _approvalLoading = true;
+    _approvalError = null;
+    _notify();
+    try {
+      final r = await apiProvider().fetchApprovalNotifications();
+      if (epoch != _epoch) return;
+      approval = r.items;
+      _approvalLoaded = true;
+      onApprovalUnread?.call(r.unread);
+    } catch (e) {
+      if (epoch != _epoch) return;
+      _approvalError = _message(e);
+    } finally {
+      if (epoch == _epoch) {
+        _approvalLoading = false;
+        _notify();
+      }
+    }
+  }
+
+  /// 결재 알림 읽음 — [ids]가 없으면 전부. 목록을 먼저 바꾸고(반응성) 남은 안 읽은 수를 [onApprovalUnread]로 넘긴다.
+  Future<void> markApprovalRead({List<String>? ids}) async {
+    final before = approval;
+    approval = [
+      for (final n in approval)
+        if (ids == null || ids.contains(n.id)) n.asRead() else n,
+    ];
+    _notify();
+    try {
+      final remaining = await apiProvider().markApprovalRead(ids: ids);
+      onApprovalUnread?.call(remaining);
+    } catch (_) {
+      // 서버가 거절했으면 읽음 표시를 되돌린다.
+      approval = before;
+      _notify();
+      rethrow;
+    }
+  }
+
   // ---- 설정 ----
 
   NotificationSettings? settings;
@@ -617,6 +690,7 @@ class NotificationController extends ChangeNotifier {
     ];
     await Future.wait([for (final f in loaded) _loadFirst(f)]);
     if (_projectLoaded) await loadProject();
+    if (_approvalLoaded) await loadApproval();
   }
 
   /// 로그아웃 — 받아 둔 것을 전부 비운다(다음에 로그인하는 사람에게 남지 않게).
@@ -630,6 +704,10 @@ class NotificationController extends ChangeNotifier {
     _projectLoaded = false;
     _projectLoading = false;
     _projectError = null;
+    approval = const [];
+    _approvalLoaded = false;
+    _approvalLoading = false;
+    _approvalError = null;
     settings = null;
     settingsLoading = false;
     settingsError = null;
@@ -651,6 +729,7 @@ class NotificationController extends ChangeNotifier {
     _newSub?.cancel();
     _syncSub?.cancel();
     _projectSub?.cancel();
+    _approvalSub?.cancel();
     _reconnectSub?.cancel();
     super.dispose();
   }

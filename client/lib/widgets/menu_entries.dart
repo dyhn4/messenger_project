@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../screens/calendar/calendar_screen.dart' show openCalendarScreen;
+import '../screens/groupware/groupware_screen.dart' show openGroupwareScreen;
 import '../screens/project/project_dialog.dart' show showProjectDialog;
 import '../screens/project/project_window.dart' show openProjectWindow;
 import '../services/app_platform.dart';
@@ -34,7 +35,7 @@ import 'side_panels.dart';
 // 권장 order 값(10 간격이라 사이에 끼워 넣을 수 있다):
 //   생성(create) — 메시지 예약 10 · 할 일 20 · 투표 30
 //   리스트(list) — 파일 10 · 즐겨찾기 20 · 북마크 30 · 링크 40 · 내가 쓴 글 50 · 앨범 60 · (투표 목록 등은 70부터)
-//   툴(tools)    — 캘린더 10 · 프로젝트 20 · 문의함 30
+//   툴(tools)    — 캘린더 10 · 그룹웨어 15 · 프로젝트 20 · 문의함 30
 // ──────────────────────────────────────────────────────────────────────────
 
 /// 메뉴 묶음 — 드롭다운에 이 순서로 나온다.
@@ -247,6 +248,18 @@ final menuEntries = <MenuEntry>[
         openCalendarScreen(context, session);
       }
     },
+  ),
+  MenuEntry(
+    key: 'groupware',
+    section: MenuSection.tools,
+    label: '그룹웨어',
+    icon: const Icon(Icons.approval_rounded),
+    color: const Color(0xFF5F3DC4),
+    background: const Color(0xFFE5DBFF),
+    order: 15,
+    // 전자결재(휴가·지출·근태 수정)·연차·출퇴근 — 숫자는 내가 지금 결재할 문서 수(session.groupwarePending).
+    badge: (session) => session.groupwarePending,
+    onOpen: (context, session) => openGroupwareScreen(context, session),
   ),
   MenuEntry(
     key: 'project',

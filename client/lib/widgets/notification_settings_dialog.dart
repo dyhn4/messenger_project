@@ -92,6 +92,7 @@ class _NotificationSettingsDialogState
       NotificationTab.mention,
       NotificationTab.board,
       NotificationTab.project,
+      NotificationTab.approval,
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

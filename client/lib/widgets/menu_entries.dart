@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/calendar/calendar_screen.dart' show openCalendarScreen;
 import '../screens/groupware/groupware_screen.dart' show openGroupwareScreen;
+import '../screens/mail/mail_screen.dart' show openMailScreen;
 import '../screens/project/project_dialog.dart' show showProjectDialog;
 import '../screens/project/project_window.dart' show openProjectWindow;
 import '../services/app_platform.dart';
@@ -260,6 +261,18 @@ final menuEntries = <MenuEntry>[
     // 전자결재(휴가·지출·근태 수정)·연차·출퇴근 — 숫자는 내가 지금 결재할 문서 수(session.groupwarePending).
     badge: (session) => session.groupwarePending,
     onOpen: (context, session) => openGroupwareScreen(context, session),
+  ),
+  MenuEntry(
+    key: 'mail',
+    section: MenuSection.tools,
+    label: '메일',
+    icon: const Icon(Icons.mail_rounded),
+    color: const Color(0xFF1971C2),
+    background: const Color(0xFFD0EBFF),
+    order: 17,
+    // 연결한 메일 계정(회사 메일·네이버·Gmail 등 — server/src/webmail.js) — 숫자는 받은편지함 안 읽은 수(session.mailUnread).
+    badge: (session) => session.mailUnread,
+    onOpen: (context, session) => openMailScreen(context, session),
   ),
   MenuEntry(
     key: 'project',

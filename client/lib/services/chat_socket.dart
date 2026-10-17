@@ -594,6 +594,8 @@ class ChatSocket {
   final _approvalNotificationSyncController = StreamController<int>.broadcast();
   final _attendanceReminderController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _mailNewController = StreamController<Map<String, dynamic>>.broadcast();
+  final _mailChangedController = StreamController<void>.broadcast();
   final _scheduledMessageEventController =
       StreamController<ScheduledMessageEvent>.broadcast();
   final _scheduledChangedController = StreamController<String>.broadcast();
@@ -651,6 +653,12 @@ class ChatSocket {
   /// 출근·퇴근 알림(서버 groupwareWork.js runAttendanceReminders — attendance:reminder) — `{kind: 'in'|'out', title, body, teamId}`.
   Stream<Map<String, dynamic>> get attendanceReminders =>
       _attendanceReminderController.stream;
+
+  /// 새 메일(서버 webmail.js 새 메일 확인 — mail:new) — `{ count, unseen, latest: [{ from, subject }] }`.
+  Stream<Map<String, dynamic>> get mailNew => _mailNewController.stream;
+
+  /// 메일 계정을 연결·해제했다(mail:changed — 내 다른 기기).
+  Stream<void> get mailChanged => _mailChangedController.stream;
 
   /// 내(다른 기기 포함) 토픽 폴더가 바뀌었을 때(topic-folders:changed) — 그 팀 id가 흐른다.
   Stream<String> get topicFoldersChanged =>
@@ -972,6 +980,10 @@ class ChatSocket {
         _approvalNotificationController.add(Map<String, dynamic>.from(data));
       }
     });
+    socket.on('mail:new', (data) {
+      if (data is Map) _mailNewController.add(Map<String, dynamic>.from(data));
+    });
+    socket.on('mail:changed', (_) => _mailChangedController.add(null));
     socket.on('attendance:reminder', (data) {
       if (data is Map) {
         _attendanceReminderController.add(Map<String, dynamic>.from(data));

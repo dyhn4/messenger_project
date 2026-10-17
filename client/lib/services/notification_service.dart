@@ -107,6 +107,51 @@ class NotificationService {
     return details?.notificationResponse?.payload;
   }
 
+  /// 새 메일 알림 payload — 누르면 메일 화면을 연다(main.dart _openRoomFromNotification, 웹은 web/sw.js도 같은 값).
+  static const mailPayload = 'mail:';
+
+  /// 새 메일 알림(웹메일 — 앱이 켜져 있을 때 소켓으로 받은 것). 채널을 따로 둬서 OS 설정에서 따로 끄고 켤 수 있다.
+  Future<void> showMailNotification({
+    required String title,
+    required String body,
+  }) async {
+    if (kIsWeb) {
+      return showWebNotification(
+        title: title,
+        body: body,
+        tag: mailPayload,
+        payload: mailPayload,
+      );
+    }
+    final key = 'mail:${DateTime.now().microsecondsSinceEpoch}';
+    if (AppPlatform.isWindows &&
+        await showNotificationPopup(
+          key: key,
+          title: title,
+          body: body,
+          payload: mailPayload,
+          style: popupStyle?.call() ?? const NotificationPopupStyle(),
+        )) {
+      return;
+    }
+    await _plugin.show(
+      id: key.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(
+        android: const AndroidNotificationDetails(
+          'mail_updates',
+          '메일 알림',
+          channelDescription: '연결한 메일 계정의 새 메일',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        windows: const WindowsNotificationDetails(),
+      ),
+      payload: mailPayload,
+    );
+  }
+
   /// 프로젝트 알림 payload 앞에 붙는 표시 — 알림을 눌렀을 때 방이 아니라 프로젝트 창을 연다.
   static const projectPayloadPrefix = 'project:';
 

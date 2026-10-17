@@ -17,6 +17,7 @@ import 'screens/chat_screen.dart';
 import 'screens/groupware/approval_notifications.dart'
     show openApprovalDocument;
 import 'screens/groupware/groupware_screen.dart' show openGroupwareScreen;
+import 'screens/mail/mail_screen.dart' show openMailScreen;
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/project/project_window.dart';
@@ -401,6 +402,11 @@ class _MyAppState extends State<MyApp>
 
   void _onFcmOpened(RemoteMessage message) {
     final data = message.data;
+    if (data['kind'] == 'mail') {
+      _pendingLaunchRoomId = NotificationService.mailPayload;
+      _tryOpenPendingLaunchRoom();
+      return;
+    }
     if (data['kind'] != 'groupware') return;
     _pendingLaunchRoomId = NotificationService.approvalPayload(
       data['documentId'] as String? ?? '',
@@ -416,7 +422,8 @@ class _MyAppState extends State<MyApp>
     // payload는 방 id거나 'call:<방 id>'·'project:<id>'·'approval:<문서 id>:<팀 id>'다 — 방이 로딩될 때까지 기다리는 건 방 쪽만.
     final isProject =
         payload.startsWith(NotificationService.projectPayloadPrefix) ||
-        payload.startsWith(NotificationService.approvalPayloadPrefix);
+        payload.startsWith(NotificationService.approvalPayloadPrefix) ||
+        payload == NotificationService.mailPayload;
     final roomId = payload.startsWith(NotificationService.callPayloadPrefix)
         ? payload.substring(NotificationService.callPayloadPrefix.length)
         : payload;
@@ -434,6 +441,17 @@ class _MyAppState extends State<MyApp>
     // 프로젝트 알림을 누르면 프로젝트 창을 연다(안드로이드에는 별도 창이 없어 앱만 앞으로 온다).
     if (payload.startsWith(NotificationService.projectPayloadPrefix)) {
       if (AppPlatform.isWindows) openProjectWindow(session);
+      return;
+    }
+    // 새 메일 알림을 누르면 메일 화면을 연다(로그인 전이면 미뤄 둔다).
+    if (payload == NotificationService.mailPayload) {
+      if (session.stage != AuthStage.ready) {
+        _pendingLaunchRoomId = payload;
+        return;
+      }
+      navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      final context = navigatorKey.currentContext;
+      if (context != null) await openMailScreen(context, session);
       return;
     }
     // 결재 알림을 누르면 그 문서 상세를 연다. 로그인 전이면(앱이 막 켜짐) 로그인·방 목록이 끝날 때까지 미뤄 둔다.

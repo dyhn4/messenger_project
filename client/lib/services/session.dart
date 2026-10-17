@@ -44,6 +44,7 @@ import 'call_quality.dart' show callVideoTierFromWire;
 import 'chat_draft_store.dart';
 import 'chat_socket.dart';
 import 'groupware_api.dart';
+import 'mail_api.dart';
 import 'notification_api.dart';
 import 'notification_controller.dart';
 import 'deep_link_service.dart';
@@ -474,6 +475,15 @@ class Session extends ChangeNotifier {
   StreamSubscription? _todoToastSub;
   StreamSubscription? _todoReminderSub;
   StreamSubscription? _attendanceReminderSub;
+
+  /// 웹메일 받은편지함의 안 읽은 수(메뉴 "메일" 배지) — 계정이 없으면 0.
+  int mailUnread = 0;
+  StreamSubscription? _mailNewSub;
+  StreamSubscription? _mailChangedSub;
+
+  /// 새 메일이 왔거나 계정이 바뀌었을 때 — 메일 화면이 목록을 다시 받는 신호.
+  final _mailEvents = StreamController<void>.broadcast();
+  Stream<void> get mailEvents => _mailEvents.stream;
 
   /// 프로젝트 알림함의 안 읽은 개수 — 툴바 "프로젝트" 버튼의 배지와 프로젝트 창 사이드바가 쓴다.
   int projectUnread = 0;
@@ -1386,6 +1396,44 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 웹메일 API(server/src/webmail.js) — 팀과 상관없이 내 계정.
+  MailApi get mailApi => MailApi(api!);
+
+  /// 받은편지함 안 읽은 수를 다시 받는다 — 계정이 없거나 예전 서버면 0(부가 표시라 조용히).
+  Future<void> refreshMailUnread() async {
+    if (api == null || token == null) return;
+    var next = 0;
+    try {
+      next = (await mailApi.status()).unseen;
+    } catch (_) {}
+    setMailUnread(next);
+  }
+
+  void setMailUnread(int count) {
+    if (count == mailUnread) return;
+    mailUnread = count;
+    notifyListeners();
+  }
+
+  /// 소켓 `mail:new` — 배지를 맞추고 토스트와 기기 알림(앱이 켜져 있으면 서버 푸시가 오지 않음 — 누르면 메일 화면, main.dart).
+  void handleMailNew(Map<String, dynamic> data) {
+    final unseen = (data['unseen'] as num?)?.toInt();
+    if (unseen != null) setMailUnread(unseen);
+    _mailEvents.add(null);
+    final latest = data['latest'];
+    final count = (data['count'] as num?)?.toInt() ?? 1;
+    final first = latest is List && latest.isNotEmpty && latest.first is Map
+        ? latest.first as Map
+        : const {};
+    final from = first['from'] as String? ?? '';
+    final subject = first['subject'] as String? ?? '';
+    final title = count > 1 ? '새 메일 $count통' : '새 메일 — $from';
+    final body = count > 1 ? '$from: $subject 외' : subject;
+    _showToast('$title · $body');
+    if (_quietNotifications) return;
+    notifications.showMailNotification(title: title, body: body);
+  }
+
   /// 소켓 `attendance:reminder` — 출근(또는 퇴근)을 아직 안 눌렀다는 알림. 앱이 켜져 있으면 서버 푸시가 오지 않으니 여기서 띄운다
   /// (토스트 + 기기 알림 — 문서 id가 빈 결재 알림이라 누르면 그룹웨어 화면, main.dart).
   void handleAttendanceReminder(Map<String, dynamic> data) {
@@ -1855,6 +1903,14 @@ class Session extends ChangeNotifier {
     _attendanceReminderSub = chatSocket.attendanceReminders.listen(
       handleAttendanceReminder,
     );
+    _mailNewSub?.cancel();
+    _mailNewSub = chatSocket.mailNew.listen(handleMailNew);
+    _mailChangedSub?.cancel();
+    _mailChangedSub = chatSocket.mailChanged.listen((_) {
+      _mailEvents.add(null);
+      unawaited(refreshMailUnread());
+    });
+    unawaited(refreshMailUnread());
     _renamedSub?.cancel();
     _renamedSub = chatSocket.renamedEvents.listen((e) {
       final match = rooms.where((r) => r.id == e.roomId);
@@ -5386,6 +5442,9 @@ class Session extends ChangeNotifier {
     await _todoToastSub?.cancel();
     await _todoReminderSub?.cancel();
     await _attendanceReminderSub?.cancel();
+    await _mailNewSub?.cancel();
+    await _mailChangedSub?.cancel();
+    mailUnread = 0;
     projectUnread = 0;
     approvalUnread = 0;
     await _hiddenSub?.cancel();

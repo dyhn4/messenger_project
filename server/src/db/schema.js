@@ -2614,6 +2614,38 @@ export const resourceBookings = pgTable(
   ],
 );
 
+/**
+ * 웹메일 — 사람마다 연결한 메일 계정 하나(회사 메일·네이버·Gmail 등의 IMAP/SMTP — webmail.js). 메일 자체는 그 메일 서버에 있고 여기에는
+ * 연결 값만 둔다. 비밀번호는 암호화(crypto.js encryptField). 새 메일 알림은 받은편지함의 UIDNEXT를 [lastUidNext]에 기억해 늘어난 만큼
+ * 알린다(UIDVALIDITY가 바뀌면 처음부터). 연결이 계속 실패하면 [lastError]를 남기고 확인 간격을 늘린다.
+ */
+export const mailAccounts = pgTable('mail_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  displayName: text('display_name'),
+  provider: text('provider').notNull().default('custom'),
+  imapHost: text('imap_host').notNull(),
+  imapPort: integer('imap_port').notNull(),
+  imapSecurity: text('imap_security').notNull(), // 'ssl' | 'starttls'
+  smtpHost: text('smtp_host').notNull(),
+  smtpPort: integer('smtp_port').notNull(),
+  smtpSecurity: text('smtp_security').notNull(), // 'ssl' | 'starttls'
+  username: text('username').notNull(),
+  passwordEnc: text('password_enc').notNull(),
+  notify: boolean('notify').notNull().default(true),
+  lastUidNext: integer('last_uid_next'),
+  lastUidValidity: text('last_uid_validity'),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** 문서 번호 매기기 — 범위·해마다 마지막 번호(groupware 문서를 올리는 트랜잭션 안에서 하나씩 올린다). */
 export const approvalCounters = pgTable(
   'approval_counters',

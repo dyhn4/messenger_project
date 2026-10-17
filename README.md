@@ -17,6 +17,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [서버 운영자와 관리자 콘솔](#서버-운영자와-관리자-콘솔)
 - [프로젝트(업무 관리)](#프로젝트업무-관리)
 - [그룹웨어(전자결재·연차·출퇴근)](#그룹웨어전자결재연차출퇴근)
+- [웹메일](#웹메일)
 - [향후 계획 / 미구현 기능](#향후-계획--미구현-기능)
 - [구성도](#구성도)
 - [기술 스택](#기술-스택)
@@ -1192,6 +1193,37 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 > 범위 설정을 바꾸면 이전 범위의 결재·근태·연차 조정 기록은 그 범위 키로 남아 새 범위에서는 보이지 않습니다(지우지는 않음 — 되돌리면 다시 보임).
 > 자원·예약도 범위마다 따로입니다.
 
+## 웹메일
+
+메뉴 → 툴 → **메일**(숫자는 받은편지함의 안 읽은 메일 수). 이미 쓰고 있는 메일 계정(회사 메일 서버·네이버·Gmail·다음·네이버웍스·
+Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메일은 원래 메일 서버에 그대로 있고 이 서버는 중계만 합니다(메일 본문을 DB에
+두지 않음). 서버는 `server/src/webmail.js`(API·새 메일 확인), `webmailClient.js`(IMAP — imapflow, SMTP — nodemailer), `webmailRules.js`(검사·모양),
+앱은 `client/lib/screens/mail/`. 서버를 올린 뒤 `npm install`(새 패키지 `imapflow`·`mailparser` — 정확한 버전으로 고정)과
+`npm run db:migrate`(마이그레이션 `0119`)가 필요합니다. 도메인·MX·포트 열기는 필요 없습니다(서버 PC에서 메일 서버로 나가는 연결만).
+
+- **계정 연결** — 사람마다 하나. 서비스를 고르면 주소·포트가 채워지고 그 서비스에서 IMAP을 켜는 법(앱 비밀번호 등)이 보입니다. **직접 입력**은
+  회사 메일 서버의 IMAP(143·993)·SMTP(25·465·587·2525)와 연결 보안(SSL·STARTTLS — 암호화 없는 연결은 받지 않음)을 넣습니다. 저장하기 전에
+  서버가 **IMAP·SMTP 로그인을 해 보고** 안 되면 어느 쪽이 왜 안 되는지 알려 줍니다(앱 비밀번호·방화벽·TLS 등). 비밀번호는 DB에 **암호화**해 두고
+  앱에 다시 내보내지 않습니다. 서버는 메일 서버 주소를 풀어 이 PC 자신(127.x·::1)·링크 로컬(169.254.x — 클라우드 메타데이터 포함)이면 접속하지
+  않습니다(사설망의 사내 메일 서버는 됨). 연결 시도는 10분에 10번까지.
+- **읽기** — 넓은 창은 폴더 · 목록 · 읽기 세 칸, 좁은 창(모바일)은 목록에서 눌러 읽기 화면으로(폴더는 서랍). 폴더는 받은편지함·보낸편지함·
+  임시보관함·스팸·휴지통이 먼저(한국어 이름), 안 읽은 수가 붙습니다. 목록은 새것부터 30통씩(**더 보기**), 찾기는 제목·보낸 사람·받는 사람·
+  본문으로(최근 100통). 열면 읽음이 됩니다. **본문은 글자로** 보여 줍니다 — HTML 메일은 서버가 글자로 바꾸고(스크립트·원격 그림·추적 픽셀이
+  실리지 않음) "HTML 메일을 글자로 보여 줍니다"라고 알립니다. 첨부는 눌러 내려받아 엽니다(실행 파일 등 위험한 형식은 탐색기에서 고르기만 —
+  채팅 첨부와 같은 규칙). 30MB 넘는 메일은 원래 메일 프로그램에서 보게 합니다.
+- **정리** — 중요(별), 안 읽음으로, 다른 폴더로 옮기기, 지우기(휴지통으로 — 휴지통에서 지우면 아주 지움).
+- **쓰기** — 받는 사람·참조·숨은 참조(쉼표로 여러 명, **주소록** 단추로 같은 팀에서 메일 계정을 연결한 사람을 그 주소로 고르기 — 가입 이메일은 내보내지 않음), 제목, 본문(글자), 첨부(10개·합계
+  20MB — 앱 업로드로 올린 파일, 직접 올린 파일만). **답장**·**전체 답장**(나는 빼고, 회신 주소가 있으면 그쪽으로)·**전달**은 "Re:"/"Fwd:"를 한 번만
+  붙이고 원문을 인용하며, 답장은 `In-Reply-To`·`References` 머리를 달아 받는 쪽에서 대화로 묶이고 원래 메일에 답장 표시가 됩니다. 보낸 메일은
+  보낸편지함에 넣습니다(Gmail은 메일 서버가 알아서 넣음). 숨은 참조는 봉투에만 실려 받는 사람에게 보이지 않습니다. 보내기는 10분에 30통까지.
+- **새 메일 알림** — 서버가 3분마다 알림을 켠 계정의 받은편지함을 확인해, 늘어난 안 읽은 메일을 앱이 켜져 있으면 토스트와 기기 알림(소켓
+  `mail:new`), 꺼져 있으면 푸시로 알립니다(방해 금지 중이면 안 보냄, 누르면 메일 화면). 메일 화면의 ⋯ 메뉴에서 알림을 끌 수 있습니다. 비밀번호가
+  바뀌는 등 로그인이 계속 실패하면 화면 위에 이유와 **계정 바꾸기**가 뜨고, 그 계정은 30분마다만 다시 확인합니다.
+- **연결 끊기** — 서버에 둔 연결 값·비밀번호를 지웁니다(메일 서버의 메일은 그대로).
+
+> 서버는 사용자가 연결한 메일 서버에 대신 접속하므로, 서버 PC에서 바깥 메일 서버(993·465·587 등)로 나가는 연결이 막혀 있으면 연결되지
+> 않습니다. Microsoft 365는 관리자가 IMAP·SMTP 기본 인증을 허용해야 합니다(OAuth 로그인은 아직 없음).
+
 ## 향후 계획 / 미구현 기능
 
 메신저 · 협업 도구 · 그룹웨어로서 **아직 없거나 일부만 있는 것**입니다. README가 아니라 코드(라우터·스키마·화면)를 직접 찾아보고
@@ -1230,7 +1262,10 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   수에 맞는 회의실 추천, 일정 하나에 여러 자원(회의실+장비), 예약 시작 전 알림, 회의실 앞 태블릿 화면.
 - **휴가 달력 후속** — 휴가 탭의 달력 보기는 들어갔습니다. 남은 것: 부서별로 거르기, 캘린더의 "팀 휴가"에 출장도 보이기, 달력에서 날을 끌어
   바로 휴가 신청하기.
-- **범위가 큰 것** — 사내 웹메일(지금 메일은 알림 발송용 SMTP뿐), 급여명세서, 법인카드 연동·영수증 OCR.
+- **웹메일 후속** — 메일 계정 연결(IMAP/SMTP)로 읽기·쓰기·답장·전달·첨부·새 메일 알림은 들어갔습니다([웹메일](#웹메일)). 남은 것: HTML 메일을
+  서식 그대로 보기(안전하게 걸러서), 임시 저장(임시보관함), 서명, 계정 여러 개, Gmail·Microsoft 365의 OAuth 로그인(앱 비밀번호 대신),
+  자주 쓰는 바깥 주소 자동 완성, 메일 받는 규칙·자동 분류, 메일을 채팅방·할 일로 보내기, 자체 메일 서버(회사 도메인 MX로 직접 받기).
+- **범위가 큰 것** — 급여명세서, 법인카드 연동·영수증 OCR.
 
 ### 3순위 — 메신저 편의
 
@@ -2293,6 +2328,21 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/api/groupware/bookings` | 예약하기 `{ resourceId, start, end, title? }`(ms) → 201. 겹치면 409("이미 예약된 시간입니다 (… 이름)"), 지난 시간·7일 넘음·180일 넘게 앞은 400, 끈 자원 409, 준회원 403, 앞으로의 예약 100건 넘음 429 |
 | DELETE | `/api/groupware/bookings/:id` | 취소 — 잡은 사람이나 관리자(남의 것이면 잡은 사람에게 알림·감사 로그). 일정 예약이면 일정은 남고 회의실만 빠짐 |
 
+**웹메일** (`server/src/webmail.js` — 사람마다 연결한 계정 하나, 팀과 상관없음. 메일 서버 오류는 502이고 `error`에 고칠 방법)
+
+| Method | Path | 설명 |
+|---|---|---|
+| GET | `/api/mail/presets` | 미리 정한 메일 서비스 `[{ key, label, imap: { host, port, security }, smtp, hint }]`(naver·gmail·daum·worksmobile·outlook) |
+| GET / PUT / PATCH / DELETE | `/api/mail/account` | 내 계정 `{ account: { email, displayName, provider, providerLabel, imap, smtp, username, notify, lastError, lastCheckedAt } \| null }`(비밀번호는 안 나감) / 연결·바꾸기 `{ email, displayName?, provider, imap?, smtp?(직접 입력일 때 `{ host, port, security: 'ssl'\|'starttls' }`), username?, password?(바꾸기는 비우면 지금 것) }` — IMAP·SMTP 로그인을 해 보고 저장(실패 400, 10분에 10번) / `{ notify?, displayName? }` / 연결 끊기. 바뀌면 소켓 `mail:changed` |
+| GET | `/api/mail/directory` | 주소록 `[{ userId, name, email }]` — 나와 같은 팀에서 메일 계정을 연결한 사람의 연결 주소(가입 이메일은 안 나감) |
+| GET | `/api/mail/status` | 받은편지함 안 읽은 수 `{ connected, unseen, error }`(메뉴 배지) |
+| GET | `/api/mail/folders` | 폴더 `[{ path, name, specialUse, unseen, total }]` — 받은편지함·보낸편지함·임시보관함·스팸·휴지통 먼저 |
+| GET | `/api/mail/messages` | `?folder=&before=(uid)&limit=(50까지)&q=` → `{ messages: [{ uid, subject, from, to, date, seen, flagged, answered, hasAttachments, size }], nextBefore }` — 새것부터, `q`는 제목·보낸 사람·받는 사람·본문(최근 100통) |
+| GET | `/api/mail/message` | `?folder=&uid=` → `{ uid, subject, from, to, cc, replyTo, date, text(HTML 메일은 글자로 바꾼 것), truncated, html, messageId, references, attachments: [{ index, fileName, contentType, size }], flagged }` — 열면 읽음, 30MB 넘으면 413 |
+| GET | `/api/mail/attachment` | `?folder=&uid=&index=` 첨부 내려받기(`application/octet-stream`) |
+| POST | `/api/mail/flags` · `/api/mail/move` · `/api/mail/delete` | `{ folder, uids, seen?, flagged? }` / `{ folder, uids, to }` / `{ folder, uids }` → `{ result: 'trash'\|'deleted' }`(uid 200개까지) |
+| POST | `/api/mail/send` | `{ to, cc?, bcc?, subject, text, attachments?: [{ fileUrl, fileName, mimeType }], inReplyTo?, references?, answered?: { folder, uid } }` → 201 `{ ok, savedToSent }` — 받는 사람 합쳐 50명, 첨부 10개·20MB(직접 올린 파일), 10분에 30통. 보낸 뒤 보낸편지함에 넣고(Gmail 제외) 답장이면 원래 메일에 답장 표시 |
+
 **외부 연동** (`server/src/integrations.js`, 공개 API는 `publicApi.js`)
 
 | Method | Path | 인증 | 설명 |
@@ -2413,6 +2463,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무) |
 | `attendance_reminders` | 보낸 출근·퇴근 알림(PK `scope_key`, `user_id`, `work_date`, `kind` — 하루 한 번만 보내려고 먼저 넣고 보냄) |
 | `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order` |
+| `mail_accounts` | 웹메일 계정(사람마다 하나 — `user_id` unique, 탈퇴하면 cascade). `email`·`display_name`·`provider`(미리 정한 서비스 키 또는 `custom`), IMAP·SMTP `*_host`·`*_port`·`*_security`(`ssl`\|`starttls`), `username`, `password_enc`(암호화 — 내보내지 않음), `notify`(새 메일 알림), 새 메일 기준 `last_uid_next`·`last_uid_validity`(받은편지함 UIDNEXT·UIDVALIDITY — 연결 값이 바뀌면 지움), `last_checked_at`, 로그인 실패 `last_error`·`last_error_at`(30분 동안 다시 확인 안 함). 메일 본문은 두지 않는다 |
 | `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — unique, 일정을 지우면 cascade). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`) |
 | `leave_promotions` | 연차 사용 촉진 통지 — `scope_key`, `user_id`, 그 연차 기간(`period_start`·`period_end`), `stage`(1 \| 2), 보낼 때 남은 연차 `remaining_half_days`, `deadline`, `message`, 2차의 `designated_dates`, 받은 사람이 낸 `plan_dates`·`planned_at`, `sent_by_id`·`sent_by_name`·`sent_at`, `read_at`. 지우지 않음 |
 | `email_codes` | 메일로 보낸 확인 코드(가입 전 `signup`·이메일 확인 `verify`·이메일 변경 `change`·비밀번호 재설정 `reset`). 코드 대신 서버 비밀값으로 만든 해시, 틀린 횟수(`attempts`), 만료(10분 — 만료된 행은 하루 한 번 지움). 같은 목적·주소로 새 코드를 보내면 앞의 행은 지움 |

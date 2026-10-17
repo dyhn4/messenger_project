@@ -330,6 +330,37 @@ export async function notifyGroupwarePush({ userId, title, body, documentId, tea
 }
 
 /**
+ * 새 메일 알림(웹메일 — webmail.js의 새 메일 확인 작업)을 결재 알림과 같은 방식으로 보낸다 — 접속해 있지 않은 기기로, 방해 금지 중이면 건너뛴다.
+ * 누르면 앱이 메일 화면을 연다(kind 'mail').
+ */
+export async function notifyMailPush({ userId, title, body }) {
+  if (skipsPush(userId)) return;
+  if ((await withoutDndUsers([userId])).length === 0) return;
+  await sendWebPushToUser(userId, { kind: 'mail', title, body });
+  const { messaging } = await getMessagingInstance();
+  if (!messaging) return;
+  const tokens = await pushableFcmTokens(userId);
+  await Promise.all(
+    tokens.map(({ deviceId, fcmToken }) =>
+      messaging
+        .send({
+          token: fcmToken,
+          notification: { title, body },
+          data: { kind: 'mail' },
+          android: { priority: 'high' },
+        })
+        .catch(async (err) => {
+          if (err?.code === 'messaging/registration-token-not-registered') {
+            await setDeviceFcmToken(deviceId, userId, null).catch(() => {});
+            return;
+          }
+          console.error('[push] 메일 알림 발송 실패:', err?.message ?? err);
+        }),
+    ),
+  );
+}
+
+/**
  * 화상회의가 시작됐을 때, 소켓이 안 붙어있는(=앱이 꺼져 있을 가능성이 높은) 멤버들에게
  * "전화가 왔다"고 FCM으로 알린다. 온라인인 사람은 이미 call:state 소켓 이벤트로 수신
  * 화면을 보고 있으므로 중복으로 보내지 않는다(메시지 푸시와 같은 분리 방식).

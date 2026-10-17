@@ -346,7 +346,9 @@ void main() {
       expect(first['resourceId'], 'R1');
       expect(first['title'], '팀 회의');
       expect(first['teamId'], 'T1');
-      expect((first['end'] as int) - (first['start'] as int), 3600000);
+      // 기본은 1시간 — 밤 11시 넘어 열면 자정에서 끊겨 30분이 된다(시각에 따라).
+      final length = (first['end'] as int) - (first['start'] as int);
+      expect(length == 3600000 || length == 1800000, isTrue, reason: '$length');
       // 다른 자원으로 바꿔 다시.
       await tester.tap(find.byKey(const ValueKey('booking-resource')));
       await tester.pumpAndSettle();

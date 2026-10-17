@@ -27,6 +27,7 @@ Flutter(PC + Android) 클라이언트와 Node.js(Express + Socket.io + PostgreSQ
 - [서버 실행 방법](#서버-실행-방법)
 - [PC 앱 실행 방법](#pc-앱-실행-방법)
 - [Android 앱 실행 방법](#android-앱-실행-방법)
+- [아이폰 앱(iOS)](#아이폰-앱ios)
 - [API 목록](#api-목록)
 - [DB 구조](#db-구조)
 - [FCM 푸시 알림 설정](#fcm-푸시-알림-설정)
@@ -985,9 +986,9 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 
 ### 1순위 — 없으면 도입을 망설이게 되는 것
 
-- **아이폰 앱** — `client/ios`가 없어 아이폰은 웹 앱만 씁니다(홈 화면에 추가해야 푸시가 오고, 화면 공유가 안 되며, 데이터 사용
-  경고도 동작하지 않음). macOS·Linux 데스크톱 앱도 없습니다. 맥 없이 만들려면 클라우드 macOS 빌드(Codemagic 등)와 Apple 개발자
-  등록이 필요합니다.
+- **아이폰 앱 마무리** — 앱 프로젝트(`client/ios`)와 맥 없는 클라우드 빌드는 만들어 두었습니다([아이폰 앱(iOS)](#아이폰-앱ios)).
+  **Apple 개발자 등록 뒤에** 남은 일: 서명(TestFlight·App Store 배포), **앱이 꺼져 있을 때의 푸시**(APNs — 그 전에는 앱이 앞에 있거나 막
+  뒤로 갔을 때만 알림이 옴), 화면 공유(방송 확장). macOS·Linux 데스크톱 앱은 없습니다.
 - **로그인 보안 강화**
   - **2단계 인증(OTP)** — Google Authenticator 같은 앱의 6자리 코드를 비밀번호와 함께 확인합니다. 외부 서비스가 필요 없어 셋 중
     가장 먼저, 쉽게 만들 수 있습니다.
@@ -1142,6 +1143,7 @@ messenger_project/
 │  │  └─ data/                    스티커 등 정적 데이터
 │  ├─ packages/conversation_shortcuts/  사내 전용 Flutter 플러그인
 │  ├─ android/                   Android 프로젝트(keystore/key.properties 위치)
+│  ├─ ios/                       아이폰 프로젝트(Info.plist 권한·주소 체계, Podfile — 빌드는 .github/workflows/ios-build.yml)
 │  ├─ windows/installer/         Inno Setup 스크립트(messenger.iss)
 │  ├─ tool/guide_capture/        초보자용 도움말 스크린샷 캡처(위젯 테스트로 진짜 화면을 그려 server/guide/images/에 PNG 저장)
 │  └─ assets/                     아이콘, 서버 인증서(server_cert.pem) 등 빌드 내장 자산
@@ -1671,6 +1673,50 @@ flutter build apk --release
 release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 릴리즈 서명](#android-릴리즈-서명) 참고.
 서명(`client/android/key.properties`)이 없으면 release 빌드는 디버그 키로 자동 폴백합니다(로컬
 테스트용 `flutter run --release`는 문제없이 되지만, 그 apk는 배포하면 안 됩니다).
+
+## 아이폰 앱(iOS)
+
+`client/ios`가 아이폰 앱 프로젝트입니다. 화면·기능은 안드로이드 앱과 같은 Dart 코드를 그대로 쓰고, 아이폰에 맞춰 다른 곳은
+아래뿐입니다. **맥이 없어도** GitHub의 macOS 러너로 빌드할 수 있고, **Apple 개발자 등록(연 $99) 전에는 서명 없는 빌드까지**만 됩니다.
+
+**지금 되는 것**
+
+- 로그인·채팅·파일·캘린더·프로젝트·그룹웨어 등 안드로이드 앱과 같은 기능. 사내 와이파이의 서버에 붙을 때 처음 한 번 "로컬
+  네트워크" 권한을 묻습니다(`NSLocalNetworkUsageDescription`).
+- 자체 서명 인증서 핀닝 — 앱의 HTTPS·소켓·화상회의 신호가 모두 Dart 네트워크라 안드로이드와 같은 방식으로 서버 인증서를 확인합니다
+  (iOS의 ATS는 Dart 연결에 걸리지 않음).
+- 화상회의·음성 참여(카메라·마이크 권한, 통화 중에 다른 앱으로 가도 소리가 이어지게 `UIBackgroundModes: audio`).
+- 알림 — 앱이 앞에 있거나 막 뒤로 갔을 때(소켓이 살아 있는 동안) 앱이 직접 띄웁니다(처음 켤 때 권한을 묻고, 같은 방 알림은 한
+  묶음). 받은 파일은 앱의 Documents에 저장돼 **"파일" 앱 > 나의 iPhone > TangoTalk**에 보입니다(폴더를 고르지 않음).
+- 초대 링크(`tangotalk://`)로 열기, "로그인한 기기"에 **iPhone 앱**으로 보임(기기 종류 `ios`).
+
+**아직 안 되는 것(개발자 등록 뒤)**
+
+- **앱을 닫았을 때의 푸시** — 아이폰은 앱이 뒤로 가면 곧 멈춰서 소켓이 끊기고, 그 뒤에 알림을 받으려면 APNs(Apple 푸시)가 있어야
+  합니다. 개발자 등록 뒤 APNs 키를 만들어 Firebase에 올리고, 서버의 FCM 설정에 iOS 앱 값(`GoogleService-Info.plist`의 앱 ID 등)을
+  더한 뒤 `main.dart`의 FCM 초기화(지금은 안드로이드만)를 아이폰에도 켭니다.
+- **화면 공유** — 화면 전체를 보내려면 방송 확장(Broadcast Upload Extension)과 앱 그룹이 필요해 지금은 막아 두었습니다(누르면 안내).
+- **앱 안 업데이트** — 아이폰은 서버가 설치 파일을 줄 수 없어 업데이트 안내를 띄우지 않습니다(TestFlight·App Store로 업데이트).
+- 모바일 데이터 경고(연결 종류 확인은 안드로이드 전용).
+
+**빌드(맥 없이)**
+
+1. 이 저장소를 GitHub에 올린 뒤 **Actions → iOS build → Run workflow**(`.github/workflows/ios-build.yml` — 비공개 저장소의 macOS
+   러너는 분당 요금이 리눅스의 10배라 손으로만 실행).
+2. 끝나면 실행 화면의 Artifacts에 **TangoTalk-unsigned-ipa**(서명 안 된 IPA)와 **TangoTalk-simulator**(맥 시뮬레이터용 `Runner.app`)가
+   올라갑니다. 서명 안 된 IPA는 그대로는 아이폰에 깔리지 않고, 무료 Apple ID로 서명해 주는 도구(Sideloadly·AltStore 등 — 7일마다
+   다시 서명)로 개발용 설치를 해 볼 수 있습니다.
+3. 빌드는 개발 PC와 같은 Flutter(3.47.5)를 쓰고, 최소 iOS는 15.0입니다(`ios/Podfile`·Xcode 프로젝트). 번들 ID는 안드로이드와 같은
+   `com.teamtalk.messenger`, 앱 이름은 TangoTalk입니다.
+
+**Apple 개발자 등록 뒤 할 일**
+
+1. developer.apple.com에서 App ID(`com.teamtalk.messenger`)를 만들고 Push Notifications를 켭니다.
+2. 배포 인증서(.p12)와 App Store 프로비저닝 프로파일을 받아 GitHub 저장소의 Secrets에 넣고, 워크플로를 `flutter build ipa`(서명)로
+   바꿔 TestFlight에 올립니다(Codemagic을 쓰면 이 과정을 화면에서 할 수 있음).
+3. 위 "앱을 닫았을 때의 푸시"(APNs)와 화면 공유 확장을 넣습니다.
+4. App Store에 낼 때는 수출 규정 질문(암호화 — HTTPS와 비밀 대화의 표준 암호화)을 답하고, 아이콘 원본을 1024px 이상으로 바꿉니다
+   (지금 아이콘은 웹의 512px 그림을 키운 것 — `dart run tool/make_ios_icons.dart <원본.png>`로 다시 만듦).
 
 ## API 목록
 

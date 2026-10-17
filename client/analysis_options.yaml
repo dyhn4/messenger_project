@@ -16,6 +16,7 @@ analyzer:
     # 고친 사본으로 들여온 외부 플러그인(packages/*/TANGOTALK_PATCHES.md) — 원래 코드가 그대로라 앱의 규칙으로 보지 않는다.
     - packages/flutter_secure_storage/**
     - packages/flutter_secure_storage_windows/**
+    - ios/**
 include: package:flutter_lints/flutter.yaml
 
 linter:

@@ -61,9 +61,17 @@ class NotificationService {
       guid: 'ae1f2c84-355a-42fa-8166-f9b7e1d1feba',
     );
 
+    // 아이폰 — 처음 켤 때 알림 권한을 묻고(백그라운드 경로는 묻지 않는다), 앱이 앞에 있을 때도 배너·소리를 낸다.
+    final ios = DarwinInitializationSettings(
+      requestAlertPermission: requestPermission,
+      requestSoundPermission: requestPermission,
+      requestBadgePermission: requestPermission,
+    );
+
     await _plugin.initialize(
-      settings: const InitializationSettings(
+      settings: InitializationSettings(
         android: android,
+        iOS: ios,
         windows: windows,
       ),
       onDidReceiveNotificationResponse: (response) {
@@ -434,6 +442,8 @@ class NotificationService {
                 ],
         ),
       ),
+      // 아이폰 — 같은 방 알림끼리 알림 센터에서 한 묶음으로.
+      iOS: DarwinNotificationDetails(threadIdentifier: roomId),
       windows: WindowsNotificationDetails(
         images: [
           if (windowsImageUri != null)

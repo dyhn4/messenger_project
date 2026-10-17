@@ -1536,7 +1536,7 @@ export const devices = pgTable(
     // 웹 푸시 구독(웹 앱 전용 — FCM 토큰의 웹판). 브라우저가 준 PushSubscription JSON(endpoint·keys)
     // 그대로이고, FCM과 같이 소켓 연결이 없을 때만 쓴다(webPush.js).
     webPushSubscription: text('web_push_subscription'),
-    // 기기 종류 — 'windows'(PC 앱) | 'android' | 'web-desktop'(PC 브라우저의 웹 앱) | 'web-mobile'(휴대폰·태블릿 브라우저).
+    // 기기 종류 — 'windows'(PC 앱) | 'android' | 'ios'(아이폰 앱) | 'web-desktop'(PC 브라우저의 웹 앱) | 'web-mobile'(휴대폰·태블릿 브라우저).
     // 앱이 등록할 때 알려 준다(예전 앱은 null — 모름). PC 앱이 접속해 있는 동안 PC 브라우저로는 웹 푸시를 보내지 않는 데
     // 쓴다(presence.js webPushTargets) — 같은 PC에서 PC 앱 알림과 크롬 알림이 두 번 뜨지 않게.
     kind: text('kind'),

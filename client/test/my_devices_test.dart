@@ -64,6 +64,7 @@ void main() {
         'Android 앱',
       ]);
       expect(MyDevice.fromJson(_device('x')).label, 'x', reason: '종류를 모르면 이름');
+      expect(MyDevice.fromJson(_device('i', kind: 'ios')).label, 'iPhone 앱');
     });
   });
 
@@ -126,7 +127,9 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: MyDevicesDialog(session: session))),
+        MaterialApp(
+          home: Scaffold(body: MyDevicesDialog(session: session)),
+        ),
       );
       await tester.pumpAndSettle();
     }

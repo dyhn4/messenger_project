@@ -158,7 +158,7 @@ Future<void> downloadTodoAttachments(
     summary = TodoDownloadSummary(
       saved: saved,
       failed: failed,
-      folder: kIsWeb ? null : await androidDownloadFolder(),
+      folder: kIsWeb ? null : await mobileDownloadFolder(),
     );
   } else {
     final initial = settings.downloadFolder;

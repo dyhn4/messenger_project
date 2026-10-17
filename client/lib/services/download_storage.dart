@@ -31,8 +31,20 @@ Future<String> androidDownloadFolder() async {
   return '${base ?? '/storage/emulated/0/Download'}/$kAndroidDownloadSubfolder';
 }
 
-/// 알림 등에 보여줄 경로 — 안드로이드는 "/storage/emulated/0/"을 떼고 "Download/…"부터 보인다.
+/// 아이폰의 다운로드 폴더 — 앱의 Documents 폴더. Info.plist의 UIFileSharingEnabled·LSSupportsOpeningDocumentsInPlace로
+/// "파일" 앱의 "나의 iPhone > TangoTalk"에 그대로 보인다(아이폰은 다른 앱의 폴더에 쓸 수 없어서 폴더를 고르지 않는다).
+Future<String> iosDownloadFolder() async =>
+    (await getApplicationDocumentsDirectory()).path;
+
+/// 휴대폰의 다운로드 폴더 — 안드로이드는 공용 Download/TangoTalk([androidDownloadFolder]), 아이폰은 앱의 Documents
+/// ([iosDownloadFolder]).
+Future<String> mobileDownloadFolder() =>
+    AppPlatform.isIOS ? iosDownloadFolder() : androidDownloadFolder();
+
+/// 알림 등에 보여줄 경로 — 안드로이드는 "/storage/emulated/0/"을 떼고 "Download/…"부터 보인다. 아이폰은 "파일" 앱에서
+/// 찾는 이름으로 보인다.
 String displayDownloadPath(String path) {
+  if (AppPlatform.isIOS) return '파일 앱 > 나의 iPhone > TangoTalk';
   if (!AppPlatform.isAndroid) return path;
   final i = path.indexOf('/Download/');
   return i < 0 ? path : path.substring(i + 1);

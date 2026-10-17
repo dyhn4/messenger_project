@@ -948,8 +948,9 @@ class Session extends ChangeNotifier {
   /// 실패해도(오프라인, 아직 배포된 빌드 없음 등) 조용히 무시한다 — 부가 기능이라 앱 사용에
   /// 지장을 주면 안 된다.
   Future<void> _checkForUpdate() async {
-    // 웹은 설치 파일이 없다 — 서버가 새 웹 빌드를 내려주면 새로고침만으로 바뀐다.
-    if (kIsWeb) return;
+    // 웹은 설치 파일이 없다 — 서버가 새 웹 빌드를 내려주면 새로고침만으로 바뀐다. 아이폰 앱은 서버가 설치 파일을 줄 수
+    // 없어(앱 스토어·TestFlight로만 깐다) 안내하지 않는다.
+    if (kIsWeb || AppPlatform.isIOS) return;
     try {
       final latest = await api?.fetchLatestVersion();
       if (latest == null) return;
@@ -972,8 +973,8 @@ class Session extends ChangeNotifier {
   /// 모달을 연다), 아무 처리도 안 하면 대화 중에도 모달이 불쑥 뜬다. 이 경로에서는 처음부터
   /// "이미 보여준 것"으로 표시해서 모달은 건너뛰고 UpdateBanner(알약)만 뜨게 한다.
   void _listenForLiveUpdates() {
-    // 웹은 설치 파일이 없다(_checkForUpdate와 같다) — 소켓도 붙지 않는다(update_socket.dart).
-    if (kIsWeb) return;
+    // 웹·아이폰은 서버가 줄 설치 파일이 없다(_checkForUpdate와 같다) — 웹은 소켓도 붙지 않는다(update_socket.dart).
+    if (kIsWeb || AppPlatform.isIOS) return;
     // init()과 restoreFromCredentials()가 둘 다 부르므로 중복 구독을 막는다.
     _updateSub?.cancel();
     _updateSub = _updateSocket.updates.listen((e) async {
@@ -1015,7 +1016,7 @@ class Session extends ChangeNotifier {
   /// 여는 것으로 시스템 패키지 설치 화면(REQUEST_INSTALL_PACKAGES 권한 필요)이 뜬다.
   Future<void> installUpdate() async {
     // 웹에는 받을 설치 파일도, 저장해 실행할 곳도 없다(웹에서는 업데이트 안내 자체가 뜨지 않는다).
-    if (kIsWeb || api == null || updateDownloading) return;
+    if (kIsWeb || AppPlatform.isIOS || api == null || updateDownloading) return;
     updateDownloading = true;
     updateDownloadProgress = null;
     updateError = null;

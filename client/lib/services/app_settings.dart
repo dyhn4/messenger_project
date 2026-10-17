@@ -229,9 +229,10 @@ class AppSettings extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     downloadWithoutAsking = _prefs.getBool(_kDownloadWithoutAsking) ?? false;
-    // 안드로이드는 폴더를 고르지 않고 늘 공용 Download/TangoTalk에 저장한다(download_storage.dart).
-    downloadFolder = AppPlatform.isAndroid
-        ? await androidDownloadFolder()
+    // 휴대폰은 폴더를 고르지 않는다 — 안드로이드는 늘 공용 Download/TangoTalk, 아이폰은 앱의 Documents("파일" 앱에 보임 —
+    // download_storage.dart).
+    downloadFolder = AppPlatform.isAndroid || AppPlatform.isIOS
+        ? await mobileDownloadFolder()
         : _prefs.getString(_kDownloadFolder) ?? _defaultDownloadFolder();
     openFolderAfterDownload = _prefs.getBool(_kOpenFolderAfterDownload) ?? true;
     themeMode = _themeModeFromName(_prefs.getString(_kThemeMode));
@@ -312,10 +313,10 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 저장 위치를 묻지 않고 [downloadFolder]에 바로 저장하는지 — 안드로이드는 늘 바로 저장한다.
+  /// 저장 위치를 묻지 않고 [downloadFolder]에 바로 저장하는지 — 휴대폰(안드로이드·아이폰)은 늘 바로 저장한다.
   bool get savesWithoutAsking =>
       downloadFolder.isNotEmpty &&
-      (AppPlatform.isAndroid || downloadWithoutAsking);
+      (AppPlatform.isAndroid || AppPlatform.isIOS || downloadWithoutAsking);
 
   Future<void> setDownloadWithoutAsking(bool value) async {
     downloadWithoutAsking = value;
@@ -324,7 +325,8 @@ class AppSettings extends ChangeNotifier {
   }
 
   Future<void> setDownloadFolder(String path) async {
-    if (AppPlatform.isAndroid) return; // 안드로이드는 Download/TangoTalk 고정.
+    // 휴대폰은 고정 — 안드로이드는 Download/TangoTalk, 아이폰은 앱의 Documents.
+    if (AppPlatform.isAndroid || AppPlatform.isIOS) return;
     downloadFolder = path;
     await _prefs.setString(_kDownloadFolder, path);
     notifyListeners();

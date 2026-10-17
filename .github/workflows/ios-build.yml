@@ -1,0 +1,64 @@
+# 아이폰 앱 빌드 — 맥 없이 GitHub의 macOS 러너에서 서명 없이(--no-codesign) 빌드해 본다.
+#
+# 쓰는 법: GitHub 저장소 → Actions → "iOS build" → Run workflow. 끝나면 실행 화면 아래 Artifacts에
+#   - TangoTalk-unsigned-ipa : 서명 안 된 IPA(Payload/Runner.app을 zip으로 묶은 것)
+#   - TangoTalk-simulator    : 맥의 iOS 시뮬레이터에 끌어다 놓아 실행해 볼 수 있는 Runner.app
+# 이 올라간다.
+#
+# 서명이 안 된 IPA는 그대로는 아이폰에 깔리지 않는다. Apple 개발자 등록(연 $99)을 하면 이 워크플로에 인증서·프로비저닝
+# 프로파일을 넣어 TestFlight/App Store용으로 서명하게 바꾼다(README "아이폰 앱" 참고). 그 전에는 무료 Apple ID로 서명해 주는
+# 도구(Sideloadly·AltStore 등 — 7일마다 다시 서명)로 개발용 설치는 해 볼 수 있다.
+#
+# 비공개 저장소에서 macOS 러너는 분 단위 요금이 리눅스의 10배라 자동으로 돌리지 않고 손으로만 실행한다.
+name: iOS build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # 개발 PC와 같은 Flutter(client/.metadata의 revision과 같은 3.47.5)로 빌드한다.
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: 패키지 받기
+        run: flutter pub get
+
+      # 테스트는 개발 PC에서 돌린다(Windows 전용 시험이 섞여 있다) — 여기서는 분석만.
+      - name: 분석
+        run: flutter analyze
+
+      - name: 아이폰용 빌드(서명 없이)
+        run: flutter build ios --release --no-codesign
+
+      - name: 서명 안 된 IPA로 묶기
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
+          cd build/ipa && zip -qr TangoTalk-unsigned.ipa Payload
+
+      - name: 시뮬레이터용 빌드
+        run: flutter build ios --simulator --debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TangoTalk-unsigned-ipa
+          path: client/build/ipa/TangoTalk-unsigned.ipa
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TangoTalk-simulator
+          path: client/build/ios/iphonesimulator/Runner.app
+          retention-days: 14

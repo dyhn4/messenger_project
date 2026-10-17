@@ -5,7 +5,7 @@ import 'app_platform.dart';
 import 'device_kind_stub.dart'
     if (dart.library.js_interop) 'device_kind_web.dart';
 
-/// 서버에 기기를 등록할 때 알려 주는 기기 종류(server/src/devices.js DEVICE_KINDS) — 'windows'(PC 앱) | 'android' |
+/// 서버에 기기를 등록할 때 알려 주는 기기 종류(server/src/devices.js DEVICE_KINDS) — 'windows'(PC 앱) | 'android' | 'ios'(아이폰 앱) |
 /// 'web-desktop'(PC 브라우저의 웹 앱) | 'web-android'(안드로이드 기기의 브라우저) | 'web-mobile'(아이폰·아이패드 등 그 밖의
 /// 휴대폰·태블릿 브라우저). 모르면 null.
 ///
@@ -18,6 +18,7 @@ String? deviceKind() {
   if (override != null) return override;
   if (AppPlatform.isWindows) return 'windows';
   if (AppPlatform.isAndroid) return 'android';
+  if (AppPlatform.isIOS) return 'ios';
   if (!kIsWeb) return null;
   if (defaultTargetPlatform == TargetPlatform.android) return 'web-android';
   // 아이패드 사파리는 기본이 데스크톱 모드라 Mac으로 보인다 — 터치 화면인 Mac은 없으니 터치 지점으로 가른다.

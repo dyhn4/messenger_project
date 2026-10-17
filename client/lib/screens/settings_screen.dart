@@ -775,6 +775,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // 없어서(안드로이드 11+ OS 제한) 늘 Download/TangoTalk에 바로 저장한다.
           child: AppPlatform.isAndroid
               ? const _AndroidDownloadFolder()
+              : AppPlatform.isIOS
+              ? const _IosDownloadFolder()
               : _desktopDownload(context),
         ),
       if (AppPlatform.isWindows)
@@ -1478,6 +1480,41 @@ class _PillOption extends StatelessWidget {
 }
 
 /// 안드로이드의 다운로드 위치 안내 — 바꿀 수 없는 고정 폴더라 누를 곳 없이 보여주기만 한다.
+/// 아이폰 — 폴더를 고르지 않고 앱의 Documents에 바로 저장한다("파일" 앱의 나의 iPhone > TangoTalk).
+class _IosDownloadFolder extends StatelessWidget {
+  const _IosDownloadFolder();
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.folder_outlined, size: 18),
+              SizedBox(width: 8),
+              Expanded(child: Text('파일 앱 > 나의 iPhone > TangoTalk')),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '다운로드한 파일은 "파일" 앱의 이 폴더에 바로 저장됩니다. 같은 이름의 파일이 있으면 '
+          '"이름 (1)"처럼 번호가 붙습니다.',
+          style: TextStyle(fontSize: 12, color: hint),
+        ),
+      ],
+    );
+  }
+}
+
 class _AndroidDownloadFolder extends StatelessWidget {
   const _AndroidDownloadFolder();
 

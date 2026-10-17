@@ -166,6 +166,12 @@ class _CallScreenState extends State<CallScreen> {
       _showToast('아이폰·아이패드 브라우저에서는 화면 공유를 할 수 없습니다.');
       return;
     }
+    if (AppPlatform.isIOS) {
+      // 아이폰 앱이 화면 전체를 보내려면 방송 확장(Broadcast Upload Extension)이 따로 있어야 하는데, 그건 Apple 개발자
+      // 등록(앱 그룹·서명) 뒤에 넣는다 — 그 전에는 이 앱 화면밖에 못 보내서 막아 둔다.
+      _showToast('아이폰 앱에서는 아직 화면 공유를 할 수 없습니다.');
+      return;
+    }
     try {
       // Windows는 어느 창을 공유할지 우리가 직접 고르게 하고(OS가 안 물어봄), Android는
       // MediaProjection 시스템 화면이 알아서 뜬다.
@@ -401,7 +407,10 @@ class _CallScreenState extends State<CallScreen> {
                               bottom: 12,
                               child: IgnorePointer(
                                 child: Center(
-                                  child: CallToast(message: _toast!, hand: _toastIsHand),
+                                  child: CallToast(
+                                    message: _toast!,
+                                    hand: _toastIsHand,
+                                  ),
                                 ),
                               ),
                             ),

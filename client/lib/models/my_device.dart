@@ -7,7 +7,7 @@ class MyDevice {
   /// 운영체제 이름(windows·android·web) — 앱이 등록할 때 보낸 값.
   final String? name;
 
-  /// 'windows' | 'android' | 'web-desktop' | 'web-android' | 'web-mobile' — 예전 앱은 null(모름).
+  /// 'windows' | 'android' | 'ios' | 'web-desktop' | 'web-android' | 'web-mobile' — 예전 앱은 null(모름).
   final String? kind;
   final DateTime createdAt;
   final DateTime? lastSeenAt;
@@ -53,12 +53,14 @@ class MyDevice {
   String get label => switch (kind) {
     'windows' => 'Windows PC',
     'android' => 'Android 앱',
+    'ios' => 'iPhone 앱',
     'web-desktop' => 'PC 웹 브라우저',
     'web-android' => 'Android 웹 브라우저',
     'web-mobile' => '휴대폰·태블릿 웹 브라우저',
     _ => switch (name) {
       'windows' => 'Windows PC',
       'android' => 'Android 앱',
+      'ios' => 'iPhone 앱',
       'web' => '웹 브라우저',
       final n? when n.isNotEmpty => n,
       _ => '알 수 없는 기기',

@@ -126,7 +126,7 @@ Future<void> downloadAlbumItems(
     summary = AlbumDownloadSummary(
       saved: saved,
       failed: failed,
-      folder: kIsWeb ? null : await androidDownloadFolder(),
+      folder: kIsWeb ? null : await mobileDownloadFolder(),
     );
   } else {
     final initial = session.settings.downloadFolder;

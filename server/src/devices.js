@@ -77,7 +77,7 @@ export function parseDeviceName(value) {
  * 다른 사람이 비밀 대화를 시작할 때 그대로 쓰는 값이라 모양이 틀리면 받지 않는다.
  */
 /** 앱이 알려 주는 기기 종류(schema.js devices.kind) — 모르는 값이면 null(예전 앱처럼 "모름"으로 본다). */
-export const DEVICE_KINDS = Object.freeze(['windows', 'android', 'web-desktop', 'web-android', 'web-mobile']);
+export const DEVICE_KINDS = Object.freeze(['windows', 'android', 'ios', 'web-desktop', 'web-android', 'web-mobile']);
 
 export function parseDeviceKind(value) {
   return DEVICE_KINDS.includes(value) ? value : null;

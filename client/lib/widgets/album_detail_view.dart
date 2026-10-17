@@ -49,9 +49,9 @@ class _AlbumDetailViewState extends State<AlbumDetailView> {
   Future<void> _pickFiles() async {
     final result = await FilePicker.pickFiles(
       allowMultiple: true,
-      // 안드로이드는 갤러리(사진·영상)에서, PC는 이미지·영상 확장자로 거른 파일 선택 창.
-      type: AppPlatform.isAndroid ? FileType.media : FileType.custom,
-      allowedExtensions: AppPlatform.isAndroid ? null : albumPickerExtensions,
+      // 휴대폰(안드로이드·아이폰)은 갤러리·사진 보관함(사진·영상)에서, PC는 이미지·영상 확장자로 거른 파일 선택 창.
+      type: !_desktop ? FileType.media : FileType.custom,
+      allowedExtensions: !_desktop ? null : albumPickerExtensions,
     );
     final files = [
       for (final f in result?.files ?? const <PlatformFile>[])

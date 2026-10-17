@@ -117,6 +117,7 @@ class _MyDevicesDialogState extends State<MyDevicesDialog> {
   IconData _icon(MyDevice d) => switch (d.kind) {
     'windows' => Icons.desktop_windows_outlined,
     'android' => Icons.phone_android,
+    'ios' => Icons.phone_iphone,
     'web-desktop' => Icons.language,
     'web-android' || 'web-mobile' => Icons.smartphone_outlined,
     _ => Icons.devices_other,

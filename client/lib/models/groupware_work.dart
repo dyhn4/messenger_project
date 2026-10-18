@@ -24,7 +24,11 @@ class GroupwareOptions {
   /// 사무실 위치(없으면 null — 거리를 재지 않음)·외근은 위치 필수.
   final ({double lat, double lng, int radius})? officeLocation;
   final bool requireFieldLocation;
+
+  /// 회의실·자원 예약 시작 몇 분 전에 알릴지(0이면 끔 — 기본 10분).
+  final int bookingReminderMinutes;
   const GroupwareOptions({
+    this.bookingReminderMinutes = 10,
     this.leaveTypes = const [],
     this.expenseCategories = const [],
     this.clockInReminder = false,
@@ -67,6 +71,8 @@ class GroupwareOptions {
           )
         : null,
     requireFieldLocation: json['requireFieldLocation'] == true,
+    bookingReminderMinutes:
+        (json['bookingReminderMinutes'] as num?)?.toInt() ?? 10,
   );
 }
 

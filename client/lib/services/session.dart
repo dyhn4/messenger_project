@@ -592,6 +592,7 @@ class Session extends ChangeNotifier {
   StreamSubscription? _todoToastSub;
   StreamSubscription? _todoReminderSub;
   StreamSubscription? _attendanceReminderSub;
+  StreamSubscription? _resourceReminderSub;
 
   /// 웹메일 받은편지함의 안 읽은 수(메뉴 "메일" 배지) — 계정이 없으면 0.
   int mailUnread = 0;
@@ -1575,6 +1576,23 @@ class Session extends ChangeNotifier {
     );
   }
 
+  /// 소켓 `resource:reminder` — 잡아 둔 회의실·자원 예약이 곧 시작한다(범위 설정의 몇 분 전 — 서버 runBookingReminders). 출근 알림과
+  /// 같이 토스트 + 기기 알림(문서 id가 빈 결재 알림이라 누르면 그룹웨어 화면). 서버 글은 [trServer]로 옮긴다.
+  void handleResourceReminder(Map<String, dynamic> data) {
+    final title = trServer(data['title'] as String?).isEmpty
+        ? tr('회의실·자원 예약')
+        : trServer(data['title'] as String?);
+    final body = trServer(data['body'] as String?);
+    _showToast(body.isEmpty ? title : '$title — $body');
+    if (_quietNotifications) return;
+    notifications.showApprovalNotification(
+      title: title,
+      body: body,
+      documentId: '',
+      teamId: data['teamId'] as String?,
+    );
+  }
+
   /// 소켓 `approval:notification-sync` — 다른 기기에서 읽었거나 결재를 처리해 요청 알림이 읽음이 됨.
   void handleApprovalNotificationSync(int count) {
     _setApprovalUnread(count);
@@ -2043,6 +2061,10 @@ class Session extends ChangeNotifier {
     _attendanceReminderSub?.cancel();
     _attendanceReminderSub = chatSocket.attendanceReminders.listen(
       handleAttendanceReminder,
+    );
+    _resourceReminderSub?.cancel();
+    _resourceReminderSub = chatSocket.resourceReminders.listen(
+      handleResourceReminder,
     );
     _mailNewSub?.cancel();
     _mailNewSub = chatSocket.mailNew.listen(handleMailNew);
@@ -5698,6 +5720,7 @@ class Session extends ChangeNotifier {
     await _todoToastSub?.cancel();
     await _todoReminderSub?.cancel();
     await _attendanceReminderSub?.cancel();
+    await _resourceReminderSub?.cancel();
     await _mailNewSub?.cancel();
     await _mailChangedSub?.cancel();
     mailUnread = 0;

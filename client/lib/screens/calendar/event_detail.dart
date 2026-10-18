@@ -8,6 +8,7 @@ import '../../widgets/app_toast.dart';
 import '../home_screen.dart' show wideBreakpoint;
 import 'calendar_common.dart';
 import 'event_editor.dart';
+import 'event_resource_picker.dart' show eventResourcesOf, resourceKindIcon;
 import 'recurrence_scope_dialog.dart';
 import '../../l10n/tr.dart';
 
@@ -162,6 +163,8 @@ class EventDetailBody extends StatelessWidget {
     final recurrence = event.recurrence;
     final canEdit = event.isUserEvent && event.canEdit && !event.restricted;
     final canDelete = event.isUserEvent && event.canDelete;
+    // 붙은 회의실·자원 모두(예전 서버면 하나) — 종류 아이콘을 단 칩으로, 승인을 기다리는 것은 "승인 대기" 꼬리표와 함께.
+    final resources = eventResourcesOf(event);
 
     Widget row(IconData icon, Widget child) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -265,16 +268,21 @@ class EventDetailBody extends StatelessWidget {
                     ),
                   ),
                 if (!event.restricted) ...[
-                  if (event.resource case final resource?)
+                  if (resources.isNotEmpty)
                     row(
                       Icons.meeting_room_outlined,
-                      Text(
-                        resource.name,
+                      Wrap(
                         key: const ValueKey('event-detail-resource'),
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          for (final r in resources) _ResourceChip(resource: r),
+                        ],
                       ),
                     ),
+                  // 장소가 붙은 자원 이름 중 하나와 같으면(회의실을 고르면 장소가 그 이름으로 채워진다) 한 번만 보인다.
                   if ((event.location ?? '').isNotEmpty &&
-                      event.location != event.resource?.name)
+                      !resources.any((r) => r.name == event.location))
                     row(
                       Icons.place_outlined,
                       Text(
@@ -357,6 +365,54 @@ class EventDetailBody extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 상세의 회의실·자원 칩 하나 — 종류 아이콘 + 이름, 관리자 승인을 기다리는 예약(`pending`)이면 이름 뒤에 "승인 대기" 꼬리표.
+/// 좁은 창(360px)에서도 넘치지 않게 이름은 한 줄로 줄인다.
+class _ResourceChip extends StatelessWidget {
+  final EventResource resource;
+  const _ResourceChip({required this.resource});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Chip(
+      key: ValueKey('event-detail-resource-${resource.resourceId}'),
+      visualDensity: VisualDensity.compact,
+      avatar: Icon(resourceKindIcon(resource.kind), size: 18),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              resource.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (resource.pending) ...[
+            const SizedBox(width: 6),
+            Container(
+              key: ValueKey(
+                'event-detail-resource-pending-${resource.resourceId}',
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                tr('승인 대기'),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onTertiaryContainer,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -2871,6 +2871,8 @@ export const groupwareOptions = pgTable('groupware_options', {
   // 사무실 위치 { lat, lng, radius(m) }(null이면 거리 확인 안 함)·외근은 위치 필수(workLocation.js).
   officeLocation: jsonb('office_location'),
   requireFieldLocation: boolean('require_field_location').notNull().default(false),
+  // 회의실·자원 예약 시작 몇 분 전에 알릴지(0이면 끔 — resourcePolicy.js).
+  bookingReminderMinutes: integer('booking_reminder_minutes').notNull().default(10),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -2976,9 +2978,21 @@ export const resources = pgTable(
     description: text('description'),
     enabled: boolean('enabled').notNull().default(true),
     sortOrder: integer('sort_order').notNull().default(0),
+    // 예약 규칙(resourcePolicy.js) — 관리자 승인이 필요한지와 승인할 사람(비면 그룹웨어 관리자), 예약할 수 있는 사람(비면 모두),
+    // 요일(0=일~6=토, null이면 모든 요일)·시간대(하루 중 분 — null이면 언제나), 한 번에 쓸 수 있는 시간(분).
+    requiresApproval: boolean('requires_approval').notNull().default(false),
+    approverIds: jsonb('approver_ids').notNull().default([]),
+    allowedUserIds: jsonb('allowed_user_ids').notNull().default([]),
+    availableDays: jsonb('available_days'),
+    availableFrom: integer('available_from'),
+    availableTo: integer('available_to'),
+    maxMinutes: integer('max_minutes'),
+    // 회의실 앞 태블릿 화면(roomDisplay.js) — 주소에 넣는 열쇠(null이면 꺼짐)와 태블릿에서 바로 예약할 수 있는지.
+    displayToken: text('display_token'),
+    displayQuickBook: boolean('display_quick_book').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('resources_scope_name_idx').on(t.scopeKey, t.name)],
+  (t) => [uniqueIndex('resources_scope_name_idx').on(t.scopeKey, t.name), uniqueIndex('resources_display_token_idx').on(t.displayToken)],
 );
 
 /**
@@ -3000,13 +3014,21 @@ export const resourceBookings = pgTable(
     title: text('title').notNull(),
     startAt: timestamp('start_at', { withTimezone: true }).notNull(),
     endAt: timestamp('end_at', { withTimezone: true }).notNull(),
+    // 일정 하나에 여러 자원(회의실 + 장비)을 붙일 수 있다 — 자원마다 한 줄.
     eventId: uuid('event_id').references(() => calendarEvents.id, { onDelete: 'cascade' }),
+    // 'confirmed'(잡힘) | 'pending'(승인을 기다림 — 그 시간은 이미 막는다, resourcePolicy.js). 거절하면 지운다.
+    status: text('status').notNull().default('confirmed'),
+    // 반복 예약(매주·2주마다 같은 시간)의 묶음 — 회차마다 한 줄, 같은 묶음 id.
+    seriesId: uuid('series_id'),
+    // 시작 전 알림을 보낸 시각(한 번만).
+    remindedAt: timestamp('reminded_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('resource_bookings_resource_start_idx').on(t.resourceId, t.startAt),
     index('resource_bookings_scope_start_idx').on(t.scopeKey, t.startAt),
-    uniqueIndex('resource_bookings_event_idx').on(t.eventId),
+    index('resource_bookings_event_idx').on(t.eventId),
+    index('resource_bookings_series_idx').on(t.seriesId),
   ],
 );
 

@@ -110,6 +110,6 @@ test('예약 줄 — 일정 예약은 일정 제목, 비공개 일정은 잡은 
   const standalone = bookingDto({ ...row, eventId: null, eventTitle: null, eventVisibility: null, title: '주간 회의' }, { viewerId: 'U3' });
   assert.equal(standalone.title, '주간 회의');
   assert.equal(standalone.start, NOW);
-  assert.deepEqual(eventResourceDto(row), { bookingId: 'B1', resourceId: 'R1', name: '대회의실', kind: 'room' });
+  assert.deepEqual(eventResourceDto(row), { bookingId: 'B1', resourceId: 'R1', name: '대회의실', kind: 'room', status: 'confirmed' });
   assert.equal(eventResourceDto(null), null);
 });

@@ -67,15 +67,9 @@ import { listExternalCalendars } from './db/queries/externalCalendars.js';
 import { toExternalCalendarDto } from './externalCalendarRules.js';
 import { externalOccurrencesFor } from './externalCalendars.js';
 import { holidaysInRange } from './holidays.js';
-import { deleteBooking, listBookingsForEvents, listStandaloneBookingsForCalendar } from './db/queries/resources.js';
-import {
-  attachEventBooking,
-  broadcastResources,
-  moveEventBooking,
-  prepareEventResource,
-  resourceScopeKeyForTeam,
-} from './groupwareResources.js';
-import { eventBookingRange, eventResourceDto, parseBookingTimes } from './resourceRules.js';
+import { listBookingsForEvents, listStandaloneBookingsForCalendar } from './db/queries/resources.js';
+import { broadcastResources, eventResourcesDto, resourceScopeKeyForTeam, syncEventResources } from './groupwareResources.js';
+import { eventBookingRange, eventResourceDto } from './resourceRules.js';
 import { calendarPermissions, canModifyCalendarEvent, graphemeLength } from './permissions.js';
 
 /**
@@ -204,8 +198,11 @@ function toMemberDto(row, calendar) {
   };
 }
 
-/** 한 일정의 한 회차를 EventOccurrence로. [info]={calendar, access}, [attendees]=[{userId,name}], [booking]=붙은 자원 예약(없으면 null). */
-function toOccurrenceDto({ event, start, end, info, viewerId, attendees, isAttendee, myColor, booking = null }) {
+/**
+ * 한 일정의 한 회차를 EventOccurrence로. [info]={calendar, access}, [attendees]=[{userId,name}], [bookings]=붙은 자원 예약들(회의실 + 장비 —
+ * 없으면 빈 목록 — DTO에는 `resource`(첫 자원, 예전 앱)와 `resources`).
+ */
+function toOccurrenceDto({ event, start, end, info, viewerId, attendees, isAttendee, myColor, bookings = [] }) {
   const access = info.access;
   const detailVisible =
     event.visibility !== 'private' ||
@@ -232,7 +229,7 @@ function toOccurrenceDto({ event, start, end, info, viewerId, attendees, isAtten
     creatorId: event.creatorId ?? null,
     creatorName: event.creatorName ?? null,
     attendees: detailVisible ? attendees : [],
-    resource: detailVisible ? eventResourceDto(booking) : null,
+    ...(detailVisible ? eventResourcesDto(bookings) : { resource: null, resources: [] }),
     color: myColor ?? info.access.member?.color ?? info.calendar.color,
     canEdit: editable,
     canDelete: editable,
@@ -881,16 +878,12 @@ export function createCalendarsRouter(io) {
     if (rec.error) return res.status(400).json({ error: rec.error });
     const attendees = await resolveAttendees(calendar.teamId, f.attendeeIds ?? [], { requesterRole: access.team.role });
     if (attendees.error) return res.status(400).json({ error: attendees.error });
-    // 회의실·자원(그룹웨어) — 반복 없는 일정에만. 시간 검사를 먼저 해 두고, 겹침은 일정을 넣은 뒤 잠금 안에서 본다(겹치면 일정을 지운다).
-    let resource = null;
+    // 회의실·자원(그룹웨어 — 여러 개: 회의실 + 장비) — 반복 없는 일정에만. 겹침·예약 규칙은 일정을 넣은 뒤 한 트랜잭션에서 본다(안 되면 일정을 지운다).
+    const resourceIds = requestedResourceIds(req.body);
+    if (resourceIds === 'invalid') return res.status(400).json({ error: '회의실·자원을 확인하세요.' });
     const bookingRange = eventBookingRange({ startMs: rec.startMs, endMs: rec.endMs, allDay: f.allDay });
-    if (req.body?.resourceId !== undefined && req.body?.resourceId !== null) {
-      if (rec.recurrence) return res.status(400).json({ error: '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.' });
-      const prepared = await prepareEventResource({ teamId: calendar.teamId, resourceId: req.body.resourceId, role: access.team.role });
-      if (prepared.error) return res.status(prepared.status).json({ error: prepared.error });
-      const times = parseBookingTimes(bookingRange.startMs, bookingRange.endMs);
-      if (times.error) return res.status(400).json({ error: `회의실·자원 — ${times.error}` });
-      resource = prepared.resource;
+    if (resourceIds?.length && rec.recurrence) {
+      return res.status(400).json({ error: '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.' });
     }
     if (!allowEventCreate(req, res)) return;
 
@@ -910,20 +903,22 @@ export function createCalendarsRouter(io) {
       },
       { attendeeIds: attendees.ids, colors: f.color ? [{ userId: req.user.sub, color: f.color }] : [] },
     );
-    if (resource) {
-      const booked = await attachEventBooking({
+    if (resourceIds?.length) {
+      const booked = await syncEventResources({
+        io,
         eventId: row.id,
         title: f.title,
-        resource,
+        resourceIds,
         range: bookingRange,
         user: access.team.user,
         teamId: calendar.teamId,
+        role: access.team.role,
       });
       if (booked.error) {
         await deleteEvent(row.id);
         return res.status(booked.status).json({ error: booked.error });
       }
-      await broadcastResources(io, resource.scopeKey);
+      for (const scopeKey of booked.scopes) await broadcastResources(io, scopeKey);
     }
     await notifyChanged(calendar, attendees.ids);
     const dto = await describeEvent(row.id, req.user.sub);
@@ -964,7 +959,7 @@ export function createCalendarsRouter(io) {
       attendees,
       isAttendee,
       myColor: colors.get(event.id),
-      booking: bookings.get(event.id) ?? null,
+      bookings: bookings.get(event.id) ?? [],
     });
   }
 
@@ -1044,11 +1039,10 @@ export function createCalendarsRouter(io) {
     const sp = parseScope(b.scope, b.occurrenceStart, event, { required: true });
     if (sp.error) return res.status(400).json({ error: sp.error });
     let { scope, occurrenceStart, index } = sp;
-    // 회의실·자원 — undefined면 그대로, null이면 빼기, id면 그 자원으로(반복 없는 일정만 — 반복 일정은 애초에 자원이 없다).
-    if (b.resourceId !== undefined && b.resourceId !== null && !isUuid(b.resourceId)) {
-      return res.status(400).json({ error: '회의실·자원을 확인하세요.' });
-    }
-    if (b.resourceId && isRecurring && scope !== 'all') {
+    // 회의실·자원 — resourceIds(목록 — 그대로 맞춤) 또는 예전 resourceId(undefined면 그대로, null이면 빼기, id면 그 하나로). 반복 없는 일정만.
+    const wantedResourceIds = requestedResourceIds(b);
+    if (wantedResourceIds === 'invalid') return res.status(400).json({ error: '회의실·자원을 확인하세요.' });
+    if (wantedResourceIds?.length && isRecurring && scope !== 'all') {
       return res.status(400).json({ error: '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.' });
     }
     // 첫 회차부터 이후 모두 = 전체.
@@ -1178,40 +1172,30 @@ export function createCalendarsRouter(io) {
       // exdates는 원래 회차 시작 ms 목록이라 시리즈가 옮겨지면 뜻이 달라진다 — 시각만 바뀐 경우는 같이 옮기고,
       // 날짜가 바뀌었거나 종일 여부가 바뀌었거나 반복이 없어졌으면 비운다.
       // 회의실·자원 — 일정을 고치기 전에 잡거나 옮겨 둔다(겹치면 일정도 안 바뀐다).
-      const booking = (await listBookingsForEvents([event.id])).get(event.id) ?? null;
-      const nextResourceId = b.resourceId === undefined ? (booking?.resourceId ?? null) : b.resourceId;
-      if (nextResourceId && fin.recurrence) {
+      const existingBookings = (await listBookingsForEvents([event.id])).get(event.id) ?? [];
+      const nextIds = wantedResourceIds === undefined ? existingBookings.map((x) => x.resourceId) : wantedResourceIds;
+      if (nextIds.length && fin.recurrence) {
         return res.status(400).json({
-          error: booking
+          error: existingBookings.length
             ? '회의실·자원을 잡은 일정은 반복할 수 없습니다. 먼저 회의실·자원을 빼세요.'
             : '반복 일정에는 회의실·자원을 잡을 수 없습니다. 회차마다 따로 잡으세요.',
         });
       }
       const range = eventBookingRange({ startMs: fin.startMs, endMs: fin.endMs, allDay: f.allDay });
-      let bookingScope = null;
-      if (!nextResourceId && booking) {
-        await deleteBooking(booking.id);
-        bookingScope = booking.scopeKey;
-      } else if (nextResourceId && (!booking || booking.resourceId !== nextResourceId)) {
-        const prepared = await prepareEventResource({ teamId: calendar.teamId, resourceId: nextResourceId, role: access.team.role });
-        if (prepared.error) return res.status(prepared.status).json({ error: prepared.error });
-        const booked = await attachEventBooking({
-          eventId: event.id,
-          title: f.title,
-          resource: prepared.resource,
-          range,
-          user: access.team.user,
-          teamId: calendar.teamId,
-          existing: booking,
-        });
-        if (booked.error) return res.status(booked.status).json({ error: booked.error });
-        bookingScope = prepared.resource.scopeKey;
-      } else if (booking && (booking.startAt.getTime() !== range.startMs || booking.endAt.getTime() !== range.endMs)) {
-        const moved = await moveEventBooking({ booking, range });
-        if (moved.error) return res.status(moved.status).json({ error: moved.error });
-        bookingScope = booking.scopeKey;
-      }
-      if (bookingScope) await broadcastResources(io, bookingScope);
+      // 붙은 자원들 맞추기 — 빠진 것 지우고, 새것 잡고, 시간이 바뀌면 옮긴다(한 트랜잭션 — 안 되면 일정도 안 바뀐다).
+      const synced = await syncEventResources({
+        io,
+        eventId: event.id,
+        title: f.title,
+        resourceIds: wantedResourceIds,
+        existing: existingBookings,
+        range,
+        user: access.team.user,
+        teamId: calendar.teamId,
+        role: access.team.role,
+      });
+      if (synced.error) return res.status(synced.status).json({ error: synced.error });
+      for (const scopeKey of synced.scopes) await broadcastResources(io, scopeKey);
 
       let exdates = normalizeExdates(event.exdates);
       const delta = fin.startMs - masterStart;
@@ -1254,9 +1238,9 @@ export function createCalendarsRouter(io) {
 
     if (!event.recurrence || scope === 'all' || (scope === 'following' && index === 0)) {
       // 붙은 회의실·자원 예약은 일정과 같이 지워진다(FK cascade) — 예약 현황을 새로 받게 알린다.
-      const booking = (await listBookingsForEvents([event.id])).get(event.id) ?? null;
+      const eventBookings = (await listBookingsForEvents([event.id])).get(event.id) ?? [];
       await deleteEvent(event.id);
-      if (booking) await broadcastResources(io, booking.scopeKey);
+      for (const scopeKey of new Set(eventBookings.map((x) => x.scopeKey))) await broadcastResources(io, scopeKey);
     } else if (scope === 'this') {
       await updateEvent(event.id, { exdates: normalizeExdates([...(event.exdates ?? []), occurrenceStart]) });
     } else {
@@ -1365,7 +1349,7 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
           attendees,
           isAttendee,
           myColor: colors.get(event.id),
-          booking: bookings.get(event.id) ?? null,
+          bookings: bookings.get(event.id) ?? [],
         }),
       );
     }
@@ -1537,4 +1521,19 @@ export async function notifyBirthdayChanged(io, userId) {
       io.to(`user:${id}`).emit('calendar:changed', { teamId, calendarId: 'birthdays' });
     }
   }
+}
+
+/**
+ * 일정 입력의 회의실·자원 — `resourceIds`(목록)가 있으면 그것, 없으면 예전 `resourceId`(null이면 빈 목록 — 빼기), 둘 다 없으면 undefined
+ * (그대로). 모양이 틀리면 'invalid'.
+ */
+function requestedResourceIds(body) {
+  if (body?.resourceIds !== undefined) {
+    if (body.resourceIds === null) return [];
+    if (!Array.isArray(body.resourceIds) || !body.resourceIds.every(isUuid)) return 'invalid';
+    return [...new Set(body.resourceIds)];
+  }
+  if (body?.resourceId === undefined) return undefined;
+  if (body.resourceId === null) return [];
+  return isUuid(body.resourceId) ? [body.resourceId] : 'invalid';
 }

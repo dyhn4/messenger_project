@@ -303,7 +303,11 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
         ),
         WorkSchedulesSection(api: widget.api, ctx: widget.ctx),
         WeeklyHoursSection(api: widget.api, ctx: widget.ctx),
-        ResourcesAdminSection(api: widget.api, changes: widget.changes),
+        ResourcesAdminSection(
+          api: widget.api,
+          changes: widget.changes,
+          serverUrl: widget.session.serverUrl,
+        ),
         GroupwareOptionsSection(
           api: widget.api,
           changes: widget.changes,

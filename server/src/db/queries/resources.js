@@ -1,4 +1,5 @@
-import { and, asc, count, eq, gt, inArray, isNull, lt, ne } from 'drizzle-orm';
+import { and, asc, count, eq, gt, gte, inArray, isNull, lt, lte, ne } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '../client.js';
 import { calendarEvents, resourceBookings, resources } from '../schema.js';
 
@@ -62,6 +63,9 @@ const bookingColumns = {
   eventTitle: calendarEvents.title,
   eventVisibility: calendarEvents.visibility,
   eventCreatorId: calendarEvents.creatorId,
+  status: resourceBookings.status,
+  seriesId: resourceBookings.seriesId,
+  remindedAt: resourceBookings.remindedAt,
   createdAt: resourceBookings.createdAt,
 };
 
@@ -111,11 +115,152 @@ export async function findBooking(id) {
   return row ?? null;
 }
 
-/** 일정마다 붙은 예약 — Map(eventId → 예약). */
+/** 일정마다 붙은 예약들 — Map(eventId → [예약] — 자원 이름순). */
 export async function listBookingsForEvents(eventIds) {
   if (eventIds.length === 0) return new Map();
-  const rows = await bookingQuery().where(inArray(resourceBookings.eventId, eventIds));
-  return new Map(rows.map((r) => [r.eventId, r]));
+  const rows = await bookingQuery()
+    .where(inArray(resourceBookings.eventId, eventIds))
+    .orderBy(asc(resources.sortOrder), asc(resources.name));
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.eventId)) map.set(r.eventId, []);
+    map.get(r.eventId).push(r);
+  }
+  return map;
+}
+
+/**
+ * 일정의 예약 맞추기 — 한 트랜잭션에서 관련 자원 행을 모두 잠그고(id 순 — 교착 없게) [plan]의 자원마다 겹침을 본 뒤, [removeIds] 예약을
+ * 지우고 [plan]을 넣거나(bookingId 없음) 고친다(bookingId — 시간·제목). 이 일정의 다른 예약과는 겹침을 보지 않는다. 새로 잡는데 자원이
+ * 없거나 꺼졌으면 `{ missing: resourceId }`, 겹치면 `{ conflict, resourceId }`, 아니면 `{ rows }`.
+ */
+export function applyEventBookings({ eventId, plan, removeIds = [] }) {
+  return db.transaction(async (tx) => {
+    const ids = [...new Set(plan.map((p) => p.resourceId))].sort();
+    const locked = ids.length
+      ? await tx.select().from(resources).where(inArray(resources.id, ids)).orderBy(asc(resources.id)).for('update')
+      : [];
+    for (const p of plan) {
+      const r = locked.find((x) => x.id === p.resourceId);
+      if (!r || (!p.bookingId && !r.enabled)) return { missing: p.resourceId };
+      const conditions = [
+        eq(resourceBookings.resourceId, p.resourceId),
+        lt(resourceBookings.startAt, p.values.endAt),
+        gt(resourceBookings.endAt, p.values.startAt),
+      ];
+      if (eventId) conditions.push(sql`${resourceBookings.eventId} is distinct from ${eventId}`);
+      const [conflict] = await tx
+        .select()
+        .from(resourceBookings)
+        .where(and(...conditions))
+        .orderBy(asc(resourceBookings.startAt))
+        .limit(1);
+      if (conflict) return { conflict, resourceId: p.resourceId };
+    }
+    if (removeIds.length) await tx.delete(resourceBookings).where(inArray(resourceBookings.id, removeIds));
+    const rows = [];
+    for (const p of plan) {
+      if (p.bookingId) {
+        const [row] = await tx.update(resourceBookings).set(p.values).where(eq(resourceBookings.id, p.bookingId)).returning();
+        rows.push(row);
+      } else {
+        const scopeKey = locked.find((x) => x.id === p.resourceId).scopeKey;
+        const [row] = await tx
+          .insert(resourceBookings)
+          .values({ ...p.values, resourceId: p.resourceId, scopeKey, eventId })
+          .returning();
+        rows.push(row);
+      }
+    }
+    return { rows };
+  });
+}
+
+/**
+ * 반복 예약 넣기 — 자원 행을 잠근 채 회차들([occurrences] `[{ startAt, endAt }]`)의 겹침을 보고, [skipConflicts]면 겹치는 회차만 빼고
+ * 넣는다(아니면 하나라도 겹치면 아무것도 넣지 않음). `{ missing }` | `{ conflicts: [{ startAt, endAt, with }], rows }`.
+ */
+export function reserveSeries({ resourceId, occurrences, values, skipConflicts = false }) {
+  return db.transaction(async (tx) => {
+    const [resource] = await tx.select().from(resources).where(eq(resources.id, resourceId)).for('update');
+    if (!resource || !resource.enabled) return { missing: true };
+    const first = occurrences[0].startAt;
+    const last = occurrences[occurrences.length - 1].endAt;
+    const existing = await tx
+      .select()
+      .from(resourceBookings)
+      .where(and(eq(resourceBookings.resourceId, resourceId), lt(resourceBookings.startAt, last), gt(resourceBookings.endAt, first)));
+    const conflicts = [];
+    const free = [];
+    for (const o of occurrences) {
+      const hit = existing.find((b) => b.startAt < o.endAt && o.startAt < b.endAt);
+      if (hit) conflicts.push({ ...o, with: hit });
+      else free.push(o);
+    }
+    if (conflicts.length && !skipConflicts) return { conflicts, rows: [] };
+    if (free.length === 0) return { conflicts, rows: [] };
+    const rows = await tx
+      .insert(resourceBookings)
+      .values(free.map((o) => ({ ...values, resourceId, scopeKey: resource.scopeKey, startAt: o.startAt, endAt: o.endAt })))
+      .returning();
+    return { conflicts, rows };
+  });
+}
+
+/** 반복 예약 묶음에서 [fromMs] 이후(그 회차 포함)에 시작하는 예약들. */
+export function listSeriesFrom(seriesId, fromMs) {
+  return bookingQuery()
+    .where(and(eq(resourceBookings.seriesId, seriesId), gte(resourceBookings.startAt, new Date(fromMs))))
+    .orderBy(asc(resourceBookings.startAt));
+}
+
+export async function deleteBookings(ids) {
+  if (ids.length) await db.delete(resourceBookings).where(inArray(resourceBookings.id, ids));
+}
+
+/** 승인 기다리는 예약(범위 — 끝나지 않은 것, 시작 순). */
+export function listPendingBookings(scopeKey, nowMs) {
+  return bookingQuery()
+    .where(and(eq(resourceBookings.scopeKey, scopeKey), eq(resourceBookings.status, 'pending'), gt(resourceBookings.endAt, new Date(nowMs))))
+    .orderBy(asc(resourceBookings.startAt));
+}
+
+/** 예약 상태 바꾸기(승인) — 기다리던 것만. 바뀐 줄 | null. */
+export async function confirmBooking(id) {
+  const [row] = await db
+    .update(resourceBookings)
+    .set({ status: 'confirmed' })
+    .where(and(eq(resourceBookings.id, id), eq(resourceBookings.status, 'pending')))
+    .returning();
+  return row ?? null;
+}
+
+/** 시작 전 알림 후보 — 지금부터 [aheadMs] 안에 시작하고 아직 안 알린 잡힌 예약(모든 범위). */
+export function listBookingsStartingSoon(nowMs, aheadMs) {
+  return bookingQuery().where(
+    and(
+      isNull(resourceBookings.remindedAt),
+      eq(resourceBookings.status, 'confirmed'),
+      gt(resourceBookings.startAt, new Date(nowMs)),
+      lte(resourceBookings.startAt, new Date(nowMs + aheadMs)),
+    ),
+  );
+}
+
+/** 알렸다고 적는다 — 아직 안 알린 것만(여러 서버 작업이 겹쳐도 한 번). true면 이번에 적음. */
+export async function claimBookingReminder(id) {
+  const rows = await db
+    .update(resourceBookings)
+    .set({ remindedAt: new Date() })
+    .where(and(eq(resourceBookings.id, id), isNull(resourceBookings.remindedAt)))
+    .returning({ id: resourceBookings.id });
+  return rows.length > 0;
+}
+
+/** 태블릿 화면 열쇠로 자원 찾기. */
+export async function findResourceByDisplayToken(token) {
+  const [row] = await db.select().from(resources).where(eq(resources.displayToken, token)).limit(1);
+  return row ?? null;
 }
 
 export async function countUpcomingBookingsOf({ scopeKey, userId, nowMs }) {

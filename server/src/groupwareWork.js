@@ -31,6 +31,7 @@ import { balanceFor, fail, groupwareContext, scheduleDto } from './groupware.js'
 import { CARRY_OVER_MAX_DAYS, optionsView, parseExpenseCategories, parseLeaveTypesInput, REMINDER_DELAY_MAX } from './groupwareOptions.js';
 import { OVERTIME_GUARDS, parsePayRates, periodsOverlapping, periodSummary, weeklyLimitFor } from './workPolicy.js';
 import { parseOfficeLocation } from './workLocation.js';
+import { BOOKING_REMINDER_MAX } from './resourcePolicy.js';
 import { HOLIDAYS } from './holidays.js';
 import { parseLeaveDates, PLAN_RESPONSE_DAYS, PROMOTION_MESSAGE_MAX, promotionSchedule, promotionStage } from './leavePromotion.js';
 import { notifyGroupwarePush } from './push.js';
@@ -194,6 +195,13 @@ export function createGroupwareWorkRouter(io) {
           if (typeof body.requireFieldLocation !== 'boolean') return fail(res, { error: '외근 위치 필수를 참/거짓으로 보내세요.' });
           patch.requireFieldLocation = body.requireFieldLocation;
           details.push(body.requireFieldLocation ? '외근 위치 필수' : '외근 위치 선택');
+        }
+        // 회의실·자원 예약 시작 전 알림(분 — 0이면 끔).
+        if ('bookingReminderMinutes' in body) {
+          const n = Number(body.bookingReminderMinutes);
+          if (!Number.isInteger(n) || n < 0 || n > BOOKING_REMINDER_MAX) return fail(res, { error: `예약 알림은 0~${BOOKING_REMINDER_MAX}분 전으로 정하세요(0이면 끔).` });
+          patch.bookingReminderMinutes = n;
+          details.push(n ? `예약 알림 ${n}분 전` : '예약 알림 끄기');
         }
         if (Object.keys(patch).length === 0) return fail(res, { error: '바꿀 내용이 없습니다.' });
         const row = await upsertGroupwareOptions(ctx.scopeKey, patch);

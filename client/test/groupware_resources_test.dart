@@ -635,7 +635,7 @@ void main() {
       return (fake, controller);
     }
 
-    testWidgets('빈 자원을 골라 만들면 resourceId — 잡힌 자원은 못 고름, 장소를 채움, 반복이면 막힘', (
+    testWidgets('빈 자원을 골라 만들면 resourceIds — 잡힌 자원은 못 고름, 장소를 채움, 반복이면 막힘', (
       tester,
     ) async {
       final h = _Harness();
@@ -657,7 +657,7 @@ void main() {
       // 편집 창 아래 저장 줄에 가릴 수 있어 단추를 직접 누른다.
       tester
           .widget<OutlinedButton>(
-            find.byKey(const ValueKey('event-resource-pick')),
+            find.byKey(const ValueKey('event-resource-add')),
           )
           .onPressed!();
       await tester.pumpAndSettle();
@@ -678,7 +678,10 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('event-resource-R2')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('event-resource-chip')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('event-resource-chip-R2')),
+        findsOneWidget,
+      );
       expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('event-location')))
@@ -688,12 +691,12 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('event-save')));
       await tester.pumpAndSettle();
-      expect(fake.lastCreateInput!.resourceId, 'R2');
+      expect(fake.lastCreateInput!.resourceIds, ['R2']);
       expect(fake.lastCreateInput!.location, '소회의실');
       await tester.pump(const Duration(seconds: 5));
     });
 
-    testWidgets('고칠 때 — 자원을 안 건드리면 resourceId를 보내지 않음', (tester) async {
+    testWidgets('고칠 때 — 자원을 안 건드리면 resourceIds를 보내지 않음', (tester) async {
       final h = _Harness();
       h.routes['GET /api/groupware/resources'] = (_) =>
           _json([_room('R1', '대회의실')]);
@@ -714,19 +717,22 @@ void main() {
         ),
       );
       final (fake, _) = await open(tester, h, editing: editing);
-      expect(find.byKey(const ValueKey('event-resource-chip')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('event-resource-chip-R1')),
+        findsOneWidget,
+      );
       await tester.enterText(
         find.byKey(const ValueKey('event-title')),
         '고객 미팅 2',
       );
       await tester.tap(find.byKey(const ValueKey('event-save')));
       await tester.pumpAndSettle();
-      expect(fake.lastEventFields, isNot(contains('resourceId')));
+      expect(fake.lastEventFields, isNot(contains('resourceIds')));
       expect(fake.lastEventFields!['title'], '고객 미팅 2');
       await tester.pump(const Duration(seconds: 5));
     });
 
-    testWidgets('고칠 때 — 칩의 X로 빼면 resourceId null', (tester) async {
+    testWidgets('고칠 때 — 칩의 X로 빼면 resourceIds 빈 목록', (tester) async {
       final h = _Harness();
       h.routes['GET /api/groupware/resources'] = (_) =>
           _json([_room('R1', '대회의실')]);
@@ -747,26 +753,29 @@ void main() {
         ),
       );
       final (fake2, _) = await open(tester, h, editing: editing);
-      await _reveal(tester, find.byKey(const ValueKey('event-resource-chip')));
+      await _reveal(
+        tester,
+        find.byKey(const ValueKey('event-resource-chip-R1')),
+      );
       await tester.tap(
         find.descendant(
-          of: find.byKey(const ValueKey('event-resource-chip')),
+          of: find.byKey(const ValueKey('event-resource-chip-R1')),
           matching: find.byIcon(Icons.clear),
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('event-resource-pick')), findsOneWidget);
+      expect(find.byKey(const ValueKey('event-resource-add')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('event-save')));
       await tester.pumpAndSettle();
-      expect(fake2.lastEventFields!.containsKey('resourceId'), isTrue);
-      expect(fake2.lastEventFields!['resourceId'], isNull);
+      expect(fake2.lastEventFields!.containsKey('resourceIds'), isTrue);
+      expect(fake2.lastEventFields!['resourceIds'], isEmpty);
       await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('자원이 없으면(그룹웨어 없는 서버 포함) 칸이 없다', (tester) async {
       final h = _Harness();
       await open(tester, h);
-      expect(find.byKey(const ValueKey('event-resource-pick')), findsNothing);
+      expect(find.byKey(const ValueKey('event-resource-add')), findsNothing);
       expect(find.text('회의실·자원'), findsNothing);
     });
 

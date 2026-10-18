@@ -473,18 +473,23 @@ class Recurrence {
   }
 }
 
-/// 일정에 붙은 회의실·자원 예약(그룹웨어 — 일정 하나에 하나). [kind] 'room' | 'equipment' | 'vehicle'.
+/// 일정에 붙은 회의실·자원 예약(그룹웨어 — 일정 하나에 여러 개: 회의실 + 장비). [kind] 'room' | 'equipment' | 'vehicle', [status]
+/// 'confirmed' | 'pending'(관리자 승인을 기다림).
 class EventResource {
   final String bookingId;
   final String resourceId;
   final String name;
   final String kind;
+  final String status;
   const EventResource({
     required this.bookingId,
     required this.resourceId,
     required this.name,
     this.kind = 'room',
+    this.status = 'confirmed',
   });
+
+  bool get pending => status == 'pending';
 
   static EventResource? fromJson(Object? json) {
     if (json is! Map) return null;
@@ -493,6 +498,7 @@ class EventResource {
       resourceId: json['resourceId'] as String? ?? '',
       name: json['name'] as String? ?? '',
       kind: json['kind'] as String? ?? 'room',
+      status: json['status'] as String? ?? 'confirmed',
     );
   }
 }
@@ -512,8 +518,11 @@ class EventOccurrence {
   final String? description;
   final String? location;
 
-  /// 붙은 회의실·자원(일정) 또는 그 예약의 자원(회의실 예약). 없으면 null.
+  /// 붙은 회의실·자원(일정) 또는 그 예약의 자원(회의실 예약). 없으면 null. 여러 개면 첫 것.
   final EventResource? resource;
+
+  /// 붙은 회의실·자원 모두(회의실 + 장비 — 예전 서버면 [resource] 하나).
+  final List<EventResource> resources;
 
   /// 원본 epoch ms. 종일이면 UTC 자정 기준 날짜이므로 직접 쓰지 말고 [firstDay]/[lastDay]를 쓴다.
   final int start;
@@ -543,6 +552,7 @@ class EventOccurrence {
     this.description,
     this.location,
     this.resource,
+    this.resources = const [],
     required this.start,
     required this.end,
     this.allDay = false,
@@ -571,6 +581,12 @@ class EventOccurrence {
       description: json['description'] as String?,
       location: json['location'] as String?,
       resource: EventResource.fromJson(json['resource']),
+      resources: json['resources'] is List
+          ? [
+              for (final r in json['resources'] as List)
+                ?EventResource.fromJson(r),
+            ]
+          : [?EventResource.fromJson(json['resource'])],
       start: start,
       end: (json['end'] as num).toInt(),
       allDay: allDay,
@@ -655,6 +671,7 @@ class EventOccurrence {
         description: description,
         location: location,
         resource: resource,
+        resources: resources,
         start: start ?? this.start,
         end: end ?? this.end,
         allDay: allDay,
@@ -777,8 +794,11 @@ class EventInput {
   /// 내 개인 색('#RRGGBB'). null이면 보내지 않아 캘린더 색을 그대로 따른다.
   final String? color;
 
-  /// 함께 잡을 회의실·자원(그룹웨어) — 반복 없는 일정만. null이면 보내지 않는다.
+  /// 함께 잡을 회의실·자원(그룹웨어) — 반복 없는 일정만. null이면 보내지 않는다. 예전 한 개짜리 — [resourceIds]가 있으면 그것을 쓴다.
   final String? resourceId;
+
+  /// 함께 잡을 회의실·자원들(회의실 + 장비, 5개까지) — 보내면 그대로 맞춘다(빈 목록이면 모두 뺌). null이면 보내지 않는다.
+  final List<String>? resourceIds;
 
   const EventInput({
     required this.title,
@@ -792,6 +812,7 @@ class EventInput {
     this.recurrence,
     this.color,
     this.resourceId,
+    this.resourceIds,
   });
 
   Map<String, dynamic> toJson() => {
@@ -808,7 +829,10 @@ class EventInput {
       weekdayShift: allDay ? 0 : kstWeekdayShift(start),
     ),
     'color': ?color,
-    'resourceId': ?resourceId,
+    if (resourceIds != null)
+      'resourceIds': resourceIds
+    else
+      'resourceId': ?resourceId,
   };
 }
 

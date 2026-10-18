@@ -474,6 +474,9 @@ class GroupwareApi {
     ({double lat, double lng, int radius})? officeLocation,
     bool clearOfficeLocation = false,
     bool? requireFieldLocation,
+
+    /// 회의실·자원 예약 시작 몇 분 전에 알릴지(0이면 끔).
+    int? bookingReminderMinutes,
   }) async => GroupwareOptions.fromJson(
     (await _api.requestJson(
               'PATCH',
@@ -499,6 +502,7 @@ class GroupwareApi {
                     'radius': officeLocation.radius,
                   },
                 'requireFieldLocation': ?requireFieldLocation,
+                'bookingReminderMinutes': ?bookingReminderMinutes,
               }),
             )
             as Map)
@@ -817,8 +821,116 @@ class GroupwareApi {
         .cast<String, dynamic>(),
   );
 
-  Future<void> cancelBooking(String id) =>
-      _api.requestJson('DELETE', '/api/groupware/bookings/$id${_query()}');
+  /// 예약 취소 — [series]면 반복 예약의 이 회차와 그 뒤 회차 모두.
+  Future<void> cancelBooking(String id, {bool series = false}) =>
+      _api.requestJson(
+        'DELETE',
+        '/api/groupware/bookings/$id${_query({'series': series ? '1' : null})}',
+      );
+
+  /// 반복 예약 — 매주([everyWeeks] 1) 또는 2주마다 같은 시간 [repeatWeeks]회. [skipConflicts]면 겹치는 회차만 빼고 잡는다(아니면 하나라도
+  /// 겹치면 409). 승인이 필요한 자원이면 '승인 기다림'으로 잡힌다.
+  Future<SeriesBookingResult> bookRepeating({
+    required String resourceId,
+    required int start,
+    required int end,
+    String? title,
+    int repeatWeeks = 1,
+    int everyWeeks = 1,
+    bool skipConflicts = false,
+  }) async {
+    final json =
+        (await _api.requestJson(
+                  'POST',
+                  '/api/groupware/bookings',
+                  body: _body({
+                    'resourceId': resourceId,
+                    'start': start,
+                    'end': end,
+                    'title': ?title,
+                    'repeatWeeks': repeatWeeks,
+                    'everyWeeks': everyWeeks,
+                    'skipConflicts': skipConflicts,
+                  }),
+                )
+                as Map)
+            .cast<String, dynamic>();
+    return (
+      first: ResourceBooking.fromJson(json),
+      created: (json['created'] as num?)?.toInt() ?? 1,
+      skipped: [
+        for (final s in json['skipped'] as List? ?? const [])
+          if (s is Map)
+            (
+              start: (s['start'] as num).toInt(),
+              end: (s['end'] as num).toInt(),
+              conflict: s['conflict'] as String? ?? '',
+            ),
+      ],
+    );
+  }
+
+  /// 회의실 추천 — [start]~[end](ms)에 비어 있고 내가 예약할 수 있고 수용 인원이 [attendees] 이상인 것, 남는 자리가 적은 것부터.
+  /// [eventId]의 예약은 빈 것으로 본다(일정 편집 중).
+  Future<List<GroupwareResource>> suggestResources({
+    required int start,
+    required int end,
+    int attendees = 0,
+    String kind = 'room',
+    String? eventId,
+  }) async => [
+    for (final r in await _getList(
+      '/api/groupware/resources/suggest${_query({'start': '$start', 'end': '$end', 'attendees': '$attendees', 'kind': kind, 'eventId': eventId})}',
+    ))
+      GroupwareResource.fromJson(r),
+  ];
+
+  /// 사용 통계(관리자) — [from]~[to](ms, 기본 지난 30일).
+  Future<List<ResourceStatsRow>> resourceStats({int? from, int? to}) async {
+    final m = await _getMap(
+      '/api/groupware/resources/stats${_query({'from': from?.toString(), 'to': to?.toString()})}',
+    );
+    return [
+      for (final r in m['resources'] as List? ?? const [])
+        ResourceStatsRow.fromJson((r as Map).cast<String, dynamic>()),
+    ];
+  }
+
+  /// 승인 기다리는 예약 — 관리자는 범위 전부, 아니면 내가 승인할 사람인 자원의 것.
+  Future<List<ResourceBooking>> pendingBookings() async => [
+    for (final b in await _getList(
+      '/api/groupware/bookings/pending${_query()}',
+    ))
+      ResourceBooking.fromJson(b),
+  ];
+
+  /// 승인([approve] true)·거절 — [series]면 반복 예약의 이 회차와 그 뒤 기다리는 회차 모두, 거절은 [reason]을 잡은 사람에게 알린다.
+  Future<void> decideBooking(
+    String id, {
+    required bool approve,
+    String? reason,
+    bool series = false,
+  }) async {
+    await _api.requestJson(
+      'POST',
+      '/api/groupware/bookings/$id/${approve ? 'approve' : 'reject'}',
+      body: _body({'reason': ?reason, 'series': series}),
+    );
+  }
+
+  /// 회의실 앞 태블릿 화면 켜기(주소를 새로 — 예전 주소는 못 씀)·끄기(관리자).
+  Future<GroupwareResource> setResourceDisplay(
+    String id, {
+    required bool enabled,
+  }) async => GroupwareResource.fromJson(
+    (await _api.requestJson(
+              enabled ? 'POST' : 'DELETE',
+              '/api/groupware/resources/$id/display${enabled ? '' : _query()}',
+              body: enabled ? _body() : null,
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
 
   /// 한 달 휴가 달력 — [month] 'YYYY-MM'.
   Future<LeaveMonth> leaveMonth(String month) async => LeaveMonth.fromJson(

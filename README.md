@@ -1387,13 +1387,35 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   (10/20 10:00~11:00 홍길동)"이 창에 보입니다. 끝과 시작이 맞닿는 것(10~11시, 11~12시)은 겹침이 아닙니다. 지난 시간·180일 넘게 앞은 잡을 수 없고,
   한 사람이 범위에 잡아 둘 수 있는 앞으로의 예약은 100건입니다.
 - **캘린더와 붙이기** — 일정 편집 창의 **회의실·자원 잡기**가 그 일정 시간의 빈 여부와 함께 자원을 보여 주고(잡힌 자원은 누가 잡았는지와 함께 못 고름),
-  고르면 장소가 비어 있을 때 자원 이름으로 채웁니다. 저장하면 일정과 예약이 함께 생기고(겹치면 일정도 만들지 않음), 일정 시간을 옮기면 예약도 옮겨지며
+  고르면 장소가 비어 있을 때 자원 이름으로 채웁니다. **한 일정에 5개까지**(회의실 + 장비) 붙일 수 있고, 저장하면 일정과 예약이 한 번에 생기고(하나라도
+  겹치거나 규칙에 걸리면 일정도 만들지 않음), 일정 시간을 옮기면 예약도 옮겨지며
   (겹치면 409 — 일정도 그대로), 칩의 ✕로 빼거나 다른 자원으로 바꾸고, 일정을 지우면 예약도 지워집니다. 종일 일정은 그날 0시부터 다음 날 0시까지를
   잡습니다. **반복 일정에는 붙일 수 없습니다**(회차마다 따로 — 자원을 잡은 일정을 반복으로 바꾸려면 먼저 뺌). 예약 탭에서 일정 예약은 일정 제목으로
   보이고 비공개 일정이면 잡은 사람·만든 사람이 아닌 사람에게 "비공개 일정"으로 보이며, 거기서 취소하면 일정은 남고 회의실만 빠집니다. 일정 상세에
   회의실 줄이 있습니다.
 - **캘린더의 "회의실 예약"** — 예약 탭에서 바로 잡은 내 예약(일정에 안 붙은 것)은 캘린더의 내장 구독 캘린더 **"회의실 예약"**(보라)에 시간 일정으로
   보입니다(정회원 이상, 숨길 수 있음 — 바꾸기·취소는 예약 탭에서). 일정에 붙인 예약은 그 일정으로 이미 보이므로 따로 나오지 않습니다.
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0132`)가 돌아야 아래 기능이 켜집니다. 규칙은 `server/src/resourcePolicy.js`.
+
+- **반복 예약** — 예약 창의 **반복**에서 매주·2주마다 같은 시간을 2~26회 잡습니다(180일 앞까지, 회차마다 한 줄 — 같은 묶음). 한 회차라도 겹치면 잡지
+  않고 몇 회가 겹치는지 알려 주며, **겹치는 날 빼고 잡기**를 고르면 나머지만 잡고 건너뛴 날을 보여 줍니다. 취소할 때 "이 회차만 / 이 회차와 이후 모두"를
+  고릅니다. 앞으로의 예약 100건에 회차마다 셉니다.
+- **관리자 승인이 필요한 자원** — 자원마다 **승인 필요**와 **승인할 사람**(비우면 그룹웨어 관리자)을 정합니다. 그 자원의 예약은 **승인 대기**로 잡혀(그 시간은
+  이미 막힘) 승인할 사람에게 알림이 가고, 예약 탭의 **승인 기다리는 예약**에서 승인·거절합니다(반복이면 이후 모두 한 번에, 거절 사유는 잡은 사람에게
+  알림 — 거절하면 예약이 지워짐). 승인할 사람·관리자가 잡으면 바로 잡힙니다. 일정에 붙인 자원도 같고 일정 상세에 "승인 대기"로 보입니다.
+- **자원마다 예약 제한** — **예약할 수 있는 사람**(비우면 모두 — 그룹웨어 관리자는 늘 됨), **요일**·**시간대**(예: 평일 09:00~18:00), **한 번에 쓸 수 있는
+  시간**(15분~7일)을 정합니다. 예약 탭·일정 편집 모두 서버가 막고(403과 까닭), 예약 창에 그 규칙이 보입니다.
+- **회의실 추천** — 예약 창·일정 편집 창의 **추천**은 참석자 수(일정은 참석자 + 나)를 넣으면 그 시간에 비어 있고 내가 예약할 수 있고 수용 인원이 맞는
+  회의실을 **남는 자리가 적은 것부터** 보여 줍니다(수용 인원을 모르는 방은 뒤에, 승인 필요는 표시).
+- **사용 통계** — 관리 쪽 **사용 통계**에서 기간(지난 7·30·90일)마다 자원별 건수·쓴 시간·**이용률**(쓴 시간 ÷ 쓸 수 있던 시간 — 자원의 요일·시간대, 없으면
+  평일 09:00~18:00)·쓴 사람 수·많이 쓴 사람·요일별 건수를 봅니다. 승인 대기는 세지 않습니다.
+- **예약 시작 전 알림** — 범위 설정의 **예약 알림**(끔·5~60분 전, 기본 10분)대로 잡은 사람에게 푸시와 앱 안 알림이 한 번 갑니다(서버가 1분마다 확인 —
+  승인 대기는 알리지 않음).
+- **회의실 앞 태블릿 화면** — 관리자가 자원마다 **태블릿 화면**을 켜면 비밀 주소(`/room-display/<열쇠>` — QR과 복사)가 생깁니다. 태블릿 브라우저로 열면
+  로그인 없이 **사용 중 / 비어 있음**(빨강·초록 — 이어진 예약은 끝까지), 지금 예약의 제목·잡은 사람·시간, 오늘 남은 예약을 크게 보여 주고 30초마다 새로
+  받습니다(비공개 일정은 제목을 가림, 한국어·영어). **태블릿 바로 예약**을 켜면 비어 있을 때 15·30·60분을 그 자리에서 잡습니다("현장 예약" — 승인이 필요한
+  자원은 안 됨). 주소를 다시 만들면 예전 주소는 못 씁니다 — 주소를 아는 사람은 누구나 볼 수 있으니 공유하지 마세요(`server/src/roomDisplay.js`).
 
 #### 설문
 
@@ -1481,9 +1503,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **회의실·자원 예약 후속** — 자원 관리·시간표·겹침 막기·캘린더 일정에 붙이기·내장 "회의실 예약" 캘린더는 들어갔습니다([회의실·자원 예약](#회의실자원-예약)).
-  남은 것: 반복 예약(매주 같은 시간 — 지금은 회차마다), 관리자 승인이 필요한 자원, 자원마다 예약할 수 있는 사람·시간대 제한, 사용 통계, 참석자
-  수에 맞는 회의실 추천, 일정 하나에 여러 자원(회의실+장비), 예약 시작 전 알림, 회의실 앞 태블릿 화면.
 - **휴가 달력 후속** — 휴가 탭의 달력 보기와 캘린더의 내장 "출장" 캘린더는 들어갔습니다. 남은 것: 부서별로 거르기, 달력에서 날을 끌어
   바로 휴가 신청하기.
 - **웹메일 후속** — 메일 계정 연결(IMAP/SMTP)로 읽기·쓰기·답장·전달·첨부·새 메일 알림은 들어갔습니다([웹메일](#웹메일)). 남은 것: HTML 메일을
@@ -1651,6 +1670,8 @@ messenger_project/
 │  │  ├─ approvalFinalRules.js    전결 규정(종류·금액마다 전결하는 직책) — 순수 규칙
 │  │  ├─ workPolicy.js            주 52시간 지키기·탄력/선택근무 정산 기간·가산 수당 — 순수 규칙
 │  │  ├─ workLocation.js          출퇴근 위치(GPS) 확인·사무실 거리 — 순수 규칙
+│  │  ├─ resourcePolicy.js        회의실·자원 예약 규칙·반복·승인·추천·통계·알림·태블릿 화면 — 순수 규칙
+│  │  ├─ roomDisplay.js           회의실 앞 태블릿 화면(로그인 없이 비밀 주소 — HTML·상태·바로 예약)
 │  │  ├─ approvalSeal.js          결재 전자서명(문서 지문·칸 서명·검증) — 순수 규칙 / approvalSealKeys.js(서버 서명 키)
 │  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
 │  │  │                           groupwareScope.js(팀마다/회사 전체)·approvalForms.js(결재 양식)가 순수 규칙(단위 테스트 대상)
@@ -2597,12 +2618,18 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/groupware/resources` | 자원 목록 `[{ id, kind: 'room'\|'equipment'\|'vehicle', kindLabel, name, location, capacity, description, enabled, sortOrder }]`(관리자가 아니면 켜진 것만). `?from=&to=`(ms, 31일 안)를 주면 자원마다 그 시간에 잡힌 첫 예약 `busy`(없으면 null — `eventId`를 주면 그 일정의 예약은 뺌) |
-| POST / PATCH / DELETE | `/api/groupware/resources` · `/:id` | (관리자) 자원 만들기 `{ kind?, name, location?, capacity?, description? }` → 201(같은 이름 409, 범위마다 100개) / 고치기(보낸 칸만, `enabled`·`sortOrder` 포함) / 지우기(예약도 지움 — 앞으로의 예약을 잡은 사람에게 알림). 바뀌면 소켓 `groupware:changed`(`resources: true`) |
-| GET | `/api/groupware/bookings` | 예약 현황 `?from=&to=`(ms, 31일 안) `[{ id, resourceId, resourceName, resourceKind, title, userId, userName, teamId, start, end, eventId, mine, canCancel }]` — 일정 예약은 일정 제목(비공개 일정이면 잡은 사람·만든 사람 말고는 "비공개 일정") |
+| GET | `/api/groupware/resources` | 자원 목록 `[{ id, kind: 'room'\|'equipment'\|'vehicle', kindLabel, name, location, capacity, description, enabled, sortOrder, requiresApproval, approverIds, allowedUserIds, availableDays, availableFrom, availableTo, maxMinutes, displayQuickBook, displayPath(관리자만), canBook, needsApproval }]`(관리자가 아니면 켜진 것만). `?from=&to=`(ms, 31일 안)를 주면 자원마다 그 시간에 잡힌 첫 예약 `busy`(없으면 null — `eventId`를 주면 그 일정의 예약은 뺌) |
+| GET | `/api/groupware/resources/suggest` | 회의실 추천 `?start=&end=(ms)&attendees=&kind=&eventId=` → 비어 있고 예약할 수 있고 수용 인원이 맞는 자원(남는 자리 `spare`가 적은 것부터) |
+| GET | `/api/groupware/resources/stats` | (관리자) 사용 통계 `?from=&to=`(ms, 기본 30일) → `{ resources: [{ resourceId, name, count, minutes, availableMinutes, utilization, userCount, topUsers, byWeekday }] }` |
+| POST / DELETE | `/api/groupware/resources/:id/display` | (관리자) 태블릿 화면 켜기(열쇠를 새로 — 예전 주소는 못 씀)·끄기 → 자원(`displayPath`) |
+| GET / POST | `/room-display/:token` · `/state` · `/quick` | (로그인 없음) 태블릿 화면 HTML / 지금 상태 `{ name, current, upcoming, freeUntil, busyUntil, quickBook }` / 바로 예약 `{ minutes: 15\|30\|60 }` |
+| POST / PATCH / DELETE | `/api/groupware/resources` · `/:id` | (관리자) 자원 만들기 `{ kind?, name, location?, capacity?, description?, requiresApproval?, approverIds?, allowedUserIds?, availableDays?, availableFrom?, availableTo?, maxMinutes?, displayQuickBook? }` → 201(같은 이름 409, 범위마다 100개) / 고치기(보낸 칸만, `enabled`·`sortOrder` 포함) / 지우기(예약도 지움 — 앞으로의 예약을 잡은 사람에게 알림). 바뀌면 소켓 `groupware:changed`(`resources: true`) |
+| GET | `/api/groupware/bookings` | 예약 현황 `?from=&to=`(ms, 31일 안) `[{ id, resourceId, resourceName, resourceKind, title, userId, userName, teamId, start, end, eventId, status: 'confirmed'\|'pending', seriesId, mine, canCancel }]` — 일정 예약은 일정 제목(비공개 일정이면 잡은 사람·만든 사람 말고는 "비공개 일정") |
 | GET | `/api/groupware/bookings/mine` | 내가 잡은 앞으로의 예약(50개) |
-| POST | `/api/groupware/bookings` | 예약하기 `{ resourceId, start, end, title? }`(ms) → 201. 겹치면 409("이미 예약된 시간입니다 (… 이름)"), 지난 시간·7일 넘음·180일 넘게 앞은 400, 끈 자원 409, 준회원 403, 앞으로의 예약 100건 넘음 429 |
-| DELETE | `/api/groupware/bookings/:id` | 취소 — 잡은 사람이나 관리자(남의 것이면 잡은 사람에게 알림·감사 로그). 일정 예약이면 일정은 남고 회의실만 빠짐 |
+| GET | `/api/groupware/bookings/pending` | 승인 기다리는 예약(관리자는 범위 전부, 아니면 내가 승인할 사람인 자원) |
+| POST | `/api/groupware/bookings/:id/approve` \| `reject` | 승인·거절 `{ reason?, series? }`(그 자원의 승인할 사람·관리자 — 거절은 지움, 잡은 사람에게 알림) |
+| POST | `/api/groupware/bookings` | 예약하기 `{ resourceId, start, end, title?, repeatWeeks?(1~26), everyWeeks?(1\|2), skipConflicts? }`(ms) → 201(반복이면 첫 회차에 `created`·`skipped`). 예약 규칙에 걸리면 403, 승인 필요 자원은 `status: 'pending'`. 겹치면 409("이미 예약된 시간입니다 (… 이름)"), 지난 시간·7일 넘음·180일 넘게 앞은 400, 끈 자원 409, 준회원 403, 앞으로의 예약 100건 넘음 429 |
+| DELETE | `/api/groupware/bookings/:id` | 취소(`?series=1`이면 반복 예약의 이 회차와 이후 모두) — 잡은 사람이나 관리자(남의 것이면 잡은 사람에게 알림·감사 로그). 일정 예약이면 일정은 남고 회의실만 빠짐 |
 | GET / POST | `/api/groupware/surveys` | **설문** 목록 `{ items: [{ id, title, creatorName, anonymous, resultVisibility, audience, questionCount, closesAt, closed, responseCount, targetCount, responded, pending }], pendingCount }`(응답할 것이 앞) / 만들기 `{ title, description?, questions: [{ kind: single\|multiple\|text\|rating, title, required, options? }], anonymous?, resultVisibility?: creator\|respondents\|all, audience?: all\|users, targetIds?, closesAt? }` — 정회원 이상, 대상에게 푸시 |
 | GET / DELETE | `/api/groupware/surveys/:id` | 설문 하나(`questions`·`myAnswers`·`canRespond`·`canManage`·`canViewResults`) / 지우기(만든 사람·관리자) |
 | PUT | `/api/groupware/surveys/:id/response` | 응답하기·고치기 `{ answers: { 문항 id: 보기 id \| [보기 id] \| 글 \| 1~5 } }` → `{ first }` — 대상·마감 전, 필수 문항 검사 |
@@ -2781,12 +2808,12 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `leave_adjustments` | 연차 조정(반일 단위 ± — 0.25 = 1시간 단위일 수 있음, 사유, 그 연차 기간의 시작일), `kind`(`manual`\|`carry` 이월) |
 | `work_wages` | 통상시급 — (`scope_key`, `user_id`)마다 `hourly_wage`(원 — 가산 수당 계산용) |
 | `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, `clock_in_mode`(`office`\|`field`\|`remote` — 외근이면 장소는 `note`), 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`), `breaks` jsonb(누른 휴게 `[{ startAt, endAt }]`), `clock_in_location`·`clock_out_location`(`{ lat, lng, accuracy, distance, outside }`). 지우지 않음 |
-| `groupware_options` | 그룹웨어 범위(`scope_key`)마다의 설정 — `leave_types` jsonb(기본 종류의 이름·켜고 끄기와 더한 종류 `c_…`, null이면 기본), `expense_categories` jsonb(null이면 기본), `clock_in_reminder`·`clock_out_reminder`·`reminder_delay_minutes`(기본 10), `overtime_guard`, `leave_basis`·`fiscal_start_month`, `carry_over_max_days`, `pay_rates` jsonb, `office_location` jsonb·`require_field_location` |
+| `groupware_options` | 그룹웨어 범위(`scope_key`)마다의 설정 — `leave_types` jsonb(기본 종류의 이름·켜고 끄기와 더한 종류 `c_…`, null이면 기본), `expense_categories` jsonb(null이면 기본), `clock_in_reminder`·`clock_out_reminder`·`reminder_delay_minutes`(기본 10), `overtime_guard`, `leave_basis`·`fiscal_start_month`, `carry_over_max_days`, `pay_rates` jsonb, `office_location` jsonb·`require_field_location`, `booking_reminder_minutes`(회의실·자원 예약 시작 전 알림 — 0이면 끔, 기본 10) |
 | `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무), `period_type`(`flex2w`\|`flex3m`\|`select`)·`period_start`·`period_months`(탄력·선택근무 정산 기간) |
 | `attendance_reminders` | 보낸 출근·퇴근 알림(PK `scope_key`, `user_id`, `work_date`, `kind` — 하루 한 번만 보내려고 먼저 넣고 보냄) |
-| `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order` |
+| `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order`, 예약 규칙 `requires_approval`·`approver_ids`·`allowed_user_ids`·`available_days`·`available_from`·`available_to`·`max_minutes`, 태블릿 화면 `display_token`(unique)·`display_quick_book` |
 | `mail_accounts` | 웹메일 계정(사람마다 하나 — `user_id` unique, 탈퇴하면 cascade). `email`·`display_name`·`provider`(미리 정한 서비스 키 또는 `custom`), IMAP·SMTP `*_host`·`*_port`·`*_security`(`ssl`\|`starttls`), `username`, `password_enc`(암호화 — 내보내지 않음), `notify`(새 메일 알림), 새 메일 기준 `last_uid_next`·`last_uid_validity`(받은편지함 UIDNEXT·UIDVALIDITY — 연결 값이 바뀌면 지움), `last_checked_at`, 로그인 실패 `last_error`·`last_error_at`(30분 동안 다시 확인 안 함). 메일 본문은 두지 않는다 |
-| `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — unique, 일정을 지우면 cascade). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`) |
+| `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — 일정 하나에 여러 줄(자원마다), 일정을 지우면 cascade), `status`(`confirmed`\|`pending` 승인 대기), `series_id`(반복 예약 묶음), `reminded_at`(시작 전 알림). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`)·`event_id`·`series_id` |
 | `surveys` / `survey_responses` | 그룹웨어 설문 — `scope_key`, `questions`(jsonb), `anonymous`, `result_visibility`, `audience`·`target_ids`, `closes_at`·`closed_at`, `reminded_at`(독촉 1시간 제한) / 응답(`survey_id`, `user_id` PK, `answers` jsonb) |
 | `work_reports` / `work_report_comments` / `work_report_reads` | 업무일지 — (`scope_key`, `user_id`, `kind`, `period_start`) 유일, `done`·`plan`·`issues` / 댓글 / 검토자가 처음 읽은 시각 |
 | `drive_folders` / `drive_files` / `drive_file_versions` | 팀 공유 드라이브 — 폴더(`parent_id`, 휴지통 `deleted_at`) / 파일(지금 판 `version`·`file_path`·`size`·`mime_type`, 휴지통 `deleted_at`) / 판 기록(`file_id`, `version` 유일, 올린 사람·메모) |

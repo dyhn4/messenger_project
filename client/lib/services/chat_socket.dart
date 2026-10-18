@@ -624,6 +624,8 @@ class ChatSocket {
   final _approvalNotificationSyncController = StreamController<int>.broadcast();
   final _attendanceReminderController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _resourceReminderController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _mailNewController = StreamController<Map<String, dynamic>>.broadcast();
   final _mailChangedController = StreamController<void>.broadcast();
   final _draftChangedController =
@@ -685,6 +687,11 @@ class ChatSocket {
   /// 출근·퇴근 알림(서버 groupwareWork.js runAttendanceReminders — attendance:reminder) — `{kind: 'in'|'out', title, body, teamId}`.
   Stream<Map<String, dynamic>> get attendanceReminders =>
       _attendanceReminderController.stream;
+
+  /// 회의실·자원 예약 시작 전 알림(서버 groupwareResources.js runBookingReminders — resource:reminder) —
+  /// `{bookingId, resourceName, start, title, body, scopeKey, teamId}`.
+  Stream<Map<String, dynamic>> get resourceReminders =>
+      _resourceReminderController.stream;
 
   /// 새 메일(서버 webmail.js 새 메일 확인 — mail:new) — `{ count, unseen, latest: [{ from, subject }] }`.
   Stream<Map<String, dynamic>> get mailNew => _mailNewController.stream;
@@ -1070,6 +1077,11 @@ class ChatSocket {
     socket.on('attendance:reminder', (data) {
       if (data is Map) {
         _attendanceReminderController.add(Map<String, dynamic>.from(data));
+      }
+    });
+    socket.on('resource:reminder', (data) {
+      if (data is Map) {
+        _resourceReminderController.add(Map<String, dynamic>.from(data));
       }
     });
     socket.on(

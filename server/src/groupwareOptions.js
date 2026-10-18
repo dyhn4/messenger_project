@@ -149,5 +149,7 @@ export function optionsView(row) {
     payRates: payRatesOf(row?.payRates ?? null),
     officeLocation: row?.officeLocation ?? null,
     requireFieldLocation: !!row?.requireFieldLocation,
+    // 회의실·자원 예약 시작 몇 분 전에 알릴지(0이면 끔 — groupwareResources.js).
+    bookingReminderMinutes: row?.bookingReminderMinutes ?? 10,
   };
 }

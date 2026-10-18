@@ -103,7 +103,8 @@ import { isMailEnabled } from './mailer.js';
 import { createGroupwareRouter } from './groupware.js';
 import { startMentionDigestJob } from './mentionDigest.js';
 import { createGroupwareWorkRouter, startAttendanceReminderJob } from './groupwareWork.js';
-import { createGroupwareResourcesRouter } from './groupwareResources.js';
+import { createGroupwareResourcesRouter, startBookingReminderJob } from './groupwareResources.js';
+import { createRoomDisplayRouter } from './roomDisplay.js';
 import { createGroupwareSurveysRouter } from './groupwareSurveys.js';
 import { createGroupwareReportsRouter } from './groupwareReports.js';
 import { createDriveRouter } from './drive.js';
@@ -181,6 +182,8 @@ app.use('/auth', createWebauthnRouter());
 app.use('/api/v1', createPublicApiRouter(io));
 // OAuth 앱 — 승인 페이지(/oauth/authorize)·결과 묻기·토큰 받기는 로그인 없이(oauth.js — 사람은 앱에서 코드를 넣어 승인한다).
 app.use(createOAuthPublicRouter());
+// 회의실 앞 태블릿 화면(roomDisplay.js) — 로그인 없이 자원마다의 비밀 주소로 연다.
+app.use(createRoomDisplayRouter(io));
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', uploadErrorHandler);
 app.use('/api', requireAuth, createFileResignRouter());
@@ -362,6 +365,8 @@ startRetentionJob();
 startMentionDigestJob();
 // 출근·퇴근 알림 — 알림을 켠 그룹웨어 범위에서 5분마다(groupwareWork.js).
 startAttendanceReminderJob(io);
+// 회의실·자원 예약 시작 전 알림(1분마다 — groupwareResources.js).
+startBookingReminderJob(io);
 startMailCheckJob(io);
 startDraftCleanupJob();
 // DDNS(DuckDNS) 자동 갱신 — 관리자 콘솔 "DDNS" 탭에서 켰을 때만 5분마다 공인 IP를 알린다(ddns.js).

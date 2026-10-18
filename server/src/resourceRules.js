@@ -138,6 +138,9 @@ export function bookingDto(b, { viewerId, isManager = false }) {
     start: ms(b.startAt),
     end: ms(b.endAt),
     eventId: b.eventId ?? null,
+    // 'confirmed' | 'pending'(승인을 기다림 — resourcePolicy.js), 반복 예약 묶음.
+    status: b.status ?? 'confirmed',
+    seriesId: b.seriesId ?? null,
     mine,
     canCancel: mine || isManager,
   };
@@ -145,4 +148,4 @@ export function bookingDto(b, { viewerId, isManager = false }) {
 
 /** 일정 DTO의 `resource` 칸(calendars.js toOccurrenceDto). */
 export const eventResourceDto = (b) =>
-  b ? { bookingId: b.id, resourceId: b.resourceId, name: b.resourceName, kind: b.resourceKind } : null;
+  b ? { bookingId: b.id, resourceId: b.resourceId, name: b.resourceName, kind: b.resourceKind, status: b.status ?? 'confirmed' } : null;

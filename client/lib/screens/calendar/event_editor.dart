@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/app_user.dart';
 import '../../models/calendar.dart';
+import '../../models/groupware_resources.dart' show GroupwareResource;
 import '../../models/team.dart' show AccountRole;
 import '../../services/api_client.dart' show ApiException;
 import '../../services/calendar_controller.dart';
@@ -83,6 +84,23 @@ enum _Repeat { none, daily, weekly, monthly, yearly, custom }
 
 enum _RepeatEnd { never, until, count }
 
+/// 편집 창에 붙인 회의실·자원 하나 — 고르기·추천 창에서 고른 것([needsApproval]: 내가 잡으면 관리자 승인을 기다림)이거나
+/// 고치는 일정에 원래 붙어 있던 예약([pending]: 이미 승인 대기로 잡혀 있음). [kind]는 'room' | 'equipment' | 'vehicle'.
+class _PickedResource {
+  final String id;
+  final String name;
+  final String kind;
+  final bool needsApproval;
+  final bool pending;
+  const _PickedResource({
+    required this.id,
+    required this.name,
+    this.kind = 'room',
+    this.needsApproval = false,
+    this.pending = false,
+  });
+}
+
 /// 일정 만들기·수정 폼. 대화상자([asDialog])와 전체 화면 둘 다 같은 몸통을 쓴다.
 class EventEditor extends StatefulWidget {
   final Session session;
@@ -129,10 +147,11 @@ class EventEditorState extends State<EventEditor> {
   List<AppUser>? _members;
   bool _membersLoading = false;
 
-  /// 함께 잡을 회의실·자원(그룹웨어 — 반복 없는 일정만). [_hasResources]가 false면(자원이 없거나 그룹웨어가 없는 서버) 칸을 숨긴다.
-  String? _resourceId;
-  String? _resourceName;
-  String? _initResourceId;
+  /// 함께 잡을 회의실·자원들(그룹웨어 — 반복 없는 일정만, 회의실 + 장비 [kEventResourcesMax]개까지, 붙인 순서 — 첫째가 예전 서버의
+  /// `resource`). [_initResourceIds]는 고칠 때 처음 붙어 있던 것(안 바뀌었으면 보내지 않으려고).
+  /// [_hasResources]가 false면(자원이 없거나 그룹웨어가 없는 서버) 칸을 숨긴다.
+  final List<_PickedResource> _resources = [];
+  List<String> _initResourceIds = const [];
   bool _hasResources = false;
 
   _Repeat _repeat = _Repeat.none;
@@ -188,8 +207,16 @@ class EventEditorState extends State<EventEditor> {
       for (final a in e.attendees) {
         _attendees[a.userId] = a.name;
       }
-      _resourceId = e.resource?.resourceId;
-      _resourceName = e.resource?.name;
+      for (final r in eventResourcesOf(e)) {
+        _resources.add(
+          _PickedResource(
+            id: r.resourceId,
+            name: r.name,
+            kind: r.kind,
+            pending: r.pending,
+          ),
+        );
+      }
       _initRecurrenceFrom(e.recurrence);
     } else {
       final base = widget.initialStart;
@@ -219,8 +246,8 @@ class EventEditorState extends State<EventEditor> {
     _initCalendarId = _calendarId;
     _initColor = _colorHex;
     _initAttendeeIds = _attendees.keys.toSet();
-    _initResourceId = _resourceId;
-    _hasResources = _resourceId != null;
+    _initResourceIds = _resourceIds;
+    _hasResources = _resources.isNotEmpty;
     if (!_isGuest && !(e?.recurring ?? false)) _checkResources();
     // 서버로 보내는 모양(시간 일정의 반복 요일은 한국 달력 기준 — kstWeekdayShift)으로 맞춰 둬야 안 바꿨을 때 같다고 본다.
     _initRecurrenceJson = jsonEncode(
@@ -402,7 +429,23 @@ class EventEditorState extends State<EventEditor> {
         )
       : (from: _start.millisecondsSinceEpoch, to: _end.millisecondsSinceEpoch);
 
-  Future<void> _pickResource() async {
+  /// 붙인 자원 id들(붙인 순서) — 저장할 때 `resourceIds`로 그대로 보낸다.
+  List<String> get _resourceIds => [for (final r in _resources) r.id];
+
+  /// 승인이 필요한 자원이 하나라도 붙어 있는지(새로 고른 것이 승인 필요이거나 이미 승인 대기로 잡힌 것) — 안내 한 줄을 띄운다.
+  bool get _anyApproval => _resources.any((r) => r.needsApproval || r.pending);
+
+  /// 더 붙일 수 있는지 — 다 찼으면 안내 토스트를 띄우고 false.
+  bool _roomForMore() {
+    if (_resources.length < kEventResourcesMax) return true;
+    // 한도(kEventResourcesMax = 5)는 서버 규약 그대로라 문구에 숫자를 박아 둔다(번역 키를 하나로).
+    showAppToast(context, tr('회의실·자원은 5개까지 붙일 수 있습니다.'));
+    return false;
+  }
+
+  /// "회의실·자원 추가" — 고르기 창에서 하나를 골라 뒤에 붙인다(이미 붙인 것은 창에서 막혀 있다).
+  Future<void> _addResource() async {
+    if (!_roomForMore()) return;
     final range = _bookingRange;
     final picked = await showEventResourcePicker(
       context,
@@ -410,51 +453,127 @@ class EventEditorState extends State<EventEditor> {
       from: range.from,
       to: range.to,
       eventId: _editing?.eventId,
-      selectedId: _resourceId,
+      selectedIds: _resourceIds.toSet(),
+    );
+    if (picked == null || !mounted) return;
+    _change(() => _attach(picked));
+  }
+
+  /// "회의실 추천" — 참석자 수(나 포함)에 맞는 빈 회의실을 받아 보여 주고, 고르면 그 회의실을 붙인다.
+  /// 일정 하나에 회의실은 보통 한 곳이라 **이미 붙인 회의실(kind 'room')은 추천으로 고른 것으로 바꾼다**(장비·차량은 그대로 둔다) —
+  /// 회의실을 둘 잡으려면 "추가"로 붙인다. 바꾸면 자리가 그대로라 개수 한도는 바꿀 회의실이 없을 때만 본다.
+  Future<void> _suggestRoom() async {
+    final hasRoom = _resources.any((r) => r.kind == 'room');
+    if (!hasRoom && !_roomForMore()) return;
+    final range = _bookingRange;
+    final me = widget.session.userId;
+    final picked = await showEventResourceSuggest(
+      context,
+      api: widget.session.groupwareApi,
+      start: range.from,
+      end: range.to,
+      attendees: _attendees.keys.where((id) => id != me).length + 1,
+      eventId: _editing?.eventId,
+      selectedIds: _resourceIds.toSet(),
     );
     if (picked == null || !mounted) return;
     _change(() {
-      _resourceId = picked.id;
-      _resourceName = picked.name;
-      // 장소를 비워 뒀으면 자원 이름으로 채운다.
-      if (_location.text.trim().isEmpty) _location.text = picked.name;
+      final replaced = _resources.where((r) => r.kind == 'room').toList();
+      _resources.removeWhere((r) => r.kind == 'room');
+      // 장소가 바꾼 회의실 이름 그대로였으면 새 회의실 이름으로 따라 바꾼다.
+      final location = _location.text.trim();
+      if (replaced.any((r) => r.name == location)) _location.clear();
+      _attach(picked);
     });
   }
 
+  /// [picked]를 뒤에 붙인다 — 장소를 비워 뒀고 회의실이면 장소를 그 이름으로 채운다(장비·차량은 장소가 아니라 채우지 않음).
+  void _attach(GroupwareResource picked) {
+    if (_resources.any((r) => r.id == picked.id)) return;
+    _resources.add(
+      _PickedResource(
+        id: picked.id,
+        name: picked.name,
+        kind: picked.kind,
+        needsApproval: picked.needsApproval,
+      ),
+    );
+    if (picked.kind == 'room' && _location.text.trim().isEmpty) {
+      _location.text = picked.name;
+    }
+  }
+
+  /// 회의실·자원 칸 — 붙인 자원 칩(X로 빼기), "추가"·"회의실 추천" 단추, 승인 안내. 반복 일정이면 붙일 수 없어 안내만 —
+  /// 이미 붙인 게 있는데 반복을 켰다면 칩은 남겨 둬 뺄 수 있게 하고(저장은 [_validate]가 막는다) 단추는 숨긴다.
   Widget _buildResource(ThemeData theme) {
     final repeating = _repeat != _Repeat.none || (_editing?.recurring ?? false);
-    if (repeating && _resourceId == null) {
+    final hintStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.hintColor,
+    );
+    if (repeating && _resources.isEmpty) {
       return Text(
         tr('반복 일정에는 회의실·자원을 잡을 수 없습니다 — 회차마다 따로 잡으세요.'),
         key: const ValueKey('event-resource-repeat'),
-        style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+        style: hintStyle,
       );
     }
-    if (_resourceId == null) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: OutlinedButton.icon(
-          key: const ValueKey('event-resource-pick'),
-          onPressed: _pickResource,
-          icon: const Icon(Icons.meeting_room_outlined, size: 18),
-          label: Text(tr('회의실·자원 잡기')),
-        ),
-      );
-    }
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 8,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InputChip(
-          key: const ValueKey('event-resource-chip'),
-          avatar: const Icon(Icons.meeting_room_outlined, size: 18),
-          label: Text(_resourceName ?? tr('회의실')),
-          onDeleted: () => _change(() {
-            _resourceId = null;
-            _resourceName = null;
-          }),
-        ),
-        TextButton(onPressed: _pickResource, child: Text(tr('바꾸기'))),
+        if (_resources.isNotEmpty) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              for (final r in _resources)
+                InputChip(
+                  key: ValueKey('event-resource-chip-${r.id}'),
+                  avatar: Icon(resourceKindIcon(r.kind), size: 18),
+                  label: Text(
+                    r.pending
+                        ? tr('{name} · 승인 대기', {'name': r.name})
+                        : r.needsApproval
+                        ? tr('{name} · 승인 필요', {'name': r.name})
+                        : r.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onDeleted: () => _change(
+                    () => _resources.removeWhere((x) => x.id == r.id),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (!repeating)
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              OutlinedButton.icon(
+                key: const ValueKey('event-resource-add'),
+                onPressed: _addResource,
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(tr('회의실·자원 추가')),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('event-resource-suggest'),
+                onPressed: _suggestRoom,
+                icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                label: Text(tr('회의실 추천')),
+              ),
+            ],
+          ),
+        if (_anyApproval)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              tr('승인이 필요한 자원은 관리자가 승인할 때까지 "승인 대기"로 잡힙니다.'),
+              key: const ValueKey('event-resource-approval-hint'),
+              style: hintStyle,
+            ),
+          ),
       ],
     );
   }
@@ -566,7 +685,7 @@ class EventEditorState extends State<EventEditor> {
     if (!_thisOnly) {
       final r = _buildRecurrence();
       if (r.error != null) return r.error;
-      if (_resourceId != null && r.value != null) {
+      if (_resources.isNotEmpty && r.value != null) {
         return tr('회의실·자원을 잡은 일정은 반복할 수 없습니다. 회의실·자원을 빼거나 반복을 끄세요.');
       }
     }
@@ -601,7 +720,8 @@ class EventEditorState extends State<EventEditor> {
             attendeeIds: _isGuest ? const [] : _attendees.keys.toList(),
             recurrence: _buildRecurrence().value,
             color: _colorTouched ? _colorHex : null,
-            resourceId: _resourceId,
+            // 새 일정은 붙인 게 있을 때만 보낸다(뺄 것이 없으니 빈 목록은 안 보냄).
+            resourceIds: _resources.isEmpty ? null : _resourceIds,
           ),
         );
       }
@@ -644,8 +764,12 @@ class EventEditorState extends State<EventEditor> {
       }
     }
     if (_calendarId != _initCalendarId) fields['calendarId'] = _calendarId;
-    // 회의실·자원 — 바뀌었을 때만(null이면 빼기). 시간만 바뀌면 서버가 붙은 예약을 같이 옮긴다.
-    if (_resourceId != _initResourceId) fields['resourceId'] = _resourceId;
+    // 회의실·자원 — 붙인 목록이 바뀌었을 때만 전체를 `resourceIds`로(서버가 그대로 맞춘다 — 빈 목록이면 모두 빼기).
+    // 안 건드렸으면 보내지 않아 제목만 고쳐도 예약 규칙을 다시 따지지 않고, 시간만 바뀌면 서버가 붙은 예약들을 같이 옮긴다.
+    final resourceIds = _resourceIds;
+    if (!_sameList(resourceIds, _initResourceIds)) {
+      fields['resourceIds'] = resourceIds;
+    }
     if (_colorTouched && _colorHex != _initColor) fields['color'] = _colorHex;
 
     // 시간은 바뀌었을 때만 보낸다. 반복 일정이면 서버가 start/end를 "고친 회차의 값"으로 읽는다
@@ -682,6 +806,15 @@ class EventEditorState extends State<EventEditor> {
 
   bool _sameSet(Set<String> a, Set<String> b) =>
       a.length == b.length && a.containsAll(b);
+
+  /// 순서까지 같은지 — 붙인 자원은 첫째가 대표(예전 `resource`)라 순서가 바뀌어도 바뀐 것으로 본다.
+  bool _sameList(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   Future<bool> _confirmDiscard() async {
     final ok = await showDialog<bool>(

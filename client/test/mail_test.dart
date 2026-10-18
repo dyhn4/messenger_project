@@ -32,6 +32,7 @@ class _RecordingNotifications extends NotificationService {
 }
 
 const _account = {
+  'id': 'A1',
   'email': 'me@corp.kr',
   'displayName': '나',
   'provider': 'naver',
@@ -137,7 +138,12 @@ class _Harness {
   }
 
   void withAccount() {
-    routes['GET /api/mail/account'] = (_) => _json({'account': _account});
+    routes['GET /api/mail/accounts'] = (_) => _json({
+      'accounts': [_account],
+      'max': 5,
+    });
+    routes['GET /api/mail/status'] = (_) =>
+        _json({'connected': true, 'unseen': 2, 'accounts': []});
     routes['GET /api/mail/folders'] = (_) => _json([
       {
         'path': 'INBOX',
@@ -300,9 +306,10 @@ void main() {
     tester,
   ) async {
     final h = _Harness();
-    h.routes['GET /api/mail/account'] = (_) => _json({'account': null});
+    h.routes['GET /api/mail/accounts'] = (_) =>
+        _json({'accounts': [], 'max': 5});
     var attempts = 0;
-    h.routes['PUT /api/mail/account'] = (_) {
+    h.routes['POST /api/mail/accounts'] = (_) {
       attempts += 1;
       if (attempts == 1) {
         return _json({
@@ -310,7 +317,7 @@ void main() {
         }, status: 400);
       }
       h.withAccount();
-      return _json({'account': _account});
+      return _json({'account': _account}, status: 201);
     };
     await _pump(tester, h);
     await tester.tap(find.byKey(const ValueKey('mail-connect')));
@@ -328,7 +335,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('mail-account-save')));
     await tester.pumpAndSettle();
     expect(find.textContaining('앱 비밀번호"를 넣어야'), findsOneWidget);
-    expect(h.lastBody('PUT', '/api/mail/account'), {
+    expect(h.lastBody('POST', '/api/mail/accounts'), {
       'email': 'me@corp.kr',
       'displayName': '',
       'provider': 'naver',
@@ -354,7 +361,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('mail-account-save')));
     await tester.pumpAndSettle();
-    final body = h.lastBody('PUT', '/api/mail/account');
+    final body = h.lastBody('POST', '/api/mail/accounts');
     expect(body['provider'], 'custom');
     expect(body['imap'], {
       'host': 'mail.corp.kr',
@@ -388,6 +395,7 @@ void main() {
     expect(find.byKey(const ValueKey('mail-attachment-0')), findsOneWidget);
     expect(h.session.mailUnread, 1, reason: '연 메일만큼 줄어든다');
     expect(h.called('GET', '/api/mail/message').last.url.queryParameters, {
+      'account': 'A1',
       'folder': 'INBOX',
       'uid': '2',
     });
@@ -424,6 +432,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('mail-reader-flag')));
     await tester.pumpAndSettle();
     expect(h.lastBody('POST', '/api/mail/flags'), {
+      'account': 'A1',
       'folder': 'INBOX',
       'uids': [2],
       'flagged': true,
@@ -457,11 +466,13 @@ void main() {
     expect(sent['text'], '확인했습니다.');
     expect(sent['inReplyTo'], '<m2@x.kr>');
     expect(sent['answered'], {'folder': 'INBOX', 'uid': 2});
+    expect(sent['account'], 'A1');
     expect(find.text('메일을 보냈습니다.'), findsOneWidget);
     await tester.pump(const Duration(seconds: 5));
     await tester.tap(find.byKey(const ValueKey('mail-delete')));
     await tester.pumpAndSettle();
     expect(h.lastBody('POST', '/api/mail/delete'), {
+      'account': 'A1',
       'folder': 'INBOX',
       'uids': [2],
     });

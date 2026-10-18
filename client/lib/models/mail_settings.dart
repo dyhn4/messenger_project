@@ -183,3 +183,90 @@ final smtpPresets = [
     note: tr('다음 메일 → 환경설정 → IMAP/SMTP에서 사용을 켜고, 2단계 인증을 쓰면 앱 비밀번호를 넣으세요.'),
   ),
 ];
+
+/// 관리자 콘솔 "메일" 탭의 웹메일 칸(server admin.js /admin/webmail) — 자체 메일 서버(회사 도메인으로 직접 받기)와 웹메일 OAuth 연결.
+class WebmailAdminSettings {
+  final bool localEnabled;
+
+  /// 받을 회사 도메인(쉼표로 여럿 — 첫 것이 주소의 기본 도메인).
+  final String localDomains;
+  final int localPort;
+  final int localMaxMessageMb;
+  final int localQuotaMb;
+
+  /// 받는 포트가 열려 있는지와 연 포트, 열지 못한 이유, 서버가 켜진 뒤 받은·거절한 메일 수.
+  final bool listening;
+  final int? listeningPort;
+  final String? listenError;
+  final int received;
+  final int rejected;
+
+  /// 도메인마다 DNS에 넣을 MX와 안내.
+  final List<({String domain, String mx, String note})> hints;
+
+  /// 바깥 주소로 보낼 수 있는지(위 메일(SMTP)이 켜져 있음).
+  final bool outboundReady;
+
+  /// OAuth로 돌아올 주소(WEB_DOMAIN이 없으면 null — OAuth를 쓸 수 없음).
+  final String? oauthRedirectUri;
+  final bool oauthGoogle;
+  final String? oauthGoogleProblem;
+  final bool oauthMicrosoft;
+  final String? oauthMicrosoftProblem;
+
+  const WebmailAdminSettings({
+    this.localEnabled = false,
+    this.localDomains = '',
+    this.localPort = 25,
+    this.localMaxMessageMb = 25,
+    this.localQuotaMb = 2048,
+    this.listening = false,
+    this.listeningPort,
+    this.listenError,
+    this.received = 0,
+    this.rejected = 0,
+    this.hints = const [],
+    this.outboundReady = false,
+    this.oauthRedirectUri,
+    this.oauthGoogle = false,
+    this.oauthGoogleProblem,
+    this.oauthMicrosoft = false,
+    this.oauthMicrosoftProblem,
+  });
+
+  factory WebmailAdminSettings.fromJson(Map<String, dynamic> json) {
+    final local = (json['local'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final status =
+        (local['status'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final oauth = (json['oauth'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final google = (oauth['google'] as Map?) ?? const {};
+    final microsoft = (oauth['microsoft'] as Map?) ?? const {};
+    return WebmailAdminSettings(
+      localEnabled: local['enabled'] == true,
+      localDomains: local['domains'] as String? ?? '',
+      localPort: (local['port'] as num?)?.toInt() ?? 25,
+      localMaxMessageMb: (local['maxMessageMb'] as num?)?.toInt() ?? 25,
+      localQuotaMb: (local['quotaMb'] as num?)?.toInt() ?? 2048,
+      listening: status['listening'] == true,
+      listeningPort: (status['port'] as num?)?.toInt(),
+      listenError: status['error'] as String?,
+      received: (status['received'] as num?)?.toInt() ?? 0,
+      rejected: (status['rejected'] as num?)?.toInt() ?? 0,
+      hints: [
+        for (final h in local['hints'] as List? ?? const [])
+          if (h is Map)
+            (
+              domain: h['domain'] as String? ?? '',
+              mx: h['mx'] as String? ?? '',
+              note: h['note'] as String? ?? '',
+            ),
+      ],
+      outboundReady: local['outboundReady'] == true,
+      oauthRedirectUri: oauth['redirectUri'] as String?,
+      oauthGoogle: google['enabled'] == true,
+      oauthGoogleProblem: google['problem'] as String?,
+      oauthMicrosoft: microsoft['enabled'] == true,
+      oauthMicrosoftProblem: microsoft['problem'] as String?,
+    );
+  }
+}

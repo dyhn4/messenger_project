@@ -5,7 +5,10 @@ import { cert } from 'firebase-admin/app';
 import { AUDIT, recordAudit, toAuditLogDto } from './audit.js';
 import { safeAvatarColor } from './avatarRules.js';
 import { endUserCallAccess } from './callAccess.js';
-import { UPLOADS_DIR } from './config.js';
+import { EXTERNAL_ADDRESS, UPLOADS_DIR, WEB_DOMAIN } from './config.js';
+import { localMailSetupHints, parseLocalMailInput } from './localMailRules.js';
+import { applyLocalMailSettings, localMailStatus } from './localMailServer.js';
+import { mailOAuthProblem, mailOAuthRedirectUri } from './webmailOAuth.js';
 import { encryptField } from './crypto.js';
 import {
   backupLockHolder,
@@ -511,6 +514,72 @@ export function createAdminRouter(io) {
       await updateServerSettings({ smtpTestedAt: new Date() });
     }
     res.json(await mailView());
+  });
+
+  // ─────────────────────────────── 웹메일(자체 메일 서버·OAuth 연결) ───────────────────────────────
+
+  /**
+   * 관리자 콘솔 "메일" 탭의 웹메일 칸 — 자체 메일 서버(회사 도메인으로 직접 받기 — localMailServer.js)의 설정·상태·DNS 안내와, 웹메일을
+   * Google·Microsoft 로그인으로 연결하게 할지(webmailOAuth.js — 로그인 보안 탭의 클라이언트를 같이 씀, [problem]은 켜도 쓸 수 없는 이유).
+   */
+  async function webmailView() {
+    const s = await getServerSettings();
+    const asEnabled = { ...s, mailOauthGoogle: true, mailOauthMicrosoft: true };
+    return {
+      local: {
+        enabled: !!s.localMailEnabled,
+        domains: s.localMailDomains ?? '',
+        port: s.localMailPort ?? 25,
+        maxMessageMb: s.localMailMaxMessageMb ?? 25,
+        quotaMb: s.localMailQuotaMb ?? 2048,
+        status: localMailStatus(),
+        hints: localMailSetupHints(s, EXTERNAL_ADDRESS?.host ?? WEB_DOMAIN ?? null),
+        outboundReady: mailReady(s),
+      },
+      oauth: {
+        redirectUri: mailOAuthRedirectUri(),
+        google: { enabled: !!s.mailOauthGoogle, problem: mailOAuthProblem('google', asEnabled) },
+        microsoft: { enabled: !!s.mailOauthMicrosoft, problem: mailOAuthProblem('microsoft', asEnabled) },
+      },
+    };
+  }
+
+  router.get('/admin/webmail', async (req, res) => {
+    res.json(await webmailView());
+  });
+
+  /** 바꾸기 `{ local?: { enabled?, domains?, port?, maxMessageMb?, quotaMb? }, oauth?: { google?, microsoft? } }` — 넘긴 것만. */
+  router.patch('/admin/webmail', async (req, res) => {
+    const body = req.body ?? {};
+    const current = await getServerSettings();
+    const fields = {};
+    if (body.local !== undefined) {
+      const parsed = parseLocalMailInput(body.local, current);
+      if (parsed.error) return res.status(400).json({ error: parsed.error });
+      Object.assign(fields, parsed.fields);
+    }
+    if (body.oauth !== undefined) {
+      for (const [key, column] of [
+        ['google', 'mailOauthGoogle'],
+        ['microsoft', 'mailOauthMicrosoft'],
+      ]) {
+        if (body.oauth?.[key] === undefined) continue;
+        if (typeof body.oauth[key] !== 'boolean') return res.status(400).json({ error: 'OAuth 켜기 값을 확인하세요.' });
+        fields[column] = body.oauth[key];
+      }
+    }
+    if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
+    const updated = await updateServerSettings(fields);
+    await applyLocalMailSettings();
+    const detail = [];
+    if (Object.keys(fields).some((k) => k.startsWith('localMail'))) {
+      detail.push(`자체 메일 서버: ${updated.localMailEnabled ? `켜짐(${updated.localMailDomains ?? ''}, 포트 ${updated.localMailPort})` : '꺼짐'}`);
+    }
+    if ('mailOauthGoogle' in fields || 'mailOauthMicrosoft' in fields) {
+      detail.push(`메일 OAuth: Google ${updated.mailOauthGoogle ? '켬' : '끔'}, Microsoft ${updated.mailOauthMicrosoft ? '켬' : '끔'}`);
+    }
+    recordAudit({ ...actorOf(req), action: AUDIT.serverSettings, detail: detail.join(', ') });
+    res.json(await webmailView());
   });
 
   // ─────────────────────────────── 로그인 보안 ───────────────────────────────

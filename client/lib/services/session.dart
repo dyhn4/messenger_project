@@ -1539,9 +1539,14 @@ class Session extends ChangeNotifier {
   }
 
   /// 소켓 `mail:new` — 배지를 맞추고 토스트와 기기 알림(앱이 켜져 있으면 서버 푸시가 오지 않음 — 누르면 메일 화면, main.dart).
+  /// 계정이 여럿인 서버는 [data]의 unseen이 그 계정 것이라(accountId가 있음) 모든 계정의 합을 다시 받는다.
   void handleMailNew(Map<String, dynamic> data) {
     final unseen = (data['unseen'] as num?)?.toInt();
-    if (unseen != null) setMailUnread(unseen);
+    if (data['accountId'] is String) {
+      unawaited(refreshMailUnread());
+    } else if (unseen != null) {
+      setMailUnread(unseen);
+    }
     _mailEvents.add(null);
     final latest = data['latest'];
     final count = (data['count'] as num?)?.toInt() ?? 1;

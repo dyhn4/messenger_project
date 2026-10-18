@@ -2155,6 +2155,45 @@ class ApiClient {
         as Map<String, dynamic>,
   );
 
+  /// 관리자 콘솔 "메일" 탭의 웹메일 칸 — 자체 메일 서버·OAuth 연결(GET /api/admin/webmail). 예전 서버는 404라 null(칸을 숨긴다).
+  Future<WebmailAdminSettings?> fetchWebmailAdmin() async {
+    final res = await _send(
+      () => _client.get(_uri('/api/admin/webmail'), headers: _authHeaders),
+    );
+    if (res.statusCode == 404) return null;
+    return WebmailAdminSettings.fromJson(
+      _decodeDdns(res, what: tr('웹메일 설정')),
+    );
+  }
+
+  /// 웹메일 칸 바꾸기 — 넘긴 것만. 자체 메일 서버는 [localEnabled]·[localDomains]·[localPort]·[localMaxMessageMb]·[localQuotaMb],
+  /// OAuth 연결은 [oauthGoogle]·[oauthMicrosoft]. 서버가 받는 포트를 바로 다시 연다.
+  Future<WebmailAdminSettings> updateWebmailAdmin({
+    bool? localEnabled,
+    String? localDomains,
+    int? localPort,
+    int? localMaxMessageMb,
+    int? localQuotaMb,
+    bool? oauthGoogle,
+    bool? oauthMicrosoft,
+  }) async {
+    final local = {
+      'enabled': ?localEnabled,
+      'domains': ?localDomains,
+      'port': ?localPort,
+      'maxMessageMb': ?localMaxMessageMb,
+      'quotaMb': ?localQuotaMb,
+    };
+    final oauth = {'google': ?oauthGoogle, 'microsoft': ?oauthMicrosoft};
+    return WebmailAdminSettings.fromJson(
+      await _patch('/api/admin/webmail', {
+            if (local.isNotEmpty) 'local': local,
+            if (oauth.isNotEmpty) 'oauth': oauth,
+          })
+          as Map<String, dynamic>,
+    );
+  }
+
   /// 시험 메일 — 지금 저장된 값으로 [to]에 한 통 보낸다. 성공하면 메일 기능을 켤 수 있게 된다. 실패하면 고칠 수 있는 이유로
   /// ApiException.
   Future<MailSettings> sendTestMail(String to) async => MailSettings.fromJson(

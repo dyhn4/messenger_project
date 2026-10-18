@@ -110,6 +110,7 @@ import { createGroupwareReportsRouter } from './groupwareReports.js';
 import { createDriveRouter } from './drive.js';
 import { createWikiRouter, wikiDocs } from './wiki.js';
 import { createWebmailRouter, startMailCheckJob } from './webmail.js';
+import { startLocalMailServer } from './localMailServer.js';
 import { createDraftsRouter, startDraftCleanupJob } from './drafts.js';
 import { createBoardExtrasRouter } from './boardExtras.js';
 import { startWebTls } from './webTls.js';
@@ -368,6 +369,8 @@ startAttendanceReminderJob(io);
 // 회의실·자원 예약 시작 전 알림(1분마다 — groupwareResources.js).
 startBookingReminderJob(io);
 startMailCheckJob(io);
+// 자체 메일 서버 — 관리자가 켜고 회사 도메인을 넣었을 때만 받는 포트(기본 25)를 연다(localMailServer.js).
+startLocalMailServer(io);
 startDraftCleanupJob();
 // DDNS(DuckDNS) 자동 갱신 — 관리자 콘솔 "DDNS" 탭에서 켰을 때만 5분마다 공인 IP를 알린다(ddns.js).
 ddnsUpdater.start().catch(() => {});

@@ -35,6 +35,7 @@ import { syncDirectoryGroupsOnLogin } from './groupSync.js';
 import { requestIdStore, samlAuthorizeUrl, samlMetadataXml, validateSamlLogin, validateSamlLogout } from './saml.js';
 import { samlButtonLabel } from './samlRules.js';
 import { endIdpSessions, startSsoSession } from './ssoSessions.js';
+import { isMailOAuthState, mailOAuthCallback } from './webmailOAuth.js';
 
 /**
  * 회사 계정 로그인(SSO — Google·Microsoft(OpenID Connect)·SAML 2.0 IdP). 규칙은 ssoRules.js·samlRules.js, SAML 서명 확인은 saml.js.
@@ -269,6 +270,11 @@ export function createSsoRouter({ io = null, endpoints = null, fetchImpl = fetch
   /** 그쪽이 돌려보내는 곳(브라우저) — 코드를 확인해 결과를 정하고, 브라우저에는 "앱으로 돌아가세요" 쪽지. */
   router.get('/sso/callback', async (req, res) => {
     const state = typeof req.query.state === 'string' ? req.query.state : '';
+    // 웹메일을 Google·Microsoft 로그인으로 연결하는 중이면(같은 돌아올 주소를 쓴다 — webmailOAuth.js) 그쪽에서 마무리한다.
+    if (isMailOAuthState(state)) {
+      const page = await mailOAuthCallback(req.query, await getServerSettings());
+      return resultPage(res, { ok: page.ok, title: page.title, message: page.message });
+    }
     const entry = pending.get(state);
     if (!entry || !OIDC_PROVIDERS.includes(entry.provider) || Date.now() - entry.createdAt > STATE_TTL_MS || entry.outcome) {
       return resultPage(res, { ok: false, status: 400, title: '로그인을 이어 갈 수 없습니다', message: EXPIRED });

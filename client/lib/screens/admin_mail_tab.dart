@@ -4,6 +4,7 @@ import '../models/mail_settings.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
+import 'admin_webmail_section.dart';
 import '../l10n/tr.dart';
 
 /// 관리자 콘솔 "메일" 탭 — 서버가 메일을 보낼 SMTP 계정과 멘션 요약 메일 설정(server/src/admin.js /admin/mail).
@@ -425,6 +426,7 @@ class _AdminMailTabState extends State<AdminMailTab> {
           ],
           const Divider(height: 28),
           ..._buildDigest(context, s),
+          AdminWebmailSection(session: widget.session),
         ],
       ),
     );

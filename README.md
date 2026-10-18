@@ -980,6 +980,7 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 - 메일을 켰다가 끄면 다시 보안 질문으로 찾습니다. 메일이 켜진 동안 보안 질문 없이 가입한 계정은 그때 사내 와이파이에서만 재설정할 수
   있습니다(보안 질문이 없는 예전 계정과 같은 규칙).
 - 이 기능이 없는 예전 서버면 "서버를 업데이트하세요"라고 나오고, 앱은 예전 서버에서 늘 보안 질문 방식으로 동작합니다.
+- 탭 아래의 **웹메일** 칸에서 자체 메일 서버(회사 도메인으로 직접 받기)와 웹메일의 Google·Microsoft 로그인(OAuth) 연결을 켭니다 — [웹메일](#웹메일).
 
 ### 로그인 보안
 
@@ -1465,34 +1466,99 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 
 ## 웹메일
 
-메뉴 → 툴 → **메일**(숫자는 받은편지함의 안 읽은 메일 수). 이미 쓰고 있는 메일 계정(회사 메일 서버·네이버·Gmail·다음·네이버웍스·
-Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메일은 원래 메일 서버에 그대로 있고 이 서버는 중계만 합니다(메일 본문을 DB에
-두지 않음). 서버는 `server/src/webmail.js`(API·새 메일 확인), `webmailClient.js`(IMAP — imapflow, SMTP — nodemailer), `webmailRules.js`(검사·모양),
-앱은 `client/lib/screens/mail/`. 서버를 올린 뒤 `npm install`(새 패키지 `imapflow`·`mailparser` — 정확한 버전으로 고정)과
-`npm run db:migrate`(마이그레이션 `0119`)가 필요합니다. 도메인·MX·포트 열기는 필요 없습니다(서버 PC에서 메일 서버로 나가는 연결만).
+메뉴 → 툴 → **메일**(숫자는 모든 계정 받은편지함의 안 읽은 메일 수). 이미 쓰고 있는 메일 계정(회사 메일 서버·네이버·Gmail·다음·네이버웍스·
+Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다(한 사람이 **5개까지** — Gmail·Microsoft 365는 **그쪽 로그인(OAuth)**으로도).
+바깥 메일 서버의 메일은 그 서버에 그대로 있고 이 서버는 중계만 합니다(메일 본문을 DB에 두지 않음). 관리자가 **자체 메일 서버**를 켜면 회사
+도메인으로 오는 메일을 이 서버가 직접 받아 사람마다 **회사 메일함**에 둡니다(아래). 서버는 `server/src/webmail.js`(API·새 메일 확인),
+`webmailBackend.js`(바깥 메일 서버·회사 메일함을 같은 모양으로), `webmailClient.js`(IMAP — imapflow, SMTP — nodemailer), `webmailRules.js`
+(검사·모양·받는 규칙·자동 완성), `webmailHtml.js`(HTML 걸러 내기), `webmailOAuth.js`(OAuth), `webmailNotify.js`(받는 규칙 걸기·알림),
+`localMailServer.js`·`localMailStore.js`·`localMailRules.js`(자체 메일 서버), 앱은 `client/lib/screens/mail/`. 서버를 올린 뒤 `npm install`
+(새 패키지 `smtp-server`·`htmlparser2` — 정확한 버전으로 고정)과 `npm run db:migrate`(마이그레이션 `0133` — 처음 것은 `0119`)가 필요합니다.
+바깥 메일 서버만 쓰면 도메인·MX·포트 열기는 필요 없습니다(서버 PC에서 메일 서버로 나가는 연결만).
 
-- **계정 연결** — 사람마다 하나. 서비스를 고르면 주소·포트가 채워지고 그 서비스에서 IMAP을 켜는 법(앱 비밀번호 등)이 보입니다. **직접 입력**은
+- **계정 연결** — 서비스를 고르면 주소·포트가 채워지고 그 서비스에서 IMAP을 켜는 법(앱 비밀번호 등)이 보입니다. **직접 입력**은
   회사 메일 서버의 IMAP(143·993)·SMTP(25·465·587·2525)와 연결 보안(SSL·STARTTLS — 암호화 없는 연결은 받지 않음)을 넣습니다. 저장하기 전에
   서버가 **IMAP·SMTP 로그인을 해 보고** 안 되면 어느 쪽이 왜 안 되는지 알려 줍니다(앱 비밀번호·방화벽·TLS 등). 비밀번호는 DB에 **암호화**해 두고
   앱에 다시 내보내지 않습니다. 서버는 메일 서버 주소를 풀어 이 PC 자신(127.x·::1)·링크 로컬(169.254.x — 클라우드 메타데이터 포함)이면 접속하지
-  않습니다(사설망의 사내 메일 서버는 됨). 연결 시도는 10분에 10번까지.
+  않습니다(사설망의 사내 메일 서버는 됨). 연결 시도는 10분에 10번까지. 같은 주소는 두 번 연결하지 않습니다.
+- **계정 여러 개** — 폴더 칸 맨 위의 계정을 눌러 바꾸고 **계정 더하기**로 더합니다(5개까지 — 회사 메일함 포함). 맨 앞 계정이 기본(⋯ → **기본
+  계정으로**)이고, 쓰기 창은 보고 있던 계정으로 보내되 **보내는 계정**을 고를 수 있습니다. 설정(알림·서명·받는 규칙·그림 허용)은 계정마다 따로이고,
+  메뉴 숫자와 새 메일 알림은 모든 계정을 합칩니다. 예전 서버(계정 하나)에 붙으면 예전처럼 계정 하나만 다룹니다.
+- **Google·Microsoft 로그인(OAuth)** — 관리자가 켜면(관리자 콘솔 → 메일 → 아래 웹메일 칸) Gmail·Outlook을 고를 때 **Google(Microsoft) 계정으로
+  로그인** 단추가 나옵니다. 누르면 브라우저에서 로그인하고 메일 권한을 허락하며, 앱은 2초마다 결과를 묻다가 끝나면 저절로 연결합니다(10분까지
+  — 회사 계정 로그인과 같은 방식). 클라이언트는 **로그인 보안 탭의 Google·Microsoft 클라이언트를 같이 쓰고**, 돌아오는 주소도 회사 계정 로그인과
+  같아(WEB_DOMAIN의 `/auth/sso/callback` — 서버가 state로 나눠 받음) 새 주소를 등록하지 않아도 됩니다. 그 클라이언트에 **메일 권한을 더해야**
+  합니다 — Google은 Gmail API 사용 설정과 범위 `https://mail.google.com/`(바깥 사용자용 앱이면 Google 확인 필요 — Workspace 내부 앱은 필요 없음),
+  Microsoft는 API 권한(위임) Office 365 Exchange Online의 `IMAP.AccessAsUser.All`·`SMTP.Send`와 `offline_access`(그 테넌트 사람만). 접근 토큰은
+  암호화해 두고 한 시간쯤마다 갱신 토큰으로 새로 받습니다(남은 시간이 2분 아래면). 비밀번호를 바꾸거나 권한을 취소해 갱신이 막히면 "다시 로그인"이
+  화면 위에 뜨고, **계정 바꾸기**에서 다시 로그인하거나 앱 비밀번호 연결로 바꿉니다.
 - **읽기** — 넓은 창은 폴더 · 목록 · 읽기 세 칸, 좁은 창(모바일)은 목록에서 눌러 읽기 화면으로(폴더는 서랍). 폴더는 받은편지함·보낸편지함·
   임시보관함·스팸·휴지통이 먼저(한국어 이름), 안 읽은 수가 붙습니다. 목록은 새것부터 30통씩(**더 보기**), 찾기는 제목·보낸 사람·받는 사람·
-  본문으로(최근 100통). 열면 읽음이 됩니다. **본문은 글자로** 보여 줍니다 — HTML 메일은 서버가 글자로 바꾸고(스크립트·원격 그림·추적 픽셀이
-  실리지 않음) "HTML 메일을 글자로 보여 줍니다"라고 알립니다. 첨부는 눌러 내려받아 엽니다(실행 파일 등 위험한 형식은 탐색기에서 고르기만 —
-  채팅 첨부와 같은 규칙). 30MB 넘는 메일은 원래 메일 프로그램에서 보게 합니다.
+  본문으로(최근 100통). 열면 읽음이 됩니다. 첨부는 눌러 내려받아 엽니다(실행 파일 등 위험한 형식은 탐색기에서 고르기만 — 채팅 첨부와 같은 규칙).
+  30MB 넘는 메일은 원래 메일 프로그램에서 보게 합니다.
+- **HTML 메일을 서식 그대로** — 서버가 HTML을 **걸러 낸 서식 문서**로 바꾸고(`webmailHtml.js`) 앱은 그것만 그립니다(HTML·웹뷰를 그대로 쓰지
+  않으므로 스크립트·양식·스타일시트·iframe이 끼어들 자리가 없음). 남는 것은 문단·제목·목록·인용·표(칸 너비·배경)·가로줄·그림과 글자 모양(굵게·
+  기울임·밑줄·취소선·고정폭·색·배경·크기)·정렬·링크(http·https·mailto만)이고, 숨긴 글(미리보기 줄 꼼수)·추적 픽셀(2px 이하 그림)·
+  `javascript:` 같은 링크는 버립니다. 칸 하나짜리 배치용 표는 풀고, 좁은 화면에서는 칸을 세로로 쌓습니다. 원래 색을 지키려고 어두운 화면에서도 흰
+  종이 위에 그립니다. **바깥 그림은 가려 두고**("바깥 그림 n개를 가렸습니다" — 열면 보낸 쪽이 읽었는지 알 수 있어서) **그림 보기**를 누르면 서버가
+  대신 받아 줍니다(`/mail/remote-image` — 앱의 IP가 드러나지 않고, 사설·이 서버 주소·80/443이 아닌 포트는 막음, 5MB까지). **이 보낸 사람은 늘
+  보기**를 누르면 그 계정에서 그 주소의 그림을 늘 보여 줍니다. 본문 안 그림(cid)은 늘 보입니다(메일에 든 것). 링크를 누르면 **실제 주소를 보이고
+  물은 뒤** 브라우저로 열고(글자와 다른 곳으로 보내는 피싱 막기), mailto는 쓰기 창으로 엽니다. **글자로 보기**로 예전처럼 글자만 볼 수 있습니다.
 - **정리** — 중요(별), 안 읽음으로, 다른 폴더로 옮기기, 지우기(휴지통으로 — 휴지통에서 지우면 아주 지움).
-- **쓰기** — 받는 사람·참조·숨은 참조(쉼표로 여러 명, **주소록** 단추로 같은 팀에서 메일 계정을 연결한 사람을 그 주소로 고르기 — 가입 이메일은 내보내지 않음), 제목, 본문(글자), 첨부(10개·합계
-  20MB — 앱 업로드로 올린 파일, 직접 올린 파일만). **답장**·**전체 답장**(나는 빼고, 회신 주소가 있으면 그쪽으로)·**전달**은 "Re:"/"Fwd:"를 한 번만
-  붙이고 원문을 인용하며, 답장은 `In-Reply-To`·`References` 머리를 달아 받는 쪽에서 대화로 묶이고 원래 메일에 답장 표시가 됩니다. 보낸 메일은
-  보낸편지함에 넣습니다(Gmail은 메일 서버가 알아서 넣음). 숨은 참조는 봉투에만 실려 받는 사람에게 보이지 않습니다. 보내기는 10분에 30통까지.
+- **쓰기** — 받는 사람·참조·숨은 참조(쉼표로 여러 명), 제목, 본문(글자), 첨부(10개·합계 20MB — 앱 업로드로 올린 파일, 직접 올린 파일만).
+  **답장**·**전체 답장**(나는 빼고, 회신 주소가 있으면 그쪽으로)·**전달**은 "Re:"/"Fwd:"를 한 번만 붙이고 원문을 인용하며, 답장은 `In-Reply-To`·
+  `References` 머리를 달아 받는 쪽에서 대화로 묶이고 원래 메일에 답장 표시가 됩니다. 보낸 메일은 보낸편지함에 넣습니다(Gmail은 메일 서버가 알아서
+  넣음). 숨은 참조는 봉투에만 실려 받는 사람에게 보이지 않습니다. 보내기는 10분에 30통까지.
+- **받는 사람 자동 완성** — 받는 사람 칸에 쓰는 동안 마지막 주소로 후보가 뜹니다. 같은 팀에서 메일 계정을 연결한 사람(주소록)과 **내가 메일을
+  보낸 바깥 주소**(자주·최근 보낸 것부터 — 보낼 때마다 남김, `mail_contacts`)이고, 고르면 `"이름" <주소>, `로 바뀝니다. 바깥 주소 후보는 ✕로 지웁니다.
+  **주소록** 단추로 같은 팀 사람을 여럿 골라도 됩니다(가입 이메일은 내보내지 않음).
+- **서명** — ⋯ → **서명**에서 계정마다 정합니다(2000자). **새 메일에 넣기**(끝)·**답장·전달에 넣기**(인용 앞)를 따로 켜고 끄며, "-- " 한 줄 아래에
+  붙습니다. 쓰는 중에 보내는 계정을 바꾸면 서명도 그 계정 것으로 바뀝니다.
+- **임시 저장(임시보관함)** — 쓰기 창의 **임시 저장** 단추, 닫을 때 묻는 창의 **임시 저장**, 그리고 바뀐 게 있으면 1분마다 저절로 그 계정의
+  임시보관함에 넣습니다(\Draft — 숨은 참조와 첨부도 함께, 다시 저장하면 앞 저장본은 지움). 임시보관함에서 열면 **이어 쓰기**로 받는 사람·숨은 참조·
+  제목·본문·첨부가 그대로 채워지고(첨부는 서버가 저장본에서 꺼내 싣는다), 보내면 저장본을 지웁니다. 임시보관함이 없는 메일 계정은 저장할 수 없다고
+  알립니다.
+- **받는 규칙·자동 분류** — ⋯ → **받는 규칙**에서 계정마다 만듭니다(50개까지). 조건은 보낸 사람·받는 사람(참조 포함)·제목이 무엇을 **포함/포함하지
+  않음/같음**(5개까지, 모두 또는 하나라도 맞으면), 맞으면 **폴더로 옮기기·읽음으로·중요 표시·알리지 않기**, "뒤 규칙은 보지 않음"을 고릅니다.
+  위에서부터 차례대로 겁니다(끌어서 차례 바꾸기, 켜고 끄기). 새 메일 확인(3분마다 — 알림을 꺼도 규칙이 있으면 확인)이나 회사 메일함이 받는 순간에
+  새 받은편지함 메일에 걸고, **지금 받은편지함에 적용**은 최근 500통에 겁니다. 다른 폴더로 옮겼거나 읽음으로 바꿨거나 "알리지 않기"인 메일은 알리지
+  않습니다. 옮길 폴더가 없어지면 그 옮기기는 건너뜁니다.
+- **대화방·할 일로 보내기** — 읽기 화면의 ⋯ → **대화방으로 보내기**는 대화방을 고르고(비밀 대화·보드·쓸 수 없는 토픽 제외 — 메시지 전달과 같은
+  규칙) 메일 요약(제목·보낸 사람·날짜·본문 앞부분 — 고칠 수 있음)과 고른 첨부·**메일 원문(.eml)**을 보냅니다. **할 일로 만들기**는 붙일 첨부를
+  고른 뒤 제목(메일 제목)·설명(메일 요약)을 채운 할 일 만들기 창을 엽니다(대화방·담당자·기간은 거기서). 첨부는 서버가 메일에서 꺼내 **내가 올린
+  파일**로 옮겨 줍니다(`/mail/export` — 한 번에 10개·50MB, 10분에 60번).
 - **새 메일 알림** — 서버가 3분마다 알림을 켠 계정의 받은편지함을 확인해, 늘어난 안 읽은 메일을 앱이 켜져 있으면 토스트와 기기 알림(소켓
-  `mail:new`), 꺼져 있으면 푸시로 알립니다(방해 금지 중이면 안 보냄, 누르면 메일 화면). 메일 화면의 ⋯ 메뉴에서 알림을 끌 수 있습니다. 비밀번호가
-  바뀌는 등 로그인이 계속 실패하면 화면 위에 이유와 **계정 바꾸기**가 뜨고, 그 계정은 30분마다만 다시 확인합니다.
-- **연결 끊기** — 서버에 둔 연결 값·비밀번호를 지웁니다(메일 서버의 메일은 그대로).
+  `mail:new` — 어느 계정인지 `accountId`), 꺼져 있으면 푸시로 알립니다(방해 금지 중이면 안 보냄, 누르면 메일 화면). 메일 화면의 ⋯ 메뉴에서
+  계정마다 알림을 끌 수 있습니다. 비밀번호가 바뀌는 등 로그인이 계속 실패하면 화면 위에 이유와 **계정 바꾸기**가 뜨고, 그 계정은 30분마다만 다시
+  확인합니다.
+- **연결 끊기** — 서버에 둔 연결 값·비밀번호·토큰을 지웁니다(메일 서버의 메일은 그대로). 회사 메일함은 끊을 수 없습니다.
 
 > 서버는 사용자가 연결한 메일 서버에 대신 접속하므로, 서버 PC에서 바깥 메일 서버(993·465·587 등)로 나가는 연결이 막혀 있으면 연결되지
-> 않습니다. Microsoft 365는 관리자가 IMAP·SMTP 기본 인증을 허용해야 합니다(OAuth 로그인은 아직 없음).
+> 않습니다. Microsoft 365를 비밀번호로 연결하려면 관리자가 IMAP·SMTP 기본 인증을 허용해야 합니다(막혀 있으면 OAuth로 연결).
+
+### 자체 메일 서버(회사 도메인으로 직접 받기)
+
+관리자 콘솔 → **메일** 탭 아래의 웹메일 칸(`screens/admin_webmail_section.dart`, 서버 `admin.js` `/admin/webmail`)에서 **받을 회사 도메인**(쉼표로
+여럿 — 첫 것이 주소의 도메인)·**받는 포트**(기본 25)·**한 통 크기**(기본 25MB, 50MB까지)·**한 사람 메일함 크기**(기본 2GB)를 정하고 켭니다.
+켜면 서버가 그 포트에서 SMTP로 메일을 받기 시작하고(`localMailServer.js` — smtp-server), 칸에 받는 중인 포트·받은/거절한 수와 도메인마다 DNS에 넣을
+**MX 레코드**가 보입니다. 할 일: 도메인의 DNS에 MX로 이 서버의 바깥 주소(`EXTERNAL_ADDRESS` 또는 `WEB_DOMAIN`)를 넣고, 공유기에서 **바깥 25번 포트를
+이 PC의 받는 포트로** 넘기고, Windows 방화벽에서 그 포트의 인바운드 TCP를 허용합니다(포트를 이미 다른 프로그램이 쓰면 칸에 이유가 뜸).
+
+- **주소** — `아이디@도메인`(아이디는 대소문자 구분 없음 — 가입 아이디 규칙과 같은 영문·숫자·. _ -). 어느 도메인으로 와도 같은 사람에게 가고,
+  `아이디+꼬리표@도메인`도 그 사람에게 갑니다(꼬리표로 받는 규칙을 만들 수 있음). 메일 화면을 열면 **회사 메일함** 계정이 저절로 생깁니다(5개 상한에
+  들어가지만 그 때문에 막히지는 않음, 끊을 수 없음). 첫 도메인이 바뀌면 주소도 바뀝니다.
+- **받기** — 우리 도메인이 아니면 받는 사람 단계에서 거절하고(`550 Relaying denied` — 남의 메일을 대신 넘기는 열린 중계가 아님), 그런 아이디가
+  없거나 탈퇴·정지한 사람이면 `550 No such user`, 메일함이 가득 차면 `452`, 한 통이 너무 크면 `552`입니다. 한 통에 받는 사람 50명까지, 한 IP가
+  10분에 60통까지입니다. 로그인(AUTH)은 받지 않고, 보내는 쪽의 TLS(STARTTLS)는 이 서버의 인증서(`certs/`)로 받습니다. 받은 메일은 앞에
+  `Received:` 머리를 붙여 원문(.eml)을 `MAIL_STORE_DIR`(기본 `server/mailstore/<계정>/` — 배포 스크립트·설치 프로그램이 건드리지 않음)에, 목록·찾기에
+  쓰는 겉봉을 DB(`local_mail_messages`)에 둡니다. 받는 즉시 받는 규칙을 걸고 알립니다(3분 확인을 기다리지 않음). 휴지통의 메일은 30일 뒤 아주
+  지웁니다. **스팸 거르기는 없습니다**(SPF·DKIM 확인 없음 — 받는 규칙으로 정리).
+- **폴더** — 받은편지함·보낸편지함·임시보관함·스팸편지함·휴지통·보관함(고정 — 폴더를 더 만들 수는 없음). 찾기는 제목·주소·본문 앞부분으로.
+- **보내기** — 우리 도메인 사람에게는 바깥을 거치지 않고 바로 그 사람의 받은편지함에 넣고(없는 아이디면 보내기 전에 알림), **바깥 주소는 위의
+  메일(SMTP) 설정으로** 보냅니다(봉투·From은 그 사람의 회사 주소). 그래서 메일(SMTP)이 켜져 있어야 하고, 그 SMTP가 회사 주소로 보내는 것을
+  허락해야 합니다(회사 메일 서버·발송 서비스에 도메인을 인증 — Gmail·네이버 SMTP는 계정 주소로 바꿔 버림). 꺼져 있으면 회사 도메인으로만 보냅니다.
+- **백업** — 서버 전체 백업(DB·비밀값·첨부파일 미러)은 `mailstore/` 폴더(회사 메일함의 메일 원문)를 아직 담지 않습니다 — DB에는 목록용 겉봉만
+  있으니, 회사 메일함을 쓰면 그 폴더를 따로 복사해 두세요.
 
 ## 향후 계획 / 미구현 기능
 
@@ -1508,9 +1574,9 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **웹메일 후속** — 메일 계정 연결(IMAP/SMTP)로 읽기·쓰기·답장·전달·첨부·새 메일 알림은 들어갔습니다([웹메일](#웹메일)). 남은 것: HTML 메일을
-  서식 그대로 보기(안전하게 걸러서), 임시 저장(임시보관함), 서명, 계정 여러 개, Gmail·Microsoft 365의 OAuth 로그인(앱 비밀번호 대신),
-  자주 쓰는 바깥 주소 자동 완성, 메일 받는 규칙·자동 분류, 메일을 채팅방·할 일로 보내기, 자체 메일 서버(회사 도메인 MX로 직접 받기).
+- **웹메일 후속(남은 것)** — HTML 서식 보기·임시 저장·서명·계정 여러 개·OAuth 연결·자동 완성·받는 규칙·대화방/할 일로 보내기·자체 메일 서버는
+  들어갔습니다([웹메일](#웹메일)). 남은 것: 서식 있는 메일 쓰기(지금은 글자만), 메일 여러 통 한꺼번에 고르기, 폴더 만들기·이름 바꾸기, 자체 메일
+  서버의 스팸 거르기(SPF·DKIM·DMARC 확인)와 보내는 메일 DKIM 서명, 회사 메일함(`mailstore/`)을 서버 백업에 넣기, 대화(스레드)로 묶어 보기.
 - **범위가 큰 것** — 급여명세서, 법인카드 연동·영수증 OCR.
 
 ### 3순위 — 메신저 편의
@@ -2654,20 +2720,32 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET / POST | `/api/wiki/:id/versions` · `/api/wiki/:id/versions/:versionId` · `…/restore` | 판 목록 / 판 하나(본문) / 그 판으로 되돌리기(지금 것을 먼저 판으로 — 편집 중인 사람에게 `wiki:op`) |
 | 소켓 | `wiki:join` · `wiki:op` · `wiki:cursor` · `wiki:leave` | 동시 편집 — join `{ pageId, sinceRevision? }` → ack `{ revision, title, canEdit, body \| ops, editors }`, op `{ pageId, revision, op, opId }` → ack `{ ok, revision }`(다른 사람에게 `wiki:op { revision, op, opId, userId }`), 사람이 바뀌면 `wiki:presence` |
 
-**웹메일** (`server/src/webmail.js` — 사람마다 연결한 계정 하나, 팀과 상관없음. 메일 서버 오류는 502이고 `error`에 고칠 방법)
+**웹메일** (`server/src/webmail.js` — 사람마다 연결한 계정 5개까지(회사 메일함 포함), 팀과 상관없음. 요청마다 `account`(계정 id — GET은 쿼리, 그 밖은 본문)로 계정을 고르고 없으면 기본(처음) 계정. 메일 서버 오류는 502이고 `error`에 고칠 방법)
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/mail/presets` | 미리 정한 메일 서비스 `[{ key, label, imap: { host, port, security }, smtp, hint }]`(naver·gmail·daum·worksmobile·outlook) |
-| GET / PUT / PATCH / DELETE | `/api/mail/account` | 내 계정 `{ account: { email, displayName, provider, providerLabel, imap, smtp, username, notify, lastError, lastCheckedAt } \| null }`(비밀번호는 안 나감) / 연결·바꾸기 `{ email, displayName?, provider, imap?, smtp?(직접 입력일 때 `{ host, port, security: 'ssl'\|'starttls' }`), username?, password?(바꾸기는 비우면 지금 것) }` — IMAP·SMTP 로그인을 해 보고 저장(실패 400, 10분에 10번) / `{ notify?, displayName? }` / 연결 끊기. 바뀌면 소켓 `mail:changed` |
+| GET | `/api/mail/presets` | 미리 정한 메일 서비스 `[{ key, label, imap: { host, port, security }, smtp, hint, oauth }]`(naver·gmail·daum·worksmobile·outlook — `oauth`는 그 서비스를 OAuth로 연결할 수 있으면 `'google'`\|`'microsoft'`) |
+| GET / POST | `/api/mail/accounts` | 내 계정들 `{ accounts: [{ id, position, email, displayName, provider, providerLabel, authType: 'password'\|'oauth'\|'local', oauthProvider, imap, smtp(회사 메일함은 null), username, notify, signature, signatureOnNew, signatureOnReply, trustedSenders, lastError, lastCheckedAt }], max }`(순서대로 — 처음 것이 기본, 비밀번호·토큰은 안 나감. 자체 메일 서버가 켜져 있으면 회사 메일함을 마련해 넣음) / 새 계정 `{ email, displayName?, provider, imap?, smtp?(직접 입력일 때 `{ host, port, security: 'ssl'\|'starttls' }`), username?, password }` → 201 — IMAP·SMTP 로그인을 해 보고 저장(실패 400, 10분에 10번, 같은 주소·5개 넘으면 400). 바뀌면 소켓 `mail:changed` |
+| PUT / PATCH / DELETE | `/api/mail/accounts/:id` | 연결 바꾸기(새 계정과 같은 본문 — 비밀번호를 비우면 지금 것, OAuth 계정을 비밀번호 연결로 바꿀 수 있음) / `{ notify?, displayName?, signature?(2000자), signatureOnNew?, signatureOnReply? }` / 연결 끊기(회사 메일함은 400) |
+| POST | `/api/mail/accounts/order` · `/api/mail/accounts/:id/trusted` | 계정 순서 `{ ids }`(내 계정 전부) → `{ accounts }` / 바깥 그림을 늘 보여 줄 보낸 사람 `{ sender: 'a@b.com'\|'@b.com', add? }`(200명까지) → `{ account }` |
+| GET / PUT / PATCH / DELETE | `/api/mail/account` | 예전 앱 — 기본 계정 하나 `{ account }` / 기본 계정 바꾸기(없으면 만들기) / 설정 / 끊기 |
+| POST / GET | `/api/mail/oauth/start` · `/api/mail/oauth/poll` | OAuth 연결 시작 `{ provider: 'google'\|'microsoft', account?(그 OAuth 계정 다시 로그인) }` → `{ state, authUrl, expiresInSeconds }`(브라우저로 연다 — 돌아오는 곳은 `/auth/sso/callback`) / 결과 `?state=` → `{ status: 'pending' }` \| `{ status: 'done', account }` \| `{ status: 'error', error }`(시작한 사람만, 끝난 결과는 한 번) |
 | GET | `/api/mail/directory` | 주소록 `[{ userId, name, email }]` — 나와 같은 팀에서 메일 계정을 연결한 사람의 연결 주소(가입 이메일은 안 나감) |
-| GET | `/api/mail/status` | 받은편지함 안 읽은 수 `{ connected, unseen, error }`(메뉴 배지) |
-| GET | `/api/mail/folders` | 폴더 `[{ path, name, specialUse, unseen, total }]` — 받은편지함·보낸편지함·임시보관함·스팸·휴지통 먼저 |
-| GET | `/api/mail/messages` | `?folder=&before=(uid)&limit=(50까지)&q=` → `{ messages: [{ uid, subject, from, to, date, seen, flagged, answered, hasAttachments, size }], nextBefore }` — 새것부터, `q`는 제목·보낸 사람·받는 사람·본문(최근 100통) |
-| GET | `/api/mail/message` | `?folder=&uid=` → `{ uid, subject, from, to, cc, replyTo, date, text(HTML 메일은 글자로 바꾼 것), truncated, html, messageId, references, attachments: [{ index, fileName, contentType, size }], flagged }` — 열면 읽음, 30MB 넘으면 413 |
-| GET | `/api/mail/attachment` | `?folder=&uid=&index=` 첨부 내려받기(`application/octet-stream`) |
-| POST | `/api/mail/flags` · `/api/mail/move` · `/api/mail/delete` | `{ folder, uids, seen?, flagged? }` / `{ folder, uids, to }` / `{ folder, uids }` → `{ result: 'trash'\|'deleted' }`(uid 200개까지) |
-| POST | `/api/mail/send` | `{ to, cc?, bcc?, subject, text, attachments?: [{ fileUrl, fileName, mimeType }], inReplyTo?, references?, answered?: { folder, uid } }` → 201 `{ ok, savedToSent }` — 받는 사람 합쳐 50명, 첨부 10개·20MB(직접 올린 파일), 10분에 30통. 보낸 뒤 보낸편지함에 넣고(Gmail 제외) 답장이면 원래 메일에 답장 표시 |
+| GET / DELETE | `/api/mail/contacts` | 받는 사람 자동 완성 `?q=` → `[{ name, address, member }]`(8개 — 같은 팀 주소록 + 내가 보낸 바깥 주소, 앞이 맞는 것 먼저) / 자동 완성에서 지우기 `{ address }` |
+| GET | `/api/mail/status` | 받은편지함 안 읽은 수(모든 계정 합) `{ connected, unseen, error, accounts: [{ id, email, unseen, error }] }`(메뉴 배지) |
+| GET | `/api/mail/folders` | `?account=` 폴더 `[{ path, name, specialUse, unseen, total }]` — 받은편지함·보낸편지함·임시보관함·스팸·휴지통 먼저 |
+| GET | `/api/mail/messages` | `?account=&folder=&before=(uid)&limit=(50까지)&q=` → `{ messages: [{ uid, subject, from, to, date, seen, flagged, answered, draft, hasAttachments, size }], nextBefore }` — 새것부터, `q`는 제목·보낸 사람·받는 사람·본문(최근 100통) |
+| GET | `/api/mail/message` | `?account=&folder=&uid=` → `{ uid, subject, from, to, cc, bcc(임시 저장본만), replyTo, date, text(HTML 메일은 글자로 바꾼 것), truncated, html, rich: { doc, remoteImages, truncated } \| null(걸러 낸 서식 — webmailHtml.js), messageId, inReplyTo, references, attachments: [{ index, fileName, contentType, size }](본문 그림은 뺌), flagged, draft }` — 열면 읽음, 30MB 넘으면 413 |
+| GET | `/api/mail/attachment` · `/api/mail/inline` | `?account=&folder=&uid=&index=` 첨부 내려받기(`application/octet-stream`) / 본문 안 그림(cid — 그림 형식이고 내용도 그림일 때만) |
+| GET | `/api/mail/remote-image` | `?url=` 바깥 그림을 서버가 대신 받아 줌("그림 보기") — http(s)·80/443만, 사설·이 서버 주소 막음(리다이렉트도 다시 검사), 5MB, 그림만, 10분에 600번 |
+| POST | `/api/mail/flags` · `/api/mail/move` · `/api/mail/delete` | `{ account?, folder, uids, seen?, flagged? }` / `{ account?, folder, uids, to }` / `{ account?, folder, uids }` → `{ result: 'trash'\|'deleted' }`(uid 200개까지) |
+| POST | `/api/mail/send` | `{ account?, to, cc?, bcc?, subject, text, attachments?: [{ fileUrl, fileName, mimeType }], draftAttachments?: [번호], draft?: { folder, uid }, inReplyTo?, references?, answered?: { folder, uid } }` → 201 `{ ok, savedToSent }` — 받는 사람 합쳐 50명, 첨부 10개·20MB(직접 올린 파일 + 임시 저장본의 첨부), 10분에 30통. 보낸 뒤 보낸편지함에 넣고(Gmail 제외) 답장이면 원래 메일에 답장 표시, `draft`면 그 저장본을 지움, 받는 사람은 자동 완성에 남김. 회사 메일함은 우리 도메인은 바로 넣고 바깥은 서버 SMTP로 |
+| POST | `/api/mail/drafts` · `/api/mail/drafts/discard` | 임시 저장(보내기와 같은 본문 — 받는 사람·제목·본문이 비어도 됨) → 201 `{ folder, uid }`(임시보관함에 \Draft, 숨은 참조도 남김, `draft`(앞 저장본)는 지움 — 임시보관함이 없으면 400) / 저장본 버리기 `{ account?, folder, uid }` |
+| POST | `/api/mail/export` | 대화방·할 일로 — `{ account?, folder, uid, attachments: [번호], eml? }` → `{ files: [{ url, fileName, size, mimeType }] }`(메일의 첨부·원문을 내가 올린 파일로 — 10개·50MB, 10분에 60번) |
+| GET / POST | `/api/mail/rules` | 받는 규칙 `?account=` → `{ rules: [{ id, name, enabled, match: 'all'\|'any', conditions: [{ field: 'from'\|'to'\|'subject', op: 'contains'\|'not_contains'\|'is', value }], actions: { moveTo, markSeen, flag, skipNotify }, stop }] }` / 만들기(같은 모양 + `account?` — 계정마다 50개, 조건 5개, 옮길 폴더가 있어야 함) → 201 `{ rule }` |
+| PUT / DELETE | `/api/mail/rules/:id` | 고치기 / 지우기 |
+| POST | `/api/mail/rules/order` · `/api/mail/rules/apply` | 차례 `{ account?, ids }` → `{ rules }` / 지금 받은편지함(최근 500통)에 걸기 `{ account? }` → `{ matched, moved }` |
+| GET / PATCH | `/api/admin/webmail` | (관리자) 웹메일 칸 `{ local: { enabled, domains, port, maxMessageMb, quotaMb, status: { listening, port, error, received, rejected }, hints: [{ domain, mx, note }], outboundReady }, oauth: { redirectUri, google: { enabled, problem }, microsoft: { enabled, problem } } }` / 바꾸기 `{ local?: { enabled?, domains?, port?, maxMessageMb?(1~50), quotaMb?(100~102400) }, oauth?: { google?, microsoft? } }` — 받는 포트를 바로 다시 연다 |
 
 **외부 연동** (`server/src/integrations.js`, 공개 API는 `publicApi.js`, OAuth는 `oauth.js`)
 
@@ -2795,7 +2873,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `sso_sessions` | 회사 계정 로그인 세션(토큰의 `ssid`) — `provider`, `idp_session_id`(SAML SessionIndex·OIDC sid), `name_id`·`name_id_format`, `ended_at`·`end_reason`(`app_logout`·`idp_logout`) |
 | `directory_group_mappings` | 디렉터리 그룹 규칙 — `source`(`any`|`ldap`|`saml`|`microsoft`), `group`, `team_id`(팀이 지워지면 같이), `account_role` |
 | `group_sync_grants` | 그룹 규칙으로 넣은 팀 멤버십(`user_id`, `team_id`) — 그룹에서 빠지면 이것만 뺀다 |
-| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각), `saml_*`(SAML IdP 주소·발급자·서명 인증서·속성 이름, 이 서버의 서명 키(암호화)·인증서), `group_sync_enabled`·`group_sync_remove`(디렉터리 그룹 규칙), `passkey_login_enabled`(보안 키로 비밀번호 없이 로그인), `sso_idp_logout`(회사 계정에서도 로그아웃), `ldap_org_source`(디렉터리로 부서 맞추기 — `attribute`·`ou`·`off`)·`ldap_org_base_dn`(OU 경로의 시작 위치)·`ldap_manager_sync`·`ldap_manager_attr`(상위자 맞추기), `approval_seal_private_key_enc`·`approval_seal_public_key`(결재 전자서명 서버 키 — Ed25519, 비밀 키는 암호화) |
+| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각), `saml_*`(SAML IdP 주소·발급자·서명 인증서·속성 이름, 이 서버의 서명 키(암호화)·인증서), `group_sync_enabled`·`group_sync_remove`(디렉터리 그룹 규칙), `passkey_login_enabled`(보안 키로 비밀번호 없이 로그인), `sso_idp_logout`(회사 계정에서도 로그아웃), `ldap_org_source`(디렉터리로 부서 맞추기 — `attribute`·`ou`·`off`)·`ldap_org_base_dn`(OU 경로의 시작 위치)·`ldap_manager_sync`·`ldap_manager_attr`(상위자 맞추기), `approval_seal_private_key_enc`·`approval_seal_public_key`(결재 전자서명 서버 키 — Ed25519, 비밀 키는 암호화), `local_mail_enabled`·`local_mail_domains`·`local_mail_port`·`local_mail_max_message_mb`·`local_mail_quota_mb`(자체 메일 서버), `mail_oauth_google`·`mail_oauth_microsoft`(웹메일 OAuth 연결) |
 | `approval_documents` | 결재 문서(`doc_number` 문서 번호 — 범위마다 unique, 휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name`, `settles_id`(이 지출 결재가 정산하는 구매·출장 — 지워지면 null) |
 | `approval_steps` | 결재선 한 칸 — `step_order` 순서, `stage`(같은 단계 = 합의로 동시에 차례, null이면 순서가 곧 단계 — 이 기능 전 문서), `role`(`approve`\|`agree`\|`final`\|`post` 후결), `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`\|`disagreed`(합의 반대 의견)\|`skipped` — 전결로 생략), `comment`, `decided_at`, `acted_by_id`·`acted_by_name`(대결로 대신 결정한 사람), `signature_path`(승인할 때의 서명 그림), `seal`(전자서명 — base64)·`signature_hash`(그때 서명 그림 파일의 SHA-256) |
 | `approval_delegations` | 대결(부재 중 대신 결재) — `scope_key`, `user_id`(자리를 비우는 사람)·`delegate_id`(대신할 사람), `start_date`·`end_date`('YYYY-MM-DD', 둘 다 포함), `reason`, `created_by_id` |
@@ -2815,7 +2893,10 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무), `period_type`(`flex2w`\|`flex3m`\|`select`)·`period_start`·`period_months`(탄력·선택근무 정산 기간) |
 | `attendance_reminders` | 보낸 출근·퇴근 알림(PK `scope_key`, `user_id`, `work_date`, `kind` — 하루 한 번만 보내려고 먼저 넣고 보냄) |
 | `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order`, 예약 규칙 `requires_approval`·`approver_ids`·`allowed_user_ids`·`available_days`·`available_from`·`available_to`·`max_minutes`, 태블릿 화면 `display_token`(unique)·`display_quick_book` |
-| `mail_accounts` | 웹메일 계정(사람마다 하나 — `user_id` unique, 탈퇴하면 cascade). `email`·`display_name`·`provider`(미리 정한 서비스 키 또는 `custom`), IMAP·SMTP `*_host`·`*_port`·`*_security`(`ssl`\|`starttls`), `username`, `password_enc`(암호화 — 내보내지 않음), `notify`(새 메일 알림), 새 메일 기준 `last_uid_next`·`last_uid_validity`(받은편지함 UIDNEXT·UIDVALIDITY — 연결 값이 바뀌면 지움), `last_checked_at`, 로그인 실패 `last_error`·`last_error_at`(30분 동안 다시 확인 안 함). 메일 본문은 두지 않는다 |
+| `mail_accounts` | 웹메일 계정(사람마다 5개까지 — `user_id`·`position` 색인, 탈퇴하면 cascade, 처음 `position`이 기본). `email`·`display_name`·`provider`(미리 정한 서비스 키·`custom`·`local`), `auth_type`(`password`\|`oauth`\|`local` 회사 메일함), IMAP·SMTP `*_host`·`*_port`·`*_security`(`ssl`\|`starttls` — 회사 메일함은 null), `username`, `password_enc`(암호화 — 내보내지 않음), OAuth `oauth_provider`·`oauth_refresh_enc`·`oauth_access_enc`(암호화)·`oauth_expires_at`, 서명 `signature`·`signature_on_new`·`signature_on_reply`, `trusted_senders` jsonb(바깥 그림을 늘 보여 줄 보낸 사람), `notify`(새 메일 알림), 새 메일 기준 `last_uid_next`·`last_uid_validity`(받은편지함 UIDNEXT·UIDVALIDITY — 연결 값이 바뀌면 지움), `last_checked_at`, 로그인 실패 `last_error`·`last_error_at`(30분 동안 다시 확인 안 함). 바깥 메일 서버의 메일 본문은 두지 않는다 |
+| `mail_contacts` | 받는 사람 자동 완성 — (`user_id`, `address` 소문자) unique, `name`, `use_count`·`last_used_at`(메일을 보낼 때마다 올림 — 자주·최근 순) |
+| `mail_rules` | 받는 규칙 — `account_id`(계정을 지우면 cascade)·`user_id`, `name`, `enabled`, `position`(차례), `match`(`all`\|`any`), `conditions` jsonb, `actions` jsonb(`moveTo`·`markSeen`·`flag`·`skipNotify`), `stop` |
+| `local_mail_messages` | 자체 메일 서버의 회사 메일함 — `uid`(serial — IMAP UID처럼 씀), `account_id`(cascade), `folder`(`INBOX`\|`Sent`\|`Drafts`\|`Junk`\|`Trash`\|`Archive`), `seen`·`flagged`·`answered`·`draft`, 겉봉 `subject`·`from_name`·`from_address`·`to_list`·`cc_list`·`sent_at`·`received_at`·`size`·`has_attachments`·`message_id`, 찾기용 `search_text`(소문자), 원문 파일 `file_name`(`MAIL_STORE_DIR/<계정>/`), `trashed_at`(30일 뒤 아주 지움). 색인 (`account_id`, `folder`, `uid`) |
 | `resource_bookings` | 자원 예약 — `scope_key`, `resource_id`(자원을 지우면 cascade), `user_id`·`user_name`(잡은 사람), `team_id`(잡은 팀 — 캘린더 새로고침 알림), `title`, `start_at`·`end_at`(같은 자원끼리 겹치지 않음 — 자원 행을 잠그고 검사해 넣음), `event_id`(캘린더 일정에 붙은 예약이면 그 일정 — 일정 하나에 여러 줄(자원마다), 일정을 지우면 cascade), `status`(`confirmed`\|`pending` 승인 대기), `series_id`(반복 예약 묶음), `reminded_at`(시작 전 알림). 인덱스 (`resource_id`, `start_at`)·(`scope_key`, `start_at`)·`event_id`·`series_id` |
 | `surveys` / `survey_responses` | 그룹웨어 설문 — `scope_key`, `questions`(jsonb), `anonymous`, `result_visibility`, `audience`·`target_ids`, `closes_at`·`closed_at`, `reminded_at`(독촉 1시간 제한) / 응답(`survey_id`, `user_id` PK, `answers` jsonb) |
 | `work_reports` / `work_report_comments` / `work_report_reads` | 업무일지 — (`scope_key`, `user_id`, `kind`, `period_start`) 유일, `done`·`plan`·`issues` / 댓글 / 검토자가 처음 읽은 시각 |

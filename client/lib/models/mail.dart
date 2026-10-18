@@ -1,4 +1,5 @@
-// 웹메일의 데이터 모양 — 서버 webmail.js·webmailRules.js(계정·폴더·목록·읽기)를 옮긴 것과 답장·전달 쓰기 도우미.
+// 웹메일의 데이터 모양 — 서버 webmail.js·webmailRules.js(계정·폴더·목록·읽기·받는 규칙·자동 완성)를 옮긴 것과 답장·전달·임시 저장본 쓰기
+// 도우미, 서명 넣기.
 
 import '../l10n/tr.dart';
 
@@ -62,19 +63,22 @@ class MailEndpoint {
   };
 }
 
-/// 미리 정한 메일 서비스(네이버·Gmail 등).
+/// 미리 정한 메일 서비스(네이버·Gmail 등). [oauth]는 그 서비스를 Google·Microsoft 로그인으로 연결할 수 있으면 그 제공자
+/// ('google'|'microsoft' — 관리자가 켰을 때).
 class MailPreset {
   final String key;
   final String label;
   final MailEndpoint imap;
   final MailEndpoint smtp;
   final String hint;
+  final String? oauth;
   const MailPreset({
     required this.key,
     required this.label,
     required this.imap,
     required this.smtp,
     this.hint = '',
+    this.oauth,
   });
 
   factory MailPreset.fromJson(Map<String, dynamic> json) => MailPreset(
@@ -83,45 +87,86 @@ class MailPreset {
     imap: MailEndpoint.fromJson(json['imap']),
     smtp: MailEndpoint.fromJson(json['smtp']),
     hint: json['hint'] as String? ?? '',
+    oauth: json['oauth'] as String?,
   );
 }
 
-/// 연결한 메일 계정(비밀번호는 오지 않는다).
+/// 연결한 메일 계정(비밀번호·토큰은 오지 않는다). [authType] — 'password' | 'oauth'(Google·Microsoft 로그인) | 'local'(이 서버가
+/// 직접 받는 회사 메일함 — 연결 값이 없고 끊을 수 없다).
 class MailAccount {
+  /// 예전 서버(계정 하나)는 id가 없다 — 그때는 빈 글.
+  final String id;
   final String email;
   final String? displayName;
   final String provider;
   final String providerLabel;
-  final MailEndpoint imap;
-  final MailEndpoint smtp;
+  final String authType;
+  final String? oauthProvider;
+  final MailEndpoint? imap;
+  final MailEndpoint? smtp;
   final String username;
   final bool notify;
+  final String signature;
+  final bool signatureOnNew;
+  final bool signatureOnReply;
+
+  /// 바깥 그림을 늘 보여 줄 보낸 사람 — 'a@b.com' 또는 '@b.com'.
+  final List<String> trustedSenders;
   final String? lastError;
   const MailAccount({
+    this.id = '',
     required this.email,
     this.displayName,
     this.provider = 'custom',
     this.providerLabel = '',
-    required this.imap,
-    required this.smtp,
+    this.authType = 'password',
+    this.oauthProvider,
+    this.imap,
+    this.smtp,
     this.username = '',
     this.notify = true,
+    this.signature = '',
+    this.signatureOnNew = true,
+    this.signatureOnReply = true,
+    this.trustedSenders = const [],
     this.lastError,
   });
 
   static MailAccount? fromJson(Object? json) {
     if (json is! Map) return null;
     return MailAccount(
+      id: json['id'] as String? ?? '',
       email: json['email'] as String? ?? '',
       displayName: json['displayName'] as String?,
       provider: json['provider'] as String? ?? 'custom',
       providerLabel: json['providerLabel'] as String? ?? '',
-      imap: MailEndpoint.fromJson(json['imap']),
-      smtp: MailEndpoint.fromJson(json['smtp']),
+      authType: json['authType'] as String? ?? 'password',
+      oauthProvider: json['oauthProvider'] as String?,
+      imap: json['imap'] == null ? null : MailEndpoint.fromJson(json['imap']),
+      smtp: json['smtp'] == null ? null : MailEndpoint.fromJson(json['smtp']),
       username: json['username'] as String? ?? '',
       notify: json['notify'] != false,
+      signature: json['signature'] as String? ?? '',
+      signatureOnNew: json['signatureOnNew'] != false,
+      signatureOnReply: json['signatureOnReply'] != false,
+      trustedSenders: [
+        for (final t in json['trustedSenders'] as List? ?? const [])
+          if (t is String) t,
+      ],
       lastError: json['lastError'] as String?,
     );
+  }
+
+  bool get isLocal => authType == 'local';
+  bool get isOAuth => authType == 'oauth';
+
+  /// 이 보낸 사람의 바깥 그림을 늘 보여 주는지(주소나 '@도메인'이 맞음).
+  bool trusts(String address) {
+    final a = address.trim().toLowerCase();
+    final at = a.lastIndexOf('@');
+    if (at < 0) return false;
+    return trustedSenders.contains(a) ||
+        trustedSenders.contains(a.substring(at));
   }
 }
 
@@ -151,6 +196,7 @@ class MailFolder {
   bool get isInbox => specialUse == r'\Inbox';
   bool get isSent => specialUse == r'\Sent';
   bool get isTrash => specialUse == r'\Trash';
+  bool get isDrafts => specialUse == r'\Drafts';
 }
 
 /// 목록 한 줄.
@@ -163,6 +209,7 @@ class MailSummary {
   final bool seen;
   final bool flagged;
   final bool answered;
+  final bool draft;
   final bool hasAttachments;
   const MailSummary({
     required this.uid,
@@ -173,6 +220,7 @@ class MailSummary {
     this.seen = false,
     this.flagged = false,
     this.answered = false,
+    this.draft = false,
     this.hasAttachments = false,
   });
 
@@ -187,6 +235,7 @@ class MailSummary {
     seen: json['seen'] == true,
     flagged: json['flagged'] == true,
     answered: json['answered'] == true,
+    draft: json['draft'] == true,
     hasAttachments: json['hasAttachments'] == true,
   );
 
@@ -199,6 +248,7 @@ class MailSummary {
     seen: seen ?? this.seen,
     flagged: flagged ?? this.flagged,
     answered: answered,
+    draft: draft,
     hasAttachments: hasAttachments,
   );
 }
@@ -223,69 +273,98 @@ class MailAttachment {
   );
 }
 
-/// 읽기 — 본문은 글자(HTML 메일은 서버가 글자로 바꾼 것 — [wasHtml]).
+/// 읽기 — 본문은 글자([text] — HTML 메일은 서버가 글자로 바꾼 것)와, HTML 메일이면 서버가 걸러 낸 서식 문서([rich] — 서버
+/// webmailHtml.js, 그리는 곳은 mail_rich_view.dart). [remoteImages]는 "그림 보기"를 눌러야 받는 바깥 그림 수.
 class MailMessage {
   final int uid;
   final String subject;
   final MailAddress from;
   final List<MailAddress> to;
   final List<MailAddress> cc;
+  final List<MailAddress> bcc;
   final List<MailAddress> replyTo;
   final DateTime? date;
   final String text;
   final bool truncated;
   final bool wasHtml;
+  final Map<String, dynamic>? rich;
+  final int remoteImages;
+  final bool richTruncated;
   final String? messageId;
+  final String? inReplyTo;
   final List<String> references;
   final List<MailAttachment> attachments;
   final bool flagged;
+
+  /// 임시 저장본(\Draft) — 읽기 대신 "이어 쓰기".
+  final bool draft;
   const MailMessage({
     required this.uid,
     required this.subject,
     required this.from,
     this.to = const [],
     this.cc = const [],
+    this.bcc = const [],
     this.replyTo = const [],
     this.date,
     this.text = '',
     this.truncated = false,
     this.wasHtml = false,
+    this.rich,
+    this.remoteImages = 0,
+    this.richTruncated = false,
     this.messageId,
+    this.inReplyTo,
     this.references = const [],
     this.attachments = const [],
     this.flagged = false,
+    this.draft = false,
   });
 
-  factory MailMessage.fromJson(Map<String, dynamic> json) => MailMessage(
-    uid: (json['uid'] as num).toInt(),
-    subject: json['subject'] as String? ?? tr('(제목 없음)'),
-    from: MailAddress.fromJson(json['from']),
-    to: _addresses(json['to']),
-    cc: _addresses(json['cc']),
-    replyTo: _addresses(json['replyTo']),
-    date: json['date'] == null
-        ? null
-        : DateTime.fromMillisecondsSinceEpoch((json['date'] as num).toInt()),
-    text: json['text'] as String? ?? '',
-    truncated: json['truncated'] == true,
-    wasHtml: json['html'] == true,
-    messageId: json['messageId'] as String?,
-    references: [
-      for (final r in json['references'] as List? ?? const [])
-        if (r is String) r,
-    ],
-    attachments: [
-      for (final a in json['attachments'] as List? ?? const [])
-        MailAttachment.fromJson((a as Map).cast<String, dynamic>()),
-    ],
-    flagged: json['flagged'] == true,
-  );
+  factory MailMessage.fromJson(Map<String, dynamic> json) {
+    final rich = json['rich'] is Map
+        ? (json['rich'] as Map).cast<String, dynamic>()
+        : null;
+    return MailMessage(
+      uid: (json['uid'] as num).toInt(),
+      subject: json['subject'] as String? ?? tr('(제목 없음)'),
+      from: MailAddress.fromJson(json['from']),
+      to: _addresses(json['to']),
+      cc: _addresses(json['cc']),
+      bcc: _addresses(json['bcc']),
+      replyTo: _addresses(json['replyTo']),
+      date: json['date'] == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch((json['date'] as num).toInt()),
+      text: json['text'] as String? ?? '',
+      truncated: json['truncated'] == true,
+      wasHtml: json['html'] == true,
+      rich: rich?['doc'] is Map
+          ? (rich!['doc'] as Map).cast<String, dynamic>()
+          : null,
+      remoteImages: (rich?['remoteImages'] as num?)?.toInt() ?? 0,
+      richTruncated: rich?['truncated'] == true,
+      messageId: json['messageId'] as String?,
+      inReplyTo: json['inReplyTo'] as String?,
+      references: [
+        for (final r in json['references'] as List? ?? const [])
+          if (r is String) r,
+      ],
+      attachments: [
+        for (final a in json['attachments'] as List? ?? const [])
+          MailAttachment.fromJson((a as Map).cast<String, dynamic>()),
+      ],
+      flagged: json['flagged'] == true,
+      draft: json['draft'] == true,
+    );
+  }
 }
 
-/// 쓰기 창에 채울 값 — 새 메일·답장·전체 답장·전달.
+/// 쓰기 창에 채울 값 — 새 메일·답장·전체 답장·전달·임시 저장본 이어 쓰기.
 class MailDraft {
   final List<MailAddress> to;
   final List<MailAddress> cc;
+  final List<MailAddress> bcc;
   final String subject;
   final String text;
   final String? inReplyTo;
@@ -293,18 +372,69 @@ class MailDraft {
 
   /// 답장한 원래 메일(보낸 뒤 답장 표시) — 폴더와 uid.
   final ({String folder, int uid})? answered;
+
+  /// 이어 쓰는 임시 저장본(다시 저장·보내면 지운다)과 그 안의 첨부(보낼 때 서버가 저장본에서 꺼내 싣는다).
+  final ({String folder, int uid})? saved;
+  final List<MailAttachment> savedAttachments;
+
+  /// 이 메일을 쓸 계정(없으면 쓰기 창이 정한다 — 보고 있던 계정).
+  final String? accountId;
+
+  /// 서명을 넣을 자리 — 답장·전달이면 인용 앞, 새 메일이면 끝. 이어 쓰기는 이미 들어 있어 넣지 않는다.
+  final MailSignatureSlot signatureSlot;
   const MailDraft({
     this.to = const [],
     this.cc = const [],
+    this.bcc = const [],
     this.subject = '',
     this.text = '',
     this.inReplyTo,
     this.references = const [],
     this.answered,
+    this.saved,
+    this.savedAttachments = const [],
+    this.accountId,
+    this.signatureSlot = MailSignatureSlot.fresh,
   });
 }
 
+/// 서명을 어디에 넣을지 — 새 메일(끝)·답장/전달(인용 앞)·넣지 않음(이어 쓰기).
+enum MailSignatureSlot { fresh, reply, none }
+
 enum MailReplyKind { reply, replyAll, forward }
+
+/// 서명 머리(관례 — "-- " 한 줄).
+const kMailSignatureMark = '-- ';
+
+/// 서명 덩어리 — 빈 줄 하나, "-- ", 서명.
+String mailSignatureBlock(String signature) =>
+    '\n\n$kMailSignatureMark\n${signature.trim()}';
+
+/// [text]에 [signature]를 넣는다 — [slot]이 reply면 맨 앞(인용 앞), fresh면 끝. 이미 같은 서명이 있거나 서명이 비면 그대로.
+String withSignature(String text, String signature, MailSignatureSlot slot) {
+  final sig = signature.trim();
+  if (sig.isEmpty || slot == MailSignatureSlot.none) return text;
+  final block = mailSignatureBlock(sig);
+  if (text.contains(block)) return text;
+  return slot == MailSignatureSlot.reply ? '$block$text' : '$text$block';
+}
+
+/// 계정을 바꿨을 때 — 본문의 [from] 서명 덩어리를 [to] 서명으로 바꾼다(없으면 [slot] 자리에 새로).
+String swapSignature(
+  String text,
+  String from,
+  String to,
+  MailSignatureSlot slot,
+) {
+  final old = from.trim().isEmpty ? null : mailSignatureBlock(from);
+  if (old != null && text.contains(old)) {
+    return text.replaceFirst(
+      old,
+      to.trim().isEmpty ? '' : mailSignatureBlock(to),
+    );
+  }
+  return withSignature(text, to, slot);
+}
 
 /// "2026. 10. 17. 오전 9:05" 같은 인용 머리용 시각.
 String mailQuoteTime(DateTime? d) {
@@ -329,6 +459,7 @@ MailDraft draftFrom(
   MailReplyKind kind, {
   required String folder,
   required String myEmail,
+  String? accountId,
 }) {
   final quotedHeader = tr('{p0}, {m.from.wire} 님이 작성:', {
     'p0': mailQuoteTime(m.date),
@@ -353,6 +484,8 @@ MailDraft draftFrom(
     return MailDraft(
       subject: prefixedSubject(m.subject, 'Fwd:'),
       text: '\n\n$header\n\n${m.text.trimRight()}',
+      accountId: accountId,
+      signatureSlot: MailSignatureSlot.reply,
     );
   }
   final me = myEmail.toLowerCase();
@@ -378,7 +511,40 @@ MailDraft draftFrom(
     inReplyTo: m.messageId,
     references: refs.length > 20 ? refs.sublist(refs.length - 20) : refs,
     answered: (folder: folder, uid: m.uid),
+    accountId: accountId,
+    signatureSlot: MailSignatureSlot.reply,
   );
+}
+
+/// 임시 저장본을 이어 쓰는 초안 — 받는 사람·숨은 참조·제목·본문·첨부를 그대로(서명은 이미 들어 있다).
+MailDraft draftFromSaved(
+  MailMessage m, {
+  required String folder,
+  String? accountId,
+}) => MailDraft(
+  to: m.to,
+  cc: m.cc,
+  bcc: m.bcc,
+  subject: m.subject,
+  text: m.text,
+  inReplyTo: m.inReplyTo,
+  references: m.references,
+  saved: (folder: folder, uid: m.uid),
+  savedAttachments: m.attachments,
+  accountId: accountId,
+  signatureSlot: MailSignatureSlot.none,
+);
+
+/// 메일을 대화방·할 일로 보낼 때의 글 — 제목, 보낸 사람·시각, 본문 앞부분([max]자).
+String mailShareText(MailMessage m, {int max = 1000}) {
+  final body = m.text.trim();
+  final cut = body.length > max ? '${body.substring(0, max)}…' : body;
+  return [
+    tr('[메일] {subject}', {'subject': m.subject}),
+    tr('보낸 사람: {from}', {'from': m.from.wire}),
+    if (m.date != null) tr('날짜: {p0}', {'p0': mailQuoteTime(m.date)}),
+    if (cut.isNotEmpty) '\n$cut',
+  ].join('\n');
 }
 
 /// 목록의 시각 — 오늘이면 "오전 9:05", 올해면 "10월 3일", 아니면 "2025. 3. 1.".
@@ -401,4 +567,113 @@ String mailSizeText(int bytes) {
   }
   if (bytes >= 1024) return '${(bytes / 1024).round()}KB';
   return tr('{bytes}바이트', {'bytes': bytes});
+}
+
+// ── 받는 규칙 ──
+
+/// 규칙의 조건 — [field] 'from'|'to'|'subject', [op] 'contains'|'not_contains'|'is'.
+class MailRuleCondition {
+  final String field;
+  final String op;
+  final String value;
+  const MailRuleCondition({
+    this.field = 'from',
+    this.op = 'contains',
+    this.value = '',
+  });
+
+  factory MailRuleCondition.fromJson(Object? json) {
+    final m = json is Map ? json : const {};
+    return MailRuleCondition(
+      field: m['field'] as String? ?? 'from',
+      op: m['op'] as String? ?? 'contains',
+      value: m['value'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'field': field, 'op': op, 'value': value};
+}
+
+/// 받는 규칙 — 새로 온 받은편지함 메일에 차례대로 건다(서버 webmailRules.js planRules).
+class MailRule {
+  final String id;
+  final String name;
+  final bool enabled;
+
+  /// 'all'(모두 맞으면) | 'any'(하나라도 맞으면).
+  final String match;
+  final List<MailRuleCondition> conditions;
+  final String? moveTo;
+  final bool markSeen;
+  final bool flag;
+  final bool skipNotify;
+  final bool stop;
+  const MailRule({
+    this.id = '',
+    required this.name,
+    this.enabled = true,
+    this.match = 'all',
+    this.conditions = const [],
+    this.moveTo,
+    this.markSeen = false,
+    this.flag = false,
+    this.skipNotify = false,
+    this.stop = false,
+  });
+
+  factory MailRule.fromJson(Map<String, dynamic> json) {
+    final a = json['actions'] is Map ? json['actions'] as Map : const {};
+    return MailRule(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      enabled: json['enabled'] != false,
+      match: json['match'] as String? ?? 'all',
+      conditions: [
+        for (final c in json['conditions'] as List? ?? const [])
+          MailRuleCondition.fromJson(c),
+      ],
+      moveTo: a['moveTo'] as String?,
+      markSeen: a['markSeen'] == true,
+      flag: a['flag'] == true,
+      skipNotify: a['skipNotify'] == true,
+      stop: json['stop'] == true,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'enabled': enabled,
+    'match': match,
+    'conditions': [for (final c in conditions) c.toJson()],
+    'actions': {
+      'moveTo': moveTo,
+      'markSeen': markSeen,
+      'flag': flag,
+      'skipNotify': skipNotify,
+    },
+    'stop': stop,
+  };
+}
+
+/// 받는 사람 자동 완성 후보 — [member]면 같은 팀 사람(주소록), 아니면 내가 보낸 적 있는 바깥 주소.
+class MailContact {
+  final String name;
+  final String address;
+  final bool member;
+  const MailContact({
+    this.name = '',
+    required this.address,
+    this.member = false,
+  });
+
+  factory MailContact.fromJson(Object? json) {
+    final m = json is Map ? json : const {};
+    return MailContact(
+      name: m['name'] as String? ?? '',
+      address: m['address'] as String? ?? '',
+      member: m['member'] == true,
+    );
+  }
+
+  String get wire => MailAddress(name: name, address: address).wire;
 }

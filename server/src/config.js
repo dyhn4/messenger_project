@@ -63,6 +63,9 @@ export const EXTERNAL_ADDRESS = (() => {
 // 단 그 경로가 항상 접근 가능해야 첨부파일 업로드/다운로드가 된다(upload.js 참고).
 export const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(rootDir, 'uploads');
 
+// 자체 메일 서버(회사 도메인으로 직접 받기 — localMailServer.js)가 받은 메일의 원문(.eml)을 두는 곳. 계정마다 하위 폴더.
+export const MAIL_STORE_DIR = process.env.MAIL_STORE_DIR || path.join(rootDir, 'mailstore');
+
 // 웹 앱(아이폰 등 앱이 없는 기기용) 빌드 결과물 폴더 — client에서 `flutter build web`으로 만든
 // build/web의 내용을 여기에 넣으면 서버 주소(https://서버:3000/)로 바로 열린다. 폴더가 없으면 웹
 // 앱만 꺼진다. 웹 앱은 브라우저가 TLS를 검증하므로 공인 인증서가 있어야 제대로 쓸 수 있다 — 아래

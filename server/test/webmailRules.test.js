@@ -175,6 +175,7 @@ test('목록 한 줄·첨부 여부·읽기 모양', () => {
     seen: true,
     flagged: true,
     answered: false,
+    draft: false,
     hasAttachments: true,
     size: 1234,
   });
@@ -198,7 +199,7 @@ test('목록 한 줄·첨부 여부·읽기 모양', () => {
   );
   assert.deepEqual(detail.references, ['<r0@x.kr>']);
   assert.equal(detail.html, true);
-  assert.deepEqual(detail.attachments, [{ index: 0, fileName: 'a.pdf', contentType: 'application/pdf', size: 10, inline: false }]);
+  assert.deepEqual(detail.attachments, [{ index: 0, fileName: 'a.pdf', contentType: 'application/pdf', size: 10 }]);
   assert.equal(detail.flagged, true);
 });
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/mail.dart';
 import '../../services/api_client.dart' show ApiException;
@@ -10,6 +11,9 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'mail_account_dialog.dart';
 import 'mail_compose.dart';
+import 'mail_rich_view.dart';
+import 'mail_settings_dialogs.dart';
+import 'mail_share.dart';
 import '../../l10n/tr.dart';
 
 /// 메일 화면을 연다 — PC·모바일 모두 전체 화면.
@@ -21,8 +25,15 @@ Future<void> openMailScreen(BuildContext context, Session session) =>
 /// 이 폭부터 폴더 · 목록 · 읽기 세 칸(좁으면 목록에서 눌러 읽기 화면으로 넘어간다).
 const kMailWideBreakpoint = 900.0;
 
-/// 웹메일 — 연결한 메일 계정(IMAP/SMTP)의 폴더·목록·읽기·쓰기(server/src/webmail.js). 계정이 없으면 연결 안내. 새 메일이 오면
-/// (session.mailEvents — 소켓 mail:new) 목록을 다시 받는다.
+/// 한 사람이 연결할 수 있는 계정 수 — 서버 webmailRules.js ACCOUNTS_MAX.
+const kMailAccountsMax = 5;
+
+/// 메일 본문의 바깥 링크를 여는 곳 — 시험에서 바꿔 끼운다.
+Future<bool> Function(Uri uri) mailOpenLink = (uri) =>
+    launchUrl(uri, mode: LaunchMode.externalApplication);
+
+/// 웹메일 — 연결한 메일 계정들(IMAP/SMTP·OAuth·회사 메일함)의 폴더·목록·읽기·쓰기(server/src/webmail.js). 계정이 여럿이면 폴더 칸
+/// 위에서 바꾼다. 계정이 없으면 연결 안내. 새 메일이 오면(session.mailEvents — 소켓 mail:new·mail:changed) 목록을 다시 받는다.
 class MailScreen extends StatefulWidget {
   final Session session;
 
@@ -35,10 +46,14 @@ class MailScreen extends StatefulWidget {
 }
 
 class _MailScreenState extends State<MailScreen> {
-  MailApi get _api => widget.api ?? widget.session.mailApi;
+  late final MailApi _api = widget.api ?? widget.session.mailApi;
 
   bool _loadingAccount = true;
-  MailAccount? _account;
+  List<MailAccount> _accounts = const [];
+
+  /// 계정이 하나뿐인 예전 서버(/mail/account — 계정 id가 없다).
+  bool _legacy = false;
+  String _accountId = '';
   String? _error;
   List<MailFolder> _folders = const [];
   String _folder = 'INBOX';
@@ -51,11 +66,18 @@ class _MailScreenState extends State<MailScreen> {
   int? _selectedUid;
   StreamSubscription<void>? _sub;
 
+  MailAccount? get _account {
+    for (final a in _accounts) {
+      if (a.id == _accountId) return a;
+    }
+    return _accounts.firstOrNull;
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadAccount();
-    _sub = widget.session.mailEvents.listen((_) => _refresh());
+    _loadAccounts();
+    _sub = widget.session.mailEvents.listen((_) => _loadAccounts(quiet: true));
   }
 
   @override
@@ -65,16 +87,23 @@ class _MailScreenState extends State<MailScreen> {
     super.dispose();
   }
 
-  Future<void> _loadAccount() async {
+  Future<void> _loadAccounts({bool quiet = false}) async {
     try {
-      final account = await _api.account();
+      final list = await _api.accountList();
       if (!mounted) return;
+      final keep = list.accounts.any((a) => a.id == _accountId);
       setState(() {
-        _account = account;
+        _accounts = list.accounts;
+        _legacy = list.legacy;
+        if (!keep) {
+          _accountId = list.accounts.firstOrNull?.id ?? '';
+          _folder = 'INBOX';
+          _selectedUid = null;
+        }
         _loadingAccount = false;
-        _error = null;
+        if (!quiet) _error = null;
       });
-      if (account != null) await _refresh();
+      if (list.accounts.isNotEmpty) await _refresh();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -91,12 +120,12 @@ class _MailScreenState extends State<MailScreen> {
   }
 
   Future<void> _loadFolders() async {
+    final account = _accountId;
     try {
-      final folders = await _api.folders();
-      if (!mounted) return;
+      final folders = await _api.folders(account);
+      if (!mounted || account != _accountId) return;
       setState(() => _folders = folders);
-      final inbox = folders.where((f) => f.isInbox).firstOrNull;
-      if (inbox?.unseen != null) widget.session.setMailUnread(inbox!.unseen!);
+      unawaited(widget.session.refreshMailUnread());
     } catch (e) {
       if (mounted) {
         setState(() => _error = e is ApiException ? trServer(e.message) : '$e');
@@ -105,13 +134,15 @@ class _MailScreenState extends State<MailScreen> {
   }
 
   Future<void> _loadMessages() async {
+    final account = _accountId;
     setState(() => _loadingList = true);
     try {
       final page = await _api.messages(
+        account,
         _folder,
         query: _query.isEmpty ? null : _query,
       );
-      if (!mounted) return;
+      if (!mounted || account != _accountId) return;
       setState(() {
         _messages = page.messages;
         _nextBefore = page.nextBefore;
@@ -134,6 +165,7 @@ class _MailScreenState extends State<MailScreen> {
     setState(() => _loadingMore = true);
     try {
       final page = await _api.messages(
+        _accountId,
         _folder,
         before: before,
         query: _query.isEmpty ? null : _query,
@@ -144,7 +176,9 @@ class _MailScreenState extends State<MailScreen> {
         _nextBefore = page.nextBefore;
       });
     } catch (e) {
-      if (mounted) showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -159,6 +193,21 @@ class _MailScreenState extends State<MailScreen> {
       _search.clear();
     });
     _loadMessages();
+  }
+
+  void _switchAccount(String id) {
+    if (id == _accountId) return;
+    setState(() {
+      _accountId = id;
+      _folder = 'INBOX';
+      _folders = const [];
+      _messages = const [];
+      _selectedUid = null;
+      _query = '';
+      _search.clear();
+      _error = null;
+    });
+    _refresh();
   }
 
   void _runSearch(String q) {
@@ -189,10 +238,29 @@ class _MailScreenState extends State<MailScreen> {
       ];
     });
     final inbox = _folders.where((f) => f.isInbox).firstOrNull;
-    if (inbox?.path == _folder && inbox?.unseen != null) {
-      widget.session.setMailUnread(inbox!.unseen!);
+    if (inbox?.path == _folder && widget.session.mailUnread > 0) {
+      widget.session.setMailUnread(widget.session.mailUnread - 1);
     }
   }
+
+  MailReader _reader(
+    int uid, {
+    required VoidCallback onGone,
+    bool wide = true,
+  }) => MailReader(
+    key: ValueKey('reader-$_accountId-$_folder-$uid'),
+    session: widget.session,
+    api: _api,
+    account: _account!,
+    accounts: _accounts,
+    folder: _folder,
+    uid: uid,
+    folders: _folders,
+    onChanged: _refresh,
+    onReply: wide ? _compose : null,
+    onAccountChanged: _replaceAccount,
+    onGone: onGone,
+  );
 
   Future<void> _open(MailSummary m, {required bool wide}) async {
     _markSeenLocally(m.uid);
@@ -204,15 +272,9 @@ class _MailScreenState extends State<MailScreen> {
       MaterialPageRoute(
         builder: (_) => Scaffold(
           appBar: AppBar(title: Text(_folderName)),
-          body: MailReader(
-            key: ValueKey('reader-${m.uid}'),
-            session: widget.session,
-            api: _api,
-            account: _account!,
-            folder: _folder,
-            uid: m.uid,
-            folders: _folders,
-            onChanged: _refresh,
+          body: _reader(
+            m.uid,
+            wide: false,
             onGone: () {
               Navigator.of(context).maybePop();
               _refresh();
@@ -224,29 +286,61 @@ class _MailScreenState extends State<MailScreen> {
   }
 
   Future<void> _compose([MailDraft draft = const MailDraft()]) async {
-    final sent = await showMailCompose(
+    final outcome = await showMailCompose(
       context,
       session: widget.session,
       api: _api,
-      draft: draft,
+      draft: MailDraft(
+        to: draft.to,
+        cc: draft.cc,
+        bcc: draft.bcc,
+        subject: draft.subject,
+        text: draft.text,
+        inReplyTo: draft.inReplyTo,
+        references: draft.references,
+        answered: draft.answered,
+        saved: draft.saved,
+        savedAttachments: draft.savedAttachments,
+        accountId: draft.accountId ?? _accountId,
+        signatureSlot: draft.signatureSlot,
+      ),
+      accounts: _accounts,
     );
-    if (sent && mounted) {
+    if (!mounted) return;
+    if (outcome == MailComposeOutcome.sent) {
       showAppToast(context, tr('메일을 보냈습니다.'));
+    }
+    if (outcome != MailComposeOutcome.closed) {
+      if (draft.saved != null) setState(() => _selectedUid = null);
       _refresh();
     }
   }
 
-  Future<void> _connect() async {
+  void _replaceAccount(MailAccount next) {
+    setState(() {
+      _accounts = [for (final a in _accounts) a.id == next.id ? next : a];
+    });
+  }
+
+  /// 계정 연결(새 계정 — [edit]면 지금 계정 바꾸기).
+  Future<void> _connect({bool edit = false}) async {
+    final current = edit ? _account : null;
     final account = await showMailAccountDialog(
       context,
       api: _api,
-      current: _account,
+      current: current,
+      legacy: _legacy,
     );
     if (account == null || !mounted) return;
     setState(() {
-      _account = account;
+      final i = _accounts.indexWhere((a) => a.id == account.id);
+      _accounts = i >= 0
+          ? [for (final a in _accounts) a.id == account.id ? account : a]
+          : [..._accounts, account];
+      _accountId = account.id;
       _folder = 'INBOX';
       _selectedUid = null;
+      _error = null;
     });
     showAppToast(
       context,
@@ -257,11 +351,17 @@ class _MailScreenState extends State<MailScreen> {
   }
 
   Future<void> _disconnect() async {
+    final account = _account;
+    if (account == null) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(tr('메일 계정 연결을 끊을까요?')),
-        content: Text(tr('서버에 둔 연결 값과 비밀번호를 지웁니다. 메일 자체는 원래 메일 서버에 그대로 남습니다.')),
+        content: Text(
+          tr('{email} — 서버에 둔 연결 값과 비밀번호를 지웁니다. 메일 자체는 원래 메일 서버에 그대로 남습니다.', {
+            'email': account.email,
+          }),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -277,17 +377,25 @@ class _MailScreenState extends State<MailScreen> {
     );
     if (ok != true || !mounted) return;
     try {
-      await _api.disconnect();
+      await _api.disconnect(account.id);
       if (!mounted) return;
-      widget.session.setMailUnread(0);
       setState(() {
-        _account = null;
+        _accounts = [
+          for (final a in _accounts)
+            if (a.id != account.id) a,
+        ];
+        _accountId = _accounts.firstOrNull?.id ?? '';
         _folders = const [];
         _messages = const [];
         _selectedUid = null;
+        _folder = 'INBOX';
       });
+      unawaited(widget.session.refreshMailUnread());
+      _refresh();
     } catch (e) {
-      if (mounted) showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
     }
   }
 
@@ -295,15 +403,65 @@ class _MailScreenState extends State<MailScreen> {
     final account = _account;
     if (account == null) return;
     try {
-      final next = await _api.setNotify(!account.notify);
+      final next = await _api.setNotify(account.id, !account.notify);
       if (!mounted) return;
-      setState(() => _account = next);
+      _replaceAccount(next);
       showAppToast(
         context,
         next.notify ? tr('새 메일 알림을 켰습니다.') : tr('새 메일 알림을 껐습니다.'),
       );
     } catch (e) {
-      if (mounted) showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    }
+  }
+
+  Future<void> _signature() async {
+    final account = _account;
+    if (account == null) return;
+    final next = await showMailSignatureDialog(
+      context,
+      api: _api,
+      account: account,
+    );
+    if (next == null || !mounted) return;
+    _replaceAccount(next);
+    showAppToast(context, tr('서명을 저장했습니다.'));
+  }
+
+  Future<void> _rules() async {
+    final account = _account;
+    if (account == null) return;
+    await showMailRulesDialog(
+      context,
+      api: _api,
+      account: account,
+      folders: _folders,
+    );
+    if (mounted) _refresh();
+  }
+
+  /// 지금 계정을 기본(맨 앞)으로.
+  Future<void> _makeDefault() async {
+    final account = _account;
+    if (account == null) return;
+    try {
+      final next = await _api.reorder([
+        account.id,
+        for (final a in _accounts)
+          if (a.id != account.id) a.id,
+      ]);
+      if (!mounted) return;
+      setState(() => _accounts = next);
+      showAppToast(
+        context,
+        tr('{email}을(를) 기본 계정으로 했습니다.', {'email': account.email}),
+      );
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
     }
   }
 
@@ -321,40 +479,101 @@ class _MailScreenState extends State<MailScreen> {
     _ => Icons.folder_outlined,
   };
 
-  Widget _folderList({VoidCallback? afterTap}) {
+  IconData _accountIcon(MailAccount a) => a.isLocal
+      ? Icons.domain
+      : a.isOAuth
+      ? Icons.verified_user_outlined
+      : Icons.alternate_email;
+
+  /// 폴더 칸 머리 — 지금 계정(여럿이면 눌러서 바꾸기·더하기).
+  Widget _accountHeader() {
     final account = _account!;
-    return ListView(
-      key: const ValueKey('mail-folders'),
+    final theme = Theme.of(context);
+    final canAdd = !_legacy && _accounts.length < kMailAccountsMax;
+    final label = Row(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: Text(
-            account.email,
-            style: Theme.of(context).textTheme.titleSmall,
-            overflow: TextOverflow.ellipsis,
+        Icon(_accountIcon(account), size: 18, color: theme.hintColor),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                account.email,
+                style: theme.textTheme.titleSmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (account.providerLabel.isNotEmpty)
+                Text(
+                  account.providerLabel,
+                  style: TextStyle(fontSize: 11, color: theme.hintColor),
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
           ),
         ),
-        for (final f in _folders)
-          ListTile(
-            key: ValueKey('mail-folder-${f.path}'),
-            dense: true,
-            selected: f.path == _folder,
-            leading: Icon(_folderIcon(f), size: 20),
-            title: Text(f.name, overflow: TextOverflow.ellipsis),
-            trailing: (f.unseen ?? 0) > 0
-                ? Text(
-                    '${f.unseen}',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  )
-                : null,
-            onTap: () {
-              _openFolder(f.path);
-              afterTap?.call();
-            },
-          ),
+        if (_accounts.length > 1 || canAdd)
+          Icon(Icons.unfold_more, size: 18, color: theme.hintColor),
       ],
     );
+    if (_accounts.length <= 1 && !canAdd) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: label,
+      );
+    }
+    return PopupMenuButton<String>(
+      key: const ValueKey('mail-account-switch'),
+      tooltip: tr('계정 바꾸기'),
+      onSelected: (v) => v == '+' ? _connect() : _switchAccount(v),
+      itemBuilder: (_) => [
+        for (final a in _accounts)
+          CheckedPopupMenuItem(
+            key: ValueKey('mail-account-${a.email}'),
+            value: a.id,
+            checked: a.id == account.id,
+            child: Text(a.email, overflow: TextOverflow.ellipsis),
+          ),
+        if (canAdd) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            key: const ValueKey('mail-account-add'),
+            value: '+',
+            child: Text(tr('계정 더하기')),
+          ),
+        ],
+      ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
+        child: label,
+      ),
+    );
   }
+
+  Widget _folderList({VoidCallback? afterTap}) => ListView(
+    key: const ValueKey('mail-folders'),
+    children: [
+      _accountHeader(),
+      for (final f in _folders)
+        ListTile(
+          key: ValueKey('mail-folder-${f.path}'),
+          dense: true,
+          selected: f.path == _folder,
+          leading: Icon(_folderIcon(f), size: 20),
+          title: Text(f.name, overflow: TextOverflow.ellipsis),
+          trailing: (f.unseen ?? 0) > 0
+              ? Text(
+                  '${f.unseen}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                )
+              : null,
+          onTap: () {
+            _openFolder(f.path);
+            afterTap?.call();
+          },
+        ),
+    ],
+  );
 
   Widget _messageList({required bool wide}) {
     final theme = Theme.of(context);
@@ -375,8 +594,8 @@ class _MailScreenState extends State<MailScreen> {
         ),
       );
     }
-    final sentFolder =
-        _folders.where((f) => f.path == _folder).firstOrNull?.isSent ?? false;
+    final current = _folders.where((f) => f.path == _folder).firstOrNull;
+    final toSide = (current?.isSent ?? false) || (current?.isDrafts ?? false);
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView.separated(
@@ -399,9 +618,9 @@ class _MailScreenState extends State<MailScreen> {
             );
           }
           final m = _messages[i];
-          final who = sentFolder
+          final who = toSide
               ? (m.to.isEmpty
-                    ? ''
+                    ? (m.draft ? tr('(받는 사람 없음)') : '')
                     : tr('받는 사람: {m.to.first.label}', {
                         'm.to.first.label': m.to.first.label,
                       }))
@@ -413,7 +632,11 @@ class _MailScreenState extends State<MailScreen> {
             key: ValueKey('mail-item-${m.uid}'),
             selected: wide && _selectedUid == m.uid,
             leading: Icon(
-              m.seen ? Icons.drafts_outlined : Icons.mail,
+              m.draft
+                  ? Icons.edit_note
+                  : m.seen
+                  ? Icons.drafts_outlined
+                  : Icons.mail,
               color: m.seen ? theme.hintColor : theme.colorScheme.primary,
               size: 20,
             ),
@@ -434,6 +657,17 @@ class _MailScreenState extends State<MailScreen> {
             ),
             subtitle: Row(
               children: [
+                if (m.draft)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Text(
+                      tr('[임시]'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ),
                 if (m.answered)
                   Padding(
                     padding: const EdgeInsets.only(right: 4),
@@ -441,7 +675,7 @@ class _MailScreenState extends State<MailScreen> {
                   ),
                 Expanded(
                   child: Text(
-                    m.subject,
+                    m.subject.isEmpty ? tr('(제목 없음)') : m.subject,
                     style: bold.copyWith(fontSize: 13),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -527,6 +761,7 @@ class _MailScreenState extends State<MailScreen> {
         ),
       ),
     );
+    final canAdd = !_legacy && _accounts.length < kMailAccountsMax;
     final appBar = AppBar(
       title: Text(tr('메일 · {_folderName}', {'_folderName': _folderName})),
       actions: [
@@ -554,18 +789,48 @@ class _MailScreenState extends State<MailScreen> {
           key: const ValueKey('mail-menu'),
           tooltip: tr('계정'),
           onSelected: (v) => switch (v) {
-            'edit' => _connect(),
+            'edit' => _connect(edit: true),
+            'signature' => _signature(),
+            'rules' => _rules(),
             'notify' => _toggleNotify(),
+            'default' => _makeDefault(),
+            'add' => _connect(),
             'disconnect' => _disconnect(),
             _ => null,
           },
           itemBuilder: (_) => [
-            PopupMenuItem(value: 'edit', child: Text(tr('계정 바꾸기'))),
+            if (!account.isLocal)
+              PopupMenuItem(value: 'edit', child: Text(tr('계정 바꾸기'))),
+            if (!_legacy) ...[
+              PopupMenuItem(
+                key: const ValueKey('mail-menu-signature'),
+                value: 'signature',
+                child: Text(tr('서명')),
+              ),
+              PopupMenuItem(
+                key: const ValueKey('mail-menu-rules'),
+                value: 'rules',
+                child: Text(tr('받는 규칙')),
+              ),
+            ],
             PopupMenuItem(
               value: 'notify',
               child: Text(account.notify ? tr('새 메일 알림 끄기') : tr('새 메일 알림 켜기')),
             ),
-            PopupMenuItem(value: 'disconnect', child: Text(tr('연결 끊기'))),
+            if (_accounts.length > 1 && _accounts.first.id != account.id)
+              PopupMenuItem(
+                key: const ValueKey('mail-menu-default'),
+                value: 'default',
+                child: Text(tr('기본 계정으로')),
+              ),
+            if (canAdd)
+              PopupMenuItem(
+                key: const ValueKey('mail-menu-add'),
+                value: 'add',
+                child: Text(tr('계정 더하기')),
+              ),
+            if (!account.isLocal)
+              PopupMenuItem(value: 'disconnect', child: Text(tr('연결 끊기'))),
           ],
         ),
       ],
@@ -584,8 +849,11 @@ class _MailScreenState extends State<MailScreen> {
                     style: TextStyle(color: theme.colorScheme.onErrorContainer),
                   ),
                 ),
-                if (account.lastError != null)
-                  TextButton(onPressed: _connect, child: Text(tr('계정 바꾸기'))),
+                if (account.lastError != null && !account.isLocal)
+                  TextButton(
+                    onPressed: () => _connect(edit: true),
+                    child: Text(tr('계정 바꾸기')),
+                  ),
               ],
             ),
           )
@@ -625,7 +893,7 @@ class _MailScreenState extends State<MailScreen> {
           Expanded(
             child: Row(
               children: [
-                SizedBox(width: 220, child: _folderList()),
+                SizedBox(width: 240, child: _folderList()),
                 const VerticalDivider(width: 1),
                 SizedBox(width: 380, child: _messageList(wide: true)),
                 const VerticalDivider(width: 1),
@@ -637,16 +905,8 @@ class _MailScreenState extends State<MailScreen> {
                             style: TextStyle(color: theme.hintColor),
                           ),
                         )
-                      : MailReader(
-                          key: ValueKey('reader-$_folder-$selected'),
-                          session: widget.session,
-                          api: _api,
-                          account: account,
-                          folder: _folder,
-                          uid: selected,
-                          folders: _folders,
-                          onChanged: _refresh,
-                          onReply: _compose,
+                      : _reader(
+                          selected,
                           onGone: () {
                             setState(() => _selectedUid = null);
                             _refresh();
@@ -662,11 +922,15 @@ class _MailScreenState extends State<MailScreen> {
   }
 }
 
-/// 메일 하나 읽기 — 머리(보낸 사람·받는 사람·참조·시각), 답장·전체 답장·전달·중요·안 읽음·옮기기·지우기, 첨부, 본문(글자).
+/// 메일 하나 읽기 — 머리(보낸 사람·받는 사람·참조·시각), 답장·전체 답장·전달·중요·안 읽음·옮기기·지우기·대화방으로·할 일로, 첨부,
+/// 본문(HTML 메일은 걸러 낸 서식 그대로 — 바깥 그림은 "그림 보기"를 눌러야, "글자로 보기"로 바꿀 수 있음). 임시 저장본이면 "이어 쓰기".
 class MailReader extends StatefulWidget {
   final Session session;
   final MailApi api;
   final MailAccount account;
+
+  /// 쓰기 창의 보내는 계정 후보.
+  final List<MailAccount> accounts;
   final String folder;
   final int uid;
   final List<MailFolder> folders;
@@ -677,19 +941,24 @@ class MailReader extends StatefulWidget {
   /// 옮기거나 지워서 이 폴더에서 없어졌을 때.
   final VoidCallback onGone;
 
-  /// 답장·전달 쓰기 — 없으면 이 위젯이 직접 쓰기 화면을 연다.
+  /// 답장·전달·이어 쓰기 — 없으면 이 위젯이 직접 쓰기 화면을 연다.
   final Future<void> Function(MailDraft draft)? onReply;
+
+  /// 계정 설정이 바뀌었을 때(그림을 늘 볼 보낸 사람).
+  final ValueChanged<MailAccount>? onAccountChanged;
   const MailReader({
     super.key,
     required this.session,
     required this.api,
     required this.account,
+    this.accounts = const [],
     required this.folder,
     required this.uid,
     required this.folders,
     required this.onChanged,
     required this.onGone,
     this.onReply,
+    this.onAccountChanged,
   });
 
   @override
@@ -700,6 +969,10 @@ class _MailReaderState extends State<MailReader> {
   MailMessage? _message;
   String? _error;
   bool _flagged = false;
+  bool _plain = false;
+  bool _showImages = false;
+
+  String get _accountId => widget.account.id;
 
   @override
   void initState() {
@@ -709,11 +982,12 @@ class _MailReaderState extends State<MailReader> {
 
   Future<void> _load() async {
     try {
-      final m = await widget.api.message(widget.folder, widget.uid);
+      final m = await widget.api.message(_accountId, widget.folder, widget.uid);
       if (!mounted) return;
       setState(() {
         _message = m;
         _flagged = m.flagged;
+        _showImages = widget.account.trusts(m.from.address);
       });
     } catch (e) {
       if (mounted) {
@@ -722,36 +996,60 @@ class _MailReaderState extends State<MailReader> {
     }
   }
 
-  Future<void> _reply(MailReplyKind kind) async {
-    final m = _message;
-    if (m == null) return;
-    final draft = draftFrom(
-      m,
-      kind,
-      folder: widget.folder,
-      myEmail: widget.account.email,
-    );
+  Future<void> _openDraft(MailDraft draft) async {
     if (widget.onReply != null) {
       await widget.onReply!(draft);
       return;
     }
-    final sent = await showMailCompose(
+    final outcome = await showMailCompose(
       context,
       session: widget.session,
       api: widget.api,
       draft: draft,
+      accounts: widget.accounts,
     );
-    if (sent && mounted) {
+    if (!mounted) return;
+    if (outcome == MailComposeOutcome.sent) {
       showAppToast(context, tr('메일을 보냈습니다.'));
-      widget.onChanged();
     }
+    if (outcome != MailComposeOutcome.closed) {
+      if (draft.saved != null) {
+        widget.onGone();
+      } else {
+        widget.onChanged();
+      }
+    }
+  }
+
+  Future<void> _reply(MailReplyKind kind) async {
+    final m = _message;
+    if (m == null) return;
+    await _openDraft(
+      draftFrom(
+        m,
+        kind,
+        folder: widget.folder,
+        myEmail: widget.account.email,
+        accountId: _accountId,
+      ),
+    );
+  }
+
+  Future<void> _resume() async {
+    final m = _message;
+    if (m == null) return;
+    await _openDraft(
+      draftFromSaved(m, folder: widget.folder, accountId: _accountId),
+    );
   }
 
   Future<void> _toggleFlag() async {
     final next = !_flagged;
     setState(() => _flagged = next);
     try {
-      await widget.api.setFlags(widget.folder, [widget.uid], flagged: next);
+      await widget.api.setFlags(_accountId, widget.folder, [
+        widget.uid,
+      ], flagged: next);
       widget.onChanged();
     } catch (e) {
       if (!mounted) return;
@@ -762,28 +1060,36 @@ class _MailReaderState extends State<MailReader> {
 
   Future<void> _markUnread() async {
     try {
-      await widget.api.setFlags(widget.folder, [widget.uid], seen: false);
+      await widget.api.setFlags(_accountId, widget.folder, [
+        widget.uid,
+      ], seen: false);
       widget.onChanged();
       if (mounted) showAppToast(context, tr('안 읽음으로 바꿨습니다.'));
     } catch (e) {
-      if (mounted) showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
     }
   }
 
   Future<void> _move(String to) async {
     try {
-      await widget.api.move(widget.folder, [widget.uid], to);
+      await widget.api.move(_accountId, widget.folder, [widget.uid], to);
       if (!mounted) return;
       showAppToast(context, tr('옮겼습니다.'));
       widget.onGone();
     } catch (e) {
-      if (mounted) showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
     }
   }
 
   Future<void> _delete() async {
     try {
-      final result = await widget.api.delete(widget.folder, [widget.uid]);
+      final result = await widget.api.delete(_accountId, widget.folder, [
+        widget.uid,
+      ]);
       if (!mounted) return;
       showAppToast(
         context,
@@ -791,14 +1097,16 @@ class _MailReaderState extends State<MailReader> {
       );
       widget.onGone();
     } catch (e) {
-      if (mounted) showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
     }
   }
 
   Future<void> _download(MailAttachment a) async {
     try {
       final path = await widget.session.downloadAuthedFile(
-        MailApi.attachmentPath(widget.folder, widget.uid, a.index),
+        MailApi.attachmentPath(_accountId, widget.folder, widget.uid, a.index),
         fileName: a.fileName,
       );
       final notice = await openLocalFile(path);
@@ -806,6 +1114,130 @@ class _MailReaderState extends State<MailReader> {
     } catch (e) {
       if (mounted) showAppToast(context, tr('첨부를 열지 못했습니다: {e}', {'e': e}));
     }
+  }
+
+  /// 이 보낸 사람의 바깥 그림을 늘 보기.
+  Future<void> _trustSender() async {
+    final m = _message;
+    if (m == null || m.from.address.isEmpty) return;
+    setState(() => _showImages = true);
+    try {
+      final next = await widget.api.trustSender(_accountId, m.from.address);
+      widget.onAccountChanged?.call(next);
+      if (mounted) {
+        showAppToast(
+          context,
+          tr('{from}이(가) 보낸 메일은 그림을 늘 보여 줍니다.', {'from': m.from.address}),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, e is ApiException ? trServer(e.message) : '$e');
+      }
+    }
+  }
+
+  /// 본문 링크 — mailto는 쓰기 창으로, 웹 주소는 실제 주소를 보이고 물은 뒤 브라우저로(글자와 다른 곳으로 보내는 피싱 막기).
+  Future<void> _openLink(String href) async {
+    final uri = Uri.tryParse(href);
+    if (uri == null) return;
+    if (uri.scheme == 'mailto') {
+      final address = uri.path;
+      if (address.isEmpty) return;
+      await _openDraft(
+        MailDraft(
+          to: [MailAddress(address: address)],
+          subject: uri.queryParameters['subject'] ?? '',
+          accountId: _accountId,
+        ),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(tr('이 주소를 열까요?')),
+        content: SelectableText(href, key: const ValueKey('mail-link-url')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(tr('취소')),
+          ),
+          FilledButton(
+            key: const ValueKey('mail-link-open'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(tr('열기')),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await mailOpenLink(uri);
+  }
+
+  Future<void> _toRoom() async {
+    final m = _message;
+    if (m == null) return;
+    final room = await showMailToRoom(
+      context,
+      session: widget.session,
+      api: widget.api,
+      account: _accountId,
+      folder: widget.folder,
+      message: m,
+    );
+    if (room != null && mounted) {
+      showAppToast(context, tr('{room}에 보냈습니다.', {'room': room.name}));
+    }
+  }
+
+  Future<void> _toTodo() async {
+    final m = _message;
+    if (m == null) return;
+    final made = await createTodoFromMail(
+      context,
+      session: widget.session,
+      api: widget.api,
+      account: _accountId,
+      folder: widget.folder,
+      message: m,
+    );
+    if (made && mounted) showAppToast(context, tr('할 일을 만들었습니다.'));
+  }
+
+  Widget _imagesBanner(MailMessage m) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('mail-images-banner'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        children: [
+          Text(
+            tr('바깥 그림 {n}개를 가렸습니다(열면 보낸 쪽이 읽었는지 알 수 있습니다).', {
+              'n': m.remoteImages,
+            }),
+            style: const TextStyle(fontSize: 12),
+          ),
+          TextButton(
+            key: const ValueKey('mail-show-images'),
+            onPressed: () => setState(() => _showImages = true),
+            child: Text(tr('그림 보기')),
+          ),
+          if (m.from.address.isNotEmpty)
+            TextButton(
+              key: const ValueKey('mail-trust-sender'),
+              onPressed: _trustSender,
+              child: Text(tr('이 보낸 사람은 늘 보기')),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -824,6 +1256,8 @@ class _MailReaderState extends State<MailReader> {
       for (final f in widget.folders)
         if (f.path != widget.folder) f,
     ];
+    final rich = m.rich;
+    final showRich = rich != null && !_plain;
     return ListView(
       key: const ValueKey('mail-reader'),
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -833,7 +1267,7 @@ class _MailReaderState extends State<MailReader> {
           children: [
             Expanded(
               child: SelectableText(
-                m.subject,
+                m.subject.isEmpty ? tr('(제목 없음)') : m.subject,
                 key: const ValueKey('mail-reader-subject'),
                 style: theme.textTheme.titleLarge,
               ),
@@ -850,10 +1284,11 @@ class _MailReaderState extends State<MailReader> {
           ],
         ),
         const SizedBox(height: 8),
-        Text(
-          tr('보낸 사람: {m.from.wire}', {'m.from.wire': m.from.wire}),
-          key: const ValueKey('mail-reader-from'),
-        ),
+        if (!m.draft || m.from.address.isNotEmpty)
+          Text(
+            tr('보낸 사람: {m.from.wire}', {'m.from.wire': m.from.wire}),
+            key: const ValueKey('mail-reader-from'),
+          ),
         if (m.to.isNotEmpty)
           Text(
             tr('받는 사람: {p0}', {'p0': people(m.to)}),
@@ -862,6 +1297,11 @@ class _MailReaderState extends State<MailReader> {
         if (m.cc.isNotEmpty)
           Text(
             tr('참조: {p0}', {'p0': people(m.cc)}),
+            style: TextStyle(color: theme.hintColor),
+          ),
+        if (m.bcc.isNotEmpty)
+          Text(
+            tr('숨은 참조: {p0}', {'p0': people(m.bcc)}),
             style: TextStyle(color: theme.hintColor),
           ),
         if (m.date != null)
@@ -874,30 +1314,39 @@ class _MailReaderState extends State<MailReader> {
           spacing: 4,
           runSpacing: 4,
           children: [
-            OutlinedButton.icon(
-              key: const ValueKey('mail-reply'),
-              onPressed: () => _reply(MailReplyKind.reply),
-              icon: const Icon(Icons.reply, size: 18),
-              label: Text(tr('답장')),
-            ),
-            OutlinedButton.icon(
-              key: const ValueKey('mail-reply-all'),
-              onPressed: () => _reply(MailReplyKind.replyAll),
-              icon: const Icon(Icons.reply_all, size: 18),
-              label: Text(tr('전체 답장')),
-            ),
-            OutlinedButton.icon(
-              key: const ValueKey('mail-forward'),
-              onPressed: () => _reply(MailReplyKind.forward),
-              icon: const Icon(Icons.forward, size: 18),
-              label: Text(tr('전달')),
-            ),
-            IconButton(
-              key: const ValueKey('mail-unread'),
-              tooltip: tr('안 읽음으로'),
-              icon: const Icon(Icons.mark_email_unread_outlined),
-              onPressed: _markUnread,
-            ),
+            if (m.draft)
+              FilledButton.icon(
+                key: const ValueKey('mail-resume-draft'),
+                onPressed: _resume,
+                icon: const Icon(Icons.edit, size: 18),
+                label: Text(tr('이어 쓰기')),
+              )
+            else ...[
+              OutlinedButton.icon(
+                key: const ValueKey('mail-reply'),
+                onPressed: () => _reply(MailReplyKind.reply),
+                icon: const Icon(Icons.reply, size: 18),
+                label: Text(tr('답장')),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('mail-reply-all'),
+                onPressed: () => _reply(MailReplyKind.replyAll),
+                icon: const Icon(Icons.reply_all, size: 18),
+                label: Text(tr('전체 답장')),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('mail-forward'),
+                onPressed: () => _reply(MailReplyKind.forward),
+                icon: const Icon(Icons.forward, size: 18),
+                label: Text(tr('전달')),
+              ),
+              IconButton(
+                key: const ValueKey('mail-unread'),
+                tooltip: tr('안 읽음으로'),
+                icon: const Icon(Icons.mark_email_unread_outlined),
+                onPressed: _markUnread,
+              ),
+            ],
             if (moveTargets.isNotEmpty)
               PopupMenuButton<String>(
                 key: const ValueKey('mail-move'),
@@ -919,6 +1368,25 @@ class _MailReaderState extends State<MailReader> {
               icon: const Icon(Icons.delete_outline),
               onPressed: _delete,
             ),
+            if (!m.draft)
+              PopupMenuButton<String>(
+                key: const ValueKey('mail-share'),
+                tooltip: tr('보내기'),
+                icon: const Icon(Icons.more_horiz),
+                onSelected: (v) => v == 'room' ? _toRoom() : _toTodo(),
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    key: const ValueKey('mail-to-room'),
+                    value: 'room',
+                    child: Text(tr('대화방으로 보내기')),
+                  ),
+                  PopupMenuItem(
+                    key: const ValueKey('mail-to-todo'),
+                    value: 'todo',
+                    child: Text(tr('할 일로 만들기')),
+                  ),
+                ],
+              ),
           ],
         ),
         if (m.attachments.isNotEmpty) ...[
@@ -938,20 +1406,52 @@ class _MailReaderState extends State<MailReader> {
           ),
         ],
         const Divider(height: 24),
-        if (m.wasHtml)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              tr('HTML 메일을 글자로 보여 줍니다(그림·서식은 빠짐).'),
-              style: TextStyle(fontSize: 12, color: theme.hintColor),
+        if (rich != null)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              key: const ValueKey('mail-view-toggle'),
+              onPressed: () => setState(() => _plain = !_plain),
+              icon: Icon(
+                _plain ? Icons.article_outlined : Icons.notes,
+                size: 16,
+              ),
+              label: Text(_plain ? tr('서식으로 보기') : tr('글자로 보기')),
             ),
           ),
-        SelectableText(m.text, key: const ValueKey('mail-reader-body')),
-        if (m.truncated)
+        if (showRich && m.remoteImages > 0 && !_showImages) _imagesBanner(m),
+        if (showRich)
+          MailRichView(
+            doc: rich,
+            showRemoteImages: _showImages,
+            cidPath: (index) => MailApi.inlinePath(
+              _accountId,
+              widget.folder,
+              widget.uid,
+              index,
+            ),
+            remotePath: MailApi.remoteImagePath,
+            loadBytes: widget.api.bytes,
+            onLink: _openLink,
+          )
+        else ...[
+          if (m.wasHtml && rich == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                tr('HTML 메일을 글자로 보여 줍니다(그림·서식은 빠짐).'),
+                style: TextStyle(fontSize: 12, color: theme.hintColor),
+              ),
+            ),
+          SelectableText(m.text, key: const ValueKey('mail-reader-body')),
+        ],
+        if (m.truncated || (showRich && m.richTruncated))
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              tr('본문이 길어 앞부분만 보여 줍니다.'),
+              showRich
+                  ? tr('본문이 길어 앞부분만 서식으로 보여 줍니다. 전부 보려면 "글자로 보기"를 누르세요.')
+                  : tr('본문이 길어 앞부분만 보여 줍니다.'),
               style: TextStyle(fontSize: 12, color: theme.hintColor),
             ),
           ),

@@ -4,6 +4,8 @@ backup_before_reset_*/
 backup_before_full_reset_*/
 uploads/*
 !uploads/.gitkeep
+# 자체 메일 서버가 받은 메일 원문(config.js MAIL_STORE_DIR).
+mailstore/
 releases/*
 !releases/.gitkeep
 *.log

@@ -62,6 +62,22 @@ export async function isMailEnabled() {
 }
 
 /**
+ * 다 만든 메일 원문([raw])을 서버의 SMTP로 [to](주소들)에게 넘긴다 — 회사 메일함(자체 메일 서버)에서 바깥 주소로 보낼 때(webmail.js).
+ * 봉투의 보내는 사람은 [from](그 사람의 회사 주소). 메일 기능이 꺼져 있으면 MailError. SMTP 쪽이 그 주소로 보내는 것을 허락해야 한다
+ * (회사 메일 서버·발송 서비스의 도메인 인증 — Gmail·네이버 SMTP는 계정 주소로 바꿔 버린다).
+ */
+export async function sendRawMail({ from, to, raw }) {
+  const current = await getServerSettings();
+  if (!mailReady(current)) throw new MailError('바깥 주소로 보내려면 관리자 콘솔 → 메일(SMTP)을 먼저 켜야 합니다.');
+  try {
+    await transporterFor(current).sendMail({ envelope: { from, to }, raw });
+  } catch (err) {
+    console.error('[mail] 회사 메일 보내기 실패:', err?.code ?? '', err?.message ?? err);
+    throw new MailError(describeSmtpError(err), err);
+  }
+}
+
+/**
  * [to]에게 [mail]({ subject, text, html } — mailTemplates.js)을 보낸다. 메일이 꺼져 있거나 보내지 못하면 MailError.
  * [settings]를 주면 그 값으로(시험 메일 — 아직 켜지 않은 설정), 아니면 지금 저장된 설정으로 켜져 있을 때만 보낸다.
  */

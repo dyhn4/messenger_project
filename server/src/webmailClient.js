@@ -7,9 +7,11 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { isBlockedAddress, LIST_LIMIT_MAX, MESSAGE_BYTES_MAX, SEARCH_MAX } from './webmailRules.js';
 
 /**
- * 웹메일의 메일 서버 쪽 — IMAP(imapflow)으로 폴더·목록·읽기·플래그·이동·지우기, SMTP(nodemailer)로 보내기. 사람마다 IMAP 연결 하나를 잠깐
- * 열어 두고(3분 동안 안 쓰면 닫음) 그 사람의 요청을 차례로 처리한다(폴더 선택이 연결 상태라 섞이지 않게). 접속 전에 주소를 풀어 이 PC 자신·
- * 링크 로컬 주소면 막는다(webmailRules.js isBlockedAddress). 시험은 __setWebmailTestHooks로 가짜 IMAP·SMTP·주소 풀이를 끼운다.
+ * 웹메일의 메일 서버 쪽 — IMAP(imapflow)으로 폴더·목록·읽기·플래그·이동·지우기·임시 저장, SMTP(nodemailer)로 보내기. 계정마다 IMAP 연결
+ * 하나를 잠깐 열어 두고(3분 동안 안 쓰면 닫음) 그 계정의 요청을 차례로 처리한다(폴더 선택이 연결 상태라 섞이지 않게). 접속 전에 주소를
+ * 풀어 이 PC 자신·링크 로컬 주소면 막는다(webmailRules.js isBlockedAddress). 로그인 값([creds])은 `{ password }`(비밀번호·앱 비밀번호)
+ * 또는 `{ accessToken }`(Google·Microsoft OAuth — XOAUTH2, webmailOAuth.js가 갱신해 넘긴다). 시험은 __setWebmailTestHooks로 가짜 IMAP·
+ * SMTP·주소 풀이를 끼운다.
  */
 
 const IDLE_CLOSE_MS = 3 * 60 * 1000;
@@ -43,12 +45,16 @@ export async function assertAllowedHost(host) {
   }
 }
 
-const imapOptions = (account, password) => ({
+/** 로그인 값 → imapflow auth(비밀번호 또는 XOAUTH2 접근 토큰). */
+const imapAuth = (account, creds) =>
+  creds?.accessToken ? { user: account.username ?? account.email, accessToken: creds.accessToken } : { user: account.username, pass: creds?.password ?? '' };
+
+const imapOptions = (account, creds) => ({
   host: account.imapHost,
   port: account.imapPort,
   secure: account.imapSecurity === 'ssl',
   doSTARTTLS: account.imapSecurity === 'starttls' ? true : undefined,
-  auth: { user: account.username, pass: password },
+  auth: imapAuth(account, creds),
   logger: false,
   emitLogs: false,
   connectionTimeout: 20_000,
@@ -58,81 +64,84 @@ const imapOptions = (account, password) => ({
 });
 
 /** IMAP에 새로 붙는다(로그인까지). 실패하면 imapflow 오류를 그대로 던진다. */
-export async function connectImap(account, password) {
+export async function connectImap(account, creds) {
   await assertAllowedHost(account.imapHost);
-  const client = hooks.imap(imapOptions(account, password));
+  const client = hooks.imap(imapOptions(account, creds));
   client.on?.('error', () => {});
   await client.connect();
   return client;
 }
 
-// ── 사람마다 연결 하나 ──
+// ── 계정마다 연결 하나 ──
 
-/** userId → { client, key, timer } */
+/** 계정 id → { client, key, timer } */
 const connections = new Map();
-/** userId → 그 사람의 요청 줄(Promise) */
+/** 계정 id → 그 계정의 요청 줄(Promise) */
 const queues = new Map();
 
-const connectionKey = (account) => `${account.imapHost}:${account.imapPort}:${account.username}:${new Date(account.updatedAt ?? 0).getTime()}`;
+const connectionKey = (account) =>
+  `${account.imapHost}:${account.imapPort}:${account.username}:${account.authType ?? 'password'}:${new Date(account.updatedAt ?? 0).getTime()}`;
 
-function scheduleClose(userId) {
-  const entry = connections.get(userId);
+function scheduleClose(accountId) {
+  const entry = connections.get(accountId);
   if (!entry) return;
   clearTimeout(entry.timer);
-  entry.timer = setTimeout(() => closeConnection(userId), IDLE_CLOSE_MS);
+  entry.timer = setTimeout(() => closeConnection(accountId), IDLE_CLOSE_MS);
   entry.timer.unref?.();
 }
 
-export function closeConnection(userId) {
-  const entry = connections.get(userId);
+export function closeConnection(accountId) {
+  const entry = connections.get(accountId);
   if (!entry) return;
-  connections.delete(userId);
+  connections.delete(accountId);
   clearTimeout(entry.timer);
   entry.client.logout?.().catch(() => entry.client.close?.());
 }
 
 export function closeAllConnections() {
-  for (const userId of [...connections.keys()]) closeConnection(userId);
+  for (const id of [...connections.keys()]) closeConnection(id);
 }
 
-async function clientFor(account, password) {
+async function clientFor(account, creds) {
   const key = connectionKey(account);
-  const entry = connections.get(account.userId);
+  const entry = connections.get(account.id);
   if (entry && entry.key === key && entry.client.usable !== false) return entry.client;
-  if (entry) closeConnection(account.userId);
-  const client = await connectImap(account, password);
+  if (entry) closeConnection(account.id);
+  const client = await connectImap(account, creds);
   client.on?.('close', () => {
-    if (connections.get(account.userId)?.client === client) connections.delete(account.userId);
+    if (connections.get(account.id)?.client === client) connections.delete(account.id);
   });
-  connections.set(account.userId, { client, key, timer: null });
+  connections.set(account.id, { client, key, timer: null });
   return client;
 }
 
 /**
- * [account]의 IMAP 연결로 [fn](client)을 돌린다 — 같은 사람의 요청은 차례로. 연결이 끊겨 실패하면 한 번 새로 붙어 다시 해 본다.
+ * [account]의 IMAP 연결로 [fn](client)을 돌린다 — 같은 계정의 요청은 차례로. 연결이 끊겨 실패하면 한 번 새로 붙어 다시 해 본다.
+ * [creds]는 로그인 값이거나 그것을 돌려주는 함수(OAuth — 줄을 기다린 뒤 토큰을 받게).
  */
-export function withImap(account, password, fn) {
-  const prev = queues.get(account.userId) ?? Promise.resolve();
+export function withImap(account, creds, fn) {
+  const prev = queues.get(account.id) ?? Promise.resolve();
   const run = prev
     .catch(() => {})
     .then(async () => {
-      let client = await clientFor(account, password);
+      const auth = typeof creds === 'function' ? await creds() : creds;
+      let client = await clientFor(account, auth);
       try {
         return await fn(client);
       } catch (err) {
         if (client.usable === false || err?.code === 'NoConnection' || err?.code === 'EPIPE' || err?.code === 'ECONNRESET') {
-          closeConnection(account.userId);
-          client = await clientFor(account, password);
+          closeConnection(account.id);
+          client = await clientFor(account, auth);
           return await fn(client);
         }
         throw err;
       } finally {
-        scheduleClose(account.userId);
+        scheduleClose(account.id);
       }
     });
-  queues.set(account.userId, run);
+  queues.set(account.id, run);
   run.finally(() => {
-    if (queues.get(account.userId) === run) queues.delete(account.userId);
+    if (queues.get(account.id) === run) queues.delete(account.id);
   }).catch(() => {});
   return run;
 }
@@ -141,10 +150,16 @@ export function withImap(account, password, fn) {
 
 export const listFolders = (client) => client.list({ statusQuery: { unseen: true, messages: true } });
 
-/** 특수 폴더([use] '\\Sent'·'\\Trash' 등)의 경로 — 없으면 null. */
+/** 특수 폴더([use] '\\Sent'·'\\Trash'·'\\Drafts' 등)의 경로 — 없으면 null. */
 export async function specialFolder(client, use) {
   const list = await client.list();
   return list.find((m) => m.specialUse === use)?.path ?? null;
+}
+
+/** 폴더가 있는지(규칙의 옮길 폴더 확인). */
+export async function folderExists(client, path) {
+  const list = await client.list();
+  return list.some((m) => m.path === path && !m.flags?.has?.('\\Noselect'));
 }
 
 async function withLock(client, path, fn, { readOnly = false } = {}) {
@@ -185,8 +200,11 @@ export async function listMessages(client, path, { before = null, limit = 30, q 
   );
 }
 
-/** 메일 하나를 받아 풀어 본다 — 없으면 null, 너무 크면 `{ tooLarge, size }`. [markSeen]이면 읽음으로. */
-export async function readMessage(client, path, uid, { markSeen = true } = {}) {
+/**
+ * 메일 하나를 받아 풀어 본다 — 없으면 null, 너무 크면 `{ tooLarge, size }`. [markSeen]이면 읽음으로. [withSource]면 원문(Buffer)도
+ * (`.eml` 내려받기·대화방으로 보내기).
+ */
+export async function readMessage(client, path, uid, { markSeen = true, withSource = false } = {}) {
   return withLock(client, path, async () => {
     const meta = await client.fetchOne(String(uid), { uid: true, size: true, flags: true }, { uid: true });
     if (!meta) return null;
@@ -194,7 +212,7 @@ export async function readMessage(client, path, uid, { markSeen = true } = {}) {
     const full = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
     const parsed = await simpleParser(full.source, { skipImageLinks: true });
     if (markSeen && !meta.flags?.has('\\Seen')) await client.messageFlagsAdd(String(uid), ['\\Seen'], { uid: true });
-    return { parsed, flags: meta.flags ?? new Set() };
+    return { parsed, flags: meta.flags ?? new Set(), source: withSource ? full.source : undefined };
   });
 }
 
@@ -228,6 +246,9 @@ export async function deleteMessages(client, path, uids) {
   return 'deleted';
 }
 
+/** 휴지통을 거치지 않고 아주 지운다(바꿔 쓴 임시 저장본·보낸 뒤의 임시 저장본). */
+export const expungeMessages = (client, path, uids) => withLock(client, path, () => client.messageDelete(uids.join(','), { uid: true }));
+
 /** 보낸 메일을 보낸편지함에 넣는다(Gmail은 SMTP가 알아서 넣으니 부르는 쪽이 건너뛴다). 보낸편지함이 없으면 false. */
 export async function appendToSent(client, raw) {
   const sent = await specialFolder(client, '\\Sent');
@@ -236,45 +257,111 @@ export async function appendToSent(client, raw) {
   return true;
 }
 
+/**
+ * 임시 저장 — 임시보관함에 \Draft로 넣고 `{ folder, uid }`. 메일 서버가 새 uid를 알려 주지 않으면(UIDPLUS 없음) Message-ID로 찾는다.
+ * 임시보관함이 없으면 오류(code 'NO_DRAFTS').
+ */
+export async function appendDraft(client, raw, messageId) {
+  const drafts = await specialFolder(client, '\\Drafts');
+  if (!drafts) {
+    const e = new Error('이 메일 계정에는 임시보관함이 없습니다.');
+    e.code = 'NO_DRAFTS';
+    throw e;
+  }
+  const res = await client.append(drafts, raw, ['\\Draft', '\\Seen']);
+  let uid = res?.uid ?? null;
+  if (!uid && messageId) {
+    uid = await withLock(
+      client,
+      drafts,
+      async () => {
+        const found = await client.search({ header: { 'message-id': messageId } }, { uid: true });
+        return found?.length ? Math.max(...found) : null;
+      },
+      { readOnly: true },
+    );
+  }
+  return { folder: drafts, uid };
+}
+
 /** 받은편지함 상태 `{ uidNext, uidValidity, unseen }`. */
 export async function inboxStatus(client) {
   const s = await client.status('INBOX', { uidNext: true, uidValidity: true, unseen: true });
   return { uidNext: s.uidNext, uidValidity: s.uidValidity != null ? String(s.uidValidity) : null, unseen: s.unseen ?? 0 };
 }
 
-/** 받은편지함에서 [fromUid] 이후의 안 읽은 메일 겉봉(새것부터 [max]통). */
-export async function newInboxEnvelopes(client, fromUid, max = 3) {
+const envelopeOf = (m) => ({
+  uid: m.uid,
+  from: { name: m.envelope?.from?.[0]?.name ?? '', address: m.envelope?.from?.[0]?.address ?? '' },
+  to: (m.envelope?.to ?? []).map((a) => ({ name: a.name ?? '', address: a.address ?? '' })),
+  cc: (m.envelope?.cc ?? []).map((a) => ({ name: a.name ?? '', address: a.address ?? '' })),
+  subject: m.envelope?.subject ?? '',
+  seen: !!m.flags?.has('\\Seen'),
+});
+
+/**
+ * 받은편지함에서 [fromUid] 이후(포함)의 메일 겉봉 — 받는 규칙을 걸고 새 메일을 알리는 데. 새것부터 [max]통.
+ * `[{ uid, from, to, cc, subject, seen }]`.
+ */
+export async function newInboxMessages(client, fromUid, max = 200) {
   return withLock(
     client,
     'INBOX',
     async () => {
       const list = await client.fetchAll(`${fromUid}:*`, { uid: true, envelope: true, flags: true }, { uid: true });
       return list
-        .filter((m) => m.uid >= fromUid && !m.flags?.has('\\Seen'))
+        .filter((m) => m.uid >= fromUid)
         .sort((a, b) => b.uid - a.uid)
-        .slice(0, max);
+        .slice(0, max)
+        .map(envelopeOf);
     },
     { readOnly: true },
   );
 }
 
+/** [path] 폴더의 최근 [limit]통 겉봉(받는 규칙을 지금 걸기). */
+export async function recentMessages(client, path, limit) {
+  return withLock(
+    client,
+    path,
+    async () => {
+      const uids = ((await client.search({ all: true }, { uid: true })) || []).sort((a, b) => b - a).slice(0, limit);
+      if (uids.length === 0) return [];
+      const list = await client.fetchAll(uids.join(','), { uid: true, envelope: true, flags: true }, { uid: true });
+      return list.map(envelopeOf);
+    },
+    { readOnly: true },
+  );
+}
+
+/** 받는 규칙의 할 일(webmailRules.js planRules)을 [path] 폴더에 한다 — 읽음·중요 표시 먼저, 옮기기는 나중. */
+export async function applyRulePlan(client, path, plan) {
+  if (plan.seen.length) await setFlags(client, path, plan.seen, { seen: true });
+  if (plan.flagged.length) await setFlags(client, path, plan.flagged, { flagged: true });
+  for (const [to, uids] of plan.moves) {
+    if (to !== path && uids.length) await moveMessages(client, path, uids, to);
+  }
+}
+
 // ── SMTP ──
 
-const smtpOptions = (account, password) => ({
+const smtpOptions = (account, creds) => ({
   host: account.smtpHost,
   port: account.smtpPort,
   secure: account.smtpSecurity === 'ssl',
   requireTLS: account.smtpSecurity === 'starttls',
-  auth: { user: account.username, pass: password },
+  auth: creds?.accessToken
+    ? { type: 'OAuth2', user: account.username ?? account.email, accessToken: creds.accessToken }
+    : { user: account.username, pass: creds?.password ?? '' },
   connectionTimeout: 20_000,
   greetingTimeout: 15_000,
   socketTimeout: 60_000,
 });
 
 /** SMTP 로그인까지 되는지(계정 연결 시험). */
-export async function verifySmtp(account, password) {
+export async function verifySmtp(account, creds) {
   await assertAllowedHost(account.smtpHost);
-  const transporter = hooks.smtp(smtpOptions(account, password));
+  const transporter = hooks.smtp(smtpOptions(account, creds));
   try {
     await transporter.verify();
   } finally {
@@ -283,16 +370,28 @@ export async function verifySmtp(account, password) {
 }
 
 /**
- * 보내기 — [mail]은 nodemailer 메일 모양(from·to·cc·bcc·subject·text·attachments·inReplyTo·references). 보낸 원문(숨은 참조 머리 없음)을
- * 돌려준다(보낸편지함에 넣을 것).
+ * 메일 원문 만들기 — [mail]은 nodemailer 메일 모양(from·to·cc·bcc·subject·text·attachments·inReplyTo·references·messageId). [keepBcc]면
+ * 숨은 참조 머리를 남긴다(임시 저장본 — 이어 쓸 때 다시 채우게). 보내는 원문에는 남기지 않는다.
  */
-export async function sendViaSmtp(account, password, mail) {
+export async function buildRaw(mail, { keepBcc = false } = {}) {
+  const node = new MailComposer(mail).compile();
+  if (keepBcc) node.keepBcc = true;
+  return node.build();
+}
+
+/** [mail]의 받는 사람 전부(봉투) — 숨은 참조 포함. */
+export const envelopeRecipients = (mail) =>
+  [...(mail.to ?? []), ...(mail.cc ?? []), ...(mail.bcc ?? [])].map((a) => (typeof a === 'string' ? a : a.address));
+
+/**
+ * 보내기 — [mail]은 nodemailer 메일 모양. 보낸 원문(숨은 참조 머리 없음)을 돌려준다(보낸편지함에 넣을 것).
+ */
+export async function sendViaSmtp(account, creds, mail) {
   await assertAllowedHost(account.smtpHost);
-  const raw = await new MailComposer(mail).compile().build();
-  const recipients = [...(mail.to ?? []), ...(mail.cc ?? []), ...(mail.bcc ?? [])].map((a) => (typeof a === 'string' ? a : a.address));
-  const transporter = hooks.smtp(smtpOptions(account, password));
+  const raw = await buildRaw(mail);
+  const transporter = hooks.smtp(smtpOptions(account, creds));
   try {
-    await transporter.sendMail({ envelope: { from: account.email, to: recipients }, raw });
+    await transporter.sendMail({ envelope: { from: account.email, to: envelopeRecipients(mail) }, raw });
   } finally {
     transporter.close?.();
   }

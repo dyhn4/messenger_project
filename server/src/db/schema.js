@@ -9,6 +9,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  serial,
   text,
   timestamp,
   uniqueIndex,
@@ -576,6 +577,19 @@ export const serverSettings = pgTable('server_settings', {
   mentionDigestEnabled: boolean('mention_digest_enabled').notNull().default(true),
   mentionDigestDays: integer('mention_digest_days').notNull().default(3),
   mentionDigestPreview: boolean('mention_digest_preview').notNull().default(false),
+  // 자체 메일 서버(localMailServer.js) — 회사 도메인의 MX를 이 서버로 두면 그 도메인으로 오는 메일을 직접 받아 사람마다 "회사 메일함"
+  // (local_mail_messages + 디스크의 원문)에 넣는다. [localMailDomains]는 받을 도메인(쉼표로 여럿 — 첫 것이 주소의 기본 도메인, 주소의
+  // 앞부분은 아이디), [localMailPort]는 받는 포트(기본 25 — 공유기에서 외부 25를 이 포트로), 한 통 크기·한 사람 메일함 크기(MB) 상한.
+  // 바깥으로 보낼 때는 위 메일(SMTP) 설정으로 보낸다.
+  localMailEnabled: boolean('local_mail_enabled').notNull().default(false),
+  localMailDomains: text('local_mail_domains'),
+  localMailPort: integer('local_mail_port').notNull().default(25),
+  localMailMaxMessageMb: integer('local_mail_max_message_mb').notNull().default(25),
+  localMailQuotaMb: integer('local_mail_quota_mb').notNull().default(2048),
+  // 웹메일을 Google·Microsoft 로그인(OAuth)으로 연결하게 할지(webmailOAuth.js) — 아래 로그인 보안의 Google·Microsoft 클라이언트를 같이
+  // 쓰고, 그 클라이언트에 메일 권한(Google https://mail.google.com/ · Microsoft IMAP.AccessAsUser.All·SMTP.Send)을 더해야 한다.
+  mailOauthGoogle: boolean('mail_oauth_google').notNull().default(false),
+  mailOauthMicrosoft: boolean('mail_oauth_microsoft').notNull().default(false),
   // 그룹웨어(전자결재·연차·출퇴근 — groupware.js)를 어떤 범위로 둘지 — 'org'(부서·직책 설정 orgScope를 따름: 계정 단위면 회사 전체,
   // 팀 단위면 팀마다, 기본) | 'team'(팀마다 따로) | 'server'(서버 전체 하나). 바꾸면 이전 범위의 결재·근태 기록은 그 범위에 남는다.
   groupwareScope: text('groupware_scope').notNull().default('org'),
@@ -3072,36 +3086,134 @@ export const chatDrafts = pgTable(
 );
 
 /**
- * 웹메일 — 사람마다 연결한 메일 계정 하나(회사 메일·네이버·Gmail 등의 IMAP/SMTP — webmail.js). 메일 자체는 그 메일 서버에 있고 여기에는
- * 연결 값만 둔다. 비밀번호는 암호화(crypto.js encryptField). 새 메일 알림은 받은편지함의 UIDNEXT를 [lastUidNext]에 기억해 늘어난 만큼
- * 알린다(UIDVALIDITY가 바뀌면 처음부터). 연결이 계속 실패하면 [lastError]를 남기고 확인 간격을 늘린다.
+ * 웹메일 — 사람마다 연결한 메일 계정(5개까지 — 회사 메일·네이버·Gmail 등의 IMAP/SMTP, webmail.js). 메일 자체는 그 메일 서버에 있고
+ * 여기에는 연결 값만 둔다. [position]이 가장 작은 계정이 기본(계정을 고르지 않은 요청·메뉴 숫자의 처음). 로그인은 [authType] —
+ * 'password'(비밀번호·앱 비밀번호 — 암호화, crypto.js encryptField) | 'oauth'(Google·Microsoft 로그인 — 갱신 토큰·접근 토큰을 암호화,
+ * webmailOAuth.js) | 'local'(이 서버가 직접 받는 회사 메일함 — 연결 값 없음, localMailStore.js). 새 메일 알림은 받은편지함의
+ * UIDNEXT를 [lastUidNext]에 기억해 늘어난 만큼 알린다(UIDVALIDITY가 바뀌면 처음부터). 연결이 계속 실패하면 [lastError]를 남기고 확인
+ * 간격을 늘린다. 서명은 새 메일·답장(전달)에 저절로 붙일지 따로 정한다. [trustedSenders]는 바깥 그림을 늘 보여 줄 보낸 사람(주소·@도메인).
  */
-export const mailAccounts = pgTable('mail_accounts', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id')
-    .notNull()
-    .unique()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  email: text('email').notNull(),
-  displayName: text('display_name'),
-  provider: text('provider').notNull().default('custom'),
-  imapHost: text('imap_host').notNull(),
-  imapPort: integer('imap_port').notNull(),
-  imapSecurity: text('imap_security').notNull(), // 'ssl' | 'starttls'
-  smtpHost: text('smtp_host').notNull(),
-  smtpPort: integer('smtp_port').notNull(),
-  smtpSecurity: text('smtp_security').notNull(), // 'ssl' | 'starttls'
-  username: text('username').notNull(),
-  passwordEnc: text('password_enc').notNull(),
-  notify: boolean('notify').notNull().default(true),
-  lastUidNext: integer('last_uid_next'),
-  lastUidValidity: text('last_uid_validity'),
-  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
-  lastError: text('last_error'),
-  lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const mailAccounts = pgTable(
+  'mail_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull().default(0),
+    email: text('email').notNull(),
+    displayName: text('display_name'),
+    provider: text('provider').notNull().default('custom'),
+    authType: text('auth_type').notNull().default('password'), // 'password' | 'oauth' | 'local'
+    imapHost: text('imap_host'),
+    imapPort: integer('imap_port'),
+    imapSecurity: text('imap_security'), // 'ssl' | 'starttls'
+    smtpHost: text('smtp_host'),
+    smtpPort: integer('smtp_port'),
+    smtpSecurity: text('smtp_security'), // 'ssl' | 'starttls'
+    username: text('username'),
+    passwordEnc: text('password_enc'),
+    oauthProvider: text('oauth_provider'), // 'google' | 'microsoft'
+    oauthRefreshEnc: text('oauth_refresh_enc'),
+    oauthAccessEnc: text('oauth_access_enc'),
+    oauthExpiresAt: timestamp('oauth_expires_at', { withTimezone: true }),
+    signature: text('signature'),
+    signatureOnNew: boolean('signature_on_new').notNull().default(true),
+    signatureOnReply: boolean('signature_on_reply').notNull().default(true),
+    trustedSenders: jsonb('trusted_senders').notNull().default([]),
+    notify: boolean('notify').notNull().default(true),
+    lastUidNext: integer('last_uid_next'),
+    lastUidValidity: text('last_uid_validity'),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+    lastError: text('last_error'),
+    lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('mail_accounts_user_idx').on(t.userId, t.position)],
+);
+
+/**
+ * 메일 주소 자동 완성 — 내가 메일을 보낸 바깥 주소(소문자)와 이름, 보낸 횟수·마지막 시각(자주·최근 쓴 것부터 — webmail.js /mail/contacts).
+ * 쓰기 창에서 지운 주소는 지운다.
+ */
+export const mailContacts = pgTable(
+  'mail_contacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    address: text('address').notNull(),
+    name: text('name'),
+    useCount: integer('use_count').notNull().default(1),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('mail_contacts_user_address_uq').on(t.userId, t.address)],
+);
+
+/**
+ * 메일 받는 규칙 — 계정마다 차례([position])대로 새로 온 받은편지함 메일에 건다(webmailRules.js ruleMatches — 보낸 사람·받는 사람·제목).
+ * [conditions] `[{ field: 'from'|'to'|'subject', op: 'contains'|'not_contains'|'is', value }]`를 [match]('all'|'any')로 묶고, 맞으면
+ * [actions] `{ moveTo, markSeen, flag, skipNotify }`를 한다. [stop]이면 뒤 규칙은 보지 않는다.
+ */
+export const mailRules = pgTable(
+  'mail_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => mailAccounts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    position: integer('position').notNull().default(0),
+    match: text('match').notNull().default('all'),
+    conditions: jsonb('conditions').notNull().default([]),
+    actions: jsonb('actions').notNull().default({}),
+    stop: boolean('stop').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('mail_rules_account_idx').on(t.accountId, t.position)],
+);
+
+/**
+ * 자체 메일 서버가 받은(또는 회사 메일함에서 보낸·임시 저장한) 메일 — 원문은 디스크(MAIL_STORE_DIR/<계정>/<파일>.eml), 여기에는 목록·찾기에
+ * 쓰는 겉봉과 플래그만(localMailStore.js). [uid]는 서버 전체에서 늘어나는 번호라 IMAP의 UID처럼 쓴다(새것일수록 큼). [folder]는
+ * 'INBOX'|'Sent'|'Drafts'|'Junk'|'Trash'|'Archive'. [searchText]는 제목·주소·본문 앞부분(소문자 — 찾기).
+ */
+export const localMailMessages = pgTable(
+  'local_mail_messages',
+  {
+    uid: serial('uid').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => mailAccounts.id, { onDelete: 'cascade' }),
+    folder: text('folder').notNull(),
+    seen: boolean('seen').notNull().default(false),
+    flagged: boolean('flagged').notNull().default(false),
+    answered: boolean('answered').notNull().default(false),
+    draft: boolean('draft').notNull().default(false),
+    subject: text('subject'),
+    fromName: text('from_name'),
+    fromAddress: text('from_address'),
+    toList: jsonb('to_list').notNull().default([]),
+    ccList: jsonb('cc_list').notNull().default([]),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    // 휴지통에 넣은 시각 — 30일 지나면 아주 지운다(localMailStore.js purgeLocalTrash).
+    trashedAt: timestamp('trashed_at', { withTimezone: true }),
+    size: integer('size').notNull().default(0),
+    hasAttachments: boolean('has_attachments').notNull().default(false),
+    messageId: text('message_id'),
+    searchText: text('search_text'),
+    fileName: text('file_name').notNull(),
+  },
+  (t) => [index('local_mail_messages_folder_idx').on(t.accountId, t.folder, t.uid)],
+);
 
 /** 문서 번호 매기기 — 범위·해마다 마지막 번호(groupware 문서를 올리는 트랜잭션 안에서 하나씩 올린다). */
 export const approvalCounters = pgTable(

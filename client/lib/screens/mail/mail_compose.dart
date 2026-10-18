@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -8,30 +10,40 @@ import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import '../../l10n/tr.dart';
 
-/// 메일 쓰기 — 받는 사람·참조·숨은 참조(쉼표로 여러 명, "주소록"으로 같은 팀에서 메일을 연결한 사람 고르기), 제목, 본문, 첨부(20MB까지). 답장·전달이면 [draft]에
-/// 채워 온다(mail.dart draftFrom). 보냈으면 true.
-Future<bool> showMailCompose(
+/// 쓰기 창을 닫은 결과 — 보냄·임시 저장함·그냥 닫음.
+enum MailComposeOutcome { sent, saved, closed }
+
+/// 메일 쓰기 — 보내는 계정(여럿이면 고름), 받는 사람·참조·숨은 참조(쉼표로 여러 명, 쓰는 동안 자동 완성 — 같은 팀 주소록과 보낸 적 있는
+/// 바깥 주소, "주소록"으로 같은 팀에서 메일을 연결한 사람 고르기), 제목, 본문(계정의 서명이 저절로 — 새 메일은 끝, 답장·전달은 인용 앞),
+/// 첨부(20MB까지). 답장·전달·임시 저장본 이어 쓰기면 [draft]에 채워 온다(mail.dart draftFrom·draftFromSaved). **임시 저장**은
+/// 단추·닫을 때 묻기·1분마다(바뀐 게 있으면) 임시보관함에 넣는다(앞의 저장본은 서버가 지운다).
+Future<MailComposeOutcome> showMailCompose(
   BuildContext context, {
   required Session session,
   MailApi? api,
   MailDraft draft = const MailDraft(),
+  List<MailAccount> accounts = const [],
 }) async {
-  final sent = await Navigator.of(context).push<bool>(
+  final result = await Navigator.of(context).push<MailComposeOutcome>(
     MaterialPageRoute(
       fullscreenDialog: true,
       builder: (_) => MailComposeScreen(
         session: session,
         api: api ?? session.mailApi,
         draft: draft,
+        accounts: accounts,
       ),
     ),
   );
-  return sent == true;
+  return result ?? MailComposeOutcome.closed;
 }
 
 /// 첨부 합계 상한 — 서버 webmailRules.js SEND_ATTACHMENTS_BYTES_MAX.
 const kMailAttachmentsBytesMax = 20 * 1024 * 1024;
 const kMailAttachmentsMax = 10;
+
+/// 바뀐 게 있으면 이만큼마다 저절로 임시 저장한다.
+const kMailAutosaveInterval = Duration(minutes: 1);
 
 /// 쉼표·세미콜론·줄바꿈으로 나눈 주소들(빈 것은 뺌).
 List<String> splitAddresses(String text) => [
@@ -48,51 +60,151 @@ String? firstBadAddress(List<String> list) {
   return null;
 }
 
+/// 쓰는 중인 마지막 주소(마지막 쉼표·세미콜론 뒤) — 자동 완성이 찾을 글.
+String lastAddressToken(String text) {
+  final i = text.lastIndexOf(RegExp(r'[,;\n]'));
+  return text.substring(i + 1).trim();
+}
+
+/// 마지막 주소를 [wire]로 바꾸고 다음 주소를 쓸 수 있게 ", "를 붙인다.
+String replaceLastAddress(String text, String wire) {
+  final i = text.lastIndexOf(RegExp(r'[,;\n]'));
+  final head = i < 0 ? '' : '${text.substring(0, i + 1).trimRight()} ';
+  return '$head$wire, ';
+}
+
 class MailComposeScreen extends StatefulWidget {
   final Session session;
   final MailApi api;
   final MailDraft draft;
+
+  /// 보낼 수 있는 계정들 — 둘 이상이면 보내는 계정을 고른다(비면 서버의 기본 계정).
+  final List<MailAccount> accounts;
   const MailComposeScreen({
     super.key,
     required this.session,
     required this.api,
     this.draft = const MailDraft(),
+    this.accounts = const [],
   });
 
   @override
   State<MailComposeScreen> createState() => _MailComposeScreenState();
 }
 
+typedef _Upload = ({String url, String name, int size, String? mimeType});
+
 class _MailComposeScreenState extends State<MailComposeScreen> {
+  late String _accountId =
+      widget.draft.accountId ??
+      (widget.accounts.isNotEmpty ? widget.accounts.first.id : '');
   late final _to = TextEditingController(
     text: widget.draft.to.map((a) => a.wire).join(', '),
   );
   late final _cc = TextEditingController(
     text: widget.draft.cc.map((a) => a.wire).join(', '),
   );
-  final _bcc = TextEditingController();
+  late final _bcc = TextEditingController(
+    text: widget.draft.bcc.map((a) => a.wire).join(', '),
+  );
   late final _subject = TextEditingController(text: widget.draft.subject);
-  late final _body = TextEditingController(text: widget.draft.text);
-  late bool _showCc = widget.draft.cc.isNotEmpty;
-  final _attachments =
-      <({String url, String name, int size, String? mimeType})>[];
+  late final _body = TextEditingController(
+    text: withSignature(
+      widget.draft.text,
+      _signatureFor(_accountId),
+      widget.draft.signatureSlot,
+    ),
+  );
+  late bool _showCc = widget.draft.cc.isNotEmpty || widget.draft.bcc.isNotEmpty;
+  final _uploads = <_Upload>[];
+
+  /// 이어 쓰는 임시 저장본과 그 안의 첨부(보낼 때 서버가 꺼내 싣는다).
+  late ({String folder, int uid})? _saved = widget.draft.saved;
+  late final _savedAttachments = [...widget.draft.savedAttachments];
   bool _uploading = false;
   bool _sending = false;
+  bool _saving = false;
   String? _error;
+  Timer? _autosave;
+
+  /// 마지막으로 저장한(또는 연) 내용 — 바뀌었는지 볼 때.
+  late String _savedSnapshot;
+
+  @override
+  void initState() {
+    super.initState();
+    _savedSnapshot = _snapshot();
+    _autosave = Timer.periodic(kMailAutosaveInterval, (_) {
+      if (_changedSinceSave && !_sending && !_saving && !_uploading) {
+        unawaited(_saveDraft(quiet: true));
+      }
+    });
+  }
 
   @override
   void dispose() {
+    _autosave?.cancel();
     for (final c in [_to, _cc, _bcc, _subject, _body]) {
       c.dispose();
     }
     super.dispose();
   }
 
+  MailAccount? _accountOf(String id) {
+    for (final a in widget.accounts) {
+      if (a.id == id) return a;
+    }
+    return null;
+  }
+
+  /// 이 계정에서 이 초안에 붙일 서명(꺼져 있으면 빈 글).
+  String _signatureFor(String id) {
+    final a = _accountOf(id);
+    if (a == null) return '';
+    return switch (widget.draft.signatureSlot) {
+      MailSignatureSlot.fresh => a.signatureOnNew ? a.signature : '',
+      MailSignatureSlot.reply => a.signatureOnReply ? a.signature : '',
+      MailSignatureSlot.none => '',
+    };
+  }
+
+  String _snapshot() => [
+    _accountId,
+    _to.text,
+    _cc.text,
+    _bcc.text,
+    _subject.text,
+    _body.text,
+    _uploads.length,
+    _savedAttachments.length,
+  ].join('\u0000');
+
+  bool get _changedSinceSave => _snapshot() != _savedSnapshot;
+
   bool get _dirty =>
       _to.text.trim().isNotEmpty ||
       _subject.text.trim() != widget.draft.subject.trim() ||
-      _body.text.trim() != widget.draft.text.trim() ||
-      _attachments.isNotEmpty;
+      _body.text.trim() !=
+          withSignature(
+            widget.draft.text,
+            _signatureFor(_accountId),
+            widget.draft.signatureSlot,
+          ).trim() ||
+      _uploads.isNotEmpty;
+
+  void _switchAccount(String id) {
+    if (id == _accountId) return;
+    final slot = widget.draft.signatureSlot == MailSignatureSlot.none
+        ? MailSignatureSlot.fresh
+        : widget.draft.signatureSlot;
+    _body.text = swapSignature(
+      _body.text,
+      _signatureFor(_accountId),
+      _signatureFor(id),
+      slot,
+    );
+    setState(() => _accountId = id);
+  }
 
   /// 주소록(같은 팀에서 메일 계정을 연결한 사람 — server webmail.js /mail/directory)에서 골라 [field]에 더한다.
   Future<void> _pickMembers(TextEditingController field) async {
@@ -118,7 +230,8 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
         if (f.path != null || f.bytes != null) f.xFile,
     ];
     if (files.isEmpty) return;
-    if (_attachments.length + files.length > kMailAttachmentsMax) {
+    if (_uploads.length + _savedAttachments.length + files.length >
+        kMailAttachmentsMax) {
       if (mounted) {
         showAppToast(
           context,
@@ -133,7 +246,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     try {
       for (final f in files) {
         final up = await widget.session.api!.uploadFile(f);
-        _attachments.add((
+        _uploads.add((
           url: up.url,
           name: up.fileName,
           size: up.size,
@@ -145,6 +258,78 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       if (mounted) showAppToast(context, tr('첨부하지 못했습니다: {e}', {'e': e}));
     } finally {
       if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  List<Map<String, dynamic>> get _uploadBodies => [
+    for (final a in _uploads)
+      {'fileUrl': a.url, 'fileName': a.name, 'mimeType': ?a.mimeType},
+  ];
+
+  int get _attachmentBytes =>
+      _uploads.fold<int>(0, (s, a) => s + a.size) +
+      _savedAttachments.fold<int>(0, (s, a) => s + a.size);
+
+  /// 임시 저장 — 새 저장본을 기억하고(올린 첨부는 이제 저장본 안에 있다), [quiet]가 아니면 알린다. 저장했으면 true.
+  Future<bool> _saveDraft({bool quiet = false}) async {
+    if (_saving) return false;
+    setState(() => _saving = true);
+    try {
+      final saved = await widget.api.saveDraft(
+        account: _accountId,
+        to: splitAddresses(_to.text),
+        cc: splitAddresses(_cc.text),
+        bcc: splitAddresses(_bcc.text),
+        subject: _subject.text.trim(),
+        text: _body.text,
+        attachments: _uploadBodies,
+        savedAttachments: [for (final a in _savedAttachments) a.index],
+        saved: _saved,
+        inReplyTo: widget.draft.inReplyTo,
+        references: widget.draft.references,
+      );
+      if (!mounted) return true;
+      // 새 저장본의 첨부 차례 — 올린 파일들 다음에 이어 온 첨부(서버 webmail.js collectAttachments와 같은 차례).
+      final next = <MailAttachment>[
+        for (final (i, a) in _uploads.indexed)
+          MailAttachment(
+            index: i,
+            fileName: a.name,
+            contentType: a.mimeType,
+            size: a.size,
+          ),
+        for (final (j, a) in _savedAttachments.indexed)
+          MailAttachment(
+            index: _uploads.length + j,
+            fileName: a.fileName,
+            contentType: a.contentType,
+            size: a.size,
+          ),
+      ];
+      setState(() {
+        _saved = saved;
+        _uploads.clear();
+        _savedAttachments
+          ..clear()
+          ..addAll(next);
+        _saving = false;
+        _savedSnapshot = _snapshot();
+        if (!quiet) _error = null;
+      });
+      if (!quiet) showAppToast(context, tr('임시보관함에 저장했습니다.'));
+      return true;
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          if (!quiet) {
+            _error = e is ApiException
+                ? trServer(e.message)
+                : tr('임시 저장하지 못했습니다.');
+          }
+        });
+      }
+      return false;
     }
   }
 
@@ -160,8 +345,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
       problem = tr('주소가 올바르지 않습니다: {bad}', {'bad': bad});
     } else if (_subject.text.trim().isEmpty && _body.text.trim().isEmpty) {
       problem = tr('제목이나 본문을 넣으세요.');
-    } else if (_attachments.fold<int>(0, (s, a) => s + a.size) >
-        kMailAttachmentsBytesMax) {
+    } else if (_attachmentBytes > kMailAttachmentsBytesMax) {
       problem = tr('첨부는 모두 합쳐 20MB까지입니다.');
     }
     if (problem != null) {
@@ -174,21 +358,21 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
     });
     try {
       await widget.api.send(
+        account: _accountId,
         to: to,
         cc: cc,
         bcc: bcc,
         subject: _subject.text.trim(),
         text: _body.text,
-        attachments: [
-          for (final a in _attachments)
-            {'fileUrl': a.url, 'fileName': a.name, 'mimeType': ?a.mimeType},
-        ],
+        attachments: _uploadBodies,
+        savedAttachments: [for (final a in _savedAttachments) a.index],
+        saved: _saved,
         inReplyTo: widget.draft.inReplyTo,
         references: widget.draft.references,
         answered: widget.draft.answered,
       );
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(MailComposeOutcome.sent);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -200,29 +384,46 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
   }
 
   Future<void> _close() async {
-    if (!_dirty) {
-      Navigator.of(context).pop(false);
+    if (!_dirty || !_changedSinceSave) {
+      Navigator.of(context).pop(
+        _saved != null && _saved != widget.draft.saved
+            ? MailComposeOutcome.saved
+            : MailComposeOutcome.closed,
+      );
       return;
     }
-    final ok = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(tr('쓰기를 그만할까요?')),
-        content: Text(tr('쓴 내용은 저장되지 않습니다.')),
+        content: Text(tr('임시 저장하면 임시보관함에서 이어 쓸 수 있습니다.')),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text(tr('계속 쓰기')),
           ),
-          FilledButton(
+          TextButton(
             key: const ValueKey('mail-compose-discard'),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(tr('그만두기')),
+            onPressed: () => Navigator.of(dialogContext).pop('discard'),
+            child: Text(tr('저장 안 함')),
+          ),
+          FilledButton(
+            key: const ValueKey('mail-compose-keep-draft'),
+            onPressed: () => Navigator.of(dialogContext).pop('save'),
+            child: Text(tr('임시 저장')),
           ),
         ],
       ),
     );
-    if (ok == true && mounted) Navigator.of(context).pop(false);
+    if (!mounted || choice == null) return;
+    if (choice == 'save') {
+      if (await _saveDraft(quiet: true) && mounted) {
+        showAppToast(context, tr('임시보관함에 저장했습니다.'));
+        Navigator.of(context).pop(MailComposeOutcome.saved);
+      }
+      return;
+    }
+    Navigator.of(context).pop(MailComposeOutcome.closed);
   }
 
   Widget _addressField(
@@ -233,15 +434,12 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
   }) => Row(
     children: [
       Expanded(
-        child: TextField(
-          key: ValueKey(key),
+        child: _AddressAutocomplete(
           controller: c,
-          keyboardType: TextInputType.emailAddress,
-          decoration: InputDecoration(
-            labelText: label,
-            hintText: tr('쉼표로 여러 명'),
-            isDense: true,
-          ),
+          fieldKey: key,
+          label: label,
+          api: widget.api,
+          onChanged: () => setState(() {}),
         ),
       ),
       IconButton(
@@ -256,7 +454,8 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final account = widget.draft;
+    final draft = widget.draft;
+    final busy = _sending || _uploading || _saving;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -269,19 +468,37 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
             icon: const Icon(Icons.close),
             onPressed: _close,
           ),
-          title: Text(account.inReplyTo != null ? tr('답장') : tr('메일 쓰기')),
+          title: Text(
+            draft.saved != null
+                ? tr('이어 쓰기')
+                : draft.inReplyTo != null
+                ? tr('답장')
+                : tr('메일 쓰기'),
+          ),
           actions: [
             IconButton(
               key: const ValueKey('mail-compose-attach'),
               tooltip: tr('파일 첨부'),
               icon: const Icon(Icons.attach_file),
-              onPressed: _uploading || _sending ? null : _attach,
+              onPressed: busy ? null : _attach,
+            ),
+            IconButton(
+              key: const ValueKey('mail-compose-save-draft'),
+              tooltip: tr('임시 저장'),
+              icon: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              onPressed: busy ? null : () => _saveDraft(),
             ),
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilledButton.icon(
                 key: const ValueKey('mail-compose-send'),
-                onPressed: _sending || _uploading ? null : _send,
+                onPressed: busy ? null : _send,
                 icon: _sending
                     ? const SizedBox(
                         width: 16,
@@ -300,6 +517,31 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
+                if (widget.accounts.length > 1)
+                  DropdownButtonFormField<String>(
+                    key: const ValueKey('mail-compose-from'),
+                    initialValue: _accountId,
+                    decoration: InputDecoration(
+                      labelText: tr('보내는 계정'),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final a in widget.accounts)
+                        DropdownMenuItem(
+                          value: a.id,
+                          child: Text(
+                            a.displayName != null && a.displayName!.isNotEmpty
+                                ? '${a.displayName} <${a.email}>'
+                                : a.email,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    // 이어 쓰는 임시 저장본은 그 계정의 임시보관함에 있다 — 다른 계정으로 바꾸지 않는다.
+                    onChanged: _saved != null
+                        ? null
+                        : (v) => _switchAccount(v ?? _accountId),
+                  ),
                 _addressField(
                   _to,
                   tr('받는 사람'),
@@ -323,22 +565,36 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
                     counterText: '',
                   ),
                 ),
-                if (_attachments.isNotEmpty || _uploading)
+                if (_uploads.isNotEmpty ||
+                    _savedAttachments.isNotEmpty ||
+                    _uploading)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Wrap(
                       spacing: 6,
                       runSpacing: 4,
                       children: [
-                        for (final a in _attachments)
+                        for (final a in _savedAttachments)
+                          InputChip(
+                            key: ValueKey('mail-compose-saved-${a.index}'),
+                            avatar: const Icon(
+                              Icons.insert_drive_file_outlined,
+                              size: 16,
+                            ),
+                            label: Text(
+                              '${a.fileName} (${mailSizeText(a.size)})',
+                            ),
+                            onDeleted: () =>
+                                setState(() => _savedAttachments.remove(a)),
+                          ),
+                        for (final a in _uploads)
                           InputChip(
                             avatar: const Icon(
                               Icons.insert_drive_file_outlined,
                               size: 16,
                             ),
                             label: Text('${a.name} (${mailSizeText(a.size)})'),
-                            onDeleted: () =>
-                                setState(() => _attachments.remove(a)),
+                            onDeleted: () => setState(() => _uploads.remove(a)),
                           ),
                         if (_uploading)
                           const Padding(
@@ -361,7 +617,7 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
                   keyboardType: TextInputType.multiline,
                   decoration: InputDecoration(
                     hintText: tr('내용'),
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 if (_error != null)
@@ -372,6 +628,118 @@ class _MailComposeScreenState extends State<MailComposeScreen> {
                       key: const ValueKey('mail-compose-error'),
                       style: TextStyle(color: theme.colorScheme.error),
                     ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 받는 사람 칸 — 쓰는 동안 마지막 주소로 후보를 찾는다(같은 팀 주소록·보낸 적 있는 바깥 주소 — server /mail/contacts). 고르면
+/// 그 주소로 바꾸고 ", "를 붙인다. 바깥 주소 후보는 ✕로 자동 완성에서 지운다.
+class _AddressAutocomplete extends StatefulWidget {
+  final TextEditingController controller;
+  final String fieldKey;
+  final String label;
+  final MailApi api;
+  final VoidCallback onChanged;
+  const _AddressAutocomplete({
+    required this.controller,
+    required this.fieldKey,
+    required this.label,
+    required this.api,
+    required this.onChanged,
+  });
+
+  @override
+  State<_AddressAutocomplete> createState() => _AddressAutocompleteState();
+}
+
+class _AddressAutocompleteState extends State<_AddressAutocomplete> {
+  final _focus = FocusNode();
+  final _forgotten = <String>{};
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<Iterable<MailContact>> _options(TextEditingValue value) async {
+    final token = lastAddressToken(value.text);
+    if (token.isEmpty || token.contains('<')) return const [];
+    try {
+      final list = await widget.api.contacts(token);
+      return [
+        for (final c in list)
+          if (!_forgotten.contains(c.address)) c,
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return RawAutocomplete<MailContact>(
+      textEditingController: widget.controller,
+      focusNode: _focus,
+      optionsBuilder: _options,
+      displayStringForOption: (c) =>
+          replaceLastAddress(widget.controller.text, c.wire),
+      onSelected: (_) => widget.onChanged(),
+      fieldViewBuilder: (context, controller, focusNode, onSubmitted) =>
+          TextField(
+            key: ValueKey(widget.fieldKey),
+            controller: controller,
+            focusNode: focusNode,
+            keyboardType: TextInputType.emailAddress,
+            onChanged: (_) => widget.onChanged(),
+            decoration: InputDecoration(
+              labelText: widget.label,
+              hintText: tr('쉼표로 여러 명'),
+              isDense: true,
+            ),
+          ),
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(8),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260, maxWidth: 480),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              children: [
+                for (final c in options)
+                  ListTile(
+                    key: ValueKey('mail-suggest-${c.address}'),
+                    dense: true,
+                    leading: Icon(
+                      c.member ? Icons.badge_outlined : Icons.history,
+                      size: 18,
+                      color: theme.hintColor,
+                    ),
+                    title: Text(c.name.isNotEmpty ? c.name : c.address),
+                    subtitle: c.name.isNotEmpty ? Text(c.address) : null,
+                    trailing: c.member
+                        ? null
+                        : IconButton(
+                            tooltip: tr('자동 완성에서 지우기'),
+                            icon: const Icon(Icons.close, size: 16),
+                            onPressed: () async {
+                              setState(() => _forgotten.add(c.address));
+                              try {
+                                await widget.api.forgetContact(c.address);
+                              } catch (_) {}
+                            },
+                          ),
+                    onTap: () => onSelected(c),
                   ),
               ],
             ),
@@ -407,7 +775,9 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
         })
         .catchError((Object e) {
           if (mounted) {
-            setState(() => _error = e is ApiException ? trServer(e.message) : '$e');
+            setState(
+              () => _error = e is ApiException ? trServer(e.message) : '$e',
+            );
           }
         });
   }
@@ -441,7 +811,7 @@ class _DirectoryDialogState extends State<_DirectoryDialog> {
               controller: _filter,
               decoration: InputDecoration(
                 isDense: true,
-                prefixIcon: Icon(Icons.search, size: 20),
+                prefixIcon: const Icon(Icons.search, size: 20),
                 hintText: tr('이름·주소'),
               ),
               onChanged: (_) => setState(() {}),

@@ -40,7 +40,7 @@ Expand-Archive -Path $ZipPath -DestinationPath $tmp
 # 혹시 이 서버 쪽에 그런 폴더가 남아있어도 robocopy 대상에서 제외해 절대 건드리지 않는다.
 $robocopyArgs = @(
     $tmp, $Server, '/E',
-    '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', 'deploy',
+    '/XD', 'node_modules', 'certs', 'uploads', 'mailstore', 'releases', 'installer', 'deploy',
     '/NFL', '/NDL', '/NJH', '/NJS'
 )
 robocopy @robocopyArgs | Out-Null

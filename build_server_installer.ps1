@@ -112,7 +112,7 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 # robocopy는 실패가 아니어도 0이 아닌 코드를 돌려준다).
 $robocopyArgs = @(
   $Server, $Stage, '/E',
-  '/XD', 'node_modules', 'certs', 'uploads', 'releases', 'installer', '.livekit', 'backups',
+  '/XD', 'node_modules', 'certs', 'uploads', 'mailstore', 'releases', 'installer', '.livekit', 'backups',
   '/XF', '.env', '*.log', '.jwt-secret', '.db-encryption-key', '.web-push-vapid.json', '.livekit-secret', 'firebase-service-account.json', 'db.json.bak', 'ecosystem.config.cjs',
   '/NFL', '/NDL', '/NJH', '/NJS'
 )

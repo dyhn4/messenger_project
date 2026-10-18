@@ -1261,6 +1261,11 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 - **휴가 달력** — 휴가 탭의 "팀 휴가"는 기본이 한 달 **달력**(일요일부터 — 캘린더와 같음, 앞뒤 달로 넘김)이고 "앞으로 30일" 목록으로 바꿀 수 있습니다.
   칸마다 승인된 휴가(초록)·출장(파랑) 이름을 두 명까지(넘치면 +n), 내가 올려 결재 중인 휴가는 테두리만, 공휴일은 빨간 날짜와 이름으로 보이고,
   날을 누르면 그날 누가 무슨 휴가·어디로 출장인지 아래에 펼칩니다(`GET /api/groupware/leave/month` — 남의 결재 중 휴가는 보내지 않음).
+  - **부서별로 거르기** — 조직도에 부서가 있으면 달력 위의 부서 고르기로 그 부서(아래 부서와 겸직한 사람 포함) 사람의 휴가·출장만 봅니다("부서 없음"도
+    있음 — 고른 부서는 이 기기에 남음, "앞으로 30일" 목록에도 같이). 조직도는 부서·직책 설정을 따릅니다(`server/src/leaveDepartments.js`).
+  - **끌어서 휴가 신청** — 달력에서 날을 길게 누르거나 끌어서 고르면 그 기간으로 휴가 신청 창이 열립니다(거꾸로 끌어도 됨, 반차·시간 연차는 첫날).
+    날을 눌러 펼친 곳의 "이날 휴가 신청"으로 하루도 바로 신청합니다.
+  - 캘린더에서는 승인된 휴가가 "팀 휴가", 출장이 "출장" 내장 캘린더에 보입니다.
 
 **지출** — 금액(원), 분류(기본 교통비·식대·비품·소모품·출장비·교육비·접대비·기타 — 관리자가 바꿈), 쓴 날, 영수증(직접 올린 파일만, 5개까지), 내용.
 
@@ -1503,8 +1508,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **휴가 달력 후속** — 휴가 탭의 달력 보기와 캘린더의 내장 "출장" 캘린더는 들어갔습니다. 남은 것: 부서별로 거르기, 달력에서 날을 끌어
-  바로 휴가 신청하기.
 - **웹메일 후속** — 메일 계정 연결(IMAP/SMTP)로 읽기·쓰기·답장·전달·첨부·새 메일 알림은 들어갔습니다([웹메일](#웹메일)). 남은 것: HTML 메일을
   서식 그대로 보기(안전하게 걸러서), 임시 저장(임시보관함), 서명, 계정 여러 개, Gmail·Microsoft 365의 OAuth 로그인(앱 비밀번호 대신),
   자주 쓰는 바깥 주소 자동 완성, 메일 받는 규칙·자동 분류, 메일을 채팅방·할 일로 보내기, 자체 메일 서버(회사 도메인 MX로 직접 받기).
@@ -2586,7 +2589,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/notifications` | 결재 알림함(알림 센터 `결재` 탭 — `teamId` 없이, 범위와 상관없이 내 것) 최근 50개 `{ items, unreadCount }` — 줄마다 `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `documentId`, `teamId`·`teamName`(회사 전체 범위면 null), `docKind`·`docStatus`, `actionable`(지금 내 결재 차례인지), `readAt`. 새 알림은 소켓 `approval:notification` `{ notification, unreadCount }` |
 | POST | `/api/groupware/notifications/read` | `{ ids? }` 또는 `{ documentId }`(그 문서의 내 알림 — 푸시를 눌러 문서를 열 때), 둘 다 없으면 전부 읽음 → `{ unreadCount }`, 내 다른 기기에 `approval:notification-sync` |
 | GET | `/api/groupware/leave/balance` | 연차 현황(`?userId=`는 관리자) — `hireDate`, `period`, `statutoryHalfDays`, `adjustmentHalfDays`, `grantedHalfDays`, `usedHalfDays`, `pendingHalfDays`, `remainingHalfDays`(반일 단위, 입사일이 없으면 null), `adjustments` |
-| GET | `/api/groupware/leave/calendar` | `?from=&to=`(92일 안) 승인된 휴가 목록 |
+| GET | `/api/groupware/leave/calendar` | `?from=&to=`(92일 안) `&departmentId=`(부서 — 아래 부서·겸직 포함, `none`은 부서 없음) 승인된 휴가 목록 |
 | GET | `/api/groupware/members` | (관리자) 구성원·입사일·연차 현황 |
 | PATCH | `/api/groupware/members/:userId` | (관리자) `{ hireDate }`('YYYY-MM-DD', null은 지움) |
 | POST | `/api/groupware/members/:userId/leave-adjustments` | (관리자) `{ halfDays(±, 0 제외, 최대 ±120), reason }` — 이번 연차 기간에, 입사일이 있어야 함 |
@@ -2607,7 +2610,7 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/schedules` | (관리자) 구성원과 근무 형태 `[{ userId, name, schedule: { mode, label, start, end, coreStart, coreEnd } \| null }]`(시각은 자정부터 분) |
 | PUT / DELETE | `/api/groupware/schedules/:userId` | (관리자) 근무 형태 `{ mode: 'staggered'\|'core'\|'free', start?, end?, coreStart?, coreEnd?, periodType?: 'flex2w'\|'flex3m'\|'select', periodStart?, periodMonths?: 1\|3 }`('HH:MM' — 시차는 start·end, 선택근무는 coreStart·coreEnd) / 범위의 근무 시간으로 되돌리기 |
 | GET | `/api/groupware/attendance/weekly` | (관리자) `?week=YYYY-MM-DD`(그날이 든 월~일) → `{ weekStart, weekEnd, members: [{ userId, name, netMinutes, overtimeMinutes, holidayMinutes, nightMinutes, status: 'ok'\|'warn'\|'over' }] }` |
-| GET | `/api/groupware/leave/month` | 휴가 달력 `?month=YYYY-MM`(기본 이번 달) → `{ month, from, to, holidays: [{ date, name }], leaves: [{ documentId, userId, name, leaveType, label, startDate, endDate, halfDays, status: 'approved'\|'pending', mine }], trips: [{ documentId, userId, name, destination, startDate, endDate }] }` — 승인된 휴가·출장은 범위 사람 모두, 결재 중인 휴가는 내 것만 |
+| GET | `/api/groupware/leave/month` | 휴가 달력 `?month=YYYY-MM`(기본 이번 달) → `{ month, from, to, holidays: [{ date, name }], leaves: [{ documentId, userId, name, leaveType, label, startDate, endDate, halfDays, status: 'approved'\|'pending', mine }], trips: [{ documentId, userId, name, destination, startDate, endDate }] }` — 승인된 휴가·출장은 범위 사람 모두, 결재 중인 휴가는 내 것만. `&departmentId=`면 그 부서(아래 부서·겸직 포함, `none`은 부서 없음) 사람 것만이고 응답에 `departments: [{ id, name, parentId, depth }]`(트리 순서)·`departmentId` |
 | GET | `/api/groupware/leave/promotions` | (관리자) 연차 촉진 현황 `{ today, members: [{ userId, name, expiry, firstYear, firstStart, firstEnd, secondDeadline, remainingHalfDays, stage, notices }] }` — 입사일이 있는 사람만 |
 | POST | `/api/groupware/leave/promotions` | (관리자) 1차 촉진 `{ userIds, message? }` → `{ sent, skipped: [{ userId, reason }] }`(보냈으면 201) — 입사일 없음·이번 기간에 이미 보냄·남은 연차 없음은 건너뜀. 마감은 10일 뒤 |
 | POST | `/api/groupware/leave/promotions/second` | (관리자) 2차 촉진 `{ userId, dates, message? }` → 201 — 1차를 받고 쓸 날을 내지 않은 사람, 남은 연차만큼까지·만료 전의 날 |

@@ -262,11 +262,18 @@ class LeaveMonth {
   final Map<String, String> holidays;
   final List<MonthLeave> leaves;
   final List<MonthTrip> trips;
+
+  /// 부서 거르기 — 조직도의 부서(트리 순서, [depth] 1이 맨 위)와 이 응답에 적용한 부서(uuid · 'none'(부서 없음) · null(모두)).
+  final List<({String id, String name, String? parentId, int depth})>
+  departments;
+  final String? departmentId;
   const LeaveMonth({
     required this.month,
     this.holidays = const {},
     this.leaves = const [],
     this.trips = const [],
+    this.departments = const [],
+    this.departmentId,
   });
 
   factory LeaveMonth.fromJson(Map<String, dynamic> json) => LeaveMonth(
@@ -283,6 +290,17 @@ class LeaveMonth {
       for (final t in json['trips'] as List? ?? const [])
         MonthTrip.fromJson((t as Map).cast<String, dynamic>()),
     ],
+    departments: [
+      for (final d in json['departments'] as List? ?? const [])
+        if (d is Map && d['id'] is String)
+          (
+            id: d['id'] as String,
+            name: d['name'] as String? ?? '',
+            parentId: d['parentId'] as String?,
+            depth: (d['depth'] as num?)?.toInt() ?? 1,
+          ),
+    ],
+    departmentId: json['departmentId'] as String?,
   );
 
   List<MonthLeave> leavesOn(String day) => [

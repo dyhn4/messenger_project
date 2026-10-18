@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../../models/groupware.dart';
+import '../../models/groupware_resources.dart' show LeaveMonth;
 import '../../models/groupware_work.dart';
 import '../../widgets/app_toast.dart';
 import '../../services/groupware_api.dart';
@@ -43,11 +45,22 @@ class _LeaveTabState extends State<LeaveTab> {
   /// 팀 휴가를 달력으로 볼지(기본) 앞으로 30일 목록으로 볼지.
   bool _calendarView = true;
 
+  /// 팀 휴가의 부서 거르기(달력·30일 목록 함께) — 부서 id · 'none'(부서 없음) · null(모든 부서). 이 기기에 기억한다(leave_calendar.dart
+  /// kLeaveDepartmentPref). 부서 목록은 달력이 받은 응답에서 얻는다(비면 드롭다운을 숨긴다).
+  String? _departmentId;
+  List<LeaveDepartment> _departments = const [];
+
   @override
   void initState() {
     super.initState();
     widget.changes.addListener(_load);
-    _load();
+    _init();
+  }
+
+  /// 기억한 부서 거르기를 먼저 읽고(못 읽으면 모든 부서) 그 부서로 처음 받는다 — 달력도 이 값으로 처음 그린다(받기 전엔 그리지 않는다).
+  Future<void> _init() async {
+    _departmentId = await loadLeaveDepartment();
+    if (mounted) await _load();
   }
 
   @override
@@ -56,15 +69,58 @@ class _LeaveTabState extends State<LeaveTab> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  /// 앞으로 30일의 팀 휴가 — 지금 부서 거르기로.
+  Future<List<TeamLeave>> _fetchTeamLeaves() {
     final today = DateTime.parse(widget.ctx.today);
+    return widget.api.teamLeaves(
+      from: widget.ctx.today,
+      to: dateKeyOf(today.add(const Duration(days: 30))),
+      departmentId: _departmentId,
+    );
+  }
+
+  /// 부서 거르기만 바뀌었을 때 — 30일 목록만 다시 받는다(달력은 [LeaveMonthCalendar.departmentId]가 바뀌어 스스로 다시 받는다).
+  Future<void> _reloadTeamLeaves() async {
+    final department = _departmentId;
+    try {
+      final leaves = await _fetchTeamLeaves();
+      if (mounted && department == _departmentId) {
+        setState(() => _teamLeaves = leaves);
+      }
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+    }
+  }
+
+  /// 드롭다운에서 부서를 골랐다 — 기억하고 달력·30일 목록을 그 부서로.
+  void _changeDepartment(String? departmentId) {
+    if (departmentId == _departmentId) return;
+    setState(() => _departmentId = departmentId);
+    saveLeaveDepartment(departmentId);
+    _reloadTeamLeaves();
+  }
+
+  /// 달력이 한 달을 받았다 — 부서 목록을 드롭다운에 쓰고, 기억한 부서가 없어졌으면(조직도에서 지웠거나 부서가 하나도 없다) 모든 부서로
+  /// 되돌린다(기억도 지운다).
+  void _onCalendarLoaded(LeaveMonth month) {
+    final departments = month.departments;
+    final stale = !leaveDepartmentValid(departments, _departmentId);
+    if (!stale && listEquals(departments, _departments)) return;
+    setState(() {
+      _departments = departments;
+      if (stale) _departmentId = null;
+    });
+    if (stale) {
+      saveLeaveDepartment(null);
+      _reloadTeamLeaves();
+    }
+  }
+
+  Future<void> _load() async {
     try {
       final results = await Future.wait([
         widget.api.leaveBalance(),
-        widget.api.teamLeaves(
-          from: widget.ctx.today,
-          to: dateKeyOf(today.add(const Duration(days: 30))),
-        ),
+        _fetchTeamLeaves(),
         widget.api.documents(box: ApprovalBox.mine, kind: ApprovalKind.leave),
         widget.api.myPromotions().catchError((_) => <LeavePromotion>[]),
       ]);
@@ -171,11 +227,23 @@ class _LeaveTabState extends State<LeaveTab> {
                   setState(() => _calendarView = s.first),
             ),
           ),
+          // 부서 거르기 — 달력과 30일 목록에 함께(조직도에 부서가 없으면 숨긴다). 자리는 늘 남겨 둔다 — 목록이 나중에 생겨도 아래 달력의
+          // 자리(순번)가 밀리지 않아 달력이 새로 만들어지며 다시 받지 않게.
+          _departments.isEmpty
+              ? const SizedBox.shrink()
+              : LeaveDepartmentFilter(
+                  departments: _departments,
+                  value: _departmentId,
+                  onChanged: _changeDepartment,
+                ),
           if (_calendarView)
             LeaveMonthCalendar(
               api: widget.api,
               ctx: widget.ctx,
               changes: widget.changes,
+              departmentId: _departmentId,
+              onLoaded: _onCalendarLoaded,
+              balance: _balance,
             )
           else if (_teamLeaves.isEmpty)
             GroupwareEmpty(tr('예정된 휴가가 없습니다.'))

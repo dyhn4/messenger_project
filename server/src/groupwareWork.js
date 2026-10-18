@@ -32,6 +32,7 @@ import { CARRY_OVER_MAX_DAYS, optionsView, parseExpenseCategories, parseLeaveTyp
 import { OVERTIME_GUARDS, parsePayRates, periodsOverlapping, periodSummary, weeklyLimitFor } from './workPolicy.js';
 import { parseOfficeLocation } from './workLocation.js';
 import { BOOKING_REMINDER_MAX } from './resourcePolicy.js';
+import { leaveDepartmentFilter } from './leaveDepartments.js';
 import { HOLIDAYS } from './holidays.js';
 import { parseLeaveDates, PLAN_RESPONSE_DAYS, PROMOTION_MESSAGE_MAX, promotionSchedule, promotionStage } from './leavePromotion.js';
 import { notifyGroupwarePush } from './push.js';
@@ -316,7 +317,8 @@ export function createGroupwareWorkRouter(io) {
 
   /**
    * 한 달 휴가 달력 `?month=YYYY-MM`(기본 이번 달) — 승인된 휴가·출장(범위 사람 모두)과 내가 올려 결재 중인 휴가, 공휴일.
-   * 휴가 이름은 신청할 때의 이름(payload.leaveLabel), 없으면 지금 범위의 휴가 종류 이름.
+   * 휴가 이름은 신청할 때의 이름(payload.leaveLabel), 없으면 지금 범위의 휴가 종류 이름. `?departmentId=`(uuid 또는 'none')면 그 부서(아래 부서·
+   * 겸직 포함) 사람 것만 — 응답에 부서 목록(`departments`)과 적용한 부서(`departmentId`)를 붙인다(leaveDepartments.js).
    */
   router.get(
     '/groupware/leave/month',
@@ -324,11 +326,16 @@ export function createGroupwareWorkRouter(io) {
       const month = typeof req.query.month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(req.query.month) ? req.query.month : localDateKey(new Date()).slice(0, 7);
       const from = `${month}-01`;
       const to = addDaysKey(addDaysKey(from, 31).slice(0, 7) + '-01', -1);
-      const [approved, pending, trips] = await Promise.all([
+      const [approvedAll, pendingAll, tripsAll, filter] = await Promise.all([
         listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to }),
         listPendingLeavesOf({ scopeKey: ctx.scopeKey, authorId: ctx.user.id, from, to }),
         listApprovedTrips({ scopeKey: ctx.scopeKey, from, to }),
+        leaveDepartmentFilter(ctx, req.query.departmentId, req.query.teamId),
       ]);
+      const keep = (row) => !filter.userIds || filter.userIds.has(row.authorId);
+      const approved = approvedAll.filter(keep);
+      const pending = pendingAll.filter(keep);
+      const trips = tripsAll.filter(keep);
       const labelOf = (p) => p?.leaveLabel ?? ctx.options.leaveTypes.find((t) => t.key === p?.leaveType)?.label ?? '휴가';
       const leaveRow = (l, status) => ({
         documentId: l.id,
@@ -348,6 +355,9 @@ export function createGroupwareWorkRouter(io) {
         from,
         to,
         holidays: HOLIDAYS.filter((h) => h.date >= from && h.date <= to),
+        // 부서 거르기 — 조직도의 부서(트리 순서)와 적용한 부서.
+        departments: filter.departments,
+        departmentId: filter.departmentId,
         leaves: [...approved.map((l) => leaveRow(l, 'approved')), ...pending.map((l) => leaveRow(l, 'pending'))]
           .filter((l) => l.startDate && l.endDate)
           .sort(byStart),

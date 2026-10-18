@@ -445,3 +445,45 @@ export function reorderSiblings(departments, id, parentId, index) {
   siblings.splice(at, 0, id);
   return siblings;
 }
+
+// ── 부서로 거르기(휴가 달력) ──
+
+/**
+ * [departmentId] 부서(아래 부서 모두 포함)에 속한 사람 id들(Set) — 주 부서가 그 안이거나 겸직 부서가 그 안인 사람. [departmentId]가
+ * 'none'이면 부서가 없는 사람(겸직도 없는). [members]는 id → `{ departmentId }`(Map 또는 목록), [concurrent]는 `[{ userId, departmentId }]`.
+ */
+export function departmentMemberIds({ departmentId, departments, members, concurrent = [] }) {
+  const list = members instanceof Map ? [...members.values()] : members;
+  if (departmentId === 'none') {
+    const withConcurrent = new Set(concurrent.map((c) => c.userId));
+    return new Set(list.filter((m) => !m.departmentId && !withConcurrent.has(m.id)).map((m) => m.id));
+  }
+  const scope = new Set([departmentId, ...descendantsOf(departments, departmentId)]);
+  const out = new Set(list.filter((m) => m.departmentId && scope.has(m.departmentId)).map((m) => m.id));
+  for (const c of concurrent) if (scope.has(c.departmentId)) out.add(c.userId);
+  return out;
+}
+
+/** 부서 고르기 목록 — 트리 순서(위 부서 다음에 그 아래)로 `[{ id, name, parentId, depth }]`. */
+export function departmentOptions(departments) {
+  const children = new Map();
+  for (const d of sortDepartments([...departments])) {
+    const key = d.parentId ?? null;
+    if (!children.has(key)) children.set(key, []);
+    children.get(key).push(d);
+  }
+  const out = [];
+  const seen = new Set();
+  const walk = (parentId, depth) => {
+    for (const d of children.get(parentId) ?? []) {
+      if (seen.has(d.id) || depth > DEPARTMENT_DEPTH_MAX) continue;
+      seen.add(d.id);
+      out.push({ id: d.id, name: d.name, parentId: d.parentId ?? null, depth });
+      walk(d.id, depth + 1);
+    }
+  };
+  walk(null, 1);
+  // 위 부서가 없어진(꼬인) 부서도 빠뜨리지 않는다.
+  for (const d of departments) if (!seen.has(d.id)) out.push({ id: d.id, name: d.name, parentId: d.parentId ?? null, depth: 1 });
+  return out;
+}

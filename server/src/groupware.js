@@ -143,6 +143,7 @@ import { fileFieldsDenial, sanitizeFileSize } from './messageLimits.js';
 import { updateUser } from './db/queries/users.js';
 import { optionsView } from './groupwareOptions.js';
 import { managerChainWithPositions } from './orgTree.js';
+import { leaveDepartmentFilter } from './leaveDepartments.js';
 import { applyLineRule, documentAmountOf, LINE_RULES_MAX, lineRuleDto, parseLineRule, pickLineRule, RULE_CHAIN_MAX } from './approvalLineRules.js';
 import { countLineRules, deleteLineRule, insertLineRule, listLineRules, updateLineRule } from './db/queries/approvalLineRules.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
@@ -1654,7 +1655,11 @@ export function createGroupwareRouter(io) {
       const to = isDateKey(req.query.to) ? req.query.to : addDaysKey(from, 30);
       if (to < from || addDaysKey(from, 92) < to) return fail(res, { error: '기간은 92일 안으로 고르세요.' });
       const userIds = ctx.scope === 'server' && ctx.teamId ? await listTeamMemberIds(ctx.teamId) : null;
-      const leaves = await listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds });
+      // ?departmentId=면 그 부서(아래 부서·겸직 포함) 사람 것만(leaveDepartments.js).
+      const filter = req.query.departmentId ? await leaveDepartmentFilter(ctx, req.query.departmentId, req.query.teamId) : { userIds: null };
+      const leaves = (await listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds })).filter(
+        (l) => !filter.userIds || filter.userIds.has(l.authorId),
+      );
       res.json(
         leaves
           .map((l) => ({ documentId: l.id, userId: l.authorId, name: l.authorName, ...l.payload }))

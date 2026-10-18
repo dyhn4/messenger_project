@@ -377,12 +377,14 @@ class GroupwareApi {
         ),
       );
 
+  /// [departmentId]를 주면 그 부서(아래 부서·겸직 포함 — 'none'은 부서 없음) 사람 것만.
   Future<List<TeamLeave>> teamLeaves({
     required String from,
     required String to,
+    String? departmentId,
   }) async => [
     for (final l in await _getList(
-      '/api/groupware/leave/calendar${_query({'from': from, 'to': to})}',
+      '/api/groupware/leave/calendar${_query({'from': from, 'to': to, 'departmentId': departmentId})}',
     ))
       TeamLeave.fromJson(l),
   ];
@@ -933,8 +935,14 @@ class GroupwareApi {
   );
 
   /// 한 달 휴가 달력 — [month] 'YYYY-MM'.
-  Future<LeaveMonth> leaveMonth(String month) async => LeaveMonth.fromJson(
-    await _getMap('/api/groupware/leave/month${_query({'month': month})}'),
+  /// [departmentId]를 주면 그 부서(아래 부서·겸직 포함 — 'none'은 부서 없음) 사람 것만, 응답에 부서 목록이 붙는다.
+  Future<LeaveMonth> leaveMonth(
+    String month, {
+    String? departmentId,
+  }) async => LeaveMonth.fromJson(
+    await _getMap(
+      '/api/groupware/leave/month${_query({'month': month, 'departmentId': departmentId})}',
+    ),
   );
 
   // ── 설문(server/src/groupwareSurveys.js) ──

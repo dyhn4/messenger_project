@@ -1014,17 +1014,31 @@ int? leaveTimeMinutes(String text) {
 /// 시간 단위 연차(반반차 2시간 고정·시간 연차 1~7시간 — [LeaveTypeInfo.hourly])는 날짜 하나, 시작 시각('HH:MM' — 기본은 내 근무 시작),
 /// 시간 수를 받고 "09:00~11:00 · 2시간 (연차 2시간)"처럼 끝 시각과 연차로 빠질 양(1시간 = 0.25 반일)을 바로 보여 준다. 올릴 때
 /// `startTime`·`hours`를 함께 보낸다(반반차의 hours는 서버가 2시간으로 정한다).
+///
+/// [initialStart]·[initialEnd]('YYYY-MM-DD')를 주면 그 기간으로 미리 채운다(휴가 달력에서 날을 끌어 고른 기간 — leave_calendar.dart).
+/// 거꾸로 주어도 앞뒤를 바로잡고, 처음 종류가 하루짜리(반차·시간 연차)면 시작 날 하나만 쓴다(종류를 바꿀 때와 같은 규칙).
 Future<ApprovalDocument?> showLeaveRequestDialog(
   BuildContext context, {
   required GroupwareApi api,
   required GroupwareContext ctx,
   LeaveBalance? balance,
+  String? initialStart,
+  String? initialEnd,
 }) {
   // 관리자가 끈 종류는 고르지 못한다(groupwareOptions.js — 예전 신청의 이름을 보이려고 목록에는 남는다).
   final types = ctx.enabledLeaveTypes;
   var type = types.isNotEmpty ? types.first.key : 'annual';
-  String? start;
-  String? end;
+  // 미리 채울 기간 — 시작만 주면 하루, 끝이 앞이면 맞바꾼다.
+  var first = initialStart ?? initialEnd;
+  var last = initialEnd ?? initialStart;
+  if (first != null && last != null && last.compareTo(first) < 0) {
+    (first, last) = (last, first);
+  }
+  final firstInfo = ctx.leaveType(type);
+  final firstSingle =
+      (firstInfo?.half ?? false) || (firstInfo?.hourly ?? false);
+  String? start = first;
+  String? end = firstSingle ? first : last;
   // 시간 연차의 시작 시각('HH:MM')과 시간 수.
   var startTime = minutesText(ctx.myWorkStart ?? ctx.workStart);
   var hours = 1;

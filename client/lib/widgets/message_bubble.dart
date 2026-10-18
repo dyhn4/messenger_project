@@ -23,6 +23,7 @@ import '../services/session.dart';
 import 'attachment_widgets.dart';
 import 'chat_font_scope.dart';
 import 'avatar_utils.dart';
+import 'bot_blocks_view.dart';
 import 'hover_toolbar.dart';
 import 'inquiries_panel.dart' show InquiryBox, openInquiriesPanel;
 import 'mention_autocomplete.dart';
@@ -1133,6 +1134,17 @@ class _MessageBubbleState extends State<MessageBubble> {
         // 할 일을 만들 때 올라간 할 일 카드 — 글(`[할 일] 제목` + 담당자 멘션) 대신 카드를 그린다.
         if (message.sharedTodo != null) {
           return TodoMessageCard(session: widget.session, message: message);
+        }
+        // 대화형 봇 메시지 — 블록(머리글·칸·단추·선택지·그림)이 있으면 글(블록을 못 그리는 곳에 보일 대체 글) 대신 블록을 그린다.
+        // 그림·파일을 함께 올린 봇 메시지(사진·파일 말풍선)는 블록 대신 그 글이 설명으로 보인다.
+        final blocks = message.blocks;
+        if (blocks != null && message.isBot) {
+          return BotBlocksView(
+            session: widget.session,
+            message: message,
+            blocks: blocks,
+            resolveUrl: widget.session.resolveUrl,
+          );
         }
         // 안드로이드(터치)에서는 SelectableText였을 때 자체 롱프레스(단어 선택)가 부모
         // GestureDetector의 onLongPress(액션 시트)와 같은 롱프레스 기반이라 제스처 아레나를

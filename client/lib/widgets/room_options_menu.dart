@@ -615,7 +615,7 @@ class RoomOptionsMenu extends StatelessWidget {
           CompactMenu.item<void>(
             context,
             icon: Icons.webhook_outlined,
-            label: tr('웹훅'),
+            label: tr('웹훅·앱'),
             onTap: () => showRoomWebhooksDialog(context, session, room),
           ),
         if (room.type == RoomType.group) ...[

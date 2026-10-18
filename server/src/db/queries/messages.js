@@ -165,6 +165,7 @@ export async function softDeleteMessage(id) {
       mimeType: null,
       title: null,
       pinnedAt: null,
+      botBlocks: null,
     })
     .where(eq(messages.id, id))
     .returning();

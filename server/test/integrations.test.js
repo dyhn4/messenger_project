@@ -79,12 +79,17 @@ test('API 토큰 권한·만료', () => {
 });
 
 test('웹훅 본문: 일반 JSON·그냥 글', () => {
-  assert.deepEqual(webhookPayloadToMessage({ text: '서버 다운' }), { text: '서버 다운' });
-  assert.deepEqual(webhookPayloadToMessage({ message: 'm' }), { text: 'm' });
-  assert.deepEqual(webhookPayloadToMessage({ title: '설문 응답', body: '홍길동: 좋아요', url: 'https://f.example/1' }), {
-    text: '설문 응답\n\n홍길동: 좋아요\n\nhttps://f.example/1',
-  });
-  assert.deepEqual(webhookPayloadToMessage('  그냥 글  '), { text: '그냥 글' });
+  // 블록·바깥 그림이 없으면 blocks: null, imageUrls: [].
+  const plain = (text) => ({ text, blocks: null, imageUrls: [] });
+  assert.deepEqual(webhookPayloadToMessage({ text: '서버 다운' }), plain('서버 다운'));
+  assert.deepEqual(webhookPayloadToMessage({ message: 'm' }), plain('m'));
+  assert.deepEqual(
+    webhookPayloadToMessage({ title: '설문 응답', body: '홍길동: 좋아요', url: 'https://f.example/1' }),
+    plain('설문 응답\n\n홍길동: 좋아요\n\nhttps://f.example/1'),
+  );
+  assert.deepEqual(webhookPayloadToMessage('  그냥 글  '), plain('그냥 글'));
+  // 파일을 함께 올리면(multipart) 글이 없어도 된다.
+  assert.deepEqual(webhookPayloadToMessage({}, { allowEmpty: true }), plain(''));
   assert.ok(webhookPayloadToMessage('').error);
   assert.ok(webhookPayloadToMessage({}).error);
   assert.ok(webhookPayloadToMessage([1, 2]).error);
@@ -155,6 +160,7 @@ test('슬래시 명령 서명 — 받는 쪽이 같은 계산으로 맞출 수 �
 test('슬래시 명령 답 읽기', () => {
   assert.deepEqual(parseCommandResponse({ status: 200, contentType: 'application/json', bodyText: '{"text":"완료"}' }), {
     text: '완료',
+    blocks: null,
     inChannel: false,
   });
   assert.deepEqual(
@@ -163,9 +169,9 @@ test('슬래시 명령 답 읽기', () => {
       contentType: 'application/json; charset=utf-8',
       bodyText: '{"response_type":"in_channel","text":"배포 시작"}',
     }),
-    { text: '배포 시작', inChannel: true },
+    { text: '배포 시작', blocks: null, inChannel: true },
   );
-  assert.deepEqual(parseCommandResponse({ status: 200, contentType: 'text/plain', bodyText: '확인' }), { text: '확인', inChannel: false });
+  assert.deepEqual(parseCommandResponse({ status: 200, contentType: 'text/plain', bodyText: '확인' }), { text: '확인', blocks: null, inChannel: false });
   assert.deepEqual(parseCommandResponse({ status: 204 }), { empty: true });
   assert.deepEqual(parseCommandResponse({ status: 200, contentType: 'application/json', bodyText: '{}' }), { empty: true });
   assert.ok(parseCommandResponse({ status: 500, bodyText: 'x' }).error);

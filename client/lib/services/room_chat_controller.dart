@@ -712,6 +712,8 @@ class RoomChatController extends ChangeNotifier {
       m.pinnedAt = edited.pinnedAt;
       m.categoryId = edited.categoryId;
       m.mustReadAt = edited.mustReadAt;
+      // 봇 메시지의 블록(단추를 누른 뒤 "승인됨"으로 바뀌는 등 — bot_blocks_view.dart).
+      m.blocks = edited.blocks;
       // 사진·파일 메시지의 첨부 삭제 — 글 메시지끼리의 수정(비밀 대화 포함)에서는 파일 칸을 건드리지 않는다
       // (비밀 대화는 복호화한 파일 이름 등을 제자리에 덮어쓰고 있어서 서버 값으로 되돌리면 안 된다).
       if (m.type != MessageType.text || edited.type != MessageType.text) {

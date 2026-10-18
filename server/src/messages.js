@@ -32,6 +32,8 @@ import { attachPolls } from './polls.js';
 import { attachReactions } from './reactions.js';
 import { resolveRawUrl, signedUploadOrNull, signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
+import { mapBlockImages } from './botBlocks.js';
+import { notifyMessageDeleted, notifyMessageUpdated } from './webhookDelivery.js';
 import { parsePostCategory } from './boardRules.js';
 import { editMediaMessage } from './messageAttachmentEdit.js';
 import { isFileDeleted, isFileOfMessage } from './db/queries/fileDelete.js';
@@ -139,6 +141,8 @@ export function toMessageDto(m) {
     isInquiryNotice: !!m.isInquiryNotice,
     // 외부 연동(웹훅·슬래시 명령)이 올린 봇 메시지 — 앱이 봇 아이콘과 "봇" 표시로 그린다. 그 밖에는 null.
     bot: m.integrationId || m.botEmoji ? { integrationId: m.integrationId ?? null, emoji: m.botEmoji ?? null } : null,
+    // 봇 메시지의 블록(머리글·칸·단추·선택지·그림 — botBlocks.js 저장 모양, 그림은 서명 링크로). 블록을 그리는 앱은 text 대신 이것을 그린다.
+    blocks: m.deletedAt ? null : mapBlockImages(m.botBlocks, (file) => signFileUrl(file)),
     inquiryId: m.inquiryId ?? null,
     // 투표(type='poll')의 제목·보기·집계 — 동기 함수라 여기서 조회하지 않고, 목록을 내려주는 쪽이 미리
     // 행에 붙여 둔 m.poll(polls.js의 attachPolls / 새 투표는 sendMessage.js)을 그대로 옮긴다. 지워진
@@ -319,6 +323,7 @@ export function createMessagesRouter(io) {
       const dto = toMessageDto(result.updated);
       if (result.changed) {
         io.to(message.roomId).emit('message:edited', dto);
+        notifyMessageUpdated(room, dto);
         notifyAfterEdit({ room, before: message, updated: result.updated, actorId: req.user.sub });
       }
       return res.json(dto);
@@ -342,6 +347,7 @@ export function createMessagesRouter(io) {
       });
       const dto = await postDto(updated);
       io.to(message.roomId).emit('message:edited', dto);
+      notifyMessageUpdated(room, dto);
       res.json(dto);
       notifyAfterEdit({ room, before: message, updated, actorId: req.user.sub });
       return;
@@ -358,6 +364,7 @@ export function createMessagesRouter(io) {
     const updated = await updateMessageText(message.id, text, textFormat, mentions);
     const dto = toMessageDto(updated);
     io.to(message.roomId).emit('message:edited', dto);
+    notifyMessageUpdated(room, dto);
     res.json(dto);
     notifyAfterEdit({ room, before: message, updated, actorId: req.user.sub });
   });
@@ -444,6 +451,8 @@ export function createMessagesRouter(io) {
       // 제거) — 새 이벤트를 만들지 않고 그 경로를 그대로 재사용한다.
       io.to(message.roomId).emit('message:expired', { roomId: message.roomId, messageId: message.id });
     }
+    // 나가는 웹훅·연동 앱에도(webhookDelivery.js).
+    notifyMessageDeleted(room, message.id);
     res.json({ ok: true });
   });
 

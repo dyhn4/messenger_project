@@ -105,8 +105,9 @@ let activePreviews = 0;
  * GET 한 번 — 리다이렉트는 따라가지 않고 그대로 돌려준다(호출부가 매 홉 다시 검사). 80/443 포트만 허용한다.
  * 본문(Buffer)은 [maxBytes]까지만 읽는다(압축 해제 후 기준): [truncate]면 거기까지 받은 것으로 끝내고(HTML — og 태그는 앞쪽에
  * 있다), 아니면 너무 큰 응답으로 보고 실패한다(그림 — 잘린 그림은 쓸 수 없다). [deadline](ms 시각)이 지나면 끊는다.
+ * [method]·[body]·[headers]는 나가는 웹훅·단추 누름 알리기(safeRequest — POST)가 쓴다(헤더는 기본값 위에 덮어쓴다).
  */
-function requestOnce(url, deadline, { maxBytes, accept, truncate }) {
+function requestOnce(url, deadline, { maxBytes, accept, truncate, method = 'GET', body = null, headers: extraHeaders = {} }) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const isHttps = parsed.protocol === 'https:';
@@ -122,12 +123,14 @@ function requestOnce(url, deadline, { maxBytes, accept, truncate }) {
         hostname: parsed.hostname,
         port,
         path: `${parsed.pathname}${parsed.search}`,
-        method: 'GET',
+        method,
         lookup: guardedLookup,
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; TangoTalkLinkPreview/1.0)',
           Accept: accept,
           'Accept-Encoding': 'gzip, deflate, br',
+          ...extraHeaders,
+          ...(body != null ? { 'Content-Length': Buffer.byteLength(body) } : {}),
         },
       },
       (res) => {
@@ -183,8 +186,44 @@ function requestOnce(url, deadline, { maxBytes, accept, truncate }) {
     const timer = setTimeout(() => req.destroy(new Error('시간 초과')), remaining);
     req.on('close', () => clearTimeout(timer));
     req.on('error', reject);
-    req.end();
+    req.end(body ?? undefined);
   });
+}
+
+/**
+ * 공인 주소로만 보내는 요청 한 번(나가는 웹훅·단추 누름 알리기 — 방 관리자가 정한 주소, outbound.js). safeFetch와 같은 SSRF 방어
+ * (이름을 푼 IP 검사·80/443 포트만)에, 리다이렉트는 따라가지 않는다(3xx는 실패로 본다 — 본문을 다른 곳에 다시 보내지 않게).
+ * 결과는 { status, headers, body(Buffer — [maxBytes]까지) }.
+ */
+export async function safeRequest(url, { method = 'POST', headers = {}, body = null, maxBytes = 64 * 1024, deadlineMs = 10_000 } = {}) {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('http(s) 주소만 됩니다.');
+  return requestOnce(url, Date.now() + deadlineMs, { maxBytes, accept: '*/*', truncate: true, method, body, headers });
+}
+
+/**
+ * 이 주소가 공인 주소인지(서버 운영자가 아닌 사람이 정하는 보낼 주소의 검사) — http(s), 80/443 포트, 이름을 푼 IP가 모두 공인
+ * 주소. 받을 때 다시 검사하므로(safeRequest) 이것은 만들 때 바로 알려 주는 용도다. `{ ok: true }` | `{ ok: false, error }`.
+ */
+export async function checkPublicUrl(url, { lookup = (h) => dns.lookup(h, { all: true }) } = {}) {
+  const PRIVATE = '사내 주소(사설망)·이 서버로는 서버 운영자만 보낼 수 있습니다. 공인 주소(80·443 포트)를 넣으세요.';
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, error: '주소 모양이 올바르지 않습니다.' };
+  }
+  const port = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80;
+  if (port !== 80 && port !== 443) return { ok: false, error: PRIVATE };
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (net.isIP(host)) return isBlockedIp(host) ? { ok: false, error: PRIVATE } : { ok: true };
+  try {
+    const list = await lookup(host);
+    if (list.length === 0) return { ok: false, error: '주소의 이름을 찾을 수 없습니다.' };
+    return list.some((a) => isBlockedIp(a.address)) ? { ok: false, error: PRIVATE } : { ok: true };
+  } catch {
+    return { ok: false, error: '주소의 이름을 찾을 수 없습니다.' };
+  }
 }
 
 /**

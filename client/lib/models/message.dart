@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart' show StringCharacters;
 
 import 'album.dart' show SharedAlbum;
+import 'bot_blocks.dart';
 import 'call_card.dart';
 import 'comment.dart';
 import 'integration.dart' show MessageBot;
@@ -238,6 +239,10 @@ class Message {
   /// 외부 연동(들어오는 웹훅·슬래시 명령)이 올린 봇 메시지의 아이콘 — 아니면 null(message_bubble.dart가 봇 아이콘·"봇" 표시로 그린다).
   final MessageBot? bot;
 
+  /// 봇 메시지의 블록(머리글·칸·단추·선택지·그림 — bot_blocks.dart) — 있으면 말풍선은 [text] 대신 이것을 그린다. 아니면 null.
+  /// 단추를 누른 뒤 봇이 메시지를 바꾸면 message:edited로 바뀐다(RoomChatController.applyEdit) — non-final.
+  List<BotBlock>? blocks;
+
   /// 화상회의 기록 카드(시스템 메시지 — call_message_card.dart) — 아니면 null. 통화가 진행되는 동안
   /// call:card로 그 자리에서 바뀐다(RoomChatController.applyCallCard) — non-final.
   CallCard? callCard;
@@ -298,6 +303,7 @@ class Message {
     this.sharedTodo,
     this.reminderCard,
     this.bot,
+    this.blocks,
     this.callCard,
     this.reactions = const [],
     this.notifyOnly,
@@ -419,6 +425,7 @@ class Message {
       sharedTodo: SharedTodo.fromJson(json['sharedTodo']),
       reminderCard: ReminderCard.fromJson(json['reminderCard']),
       bot: MessageBot.fromJson(json['bot']),
+      blocks: BotBlock.listFromJson(json['blocks']),
       callCard: CallCard.fromJson(json['callCard']),
       reactions: parseReactions(json['reactions']),
       notifyOnly: (json['notifyOnly'] as List?)?.whereType<String>().toList(),

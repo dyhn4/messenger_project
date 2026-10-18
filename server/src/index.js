@@ -28,7 +28,9 @@ import { createLoginSecurityRouter } from './loginSecurity.js';
 import { loginMethodsView } from './loginSecurityRules.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { createSsoRouter, ssoRedirectUri } from './sso.js';
-import { createIntegrationsRouter, webhookReceiveHandler } from './integrations.js';
+import { createIntegrationsRouter, webhookReceiveRoute } from './integrations.js';
+import { createOAuthPublicRouter, createOAuthRouter } from './oauth.js';
+import { startWebhookDeliveryJob } from './webhookDelivery.js';
 import { backfillOrgTrees, createOrgTreeRouter } from './orgTree.js';
 import { createPublicApiRouter } from './publicApi.js';
 import { clientIp, isLanAddress, limits, rateLimit } from './authGuard.js';
@@ -172,8 +174,10 @@ app.use('/auth', createAuthRouter(io));
 // 2단계 인증(OTP)과 회사 계정 로그인(SSO) — 로그인 전에도 부르는 경로라 /auth 아래(각 경로가 필요하면 토큰을 직접 본다).
 app.use('/auth', createLoginSecurityRouter());
 app.use('/auth', createSsoRouter());
-// 공개 API(개인 API 토큰 — publicApi.js) — 앱 토큰(requireAuth)이 아니라 API 토큰으로 열어서 아래 /api 묶음보다 먼저 건다.
+// 공개 API(개인 API 토큰·OAuth 토큰·봇 토큰 — publicApi.js) — 앱 토큰(requireAuth)이 아니라 API 토큰으로 열어서 아래 /api 묶음보다 먼저 건다.
 app.use('/api/v1', createPublicApiRouter(io));
+// OAuth 앱 — 승인 페이지(/oauth/authorize)·결과 묻기·토큰 받기는 로그인 없이(oauth.js — 사람은 앱에서 코드를 넣어 승인한다).
+app.use(createOAuthPublicRouter());
 app.use('/api', requireAuth, uploadRouter);
 app.use('/api', uploadErrorHandler);
 app.use('/api', requireAuth, createFileResignRouter());
@@ -231,8 +235,9 @@ app.use('/api', requireAuth, createCalendarFeedsRouter());
 // 할 일(To-Do) — 대화방에 딸린 가벼운 할 일(담당자·기한·첨부·알림 일정). 프로젝트 업무와는 별개(todos.js).
 app.use('/api', requireAuth, createTodosRouter(io));
 app.use('/api', requireAuth, createDevicesRouter(io));
-// 외부 연동 — 웹훅·슬래시 명령·개인 API 토큰 관리(integrations.js).
+// 외부 연동 — 웹훅(들어오는·나가는)·슬래시 명령·연동 앱·단추 누르기·개인 API 토큰 관리(integrations.js), OAuth 코드 승인·연결된 앱(oauth.js).
 app.use('/api', requireAuth, createIntegrationsRouter(io));
+app.use('/api', requireAuth, createOAuthRouter());
 // 조직도 — 부서 트리·상위자(orgTree.js).
 app.use('/api', requireAuth, createOrgTreeRouter(io));
 // 화상회의(LiveKit) 참가 토큰 — LiveKit 비밀값이 없으면 라우트가 503으로 알려준다(calls.js).
@@ -277,12 +282,12 @@ app.use('/guide', guideStatic);
 // 내 일정 ICS 구독 주소 — Google·Outlook 캘린더가 로그인 없이 받아 가므로 인증 대신 주소의 긴 비밀 토큰으로 연다(calendarFeeds.js).
 app.get('/calendar-feed/:token', rateLimit(limits.calendarFeedIp, '캘린더 피드 요청'), calendarFeedHandler);
 // 들어오는 웹훅 — 바깥 서비스(모니터링·CI·설문)가 로그인 없이 보내므로 주소의 비밀 토큰으로 연다(integrations.js). JSON은 위 공통
-// 파서가 읽고, 그냥 글(text/plain)과 Slack 옛 방식(form의 payload=)도 받는다.
+// 파서가 읽고, 그냥 글(text/plain)과 Slack 옛 방식(form의 payload=), 파일을 함께 올리는 multipart(그림·로그 파일)도 받는다.
 app.post(
   '/hooks/:token',
   express.text({ type: 'text/*', limit: '100kb' }),
   express.urlencoded({ extended: false, limit: '100kb' }),
-  (req, res) => webhookReceiveHandler(io, req, res),
+  ...webhookReceiveRoute(io),
 );
 // FCM 클라이언트 초기화 값 — 비밀값이 아니라 인증 없이 공개한다(push.js 참고).
 app.use(firebaseConfigRouter);
@@ -363,6 +368,8 @@ startAnnouncementAutoUnpinJob(io);
 startProjectDueReminderJob(io);
 startScheduledMessageJob(io);
 startTodoReminderJob(io);
+// 나가는 웹훅·연동 앱으로 방의 일 보내기(실패하면 다시 — webhookDelivery.js).
+startWebhookDeliveryJob();
 // 메시지 리마인더 — 30초마다 울릴 때가 된 것을 "나와의 대화"에 올린다(reminders.js).
 startReminderJob(io);
 // 외부 캘린더(ICS 구독) — 5분마다 30분이 지난 구독을 다시 받는다(externalCalendars.js).

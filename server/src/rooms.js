@@ -70,12 +70,14 @@ import {
   getLastMessageAt,
   getLastMessageForPreview,
   insertMessage,
+  insertMessageWithAttachments,
   iterateMessagesForExport,
   listAttachmentsForMessages,
   listMessagesByIds,
   listMessagesByRoom,
   listPinnedPosts,
 } from './db/queries/messages.js';
+import { notifyMessageCreated } from './webhookDelivery.js';
 import {
   countUnreadCommentsForUser,
   getLastCommentAt,
@@ -519,23 +521,44 @@ export async function postSystemMessage(io, room, text) {
  * socket.js의 message:send와 같은 순서(숨긴 DM 되살리기 → message:new → 푸시)로 보낸다.
  * senderId가 null이라 누구의 "내 메시지"도 아니고, 푸시에서 보낸 사람으로 빠지는 멤버도 없다.
  */
-export async function postBotMessage(io, room, text, { senderName, reminderCard = null, integrationId = null, botEmoji = null }) {
-  const message = await insertMessage({
+export async function postBotMessage(
+  io,
+  room,
+  text,
+  { senderName, reminderCard = null, integrationId = null, botEmoji = null, botBlocks = null, attachments = [] },
+) {
+  // 외부 연동이 함께 올린 파일(웹훅 multipart·바깥 그림 — integrations.js가 이미 업로드 파일로 둔 것)은 사람 메시지처럼 첨부로 —
+  // 그림만이면 'image', 하나라도 파일이면 'file', 첫 첨부는 messages의 파일 칸에도(sendMessage.js와 같다).
+  const head = attachments[0] ?? null;
+  const fields = {
     id: randomUUID(),
     roomId: room.id,
     senderId: null,
     senderName,
-    type: 'text',
+    type: head ? (attachments.every((a) => a.kind === 'image') ? 'image' : 'file') : 'text',
     text,
     // 메시지 리마인더가 울릴 때 붙는 원본 메시지 카드(reminders.js) — 그 밖에는 null.
     reminderCard,
-    // 외부 연동(웹훅·슬래시 명령 — integrations.js)이 올린 봇 메시지의 연동과 아이콘 — 그 밖에는 null.
+    // 외부 연동(웹훅·슬래시 명령·연동 앱 — integrations.js)이 올린 봇 메시지의 연동·아이콘·블록(단추 등) — 그 밖에는 null.
     integrationId,
     botEmoji,
-  });
+    botBlocks,
+    ...(head
+      ? { fileUrl: head.fileUrl, fileName: head.fileName, fileSize: head.fileSize, mimeType: head.mimeType, thumbnailUrl: head.thumbnailUrl }
+      : {}),
+  };
+  let message;
+  if (attachments.length > 1) {
+    const created = await insertMessageWithAttachments(fields, attachments);
+    message = { ...created.message, attachments: created.attachments };
+  } else {
+    message = await insertMessage(fields);
+  }
   await unhideDmForOtherMembers(io, room, null);
   const dto = toMessageDto(message);
   io.to(room.id).emit('message:new', dto);
+  // 나가는 웹훅·연동 앱에도(이 메시지를 올린 연동 자신에게는 빼고 — webhookDelivery.js).
+  notifyMessageCreated(room, dto, { sourceIntegrationId: integrationId });
   // 푸시는 기다리지 않는다(socket.js와 같은 이유) — 실패해도 메시지는 이미 올라갔다.
   listRoomMemberIds(room.id)
     .then((memberIds) =>

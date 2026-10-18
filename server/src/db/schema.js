@@ -110,6 +110,14 @@ export const users = pgTable('users', {
  *    [name]·[emoji]의 봇 메시지로 올라간다. 토큰은 열쇠 해시로만 두고(만들 때 한 번만 보여 줌), 앞 몇 글자([tokenPrefix])만 화면에.
  *  - 'command'(슬래시 명령): 팀에 묶인 `/[command]`. 대화방에서 `/명령 내용`을 치면 서버가 [url]로 서명한 요청을 보내고 받은 답을
  *    봇 메시지로 올린다. 서명 비밀은 암호화해 둔다. 서버가 사내 다른 주소로 요청을 보내는 일이라 서버 운영자만 만든다.
+ *  - 'outgoing'(나가는 웹훅): 대화방 하나에 묶여, 그 방의 일([events] — 새 메시지·멘션·댓글·할 일 등)을 [url]로 서명해 보낸다
+ *    (webhookDelivery.js — 보내기 기록은 webhook_deliveries).
+ *  - 'app'(연동 앱 — 봇 전용 계정 + OAuth 앱): 팀에 묶인 앱. 봇 토큰(ttb_ — [tokenHash])으로 공개 API를 봇 이름으로 부르고, 방 관리자가
+ *    방에 추가한 곳(integration_rooms)만 읽고 쓴다. [url]이 있으면 그 방들의 일([events])을 받고, [interactionUrl]로 단추 누름을 받는다.
+ *    [clientId]·[clientSecretHash]·[redirectUris]는 사람이 승인해 그 사람 이름으로 부르는 OAuth(oauth.js). 서버 운영자만 만든다.
+ * 단추·선택지가 있는 봇 메시지(messages.bot_blocks)를 누르면 [interactionUrl](명령은 [url])로 서명한 요청을 보낸다.
+ * [allowPrivate]는 보낼 주소가 사내 주소(사설망)여도 되는지 — 서버 운영자가 정한 주소만 true(아니면 공인 주소만, linkPreview.js
+ * safeRequest). [enabled]·[failureCount]는 나가는 일 보내기가 계속 실패할 때 저절로 끄는 데 쓴다.
  * 팀·방이 지워지면 같이 지워진다.
  */
 export const integrations = pgTable(
@@ -130,6 +138,18 @@ export const integrations = pgTable(
     description: text('description'),
     url: text('url'),
     secretEnc: text('secret_enc'),
+    // 나가는 웹훅·앱이 받을 일 종류(integrationRules.js INTEGRATION_EVENTS 중에서) — 그 밖은 null.
+    events: jsonb('events'),
+    // 단추·선택지 누름을 받을 주소(들어오는 웹훅은 고르기, 앱) — 슬래시 명령은 [url]로 받는다.
+    interactionUrl: text('interaction_url'),
+    allowPrivate: boolean('allow_private').notNull().default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    // 나가는 일 보내기가 연달아 실패한 횟수 — 성공하면 0, 상한에 닿으면 [enabled]를 끈다(webhookDelivery.js).
+    failureCount: integer('failure_count').notNull().default(0),
+    // OAuth(앱) — 공개해도 되는 앱 id, 앱 비밀의 열쇠 해시, 돌아갈 주소 목록.
+    clientId: text('client_id'),
+    clientSecretHash: text('client_secret_hash'),
+    redirectUris: jsonb('redirect_uris'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdByName: text('created_by_name'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -139,13 +159,110 @@ export const integrations = pgTable(
   (t) => [
     uniqueIndex('integrations_token_hash_idx').on(t.tokenHash),
     uniqueIndex('integrations_team_command_idx').on(t.teamId, t.command),
+    uniqueIndex('integrations_client_id_idx').on(t.clientId),
     index('integrations_room_idx').on(t.roomId),
   ],
 );
 
 /**
+ * 연동 앱(integrations kind 'app')을 추가한 대화방 — 봇은 여기 있는 방만 읽고 쓰고, 이 방들의 일만 받는다. 방 관리자(웹훅을 다룰 수
+ * 있는 사람)가 추가·제거하고, 그때 방에 안내가 남는다. 앱이나 방이 지워지면 같이 지워진다.
+ */
+export const integrationRooms = pgTable(
+  'integration_rooms',
+  {
+    integrationId: uuid('integration_id')
+      .notNull()
+      .references(() => integrations.id, { onDelete: 'cascade' }),
+    roomId: text('room_id')
+      .notNull()
+      .references(() => rooms.id, { onDelete: 'cascade' }),
+    addedBy: uuid('added_by').references(() => users.id, { onDelete: 'set null' }),
+    addedByName: text('added_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.integrationId, t.roomId] }), index('integration_rooms_room_idx').on(t.roomId)],
+);
+
+/**
+ * 나가는 웹훅·앱으로 보낼 일 한 건(webhookDelivery.js) — 바로 보내고, 실패하면 [nextAttemptAt]에 다시 보낸다(정해진 횟수까지).
+ * [status] 'pending' | 'delivered' | 'failed'. 화면의 "최근 보내기"가 이 기록을 보여 주고, 7일이 지나면 지운다.
+ */
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    integrationId: uuid('integration_id')
+      .notNull()
+      .references(() => integrations.id, { onDelete: 'cascade' }),
+    event: text('event').notNull(),
+    payload: jsonb('payload').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    lastStatus: integer('last_status'),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('webhook_deliveries_due_idx').on(t.status, t.nextAttemptAt),
+    index('webhook_deliveries_integration_idx').on(t.integrationId, t.createdAt.desc()),
+  ],
+);
+
+/**
+ * OAuth 승인 — 사람이 연동 앱에 "내 이름으로 [scopes]만큼 해도 된다"고 허락한 기록(oauth.js). 한 사람·한 앱에 하나. 내 프로필 →
+ * 연결된 앱에서 끊으면(행을 지운다) 그 앱의 토큰도 같이 지워진다(api_tokens.grant_id).
+ */
+export const oauthGrants = pgTable(
+  'oauth_grants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    integrationId: uuid('integration_id')
+      .notNull()
+      .references(() => integrations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    scopes: jsonb('scopes').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('oauth_grants_app_user_idx').on(t.integrationId, t.userId), index('oauth_grants_user_idx').on(t.userId)],
+);
+
+/**
+ * OAuth 승인을 기다리는 요청(oauth.js) — 브라우저의 승인 페이지가 [userCode]를 보여 주고, 사람이 앱(내 프로필 → 연결된 앱)에서 그
+ * 코드를 넣어 승인하면(approved) 페이지가 처음 물을 때 [codeHash](한 번 쓰는 승인 코드)를 만들어 돌아갈 주소로 보낸다(issued — 5분),
+ * 앱이 토큰으로 바꾸면 used. [status] 'pending' | 'approved' | 'issued' | 'used' | 'denied'. 10분이면 끝난다.
+ */
+export const oauthRequests = pgTable(
+  'oauth_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    integrationId: uuid('integration_id')
+      .notNull()
+      .references(() => integrations.id, { onDelete: 'cascade' }),
+    userCode: text('user_code').notNull(),
+    redirectUri: text('redirect_uri').notNull(),
+    scopes: jsonb('scopes').notNull(),
+    state: text('state'),
+    codeChallenge: text('code_challenge'),
+    status: text('status').notNull().default('pending'),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('oauth_requests_user_code_idx').on(t.userCode), uniqueIndex('oauth_requests_code_hash_idx').on(t.codeHash)],
+);
+
+/**
  * 개인 API 토큰 — 내 이름으로 공개 API(/api/v1 — publicApi.js)를 부르는 열쇠(스크립트·자동화용). 토큰은 열쇠 해시로만 두고(만들 때 한
  * 번만 보여 줌), 권한([scopes] — 'read' 읽기, 'write' 메시지 보내기)과 만료를 정한다. 지우면(revoked) 바로 못 쓴다.
+ * [kind] 'personal'(내가 만든 개인 토큰 — 화면 목록은 이것만) | 'oauth'(OAuth 승인으로 앱이 받은 짧은 토큰 tto_) | 'refresh'(그 토큰을
+ * 다시 받는 열쇠 ttr_ — 공개 API에는 못 쓴다). OAuth 토큰은 [grantId]의 승인이 지워지면 같이 지워진다.
  */
 export const apiTokens = pgTable(
   'api_tokens',
@@ -162,8 +279,14 @@ export const apiTokens = pgTable(
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    kind: text('kind').notNull().default('personal'),
+    grantId: uuid('grant_id').references(() => oauthGrants.id, { onDelete: 'cascade' }),
   },
-  (t) => [uniqueIndex('api_tokens_token_hash_idx').on(t.tokenHash), index('api_tokens_user_idx').on(t.userId)],
+  (t) => [
+    uniqueIndex('api_tokens_token_hash_idx').on(t.tokenHash),
+    index('api_tokens_user_idx').on(t.userId),
+    index('api_tokens_grant_idx').on(t.grantId),
+  ],
 );
 
 export const userIdentities = pgTable(
@@ -839,6 +962,9 @@ export const messages = pgTable(
     // sender_name에 그대로 둔다(연동을 지워도 메시지의 이름·이모지는 남는다). 사람 메시지·다른 자동 메시지는 null.
     integrationId: uuid('integration_id').references(() => integrations.id, { onDelete: 'set null' }),
     botEmoji: text('bot_emoji'),
+    // 봇 메시지의 블록(머리글·글·칸·단추·선택지·그림 — botBlocks.js가 걸러 저장한 모양). 앱은 이것을 그리고, 단추를 누르면 서버가
+    // 그 연동의 응답 주소로 알린다. [text]에는 같은 내용을 글로 둔다(검색·알림·예전 앱).
+    botBlocks: jsonb('bot_blocks'),
     // 화상회의 한 통의 기록 카드(type='system' 메시지에만, callCards.js) — 통화가 시작될 때 한 장 만들고 참여·거절·
     // 나감마다 고친다: { status: 'active'|'ended', startedAt, endedAt, durationMs, answered, events: [{ at, userId,
     // name, kind: 'start'|'join'|'leave'|'decline' }] }. 대화에 시스템 메시지를 여러 줄 남기는 대신 이 한 장으로 본다.

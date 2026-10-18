@@ -1,6 +1,8 @@
-/// 외부 연동(들어오는 웹훅·슬래시 명령·개인 API 토큰) 화면이 쓰는 모양 — 서버 integrations.js의 응답과 같다.
+/// 외부 연동(들어오는·나가는 웹훅, 슬래시 명령, 연동 앱, 개인 API 토큰, 연결된 앱) 화면이 쓰는 모양 — 서버 integrations.js·oauth.js의
+/// 응답과 같다.
 library;
 
+import '../l10n/tr.dart';
 import 'room.dart';
 
 /// 연동(웹훅·슬래시 명령)을 쓸 수 있는 방인지 — 서버 integrationRules.js roomAcceptsIntegrations와 같은 규칙(토픽 챗 뷰·그룹,
@@ -33,7 +35,8 @@ class MessageBot {
   }
 }
 
-/// 웹훅 하나 또는 슬래시 명령 하나([kind] 'webhook' | 'command'). 비밀값(토큰·서명 비밀)은 만들 때 한 번만 따로 온다.
+/// 연동 하나([kind] 'webhook'(들어오는 웹훅) | 'command'(슬래시 명령) | 'outgoing'(나가는 웹훅) | 'app'(연동 앱)). 비밀값(토큰·서명
+/// 비밀)은 만들 때 한 번만 따로 온다.
 class Integration {
   final String id;
   final String kind;
@@ -45,8 +48,25 @@ class Integration {
   final String? command;
   final String? description;
 
-  /// 슬래시 명령을 보낼 주소 — 서버 운영자에게만 온다(그 밖에는 null).
+  /// 보낼 주소(슬래시 명령·나가는 웹훅·앱의 받을 일) — 그 연동을 다룰 수 있는 사람에게만 온다(그 밖에는 null).
   final String? url;
+
+  /// 단추·선택지 누름을 받을 주소(들어오는 웹훅·앱) — 없으면 그 연동이 올린 메시지의 단추는 눌러도 갈 곳이 없다.
+  final String? interactionUrl;
+
+  /// 받을 일(나가는 웹훅·앱 — [integrationEvents] 중에서).
+  final List<String> events;
+
+  /// 켜져 있는지(나가는 웹훅·앱 — 보내기가 연달아 실패하면 서버가 끈다)와 연달아 실패한 수.
+  final bool enabled;
+  final int failureCount;
+
+  /// 서명 비밀이 있는지(들어오는 웹훅은 응답 주소를 정할 때 처음 생긴다).
+  final bool hasSigningSecret;
+
+  /// OAuth 앱 id와 돌아갈 주소(앱 — 서버 운영자에게만).
+  final String? clientId;
+  final List<String> redirectUris;
   final String? createdByName;
   final DateTime? createdAt;
   final DateTime? lastUsedAt;
@@ -63,6 +83,13 @@ class Integration {
     this.command,
     this.description,
     this.url,
+    this.interactionUrl,
+    this.events = const [],
+    this.enabled = true,
+    this.failureCount = 0,
+    this.hasSigningSecret = false,
+    this.clientId,
+    this.redirectUris = const [],
     this.createdByName,
     this.createdAt,
     this.lastUsedAt,
@@ -70,6 +97,8 @@ class Integration {
   });
 
   bool get isCommand => kind == 'command';
+  bool get isOutgoing => kind == 'outgoing';
+  bool get isApp => kind == 'app';
 
   factory Integration.fromJson(Map<String, dynamic> json) => Integration(
     id: json['id'] as String,
@@ -82,6 +111,15 @@ class Integration {
     command: json['command'] as String?,
     description: json['description'] as String?,
     url: json['url'] as String?,
+    interactionUrl: json['interactionUrl'] as String?,
+    events: (json['events'] as List? ?? const []).whereType<String>().toList(),
+    enabled: json['enabled'] as bool? ?? true,
+    failureCount: (json['failureCount'] as num?)?.toInt() ?? 0,
+    hasSigningSecret: json['hasSigningSecret'] == true,
+    clientId: json['clientId'] as String?,
+    redirectUris: (json['redirectUris'] as List? ?? const [])
+        .whereType<String>()
+        .toList(),
     createdByName: json['createdByName'] as String?,
     createdAt: _time(json['createdAt']),
     lastUsedAt: _time(json['lastUsedAt']),
@@ -181,4 +219,190 @@ class ApiToken {
 String? slashCommandQuery(String input) {
   final m = RegExp(r'^/([a-zA-Z0-9_-]{0,32})$').firstMatch(input);
   return m?.group(1)?.toLowerCase();
+}
+
+/// 나가는 웹훅·앱이 받을 수 있는 일 — 서버 integrationRules.js INTEGRATION_EVENTS와 같은 순서.
+const integrationEvents = [
+  'message.created',
+  'message.updated',
+  'message.deleted',
+  'mention',
+  'comment.created',
+  'todo.created',
+  'todo.updated',
+  'todo.deleted',
+];
+
+/// 일 종류의 화면 이름('ping'은 시험 보내기).
+String integrationEventLabel(String event) => switch (event) {
+  'message.created' => tr('새 메시지'),
+  'message.updated' => tr('메시지 수정'),
+  'message.deleted' => tr('메시지 삭제'),
+  'mention' => tr('멘션'),
+  'comment.created' => tr('새 댓글'),
+  'todo.created' => tr('할 일 생성'),
+  'todo.updated' => tr('할 일 수정'),
+  'todo.deleted' => tr('할 일 삭제'),
+  'ping' => tr('시험 보내기'),
+  _ => event,
+};
+
+/// 나가는 웹훅·앱의 보내기 기록 한 건([status] 'pending'(다시 보낼 차례를 기다림) | 'delivered' | 'failed').
+class WebhookDelivery {
+  final String id;
+  final String event;
+  final String status;
+  final int attempts;
+  final int? lastStatus;
+  final String? lastError;
+  final DateTime? createdAt;
+  final DateTime? deliveredAt;
+  final DateTime? nextAttemptAt;
+
+  const WebhookDelivery({
+    required this.id,
+    required this.event,
+    required this.status,
+    this.attempts = 0,
+    this.lastStatus,
+    this.lastError,
+    this.createdAt,
+    this.deliveredAt,
+    this.nextAttemptAt,
+  });
+
+  bool get delivered => status == 'delivered';
+  bool get failed => status == 'failed';
+
+  factory WebhookDelivery.fromJson(Map<String, dynamic> json) =>
+      WebhookDelivery(
+        id: json['id'] as String? ?? '',
+        event: json['event'] as String? ?? '',
+        status: json['status'] as String? ?? 'failed',
+        attempts: (json['attempts'] as num?)?.toInt() ?? 0,
+        lastStatus: (json['lastStatus'] as num?)?.toInt(),
+        lastError: json['lastError'] as String?,
+        createdAt: _time(json['createdAt']),
+        deliveredAt: _time(json['deliveredAt']),
+        nextAttemptAt: _time(json['nextAttemptAt']),
+      );
+}
+
+/// 연동 앱을 만들거나 비밀을 새로 만든 결과 — 비밀값은 이번에만 보인다(바꾸지 않은 것은 null).
+class AppSecrets {
+  final Integration app;
+  final String? botToken;
+  final String? clientSecret;
+  final String? signingSecret;
+  const AppSecrets({
+    required this.app,
+    this.botToken,
+    this.clientSecret,
+    this.signingSecret,
+  });
+
+  factory AppSecrets.fromJson(Map<String, dynamic> json) => AppSecrets(
+    app: Integration.fromJson(json),
+    botToken: json['botToken'] as String?,
+    clientSecret: json['clientSecret'] as String?,
+    signingSecret: (json['signingSecret'] ?? json['secret']) as String?,
+  );
+}
+
+/// 팀 멤버에게 보이는 연동 앱(이름·아이콘·설명) — 방에 추가된 앱이면 추가한 사람·시각도.
+class TeamApp {
+  final String id;
+  final String name;
+  final String? emoji;
+  final String? description;
+  final bool enabled;
+  final String? addedByName;
+  final DateTime? addedAt;
+
+  const TeamApp({
+    required this.id,
+    required this.name,
+    this.emoji,
+    this.description,
+    this.enabled = true,
+    this.addedByName,
+    this.addedAt,
+  });
+
+  factory TeamApp.fromJson(Map<String, dynamic> json) => TeamApp(
+    id: json['id'] as String,
+    name: json['name'] as String? ?? '',
+    emoji: json['emoji'] as String?,
+    description: json['description'] as String?,
+    enabled: json['enabled'] as bool? ?? true,
+    addedByName: json['addedByName'] as String?,
+    addedAt: _time(json['addedAt']),
+  );
+}
+
+/// 내 프로필 → 연결된 앱 한 줄 — 내가 승인한 OAuth 앱과 권한.
+class ConnectedApp {
+  final String id;
+  final TeamApp app;
+  final String? teamName;
+  final List<String> scopes;
+  final DateTime? createdAt;
+  final DateTime? lastUsedAt;
+
+  const ConnectedApp({
+    required this.id,
+    required this.app,
+    this.teamName,
+    this.scopes = const [],
+    this.createdAt,
+    this.lastUsedAt,
+  });
+
+  bool get canWrite => scopes.contains('write');
+
+  factory ConnectedApp.fromJson(Map<String, dynamic> json) => ConnectedApp(
+    id: json['id'] as String,
+    app: TeamApp.fromJson(
+      (json['app'] as Map? ?? const {}).cast<String, dynamic>(),
+    ),
+    teamName: json['teamName'] as String?,
+    scopes: (json['scopes'] as List? ?? const []).whereType<String>().toList(),
+    createdAt: _time(json['createdAt']),
+    lastUsedAt: _time(json['lastUsedAt']),
+  );
+}
+
+/// 승인 코드를 넣어 찾은 OAuth 승인 요청 — 승인 창에 앱 이름·팀·권한·돌아갈 곳을 보여 준다.
+class OAuthRequestInfo {
+  final String id;
+  final TeamApp app;
+  final String? teamName;
+  final List<String> scopes;
+  final String redirectHost;
+  final DateTime? expiresAt;
+
+  const OAuthRequestInfo({
+    required this.id,
+    required this.app,
+    this.teamName,
+    this.scopes = const [],
+    required this.redirectHost,
+    this.expiresAt,
+  });
+
+  bool get canWrite => scopes.contains('write');
+
+  factory OAuthRequestInfo.fromJson(Map<String, dynamic> json) =>
+      OAuthRequestInfo(
+        id: json['id'] as String,
+        app: TeamApp.fromJson(
+          (json['app'] as Map? ?? const {}).cast<String, dynamic>(),
+        ),
+        teamName: json['teamName'] as String?,
+        scopes: (json['scopes'] as List? ?? const [])
+            .whereType<String>()
+            .toList(),
+        redirectHost: json['redirectHost'] as String? ?? '',
+        expiresAt: _time(json['expiresAt']),
+      );
 }

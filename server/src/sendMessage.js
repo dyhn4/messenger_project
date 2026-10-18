@@ -35,6 +35,7 @@ import { notifyBoard, notifyMentions } from './notifications.js';
 import { toPollDto } from './polls.js';
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { sanitizeTextFormat } from './textFormat.js';
+import { notifyMessageCreated } from './webhookDelivery.js';
 
 /** 같은 임시 id로 이미 만든 메시지가 있으면 그 응답(다시 방송하지 않는다 — 처음 보낼 때 이미 갔다). 없으면 null. */
 async function duplicateReply(senderId, clientId, roomId) {
@@ -384,6 +385,8 @@ export async function sendUserMessage({
   const broadcastMessage = toMessageDto(pollDto ? { ...message, poll: pollDto } : message);
   if (Array.isArray(notifyOnly)) broadcastMessage.notifyOnly = notifyOnly;
   io.to(room.id).emit('message:new', broadcastMessage);
+  // 나가는 웹훅·연동 앱에도(비밀 대화는 보내지 않는다 — webhookDelivery.js).
+  notifyMessageCreated(room, broadcastMessage);
 
   // 응답(소켓 ack 등)을 기다리게 하지 않도록 백그라운드로 보낸다 — 실패해도(토큰 만료 등)
   // notifyOfflineMembers 내부에서 개별적으로 처리되고 메시지 전송 자체엔 영향 없다.

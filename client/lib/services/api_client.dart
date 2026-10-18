@@ -14,6 +14,7 @@ import '../models/comment.dart';
 import '../models/backup_settings.dart';
 import '../models/ddns_settings.dart';
 import '../models/inquiry.dart';
+import '../models/bot_blocks.dart' show BotActionResult;
 import '../models/integration.dart';
 import '../models/invite_link.dart';
 import '../models/invite_result.dart';
@@ -1208,6 +1209,155 @@ class ApiClient {
 
   Future<void> revokeApiToken(String id) async {
     await _delete('/api/users/me/api-tokens/$id');
+  }
+
+  // ── 나가는 웹훅·연동 앱·단추 누르기·연결된 앱(서버 integrations.js·oauth.js) ──
+
+  Future<List<Integration>> fetchRoomOutgoingWebhooks(String roomId) async => [
+    for (final j in await _get('/api/rooms/$roomId/outgoing-webhooks') as List)
+      Integration.fromJson(_map(j)),
+  ];
+
+  /// 나가는 웹훅 만들기 → (웹훅, 서명 비밀 — 이번에만).
+  Future<(Integration, String)> createOutgoingWebhook(
+    String roomId, {
+    required String name,
+    required String url,
+    required List<String> events,
+    String? emoji,
+  }) async {
+    final body = _map(
+      await _post('/api/rooms/$roomId/outgoing-webhooks', {
+        'name': name,
+        'url': url,
+        'events': events,
+        'emoji': ?emoji,
+      }),
+    );
+    return (Integration.fromJson(body), body['secret'] as String);
+  }
+
+  /// 바꾸기 — 들어오는 웹훅에 응답 주소를 처음 정하면 서명 비밀이 함께 온다(이번에만).
+  Future<(Integration, String?)> updateIntegrationWithSecret(
+    String id,
+    Map<String, dynamic> patch,
+  ) async {
+    final body = _map(await _patch('/api/integrations/$id', patch));
+    return (Integration.fromJson(body), body['secret'] as String?);
+  }
+
+  /// 새 서명 비밀(나가는 웹훅, 들어오는 웹훅의 응답 — [which] 'signing') — 이번에만.
+  Future<String> regenerateSigningSecret(String id) async {
+    final body = _map(
+      await _post('/api/integrations/$id/regenerate', {'which': 'signing'}),
+    );
+    return body['secret'] as String;
+  }
+
+  /// 연동 앱의 비밀 하나를 새로 — [which] 'bot'(봇 토큰) | 'client'(OAuth 앱 비밀) | 'signing'(서명 비밀).
+  Future<AppSecrets> regenerateAppSecret(String id, String which) async =>
+      AppSecrets.fromJson(
+        _map(await _post('/api/integrations/$id/regenerate', {'which': which})),
+      );
+
+  Future<List<WebhookDelivery>> fetchIntegrationDeliveries(String id) async => [
+    for (final j in await _get('/api/integrations/$id/deliveries') as List)
+      WebhookDelivery.fromJson(_map(j)),
+  ];
+
+  /// 보내 보기 — ping을 바로 한 번 보내고 그 결과.
+  Future<WebhookDelivery> testIntegration(String id) async =>
+      WebhookDelivery.fromJson(
+        _map(await _post('/api/integrations/$id/test', {})),
+      );
+
+  /// 팀의 연동 앱 — 서버 운영자는 주소까지(관리자 콘솔), 팀 멤버는 이름·아이콘·설명만.
+  Future<List<Integration>> fetchTeamAppsAdmin(String teamId) async => [
+    for (final j in await _get('/api/teams/$teamId/apps') as List)
+      Integration.fromJson({'kind': 'app', 'teamId': teamId, ..._map(j)}),
+  ];
+
+  Future<List<TeamApp>> fetchTeamApps(String teamId) async => [
+    for (final j in await _get('/api/teams/$teamId/apps') as List)
+      TeamApp.fromJson(_map(j)),
+  ];
+
+  /// 연동 앱 만들기(서버 운영자) → 봇 토큰·OAuth 앱 비밀·서명 비밀(이번에만).
+  Future<AppSecrets> createTeamApp(
+    String teamId, {
+    required String name,
+    String? emoji,
+    String? description,
+    String? url,
+    List<String> events = const [],
+    String? interactionUrl,
+    List<String> redirectUris = const [],
+  }) async => AppSecrets.fromJson(
+    _map(
+      await _post('/api/teams/$teamId/apps', {
+        'name': name,
+        'emoji': ?emoji,
+        'description': ?description,
+        'url': ?url,
+        'events': events,
+        'interactionUrl': ?interactionUrl,
+        'redirectUris': redirectUris,
+      }),
+    ),
+  );
+
+  Future<List<TeamApp>> fetchRoomApps(String roomId) async => [
+    for (final j in await _get('/api/rooms/$roomId/apps') as List)
+      TeamApp.fromJson(_map(j)),
+  ];
+
+  Future<void> addAppToRoom(String roomId, String appId) async {
+    await _post('/api/rooms/$roomId/apps', {'appId': appId});
+  }
+
+  Future<void> removeAppFromRoom(String roomId, String appId) async {
+    await _delete('/api/rooms/$roomId/apps/$appId');
+  }
+
+  /// 봇 메시지의 단추·선택지 누르기([value]는 선택지에서 고른 값).
+  Future<BotActionResult> runMessageAction(
+    String messageId, {
+    required String actionId,
+    String? value,
+  }) async => BotActionResult.fromJson(
+    _map(
+      await _post('/api/messages/$messageId/actions', {
+        'actionId': actionId,
+        'value': ?value,
+      }),
+    ),
+  );
+
+  /// 승인 코드로 OAuth 승인 요청 찾기(브라우저의 승인 페이지에 보이는 코드).
+  Future<OAuthRequestInfo> lookupOAuthRequest(String code) async =>
+      OAuthRequestInfo.fromJson(
+        _map(await _post('/api/oauth/requests/lookup', {'code': code})),
+      );
+
+  /// 승인([approve] true)·거절 — 같은 코드를 다시 보낸다.
+  Future<void> answerOAuthRequest(
+    String requestId, {
+    required String code,
+    required bool approve,
+  }) async {
+    await _post(
+      '/api/oauth/requests/$requestId/${approve ? 'approve' : 'deny'}',
+      {'code': code},
+    );
+  }
+
+  Future<List<ConnectedApp>> fetchConnectedApps() async => [
+    for (final j in await _get('/api/users/me/connected-apps') as List)
+      ConnectedApp.fromJson(_map(j)),
+  ];
+
+  Future<void> disconnectApp(String grantId) async {
+    await _delete('/api/users/me/connected-apps/$grantId');
   }
 
   /// refreshToken으로 새 accessToken을 받아온다. 실패하면(만료/비밀번호 변경 등) 던진다.

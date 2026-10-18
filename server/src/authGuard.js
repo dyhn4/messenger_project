@@ -453,8 +453,17 @@ export const limits = {
   webhookIp: new RateLimiter({ max: 300, windowMs: MIN }),
   // 슬래시 명령 — 한 사람이 1분에 30번(바깥 서버로 요청이 나간다).
   commandUser: new RateLimiter({ max: 30, windowMs: MIN }),
-  // 공개 API(개인 API 토큰) — 토큰 하나에 1분 120번.
+  // 공개 API(개인 API 토큰·OAuth 토큰·봇 토큰) — 토큰 하나에 1분 120번.
   apiToken: new RateLimiter({ max: 120, windowMs: MIN }),
+  // 봇 메시지의 단추·선택지 누르기 — 한 사람이 1분에 60번(누를 때마다 바깥 서버로 요청이 나간다).
+  interactionUser: new RateLimiter({ max: 60, windowMs: MIN }),
+  // 나가는 웹훅·앱의 "보내 보기" — 한 사람이 1분에 10번.
+  webhookTestUser: new RateLimiter({ max: 10, windowMs: MIN }),
+  // OAuth — 승인 페이지 열기(한 IP 10분 60번), 승인 코드 넣기(한 사람 10분 20번 — 짧은 코드를 마구 넣어 보지 못하게), 토큰 받기·
+  // 승인 결과 묻기(한 IP 10분 600번 — 페이지가 2초마다 묻는다).
+  oauthAuthorizeIp: new RateLimiter({ max: 60, windowMs: 10 * MIN }),
+  oauthCodeUser: new RateLimiter({ max: 20, windowMs: 10 * MIN }),
+  oauthTokenIp: new RateLimiter({ max: 600, windowMs: 10 * MIN }),
 };
 
 setInterval(() => {

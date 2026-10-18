@@ -77,6 +77,7 @@ import {
 } from './todoRules.js';
 import { sendUserMessage } from './sendMessage.js';
 import { signFileUrl } from './upload.js';
+import { notifyTodoChanged } from './webhookDelivery.js';
 
 const ms = (d) => (d ? new Date(d).getTime() : null);
 
@@ -253,6 +254,8 @@ export function createTodosRouter(io) {
     const memberIds = await listRoomMemberIds(todo.roomId);
     const payload = { teamId: todo.teamId, roomId: todo.roomId, todoId: todo.id, kind, ...extra };
     for (const id of memberIds) io.to(`user:${id}`).emit('todo:changed', payload);
+    // 나가는 웹훅·연동 앱에도(만들기·고치기·지우기만 — webhookDelivery.js).
+    notifyTodoChanged(todo, kind);
   }
 
   /** 담당자로 지정된 사람에게 푸시 — 소켓이 붙어 있는 기기는 todo:changed로 앱이 토스트를 띄우므로 그 기기로는 안 보낸다

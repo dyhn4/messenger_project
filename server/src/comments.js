@@ -15,6 +15,7 @@ import { isBoardRoom, notifyBoard, notifyMentions, removeNotificationsForComment
 import { notifyOfflineMembers, roomTagFor } from './push.js';
 import { signFileUrl } from './upload.js';
 import { sanitizeTextFormat } from './textFormat.js';
+import { notifyCommentCreated } from './webhookDelivery.js';
 
 // messages.js와 동일: 수정/삭제 허용 여부와 가능 시간은 팀 설정([메시지 설정])을 따르며
 // moderation.js의 canModifyContent가 판단한다.
@@ -124,6 +125,8 @@ export function createCommentsRouter(io) {
     const dto = toCommentDto(comment);
     io.to(message.roomId).emit('comment:new', dto);
     res.status(201).json(dto);
+    // 나가는 웹훅·연동 앱에도(webhookDelivery.js).
+    notifyCommentCreated(room, comment);
 
     // 응답 이후 백그라운드로 — socket.js의 message:send와 동일한 패턴.
     (async () => {

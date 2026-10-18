@@ -112,18 +112,18 @@ function rememberShared(url, stored) {
  * 받은 그림을 미리보기용 WEBP로 다시 만든다 — 그림으로 풀리지 않으면 throw. 움직이는 그림은 첫 장면만. 다시 만들기 때문에 받은
  * 파일의 다른 내용(메타데이터·그림 뒤에 덧붙인 다른 파일)은 남지 않는다.
  */
-export async function previewWebpOf(bytes) {
+export async function previewWebpOf(bytes, maxSide = PREVIEW_IMAGE_MAX_SIDE) {
   // sharp(네이티브 모듈)는 여기서 불러온다 — 이 파일의 판단 규칙만 쓰는 단위 테스트가 불러오지 않아도 되게.
   const { default: sharp } = await import('sharp');
   return sharp(bytes, { limitInputPixels: PREVIEW_IMAGE_MAX_PIXELS })
     .rotate() // 사진의 EXIF 방향 반영
-    .resize(PREVIEW_IMAGE_MAX_SIDE, PREVIEW_IMAGE_MAX_SIDE, { fit: 'inside', withoutEnlargement: true })
+    .resize(maxSide, maxSide, { fit: 'inside', withoutEnlargement: true })
     .webp({ quality: 80 })
     .toBuffer();
 }
 
 /** 업로드 폴더에 새 이름으로 쓰고 uploads 표에 남긴다(올린 사람 [ownerId] — 서버가 받은 대화방 미리보기는 null). 저장 경로. */
-async function storeUpload(bytes, ownerId) {
+export async function storeUpload(bytes, ownerId) {
   if (!(await uploadsDirHasRoom(bytes.length))) return null;
   const fileName = `${randomUUID()}.webp`;
   const filePath = path.join(uploadsDir, fileName);
@@ -173,6 +173,47 @@ export async function storePreviewImage(imageUrl, { requesterId = null, ownerId 
     return stored;
   } catch (err) {
     console.warn('[linkPreview] 미리보기 그림을 받지 못했습니다:', err?.message ?? err);
+    return null;
+  } finally {
+    activeDownloads--;
+  }
+}
+
+/** 봇 메시지에 붙일 바깥 그림의 한 변 — 그래프·스크린샷이 읽히게 미리보기(800)보다 크게. 말풍선에는 미리보기 크기 사본을 쓴다. */
+export const BOT_IMAGE_MAX_SIDE = 2048;
+const BOT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * 연동(웹훅의 image_url·그림 블록, 봇 API)이 준 바깥 그림을 받아 그림 첨부로 둔다 — 링크 미리보기와 같은 SSRF 방어(safeFetch — 공인
+ * 주소만)로 받고, 그림인지 확인한 뒤 WEBP로 다시 만들어(원본 2048px·미리보기 800px) 업로드 파일로 둔다. 못 받으면 null.
+ * 결과 { fileUrl, thumbnailUrl, fileName, fileSize, mimeType }. 동시 받기 수는 미리보기와 같이 센다.
+ */
+export async function storeRemoteImage(imageUrl, deps = defaultDeps) {
+  if (!isRemoteImageUrl(imageUrl)) return null;
+  if (activeDownloads >= PREVIEW_IMAGE_MAX_CONCURRENT) return null;
+  activeDownloads++;
+  try {
+    const res = await deps.fetch(imageUrl, {
+      maxBytes: BOT_IMAGE_MAX_BYTES,
+      accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.1',
+      truncate: false,
+      deadlineMs: PREVIEW_IMAGE_DEADLINE_MS,
+    });
+    if (!acceptablePreviewResponse(res)) return null;
+    const [full, thumb] = await Promise.all([previewWebpOf(res.body, BOT_IMAGE_MAX_SIDE), previewWebpOf(res.body)]);
+    const fileUrl = await deps.store(full, null);
+    if (!fileUrl) return null;
+    const thumbnailUrl = await deps.store(thumb, null);
+    const base = (() => {
+      try {
+        return decodeURIComponent(new URL(imageUrl).pathname.split('/').pop() || '').replace(/\.[^.]*$/, '');
+      } catch {
+        return '';
+      }
+    })();
+    return { fileUrl, thumbnailUrl, fileName: `${(base || 'image').slice(0, 80)}.webp`, fileSize: full.length, mimeType: 'image/webp' };
+  } catch (err) {
+    console.warn('[integrations] 바깥 그림을 받지 못했습니다:', err?.message ?? err);
     return null;
   } finally {
     activeDownloads--;

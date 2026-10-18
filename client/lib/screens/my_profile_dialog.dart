@@ -28,6 +28,7 @@ import 'birthday_dialog.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart' show wideBreakpoint;
 import 'api_tokens_dialog.dart';
+import 'connected_apps_dialog.dart';
 import 'my_devices_dialog.dart';
 import 'linked_accounts_dialog.dart';
 import '../widgets/otp_dialogs.dart' show showOtpManageDialog;
@@ -754,6 +755,15 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                           label: tr('API 토큰'),
                           onTap: () =>
                               showApiTokensDialog(context, widget.session),
+                        ),
+                        const Divider(height: 1),
+                        // 연결된 앱 — 내 계정으로 쓰도록 승인한 OAuth 앱, 브라우저 승인 코드로 새 앱 승인(connected_apps_dialog.dart).
+                        _ProfileLinkRow(
+                          rowKey: const ValueKey('profile-connected-apps'),
+                          icon: Icons.apps_outlined,
+                          label: tr('연결된 앱'),
+                          onTap: () =>
+                              showConnectedAppsDialog(context, widget.session),
                         ),
                         const Divider(height: 1),
                       ],

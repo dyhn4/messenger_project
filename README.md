@@ -358,7 +358,7 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
 - 채팅 목록·채팅방 제목에 초록 자물쇠 아이콘 + 초록 이름, 알림 미리보기는 항상 고정 문구, 통합 검색에서 제외
 
 **캘린더** (팀 단위 — `server/src/calendars.js`)
-- 캘린더 종류: 사람마다 자동으로 생기는 **기본 캘린더**(공개면 다른 사람이 검색해서 구독), 팀마다 하나인 **팀 캘린더**(정회원 이상이 보고, 일정은 팀 소유자·관리자만 편집), 정회원이 만드는 **공유 캘린더**(멤버별 관리자/쓰기/읽기 권한, 삭제는 소유자만), 그리고 항상 켜져 있는 **공휴일**·**멤버 생일**·**팀 휴가**·**회의실 예약** 캘린더(숨기기만 가능 — 팀 휴가·회의실 예약은 [그룹웨어](#그룹웨어전자결재연차출퇴근)에서 온다)
+- 캘린더 종류: 사람마다 자동으로 생기는 **기본 캘린더**(공개면 다른 사람이 검색해서 구독), 팀마다 하나인 **팀 캘린더**(정회원 이상이 보고, 일정은 팀 소유자·관리자만 편집), 정회원이 만드는 **공유 캘린더**(멤버별 관리자/쓰기/읽기 권한, 삭제는 소유자만), 그리고 항상 켜져 있는 **공휴일**·**멤버 생일**·**팀 휴가**·**출장**·**회의실 예약** 캘린더(숨기기만 가능 — 팀 휴가·출장·회의실 예약은 [그룹웨어](#그룹웨어전자결재연차출퇴근)에서 온다)
 - 일정: 제목·설명·장소·종일/시간·공개 범위(비공개는 만든 사람·참석자·캘린더 관리자만 자세히, 나머지에게는 "비공개 일정")·참석자·내 개인 색. **반복**(매일/매주 요일 지정/매월/매년, 간격, 종료일 또는 횟수)은 시간 일정이면 한국 시간 기준으로 펼치고, "이 일정만/이후 모두/전체" 단위로 수정·삭제합니다
 - 반복 일정 한도(남용 방지 — `server/src/calendarRecurrence.js`): 반복 종료일은 2299-12-31까지이고, 달력은 1900년 1월 ~ 2299년 12월 사이만 불러옵니다. "이 일정만"으로 따로 고치거나 지운 회차는 반복 일정 하나에 1,000개까지이고(넘으면 "이 일정 및 이후 일정"으로 나눠 바꾸라고 안내), 새 일정 만들기와 반복 일정의 "이 일정만"·"이 일정 및 이후 일정" 수정은 한 사람이 10분에 60번까지입니다. 한 번에 불러오는 회차는 5,000개까지라, 누가 일정을 대량으로 만들어 넘치면 내가 만든 일정부터 넣고 나머지는 만든 사람마다 하나씩 돌아가며 채웁니다
 - 준회원은 팀 캘린더·생일 캘린더를 볼 수 없고, 새 캘린더 만들기·구독·참석자 초대를 할 수 없습니다(자기 기본 캘린더에 일정은 만들 수 있음). 팀에서 나간 사람은 멤버 행이 남아 있어도 접근이 막힙니다. **준회원으로 내려간 사람은 공유 캘린더에서 읽기만** 합니다 — 예전에 관리자·쓰기였거나 소유자여도 이름·공개 설정·멤버·일정을 바꾸거나 일정을 그 캘린더로 옮기거나 캘린더를 지우지 못하고, 남의 비공개 일정 내용(달력·상세·검색)도 못 봅니다(자기 일정과 참석자로 초대된 일정은 봄 — `permissions.js`의 `effectiveCalendarMemberRole`, 거절 문구는 `준회원은 공유 캘린더에서 읽기만 할 수 있습니다.`, 소유자가 "나에게만 삭제"를 고르면 `…숨김을 사용하세요.`). 행은 고치지 않아서 멤버 목록에는 저장된 권한이 그대로 보이고(캘린더 관리자가 읽기로 낮춰 둘 수 있음), 정회원 이상으로 돌아오면 저장된 권한이 다시 살아납니다. 앱 업데이트는 필요 없습니다
@@ -1165,10 +1165,10 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 ## 그룹웨어(전자결재·연차·출퇴근)
 
 메뉴 → 툴 → **그룹웨어**(타일의 숫자는 내가 지금 결재할 문서 수). 탭: **결재 · 휴가 · 지출 · 출퇴근 · 예약 · 관리**(관리자만). 서버는
-`server/src/groupware.js`, 규칙은 `approvalRules.js`(결재)·`approvalForms.js`(결재 양식)·`annualLeave.js`(휴가·법정 연차)·
+`server/src/groupware.js`, 규칙은 `approvalRules.js`(결재)·`approvalForms.js`(결재 양식)·`approvalFormDefaults.js`(양식의 기본 결재선)·`settlementRules.js`(정산 연결)·`annualLeave.js`(휴가·법정 연차)·
 `attendanceRules.js`(출퇴근)·`workRules.js`(근로시간·유연근무·출근 알림)·`leavePromotion.js`(연차 촉진)·`groupwareOptions.js`(휴가 종류·지출 분류)·
 `resourceRules.js`(회의실·자원 예약)·`groupwareScope.js`(범위), 근태·휴가 관리 API는 `groupwareWork.js`, 회의실·자원 예약 API는 `groupwareResources.js`, 앱은
-`client/lib/screens/groupware/`(양식은 `approval_form_widgets.dart`, 관리 탭의 근태·휴가 관리는 `groupware_work_admin.dart`, 예약은 `resource_tab.dart`, 휴가
+`client/lib/screens/groupware/`(양식은 `approval_form_widgets.dart`·관리 탭의 양식 관리는 `approval_form_admin.dart`, 관리 탭의 근태·휴가 관리는 `groupware_work_admin.dart`, 예약은 `resource_tab.dart`, 휴가
 달력은 `leave_calendar.dart`).
 
 **범위** — 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". **팀마다**면 결재선 후보·연차·출퇴근·근무 시간·관리자가 모두 그 팀 안이고(앱이 지금
@@ -1235,7 +1235,8 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
   셉니다(공휴일 표는 `holidays.js` — 2025~2027). 한 번에 60일까지, 같은 기간에 휴가를 두 번 낼 수 없습니다.
 - 남은 연차(결재 중인 것까지 뺀)보다 많이 신청하면 막습니다. 입사일이 없으면 남은 양을 모르니 막지 않습니다.
 - 출근율 80% 미만인 해의 감액, 이월, 회사가 더 주는 휴가는 계산하지 않습니다 — 관리자가 **연차 조정**(0.5일 단위 ±, 사유 필수, 감사 로그)으로 맞춥니다.
-- 승인된 휴가는 캘린더의 내장 구독 캘린더 **"팀 휴가"**에 보입니다(정회원 이상, 숨길 수 있음).
+- 승인된 휴가는 캘린더의 내장 구독 캘린더 **"팀 휴가"**에, 승인된 출장은 **"출장"**(주황 — "이름 출장 · 출장지", 장소는 출장지)에 보입니다(정회원
+  이상, 숨길 수 있음 — 승인·취소되면 바로 다시 받음).
 - **휴가 달력** — 휴가 탭의 "팀 휴가"는 기본이 한 달 **달력**(일요일부터 — 캘린더와 같음, 앞뒤 달로 넘김)이고 "앞으로 30일" 목록으로 바꿀 수 있습니다.
   칸마다 승인된 휴가(초록)·출장(파랑) 이름을 두 명까지(넘치면 +n), 내가 올려 결재 중인 휴가는 테두리만, 공휴일은 빨간 날짜와 이름으로 보이고,
   날을 누르면 그날 누가 무슨 휴가·어디로 출장인지 아래에 펼칩니다(`GET /api/groupware/leave/month` — 남의 결재 중 휴가는 보내지 않음).
@@ -1258,7 +1259,25 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 관리 탭(결재·근태 관리자) → **결재 양식** — 기본 양식마다 켜고 끄고(끈 양식은 "새 결재"에 안 나오고 올릴 수 없음 — 409), **양식 만들기**로
 이름·설명·칸(이름·종류·필수·고르기의 고를 거리)·파일 첨부 받기를 정해 양식을 만듭니다(범위마다 50개, 칸 20개). 만든 양식은 고치기·켜고 끄기·
 지우기가 되고, 바꾼 내용은 감사 로그(`groupware.form`)에 남으며 그 범위 사람들의 그룹웨어 화면이 바로 다시 받습니다. 양식으로 올린 결재의
-알림·감사 로그는 양식 이름으로 나갑니다(예: "교육 신청 결재 승인").
+알림·감사 로그는 양식 이름으로 나갑니다(예: "교육 신청 결재 승인"). 관리 화면은 `client/lib/screens/groupware/approval_form_admin.dart`.
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0129`)가 돌아야 아래 기능이 켜집니다.
+
+- **칸 순서·칸 설명** — 양식 고치기에서 칸을 손잡이로 끌어 순서를 바꾸고, 칸마다 설명(100자 — 신청 창의 입력칸 아래에 보임)을 붙입니다. 칸 key
+  (`f1`, `f2` …)는 한 번 매기면 그대로라 순서를 바꾸거나 칸을 빼도 다른 칸의 값과 섞이지 않습니다(새 칸만 가장 큰 번호 다음).
+- **사람 칸** — 이 범위의 정회원 이상(올리는 사람 자신도)을 고릅니다. 한 사람 또는 "여러 명 고르기"(10명까지). 문서에는 그때의 이름으로 적힙니다.
+- **표 칸** — 관리자가 열(8개까지, 열마다 글·숫자·금액·날짜)을 정하고, 올리는 사람이 줄(50줄까지 — 빈 줄은 버림)을 채웁니다. 숫자·금액 열은
+  합계가 붙고, 금액 열의 합계는 [결재선 규칙](#부서-트리와-상위자조직도)의 문서 금액에 들어갑니다.
+- **양식마다의 기본 결재선·참조자** — 양식(기본 양식도) ⋯ → **기본 결재선**에서 결재자(순서와 결재·합의·전결)와 참조자를 정해 두면, 그 양식으로
+  새 결재를 쓸 때 결재선을 그 사람들로 미리 채웁니다 — 결재선 규칙·조직도 상위자보다 먼저("구매 요청" 양식이면 "'구매 요청' 양식의 기본 결재선으로 채웠습니다" 안내).
+  참조자만 정하면 결재자는 규칙·상위자로 채우고 참조자에 더합니다. 올리는 사람 자신과 지금 고를 수 없는 사람은 빠지고, 올리는 사람이 고칠 수
+  있습니다(`approvalFormDefaults.js`).
+- **정산 연결** — 승인된 **구매 요청·출장 신청**을 올린 사람은 상세에서 **정산하기**를 누릅니다. 지출 결재 창이 그 결재를 가리킨 채 열리고(예산
+  — 구매는 품목 합계, 출장은 예상 경비 — 을 금액에 미리 넣고 예산과의 차이를 보여 줌), 올리면 지출 결재에 그때의 제목·번호·예산이 적힙니다
+  (`approval_documents.settles_id`, `payload.settles`). 원래 결재에는 "정산 결재 중 / 정산됨"과 정산 금액·차이가, 지출 결재에는 "정산 대상"과
+  예산·차이가 보이고 서로 눌러 엽니다. 한 결재에 결재 중이거나 승인된 정산은 하나뿐이고(반려·회수·취소되면 다시 올릴 수 있음), 결재함의
+  **정산 안 됨**으로 정산 안 된 승인 구매·출장만 봅니다(내가 올린 것 — 관리자는 전체에서도). 규칙은 `settlementRules.js`.
+- **출장의 캘린더 표시** — 승인된 출장은 캘린더의 내장 캘린더 **"출장"**에 보입니다(위 [휴가·법정 연차](#그룹웨어전자결재연차출퇴근) 참고).
 
 **출퇴근** — 출근·퇴근 단추(하루 한 번씩). **위치 정보는 받지 않고**, 사내 와이파이에서 눌렀는지만 함께 남깁니다(서버가 보는 접속 주소가
 사설망인지 — 로그인·가입의 사내망 판정과 같다). 날짜·시각은 서버 PC의 시각입니다. 전날 출근하고 안 닫힌 기록은 출근한 지 20시간 안이면 다음
@@ -1408,9 +1427,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **결재 양식 후속** — 일반 기안서·출장·구매·연장근무 양식과 관리자가 만드는 양식은 들어갔습니다([결재 양식](#결재-양식)). 남은 것: 양식마다의
-  기본 결재선·참조자, 칸 순서 끌어 옮기기·칸 설명, 사람 고르기·표(임의 열) 칸, 승인된 지출성 결재(구매·출장 경비)의 정산 연결, 출장의
-  캘린더 표시.
 - **결재 기능 후속** — 합의·전결·대결·문서 번호·서명·도장·인쇄·PDF·결재 통계는 들어갔습니다([합의·전결·대결](#합의전결대결)). 남은 것:
   전결 규정(종류·금액에 따라 전결권자를 저절로 — 지금은 올리는 사람이 결재선에서 정함), 합의의 "반대 의견으로 진행", 후결(사후 결재),
   결재 문서 보관·검색(기간·문서 번호), 통계 엑셀 내보내기, 서명 그림의 위변조 방지(전자서명).
@@ -1421,7 +1437,7 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 - **회의실·자원 예약 후속** — 자원 관리·시간표·겹침 막기·캘린더 일정에 붙이기·내장 "회의실 예약" 캘린더는 들어갔습니다([회의실·자원 예약](#회의실자원-예약)).
   남은 것: 반복 예약(매주 같은 시간 — 지금은 회차마다), 관리자 승인이 필요한 자원, 자원마다 예약할 수 있는 사람·시간대 제한, 사용 통계, 참석자
   수에 맞는 회의실 추천, 일정 하나에 여러 자원(회의실+장비), 예약 시작 전 알림, 회의실 앞 태블릿 화면.
-- **휴가 달력 후속** — 휴가 탭의 달력 보기는 들어갔습니다. 남은 것: 부서별로 거르기, 캘린더의 "팀 휴가"에 출장도 보이기, 달력에서 날을 끌어
+- **휴가 달력 후속** — 휴가 탭의 달력 보기와 캘린더의 내장 "출장" 캘린더는 들어갔습니다. 남은 것: 부서별로 거르기, 달력에서 날을 끌어
   바로 휴가 신청하기.
 - **웹메일 후속** — 메일 계정 연결(IMAP/SMTP)로 읽기·쓰기·답장·전달·첨부·새 메일 알림은 들어갔습니다([웹메일](#웹메일)). 남은 것: HTML 메일을
   서식 그대로 보기(안전하게 걸러서), 임시 저장(임시보관함), 서명, 계정 여러 개, Gmail·Microsoft 365의 OAuth 로그인(앱 비밀번호 대신),
@@ -1583,6 +1599,8 @@ messenger_project/
 │  │  ├─ orgTree.js               조직도 — 부서 트리·부서장·상위자·겸직·끌어 옮기기·엑셀 내보내기/가져오기, 결재선 추천의 상위자 사슬(규칙은 orgTreeRules.js)
 │  │  ├─ orgDirectorySync.js      사내 디렉터리(LDAP)의 OU 경로·manager 속성으로 부서·상위자 맞추기
 │  │  ├─ approvalLineRules.js     결재선 규칙(종류·금액마다 상위자 사슬을 어디까지) — 순수 규칙
+│  │  ├─ approvalFormDefaults.js  양식마다의 기본 결재선·참조자(미리 채우기) — 순수 규칙
+│  │  ├─ settlementRules.js       승인된 구매·출장과 지출 결재의 정산 연결 — 순수 규칙
 │  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
 │  │  │                           groupwareScope.js(팀마다/회사 전체)·approvalForms.js(결재 양식)가 순수 규칙(단위 테스트 대상)
 │  │  ├─ backup.js                서버 전체 백업(DB를 모름 — 만들기·보관·외부 위치·첨부파일 미러·예약) — backupService.js가 DB·pg_dump와 잇고,
@@ -2476,15 +2494,15 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | Method | Path | 설명 |
 |---|---|---|
 | GET | `/api/groupware/context` | 범위(`scope`·`scopeSetting`), `isManager`, 근무 시간(`workStart`·`workEnd` — 하루 중 분), `today`, 내 `hireDate`, `pendingForMe`(내가 결재할 수 — 대결을 맡은 것 포함), `leaveTypes`, `expenseCategories`, `limits`, `inLan`, `signatureUrl`(내 서명·도장) |
-| GET | `/api/groupware/candidates` | 결재자·참조자 후보(이 범위의 정회원 이상, 나 빼고) |
-| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }`(줄마다·추천에 `roles` — `?kind=&templateId=&amount=`면 결재선 규칙대로, 그때 `suggested.source`는 `rule`·`suggested.rule`) / 저장 `{ name, approverIds, ccIds, roles? }`(20개까지) |
+| GET | `/api/groupware/candidates` | 결재자·참조자 후보(이 범위의 정회원 이상, 나 빼고 — `?includeSelf=1`이면 나도: 양식의 사람 칸·기본 결재선) |
+| GET/POST | `/api/groupware/approval-lines` | 저장한 결재선 `{ lines, suggested }`(줄마다·추천에 `roles` — `?kind=&templateId=&amount=`면 결재선 규칙대로, 그때 `suggested.source`는 `rule`·`suggested.rule`. 양식에 기본 결재선이 있으면 `source: 'form'`, 기본 참조자만 더했어도 `suggested.form: { id, name }`) / 저장 `{ name, approverIds, ccIds, roles? }`(20개까지) |
 | DELETE | `/api/groupware/approval-lines/:id` | 내 결재선 지우기 |
-| GET | `/api/groupware/documents` | 결재함 `?box=inbox\|mine\|done\|cc\|all`(all은 관리자) `&kind=&status=&before=`(만든 시각 ms) |
+| GET | `/api/groupware/documents` | 결재함 `?box=inbox\|mine\|done\|cc\|all`(all은 관리자) `&kind=&status=&before=`(만든 시각 ms) `&unsettled=1`(정산 안 된 승인 구매·출장만). 구매·출장 문서에는 `settlement`(`{ id, docNumber, title, status, amount }` \| null)·`canSettle` |
 | GET | `/api/groupware/documents/:id` | 문서 상세(`docNumber`, 결재선 — 칸마다 `stage`·`role`·`actedByName`(대결)·`signatureUrl`, 참조자 `cc`, `myTurn`·`actingFor`(대결로 누구 대신인지)·`finalForMe`(내 칸이 전결)·`canWithdraw`·`canCancel`) — 올린 사람·결재자·참조자·관리자·대결한 사람, 지금 차례인 결재자의 대결을 맡은 사람만 |
-| POST | `/api/groupware/documents` | 결재 올리기 `{ kind: 'leave'\|'expense'\|'attendance'\|'draft'\|'trip'\|'purchase'\|'overtime'\|'form', title?, body?, approverIds, ccIds?, …내용 }` — 휴가 `leaveType, startDate, endDate`(양은 서버가 계산), 지출 `amount, category, spentOn, attachments?`, 근태 수정 `workDate, clockIn, clockOut?`, 양식 `values`(칸 key → 값 — 기간·시간대 `{ start, end }`, 품목 표 `[{ name, qty, unitPrice }]`)·`formId`(관리자가 만든 양식)·`attachments?`(첨부 받는 양식만). 연차 부족·겹치는 휴가·꺼진 양식은 409, 없는 양식 404, 한 시간에 30건 |
-| GET | `/api/groupware/forms` | 이 범위의 결재 양식 `[{ id('builtin:종류' \| uuid), kind, builtin, name, description, fields: [{ key, label, type, required, options? }], allowAttachments, enabled }]` — 관리자가 아니면 켜진 것만 |
-| POST | `/api/groupware/forms` | (관리자) 양식 만들기 `{ name, description?, fields: [{ label, type, required?, options? }], allowAttachments? }` → 201(칸 key는 f1, f2 …). 같은 이름 409, 50개·칸 20개까지 |
-| PATCH / DELETE | `/api/groupware/forms/:id` | (관리자) 기본 양식은 `{ enabled }`만, 만든 양식은 `{ name?, description?, fields?, allowAttachments?, enabled? }` / 지우기(만든 양식만 — 이미 올린 문서는 남음). 바뀌면 소켓 `groupware:changed`(`forms: true`) |
+| POST | `/api/groupware/documents` | 결재 올리기 `{ kind: 'leave'\|'expense'\|'attendance'\|'draft'\|'trip'\|'purchase'\|'overtime'\|'form', title?, body?, approverIds, ccIds?, …내용 }` — 휴가 `leaveType, startDate, endDate`(양은 서버가 계산), 지출 `amount, category, spentOn, attachments?, settlesId?`(정산할 승인된 구매·출장 — 내 것만, 결재 중·승인된 정산이 있으면 409), 근태 수정 `workDate, clockIn, clockOut?`, 양식 `values`(칸 key → 값 — 기간·시간대 `{ start, end }`, 품목 표 `[{ name, qty, unitPrice }]`, 사람 칸은 id(여러 명이면 id 목록), 표 칸은 줄마다 열 순서의 값 목록)·`formId`(관리자가 만든 양식)·`attachments?`(첨부 받는 양식만). 연차 부족·겹치는 휴가·꺼진 양식은 409, 없는 양식 404, 한 시간에 30건 |
+| GET | `/api/groupware/forms` | 이 범위의 결재 양식 `[{ id('builtin:종류' \| uuid), kind, builtin, name, description, fields: [{ key, label, type, required, help?, options?, multiple?, columns? }], allowAttachments, enabled, defaultLine, defaultCcIds }]` — 관리자가 아니면 켜진 것만 |
+| POST | `/api/groupware/forms` | (관리자) 양식 만들기 `{ name, description?, fields: [{ key?, label, type, required?, help?, options?, multiple?(사람), columns?(표 — `[{ label, type: text\|number\|money\|date }]` 8개까지) }], allowAttachments?, defaultLine?: [{ userId, role }], defaultCcIds? }` → 201(칸 key는 보낸 것을 지키고, 없으면 f1, f2 …). 같은 이름 409, 50개·칸 20개까지 |
+| PATCH / DELETE | `/api/groupware/forms/:id` | (관리자) 기본 양식은 `{ enabled?, defaultLine?, defaultCcIds? }`, 만든 양식은 `{ name?, description?, fields?, allowAttachments?, enabled?, defaultLine?, defaultCcIds? }`(기본 결재선은 결재선과 같은 규칙으로 검사 — 빈 목록이면 지움) / 지우기(만든 양식만 — 이미 올린 문서는 남음). 바뀌면 소켓 `groupware:changed`(`forms: true`) |
 | POST | `/api/groupware/documents/:id/approve` \| `reject` \| `withdraw` \| `cancel` | `{ comment }` — 승인(의견 선택)·반려(사유 필수)는 지금 차례인 결재자(합의 단계면 그 단계 누구든 — 모두 동의해야 넘어감, 전결이면 남은 칸 생략)나 그 사람의 대결을 맡은 사람, 회수는 올린 사람(진행 중), 취소는 관리자(승인된 것, 사유 필수) |
 | GET / POST | `/api/groupware/delegations` | 대결 설정 — 내가 맡긴 것·맡은 것(관리자는 `?all=1`, 지난 것은 뺌) / 맡기기 `{ delegateId, startDate, endDate, reason?, userId?(관리자만) }` — 자기 자신·고를 수 없는 사람·지난 기간·90일 넘음·겹침은 400 |
 | DELETE | `/api/groupware/delegations/:id` | 대결 거두기(맡긴 사람·관리자) |
@@ -2691,7 +2709,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `directory_group_mappings` | 디렉터리 그룹 규칙 — `source`(`any`|`ldap`|`saml`|`microsoft`), `group`, `team_id`(팀이 지워지면 같이), `account_role` |
 | `group_sync_grants` | 그룹 규칙으로 넣은 팀 멤버십(`user_id`, `team_id`) — 그룹에서 빠지면 이것만 뺀다 |
 | `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각), `saml_*`(SAML IdP 주소·발급자·서명 인증서·속성 이름, 이 서버의 서명 키(암호화)·인증서), `group_sync_enabled`·`group_sync_remove`(디렉터리 그룹 규칙), `passkey_login_enabled`(보안 키로 비밀번호 없이 로그인), `sso_idp_logout`(회사 계정에서도 로그아웃), `ldap_org_source`(디렉터리로 부서 맞추기 — `attribute`·`ou`·`off`)·`ldap_org_base_dn`(OU 경로의 시작 위치)·`ldap_manager_sync`·`ldap_manager_attr`(상위자 맞추기) |
-| `approval_documents` | 결재 문서(`doc_number` 문서 번호 — 범위마다 unique, 휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
+| `approval_documents` | 결재 문서(`doc_number` 문서 번호 — 범위마다 unique, 휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name`, `settles_id`(이 지출 결재가 정산하는 구매·출장 — 지워지면 null) |
 | `approval_steps` | 결재선 한 칸 — `step_order` 순서, `stage`(같은 단계 = 합의로 동시에 차례, null이면 순서가 곧 단계 — 이 기능 전 문서), `role`(`approve`\|`agree`\|`final`), `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`\|`skipped` — 전결로 생략), `comment`, `decided_at`, `acted_by_id`·`acted_by_name`(대결로 대신 결정한 사람), `signature_path`(승인할 때의 서명 그림) |
 | `approval_delegations` | 대결(부재 중 대신 결재) — `scope_key`, `user_id`(자리를 비우는 사람)·`delegate_id`(대신할 사람), `start_date`·`end_date`('YYYY-MM-DD', 둘 다 포함), `reason`, `created_by_id` |
 | `approval_counters` | 문서 번호 — (`scope_key`, `year`)마다 `last_seq`(올리는 트랜잭션에서 하나씩 올림) |
@@ -2699,7 +2717,7 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `departments` | 조직도 부서 트리 — `scope_key`(`server` 회사 하나 \| 팀 id — 부서·직책 설정을 따름), `parent_id`(위 부서, 지우면 하위 부서는 위로), `name`, `head_id`(부서장 — 그 부서 사람의 기본 상위자), `sort_order`(같은 위 부서 안 순서). 팀을 지우면 그 팀의 부서도 지운다 |
 | `department_memberships` | 겸직 — (`user_id`, `department_id`) PK, `scope_key`(부서의 범위), `position`(그 부서에서의 직책). 부서가 지워지면 같이(앱은 위 부서로 옮긴 뒤 지움) |
 | `approval_line_rules` | 결재선 규칙 — `scope_key`(그룹웨어 범위), `kind`(결재 종류 또는 `any`)·`template_id`(양식 하나만), `min_amount`(이 금액 이상일 때), `mode`(`levels`·`position`)·`levels`·`position_label`, `extra_approver_ids`·`cc_ids` |
-| `approval_templates` | 결재 양식 — `scope_key`(그룹웨어 범위), `builtin_key`(기본 양식을 켜고 끈 줄이면 그 종류 — 이때는 `enabled`·`sort_order`만 씀, 관리자가 만든 양식이면 null), `name`·`description`, `fields` jsonb(칸 정의), `allow_attachments`, `enabled`, `created_by_name`. unique(`scope_key`, `builtin_key`) |
+| `approval_templates` | 결재 양식 — `scope_key`(그룹웨어 범위), `builtin_key`(기본 양식을 켜고 끈 줄이면 그 종류 — 이때는 `enabled`·`sort_order`만 씀, 관리자가 만든 양식이면 null), `name`·`description`, `fields` jsonb(칸 정의), `allow_attachments`, `enabled`, `default_line`(기본 결재선 `[{ userId, role }]` — 기본 양식 줄에도)·`default_cc_ids`, `created_by_name`. unique(`scope_key`, `builtin_key`) |
 | `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb, `line`(결재자마다의 역할 `[{ userId, role }]`, null이면 모두 결재) |
 | `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |
 | `leave_adjustments` | 연차 조정(반일 단위 ±, 사유, 그 연차 기간의 시작일) |

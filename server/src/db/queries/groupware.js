@@ -101,8 +101,26 @@ export async function applyApprovalDecision(id, plan, afterApply = null) {
  * 이 범위 전부). [kind]·[status]로 좁히고 [before](만든 시각 ms)로 다음 쪽을 받는다. 결재선은 따로 붙인다(attachSteps).
  * [proxyFor]는 오늘 나에게 대결을 맡긴 사람들 — 'inbox'에 그 사람 차례인 문서도 넣는다(내가 올렸거나 이미 결재선에 있는 문서는 빼고).
  */
-export async function listApprovalDocuments({ scopeKey, box, userId, kind = null, status = null, before = null, limit = 50, proxyFor = [] }) {
+export async function listApprovalDocuments({
+  scopeKey,
+  box,
+  userId,
+  kind = null,
+  status = null,
+  before = null,
+  limit = 50,
+  proxyFor = [],
+  unsettled = false,
+}) {
   const conditions = [eq(approvalDocuments.scopeKey, scopeKey)];
+  // 정산 안 된 것 — 승인된 구매·출장 중 결재 중이거나 승인된 정산(지출 결재)이 없는 것(settlementRules.js).
+  if (unsettled) {
+    conditions.push(inArray(approvalDocuments.kind, ['purchase', 'trip']), eq(approvalDocuments.status, 'approved'));
+    conditions.push(
+      sql`not exists (select 1 from ${approvalDocuments} as s where s.settles_id = ${approvalDocuments.id}
+        and s.status in ('pending', 'approved'))`,
+    );
+  }
   if (kind) conditions.push(eq(approvalDocuments.kind, kind));
   if (status) conditions.push(eq(approvalDocuments.status, status));
   if (before) conditions.push(lt(approvalDocuments.createdAt, new Date(before)));
@@ -369,6 +387,32 @@ export async function listApprovedTrips({ scopeKey, from, to, userIds = null }) 
     })
     .from(approvalDocuments)
     .where(and(...conditions));
+}
+
+/**
+ * [sourceIds] 결재들을 정산하는 지출 결재들 `[{ id, settlesId, docNumber, title, status, amount, createdAt }]`(settlementRules.js).
+ */
+export async function listSettlementsOf(sourceIds) {
+  if (!sourceIds.length) return [];
+  const rows = await db
+    .select({
+      id: approvalDocuments.id,
+      settlesId: approvalDocuments.settlesId,
+      docNumber: approvalDocuments.docNumber,
+      title: approvalDocuments.title,
+      status: approvalDocuments.status,
+      payload: approvalDocuments.payload,
+      createdAt: approvalDocuments.createdAt,
+    })
+    .from(approvalDocuments)
+    .where(and(inArray(approvalDocuments.settlesId, sourceIds), eq(approvalDocuments.kind, 'expense')));
+  return rows.map(({ payload, ...r }) => ({ ...r, amount: Number.isFinite(payload?.amount) ? payload.amount : null }));
+}
+
+/** 결재 문서 한 줄만(정산할 원래 결재 확인 — 결재선 없이). */
+export async function findApprovalDocumentRow(id) {
+  const [row] = await db.select().from(approvalDocuments).where(eq(approvalDocuments.id, id)).limit(1);
+  return row ?? null;
 }
 
 /** [authorId]가 올려 결재 중인 휴가 중 [from]~[to]와 겹치는 것(휴가 달력에 내 것만 "결재 중"으로). */
@@ -656,13 +700,15 @@ export async function deleteApprovalTemplate(id) {
 }
 
 /** 기본 양식을 이 범위에서 켜고 끈 기록 — 없으면 만들고 있으면 바꾼다. */
-export async function upsertBuiltinTemplate(scopeKey, builtinKey, { name, enabled, sortOrder }) {
+/** 기본 양식의 이 범위 기록 — 켜고 끄기·순서와 기본 결재선([defaults] `{ defaultLine, defaultCcIds }` — 주지 않으면 그대로). */
+export async function upsertBuiltinTemplate(scopeKey, builtinKey, { name, enabled, sortOrder, defaults = null }) {
+  const extra = defaults ? { defaultLine: defaults.defaultLine, defaultCcIds: defaults.defaultCcIds } : {};
   const [row] = await db
     .insert(approvalTemplates)
-    .values({ scopeKey, builtinKey, name, fields: [], enabled, sortOrder })
+    .values({ scopeKey, builtinKey, name, fields: [], enabled, sortOrder, ...extra })
     .onConflictDoUpdate({
       target: [approvalTemplates.scopeKey, approvalTemplates.builtinKey],
-      set: { enabled, sortOrder, updatedAt: new Date() },
+      set: { enabled, sortOrder, ...extra, updatedAt: new Date() },
     })
     .returning();
   return row;

@@ -59,7 +59,7 @@ import {
 import { canSearchEventTitle, parseCalendarSearchQuery, searchCursorOf, toSearchItem } from './calendarSearchRules.js';
 import { listTeamIdsForUser, listTeamMemberIds } from './db/queries/teams.js';
 import { leaveTypeOf } from './annualLeave.js';
-import { listApprovedLeaves } from './db/queries/groupware.js';
+import { listApprovedLeaves, listApprovedTrips } from './db/queries/groupware.js';
 import { getServerSettings } from './db/queries/serverSettings.js';
 import { effectiveGroupwareScope, groupwareScopeKey } from './groupwareScope.js';
 import { findUserById } from './db/queries/users.js';
@@ -118,6 +118,8 @@ export const HOLIDAY_COLOR = '#E53935';
 export const BIRTHDAY_COLOR = '#F06292';
 // 내장 캘린더 "팀 휴가" — 그룹웨어에서 승인된 휴가(groupware.js).
 export const LEAVE_COLOR = '#12B886';
+// 내장 캘린더 "출장" — 그룹웨어에서 승인된 출장 신청(양식 'trip' — 휴가와 같은 사람들에게).
+export const TRIP_COLOR = '#F08C00';
 // 내장 캘린더 "회의실 예약" — 그룹웨어에서 바로 잡은 내 예약(일정에 붙인 예약은 그 일정으로 보인다 — groupwareResources.js).
 export const BOOKING_COLOR = '#7950F2';
 const TEAM_CALENDAR_COLOR = '#5B8DEF';
@@ -1428,6 +1430,31 @@ export async function collectOccurrences({ team, teamId, userId, fromMs, toMs, b
           start: startMs,
           end: endMs,
           color: LEAVE_COLOR,
+        }),
+      );
+    }
+    // 출장 — 그룹웨어에서 승인된 출장 신청(휴가와 같은 범위·같은 사람들).
+    const trips = await listApprovedTrips({
+      scopeKey: groupwareScopeKey(scope, teamId),
+      from: new Date(dayFrom).toISOString().slice(0, 10),
+      to: new Date(dayTo - 1).toISOString().slice(0, 10),
+      userIds: scope === 'server' ? await listTeamMemberIds(teamId) : null,
+    });
+    for (const trip of trips) {
+      const { startDate, endDate, destination } = trip.payload ?? {};
+      const startMs = Date.parse(`${startDate}T00:00:00Z`);
+      const endMs = Date.parse(`${endDate}T00:00:00Z`) + DAY_MS;
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
+      result.push(
+        builtInOccurrence({
+          key: `trip:${trip.id}`,
+          calendarId: 'trips',
+          source: 'trip',
+          title: destination ? `${trip.authorName} 출장 · ${destination}` : `${trip.authorName} 출장`,
+          start: startMs,
+          end: endMs,
+          color: TRIP_COLOR,
+          location: destination ?? null,
         }),
       );
     }

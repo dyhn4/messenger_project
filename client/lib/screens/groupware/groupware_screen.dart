@@ -289,6 +289,14 @@ class ApprovalDocumentTile extends StatelessWidget {
             tr('{current.approverName} 결재 차례', {
               'current.approverName': current.approverName,
             }),
+          // 승인된 구매·출장 — 정산했는지(서버 settlementRules.js settlementOf).
+          if (kSettleKinds.contains(doc.kind) &&
+              doc.status == ApprovalStatus.approved)
+            switch (doc.settlement?.status) {
+              ApprovalStatus.approved => tr('정산됨'),
+              ApprovalStatus.pending => tr('정산 결재 중'),
+              _ => tr('정산 전'),
+            },
         ].join(' · '),
         style: TextStyle(color: hint),
         maxLines: 2,

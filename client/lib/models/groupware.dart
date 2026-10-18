@@ -40,7 +40,13 @@ enum FormFieldType {
   dateRange('dateRange', '기간'),
   timeRange('timeRange', '시간대'),
   select('select', '고르기'),
-  items('items', '품목 표');
+  items('items', '품목 표'),
+
+  /// 이 범위의 사람을 골라 넣는 칸(값은 [{id, name}] — 그때의 이름). [FormFieldDef.multiple]이면 여러 명.
+  person('person', '사람'),
+
+  /// 관리자가 정한 열([FormFieldDef.columns])대로 줄마다 값을 넣는 표(값은 {rows: [[…]], totals: [열마다 합계 | null]}).
+  table('table', '표');
 
   final String wire;
   final String _labelKo;
@@ -53,19 +59,74 @@ enum FormFieldType {
       values.firstWhere((t) => t.wire == value, orElse: () => text);
 }
 
-/// 양식의 칸 하나.
+/// 표 칸의 열 종류 — 서버 approvalForms.js TABLE_COLUMN_TYPES.
+enum FormTableColumnType {
+  text('text', '글'),
+  number('number', '숫자'),
+  money('money', '금액(원)'),
+  date('date', '날짜');
+
+  final String wire;
+  final String _labelKo;
+
+  /// 화면에 보일 이름(지금 언어 — l10n/tr.dart).
+  String get label => tr(_labelKo);
+  const FormTableColumnType(this.wire, this._labelKo);
+
+  static FormTableColumnType fromWire(String? value) =>
+      values.firstWhere((t) => t.wire == value, orElse: () => text);
+}
+
+/// 표 칸의 열 하나(이름·종류).
+class FormTableColumn {
+  final String label;
+  final FormTableColumnType type;
+  const FormTableColumn({
+    required this.label,
+    this.type = FormTableColumnType.text,
+  });
+
+  factory FormTableColumn.fromJson(Map<String, dynamic> json) =>
+      FormTableColumn(
+        label: json['label'] as String? ?? '',
+        type: FormTableColumnType.fromWire(json['type'] as String?),
+      );
+
+  Map<String, dynamic> toJson() => {'label': label, 'type': type.wire};
+}
+
+/// 표 칸에 넣을 수 있는 열·줄 수(서버 approvalForms.js TABLE_COLUMNS_MAX·TABLE_ROWS_MAX), 사람 칸의 사람 수(FORM_PEOPLE_MAX),
+/// 칸 설명 길이(FORM_FIELD_HELP_MAX).
+const kFormTableColumnsMax = 8;
+const kFormTableRowsMax = 50;
+const kFormPeopleMax = 10;
+const kFormFieldHelpMax = 100;
+
+/// 양식의 칸 하나. [key]는 서버가 매기고 양식을 고쳐도 그대로다(순서를 바꿔도 같은 칸 — 새 칸은 ''로 보낸다).
 class FormFieldDef {
   final String key;
   final String label;
   final FormFieldType type;
   final bool required;
   final List<String> options;
+
+  /// 칸 설명 — 신청 창의 입력칸 아래에 보인다(없으면 null).
+  final String? help;
+
+  /// 사람 칸 — 여러 명을 고를 수 있는지.
+  final bool multiple;
+
+  /// 표 칸 — 열들.
+  final List<FormTableColumn> columns;
   const FormFieldDef({
     required this.key,
     required this.label,
     required this.type,
     this.required = false,
     this.options = const [],
+    this.help,
+    this.multiple = false,
+    this.columns = const [],
   });
 
   factory FormFieldDef.fromJson(Map<String, dynamic> json) => FormFieldDef(
@@ -76,16 +137,30 @@ class FormFieldDef {
     options: (json['options'] as List? ?? const [])
         .whereType<String>()
         .toList(),
+    help: json['help'] as String?,
+    multiple: json['multiple'] == true,
+    columns: [
+      for (final c in json['columns'] as List? ?? const [])
+        if (c is Map) FormTableColumn.fromJson(c.cast<String, dynamic>()),
+    ],
   );
 
-  /// 관리자 양식 만들기에 보낼 모양(key는 서버가 매긴다).
+  /// 관리자 양식 만들기·고치기에 보낼 모양 — 이미 있는 칸은 [key]를 함께 보내 순서를 바꿔도 같은 칸으로 남게 한다.
   Map<String, dynamic> toDefinitionJson() => {
+    if (key.isNotEmpty) 'key': key,
     'label': label,
     'type': type.wire,
     'required': required,
+    if (help != null && help!.trim().isNotEmpty) 'help': help!.trim(),
     if (type == FormFieldType.select) 'options': options,
+    if (type == FormFieldType.person) 'multiple': multiple,
+    if (type == FormFieldType.table)
+      'columns': [for (final c in columns) c.toJson()],
   };
 }
+
+/// 양식의 기본 결재선 한 칸(사람·역할 — 서버 approvalFormDefaults.js).
+typedef FormDefaultLineEntry = ({String userId, LineRole role});
 
 /// 결재 양식 — 기본 양식(id 'builtin:종류')과 관리자가 만든 양식. 서버 GET /groupware/forms.
 class ApprovalForm {
@@ -97,6 +172,11 @@ class ApprovalForm {
   final List<FormFieldDef> fields;
   final bool allowAttachments;
   final bool enabled;
+
+  /// 기본 결재선(비었으면 정하지 않음 — 결재선 규칙·조직도 상위자로)과 기본 참조자. 새 결재를 쓸 때 미리 채운다(서버
+  /// approvalFormDefaults.js — 올리는 사람이 고칠 수 있다).
+  final List<FormDefaultLineEntry> defaultLine;
+  final List<String> defaultCcIds;
   const ApprovalForm({
     required this.id,
     required this.kind,
@@ -106,7 +186,12 @@ class ApprovalForm {
     this.fields = const [],
     this.allowAttachments = false,
     this.enabled = true,
+    this.defaultLine = const [],
+    this.defaultCcIds = const [],
   });
+
+  /// 기본 결재선이나 기본 참조자가 있는지.
+  bool get hasDefaults => defaultLine.isNotEmpty || defaultCcIds.isNotEmpty;
 
   factory ApprovalForm.fromJson(Map<String, dynamic> json) => ApprovalForm(
     id: json['id'] as String,
@@ -120,6 +205,17 @@ class ApprovalForm {
     ],
     allowAttachments: json['allowAttachments'] == true,
     enabled: json['enabled'] != false,
+    defaultLine: [
+      for (final e in json['defaultLine'] as List? ?? const [])
+        if (e is Map && e['userId'] is String)
+          (
+            userId: e['userId'] as String,
+            role: LineRole.fromWire(e['role'] as String?),
+          ),
+    ],
+    defaultCcIds: (json['defaultCcIds'] as List? ?? const [])
+        .whereType<String>()
+        .toList(),
   );
 }
 
@@ -154,9 +250,107 @@ String? formValueText(FormFieldDef field, Object? value) {
         'p0': (m['rows'] as List? ?? const []).length,
         'p1': wonText((m['total'] as num?)?.toInt() ?? 0),
       });
+    case FormFieldType.person:
+      return formPeopleOf(value).map((p) => p.name).join(', ');
+    case FormFieldType.table:
+      final m = (value as Map).cast<String, dynamic>();
+      return tr('{n}줄', {'n': (m['rows'] as List? ?? const []).length});
     default:
       return value.toString();
   }
+}
+
+/// 사람 칸의 값(문서에 적힌 [{id, name}]) → 목록.
+List<({String id, String name})> formPeopleOf(Object? value) => [
+  for (final p in value is List ? value : const [])
+    if (p is Map)
+      (id: p['id'] as String? ?? '', name: p['name'] as String? ?? ''),
+];
+
+/// 표 칸의 한 칸 값을 글로 — 열 종류대로(금액은 원, 비었으면 '').
+String formTableCellText(FormTableColumn column, Object? value) {
+  if (value == null) return '';
+  switch (column.type) {
+    case FormTableColumnType.money:
+      return value is num ? wonText(value.toInt()) : '$value';
+    case FormTableColumnType.number:
+      if (value is! num) return '$value';
+      return value == value.roundToDouble()
+          ? value.toInt().toString()
+          : value.toString();
+    default:
+      return '$value';
+  }
+}
+
+/// 구매 요청·출장 신청을 정산하는 지출 결재(서버 settlementRules.js settlementOf — 승인된 것, 없으면 결재 중, 없으면 최근 것).
+class ApprovalSettlement {
+  final String id;
+  final String? docNumber;
+  final String title;
+  final ApprovalStatus status;
+
+  /// 정산 금액(원).
+  final int? amount;
+  const ApprovalSettlement({
+    required this.id,
+    this.docNumber,
+    required this.title,
+    required this.status,
+    this.amount,
+  });
+
+  factory ApprovalSettlement.fromJson(Map<String, dynamic> json) =>
+      ApprovalSettlement(
+        id: json['id'] as String? ?? '',
+        docNumber: json['docNumber'] as String?,
+        title: json['title'] as String? ?? '',
+        status: ApprovalStatus.fromWire(json['status'] as String?),
+        amount: (json['amount'] as num?)?.toInt(),
+      );
+}
+
+/// 지출 결재가 정산하는 원래 결재(지출 payload.settles — 올릴 때의 제목·번호·예산).
+class ApprovalSettles {
+  final String id;
+  final ApprovalKind kind;
+  final String title;
+  final String? docNumber;
+
+  /// 원래 결재의 예산(구매 합계·출장 예상 경비 — 없으면 null).
+  final int? budget;
+  const ApprovalSettles({
+    required this.id,
+    required this.kind,
+    required this.title,
+    this.docNumber,
+    this.budget,
+  });
+
+  factory ApprovalSettles.fromJson(Map<String, dynamic> json) =>
+      ApprovalSettles(
+        id: json['id'] as String? ?? '',
+        kind: ApprovalKind.fromWire(json['kind'] as String?),
+        title: json['title'] as String? ?? '',
+        docNumber: json['docNumber'] as String?,
+        budget: (json['budget'] as num?)?.toInt(),
+      );
+}
+
+/// 정산할 수 있는 결재 종류(서버 settlementRules.js SETTLE_KINDS).
+const kSettleKinds = {ApprovalKind.purchase, ApprovalKind.trip};
+
+/// 원래 결재의 예산(원) — 구매는 품목 합계, 출장은 예상 경비. 없으면 null(서버 settleBudgetOf).
+int? settleBudgetOf(ApprovalDocument doc) {
+  final p = doc.payload;
+  if (doc.kind == ApprovalKind.purchase) {
+    return (p['total'] as num?)?.toInt() ??
+        (((p['values'] as Map?)?['items'] as Map?)?['total'] as num?)?.toInt();
+  }
+  if (doc.kind == ApprovalKind.trip) {
+    return ((p['values'] as Map?)?['cost'] as num?)?.toInt();
+  }
+  return null;
 }
 
 /// 결재 상태 — 서버 approvalRules.js APPROVAL_STATUSES.
@@ -771,8 +965,12 @@ class ApprovalLines {
   final List<String> suggestedApproverIds;
   final List<String> suggestedCcIds;
 
-  /// 추천이 어디서 왔는지 — 'rule'(결재선 규칙) | 'org'(조직도의 상위자 사슬) | 'saved'(가장 최근에 저장한 결재선) | null(추천 없음).
+  /// 추천이 어디서 왔는지 — 'form'(양식의 기본 결재선) | 'rule'(결재선 규칙) | 'org'(조직도의 상위자 사슬) | 'saved'(가장 최근에
+  /// 저장한 결재선) | null(추천 없음).
   final String? suggestedSource;
+
+  /// 양식의 기본 결재선·참조자를 썼으면 그 양식 이름("양식 기본 결재선: 구매 요청" — 참조자만 더했을 때도).
+  final String? suggestedFormName;
 
   /// 추천에 쓴 결재선 규칙('rule'일 때 — "규칙: 지출 100만 원 이상 — 본부장까지"로 보인다).
   final ApprovalLineRule? suggestedRule;
@@ -786,6 +984,7 @@ class ApprovalLines {
     this.suggestedSource,
     this.suggestedRoles = const {},
     this.suggestedRule,
+    this.suggestedFormName,
   });
 
   factory ApprovalLines.fromJson(Map<String, dynamic> json) {
@@ -805,6 +1004,7 @@ class ApprovalLines {
               (suggested!['rule'] as Map).cast<String, dynamic>(),
             )
           : null,
+      suggestedFormName: (suggested?['form'] as Map?)?['name'] as String?,
     );
   }
 }
@@ -906,6 +1106,11 @@ class ApprovalDocument {
   final bool canWithdraw;
   final bool canCancel;
 
+  /// 구매 요청·출장 신청 — 이 결재를 정산하는 지출 결재(없으면 null)와 "정산하기"를 누를 수 있는지(올린 사람·승인됨·살아 있는 정산
+  /// 없음 — 서버 settlementRules.js).
+  final ApprovalSettlement? settlement;
+  final bool canSettle;
+
   /// 대결로 내 차례면 누구 대신인지.
   final String? actingFor;
 
@@ -934,6 +1139,8 @@ class ApprovalDocument {
     this.myTurn = false,
     this.canWithdraw = false,
     this.canCancel = false,
+    this.settlement,
+    this.canSettle = false,
   });
 
   factory ApprovalDocument.fromJson(Map<String, dynamic> json) =>
@@ -969,7 +1176,20 @@ class ApprovalDocument {
         myTurn: json['myTurn'] as bool? ?? false,
         canWithdraw: json['canWithdraw'] as bool? ?? false,
         canCancel: json['canCancel'] as bool? ?? false,
+        settlement: json['settlement'] is Map
+            ? ApprovalSettlement.fromJson(
+                (json['settlement'] as Map).cast<String, dynamic>(),
+              )
+            : null,
+        canSettle: json['canSettle'] == true,
       );
+
+  /// 지출 결재가 정산하는 원래 결재(구매·출장 — 없으면 null).
+  ApprovalSettles? get settles => payload['settles'] is Map
+      ? ApprovalSettles.fromJson(
+          (payload['settles'] as Map).cast<String, dynamic>(),
+        )
+      : null;
 
   /// 지금 결재할 차례인 칸(진행 중일 때만).
   ApprovalStep? get currentStep {

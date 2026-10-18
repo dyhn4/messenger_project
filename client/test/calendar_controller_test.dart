@@ -49,6 +49,7 @@ void main() {
       'holidays',
       'birthdays',
       'leaves',
+      'trips',
       'bookings',
       'sub',
     ]);

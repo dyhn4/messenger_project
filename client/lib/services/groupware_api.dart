@@ -35,8 +35,13 @@ class GroupwareApi {
     await _getMap('/api/groupware/context${_query()}'),
   );
 
-  Future<List<ApprovalCandidate>> candidates() async => [
-    for (final c in await _getList('/api/groupware/candidates${_query()}'))
+  /// 결재자·참조자 후보 — 나는 빼고, [includeSelf]면 나도(양식의 사람 칸·양식 기본 결재선).
+  Future<List<ApprovalCandidate>> candidates({
+    bool includeSelf = false,
+  }) async => [
+    for (final c in await _getList(
+      '/api/groupware/candidates${_query({'includeSelf': includeSelf ? '1' : null})}',
+    ))
       ApprovalCandidate.fromJson(c),
   ];
 
@@ -113,6 +118,8 @@ class GroupwareApi {
     String? description,
     required List<FormFieldDef> fields,
     bool allowAttachments = false,
+    List<FormDefaultLineEntry>? defaultLine,
+    List<String>? defaultCcIds,
   }) async => ApprovalForm.fromJson(
     (await _api.requestJson(
               'POST',
@@ -122,13 +129,22 @@ class GroupwareApi {
                 'description': ?description,
                 'fields': [for (final f in fields) f.toDefinitionJson()],
                 'allowAttachments': allowAttachments,
+                if (defaultLine != null)
+                  'defaultLine': _defaultLineJson(defaultLine),
+                'defaultCcIds': ?defaultCcIds,
               }),
             )
             as Map)
         .cast<String, dynamic>(),
   );
 
-  /// 양식 바꾸기(관리자) — 기본 양식은 enabled만.
+  List<Map<String, dynamic>> _defaultLineJson(
+    List<FormDefaultLineEntry> line,
+  ) => [
+    for (final e in line) {'userId': e.userId, 'role': e.role.wire},
+  ];
+
+  /// 양식 바꾸기(관리자) — 기본 양식은 enabled와 기본 결재선·참조자만. [defaultLine]을 빈 목록으로 보내면 기본 결재선을 지운다.
   Future<ApprovalForm> updateForm(
     String id, {
     String? name,
@@ -136,6 +152,8 @@ class GroupwareApi {
     List<FormFieldDef>? fields,
     bool? allowAttachments,
     bool? enabled,
+    List<FormDefaultLineEntry>? defaultLine,
+    List<String>? defaultCcIds,
   }) async => ApprovalForm.fromJson(
     (await _api.requestJson(
               'PATCH',
@@ -147,6 +165,9 @@ class GroupwareApi {
                   'fields': [for (final f in fields) f.toDefinitionJson()],
                 'allowAttachments': ?allowAttachments,
                 'enabled': ?enabled,
+                if (defaultLine != null)
+                  'defaultLine': _defaultLineJson(defaultLine),
+                'defaultCcIds': ?defaultCcIds,
               }),
             )
             as Map)
@@ -242,9 +263,12 @@ class GroupwareApi {
     ApprovalKind? kind,
     ApprovalStatus? status,
     DateTime? before,
+
+    /// 정산 안 된 승인 구매·출장만(서버 ?unsettled=1).
+    bool unsettled = false,
   }) async => [
     for (final d in await _getList(
-      '/api/groupware/documents${_query({'box': box.wire, 'kind': kind?.wire, 'status': status?.wire, 'before': before?.millisecondsSinceEpoch.toString()})}',
+      '/api/groupware/documents${_query({'box': box.wire, 'kind': kind?.wire, 'status': status?.wire, 'before': before?.millisecondsSinceEpoch.toString(), 'unsettled': unsettled ? '1' : null})}',
     ))
       ApprovalDocument.fromJson(d),
   ];

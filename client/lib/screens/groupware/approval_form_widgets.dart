@@ -6,8 +6,8 @@ import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_forms.dart';
-import 'groupware_screen.dart'
-    show GroupwareChanges, GroupwareSectionHeader, approvalKindIcon;
+import 'approval_print.dart' show formTableTotalsRow;
+import 'groupware_screen.dart' show approvalKindIcon;
 import '../../l10n/tr.dart';
 
 /// 양식으로 올리는 결재(서버 approvalForms.js) — 기본 양식(일반 기안서·출장 신청·구매 요청·연장근무 신청)과 관리자가 만든 양식을
@@ -43,6 +43,8 @@ class FormValues extends ChangeNotifier {
         FormFieldType.items =>
           v is! List ||
               !v.any((r) => (r as Map)['name'].toString().trim().isNotEmpty),
+        FormFieldType.person => v is! List || v.isEmpty,
+        FormFieldType.table => _filledRows(v).isEmpty,
         _ => v == null || v.toString().trim().isEmpty,
       };
       if (empty) return tr('"{f.label}"을(를) 넣으세요.', {'f.label': f.label});
@@ -58,7 +60,8 @@ class FormValues extends ChangeNotifier {
   }
 
   /// 문서 금액(원) — 결재선 규칙의 금액 기준을 고를 때 쓴다(서버 approvalLineRules.js documentAmountOf와 같은 규칙): 기안은 예산,
-  /// 출장은 예상 경비, 구매는 품목 합계, 관리자가 만든 양식은 금액 칸·품목 칸 합계의 합. 금액이 없는 양식(연장근무)이나 비었으면 null.
+  /// 출장은 예상 경비, 구매는 품목 합계, 관리자가 만든 양식은 금액 칸·품목 칸 합계·표 칸 금액 열 합계의 합. 금액이 없는
+  /// 양식(연장근무)이나 비었으면 null.
   int? get documentAmount {
     int? money(String key) =>
         int.tryParse('${_values[key] ?? ''}'.replaceAll(',', '').trim());
@@ -71,6 +74,20 @@ class FormValues extends ChangeNotifier {
             sum + _parseInt((r as Map)['qty']) * _parseInt(r['unitPrice']),
       );
       return total > 0 ? total : null;
+    }
+
+    // 표 칸 — 빈칸 아닌 줄의 금액 열 합(서버처럼 값이 있는 줄이 하나라도 있으면 0원도 센다). 금액 열이 없으면 null.
+    int? table(FormFieldDef f) {
+      final rows = _filledRows(_values[f.key]);
+      if (rows.isEmpty) return null;
+      int? sum;
+      for (final (j, c) in f.columns.indexed) {
+        if (c.type != FormTableColumnType.money) continue;
+        sum =
+            (sum ?? 0) +
+            rows.fold<int>(0, (s, r) => s + _parseInt(r.elementAtOrNull(j)));
+      }
+      return sum;
     }
 
     switch (form.kind) {
@@ -86,6 +103,7 @@ class FormValues extends ChangeNotifier {
           final v = switch (f.type) {
             FormFieldType.money => money(f.key),
             FormFieldType.items => items(f.key),
+            FormFieldType.table => table(f),
             _ => null,
           };
           if (v != null) sum = (sum ?? 0) + v;
@@ -96,28 +114,63 @@ class FormValues extends ChangeNotifier {
     }
   }
 
-  /// 서버에 보낼 값.
-  Map<String, dynamic> toJson() => {
-    for (final f in form.fields)
-      if (_values[f.key] != null)
-        f.key: switch (f.type) {
-          FormFieldType.money || FormFieldType.number =>
-            _values[f.key].toString().replaceAll(',', '').trim(),
-          FormFieldType.items => [
-            for (final r in _values[f.key] as List)
-              {
-                'name': (r as Map)['name'],
-                'qty': '${r['qty']}'.replaceAll(',', '').trim(),
-                'unitPrice': '${r['unitPrice']}'.replaceAll(',', '').trim(),
-              },
-          ],
-          _ => _values[f.key],
-        },
-  };
+  /// 서버에 보낼 값(서버 approvalForms.js parseFieldValue가 받는 모양) — 숫자·금액은 쉼표를 빼고, 사람 칸은 id(여러 명이면 id
+  /// 목록), 표 칸은 줄마다 열 순서의 글 목록(빈 줄도 그대로 — 서버가 건너뛰고, "몇 번째 줄" 안내가 화면 줄 번호와 맞는다).
+  Map<String, dynamic> toJson() {
+    final out = <String, dynamic>{};
+    for (final f in form.fields) {
+      final v = _values[f.key];
+      if (v == null) continue;
+      final json = switch (f.type) {
+        FormFieldType.money ||
+        FormFieldType.number => v.toString().replaceAll(',', '').trim(),
+        FormFieldType.items => [
+          for (final r in v as List)
+            {
+              'name': (r as Map)['name'],
+              'qty': '${r['qty']}'.replaceAll(',', '').trim(),
+              'unitPrice': '${r['unitPrice']}'.replaceAll(',', '').trim(),
+            },
+        ],
+        FormFieldType.person => () {
+          final ids = [
+            for (final p in v as List<({String id, String name})>) p.id,
+          ];
+          return f.multiple ? ids : ids.firstOrNull;
+        }(),
+        FormFieldType.table => [
+          for (final row in v as List)
+            [
+              for (final (j, c) in f.columns.indexed)
+                _tableCellJson(c, (row as List).elementAtOrNull(j)),
+            ],
+        ],
+        _ => v,
+      };
+      if (json != null) out[f.key] = json;
+    }
+    return out;
+  }
 }
 
 int _parseInt(Object? v) =>
     int.tryParse('${v ?? ''}'.replaceAll(',', '').trim()) ?? 0;
+
+/// 표 칸 값(줄마다 글 목록) 중 빈칸 아닌 줄만 — 필수 검사·문서 금액에 쓴다(서버도 빈 줄은 건너뛴다).
+List<List<Object?>> _filledRows(Object? rows) => [
+  for (final r in rows is List ? rows : const [])
+    if (r is List && r.any((c) => '${c ?? ''}'.trim().isNotEmpty)) r,
+];
+
+/// 표 한 칸을 보낼 글로 — 앞뒤 빈칸을 빼고, 숫자·금액 열은 쉼표도 뺀다.
+String _tableCellJson(FormTableColumn column, Object? cell) {
+  final text = '${cell ?? ''}'.trim();
+  return switch (column.type) {
+    FormTableColumnType.number ||
+    FormTableColumnType.money => text.replaceAll(',', ''),
+    _ => text,
+  };
+}
 
 // ── 신청 창 ───────────────────────────────────────────────────────────────
 
@@ -155,6 +208,15 @@ class FormRequestDialog extends StatefulWidget {
 class _FormRequestDialogState extends State<FormRequestDialog> {
   late final _values = FormValues(widget.form);
   final _title = TextEditingController();
+
+  /// 사람 칸에서 고를 후보(나 포함) — 처음 고를 때 한 번 불러 두고, 못 불렀으면 다음에 다시 부른다.
+  Future<List<ApprovalCandidate>>? _people;
+  Future<List<ApprovalCandidate>> _loadPeople() => _people ??= widget.api
+      .candidates(includeSelf: true)
+      .catchError((Object e, StackTrace st) {
+        _people = null;
+        Error.throwWithStackTrace(e, st);
+      });
 
   /// 일반 기안서는 제목이 곧 안건이라 꼭 받는다.
   bool get _titleRequired => widget.form.kind == ApprovalKind.draft;
@@ -196,7 +258,7 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
             border: const OutlineInputBorder(),
           ),
         ),
-        FormFieldsEditor(values: _values),
+        FormFieldsEditor(values: _values, loadPeople: _loadPeople),
         if (form.allowAttachments)
           _FormAttachments(
             values: _values,
@@ -237,10 +299,12 @@ class _FormRequestDialogState extends State<FormRequestDialog> {
   }
 }
 
-/// 양식 칸들 — 칸마다 종류에 맞는 입력을 그리고 [values]에 적는다. 입력칸 컨트롤러는 이 위젯이 갖는다.
+/// 양식 칸들 — 칸마다 종류에 맞는 입력을 그리고 [values]에 적는다. 입력칸 컨트롤러는 이 위젯이 갖는다. 칸 설명(help)은 칸
+/// 아래에 보인다. [loadPeople]은 사람 칸에서 고를 후보(없으면 사람 고르기 단추가 꺼진다).
 class FormFieldsEditor extends StatefulWidget {
   final FormValues values;
-  const FormFieldsEditor({super.key, required this.values});
+  final Future<List<ApprovalCandidate>> Function()? loadPeople;
+  const FormFieldsEditor({super.key, required this.values, this.loadPeople});
 
   @override
   State<FormFieldsEditor> createState() => _FormFieldsEditorState();
@@ -264,6 +328,40 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
 
   String _label(FormFieldDef f) => f.required ? '${f.label} *' : f.label;
 
+  /// 칸 설명(비었으면 null).
+  String? _help(FormFieldDef f) {
+    final help = f.help?.trim();
+    return help == null || help.isEmpty ? null : help;
+  }
+
+  /// 입력칸 꾸밈을 쓰지 않는 칸(날짜·기간·시간대·품목·사람·표) — 칸 아래에 설명을 작은 글로 붙인다.
+  Widget _withHelp(BuildContext context, FormFieldDef f, Widget child) {
+    final help = _help(f);
+    final decorated = switch (f.type) {
+      FormFieldType.text ||
+      FormFieldType.textarea ||
+      FormFieldType.number ||
+      FormFieldType.money ||
+      FormFieldType.select => true,
+      _ => false,
+    };
+    if (help == null || decorated) return child;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        child,
+        Padding(
+          padding: const EdgeInsets.only(top: 4, left: 12),
+          child: Text(
+            help,
+            key: ValueKey('form-field-${f.key}-help'),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -272,7 +370,7 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
         for (final f in _v.form.fields)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: _field(context, f),
+            child: _withHelp(context, f, _field(context, f)),
           ),
       ],
     );
@@ -289,7 +387,12 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
           minLines: f.type == FormFieldType.textarea ? 3 : 1,
           maxLines: f.type == FormFieldType.textarea ? 8 : 1,
           maxLength: f.type == FormFieldType.textarea ? 2000 : 200,
-          decoration: InputDecoration(labelText: _label(f), border: border),
+          decoration: InputDecoration(
+            labelText: _label(f),
+            border: border,
+            helperText: _help(f),
+            helperMaxLines: 3,
+          ),
           onChanged: (v) => _v.set(f.key, v),
         );
       case FormFieldType.number:
@@ -301,6 +404,8 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
           decoration: InputDecoration(
             labelText: _label(f),
             border: border,
+            helperText: _help(f),
+            helperMaxLines: 3,
             suffixText: f.type == FormFieldType.money ? tr('원') : null,
           ),
           onChanged: (v) => _v.set(f.key, v),
@@ -390,7 +495,12 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
         return DropdownButtonFormField<String>(
           key: ValueKey('form-field-${f.key}'),
           initialValue: _v[f.key] as String?,
-          decoration: InputDecoration(labelText: _label(f), border: border),
+          decoration: InputDecoration(
+            labelText: _label(f),
+            border: border,
+            helperText: _help(f),
+            helperMaxLines: 3,
+          ),
           items: [
             for (final o in f.options)
               DropdownMenuItem(value: o, child: Text(o)),
@@ -399,7 +509,480 @@ class _FormFieldsEditorState extends State<FormFieldsEditor> {
         );
       case FormFieldType.items:
         return _ItemsEditor(field: f, values: _v, controllerOf: _c);
+      case FormFieldType.person:
+        return _PersonFieldEditor(
+          field: f,
+          label: _label(f),
+          values: _v,
+          loadPeople: widget.loadPeople,
+        );
+      case FormFieldType.table:
+        return _TableFieldEditor(
+          field: f,
+          label: _label(f),
+          values: _v,
+          controllerOf: _c,
+        );
     }
+  }
+}
+
+/// 사람 칸 — 고른 사람을 지울 수 있는 칩으로 보이고, "사람 고르기"로 후보 창을 연다. 한 사람 칸은 새로 고르면 바뀌고, 여러 명
+/// 칸은 [kFormPeopleMax]명까지 더한다. 값은 [FormValues]에 ({id, name}) 목록으로 적는다(보낼 때 id만 — [FormValues.toJson]).
+class _PersonFieldEditor extends StatefulWidget {
+  final FormFieldDef field;
+  final String label;
+  final FormValues values;
+  final Future<List<ApprovalCandidate>> Function()? loadPeople;
+  const _PersonFieldEditor({
+    required this.field,
+    required this.label,
+    required this.values,
+    required this.loadPeople,
+  });
+
+  @override
+  State<_PersonFieldEditor> createState() => _PersonFieldEditorState();
+}
+
+class _PersonFieldEditorState extends State<_PersonFieldEditor> {
+  FormFieldDef get _f => widget.field;
+
+  List<({String id, String name})> get _people => [
+    ...?(widget.values[_f.key] as List<({String id, String name})>?),
+  ];
+
+  void _setPeople(List<({String id, String name})> people) {
+    widget.values.set(_f.key, people);
+    setState(() {});
+  }
+
+  Future<void> _pick() async {
+    final load = widget.loadPeople;
+    if (load == null) return;
+    final picked = await showDialog<List<({String id, String name})>>(
+      context: context,
+      builder: (_) => _FormPeopleDialog(
+        title: _f.label,
+        multiple: _f.multiple,
+        load: load,
+        initial: _people,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    _setPeople(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final people = _people;
+    final full = _f.multiple && people.length >= kFormPeopleMax;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(widget.label),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final p in people)
+              InputChip(
+                key: ValueKey('form-field-${_f.key}-person-${p.id}'),
+                avatar: const Icon(Icons.person_outline, size: 16),
+                label: Text(p.name, overflow: TextOverflow.ellipsis),
+                onDeleted: () =>
+                    _setPeople([...people.where((x) => x.id != p.id)]),
+              ),
+            TextButton.icon(
+              key: ValueKey('form-field-${_f.key}-pick'),
+              onPressed: widget.loadPeople == null || full ? null : _pick,
+              icon: const Icon(Icons.person_add_alt, size: 18),
+              label: Text(
+                _f.multiple
+                    ? tr('사람 고르기 ({n}/{max})', {
+                        'n': people.length,
+                        'max': kFormPeopleMax,
+                      })
+                    : tr('사람 고르기'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// 사람 칸의 후보 창 — 이름·아이디로 찾는다. 한 사람 칸은 누르면 바로 그 사람으로 닫히고, 여러 명 칸은 체크해서 "확인"으로
+/// 닫는다([kFormPeopleMax]명까지 — 이미 고른 사람은 체크된 채로 시작). 닫으면 고른 사람 목록(취소는 null).
+class _FormPeopleDialog extends StatefulWidget {
+  final String title;
+  final bool multiple;
+  final Future<List<ApprovalCandidate>> Function() load;
+  final List<({String id, String name})> initial;
+  const _FormPeopleDialog({
+    required this.title,
+    required this.multiple,
+    required this.load,
+    required this.initial,
+  });
+
+  @override
+  State<_FormPeopleDialog> createState() => _FormPeopleDialogState();
+}
+
+class _FormPeopleDialogState extends State<_FormPeopleDialog> {
+  late final Future<List<ApprovalCandidate>> _candidates = widget.load();
+  late final _selected = [...widget.initial];
+  String _query = '';
+
+  void _toggle(ApprovalCandidate c) {
+    setState(() {
+      if (_selected.any((p) => p.id == c.id)) {
+        _selected.removeWhere((p) => p.id == c.id);
+      } else if (_selected.length < kFormPeopleMax) {
+        _selected.add((id: c.id, name: c.name));
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 360,
+        height: 420,
+        child: Column(
+          children: [
+            TextField(
+              key: const ValueKey('form-person-search'),
+              autofocus: true,
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: tr('이름·아이디로 찾기'),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+            if (widget.multiple)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    tr('{n}/{max}명', {
+                      'n': _selected.length,
+                      'max': kFormPeopleMax,
+                    }),
+                    style: TextStyle(fontSize: 12, color: hint),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: FutureBuilder<List<ApprovalCandidate>>(
+                future: _candidates,
+                builder: (context, snap) {
+                  if (snap.hasError) {
+                    return Center(
+                      child: Text(
+                        tr('사람 목록을 불러오지 못했습니다: {e}', {'e': snap.error}),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: hint),
+                      ),
+                    );
+                  }
+                  if (!snap.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final q = _query.trim().toLowerCase();
+                  final shown = [
+                    for (final c in snap.data!)
+                      if (q.isEmpty ||
+                          c.name.toLowerCase().contains(q) ||
+                          c.username.toLowerCase().contains(q))
+                        c,
+                  ];
+                  if (shown.isEmpty) {
+                    return Center(
+                      child: Text(
+                        tr('고를 수 있는 사람이 없습니다.'),
+                        style: TextStyle(color: hint),
+                      ),
+                    );
+                  }
+                  return ListView(
+                    children: [
+                      for (final c in shown)
+                        if (widget.multiple)
+                          CheckboxListTile(
+                            key: ValueKey('form-person-${c.id}'),
+                            value: _selected.any((p) => p.id == c.id),
+                            title: Text(c.name),
+                            subtitle: Text(c.username),
+                            // 다 찼으면 이미 고른 사람만 뺄 수 있다.
+                            enabled:
+                                _selected.length < kFormPeopleMax ||
+                                _selected.any((p) => p.id == c.id),
+                            onChanged: (_) => _toggle(c),
+                          )
+                        else
+                          ListTile(
+                            key: ValueKey('form-person-${c.id}'),
+                            title: Text(c.name),
+                            subtitle: Text(c.username),
+                            trailing: _selected.any((p) => p.id == c.id)
+                                ? const Icon(Icons.check, size: 18)
+                                : null,
+                            onTap: () => Navigator.of(
+                              context,
+                            ).pop([(id: c.id, name: c.name)]),
+                          ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(tr('닫기')),
+        ),
+        if (widget.multiple)
+          FilledButton(
+            key: const ValueKey('form-person-done'),
+            onPressed: () => Navigator.of(context).pop([..._selected]),
+            child: Text(tr('확인')),
+          ),
+      ],
+    );
+  }
+}
+
+/// 표 칸 — 관리자가 정한 열([FormFieldDef.columns])마다 입력칸(글·숫자·금액은 글칸, 날짜는 날짜 단추)을 줄로 넣는다. 줄은
+/// [kFormTableRowsMax]줄까지, 숫자·금액 열은 아래에 합계를 바로 보인다. 좁은 화면에서는 표가 옆으로 밀린다(넓으면 열을 늘려 채움).
+/// 값은 [FormValues]에 줄마다 열 순서의 글 목록으로 적는다.
+class _TableFieldEditor extends StatefulWidget {
+  final FormFieldDef field;
+  final String label;
+  final FormValues values;
+  final TextEditingController Function(String id, [String initial])
+  controllerOf;
+  const _TableFieldEditor({
+    required this.field,
+    required this.label,
+    required this.values,
+    required this.controllerOf,
+  });
+
+  @override
+  State<_TableFieldEditor> createState() => _TableFieldEditorState();
+}
+
+class _TableFieldEditorState extends State<_TableFieldEditor> {
+  /// 줄 id(지워도 입력칸 컨트롤러가 섞이지 않게) — 0부터 늘어난다. 처음엔 빈 줄 하나.
+  final _rowIds = <int>[0];
+  int _nextId = 1;
+  late final _rows = <int, List<String>>{0: _emptyRow()};
+
+  FormFieldDef get _f => widget.field;
+  List<FormTableColumn> get _columns => _f.columns;
+
+  List<String> _emptyRow() => List.filled(_columns.length, '');
+
+  void _sync() {
+    widget.values.set(_f.key, [
+      for (final id in _rowIds) List<String>.of(_rows[id]!),
+    ]);
+    setState(() {});
+  }
+
+  /// 열 종류별 기본 너비 — 넓은 화면에서는 비율대로 늘린다.
+  static double _baseWidth(FormTableColumnType type) => switch (type) {
+    FormTableColumnType.text => 150,
+    FormTableColumnType.number => 96,
+    FormTableColumnType.money => 120,
+    FormTableColumnType.date => 140,
+  };
+
+  static const _removeWidth = 40.0;
+
+  /// 숫자·금액 열의 합계 글(그 밖의 열은 null) — 빈칸·숫자 아닌 칸은 0으로 센다(서버와 같게 소수 둘째 자리까지).
+  String? _totalText(int j) {
+    final c = _columns[j];
+    if (c.type == FormTableColumnType.money) {
+      return wonText(
+        _rowIds.fold<int>(0, (s, id) => s + _parseInt(_rows[id]![j])),
+      );
+    }
+    if (c.type == FormTableColumnType.number) {
+      final sum = _rowIds.fold<double>(
+        0,
+        (s, id) =>
+            s +
+            (double.tryParse(_rows[id]![j].replaceAll(',', '').trim()) ?? 0),
+      );
+      return formTableCellText(c, (sum * 100).round() / 100);
+    }
+    return null;
+  }
+
+  Widget _cell(int index, int id, int j, double width) {
+    final c = _columns[j];
+    final cellKey = ValueKey('form-field-${_f.key}-$index-$j');
+    final Widget input;
+    if (c.type == FormTableColumnType.date) {
+      final value = _rows[id]![j];
+      input = Align(
+        alignment: Alignment.centerLeft,
+        child: ApprovalDateField(
+          key: cellKey,
+          label: c.label,
+          value: value.isEmpty ? null : value,
+          onChanged: (v) {
+            _rows[id]![j] = v;
+            _sync();
+          },
+        ),
+      );
+    } else {
+      final numeric = c.type != FormTableColumnType.text;
+      input = TextField(
+        key: cellKey,
+        controller: widget.controllerOf('${_f.key}.$id.$j'),
+        keyboardType: numeric ? TextInputType.number : null,
+        textAlign: numeric ? TextAlign.end : TextAlign.start,
+        decoration: InputDecoration(
+          isDense: true,
+          border: const OutlineInputBorder(),
+          suffixText: c.type == FormTableColumnType.money ? tr('원') : null,
+        ),
+        onChanged: (v) {
+          _rows[id]![j] = v;
+          _sync();
+        },
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: SizedBox(width: width - 4, child: input),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = Theme.of(context).hintColor;
+    final totals = [
+      for (final (j, c) in _columns.indexed)
+        if (_totalText(j) case final t?)
+          tr('{label} 합계 {total}', {'label': c.label, 'total': t}),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(widget.label),
+        const SizedBox(height: 6),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final natural = _columns.fold<double>(
+              0,
+              (s, c) => s + _baseWidth(c.type),
+            );
+            final room = constraints.maxWidth.isFinite
+                ? constraints.maxWidth - _removeWidth
+                : natural;
+            // 자리가 남으면 열을 비율대로 늘리고, 모자라면 기본 너비로 두고 옆으로 밀게 한다.
+            final scale = natural > 0 && room > natural ? room / natural : 1.0;
+            final widths = [
+              for (final c in _columns) _baseWidth(c.type) * scale,
+            ];
+            return SingleChildScrollView(
+              key: ValueKey('form-field-${_f.key}-scroll'),
+              scrollDirection: Axis.horizontal,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      for (final (j, c) in _columns.indexed)
+                        SizedBox(
+                          width: widths[j],
+                          child: Text(
+                            c.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: hint),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  for (final (i, id) in _rowIds.indexed)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        children: [
+                          for (final j in Iterable<int>.generate(
+                            _columns.length,
+                          ))
+                            _cell(i, id, j, widths[j]),
+                          SizedBox(
+                            width: _removeWidth,
+                            child: IconButton(
+                              key: ValueKey('form-field-${_f.key}-$i-remove'),
+                              tooltip: tr('이 줄 빼기'),
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: _rowIds.length == 1
+                                  ? null
+                                  : () {
+                                      _rowIds.remove(id);
+                                      _rows.remove(id);
+                                      _sync();
+                                    },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              key: ValueKey('form-field-${_f.key}-add-row'),
+              onPressed: _rowIds.length >= kFormTableRowsMax
+                  ? null
+                  : () {
+                      final id = _nextId++;
+                      _rowIds.add(id);
+                      _rows[id] = _emptyRow();
+                      _sync();
+                    },
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(tr('줄 추가')),
+            ),
+            if (totals.isNotEmpty)
+              Text(
+                totals.join(' · '),
+                key: ValueKey('form-field-${_f.key}-totals'),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
@@ -725,6 +1308,25 @@ class FormValuesView extends StatelessWidget {
         );
         continue;
       }
+      if (f.type == FormFieldType.table && value is Map) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 2),
+            child: Text(f.label, style: TextStyle(color: hint)),
+          ),
+        );
+        children.add(
+          FormTableValueView(
+            key: ValueKey('form-value-${f.key}'),
+            field: f,
+            value: value,
+          ),
+        );
+        continue;
+      }
+      // 한 줄 값(사람 칸은 이름들) — 비었으면 '—'.
+      final text = formValueText(f, value);
+      final empty = text == null || text.isEmpty;
       children.add(
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
@@ -737,9 +1339,9 @@ class FormValuesView extends StatelessWidget {
               ),
               Expanded(
                 child: Text(
-                  formValueText(f, value) ?? '—',
+                  empty ? '—' : text,
                   key: ValueKey('form-value-${f.key}'),
-                  style: value == null ? TextStyle(color: hint) : null,
+                  style: empty ? TextStyle(color: hint) : null,
                 ),
               ),
             ],
@@ -751,6 +1353,85 @@ class FormValuesView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: children,
+    );
+  }
+}
+
+/// 문서에 적힌 표 칸 값({rows, totals}) — 열 이름 머리, 줄마다 칸 글([formTableCellText]), 숫자·금액 열이 있으면 맨 아래 합계 줄.
+/// 열이 많으면 옆으로 밀린다.
+class FormTableValueView extends StatelessWidget {
+  final FormFieldDef field;
+  final Map value;
+  const FormTableValueView({
+    super.key,
+    required this.field,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final columns = field.columns;
+    final rows = [
+      for (final r in value['rows'] as List? ?? const [])
+        if (r is List) r,
+    ];
+    final totals = value['totals'] as List? ?? const [];
+    final totalsRow = formTableTotalsRow(field, totals);
+    Widget cell(String text, {TextStyle? style, bool end = false}) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      child: Text(
+        text,
+        style: style,
+        textAlign: end ? TextAlign.end : TextAlign.start,
+      ),
+    );
+    bool numeric(FormTableColumn c) =>
+        c.type == FormTableColumnType.number ||
+        c.type == FormTableColumnType.money;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        border: TableBorder(
+          horizontalInside: BorderSide(color: theme.dividerColor, width: 0.5),
+        ),
+        children: [
+          TableRow(
+            children: [
+              for (final c in columns)
+                cell(
+                  c.label,
+                  style: TextStyle(fontSize: 12, color: hint),
+                  end: numeric(c),
+                ),
+            ],
+          ),
+          for (final r in rows)
+            TableRow(
+              children: [
+                for (final (j, c) in columns.indexed)
+                  cell(
+                    formTableCellText(c, r.elementAtOrNull(j)),
+                    end: numeric(c),
+                  ),
+              ],
+            ),
+          if (totalsRow != null)
+            TableRow(
+              children: [
+                for (final (j, c) in columns.indexed)
+                  cell(
+                    totalsRow[j],
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    end: numeric(c),
+                  ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
@@ -864,455 +1545,4 @@ Future<ApprovalDocument?> showNewApprovalChooser(
     session: session,
     form: picked as ApprovalForm,
   );
-}
-
-// ── 관리: 결재 양식 ───────────────────────────────────────────────────────
-
-/// 관리 탭의 "결재 양식" — 기본 양식 켜고 끄기, 양식 만들기·고치기·켜고 끄기·지우기.
-class ApprovalFormsAdminSection extends StatefulWidget {
-  final GroupwareApi api;
-  final GroupwareChanges changes;
-  const ApprovalFormsAdminSection({
-    super.key,
-    required this.api,
-    required this.changes,
-  });
-
-  @override
-  State<ApprovalFormsAdminSection> createState() =>
-      _ApprovalFormsAdminSectionState();
-}
-
-class _ApprovalFormsAdminSectionState extends State<ApprovalFormsAdminSection> {
-  List<ApprovalForm>? _forms;
-  String? _error;
-  bool _busy = false;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.changes.addListener(_load);
-    _load();
-  }
-
-  @override
-  void dispose() {
-    widget.changes.removeListener(_load);
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      final forms = await widget.api.forms();
-      if (mounted) setState(() => (_forms = forms, _error = null));
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    }
-  }
-
-  Future<void> _run(Future<void> Function() action) async {
-    setState(() => _busy = true);
-    try {
-      await action();
-      await _load();
-    } catch (e) {
-      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _edit([ApprovalForm? form]) async {
-    final result = await showDialog<_FormDefinition>(
-      context: context,
-      builder: (_) => _FormDefinitionDialog(initial: form),
-    );
-    if (result == null) return;
-    await _run(() async {
-      if (form == null) {
-        await widget.api.createForm(
-          name: result.name,
-          description: result.description,
-          fields: result.fields,
-          allowAttachments: result.allowAttachments,
-        );
-        if (mounted) {
-          showAppToast(
-            context,
-            tr('"{result.name}" 양식을 만들었습니다.', {'result.name': result.name}),
-          );
-        }
-      } else {
-        await widget.api.updateForm(
-          form.id,
-          name: result.name,
-          description: result.description ?? '',
-          fields: result.fields,
-          allowAttachments: result.allowAttachments,
-        );
-      }
-    });
-  }
-
-  Future<void> _delete(ApprovalForm form) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(tr('양식 지우기')),
-        content: Text(
-          tr('"{form.name}" 양식을 지울까요? 이 양식으로 이미 올린 결재는 그대로 남습니다.', {
-            'form.name': form.name,
-          }),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(tr('취소')),
-          ),
-          FilledButton(
-            key: const ValueKey('gw-form-delete-confirm'),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(tr('지우기')),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await _run(() => widget.api.deleteForm(form.id));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final forms = _forms;
-    final hint = Theme.of(context).hintColor;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        GroupwareSectionHeader(
-          tr('결재 양식'),
-          trailing: TextButton.icon(
-            key: const ValueKey('gw-form-create'),
-            onPressed: _busy ? null : () => _edit(),
-            icon: const Icon(Icons.add, size: 18),
-            label: Text(tr('양식 만들기')),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            tr(
-              '휴가·지출·근태 수정 말고 쓸 양식입니다. 끈 양식은 "새 결재"에 나오지 않고, 양식을 고치거나 지워도 이미 올린 결재는 그대로입니다.',
-            ),
-            style: TextStyle(fontSize: 12, color: hint),
-          ),
-        ),
-        if (_error != null)
-          Padding(padding: const EdgeInsets.all(16), child: Text(_error!))
-        else if (forms == null)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else
-          for (final f in forms)
-            ListTile(
-              key: ValueKey('gw-form-${f.id}'),
-              dense: true,
-              leading: Icon(
-                approvalKindIcon(f.kind),
-                color: f.enabled ? null : hint,
-              ),
-              title: Text(
-                f.builtin
-                    ? f.name
-                    : tr('{f.name} (직접 만든 양식)', {'f.name': f.name}),
-              ),
-              subtitle: Text(
-                tr('칸 {f.fields.length}개{p0}{p1}', {
-                  'f.fields.length': f.fields.length,
-                  'p0': f.allowAttachments ? tr(' · 첨부') : '',
-                  'p1': f.enabled ? '' : tr(' · 꺼짐'),
-                }),
-                style: TextStyle(color: hint),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Switch(
-                    key: ValueKey('gw-form-enabled-${f.id}'),
-                    value: f.enabled,
-                    onChanged: _busy
-                        ? null
-                        : (v) => _run(
-                            () => widget.api.updateForm(f.id, enabled: v),
-                          ),
-                  ),
-                  if (!f.builtin)
-                    PopupMenuButton<String>(
-                      key: ValueKey('gw-form-menu-${f.id}'),
-                      enabled: !_busy,
-                      onSelected: (v) => v == 'edit' ? _edit(f) : _delete(f),
-                      itemBuilder: (_) => [
-                        PopupMenuItem(value: 'edit', child: Text(tr('고치기'))),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Text(
-                            tr('지우기'),
-                            style: TextStyle(color: Colors.redAccent),
-                          ),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
-      ],
-    );
-  }
-}
-
-typedef _FormDefinition = ({
-  String name,
-  String? description,
-  List<FormFieldDef> fields,
-  bool allowAttachments,
-});
-
-/// 양식 만들기·고치기 — 이름·설명·칸(이름·종류·필수·고를 거리)·첨부.
-class _FormDefinitionDialog extends StatefulWidget {
-  final ApprovalForm? initial;
-  const _FormDefinitionDialog({this.initial});
-
-  @override
-  State<_FormDefinitionDialog> createState() => _FormDefinitionDialogState();
-}
-
-class _FieldDraft {
-  final label = TextEditingController();
-  final options = TextEditingController();
-  FormFieldType type = FormFieldType.text;
-  bool required = false;
-  void dispose() {
-    label.dispose();
-    options.dispose();
-  }
-}
-
-class _FormDefinitionDialogState extends State<_FormDefinitionDialog> {
-  late final _name = TextEditingController(text: widget.initial?.name ?? '');
-  late final _description = TextEditingController(
-    text: widget.initial?.description ?? '',
-  );
-  late bool _attachments = widget.initial?.allowAttachments ?? false;
-  final _fields = <_FieldDraft>[];
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    for (final f in widget.initial?.fields ?? const <FormFieldDef>[]) {
-      _fields.add(
-        _FieldDraft()
-          ..label.text = f.label
-          ..type = f.type
-          ..required = f.required
-          ..options.text = f.options.join(', '),
-      );
-    }
-    if (_fields.isEmpty) _fields.add(_FieldDraft());
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _description.dispose();
-    for (final f in _fields) {
-      f.dispose();
-    }
-    super.dispose();
-  }
-
-  void _submit() {
-    final name = _name.text.trim();
-    if (name.isEmpty) return setState(() => _error = tr('양식 이름을 넣으세요.'));
-    final fields = <FormFieldDef>[];
-    for (final (i, d) in _fields.indexed) {
-      final label = d.label.text.trim();
-      if (label.isEmpty) {
-        return setState(
-          () => _error = tr('{p0}번째 칸의 이름을 넣으세요.', {'p0': i + 1}),
-        );
-      }
-      final options = d.type == FormFieldType.select
-          ? d.options.text
-                .split(',')
-                .map((o) => o.trim())
-                .where((o) => o.isNotEmpty)
-                .toList()
-          : const <String>[];
-      if (d.type == FormFieldType.select && options.length < 2) {
-        return setState(
-          () => _error = tr('"{label}"의 고를 거리를 쉼표로 나눠 둘 이상 넣으세요.', {
-            'label': label,
-          }),
-        );
-      }
-      fields.add(
-        FormFieldDef(
-          key: '',
-          label: label,
-          type: d.type,
-          required: d.required,
-          options: options,
-        ),
-      );
-    }
-    final description = _description.text.trim();
-    Navigator.of(context).pop((
-      name: name,
-      description: description.isEmpty ? null : description,
-      fields: fields,
-      allowAttachments: _attachments,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.initial == null ? tr('양식 만들기') : tr('양식 고치기')),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                key: const ValueKey('gw-form-name'),
-                controller: _name,
-                maxLength: 30,
-                decoration: InputDecoration(
-                  labelText: tr('양식 이름'),
-                  hintText: tr('예: 교육 신청'),
-                ),
-              ),
-              TextField(
-                key: const ValueKey('gw-form-description'),
-                controller: _description,
-                maxLength: 200,
-                decoration: InputDecoration(labelText: tr('설명(새 결재 고르기에 보임)')),
-              ),
-              CheckboxListTile(
-                key: const ValueKey('gw-form-attachments'),
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                value: _attachments,
-                onChanged: (v) => setState(() => _attachments = v ?? false),
-                title: Text(tr('파일 첨부 받기')),
-              ),
-              const Divider(),
-              for (final (i, d) in _fields.indexed)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        flex: 4,
-                        child: Column(
-                          children: [
-                            TextField(
-                              key: ValueKey('gw-form-field-$i-label'),
-                              controller: d.label,
-                              decoration: InputDecoration(
-                                labelText: tr('칸 {p0} 이름', {'p0': i + 1}),
-                                isDense: true,
-                              ),
-                            ),
-                            if (d.type == FormFieldType.select)
-                              TextField(
-                                key: ValueKey('gw-form-field-$i-options'),
-                                controller: d.options,
-                                decoration: InputDecoration(
-                                  labelText: tr('고를 거리(쉼표로)'),
-                                  isDense: true,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 3,
-                        child: DropdownButtonFormField<FormFieldType>(
-                          key: ValueKey('gw-form-field-$i-type'),
-                          initialValue: d.type,
-                          isDense: true,
-                          decoration: InputDecoration(
-                            labelText: tr('종류'),
-                            isDense: true,
-                          ),
-                          items: [
-                            for (final t in FormFieldType.values)
-                              DropdownMenuItem(value: t, child: Text(t.label)),
-                          ],
-                          onChanged: (v) =>
-                              setState(() => d.type = v ?? d.type),
-                        ),
-                      ),
-                      Column(
-                        children: [
-                          Text(tr('필수'), style: TextStyle(fontSize: 11)),
-                          Checkbox(
-                            key: ValueKey('gw-form-field-$i-required'),
-                            value: d.required,
-                            onChanged: (v) =>
-                                setState(() => d.required = v ?? false),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        tooltip: tr('칸 빼기'),
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: _fields.length == 1
-                            ? null
-                            : () =>
-                                  setState(() => _fields.removeAt(i).dispose()),
-                      ),
-                    ],
-                  ),
-                ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  key: const ValueKey('gw-form-field-add'),
-                  onPressed: _fields.length >= 20
-                      ? null
-                      : () => setState(() => _fields.add(_FieldDraft())),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: Text(tr('칸 추가')),
-                ),
-              ),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(tr('취소')),
-        ),
-        FilledButton(
-          key: const ValueKey('gw-form-save'),
-          onPressed: _submit,
-          child: Text(tr('저장')),
-        ),
-      ],
-    );
-  }
 }

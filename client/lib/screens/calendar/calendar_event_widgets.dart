@@ -74,6 +74,17 @@ class CalendarEventTile extends StatelessWidget {
                             color: theme.hintColor,
                           ),
                         ),
+                      // 승인된 출장(그룹웨어) — 아래 줄의 장소가 출장지다.
+                      if (event.isTrip)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(
+                            Icons.flight_takeoff,
+                            key: const ValueKey('event-tile-trip'),
+                            size: 14,
+                            color: color,
+                          ),
+                        ),
                       Expanded(
                         child: Text(
                           eventDisplayTitle(event),

@@ -5,7 +5,7 @@ import '../../services/download_storage.dart';
 import '../../services/groupware_api.dart';
 import '../../services/session.dart';
 import '../../widgets/app_toast.dart';
-import 'approval_form_widgets.dart' show ApprovalFormsAdminSection;
+import 'approval_form_admin.dart' show ApprovalFormsAdminSection;
 import 'approval_forms.dart' show isHmText;
 import 'approval_settings.dart' show ApprovalStatsSection;
 import 'groupware_work_admin.dart';

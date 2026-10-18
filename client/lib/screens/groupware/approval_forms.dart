@@ -453,6 +453,22 @@ class _ApprovalLinePickerState extends State<ApprovalLinePicker> {
               style: TextStyle(fontSize: 12, color: hint),
             ),
           ),
+        // 양식의 기본 결재선·참조자를 썼으면(서버 approvalFormDefaults.js) 그 양식 이름과 함께 알린다.
+        if (suggestion?.suggestedFormName != null && !_touched)
+          Padding(
+            key: const ValueKey('approval-line-form-hint'),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              suggestion!.suggestedSource == 'form'
+                  ? tr('"{form}" 양식의 기본 결재선으로 채웠습니다. 올리기 전에 고칠 수 있습니다.', {
+                      'form': suggestion.suggestedFormName,
+                    })
+                  : tr('"{form}" 양식의 기본 참조자를 더했습니다.', {
+                      'form': suggestion.suggestedFormName,
+                    }),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ),
         // 손으로 고친 뒤 금액이 바뀌어 추천이 달라졌다 — 덮어쓰지 않고 다시 채울 수 있게만.
         if (_stale && suggestion != null && !_lineMatches(suggestion))
           Align(
@@ -727,6 +743,9 @@ class ApprovalRequestDialog extends StatefulWidget {
   final String? lineTemplateId;
   final int? Function()? lineAmountOf;
   final Listenable? lineAmountChanges;
+
+  /// 사유 칸에 미리 채울 글(예: 정산 지출의 "○○ 정산") — 없으면 빈 칸.
+  final String? initialBody;
   const ApprovalRequestDialog({
     super.key,
     required this.title,
@@ -741,6 +760,7 @@ class ApprovalRequestDialog extends StatefulWidget {
     this.lineTemplateId,
     this.lineAmountOf,
     this.lineAmountChanges,
+    this.initialBody,
   });
 
   @override
@@ -749,7 +769,7 @@ class ApprovalRequestDialog extends StatefulWidget {
 
 class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
   final _line = ApprovalLineController();
-  final _body = TextEditingController();
+  late final _body = TextEditingController(text: widget.initialBody);
   bool _submitting = false;
   String? _error;
 
@@ -774,19 +794,26 @@ class _ApprovalRequestDialogState extends State<ApprovalRequestDialog> {
       _submitting = true;
       _error = null;
     });
+    final ApprovalDocument doc;
     try {
-      final doc = await widget.submit(
+      doc = await widget.submit(
         body: _body.text.trim().isEmpty ? null : _body.text.trim(),
         approverIds: List.of(_line.approverIds),
         ccIds: List.of(_line.ccIds),
         roles: Map.of(_line.roles),
       );
-      if (mounted) Navigator.of(context).pop(doc);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _submitting = false;
+        });
+      }
+      return;
     }
+    // 닫은 뒤에는 다시 그리지 않는다 — 부르는 쪽이 창이 닫히자마자(whenComplete) 칸의 컨트롤러를 버려서, 닫히는 애니메이션 중에
+    // setState로 다시 그리면 버린 컨트롤러를 쓰게 된다.
+    if (mounted) Navigator.of(context).pop(doc);
   }
 
   @override
@@ -1015,13 +1042,22 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
 }
 
 /// 지출 결재 — 금액(원), 분류, 쓴 날, 영수증(최대 [GroupwareContext.attachmentsMax]개), 내용, 결재선.
+///
+/// [settles]를 주면 그 승인된 구매 요청·출장 신청을 **정산**하는 지출이다(결재 상세의 "정산하기") — 위에 정산 대상 띠(문서 번호·
+/// 예산)를 보이고, 금액은 예산(구매 품목 합계·출장 예상 경비 — [settleBudgetOf], 없으면 빈 칸)으로, 내용은 "○○ 정산"으로 미리
+/// 채운다. 금액 아래에는 예산과의 차이를 바로바로 보여 주고, 올릴 때 `settlesId`를 함께 보내 서버가 두 결재를 잇는다(서버가
+/// 내 결재·승인됨·살아 있는 정산 없음을 다시 확인한다 — settlementRules.js checkSettlement).
 Future<ApprovalDocument?> showExpenseRequestDialog(
   BuildContext context, {
   required GroupwareApi api,
   required GroupwareContext ctx,
   required Session session,
+  ApprovalDocument? settles,
 }) {
-  final amount = TextEditingController();
+  final budget = settles == null ? null : settleBudgetOf(settles);
+  final amount = TextEditingController(
+    text: budget != null && budget > 0 ? '$budget' : null,
+  );
   final title = TextEditingController();
   var category = ctx.expenseCategories.isNotEmpty
       ? ctx.expenseCategories.first
@@ -1031,164 +1067,276 @@ Future<ApprovalDocument?> showExpenseRequestDialog(
   var uploading = false;
   return showDialog<ApprovalDocument>(
     context: context,
-    builder: (dialogContext) => ApprovalRequestDialog(
-      title: tr('지출 결재'),
-      api: api,
-      ctx: ctx,
-      // 금액을 바꾸면 그 금액에 맞는 결재선 규칙으로 다시 추천받는다(예: 100만 원 이상은 본부장까지).
-      lineKind: ApprovalKind.expense.wire,
-      lineAmountOf: () => expenseAmountOf(amount.text),
-      lineAmountChanges: amount,
-      bodyLabel: tr('내용(어디에 무엇을)'),
-      fields: (setState) => [
-        TextField(
-          controller: title,
-          maxLength: 100,
-          decoration: InputDecoration(
-            labelText: tr('제목(비우면 자동)'),
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 4),
-        TextField(
-          key: const ValueKey('expense-amount'),
-          controller: amount,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            labelText: tr('금액(원)'),
-            border: OutlineInputBorder(),
-            suffixText: tr('원'),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: category,
-                decoration: InputDecoration(
-                  labelText: tr('분류'),
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  for (final c in ctx.expenseCategories)
-                    DropdownMenuItem(value: c, child: Text(c)),
-                ],
-                onChanged: (v) => setState(() => category = v ?? category),
-              ),
-            ),
-            const SizedBox(width: 8),
-            ApprovalDateField(
-              label: tr('쓴 날'),
-              value: spentOn,
-              lastDate: DateTime.now(),
-              onChanged: (v) => setState(() => spentOn = v),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            for (final r in receipts)
-              InputChip(
-                label: Text(r.name, overflow: TextOverflow.ellipsis),
-                onDeleted: () => setState(() => receipts.remove(r)),
-              ),
-            ActionChip(
-              avatar: uploading
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.attach_file, size: 16),
-              label: Text(
-                tr('영수증 첨부 ({receipts.length}/{ctx.attachmentsMax})', {
-                  'receipts.length': receipts.length,
-                  'ctx.attachmentsMax': ctx.attachmentsMax,
-                }),
-              ),
-              onPressed: uploading || receipts.length >= ctx.attachmentsMax
-                  ? null
-                  : () async {
-                      final picked = await FilePicker.pickFiles(
-                        allowMultiple: true,
-                      );
-                      final files = [
-                        for (final f in picked?.files ?? const <PlatformFile>[])
-                          if (f.path != null || f.bytes != null) f.xFile,
-                      ].take(ctx.attachmentsMax - receipts.length).toList();
-                      if (files.isEmpty) return;
-                      setState(() => uploading = true);
-                      try {
-                        for (final f in files) {
-                          final up = await session.api!.uploadFile(f);
-                          setState(
-                            () => receipts.add((
-                              url: up.url,
-                              name: up.fileName,
-                              size: up.size,
-                              mimeType: up.mimeType,
-                            )),
-                          );
-                        }
-                      } catch (e) {
-                        if (dialogContext.mounted) {
-                          showAppToast(
-                            dialogContext,
-                            tr('첨부 실패: {e}', {'e': e}),
-                          );
-                        }
-                      } finally {
-                        setState(() => uploading = false);
-                      }
-                    },
-            ),
-          ],
-        ),
-      ],
-      validate: () {
-        final value = int.tryParse(amount.text.replaceAll(',', '').trim());
-        if (value == null || value <= 0) return tr('금액을 원 단위 숫자로 넣으세요.');
-        if (uploading) return tr('영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.');
-        return null;
+    builder: (dialogContext) => _DisposeWithRoute(
+      onDispose: () {
+        amount.dispose();
+        title.dispose();
       },
-      submit:
-          ({
-            required body,
-            required approverIds,
-            required ccIds,
-            required roles,
-          }) => api.submit(
-            kind: ApprovalKind.expense,
-            fields: {
-              'amount': int.parse(amount.text.replaceAll(',', '').trim()),
-              'category': category,
-              'spentOn': spentOn,
-              'attachments': [
-                for (final r in receipts)
-                  {
-                    'fileUrl': r.url,
-                    'fileName': r.name,
-                    'fileSize': r.size,
-                    'mimeType': r.mimeType,
-                  },
-              ],
-            },
-            title: title.text.trim().isEmpty ? null : title.text.trim(),
-            body: body,
-            approverIds: approverIds,
-            ccIds: ccIds,
-            roles: roles,
+      child: ApprovalRequestDialog(
+        title: tr('지출 결재'),
+        api: api,
+        ctx: ctx,
+        // 금액을 바꾸면 그 금액에 맞는 결재선 규칙으로 다시 추천받는다(예: 100만 원 이상은 본부장까지).
+        lineKind: ApprovalKind.expense.wire,
+        lineAmountOf: () => expenseAmountOf(amount.text),
+        lineAmountChanges: amount,
+        bodyLabel: tr('내용(어디에 무엇을)'),
+        initialBody: settles == null
+            ? null
+            : tr('{title} 정산', {'title': settles.title}),
+        fields: (setState) => [
+          if (settles != null) ...[
+            _SettlesBanner(source: settles, budget: budget),
+            const SizedBox(height: 12),
+          ],
+          TextField(
+            controller: title,
+            maxLength: 100,
+            decoration: InputDecoration(
+              labelText: tr('제목(비우면 자동)'),
+              border: OutlineInputBorder(),
+            ),
           ),
+          const SizedBox(height: 4),
+          TextField(
+            key: const ValueKey('expense-amount'),
+            controller: amount,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: tr('금액(원)'),
+              border: OutlineInputBorder(),
+              suffixText: tr('원'),
+            ),
+          ),
+          // 정산이면 예산과의 차이 — 금액을 고칠 때마다 다시 그린다(예산을 모르면 숨긴다).
+          if (budget != null)
+            ListenableBuilder(
+              listenable: amount,
+              builder: (context, _) {
+                final value = expenseAmountOf(amount.text);
+                if (value == null) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 4),
+                  child: Text(
+                    settleDiffText(value - budget),
+                    key: const ValueKey('expense-settle-diff'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: value > budget
+                          ? Theme.of(context).colorScheme.error
+                          : Theme.of(context).hintColor,
+                    ),
+                  ),
+                );
+              },
+            ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: category,
+                  decoration: InputDecoration(
+                    labelText: tr('분류'),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final c in ctx.expenseCategories)
+                      DropdownMenuItem(value: c, child: Text(c)),
+                  ],
+                  onChanged: (v) => setState(() => category = v ?? category),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ApprovalDateField(
+                label: tr('쓴 날'),
+                value: spentOn,
+                lastDate: DateTime.now(),
+                onChanged: (v) => setState(() => spentOn = v),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (final r in receipts)
+                InputChip(
+                  label: Text(r.name, overflow: TextOverflow.ellipsis),
+                  onDeleted: () => setState(() => receipts.remove(r)),
+                ),
+              ActionChip(
+                avatar: uploading
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.attach_file, size: 16),
+                label: Text(
+                  tr('영수증 첨부 ({receipts.length}/{ctx.attachmentsMax})', {
+                    'receipts.length': receipts.length,
+                    'ctx.attachmentsMax': ctx.attachmentsMax,
+                  }),
+                ),
+                onPressed: uploading || receipts.length >= ctx.attachmentsMax
+                    ? null
+                    : () async {
+                        final picked = await FilePicker.pickFiles(
+                          allowMultiple: true,
+                        );
+                        final files = [
+                          for (final f
+                              in picked?.files ?? const <PlatformFile>[])
+                            if (f.path != null || f.bytes != null) f.xFile,
+                        ].take(ctx.attachmentsMax - receipts.length).toList();
+                        if (files.isEmpty) return;
+                        setState(() => uploading = true);
+                        try {
+                          for (final f in files) {
+                            final up = await session.api!.uploadFile(f);
+                            setState(
+                              () => receipts.add((
+                                url: up.url,
+                                name: up.fileName,
+                                size: up.size,
+                                mimeType: up.mimeType,
+                              )),
+                            );
+                          }
+                        } catch (e) {
+                          if (dialogContext.mounted) {
+                            showAppToast(
+                              dialogContext,
+                              tr('첨부 실패: {e}', {'e': e}),
+                            );
+                          }
+                        } finally {
+                          setState(() => uploading = false);
+                        }
+                      },
+              ),
+            ],
+          ),
+        ],
+        validate: () {
+          final value = int.tryParse(amount.text.replaceAll(',', '').trim());
+          if (value == null || value <= 0) return tr('금액을 원 단위 숫자로 넣으세요.');
+          if (uploading) return tr('영수증을 올리는 중입니다. 잠시 뒤 다시 누르세요.');
+          return null;
+        },
+        submit:
+            ({
+              required body,
+              required approverIds,
+              required ccIds,
+              required roles,
+            }) => api.submit(
+              kind: ApprovalKind.expense,
+              fields: {
+                'amount': int.parse(amount.text.replaceAll(',', '').trim()),
+                'category': category,
+                'spentOn': spentOn,
+                // 정산 대상(승인된 구매 요청·출장 신청) — 서버가 확인하고 payload.settles로 적는다.
+                'settlesId': ?settles?.id,
+                'attachments': [
+                  for (final r in receipts)
+                    {
+                      'fileUrl': r.url,
+                      'fileName': r.name,
+                      'fileSize': r.size,
+                      'mimeType': r.mimeType,
+                    },
+                ],
+              },
+              title: title.text.trim().isEmpty ? null : title.text.trim(),
+              body: body,
+              approverIds: approverIds,
+              ccIds: ccIds,
+              roles: roles,
+            ),
+      ),
     ),
-  ).whenComplete(() {
-    amount.dispose();
-    title.dispose();
-  });
+  );
+}
+
+/// 창(route)이 화면에서 완전히 빠질 때(닫히는 애니메이션까지 끝나고 위젯이 떨어질 때) [onDispose]를 부른다 — 창 밖에서 만든
+/// 컨트롤러를 버리는 곳. showDialog(...).whenComplete에서 버리면 닫히는 동안 다시 그려질 때 버린 컨트롤러를 쓰게 된다. 아래 칸들이
+/// 먼저 떨어져(리스너를 떼고) 나서 불린다.
+class _DisposeWithRoute extends StatefulWidget {
+  final VoidCallback onDispose;
+  final Widget child;
+  const _DisposeWithRoute({required this.onDispose, required this.child});
+
+  @override
+  State<_DisposeWithRoute> createState() => _DisposeWithRouteState();
+}
+
+class _DisposeWithRouteState extends State<_DisposeWithRoute> {
+  @override
+  void dispose() {
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 정산 금액과 예산의 차이 문구 — [diff]는 정산 금액 − 예산(원, +면 예산보다 많이 씀).
+String settleDiffText(int diff) => diff > 0
+    ? tr('예산보다 {won} 많습니다', {'won': wonText(diff)})
+    : diff < 0
+    ? tr('예산보다 {won} 적습니다', {'won': wonText(-diff)})
+    : tr('예산과 같습니다');
+
+/// 정산 지출 창 맨 위의 띠 — 무엇을 정산하는지(제목·문서 번호)와 예산(알 때만).
+class _SettlesBanner extends StatelessWidget {
+  final ApprovalDocument source;
+  final int? budget;
+  const _SettlesBanner({required this.source, required this.budget});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('expense-settles-banner'),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.link, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tr('정산: {title}', {'title': source.title}),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  [
+                    source.kindLabel,
+                    ?source.docNumber,
+                    if (budget != null)
+                      tr('예산 {won}', {'won': wonText(budget!)}),
+                  ].join(' · '),
+                  style: TextStyle(fontSize: 12, color: theme.hintColor),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// 지출 금액 입력칸의 값(원) — 쉼표는 빼고, 비었거나 0 이하·숫자가 아니면 null(결재선 규칙의 금액 기준을 고르지 않는다).

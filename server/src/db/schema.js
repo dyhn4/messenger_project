@@ -2816,6 +2816,8 @@ export const approvalDocuments = pgTable(
     canceledByName: text('canceled_by_name'),
     // 문서 번호 — 올릴 때 매긴다("휴가-2026-0012" — 범위·해마다 1부터, approval_counters). 이 기능 전 문서는 null.
     docNumber: text('doc_number'),
+    // 정산 — 이 지출 결재가 정산하는 승인된 구매 요청·출장 신청(settlementRules.js). 그때의 제목·번호·예산은 payload.settles에도.
+    settlesId: uuid('settles_id').references(() => approvalDocuments.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2823,6 +2825,7 @@ export const approvalDocuments = pgTable(
     index('approval_documents_scope_author_idx').on(t.scopeKey, t.authorId, t.createdAt),
     index('approval_documents_scope_status_idx').on(t.scopeKey, t.status),
     uniqueIndex('approval_documents_number_idx').on(t.scopeKey, t.docNumber),
+    index('approval_documents_settles_idx').on(t.settlesId),
   ],
 );
 
@@ -3144,7 +3147,9 @@ export const approvalNotifications = pgTable(
  * 결재 양식(approvalForms.js) — 관리자가 만든 양식([builtinKey] null)과, 코드에 정해 둔 기본 양식(일반 기안서·출장 신청·구매 요청·
  * 연장근무 신청 — [builtinKey]가 그 종류)을 이 범위에서 켜고 끈 기록. 범위([scopeKey])는 그룹웨어 범위('server' 또는 팀 id).
  * [fields]는 칸 정의 [{ key, label, type, required, options? }] — 문서를 올릴 때 그때의 칸 정의를 문서에 같이 적어 두므로(payload) 양식을
- * 고치거나 지워도 이미 올린 문서는 그대로 보인다. 기본 양식의 줄은 [enabled]·[sortOrder]만 쓴다.
+ * 고치거나 지워도 이미 올린 문서는 그대로 보인다. 기본 양식의 줄은 [enabled]·[sortOrder]와 기본 결재선만 쓴다.
+ * [defaultLine]·[defaultCcIds]는 양식의 기본 결재선 `[{ userId, role }]`(null이면 정하지 않음 — 규칙·상위자로)과 기본 참조자
+ * (approvalFormDefaults.js — 새 결재를 쓸 때 미리 채운다).
  */
 export const approvalTemplates = pgTable(
   'approval_templates',
@@ -3158,6 +3163,8 @@ export const approvalTemplates = pgTable(
     allowAttachments: boolean('allow_attachments').notNull().default(false),
     enabled: boolean('enabled').notNull().default(true),
     sortOrder: integer('sort_order').notNull().default(0),
+    defaultLine: jsonb('default_line'),
+    defaultCcIds: jsonb('default_cc_ids').notNull().default([]),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdByName: text('created_by_name'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

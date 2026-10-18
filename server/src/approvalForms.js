@@ -9,9 +9,25 @@ import { parseHm } from './attendanceRules.js';
  * 양식으로 올린 문서의 payload는 `{ templateId, templateName, fields(그때의 칸 정의), values(칸 key → 값), …종류별로 뽑아 둔 값 }`이다 —
  * 칸 정의를 같이 적어 두므로 양식을 고치거나 지워도 이미 올린 문서는 그대로 보인다. 출장(startDate·endDate)·연장근무(workDate·minutes)는
  * 근태가 읽는 값을 따로 뽑아 둔다(groupware.js 월 근태).
+ *
+ * 칸마다 설명([help] — 신청 창의 입력칸 아래에 보임)을 붙일 수 있고, 칸 key는 한 번 매기면 고쳐도 그대로다(순서를 바꿔도 이어 쓰는 값이
+ * 섞이지 않게 — 새 칸만 가장 큰 번호 다음으로). 사람 칸은 이 범위의 사람을 골라 `[{ id, name }]`(그때의 이름)으로, 표 칸은 관리자가 정한
+ * 열(글·숫자·금액·날짜)대로 줄마다 값을 받아 `{ rows: [[…]], totals: [열마다 합계 | null] }`로 적는다.
  */
 
-export const FORM_FIELD_TYPES = Object.freeze(['text', 'textarea', 'number', 'money', 'date', 'dateRange', 'timeRange', 'select', 'items']);
+export const FORM_FIELD_TYPES = Object.freeze([
+  'text',
+  'textarea',
+  'number',
+  'money',
+  'date',
+  'dateRange',
+  'timeRange',
+  'select',
+  'items',
+  'person',
+  'table',
+]);
 export const FORM_FIELD_TYPE_LABEL = Object.freeze({
   text: '한 줄 글',
   textarea: '여러 줄 글',
@@ -22,6 +38,8 @@ export const FORM_FIELD_TYPE_LABEL = Object.freeze({
   timeRange: '시간대',
   select: '고르기',
   items: '품목 표',
+  person: '사람',
+  table: '표',
 });
 export const FORM_NAME_MAX = 30;
 export const FORM_DESCRIPTION_MAX = 200;
@@ -33,6 +51,15 @@ export const FORM_TEXT_MAX = 200;
 export const FORM_TEXTAREA_MAX = 2000;
 export const FORM_ITEMS_MAX = 50;
 export const FORM_ITEM_NAME_MAX = 100;
+/** 칸 설명(신청 창의 입력칸 아래 안내). */
+export const FORM_FIELD_HELP_MAX = 100;
+/** 사람 칸에 고를 수 있는 사람 수(여러 명일 때). */
+export const FORM_PEOPLE_MAX = 10;
+/** 표 칸 — 열 종류·열 수·열 이름 길이·줄 수. */
+export const TABLE_COLUMN_TYPES = Object.freeze(['text', 'number', 'money', 'date']);
+export const TABLE_COLUMNS_MAX = 8;
+export const TABLE_COLUMN_LABEL_MAX = 20;
+export const TABLE_ROWS_MAX = 50;
 /** 한 범위에 관리자가 만들 수 있는 양식 수. */
 export const CUSTOM_FORMS_MAX = 50;
 export const MONEY_MAX = 10_000_000_000;
@@ -104,12 +131,44 @@ const toInt = (v) => {
 };
 const daysBetween = (start, end) => Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000);
 
-/** 칸 하나의 값 → `{ value }`(비었으면 null) | `{ error }`. */
-export function parseFieldValue(field, raw) {
+/** 표의 칸 하나(열 종류대로) → `{ value }`(비었으면 null) | `{ error }`. */
+function parseTableCell(column, raw, { label, row }) {
+  // 오류 문구는 문장 전체로(앱이 틀로 통째로 번역한다 — 조각을 이어 붙이지 않는다).
+  const col = column.label;
+  if (raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '')) return { value: null };
+  switch (column.type) {
+    case 'number': {
+      const n = typeof raw === 'string' ? Number(raw.replace(/,/g, '').trim()) : Number(raw);
+      if (!Number.isFinite(n) || Math.abs(n) > NUMBER_MAX) return { error: `"${label}" ${row}번째 줄의 "${col}"에 숫자를 넣으세요.` };
+      return { value: Math.round(n * 100) / 100 };
+    }
+    case 'money': {
+      const n = toInt(raw);
+      if (!Number.isInteger(n) || n < 0 || n > MONEY_MAX) return { error: `"${label}" ${row}번째 줄의 "${col}"에 원 단위 금액을 넣으세요.` };
+      return { value: n };
+    }
+    case 'date':
+      return isDateKey(raw) ? { value: raw } : { error: `"${label}" ${row}번째 줄의 "${col}" 날짜를 확인하세요.` };
+    default: {
+      const text = clean(String(raw)).replace(/\s+/g, ' ');
+      if ([...text].length > FORM_TEXT_MAX) return { error: `"${label}" ${row}번째 줄의 "${col}"은(는) ${FORM_TEXT_MAX}자 이내로 넣으세요.` };
+      return { value: text || null };
+    }
+  }
+}
+
+/**
+ * 칸 하나의 값 → `{ value }`(비었으면 null) | `{ error }`. 사람 칸은 [personOf](id → `{ id, name }` | null — 이 범위에서 고를 수 있는
+ * 사람)로 확인한다(없으면 사람 칸을 받지 않는다).
+ */
+export function parseFieldValue(field, raw, { personOf = null } = {}) {
   const label = field.label;
   const blank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
   const isRange = field.type === 'dateRange' || field.type === 'timeRange';
-  const empty = blank(raw) || (isRange && typeof raw === 'object' && blank(raw.start) && blank(raw.end));
+  const empty =
+    blank(raw) ||
+    (isRange && typeof raw === 'object' && blank(raw.start) && blank(raw.end)) ||
+    (field.type === 'person' && Array.isArray(raw) && raw.length === 0);
   if (empty) return field.required ? { error: `"${label}"을(를) 넣으세요.` } : { value: null };
   switch (field.type) {
     case 'text':
@@ -175,17 +234,56 @@ export function parseFieldValue(field, raw) {
       if (total > MONEY_MAX) return { error: '합계가 너무 큽니다.' };
       return { value: { rows, total } };
     }
+    case 'person': {
+      // 한 사람이면 id 하나, 여러 명이면 id 목록(앞뒤 모두 받는다 — 저장은 늘 목록).
+      const ids = [...new Set((Array.isArray(raw) ? raw : [raw]).map((v) => (typeof v === 'object' && v ? v.id : v)))];
+      if (!field.multiple && ids.length > 1) return { error: `"${label}"에는 한 사람만 고르세요.` };
+      if (ids.length > FORM_PEOPLE_MAX) return { error: `"${label}"에는 ${FORM_PEOPLE_MAX}명까지 고를 수 있습니다.` };
+      const people = [];
+      for (const id of ids) {
+        const person = typeof id === 'string' && personOf ? personOf(id) : null;
+        if (!person) return { error: `"${label}"에 고를 수 없는 사람이 있습니다.` };
+        people.push({ id: person.id, name: person.name });
+      }
+      return { value: people };
+    }
+    case 'table': {
+      const columns = Array.isArray(field.columns) ? field.columns : [];
+      const list = Array.isArray(raw) ? raw : Array.isArray(raw?.rows) ? raw.rows : null;
+      if (!list || columns.length === 0) return { error: `"${label}"이(가) 올바르지 않습니다.` };
+      const rows = [];
+      for (const [i, r] of list.entries()) {
+        // 줄은 열 순서의 목록 — 열 이름을 열쇠로 한 모양도 받는다.
+        const cellsIn = Array.isArray(r) ? r : columns.map((c) => r?.[c.label]);
+        const cells = [];
+        for (const [j, column] of columns.entries()) {
+          const parsed = parseTableCell(column, cellsIn[j], { label, row: i + 1 });
+          if (parsed.error) return { error: parsed.error };
+          cells.push(parsed.value);
+        }
+        if (cells.every((c) => c === null)) continue; // 빈 줄은 건너뜀
+        rows.push(cells);
+      }
+      if (rows.length === 0) return field.required ? { error: `"${label}"에 한 줄 이상 넣으세요.` } : { value: null };
+      if (rows.length > TABLE_ROWS_MAX) return { error: `"${label}"은(는) ${TABLE_ROWS_MAX}줄까지 넣을 수 있습니다.` };
+      // 숫자·금액 열은 합계(빈칸은 0으로), 그 밖의 열은 null.
+      const totals = columns.map((c, j) =>
+        c.type === 'money' || c.type === 'number' ? Math.round(rows.reduce((s, row) => s + (row[j] ?? 0), 0) * 100) / 100 : null,
+      );
+      if (totals.some((t) => t !== null && Math.abs(t) > MONEY_MAX * 10)) return { error: `"${label}"의 합계가 너무 큽니다.` };
+      return { value: { rows, totals } };
+    }
     default:
       return { error: `알 수 없는 칸 종류입니다: ${field.type}` };
   }
 }
 
 /** 칸 정의 목록대로 값들을 검사 → `{ values }`(key → 값, 빈 칸은 null) | `{ error }`. */
-export function parseFormValues(fields, input) {
+export function parseFormValues(fields, input, options = {}) {
   const values = {};
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   for (const field of fields) {
-    const parsed = parseFieldValue(field, raw[field.key]);
+    const parsed = parseFieldValue(field, raw[field.key], options);
     if (parsed.error) return { error: parsed.error };
     values[field.key] = parsed.value;
   }
@@ -193,8 +291,9 @@ export function parseFormValues(fields, input) {
 }
 
 /**
- * 관리자가 만드는 양식 정의 `{ name, description?, fields: [{ label, type, required?, options? }], allowAttachments? }` 검사 →
- * `{ form: { name, description, fields(key는 f1, f2 … 로 새로 매김), allowAttachments } }` | `{ error }`.
+ * 관리자가 만드는 양식 정의 `{ name, description?, fields: [{ key?, label, type, required?, help?, options?, multiple?, columns? }],
+ * allowAttachments? }` 검사 → `{ form: { name, description, fields, allowAttachments } }` | `{ error }`. 칸 key는 보낸 것('f숫자')을
+ * 그대로 쓰고(고치기 — 순서를 바꿔도 같은 칸), 없는 칸만 가장 큰 번호 다음으로 매긴다(처음 만들 때는 f1, f2 …).
  */
 export function parseFormDefinition(input) {
   const name = clean(input?.name).replace(/\s+/g, ' ');
@@ -207,6 +306,14 @@ export function parseFormDefinition(input) {
   if (list.length > FORM_FIELDS_MAX) return { error: `칸은 ${FORM_FIELDS_MAX}개까지 만들 수 있습니다.` };
   const fields = [];
   const labels = new Set();
+  // 보낸 key 중 쓸 수 있는 것(f숫자, 겹치지 않게) — 나머지 칸은 그 다음 번호부터.
+  const keyed = new Set();
+  const keyOk = list.map((f) => {
+    const key = typeof f?.key === 'string' && /^f\d{1,4}$/.test(f.key) && !keyed.has(f.key) ? f.key : null;
+    if (key) keyed.add(key);
+    return key;
+  });
+  let nextKey = Math.max(0, ...[...keyed].map((k) => Number(k.slice(1)))) + 1;
   for (const [i, f] of list.entries()) {
     const label = clean(f?.label).replace(/\s+/g, ' ');
     if (!label) return { error: `${i + 1}번째 칸의 이름을 넣으세요.` };
@@ -214,7 +321,27 @@ export function parseFormDefinition(input) {
     if (labels.has(label)) return { error: `같은 이름의 칸이 두 개 있습니다: ${label}` };
     labels.add(label);
     if (!FORM_FIELD_TYPES.includes(f?.type)) return { error: `"${label}" 칸의 종류를 고르세요.` };
-    const field = { key: `f${i + 1}`, label, type: f.type, required: f?.required === true };
+    const field = { key: keyOk[i] ?? `f${nextKey++}`, label, type: f.type, required: f?.required === true };
+    const help = clean(f?.help).replace(/\s+/g, ' ');
+    if ([...help].length > FORM_FIELD_HELP_MAX) return { error: `"${label}" 칸의 설명은 ${FORM_FIELD_HELP_MAX}자 이내로 넣으세요.` };
+    if (help) field.help = help;
+    if (f.type === 'person') field.multiple = f?.multiple === true;
+    if (f.type === 'table') {
+      const cols = Array.isArray(f.columns) ? f.columns : [];
+      if (cols.length === 0) return { error: `"${label}" 표의 열을 하나 이상 만드세요.` };
+      if (cols.length > TABLE_COLUMNS_MAX) return { error: `표의 열은 ${TABLE_COLUMNS_MAX}개까지입니다.` };
+      const columns = [];
+      const colLabels = new Set();
+      for (const [j, c] of cols.entries()) {
+        const colLabel = clean(c?.label).replace(/\s+/g, ' ');
+        if (!colLabel) return { error: `"${label}" 표의 ${j + 1}번째 열 이름을 넣으세요.` };
+        if ([...colLabel].length > TABLE_COLUMN_LABEL_MAX) return { error: `열 이름은 ${TABLE_COLUMN_LABEL_MAX}자 이내로 넣으세요.` };
+        if (colLabels.has(colLabel)) return { error: `"${label}" 표에 같은 이름의 열이 두 개 있습니다: ${colLabel}` };
+        colLabels.add(colLabel);
+        columns.push({ label: colLabel, type: TABLE_COLUMN_TYPES.includes(c?.type) ? c.type : 'text' });
+      }
+      field.columns = columns;
+    }
     if (f.type === 'select') {
       const options = [...new Set((Array.isArray(f.options) ? f.options : []).map((o) => clean(o).replace(/\s+/g, ' ')).filter(Boolean))];
       if (options.length < 2) return { error: `"${label}"의 고를 거리를 둘 이상 넣으세요.` };
@@ -227,16 +354,23 @@ export function parseFormDefinition(input) {
   return { form: { name, description, fields, allowAttachments: input?.allowAttachments === true } };
 }
 
-/** 문서에 적어 둘 칸 정의(필요한 것만). */
+/** 문서에 적어 둘 칸 정의(보이는 데 필요한 것만 — 설명은 신청 창에서만 쓴다). */
 const snapshotFields = (fields) =>
-  fields.map((f) => ({ key: f.key, label: f.label, type: f.type, ...(f.options ? { options: [...f.options] } : {}) }));
+  fields.map((f) => ({
+    key: f.key,
+    label: f.label,
+    type: f.type,
+    ...(f.options ? { options: [...f.options] } : {}),
+    ...(f.type === 'person' ? { multiple: !!f.multiple } : {}),
+    ...(f.columns ? { columns: f.columns.map((c) => ({ label: c.label, type: c.type })) } : {}),
+  }));
 
 /**
  * 양식으로 올리는 결재의 payload — [kind]는 기본 양식 종류 또는 'form', [template]은 `{ id?, name, fields }`. 종류별로 근태·목록이
- * 쓸 값을 뽑아 두고 규칙을 더 본다(연장근무 날짜 범위). `{ payload }` | `{ error }`.
+ * 쓸 값을 뽑아 두고 규칙을 더 본다(연장근무 날짜 범위). [personOf]는 사람 칸 확인(parseFieldValue). `{ payload }` | `{ error }`.
  */
-export function buildFormPayload({ kind, template, values: input, today }) {
-  const parsed = parseFormValues(template.fields, input);
+export function buildFormPayload({ kind, template, values: input, today, personOf = null }) {
+  const parsed = parseFormValues(template.fields, input, { personOf });
   if (parsed.error) return parsed;
   const values = parsed.values;
   const payload = {
@@ -292,8 +426,9 @@ export function defaultFormTitle(kind, payload) {
 
 /**
  * 범위의 양식 목록 — 기본 양식(코드)에 이 범위의 켜고 끈 기록([rows] 중 builtin_key 줄)을 입히고, 관리자가 만든 양식을 붙인다.
- * `[{ id, kind, builtin, name, description, fields, allowAttachments, enabled, sortOrder }]` — 기본 양식의 id는 'builtin:종류'. 순서는
- * sortOrder, 같으면 기본 양식 먼저.
+ * `[{ id, kind, builtin, name, description, fields, allowAttachments, enabled, sortOrder, defaultLine, defaultCcIds }]` — 기본 양식의
+ * id는 'builtin:종류'. 순서는 sortOrder, 같으면 기본 양식 먼저. [defaultLine]·[defaultCcIds]는 양식의 기본 결재선·참조자
+ * (approvalFormDefaults.js — 기본 양식도 켜고 끈 기록 줄에 둔다).
  */
 export function mergeForms(rows) {
   const overrides = new Map(rows.filter((r) => r.builtinKey).map((r) => [r.builtinKey, r]));
@@ -310,6 +445,8 @@ export function mergeForms(rows) {
       allowAttachments: def.allowAttachments,
       enabled: o ? o.enabled : true,
       sortOrder: o ? o.sortOrder : i,
+      defaultLine: o?.defaultLine ?? null,
+      defaultCcIds: o?.defaultCcIds ?? [],
     };
   });
   const custom = rows
@@ -324,6 +461,8 @@ export function mergeForms(rows) {
       allowAttachments: !!r.allowAttachments,
       enabled: !!r.enabled,
       sortOrder: r.sortOrder ?? 100,
+      defaultLine: r.defaultLine ?? null,
+      defaultCcIds: r.defaultCcIds ?? [],
     }));
   return [...builtins, ...custom].sort((a, b) => a.sortOrder - b.sortOrder || Number(b.builtin) - Number(a.builtin));
 }

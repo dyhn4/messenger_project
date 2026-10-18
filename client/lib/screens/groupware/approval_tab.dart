@@ -7,7 +7,8 @@ import '../../services/session.dart';
 import '../../services/time_format.dart';
 import '../../widgets/app_toast.dart';
 import 'approval_form_widgets.dart';
-import 'approval_forms.dart' show toastSubmitted;
+import 'approval_forms.dart'
+    show settleDiffText, showExpenseRequestDialog, toastSubmitted;
 import 'approval_print.dart';
 import 'approval_settings.dart';
 import 'groupware_screen.dart';
@@ -39,6 +40,15 @@ class _ApprovalTabState extends State<ApprovalTab> {
   String? _error;
   int _loadSeq = 0;
 
+  /// "정산 안 됨" 거르기 — 승인됐는데 살아 있는 정산이 없는 구매 요청·출장 신청만(서버 ?unsettled=1). "내가 올린 문서"(내 것)와
+  /// 관리자의 "전체 문서"(모두의 것)에서만 고를 수 있고, 다른 함으로 옮기면 꺼진다.
+  bool _unsettled = false;
+
+  /// 지금 함에서 "정산 안 됨" 거르기를 고를 수 있는지.
+  bool get _canFilterUnsettled =>
+      _box == ApprovalBox.mine ||
+      (_box == ApprovalBox.all && widget.ctx.isManager);
+
   @override
   void initState() {
     super.initState();
@@ -55,7 +65,10 @@ class _ApprovalTabState extends State<ApprovalTab> {
   Future<void> _load() async {
     final seq = ++_loadSeq;
     try {
-      final docs = await widget.api.documents(box: _box);
+      final docs = await widget.api.documents(
+        box: _box,
+        unsettled: _unsettled && _canFilterUnsettled,
+      );
       if (mounted && seq == _loadSeq) setState(() => _docs = docs);
     } catch (e) {
       if (mounted && seq == _loadSeq) setState(() => _error = e.toString());
@@ -79,6 +92,16 @@ class _ApprovalTabState extends State<ApprovalTab> {
   void _select(ApprovalBox box) {
     setState(() {
       _box = box;
+      if (!_canFilterUnsettled) _unsettled = false;
+      _docs = null;
+      _error = null;
+    });
+    _load();
+  }
+
+  void _toggleUnsettled(bool on) {
+    setState(() {
+      _unsettled = on;
       _docs = null;
       _error = null;
     });
@@ -161,6 +184,19 @@ class _ApprovalTabState extends State<ApprovalTab> {
                     onSelected: (_) => _select(box),
                   ),
                 ),
+              if (_canFilterUnsettled) ...[
+                const SizedBox(width: 6),
+                FilterChip(
+                  key: const ValueKey('approval-filter-unsettled'),
+                  avatar: _unsettled
+                      ? null
+                      : const Icon(Icons.receipt_long_outlined, size: 16),
+                  label: Text(tr('정산 안 됨')),
+                  tooltip: tr('승인됐지만 아직 정산하지 않은 구매·출장'),
+                  selected: _unsettled,
+                  onSelected: _toggleUnsettled,
+                ),
+              ],
             ],
           ),
         ),
@@ -173,6 +209,8 @@ class _ApprovalTabState extends State<ApprovalTab> {
               ? GroupwareEmpty(
                   _box == ApprovalBox.inbox
                       ? tr('지금 결재할 문서가 없습니다.')
+                      : _unsettled && _canFilterUnsettled
+                      ? tr('정산할 구매·출장 결재가 없습니다.')
                       : tr('문서가 없습니다.'),
                 )
               : RefreshIndicator(
@@ -337,6 +375,36 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
     }
   }
 
+  /// "정산하기" — 이 승인된 구매 요청·출장 신청을 정산하는 지출 결재 창을 연다(예산·내용을 미리 채움). 올렸으면 안내하고 상세를
+  /// 다시 받아 정산 상태("정산 결재 중")를 보인다. 서버가 거절하면(이미 정산함 등) 지출 창 안에 그 문구가 뜬다.
+  Future<void> _settle(ApprovalDocument doc) async {
+    final created = await showExpenseRequestDialog(
+      context,
+      api: widget.api,
+      ctx: widget.ctx,
+      session: widget.session,
+      settles: doc,
+    );
+    if (created == null || !mounted) return;
+    toastSubmitted(context, created);
+    setState(() => _changed = true);
+    await _load();
+  }
+
+  /// 다른 결재(정산 지출 ↔ 원래 결재)의 상세를 위에 겹쳐 연다. 거기서 무언가 바꿨으면 이 문서도 다시 받는다(정산 상태가 바뀔 수 있다).
+  Future<void> _openLinked(String id) async {
+    final changed = await showApprovalDetail(
+      context,
+      api: widget.api,
+      ctx: widget.ctx,
+      session: widget.session,
+      documentId: id,
+    );
+    if (!changed || !mounted) return;
+    setState(() => _changed = true);
+    await _load();
+  }
+
   Future<void> _openAttachment(ApprovalAttachment a) async {
     final url = a.fileUrl;
     if (url == null) return;
@@ -384,6 +452,14 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
               PopupMenuItem(value: 'print', child: Text(tr('인쇄'))),
               PopupMenuItem(value: 'pdf', child: Text(tr('PDF로 저장'))),
             ],
+          ),
+        // 승인된 내 구매 요청·출장 신청에 살아 있는 정산이 없으면(서버 canSettle) — 쓴 돈을 지출 결재로 정산한다.
+        if (doc != null && doc.canSettle)
+          OutlinedButton.icon(
+            key: const ValueKey('approval-settle'),
+            onPressed: _busy ? null : () => _settle(doc),
+            icon: const Icon(Icons.receipt_long_outlined, size: 18),
+            label: Text(tr('정산하기')),
           ),
         if (doc != null && doc.canWithdraw)
           TextButton(
@@ -493,8 +569,11 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
           row(tr('금액'), wonText((p['amount'] as num?)?.toInt() ?? 0)),
           row(tr('분류'), '${p['category'] ?? ''}'),
           row(tr('쓴 날'), '${p['spentOn'] ?? ''}'),
+          if (doc.settles case final settles?)
+            ..._settlesRows(context, doc, settles, row),
         ],
         if (doc.kind.isForm) FormValuesView(doc: doc),
+        if (kSettleKinds.contains(doc.kind)) ?_settlementRow(context, doc),
         if (doc.kind == ApprovalKind.attendance) ...[
           row(tr('날짜'), '${p['workDate'] ?? ''}'),
           row(tr('출근'), '${p['clockIn'] ?? ''}'),
@@ -587,7 +666,136 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
       ],
     );
   }
+
+  /// 구매 요청·출장 신청의 "정산" 줄 — 이 결재를 정산하는 지출 결재의 상태(서버 settlementOf: 승인된 것 → 결재 중 → 최근 것)와
+  /// 그 번호·제목·금액·예산과의 차이. 누르면 그 지출 결재 상세를 연다. 정산이 아직 없으면 승인된 결재에만 "정산 안 함"을 보인다
+  /// (진행 중·반려된 구매·출장은 정산할 일이 없다). 보일 게 없으면 null.
+  Widget? _settlementRow(BuildContext context, ApprovalDocument doc) {
+    final theme = Theme.of(context);
+    final hint = theme.hintColor;
+    final s = doc.settlement;
+    if (s == null && doc.status != ApprovalStatus.approved) return null;
+    final (String status, Color color) = switch (s?.status) {
+      null => (tr('정산 안 함'), hint),
+      ApprovalStatus.pending => (tr('정산 결재 중'), theme.colorScheme.primary),
+      ApprovalStatus.approved => (tr('정산됨'), Colors.green.shade700),
+      final other => (
+        tr('정산 {status} — 다시 올릴 수 있습니다', {'status': other.label}),
+        theme.colorScheme.error,
+      ),
+    };
+    final budget = settleBudgetOf(doc);
+    final amount = s?.amount;
+    final detail = s == null
+        ? ''
+        : [
+            ?s.docNumber,
+            s.title,
+            if (amount != null) wonText(amount),
+            if (amount != null && budget != null)
+              settleDiffText(amount - budget),
+          ].join(' · ');
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(tr('정산'), style: TextStyle(color: hint)),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  status,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
+                ),
+                if (detail.isNotEmpty)
+                  Text(detail, style: TextStyle(fontSize: 12, color: hint)),
+              ],
+            ),
+          ),
+          if (s != null) Icon(Icons.chevron_right, size: 18, color: hint),
+        ],
+      ),
+    );
+    return Padding(
+      key: const ValueKey('approval-settlement'),
+      padding: const EdgeInsets.only(top: 4),
+      child: s == null
+          ? content
+          : InkWell(
+              onTap: () => _openLinked(s.id),
+              borderRadius: BorderRadius.circular(6),
+              child: content,
+            ),
+    );
+  }
+
+  /// 정산 지출 결재의 줄들 — "정산 대상"(올릴 때의 번호·제목, 누르면 그 결재 상세)과, 예산을 알면 "예산"·"차이"(+면 예산보다 많이 씀).
+  List<Widget> _settlesRows(
+    BuildContext context,
+    ApprovalDocument doc,
+    ApprovalSettles settles,
+    Widget Function(String label, String value) row,
+  ) {
+    final hint = Theme.of(context).hintColor;
+    final budget = settles.budget;
+    final amount = (doc.payload['amount'] as num?)?.toInt();
+    return [
+      InkWell(
+        key: const ValueKey('approval-settles'),
+        onTap: settles.id.isEmpty ? null : () => _openLinked(settles.id),
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 72,
+                child: Text(tr('정산 대상'), style: TextStyle(color: hint)),
+              ),
+              Expanded(
+                child: Text(
+                  [
+                    settles.kind.label,
+                    ?settles.docNumber,
+                    settles.title,
+                  ].join(' · '),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: hint),
+            ],
+          ),
+        ),
+      ),
+      if (budget != null) ...[
+        row(tr('예산'), wonText(budget)),
+        if (amount != null)
+          KeyedSubtree(
+            key: const ValueKey('approval-settle-diff'),
+            child: row(
+              tr('차이'),
+              '${_signedWon(amount - budget)} (${settleDiffText(amount - budget)})',
+            ),
+          ),
+      ],
+    ];
+  }
 }
+
+/// 차이 금액 → "+12,000원" / "-3,000원" / "0원"(wonText는 음수를 못 받아 부호를 따로 붙인다).
+String _signedWon(int diff) =>
+    '${diff > 0
+        ? '+'
+        : diff < 0
+        ? '-'
+        : ''}${wonText(diff.abs())}';
 
 class _CommentDialog extends StatefulWidget {
   final String title;

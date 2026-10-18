@@ -154,6 +154,8 @@ class EventDetailBody extends StatelessWidget {
             ? tr('국가 공휴일')
             : event.isBirthday
             ? tr('멤버 생일')
+            : event.isTrip
+            ? tr('출장')
             : event.isExternal
             ? tr('외부 캘린더')
             : tr('캘린더'));
@@ -273,7 +275,23 @@ class EventDetailBody extends StatelessWidget {
                     ),
                   if ((event.location ?? '').isNotEmpty &&
                       event.location != event.resource?.name)
-                    row(Icons.place_outlined, Text(event.location!)),
+                    row(
+                      Icons.place_outlined,
+                      Text(
+                        event.location!,
+                        key: const ValueKey('event-detail-location'),
+                      ),
+                    ),
+                  // 그룹웨어에서 승인된 출장 — 장소(위)가 출장지. 바꾸거나 취소하는 건 그룹웨어 결재에서.
+                  if (event.isTrip)
+                    row(
+                      Icons.flight_takeoff,
+                      Text(
+                        tr('그룹웨어 → 결재에서 승인된 출장입니다. 바꾸거나 취소하려면 그곳에서 하세요.'),
+                        key: const ValueKey('event-detail-trip'),
+                        style: TextStyle(color: theme.hintColor),
+                      ),
+                    ),
                   // 그룹웨어에서 바로 잡은 회의실 예약 — 바꾸기·취소는 그룹웨어 "예약" 탭에서.
                   if (event.isBooking)
                     row(

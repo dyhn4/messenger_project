@@ -166,18 +166,52 @@ class _Stamp extends StatelessWidget {
 
 // ── 내용 줄(PDF) ──────────────────────────────────────────────────────────
 
-/// 문서 내용을 (이름, 값) 줄로 — 종류별 칸과 양식 칸. 여러 줄 글은 따로([longTexts]), 품목 표는 [items].
+/// 표 칸 합계 줄의 칸 글들 — 숫자·금액 열은 합계, 그 밖의 첫 열에는 "합계"(모든 열이 숫자면 첫 칸 앞에 붙인다). 합계 낼 열이
+/// 없으면 null. 화면(상세 — approval_form_widgets.dart FormTableValueView)과 인쇄가 같이 쓴다.
+List<String>? formTableTotalsRow(FormFieldDef field, List totals) {
+  final out = [
+    for (final (j, c) in field.columns.indexed)
+      (c.type == FormTableColumnType.number ||
+                  c.type == FormTableColumnType.money) &&
+              totals.elementAtOrNull(j) != null
+          ? formTableCellText(c, totals[j])
+          : '',
+  ];
+  if (out.every((t) => t.isEmpty)) return null;
+  final labelAt = out.indexWhere((t) => t.isEmpty);
+  if (labelAt >= 0) {
+    out[labelAt] = tr('합계');
+  } else {
+    out[0] = tr('합계 {p0}', {'p0': out[0]});
+  }
+  return out;
+}
+
+/// 인쇄할 표 칸 하나 — 칸 이름, 열 머리, 줄마다 칸 글([formTableCellText]), 합계 줄([formTableTotalsRow] — 없으면 null), 숫자·금액
+/// 열(오른쪽 맞춤할 열 번호).
+typedef ApprovalPrintTable = ({
+  String label,
+  List<String> headers,
+  List<List<String>> rows,
+  List<String>? totals,
+  Set<int> numericColumns,
+});
+
+/// 문서 내용을 (이름, 값) 줄로 — 종류별 칸과 양식 칸(사람 칸은 이름들). 여러 줄 글은 따로([longTexts]), 품목 표는 [items],
+/// 표 칸은 [tables].
 ({
   List<(String, String)> rows,
   List<(String, String)> longTexts,
   List<Map<String, dynamic>> items,
   int? itemsTotal,
+  List<ApprovalPrintTable> tables,
 })
 approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
   final rows = <(String, String)>[];
   final longTexts = <(String, String)>[];
   var items = <Map<String, dynamic>>[];
   int? itemsTotal;
+  final tables = <ApprovalPrintTable>[];
   final p = doc.payload;
   switch (doc.kind) {
     case ApprovalKind.leave:
@@ -217,8 +251,30 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
               (r as Map).cast<String, dynamic>(),
           ];
           itemsTotal = (v['total'] as num?)?.toInt();
+        } else if (f.type == FormFieldType.table && v is Map) {
+          tables.add((
+            label: f.label,
+            headers: [for (final c in f.columns) c.label],
+            rows: [
+              for (final r in v['rows'] as List? ?? const [])
+                if (r is List)
+                  [
+                    for (final (j, c) in f.columns.indexed)
+                      formTableCellText(c, r.elementAtOrNull(j)),
+                  ],
+            ],
+            totals: formTableTotalsRow(f, v['totals'] as List? ?? const []),
+            numericColumns: {
+              for (final (j, c) in f.columns.indexed)
+                if (c.type == FormTableColumnType.number ||
+                    c.type == FormTableColumnType.money)
+                  j,
+            },
+          ));
         } else {
-          rows.add((f.label, formValueText(f, v) ?? '—'));
+          // 한 줄 값(사람 칸은 이름들) — 비었으면 '—'.
+          final text = formValueText(f, v);
+          rows.add((f.label, text == null || text.isEmpty ? '—' : text));
         }
       }
   }
@@ -228,6 +284,7 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
     longTexts: longTexts,
     items: items,
     itemsTotal: itemsTotal,
+    tables: tables,
   );
 }
 
@@ -419,6 +476,22 @@ Future<Uint8List> buildApprovalPdf(
                 style: const pw.TextStyle(fontSize: 10),
               ),
             ),
+          ),
+        ],
+        // 표 칸 — 칸 이름 아래 열 머리·줄, 맨 아래 합계 줄(숫자·금액 열은 오른쪽 맞춤).
+        for (final t in content.tables) ...[
+          pw.SizedBox(height: 10),
+          pw.Text(t.label, style: pw.TextStyle(fontSize: 9, color: grey)),
+          pw.SizedBox(height: 3),
+          pw.TableHelper.fromTextArray(
+            headers: t.headers,
+            data: [...t.rows, ?t.totals],
+            headerStyle: pw.TextStyle(fontSize: 9, color: grey),
+            cellStyle: const pw.TextStyle(fontSize: 9),
+            border: pw.TableBorder.all(color: line, width: 0.6),
+            cellAlignments: {
+              for (final j in t.numericColumns) j: pw.Alignment.centerRight,
+            },
           ),
         ],
         for (final (label, text) in content.longTexts) ...[

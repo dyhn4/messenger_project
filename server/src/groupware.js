@@ -52,6 +52,8 @@ import {
   mergeForms,
   parseFormDefinition,
 } from './approvalForms.js';
+import { applyFormDefaults, parseFormDefaults } from './approvalFormDefaults.js';
+import { canSettle, checkSettlement, SETTLE_KINDS, settlementOf } from './settlementRules.js';
 import { clientIp, isLanAddress, limits, retryLater, waitText } from './authGuard.js';
 import {
   applyApprovalDecision,
@@ -60,6 +62,8 @@ import {
   countUnreadApprovalNotifications,
   deleteApprovalLine,
   findApprovalDocument,
+  findApprovalDocumentRow,
+  listSettlementsOf,
   findHireDate,
   findOverlappingLeave,
   insertApprovalDocument,
@@ -272,7 +276,7 @@ function attachmentDtos(list) {
 }
 
 /** 앱에 내려줄 문서 모양 — [viewerId] 기준으로 지금 내 차례인지·회수·취소할 수 있는지를 함께. */
-function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, proxySources = [] } = {}) {
+function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, proxySources = [], settlements = null } = {}) {
   const pending = doc.status === 'pending' ? steps.filter((s) => s.status === 'pending') : [];
   const own = pending.find((s) => s.approverId === viewerId) ?? null;
   // 대결 — 내가 올렸거나 이미 결재선에 있으면 대신 결재하지 않는다(approvalRules.js proxyForOf).
@@ -303,7 +307,19 @@ function documentDto({ doc, steps }, viewerId, { isManager = false, cc = null, p
     finalForMe: (own ?? proxied)?.role === 'final',
     canWithdraw: doc.status === 'pending' && doc.authorId === viewerId,
     canCancel: doc.status === 'approved' && isManager,
+    // 정산(구매·출장 — settlementRules.js) — 이 결재를 정산하는 지출 결재(승인 → 결재 중 → 최근 순)와 "정산하기"를 누를 수 있는지.
+    ...(SETTLE_KINDS.includes(doc.kind) && settlements
+      ? { settlement: settlementOf(settlements), canSettle: canSettle(doc, viewerId, settlements) }
+      : {}),
   };
+}
+
+/** 문서들([rows] `[{ doc }]`) 중 구매·출장을 정산하는 지출 결재들 — 문서 id → 목록. */
+async function settlementsByDoc(rows) {
+  const ids = rows.filter((r) => SETTLE_KINDS.includes(r.doc.kind)).map((r) => r.doc.id);
+  const map = new Map(ids.map((id) => [id, []]));
+  for (const s of await listSettlementsOf(ids)) map.get(s.settlesId)?.push(s);
+  return map;
 }
 
 /** 휴가 하나 → 'YYYY-MM-DD' 날짜별 { halfDays, halfType }(근태 요약·내 근무 기록에서 휴가 날을 가리는 데). */
@@ -346,6 +362,12 @@ async function formForSubmission(ctx, kind, formId) {
   return { id: form.builtin ? null : form.id, name: form.name, fields: form.fields, allowAttachments: form.allowAttachments };
 }
 
+/** 기본 결재선·참조자를 볼 양식 — 기본 양식은 종류로, 관리자가 만든 양식은 [templateId]로. 없으면 null. */
+function formForLine(forms, kind, templateId) {
+  if (kind === 'form') return forms.find((f) => !f.builtin && f.id === templateId) ?? null;
+  return forms.find((f) => f.id === `builtin:${kind}`) ?? null;
+}
+
 const formDto = (f) => ({
   id: f.id,
   kind: f.kind,
@@ -355,6 +377,9 @@ const formDto = (f) => ({
   fields: f.fields,
   allowAttachments: f.allowAttachments,
   enabled: f.enabled,
+  // 기본 결재선 `[{ userId, role }]`(null이면 정하지 않음)·기본 참조자(approvalFormDefaults.js).
+  defaultLine: f.defaultLine ?? null,
+  defaultCcIds: f.defaultCcIds ?? [],
 });
 
 /** 한 사람의 이번 연차 현황(annualLeave.js leaveBalance + 조정 목록). */
@@ -487,12 +512,13 @@ async function announceNotifications(io, { doc, event, notifyIds, actorId, actor
   }
 }
 
-/** 휴가가 승인·취소되면 캘린더 "팀 휴가"를 새로 고치게 한다. */
+/** 휴가·출장이 승인·취소되면 캘린더 "팀 휴가"·"출장"을 새로 고치게 한다. */
 async function announceLeaveCalendar(io, doc, event) {
-  if (doc.kind === 'leave' && (event === 'approved' || event === 'canceled')) {
+  if ((doc.kind === 'leave' || doc.kind === 'trip') && (event === 'approved' || event === 'canceled')) {
+    const calendarId = doc.kind === 'trip' ? 'trips' : 'leaves';
     const teamIds = doc.teamId ? [doc.teamId] : doc.authorId ? await listTeamIdsForUser(doc.authorId) : [];
     for (const teamId of teamIds) {
-      for (const id of await listTeamMemberIds(teamId)) io.to(`user:${id}`).emit('calendar:changed', { teamId, calendarId: 'leaves' });
+      for (const id of await listTeamMemberIds(teamId)) io.to(`user:${id}`).emit('calendar:changed', { teamId, calendarId });
     }
   }
 }
@@ -591,14 +617,15 @@ export function createGroupwareRouter(io) {
     }),
   );
 
-  /** 결재자·참조자 후보(나 빼고). */
+  /** 결재자·참조자 후보(나 빼고 — ?includeSelf=1이면 나도: 양식의 사람 칸·관리자가 정하는 양식 기본 결재선). */
   router.get(
     '/groupware/candidates',
     withContext(async (req, res, ctx) => {
       const candidates = await approverCandidates(ctx);
+      const includeSelf = req.query.includeSelf === '1';
       res.json(
         [...candidates.values()]
-          .filter((m) => m.id !== ctx.user.id)
+          .filter((m) => includeSelf || m.id !== ctx.user.id)
           .map((m) => ({ id: m.id, name: m.name, username: m.username }))
           .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
       );
@@ -610,15 +637,17 @@ export function createGroupwareRouter(io) {
   /**
    * 저장한 결재선과 새 결재에 미리 채울 결재선 `?kind=&templateId=&amount=` — [kind]·[amount](원)를 주면 그 문서에 맞는 결재선 규칙
    * (approvalLineRules.js)대로 상위자 사슬을 자르고(직책 기준이면 그 직책 이상까지) 늘 붙일 결재자·참조자를 더한다(`source: 'rule'`, `rule`).
-   * 규칙이 없거나 종류를 안 주면 예전처럼 사슬 5명, 사슬도 없으면 가장 최근에 저장한 결재선.
+   * 규칙이 없거나 종류를 안 주면 예전처럼 사슬 5명, 사슬도 없으면 가장 최근에 저장한 결재선. 양식(기본 양식은 종류, 관리자가 만든
+   * 양식은 templateId)에 기본 결재선이 있으면 그것이 먼저고(`source: 'form'`), 기본 참조자는 참조자에 더한다(approvalFormDefaults.js).
    */
   router.get(
     '/groupware/approval-lines',
     withContext(async (req, res, ctx) => {
-      const [lines, candidates, rules] = await Promise.all([
+      const [lines, candidates, rules, templates] = await Promise.all([
         listApprovalLines(ctx.user.id, ctx.scopeKey),
         approverCandidates(ctx),
         listLineRules(ctx.scopeKey),
+        listApprovalTemplates(ctx.scopeKey),
       ]);
       const kind = typeof req.query.kind === 'string' ? req.query.kind : null;
       const amount = Number.isFinite(Number(req.query.amount)) && req.query.amount !== '' ? Number(req.query.amount) : null;
@@ -653,6 +682,10 @@ export function createGroupwareRouter(io) {
           source: 'rule',
           rule: lineRuleDto(rule, { templateName: rules.find((r) => r.rule.id === rule.id)?.templateName ?? null }),
         };
+      }
+      if (kind && FORM_KINDS.includes(kind)) {
+        const form = formForLine(mergeForms(templates), kind, isUuid(req.query.templateId) ? req.query.templateId : null);
+        suggested = applyFormDefaults({ form, authorId: ctx.user.id, suggested, isCandidate: (id) => candidates.has(id) });
       }
       res.json({
         lines: lines.map((l) => ({
@@ -808,8 +841,24 @@ export function createGroupwareRouter(io) {
       const status = APPROVAL_STATUSES.includes(req.query.status) ? req.query.status : null;
       const before = Number(req.query.before) > 0 ? Number(req.query.before) : null;
       const proxySources = await proxySourcesOf(ctx.scopeKey, ctx.user.id);
-      const rows = await listApprovalDocuments({ scopeKey: ctx.scopeKey, box, userId: ctx.user.id, kind, status, before, proxyFor: proxySources });
-      res.json(rows.map((r) => documentDto(r, ctx.user.id, { isManager: ctx.isManager, proxySources })));
+      // 정산 안 된 승인 구매·출장만(?unsettled=1) — 관리자는 전체에서, 아니면 내가 올린 것에서.
+      const unsettled = req.query.unsettled === '1' || req.query.unsettled === 'true';
+      const rows = await listApprovalDocuments({
+        scopeKey: ctx.scopeKey,
+        box,
+        userId: ctx.user.id,
+        kind,
+        status,
+        before,
+        proxyFor: proxySources,
+        unsettled,
+      });
+      const settlements = await settlementsByDoc(rows);
+      res.json(
+        rows.map((r) =>
+          documentDto(r, ctx.user.id, { isManager: ctx.isManager, proxySources, settlements: settlements.get(r.doc.id) ?? null }),
+        ),
+      );
     }),
   );
 
@@ -828,7 +877,8 @@ export function createGroupwareRouter(io) {
       : [];
     const names = new Map(members.map((m) => [m.id, m.name]));
     const cc = found.ccIds.map((id) => ({ id, name: names.get(id) ?? '(알 수 없음)' }));
-    res.json(documentDto(found, req.user.sub, { isManager, cc, proxySources }));
+    const settlements = (await settlementsByDoc([found])).get(found.doc.id) ?? null;
+    res.json(documentDto(found, req.user.sub, { isManager, cc, proxySources, settlements }));
   });
 
   // ── 결재 양식 ──
@@ -856,9 +906,12 @@ export function createGroupwareRouter(io) {
         const custom = rows.filter((r) => !r.builtinKey);
         if (custom.length >= CUSTOM_FORMS_MAX) return fail(res, { error: `양식은 ${CUSTOM_FORMS_MAX}개까지 만들 수 있습니다.` });
         if (mergeForms(rows).some((f) => f.name === parsed.form.name)) return fail(res, { error: '같은 이름의 양식이 있습니다.', status: 409 });
+        const defaults = await parsedFormDefaults(ctx, req.body);
+        if (defaults.error) return fail(res, defaults);
         const row = await insertApprovalTemplate({
           scopeKey: ctx.scopeKey,
           ...parsed.form,
+          ...defaults.defaults,
           sortOrder: 100 + custom.reduce((max, r) => Math.max(max, (r.sortOrder ?? 100) - 100), -1) + 1,
           createdBy: ctx.user.id,
           createdByName: ctx.user.name ?? ctx.user.username,
@@ -871,24 +924,49 @@ export function createGroupwareRouter(io) {
     ),
   );
 
-  /** 양식 바꾸기(관리자) — 기본 양식은 `{ enabled }`만, 관리자가 만든 양식은 `{ name?, description?, fields?, allowAttachments?, enabled? }`. */
+  /** 기본 결재선·참조자 입력 검사(결재자 후보로) — 본문에 둘 다 없으면 `{ defaults: {} }`(그대로). */
+  async function parsedFormDefaults(ctx, body) {
+    if (!body || (!('defaultLine' in body) && !('defaultCcIds' in body))) return { defaults: {} };
+    const candidates = await approverCandidates(ctx);
+    return parseFormDefaults(body, { isCandidate: (id) => candidates.has(id) });
+  }
+
+  /**
+   * 양식 바꾸기(관리자) — 기본 양식은 `{ enabled?, defaultLine?, defaultCcIds? }`, 관리자가 만든 양식은 `{ name?, description?, fields?,
+   * allowAttachments?, enabled?, defaultLine?, defaultCcIds? }`. 기본 결재선·참조자는 둘 중 하나만 보내면 다른 하나는 그대로.
+   */
   router.patch(
     '/groupware/forms/:id',
     withContext(
       async (req, res, ctx) => {
         const body = req.body ?? {};
         const builtin = builtinKindOfId(req.params.id);
+        const current = builtin ? mergeForms(await listApprovalTemplates(ctx.scopeKey)).find((f) => f.id === req.params.id) : null;
+        const defaults = await parsedFormDefaults(ctx, {
+          ...('defaultLine' in body || 'defaultCcIds' in body
+            ? { defaultLine: current?.defaultLine ?? null, defaultCcIds: current?.defaultCcIds ?? [] }
+            : {}),
+          ...body,
+        });
+        if (defaults.error) return fail(res, defaults);
+        const hasDefaults = Object.keys(defaults.defaults).length > 0;
         if (builtin) {
-          if (typeof body.enabled !== 'boolean') return fail(res, { error: '기본 양식은 켜고 끄기만 할 수 있습니다.' });
-          const current = mergeForms(await listApprovalTemplates(ctx.scopeKey)).find((f) => f.id === req.params.id);
+          if (typeof body.enabled !== 'boolean' && !hasDefaults) {
+            return fail(res, { error: '기본 양식은 켜고 끄기와 기본 결재선만 바꿀 수 있습니다.' });
+          }
+          const enabled = typeof body.enabled === 'boolean' ? body.enabled : current.enabled;
           await upsertBuiltinTemplate(ctx.scopeKey, builtin, {
             name: BUILTIN_FORMS[builtin].name,
-            enabled: body.enabled,
+            enabled,
             sortOrder: current.sortOrder,
+            defaults: hasDefaults ? defaults.defaults : null,
           });
-          auditForm(ctx, `기본 양식 ${body.enabled ? '켜기' : '끄기'} — ${BUILTIN_FORMS[builtin].name}`);
+          if (typeof body.enabled === 'boolean') {
+            auditForm(ctx, `기본 양식 ${body.enabled ? '켜기' : '끄기'} — ${BUILTIN_FORMS[builtin].name}`);
+          }
+          if (hasDefaults) auditForm(ctx, `기본 결재선 바꾸기 — ${BUILTIN_FORMS[builtin].name}`);
           broadcastFormsChanged(ctx);
-          return res.json(formDto({ ...current, enabled: body.enabled }));
+          return res.json(formDto({ ...current, enabled, ...defaults.defaults }));
         }
         const row = isUuid(req.params.id) ? await findApprovalTemplate(req.params.id) : null;
         if (!row || row.builtinKey || row.scopeKey !== ctx.scopeKey) return fail(res, { error: '결재 양식을 찾을 수 없습니다.', status: 404 });
@@ -906,6 +984,15 @@ export function createGroupwareRouter(io) {
           Object.assign(patch, parsed.form);
         }
         if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+        if (hasDefaults) {
+          // 한쪽만 보냈으면 다른 쪽은 지금 값(관리자가 만든 양식 줄).
+          const next = await parsedFormDefaults(ctx, {
+            defaultLine: 'defaultLine' in body ? body.defaultLine : row.defaultLine,
+            defaultCcIds: 'defaultCcIds' in body ? body.defaultCcIds : row.defaultCcIds,
+          });
+          if (next.error) return fail(res, next);
+          Object.assign(patch, next.defaults);
+        }
         if (Object.keys(patch).length === 0) return fail(res, { error: '바꿀 내용이 없습니다.' });
         const updated = await updateApprovalTemplate(row.id, patch);
         auditForm(ctx, `양식 바꾸기 — ${updated.name}`);
@@ -946,15 +1033,34 @@ export function createGroupwareRouter(io) {
       let parsed;
       // 양식으로 올리는 종류(일반 기안서·출장·구매·연장근무·관리자가 만든 양식) — 칸 정의대로 검사하고 칸 정의를 문서에 같이 적는다.
       let form = null;
+      const candidates = await approverCandidates(ctx);
       if (FORM_KINDS.includes(body.kind)) {
         form = await formForSubmission(ctx, body.kind, body.formId);
         if (form.error) return fail(res, form);
-        parsed = buildFormPayload({ kind: body.kind, template: form, values: body.values, today });
+        // 사람 칸 — 이 범위에서 결재자로 고를 수 있는 사람과 올리는 사람 자신(그때의 이름으로 적는다).
+        const personOf = (id) =>
+          candidates.get(id) ?? (id === ctx.user.id ? { id: ctx.user.id, name: ctx.user.name ?? ctx.user.username } : null);
+        parsed = buildFormPayload({ kind: body.kind, template: form, values: body.values, today, personOf });
       } else if (body.kind === 'leave') parsed = parseLeavePayload(body, HOLIDAY_DATES, ctx.options.leaveTypes);
       else if (body.kind === 'expense') parsed = parseExpensePayload(body, ctx.options.expenseCategories);
       else parsed = parseAttendancePayload(body, { today });
       if (parsed.error) return fail(res, parsed);
       const payload = parsed.payload;
+
+      // 정산 — 지출 결재가 승인된 구매 요청·출장 신청을 가리키면(settlesId) 그 결재를 확인하고 그때의 제목·번호·예산을 적는다.
+      let settlesId = null;
+      if (body.kind === 'expense' && body.settlesId !== undefined && body.settlesId !== null) {
+        const source = isUuid(body.settlesId) ? await findApprovalDocumentRow(body.settlesId) : null;
+        const checked = checkSettlement({
+          source,
+          userId: ctx.user.id,
+          scopeKey: ctx.scopeKey,
+          settlements: source ? await listSettlementsOf([source.id]) : [],
+        });
+        if (checked.error) return fail(res, checked);
+        payload.settles = checked.settles;
+        settlesId = source.id;
+      }
 
       if (body.kind === 'leave') {
         const overlap = await findOverlappingLeave({ scopeKey: ctx.scopeKey, userId: ctx.user.id, from: payload.startDate, to: payload.endDate });
@@ -972,7 +1078,6 @@ export function createGroupwareRouter(io) {
         body.kind === 'expense' || form?.allowAttachments ? await parseAttachments(body.attachments, ctx.user.id) : { attachments: [] };
       if (files.error) return fail(res, files);
 
-      const candidates = await approverCandidates(ctx);
       const line = validateApprovalLine({
         authorId: ctx.user.id,
         approverIds: body.approverIds,
@@ -994,6 +1099,7 @@ export function createGroupwareRouter(io) {
           body: text.body,
           payload,
           attachments: files.attachments.length ? files.attachments : null,
+          settlesId,
         },
         approvers: line.line.map(({ userId, role, stage }) => ({ id: userId, name: candidates.get(userId).name, role, stage })),
         ccIds: line.ccIds,
@@ -1086,6 +1192,7 @@ export function createGroupwareRouter(io) {
         documentDto(fresh, req.user.sub, {
           isManager: isManager || (await isManagerOfDocument(fresh.doc, req.user.sub)),
           proxySources: [...delegationMap].filter(([, d]) => d === req.user.sub).map(([absent]) => absent),
+          settlements: (await settlementsByDoc([fresh])).get(fresh.doc.id) ?? null,
         }),
       );
     });

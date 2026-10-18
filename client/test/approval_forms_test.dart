@@ -3,7 +3,7 @@
 import 'dart:convert';
 
 import 'package:client/models/groupware.dart';
-import 'package:client/screens/groupware/approval_form_widgets.dart';
+import 'package:client/screens/groupware/approval_form_admin.dart';
 import 'package:client/screens/groupware/approval_tab.dart';
 import 'package:client/screens/groupware/groupware_screen.dart'
     show GroupwareChanges;
@@ -547,11 +547,13 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('교육 신청 (직접 만든 양식)'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('gw-form-menu-builtin:draft')),
-      findsNothing,
-      reason: '기본 양식은 고치지 못한다',
-    );
+    // 기본 양식의 ⋯ 메뉴는 "기본 결재선"뿐 — 고치기·지우기는 없다.
+    await tester.tap(find.byKey(const ValueKey('gw-form-menu-builtin:draft')));
+    await tester.pumpAndSettle();
+    expect(find.text('기본 결재선'), findsOneWidget);
+    expect(find.text('고치기'), findsNothing, reason: '기본 양식은 고치지 못한다');
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
 
     await tester.tap(
       find.byKey(const ValueKey('gw-form-enabled-builtin:purchase')),

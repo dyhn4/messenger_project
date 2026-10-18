@@ -13,6 +13,10 @@ const kBirthdaysCalendarId = 'birthdays';
 /// 그룹웨어에서 승인된 휴가(server/src/calendars.js — 팀 범위면 이 팀의 결재, 회사 전체면 이 팀 사람들의 휴가).
 const kLeavesCalendarId = 'leaves';
 
+/// 그룹웨어에서 승인된 출장 신청(server/src/calendars.js — 팀 휴가를 보는 사람들에게, 출장지를 장소로 한 종일 일정). 결재가
+/// 승인·취소되면 서버가 calendarId 'trips'로 calendar:changed를 보낸다.
+const kTripsCalendarId = 'trips';
+
 /// 그룹웨어에서 바로 잡은 내 회의실·자원 예약(일정에 붙인 예약은 그 일정으로 보인다 — server/src/groupwareResources.js).
 const kBookingsCalendarId = 'bookings';
 
@@ -20,6 +24,7 @@ const kBookingsCalendarId = 'bookings';
 const kHolidayColor = '#E53935';
 const kBirthdayColor = '#F06292';
 const kLeaveColor = '#12B886';
+const kTripColor = '#F08C00';
 const kBookingColor = '#7950F2';
 
 /// 내장 캘린더 id들 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
@@ -27,6 +32,7 @@ const kBuiltinCalendarIds = {
   kHolidaysCalendarId,
   kBirthdaysCalendarId,
   kLeavesCalendarId,
+  kTripsCalendarId,
   kBookingsCalendarId,
 };
 
@@ -202,6 +208,16 @@ class CalendarInfo {
     hidden: hidden,
   );
 
+  /// 승인된 출장(그룹웨어 출장 신청) — 팀 휴가처럼 정회원 이상에게만 보인다.
+  factory CalendarInfo.trips({bool hidden = false}) => CalendarInfo(
+    id: kTripsCalendarId,
+    kind: kTripsCalendarId,
+    name: tr('출장'),
+    color: kTripColor,
+    role: 'subscriber',
+    hidden: hidden,
+  );
+
   factory CalendarInfo.bookings({bool hidden = false}) => CalendarInfo(
     id: kBookingsCalendarId,
     kind: kBookingsCalendarId,
@@ -236,7 +252,7 @@ class CalendarInfo {
     lastError: lastError,
   );
 
-  /// 국가 공휴일·멤버 생일·팀 휴가·회의실 예약 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
+  /// 국가 공휴일·멤버 생일·팀 휴가·출장·회의실 예약 — DB 행이 없어 서버에 저장·삭제·색 변경을 하지 않는다.
   bool get isBuiltin => kBuiltinCalendarIds.contains(id);
 
   /// 다른 사람의 캘린더를 구독 중인지(구독 취소로 없앨 수 있다).
@@ -489,7 +505,8 @@ class EventOccurrence {
   final String? eventId;
   final String calendarId;
 
-  /// 'event' | 'holiday' | 'birthday' | 'leave' | 'booking'(그룹웨어에서 잡은 회의실 예약) | 'external'(외부 ICS — 읽기 전용)
+  /// 'event' | 'holiday' | 'birthday' | 'leave' | 'trip'(승인된 출장 — 장소는 출장지) | 'booking'(그룹웨어에서 잡은 회의실
+  /// 예약) | 'external'(외부 ICS — 읽기 전용)
   final String source;
   final String title;
   final String? description;
@@ -583,6 +600,9 @@ class EventOccurrence {
   bool get isBirthday => source == 'birthday';
   bool get isExternal => source == 'external';
   bool get isBooking => source == 'booking';
+
+  /// 그룹웨어에서 승인된 출장(종일, [location]이 출장지) — 바꾸거나 취소하는 건 그룹웨어 결재에서 한다.
+  bool get isTrip => source == 'trip';
 
   /// 사용자가 만든 일정(수정·삭제·참석자가 있을 수 있는 것) — 공휴일·생일이 아니다.
   bool get isUserEvent => source == 'event';

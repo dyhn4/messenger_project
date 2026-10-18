@@ -124,6 +124,12 @@ export function documentAmountOf(kind, payload) {
       const v = values[f.key];
       if (f.type === 'money' && Number.isFinite(v)) [sum, any] = [sum + v, true];
       if (f.type === 'items' && Number.isFinite(v?.total)) [sum, any] = [sum + v.total, true];
+      // 표 칸 — 금액 열의 합계.
+      if (f.type === 'table' && Array.isArray(v?.totals)) {
+        for (const [j, c] of (Array.isArray(f.columns) ? f.columns : []).entries()) {
+          if (c.type === 'money' && Number.isFinite(v.totals[j])) [sum, any] = [sum + v.totals[j], true];
+        }
+      }
     }
     return any ? sum : null;
   }

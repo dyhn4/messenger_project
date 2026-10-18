@@ -1175,7 +1175,7 @@ void main() {
           'trip',
           DateTime(2026, 9, 29),
           DateTime(2026, 10, 1),
-          title: '출장',
+          title: '제주 출장',
         ),
         holidayEvent(DateTime(2026, 10, 3), '개천절'),
         timedEvent(
@@ -1193,7 +1193,7 @@ void main() {
       await _pumpScreen(tester, api0());
       expect(find.text('2026년 9월'), findsWidgets);
       expect(find.textContaining('오늘 회의'), findsOneWidget);
-      expect(find.text('출장'), findsOneWidget);
+      expect(find.text('제주 출장'), findsOneWidget);
       expect(find.textContaining('디자인 리뷰'), findsOneWidget);
       expect(find.text('개천절'), findsOneWidget);
       // 캘린더 목록 두 묶음이 왼쪽에 있다.
@@ -1256,7 +1256,7 @@ void main() {
         );
       }
       expect(find.text('오늘 회의'), findsOneWidget);
-      expect(find.text('출장'), findsOneWidget, reason: '종일 일정은 위쪽 종일 칸에');
+      expect(find.text('제주 출장'), findsOneWidget, reason: '종일 일정은 위쪽 종일 칸에');
 
       await tester.tap(
         find.descendant(

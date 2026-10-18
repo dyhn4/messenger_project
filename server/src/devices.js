@@ -131,7 +131,7 @@ export function createDevicesRouter(io = null) {
     // 토큰 버전은 requireAuth가 지금 계정 값과 맞는지 이미 봤다 — DB를 다시 읽지 않고 그 토큰의 값으로 새로 낸다.
     const tokens = issueTokenPair(
       { id: req.user.sub, username: req.user.username, tokenVersion: req.user.tokenVersion ?? 0 },
-      { deviceId: device.id, authAt: req.user.aat ?? req.user.iat },
+      { deviceId: device.id, authAt: req.user.aat ?? req.user.iat, ssoSessionId: req.user.ssid ?? null },
     );
     res.status(201).json({ ...toDeviceDto(device, device.id), tokens });
   });
@@ -159,7 +159,7 @@ export function createDevicesRouter(io = null) {
     // 이 기기의 소켓도 옛 토큰 버전이라 같이 끊긴다 — 앱이 새 토큰으로 다시 붙는다.
     io?.in(`user:${user.id}`).disconnectSockets(true);
     res.json({
-      ...issueTokenPair(updated, { deviceId: current.id, authAt: req.user.aat ?? req.user.iat }),
+      ...issueTokenPair(updated, { deviceId: current.id, authAt: req.user.aat ?? req.user.iat, ssoSessionId: req.user.ssid ?? null }),
       revokedCount: revoked.length,
     });
   });

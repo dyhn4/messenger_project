@@ -356,6 +356,9 @@ void main() {
       );
       await tester.tap(find.widgetWithText(FilledButton, '로그인'));
       await tester.pumpAndSettle();
+      // 먼저 방법을 고른다 — 인증 앱 켜기(보안 키 등록은 passkey_login_test.dart).
+      await tester.tap(find.byKey(const ValueKey('otp-setup-totp')));
+      await tester.pumpAndSettle();
       expect(find.text('2단계 인증 켜기'), findsOneWidget);
       expect(find.textContaining('관리자가 2단계 인증을 꼭 쓰게'), findsOneWidget);
       expect(find.byKey(const ValueKey('otp-qr')), findsOneWidget);

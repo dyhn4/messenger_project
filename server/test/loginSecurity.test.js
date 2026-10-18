@@ -166,7 +166,8 @@ test('SSO ID 토큰 — 발급자·대상·만료·nonce·회사(hd/tid)를 모�
     nonce: 'n',
     nowMs: now,
   });
-  assert.deepEqual(ms.identity, { subject: `${tenant}:abc`, email: 'kim@company.com', name: '김철수' });
+  // groups(그룹 클레임)·sessionId(선택적 클레임 sid)는 없으면 빈 목록·null.
+  assert.deepEqual(ms.identity, { subject: `${tenant}:abc`, email: 'kim@company.com', name: '김철수', groups: [], sessionId: null });
   assert.match(
     validateIdTokenClaims({
       provider: 'microsoft',
@@ -253,13 +254,20 @@ test('관리자 입력 검사 — 값 모양, 비밀값은 평문 칸으로(저�
   assert.equal(view.sso.google.hasClientSecret, true);
   assert.equal(view.ldap.hasBindPassword, true);
   assert.ok(!JSON.stringify(view).includes('"enc"'), '비밀값은 내려보내지 않는다');
-  assert.deepEqual(loginMethodsView({ ...google, otpPolicy: 'all' }, { redirectReady: false }), { sso: [], ldap: false, otpPolicy: 'all' });
+  // 웹 앱 주소가 없으면 회사 계정·패스키 로그인 단추가 없다(SAML 단추 글은 기본값).
+  assert.deepEqual(loginMethodsView({ ...google, otpPolicy: 'all' }, { redirectReady: false }), {
+    sso: [],
+    samlLabel: '회사 계정(SAML)',
+    passkey: false,
+    ldap: false,
+    otpPolicy: 'all',
+  });
 });
 
 test('연결: 로그인은 디렉터리·2단계 인증을 거치고, DTO는 비밀값을 싣지 않는다', () => {
   const auth = fs.readFileSync(new URL('../src/auth.js', import.meta.url), 'utf8');
   assert.match(auth, /return completeLogin\(res, user, \{ method: directory\.profile \? "ldap" : "password" \}\)/);
-  assert.match(auth, /user\.authSource === "ldap" && !\(await directoryAccountActive\(user\)\)/);
+  assert.match(auth, /user\.authSource === "ldap" && !\(await directoryAccountActive\(user, \{ io \}\)\)/);
   const users = fs.readFileSync(new URL('../src/users.js', import.meta.url), 'utf8');
   assert.ok(!/totpSecretEnc|totpRecoveryHashes/.test(users.slice(users.indexOf('export function selfUser'), users.indexOf('export function selfUser') + 900)));
 });

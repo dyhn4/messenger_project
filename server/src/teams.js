@@ -59,6 +59,7 @@ import {
   postSystemMessage,
 } from './rooms.js';
 import { announceTeamJoin, announceTeamRemoval } from './selfRoomNotices.js';
+import { removeGroupSyncGrant } from './db/queries/loginSecurityExtras.js';
 import { publicUser } from './users.js';
 import {
   MEMBER_LOOKUP_RATE,
@@ -497,32 +498,7 @@ export function createTeamsRouter(io) {
 
     // 이미 멤버였던 사람은 조용히 건너뛴다 — 실제로 새로 들어온 사람에게만 아래 나와의 대화 안내를 보낸다.
     const joinedIds = await addTeamMembers(team.id, userIds, 'member');
-
-    // 팀에 들어오면 '정회원 자동 초대'가 켜진 공개 토픽(보관 안 된 것)에 자동으로 참여시킨다 —
-    // 나머지 공개 토픽은 "참여 가능한 토픽"에서 스스로 찾아 들어간다. 준회원은 제외 —
-    // 초대받은 방에만 들어간다(계정 등급 기준이라 사람마다 따로 판단한다).
-    const autoJoinIds = userIds.filter((id) => accountRoles.get(id) !== 'guest');
-    if (autoJoinIds.length > 0) {
-      for (const room of await listAutoInviteTopics(team.id)) {
-        const before = await listRoomMemberIds(room.id);
-        const missing = autoJoinIds.filter((id) => !before.includes(id));
-        if (missing.length === 0) continue;
-        const changedTodos = await addRoomMembers(room.id, missing);
-        await notifyMembership(io, room);
-        await notifyTodosResynced(io, room, changedTodos, req.user.sub); // 예전 담당 행이 남아 있던 사람이 다시 들어옴.
-        const names = await Promise.all(missing.map(nameOf));
-        await postSystemMessage(io, room, `${names.join(', ')} 님이 참여했습니다.`);
-      }
-    }
-
-    const [memberIds, topicCreatorIds] = await Promise.all([listTeamMemberIds(team.id), topicCreatorIdsFor(team)]);
-    // 새로 들어온 사람의 다른 기기까지 팀 목록을 갱신시킨다(팀 선택 화면에 바로 뜨도록).
-    for (const userId of userIds) {
-      io.to(`user:${userId}`).emit(
-        'team:joined',
-        toTeamDto(team, { isOwner: false, memberCount: memberIds.length, topicCreatorIds }),
-      );
-    }
+    await afterTeamMembersAdded(io, team, { userIds, accountRoles, actorId: req.user.sub });
     const addedNames = await Promise.all(userIds.map(nameOf));
     recordAudit({
       actorId: req.user.sub,
@@ -654,20 +630,7 @@ export function createTeamsRouter(io) {
     }
 
     const targetName = await nameOf(targetId);
-    // 팀 멤버십과 그 팀 모든 방의 멤버십을 한 트랜잭션에서 지운다(방 종류별 정리는 db/queries/rooms.js
-    // removeMemberFromTeamRooms). 토픽 관리자 역할도 방 멤버십과 함께 사라진다.
-    const roomRemovals = await removeTeamMember(team.id, targetId, { departedName: targetName });
-    // 이 팀 조직도에서 그 사람을 상위자·부서장으로 정해 둔 칸을 비운다(orgTree.js).
-    await forgetTeamManager(team.id, targetId).catch((err) => console.error('[orgTree] 상위자 정리 실패:', err?.message ?? err));
-    // 팀 목록에서 먼저 빼게 한다 — 앱은 team:left를 받으면 그 팀 방을 한꺼번에 정리하므로, 뒤따르는 방별
-    // room:removed는 방마다 "내보내졌습니다" 안내를 띄우지 않고 지나간다.
-    io.to(`user:${targetId}`).emit('team:left', { teamId: team.id, teamName: team.name });
-    await notifyRemovedFromTeamRooms(io, {
-      userId: targetId,
-      userName: targetName,
-      actorId: req.user.sub,
-      removals: roomRemovals,
-    });
+    const roomRemovals = await removeUserFromTeam(io, team, targetId, { actorId: req.user.sub, userName: targetName });
     recordAudit({
       actorId: req.user.sub,
       actorName: await nameOf(req.user.sub),
@@ -685,6 +648,50 @@ export function createTeamsRouter(io) {
   });
 
   return router;
+}
+
+/**
+ * 팀에 새로 넣은 사람들의 뒷일 — 팀 멤버 추가(위 POST /teams/:id/members)와 디렉터리 그룹 규칙(groupSync.js)이 같이 쓴다.
+ *  - '정회원 자동 초대'가 켜진 공개 토픽(보관 안 된 것)에 자동으로 참여시킨다 — 나머지 공개 토픽은 "참여 가능한 토픽"에서 스스로 찾아
+ *    들어간다. 준회원은 제외(초대받은 방에만 — 계정 등급 기준이라 사람마다 따로 판단한다, [accountRoles] userId → 등급).
+ *  - 새로 들어온 사람의 다른 기기까지 팀 목록을 갱신시킨다(팀 선택 화면에 바로 뜨도록).
+ * [actorId]는 넣은 사람(규칙이면 null).
+ */
+export async function afterTeamMembersAdded(io, team, { userIds, accountRoles, actorId = null }) {
+  const autoJoinIds = userIds.filter((id) => accountRoles.get(id) !== 'guest');
+  if (autoJoinIds.length > 0) {
+    for (const room of await listAutoInviteTopics(team.id)) {
+      const before = await listRoomMemberIds(room.id);
+      const missing = autoJoinIds.filter((id) => !before.includes(id));
+      if (missing.length === 0) continue;
+      const changedTodos = await addRoomMembers(room.id, missing);
+      await notifyMembership(io, room);
+      await notifyTodosResynced(io, room, changedTodos, actorId); // 예전 담당 행이 남아 있던 사람이 다시 들어옴.
+      const names = await Promise.all(missing.map(nameOf));
+      await postSystemMessage(io, room, `${names.join(', ')} 님이 참여했습니다.`);
+    }
+  }
+  const [memberIds, topicCreatorIds] = await Promise.all([listTeamMemberIds(team.id), topicCreatorIdsFor(team)]);
+  for (const userId of userIds) {
+    io.to(`user:${userId}`).emit('team:joined', toTeamDto(team, { isOwner: false, memberCount: memberIds.length, topicCreatorIds }));
+  }
+}
+
+/**
+ * 팀에서 빼기 — 팀 멤버 빼기(위 DELETE /teams/:id/members/:userId)와 디렉터리 그룹 규칙(groupSync.js)이 같이 쓴다. 팀 멤버십과 그 팀
+ * 모든 방의 멤버십을 한 트랜잭션에서 지우고(방 종류별 정리는 db/queries/rooms.js removeMemberFromTeamRooms — 토픽 관리자 역할도 방
+ * 멤버십과 함께 사라진다), 이 팀 조직도에서 그 사람을 상위자·부서장으로 정해 둔 칸을 비우고(orgTree.js), 그룹 규칙의 기록도 지운다.
+ * 팀 목록에서 먼저 빼게 한다 — 앱은 team:left를 받으면 그 팀 방을 한꺼번에 정리하므로, 뒤따르는 방별 room:removed는 방마다
+ * "내보내졌습니다" 안내를 띄우지 않고 지나간다. 빠진 방 목록을 돌려준다.
+ */
+export async function removeUserFromTeam(io, team, targetId, { actorId = null, userName = null } = {}) {
+  const targetName = userName ?? (await nameOf(targetId));
+  const roomRemovals = await removeTeamMember(team.id, targetId, { departedName: targetName });
+  await forgetTeamManager(team.id, targetId).catch((err) => console.error('[orgTree] 상위자 정리 실패:', err?.message ?? err));
+  await removeGroupSyncGrant(targetId, team.id).catch(() => {});
+  io.to(`user:${targetId}`).emit('team:left', { teamId: team.id, teamName: team.name });
+  await notifyRemovedFromTeamRooms(io, { userId: targetId, userName: targetName, actorId, removals: roomRemovals });
+  return roomRemovals;
 }
 
 /**

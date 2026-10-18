@@ -109,6 +109,28 @@ Firebase는 Windows 데스크톱을 공식 지원하지 않아서(Android/iOS/ma
   이름·이메일·부서·직책으로 계정이 만들어지고(관리자가 끌 수 있음), 같은 아이디의 기존 계정은 **이메일이 디렉터리와 같을 때만** 연결되어
   그다음부터 디렉터리 비밀번호로만 들어옵니다. 디렉터리에서 계정을 막거나(사용 안 함) 지우면 토큰 갱신 때(10분 안) 앱에서도 끊깁니다.
   디렉터리 계정은 이 앱에서 비밀번호를 바꾸거나 찾을 수 없고(회사 계정에서), 이메일 변경·탈퇴 같은 확인은 디렉터리 비밀번호로 합니다
+- **회사 계정 로그인(SAML 2.0)** — OIDC를 못 쓰는 IdP(ADFS·Okta·OneLogin·Keycloak·Google Workspace SAML 등)도 로그인 화면의 단추(관리자가
+  정한 IdP 이름 — 예: "Okta 로그인")로 Google·Microsoft와 같은 방식(브라우저 → 앱이 결과를 묻는다)으로 들어옵니다(`server/src/saml.js`·
+  `samlRules.js`, 서명 확인은 `@node-saml/node-saml`). 이 서버가 보낸 요청에 대한 응답만 받고(로그인마다 따로 둔 요청 id — 다른 로그인의
+  응답을 끼워 넣거나 IdP가 먼저 보낸 응답은 거절), Assertion 서명·발급자·대상(이 서버 entityID)·시각을 확인합니다. NameID는 persistent나
+  이메일 형식이어야 하고(일회용은 거절), 이메일·이름·그룹은 정한 속성 이름(없으면 흔한 표준 이름)에서 읽습니다. 계정 고르기는 Google·
+  Microsoft와 같습니다
+- **디렉터리 그룹으로 팀·등급 저절로 정하기** — 관리자 콘솔 → 로그인 보안 → **디렉터리 그룹 규칙**에 "이 그룹이면 이 팀에 넣고(일반
+  멤버) 이 등급으로"를 적어 두면, 사내 디렉터리(LDAP `memberOf` — DN 전체나 CN만으로도)·SAML 그룹 속성·Microsoft `groups` 클레임(그룹
+  개체 ID — 앱 등록에서 그룹 클레임을 켠다)으로 로그인할 때마다 맞춥니다(LDAP은 10분마다 다시 볼 때도 — 부서 이동·권한 그룹이
+  바로 반영). 여러 규칙이 맞으면 가장 높은 등급, 서버 운영자 여부는 건드리지 않습니다. **그룹에서 빠지면 빼기**를 켜면 규칙으로 넣었던
+  팀에서만 빼고(사람이 직접 넣은 팀·소유자인 팀은 그대로) 규칙이 올려 준 등급만 기본 등급으로 되돌립니다(관리자가 손으로 바꾼 등급은
+  그대로). 바꾼 것은 감사 로그에 "디렉터리 그룹 규칙"으로 남습니다(`server/src/groupSync.js`·`groupSyncRules.js`)
+- **보안 키·패스키(WebAuthn)** — 내 프로필 → **보안 키·패스키**에서 USB·NFC 보안 키(YubiKey 등), Windows Hello, 휴대폰·iCloud·Google
+  비밀번호 관리자의 패스키를 등록하면(10개까지) **비밀번호 없이 로그인**(로그인 화면의 "보안 키·패스키로 로그인" — PIN·지문 같은
+  사용자 확인을 꼭 거침, 관리자가 막을 수 있음)하거나 **2단계 인증**으로 씁니다(비밀번호 다음에 인증 앱 코드 대신 "보안 키로 확인" —
+  "2단계 인증 필수" 정책도 이것으로 채워짐). PC·안드로이드·아이폰·웹 모두 같은 방식 — 앱이 웹 앱 주소(`WEB_DOMAIN` — 정식 인증서)의
+  작은 페이지를 브라우저로 열고 결과를 묻습니다(키는 그 도메인에 묶여 가짜 사이트에서는 못 씀 — 피싱에 강함, `server/src/webauthn.js`,
+  서명 확인은 `@simplewebauthn/server`, 앱 `client/lib/services/passkey_flow.dart`)
+- **회사 계정 쪽 로그아웃 연동** — 회사 계정으로 들어온 로그인마다 세션을 두고 토큰에 싣습니다(`server/src/ssoSessions.js`). 회사 계정
+  쪽에서 로그아웃하면 — SAML IdP의 단일 로그아웃(SLO, 서명 확인)이나 Microsoft의 프런트 채널 로그아웃(앱 등록에 주소와 선택적 클레임
+  `sid`를 넣는다) — 그 세션의 토큰이 바로(30초 안) 갱신·요청·소켓에서 막힙니다. 이 앱에서 로그아웃하면 그 세션을 끝내고, 관리자가
+  "회사 계정에서도 로그아웃"을 켰으면 브라우저로 Microsoft 로그아웃·SAML 로그아웃 요청(서명)을 엽니다. Google은 연동할 로그아웃이 없습니다
 - **로그인한 기기** — 내 프로필의 **로그인한 기기**에서 내 계정으로 로그인한 기기(Windows PC·Android 앱·웹 브라우저)를 이 기기 맨
   위·최근에 쓴 순으로 보고(지금 사용 중이면 초록 점), 기기마다 **로그아웃**시키거나 **다른 모든 기기에서 로그아웃**합니다(공용 PC에서
   로그아웃을 잊었거나 휴대폰을 잃어버렸을 때). 앱이 로그인할 때 기기를 등록하면 서버가 **그 기기에 묶인 토큰**(`did`)을 새로 내주고
@@ -951,11 +973,15 @@ SPF/DKIM을 설정하세요(도메인 쪽 설정이라 이 서버는 바꿀 것�
 
 | 항목 | 설명 |
 |---|---|
-| 2단계 인증 | 각자 선택(기본) / 관리자는 필수(계정 등급 관리자·서버 운영자) / 모두 필수. 꼭 써야 하는 사람은 다음 로그인 때 그 자리에서 켭니다 |
+| 2단계 인증 | 각자 선택(기본) / 관리자는 필수(계정 등급 관리자·서버 운영자) / 모두 필수. 꼭 써야 하는 사람은 다음 로그인 때 그 자리에서 켭니다(인증 앱 또는 보안 키·패스키 — 둘 중 하나면 된다) |
 | 회사 계정 — Google | Google Cloud 콘솔 → API 및 서비스 → 사용자 인증 정보 → **OAuth 클라이언트 ID(웹 애플리케이션)** 를 만들고, 화면에 보이는 **돌아올 주소**(`https://웹앱주소/auth/sso/callback`)를 승인된 리디렉션 URI에 넣은 뒤 클라이언트 ID·보안 비밀과 **받아들일 회사 도메인**을 넣습니다(도메인이 없으면 켤 수 없음) |
 | 회사 계정 — Microsoft | Microsoft Entra 관리 센터 → 앱 등록 → 새 등록(리디렉션 URI: 웹, 돌아올 주소) → **인증서 및 암호**에서 클라이언트 암호를 만들고, 개요의 **디렉터리(테넌트) ID**·애플리케이션 ID와 암호를 넣습니다(그 회사 사람만 들어옴) |
 | 처음 들어온 회사 계정 | 계정을 저절로 만들지(기본 끔)와 그 등급(정회원/준회원), 회사 계정 전용 계정의 다시 확인 주기(기본 7일) |
 | 사내 디렉터리(LDAP) | 서버 주소(`ldaps://dc01.company.local:636` — `ldap://`는 비밀번호가 암호화되지 않으니 되도록 ldaps), 서비스 계정 DN·비밀번호(비우면 익명 검색), 검색 위치(Base DN), 사용자 검색 조건(기본 `(&(objectClass=user)(sAMAccountName={username}))`), 이름·이메일·부서·직책 속성, ldaps 인증서 확인(사내 인증 기관이라 안 되면 끔), 처음 들어온 사람 자동 생성(기본 켬)·등급. 값을 저장 → **연결 시험**(아이디를 넣으면 그 사람을 찾고, 비밀번호까지 넣으면 로그인도 해 봄 — 남기지 않음) 통과 → 켜기 순서이고, 연결 값을 바꾸면 다시 꺼집니다 |
+| 회사 계정 — SAML 2.0 | IdP에 이 서버를 등록할 때 화면의 값 — **entityID**(`https://웹앱주소/auth/sso/saml/metadata`, 메타데이터 주소와 같음), **ACS**(`…/auth/sso/saml/acs`, HTTP-POST), **SLO**(`…/auth/sso/saml/slo`)를 넣거나 메타데이터 주소를 그대로 넣습니다(이 서버의 서명 인증서 포함 — 처음 켤 때 서버가 만든다). 이 서버에는 IdP 로그인 주소(HTTP-Redirect)·entityID·서명 인증서(PEM — 바꾸는 동안 여럿 가능)·로그아웃 주소를 넣거나 **IdP 메타데이터로 채우기**에 XML을 붙여 넣습니다. NameID는 persistent·이메일 형식, Assertion에 서명. 단추에 보일 IdP 이름(예: Okta)·이메일·이름·그룹 속성 이름도 정합니다 |
+| 디렉터리 그룹 규칙 | 켜기·그룹에서 빠지면 빼기와 규칙 목록(출처 — 어디서든·LDAP·SAML·Microsoft, 그룹 이름·DN·개체 ID, 넣을 팀, 정할 등급). 200개까지 |
+| 보안 키·패스키 | 비밀번호 없이 로그인 허용(기본 켬 — 꺼도 2단계 인증으로는 씀). 웹 앱 주소가 있어야 합니다 |
+| 로그아웃 연동 | 이 앱에서 로그아웃하면 회사 계정에서도 로그아웃(기본 끔). Microsoft는 앱 등록의 **프런트 채널 로그아웃 URL**에 화면의 주소(`…/auth/sso/frontchannel-logout`)를 넣고 **토큰 구성 → 선택적 클레임**에 ID 토큰의 `sid`를 더하면 회사 계정 로그아웃이 이 앱에도 옵니다 |
 
 ### 슬래시 명령
 
@@ -1355,8 +1381,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 - **아이폰 앱 마무리** — 앱 프로젝트(`client/ios`)와 맥 없는 클라우드 빌드는 만들어 두었습니다([아이폰 앱(iOS)](#아이폰-앱ios)).
   **Apple 개발자 등록 뒤에** 남은 일: 서명(TestFlight·App Store 배포), **앱이 꺼져 있을 때의 푸시**(APNs — 그 전에는 앱이 앞에 있거나 막
   뒤로 갔을 때만 알림이 옴), 화면 공유(방송 확장). macOS·Linux 데스크톱 앱은 없습니다.
-- **로그인 보안 후속** — 2단계 인증·회사 계정(SSO)·사내 디렉터리(LDAP)는 들어갔습니다([주요 기능](#주요-기능)의 "계정"). 남은 것:
-  SAML(OIDC를 못 쓰는 IdP), 디렉터리 그룹으로 팀·등급 자동 지정, 하드웨어 보안 키(패스키·WebAuthn), 회사 계정 쪽 로그아웃 연동.
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
@@ -1519,7 +1543,10 @@ messenger_project/
 │  │  ├─ index.js                 앱 진입점 — 라우터 마운트, HTTPS 서버, 소켓/백그라운드 잡 시작
 │  │  ├─ auth.js                  회원가입/로그인/토큰 재발급/아이디·비밀번호 찾기
 │  │  ├─ loginSecurity.js         2단계 인증(OTP)·로그인 마무리·사내 디렉터리 계정 연결 — 규칙은 totp.js·loginSecurityRules.js
-│  │  ├─ sso.js                   회사 계정 로그인(Google·Microsoft OIDC) — 규칙은 ssoRules.js
+│  │  ├─ sso.js                   회사 계정 로그인(Google·Microsoft OIDC·SAML) — 규칙은 ssoRules.js·samlRules.js, SAML 확인은 saml.js
+│  │  ├─ ssoSessions.js           회사 계정 로그인 세션 — 로그아웃 연동(SAML SLO·Microsoft 프런트 채널·이 앱 로그아웃)
+│  │  ├─ webauthn.js              보안 키·패스키(WebAuthn) — 등록·비밀번호 없이 로그인·2단계 인증(규칙은 webauthnRules.js)
+│  │  ├─ groupSync.js             디렉터리 그룹 → 팀·계정 등급(규칙은 groupSyncRules.js)
 │  │  ├─ ldapAuth.js              사내 디렉터리(LDAP/AD) 확인 — 규칙은 ldapRules.js
 │  │  ├─ integrations.js          외부 연동 — 들어오는(/hooks — 그림·파일 포함)·나가는 웹훅, 슬래시 명령, 연동 앱, 단추 누르기, API 토큰 관리
 │  │  │                           — 규칙은 integrationRules.js, 블록은 botBlocks.js, 봇 메시지 올리기·바꾸기는 botMessages.js
@@ -2130,6 +2157,16 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | POST | `/auth/sso/poll` | 결과 묻기 `{ state, verifier }` → `{ status: 'pending' \| 'done'(+토큰) \| 'linked' \| 'link_required'(email 일부, canEmail) \| 'error' }` — 토큰은 한 번만, 진행 중인 로그인은 서버 메모리에 10분 |
 | POST | `/auth/sso/link/send` · `/auth/sso/link/verify` | 같은 이메일의 계정에 잇기 — 그 이메일로 확인 코드(purpose `link`) / `{ code }`가 맞으면 연결하고 토큰 |
 | GET / DELETE | `/auth/identities` · `/auth/identities/:provider` | 내 연결된 로그인(회사 계정·디렉터리)과 연결할 수 있는 회사 계정 / 회사 계정 연결 끊기(회사 계정 전용 계정의 마지막 연결은 400) |
+| POST | `/auth/sso/saml/acs` | SAML IdP가 돌려보내는 곳(브라우저가 서명한 응답을 POST, `RelayState`=로그인 state) — 그 로그인이 보낸 요청에 대한 응답만 받는다 |
+| GET | `/auth/sso/saml/metadata` | 이 서버(SP)의 SAML 메타데이터(entityID·ACS·SLO·서명 인증서) |
+| GET / POST | `/auth/sso/saml/slo` | SAML 단일 로그아웃 — IdP가 보낸 LogoutRequest(서명 확인)로 그 세션을 끝내고 LogoutResponse로 돌려보낸다 |
+| GET | `/auth/sso/frontchannel-logout` | Microsoft 프런트 채널 로그아웃(`?iss&sid`) — 그 sid의 로그인 세션을 끝낸다 |
+| POST | `/auth/logout` | 로그아웃(앱이 토큰을 지우기 전에) — 회사 계정 로그인 세션을 끝내고 `{ idpLogoutUrl }`(설정이 켜졌을 때 브라우저로 열 회사 계정 로그아웃 주소) |
+| POST | `/auth/passkeys/register/start` · `/auth/passkeys/login/start` · `/auth/passkeys/second/start` | 보안 키 등록(토큰 또는 설정 확인 표) / 비밀번호 없이 로그인 / 로그인 둘째 단계(확인 표) 시작 `{ challenge, … }` → `{ state, url }`(브라우저로 열 웹 앱 주소의 페이지) |
+| POST | `/auth/passkeys/poll` | 결과 묻기 `{ state, verifier }` → `{ status: pending \| registered(passkey) \| done(+토큰) \| error }` — 진행 중인 것은 5분 |
+| GET / PATCH / DELETE | `/auth/passkeys` · `/auth/passkeys/:id` | 내 보안 키 목록(`available` — 웹 앱 주소가 있는지) / 이름 바꾸기 / 지우기(2단계 인증 필수인데 마지막 방법이면 403) |
+| GET / POST / DELETE | `/api/admin/group-mappings` · `/:id` | 서버 운영자 — 디렉터리 그룹 규칙 목록 / 더하기 `{ source, group, teamId?, accountRole? }` / 지우기 |
+| POST | `/api/admin/login-security/saml-metadata` | 서버 운영자 — IdP 메타데이터 XML `{ xml }` → 칸에 채울 값(저장하지 않음) |
 
 **사용자/프로필** (`/api`, 인증 필요)
 
@@ -2614,15 +2651,19 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 
 | 테이블 | 요약 |
 |---|---|
-| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `department_id`·`manager_id`(계정 단위 조직도의 부서와 따로 정한 상위자 — [부서 트리와 상위자](#부서-트리와-상위자조직도)), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `signature_path`(전자결재 서명·도장 그림), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb) |
+| `users` | 계정. `role`(계정 등급 `guest`\|`member`\|`admin`), `department`/`position`(계정 단위 부서·직책), `department_id`·`manager_id`(계정 단위 조직도의 부서와 따로 정한 상위자 — [부서 트리와 상위자](#부서-트리와-상위자조직도)), `is_server_admin`(서버 운영자), `suspended_at`(정지), `email_enc`(암호화)+`email_lookup`(조회용 해시)로 이메일 분리 저장, `security_question`/`security_answer_hash`(비밀번호 찾기용, bcrypt), `token_version`(전체 로그아웃/탈퇴 시 증가), `deleted_at`(탈퇴), `avatar_*`(아바타 종류/이모지/색/사진 URL), `status_emoji`/`status_text`/`status_until`(상태 메시지 — 지울 시각이 지나면 내려줄 때 거름), `dnd_until`/`dnd_schedule`(방해 금지 — 이 시각까지 / 매일 일정 jsonb), `email_verified_at`(메일 코드로 이메일을 확인한 시각 — 메일이 켜진 서버에서 비밀번호·아이디를 메일로 찾는 기준), `last_seen_at`(앱이 마지막으로 붙어 있던 시각)·`mention_digest_sent_at`(멘션 요약 메일을 마지막으로 보낸 시각), `signature_path`(전자결재 서명·도장 그림), `hire_date`(입사일 — 그룹웨어가 회사 전체 범위일 때 법정 연차 기준, 팀 범위면 `team_members.hire_date`), `auth_source`(로그인 방법 `local`|`ldap`|`sso` — 디렉터리·회사 계정 전용 계정은 이 앱의 비밀번호로 못 들어옴), `totp_secret_enc`·`totp_pending_enc`(2단계 인증 비밀 키 — 암호화, 켜기 전에는 pending), `totp_enabled_at`, `totp_last_step`(마지막으로 받은 30초 칸 — 같은 코드 재사용 막기), `totp_recovery_hashes`(복구 코드의 열쇠 해시 jsonb), `group_sync_role`(디렉터리 그룹 규칙이 마지막으로 정해 준 등급 — 그대로일 때만 되돌린다) |
 | `integrations` | 외부 연동 — `kind`(`webhook` 들어오는 웹훅 \| `command` 슬래시 명령 \| `outgoing` 나가는 웹훅 \| `app` 연동 앱 — 봇 토큰은 `token_hash`, OAuth는 `client_id`·`client_secret_hash`·`redirect_uris`, 받을 일 `events`·`url`, 단추 응답 `interaction_url`, 사내 주소 허용 `allow_private`, 저절로 끄기 `enabled`·`failure_count`), `team_id`(팀이 지워지면 같이), `room_id`(웹훅의 방 — 방이 지워지면 같이), `name`·`emoji`(봇 이름·아이콘), `token_hash`(웹훅 주소 토큰의 열쇠 해시 — unique)·`token_prefix`(화면용 앞 8자), `command`·`description`·`url`·`secret_enc`(명령 이름 — 팀 안에서 unique, 보낼 주소, 서명 비밀 암호화), `created_by`·`created_by_name`, `last_used_at`·`use_count` |
 | `api_tokens` | 개인 API 토큰 — `user_id`, `name`, `token_hash`(열쇠 해시 — unique)·`token_prefix`, `scopes`(jsonb `["read"]` \| `["read","write"]`), `expires_at`(null이면 만료 없음), `revoked_at`(지운 시각 — 지우면 바로 못 씀), `last_used_at`(1분에 한 번만 적음), `kind`(`personal` 개인 토큰 \| `oauth` OAuth 토큰 tto_ \| `refresh` 다시 받기 토큰 ttr_)·`grant_id`(OAuth 승인 — 지우면 같이) |
 | `integration_rooms` | 연동 앱을 추가한 대화방 — (`integration_id`, `room_id`) PK, `added_by`·`added_by_name`. 앱·방이 지워지면 같이 |
 | `webhook_deliveries` | 나가는 웹훅·앱으로 보낼 일 — `event`, `payload`(보낼 봉투), `status`(`pending`\|`delivered`\|`failed`), `attempts`, `next_attempt_at`, `last_status`·`last_error`, `delivered_at`. 7일 뒤 지운다 |
 | `oauth_grants` | OAuth 승인 — (`integration_id`, `user_id`) unique, `scopes`, `last_used_at`. 지우면 그 토큰(`api_tokens.grant_id`)도 같이 |
 | `oauth_requests` | 승인을 기다리는 OAuth 요청 — `user_code`(사람이 넣는 코드, unique), `redirect_uri`, `scopes`, `state`, `code_challenge`, `status`(`pending`→`approved`→`issued`→`used` \| `denied`), `user_id`, `code_hash`(한 번 쓰는 승인 코드), `expires_at`(10분) |
-| `user_identities` | 연결된 외부 로그인 — `provider`(`google`|`microsoft`|`ldap`)·`subject`(그쪽이 바꾸지 않는 값 — Google sub, Microsoft 테넌트+oid, LDAP objectGUID; 같은 외부 계정은 한 사람에게만 — unique), `email_enc`(연결할 때의 그쪽 이메일, 암호화), `last_login_at` |
-| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각) |
+| `user_identities` | 연결된 외부 로그인 — `provider`(`google`|`microsoft`|`saml`|`ldap` — SAML의 subject는 발급자|NameID)·`subject`(그쪽이 바꾸지 않는 값 — Google sub, Microsoft 테넌트+oid, LDAP objectGUID; 같은 외부 계정은 한 사람에게만 — unique), `email_enc`(연결할 때의 그쪽 이메일, 암호화), `last_login_at` |
+| `webauthn_credentials` | 보안 키·패스키 — `user_id`, `credential_id`(base64url, unique)·`public_key`, `counter`(키가 센 서명 횟수), `transports`, `device_type`·`backed_up`(동기화되는 패스키인지), `aaguid`, `name`, `last_used_at` |
+| `sso_sessions` | 회사 계정 로그인 세션(토큰의 `ssid`) — `provider`, `idp_session_id`(SAML SessionIndex·OIDC sid), `name_id`·`name_id_format`, `ended_at`·`end_reason`(`app_logout`·`idp_logout`) |
+| `directory_group_mappings` | 디렉터리 그룹 규칙 — `source`(`any`|`ldap`|`saml`|`microsoft`), `group`, `team_id`(팀이 지워지면 같이), `account_role` |
+| `group_sync_grants` | 그룹 규칙으로 넣은 팀 멤버십(`user_id`, `team_id`) — 그룹에서 빠지면 이것만 뺀다 |
+| `server_settings` | 서버 전체 설정(항상 1행). `team_creation`(팀을 만들 수 있는 최소 등급), `team_invite_link_creation`(팀 초대 링크를 만들 수 있는 최소 등급), `org_scope`(부서·직책을 팀/계정 어디에 둘지), `project_creation`(프로젝트를 만들 수 있는 최소 등급), `smtp_*`(메일 계정 — 비밀번호는 암호화, `smtp_tested_at`은 지금 값으로 시험 메일이 성공한 시각), `mention_digest_*`(멘션 요약 메일 켜짐·기준 날수·미리보기), `otp_policy`(2단계 인증 정책), `sso_google_*`·`sso_microsoft_*`(회사 계정 로그인 — 클라이언트 보안 비밀은 암호화, Google 허용 도메인, Microsoft 테넌트), `sso_auto_create`·`sso_default_role`·`sso_session_days`, `ldap_*`(사내 디렉터리 — 서비스 계정 비밀번호는 암호화, 검색 조건·속성, `ldap_tested_at`은 지금 값으로 연결 시험을 통과한 시각), `saml_*`(SAML IdP 주소·발급자·서명 인증서·속성 이름, 이 서버의 서명 키(암호화)·인증서), `group_sync_enabled`·`group_sync_remove`(디렉터리 그룹 규칙), `passkey_login_enabled`(보안 키로 비밀번호 없이 로그인), `sso_idp_logout`(회사 계정에서도 로그아웃) |
 | `approval_documents` | 결재 문서(`doc_number` 문서 번호 — 범위마다 unique, 휴가·지출·근태 수정·양식 — 양식이면 `payload`가 `{ templateId, templateName, fields, values, …}`, 출장은 `startDate`·`endDate`, 연장근무는 `workDate`·`minutes`를 따로 둠). `scope_key`(팀 id 또는 `server`)·`team_id`, `kind`, `author_id`·`author_name`, `title`·`body`, `payload`(종류별 내용 jsonb — 휴가 양은 반일 단위 `halfDays`), `attachments`, `status`(`pending`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `current_step`, `cancel_reason`·`canceled_by_name` |
 | `approval_steps` | 결재선 한 칸 — `step_order` 순서, `stage`(같은 단계 = 합의로 동시에 차례, null이면 순서가 곧 단계 — 이 기능 전 문서), `role`(`approve`\|`agree`\|`final`), `approver_id`·`approver_name`, `status`(`waiting`\|`pending`\|`approved`\|`rejected`\|`skipped` — 전결로 생략), `comment`, `decided_at`, `acted_by_id`·`acted_by_name`(대결로 대신 결정한 사람), `signature_path`(승인할 때의 서명 그림) |
 | `approval_delegations` | 대결(부재 중 대신 결재) — `scope_key`, `user_id`(자리를 비우는 사람)·`delegate_id`(대신할 사람), `start_date`·`end_date`('YYYY-MM-DD', 둘 다 포함), `reason`, `created_by_id` |

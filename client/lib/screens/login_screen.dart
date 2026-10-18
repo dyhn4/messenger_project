@@ -10,6 +10,7 @@ import '../services/session.dart';
 import '../widgets/email_address_field.dart';
 import '../widgets/email_code_input.dart';
 import '../widgets/otp_dialogs.dart';
+import '../widgets/passkey_dialogs.dart';
 import '../widgets/sso_dialogs.dart';
 import '../widgets/update_dialog.dart';
 import 'find_id_screen.dart';
@@ -315,10 +316,34 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   /// 2단계 인증 — 확인 표로 코드를 넣거나(켠 사람) 켜기(정책상 꼭 써야 하는데 아직 안 켠 사람)를 마쳐 토큰을 받는다. 취소하면 null.
+  /// 서버가 준 방법([OtpChallenge.methods])에 보안 키('webauthn')가 있으면 코드 창에 "보안 키로 확인"도 보이고, 보안 키만 있는
+  /// 사람(인증 앱은 안 켬)은 코드 창 없이 바로 보안 키 확인으로 간다. 꼭 써야 하는데 아무것도 없는 사람은 인증 앱 켜기와 보안 키
+  /// 등록 중에서 고른다. 어느 길이든 끝에 받은 토큰은 똑같이 [Session.signInWith]로 넘긴다.
   Future<AuthResult?> _secondFactor(OtpChallenge challenge) async {
     final api = widget.session.api!;
     if (!challenge.setupRequired) {
-      return showOtpLoginDialog(context, api: api, ticket: challenge.ticket);
+      if (!challenge.canUseTotp && challenge.canUsePasskey) {
+        return showPasskeySecondFactorDialog(
+          context,
+          api: api,
+          ticket: challenge.ticket,
+        );
+      }
+      return showOtpLoginDialog(
+        context,
+        api: api,
+        ticket: challenge.ticket,
+        canUsePasskey: challenge.canUsePasskey,
+      );
+    }
+    final choice = await showOtpSetupChoiceDialog(context);
+    if (choice == null || !mounted) return null;
+    if (choice == OtpSetupChoice.passkey) {
+      return showPasskeySetupDialog(
+        context,
+        api: api,
+        ticket: challenge.ticket,
+      );
     }
     final done = await showOtpSetupDialog(
       context,
@@ -328,15 +353,32 @@ class _LoginScreenState extends State<LoginScreen> {
     return done?.auth;
   }
 
-  /// 회사 계정(Google·Microsoft)으로 로그인 — 브라우저에서 로그인하고 돌아오면 이어서 들어간다(sso_dialogs.dart).
+  /// 회사 계정(Google·Microsoft·SAML)으로 로그인 — 브라우저에서 로그인하고 돌아오면 이어서 들어간다(sso_dialogs.dart).
   Future<void> _loginWithSso(String provider) async {
-    final keepSignedIn = _keepSignedIn;
     final auth = await showSsoLoginDialog(
       context,
       api: widget.session.api!,
       provider: provider,
+      samlLabel: widget.session.loginMethods.samlLabel,
     );
+    await _finishExternalLogin(auth);
+  }
+
+  /// 보안 키·패스키로 바로(비밀번호 없이) 로그인 — 브라우저에서 키를 쓰고 돌아오면 이어서 들어간다(passkey_dialogs.dart). 키가
+  /// 사람을 확인하므로 2단계 인증을 따로 묻지 않는다(서버 webauthn.js).
+  Future<void> _loginWithPasskey() async {
+    final auth = await showPasskeyLoginDialog(
+      context,
+      api: widget.session.api!,
+    );
+    await _finishExternalLogin(auth);
+  }
+
+  /// 회사 계정·보안 키로 받은 토큰으로 들어간다 — 취소했으면([auth]가 null) 아무것도 하지 않는다. "로그인 상태 유지"는 지금
+  /// 체크박스 값(창이 떠 있는 동안에는 바꿀 수 없다)을 들어가기 전에 뽑아 둔다 — 들어가면 이 화면이 사라진다([_submit]과 같은 까닭).
+  Future<void> _finishExternalLogin(AuthResult? auth) async {
     if (auth == null || !mounted) return;
+    final keepSignedIn = _keepSignedIn;
     setState(() => _loading = true);
     final ok = await widget.session.signInWith(
       auth,
@@ -352,10 +394,25 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// 로그인 단추 아래 — 회사 계정 로그인 단추들(서버가 켠 것만).
+  /// 회사 계정 단추 글 — SAML은 관리자가 정한 IdP 이름으로("Okta 로그인" — 안 정했으면 "회사 계정(SAML) 로그인". 이름이 받침으로
+  /// 끝나도 어색하지 않게 조사를 붙이지 않는다),
+  /// Google·Microsoft는 "… 회사 계정으로 로그인".
+  String _ssoButtonLabel(String provider) => provider == 'saml'
+      ? tr('{label} 로그인', {
+          'label': ssoProviderLabel(
+            'saml',
+            samlLabel: widget.session.loginMethods.samlLabel,
+          ),
+        })
+      : tr('{p0} 회사 계정으로 로그인', {'p0': ssoProviderLabel(provider)});
+
+  /// 로그인 단추 아래 — 회사 계정 로그인 단추들과 보안 키·패스키 로그인 단추(서버가 켠 것만).
   List<Widget> _ssoButtons() {
-    final providers = widget.session.loginMethods.sso;
-    if (_isRegister || providers.isEmpty) return const [];
+    final methods = widget.session.loginMethods;
+    final providers = methods.sso;
+    if (_isRegister || (providers.isEmpty && !methods.passkey)) {
+      return const [];
+    }
     return [
       const SizedBox(height: 12),
       Row(
@@ -385,7 +442,20 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             onPressed: _loading ? null : () => _loginWithSso(p),
             icon: const Icon(Icons.business_center_outlined),
-            label: Text(tr('{p0} 회사 계정으로 로그인', {'p0': ssoProviderLabel(p)})),
+            label: Text(_ssoButtonLabel(p)),
+          ),
+        ),
+      if (methods.passkey)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: OutlinedButton.icon(
+            key: const ValueKey('login-passkey'),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            onPressed: _loading ? null : _loginWithPasskey,
+            icon: const Icon(Icons.key),
+            label: Text(tr('보안 키·패스키로 로그인')),
           ),
         ),
     ];

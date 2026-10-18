@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import { samlConfigProblem } from './samlRules.js';
 
 /**
- * 회사 계정 로그인(SSO — Google·Microsoft, OAuth 2.0 / OpenID Connect)의 **순수 규칙** — 주소 만들기와 받은 ID 토큰 확인.
+ * 회사 계정 로그인(SSO — Google·Microsoft, OAuth 2.0 / OpenID Connect)의 **순수 규칙** — 주소 만들기와 받은 ID 토큰 확인. SAML 2.0
+ * IdP('saml')도 같은 목록에 들어가지만 그 규칙은 samlRules.js(요청·응답 확인은 saml.js). 회사 계정 쪽 로그아웃 주소도 여기서 만든다.
  * 네트워크·DB는 sso.js가 한다. `node --test`로 시험한다(test/loginSecurity.test.js).
  *
  * 흐름(sso.js): 앱이 서버에 시작을 청하면 서버가 그쪽 로그인 주소를 만들어 주고(앱은 브라우저로 연다), 로그인이 끝나면 그쪽이
@@ -10,8 +12,10 @@ import crypto from 'node:crypto';
  * 받았으므로 서명 대신 TLS 서버 확인으로 출처를 믿는다(OpenID Connect Core 3.1.3.7 6번).
  */
 
-export const SSO_PROVIDERS = Object.freeze(['google', 'microsoft']);
-export const SSO_PROVIDER_LABEL = Object.freeze({ google: 'Google', microsoft: 'Microsoft' });
+export const SSO_PROVIDERS = Object.freeze(['google', 'microsoft', 'saml']);
+export const SSO_PROVIDER_LABEL = Object.freeze({ google: 'Google', microsoft: 'Microsoft', saml: 'SAML' });
+/** OAuth/OpenID Connect로 들어오는 제공자(코드 → ID 토큰). 'saml'은 따로(saml.js). */
+export const OIDC_PROVIDERS = Object.freeze(['google', 'microsoft']);
 
 /** Microsoft 테넌트 ID — 디렉터리(테넌트) ID GUID만 받는다('common' 등 아무 회사나 들어오는 값은 안 됨). */
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,13 +66,16 @@ export function ssoConfigProblem(provider, settings) {
     if (!settings.ssoMicrosoftClientSecretEnc) return '클라이언트 암호를 넣으세요.';
     return null;
   }
+  if (provider === 'saml') return samlConfigProblem(settings);
   return '알 수 없는 로그인 방법입니다.';
 }
 
 /** 지금 쓸 수 있는(켜져 있고 값이 다 있는) 제공자들. */
 export function enabledSsoProviders(settings) {
   return SSO_PROVIDERS.filter(
-    (p) => (p === 'google' ? settings.ssoGoogleEnabled : settings.ssoMicrosoftEnabled) && !ssoConfigProblem(p, settings),
+    (p) =>
+      (p === 'google' ? settings.ssoGoogleEnabled : p === 'microsoft' ? settings.ssoMicrosoftEnabled : settings.samlEnabled) &&
+      !ssoConfigProblem(p, settings),
   );
 }
 
@@ -170,8 +177,34 @@ export function validateIdTokenClaims({ provider, settings, claims, nonce, nowMs
       subject: `${tenant}:${claims.oid.toLowerCase()}`,
       email: mail ? mail.toLowerCase() : null,
       name: typeof claims.name === 'string' ? claims.name : null,
+      // 그룹(앱 등록의 "토큰 구성 → 그룹 클레임"을 켰을 때 — 그룹 개체 ID들)과 로그인 세션 id(선택적 클레임 sid — 프런트 채널 로그아웃).
+      groups: Array.isArray(claims.groups) ? claims.groups.filter((g) => typeof g === 'string').slice(0, 500) : [],
+      sessionId: typeof claims.sid === 'string' ? claims.sid : null,
     },
   };
+}
+
+/**
+ * Microsoft 로그아웃 주소 — 이 앱에서 로그아웃할 때 회사 계정(Entra) 쪽에서도 로그아웃하게 브라우저로 연다(설정 "회사 계정에서도
+ * 로그아웃"). 끝나면 [postLogoutRedirectUri](이 서버의 "로그아웃했습니다" 쪽지)로 돌아온다.
+ */
+export function microsoftLogoutUrl(settings, postLogoutRedirectUri) {
+  const tenant = String(settings.ssoMicrosoftTenantId ?? '').trim().toLowerCase();
+  if (!isTenantId(tenant)) return null;
+  const q = postLogoutRedirectUri ? `?post_logout_redirect_uri=${encodeURIComponent(postLogoutRedirectUri)}` : '';
+  return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/logout${q}`;
+}
+
+/**
+ * Microsoft 프런트 채널 로그아웃(Entra가 그쪽에서 로그아웃할 때 숨은 창으로 여는 주소)의 값 → 끝낼 세션 id | null. 발급자([iss])가 이
+ * 서버의 테넌트여야 하고 sid가 있어야 한다(sid는 앱 등록의 선택적 클레임 — 없으면 세션을 고를 수 없다).
+ */
+export function frontChannelLogoutSession(query, settings) {
+  const sid = typeof query?.sid === 'string' ? query.sid.trim() : '';
+  if (!sid || sid.length > 200) return null;
+  const iss = typeof query?.iss === 'string' ? query.iss.trim() : '';
+  if (iss && !providerEndpoints('microsoft', settings).issuers.includes(iss)) return null;
+  return sid;
 }
 
 /**

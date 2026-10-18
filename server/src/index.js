@@ -30,6 +30,7 @@ import { getServerSettings } from './db/queries/serverSettings.js';
 import { createSsoRouter, ssoRedirectUri } from './sso.js';
 import { createIntegrationsRouter, webhookReceiveRoute } from './integrations.js';
 import { createOAuthPublicRouter, createOAuthRouter } from './oauth.js';
+import { createWebauthnRouter } from './webauthn.js';
 import { startWebhookDeliveryJob } from './webhookDelivery.js';
 import { backfillOrgTrees, createOrgTreeRouter } from './orgTree.js';
 import { createPublicApiRouter } from './publicApi.js';
@@ -173,7 +174,9 @@ const livekitMediaPorts = await startLivekitNatSync({ externalAddress: EXTERNAL_
 app.use('/auth', createAuthRouter(io));
 // 2단계 인증(OTP)과 회사 계정 로그인(SSO) — 로그인 전에도 부르는 경로라 /auth 아래(각 경로가 필요하면 토큰을 직접 본다).
 app.use('/auth', createLoginSecurityRouter());
-app.use('/auth', createSsoRouter());
+app.use('/auth', createSsoRouter({ io }));
+// 하드웨어 보안 키·패스키(WebAuthn — 웹 앱 주소의 페이지에서 등록·로그인·둘째 단계, webauthn.js).
+app.use('/auth', createWebauthnRouter());
 // 공개 API(개인 API 토큰·OAuth 토큰·봇 토큰 — publicApi.js) — 앱 토큰(requireAuth)이 아니라 API 토큰으로 열어서 아래 /api 묶음보다 먼저 건다.
 app.use('/api/v1', createPublicApiRouter(io));
 // OAuth 앱 — 승인 페이지(/oauth/authorize)·결과 묻기·토큰 받기는 로그인 없이(oauth.js — 사람은 앱에서 코드를 넣어 승인한다).

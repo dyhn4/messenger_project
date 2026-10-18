@@ -1,8 +1,9 @@
 import { isLdapUrl, LDAP_CONNECTION_FIELDS, ldapConfigProblem, userFilterProblem } from './ldapRules.js';
+import { parseSamlInput, samlButtonLabel, samlSpEndpoints } from './samlRules.js';
 import { enabledSsoProviders, isDomainName, isTenantId, parseDomainList, ssoConfigProblem } from './ssoRules.js';
 
 /**
- * 로그인 보안(2단계 인증 정책·회사 계정 SSO·사내 디렉터리 LDAP) 설정의 **순수 규칙** — 관리자 콘솔 "로그인 보안" 입력 검사와
+ * 로그인 보안(2단계 인증 정책·회사 계정 SSO(OIDC·SAML)·사내 디렉터리 LDAP·그룹 규칙·보안 키·로그아웃 연동) 설정의 **순수 규칙** — 관리자 콘솔 "로그인 보안" 입력 검사와
  * 화면에 보낼 모양(비밀값은 정했는지만). `node --test`로 시험한다(test/loginSecurity.test.js).
  */
 
@@ -23,7 +24,7 @@ export const usesLocalPassword = (user) => (user?.authSource ?? 'local') === 'lo
 /** 비밀번호 바꾸기·찾기·보안 질문을 막을 때의 안내(로그인 방법별). null이면 막지 않는다. */
 export function localPasswordBlockedText(user) {
   if (user?.authSource === 'ldap') return '회사(Windows 도메인) 계정으로 로그인하는 계정입니다. 비밀번호는 회사 계정에서 바꾸세요.';
-  if (user?.authSource === 'sso') return '회사 계정(Google·Microsoft)으로 로그인하는 계정이라 이 앱의 비밀번호가 없습니다.';
+  if (user?.authSource === 'sso') return '회사 계정(Google·Microsoft·SAML)으로 로그인하는 계정이라 이 앱의 비밀번호가 없습니다.';
   return null;
 }
 
@@ -59,6 +60,10 @@ export function parseLoginSecurityInput(body) {
     ['ldapEnabled', 'ldapEnabled'],
     ['ldapTlsVerify', 'ldapTlsVerify'],
     ['ldapAutoCreate', 'ldapAutoCreate'],
+    ['groupSyncEnabled', 'groupSyncEnabled'],
+    ['groupSyncRemove', 'groupSyncRemove'],
+    ['passkeyLoginEnabled', 'passkeyLoginEnabled'],
+    ['ssoIdpLogout', 'ssoIdpLogout'],
   ]) {
     if (key in b) {
       if (typeof b[key] !== 'boolean') return fail(`${key}는 참/거짓이어야 합니다.`);
@@ -108,6 +113,10 @@ export function parseLoginSecurityInput(body) {
     if (r.error) return fail('Microsoft 클라이언트 값이 올바르지 않습니다.');
     if (!r.skip) fields[key] = r.value;
   }
+  // SAML
+  const saml = parseSamlInput(b);
+  if (saml.error) return fail(saml.error);
+  Object.assign(fields, saml.fields);
   // LDAP
   if ('ldapUrl' in b) {
     const r = textField(b, 'ldapUrl');
@@ -141,10 +150,37 @@ export function ldapConnectionChanged(current, fields) {
   return LDAP_CONNECTION_FIELDS.some((k) => k in fields && (fields[k] ?? null) !== (current[k] ?? null));
 }
 
-/** 관리자 콘솔에 보낼 모양 — 비밀값은 정했는지만, 켤 수 없는 이유와 돌아올 주소를 같이. */
-export function loginSecurityView(settings, { redirectUri = null } = {}) {
+/**
+ * 관리자 콘솔에 보낼 모양 — 비밀값은 정했는지만, 켤 수 없는 이유와 돌아올 주소를 같이. [webBase]는 웹 앱 주소(SAML SP 주소·로그아웃
+ * 주소를 보여 준다).
+ */
+export function loginSecurityView(settings, { redirectUri = null, webBase = null } = {}) {
+  const base = webBase ? String(webBase).replace(/\/+$/, '') : null;
   return {
     otpPolicy: settings.otpPolicy ?? 'optional',
+    passkeyLoginEnabled: settings.passkeyLoginEnabled !== false,
+    passkeysAvailable: !!base,
+    groupSync: { enabled: !!settings.groupSyncEnabled, removeUnmatched: !!settings.groupSyncRemove },
+    logout: {
+      idpLogout: !!settings.ssoIdpLogout,
+      // Microsoft 앱 등록의 "프런트 채널 로그아웃 URL"에 넣을 주소.
+      frontChannelUrl: base ? `${base}/auth/sso/frontchannel-logout` : null,
+    },
+    saml: {
+      enabled: !!settings.samlEnabled,
+      label: settings.samlLabel ?? '',
+      buttonLabel: samlButtonLabel(settings),
+      entryPoint: settings.samlEntryPoint ?? '',
+      idpIssuer: settings.samlIdpIssuer ?? '',
+      idpCert: settings.samlIdpCert ?? '',
+      logoutUrl: settings.samlLogoutUrl ?? '',
+      emailAttr: settings.samlEmailAttr ?? 'email',
+      nameAttr: settings.samlNameAttr ?? 'displayName',
+      groupsAttr: settings.samlGroupsAttr ?? 'groups',
+      // IdP에 넣을 이 서버(SP)의 값 — entityID·ACS·SLO·메타데이터 주소.
+      sp: base ? samlSpEndpoints(base) : null,
+      problem: ssoConfigProblem('saml', settings),
+    },
     sso: {
       redirectUri,
       autoCreate: !!settings.ssoAutoCreate,
@@ -189,6 +225,9 @@ export function loginSecurityView(settings, { redirectUri = null } = {}) {
 export function loginMethodsView(settings, { redirectReady }) {
   return {
     sso: redirectReady ? enabledSsoProviders(settings) : [],
+    // SAML 단추에 보일 IdP 이름(관리자가 정한 것)과 보안 키·패스키로 바로 로그인할 수 있는지(웹 앱 주소가 있어야 한다).
+    samlLabel: samlButtonLabel(settings),
+    passkey: redirectReady && settings.passkeyLoginEnabled !== false,
     ldap: !!settings.ldapEnabled && !!settings.ldapTestedAt && !ldapConfigProblem(settings),
     otpPolicy: settings.otpPolicy ?? 'optional',
   };

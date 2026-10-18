@@ -7,7 +7,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/sso_dialogs.dart';
 import '../l10n/tr.dart';
 
-/// 내 프로필 "연결된 회사 계정" — 연결한 Google·Microsoft 회사 계정(과 회사 디렉터리)을 보여 주고, 이 서버에서 쓸 수 있는 회사
+/// 내 프로필 "연결된 회사 계정" — 연결한 Google·Microsoft·SAML 회사 계정(과 회사 디렉터리)을 보여 주고, 이 서버에서 쓸 수 있는 회사
 /// 계정을 연결하거나 끊는다(server/src/sso.js). 연결하면 로그인 화면의 회사 계정 단추로 들어올 수 있다.
 Future<void> showLinkedAccountsDialog(BuildContext context, Session session) =>
     showDialog<void>(
@@ -43,17 +43,19 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
     }
   }
 
+  /// 회사 계정 이름 — SAML은 서버가 알려 준 IdP 이름([IdentitiesInfo.samlLabel] — 예: "Okta").
+  String _label(String provider) =>
+      ssoProviderLabel(provider, samlLabel: _info?.samlLabel);
+
   Future<void> _link(String provider) async {
     final ok = await showSsoLinkDialog(
       context,
       api: widget.session.api!,
       provider: provider,
+      samlLabel: _info?.samlLabel,
     );
     if (!ok || !mounted) return;
-    showAppToast(
-      context,
-      tr('{p0} 계정을 연결했습니다.', {'p0': ssoProviderLabel(provider)}),
-    );
+    showAppToast(context, tr('{p0} 계정을 연결했습니다.', {'p0': _label(provider)}));
     await _load();
   }
 
@@ -64,7 +66,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
         title: Text(tr('연결 끊기')),
         content: Text(
           tr('{p0} 계정 연결을 끊을까요? 그다음부터는 그 계정으로 로그인할 수 없습니다.', {
-            'p0': ssoProviderLabel(provider),
+            'p0': _label(provider),
           }),
         ),
         actions: [
@@ -143,7 +145,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                       key: ValueKey('linked-${i.provider}'),
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(_icon(i.provider)),
-                      title: Text(ssoProviderLabel(i.provider)),
+                      title: Text(_label(i.provider)),
                       subtitle: Text(
                         [
                           ?i.email,
@@ -170,9 +172,7 @@ class _LinkedAccountsDialogState extends State<LinkedAccountsDialog> {
                         key: ValueKey('linked-link-$p'),
                         onPressed: _busy ? null : () => _link(p),
                         icon: const Icon(Icons.link),
-                        label: Text(
-                          tr('{p0} 계정 연결', {'p0': ssoProviderLabel(p)}),
-                        ),
+                        label: Text(tr('{p0} 계정 연결', {'p0': _label(p)})),
                       ),
                     ),
                 ],

@@ -127,10 +127,15 @@ OtpChallenge? otpChallengeOf(int status, Map<String, dynamic> body) {
       (code != 'otp_required' && code != 'otp_setup_required')) {
     return null;
   }
+  final methods = [
+    for (final m in body['methods'] as List? ?? const ['totp'])
+      if (m == 'totp' || m == 'webauthn') m as String,
+  ];
   return OtpChallenge(
     ticket: ticket,
     setupRequired: code == 'otp_setup_required',
     username: body['username'] as String? ?? '',
+    methods: methods.isEmpty ? const ['totp'] : methods,
   );
 }
 
@@ -1002,6 +1007,116 @@ class ApiClient {
       'code': code,
     }),
   );
+
+  // ── 보안 키·패스키(WebAuthn — 서버 webauthn.js) ──
+
+  /// 등록 시작 — 내 프로필(토큰) 또는 로그인 중 "2단계 인증을 꼭 써야 함"(설정 확인 표 [ticket]).
+  Future<({String state, String url})> passkeyRegisterStart(
+    String challenge, {
+    String? name,
+    String? ticket,
+  }) async {
+    final payload = {'challenge': challenge, 'name': ?name};
+    final body = ticket != null
+        ? await _publicPost('/auth/passkeys/register/start', {
+            ...payload,
+            'ticket': ticket,
+          })
+        : (await _post('/auth/passkeys/register/start', payload) as Map)
+              .cast<String, dynamic>();
+    return (state: body['state'] as String, url: body['url'] as String);
+  }
+
+  /// 비밀번호 없이 로그인 시작(아이디를 묻지 않는다).
+  Future<({String state, String url})> passkeyLoginStart(
+    String challenge,
+  ) async {
+    final body = await _publicPost('/auth/passkeys/login/start', {
+      'challenge': challenge,
+    });
+    return (state: body['state'] as String, url: body['url'] as String);
+  }
+
+  /// 로그인 둘째 단계 시작 — 비밀번호를 통과하고 받은 확인 표로.
+  Future<({String state, String url})> passkeySecondStart(
+    String ticket,
+    String challenge,
+  ) async {
+    final body = await _publicPost('/auth/passkeys/second/start', {
+      'ticket': ticket,
+      'challenge': challenge,
+    });
+    return (state: body['state'] as String, url: body['url'] as String);
+  }
+
+  /// 보안 키 확인 결과 묻기.
+  Future<PasskeyPollResult> passkeyPoll(String state, String verifier) async {
+    try {
+      return passkeyPollResultFromJson(
+        await _publicPost('/auth/passkeys/poll', {
+          'state': state,
+          'verifier': verifier,
+        }),
+      );
+    } on ApiException catch (e) {
+      if (e.statusCode == 400) return PasskeyFailed(e.message);
+      rethrow;
+    }
+  }
+
+  Future<PasskeysInfo> fetchPasskeys() async => PasskeysInfo.fromJson(
+    (await _get('/auth/passkeys') as Map).cast<String, dynamic>(),
+  );
+
+  Future<Passkey> renamePasskey(String id, String name) async =>
+      Passkey.fromJson(
+        (await _patch('/auth/passkeys/$id', {'name': name}) as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<void> deletePasskey(String id) async {
+    await _delete('/auth/passkeys/$id');
+  }
+
+  /// 로그아웃 — 토큰을 지우기 전에. 회사 계정으로 들어온 로그인이면 그 세션을 끝내고, 관리자가 "회사 계정에서도 로그아웃"을 켰으면
+  /// 브라우저로 열 그쪽 로그아웃 주소를 돌려준다(없으면 null).
+  Future<String?> logoutOnServer({String? refreshToken}) async {
+    final body = await _post('/auth/logout', {'refreshToken': ?refreshToken});
+    return body is Map ? body['idpLogoutUrl'] as String? : null;
+  }
+
+  // 관리자 콘솔 — SAML 메타데이터·그룹 규칙
+  Future<SamlMetadataFill> parseSamlMetadata(String xml) async =>
+      SamlMetadataFill.fromJson(
+        (await _post('/api/admin/login-security/saml-metadata', {'xml': xml})
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  Future<List<GroupMapping>> fetchGroupMappings() async => [
+    for (final j in await _get('/api/admin/group-mappings') as List)
+      GroupMapping.fromJson((j as Map).cast<String, dynamic>()),
+  ];
+
+  Future<GroupMapping> createGroupMapping({
+    required String source,
+    required String group,
+    String? teamId,
+    String? accountRole,
+  }) async => GroupMapping.fromJson(
+    (await _post('/api/admin/group-mappings', {
+              'source': source,
+              'group': group,
+              'teamId': teamId,
+              'accountRole': accountRole,
+            })
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  Future<void> deleteGroupMapping(String id) async {
+    await _delete('/api/admin/group-mappings/$id');
+  }
 
   Future<IdentitiesInfo> fetchIdentities() async => IdentitiesInfo.fromJson(
     (await _get('/auth/identities') as Map).cast<String, dynamic>(),

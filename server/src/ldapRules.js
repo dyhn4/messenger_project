@@ -70,6 +70,16 @@ export function attrText(entry, name) {
   return s ? s : null;
 }
 
+/** 항목 속성 값 전부(memberOf처럼 여럿인 것) — 글 목록. */
+export function attrList(entry, name) {
+  const key = Object.keys(entry ?? {}).find((k) => k.toLowerCase() === String(name).toLowerCase());
+  if (!key) return [];
+  const v = entry[key];
+  return (Array.isArray(v) ? v : [v])
+    .map((x) => (Buffer.isBuffer(x) ? x.toString('utf8') : x == null ? '' : String(x)).trim())
+    .filter(Boolean);
+}
+
 /** Active Directory userAccountControl의 "사용 안 함"(ACCOUNTDISABLE = 0x2). */
 export function isDisabledEntry(entry) {
   const uac = Number(attrText(entry, 'userAccountControl'));
@@ -89,7 +99,8 @@ export function entryGuid(entry) {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * 받은 항목 → 사람 정보 `{ subject, dn, name, email, department, title, disabled }`. [subject]는 바뀌지 않는 objectGUID(없으면
+ * 받은 항목 → 사람 정보 `{ subject, dn, name, email, department, title, disabled, groups }`([groups]는 memberOf의 그룹 DN들 —
+ * 그룹 규칙(groupSync.js)이 쓴다). [subject]는 바뀌지 않는 objectGUID(없으면
  * DN — 사람이 부서를 옮겨 DN이 바뀌면 새 사람으로 보이니 AD는 GUID를 쓴다).
  */
 export function entryToProfile(entry, settings) {
@@ -103,6 +114,7 @@ export function entryToProfile(entry, settings) {
     department: attrText(entry, settings.ldapDepartmentAttr),
     title: attrText(entry, settings.ldapTitleAttr),
     disabled: isDisabledEntry(entry),
+    groups: attrList(entry, 'memberOf').slice(0, 1000),
   };
 }
 
@@ -110,7 +122,7 @@ export function entryToProfile(entry, settings) {
 export function ldapAttributes(settings) {
   return [
     ...new Set(
-      ['dn', 'objectGUID', 'userAccountControl', settings.ldapNameAttr, settings.ldapEmailAttr, settings.ldapDepartmentAttr, settings.ldapTitleAttr].filter(
+      ['dn', 'objectGUID', 'userAccountControl', 'memberOf', settings.ldapNameAttr, settings.ldapEmailAttr, settings.ldapDepartmentAttr, settings.ldapTitleAttr].filter(
         Boolean,
       ),
     ),

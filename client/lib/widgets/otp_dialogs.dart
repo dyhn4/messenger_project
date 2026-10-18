@@ -9,10 +9,11 @@ import '../services/api_client.dart';
 import '../services/app_platform.dart';
 import '../services/session.dart';
 import 'app_toast.dart';
+import 'passkey_dialogs.dart';
 import '../l10n/tr.dart';
 
-/// 2단계 인증(OTP) 화면들 — 로그인 둘째 단계(코드 넣기), 켜기(QR·비밀 키 → 코드 확인 → 복구 코드), 내 프로필의 관리(복구 코드
-/// 새로 받기·끄기). 서버는 server/src/loginSecurity.js.
+/// 2단계 인증(OTP) 화면들 — 로그인 둘째 단계(코드 넣기 — 보안 키를 등록한 사람은 "보안 키로 확인"도), 로그인 중 방법 고르기(인증 앱·
+/// 보안 키), 켜기(QR·비밀 키 → 코드 확인 → 복구 코드), 내 프로필의 관리(복구 코드 새로 받기·끄기). 서버는 server/src/loginSecurity.js.
 
 const _dialogWidth = 400.0;
 
@@ -117,21 +118,123 @@ class RecoveryCodesView extends StatelessWidget {
   }
 }
 
-/// 로그인 둘째 단계 — 인증 앱의 6자리 코드(또는 복구 코드)를 넣으면 토큰. 취소하면 null.
+/// 로그인 둘째 단계 — 인증 앱의 6자리 코드(또는 복구 코드)를 넣으면 토큰. 취소하면 null. [canUsePasskey]면(보안 키·패스키도
+/// 등록한 사람 — 서버가 준 methods에 'webauthn') "보안 키로 확인"도 보여, 코드 대신 보안 키로 마칠 수 있다(passkey_dialogs.dart).
 Future<AuthResult?> showOtpLoginDialog(
   BuildContext context, {
   required ApiClient api,
   required String ticket,
+  bool canUsePasskey = false,
 }) => showDialog<AuthResult>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => _OtpLoginDialog(api: api, ticket: ticket),
+  builder: (_) =>
+      _OtpLoginDialog(api: api, ticket: ticket, canUsePasskey: canUsePasskey),
 );
+
+/// 관리자가 2단계 인증을 꼭 쓰게 정했는데 아직 아무것도 없는 사람이 고를 방법 — 인증 앱 켜기 또는 보안 키·패스키 등록.
+enum OtpSetupChoice { authenticatorApp, passkey }
+
+/// 로그인 중 2단계 인증 방법 고르기 — 인증 앱(QR → 코드 → 복구 코드, [showOtpSetupDialog])이나 보안 키·패스키 등록
+/// (passkey_dialogs.dart showPasskeySetupDialog). 취소하면 null.
+Future<OtpSetupChoice?> showOtpSetupChoiceDialog(BuildContext context) =>
+    showDialog<OtpSetupChoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        Widget option({
+          required Key key,
+          required IconData icon,
+          required String title,
+          required String subtitle,
+          required OtpSetupChoice choice,
+        }) => Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: OutlinedButton(
+            key: key,
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              alignment: Alignment.centerLeft,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(choice),
+            child: Row(
+              children: [
+                Icon(icon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        return AlertDialog(
+          title: Text(tr('2단계 인증 방법 고르기')),
+          content: SizedBox(
+            width: _dialogWidth,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  tr('관리자가 2단계 인증을 꼭 쓰게 정했습니다. 로그인할 때 비밀번호와 함께 쓸 방법을 하나 정하세요.'),
+                  style: TextStyle(color: scheme.primary),
+                ),
+                const SizedBox(height: 8),
+                option(
+                  key: const ValueKey('otp-setup-totp'),
+                  icon: Icons.phone_android,
+                  title: tr('인증 앱 켜기'),
+                  subtitle: tr(
+                    '휴대폰 인증 앱(Google Authenticator 등)에 보이는 6자리 코드를 넣습니다.',
+                  ),
+                  choice: OtpSetupChoice.authenticatorApp,
+                ),
+                option(
+                  key: const ValueKey('otp-setup-passkey'),
+                  icon: Icons.key,
+                  title: tr('보안 키·패스키 등록'),
+                  subtitle: tr('USB 보안 키나 이 기기·휴대폰의 패스키(지문·얼굴·PIN)로 확인합니다.'),
+                  choice: OtpSetupChoice.passkey,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(tr('취소')),
+            ),
+          ],
+        );
+      },
+    );
 
 class _OtpLoginDialog extends StatefulWidget {
   final ApiClient api;
   final String ticket;
-  const _OtpLoginDialog({required this.api, required this.ticket});
+  final bool canUsePasskey;
+  const _OtpLoginDialog({
+    required this.api,
+    required this.ticket,
+    this.canUsePasskey = false,
+  });
 
   @override
   State<_OtpLoginDialog> createState() => _OtpLoginDialogState();
@@ -180,6 +283,18 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
         _code.clear();
       });
     }
+  }
+
+  /// 코드 대신 보안 키·패스키로 확인 — 같은 확인 표로 브라우저에서 키를 쓰고, 받은 토큰으로 이 창도 닫는다(코드로 마친 것과 같다).
+  /// 보안 키 창에서 취소했으면 이 창에 남아 코드를 넣을 수 있다.
+  Future<void> _usePasskey() async {
+    if (_busy) return;
+    final auth = await showPasskeySecondFactorDialog(
+      context,
+      api: widget.api,
+      ticket: widget.ticket,
+    );
+    if (auth != null && mounted) Navigator.of(context).pop(auth);
   }
 
   @override
@@ -234,6 +349,16 @@ class _OtpLoginDialogState extends State<_OtpLoginDialog> {
                 ),
               ),
             ),
+            if (widget.canUsePasskey)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const ValueKey('otp-use-passkey'),
+                  onPressed: _busy ? null : _usePasskey,
+                  icon: const Icon(Icons.key, size: 18),
+                  label: Text(tr('보안 키로 확인')),
+                ),
+              ),
           ],
         ),
       ),
@@ -626,11 +751,16 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
                           ),
                     style: TextStyle(fontSize: 13, color: hint),
                   ),
+                  // 꼭 써야 해도 보안 키·패스키가 있으면 그게 2단계를 대신하니 인증 앱은 끌 수 있다(서버도 같은 규칙).
                   if (status.required)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
                       child: Text(
-                        tr('관리자가 꼭 쓰게 정해서 끌 수 없습니다.'),
+                        status.passkeyCount > 0
+                            ? tr(
+                                '관리자가 2단계 인증을 꼭 쓰게 정했지만, 등록한 보안 키·패스키가 있어 인증 앱은 끌 수 있습니다.',
+                              )
+                            : tr('관리자가 꼭 쓰게 정해서 끌 수 없습니다.'),
                         style: TextStyle(fontSize: 12, color: hint),
                       ),
                     ),
@@ -644,7 +774,7 @@ class _OtpManageDialogState extends State<_OtpManageDialog> {
             onPressed: _regenerate,
             child: Text(tr('복구 코드 새로 받기')),
           ),
-          if (!status.required)
+          if (!status.required || status.passkeyCount > 0)
             TextButton(
               key: const ValueKey('otp-disable'),
               onPressed: _disable,

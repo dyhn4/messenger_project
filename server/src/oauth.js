@@ -96,7 +96,7 @@ const errorPage = (res, status, ko, en) =>
   });
 
 /** 승인 페이지의 스크립트 — 2초마다 승인 결과를 묻고, 끝나면 돌아갈 주소로 간다. */
-const AUTHORIZE_JS = `(function(){
+export const AUTHORIZE_JS = `(function(){
 var id=document.body.getAttribute('data-request-id');var el=document.getElementById('status');
 function show(t){if(el)el.textContent=t;}
 function poll(){fetch('/oauth/requests/'+encodeURIComponent(id)+'/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(j){

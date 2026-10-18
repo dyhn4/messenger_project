@@ -5,13 +5,18 @@ import '../models/login_security.dart';
 import '../services/session.dart';
 import '../services/time_format.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/integration_widgets.dart';
 import '../l10n/tr.dart';
+import 'admin_group_mappings.dart';
+import 'admin_login_security_saml.dart';
 
-/// 관리자 콘솔 "로그인 보안" 탭 — 2단계 인증 정책, 회사 계정 로그인(Google·Microsoft — SSO), 사내 디렉터리(LDAP/Active Directory)
-/// (server/src/admin.js /admin/login-security). 기존 아이디·비밀번호 로그인은 그대로 두고 그 위에 더한다.
+/// 관리자 콘솔 "로그인 보안" 탭 — 2단계 인증 정책, 회사 계정 로그인(Google·Microsoft — OIDC, 그리고 SAML 2.0), 사내 디렉터리
+/// (LDAP/Active Directory), 디렉터리 그룹 규칙(그룹 → 팀·등급), 보안 키·패스키 로그인, 로그아웃 연동
+/// (server/src/admin.js /admin/login-security·/admin/group-mappings). 기존 아이디·비밀번호 로그인은 그대로 두고 그 위에 더한다.
 ///
 /// 비밀값(클라이언트 보안 비밀·서비스 계정 비밀번호)은 서버가 다시 내려주지 않아 "설정됨"으로만 보이고 바꿀 때만 넣는다. 디렉터리는
-/// 값을 저장 → "연결 시험" 통과 → 켜기 순서다(연결 값을 바꾸면 서버가 다시 끈다 — 메일 설정과 같다).
+/// 값을 저장 → "연결 시험" 통과 → 켜기 순서다(연결 값을 바꾸면 서버가 다시 끈다 — 메일 설정과 같다). SAML 칸은
+/// [AdminSamlSection], 그룹 규칙 목록은 [AdminGroupMappingsSection](따로 파일) — 켜기·끄기 스위치는 모두 바로 저장한다.
 class AdminLoginSecurityTab extends StatefulWidget {
   final Session session;
   const AdminLoginSecurityTab({super.key, required this.session});
@@ -328,6 +333,12 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
                 : (v) =>
                       _patch({'otpPolicy': v.first}, tr('2단계 인증 정책을 바꿨습니다.')),
           ),
+          const SizedBox(height: 6),
+          // 보안 키·패스키도 둘째 단계라 등록해 두면 "필수"를 채운다(인증 앱을 안 켜도 된다 — server/src/webauthn.js).
+          Text(
+            tr('보안 키·패스키를 등록한 회원은 인증 앱 없이도 "필수" 정책을 채웁니다.'),
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
           const Divider(height: 32),
 
           // ── 회사 계정(SSO) ──
@@ -462,6 +473,15 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
                 const ValueKey('admin-sso-role'),
               ),
             ],
+          ),
+          const Divider(height: 32),
+
+          // ── SAML 2.0(admin_login_security_saml.dart) ──
+          AdminSamlSection(
+            session: widget.session,
+            saml: s.saml,
+            busy: _busy,
+            onPatch: _patch,
           ),
           const Divider(height: 32),
 
@@ -620,6 +640,100 @@ class _AdminLoginSecurityTabState extends State<AdminLoginSecurityTab> {
               ),
             ],
           ),
+          const Divider(height: 32),
+
+          // ── 디렉터리 그룹 규칙(server/src/groupSync.js) — 켜기·빼기는 서버 설정, 규칙 목록은 admin_group_mappings.dart ──
+          _section(
+            tr('디렉터리 그룹 규칙'),
+            tr(
+              '사내 디렉터리·SAML·Microsoft가 알려 준 그룹에 따라 팀에 넣고 계정 등급을 정합니다. 로그인할 때마다 맞추고, 디렉터리(LDAP) 계정은 10분마다도 맞춥니다.',
+            ),
+          ),
+          SwitchListTile(
+            key: const ValueKey('group-sync-enabled'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(tr('그룹 규칙 켜기')),
+            value: s.groupSyncEnabled,
+            onChanged: _busy
+                ? null
+                : (v) => _patch({
+                    'groupSyncEnabled': v,
+                  }, v ? tr('그룹 규칙을 켰습니다.') : tr('그룹 규칙을 껐습니다.')),
+          ),
+          SwitchListTile(
+            key: const ValueKey('group-sync-remove'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(tr('그룹에서 빠지면 팀에서 빼고 등급 되돌리기')),
+            subtitle: Text(
+              tr(
+                '규칙으로 넣은 팀·등급만 되돌립니다. 팀 소유자와 직접 넣은 팀 멤버는 그대로 두고, 관리자가 손으로 바꾼 등급도 되돌리지 않습니다. 서버 관리자 권한은 건드리지 않습니다.',
+              ),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+            value: s.groupSyncRemove,
+            onChanged: _busy || !s.groupSyncEnabled
+                ? null
+                : (v) => _patch({'groupSyncRemove': v}, tr('저장했습니다.')),
+          ),
+          const SizedBox(height: 4),
+          AdminGroupMappingsSection(session: widget.session),
+          const Divider(height: 32),
+
+          // ── 보안 키·패스키(server/src/webauthn.js) ──
+          _section(
+            tr('보안 키·패스키'),
+            tr(
+              '회원이 내 프로필에서 등록한 보안 키(YubiKey 등)·패스키는 늘 2단계 인증으로 쓸 수 있습니다. 여기서는 비밀번호 없이 그것만으로 로그인하게 할지 정합니다.',
+            ),
+          ),
+          if (!s.passkeysAvailable)
+            Text(
+              tr(
+                '서버의 웹 앱 주소(정식 인증서 — WEB_DOMAIN)가 없어 보안 키·패스키를 쓸 수 없습니다. "DDNS" 탭의 웹 앱 주소를 먼저 설정하세요.',
+              ),
+              key: const ValueKey('passkey-unavailable'),
+              style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+            ),
+          SwitchListTile(
+            key: const ValueKey('passkey-login-enabled'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(tr('보안 키·패스키로 비밀번호 없이 로그인 허용')),
+            value: s.passkeyLoginEnabled,
+            onChanged: _busy
+                ? null
+                : (v) => _patch(
+                    {'passkeyLoginEnabled': v},
+                    v
+                        ? tr('보안 키·패스키 로그인을 허용했습니다.')
+                        : tr('보안 키·패스키 로그인을 막았습니다.'),
+                  ),
+          ),
+          const Divider(height: 32),
+
+          // ── 로그아웃 연동(server/src/ssoSessions.js) ──
+          _section(
+            tr('로그아웃 연동'),
+            tr(
+              'Microsoft: 앱 등록의 "프런트 채널 로그아웃 URL"에 아래 주소를 넣고, 토큰 구성에서 ID 토큰에 선택적 클레임 sid를 더하면 회사 계정에서 로그아웃할 때 TangoTalk 로그인도 끝납니다. SAML: IdP의 Single Logout이 위 SLO URL로 보냅니다. Google은 로그아웃 연동이 없습니다.',
+            ),
+          ),
+          SwitchListTile(
+            key: const ValueKey('sso-idp-logout'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(tr('이 앱에서 로그아웃하면 회사 계정(Microsoft·SAML)에서도 로그아웃')),
+            value: s.idpLogout,
+            onChanged: _busy
+                ? null
+                : (v) => _patch({'ssoIdpLogout': v}, tr('저장했습니다.')),
+          ),
+          if (s.frontChannelLogoutUrl != null) ...[
+            Text(tr('프런트 채널 로그아웃 URL'), style: const TextStyle(fontSize: 12)),
+            const SizedBox(height: 2),
+            CopyableSecretField(
+              value: s.frontChannelLogoutUrl!,
+              fieldKey: const ValueKey('sso-front-channel-url'),
+            ),
+          ],
           const SizedBox(height: 16),
         ],
       ),

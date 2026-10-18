@@ -48,6 +48,12 @@ import { ldapTest } from './ldapAuth.js';
 import { ldapConfigProblem } from './ldapRules.js';
 import { ldapConnectionChanged, loginSecurityView, parseLoginSecurityInput } from './loginSecurityRules.js';
 import { ssoRedirectUri } from './sso.js';
+import { ensureSpKeys } from './saml.js';
+import { parseIdpMetadata } from './samlRules.js';
+import { GROUP_MAPPINGS_MAX, parseGroupMapping } from './groupSyncRules.js';
+import { countGroupMappings, deleteGroupMapping, insertGroupMapping, listGroupMappings } from './db/queries/loginSecurityExtras.js';
+import { getWebPublicUrl } from './webAddress.js';
+import { isUuid } from './favoritesRules.js';
 import { SSO_PROVIDER_LABEL, ssoConfigProblem } from './ssoRules.js';
 import { signFileUrl } from './upload.js';
 import { listAuditLogs } from './db/queries/audit.js';
@@ -65,7 +71,7 @@ import {
   reorderPositionOptions,
   toggleDefaultPositionOption,
 } from './db/queries/positionOptions.js';
-import { listTeamIdsForUser, listTeamMemberIds, listTeamsForUser } from './db/queries/teams.js';
+import { findTeamById, listTeamIdsForUser, listTeamMemberIds, listTeamsForUser } from './db/queries/teams.js';
 import {
   countActiveUsers,
   findUserById,
@@ -85,6 +91,41 @@ import {
   listRoomMemberIds,
 } from './db/queries/rooms.js';
 import { notifyMembership, notifyTodosResynced, postSystemMessage, toRoomDto } from './rooms.js';
+
+/**
+ * 계정 등급 바꾸기와 그 뒷일 — 관리자 콘솔(아래 POST /admin/users/:id/role)과 디렉터리 그룹 규칙(groupSync.js)이 같이 쓴다. 바꾼 계정 행.
+ *  - 로그아웃 없이 바로 반영되도록, 지금 접속 중인 그 사람의 소켓에 알려서 앱이 자기 프로필(/users/me)을 다시 받게 한다 — token_version은
+ *    안 올린다(강제 로그아웃 사유가 아니라서, 정지/전체 로그아웃과 달리 접속을 끊을 이유가 없다).
+ *  - 준회원은 토픽 관리자가 될 수 없다 — 내려가면 맡던 토픽 관리자 역할을 거두고, 그 토픽 멤버들의 관리자 표시·관리 메뉴가 바로 바뀌도록
+ *    방 정보를 다시 보낸다.
+ *  - 준회원 → 정회원 이상으로 올리면, 그동안 빠져 있던 그 사람 소속 팀들의 '정회원 자동 초대' 토픽에 넣어 준다(준회원은 자동 참여
+ *    대상이 아니었으므로 따라잡아 주는 것 — 팀에 새로 들어올 때와 같은 기준, teams.js).
+ * [extra]는 같이 바꿀 계정 칸(그룹 규칙의 groupSyncRole 등).
+ */
+export async function applyAccountRole(io, target, newRole, { actorId = null, extra = {} } = {}) {
+  const before = accountRole(target);
+  const updated = await updateUser(target.id, { role: newRole, ...extra });
+  io.to(`user:${target.id}`).emit('user:role-updated', { role: newRole });
+  if (newRole === 'guest') {
+    for (const roomId of await clearTopicAdminRoles(target.id)) {
+      const room = await findRoomById(roomId);
+      if (room) io.to(room.id).emit('room:created', await toRoomDto(room));
+    }
+  }
+  if (before === 'guest' && newRole !== 'guest') {
+    for (const teamId of await listTeamIdsForUser(target.id)) {
+      for (const room of await listAutoInviteTopics(teamId)) {
+        const memberIds = await listRoomMemberIds(room.id);
+        if (memberIds.includes(target.id)) continue;
+        const changedTodos = await addRoomMembers(room.id, [target.id]);
+        await notifyMembership(io, room);
+        await notifyTodosResynced(io, room, changedTodos, actorId); // 예전 담당 행이 남아 있던 사람이 다시 들어옴.
+        await postSystemMessage(io, room, `${target.name ?? target.username} 님이 참여했습니다.`);
+      }
+    }
+  }
+  return updated;
+}
 
 /**
  * 서버 운영자(users.isServerAdmin)만 쓸 수 있는 관리자 콘솔 API.
@@ -473,7 +514,8 @@ export function createAdminRouter(io) {
 
   // ─────────────────────────────── 로그인 보안 ───────────────────────────────
 
-  const securityView = async () => loginSecurityView(await getServerSettings(), { redirectUri: ssoRedirectUri() });
+  const securityView = async () =>
+    loginSecurityView(await getServerSettings(), { redirectUri: ssoRedirectUri(), webBase: getWebPublicUrl() });
 
   /** 관리자 콘솔 "로그인 보안" — 2단계 인증 정책, 회사 계정(Google·Microsoft), 사내 디렉터리(LDAP). 비밀값은 정했는지만. */
   router.get('/admin/login-security', async (req, res) => {
@@ -502,8 +544,8 @@ export function createAdminRouter(io) {
     if (Object.keys(fields).length === 0) return res.status(400).json({ error: '바꿀 내용이 없습니다.' });
     const current = await getServerSettings();
     const next = { ...current, ...fields };
-    for (const provider of ['google', 'microsoft']) {
-      const key = provider === 'google' ? 'ssoGoogleEnabled' : 'ssoMicrosoftEnabled';
+    for (const provider of ['google', 'microsoft', 'saml']) {
+      const key = { google: 'ssoGoogleEnabled', microsoft: 'ssoMicrosoftEnabled', saml: 'samlEnabled' }[provider];
       if (!next[key]) continue;
       const problem = ssoConfigProblem(provider, next);
       if (problem) {
@@ -525,11 +567,17 @@ export function createAdminRouter(io) {
       if (!current.ldapTestedAt) return res.status(400).json({ error: '"연결 시험"을 먼저 해 보세요. 통과하면 켤 수 있습니다.' });
     }
     const updated = await updateServerSettings(fields);
+    // SAML을 켜면 이 서버(SP)의 서명 키·인증서를 바로 만들어 둔다(메타데이터에 들어간다).
+    if (updated.samlEnabled) await ensureSpKeys(updated);
     const detail = [
       `2단계 인증: ${{ optional: '각자', admins: '관리자 필수', all: '모두 필수' }[updated.otpPolicy] ?? updated.otpPolicy}`,
       `Google ${updated.ssoGoogleEnabled ? '켜짐' : '꺼짐'}`,
       `Microsoft ${updated.ssoMicrosoftEnabled ? '켜짐' : '꺼짐'}`,
+      `SAML ${updated.samlEnabled ? '켜짐' : '꺼짐'}`,
       `LDAP ${updated.ldapEnabled ? '켜짐' : '꺼짐'}`,
+      `그룹 규칙 ${updated.groupSyncEnabled ? (updated.groupSyncRemove ? '켜짐(빠지면 빼기)' : '켜짐') : '꺼짐'}`,
+      `패스키 로그인 ${updated.passkeyLoginEnabled ? '허용' : '막음'}`,
+      `회사 계정 로그아웃 연동 ${updated.ssoIdpLogout ? '켜짐' : '꺼짐'}`,
     ];
     for (const enc of ['ssoGoogleClientSecretEnc', 'ssoMicrosoftClientSecretEnc', 'ldapBindPasswordEnc']) {
       if (enc in fields) detail.push(`${enc.replace(/Enc$/, '')} ${fields[enc] ? '변경' : '지움'}`);
@@ -543,6 +591,59 @@ export function createAdminRouter(io) {
       detail: detail.join(' · '),
     });
     res.json(await securityView());
+  });
+
+  /** SAML — IdP 메타데이터 XML `{ xml }`을 읽어 칸에 채울 값(저장하지 않는다 — 관리자가 보고 저장). */
+  router.post('/admin/login-security/saml-metadata', async (req, res) => {
+    const r = parseIdpMetadata(typeof req.body?.xml === 'string' ? req.body.xml : '');
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.json({
+      idpIssuer: r.entityId,
+      entryPoint: r.entryPoint,
+      logoutUrl: r.logoutUrl,
+      idpCert: r.certs.map((c) => `-----BEGIN CERTIFICATE-----\n${c.match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----`).join('\n'),
+    });
+  });
+
+  // ── 디렉터리 그룹 규칙(groupSync.js) ──
+
+  const mappingDto = ({ mapping, teamName }) => ({
+    id: mapping.id,
+    source: mapping.source,
+    group: mapping.group,
+    teamId: mapping.teamId ?? null,
+    teamName: teamName ?? null,
+    accountRole: mapping.accountRole ?? null,
+    createdAt: new Date(mapping.createdAt).getTime(),
+  });
+
+  router.get('/admin/group-mappings', async (req, res) => {
+    res.json((await listGroupMappings()).map(mappingDto));
+  });
+
+  /** 규칙 더하기 `{ source, group, teamId?, accountRole? }` — 다음 로그인부터 맞춘다. */
+  router.post('/admin/group-mappings', async (req, res) => {
+    const parsed = parseGroupMapping(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    if (parsed.fields.teamId && !(await findTeamById(parsed.fields.teamId))) return res.status(404).json({ error: '팀을 찾을 수 없습니다.' });
+    if ((await countGroupMappings()) >= GROUP_MAPPINGS_MAX) return res.status(400).json({ error: `그룹 규칙은 ${GROUP_MAPPINGS_MAX}개까지입니다.` });
+    const row = await insertGroupMapping(parsed.fields);
+    recordAudit({
+      ...actorOf(req),
+      action: AUDIT.loginSecurity,
+      targetType: 'server',
+      targetId: null,
+      targetLabel: '그룹 규칙',
+      detail: `그룹 규칙 더함 — ${row.group}${row.accountRole ? ` → ${roleLabel(row.accountRole)}` : ''}`,
+    });
+    const list = await listGroupMappings();
+    res.status(201).json(mappingDto(list.find((r) => r.mapping.id === row.id) ?? { mapping: row, teamName: null }));
+  });
+
+  router.delete('/admin/group-mappings/:id', async (req, res) => {
+    if (!isUuid(req.params.id) || !(await deleteGroupMapping(req.params.id))) return res.status(404).json({ error: '규칙을 찾을 수 없습니다.' });
+    recordAudit({ ...actorOf(req), action: AUDIT.loginSecurity, targetType: 'server', targetId: null, targetLabel: '그룹 규칙', detail: '그룹 규칙 지움' });
+    res.json({ ok: true });
   });
 
   /**
@@ -804,34 +905,8 @@ export function createAdminRouter(io) {
     const before = accountRole(target);
     if (before === newRole) return res.json(toAdminUserDto(target, await listTeamsForUser(target.id)));
 
-    const updated = await updateUser(target.id, { role: newRole });
-
-    // 로그아웃 없이 바로 반영되도록, 지금 접속 중인 그 사람의 소켓에 알려서 클라이언트가
-    // 자기 프로필(/users/me)을 다시 받아오게 한다 — token_version은 안 올린다(강제 로그아웃
-    // 사유가 아니라서, 정지/전체 로그아웃과 달리 이 경우는 접속을 끊을 이유가 없다).
-    io.to(`user:${target.id}`).emit('user:role-updated', { role: newRole });
-
-    // 준회원은 토픽 관리자가 될 수 없다 — 내려가면 맡던 토픽 관리자 역할을 거두고, 그 토픽 멤버들의
-    // 관리자 표시·관리 메뉴가 바로 바뀌도록 방 정보를 다시 보낸다.
-    if (newRole === 'guest') {
-      for (const roomId of await clearTopicAdminRoles(target.id)) {
-        const room = await findRoomById(roomId);
-        if (room) io.to(room.id).emit('room:created', await toRoomDto(room));
-      }
-    }
-
-    if (before === 'guest' && newRole !== 'guest') {
-      for (const teamId of await listTeamIdsForUser(target.id)) {
-        for (const room of await listAutoInviteTopics(teamId)) {
-          const memberIds = await listRoomMemberIds(room.id);
-          if (memberIds.includes(target.id)) continue;
-          const changedTodos = await addRoomMembers(room.id, [target.id]);
-          await notifyMembership(io, room);
-          await notifyTodosResynced(io, room, changedTodos, req.user.sub); // 예전 담당 행이 남아 있던 사람이 다시 들어옴.
-          await postSystemMessage(io, room, `${target.name ?? target.username} 님이 참여했습니다.`);
-        }
-      }
-    }
+    // 관리자가 손으로 바꾼 등급 — 그룹 규칙이 정해 준 등급 기록은 지운다(그룹에서 빠져도 이 등급은 그대로 — groupSyncRules.js).
+    const updated = await applyAccountRole(io, target, newRole, { actorId: req.user.sub, extra: { groupSyncRole: null } });
 
     recordAudit({
       ...actorOf(req),

@@ -30,6 +30,7 @@ import 'home_screen.dart' show wideBreakpoint;
 import 'api_tokens_dialog.dart';
 import 'connected_apps_dialog.dart';
 import 'my_devices_dialog.dart';
+import 'passkeys_dialog.dart';
 import 'linked_accounts_dialog.dart';
 import '../widgets/otp_dialogs.dart' show showOtpManageDialog;
 import '../l10n/tr.dart';
@@ -710,6 +711,15 @@ class _PersonalInfoDialogState extends State<PersonalInfoDialog> {
                         ),
                         const Divider(height: 1),
                       ],
+                      // 보안 키·패스키 — 비밀번호 없이 로그인·인증 앱 대신 2단계 인증(passkeys_dialog.dart). 내 로그인 보안이라 게스트도.
+                      _ProfileLinkRow(
+                        rowKey: const ValueKey('profile-passkeys'),
+                        icon: Icons.key,
+                        label: tr('보안 키·패스키'),
+                        onTap: () =>
+                            showPasskeysDialog(context, widget.session),
+                      ),
+                      const Divider(height: 1),
                       // 연결된 회사 계정(Google·Microsoft) — 연결하면 로그인 화면의 회사 계정 단추로 들어온다.
                       _ProfileLinkRow(
                         rowKey: const ValueKey('profile-linked-accounts'),

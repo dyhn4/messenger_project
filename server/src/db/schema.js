@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 /**
  * 스키마의 원본(source of truth). `npm run db:generate`가 이 파일을 이전 스냅샷과 비교해서
@@ -97,6 +97,9 @@ export const users = pgTable('users', {
   totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
   totpLastStep: integer('totp_last_step'),
   totpRecoveryHashes: jsonb('totp_recovery_hashes'),
+  // 디렉터리 그룹 규칙(groupSync.js)이 마지막으로 정해 준 계정 등급 — 지금 등급이 이것과 같을 때만 그룹에서 빠지면 되돌린다(관리자가
+  // 손으로 바꾼 등급은 그대로 둔다). 규칙이 정한 적 없으면 null.
+  groupSyncRole: text('group_sync_role'),
 });
 
 /**
@@ -296,7 +299,7 @@ export const userIdentities = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    // 'google' | 'microsoft' | 'ldap'
+    // 'google' | 'microsoft' | 'saml'(SAML 2.0 IdP — subject는 NameID) | 'ldap'
     provider: text('provider').notNull(),
     subject: text('subject').notNull(),
     emailEnc: text('email_enc'),
@@ -580,8 +583,120 @@ export const serverSettings = pgTable('server_settings', {
   ldapDefaultRole: text('ldap_default_role').notNull().default('member'),
   // 연결 시험을 통과한 시각 — 연결 값을 바꾸면 지워지고 꺼진다(메일 설정과 같은 규칙).
   ldapTestedAt: timestamp('ldap_tested_at', { withTimezone: true }),
+  // 회사 계정 로그인(SAML 2.0 — OIDC를 못 쓰는 IdP: ADFS·Okta·OneLogin·Keycloak 등, saml.js). [samlLabel]은 로그인 단추 글,
+  // IdP 쪽 값은 로그인 주소([samlEntryPoint] — HTTP-Redirect), 발급자(entityID), 서명 인증서(PEM — 여럿이면 이어 붙임), 로그아웃
+  // 주소(SLO), 받을 속성 이름(이메일·이름·그룹). 이 서버(SP)의 서명 키·인증서는 처음 켤 때 서버가 만든다(키는 암호화).
+  samlEnabled: boolean('saml_enabled').notNull().default(false),
+  samlLabel: text('saml_label'),
+  samlEntryPoint: text('saml_entry_point'),
+  samlIdpIssuer: text('saml_idp_issuer'),
+  samlIdpCert: text('saml_idp_cert'),
+  samlLogoutUrl: text('saml_logout_url'),
+  samlEmailAttr: text('saml_email_attr').notNull().default('email'),
+  samlNameAttr: text('saml_name_attr').notNull().default('displayName'),
+  samlGroupsAttr: text('saml_groups_attr').notNull().default('groups'),
+  samlSpPrivateKeyEnc: text('saml_sp_private_key_enc'),
+  samlSpCert: text('saml_sp_cert'),
+  // 디렉터리 그룹으로 팀·등급 저절로 정하기(groupSync.js — 규칙은 directory_group_mappings). 로그인할 때(와 디렉터리 계정을 10분마다
+  // 다시 볼 때) 맞춘다. [groupSyncRemove]면 그룹에서 빠진 사람을 그 규칙으로 넣었던 팀에서 빼고, 등급도 기본 등급으로 되돌린다.
+  groupSyncEnabled: boolean('group_sync_enabled').notNull().default(false),
+  groupSyncRemove: boolean('group_sync_remove').notNull().default(false),
+  // 하드웨어 보안 키·패스키(WebAuthn — webauthn.js)로 비밀번호 없이 로그인하게 할지(꺼도 2단계 인증으로는 쓴다).
+  passkeyLoginEnabled: boolean('passkey_login_enabled').notNull().default(true),
+  // 이 앱에서 로그아웃할 때 회사 계정(Microsoft·SAML IdP) 쪽에서도 로그아웃할지 — 브라우저로 그쪽 로그아웃 주소를 연다.
+  ssoIdpLogout: boolean('sso_idp_logout').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * 디렉터리 그룹 → 팀·계정 등급 규칙(groupSync.js). [source]는 그룹이 어디서 오는지 — 'ldap'(memberOf의 DN·CN), 'saml'(그룹 속성 값),
+ * 'microsoft'(ID 토큰 groups — 그룹 개체 ID), 'any'(어디서든). [group]은 대소문자를 가리지 않고 맞춘다(LDAP은 DN 전체나 CN만).
+ * 맞으면 [teamId] 팀에 넣고(일반 멤버), [accountRole]이 있으면 그 등급으로 — 여러 규칙이 맞으면 가장 높은 등급. 서버 운영자 여부는
+ * 건드리지 않는다.
+ */
+export const directoryGroupMappings = pgTable(
+  'directory_group_mappings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull().default('any'),
+    group: text('group').notNull(),
+    teamId: uuid('team_id').references(() => teams.id, { onDelete: 'cascade' }),
+    accountRole: text('account_role'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('directory_group_mappings_team_idx').on(t.teamId)],
+);
+
+/**
+ * 그룹 규칙으로 넣은 팀 멤버십 — "그룹에서 빠지면 빼기"가 사람이 직접 넣은 멤버십까지 빼지 않게, 규칙으로 넣은 것만 적어 둔다.
+ * 팀에서 빠지면(누가 빼든) 같이 지운다.
+ */
+export const groupSyncGrants = pgTable(
+  'group_sync_grants',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.teamId] })],
+);
+
+/**
+ * 하드웨어 보안 키·패스키(WebAuthn — webauthn.js). [credentialId]·[publicKey]는 base64url, [counter]는 키가 센 서명 횟수(복제 키
+ * 알아보기), [transports]는 키가 알려 준 연결 방법(usb·nfc·ble·internal·hybrid), [backedUp]은 여러 기기에 동기화되는 패스키인지.
+ * [name]은 사람이 붙인 이름(예: "YubiKey 5"). 비밀번호 없이 로그인하거나 2단계 인증으로 쓴다.
+ */
+export const webauthnCredentials = pgTable(
+  'webauthn_credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+    transports: jsonb('transports'),
+    deviceType: text('device_type'),
+    backedUp: boolean('backed_up').notNull().default(false),
+    aaguid: text('aaguid'),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('webauthn_credentials_credential_idx').on(t.credentialId), index('webauthn_credentials_user_idx').on(t.userId)],
+);
+
+/**
+ * 회사 계정 로그인 한 번(SSO 세션 — 로그아웃 연동). 회사 계정으로 들어오면 하나 만들고 그 id를 토큰(`ssid`)에 싣는다. 회사 계정 쪽에서
+ * 로그아웃하면(SAML SLO·Microsoft 프런트 채널 로그아웃) 그쪽 세션 값([idpSessionId] — SAML SessionIndex·OIDC sid, [nameId])으로
+ * 찾아 끝내고([endedAt]), 그 세션으로 받은 토큰은 갱신·요청에서 바로 막힌다(authState.js). 이 앱에서 로그아웃해도 끝난다.
+ */
+export const ssoSessions = pgTable(
+  'sso_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    idpSessionId: text('idp_session_id'),
+    nameId: text('name_id'),
+    nameIdFormat: text('name_id_format'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    endReason: text('end_reason'),
+  },
+  (t) => [
+    index('sso_sessions_idp_session_idx').on(t.provider, t.idpSessionId),
+    index('sso_sessions_name_id_idx').on(t.provider, t.nameId),
+    index('sso_sessions_user_idx').on(t.userId),
+  ],
+);
 
 /**
  * 감사 로그 — "누가 언제 무엇을 했는지"의 추가 전용 기록. 관리자 권한으로 한 일(남의 메시지

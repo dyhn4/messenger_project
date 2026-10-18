@@ -51,3 +51,26 @@ export async function deviceActive(deviceId, userId) {
 export function invalidateDeviceState(deviceId, userId) {
   deviceCache.delete(`${userId}|${deviceId}`);
 }
+
+const ssoCache = new Map(); // ssoSessionId → { at, active }
+
+/**
+ * 회사 계정 로그인 세션(`ssid` — auth.js issueTokenPair)이 아직 살아 있는지 — 회사 계정 쪽에서 로그아웃했거나(SAML SLO·Microsoft
+ * 프런트 채널 로그아웃) 이 앱에서 로그아웃하면 끝난다(sso_sessions.ended_at). 계정 상태와 같은 30초 캐시이고, 끝낼 때 그 자리에서
+ * 지운다([invalidateSsoSessionState]).
+ */
+export async function ssoSessionActive(ssid, userId) {
+  const hit = ssoCache.get(ssid);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.active && hit.userId === userId;
+  const { findSsoSessionById } = await import('./db/queries/loginSecurityExtras.js');
+  const row = await findSsoSessionById(ssid);
+  const entry = { at: Date.now(), active: !!row && !row.endedAt, userId: row?.userId ?? null };
+  ssoCache.set(ssid, entry);
+  if (ssoCache.size > 10_000) ssoCache.delete(ssoCache.keys().next().value);
+  return entry.active && entry.userId === userId;
+}
+
+/** 회사 계정 세션을 끝냈을 때 — 다음 요청부터 바로 막히게. */
+export function invalidateSsoSessionState(ssid) {
+  ssoCache.delete(ssid);
+}

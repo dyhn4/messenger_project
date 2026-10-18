@@ -10,6 +10,7 @@ import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart' show LaunchMode, launchUrl;
 
 import '../data/stickers.dart';
 import '../models/app_notification.dart';
@@ -1645,7 +1646,8 @@ class Session extends ChangeNotifier {
   Future<void> logoutDevice(MyDevice device) async {
     await api!.logoutDevice(device.id);
     if (device.current || device.id == deviceIdentity?.deviceId) {
-      await logout();
+      // 서버가 방금 이 기기의 토큰을 끊었다 — 다시 알리면 401이 갱신을 부를 뿐이다.
+      await logout(notifyServer: false);
     }
   }
 
@@ -2931,7 +2933,9 @@ class Session extends ChangeNotifier {
   /// 기기를 로그아웃 화면으로 되돌린다. 서버는 이미 이 세션을 폐기한 상태라 서버에 알릴
   /// 것은 없고, 로컬 상태만 정리한다.
   Future<void> _forceLogout() async {
-    await logout();
+    // 사용자가 누른 로그아웃이 서버에 알리는 중에 토큰이 무효로 드러났으면 그 로그아웃이 마저 정리한다 — "세션 만료"를 띄우지 않는다.
+    if (_notifyingServerLogout) return;
+    await logout(notifyServer: false);
     error = tr('세션이 만료되었습니다. 다시 로그인해주세요.');
     notifyListeners();
   }
@@ -4617,7 +4621,7 @@ class Session extends ChangeNotifier {
   /// 방식으로 로컬 상태를 정리한다. 비밀번호가 틀리면 여기서 던져서 다이얼로그가 잡는다.
   Future<void> withdraw(String password) async {
     await api!.withdraw(password);
-    await logout();
+    await logout(notifyServer: false); // 계정이 없어졌다 — 서버에 알릴 세션도 없다.
   }
 
   /// 비밀번호 변경. 다른 기기는 서버가 강제로 끊지만, 이 기기는 응답으로 받은 새 토큰
@@ -5614,7 +5618,22 @@ class Session extends ChangeNotifier {
     }();
   }
 
-  Future<void> logout() async {
+  /// 로그아웃 뒤 회사 계정(IdP) 로그아웃 주소를 브라우저로 연다 — 시험에서 바꿔 끼운다(실제로 브라우저를 열지 않게).
+  @visibleForTesting
+  static Future<bool> Function(Uri url) openIdpLogoutUrl = _openExternal;
+
+  static Future<bool> _openExternal(Uri url) =>
+      launchUrl(url, mode: LaunchMode.externalApplication);
+
+  /// 서버에 로그아웃을 알리는 중 — 그사이 토큰이 무효라 갱신 실패로 [_forceLogout]이 다시 [logout]을 부르면 그쪽은 건너뛴다
+  /// (바깥 로그아웃이 이어서 정리한다).
+  bool _notifyingServerLogout = false;
+
+  /// 이 기기에서 로그아웃. [notifyServer]면(사용자가 누른 로그아웃) 토큰을 지우기 전에 서버에도 알린다(POST /auth/logout — 회사
+  /// 계정 로그인 세션을 끝내고, 관리자가 "회사 계정에서도 로그아웃"을 켰으면 그쪽 로그아웃 주소를 받아 브라우저로 연다). 서버가
+  /// 이미 세션을 끝낸 경우(토큰 갱신 실패·이 기기 로그아웃·회원 탈퇴)는 false — 알릴 것이 없고, 401이 갱신을 다시 부르지 않게.
+  Future<void> logout({bool notifyServer = true}) async {
+    if (_notifyingServerLogout) return;
     // 통화 중이었으면 먼저 끊는다 — 안 그러면 로그아웃한 뒤에도(정지·전체 로그아웃으로 쫓겨난 경우도) 이 기기의
     // 카메라·마이크가 그 회의에 계속 나간다. 소켓을 닫기 전이라 서버에도 바로 나감이 간다.
     if (callController.roomId != null) await leaveCall();
@@ -5638,6 +5657,28 @@ class Session extends ChangeNotifier {
         await api!.registerWebPushSubscription(deviceIdentity!.deviceId, null);
         await unsubscribeWebPush();
       } catch (_) {}
+    }
+    // 서버에 로그아웃을 알린다 — 위의 알림 지우기까지 끝낸 뒤(이 요청으로 회사 계정 세션의 토큰은 바로 막힌다), 아래에서 토큰을
+    // 지우기 전. 오프라인·서버 오류여도 로그아웃은 그대로 이어지게 잠깐(5초)만 기다리고 실패는 삼킨다.
+    if (notifyServer && api != null && token != null) {
+      String? idpLogoutUrl;
+      _notifyingServerLogout = true;
+      try {
+        idpLogoutUrl = await api!
+            .logoutOnServer(refreshToken: refreshToken)
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // 못 알렸어도 이 기기의 로그아웃은 계속한다(토큰은 만료되면 끝난다).
+      } finally {
+        _notifyingServerLogout = false;
+      }
+      final url = idpLogoutUrl == null ? null : Uri.tryParse(idpLogoutUrl);
+      if (url != null && url.hasScheme) {
+        // 회사 계정(Microsoft·SAML IdP)에서도 로그아웃 — 그 페이지가 끝나면 서버의 "로그아웃했습니다" 쪽지로 돌아온다.
+        try {
+          await openIdpLogoutUrl(url);
+        } catch (_) {}
+      }
     }
     await _fcmTokenRefreshSub?.cancel();
     await _prefs.remove(_kToken);

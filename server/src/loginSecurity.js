@@ -22,6 +22,8 @@ import {
 import { ldapStillActive } from './ldapAuth.js';
 import { ldapConfigProblem } from './ldapRules.js';
 import { otpRequiredFor, usesLocalPassword } from './loginSecurityRules.js';
+import { countPasskeys } from './db/queries/loginSecurityExtras.js';
+import { secondFactorMethods } from './webauthnRules.js';
 import { usernameFromEmail } from './ssoRules.js';
 import {
   generateRecoveryCodes,
@@ -73,12 +75,15 @@ const tokensFor = (user) => ({ ...issueTokenPair(user), userId: user.id, usernam
  */
 export async function completeLogin(res, user, { method = 'password' } = {}) {
   if (method !== 'sso') {
-    if (user.totpEnabledAt && user.totpSecretEnc) {
+    // 둘째 단계로 쓸 수 있는 것 — 인증 앱(TOTP)과 보안 키·패스키(webauthn.js — /auth/passkeys/second/start). 앱은 [methods]로 고르게 한다.
+    const methods = secondFactorMethods(user, await countPasskeys(user.id));
+    if (methods.length > 0) {
       return res.status(403).json({
         error: UPDATE_APP_ERROR,
         code: 'otp_required',
         otpRequired: true,
         otpTicket: issueOtpTicket(user, 'login'),
+        methods,
         username: user.username,
       });
     }
@@ -176,6 +181,8 @@ export function createLoginSecurityRouter() {
       required: otpRequiredFor(settings.otpPolicy, user),
       policy: settings.otpPolicy,
       recoveryCodesLeft: Array.isArray(user.totpRecoveryHashes) ? user.totpRecoveryHashes.length : 0,
+      // 등록한 보안 키·패스키 수 — 있으면 정책상 꼭 써야 해도 인증 앱을 끌 수 있다.
+      passkeyCount: await countPasskeys(user.id),
     });
   });
 
@@ -220,7 +227,8 @@ export function createLoginSecurityRouter() {
     if (!user) return;
     if (!user.totpEnabledAt) return res.json({ enabled: false });
     const settings = await getServerSettings();
-    if (otpRequiredFor(settings.otpPolicy, user)) {
+    // 정책상 꼭 써야 해도 보안 키·패스키가 남아 있으면 인증 앱은 끌 수 있다(webauthn.js lastSecondFactorLocked).
+    if (otpRequiredFor(settings.otpPolicy, user) && (await countPasskeys(user.id)) === 0) {
       return res.status(403).json({ error: '관리자가 2단계 인증을 꼭 쓰게 정해서 끌 수 없습니다.' });
     }
     if (usesLocalPassword(user)) {
@@ -377,10 +385,10 @@ const DIRECTORY_CHECK_MS = 10 * 60 * 1000;
 const directoryChecks = new Map(); // userId → { at, active }
 
 /**
- * 디렉터리 계정이 아직 살아 있는지(토큰 갱신 때 — authSource 'ldap'). 10분 동안 기억한다. 디렉터리에 못 붙거나 디렉터리 로그인이
+ * 디렉터리 계정이 아직 살아 있는지(토큰 갱신 때 — authSource 'ldap'). 10분 동안 기억한다. [io]를 주면 다시 본 그룹으로 팀·등급도 맞춘다. 디렉터리에 못 붙거나 디렉터리 로그인이
  * 꺼져 있으면 막지 않는다(서버가 잠깐 안 될 때 모두가 로그아웃되지 않게 — 그 사이 새로 로그인은 못 한다).
  */
-export async function directoryAccountActive(user, { stillActive = ldapStillActive } = {}) {
+export async function directoryAccountActive(user, { stillActive = ldapStillActive, io = null } = {}) {
   const hit = directoryChecks.get(user.id);
   if (hit && Date.now() - hit.at < DIRECTORY_CHECK_MS) return hit.active;
   const settings = await getServerSettings();
@@ -391,5 +399,11 @@ export async function directoryAccountActive(user, { stillActive = ldapStillActi
   if (r.unavailable) return true;
   directoryChecks.set(user.id, { at: Date.now(), active: r.active });
   if (directoryChecks.size > 10_000) directoryChecks.delete(directoryChecks.keys().next().value);
+  // 그룹이 바뀌었으면(부서 이동·권한 그룹) 팀·등급도 맞춘다(groupSync.js — 기다리지 않는다).
+  if (r.active && r.profile && io) {
+    import('./groupSync.js')
+      .then(({ syncDirectoryGroups }) => syncDirectoryGroups(io, user, { source: 'ldap', groups: r.profile.groups }))
+      .catch(() => {});
+  }
   return r.active;
 }

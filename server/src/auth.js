@@ -26,7 +26,9 @@ import { sendMail } from "./mailer.js";
 import { maskEmail, mailReady } from "./mailRules.js";
 import { findIdMail } from "./mailTemplates.js";
 import { passwordPolicyError } from "./passwordPolicy.js";
-import { accountState, deviceActive } from "./authState.js";
+import { accountState, deviceActive, ssoSessionActive } from "./authState.js";
+import { endSsoLogin } from "./ssoSessions.js";
+import { syncDirectoryGroupsOnLogin } from "./groupSync.js";
 import { LDAP_REASON_TEXT, ldapAuthenticate } from "./ldapAuth.js";
 import { completeLogin, directoryAccountActive, ldapUsable, resolveDirectoryLogin } from "./loginSecurity.js";
 import { localPasswordBlockedText, usesLocalPassword } from "./loginSecurityRules.js";
@@ -250,9 +252,10 @@ const UPDATE_APP_FOR_EMAIL_RECOVERY_ERROR =
  * (devices.js DELETE /devices/:id) 그 기기의 토큰만 REST·갱신·소켓에서 막힌다(authState.js deviceActive). 기기 등록 전에 받은
  * 토큰(로그인 직후·예전 앱)은 묶이지 않아서, 그런 토큰까지 끊으려면 "다른 모든 기기에서 로그아웃"(tokenVersion)을 쓴다.
  */
-export function issueTokenPair(user, { deviceId = null, authAt = null } = {}) {
+export function issueTokenPair(user, { deviceId = null, authAt = null, ssoSessionId = null } = {}) {
   const tokenVersion = user.tokenVersion ?? 0;
-  const did = deviceId ? { did: deviceId } : {};
+  // did — 묶인 기기, ssid — 회사 계정 로그인 세션(그쪽에서 로그아웃하면 이 토큰도 막힌다 — authState.js ssoSessionActive).
+  const did = { ...(deviceId ? { did: deviceId } : {}), ...(ssoSessionId ? { ssid: ssoSessionId } : {}) };
   // aat — 처음 로그인(비밀번호·디렉터리·회사 계정)한 시각(초). 토큰을 다시 내줘도(갱신·기기 등록·비밀번호 변경) 그대로 이어서,
   // 회사 계정으로만 들어오는 계정은 이 시각에서 정한 날수가 지나면 다시 회사 계정으로 확인하게 한다(/refresh).
   const aat = Number.isInteger(authAt) ? authAt : Math.floor(Date.now() / 1000);
@@ -818,6 +821,8 @@ export function createAuthRouter(io) {
       user = resolved.user;
       if (user.deletedAt) return res.status(403).json({ error: "탈퇴한 계정입니다." });
       if (user.suspendedAt) return res.status(403).json({ error: "정지된 계정입니다. 서버 운영자에게 문의하세요." });
+      // 디렉터리 그룹으로 팀·등급 맞추기(groupSync.js — 꺼져 있으면 아무것도 안 한다).
+      user = await syncDirectoryGroupsOnLogin(io, user, { source: "ldap", groups: directory.profile.groups });
     }
     return completeLogin(res, user, { method: directory.profile ? "ldap" : "password" });
   });
@@ -864,8 +869,14 @@ export function createAuthRouter(io) {
         .json({ error: "세션이 만료되었습니다. 다시 로그인해주세요." });
     }
     const authAt = Number.isInteger(payload.aat) ? payload.aat : payload.iat;
-    // 사내 디렉터리 계정 — 퇴사 등으로 디렉터리에서 막혔거나 없어졌으면 여기서 끊는다(10분마다 한 번 확인).
-    if (user.authSource === "ldap" && !(await directoryAccountActive(user))) {
+    // 회사 계정 쪽에서 로그아웃한(또는 이 앱에서 로그아웃한) 로그인 세션의 토큰.
+    if (payload.ssid && !(await ssoSessionActive(payload.ssid, user.id))) {
+      return res
+        .status(401)
+        .json({ error: "회사 계정에서 로그아웃되었습니다. 다시 로그인해 주세요." });
+    }
+    // 사내 디렉터리 계정 — 퇴사 등으로 디렉터리에서 막혔거나 없어졌으면 여기서 끊는다(10분마다 한 번 확인 — 그때 그룹 규칙도 맞춘다).
+    if (user.authSource === "ldap" && !(await directoryAccountActive(user, { io }))) {
       return res
         .status(401)
         .json({ error: "회사 계정을 쓸 수 없습니다. 다시 로그인하거나 관리자에게 문의하세요." });
@@ -880,7 +891,26 @@ export function createAuthRouter(io) {
       }
     }
 
-    res.json({ accessToken: issueTokenPair(user, { deviceId: payload.did, authAt }).accessToken });
+    res.json({ accessToken: issueTokenPair(user, { deviceId: payload.did, authAt, ssoSessionId: payload.ssid ?? null }).accessToken });
+  });
+
+  /**
+   * 로그아웃 — 앱이 토큰을 지우기 전에 부른다(AccessToken 또는 본문의 refreshToken). 회사 계정으로 들어온 로그인이면 그 세션을 끝내고
+   * (그 세션의 토큰은 바로 못 쓴다), 관리자가 "회사 계정에서도 로그아웃"을 켰으면 브라우저로 열 그쪽 로그아웃 주소(`idpLogoutUrl`)를
+   * 돌려준다. 토큰이 이미 만료됐어도 200(앱은 어차피 로그아웃한다).
+   */
+  router.post("/logout", async (req, res) => {
+    let payload = await accessPayload(req);
+    if (!payload && typeof req.body?.refreshToken === "string") {
+      try {
+        const p = jwt.verify(req.body.refreshToken, JWT_SECRET);
+        if (p.type === "refresh") payload = p;
+      } catch {
+        payload = null;
+      }
+    }
+    if (!payload?.ssid) return res.json({ ok: true, idpLogoutUrl: null });
+    res.json({ ok: true, idpLogoutUrl: await endSsoLogin(payload.ssid, payload.sub, "app_logout") });
   });
 
   return router;
@@ -920,6 +950,7 @@ export async function accessPayload(req) {
   const state = await accountState(payload.sub);
   if (state.blocked || state.tokenVersion !== (payload.tokenVersion ?? 0)) return null;
   if (payload.did && !(await deviceActive(payload.did, payload.sub))) return null;
+  if (payload.ssid && !(await ssoSessionActive(payload.ssid, payload.sub))) return null;
   return payload;
 }
 
@@ -955,6 +986,10 @@ export async function verifySocketToken(token) {
   }
   // "내 기기"에서 로그아웃시킨 기기의 토큰.
   if (payload.did && !(await deviceActive(payload.did, user.id))) {
+    throw new Error("unauthorized");
+  }
+  // 회사 계정 쪽에서 로그아웃한 로그인 세션.
+  if (payload.ssid && !(await ssoSessionActive(payload.ssid, user.id))) {
     throw new Error("unauthorized");
   }
   return payload;

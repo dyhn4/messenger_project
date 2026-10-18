@@ -591,7 +591,7 @@ export function createUsersRouter(io) {
 
     // 이 기기에 묶인 토큰이었으면 새 토큰도 그 기기에 묶는다("내 기기"에서 이 기기만 로그아웃할 수 있게).
     res.json({
-      ...issueTokenPair(updated, { deviceId: req.user.did, authAt: req.user.aat ?? req.user.iat }),
+      ...issueTokenPair(updated, { deviceId: req.user.did, authAt: req.user.aat ?? req.user.iat, ssoSessionId: req.user.ssid ?? null }),
       userId: updated.id,
       username: updated.username,
     });

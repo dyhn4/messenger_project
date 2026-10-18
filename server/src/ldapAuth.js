@@ -91,7 +91,7 @@ export async function ldapAuthenticate({ settings, username, password, clientFac
 /**
  * 아직 디렉터리에 있고 쓸 수 있는 사람인지(토큰 갱신 때 — 퇴사로 계정을 막으면 그 뒤 갱신에서 로그아웃되게). 연결할 때 적어 둔
  * [subject](objectGUID·DN)로 찾는다 — 이 앱의 아이디가 디렉터리 아이디와 달라도 된다. `{ active: true|false }` |
- * `{ unavailable: true }`(디렉터리에 못 붙음).
+ * `{ unavailable: true }`(디렉터리에 못 붙음). 찾았으면 [profile](그룹 포함)도.
  */
 export async function ldapStillActive({ settings, subject, clientFactory = defaultLdapClient }) {
   const search = subjectSearch(subject, settings.ldapBaseDn);
@@ -100,7 +100,8 @@ export async function ldapStillActive({ settings, subject, clientFactory = defau
   if (found.error === 'unavailable') return { unavailable: true };
   if (found.error) return { active: false };
   const profile = entryToProfile(found.entry, settings);
-  return { active: !profile.disabled && profile.subject === subject };
+  // 사람 정보도 같이 — 그룹 규칙(groupSync.js)이 10분마다 그룹을 다시 맞춘다.
+  return { active: !profile.disabled && profile.subject === subject, profile };
 }
 
 /**

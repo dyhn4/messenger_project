@@ -9,8 +9,9 @@ import '../services/sso_flow.dart';
 import 'otp_dialogs.dart' show OtpCodeField;
 import '../l10n/tr.dart';
 
-/// 회사 계정(Google·Microsoft) 로그인·연결 대화상자 — 브라우저를 열어 두고 결과를 기다린다(sso_flow.dart). 같은 이메일의
-/// 계정이 이미 있으면 그 이메일로 받은 확인 코드를 넣어야 연결·로그인된다(남의 계정을 가로채지 못하게).
+/// 회사 계정(Google·Microsoft·SAML) 로그인·연결 대화상자 — 브라우저를 열어 두고 결과를 기다린다(sso_flow.dart). 같은 이메일의
+/// 계정이 이미 있으면 그 이메일로 받은 확인 코드를 넣어야 연결·로그인된다(남의 계정을 가로채지 못하게). SAML은 관리자가 정한 IdP
+/// 이름([samlLabel] — 예: "Okta")으로 보인다.
 
 /// 브라우저로 연다 — 웹은 새 탭.
 Future<bool> openSsoUrl(Uri url) =>
@@ -21,6 +22,7 @@ Future<AuthResult?> showSsoLoginDialog(
   BuildContext context, {
   required ApiClient api,
   required String provider,
+  String? samlLabel,
   SsoFlow Function()? flowFactory,
 }) async {
   final result = await showDialog<Object>(
@@ -28,6 +30,7 @@ Future<AuthResult?> showSsoLoginDialog(
     barrierDismissible: false,
     builder: (_) => _SsoDialog(
       provider: provider,
+      samlLabel: samlLabel,
       link: false,
       flow: flowFactory?.call() ?? SsoFlow(api: api, openUrl: openSsoUrl),
     ),
@@ -40,6 +43,7 @@ Future<bool> showSsoLinkDialog(
   BuildContext context, {
   required ApiClient api,
   required String provider,
+  String? samlLabel,
   SsoFlow Function()? flowFactory,
 }) async {
   final result = await showDialog<Object>(
@@ -47,6 +51,7 @@ Future<bool> showSsoLinkDialog(
     barrierDismissible: false,
     builder: (_) => _SsoDialog(
       provider: provider,
+      samlLabel: samlLabel,
       link: true,
       flow: flowFactory?.call() ?? SsoFlow(api: api, openUrl: openSsoUrl),
     ),
@@ -56,10 +61,14 @@ Future<bool> showSsoLinkDialog(
 
 class _SsoDialog extends StatefulWidget {
   final String provider;
+
+  /// SAML IdP 이름(관리자가 정한 단추 글) — 다른 회사 계정이면 쓰지 않는다.
+  final String? samlLabel;
   final bool link;
   final SsoFlow flow;
   const _SsoDialog({
     required this.provider,
+    this.samlLabel,
     required this.link,
     required this.flow,
   });
@@ -75,7 +84,10 @@ class _SsoDialogState extends State<_SsoDialog> {
   bool _busy = false;
   String? _error;
 
-  String get _label => ssoProviderLabel(widget.provider);
+  String get _label =>
+      ssoProviderLabel(widget.provider, samlLabel: widget.samlLabel);
+
+  bool get _isSaml => widget.provider == 'saml';
 
   @override
   void initState() {
@@ -166,9 +178,14 @@ class _SsoDialogState extends State<_SsoDialog> {
           const CircularProgressIndicator(),
           const SizedBox(height: 16),
           Text(
-            tr('브라우저에서 {_label} 회사 계정으로 로그인하세요. 끝나면 여기서 저절로 이어집니다.', {
-              '_label': _label,
-            }),
+            // SAML은 IdP 이름 자체가 "회사 계정(SAML)"·"Okta"처럼 계정을 가리켜서 "… 회사 계정으로"를 붙이지 않는다.
+            _isSaml
+                ? tr('브라우저에서 {label}에 로그인하세요. 끝나면 여기서 저절로 이어집니다.', {
+                    'label': _label,
+                  })
+                : tr('브라우저에서 {_label} 회사 계정으로 로그인하세요. 끝나면 여기서 저절로 이어집니다.', {
+                    '_label': _label,
+                  }),
             textAlign: TextAlign.center,
             style: TextStyle(color: hint),
           ),
@@ -235,7 +252,11 @@ class _SsoDialogState extends State<_SsoDialog> {
     final linkStep = _result is SsoLinkRequired;
     return AlertDialog(
       title: Text(
-        widget.link
+        _isSaml
+            ? (widget.link
+                  ? tr('{label} 연결', {'label': _label})
+                  : tr('{label} 로그인', {'label': _label}))
+            : widget.link
             ? tr('{_label} 계정 연결', {'_label': _label})
             : tr('{_label} 계정으로 로그인', {'_label': _label}),
       ),

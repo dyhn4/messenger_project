@@ -18,6 +18,7 @@ import {
   teamMembers,
   teams,
   users,
+  workWages,
 } from '../schema.js';
 
 // ── 결재 문서 ───────────────────────────────────────────────────────────
@@ -357,7 +358,8 @@ export async function sumDeductedLeave({ scopeKey, userId, from, to }) {
   const rows = await db
     .select({
       status: approvalDocuments.status,
-      halfDays: sql`coalesce(sum((${approvalDocuments.payload}->>'halfDays')::int), 0)`.mapWith(Number),
+      // 시간 연차는 0.25 단위라 정수가 아니다.
+      halfDays: sql`coalesce(sum((${approvalDocuments.payload}->>'halfDays')::numeric), 0)`.mapWith(Number),
     })
     .from(approvalDocuments)
     .where(
@@ -498,6 +500,23 @@ export async function listApprovedOvertime({ scopeKey, from, to, userIds = null 
     .where(and(...conditions));
 }
 
+/** [userId]의 결재 중·승인된 연장근무 신청 중 근무일이 [from]~[to](둘 다 포함)인 것 — 주 52시간 지키기(workPolicy.js). */
+export async function listOvertimeRequests({ scopeKey, userId, from, to }) {
+  return db
+    .select({ id: approvalDocuments.id, status: approvalDocuments.status, payload: approvalDocuments.payload })
+    .from(approvalDocuments)
+    .where(
+      and(
+        eq(approvalDocuments.scopeKey, scopeKey),
+        eq(approvalDocuments.authorId, userId),
+        eq(approvalDocuments.kind, 'overtime'),
+        inArray(approvalDocuments.status, ['approved', 'pending']),
+        gte(sql`${approvalDocuments.payload}->>'workDate'`, from),
+        lte(sql`${approvalDocuments.payload}->>'workDate'`, to),
+      ),
+    );
+}
+
 /** 이 사람의 결재 중·승인된 휴가 가운데 [from]~[to](둘 다 포함)와 겹치는 것 하나(없으면 null) — 같은 날 휴가를 두 번 내지 못하게. */
 export async function findOverlappingLeave({ scopeKey, userId, from, to }) {
   const [row] = await db
@@ -633,14 +652,53 @@ export async function insertClockIn(fields) {
   return row ?? null;
 }
 
-/** 퇴근 — 아직 안 닫힌 기록만 닫는다(이미 퇴근했으면 null). */
-export async function updateClockOut(id, { clockOutAt, clockOutLan }) {
+/** 퇴근 — 아직 안 닫힌 기록만 닫는다(이미 퇴근했으면 null). [extra]는 함께 바꿀 값(열린 휴게 닫기·퇴근 위치). */
+export async function updateClockOut(id, { clockOutAt, clockOutLan, ...extra }) {
   const [row] = await db
     .update(attendanceRecords)
-    .set({ clockOutAt, clockOutLan, updatedAt: new Date() })
+    .set({ clockOutAt, clockOutLan, ...extra, updatedAt: new Date() })
     .where(and(eq(attendanceRecords.id, id), isNull(attendanceRecords.clockOutAt)))
     .returning();
   return row ?? null;
+}
+
+/** 휴게 목록 바꾸기 — 퇴근 전인 기록만(퇴근했으면 null). */
+export async function updateAttendanceBreaks(id, breaks) {
+  const [row] = await db
+    .update(attendanceRecords)
+    .set({ breaks, updatedAt: new Date() })
+    .where(and(eq(attendanceRecords.id, id), isNull(attendanceRecords.clockOutAt)))
+    .returning();
+  return row ?? null;
+}
+
+// ── 통상시급(가산 수당 — workPolicy.js) ──
+
+export async function listWorkWages(scopeKey) {
+  return db.select().from(workWages).where(eq(workWages.scopeKey, scopeKey));
+}
+
+export async function findWorkWage(scopeKey, userId) {
+  const [row] = await db
+    .select()
+    .from(workWages)
+    .where(and(eq(workWages.scopeKey, scopeKey), eq(workWages.userId, userId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** 통상시급 정하기 — [hourlyWage]가 null이면 지운다. */
+export async function setWorkWage(scopeKey, userId, hourlyWage) {
+  if (hourlyWage === null) {
+    await db.delete(workWages).where(and(eq(workWages.scopeKey, scopeKey), eq(workWages.userId, userId)));
+    return null;
+  }
+  const [row] = await db
+    .insert(workWages)
+    .values({ scopeKey, userId, hourlyWage })
+    .onConflictDoUpdate({ target: [workWages.scopeKey, workWages.userId], set: { hourlyWage, updatedAt: new Date() } })
+    .returning();
+  return row;
 }
 
 /**

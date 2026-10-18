@@ -615,13 +615,25 @@ enum ApprovalBox {
 DateTime? _time(Object? v) =>
     v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
 
-/// 반일 단위 → "3일" / "2.5일" — 서버 annualLeave.js halfDaysText와 같다.
-String halfDaysText(int halfDays) {
-  final text = halfDays % 2 == 0
-      ? '${halfDays ~/ 2}'
-      : (halfDays / 2).toStringAsFixed(1);
-  return tr('{text}일', {'text': text});
+/// 반일 단위 → "3일" / "2.5일" / "1일 6시간" / "2시간" — 서버 annualLeave.js leaveAmountText와 같다(시간 연차로 0.25 = 1시간 단위일 수
+/// 있다 — 하루 8시간).
+String halfDaysText(num halfDays) {
+  if (halfDays == halfDays.roundToDouble()) {
+    final n = halfDays.round();
+    final text = n % 2 == 0 ? '${n ~/ 2}' : (n / 2).toStringAsFixed(1);
+    return tr('{text}일', {'text': text});
+  }
+  final sign = halfDays < 0 ? '-' : '';
+  final hours = (halfDays.abs() * 4).round();
+  final days = hours ~/ 8;
+  final rest = hours % 8;
+  return days > 0
+      ? tr('{sign}{d}일 {h}시간', {'sign': sign, 'd': days, 'h': rest})
+      : tr('{sign}{h}시간', {'sign': sign, 'h': rest});
 }
+
+/// JSON 숫자 → double(없으면 null).
+double? _dbl(Object? v) => (v as num?)?.toDouble();
 
 /// 하루 중 분 → 'HH:MM'.
 String minutesText(int minutes) =>
@@ -658,6 +670,10 @@ class LeaveTypeInfo {
   final bool deducts;
   final bool half;
 
+  /// 시간 단위 연차(반반차·시간 연차 — 그날 시작 시각과 시간 수), [fixedHours]가 있으면 그 시간으로 정해짐(반반차 2시간).
+  final bool hourly;
+  final int? fixedHours;
+
   /// 지금 신청할 수 있는지(관리자가 끈 종류는 예전 신청의 이름을 보이려고 목록에 남는다).
   final bool enabled;
 
@@ -668,6 +684,8 @@ class LeaveTypeInfo {
     required this.label,
     required this.deducts,
     required this.half,
+    this.hourly = false,
+    this.fixedHours,
     this.enabled = true,
     this.builtin = true,
   });
@@ -677,6 +695,8 @@ class LeaveTypeInfo {
     label: json['label'] as String? ?? json['key'] as String,
     deducts: json['deducts'] as bool? ?? false,
     half: json['half'] as bool? ?? false,
+    hourly: json['hourly'] == true,
+    fixedHours: (json['fixedHours'] as num?)?.toInt(),
     enabled: json['enabled'] as bool? ?? true,
     builtin: json['builtin'] as bool? ?? true,
   );
@@ -698,6 +718,12 @@ class WorkSchedule {
   final int? end;
   final int? coreStart;
   final int? coreEnd;
+
+  /// 탄력적 근로시간제·선택근무 정산 기간 — 'flex2w' | 'flex3m' | 'select' | null(주 단위), 이름, 기간이 시작하는 날, 선택근무 정산 개월.
+  final String? periodType;
+  final String? periodLabel;
+  final String? periodStart;
+  final int? periodMonths;
   const WorkSchedule({
     required this.mode,
     required this.label,
@@ -705,6 +731,10 @@ class WorkSchedule {
     this.end,
     this.coreStart,
     this.coreEnd,
+    this.periodType,
+    this.periodLabel,
+    this.periodStart,
+    this.periodMonths,
   });
 
   static WorkSchedule? fromJson(Object? json) {
@@ -717,6 +747,10 @@ class WorkSchedule {
       end: n('end'),
       coreStart: n('coreStart'),
       coreEnd: n('coreEnd'),
+      periodType: json['periodType'] as String?,
+      periodLabel: json['periodLabel'] as String?,
+      periodStart: json['periodStart'] as String?,
+      periodMonths: n('periodMonths'),
     );
   }
 
@@ -740,6 +774,10 @@ class WorkBreakdown {
   final int overtimeMinutes;
   final int holidayMinutes;
   final int nightMinutes;
+
+  /// 휴게를 직접 눌렀는지, 법정 휴게보다 모자란 분.
+  final bool breakRecorded;
+  final int breakShortMinutes;
   const WorkBreakdown({
     this.workedMinutes = 0,
     this.breakMinutes = 0,
@@ -747,6 +785,8 @@ class WorkBreakdown {
     this.overtimeMinutes = 0,
     this.holidayMinutes = 0,
     this.nightMinutes = 0,
+    this.breakRecorded = false,
+    this.breakShortMinutes = 0,
   });
 
   factory WorkBreakdown.fromJson(Object? json) {
@@ -759,6 +799,8 @@ class WorkBreakdown {
       overtimeMinutes: n('overtimeMinutes'),
       holidayMinutes: n('holidayMinutes'),
       nightMinutes: n('nightMinutes'),
+      breakRecorded: json['breakRecorded'] == true,
+      breakShortMinutes: n('breakShortMinutes'),
     );
   }
 }
@@ -1312,7 +1354,7 @@ class ApprovalDocument {
         final range = start == end
             ? shortDateText(start)
             : '${shortDateText(start)}~${shortDateText(end)}';
-        final half = (payload['halfDays'] as num?)?.toInt() ?? 0;
+        final half = payload['halfDays'] as num? ?? 0;
         return '$label · $range · ${halfDaysText(half)}';
       case ApprovalKind.expense:
         final amount = (payload['amount'] as num?)?.toInt() ?? 0;
@@ -1330,12 +1372,16 @@ class ApprovalDocument {
 
 class LeaveAdjustment {
   final String id;
-  final int halfDays;
+
+  /// 'manual'(관리자 조정) | 'carry'(지난 기간에서 이월).
+  final String kind;
+  final double halfDays;
   final String reason;
   final String createdByName;
   final DateTime? createdAt;
   const LeaveAdjustment({
     required this.id,
+    this.kind = 'manual',
     required this.halfDays,
     required this.reason,
     required this.createdByName,
@@ -1345,7 +1391,8 @@ class LeaveAdjustment {
   factory LeaveAdjustment.fromJson(Map<String, dynamic> json) =>
       LeaveAdjustment(
         id: json['id'] as String,
-        halfDays: (json['halfDays'] as num?)?.toInt() ?? 0,
+        kind: json['kind'] as String? ?? 'manual',
+        halfDays: _dbl(json['halfDays']) ?? 0,
         reason: json['reason'] as String? ?? '',
         createdByName: json['createdByName'] as String? ?? '',
         createdAt: _time(json['createdAt']),
@@ -1360,13 +1407,18 @@ class LeaveBalance {
 
   /// 근속 연수(0이면 입사 첫해).
   final int? serviceYears;
-  final int? statutoryHalfDays;
-  final int adjustmentHalfDays;
-  final int? grantedHalfDays;
-  final int usedHalfDays;
-  final int pendingHalfDays;
-  final int? remainingHalfDays;
+
+  /// 반일 단위(시간 연차·이월로 0.25 = 1시간 단위일 수 있음).
+  final double? statutoryHalfDays;
+  final double adjustmentHalfDays;
+  final double? grantedHalfDays;
+  final double usedHalfDays;
+  final double pendingHalfDays;
+  final double? remainingHalfDays;
   final List<LeaveAdjustment> adjustments;
+
+  /// 연차 기준 — 'hire'(입사일) | 'fiscal'(회계연도).
+  final String basis;
 
   const LeaveBalance({
     this.hireDate,
@@ -1380,6 +1432,7 @@ class LeaveBalance {
     this.pendingHalfDays = 0,
     this.remainingHalfDays,
     this.adjustments = const [],
+    this.basis = 'hire',
   });
 
   factory LeaveBalance.fromJson(Map<String, dynamic> json) {
@@ -1390,12 +1443,13 @@ class LeaveBalance {
       periodStart: period?['start'] as String?,
       periodEnd: period?['end'] as String?,
       serviceYears: n(period?['year']),
-      statutoryHalfDays: n(json['statutoryHalfDays']),
-      adjustmentHalfDays: n(json['adjustmentHalfDays']) ?? 0,
-      grantedHalfDays: n(json['grantedHalfDays']),
-      usedHalfDays: n(json['usedHalfDays']) ?? 0,
-      pendingHalfDays: n(json['pendingHalfDays']) ?? 0,
-      remainingHalfDays: n(json['remainingHalfDays']),
+      statutoryHalfDays: _dbl(json['statutoryHalfDays']),
+      adjustmentHalfDays: _dbl(json['adjustmentHalfDays']) ?? 0,
+      grantedHalfDays: _dbl(json['grantedHalfDays']),
+      usedHalfDays: _dbl(json['usedHalfDays']) ?? 0,
+      pendingHalfDays: _dbl(json['pendingHalfDays']) ?? 0,
+      remainingHalfDays: _dbl(json['remainingHalfDays']),
+      basis: json['basis'] as String? ?? 'hire',
       adjustments: [
         for (final a in (json['adjustments'] as List? ?? const []))
           LeaveAdjustment.fromJson((a as Map).cast<String, dynamic>()),
@@ -1417,7 +1471,7 @@ class TeamLeave {
   final String? leaveLabel;
   final String startDate;
   final String endDate;
-  final int halfDays;
+  final double halfDays;
   const TeamLeave({
     this.leaveLabel,
     required this.documentId,
@@ -1437,7 +1491,7 @@ class TeamLeave {
     leaveType: json['leaveType'] as String? ?? '',
     startDate: json['startDate'] as String? ?? '',
     endDate: json['endDate'] as String? ?? '',
-    halfDays: (json['halfDays'] as num?)?.toInt() ?? 0,
+    halfDays: _dbl(json['halfDays']) ?? 0,
   );
 }
 
@@ -1464,7 +1518,19 @@ class AttendanceRecord {
   /// 휴게·실근로·연장·야간·휴일 근무.
   final WorkBreakdown breakdown;
 
+  /// 직접 누른 휴게(끝이 null이면 휴게 중)와 지금 휴게 중인지.
+  final List<({DateTime start, DateTime? end})> breaks;
+  final bool onBreak;
+
+  /// 출근·퇴근할 때 보낸 기기 위치(없으면 null).
+  final AttendanceLocation? clockInLocation;
+  final AttendanceLocation? clockOutLocation;
+
   const AttendanceRecord({
+    this.breaks = const [],
+    this.onBreak = false,
+    this.clockInLocation,
+    this.clockOutLocation,
     this.clockInMode = 'office',
     this.note,
     this.breakdown = const WorkBreakdown(),
@@ -1501,6 +1567,14 @@ class AttendanceRecord {
         clockInMode: json['clockInMode'] as String? ?? 'office',
         note: json['note'] as String?,
         breakdown: WorkBreakdown.fromJson(json['breakdown']),
+        breaks: [
+          for (final b in json['breaks'] as List? ?? const [])
+            if (b is Map && _time(b['startAt']) != null)
+              (start: _time(b['startAt'])!, end: _time(b['endAt'])),
+        ],
+        onBreak: json['onBreak'] == true,
+        clockInLocation: AttendanceLocation.maybe(json['clockInLocation']),
+        clockOutLocation: AttendanceLocation.maybe(json['clockOutLocation']),
       );
 
   static AttendanceRecord? maybe(Object? json) => json is Map
@@ -1524,8 +1598,30 @@ class AttendanceToday {
   /// 이번 주(월~일) 근로시간 — 주 52시간.
   final WeeklyHours? week;
 
+  /// 휴게 시작·끝을 누를 수 있는지.
+  final bool canBreakStart;
+  final bool canBreakEnd;
+
+  /// 이 사람의 주 상한(분 — 탄력·선택근무면 다름, null이면 없음)과 범위의 주 52시간 지키기('warn' | 'approval' | 'block').
+  final int? weeklyLimitMinutes;
+  final String overtimeGuard;
+
+  /// 출근할 때 위치를 보내야 하는지(외근은 필수) · 사무실 위치가 정해졌는지(거리를 잰다).
+  final bool requireFieldLocation;
+  final bool officeLocationSet;
+
+  /// 탄력·선택근무의 지금 기간(없으면 null).
+  final WorkPeriodSummary? period;
+
   const AttendanceToday({
     this.week,
+    this.canBreakStart = false,
+    this.canBreakEnd = false,
+    this.weeklyLimitMinutes = 52 * 60,
+    this.overtimeGuard = 'warn',
+    this.requireFieldLocation = false,
+    this.officeLocationSet = false,
+    this.period,
     required this.today,
     this.record,
     this.openRecord,
@@ -1545,6 +1641,15 @@ class AttendanceToday {
         canClockOut: json['canClockOut'] as bool? ?? false,
         inLan: json['inLan'] as bool? ?? false,
         week: WeeklyHours.fromJson(json['week']),
+        canBreakStart: json['canBreakStart'] == true,
+        canBreakEnd: json['canBreakEnd'] == true,
+        weeklyLimitMinutes: json.containsKey('weeklyLimitMinutes')
+            ? (json['weeklyLimitMinutes'] as num?)?.toInt()
+            : 52 * 60,
+        overtimeGuard: json['overtimeGuard'] as String? ?? 'warn',
+        requireFieldLocation: json['requireFieldLocation'] == true,
+        officeLocationSet: json['officeLocationSet'] == true,
+        period: WorkPeriodSummary.maybe(json['period']),
         workStart: (json['workStart'] as num?)?.toInt() ?? 540,
         workEnd: (json['workEnd'] as num?)?.toInt() ?? 1080,
       );
@@ -1558,7 +1663,7 @@ class AttendanceSummary {
   final int earlyLeave;
   final int missingClockOut;
   final int absent;
-  final int leaveHalfDays;
+  final double leaveHalfDays;
 
   /// 승인된 출장 날 수와 승인된 연장근무(분) — 출장·연장근무 신청(양식).
   final int tripDays;
@@ -1594,7 +1699,7 @@ class AttendanceSummary {
       earlyLeave: n('earlyLeave'),
       missingClockOut: n('missingClockOut'),
       absent: n('absent'),
-      leaveHalfDays: n('leaveHalfDays'),
+      leaveHalfDays: _dbl(json['leaveHalfDays']) ?? 0,
       tripDays: n('tripDays'),
       overtimeMinutes: n('overtimeMinutes'),
       netMinutes: n('netMinutes'),
@@ -1630,7 +1735,11 @@ class AttendanceDay {
   final String date;
   final String? holiday;
   final String? leaveType;
-  final int leaveHalfDays;
+  final double leaveHalfDays;
+
+  /// 시간 연차면 몇 시간·그 시간대(하루 중 분 — start·end).
+  final int? leaveHours;
+  final ({int start, int end})? leaveHourRange;
 
   /// 승인된 출장 날인지, 승인된 연장근무(분).
   final bool trip;
@@ -1641,6 +1750,8 @@ class AttendanceDay {
     this.holiday,
     this.leaveType,
     this.leaveHalfDays = 0,
+    this.leaveHours,
+    this.leaveHourRange,
     this.trip = false,
     this.overtimeMinutes = 0,
     this.record,
@@ -1652,7 +1763,14 @@ class AttendanceDay {
       date: json['date'] as String,
       holiday: json['holiday'] as String?,
       leaveType: leave?['type'] as String?,
-      leaveHalfDays: (leave?['halfDays'] as num?)?.toInt() ?? 0,
+      leaveHalfDays: _dbl(leave?['halfDays']) ?? 0,
+      leaveHours: (leave?['hours'] as num?)?.toInt(),
+      leaveHourRange: leave?['hourRange'] is Map
+          ? (
+              start: ((leave!['hourRange'] as Map)['start'] as num).toInt(),
+              end: ((leave['hourRange'] as Map)['end'] as num).toInt(),
+            )
+          : null,
       trip: json['trip'] == true,
       overtimeMinutes: (json['overtimeMinutes'] as num?)?.toInt() ?? 0,
       record: AttendanceRecord.maybe(json['record']),
@@ -1673,11 +1791,19 @@ class AttendanceMonth {
 
   /// 이 달에 걸친 주들의 근로시간(주 52시간).
   final List<WeeklyHours> weeks;
+
+  /// 이 사람의 주 상한(분 — null이면 없음), 이 달에 걸친 탄력·선택근무 기간들, 가산 수당(참고용 — 통상시급을 정한 사람만).
+  final int? weeklyLimitMinutes;
+  final List<WorkPeriodSummary> periods;
+  final WorkAllowance? allowance;
   const AttendanceMonth({
     required this.month,
     required this.days,
     required this.summary,
     this.weeks = const [],
+    this.weeklyLimitMinutes = 52 * 60,
+    this.periods = const [],
+    this.allowance,
   });
 
   factory AttendanceMonth.fromJson(Map<String, dynamic> json) =>
@@ -1694,6 +1820,14 @@ class AttendanceMonth {
           for (final w in (json['weeks'] as List? ?? const []))
             ?WeeklyHours.fromJson(w),
         ],
+        weeklyLimitMinutes: json.containsKey('weeklyLimitMinutes')
+            ? (json['weeklyLimitMinutes'] as num?)?.toInt()
+            : 52 * 60,
+        periods: [
+          for (final p in (json['periods'] as List? ?? const []))
+            ?WorkPeriodSummary.maybe(p),
+        ],
+        allowance: WorkAllowance.maybe(json['allowance']),
       );
 }
 
@@ -1702,10 +1836,14 @@ class AttendanceSummaryRow {
   final String userId;
   final String name;
   final AttendanceSummary summary;
+
+  /// 가산 수당(참고용 — 통상시급을 정한 사람만).
+  final WorkAllowance? allowance;
   const AttendanceSummaryRow({
     required this.userId,
     required this.name,
     required this.summary,
+    this.allowance,
   });
 
   factory AttendanceSummaryRow.fromJson(Map<String, dynamic> json) =>
@@ -1713,6 +1851,7 @@ class AttendanceSummaryRow {
         userId: json['userId'] as String,
         name: json['name'] as String? ?? '',
         summary: AttendanceSummary.fromJson(json),
+        allowance: WorkAllowance.maybe(json['allowance']),
       );
 }
 
@@ -1724,11 +1863,15 @@ class GroupwareMember {
   final String role;
   final bool suspended;
   final String? hireDate;
-  final int? grantedHalfDays;
-  final int usedHalfDays;
-  final int pendingHalfDays;
-  final int? remainingHalfDays;
+  final double? grantedHalfDays;
+  final double usedHalfDays;
+  final double pendingHalfDays;
+  final double? remainingHalfDays;
+
+  /// 통상시급(원 — 가산 수당 계산용, 없으면 null).
+  final int? hourlyWage;
   const GroupwareMember({
+    this.hourlyWage,
     required this.id,
     required this.name,
     required this.username,
@@ -1750,10 +1893,11 @@ class GroupwareMember {
       role: json['role'] as String? ?? 'guest',
       suspended: json['suspended'] as bool? ?? false,
       hireDate: json['hireDate'] as String?,
-      grantedHalfDays: n(json['grantedHalfDays']),
-      usedHalfDays: n(json['usedHalfDays']) ?? 0,
-      pendingHalfDays: n(json['pendingHalfDays']) ?? 0,
-      remainingHalfDays: n(json['remainingHalfDays']),
+      grantedHalfDays: _dbl(json['grantedHalfDays']),
+      usedHalfDays: _dbl(json['usedHalfDays']) ?? 0,
+      pendingHalfDays: _dbl(json['pendingHalfDays']) ?? 0,
+      remainingHalfDays: _dbl(json['remainingHalfDays']),
+      hourlyWage: n(json['hourlyWage']),
     );
   }
 }
@@ -1998,4 +2142,142 @@ class ApprovalVerification {
   /// 바뀐 칸이 있는지(서명 없는 옛 칸은 빼고).
   bool get tampered =>
       steps.any((s) => s.result != 'valid' && s.result != 'unsealed');
+}
+
+/// 출퇴근할 때의 기기 위치(서버 workLocation.js) — [distance]는 사무실까지 m(사무실 위치를 정했을 때), [outside]는 사무실 출근인데 반경 밖.
+class AttendanceLocation {
+  final double lat;
+  final double lng;
+  final int? accuracy;
+  final int? distance;
+  final bool outside;
+  const AttendanceLocation({
+    required this.lat,
+    required this.lng,
+    this.accuracy,
+    this.distance,
+    this.outside = false,
+  });
+
+  static AttendanceLocation? maybe(Object? json) {
+    if (json is! Map || json['lat'] is! num || json['lng'] is! num) return null;
+    return AttendanceLocation(
+      lat: (json['lat'] as num).toDouble(),
+      lng: (json['lng'] as num).toDouble(),
+      accuracy: (json['accuracy'] as num?)?.toInt(),
+      distance: (json['distance'] as num?)?.toInt(),
+      outside: json['outside'] == true,
+    );
+  }
+
+  /// 지도에서 보기(OpenStreetMap — 앱 밖 브라우저).
+  String get mapUrl =>
+      'https://www.openstreetmap.org/?mlat=$lat&mlon=$lng#map=17/$lat/$lng';
+}
+
+/// 탄력적 근로시간제·선택근무 정산 기간 하나의 근로시간(서버 workPolicy.js periodSummary). [end]는 다음 기간 시작일(그날은 안 듦),
+/// [standardMinutes]는 주 40시간 × 주 수, [overtimeMinutes]는 그것을 넘은 시간, [overtimeCapMinutes]는 연장 한도(주 12시간 × 주 수).
+/// [status] 'ok' | 'warn'(한도의 80% 이상) | 'over'(한도를 넘었거나 주 상한을 넘은 주가 있음).
+class WorkPeriodSummary {
+  final String type;
+  final String start;
+  final String end;
+  final int days;
+  final int standardMinutes;
+  final int overtimeCapMinutes;
+  final int? weeklyMaxMinutes;
+  final int netMinutes;
+  final int overtimeMinutes;
+  final List<({String weekStart, int netMinutes, bool over})> weeks;
+  final String status;
+  const WorkPeriodSummary({
+    required this.type,
+    required this.start,
+    required this.end,
+    this.days = 0,
+    this.standardMinutes = 0,
+    this.overtimeCapMinutes = 0,
+    this.weeklyMaxMinutes,
+    this.netMinutes = 0,
+    this.overtimeMinutes = 0,
+    this.weeks = const [],
+    this.status = 'ok',
+  });
+
+  static WorkPeriodSummary? maybe(Object? json) {
+    if (json is! Map) return null;
+    int n(String k) => (json[k] as num?)?.toInt() ?? 0;
+    return WorkPeriodSummary(
+      type: json['type'] as String? ?? '',
+      start: json['start'] as String? ?? '',
+      end: json['end'] as String? ?? '',
+      days: n('days'),
+      standardMinutes: n('standardMinutes'),
+      overtimeCapMinutes: n('overtimeCapMinutes'),
+      weeklyMaxMinutes: (json['weeklyMaxMinutes'] as num?)?.toInt(),
+      netMinutes: n('netMinutes'),
+      overtimeMinutes: n('overtimeMinutes'),
+      weeks: [
+        for (final w in json['weeks'] as List? ?? const [])
+          if (w is Map)
+            (
+              weekStart: w['weekStart'] as String? ?? '',
+              netMinutes: (w['netMinutes'] as num?)?.toInt() ?? 0,
+              over: w['over'] == true,
+            ),
+      ],
+      status: json['status'] as String? ?? 'ok',
+    );
+  }
+
+  /// 기간의 마지막 날('YYYY-MM-DD').
+  String get lastDay =>
+      dateKeyOf(DateTime.parse(end).subtract(const Duration(days: 1)));
+}
+
+/// 탄력·선택근무 기간 종류의 이름(서버 workRules.js PERIOD_TYPE_LABEL).
+final workPeriodTypeLabels = {
+  'flex2w': tr('탄력 2주'),
+  'flex3m': tr('탄력 3개월'),
+  'select': tr('선택근무 정산'),
+};
+
+/// 가산 수당(참고용 — 서버 workPolicy.js allowanceOf): 통상시급, 연장·야간·휴일(8시간까지·넘는 부분) 분과 원.
+class WorkAllowance {
+  final int wage;
+  final int overtimeMinutes;
+  final int nightMinutes;
+  final int holidayMinutes;
+  final int holidayOverMinutes;
+  final int overtimePay;
+  final int nightPay;
+  final int holidayPay;
+  final int totalPay;
+  const WorkAllowance({
+    required this.wage,
+    this.overtimeMinutes = 0,
+    this.nightMinutes = 0,
+    this.holidayMinutes = 0,
+    this.holidayOverMinutes = 0,
+    this.overtimePay = 0,
+    this.nightPay = 0,
+    this.holidayPay = 0,
+    this.totalPay = 0,
+  });
+
+  static WorkAllowance? maybe(Object? json) {
+    if (json is! Map || json['wage'] is! num) return null;
+    int n(String k) => (json[k] as num?)?.toInt() ?? 0;
+    return WorkAllowance(
+      wage: n('wage'),
+      overtimeMinutes: n('overtimeMinutes'),
+      nightMinutes: n('nightMinutes'),
+      holidayMinutes: n('holidayMinutes'),
+      holidayOverMinutes: n('holidayOverMinutes'),
+      overtimePay: n('overtimePay'),
+      nightPay: n('nightPay'),
+      holidayPay: n('holidayPay'),
+      totalPay: n('totalPay'),
+    );
+  }
 }

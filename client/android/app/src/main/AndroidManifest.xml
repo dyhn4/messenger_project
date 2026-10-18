@@ -19,6 +19,10 @@
     <!-- 걸려온 화상회의를 잠금화면 위에 전체화면으로 띄우기 위한 권한(Android 14+에서
          통화/알람 앱에만 허용된다 — 우리는 category=call 알림에만 쓴다). -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- 그룹웨어 출퇴근 — 누를 때만 한 번 위치를 잰다(외근 위치 확인·사무실과의 거리 — geolocator,
+         services/device_location.dart). 요청 창은 처음 누를 때 뜨고, 백그라운드 위치는 쓰지 않는다. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- 통화 중에만 도는 포그라운드 서비스 — 이게 없으면 통화 중 홈으로 나가는 순간 OS가
          카메라/마이크 캡처를 끊는다(Android 14+). 알림바의 "통화 중" 표시가 이 서비스다. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

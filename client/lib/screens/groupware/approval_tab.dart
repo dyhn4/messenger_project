@@ -881,7 +881,7 @@ class _ApprovalDetailDialogState extends State<ApprovalDetailDialog> {
                 ? '${p['startDate']}'
                 : '${p['startDate']} ~ ${p['endDate']}',
           ),
-          row(tr('일수'), halfDaysText((p['halfDays'] as num?)?.toInt() ?? 0)),
+          row(tr('일수'), halfDaysText(p['halfDays'] as num? ?? 0)),
         ],
         if (doc.kind == ApprovalKind.expense) ...[
           row(tr('금액'), wonText((p['amount'] as num?)?.toInt() ?? 0)),

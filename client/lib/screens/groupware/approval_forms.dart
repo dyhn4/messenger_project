@@ -1000,7 +1000,20 @@ class ApprovalDateField extends StatelessWidget {
   }
 }
 
-/// 휴가 신청 — 종류, 기간(반차는 하루), 사유, 결재선. [balance]가 있으면 남은 연차를 보여 준다. 올렸으면 그 문서.
+/// 시간 연차 한 번에 쓸 수 있는 시간(1~7 — 8시간이면 연차, 서버 annualLeave.js HOURLY_LEAVE_MAX).
+const kHourlyLeaveMax = 7;
+
+/// 'HH:MM' → 하루 중 분(형식이 틀리면 null — 서버 annualLeave.js leaveRequestAmount와 같은 규칙).
+int? leaveTimeMinutes(String text) {
+  final m = RegExp(r'^([01]\d|2[0-3]):([0-5]\d)$').firstMatch(text.trim());
+  return m == null ? null : int.parse(m[1]!) * 60 + int.parse(m[2]!);
+}
+
+/// 휴가 신청 — 종류, 기간(반차·시간 연차는 하루), 사유, 결재선. [balance]가 있으면 남은 연차를 보여 준다. 올렸으면 그 문서.
+///
+/// 시간 단위 연차(반반차 2시간 고정·시간 연차 1~7시간 — [LeaveTypeInfo.hourly])는 날짜 하나, 시작 시각('HH:MM' — 기본은 내 근무 시작),
+/// 시간 수를 받고 "09:00~11:00 · 2시간 (연차 2시간)"처럼 끝 시각과 연차로 빠질 양(1시간 = 0.25 반일)을 바로 보여 준다. 올릴 때
+/// `startTime`·`hours`를 함께 보낸다(반반차의 hours는 서버가 2시간으로 정한다).
 Future<ApprovalDocument?> showLeaveRequestDialog(
   BuildContext context, {
   required GroupwareApi api,
@@ -1012,6 +1025,10 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
   var type = types.isNotEmpty ? types.first.key : 'annual';
   String? start;
   String? end;
+  // 시간 연차의 시작 시각('HH:MM')과 시간 수.
+  var startTime = minutesText(ctx.myWorkStart ?? ctx.workStart);
+  var hours = 1;
+  int hoursOf(LeaveTypeInfo? info) => info?.fixedHours ?? hours;
   return showDialog<ApprovalDocument>(
     context: context,
     builder: (_) => ApprovalRequestDialog(
@@ -1021,6 +1038,11 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
       lineKind: ApprovalKind.leave.wire,
       fields: (setState) {
         final info = ctx.leaveType(type);
+        final hourly = info?.hourly ?? false;
+        // 하루만 고르는 종류 — 반차·시간 연차.
+        final single = (info?.half ?? false) || hourly;
+        final startMinutes = leaveTimeMinutes(startTime);
+        final hint = Theme.of(context).hintColor;
         return [
           if (balance != null)
             Text(
@@ -1063,7 +1085,8 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
             ],
             onChanged: (v) => setState(() {
               type = v ?? type;
-              if (ctx.leaveType(type)?.half ?? false) end = start;
+              final next = ctx.leaveType(type);
+              if ((next?.half ?? false) || (next?.hourly ?? false)) end = start;
             }),
           ),
           const SizedBox(height: 8),
@@ -1071,18 +1094,16 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
             spacing: 8,
             children: [
               ApprovalDateField(
-                label: info?.half ?? false ? tr('날짜') : tr('시작'),
+                label: single ? tr('날짜') : tr('시작'),
                 value: start,
                 onChanged: (v) => setState(() {
                   start = v;
                   final keepEnd =
-                      end != null &&
-                      !(info?.half ?? false) &&
-                      end!.compareTo(v) >= 0;
+                      end != null && !single && end!.compareTo(v) >= 0;
                   if (!keepEnd) end = v;
                 }),
               ),
-              if (!(info?.half ?? false))
+              if (!single)
                 ApprovalDateField(
                   label: tr('끝'),
                   value: end,
@@ -1090,6 +1111,76 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
                 ),
             ],
           ),
+          if (hourly) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    key: const ValueKey('leave-start-time'),
+                    initialValue: startTime,
+                    keyboardType: TextInputType.datetime,
+                    maxLength: 5,
+                    decoration: InputDecoration(
+                      labelText: tr('시작 시각'),
+                      hintText: 'HH:MM',
+                      counterText: '',
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (v) => setState(() => startTime = v.trim()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: info?.fixedHours != null
+                      ? InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: tr('시간'),
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                          child: Text(
+                            tr('{h}시간 고정', {'h': info!.fixedHours}),
+                            key: const ValueKey('leave-hours-fixed'),
+                          ),
+                        )
+                      : DropdownButtonFormField<int>(
+                          key: const ValueKey('leave-hours'),
+                          initialValue: hours,
+                          isDense: true,
+                          decoration: InputDecoration(
+                            labelText: tr('시간'),
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                          items: [
+                            for (var h = 1; h <= kHourlyLeaveMax; h++)
+                              DropdownMenuItem(
+                                value: h,
+                                child: Text(tr('{h}시간', {'h': h})),
+                              ),
+                          ],
+                          onChanged: (v) => setState(() => hours = v ?? hours),
+                        ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              startMinutes == null
+                  ? tr('시작 시각을 HH:MM으로 넣으세요.')
+                  : tr('{start}~{end} · {hours}시간 (연차 {amount})', {
+                      'start': minutesText(startMinutes),
+                      'end': minutesText(startMinutes + hoursOf(info) * 60),
+                      'hours': hoursOf(info),
+                      'amount': halfDaysText(hoursOf(info) / 4),
+                    }),
+              key: const ValueKey('leave-hourly-summary'),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             tr('주말·공휴일은 빼고 근무일만 셉니다.'),
@@ -1101,6 +1192,14 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
         if (start == null) return tr('휴가 날짜를 고르세요.');
         if (end != null && end!.compareTo(start!) < 0) {
           return tr('끝나는 날이 시작하는 날보다 앞입니다.');
+        }
+        final info = ctx.leaveType(type);
+        if (info?.hourly ?? false) {
+          final m = leaveTimeMinutes(startTime);
+          if (m == null) return tr('시작 시각을 HH:MM으로 넣으세요.');
+          if (m + hoursOf(info) * 60 > 24 * 60) {
+            return tr('시간 연차는 그날 안에서 끝나야 합니다.');
+          }
         }
         return null;
       },
@@ -1115,7 +1214,13 @@ Future<ApprovalDocument?> showLeaveRequestDialog(
             fields: {
               'leaveType': type,
               'startDate': start,
-              'endDate': end ?? start,
+              // 시간 연차는 하루 — 시작 시각과 시간 수(반반차는 정해진 2시간).
+              if (ctx.leaveType(type)?.hourly ?? false) ...{
+                'endDate': start,
+                'startTime': minutesText(leaveTimeMinutes(startTime)!),
+                'hours': hoursOf(ctx.leaveType(type)),
+              } else
+                'endDate': end ?? start,
             },
             body: body,
             approverIds: approverIds,

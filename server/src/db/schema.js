@@ -1,5 +1,19 @@
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  date,
+  doublePrecision,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 /**
  * 스키마의 원본(source of truth). `npm run db:generate`가 이 파일을 이전 스냅샷과 비교해서
@@ -2845,8 +2859,34 @@ export const groupwareOptions = pgTable('groupware_options', {
   clockOutReminder: boolean('clock_out_reminder').notNull().default(false),
   // 근무 시작 몇 분 뒤에 출근 알림을 보낼지.
   reminderDelayMinutes: integer('reminder_delay_minutes').notNull().default(10),
+  // 주 52시간 지키기(workPolicy.js) — 'warn' | 'approval'(48시간 넘으면 연장 결재가 있어야 출근) | 'block'(52시간이면 출근 막음).
+  overtimeGuard: text('overtime_guard').notNull().default('warn'),
+  // 연차 기준 — 'hire'(입사일) | 'fiscal'(회계연도 — [fiscalStartMonth]월 1일 시작, annualLeave.js).
+  leaveBasis: text('leave_basis').notNull().default('hire'),
+  fiscalStartMonth: integer('fiscal_start_month').notNull().default(1),
+  // 연차 이월 상한(일 — 0이면 이월하지 않음).
+  carryOverMaxDays: integer('carry_over_max_days').notNull().default(0),
+  // 가산율 { overtime, night, holiday, holidayOver, smallBusiness }(null이면 법정 — workPolicy.js).
+  payRates: jsonb('pay_rates'),
+  // 사무실 위치 { lat, lng, radius(m) }(null이면 거리 확인 안 함)·외근은 위치 필수(workLocation.js).
+  officeLocation: jsonb('office_location'),
+  requireFieldLocation: boolean('require_field_location').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** 구성원의 통상시급(원) — 가산 수당(참고용) 계산에만 쓴다(workPolicy.js allowanceOf). 관리자만 보고 정한다(본인은 자기 것만 본다). */
+export const workWages = pgTable(
+  'work_wages',
+  {
+    scopeKey: text('scope_key').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    hourlyWage: integer('hourly_wage').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.scopeKey, t.userId] })],
+);
 
 /**
  * 유연근무 — 사람마다의 근무 형태(없으면 범위의 근무 시간). [mode]: 'staggered'(시차출퇴근 — 자기 시작·끝 시각으로 지각·조퇴) |
@@ -2864,6 +2904,11 @@ export const workSchedules = pgTable(
     endMinutes: integer('end_minutes'),
     coreStartMinutes: integer('core_start_minutes'),
     coreEndMinutes: integer('core_end_minutes'),
+    // 탄력적 근로시간제·선택근무 정산 기간(workPolicy.js) — 'flex2w' | 'flex3m' | 'select'(null이면 주 단위), 기간이 시작하는 날,
+    // 선택근무 정산 개월(1 | 3).
+    periodType: text('period_type'),
+    periodStart: text('period_start'),
+    periodMonths: integer('period_months'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.scopeKey, t.userId] })],
@@ -3259,7 +3304,10 @@ export const leaveAdjustments = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     periodStart: text('period_start').notNull(),
-    halfDays: integer('half_days').notNull(),
+    // 반일 단위 — 시간 연차·이월로 0.25(1시간) 단위일 수 있다.
+    halfDays: doublePrecision('half_days').notNull(),
+    // 'manual'(관리자 조정) | 'carry'(지난 기간에서 이월 — 기간마다 한 번).
+    kind: text('kind').notNull().default('manual'),
     reason: text('reason').notNull(),
     createdByName: text('created_by_name').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -3289,6 +3337,11 @@ export const attendanceRecords = pgTable(
     // 출근 형태 — 'office'(사무실) | 'field'(외근 — note에 장소) | 'remote'(재택). 이 기능 전 기록은 'office'.
     clockInMode: text('clock_in_mode').notNull().default('office'),
     note: text('note'),
+    // 직접 누른 휴게 [{ startAt, endAt(null이면 휴게 중) }](ISO — workRules.js) — 비어 있으면 법정 휴게를 뺀다.
+    breaks: jsonb('breaks').notNull().default([]),
+    // 출근·퇴근할 때 기기 위치 { lat, lng, accuracy, distance?(사무실까지 m), outside? }(workLocation.js — 보낸 때만).
+    clockInLocation: jsonb('clock_in_location'),
+    clockOutLocation: jsonb('clock_out_location'),
     correctedDocId: uuid('corrected_doc_id').references(() => approvalDocuments.id, { onDelete: 'set null' }),
     originalClockInAt: timestamp('original_clock_in_at', { withTimezone: true }),
     originalClockOutAt: timestamp('original_clock_out_at', { withTimezone: true }),

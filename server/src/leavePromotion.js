@@ -1,4 +1,4 @@
-import { addDaysKey, addMonthsKey, isDateKey, leavePeriod } from './annualLeave.js';
+import { addDaysKey, addMonthsKey, isDateKey, leavePeriodFor } from './annualLeave.js';
 
 /**
  * 연차 사용 촉진(근로기준법 제61조)의 **순수 규칙** — 언제 1차·2차 촉진을 해야 하는지, 받은 사람이 내는 사용 계획과 회사가 정하는 날 검사.
@@ -22,10 +22,11 @@ export const PROMOTION_MESSAGE_MAX = 500;
 
 /**
  * 그 사람의 이번 연차 기간 촉진 일정 — `{ periodStart, periodEnd(다음 기간 시작 — 그날은 안 듦), expiry(마지막 날), firstYear,
- * firstStart, firstEnd(1차를 해야 하는 10일 — 끝 포함), secondDeadline(2차 마감 — 그날까지) }`. 입사일이 없으면 null.
+ * firstStart, firstEnd(1차를 해야 하는 10일 — 끝 포함), secondDeadline(2차 마감 — 그날까지) }`. 입사일이 없으면 null. [basis]·
+ * [fiscalStartMonth]는 범위의 연차 기준(annualLeave.js leavePeriodFor — 회계연도면 회계연도 끝을 기준으로).
  */
-export function promotionSchedule(hireDate, today) {
-  const period = leavePeriod(hireDate, today);
+export function promotionSchedule(hireDate, today, { basis = 'hire', fiscalStartMonth = 1 } = {}) {
+  const period = leavePeriodFor({ hireDate, today, basis, fiscalStartMonth });
   if (!period) return null;
   const expiry = addDaysKey(period.end, -1);
   const firstYear = period.year === 0;

@@ -9,6 +9,7 @@ import 'approval_forms.dart';
 import 'approval_tab.dart';
 import 'groupware_screen.dart';
 import 'leave_calendar.dart';
+import 'leave_notice_pdf.dart';
 import '../../l10n/tr.dart';
 
 /// 휴가 탭 — 내 연차 현황(입사일 기준 법정 연차 — server annualLeave.js), 휴가 신청, 팀 휴가(달력 — leave_calendar.dart, 또는 앞으로 30일
@@ -107,6 +108,22 @@ class _LeaveTabState extends State<LeaveTab> {
     }
   }
 
+  /// 받은 촉진 통지를 서면 통지서(PDF)로 — 근로기준법 제61조의 "서면으로 촉구·통보"를 받은 사람도 남겨 둘 수 있게(leave_notice_pdf.dart).
+  /// 받는 사람 이름은 로그인한 내 이름(없으면 아이디).
+  Future<void> _noticePdf(LeavePromotion p) async {
+    try {
+      await leaveNoticePdf(
+        context,
+        notice: p,
+        employeeName: widget.session.name ?? widget.session.username ?? '',
+        scopeLabel: widget.ctx.scopeLabel,
+        ctx: widget.ctx,
+      );
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+    }
+  }
+
   Future<void> _request() async {
     final doc = await showLeaveRequestDialog(
       context,
@@ -137,6 +154,7 @@ class _LeaveTabState extends State<LeaveTab> {
               promotion: p,
               today: widget.ctx.today,
               onPlan: () => _submitPlan(p),
+              onPdf: () => _noticePdf(p),
             ),
           _BalanceCard(balance: balance, onRequest: _request),
           GroupwareSectionHeader(
@@ -210,6 +228,12 @@ class _BalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hint = theme.hintColor;
+    // 조정 합 = 이월 + 관리자 조정(반일 — 시간 연차·이월로 소수일 수 있다).
+    final carry = balance.adjustments
+        .where((a) => a.kind == 'carry')
+        .fold<double>(0, (sum, a) => sum + a.halfDays);
+    // 1시간(0.25 반일) 단위로 맞춰 소수 오차로 "관리자 조정 0시간"이 생기지 않게.
+    final manual = ((balance.adjustmentHalfDays - carry) * 4).round() / 4;
     Widget stat(String label, String value, {Color? color}) => Expanded(
       child: Column(
         children: [
@@ -276,15 +300,23 @@ class _BalanceCard extends StatelessWidget {
                       'balance.periodStart': balance.periodStart,
                       'balance.periodEnd': balance.periodEnd,
                     }),
+                  // 범위가 회계연도 기준이면(groupwareWork.js leaveBasis) 기간 옆에 밝힌다 — 입사일 기념일과 다르게 끊긴다.
+                  if (balance.basis == 'fiscal') tr('회계연도 기준'),
                   balance.serviceYears == 0
                       ? tr('입사 첫해 — 한 달 채울 때마다 1일(최대 11일)')
                       : tr('근속 {balance.serviceYears}년', {
                           'balance.serviceYears': balance.serviceYears,
                         }),
-                  if (balance.adjustmentHalfDays != 0)
+                  // 조정 합에는 지난 기간에서 넘어온 이월(kind 'carry')이 함께 들어 있다 — 따로 보인다.
+                  if (carry != 0)
+                    tr('이월 {p0}{p1}', {
+                      'p0': carry > 0 ? '+' : '−',
+                      'p1': halfDaysText(carry.abs()),
+                    }),
+                  if (manual != 0)
                     tr('관리자 조정 {p0}{p1}', {
-                      'p0': balance.adjustmentHalfDays > 0 ? '+' : '−',
-                      'p1': halfDaysText(balance.adjustmentHalfDays.abs()),
+                      'p0': manual > 0 ? '+' : '−',
+                      'p1': halfDaysText(manual.abs()),
                     }),
                 ].join(' · '),
                 style: TextStyle(fontSize: 12, color: hint),
@@ -297,15 +329,17 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
-/// 연차 사용 촉진 통지 카드 — 1차는 남은 연차와 마감(쓸 날을 내는 단추), 2차는 회사가 정한 날.
+/// 연차 사용 촉진 통지 카드 — 1차는 남은 연차와 마감(쓸 날을 내는 단추), 2차는 회사가 정한 날. 둘 다 서면 통지서(PDF) 단추.
 class _PromotionCard extends StatelessWidget {
   final LeavePromotion promotion;
   final String today;
   final VoidCallback onPlan;
+  final VoidCallback onPdf;
   const _PromotionCard({
     required this.promotion,
     required this.today,
     required this.onPlan,
+    required this.onPdf,
   });
 
   @override
@@ -355,15 +389,27 @@ class _PromotionCard extends StatelessWidget {
                 key: const ValueKey('leave-promotion-plan'),
               ),
             ],
-            if (p.awaitingPlan(today))
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton(
-                  key: const ValueKey('leave-promotion-submit'),
-                  onPressed: onPlan,
-                  child: Text(tr('쓸 날 내기')),
+            const SizedBox(height: 6),
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                // 서면 통지서(PDF) — 받은 통지를 문서로 남겨 둔다.
+                OutlinedButton.icon(
+                  key: ValueKey('leave-notice-pdf-${p.id}'),
+                  onPressed: onPdf,
+                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                  label: Text(tr('통지서 PDF')),
                 ),
-              ),
+                if (p.awaitingPlan(today))
+                  FilledButton(
+                    key: const ValueKey('leave-promotion-submit'),
+                    onPressed: onPlan,
+                    child: Text(tr('쓸 날 내기')),
+                  ),
+              ],
+            ),
           ],
         ),
       ),

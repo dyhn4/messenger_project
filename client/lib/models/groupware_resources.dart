@@ -117,7 +117,7 @@ class MonthLeave {
   final String label;
   final String startDate;
   final String endDate;
-  final int? halfDays;
+  final double? halfDays;
   final String status;
   final bool mine;
   const MonthLeave({
@@ -141,7 +141,7 @@ class MonthLeave {
     label: json['label'] as String? ?? tr('휴가'),
     startDate: json['startDate'] as String,
     endDate: json['endDate'] as String,
-    halfDays: (json['halfDays'] as num?)?.toInt(),
+    halfDays: (json['halfDays'] as num?)?.toDouble(),
     status: json['status'] as String? ?? 'approved',
     mine: json['mine'] == true,
   );

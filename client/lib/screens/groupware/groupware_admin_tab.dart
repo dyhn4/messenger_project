@@ -134,10 +134,40 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
     }
   }
 
+  /// 통상시급 정하기·지우기 — 가산 수당(참고용) 계산에만 쓴다(server PUT /groupware/members/:userId/wage).
+  Future<void> _editWage(GroupwareMember m) async {
+    final result = await showDialog<({int? wage})>(
+      context: context,
+      builder: (_) => _WageDialog(name: m.name, wage: m.hourlyWage),
+    );
+    if (result == null || !mounted) return;
+    try {
+      await widget.api.setHourlyWage(m.id, result.wage);
+      if (mounted) {
+        showAppToast(
+          context,
+          result.wage == null
+              ? tr('{name}님의 통상시급을 지웠습니다.', {'name': m.name})
+              : tr('{name}님의 통상시급을 {wage}으로 정했습니다.', {
+                  'name': m.name,
+                  'wage': wonText(result.wage!),
+                }),
+        );
+      }
+      await _load();
+    } catch (e) {
+      if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
+    }
+  }
+
   Future<void> _adjust(GroupwareMember m) async {
+    // 조정 내역은 창을 열 때 한 번만 받는다(창이 다시 그려져도 다시 받지 않게 — 못 받으면 내역 없이 조정만).
+    final history = widget.api
+        .leaveBalance(userId: m.id)
+        .then((b) => b.adjustments);
     final result = await showDialog<({int halfDays, String reason})>(
       context: context,
-      builder: (_) => _AdjustDialog(name: m.name),
+      builder: (_) => _AdjustDialog(name: m.name, history: history),
     );
     if (result == null || !mounted) return;
     try {
@@ -154,6 +184,26 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
       if (mounted) showAppToast(context, tr('실패: {e}', {'e': e}));
     }
   }
+
+  /// 가산 수당 나눔 — "통상시급 10,000원 · 연장 2시간 15,000원 · 야간 1시간 5,000원 · 휴일 8시간 120,000원".
+  static String _allowanceDetail(WorkAllowance a) => [
+    tr('통상시급 {wage}', {'wage': wonText(a.wage)}),
+    if (a.overtimeMinutes > 0)
+      tr('연장 {t} {pay}', {
+        't': durationText(a.overtimeMinutes),
+        'pay': wonText(a.overtimePay),
+      }),
+    if (a.nightMinutes > 0)
+      tr('야간 {t} {pay}', {
+        't': durationText(a.nightMinutes),
+        'pay': wonText(a.nightPay),
+      }),
+    if (a.holidayMinutes + a.holidayOverMinutes > 0)
+      tr('휴일 {t} {pay}', {
+        't': durationText(a.holidayMinutes + a.holidayOverMinutes),
+        'pay': wonText(a.holidayPay),
+      }),
+  ].join(' · ');
 
   void _shiftMonth(int delta) {
     final parts = _monthKey.split('-');
@@ -198,13 +248,14 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: Text(
             tr(
-              '범위: {p0} — 바꾸려면 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". 법정 연차는 입사일 기준으로 계산하고, 출근율 80% 미만·이월·회사가 더 주는 휴가는 "연차 조정"으로 맞춥니다.',
+              '범위: {p0} — 바꾸려면 관리자 콘솔 → 운영 현황의 "그룹웨어 범위". 법정 연차는 설정의 연차 기준(입사일·회계연도)으로 계산하고, 남은 연차 이월은 "연차 이월"로, 출근율 80% 미만·회사가 더 주는 휴가는 "연차 조정"으로 맞춥니다.',
               {
                 'p0': widget.ctx.scope == 'server'
                     ? tr('회사 전체')
                     : tr('이 팀({p0})', {'p0': widget.ctx.teamName ?? ''}),
               },
             ),
+            key: const ValueKey('gw-admin-scope-note'),
             style: TextStyle(fontSize: 12, color: hint),
           ),
         ),
@@ -316,13 +367,27 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
                 ),
               ),
               onTap: () => _editHireDate(m),
-              trailing: m.hireDate == null
-                  ? null
-                  : TextButton(
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 통상시급(가산 수당 참고용) — 정했으면 금액, 아니면 "시급".
+                  TextButton(
+                    key: ValueKey('gw-member-wage-${m.id}'),
+                    onPressed: () => _editWage(m),
+                    child: Text(
+                      m.hourlyWage == null
+                          ? tr('시급')
+                          : tr('시급 {wage}', {'wage': wonText(m.hourlyWage!)}),
+                    ),
+                  ),
+                  if (m.hireDate != null)
+                    TextButton(
                       key: ValueKey('gw-adjust-${m.id}'),
                       onPressed: () => _adjust(m),
                       child: Text(tr('연차 조정')),
                     ),
+                ],
+              ),
             ),
         GroupwareSectionHeader(
           tr('월별 근태'),
@@ -362,6 +427,17 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
             ],
           ),
         ),
+        if (summary != null && summary.any((r) => r.allowance != null))
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              tr(
+                '오른쪽 금액은 총 가산 수당(참고용) — 통상시급을 정한 사람만, 승인된 연장근무와 출퇴근 기록·설정의 가산율로 셈한 것입니다. 급여 계산은 노무·급여 담당과 맞춰 보세요.',
+              ),
+              key: const ValueKey('gw-summary-allowance-note'),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ),
         if (summary == null)
           const Padding(
             padding: EdgeInsets.all(24),
@@ -373,6 +449,27 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
               key: ValueKey('gw-summary-${row.userId}'),
               dense: true,
               title: Text(row.name),
+              // 총 가산 수당(참고용 — 통상시급을 정한 사람만). 길게 누르거나 올려 보면 연장·야간·휴일 나눔.
+              trailing: row.allowance == null
+                  ? null
+                  : Tooltip(
+                      message: _allowanceDetail(row.allowance!),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            tr('총 가산 수당'),
+                            style: TextStyle(fontSize: 11, color: hint),
+                          ),
+                          Text(
+                            wonText(row.allowance!.totalPay),
+                            key: ValueKey('gw-summary-allowance-${row.userId}'),
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
               subtitle: Text(
                 [
                   tr('출근 {row.summary.daysWorked}일', {
@@ -417,10 +514,99 @@ class _GroupwareAdminTabState extends State<GroupwareAdminTab> {
   }
 }
 
-/// 연차 조정 — 일수(0.5일 단위, 빼려면 −)와 사유.
+/// 통상시급 — 원 단위(쉼표 넣어도 됨), 정해 둔 것이 있으면 지우기.
+class _WageDialog extends StatefulWidget {
+  final String name;
+  final int? wage;
+  const _WageDialog({required this.name, this.wage});
+
+  @override
+  State<_WageDialog> createState() => _WageDialogState();
+}
+
+class _WageDialogState extends State<_WageDialog> {
+  late final _input = TextEditingController(
+    text: widget.wage == null ? '' : '${widget.wage}',
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _input.dispose();
+    super.dispose();
+  }
+
+  void _done() {
+    final value = int.tryParse(_input.text.trim().replaceAll(',', ''));
+    // 서버 workPolicy.js parseHourlyWage와 같은 범위(1원~100만 원).
+    if (value == null || value <= 0 || value > 1000000) {
+      setState(() => _error = tr('통상시급을 원 단위 숫자로 넣으세요.'));
+      return;
+    }
+    Navigator.of(context).pop((wage: value));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(tr('{name}님 통상시급', {'name': widget.name})),
+    content: SizedBox(
+      width: 360,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tr(
+              '월별 근태의 가산 수당(참고용 — 연장·야간·휴일)을 셈하는 데만 씁니다. 급여 명세에 쓰기 전에 꼭 확인하세요.',
+            ),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('gw-wage-input'),
+            controller: _input,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: tr('통상시급'),
+              border: const OutlineInputBorder(),
+              suffixText: tr('원'),
+            ),
+            onSubmitted: (_) => _done(),
+          ),
+          if (_error != null)
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      if (widget.wage != null)
+        TextButton(
+          key: const ValueKey('gw-wage-clear'),
+          onPressed: () => Navigator.of(context).pop((wage: null)),
+          child: Text(tr('지우기')),
+        ),
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: Text(tr('취소')),
+      ),
+      FilledButton(
+        key: const ValueKey('gw-wage-save'),
+        onPressed: _done,
+        child: Text(tr('저장')),
+      ),
+    ],
+  );
+}
+
+/// 연차 조정 — 일수(0.5일 단위, 빼려면 −)와 사유. 위에는 이번 기간의 조정 내역([history] — 이월로 넣은 것은 "이월" 표시).
 class _AdjustDialog extends StatefulWidget {
   final String name;
-  const _AdjustDialog({required this.name});
+  final Future<List<LeaveAdjustment>>? history;
+  const _AdjustDialog({required this.name, this.history});
 
   @override
   State<_AdjustDialog> createState() => _AdjustDialogState();
@@ -458,6 +644,68 @@ class _AdjustDialogState extends State<_AdjustDialog> {
     ).pop((halfDays: halfDays, reason: _reason.text.trim()));
   }
 
+  /// 이번 기간 조정 내역 — 줄마다 "이월"(지난 기간에서 넘어온 것)·"조정"(관리자가 넣은 것), 양, 사유, 넣은 사람. 못 받으면 숨긴다.
+  Widget _historyView(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<List<LeaveAdjustment>>(
+      future: widget.history,
+      builder: (context, snap) {
+        final list = snap.data;
+        if (list == null || list.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                tr('이번 기간 조정 내역'),
+                style: TextStyle(fontSize: 12, color: theme.hintColor),
+              ),
+              for (final a in list)
+                Padding(
+                  key: ValueKey('gw-adjustment-${a.id}'),
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: a.kind == 'carry'
+                              ? theme.colorScheme.primaryContainer
+                              : theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          a.kind == 'carry' ? tr('이월') : tr('조정'),
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          tr('{amount} · {reason} · {by}', {
+                            'amount':
+                                '${a.halfDays > 0 ? '+' : ''}${halfDaysText(a.halfDays)}',
+                            'reason': a.reason,
+                            'by': a.createdByName,
+                          }),
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text(tr('{widget.name}님 연차 조정', {'widget.name': widget.name})),
@@ -466,6 +714,7 @@ class _AdjustDialogState extends State<_AdjustDialog> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (widget.history != null) _historyView(context),
           SegmentedButton<bool>(
             segments: [
               ButtonSegment(value: false, label: Text(tr('더 주기'))),

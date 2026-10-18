@@ -270,7 +270,7 @@ approvalContentOf(ApprovalDocument doc, GroupwareContext ctx) {
             ? '${p['startDate']}'
             : '${p['startDate']} ~ ${p['endDate']}',
       ));
-      rows.add((tr('일수'), halfDaysText((p['halfDays'] as num?)?.toInt() ?? 0)));
+      rows.add((tr('일수'), halfDaysText(p['halfDays'] as num? ?? 0)));
     case ApprovalKind.expense:
       rows.add((tr('금액'), wonText((p['amount'] as num?)?.toInt() ?? 0)));
       rows.add((tr('분류'), '${p['category'] ?? ''}'));

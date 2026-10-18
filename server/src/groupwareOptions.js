@@ -1,4 +1,5 @@
-import { LEAVE_TYPES } from './annualLeave.js';
+import { LEAVE_BASES, LEAVE_TYPES } from './annualLeave.js';
+import { OVERTIME_GUARDS, payRatesOf } from './workPolicy.js';
 
 /**
  * 그룹웨어 범위마다의 설정 — 휴가 종류와 지출 분류(관리자가 바꾼다), 출근·퇴근 알림. DB 없이 시험할 수 있게 규칙만 모았다
@@ -33,13 +34,24 @@ export function mergeLeaveTypes(stored) {
       label: clean(o?.label) || t.label,
       deducts: t.deducts,
       half: t.half,
+      hourly: !!t.hourly,
+      fixedHours: t.fixedHours ?? null,
       enabled: t.key === 'annual' ? true : o?.enabled !== false,
       builtin: true,
     };
   });
   const customs = rows
     .filter((r) => r?.custom && typeof r.key === 'string' && /^c_[a-z0-9]{1,16}$/.test(r.key))
-    .map((r) => ({ key: r.key, label: clean(r.label) || '휴가', deducts: r.deducts === true, half: false, enabled: r.enabled !== false, builtin: false }));
+    .map((r) => ({
+      key: r.key,
+      label: clean(r.label) || '휴가',
+      deducts: r.deducts === true,
+      half: false,
+      hourly: false,
+      fixedHours: null,
+      enabled: r.enabled !== false,
+      builtin: false,
+    }));
   return [...builtins, ...customs];
 }
 
@@ -116,7 +128,13 @@ export function parseExpenseCategories(input) {
   return { categories };
 }
 
-/** 이 범위의 설정 모양(앱·관리 탭) — [row]는 groupware_options 줄(없으면 null). */
+/** 연차 이월 상한(일). */
+export const CARRY_OVER_MAX_DAYS = 25;
+
+/**
+ * 이 범위의 설정 모양(앱·관리 탭) — [row]는 groupware_options 줄(없으면 null). 근태 후속: 주 52시간 지키기([overtimeGuard] —
+ * workPolicy.js), 연차 기준(입사일·회계연도 — [fiscalStartMonth]월 1일), 연차 이월 상한(일 — 0이면 끔), 가산율, 사무실 위치·외근 위치 필수.
+ */
 export function optionsView(row) {
   return {
     leaveTypes: mergeLeaveTypes(row?.leaveTypes ?? null),
@@ -124,5 +142,12 @@ export function optionsView(row) {
     clockInReminder: !!row?.clockInReminder,
     clockOutReminder: !!row?.clockOutReminder,
     reminderDelayMinutes: row?.reminderDelayMinutes ?? 10,
+    overtimeGuard: OVERTIME_GUARDS.includes(row?.overtimeGuard) ? row.overtimeGuard : 'warn',
+    leaveBasis: LEAVE_BASES.includes(row?.leaveBasis) ? row.leaveBasis : 'hire',
+    fiscalStartMonth: row?.fiscalStartMonth ?? 1,
+    carryOverMaxDays: row?.carryOverMaxDays ?? 0,
+    payRates: payRatesOf(row?.payRates ?? null),
+    officeLocation: row?.officeLocation ?? null,
+    requireFieldLocation: !!row?.requireFieldLocation,
   };
 }

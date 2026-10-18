@@ -431,15 +431,21 @@ class GroupwareApi {
     await _getMap('/api/groupware/attendance/today${_query()}'),
   );
 
-  /// 출근 — [mode] 'office'(사무실) | 'field'(외근 — [note]에 장소, 꼭) | 'remote'(재택).
+  /// 출근 — [mode] 'office'(사무실) | 'field'(외근 — [note]에 장소, 꼭) | 'remote'(재택). [location]은 기기 위치(GPS — 보낼 수 있을 때,
+  /// 범위가 외근 위치를 필수로 했으면 외근에 꼭). 주 52시간 지키기에 걸리면 409.
   Future<AttendanceRecord> clockIn({
     String mode = 'office',
     String? note,
+    ({double lat, double lng, double? accuracy})? location,
   }) async => AttendanceRecord.fromJson(
     (await _api.requestJson(
               'POST',
               '/api/groupware/attendance/clock-in',
-              body: _body({'mode': mode, 'note': ?note}),
+              body: _body({
+                'mode': mode,
+                'note': ?note,
+                if (location != null) 'location': _locationJson(location),
+              }),
             )
             as Map)
         .cast<String, dynamic>(),
@@ -458,6 +464,16 @@ class GroupwareApi {
     bool? clockInReminder,
     bool? clockOutReminder,
     int? reminderDelayMinutes,
+    String? overtimeGuard,
+    String? leaveBasis,
+    int? fiscalStartMonth,
+    int? carryOverMaxDays,
+    PayRates? payRates,
+
+    /// 사무실 위치 — [clearOfficeLocation]이면 지운다.
+    ({double lat, double lng, int radius})? officeLocation,
+    bool clearOfficeLocation = false,
+    bool? requireFieldLocation,
   }) async => GroupwareOptions.fromJson(
     (await _api.requestJson(
               'PATCH',
@@ -469,6 +485,20 @@ class GroupwareApi {
                 'clockInReminder': ?clockInReminder,
                 'clockOutReminder': ?clockOutReminder,
                 'reminderDelayMinutes': ?reminderDelayMinutes,
+                'overtimeGuard': ?overtimeGuard,
+                'leaveBasis': ?leaveBasis,
+                'fiscalStartMonth': ?fiscalStartMonth,
+                'carryOverMaxDays': ?carryOverMaxDays,
+                if (payRates != null) 'payRates': payRates.toJson(),
+                if (clearOfficeLocation)
+                  'officeLocation': null
+                else if (officeLocation != null)
+                  'officeLocation': {
+                    'lat': officeLocation.lat,
+                    'lng': officeLocation.lng,
+                    'radius': officeLocation.radius,
+                  },
+                'requireFieldLocation': ?requireFieldLocation,
               }),
             )
             as Map)
@@ -488,6 +518,11 @@ class GroupwareApi {
     String? end,
     String? coreStart,
     String? coreEnd,
+
+    /// 탄력적 근로시간제·선택근무 정산 기간 — 'flex2w' | 'flex3m' | 'select'(null이면 주 단위), 시작하는 날, 선택근무 개월(1 | 3).
+    String? periodType,
+    String? periodStart,
+    int? periodMonths,
   }) async => MemberSchedule.fromJson(
     (await _api.requestJson(
               'PUT',
@@ -498,6 +533,9 @@ class GroupwareApi {
                 'end': ?end,
                 'coreStart': ?coreStart,
                 'coreEnd': ?coreEnd,
+                'periodType': ?periodType,
+                'periodStart': ?periodStart,
+                'periodMonths': ?periodMonths,
               }),
             )
             as Map)
@@ -604,11 +642,55 @@ class GroupwareApi {
         .cast<String, dynamic>(),
   );
 
-  Future<AttendanceRecord> clockOut() async => AttendanceRecord.fromJson(
+  Map<String, dynamic> _locationJson(
+    ({double lat, double lng, double? accuracy}) l,
+  ) => {'lat': l.lat, 'lng': l.lng, 'accuracy': ?l.accuracy};
+
+  /// 퇴근 — [location]은 기기 위치(보낼 수 있을 때). 열린 휴게는 퇴근 시각으로 닫힌다.
+  Future<AttendanceRecord> clockOut({
+    ({double lat, double lng, double? accuracy})? location,
+  }) async => AttendanceRecord.fromJson(
     (await _api.requestJson(
               'POST',
               '/api/groupware/attendance/clock-out',
-              body: _body(),
+              body: _body({
+                if (location != null) 'location': _locationJson(location),
+              }),
+            )
+            as Map)
+        .cast<String, dynamic>(),
+  );
+
+  /// 휴게 시작([start] true)·끝 — 출근 뒤 퇴근 전.
+  Future<AttendanceRecord> attendanceBreak({required bool start}) async =>
+      AttendanceRecord.fromJson(
+        (await _api.requestJson(
+                  'POST',
+                  '/api/groupware/attendance/break-${start ? 'start' : 'end'}',
+                  body: _body(),
+                )
+                as Map)
+            .cast<String, dynamic>(),
+      );
+
+  /// 통상시급 정하기(관리자 — null이면 지움). 가산 수당(참고용) 계산에만 쓴다.
+  Future<void> setHourlyWage(String userId, int? hourlyWage) async {
+    await _api.requestJson(
+      'PUT',
+      '/api/groupware/members/$userId/wage',
+      body: _body({'hourlyWage': hourlyWage}),
+    );
+  }
+
+  /// 연차 이월(관리자) — [dryRun]이면 넣지 않고 넣을 양만. [userIds]를 안 주면 입사일이 있는 모두.
+  Future<CarryOverResult> carryOverLeave({
+    bool dryRun = false,
+    List<String>? userIds,
+  }) async => CarryOverResult.fromJson(
+    (await _api.requestJson(
+              'POST',
+              '/api/groupware/leave/carry-over',
+              body: _body({'dryRun': dryRun, 'userIds': ?userIds}),
             )
             as Map)
         .cast<String, dynamic>(),

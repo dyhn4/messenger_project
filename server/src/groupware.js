@@ -2,7 +2,24 @@ import ExcelJS from 'exceljs';
 import { Router } from 'express';
 import { AUDIT, recordAudit } from './audit.js';
 import { teamAccess, userAccess } from './access.js';
-import { addDaysKey, halfDaysText, isDateKey, leaveBalance, leaveShortage, leaveTypeOf } from './annualLeave.js';
+import {
+  addDaysKey,
+  isDateKey,
+  leaveAmountText,
+  leaveBalance,
+  leaveShortage,
+  leaveTypeOf,
+} from './annualLeave.js';
+import {
+  allowanceOf,
+  clockInGuard,
+  overtimeRequestGuard,
+  parseHourlyWage,
+  periodsOverlapping,
+  periodSummary,
+  weeklyLimitFor,
+} from './workPolicy.js';
+import { checkClockLocation, parseLocation } from './workLocation.js';
 import {
   activeDelegationMap,
   APPROVAL_KINDS,
@@ -105,6 +122,11 @@ import {
   setHireDate,
   sumDeductedLeave,
   updateClockOut,
+  updateAttendanceBreaks,
+  listOvertimeRequests,
+  listWorkWages,
+  findWorkWage,
+  setWorkWage,
 } from './db/queries/groupware.js';
 import { getServerSettings, updateServerSettings } from './db/queries/serverSettings.js';
 import { findTeamById, listTeamIdsForUser, listTeamMemberIds, updateTeam } from './db/queries/teams.js';
@@ -125,6 +147,9 @@ import { applyLineRule, documentAmountOf, LINE_RULES_MAX, lineRuleDto, parseLine
 import { countLineRules, deleteLineRule, insertLineRule, listLineRules, updateLineRule } from './db/queries/approvalLineRules.js';
 import { listPositionOptions } from './db/queries/positionOptions.js';
 import {
+  applyBreakAction,
+  closeOpenBreaks,
+  PERIOD_TYPE_LABEL,
   CLOCK_IN_MODES,
   effectiveHours,
   monthBreakdown,
@@ -207,6 +232,11 @@ export function scheduleDto(s) {
     end: s.endMinutes ?? null,
     coreStart: s.coreStartMinutes ?? null,
     coreEnd: s.coreEndMinutes ?? null,
+    // 탄력적 근로시간제·선택근무 정산 기간(workPolicy.js — 없으면 주 단위).
+    periodType: s.periodType ?? null,
+    periodLabel: s.periodType ? (PERIOD_TYPE_LABEL[s.periodType] ?? null) : null,
+    periodStart: s.periodStart ?? null,
+    periodMonths: s.periodMonths ?? null,
   };
 }
 
@@ -345,6 +375,20 @@ function leaveDaysOf(leave, into = new Map()) {
   // 반차는 기본 종류(오전·오후 반차)뿐 — 관리자가 더한 종류는 하루 단위.
   const half = leaveTypeOf(key)?.half === true;
   const label = leave.payload?.leaveLabel ?? leaveTypeOf(key)?.label ?? '휴가';
+  // 시간 연차(반반차 포함) — 그날 그 시간만(지각·조퇴 기준을 옮긴다).
+  if (leave.payload?.hours && leave.payload?.startTime && leave.payload?.endTime) {
+    const start = parseHm(leave.payload.startTime);
+    const end = parseHm(leave.payload.endTime);
+    into.set(leave.payload.startDate, {
+      halfDays: leave.payload.halfDays ?? leave.payload.hours / 4,
+      halfType: null,
+      hourRange: start !== null && end !== null ? { start, end } : null,
+      hours: leave.payload.hours,
+      type: key,
+      label,
+    });
+    return into;
+  }
   for (let day = leave.payload.startDate; day <= leave.payload.endDate; day = addDaysKey(day, 1)) {
     into.set(day, { halfDays: half ? 1 : 2, halfType: half ? key : null, type: key, label });
   }
@@ -398,11 +442,14 @@ const formDto = (f) => ({
   defaultCcIds: f.defaultCcIds ?? [],
 });
 
-/** 한 사람의 이번 연차 현황(annualLeave.js leaveBalance + 조정 목록). */
-export async function balanceFor(ctx, userId) {
-  const today = localDateKey(new Date());
+/**
+ * 한 사람의 이번 연차 현황(annualLeave.js leaveBalance + 조정 목록) — 범위의 연차 기준(입사일·회계연도)으로. [today]를 주면 그날 기준
+ * (연차 이월 — 지난 기간의 마지막 날).
+ */
+export async function balanceFor(ctx, userId, { today = localDateKey(new Date()) } = {}) {
   const hireDate = await findHireDate({ scope: ctx.scope, teamId: ctx.teamId, userId });
-  const base = leaveBalance({ hireDate, today });
+  const basis = { basis: ctx.options?.leaveBasis ?? 'hire', fiscalStartMonth: ctx.options?.fiscalStartMonth ?? 1 };
+  const base = leaveBalance({ hireDate, today, ...basis });
   if (!base.period) return { ...base, hireDate, adjustments: [] };
   const [used, adjustments] = await Promise.all([
     sumDeductedLeave({ scopeKey: ctx.scopeKey, userId, from: base.period.start, to: base.period.end }),
@@ -410,10 +457,12 @@ export async function balanceFor(ctx, userId) {
   ]);
   const adjustmentHalfDays = adjustments.reduce((sum, a) => sum + a.halfDays, 0);
   return {
-    ...leaveBalance({ hireDate, today, usedHalfDays: used.approved, pendingHalfDays: used.pending, adjustmentHalfDays }),
+    ...leaveBalance({ hireDate, today, usedHalfDays: used.approved, pendingHalfDays: used.pending, adjustmentHalfDays, ...basis }),
     hireDate,
+    basis: basis.basis,
     adjustments: adjustments.map((a) => ({
       id: a.id,
+      kind: a.kind ?? 'manual',
       halfDays: a.halfDays,
       reason: a.reason,
       createdByName: a.createdByName,
@@ -428,6 +477,7 @@ function attendanceDto(record, ctx, leave = null, hours = ctx.hours) {
   const flags = scheduledFlags(record, hours ?? effectiveHours(null, { workStart: ctx.workStart, workEnd: ctx.workEnd }), {
     halfType: leave?.halfType ?? null,
     fullLeave: leave?.halfDays === 2,
+    hourRange: leave?.hourRange ?? null,
   });
   return {
     id: record.id,
@@ -445,6 +495,11 @@ function attendanceDto(record, ctx, leave = null, hours = ctx.hours) {
     ...flags,
     // 휴게·연장·야간·휴일 근무(workRules.js workBreakdown — 퇴근을 눌러야 계산).
     breakdown: workBreakdown(record, { holidays: HOLIDAY_DATES }),
+    // 직접 누른 휴게(ms — endAt이 null이면 휴게 중)와 출근·퇴근 위치(workLocation.js).
+    breaks: (Array.isArray(record.breaks) ? record.breaks : []).map((b) => ({ startAt: ms(b.startAt), endAt: ms(b.endAt) })),
+    onBreak: (Array.isArray(record.breaks) ? record.breaks : []).some((b) => !b.endAt),
+    clockInLocation: record.clockInLocation ?? null,
+    clockOutLocation: record.clockOutLocation ?? null,
   };
 }
 
@@ -1195,6 +1250,26 @@ export function createGroupwareRouter(io) {
         settlesId = source.id;
       }
 
+      // 연장근무 신청 — 범위가 주 52시간을 지키게 했으면(결재를 받게·막기) 그 주를 넘기게 되는 신청은 받지 않는다(workPolicy.js).
+      if (body.kind === 'overtime' && ctx.options.overtimeGuard !== 'warn') {
+        const weekStart = weekStartOf(payload.workDate);
+        const weekEnd = addDaysKey(weekStart, 6);
+        const [weekRecords, requests] = await Promise.all([
+          listAttendanceInRange({ scopeKey: ctx.scopeKey, from: weekStart, to: weekEnd, userId: ctx.user.id }),
+          listOvertimeRequests({ scopeKey: ctx.scopeKey, userId: ctx.user.id, from: weekStart, to: weekEnd }),
+        ]);
+        const guard = overtimeRequestGuard({
+          guard: ctx.options.overtimeGuard,
+          workDate: payload.workDate,
+          today,
+          weekNetMinutes: weeklySummary(weekRecords, weekStart, { holidays: HOLIDAY_DATES }).netMinutes,
+          futureCommittedMinutes: requests.filter((r) => (r.payload?.workDate ?? '') >= today).reduce((s, r) => s + (Number(r.payload?.minutes) || 0), 0),
+          requestMinutes: payload.minutes,
+          limitMinutes: weeklyLimitFor(ctx.schedule),
+        });
+        if (guard.error) return fail(res, { error: guard.error, status: 409 });
+      }
+
       if (body.kind === 'leave') {
         const overlap = await findOverlappingLeave({ scopeKey: ctx.scopeKey, userId: ctx.user.id, from: payload.startDate, to: payload.endDate });
         if (overlap) return fail(res, { error: `그 기간에 이미 신청한 휴가가 있습니다: ${overlap.title}`, status: 409 });
@@ -1595,11 +1670,14 @@ export function createGroupwareRouter(io) {
     '/groupware/members',
     withContext(
       async (req, res, ctx) => {
-        const members = await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId });
+        const [members, wages] = await Promise.all([listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId }), listWorkWages(ctx.scopeKey)]);
+        const wageOf = new Map(wages.map((w) => [w.userId, w.hourlyWage]));
         const rows = [];
         for (const m of members) {
           const balance = await balanceFor(ctx, m.id);
           rows.push({
+            // 통상시급(원 — 가산 수당 계산용, 없으면 null).
+            hourlyWage: wageOf.get(m.id) ?? null,
             id: m.id,
             name: m.name,
             username: m.username,
@@ -1648,6 +1726,34 @@ export function createGroupwareRouter(io) {
     ),
   );
 
+  /** 통상시급 정하기(관리자) `{ hourlyWage }`(원 — null이면 지움) — 가산 수당(참고용) 계산에만 쓴다(workPolicy.js). */
+  router.put(
+    '/groupware/members/:userId/wage',
+    withContext(
+      async (req, res, ctx) => {
+        if (!isUuid(req.params.userId)) return fail(res, { error: '구성원을 찾을 수 없습니다.', status: 404 });
+        const members = await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId });
+        const member = members.find((m) => m.id === req.params.userId);
+        if (!member) return fail(res, { error: '이 범위의 구성원이 아닙니다.', status: 404 });
+        const parsed = parseHourlyWage(req.body?.hourlyWage);
+        if (parsed.error) return fail(res, parsed);
+        await setWorkWage(ctx.scopeKey, member.id, parsed.wage);
+        recordAudit({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.username,
+          action: AUDIT.groupwareSettings,
+          teamId: ctx.teamId,
+          teamName: ctx.team?.name ?? null,
+          targetType: 'user',
+          targetId: member.id,
+          detail: `${member.name} 통상시급 ${parsed.wage === null ? '지움' : `${parsed.wage.toLocaleString('ko-KR')}원`}`,
+        });
+        res.json({ userId: member.id, hourlyWage: parsed.wage });
+      },
+      { managerOnly: true },
+    ),
+  );
+
   /** 연차 조정(반일 단위, +는 더 줌 −는 뺌) — 이번 연차 기간에. 입사일이 있어야 한다. */
   router.post(
     '/groupware/members/:userId/leave-adjustments',
@@ -1678,7 +1784,7 @@ export function createGroupwareRouter(io) {
           teamName: ctx.team?.name ?? null,
           targetType: 'user',
           targetId: req.params.userId,
-          detail: `연차 ${halfDays > 0 ? '+' : '−'}${halfDaysText(Math.abs(halfDays))} — ${reason}`,
+          detail: `연차 ${halfDays > 0 ? '+' : '−'}${leaveAmountText(Math.abs(halfDays))} — ${reason}`,
         });
         res.status(201).json(await balanceFor(ctx, req.params.userId));
       },
@@ -1724,22 +1830,35 @@ export function createGroupwareRouter(io) {
       const recent = await listRecentAttendance({ scopeKey: ctx.scopeKey, userId: ctx.user.id, fromDate: addDaysKey(today, -1) });
       const todayRecord = recent.find((r) => r.workDate === today) ?? null;
       const target = clockOutTarget(recent, now);
+      const weekRecords = await listAttendanceInRange({
+        scopeKey: ctx.scopeKey,
+        from: weekStartOf(today),
+        to: addDaysKey(weekStartOf(today), 6),
+        userId: ctx.user.id,
+      });
+      const open = target?.clockInAt && !target.clockOutAt ? target : null;
       res.json({
         today,
         record: attendanceDto(todayRecord, ctx),
         openRecord: target && target !== todayRecord ? attendanceDto(target, ctx) : null,
         canClockIn: !todayRecord,
         canClockOut: !!target?.clockInAt && !target.clockOutAt,
+        // 휴게 — 출근 뒤 퇴근 전에 시작·끝을 누른다(workRules.js applyBreakAction).
+        canBreakStart: !!open && !(open.breaks ?? []).some((b) => !b.endAt),
+        canBreakEnd: !!open && (open.breaks ?? []).some((b) => !b.endAt),
         inLan: isLanAddress(clientIp(req)),
         workStart: ctx.hours.workStart,
         workEnd: ctx.hours.workEnd,
         schedule: scheduleDto(ctx.schedule),
-        // 이번 주(월~일) 근로시간 — 주 52시간.
-        week: weeklySummary(
-          await listAttendanceInRange({ scopeKey: ctx.scopeKey, from: weekStartOf(today), to: addDaysKey(weekStartOf(today), 6), userId: ctx.user.id }),
-          weekStartOf(today),
-          { holidays: HOLIDAY_DATES },
-        ),
+        // 이번 주(월~일) 근로시간 — 주 52시간(탄력·선택근무면 이 사람의 주 상한 — null이면 주 상한 없음).
+        week: weeklySummary(weekRecords, weekStartOf(today), { holidays: HOLIDAY_DATES }),
+        weeklyLimitMinutes: weeklyLimitFor(ctx.schedule),
+        overtimeGuard: ctx.options.overtimeGuard,
+        // 출근할 때 위치를 보내야 하는지(외근 위치 필수·사무실 위치가 정해짐).
+        requireFieldLocation: ctx.options.requireFieldLocation,
+        officeLocationSet: !!ctx.options.officeLocation,
+        // 탄력·선택근무의 지금 기간(없으면 null).
+        period: await currentPeriod(ctx, ctx.user.id, ctx.schedule, today),
       });
     }),
   );
@@ -1751,15 +1870,42 @@ export function createGroupwareRouter(io) {
       // 출근 형태 — 사무실·외근(장소 필수)·재택(workRules.js parseClockIn).
       const input = parseClockIn(req.body);
       if (input.error) return fail(res, input);
+      // 위치(앱이 보냈으면 — workLocation.js): 외근 위치 필수, 사무실 위치와의 거리.
+      const loc = parseLocation(req.body?.location);
+      if (loc.error) return fail(res, loc);
+      const checked = checkClockLocation({
+        mode: input.mode,
+        location: loc.location,
+        office: ctx.options.officeLocation,
+        requireField: ctx.options.requireFieldLocation,
+      });
+      if (checked.error) return fail(res, checked);
+      // 주 52시간 지키기 — 이번 주를 다 채웠거나(막기), 48시간을 넘겼는데 오늘 승인된 연장근무가 없으면(결재를 받게) 출근을 막는다.
+      const today = localDateKey(now);
+      if (ctx.options.overtimeGuard !== 'warn') {
+        const weekStart = weekStartOf(today);
+        const [weekRecords, approvedToday] = await Promise.all([
+          listAttendanceInRange({ scopeKey: ctx.scopeKey, from: weekStart, to: addDaysKey(weekStart, 6), userId: ctx.user.id }),
+          listApprovedOvertime({ scopeKey: ctx.scopeKey, from: today, to: today, userIds: [ctx.user.id] }),
+        ]);
+        const guard = clockInGuard({
+          guard: ctx.options.overtimeGuard,
+          weekNetMinutes: weeklySummary(weekRecords, weekStart, { holidays: HOLIDAY_DATES }).netMinutes,
+          limitMinutes: weeklyLimitFor(ctx.schedule),
+          hasApprovedOvertime: approvedToday.length > 0,
+        });
+        if (guard) return fail(res, { error: guard.error, status: 409 });
+      }
       const row = await insertClockIn({
         scopeKey: ctx.scopeKey,
         teamId: ctx.teamId,
         userId: ctx.user.id,
-        workDate: localDateKey(now),
+        workDate: today,
         clockInAt: now,
         clockInLan: isLanAddress(clientIp(req)),
         clockInMode: input.mode,
         note: input.note,
+        clockInLocation: loc.location ? { ...loc.location, distance: checked.distance, outside: checked.outside } : null,
       });
       if (!row) return fail(res, { error: '오늘은 이미 출근을 눌렀습니다.', status: 409 });
       res.status(201).json(attendanceDto(row, ctx));
@@ -1776,11 +1922,37 @@ export function createGroupwareRouter(io) {
         return fail(res, { error: '출근 기록이 없습니다. 출근을 빠뜨렸으면 근태 수정을 올리세요.', status: 409 });
       }
       if (target.clockOutAt) return fail(res, { error: '이미 퇴근을 눌렀습니다.', status: 409 });
-      const row = await updateClockOut(target.id, { clockOutAt: now, clockOutLan: isLanAddress(clientIp(req)) });
+      const loc = parseLocation(req.body?.location);
+      if (loc.error) return fail(res, loc);
+      const checked = checkClockLocation({ mode: target.clockInMode ?? 'office', location: loc.location, office: ctx.options.officeLocation });
+      const row = await updateClockOut(target.id, {
+        clockOutAt: now,
+        clockOutLan: isLanAddress(clientIp(req)),
+        // 열린 휴게는 퇴근 시각으로 닫는다.
+        breaks: closeOpenBreaks(target.breaks, now),
+        ...(loc.location ? { clockOutLocation: { ...loc.location, distance: checked.distance, outside: checked.outside } } : {}),
+      });
       if (!row) return fail(res, { error: '이미 퇴근을 눌렀습니다.', status: 409 });
       res.json(attendanceDto(row, ctx));
     }),
   );
+
+  /** 휴게 시작·끝 — 출근 뒤 퇴근 전(밤을 넘긴 어제 기록 포함). 누른 휴게가 있는 날은 법정 휴게 대신 누른 시간을 뺀다(workRules.js). */
+  for (const action of ['start', 'end']) {
+    router.post(
+      `/groupware/attendance/break-${action}`,
+      withContext(async (req, res, ctx) => {
+        const now = new Date();
+        const recent = await listRecentAttendance({ scopeKey: ctx.scopeKey, userId: ctx.user.id, fromDate: addDaysKey(localDateKey(now), -1) });
+        const target = clockOutTarget(recent, now);
+        const next = applyBreakAction(target, action, now);
+        if (next.error) return fail(res, next);
+        const row = await updateAttendanceBreaks(target.id, next.breaks);
+        if (!row) return fail(res, { error: '이미 퇴근을 눌렀습니다.', status: 409 });
+        res.json(attendanceDto(row, ctx));
+      }),
+    );
+  }
 
   /** 한 달 근태 — 내 것, 관리자는 ?userId=로 남의 것도. 날마다 기록·휴가와 요약. */
   router.get(
@@ -1804,6 +1976,7 @@ export function createGroupwareRouter(io) {
         hoursByUser(ctx),
       ]);
       const targetHours = hoursOf(target);
+      const targetSchedule = target === ctx.user.id ? ctx.schedule : await findWorkSchedule(ctx.scopeKey, target);
       const leaveByDate = new Map();
       for (const l of leaves) leaveDaysOf(l, leaveByDate);
       const tripDates = new Set();
@@ -1818,7 +1991,7 @@ export function createGroupwareRouter(io) {
           return {
             date: day,
             holiday: HOLIDAYS.find((h) => h.date === day)?.name ?? null,
-            leave: leave ? { type: leave.type, halfDays: leave.halfDays } : null,
+            leave: leave ? { type: leave.type, halfDays: leave.halfDays, hours: leave.hours ?? null, hourRange: leave.hourRange ?? null } : null,
             trip: tripDates.has(day),
             overtimeMinutes: overtimeByDate.get(day) ?? 0,
             record: attendanceDto(byDate.get(day) ?? null, ctx, leave, targetHours),
@@ -1841,9 +2014,50 @@ export function createGroupwareRouter(io) {
           ...monthBreakdown(records, { holidays: HOLIDAY_DATES }),
         },
         weeks: weeks.map((w) => weeklySummary(weekRecords, w, { holidays: HOLIDAY_DATES })),
+        // 이 사람의 주 상한(탄력·선택근무면 다름 — null이면 없음)과 이 달에 걸친 탄력·선택근무 기간.
+        weeklyLimitMinutes: weeklyLimitFor(targetSchedule),
+        periods: await periodsOf(ctx, target, targetSchedule, from, to),
+        // 가산 수당(참고용 — 통상시급을 정한 사람만).
+        allowance: await allowanceFor(ctx, target, targetSchedule, records, from, to),
       });
     }),
   );
+
+  /** 탄력·선택근무 기간 하나(오늘이 든 것)의 근로시간 — 없으면 null. */
+  async function currentPeriod(ctx, userId, schedule, today) {
+    const [period] = schedule?.periodType ? periodsOverlapping(schedule, today, today) : [];
+    if (!period) return null;
+    const records = await listAttendanceInRange({ scopeKey: ctx.scopeKey, from: period.start, to: addDaysKey(period.end, -1), userId });
+    return periodSummary(records, period, { holidays: HOLIDAY_DATES });
+  }
+
+  /** [from]~[to]에 걸친 탄력·선택근무 기간들의 근로시간(기간 전체를 읽는다). */
+  async function periodsOf(ctx, userId, schedule, from, to) {
+    const periods = schedule?.periodType ? periodsOverlapping(schedule, from, to) : [];
+    if (!periods.length) return [];
+    const records = await listAttendanceInRange({
+      scopeKey: ctx.scopeKey,
+      from: periods[0].start,
+      to: addDaysKey(periods[periods.length - 1].end, -1),
+      userId,
+    });
+    return periods.map((p) => periodSummary(records, p, { holidays: HOLIDAY_DATES }));
+  }
+
+  /**
+   * 한 사람의 [from]~[to] 가산 수당(참고용) — 통상시급이 없으면 null. 탄력·선택근무는 날마다의 연장 대신 이 기간 안에 끝나는 정산 기간의
+   * 연장을 센다(정산 기간이 끝난 달에).
+   */
+  async function allowanceFor(ctx, userId, schedule, records, from, to, wage = undefined) {
+    const hourlyWage = wage === undefined ? ((await findWorkWage(ctx.scopeKey, userId))?.hourlyWage ?? null) : wage;
+    if (!hourlyWage) return null;
+    let overtimeMinutes = null;
+    if (schedule?.periodType) {
+      const ending = (await periodsOf(ctx, userId, schedule, from, to)).filter((p) => addDaysKey(p.end, -1) >= from && addDaysKey(p.end, -1) <= to);
+      overtimeMinutes = ending.reduce((s, p) => s + p.overtimeMinutes, 0);
+    }
+    return allowanceOf({ records, wage: hourlyWage, rates: ctx.options.payRates, holidays: HOLIDAY_DATES, overtimeMinutes });
+  }
 
   /** 구성원별 한 달 근태 요약(관리자). */
   async function monthSummaries(ctx, month) {
@@ -1852,14 +2066,25 @@ export function createGroupwareRouter(io) {
     const to = days[days.length - 1];
     const members = (await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).filter((m) => !m.suspendedAt);
     const memberIds = members.map((m) => m.id);
-    const [records, leaves, trips, overtime] = await Promise.all([
+    const [records, leaves, trips, overtime, wages, schedules] = await Promise.all([
       listAttendanceInRange({ scopeKey: ctx.scopeKey, from, to }),
       listApprovedLeaves({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
       listApprovedTrips({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
       listApprovedOvertime({ scopeKey: ctx.scopeKey, from, to, userIds: memberIds }),
+      listWorkWages(ctx.scopeKey),
+      listWorkSchedules(ctx.scopeKey),
     ]);
     const hoursOf = await hoursByUser(ctx);
     const today = localDateKey(new Date());
+    const wageOf = new Map(wages.map((w) => [w.userId, w.hourlyWage]));
+    const scheduleOf = new Map(schedules.map((s) => [s.userId, s]));
+    // 가산 수당(통상시급을 정한 사람만 — 탄력·선택근무는 정산 기간을 따로 읽는다).
+    const allowances = new Map();
+    for (const m of members) {
+      if (!wageOf.has(m.id)) continue;
+      const mine = records.filter((r) => r.userId === m.id);
+      allowances.set(m.id, await allowanceFor(ctx, m.id, scheduleOf.get(m.id) ?? null, mine, from, to, wageOf.get(m.id)));
+    }
     return members
       .map((m) => {
         const leaveByDate = new Map();
@@ -1875,6 +2100,7 @@ export function createGroupwareRouter(io) {
           records: mine,
           leaveByDate,
           hours: hoursOf(m.id),
+          allowance: allowances.get(m.id) ?? null,
           summary: {
             ...summarizeMonth({
               monthKey: month,
@@ -1903,7 +2129,8 @@ export function createGroupwareRouter(io) {
         const month = typeof req.query.month === 'string' ? req.query.month : localDateKey(new Date()).slice(0, 7);
         if (!monthDays(month)) return fail(res, { error: '달을 확인하세요(YYYY-MM).' });
         const rows = await monthSummaries(ctx, month);
-        res.json({ month, members: rows.map((r) => ({ userId: r.userId, name: r.name, username: r.username, ...r.summary })) });
+        // 가산 수당(참고용 — 통상시급을 정한 사람만, 아니면 null).
+        res.json({ month, members: rows.map((r) => ({ userId: r.userId, name: r.name, username: r.username, ...r.summary, allowance: r.allowance })) });
       },
       { managerOnly: true },
     ),
@@ -1968,12 +2195,22 @@ export function createGroupwareRouter(io) {
           { header: '연장', key: 'overtime', width: 8 },
           { header: '야간', key: 'night', width: 8 },
           { header: '휴일', key: 'holiday', width: 8 },
+          { header: '휴게', key: 'break', width: 8 },
+          { header: '휴게 누름', key: 'breakRecorded', width: 9 },
+          { header: '휴게 모자람', key: 'breakShort', width: 10 },
+          { header: '출근 위치', key: 'inLocation', width: 22 },
+          { header: '사무실 밖', key: 'outside', width: 9 },
         ];
         const hm = (v) => (v ? hmText(new Date(v).getHours() * 60 + new Date(v).getMinutes()) : '');
         for (const r of rows) {
           for (const record of r.records) {
             const leave = r.leaveByDate.get(record.workDate) ?? null;
-            const flags = scheduledFlags(record, r.hours, { halfType: leave?.halfType ?? null, fullLeave: leave?.halfDays === 2 });
+            const flags = scheduledFlags(record, r.hours, {
+              halfType: leave?.halfType ?? null,
+              fullLeave: leave?.halfDays === 2,
+              hourRange: leave?.hourRange ?? null,
+            });
+            const loc = record.clockInLocation;
             const b = workBreakdown(record, { holidays: HOLIDAY_DATES });
             daily.addRow({
               name: r.name,
@@ -1987,6 +2224,11 @@ export function createGroupwareRouter(io) {
               mode: { office: '사무실', field: '외근', remote: '재택' }[record.clockInMode ?? 'office'] ?? '',
               net: b.netMinutes ? hmText(b.netMinutes) : '',
               overtime: b.overtimeMinutes ? hmText(b.overtimeMinutes) : '',
+              break: b.breakMinutes ? hmText(b.breakMinutes) : '',
+              breakRecorded: b.breakRecorded ? '예' : '',
+              breakShort: b.breakShortMinutes ? `${b.breakShortMinutes}분` : '',
+              inLocation: loc ? `${loc.lat}, ${loc.lng}${loc.distance != null ? ` (사무실 ${loc.distance}m)` : ''}` : '',
+              outside: loc?.outside ? '예' : '',
               night: b.nightMinutes ? hmText(b.nightMinutes) : '',
               holiday: b.holidayMinutes ? hmText(b.holidayMinutes) : '',
               corrected: record.corrected ? '예' : '',
@@ -1995,7 +2237,33 @@ export function createGroupwareRouter(io) {
             });
           }
         }
-        for (const sheet of [summary, daily]) sheet.getRow(1).font = { bold: true };
+        // 가산 수당(참고용) — 통상시급을 정한 사람만.
+        const pay = workbook.addWorksheet('가산 수당');
+        pay.columns = [
+          { header: '이름', key: 'name', width: 14 },
+          { header: '통상시급', key: 'wage', width: 10 },
+          { header: '연장(시간)', key: 'overtimeHours', width: 10 },
+          { header: '연장 수당', key: 'overtimePay', width: 12 },
+          { header: '야간(시간)', key: 'nightHours', width: 10 },
+          { header: '야간 가산', key: 'nightPay', width: 12 },
+          { header: '휴일 8시간까지(시간)', key: 'holidayHours', width: 16 },
+          { header: '휴일 8시간 넘음(시간)', key: 'holidayOverHours', width: 16 },
+          { header: '휴일 수당', key: 'holidayPay', width: 12 },
+          { header: '합계', key: 'totalPay', width: 12 },
+        ];
+        const h1 = (m) => Math.round((m / 60) * 10) / 10;
+        for (const r of rows) {
+          if (!r.allowance) continue;
+          pay.addRow({
+            name: r.name,
+            ...r.allowance,
+            overtimeHours: h1(r.allowance.overtimeMinutes),
+            nightHours: h1(r.allowance.nightMinutes),
+            holidayHours: h1(r.allowance.holidayMinutes),
+            holidayOverHours: h1(r.allowance.holidayOverMinutes),
+          });
+        }
+        for (const sheet of [summary, daily, pay]) sheet.getRow(1).font = { bold: true };
         const fileName = `근태_${ctx.team?.name ?? '회사'}_${month}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);

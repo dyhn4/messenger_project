@@ -1,4 +1,4 @@
-import { addDaysKey, isWorkday, weekdayOf } from './annualLeave.js';
+import { addDaysKey, isDateKey, isWorkday, weekdayOf } from './annualLeave.js';
 import { localDateKey, minutesOfDay, parseHm, recordFlags } from './attendanceRules.js';
 
 /**
@@ -7,10 +7,12 @@ import { localDateKey, minutesOfDay, parseHm, recordFlags } from './attendanceRu
  * 쓴다, test/groupwareWork.test.js). 시각은 서버 PC 기준(attendanceRules.js와 같다).
  *
  * 하루 나누기(실제 출퇴근 기록 기준 — 결재로 받은 연장근무 신청과는 따로 본다):
- *  - 휴게: 일한 시간이 8시간 30분 이상이면 1시간, 4시간 30분 이상이면 30분을 뺀다(제54조 — 4시간마다 30분, 8시간이면 1시간).
+ *  - 휴게: 휴게 시작·끝을 직접 누른 날은 누른 시간(출근~퇴근 안에서 닫힌 것)을 빼고, 법정 휴게보다 짧으면 모자란 분을 알린다
+ *    (breakShortMinutes). 누르지 않은 날은 일한 시간이 8시간 30분 이상이면 1시간, 4시간 30분 이상이면 30분을 뺀다(제54조 — 4시간마다
+ *    30분, 8시간이면 1시간).
  *  - 연장: 근무일에 휴게를 뺀 시간 중 8시간을 넘는 부분.
  *  - 휴일: 주말·공휴일에 일한 시간(휴게를 뺀 것) 전부.
- *  - 야간: 22:00~06:00에 걸친 시간(휴게를 따로 빼지 않는다 — 언제 쉬었는지 기록이 없다).
+ *  - 야간: 22:00~06:00에 걸친 시간(누른 휴게가 그 안에 들면 뺀다 — 누르지 않은 날은 언제 쉬었는지 몰라 빼지 않는다).
  */
 
 export const DAILY_LIMIT_MINUTES = 8 * 60;
@@ -46,28 +48,86 @@ export function nightMinutesBetween(start, end) {
   return Math.round(total / 60000);
 }
 
+/** 하루에 누를 수 있는 휴게 수. */
+export const BREAKS_MAX = 10;
+
+/** 누른 휴게들([breaks] `[{ startAt, endAt }]`) 중 [inAt]~[outAt] 안에서 닫힌 구간들(겹치는 부분만, Date). */
+function closedBreaks(breaks, inAt, outAt) {
+  const out = [];
+  for (const b of Array.isArray(breaks) ? breaks : []) {
+    if (!b?.startAt || !b?.endAt) continue;
+    const s = Math.max(new Date(b.startAt).getTime(), inAt.getTime());
+    const e = Math.min(new Date(b.endAt).getTime(), outAt.getTime());
+    if (e > s) out.push([new Date(s), new Date(e)]);
+  }
+  return out;
+}
+
 /**
- * 기록 하나 → `{ workedMinutes, breakMinutes, netMinutes, overtimeMinutes, holidayMinutes, nightMinutes }`(퇴근을 안 눌렀으면 모두 0).
- * [holidays]는 공휴일 모음.
+ * 기록 하나 → `{ workedMinutes, breakMinutes, netMinutes, overtimeMinutes, holidayMinutes, nightMinutes, breakRecorded, breakShortMinutes }`
+ * (퇴근을 안 눌렀으면 모두 0). [holidays]는 공휴일 모음. 휴게를 누른 날([record.breaks])은 누른 시간을 뺀다.
  */
 export function workBreakdown(record, { holidays = new Set() } = {}) {
-  const zero = { workedMinutes: 0, breakMinutes: 0, netMinutes: 0, overtimeMinutes: 0, holidayMinutes: 0, nightMinutes: 0 };
+  const zero = {
+    workedMinutes: 0,
+    breakMinutes: 0,
+    netMinutes: 0,
+    overtimeMinutes: 0,
+    holidayMinutes: 0,
+    nightMinutes: 0,
+    breakRecorded: false,
+    breakShortMinutes: 0,
+  };
   if (!record?.clockInAt || !record?.clockOutAt) return zero;
   const inAt = new Date(record.clockInAt);
   const outAt = new Date(record.clockOutAt);
   if (!(outAt > inAt)) return zero;
   const worked = Math.round((outAt - inAt) / 60000);
-  const brk = breakMinutesFor(worked);
+  const statutory = breakMinutesFor(worked);
+  const pressed = closedBreaks(record.breaks, inAt, outAt);
+  const pressedMinutes = Math.round(pressed.reduce((sum, [s, e]) => sum + (e - s), 0) / 60000);
+  const brk = pressed.length ? Math.min(worked, pressedMinutes) : statutory;
   const net = Math.max(0, worked - brk);
   const workday = isWorkday(record.workDate, holidays);
+  const nightBreak = pressed.reduce((sum, [s, e]) => sum + nightMinutesBetween(s, e), 0);
   return {
     workedMinutes: worked,
     breakMinutes: brk,
     netMinutes: net,
     overtimeMinutes: workday ? Math.max(0, net - DAILY_LIMIT_MINUTES) : 0,
     holidayMinutes: workday ? 0 : net,
-    nightMinutes: nightMinutesBetween(inAt, outAt),
+    nightMinutes: Math.max(0, nightMinutesBetween(inAt, outAt) - nightBreak),
+    breakRecorded: pressed.length > 0,
+    breakShortMinutes: pressed.length ? Math.max(0, statutory - brk) : 0,
   };
+}
+
+/**
+ * 휴게 누르기 — [action] 'start' | 'end', [record]는 그날(또는 밤을 넘긴 어제) 기록. 출근했고 퇴근 전이어야 하고, 시작은 열린 휴게가 없을 때·
+ * 하루 [BREAKS_MAX]번까지, 끝은 열린 휴게가 있을 때. `{ breaks }`(저장할 목록 — ISO 시각) | `{ error, status }`.
+ */
+export function applyBreakAction(record, action, now = new Date()) {
+  if (!record?.clockInAt) return { error: '출근을 먼저 누르세요.', status: 409 };
+  if (record.clockOutAt) return { error: '이미 퇴근을 눌렀습니다.', status: 409 };
+  const list = (Array.isArray(record.breaks) ? record.breaks : []).map((b) => ({ startAt: b.startAt, endAt: b.endAt ?? null }));
+  const open = list.find((b) => !b.endAt);
+  const at = new Date(now).toISOString();
+  if (action === 'start') {
+    if (open) return { error: '이미 휴게 중입니다.', status: 409 };
+    if (list.length >= BREAKS_MAX) return { error: `휴게는 하루 ${BREAKS_MAX}번까지 누를 수 있습니다.`, status: 409 };
+    return { breaks: [...list, { startAt: at, endAt: null }] };
+  }
+  if (action === 'end') {
+    if (!open) return { error: '휴게 중이 아닙니다.', status: 409 };
+    return { breaks: list.map((b) => (b === open ? { ...b, endAt: at } : b)) };
+  }
+  return { error: '알 수 없는 동작입니다.', status: 400 };
+}
+
+/** 퇴근할 때 열린 휴게는 퇴근 시각으로 닫는다. */
+export function closeOpenBreaks(breaks, at) {
+  const iso = new Date(at).toISOString();
+  return (Array.isArray(breaks) ? breaks : []).map((b) => (b.endAt ? b : { ...b, endAt: iso }));
 }
 
 /** 그 날이 든 주의 월요일('YYYY-MM-DD'). */
@@ -128,7 +188,9 @@ export const WORK_MODE_LABEL = Object.freeze({ staggered: '시차출퇴근', cor
 export function parseSchedule(input) {
   const mode = input?.mode;
   if (!WORK_MODES.includes(mode)) return { error: '근무 형태를 고르세요(시차출퇴근·선택근무·자율 출퇴근).' };
-  const none = { startMinutes: null, endMinutes: null, coreStartMinutes: null, coreEndMinutes: null };
+  const period = parsePeriod(input, mode);
+  if (period.error) return period;
+  const none = { startMinutes: null, endMinutes: null, coreStartMinutes: null, coreEndMinutes: null, ...period.period };
   if (mode === 'free') return { schedule: { mode, ...none } };
   if (mode === 'staggered') {
     const start = parseHm(input?.start);
@@ -140,6 +202,27 @@ export function parseSchedule(input) {
   const coreEnd = parseHm(input?.coreEnd);
   if (coreStart === null || coreEnd === null || coreStart >= coreEnd) return { error: '핵심 시간대를 HH:MM으로, 시작이 끝보다 앞이게 넣으세요.' };
   return { schedule: { mode, ...none, coreStartMinutes: coreStart, coreEndMinutes: coreEnd } };
+}
+
+/** 탄력적 근로시간제의 단위 기간·선택근무의 정산 기간(workPolicy.js). */
+export const PERIOD_TYPES = Object.freeze(['flex2w', 'flex3m', 'select']);
+export const PERIOD_TYPE_LABEL = Object.freeze({ flex2w: '탄력 2주', flex3m: '탄력 3개월', select: '선택근무 정산' });
+
+/**
+ * 근무 형태의 기간 입력 `{ periodType?, periodStart?, periodMonths? }` → `{ period: { periodType, periodStart, periodMonths } }` | `{ error }`.
+ * 없으면 모두 null(주 단위 — 주 52시간). 선택근무 정산은 선택근무·자율 출퇴근에만, 1개월 또는 3개월(신상품·연구개발).
+ */
+function parsePeriod(input, mode) {
+  const type = input?.periodType ?? null;
+  if (type === null || type === '') return { period: { periodType: null, periodStart: null, periodMonths: null } };
+  if (!PERIOD_TYPES.includes(type)) return { error: '근로시간 기간 종류를 확인하세요(탄력 2주·탄력 3개월·선택근무 정산).' };
+  if (type === 'select' && mode !== 'core' && mode !== 'free') {
+    return { error: '선택근무 정산 기간은 선택근무·자율 출퇴근에만 정할 수 있습니다.' };
+  }
+  if (!isDateKey(input?.periodStart)) return { error: '기간이 시작하는 날을 정하세요.' };
+  const months = type === 'select' ? Number(input?.periodMonths ?? 1) : type === 'flex3m' ? 3 : null;
+  if (type === 'select' && months !== 1 && months !== 3) return { error: '선택근무 정산 기간은 1개월 또는 3개월입니다.' };
+  return { period: { periodType: type, periodStart: input.periodStart, periodMonths: months } };
 }
 
 /**
@@ -156,8 +239,8 @@ export function effectiveHours(schedule, { workStart, workEnd }) {
 }
 
 /** 근무 형태를 반영한 기록 표시(attendanceRules.js recordFlags + 자율이면 지각·조퇴 없음). */
-export function scheduledFlags(record, hours, { halfType = null, fullLeave = false } = {}) {
-  const flags = recordFlags(record, { workStart: hours.workStart, workEnd: hours.workEnd, halfType, fullLeave });
+export function scheduledFlags(record, hours, { halfType = null, fullLeave = false, hourRange = null } = {}) {
+  const flags = recordFlags(record, { workStart: hours.workStart, workEnd: hours.workEnd, halfType, fullLeave, hourRange });
   return { ...flags, late: hours.checkLate && flags.late, earlyLeave: hours.checkEarly && flags.earlyLeave };
 }
 

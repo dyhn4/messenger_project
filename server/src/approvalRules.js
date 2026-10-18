@@ -1,4 +1,4 @@
-import { addDaysKey, halfDaysText, isDateKey, leaveRequestAmount, leaveTypeOf } from './annualLeave.js';
+import { addDaysKey, isDateKey, leaveAmountText, leaveRequestAmount, leaveTypeOf } from './annualLeave.js';
 import { defaultFormTitle, FORM_KINDS, MONEY_MAX } from './approvalForms.js';
 import { DEFAULT_EXPENSE_CATEGORIES } from './groupwareOptions.js';
 import { parseHm } from './attendanceRules.js';
@@ -103,10 +103,16 @@ export function parseLeavePayload(body, holidays = new Set(), types = null) {
   const startDate = body?.startDate;
   const endDate = body?.endDate ?? startDate;
   const typeOf = types ? (key) => types.find((t) => t.key === key && t.enabled) ?? null : leaveTypeOf;
-  const amount = leaveRequestAmount({ leaveType, startDate, endDate }, holidays, typeOf);
+  const amount = leaveRequestAmount({ leaveType, startDate, endDate, startTime: body?.startTime, hours: body?.hours }, holidays, typeOf);
   if (amount.error) return { error: amount.error };
   const type = typeOf(leaveType);
-  return { payload: { leaveType, leaveLabel: type.label, deducts: type.deducts, startDate, endDate, halfDays: amount.halfDays } };
+  const payload = { leaveType, leaveLabel: type.label, deducts: type.deducts, startDate, endDate, halfDays: amount.halfDays };
+  // 시간 연차 — 그날 몇 시부터 몇 시간(근태의 지각·조퇴 기준이 그만큼 옮겨진다).
+  if (amount.hours) {
+    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    Object.assign(payload, { hours: amount.hours, startTime: hm(amount.startMinutes), endTime: hm(amount.endMinutes) });
+  }
+  return { payload };
 }
 
 /** 지출 내용 → `{ payload }` — 금액(원, 정수), 분류, 쓴 날. */
@@ -146,7 +152,8 @@ export function defaultApprovalTitle(kind, payload) {
   if (kind === 'leave') {
     const label = payload.leaveLabel ?? leaveTypeOf(payload.leaveType)?.label ?? '휴가';
     const range = payload.startDate === payload.endDate ? shortDate(payload.startDate) : `${shortDate(payload.startDate)}~${shortDate(payload.endDate)}`;
-    return `${label} 신청 (${range}, ${halfDaysText(payload.halfDays)})`;
+    if (payload.hours) return `${label} 신청 (${range} ${payload.startTime}~${payload.endTime}, ${payload.hours}시간)`;
+    return `${label} 신청 (${range}, ${leaveAmountText(payload.halfDays)})`;
   }
   if (kind === 'expense') return `지출 결재 — ${payload.category} ${payload.amount.toLocaleString('ko-KR')}원`;
   if (kind === 'attendance') return `근태 수정 (${shortDate(payload.workDate)})`;

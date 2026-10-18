@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { addDaysKey } from './annualLeave.js';
+import { addDaysKey, carryOverHalfDays, LEAVE_BASES, leaveAmountText } from './annualLeave.js';
 import { localDateKey } from './attendanceRules.js';
 import { AUDIT, recordAudit } from './audit.js';
 import {
@@ -8,6 +8,8 @@ import {
   findGroupwareOptions,
   findLeavePromotion,
   insertLeavePromotion,
+  insertLeaveAdjustment,
+  listLeaveAdjustments,
   listApprovedLeaves,
   listApprovedTrips,
   listAttendanceInRange,
@@ -26,7 +28,9 @@ import { getServerSettings } from './db/queries/serverSettings.js';
 import { findTeamById, listTeamMemberIds } from './db/queries/teams.js';
 import { isUuid } from './favoritesRules.js';
 import { balanceFor, fail, groupwareContext, scheduleDto } from './groupware.js';
-import { optionsView, parseExpenseCategories, parseLeaveTypesInput, REMINDER_DELAY_MAX } from './groupwareOptions.js';
+import { CARRY_OVER_MAX_DAYS, optionsView, parseExpenseCategories, parseLeaveTypesInput, REMINDER_DELAY_MAX } from './groupwareOptions.js';
+import { OVERTIME_GUARDS, parsePayRates, periodsOverlapping, periodSummary, weeklyLimitFor } from './workPolicy.js';
+import { parseOfficeLocation } from './workLocation.js';
 import { HOLIDAYS } from './holidays.js';
 import { parseLeaveDates, PLAN_RESPONSE_DAYS, PROMOTION_MESSAGE_MAX, promotionSchedule, promotionStage } from './leavePromotion.js';
 import { notifyGroupwarePush } from './push.js';
@@ -40,6 +44,8 @@ import { effectiveHours, parseSchedule, reminderDue, weekStartOf, weeklySummary 
 
 const HOLIDAY_DATES = new Set(HOLIDAYS.map((h) => h.date));
 const ms = (v) => (v ? new Date(v).getTime() : null);
+/** 범위의 연차 기준(입사일·회계연도) — promotionSchedule·leavePeriodFor에 넘긴다. */
+const basisOf = (ctx) => ({ basis: ctx.options?.leaveBasis ?? 'hire', fiscalStartMonth: ctx.options?.fiscalStartMonth ?? 1 });
 
 const promotionDto = (p) => ({
   id: p.id,
@@ -110,7 +116,10 @@ export function createGroupwareWorkRouter(io) {
     withContext(async (req, res, ctx) => res.json(ctx.options)),
   );
 
-  /** 범위 설정 바꾸기(관리자) `{ leaveTypes?, expenseCategories?, clockInReminder?, clockOutReminder?, reminderDelayMinutes? }`. */
+  /**
+   * 범위 설정 바꾸기(관리자) `{ leaveTypes?, expenseCategories?, clockInReminder?, clockOutReminder?, reminderDelayMinutes?, overtimeGuard?,
+   * leaveBasis?, fiscalStartMonth?, carryOverMaxDays?, payRates?, officeLocation?, requireFieldLocation? }`.
+   */
   router.patch(
     '/groupware/options',
     withContext(
@@ -142,6 +151,49 @@ export function createGroupwareWorkRouter(io) {
           if (!Number.isInteger(n) || n < 0 || n > REMINDER_DELAY_MAX) return fail(res, { error: `출근 알림은 근무 시작 0~${REMINDER_DELAY_MAX}분 뒤로 정하세요.` });
           patch.reminderDelayMinutes = n;
           details.push(`출근 알림 ${n}분 뒤`);
+        }
+        // 주 52시간 지키기(workPolicy.js).
+        if ('overtimeGuard' in body) {
+          if (!OVERTIME_GUARDS.includes(body.overtimeGuard)) return fail(res, { error: '주 52시간 지키기 방식을 고르세요(알리기만·결재를 받게·막기).' });
+          patch.overtimeGuard = body.overtimeGuard;
+          // 문장 전체로(앱이 통째로 번역한다).
+          details.push({ warn: '주 52시간 알리기만', approval: '주 52시간 결재를 받게', block: '주 52시간 막기' }[body.overtimeGuard]);
+        }
+        // 연차 기준 — 입사일·회계연도(annualLeave.js). 바꾸면 이번 기간·조정·촉진 일정이 새 기준으로 다시 계산된다.
+        if ('leaveBasis' in body) {
+          if (!LEAVE_BASES.includes(body.leaveBasis)) return fail(res, { error: '연차 기준을 고르세요(입사일·회계연도).' });
+          patch.leaveBasis = body.leaveBasis;
+          details.push(body.leaveBasis === 'fiscal' ? '연차 기준 회계연도' : '연차 기준 입사일');
+        }
+        if ('fiscalStartMonth' in body) {
+          const n = Number(body.fiscalStartMonth);
+          if (!Number.isInteger(n) || n < 1 || n > 12) return fail(res, { error: '회계연도가 시작하는 달을 1~12로 정하세요.' });
+          patch.fiscalStartMonth = n;
+          details.push(`회계연도 ${n}월 시작`);
+        }
+        if ('carryOverMaxDays' in body) {
+          const n = Number(body.carryOverMaxDays);
+          if (!Number.isInteger(n) || n < 0 || n > CARRY_OVER_MAX_DAYS) return fail(res, { error: `연차 이월은 0~${CARRY_OVER_MAX_DAYS}일로 정하세요(0이면 하지 않음).` });
+          patch.carryOverMaxDays = n;
+          details.push(n ? `연차 이월 ${n}일까지` : '연차 이월 끄기');
+        }
+        if ('payRates' in body) {
+          const parsed = parsePayRates(body.payRates, (await findGroupwareOptions(ctx.scopeKey))?.payRates ?? null);
+          if (parsed.error) return fail(res, parsed);
+          patch.payRates = parsed.rates;
+          details.push('가산율');
+        }
+        // 사무실 위치·외근 위치 필수(workLocation.js).
+        if ('officeLocation' in body) {
+          const parsed = parseOfficeLocation(body.officeLocation);
+          if (parsed.error) return fail(res, parsed);
+          patch.officeLocation = parsed.office;
+          details.push(parsed.office ? `사무실 위치(반경 ${parsed.office.radius}m)` : '사무실 위치 지움');
+        }
+        if ('requireFieldLocation' in body) {
+          if (typeof body.requireFieldLocation !== 'boolean') return fail(res, { error: '외근 위치 필수를 참/거짓으로 보내세요.' });
+          patch.requireFieldLocation = body.requireFieldLocation;
+          details.push(body.requireFieldLocation ? '외근 위치 필수' : '외근 위치 선택');
         }
         if (Object.keys(patch).length === 0) return fail(res, { error: '바꿀 내용이 없습니다.' });
         const row = await upsertGroupwareOptions(ctx.scopeKey, patch);
@@ -218,23 +270,35 @@ export function createGroupwareWorkRouter(io) {
       async (req, res, ctx) => {
         const day = typeof req.query.week === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.week) ? req.query.week : localDateKey(new Date());
         const weekStart = weekStartOf(day);
-        const [members, records] = await Promise.all([
+        const [members, records, schedules] = await Promise.all([
           listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId }),
           listAttendanceInRange({ scopeKey: ctx.scopeKey, from: weekStart, to: addDaysKey(weekStart, 6) }),
+          listWorkSchedules(ctx.scopeKey),
         ]);
-        const rows = members
-          .filter((m) => !m.suspendedAt)
-          .map((m) => ({
-            userId: m.id,
-            name: m.name,
-            ...weeklySummary(
-              records.filter((r) => r.userId === m.id),
-              weekStart,
-              { holidays: HOLIDAY_DATES },
-            ),
-          }))
-          .sort((a, b) => b.netMinutes - a.netMinutes);
-        res.json({ weekStart, weekEnd: addDaysKey(weekStart, 6), members: rows });
+        const scheduleOf = new Map(schedules.map((s) => [s.userId, s]));
+        const rows = [];
+        for (const m of members.filter((x) => !x.suspendedAt)) {
+          const schedule = scheduleOf.get(m.id) ?? null;
+          const week = weeklySummary(
+            records.filter((r) => r.userId === m.id),
+            weekStart,
+            { holidays: HOLIDAY_DATES },
+          );
+          // 탄력·선택근무 — 주 상한이 다르고(선택근무는 없음) 그 주가 든 기간의 근로시간을 함께.
+          const limit = weeklyLimitFor(schedule);
+          let period = null;
+          if (schedule?.periodType) {
+            const [p] = periodsOverlapping(schedule, weekStart, weekStart);
+            if (p) {
+              const periodRecords = await listAttendanceInRange({ scopeKey: ctx.scopeKey, from: p.start, to: addDaysKey(p.end, -1), userId: m.id });
+              period = periodSummary(periodRecords, p, { holidays: HOLIDAY_DATES });
+            }
+          }
+          const status = limit == null ? (period?.status ?? 'ok') : week.netMinutes > limit ? 'over' : week.netMinutes >= limit - 4 * 60 ? 'warn' : 'ok';
+          rows.push({ userId: m.id, name: m.name, ...week, status, weeklyLimitMinutes: limit, periodType: schedule?.periodType ?? null, period });
+        }
+        rows.sort((a, b) => b.netMinutes - a.netMinutes);
+        res.json({ weekStart, weekEnd: addDaysKey(weekStart, 6), overtimeGuard: ctx.options.overtimeGuard, members: rows });
       },
       { managerOnly: true },
     ),
@@ -306,7 +370,7 @@ export function createGroupwareWorkRouter(io) {
         const notices = await listLeavePromotions(ctx.scopeKey);
         const rows = [];
         for (const m of members) {
-          const schedule = promotionSchedule(m.hireDate, today);
+          const schedule = promotionSchedule(m.hireDate, today, basisOf(ctx));
           if (!schedule) continue;
           const balance = await balanceFor(ctx, m.id);
           const mine = notices.filter((n) => n.userId === m.id && n.periodStart === schedule.periodStart);
@@ -346,7 +410,7 @@ export function createGroupwareWorkRouter(io) {
         const skipped = [];
         for (const userId of [...new Set(userIds)]) {
           const m = members.get(userId);
-          const schedule = m?.hireDate ? promotionSchedule(m.hireDate, today) : null;
+          const schedule = m?.hireDate ? promotionSchedule(m.hireDate, today, basisOf(ctx)) : null;
           if (!schedule) {
             skipped.push({ userId, reason: '입사일이 없습니다.' });
             continue;
@@ -379,7 +443,7 @@ export function createGroupwareWorkRouter(io) {
             ctx,
             userId,
             '연차 사용 촉진 안내',
-            `쓰지 않은 연차 ${remaining / 2}일 — ${row.deadline}까지 쓸 날을 정해 내 주세요(연차 기간 ${schedule.expiry} 만료).`,
+            `쓰지 않은 연차 ${leaveAmountText(remaining)} — ${row.deadline}까지 쓸 날을 정해 내 주세요(연차 기간 ${schedule.expiry} 만료).`,
           );
         }
         if (sent.length) audit(ctx, `연차 사용 촉진 1차 — ${sent.length}명`);
@@ -397,7 +461,7 @@ export function createGroupwareWorkRouter(io) {
         const userId = req.body?.userId;
         const today = localDateKey(new Date());
         const m = isUuid(userId) ? (await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).find((x) => x.id === userId) : null;
-        const schedule = m?.hireDate ? promotionSchedule(m.hireDate, today) : null;
+        const schedule = m?.hireDate ? promotionSchedule(m.hireDate, today, basisOf(ctx)) : null;
         if (!schedule) return fail(res, { error: '입사일이 있는 구성원을 고르세요.', status: 404 });
         const notices = await listLeavePromotions(ctx.scopeKey, { userId, periodStart: schedule.periodStart });
         const first = notices.find((n) => n.stage === 1);
@@ -425,6 +489,74 @@ export function createGroupwareWorkRouter(io) {
         audit(ctx, `연차 사용 촉진 2차 — ${m.name} ${dates.dates.length}일 지정`);
         notify(ctx, userId, '연차 사용 시기 지정 통보', `회사가 연차 쓸 날을 정했습니다: ${dates.dates.join(', ')}`);
         res.status(201).json(promotionDto(row));
+      },
+      { managerOnly: true },
+    ),
+  );
+
+  // ── 연차 이월 ──
+
+  /**
+   * 연차 이월(관리자) `{ userIds?, dryRun? }` — 범위의 이월 상한(일)까지, 지난 연차 기간 끝에 남은 연차를 이번 기간의 조정(kind 'carry')으로
+   * 넣는다. 기간마다 한 번(이미 넣었으면 건너뜀). [userIds]를 안 주면 입사일이 있는 모두. [dryRun]이면 넣지 않고 넣을 양만 보여 준다.
+   * `{ capDays, applied: [{ userId, name, halfDays, from, to }], skipped: [{ userId, name, reason }] }`.
+   */
+  router.post(
+    '/groupware/leave/carry-over',
+    withContext(
+      async (req, res, ctx) => {
+        const capDays = ctx.options.carryOverMaxDays ?? 0;
+        if (capDays <= 0) return fail(res, { error: '연차 이월이 꺼져 있습니다. 먼저 이월할 수 있는 일수를 정하세요.' });
+        const dryRun = req.body?.dryRun === true;
+        const pick = Array.isArray(req.body?.userIds) ? new Set(req.body.userIds.filter(isUuid)) : null;
+        const today = localDateKey(new Date());
+        const members = (await listGroupwareMembers({ scope: ctx.scope, teamId: ctx.teamId })).filter(
+          (m) => !m.suspendedAt && m.hireDate && (!pick || pick.has(m.id)),
+        );
+        const applied = [];
+        const skipped = [];
+        for (const m of members) {
+          const now = await balanceFor(ctx, m.id);
+          if (!now.period) {
+            skipped.push({ userId: m.id, name: m.name, reason: '입사일이 없거나 아직 입사 전입니다.' });
+            continue;
+          }
+          const lastDay = addDaysKey(now.period.start, -1);
+          if (lastDay < m.hireDate) {
+            skipped.push({ userId: m.id, name: m.name, reason: '지난 연차 기간이 없습니다(첫 기간).' });
+            continue;
+          }
+          const existing = await listLeaveAdjustments({ scopeKey: ctx.scopeKey, userId: m.id, periodStart: now.period.start });
+          if (existing.some((a) => a.kind === 'carry')) {
+            skipped.push({ userId: m.id, name: m.name, reason: '이번 기간에 이미 이월했습니다.' });
+            continue;
+          }
+          // 지난 기간 마지막 날 기준의 남은 연차(결재 중이던 것은 빼지 않는다 — 승인된 것만 쓴 것으로).
+          const prev = await balanceFor(ctx, m.id, { today: lastDay });
+          const halfDays = carryOverHalfDays(prev.remainingHalfDays, capDays);
+          if (halfDays <= 0) {
+            skipped.push({ userId: m.id, name: m.name, reason: '지난 기간에 남은 연차가 없습니다.' });
+            continue;
+          }
+          const from = prev.period?.start ?? null;
+          if (!dryRun) {
+            await insertLeaveAdjustment({
+              scopeKey: ctx.scopeKey,
+              userId: m.id,
+              periodStart: now.period.start,
+              halfDays,
+              kind: 'carry',
+              reason: `이월 — ${from}~${lastDay}에 남은 ${leaveAmountText(prev.remainingHalfDays)} 중 ${leaveAmountText(halfDays)}`,
+              createdByName: ctx.user.name ?? ctx.user.username,
+            });
+          }
+          applied.push({ userId: m.id, name: m.name, halfDays, from, to: lastDay });
+        }
+        if (!dryRun && applied.length) {
+          audit(ctx, `연차 이월 — ${applied.length}명`);
+          await broadcast(ctx, { leave: true });
+        }
+        res.json({ capDays, dryRun, applied, skipped, today });
       },
       { managerOnly: true },
     ),
@@ -498,7 +630,7 @@ export async function runAttendanceReminders(io, now = new Date()) {
     const scheduleOf = new Map(schedules.map((s) => [s.userId, s]));
     // 하루 휴가(반차는 아님)·출장인 사람.
     const off = new Set([
-      ...leaves.filter((l) => !['half_am', 'half_pm'].includes(l.payload?.leaveType)).map((l) => l.authorId),
+      ...leaves.filter((l) => !['half_am', 'half_pm'].includes(l.payload?.leaveType) && !l.payload?.hours).map((l) => l.authorId),
       ...trips.map((t) => t.authorId),
     ]);
     for (const m of members) {

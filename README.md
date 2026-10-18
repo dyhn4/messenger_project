@@ -1312,14 +1312,14 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
 서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0117`)가 돌아야 아래 기능이 켜집니다.
 
 - **외근·재택 출근** — 출근할 때 **사무실 / 외근 / 재택**을 고릅니다. 외근은 장소를 적어야 하고(200자), 날마다의 기록·엑셀에 형태와 장소가
-  남습니다. 위치 정보는 여전히 받지 않습니다.
+  남습니다. 출퇴근 위치(GPS)는 아래 [근태 후속](#근태-후속--휴게위치시간-연차회계연도수당) 참고.
 - **근로시간 나누기**(퇴근을 눌러야 계산, `workRules.js`) — 머문 시간에서 **휴게시간**(4시간 30분 넘게 일하면 30분, 8시간 30분 넘으면 1시간 —
   제54조)을 뺀 것이 **실근로**입니다. 평일은 하루 8시간을 넘은 만큼이 **연장**, 주말·공휴일은 모두 **휴일근무**, 22:00~06:00 안의 시간은
   **야간**입니다(연장·휴일과 겹쳐 셈 — 가산 수당 계산 근거). 날마다 표시·한 달 요약·엑셀(요약 시트에 실근로·연장·야간·휴일, 일별 시트에 형태·
   실근로·연장·야간·휴일)에 나옵니다. 연장근무 신청 결재로 승인된 시간은 "연장근무 신청"으로 따로 셉니다.
 - **주 52시간** — 월~일 한 주의 실근로(휴일근무 포함)를 셉니다. 출퇴근 탭 위에 이번 주 막대(48시간부터 주의 색, 52시간을 넘으면 빨강)와
   달력 아래 주마다의 합이 있고, 관리 탭 **주 52시간**은 구성원별 한 주(앞뒤로 넘김)를 보여 주며 52시간·48시간을 넘은 사람을 표시합니다.
-  막지는 않습니다(기록은 사실대로 남아야 하므로) — 넘지 않게 관리하는 것은 관리자 몫입니다.
+  기본은 알리기만 하고, 범위 설정으로 **결재를 받게·막기**를 고를 수 있습니다(아래 근태 후속).
 - **유연근무** — 관리 탭 **유연근무**에서 사람마다 근무 형태를 정합니다: **시차출퇴근**(그 사람의 출근·퇴근 시각으로 지각·조퇴),
   **선택근무**(핵심 시간대만 지각·조퇴), **자율 출퇴근**(지각·조퇴를 세지 않음). 정하지 않으면 범위의 근무 시간이고, "기본으로"로 되돌립니다.
   근로시간·주 52시간은 형태와 상관없이 똑같이 셉니다. 본인의 출퇴근 탭에 근무 형태가 보입니다.
@@ -1334,11 +1334,44 @@ res.json({ response_type: 'in_channel', text: `배포를 시작합니다: ${JSON
     연차만큼까지 날짜를 골라 냅니다(그날 휴가 신청은 따로 올림).
   - **2차** — 10일 안에 내지 않은 사람에게 만료 2개월 전(첫해는 1개월 전)까지 회사가 쓸 날을 정해 통보합니다.
   - 보낸 사람·보낸 시각·확인 시각·낸 날이 기록에 남고 지우지 않습니다(감사 로그 `groupware.settings`). 전자 통지를 서면 통지로 인정받는지는 노무
-    담당과 확인하세요. 회계연도 방식, 1차 기간을 지난 뒤의 늦은 촉진은 다루지 않습니다.
+    담당과 확인하세요. 1차 기간을 지난 뒤의 늦은 촉진은 다루지 않습니다. 통지마다 **서면 통지서 PDF**(인쇄·저장)를 만들 수 있습니다(아래).
 - **휴가 종류·지출 분류** — 관리 탭 **휴가 종류·지출 분류**에서 범위마다 바꿉니다. 기본 휴가 종류는 이름을 바꾸거나 끌 수 있고(연차는 끌 수 없음,
   반차·연차 차감 여부는 그대로), 종류를 더하면 하루 단위이고 연차에서 뺄지 고릅니다. 끈 종류는 새로 신청할 수 없고, **이미 올린 신청은 그때의
   이름·차감 여부를 문서에 적어 두어**(payload `leaveLabel`·`deducts`) 이름을 바꾸거나 꺼도 그대로 보이고 연차 계산도 바뀌지 않습니다.
   지출 분류는 목록을 그대로 바꿉니다(1~30개, 이미 올린 지출은 그때 분류 그대로). 바꾼 내용은 감사 로그에 남고 그 범위의 화면이 바로 다시 받습니다.
+
+#### 근태 후속 — 휴게·위치·시간 연차·회계연도·수당
+
+서버를 올린 뒤 `npm run db:migrate`(마이그레이션 `0131`)가 돌아야 아래 기능이 켜집니다. 규칙은 `workRules.js`(휴게)·`workPolicy.js`(주 52시간
+지키기·탄력/선택근무 기간·가산 수당)·`workLocation.js`(위치)·`annualLeave.js`(시간 연차·회계연도·이월)입니다.
+
+- **주 52시간 지키기** — 관리 탭의 범위 설정에서 **알리기만**(예전) / **결재를 받게** / **막기**를 고릅니다. "결재를 받게"는 그 주 실근로가
+  48시간을 넘으면 **그날 승인된 연장·휴일근무 신청이 있어야 출근**을 누를 수 있고, "막기"는 52시간을 채운 주에 출근을 막습니다(둘 다 409와 안내).
+  두 방식 모두 그 주를 52시간 넘게 만드는 **연장근무 신청은 받지 않습니다** — 그 주를 `max(40시간, 지금까지 일한 시간) + 앞으로 할(결재 중·승인된)
+  연장 + 이번 신청`으로 어림합니다(지난 날의 신청은 막지 않음). 탄력적 근로시간제는 사람마다의 주 상한(아래)으로 봅니다.
+- **탄력적 근로시간제·선택근무 정산 기간** — 유연근무에서 사람마다 **탄력 2주**(주 평균 40시간, 한 주 48 + 연장 12 = 60시간까지)·**탄력 3개월**
+  (한 주 52 + 12 = 64시간까지)·**선택근무 정산**(선택근무·자율 출퇴근만, 1개월 또는 3개월 — 주 상한 없이 기간 평균)과 기간이 시작하는 날을
+  정합니다(기간은 그날부터 이어짐). 기간마다 **기준 시간**(주 40시간 × 주 수)을 넘은 시간이 연장이고, 연장이 한도(주 12시간 × 주 수)를 넘거나
+  한 주가 상한을 넘으면 빨강입니다. 출퇴근 탭·관리 탭 주 52시간에 그 기간의 근로시간이 보이고, 가산 수당의 연장은 **정산 기간이 끝난 달**에
+  기간의 연장으로 셉니다. 단위 기간의 날마다 근로시간을 미리 정하는 것(근로일별 계획)은 다루지 않습니다.
+- **휴게 누르기** — 출퇴근 탭의 **휴게 시작·끝**(하루 10번까지, 퇴근하면 열린 휴게는 닫힘). 누른 날은 법정 휴게 대신 **누른 시간**을 빼고
+  (야간에 든 휴게는 야간에서도 뺌), 법정 휴게보다 짧으면 "휴게 n분 모자람"을 표시합니다. 누르지 않은 날은 예전처럼 법정 휴게를 뺍니다.
+- **출퇴근 위치(GPS)** — 앱이 출근·퇴근을 누를 때 기기 위치(위도·경도·정확도)를 보내 기록에 남깁니다(그때 한 번 — 계속 따라다니지 않음).
+  범위 설정에 **사무실 위치**(위도·경도·반경 50m~5km)를 정하면 거리를 재 사무실 출근인데 반경 밖이면 "사무실 밖"으로 표시하고, **외근은 위치
+  필수**를 켜면 위치 없이 외근 출근을 받지 않습니다. 기록·엑셀(일별 시트)에 위치와 지도 링크가 나옵니다. 위치 권한을 끈 기기는 위치 없이 누릅니다.
+- **시간 단위 연차** — 휴가 종류에 **반반차**(2시간)와 **시간 연차**(1~7시간)가 더해졌습니다(관리자가 이름을 바꾸거나 끌 수 있음). 그날 시작
+  시각과 시간을 고르고, 연차는 1시간 = 0.25 반일(하루 8시간)로 뺍니다. 근태에서는 그 시간대만큼 출근·퇴근 기준이 옮겨져(예: 09:00~11:00이면 11시
+  출근이 지각 아님) 지각·조퇴를 따지지 않습니다. 남은 연차는 "13일 6시간"처럼 보입니다.
+- **회계연도 기준 연차** — 범위 설정의 **연차 기준**을 입사일 / 회계연도(시작 달 1일)로 고릅니다. 회계연도면 입사한 해는 한 달에 1일, 그다음
+  해는 입사한 해에 일한 날 비율만큼의 15일(반일 단위 올림)과 입사 1년이 될 때까지 새로 채운 달의 1일씩, 그 뒤는 회계연도 수로 15 + ⌊(n − 1) / 2⌋일
+  (25일까지)입니다. 연차 기간·조정·촉진 일정이 모두 회계연도로 바뀝니다. 퇴사할 때 입사일 기준보다 적으면 그 차이의 정산이 필요합니다(계산하지 않음).
+- **연차 이월** — 범위 설정의 **이월 일수**(0이면 끔, 25일까지)를 정한 뒤 **연차 이월**을 누르면, 지난 기간 끝에 남은 연차를 그 일수까지 이번 기간의
+  조정("이월")으로 넣습니다(먼저 미리 보기, 사람마다 기간에 한 번). 법은 이월을 요구하지 않습니다 — 촉진 없이 못 쓴 연차는 수당 정산 대상일 수 있습니다.
+- **가산 수당(참고용)** — 관리 탭 구성원 목록에서 사람마다 **통상시급**을 정하면, 달마다 연장(1.5배)·야간(가산 0.5배)·휴일(8시간까지 1.5배·넘는 부분
+  2배) 수당을 계산해 본인의 출퇴근 탭·관리 탭 한 달 요약·엑셀("가산 수당" 시트)에 보입니다. 가산율은 범위마다 법정 이상으로 바꿀 수 있고, **상시
+  5명 미만 사업장**이면 가산하지 않습니다(일한 시간의 통상임금만). 실근로 기록 기준이라 실제 급여 계산(주휴수당·포괄임금 등)과 다를 수 있습니다.
+- **연차 촉진 서면 통지서** — 1차 "연차 사용 촉진 통지서", 2차 "연차 사용 시기 지정 통지서"를 A4 PDF로 인쇄·저장합니다(받는 사람·연차 기간·남은
+  연차·기한 또는 지정한 날·근거 조항·보낸·확인한 날). 관리 탭의 촉진 현황과 받은 사람의 휴가 탭에서 만듭니다(`leave_notice_pdf.dart`).
 
 #### 회의실·자원 예약
 
@@ -1448,10 +1481,6 @@ Microsoft 365)을 **IMAP/SMTP로 연결**해 앱에서 받고 보냅니다. 메�
 
 ### 2순위 — 그룹웨어로서 부족한 것
 
-- **근태 후속** — 주 52시간·연장·야간·휴일 집계·유연근무·외근·출근 알림·연차 촉진·휴가 종류·지출 분류 바꾸기는 들어갔습니다
-  ([근로시간·유연근무·연차 촉진](#근로시간유연근무연차-촉진)). 남은 것: 52시간을 넘기 전에 막거나 결재를 받게 하기, 탄력적 근로시간제(2주·3개월
-  단위 평균)와 선택근무의 정산 기간, 휴게시간을 직접 누르기, 외근 위치 확인(GPS — 지금은 적은 장소뿐), 회계연도 기준 연차·연차 이월, 수당
-  계산(가산율), 연차 촉진의 서면(PDF) 통지서, 시간 단위 연차(반반차).
 - **회의실·자원 예약 후속** — 자원 관리·시간표·겹침 막기·캘린더 일정에 붙이기·내장 "회의실 예약" 캘린더는 들어갔습니다([회의실·자원 예약](#회의실자원-예약)).
   남은 것: 반복 예약(매주 같은 시간 — 지금은 회차마다), 관리자 승인이 필요한 자원, 자원마다 예약할 수 있는 사람·시간대 제한, 사용 통계, 참석자
   수에 맞는 회의실 추천, 일정 하나에 여러 자원(회의실+장비), 예약 시작 전 알림, 회의실 앞 태블릿 화면.
@@ -1620,6 +1649,8 @@ messenger_project/
 │  │  ├─ approvalFormDefaults.js  양식마다의 기본 결재선·참조자(미리 채우기) — 순수 규칙
 │  │  ├─ settlementRules.js       승인된 구매·출장과 지출 결재의 정산 연결 — 순수 규칙
 │  │  ├─ approvalFinalRules.js    전결 규정(종류·금액마다 전결하는 직책) — 순수 규칙
+│  │  ├─ workPolicy.js            주 52시간 지키기·탄력/선택근무 정산 기간·가산 수당 — 순수 규칙
+│  │  ├─ workLocation.js          출퇴근 위치(GPS) 확인·사무실 거리 — 순수 규칙
 │  │  ├─ approvalSeal.js          결재 전자서명(문서 지문·칸 서명·검증) — 순수 규칙 / approvalSealKeys.js(서버 서명 키)
 │  │  ├─ groupware.js             그룹웨어 API(전자결재·연차·출퇴근) — approvalRules.js·annualLeave.js(법정 연차)·attendanceRules.js·
 │  │  │                           groupwareScope.js(팀마다/회사 전체)·approvalForms.js(결재 양식)가 순수 규칙(단위 테스트 대상)
@@ -2538,9 +2569,12 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 | GET | `/api/groupware/members` | (관리자) 구성원·입사일·연차 현황 |
 | PATCH | `/api/groupware/members/:userId` | (관리자) `{ hireDate }`('YYYY-MM-DD', null은 지움) |
 | POST | `/api/groupware/members/:userId/leave-adjustments` | (관리자) `{ halfDays(±, 0 제외, 최대 ±120), reason }` — 이번 연차 기간에, 입사일이 있어야 함 |
+| PUT | `/api/groupware/members/:userId/wage` | (관리자) 통상시급 `{ hourlyWage }`(원, null이면 지움) — 가산 수당 계산용. `GET /api/groupware/members`의 줄마다 `hourlyWage` |
+| POST | `/api/groupware/leave/carry-over` | (관리자) 연차 이월 `{ dryRun?, userIds? }` → `{ capDays, applied: [{ userId, name, halfDays, from, to }], skipped }` — 이월 일수가 0이면 400, 사람마다 기간에 한 번 |
 | PATCH | `/api/groupware/settings` | (관리자) `{ workStart, workEnd }`('HH:MM') — 팀 범위는 그 팀, 회사 전체는 서버 설정 |
 | GET | `/api/groupware/attendance/today` | 오늘 기록·어제 열린 기록(`openRecord`)·`canClockIn`·`canClockOut`·`inLan` |
-| POST | `/api/groupware/attendance/clock-in` \| `clock-out` | 출근(하루 한 번 — 또 누르면 409)·퇴근(오늘 기록, 없으면 20시간 안의 어제 열린 기록) |
+| POST | `/api/groupware/attendance/clock-in` \| `clock-out` | 출근(하루 한 번 — 또 누르면 409, 주 52시간 지키기에 걸리면 409)·퇴근(오늘 기록, 없으면 20시간 안의 어제 열린 기록 — 열린 휴게는 닫음). 둘 다 `location?: { lat, lng, accuracy }`(외근 위치 필수면 외근 출근에 꼭) |
+| POST | `/api/groupware/attendance/break-start` \| `break-end` | 휴게 시작·끝(출근 뒤 퇴근 전, 하루 10번까지) |
 | GET | `/api/groupware/attendance/month` | `?month=YYYY-MM&userId=`(남의 것은 관리자) 날마다 기록·휴가·공휴일과 요약 |
 | GET | `/api/groupware/attendance/summary` \| `export` | (관리자) 구성원별 한 달 요약 / 같은 내용의 엑셀(.xlsx — 요약·일별 기록) |
 
@@ -2548,9 +2582,9 @@ release 빌드에는 서명이 필요합니다 — 자세한 절차는 [Android 
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET / PATCH | `/api/groupware/options` | (관리자) 범위 설정 `{ leaveTypes: [{ key, label, deducts, half, enabled, builtin }], expenseCategories, clockInReminder, clockOutReminder, reminderDelayMinutes }` / 보낸 것만 바꾸기 — `leaveTypes`는 `[{ key?(새 종류는 비움), label, enabled, deducts?(더한 종류만) }]`(빠진 종류는 꺼짐, 연차는 끌 수 없음 — 400), `expenseCategories` 1~30개, `reminderDelayMinutes` 0~120. 소켓 `groupware:changed`(`options: true`) |
+| GET / PATCH | `/api/groupware/options` | (관리자) 범위 설정 `{ leaveTypes: [{ key, label, deducts, half, enabled, builtin }], expenseCategories, clockInReminder, clockOutReminder, reminderDelayMinutes, overtimeGuard, leaveBasis, fiscalStartMonth, carryOverMaxDays, payRates, officeLocation, requireFieldLocation }` / 보낸 것만 바꾸기 — `leaveTypes`는 `[{ key?(새 종류는 비움), label, enabled, deducts?(더한 종류만) }]`(빠진 종류는 꺼짐, 연차는 끌 수 없음 — 400), `expenseCategories` 1~30개, `reminderDelayMinutes` 0~120, `overtimeGuard` `warn`\|`approval`\|`block`, `leaveBasis` `hire`\|`fiscal`·`fiscalStartMonth` 1~12, `carryOverMaxDays` 0~25, `payRates` `{ overtime, night, holiday, holidayOver, smallBusiness }`(5명 이상이면 법정 이상), `officeLocation` `{ lat, lng, radius }`\|null. 소켓 `groupware:changed`(`options: true`) |
 | GET | `/api/groupware/schedules` | (관리자) 구성원과 근무 형태 `[{ userId, name, schedule: { mode, label, start, end, coreStart, coreEnd } \| null }]`(시각은 자정부터 분) |
-| PUT / DELETE | `/api/groupware/schedules/:userId` | (관리자) 근무 형태 `{ mode: 'staggered'\|'core'\|'free', start?, end?, coreStart?, coreEnd? }`('HH:MM' — 시차는 start·end, 선택근무는 coreStart·coreEnd) / 범위의 근무 시간으로 되돌리기 |
+| PUT / DELETE | `/api/groupware/schedules/:userId` | (관리자) 근무 형태 `{ mode: 'staggered'\|'core'\|'free', start?, end?, coreStart?, coreEnd?, periodType?: 'flex2w'\|'flex3m'\|'select', periodStart?, periodMonths?: 1\|3 }`('HH:MM' — 시차는 start·end, 선택근무는 coreStart·coreEnd) / 범위의 근무 시간으로 되돌리기 |
 | GET | `/api/groupware/attendance/weekly` | (관리자) `?week=YYYY-MM-DD`(그날이 든 월~일) → `{ weekStart, weekEnd, members: [{ userId, name, netMinutes, overtimeMinutes, holidayMinutes, nightMinutes, status: 'ok'\|'warn'\|'over' }] }` |
 | GET | `/api/groupware/leave/month` | 휴가 달력 `?month=YYYY-MM`(기본 이번 달) → `{ month, from, to, holidays: [{ date, name }], leaves: [{ documentId, userId, name, leaveType, label, startDate, endDate, halfDays, status: 'approved'\|'pending', mine }], trips: [{ documentId, userId, name, destination, startDate, endDate }] }` — 승인된 휴가·출장은 범위 사람 모두, 결재 중인 휴가는 내 것만 |
 | GET | `/api/groupware/leave/promotions` | (관리자) 연차 촉진 현황 `{ today, members: [{ userId, name, expiry, firstYear, firstStart, firstEnd, secondDeadline, remainingHalfDays, stage, notices }] }` — 입사일이 있는 사람만 |
@@ -2744,10 +2778,11 @@ PostgreSQL, `drizzle-orm`으로 접근(원본 스키마: `server/src/db/schema.j
 | `approval_templates` | 결재 양식 — `scope_key`(그룹웨어 범위), `builtin_key`(기본 양식을 켜고 끈 줄이면 그 종류 — 이때는 `enabled`·`sort_order`만 씀, 관리자가 만든 양식이면 null), `name`·`description`, `fields` jsonb(칸 정의), `allow_attachments`, `enabled`, `default_line`(기본 결재선 `[{ userId, role }]` — 기본 양식 줄에도)·`default_cc_ids`, `created_by_name`. unique(`scope_key`, `builtin_key`) |
 | `approval_lines` | 저장한 결재선(사람 × 범위) — `approver_ids`·`cc_ids` jsonb, `line`(결재자마다의 역할 `[{ userId, role }]`, null이면 모두 결재) |
 | `approval_notifications` | 결재 알림함(받는 사람마다 한 줄 — 알림 센터 `결재` 탭). `document_id`, `team_id`(회사 전체 범위면 null — 그래서 `team_id`가 필수인 `notifications`와 따로 둠), `kind`(`request`\|`approved`\|`rejected`\|`withdrawn`\|`canceled`), `title`·`body`, `actor_id`·`actor_name`, `read_at`. 90일 지나면 지움 |
-| `leave_adjustments` | 연차 조정(반일 단위 ±, 사유, 그 연차 기간의 시작일) |
-| `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, `clock_in_mode`(`office`\|`field`\|`remote` — 외근이면 장소는 `note`), 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`). 지우지 않음 |
-| `groupware_options` | 그룹웨어 범위(`scope_key`)마다의 설정 — `leave_types` jsonb(기본 종류의 이름·켜고 끄기와 더한 종류 `c_…`, null이면 기본), `expense_categories` jsonb(null이면 기본), `clock_in_reminder`·`clock_out_reminder`·`reminder_delay_minutes`(기본 10) |
-| `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무) |
+| `leave_adjustments` | 연차 조정(반일 단위 ± — 0.25 = 1시간 단위일 수 있음, 사유, 그 연차 기간의 시작일), `kind`(`manual`\|`carry` 이월) |
+| `work_wages` | 통상시급 — (`scope_key`, `user_id`)마다 `hourly_wage`(원 — 가산 수당 계산용) |
+| `attendance_records` | 출퇴근(범위 × 사람 × 날짜 하나 — unique). `clock_in_at`·`clock_out_at`, 사내 와이파이 여부, `clock_in_mode`(`office`\|`field`\|`remote` — 외근이면 장소는 `note`), 근태 수정 결재로 고쳤으면 `corrected`·`corrected_doc_id`와 처음 값(`original_…`), `breaks` jsonb(누른 휴게 `[{ startAt, endAt }]`), `clock_in_location`·`clock_out_location`(`{ lat, lng, accuracy, distance, outside }`). 지우지 않음 |
+| `groupware_options` | 그룹웨어 범위(`scope_key`)마다의 설정 — `leave_types` jsonb(기본 종류의 이름·켜고 끄기와 더한 종류 `c_…`, null이면 기본), `expense_categories` jsonb(null이면 기본), `clock_in_reminder`·`clock_out_reminder`·`reminder_delay_minutes`(기본 10), `overtime_guard`, `leave_basis`·`fiscal_start_month`, `carry_over_max_days`, `pay_rates` jsonb, `office_location` jsonb·`require_field_location` |
+| `work_schedules` | 유연근무 — (`scope_key`, `user_id`)마다 `mode`(`staggered`\|`core`\|`free`), `start_minutes`·`end_minutes`(시차), `core_start_minutes`·`core_end_minutes`(선택근무), `period_type`(`flex2w`\|`flex3m`\|`select`)·`period_start`·`period_months`(탄력·선택근무 정산 기간) |
 | `attendance_reminders` | 보낸 출근·퇴근 알림(PK `scope_key`, `user_id`, `work_date`, `kind` — 하루 한 번만 보내려고 먼저 넣고 보냄) |
 | `resources` | 회의실·자원(그룹웨어 범위 `scope_key`마다) — `kind`(`room`\|`equipment`\|`vehicle`), `name`(범위 안에서 unique), `location`·`capacity`·`description`, `enabled`(끄면 새 예약 안 됨), `sort_order` |
 | `mail_accounts` | 웹메일 계정(사람마다 하나 — `user_id` unique, 탈퇴하면 cascade). `email`·`display_name`·`provider`(미리 정한 서비스 키 또는 `custom`), IMAP·SMTP `*_host`·`*_port`·`*_security`(`ssl`\|`starttls`), `username`, `password_enc`(암호화 — 내보내지 않음), `notify`(새 메일 알림), 새 메일 기준 `last_uid_next`·`last_uid_validity`(받은편지함 UIDNEXT·UIDVALIDITY — 연결 값이 바뀌면 지움), `last_checked_at`, 로그인 실패 `last_error`·`last_error_at`(30분 동안 다시 확인 안 함). 메일 본문은 두지 않는다 |

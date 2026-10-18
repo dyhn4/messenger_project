@@ -67,7 +67,15 @@ export function clockOutTarget(records, now = new Date()) {
  * 한 기록의 표시 — 지각(근무 시작 뒤 출근), 조퇴(근무 끝 전 퇴근), 일한 분(퇴근을 안 눌렀으면 null). 휴가로 쉬는 날([leaveHalfDays]가
  * 2)은 지각·조퇴를 따지지 않고, 반차(1)면 오전 반차는 지각을, 오후 반차는 조퇴를 따지지 않는다([halfType]).
  */
-export function recordFlags(record, { workStart = DEFAULT_WORK_START, workEnd = DEFAULT_WORK_END, halfType = null, fullLeave = false } = {}) {
+export function recordFlags(
+  record,
+  { workStart = DEFAULT_WORK_START, workEnd = DEFAULT_WORK_END, halfType = null, fullLeave = false, hourRange = null } = {},
+) {
+  // 시간 연차([hourRange] `{ start, end }` — 하루 중 분)가 근무 시작에 걸치면 출근 기준을 그 끝으로, 근무 끝에 걸치면 퇴근 기준을 그 시작으로.
+  if (hourRange) {
+    if (hourRange.start <= workStart && hourRange.end > workStart) workStart = hourRange.end;
+    if (hourRange.end >= workEnd && hourRange.start < workEnd) workEnd = hourRange.start;
+  }
   const inAt = record?.clockInAt ? new Date(record.clockInAt) : null;
   const outAt = record?.clockOutAt ? new Date(record.clockOutAt) : null;
   const sameDay = (at) => at && localDateKey(at) === record.workDate;
@@ -129,7 +137,13 @@ export function summarizeMonth({
     const record = byDate.get(day);
     if (record?.clockInAt) {
       summary.daysWorked += 1;
-      const flags = recordFlags(record, { workStart, workEnd, halfType: leave?.halfType ?? null, fullLeave: leave?.halfDays === 2 });
+      const flags = recordFlags(record, {
+        workStart,
+        workEnd,
+        halfType: leave?.halfType ?? null,
+        fullLeave: leave?.halfDays === 2,
+        hourRange: leave?.hourRange ?? null,
+      });
       if (flags.late && checkLate) summary.late += 1;
       if (flags.earlyLeave && checkEarly) summary.earlyLeave += 1;
       if (flags.missingClockOut && day < today) summary.missingClockOut += 1;

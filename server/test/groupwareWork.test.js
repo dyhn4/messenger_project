@@ -34,7 +34,8 @@ const rec = (date, inHm, outHm, { nextDayOut = false } = {}) => {
 
 test('휴가 종류 — 기본 종류 이름·끄기, 더한 종류, 빠진 종류는 꺼진 채 남김, 연차는 못 끔', () => {
   const base = mergeLeaveTypes(null);
-  assert.equal(base.length, 7);
+  // 기본 7가지 + 시간 단위 연차(반반차·시간 연차).
+  assert.equal(base.length, 9);
   assert.ok(base.every((t) => t.enabled && t.builtin));
   let key = 0;
   const parsed = parseLeaveTypesInput(
@@ -95,6 +96,7 @@ test('하루 나누기 — 휴게(4시간 30분·8시간 30분), 연장(8시간 
   // 수요일 09:00~18:00 = 9시간, 휴게 1시간 → 실근로 8시간, 연장 없음.
   assert.deepEqual(workBreakdown(rec('2026-10-14', '09:00', '18:00')), {
     workedMinutes: 540, breakMinutes: 60, netMinutes: 480, overtimeMinutes: 0, holidayMinutes: 0, nightMinutes: 0,
+    breakRecorded: false, breakShortMinutes: 0,
   });
   // 09:00~23:00 = 14시간 → 실근로 13시간, 연장 5시간, 야간 1시간.
   const late = workBreakdown(rec('2026-10-14', '09:00', '23:00'));
@@ -140,6 +142,7 @@ test('주 52시간 — 월~일, 휴일 근무 포함, 48시간부터 주의, 52�
 test('유연근무 — 시차출퇴근·선택근무(핵심 시간)·자율, 지각·조퇴 기준', () => {
   assert.deepEqual(parseSchedule({ mode: 'staggered', start: '07:00', end: '16:00' }).schedule, {
     mode: 'staggered', startMinutes: 420, endMinutes: 960, coreStartMinutes: null, coreEndMinutes: null,
+    periodType: null, periodStart: null, periodMonths: null,
   });
   assert.ok(parseSchedule({ mode: 'staggered', start: '16:00', end: '07:00' }).error);
   assert.equal(parseSchedule({ mode: 'core', coreStart: '10:00', coreEnd: '15:00' }).schedule.coreStartMinutes, 600);

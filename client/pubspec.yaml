@@ -97,6 +97,9 @@ dependencies:
   web: ^1.1.1
   # 2단계 인증(OTP)을 켤 때 인증 앱이 찍을 QR 코드(otpauth:// 주소 — otp_dialogs.dart).
   qr_flutter: ^4.1.0
+  # 출퇴근을 누를 때 기기 위치(GPS — 외근 위치 확인·사무실과의 거리, services/device_location.dart). 못 얻으면 위치 없이 보낸다.
+  # Android·iOS·Windows(geolocator_windows)·웹을 함께 지원한다.
+  geolocator: ^14.0.2
 
 # Windows 보안 저장소 구현(flutter_secure_storage_windows 3.1.2)을 고친 사본으로 — 파일을 통째로 바꿔 끼워 쓰다
 # 끊겨도 깨지지 않고, 읽지 못한 파일은 지우지 않고 남기며, 작업을 한 번에 하나씩 한다
